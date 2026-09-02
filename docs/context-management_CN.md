@@ -51,7 +51,38 @@ context:
 | `reserved` | 整数 | `0` | 在 `threshold` 留出的比例余量之外，再为 tokenizer 误差、工具 schema 开销、压缩恢复安全等保留的固定 token 余量。通常建议省略（保持 `0`）；非零值会先从输入预算中扣除，再应用 `threshold`。 |
 | `preset` | 字符串 | 自动检测 | 强制指定压缩实现方式，一般无需设置。 |
 | `profile` | 字符串 | `auto` | 压缩策略，一般无需设置。 |
+| `reminder` | 浮点 | `0`（派生） | 上下文压力提醒线（usage 比例）。`0` 表示按 `min(0.60, threshold × 0.90)` 派生；非零值作为提醒线使用。usage 达到 `min(reminder, threshold)`（任一先到）即触发提醒——压缩宽限期会把真正压缩推迟最多 2 个主请求，所以即使 reminder 设在 `threshold` 之上，threshold 越线本身也会触发提醒。`threshold: 0` 时提醒一并禁用。 |
 | `model_driven` | 布尔 | `false` | 实验性开关：给主 agent 暴露 `compact_context` 工具，让模型在工作状态充分外化（写入文件或结构化参数）后主动请求 durable context checkpoint。checkpoint 不调用摘要模型，在工具批次收口后的 barrier 处原子应用并暂停下一次主模型请求，随后在同一 turn 的压缩上下文上继续。工具仅 MainAgent 可见、必须单独调用、`state_files` 只作路径引用不读取。低收益请求会被自动跳过。默认关闭。 |
+
+按模型覆盖写在**模型定义**上（`ModelConfig.compaction`，含 `threshold` 与 `reminder` 两个子字段），可经 `model_templates` 用 `<<:` 共享；**没有** `context.compaction.models` 这张表。
+
+`threshold` / `reminder`（全局或按模型）驱动 usage-driven 压缩路径和压力提醒，对**所有**用户生效，与 `model_driven` 无关——后者只注册 `compact_context` 工具。
+
+全局行写在 `context.compaction` 下，按模型调参写在模型定义上（`ModelConfig.compaction`），可用模板 `<<:` 复用：
+
+```yaml
+context:
+  compaction:
+    threshold: 0.65          # 全局自动压缩线（兜底）
+
+model_templates:
+  luna-cost-first: &luna-cost-first
+    limit: {context: 1050000, output: 128000}   # 官方全窗口：不写 input
+    compaction: {threshold: 0.25, reminder: 0.2}   # 留在 272K 长上下文计价档之内
+
+providers:
+  openai:
+    models:
+      gpt-5.6-luna: *luna-cost-first
+      gpt-5.6-sol:
+        limit: {context: 1050000, output: 128000}
+        compaction: {threshold: 0.55}   # 质量优先
+```
+
+没有 `compaction` 块的模型继承全局 `context.compaction.threshold` /
+`reminder`；模型级 `threshold: 0` 只对该模型禁用自动压缩（提醒一并禁用）。
+
+自动压缩阈值首次越线时，Chord **不会立刻压缩**，而是开一个**宽限期**（最多 2 个主模型请求）：期间模型会看到压力提醒（自动压缩请求武装后还会看到一次性外化提示），可以主动调用 `compact_context` reset，或把状态写入文件。宽限到期且 usage 仍越线才启动 usage-driven 压缩；provider 拒绝（oversize）时仍然立即强制压缩，不受宽限限制。model-driven 请求被 skip / 失败 / 取消后宽限期提前结束，usage-driven 安全网立即接管。切换模型会套用新模型的 per-model 阈值并开启新的提醒/宽限窗口。
 
 ### 模型驱动上下文 checkpoint（实验性）
 
@@ -62,6 +93,8 @@ context:
 3. 原子应用 checkpoint，快照后追加的内容作为 live tail 保留，并在压缩后的上下文上继续同一 turn。
 
 skip 是正常的策略结果：立即用相同请求重试会被短暂冷却，结果不会改变——模型应等待或继续推进。上下文用量接近自动压缩阈值时，下一次请求还可能附带一次性压力提醒，提示模型外化重要状态（工具可用时会点名 `compact_context`）；自动压缩等待期间还会附带一次性外化提示。这些 overlay 都是瞬态的，不会进入对话历史。
+
+启用 `model_driven` 时，主 agent 的系统提示词还会附带一段简短被动的 `Long-session context management` 指引：随阶段收口把关键发现和决定写入项目文件（让它们能在后续 checkpoint 后存活），只在真正的阶段边界单独调用 `compact_context`，checkpoint 应用后需要精确历史时去读归档的 history 文件。SubAgent 永远不会收到这段指引或该工具。该指引是建议性的，不是强制流程。
 
 `state_files` 只是路径引用：Chord 从不读取或注入这些文件，因此该工具无法绕过 Read 权限。checkpoint 的 `Current User Request` 永远来自你的真实消息，不会采用模型参数。工具 success 只表示请求被接受；之后出现的 model-driven `[Context Summary]` checkpoint 才表示 reset 已应用。请求被跳过或失败时会继续使用旧上下文，usage-driven 自动压缩兜底保持生效。
 

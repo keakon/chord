@@ -2118,3 +2118,39 @@ func (s taskCreatorStub) CreateSubAgent(ctx context.Context, description, agentT
 func (s taskCreatorStub) AvailableSubAgents() []tools.AgentInfo {
 	return s.agents
 }
+
+func TestModelDrivenContextPromptBlockEmptyWhenDisabled(t *testing.T) {
+	a := &MainAgent{}
+	if got := a.modelDrivenContextPromptBlock(); got != "" {
+		t.Fatalf("disabled model-driven must render no block, got %q", got)
+	}
+}
+
+func TestModelDrivenContextPromptBlockInjectedWhenEnabled(t *testing.T) {
+	a := &MainAgent{}
+	a.modelDrivenCompactionEnabled.Store(true)
+	block := a.modelDrivenContextPromptBlock()
+	if block == "" {
+		t.Fatal("enabled model-driven must render the context-management block")
+	}
+	for _, want := range []string{
+		"## Long-session context management",
+		"compact_context",
+		"archived history",
+		"low-gain",
+	} {
+		if !strings.Contains(block, want) {
+			t.Fatalf("block must mention %q, got:\n%s", want, block)
+		}
+	}
+}
+
+func TestModelDrivenContextPromptBlockNotInSubAgentPrompt(t *testing.T) {
+	// SubAgents never see the compact_context tool, so their prompt must not
+	// carry the guidance either; the block is MainAgent-only by construction
+	// (modelDrivenCompactionEnabled lives on MainAgent).
+	s := &SubAgent{}
+	if got := s.buildSystemPrompt(); strings.Contains(got, "Long-session context management") {
+		t.Fatalf("SubAgent prompt must not include model-driven context guidance")
+	}
+}

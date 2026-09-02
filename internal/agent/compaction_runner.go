@@ -460,10 +460,14 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	a.recordCompactionAppliedAnalyticsEvent(d, headSplit, compactedMessages)
 	// A durable apply starts a fresh compaction window: drop any overlay texts
 	// queued for the pre-apply window (the reminder reported the old usage
-	// baseline and the warning is moot once auto-compact applied). The next
-	// beginMainLLMAfterPreparation re-queues against the new window claims.
+	// baseline and the warning is moot once auto-compact applied) and reset
+	// the threshold grace period (the new window re-evaluates usage from the
+	// compacted baseline). The next beginMainLLMAfterPreparation re-queues
+	// against the new window claims.
 	a.pendingContextPressureReminder = ""
 	a.pendingCompactionWarning = ""
+	a.gracePeriodStartBatch = 0
+	a.gracePeriodExhausted = false
 	// A successful model-driven apply records its request batch as the new
 	// interval anchor and clears the skip-cooldown state: the next model-driven
 	// request must wait minModelDrivenApplyIntervalBatches batches, and stale

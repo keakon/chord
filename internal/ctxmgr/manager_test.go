@@ -242,6 +242,32 @@ func TestShouldAutoCompactUsesInputBudgetWhenConfigured(t *testing.T) {
 	}
 }
 
+func TestSetThresholdUpdatesDecisionAndBumpsEpoch(t *testing.T) {
+	m := NewManagerWithInputBudget(400000, 272000, 0, 0.8)
+	epochBefore := m.TokenBudgetsEpoch()
+	// Same value is a no-op for the epoch (no budget change).
+	m.SetThreshold(0.8)
+	if m.TokenBudgetsEpoch() != epochBefore {
+		t.Fatal("same threshold must not bump the epoch")
+	}
+	// A real change re-derives the threshold and starts a fresh claim window.
+	m.SetThreshold(0.3)
+	if m.TokenBudgetsEpoch() != epochBefore+1 {
+		t.Fatalf("epoch = %d, want %d after threshold change", m.TokenBudgetsEpoch(), epochBefore+1)
+	}
+	if m.Threshold() != 0.3 {
+		t.Fatalf("threshold = %v, want 0.3", m.Threshold())
+	}
+	m.UpdateFromUsage(message.TokenUsage{InputTokens: 217600})
+	if !m.ShouldAutoCompact() {
+		t.Fatal("expected threshold check to become true at 30% of input budget")
+	}
+	m.SetThreshold(0)
+	if m.ShouldAutoCompact() {
+		t.Fatal("expected zero threshold to disable auto-compaction")
+	}
+}
+
 func TestShouldAutoCompactUsesUsableInputBudgetWhenReserved(t *testing.T) {
 	m := NewManagerWithInputBudget(400000, 272000, 20000, 0.8)
 	if got := m.GetUsableInputBudget(); got != 252000 {

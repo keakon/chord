@@ -381,6 +381,7 @@ type ModelConfig struct {
 	Limit                 ModelLimit              `json:"limit" yaml:"limit"`
 	Modalities            *ModelModalities        `json:"modalities,omitempty" yaml:"modalities,omitempty"`
 	SupportedServiceTiers []ServiceTier           `json:"supported_service_tiers,omitempty" yaml:"supported_service_tiers,omitempty"` // explicit non-standard tiers supported by this model
+	Compaction            *ModelCompactionConfig  `json:"compaction,omitempty" yaml:"compaction,omitempty"`                           // per-model compaction threshold/reminder overrides; nil inherits the global context.compaction values
 	Thinking              *ThinkingConfig         `json:"thinking,omitempty" yaml:"thinking,omitempty"`
 	Reasoning             *ReasoningConfig        `json:"reasoning,omitempty" yaml:"reasoning,omitempty"`
 	Text                  *TextConfig             `json:"text,omitempty" yaml:"text,omitempty"`
@@ -1289,12 +1290,26 @@ type CompactionConfig struct {
 	Profile   string  `json:"profile,omitempty" yaml:"profile,omitempty"`
 	Reserved  int     `json:"reserved,omitempty" yaml:"reserved,omitempty"`
 	ModelPool string  `json:"model_pool,omitempty" yaml:"model_pool,omitempty"`
+	// Reminder is the context-pressure reminder line as a usage fraction.
+	// Zero means "not configured": the runtime derives it as
+	// min(0.60, threshold*0.90). Unlike threshold, zero is not a disable
+	// signal — to disable reminders for a model, set its threshold to 0.
+	Reminder float64 `json:"reminder,omitempty" yaml:"reminder,omitempty"`
 	// ModelDriven exposes the compact_context tool so the model can request a
 	// durable context checkpoint once its working state is externalized.
 	// Defaults to false; only the merged effective value decides whether the
 	// tool is registered, so a project setting this false overrides a global
 	// true like any other scalar override.
 	ModelDriven bool `json:"model_driven,omitempty" yaml:"model_driven,omitempty"`
+}
+
+// ModelCompactionConfig carries per-model overrides for the compaction
+// threshold and reminder lines. Pointer fields distinguish "not configured"
+// (nil, inherit global) from an explicit value; a zero threshold disables
+// automatic compaction for that model (and its reminders).
+type ModelCompactionConfig struct {
+	Threshold *float64 `json:"threshold,omitempty" yaml:"threshold,omitempty"`
+	Reminder  *float64 `json:"reminder,omitempty" yaml:"reminder,omitempty"`
 }
 
 // DefaultConfig returns a Config with hardcoded defaults.
@@ -1431,7 +1446,65 @@ func collectSemanticIssues(cfg *Config) []string {
 	}
 	issues = append(issues, collectDiagnosticsConfigIssues(cfg)...)
 	resetInvalidDiagnosticsFields(&cfg.Diagnostics)
+	issues = append(issues, collectCompactionConfigIssues(cfg)...)
+	issues = append(issues, collectModelCompactionIssues(cfg)...)
 	return issues
+}
+
+// collectCompactionConfigIssues reports compaction configurations whose
+// reminder is silently ineffective. A reminder at or above the threshold is
+// *not* an issue: the reminder fires on the threshold crossing itself (the
+// caller takes min(reminder, threshold)) and the grace period defers the
+// actual compaction. But a reminder configured against a disabled compaction
+// (threshold 0) never fires — threshold 0 disables both auto-compaction and
+// reminders — so that combination is reported so the user knows the reminder
+// is dead. Global compaction is checked directly; per-model compaction lives
+// on the model definitions (ModelConfig.Compaction) and is checked there.
+func collectCompactionConfigIssues(cfg *Config) []string {
+	comp := cfg.Context.Compaction
+	var issues []string
+	if comp.Threshold <= 0 && comp.Reminder > 0 {
+		issues = append(issues, "context.compaction.reminder is set but context.compaction.threshold is 0 (auto-compaction disabled); the reminder will never fire")
+	}
+	return issues
+}
+
+// collectModelCompactionIssues reports per-model compaction (ModelConfig.
+// Compaction) whose reminder is silently ineffective: a reminder set against
+// threshold 0 never fires.
+func collectModelCompactionIssues(cfg *Config) []string {
+	var issues []string
+	global := compThresholdConfig(cfg)
+	for providerName, prov := range cfg.Providers {
+		for modelID, mc := range prov.Models {
+			if mc.Compaction == nil {
+				continue
+			}
+			threshold := compThresholdForModel(global, mc)
+			if threshold <= 0 && mc.Compaction.Reminder != nil && *mc.Compaction.Reminder > 0 {
+				issues = append(issues, fmt.Sprintf("model %s/%s: compaction.reminder is set but its threshold is 0 (auto-compaction disabled); the reminder will never fire", providerName, modelID))
+			}
+		}
+	}
+	return issues
+}
+
+// compThresholdConfig returns the effective global compaction threshold config.
+func compThresholdConfig(cfg *Config) CompactionConfig {
+	if cfg == nil {
+		return CompactionConfig{}
+	}
+	return cfg.Context.Compaction
+}
+
+// compThresholdForModel resolves the effective auto-compaction threshold for a
+// model definition: the model's own compaction.threshold when present, else
+// the global one.
+func compThresholdForModel(global CompactionConfig, mc ModelConfig) float64 {
+	if mc.Compaction != nil && mc.Compaction.Threshold != nil {
+		return *mc.Compaction.Threshold
+	}
+	return global.Threshold
 }
 
 // loadConfigData loads configuration from raw YAML bytes. Malformed YAML is a

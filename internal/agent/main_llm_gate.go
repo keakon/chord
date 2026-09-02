@@ -371,6 +371,12 @@ func (a *MainAgent) applyAnthropicCacheHints(stableLen, metaPrefixCount, durable
 
 func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID uint64, agentErrSourceID string) {
 	a.applyPendingModelPoolSwitchesAtRequestBoundary()
+	// Apply the per-model compaction threshold for the current model
+	// reference. This runs after pending model-pool switches are applied so a
+	// fallback or explicit switch re-derives the threshold immediately; a
+	// model change also clears the grace period (the new model re-evaluates
+	// usage against its own threshold).
+	a.applyModelCompactionConfig()
 	// Arm the one-shot context-pressure reminder and the usage-driven
 	// externalization warning before the compaction gate decision: the gate
 	// may start a parallel usage-driven compaction, and the reminder's usage
@@ -398,6 +404,21 @@ func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID
 	snapshot := a.ctxMgr.Snapshot()
 	trigger := a.compactionTriggerForMainLLM()
 	if !trigger.needed() {
+		a.applyMainLLMRequestTuningOverride(llm.RequestTuning{})
+		a.spawnMainLLMResponseGoroutine(turnCtx, turnID, snapshot, agentErrSourceID)
+		return
+	}
+
+	// Threshold crossed (§11.5): open a grace period instead of compacting
+	// immediately. The model already got the context-pressure reminder (and,
+	// once autoCompactRequested is armed, the externalization warning) from
+	// queueContextPressureOverlays above; it now has up to
+	// minCompactionGracePeriodBatches main requests to actively reset via
+	// compact_context or write its state to files before the usage-driven
+	// compaction starts. A successful model-driven reset clears the armed
+	// request, so the grace anchor is reset on any durable apply / model
+	// switch / session switch.
+	if a.deferCompactionForGracePeriod(a.currentRequestBatch(snapshot)) {
 		a.applyMainLLMRequestTuningOverride(llm.RequestTuning{})
 		a.spawnMainLLMResponseGoroutine(turnCtx, turnID, snapshot, agentErrSourceID)
 		return

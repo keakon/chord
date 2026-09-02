@@ -77,6 +77,52 @@ func TestCollectConfigFileIssuesReportsMalformedYAML(t *testing.T) {
 	}
 }
 
+func TestCollectConfigFileIssuesAllowsReminderRaisingThreshold(t *testing.T) {
+	// A reminder >= threshold is legal: it raises the compaction line to the
+	// reminder (the user's declared pressure limit). No issue is reported.
+	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "context:\n  compaction:\n    threshold: 0.65\n    reminder: 0.7\n")
+	issues, err := CollectConfigFileIssues(path, true)
+	if err != nil {
+		t.Fatalf("CollectConfigFileIssues: %v", err)
+	}
+	for _, issue := range issues {
+		if strings.Contains(issue, "compaction") {
+			t.Fatalf("reminder raising the threshold must not report issues, got %q in %v", issue, issues)
+		}
+	}
+}
+
+func TestCollectConfigFileIssuesReportsDeadReminderOnDisabledCompaction(t *testing.T) {
+	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "context:\n  compaction:\n    threshold: 0\n    reminder: 0.7\n")
+	issues, err := CollectConfigFileIssues(path, true)
+	if err != nil {
+		t.Fatalf("CollectConfigFileIssues: %v", err)
+	}
+	found := false
+	for _, issue := range issues {
+		if strings.Contains(issue, "reminder") && strings.Contains(issue, "threshold is 0") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected a dead-reminder issue for threshold 0, got %v", issues)
+	}
+}
+
+func TestCollectConfigFileIssuesAllowsValidReminder(t *testing.T) {
+	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "context:\n  compaction:\n    threshold: 0.65\n    reminder: 0.5\n    models:\n      openai/gpt-5.6-luna:\n        threshold: 0.3\n        reminder: 0.2\n")
+	issues, err := CollectConfigFileIssues(path, true)
+	if err != nil {
+		t.Fatalf("CollectConfigFileIssues: %v", err)
+	}
+	for _, issue := range issues {
+		if strings.Contains(issue, "compaction") {
+			t.Fatalf("valid compaction config must not report issues, got %q in %v", issue, issues)
+		}
+	}
+}
+
 func TestCollectProjectConfigIssuesReportsUnsupportedFields(t *testing.T) {
 	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "provder:\n  x: 1\nproviders:\n  sample:\n    type: responses\n")
 	issues, err := CollectProjectConfigIssues(path)

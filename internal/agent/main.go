@@ -652,6 +652,27 @@ type MainAgent struct {
 	// the per-generation externalization warning claim. Cross-goroutine: the
 	// event loop queues, the main LLM goroutine confirms delivery at dispatch.
 	overlayClaims overlayClaimState
+	// gracePeriodStartBatch is the main-request batch at which the
+	// automatic-compaction threshold was first crossed in the current window.
+	// Zero means no grace period is open. While the gap between the current
+	// batch and this anchor is below minCompactionGracePeriodBatches, the
+	// usage-driven compaction is deferred (§11.5): the model gets the reminder
+	// plus up to that many requests to actively reset or externalize state
+	// before the compaction starts. Cleared on any durable apply, model
+	// switch, or session switch.
+	gracePeriodStartBatch uint64
+	// gracePeriodExhausted records that the model already spent its active
+	// reset chance in the current window (a model-driven request settled as
+	// skipped / failed / cancelled). Once exhausted the usage-driven safety
+	// net must take over promptly, so the grace period is not re-opened.
+	// Cleared together with gracePeriodStartBatch on any durable apply, model
+	// switch, or session switch.
+	gracePeriodExhausted bool
+	// appliedCompactionModelRef records the model reference whose per-model
+	// compaction threshold is currently applied to ctxmgr. A change re-applies
+	// the threshold and clears the grace period; not persisted, so after a
+	// restore the threshold is re-applied at the first request boundary.
+	appliedCompactionModelRef string
 	// lastCompactionMessageCount is the compacted message count at the previous
 	// compaction apply, used to report the interval (in messages) since the
 	// last compaction in lifecycle analytics.

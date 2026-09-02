@@ -45,6 +45,9 @@ func (a *MainAgent) buildSystemPrompt() string {
 	if block := a.mainAgentCapabilityPromptBlock(); block != "" {
 		parts = append(parts, block)
 	}
+	if block := a.modelDrivenContextPromptBlock(); block != "" {
+		parts = append(parts, block)
+	}
 	if block := a.primaryAgentCoordinationPromptBlock(); block != "" {
 		parts = append(parts, block)
 	}
@@ -381,6 +384,24 @@ func (a *MainAgent) mainAgentCapabilityPromptBlock() string {
 	visibleTools := a.mainVisibleLLMTools()
 	visible := toolNamesFromVisibleTools(visibleTools)
 	return buildDynamicCapabilityPromptBlock(visible, a.effectiveRuleset(), capabilityPromptAudienceMain)
+}
+
+// modelDrivenContextPromptBlock renders passive long-session guidance for the
+// compact_context tool. It is only injected when model-driven compaction is
+// enabled (otherwise the tool does not exist and the guidance has no
+// referent). Unlike the tool description (which governs how to call it), this
+// guidance tells the model when to start planning for it: during exploration,
+// write key findings to files as they settle so a later checkpoint can be
+// built from them, and only call compact_context at a real phase boundary.
+func (a *MainAgent) modelDrivenContextPromptBlock() string {
+	if !a.modelDrivenCompactionEnabled.Load() {
+		return ""
+	}
+	return "## Long-session context management\n" +
+		"- In a long session, keep writing important findings, decisions, and state to project files (for example notes or plan documents) as phases settle, so they survive any later context compaction and can be re-read.\n" +
+		"- When a phase is fully wrapped up (investigation done, decisions made) and the next step needs only those conclusions rather than the current context's intermediate detail, you may request a durable context checkpoint with compact_context alone.\n" +
+		"- After a checkpoint applies, older detail lives in the archived history files; read them when you need exact past facts instead of guessing.\n" +
+		"- Do not treat completing a small task or TODO as a reason to checkpoint; the runtime rejects low-gain resets."
 }
 
 func (a *MainAgent) shouldUsePlannerPrompt(activeCfg *config.AgentConfig) bool {

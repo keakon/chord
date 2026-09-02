@@ -920,6 +920,16 @@ func assistantContentForToolCall(messages []message.Message, callID string) stri
 // stays armed and the next gate decides.
 func (a *MainAgent) settleModelDrivenOutcome(status string, reason string, preflight *modelDrivenPreflightStats) {
 	a.modelDrivenSkipNotice = strings.TrimSpace(reason)
+	// The model already tried the active-reset path and it settled here
+	// (skipped / failed / cancelled). The usage-driven safety net must take
+	// over promptly rather than waiting out a fresh grace period: the grace
+	// window exists to give a wrapping-up model a chance to actively reset,
+	// and that chance was just spent. Cleared again on the next durable apply
+	// / model switch / session switch.
+	if status == CompactionStatusSkipped || status == CompactionStatusFailed || status == CompactionStatusCancelled {
+		a.gracePeriodExhausted = true
+		a.gracePeriodStartBatch = 0
+	}
 	diagnostic := map[string]string{
 		"trigger": compactionTriggerModelDriven.analyticsName(),
 		"reason":  a.modelDrivenSkipNotice,

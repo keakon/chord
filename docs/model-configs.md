@@ -2,6 +2,34 @@
 
 Use this page when you already know which provider/model family you want and just need a copy-paste-ready starting point. Keep [Configuration & Auth](./configuration.md) for field semantics and full schema details; use [Examples](./examples/index.md) for full multi-file workstation/team layouts.
 
+> **Per-model compaction tuning.** Every recipe below is a `model_pools` /
+> `providers` recipe for wiring up the model. To tune context
+> auto-compaction per model, add a `compaction` block to the model's own
+> definition or template (see [Context compaction](./context-management.md#context-compaction)):
+>
+> ```yaml
+> model_templates:
+>   luna-full-window: &luna-full-window
+>     limit: {context: 1050000, output: 128000}   # full API window: no `input`
+>     compaction: {threshold: 0.25, reminder: 0.2}   # stay under the 272K long-context pricing tier
+>
+> providers:
+>   openai:
+>     models:
+>       gpt-5.6-luna: *luna-full-window
+> ```
+>
+> A model without a `compaction` block inherits the global
+> `context.compaction.threshold`; `reminder` defaults to
+> `min(0.60, threshold × 0.90)` when unset. These fields tune the usage-driven
+> automatic-compaction path and take effect whether or not `model_driven` is
+> enabled. Where the benchmark evidence below gives a recommended usage band
+> for a model, tune its `threshold` to the *top* of that band (compaction keeps
+> the context inside it) and optionally set `reminder` just below it. When a
+> model's long-context reliability is not documented here, omit the
+> `compaction` block and let it use the global default.
+
+
 ## OpenAI Responses-compatible: GPT-5.4 / GPT-5.5 / GPT-5.6
 
 The GPT-5.6 snippets use the conservative Codex/common-relay allocation by
@@ -250,6 +278,96 @@ Verify:
 chord doctor models --model openai/gpt-5.6@max
 ```
 
+#### Compaction tuning for GPT-5.6
+
+Start from two separate questions: **which window the model runs in** — the
+272K-input Codex/relay allocation or the full 1.05M API window — and **what
+the threshold is for**: keeping quality up, staying under the 272K
+long-context pricing tier, or using the window for raw capacity. The same
+ratio fires at very different token counts under the two windows, so a recipe
+tuned for one does not transfer to the other.
+
+**Long-context quality** (MRCR v2 8-needle results as reported by OpenAI):
+Sol/Terra stay strong in the 256K–512K band (91.5% / 89.6%) and drop to ~73%
+(73.8% / 72.5%) in the 512K–1M band, while Luna sits at 41.3% in both — a
+cliff, not a slope. The bands are averages, so treat them as a broad guide
+for where quality starts slipping, not as an exact cliff location.
+
+**Pricing** (official OpenAI API): a prompt that exceeds 272K input tokens
+(exactly 272000 does not) bills the **entire request** at the long-context
+rates — 2x input / cache-read / cache-write and 1.5x output, not just the
+portion above 272K. Relays and Codex OAuth set their own prices, so this tier
+does not necessarily apply there. Chord's cost accounting selects the tier
+from the full prompt, but automatic compaction does not know about price
+tiers: it fires on a usage ratio, so keeping requests under 272K is a tuning
+goal, not a guarantee. The trigger compares the last provider-reported usage
+with the budget, a single large tool result can push the next prompt past the
+line, and while `model_driven` is enabled the grace period lets crossing
+requests run before compaction starts. Leave headroom below the line — and
+note that every compaction costs a summarization call and loses raw context,
+so compressing too eagerly can cost more than the tier it avoids.
+
+##### Full API window (1.05M)
+
+Remove `input`; the usable input budget then derives from `context` minus the
+requested output cap — 986K under the default 64K output cap, 922K with
+`max_output_tokens: 128000`. The 272K pricing line is roughly 28–30% of that
+budget, which is why the cost-first answer sits in the 0.2 range, not a typo.
+
+Cost-first (Sol/Terra/Luna share this: it keeps usage under the 272K tier
+and below Luna's 256K+ collapse zone):
+
+```yaml
+model_templates:
+  gpt-5.6-full-cost: &gpt-5.6-full-cost
+    <<: *gpt-5-6-base
+    limit:
+      context: 1050000      # full API window: `input` removed
+      output: 128000
+    compaction:
+      threshold: 0.25       # fires at ~231K–247K, under the 272K tier
+      reminder: 0.2
+```
+
+Quality-first (Sol/Terra; Luna has no strong long-context band to aim for):
+
+```yaml
+model_templates:
+  gpt-5.6-sol-quality: &gpt-5.6-sol-quality
+    <<: *gpt-5-6-base
+    limit:
+      context: 1050000
+      output: 128000
+    compaction:
+      threshold: 0.55       # fires at ~507K–542K; 0.5–0.65 are reasonable
+```
+
+The `reminder` above is optional: it derives as `min(0.60, threshold × 0.90)`
+when omitted (0.50 for the quality-first template). Going above ~0.65 moves
+the trigger past ~600K–640K, already inside the band where Sol/Terra measure
+~73%; 0.7 (~645K–690K) is a capacity-first choice that deliberately accepts
+the long-context rate and some quality loss, and 0.8 (~738K–789K) even more
+so. Do not reuse the old 0.3 Luna recipe under this window: it fires at
+~277K–296K, already past the pricing line.
+
+##### 272K-limited access (Codex / relay allocation)
+
+`limit.input: 272000` is the real input cap, thresholds are fractions of
+272K, and there is no long-context pricing tier to dodge — the relay or Codex
+price already covers the whole window. For Sol/Terra, 0.7 fires at ~190K and
+leaves ~82K of headroom for tool output and the asynchronous compaction
+window, which is reasonable; the global default 0.8 (~218K) works too. Luna
+has no published long-context measurements inside this window, so singling it
+out at 0.3 (~82K) has no evidence behind it: start from the same 0.7–0.8
+range and tune down only if you actually observe quality problems or oversize
+rejections.
+
+As everywhere on this page, the `compaction` block lives on the model
+template so every provider referencing it inherits it, and the fields tune
+the usage-driven automatic-compaction path regardless of `model_driven`. If
+you use the `gpt-5.6` alias (it resolves to Sol), put its `compaction` on
+the alias' template.
+
 ## Codex OAuth preset
 
 Use this when you want ChatGPT/Codex OAuth instead of API keys. Codex uses its
@@ -414,6 +532,45 @@ model_pools:
 
 `claude-fable-5` remains available with the same rates except cache reads at $1.0.
 
+#### Compaction tuning for Claude 5
+
+The whole Claude 5 line (Fable 5.1, Opus 5, Sonnet 5) advertises 1M tokens
+with 128K output and flat per-token pricing across the window. MRCR v2 8-needle
+shows Opus-class models holding ~76% even at 1M (the flattest curve of any
+current family), so the reliable window is genuinely large. Opus 4.7-era
+models trade retrieval accuracy for refusal honesty; Opus 5 and Fable 5.1
+restore strong long-context retrieval. The default `threshold: 0.8` is a
+reasonable starting point for these models; if you run many-hour agentic
+sessions, 0.7 keeps the model out of the mild 512K+ degradation band.
+
+```yaml
+model_templates:
+  claude-fable-5-1: &claude-fable-5-1
+    limit: {context: 1000000, output: 128000}
+    cost:
+      input: 10
+      output: 50
+      cache_read: 0.25
+      cache_write: 12.5
+      cache_write_1h: 20
+    thinking: {type: adaptive, display: summarized}
+    compaction: {threshold: 0.7}   # tuned for long agentic sessions
+
+providers:
+  anthropic:
+    models:
+      claude-fable-5-1: *claude-fable-5-1
+      claude-opus-5: *claude-fable-5-1     # same profile; adjust cost block
+```
+
+`reminder` is omitted on purpose: it derives to `min(0.60, 0.7×0.9) = 0.60`,
+a sensible pressure head start for these models — set it explicitly only when
+you want the reminder earlier or later than the derived value.
+
+Note the tokenizer change since Opus 4.7: the same text produces ~30% more
+tokens on Claude 5 models than on older ones, so a context budget that felt
+right on an older model should be scaled down accordingly.
+
 ## Google Gemini
 
 Pair with `~/.config/chord/auth.yaml`:
@@ -456,6 +613,33 @@ Notes:
 - Keep `api_url` at the `/models` base path. Chord appends `/{model}:streamGenerateContent?alt=sse` automatically.
 - `type` can be omitted; Chord auto-detects Gemini from the `/models` path.
 - Gemini 3.7 Flash (GA August 2026) is the current workhorse: introductory $0.75 / $3.75 per 1M tokens through 2026, then $1.50 / $7.50 from 2027. Its thinking levels are `low` / `medium` / `high` only — `minimal` is not supported, and `thinking_budget` is deprecated, so the template above omits `budget`. Gemini 3.5/3.6 Flash remain available with the older template.
+
+#### Compaction tuning for Gemini
+
+Gemini 3.x is the steepest long-context cliff of the current frontier: strong
+at 128K (84.9% MRCR v2 8-needle) but collapsing to ~26% at 1M, so the
+*reliable* window is only around 128K–200K even though the window advertises
+1M. Keep Gemini sessions compacted well before that: tune the model's
+`threshold` to ~0.15–0.25 of the usable budget (roughly 150K–250K on a 1M
+window) and set `reminder` just below it, so the model gets a pressure hint
+and a chance to actively reset before auto-compaction runs.
+
+```yaml
+# Add compaction to each Gemini model template you already define; every
+# provider referencing the template inherits it.
+model_templates:
+  gemini-3.1-pro: &gemini-3.1-pro
+    limit: {context: 1048576, output: 65536}
+    compaction: {threshold: 0.2, reminder: 0.15}
+  gemini-3.7-flash: &gemini-3.7-flash
+    limit: {context: 1048576, output: 65536}
+    compaction: {threshold: 0.25, reminder: 0.2}
+```
+
+Gemini also doubles input pricing above 200K tokens (the whole request is
+billed at the higher tier), so compacting before 200K saves money as well as
+quality. If your workload truly needs long context, prefer a GPT-5.6 Sol /
+Claude 5-class model instead of pushing Gemini past its reliable band.
 
 ## GLM-5.2 / BigModel Coding Plan
 
@@ -598,6 +782,28 @@ Notes:
   template already sets. Third-party relays may only implement the older
   URL-only `file_url` form; check the relay before relying on Base64
   `file_data`.
+
+#### Compaction tuning for GLM-5.x
+
+GLM-5.2/5.3 advertise a 1M window, but independent long-context evals put the
+reliable working window of the open-weight GLM/Qwen-class models around
+200K–256K (roughly 20–25% of the advertised 1M). If you run long exploratory
+sessions on GLM, compact around a quarter of the usable budget:
+
+```yaml
+# Add compaction to the glm templates you already use (glm-5.2-chat /
+# glm-5.2-messages / glm-5.3-chat ...); every model entry referencing the
+# template inherits it.
+model_templates:
+  glm-5.2-chat: &glm-5-2-chat
+    limit: {context: 1000000, output: 128000}
+    compaction: {threshold: 0.25, reminder: 0.2}
+```
+
+GLM-5.2 is served by several providers in the recipes above (`bigmodel` chat,
+`bigmodel-messages`, `glm-responses`); each model entry that references the
+template gets the same `compaction`. If your workloads stay short, omit the
+`compaction` block and let the model use the global default.
 
 ## DeepSeek V4 (Flash / Pro)
 
@@ -839,6 +1045,30 @@ inputs are not supported from within Chord. The
 when this model heads the active pool on the `messages` or `responses` provider:
 the `chat-completions` (`deepseek`) provider accepts images in user messages yet
 cannot carry them back in tool results.
+
+#### Compaction tuning for DeepSeek V4
+
+DeepSeek V4 Pro/Flash advertise a 1M window, but the MLA architecture degrades
+noticeably at long range: independent multi-needle evals put V4 Pro around
+~41% at 1M (8-needle) versus ~78% single-needle, a sharp drop that mirrors the
+Gemini cliff. The reliable working window is roughly 200K on the 1M window.
+V4 is the cheapest family by a wide margin even on cache misses, so frequent
+compaction is far cheaper than on premium models — compact early and often:
+
+```yaml
+# deepseek-v4-chat / deepseek-v4-messages / deepseek-v4-responses already
+# share a base in the recipes above; add compaction to the shared template so
+# every deepseek-v4-pro / deepseek-v4-flash entry inherits it.
+model_templates:
+  deepseek-v4-chat: &deepseek-v4-chat
+    limit: {context: 1000000, output: 128000}
+    compaction: {threshold: 0.25, reminder: 0.2}
+```
+
+DeepSeek's cache-hit rate is the best in the industry ($0.0036/M), so a
+compaction that preserves the cacheable prefix is nearly free on repeated
+reads. Keep short interactive sessions on the global default and only tune the
+model entry when you run genuinely long agentic runs.
 
 ## Qwen preserved thinking
 

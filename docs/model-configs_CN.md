@@ -2,6 +2,29 @@
 
 当你已经确定要用哪一类 provider / model，只想要一段可复制的起始配置时，用这一页。字段语义和完整 schema 仍以[配置与认证](./configuration_CN.md)为准；完整的多文件工作站 / 团队布局示例见[配置示例](./examples/index_CN.md)。
 
+> **按模型调压缩。** 本页每一份 recipe 都是把模型接进 `model_pools` /
+> `providers` 的接线配置。想按模型分别调整上下文自动压缩，在
+> 模型自身定义或模板上加 `compaction` 块即可（详见[上下文压缩](./context-management_CN.md#上下文压缩compaction)）：
+>
+> ```yaml
+> model_templates:
+>   luna-full-window: &luna-full-window
+>     limit: {context: 1050000, output: 128000}   # 官方全窗口：不写 input
+>     compaction: {threshold: 0.25, reminder: 0.2}   # 把用量留在 272K 长上下文计价档之下
+>
+> providers:
+>   openai:
+>     models:
+>       gpt-5.6-luna: *luna-full-window
+> ```
+>
+> 没有 `compaction` 块的模型继承全局 `context.compaction.threshold`；
+> `reminder` 未设置时按 `min(0.60, threshold × 0.90)` 派生。这两个字段调
+> 的是 usage-driven 自动压缩路径，**无论是否启用 `model_driven` 都生效**。
+> 本页给出的建议把模型的 `threshold` 调到可靠工作窗口的**上沿**（压缩把
+> 上下文维持在该区间内），需要时可把 `reminder` 设在它下方一点。某模型的
+> 长上下文可靠性没有依据可写时，省略 `compaction` 块、让它用全局默认即可。
+
 ## OpenAI Responses 兼容接口：GPT-5.4 / GPT-5.5 / GPT-5.6
 
 GPT-5.6 片段默认使用保守的 Codex / 常见中转配额（`400000` context /
@@ -245,6 +268,83 @@ providers:
 chord doctor models --model openai/gpt-5.6@max
 ```
 
+#### GPT-5.6 的压缩调优
+
+先分清两件事再定阈值：**模型跑在哪个窗口**——Codex/中转的 272K 输入
+配额，还是官方 API 的 1.05M 全窗口——以及**阈值为什么调**：保质量、
+避开 272K 长上下文计价档，还是把窗口当容量用。同一比例在两个窗口下的
+触发点相差近 4 倍，针对一个窗口调出来的配方不能直接搬给另一个。
+
+**长上下文质量**（OpenAI 公布的 MRCR v2 8-needle 数据）：Sol/Terra 在
+256K–512K 段保持 91.5% / 89.6%，到 512K–1M 段降到 73.8% / 72.5%；Luna
+两段都是 41.3%——是悬崖而不是缓坡。区间是平均值，只能当"质量大致从哪
+里开始下滑"的粗略参照，不能当精确拐点用。
+
+**计费**（官方 OpenAI API）：prompt 输入**超过** 272K（正好 272000 不算）
+时，**整次请求**按长上下文费率计费——输入 / 缓存读取 / 缓存写入都是 2
+倍、输出 1.5 倍，不是只对超出部分计价。中转和 Codex OAuth 自己定价，这
+条不一定适用。Chord 的费用统计按完整 prompt 选档，但自动压缩不认识价格
+档：它只按用量比例触发，所以"请求不超过 272K"是调参目标，不是保证——
+触发比较的是上一次 provider 返回的 usage，一次大工具结果就可能把下一次
+请求推过线，启用 `model_driven` 时宽限期还会让越线后的请求照常发出。给
+272K 线留点余量；另外每次压缩都要调用摘要模型并丢失原始上下文，阈值压
+得过低省下的输入费可能还抵不上压缩开销。
+
+##### 官方 API 全窗口（1.05M）
+
+删掉 `input`，可用输入预算由 `context` 减去请求输出上限推出：默认输出
+上限 64K 时约 986K，`max_output_tokens: 128000` 时约 922K。272K 计价线约
+占预算的 28%–30%，所以成本优先档落在 0.2 区间，不是笔误。
+
+成本优先（Sol/Terra/Luna 共用：把用量留在 272K 计价档内，同时避开 Luna
+的 256K+ 崩塌区）：
+
+```yaml
+model_templates:
+  gpt-5.6-full-cost: &gpt-5.6-full-cost
+    <<: *gpt-5-6-base
+    limit:
+      context: 1050000      # 官方全窗口：不写 input
+      output: 128000
+    compaction:
+      threshold: 0.25       # 约 231K–247K 触发，低于 272K 计价线
+      reminder: 0.2
+```
+
+质量优先（Sol/Terra；Luna 没有可以瞄准的强长上下文区段）：
+
+```yaml
+model_templates:
+  gpt-5.6-sol-quality: &gpt-5.6-sol-quality
+    <<: *gpt-5-6-base
+    limit:
+      context: 1050000
+      output: 128000
+    compaction:
+      threshold: 0.55       # 约 507K–542K 触发；0.5–0.65 都合理
+```
+
+上面示例里的 `reminder` 可以省略：省略时按 `min(0.60, threshold × 0.90)`
+派生（质量优先模板对应 0.50）。超过约 0.65 后触发点进入约 600K–640K，
+已经在 Sol/Terra 只有 ~73% 的区段里；0.7（约 645K–690K）是容量优先选
+择，等于明确接受长上下文计费和部分质量损失，0.8（约 738K–789K）更甚。
+别把旧的 Luna 0.3 配方搬到这里：该窗口下 0.3 在约 277K–296K 才触发，
+已经越过计价线。
+
+##### Codex / 272K 受限接入
+
+`limit.input: 272000` 是实际输入上限，阈值是它的比例，也不存在需要躲的
+长上下文计价档——中转或 Codex 的价格本来就覆盖整个窗口。Sol/Terra 用
+0.7 在约 190K 触发，给工具输出和异步压缩留出约 82K 余量，合理；全局默
+认 0.8（约 218K）也可以用。Luna 在这个窗口内没有公开的长上下文评测，
+单独给它设 0.3（约 82K 触发）没有依据：先跟 Sol/Terra 一样用 0.7–0.8，
+实际遇到质量问题或 oversize 拒绝再下调。
+
+其余规则不变：`compaction` 写在模型模板上，引用它的 provider 都会继
+承；`reminder` 省略时按 `min(0.60, threshold × 0.90)` 派生；这两个字段
+调 usage-driven 自动压缩，与 `model_driven` 是否开启无关。用 `gpt-5.6`
+别名（解析到 Sol）时，把 `compaction` 加到该别名对应的模板上。
+
 ## Codex OAuth preset
 
 当你要使用 ChatGPT/Codex OAuth，而不是 API key 时，用这个配置。Codex 使用
@@ -410,6 +510,24 @@ model_pools:
 
 `claude-fable-5` 仍可用，费率相同，只有缓存读取是 $1.0。
 
+#### Claude 5 的压缩调优
+
+Claude 5 全系（Fable 5.1、Opus 5、Sonnet 5）都是 1M 上下文、128K 最大输出、全窗口统一按 token 计费。MRCR v2 8-needle 显示 Opus 级模型即使到 1M 仍能保持 ~76%（当前所有模型族里最平坦的曲线），可靠窗口确实很大。Opus 4.7 时代的模型为换取"拒绝而非编造"牺牲了检索准确率；Opus 5 和 Fable 5.1 恢复了强长上下文检索。默认 `threshold: 0.8` 对这类模型是合理起点；如果跑数小时的 agentic 长会话，0.7 能让模型避开 512K 以上的轻度退化带。
+
+```yaml
+# 直接在既有 claude-fable-5-1 模板上加 compaction，引用它的 provider 全部继承
+model_templates:
+  claude-fable-5-1: &claude-fable-5-1
+    limit: {context: 1000000, output: 128000}
+    compaction: {threshold: 0.7}   # 针对数小时 agentic 长会话调低到 0.7
+```
+
+`reminder` 故意省略：缺省派生为 `min(0.60, 0.7×0.9) = 0.60`，对这些模型是
+合理的提前量——只有想更早/更晚提示时才显式设置。Opus 5 等同一可靠档的
+模型加同样一行即可。
+
+注意 Opus 4.7 起换了 tokenizer：同样文本在 Claude 5 模型上比老模型多约 30% token，所以在老模型上感觉合适的上下文预算要相应下调。
+
 ## Google Gemini
 
 在 `~/.config/chord/auth.yaml` 中配置：
@@ -452,6 +570,23 @@ model_pools:
 - `api_url` 保持在 `/models` 基础路径即可；Chord 会自动追加 `/{model}:streamGenerateContent?alt=sse`。
 - `type` 可以省略；Chord 会根据 `/models` 路径自动识别 Gemini。
 - Gemini 3.7 Flash（2026 年 8 月 GA）是目前的主力模型：促销价每百万 token $0.75 / $3.75 到 2026 年底，2027 年起 $1.50 / $7.50。它的 thinking 级别只有 `low` / `medium` / `high`——不支持 `minimal`，且 `thinking_budget` 已废弃，所以上面模板省略了 `budget`。Gemini 3.5 / 3.6 Flash 仍可用旧模板。
+
+#### Gemini 的压缩调优
+
+Gemini 3.x 是目前前沿模型里长上下文悬崖最陡的：128K 处很强（MRCR v2 8-needle 84.9%），到 1M 崩到 ~26%——所以尽管窗口标称 1M，可靠窗口其实只有 128K–200K 左右。Gemini 会话应远早于此压缩：把该模型的 `threshold` 调到可用预算的 ~0.15–0.25（1M 窗口约合 150K–250K），`reminder` 设在它下方一点，让模型在自动压缩前先收到压力提示并有机会主动 reset。
+
+```yaml
+# 在每个 Gemini 模型模板上加 compaction；引用该模板的 provider 全部继承
+model_templates:
+  gemini-3.1-pro: &gemini-3.1-pro
+    limit: {context: 1048576, output: 65536}
+    compaction: {threshold: 0.2, reminder: 0.15}
+  gemini-3.7-flash: &gemini-3.7-flash
+    limit: {context: 1048576, output: 65536}
+    compaction: {threshold: 0.25, reminder: 0.2}
+```
+
+Gemini 在超过 200K 输入时也按整请求更高档计费（全请求进高价档），所以赶在 200K 前压缩既保质量又省钱。如果工作负载确实需要长上下文，建议改用 GPT-5.6 Sol / Claude 5 这类模型，而不是把 Gemini 硬推到它的可靠区间之外。
 
 ## GLM-5.2 / BigModel Coding Plan
 

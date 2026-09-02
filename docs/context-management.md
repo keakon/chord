@@ -115,7 +115,56 @@ context:
 | `reserved` | int | `0` | Fixed token headroom added on top of the proportional headroom left by `threshold`, for tokenizer drift, tool schema overhead, and compaction/recovery safety. Usually omit it (leave it at `0`); a non-zero value is subtracted from the input budget before applying `threshold`. |
 | `preset` | string | auto-detected | Force a specific compaction implementation. Usually unnecessary. |
 | `profile` | string | `auto` | Compaction strategy. Usually unnecessary. |
+| `reminder` | float | `0` (derived) | Context-pressure reminder line as a usage ratio. `0` means derive as `min(0.60, threshold × 0.90)`; a non-zero value is used as the reminder line. The reminder fires when usage reaches `min(reminder, threshold)` — whichever line comes first — and the compaction grace period (see below) defers the actual compression for up to two main requests, so a reminder set at or above `threshold` still fires on the threshold crossing itself. Disabled together with `threshold: 0`. |
 | `model_driven` | bool | `false` | Experimental opt-in: expose the `compact_context` tool to the main agent so the model can request a durable context checkpoint once it has externalized its working state (written it into files or structured arguments). The checkpoint is built deterministically without a summarization model call, applies at a tool-batch barrier that pauses the next main-model request, and continues the same turn on the compacted context. The tool is MainAgent-only, must be called alone, and only references `state_files` paths without reading them. Low-gain requests are skipped automatically. Off by default; enable only for projects where long exploratory sessions benefit from explicit resets. |
+
+Per-model overrides live on the model definition (`ModelConfig.compaction`,
+with `threshold` and `reminder` subfields), so `model_templates` can share them
+through `<<:`. There is no `context.compaction.models` map.
+
+`threshold` and `reminder` (global or per-model) drive the usage-driven
+compaction path and the context-pressure reminder for **all** users; they do
+not depend on `model_driven`, which only registers the `compact_context` tool.
+
+Set the global lines under `context.compaction` and tune per model on the model
+definition itself (`ModelConfig.compaction`). Model templates make this
+reusable: define a template that carries both `limit` and `compaction`, then
+reference it from every provider that serves that model.
+
+```yaml
+context:
+  compaction:
+    threshold: 0.65          # global automatic-compaction line (fallback)
+
+model_templates:
+  luna-cost-first: &luna-cost-first
+    limit: {context: 1050000, output: 128000}   # full API window: no `input`
+    compaction: {threshold: 0.25, reminder: 0.2}   # stay under the 272K long-context pricing tier
+
+providers:
+  openai:
+    models:
+      gpt-5.6-luna: *luna-cost-first
+      gpt-5.6-sol:
+        limit: {context: 1050000, output: 128000}
+        compaction: {threshold: 0.55}   # quality-first
+```
+
+A model without a `compaction` block inherits the global
+`context.compaction.threshold` / `reminder`. A model-level `threshold: 0`
+disables automatic compaction (and reminders) for that model only.
+
+When the automatic-compaction threshold is first crossed, Chord does **not**
+compact immediately: it opens a **grace period** of two main-model requests
+during which the model sees the context-pressure reminder (and, once the
+auto-compact request is armed, an externalization warning) and can actively
+reset via `compact_context` or write its state to files. The usage-driven
+compaction starts only after the grace period expires and usage is still over
+the threshold; provider rejections (oversize) still force compaction
+immediately regardless of the grace period. A model-driven request that is
+skipped, fails, or is cancelled ends the grace period early so the
+usage-driven safety net takes over promptly. Switching models applies the new
+model's per-model thresholds and starts a fresh grace/reminder window.
 
 ### Model-driven context checkpoint (experimental)
 
@@ -145,6 +194,14 @@ the model externalize important state (naming `compact_context` when it is
 available), and a one-time warning is shown while an automatic compaction is
 pending. These overlays are transient: they never become part of the
 conversation history.
+
+While model-driven compaction is enabled, the main agent's system prompt also
+carries a short passive `Long-session context management` section: write key
+findings and decisions to project files as phases settle (so they survive a
+later checkpoint), call `compact_context` alone only at a real phase boundary,
+and read the archived history files for exact past facts after a checkpoint
+applies. SubAgents never receive this section or the tool. The guidance is
+advisory, not a required workflow.
 
 `state_files` are pure path references: Chord never reads or injects them, so
 the tool cannot bypass read permissions. The checkpoint's `Current User

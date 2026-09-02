@@ -132,6 +132,19 @@ func (m *Manager) TokenBudgetsEpoch() uint64 {
 	return m.tokenBudgetsEpoch
 }
 
+// SetThreshold updates the automatic-compaction threshold fraction. A value
+// <= 0 disables automatic compaction. The epoch bumps only when the value
+// actually changes, so a per-model threshold switch (which also re-derives the
+// reminder baseline) starts a fresh claim window like any other budget change.
+func (m *Manager) SetThreshold(threshold float64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if threshold != m.threshold {
+		m.threshold = threshold
+		m.tokenBudgetsEpoch++
+	}
+}
+
 // CalibratedRatio returns the current usage-calibrated tokens-per-byte median
 // (0 when no usable sample exists). Callers that must keep two estimates on
 // the same calibration (e.g. a compaction preflight and its post-export

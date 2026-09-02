@@ -188,11 +188,16 @@ func (a *MainAgent) queueContextPressureReminder(decision ctxmgr.AutoCompactDeci
 	if threshold <= 0 || usable <= 0 {
 		return
 	}
-	reminderPct := contextPressureReminderRatioCap
-	if head := threshold * contextPressureReminderThresholdRatio; head < reminderPct {
-		reminderPct = head
+	reminderPct := a.effectiveReminderPct(threshold)
+	// "Whichever line is reached first" semantics: when the configured
+	// reminder is at or above the threshold, the threshold crossing itself
+	// triggers the reminder (the compaction grace period defers the actual
+	// compression for minCompactionGracePeriodBatches, so the model still has
+	// a window to act on the reminder).
+	if reminderPct > threshold {
+		reminderPct = threshold
 	}
-	if float64(decision.EffectiveInputTokens)/float64(usable) < reminderPct {
+	if reminderPct <= 0 || float64(decision.EffectiveInputTokens)/float64(usable) < reminderPct {
 		return
 	}
 	windowEpoch := a.sessionEpoch
