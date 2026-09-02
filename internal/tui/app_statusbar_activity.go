@@ -391,16 +391,13 @@ func (m *Model) renderCompactionBackgroundPill(now time.Time) string {
 	// Time elapsed since start
 	elapsedText := strings.TrimSpace(formatStatusBarElapsed(now.Sub(m.compactionBgStatus.StartedAt)))
 
-	// Build pill content. A live compaction is labeled so the indicator reads
-	// as compaction even beside a busy foreground request; terminal states keep
-	// icon + elapsed so the outcome glyph stays the visual anchor during the
-	// short flush window.
+	// Build pill content. The breathing icon stays the visual anchor in both
+	// states: live compaction uses an alternating ■/▪ so it reads as still in
+	// flight, terminal states use the outcome glyph (✓/✗/⤼/✕) for the short
+	// flush window. Elapsed keeps ticking so a long compaction stays visibly
+	// alive without a spinner.
 	pillParts := make([]string, 0, 3)
-	if m.compactionBgStatus.Terminal == "" {
-		pillParts = append(pillParts, icon, "compacting", elapsedText)
-	} else {
-		pillParts = append(pillParts, icon+" "+elapsedText)
-	}
+	pillParts = append(pillParts, icon+" "+elapsedText)
 
 	// A model-requested context checkpoint is labeled distinctly from a
 	// usage-driven compaction so the user can tell the two apart.

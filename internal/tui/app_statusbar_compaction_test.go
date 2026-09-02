@@ -277,18 +277,21 @@ func TestCompactionPillSurvivesBusyActivityLane(t *testing.T) {
 		t.Fatalf("compaction pill collides with the busy activity lane: rightStart=%d centerEnd=%d", rightStart, centerEnd)
 	}
 	line := renderStatusBarPlacedLine("", 0, rightStart, rightSide, "", activityWidth, effectiveWidth)
-	if plain := stripANSI(line); !strings.Contains(plain, "compacting") {
+	if plain := stripANSI(line); !strings.Contains(plain, "▪") && !strings.Contains(plain, "■") {
 		t.Fatalf("status bar lost the compaction indicator beside a busy activity lane: %q", plain)
 	}
 }
 
-func TestCompactionLivePillIsLabeled(t *testing.T) {
+func TestCompactionLivePillShowsElapsed(t *testing.T) {
 	m := NewModelWithSize(nil, 140, 24)
 	now := time.Unix(1_700_000_000, 0)
 	m.compactionBgStatus = compactionBackgroundStatus{Active: true, StartedAt: now.Add(-3 * time.Second)}
 
 	got := stripANSI(m.renderCompactionBackgroundPill(now))
-	if !strings.Contains(got, "compacting") || !strings.Contains(got, "3s") {
-		t.Fatalf("live compaction pill = %q, want a labeled indicator with elapsed time", got)
+	if !strings.Contains(got, "3s") {
+		t.Fatalf("live compaction pill = %q, want elapsed 3s", got)
+	}
+	if strings.Contains(got, "compacting") {
+		t.Fatalf("live compaction pill = %q, should not render the literal \"compacting\" word", got)
 	}
 }
