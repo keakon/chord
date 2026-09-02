@@ -86,6 +86,15 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 			Content: "<system-reminder>\n" + reminder + "\n</system-reminder>",
 		})
 	}
+	if imminent := strings.TrimSpace(a.pendingCompactionImminent); imminent != "" {
+		a.pendingCompactionImminent = ""
+		a.noteCompactionImminentAttached()
+		overlays = append(overlays, message.Message{
+			Role:    "user",
+			Kind:    message.KindTurnOverlay,
+			Content: "<system-reminder>\n" + imminent + "\n</system-reminder>",
+		})
+	}
 	if warning := strings.TrimSpace(a.pendingCompactionWarning); warning != "" {
 		a.pendingCompactionWarning = ""
 		a.noteCompactionWarningAttached()

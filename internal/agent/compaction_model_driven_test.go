@@ -245,9 +245,9 @@ func TestModelDrivenLowGainPreflightRejectsTinyContext(t *testing.T) {
 	}
 	snapshot := a.ctxMgr.Snapshot()
 	bundle := modelDrivenBarrierSnapshot{
-		snapshot:     snapshot,
-		maxTokens:    a.ctxMgr.GetMaxTokens(),
-		scratchAgent: a.compactionReductionScratch(),
+		snapshot:              snapshot,
+		maxTokens:             a.ctxMgr.GetMaxTokens(),
+		prepareReducedRequest: a.compactionReductionScratch().prepareMessagesForLLM,
 	}
 	reason, skip, _ := a.modelDrivenLowGainPreflight(bundle, len(snapshot), snapshot, snapshot, req)
 	if !skip {
@@ -429,7 +429,7 @@ func TestModelDrivenAppliedDraftCarriesPreflightStats(t *testing.T) {
 		snapshot:                    snapshot,
 		maxTokens:                   a.ctxMgr.GetMaxTokens(),
 		sessionDir:                  a.sessionDir,
-		scratchAgent:                a.compactionReductionScratch(),
+		prepareReducedRequest:       a.compactionReductionScratch().prepareMessagesForLLM,
 		fixedRequestTokens:          1000,
 		postResetFixedRequestTokens: 4000,
 	}
@@ -745,7 +745,7 @@ func TestModelDrivenDraftCommittedArchiveSurvives(t *testing.T) {
 		snapshot:                    snapshot,
 		maxTokens:                   a.ctxMgr.GetMaxTokens(),
 		sessionDir:                  a.sessionDir,
-		scratchAgent:                a.compactionReductionScratch(),
+		prepareReducedRequest:       a.compactionReductionScratch().prepareMessagesForLLM,
 		fixedRequestTokens:          1000,
 		postResetFixedRequestTokens: 4000,
 	}
@@ -783,7 +783,7 @@ func TestModelDrivenDraftPreExportCancellationLeavesNoFiles(t *testing.T) {
 		snapshot:                    snapshot,
 		maxTokens:                   a.ctxMgr.GetMaxTokens(),
 		sessionDir:                  a.sessionDir,
-		scratchAgent:                a.compactionReductionScratch(),
+		prepareReducedRequest:       a.compactionReductionScratch().prepareMessagesForLLM,
 		fixedRequestTokens:          1000,
 		postResetFixedRequestTokens: 4000,
 	}
@@ -825,18 +825,41 @@ func TestModelDrivenIntervalVerdictRequiresThreeBatches(t *testing.T) {
 	}
 }
 
-func TestModelDrivenIntervalVerdictNoUnderflowAfterRestore(t *testing.T) {
+func TestModelDrivenIntervalVerdictStaleAnchorCountsAsSatisfied(t *testing.T) {
 	a := &MainAgent{}
-	// Restored session: the in-memory batch counter restarts at 0 while the
-	// persisted last-apply batch comes from the pre-crash history. Without the
-	// current > last guard, 0-5 would underflow to a huge number and the
-	// interval would be misread as satisfied, allowing an immediate re-reset.
-	reason, _, skip := a.modelDrivenIntervalCooldownVerdict(modelDrivenBarrierSnapshot{currentRequestBatch: 0, lastModelDrivenApplyBatch: 5})
-	if !skip {
-		t.Fatal("restored session must not treat the interval as satisfied (uint64 underflow guard)")
+	// Restored session whose batch numbering restarted below the persisted
+	// last-apply anchor: the anchor is stale. It must neither underflow into
+	// "satisfied by a huge gap" nor throttle every model-driven request until
+	// the counter catches up; the interval simply counts as satisfied.
+	if _, _, skip := a.modelDrivenIntervalCooldownVerdict(modelDrivenBarrierSnapshot{currentRequestBatch: 2, lastModelDrivenApplyBatch: 5}); skip {
+		t.Fatal("a stale (current < last) apply anchor must not block model-driven requests")
 	}
-	if !strings.Contains(reason, "interval") {
-		t.Fatalf("restored-session skip reason = %q, want interval wording", reason)
+	// current == last is a genuine zero-batch gap and stays throttled.
+	reason, _, skip := a.modelDrivenIntervalCooldownVerdict(modelDrivenBarrierSnapshot{currentRequestBatch: 5, lastModelDrivenApplyBatch: 5})
+	if !skip || !strings.Contains(reason, "interval") {
+		t.Fatalf("same-batch retry must interval-skip, got skip=%v reason=%q", skip, reason)
+	}
+	// currentRequestBatch 0 (no batch reserved yet) with a persisted anchor is
+	// the classic restore shape; it is stale as well.
+	if _, _, skip := a.modelDrivenIntervalCooldownVerdict(modelDrivenBarrierSnapshot{currentRequestBatch: 0, lastModelDrivenApplyBatch: 5}); skip {
+		t.Fatal("batch 0 against a persisted anchor must not throttle")
+	}
+}
+
+func TestModelDrivenCacheRebuildCostAmortizesProjectedPrefix(t *testing.T) {
+	// The rebuild charge is the write-read delta (1.15x) of the NEW checkpoint
+	// prefix, amortized over the minimum apply interval — never the archived
+	// head, which is dropped rather than rewritten.
+	if got := modelDrivenCacheRebuildCost(0); got != 0 {
+		t.Fatalf("zero projected prefix cost = %d, want 0", got)
+	}
+	projected := 30000
+	want := projected * modelDrivenCacheRebuildDeltaNumer / modelDrivenCacheRebuildDeltaDenom / minModelDrivenApplyIntervalBatches
+	if got := modelDrivenCacheRebuildCost(projected); got != want {
+		t.Fatalf("rebuild cost = %d, want %d", got, want)
+	}
+	if got := modelDrivenCacheRebuildCost(projected); got >= projected {
+		t.Fatalf("amortized rebuild cost %d must stay well below the projected prefix %d", got, projected)
 	}
 }
 
@@ -928,6 +951,45 @@ func TestModelDrivenApplyRecordsLastApplyBatch(t *testing.T) {
 	}
 	if a.lastModelDrivenSkipBatch != 0 || a.lastModelDrivenSkipReason != "" {
 		t.Fatalf("apply must clear the skip-cooldown state, got batch=%d reason=%q", a.lastModelDrivenSkipBatch, a.lastModelDrivenSkipReason)
+	}
+}
+
+func TestUsageDrivenApplyClearsSkipCooldownAndGrace(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.newTurn()
+	a.ctxMgr.Append(message.Message{Role: "user", Content: "one"})
+	a.ctxMgr.Append(message.Message{Role: "assistant", Content: "two"})
+	a.ctxMgr.Append(message.Message{Role: "user", Content: "three"})
+	a.requestBatches.reserve(a.sessionEpoch, 0)
+	a.lastModelDrivenSkipBatch = 1
+	a.lastModelDrivenSkipReason = "low_gain"
+	a.compactionGraceStartBatch = 1
+	a.compactionGraceExhausted = true
+	a.pendingCompactionImminent = "stale"
+
+	draft := &compactionDraft{
+		NewMessages:    []message.Message{{Role: "user", Content: "[Context Summary]", IsCompactionSummary: true}},
+		HeadSplit:      2,
+		Index:          1,
+		AbsHistoryPath: filepath.Join(a.sessionDir, "history-1.md"),
+		PlanID:         1,
+		Target:         compactionTarget{sessionEpoch: a.sessionEpoch},
+	}
+	if err := a.applyCompactionDraft(draft); err != nil {
+		t.Fatalf("applyCompactionDraft: %v", err)
+	}
+	// A non-model-driven apply does not move the interval anchor…
+	if a.lastModelDrivenApplyBatch != 0 {
+		t.Fatalf("usage-driven apply must not record a model-driven apply batch, got %d", a.lastModelDrivenApplyBatch)
+	}
+	// …but the prepared surface the last low-gain verdict was computed on is
+	// gone, so the skip cooldown and the grace window must reset.
+	if a.lastModelDrivenSkipBatch != 0 || a.lastModelDrivenSkipReason != "" {
+		t.Fatalf("usage-driven apply must clear the skip-cooldown state, got batch=%d reason=%q", a.lastModelDrivenSkipBatch, a.lastModelDrivenSkipReason)
+	}
+	if a.compactionGraceStartBatch != 0 || a.compactionGraceExhausted || a.pendingCompactionImminent != "" {
+		t.Fatalf("durable apply must clear the grace state, got start=%d exhausted=%v pending=%q", a.compactionGraceStartBatch, a.compactionGraceExhausted, a.pendingCompactionImminent)
 	}
 }
 

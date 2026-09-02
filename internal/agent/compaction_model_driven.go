@@ -71,15 +71,11 @@ const (
 	// would otherwise re-run prepareMessagesForLLM for an outcome that cannot
 	// change). Different reasons are never cooled down by each other.
 	minModelDrivenSkipCooldownBatches = 2
-	// modelDrivenCacheWriteMultiplier / modelDrivenCacheReadMultiplier
-	// approximate the Anthropic prompt-cache pricing used to charge the
-	// projected side of the low-gain gate the cost of rewriting the archived
-	// prefix (cache write ≈ 1.25x, cache read ≈ 0.1x). Only the delta applies:
-	// the old prefix would have been cache-read, the new one must be
-	// cache-written. modelDrivenCacheRebuildDeltaNumer/Denom carry the same
-	// delta (1.15) as integer math.
-	modelDrivenCacheWriteMultiplier   = 1.25
-	modelDrivenCacheReadMultiplier    = 0.10
+	// modelDrivenCacheRebuildDeltaNumer/Denom carry the prompt-cache
+	// write-read delta (1.15) as integer math: the rewritten checkpoint prefix
+	// is cache-written once (write ≈ 1.25×) where the kept prefix would only
+	// have been cache-read (≈ 0.1×); only the delta is charged, and it is
+	// amortized over the minimum apply interval.
 	modelDrivenCacheRebuildDeltaNumer = 115
 	modelDrivenCacheRebuildDeltaDenom = 100
 )
@@ -99,11 +95,12 @@ type modelDrivenBarrierSnapshot struct {
 	sessionDir        string
 	originalRequest   string
 	responsesState    *llm.ResponsesTurnState
-	// scratchAgent carries the request-reduction policy of the live agent
-	// (config, immutable tool registry, project root, recall-protection
-	// snapshots) captured at the barrier; preflight runs reduction through it
-	// without touching live state.
-	scratchAgent *MainAgent
+	// prepareReducedRequest is the request-reduction closure captured at the
+	// barrier from the (isolated) reduction scratch agent. Capturing only the
+	// function — not the *MainAgent — keeps the worker from ever calling other
+	// agent methods: it can only reduce a message slice. The closure still runs
+	// on the scratch agent, so it never reads live MainAgent state.
+	prepareReducedRequest func([]message.Message) []message.Message
 	// fixedRequestTokens is the estimated per-request fixed surface (system
 	// prompt + tool definitions) that is paid on both sides of a reset. It is
 	// included in the low-gain ratio base so the 10% gate is measured against
@@ -350,7 +347,7 @@ func (a *MainAgent) captureModelDrivenBarrierSnapshot(snapshot []message.Message
 		sessionDir:                  a.sessionDir,
 		originalRequest:             a.captureOriginalFirstUserHint(),
 		responsesState:              a.currentTurnResponsesState(),
-		scratchAgent:                a.compactionReductionScratch(),
+		prepareReducedRequest:       a.compactionReductionScratch().prepareMessagesForLLM,
 		fixedRequestTokens:          a.estimateFixedRequestTokens(),
 		queuedUserMessages:          a.pendingUserMessagesForPreflight(),
 		postResetFixedRequestTokens: a.estimatePostResetFixedRequestTokens(),
@@ -656,7 +653,7 @@ func (a *MainAgent) produceModelDrivenDraftAsync(ctx context.Context, bundle mod
 // overestimated, never ignored, so a reset is only skipped for clearly
 // insufficient gain.
 func (a *MainAgent) modelDrivenLowGainPreflight(bundle modelDrivenBarrierSnapshot, headSplit int, head []message.Message, snapshot []message.Message, req *modelDrivenCheckpointRequest) (string, bool, modelDrivenPreflightStats) {
-	currentSurface := bundle.scratch().prepareMessagesForLLM(snapshot)
+	currentSurface := bundle.prepareReducedRequest(snapshot)
 	// Queued user messages are merged after reduction on the real request
 	// path, so they append to the prepared surface on both sides.
 	currentSurface = append(currentSurface, bundle.queuedUserMessages...)
@@ -679,17 +676,17 @@ func (a *MainAgent) modelDrivenLowGainPreflight(bundle modelDrivenBarrierSnapsho
 	if currentTokens > 0 {
 		preflight.SavedRatioPct = saved * 100 / currentTokens
 	}
-	// Prompt-cache rewrite cost: replacing the archived prefix invalidates the
-	// cached head, so the projected side must pay the delta between writing
-	// the new prefix and reading the old one (write ≈ 1.25×, read ≈ 0.1× for
-	// Anthropic). Only the head region [0, headSplit) is rewritten; the live
-	// tail keeps its cache position. The cost is charged to the savings before
+	// Prompt-cache rebuild cost: after apply the checkpoint prefix must be
+	// cache-written once (write ≈ 1.25×) where a kept prefix would only have
+	// been cache-read (≈ 0.1×). The rewritten prefix is the projected surface,
+	// not the archived head, and the one-time delta is amortized over the
+	// minimum apply interval so the gate compares amortized per-request net
+	// gain, not a single request's. The cost is charged to the savings before
 	// the low-gain gates, so a cacheable session cannot approve a reset whose
-	// net gain after cache rebuild falls below the gate.
+	// amortized net gain falls below the gate.
 	var cacheRebuildCost int
-	if bundle.promptCacheCapable && headSplit > 0 && headSplit <= len(currentSurface) {
-		headTokens := bundle.estimateTokens(currentSurface[:headSplit])
-		cacheRebuildCost = headTokens * modelDrivenCacheRebuildDeltaNumer / modelDrivenCacheRebuildDeltaDenom
+	if bundle.promptCacheCapable && headSplit > 0 {
+		cacheRebuildCost = modelDrivenCacheRebuildCost(projectedTokens)
 	}
 	preflight.CacheRebuildCost = cacheRebuildCost
 	if reason, skip := modelDrivenLowGainCheck(currentTokens, projectedTokens, saved, cacheRebuildCost); skip {
@@ -717,6 +714,18 @@ func modelDrivenLowGainCheck(currentTokens, projectedTokens, saved, cacheRebuild
 	return "", false
 }
 
+// modelDrivenCacheRebuildCost returns the amortized prompt-cache rebuild
+// charge for a reset whose post-apply prefix is projectedTokens long: the
+// write−read delta of cache-writing that prefix once, spread over the
+// minModelDrivenApplyIntervalBatches requests that follow before another
+// reset may apply.
+func modelDrivenCacheRebuildCost(projectedTokens int) int {
+	if projectedTokens <= 0 {
+		return 0
+	}
+	return projectedTokens * modelDrivenCacheRebuildDeltaNumer / modelDrivenCacheRebuildDeltaDenom / minModelDrivenApplyIntervalBatches
+}
+
 // modelDrivenSkipDraft builds a policy skip draft carrying the verdict batch
 // and reason so the event-loop settlement records exactly the numbers the
 // worker decided on. Preflight stays nil for skips that never ran it (interval
@@ -737,9 +746,10 @@ func modelDrivenSkipDraft(planID uint64, target compactionTarget, reason, skipRe
 // gates from the barrier snapshot:
 //   - the apply interval: fewer than
 //     minModelDrivenApplyIntervalBatches since the last successful model-driven
-//     apply skips without preflight. The current > last guard prevents the
-//     uint64 underflow that would otherwise treat a restored session (batch
-//     counter restarts at 0) as "interval satisfied".
+//     apply skips without preflight. The current >= last guard prevents the
+//     uint64 underflow of a restored session whose batch counter restarted
+//     below the persisted anchor; such a stale anchor counts as satisfied
+//     instead of throttling forever.
 //   - the same-reason low-gain cooldown: within
 //     minModelDrivenSkipCooldownBatches of a previous low-gain skip,
 //     short-circuit without entering preflight (which would re-run
@@ -754,8 +764,14 @@ func modelDrivenSkipDraft(planID uint64, target compactionTarget, reason, skipRe
 // It returns the skip reason, the bound skip reason, and whether to skip.
 func (a *MainAgent) modelDrivenIntervalCooldownVerdict(bundle modelDrivenBarrierSnapshot) (string, string, bool) {
 	current := bundle.currentRequestBatch
-	if bundle.lastModelDrivenApplyBatch > 0 &&
-		(current <= bundle.lastModelDrivenApplyBatch || current-bundle.lastModelDrivenApplyBatch < minModelDrivenApplyIntervalBatches) {
+	// current < last means the recorded anchor comes from a counter the
+	// current session no longer continues (a restored session whose batch
+	// numbering restarted below the persisted anchor): the anchor is stale
+	// and the interval counts as satisfied rather than blocking every
+	// model-driven request until the counter catches up. current == last is
+	// a genuine zero-batch gap and stays throttled.
+	if bundle.lastModelDrivenApplyBatch > 0 && current >= bundle.lastModelDrivenApplyBatch &&
+		current-bundle.lastModelDrivenApplyBatch < minModelDrivenApplyIntervalBatches {
 		return fmt.Sprintf("the minimum %d-request-batch interval since the last applied context checkpoint has not elapsed", minModelDrivenApplyIntervalBatches), "interval", true
 	}
 	if bundle.lastModelDrivenSkipReason == "low_gain" &&
@@ -978,14 +994,6 @@ func renderStateFilesSection(paths []string) string {
 
 // ------------------------------------------------------------ helpers ----
 
-func (b modelDrivenBarrierSnapshot) scratch() *MainAgent {
-	// The reduction scratch is built on the event loop in
-	// captureModelDrivenBarrierSnapshot. This accessor exists so preflight
-	// reads stay on the barrier snapshot even though the field is constructed
-	// there; it never touches live agent state.
-	return b.scratchAgent
-}
-
 func assistantContentForToolCall(messages []message.Message, callID string) string {
 	for i := len(messages) - 1; i >= 0; i-- {
 		msg := messages[i]
@@ -1007,6 +1015,9 @@ func assistantContentForToolCall(messages []message.Message, callID string) stri
 // stays armed and the next gate decides.
 func (a *MainAgent) settleModelDrivenOutcome(status string, reason string, preflight *modelDrivenPreflightStats) {
 	a.modelDrivenSkipNotice = strings.TrimSpace(reason)
+	// The model already took its shot at a checkpoint: the threshold grace
+	// (if any) ends here so the usage-driven safety net is not deferred again.
+	a.exhaustCompactionGraceAfterModelDriven()
 	diagnostic := map[string]string{
 		"trigger": compactionTriggerModelDriven.analyticsName(),
 		"reason":  a.modelDrivenSkipNotice,

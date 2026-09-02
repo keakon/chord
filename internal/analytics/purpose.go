@@ -20,6 +20,11 @@ const (
 	// externalization warning deliveries (zero-usage bookkeeping).
 	UsagePurposeContextPressureReminder = "context_pressure_reminder"
 	UsagePurposeCompactionWarning       = "compaction_warning"
+	// UsagePurposeCompactionGrace records the threshold grace-period
+	// lifecycle (started / notice_delivered / expired / hard_ceiling /
+	// model_driven_settled) so telemetry can tell whether the grace bought a
+	// model-driven reset or only delayed the safety net.
+	UsagePurposeCompactionGrace = "compaction_grace"
 )
 
 var diagnosticUsagePurposes = []string{
@@ -30,6 +35,7 @@ var diagnosticUsagePurposes = []string{
 	UsagePurposeCompactionLifecycle,
 	UsagePurposeContextPressureReminder,
 	UsagePurposeCompactionWarning,
+	UsagePurposeCompactionGrace,
 	// Wall-clock time bookkeeping events (TIME sidebar section) are zero-usage
 	// segments; they must stay out of token/cost aggregates and the Calls count.
 	WalltimePurposeModel,

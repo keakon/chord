@@ -19,7 +19,8 @@
 > ```
 >
 > 没有 `compaction` 块的模型继承全局 `context.compaction.threshold`；
-> `reminder` 未设置时按 `min(0.60, threshold × 0.90)` 派生。这两个字段调
+> `reminder` 未设置时按 `min(0.60, threshold × 0.90)` 派生；`reminder: -1`
+> 则只关闭该模型的压力提醒，自动压缩保持开启。这两个字段调
 > 的是 usage-driven 自动压缩路径，**无论是否启用 `model_driven` 都生效**。
 > 本页给出的建议把模型的 `threshold` 调到可靠工作窗口的**上沿**（压缩把
 > 上下文维持在该区间内），需要时可把 `reminder` 设在它下方一点。某模型的

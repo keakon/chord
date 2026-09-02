@@ -479,14 +479,18 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	a.pendingContextPressureReminder = ""
 	a.pendingCompactionWarning = ""
 	// A successful model-driven apply records its request batch as the new
-	// interval anchor and clears the skip-cooldown state: the next model-driven
-	// request must wait minModelDrivenApplyIntervalBatches batches, and stale
-	// skip reasons from before the apply must not gate the fresh window.
+	// interval anchor: the next model-driven request must wait
+	// minModelDrivenApplyIntervalBatches batches. Every durable apply — model-
+	// driven, usage-driven, or manual — clears the skip-cooldown state and the
+	// threshold grace window: the prepared surface the last low-gain verdict
+	// was computed on no longer exists, and the new window re-derives its own
+	// grace from a fresh crossing.
 	if d.SummaryMode == compactionSummaryModeModelDriven {
 		a.lastModelDrivenApplyBatch = a.currentRequestBatch(a.ctxMgr.Snapshot())
-		a.lastModelDrivenSkipBatch = 0
-		a.lastModelDrivenSkipReason = ""
 	}
+	a.lastModelDrivenSkipBatch = 0
+	a.lastModelDrivenSkipReason = ""
+	a.clearCompactionGrace()
 	a.resetContextReductionStats()
 	a.clearLoopFrozenReductionPrefix()
 	if a.llmClient != nil {

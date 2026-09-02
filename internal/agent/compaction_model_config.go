@@ -27,7 +27,8 @@ func (a *MainAgent) modelCompactionConfig(modelRef string) *config.ModelCompacti
 }
 
 // explicitReminderPct returns the configured reminder line for modelRef
-// (per-model first, then the global reminder), or 0 when none is configured.
+// (per-model first, then the global reminder): 0 when none is configured,
+// negative (config.CompactionReminderDisabled) when explicitly disabled.
 func (a *MainAgent) explicitReminderPct(modelRef string) float64 {
 	if a == nil {
 		return 0
@@ -84,7 +85,13 @@ func (a *MainAgent) effectiveReminderPctForModelRef(modelRef string, threshold f
 	if threshold <= 0 {
 		return 0
 	}
-	if reminder := a.explicitReminderPct(modelRef); reminder > 0 {
+	reminder := a.explicitReminderPct(modelRef)
+	if reminder < 0 {
+		// Explicitly disabled (config.CompactionReminderDisabled): no
+		// reminder line even though automatic compaction stays on.
+		return 0
+	}
+	if reminder > 0 {
 		return reminder
 	}
 	derived := contextPressureReminderRatioCap
@@ -116,6 +123,9 @@ func (a *MainAgent) applyModelCompactionConfig() bool {
 		// switch so the armed usage-driven request is re-evaluated below.
 		if a.appliedCompactionModelRef != "" {
 			modelChanged = true
+			// The new model re-evaluates usage against its own threshold,
+			// so the previous window's grace state does not carry over.
+			a.clearCompactionGrace()
 		}
 		a.appliedCompactionModelRef = modelRef
 	}

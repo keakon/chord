@@ -287,6 +287,7 @@ func (a *MainAgent) installSessionTarget(sessionDir string) {
 	a.lastModelDrivenApplyBatch = 0
 	a.lastModelDrivenSkipBatch = 0
 	a.lastModelDrivenSkipReason = ""
+	a.clearCompactionGrace()
 	a.resetThinkingTranslationSeen()
 	a.stateMu.Lock()
 	a.sessionDir = sessionDir

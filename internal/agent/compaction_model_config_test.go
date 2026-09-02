@@ -110,6 +110,37 @@ func TestEffectiveReminderPctReturnsExplicitAboveThreshold(t *testing.T) {
 	}
 }
 
+func TestEffectiveReminderPctExplicitDisable(t *testing.T) {
+	disabled := float64(config.CompactionReminderDisabled)
+	// Per-model -1 disables the reminder while automatic compaction stays on.
+	a := modelCompTestAgent(
+		config.CompactionConfig{Threshold: 0.8, Reminder: 0.5},
+		map[string]*config.ModelCompactionConfig{"p/m": {Reminder: &disabled}},
+		"p/m",
+	)
+	if got := a.effectiveReminderPct(0.8); got != 0 {
+		t.Fatalf("per-model disabled reminder = %v, want 0 (no reminder)", got)
+	}
+	if got := a.effectiveCompactionThreshold("p/m"); got != 0.8 {
+		t.Fatalf("disabling the reminder must not touch the threshold, got %v", got)
+	}
+	// Global -1 disables it for models without their own reminder.
+	a = modelCompTestAgent(config.CompactionConfig{Threshold: 0.8, Reminder: disabled}, nil, "p/m")
+	if got := a.effectiveReminderPct(0.8); got != 0 {
+		t.Fatalf("global disabled reminder = %v, want 0", got)
+	}
+	// A per-model reminder overrides a global disable.
+	perModel := 0.4
+	a = modelCompTestAgent(
+		config.CompactionConfig{Threshold: 0.8, Reminder: disabled},
+		map[string]*config.ModelCompactionConfig{"p/m": {Reminder: &perModel}},
+		"p/m",
+	)
+	if got := a.effectiveReminderPct(0.8); got != perModel {
+		t.Fatalf("per-model reminder over a global disable = %v, want 0.4", got)
+	}
+}
+
 func TestEffectiveCompactionThresholdReminderDoesNotRaiseLine(t *testing.T) {
 	perModelReminder := 0.7
 	a := modelCompTestAgent(

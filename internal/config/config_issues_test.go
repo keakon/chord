@@ -173,6 +173,33 @@ func TestCollectProjectConfigIssuesMissingFile(t *testing.T) {
 	}
 }
 
+func TestCompactionReminderMinusOneDisablesWithoutIssue(t *testing.T) {
+	// reminder: -1 is the explicit "no context-pressure reminder" switch; it
+	// keeps automatic compaction on and must neither be reported nor reset,
+	// globally or per model.
+	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "context:\n  compaction:\n    threshold: 0.8\n    reminder: -1\nproviders:\n  openai:\n    type: responses\n    models:\n      gpt-5.6-luna:\n        compaction:\n          reminder: -1\n")
+	issues, err := CollectConfigFileIssues(path, true)
+	if err != nil {
+		t.Fatalf("CollectConfigFileIssues: %v", err)
+	}
+	for _, issue := range issues {
+		if strings.Contains(issue, "reminder") {
+			t.Fatalf("reminder -1 must not report an issue, got %q in %v", issue, issues)
+		}
+	}
+	cfg, err := LoadConfigFromPath(path)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath: %v", err)
+	}
+	if cfg.Context.Compaction.Reminder != CompactionReminderDisabled {
+		t.Fatalf("global reminder = %v, want %v (kept)", cfg.Context.Compaction.Reminder, CompactionReminderDisabled)
+	}
+	mc := cfg.Providers["openai"].Models["gpt-5.6-luna"]
+	if mc.Compaction == nil || mc.Compaction.Reminder == nil || *mc.Compaction.Reminder != CompactionReminderDisabled {
+		t.Fatalf("per-model reminder -1 must be kept, got %+v", mc.Compaction)
+	}
+}
+
 func TestCollectConfigFileIssuesReportsOutOfRangeCompactionValues(t *testing.T) {
 	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "context:\n  compaction:\n    threshold: 1.5\n    reminder: -0.2\n")
 	issues, err := CollectConfigFileIssues(path, true)

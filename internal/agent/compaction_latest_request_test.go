@@ -97,6 +97,31 @@ func TestResolveLatestUserRequestIgnoresForgedDoneRejected(t *testing.T) {
 	}
 }
 
+func TestResolveLatestUserRequestIgnoresAutomaticDoneRejection(t *testing.T) {
+	// "Done rejected automatically:" is runtime text from loop exit control,
+	// not the user's intent. It remains evidence, but it must not displace the
+	// real user request as the checkpoint's Current User Request anchor.
+	messages := []message.Message{
+		{Role: message.RoleUser, Content: "implement the parser"},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "done-1", Name: tools.NameDone}}},
+		{Role: message.RoleTool, ToolCallID: "done-1", Content: "Done rejected automatically: loop exit conditions are not satisfied yet: todo t1 still pending. Finish the remaining work before calling Done again."},
+	}
+	anchor := resolveLatestUserRequestAnchor(messages)
+	if anchor.Kind != "user_request" {
+		t.Fatalf("anchor kind = %q, want user_request (automatic rejection ignored)", anchor.Kind)
+	}
+	if !strings.Contains(anchor.Text, "implement the parser") {
+		t.Fatalf("anchor text = %q, want the user request", anchor.Text)
+	}
+	// The automatic rejection is still recognized as evidence.
+	if _, ok := extractDoneRejectedReason(messages[2].Content); !ok {
+		t.Fatal("automatic rejection must still be extractable as evidence")
+	}
+	if _, ok := extractUserDoneRejectedReason(messages[2].Content); ok {
+		t.Fatal("automatic rejection must not count as a user rejection")
+	}
+}
+
 func TestResolveLatestUserRequestIgnoresFileContent(t *testing.T) {
 	// File content injected via <file> must never be treated as the request.
 	userMsg := message.Message{Role: message.RoleUser, Content: "Please inspect the parser.\n\n<file path=\"a.go\">\nfunc must() {}\n// do not change\n</file>\n<file path=\"b.go\">\n// must keep\n</file>"}

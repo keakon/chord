@@ -642,6 +642,13 @@ type MainAgent struct {
 	// propagates the reason it was bound to.
 	lastModelDrivenSkipBatch  uint64
 	lastModelDrivenSkipReason string
+	// compactionGraceStartBatch / compactionGraceExhausted are the threshold
+	// grace period (compaction_grace.go): the request batch at which the
+	// usage-driven crossing was first deferred, and whether this compaction
+	// window already spent its grace. Runtime memory only; a durable apply,
+	// a session switch, or a model change clears both.
+	compactionGraceStartBatch uint64
+	compactionGraceExhausted  bool
 	// modelDrivenCompactionEnabled reflects the effective
 	// context.compaction.model_driven configuration. It is set once at runtime
 	// wiring; the capability is decided at construction, never toggled at
@@ -658,6 +665,9 @@ type MainAgent struct {
 	// dispatch, not at attach.
 	pendingContextPressureReminder string
 	pendingCompactionWarning       string
+	// pendingCompactionImminent is the one-shot grace-period notice queued on
+	// the request that observed the threshold crossing (compaction_grace.go).
+	pendingCompactionImminent string
 	// overlayClaims holds the per-window context-pressure reminder claim and
 	// the per-generation externalization warning claim. Cross-goroutine: the
 	// event loop queues, the main LLM goroutine confirms delivery at dispatch.

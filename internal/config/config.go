@@ -1293,7 +1293,8 @@ type CompactionConfig struct {
 	// Reminder is the context-pressure reminder line as a usage fraction.
 	// Zero means "not configured": the runtime derives it as
 	// min(0.60, threshold*0.90). Unlike threshold, zero is not a disable
-	// signal — to disable reminders for a model, set its threshold to 0.
+	// signal; CompactionReminderDisabled (-1) disables the reminder while
+	// keeping automatic compaction.
 	Reminder float64 `json:"reminder,omitempty" yaml:"reminder,omitempty"`
 	// ModelDriven exposes the compact_context tool so the model can request a
 	// durable context checkpoint once its working state is externalized.
@@ -1309,6 +1310,10 @@ type CompactionConfig struct {
 	// text counts toward the budget.
 	RetainRecentTokens int `json:"retain_recent_tokens,omitempty" yaml:"retain_recent_tokens,omitempty"`
 }
+
+// CompactionReminderDisabled is the reminder value that switches the
+// context-pressure reminder off without touching the compaction threshold.
+const CompactionReminderDisabled = -1
 
 // ModelCompactionConfig carries per-model overrides for the compaction
 // threshold and reminder lines. Pointer fields distinguish "not configured"
@@ -1468,6 +1473,13 @@ func validCompactionFraction(v float64) bool {
 	return v == 0 || (v > 0 && v <= 1)
 }
 
+// validCompactionReminder accepts the reminder line values: 0 (derive from
+// the threshold), a usage fraction in (0,1], or -1 (explicitly disable the
+// context-pressure reminder while keeping automatic compaction).
+func validCompactionReminder(v float64) bool {
+	return v == CompactionReminderDisabled || validCompactionFraction(v)
+}
+
 // collectCompactionConfigIssues reports compaction configurations that are
 // invalid or silently ineffective, and resets the invalid values to their
 // unset state so they behave as not configured. Two kinds of problems exist:
@@ -1496,8 +1508,8 @@ func collectCompactionConfigIssues(cfg *Config) []string {
 		issues = append(issues, fmt.Sprintf("context.compaction.threshold must be 0 (disable automatic compaction) or a usage fraction in (0,1]; got %v, using the default %v", comp.Threshold, DefaultContextCompactUsage))
 		comp.Threshold = DefaultContextCompactUsage
 	}
-	if !validCompactionFraction(comp.Reminder) {
-		issues = append(issues, fmt.Sprintf("context.compaction.reminder must be 0 (derive from the threshold) or a usage fraction in (0,1]; got %v, using the derived default", comp.Reminder))
+	if !validCompactionReminder(comp.Reminder) {
+		issues = append(issues, fmt.Sprintf("context.compaction.reminder must be 0 (derive from the threshold), -1 (disable the reminder), or a usage fraction in (0,1]; got %v, using the derived default", comp.Reminder))
 		comp.Reminder = 0
 	}
 	cfg.Context.Compaction = comp
@@ -1530,8 +1542,8 @@ func collectModelCompactionIssues(cfg *Config) []string {
 				comp.Threshold = nil
 				changed = true
 			}
-			if comp.Reminder != nil && !validCompactionFraction(*comp.Reminder) {
-				issues = append(issues, fmt.Sprintf("model %s/%s: compaction.reminder must be 0 (derive from the threshold) or a usage fraction in (0,1]; got %v, inheriting the global reminder", providerName, modelID, *comp.Reminder))
+			if comp.Reminder != nil && !validCompactionReminder(*comp.Reminder) {
+				issues = append(issues, fmt.Sprintf("model %s/%s: compaction.reminder must be 0 (derive from the threshold), -1 (disable the reminder), or a usage fraction in (0,1]; got %v, inheriting the global reminder", providerName, modelID, *comp.Reminder))
 				comp.Reminder = nil
 				changed = true
 			}
@@ -2041,7 +2053,7 @@ func semanticInvalidOverridePaths(data []byte) ([][]string, error) {
 	if !validCompactionFraction(comp.Threshold) {
 		paths = append(paths, []string{"context", "compaction", "threshold"})
 	}
-	if !validCompactionFraction(comp.Reminder) {
+	if !validCompactionReminder(comp.Reminder) {
 		paths = append(paths, []string{"context", "compaction", "reminder"})
 	}
 	for name, p := range cfg.Providers {
@@ -2053,7 +2065,7 @@ func semanticInvalidOverridePaths(data []byte) ([][]string, error) {
 			if mc.Compaction.Threshold != nil && !validCompactionFraction(*mc.Compaction.Threshold) {
 				paths = append(paths, append(base[:len(base):len(base)], "threshold"))
 			}
-			if mc.Compaction.Reminder != nil && !validCompactionFraction(*mc.Compaction.Reminder) {
+			if mc.Compaction.Reminder != nil && !validCompactionReminder(*mc.Compaction.Reminder) {
 				paths = append(paths, append(base[:len(base):len(base)], "reminder"))
 			}
 		}

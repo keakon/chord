@@ -715,6 +715,7 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	a.lastModelDrivenApplyBatch = loaded.LastModelDrivenApplyBatch
 	a.lastModelDrivenSkipBatch = 0
 	a.lastModelDrivenSkipReason = ""
+	a.clearCompactionGrace()
 	a.autoCompactRequestGeneration.Store(loaded.AutoCompactRequestGeneration)
 	if resume := a.pendingCompactionResume; resume != nil &&
 		resume.Kind == string(compactionResumeAutoContinue) &&

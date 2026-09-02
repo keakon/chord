@@ -412,11 +412,27 @@ func extractDoneRejectedReason(text string) (string, bool) {
 	return "", false
 }
 
+// extractUserDoneRejectedReason recognizes only a user-authored Done rejection
+// ("Done rejected:"). The runtime's automatic rejection ("Done rejected
+// automatically:", emitted by loop exit control) is runtime text, not user
+// intent: it stays evidence (extractDoneRejectedReason) but must never become
+// the Current User Request anchor of a checkpoint.
+func extractUserDoneRejectedReason(text string) (string, bool) {
+	trimmed := strings.TrimSpace(text)
+	after, ok := strings.CutPrefix(trimmed, "Done rejected:")
+	if !ok {
+		return "", false
+	}
+	reason := strings.TrimSpace(after)
+	return reason, reason != ""
+}
+
 // doneRejectedToolResult reports whether messages[i] is the result of a Done
-// tool call that carried a rejection. The message's ToolCallID must resolve to
-// a preceding Done tool call: text that merely starts with "Done rejected:" —
-// for example a shell echo — is not the user's rejection and must not become
-// the latest-request anchor of a checkpoint.
+// tool call that carried a user rejection. The message's ToolCallID must
+// resolve to a preceding Done tool call: text that merely starts with "Done
+// rejected:" — for example a shell echo — is not the user's rejection and must
+// not become the latest-request anchor of a checkpoint. Automatic rejections
+// are excluded for the same reason (see extractUserDoneRejectedReason).
 func doneRejectedToolResult(messages []message.Message, i int) (string, bool) {
 	msg := messages[i]
 	if msg.ToolCallID == "" {
@@ -428,7 +444,7 @@ func doneRejectedToolResult(messages []message.Message, i int) (string, bool) {
 				if tools.NormalizeName(tc.Name) != tools.NameDone {
 					return "", false
 				}
-				return extractDoneRejectedReason(msg.Content)
+				return extractUserDoneRejectedReason(msg.Content)
 			}
 		}
 	}

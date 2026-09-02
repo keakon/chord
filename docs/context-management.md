@@ -134,7 +134,7 @@ context:
 | `reserved` | int | `0` | Fixed token headroom added on top of the proportional headroom left by `threshold`, for tokenizer drift, tool schema overhead, and compaction/recovery safety. Usually omit it (leave it at `0`); a non-zero value is subtracted from the input budget before applying `threshold`. |
 | `preset` | string | auto-detected | Force a specific compaction implementation. Usually unnecessary. |
 | `profile` | string | `auto` | Compaction strategy. Usually unnecessary. |
-| `reminder` | float | `0` (derived) | Context-pressure reminder line as a usage ratio. `0` means derive as `min(0.60, threshold × 0.90)`; a non-zero value is used as the reminder line. The reminder fires when usage reaches `min(reminder, threshold)` — whichever line comes first — and when the reminder sits at or above `threshold`, the threshold crossing itself triggers it (compaction starts on the crossing itself, so the reminder and the start share the request). Disabled together with `threshold: 0`. Reminders cannot be turned off on their own: there is no option to keep automatic compaction enabled while disabling the pressure reminder — raise the reminder line as needed, or set `threshold: 0` to disable both. Values outside `0`–`1` (negative, above `1`, or NaN/±Inf) are rejected with a warning and fall back to the derived default. |
+| `reminder` | float | `0` (derived) | Context-pressure reminder line as a usage ratio. `0` (the default) derives the line as `min(0.60, threshold × 0.90)`; a fraction in `(0,1]` sets it explicitly; `-1` disables the pressure reminder while keeping automatic compaction on (per model as well). The reminder fires when usage reaches `min(reminder, threshold)` — whichever line comes first — so a reminder at or above the threshold fires on the threshold crossing itself. `threshold: 0` disables both. Any other value (negative, above `1`, or NaN/±Inf) is rejected with a warning and falls back to the derived default. |
 | `model_driven` | bool | `false` | Experimental opt-in: expose the `compact_context` tool to the main agent so the model can request a durable context checkpoint once it has externalized its working state (written it into files or structured arguments). The checkpoint is built deterministically without a summarization model call, applies at a tool-batch barrier that pauses the next main-model request, and continues the same turn on the compacted context. The tool is MainAgent-only, must be called alone, and only references `state_files` paths without reading them. Low-gain requests are skipped automatically. Off by default; enable only for projects where long exploratory sessions benefit from explicit resets. |
 | `retain_recent_tokens` | int | `4096` (built-in) | Estimated-token budget for the newest real user messages kept verbatim inside every compaction checkpoint (see [Retained recent messages](#retained-recent-messages)); `0` or omitted uses the built-in default. Only the message text counts toward the budget. Set it higher to keep more of the latest turns across a compaction, or lower to reclaim more context; the retained section never replaces the summary — it pins the newest instruction boundary verbatim. |
 
@@ -177,23 +177,50 @@ providers:
 
 A model without a `compaction` block inherits the global
 `context.compaction.threshold` / `reminder`. A model-level `threshold: 0`
-disables automatic compaction (and reminders) for that model only.
+disables automatic compaction (and reminders) for that model only, and a
+model-level `reminder: -1` disables the pressure reminder while automatic
+compaction stays on.
 
 When the automatic-compaction threshold is crossed, Chord starts the
-usage-driven compaction right away: it runs asynchronously in the background
+usage-driven compaction right away — it runs asynchronously in the background
 and applies at the next continuation barrier, so the request that crosses the
-line keeps running in parallel with it. The request-side reminder described
-below only fires while model-driven compaction is enabled (`compact_context`
-visible); with it off, automatic compaction is fully runtime-owned — as in
-Codex's local and remote compaction paths, which never notify the working
-model — and the session simply keeps running until the compaction applies at
-the barrier. The reminder only applies while the session keeps issuing main
-requests — if the turn ends right at the crossing, the usage-driven compaction
-runs through the normal end-of-turn path instead. The one-shot externalization
-warning is shown on the request that actually runs alongside the start (again
-only while model-driven is enabled); provider rejections (oversize) still
-force compaction immediately. Switching models applies the new model's
-per-model thresholds and starts a fresh reminder window.
+line keeps running in parallel with it. Provider rejections (oversize) still
+force compaction immediately.
+
+While model-driven compaction is enabled (`compact_context` visible), the
+first crossing in a compaction window instead defers the start across two
+main-model requests: the first request after the crossing and one more run
+before the summary-based compaction takes over, giving the model room to wrap
+up the phase and request a model-driven checkpoint or externalize state. The
+first request after the crossing carries a one-shot "compaction imminent"
+notice — the pressure-reminder line usually fired earlier in the same window,
+so without it the deferral would be silent. The grace is skipped or cut short
+once usage reaches 95% of the usable input budget (a single batch that pulled
+in large tool output cannot ride the grace into a provider oversize rejection)
+and ends as soon as a model-driven request settles without applying (skip /
+failure / cancel): the model already took its shot, so the safety net takes
+over on the next gate. The grace is spent once per window; any durable apply,
+session switch, restore, or model change starts a fresh window.
+
+The request-side reminder and warning overlays only fire while model-driven
+compaction is enabled; with it off, automatic compaction is fully
+runtime-owned — as in Codex's local and remote compaction paths, which never
+notify the working model — and the session simply keeps running until the
+compaction applies at the barrier. The reminder only applies while the session
+keeps issuing main requests — if the turn ends right at the crossing, the
+usage-driven compaction runs through the normal end-of-turn path instead. The
+one-shot externalization warning is shown on the request that actually starts
+the compaction, which under the grace period is not the first request after
+the crossing.
+
+Switching models applies the new model's per-model thresholds and starts a
+fresh reminder window. When the switch lands on a model with a smaller context
+window while the current context already crosses its line, Chord compacts
+ahead of the move: from idle the automatic compaction starts right away, and
+with a turn active the next main-model request is deferred until the
+compaction applies, so a request never runs over the new model's threshold
+right after the switch. A one-line status notice reports the downshift
+compaction once it applies.
 
 ### Model-driven context checkpoint (experimental)
 
@@ -238,8 +265,11 @@ phases settle) instead of quoting how much context is left. The reminder and
 warning name the write target in role terms — a task-notes file under
 `.chord/notes/` or a plan document under `.chord/plans/`, whichever the role
 may write. The usage-driven
-compaction starts on the threshold crossing itself, and the request that runs
-alongside it carries a one-time externalization warning. Both
+compaction starts on the threshold crossing itself — or, while model-driven is
+enabled, once the grace period described above has deferred it across two
+requests — and the request that actually starts it carries a one-time
+externalization warning (under the grace, the first request after the crossing
+carries the "compaction imminent" notice instead). Both
 overlays are wrapped in a `<system-reminder>` block — the same runtime-message
 convention every harness injection uses — so the model can tell them apart
 from user-written messages (research on memory-pressure signals, e.g. MemGPT,

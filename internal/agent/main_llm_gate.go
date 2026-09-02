@@ -431,6 +431,19 @@ func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID
 		a.spawnMainLLMResponseGoroutine(turnCtx, turnID, snapshot, agentErrSourceID)
 		return
 	}
+	// Threshold grace period: while compact_context is visible, the first
+	// crossing in a compaction window defers the usage-driven start for
+	// minCompactionGracePeriodBatches requests and tells the model that
+	// compaction is imminent, so it can wrap up the phase and request a
+	// model-driven checkpoint (or externalize state) first. The grace is
+	// bypassed above the hard ceiling and spent once per window; the oversize
+	// safety valve below is unaffected.
+	if trigger.isUsageDriven() && !a.IsCompactionRunning() && a.usageDrivenCompactionGraceDefers(snapshot) {
+		log.Debugf("beginMainLLMAfterPreparation: usage-driven compaction deferred by the threshold grace period turn_id=%v", turnID)
+		a.applyMainLLMRequestTuningOverride(llm.RequestTuning{})
+		a.spawnMainLLMResponseGoroutine(turnCtx, turnID, snapshot, agentErrSourceID)
+		return
+	}
 
 	// Threshold crossed: the usage-driven compaction starts below (or is
 	// already running from an earlier gate), so this request is the one that

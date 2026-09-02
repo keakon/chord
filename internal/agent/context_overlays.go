@@ -72,6 +72,9 @@ type overlayClaimState struct {
 	mu       sync.Mutex
 	reminder reminderOverlayClaim
 	warning  warningOverlayClaim
+	// imminent is the grace-period "compaction imminent" notice claim; it
+	// shares the reminder's (window, budget) key but is claimed separately.
+	imminent reminderOverlayClaim
 }
 
 // tryClaimContextPressureReminder returns true when the reminder overlay may
@@ -81,6 +84,18 @@ func (a *MainAgent) tryClaimContextPressureReminder(windowEpoch uint64, windowIn
 	a.overlayClaims.mu.Lock()
 	defer a.overlayClaims.mu.Unlock()
 	c := &a.overlayClaims.reminder
+	if c.windowEpoch != windowEpoch || c.windowIndex != windowIndex || c.budgetEpoch != budgetEpoch {
+		*c = reminderOverlayClaim{windowEpoch: windowEpoch, windowIndex: windowIndex, budgetEpoch: budgetEpoch}
+	}
+	return !c.delivered
+}
+
+// tryClaimCompactionImminent is tryClaimContextPressureReminder for the
+// grace-period notice: at most one delivered notice per (window, budget).
+func (a *MainAgent) tryClaimCompactionImminent(windowEpoch uint64, windowIndex int, budgetEpoch uint64) bool {
+	a.overlayClaims.mu.Lock()
+	defer a.overlayClaims.mu.Unlock()
+	c := &a.overlayClaims.imminent
 	if c.windowEpoch != windowEpoch || c.windowIndex != windowIndex || c.budgetEpoch != budgetEpoch {
 		*c = reminderOverlayClaim{windowEpoch: windowEpoch, windowIndex: windowIndex, budgetEpoch: budgetEpoch}
 	}
@@ -110,6 +125,14 @@ func (a *MainAgent) noteContextPressureReminderAttached() {
 	a.overlayClaims.mu.Unlock()
 }
 
+// noteCompactionImminentAttached records that the grace-period notice was
+// attached to the in-flight request. Called from buildTurnOverlayMessages.
+func (a *MainAgent) noteCompactionImminentAttached() {
+	a.overlayClaims.mu.Lock()
+	a.overlayClaims.imminent.deliveryPending = true
+	a.overlayClaims.mu.Unlock()
+}
+
 // noteCompactionWarningAttached records that the externalization warning was
 // attached to the in-flight request. Called from buildTurnOverlayMessages.
 func (a *MainAgent) noteCompactionWarningAttached() {
@@ -127,7 +150,13 @@ func (a *MainAgent) noteCompactionWarningAttached() {
 func (a *MainAgent) markOverlayClaimsDelivered() {
 	reminderDelivered := false
 	warningDelivered := false
+	imminentDelivered := false
 	a.overlayClaims.mu.Lock()
+	if a.overlayClaims.imminent.deliveryPending {
+		a.overlayClaims.imminent.deliveryPending = false
+		a.overlayClaims.imminent.delivered = true
+		imminentDelivered = true
+	}
 	if a.overlayClaims.reminder.deliveryPending {
 		a.overlayClaims.reminder.deliveryPending = false
 		a.overlayClaims.reminder.delivered = true
@@ -151,6 +180,9 @@ func (a *MainAgent) markOverlayClaimsDelivered() {
 	}
 	if warningDelivered {
 		a.recordContextDiagnosticEvent(analytics.UsagePurposeCompactionWarning, map[string]string{"stage": "delivered"})
+	}
+	if imminentDelivered {
+		a.recordContextDiagnosticEvent(analytics.UsagePurposeCompactionGrace, map[string]string{"stage": "notice_delivered"})
 	}
 }
 

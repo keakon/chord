@@ -21,7 +21,9 @@ Use this page when you already know which provider/model family you want and jus
 >
 > A model without a `compaction` block inherits the global
 > `context.compaction.threshold`; `reminder` defaults to
-> `min(0.60, threshold × 0.90)` when unset. These fields tune the usage-driven
+> `min(0.60, threshold × 0.90)` when unset; `reminder: -1` disables the
+> pressure reminder for the model while keeping its automatic compaction.
+> These fields tune the usage-driven
 > automatic-compaction path and take effect whether or not `model_driven` is
 > enabled. Where the benchmark evidence below gives a recommended usage band
 > for a model, tune its `threshold` to the *top* of that band (compaction keeps
