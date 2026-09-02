@@ -55,6 +55,9 @@ func (loopBusyAgentStub) GetSidebarWalltimeStats() analytics.WalltimeStats {
 	return analytics.WalltimeStats{}
 }
 func (loopBusyAgentStub) GetContextStats() (int, int) { return 0, 0 }
+func (loopBusyAgentStub) ContextPressureLinesForModelRef(string) (float64, float64) {
+	return 0, 0
+}
 func (loopBusyAgentStub) GetContextMessageCount() int { return 0 }
 func (loopBusyAgentStub) GetContextBytes() int        { return 0 }
 func (loopBusyAgentStub) GetContextReductionStats() agent.ContextReductionStats {

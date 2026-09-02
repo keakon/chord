@@ -93,7 +93,7 @@ func (m *Model) appendStatusBarModelPills(pills []string, snap statusBarAgentSna
 
 	ctxStr := formatContextPill(snap.contextCurrent, snap.contextLimit)
 	if ctxStr != "" {
-		pills = append(pills, renderContextPill(ctxStr, snap.contextCurrent, snap.contextLimit))
+		pills = append(pills, renderContextPill(ctxStr, snap.contextCurrent, snap.contextLimit, snap.contextReminder, snap.contextThreshold))
 	}
 	return pills
 }
@@ -117,19 +117,17 @@ func formatContextPill(current, limit int) string {
 	return fmt.Sprintf("%d%% (%s)", pct, tok)
 }
 
-func renderContextPill(text string, current, limit int) string {
+func renderContextPill(text string, current, limit int, reminder, threshold float64) string {
 	if limit <= 0 {
 		return PillStyle.Render(text)
 	}
 	pct := float64(current) / float64(limit)
-	var fg string
-	switch {
-	case pct >= 0.85:
-		fg = "196"
-	case pct >= 0.60:
-		fg = "220"
-	default:
-		fg = "82"
+	fg := currentTheme.InfoPanelSuccessFg
+	switch contextUsageSeverityFor(pct, reminder, threshold) {
+	case contextUsageCritical:
+		fg = currentTheme.InfoPanelCriticalFg
+	case contextUsageWarning:
+		fg = currentTheme.InfoPanelWarningFg
 	}
 	return PillStyle.Foreground(lipgloss.Color(fg)).Render(text)
 }

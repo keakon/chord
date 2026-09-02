@@ -656,7 +656,7 @@ type MainAgent struct {
 	// automatic-compaction threshold was first crossed in the current window.
 	// Zero means no grace period is open. While the gap between the current
 	// batch and this anchor is below minCompactionGracePeriodBatches, the
-	// usage-driven compaction is deferred (§11.5): the model gets the reminder
+	// usage-driven compaction is deferred: the model gets the reminder
 	// plus up to that many requests to actively reset or externalize state
 	// before the compaction starts. Cleared on any durable apply, model
 	// switch, or session switch.

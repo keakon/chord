@@ -57,8 +57,8 @@ type warningOverlayClaim struct {
 // overlayClaimState owns the two one-shot overlay claims. The queue decision
 // runs on the event loop (beginMainLLMAfterPreparation), the attach note and
 // the delivered confirmation run on the main LLM goroutine (callLLM), so the
-// state is mutex-guarded. Claims are best-effort runtime memory (§11.3): no
-// durable pending artifact is introduced.
+// state is mutex-guarded. Claims are best-effort runtime memory (at most once
+// per window is best-effort): no durable pending artifact is introduced.
 type overlayClaimState struct {
 	mu       sync.Mutex
 	reminder reminderOverlayClaim
@@ -164,19 +164,19 @@ func (a *MainAgent) compactContextVisible() bool {
 	return !ruleset.IsDisabled(tools.NameCompactContext)
 }
 
-// queueContextPressureOverlays arms the one-shot context-pressure reminder and
-// the usage-driven externalization warning for the next main request. Called
-// from beginMainLLMAfterPreparation before the compaction gate decision, using
-// the post-response usage baseline of AutoCompactDecision — not the current
-// request's prepared/reduced surface. Both overlays may be queued on the same
-// request: they have independent claims and neither suppresses the other.
-func (a *MainAgent) queueContextPressureOverlays() {
+// queueContextPressureReminderForNextRequest arms the one-shot context-pressure
+// reminder for the next main request. Called from beginMainLLMAfterPreparation
+// before the compaction gate decision, using the post-response usage baseline
+// of AutoCompactDecision — not the current request's prepared/reduced surface.
+// The usage-driven externalization warning is queued separately by the gate
+// only on the request that actually starts the compaction: during the grace
+// period the compaction has not started yet, so a warning that claims "the
+// runtime has scheduled automatic compaction" would be misleading there.
+func (a *MainAgent) queueContextPressureReminderForNextRequest() {
 	if a == nil || a.ctxMgr == nil {
 		return
 	}
-	decision := a.ctxMgr.AutoCompactDecision()
-	a.queueContextPressureReminder(decision)
-	a.queueCompactionWarning()
+	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
 }
 
 func (a *MainAgent) queueContextPressureReminder(decision ctxmgr.AutoCompactDecision) {

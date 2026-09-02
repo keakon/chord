@@ -159,6 +159,87 @@ providers:
 	}
 }
 
+// TestLoadConfigFromPathAllowsModelTemplatesCompaction resolves a compaction
+// block carried by a model_templates anchor (shared through <<:) into the
+// model definition, including pointer-typed zero values: an explicit
+// threshold: 0 disables auto-compaction for that model while an absent field
+// keeps the inherited value.
+func TestLoadConfigFromPathAllowsModelTemplatesCompaction(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	content := []byte(`
+model_templates:
+  "weak-context": &weak-context
+    limit:
+      context: 1050000
+      input: 272000
+      output: 128000
+    compaction:
+      threshold: 0.3
+      reminder: 0.25
+
+providers:
+  openai:
+    type: responses
+    models:
+      gpt-5.6-luna: *weak-context
+      gpt-5.6-sol:
+        limit: {context: 1050000, input: 272000, output: 128000}
+        compaction: {threshold: 0.7}
+`)
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	cfg, err := LoadConfigFromPath(path)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath: %v", err)
+	}
+	luna := cfg.Providers["openai"].Models["gpt-5.6-luna"]
+	if luna.Compaction == nil || luna.Compaction.Threshold == nil || *luna.Compaction.Threshold != 0.3 {
+		t.Fatalf("template compaction did not resolve for luna: %#v", luna.Compaction)
+	}
+	if luna.Compaction.Reminder == nil || *luna.Compaction.Reminder != 0.25 {
+		t.Fatalf("template compaction reminder did not resolve for luna: %#v", luna.Compaction)
+	}
+	sol := cfg.Providers["openai"].Models["gpt-5.6-sol"]
+	if sol.Compaction == nil || sol.Compaction.Threshold == nil || *sol.Compaction.Threshold != 0.7 {
+		t.Fatalf("inline compaction did not resolve for sol: %#v", sol.Compaction)
+	}
+	if sol.Compaction.Reminder != nil {
+		t.Fatalf("absent reminder must stay nil (inherit global), got %#v", sol.Compaction.Reminder)
+	}
+}
+
+// TestLoadConfigFromPathPerModelZeroThresholdDisables confirms an explicit
+// model-level threshold: 0 parses as a real zero (auto-compaction disabled
+// for that model) rather than being treated as absent.
+func TestLoadConfigFromPathPerModelZeroThresholdDisables(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	content := []byte(`
+context:
+  compaction:
+    threshold: 0.65
+
+providers:
+  openai:
+    type: responses
+    models:
+      gpt-5.6-luna:
+        compaction:
+          threshold: 0
+`)
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	cfg, err := LoadConfigFromPath(path)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath: %v", err)
+	}
+	luna := cfg.Providers["openai"].Models["gpt-5.6-luna"]
+	if luna.Compaction == nil || luna.Compaction.Threshold == nil || *luna.Compaction.Threshold != 0 {
+		t.Fatalf("model-level threshold 0 must parse as an explicit zero, got %#v", luna.Compaction)
+	}
+}
+
 // TestLoadConfigFromPathAcceptsEmptyAndCommentOnlyFiles pins the pre-strict
 // behavior: a file with no YAML document (empty, or fully commented out to
 // "disable" it) loads as an empty config instead of failing with io.EOF.

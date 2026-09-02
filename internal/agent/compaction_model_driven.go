@@ -485,7 +485,7 @@ func (a *MainAgent) produceModelDrivenDraftAsync(ctx context.Context, bundle mod
 		}, nil
 	}
 
-	// Apply-interval and same-reason skip-cooldown verdicts (§5, §5.1). Both
+	// Apply-interval and same-reason skip-cooldown verdicts. Both
 	// are decided before the low-gain preflight: an interval skip never enters
 	// preflight (savings are meaningless while the apply spacing has not
 	// elapsed) and a cooldown short-circuit avoids re-running
@@ -685,12 +685,12 @@ func modelDrivenSkipDraft(planID uint64, target compactionTarget, reason, skipRe
 
 // modelDrivenIntervalCooldownVerdict decides the two pre-preflight policy
 // gates from the barrier snapshot:
-//   - the apply interval (§5): fewer than
+//   - the apply interval: fewer than
 //     minModelDrivenApplyIntervalBatches since the last successful model-driven
 //     apply skips without preflight. The current > last guard prevents the
 //     uint64 underflow that would otherwise treat a restored session (batch
 //     counter restarts at 0) as "interval satisfied".
-//   - the same-reason low-gain cooldown (§5.1): within
+//   - the same-reason low-gain cooldown: within
 //     minModelDrivenSkipCooldownBatches of a previous low-gain skip,
 //     short-circuit without entering preflight (which would re-run
 //     prepareMessagesForLLM for an outcome that cannot change).
@@ -927,6 +927,12 @@ func (a *MainAgent) settleModelDrivenOutcome(status string, reason string, prefl
 	// and that chance was just spent. Cleared again on the next durable apply
 	// / model switch / session switch.
 	if status == CompactionStatusSkipped || status == CompactionStatusFailed || status == CompactionStatusCancelled {
+		// Grace telemetry: only a settle that closes an *open* grace window is
+		// attributed to it — a settle outside any window (no crossing yet) has
+		// no grace outcome to record, even though it still exhausts the flag.
+		if a.gracePeriodStartBatch != 0 {
+			a.recordGracePolicyEvent("grace_closed_by_model_driven_settle")
+		}
 		a.gracePeriodExhausted = true
 		a.gracePeriodStartBatch = 0
 	}

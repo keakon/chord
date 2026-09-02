@@ -56,7 +56,7 @@ context:
 
 按模型覆盖写在**模型定义**上（`ModelConfig.compaction`，含 `threshold` 与 `reminder` 两个子字段），可经 `model_templates` 用 `<<:` 共享；**没有** `context.compaction.models` 这张表。
 
-`threshold` / `reminder`（全局或按模型）驱动 usage-driven 压缩路径和压力提醒，对**所有**用户生效，与 `model_driven` 无关——后者只注册 `compact_context` 工具。
+`threshold` / `reminder`（全局或按模型）驱动 usage-driven 压缩路径和压力提醒，对**所有**用户生效，与 `model_driven` 无关——后者只注册 `compact_context` 工具。TUI 的上下文用量显示（侧边栏 Context 数值与进度条、状态栏百分比 pill）用这两条线取色：reminder 以下为绿色，reminder 到 threshold 之间为橙/黄色，达到 threshold 为红色。
 
 全局行写在 `context.compaction` 下，按模型调参写在模型定义上（`ModelConfig.compaction`），可用模板 `<<:` 复用：
 
@@ -82,7 +82,7 @@ providers:
 没有 `compaction` 块的模型继承全局 `context.compaction.threshold` /
 `reminder`；模型级 `threshold: 0` 只对该模型禁用自动压缩（提醒一并禁用）。
 
-自动压缩阈值首次越线时，Chord **不会立刻压缩**，而是开一个**宽限期**（最多 2 个主模型请求）：期间模型会看到压力提醒（自动压缩请求武装后还会看到一次性外化提示），可以主动调用 `compact_context` reset，或把状态写入文件。宽限到期且 usage 仍越线才启动 usage-driven 压缩；provider 拒绝（oversize）时仍然立即强制压缩，不受宽限限制。model-driven 请求被 skip / 失败 / 取消后宽限期提前结束，usage-driven 安全网立即接管。切换模型会套用新模型的 per-model 阈值并开启新的提醒/宽限窗口。
+自动压缩阈值首次越线时，Chord **不会立刻压缩**，而是开一个**宽限期**（最多 2 个主模型请求）：期间模型会看到压力提醒，可以主动调用 `compact_context` reset，或把状态写入文件。提醒和宽限只在会话继续发出主请求时生效——越线后若 turn 正好收尾，usage-driven 压缩走既有的 end-of-turn 路径。宽限到期且 usage 仍越线才启动 usage-driven 压缩，真正与压缩并行的那次请求才会附带一次性外化提示；provider 拒绝（oversize）时仍然立即强制压缩，不受宽限限制。model-driven 请求被 skip / 失败 / 取消后宽限期提前结束，usage-driven 安全网立即接管。切换模型会套用新模型的 per-model 阈值并开启新的提醒/宽限窗口。
 
 ### 模型驱动上下文 checkpoint（实验性）
 
@@ -92,7 +92,7 @@ providers:
 2. 当预计收益低于保守门槛（2048 tokens 且占 prepared surface 的 10%，可缓存会话还会扣除 prompt-cache 重写成本）时拒绝 reset；距上次成功 apply 不足 3 个主模型请求批次时同样会跳过；
 3. 原子应用 checkpoint，快照后追加的内容作为 live tail 保留，并在压缩后的上下文上继续同一 turn。
 
-skip 是正常的策略结果：立即用相同请求重试会被短暂冷却，结果不会改变——模型应等待或继续推进。上下文用量接近自动压缩阈值时，下一次请求还可能附带一次性压力提醒，提示模型外化重要状态（工具可用时会点名 `compact_context`）；自动压缩等待期间还会附带一次性外化提示。这些 overlay 都是瞬态的，不会进入对话历史。
+skip 是正常的策略结果：立即用相同请求重试会被短暂冷却，结果不会改变——模型应等待或继续推进。上下文用量接近自动压缩阈值时，下一次请求还可能附带一次性压力提醒，提示模型外化重要状态（工具可用时会点名 `compact_context`）；宽限到期、usage-driven 压缩真正启动后，与压缩并行的那次请求才会附带一次性外化提示。这些 overlay 都是瞬态的，不会进入对话历史。
 
 启用 `model_driven` 时，主 agent 的系统提示词还会附带一段简短被动的 `Long-session context management` 指引：随阶段收口把关键发现和决定写入项目文件（让它们能在后续 checkpoint 后存活），只在真正的阶段边界单独调用 `compact_context`，checkpoint 应用后需要精确历史时去读归档的 history 文件。SubAgent 永远不会收到这段指引或该工具。该指引是建议性的，不是强制流程。
 

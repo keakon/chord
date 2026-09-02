@@ -82,6 +82,40 @@ func TestMergeProjectConfigDerivesModelContext(t *testing.T) {
 	}
 }
 
+func TestMergeProjectConfigPerModelCompactionOverrides(t *testing.T) {
+	// A project may tune compaction per model by overriding the compaction
+	// block on the model definition itself; absent subfields inherit the
+	// global model-level values, and models without a project override keep
+	// their global definitions untouched.
+	global := float64(0.3)
+	reminder := float64(0.25)
+	base := DefaultConfig()
+	base.Providers = map[string]ProviderConfig{
+		"openai": {Models: map[string]ModelConfig{
+			"gpt-5.6-luna": {Compaction: &ModelCompactionConfig{Threshold: &global, Reminder: &reminder}},
+		}},
+	}
+	base.Context.Compaction.Threshold = 0.65
+	projectPath := filepath.Join(t.TempDir(), ".chord", "config.yaml")
+	writeTestFile(t, projectPath, "providers:\n  openai:\n    models:\n      gpt-5.6-luna:\n        compaction:\n          threshold: 0.4\n      gpt-5.6-sol:\n        compaction:\n          threshold: 0.7\n")
+
+	_, merged, err := MergeProjectConfig(base, projectPath)
+	if err != nil {
+		t.Fatalf("MergeProjectConfig: %v", err)
+	}
+	luna := merged.Providers["openai"].Models["gpt-5.6-luna"]
+	if luna.Compaction == nil || luna.Compaction.Threshold == nil || *luna.Compaction.Threshold != 0.4 {
+		t.Fatalf("project threshold override did not apply for luna: %#v", luna.Compaction)
+	}
+	if luna.Compaction.Reminder == nil || *luna.Compaction.Reminder != 0.25 {
+		t.Fatalf("absent project reminder must inherit the global model value for luna, got %#v", luna.Compaction.Reminder)
+	}
+	sol := merged.Providers["openai"].Models["gpt-5.6-sol"]
+	if sol.Compaction == nil || sol.Compaction.Threshold == nil || *sol.Compaction.Threshold != 0.7 {
+		t.Fatalf("project-added model compaction did not merge for sol: %#v", sol.Compaction)
+	}
+}
+
 func TestLoadConfigParsesResponseHeaderTimeout(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	writeTestFile(t, path, `providers:

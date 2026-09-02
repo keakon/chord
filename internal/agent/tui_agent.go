@@ -208,6 +208,19 @@ type UsageReporter interface {
 	// GetContextStats returns current input-context usage and usable input budget for the focused agent.
 	// current is the last input token count; limit is the usable input budget (0 if unknown).
 	GetContextStats() (current, limit int)
+	// ContextPressureLinesForModelRef returns the context-pressure reminder and
+	// auto-compaction lines that a model at modelRef would manage its context
+	// with, as usage ratios in the same frame as GetContextStats (current /
+	// usable input budget). The mapping is pure configuration (per-model →
+	// global → derived), independent of what the agent is currently running.
+	// The TUI resolves the displayed model itself — the running model while
+	// busy, the next-request model otherwise, so a pending model switch
+	// re-colors the context display immediately — and queries per that ref.
+	// Both lines are 0 when the ref is unknown/empty or automatic compaction
+	// is disabled (threshold 0); agents that never manage context with
+	// usage-driven lines (focused SubAgent, parked target) must not be queried
+	// through this and keep their fixed fallback lines instead.
+	ContextPressureLinesForModelRef(modelRef string) (reminder, threshold float64)
 	// GetContextMessageCount returns the number of messages in the focused agent's context (for sidebar). -1 if unknown.
 	GetContextMessageCount() int
 	// GetContextBytes returns request payload bytes for the focused agent.

@@ -6,14 +6,14 @@ import (
 )
 
 // minCompactionGracePeriodBatches is how many main requests the usage-driven
-// compaction waits after the threshold is first crossed before it starts
-// (§11.5). During the grace period the model receives the context-pressure
-// reminder (and the externalization warning once the auto-compact request is
-// armed) and can actively reset via compact_context or write its state to
-// files; the compaction only starts once the grace period expires and the
-// threshold is still crossed. Two requests match the community-observed
-// end-of-turn compaction window (Claude Code rapid-refill breaker uses three
-// turns) and give a wrapping-up model one or two rounds to finish.
+// compaction waits after the threshold is first crossed before it starts.
+// During the grace period the model receives the context-pressure reminder
+// (and the externalization warning once the auto-compact request is armed)
+// and can actively reset via compact_context or write its state to files; the
+// compaction only starts once the grace period expires and the threshold is
+// still crossed. Two requests match the community-observed end-of-turn
+// compaction window (Claude Code rapid-refill breaker uses three turns) and
+// give a wrapping-up model one or two rounds to finish.
 const minCompactionGracePeriodBatches = 2
 
 // modelCompactionConfig returns the per-model compaction config for modelRef,
@@ -82,12 +82,20 @@ func (a *MainAgent) effectiveCompactionThreshold(modelRef string) float64 {
 // threshold crossing itself. Returns 0 when the threshold disables automatic
 // compaction (threshold<=0), meaning no reminder is ever injected.
 func (a *MainAgent) effectiveReminderPct(threshold float64) float64 {
-	if threshold <= 0 {
-		return 0
-	}
 	modelRef := a.runningModelRef
 	if modelRef == "" {
 		modelRef = a.providerModelRef
+	}
+	return a.effectiveReminderPctForModelRef(modelRef, threshold)
+}
+
+// effectiveReminderPctForModelRef is effectiveReminderPct resolved against an
+// explicit model reference instead of the current running model, so callers
+// can preview the reminder line a model would manage its context with (the TUI
+// re-colors the context display for the model that is next up after a switch).
+func (a *MainAgent) effectiveReminderPctForModelRef(modelRef string, threshold float64) float64 {
+	if threshold <= 0 {
+		return 0
 	}
 	if reminder := a.explicitReminderPct(modelRef); reminder > 0 {
 		return reminder
@@ -113,6 +121,7 @@ func (a *MainAgent) applyModelCompactionConfig() {
 	if modelRef == "" {
 		modelRef = a.providerModelRef
 	}
+	modelChanged := false
 	if modelRef != a.appliedCompactionModelRef {
 		// A real model change (not the first application after construction,
 		// where appliedCompactionModelRef is still the zero value) starts a
@@ -120,18 +129,31 @@ func (a *MainAgent) applyModelCompactionConfig() {
 		// grace period and the exhausted flag so the new model gets its own
 		// active-reset window.
 		if a.appliedCompactionModelRef != "" {
+			modelChanged = true
 			a.gracePeriodStartBatch = 0
 			a.gracePeriodExhausted = false
 		}
 		a.appliedCompactionModelRef = modelRef
 	}
 	a.ctxMgr.SetThreshold(a.effectiveCompactionThreshold(modelRef))
+	// A usage-driven request armed under the previous model's threshold may
+	// not be justified by the new model's line (for example a fallback from a
+	// small-window model with a low threshold to a large-window one with a
+	// high threshold). Re-evaluate the armed request against the freshly
+	// applied threshold: if the post-response usage no longer crosses it,
+	// clear the stale request so the new window is not force-compacted by an
+	// old crossing. A request that still crosses the new threshold stays
+	// armed and opens a fresh grace period through the regular gate.
+	if modelChanged && a.autoCompactRequested.Load() && !a.ctxMgr.AutoCompactDecision().ShouldCompact {
+		a.clearUsageDrivenAutoCompactRequest()
+	}
 }
 
-// deferCompactionForGracePeriod implements §11.5: when the auto-compaction
-// threshold was first crossed within the last minCompactionGracePeriodBatches
-// main requests, the usage-driven compaction is deferred one more request so
-// the model can actively reset via compact_context or externalize its state.
+// deferCompactionForGracePeriod defers the usage-driven compaction after the
+// automatic-compaction threshold is crossed: when the crossing happened within
+// the last minCompactionGracePeriodBatches main requests, the compaction is
+// deferred one more request so the model can actively reset via
+// compact_context or externalize its state.
 // It records the anchor batch on first crossing, defers while the gap is below
 // the limit, and clears the anchor (returning false) once the grace period
 // expires so the caller starts the compaction. batch comes from
@@ -149,6 +171,7 @@ func (a *MainAgent) deferCompactionForGracePeriod(batch uint64) bool {
 	}
 	if a.gracePeriodStartBatch == 0 {
 		a.gracePeriodStartBatch = batch
+		a.recordGracePolicyEvent("grace_opened")
 		return true
 	}
 	if batch-a.gracePeriodStartBatch < minCompactionGracePeriodBatches {
@@ -158,5 +181,16 @@ func (a *MainAgent) deferCompactionForGracePeriod(batch uint64) bool {
 	// next crossing in this window does not re-open it either.
 	a.gracePeriodStartBatch = 0
 	a.gracePeriodExhausted = true
+	a.recordGracePolicyEvent("grace_expired")
 	return false
+}
+
+// recordGracePolicyEvent emits a grace-period policy telemetry event. Guarded
+// on the usage ledger: the grace helpers are also exercised on bare agents in
+// tests, whose field accessors are not all nil-safe.
+func (a *MainAgent) recordGracePolicyEvent(detail string) {
+	if a == nil || a.usageLedger == nil {
+		return
+	}
+	a.recordCompactionPolicyAnalyticsEvent(detail)
 }

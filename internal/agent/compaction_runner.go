@@ -466,6 +466,14 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	// against the new window claims.
 	a.pendingContextPressureReminder = ""
 	a.pendingCompactionWarning = ""
+	// A model-driven checkpoint that lands while a grace window is open is the
+	// grace period's success case: the model actively reset instead of waiting
+	// out the usage-driven compaction. Record it before the window state is
+	// cleared below, so the grace telemetry can distinguish "model reset during
+	// the window" from a plain usage-driven expiry.
+	if d.SummaryMode == compactionSummaryModeModelDriven && a.gracePeriodStartBatch != 0 {
+		a.recordGracePolicyEvent("grace_active_reset_applied")
+	}
 	a.gracePeriodStartBatch = 0
 	a.gracePeriodExhausted = false
 	// A successful model-driven apply records its request batch as the new

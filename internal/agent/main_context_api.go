@@ -107,6 +107,30 @@ func (a *MainAgent) GetContextStats() (current, limit int) {
 	return a.ctxMgr.LastTotalContextTokens(), a.ctxMgr.GetUsableInputBudget()
 }
 
+// ContextPressureLinesForModelRef returns the reminder and auto-compaction
+// usage lines a model at modelRef would manage its context with, in the same
+// frame as GetContextStats: usage at the reminder line starts context-pressure
+// reminders, usage at the threshold line arms usage-driven compaction. The
+// lines resolve exactly as the compaction policy sees them — the model-level
+// config of the ref, then the global lines, then the derived reminder — and
+// are independent of what the agent is currently running, so the TUI can
+// preview the lines of the model shown as next up after a switch. Both lines
+// are 0 when the ref is empty (no model selected) or automatic compaction is
+// disabled (threshold 0); a model with no compaction config inherits the
+// global threshold, and the reminder is derived when no explicit value is set.
+// Focused SubAgents and parked targets manage their context with
+// sliding-window compaction rather than usage lines, so the TUI does not query
+// them through this method and keeps the fixed fallback lines.
+func (a *MainAgent) ContextPressureLinesForModelRef(modelRef string) (reminder, threshold float64) {
+	modelRef = strings.TrimSpace(modelRef)
+	if modelRef == "" {
+		return 0, 0
+	}
+	threshold = a.effectiveCompactionThreshold(modelRef)
+	reminder = a.effectiveReminderPctForModelRef(modelRef, threshold)
+	return reminder, threshold
+}
+
 // GetContextMessageCount returns the number of messages in the focused agent's context (for sidebar).
 func (a *MainAgent) GetContextMessageCount() int {
 	target := a.focusedAgentSnapshot()

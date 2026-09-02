@@ -77,9 +77,11 @@ func TestCollectConfigFileIssuesReportsMalformedYAML(t *testing.T) {
 	}
 }
 
-func TestCollectConfigFileIssuesAllowsReminderRaisingThreshold(t *testing.T) {
-	// A reminder >= threshold is legal: it raises the compaction line to the
-	// reminder (the user's declared pressure limit). No issue is reported.
+func TestCollectConfigFileIssuesAllowsReminderAtOrAboveThreshold(t *testing.T) {
+	// A reminder >= threshold is legal and must not report an issue: the
+	// reminder fires on the threshold crossing itself (usage reaching
+	// min(reminder, threshold)) while the grace period defers the actual
+	// compaction; the reminder never raises the compaction line.
 	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "context:\n  compaction:\n    threshold: 0.65\n    reminder: 0.7\n")
 	issues, err := CollectConfigFileIssues(path, true)
 	if err != nil {
@@ -87,7 +89,7 @@ func TestCollectConfigFileIssuesAllowsReminderRaisingThreshold(t *testing.T) {
 	}
 	for _, issue := range issues {
 		if strings.Contains(issue, "compaction") {
-			t.Fatalf("reminder raising the threshold must not report issues, got %q in %v", issue, issues)
+			t.Fatalf("reminder at or above the threshold must not report issues, got %q in %v", issue, issues)
 		}
 	}
 }
@@ -110,8 +112,12 @@ func TestCollectConfigFileIssuesReportsDeadReminderOnDisabledCompaction(t *testi
 	}
 }
 
-func TestCollectConfigFileIssuesAllowsValidReminder(t *testing.T) {
-	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "context:\n  compaction:\n    threshold: 0.65\n    reminder: 0.5\n    models:\n      openai/gpt-5.6-luna:\n        threshold: 0.3\n        reminder: 0.2\n")
+func TestCollectConfigFileIssuesAllowsValidPerModelReminder(t *testing.T) {
+	// The per-model compaction block lives on the model definition
+	// (ModelConfig.compaction); the old context.compaction.models table is
+	// gone and must not be referenced. Valid global + per-model lines report
+	// no issue.
+	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "context:\n  compaction:\n    threshold: 0.65\n    reminder: 0.5\nproviders:\n  openai:\n    type: responses\n    models:\n      gpt-5.6-luna:\n        compaction:\n          threshold: 0.3\n          reminder: 0.2\n")
 	issues, err := CollectConfigFileIssues(path, true)
 	if err != nil {
 		t.Fatalf("CollectConfigFileIssues: %v", err)
@@ -120,6 +126,27 @@ func TestCollectConfigFileIssuesAllowsValidReminder(t *testing.T) {
 		if strings.Contains(issue, "compaction") {
 			t.Fatalf("valid compaction config must not report issues, got %q in %v", issue, issues)
 		}
+	}
+}
+
+func TestCollectConfigFileIssuesReportsDeadModelReminder(t *testing.T) {
+	// A reminder configured against a model-level threshold of 0 never fires
+	// (threshold 0 disables auto-compaction and reminders for that model); the
+	// issue names the model definition so the user fixes it on the model side.
+	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "providers:\n  openai:\n    type: responses\n    models:\n      gpt-5.6-luna:\n        compaction:\n          threshold: 0\n          reminder: 0.2\n")
+	issues, err := CollectConfigFileIssues(path, true)
+	if err != nil {
+		t.Fatalf("CollectConfigFileIssues: %v", err)
+	}
+	found := false
+	for _, issue := range issues {
+		if strings.Contains(issue, "openai/gpt-5.6-luna") && strings.Contains(issue, "threshold is 0") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected a dead-reminder issue for the model threshold 0, got %v", issues)
 	}
 }
 

@@ -125,6 +125,10 @@ through `<<:`. There is no `context.compaction.models` map.
 `threshold` and `reminder` (global or per-model) drive the usage-driven
 compaction path and the context-pressure reminder for **all** users; they do
 not depend on `model_driven`, which only registers the `compact_context` tool.
+The TUI context usage display (sidebar Context value/gauge and the status-bar
+percentage pill) uses the same two lines for its colors: green below the
+reminder, orange/yellow from the reminder up to the threshold, red at the
+threshold.
 
 Set the global lines under `context.compaction` and tune per model on the model
 definition itself (`ModelConfig.compaction`). Model templates make this
@@ -156,11 +160,14 @@ disables automatic compaction (and reminders) for that model only.
 
 When the automatic-compaction threshold is first crossed, Chord does **not**
 compact immediately: it opens a **grace period** of two main-model requests
-during which the model sees the context-pressure reminder (and, once the
-auto-compact request is armed, an externalization warning) and can actively
-reset via `compact_context` or write its state to files. The usage-driven
-compaction starts only after the grace period expires and usage is still over
-the threshold; provider rejections (oversize) still force compaction
+during which the model sees the context-pressure reminder and can actively
+reset via `compact_context` or write its state to files. The reminder and the
+grace window only apply while the session keeps issuing main requests — if the
+turn ends right at the crossing, the usage-driven compaction runs through the
+normal end-of-turn path instead. The usage-driven compaction starts only after
+the grace period expires and usage is still over the threshold, and the
+one-shot externalization warning is shown on the request that actually runs
+alongside it; provider rejections (oversize) still force compaction
 immediately regardless of the grace period. A model-driven request that is
 skipped, fails, or is cancelled ends the grace period early so the
 usage-driven safety net takes over promptly. Switching models applies the new
@@ -191,9 +198,10 @@ cooled down briefly and does not change the outcome — the model should wait or
 move on. When context usage approaches the automatic-compaction threshold, the
 next request may also carry a one-time context-pressure reminder suggesting
 the model externalize important state (naming `compact_context` when it is
-available), and a one-time warning is shown while an automatic compaction is
-pending. These overlays are transient: they never become part of the
-conversation history.
+available); once the grace period expires and the usage-driven compaction
+actually starts, the request that runs alongside it carries a one-time
+externalization warning. These overlays are transient: they never become part
+of the conversation history.
 
 While model-driven compaction is enabled, the main agent's system prompt also
 carries a short passive `Long-session context management` section: write key

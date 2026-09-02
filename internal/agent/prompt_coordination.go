@@ -59,9 +59,10 @@ func (a *MainAgent) subAgentWorkflowPromptBlock() string {
 	sb.WriteString("\n## SubAgent Workflow\n")
 	sb.WriteString("- The Delegate tool call returns immediately; MainAgent receives SubAgent progress and completion updates automatically through the runtime coordination flow (see the Delegate tool description for its call semantics).\n")
 	sb.WriteString(delegationStrategyPromptLines())
-	if a.modelDrivenCompactionEnabled.Load() {
-		// §6.4: the compact_context tool exists only when model-driven
-		// compaction is enabled; without it this guidance has no referent.
+	if a.compactContextVisible() {
+		// The compact_context tool exists only when it is visible and
+		// executable; without it this guidance has no referent (a denied or
+		// invisible tool must never be pushed onto the model as an option).
 		sb.WriteString("- For sub-tasks that can be described and executed independently with results the main thread can consume, prefer Delegate (SubAgent): the SubAgent runs in a fresh window and only the final result reaches the main thread, so its intermediate tool output never pollutes the main context. Use compact_context only when the main thread itself must keep reasoning across a wrapped-up phase and only its conclusions need to be preserved.\n")
 	}
 	sb.WriteString("- For implementation tasks, first dispatch all currently independent tasks whose write scopes are clearly disjoint.\n")

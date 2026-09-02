@@ -4314,6 +4314,9 @@ func (s *sessionControlAgent) GetSidebarWalltimeStats() analytics.WalltimeStats 
 func (s *sessionControlAgent) GetContextStats() (current, limit int) {
 	return s.contextCurrent, s.contextLimit
 }
+func (s *sessionControlAgent) ContextPressureLinesForModelRef(string) (float64, float64) {
+	return 0, 0
+}
 func (s *sessionControlAgent) GetContextMessageCount() int { return 0 }
 func (s *sessionControlAgent) GetContextBytes() int        { return 0 }
 func (s *sessionControlAgent) GetContextReductionStats() agent.ContextReductionStats {

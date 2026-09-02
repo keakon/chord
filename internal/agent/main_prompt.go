@@ -387,14 +387,16 @@ func (a *MainAgent) mainAgentCapabilityPromptBlock() string {
 }
 
 // modelDrivenContextPromptBlock renders passive long-session guidance for the
-// compact_context tool. It is only injected when model-driven compaction is
-// enabled (otherwise the tool does not exist and the guidance has no
-// referent). Unlike the tool description (which governs how to call it), this
+// compact_context tool. It is only injected when the tool is actually visible
+// and executable (enabled + registered + not denied by permission rules);
+// otherwise the tool does not exist on the model's surface and the guidance
+// would have no referent — no system prompt may push a tool that is invisible
+// or denied. Unlike the tool description (which governs how to call it), this
 // guidance tells the model when to start planning for it: during exploration,
 // write key findings to files as they settle so a later checkpoint can be
 // built from them, and only call compact_context at a real phase boundary.
 func (a *MainAgent) modelDrivenContextPromptBlock() string {
-	if !a.modelDrivenCompactionEnabled.Load() {
+	if !a.compactContextVisible() {
 		return ""
 	}
 	return "## Long-session context management\n" +

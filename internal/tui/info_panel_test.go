@@ -29,6 +29,12 @@ type infoPanelAgent struct {
 	contextCurrent      int
 	contextBytes        int
 	contextLimit        int
+	contextReminder     float64
+	contextThreshold    float64
+	// contextLinesForRef optionally overrides ContextPressureLinesForModelRef
+	// per queried ref so tests can distinguish which model the display
+	// resolved (nil falls back to contextReminder/contextThreshold for any ref).
+	contextLinesForRef  func(ref string) (reminder, threshold float64)
 	contextMessageCount int
 	contextReduction    agent.ContextReductionStats
 	todos               []tools.TodoItem
@@ -76,6 +82,13 @@ func (a *infoPanelAgent) GetSidebarWalltimeStats() analytics.WalltimeStats {
 
 func (a *infoPanelAgent) GetContextStats() (current, limit int) {
 	return a.contextCurrent, a.contextLimit
+}
+
+func (a *infoPanelAgent) ContextPressureLinesForModelRef(modelRef string) (reminder, threshold float64) {
+	if a.contextLinesForRef != nil {
+		return a.contextLinesForRef(modelRef)
+	}
+	return a.contextReminder, a.contextThreshold
 }
 
 func (a *infoPanelAgent) GetContextMessageCount() int {
@@ -2388,5 +2401,177 @@ func TestInfoPanelUsesSingleUsageLayoutAcrossWidths(t *testing.T) {
 		if strings.Contains(plain, "Reduced") {
 			t.Fatalf("info panel should not render legacy Reduced label at width %d, got %q", width, plain)
 		}
+	}
+}
+
+func TestContextUsageSeverityFor(t *testing.T) {
+	// No pressure lines (SubAgent/parked): fixed 50/80 fallback.
+	if got := contextUsageSeverityFor(0.40, 0, 0); got != contextUsageNormal {
+		t.Fatalf("severity(40%%, 0, 0) = %v, want normal", got)
+	}
+	if got := contextUsageSeverityFor(0.50, 0, 0); got != contextUsageWarning {
+		t.Fatalf("severity(50%%, 0, 0) = %v, want warning at fallback 50%%", got)
+	}
+	if got := contextUsageSeverityFor(0.79, 0, 0); got != contextUsageWarning {
+		t.Fatalf("severity(79%%, 0, 0) = %v, want warning", got)
+	}
+	if got := contextUsageSeverityFor(0.80, 0, 0); got != contextUsageCritical {
+		t.Fatalf("severity(80%%, 0, 0) = %v, want critical at fallback 80%%", got)
+	}
+
+	// Configured lines: warning at the reminder, critical at the threshold.
+	if got := contextUsageSeverityFor(0.599, 0.6, 0.8); got != contextUsageNormal {
+		t.Fatalf("severity(59.9%%, 0.6, 0.8) = %v, want normal", got)
+	}
+	if got := contextUsageSeverityFor(0.6, 0.6, 0.8); got != contextUsageWarning {
+		t.Fatalf("severity(60%%, 0.6, 0.8) = %v, want warning at reminder", got)
+	}
+	if got := contextUsageSeverityFor(0.799, 0.6, 0.8); got != contextUsageWarning {
+		t.Fatalf("severity(79.9%%, 0.6, 0.8) = %v, want warning below threshold", got)
+	}
+	if got := contextUsageSeverityFor(0.8, 0.6, 0.8); got != contextUsageCritical {
+		t.Fatalf("severity(80%%, 0.6, 0.8) = %v, want critical at threshold", got)
+	}
+
+	// Reminder configured at/above the threshold never shows warning: the
+	// threshold crossing is critical ("whichever line comes first").
+	if got := contextUsageSeverityFor(0.75, 0.8, 0.7); got != contextUsageCritical {
+		t.Fatalf("severity(75%%, 0.8, 0.7) = %v, want critical (not warning)", got)
+	}
+
+	// Threshold 0 (auto-compaction disabled): fixed 80% stays as an
+	// oversize-risk guard while the reminder drives warning.
+	if got := contextUsageSeverityFor(0.5, 0.4, 0); got != contextUsageWarning {
+		t.Fatalf("severity(50%%, 0.4, 0) = %v, want warning at reminder", got)
+	}
+	if got := contextUsageSeverityFor(0.85, 0.4, 0); got != contextUsageCritical {
+		t.Fatalf("severity(85%%, 0.4, 0) = %v, want critical via fixed 80%% guard", got)
+	}
+}
+
+// contextFGSGR returns the foreground color spec lipgloss merges into SGR
+// sequences (e.g. "214" for a 256-color orange). Sequences combine multiple
+// attributes (bold/bg/fg), so matching the bare "38;5;<spec>" substring is
+// more robust than matching a whole escape.
+func contextFGSGR(spec string) string {
+	return "38;5;" + spec
+}
+
+// TestRenderInfoPanelContextColorFollowsPressureLines verifies the wiring from
+// ContextPressureLinesForModelRef through contextValueStyle into the rendered
+// panel: the Context value turns warning at the reminder line and critical at
+// the auto-compaction threshold (compared to the same rendering that stays
+// normal below both lines).
+func TestRenderInfoPanelContextColorFollowsPressureLines(t *testing.T) {
+	renderContextLine := func(percent float64) string {
+		backend := newInfoPanelAgent()
+		backend.sessionControlAgent.providerModelRef = "test-model"
+		backend.contextLimit = 100_000
+		backend.contextCurrent = int(percent * 100_000)
+		backend.contextReminder = 0.6
+		backend.contextThreshold = 0.8
+		m := NewModel(backend)
+		rendered := m.renderInfoPanel(44, 24)
+		for _, line := range strings.Split(rendered, "\n") {
+			if strings.Contains(line, "Context") {
+				return line
+			}
+		}
+		t.Fatalf("no Context line in rendered panel")
+		return ""
+	}
+
+	line := renderContextLine(0.5)
+	if strings.Contains(line, contextFGSGR(currentTheme.InfoPanelWarningFg)) {
+		t.Fatalf("Context at 50%% should be below reminder 0.6 (normal): %q", line)
+	}
+
+	line = renderContextLine(0.7)
+	if !strings.Contains(line, contextFGSGR(currentTheme.InfoPanelWarningFg)) {
+		t.Fatalf("Context at 70%% should be warning (>= reminder 0.6): %q", line)
+	}
+	if strings.Contains(line, contextFGSGR(currentTheme.InfoPanelCriticalFg)) {
+		t.Fatalf("Context at 70%% should not be critical (below threshold 0.8): %q", line)
+	}
+
+	line = renderContextLine(0.9)
+	if !strings.Contains(line, contextFGSGR(currentTheme.InfoPanelCriticalFg)) {
+		t.Fatalf("Context at 90%% should be critical (>= threshold 0.8): %q", line)
+	}
+}
+
+// TestRenderInfoPanelContextColorFollowsPendingModelSwitch verifies the model
+// the display resolves drives the color: while idle the display shows the
+// next-request model, so a pending switch to a model with a lower threshold
+// re-colors the Context value immediately instead of lingering on the running
+// model's lines until the next request boundary.
+func TestRenderInfoPanelContextColorFollowsPendingModelSwitch(t *testing.T) {
+	renderContextLine := func(percent float64) string {
+		backend := newInfoPanelAgent()
+		backend.sessionControlAgent.providerModelRef = "old-model"
+		backend.runningModelRef = "old-model"
+		backend.nextRequestModelRef = "new-model"
+		backend.contextLimit = 100_000
+		backend.contextCurrent = int(percent * 100_000)
+		// The running/selected model ("old-model") has a spacious 0.8
+		// threshold; the pending "new-model" compacts early at 0.6.
+		backend.contextLinesForRef = func(ref string) (float64, float64) {
+			if ref == "new-model" {
+				return 0.5, 0.6
+			}
+			return 0.6, 0.8
+		}
+		m := NewModel(backend)
+		rendered := m.renderInfoPanel(44, 24)
+		for _, line := range strings.Split(rendered, "\n") {
+			if strings.Contains(line, "Context") {
+				return line
+			}
+		}
+		t.Fatalf("no Context line in rendered panel")
+		return ""
+	}
+
+	// 55% is green under the old model (below its 0.6 reminder) but already
+	// warning under the pending new model (past its 0.5 reminder): the color
+	// must follow the pending model while idle.
+	line := renderContextLine(0.55)
+	if !strings.Contains(line, contextFGSGR(currentTheme.InfoPanelWarningFg)) {
+		t.Fatalf("Context at 55%% should follow the pending new-model lines (warning): %q", line)
+	}
+	if strings.Contains(line, contextFGSGR(currentTheme.InfoPanelCriticalFg)) {
+		t.Fatalf("Context at 55%% should not be critical: %q", line)
+	}
+
+	// 62% passes the pending new-model threshold (0.6) — critical now.
+	line = renderContextLine(0.62)
+	if !strings.Contains(line, contextFGSGR(currentTheme.InfoPanelCriticalFg)) {
+		t.Fatalf("Context at 62%% should be critical under the pending new-model threshold 0.6: %q", line)
+	}
+}
+
+// TestContextPressureDisplayRefPicksTheDisplayedModel pins the ref-resolution
+// that ties the context color to the model the focused agent shows: running
+// while busy, next-request (pending switch) otherwise, selected as fallback.
+func TestContextPressureDisplayRefPicksTheDisplayedModel(t *testing.T) {
+	busy := true
+	idle := false
+	if got := contextPressureDisplayRef(busy, "running", "selected", "next"); got != "running" {
+		t.Fatalf("busy ref = %q, want running", got)
+	}
+	if got := contextPressureDisplayRef(idle, "running", "selected", "next"); got != "next" {
+		t.Fatalf("idle ref = %q, want next (pending switch)", got)
+	}
+	if got := contextPressureDisplayRef(idle, "running", "selected", ""); got != "selected" {
+		t.Fatalf("idle without next ref = %q, want selected", got)
+	}
+	if got := contextPressureDisplayRef(idle, "", "", "next"); got != "next" {
+		t.Fatalf("idle without running ref = %q, want next", got)
+	}
+	if got := contextPressureDisplayRef(busy, "", "selected", "next"); got != "selected" {
+		t.Fatalf("busy without running ref = %q, want selected", got)
+	}
+	if got := contextPressureDisplayRef(idle, "", "", ""); got != "" {
+		t.Fatalf("no refs = %q, want empty", got)
 	}
 }

@@ -377,12 +377,13 @@ func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID
 	// model change also clears the grace period (the new model re-evaluates
 	// usage against its own threshold).
 	a.applyModelCompactionConfig()
-	// Arm the one-shot context-pressure reminder and the usage-driven
-	// externalization warning before the compaction gate decision: the gate
-	// may start a parallel usage-driven compaction, and the reminder's usage
-	// baseline is the post-response AutoCompactDecision — not the prepared
-	// surface being assembled for this request.
-	a.queueContextPressureOverlays()
+	// Arm the one-shot context-pressure reminder before the compaction gate
+	// decision: the gate may start a parallel usage-driven compaction, and the
+	// reminder's usage baseline is the post-response AutoCompactDecision — not
+	// the prepared surface being assembled for this request. The usage-driven
+	// externalization warning is queued further below, only once the gate
+	// actually starts the compaction.
+	a.queueContextPressureReminderForNextRequest()
 	// Continuation barrier: apply any ready compaction draft first. When the
 	// apply path resumes a saved continuation (handled=true), it owns control
 	// flow from here; otherwise this fresh pre-request path should continue on
@@ -409,20 +410,30 @@ func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID
 		return
 	}
 
-	// Threshold crossed (§11.5): open a grace period instead of compacting
-	// immediately. The model already got the context-pressure reminder (and,
-	// once autoCompactRequested is armed, the externalization warning) from
-	// queueContextPressureOverlays above; it now has up to
+	// Threshold crossed: open a grace period instead of compacting
+	// immediately. The model already got the context-pressure reminder from
+	// queueContextPressureReminderForNextRequest above; it now has up to
 	// minCompactionGracePeriodBatches main requests to actively reset via
 	// compact_context or write its state to files before the usage-driven
 	// compaction starts. A successful model-driven reset clears the armed
 	// request, so the grace anchor is reset on any durable apply / model
-	// switch / session switch.
+	// switch / session switch. No externalization warning is queued on these
+	// deferred rounds: the compaction has not started yet, so the warning's
+	// claim that the runtime "has scheduled automatic compaction" would be
+	// misleading (it is queued below once the compaction actually starts).
 	if a.deferCompactionForGracePeriod(a.currentRequestBatch(snapshot)) {
 		a.applyMainLLMRequestTuningOverride(llm.RequestTuning{})
 		a.spawnMainLLMResponseGoroutine(turnCtx, turnID, snapshot, agentErrSourceID)
 		return
 	}
+
+	// The grace period is spent (expired or exhausted): the usage-driven
+	// compaction starts below (or is already running from an earlier gate), so
+	// this request is the one that actually runs in parallel with it. Queue
+	// the per-generation externalization warning here — the queue runs before
+	// the compaction state changes, but the armed request it refers to is
+	// exactly the one this gate is about to start.
+	a.queueCompactionWarning()
 
 	// Threshold crossed: start background compaction WITHOUT blocking the LLM
 	// call.  The compaction runs asynchronously with a lightweight idle

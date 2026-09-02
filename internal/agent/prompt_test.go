@@ -2126,9 +2126,19 @@ func TestModelDrivenContextPromptBlockEmptyWhenDisabled(t *testing.T) {
 	}
 }
 
-func TestModelDrivenContextPromptBlockInjectedWhenEnabled(t *testing.T) {
+// modelDrivenPromptTestAgent builds a MainAgent with model-driven enabled and
+// the compact_context tool registered, mirroring the runtime wiring.
+func modelDrivenPromptTestAgent(t *testing.T) *MainAgent {
+	t.Helper()
 	a := &MainAgent{}
 	a.modelDrivenCompactionEnabled.Store(true)
+	a.tools = tools.NewRegistry()
+	a.tools.Register(tools.NewCompactContextTool(tools.CompactContextValidator{ContinuationStateMaxTokens: 2048}))
+	return a
+}
+
+func TestModelDrivenContextPromptBlockInjectedWhenEnabled(t *testing.T) {
+	a := modelDrivenPromptTestAgent(t)
 	block := a.modelDrivenContextPromptBlock()
 	if block == "" {
 		t.Fatal("enabled model-driven must render the context-management block")
@@ -2145,10 +2155,20 @@ func TestModelDrivenContextPromptBlockInjectedWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestModelDrivenContextPromptBlockEmptyWhenToolDenied(t *testing.T) {
+	// No system prompt may push a tool that permission rules deny — the
+	// guidance only renders while compact_context is visible and executable.
+	a := modelDrivenPromptTestAgent(t)
+	a.ruleset = permission.Ruleset{{Permission: tools.NameCompactContext, Pattern: "*", Action: permission.ActionDeny}}
+	if got := a.modelDrivenContextPromptBlock(); got != "" {
+		t.Fatalf("denied compact_context must render no block, got %q", got)
+	}
+}
+
 func TestModelDrivenContextPromptBlockNotInSubAgentPrompt(t *testing.T) {
 	// SubAgents never see the compact_context tool, so their prompt must not
 	// carry the guidance either; the block is MainAgent-only by construction
-	// (modelDrivenCompactionEnabled lives on MainAgent).
+	// (compactContextVisible lives on MainAgent).
 	s := &SubAgent{}
 	if got := s.buildSystemPrompt(); strings.Contains(got, "Long-session context management") {
 		t.Fatalf("SubAgent prompt must not include model-driven context guidance")

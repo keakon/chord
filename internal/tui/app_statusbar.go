@@ -105,6 +105,8 @@ type statusBarAgentSnapshot struct {
 	cost             float64
 	contextCurrent   int
 	contextLimit     int
+	contextReminder  float64
+	contextThreshold float64
 }
 
 type statusBarInputs struct {
@@ -253,6 +255,7 @@ func (m *Model) statusBarSnapshot() statusBarAgentSnapshot {
 		snap.tokenUsage = m.agent.GetTokenUsage()
 		snap.cost = m.agent.GetSidebarUsageStats().EstimatedCost
 		snap.contextCurrent, snap.contextLimit = m.agent.GetContextStats()
+		snap.contextReminder, snap.contextThreshold = m.contextPressureLinesForFocusedModel()
 	} else {
 		snap.viewingLabel = m.computeStatusBarCurrentAgentLabel("")
 		snap.viewingColor = m.computeStatusBarCurrentAgentColor()
@@ -426,7 +429,7 @@ func (m *Model) statusBarFingerprint(now time.Time) string {
 	snap := inputs.Snapshot
 	statusActivity := inputs.StatusActivity
 	usage := snap.tokenUsage
-	fmt.Fprintf(&b, "%d|%d|%d|%d|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%d|%d|%t|%t|%t|%s|%s|%s|%s|%s|%t|%t|%d|%d|%d|%d|%f|%d|%d|%t|%d|%d|%d|%d|%t",
+	fmt.Fprintf(&b, "%d|%d|%d|%d|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%d|%d|%t|%t|%t|%s|%s|%s|%s|%s|%t|%t|%d|%d|%d|%d|%f|%d|%d|%f|%f|%t|%d|%d|%d|%d|%t",
 		inputs.Width,
 		inputs.Height,
 		m.mode,
@@ -461,6 +464,8 @@ func (m *Model) statusBarFingerprint(now time.Time) string {
 		snap.cost,
 		snap.contextCurrent,
 		snap.contextLimit,
+		snap.contextReminder,
+		snap.contextThreshold,
 		snap.proxyInUse,
 		len(snap.modelRef),
 		len(snap.selectedModelRef),
@@ -983,4 +988,6 @@ func compactionBackgroundStatusFrameKey(now time.Time) string {
 
 // formatContextPill formats input-budget usage for the status bar: "42% (72.7K)" or "(72.7K)" when limit is 0.
 // Returns "" when current is 0 (including unknown limit) so the footer stays minimal in narrow layouts.
-// renderContextPill renders the context pill with color by pressure: < 60% green, 60–85% yellow, > 85% red.
+// renderContextPill colors the pill from the agent's pressure lines: green below
+// the reminder, yellow from the reminder to the auto-compaction threshold, red
+// at the threshold (fixed 50/80% when no lines are configured).

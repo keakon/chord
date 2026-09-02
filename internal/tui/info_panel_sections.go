@@ -145,12 +145,16 @@ func keyPoolHealthSeverity(healthy, total int) keyPoolSeverity {
 
 func (m *Model) buildInfoPanelUsageBlock(width, lineW int) string {
 	// current = last request input tokens; percent = current / usable input budget.
-	// Color by usage: green normal, orange >50%, red >80% (value and gauge match).
+	// Color the Context value and its gauge from the focused agent's pressure
+	// lines: orange once usage reaches the reminder line, red once it reaches
+	// the auto-compaction threshold. Agents without usage-driven lines (focused
+	// SubAgent, parked target) fall back to the fixed 50/80% lines.
 	current, limit := m.agent.GetContextStats()
 	percent := 0.0
 	if limit > 0 {
 		percent = float64(current) / float64(limit)
 	}
+	reminder, threshold := m.contextPressureLinesForFocusedModel()
 	reduction := m.agent.GetContextReductionStats()
 	currentBytes := m.agent.GetContextBytes()
 	if reduction.CurrentBytes > 0 {
@@ -164,10 +168,10 @@ func (m *Model) buildInfoPanelUsageBlock(width, lineW int) string {
 	stats := m.agent.GetSidebarUsageStats()
 	usageLines := []string{InfoPanelLineBg.Width(lineW).Render(InfoPanelTitle.Render("USAGE"))}
 	if current > 0 || limit > 0 {
-		gauge := m.renderContextGauge(width-6, percent)
+		gauge := m.renderContextGauge(width-6, percent, reminder, threshold)
 		contextValueStr := fmt.Sprintf("%s (%s)", formatTokens(current), formatPercent(percent))
 		usageLines = append(usageLines,
-			renderInfoPanelKVLine(lineW, "Context", contextValueStyle(percent).Render(contextValueStr)),
+			renderInfoPanelKVLine(lineW, "Context", contextValueStyle(percent, reminder, threshold).Render(contextValueStr)),
 			InfoPanelLineBg.Width(lineW).Render(gauge),
 		)
 		if currentBytes > 0 && msgCount > 0 {
@@ -763,16 +767,61 @@ func (m *Model) buildInfoPanelFilesBlock(lineW int) string {
 	return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(filesLines))
 }
 
-// contextValueStyle returns a style for the context usage value so it matches the gauge:
-// normal (green) ≤50%, warning (orange) 50–80%, critical (red) >80%.
-func contextValueStyle(percent float64) lipgloss.Style {
-	if percent > 0.8 {
+// Fixed fallback lines for context usage display when the focused agent does
+// not expose reminder/threshold lines (a focused SubAgent, whose context is
+// managed by sliding-window compaction, or a parked target): orange past 50%,
+// red past 80% — the historical fixed behavior.
+const (
+	infoPanelContextFallbackWarnRatio     = 0.5
+	infoPanelContextFallbackCriticalRatio = 0.8
+)
+
+type contextUsageSeverity uint8
+
+const (
+	contextUsageNormal contextUsageSeverity = iota
+	contextUsageWarning
+	contextUsageCritical
+)
+
+// contextUsageSeverityFor maps a context usage ratio onto the display severity
+// shared by the Context value and its gauge. Critical means usage reached the
+// agent's auto-compaction threshold; warning means it reached the reminder
+// line (a reminder configured at or above the threshold simply never shows
+// warning — the threshold crossing is critical). Agents without usage-driven
+// lines report 0 for both and fall back to the fixed 50%/80% lines. A 0
+// threshold (auto-compaction disabled) keeps the fixed 80% line as an
+// oversize-risk guard, since no compaction protects the model there.
+func contextUsageSeverityFor(percent, reminder, threshold float64) contextUsageSeverity {
+	if threshold <= 0 {
+		threshold = infoPanelContextFallbackCriticalRatio
+	}
+	if reminder <= 0 {
+		reminder = infoPanelContextFallbackWarnRatio
+	}
+	switch {
+	case percent >= threshold:
+		return contextUsageCritical
+	case percent >= reminder:
+		return contextUsageWarning
+	default:
+		return contextUsageNormal
+	}
+}
+
+// contextValueStyle returns a style for the context usage value so it matches
+// the gauge: normal (green) below the reminder line, warning (orange) from the
+// reminder line up to the auto-compaction threshold, critical (red) at the
+// threshold.
+func contextValueStyle(percent, reminder, threshold float64) lipgloss.Style {
+	switch contextUsageSeverityFor(percent, reminder, threshold) {
+	case contextUsageCritical:
 		return InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelCriticalFg))
-	}
-	if percent > 0.5 {
+	case contextUsageWarning:
 		return InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelWarningFg))
+	default:
+		return InfoPanelValue
 	}
-	return InfoPanelValue
 }
 
 func renderInfoPanelIndentedKVLine(lineW, inset int, key, value string) string {
@@ -882,7 +931,7 @@ func truncateInfoPanelLine(s string, width int) string {
 	return ansi.Truncate(s, width, "…")
 }
 
-func (m *Model) renderContextGauge(width int, percent float64) string {
+func (m *Model) renderContextGauge(width int, percent, reminder, threshold float64) string {
 	if width <= 2 {
 		return ""
 	}
@@ -891,9 +940,10 @@ func (m *Model) renderContextGauge(width int, percent float64) string {
 	emptySize := innerWidth - fullSize
 
 	style := GaugeFull
-	if percent > 0.8 {
+	switch contextUsageSeverityFor(percent, reminder, threshold) {
+	case contextUsageCritical:
 		style = GaugeCritical
-	} else if percent > 0.5 {
+	case contextUsageWarning:
 		style = GaugeWarning
 	}
 
