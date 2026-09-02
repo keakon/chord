@@ -258,16 +258,20 @@ func (e *EmptyResponseError) Error() string {
 
 // InterruptedResponseError indicates the model streamed a partial response
 // that ended interrupted (a mid-stream provider error event or a truncated
-// transport stream with visible text already delivered). The partial text
-// stays on screen, but the response is a failed attempt: the retry layer keeps
-// retrying until the request succeeds or the user cancels (default
-// stream_retry_rounds=0 retries forever).
+// transport stream with body text already delivered). The response is a failed
+// attempt, but its text is never thrown away: the partial stays on screen, the
+// error is escalated to the caller, and the caller saves the partial reply and
+// resumes it with a continuation prompt through the normal key/fallback
+// rotation. The caller caps automatic continuation rounds, after which the
+// preserved text is left in history for the user to resume by hand. An attempt
+// that streamed no body text — reasoning only, or a tool preview — keeps the
+// old silent retry instead of escalating.
 type InterruptedResponseError struct {
 	StopReason string
 }
 
 func (e *InterruptedResponseError) Error() string {
-	return "model response interrupted (partial output retained, retrying)"
+	return "model response interrupted (partial output retained, resuming)"
 }
 
 // ReplayEvidenceEchoError means the model repeated a request-only historical

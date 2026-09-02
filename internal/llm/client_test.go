@@ -1203,6 +1203,55 @@ func TestClient_VisibleInterruptionEscalatesWithoutRollback(t *testing.T) {
 	}
 }
 
+// TestClient_ThinkingOnlyInterruptionKeepsSilentRetry guards the other half of
+// the escalation rule. Reasoning deltas are visible but never reach the
+// caller's partial-text accumulator, so an interruption after thinking alone
+// leaves nothing to resume: escalating it would end the turn instead of
+// recovering it, which is the opposite of what the preservation is for.
+func TestClient_ThinkingOnlyInterruptionKeepsSilentRetry(t *testing.T) {
+	primaryCfg := testProviderConfigWithKeys("primary-prov", "gpt-test", []string{"k1"})
+	impl := &scriptedProvider{calls: []scriptedCall{
+		{streams: []message.StreamDelta{{Type: message.StreamDeltaThinking, Text: "let me work through this"}}, err: io.ErrUnexpectedEOF},
+		{streams: []message.StreamDelta{{Type: message.StreamDeltaText, Text: "the answer"}}, resp: &message.Response{Content: "the answer", StopReason: "stop"}},
+	}}
+	c := NewClient(primaryCfg, impl, "gpt-test", 4096, "sys")
+
+	var rollbacks int
+	resp, err := callCompleteStreamWithRetryForTest(
+		c,
+		context.Background(),
+		primaryCfg,
+		impl,
+		"gpt-test",
+		4096,
+		RequestTuning{},
+		"",
+		[]message.Message{{Role: "user", Content: "hi"}},
+		nil,
+		func(delta message.StreamDelta) {
+			if delta.Type == message.StreamDeltaRollback {
+				rollbacks++
+			}
+		},
+		false,
+		nil,
+		0, // default: retry until success
+		&CallStatus{},
+	)
+	if err != nil {
+		t.Fatalf("completeStreamWithRetry err = %v, want the silent retry to recover the turn", err)
+	}
+	if resp == nil || resp.Content != "the answer" {
+		t.Fatalf("response = %#v, want the retried attempt's reply", resp)
+	}
+	if got := impl.CallCount(); got != 2 {
+		t.Fatalf("provider calls = %d, want 2 (interrupted attempt + silent retry)", got)
+	}
+	if rollbacks != 1 {
+		t.Fatalf("rollback deltas = %d, want 1 (the thinking-only output is rolled back once the retry produces text)", rollbacks)
+	}
+}
+
 func TestClient_ModelPoolNoUsableKeysDoesNotStopRetryRounds(t *testing.T) {
 	primaryCfg := testProviderConfigWithKeys("linux", "gpt-5.5", []string{"key-a"})
 	fallbackCfg := testProviderConfig("codex2", "gpt-5.5")

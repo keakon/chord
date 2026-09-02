@@ -23,6 +23,7 @@ type visibleStreamTracker struct {
 	inner            StreamCallback
 	visible          bool
 	toolStreamStated bool   // a tool-call delta reached the UI in the current attempt
+	textStated       bool   // a non-blank text delta reached the UI; only this is resumable body text
 	pendingRollback  string // non-empty: a prior attempt's partial output is still rendered; its rollback must precede this attempt's first visible delta
 	rollbackFired    bool   // the armed pendingRollback was emitted to the UI
 	onVisibleStart   func() // called each time a visible streaming attempt begins; may be nil
@@ -49,6 +50,14 @@ func (t *visibleStreamTracker) Callback(delta message.StreamDelta) {
 		switch delta.Type {
 		case message.StreamDeltaToolUseStart, message.StreamDeltaToolUseDelta, message.StreamDeltaToolUseEnd:
 			t.toolStreamStated = true
+		case message.StreamDeltaText:
+			// Only body text can be resumed by a continuation prompt. Thinking
+			// deltas are visible but never reach the turn's partial-text
+			// accumulator, so an attempt that streamed nothing but reasoning
+			// has no resumable reply.
+			if strings.TrimSpace(delta.Text) != "" {
+				t.textStated = true
+			}
 		}
 		if !t.visible {
 			log.Debugf("LLM first visible stream delta delta_type=%v model=%v key_id=%v key_attempt=%v key_total=%v", delta.Type, t.providerModel, t.keyLogID, t.keyAttempt, t.keyCount)
@@ -67,6 +76,7 @@ func (t *visibleStreamTracker) Callback(delta message.StreamDelta) {
 		}
 		t.visible = false
 		t.toolStreamStated = false
+		t.textStated = false
 	}
 	if t.inner != nil {
 		t.inner(delta)
@@ -130,7 +140,19 @@ func (t *visibleStreamTracker) MarkInterruptedVisibleOutput() bool {
 	}
 	log.Debugf("LLM visible stream interrupted; keeping partial output model=%v key_id=%v key_attempt=%v key_total=%v", t.providerModel, t.keyLogID, t.keyAttempt, t.keyCount)
 	t.visible = false
+	t.toolStreamStated = false
 	return true
+}
+
+// HadTextDelta reports whether the current attempt streamed non-blank body
+// text, which is the only kind of output a continuation prompt can resume.
+// Thinking-only attempts are visible but never reach the caller's
+// partial-text accumulator, so they must keep the ordinary silent retry.
+// Unlike visible and toolStreamStated, textStated survives
+// MarkInterruptedVisibleOutput: callers close the attempt first and then ask
+// whether what it left behind is resumable.
+func (t *visibleStreamTracker) HadTextDelta() bool {
+	return t != nil && t.textStated
 }
 
 const maxCoolingWait = 1 * time.Minute
@@ -745,14 +767,14 @@ func (c *Client) completeStreamTarget(
 
 		result.setLastErr(t.provider, err)
 		visibleStarted := tracker.visible
-		// preservablePartial records that this attempt streamed visible
-		// assistant text without a tool card, so a later resumable failure can
-		// escalate instead of silently retrying the whole request.
+		// preservablePartial records that this attempt streamed resumable
+		// assistant body text without a tool card, so a later resumable failure
+		// can escalate to the caller instead of silently retrying the whole
+		// request.
 		preservablePartial := false
-		// A stream interrupted after visible text keeps that text on screen:
-		// the retry continues the same request (default stream_retry_rounds=0
-		// retries until success or user cancel) and the preserved partial
-		// leaves the screen only when the retry regenerates output. Attempts
+		// A stream interrupted after visible output keeps that output on
+		// screen: the preserved partial leaves the screen only when the retry
+		// regenerates output, so the reply never mixes two attempts. Attempts
 		// that already streamed a tool call, and failures that carry no usable
 		// output (bad request shape, context length, replay rejections), still
 		// roll back immediately.
@@ -761,7 +783,11 @@ func (c *Client) completeStreamTarget(
 				pendingRollback = ""
 			}
 		} else {
-			preservablePartial = true
+			// Only body text is resumable. A thinking-only attempt is visible
+			// but leaves the caller with no partial reply to continue, so it
+			// keeps the old silent retry — escalating it would let the turn
+			// fail instead of recovering, which is the opposite of the intent.
+			preservablePartial = tracker.HadTextDelta()
 			pendingRollback = err.Error()
 		}
 		if err := abortIfCancelled(); err != nil {
@@ -932,8 +958,9 @@ func (c *Client) completeStreamTarget(
 		if status != nil && !t.isFallback && shouldFallback(err) && status.FallbackReason == "" {
 			status.FallbackReason = classifyFallbackReason(err)
 		}
-		// This attempt streamed visible text (the visibleStarted gate above)
-		// and the failure is a resumable stream interruption. The partial text
+		// This attempt streamed resumable body text without a tool card and
+		// the failure is a stream interruption. preservablePartial already
+		// implies both, so it is the only gate needed here. The partial text
 		// stays on screen: mark the key recovering so the caller's restart
 		// prefers another key/fallback model, and escalate the error so the
 		// caller can save the partial reply and resume it with a continuation
@@ -941,7 +968,7 @@ func (c *Client) completeStreamTarget(
 		// whole reply and discard every attempt's partial output. Keep
 		// pendingRollback empty so the retry-layer deferred rollback does not
 		// wipe the preserved text when this error unwinds.
-		if preservablePartial && IsPreservableStreamInterruption(err) {
+		if preservablePartial {
 			t.provider.MarkRecovering(apiKey)
 			log.Warnf("interrupted visible stream with preserved partial text; escalating for continuation provider=%v model=%v key_id=%v error=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), err)
 			pendingRollback = ""
