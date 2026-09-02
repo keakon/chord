@@ -42,6 +42,9 @@ type Manager struct {
 	maxTokens            int
 	inputBudget          int
 	inputBudgetReserved  int
+	// tokenBudgetsEpoch counts token-budget value changes (see SetTokenBudgets);
+	// it identifies a usage-baseline window together with the session epoch.
+	tokenBudgetsEpoch uint64
 
 	threshold float64 // fraction of usable input budget that triggers compaction; <= 0 disables automatic compaction
 
@@ -100,6 +103,9 @@ func (m *Manager) SetMaxTokens(n int) {
 
 // SetTokenBudgets updates total context window, input-side budget, and reserved
 // input headroom. If inputBudget <= 0, maxTokens is used as the input budget.
+// The token-budgets epoch increments only when a value actually changes, so it
+// counts model/provider/budget switches (the budget_epoch component of the
+// context-pressure reminder claim) rather than every per-response call.
 func (m *Manager) SetTokenBudgets(maxTokens, inputBudget, reservedInput int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -109,9 +115,32 @@ func (m *Manager) SetTokenBudgets(maxTokens, inputBudget, reservedInput int) {
 	if reservedInput < 0 {
 		reservedInput = 0
 	}
-	m.maxTokens = maxTokens
-	m.inputBudget = inputBudget
-	m.inputBudgetReserved = reservedInput
+	if maxTokens != m.maxTokens || inputBudget != m.inputBudget || reservedInput != m.inputBudgetReserved {
+		m.maxTokens = maxTokens
+		m.inputBudget = inputBudget
+		m.inputBudgetReserved = reservedInput
+		m.tokenBudgetsEpoch++
+	}
+}
+
+// TokenBudgetsEpoch returns the number of token-budget value changes since the
+// manager was created. Combined with the session epoch it identifies a usage
+// baseline window for the context-pressure reminder claim.
+func (m *Manager) TokenBudgetsEpoch() uint64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.tokenBudgetsEpoch
+}
+
+// CalibratedRatio returns the current usage-calibrated tokens-per-byte median
+// (0 when no usable sample exists). Callers that must keep two estimates on
+// the same calibration (e.g. a compaction preflight and its post-export
+// re-check) should snapshot this once and use EstimateMessagesTokensWithRatio
+// on both sides instead of reading the live ratio twice.
+func (m *Manager) CalibratedRatio() float64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.calibratedRatioCache
 }
 
 // GetMaxTokens returns the context window size (token budget). Thread-safe.
@@ -669,6 +698,19 @@ func (m *Manager) EstimateMessagesTokensCalibrated(messages []message.Message) i
 	bytes := messageContextBytes(messages)
 	tokens := max(int(float64(bytes)*ratio), 1)
 	return tokens
+}
+
+// EstimateMessagesTokensWithRatio estimates input tokens from a caller-provided
+// calibration ratio, keeping two estimates on the same calibration baseline
+// even when the live manager ratio may change between them (a compaction
+// preflight and its post-export re-check, for example). A non-positive ratio
+// falls back to the plain bytes/3 estimate, matching
+// EstimateMessagesTokensCalibrated's no-sample behavior.
+func EstimateMessagesTokensWithRatio(messages []message.Message, ratio float64) int {
+	if ratio <= 0 {
+		return EstimateMessagesTokens(messages)
+	}
+	return max(int(float64(messageContextBytes(messages))*ratio), 1)
 }
 
 // EstimateBytesForTokensCalibrated converts a token budget back into a byte

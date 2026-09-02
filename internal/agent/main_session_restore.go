@@ -32,29 +32,31 @@ type sessionRestoreResult struct {
 }
 
 type loadedSessionState struct {
-	SessionPath               string
-	Messages                  []message.Message
-	TodoItems                 []tools.TodoItem
-	TaskRecords               map[string]*DurableTaskRecord
-	TaskSettlements           map[taskAttemptKey]*TaskSettlement
-	TaskGroups                map[string]*DurableTaskGroup
-	TaskGroupsDegraded        bool
-	AgentRequests             map[string]*DurableAgentRequest
-	AgentRequestsDegraded     bool
-	ActiveRole                string
-	ModelPoolCurrentModelPool string
-	ModelPoolAgentOverrides   map[string]string
-	UsageStats                analytics.SessionStats
-	WalltimeStats             map[string]*analytics.WalltimeStats
-	AgentModelRefs            map[string]analytics.AgentModelRefs
-	ContextUsage              message.TokenUsage
-	LastInputTokens           int
-	LastTotalContextTokens    int
-	PendingCompactionResume   *recovery.PendingCompactionResume
-	SubAgentStates            []loadedSubAgentState
-	MailboxMessages           []SubAgentMailboxMessage
-	MailboxSeqMax             uint64
-	Summary                   *SessionSummary
+	SessionPath                  string
+	Messages                     []message.Message
+	TodoItems                    []tools.TodoItem
+	TaskRecords                  map[string]*DurableTaskRecord
+	TaskSettlements              map[taskAttemptKey]*TaskSettlement
+	TaskGroups                   map[string]*DurableTaskGroup
+	TaskGroupsDegraded           bool
+	AgentRequests                map[string]*DurableAgentRequest
+	AgentRequestsDegraded        bool
+	ActiveRole                   string
+	ModelPoolCurrentModelPool    string
+	ModelPoolAgentOverrides      map[string]string
+	UsageStats                   analytics.SessionStats
+	WalltimeStats                map[string]*analytics.WalltimeStats
+	AgentModelRefs               map[string]analytics.AgentModelRefs
+	ContextUsage                 message.TokenUsage
+	LastInputTokens              int
+	LastTotalContextTokens       int
+	PendingCompactionResume      *recovery.PendingCompactionResume
+	LastModelDrivenApplyBatch    uint64
+	AutoCompactRequestGeneration uint64
+	SubAgentStates               []loadedSubAgentState
+	MailboxMessages              []SubAgentMailboxMessage
+	MailboxSeqMax                uint64
+	Summary                      *SessionSummary
 }
 
 type loadedSubAgentState struct {
@@ -416,6 +418,8 @@ func (a *MainAgent) applySessionSnapshot(loaded *loadedSessionState, sessionPath
 	loaded.LastInputTokens = snap.LastInputTokens
 	loaded.LastTotalContextTokens = snap.LastTotalContextTokens
 	loaded.PendingCompactionResume = clonePendingCompactionResume(snap.PendingCompactionResume)
+	loaded.LastModelDrivenApplyBatch = snap.LastModelDrivenApplyBatch
+	loaded.AutoCompactRequestGeneration = snap.AutoCompactRequestGeneration
 	subAgentStarted := time.Now()
 	loaded.SubAgentStates = a.loadRestoredSubAgentStates(sessionPath, tmpRecovery, snap, loaded.MailboxMessages, loaded.TaskRecords, started)
 	subAgentRestoreDuration = time.Since(subAgentStarted)
@@ -708,6 +712,10 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 		a.ctxMgr.SetLastTotalContextTokens(loaded.LastTotalContextTokens)
 	}
 	a.setPendingCompactionResume(loaded.PendingCompactionResume)
+	a.lastModelDrivenApplyBatch = loaded.LastModelDrivenApplyBatch
+	a.lastModelDrivenSkipBatch = 0
+	a.lastModelDrivenSkipReason = ""
+	a.autoCompactRequestGeneration.Store(loaded.AutoCompactRequestGeneration)
 	if resume := a.pendingCompactionResume; resume != nil &&
 		resume.Kind == string(compactionResumeAutoContinue) &&
 		strings.TrimSpace(resume.UserIntent) == "" &&

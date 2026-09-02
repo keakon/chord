@@ -117,6 +117,13 @@ type compactionDraft struct {
 	// by the model-driven worker so the event-loop settlement can record them
 	// in lifecycle analytics. Nil for generic drafts and early skips.
 	ModelDrivenPreflight *modelDrivenPreflightStats
+	// ModelDrivenSkipReason and ModelDrivenSkipBatch carry the model-driven
+	// policy-skip verdict (low_gain / interval, or the propagated reason of a
+	// cooldown short-circuit) and the request batch it was decided at, so the
+	// event-loop settlement records the skip-cooldown state exactly as the
+	// worker saw it. Empty for non-model-driven and structural skips.
+	ModelDrivenSkipReason string
+	ModelDrivenSkipBatch  uint64
 }
 
 const compactionSystemPrompt = `You summarize earlier coding-agent conversation history so another agent can continue work without losing important context.

@@ -58,6 +58,30 @@ const (
 	// anchor cap so both compaction paths preserve the same amount of the
 	// latest user request.
 	modelDrivenAnchorMaxRunes = 260
+	// minModelDrivenApplyIntervalBatches is the conservative first-version
+	// spacing between durable model-driven applies: a reset is only allowed
+	// after at least this many main-model request batches since the last
+	// successful model-driven apply (currentRequestBatch semantics, not call
+	// counts). It prevents immediately re-resetting from a thin evidence
+	// baseline right after an archival apply.
+	minModelDrivenApplyIntervalBatches = 3
+	// minModelDrivenSkipCooldownBatches is the fixed same-reason skip cooldown:
+	// a retry within this many batches of the previous skip with the same
+	// reason short-circuits without re-running the low-gain preflight (which
+	// would otherwise re-run prepareMessagesForLLM for an outcome that cannot
+	// change). Different reasons are never cooled down by each other.
+	minModelDrivenSkipCooldownBatches = 2
+	// modelDrivenCacheWriteMultiplier / modelDrivenCacheReadMultiplier
+	// approximate the Anthropic prompt-cache pricing used to charge the
+	// projected side of the low-gain gate the cost of rewriting the archived
+	// prefix (cache write ≈ 1.25x, cache read ≈ 0.1x). Only the delta applies:
+	// the old prefix would have been cache-read, the new one must be
+	// cache-written. modelDrivenCacheRebuildDeltaNumer/Denom carry the same
+	// delta (1.15) as integer math.
+	modelDrivenCacheWriteMultiplier   = 1.25
+	modelDrivenCacheReadMultiplier    = 0.10
+	modelDrivenCacheRebuildDeltaNumer = 115
+	modelDrivenCacheRebuildDeltaDenom = 100
 )
 
 // modelDrivenBarrierSnapshot is the immutable event-loop capture handed to the
@@ -99,6 +123,36 @@ type modelDrivenBarrierSnapshot struct {
 	// projected side must use the larger full-injection surface instead of
 	// being silently understated.
 	postResetFixedRequestTokens int
+	// currentRequestBatch is the main-model request batch at the barrier
+	// (currentRequestBatch semantics: the request-batch counter falling back
+	// to maxRequestBatch(messages) after a process restart). The interval and
+	// cooldown verdicts and their settlement recording all use this one
+	// number, captured once on the event loop.
+	currentRequestBatch uint64
+	// lastModelDrivenApplyBatch / lastModelDrivenSkipBatch /
+	// lastModelDrivenSkipReason are the event-loop-owned apply/skip records at
+	// the barrier. The worker decides the interval and cooldown verdicts from
+	// these snapshots; the settlement writes the verdict batch back on the
+	// event loop.
+	lastModelDrivenApplyBatch uint64
+	lastModelDrivenSkipBatch  uint64
+	lastModelDrivenSkipReason string
+	// promptCacheCapable reports whether the running model supports prompt
+	// caching, so the low-gain gate can charge the projected side the cache
+	// rewrite cost of replacing the archived prefix.
+	promptCacheCapable bool
+	// calibratedRatio is the usage-calibrated tokens/bytes ratio snapshot at
+	// the barrier. Preflight and the post-export re-check both estimate
+	// through this snapshot (bundle.estimateTokens) so the two sides cannot
+	// drift apart if the live ctxMgr calibration changes between them.
+	calibratedRatio float64
+}
+
+// estimateTokens estimates the input tokens of a message slice on the barrier
+// calibration snapshot. It is the only estimator the model-driven worker uses,
+// so the preflight and its post-export re-check share one baseline.
+func (b modelDrivenBarrierSnapshot) estimateTokens(messages []message.Message) int {
+	return ctxmgr.EstimateMessagesTokensWithRatio(messages, b.calibratedRatio)
 }
 
 // modelDrivenPreflightStats carries the low-gain preflight estimates from the
@@ -119,6 +173,11 @@ type modelDrivenPreflightStats struct {
 	AnchorBytes        int
 	HistoryMapBytes    int
 	ContinuationTokens int
+	// CacheRebuildCost is the prompt-cache rewrite cost charged to the
+	// projected side of the low-gain gate for prompt-cache-capable sessions
+	// (rewritten-prefix tokens × (write − read) multiplier). Zero for
+	// non-cacheable sessions.
+	CacheRebuildCost int
 }
 
 // ---------------------------------------------------------------- accept ---
@@ -246,7 +305,30 @@ func (a *MainAgent) captureModelDrivenBarrierSnapshot(snapshot []message.Message
 		fixedRequestTokens:          a.estimateFixedRequestTokens(),
 		queuedUserMessages:          a.pendingUserMessagesForPreflight(),
 		postResetFixedRequestTokens: a.estimatePostResetFixedRequestTokens(),
+		currentRequestBatch:         a.currentRequestBatch(snapshot),
+		lastModelDrivenApplyBatch:   a.lastModelDrivenApplyBatch,
+		lastModelDrivenSkipBatch:    a.lastModelDrivenSkipBatch,
+		lastModelDrivenSkipReason:   a.lastModelDrivenSkipReason,
+		promptCacheCapable:          a.currentModelPromptCacheCapable(),
+		calibratedRatio:             a.ctxMgr.CalibratedRatio(),
 	}
+}
+
+// currentModelPromptCacheCapable reports whether the running model supports
+// prompt caching, so the low-gain gate can charge the projected side the
+// cache-rewrite cost of replacing the archived prefix. Read on the event loop
+// at the barrier; the verdict rides inside the snapshot.
+func (a *MainAgent) currentModelPromptCacheCapable() bool {
+	if a == nil {
+		return false
+	}
+	a.llmMu.RLock()
+	client := a.llmClient
+	a.llmMu.RUnlock()
+	if client == nil {
+		return false
+	}
+	return client.SupportsAnthropicPromptCache(client.NextRequestModelRef())
 }
 
 // pendingUserMessagesForPreflight converts the queued user messages that the
@@ -322,7 +404,7 @@ func (a *MainAgent) startModelDrivenCompactionAsync(bundle modelDrivenBarrierSna
 	}
 
 	a.emitCompactionSlotActivity()
-	a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusStarted, Trigger: string(compactionTriggerModelDriven)})
+	a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusStarted, Trigger: string(compactionTriggerModelDriven), PlanID: strconv.FormatUint(planID, 10)})
 	a.compactionWg.Add(1)
 	go func(ctx context.Context, bundle modelDrivenBarrierSnapshot, planID uint64, target compactionTarget, headSplit int, req *modelDrivenCheckpointRequest) {
 		defer a.compactionWg.Done()
@@ -403,18 +485,23 @@ func (a *MainAgent) produceModelDrivenDraftAsync(ctx context.Context, bundle mod
 		}, nil
 	}
 
+	// Apply-interval and same-reason skip-cooldown verdicts (§5, §5.1). Both
+	// are decided before the low-gain preflight: an interval skip never enters
+	// preflight (savings are meaningless while the apply spacing has not
+	// elapsed) and a cooldown short-circuit avoids re-running
+	// prepareMessagesForLLM for a request whose outcome cannot change. The
+	// verdict batch/reason ride on the draft so the event-loop settlement
+	// records exactly the numbers the worker decided on.
+	if reason, skipReason, ok := a.modelDrivenIntervalCooldownVerdict(bundle); ok {
+		return modelDrivenSkipDraft(planID, target, reason, skipReason, bundle.currentRequestBatch, nil), nil
+	}
+
 	// Low-gain preflight BEFORE history export. A skip here must not produce
 	// orphan history-*.md / metadata / backup files. The preflight stats ride
 	// on the returned draft so the event-loop settlement records them once.
 	skipReason, skip, preflight := a.modelDrivenLowGainPreflight(bundle, headSplit, head, snapshot, req)
 	if skip {
-		return &compactionDraft{
-			Skip:                 true,
-			InfoMessage:          "Context checkpoint skipped: " + skipReason,
-			PlanID:               planID,
-			Target:               target,
-			ModelDrivenPreflight: &preflight,
-		}, nil
+		return modelDrivenSkipDraft(planID, target, skipReason, "low_gain", bundle.currentRequestBatch, &preflight), nil
 	}
 
 	if ctx.Err() != nil {
@@ -465,7 +552,7 @@ func (a *MainAgent) produceModelDrivenDraftAsync(ctx context.Context, bundle mod
 	projected := []message.Message{{Role: message.RoleUser, Content: checkpointContent, IsCompactionSummary: true}}
 	projected = append(projected, snapshot[headSplit:]...)
 	projected = append(projected, bundle.queuedUserMessages...)
-	projectedTokens := estimateMessagesTokens(a.ctxMgr, projected) + bundle.postResetFixedRequestTokens + modelDrivenPostResetOverlayTokens
+	projectedTokens := bundle.estimateTokens(projected) + bundle.postResetFixedRequestTokens + modelDrivenPostResetOverlayTokens
 	saved := preflight.CurrentTokens - projectedTokens
 	preflight.ProjectedTokens = projectedTokens
 	preflight.SavedTokens = saved
@@ -473,14 +560,8 @@ func (a *MainAgent) produceModelDrivenDraftAsync(ctx context.Context, bundle mod
 	if preflight.CurrentTokens > 0 {
 		preflight.SavedRatioPct = saved * 100 / preflight.CurrentTokens
 	}
-	if reason, skip := modelDrivenLowGainCheck(preflight.CurrentTokens, projectedTokens, saved); skip {
-		return &compactionDraft{
-			Skip:                 true,
-			InfoMessage:          "Context checkpoint skipped: " + reason,
-			PlanID:               planID,
-			Target:               target,
-			ModelDrivenPreflight: &preflight,
-		}, nil
+	if reason, skip := modelDrivenLowGainCheck(preflight.CurrentTokens, projectedTokens, saved, preflight.CacheRebuildCost); skip {
+		return modelDrivenSkipDraft(planID, target, reason, "low_gain", bundle.currentRequestBatch, &preflight), nil
 	}
 	contextSummaryMsg := message.Message{
 		Role:                "user",
@@ -534,11 +615,11 @@ func (a *MainAgent) modelDrivenLowGainPreflight(bundle modelDrivenBarrierSnapsho
 	projected = append(projected, snapshot[headSplit:]...)
 	projected = append(projected, bundle.queuedUserMessages...)
 
-	currentTokens := estimateMessagesTokens(a.ctxMgr, currentSurface) + bundle.fixedRequestTokens
+	currentTokens := bundle.estimateTokens(currentSurface) + bundle.fixedRequestTokens
 	// The projected side pays the post-reset fixed surface: after apply, the
 	// cache-friendly MCP mount is dropped for full top-level injection, so the
 	// frozen/mounted subset used for the current side would understate it.
-	projectedTokens := estimateMessagesTokens(a.ctxMgr, projected) + bundle.postResetFixedRequestTokens + modelDrivenPostResetOverlayTokens
+	projectedTokens := bundle.estimateTokens(projected) + bundle.postResetFixedRequestTokens + modelDrivenPostResetOverlayTokens
 	saved := currentTokens - projectedTokens
 	preflight.CurrentTokens = currentTokens
 	preflight.ProjectedTokens = projectedTokens
@@ -548,7 +629,20 @@ func (a *MainAgent) modelDrivenLowGainPreflight(bundle modelDrivenBarrierSnapsho
 	if currentTokens > 0 {
 		preflight.SavedRatioPct = saved * 100 / currentTokens
 	}
-	if reason, skip := modelDrivenLowGainCheck(currentTokens, projectedTokens, saved); skip {
+	// Prompt-cache rewrite cost: replacing the archived prefix invalidates the
+	// cached head, so the projected side must pay the delta between writing
+	// the new prefix and reading the old one (write ≈ 1.25×, read ≈ 0.1× for
+	// Anthropic). Only the head region [0, headSplit) is rewritten; the live
+	// tail keeps its cache position. The cost is charged to the savings before
+	// the low-gain gates, so a cacheable session cannot approve a reset whose
+	// net gain after cache rebuild falls below the gate.
+	var cacheRebuildCost int
+	if bundle.promptCacheCapable && headSplit > 0 && headSplit <= len(currentSurface) {
+		headTokens := bundle.estimateTokens(currentSurface[:headSplit])
+		cacheRebuildCost = headTokens * modelDrivenCacheRebuildDeltaNumer / modelDrivenCacheRebuildDeltaDenom
+	}
+	preflight.CacheRebuildCost = cacheRebuildCost
+	if reason, skip := modelDrivenLowGainCheck(currentTokens, projectedTokens, saved, cacheRebuildCost); skip {
 		return reason, true, preflight
 	}
 	return "", false, preflight
@@ -557,12 +651,69 @@ func (a *MainAgent) modelDrivenLowGainPreflight(bundle modelDrivenBarrierSnapsho
 // modelDrivenLowGainCheck applies the fixed low-gain gates to a savings
 // estimate and returns the skip reason when either gate fails. Both the
 // pre-export preflight and the post-export re-check share it so the refined
-// checkpoint cannot be approved on a stale estimate.
-func modelDrivenLowGainCheck(currentTokens, projectedTokens, saved int) (string, bool) {
-	if saved < modelDrivenLowGainMinTokens || saved < int(float64(currentTokens)*modelDrivenLowGainMinRatio) {
-		return fmt.Sprintf("projected savings %d tokens is below the low-gain gate (%d tokens and %d%% of the prepared surface)", saved, modelDrivenLowGainMinTokens, int(modelDrivenLowGainMinRatio*100)), true
+// checkpoint cannot be approved on a stale estimate. cacheRebuildCost is
+// subtracted from the raw savings before the gates: prompt-cache-capable
+// sessions pay the cache rewrite of the archived prefix on the projected
+// side, so a reset is only approved when the net gain survives that cost.
+func modelDrivenLowGainCheck(currentTokens, projectedTokens, saved, cacheRebuildCost int) (string, bool) {
+	net := saved - cacheRebuildCost
+	if net < modelDrivenLowGainMinTokens || net < int(float64(currentTokens)*modelDrivenLowGainMinRatio) {
+		reason := fmt.Sprintf("projected savings %d tokens is below the low-gain gate (%d tokens and %d%% of the prepared surface)", saved, modelDrivenLowGainMinTokens, int(modelDrivenLowGainMinRatio*100))
+		if cacheRebuildCost > 0 {
+			reason += fmt.Sprintf("; prompt-cache rebuild cost %d tokens was subtracted", cacheRebuildCost)
+		}
+		return reason, true
 	}
 	return "", false
+}
+
+// modelDrivenSkipDraft builds a policy skip draft carrying the verdict batch
+// and reason so the event-loop settlement records exactly the numbers the
+// worker decided on. Preflight stays nil for skips that never ran it (interval
+// and cooldown short-circuits).
+func modelDrivenSkipDraft(planID uint64, target compactionTarget, reason, skipReason string, batch uint64, preflight *modelDrivenPreflightStats) *compactionDraft {
+	return &compactionDraft{
+		Skip:                  true,
+		InfoMessage:           "Context checkpoint skipped: " + reason,
+		PlanID:                planID,
+		Target:                target,
+		ModelDrivenPreflight:  preflight,
+		ModelDrivenSkipReason: skipReason,
+		ModelDrivenSkipBatch:  batch,
+	}
+}
+
+// modelDrivenIntervalCooldownVerdict decides the two pre-preflight policy
+// gates from the barrier snapshot:
+//   - the apply interval (§5): fewer than
+//     minModelDrivenApplyIntervalBatches since the last successful model-driven
+//     apply skips without preflight. The current > last guard prevents the
+//     uint64 underflow that would otherwise treat a restored session (batch
+//     counter restarts at 0) as "interval satisfied".
+//   - the same-reason low-gain cooldown (§5.1): within
+//     minModelDrivenSkipCooldownBatches of a previous low-gain skip,
+//     short-circuit without entering preflight (which would re-run
+//     prepareMessagesForLLM for an outcome that cannot change).
+//
+// The interval gate runs first: it is deterministic and already skips without
+// preflight, so an interval-rejected retry is re-gated by the interval itself,
+// never cooled down (a parameter-corrected retry after an interval rejection
+// must not be cooldown-blocked). The cooldown therefore binds only to the
+// low-gain reason — the one whose repeated evaluation is expensive.
+//
+// It returns the skip reason, the bound skip reason, and whether to skip.
+func (a *MainAgent) modelDrivenIntervalCooldownVerdict(bundle modelDrivenBarrierSnapshot) (string, string, bool) {
+	current := bundle.currentRequestBatch
+	if bundle.lastModelDrivenApplyBatch > 0 &&
+		(current <= bundle.lastModelDrivenApplyBatch || current-bundle.lastModelDrivenApplyBatch < minModelDrivenApplyIntervalBatches) {
+		return fmt.Sprintf("the minimum %d-request-batch interval since the last applied context checkpoint has not elapsed", minModelDrivenApplyIntervalBatches), "interval", true
+	}
+	if bundle.lastModelDrivenSkipReason == "low_gain" &&
+		current > bundle.lastModelDrivenSkipBatch &&
+		current-bundle.lastModelDrivenSkipBatch < minModelDrivenSkipCooldownBatches {
+		return "cooling down after a previous low_gain skip; wait a couple of model requests before retrying", "low_gain", true
+	}
+	return "", "", false
 }
 
 // --------------------------------------------------------------- checkpoint ---
@@ -603,7 +754,7 @@ func (a *MainAgent) buildModelDrivenCheckpointContent(bundle modelDrivenBarrierS
 		CheckpointBytes:    len(checkpointContent),
 		AnchorBytes:        anchorBytes,
 		HistoryMapBytes:    historyMapBytes,
-		ContinuationTokens: estimateMessagesTokens(a.ctxMgr, []message.Message{{Role: message.RoleUser, Content: req.Args.ActiveObjective + "\n" + req.Args.NextStep + "\n" + strings.Join(req.Args.Completed, "\n") + "\n" + strings.Join(req.Args.Decisions, "\n") + "\n" + strings.Join(req.Args.OpenIssues, "\n") + "\n" + strings.Join(req.Args.StateFiles, "\n")}}),
+		ContinuationTokens: bundle.estimateTokens([]message.Message{{Role: message.RoleUser, Content: req.Args.ActiveObjective + "\n" + req.Args.NextStep + "\n" + strings.Join(req.Args.Completed, "\n") + "\n" + strings.Join(req.Args.Decisions, "\n") + "\n" + strings.Join(req.Args.OpenIssues, "\n") + "\n" + strings.Join(req.Args.StateFiles, "\n")}}),
 	}
 }
 
@@ -784,17 +935,28 @@ func (a *MainAgent) settleModelDrivenOutcome(status string, reason string, prefl
 		diagnostic["anchor_bytes"] = strconv.Itoa(preflight.AnchorBytes)
 		diagnostic["history_map_bytes"] = strconv.Itoa(preflight.HistoryMapBytes)
 		diagnostic["continuation_tokens"] = strconv.Itoa(preflight.ContinuationTokens)
+		diagnostic["cache_rebuild_cost"] = strconv.Itoa(preflight.CacheRebuildCost)
 	}
 	a.recordCompactionLifecycleEvent(status, diagnostic)
-	a.emitToTUI(CompactionStatusEvent{Status: status, Trigger: string(compactionTriggerModelDriven), Reason: a.modelDrivenSkipNotice})
+	a.emitToTUI(a.compactionStatusEvent(status, a.modelDrivenSkipNotice))
 }
 
-// settleModelDrivenSkip records the low-gain skip with the worker-computed
-// preflight stats. Kept for call-site readability; all settlement shares
-// settleModelDrivenOutcome.
+// settleModelDrivenSkip records a model-driven policy skip (low-gain, apply
+// interval, or same-reason cooldown) with the worker-computed preflight stats.
+// The verdict batch and reason from the draft update the skip-cooldown state
+// so a retry with the same reason short-circuits without re-running preflight;
+// structural skips ("not enough history") carry no verdict and do not touch
+// the cooldown state.
 func (a *MainAgent) settleModelDrivenSkip(draft *compactionDraft) {
-	reason := strings.TrimSpace(draft.InfoMessage)
-	reason = strings.TrimPrefix(reason, "Context checkpoint skipped: ")
+	if draft != nil && draft.ModelDrivenSkipReason != "" && draft.ModelDrivenSkipBatch > 0 {
+		a.lastModelDrivenSkipBatch = draft.ModelDrivenSkipBatch
+		a.lastModelDrivenSkipReason = draft.ModelDrivenSkipReason
+	}
+	reason := ""
+	if draft != nil {
+		reason = strings.TrimSpace(draft.InfoMessage)
+		reason = strings.TrimPrefix(reason, "Context checkpoint skipped: ")
+	}
 	if reason == "" {
 		reason = "projected savings were too small"
 	}

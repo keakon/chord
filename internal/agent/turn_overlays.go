@@ -69,6 +69,31 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 		})
 	}
 
+	// Context-pressure reminder (per compaction window) and the usage-driven
+	// externalization warning (per auto-compact request generation). Both are
+	// one-shot turn-tail overlays queued by queueContextPressureOverlays; the
+	// delivered claim is confirmed at dispatch, so attaching here only marks
+	// deliveryPending — a request cancelled before dispatch leaves the claim
+	// reusable.
+	if reminder := strings.TrimSpace(a.pendingContextPressureReminder); reminder != "" {
+		a.pendingContextPressureReminder = ""
+		a.noteContextPressureReminderAttached()
+		overlays = append(overlays, message.Message{
+			Role:    "user",
+			Kind:    message.KindTurnOverlay,
+			Content: reminder,
+		})
+	}
+	if warning := strings.TrimSpace(a.pendingCompactionWarning); warning != "" {
+		a.pendingCompactionWarning = ""
+		a.noteCompactionWarningAttached()
+		overlays = append(overlays, message.Message{
+			Role:    "user",
+			Kind:    message.KindTurnOverlay,
+			Content: warning,
+		})
+	}
+
 	if block := strings.TrimSpace(a.pendingLoopContinuationPromptBlock()); block != "" {
 		overlays = append(overlays, message.Message{
 			Role:    "user",

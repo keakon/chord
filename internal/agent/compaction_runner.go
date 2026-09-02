@@ -117,7 +117,7 @@ func (a *MainAgent) startCompactionAsyncWithContinuation(snapshot []message.Mess
 	}
 
 	a.emitCompactionSlotActivity()
-	a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusStarted, Trigger: trigger.analyticsName()})
+	a.emitToTUI(a.compactionStatusEvent(CompactionStatusStarted, ""))
 	a.compactionWg.Add(1)
 	go func(ctx context.Context, snapshot []message.Message, planID uint64, target compactionTarget, headSplit int, profile compactionProfile, manual bool, originalRequest string, evidenceItems []evidenceItem) {
 		defer a.compactionWg.Done()
@@ -458,6 +458,21 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	// re-scanned.
 	a.resetRuntimeEvidenceFromMessages(compactedMessages)
 	a.recordCompactionAppliedAnalyticsEvent(d, headSplit, compactedMessages)
+	// A durable apply starts a fresh compaction window: drop any overlay texts
+	// queued for the pre-apply window (the reminder reported the old usage
+	// baseline and the warning is moot once auto-compact applied). The next
+	// beginMainLLMAfterPreparation re-queues against the new window claims.
+	a.pendingContextPressureReminder = ""
+	a.pendingCompactionWarning = ""
+	// A successful model-driven apply records its request batch as the new
+	// interval anchor and clears the skip-cooldown state: the next model-driven
+	// request must wait minModelDrivenApplyIntervalBatches batches, and stale
+	// skip reasons from before the apply must not gate the fresh window.
+	if d.SummaryMode == compactionSummaryModeModelDriven {
+		a.lastModelDrivenApplyBatch = a.currentRequestBatch(a.ctxMgr.Snapshot())
+		a.lastModelDrivenSkipBatch = 0
+		a.lastModelDrivenSkipReason = ""
+	}
 	a.resetContextReductionStats()
 	a.clearLoopFrozenReductionPrefix()
 	if a.llmClient != nil {

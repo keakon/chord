@@ -187,19 +187,34 @@ func (a *MainAgent) recordCompactionAppliedAnalyticsEvent(d *compactionDraft, he
 		diagnostic["anchor_bytes"] = strconv.Itoa(preflight.AnchorBytes)
 		diagnostic["history_map_bytes"] = strconv.Itoa(preflight.HistoryMapBytes)
 		diagnostic["continuation_tokens"] = strconv.Itoa(preflight.ContinuationTokens)
+		diagnostic["cache_rebuild_cost"] = strconv.Itoa(preflight.CacheRebuildCost)
 		diagnostic["post_apply_evidence_candidates"] = strconv.Itoa(a.evidence.len())
+	}
+	// The request-batch interval since the last model-driven apply (measured
+	// in issued main-model requests, not call attempts). The first model-driven
+	// apply of a session has no previous anchor and omits the field.
+	if d.SummaryMode == compactionSummaryModeModelDriven {
+		if last := a.lastModelDrivenApplyBatch; last > 0 {
+			if current := a.currentRequestBatch(a.ctxMgr.Snapshot()); current > last {
+				diagnostic["request_batches_since_last_apply"] = strconv.FormatUint(current-last, 10)
+			}
+		}
 	}
 	a.recordCompactionLifecycleEvent("applied", diagnostic)
 }
 
 // compactionStatusEvent builds a terminal CompactionStatusEvent from the
-// current compaction state's trigger so every terminal outcome carries the
-// trigger end-to-end; headless forwarding and the gateway rely on it. When the
-// state has already been cleared the trigger stays empty (pre-field events).
+// current compaction state's trigger and plan so every terminal outcome
+// carries the trigger and plan id end-to-end; headless forwarding and the
+// gateway rely on them. When the state has already been cleared the trigger
+// stays empty (pre-field events).
 func (a *MainAgent) compactionStatusEvent(status string, reason string) CompactionStatusEvent {
 	evt := CompactionStatusEvent{Status: status, Reason: reason}
 	if a.compactionState.trigger != "" {
 		evt.Trigger = a.compactionState.trigger.analyticsName()
+	}
+	if a.compactionState.planID > 0 {
+		evt.PlanID = strconv.FormatUint(a.compactionState.planID, 10)
 	}
 	return evt
 }

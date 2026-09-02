@@ -612,6 +612,159 @@ func TestModelDrivenDraftPreExportCancellationLeavesNoFiles(t *testing.T) {
 	}
 }
 
+func TestModelDrivenIntervalVerdictRequiresThreeBatches(t *testing.T) {
+	a := &MainAgent{}
+	// No previous apply: no interval gate.
+	if _, _, skip := a.modelDrivenIntervalCooldownVerdict(modelDrivenBarrierSnapshot{currentRequestBatch: 1}); skip {
+		t.Fatal("no previous apply must not interval-skip")
+	}
+	// Same batch as the last apply: interval skip.
+	bundle := modelDrivenBarrierSnapshot{currentRequestBatch: 3, lastModelDrivenApplyBatch: 3}
+	reason, skipReason, skip := a.modelDrivenIntervalCooldownVerdict(bundle)
+	if !skip || skipReason != "interval" || !strings.Contains(reason, "interval") {
+		t.Fatalf("same batch must interval-skip, reason=%q skipReason=%q skip=%v", reason, skipReason, skip)
+	}
+	// 2 batches after apply: still skipping.
+	if _, _, skip := a.modelDrivenIntervalCooldownVerdict(modelDrivenBarrierSnapshot{currentRequestBatch: 5, lastModelDrivenApplyBatch: 3}); !skip {
+		t.Fatal("2 batches after the last apply must interval-skip")
+	}
+	// 3 batches after apply: allowed.
+	if _, _, skip := a.modelDrivenIntervalCooldownVerdict(modelDrivenBarrierSnapshot{currentRequestBatch: 6, lastModelDrivenApplyBatch: 3}); skip {
+		t.Fatal("3 batches after the last apply must pass the interval")
+	}
+}
+
+func TestModelDrivenIntervalVerdictNoUnderflowAfterRestore(t *testing.T) {
+	a := &MainAgent{}
+	// Restored session: the in-memory batch counter restarts at 0 while the
+	// persisted last-apply batch comes from the pre-crash history. Without the
+	// current > last guard, 0-5 would underflow to a huge number and the
+	// interval would be misread as satisfied, allowing an immediate re-reset.
+	reason, _, skip := a.modelDrivenIntervalCooldownVerdict(modelDrivenBarrierSnapshot{currentRequestBatch: 0, lastModelDrivenApplyBatch: 5})
+	if !skip {
+		t.Fatal("restored session must not treat the interval as satisfied (uint64 underflow guard)")
+	}
+	if !strings.Contains(reason, "interval") {
+		t.Fatalf("restored-session skip reason = %q, want interval wording", reason)
+	}
+}
+
+func TestModelDrivenSkipCooldownShortCircuitsLowGain(t *testing.T) {
+	a := &MainAgent{}
+	// Previous low-gain skip at batch 10; retry one batch later.
+	bundle := modelDrivenBarrierSnapshot{currentRequestBatch: 11, lastModelDrivenSkipReason: "low_gain", lastModelDrivenSkipBatch: 10}
+	reason, skipReason, skip := a.modelDrivenIntervalCooldownVerdict(bundle)
+	if !skip {
+		t.Fatal("same-reason low-gain retry within the cooldown must short-circuit")
+	}
+	if skipReason != "low_gain" {
+		t.Fatalf("cooldown bound reason = %q, want low_gain", skipReason)
+	}
+	if !strings.Contains(reason, "cooling down") {
+		t.Fatalf("cooldown reason = %q, want cooling-down wording", reason)
+	}
+	// Two batches later the cooldown expires and the interval gate decides.
+	if _, _, skip := a.modelDrivenIntervalCooldownVerdict(modelDrivenBarrierSnapshot{currentRequestBatch: 12, lastModelDrivenSkipReason: "low_gain", lastModelDrivenSkipBatch: 10}); skip {
+		t.Fatal("low-gain cooldown must expire after 2 batches")
+	}
+}
+
+func TestModelDrivenIntervalRejectionNotCooldownBlocked(t *testing.T) {
+	a := &MainAgent{}
+	// An interval skip was recorded at batch 10 (last apply at 9). The model
+	// retries at batch 11: the interval still has not elapsed (11-9=2 < 3), so
+	// the retry is interval-skipped again — gated by the deterministic
+	// interval, never cooled down by the previous interval record.
+	bundle := modelDrivenBarrierSnapshot{currentRequestBatch: 11, lastModelDrivenApplyBatch: 9, lastModelDrivenSkipReason: "interval", lastModelDrivenSkipBatch: 10}
+	_, skipReason, skip := a.modelDrivenIntervalCooldownVerdict(bundle)
+	if !skip {
+		t.Fatal("retry while the interval has not elapsed must skip")
+	}
+	if skipReason != "interval" {
+		t.Fatalf("interval-gated retry must keep the interval reason, got %q (must not be cooldown-blocked)", skipReason)
+	}
+	// Once the interval elapses (3 batches since the apply), a retry proceeds
+	// to preflight: it is free of any cooldown.
+	if _, _, skip := a.modelDrivenIntervalCooldownVerdict(modelDrivenBarrierSnapshot{currentRequestBatch: 12, lastModelDrivenApplyBatch: 9, lastModelDrivenSkipReason: "interval", lastModelDrivenSkipBatch: 10}); skip {
+		t.Fatal("interval-satisfied retry must not be blocked by the interval skip record")
+	}
+}
+
+func TestModelDrivenLowGainCheckSubtractsCacheRebuildCost(t *testing.T) {
+	// Raw savings pass both gates...
+	if reason, skip := modelDrivenLowGainCheck(10000, 5000, 5000, 0); skip {
+		t.Fatalf("raw savings above the gate must pass, got reason %q", reason)
+	}
+	// ...but subtracting the cache rebuild cost drops them below the absolute
+	// floor (5000 - 4000 = 1000 < 2048).
+	if reason, skip := modelDrivenLowGainCheck(10000, 5000, 5000, 4000); !skip {
+		t.Fatal("savings net of cache rebuild cost below the gate must skip")
+	} else if !strings.Contains(reason, "cache rebuild") {
+		t.Fatalf("cache-gated skip reason must mention the rebuild cost, got %q", reason)
+	}
+	// The 10% relative gate applies to the net savings too.
+	if reason, skip := modelDrivenLowGainCheck(100000, 95000, 5000, 4000); !skip {
+		t.Fatalf("net savings below 10%% of the prepared surface must skip, got %q", reason)
+	} else if !strings.Contains(reason, "cache rebuild") {
+		t.Fatalf("relative-gate skip reason must mention the rebuild cost, got %q", reason)
+	}
+}
+
+func TestModelDrivenApplyRecordsLastApplyBatch(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.newTurn()
+	a.ctxMgr.Append(message.Message{Role: "user", Content: "one"})
+	a.ctxMgr.Append(message.Message{Role: "assistant", Content: "two"})
+	a.ctxMgr.Append(message.Message{Role: "user", Content: "three"})
+	// Reserve one request batch so currentRequestBatch returns a known value.
+	a.requestBatches.reserve(a.sessionEpoch, 0)
+
+	draft := &compactionDraft{
+		NewMessages:    []message.Message{{Role: "user", Content: "[Context Summary]", IsCompactionSummary: true}},
+		HeadSplit:      2,
+		Index:          1,
+		AbsHistoryPath: filepath.Join(a.sessionDir, "history-1.md"),
+		SummaryMode:    compactionSummaryModeModelDriven,
+		PlanID:         1,
+		Target:         compactionTarget{sessionEpoch: a.sessionEpoch},
+	}
+	if err := a.applyCompactionDraft(draft); err != nil {
+		t.Fatalf("applyCompactionDraft: %v", err)
+	}
+	if a.lastModelDrivenApplyBatch != 1 {
+		t.Fatalf("lastModelDrivenApplyBatch = %d, want 1", a.lastModelDrivenApplyBatch)
+	}
+	if a.lastModelDrivenSkipBatch != 0 || a.lastModelDrivenSkipReason != "" {
+		t.Fatalf("apply must clear the skip-cooldown state, got batch=%d reason=%q", a.lastModelDrivenSkipBatch, a.lastModelDrivenSkipReason)
+	}
+}
+
+func TestModelDrivenSettleRecordsSkipCooldownState(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.newTurn()
+	a.settleModelDrivenSkip(&compactionDraft{Skip: true, InfoMessage: "Context checkpoint skipped: the minimum 3-request-batch interval since the last applied context checkpoint has not elapsed", ModelDrivenSkipReason: "interval", ModelDrivenSkipBatch: 7})
+	if a.lastModelDrivenSkipReason != "interval" || a.lastModelDrivenSkipBatch != 7 {
+		t.Fatalf("interval skip must record the cooldown state, got reason=%q batch=%d", a.lastModelDrivenSkipReason, a.lastModelDrivenSkipBatch)
+	}
+	// Structural skips carry no verdict and must not touch the cooldown state.
+	a.settleModelDrivenSkip(&compactionDraft{Skip: true, InfoMessage: "Not enough history to compact."})
+	if a.lastModelDrivenSkipReason != "interval" || a.lastModelDrivenSkipBatch != 7 {
+		t.Fatalf("structural skip must not touch the cooldown state, got reason=%q batch=%d", a.lastModelDrivenSkipReason, a.lastModelDrivenSkipBatch)
+	}
+}
+
+func TestModelDrivenSkipDraftCarriesVerdict(t *testing.T) {
+	draft := modelDrivenSkipDraft(3, compactionTarget{}, "reason text", "low_gain", 9, nil)
+	if !draft.Skip || draft.InfoMessage != "Context checkpoint skipped: reason text" {
+		t.Fatalf("skip draft = %+v, want skip with reason text", draft)
+	}
+	if draft.ModelDrivenSkipReason != "low_gain" || draft.ModelDrivenSkipBatch != 9 {
+		t.Fatalf("skip draft verdict = reason=%q batch=%d, want low_gain/9", draft.ModelDrivenSkipReason, draft.ModelDrivenSkipBatch)
+	}
+}
+
 func TestEstimatePostResetFixedRequestTokensAtLeastCurrentFixed(t *testing.T) {
 	// P1-2: the projected side of the low-gain gate must account for the
 	// post-reset full-injection tool surface. forceFullMCPToolInjection drops

@@ -130,10 +130,21 @@ waits for the tool batch to close, then:
 1. snapshots the conversation and archives the head (no summarization model
    call — the checkpoint is deterministic),
 2. refuses the reset when the projected savings are below a conservative
-   low-gain gate (2048 tokens and 10% of the prepared surface),
+   low-gain gate (2048 tokens and 10% of the prepared surface, net of the
+   prompt-cache rewrite cost on cacheable sessions), or when fewer than three
+   main-model requests have passed since the last applied checkpoint,
 3. applies the checkpoint atomically, preserves anything appended after the
    snapshot as a live tail, and continues the same turn on the compacted
    context.
+
+A skip is a normal policy result: retrying the same request immediately is
+cooled down briefly and does not change the outcome — the model should wait or
+move on. When context usage approaches the automatic-compaction threshold, the
+next request may also carry a one-time context-pressure reminder suggesting
+the model externalize important state (naming `compact_context` when it is
+available), and a one-time warning is shown while an automatic compaction is
+pending. These overlays are transient: they never become part of the
+conversation history.
 
 `state_files` are pure path references: Chord never reads or injects them, so
 the tool cannot bypass read permissions. The checkpoint's `Current User

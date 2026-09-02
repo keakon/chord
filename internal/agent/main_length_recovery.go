@@ -40,7 +40,7 @@ func noOutputLengthRecoveryPrompt() string {
 }
 
 func autoContinuePrompt() string {
-	return "System note: context compaction completed successfully. Continue the active coding task directly without apology or recap. Prefer the smallest next concrete step, and preserve the constraints and decisions captured in the compacted context summary."
+	return "System note: context compaction completed successfully. Continue the active coding task directly without apology or recap. Prefer the smallest next concrete step, and preserve the constraints and decisions captured in the compacted context summary. Before continuing, confirm that the preserved Current User Request and Next Step still match the actual state. Re-read any referenced state_files when needed before acting."
 }
 
 func autoContinueReplayPrompt(userIntent string) string {

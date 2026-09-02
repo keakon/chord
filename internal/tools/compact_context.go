@@ -226,6 +226,8 @@ func (CompactContextTool) Description() string {
 		"- no key fact exists only in the current context that cannot be re-read or re-derived.\n" +
 		"Do not call it when still investigating, waiting on siblings, or wanting a smaller context for its own sake;\n" +
 		"do not call it when the context is already small (the runtime rejects low-gain resets).\n" +
+		"The runtime may also skip the checkpoint when the minimum apply interval has not elapsed or projected savings are too small; that is a normal policy result, not an error, and retrying the same request repeatedly will not change the outcome.\n" +
+		"Prefer Delegate (SubAgent) for separable sub-tasks whose results the main thread can consume; use compact_context only when the main thread itself must keep reasoning across the phase boundary.\n" +
 		"A success result only means the request was accepted; a later model-driven [Context Summary] checkpoint confirms the reset was applied.\n" +
 		"state_files entries are workspace-relative path references only: neither read nor injected automatically.\n" +
 		"If the arguments are rejected, shorten them and retry; never work around the limits by splitting the checkpoint."

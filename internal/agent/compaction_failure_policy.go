@@ -84,6 +84,26 @@ func (a *MainAgent) clearUsageDrivenAutoCompactRequest() {
 	a.autoCompactRequested.Store(false)
 }
 
+// armUsageDrivenAutoCompactRequest raises the usage-driven auto-compact request
+// and, on the false->true transition, assigns it a fresh monotonic generation.
+// The generation is never reset by apply/skip/clear: it identifies the request
+// instance for the usage-driven externalization warning claim
+// (auto_compact_request_id), so a later arm — after a durable apply or a
+// session switch — always starts a new claim.
+func (a *MainAgent) armUsageDrivenAutoCompactRequest() {
+	if a.autoCompactRequested.CompareAndSwap(false, true) {
+		a.autoCompactRequestGeneration.Add(1)
+	}
+}
+
+// SetModelDrivenCompactionEnabled records whether the compact_context tool is
+// part of the effective configuration. It is called once at runtime wiring and
+// never toggled afterwards: the capability exists or not for the whole
+// process, matching "配置只在创建 runtime 和工具 surface 时决定能力是否存在".
+func (a *MainAgent) SetModelDrivenCompactionEnabled(enabled bool) {
+	a.modelDrivenCompactionEnabled.Store(enabled)
+}
+
 func (a *MainAgent) usageDrivenAutoCompactCheckTurn() uint64 {
 	if a.turn != nil {
 		return a.turn.ID

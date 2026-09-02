@@ -547,6 +547,10 @@ type CompactionStatusEvent struct {
 	Trigger string
 	// Reason is the optional human-readable skip/failure reason.
 	Reason string
+	// PlanID is the bounded compaction plan identifier so control-plane
+	// consumers and the gateway can correlate a terminal outcome with the
+	// specific plan that produced it.
+	PlanID string
 }
 
 func (CompactionStatusEvent) agentEvent() {}

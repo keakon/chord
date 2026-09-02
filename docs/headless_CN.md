@@ -217,7 +217,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 | `info`               | 运行时信息消息                               | `agent_id`、`message` |
 | `toast`              | TUI 中的瞬时通知；headless 可以忽略          | `agent_id`、`message`、`level`（`info` / `warn` / `error`） |
 | `todos`              | 替换当前 todo 列表                           | `todos[]`，元素结构为 `{id, content, status, active_form}`；启用 `todo_write` 时，多个独立且正在处理的工作流可以同时为 `in_progress`，但必须使用唯一的 `active_form`。 |
-| `compaction_status`  | 压缩生命周期事件：`started` 与终态（`succeeded`、`skipped`、`failed`、`cancelled`） | `status`、`trigger`（`manual`、`usage_driven`、`length_recovery`、`oversize_driven`、`model_driven`）、`reason`。进度类遥测不转发。 |
+| `compaction_status`  | 压缩生命周期事件：`started` 与终态（`succeeded`、`skipped`、`failed`、`cancelled`） | `status`、`trigger`（`manual`、`usage_driven`、`length_recovery`、`oversize_driven`、`model_driven`）、`reason`、`plan_id`（有界压缩计划标识，用于把终态与产生它的具体计划关联）。进度类遥测不转发。 |
 | `error`              | 运行时错误                                   | `agent_id`、`message`，可选 `code` |
 
 如果 stdin 上的单行输入超过协议行长度限制，Chord 会输出带 `code: "stdin_line_too_long"` 的 `error` envelope，并继续读取后续行。集成方应在存在 `code` 时用它做错误分类，把 `message` 作为面向人的诊断信息。

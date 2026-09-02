@@ -678,6 +678,13 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 	}
 	defer releaseLLM()
 	requestStarted = true
+	// Dispatch confirmation for the one-shot context-pressure overlay claims:
+	// the request has passed the hook and governor gates and is about to reach
+	// the provider, so any reminder/warning attached by buildTurnOverlayMessages
+	// counts as delivered. Requests that never reach this point (hook-blocked,
+	// governor-rejected, cancelled before dispatch) leave the claims unspent so
+	// the next request may re-claim.
+	a.markOverlayClaimsDelivered()
 	// Model/cooldown wall-clock segmentation for the TIME section: the segment
 	// spans acquireLLM success through CompleteStream return (success or
 	// error), so hook-blocked / governor-rejected / zero-delta requests still
@@ -814,7 +821,7 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 	decision := a.ctxMgr.AutoCompactDecision()
 	if decision.ShouldCompact {
 		log.Infof("automatic context compaction requested last_input_tokens=%v estimated_input_tokens=%v effective_input_tokens=%v threshold_tokens=%v input_budget=%v reserved_input=%v usable_input_budget=%v threshold=%v selected_model=%v running_model=%v turn_id=%v", decision.LastInputTokens, decision.EstimatedInputTokens, decision.EffectiveInputTokens, decision.ThresholdTokens, decision.InputBudget, decision.ReservedInput, decision.UsableInputBudget, decision.Threshold, selectedRef, callStatus.RunningModelRef, turnID)
-		a.autoCompactRequested.Store(true)
+		a.armUsageDrivenAutoCompactRequest()
 	} else {
 		log.Debugf("automatic context compaction not requested last_input_tokens=%v estimated_input_tokens=%v effective_input_tokens=%v threshold_tokens=%v input_budget=%v reserved_input=%v usable_input_budget=%v threshold=%v selected_model=%v running_model=%v turn_id=%v", decision.LastInputTokens, decision.EstimatedInputTokens, decision.EffectiveInputTokens, decision.ThresholdTokens, decision.InputBudget, decision.ReservedInput, decision.UsableInputBudget, decision.Threshold, selectedRef, callStatus.RunningModelRef, turnID)
 	}

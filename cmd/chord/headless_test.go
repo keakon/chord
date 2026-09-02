@@ -1037,6 +1037,7 @@ func TestHeadlessCompactionStatusTerminalEnvelope(t *testing.T) {
 		Status:  agent.CompactionStatusSucceeded,
 		Trigger: "model_driven",
 		Reason:  "checkpoint applied",
+		PlanID:  "17",
 	}
 	envs := filterHeadlessEvent(ev, state)
 	if len(envs) != 1 {
@@ -1057,6 +1058,9 @@ func TestHeadlessCompactionStatusTerminalEnvelope(t *testing.T) {
 	}
 	if payload["reason"] != "checkpoint applied" {
 		t.Errorf("reason = %q, want checkpoint applied", payload["reason"])
+	}
+	if payload["plan_id"] != "17" {
+		t.Errorf("plan_id = %q, want 17", payload["plan_id"])
 	}
 }
 

@@ -74,6 +74,16 @@ type SessionSnapshot struct {
 	SessionEpoch              uint64                   `json:"session_epoch,omitempty"`
 	ActiveBackgroundObjects   []BackgroundObjectState  `json:"active_background_objects,omitempty"`
 	PendingCompactionResume   *PendingCompactionResume `json:"pending_compaction_resume,omitempty"`
+	// LastModelDrivenApplyBatch is the request batch of the last successful
+	// model-driven apply (currentRequestBatch semantics). It survives crashes
+	// so a restored session keeps enforcing the minimum apply interval; the
+	// current > last comparison guards against uint64 underflow when the
+	// in-memory batch counter restarts at 0 after restore.
+	LastModelDrivenApplyBatch uint64 `json:"last_model_driven_apply_batch,omitempty"`
+	// AutoCompactRequestGeneration is the monotonic id of the last armed
+	// usage-driven auto-compact request. It is persisted so a restored session
+	// never reuses a generation (and its externalization-warning claim).
+	AutoCompactRequestGeneration uint64 `json:"auto_compact_request_generation,omitempty"`
 }
 
 // BackgroundObjectState captures the durable summary of an active background object.

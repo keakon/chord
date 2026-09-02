@@ -15,6 +15,11 @@ const (
 	UsagePurposeOversizeRecovery    = "oversize_recovery"
 	UsagePurposeContextProvenance   = "context_provenance"
 	UsagePurposeCompactionLifecycle = "context_compaction"
+	// UsagePurposeContextPressureReminder and UsagePurposeCompactionWarning
+	// are the one-shot context-pressure reminder and usage-driven
+	// externalization warning deliveries (zero-usage bookkeeping).
+	UsagePurposeContextPressureReminder = "context_pressure_reminder"
+	UsagePurposeCompactionWarning       = "compaction_warning"
 )
 
 var diagnosticUsagePurposes = []string{
@@ -23,6 +28,8 @@ var diagnosticUsagePurposes = []string{
 	UsagePurposeOversizeRecovery,
 	UsagePurposeContextProvenance,
 	UsagePurposeCompactionLifecycle,
+	UsagePurposeContextPressureReminder,
+	UsagePurposeCompactionWarning,
 	// Wall-clock time bookkeeping events (TIME sidebar section) are zero-usage
 	// segments; they must stay out of token/cost aggregates and the Calls count.
 	WalltimePurposeModel,

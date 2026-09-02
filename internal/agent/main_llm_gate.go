@@ -371,6 +371,12 @@ func (a *MainAgent) applyAnthropicCacheHints(stableLen, metaPrefixCount, durable
 
 func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID uint64, agentErrSourceID string) {
 	a.applyPendingModelPoolSwitchesAtRequestBoundary()
+	// Arm the one-shot context-pressure reminder and the usage-driven
+	// externalization warning before the compaction gate decision: the gate
+	// may start a parallel usage-driven compaction, and the reminder's usage
+	// baseline is the post-response AutoCompactDecision — not the prepared
+	// surface being assembled for this request.
+	a.queueContextPressureOverlays()
 	// Continuation barrier: apply any ready compaction draft first. When the
 	// apply path resumes a saved continuation (handled=true), it owns control
 	// flow from here; otherwise this fresh pre-request path should continue on
@@ -835,7 +841,7 @@ func (a *MainAgent) resumePendingMainLLMAfterCompaction(pending *pendingMainLLMC
 			if a.turn == nil || a.turn.ID != pending.turnID || a.turn.Epoch != pending.turnEpoch {
 				return false
 			}
-			a.pendingModelDrivenNotice = "A model-driven context checkpoint was applied; continue the current task on the compacted context."
+			a.pendingModelDrivenNotice = appendContextPressureVerificationGuidance("A model-driven context checkpoint was applied; continue the current task on the compacted context.")
 			a.beginMainLLMAfterPreparation(a.turn.Ctx, pending.turnID, pending.agentErrSourceID)
 			return true
 		}

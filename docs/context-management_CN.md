@@ -58,8 +58,10 @@ context:
 设置 `context.compaction.model_driven: true` 后，主 agent 获得 `compact_context` 工具。模型在状态充分外化后单独调用它（同一响应里不能有其他工具调用）——后续需要的事实要么写在 `state_files` 指出的文件里，要么完整表达在 `active_objective` / `completed` / `decisions` / `open_issues` / `next_step` 结构化参数中。runtime 校验请求，等工具批次收口后：
 
 1. 快照对话并归档 head（不调用摘要模型，checkpoint 由确定性构造）；
-2. 当预计收益低于保守门槛（2048 tokens 且占 prepared surface 的 10%）时拒绝 reset；
+2. 当预计收益低于保守门槛（2048 tokens 且占 prepared surface 的 10%，可缓存会话还会扣除 prompt-cache 重写成本）时拒绝 reset；距上次成功 apply 不足 3 个主模型请求批次时同样会跳过；
 3. 原子应用 checkpoint，快照后追加的内容作为 live tail 保留，并在压缩后的上下文上继续同一 turn。
+
+skip 是正常的策略结果：立即用相同请求重试会被短暂冷却，结果不会改变——模型应等待或继续推进。上下文用量接近自动压缩阈值时，下一次请求还可能附带一次性压力提醒，提示模型外化重要状态（工具可用时会点名 `compact_context`）；自动压缩等待期间还会附带一次性外化提示。这些 overlay 都是瞬态的，不会进入对话历史。
 
 `state_files` 只是路径引用：Chord 从不读取或注入这些文件，因此该工具无法绕过 Read 权限。checkpoint 的 `Current User Request` 永远来自你的真实消息，不会采用模型参数。工具 success 只表示请求被接受；之后出现的 model-driven `[Context Summary]` checkpoint 才表示 reset 已应用。请求被跳过或失败时会继续使用旧上下文，usage-driven 自动压缩兜底保持生效。
 

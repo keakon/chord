@@ -616,6 +616,42 @@ type MainAgent struct {
 	// and why. It is consumed by buildTurnOverlayMessages and never persisted
 	// to ctxMgr.
 	pendingModelDrivenNotice string
+	// lastModelDrivenApplyBatch is the main request batch of the last
+	// successful model-driven apply, using currentRequestBatch semantics (the
+	// request-batch counter, persisted with the recovery snapshot). The next
+	// model-driven apply must wait minModelDrivenApplyIntervalBatches requests
+	// after it. Session switch clears it so a fresh session starts
+	// unthrottled; restore keeps the persisted value (the current > last
+	// guard prevents uint64 underflow on resumed sessions).
+	lastModelDrivenApplyBatch uint64
+	// lastModelDrivenSkipBatch and lastModelDrivenSkipReason record the most
+	// recent low-gain / interval skip for the same-reason skip cooldown: a
+	// retry within minModelDrivenSkipCooldownBatches of the same reason
+	// short-circuits without re-running preflight. Reasons are
+	// "low_gain"/"interval" (see compaction_model_driven.go); a cooldown skip
+	// propagates the reason it was bound to.
+	lastModelDrivenSkipBatch  uint64
+	lastModelDrivenSkipReason string
+	// modelDrivenCompactionEnabled reflects the effective
+	// context.compaction.model_driven configuration. It is set once at runtime
+	// wiring; the capability is decided at construction, never toggled at
+	// runtime.
+	modelDrivenCompactionEnabled atomic.Bool
+	// autoCompactRequestGeneration is a monotonic id for each usage-driven
+	// auto-compact request instance. It increments when the request is armed
+	// (false->true) and is never reset by apply/skip/clear; it binds the
+	// usage-driven externalization warning claim (auto_compact_request_id).
+	autoCompactRequestGeneration atomic.Uint64
+	// pendingContextPressureReminder and pendingCompactionWarning are one-shot
+	// turn-tail overlays queued by queueContextPressureOverlays and consumed by
+	// buildTurnOverlayMessages; their claim's delivered flag is confirmed at
+	// dispatch, not at attach.
+	pendingContextPressureReminder string
+	pendingCompactionWarning       string
+	// overlayClaims holds the per-window context-pressure reminder claim and
+	// the per-generation externalization warning claim. Cross-goroutine: the
+	// event loop queues, the main LLM goroutine confirms delivery at dispatch.
+	overlayClaims overlayClaimState
 	// lastCompactionMessageCount is the compacted message count at the previous
 	// compaction apply, used to report the interval (in messages) since the
 	// last compaction in lifecycle analytics.

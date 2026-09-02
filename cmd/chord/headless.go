@@ -247,6 +247,7 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 				"status":  e.Status,
 				"trigger": e.Trigger,
 				"reason":  e.Reason,
+				"plan_id": e.PlanID,
 			}})
 		}
 	case agent.AssistantMessageEvent:

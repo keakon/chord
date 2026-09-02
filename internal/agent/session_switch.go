@@ -279,6 +279,14 @@ func (a *MainAgent) resetSessionRuntimeState() {
 
 func (a *MainAgent) installSessionTarget(sessionDir string) {
 	a.sessionEpoch++
+	// Session switch invalidates the batch-relative model-driven gates: the
+	// request-batch counter restarts in the new session, so the last apply /
+	// skip anchors from the old epoch are meaningless (and could otherwise
+	// underflow against a freshly resumed counter). The new session's first
+	// model-driven request is treated as interval-satisfied.
+	a.lastModelDrivenApplyBatch = 0
+	a.lastModelDrivenSkipBatch = 0
+	a.lastModelDrivenSkipReason = ""
 	a.resetThinkingTranslationSeen()
 	a.stateMu.Lock()
 	a.sessionDir = sessionDir
