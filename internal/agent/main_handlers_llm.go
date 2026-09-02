@@ -899,14 +899,15 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 // provided turn and, if non-empty, appends a partial assistant message to the
 // context so the model can see what it had already written when it resumes.
 // Only pure-text content is saved; incomplete tool calls are intentionally
-// dropped because dangling tool_use blocks would cause API errors.
-func (a *MainAgent) savePartialAssistantMsgForTurn(turn *Turn) {
+// dropped because dangling tool_use blocks would cause API errors. It reports
+// whether a partial message was actually saved.
+func (a *MainAgent) savePartialAssistantMsgForTurn(turn *Turn) bool {
 	if turn == nil {
-		return
+		return false
 	}
 	text := turn.drainPartialText()
 	if strings.TrimSpace(text) == "" {
-		return
+		return false
 	}
 	msg := message.Message{
 		Role:       "assistant",
@@ -918,6 +919,7 @@ func (a *MainAgent) savePartialAssistantMsgForTurn(turn *Turn) {
 		a.persistAsync(identity.MainAgentID, msg)
 	}
 	log.Debugf("saved partial assistant message after stream interruption len=%v turn_id=%v", len(text), turn.ID)
+	return true
 }
 
 // savePartialAssistantMsg drains any accumulated streaming text from the

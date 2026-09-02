@@ -285,6 +285,17 @@ type LoopNoticeEvent struct {
 
 func (LoopNoticeEvent) agentEvent() {}
 
+// StreamContinueEvent notifies the TUI that a preserved stream interruption
+// injected a visible continuation prompt (KindStreamContinue). The prompt is
+// real user-role history that the model will see, so the UI shows it as a user
+// message instead of hiding it.
+type StreamContinueEvent struct {
+	Text    string
+	AgentID string // originating agent ("" = main agent)
+}
+
+func (StreamContinueEvent) agentEvent() {}
+
 // LoopStateChangedEvent notifies the TUI that loop-controller state changed and
 // any loop-dependent pills/activity text should refresh immediately.
 type LoopStateChangedEvent struct{}

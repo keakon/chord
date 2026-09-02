@@ -114,8 +114,14 @@ type Turn struct {
 	// it reaches maxIntentBarrierFailureRounds the turn is aborted instead of
 	// burning further LLM rounds against a broken write path. Reset to zero by
 	// every successful barrier. Event-loop-goroutine only, like MalformedCount.
-	BarrierFailureRounds               int
-	LengthRecoveryCount                int
+	BarrierFailureRounds int
+	LengthRecoveryCount  int
+	// AutoContinueCount tracks how many consecutive LLM rounds in this turn
+	// were resumed with an injected continuation prompt after a preserved
+	// stream interruption. When it reaches maxAutoContinueStreamRounds the
+	// automatic resumption stops — partial text is never discarded, see
+	// resumeAfterPreservedStreamInterruption. Event-loop-goroutine only.
+	AutoContinueCount                  int
 	thinkingReplayAttempted            bool
 	InLengthRecovery                   bool
 	LastTruncatedToolName              string
@@ -2223,6 +2229,75 @@ func (a *MainAgent) resumeTurnAfterRoutingInvalidation(turnID uint64) bool {
 	return true
 }
 
+// maxAutoContinueStreamRounds bounds how many consecutive times one turn
+// auto-injects a continuation prompt after preserved stream interruptions.
+// Every round persists the partial text it saved, so reaching the cap never
+// discards work: the automatic loop stops with the preserved partial replies
+// kept in history, where the user can type "继续" to resume writing or switch
+// model. Event-loop-goroutine only, like LengthRecoveryCount.
+const maxAutoContinueStreamRounds = 3
+
+// streamContinuePromptText is the visible continuation prompt injected after a
+// preserved stream interruption. It stays deliberately terse: the preserved
+// partial reply sits directly above it in history, so a verbose instruction
+// would read like a system directive instead of a user message.
+const streamContinuePromptText = "继续"
+
+// resumeAfterPreservedStreamInterruption saves the turn's streamed partial
+// text as an interrupted assistant message, injects a visible continuation
+// prompt (KindStreamContinue), and restarts the main LLM request so the model
+// continues from where it stopped. The restart runs the full retry rotation
+// (key switch, fallback models, cooling waits), so a persistently failing
+// transport behaves like any other error — while the partial reply is never
+// discarded. It reports false when the turn is stale or nothing visible was
+// streamed, letting the caller fall through to ordinary error handling. When
+// the auto-continuation cap is hit, the partial reply just saved stays in
+// history and the turn is closed with an explanatory error instead of an
+// endless automatic loop. Event-loop-goroutine only.
+func (a *MainAgent) resumeAfterPreservedStreamInterruption(turnID uint64, cause error) bool {
+	if a.turn == nil || turnID == 0 || a.turn.ID != turnID {
+		return false
+	}
+	if !a.savePartialAssistantMsgForTurn(a.turn) {
+		// Nothing visible was streamed before the interruption, so there is no
+		// partial reply to resume; fall through to ordinary error handling.
+		return false
+	}
+	if a.turn.AutoContinueCount >= maxAutoContinueStreamRounds {
+		log.Warnf("preserved stream interruption exceeded auto-continue cap turn_id=%v auto_continue_count=%v error=%v", turnID, a.turn.AutoContinueCount, cause)
+		wrapErr := fmt.Errorf("模型回复多次被网络中断（已自动续写 %d 次），已输出的正文均已保留在对话中。输入“继续”可让它接着写，或切换模型。最后错误：%v", a.turn.AutoContinueCount, cause)
+		a.failPendingToolCalls(a.turn, wrapErr)
+		a.applyPendingModelPoolSwitchesAtRequestBoundary()
+		a.fireHookBackground(a.parentCtx, hook.OnAgentError, turnID, map[string]any{"message": wrapErr.Error(), "error_kind": classifyAgentError(cause), "source_agent_id": a.instanceID})
+		a.emitToTUI(ErrorEvent{Err: wrapErr})
+		a.stopLoopAsBlocked(wrapErr.Error())
+		a.markActiveSubAgentMailboxAck(false)
+		a.setIdleAndDrainPending()
+		return true
+	}
+	a.turn.AutoContinueCount++
+	log.Infof("resuming turn after preserved stream interruption turn_id=%v auto_continue_count=%v error=%v", turnID, a.turn.AutoContinueCount, cause)
+	a.injectStreamContinueMessage()
+	a.resumeTurnAfterRoutingInvalidation(turnID)
+	return true
+}
+
+// injectStreamContinueMessage appends a visible user-role continuation prompt
+// (KindStreamContinue) to the conversation and persists it, so the model sees
+// the preserved partial reply followed by the prompt and continues writing
+// instead of restarting. The message is rendered in the UI like a normal user
+// message, but its kind excludes it from user-authored surfaces (latest-request
+// anchor, terminal title, input statistics).
+func (a *MainAgent) injectStreamContinueMessage() {
+	msg := message.Message{Role: message.RoleUser, Content: streamContinuePromptText, Kind: message.KindStreamContinue}
+	a.ctxMgr.Append(msg)
+	if a.recovery != nil {
+		a.persistAsync(identity.MainAgentID, msg)
+	}
+	a.emitToTUI(StreamContinueEvent{Text: streamContinuePromptText})
+	log.Debugf("injected stream continuation prompt turn_id=%v", a.turn.ID)
+}
+
 // handleAgentError emits the error to the TUI and logs it. An IdleEvent is
 // also sent so the TUI knows the agent is ready for new input.
 //
@@ -2253,6 +2328,22 @@ func (a *MainAgent) handleAgentError(evt Event) {
 			log.Infof("routing invalidated during active turn; restarting request turn_id=%v instance=%v", evt.TurnID, a.instanceID)
 			a.applyPendingModelPoolSwitchesAtRequestBoundary()
 			if a.resumeTurnAfterRoutingInvalidation(evt.TurnID) {
+				return
+			}
+		}
+
+		// A stream interruption that carried already-streamed assistant text is
+		// resumable: the partial reply is saved to history (never discarded), a
+		// visible continuation prompt is injected, and the turn restarts the
+		// request so the model continues from where it stopped. The restart
+		// runs the full retry rotation (key switch, fallback models, cooling
+		// waits), so a persistently failing transport behaves like any other
+		// error without ever throwing away produced text. When nothing visible
+		// was streamed, or the auto-continuation cap is hit, this falls through
+		// to ordinary error handling below — which then discards nothing, since
+		// the partial text has already been drained and saved.
+		if a.turn != nil && llm.IsPreservableStreamInterruption(err) {
+			if a.resumeAfterPreservedStreamInterruption(evt.TurnID, err) {
 				return
 			}
 		}

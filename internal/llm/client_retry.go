@@ -745,6 +745,10 @@ func (c *Client) completeStreamTarget(
 
 		result.setLastErr(t.provider, err)
 		visibleStarted := tracker.visible
+		// preservablePartial records that this attempt streamed visible
+		// assistant text without a tool card, so a later resumable failure can
+		// escalate instead of silently retrying the whole request.
+		preservablePartial := false
 		// A stream interrupted after visible text keeps that text on screen:
 		// the retry continues the same request (default stream_retry_rounds=0
 		// retries until success or user cancel) and the preserved partial
@@ -757,6 +761,7 @@ func (c *Client) completeStreamTarget(
 				pendingRollback = ""
 			}
 		} else {
+			preservablePartial = true
 			pendingRollback = err.Error()
 		}
 		if err := abortIfCancelled(); err != nil {
@@ -927,6 +932,21 @@ func (c *Client) completeStreamTarget(
 		if status != nil && !t.isFallback && shouldFallback(err) && status.FallbackReason == "" {
 			status.FallbackReason = classifyFallbackReason(err)
 		}
+		// This attempt streamed visible text (the visibleStarted gate above)
+		// and the failure is a resumable stream interruption. The partial text
+		// stays on screen: mark the key recovering so the caller's restart
+		// prefers another key/fallback model, and escalate the error so the
+		// caller can save the partial reply and resume it with a continuation
+		// prompt. Silently retrying the same key here would regenerate the
+		// whole reply and discard every attempt's partial output. Keep
+		// pendingRollback empty so the retry-layer deferred rollback does not
+		// wipe the preserved text when this error unwinds.
+		if preservablePartial && IsPreservableStreamInterruption(err) {
+			t.provider.MarkRecovering(apiKey)
+			log.Warnf("interrupted visible stream with preserved partial text; escalating for continuation provider=%v model=%v key_id=%v error=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), err)
+			pendingRollback = ""
+			return result, lastInputTokens, err
+		}
 		log.Warnf("stream interrupted after visible output; retrying current key provider=%v model=%v key_id=%v error=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), err)
 		emitRetryErrorForKey(cb, err, t.provider, t.modelID, apiKey)
 		if cb != nil {
@@ -959,23 +979,34 @@ func (c *Client) completeStreamTarget(
 			return result, lastInputTokens, nil
 		}
 		if resp.StopReason == "interrupted" {
-			// An interrupted response is a failed attempt, not a success:
-			// the partial text already streamed stays on screen (its rollback
-			// is deferred until the retry regenerates output) while the retry
-			// layer keeps retrying the request (Chord's default
-			// stream_retry_rounds=0 retries until success or user cancel).
-			// A tool-call preview already on screen cannot be preserved: the
-			// retry would emit a second tool card for the same call.
+			// An interrupted response is a failed attempt, not a success.
+			// When it already streamed assistant text (no tool card), the
+			// partial output stays on screen and the failure is escalated to
+			// the caller so it can save the partial reply and resume it with a
+			// continuation prompt — the text is never discarded and never
+			// silently regenerated. A tool-call preview cannot be preserved (a
+			// retry would emit a second tool card for the same call), so those
+			// fall through to the silent retry loop, rolling the preview back
+			// first.
 			interruptedErr := &InterruptedResponseError{StopReason: "interrupted"}
 			result.setLastErr(t.provider, interruptedErr)
-			if !tracker.MarkInterruptedVisibleOutput() {
+			if !tracker.MarkInterruptedVisibleOutput() || strings.TrimSpace(resp.Content) == "" {
 				if tracker.EmitRollback(interruptedErr.Error()) {
 					pendingRollback = ""
 				}
-			} else {
-				pendingRollback = interruptedErr.Error()
+				// Tool-call previews (would duplicate the card on retry) and
+				// interruptions without streamed text (nothing worth resuming)
+				// keep the old silent-retry behavior.
+				return result, lastInputTokens, nil
 			}
-			return result, lastInputTokens, nil
+			// Preservable partial text is on screen: mark the key recovering so
+			// the caller's restart prefers another key/fallback model, and keep
+			// pendingRollback empty so the retry-layer deferred rollback does
+			// not wipe the preserved text when this error unwinds.
+			t.provider.MarkRecovering(apiKey)
+			log.Warnf("interrupted response with preserved partial text; escalating for continuation provider=%v model=%v key_id=%v content_len=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), len(resp.Content))
+			pendingRollback = ""
+			return result, lastInputTokens, interruptedErr
 		}
 		result.resp = resp
 	}

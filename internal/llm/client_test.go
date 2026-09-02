@@ -1069,10 +1069,10 @@ func TestClient_402QuotaErrorTriesOtherKeysBeforeFallbackModel(t *testing.T) {
 	}
 }
 
-func TestClient_InterruptedPartialRetriesUntilSuccess(t *testing.T) {
+func TestClient_InterruptedPartialEscalatesForContinuation(t *testing.T) {
 	primaryCfg := testProviderConfigWithKeys("sample", "gpt-5.4", []string{"key-a"})
 	impl := &scriptedProvider{calls: []scriptedCall{
-		{resp: &message.Response{Content: "partial ", StopReason: "interrupted"}},
+		{streams: []message.StreamDelta{{Type: "text", Text: "partial "}}, resp: &message.Response{Content: "partial ", StopReason: "interrupted"}},
 		{resp: &message.Response{Content: "text continued", StopReason: "stop"}},
 	}}
 	c := &Client{}
@@ -1093,14 +1093,18 @@ func TestClient_InterruptedPartialRetriesUntilSuccess(t *testing.T) {
 		0, // default: retry until success
 		&CallStatus{},
 	)
-	if err != nil {
-		t.Fatalf("completeStreamWithRetry returned error: %v", err)
+	// A stream interruption that already produced assistant text is no longer
+	// silently retried by the client: the partial reply is preserved on screen
+	// and the failure escalates so the caller can save it and resume with a
+	// continuation prompt. Nothing may be discarded by an in-client retry.
+	if _, ok := errors.AsType[*InterruptedResponseError](err); !ok {
+		t.Fatalf("completeStreamWithRetry err = %v, want *InterruptedResponseError escalated for continuation", err)
 	}
-	if resp == nil || resp.Content != "text continued" || resp.StopReason != "stop" {
-		t.Fatalf("response = %#v, want eventual successful response", resp)
+	if resp != nil {
+		t.Fatalf("unexpected response: %#v", resp)
 	}
-	if got := impl.CallCount(); got != 2 {
-		t.Fatalf("provider calls = %d, want 2 (interrupted attempt then success)", got)
+	if got := impl.CallCount(); got != 1 {
+		t.Fatalf("provider calls = %d, want 1 (the interrupted attempt only; no silent in-client retry)", got)
 	}
 }
 
@@ -1144,13 +1148,11 @@ func TestClient_InterruptedPartialResponseRespectsExplicitRetryCap(t *testing.T)
 	}
 }
 
-// TestClient_KeptPartialRollsBackWhenRetryRegeneratesOutput guards the
-// deferred rollback: the preserved partial of an interrupted attempt must
-// leave the screen exactly when the retry regenerates content, so the card
-// never concatenates two attempts' output. The rollback fires before the
-// retry's first visible delta, not at interruption time (which would blank
-// the card during the retry wait).
-func TestClient_KeptPartialRollsBackWhenRetryRegeneratesOutput(t *testing.T) {
+// TestClient_VisibleInterruptionEscalatesWithoutRollback guards the preserved
+// partial of a visible stream interruption: the failure escalates to the
+// caller (which saves the partial and resumes it) and no rollback is emitted,
+// so the card keeps showing the partial text instead of blanking it.
+func TestClient_VisibleInterruptionEscalatesWithoutRollback(t *testing.T) {
 	primaryCfg := testProviderConfigWithKeys("primary-prov", "gpt-test", []string{"k1"})
 	impl := &scriptedProvider{calls: []scriptedCall{
 		{streams: []message.StreamDelta{{Type: "text", Text: "partial"}}, err: io.ErrUnexpectedEOF},
@@ -1158,11 +1160,8 @@ func TestClient_KeptPartialRollsBackWhenRetryRegeneratesOutput(t *testing.T) {
 	}}
 	c := NewClient(primaryCfg, impl, "gpt-test", 4096, "sys")
 
-	type deltaMark struct {
-		kind string // "text" or "rollback"
-		text string
-	}
-	var marks []deltaMark
+	var rollbacks int
+	var textSeen bool
 	resp, err := callCompleteStreamWithRetryForTest(
 		c,
 		context.Background(),
@@ -1177,9 +1176,9 @@ func TestClient_KeptPartialRollsBackWhenRetryRegeneratesOutput(t *testing.T) {
 		func(delta message.StreamDelta) {
 			switch delta.Type {
 			case message.StreamDeltaText:
-				marks = append(marks, deltaMark{kind: "text", text: delta.Text})
+				textSeen = true
 			case message.StreamDeltaRollback:
-				marks = append(marks, deltaMark{kind: "rollback"})
+				rollbacks++
 			}
 		},
 		false,
@@ -1187,25 +1186,20 @@ func TestClient_KeptPartialRollsBackWhenRetryRegeneratesOutput(t *testing.T) {
 		0, // default: retry until success
 		&CallStatus{},
 	)
-	if err != nil {
-		t.Fatalf("completeStreamWithRetry returned error: %v", err)
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("completeStreamWithRetry err = %v, want io.ErrUnexpectedEOF escalated for continuation", err)
 	}
-	if resp == nil || resp.Content != "regenerated" {
-		t.Fatalf("response = %#v, want the regenerated response", resp)
+	if resp != nil {
+		t.Fatalf("response = %#v, want nil (no silent in-client retry)", resp)
 	}
-	rollbacks := 0
-	rollbackIdx := -1
-	for i, m := range marks {
-		if m.kind == "rollback" {
-			rollbacks++
-			rollbackIdx = i
-		}
+	if rollbacks != 0 {
+		t.Fatalf("rollback deltas = %d, want 0 (preserved partial stays on screen)", rollbacks)
 	}
-	if rollbacks != 1 || rollbackIdx != 1 {
-		t.Fatalf("deltas = %+v, want [text partial, rollback, text regenerated]", marks)
+	if !textSeen {
+		t.Fatal("expected the streamed partial text delta before the failure")
 	}
-	if marks[len(marks)-1].kind != "text" || marks[len(marks)-1].text != "regenerated" {
-		t.Fatalf("last delta = %+v, want the retry's regenerated text", marks[len(marks)-1])
+	if got := impl.CallCount(); got != 1 {
+		t.Fatalf("provider calls = %d, want 1 (the interrupted attempt only; no silent in-client retry)", got)
 	}
 }
 
@@ -2502,7 +2496,11 @@ func TestClientComplete401OAuthRefreshRotatesToNextKey(t *testing.T) {
 	}
 }
 
-func TestClientCompleteStreamVisibleInterruptionRetriesSameKey(t *testing.T) {
+// TestClientCompleteStreamVisibleInterruptionEscalates guards that a visible
+// stream interruption escalates to the caller (which saves the partial text
+// and resumes it with a continuation prompt) instead of silently retrying the
+// same key and regenerating the whole reply.
+func TestClientCompleteStreamVisibleInterruptionEscalates(t *testing.T) {
 	primaryCfg := testProviderConfigWithKeys("primary-prov", "gpt-test", []string{"k1", "k2"})
 	impl := &recordingProvider{}
 	impl.calls = []scriptedCall{
@@ -2512,21 +2510,17 @@ func TestClientCompleteStreamVisibleInterruptionRetriesSameKey(t *testing.T) {
 	c := NewClient(primaryCfg, impl, "gpt-test", 4096, "sys")
 
 	resp, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
-	if err != nil {
-		t.Fatalf("CompleteStream returned error: %v", err)
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("CompleteStream err = %v, want io.ErrUnexpectedEOF escalated for continuation", err)
 	}
-	if resp == nil || resp.Content != "ok from same key" {
+	if resp != nil {
 		t.Fatalf("unexpected response: %#v", resp)
 	}
-	if len(impl.apiKeys) != 2 {
-		t.Fatalf("expected 2 provider calls, got %d", len(impl.apiKeys))
+	if len(impl.apiKeys) != 1 {
+		t.Fatalf("provider calls = %d, want 1 (the interrupted attempt only; no silent in-client retry)", len(impl.apiKeys))
 	}
-	if impl.apiKeys[0] != "k1" || impl.apiKeys[1] != "k1" {
-		t.Fatalf("expected same key retry after visible interruption, got %#v", impl.apiKeys)
-	}
-	healthy, total := primaryCfg.HealthyKeyCount()
-	if total != 2 || healthy != 2 {
-		t.Fatalf("HealthyKeyCount = %d/%d, want 2/2 after same-key recovery", healthy, total)
+	if impl.apiKeys[0] != "k1" {
+		t.Fatalf("first call key = %q, want k1", impl.apiKeys[0])
 	}
 }
 
@@ -2877,7 +2871,7 @@ func TestCompleteStreamWithRetryDoesNotResetRetryCountAfterVisibleOutputOnly(t *
 	}
 }
 
-func TestCompleteStreamWithRetryKeepsVisibleTextOnInterruptedStream(t *testing.T) {
+func TestCompleteStreamWithRetryEscalatesVisibleInterruptedStream(t *testing.T) {
 	primaryCfg := testProviderConfigWithKeys("primary-prov", "gpt-test", []string{"k1"})
 	impl := &recordingProvider{}
 	impl.calls = []scriptedCall{
@@ -2908,14 +2902,20 @@ func TestCompleteStreamWithRetryKeepsVisibleTextOnInterruptedStream(t *testing.T
 		0,
 		&CallStatus{},
 	)
-	if err != nil {
-		t.Fatalf("completeStreamWithRetry err = %v, want success after retry", err)
+	// Visible interruption escalates to the caller (which saves the partial
+	// text and resumes it) instead of silently regenerating in-client; no
+	// rollback wipes the preserved partial from the screen.
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("completeStreamWithRetry err = %v, want io.ErrUnexpectedEOF escalated for continuation", err)
 	}
-	if resp == nil || resp.Content != " continued" {
-		t.Fatalf("resp = %#v, want the retried response", resp)
+	if resp != nil {
+		t.Fatalf("resp = %#v, want nil (no silent in-client retry)", resp)
 	}
 	if rollbacks != 0 {
 		t.Fatalf("rollback deltas = %d, want 0 (interrupted partial stays on screen)", rollbacks)
+	}
+	if got := impl.CallCount(); got != 1 {
+		t.Fatalf("provider calls = %d, want 1 (the interrupted attempt only)", got)
 	}
 }
 

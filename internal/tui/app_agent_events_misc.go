@@ -31,6 +31,30 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			m.viewport.ScrollToBottom()
 		}
 		return true, effects
+	case agent.StreamContinueEvent:
+		// A preserved stream interruption saved the partial reply and injected
+		// a visible continuation prompt (KindStreamContinue). Settle the
+		// interrupted assistant card first, then render the prompt as a real
+		// user message so the user sees the reply is being resumed. The prompt
+		// is genuine history the model will see, so it must not be hidden as a
+		// toast or status card.
+		m.invalidateStatusBarAgentSnapshot()
+		m.invalidateDrawCaches()
+		m.finalizeAgentStream(evt.AgentID)
+		content := strings.TrimSpace(evt.Text)
+		if content == "" {
+			return true, effects
+		}
+		m.exitRenderFreeze()
+		wasNearBottom := m.viewport != nil && (m.viewport.sticky || m.viewport.TotalLines()-m.viewport.height-m.viewport.offset <= 1)
+		block := &Block{ID: m.nextBlockID, Type: BlockUser, Content: content, AgentID: evt.AgentID, MsgIndex: -1}
+		m.nextBlockID++
+		m.appendViewportBlock(block)
+		m.markBlockSettled(block)
+		if wasNearBottom && m.viewport != nil {
+			m.viewport.ScrollToBottom()
+		}
+		return true, effects
 	case agent.LoopStateChangedEvent, agent.YoloModeChangedEvent:
 		effects.invalidateUsage = true
 		m.invalidateDrawCaches()

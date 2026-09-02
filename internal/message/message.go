@@ -203,6 +203,18 @@ const KindBackgroundResult = "background_result"
 // or any other "what did the user ask" surface, so IsUserAuthored excludes it.
 const KindHookFeedback = "hook_feedback"
 
+// KindStreamContinue identifies a synthetic user-role message injected after a
+// streamed assistant reply was interrupted with preserved partial text. It is
+// persisted and shown like a normal user message (the model must see the
+// partial reply followed by the continuation prompt, and the user sees that the
+// reply is being resumed), but it is not user-authored: it must never become
+// the latest-request anchor of a context checkpoint, a terminal title, or a
+// "what did the user ask" surface, so IsUserAuthored excludes it. When the
+// preserved reply is dropped instead of resumed this message must not be
+// appended; a dangling continuation prompt would ask the model to resume text
+// it never sees in history.
+const KindStreamContinue = "stream_continue"
+
 // KindReplayEvidence and KindReplayContinuation mark the pair of messages that
 // modelcompat synthesizes when a target cannot replay a native tool trajectory.
 // They exist only on the request face built for one provider call and are never
@@ -302,7 +314,7 @@ func IsUserAuthored(msg Message) bool {
 		return false
 	}
 	switch msg.Kind {
-	case KindSubAgentMailbox, KindLoopNotice, KindBackgroundResult, KindHookFeedback:
+	case KindSubAgentMailbox, KindLoopNotice, KindBackgroundResult, KindHookFeedback, KindStreamContinue:
 		return false
 	default:
 		return true

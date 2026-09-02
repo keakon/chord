@@ -280,7 +280,7 @@ func TestHandleAgentErrorPersistsFailedPendingToolCalls(t *testing.T) {
 	}
 }
 
-func TestHandleAgentErrorDiscardsPartialAssistantText(t *testing.T) {
+func TestHandleAgentErrorPreservesPartialAssistantTextAndResumes(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn()
 	a.turn.appendPartialText("the second conflict is caused by the next commit touching the same file")
@@ -288,19 +288,67 @@ func TestHandleAgentErrorDiscardsPartialAssistantText(t *testing.T) {
 	a.handleAgentError(Event{Type: EventAgentError, TurnID: a.turn.ID, Payload: context.DeadlineExceeded})
 	a.flushPersist()
 
-	for _, msg := range a.GetMessages() {
-		if msg.Role == "assistant" && strings.Contains(msg.Content, "the second conflict") {
-			t.Fatalf("partial failed response was appended to context: %#v", msg)
-		}
+	// The partial reply is saved as an interrupted assistant message instead of
+	// being discarded, followed by the visible continuation prompt.
+	msgs := a.GetMessages()
+	if len(msgs) != 2 {
+		t.Fatalf("len(GetMessages()) = %d, want 2 (interrupted partial + continuation prompt)", len(msgs))
 	}
+	if msgs[0].Role != "assistant" || !strings.Contains(msgs[0].Content, "the second conflict") || msgs[0].StopReason != "interrupted" {
+		t.Fatalf("first saved message = %#v, want interrupted assistant partial", msgs[0])
+	}
+	if msgs[1].Role != "user" || msgs[1].Kind != message.KindStreamContinue || msgs[1].Content != streamContinuePromptText {
+		t.Fatalf("second saved message = %#v, want visible continuation prompt", msgs[1])
+	}
+	if a.turn.AutoContinueCount != 1 {
+		t.Fatalf("turn.AutoContinueCount = %d, want 1", a.turn.AutoContinueCount)
+	}
+
 	restored, err := a.recovery.LoadMessages("main")
 	if err != nil {
 		t.Fatalf("LoadMessages(main): %v", err)
 	}
-	for _, msg := range restored {
-		if msg.Role == "assistant" && strings.Contains(msg.Content, "the second conflict") {
-			t.Fatalf("partial failed response was persisted: %#v", msg)
+	if len(restored) != 2 {
+		t.Fatalf("len(restored main messages) = %d, want 2", len(restored))
+	}
+	if restored[0].Role != "assistant" || !strings.Contains(restored[0].Content, "the second conflict") {
+		t.Fatalf("restored partial = %#v, want preserved interrupted assistant", restored[0])
+	}
+	if restored[1].Role != "user" || restored[1].Kind != message.KindStreamContinue {
+		t.Fatalf("restored continuation prompt = %#v, want KindStreamContinue", restored[1])
+	}
+}
+
+func TestHandleAgentErrorAutoContinueCapKeepsPartialTextAndStops(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.newTurn()
+	a.turn.AutoContinueCount = maxAutoContinueStreamRounds
+	a.turn.appendPartialText("partial reply saved before the cap")
+
+	a.handleAgentError(Event{Type: EventAgentError, TurnID: a.turn.ID, Payload: context.DeadlineExceeded})
+	a.flushPersist()
+
+	// The cap stops the automatic loop, but the partial text just streamed is
+	// still saved; no further continuation prompt is injected.
+	msgs := a.GetMessages()
+	if len(msgs) != 1 {
+		t.Fatalf("len(GetMessages()) = %d, want 1 (preserved partial only)", len(msgs))
+	}
+	if msgs[0].Role != "assistant" || !strings.Contains(msgs[0].Content, "partial reply saved") || msgs[0].StopReason != "interrupted" {
+		t.Fatalf("saved message = %#v, want interrupted assistant partial", msgs[0])
+	}
+
+	// An explanatory error event is emitted so the UI tells the user the reply
+	// was preserved and how to resume it manually.
+	var sawError bool
+	for len(a.outputCh) > 0 {
+		evt := <-a.outputCh
+		if _, ok := evt.(ErrorEvent); ok {
+			sawError = true
 		}
+	}
+	if !sawError {
+		t.Fatal("expected ErrorEvent after auto-continue cap was hit")
 	}
 }
 

@@ -331,6 +331,19 @@ func IsUpstreamStreamFailure(err error) bool {
 	return ok && hasUpstreamFailureSignal(apiErr)
 }
 
+// IsPreservableStreamInterruption is the exported form of isInterruptedStreamError:
+// it reports whether err ended a stream that may carry already-streamed
+// assistant text worth preserving (an interrupted partial response, a
+// truncated/closed transport, a chunk/read timeout, or a timeout-like
+// failure). The agent uses it to decide whether the turn's accumulated partial
+// text should be saved to history and resumed with a visible continuation
+// prompt instead of being discarded. Request-shape rejections (bad request,
+// context length, replay rejections) are excluded because they carry no usable
+// partial output.
+func IsPreservableStreamInterruption(err error) bool {
+	return isInterruptedStreamError(err)
+}
+
 // isReasoningReplayRejection reports whether err is a request rejection caused
 // by replaying reasoning/tool trajectory items the backend refuses to accept
 // (for example a function_call item missing its paired reasoning item, or an
