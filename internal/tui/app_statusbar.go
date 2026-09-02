@@ -770,6 +770,19 @@ func (m *Model) renderStatusBarRightSide(now time.Time, effectiveWidth, leftWidt
 			availableRight = min(availableRight, rightFreeFromCenter)
 		}
 	}
+	// Reserve the compaction indicator's width before budgeting path/session.
+	// The right-aligned group is placed with its left edge against the centered
+	// activity lane; without a reservation the pill (its leftmost member) is the
+	// first thing sliced off when a foreground request owns the lane and the
+	// terminal is narrow, making a long-running compaction look completely
+	// absent from the status bar.
+	compactionPill := m.renderCompactionBackgroundPill(now)
+	if compactionPill != "" {
+		availableRight -= lipgloss.Width(compactionPill) + separatorWidth
+		if availableRight < 0 {
+			availableRight = 0
+		}
+	}
 	if availableRight > 0 {
 		availableSession := availableRight
 		if m.width < statusBarSessionMinVisibleCols {
@@ -811,7 +824,7 @@ func (m *Model) renderStatusBarRightSide(now time.Time, effectiveWidth, leftWidt
 	}
 
 	rightParts := make([]string, 0, 5)
-	if compactionPill := m.renderCompactionBackgroundPill(now); compactionPill != "" {
+	if compactionPill != "" {
 		rightParts = append(rightParts, compactionPill)
 	}
 	if pathText != "" {

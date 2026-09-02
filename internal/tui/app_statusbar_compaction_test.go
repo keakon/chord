@@ -216,3 +216,42 @@ func TestExpiredCompactionTerminalStatusKeepsIdleRefresh(t *testing.T) {
 		t.Fatalf("expired terminal refresh delay = %v, want the idle minute cadence", delay)
 	}
 }
+
+// A live compaction indicator must survive beside a busy foreground request.
+// The right-aligned group is placed with its left edge against the centered
+// activity lane; if path/session are budgeted without reserving the pill, the
+// placed line slices the right block's left edge and the whole compaction
+// indicator disappears on narrower terminals for the full compaction duration.
+func TestCompactionPillSurvivesBusyActivityLane(t *testing.T) {
+	m := NewModelWithSize(nil, 140, 24)
+	now := time.Unix(1_700_000_000, 0)
+	m.compactionBgStatus = compactionBackgroundStatus{Active: true, StartedAt: now.Add(-4 * time.Second)}
+
+	const (
+		effectiveWidth = 100
+		leftWidth      = 24
+		activityWidth  = 22
+	)
+	rightSide, rightStart, _ := m.renderStatusBarRightSide(now, effectiveWidth, leftWidth, activityWidth, "/Users/keakon/Workspace/chord", "20260902024540990")
+
+	centerStart := max((effectiveWidth-activityWidth)/2, leftWidth+2)
+	centerEnd := centerStart + activityWidth
+	if rightStart < centerEnd {
+		t.Fatalf("compaction pill collides with the busy activity lane: rightStart=%d centerEnd=%d", rightStart, centerEnd)
+	}
+	line := renderStatusBarPlacedLine("", 0, rightStart, rightSide, "", activityWidth, effectiveWidth)
+	if plain := stripANSI(line); !strings.Contains(plain, "compacting") {
+		t.Fatalf("status bar lost the compaction indicator beside a busy activity lane: %q", plain)
+	}
+}
+
+func TestCompactionLivePillIsLabeled(t *testing.T) {
+	m := NewModelWithSize(nil, 140, 24)
+	now := time.Unix(1_700_000_000, 0)
+	m.compactionBgStatus = compactionBackgroundStatus{Active: true, StartedAt: now.Add(-3 * time.Second)}
+
+	got := stripANSI(m.renderCompactionBackgroundPill(now))
+	if !strings.Contains(got, "compacting") || !strings.Contains(got, "3s") {
+		t.Fatalf("live compaction pill = %q, want a labeled indicator with elapsed time", got)
+	}
+}
