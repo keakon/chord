@@ -119,8 +119,8 @@ func TestQueueContextPressureReminderGates(t *testing.T) {
 	if reminder == "" {
 		t.Fatal("tool-visible session must queue a reminder above the line")
 	}
-	if !strings.Contains(reminder, "compact_context") || !strings.Contains(reminder, "automatic-compaction threshold") {
-		t.Fatalf("reminder text = %q, want actionable text naming compact_context", reminder)
+	if !strings.Contains(reminder, "compact_context") || !strings.Contains(reminder, "automatic-compaction threshold") || !strings.Contains(reminder, ".chord/notes/") {
+		t.Fatalf("reminder text = %q, want actionable text naming compact_context and a concrete write target", reminder)
 	}
 	if strings.Contains(reminder, "<context-pressure>") || strings.Contains(reminder, "<system-reminder>") {
 		t.Fatalf("queued reminder must be bare text; the injector wraps it in <system-reminder>, got %q", reminder)
@@ -173,7 +173,7 @@ func TestQueueCompactionWarningLifecycle(t *testing.T) {
 	if a.pendingCompactionWarning == "" {
 		t.Fatal("armed auto-compact request with a visible tool must queue the externalization warning")
 	}
-	if !strings.Contains(a.pendingCompactionWarning, "next safe boundary") || !strings.Contains(a.pendingCompactionWarning, "last request on the current context") || strings.Contains(a.pendingCompactionWarning, "<") {
+	if !strings.Contains(a.pendingCompactionWarning, "next safe boundary") || !strings.Contains(a.pendingCompactionWarning, "last request on the current context") || !strings.Contains(a.pendingCompactionWarning, ".chord/notes/") || strings.Contains(a.pendingCompactionWarning, "<") {
 		t.Fatalf("warning text = %q, want bare actionable externalization content (the injector wraps <system-reminder>)", a.pendingCompactionWarning)
 	}
 	a.pendingCompactionWarning = ""

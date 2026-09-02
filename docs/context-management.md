@@ -229,7 +229,10 @@ move on. When context usage approaches the automatic-compaction threshold, the
 next request may carry a one-time context-pressure reminder: it tells the model
 to prepare for the compaction (call `compact_context` alone if the current
 phase is wrapped up, otherwise keep externalizing findings to project files as
-phases settle) instead of quoting how much context is left. The usage-driven
+phases settle) instead of quoting how much context is left. The reminder and
+warning name the write target in role terms — a task-notes file under
+`.chord/notes/` or a plan document under `.chord/plans/`, whichever the role
+may write. The usage-driven
 compaction starts on the threshold crossing itself, and the request that runs
 alongside it carries a one-time externalization warning. Both
 overlays are wrapped in a `<system-reminder>` block — the same runtime-message
@@ -244,8 +247,10 @@ While model-driven compaction is enabled, the main agent's system prompt also
 carries a short passive `Long-session context management` section: it states
 that `<system-reminder>`-wrapped messages are harness-injected runtime state
 (never user-written) and authoritative, and asks the model to write key
-findings and decisions to project files as phases settle (so they survive a
-later checkpoint), call `compact_context` alone only at a real phase boundary,
+findings and decisions to project files the role may write — for example a
+task-notes file under `.chord/notes/` or a plan document under `.chord/plans/`
+— as phases settle (so they survive a later checkpoint), call
+`compact_context` alone only at a real phase boundary,
 and read the archived history files for exact past facts after a checkpoint
 applies. SubAgents never receive this section or the tool. The guidance is
 advisory, not a required workflow.

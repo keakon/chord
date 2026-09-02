@@ -101,9 +101,9 @@ providers:
 
 自动压缩不会把模型的 checkpoint 锁死。当 usage-driven 压缩已在运行（threshold 越线启动了后台 worker，或 draft 已 ready、正在等 continuation barrier）时，与它并行的那次请求仍可提交 `compact_context`。模型是自己挑的边界，所以它的 checkpoint 优先：runtime 丢弃自动 draft，改应用模型 checkpoint。自动压缩是兜底而不是锁——threshold 越线不会夺走正在收尾的模型的 reset 机会。一次性外化提示不会提及这种覆盖（模型不需要知道有自动压缩在跑，只需要知道当前上下文即将结束）；模型之前主动提交的 checkpoint 照常工作。
 
-skip 是正常的策略结果：立即用相同请求重试会被短暂冷却，结果不会改变——模型应等待或继续推进。上下文用量接近自动压缩阈值时，下一次请求可能附带一次性压力提醒：它直接告诉模型为压缩做准备（当前阶段已收口就单独调用 `compact_context`，否则随阶段把 findings 和决定写进项目文件），不再引用还剩多少空间。usage-driven 压缩在 threshold 越线当次即启动，与压缩并行的那次请求会附带一次性外化提示。这两个 overlay 都用 `<system-reminder>` 块包裹——与其他所有 harness 注入的运行时消息同一约定——让模型能区分它们和用户写的内容（内存压力信号类研究，如 MemGPT，正是以 system 消息注入这类提醒）。它们都只在启用 `model_driven` 时注入——关闭时模型没有任何外化契约，注入只会变成无法执行的噪音。它们是瞬态的，不会进入对话历史。
+skip 是正常的策略结果：立即用相同请求重试会被短暂冷却，结果不会改变——模型应等待或继续推进。上下文用量接近自动压缩阈值时，下一次请求可能附带一次性压力提醒：它直接告诉模型为压缩做准备（当前阶段已收口就单独调用 `compact_context`，否则随阶段把 findings 和决定写进本角色可写的项目文件，如 `.chord/notes/` 下的任务笔记或 `.chord/plans/` 下的计划文档），不再引用还剩多少空间。usage-driven 压缩在 threshold 越线当次即启动，与压缩并行的那次请求会附带一次性外化提示。这两个 overlay 都用 `<system-reminder>` 块包裹——与其他所有 harness 注入的运行时消息同一约定——让模型能区分它们和用户写的内容（内存压力信号类研究，如 MemGPT，正是以 system 消息注入这类提醒）。它们都只在启用 `model_driven` 时注入——关闭时模型没有任何外化契约，注入只会变成无法执行的噪音。它们是瞬态的，不会进入对话历史。
 
-启用 `model_driven` 时，主 agent 的系统提示词还会附带一段简短被动的 `Long-session context management` 指引：开头声明 `<system-reminder>` 包裹的消息是 harness 注入的运行时状态（绝非用户所写）且具权威性；随后要求随阶段收口把关键发现和决定写入项目文件（让它们能在后续 checkpoint 后存活），只在真正的阶段边界单独调用 `compact_context`，checkpoint 应用后需要精确历史时去读归档的 history 文件。SubAgent 永远不会收到这段指引或该工具。该指引是建议性的，不是强制流程。
+启用 `model_driven` 时，主 agent 的系统提示词还会附带一段简短被动的 `Long-session context management` 指引：开头声明 `<system-reminder>` 包裹的消息是 harness 注入的运行时状态（绝非用户所写）且具权威性；随后要求随阶段收口把关键发现和决定写入本角色可写的项目文件——如 `.chord/notes/` 下的任务笔记或 `.chord/plans/` 下的计划文档——让它们能在后续 checkpoint 后存活，只在真正的阶段边界单独调用 `compact_context`，checkpoint 应用后需要精确历史时去读归档的 history 文件。SubAgent 永远不会收到这段指引或该工具。该指引是建议性的，不是强制流程。
 
 压缩是递归的：下一次自动摘要写在一段以 checkpoint 开头的历史之上。会话锚点（原始请求、standing constraints）逐字前向携带，前一个 checkpoint 的结构化正文也一样——摘要模型始终把它作为受保护的输入段收到，应用后的 checkpoint 还会把它逐字追加为 `## Previous Checkpoint` 段。因此 checkpoint 的结构化内容（目标、决策、未决问题、下一步……）从不依赖摘要模型恰好复述它，链式压缩也无法一次摘要一点地侵蚀它。
 

@@ -23,10 +23,20 @@ func TestDefaultPlannerAgentUsesUpdatedPermissionPolicy(t *testing.T) {
 			pattern: ".chord/plans/plan-001.md",
 			want:    permission.ActionAllow,
 		},
+		{
+			perm:    toolname.Write,
+			pattern: ".chord/notes/findings-001.md",
+			want:    permission.ActionAllow,
+		},
 		{perm: toolname.Write, pattern: "docs/plan.md", want: permission.ActionDeny},
 		{
 			perm:    toolname.Edit,
 			pattern: ".chord/plans/plan-001.md",
+			want:    permission.ActionAllow,
+		},
+		{
+			perm:    toolname.Edit,
+			pattern: ".chord/notes/findings-001.md",
 			want:    permission.ActionAllow,
 		},
 		{perm: toolname.Edit, pattern: "docs/plan.md", want: permission.ActionDeny},

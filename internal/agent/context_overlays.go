@@ -33,7 +33,7 @@ const (
 	// externalization opportunity on the request that runs alongside the
 	// automatic-compaction start, and says plainly that the compaction does
 	// not wait for it.
-	compactionWarningText = "The context has reached the automatic-compaction threshold and will be compacted at the next safe boundary.\nIf important findings, decisions, or working state are not yet written to files, write them now — this may be the last request on the current context.\nThe compaction does not wait for this message."
+	compactionWarningText = "The context has reached the automatic-compaction threshold and will be compacted at the next safe boundary.\nIf important findings, decisions, or working state are not yet written to files, write them now to a project file your role may write (for example a task-notes file under .chord/notes/ or a plan document under .chord/plans/) — this may be the last request on the current context.\nThe compaction does not wait for this message."
 )
 
 // reminderOverlayClaim is the per-window claim for the context-pressure
@@ -259,7 +259,7 @@ func (a *MainAgent) queueCompactionWarning() {
 func buildContextPressureReminderText() string {
 	return "The context is approaching the configured automatic-compaction threshold.\n" +
 		"If the current phase is wrapped up and its working state is fully externalized, request a durable context checkpoint now by calling compact_context alone.\n" +
-		"If the phase is still open, keep writing important findings and decisions to project files as they settle, so they survive the upcoming compaction and can be re-read afterwards."
+		"If the phase is still open, keep writing important findings and decisions to project files your role may write (for example a task-notes file under .chord/notes/ or a plan document under .chord/plans/) as they settle, so they survive the upcoming compaction and can be re-read afterwards."
 }
 
 // appendContextPressureVerificationGuidance appends the post-apply guidance:

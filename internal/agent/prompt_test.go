@@ -2150,6 +2150,8 @@ func TestModelDrivenContextPromptBlockInjectedWhenEnabled(t *testing.T) {
 		"state_files",
 		"archived history",
 		"low-gain",
+		".chord/notes/",
+		".chord/plans/",
 	} {
 		if !strings.Contains(block, want) {
 			t.Fatalf("block must mention %q, got:\n%s", want, block)

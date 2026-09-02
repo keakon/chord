@@ -127,6 +127,7 @@ Sessions、运行时缓存、exports 都以这个 key 为索引——在 `~/proj
 - `AGENTS.md` 放仓库级指令，适用的 agent 必须遵守。
 - `.chord/config.yaml`、`.chord/agents/`、`.chord/commands/` 和 `.chord/skills/` 放项目显式配置与共享能力。
 - `.chord/plans/` 放计划文档，是否提交由项目自行决定。
+- `.chord/notes/` 放会话为自己保留的可读工作笔记（发现、未收口线索），让长只读会话在被跟踪的树外有一个合法写盘目标；是否提交由项目自行决定。
 - 项目内 Chord 文件引用仓库文件时，应使用相对项目根的路径，这样移动整个项目目录后仍然有效。
 
 不要把 `.chord/` 当成通用运行时状态目录。会话 transcript、usage ledger、恢复快照、项目注册表、日志、锁和其他不透明的运行时记账数据，应放在上面的 state 目录或 cache 目录中。用户需要直接编辑、使用相对路径引用或随项目移动的人类可读产物，可以放在项目目录，但必须明确 Git 和所有权语义。尤其不要把 `auth.yaml` 或其他凭据放进项目目录。

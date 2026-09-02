@@ -142,6 +142,7 @@ project, or for user-visible artifacts that a team may review:
 - `AGENTS.md` contains repository instructions that applicable agents must follow.
 - `.chord/config.yaml`, `.chord/agents/`, `.chord/commands/`, and `.chord/skills/` contain explicit project configuration and shared capabilities.
 - `.chord/plans/` contains planning documents. Whether plans are committed is a project decision.
+- `.chord/notes/` holds human-readable working notes a session keeps for itself (findings, open-thread state) so long read-mostly sessions have a legal write target outside the tracked tree; whether notes are committed is a project decision.
 - Project-local Chord files should use paths relative to the project root when they refer to repository files, so the project remains portable when its directory moves.
 
 Do not use `.chord/` as a general runtime-state directory. Session transcripts,
