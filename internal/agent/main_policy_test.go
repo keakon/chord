@@ -1477,6 +1477,25 @@ func newTestLLMClient() *llm.Client {
 	return llm.NewClient(providerCfg, stubProvider{}, "test-model", 1024, "")
 }
 
+// newChatCompletionsTestClient builds a client on the openai-chat wire family.
+// Tests use it when they need a model pool that can resume a reply from a
+// trailing assistant turn, which the default Anthropic-family test client
+// deliberately cannot.
+func newChatCompletionsTestClient() *llm.Client {
+	providerCfg := llm.NewProviderConfig("test-cc", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"test-model": {
+				Limit: config.ModelLimit{
+					Context: 8192,
+					Output:  1024,
+				},
+			},
+		},
+	}, []string{"test-key"})
+	return llm.NewClient(providerCfg, stubProvider{}, "test-model", 1024, "")
+}
+
 func newRoleSwitchClient(t *testing.T, providerName, modelID string, contextLimit int, keys ...string) *llm.Client {
 	t.Helper()
 	if len(keys) == 0 {

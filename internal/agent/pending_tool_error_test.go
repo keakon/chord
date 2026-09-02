@@ -280,6 +280,11 @@ func TestHandleAgentErrorPersistsFailedPendingToolCalls(t *testing.T) {
 	}
 }
 
+// TestHandleAgentErrorPreservesPartialAssistantTextAndResumes covers a pool
+// whose models cannot resume from a trailing assistant turn (the Anthropic wire
+// family): the partial reply is saved as durable history, and the instruction to
+// continue it is queued as a request-scoped overlay rather than appended to the
+// conversation.
 func TestHandleAgentErrorPreservesPartialAssistantTextAndResumes(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn()
@@ -289,33 +294,92 @@ func TestHandleAgentErrorPreservesPartialAssistantTextAndResumes(t *testing.T) {
 	a.flushPersist()
 
 	// The partial reply is saved as an interrupted assistant message instead of
-	// being discarded, followed by the visible continuation prompt.
+	// being discarded. The continuation instruction must NOT join it: it is a
+	// synthetic message the user never wrote, and it would outlive the
+	// interruption it describes in the session record.
 	msgs := a.GetMessages()
-	if len(msgs) != 2 {
-		t.Fatalf("len(GetMessages()) = %d, want 2 (interrupted partial + continuation prompt)", len(msgs))
+	if len(msgs) != 1 {
+		t.Fatalf("len(GetMessages()) = %d, want 1 (interrupted partial only)", len(msgs))
 	}
 	if msgs[0].Role != "assistant" || !strings.Contains(msgs[0].Content, "the second conflict") || msgs[0].StopReason != "interrupted" {
-		t.Fatalf("first saved message = %#v, want interrupted assistant partial", msgs[0])
-	}
-	if msgs[1].Role != "user" || msgs[1].Kind != message.KindStreamContinue || msgs[1].Content != streamContinuePromptText {
-		t.Fatalf("second saved message = %#v, want visible continuation prompt", msgs[1])
+		t.Fatalf("saved message = %#v, want interrupted assistant partial", msgs[0])
 	}
 	if a.turn.AutoContinueCount != 1 {
 		t.Fatalf("turn.AutoContinueCount = %d, want 1", a.turn.AutoContinueCount)
+	}
+	if a.pendingStreamContinuePrompt == "" {
+		t.Fatal("expected a request-scoped continuation prompt for a pool that cannot prefill-continue")
 	}
 
 	restored, err := a.recovery.LoadMessages("main")
 	if err != nil {
 		t.Fatalf("LoadMessages(main): %v", err)
 	}
-	if len(restored) != 2 {
-		t.Fatalf("len(restored main messages) = %d, want 2", len(restored))
+	if len(restored) != 1 {
+		t.Fatalf("len(restored main messages) = %d, want 1 (no synthetic continuation persisted)", len(restored))
 	}
 	if restored[0].Role != "assistant" || !strings.Contains(restored[0].Content, "the second conflict") {
 		t.Fatalf("restored partial = %#v, want preserved interrupted assistant", restored[0])
 	}
-	if restored[1].Role != "user" || restored[1].Kind != message.KindStreamContinue {
-		t.Fatalf("restored continuation prompt = %#v, want KindStreamContinue", restored[1])
+}
+
+// TestHandleAgentErrorPrefillCapablePoolSkipsContinuationPrompt covers a pool
+// whose models can resume from a trailing assistant turn: nothing is appended
+// and no overlay is queued, so the next request simply ends with the preserved
+// reply and the model picks it up where it stopped.
+func TestHandleAgentErrorPrefillCapablePoolSkipsContinuationPrompt(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.llmClient = newChatCompletionsTestClient()
+	a.newTurn()
+	a.turn.appendPartialText("the second conflict is caused by the next commit touching the same file")
+
+	a.handleAgentError(Event{Type: EventAgentError, TurnID: a.turn.ID, Payload: context.DeadlineExceeded})
+	a.flushPersist()
+
+	msgs := a.GetMessages()
+	if len(msgs) != 1 {
+		t.Fatalf("len(GetMessages()) = %d, want 1 (interrupted partial only)", len(msgs))
+	}
+	if msgs[0].Role != "assistant" || msgs[0].StopReason != "interrupted" {
+		t.Fatalf("saved message = %#v, want interrupted assistant partial", msgs[0])
+	}
+	if a.turn.AutoContinueCount != 1 {
+		t.Fatalf("turn.AutoContinueCount = %d, want 1", a.turn.AutoContinueCount)
+	}
+	if a.pendingStreamContinuePrompt != "" {
+		t.Fatalf("pendingStreamContinuePrompt = %q, want empty for a prefill-capable pool", a.pendingStreamContinuePrompt)
+	}
+}
+
+// TestStreamContinueOverlayIsRequestScoped guards the one-shot contract: the
+// continuation prompt reaches the request overlay exactly once and is cleared,
+// so it cannot leak into a later request or survive a compaction.
+func TestStreamContinueOverlayIsRequestScoped(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.pendingStreamContinuePrompt = streamContinuePrompt()
+
+	var seen []message.Message
+	for i := 0; i < 2; i++ {
+		seen = a.buildTurnOverlayMessages()
+		if i == 0 {
+			if len(seen) != 1 {
+				t.Fatalf("first build produced %d overlays, want 1: %+v", len(seen), seen)
+			}
+			ov := seen[0]
+			if ov.Role != "user" || ov.Kind != message.KindTurnOverlay {
+				t.Fatalf("overlay = %#v, want user-role KindTurnOverlay", ov)
+			}
+			if !strings.Contains(ov.Content, "<system-reminder>") || !strings.Contains(ov.Content, "interrupted by a transport error") {
+				t.Fatalf("overlay content = %q, want the wrapped continuation instruction", ov.Content)
+			}
+			continue
+		}
+		if len(seen) != 0 {
+			t.Fatalf("second build produced %d overlays, want 0 (one-shot): %+v", len(seen), seen)
+		}
+	}
+	if a.pendingStreamContinuePrompt != "" {
+		t.Fatalf("pendingStreamContinuePrompt = %q, want empty after consumption", a.pendingStreamContinuePrompt)
 	}
 }
 

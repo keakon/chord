@@ -517,6 +517,58 @@ func kimiDynamicTargetSupported(target FallbackModel) bool {
 	return cc != nil && compatBool(cc.MCPSystemToolsMessage, false)
 }
 
+// AllPoolTargetsSupportAssistantPrefillContinuation reports whether every
+// target in the model pool can resume a reply from a request whose last
+// message is the interrupted assistant turn, letting the caller skip the
+// extra user turn a continuation prompt would otherwise need.
+//
+// Like AllPoolTargetsSupportKimiDynamicTools this is deliberately an all-target
+// check: a preserved interruption restarts the request through the full
+// key/fallback rotation, so the request shape must be legal for every target
+// that may end up serving it, not just the one that was interrupted. A pool
+// containing a single target that needs a user turn therefore makes the whole
+// pool take the user-turn path.
+func (c *Client) AllPoolTargetsSupportAssistantPrefillContinuation() bool {
+	if c == nil {
+		return false
+	}
+	c.mu.RLock()
+	pool := c.modelPoolLocked()
+	c.mu.RUnlock()
+	if len(pool) == 0 {
+		return false
+	}
+	for _, target := range pool {
+		if !assistantPrefillContinuationSupported(target) {
+			return false
+		}
+	}
+	return true
+}
+
+// assistantPrefillContinuationSupported reports whether one target accepts a
+// trailing assistant turn as a continuation point. Only the wire families that
+// are known to allow it return true; an unrecognized family is treated as
+// unsupported so the caller keeps the portable user-turn path.
+func assistantPrefillContinuationSupported(target FallbackModel) bool {
+	if target.ProviderConfig == nil {
+		return false
+	}
+	switch providerWireFamily(target.ProviderConfig) {
+	case modelcompat.WireFamilyAnthropic:
+		// The Anthropic Messages API does accept a trailing assistant turn as
+		// a prefill, but not for requests that run with extended thinking, and
+		// the wire family alone cannot tell whether this target does. Since a
+		// rejected continuation is far worse than a redundant user turn,
+		// Anthropic targets always take the user-turn path.
+		return false
+	case modelcompat.WireFamilyOpenAIChat, modelcompat.WireFamilyOpenAIResponses, modelcompat.WireFamilyGemini:
+		return true
+	default:
+		return false
+	}
+}
+
 // SupportsThinkingReplay reports whether modelRef (or the next cursor-head
 // target when modelRef is empty) runs a thinking-mode chat backend that
 // accepts visible reasoning_content replay (DeepSeek family and other

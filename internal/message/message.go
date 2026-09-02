@@ -203,16 +203,16 @@ const KindBackgroundResult = "background_result"
 // or any other "what did the user ask" surface, so IsUserAuthored excludes it.
 const KindHookFeedback = "hook_feedback"
 
-// KindStreamContinue identifies a synthetic user-role message injected after a
-// streamed assistant reply was interrupted with preserved partial text. It is
-// persisted and shown like a normal user message (the model must see the
-// partial reply followed by the continuation prompt, and the user sees that the
-// reply is being resumed), but it is not user-authored: it must never become
-// the latest-request anchor of a context checkpoint, a terminal title, or a
-// "what did the user ask" surface, so IsUserAuthored excludes it. When the
-// preserved reply is dropped instead of resumed this message must not be
-// appended; a dangling continuation prompt would ask the model to resume text
-// it never sees in history.
+// KindStreamContinue is legacy-only: it marked a synthetic user-role
+// continuation prompt that was durably appended after a streamed assistant
+// reply was interrupted. Continuation is now a request-scoped overlay, so no
+// new message of this kind is ever created or persisted.
+//
+// The kind and its IsUserAuthored exclusion are kept so session files recorded
+// before that change still restore correctly: without the exclusion a stale
+// "继续" message would restore as user-authored and could become the
+// latest-request anchor of a context checkpoint or a terminal title. Remove
+// both once no session predates the overlay switch.
 const KindStreamContinue = "stream_continue"
 
 // KindReplayEvidence and KindReplayContinuation mark the pair of messages that

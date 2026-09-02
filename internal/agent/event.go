@@ -285,10 +285,11 @@ type LoopNoticeEvent struct {
 
 func (LoopNoticeEvent) agentEvent() {}
 
-// StreamContinueEvent notifies the TUI that a preserved stream interruption
-// injected a visible continuation prompt (KindStreamContinue). The prompt is
-// real user-role history that the model will see, so the UI shows it as a user
-// message instead of hiding it.
+// StreamContinueEvent notifies the TUI that a preserved stream interruption is
+// being resumed. Text is a status notice, not conversation content: the reply
+// is continued by a request-scoped overlay, so nothing is appended to the
+// transcript and the UI must render this as a productized status card rather
+// than as a user message the user never wrote.
 type StreamContinueEvent struct {
 	Text    string
 	AgentID string // originating agent ("" = main agent)

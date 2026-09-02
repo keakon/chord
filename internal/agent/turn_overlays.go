@@ -122,6 +122,18 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 		})
 	}
 
+	// Continuation prompt for a preserved stream interruption: request-scoped
+	// like the recovery prompt above. The interrupted reply itself is durable
+	// history, but the instruction to continue it is a runtime hint that must
+	// not survive into the session record or into a later compaction.
+	if continuePrompt := a.takePendingStreamContinuePrompt(); continuePrompt != "" {
+		overlays = append(overlays, message.Message{
+			Role:    "user",
+			Kind:    message.KindTurnOverlay,
+			Content: "<system-reminder>\n" + continuePrompt + "\n</system-reminder>",
+		})
+	}
+
 	// Auto-continue prompt from usage-driven / oversize-driven compaction: keep it
 	// request-scoped so the durable session history remains a clean compressed
 	// summary, while the next turn explicitly resumes the task. The continue and
@@ -155,6 +167,17 @@ func (a *MainAgent) takePendingRecoveryPrompt() string {
 	}
 	prompt := a.pendingRecoveryPrompt
 	a.pendingRecoveryPrompt = ""
+	return prompt
+}
+
+// takePendingStreamContinuePrompt consumes the pending stream-continuation
+// prompt (one-shot). Returns the pending prompt if any, or empty string if none.
+func (a *MainAgent) takePendingStreamContinuePrompt() string {
+	if a.pendingStreamContinuePrompt == "" {
+		return ""
+	}
+	prompt := a.pendingStreamContinuePrompt
+	a.pendingStreamContinuePrompt = ""
 	return prompt
 }
 

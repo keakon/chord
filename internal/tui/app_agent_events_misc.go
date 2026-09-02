@@ -10,6 +10,11 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
+// streamContinueCardTitle labels the status card left behind by a preserved
+// stream interruption. It is UI chrome, matching the other status cards, not a
+// message in the transcript.
+const streamContinueCardTitle = "REPLY RESUMED"
+
 func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEffects) {
 	var effects agentEventEffects
 	switch evt := event.(type) {
@@ -32,12 +37,11 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		}
 		return true, effects
 	case agent.StreamContinueEvent:
-		// A preserved stream interruption saved the partial reply and injected
-		// a visible continuation prompt (KindStreamContinue). Settle the
-		// interrupted assistant card first, then render the prompt as a real
-		// user message so the user sees the reply is being resumed. The prompt
-		// is genuine history the model will see, so it must not be hidden as a
-		// toast or status card.
+		// A preserved stream interruption saved the partial reply and is
+		// resuming it. Settle the interrupted assistant card first, then leave a
+		// status card explaining the resume. The continuation itself is a
+		// request-scoped overlay, so rendering it as a user message would put a
+		// message the user never wrote into the transcript.
 		m.invalidateStatusBarAgentSnapshot()
 		m.invalidateDrawCaches()
 		m.finalizeAgentStream(evt.AgentID)
@@ -47,7 +51,7 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		}
 		m.exitRenderFreeze()
 		wasNearBottom := m.viewport != nil && (m.viewport.sticky || m.viewport.TotalLines()-m.viewport.height-m.viewport.offset <= 1)
-		block := &Block{ID: m.nextBlockID, Type: BlockUser, Content: content, AgentID: evt.AgentID, MsgIndex: -1}
+		block := &Block{ID: m.nextBlockID, Type: BlockStatus, StatusTitle: streamContinueCardTitle, Content: content, AgentID: evt.AgentID}
 		m.nextBlockID++
 		m.appendViewportBlock(block)
 		m.markBlockSettled(block)
