@@ -103,17 +103,44 @@ chord doctor models --model openai/gpt-5.5@high
 
 ### GPT-5.6 alias (`gpt-5.6` → Sol)
 
+The three 5.6 tiers share the same window, reasoning, variants, and
+modalities, so a common `&gpt-5-6-base` anchor carries those; each tier only
+adds its own `cost` block (permanent list prices; temporary promotions are not
+maintained here).
+
 ```yaml
+model_templates:
+  gpt-5.6-base: &gpt-5-6-base
+    limit:
+      context: 400000
+      input: 272000
+      output: 128000
+    reasoning:
+      effort: medium
+      summary: auto
+    variants:
+      low:
+        reasoning:
+          effort: low
+      high:
+        reasoning:
+          effort: high
+      xhigh:
+        reasoning:
+          effort: xhigh
+      max:
+        reasoning:
+          effort: max
+    modalities:
+      input: [text, image, pdf]
+
 providers:
   openai:
     type: responses
     api_url: https://api.openai.com/v1/responses
     models:
       gpt-5.6:
-        limit:
-          context: 400000
-          input: 272000
-          output: 128000
+        <<: *gpt-5-6-base
         cost:
           input: 5
           output: 30
@@ -125,24 +152,6 @@ providers:
               output: 45
               cache_read: 1
               cache_write: 12.5
-        reasoning:
-          effort: medium
-          summary: auto
-        variants:
-          low:
-            reasoning:
-              effort: low
-          high:
-            reasoning:
-              effort: high
-          xhigh:
-            reasoning:
-              effort: xhigh
-          max:
-            reasoning:
-              effort: max
-        modalities:
-          input: [text, image]
 
 model_pools:
   default:
@@ -160,10 +169,7 @@ providers:
     api_url: https://api.openai.com/v1/responses
     models:
       gpt-5.6-sol:
-        limit:
-          context: 400000
-          input: 272000
-          output: 128000
+        <<: *gpt-5-6-base
         cost:
           input: 5
           output: 30
@@ -175,15 +181,6 @@ providers:
               output: 45
               cache_read: 1
               cache_write: 12.5
-        reasoning:
-          effort: medium
-          summary: auto
-        variants:
-          max:
-            reasoning:
-              effort: max
-        modalities:
-          input: [text, image]
 ```
 
 ### GPT-5.6 Terra
@@ -195,10 +192,7 @@ providers:
     api_url: https://api.openai.com/v1/responses
     models:
       gpt-5.6-terra:
-        limit:
-          context: 400000
-          input: 272000
-          output: 128000
+        <<: *gpt-5-6-base
         cost:
           input: 2
           output: 12
@@ -210,15 +204,6 @@ providers:
               output: 18
               cache_read: 0.4
               cache_write: 5
-        reasoning:
-          effort: medium
-          summary: auto
-        variants:
-          max:
-            reasoning:
-              effort: max
-        modalities:
-          input: [text, image]
 ```
 
 ### GPT-5.6 Luna
@@ -230,10 +215,7 @@ providers:
     api_url: https://api.openai.com/v1/responses
     models:
       gpt-5.6-luna:
-        limit:
-          context: 400000
-          input: 272000
-          output: 128000
+        <<: *gpt-5-6-base
         cost:
           input: 0.2
           output: 1.2
@@ -245,15 +227,6 @@ providers:
               output: 1.8
               cache_read: 0.04
               cache_write: 0.5
-        reasoning:
-          effort: medium
-          summary: auto
-        variants:
-          max:
-            reasoning:
-              effort: max
-        modalities:
-          input: [text, image]
 ```
 
 Notes:
@@ -396,7 +369,50 @@ model_pools:
 
 Claude Opus 5 / 4.8 / 4.7 share the same context window (1M), max output (128K), pricing, adaptive thinking, and input modalities, so all three reuse the single `&claude-opus` template — only the model ID differs. Remove the entries you don't use, and point `model_pools` at your preferred model (e.g. `anthropic/claude-opus-5@high`).
 
-For a lower-cost Claude family config, use the same shape with `claude-sonnet-4.6`, `output: 64000`, and Sonnet pricing from your account/provider docs.
+For a lower-cost Claude family config, use the same shape with `claude-sonnet-5`, `cost: {input: 2, output: 10}`, and `output: 64000` for a conservative local allocation. Sonnet 5's $2 / $10 per-1M pricing became permanent in August 2026.
+
+### Claude Fable 5.1
+
+`claude-fable-5-1` (released September 2026) keeps Fable 5's $10 / $50 per-1M input/output rates but cuts cache reads to $0.25 per 1M tokens — 0.025x of base input instead of the standard 0.1x multiplier — so set `cache_read: 0.25`, not 1.0. It shares Fable 5's 1M context, 128K max output, adaptive thinking, and PDF support.
+
+```yaml
+model_templates:
+  claude-fable-5.1: &claude-fable-5-1
+    limit:
+      context: 1000000
+      output: 128000
+    cost:
+      input: 10
+      output: 50
+      cache_read: 0.25
+      cache_write: 12.5
+      cache_write_1h: 20
+    thinking:
+      type: adaptive
+      display: summarized
+    variants:
+      high:
+        thinking:
+          effort: high
+      xhigh:
+        thinking:
+          effort: xhigh
+    modalities:
+      input: [text, image, pdf]
+
+providers:
+  anthropic:
+    type: messages
+    api_url: https://api.anthropic.com/v1/messages
+    models:
+      claude-fable-5-1: *claude-fable-5-1
+
+model_pools:
+  default:
+    - anthropic/claude-fable-5-1@high
+```
+
+`claude-fable-5` remains available with the same rates except cache reads at $1.0.
 
 ## Google Gemini
 
@@ -421,6 +437,14 @@ providers:
         thinking:
           budget: -1
           level: high
+      gemini-3.7-flash:
+        limit:
+          context: 1048576
+          output: 65536
+        modalities:
+          input: [text, image, pdf]
+        thinking:
+          level: high
 
 model_pools:
   default:
@@ -431,6 +455,7 @@ Notes:
 
 - Keep `api_url` at the `/models` base path. Chord appends `/{model}:streamGenerateContent?alt=sse` automatically.
 - `type` can be omitted; Chord auto-detects Gemini from the `/models` path.
+- Gemini 3.7 Flash (GA August 2026) is the current workhorse: introductory $0.75 / $3.75 per 1M tokens through 2026, then $1.50 / $7.50 from 2027. Its thinking levels are `low` / `medium` / `high` only — `minimal` is not supported, and `thinking_budget` is deprecated, so the template above omits `budget`. Gemini 3.5/3.6 Flash remain available with the older template.
 
 ## GLM-5.2 / BigModel Coding Plan
 
@@ -440,6 +465,14 @@ Pair with `~/.config/chord/auth.yaml`:
 bigmodel:
   - "$BIGMODEL_API_KEY"
 ```
+
+The three templates below are the GLM-5.x family base: the `chat` template's
+`thinking.type: enabled` + `clear_thinking: false` and `reasoning.effort`
+values fall in the intersection of GLM-5.2 (dynamic thinking, effort
+`max`/`xhigh`/…/`none`) and GLM-5.3 / 5.3-Flash (forced thinking, effort
+`max`/`high`/`low`), so the same templates serve 5.2, 5.3, and 5.3-Flash
+unchanged. The `glm-5.2-*` names reflect the model that introduced these
+compat settings, not a 5.2-only restriction.
 
 ```yaml
 model_templates:
@@ -482,12 +515,32 @@ model_templates:
     reasoning:
       effort: max
 
+  glm-5.3-chat: &glm-5-3-chat
+    <<: *glm-5-2-chat
+    variants:
+      low:
+        reasoning:
+          effort: low
+      high:
+        reasoning:
+          effort: high
+      max:
+        reasoning:
+          effort: max
+
+  glm-5.3-flash: &glm-5-3-flash
+    <<: *glm-5-3-chat
+    modalities:
+      input: [text, image, pdf]
+
 providers:
   bigmodel:
     type: chat-completions
     api_url: https://open.bigmodel.cn/api/coding/paas/v4/chat/completions
     models:
       glm-5.2: *glm-5-2-chat
+      glm-5.3: *glm-5-3-chat
+      glm-5.3-flash: *glm-5-3-flash
 
   bigmodel-messages:
     type: messages
@@ -513,6 +566,11 @@ Notes:
   dynamically calculated output-limit field; `openai_visible` replays native
   `reasoning_content` and accepts portable visible reasoning from other wire
   families as `reasoning_content`.
+- GLM-5.3 and 5.3-Flash support only `reasoning_effort` `low` / `high` / `max`
+  (GLM-5.2 additionally accepts `xhigh` / `medium` / `minimal` / `none`), so
+  the `glm-5.3-chat` template adds the three-effort `variants`; use
+  `glm-5.3@low|high|max` refs for 5.3 and 5.3-Flash instead of the 5.2
+  effort set.
 - Messages-compatible endpoints use `thinking` plus `output_config.effort`.
   Disable Anthropic beta headers unless that endpoint documents support. A
   compatible Messages endpoint may return unsigned thinking rather than
@@ -523,6 +581,23 @@ Notes:
   families into unsigned `thinking` blocks for that target.
 - A GLM `/responses` endpoint is gateway-specific. Use a separate template with
   `reasoning.effort` only when the gateway documents OpenAI Responses mapping.
+- GLM-5.3 (GA August 2026) keeps GLM-5.2's text-only specs (1M context, 128K
+  max output), so it can reuse any of the GLM-5.2 templates above unchanged —
+  only the model ID differs (e.g. `glm-5.3` in your provider's `models` map).
+- GLM-5.3-Flash (released August 2026) is the family's first natively
+  multimodal model: image/video/file input, with 1M context and 128K max
+  output. PDF input is officially supported: the GLM Chat Completion API
+  accepts a `file` content block whose `file` object takes `file_id`,
+  `file_url`, or `file_data` (a Base64 `data:<MIME>;base64,...` URL), up to
+  50 MB per file, in `pdf`/`txt`/`word`/`jsonl`/`xlsx`/`pptx` formats. That
+  matches Chord's chat-completions PDF payload exactly (`type: file` with
+  `filename` and `file_data`), so no compatibility config is needed. Text
+  parameters match GLM-5.3, so it derives from the Chat Completions template
+  above and only adds the multimodal `modalities.input`. `thinking.type`
+  supports `enabled` only (thinking cannot be turned off), which the chat
+  template already sets. Third-party relays may only implement the older
+  URL-only `file_url` form; check the relay before relying on Base64
+  `file_data`.
 
 ## DeepSeek V4 (Flash / Pro)
 
@@ -917,9 +992,14 @@ chain-of-thought that is not tied to a tool round.
 
 xAI recommends the Responses API for Grok. Grok 4.6 supports text and image
 input, function calling, structured output, reasoning, and a 500K context
-window. It emits reasoning text through `response.reasoning_text.*` stream
-events; Chord maps those events to the normal thinking stream while preserving
-the ordered Responses output items for tool-loop continuity.
+window. xAI also accepts PDF attachments as `input_file` with a public
+`file_url` or an uploaded `file_id`, which activates the server-side
+`attachment_search` tool; Chord sends PDF attachments as inline base64
+`file_data`, which the xAI Responses API does not accept for non-image
+documents, so this recipe keeps `pdf` out of `modalities.input`. Grok 4.6
+emits reasoning text through `response.reasoning_text.*` stream events; Chord
+maps those events to the normal thinking stream while preserving the ordered
+Responses output items for tool-loop continuity.
 
 ```yaml
 model_templates:
@@ -930,15 +1010,6 @@ model_templates:
       effort: high
     modalities:
       input: [text, image]
-    cost:
-      input: 2
-      output: 6
-      cache_read: 0.5
-      input_tiers:
-        - above_input_tokens: 199999
-          input: 4
-          output: 12
-          cache_read: 1
 
 providers:
   xai:

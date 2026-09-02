@@ -101,17 +101,43 @@ chord doctor models --model openai/gpt-5.5@high
 
 ### GPT-5.6 alias（`gpt-5.6` → Sol）
 
+5.6 三个档位共用相同的窗口、reasoning、variants 和 modalities，所以公共
+内容收进 `&gpt-5-6-base` anchor，各档位只需添加自己的 `cost` 块（只维护
+永久牌价，限时促销价不在这里维护）。
+
 ```yaml
+model_templates:
+  gpt-5.6-base: &gpt-5-6-base
+    limit:
+      context: 400000
+      input: 272000
+      output: 128000
+    reasoning:
+      effort: medium
+      summary: auto
+    variants:
+      low:
+        reasoning:
+          effort: low
+      high:
+        reasoning:
+          effort: high
+      xhigh:
+        reasoning:
+          effort: xhigh
+      max:
+        reasoning:
+          effort: max
+    modalities:
+      input: [text, image, pdf]
+
 providers:
   openai:
     type: responses
     api_url: https://api.openai.com/v1/responses
     models:
       gpt-5.6:
-        limit:
-          context: 400000
-          input: 272000
-          output: 128000
+        <<: *gpt-5-6-base
         cost:
           input: 5
           output: 30
@@ -123,24 +149,6 @@ providers:
               output: 45
               cache_read: 1
               cache_write: 12.5
-        reasoning:
-          effort: medium
-          summary: auto
-        variants:
-          low:
-            reasoning:
-              effort: low
-          high:
-            reasoning:
-              effort: high
-          xhigh:
-            reasoning:
-              effort: xhigh
-          max:
-            reasoning:
-              effort: max
-        modalities:
-          input: [text, image]
 
 model_pools:
   default:
@@ -158,10 +166,7 @@ providers:
     api_url: https://api.openai.com/v1/responses
     models:
       gpt-5.6-sol:
-        limit:
-          context: 400000
-          input: 272000
-          output: 128000
+        <<: *gpt-5-6-base
         cost:
           input: 5
           output: 30
@@ -173,15 +178,6 @@ providers:
               output: 45
               cache_read: 1
               cache_write: 12.5
-        reasoning:
-          effort: medium
-          summary: auto
-        variants:
-          max:
-            reasoning:
-              effort: max
-        modalities:
-          input: [text, image]
 ```
 
 ### GPT-5.6 Terra
@@ -193,10 +189,7 @@ providers:
     api_url: https://api.openai.com/v1/responses
     models:
       gpt-5.6-terra:
-        limit:
-          context: 400000
-          input: 272000
-          output: 128000
+        <<: *gpt-5-6-base
         cost:
           input: 2
           output: 12
@@ -208,15 +201,6 @@ providers:
               output: 18
               cache_read: 0.4
               cache_write: 5
-        reasoning:
-          effort: medium
-          summary: auto
-        variants:
-          max:
-            reasoning:
-              effort: max
-        modalities:
-          input: [text, image]
 ```
 
 ### GPT-5.6 Luna
@@ -228,10 +212,7 @@ providers:
     api_url: https://api.openai.com/v1/responses
     models:
       gpt-5.6-luna:
-        limit:
-          context: 400000
-          input: 272000
-          output: 128000
+        <<: *gpt-5-6-base
         cost:
           input: 0.2
           output: 1.2
@@ -243,15 +224,6 @@ providers:
               output: 1.8
               cache_read: 0.04
               cache_write: 0.5
-        reasoning:
-          effort: medium
-          summary: auto
-        variants:
-          max:
-            reasoning:
-              effort: max
-        modalities:
-          input: [text, image]
 ```
 
 要点：
@@ -393,7 +365,50 @@ thinking 与输入模态完全一致，因此共用同一个 `&claude-opus` 模�
 模型 ID 不同。用不到的型号可以删掉，`model_pools` 指向你想用的模型即可
 （例如 `anthropic/claude-opus-5@high`）。
 
-如果想要更低成本的 Claude 配置，可沿用同样结构，改为 `claude-sonnet-4.6`、`output: 64000`，并按你的账号 / provider 文档填写 Sonnet 费率。
+如果想要更低成本的 Claude 配置，可沿用同样结构，改为 `claude-sonnet-5`、`cost: {input: 2, output: 10}`，并按需把 `output` 调低（例如 64000）做保守的本地分配。Sonnet 5 的 $2 / $10（每百万 token）定价已于 2026 年 8 月转为永久。
+
+### Claude Fable 5.1
+
+`claude-fable-5-1`（2026 年 9 月发布）沿用了 Fable 5 的 $10 / $50（每百万 token 输入 / 输出）费率，但缓存读取降到每百万 token $0.25——是基础输入价的 0.025x，而不是常见的 0.1x 乘数——所以 `cache_read` 要填 0.25，不要按比例填成 1.0。它与 Fable 5 一样是 1M 上下文、128K 最大输出、adaptive thinking，并支持 PDF。
+
+```yaml
+model_templates:
+  claude-fable-5.1: &claude-fable-5-1
+    limit:
+      context: 1000000
+      output: 128000
+    cost:
+      input: 10
+      output: 50
+      cache_read: 0.25
+      cache_write: 12.5
+      cache_write_1h: 20
+    thinking:
+      type: adaptive
+      display: summarized
+    variants:
+      high:
+        thinking:
+          effort: high
+      xhigh:
+        thinking:
+          effort: xhigh
+    modalities:
+      input: [text, image, pdf]
+
+providers:
+  anthropic:
+    type: messages
+    api_url: https://api.anthropic.com/v1/messages
+    models:
+      claude-fable-5-1: *claude-fable-5-1
+
+model_pools:
+  default:
+    - anthropic/claude-fable-5-1@high
+```
+
+`claude-fable-5` 仍可用，费率相同，只有缓存读取是 $1.0。
 
 ## Google Gemini
 
@@ -418,6 +433,14 @@ providers:
         thinking:
           budget: -1
           level: high
+      gemini-3.7-flash:
+        limit:
+          context: 1048576
+          output: 65536
+        modalities:
+          input: [text, image, pdf]
+        thinking:
+          level: high
 
 model_pools:
   default:
@@ -428,6 +451,7 @@ model_pools:
 
 - `api_url` 保持在 `/models` 基础路径即可；Chord 会自动追加 `/{model}:streamGenerateContent?alt=sse`。
 - `type` 可以省略；Chord 会根据 `/models` 路径自动识别 Gemini。
+- Gemini 3.7 Flash（2026 年 8 月 GA）是目前的主力模型：促销价每百万 token $0.75 / $3.75 到 2026 年底，2027 年起 $1.50 / $7.50。它的 thinking 级别只有 `low` / `medium` / `high`——不支持 `minimal`，且 `thinking_budget` 已废弃，所以上面模板省略了 `budget`。Gemini 3.5 / 3.6 Flash 仍可用旧模板。
 
 ## GLM-5.2 / BigModel Coding Plan
 
@@ -437,6 +461,13 @@ model_pools:
 bigmodel:
   - "$BIGMODEL_API_KEY"
 ```
+
+下面三个模板是 GLM-5.x 系列通用基础：`chat` 模板的
+`thinking.type: enabled` + `clear_thinking: false` 与 `reasoning.effort`
+取值落在 GLM-5.2（动态思考，effort 支持 `max`/`xhigh`/…/`none`）和
+GLM-5.3 / 5.3-Flash（强制思考，effort 仅 `max`/`high`/`low`）的交集上，
+所以同一套模板可直接用于 5.2、5.3 与 5.3-Flash。`glm-5.2-*` 命名取自引入
+这些 compat 设置的模型，不代表只适用于 5.2。
 
 ```yaml
 model_templates:
@@ -479,12 +510,32 @@ model_templates:
     reasoning:
       effort: max
 
+  glm-5.3-chat: &glm-5-3-chat
+    <<: *glm-5-2-chat
+    variants:
+      low:
+        reasoning:
+          effort: low
+      high:
+        reasoning:
+          effort: high
+      max:
+        reasoning:
+          effort: max
+
+  glm-5.3-flash: &glm-5-3-flash
+    <<: *glm-5-3-chat
+    modalities:
+      input: [text, image, pdf]
+
 providers:
   bigmodel:
     type: chat-completions
     api_url: https://open.bigmodel.cn/api/coding/paas/v4/chat/completions
     models:
       glm-5.2: *glm-5-2-chat
+      glm-5.3: *glm-5-3-chat
+      glm-5.3-flash: *glm-5-3-flash
 
   bigmodel-messages:
     type: messages
@@ -517,6 +568,23 @@ model_pools:
   可见 reasoning 映射成该 target 的无签名 `thinking` block。
 - GLM 的 `/responses` 由网关自行实现。只有网关明确说明支持 OpenAI
   Responses 映射时，才单独使用仅含 `reasoning.effort` 的模板。
+- GLM-5.3（2026 年 8 月 GA）沿用 GLM-5.2 的纯文本规格（1M 上下文、128K
+  最大输出），可以直接复用上面的 GLM-5.2 模板，只需把 provider `models`
+  里的模型 ID 换成 `glm-5.3`。
+- GLM-5.3 和 5.3-Flash 的 `reasoning_effort` 只支持 `low` / `high` / `max`
+  三档（GLM-5.2 另外支持 `xhigh` / `medium` / `minimal` / `none` 并映射），
+  所以 `glm-5.3-chat` 模板额外加了这三档 `variants`；5.3 和 5.3-Flash 请用
+  `glm-5.3@low|high|max` 这类引用，不要套用 5.2 的 effort 取值集合。
+- GLM-5.3-Flash（2026 年 8 月发布）是 GLM-5 系列首个原生多模态模型：
+  支持图像 / 视频 / 文件输入，上下文 1M、最大输出 128K。PDF 输入官方支持：
+  GLM Chat Completion API 接受 `file` content block，`file` 对象可选
+  `file_id` / `file_url` / `file_data`（Base64 的 `data:<MIME>;base64,...`
+  URL），单文件 ≤ 50M，支持 pdf/txt/word/jsonl/xlsx/pptx 等格式；这与 Chord
+  的 chat-completions PDF 负载（`type: file` + `filename` + `file_data`）
+  完全一致，无需兼容配置。文本参数与 GLM-5.3 一致，所以从上面的 Chat
+  Completions 模板继承，只需补 `modalities.input`。`thinking.type` 只支持
+  `enabled`（无法关闭思考），chat 模板已配置好。第三方中转可能只实现了
+  旧的仅 URL 形式 `file_url`，依赖 Base64 `file_data` 前先确认中转支持。
 
 ## DeepSeek V4（Flash / Pro）
 
@@ -886,7 +954,11 @@ Chord 会保留已完成工具轮次中可迁移的部分：
 ## Grok 4.6（xAI Responses）
 
 xAI 推荐通过 Responses API 使用 Grok。Grok 4.6 支持文本和图片输入、
-function calling、structured output、reasoning，并提供 500K 上下文。它通过
+function calling、structured output、reasoning，并提供 500K 上下文。xAI
+也接受 PDF 附件，以 `input_file` 提供公开 `file_url` 或已上传的 `file_id`
+即可，服务端会自动启用 `attachment_search` 工具；但 Chord 发送 PDF 用的是
+inline base64 `file_data`，xAI 的 Responses API 不接受非图片的 inline 字节，
+所以这里的 `modalities.input` 不声明 `pdf`。Grok 4.6 通过
 `response.reasoning_text.*` 流事件返回 reasoning text；Chord 会把这些事件
 映射到统一 thinking stream，同时保存有序 Responses output item 以延续工具
 调用状态。
@@ -900,15 +972,6 @@ model_templates:
       effort: high
     modalities:
       input: [text, image]
-    cost:
-      input: 2
-      output: 6
-      cache_read: 0.5
-      input_tiers:
-        - above_input_tokens: 199999
-          input: 4
-          output: 12
-          cache_read: 1
 
 providers:
   xai:

@@ -61,7 +61,7 @@ providers:
           input: 272000
           output: 128000
         modalities:
-          input: [text, image]
+          input: [text, image, pdf]
 ```
 
 ### BigModel Chat Completions (Coding Plan)
@@ -126,7 +126,7 @@ providers:
             reasoning:
               effort: max
         modalities:
-          input: [text, image]
+          input: [text, image, pdf]
 
 model_pools:
   default:

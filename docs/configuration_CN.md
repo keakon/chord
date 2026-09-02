@@ -119,7 +119,7 @@ providers:
             reasoning:
               effort: max
         modalities:
-          input: [text, image]
+          input: [text, image, pdf]
 
 model_pools:
   default:
