@@ -307,11 +307,16 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 			m.compactionBgStatus.Active = true
 			m.compactionBgStatus.Bytes = evt.Bytes
 			m.compactionBgStatus.Events = evt.Events
-		case agent.CompactionStatusSucceeded, agent.CompactionStatusFailed, agent.CompactionStatusSkipped:
+		case agent.CompactionStatusSucceeded, agent.CompactionStatusFailed, agent.CompactionStatusSkipped, agent.CompactionStatusCancelled:
 			// Terminal flush state: show the outcome for ~2s, then disappear.
 			// Skipped is a terminal outcome too — nothing was rewritten, but
 			// the model requested a checkpoint and the runtime declined, so the
-			// reason is surfaced instead of a silent no-op.
+			// reason is surfaced instead of a silent no-op. Cancelled is a
+			// terminal outcome as well: a model checkpoint discarded by a turn
+			// cancellation, stale-turn settlement, or higher-priority queued
+			// work disappears silently otherwise, leaving the user unable to
+			// tell the accepted request was voided. A usage-driven compaction
+			// cancelled by the user shows the same short confirmation.
 			if m.compactionBgStatus.StartedAt.IsZero() {
 				m.compactionBgStatus.StartedAt = now
 			}
@@ -322,9 +327,6 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 			m.compactionBgStatus.Events = evt.Events
 			m.compactionBgStatus.Trigger = evt.Trigger
 			m.compactionBgStatus.Reason = evt.Reason
-		case agent.CompactionStatusCancelled:
-			// Cancel disappears immediately, no terminal flush
-			m.compactionBgStatus = compactionBackgroundStatus{}
 		}
 		m.cachedStatusBarRightKey = ""
 		m.cachedStatusBarRightSide = ""

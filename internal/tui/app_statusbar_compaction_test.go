@@ -97,6 +97,43 @@ func TestCompactionSkippedStatusShowsTerminalReason(t *testing.T) {
 	}
 }
 
+func TestCompactionCancelledStatusShowsTerminalReason(t *testing.T) {
+	m := NewModelWithSize(nil, 140, 24)
+	m.compactionBgStatus = compactionBackgroundStatus{
+		Active:    true,
+		StartedAt: time.Now().Add(-time.Second),
+		Bytes:     128,
+		Events:    2,
+	}
+
+	m.handleAgentEvent(agentEventMsg{event: agent.CompactionStatusEvent{
+		Status:  agent.CompactionStatusCancelled,
+		Trigger: "model_driven",
+		Reason:  "the requesting turn is no longer active",
+	}})
+
+	if m.compactionBgStatus.Active {
+		t.Fatal("compaction status after cancel = active, want terminal flush")
+	}
+	if m.compactionBgStatus.Terminal != agent.CompactionStatusCancelled {
+		t.Fatalf("compaction status after cancel = %q, want cancelled terminal", m.compactionBgStatus.Terminal)
+	}
+	if m.compactionBgStatus.Trigger != "model_driven" {
+		t.Fatalf("compaction trigger after cancel = %q, want model_driven", m.compactionBgStatus.Trigger)
+	}
+	if m.compactionBgStatus.TerminalAt.IsZero() {
+		t.Fatal("compaction status after cancel has no terminal timestamp")
+	}
+	got := stripANSI(m.renderCompactionBackgroundPill(time.Now()))
+	if !strings.Contains(got, "✕") || !strings.Contains(got, "no longer active") {
+		t.Fatalf("compaction pill after cancel = %q, want void icon and terminal reason", got)
+	}
+	// The terminal flush expires like every other terminal outcome.
+	if pill := m.renderCompactionBackgroundPill(time.Now().Add(compactionStatusTerminalDuration)); pill != "" {
+		t.Fatalf("expired cancelled pill = %q, want empty", stripANSI(pill))
+	}
+}
+
 func TestCompactionModelDrivenStartedShowsLabel(t *testing.T) {
 	m := NewModelWithSize(nil, 140, 24)
 	now := time.Now()

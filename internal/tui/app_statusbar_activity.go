@@ -367,8 +367,6 @@ func (m Model) isFocusedAgentBusy() bool {
 	return statusActivity.Type != "" && statusActivity.Type != agent.ActivityIdle
 }
 
-const compactionTriggerModelDriven = "model_driven"
-
 // renderCompactionBackgroundPill creates the compaction background status pill.
 // This renders a compact background pill with breathing animation and optional progress.
 func (m *Model) renderCompactionBackgroundPill(now time.Time) string {
@@ -385,6 +383,8 @@ func (m *Model) renderCompactionBackgroundPill(now time.Time) string {
 			icon = "✗" // Cross for failure
 		case agent.CompactionStatusSkipped:
 			icon = "⤼" // Skip arrow: nothing was rewritten
+		case agent.CompactionStatusCancelled:
+			icon = "✕" // Void mark: the checkpoint or compaction was cancelled
 		}
 	}
 
@@ -404,7 +404,7 @@ func (m *Model) renderCompactionBackgroundPill(now time.Time) string {
 
 	// A model-requested context checkpoint is labeled distinctly from a
 	// usage-driven compaction so the user can tell the two apart.
-	if m.compactionBgStatus.Trigger == compactionTriggerModelDriven {
+	if m.compactionBgStatus.Trigger == agent.CompactionTriggerModelDriven {
 		pillParts = append(pillParts, "model checkpoint")
 	}
 	// Terminal reason (e.g. low-gain skip cause) is surfaced during the flush
