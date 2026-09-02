@@ -256,6 +256,19 @@ func TestCompactContextExecuteRejectsInvalid(t *testing.T) {
 	}
 }
 
+func TestCompactContextDescriptionStatesBudget(t *testing.T) {
+	// The combined budget is the binding limit and is several times smaller
+	// than the per-field character caps add up to, so the description must
+	// state it up front; a validator without a budget must not invent one.
+	tool := NewCompactContextTool(CompactContextValidator{ContinuationStateMaxTokens: 2048})
+	if desc := tool.Description(); !strings.Contains(desc, "about 2048 estimated tokens") {
+		t.Fatalf("description must state the combined continuation-state budget, got:\n%s", desc)
+	}
+	if desc := (CompactContextTool{}).Description(); strings.Contains(desc, "estimated tokens") {
+		t.Fatalf("a validator without a budget must not advertise one, got:\n%s", desc)
+	}
+}
+
 func TestCompactContextToolTraits(t *testing.T) {
 	tool := CompactContextTool{}
 	if tool.IsReadOnly() {

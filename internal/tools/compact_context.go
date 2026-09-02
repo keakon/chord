@@ -217,7 +217,15 @@ func NewCompactContextTool(validator CompactContextValidator) CompactContextTool
 
 func (CompactContextTool) Name() string { return NameCompactContext }
 
-func (CompactContextTool) Description() string {
+func (t CompactContextTool) Description() string {
+	// The combined continuation-state budget is the binding limit; the
+	// per-field character caps in the schema add up to several times more
+	// than it, so the model is told the budget up front instead of learning it
+	// from a rejection after it has already authored the whole state.
+	budget := ""
+	if limit := t.validator.ContinuationStateMaxTokens; limit > 0 {
+		budget = fmt.Sprintf("All text fields together (active_objective, next_step, completed, decisions, open_issues, state_files) must fit a combined budget of about %d estimated tokens; the per-field character limits are upper bounds that cannot all be used at once, so keep every item short.\n", limit)
+	}
 	return "Request a durable context checkpoint once your current working state is fully externalized (written into state_files or fully expressible in structured arguments).\n" +
 		"Runtime pauses the next main-model request, applies the checkpoint atomically, and continues the same turn on the compacted context. This involves a session history rewrite; it is NOT read-only.\n" +
 		"Call it alone (no sibling tool calls in the same response) and only when:\n" +
@@ -235,6 +243,7 @@ func (CompactContextTool) Description() string {
 		"Entries are pure references: never read, injected, or existence-verified, so only list project files you intend to re-read with the read tool.\n" +
 		"Roles that are allowed to write plan or notes files (for example .chord/plans/YYYYMMDD-<slug>.md or a task-notes file under .chord/notes/ in a planner role) may list those files here; state_files itself never reads or writes anything, and write permissions are still governed by the role's permission rules.\n" +
 		"State outside the project (temp dirs, logs, session files, other checkouts) cannot be referenced here; capture it in completed/decisions/open_issues text instead.\n" +
+		budget +
 		"If the arguments are rejected, fix the reported problem (shorten over-budget text, or drop non-workspace paths from state_files) and retry; never work around the limits by splitting the checkpoint."
 }
 
