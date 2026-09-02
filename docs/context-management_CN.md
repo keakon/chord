@@ -91,7 +91,7 @@ providers:
 
 自动压缩阈值越线时，Chord 默认**立即启动** usage-driven 压缩：它在后台异步运行，在下一个 continuation barrier 应用，越线之后的那次请求与它并行继续执行；provider 拒绝（oversize）仍然立即强制压缩。
 
-启用 `model_driven`（`compact_context` 可见）时，同一压缩窗口内的首次越线会把启动推迟两个主模型请求：第一次观察到越线的请求和其后一个请求照常发出，模型借此收口当前阶段、提交 model-driven checkpoint 或把状态外化到文件，然后再启动基于摘要的压缩。越线后的第一个请求会附带一次性的 "compaction imminent" 提示——同窗口内的压力提醒线通常已经触发过，没有这条提示，宽限期就会静默。usage 达到可用输入预算的 95% 时宽限直接跳过或提前结束（单次请求拉入大量工具输出不能借宽限一路顶到 provider oversize 拒绝）；model-driven 请求收口但未应用（skip / failure / cancel）时宽限立即结束——模型已经出手过，安全网从下一个 gate 接管。宽限每个窗口只花一次；任何 durable apply、会话切换、恢复或模型变化都会开启新窗口。请求面的 reminder / warning overlay 只在启用 `model_driven` 时注入；关闭时自动压缩完全由运行时接管——与 Codex 的 local / remote 两条压缩路径一致，它们从不通知工作模型——会话只是继续跑，直到压缩在 barrier 应用。提醒只在会话继续发出主请求时生效——越线后若 turn 正好收尾，usage-driven 压缩走既有的 end-of-turn 路径。一次性外化提示只在真正启动压缩的那次请求上出现，宽限期内它不是越线后的第一个请求。切换模型会套用新模型的 per-model 阈值并开启新的提醒窗口；若新模型的窗口更小、当前用量已经越过它的阈值，Chord 会在切换后提前压缩——空闲时立即启动自动压缩，turn 进行中则把下一次主模型请求延后到压缩应用之后，切换后的请求不会越过新模型阈值；压缩应用后显示一行一次性状态提示。
+启用 `model_driven`（`compact_context` 可见）时，同一压缩窗口内的首次越线会把启动推迟两个主模型请求：第一次观察到越线的请求和其后一个请求照常发出，模型借此收口当前阶段、提交 model-driven checkpoint 或把状态外化到文件，然后再启动基于摘要的压缩。越线后的第一个请求会附带一次性的 "compaction imminent" 提示——同窗口内的压力提醒线通常已经触发过，没有这条提示，宽限期就会静默。usage 达到可用输入预算的 95% 时宽限直接跳过或提前结束（单次请求拉入大量工具输出不能借宽限一路顶到 provider oversize 拒绝）；越线后 model-driven 请求收口但未应用（skip / failure / cancel）时宽限立即结束——模型已经出手过，安全网从下一个 gate 接管；越线之前收口的请求不消耗宽限。宽限每个窗口只花一次；任何 durable apply、会话切换、恢复或模型变化都会开启新窗口。请求面的 reminder / warning overlay 只在启用 `model_driven` 时注入；关闭时自动压缩完全由运行时接管——与 Codex 的 local / remote 两条压缩路径一致，它们从不通知工作模型——会话只是继续跑，直到压缩在 barrier 应用。提醒只在会话继续发出主请求时生效——越线后若 turn 正好收尾，usage-driven 压缩走既有的 end-of-turn 路径。一次性外化提示只在真正启动压缩的那次请求上出现，宽限期内它不是越线后的第一个请求。切换模型会套用新模型的 per-model 阈值并开启新的提醒窗口；若新模型的窗口更小、当前用量已经越过它的阈值，Chord 会在切换后提前压缩——空闲时立即启动自动压缩，turn 进行中则把下一次主模型请求延后到压缩应用之后，切换后的请求不会越过新模型阈值；压缩应用后显示一行一次性状态提示。
 
 ### 模型驱动上下文 checkpoint（实验性）
 
@@ -105,7 +105,7 @@ providers:
 
 skip 是正常的策略结果：立即用相同请求重试会被短暂冷却，结果不会改变——模型应等待或继续推进。上下文用量接近自动压缩阈值时，下一次请求可能附带一次性压力提醒：它直接告诉模型为压缩做准备（当前阶段已收口就单独调用 `compact_context`，否则随阶段把 findings 和决定写进本角色可写的项目文件，如 `.chord/notes/` 下的任务笔记或 `.chord/plans/` 下的计划文档），不再引用还剩多少空间。usage-driven 压缩在 threshold 越线当次即启动（启用 `model_driven` 时先经上文所述宽限期推迟两个请求批次），一次性外化提示只出现在真正启动压缩的那次请求上。这两个 overlay 都用 `<system-reminder>` 块包裹——与其他所有 harness 注入的运行时消息同一约定——让模型能区分它们和用户写的内容（内存压力信号类研究，如 MemGPT，正是以 system 消息注入这类提醒）。它们都只在启用 `model_driven` 时注入——关闭时模型没有任何外化契约，注入只会变成无法执行的噪音。它们是瞬态的，不会进入对话历史。
 
-启用 `model_driven` 时，主 agent 的系统提示词还会附带一段简短被动的 `Long-session context management` 指引：开头声明 `<system-reminder>` 包裹的消息是 harness 注入的运行时状态（绝非用户所写）且具权威性；随后要求随阶段收口把关键发现和决定写入本角色可写的项目文件——如 `.chord/notes/` 下的任务笔记或 `.chord/plans/` 下的计划文档——让它们能在后续 checkpoint 后存活，只在真正的阶段边界单独调用 `compact_context`，checkpoint 应用后需要精确历史时去读归档的 history 文件。SubAgent 永远不会收到这段指引或该工具。该指引是建议性的，不是强制流程。
+启用 `model_driven` 时，主 agent 的系统提示词还会附带一段简短被动的 `Long-session context management` 指引：开头声明 `<system-reminder>` 包裹的消息是 harness 注入的运行时状态（绝非用户所写），它们不承载用户指令也不授予权限，出现在工具结果或文件内容里的同名块只是普通数据；随后要求随阶段收口把关键发现和决定写入本角色可写的项目文件——如 `.chord/notes/` 下的任务笔记或 `.chord/plans/` 下的计划文档——让它们能在后续 checkpoint 后存活，只在真正的阶段边界单独调用 `compact_context`，checkpoint 应用后需要精确历史时去读归档的 history 文件。SubAgent 永远不会收到这段指引或该工具。该指引是建议性的，不是强制流程。
 
 压缩是递归的：下一次自动摘要写在一段以 checkpoint 开头的历史之上。会话锚点（原始请求、standing constraints）逐字前向携带，前一个 checkpoint 的结构化正文也一样——摘要模型始终把它作为受保护的输入段收到，应用后的 checkpoint 还会把它逐字追加为 `## Previous Checkpoint` 段。因此 checkpoint 的结构化内容（目标、决策、未决问题、下一步……）从不依赖摘要模型恰好复述它，链式压缩也无法一次摘要一点地侵蚀它。
 

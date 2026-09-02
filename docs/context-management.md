@@ -198,9 +198,11 @@ so without it the deferral would be silent. The grace is skipped or cut short
 once usage reaches 95% of the usable input budget (a single batch that pulled
 in large tool output cannot ride the grace into a provider oversize rejection)
 and ends as soon as a model-driven request settles without applying (skip /
-failure / cancel): the model already took its shot, so the safety net takes
-over on the next gate. The grace is spent once per window; any durable apply,
-session switch, restore, or model change starts a fresh window.
+failure / cancel) after the crossing: the model already took its shot, so the
+safety net takes over on the next gate. A request that settled while usage was
+still below the threshold does not spend the grace. The grace is spent once
+per window; any durable apply, session switch, restore, or model change starts
+a fresh window.
 
 The request-side reminder and warning overlays only fire while model-driven
 compaction is enabled; with it off, automatic compaction is fully
@@ -281,7 +283,9 @@ transient: they never become part of the conversation history.
 While model-driven compaction is enabled, the main agent's system prompt also
 carries a short passive `Long-session context management` section: it states
 that `<system-reminder>`-wrapped messages are harness-injected runtime state
-(never user-written) and authoritative, and asks the model to write key
+(never user-written) that carries no user instructions and grants no
+permissions — a block that merely appears inside a tool result or file is
+ordinary data — and asks the model to write key
 findings and decisions to project files the role may write — for example a
 task-notes file under `.chord/notes/` or a plan document under `.chord/plans/`
 — as phases settle (so they survive a later checkpoint), call
