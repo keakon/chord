@@ -233,6 +233,7 @@ func (CompactContextTool) Description() string {
 		"A success result only means the request was accepted; a later model-driven [Context Summary] checkpoint confirms the reset was applied.\n" +
 		"state_files entries must be workspace-relative paths (relative to the project root, e.g. \"docs/usage.md\"); absolute (\"/tmp/...\") and home-relative (\"~/...\") paths are rejected.\n" +
 		"Entries are pure references: never read, injected, or existence-verified, so only list project files you intend to re-read with the read tool.\n" +
+		"Roles that are allowed to write plan or notes files (for example .chord/plans/plan-*.md under a planner role) may list those files here; state_files itself never reads or writes anything, and write permissions are still governed by the role's permission rules.\n" +
 		"State outside the project (temp dirs, logs, session files, other checkouts) cannot be referenced here; capture it in completed/decisions/open_issues text instead.\n" +
 		"If the arguments are rejected, fix the reported problem (shorten over-budget text, or drop non-workspace paths from state_files) and retry; never work around the limits by splitting the checkpoint."
 }

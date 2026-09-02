@@ -334,7 +334,8 @@ func BuiltinAgentConfigs() map[string]*AgentConfig {
 // DefaultPlannerAgent returns the built-in planner agent configuration.
 // The planner agent is specialised for codebase exploration and plan generation.
 // It is read-heavy by default: read/grep/glob/shell are allowed, plan-file writes/patches are allowed,
-// and it can use Handoff to signal plan completion.
+// compact_context is allowed so planning sessions can checkpoint at phase boundaries, and it can use
+// Handoff to signal plan completion.
 func DefaultPlannerAgent() *AgentConfig {
 	// Build permission node: read-heavy, free exploration, plan-file changes only.
 	permYAML := fmt.Sprintf(`
@@ -350,7 +351,8 @@ func DefaultPlannerAgent() *AgentConfig {
 %s: allow
 %s: allow
 %s: allow
-`, toolname.Read, toolname.Grep, toolname.Glob, toolname.Shell, toolname.Write, toolname.Edit, toolname.Handoff, toolname.Skill, toolname.Question)
+%s: allow
+`, toolname.Read, toolname.Grep, toolname.Glob, toolname.Shell, toolname.Write, toolname.Edit, toolname.Handoff, toolname.Skill, toolname.Question, toolname.CompactContext)
 	var permNode yaml.Node
 	_ = yaml.Unmarshal([]byte(permYAML), &permNode)
 

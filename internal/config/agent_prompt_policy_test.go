@@ -31,6 +31,7 @@ func TestDefaultPlannerAgentUsesUpdatedPermissionPolicy(t *testing.T) {
 		},
 		{perm: toolname.Edit, pattern: "docs/plan.md", want: permission.ActionDeny},
 		{perm: toolname.Handoff, pattern: "*", want: permission.ActionAllow},
+		{perm: toolname.CompactContext, pattern: "*", want: permission.ActionAllow},
 	}
 	for _, tt := range checks {
 		if got := ruleset.Evaluate(tt.perm, tt.pattern); got != tt.want {

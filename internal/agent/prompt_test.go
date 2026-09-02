@@ -2147,6 +2147,7 @@ func TestModelDrivenContextPromptBlockInjectedWhenEnabled(t *testing.T) {
 		"## Long-session context management",
 		"<system-reminder>",
 		"compact_context",
+		"state_files",
 		"archived history",
 		"low-gain",
 	} {
@@ -2163,6 +2164,19 @@ func TestModelDrivenContextPromptBlockEmptyWhenToolDenied(t *testing.T) {
 	a.ruleset = permission.Ruleset{{Permission: tools.NameCompactContext, Pattern: "*", Action: permission.ActionDeny}}
 	if got := a.modelDrivenContextPromptBlock(); got != "" {
 		t.Fatalf("denied compact_context must render no block, got %q", got)
+	}
+}
+
+func TestPlannerModePromptMentionsStateFilesWhenCompactContextVisible(t *testing.T) {
+	// P1b: planning mode may default to compact_context, so the planning-mode
+	// prompt must tell the model that the plan file it is allowed to write can
+	// be listed in state_files for a durable checkpoint.
+	a := modelDrivenPromptTestAgent(t)
+	block := a.plannerModePromptBlock()
+	for _, want := range []string{"compact_context", "state_files", ".chord/plans/"} {
+		if !strings.Contains(block, want) {
+			t.Fatalf("planning-mode prompt must mention %q when compact_context is visible, got:\n%s", want, block)
+		}
 	}
 }
 
