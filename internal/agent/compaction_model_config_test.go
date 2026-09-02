@@ -2,8 +2,6 @@ package agent
 
 import (
 	"math"
-	"slices"
-	"strings"
 	"testing"
 
 	"github.com/keakon/chord/internal/analytics"
@@ -149,57 +147,7 @@ func TestEffectiveCompactionThresholdZeroDisablesReminderNeverRevives(t *testing
 	}
 }
 
-func TestDeferCompactionForGracePeriod(t *testing.T) {
-	a := &MainAgent{}
-	// First crossing: anchor recorded, compaction deferred.
-	if !a.deferCompactionForGracePeriod(5) {
-		t.Fatal("first crossing must defer")
-	}
-	if a.gracePeriodStartBatch != 5 {
-		t.Fatalf("anchor = %d, want 5", a.gracePeriodStartBatch)
-	}
-	// One request later: still within the 2-batch grace window.
-	if !a.deferCompactionForGracePeriod(6) {
-		t.Fatal("batch 6 must still defer (gap 1 < 2)")
-	}
-	// Two requests later: grace expired, compaction proceeds.
-	if a.deferCompactionForGracePeriod(7) {
-		t.Fatal("batch 7 must expire the grace period (gap 2)")
-	}
-	if a.gracePeriodStartBatch != 0 {
-		t.Fatalf("anchor must clear on expiry, got %d", a.gracePeriodStartBatch)
-	}
-}
-
-func TestDeferCompactionForGracePeriodExhaustedAfterExpiry(t *testing.T) {
-	a := &MainAgent{}
-	if !a.deferCompactionForGracePeriod(3) {
-		t.Fatal("first crossing must defer")
-	}
-	if !a.deferCompactionForGracePeriod(4) {
-		t.Fatal("still in grace")
-	}
-	if a.deferCompactionForGracePeriod(5) {
-		t.Fatal("grace expired")
-	}
-	// Once the grace period expires, the window's active-reset chance is
-	// spent: a later threshold crossing in the same window does not re-open it.
-	if a.deferCompactionForGracePeriod(9) {
-		t.Fatal("grace must not re-open after expiry in the same window")
-	}
-	if !a.gracePeriodExhausted {
-		t.Fatal("expiry must mark the grace period exhausted")
-	}
-}
-
-func TestDeferCompactionForGracePeriodNilAgent(t *testing.T) {
-	var a *MainAgent
-	if a.deferCompactionForGracePeriod(1) {
-		t.Fatal("nil agent must not defer")
-	}
-}
-
-func TestApplyModelCompactionConfigSetsThresholdAndClearsGrace(t *testing.T) {
+func TestApplyModelCompactionConfigSetsThresholdOnModelChange(t *testing.T) {
 	perModel := 0.3
 	a := modelCompTestAgent(
 		config.CompactionConfig{Threshold: 0.65},
@@ -207,46 +155,23 @@ func TestApplyModelCompactionConfigSetsThresholdAndClearsGrace(t *testing.T) {
 		"openai/gpt-5.6-luna",
 	)
 	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(1000000, 1000000, 0, 0.65)
-	a.gracePeriodStartBatch = 4
 	a.appliedCompactionModelRef = "openai/gpt-5.6-sol"
 	a.applyModelCompactionConfig()
 	if got := a.ctxMgr.Threshold(); got != 0.3 {
 		t.Fatalf("applied threshold = %v, want 0.3", got)
-	}
-	if a.gracePeriodStartBatch != 0 {
-		t.Fatal("model change must clear the grace period")
 	}
 	if a.appliedCompactionModelRef != "openai/gpt-5.6-luna" {
 		t.Fatalf("applied ref = %q, want openai/gpt-5.6-luna", a.appliedCompactionModelRef)
 	}
 }
 
-func TestApplyModelCompactionConfigSameModelKeepsGrace(t *testing.T) {
+func TestApplyModelCompactionConfigSameModelKeepsThreshold(t *testing.T) {
 	a := modelCompTestAgent(config.CompactionConfig{Threshold: 0.65}, nil, "p/m")
 	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(1000000, 1000000, 0, 0.65)
-	a.gracePeriodStartBatch = 3
 	a.appliedCompactionModelRef = "p/m"
 	a.applyModelCompactionConfig()
-	if a.gracePeriodStartBatch != 3 {
-		t.Fatal("same-model re-apply must keep the grace period")
-	}
 	if got := a.ctxMgr.Threshold(); got != 0.65 {
 		t.Fatalf("threshold = %v, want 0.65", got)
-	}
-}
-
-func TestApplyModelCompactionConfigFirstApplicationKeepsGrace(t *testing.T) {
-	a := modelCompTestAgent(config.CompactionConfig{Threshold: 0.65}, nil, "p/m")
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(1000000, 1000000, 0, 0.65)
-	// appliedCompactionModelRef starts as the zero value ""; the first
-	// application must not treat that as a model change (no grace clear, no
-	// exhausted clear), because a mid-window model-driven skip set exhausted
-	// and the first request boundary must not wipe it.
-	a.gracePeriodStartBatch = 2
-	a.gracePeriodExhausted = true
-	a.applyModelCompactionConfig()
-	if a.gracePeriodStartBatch != 2 || !a.gracePeriodExhausted {
-		t.Fatal("first application must keep grace/exhausted state")
 	}
 }
 
@@ -377,88 +302,5 @@ func TestContextPressureLinesForModelRefFollowsTheRefNotTheRunningModel(t *testi
 	reminder, threshold = a.ContextPressureLinesForModelRef("openai/spacious")
 	if threshold != 0.7 || reminder != 0.6 {
 		t.Fatalf("spacious lines = (%v, %v), want (0.60, 0.7)", reminder, threshold)
-	}
-}
-
-func collectGracePolicyPurposes(t *testing.T, a *MainAgent) *[]string {
-	t.Helper()
-	var got []string
-	a.SetUsageEventSink(func(ev analytics.UsageEvent) {
-		if strings.Contains(ev.Purpose, "grace_") {
-			got = append(got, ev.Purpose)
-		}
-	})
-	return &got
-}
-
-func TestGracePeriodOpenedAndExpiredEmitTelemetry(t *testing.T) {
-	projectRoot := t.TempDir()
-	a := newTestMainAgent(t, projectRoot)
-	got := collectGracePolicyPurposes(t, a)
-
-	// First crossing opens the window and records it.
-	if !a.deferCompactionForGracePeriod(5) {
-		t.Fatal("first crossing must open a grace period")
-	}
-	// Deferred round inside the window records nothing new.
-	if !a.deferCompactionForGracePeriod(6) {
-		t.Fatal("second crossing must still defer")
-	}
-	// Expiry records the window close and clears the anchor.
-	if a.deferCompactionForGracePeriod(7) {
-		t.Fatal("third crossing must expire the grace period")
-	}
-	wantOpened := compactionPolicyAnalyticsPurpose + "/grace_opened"
-	wantExpired := compactionPolicyAnalyticsPurpose + "/grace_expired"
-	if !slices.Contains(*got, wantOpened) || !slices.Contains(*got, wantExpired) {
-		t.Fatalf("grace telemetry = %v, want both %q and %q", *got, wantOpened, wantExpired)
-	}
-}
-
-func TestGraceClosedByModelDrivenSettleEmitTelemetryOnlyForOpenWindow(t *testing.T) {
-	projectRoot := t.TempDir()
-	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
-	a.beginCompactionState(7, compactionTarget{turnID: 1, turnEpoch: 1, sessionEpoch: a.sessionEpoch}, compactionTriggerModelDriven, continuationPlan{kind: compactionResumeModelDriven, turnID: 1}, 4, nil)
-	got := collectGracePolicyPurposes(t, a)
-
-	// A settle closing an *open* grace window is attributed to it.
-	a.gracePeriodStartBatch = 5
-	a.settleModelDrivenSkip(&compactionDraft{Skip: true, InfoMessage: "Context checkpoint skipped: projected savings too small"})
-	want := compactionPolicyAnalyticsPurpose + "/grace_closed_by_model_driven_settle"
-	if !slices.Contains(*got, want) {
-		t.Fatalf("settle telemetry = %v, want %q", *got, want)
-	}
-	if !a.gracePeriodExhausted || a.gracePeriodStartBatch != 0 {
-		t.Fatal("settle must exhaust the grace window and clear the anchor")
-	}
-
-	// A settle outside any window still exhausts the flag but records no
-	// grace outcome (there was no window to close).
-	*got = nil
-	a.gracePeriodExhausted = false
-	a.settleModelDrivenFailure(errCompactionWatchdog)
-	if !a.gracePeriodExhausted {
-		t.Fatal("settle outside a window must still exhaust the flag")
-	}
-	for _, purpose := range *got {
-		if strings.Contains(purpose, "grace_") {
-			t.Fatalf("windowless settle must not emit grace telemetry, got %v", *got)
-		}
-	}
-}
-
-func TestGraceHelpersDoNotEmitTelemetryOnBareAgents(t *testing.T) {
-	// Bare-agent unit tests of the grace helpers must not touch telemetry
-	// plumbing (no ledger, no sink): recordGracePolicyEvent guards on the
-	// usage ledger.
-	a := &MainAgent{}
-	if !a.deferCompactionForGracePeriod(1) || a.deferCompactionForGracePeriod(3) {
-		t.Fatal("bare-agent grace helpers must behave as before")
-	}
-	a.gracePeriodStartBatch = 0
-	a.gracePeriodExhausted = false
-	if a.gracePeriodExhausted {
-		t.Fatal("unexpected state")
 	}
 }

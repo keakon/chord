@@ -206,9 +206,12 @@ func (a *MainAgent) cancelCompactionForTurnCancellation(turnID uint64) {
 	if readyDraft != nil {
 		// The worker already reached its terminal event for this plan; settle
 		// here (no further worker event will arrive) and clean its orphan files.
+		// The settle runs before resetCompactionState: its terminal status
+		// event is built from the still-live compaction state (trigger and
+		// plan id), the same order every other model-driven settle path uses.
 		cleanupOrphanCompactionFiles(readyDraft.AbsHistoryPath)
-		a.resetCompactionState()
 		a.settleModelDrivenCancelled("the requesting turn was cancelled by the user")
+		a.resetCompactionState()
 		return
 	}
 	// Running worker: mark discard and cancel its context; the worker's
@@ -410,29 +413,12 @@ func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID
 		return
 	}
 
-	// Threshold crossed: open a grace period instead of compacting
-	// immediately. The model already got the context-pressure reminder from
-	// queueContextPressureReminderForNextRequest above; it now has up to
-	// minCompactionGracePeriodBatches main requests to actively reset via
-	// compact_context or write its state to files before the usage-driven
-	// compaction starts. A successful model-driven reset clears the armed
-	// request, so the grace anchor is reset on any durable apply / model
-	// switch / session switch. No externalization warning is queued on these
-	// deferred rounds: the compaction has not started yet, so the warning's
-	// claim that the runtime "has scheduled automatic compaction" would be
-	// misleading (it is queued below once the compaction actually starts).
-	if a.deferCompactionForGracePeriod(a.currentRequestBatch(snapshot)) {
-		a.applyMainLLMRequestTuningOverride(llm.RequestTuning{})
-		a.spawnMainLLMResponseGoroutine(turnCtx, turnID, snapshot, agentErrSourceID)
-		return
-	}
-
-	// The grace period is spent (expired or exhausted): the usage-driven
-	// compaction starts below (or is already running from an earlier gate), so
-	// this request is the one that actually runs in parallel with it. Queue
-	// the per-generation externalization warning here — the queue runs before
-	// the compaction state changes, but the armed request it refers to is
-	// exactly the one this gate is about to start.
+	// Threshold crossed: the usage-driven compaction starts below (or is
+	// already running from an earlier gate), so this request is the one that
+	// actually runs in parallel with it. Queue the per-generation
+	// externalization warning here — the queue runs before the compaction
+	// state changes, but the armed request it refers to is exactly the one
+	// this gate is about to start.
 	a.queueCompactionWarning()
 
 	// Threshold crossed: start background compaction WITHOUT blocking the LLM

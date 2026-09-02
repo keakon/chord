@@ -310,6 +310,13 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 	// archive back by its stable relative address.
 	historyRefs = formatHistoryMapLines(historyRefs, readCompactionHistoryMetas(historyRefs))
 	summaryText = ensureCompactionSummaryKeyFiles(strings.TrimSpace(summaryText), keyFiles)
+	// A prior checkpoint inside the archived head is carried forward verbatim
+	// as a final section, so the checkpoint that replaces it always references
+	// the structured content of the one before (recursive compaction must not
+	// erode it one summary at a time). The append runs on every mode — the
+	// model summary, the structured fallback, and the truncate-only fallback —
+	// because the guarantee is deterministic, not summarizer-dependent.
+	summaryText = appendPriorCheckpointCarry(summaryText, latestPriorCheckpointBody(head))
 	// Anchor coherence (duplicate, co-existing, or mutually contradictory
 	// active/superseded constraints) is a diagnostic, not a gate: refusing the
 	// checkpoint here would leave the context that triggered compaction growing
@@ -460,22 +467,10 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	a.recordCompactionAppliedAnalyticsEvent(d, headSplit, compactedMessages)
 	// A durable apply starts a fresh compaction window: drop any overlay texts
 	// queued for the pre-apply window (the reminder reported the old usage
-	// baseline and the warning is moot once auto-compact applied) and reset
-	// the threshold grace period (the new window re-evaluates usage from the
-	// compacted baseline). The next beginMainLLMAfterPreparation re-queues
-	// against the new window claims.
+	// baseline and the warning is moot once auto-compact applied). The next
+	// beginMainLLMAfterPreparation re-queues against the new window claims.
 	a.pendingContextPressureReminder = ""
 	a.pendingCompactionWarning = ""
-	// A model-driven checkpoint that lands while a grace window is open is the
-	// grace period's success case: the model actively reset instead of waiting
-	// out the usage-driven compaction. Record it before the window state is
-	// cleared below, so the grace telemetry can distinguish "model reset during
-	// the window" from a plain usage-driven expiry.
-	if d.SummaryMode == compactionSummaryModeModelDriven && a.gracePeriodStartBatch != 0 {
-		a.recordGracePolicyEvent("grace_active_reset_applied")
-	}
-	a.gracePeriodStartBatch = 0
-	a.gracePeriodExhausted = false
 	// A successful model-driven apply records its request batch as the new
 	// interval anchor and clears the skip-cooldown state: the next model-driven
 	// request must wait minModelDrivenApplyIntervalBatches batches, and stale

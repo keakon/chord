@@ -173,8 +173,8 @@ func TestQueueCompactionWarningLifecycle(t *testing.T) {
 	if a.pendingCompactionWarning == "" {
 		t.Fatal("armed auto-compact request with a visible tool must queue the externalization warning")
 	}
-	if !strings.Contains(a.pendingCompactionWarning, "scheduled automatic context compaction") || !strings.Contains(a.pendingCompactionWarning, "no manual checkpoint") || strings.Contains(a.pendingCompactionWarning, "<") {
-		t.Fatalf("warning text = %q, want bare actionable content including the no-manual-checkpoint guidance (the injector wraps <system-reminder>)", a.pendingCompactionWarning)
+	if !strings.Contains(a.pendingCompactionWarning, "next safe boundary") || !strings.Contains(a.pendingCompactionWarning, "last request on the current context") || strings.Contains(a.pendingCompactionWarning, "<") {
+		t.Fatalf("warning text = %q, want bare actionable externalization content (the injector wraps <system-reminder>)", a.pendingCompactionWarning)
 	}
 	a.pendingCompactionWarning = ""
 

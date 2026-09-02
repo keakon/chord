@@ -112,6 +112,12 @@ type compactionInput struct {
 	ConstraintAnchor string
 	DecisionAnchor   string
 	ProgressAnchor   string
+	// PriorCheckpoint is the durable body of the most recent checkpoint inside
+	// the archived head (see latestPriorCheckpointBody). It is surfaced to the
+	// summarizer as a protected section it must fold in rather than rely on the
+	// checkpoint surviving transcript trimming, so recursive compaction cannot
+	// erode the previous checkpoint's structured sections one summary at a time.
+	PriorCheckpoint string
 }
 
 // compactionReductionScratch returns a throwaway agent carrying the reduction
@@ -180,6 +186,7 @@ func (a *MainAgent) buildCompactionInputWithOptions(head []message.Message, cont
 		RecentTail:       recentTail,
 		RecentTailAnchor: formatRecentTailAnchor(recentTail),
 		SessionAnchors:   sessionAnchors,
+		PriorCheckpoint:  latestPriorCheckpointBody(head),
 		// Evidence selection and the goal anchor classify what the user asked
 		// for, so they read the unmerged surface: normalized folds @-injected
 		// file bodies into Content, and a document's "must"/"do not" wording
@@ -1195,6 +1202,12 @@ func buildCompactionPromptWithKeyFiles(input *compactionInput, historyPath strin
 	sb.WriteString(formatSubAgentsForPrompt(subAgents))
 	sb.WriteString("\n\nCurrent background objects:\n")
 	sb.WriteString(formatBackgroundObjectsForPrompt(backgroundObjects))
+	if input != nil && strings.TrimSpace(input.PriorCheckpoint) != "" {
+		sb.WriteString("\n\nPrior durable checkpoint from an earlier compaction of this session — always present, independent of transcript trimming:\n")
+		sb.WriteString("Fold its still-accurate content into your summary. Do not silently drop or contradict the sections it established. The session anchors are carried forward verbatim separately; do not restate them.\n\n")
+		sb.WriteString(formatPriorCheckpointCarryForPrompt(input.PriorCheckpoint))
+		sb.WriteByte('\n')
+	}
 	sb.WriteString("\n\nConversation transcript to summarize:\n\n")
 	if input != nil {
 		sb.WriteString(input.Transcript)

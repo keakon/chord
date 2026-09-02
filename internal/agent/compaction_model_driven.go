@@ -193,15 +193,15 @@ func (a *MainAgent) validateCompactContextResult(callID string, rawArgs string) 
 	if a.turn == nil {
 		return "", tools.CompactContextArgs{}, fmt.Errorf("compact_context requires an active turn")
 	}
-	if a.IsCompactionRunning() {
-		// The model cannot act on this rejection beyond waiting: whichever
-		// compaction owns the slot (automatic usage-driven, oversize, or an
-		// earlier accepted model-driven request) settles at the next
-		// continuation barrier and resets the history on its own. Say that
-		// explicitly so the model does not read this as a request failure and
-		// does not burn retries while the barrier is pending.
-		return "", tools.CompactContextArgs{}, fmt.Errorf("a context compaction is already running or waiting to apply; it will settle automatically at the next continuation barrier and reset the conversation history. No manual checkpoint is needed now; retry compact_context after it settles only if your continuation still needs one")
-	}
+	// A compaction already owning the slot does not reject the request: the
+	// model's explicit checkpoint may override an in-flight automatic
+	// compaction (a usage-driven worker started by a threshold crossing, an
+	// oversize recovery, or a ready draft waiting for the continuation
+	// barrier). maybeStartModelDrivenBarrier discards the running compaction
+	// when the model-driven barrier fires; if the armed request never reaches
+	// that barrier (the turn ends or higher-priority work arrives first), the
+	// running compaction settles on its own and the pending request is
+	// dropped by the normal discard paths.
 	if a.persistenceDegraded() {
 		return "", tools.CompactContextArgs{}, fmt.Errorf("session persistence is degraded; compact_context cannot rewrite session history safely")
 	}
@@ -221,7 +221,7 @@ func (a *MainAgent) validateCompactContextResult(callID string, rawArgs string) 
 // the plain bytes/3 heuristic because it cannot reach the ctxmgr calibration).
 func (a *MainAgent) parseCompactContextArgs(raw json.RawMessage) (tools.CompactContextArgs, error) {
 	validator := tools.CompactContextValidator{
-		ContinuationStateMaxTokens: compactEvidenceMaxTokens,
+		ContinuationStateMaxTokens: CompactEvidenceMaxTokens,
 		EstimateTokens:             a.EstimateTokensForText,
 	}
 	return validator.ParseCompactContextArgs(raw)
@@ -286,11 +286,49 @@ func (a *MainAgent) maybeStartModelDrivenBarrier() bool {
 		turnID:    a.turn.ID,
 		turnEpoch: a.turn.Epoch,
 	}
+	// The model's explicit checkpoint overrides any automatic compaction
+	// currently owning the slot (usage-driven async started by a threshold
+	// crossing, an oversize recovery, or a ready draft waiting for the
+	// continuation barrier): the model chose this boundary on purpose, so its
+	// checkpoint wins over the runtime's background summary. The single slot
+	// cannot host two workers, so the running compaction is discarded first;
+	// its late terminal event is dropped by the plan-id stale guard in
+	// handleCompactionReady / handleCompactionFailed.
+	a.discardCompactionForModelOverride()
 	a.startModelDrivenCompactionAsync(bundle, planID, target, continuation, req)
 	// The worker is now in charge: the next main LLM request must wait for
 	// the checkpoint barrier instead of running on the old context.
 	a.emitCompactionSlotActivity()
 	return true
+}
+
+// discardCompactionForModelOverride cancels the automatic compaction currently
+// owning the slot (usage-driven async started by a threshold crossing, an
+// oversize recovery, or a ready draft waiting for the continuation barrier) so
+// a freshly accepted model-driven checkpoint can take over. A ready draft is
+// discarded together with its orphan history files, the worker context is
+// cancelled, and the state is reset. No terminal TUI event is emitted here:
+// the model-driven worker that follows immediately emits its own Started
+// event, so a cancelled flash would be misleading. A model-driven worker
+// already owning the slot is never overridden — a second model-driven barrier
+// cannot legitimately occur while the first checkpoint is pending, because the
+// model-driven continuation freezes the main request until it settles.
+func (a *MainAgent) discardCompactionForModelOverride() {
+	if !a.compactionState.isRunning() {
+		return
+	}
+	if a.compactionState.continuation.kind == compactionResumeModelDriven {
+		return
+	}
+	if readyDraft := a.compactionState.readyDraft; readyDraft != nil {
+		a.compactionState.readyDraft = nil
+		cleanupOrphanCompactionFiles(readyDraft.AbsHistoryPath)
+	}
+	a.recordCompactionPolicyAnalyticsEvent("auto_compact_overridden_by_model_checkpoint")
+	if a.compactionState.cancel != nil {
+		a.compactionState.cancel()
+	}
+	a.resetCompactionState()
 }
 
 // captureModelDrivenBarrierSnapshot snapshots every piece of event-loop-owned
@@ -926,22 +964,6 @@ func assistantContentForToolCall(messages []message.Message, callID string) stri
 // stays armed and the next gate decides.
 func (a *MainAgent) settleModelDrivenOutcome(status string, reason string, preflight *modelDrivenPreflightStats) {
 	a.modelDrivenSkipNotice = strings.TrimSpace(reason)
-	// The model already tried the active-reset path and it settled here
-	// (skipped / failed / cancelled). The usage-driven safety net must take
-	// over promptly rather than waiting out a fresh grace period: the grace
-	// window exists to give a wrapping-up model a chance to actively reset,
-	// and that chance was just spent. Cleared again on the next durable apply
-	// / model switch / session switch.
-	if status == CompactionStatusSkipped || status == CompactionStatusFailed || status == CompactionStatusCancelled {
-		// Grace telemetry: only a settle that closes an *open* grace window is
-		// attributed to it — a settle outside any window (no crossing yet) has
-		// no grace outcome to record, even though it still exhausts the flag.
-		if a.gracePeriodStartBatch != 0 {
-			a.recordGracePolicyEvent("grace_closed_by_model_driven_settle")
-		}
-		a.gracePeriodExhausted = true
-		a.gracePeriodStartBatch = 0
-	}
 	diagnostic := map[string]string{
 		"trigger": compactionTriggerModelDriven.analyticsName(),
 		"reason":  a.modelDrivenSkipNotice,

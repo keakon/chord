@@ -23,11 +23,11 @@ import (
 
 func evidencePackTokenBudget(contextLimit int) int {
 	if contextLimit <= 0 {
-		return compactEvidenceMaxTokens
+		return CompactEvidenceMaxTokens
 	}
 	b := contextLimit * compactEvidencePercentNumer / compactEvidencePercentDenom
 	b = max(b, compactEvidenceMinTokens)
-	b = min(b, compactEvidenceMaxTokens)
+	b = min(b, CompactEvidenceMaxTokens)
 	return b
 }
 

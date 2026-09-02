@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
@@ -91,23 +92,19 @@ func TestTryArmModelDrivenCheckpointRejectsBadArgs(t *testing.T) {
 		t.Fatal("expected rejection for missing required fields")
 	}
 
-	// A compaction already owning the slot rejects the request before
-	// argument parsing, and the error must tell the model that the running
-	// compaction settles on its own at the barrier (so it does not read the
-	// rejection as a request failure or burn retries in the same window).
-	a.beginCompactionState(9, compactionTarget{turnID: 1, turnEpoch: 1, sessionEpoch: a.sessionEpoch}, compactionTriggerModelDriven, continuationPlan{kind: compactionResumeModelDriven, turnID: 1}, 0, nil)
+	// A compaction already owning the slot does not reject the request: the
+	// model's explicit checkpoint may override an in-flight automatic
+	// compaction, and the model-driven barrier discards the running
+	// compaction before starting the model's own worker. The request is
+	// armed normally.
+	a.ctxMgr.Append(message.Message{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{testToolCall("cc-1", tools.NameCompactContext)}})
+	a.beginCompactionState(9, compactionTarget{turnID: 1, turnEpoch: 1, sessionEpoch: a.sessionEpoch}, compactionTriggerUsageDriven, continuationPlan{kind: compactionResumeAutoContinue, turnID: 1}, 0, nil)
 	defer a.resetCompactionState()
-	_, err := a.tryArmModelDrivenCheckpoint("cc-1", `{"active_objective":"a","next_step":"b"}`)
-	if err == nil {
-		t.Fatal("expected rejection while a compaction is running")
+	if _, err := a.tryArmModelDrivenCheckpoint("cc-1", `{"active_objective":"a","next_step":"b"}`); err != nil {
+		t.Fatalf("model checkpoint must be accepted while an automatic compaction runs: %v", err)
 	}
-	for _, want := range []string{"next continuation barrier", "No manual checkpoint is needed now"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("rejection error %q is missing guidance %q", err.Error(), want)
-		}
-	}
-	if a.pendingModelDriven != nil {
-		t.Fatal("pendingModelDriven must not be armed while a compaction is running")
+	if a.pendingModelDriven == nil {
+		t.Fatal("pendingModelDriven must be armed while a compaction is running (override path)")
 	}
 }
 
@@ -154,6 +151,82 @@ func TestMaybeStartModelDrivenBarrierStartsWorker(t *testing.T) {
 	}
 	// The worker runs without an event loop in this test, so it never reaches
 	// a terminal state here; teardown joins it via signalStopping + outputWg.
+}
+
+func TestMaybeStartModelDrivenBarrierOverridesRunningUsageCompaction(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.newTurn()
+	for _, msg := range []message.Message{
+		{Role: message.RoleUser, Content: "first request"},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{testToolCall("cc-1", tools.NameCompactContext)}},
+	} {
+		a.ctxMgr.Append(msg)
+	}
+	// An automatic usage-driven compaction owns the slot (a threshold crossing
+	// started its async worker). The model's checkpoint request is accepted
+	// and the barrier discards the running compaction before the model-driven
+	// worker starts: the model chose this boundary on purpose, so it wins over
+	// the runtime's background summary.
+	cancelCalled := false
+	a.beginCompactionState(7, compactionTarget{turnID: 1, turnEpoch: 1, sessionEpoch: a.sessionEpoch}, compactionTriggerUsageDriven, continuationPlan{kind: compactionResumeAutoContinue, turnID: 1}, 5, func() { cancelCalled = true })
+	ccID, args := testCompactContextCall()
+	if _, err := a.tryArmModelDrivenCheckpoint(ccID, args); err != nil {
+		t.Fatalf("tryArm must accept the override request: %v", err)
+	}
+	if a.pendingModelDriven == nil {
+		t.Fatal("pending request must be armed")
+	}
+	if !a.maybeStartModelDrivenBarrier() {
+		t.Fatal("barrier should start the model-driven worker")
+	}
+	if !cancelCalled {
+		t.Fatal("the running usage compaction must be cancelled for the model override")
+	}
+	if a.compactionState.trigger != compactionTriggerModelDriven {
+		t.Fatalf("trigger = %q, want model_driven (model wins over usage-driven)", a.compactionState.trigger)
+	}
+	if a.compactionState.planID == 7 {
+		t.Fatal("compaction state must belong to the new model-driven plan")
+	}
+}
+
+func TestMaybeStartModelDrivenBarrierDiscardsReadyUsageDraft(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.newTurn()
+	for _, msg := range []message.Message{
+		{Role: message.RoleUser, Content: "first request"},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{testToolCall("cc-1", tools.NameCompactContext)}},
+	} {
+		a.ctxMgr.Append(msg)
+	}
+	// A usage-driven draft is ready and waiting for the continuation barrier
+	// (Case C). The model's checkpoint arrives in the tool batch before that
+	// barrier resolves: the barrier must discard the ready draft (removing its
+	// orphan history files) and start the model-driven worker instead.
+	readyHistory := filepath.Join(t.TempDir(), "history-1.md")
+	if err := os.WriteFile(readyHistory, []byte("# archived"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a.beginCompactionState(7, compactionTarget{turnID: 1, turnEpoch: 1, sessionEpoch: a.sessionEpoch}, compactionTriggerUsageDriven, continuationPlan{kind: compactionResumeAutoContinue, turnID: 1}, 5, nil)
+	a.compactionState.readyDraft = &compactionDraft{PlanID: 7, AbsHistoryPath: readyHistory}
+	ccID, args := testCompactContextCall()
+	if _, err := a.tryArmModelDrivenCheckpoint(ccID, args); err != nil {
+		t.Fatalf("tryArm must accept the override request: %v", err)
+	}
+	if !a.maybeStartModelDrivenBarrier() {
+		t.Fatal("barrier should start the model-driven worker")
+	}
+	if a.compactionState.readyDraft != nil {
+		t.Fatal("ready draft must be discarded on the model override")
+	}
+	if _, err := os.Stat(readyHistory); !os.IsNotExist(err) {
+		t.Fatalf("orphan ready history must be removed, stat err = %v", err)
+	}
+	if a.compactionState.trigger != compactionTriggerModelDriven {
+		t.Fatalf("trigger = %q, want model_driven", a.compactionState.trigger)
+	}
 }
 
 func TestModelDrivenLowGainPreflightRejectsTinyContext(t *testing.T) {
@@ -550,6 +623,69 @@ func TestCancelCompactionForTurnCancellationDiscardsModelDrivenWorker(t *testing
 	}
 	if a2.compactionState.discard {
 		t.Fatal("cancelling an unrelated turn must not mark the compaction discard")
+	}
+}
+
+func TestCancelCompactionForTurnCancellationSettlesParkedDraftWithLiveTrigger(t *testing.T) {
+	// A model-driven draft already parked at the continuation barrier belongs
+	// to the cancelled turn. Cancelling the turn must settle it while the
+	// compaction state is still live — the terminal status event carries the
+	// model_driven trigger and plan id only when it is built before the
+	// reset — then clean its orphan history files and reset the state.
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.newTurn()
+	turnID := a.turn.ID
+	history := filepath.Join(projectRoot, "history-7.md")
+	if err := os.WriteFile(history, []byte("parked archive body"), 0o644); err != nil {
+		t.Fatalf("write parked history archive: %v", err)
+	}
+	a.beginCompactionState(
+		7,
+		compactionTarget{turnID: turnID, turnEpoch: 1, sessionEpoch: a.sessionEpoch},
+		compactionTriggerModelDriven,
+		continuationPlan{kind: compactionResumeModelDriven, turnID: turnID, turnEpoch: 1},
+		2,
+		nil,
+	)
+	// Park the ready draft at the barrier like the model-driven apply path in
+	// handleCompactionReady does once the worker reaches its terminal event.
+	a.compactionState.readyDraft = &compactionDraft{PlanID: 7, AbsHistoryPath: history}
+
+	a.cancelCompactionForTurnCancellation(turnID)
+
+	if a.IsCompactionRunning() {
+		t.Fatal("compaction must no longer be running after the parked draft settles")
+	}
+	if _, err := os.Stat(history); !os.IsNotExist(err) {
+		t.Fatalf("parked draft history archive must be cleaned up, stat err=%v", err)
+	}
+	if a.modelDrivenSkipNotice == "" {
+		t.Fatal("cancelling the parked draft must surface the continuation notice")
+	}
+	// Drain events until the terminal status event arrives (newTurn and the
+	// settle path may interleave unrelated bookkeeping events first).
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case evt := <-a.outputCh:
+			status, ok := evt.(CompactionStatusEvent)
+			if !ok {
+				continue
+			}
+			if status.Status != CompactionStatusCancelled {
+				t.Fatalf("status = %v, want %v", status.Status, CompactionStatusCancelled)
+			}
+			if status.Trigger != string(compactionTriggerModelDriven) {
+				t.Fatalf("trigger = %q, want %q (built from the live compaction state before reset)", status.Trigger, compactionTriggerModelDriven)
+			}
+			if status.PlanID != "7" {
+				t.Fatalf("plan_id = %q, want \"7\"", status.PlanID)
+			}
+			return
+		case <-deadline:
+			t.Fatal("no compaction status event was emitted for the cancelled parked draft")
+		}
 	}
 }
 

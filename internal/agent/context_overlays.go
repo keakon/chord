@@ -28,11 +28,12 @@ const (
 	// read as conversation noise. The text is bare content: the turn-overlay
 	// injector wraps it in a <system-reminder> block, the same runtime-message
 	// convention used by every other harness injection, so the model can tell
-	// it apart from user-written messages. It never asks the model to delay
-	// compaction, call compact_context (the compaction is already running by
-	// the time the model sees it), or guarantee a write; it only preserves an
-	// externalization opportunity while an auto-compact request is armed.
-	compactionWarningText = "The runtime has scheduled automatic context compaction for the current context.\nIf critical findings or state are not yet externalized, write them when appropriate.\ncompact_context is rejected while automatic compaction is scheduled or running, and the reset needs no manual checkpoint; retry it after the compaction settles only if your continuation still needs one.\nCompaction may continue independently of this message."
+	// it apart from user-written messages. It never asks the model to call
+	// compact_context or guarantee a write; it only preserves an
+	// externalization opportunity on the request that runs alongside the
+	// automatic-compaction start, and says plainly that the compaction does
+	// not wait for it.
+	compactionWarningText = "The context has reached the automatic-compaction threshold and will be compacted at the next safe boundary.\nIf important findings, decisions, or working state are not yet written to files, write them now — this may be the last request on the current context.\nThe compaction does not wait for this message."
 )
 
 // reminderOverlayClaim is the per-window claim for the context-pressure
@@ -207,9 +208,8 @@ func (a *MainAgent) queueContextPressureReminder(decision ctxmgr.AutoCompactDeci
 	reminderPct := a.effectiveReminderPct(threshold)
 	// "Whichever line is reached first" semantics: when the configured
 	// reminder is at or above the threshold, the threshold crossing itself
-	// triggers the reminder (the compaction grace period defers the actual
-	// compression for minCompactionGracePeriodBatches, so the model still has
-	// a window to act on the reminder).
+	// triggers the reminder (compaction starts on the crossing itself, so the
+	// reminder and the start share the request).
 	if reminderPct > threshold {
 		reminderPct = threshold
 	}
@@ -257,9 +257,9 @@ func (a *MainAgent) queueCompactionWarning() {
 // directly and splits the instruction by phase state. The text is bare
 // content; the turn-overlay injector wraps it in a <system-reminder> block.
 func buildContextPressureReminderText() string {
-	return "The context is approaching the configured automatic-compaction threshold; automatic compaction may start within the next few requests.\n" +
+	return "The context is approaching the configured automatic-compaction threshold.\n" +
 		"If the current phase is wrapped up and its working state is fully externalized, request a durable context checkpoint now by calling compact_context alone.\n" +
-		"If the phase is still open, keep writing important findings and decisions to project files as they settle, so they survive the compaction and can be re-read afterwards."
+		"If the phase is still open, keep writing important findings and decisions to project files as they settle, so they survive the upcoming compaction and can be re-read afterwards."
 }
 
 // appendContextPressureVerificationGuidance appends the post-apply guidance:

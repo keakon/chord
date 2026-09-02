@@ -14,8 +14,12 @@ import (
 
 const (
 	// Raw evidence pack: small continuation stabilizer (checkpoint-first design).
-	compactEvidenceMinTokens    = 512
-	compactEvidenceMaxTokens    = 2048
+	compactEvidenceMinTokens = 512
+	// CompactEvidenceMaxTokens caps one compaction's raw evidence pack. It is
+	// also the continuation-state token budget for compact_context (see
+	// parseCompactContextArgs): cmd/chord wires the registered validator with
+	// this exported constant so both validation paths share one number.
+	CompactEvidenceMaxTokens    = 2048
 	compactEvidencePercentNumer = 2 // ~2% of context window
 	compactEvidencePercentDenom = 100
 	compactRecentTailMinTokens  = 768
