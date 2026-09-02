@@ -249,7 +249,7 @@ func TestModelDrivenLowGainPreflightRejectsTinyContext(t *testing.T) {
 		maxTokens:             a.ctxMgr.GetMaxTokens(),
 		prepareReducedRequest: a.compactionReductionScratch().prepareMessagesForLLM,
 	}
-	reason, skip, _ := a.modelDrivenLowGainPreflight(bundle, len(snapshot), snapshot, snapshot, req)
+	reason, skip, _ := a.modelDrivenLowGainPreflight(bundle, len(snapshot), snapshot, req)
 	if !skip {
 		t.Fatal("tiny context must be skipped by the low-gain gate")
 	}

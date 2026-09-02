@@ -23,9 +23,8 @@ import (
 // tool-batch barrier (all sibling calls and batch hooks done) and never
 // touched from the compaction worker goroutine.
 type modelDrivenCheckpointRequest struct {
-	ToolCallID   string
-	Args         tools.CompactContextArgs
-	AssistantMsg string // declaring assistant message content (for batch hooks / model context)
+	ToolCallID string
+	Args       tools.CompactContextArgs
 }
 
 // requestAcceptedToolResult is the canonical compact_context success text. It
@@ -219,8 +218,12 @@ func (a *MainAgent) validateCompactContextResult(callID string, rawArgs string) 
 }
 
 // parseCompactContextArgs re-validates model arguments on the event loop with
-// the usage-calibrated token estimator (the tool's own Execute falls back to
-// the plain bytes/3 heuristic because it cannot reach the ctxmgr calibration).
+// the usage-calibrated token estimator. The tool's own Execute already ran the
+// same parser — cmd/chord wires the registered validator with this agent's
+// estimator (common_runtime_setup.go) — so the re-run here does not change the
+// budget verdict; it binds the accepted arguments to the event-loop state the
+// barrier is about to snapshot instead of trusting the pipeline's result text.
+// Only an estimator-less validator (unit tests) falls back to bytes/3.
 func (a *MainAgent) parseCompactContextArgs(raw json.RawMessage) (tools.CompactContextArgs, error) {
 	validator := tools.CompactContextValidator{
 		ContinuationStateMaxTokens: CompactEvidenceMaxTokens,
@@ -255,9 +258,8 @@ func (a *MainAgent) tryArmModelDrivenCheckpoint(callID string, rawArgs string) (
 		return "", err
 	}
 	a.pendingModelDriven = &modelDrivenCheckpointRequest{
-		ToolCallID:   callID,
-		Args:         args,
-		AssistantMsg: assistantContentForToolCall(a.ctxMgr.Snapshot(), callID),
+		ToolCallID: callID,
+		Args:       args,
 	}
 	return result, nil
 }
@@ -546,7 +548,7 @@ func (a *MainAgent) produceModelDrivenDraftAsync(ctx context.Context, bundle mod
 	// Low-gain preflight BEFORE history export. A skip here must not produce
 	// orphan history-*.md / metadata / backup files. The preflight stats ride
 	// on the returned draft so the event-loop settlement records them once.
-	skipReason, skip, preflight := a.modelDrivenLowGainPreflight(bundle, headSplit, head, snapshot, req)
+	skipReason, skip, preflight := a.modelDrivenLowGainPreflight(bundle, headSplit, snapshot, req)
 	if skip {
 		return modelDrivenSkipDraft(planID, target, skipReason, "low_gain", bundle.currentRequestBatch, &preflight), nil
 	}
@@ -652,7 +654,7 @@ func (a *MainAgent) produceModelDrivenDraftAsync(ctx context.Context, bundle mod
 // measured against the full request. Uncertain post-reset costs are
 // overestimated, never ignored, so a reset is only skipped for clearly
 // insufficient gain.
-func (a *MainAgent) modelDrivenLowGainPreflight(bundle modelDrivenBarrierSnapshot, headSplit int, head []message.Message, snapshot []message.Message, req *modelDrivenCheckpointRequest) (string, bool, modelDrivenPreflightStats) {
+func (a *MainAgent) modelDrivenLowGainPreflight(bundle modelDrivenBarrierSnapshot, headSplit int, snapshot []message.Message, req *modelDrivenCheckpointRequest) (string, bool, modelDrivenPreflightStats) {
 	currentSurface := bundle.prepareReducedRequest(snapshot)
 	// Queued user messages are merged after reduction on the real request
 	// path, so they append to the prepared surface on both sides.
@@ -990,20 +992,6 @@ func renderStateFilesSection(paths []string) string {
 		}
 	}
 	return strings.TrimRight(sb.String(), "\n")
-}
-
-// ------------------------------------------------------------ helpers ----
-
-func assistantContentForToolCall(messages []message.Message, callID string) string {
-	for i := len(messages) - 1; i >= 0; i-- {
-		msg := messages[i]
-		for _, tc := range msg.ToolCalls {
-			if tc.ID == callID {
-				return msg.Content
-			}
-		}
-	}
-	return ""
 }
 
 // settleModelDrivenOutcome is the single settlement point for model-driven
