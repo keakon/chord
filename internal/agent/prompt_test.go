@@ -725,7 +725,7 @@ func TestMainAgentRolePromptBlock_UsesPlannerPromptOnlyForPlannerRole(t *testing
 	a := &MainAgent{}
 	a.activeConfig = &config.AgentConfig{Name: "planner"}
 	got := a.mainAgentRolePromptBlock()
-	for _, want := range []string{"Save the plan document under .chord/plans/ as plan-<NNN>.md, using the next unused three-digit number", "Explore the codebase using the tools and permissions available in this role.", "Answer directly and stop (no plan file, no Handoff) when the user asks for any", "When the user rejects Handoff"} {
+	for _, want := range []string{"Save the plan document under .chord/plans/ as YYYYMMDD-<slug>.md, using today's date and a short descriptive slug derived from the task title", "Explore the codebase using the tools and permissions available in this role.", "Answer directly and stop (no plan file, no Handoff) when the user asks for any", "When the user rejects Handoff"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("planner prompt missing %q in %q", want, got)
 		}

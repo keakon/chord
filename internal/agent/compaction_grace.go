@@ -34,7 +34,7 @@ const (
 func compactionImminentText(requests int) string {
 	return fmt.Sprintf("The context has crossed the automatic-compaction threshold. Automatic compaction will start after the next %d requests unless a context checkpoint is applied first.\n", requests) +
 		"If the current phase is wrapped up and its working state is externalized, call compact_context alone on this turn to checkpoint it now.\n" +
-		"Otherwise write important findings, decisions, and working state to a project file your role may write (for example a task-notes file under .chord/notes/ or a plan document under .chord/plans/) so they survive the compaction."
+		"Otherwise write important findings, decisions, and working state to a project file your role may write (for example a task-notes file under .chord/notes/, named with a YYYYMMDD date prefix) so they survive the compaction."
 }
 
 // usageDrivenCompactionGraceDefers decides, on the pre-request gate after the

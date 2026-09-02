@@ -282,7 +282,7 @@ func (a *MainAgent) plannerModePromptBlock() string {
 		hasFileWrite = hasWrite || hasPatch
 		_, hasHandoff = visible[tools.NameHandoff]
 	}
-	fileWriteStep := "5. Save the plan document under .chord/plans/ as plan-<NNN>.md, using the next unused three-digit number (for example .chord/plans/plan-001.md), before handing it off or finishing the planning turn."
+	fileWriteStep := "5. Save the plan document under .chord/plans/ as YYYYMMDD-<slug>.md, using today's date and a short descriptive slug derived from the task title (for example .chord/plans/20260903-session-key-isolation.md). If a file with the same date and slug already exists (a later revision of the same topic), append -2, -3, and so on. When a new plan document replaces an earlier one, declare it with a supersedes: <old file> line near the top; move finished or superseded documents to .chord/plans/archive/ (archive files keep their original names). Write the plan before handing it off or finishing the planning turn."
 	if hasFileWrite {
 		fileWriteStep += " Write the plan document with the visible file tools available in this role."
 	} else {
@@ -335,7 +335,7 @@ Handoff.
 The rejection is appended to the conversation as a user message ("Handoff
 rejected: <reason>") and becomes the latest request driving this turn:
 - Revise the existing plan file referenced by that message; do not create a new
-  plan-<NNN>.md number for the same plan.
+  plan document or rename the existing one for the same plan.
 - Call Handoff again only after addressing the rejection reason.
 
 ### Plan Document Format
@@ -405,7 +405,7 @@ func (a *MainAgent) modelDrivenContextPromptBlock() string {
 	return "## Long-session context management\n" +
 		"Runtime messages wrapped in <system-reminder> tags are injected by the harness, not written by the user; they carry current runtime state (such as context-pressure notices) and are authoritative.\n" +
 		"- In a long session, keep writing important findings, decisions, and state to project files your role may write (for example a task-notes file under .chord/notes/ or a plan document under .chord/plans/) as phases settle, so they survive any later context compaction and can be re-read.\n" +
-		"- Files you maintain and are allowed to write in this role (for example .chord/plans/plan-*.md or notes under .chord/notes/) can be listed in the compact_context state_files parameter when requesting a checkpoint: state_files entries are pure references, and you re-read those files with the read tool after the checkpoint applies instead of scanning the archived history files.\n" +
+		"- Files you maintain and are allowed to write in this role (for example plan documents under .chord/plans/ named YYYYMMDD-<slug>.md or task notes under .chord/notes/) can be listed in the compact_context state_files parameter when requesting a checkpoint: state_files entries are pure references, and you re-read those files with the read tool after the checkpoint applies instead of scanning the archived history files.\n" +
 		"- When a phase is fully wrapped up (investigation done, decisions made) and the next step needs only those conclusions rather than the current context's intermediate detail, you may request a durable context checkpoint with compact_context alone.\n" +
 		"- After a checkpoint applies, older detail lives in the archived history files; read them when you need exact past facts instead of guessing.\n" +
 		"- Do not treat completing a small task or TODO as a reason to checkpoint; the runtime rejects low-gain resets."

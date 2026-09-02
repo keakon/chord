@@ -24,7 +24,7 @@ func (HandoffTool) Name() string { return NameHandoff }
 
 func (HandoffTool) Description() string {
 	return "Signal that planning is complete and hand off to another agent for execution. " +
-		"Always write the plan to .chord/plans/plan-XXX.md before calling this tool — " +
+		"Always write the plan to .chord/plans/ as YYYYMMDD-<slug>.md before calling this tool — " +
 		"it validates that the referenced file already exists. Call it after writing the plan document to .chord/plans/. " +
 		"Call it only when the request actually needs execution in another role; do not use it to " +
 		"hand off a request you answered directly or a plan the user only asked to review."
@@ -36,7 +36,7 @@ func (HandoffTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"plan_path": map[string]any{
 				"type":        "string",
-				"description": "Path to the plan document (e.g. .chord/plans/plan-001.md). Relative paths resolve from the session working directory. Supports ~ for the current user's home directory. The file must exist before calling this tool.",
+				"description": "Path to the plan document (e.g. .chord/plans/20260903-session-key-isolation.md). Relative paths resolve from the session working directory. Supports ~ for the current user's home directory. The file must exist before calling this tool.",
 			},
 		},
 		"required":             []string{"plan_path"},
