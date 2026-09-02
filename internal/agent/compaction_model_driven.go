@@ -146,6 +146,11 @@ type modelDrivenBarrierSnapshot struct {
 	// through this snapshot (bundle.estimateTokens) so the two sides cannot
 	// drift apart if the live ctxMgr calibration changes between them.
 	calibratedRatio float64
+	// retainRecentTokens is the estimated-token budget for the real recent
+	// user messages kept verbatim inside the checkpoint (zero falls back to
+	// the built-in default). Read from the merged config on the event loop
+	// like every other config read; the worker never touches live config.
+	retainRecentTokens int
 }
 
 // estimateTokens estimates the input tokens of a message slice on the barrier
@@ -355,6 +360,7 @@ func (a *MainAgent) captureModelDrivenBarrierSnapshot(snapshot []message.Message
 		lastModelDrivenSkipReason:   a.lastModelDrivenSkipReason,
 		promptCacheCapable:          a.currentModelPromptCacheCapable(),
 		calibratedRatio:             a.ctxMgr.CalibratedRatio(),
+		retainRecentTokens:          a.effectiveCompactionRetainRecentTokens(),
 	}
 }
 
@@ -779,7 +785,15 @@ func (a *MainAgent) buildModelDrivenCheckpointContent(bundle modelDrivenBarrierS
 	}
 	historyRefs = formatHistoryMapLines(historyRefs, readCompactionHistoryMetas(historyRefs))
 	evidenceItems := filterCompactionEvidenceForArchival(bundle.evidenceItems)
-	checkpointContent := buildCompactionCheckpointMessage(summaryText, historyRefs, compactionSummaryModeModelDriven, evidenceItems)
+	// The newest real user messages of the archived head (and any dangling
+	// interrupted reply) stay verbatim inside the checkpoint within the
+	// retention budget, deterministic like the rest of this path — no model
+	// call is involved, and the preflight counts the section because it is
+	// part of checkpointContent.
+	retainedRecent := renderCheckpointRetainedRecentMessages(headSnapshot, compactRetainRecentUserMessages, bundle.retainRecentTokens, func(text string) int {
+		return ctxmgr.EstimateMessagesTokensWithRatio([]message.Message{{Role: message.RoleUser, Content: text}}, bundle.calibratedRatio)
+	})
+	checkpointContent := buildCompactionCheckpointMessage(summaryText, historyRefs, compactionSummaryModeModelDriven, evidenceItems, retainedRecent)
 
 	var historyMapBytes int
 	for _, ref := range historyRefs {

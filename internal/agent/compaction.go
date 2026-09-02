@@ -32,6 +32,17 @@ const (
 	// nothing exactly when compaction fires, because by then the newest user
 	// turn carries a full tool loop.
 	compactRecentTailBudgetRatio = 20
+	// compactRetainRecentDefaultTokens is the built-in estimated-token budget
+	// for the newest real user messages kept verbatim inside every checkpoint
+	// (context.compaction.retain_recent_tokens overrides it). Deliberately
+	// small so compaction still reclaims the bulk of the context: the latest
+	// instruction boundary is what the continuation needs first, and the
+	// summarized sections plus archives cover everything older.
+	compactRetainRecentDefaultTokens = 4096
+	// compactRetainRecentUserMessages bounds how many newest user messages the
+	// checkpoint retention may keep (a dangling interrupted assistant reply is
+	// kept in addition, at most one).
+	compactRetainRecentUserMessages = 4
 	// compactRecentTailAnchorMessages bounds how many tail messages are echoed
 	// into the summarize prompt. The tail survives verbatim in the context
 	// anyway; the anchor only has to tell the summarizer what not to duplicate.

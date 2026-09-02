@@ -168,6 +168,22 @@ func TestContextReductionKnownKeysCoverAllYamlTags(t *testing.T) {
 	}
 }
 
+func TestLoadConfigFromPathParsesCompactionRetainRecentTokens(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := []byte("context:\n  compaction:\n    retain_recent_tokens: 8192\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	cfg, err := LoadConfigFromPath(path)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath: %v", err)
+	}
+	if cfg.Context.Compaction.RetainRecentTokens != 8192 {
+		t.Fatalf("context.compaction.retain_recent_tokens = %d, want 8192", cfg.Context.Compaction.RetainRecentTokens)
+	}
+}
+
 func TestLoadConfigFromPathParsesNestedCompactionConfig(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")

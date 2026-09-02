@@ -47,6 +47,22 @@ func (a *MainAgent) effectiveCompactionReservedInput() int {
 	return 0
 }
 
+// effectiveCompactionRetainRecentTokens returns the configured
+// context.compaction.retain_recent_tokens checkpoint-retention budget, or the
+// built-in default when unset. Project wins over global, mirroring
+// effectiveCompactionReservedInput; only an explicit positive value counts.
+func (a *MainAgent) effectiveCompactionRetainRecentTokens() int {
+	for _, cfg := range []*config.Config{a.projectConfig, a.globalConfig} {
+		if cfg == nil {
+			continue
+		}
+		if cfg.Context.Compaction.RetainRecentTokens > 0 {
+			return cfg.Context.Compaction.RetainRecentTokens
+		}
+	}
+	return compactRetainRecentDefaultTokens
+}
+
 func (a *MainAgent) resolveCompactionProfile(todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState, evidenceItems []evidenceItem) compactionProfile {
 	switch profile := a.configuredCompactionProfile(); profile {
 	case compactionProfileContinuation, compactionProfileArchival:

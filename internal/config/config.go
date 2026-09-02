@@ -1301,6 +1301,13 @@ type CompactionConfig struct {
 	// tool is registered, so a project setting this false overrides a global
 	// true like any other scalar override.
 	ModelDriven bool `json:"model_driven,omitempty" yaml:"model_driven,omitempty"`
+	// RetainRecentTokens is the estimated-token budget for the newest real
+	// user messages (plus a dangling interrupted assistant reply) kept
+	// verbatim inside every compaction checkpoint, so the continuation can
+	// pick up the latest work boundary without re-reading the archived
+	// history. Zero (or omitted) uses the built-in default; only the message
+	// text counts toward the budget.
+	RetainRecentTokens int `json:"retain_recent_tokens,omitempty" yaml:"retain_recent_tokens,omitempty"`
 }
 
 // ModelCompactionConfig carries per-model overrides for the compaction

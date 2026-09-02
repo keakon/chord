@@ -6,9 +6,189 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/keakon/chord/internal/message"
 )
+
+// Checkpoint recent-message retention.
+//
+// A checkpoint replaces the archived head with a summary, moving the real
+// conversation out of the live context. The newest real user messages are kept
+// verbatim inside the checkpoint (bounded by a small token budget) so the
+// model can pick the latest instruction boundary back up without re-reading
+// the archives — codex keeps recent user messages in its compacted history for
+// the same reason. A dangling interrupted assistant reply is kept too:
+// compaction often lands right after a streamed reply was cut, and that
+// partial text is exactly what the continuation must resume.
+const (
+	// retainedRecentMessagesHeading introduces the retained section inside the
+	// checkpoint wrapper. It lives outside the summary body ([Context Summary]
+	// .. [Context compressed]), so prior-checkpoint carry and the summary-body
+	// parsers never treat the retained messages as summary content.
+	retainedRecentMessagesHeading = "## Retained Recent Messages"
+	// retainedRecentTruncationMarker marks a block that was cut to fit the
+	// retention budget.
+	retainedRecentTruncationMarker = "[truncated]"
+
+	retainedUserLabel                 = "User"
+	retainedInterruptedAssistantLabel = "Assistant (interrupted reply, partial text)"
+)
+
+// retainedCheckpointBlock is one message kept verbatim inside a checkpoint.
+// Blocks are collected newest first and rendered in reverse (chronological).
+type retainedCheckpointBlock struct {
+	label     string
+	text      string
+	truncated bool
+}
+
+// selectCheckpointRetainedRecentBlocks walks the head being replaced by a
+// checkpoint from the newest message backwards and returns the real messages
+// worth keeping verbatim, newest first. Only user-authored messages count:
+// synthetic user-role messages — prior compaction checkpoints, stream-continue
+// prompts, loop notices, mailbox traffic, hook feedback, background results —
+// never do, so retention cannot resurrect plumbing or a previous checkpoint.
+// An interrupted assistant reply (StopReason "interrupted", no tool calls) is
+// additionally retained only when it is the newest assistant segment of the
+// head and no real user message is newer: an already-continued or superseded
+// partial would only pull the model back to an abandoned exchange. At most
+// maxUserMessages user messages are kept; the budget counts message text only.
+func selectCheckpointRetainedRecentBlocks(messages []message.Message, maxUserMessages int, budgetTokens int, estimateTokens func(text string) int) []retainedCheckpointBlock {
+	if budgetTokens <= 0 || estimateTokens == nil || maxUserMessages <= 0 {
+		return nil
+	}
+	remaining := budgetTokens
+	var blocks []retainedCheckpointBlock
+	users := 0
+	partialKept := false
+	seenAssistant := false
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		switch {
+		case msg.Role == message.RoleUser && !message.IsUserAuthored(msg):
+			// Synthetic user-role plumbing: never a real instruction.
+			continue
+		case msg.Role == message.RoleUser:
+			if users >= maxUserMessages {
+				return blocks
+			}
+			text := message.UserPromptInstructionText(msg)
+			if text == "" {
+				continue
+			}
+			users++
+			blocks, remaining = addCheckpointRetainedBlock(blocks, remaining, estimateTokens, retainedCheckpointBlock{label: retainedUserLabel, text: text})
+			if remaining <= 0 {
+				return blocks
+			}
+		case msg.Role == message.RoleAssistant:
+			if !seenAssistant && !partialKept && users == 0 && len(msg.ToolCalls) == 0 && msg.StopReason == "interrupted" {
+				if text := retainedAssistantPartialText(msg); text != "" {
+					partialKept = true
+					blocks, remaining = addCheckpointRetainedBlock(blocks, remaining, estimateTokens, retainedCheckpointBlock{label: retainedInterruptedAssistantLabel, text: text})
+					if remaining <= 0 {
+						return blocks
+					}
+				}
+			}
+			seenAssistant = true
+		}
+	}
+	return blocks
+}
+
+// addCheckpointRetainedBlock appends block when its text fits the remaining
+// budget; otherwise it keeps the largest fitting prefix and marks the block
+// truncated. Blocks are added newest first, so the block that does not fit is
+// the oldest kept one — truncating exactly there (and stopping) keeps every
+// newer message whole.
+func addCheckpointRetainedBlock(blocks []retainedCheckpointBlock, remaining int, estimateTokens func(text string) int, block retainedCheckpointBlock) ([]retainedCheckpointBlock, int) {
+	cost := estimateTokens(block.text)
+	if cost <= remaining {
+		return append(blocks, block), remaining - cost
+	}
+	block.text = truncateRetainedTextToBudget(block.text, remaining, estimateTokens)
+	if block.text == "" {
+		return blocks, 0
+	}
+	block.truncated = true
+	return append(blocks, block), 0
+}
+
+// truncateRetainedTextToBudget returns the longest prefix of text whose
+// estimated cost fits budget, cut at a UTF-8 rune boundary. The estimator is
+// monotone in prefix length, so a binary search finds the fit point.
+func truncateRetainedTextToBudget(text string, budget int, estimateTokens func(text string) int) string {
+	if text == "" || budget <= 0 {
+		return ""
+	}
+	if estimateTokens(text) <= budget {
+		return text
+	}
+	lo, hi := 0, len(text)
+	for lo < hi {
+		mid := (lo + hi + 1) / 2
+		if estimateTokens(text[:mid]) <= budget {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
+	}
+	for lo > 0 && !utf8.RuneStart(text[lo]) {
+		lo--
+	}
+	return text[:lo]
+}
+
+// retainedAssistantPartialText returns the text of an interrupted assistant
+// message for retention. Content is used verbatim; part-based messages fall
+// back to the same text normalization the recent-tail anchor echo uses.
+func retainedAssistantPartialText(msg message.Message) string {
+	if text := strings.TrimSpace(msg.Content); text != "" {
+		return text
+	}
+	if len(msg.Parts) == 0 {
+		return ""
+	}
+	norm := normalizeMessagesForSummary([]message.Message{msg})
+	if len(norm) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(norm[0].Content)
+}
+
+// renderCheckpointRetainedRecentMessages builds the `## Retained Recent
+// Messages` section embedded in a checkpoint message, with the retained
+// messages in chronological order (oldest first) as labelled blockquotes so
+// they read as real conversation and cannot be mistaken for checkpoint
+// structure. Returns "" when nothing was retained.
+func renderCheckpointRetainedRecentMessages(messages []message.Message, maxUserMessages int, budgetTokens int, estimateTokens func(text string) int) string {
+	blocks := selectCheckpointRetainedRecentBlocks(messages, maxUserMessages, budgetTokens, estimateTokens)
+	if len(blocks) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString(retainedRecentMessagesHeading)
+	sb.WriteString("\nReal messages kept verbatim from just before the checkpoint so the conversation continues on the actual work boundary; everything older lives in the summarized sections above and the archived history files.\n")
+	for i := len(blocks) - 1; i >= 0; i-- {
+		block := blocks[i]
+		sb.WriteByte('\n')
+		sb.WriteString(block.label)
+		sb.WriteString(":\n")
+		for _, line := range strings.Split(block.text, "\n") {
+			sb.WriteString("> ")
+			sb.WriteString(line)
+			sb.WriteByte('\n')
+		}
+		if block.truncated {
+			sb.WriteString("> ")
+			sb.WriteString(retainedRecentTruncationMarker)
+			sb.WriteByte('\n')
+		}
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
 
 func renderEvidenceArtifactContent(items []evidenceItem) string {
 	if len(items) == 0 {
@@ -34,7 +214,13 @@ func renderEvidenceArtifactContent(items []evidenceItem) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-func buildCompactionCheckpointMessage(summary string, historyRefs []string, mode string, evidenceItems []evidenceItem) string {
+// buildCompactionCheckpointMessage renders the checkpoint message: the summary
+// body between the [Context Summary] / [Context compressed] markers, then the
+// wrapper (mode note, archived-history map, retained recent messages, evidence
+// artifact, display hint). retainedRecent, when non-empty, is the rendered
+// `## Retained Recent Messages` section; the variadic form keeps the many
+// direct callers (tests, carry helpers) free of an always-empty argument.
+func buildCompactionCheckpointMessage(summary string, historyRefs []string, mode string, evidenceItems []evidenceItem, retainedRecent ...string) string {
 	var sb strings.Builder
 	sb.WriteString(message.CompactionSummaryHeader)
 	sb.WriteString(strings.TrimSpace(summary))
@@ -46,7 +232,7 @@ func buildCompactionCheckpointMessage(summary string, historyRefs []string, mode
 	case "structured_fallback":
 		sb.WriteString("Earlier conversation was compacted using a structured fallback summary after model summarization was weak or unavailable.\n")
 	case compactionSummaryModeModelDriven:
-		sb.WriteString("Earlier conversation was compacted into this model-driven context checkpoint. The checkpoint was built deterministically from runtime facts (current request, todos, subagents, background objects, anchors) and the continuation state the model submitted through the compact_context tool; no summarization model was called. The archived history files below remain the authoritative record.\n")
+		sb.WriteString("Earlier conversation was compacted into this model-driven context checkpoint. The checkpoint was built deterministically from runtime facts (current request, todos, subagents, background objects, anchors, and the newest real messages retained below) and the continuation state the model submitted through the compact_context tool; no summarization model was called. The archived history files below remain the authoritative record.\n")
 	default:
 		sb.WriteString("Earlier conversation was compacted into the summary above.\n")
 	}
@@ -54,6 +240,11 @@ func buildCompactionCheckpointMessage(summary string, historyRefs []string, mode
 	for _, ref := range historyRefs {
 		sb.WriteString("- ")
 		sb.WriteString(ref)
+		sb.WriteByte('\n')
+	}
+	if retained := firstRetainedRecentSection(retainedRecent); retained != "" {
+		sb.WriteString("\n")
+		sb.WriteString(retained)
 		sb.WriteByte('\n')
 	}
 	if evidence := renderEvidenceArtifactContent(evidenceItems); evidence != "" {
@@ -64,6 +255,13 @@ func buildCompactionCheckpointMessage(summary string, historyRefs []string, mode
 	sb.WriteString(message.CompactionDisplayHint)
 	sb.WriteString("Press toggle-collapse to expand and inspect the full preserved context message.\n")
 	return strings.TrimRight(sb.String(), "\n")
+}
+
+func firstRetainedRecentSection(retainedRecent []string) string {
+	if len(retainedRecent) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(retainedRecent[0])
 }
 
 func formatKeyFileCandidatesForPrompt(paths []string) string {

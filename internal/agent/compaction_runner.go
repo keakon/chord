@@ -326,7 +326,14 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 	if problems := verifyAnchorsCoherence(sessionAnchors); len(problems) > 0 {
 		log.Warnf("compaction checkpoint anchor coherence problems: %v", problems)
 	}
-	checkpointContent := buildCompactionCheckpointMessage(withCompactionAnchors(summaryText, sessionAnchors), historyRefs, summaryMode, evidenceItems)
+	// The newest real user messages of the archived head (and any dangling
+	// interrupted reply) are kept verbatim inside the checkpoint within the
+	// retention budget, so the continuation can resume the actual work
+	// boundary without re-reading the archives.
+	retainedRecent := renderCheckpointRetainedRecentMessages(headSnapshot, compactRetainRecentUserMessages, a.effectiveCompactionRetainRecentTokens(), func(text string) int {
+		return estimateMessageTokens(a.ctxMgr, message.Message{Role: message.RoleUser, Content: text})
+	})
+	checkpointContent := buildCompactionCheckpointMessage(withCompactionAnchors(summaryText, sessionAnchors), historyRefs, summaryMode, evidenceItems, retainedRecent)
 	checkpointKeyFiles := extractCompactionKeyFiles(checkpointContent, a.projectRoot)
 	keyFileRevisions := captureCompactionFileRevisions(checkpointKeyFiles, a.resolveCheckpointFilePath)
 	contextSummaryMsg := message.Message{

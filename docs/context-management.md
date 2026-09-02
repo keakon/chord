@@ -90,7 +90,21 @@ turn exceeds that budget — the usual case once that turn carries a full tool l
 — it falls back to the longest safe suffix that does fit rather than dropping the
 tail entirely. Tool-call/result pairs are never split, and short histories fall
 back to summarizing the full safe head when preserving the tail would leave too
-little material to summarize. Explicit `archival` profiles remain summary-only.
+little material to summarize.
+
+### Retained recent messages
+
+Every checkpoint also embeds the newest real user messages from the archived
+head verbatim — plus a dangling interrupted assistant reply when the
+conversation ends on one — as a `## Retained Recent Messages` section inside
+the checkpoint, within a small estimated-token budget (`retain_recent_tokens`,
+built-in default 4096). Continuation profiles keep the most recent turns as raw
+messages below the checkpoint; the retained section covers the messages just
+before them, and for `archival` profiles — which keep no raw tail and are
+otherwise summary-only — it is the only verbatim remnant of the latest
+instructions. Retention never substitutes for the summary: it only pins the
+newest instruction boundary so the continuation can resume without re-reading
+the archives.
 Key files reloaded from the checkpoint are request-local overlays read from disk
 on every request; each `<file>` block includes its SHA-256 revision and whether
 it changed since that checkpoint's first injection. The overlay is injected only
@@ -117,6 +131,7 @@ context:
 | `profile` | string | `auto` | Compaction strategy. Usually unnecessary. |
 | `reminder` | float | `0` (derived) | Context-pressure reminder line as a usage ratio. `0` means derive as `min(0.60, threshold × 0.90)`; a non-zero value is used as the reminder line. The reminder fires when usage reaches `min(reminder, threshold)` — whichever line comes first — and when the reminder sits at or above `threshold`, the threshold crossing itself triggers it (compaction starts on the crossing itself, so the reminder and the start share the request). Disabled together with `threshold: 0`. Reminders cannot be turned off on their own: there is no option to keep automatic compaction enabled while disabling the pressure reminder — raise the reminder line as needed, or set `threshold: 0` to disable both. Values outside `0`–`1` (negative, above `1`, or NaN/±Inf) are rejected with a warning and fall back to the derived default. |
 | `model_driven` | bool | `false` | Experimental opt-in: expose the `compact_context` tool to the main agent so the model can request a durable context checkpoint once it has externalized its working state (written it into files or structured arguments). The checkpoint is built deterministically without a summarization model call, applies at a tool-batch barrier that pauses the next main-model request, and continues the same turn on the compacted context. The tool is MainAgent-only, must be called alone, and only references `state_files` paths without reading them. Low-gain requests are skipped automatically. Off by default; enable only for projects where long exploratory sessions benefit from explicit resets. |
+| `retain_recent_tokens` | int | `4096` (built-in) | Estimated-token budget for the newest real user messages kept verbatim inside every compaction checkpoint (see [Retained recent messages](#retained-recent-messages)); `0` or omitted uses the built-in default. Only the message text counts toward the budget. Set it higher to keep more of the latest turns across a compaction, or lower to reclaim more context; the retained section never replaces the summary — it pins the newest instruction boundary verbatim. |
 
 Per-model overrides live on the model definition (`ModelConfig.compaction`,
 with `threshold` and `reminder` subfields), so `model_templates` can share them
