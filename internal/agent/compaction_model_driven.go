@@ -1005,16 +1005,18 @@ func (a *MainAgent) settleModelDrivenOutcome(status string, reason string, prefl
 // so a retry with the same reason short-circuits without re-running preflight;
 // structural skips ("not enough history") carry no verdict and do not touch
 // the cooldown state.
+//
+// draft must be non-nil: the only production caller reaches this through a
+// branch that has already dereferenced draft.Skip. Half-guarding it (as this
+// function once did) only hides a caller bug that the very next line would
+// trip over anyway.
 func (a *MainAgent) settleModelDrivenSkip(draft *compactionDraft) {
-	if draft != nil && draft.ModelDrivenSkipReason != "" && draft.ModelDrivenSkipBatch > 0 {
+	if draft.ModelDrivenSkipReason != "" && draft.ModelDrivenSkipBatch > 0 {
 		a.lastModelDrivenSkipBatch = draft.ModelDrivenSkipBatch
 		a.lastModelDrivenSkipReason = draft.ModelDrivenSkipReason
 	}
-	reason := ""
-	if draft != nil {
-		reason = strings.TrimSpace(draft.InfoMessage)
-		reason = strings.TrimPrefix(reason, "Context checkpoint skipped: ")
-	}
+	reason := strings.TrimSpace(draft.InfoMessage)
+	reason = strings.TrimPrefix(reason, "Context checkpoint skipped: ")
 	if reason == "" {
 		reason = "projected savings were too small"
 	}
