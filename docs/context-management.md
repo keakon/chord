@@ -115,7 +115,7 @@ context:
 | `reserved` | int | `0` | Fixed token headroom added on top of the proportional headroom left by `threshold`, for tokenizer drift, tool schema overhead, and compaction/recovery safety. Usually omit it (leave it at `0`); a non-zero value is subtracted from the input budget before applying `threshold`. |
 | `preset` | string | auto-detected | Force a specific compaction implementation. Usually unnecessary. |
 | `profile` | string | `auto` | Compaction strategy. Usually unnecessary. |
-| `reminder` | float | `0` (derived) | Context-pressure reminder line as a usage ratio. `0` means derive as `min(0.60, threshold × 0.90)`; a non-zero value is used as the reminder line. The reminder fires when usage reaches `min(reminder, threshold)` — whichever line comes first — and the compaction grace period (see below) defers the actual compression for up to two main requests, so a reminder set at or above `threshold` still fires on the threshold crossing itself. Disabled together with `threshold: 0`. |
+| `reminder` | float | `0` (derived) | Context-pressure reminder line as a usage ratio. `0` means derive as `min(0.60, threshold × 0.90)`; a non-zero value is used as the reminder line. The reminder fires when usage reaches `min(reminder, threshold)` — whichever line comes first — and the compaction grace period (see below) defers the actual compression for up to two main requests, so a reminder set at or above `threshold` still fires on the threshold crossing itself. Disabled together with `threshold: 0`. Reminders cannot be turned off on their own: there is no option to keep automatic compaction enabled while disabling the pressure reminder — raise the reminder line as needed, or set `threshold: 0` to disable both. |
 | `model_driven` | bool | `false` | Experimental opt-in: expose the `compact_context` tool to the main agent so the model can request a durable context checkpoint once it has externalized its working state (written it into files or structured arguments). The checkpoint is built deterministically without a summarization model call, applies at a tool-batch barrier that pauses the next main-model request, and continues the same turn on the compacted context. The tool is MainAgent-only, must be called alone, and only references `state_files` paths without reading them. Low-gain requests are skipped automatically. Off by default; enable only for projects where long exploratory sessions benefit from explicit resets. |
 
 Per-model overrides live on the model definition (`ModelConfig.compaction`,
@@ -128,7 +128,8 @@ not depend on `model_driven`, which only registers the `compact_context` tool.
 The TUI context usage display (sidebar Context value/gauge and the status-bar
 percentage pill) uses the same two lines for its colors: green below the
 reminder, orange/yellow from the reminder up to the threshold, red at the
-threshold.
+threshold. The request-side reminder and warning overlays, by contrast, are
+only injected while `model_driven` is enabled (see below).
 
 Set the global lines under `context.compaction` and tune per model on the model
 definition itself (`ModelConfig.compaction`). Model templates make this
@@ -159,19 +160,23 @@ A model without a `compaction` block inherits the global
 disables automatic compaction (and reminders) for that model only.
 
 When the automatic-compaction threshold is first crossed, Chord does **not**
-compact immediately: it opens a **grace period** of two main-model requests
-during which the model sees the context-pressure reminder and can actively
-reset via `compact_context` or write its state to files. The reminder and the
+compact immediately: it opens a **grace period** of two main-model requests.
+The request-side reminder described below only fires while model-driven
+compaction is enabled (`compact_context` visible); with it off, automatic
+compaction is fully runtime-owned — as in Codex's local and remote compaction
+paths, which never notify the working model — and the session simply keeps
+running until the compaction applies at the next barrier. The reminder and the
 grace window only apply while the session keeps issuing main requests — if the
 turn ends right at the crossing, the usage-driven compaction runs through the
 normal end-of-turn path instead. The usage-driven compaction starts only after
 the grace period expires and usage is still over the threshold, and the
 one-shot externalization warning is shown on the request that actually runs
-alongside it; provider rejections (oversize) still force compaction
-immediately regardless of the grace period. A model-driven request that is
-skipped, fails, or is cancelled ends the grace period early so the
-usage-driven safety net takes over promptly. Switching models applies the new
-model's per-model thresholds and starts a fresh grace/reminder window.
+alongside it (again only while model-driven is enabled); provider rejections
+(oversize) still force compaction immediately regardless of the grace period.
+A model-driven request that is skipped, fails, or is cancelled ends the grace
+period early so the usage-driven safety net takes over promptly. Switching
+models applies the new model's per-model thresholds and starts a fresh
+grace/reminder window.
 
 ### Model-driven context checkpoint (experimental)
 
@@ -196,15 +201,24 @@ waits for the tool batch to close, then:
 A skip is a normal policy result: retrying the same request immediately is
 cooled down briefly and does not change the outcome — the model should wait or
 move on. When context usage approaches the automatic-compaction threshold, the
-next request may also carry a one-time context-pressure reminder suggesting
-the model externalize important state (naming `compact_context` when it is
-available); once the grace period expires and the usage-driven compaction
-actually starts, the request that runs alongside it carries a one-time
-externalization warning. These overlays are transient: they never become part
-of the conversation history.
+next request may carry a one-time context-pressure reminder: it tells the model
+to prepare for the compaction (call `compact_context` alone if the current
+phase is wrapped up, otherwise keep externalizing findings to project files as
+phases settle) instead of quoting how much context is left. Once the grace
+period expires and the usage-driven compaction actually starts, the request
+that runs alongside it carries a one-time externalization warning. Both
+overlays are wrapped in a `<system-reminder>` block — the same runtime-message
+convention every harness injection uses — so the model can tell them apart
+from user-written messages (research on memory-pressure signals, e.g. MemGPT,
+injects these as system messages for exactly this reason). They are injected
+only while `model_driven` is enabled — without it the model has no
+externalization contract, so they would be unactionable noise. They are
+transient: they never become part of the conversation history.
 
 While model-driven compaction is enabled, the main agent's system prompt also
-carries a short passive `Long-session context management` section: write key
+carries a short passive `Long-session context management` section: it states
+that `<system-reminder>`-wrapped messages are harness-injected runtime state
+(never user-written) and authoritative, and asks the model to write key
 findings and decisions to project files as phases settle (so they survive a
 later checkpoint), call `compact_context` alone only at a real phase boundary,
 and read the archived history files for exact past facts after a checkpoint

@@ -400,6 +400,7 @@ func (a *MainAgent) modelDrivenContextPromptBlock() string {
 		return ""
 	}
 	return "## Long-session context management\n" +
+		"Runtime messages wrapped in <system-reminder> tags are injected by the harness, not written by the user; they carry current runtime state (such as context-pressure notices) and are authoritative.\n" +
 		"- In a long session, keep writing important findings, decisions, and state to project files (for example notes or plan documents) as phases settle, so they survive any later context compaction and can be re-read.\n" +
 		"- When a phase is fully wrapped up (investigation done, decisions made) and the next step needs only those conclusions rather than the current context's intermediate detail, you may request a durable context checkpoint with compact_context alone.\n" +
 		"- After a checkpoint applies, older detail lives in the archived history files; read them when you need exact past facts instead of guessing.\n" +

@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"fmt"
 	"strings"
 	"sync"
 
@@ -21,10 +20,19 @@ const (
 	// the configured auto-compaction threshold.
 	contextPressureReminderThresholdRatio = 0.90
 	// compactionWarningText is the usage-driven externalization opportunity.
-	// It never asks the model to delay compaction, call compact_context, or
-	// guarantee a write; it only preserves an externalization opportunity
-	// while an auto-compact request is armed.
-	compactionWarningText = "<compaction-warning>\nThe runtime has scheduled automatic context compaction for the current context.\nIf critical findings or state are not yet externalized, write them when appropriate.\nCompaction may continue independently of this message.\n</compaction-warning>"
+	// It is only injected while model-driven compaction is enabled (the
+	// compact_context tool is visible): with the tool off the model has no
+	// externalization contract, so automatic compaction is fully owned by the
+	// runtime — like Codex's local and remote compaction paths, which never
+	// notify the working model — and an unactionable warning would only be
+	// read as conversation noise. The text is bare content: the turn-overlay
+	// injector wraps it in a <system-reminder> block, the same runtime-message
+	// convention used by every other harness injection, so the model can tell
+	// it apart from user-written messages. It never asks the model to delay
+	// compaction, call compact_context (the compaction is already running by
+	// the time the model sees it), or guarantee a write; it only preserves an
+	// externalization opportunity while an auto-compact request is armed.
+	compactionWarningText = "The runtime has scheduled automatic context compaction for the current context.\nIf critical findings or state are not yet externalized, write them when appropriate.\nCompaction may continue independently of this message."
 )
 
 // reminderOverlayClaim is the per-window claim for the context-pressure
@@ -188,6 +196,14 @@ func (a *MainAgent) queueContextPressureReminder(decision ctxmgr.AutoCompactDeci
 	if threshold <= 0 || usable <= 0 {
 		return
 	}
+	// Without the compact_context tool the reminder is unactionable: the model
+	// has no externalization contract, and quoting usage numbers would only
+	// invite it to reason about how much space is left instead of preparing
+	// for the compaction. Automatic compaction is fully runtime-owned in that
+	// mode, so no request-side overlay is injected.
+	if !a.compactContextVisible() {
+		return
+	}
 	reminderPct := a.effectiveReminderPct(threshold)
 	// "Whichever line is reached first" semantics: when the configured
 	// reminder is at or above the threshold, the threshold crossing itself
@@ -206,10 +222,18 @@ func (a *MainAgent) queueContextPressureReminder(decision ctxmgr.AutoCompactDeci
 	if !a.tryClaimContextPressureReminder(windowEpoch, windowIndex, budgetEpoch) {
 		return
 	}
-	a.pendingContextPressureReminder = buildContextPressureReminderText(decision, reminderPct, a.compactContextVisible())
+	a.pendingContextPressureReminder = buildContextPressureReminderText()
 }
 
 func (a *MainAgent) queueCompactionWarning() {
+	// The warning rides on the request that actually starts the usage-driven
+	// compaction. It is only actionable while model-driven compaction is
+	// enabled (the compact_context tool is visible and the system prompt's
+	// long-session guidance gives the model an externalization contract);
+	// otherwise compaction is runtime-owned and the model is never notified.
+	if !a.compactContextVisible() {
+		return
+	}
 	if !a.autoCompactRequested.Load() || a.isUsageDrivenAutoCompactSuppressed() {
 		return
 	}
@@ -225,27 +249,17 @@ func (a *MainAgent) queueCompactionWarning() {
 	a.pendingCompactionWarning = compactionWarningText
 }
 
-// buildContextPressureReminderText renders the one-shot reminder. The usage
-// percentage comes from the trusted provider-input baseline
-// (AutoCompactDecision), so no "estimate" qualifier is needed for the ratio
-// itself; the remaining tokens are derived from the same baseline and rounded.
-// The compact_context tool is only named when it is visible and executable.
-func buildContextPressureReminderText(decision ctxmgr.AutoCompactDecision, reminderPct float64, toolVisible bool) string {
-	remaining := decision.UsableInputBudget - decision.EffectiveInputTokens
-	if remaining < 0 {
-		remaining = 0
-	}
-	pct := int(reminderPct * 100)
-	if ratio := float64(decision.EffectiveInputTokens) / float64(decision.UsableInputBudget); ratio > 0 {
-		pct = int(ratio*100 + 0.5)
-	}
-	text := fmt.Sprintf("<context-pressure>\nContext usage is approximately %d%% of the usable input budget, with about %d tokens remaining.", pct, remaining)
-	if toolVisible {
-		text += "\nIf the current phase is wrapped up and its working state is externalized, you may consider requesting a context checkpoint with compact_context before automatic compaction."
-	} else {
-		text += "\nIf important findings are not externalized, preserve them when appropriate; separable, summarizable work may be isolated in a SubAgent."
-	}
-	return text + "\n</context-pressure>"
+// buildContextPressureReminderText renders the one-shot reminder. It does not
+// quote the current usage ratio or the remaining budget: the model cannot act
+// on that number (compaction is already scheduled), and stating how much space
+// is left would invite it to reason about deferring instead of preparing. It
+// only ever runs while compact_context is visible, so it names the tool
+// directly and splits the instruction by phase state. The text is bare
+// content; the turn-overlay injector wraps it in a <system-reminder> block.
+func buildContextPressureReminderText() string {
+	return "The context is approaching the configured automatic-compaction threshold; automatic compaction may start within the next few requests.\n" +
+		"If the current phase is wrapped up and its working state is fully externalized, request a durable context checkpoint now by calling compact_context alone.\n" +
+		"If the phase is still open, keep writing important findings and decisions to project files as they settle, so they survive the compaction and can be re-read afterwards."
 }
 
 // appendContextPressureVerificationGuidance appends the post-apply guidance:

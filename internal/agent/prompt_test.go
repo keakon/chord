@@ -2145,6 +2145,7 @@ func TestModelDrivenContextPromptBlockInjectedWhenEnabled(t *testing.T) {
 	}
 	for _, want := range []string{
 		"## Long-session context management",
+		"<system-reminder>",
 		"compact_context",
 		"archived history",
 		"low-gain",

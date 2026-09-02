@@ -83,7 +83,6 @@ func TestQueueContextPressureReminderGates(t *testing.T) {
 	// enabled — there is no usage-driven safety net to justify the nudge.
 	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0)
 	a.ctxMgr.SetLastTotalContextTokens(7000)
-	a.modelDrivenCompactionEnabled.Store(true)
 	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
 	if a.pendingContextPressureReminder != "" {
 		t.Fatalf("threshold=0 must not queue a reminder, got %q", a.pendingContextPressureReminder)
@@ -97,36 +96,39 @@ func TestQueueContextPressureReminderGates(t *testing.T) {
 		t.Fatalf("below the reminder line must not queue a reminder, got %q", a.pendingContextPressureReminder)
 	}
 
-	// Above the reminder line: queued, generic variant when compact_context is
-	// not visible.
+	// Above the reminder line while model-driven compaction is off (the
+	// compact_context tool is not visible): no reminder. Without an
+	// externalization contract the model cannot act on the overlay, and quoting
+	// usage numbers would only invite it to reason about how much space is left
+	// instead of preparing — automatic compaction is runtime-owned in this
+	// mode, like Codex's local and remote paths that never notify the working
+	// model.
 	a.ctxMgr.SetLastTotalContextTokens(5000) // 5000/8192 ≈ 0.61 >= 0.60
 	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
-	reminder := a.pendingContextPressureReminder
-	if reminder == "" {
-		t.Fatal("above the reminder line must queue a reminder")
+	if a.pendingContextPressureReminder != "" {
+		t.Fatalf("model-driven off must not queue a reminder, got %q", a.pendingContextPressureReminder)
 	}
-	if !strings.Contains(reminder, "<context-pressure>") || !strings.Contains(reminder, "approximately 61%") {
-		t.Fatalf("reminder text = %q, want context-pressure block with rounded percentage", reminder)
-	}
-	if strings.Contains(reminder, "compact_context") {
-		t.Fatalf("hidden tool must not be named in the reminder: %q", reminder)
-	}
-	a.pendingContextPressureReminder = ""
 
-	// Tool visible: the tool variant names compact_context.
+	// Model-driven on with the tool registered: the reminder is queued above
+	// the line, tells the model to prepare for the compaction instead of
+	// quoting how much space is left, and names compact_context.
 	a.modelDrivenCompactionEnabled.Store(true)
 	a.tools.Register(tools.NewCompactContextTool(tools.CompactContextValidator{ContinuationStateMaxTokens: 2048}))
 	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
-	reminder = a.pendingContextPressureReminder
+	reminder := a.pendingContextPressureReminder
 	if reminder == "" {
 		t.Fatal("tool-visible session must queue a reminder above the line")
 	}
-	if !strings.Contains(reminder, "compact_context") {
-		t.Fatalf("visible tool must be named in the reminder: %q", reminder)
+	if !strings.Contains(reminder, "compact_context") || !strings.Contains(reminder, "automatic-compaction threshold") {
+		t.Fatalf("reminder text = %q, want actionable text naming compact_context", reminder)
 	}
-	if strings.Contains(reminder, "SubAgent") {
-		t.Fatalf("tool variant must not suggest SubAgent isolation: %q", reminder)
+	if strings.Contains(reminder, "<context-pressure>") || strings.Contains(reminder, "<system-reminder>") {
+		t.Fatalf("queued reminder must be bare text; the injector wraps it in <system-reminder>, got %q", reminder)
 	}
+	if strings.Contains(reminder, "approximately") || strings.Contains(reminder, "tokens remaining") {
+		t.Fatalf("reminder must not quote usage numbers, got %q", reminder)
+	}
+	a.pendingContextPressureReminder = ""
 
 	// A delivered claim suppresses the reminder for the same window even when
 	// the ratio stays above the line.
@@ -149,17 +151,30 @@ func TestQueueCompactionWarningLifecycle(t *testing.T) {
 		t.Fatalf("no armed request must not queue a warning, got %q", a.pendingCompactionWarning)
 	}
 
-	// Armed: queued for the request about to be prepared. The claim batch is
-	// the last completed request batch (the queue runs before the next
-	// callLLM reserve).
+	// Armed while model-driven compaction is off (the compact_context tool is
+	// not visible): no warning either. The model has no externalization
+	// contract in that mode, and automatic compaction is runtime-owned — like
+	// Codex's local and remote paths, which never notify the working model —
+	// so an unactionable warning would only be read as conversation noise.
 	a.requestBatches.reserve(a.sessionEpoch, 0) // batch 1 = last completed request
 	a.armUsageDrivenAutoCompactRequest()        // generation 1
 	a.queueCompactionWarning()
-	if a.pendingCompactionWarning == "" {
-		t.Fatal("armed auto-compact request must queue the externalization warning")
+	if a.pendingCompactionWarning != "" {
+		t.Fatalf("model-driven off must not queue a warning, got %q", a.pendingCompactionWarning)
 	}
-	if !strings.Contains(a.pendingCompactionWarning, "<compaction-warning>") {
-		t.Fatalf("warning text = %q, want compaction-warning block", a.pendingCompactionWarning)
+
+	// With model-driven enabled and compact_context visible, the armed request
+	// queues the externalization warning for the request about to be prepared.
+	// The claim batch is the last completed request batch (the queue runs
+	// before the next callLLM reserve).
+	a.modelDrivenCompactionEnabled.Store(true)
+	a.tools.Register(tools.NewCompactContextTool(tools.CompactContextValidator{ContinuationStateMaxTokens: 2048}))
+	a.queueCompactionWarning()
+	if a.pendingCompactionWarning == "" {
+		t.Fatal("armed auto-compact request with a visible tool must queue the externalization warning")
+	}
+	if !strings.Contains(a.pendingCompactionWarning, "scheduled automatic context compaction") || strings.Contains(a.pendingCompactionWarning, "<") {
+		t.Fatalf("warning text = %q, want bare actionable content (the injector wraps <system-reminder>)", a.pendingCompactionWarning)
 	}
 	a.pendingCompactionWarning = ""
 
@@ -198,8 +213,8 @@ func TestQueueCompactionWarningLifecycle(t *testing.T) {
 func TestBuildTurnOverlayMessagesAttachesPressureOverlays(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.pendingContextPressureReminder = "<context-pressure>test reminder</context-pressure>"
-	a.pendingCompactionWarning = "<compaction-warning>test warning</compaction-warning>"
+	a.pendingContextPressureReminder = "test reminder text"
+	a.pendingCompactionWarning = "test warning text"
 
 	overlays := a.buildTurnOverlayMessages()
 	if len(overlays) != 2 {
@@ -211,10 +226,17 @@ func TestBuildTurnOverlayMessagesAttachesPressureOverlays(t *testing.T) {
 		if o.Kind != message.KindTurnOverlay {
 			t.Fatalf("pressure overlay kind = %q, want turn overlay", o.Kind)
 		}
-		if strings.Contains(o.Content, "<context-pressure>") {
+		// The injector wraps every runtime notice in the same
+		// <system-reminder> block so the model can tell it apart from
+		// user-written content (the convention used by all harness
+		// injections); the two overlays remain distinguishable by content.
+		if !strings.HasPrefix(o.Content, "<system-reminder>\n") || !strings.HasSuffix(o.Content, "\n</system-reminder>") {
+			t.Fatalf("pressure overlay must be wrapped in <system-reminder>, got %q", o.Content)
+		}
+		if strings.Contains(o.Content, "test reminder text") {
 			foundReminder = true
 		}
-		if strings.Contains(o.Content, "<compaction-warning>") {
+		if strings.Contains(o.Content, "test warning text") {
 			foundWarning = true
 		}
 	}

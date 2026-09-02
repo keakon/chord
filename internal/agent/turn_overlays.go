@@ -74,14 +74,16 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 	// one-shot turn-tail overlays queued by queueContextPressureOverlays; the
 	// delivered claim is confirmed at dispatch, so attaching here only marks
 	// deliveryPending — a request cancelled before dispatch leaves the claim
-	// reusable.
+	// reusable. They carry bare text and are wrapped in the same
+	// <system-reminder> runtime-message block as every other harness injection
+	// so the model can tell them apart from user-written messages.
 	if reminder := strings.TrimSpace(a.pendingContextPressureReminder); reminder != "" {
 		a.pendingContextPressureReminder = ""
 		a.noteContextPressureReminderAttached()
 		overlays = append(overlays, message.Message{
 			Role:    "user",
 			Kind:    message.KindTurnOverlay,
-			Content: reminder,
+			Content: "<system-reminder>\n" + reminder + "\n</system-reminder>",
 		})
 	}
 	if warning := strings.TrimSpace(a.pendingCompactionWarning); warning != "" {
@@ -90,7 +92,7 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 		overlays = append(overlays, message.Message{
 			Role:    "user",
 			Kind:    message.KindTurnOverlay,
-			Content: warning,
+			Content: "<system-reminder>\n" + warning + "\n</system-reminder>",
 		})
 	}
 
