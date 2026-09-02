@@ -527,6 +527,63 @@ func TestMergeProjectConfigDropsSemanticInvalidLeafKeepsSibling(t *testing.T) {
 	}
 }
 
+// Out-of-range compaction leaves (threshold above 1, NaN, etc.) are stripped
+// from project overrides so the global line they overlay survives; individually
+// valid siblings such as a per-model reminder stay applied.
+func TestMergeProjectConfigDropsSemanticInvalidCompactionValues(t *testing.T) {
+	globalPath := filepath.Join(t.TempDir(), "global.yaml")
+	writeTestFile(t, globalPath, "context:\n  compaction:\n    threshold: 0.65\n")
+	globalCfg, err := LoadConfigFromPath(globalPath)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath(global): %v", err)
+	}
+	projectPath := filepath.Join(t.TempDir(), ".chord", "config.yaml")
+	writeTestFile(t, projectPath, "context:\n  compaction:\n    threshold: 1.5\nproviders:\n  openai:\n    type: responses\n    models:\n      gpt-5.6-luna:\n        compaction:\n          threshold: 2\n          reminder: 0.2\n")
+
+	_, merged, err := MergeProjectConfig(globalCfg, projectPath)
+	if err != nil {
+		t.Fatalf("MergeProjectConfig: %v", err)
+	}
+	if merged.Context.Compaction.Threshold != 0.65 {
+		t.Fatalf("merged global threshold = %v, want global 0.65 preserved", merged.Context.Compaction.Threshold)
+	}
+	mc := merged.Providers["openai"].Models["gpt-5.6-luna"].Compaction
+	if mc == nil {
+		t.Fatal("model compaction block missing after merge")
+	}
+	if mc.Threshold != nil {
+		t.Fatalf("merged model threshold = %v, want nil (inherit the global 0.65)", *mc.Threshold)
+	}
+	if mc.Reminder == nil || *mc.Reminder != 0.2 {
+		t.Fatalf("merged model reminder = %v, want the valid 0.2 kept", mc.Reminder)
+	}
+}
+
+// A project override may deliberately disable compaction (threshold 0) while a
+// sibling reminder stays set; both values are individually valid, so the merge
+// keeps them and only the doctor-style issue reporting flags the dead reminder.
+func TestMergeProjectConfigKeepsIndividuallyValidDeadReminderCombination(t *testing.T) {
+	globalPath := filepath.Join(t.TempDir(), "global.yaml")
+	writeTestFile(t, globalPath, "context:\n  compaction:\n    threshold: 0.65\n")
+	globalCfg, err := LoadConfigFromPath(globalPath)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath(global): %v", err)
+	}
+	projectPath := filepath.Join(t.TempDir(), ".chord", "config.yaml")
+	writeTestFile(t, projectPath, "context:\n  compaction:\n    threshold: 0\n    reminder: 0.7\n")
+
+	_, merged, err := MergeProjectConfig(globalCfg, projectPath)
+	if err != nil {
+		t.Fatalf("MergeProjectConfig: %v", err)
+	}
+	if merged.Context.Compaction.Threshold != 0 {
+		t.Fatalf("merged threshold = %v, want the explicit project 0 (disable) preserved", merged.Context.Compaction.Threshold)
+	}
+	if merged.Context.Compaction.Reminder != 0.7 {
+		t.Fatalf("merged reminder = %v, want 0.7 preserved", merged.Context.Compaction.Reminder)
+	}
+}
+
 // An unknown key sitting on the first line of a nested mapping used to take the
 // whole mapping with it: go-yaml reports a block container's Line as its first
 // child's line, so the container looked like the offender.

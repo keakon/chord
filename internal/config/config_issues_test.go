@@ -1,6 +1,7 @@
 package config
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -169,5 +170,85 @@ func TestCollectProjectConfigIssuesMissingFile(t *testing.T) {
 	}
 	if issues != nil {
 		t.Fatalf("issues = %#v, want nil for missing file", issues)
+	}
+}
+
+func TestCollectConfigFileIssuesReportsOutOfRangeCompactionValues(t *testing.T) {
+	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "context:\n  compaction:\n    threshold: 1.5\n    reminder: -0.2\n")
+	issues, err := CollectConfigFileIssues(path, true)
+	if err != nil {
+		t.Fatalf("CollectConfigFileIssues: %v", err)
+	}
+	joined := strings.Join(issues, "\n")
+	for _, want := range []string{"context.compaction.threshold", "context.compaction.reminder"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("issues = %q, want one mentioning %q", joined, want)
+		}
+	}
+}
+
+func TestCollectConfigFileIssuesReportsOutOfRangeModelCompactionValues(t *testing.T) {
+	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "providers:\n  openai:\n    type: responses\n    models:\n      gpt-5.6-luna:\n        compaction:\n          threshold: 2\n          reminder: 2\n")
+	issues, err := CollectConfigFileIssues(path, true)
+	if err != nil {
+		t.Fatalf("CollectConfigFileIssues: %v", err)
+	}
+	joined := strings.Join(issues, "\n")
+	for _, want := range []string{"openai/gpt-5.6-luna", "compaction.threshold", "compaction.reminder"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("issues = %q, want one mentioning %q", joined, want)
+		}
+	}
+}
+
+func TestLoadConfigFromPathFallsBackForOutOfRangeCompactionValues(t *testing.T) {
+	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "context:\n  compaction:\n    threshold: 1.5\n    reminder: 2\n")
+	cfg, err := LoadConfigFromPath(path)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath: %v", err)
+	}
+	if cfg.Context.Compaction.Threshold != DefaultContextCompactUsage {
+		t.Fatalf("out-of-range threshold = %v, want the built-in default %v", cfg.Context.Compaction.Threshold, DefaultContextCompactUsage)
+	}
+	if cfg.Context.Compaction.Reminder != 0 {
+		t.Fatalf("out-of-range reminder = %v, want 0 (re-derives from the threshold)", cfg.Context.Compaction.Reminder)
+	}
+}
+
+func TestLoadConfigFromPathRejectsNaNInfCompactionValues(t *testing.T) {
+	// yaml.v3 decodes .nan/.inf/-.inf plain scalars into float64 NaN/±Inf
+	// without a type error, so they must be caught by the semantic checks and
+	// fall back to the defaults instead of riding through to the runtime.
+	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "context:\n  compaction:\n    threshold: .nan\n    reminder: .inf\n")
+	cfg, err := LoadConfigFromPath(path)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath: %v", err)
+	}
+	if cfg.Context.Compaction.Threshold != DefaultContextCompactUsage {
+		t.Fatalf("NaN threshold = %v, want the built-in default %v", cfg.Context.Compaction.Threshold, DefaultContextCompactUsage)
+	}
+	if cfg.Context.Compaction.Reminder != 0 {
+		t.Fatalf("+Inf reminder = %v, want 0 (re-derives from the threshold)", cfg.Context.Compaction.Reminder)
+	}
+	if math.IsNaN(cfg.Context.Compaction.Threshold) || math.IsInf(cfg.Context.Compaction.Reminder, 0) {
+		t.Fatal("NaN/Inf compaction values rode through config loading")
+	}
+}
+
+func TestLoadConfigFromPathFallsBackForOutOfRangeModelCompactionValues(t *testing.T) {
+	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "providers:\n  openai:\n    type: responses\n    models:\n      gpt-5.6-luna:\n        compaction:\n          threshold: 2\n          reminder: -.inf\n")
+	cfg, err := LoadConfigFromPath(path)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath: %v", err)
+	}
+	mc := cfg.Providers["openai"].Models["gpt-5.6-luna"].Compaction
+	if mc == nil {
+		t.Fatal("model compaction block missing after load")
+	}
+	if mc.Threshold != nil {
+		t.Fatalf("out-of-range model threshold = %v, want nil (inherit the global value)", *mc.Threshold)
+	}
+	if mc.Reminder != nil {
+		t.Fatalf("out-of-range model reminder = %v, want nil (inherit the global value)", *mc.Reminder)
 	}
 }

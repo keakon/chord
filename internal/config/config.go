@@ -1451,18 +1451,49 @@ func collectSemanticIssues(cfg *Config) []string {
 	return issues
 }
 
-// collectCompactionConfigIssues reports compaction configurations whose
-// reminder is silently ineffective. A reminder at or above the threshold is
-// *not* an issue: the reminder fires on the threshold crossing itself (the
-// caller takes min(reminder, threshold)) and the grace period defers the
-// actual compaction. But a reminder configured against a disabled compaction
-// (threshold 0) never fires — threshold 0 disables both auto-compaction and
-// reminders — so that combination is reported so the user knows the reminder
-// is dead. Global compaction is checked directly; per-model compaction lives
-// on the model definitions (ModelConfig.Compaction) and is checked there.
+// validCompactionFraction reports whether a configured compaction threshold or
+// reminder line is usable: 0 is the documented "unset / disable" value and
+// (0,1] the only meaningful usage-fraction range. NaN and ±Inf fail the
+// comparisons and are rejected here so they cannot ride through to the
+// runtime's threshold and reminder decisions, the TUI's context coloring, or
+// the compaction logs.
+func validCompactionFraction(v float64) bool {
+	return v == 0 || (v > 0 && v <= 1)
+}
+
+// collectCompactionConfigIssues reports compaction configurations that are
+// invalid or silently ineffective, and resets the invalid values to their
+// unset state so they behave as not configured. Two kinds of problems exist:
+//
+//   - An out-of-range threshold/reminder (negative, above 1, NaN, ±Inf) must
+//     not ride through to the runtime: a negative or NaN threshold silently
+//     disables automatic compaction, a value above 1 pushes the compaction
+//     line past the usable budget so it never triggers, and NaN poisons every
+//     comparison in the reminder and coloring paths. These are reset to the
+//     built-in default (reminder 0 re-derives from the threshold).
+//   - A reminder set against a disabled compaction (threshold 0) never fires —
+//     threshold 0 disables both auto-compaction and reminders — so the
+//     combination is reported so the user knows the reminder is dead. A
+//     reminder at or above the threshold is *not* an issue: the reminder fires
+//     on the threshold crossing itself (the caller takes min(reminder,
+//     threshold)), and the crossing starts the automatic compaction right away,
+//     so the reminder and the start share the request.
+//
+// Global compaction is checked directly; per-model compaction lives on the
+// model definitions (ModelConfig.Compaction) and is checked in
+// collectModelCompactionIssues.
 func collectCompactionConfigIssues(cfg *Config) []string {
 	comp := cfg.Context.Compaction
 	var issues []string
+	if !validCompactionFraction(comp.Threshold) {
+		issues = append(issues, fmt.Sprintf("context.compaction.threshold must be 0 (disable automatic compaction) or a usage fraction in (0,1]; got %v, using the default %v", comp.Threshold, DefaultContextCompactUsage))
+		comp.Threshold = DefaultContextCompactUsage
+	}
+	if !validCompactionFraction(comp.Reminder) {
+		issues = append(issues, fmt.Sprintf("context.compaction.reminder must be 0 (derive from the threshold) or a usage fraction in (0,1]; got %v, using the derived default", comp.Reminder))
+		comp.Reminder = 0
+	}
+	cfg.Context.Compaction = comp
 	if comp.Threshold <= 0 && comp.Reminder > 0 {
 		issues = append(issues, "context.compaction.reminder is set but context.compaction.threshold is 0 (auto-compaction disabled); the reminder will never fire")
 	}
@@ -1470,20 +1501,45 @@ func collectCompactionConfigIssues(cfg *Config) []string {
 }
 
 // collectModelCompactionIssues reports per-model compaction (ModelConfig.
-// Compaction) whose reminder is silently ineffective: a reminder set against
-// threshold 0 never fires.
+// Compaction) problems and resets the invalid values. An out-of-range
+// threshold or reminder (negative, above 1, NaN, ±Inf) is dropped so the model
+// inherits the global line again instead of running its runtime on a broken
+// value; a reminder set against a model threshold of 0 never fires (threshold
+// 0 disables auto-compaction and reminders for that model), which is reported
+// so the user fixes it on the model side.
 func collectModelCompactionIssues(cfg *Config) []string {
 	var issues []string
 	global := compThresholdConfig(cfg)
 	for providerName, prov := range cfg.Providers {
+		modelsChanged := false
 		for modelID, mc := range prov.Models {
 			if mc.Compaction == nil {
 				continue
 			}
+			comp := mc.Compaction
+			changed := false
+			if comp.Threshold != nil && !validCompactionFraction(*comp.Threshold) {
+				issues = append(issues, fmt.Sprintf("model %s/%s: compaction.threshold must be 0 (disable automatic compaction) or a usage fraction in (0,1]; got %v, inheriting the global value", providerName, modelID, *comp.Threshold))
+				comp.Threshold = nil
+				changed = true
+			}
+			if comp.Reminder != nil && !validCompactionFraction(*comp.Reminder) {
+				issues = append(issues, fmt.Sprintf("model %s/%s: compaction.reminder must be 0 (derive from the threshold) or a usage fraction in (0,1]; got %v, inheriting the global reminder", providerName, modelID, *comp.Reminder))
+				comp.Reminder = nil
+				changed = true
+			}
+			if changed {
+				mc.Compaction = comp
+				prov.Models[modelID] = mc
+				modelsChanged = true
+			}
 			threshold := compThresholdForModel(global, mc)
-			if threshold <= 0 && mc.Compaction.Reminder != nil && *mc.Compaction.Reminder > 0 {
+			if threshold <= 0 && comp.Reminder != nil && *comp.Reminder > 0 {
 				issues = append(issues, fmt.Sprintf("model %s/%s: compaction.reminder is set but its threshold is 0 (auto-compaction disabled); the reminder will never fire", providerName, modelID))
 			}
+		}
+		if modelsChanged {
+			cfg.Providers[providerName] = prov
 		}
 	}
 	return issues
@@ -1967,6 +2023,33 @@ func semanticInvalidOverridePaths(data []byte) ([][]string, error) {
 	}
 	for _, issue := range collectDiagnosticIssues(cfg) {
 		paths = append(paths, strings.Split(issue.Path, "."))
+	}
+	// Compaction threshold/reminder leaves are validated the same way so an
+	// out-of-range project value (including NaN/±Inf) falls back to the global
+	// line it overlays instead of clobbering it. The dead-reminder combination
+	// (threshold 0 + reminder) is deliberately not stripped: both values are
+	// individually valid, and removing either leaf would silently override the
+	// user's explicit disable intent.
+	comp := cfg.Context.Compaction
+	if !validCompactionFraction(comp.Threshold) {
+		paths = append(paths, []string{"context", "compaction", "threshold"})
+	}
+	if !validCompactionFraction(comp.Reminder) {
+		paths = append(paths, []string{"context", "compaction", "reminder"})
+	}
+	for name, p := range cfg.Providers {
+		for modelName, mc := range p.Models {
+			if mc.Compaction == nil {
+				continue
+			}
+			base := []string{"providers", name, "models", modelName, "compaction"}
+			if mc.Compaction.Threshold != nil && !validCompactionFraction(*mc.Compaction.Threshold) {
+				paths = append(paths, append(base[:len(base):len(base)], "threshold"))
+			}
+			if mc.Compaction.Reminder != nil && !validCompactionFraction(*mc.Compaction.Reminder) {
+				paths = append(paths, append(base[:len(base):len(base)], "reminder"))
+			}
+		}
 	}
 	return paths, nil
 }

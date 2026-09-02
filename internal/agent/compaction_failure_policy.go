@@ -51,12 +51,18 @@ const (
 // means "no trigger" only in a freshly reset compactionState.
 type compactionTrigger string
 
+// CompactionTriggerModelDriven is the exported trigger label carried by
+// CompactionStatusEvent.Trigger for model-driven checkpoints. Consumers
+// outside the agent package (the TUI's model-checkpoint indicator) compare
+// against it instead of duplicating the literal.
+const CompactionTriggerModelDriven = "model_driven"
+
 const (
 	compactionTriggerManual         compactionTrigger = "manual"
 	compactionTriggerUsageDriven    compactionTrigger = "usage_driven"
 	compactionTriggerLengthRecovery compactionTrigger = "length_recovery"
 	compactionTriggerOversize       compactionTrigger = "oversize_driven"
-	compactionTriggerModelDriven    compactionTrigger = "model_driven"
+	compactionTriggerModelDriven    compactionTrigger = compactionTrigger(CompactionTriggerModelDriven)
 )
 
 func (t compactionTrigger) needed() bool {
@@ -102,6 +108,12 @@ func (a *MainAgent) armUsageDrivenAutoCompactRequest() {
 // process, matching "配置只在创建 runtime 和工具 surface 时决定能力是否存在".
 func (a *MainAgent) SetModelDrivenCompactionEnabled(enabled bool) {
 	a.modelDrivenCompactionEnabled.Store(enabled)
+}
+
+// ModelDrivenCompactionEnabled reports whether model-driven compaction (the
+// compact_context tool) is part of the effective configuration.
+func (a *MainAgent) ModelDrivenCompactionEnabled() bool {
+	return a.modelDrivenCompactionEnabled.Load()
 }
 
 func (a *MainAgent) usageDrivenAutoCompactCheckTurn() uint64 {

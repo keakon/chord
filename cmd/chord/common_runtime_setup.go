@@ -75,6 +75,12 @@ func wireMainAgentRuntime(ctx context.Context, mainAgent *agent.MainAgent, reg *
 		return mainAgent.AskQuestions(ctx, questions, confirmTimeout)
 	}))
 	reg.Register(tools.NewDoneTool())
+	// Record the capability on the agent exactly when the tool registration
+	// decision is made: modelDrivenCompactionEnabled gates the Long-session
+	// context-management system-prompt block, the compact_context visibility
+	// checks, and the context-pressure overlays, so the flag must mirror the
+	// registration decision made here.
+	mainAgent.SetModelDrivenCompactionEnabled(modelDrivenCompaction)
 	if modelDrivenCompaction {
 		reg.Register(tools.NewCompactContextTool(tools.CompactContextValidator{
 			// The continuation-state budget is the same number the agent's own

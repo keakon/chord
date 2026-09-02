@@ -77,6 +77,51 @@ func TestCreateRuntimeWiresConfirmAndQuestionTools(t *testing.T) {
 	}
 }
 
+func TestCreateRuntimeModelDrivenCompactionWiresFlagAndTool(t *testing.T) {
+	ac := newTestAppContext(t)
+	ac.Ctx, ac.Cancel = context.WithCancel(context.Background())
+	defer ac.Cancel()
+	ac.Registry = tools.NewRegistry()
+	ac.Cfg = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{ModelDriven: true}}}
+
+	rt, err := createRuntime(ac)
+	if err != nil {
+		t.Fatalf("createRuntime: %v", err)
+	}
+	defer rt.Close()
+
+	// The agent flag must mirror the tool registration: it gates the
+	// Long-session context-management prompt block, the compact_context
+	// visibility checks, and the context-pressure overlays.
+	if !ac.MainAgent.ModelDrivenCompactionEnabled() {
+		t.Fatal("model-driven compaction flag must be set when context.compaction.model_driven is true")
+	}
+	if _, ok := ac.Registry.Get(tools.NameCompactContext); !ok {
+		t.Fatal("compact_context tool was not registered for model-driven compaction")
+	}
+}
+
+func TestCreateRuntimeWithoutModelDrivenCompactionLeavesCapabilityOff(t *testing.T) {
+	ac := newTestAppContext(t)
+	ac.Ctx, ac.Cancel = context.WithCancel(context.Background())
+	defer ac.Cancel()
+	ac.Registry = tools.NewRegistry()
+	ac.Cfg = &config.Config{}
+
+	rt, err := createRuntime(ac)
+	if err != nil {
+		t.Fatalf("createRuntime: %v", err)
+	}
+	defer rt.Close()
+
+	if ac.MainAgent.ModelDrivenCompactionEnabled() {
+		t.Fatal("model-driven compaction flag must stay off without context.compaction.model_driven")
+	}
+	if _, ok := ac.Registry.Get(tools.NameCompactContext); ok {
+		t.Fatal("compact_context tool must not be registered without model-driven compaction")
+	}
+}
+
 func TestRuntimeCloseIsNilSafe(t *testing.T) {
 	(&Runtime{}).Close()
 }

@@ -1209,7 +1209,7 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `limit.context`   | int    | 已知时表示总请求窗口上限；未配置 `limit.input` 时，Chord 会从中扣除有效请求输出后推导输入预算。                                       |
 | `limit.input`     | int    | provider 单独公布输入上限时填写。Chord 用它判断何时在 prompt 过大前压缩或恢复重试。                |
 | `limit.output`    | int    | 输出 token 上限；运行时还会受 `max_output_tokens` 限制。                                                          |
-| `compaction`      | object | 该模型的自定义压缩参数：`compaction.threshold`（自动压缩使用率阈值；`0` 对该模型禁用）与 `compaction.reminder`（压力提醒线；`0`/缺省按 `min(0.60, threshold×0.90)` 派生）。未设字段继承全局 `context.compaction.*`。详见[上下文压缩](./context-management_CN.md#上下文压缩compaction)。 |
+| `compaction`      | object | 该模型的自定义压缩参数：`compaction.threshold`（自动压缩使用率阈值；`0` 对该模型禁用）与 `compaction.reminder`（压力提醒线；`0`/缺省按 `min(0.60, threshold×0.90)` 派生）。未设字段继承全局 `context.compaction.*`。越界值会被拒绝并回退继承全局值。详见[上下文压缩](./context-management_CN.md#上下文压缩compaction)。 |
 | `reasoning`       | object | OpenAI reasoning 选项。`reasoning.effort` 会先归一化再原样透传，因此 provider 支持的任意取值（如 GLM 的 `max` / `minimal` / `none`）都能不变地到达上游（留空 = 不发送，使用 provider/model 默认）。Responses 的 `reasoning.summary` 支持 `auto` / `concise` / `detailed` / `none`；启用 reasoning 时留空默认使用 `auto`，配置 `none` 可明确关闭。 |
 | `text.verbosity`  | string | 可选的 OpenAI 文本详细程度提示，支持的模型生效；除非明确要覆盖为 `low` / `medium` / `high`，否则建议留空使用 provider/model 默认值。 |
 | `thinking`        | object | Anthropic 扩展思考选项。`type: adaptive` 让 Chord 按 `effort` 推算预算；`thinking.effort` 在 Messages 请求中会生成 `output_config.effort`；`display: summarized` 启用 summarized thinking block（仅 `type: enabled` 或 `adaptive` 有效）。 |
