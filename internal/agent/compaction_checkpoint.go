@@ -242,6 +242,7 @@ func buildCompactionCheckpointMessage(summary string, historyRefs []string, mode
 		sb.WriteString(ref)
 		sb.WriteByte('\n')
 	}
+	sb.WriteString("Each archive begins with a short message-segment index (after its header): read the index first, then read only the line ranges you need — a single read is capped around 2000 lines, so slice by the index instead of reading whole files.\n")
 	if retained := firstRetainedRecentSection(retainedRecent); retained != "" {
 		sb.WriteString("\n")
 		sb.WriteString(retained)

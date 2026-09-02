@@ -21,7 +21,12 @@ import (
 )
 
 func (a *MainAgent) exportCompactionHistory(messages []message.Message, index int, topics []string) (absPath string, sourceRefs []checkpointSourceRef, sourceFingerprint string, err error) {
-	absPath = filepath.Join(a.sessionDir, fmt.Sprintf("history-%d.md", index))
+	// The compaction workers call this from their goroutines while a session
+	// switch may rewrite a.sessionDir under stateMu on the event loop: read it
+	// once through the locked accessor and use that one value for the archive,
+	// its permission root, and its status file.
+	sessionDir := a.SessionDir()
+	absPath = filepath.Join(sessionDir, fmt.Sprintf("history-%d.md", index))
 	metadata := map[string]string{
 		session.MetadataKeyModel:       a.ModelName(),
 		session.MetadataKeyProjectPath: a.projectRoot,
@@ -32,7 +37,12 @@ func (a *MainAgent) exportCompactionHistory(messages []message.Message, index in
 	if err != nil {
 		return "", nil, "", err
 	}
-	if err := privatefs.WriteFile(a.sessionDir, absPath, []byte(session.ExportToMarkdown(exported))); err != nil {
+	// history-N.md is the model's archive: prepend a message-segment index so
+	// the checkpoint wrapper can tell the model to read the index first and
+	// then only the line ranges it needs (whole-file reads truncate and
+	// re-inflate the context).
+	md := buildCompactionArchiveIndexedMarkdown(session.ExportToMarkdown(exported))
+	if err := privatefs.WriteFile(sessionDir, absPath, []byte(md)); err != nil {
 		return "", nil, "", err
 	}
 	generation := fmt.Sprintf("compaction-%d", index)
@@ -41,7 +51,7 @@ func (a *MainAgent) exportCompactionHistory(messages []message.Message, index in
 		return "", nil, "", err
 	}
 	sourceFingerprint = checkpointSourceFingerprint(sourceRefs)
-	if err := writeCompactionHistoryMeta(a.sessionDir, compactionHistoryMetaPath(absPath), compactionHistoryMeta{
+	if err := writeCompactionHistoryMeta(sessionDir, compactionHistoryMetaPath(absPath), compactionHistoryMeta{
 		Version:           1,
 		HistoryFile:       filepath.Base(absPath),
 		Status:            compactionHistoryPending,

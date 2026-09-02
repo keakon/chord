@@ -81,7 +81,12 @@ imperative corrections, because they too are standing instructions that would
 otherwise erode over repeated compactions. The checkpoint also lists every
 archived `history-N.md` file with its content topics as a **history map**, so
 the model can read the exact archive back with the read tool when it needs the
-original wording instead of guessing which file to open.
+original wording instead of guessing which file to open. Each archive also
+starts with a short **message index** (one line per message segment: start
+line, block kind, first-line snippet, `LARGE` marker for oversized tool
+output); the checkpoint tells the model to read the index first and then only
+the line ranges it needs, so exact-history lookups no longer mean re-reading
+whole archives through truncation.
 
 Continuation-oriented compaction keeps a safe recent tail as verbatim messages
 after the checkpoint. It prefers whole user turns (normally the latest two)
