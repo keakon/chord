@@ -87,3 +87,10 @@ func (a *MainAgent) emitCompactionSlotActivity() {
 	}
 	a.emitActivity(identity.MainAgentID, ActivityCompacting, compactionActivityDetail)
 }
+
+// handoffMainActivityToCompaction releases a foreground slot that has been
+// explicitly suspended, then lets the active compaction claim it.
+func (a *MainAgent) handoffMainActivityToCompaction() {
+	a.mainSlotForeground.Store(false)
+	a.emitCompactionSlotActivity()
+}

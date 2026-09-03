@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -680,6 +681,109 @@ func TestScheduleCompactionForLengthRecoveryUsesLengthRecoveryTrigger(t *testing
 	}
 	if a.compactionState.trigger != compactionTriggerLengthRecovery {
 		t.Fatal("expected LengthRecovery trigger for length recovery compaction")
+	}
+}
+
+func TestScheduleCompactionForLengthRecoveryHandsOffForegroundActivity(t *testing.T) {
+	for _, activity := range []ActivityType{ActivityStreaming, ActivityExecuting} {
+		t.Run(string(activity), func(t *testing.T) {
+			a := newTestMainAgent(t, t.TempDir())
+			a.newTurn()
+			a.emitActivity("main", activity, "")
+			drainAgentEvents(a.outputCh)
+			if !a.mainSlotForeground.Load() {
+				t.Fatalf("precondition: %s must hold the foreground slot", activity)
+			}
+
+			t.Cleanup(func() {
+				if a.IsCompactionRunning() {
+					a.handleCompactionCancel()
+				}
+				a.compactionWg.Wait()
+			})
+
+			if !a.scheduleCompactionForLengthRecovery() {
+				t.Fatal("expected length-recovery compaction to start")
+			}
+			if a.mainSlotForeground.Load() {
+				t.Fatal("length-recovery compaction must release the foreground slot")
+			}
+
+			for _, event := range drainAgentEvents(a.outputCh) {
+				got, ok := event.(AgentActivityEvent)
+				if ok && got.AgentID == "main" && got.Type == ActivityCompacting && got.Detail == compactionActivityDetail {
+					return
+				}
+			}
+			t.Fatal("length-recovery compaction must emit compacting activity after handoff")
+		})
+	}
+}
+
+func TestHandleCompactionReadyLengthRecoveryAppliesImmediately(t *testing.T) {
+	a := newReadyTestMainAgent(t)
+	provider := &blockingStreamProvider{
+		calls:      []scriptedStreamCall{{resp: &message.Response{Content: "recovered", StopReason: "stop"}, holdAfterStreams: true}},
+		streamedCh: make(chan struct{}),
+		releaseCh:  make(chan struct{}),
+	}
+	defer close(provider.releaseCh)
+	providerCfg := llm.NewProviderConfig("sample", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"test-model": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
+		},
+	}, []string{"test-key"})
+	a.llmClient = llm.NewClient(providerCfg, provider, "test-model", 1024, "")
+	a.ctxMgr.Append(message.Message{Role: "user", Content: "original request"})
+	a.ctxMgr.Append(message.Message{Role: "assistant", Content: "partial tool call"})
+	a.newTurn()
+	a.turn.InLengthRecovery = true
+	a.turn.LastTruncatedToolName = "shell"
+	target := compactionTarget{
+		turnID:       a.turn.ID,
+		turnEpoch:    a.turn.Epoch,
+		sessionEpoch: a.sessionEpoch,
+	}
+	a.startCompactionState(1, target, compactionTriggerLengthRecovery, continuationPlan{
+		kind:      compactionResumeLengthRecovery,
+		turnID:    target.turnID,
+		turnEpoch: target.turnEpoch,
+	})
+	a.compactionState.headSplit = 1
+
+	draft := &compactionDraft{
+		NewMessages:    []message.Message{{Role: "user", Content: "[Context Summary]\nsummary", IsCompactionSummary: true}},
+		HeadSplit:      1,
+		Index:          1,
+		AbsHistoryPath: filepath.Join(a.sessionDir, "history-1.md"),
+		SummaryMode:    "truncate_only",
+		PlanID:         1,
+		Target:         target,
+	}
+	a.handleCompactionReady(Event{Type: EventCompactionReady, TurnID: target.turnID, Payload: draft})
+
+	if a.compactionState.readyDraft != nil {
+		t.Fatal("length-recovery draft should apply immediately instead of waiting for a barrier")
+	}
+	if a.IsCompactionRunning() {
+		t.Fatal("compaction should be settled after immediate length-recovery apply")
+	}
+	msgs := a.ctxMgr.Snapshot()
+	if len(msgs) != 2 || !msgs[0].IsCompactionSummary {
+		t.Fatalf("messages after length-recovery apply = %#v, want summary plus preserved tail", msgs)
+	}
+
+	select {
+	case <-provider.streamedCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for length-recovery retry request")
+	}
+	if a.turn == nil {
+		t.Fatal("length-recovery apply should resume the active turn")
+	}
+	if !a.turn.InLengthRecovery {
+		t.Fatal("length-recovery retry should keep recovery state active")
 	}
 }
 

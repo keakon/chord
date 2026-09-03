@@ -24,6 +24,7 @@ func (a *MainAgent) scheduleCompactionForLengthRecovery() bool {
 		turnEpoch:        a.turn.Epoch,
 		agentErrSourceID: "",
 	}, false)
+	a.handoffMainActivityToCompaction()
 	return true
 }
 

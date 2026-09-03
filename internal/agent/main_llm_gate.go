@@ -647,8 +647,9 @@ func (a *MainAgent) handleCompactionReady(evt Event) {
 	a.compactionState.discard = false
 
 	// Determine whether to apply now or defer to the continuation barrier.
-	// Apply immediately when there is no active turn or an oversize LLM call is
-	// suspended; otherwise defer until the active LLM/tool work reaches a barrier.
+	// Apply immediately when there is no active turn or the continuation has
+	// suspended foreground work; otherwise defer until live LLM/tool work
+	// reaches a barrier.
 	asyncPath := draft.HeadSplit > 0 && a.compactionState.headSplit > 0
 	turnActive := a.turn != nil
 	modelDriven := a.compactionState.continuation.kind == compactionResumeModelDriven
@@ -672,7 +673,11 @@ func (a *MainAgent) handleCompactionReady(evt Event) {
 		_ = a.resumePendingMainLLMAfterCompaction(pending, false)
 		return
 	}
-	canApplyNow := !turnActive || a.compactionState.oversizeSuspended || a.compactionState.downshiftSuspended || modelDriven
+	canApplyNow := !turnActive ||
+		a.compactionState.oversizeSuspended ||
+		a.compactionState.downshiftSuspended ||
+		a.compactionState.continuation.kind == compactionResumeLengthRecovery ||
+		modelDriven
 
 	if asyncPath && !canApplyNow {
 		// Case C: Turn is active and no pending call means we're mid-LLM/tool.
@@ -869,8 +874,7 @@ func (a *MainAgent) handleCompactionOversizeSuspend(evt Event) {
 	a.compactionState.oversizeSuspended = true
 	// The provider response has reached the event loop and is now suspended;
 	// only now may the background compaction reclaim the shared activity slot.
-	a.mainSlotForeground.Store(false)
-	a.emitCompactionSlotActivity()
+	a.handoffMainActivityToCompaction()
 }
 
 func (a *MainAgent) resumePendingMainLLMAfterCompaction(pending *pendingMainLLMCall, recheckGate bool) (handledIdleBarrier bool) {

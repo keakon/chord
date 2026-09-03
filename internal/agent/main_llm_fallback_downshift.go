@@ -30,6 +30,5 @@ func (a *MainAgent) handleCompactionDownshiftSuspend(evt Event) {
 	a.compactionState.downshiftSuspended = true
 	// The provider response has reached the event loop and is now suspended;
 	// only now may the background compaction reclaim the shared activity slot.
-	a.mainSlotForeground.Store(false)
-	a.emitCompactionSlotActivity()
+	a.handoffMainActivityToCompaction()
 }

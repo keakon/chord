@@ -78,6 +78,54 @@ func TestDeferModelDownshiftCompactionDefersRoundUntilDraftApplies(t *testing.T)
 	}
 }
 
+// TestDeferModelDownshiftCompactionAtGateReleasesStaleForegroundActivity
+// reproduces the stale-status-bar bug: the tool batch that just completed left
+// the shared main activity slot on executing (mainSlotForeground held), and the
+// gate defers the next LLM round behind a model-downshift compaction. The slot
+// must be handed to compaction immediately so the status bar stops showing the
+// stale executing state for the whole compaction.
+func TestDeferModelDownshiftCompactionAtGateReleasesStaleForegroundActivity(t *testing.T) {
+	a := modelDownshiftTestAgent(t, 1000000)
+	t.Cleanup(func() {
+		if a.IsCompactionRunning() {
+			a.handleCompactionCancel()
+		}
+		a.compactionWg.Wait()
+	})
+
+	// The tool phase that just ended: main_handlers_llm.go emits executing
+	// before dispatching the batch, which holds the foreground slot.
+	a.emitActivity("main", ActivityExecuting, "1 tools")
+	drainAgentEvents(a.outputCh)
+	if !a.mainSlotForeground.Load() {
+		t.Fatal("precondition: ActivityExecuting must hold the foreground slot")
+	}
+
+	if !a.deferModelDownshiftCompactionAtGate(7, "main", a.ctxMgr.Snapshot()) {
+		t.Fatal("deferral must start when the crossing exists")
+	}
+
+	sawCompacting := false
+	for _, ev := range drainAgentEvents(a.outputCh) {
+		act, ok := ev.(AgentActivityEvent)
+		if !ok {
+			continue
+		}
+		if act.AgentID == "main" && act.Type == ActivityCompacting && act.Detail == compactionActivityDetail {
+			sawCompacting = true
+		}
+		if act.AgentID == "main" && act.Type == ActivityExecuting {
+			t.Fatalf("stale executing activity must not be re-emitted after the gate: %+v", act)
+		}
+	}
+	if !sawCompacting {
+		t.Fatal("the deferred gate must hand the activity slot to compaction immediately")
+	}
+	if a.mainSlotForeground.Load() {
+		t.Fatal("mainSlotForeground must stay released while the deferred round waits for compaction")
+	}
+}
+
 func TestDeferModelDownshiftCompactionNoCrossing(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)

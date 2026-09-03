@@ -90,6 +90,11 @@ func (a *MainAgent) startDownshiftCompactionWithContinuation(snapshot []message.
 		agentErrSourceID: agentErrSourceID,
 	}, false)
 	a.compactionState.downshiftSuspended = true
+	// The deferred round is suspended behind the compaction: no live
+	// foreground LLM request or tool execution owns the shared activity slot
+	// anymore. The prior ActivityExecuting from the just-completed tool batch
+	// is stale at this pre-request gate.
+	a.handoffMainActivityToCompaction()
 	log.Infof("model downshift: deferred LLM round for context compaction turn_id=%v plan_id=%v", turnID, planID)
 }
 
