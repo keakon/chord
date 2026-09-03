@@ -36,7 +36,9 @@ func (b *Block) renderStatus(width int) []string {
 		return b.renderBackgroundResult(width)
 	}
 	style := CompactionSummaryCardStyle
-	boxWidth := max(width-style.GetHorizontalMargins(), 10)
+	// Reserve a column for the conversation rail (foreground-only "│" prepended
+	// outside the card width); otherwise a full-width card overflows the terminal.
+	boxWidth := max((width-railWidthToReserve(style))-style.GetHorizontalMargins(), 10)
 	innerWidth := max(boxWidth-style.GetHorizontalPadding()-style.GetHorizontalBorderSize(), 10)
 	innerWidth = clampCardInnerWidth(innerWidth, style, maxProseWidth)
 	contentWidth := min(innerWidth-2, maxProseWidth)
@@ -87,7 +89,9 @@ func (b *Block) renderBoundaryMarker(width int) []string {
 
 func (b *Block) renderCompactionSummary(width int) []string {
 	style := CompactionSummaryCardStyle
-	boxWidth := max(width-style.GetHorizontalMargins(), 10)
+	// Reserve a column for the conversation rail (foreground-only "│" prepended
+	// outside the card width); otherwise a full-width card overflows the terminal.
+	boxWidth := max((width-railWidthToReserve(style))-style.GetHorizontalMargins(), 10)
 	innerWidth := max(boxWidth-style.GetHorizontalPadding()-style.GetHorizontalBorderSize(), 10)
 	innerWidth = clampCardInnerWidth(innerWidth, style, maxProseWidth)
 	contentWidth := min(innerWidth, maxProseWidth)

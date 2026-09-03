@@ -4656,16 +4656,12 @@ func TestDoneCallUsesProseWidthForReportCard(t *testing.T) {
 		t.Fatalf("done card width = %d, want %d", got, want)
 	}
 
+	// Tool-call cards now share the same prose cap as done/report cards (the
+	// width-unification fix), so the done card is no longer wider than a generic
+	// tool card — they match by design.
 	generic := newToolCardMetrics(width)
-	genericWidth := style.GetMarginLeft() + style.GetPaddingLeft() + generic.cardWidth + style.GetPaddingRight() + style.GetMarginRight()
-	if railANSISeq("tool", false) != "" {
-		genericWidth++
-	}
-	if got <= genericWidth {
-		t.Fatalf("done card width = %d, want wider than generic tool width %d", got, genericWidth)
-	}
-	if metrics.contentWidth <= generic.contentWidth {
-		t.Fatalf("done content width = %d, want wider than generic tool content width %d", metrics.contentWidth, generic.contentWidth)
+	if metrics.cardWidth != generic.cardWidth {
+		t.Fatalf("done card width = %d, want equal to generic tool card width %d (unified prose cap)", metrics.cardWidth, generic.cardWidth)
 	}
 	if metrics.contentWidth > maxProseWidth {
 		t.Fatalf("done content width = %d, want no more than %d", metrics.contentWidth, maxProseWidth)

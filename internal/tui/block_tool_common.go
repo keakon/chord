@@ -61,7 +61,13 @@ type toolCardMetrics struct {
 }
 
 func newToolCardMetrics(width int) toolCardMetrics {
-	return newToolCardMetricsWithContentCap(width, maxTextWidth)
+	// Unified with the prose/thinking card cap (maxProseWidth) so tool-call
+	// cards share the same right edge as thinking/assistant cards on wide
+	// terminals instead of stopping ~40 columns short and reading as truncated.
+	// apply_patch/edit/write content already clips to the card width (see
+	// renderHighlightedSnippetLine / renderNumberedToolPreview), so widening
+	// the cap only moves the clip point, it does not stretch wrapped prose.
+	return newToolCardMetricsWithContentCap(width, maxProseWidth)
 }
 
 func newWideHeaderToolCardMetrics(width int) toolCardMetrics {
@@ -74,7 +80,11 @@ func newToolCardMetricsWithContentCap(width, contentCap int) toolCardMetrics {
 
 func newToolCardMetricsForHeaderWidth(width, contentCap int, wideHeader bool) toolCardMetrics {
 	blockStyle := ToolBlockStyle
-	boxWidth := max(width-blockStyle.GetHorizontalMargins(), 10)
+	// Reserve a column for the conversation rail (a foreground-only "│" prepended
+	// outside the card width by wrapLineWithBackgroundAndRail). Without this, a
+	// full-width card (e.g. wide-header read/shell cards, or any card on a narrow
+	// terminal) renders one column past the terminal width and gets hard-wrapped.
+	boxWidth := max((width-railWidthToReserve(blockStyle))-blockStyle.GetHorizontalMargins(), 10)
 	cardWidth := max(boxWidth-blockStyle.GetHorizontalPadding()-blockStyle.GetHorizontalBorderSize(), 10)
 	if !wideHeader {
 		// Keep the card surface aligned with the prose cards' right edge on very

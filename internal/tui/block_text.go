@@ -51,6 +51,17 @@ func clampCardInnerWidth(innerWidth int, style lipgloss.Style, textCap int) int 
 	return innerWidth
 }
 
+// railWidthToReserve returns how many columns to subtract from the available
+// width so the conversation rail (a foreground-only "│" rendered OUTSIDE the
+// card surface by wrapLineWithBackgroundAndRail) never pushes a card past the
+// terminal width. A card border already occupies one column on its left edge,
+// so when a border is present it absorbs the rail's width and nothing extra
+// needs reserving; only borderless cards (wide-header read/shell cards, diff
+// tool cards) need the full rail column reserved.
+func railWidthToReserve(style lipgloss.Style) int {
+	return max(cardRailWidth-style.GetHorizontalBorderSize(), 0)
+}
+
 // ansiStrip removes ANSI CSI sequences for display-width calculation.
 var ansiStrip = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 
@@ -675,6 +686,14 @@ func newPrewrappedCardFrame(style lipgloss.Style, innerWidth int, bgColorNum, ra
 	marginPrefix := strings.Repeat(" ", marginLeft)
 	marginSuffix := strings.Repeat(" ", marginRight)
 	lineWidth := padLeft + innerWidth + padRight
+	// blankMargin (the outer top/bottom margin rows) must span the same horizontal
+	// extent as a body line. A rail-bearing body line is railSeq+"│"+Reset wider
+	// than its inner content, so reserve that column here too; otherwise the
+	// margin rows render one column short of the card's right edge.
+	marginExtent := marginLeft + lineWidth + marginRight
+	if railSeq != "" {
+		marginExtent += cardRailWidth
+	}
 	return prewrappedCardFrame{
 		innerWidth:   innerWidth,
 		bgColorNum:   bgColorNum,
@@ -689,7 +708,7 @@ func newPrewrappedCardFrame(style lipgloss.Style, innerWidth int, bgColorNum, ra
 		marginTop:    marginTop,
 		marginBottom: marginBottom,
 		blankWrapped: wrapLineWithBackgroundAndRail(marginPrefix, "", strings.Repeat(" ", lineWidth), "", bgSeq, marginSuffix, railSeq, 0),
-		blankMargin:  strings.Repeat(" ", marginLeft+lineWidth+marginRight),
+		blankMargin:  strings.Repeat(" ", marginExtent),
 	}
 }
 

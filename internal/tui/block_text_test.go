@@ -672,7 +672,10 @@ func TestRenderPrewrappedCardMarginBottomStaysTransparentBetweenCards(t *testing
 	if strings.ContainsRune(last, '\x1b') {
 		t.Fatalf("marginBottom row should stay transparent and unstyled between cards, got: %q", last)
 	}
-	wantWidth := style.GetMarginLeft() + style.GetPaddingLeft() + innerWidth + style.GetPaddingRight() + style.GetMarginRight()
+	// The margin row must span the same horizontal extent as a body line, which
+	// for a rail-bearing card includes the rail column prepended by
+	// wrapLineWithBackgroundAndRail.
+	wantWidth := style.GetMarginLeft() + style.GetPaddingLeft() + innerWidth + style.GetPaddingRight() + style.GetMarginRight() + cardRailWidth
 	if got := ansi.StringWidth(last); got != wantWidth {
 		t.Fatalf("marginBottom row width=%d want %d; row=%q", got, wantWidth, last)
 	}

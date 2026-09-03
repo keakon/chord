@@ -699,7 +699,7 @@ func TestRenderAssistantCodeBlockWrappedContinuationIndented(t *testing.T) {
 	}
 	got := strings.TrimSpace(codeLines[1])
 	got = strings.TrimLeft(got, "│ ")
-	if !strings.HasPrefix(got, "PersistsCancelledToolResult") && !strings.HasPrefix(got, "sistsCancelledToolResult") && !strings.HasPrefix(got, "ersistsCancelledToolResult") {
+	if !strings.HasPrefix(got, "PersistsCancelledToolResult") && !strings.HasPrefix(got, "sistsCancelledToolResult") && !strings.HasPrefix(got, "ersistsCancelledToolResult") && !strings.HasPrefix(got, "dPersistsCancelledToolResult") {
 		t.Fatalf("continuation content got %q", got)
 	}
 }

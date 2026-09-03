@@ -360,7 +360,7 @@ func TestPartiallyAppliedPatchShowsOnlyAppliedDiff(t *testing.T) {
 			t.Fatalf("expected partially applied patch to contain %q, got:\n%s", want, plain)
 		}
 	}
-	for _, duplicate := range []string{"↳ Requested patch:", "Applied patch:", longReasonTail, "*** Begin Patch"} {
+	for _, duplicate := range []string{"↳ Requested patch:", "Applied patch:", "*** Begin Patch"} {
 		if strings.Contains(plain, duplicate) {
 			t.Fatalf("expected partially applied patch to omit requested patch content %q, got:\n%s", duplicate, plain)
 		}
@@ -375,15 +375,84 @@ func TestPartiallyAppliedPatchShowsOnlyAppliedDiff(t *testing.T) {
 	if errorAt < 0 || notAppliedAt < errorAt || diagnosticsAt < notAppliedAt || diagnosticAt < diagnosticsAt {
 		t.Fatalf("expected failure and diagnostics to render as separate ordered sections, got:\n%s", plain)
 	}
+	// Plain error text wraps to multiple lines so the full diagnostic (including
+	// the tail of the long failure reason) is visible in the rendered card,
+	// rather than truncating with "…". The copy path preserves the full content
+	// independently (see the toolCallMarkdownContent check below).
+	if !strings.Contains(plain, longReasonTail) {
+		t.Fatalf("expected wrapped failure lines to surface the full tail %q in the rendered card, got:\n%s", longReasonTail, plain)
+	}
 	failureLine := renderedLineContaining(t, block.Render(80, ""), "- failed.go: hunk not found")
-	if !strings.Contains(stripANSI(failureLine), "…") {
-		t.Fatalf("expected long failure line to be truncated, got %q", stripANSI(failureLine))
+	if strings.Contains(stripANSI(failureLine), "…") {
+		t.Fatalf("expected long failure line to wrap instead of truncate, got %q", stripANSI(failureLine))
 	}
 	copyContent := toolCallMarkdownContent(block)
 	for _, preserved := range []string{longReasonTail} {
 		if !strings.Contains(copyContent, preserved) {
 			t.Fatalf("expected copied tool content to preserve %q, got:\n%s", preserved, copyContent)
 		}
+	}
+}
+
+// TestApplyPatchFullFailureWrapsLongDiagnostic guards the "plain error text
+// wraps, not truncates" contract for a full apply_patch failure (no partial
+// application). The "Not applied:" diagnostic must wrap to multiple lines so
+// the actionable tail is fully visible, instead of being clipped with "…" and
+// hiding the very information the user needs to fix the patch. Mirrors the
+// wrap behavior of renderLSPDiagnosticsLines (Edit errors, diagnostics) and
+// the collapsed error path, both of which already wrap.
+func TestApplyPatchFullFailureWrapsLongDiagnostic(t *testing.T) {
+	tail := "actionable-tail-must-be-visible"
+	longLine := "- internal/agent/main_llm_gate.go: hunk not found (1/1); first expected complete line: `\t\tif isFoo(err) {`; the file currently has a different guard; " + tail
+	content := strings.Join([]string{
+		"Error: apply_patch failed: no changes were committed.",
+		"",
+		"Not applied:",
+		longLine,
+	}, "\n")
+	patchArgs := `{"patch":"*** Begin Patch\n*** Update File: internal/agent/main_llm_gate.go\n@@\n-if isBar(err) {\n+if isFoo(err) {\n*** End Patch"}`
+	block := &Block{
+		ID: 829, Type: BlockToolCall, ToolName: tools.NameApplyPatch,
+		Content:       applyPatchToolDisplayArgs(patchArgs),
+		RawArgs:       patchArgs,
+		ResultDone:    true,
+		ResultStatus:  agent.ToolResultStatusError,
+		ResultContent: content,
+	}
+
+	for _, width := range []int{80, 120, 160, 200} {
+		t.Run(fmt.Sprintf("width=%d", width), func(t *testing.T) {
+			plain := stripANSI(strings.Join(block.Render(width, ""), "\n"))
+
+			for _, want := range []string{"↳ Error:", "apply_patch failed", "Not applied:"} {
+				if !strings.Contains(plain, want) {
+					t.Fatalf("expected full-failure card to contain %q, got:\n%s", want, plain)
+				}
+			}
+			// The full diagnostic tail is visible in the rendered card (wrap,
+			// not truncation).
+			if !strings.Contains(plain, tail) {
+				t.Fatalf("expected wrapped diagnostic to surface the tail %q in the rendered card, got:\n%s", tail, plain)
+			}
+			// No truncation marker on the first wrapped line of the diagnostic.
+			firstWrapped := renderedLineContaining(t, block.Render(width, ""), "hunk not found")
+			if strings.Contains(stripANSI(firstWrapped), "…") {
+				t.Fatalf("expected diagnostic to wrap instead of truncate, got %q", stripANSI(firstWrapped))
+			}
+			// The long diagnostic spans multiple wrapped lines at every tested
+			// width (the line is well over any card content budget), proving
+			// wrap occurred instead of single-line truncation.
+			wrappedLines := 0
+			for _, ln := range block.Render(width, "") {
+				p := stripANSI(ln)
+				if strings.Contains(p, "hunk not found") || strings.Contains(p, "the file currently") || strings.Contains(p, tail) {
+					wrappedLines++
+				}
+			}
+			if wrappedLines < 2 {
+				t.Fatalf("expected the long diagnostic to wrap to >=2 rendered lines, got %d matching lines", wrappedLines)
+			}
+		})
 	}
 }
 

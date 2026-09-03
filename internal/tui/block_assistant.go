@@ -754,7 +754,9 @@ func (b *Block) renderAssistant(width int) []string {
 	// (Note: we removed the "[assistant]" string header for a cleaner conversational look)
 	style := AssistantCardStyle
 	// v2: Width() sets border-box (excl margin).
-	boxWidth := max(width-style.GetHorizontalMargins(), 10)
+	// Reserve a column for the conversation rail (foreground-only "│" prepended
+	// outside the card width); otherwise a full-width card overflows the terminal.
+	boxWidth := max((width-railWidthToReserve(style))-style.GetHorizontalMargins(), 10)
 	// innerWidth is the content area for text wrapping
 	innerWidth := max(boxWidth-style.GetHorizontalPadding()-style.GetHorizontalBorderSize(), 10)
 
@@ -1351,7 +1353,9 @@ func (b *Block) renderThinkingParts(innerWidth int) []string {
 func (b *Block) renderThinking(width int) []string {
 	style := ThinkingCardStyle
 	// v2: Width() sets border-box (excl margin).
-	boxWidth := max(width-style.GetHorizontalMargins(), 10)
+	// Reserve a column for the conversation rail (foreground-only "│" prepended
+	// outside the card width); otherwise a full-width card overflows the terminal.
+	boxWidth := max((width-railWidthToReserve(style))-style.GetHorizontalMargins(), 10)
 	innerWidth := max(boxWidth-style.GetHorizontalPadding()-style.GetHorizontalBorderSize(), 10)
 	innerWidth = clampCardInnerWidth(innerWidth, style, maxProseWidth)
 	contentWidth := thinkingMarkdownContentWidth(innerWidth)

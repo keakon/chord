@@ -428,12 +428,27 @@ func splitApplyPatchErrorSections(content string) applyPatchErrorSections {
 	return sections
 }
 
+// appendApplyPatchErrorTextLines renders plain-text sections of an apply_patch
+// error result (the "Error:" summary, the "Not applied:" details, the trailing
+// guidance line) under the "↳ Error:" header. Plain text is not aligned like a
+// diff body, so each line wraps at the available width instead of truncating
+// with "…": the tail of a long diagnostic (e.g. "hunk not found (1/1); first
+// expected complete line: `\t\tif …`") is exactly what the user needs to fix
+// the patch, and clipping it hides the actionable information. Matches the
+// wrap behavior of renderLSPDiagnosticsLines and the collapsed error path.
 func appendApplyPatchErrorTextLines(result []string, content string, width int) []string {
+	// displayIndent is prepended BEFORE wrapping so wrapText treats it as the
+	// paragraph indent and re-applies it to every continuation line; otherwise
+	// wrapped lines would lose alignment with the first line.
+	const displayIndent = "    "
 	for line := range strings.SplitSeq(strings.TrimRight(content, "\n"), "\n") {
 		displayLine := sanitizeToolDisplayText(strings.TrimSuffix(line, "\r"))
+		// Expand tabs so an indented code snippet inside the diagnostic (e.g.
+		// `\t\tif isFoo(err) {`) aligns to the tab stop and wraps cleanly.
 		displayLine = expandTabsForDisplay(displayLine, preformattedTabWidth)
-		displayLine = truncateApplyPatchDisplayLine(displayLine, width)
-		result = append(result, ToolResultExpandedStyle.Render("    "+displayLine))
+		for _, wl := range wrapText(displayIndent+displayLine, width) {
+			result = append(result, ToolResultExpandedStyle.Render(wl))
+		}
 	}
 	return result
 }
@@ -543,10 +558,11 @@ func appendEditPatchPreview(result []string, argsJSON string, width int) []strin
 		return result
 	}
 	result = append(result, ToolResultExpandedStyle.Render("  ↳ Patch:"))
+	// Truncate (not wrap) each patch line, matching the apply_patch preview and
+	// the diff body. Diffs/file content are column-aligned; wrapping breaks the
+	// +/- gutter alignment and is harder to read than a clipped line.
 	for _, line := range editPatchPreviewLines(patch) {
-		for _, wrapped := range wrapIndentedText(line, width) {
-			result = append(result, renderEditPatchPreviewLine(wrapped))
-		}
+		result = append(result, renderEditPatchPreviewLine(truncateApplyPatchDisplayLine(line, width)))
 	}
 	return result
 }
