@@ -229,6 +229,121 @@ func TestMaybeStartModelDrivenBarrierDiscardsReadyUsageDraft(t *testing.T) {
 	}
 }
 
+func TestMaybeStartModelDrivenBarrierIntervalSkipKeepsRunningUsageCompaction(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.newTurn()
+	for _, msg := range []message.Message{
+		{Role: message.RoleUser, Content: "first request"},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{testToolCall("cc-1", tools.NameCompactContext)}},
+	} {
+		a.ctxMgr.Append(msg)
+	}
+	// A usage-driven compaction owns the slot and a recent model-driven apply
+	// keeps the batch counter inside the 3-batch interval. The policy verdict
+	// rejects the checkpoint request before the slot is touched: the running
+	// automatic compaction must survive, and the settle must be synchronous
+	// (started + skipped on one plan id, no worker, no continuation).
+	cancelCalled := false
+	a.beginCompactionState(7, compactionTarget{turnID: 1, turnEpoch: 1, sessionEpoch: a.sessionEpoch}, compactionTriggerUsageDriven, continuationPlan{kind: compactionResumeAutoContinue, turnID: 1}, 5, func() { cancelCalled = true })
+	a.lastModelDrivenApplyBatch = 4
+	a.requestBatches.mu.Lock()
+	a.requestBatches.sessionEpoch = a.sessionEpoch
+	a.requestBatches.sequence = 5
+	a.requestBatches.mu.Unlock()
+	ccID, args := testCompactContextCall()
+	if _, err := a.tryArmModelDrivenCheckpoint(ccID, args); err != nil {
+		t.Fatalf("tryArm must accept the checkpoint request: %v", err)
+	}
+	if a.maybeStartModelDrivenBarrier() {
+		t.Fatal("barrier must not start a worker for an interval-blocked request")
+	}
+	if cancelCalled {
+		t.Fatal("the running usage compaction must NOT be cancelled for an interval-blocked request")
+	}
+	if !a.IsCompactionRunning() || a.compactionState.trigger != compactionTriggerUsageDriven || a.compactionState.planID != 7 {
+		t.Fatalf("the running usage compaction must stay untouched, running=%v trigger=%q plan=%d", a.IsCompactionRunning(), a.compactionState.trigger, a.compactionState.planID)
+	}
+	if a.pendingModelDriven != nil {
+		t.Fatal("pending request must be consumed by the barrier")
+	}
+	planIDs := map[string]string{}
+	for len(planIDs) < 2 {
+		select {
+		case evt := <-a.outputCh:
+			status, ok := evt.(CompactionStatusEvent)
+			if !ok {
+				continue
+			}
+			if status.Trigger != string(compactionTriggerModelDriven) {
+				t.Fatalf("trigger = %q, want model_driven", status.Trigger)
+			}
+			planIDs[status.Status] = status.PlanID
+		case <-time.After(2 * time.Second):
+			t.Fatalf("no started+skipped status events, got %v", planIDs)
+		}
+	}
+	if planIDs[CompactionStatusStarted] == "" || planIDs[CompactionStatusStarted] != planIDs[CompactionStatusSkipped] {
+		t.Fatalf("started and skipped must share one plan id, got %v", planIDs)
+	}
+	if a.lastModelDrivenSkipReason != "interval" {
+		t.Fatalf("skip reason = %q, want interval", a.lastModelDrivenSkipReason)
+	}
+	if a.pendingModelDrivenNotice == "" {
+		t.Fatal("sync skip must queue the continuation notice for the next request")
+	}
+}
+
+func TestMaybeStartModelDrivenBarrierCooldownSkipIsSynchronous(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.newTurn()
+	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "first request"})
+	a.ctxMgr.Append(message.Message{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{testToolCall("cc-1", tools.NameCompactContext)}})
+	// The previous request skipped for low_gain two batches ago, so the same
+	// reason is still cooling down: the barrier must short-circuit without
+	// starting a worker or re-running the preflight.
+	a.lastModelDrivenSkipReason = "low_gain"
+	a.lastModelDrivenSkipBatch = 3
+	a.requestBatches.mu.Lock()
+	a.requestBatches.sessionEpoch = a.sessionEpoch
+	a.requestBatches.sequence = 4
+	a.requestBatches.mu.Unlock()
+	ccID, args := testCompactContextCall()
+	if _, err := a.tryArmModelDrivenCheckpoint(ccID, args); err != nil {
+		t.Fatalf("tryArm must accept the checkpoint request: %v", err)
+	}
+	if a.maybeStartModelDrivenBarrier() {
+		t.Fatal("barrier must not start a worker for a cooldown-blocked request")
+	}
+	if a.IsCompactionRunning() {
+		t.Fatal("no compaction may run for a cooldown skip")
+	}
+	if a.lastModelDrivenSkipReason != "low_gain" || a.lastModelDrivenSkipBatch != 4 {
+		t.Fatalf("cooldown skip must refresh the skip record, got reason=%q batch=%d", a.lastModelDrivenSkipReason, a.lastModelDrivenSkipBatch)
+	}
+	if a.pendingModelDrivenNotice == "" {
+		t.Fatal("sync cooldown skip must queue the continuation notice")
+	}
+	// started + skipped share one plan id.
+	planIDs := map[string]string{}
+	for len(planIDs) < 2 {
+		select {
+		case evt := <-a.outputCh:
+			status, ok := evt.(CompactionStatusEvent)
+			if !ok {
+				continue
+			}
+			planIDs[status.Status] = status.PlanID
+		case <-time.After(2 * time.Second):
+			t.Fatalf("no started+skipped status events, got %v", planIDs)
+		}
+	}
+	if planIDs[CompactionStatusStarted] != planIDs[CompactionStatusSkipped] || planIDs[CompactionStatusSkipped] == "" {
+		t.Fatalf("started and skipped must share one plan id, got %v", planIDs)
+	}
+}
+
 func TestModelDrivenLowGainPreflightRejectsTinyContext(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)

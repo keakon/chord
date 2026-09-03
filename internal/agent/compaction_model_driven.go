@@ -307,6 +307,32 @@ func (a *MainAgent) maybeStartModelDrivenBarrier() bool {
 	}
 	snapshot := a.ctxMgr.Snapshot()
 	bundle := a.captureModelDrivenBarrierSnapshot(snapshot)
+	// Policy pre-verdict on the event loop (optimization 2.1A): the interval
+	// and same-reason cooldown verdicts are deterministic from the bundle
+	// alone, so a request they reject must settle before the compaction slot
+	// is touched. A running or ready automatic compaction keeps its paid-for
+	// draft (a usage-driven worker or ready draft is only discarded when the
+	// model-driven request actually proceeds), and the worker never starts —
+	// the settle is synchronous with started + terminal events on the same
+	// plan id, and the caller continues into beginMainLLMAfterPreparation
+	// without a model-driven continuation. The worker re-checks the same
+	// verdict defensively for paths that could reach it without this gate.
+	if reason, skipReason, skip := a.modelDrivenIntervalCooldownVerdict(bundle); skip {
+		planID, target := a.nextCompactionPlan()
+		a.recordCompactionLifecycleEvent("started", map[string]string{
+			"trigger":        compactionTriggerModelDriven.analyticsName(),
+			"plan_id":        strconv.FormatUint(planID, 10),
+			"turn_id":        strconv.FormatUint(target.turnID, 10),
+			"message_count":  strconv.Itoa(len(bundle.snapshot)),
+			"state_file_cnt": strconv.Itoa(len(req.Args.StateFiles)),
+			"max_tokens":     strconv.Itoa(bundle.maxTokens),
+		})
+		a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusStarted, Trigger: string(compactionTriggerModelDriven), PlanID: strconv.FormatUint(planID, 10)})
+		draft := modelDrivenSkipDraft(planID, target, reason, skipReason, bundle.currentRequestBatch, nil)
+		a.settleModelDrivenSkip(draft)
+		a.appendModelDrivenContinuationNotice()
+		return false
+	}
 	planID, target := a.nextCompactionPlan()
 	continuation := continuationPlan{
 		kind:      compactionResumeModelDriven,
@@ -1060,7 +1086,7 @@ func renderStateFilesSection(paths []string) string {
 // continuation notice. It deliberately does NOT clear LastTokenUsage,
 // autoCompactRequested, or the usage-driven failure state: the safety net
 // stays armed and the next gate decides.
-func (a *MainAgent) settleModelDrivenOutcome(status string, reason string, preflight *modelDrivenPreflightStats) {
+func (a *MainAgent) settleModelDrivenOutcome(status string, reason string, preflight *modelDrivenPreflightStats, eventPlanID uint64) {
 	a.modelDrivenSkipNotice = strings.TrimSpace(reason)
 	// The model already took its shot at a checkpoint: the threshold grace
 	// (if any) ends here so the usage-driven safety net is not deferred again.
@@ -1086,7 +1112,20 @@ func (a *MainAgent) settleModelDrivenOutcome(status string, reason string, prefl
 		diagnostic["cache_rebuild_cost"] = strconv.Itoa(preflight.CacheRebuildCost)
 	}
 	a.recordCompactionLifecycleEvent(status, diagnostic)
-	a.emitToTUI(a.compactionStatusEvent(status, a.modelDrivenSkipNotice))
+	// The terminal TUI/control-plane event always carries the model_driven
+	// trigger and the settled plan id. The plan id comes from the explicit
+	// argument (the worker draft's, or the state's when the draft is generic):
+	// a synchronous settle that never owned the compaction slot (2.1A) must
+	// not emit an empty id, nor borrow the id of a running automatic
+	// compaction it deliberately left untouched.
+	if eventPlanID == 0 {
+		eventPlanID = a.compactionState.planID
+	}
+	evt := CompactionStatusEvent{Status: status, Reason: a.modelDrivenSkipNotice, Trigger: compactionTriggerModelDriven.analyticsName()}
+	if eventPlanID > 0 {
+		evt.PlanID = strconv.FormatUint(eventPlanID, 10)
+	}
+	a.emitToTUI(evt)
 }
 
 // settleModelDrivenSkip records a model-driven policy skip (low-gain, apply
@@ -1110,14 +1149,14 @@ func (a *MainAgent) settleModelDrivenSkip(draft *compactionDraft) {
 	if reason == "" {
 		reason = "projected savings were too small"
 	}
-	a.settleModelDrivenOutcome(CompactionStatusSkipped, reason, draft.ModelDrivenPreflight)
+	a.settleModelDrivenOutcome(CompactionStatusSkipped, reason, draft.ModelDrivenPreflight, draft.PlanID)
 }
 
 // settleModelDrivenFailure records a failed model-driven compaction without
 // clearing the usage-driven safety net.
 func (a *MainAgent) settleModelDrivenFailure(err error) {
 	reason := "the checkpoint request failed: " + shortCompactionFailureReason(err)
-	a.settleModelDrivenOutcome(CompactionStatusFailed, reason, nil)
+	a.settleModelDrivenOutcome(CompactionStatusFailed, reason, nil, a.compactionState.planID)
 	a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Model-driven context checkpoint failed: %v", err), Level: "warn"})
 }
 
@@ -1127,7 +1166,7 @@ func (a *MainAgent) settleModelDrivenCancelled(reason string) {
 	if strings.TrimSpace(reason) == "" {
 		reason = "the checkpoint request was cancelled"
 	}
-	a.settleModelDrivenOutcome(CompactionStatusCancelled, reason, nil)
+	a.settleModelDrivenOutcome(CompactionStatusCancelled, reason, nil, a.compactionState.planID)
 }
 
 // appendModelDrivenContinuationNotice queues the model-driven continuation
