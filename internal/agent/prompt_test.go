@@ -2133,7 +2133,7 @@ func modelDrivenPromptTestAgent(t *testing.T) *MainAgent {
 	a := &MainAgent{}
 	a.modelDrivenCompactionEnabled.Store(true)
 	a.tools = tools.NewRegistry()
-	a.tools.Register(tools.NewCompactContextTool(tools.CompactContextValidator{ContinuationStateMaxTokens: 2048}))
+	a.tools.Register(tools.NewCompactContextTool(tools.CompactContextValidator{ContinuationStateMaxTokens: CompactContinuationStateMaxTokens}))
 	return a
 }
 

@@ -18,7 +18,7 @@ func graceTestAgent(t *testing.T, usage float64) *MainAgent {
 	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(budget, budget, 0, 0.8)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: int(budget * usage)})
 	a.modelDrivenCompactionEnabled.Store(true)
-	a.tools.Register(tools.NewCompactContextTool(tools.CompactContextValidator{ContinuationStateMaxTokens: 2048}))
+	a.tools.Register(tools.NewCompactContextTool(tools.CompactContextValidator{ContinuationStateMaxTokens: CompactContinuationStateMaxTokens}))
 	a.requestBatches.reserve(a.sessionEpoch, 0) // batch 1 = last completed request
 	return a
 }

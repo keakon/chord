@@ -132,7 +132,7 @@ func TestQueueContextPressureReminderGates(t *testing.T) {
 	// the line, tells the model to prepare for the compaction instead of
 	// quoting how much space is left, and names compact_context.
 	a.modelDrivenCompactionEnabled.Store(true)
-	a.tools.Register(tools.NewCompactContextTool(tools.CompactContextValidator{ContinuationStateMaxTokens: 2048}))
+	a.tools.Register(tools.NewCompactContextTool(tools.CompactContextValidator{ContinuationStateMaxTokens: CompactContinuationStateMaxTokens}))
 	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
 	reminder := a.pendingContextPressureReminder
 	if reminder == "" {
@@ -168,7 +168,7 @@ func TestQueueContextPressureReminderStickyAcrossRequests(t *testing.T) {
 	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
 	a.ctxMgr.SetLastTotalContextTokens(5000) // ≈0.61: above the 0.60 reminder line, below threshold 0.9
 	a.modelDrivenCompactionEnabled.Store(true)
-	a.tools.Register(tools.NewCompactContextTool(tools.CompactContextValidator{ContinuationStateMaxTokens: 2048}))
+	a.tools.Register(tools.NewCompactContextTool(tools.CompactContextValidator{ContinuationStateMaxTokens: CompactContinuationStateMaxTokens}))
 	queue := func() string {
 		// Runtime order: buildTurnOverlayMessages consumes the pending text at
 		// attach, then the next request's queue call refills it from scratch.
@@ -227,7 +227,7 @@ func TestCompactContextCallArmsAndStopsStickyReminder(t *testing.T) {
 	a.ctxMgr.SetThreshold(0.9)
 	a.ctxMgr.SetLastTotalContextTokens(5000) // above the 0.60 reminder line, below threshold
 	a.modelDrivenCompactionEnabled.Store(true)
-	a.tools.Register(tools.NewCompactContextTool(tools.CompactContextValidator{ContinuationStateMaxTokens: 2048}))
+	a.tools.Register(tools.NewCompactContextTool(tools.CompactContextValidator{ContinuationStateMaxTokens: CompactContinuationStateMaxTokens}))
 
 	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
 	if a.pendingContextPressureReminder == "" {
@@ -254,7 +254,7 @@ func TestQueueContextPressureReminderSkipsWhenReminderAtThreshold(t *testing.T) 
 	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.5)
 	a.ctxMgr.SetLastTotalContextTokens(4500) // ≈0.55: above the reminder line
 	a.modelDrivenCompactionEnabled.Store(true)
-	a.tools.Register(tools.NewCompactContextTool(tools.CompactContextValidator{ContinuationStateMaxTokens: 2048}))
+	a.tools.Register(tools.NewCompactContextTool(tools.CompactContextValidator{ContinuationStateMaxTokens: CompactContinuationStateMaxTokens}))
 	// An explicit reminder line at the threshold: the reminder only ever
 	// fires on requests that already crossed the line, and
 	// those carry the grace imminent notice or the externalization warning —
@@ -300,7 +300,7 @@ func TestQueueCompactionWarningLifecycle(t *testing.T) {
 	// The claim batch is the last completed request batch (the queue runs
 	// before the next callLLM reserve).
 	a.modelDrivenCompactionEnabled.Store(true)
-	a.tools.Register(tools.NewCompactContextTool(tools.CompactContextValidator{ContinuationStateMaxTokens: 2048}))
+	a.tools.Register(tools.NewCompactContextTool(tools.CompactContextValidator{ContinuationStateMaxTokens: CompactContinuationStateMaxTokens}))
 	a.queueCompactionWarning()
 	if a.pendingCompactionWarning == "" {
 		t.Fatal("armed auto-compact request with a visible tool must queue the externalization warning")
