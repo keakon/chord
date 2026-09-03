@@ -633,6 +633,7 @@ func (a *MainAgent) handleCompactionReady(evt Event) {
 			}
 			return pending.planID
 		}(), draft.Target.sessionEpoch, draft.Target.turnID, draft.Target.turnEpoch)
+		cleanupOrphanCompactionFiles(draft.AbsHistoryPath)
 		return
 	}
 
