@@ -37,8 +37,8 @@ const (
 )
 
 // reminderOverlayClaim is the per-window claim shared by the context-pressure
-// reminder and the grace-period "compaction imminent" notice (optimizations
-// 2.9/2.10). It binds to (compaction_window_id, budget_epoch): a durable apply
+// reminder and the grace-period "compaction imminent" notice. It binds to
+// (compaction_window_id, budget_epoch): a durable apply
 // (model-driven or usage-driven), a session reset/restore, or a usage-baseline
 // model/provider/budget switch changes one of the three components and starts
 // a fresh claim, so a reset that is followed by a new full reminder is
@@ -175,7 +175,7 @@ func (a *MainAgent) noteCompactionWarningAttached() {
 // replacement — never consumes its claim and the next request may re-claim.
 //
 // Delivery stages distinguish the first delivery in the window from the sticky
-// repeat deliveries (optimization 2.9): the reminder and the grace imminent
+// repeat deliveries: the reminder and the grace imminent
 // notice report delivered_first when the claim had no delivery yet and
 // delivered_repeat on later ones. The warning stays one-shot per generation
 // and keeps a plain delivered stage.
@@ -291,7 +291,7 @@ func (a *MainAgent) queueContextPressureReminder(decision ctxmgr.AutoCompactDeci
 	if reminderPct <= 0 || float64(decision.EffectiveInputTokens)/float64(usable) < reminderPct {
 		return
 	}
-	// Optimization 2.10: when the resolved reminder line sits at or beyond the
+	// When the resolved reminder line sits at or beyond the
 	// threshold the reminder would only ever attach to a request that already
 	// crossed the line — the crossing and every grace-deferred request carry
 	// the "compaction imminent" notice (or the externalization warning once
@@ -306,7 +306,7 @@ func (a *MainAgent) queueContextPressureReminder(decision ctxmgr.AutoCompactDeci
 	windowIndex := nextHistoryIndexMinusOne(a.sessionDir)
 	budgetEpoch := a.ctxMgr.TokenBudgetsEpoch()
 	claim := a.syncOverlayWindowClaim(&a.overlayClaims.reminder, windowEpoch, windowIndex, budgetEpoch)
-	// The model already called compact_context in this window (2.9): whatever
+	// The model already called compact_context in this window: whatever
 	// that attempt settles to — an apply that advances the window and resets
 	// the claim, or a skip/failure surfaced by the continuation notice — the
 	// nudge has been answered, so the sticky reminder goes quiet until a fresh
@@ -349,8 +349,8 @@ func (a *MainAgent) queueCompactionWarning() {
 }
 
 // contextPressureReminderShortText is the one-line re-attachment used on
-// requests after the full reminder already dispatched in the same window
-// (optimization 2.9). The model saw the full instructions on the first
+// requests after the full reminder already dispatched in the same window. The
+// model saw the full instructions on the first
 // delivery, so a single line that it is still above the reminder line and
 // points back at the full notice is enough to keep the phase open and
 // externalizing without re-quoting the whole contract on every request.

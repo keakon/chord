@@ -282,6 +282,88 @@ func TestCompactionPillSurvivesBusyActivityLane(t *testing.T) {
 	}
 }
 
+// Regression: the synchronous interval/cooldown skip of a model-driven
+// request emits a synthetic started + skipped pair that never occupies the
+// compaction slot. While a compaction is running, the pair must not overwrite
+// the pill — the running compaction keeps showing until its own terminal
+// arrives.
+func TestCompactionSyntheticSkipDoesNotOverwriteRunningSlot(t *testing.T) {
+	m := NewModelWithSize(nil, 140, 24)
+
+	// A usage-driven compaction owns the slot.
+	m.handleAgentEvent(agentEventMsg{event: agent.CompactionStatusEvent{Status: agent.CompactionStatusStarted, Trigger: "usage_driven", PlanID: "11"}})
+	if !m.compactionBgStatus.Active || m.compactionBgStatus.PlanID != "11" {
+		t.Fatalf("usage-driven started must arm the slot, got %+v", m.compactionBgStatus)
+	}
+
+	// Sync-skip pair for a model-driven request rejected on interval/cooldown:
+	// synthetic started is ignored and its skipped terminal does not match the
+	// running plan.
+	m.handleAgentEvent(agentEventMsg{event: agent.CompactionStatusEvent{Status: agent.CompactionStatusStarted, Trigger: "model_driven", PlanID: "12", Synthetic: true}})
+	if !m.compactionBgStatus.Active || m.compactionBgStatus.PlanID != "11" || m.compactionBgStatus.Trigger != "usage_driven" || m.compactionBgStatus.Terminal != "" {
+		t.Fatalf("synthetic started must not touch the running slot, got %+v", m.compactionBgStatus)
+	}
+	m.handleAgentEvent(agentEventMsg{event: agent.CompactionStatusEvent{Status: agent.CompactionStatusSkipped, Trigger: "model_driven", PlanID: "12", Reason: "minimum 3-request-batch interval"}})
+	if !m.compactionBgStatus.Active || m.compactionBgStatus.Terminal != "" {
+		t.Fatalf("foreign skipped terminal must not resolve the running slot, got %+v", m.compactionBgStatus)
+	}
+
+	// The running compaction's own progress still updates the pill...
+	m.handleAgentEvent(agentEventMsg{event: agent.CompactionStatusEvent{Status: agent.CompactionStatusProgress, Bytes: 2048, Events: 5}})
+	if !m.compactionBgStatus.Active || m.compactionBgStatus.Bytes != 2048 {
+		t.Fatalf("running compaction progress must keep updating the pill, got %+v", m.compactionBgStatus)
+	}
+	// ...and its own terminal resolves it.
+	m.handleAgentEvent(agentEventMsg{event: agent.CompactionStatusEvent{Status: agent.CompactionStatusSucceeded, PlanID: "11"}})
+	if m.compactionBgStatus.Active || m.compactionBgStatus.Terminal != agent.CompactionStatusSucceeded {
+		t.Fatalf("owning terminal must resolve the running slot, got %+v", m.compactionBgStatus)
+	}
+}
+
+// A lone synthetic skip on an idle slot still surfaces: the synthetic started
+// does not arm the pill, and the skipped terminal applies because no
+// compaction is running.
+func TestCompactionSyntheticSkipShowsOnIdleSlot(t *testing.T) {
+	m := NewModelWithSize(nil, 140, 24)
+
+	m.handleAgentEvent(agentEventMsg{event: agent.CompactionStatusEvent{Status: agent.CompactionStatusStarted, Trigger: "model_driven", PlanID: "5", Synthetic: true}})
+	if m.compactionBgStatus.Active {
+		t.Fatalf("synthetic started must not arm an idle pill, got %+v", m.compactionBgStatus)
+	}
+	m.handleAgentEvent(agentEventMsg{event: agent.CompactionStatusEvent{Status: agent.CompactionStatusSkipped, Trigger: "model_driven", PlanID: "5", Reason: "minimum 3-request-batch interval"}})
+	if m.compactionBgStatus.Terminal != agent.CompactionStatusSkipped {
+		t.Fatalf("idle-slot skip terminal must be shown, got %+v", m.compactionBgStatus)
+	}
+	got := stripANSI(m.renderCompactionBackgroundPill(time.Now()))
+	if !strings.Contains(got, "minimum 3-request-batch interval") {
+		t.Fatalf("idle-slot synthetic skip pill = %q, want the skip reason", got)
+	}
+}
+
+// A real (non-synthetic) started replaces the running slot: a model-driven
+// checkpoint that proceeded past the policy verdict has discarded the running
+// automatic draft, so its started takes over and the superseded plan's
+// late-arriving terminal is ignored.
+func TestCompactionRealStartedReplacesRunningSlot(t *testing.T) {
+	m := NewModelWithSize(nil, 140, 24)
+
+	m.handleAgentEvent(agentEventMsg{event: agent.CompactionStatusEvent{Status: agent.CompactionStatusStarted, Trigger: "usage_driven", PlanID: "1"}})
+	m.handleAgentEvent(agentEventMsg{event: agent.CompactionStatusEvent{Status: agent.CompactionStatusStarted, Trigger: "model_driven", PlanID: "2"}})
+	if !m.compactionBgStatus.Active || m.compactionBgStatus.PlanID != "2" || m.compactionBgStatus.Trigger != "model_driven" {
+		t.Fatalf("real started must take over the slot, got %+v", m.compactionBgStatus)
+	}
+	// The superseded plan's terminal (should be stale-guarded agent-side, but
+	// a straggler must not resolve the slot it no longer owns).
+	m.handleAgentEvent(agentEventMsg{event: agent.CompactionStatusEvent{Status: agent.CompactionStatusSucceeded, PlanID: "1"}})
+	if !m.compactionBgStatus.Active || m.compactionBgStatus.Terminal != "" {
+		t.Fatalf("superseded terminal must be ignored, got %+v", m.compactionBgStatus)
+	}
+	m.handleAgentEvent(agentEventMsg{event: agent.CompactionStatusEvent{Status: agent.CompactionStatusSucceeded, PlanID: "2"}})
+	if m.compactionBgStatus.Active || m.compactionBgStatus.Terminal != agent.CompactionStatusSucceeded {
+		t.Fatalf("owning terminal must resolve the slot, got %+v", m.compactionBgStatus)
+	}
+}
+
 func TestCompactionLivePillShowsElapsed(t *testing.T) {
 	m := NewModelWithSize(nil, 140, 24)
 	now := time.Unix(1_700_000_000, 0)

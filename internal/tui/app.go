@@ -410,6 +410,7 @@ type compactionBackgroundStatus struct {
 	TerminalAt time.Time // When status terminal was set (1-2s flush window)
 	Trigger    string    // Compaction trigger kind (manual | usage_driven | ... | model_driven | model_downshift)
 	Reason     string    // Optional terminal reason (e.g. low-gain skip cause)
+	PlanID     string    // Plan id of the compaction this slot shows; "" when idle/terminal
 }
 
 // tuiLayout defines the positioning of UI elements for Draw(scr, area).

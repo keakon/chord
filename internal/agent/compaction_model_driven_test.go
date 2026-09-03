@@ -268,6 +268,7 @@ func TestMaybeStartModelDrivenBarrierIntervalSkipKeepsRunningUsageCompaction(t *
 		t.Fatal("pending request must be consumed by the barrier")
 	}
 	planIDs := map[string]string{}
+	synthetic := false
 	for len(planIDs) < 2 {
 		select {
 		case evt := <-a.outputCh:
@@ -278,10 +279,17 @@ func TestMaybeStartModelDrivenBarrierIntervalSkipKeepsRunningUsageCompaction(t *
 			if status.Trigger != string(compactionTriggerModelDriven) {
 				t.Fatalf("trigger = %q, want model_driven", status.Trigger)
 			}
+			if status.Status == CompactionStatusStarted && !status.Synthetic {
+				t.Fatal("sync-skip started must be synthetic (the plan never occupies the slot)")
+			}
+			synthetic = synthetic || status.Synthetic
 			planIDs[status.Status] = status.PlanID
 		case <-time.After(2 * time.Second):
 			t.Fatalf("no started+skipped status events, got %v", planIDs)
 		}
+	}
+	if !synthetic {
+		t.Fatal("sync-skip events must carry the synthetic flag for slot-aware consumers")
 	}
 	if planIDs[CompactionStatusStarted] == "" || planIDs[CompactionStatusStarted] != planIDs[CompactionStatusSkipped] {
 		t.Fatalf("started and skipped must share one plan id, got %v", planIDs)
@@ -325,8 +333,10 @@ func TestMaybeStartModelDrivenBarrierCooldownSkipIsSynchronous(t *testing.T) {
 	if a.pendingModelDrivenNotice == "" {
 		t.Fatal("sync cooldown skip must queue the continuation notice")
 	}
-	// started + skipped share one plan id.
+	// started + skipped share one plan id and the started is synthetic (the
+	// cooldown skip never occupies the compaction slot).
 	planIDs := map[string]string{}
+	syntheticStarted := false
 	for len(planIDs) < 2 {
 		select {
 		case evt := <-a.outputCh:
@@ -334,10 +344,16 @@ func TestMaybeStartModelDrivenBarrierCooldownSkipIsSynchronous(t *testing.T) {
 			if !ok {
 				continue
 			}
+			if status.Status == CompactionStatusStarted && status.Synthetic {
+				syntheticStarted = true
+			}
 			planIDs[status.Status] = status.PlanID
 		case <-time.After(2 * time.Second):
 			t.Fatalf("no started+skipped status events, got %v", planIDs)
 		}
+	}
+	if !syntheticStarted {
+		t.Fatal("cooldown-skip started must carry the synthetic flag")
 	}
 	if planIDs[CompactionStatusStarted] != planIDs[CompactionStatusSkipped] || planIDs[CompactionStatusSkipped] == "" {
 		t.Fatalf("started and skipped must share one plan id, got %v", planIDs)
@@ -1063,7 +1079,7 @@ func TestModelDrivenPreflightRecordsCacheRebuildCostWithoutSubtracting(t *testin
 	// preflight records the amortized cost on the stats while the gate keeps
 	// deciding on raw surface savings, so a charge that would have flipped the
 	// verdict under the old "net = saved − cost" rule no longer denies the
-	// reset — the §14.2 telemetry answers whether cache rebuilds eat the
+	// reset — the cost telemetry answers whether cache rebuilds eat the
 	// gains instead of pre-deciding it inside the gate.
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)

@@ -1046,21 +1046,24 @@ func TestHeadlessCompactionStatusTerminalEnvelope(t *testing.T) {
 	if envs[0].Type != "compaction_status" {
 		t.Fatalf("type = %q, want compaction_status", envs[0].Type)
 	}
-	payload, ok := envs[0].Payload.(map[string]string)
+	payload, ok := envs[0].Payload.(map[string]any)
 	if !ok {
-		t.Fatalf("payload type = %T, want map[string]string", envs[0].Payload)
+		t.Fatalf("payload type = %T, want map[string]any", envs[0].Payload)
 	}
 	if payload["status"] != agent.CompactionStatusSucceeded {
-		t.Errorf("status = %q, want %q", payload["status"], agent.CompactionStatusSucceeded)
+		t.Errorf("status = %v, want %q", payload["status"], agent.CompactionStatusSucceeded)
 	}
 	if payload["trigger"] != "model_driven" {
-		t.Errorf("trigger = %q, want model_driven", payload["trigger"])
+		t.Errorf("trigger = %v, want model_driven", payload["trigger"])
 	}
 	if payload["reason"] != "checkpoint applied" {
-		t.Errorf("reason = %q, want checkpoint applied", payload["reason"])
+		t.Errorf("reason = %v, want checkpoint applied", payload["reason"])
 	}
 	if payload["plan_id"] != "17" {
-		t.Errorf("plan_id = %q, want 17", payload["plan_id"])
+		t.Errorf("plan_id = %v, want 17", payload["plan_id"])
+	}
+	if payload["synthetic"] != false {
+		t.Errorf("synthetic = %v, want false for a real terminal", payload["synthetic"])
 	}
 }
 
@@ -1074,9 +1077,32 @@ func TestHeadlessCompactionStatusSkippedCarriesTriggerAndReason(t *testing.T) {
 	if len(envs) != 1 {
 		t.Fatalf("envelopes = %d, want 1", len(envs))
 	}
-	payload := envs[0].Payload.(map[string]string)
+	payload := envs[0].Payload.(map[string]any)
 	if payload["reason"] != "projected savings too small" {
-		t.Errorf("reason = %q", payload["reason"])
+		t.Errorf("reason = %v", payload["reason"])
+	}
+}
+
+func TestHeadlessCompactionStatusSyntheticStartedCarriesFlag(t *testing.T) {
+	state := &headlessState{}
+	envs := filterHeadlessEvent(agent.CompactionStatusEvent{
+		Status:    agent.CompactionStatusStarted,
+		Trigger:   "model_driven",
+		PlanID:    "9",
+		Synthetic: true,
+	}, state)
+	if len(envs) != 1 {
+		t.Fatalf("envelopes = %d, want 1", len(envs))
+	}
+	payload := envs[0].Payload.(map[string]any)
+	if payload["status"] != agent.CompactionStatusStarted {
+		t.Errorf("status = %v, want started", payload["status"])
+	}
+	if payload["synthetic"] != true {
+		t.Errorf("synthetic = %v, want true for the sync-skip started", payload["synthetic"])
+	}
+	if payload["plan_id"] != "9" {
+		t.Errorf("plan_id = %v, want 9", payload["plan_id"])
 	}
 }
 

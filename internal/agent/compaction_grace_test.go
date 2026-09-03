@@ -43,8 +43,8 @@ func TestCompactionGraceDefersTwoBatchesThenExpires(t *testing.T) {
 
 	// Same batch again (the request was cancelled before dispatch and is
 	// being retried): still deferred, and the notice is re-queued with the
-	// full window still ahead (optimization 2.9 — the notice is sticky for
-	// the grace, so a retried request that never saw it is not left silent).
+	// full window still ahead (the notice is sticky for the grace, so a
+	// retried request that never saw it is not left silent).
 	if !a.usageDrivenCompactionGraceDefers(snapshot) {
 		t.Fatal("same-batch re-gate must still defer")
 	}

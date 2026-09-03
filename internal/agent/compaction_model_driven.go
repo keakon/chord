@@ -158,7 +158,7 @@ type modelDrivenBarrierSnapshot struct {
 	// that source unchanged, the preflight reuses the sent prefix as the
 	// current-side baseline — the provider already saw it, so the estimate is
 	// exact for the head — instead of re-running a full scratch reduction.
-	// Captured under loopReductionMu on the event loop (2.6).
+	// Captured under loopReductionMu on the event loop.
 	lastPreparedTurnID uint64
 	lastPreparedSource []message.Message
 	lastPreparedPrefix []message.Message
@@ -284,7 +284,7 @@ func (a *MainAgent) tryArmModelDrivenCheckpoint(callID string, rawArgs string) (
 		ToolCallID: callID,
 		Args:       args,
 	}
-	// The model called compact_context in this window (optimization 2.9):
+	// The model called compact_context in this window:
 	// whatever the attempt settles to, the reminder nudge has been answered,
 	// so the sticky reminder stops re-attaching until a fresh window resets
 	// the claim (a durable apply advances the window; a skip/failure is
@@ -313,7 +313,7 @@ func (a *MainAgent) maybeStartModelDrivenBarrier() bool {
 	}
 	snapshot := a.ctxMgr.Snapshot()
 	bundle := a.captureModelDrivenBarrierSnapshot(snapshot)
-	// Policy pre-verdict on the event loop (optimization 2.1A): the interval
+	// Policy pre-verdict on the event loop: the interval
 	// and same-reason cooldown verdicts are deterministic from the bundle
 	// alone, so a request they reject must settle before the compaction slot
 	// is touched. A running or ready automatic compaction keeps its paid-for
@@ -333,7 +333,7 @@ func (a *MainAgent) maybeStartModelDrivenBarrier() bool {
 			"state_file_cnt": strconv.Itoa(len(req.Args.StateFiles)),
 			"max_tokens":     strconv.Itoa(bundle.maxTokens),
 		})
-		a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusStarted, Trigger: string(compactionTriggerModelDriven), PlanID: strconv.FormatUint(planID, 10)})
+		a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusStarted, Trigger: string(compactionTriggerModelDriven), PlanID: strconv.FormatUint(planID, 10), Synthetic: true})
 		draft := modelDrivenSkipDraft(planID, target, reason, skipReason, bundle.currentRequestBatch, nil)
 		a.settleModelDrivenSkip(draft)
 		a.appendModelDrivenContinuationNotice()
@@ -774,7 +774,7 @@ func (a *MainAgent) modelDrivenLowGainPreflight(bundle modelDrivenBarrierSnapsho
 	// been cache-read (≈ 0.1×). The rewritten prefix is the projected surface,
 	// not the archived head, and the one-time delta is amortized over the
 	// minimum apply interval. The cost is recorded on the preflight stats for
-	// the §14.2 cost telemetry only; the low-gain gates below compare raw
+	// cost telemetry only; the low-gain gates below compare raw
 	// surface savings, keeping pure surface semantics — the rebuild delta is a
 	// per-provider billing weight, not a token the model attends to, and
 	// whether it systematically eats the gains is answered by the telemetry
@@ -799,7 +799,7 @@ func (a *MainAgent) modelDrivenLowGainPreflight(bundle modelDrivenBarrierSnapsho
 // gate keeps a pure surface semantics (the one-off cache rewrite of a kept
 // prefix is a per-provider billing weight, not a token the model attends to);
 // whether cache rebuilds systematically eat the gains is answered by the
-// §14.2 cost telemetry instead of being pre-decided inside the gate.
+// cost telemetry instead of being pre-decided inside the gate.
 func modelDrivenLowGainCheck(currentTokens, projectedTokens, saved int) (string, bool) {
 	if saved < modelDrivenLowGainMinTokens || saved < int(float64(currentTokens)*modelDrivenLowGainMinRatio) {
 		return fmt.Sprintf("projected savings %d tokens is below the low-gain gate (%d tokens and %d%% of the prepared surface)", saved, modelDrivenLowGainMinTokens, int(modelDrivenLowGainMinRatio*100)), true
@@ -1121,7 +1121,7 @@ func (a *MainAgent) settleModelDrivenOutcome(status string, reason string, prefl
 	// The terminal TUI/control-plane event always carries the model_driven
 	// trigger and the settled plan id. The plan id comes from the explicit
 	// argument (the worker draft's, or the state's when the draft is generic):
-	// a synchronous settle that never owned the compaction slot (2.1A) must
+	// a synchronous settle that never owned the compaction slot must
 	// not emit an empty id, nor borrow the id of a running automatic
 	// compaction it deliberately left untouched.
 	if eventPlanID == 0 {

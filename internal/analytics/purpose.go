@@ -18,8 +18,8 @@ const (
 	// UsagePurposeContextPressureReminder and UsagePurposeCompactionWarning
 	// record the context-pressure reminder and usage-driven externalization
 	// warning deliveries (zero-usage bookkeeping). The reminder is sticky
-	// (delivered_first / delivered_repeat per compaction window, optimization
-	// 2.9); the warning stays one-shot per auto-compact generation
+	// (delivered_first / delivered_repeat per compaction window); the warning
+	// stays one-shot per auto-compact generation
 	// (plain "delivered").
 	UsagePurposeContextPressureReminder = "context_pressure_reminder"
 	UsagePurposeCompactionWarning       = "compaction_warning"
@@ -27,7 +27,7 @@ const (
 	// (started / delivered_first / delivered_repeat / expired / hard_ceiling /
 	// model_driven_settled) so telemetry can tell whether the grace bought a
 	// model-driven reset or only delayed the safety net. The delivery stages
-	// are sticky (optimization 2.9): the notice attaches on every deferred
+	// are sticky: the notice attaches on every deferred
 	// request while the grace is active.
 	UsagePurposeCompactionGrace = "compaction_grace"
 )

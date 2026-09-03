@@ -578,6 +578,14 @@ type CompactionStatusEvent struct {
 	// consumers and the gateway can correlate a terminal outcome with the
 	// specific plan that produced it.
 	PlanID string
+	// Synthetic marks lifecycle events that never occupied the compaction
+	// slot: the synchronous interval/cooldown skip emits a
+	// started + terminal pair on a fresh plan id to keep the control-plane
+	// started/terminal contract, but no worker runs behind it. Single-slot
+	// consumers (the TUI pill, the gateway LastCompaction snapshot) must not
+	// let a synthetic pair overwrite the state of a compaction that is still
+	// running; they may still show it when the slot is idle.
+	Synthetic bool
 }
 
 func (CompactionStatusEvent) agentEvent() {}

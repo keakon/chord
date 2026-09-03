@@ -28,8 +28,8 @@ const (
 // notice for a request inside the deferral window. requests is the number of
 // main-model request batches left before automatic compaction takes over: the
 // crossing request reports the full minCompactionGracePeriodBatches window and
-// every later deferred request reports its true remaining count (optimization
-// 2.9), so the model always sees how much room is actually left. It is bare
+// every later deferred request reports its true remaining count, so the model
+// always sees how much room is actually left. It is bare
 // content; the turn-overlay injector wraps it in a <system-reminder> block.
 func compactionImminentText(requests int) string {
 	countdown := fmt.Sprintf("the next %d requests", requests)
@@ -73,7 +73,7 @@ func (a *MainAgent) usageDrivenCompactionGraceDefers(snapshot []message.Message)
 		return true
 	}
 	// Grace in progress: every deferred request re-attaches the imminent
-	// notice (optimization 2.9) with the true remaining countdown, so a model
+	// notice with the true remaining countdown, so a model
 	// that missed the crossing request — or whose copy was attached to a
 	// cancelled dispatch — still sees how much room is left.
 	if current >= a.compactionGraceStartBatch && current-a.compactionGraceStartBatch < minCompactionGracePeriodBatches {
@@ -144,7 +144,7 @@ func (a *MainAgent) recordCompactionGraceEvent(stage string, batch uint64) {
 }
 
 // queueCompactionImminentNotice arms the "compaction imminent" overlay for a
-// request inside the threshold grace period (optimization 2.9). The notice is
+// request inside the threshold grace period. The notice is
 // sticky for the whole grace: the queue never suppresses an attach, because
 // the gate only defers while the grace is active and the notice is the only
 // signal that automatic compaction is about to take over — if a request could

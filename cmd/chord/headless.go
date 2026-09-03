@@ -243,11 +243,12 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 			return nil
 		}
 		if state.isSubscribed("compaction_status") {
-			out = append(out, &headlessEnvelope{Type: "compaction_status", Payload: map[string]string{
-				"status":  e.Status,
-				"trigger": e.Trigger,
-				"reason":  e.Reason,
-				"plan_id": e.PlanID,
+			out = append(out, &headlessEnvelope{Type: "compaction_status", Payload: map[string]any{
+				"status":    e.Status,
+				"trigger":   e.Trigger,
+				"reason":    e.Reason,
+				"plan_id":   e.PlanID,
+				"synthetic": e.Synthetic,
 			}})
 		}
 	case agent.AssistantMessageEvent:

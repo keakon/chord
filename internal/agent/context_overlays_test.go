@@ -150,7 +150,7 @@ func TestQueueContextPressureReminderGates(t *testing.T) {
 	a.pendingContextPressureReminder = ""
 
 	// A delivered claim does not silence the reminder while usage stays above
-	// the line (optimization 2.9): the next request re-queues the one-line
+	// the line: the next request re-queues the one-line
 	// short text, not the full reminder. Only the full text is one-shot per
 	// window.
 	a.pendingContextPressureReminder = ""
@@ -183,7 +183,7 @@ func TestQueueContextPressureReminderStickyAcrossRequests(t *testing.T) {
 	}
 
 	// First above-line request carries the full text; after a dispatch the
-	// next request re-attaches only the short text (optimization 2.9).
+	// next request re-attaches only the short text.
 	if got := queue(); got == "" || got == contextPressureReminderShortText {
 		t.Fatalf("first above-line request must queue the full reminder, got %q", got)
 	}
@@ -238,7 +238,7 @@ func TestCompactContextCallArmsAndStopsStickyReminder(t *testing.T) {
 	if _, err := a.tryArmModelDrivenCheckpoint(ccID, args); err != nil {
 		t.Fatalf("tryArmModelDrivenCheckpoint: %v", err)
 	}
-	// The armed call marks the window ccCalled (optimization 2.9): later
+	// The armed call marks the window ccCalled: later
 	// requests in the same window stop re-attaching the reminder, whatever the
 	// attempt settles to.
 	a.pendingContextPressureReminder = ""
@@ -255,8 +255,8 @@ func TestQueueContextPressureReminderSkipsWhenReminderAtThreshold(t *testing.T) 
 	a.ctxMgr.SetLastTotalContextTokens(4500) // ≈0.55: above the reminder line
 	a.modelDrivenCompactionEnabled.Store(true)
 	a.tools.Register(tools.NewCompactContextTool(tools.CompactContextValidator{ContinuationStateMaxTokens: 2048}))
-	// An explicit reminder line at the threshold (optimization 2.10): the
-	// reminder only ever fires on requests that already crossed the line, and
+	// An explicit reminder line at the threshold: the reminder only ever
+	// fires on requests that already crossed the line, and
 	// those carry the grace imminent notice or the externalization warning —
 	// injecting both would stack two prompts on the same request.
 	a.globalConfig.Context.Compaction.Reminder = 0.5

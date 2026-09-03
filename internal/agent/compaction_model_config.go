@@ -48,8 +48,7 @@ func (a *MainAgent) explicitReminderPct(modelRef string) float64 {
 // model), otherwise the global threshold. The reminder line never moves this
 // line: a configured reminder at or above the threshold simply never injects
 // on its own — the crossing request itself carries the grace imminent notice
-// or the usage-driven externalization warning (optimization 2.10, see
-// queueContextPressureReminder).
+// or the usage-driven externalization warning (see queueContextPressureReminder).
 func (a *MainAgent) effectiveCompactionThreshold(modelRef string) float64 {
 	if a == nil {
 		return config.DefaultContextCompactUsage
@@ -68,8 +67,8 @@ func (a *MainAgent) effectiveCompactionThreshold(modelRef string) float64 {
 // default (min(0.60, threshold*0.90)). The resolved line may sit at or above
 // the threshold — queueContextPressureReminder applies the "whichever line is
 // reached first" semantics via min with the threshold and never injects when
-// the line is at/above it (optimization 2.10: the crossing and grace-deferred
-// requests carry the imminent notice or the externalization warning). Returns
+// the line is at/above it (the crossing and grace-deferred requests carry the
+// imminent notice or the externalization warning). Returns
 // 0 when the threshold disables automatic compaction (threshold<=0) or the
 // reminder is explicitly disabled, meaning no reminder is ever injected.
 func (a *MainAgent) effectiveReminderPct(threshold float64) float64 {
@@ -85,7 +84,7 @@ func (a *MainAgent) effectiveReminderPct(threshold float64) float64 {
 // can preview the reminder line a model would manage its context with (the TUI
 // re-colors the context display for the model that is next up after a switch).
 // The line may sit at or above the threshold; queueContextPressureReminder
-// then never injects a separate reminder (optimization 2.10).
+// then never injects a separate reminder.
 func (a *MainAgent) effectiveReminderPctForModelRef(modelRef string, threshold float64) float64 {
 	if threshold <= 0 {
 		return 0

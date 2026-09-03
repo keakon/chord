@@ -293,12 +293,22 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 		now := time.Now()
 		switch evt.Status {
 		case agent.CompactionStatusStarted:
+			// A synthetic started (the synchronous interval/cooldown skip of a
+			// model-driven request) never occupies the
+			// compaction slot: the pill keeps showing the compaction that is
+			// actually running, or stays idle when none is. The skipped
+			// terminal that follows is applied by the terminal branch below —
+			// an idle slot always applies a terminal outcome.
+			if evt.Synthetic {
+				break
+			}
 			m.compactionBgStatus = compactionBackgroundStatus{
 				Active:    true,
 				StartedAt: now,
 				Bytes:     evt.Bytes,
 				Events:    evt.Events,
 				Trigger:   evt.Trigger,
+				PlanID:    evt.PlanID,
 			}
 		case agent.CompactionStatusProgress:
 			if m.compactionBgStatus.StartedAt.IsZero() {
@@ -308,6 +318,16 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 			m.compactionBgStatus.Bytes = evt.Bytes
 			m.compactionBgStatus.Events = evt.Events
 		case agent.CompactionStatusSucceeded, agent.CompactionStatusFailed, agent.CompactionStatusSkipped, agent.CompactionStatusCancelled:
+			// The slot shows a running compaction: only that compaction's own
+			// terminal may resolve it. A terminal from another plan id — the
+			// skipped half of a synthetic interval/cooldown skip, or the
+			// late-arriving terminal of a superseded plan — must not overwrite
+			// the running state. Idle or terminal-flush slots apply any
+			// terminal (a lone synthetic skip, or a terminal that arrived
+			// without a plan id on older usage-driven paths).
+			if m.compactionBgStatus.Active && m.compactionBgStatus.PlanID != "" && evt.PlanID != "" && evt.PlanID != m.compactionBgStatus.PlanID {
+				return true, effects
+			}
 			// Terminal flush state: show the outcome for ~2s, then disappear.
 			// Skipped is a terminal outcome too — nothing was rewritten, but
 			// the model requested a checkpoint and the runtime declined, so the
@@ -321,6 +341,7 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 				m.compactionBgStatus.StartedAt = now
 			}
 			m.compactionBgStatus.Active = false
+			m.compactionBgStatus.PlanID = ""
 			m.compactionBgStatus.Terminal = evt.Status
 			m.compactionBgStatus.TerminalAt = now
 			m.compactionBgStatus.Bytes = evt.Bytes
