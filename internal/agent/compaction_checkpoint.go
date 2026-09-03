@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
 )
 
 // Checkpoint recent-message retention.
@@ -33,6 +34,7 @@ const (
 
 	retainedUserLabel                 = "User"
 	retainedInterruptedAssistantLabel = "Assistant (interrupted reply, partial text)"
+	retainedCheckpointRequestLabel    = "Assistant (context checkpoint request, own reasoning)"
 )
 
 // retainedCheckpointBlock is one message kept verbatim inside a checkpoint.
@@ -52,8 +54,13 @@ type retainedCheckpointBlock struct {
 // An interrupted assistant reply (StopReason "interrupted", no tool calls) is
 // additionally retained only when it is the newest assistant segment of the
 // head and no real user message is newer: an already-continued or superseded
-// partial would only pull the model back to an abandoned exchange. At most
-// maxUserMessages user messages are kept; the budget counts message text only.
+// partial would only pull the model back to an abandoned exchange. The newest
+// assistant segment that declared compact_context is likewise retained when it
+// carries non-empty own text: under the archival profile the reasoning that
+// led to the checkpoint request lives only in that body (plus what the model
+// wrote into the continuation-state arguments), so dropping it would sever the
+// model from its own just-completed analysis. At most maxUserMessages user
+// messages are kept; the budget counts message text only.
 func selectCheckpointRetainedRecentBlocks(messages []message.Message, maxUserMessages int, budgetTokens int, estimateTokens func(text string) int) []retainedCheckpointBlock {
 	if budgetTokens <= 0 || estimateTokens == nil || maxUserMessages <= 0 {
 		return nil
@@ -62,6 +69,7 @@ func selectCheckpointRetainedRecentBlocks(messages []message.Message, maxUserMes
 	var blocks []retainedCheckpointBlock
 	users := 0
 	partialKept := false
+	ccKept := false
 	seenAssistant := false
 	for i := len(messages) - 1; i >= 0; i-- {
 		msg := messages[i]
@@ -83,6 +91,19 @@ func selectCheckpointRetainedRecentBlocks(messages []message.Message, maxUserMes
 				return blocks
 			}
 		case msg.Role == message.RoleAssistant:
+			// The newest compact_context declaring segment is kept verbatim
+			// when it has own text. It sits below any interrupted partial or
+			// newer tool-only rounds in the scan, so retaining it cannot
+			// resurrect a superseded exchange; only one such block per head.
+			if !ccKept && users == 0 && assistantDeclaresCompactContext(msg) {
+				if text := retainedAssistantPartialText(msg); text != "" {
+					ccKept = true
+					blocks, remaining = addCheckpointRetainedBlock(blocks, remaining, estimateTokens, retainedCheckpointBlock{label: retainedCheckpointRequestLabel, text: text})
+					if remaining <= 0 {
+						return blocks
+					}
+				}
+			}
 			if !seenAssistant && !partialKept && users == 0 && len(msg.ToolCalls) == 0 && msg.StopReason == "interrupted" {
 				if text := retainedAssistantPartialText(msg); text != "" {
 					partialKept = true
@@ -96,6 +117,16 @@ func selectCheckpointRetainedRecentBlocks(messages []message.Message, maxUserMes
 		}
 	}
 	return blocks
+}
+
+// assistantDeclaresCompactContext reports whether the assistant message's
+// declaring response is exactly one compact_context tool call (the only shape
+// that passes the barrier validation).
+func assistantDeclaresCompactContext(msg message.Message) bool {
+	if len(msg.ToolCalls) != 1 {
+		return false
+	}
+	return tools.NormalizeName(msg.ToolCalls[0].Name) == tools.NameCompactContext
 }
 
 // addCheckpointRetainedBlock appends block when its text fits the remaining

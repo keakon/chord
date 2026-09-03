@@ -7,6 +7,7 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
 )
 
 // estimatorTokensPerChar returns a deterministic estimator that charges one
@@ -223,6 +224,95 @@ func TestTruncateRetainedTextToBudgetIsRuneSafe(t *testing.T) {
 	// A budget that fits at most the first rune keeps exactly that rune.
 	if got := truncateRetainedTextToBudget("ab", 1, estimatorTokensPerChar); got != "a" {
 		t.Fatalf("truncated = %q, want %q", got, "a")
+	}
+}
+
+func TestSelectCheckpointRetainedRecentBlocksKeepsCompactContextDeclaringAssistant(t *testing.T) {
+	cc := message.ToolCall{ID: "cc-1", Name: tools.NameCompactContext}
+	head := []message.Message{
+		{Role: message.RoleUser, Content: "Refactor the parser."},
+		{Role: message.RoleAssistant, Content: "Explored the code and found the shape of the fix."},
+		{Role: message.RoleUser, Content: "Land it."},
+		{Role: message.RoleAssistant, Content: "Phase wrapped up; checkpointing now.", ToolCalls: []message.ToolCall{cc}},
+	}
+	blocks := selectCheckpointRetainedRecentBlocks(head, compactRetainRecentUserMessages, 1<<20, estimatorTokensPerChar)
+	// Newest first: the cc-declaring assistant body, then the two real user
+	// messages; the earlier analysis assistant is not retained.
+	if len(blocks) != 3 {
+		t.Fatalf("retained %d blocks, want 3:\n%+v", len(blocks), blocks)
+	}
+	if blocks[0].label != retainedCheckpointRequestLabel || !strings.Contains(blocks[0].text, "Phase wrapped up") {
+		t.Fatalf("newest block must be the cc-declaring assistant, got %+v", blocks[0])
+	}
+	section := renderCheckpointRetainedRecentMessages(head, compactRetainRecentUserMessages, 1<<20, estimatorTokensPerChar)
+	if !strings.Contains(section, retainedCheckpointRequestLabel) {
+		t.Fatalf("section missing the checkpoint-request label:\n%s", section)
+	}
+	if !strings.Contains(section, "Phase wrapped up; checkpointing now.") {
+		t.Fatalf("section missing the cc-declaring assistant body:\n%s", section)
+	}
+	// Chronological order inside the section: the cc body renders after the
+	// user messages it answers.
+	if strings.Index(section, "> Refactor the parser.") > strings.Index(section, "> Phase wrapped up; checkpointing now.") {
+		t.Fatalf("cc-declaring body must render chronologically after the older user message:\n%s", section)
+	}
+}
+
+func TestSelectCheckpointRetainedRecentBlocksSkipsEmptyOrSupersededCheckpointRequests(t *testing.T) {
+	cc := message.ToolCall{ID: "cc-1", Name: tools.NameCompactContext}
+	// A cc-declaring assistant with an empty body has no own text to retain.
+	empty := []message.Message{
+		{Role: message.RoleUser, Content: "original"},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{cc}},
+	}
+	if blocks := selectCheckpointRetainedRecentBlocks(empty, compactRetainRecentUserMessages, 1<<20, estimatorTokensPerChar); len(blocks) != 1 {
+		t.Fatalf("empty cc body must not be retained, got %+v", blocks)
+	}
+	// A real user message newer than the cc request supersedes it (for
+	// example a skip that let the model continue and the user then corrected
+	// course): retention must not pull the model back to the abandoned
+	// checkpoint request.
+	superseded := []message.Message{
+		{Role: message.RoleUser, Content: "Phase A."},
+		{Role: message.RoleAssistant, Content: "Checkpointing phase A.", ToolCalls: []message.ToolCall{cc}},
+		{Role: message.RoleUser, Content: "Do not checkpoint; keep the context and continue."},
+	}
+	blocks := selectCheckpointRetainedRecentBlocks(superseded, compactRetainRecentUserMessages, 1<<20, estimatorTokensPerChar)
+	// The newer user message supersedes the cc request: no checkpoint-request
+	// block is retained, and the retained blocks are exactly the real user
+	// messages, newest first.
+	if len(blocks) != 2 {
+		t.Fatalf("expected the two user messages only, got %+v", blocks)
+	}
+	for _, b := range blocks {
+		if b.label != retainedUserLabel {
+			t.Fatalf("superseded cc request must not be retained, got %+v", blocks)
+		}
+	}
+	if blocks[0].text != "Do not checkpoint; keep the context and continue." {
+		t.Fatalf("newest retained block must be the newer user message, got %+v", blocks)
+	}
+}
+
+func TestSelectCheckpointRetainedRecentBlocksBudgetPrefersNewerOverCheckpointRequest(t *testing.T) {
+	cc := message.ToolCall{ID: "cc-1", Name: tools.NameCompactContext}
+	head := []message.Message{
+		{Role: message.RoleUser, Content: "aaaaaaaaaa"},                                                    // 10
+		{Role: message.RoleUser, Content: "bbbbbbbbbb"},                                                    // 10
+		{Role: message.RoleAssistant, Content: strings.Repeat("c", 10), ToolCalls: []message.ToolCall{cc}}, // 10
+	}
+	blocks := selectCheckpointRetainedRecentBlocks(head, compactRetainRecentUserMessages, 25, estimatorTokensPerChar)
+	// Newest first: cc body (10) and the newest user (10) are kept whole; the
+	// oldest user cannot fit the remaining 5 tokens, so it is kept as a
+	// truncated prefix and retention stops there.
+	if len(blocks) != 3 || blocks[0].label != retainedCheckpointRequestLabel || blocks[1].label != retainedUserLabel {
+		t.Fatalf("budget must keep the cc body and newest user whole, got %+v", blocks)
+	}
+	if blocks[0].text != strings.Repeat("c", 10) || blocks[1].text != "bbbbbbbbbb" {
+		t.Fatalf("unexpected kept blocks: %+v", blocks)
+	}
+	if !blocks[2].truncated || blocks[2].text != "aaaaa" {
+		t.Fatalf("oldest user must be truncated to the remaining budget, got %+v", blocks[2])
 	}
 }
 
