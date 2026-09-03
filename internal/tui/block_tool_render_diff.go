@@ -603,15 +603,16 @@ func (b *Block) cachedApplyPatchStreamingArgs(argsJSON string) string {
 
 func appendApplyPatchPreview(result []string, b *Block, filePath string, width int) []string {
 	argsJSON := b.editPatchArgsJSON()
-	// Strip orphaned variation selectors so the highlighted preview lines
-	// measure the same width the terminal paints. The streaming fallback is
-	// already sanitized; stripping again is idempotent.
-	patch := tools.StripOrphanVariationSelectors(editPatchFromArgs(argsJSON))
+	// Sanitize the display copy before splitting it into lines. In particular,
+	// a CR left inside a patch line would be interpreted by the screen renderer
+	// as a cursor return and could overwrite the rail and card padding. Keep the
+	// raw argument untouched: this is only a presentation boundary.
+	patch := sanitizeToolDisplayText(editPatchFromArgs(argsJSON))
 	if patch == "" {
 		// Args may still be streaming: the JSON is not parseable yet, but the
 		// patch text itself is a valid live preview (see
 		// applyPatchStreamingPreview).
-		patch = applyPatchStreamingPreview(argsJSON)
+		patch = sanitizeToolDisplayText(applyPatchStreamingPreview(argsJSON))
 	}
 	if patch == "" {
 		return result

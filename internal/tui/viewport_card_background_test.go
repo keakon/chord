@@ -81,14 +81,13 @@ func TestViewportKeepsToolCardBackgroundEdge(t *testing.T) {
 	}
 }
 
-// TestViewportDoesNotLetExpandedTabsBleedPastToolCard verifies that tab
-// expansion inside a tool-card body cannot push the card background past the
-// viewport edge or leave a right-edge gap between rows: every background row
-// ends at the same filled right edge as the raw card.
-func TestViewportDoesNotLetExpandedTabsBleedPastToolCard(t *testing.T) {
+// TestViewportDoesNotLetExpandedTabsOrCarriageReturnsCorruptToolCard verifies
+// that display-only tab expansion and control-character sanitization cannot
+// leave a right-edge gap or overwrite the card rail.
+func TestViewportDoesNotLetExpandedTabsOrCarriageReturnsCorruptToolCard(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	const width = 290
-	patchArgs := `{"patch":"*** Begin Patch\n*** Update File: internal/tui/tool_card_width_test.go\n@@\n*** End Patch"}`
+	patchArgs := `{"patch":"*** Begin Patch\n*** Update File: internal/tui/tool_card_width_test.go\n@@\n \t\r\n*** End Patch"}`
 	block := &Block{
 		ID:            2,
 		Type:          BlockToolCall,
@@ -101,6 +100,11 @@ func TestViewportDoesNotLetExpandedTabsBleedPastToolCard(t *testing.T) {
 	}
 
 	raw := block.Render(width, "")
+	for i, line := range raw {
+		if strings.ContainsRune(line, '\r') {
+			t.Fatalf("raw card line %d still contains carriage return: %q", i, line)
+		}
+	}
 	rawScreen := newScreenBuffer(width, len(raw))
 	uv.NewStyledString(strings.Join(raw, "\n")).Draw(rawScreen, rawScreen.Bounds())
 
@@ -138,5 +142,21 @@ func TestViewportDoesNotLetExpandedTabsBleedPastToolCard(t *testing.T) {
 	}
 	if filled == 0 {
 		t.Fatal("no tool-card background was rendered")
+	}
+
+	railRows := 0
+	railFg := colorOfTheme(currentTheme.RailToolFg)
+	for y, line := range raw {
+		if !strings.HasPrefix(stripANSI(line), "│") {
+			continue
+		}
+		railRows++
+		cell := rawScreen.Line(y).At(0)
+		if cell == nil || cell.Content != "│" || !colorsEqual(cell.Style.Fg, railFg) {
+			t.Fatalf("raw row %d: rail at column 0 was overwritten: cell=%+v", y, cell)
+		}
+	}
+	if railRows == 0 {
+		t.Fatal("no rail-bearing card rows were rendered")
 	}
 }

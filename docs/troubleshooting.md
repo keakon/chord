@@ -268,7 +268,7 @@ If a tool card, local shell result, question dialog, or confirmation summary sho
 - retry the same `read`, `shell`, `web_fetch`, or local shell action
 - if you still see corruption, save the original file/output and a screenshot together
 
-Chord sanitizes assistant/thinking streaming replies, tool results, local shell output, and status/error cards before rendering them as terminal-safe plain text. Control characters and ANSI escapes such as `\x1b[1;1H` (a cursor-position command) render as literals instead of corrupting the card layout or its background. If the same content consistently breaks layout, attach the original text and a screenshot so the rendering case can be reproduced.
+Chord sanitizes assistant/thinking streaming replies, tool results, local shell output, status/error cards, and tool-request previews such as the `apply_patch` patch text before rendering them as terminal-safe plain text. Control characters and ANSI escapes such as `\x1b[1;1H` (a cursor-position command) render as literals instead of corrupting the card layout or its background. A raw carriage return embedded in a patch preview is treated the same way: CRLF still displays as a normal line break, while a standalone CR shows as the literal `\r`, so the preview cannot reflow mid-line and truncate or miscolor the card background or its left edge. If the same content consistently breaks layout, attach the original text and a screenshot so the rendering case can be reproduced.
 
 ## Dark block at a card's right edge or text shifted after an emoji
 
