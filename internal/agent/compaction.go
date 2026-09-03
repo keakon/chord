@@ -15,16 +15,23 @@ import (
 const (
 	// Raw evidence pack: small continuation stabilizer (checkpoint-first design).
 	compactEvidenceMinTokens = 512
-	// CompactEvidenceMaxTokens caps one compaction's raw evidence pack. It is
-	// also the continuation-state token budget for compact_context (see
-	// parseCompactContextArgs): cmd/chord wires the registered validator with
-	// this exported constant so both validation paths share one number.
-	CompactEvidenceMaxTokens    = 2048
-	compactEvidencePercentNumer = 2 // ~2% of context window
-	compactEvidencePercentDenom = 100
-	compactRecentTailMinTokens  = 768
-	compactRecentTailMaxTokens  = 16384
-	compactRecentTailTurns      = 2
+	// CompactEvidenceMaxTokens caps one compaction's raw evidence pack.
+	CompactEvidenceMaxTokens = 2048
+	// CompactContinuationStateMaxTokens caps the compact_context continuation
+	// state: all model-authored text fields combined must fit this
+	// estimated-token budget (see parseCompactContextArgs). It is decoupled
+	// from the raw evidence pack tier and deliberately larger: the checkpoint
+	// is the model's only self-described continuation basis under the archival
+	// profile, and the low-gain gate accounts the extra tokens on the
+	// projected side so a marginal reset cannot slip through. cmd/chord wires
+	// the registered validator with this exported constant so both validation
+	// paths share one number.
+	CompactContinuationStateMaxTokens = 4096
+	compactEvidencePercentNumer       = 2 // ~2% of context window
+	compactEvidencePercentDenom       = 100
+	compactRecentTailMinTokens        = 768
+	compactRecentTailMaxTokens        = 16384
+	compactRecentTailTurns            = 2
 	// compactRecentTailBudgetRatio divides the context window to size the raw
 	// tail kept after a continuation checkpoint. The compaction threshold
 	// already leaves ~20% of the window unused, so a tail worth ~5% of it is

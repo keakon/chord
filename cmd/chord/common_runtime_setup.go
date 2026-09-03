@@ -84,13 +84,13 @@ func wireMainAgentRuntime(ctx context.Context, mainAgent *agent.MainAgent, reg *
 	if modelDrivenCompaction {
 		reg.Register(tools.NewCompactContextTool(tools.CompactContextValidator{
 			// The continuation-state budget is the same number the agent's own
-			// event-loop validation applies (agent.CompactEvidenceMaxTokens);
+			// event-loop validation applies (agent.CompactContinuationStateMaxTokens);
 			// estimation is inherited from the agent's calibrated estimator at
 			// validation time and falls back to the conservative bytes/3
 			// default here. ProjectRoot anchors state_files spellings the same
 			// way the file tools' BaseDir does, so the model-facing display
 			// paths and the accepted entries agree.
-			ContinuationStateMaxTokens: agent.CompactEvidenceMaxTokens,
+			ContinuationStateMaxTokens: agent.CompactContinuationStateMaxTokens,
 			ProjectRoot:                mainAgent.ProjectRoot,
 			EstimateTokens: func(text string) int {
 				return mainAgent.EstimateTokensForText(text)

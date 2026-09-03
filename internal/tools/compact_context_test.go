@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -129,9 +128,6 @@ func TestCompactContextStateFilesDedupedAndNormalized(t *testing.T) {
 
 // rootedCompactValidator returns a validator whose ProjectRoot provider serves
 // root, with HOME pinned to its parent so "~" spellings expand deterministically.
-// The root is a short fixed lexical path under os.TempDir: validation never
-// stats the filesystem, so the directory need not exist, and staying under the
-// 128-rune raw-spelling cap keeps the absolute/tilde fixtures themselves valid.
 func rootedCompactValidator(t *testing.T, root string) CompactContextValidator {
 	t.Helper()
 	t.Setenv("HOME", filepath.Dir(root))
@@ -141,10 +137,9 @@ func rootedCompactValidator(t *testing.T, root string) CompactContextValidator {
 	}
 }
 
-func ccTestRoot(name string) string { return filepath.Join(os.TempDir(), "chord-cc-"+name) }
-
 func TestCompactContextStateFilesAcceptsInProjectSpellings(t *testing.T) {
-	root := ccTestRoot("accept")
+	home := t.TempDir()
+	root := filepath.Join(home, "proj")
 	v := rootedCompactValidator(t, root)
 	abs := filepath.Join(root, "docs", "x.md")
 	for name, raw := range map[string]string{
@@ -153,8 +148,8 @@ func TestCompactContextStateFilesAcceptsInProjectSpellings(t *testing.T) {
 		"inner_dot":             `{"active_objective":"a","next_step":"b","state_files":["docs/./x.md"]}`,
 		"inner_dotdot":          `{"active_objective":"a","next_step":"b","state_files":["docs/../docs/x.md"]}`,
 		"absolute":              `{"active_objective":"a","next_step":"b","state_files":["` + abs + `"]}`,
-		"tilde":                 `{"active_objective":"a","next_step":"b","state_files":["~/chord-cc-accept/docs/x.md"]}`,
-		"leading_dotdot_inside": `{"active_objective":"a","next_step":"b","state_files":["sub/../../chord-cc-accept/docs/x.md"]}`,
+		"tilde":                 `{"active_objective":"a","next_step":"b","state_files":["~/proj/docs/x.md"]}`,
+		"leading_dotdot_inside": `{"active_objective":"a","next_step":"b","state_files":["sub/../../proj/docs/x.md"]}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			args, err := v.ParseCompactContextArgs(json.RawMessage(raw))
@@ -169,12 +164,13 @@ func TestCompactContextStateFilesAcceptsInProjectSpellings(t *testing.T) {
 }
 
 func TestCompactContextStateFilesRejectsOutsideRootEvenWithRoot(t *testing.T) {
-	root := ccTestRoot("reject")
+	home := t.TempDir()
+	root := filepath.Join(home, "proj")
 	v := rootedCompactValidator(t, root)
-	sibling := filepath.Join(os.TempDir(), "chord-cc-other.md")
+	sibling := filepath.Join(home, "other.md")
 	for name, raw := range map[string]string{
 		"absolute_outside":    `{"active_objective":"a","next_step":"b","state_files":["` + sibling + `"]}`,
-		"tilde_outside":       `{"active_objective":"a","next_step":"b","state_files":["~/chord-cc-other.md"]}`,
+		"tilde_outside":       `{"active_objective":"a","next_step":"b","state_files":["~/other.md"]}`,
 		"dotdot_outside":      `{"active_objective":"a","next_step":"b","state_files":["../other.md"]}`,
 		"system_path":         `{"active_objective":"a","next_step":"b","state_files":["/etc/passwd"]}`,
 		"tilde_home_dir":      `{"active_objective":"a","next_step":"b","state_files":["~"]}`,
@@ -189,12 +185,13 @@ func TestCompactContextStateFilesRejectsOutsideRootEvenWithRoot(t *testing.T) {
 }
 
 func TestCompactContextStateFilesCollapsesEquivalentSpellings(t *testing.T) {
-	root := ccTestRoot("collapse")
+	home := t.TempDir()
+	root := filepath.Join(home, "proj")
 	v := rootedCompactValidator(t, root)
 	abs := filepath.Join(root, "notes", "task.md")
 	args, err := v.ParseCompactContextArgs(json.RawMessage(`{
 		"active_objective":"a","next_step":"b",
-		"state_files":["notes/task.md","./notes/task.md","notes/../notes/task.md","` + abs + `","~/chord-cc-collapse/notes/task.md"]
+		"state_files":["notes/task.md","./notes/task.md","notes/../notes/task.md","` + abs + `","~/proj/notes/task.md"]
 	}`))
 	if err != nil {
 		t.Fatalf("ParseCompactContextArgs: %v", err)

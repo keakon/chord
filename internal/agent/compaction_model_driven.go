@@ -248,7 +248,7 @@ func (a *MainAgent) validateCompactContextResult(callID string, rawArgs string) 
 // Only an estimator-less validator (unit tests) falls back to bytes/3.
 func (a *MainAgent) parseCompactContextArgs(raw json.RawMessage) (tools.CompactContextArgs, error) {
 	validator := tools.CompactContextValidator{
-		ContinuationStateMaxTokens: CompactEvidenceMaxTokens,
+		ContinuationStateMaxTokens: CompactContinuationStateMaxTokens,
 		ProjectRoot:                a.ProjectRoot,
 		EstimateTokens:             a.EstimateTokensForText,
 	}

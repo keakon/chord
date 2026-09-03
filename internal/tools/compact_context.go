@@ -196,9 +196,6 @@ func validateStateFiles(paths []string, maxItems int, maxRunes int, projectRoot 
 		if p == "" {
 			return nil, fmt.Errorf("state_files contains an empty path at index %d", i)
 		}
-		if len([]rune(p)) > maxRunes {
-			return nil, fmt.Errorf("state_files path at index %d exceeds the %d-character limit", i, maxRunes)
-		}
 		if hasControlChars(p) {
 			return nil, fmt.Errorf("state_files path %q must not contain control characters or newlines", p)
 		}
@@ -235,6 +232,12 @@ func validateStateFiles(paths []string, maxItems int, maxRunes int, projectRoot 
 		// Store the normalized workspace-relative form so equivalent
 		// spellings (absolute, ~-, ./-, ../-, plain) collapse to one entry.
 		normalized := filepath.ToSlash(rel)
+		// The rune cap applies to the stored form — what the checkpoint
+		// renders and counts toward the budget — not to the raw spelling, so
+		// a deep absolute spelling whose relative form is short still passes.
+		if len([]rune(normalized)) > maxRunes {
+			return nil, fmt.Errorf("state_files path %q exceeds the %d-character limit in its workspace-relative form", normalized, maxRunes)
+		}
 		if !seen[normalized] {
 			seen[normalized] = true
 			out = append(out, normalized)
@@ -337,7 +340,7 @@ func (CompactContextTool) Parameters() map[string]any {
 				"type":        "array",
 				"maxItems":    16,
 				"items":       map[string]any{"type": "string", "minLength": 1, "maxLength": compactContextStateFileMaxRunes},
-				"description": "Paths of files carrying externalized state: workspace-relative (e.g. docs/usage.md), or absolute / ~-prefixed / ./- / ../-prefixed spellings that resolve inside the project root (stored normalized as workspace-relative); out-of-project state must be captured in completed/decisions/open_issues text instead. References only: never read, injected, or existence-verified.",
+				"description": "Paths of files carrying externalized state: workspace-relative (e.g. docs/usage.md), or absolute / ~-prefixed / ./- / ../-prefixed spellings that resolve inside the project root (stored normalized as workspace-relative); out-of-project state must be captured in completed/decisions/open_issues text instead. The per-path character limit applies to the stored workspace-relative form. References only: never read, injected, or existence-verified.",
 			},
 		},
 		"required":             []string{"active_objective", "next_step"},
