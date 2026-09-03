@@ -710,3 +710,69 @@ func promotionFileBody(sessionID string, p Promotion) []byte {
 	b.WriteString("\n")
 	return []byte(b.String())
 }
+
+// PendingPromotionSummaries returns the one-line titles of pending promotion
+// suggestions, newest first, capped at max. Extraction passes read the pending
+// queue only to avoid suggesting the same conclusion twice across sessions;
+// Chord never consumes the queue itself. A missing directory is an empty view,
+// and a file deleted between listing and reading (a human reviewing the queue)
+// is skipped rather than an error.
+func (m *Manager) PendingPromotionSummaries(max int) ([]string, error) {
+	if max <= 0 {
+		return nil, nil
+	}
+	entries, err := os.ReadDir(m.layout.PromotionsDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read pending promotions: %w", err)
+	}
+	type pendingItem struct {
+		title string
+		mod   time.Time
+		name  string
+	}
+	const promotionTitlePrefix = "# Pending promotion: "
+	var items []pendingItem
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(m.layout.PromotionsDir, e.Name()))
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return nil, fmt.Errorf("read pending promotion %s: %w", e.Name(), err)
+		}
+		first, _, _ := strings.Cut(string(data), "\n")
+		title, ok := strings.CutPrefix(first, promotionTitlePrefix)
+		if !ok {
+			continue
+		}
+		title = strings.Join(strings.Fields(title), " ")
+		if r := []rune(title); len(r) > 160 {
+			title = string(r[:160])
+		}
+		items = append(items, pendingItem{title: title, mod: info.ModTime(), name: e.Name()})
+	}
+	slices.SortFunc(items, func(a, b pendingItem) int {
+		if cmp := b.mod.Compare(a.mod); cmp != 0 {
+			return cmp
+		}
+		return strings.Compare(a.name, b.name)
+	})
+	titles := make([]string, 0, min(len(items), max))
+	for i, it := range items {
+		if i >= max {
+			break
+		}
+		titles = append(titles, it.title)
+	}
+	return titles, nil
+}

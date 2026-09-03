@@ -80,6 +80,8 @@ Memory is one of several homes for a conclusion, and the weakest of them. Route 
 
 You never see the code, tests, or documentation themselves, so absence from this input is not evidence that something is undocumented. When you cannot tell whether the repository already expresses a conclusion, drop it. If its main body is already covered but one part is genuinely non-obvious, keep only that part; if that leaves nothing worth stating, produce nothing.
 
+repository_instructions is truncated when it is large, and a marker inside the text says so. Rules near the end of a large guidance file can be missing from that cut: treat them as unseen, not absent, and never promote or record a rule you did not actually see.
+
 Suggest a promotion location only when repository_instructions already names a plausible section or document. Otherwise leave suggested_location empty. Never assume a directory layout.
 
 ## Never record
@@ -97,13 +99,15 @@ A preference requires the user to signal persistence, such as "always", "from no
 
 ## Curate what is already there
 
+The input's pending_promotions lists conclusions already suggested for project instructions or docs, newest first, still awaiting human review. A conclusion already pending there needs no second suggestion from you: never widen the queue with a duplicate of a suggestion that already exists.
+
 active_memory is the current index. You are responsible for its quality, not only for adding to it: an earlier pass may have used a weaker model and left entries that never deserved a slot.
 
 - An equivalent conclusion is already active -> no candidate. Do not restate it in other words.
 - A conclusion corrects or materially refines an active entry -> one candidate carrying that record ID in supersedes. Do not supersede merely to reword.
 - Several active entries on one subsystem that a single sharper statement would cover -> one candidate that supersedes them together, rather than another entry beside them.
 - An active entry that should never have been recorded, is no longer true, or is already covered by repository instructions -> list it in retire with a one-line reason. Retire is removal with no replacement; use supersedes when you do have a replacement.
-- Never retire an entry whose confidence is "user_stated". If such an entry looks stale or belongs in project instructions, emit a promotion instead; the entry stays in memory until a human accepts the suggestion.
+- Never retire an entry whose confidence is "user_stated". If such an entry looks stale or belongs in project instructions, emit a promotion instead — except when the visible repository_instructions already state it in full: then the memory entry is a duplicate for a human to drop, and another promotion would only restate guidance already in force. The entry stays in memory until a human accepts the suggestion.
 - Removals are rationed per run: retire requests and promotions carrying source_id share the same small allowance, so remove only what you would defend removing.
 - When active_memory has reached active_memory_limit, a new candidate must earn its slot: supersede or retire at least as many entries as you add, so the index does not outgrow its budget.
 
@@ -136,10 +140,14 @@ const memoryReviewTask = "review_active_memory"
 type memoryExtractionInput struct {
 	// Task is empty for ordinary session extraction and memoryReviewTask for a
 	// whole-index audit.
-	Task                   string                         `json:"task,omitempty"`
-	RepositoryInstructions string                         `json:"repository_instructions,omitempty"`
-	ActiveMemory           []memoryExtractionActiveRecord `json:"active_memory,omitempty"`
-	ActiveMemoryOmitted    int                            `json:"active_memory_omitted,omitempty"`
+	Task                   string `json:"task,omitempty"`
+	RepositoryInstructions string `json:"repository_instructions,omitempty"`
+	// PendingPromotions lists one-line titles of human-pending promotion
+	// suggestions, newest first, so the model does not suggest the same
+	// conclusion twice across sessions.
+	PendingPromotions   []string                       `json:"pending_promotions,omitempty"`
+	ActiveMemory        []memoryExtractionActiveRecord `json:"active_memory,omitempty"`
+	ActiveMemoryOmitted int                            `json:"active_memory_omitted,omitempty"`
 	// ActiveMemoryLimit is the soft cap on active index entries, derived from the
 	// reminder budget. It is what turns "consolidate instead of appending" from
 	// advice into a condition the model can actually evaluate.
@@ -164,9 +172,10 @@ type memoryExtractionTranscript struct {
 
 // buildMemoryExtractionPrompt renders the extraction input: bounded repository
 // guidance, the current active memory view, and the sanitized transcript.
-func buildMemoryExtractionPrompt(projected []sessionview.Projected, agentsMD string, active *memory.ActiveSnapshot) string {
+func buildMemoryExtractionPrompt(projected []sessionview.Projected, agentsMD string, active *memory.ActiveSnapshot, pendingPromotions []string) string {
 	input := memoryExtractionInput{
 		RepositoryInstructions: strings.TrimSpace(agentsMD),
+		PendingPromotions:      pendingPromotions,
 		ActiveMemoryLimit:      memory.ActiveIndexSoftLimit,
 	}
 	input.ActiveMemory, input.ActiveMemoryOmitted = activeMemoryForExtraction(active)
@@ -183,10 +192,11 @@ func buildMemoryExtractionPrompt(projected []sessionview.Projected, agentsMD str
 // active memory view and repository guidance, with no transcript. The task field
 // tells the model it is curating an existing collection rather than mining a
 // session, so it consolidates and removes instead of inventing conclusions.
-func buildMemoryIndexReviewPrompt(agentsMD string, active *memory.ActiveSnapshot) string {
+func buildMemoryIndexReviewPrompt(agentsMD string, active *memory.ActiveSnapshot, pendingPromotions []string) string {
 	input := memoryExtractionInput{
 		Task:                   memoryReviewTask,
 		RepositoryInstructions: strings.TrimSpace(agentsMD),
+		PendingPromotions:      pendingPromotions,
 		ActiveMemoryLimit:      memory.ActiveIndexSoftLimit,
 	}
 	input.ActiveMemory, input.ActiveMemoryOmitted = activeMemoryForExtraction(active)

@@ -23,9 +23,15 @@ import (
 // model. It is intentionally conservative relative to the model input budget so
 // extraction never competes for a huge input slice.
 const (
-	memoryExtractionTokens        = 24000
-	memoryExtractionItemBytes     = 32 * 1024
-	memoryExtractionAgentsBytes   = 32 * 1024
+	memoryExtractionTokens    = 24000
+	memoryExtractionItemBytes = 32 * 1024
+	// memoryExtractionAgentsBytes bounds repository guidance in the extraction
+	// input; the last memoryExtractionAgentsTail bytes of it stay reserved for
+	// the end of the file, where guidance concentrates commit/review
+	// discipline. Oversized guidance keeps both ends and marks the cut.
+	memoryExtractionAgentsBytes   = 48 * 1024
+	memoryExtractionAgentsTail    = 8 * 1024
+	memoryPendingPromotionsView   = 12
 	memoryExtractionActiveBytes   = 64 * 1024
 	memoryExtractionActiveRecords = 128
 	memoryJobRetainBackoff        = 2 * time.Second
@@ -521,7 +527,7 @@ func (a *MainAgent) runMemoryExtraction(ctx context.Context, sessionDir string) 
 		log.Warnf("memory: active snapshot warnings=%v", warnings)
 	}
 	agentsMD := a.boundedAgentsMDSnapshot()
-	prompt := buildMemoryExtractionPrompt(kept, agentsMD, active)
+	prompt := buildMemoryExtractionPrompt(kept, agentsMD, active, a.pendingPromotionView())
 	out, err := a.callMemoryExtraction(ctx, prompt, memory.MaxRetirePerSessionRun)
 	if err != nil {
 		return err
@@ -539,18 +545,61 @@ func (a *MainAgent) runMemoryExtraction(ctx context.Context, sessionDir string) 
 	return err
 }
 
-// boundedAgentsMDSnapshot returns the cached AGENTS.md snapshot truncated to
-// the extraction budget without splitting a UTF-8 rune at the cut point.
+// agentsMDTruncationMarker marks the cut inside a truncated repository
+// guidance snapshot, so the extraction model knows rules near the end of the
+// file may be missing from the cut rather than absent from the repository.
+const agentsMDTruncationMarker = "\n\n[... repository instructions truncated in the middle to fit the extraction budget; rules near the end may be missing ...]\n\n"
+
+// boundedAgentsMDSnapshot returns the cached AGENTS.md snapshot bounded to the
+// extraction budget. Oversized guidance keeps its head and its tail: guidance
+// files concentrate commit/review/push discipline near their end, and a blind
+// head-only cut hides exactly the rules the model needs when judging whether a
+// conclusion is already expressed.
 func (a *MainAgent) boundedAgentsMDSnapshot() string {
-	agentsMD := a.cachedAgentsMDSnapshot()
-	if len(agentsMD) <= memoryExtractionAgentsBytes {
-		return agentsMD
+	return boundedAgentsSnapshot(a.cachedAgentsMDSnapshot(), memoryExtractionAgentsBytes, memoryExtractionAgentsTail)
+}
+
+// boundedAgentsSnapshot keeps the first budget-tailReserve bytes and the last
+// tailReserve bytes of md, joined by the truncation marker, without splitting a
+// UTF-8 rune at either cut. When the budget cannot hold a separate tail
+// reserve, it degrades to a rune-safe head-only cut.
+func boundedAgentsSnapshot(md string, budget, tailReserve int) string {
+	if len(md) <= budget {
+		return md
 	}
-	agentsMD = agentsMD[:memoryExtractionAgentsBytes]
-	for len(agentsMD) > 0 && !utf8.ValidString(agentsMD) {
-		agentsMD = agentsMD[:len(agentsMD)-1]
+	if tailReserve <= 0 || tailReserve >= budget {
+		md = md[:budget]
+		for len(md) > 0 && !utf8.ValidString(md) {
+			md = md[:len(md)-1]
+		}
+		return md
 	}
-	return agentsMD
+	head := md[:budget-tailReserve]
+	for len(head) > 0 && !utf8.ValidString(head) {
+		head = head[:len(head)-1]
+	}
+	tailStart := len(md) - tailReserve
+	for tailStart < len(md) {
+		r, size := utf8.DecodeRuneInString(md[tailStart:])
+		if r != utf8.RuneError || size > 1 {
+			break
+		}
+		tailStart++
+	}
+	return head + agentsMDTruncationMarker + md[tailStart:]
+}
+
+// pendingPromotionView returns the titles of pending human-review suggestions
+// for the extraction prompt, newest first. A read failure degrades to an empty
+// view: the pass still runs, it just cannot avoid re-suggesting a conclusion
+// that is already pending for a human.
+func (a *MainAgent) pendingPromotionView() []string {
+	pending, err := a.memoryMgr.PendingPromotionSummaries(memoryPendingPromotionsView)
+	if err != nil {
+		log.Warnf("memory: pending promotion view unavailable: %v", err)
+		return nil
+	}
+	return pending
 }
 
 // maybeScheduleMemoryIndexReview queues an index audit once the active index
@@ -601,7 +650,7 @@ func (a *MainAgent) runMemoryIndexReview(ctx context.Context) error {
 		return nil
 	}
 	agentsMD := a.boundedAgentsMDSnapshot()
-	prompt := buildMemoryIndexReviewPrompt(agentsMD, active)
+	prompt := buildMemoryIndexReviewPrompt(agentsMD, active, a.pendingPromotionView())
 	out, err := a.callMemoryExtraction(ctx, prompt, memory.MaxRetirePerReviewRun)
 	if err != nil {
 		return err

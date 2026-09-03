@@ -1484,6 +1484,59 @@ func TestCommitPromotionWritesSuggestionAndUnindexes(t *testing.T) {
 	}
 }
 
+// The pending queue is human-reviewed; extraction reads it only to avoid
+// suggesting the same conclusion twice across sessions. Titles come back newest
+// first, malformed files are skipped, and a missing directory is an empty view.
+func TestPendingPromotionSummariesNewestFirst(t *testing.T) {
+	t.Setenv("CHORD_STATE_DIR", filepath.Join(t.TempDir(), "state"))
+	root := t.TempDir()
+	m, err := NewManager(root)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	if pending, err := m.PendingPromotionSummaries(10); err != nil || len(pending) != 0 {
+		t.Fatalf("empty promotions dir = %v, %v", pending, err)
+	}
+	dir := filepath.Join(root, ".chord/memory/promotions")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir promotions: %v", err)
+	}
+	write := func(name, title string, mod time.Time) {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("# Pending promotion: "+title+"\n\ndraft body\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+		if err := os.Chtimes(path, mod, mod); err != nil {
+			t.Fatalf("chtimes %s: %v", name, err)
+		}
+	}
+	older := time.Now().Add(-2 * time.Hour)
+	newer := time.Now().Add(-time.Hour)
+	write("older--1111111111111111.md", "Older suggestion", older)
+	write("newer--2222222222222222.md", "Newer suggestion", newer)
+	bad := filepath.Join(dir, "bad--3333333333333333.md")
+	if err := os.WriteFile(bad, []byte("# Not a promotion: ignored\n"), 0o644); err != nil {
+		t.Fatalf("write bad: %v", err)
+	}
+	if err := os.Chtimes(bad, newer, newer); err != nil {
+		t.Fatalf("chtimes bad: %v", err)
+	}
+	pending, err := m.PendingPromotionSummaries(10)
+	if err != nil {
+		t.Fatalf("PendingPromotionSummaries: %v", err)
+	}
+	if len(pending) != 2 || pending[0] != "Newer suggestion" || pending[1] != "Older suggestion" {
+		t.Fatalf("pending = %+v, want newest first with the malformed file skipped", pending)
+	}
+	if capped, err := m.PendingPromotionSummaries(1); err != nil || len(capped) != 1 || capped[0] != "Newer suggestion" {
+		t.Fatalf("capped = %v, %v", capped, err)
+	}
+	if none, err := m.PendingPromotionSummaries(0); err != nil || len(none) != 0 {
+		t.Fatalf("zero cap = %v, %v", none, err)
+	}
+}
+
 // A promotion never unindexes a user-stated record on its own: until a human
 // accepts the suggestion, the indexed entry is what every future session sees.
 // The suggestion file itself is still written for review.
