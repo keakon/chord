@@ -18,7 +18,6 @@ func (b *Block) renderUserLocalShell(width int, spinnerFrame string) []string {
 	// outside the card width); otherwise a full-width card overflows the terminal.
 	boxWidth := max((width-railWidthToReserve(style))-style.GetHorizontalMargins(), 10)
 	innerWidth := max(boxWidth-style.GetHorizontalPadding()-style.GetHorizontalBorderSize(), 10)
-	innerWidth = clampCardInnerWidth(innerWidth, style, maxTextWidth)
 	contentWidth := min(innerWidth-4, maxTextWidth)
 
 	argsJSON, _ := json.Marshal(map[string]string{"command": b.UserLocalShellCmd})
@@ -127,7 +126,6 @@ func (b *Block) renderUserPlain(width int) []string {
 	// outside the card width); otherwise a full-width card overflows the terminal.
 	boxWidth := max((width-railWidthToReserve(style))-style.GetHorizontalMargins(), 10)
 	innerWidth := max(boxWidth-style.GetHorizontalPadding()-style.GetHorizontalBorderSize(), 10)
-	innerWidth = clampCardInnerWidth(innerWidth, style, maxProseWidth)
 	contentWidth := min(innerWidth-2, maxProseWidth)
 
 	if strings.TrimSpace(b.Content) == "" && b.ImageCount == 0 && len(b.FileRefs) == 0 && len(b.PDFNames) == 0 {

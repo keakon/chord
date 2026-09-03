@@ -36,21 +36,6 @@ const (
 	preformattedTabWidth = 4
 )
 
-// clampCardInnerWidth caps a card's inner width so the card surface ends near
-// the wrapped-text cap instead of stretching a mostly-empty background across
-// very wide viewports. textCap is the renderer's content-width cap (usually
-// maxTextWidth; assistant passes its own so markdown tables can stretch). The
-// cap is expressed as a shared box width (horizontal padding + inner width)
-// so cards with different padding keep their right edges aligned: prose cards
-// use 2 padding columns + 2 content-indent columns around textCap, hence
-// textCap + 4.
-func clampCardInnerWidth(innerWidth int, style lipgloss.Style, textCap int) int {
-	if boxCap := textCap + 4 - style.GetHorizontalPadding(); innerWidth > boxCap {
-		return boxCap
-	}
-	return innerWidth
-}
-
 // railWidthToReserve returns how many columns to subtract from the available
 // width so the conversation rail (a foreground-only "│" rendered OUTSIDE the
 // card surface by wrapLineWithBackgroundAndRail) never pushes a card past the
@@ -135,6 +120,22 @@ func padLineToDisplayWidth(line string, width int) string {
 		return line[:len(line)-3] + padding + "\x1b[m"
 	}
 	return line + padding
+}
+
+// padViewportLineToDisplayWidth keeps viewport padding outside a completed
+// ANSI style. Card renderers close their background before the outer margin;
+// inserting the viewport's spare columns before that reset would extend a
+// capped card's background to the viewport edge.
+func padViewportLineToDisplayWidth(line string, width int) string {
+	w := tuiStringWidth(line)
+	if w >= width {
+		return line
+	}
+	padding := strings.Repeat(" ", width-w)
+	if strings.HasSuffix(line, "\x1b[0m") || strings.HasSuffix(line, "\x1b[m") {
+		return line + padding
+	}
+	return padLineToDisplayWidth(line, width)
 }
 
 // ensureStyledLineReset appends a final SGR reset when a styled line still ends

@@ -61,24 +61,23 @@ type toolCardMetrics struct {
 }
 
 func newToolCardMetrics(width int) toolCardMetrics {
-	// Unified with the prose/thinking card cap (maxProseWidth) so tool-call
-	// cards share the same right edge as thinking/assistant cards on wide
-	// terminals instead of stopping ~40 columns short and reading as truncated.
-	// apply_patch/edit/write content already clips to the card width (see
-	// renderHighlightedSnippetLine / renderNumberedToolPreview), so widening
-	// the cap only moves the clip point, it does not stretch wrapped prose.
+	// The card surface spans the full viewport (after the rail reservation);
+	// contentCap only caps the wrapped content column so text does not stretch
+	// across very wide terminals. apply_patch/edit/write content already clips
+	// to the content width (see renderHighlightedSnippetLine /
+	// renderNumberedToolPreview), so the cap never widens the surface.
 	return newToolCardMetricsWithContentCap(width, maxProseWidth)
 }
 
 func newWideHeaderToolCardMetrics(width int) toolCardMetrics {
-	return newToolCardMetricsForHeaderWidth(width, maxTextWidth, true)
+	return newToolCardMetricsForHeaderWidth(width, maxProseWidth)
 }
 
 func newToolCardMetricsWithContentCap(width, contentCap int) toolCardMetrics {
-	return newToolCardMetricsForHeaderWidth(width, contentCap, false)
+	return newToolCardMetricsForHeaderWidth(width, contentCap)
 }
 
-func newToolCardMetricsForHeaderWidth(width, contentCap int, wideHeader bool) toolCardMetrics {
+func newToolCardMetricsForHeaderWidth(width, contentCap int) toolCardMetrics {
 	blockStyle := ToolBlockStyle
 	// Reserve a column for the conversation rail (a foreground-only "│" prepended
 	// outside the card width by wrapLineWithBackgroundAndRail). Without this, a
@@ -86,11 +85,6 @@ func newToolCardMetricsForHeaderWidth(width, contentCap int, wideHeader bool) to
 	// terminal) renders one column past the terminal width and gets hard-wrapped.
 	boxWidth := max((width-railWidthToReserve(blockStyle))-blockStyle.GetHorizontalMargins(), 10)
 	cardWidth := max(boxWidth-blockStyle.GetHorizontalPadding()-blockStyle.GetHorizontalBorderSize(), 10)
-	if !wideHeader {
-		// Keep the card surface aligned with the prose cards' right edge on very
-		// wide viewports instead of stretching empty background past the text cap.
-		cardWidth = clampCardInnerWidth(cardWidth, blockStyle, contentCap)
-	}
 	contentWidth := max(min(cardWidth-4, contentCap), 10)
 	return toolCardMetrics{
 		blockStyle:   blockStyle,

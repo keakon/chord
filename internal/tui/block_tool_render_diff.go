@@ -123,6 +123,13 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 		filePath = b.displayToolPath(filePath)
 	}
 	prefix := b.renderToolPrefix(spinnerFrame)
+	// The card surface spans the full viewport, but wrapped plain-text error /
+	// diagnostic sections keep a readable column: they wrap at the prose cap
+	// instead of becoming ultra-wide lines (see
+	// appendApplyPatchErrorTextLines / renderLSPDiagnosticsLines). Line-oriented
+	// content (diffs, previews, target summaries) deliberately uses the full
+	// cardWidth-4 instead, clipping per line so more file content shows.
+	textWrap := max(min(cardWidth-4, maxProseWidth), 10)
 	hasDisclosure := !b.toolResultIsCancelled() && (strings.TrimSpace(displayDiff) != "" || hasOperationSummaries || len(applyPatchTargets) > 0)
 	if b.ResultDone && hasDisclosure {
 		prefix = renderToolDisclosurePrefix(prefix, !b.Collapsed)
@@ -161,13 +168,13 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	if b.Collapsed {
 		if b.toolResultIsError() && strings.TrimSpace(b.ResultContent) != "" {
 			result = append(result, ErrorStyle.Render("  ↳ Error:"))
-			for _, line := range wrapText(sanitizeToolDisplayText(toolDisplayResultContent(b)), cardWidth-8) {
+			for _, line := range wrapText(sanitizeToolDisplayText(toolDisplayResultContent(b)), max(textWrap-4, 10)) {
 				result = append(result, ErrorStyle.Render("    "+line))
 			}
 		} else if b.toolResultIsCancelled() && strings.TrimSpace(b.ResultContent) != "" {
 			result = append(result, DimStyle.Render("  ↳ Cancelled"))
 			if detail := toolCancelledDetailText(b.ResultContent); detail != "" {
-				for _, line := range wrapText(sanitizeToolDisplayText(detail), cardWidth-8) {
+				for _, line := range wrapText(sanitizeToolDisplayText(detail), max(textWrap-4, 10)) {
 					result = append(result, DimStyle.Render("    "+line))
 				}
 			}
@@ -345,7 +352,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	}
 	if (b.ToolName == tools.NameEdit || b.ToolName == tools.NameApplyPatch) && strings.TrimSpace(b.ResultContent) != "" && !b.toolResultIsError() && !b.toolResultIsCancelled() && !toolShouldHideSuccessfulFileOpResult(b) {
 		result = append(result, ToolResultExpandedStyle.Render("  ↳ Diagnostics:"))
-		result = append(result, renderLSPDiagnosticsLines(editSuccessDiagnosticsContent(b.ResultContent), "    ", cardWidth-4)...)
+		result = append(result, renderLSPDiagnosticsLines(editSuccessDiagnosticsContent(b.ResultContent), "    ", textWrap)...)
 	}
 	if b.toolResultIsError() && b.ResultContent != "" {
 		switch b.ToolName {
@@ -355,14 +362,14 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 				result = appendApplyPatchPreview(result, b, filePath, cardWidth-4)
 				if sections.applied != "" && !hasOperationSummaries {
 					result = append(result, ToolResultExpandedStyle.Render("  ↳ Applied changes:"))
-					result = appendApplyPatchErrorTextLines(result, sections.applied, cardWidth-4)
+					result = appendApplyPatchErrorTextLines(result, sections.applied, textWrap)
 				}
 			}
 			result = append(result, ErrorStyle.Render("  ↳ Error:"))
-			result = appendApplyPatchErrorTextLines(result, sections.failure, cardWidth-4)
+			result = appendApplyPatchErrorTextLines(result, sections.failure, textWrap)
 			if sections.diagnostics != "" {
 				result = append(result, ToolResultExpandedStyle.Render("  ↳ Diagnostics:"))
-				result = append(result, renderLSPDiagnosticsLines(sections.diagnostics, "    ", cardWidth-4)...)
+				result = append(result, renderLSPDiagnosticsLines(sections.diagnostics, "    ", textWrap)...)
 			}
 		case tools.NameEdit:
 			if strings.TrimSpace(displayDiff) == "" {
@@ -373,12 +380,12 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 				}
 			}
 			result = append(result, ErrorStyle.Render("  ↳ Error:"))
-			result = append(result, renderLSPDiagnosticsLines(toolErrorDisplayContent(b.ResultContent), "    ", cardWidth-4)...)
+			result = append(result, renderLSPDiagnosticsLines(toolErrorDisplayContent(b.ResultContent), "    ", textWrap)...)
 		}
 	} else if b.toolResultIsCancelled() && b.ResultContent != "" {
 		result = append(result, DimStyle.Render("  ↳ Cancelled"))
 		if detail := toolCancelledDetailText(b.ResultContent); detail != "" {
-			result = append(result, renderLSPDiagnosticsLines(detail, "    ", cardWidth-4)...)
+			result = append(result, renderLSPDiagnosticsLines(detail, "    ", textWrap)...)
 		}
 	}
 	result = appendToolElapsedToHeader(result, b, cardWidth)

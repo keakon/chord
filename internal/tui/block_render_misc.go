@@ -7,9 +7,8 @@ func (b *Block) renderError(width int) []string {
 	// v2: Width() sets border-box (excl margin).
 	boxWidth := max(width-style.GetHorizontalMargins(), 10)
 	innerWidth := max(boxWidth-style.GetHorizontalPadding()-style.GetHorizontalBorderSize(), 10)
-	innerWidth = clampCardInnerWidth(innerWidth, style, maxProseWidth)
 	lines := []string{ErrorStyle.Render(blockLabelWithID("ERROR", b.displayLabelID())), ""}
-	wrapped := wrapText(sanitizeDisplayText(b.Content), innerWidth)
+	wrapped := wrapText(sanitizeDisplayText(b.Content), min(innerWidth, maxProseWidth))
 	for i, line := range wrapped {
 		if i == 0 {
 			lines = append(lines, ErrorStyle.Render("✗ "+line))
@@ -40,7 +39,6 @@ func (b *Block) renderStatus(width int) []string {
 	// outside the card width); otherwise a full-width card overflows the terminal.
 	boxWidth := max((width-railWidthToReserve(style))-style.GetHorizontalMargins(), 10)
 	innerWidth := max(boxWidth-style.GetHorizontalPadding()-style.GetHorizontalBorderSize(), 10)
-	innerWidth = clampCardInnerWidth(innerWidth, style, maxProseWidth)
 	contentWidth := min(innerWidth-2, maxProseWidth)
 
 	title := sanitizeDisplayText(b.StatusTitle)
@@ -93,7 +91,6 @@ func (b *Block) renderCompactionSummary(width int) []string {
 	// outside the card width); otherwise a full-width card overflows the terminal.
 	boxWidth := max((width-railWidthToReserve(style))-style.GetHorizontalMargins(), 10)
 	innerWidth := max(boxWidth-style.GetHorizontalPadding()-style.GetHorizontalBorderSize(), 10)
-	innerWidth = clampCardInnerWidth(innerWidth, style, maxProseWidth)
 	contentWidth := min(innerWidth, maxProseWidth)
 	label := ThinkingLabelStyle.Render(blockLabelWithID("CONTEXT SUMMARY", b.displayLabelID()))
 	// Compaction summaries are always fully expanded (see Block.Toggle); the

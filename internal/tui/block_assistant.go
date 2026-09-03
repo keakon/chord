@@ -766,15 +766,6 @@ func (b *Block) renderAssistant(width int) []string {
 	bodyContent := stripAssistantSummary(rawContent, summary)
 	hasTable := b.streamingHasMarkdownTable(bodyContent, rawContent)
 	contentWidth := markdownRenderWidthWithTable(hasTable, innerWidth)
-	// End the card surface at the wrapped-text cap instead of stretching a
-	// mostly-empty background across very wide viewports. Tables widen the
-	// cap so wide-table content keeps its surface.
-	textCap := maxProseWidth
-	if hasTable {
-		textCap = maxMarkdownTableWidth
-	}
-	innerWidth = clampCardInnerWidth(innerWidth, style, textCap)
-
 	var out []string
 
 	// Thinking block (if any).
@@ -1317,7 +1308,6 @@ func (b *Block) renderThinkingParts(innerWidth int) []string {
 	if len(b.ThinkingParts) == 0 {
 		return nil
 	}
-	innerWidth = clampCardInnerWidth(innerWidth, ThinkingCardStyle, maxProseWidth)
 	contentWidth := thinkingMarkdownContentWidth(innerWidth)
 	// Build a single slice: header, gap, then for each part both title and content lines.
 	// Previously rawLines (titles) and tempLines (content) were merged by rawLines = tempLines,
@@ -1357,7 +1347,6 @@ func (b *Block) renderThinking(width int) []string {
 	// outside the card width); otherwise a full-width card overflows the terminal.
 	boxWidth := max((width-railWidthToReserve(style))-style.GetHorizontalMargins(), 10)
 	innerWidth := max(boxWidth-style.GetHorizontalPadding()-style.GetHorizontalBorderSize(), 10)
-	innerWidth = clampCardInnerWidth(innerWidth, style, maxProseWidth)
 	contentWidth := thinkingMarkdownContentWidth(innerWidth)
 	content := removeTrailingCursorGlyph(b.Content)
 	// preprocessThinkingMarkdown runs inside renderThinkingMarkdownPart; do not

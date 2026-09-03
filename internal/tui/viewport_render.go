@@ -110,7 +110,7 @@ func (v *Viewport) Render(spinnerFrame string, sel *SelectionRange, searchBlockI
 			for i, l := range blockLines {
 				line := expandTabsForDisplayANSI(l, preformattedTabWidth)
 				line = truncateLineToDisplayWidth(line, v.width)
-				line = padLineToDisplayWidth(line, v.width)
+				line = padViewportLineToDisplayWidth(line, v.width)
 				finalLines[i] = line
 			}
 			if lo == 0 && hi == blockCount {

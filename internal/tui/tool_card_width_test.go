@@ -8,17 +8,27 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-// TestToolCardWidthUnifiedWithProse verifies the background-width fix: a plain
-// tool-call card now caps at the same inner width as a prose/done card, so tool
-// cards no longer stop ~40 columns short of thinking/assistant cards on wide
-// terminals (the original "background looks wrong / truncated" report).
-func TestToolCardWidthUnifiedWithProse(t *testing.T) {
+// TestToolCardSurfaceSpansViewport verifies the full-width card behavior: the
+// card surface (background/border) spans the whole viewport after the rail
+// reservation, matching every other card kind, while only the wrapped content
+// column is capped (so long lines do not stretch across ultra-wide terminals).
+func TestToolCardSurfaceSpansViewport(t *testing.T) {
 	ApplyTheme(DefaultTheme())
-	for _, w := range []int{140, 200, 240, 290} {
+	for _, w := range []int{80, 120, 140, 200, 240, 290} {
+		style := ToolBlockStyle
+		wantSurface := max((w-railWidthToReserve(style))-style.GetHorizontalMargins()-style.GetHorizontalPadding()-style.GetHorizontalBorderSize(), 10)
 		toolCard := newToolCardMetrics(w)
 		doneCard := newDoneToolCardMetrics(w)
-		if toolCard.cardWidth != doneCard.cardWidth {
-			t.Errorf("tool card width = %d, done card width = %d at viewport %d; tool cards must share the prose cap", toolCard.cardWidth, doneCard.cardWidth, w)
+		wideHeaderCard := newWideHeaderToolCardMetrics(w)
+		for name, c := range map[string]toolCardMetrics{
+			"tool": toolCard, "done": doneCard, "wide-header": wideHeaderCard,
+		} {
+			if c.cardWidth != wantSurface {
+				t.Errorf("%s card width = %d, want full surface %d at viewport %d", name, c.cardWidth, wantSurface, w)
+			}
+			if wantContent := max(min(wantSurface-4, maxProseWidth), 10); c.contentWidth != wantContent {
+				t.Errorf("%s content width = %d, want capped content %d at viewport %d", name, c.contentWidth, wantContent, w)
+			}
 		}
 	}
 }

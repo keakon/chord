@@ -14,7 +14,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/keakon/chord/internal/message"
-	"github.com/keakon/chord/internal/tools"
 )
 
 // TestRealSessionToolCardWidthVsThinking replays a real chord session (set
@@ -22,7 +21,7 @@ import (
 // through the production messagesToBlocks path, then
 // renders them at wide terminal widths to verify two things introduced by the
 // tool-card width unification fix:
-//  1. apply_patch / edit / write tool cards now reach the SAME right edge as
+//  1. Tool cards now reach the SAME right edge as
 //     thinking cards (they previously stopped ~40 cols short).
 //  2. No rendered line of those tool cards overflows the terminal width
 //     (content is truncated, not wrapped).
@@ -54,8 +53,8 @@ func TestRealSessionToolCardWidthVsThinking(t *testing.T) {
 
 	widths := []int{160, 200, 240, 290}
 
-	// Collect, per width, the thinking card surface width and the apply_patch/
-	// edit/write tool card surface widths, plus any overflow.
+	// Collect, per width, the thinking card surface width and tool-card surface
+	// widths, plus any overflow.
 	var thinkingWidths []int
 	for range widths {
 		thinkingWidths = append(thinkingWidths, -1)
@@ -92,7 +91,7 @@ func TestRealSessionToolCardWidthVsThinking(t *testing.T) {
 				if blockMax > thinkingMax {
 					thinkingMax = blockMax
 				}
-			case b.Type == BlockToolCall && isFileTool(b.ToolName):
+			case b.Type == BlockToolCall:
 				toolSamples = append(toolSamples, toolSample{name: b.ToolName, width: w, maxW: blockMax})
 			}
 		}
@@ -129,14 +128,6 @@ func TestRealSessionToolCardWidthVsThinking(t *testing.T) {
 	if len(toolSamples) == 0 {
 		t.Logf("note: no apply_patch/edit/write tool cards found in this session slice")
 	}
-}
-
-func isFileTool(name string) bool {
-	switch tools.NormalizeName(name) {
-	case tools.NameApplyPatch, tools.NameEdit, tools.NameWrite:
-		return true
-	}
-	return false
 }
 
 func blockKind(b *Block) string {
