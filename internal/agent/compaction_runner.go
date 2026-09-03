@@ -251,7 +251,7 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 		return nil, ctx.Err()
 	}
 
-	index, err := nextCompactionIndex(a.sessionDir)
+	index, err := a.nextCompactionIndexForAgent()
 	if err != nil {
 		return nil, fmt.Errorf("determine compaction index: %w", err)
 	}

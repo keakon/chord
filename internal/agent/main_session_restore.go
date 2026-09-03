@@ -770,6 +770,12 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	a.stateMu.Lock()
 	a.sessionDir = loaded.SessionPath
 	a.stateMu.Unlock()
+	// The restored session dir has its own on-disk history maximum: reseed
+	// the index allocator lazily against it on the next allocation.
+	a.compactionIndexAlloc.mu.Lock()
+	a.compactionIndexAlloc.seeded = false
+	a.compactionIndexAlloc.next = 0
+	a.compactionIndexAlloc.mu.Unlock()
 	cleanupStalePendingCompactions(a.sessionDir, 5*time.Minute)
 	a.recovery = recovery.NewRecoveryManager(loaded.SessionPath)
 	a.usageLedger = analytics.NewUsageLedger(loaded.SessionPath, a.projectRoot)

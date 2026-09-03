@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/keakon/golog/log"
@@ -229,6 +230,16 @@ func listHistoryReferences(sessionDir string) ([]string, error) {
 	return refs, nil
 }
 
+// compactionIndexAllocator serializes history index allocation across
+// compaction worker goroutines.
+type compactionIndexAllocator struct {
+	mu     sync.Mutex
+	next   int
+	seeded bool
+}
+
+// nextCompactionIndex scans the session dir for the highest history /
+// pre-compress index on disk.
 func nextCompactionIndex(sessionDir string) (int, error) {
 	entries, err := os.ReadDir(sessionDir)
 	if err != nil {
@@ -252,6 +263,31 @@ func nextCompactionIndex(sessionDir string) (int, error) {
 		}
 	}
 	return maxIndex + 1, nil
+}
+
+// nextCompactionIndexForAgent allocates the next history index for this
+// agent's session dir through the in-memory monotonic allocator seeded from
+// the on-disk maximum. A purely disk-derived index is racy against the
+// deferred orphan cleanup of a discarded worker: a usage-driven worker whose
+// cancellation landed mid-export still finishes writing history-N.md and
+// removes it asynchronously, while the overriding model-driven worker that
+// scanned before the write became visible allocates the same N — the late
+// cleanup then deletes the new worker's archive. Once an index is handed out
+// it is never reused, so any cleanup can only ever remove files written for
+// that index by this process.
+func (a *MainAgent) nextCompactionIndexForAgent() (int, error) {
+	a.compactionIndexAlloc.mu.Lock()
+	defer a.compactionIndexAlloc.mu.Unlock()
+	if !a.compactionIndexAlloc.seeded {
+		next, err := nextCompactionIndex(a.sessionDir)
+		if err != nil {
+			return 0, err
+		}
+		a.compactionIndexAlloc.next = next
+		a.compactionIndexAlloc.seeded = true
+	}
+	a.compactionIndexAlloc.next++
+	return a.compactionIndexAlloc.next - 1, nil
 }
 
 // captureOriginalFirstUserHint returns the best-known original first user

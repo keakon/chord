@@ -690,6 +690,12 @@ type MainAgent struct {
 	// reminder for requests racing that window. Event-loop owned: queued,
 	// advanced, and reset only on the event loop, so it needs no lock.
 	compactionWindowGeneration uint64
+	// compactionIndexAlloc hands out history file indexes without re-scanning
+	// the disk, so a discarded worker's deferred orphan cleanup can never race
+	// a fresh worker into reusing the same index (see
+	// nextCompactionIndexForAgent). Guarded by its own mutex: compaction
+	// workers allocate from their own goroutines. Reseeds on session switch.
+	compactionIndexAlloc compactionIndexAllocator
 	// appliedCompactionModelRef records the model reference whose per-model
 	// compaction threshold is currently applied to ctxmgr. A change re-applies
 	// the threshold; not persisted, so after a restore the threshold is

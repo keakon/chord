@@ -290,6 +290,12 @@ func (a *MainAgent) installSessionTarget(sessionDir string) {
 	// A session switch starts a fresh compaction window for the
 	// reminder-class overlay claims too.
 	a.compactionWindowGeneration = 0
+	// The new session dir has its own on-disk history maximum: reseed the
+	// index allocator lazily against it on the next allocation.
+	a.compactionIndexAlloc.mu.Lock()
+	a.compactionIndexAlloc.seeded = false
+	a.compactionIndexAlloc.next = 0
+	a.compactionIndexAlloc.mu.Unlock()
 	a.clearCompactionGrace()
 	a.resetThinkingTranslationSeen()
 	a.stateMu.Lock()

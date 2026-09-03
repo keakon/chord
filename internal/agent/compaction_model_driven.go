@@ -629,7 +629,7 @@ func (a *MainAgent) produceModelDrivenDraftAsync(ctx context.Context, bundle mod
 		return nil, ctx.Err()
 	}
 
-	index, err := nextCompactionIndex(bundle.sessionDir)
+	index, err := a.nextCompactionIndexForAgent()
 	if err != nil {
 		return nil, fmt.Errorf("determine compaction index: %w", err)
 	}
