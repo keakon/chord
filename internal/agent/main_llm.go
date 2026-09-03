@@ -678,12 +678,14 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 	}
 	defer releaseLLM()
 	requestStarted = true
-	// Dispatch confirmation for the one-shot context-pressure overlay claims:
-	// the request has passed the hook and governor gates and is about to reach
-	// the provider, so any reminder/warning attached by buildTurnOverlayMessages
-	// counts as delivered. Requests that never reach this point (hook-blocked,
-	// governor-rejected, cancelled before dispatch) leave the claims unspent so
-	// the next request may re-claim.
+	// Dispatch confirmation for the context-pressure overlay claims: the
+	// request has passed the hook and governor gates and is about to reach the
+	// provider, so any reminder/imminent/warning attached by
+	// buildTurnOverlayMessages counts as delivered. Requests that never reach
+	// this point (hook-blocked, governor-rejected, cancelled before dispatch)
+	// leave the claims undelivered so the next request may re-attach (the
+	// sticky reminder and imminent notice re-queue every request; the
+	// per-generation warning needs the claim to stay spendable for the retry).
 	a.markOverlayClaimsDelivered()
 	// Model/cooldown wall-clock segmentation for the TIME section: the segment
 	// spans acquireLLM success through CompleteStream return (success or

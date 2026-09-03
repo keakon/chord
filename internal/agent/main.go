@@ -659,14 +659,22 @@ type MainAgent struct {
 	// (false->true) and is never reset by apply/skip/clear; it binds the
 	// usage-driven externalization warning claim (auto_compact_request_id).
 	autoCompactRequestGeneration atomic.Uint64
-	// pendingContextPressureReminder and pendingCompactionWarning are one-shot
-	// turn-tail overlays queued by queueContextPressureOverlays and consumed by
-	// buildTurnOverlayMessages; their claim's delivered flag is confirmed at
-	// dispatch, not at attach.
+	// pendingContextPressureReminder is the turn-tail context-pressure
+	// reminder overlay (context_overlays.go). It is sticky (optimization
+	// 2.9): beginMainLLMAfterPreparation re-queues it for every request while
+	// usage stays above the reminder line — the full text once per compaction
+	// window, then a one-line short text — until the model calls
+	// compact_context in the window, the usage drops back below the line, or a
+	// durable apply / session switch / model change starts a fresh window. The
+	// per-request queue + per-attach consume cycle keeps the field scoped to
+	// one request; the claim's delivered flag is confirmed at dispatch, not at
+	// attach. pendingCompactionWarning is the one-shot usage-driven
+	// externalization warning (once per auto-compact request generation).
 	pendingContextPressureReminder string
 	pendingCompactionWarning       string
-	// pendingCompactionImminent is the one-shot grace-period notice queued on
-	// the request that observed the threshold crossing (compaction_grace.go).
+	// pendingCompactionImminent is the grace-period "compaction imminent"
+	// notice. It is re-queued on every request inside the threshold grace
+	// window with the true remaining countdown (compaction_grace.go).
 	pendingCompactionImminent string
 	// overlayClaims holds the per-window context-pressure reminder claim and
 	// the per-generation externalization warning claim. Cross-goroutine: the

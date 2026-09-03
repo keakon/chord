@@ -16,14 +16,19 @@ const (
 	UsagePurposeContextProvenance   = "context_provenance"
 	UsagePurposeCompactionLifecycle = "context_compaction"
 	// UsagePurposeContextPressureReminder and UsagePurposeCompactionWarning
-	// are the one-shot context-pressure reminder and usage-driven
-	// externalization warning deliveries (zero-usage bookkeeping).
+	// record the context-pressure reminder and usage-driven externalization
+	// warning deliveries (zero-usage bookkeeping). The reminder is sticky
+	// (delivered_first / delivered_repeat per compaction window, optimization
+	// 2.9); the warning stays one-shot per auto-compact generation
+	// (plain "delivered").
 	UsagePurposeContextPressureReminder = "context_pressure_reminder"
 	UsagePurposeCompactionWarning       = "compaction_warning"
-	// UsagePurposeCompactionGrace records the threshold grace-period
-	// lifecycle (started / notice_delivered / expired / hard_ceiling /
+	// UsagePurposeCompactionGrace records the threshold grace-period lifecycle
+	// (started / delivered_first / delivered_repeat / expired / hard_ceiling /
 	// model_driven_settled) so telemetry can tell whether the grace bought a
-	// model-driven reset or only delayed the safety net.
+	// model-driven reset or only delayed the safety net. The delivery stages
+	// are sticky (optimization 2.9): the notice attaches on every deferred
+	// request while the grace is active.
 	UsagePurposeCompactionGrace = "compaction_grace"
 )
 

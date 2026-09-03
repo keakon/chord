@@ -24,15 +24,19 @@ const (
 	compactionGraceHardCeilingRatio = 0.95
 )
 
-// compactionImminentText is the one-shot notice attached to the request on
-// which the threshold crossing was observed and the grace period started.
-// The context-pressure reminder usually fired earlier in the same window (at
-// the reminder line) and its claim is consumed, so without this notice the
-// grace window would be silent and the model would not know that automatic
-// compaction is about to start. It is bare content; the turn-overlay injector
-// wraps it in a <system-reminder> block.
+// compactionImminentText renders the grace-period "compaction imminent"
+// notice for a request inside the deferral window. requests is the number of
+// main-model request batches left before automatic compaction takes over: the
+// crossing request reports the full minCompactionGracePeriodBatches window and
+// every later deferred request reports its true remaining count (optimization
+// 2.9), so the model always sees how much room is actually left. It is bare
+// content; the turn-overlay injector wraps it in a <system-reminder> block.
 func compactionImminentText(requests int) string {
-	return fmt.Sprintf("The context has crossed the automatic-compaction threshold. Automatic compaction will start after the next %d requests unless a context checkpoint is applied first.\n", requests) +
+	countdown := fmt.Sprintf("the next %d requests", requests)
+	if requests == 1 {
+		countdown = "the next request"
+	}
+	return fmt.Sprintf("The context has crossed the automatic-compaction threshold. Automatic compaction will start after %s unless a context checkpoint is applied first.\n", countdown) +
 		"If the current phase is wrapped up and its working state is externalized, call compact_context alone on this turn to checkpoint it now.\n" +
 		"Otherwise write important findings, decisions, and working state to a project file your role may write (for example a task-notes file under .chord/notes/, named with a YYYYMMDD date prefix) so they survive the compaction."
 }
@@ -64,11 +68,17 @@ func (a *MainAgent) usageDrivenCompactionGraceDefers(snapshot []message.Message)
 	}
 	if a.compactionGraceStartBatch == 0 {
 		a.compactionGraceStartBatch = current
-		a.queueCompactionImminentNotice()
+		a.queueCompactionImminentNotice(minCompactionGracePeriodBatches)
 		a.recordCompactionGraceEvent("started", current)
 		return true
 	}
+	// Grace in progress: every deferred request re-attaches the imminent
+	// notice (optimization 2.9) with the true remaining countdown, so a model
+	// that missed the crossing request — or whose copy was attached to a
+	// cancelled dispatch — still sees how much room is left.
 	if current >= a.compactionGraceStartBatch && current-a.compactionGraceStartBatch < minCompactionGracePeriodBatches {
+		remaining := minCompactionGracePeriodBatches - int(current-a.compactionGraceStartBatch)
+		a.queueCompactionImminentNotice(remaining)
 		return true
 	}
 	a.endCompactionGrace("expired", current)
@@ -133,16 +143,20 @@ func (a *MainAgent) recordCompactionGraceEvent(stage string, batch uint64) {
 	})
 }
 
-// queueCompactionImminentNotice arms the one-shot "compaction imminent"
-// overlay for the request that starts the grace period. It has its own claim
-// bound to the same (window, budget) key as the reminder so the two never
-// suppress each other.
-func (a *MainAgent) queueCompactionImminentNotice() {
+// queueCompactionImminentNotice arms the "compaction imminent" overlay for a
+// request inside the threshold grace period (optimization 2.9). The notice is
+// sticky for the whole grace: the queue never suppresses an attach, because
+// the gate only defers while the grace is active and the notice is the only
+// signal that automatic compaction is about to take over — if a request could
+// attach it, it is by definition still inside the window. remaining is the
+// number of main-model request batches left before compaction starts; the
+// crossing request reports the full window and every later deferred request
+// reports its true countdown. The claim shares the reminder's (window,
+// budget) key but only records first/repeat delivery stages for telemetry.
+func (a *MainAgent) queueCompactionImminentNotice(remaining int) {
 	windowEpoch := a.sessionEpoch
 	windowIndex := nextHistoryIndexMinusOne(a.sessionDir)
 	budgetEpoch := a.ctxMgr.TokenBudgetsEpoch()
-	if !a.tryClaimCompactionImminent(windowEpoch, windowIndex, budgetEpoch) {
-		return
-	}
-	a.pendingCompactionImminent = compactionImminentText(minCompactionGracePeriodBatches)
+	a.syncOverlayWindowClaim(&a.overlayClaims.imminent, windowEpoch, windowIndex, budgetEpoch)
+	a.pendingCompactionImminent = compactionImminentText(remaining)
 }

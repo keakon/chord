@@ -69,14 +69,18 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 		})
 	}
 
-	// Context-pressure reminder (per compaction window) and the usage-driven
-	// externalization warning (per auto-compact request generation). Both are
-	// one-shot turn-tail overlays queued by queueContextPressureOverlays; the
-	// delivered claim is confirmed at dispatch, so attaching here only marks
-	// deliveryPending — a request cancelled before dispatch leaves the claim
-	// reusable. They carry bare text and are wrapped in the same
-	// <system-reminder> runtime-message block as every other harness injection
-	// so the model can tell them apart from user-written messages.
+	// Context-pressure reminder (sticky per compaction window — full text once,
+	// then the short text — until the model calls compact_context or the
+	// window resets), the grace-period imminent notice (sticky per deferred
+	// request during the grace window) and the usage-driven externalization
+	// warning (one-shot per auto-compact request generation). They are
+	// turn-tail overlays queued by beginMainLLMAfterPreparation /
+	// usageDrivenCompactionGraceDefers and consumed here; the delivered claim
+	// is confirmed at dispatch, so attaching here only marks deliveryPending —
+	// a request cancelled before dispatch leaves the claim reusable. They
+	// carry bare text and are wrapped in the same <system-reminder> runtime
+	// message block as every other harness injection so the model can tell
+	// them apart from user-written messages.
 	if reminder := strings.TrimSpace(a.pendingContextPressureReminder); reminder != "" {
 		a.pendingContextPressureReminder = ""
 		a.noteContextPressureReminderAttached()

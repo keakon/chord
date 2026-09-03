@@ -36,18 +36,31 @@ const (
 	compactionWarningText = "The context has reached the automatic-compaction threshold and will be compacted at the next safe boundary.\nIf important findings, decisions, or working state are not yet written to files, write them now to a project file your role may write (for example a task-notes file under .chord/notes/, named with a YYYYMMDD date prefix, or a plan document under .chord/plans/) — this may be the last request on the current context.\nThe compaction does not wait for this message."
 )
 
-// reminderOverlayClaim is the per-window claim for the context-pressure
-// reminder. It binds to (compaction_window_id, budget_epoch): a durable apply
+// reminderOverlayClaim is the per-window claim shared by the context-pressure
+// reminder and the grace-period "compaction imminent" notice (optimizations
+// 2.9/2.10). It binds to (compaction_window_id, budget_epoch): a durable apply
 // (model-driven or usage-driven), a session reset/restore, or a usage-baseline
 // model/provider/budget switch changes one of the three components and starts
-// a fresh claim, so a reset that is followed by a new reminder is intended —
-// each compaction window gets at most one delivered reminder.
+// a fresh claim, so a reset that is followed by a new full reminder is
+// intended — each compaction window delivers the full reminder text at most
+// once.
+//
+// The claim never suppresses an attach by itself: the reminder overlay is
+// sticky while usage stays above the reminder line (the full text before the
+// first dispatch, the short text afterwards) and the imminent notice is
+// sticky for the whole grace period. delivered only records whether the full
+// text / first notice already dispatched, and ccCalled records that the model
+// called compact_context in this window — its attempt (whatever it settles
+// to) answered the nudge, so the reminder goes quiet until a fresh window
+// clears the mark. Cancellation never consumes a delivery: delivered is
+// confirmed only when a request carrying the overlay actually dispatches.
 type reminderOverlayClaim struct {
 	windowEpoch     uint64
 	windowIndex     int    // compaction index (history file count); 0 = no history yet
 	budgetEpoch     uint64 // ctxmgr token-budget switch counter (model/provider/budget changes)
 	deliveryPending bool   // overlay attached to the current in-flight request
 	delivered       bool   // overlay attached to a request that actually dispatched
+	ccCalled        bool   // model called compact_context in this window
 }
 
 // warningOverlayClaim is the per-generation claim for the usage-driven
@@ -55,7 +68,8 @@ type reminderOverlayClaim struct {
 // main_request_batch). A request whose dispatch was cancelled rolls the batch
 // back, so the retried request carries the same batch and may re-claim; once a
 // request with that batch dispatches, the batch advances and the same
-// generation can never claim again.
+// generation can never claim again. The warning stays one-shot per generation
+// (it is explicitly the "last request" notice), unlike the sticky reminder.
 type warningOverlayClaim struct {
 	requestID       uint64
 	batch           uint64
@@ -63,43 +77,55 @@ type warningOverlayClaim struct {
 	delivered       bool
 }
 
-// overlayClaimState owns the two one-shot overlay claims. The queue decision
-// runs on the event loop (beginMainLLMAfterPreparation), the attach note and
-// the delivered confirmation run on the main LLM goroutine (callLLM), so the
-// state is mutex-guarded. Claims are best-effort runtime memory (at most once
-// per window is best-effort): no durable pending artifact is introduced.
+// overlayClaimState owns the overlay claims: the sticky context-pressure
+// reminder and grace-period imminent notice (reminder-class, same window key)
+// plus the one-shot usage-driven warning. The queue decision runs on the event
+// loop (beginMainLLMAfterPreparation), the attach note and the delivered
+// confirmation run on the main LLM goroutine (callLLM), so the state is
+// mutex-guarded. Claims are best-effort runtime memory: no durable pending
+// artifact is introduced.
 type overlayClaimState struct {
 	mu       sync.Mutex
 	reminder reminderOverlayClaim
 	warning  warningOverlayClaim
 	// imminent is the grace-period "compaction imminent" notice claim; it
-	// shares the reminder's (window, budget) key but is claimed separately.
+	// shares the reminder's (window, budget) key but is tracked separately so
+	// the two never suppress each other.
 	imminent reminderOverlayClaim
 }
 
-// tryClaimContextPressureReminder returns true when the reminder overlay may
-// be attached for the given (window, budget) epoch, updating the claim
-// bookkeeping. Call on the event loop before queuing the overlay text.
-func (a *MainAgent) tryClaimContextPressureReminder(windowEpoch uint64, windowIndex int, budgetEpoch uint64) bool {
+// syncOverlayWindowClaim binds a reminder-class claim (the context-pressure
+// reminder or the grace-period imminent notice) to the given (window, budget)
+// key, resetting the claim — including delivered and ccCalled — when a
+// component changed, and returns a snapshot for the queue decision. Call on
+// the event loop before queuing overlay text.
+func (a *MainAgent) syncOverlayWindowClaim(claim *reminderOverlayClaim, windowEpoch uint64, windowIndex int, budgetEpoch uint64) reminderOverlayClaim {
+	a.overlayClaims.mu.Lock()
+	defer a.overlayClaims.mu.Unlock()
+	if claim.windowEpoch != windowEpoch || claim.windowIndex != windowIndex || claim.budgetEpoch != budgetEpoch {
+		*claim = reminderOverlayClaim{windowEpoch: windowEpoch, windowIndex: windowIndex, budgetEpoch: budgetEpoch}
+	}
+	return *claim
+}
+
+// markReminderCompactContextCalled records that the model called
+// compact_context in the current window: whatever that attempt settles to, the
+// reminder nudge has been answered and the sticky reminder must go quiet until
+// a fresh window resets the claim. It binds the mark to the current (window,
+// budget) key first, because the reminder claim is only synced lazily by the
+// queue — a call that arrived after a background apply advanced the window
+// must not stamp ccCalled onto the stale pre-apply claim.
+func (a *MainAgent) markReminderCompactContextCalled() {
+	windowEpoch := a.sessionEpoch
+	windowIndex := nextHistoryIndexMinusOne(a.sessionDir)
+	budgetEpoch := a.ctxMgr.TokenBudgetsEpoch()
 	a.overlayClaims.mu.Lock()
 	defer a.overlayClaims.mu.Unlock()
 	c := &a.overlayClaims.reminder
 	if c.windowEpoch != windowEpoch || c.windowIndex != windowIndex || c.budgetEpoch != budgetEpoch {
 		*c = reminderOverlayClaim{windowEpoch: windowEpoch, windowIndex: windowIndex, budgetEpoch: budgetEpoch}
 	}
-	return !c.delivered
-}
-
-// tryClaimCompactionImminent is tryClaimContextPressureReminder for the
-// grace-period notice: at most one delivered notice per (window, budget).
-func (a *MainAgent) tryClaimCompactionImminent(windowEpoch uint64, windowIndex int, budgetEpoch uint64) bool {
-	a.overlayClaims.mu.Lock()
-	defer a.overlayClaims.mu.Unlock()
-	c := &a.overlayClaims.imminent
-	if c.windowEpoch != windowEpoch || c.windowIndex != windowIndex || c.budgetEpoch != budgetEpoch {
-		*c = reminderOverlayClaim{windowEpoch: windowEpoch, windowIndex: windowIndex, budgetEpoch: budgetEpoch}
-	}
-	return !c.delivered
+	c.ccCalled = true
 }
 
 // tryClaimCompactionWarning returns true when the usage-driven externalization
@@ -147,20 +173,32 @@ func (a *MainAgent) noteCompactionWarningAttached() {
 // before the provider request starts), so a request cancelled before dispatch
 // — by a hook block, an oversize rejection, a session switch, or a turn
 // replacement — never consumes its claim and the next request may re-claim.
+//
+// Delivery stages distinguish the first delivery in the window from the sticky
+// repeat deliveries (optimization 2.9): the reminder and the grace imminent
+// notice report delivered_first when the claim had no delivery yet and
+// delivered_repeat on later ones. The warning stays one-shot per generation
+// and keeps a plain delivered stage.
 func (a *MainAgent) markOverlayClaimsDelivered() {
-	reminderDelivered := false
+	reminderStage := ""
 	warningDelivered := false
-	imminentDelivered := false
+	imminentStage := ""
 	a.overlayClaims.mu.Lock()
 	if a.overlayClaims.imminent.deliveryPending {
+		imminentStage = "delivered_first"
+		if a.overlayClaims.imminent.delivered {
+			imminentStage = "delivered_repeat"
+		}
 		a.overlayClaims.imminent.deliveryPending = false
 		a.overlayClaims.imminent.delivered = true
-		imminentDelivered = true
 	}
 	if a.overlayClaims.reminder.deliveryPending {
+		reminderStage = "delivered_first"
+		if a.overlayClaims.reminder.delivered {
+			reminderStage = "delivered_repeat"
+		}
 		a.overlayClaims.reminder.deliveryPending = false
 		a.overlayClaims.reminder.delivered = true
-		reminderDelivered = true
 	}
 	if a.overlayClaims.warning.deliveryPending {
 		a.overlayClaims.warning.deliveryPending = false
@@ -168,21 +206,21 @@ func (a *MainAgent) markOverlayClaimsDelivered() {
 		warningDelivered = true
 	}
 	a.overlayClaims.mu.Unlock()
-	if reminderDelivered {
+	if reminderStage != "" {
 		modelDriven := "0"
 		if a.compactContextVisible() {
 			modelDriven = "1"
 		}
 		a.recordContextDiagnosticEvent(analytics.UsagePurposeContextPressureReminder, map[string]string{
-			"stage":        "delivered",
+			"stage":        reminderStage,
 			"model_driven": modelDriven,
 		})
 	}
 	if warningDelivered {
 		a.recordContextDiagnosticEvent(analytics.UsagePurposeCompactionWarning, map[string]string{"stage": "delivered"})
 	}
-	if imminentDelivered {
-		a.recordContextDiagnosticEvent(analytics.UsagePurposeCompactionGrace, map[string]string{"stage": "notice_delivered"})
+	if imminentStage != "" {
+		a.recordContextDiagnosticEvent(analytics.UsagePurposeCompactionGrace, map[string]string{"stage": imminentStage})
 	}
 }
 
@@ -205,14 +243,20 @@ func (a *MainAgent) compactContextVisible() bool {
 	return !ruleset.IsDisabled(tools.NameCompactContext)
 }
 
-// queueContextPressureReminderForNextRequest arms the one-shot context-pressure
-// reminder for the next main request. Called from beginMainLLMAfterPreparation
-// before the compaction gate decision, using the post-response usage baseline
-// of AutoCompactDecision — not the current request's prepared/reduced surface.
-// The usage-driven externalization warning is queued separately by the gate
-// only on the request that actually starts the compaction: during the grace
-// period the compaction has not started yet, so a warning that claims "the
-// runtime has scheduled automatic compaction" would be misleading there.
+// queueContextPressureReminderForNextRequest queues the context-pressure
+// reminder overlay for the next main request. Called from
+// beginMainLLMAfterPreparation before the compaction gate decision, using the
+// post-response usage baseline of AutoCompactDecision — not the current
+// request's prepared/reduced surface. The reminder is sticky (optimization
+// 2.9): while usage stays above the reminder line it is re-queued for every
+// request — the full text once per window, then a one-line short text — until
+// the model calls compact_context in this window, the usage drops back below
+// the line, or a durable apply / session switch / model change starts a fresh
+// window. The usage-driven externalization warning is queued separately by
+// the gate only on the request that actually starts the compaction: during
+// the grace period the compaction has not started yet, so a warning that
+// claims "the runtime has scheduled automatic compaction" would be misleading
+// there.
 func (a *MainAgent) queueContextPressureReminderForNextRequest() {
 	if a == nil || a.ctxMgr == nil {
 		return
@@ -238,23 +282,46 @@ func (a *MainAgent) queueContextPressureReminder(decision ctxmgr.AutoCompactDeci
 		return
 	}
 	reminderPct := a.effectiveReminderPct(threshold)
-	// "Whichever line is reached first" semantics: when the configured
-	// reminder is at or above the threshold, the threshold crossing itself
-	// triggers the reminder (compaction starts on the crossing itself, so the
-	// reminder and the start share the request).
+	// "Whichever line is reached first" semantics: a configured reminder below
+	// the threshold fires at its own line and is clamped so it never moves the
+	// compaction line.
 	if reminderPct > threshold {
 		reminderPct = threshold
 	}
 	if reminderPct <= 0 || float64(decision.EffectiveInputTokens)/float64(usable) < reminderPct {
 		return
 	}
+	// Optimization 2.10: when the resolved reminder line sits at or beyond the
+	// threshold the reminder would only ever attach to a request that already
+	// crossed the line — the crossing and every grace-deferred request carry
+	// the "compaction imminent" notice (or the externalization warning once
+	// the grace is spent), which contains the same wrap-up and externalize
+	// instructions. Injecting the reminder as well would stack two prompts on
+	// every such request, so a reminder line at/above the threshold never
+	// injects on its own.
+	if reminderPct >= threshold {
+		return
+	}
 	windowEpoch := a.sessionEpoch
 	windowIndex := nextHistoryIndexMinusOne(a.sessionDir)
 	budgetEpoch := a.ctxMgr.TokenBudgetsEpoch()
-	if !a.tryClaimContextPressureReminder(windowEpoch, windowIndex, budgetEpoch) {
+	claim := a.syncOverlayWindowClaim(&a.overlayClaims.reminder, windowEpoch, windowIndex, budgetEpoch)
+	// The model already called compact_context in this window (2.9): whatever
+	// that attempt settles to — an apply that advances the window and resets
+	// the claim, or a skip/failure surfaced by the continuation notice — the
+	// nudge has been answered, so the sticky reminder goes quiet until a fresh
+	// window.
+	if claim.ccCalled {
 		return
 	}
-	a.pendingContextPressureReminder = buildContextPressureReminderText()
+	// Sticky re-attach: only the full text is one-shot per window (delivered
+	// is confirmed at dispatch, so a cancelled request never consumes it);
+	// later above-line requests in the same window carry the short text.
+	text := buildContextPressureReminderText()
+	if claim.delivered {
+		text = contextPressureReminderShortText
+	}
+	a.pendingContextPressureReminder = text
 }
 
 func (a *MainAgent) queueCompactionWarning() {
@@ -281,7 +348,15 @@ func (a *MainAgent) queueCompactionWarning() {
 	a.pendingCompactionWarning = compactionWarningText
 }
 
-// buildContextPressureReminderText renders the one-shot reminder. It does not
+// contextPressureReminderShortText is the one-line re-attachment used on
+// requests after the full reminder already dispatched in the same window
+// (optimization 2.9). The model saw the full instructions on the first
+// delivery, so a single line that it is still above the reminder line and
+// points back at the full notice is enough to keep the phase open and
+// externalizing without re-quoting the whole contract on every request.
+const contextPressureReminderShortText = "Context pressure reminder still active; see the earlier notice."
+
+// buildContextPressureReminderText renders the full reminder text. It does not
 // quote the current usage ratio or the remaining budget: the model cannot act
 // on that number (compaction is already scheduled), and stating how much space
 // is left would invite it to reason about deferring instead of preparing. It

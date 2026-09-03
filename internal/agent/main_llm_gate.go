@@ -389,12 +389,13 @@ func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID
 	// model-downshift gate below: when the running model just changed and the
 	// new line is crossed, the round is deferred until a compaction applies.
 	modelChanged := a.applyModelCompactionConfig()
-	// Arm the one-shot context-pressure reminder before the compaction gate
-	// decision: the gate may start a parallel usage-driven compaction, and the
-	// reminder's usage baseline is the post-response AutoCompactDecision — not
-	// the prepared surface being assembled for this request. The usage-driven
-	// externalization warning is queued further below, only once the gate
-	// actually starts the compaction.
+	// Queue the context-pressure reminder (sticky: re-queued on every request
+	// above the reminder line until the model calls compact_context or the
+	// window resets) before the compaction gate decision: the gate may start a
+	// parallel usage-driven compaction, and the reminder's usage baseline is
+	// the post-response AutoCompactDecision — not the prepared surface being
+	// assembled for this request. The usage-driven externalization warning is
+	// queued further below, only once the gate actually starts the compaction.
 	a.queueContextPressureReminderForNextRequest()
 	// Continuation barrier: apply any ready compaction draft first. When the
 	// apply path resumes a saved continuation (handled=true), it owns control
@@ -433,8 +434,9 @@ func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID
 	}
 	// Threshold grace period: while compact_context is visible, the first
 	// crossing in a compaction window defers the usage-driven start for
-	// minCompactionGracePeriodBatches requests and tells the model that
-	// compaction is imminent, so it can wrap up the phase and request a
+	// minCompactionGracePeriodBatches requests and keeps the "compaction
+	// imminent" notice attached to every deferred request with the true
+	// remaining countdown, so the model can wrap up the phase and request a
 	// model-driven checkpoint (or externalize state) first. The grace is
 	// bypassed above the hard ceiling and spent once per window; the oversize
 	// safety valve below is unaffected.

@@ -284,6 +284,12 @@ func (a *MainAgent) tryArmModelDrivenCheckpoint(callID string, rawArgs string) (
 		ToolCallID: callID,
 		Args:       args,
 	}
+	// The model called compact_context in this window (optimization 2.9):
+	// whatever the attempt settles to, the reminder nudge has been answered,
+	// so the sticky reminder stops re-attaching until a fresh window resets
+	// the claim (a durable apply advances the window; a skip/failure is
+	// surfaced by the continuation notice).
+	a.markReminderCompactContextCalled()
 	return result, nil
 }
 

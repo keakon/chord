@@ -42,15 +42,24 @@ func TestCompactionGraceDefersTwoBatchesThenExpires(t *testing.T) {
 	a.pendingCompactionImminent = ""
 
 	// Same batch again (the request was cancelled before dispatch and is
-	// being retried): still deferred, notice not re-queued (claim pending).
+	// being retried): still deferred, and the notice is re-queued with the
+	// full window still ahead (optimization 2.9 — the notice is sticky for
+	// the grace, so a retried request that never saw it is not left silent).
 	if !a.usageDrivenCompactionGraceDefers(snapshot) {
 		t.Fatal("same-batch re-gate must still defer")
 	}
+	if !strings.Contains(a.pendingCompactionImminent, "after the next 2 requests") {
+		t.Fatalf("same-batch re-queue must carry the full countdown, got %q", a.pendingCompactionImminent)
+	}
 
-	// One batch later: still inside the grace.
+	// One batch later: still inside the grace, and the countdown now reports
+	// the true remaining request.
 	a.requestBatches.reserve(a.sessionEpoch, 1) // batch 2
 	if !a.usageDrivenCompactionGraceDefers(snapshot) {
 		t.Fatal("one batch into the grace must still defer")
+	}
+	if !strings.Contains(a.pendingCompactionImminent, "after the next request") || strings.Contains(a.pendingCompactionImminent, "next 1 requests") {
+		t.Fatalf("second-round notice must count down to the last request, got %q", a.pendingCompactionImminent)
 	}
 
 	// Two batches later: expired — compaction starts and the window is spent.
@@ -121,7 +130,7 @@ func TestCompactionGraceEndsWhenModelDrivenSettlesWithoutApply(t *testing.T) {
 	}
 	// The model requested a checkpoint and the runtime skipped it: it took
 	// its shot, so the safety net must not be deferred any further.
-	a.settleModelDrivenOutcome(CompactionStatusSkipped, "projected savings too small", nil)
+	a.settleModelDrivenOutcome(CompactionStatusSkipped, "projected savings too small", nil, 0)
 	if !a.compactionGraceExhausted || a.compactionGraceStartBatch != 0 {
 		t.Fatalf("model-driven skip must end the grace, got exhausted=%v start=%d", a.compactionGraceExhausted, a.compactionGraceStartBatch)
 	}
@@ -136,7 +145,7 @@ func TestCompactionGraceSurvivesModelDrivenSettleBelowThreshold(t *testing.T) {
 	// the grace the window has not granted yet must survive, so the later
 	// crossing still gets its deferral and its imminent notice.
 	a := graceTestAgent(t, 0.5)
-	a.settleModelDrivenOutcome(CompactionStatusSkipped, "projected savings too small", nil)
+	a.settleModelDrivenOutcome(CompactionStatusSkipped, "projected savings too small", nil, 0)
 	if a.compactionGraceExhausted || a.compactionGraceStartBatch != 0 {
 		t.Fatalf("a settle below the threshold must not touch the grace, got exhausted=%v start=%d", a.compactionGraceExhausted, a.compactionGraceStartBatch)
 	}
@@ -156,7 +165,7 @@ func TestCompactionGraceEndsWhenModelDrivenSettlesAfterArmedCrossing(t *testing.
 	// window's grace is spent and the next gate starts compaction.
 	a := graceTestAgent(t, 0.85)
 	a.autoCompactRequested.Store(true)
-	a.settleModelDrivenOutcome(CompactionStatusSkipped, "projected savings too small", nil)
+	a.settleModelDrivenOutcome(CompactionStatusSkipped, "projected savings too small", nil, 0)
 	if !a.compactionGraceExhausted {
 		t.Fatal("a settle after the armed crossing must exhaust the grace")
 	}
@@ -188,30 +197,46 @@ func TestCompactionGraceClearedOnModelChangeAndSessionSwitch(t *testing.T) {
 
 func TestCompactionImminentClaimAndOverlay(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	if !a.tryClaimCompactionImminent(1, 0, 0) {
-		t.Fatal("fresh window must grant the imminent claim")
+	// The grace queue arms the notice for every deferred request (optimization
+	// 2.9); attaching consumes the pending text and marks deliveryPending
+	// without consuming the claim (a cancelled dispatch stays reusable).
+	a.queueCompactionImminentNotice(minCompactionGracePeriodBatches)
+	if a.pendingCompactionImminent == "" || !strings.Contains(a.pendingCompactionImminent, "after the next 2 requests") {
+		t.Fatalf("queued imminent notice = %q, want the 2-request countdown", a.pendingCompactionImminent)
 	}
-	a.pendingCompactionImminent = "imminent text"
 	overlays := a.buildTurnOverlayMessages()
-	if len(overlays) != 1 || overlays[0].Kind != message.KindTurnOverlay || !strings.Contains(overlays[0].Content, "<system-reminder>\nimminent text\n</system-reminder>") {
+	if len(overlays) != 1 || overlays[0].Kind != message.KindTurnOverlay || !strings.Contains(overlays[0].Content, "<system-reminder>\n") || !strings.Contains(overlays[0].Content, "\n</system-reminder>") {
 		t.Fatalf("imminent overlay not attached as a wrapped turn overlay: %#v", overlays)
 	}
 	if a.pendingCompactionImminent != "" {
 		t.Fatal("attaching must consume the pending notice")
 	}
-	// Attached but not dispatched: still claimable.
-	if !a.tryClaimCompactionImminent(1, 0, 0) {
-		t.Fatal("attached-but-undelivered claim must stay reusable")
+	// A retried grace request re-queues the notice with the true remaining
+	// countdown, and the dispatch confirmation then marks the claim delivered
+	// (delivered_first).
+	a.queueCompactionImminentNotice(minCompactionGracePeriodBatches - 1)
+	if a.pendingCompactionImminent == "" || !strings.Contains(a.pendingCompactionImminent, "after the next request") {
+		t.Fatalf("retried request must re-queue the countdown notice, got %q", a.pendingCompactionImminent)
+	}
+	if overlays := a.buildTurnOverlayMessages(); len(overlays) != 1 || a.pendingCompactionImminent != "" {
+		t.Fatalf("re-attach must consume the re-queued notice, got %#v", overlays)
 	}
 	a.markOverlayClaimsDelivered()
-	if a.tryClaimCompactionImminent(1, 0, 0) {
-		t.Fatal("delivered notice must not be claimable again in the same window")
+	claim := a.syncOverlayWindowClaim(&a.overlayClaims.imminent, a.sessionEpoch, nextHistoryIndexMinusOne(a.sessionDir), a.ctxMgr.TokenBudgetsEpoch())
+	if !claim.delivered || claim.deliveryPending {
+		t.Fatalf("dispatch must confirm the imminent delivery, got %+v", claim)
 	}
-	// The reminder claim is independent of the imminent claim.
-	if !a.tryClaimContextPressureReminder(1, 0, 0) {
-		t.Fatal("imminent delivery must not consume the reminder claim")
+	// The reminder claim is independent of the imminent claim: delivering the
+	// imminent notice never consumes a fresh reminder claim.
+	if claim := a.syncOverlayWindowClaim(&a.overlayClaims.reminder, a.sessionEpoch, nextHistoryIndexMinusOne(a.sessionDir), a.ctxMgr.TokenBudgetsEpoch()); claim.delivered || claim.ccCalled {
+		t.Fatal("imminent delivery must not leak into the reminder claim")
 	}
-	if !a.tryClaimCompactionImminent(1, 1, 0) {
+	// A new compaction window resets the imminent claim, so the next grace in
+	// a fresh window records a delivered_first again.
+	a.overlayClaims.mu.Lock()
+	a.overlayClaims.imminent = reminderOverlayClaim{windowEpoch: a.sessionEpoch, windowIndex: nextHistoryIndexMinusOne(a.sessionDir), budgetEpoch: a.ctxMgr.TokenBudgetsEpoch(), delivered: true}
+	a.overlayClaims.mu.Unlock()
+	if claim := a.syncOverlayWindowClaim(&a.overlayClaims.imminent, a.sessionEpoch, nextHistoryIndexMinusOne(a.sessionDir)+1, a.ctxMgr.TokenBudgetsEpoch()); claim.delivered {
 		t.Fatal("a new compaction window must reset the imminent claim")
 	}
 }

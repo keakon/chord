@@ -11,38 +11,57 @@ import (
 
 func TestContextPressureReminderClaimWindowBinding(t *testing.T) {
 	a := &MainAgent{}
-	// Fresh window: claimable.
-	if !a.tryClaimContextPressureReminder(1, 0, 0) {
-		t.Fatal("first claim in a fresh window must be granted")
+	// Delivered and ccCalled reset whenever any window component changes.
+	// Same key keeps the claim; a new compaction window index, budget epoch,
+	// or session epoch all start a fresh claim.
+	a.overlayClaims.mu.Lock()
+	a.overlayClaims.reminder = reminderOverlayClaim{windowEpoch: 1, windowIndex: 0, budgetEpoch: 0, delivered: true, ccCalled: true}
+	a.overlayClaims.mu.Unlock()
+	claim := a.syncOverlayWindowClaim(&a.overlayClaims.reminder, 1, 0, 0)
+	if !claim.delivered || !claim.ccCalled {
+		t.Fatalf("same-key sync must preserve the claim, got %+v", claim)
 	}
-	// Same window before any delivery: still claimable (the queue is a
-	// per-request attempt until the request actually dispatches).
-	if !a.tryClaimContextPressureReminder(1, 0, 0) {
-		t.Fatal("same-window claim before delivery must be granted")
+	claim = a.syncOverlayWindowClaim(&a.overlayClaims.reminder, 1, 1, 0)
+	if claim.delivered || claim.ccCalled {
+		t.Fatal("new window index must reset delivered and ccCalled")
 	}
-	// Delivered: same window is now spent.
-	a.noteContextPressureReminderAttached()
-	a.markOverlayClaimsDelivered()
-	if a.tryClaimContextPressureReminder(1, 0, 0) {
-		t.Fatal("same-window claim after delivery must be rejected")
+	a.overlayClaims.mu.Lock()
+	a.overlayClaims.reminder = reminderOverlayClaim{windowEpoch: 1, windowIndex: 1, budgetEpoch: 0, delivered: true, ccCalled: true}
+	a.overlayClaims.mu.Unlock()
+	claim = a.syncOverlayWindowClaim(&a.overlayClaims.reminder, 1, 1, 1)
+	if claim.delivered || claim.ccCalled {
+		t.Fatal("new budget epoch must reset delivered and ccCalled")
 	}
-	// A new compaction window (compaction index advanced) resets the claim.
-	if !a.tryClaimContextPressureReminder(1, 1, 0) {
-		t.Fatal("new window index must reset the reminder claim")
-	}
-	// A new budget epoch (model/provider/budget switch) also resets it.
-	if !a.tryClaimContextPressureReminder(1, 1, 1) {
-		t.Fatal("new budget epoch must reset the reminder claim")
-	}
-	// A session switch (new session epoch) resets it too.
-	if !a.tryClaimContextPressureReminder(2, 0, 0) {
-		t.Fatal("new session epoch must reset the reminder claim")
+	a.overlayClaims.mu.Lock()
+	a.overlayClaims.reminder = reminderOverlayClaim{windowEpoch: 1, windowIndex: 1, budgetEpoch: 1, delivered: true, ccCalled: true}
+	a.overlayClaims.mu.Unlock()
+	claim = a.syncOverlayWindowClaim(&a.overlayClaims.reminder, 2, 1, 1)
+	if claim.delivered || claim.ccCalled {
+		t.Fatal("new session epoch must reset delivered and ccCalled")
 	}
 	// Attached but never dispatched (pre-dispatch cancellation): the claim
-	// stays reusable for the retried request.
+	// stays undelivered so the retried request may still deliver the full
+	// text — delivery is confirmed only by the dispatch.
+	a.overlayClaims.mu.Lock()
+	a.overlayClaims.reminder = reminderOverlayClaim{windowEpoch: 2, windowIndex: 1, budgetEpoch: 1}
+	a.overlayClaims.mu.Unlock()
 	a.noteContextPressureReminderAttached()
-	if !a.tryClaimContextPressureReminder(2, 0, 0) {
-		t.Fatal("attached-but-not-delivered claim must remain reusable after a cancelled dispatch")
+	claim = a.syncOverlayWindowClaim(&a.overlayClaims.reminder, 2, 1, 1)
+	if claim.deliveryPending != true || claim.delivered {
+		t.Fatalf("attach must mark deliveryPending without consuming the claim, got %+v", claim)
+	}
+	// A dispatch confirmation marks delivered with a delivered_first stage
+	// (first delivery in the window).
+	a.markOverlayClaimsDelivered()
+	claim = a.syncOverlayWindowClaim(&a.overlayClaims.reminder, 2, 1, 1)
+	if !claim.delivered || claim.deliveryPending {
+		t.Fatalf("dispatch must confirm the delivery, got %+v", claim)
+	}
+	// The imminent claim is tracked separately under the same window key:
+	// claiming it never touches the reminder claim and vice versa.
+	claim = a.syncOverlayWindowClaim(&a.overlayClaims.imminent, 2, 1, 1)
+	if claim.delivered || claim.ccCalled {
+		t.Fatal("reminder state must not leak into the imminent claim")
 	}
 }
 
@@ -130,14 +149,127 @@ func TestQueueContextPressureReminderGates(t *testing.T) {
 	}
 	a.pendingContextPressureReminder = ""
 
-	// A delivered claim suppresses the reminder for the same window even when
-	// the ratio stays above the line.
+	// A delivered claim does not silence the reminder while usage stays above
+	// the line (optimization 2.9): the next request re-queues the one-line
+	// short text, not the full reminder. Only the full text is one-shot per
+	// window.
 	a.pendingContextPressureReminder = ""
 	a.noteContextPressureReminderAttached()
 	a.markOverlayClaimsDelivered()
 	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
+	if a.pendingContextPressureReminder != contextPressureReminderShortText {
+		t.Fatalf("sticky reminder after delivery must re-queue the short text, got %q", a.pendingContextPressureReminder)
+	}
+}
+
+func TestQueueContextPressureReminderStickyAcrossRequests(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
+	a.ctxMgr.SetLastTotalContextTokens(5000) // ≈0.61: above the 0.60 reminder line, below threshold 0.9
+	a.modelDrivenCompactionEnabled.Store(true)
+	a.tools.Register(tools.NewCompactContextTool(tools.CompactContextValidator{ContinuationStateMaxTokens: 2048}))
+	queue := func() string {
+		// Runtime order: buildTurnOverlayMessages consumes the pending text at
+		// attach, then the next request's queue call refills it from scratch.
+		a.pendingContextPressureReminder = ""
+		a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
+		return a.pendingContextPressureReminder
+	}
+	deliver := func() {
+		a.pendingContextPressureReminder = ""
+		a.noteContextPressureReminderAttached()
+		a.markOverlayClaimsDelivered()
+	}
+
+	// First above-line request carries the full text; after a dispatch the
+	// next request re-attaches only the short text (optimization 2.9).
+	if got := queue(); got == "" || got == contextPressureReminderShortText {
+		t.Fatalf("first above-line request must queue the full reminder, got %q", got)
+	}
+	deliver()
+	if got := queue(); got != contextPressureReminderShortText {
+		t.Fatalf("after the first dispatch the reminder must re-attach as short text, got %q", got)
+	}
+
+	// Usage drops back below the line: the reminder stops re-attaching.
+	a.ctxMgr.SetLastTotalContextTokens(4000) // ≈0.49 < 0.60
+	if got := queue(); got != "" {
+		t.Fatalf("usage below the line must stop the reminder, got %q", got)
+	}
+	// A later rise in the same window resumes with the short text (the full
+	// text already dispatched in this window).
+	a.ctxMgr.SetLastTotalContextTokens(5000)
+	if got := queue(); got != contextPressureReminderShortText {
+		t.Fatalf("re-crossing the reminder line in the same window must keep the short text, got %q", got)
+	}
+
+	// The model calls compact_context in this window: whatever the attempt
+	// settles to, the reminder goes quiet even while usage stays above the
+	// line...
+	a.markReminderCompactContextCalled()
+	if got := queue(); got != "" {
+		t.Fatalf("a compact_context call in the window must stop the reminder, got %q", got)
+	}
+
+	// ...until a fresh window (a session switch here) resets the claim and the
+	// full text becomes available again.
+	a.sessionEpoch++
+	if got := queue(); got == "" || got == contextPressureReminderShortText {
+		t.Fatalf("a fresh window must re-queue the full reminder, got %q", got)
+	}
+}
+
+func TestCompactContextCallArmsAndStopsStickyReminder(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.newTurn()
+	a.ctxMgr.SetThreshold(0.9)
+	a.ctxMgr.SetLastTotalContextTokens(5000) // above the 0.60 reminder line, below threshold
+	a.modelDrivenCompactionEnabled.Store(true)
+	a.tools.Register(tools.NewCompactContextTool(tools.CompactContextValidator{ContinuationStateMaxTokens: 2048}))
+
+	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
+	if a.pendingContextPressureReminder == "" {
+		t.Fatal("above-line usage must queue the reminder before the call")
+	}
+	ccID, args := testCompactContextCall()
+	a.ctxMgr.Append(message.Message{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{testToolCall(ccID, tools.NameCompactContext)}})
+	if _, err := a.tryArmModelDrivenCheckpoint(ccID, args); err != nil {
+		t.Fatalf("tryArmModelDrivenCheckpoint: %v", err)
+	}
+	// The armed call marks the window ccCalled (optimization 2.9): later
+	// requests in the same window stop re-attaching the reminder, whatever the
+	// attempt settles to.
+	a.pendingContextPressureReminder = ""
+	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
 	if a.pendingContextPressureReminder != "" {
-		t.Fatalf("same-window reminder must be delivered at most once, got %q", a.pendingContextPressureReminder)
+		t.Fatalf("a compact_context call in the window must stop the sticky reminder, got %q", a.pendingContextPressureReminder)
+	}
+}
+
+func TestQueueContextPressureReminderSkipsWhenReminderAtThreshold(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.5)
+	a.ctxMgr.SetLastTotalContextTokens(4500) // ≈0.55: above the reminder line
+	a.modelDrivenCompactionEnabled.Store(true)
+	a.tools.Register(tools.NewCompactContextTool(tools.CompactContextValidator{ContinuationStateMaxTokens: 2048}))
+	// An explicit reminder line at the threshold (optimization 2.10): the
+	// reminder only ever fires on requests that already crossed the line, and
+	// those carry the grace imminent notice or the externalization warning —
+	// injecting both would stack two prompts on the same request.
+	a.globalConfig.Context.Compaction.Reminder = 0.5
+	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
+	if a.pendingContextPressureReminder != "" {
+		t.Fatalf("a reminder line at the threshold must not inject separately, got %q", a.pendingContextPressureReminder)
+	}
+	// A reminder line below the threshold still injects once usage is above
+	// its own line (control group).
+	a.globalConfig.Context.Compaction.Reminder = 0.45
+	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
+	if a.pendingContextPressureReminder == "" {
+		t.Fatal("a reminder line below the threshold must keep injecting above its own line")
 	}
 }
 

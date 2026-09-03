@@ -46,9 +46,10 @@ func (a *MainAgent) explicitReminderPct(modelRef string) float64 {
 // model reference: the model definition's own compaction.threshold when
 // present (including an explicit zero that disables auto-compaction for that
 // model), otherwise the global threshold. The reminder line never moves this
-// line: a configured reminder higher than the threshold simply never fires on
-// its own (the threshold crossing itself triggers the reminder through the
-// min() in queueContextPressureReminder).
+// line: a configured reminder at or above the threshold simply never injects
+// on its own — the crossing request itself carries the grace imminent notice
+// or the usage-driven externalization warning (optimization 2.10, see
+// queueContextPressureReminder).
 func (a *MainAgent) effectiveCompactionThreshold(modelRef string) float64 {
 	if a == nil {
 		return config.DefaultContextCompactUsage
@@ -64,11 +65,13 @@ func (a *MainAgent) effectiveCompactionThreshold(modelRef string) float64 {
 
 // effectiveReminderPct resolves the configured context-pressure reminder line
 // for the current model: per-model reminder → global reminder → derived
-// default (min(0.60, threshold*0.90)). It may return a value at or above the
-// threshold — the caller applies the "whichever line is reached first"
-// semantics (min with the threshold) so the reminder still fires on the
-// threshold crossing itself. Returns 0 when the threshold disables automatic
-// compaction (threshold<=0), meaning no reminder is ever injected.
+// default (min(0.60, threshold*0.90)). The resolved line may sit at or above
+// the threshold — queueContextPressureReminder applies the "whichever line is
+// reached first" semantics via min with the threshold and never injects when
+// the line is at/above it (optimization 2.10: the crossing and grace-deferred
+// requests carry the imminent notice or the externalization warning). Returns
+// 0 when the threshold disables automatic compaction (threshold<=0) or the
+// reminder is explicitly disabled, meaning no reminder is ever injected.
 func (a *MainAgent) effectiveReminderPct(threshold float64) float64 {
 	modelRef := a.runningModelRef
 	if modelRef == "" {
@@ -81,6 +84,8 @@ func (a *MainAgent) effectiveReminderPct(threshold float64) float64 {
 // explicit model reference instead of the current running model, so callers
 // can preview the reminder line a model would manage its context with (the TUI
 // re-colors the context display for the model that is next up after a switch).
+// The line may sit at or above the threshold; queueContextPressureReminder
+// then never injects a separate reminder (optimization 2.10).
 func (a *MainAgent) effectiveReminderPctForModelRef(modelRef string, threshold float64) float64 {
 	if threshold <= 0 {
 		return 0
@@ -104,10 +109,12 @@ func (a *MainAgent) effectiveReminderPctForModelRef(modelRef string, threshold f
 // applyModelCompactionConfig applies the per-model compaction threshold for the
 // current model reference to ctxmgr. Called at request boundaries after
 // pending model-pool switches are applied; a model change bumps the budget
-// epoch through SetThreshold, which re-arms the one-shot overlay claims for
-// the new window. It returns whether the running model changed since the last
-// application — the caller (the pre-request gate or the idle switch path) uses
-// that to start the model-downshift compaction when the new line is crossed.
+// epoch through SetThreshold, which resets the reminder-class overlay claims
+// for the new window (full reminder text becomes available again; the warning
+// claim resets with the request generation). It returns whether the running
+// model changed since the last application — the caller (the pre-request gate
+// or the idle switch path) uses that to start the model-downshift compaction
+// when the new line is crossed.
 func (a *MainAgent) applyModelCompactionConfig() bool {
 	if a == nil || a.ctxMgr == nil {
 		return false
