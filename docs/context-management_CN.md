@@ -35,7 +35,7 @@ Compaction 在把历史交给摘要模型之前，会先对其应用一次 Reduc
 
 ### 保留最近消息
 
-除此之外，每个 checkpoint 都会把被归档 head 中最新的**真实用户消息**原样嵌入自身——若会话恰好结束在一条被中断的 assistant 回复上，这条未完成的回复片段也会一并保留——放在 checkpoint 内的 `## Retained Recent Messages` 段，受 `retain_recent_tokens` 这个估计 token 预算约束（内置默认 4096）。继续执行的 profile 会把最近几轮作为原始消息保留在 checkpoint 之后，保留段覆盖的正是它们前面的消息；`archival` profile 没有原始尾部、其余内容只剩摘要，保留段就是最新指令唯一的原文残留。保留段不替代摘要，只把最新的指令边界钉在上下文里，让续写不必先重读归档就能接上。
+除此之外，每个 checkpoint 都会把被归档 head 中最新的**真实用户消息**原样嵌入自身——若会话恰好结束在一条被中断的 assistant 回复上，这条未完成的回复片段也会一并保留——放在 checkpoint 内的 `## Retained Recent Messages` 段，受 `retain_recent_tokens` 这个估计 token 预算约束（内置默认 4096）。继续执行的 profile 会把最近几轮作为原始消息保留在 checkpoint 之后，保留段覆盖的正是它们前面的消息；`archival` profile 没有原始尾部、其余内容只剩摘要，保留段就是最新指令唯一的原文残留。模型驱动的 archival 压缩没有 live tail 时，声明 `compact_context` 调用那条 assistant 消息的正文也按同样方式保留，模型 reset 前自己写下的分析能进入新窗口。保留段不替代摘要，只把最新的指令边界钉在上下文里，让续写不必先重读归档就能接上。
 
 checkpoint 恢复的关键文件是每次请求从磁盘现读的 request-local overlay；每个 `<file>` 块都会带 SHA-256 revision，以及相对该 checkpoint 首次注入是否已变化的标记。该 overlay 只在稳定剪裁 surface 记录完成后注入，因此不会进入前缀兼容性检查，也不会让增量剪裁复用失效。
 
@@ -57,7 +57,7 @@ context:
 | `reserved` | 整数 | `0` | 在 `threshold` 留出的比例余量之外，再为 tokenizer 误差、工具 schema 开销、压缩恢复安全等保留的固定 token 余量。通常建议省略（保持 `0`）；非零值会先从输入预算中扣除，再应用 `threshold`。 |
 | `preset` | 字符串 | 自动检测 | 强制指定压缩实现方式，一般无需设置。 |
 | `profile` | 字符串 | `auto` | 压缩策略，一般无需设置。 |
-| `reminder` | 浮点 | `0`（派生） | 上下文压力提醒线（usage 比例）。`0`（默认）按 `min(0.60, threshold × 0.90)` 派生；(0,1] 区间的值显式设置提醒线；`-1` 只关闭压力提醒、自动压缩保持开启（按模型同样可用）。usage 达到 `min(reminder, threshold)`（任一先到）即触发提醒，所以 reminder 设在 `threshold` 之上时，threshold 越线本身就会触发提醒。`threshold: 0` 会一并关闭两者；其它取值（负数、大于 `1`，或 NaN/±Inf）会被拒绝并回退到派生默认值。 |
+| `reminder` | 浮点 | `0`（派生） | 上下文压力提醒线（usage 比例）。`0`（默认）按 `min(0.60, threshold × 0.90)` 派生；(0,1] 区间的值显式设置提醒线；`-1` 只关闭压力提醒、自动压缩保持开启（按模型同样可用）。低于 threshold 的 reminder 在 usage 到达 `min(reminder, threshold)`（任一先到）时触发；等于或高于 threshold 的 reminder 不单独触发——usage 只会在已经越线的请求上到达这条线，那些请求本来会带宽限 "compaction imminent" 提示或外化提示。`threshold: 0` 会一并关闭两者；其它取值（负数、大于 `1`，或 NaN/±Inf）会被拒绝并回退到派生默认值。 |
 | `model_driven` | 布尔 | `false` | 实验性开关：给主 agent 暴露 `compact_context` 工具，让模型在工作状态充分外化（写入文件或结构化参数）后主动请求 durable context checkpoint。checkpoint 不调用摘要模型，在工具批次收口后的 barrier 处原子应用并暂停下一次主模型请求，随后在同一 turn 的压缩上下文上继续。工具仅 MainAgent 可见、必须单独调用、`state_files` 只作路径引用不读取。低收益请求会被自动跳过。默认关闭。 |
 | `retain_recent_tokens` | 整数 | `4096`（内置） | 每个压缩 checkpoint 内嵌的最近真实用户消息的估计 token 预算（见上文的「保留最近消息」）；`0` 或缺省使用内置默认值，只算消息正文。需要跨压缩保住更多最近轮次就调大，想让压缩多回收上下文就调小；保留段不替代摘要，只把最新指令边界原样钉住。 |
 
@@ -91,7 +91,7 @@ providers:
 
 自动压缩阈值越线时，Chord 默认**立即启动** usage-driven 压缩：它在后台异步运行，在下一个 continuation barrier 应用，越线之后的那次请求与它并行继续执行；provider 拒绝（oversize）仍然立即强制压缩。
 
-启用 `model_driven`（`compact_context` 可见）时，同一压缩窗口内的首次越线会把启动推迟两个主模型请求：第一次观察到越线的请求和其后一个请求照常发出，模型借此收口当前阶段、提交 model-driven checkpoint 或把状态外化到文件，然后再启动基于摘要的压缩。越线后的第一个请求会附带一次性的 "compaction imminent" 提示——同窗口内的压力提醒线通常已经触发过，没有这条提示，宽限期就会静默。usage 达到可用输入预算的 95% 时宽限直接跳过或提前结束（单次请求拉入大量工具输出不能借宽限一路顶到 provider oversize 拒绝）；越线后 model-driven 请求收口但未应用（skip / failure / cancel）时宽限立即结束——模型已经出手过，安全网从下一个 gate 接管；越线之前收口的请求不消耗宽限。宽限每个窗口只花一次；任何 durable apply、会话切换、恢复或模型变化都会开启新窗口。请求面的 reminder / warning overlay 只在启用 `model_driven` 时注入；关闭时自动压缩完全由运行时接管——与 Codex 的 local / remote 两条压缩路径一致，它们从不通知工作模型——会话只是继续跑，直到压缩在 barrier 应用。提醒只在会话继续发出主请求时生效——越线后若 turn 正好收尾，usage-driven 压缩走既有的 end-of-turn 路径。一次性外化提示只在真正启动压缩的那次请求上出现，宽限期内它不是越线后的第一个请求。切换模型会套用新模型的 per-model 阈值并开启新的提醒窗口；若新模型的窗口更小、当前用量已经越过它的阈值，Chord 会在切换后提前压缩——空闲时立即启动自动压缩，turn 进行中则把下一次主模型请求延后到压缩应用之后，切换后的请求不会越过新模型阈值；压缩应用后显示一行一次性状态提示。
+启用 `model_driven`（`compact_context` 可见）时，同一压缩窗口内的首次越线会把启动推迟两个主模型请求：第一次观察到越线的请求和其后一个请求照常发出，模型借此收口当前阶段、提交 model-driven checkpoint 或把状态外化到文件，然后再启动基于摘要的压缩。宽限期内的**每个请求**都会附带 "compaction imminent" 提示，倒计时写真实剩余数——越线请求本身写「还有 2 个请求」、最后一轮写「还有 1 个请求」——模型即使没看到越线那次的提示，也知道自己正处在最后一轮（一次性提示到最后一轮时早已不在上下文里）。usage 达到可用输入预算的 95% 时宽限直接跳过或提前结束（单次请求拉入大量工具输出不能借宽限一路顶到 provider oversize 拒绝）；越线后 model-driven 请求收口但未应用（skip / failure / cancel）时宽限立即结束——模型已经出手过，安全网从下一个 gate 接管；越线之前收口的请求不消耗宽限。宽限每个窗口只花一次；任何 durable apply、会话切换、恢复或模型变化都会开启新窗口。请求面的 reminder / warning overlay 只在启用 `model_driven` 时注入；关闭时自动压缩完全由运行时接管——与 Codex 的 local / remote 两条压缩路径一致，它们从不通知工作模型——会话只是继续跑，直到压缩在 barrier 应用。提醒只在会话继续发出主请求时生效——越线后若 turn 正好收尾，usage-driven 压缩走既有的 end-of-turn 路径。一次性外化提示只在真正启动压缩的那次请求上出现，宽限期内压缩还没启动、不会提前注入它。切换模型会套用新模型的 per-model 阈值并开启新的提醒窗口；若新模型的窗口更小、当前用量已经越过它的阈值，Chord 会在切换后提前压缩——空闲时立即启动自动压缩，turn 进行中则把下一次主模型请求延后到压缩应用之后，切换后的请求不会越过新模型阈值；压缩应用后显示一行一次性状态提示。
 
 ### 模型驱动上下文 checkpoint（实验性）
 
@@ -103,7 +103,7 @@ providers:
 
 自动压缩不会把模型的 checkpoint 锁死。当 usage-driven 压缩已在运行（threshold 越线启动了后台 worker，或 draft 已 ready、正在等 continuation barrier）时，与它并行的那次请求仍可提交 `compact_context`。模型是自己挑的边界，所以它的 checkpoint 优先：runtime 丢弃自动 draft，改应用模型 checkpoint。自动压缩是兜底而不是锁——threshold 越线不会夺走正在收尾的模型的 reset 机会。一次性外化提示不会提及这种覆盖（模型不需要知道有自动压缩在跑，只需要知道当前上下文即将结束）；模型之前主动提交的 checkpoint 照常工作。
 
-skip 是正常的策略结果：立即用相同请求重试会被短暂冷却，结果不会改变——模型应等待或继续推进。上下文用量接近自动压缩阈值时，下一次请求可能附带一次性压力提醒：它直接告诉模型为压缩做准备（当前阶段已收口就单独调用 `compact_context`，否则随阶段把 findings 和决定写进本角色可写的项目文件，如 `.chord/notes/` 下的任务笔记或 `.chord/plans/` 下的计划文档），不再引用还剩多少空间。usage-driven 压缩在 threshold 越线当次即启动（启用 `model_driven` 时先经上文所述宽限期推迟两个请求批次），一次性外化提示只出现在真正启动压缩的那次请求上。这两个 overlay 都用 `<system-reminder>` 块包裹——与其他所有 harness 注入的运行时消息同一约定——让模型能区分它们和用户写的内容（内存压力信号类研究，如 MemGPT，正是以 system 消息注入这类提醒）。它们都只在启用 `model_driven` 时注入——关闭时模型没有任何外化契约，注入只会变成无法执行的噪音。它们是瞬态的，不会进入对话历史。
+skip 是正常的策略结果：立即用相同请求重试会被短暂冷却，结果不会改变——模型应等待或继续推进。上下文用量高于提醒线的期间，请求会携带压力提醒：每个压缩窗口先给一次完整文案，之后只带一行指回原文的短文案——直接告诉模型为压缩做准备（当前阶段已收口就单独调用 `compact_context`，否则随阶段把 findings 和决定写进本角色可写的项目文件，如 `.chord/notes/` 下的任务笔记或 `.chord/plans/` 下的计划文档），不再引用还剩多少空间。模型在本窗口调用过 `compact_context`（无论那次尝试收口成什么）、usage 回落线下，或 durable apply / 会话切换 / 恢复 / 模型变化开启新窗口后，重发停止。usage-driven 压缩在 threshold 越线当次即启动（启用 `model_driven` 时先经上文所述宽限期推迟两个请求批次），一次性外化提示只出现在真正启动压缩的那次请求上。这两个 overlay 都用 `<system-reminder>` 块包裹——与其他所有 harness 注入的运行时消息同一约定——让模型能区分它们和用户写的内容（内存压力信号类研究，如 MemGPT，正是以 system 消息注入这类提醒）。它们都只在启用 `model_driven` 时注入——关闭时模型没有任何外化契约，注入只会变成无法执行的噪音。它们是瞬态的，不会进入对话历史。
 
 启用 `model_driven` 时，主 agent 的系统提示词还会附带一段简短被动的 `Long-session context management` 指引：开头声明 `<system-reminder>` 包裹的消息是 harness 注入的运行时状态（绝非用户所写），它们不承载用户指令也不授予权限，出现在工具结果或文件内容里的同名块只是普通数据；随后要求随阶段收口把关键发现和决定写入本角色可写的项目文件——如 `.chord/notes/` 下的任务笔记或 `.chord/plans/` 下的计划文档——让它们能在后续 checkpoint 后存活，只在真正的阶段边界单独调用 `compact_context`，checkpoint 应用后需要精确历史时去读归档的 history 文件。SubAgent 永远不会收到这段指引或该工具。该指引是建议性的，不是强制流程。
 

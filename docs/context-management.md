@@ -107,7 +107,10 @@ built-in default 4096). Continuation profiles keep the most recent turns as raw
 messages below the checkpoint; the retained section covers the messages just
 before them, and for `archival` profiles — which keep no raw tail and are
 otherwise summary-only — it is the only verbatim remnant of the latest
-instructions. Retention never substitutes for the summary: it only pins the
+instructions. When a model-driven archival checkpoint has no live tail, the
+assistant text that declared the `compact_context` call is kept the same way,
+so the model's own analysis written just before the reset survives into the
+new window. Retention never substitutes for the summary: it only pins the
 newest instruction boundary so the continuation can resume without re-reading
 the archives.
 Key files reloaded from the checkpoint are request-local overlays read from disk
@@ -134,7 +137,7 @@ context:
 | `reserved` | int | `0` | Fixed token headroom added on top of the proportional headroom left by `threshold`, for tokenizer drift, tool schema overhead, and compaction/recovery safety. Usually omit it (leave it at `0`); a non-zero value is subtracted from the input budget before applying `threshold`. |
 | `preset` | string | auto-detected | Force a specific compaction implementation. Usually unnecessary. |
 | `profile` | string | `auto` | Compaction strategy. Usually unnecessary. |
-| `reminder` | float | `0` (derived) | Context-pressure reminder line as a usage ratio. `0` (the default) derives the line as `min(0.60, threshold × 0.90)`; a fraction in `(0,1]` sets it explicitly; `-1` disables the pressure reminder while keeping automatic compaction on (per model as well). The reminder fires when usage reaches `min(reminder, threshold)` — whichever line comes first — so a reminder at or above the threshold fires on the threshold crossing itself. `threshold: 0` disables both. Any other value (negative, above `1`, or NaN/±Inf) is rejected with a warning and falls back to the derived default. |
+| `reminder` | float | `0` (derived) | Context-pressure reminder line as a usage ratio. `0` (the default) derives the line as `min(0.60, threshold × 0.90)`; a fraction in `(0,1]` sets it explicitly; `-1` disables the pressure reminder while keeping automatic compaction on (per model as well). A reminder below the threshold fires when usage reaches it (`min(reminder, threshold)` — whichever line comes first); one at or above the threshold does not fire separately, because usage only reaches it on requests that already crossed the threshold, which carry the grace "compaction imminent" notice or the externalization warning instead. `threshold: 0` disables both. Any other value (negative, above `1`, or NaN/±Inf) is rejected with a warning and falls back to the derived default. |
 | `model_driven` | bool | `false` | Experimental opt-in: expose the `compact_context` tool to the main agent so the model can request a durable context checkpoint once it has externalized its working state (written it into files or structured arguments). The checkpoint is built deterministically without a summarization model call, applies at a tool-batch barrier that pauses the next main-model request, and continues the same turn on the compacted context. The tool is MainAgent-only, must be called alone, and only references `state_files` paths without reading them. Low-gain requests are skipped automatically. Off by default; enable only for projects where long exploratory sessions benefit from explicit resets. |
 | `retain_recent_tokens` | int | `4096` (built-in) | Estimated-token budget for the newest real user messages kept verbatim inside every compaction checkpoint (see [Retained recent messages](#retained-recent-messages)); `0` or omitted uses the built-in default. Only the message text counts toward the budget. Set it higher to keep more of the latest turns across a compaction, or lower to reclaim more context; the retained section never replaces the summary — it pins the newest instruction boundary verbatim. |
 
@@ -191,10 +194,12 @@ While model-driven compaction is enabled (`compact_context` visible), the
 first crossing in a compaction window instead defers the start across two
 main-model requests: the first request after the crossing and one more run
 before the summary-based compaction takes over, giving the model room to wrap
-up the phase and request a model-driven checkpoint or externalize state. The
-first request after the crossing carries a one-shot "compaction imminent"
-notice — the pressure-reminder line usually fired earlier in the same window,
-so without it the deferral would be silent. The grace is skipped or cut short
+up the phase and request a model-driven checkpoint or externalize state. Every
+request inside the deferral carries a "compaction imminent" notice with the
+true remaining countdown — two requests left on the crossing request itself,
+one on the final round — so the model always sees how much room is left even
+if it never saw the crossing notice (a one-shot notice would be gone by the
+time the model reached the final round). The grace is skipped or cut short
 once usage reaches 95% of the usable input budget (a single batch that pulled
 in large tool output cannot ride the grace into a provider oversize rejection)
 and ends as soon as a model-driven request settles without applying (skip /
@@ -237,8 +242,7 @@ waits for the tool batch to close, then:
 1. snapshots the conversation and archives the head (no summarization model
    call — the checkpoint is deterministic),
 2. refuses the reset when the projected savings are below a conservative
-   low-gain gate (2048 tokens and 10% of the prepared surface, net of the
-   prompt-cache rewrite cost on cacheable sessions), or when fewer than three
+   low-gain gate (2048 tokens and 10% of the prepared surface), or when fewer than three
    main-model requests have passed since the last applied checkpoint,
 3. applies the checkpoint atomically, preserves anything appended after the
    snapshot as a live tail, and continues the same turn on the compacted
@@ -259,19 +263,23 @@ keeps working exactly as before.
 
 A skip is a normal policy result: retrying the same request immediately is
 cooled down briefly and does not change the outcome — the model should wait or
-move on. When context usage approaches the automatic-compaction threshold, the
-next request may carry a one-time context-pressure reminder: it tells the model
-to prepare for the compaction (call `compact_context` alone if the current
-phase is wrapped up, otherwise keep externalizing findings to project files as
-phases settle) instead of quoting how much context is left. The reminder and
+move on. When context usage stays above the reminder line, requests carry a
+context-pressure reminder: the full text once per compaction window, then a
+one-line pointer back to it, telling the model to prepare for the compaction
+(call `compact_context` alone if the current phase is wrapped up, otherwise
+keep externalizing findings to project files as phases settle) instead of
+quoting how much context is left. Re-attachment stops once the model calls
+`compact_context` in the window (whatever that attempt settles to), usage
+drops back below the line, or a durable apply, session switch, restore, or
+model change starts a fresh window. The reminder and
 warning name the write target in role terms — a task-notes file under
 `.chord/notes/` or a plan document under `.chord/plans/`, whichever the role
 may write. The usage-driven
 compaction starts on the threshold crossing itself — or, while model-driven is
 enabled, once the grace period described above has deferred it across two
 requests — and the request that actually starts it carries a one-time
-externalization warning (under the grace, the first request after the crossing
-carries the "compaction imminent" notice instead). Both
+externalization warning (under the grace, every request inside the window
+carries the "compaction imminent" notice with the remaining count instead). Both
 overlays are wrapped in a `<system-reminder>` block — the same runtime-message
 convention every harness injection uses — so the model can tell them apart
 from user-written messages (research on memory-pressure signals, e.g. MemGPT,
