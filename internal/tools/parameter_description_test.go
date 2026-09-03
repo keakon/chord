@@ -65,6 +65,7 @@ func TestToolParameterDescriptionsMentionDefaults(t *testing.T) {
 		{name: "save artifact mime type", tool: SaveArtifactTool{}, path: []string{"mime_type"}, want: "defaults to text/markdown"},
 		{name: "save artifact mode", tool: SaveArtifactTool{}, path: []string{"mode"}, want: "default"},
 		{name: "question multiple", tool: NewQuestionTool(nil), path: []string{"questions", "items", "multiple"}, want: "Defaults to false."},
+		{name: "apply patch", tool: ApplyPatchTool{}, path: []string{"patch"}, want: "Context lines must be literal complete source lines"},
 	}
 
 	for _, tc := range tests {

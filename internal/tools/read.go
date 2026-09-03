@@ -28,6 +28,21 @@ type readArgs struct {
 	Limit  *int   `json:"limit,omitempty"`  // number of lines; defaults to 2000
 }
 
+// ExtractReadPathFromArgsInDir returns the absolute path targeted by a Read
+// call. Agent-side retry bookkeeping uses the same argument decoding and path
+// resolution as ReadTool so relative and absolute spellings share one key.
+func ExtractReadPathFromArgsInDir(args json.RawMessage, baseDir string) string {
+	var parsed readArgs
+	if err := json.Unmarshal(unwrapToolArgs(args), &parsed); err != nil || strings.TrimSpace(parsed.Path) == "" {
+		return ""
+	}
+	resolved, err := resolveToolPathAbsInDir(parsed.Path, baseDir)
+	if err != nil {
+		return ""
+	}
+	return resolved
+}
+
 func (ReadTool) Name() string { return NameRead }
 
 func (t ReadTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {

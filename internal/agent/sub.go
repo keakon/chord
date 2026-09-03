@@ -170,6 +170,9 @@ type SubAgent struct {
 	// MainAgent, so repeated drift failures also steer SubAgent retries
 	// toward a fresh bounded read. Event-loop-owned; no locking needed.
 	editMatchFailStreak map[string]int
+	// applyPatchRetry mirrors MainAgent's unchanged-patch gate. Execution
+	// goroutines consult it, so the guard synchronizes its own state.
+	applyPatchRetry applyPatchRetryGuard
 
 	// Idle timeout: starts when LLM returns pure text (no tool_calls).
 	// MainAgent auto-intervenes on timeout.
@@ -1116,6 +1119,7 @@ func (s *SubAgent) newTurn() *Turn {
 	// history: a new mailbox delivery targets new work, so stale streaks
 	// would mis-advise the model.
 	s.editMatchFailStreak = nil
+	s.applyPatchRetry.reset()
 	s.nextTurnID++
 	ctx, cancel := context.WithCancel(s.parentCtx)
 	s.turn = &Turn{

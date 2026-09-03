@@ -1,12 +1,156 @@
 package agent
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/keakon/chord/internal/tools"
 )
+
+type applyPatchRetryRecord struct {
+	paths []string
+	// revisions snapshots each target file's content hash at the moment the
+	// failure armed the block. A later unchanged-patch retry compares the
+	// live hash against it so a target that changed underneath the model
+	// (edit/write/shell or an external editor — not only a successful Read)
+	// releases the block. An unreadable/missing file records "".
+	revisions map[string]string
+}
+
+// applyPatchRetryGuard blocks an unchanged apply_patch after that exact patch
+// failed to match in the current turn. A successful Read of any target proves
+// the model refreshed its source view and removes the block; a target file
+// whose content changed since the failure is an equally fresh basis, so the
+// guard re-checks file revisions before rejecting. Tool execution goroutines
+// consult the guard while result handlers and turn transitions update it, so
+// access is synchronized.
+type applyPatchRetryGuard struct {
+	mu      sync.Mutex
+	blocked map[[sha256.Size]byte]applyPatchRetryRecord
+}
+
+// applyPatchTargetRevisions hashes each blocked target at the moment the
+// failure arms the guard. Only approximate-match failures — already rare —
+// pay for whole-file hashing, and a content hash, not stat mtime alone, is
+// what lets a later retry recognize a rewrite that preserved size and mtime.
+func applyPatchTargetRevisions(paths []string) map[string]string {
+	revisions := make(map[string]string, len(paths))
+	for _, path := range paths {
+		revisions[path] = computeFileHash(path)
+	}
+	return revisions
+}
+
+func applyPatchRetrySignature(raw json.RawMessage, baseDir string) ([sha256.Size]byte, []string, bool) {
+	normalized, err := tools.NormalizeApplyPatchArgs(raw)
+	if err != nil {
+		return [sha256.Size]byte{}, nil, false
+	}
+	var args tools.ApplyPatchArgs
+	if err := json.Unmarshal(normalized, &args); err != nil {
+		return [sha256.Size]byte{}, nil, false
+	}
+	targets, err := tools.ApplyPatchTargets(normalized, baseDir)
+	if err != nil {
+		return [sha256.Size]byte{}, nil, false
+	}
+	paths := tools.MutationTargetPaths(targets)
+	if len(paths) == 0 {
+		return [sha256.Size]byte{}, nil, false
+	}
+	patch := strings.ReplaceAll(strings.TrimSpace(args.Patch), "\r\n", "\n")
+	fingerprint := sha256.Sum256([]byte(strings.Join(paths, "\x00") + "\x00" + patch))
+	return fingerprint, paths, true
+}
+
+func (g *applyPatchRetryGuard) reject(tcName string, raw json.RawMessage, baseDir string) error {
+	if g == nil || tools.NormalizeName(tcName) != tools.NameApplyPatch {
+		return nil
+	}
+	fingerprint, _, ok := applyPatchRetrySignature(raw, baseDir)
+	if !ok {
+		return nil
+	}
+	g.mu.Lock()
+	record, blocked := g.blocked[fingerprint]
+	g.mu.Unlock()
+	if !blocked {
+		return nil
+	}
+	// Release the block when any target demonstrably changed since the
+	// failure: the patch may now match the fresh content (a rewrite by
+	// edit/write/shell or an external editor is as new a basis as a Read).
+	// An unchanged retry fails again and re-arms the guard on the new failure.
+	for path, revision := range record.revisions {
+		if computeFileHash(path) != revision {
+			g.mu.Lock()
+			delete(g.blocked, fingerprint)
+			g.mu.Unlock()
+			return nil
+		}
+	}
+	displayPaths := make([]string, len(record.paths))
+	for i, path := range record.paths {
+		displayPaths[i] = displayPathFromWorkDir(baseDir, path)
+	}
+	target := displayPaths[0]
+	if len(displayPaths) > 1 {
+		target = "one of these targets: " + strings.Join(displayPaths, ", ")
+	}
+	return fmt.Errorf("apply_patch rejected before execution: this exact patch already failed to match %s in the current turn; read the current target range, rebuild the hunk from that fresh output, and submit a changed patch instead of retrying the same patch unchanged", target)
+}
+
+func (g *applyPatchRetryGuard) observeResult(name, argsJSON, baseDir string, err error) {
+	if g == nil {
+		return
+	}
+	switch tools.NormalizeName(name) {
+	case tools.NameApplyPatch:
+		if !tools.IsApproximateMatchFailure(tools.NameApplyPatch, err) {
+			return
+		}
+		fingerprint, paths, ok := applyPatchRetrySignature(json.RawMessage(argsJSON), baseDir)
+		if !ok {
+			return
+		}
+		g.mu.Lock()
+		if g.blocked == nil {
+			g.blocked = make(map[[sha256.Size]byte]applyPatchRetryRecord)
+		}
+		g.blocked[fingerprint] = applyPatchRetryRecord{paths: paths, revisions: applyPatchTargetRevisions(paths)}
+		g.mu.Unlock()
+	case tools.NameRead:
+		if err != nil {
+			return
+		}
+		path := tools.ExtractReadPathFromArgsInDir(json.RawMessage(argsJSON), baseDir)
+		if path == "" {
+			return
+		}
+		g.mu.Lock()
+		for fingerprint, record := range g.blocked {
+			for _, target := range record.paths {
+				if target == path {
+					delete(g.blocked, fingerprint)
+					break
+				}
+			}
+		}
+		g.mu.Unlock()
+	}
+}
+
+func (g *applyPatchRetryGuard) reset() {
+	if g == nil {
+		return
+	}
+	g.mu.Lock()
+	g.blocked = nil
+	g.mu.Unlock()
+}
 
 // editRetryAdviceThreshold is the number of repeated approximate-match
 // failures for the same edit/apply_patch target before the agent injects a
@@ -34,6 +178,14 @@ const editRetryAdviceCap = 4
 // reader/writer, so it needs no locking.
 func appendEditRetryAdvice(streaks *map[string]int, contextResult, name, argsJSON, baseDir string, err error, isError bool) string {
 	name = tools.NormalizeName(name)
+	if name == tools.NameRead {
+		if !isError && *streaks != nil {
+			if path := tools.ExtractReadPathFromArgsInDir(json.RawMessage(argsJSON), baseDir); path != "" {
+				delete(*streaks, path)
+			}
+		}
+		return contextResult
+	}
 	if name != tools.NameEdit && name != tools.NameApplyPatch {
 		return contextResult
 	}

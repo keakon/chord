@@ -63,6 +63,7 @@ func (a *MainAgent) toolExecutionPipeline() toolExecutionPipeline {
 		emit:             a.emitToTUI,
 		projectRoot:      a.projectRoot,
 		guidance:         mainToolOutputGuidance,
+		applyPatchRetry:  &a.applyPatchRetry,
 		currentRuleset: func() permission.Ruleset {
 			return a.effectiveRuleset()
 		},

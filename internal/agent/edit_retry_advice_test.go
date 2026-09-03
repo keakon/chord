@@ -1,13 +1,16 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -74,6 +77,18 @@ func TestAppendEditRetryAdviceSuccessResetsStreak(t *testing.T) {
 	out = applyAdvice(a, out, payload, true)   // streak 2
 	if !strings.Contains(out, "2 repeated approximate-match failures") {
 		t.Fatalf("out = %q, want advisory only after two failures since the last success", out)
+	}
+}
+
+func TestAppendEditRetryAdviceSuccessfulReadResetsStreak(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	failure := editRetryPayload(tools.NameEdit, `{"path":"demo.md"}`, editMatchFailureError())
+	_ = applyAdvice(a, "err", failure, true)
+	read := editRetryPayload(tools.NameRead, `{"path":"demo.md","offset":1,"limit":20}`, nil)
+	_ = applyAdvice(a, "ok", read, false)
+	out := applyAdvice(a, "err", failure, true)
+	if strings.Contains(out, "repeated approximate-match") {
+		t.Fatalf("out = %q, want the successful read to start a fresh failure streak", out)
 	}
 }
 
@@ -330,6 +345,92 @@ func TestEditRetryStreakResetsOnNewTurn(t *testing.T) {
 	}
 }
 
+func TestMainAgentApplyPatchRetryRequiresSuccessfulRead(t *testing.T) {
+	projectRoot := t.TempDir()
+	path := filepath.Join(projectRoot, "demo.txt")
+	if err := os.WriteFile(path, []byte("current\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := newTestMainAgent(t, projectRoot)
+	a.tools.Register(tools.ReadTool{BaseDir: projectRoot})
+	a.tools.Register(tools.ApplyPatchTool{BaseDir: projectRoot})
+	a.newTurn()
+
+	patch := "*** Begin Patch\n" +
+		"*** Update File: demo.txt\n" +
+		"@@\n" +
+		"-expected\n" +
+		"+replacement\n" +
+		"*** End Patch"
+	argsJSON := mustPatchArgs(t, patch)
+	first, firstErr := a.executeToolCall(context.Background(), message.ToolCall{
+		ID:   "patch-1",
+		Name: tools.NameApplyPatch,
+		Args: json.RawMessage(argsJSON),
+	})
+	if firstErr == nil || !strings.Contains(firstErr.Error(), "hunk not found") {
+		t.Fatalf("first error = %v, want ordinary hunk-not-found diagnostic", firstErr)
+	}
+	a.applyPatchRetry.observeResult(tools.NameApplyPatch, first.EffectiveArgsJSON, projectRoot, firstErr)
+
+	blocked, blockedErr := a.executeToolCall(context.Background(), message.ToolCall{
+		ID:   "patch-2",
+		Name: tools.NameApplyPatch,
+		Args: json.RawMessage(argsJSON),
+	})
+	if blockedErr == nil || !strings.Contains(blockedErr.Error(), "this exact patch already failed") {
+		t.Fatalf("second error = %v, want unchanged-patch rejection", blockedErr)
+	}
+	if !blocked.ExecStartedAt.IsZero() {
+		t.Fatalf("blocked retry execution started at %v, want rejection before execution", blocked.ExecStartedAt)
+	}
+
+	if err := os.WriteFile(path, []byte("expected\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	readArgs := `{"path":"demo.txt","offset":1,"limit":20}`
+	readResult, readErr := a.executeToolCall(context.Background(), message.ToolCall{
+		ID:   "read-1",
+		Name: tools.NameRead,
+		Args: json.RawMessage(readArgs),
+	})
+	if readErr != nil {
+		t.Fatalf("read current target: %v", readErr)
+	}
+	a.applyPatchRetry.observeResult(tools.NameRead, readResult.EffectiveArgsJSON, projectRoot, nil)
+
+	if _, err := a.executeToolCall(context.Background(), message.ToolCall{
+		ID:   "patch-3",
+		Name: tools.NameApplyPatch,
+		Args: json.RawMessage(argsJSON),
+	}); err != nil {
+		t.Fatalf("retry after successful read: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "replacement\n" {
+		t.Fatalf("file content = %q, want replacement", got)
+	}
+}
+
+func TestApplyPatchRetryAllowsChangedPatchWithoutRead(t *testing.T) {
+	projectRoot := t.TempDir()
+	stalePatch := "*** Begin Patch\n*** Update File: demo.txt\n@@\n-old\n+new\n*** End Patch"
+	revisedPatch := "*** Begin Patch\n*** Update File: demo.txt\n@@\n-current\n+new\n*** End Patch"
+	var guard applyPatchRetryGuard
+	guard.observeResult(
+		tools.NameApplyPatch,
+		mustPatchArgs(t, stalePatch),
+		projectRoot,
+		errors.New("hunk not found (1/1)"),
+	)
+	if err := guard.reject(tools.NameApplyPatch, json.RawMessage(mustPatchArgs(t, revisedPatch)), projectRoot); err != nil {
+		t.Fatalf("changed patch rejected: %v", err)
+	}
+}
+
 // Path spellings that resolve to the same file must share one streak: the
 // advisory keys on the resolved path, so `demo.md`, `./demo.md` and the
 // absolute path all increment the same counter.
@@ -386,5 +487,73 @@ func collectToolResultEventResults(t *testing.T, a *MainAgent, callID string) []
 		default:
 			return results
 		}
+	}
+}
+
+// A target rewrite by another tool (edit/write/shell) or an external editor
+// is as fresh a basis for a retry as a successful Read: the guard snapshots
+// the target's content hash when the failure arms the block, and an
+// unchanged-patch retry that finds the file changed is allowed to execute —
+// it can now match the new content, and if it fails again the failure re-arms
+// the guard on the new revision.
+func TestApplyPatchRetryUnblocksAfterTargetRewriteWithoutRead(t *testing.T) {
+	projectRoot := t.TempDir()
+	path := filepath.Join(projectRoot, "demo.txt")
+	if err := os.WriteFile(path, []byte("current\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := newTestMainAgent(t, projectRoot)
+	a.tools.Register(tools.ReadTool{BaseDir: projectRoot})
+	a.tools.Register(tools.ApplyPatchTool{BaseDir: projectRoot})
+	a.newTurn()
+
+	patch := "*** Begin Patch\n" +
+		"*** Update File: demo.txt\n" +
+		"@@\n" +
+		"-old\n" +
+		"+replacement\n" +
+		"*** End Patch"
+	argsJSON := mustPatchArgs(t, patch)
+	first, firstErr := a.executeToolCall(context.Background(), message.ToolCall{
+		ID:   "patch-1",
+		Name: tools.NameApplyPatch,
+		Args: json.RawMessage(argsJSON),
+	})
+	if firstErr == nil || !strings.Contains(firstErr.Error(), "hunk not found") {
+		t.Fatalf("first error = %v, want ordinary hunk-not-found diagnostic", firstErr)
+	}
+	a.applyPatchRetry.observeResult(tools.NameApplyPatch, first.EffectiveArgsJSON, projectRoot, firstErr)
+
+	blocked, blockedErr := a.executeToolCall(context.Background(), message.ToolCall{
+		ID:   "patch-2",
+		Name: tools.NameApplyPatch,
+		Args: json.RawMessage(argsJSON),
+	})
+	if blockedErr == nil || !strings.Contains(blockedErr.Error(), "this exact patch already failed") {
+		t.Fatalf("second error = %v, want unchanged-patch rejection while the file is unchanged", blockedErr)
+	}
+	if !blocked.ExecStartedAt.IsZero() {
+		t.Fatalf("blocked retry execution started at %v, want rejection before execution", blocked.ExecStartedAt)
+	}
+
+	// The model's own earlier edit/write (or an external editor) rewrote the
+	// file to the content this patch expects — note there is no Read here.
+	if err := os.WriteFile(path, []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := a.executeToolCall(context.Background(), message.ToolCall{
+		ID:   "patch-3",
+		Name: tools.NameApplyPatch,
+		Args: json.RawMessage(argsJSON),
+	}); err != nil {
+		t.Fatalf("retry after the target file changed: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "replacement\n" {
+		t.Fatalf("file content = %q, want replacement", got)
 	}
 }

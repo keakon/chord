@@ -376,6 +376,7 @@ func (a *MainAgent) newTurn() {
 	// history: a new user message targets new work, so stale streaks would
 	// mis-advise the model.
 	a.editMatchFailStreak = nil
+	a.applyPatchRetry.reset()
 	ctx, cancel := context.WithCancel(a.parentCtx)
 	a.turn = &Turn{
 		ID:                    a.nextTurnID,

@@ -277,7 +277,9 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 	// contextResult changes; the display result (and the TUI) stays untouched.
 	// Runs behind the efficiency note so it lands last among the agent-appended
 	// notes.
-	contextResult = appendEditRetryAdvice(&s.editMatchFailStreak, contextResult, result.Name, result.ArgsJSON, s.toolExecutionPipeline().effectiveToolBaseDir(), result.Error, isError)
+	toolBaseDir := s.toolExecutionPipeline().effectiveToolBaseDir()
+	s.applyPatchRetry.observeResult(result.Name, result.ArgsJSON, toolBaseDir, result.Error)
+	contextResult = appendEditRetryAdvice(&s.editMatchFailStreak, contextResult, result.Name, result.ArgsJSON, toolBaseDir, result.Error, isError)
 
 	s.fireHookBackground(s.turn.Ctx, hook.OnToolResult, s.turn.ID, buildToolResultHookData(
 		result.Name,

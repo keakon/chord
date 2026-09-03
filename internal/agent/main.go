@@ -764,6 +764,10 @@ type MainAgent struct {
 	// drifted target text. Reset at every new turn; the event loop is the
 	// only reader/writer.
 	editMatchFailStreak map[string]int
+	// applyPatchRetry blocks an unchanged patch after a match failure until
+	// the model successfully reads one of its targets. Unlike the advisory
+	// streak above, execution goroutines also consult this state.
+	applyPatchRetry applyPatchRetryGuard
 
 	// pendingRecoveryPrompt is a request-scoped recovery prompt injected after
 	// length-recovery auto compaction succeeds. It is consumed as a one-shot

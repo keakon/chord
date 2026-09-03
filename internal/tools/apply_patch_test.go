@@ -136,39 +136,15 @@ func TestApplyPatchUpdatesExistingEmptyFileWithPureInsertion(t *testing.T) {
 	}
 }
 
-func TestApplyPatchReportsNoNetChangesForContextOnlyUpdate(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "unchanged.md")
-	content := "## 5. Related docs\n"
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		t.Fatal(err)
-	}
+func TestApplyPatchRejectsContextOnlyUpdate(t *testing.T) {
 	patch := "*** Begin Patch\n" +
 		"*** Update File: unchanged.md\n" +
 		"@@\n" +
 		" ## 5. Related docs\n" +
 		"*** End Patch"
-	plan, err := BuildApplyPatchPlan(context.Background(), patch, dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(plan.Mutations) != 0 {
-		t.Fatalf("mutations = %#v, want no filesystem mutations", plan.Mutations)
-	}
-
-	result, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result != "Applied patch:\nNo net file changes" {
-		t.Fatalf("result = %q, want no-net-changes result", result)
-	}
-	got, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(got) != content {
-		t.Fatalf("unchanged.md = %q, want %q", got, content)
+	_, err := ParseApplyPatch(patch)
+	if err == nil || !strings.Contains(err.Error(), "at least one added or removed line is required") {
+		t.Fatalf("err = %v, want context-only hunk rejection", err)
 	}
 }
 
@@ -491,7 +467,7 @@ func TestApplyPatchCodexParserAndHunkCompatibility(t *testing.T) {
 	})
 
 	t.Run("implicit hunk preserves bare empty context", func(t *testing.T) {
-		doc, err := ParseApplyPatch("*** Begin Patch\n*** Update File: file.txt\n context before\n\n context after\n*** End Patch")
+		doc, err := ParseApplyPatch("*** Begin Patch\n*** Update File: file.txt\n context before\n\n-context after\n+context updated\n*** End Patch")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -499,7 +475,7 @@ func TestApplyPatchCodexParserAndHunkCompatibility(t *testing.T) {
 			t.Fatalf("doc = %#v", doc)
 		}
 		lines := doc.Operations[0].Hunks[0].Lines
-		if len(lines) != 3 || lines[1].Kind != ' ' || lines[1].Text != "" {
+		if len(lines) != 4 || lines[1].Kind != ' ' || lines[1].Text != "" {
 			t.Fatalf("lines = %#v, want bare empty context line", lines)
 		}
 	})
@@ -1028,6 +1004,32 @@ func TestApplyPatchHunkFailurePointsAtClosestFileLine(t *testing.T) {
 	}
 	if !strings.Contains(msg, "middle line") || !strings.Contains(msg, "muddle line") {
 		t.Fatalf("error = %q, want both the file line and the expected line", msg)
+	}
+	assertApplyPatchFile(t, path, content)
+}
+
+func TestApplyPatchHunkFailureExplainsWhitespaceOnlyContext(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "proposal.md")
+	content := "first line\nmiddle line\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	patch := "*** Begin Patch\n" +
+		"*** Update File: proposal.md\n" +
+		"@@\n" +
+		" \t\n" +
+		"-missing line\n" +
+		"+replacement\n" +
+		"*** End Patch"
+
+	_, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+	if err == nil {
+		t.Fatal("Execute error = nil, want hunk mismatch")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "whitespace-only context lines are literal source lines") {
+		t.Fatalf("error = %q, want whitespace-placeholder guidance", msg)
 	}
 	assertApplyPatchFile(t, path, content)
 }
@@ -2478,7 +2480,7 @@ func updateHunksFor(t *testing.T, patch string) []applyPatchHunk {
 func TestApplyPatchTolerantMatchCoversWhitespaceAndPunctuation(t *testing.T) {
 	file := "alpha\nit’s here\nbeta\n"
 	hunks := updateHunksFor(t, "*** Begin Patch\n*** Update File: f\n@@\n-alpha\n it's here  \n+new\n*** End Patch")
-	got, _, err := applyApplyPatchHunks(context.Background(), file, hunks)
+	got, _, _, err := applyApplyPatchHunks(context.Background(), file, hunks)
 	if err != nil {
 		t.Fatalf("applyApplyPatchHunks error = %v, want tolerance to cover trailing whitespace plus punctuation", err)
 	}
@@ -2490,7 +2492,7 @@ func TestApplyPatchTolerantMatchCoversWhitespaceAndPunctuation(t *testing.T) {
 func TestApplyPatchTolerantMatchCoversFullWidthPunctuation(t *testing.T) {
 	file := "alpha\n注意：这里\nbeta\n"
 	hunks := updateHunksFor(t, "*** Begin Patch\n*** Update File: f\n@@\n alpha\n 注意: 这里\n-beta\n+new\n*** End Patch")
-	got, _, err := applyApplyPatchHunks(context.Background(), file, hunks)
+	got, _, _, err := applyApplyPatchHunks(context.Background(), file, hunks)
 	if err != nil {
 		t.Fatalf("applyApplyPatchHunks error = %v, want full-width punctuation tolerance", err)
 	}
@@ -2505,13 +2507,40 @@ func TestApplyPatchTolerantMatchCoversFullWidthPunctuation(t *testing.T) {
 func TestApplyPatchTolerantMatchRejectsAmbiguousCandidates(t *testing.T) {
 	file := "it’s here\nx\nit’s here\nx\nit’s here\n"
 	hunks := updateHunksFor(t, "*** Begin Patch\n*** Update File: f\n@@\n it's here\n+y\n*** End Patch")
-	_, _, err := applyApplyPatchHunks(context.Background(), file, hunks)
+	_, _, _, err := applyApplyPatchHunks(context.Background(), file, hunks)
 	if err == nil {
 		t.Fatal("applyApplyPatchHunks error = nil, want the ambiguous tolerant match rejected")
 	}
 	msg := err.Error()
 	if !strings.Contains(msg, "ambiguous") || !strings.Contains(msg, "1, 3, 5") {
 		t.Fatalf("err = %q, want an ambiguity notice naming all three lines", msg)
+	}
+}
+
+func TestApplyPatchFuzzyMatchReplacesUniqueNearMatch(t *testing.T) {
+	file := "before anchor\nold code\nafter anchor\n"
+	hunks := updateHunksFor(t, "*** Begin Patch\n*** Update File: f\n@@\n before anchor\n-old cod\n+replacement\n after anchor\n*** End Patch")
+	got, _, fuzzy, err := applyApplyPatchHunks(context.Background(), file, hunks)
+	if err != nil {
+		t.Fatalf("applyApplyPatchHunks error = %v, want unique fuzzy match to apply", err)
+	}
+	if fuzzy != 1 {
+		t.Fatalf("fuzzy hunk count = %d, want 1", fuzzy)
+	}
+	if got != "before anchor\nreplacement\nafter anchor\n" {
+		t.Fatalf("result = %q, want current context preserved around replacement", got)
+	}
+}
+
+func TestApplyPatchFuzzyMatchRejectsAmbiguousNearMatches(t *testing.T) {
+	file := "before anchor\nold code\nafter anchor\nbefore anchor\nold code\nafter anchor\n"
+	hunks := updateHunksFor(t, "*** Begin Patch\n*** Update File: f\n@@\n before anchor\n-old code!\n+replacement\n after anchor\n*** End Patch")
+	_, _, _, err := applyApplyPatchHunks(context.Background(), file, hunks)
+	if err == nil {
+		t.Fatal("applyApplyPatchHunks error = nil, want ambiguous fuzzy match rejected")
+	}
+	if !strings.Contains(err.Error(), "safe fuzzy matching is ambiguous at lines") {
+		t.Fatalf("error = %q, want fuzzy ambiguity guidance", err)
 	}
 }
 
@@ -2555,7 +2584,7 @@ func TestApplyPatchHunkMismatchErrorPinpointsDivergence(t *testing.T) {
 	// line "c" does not exist right after it — so the hunk's first line
 	// matches but the sequence breaks at the second line.
 	_, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(),
-		applyPatchArgs(t, "*** Begin Patch\n*** Update File: "+path+"\n@@\n a\n c\n d\n*** End Patch\n"))
+		applyPatchArgs(t, "*** Begin Patch\n*** Update File: "+path+"\n@@\n a\n c\n-d\n+e\n*** End Patch\n"))
 	if err == nil {
 		t.Fatal("Execute error = nil, want hunk-not-found failure")
 	}

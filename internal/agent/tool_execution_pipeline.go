@@ -47,6 +47,7 @@ type toolExecutionPipeline struct {
 	toolBaseDir      string
 	writeScope       *tools.WriteScope
 	writeScopeDir    string
+	applyPatchRetry  *applyPatchRetryGuard
 
 	currentRuleset                func() permission.Ruleset
 	refreshRulesetAfterRuleIntent func(toolName string, intent *ConfirmRuleIntent) permission.Ruleset
@@ -462,6 +463,9 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 	if err := p.validateWriteScope(tc); err != nil {
 		return execResult, err
 	}
+	if err := p.applyPatchRetry.reject(tc.Name, tc.Args, p.effectiveToolBaseDir()); err != nil {
+		return execResult, err
+	}
 
 	// Wall-clock execution anchor: set after permission confirmation, hooks,
 	// and argument validation all passed, before resource acquisition (file
@@ -667,6 +671,9 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 	// guidance for malformed/empty args, unknown fields stripped and reported.
 	ignored, _, err := p.validateToolCallArgs(&tc, &execResult)
 	if err != nil {
+		return execResult, err
+	}
+	if err := p.applyPatchRetry.reject(tc.Name, tc.Args, p.effectiveToolBaseDir()); err != nil {
 		return execResult, err
 	}
 	// Wall-clock execution anchor for the speculative run: after schema

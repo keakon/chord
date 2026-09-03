@@ -41,6 +41,7 @@ func (s *SubAgent) toolExecutionPipeline() toolExecutionPipeline {
 		emit:             emit,
 		guidance:         subToolOutputGuidance,
 		logPrefix:        "SubAgent:",
+		applyPatchRetry:  &s.applyPatchRetry,
 		projectRoot:      s.parent.projectRoot,
 		toolBaseDir:      s.workDir,
 		writeScope:       &s.writeScope,

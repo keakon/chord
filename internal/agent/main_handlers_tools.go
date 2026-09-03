@@ -435,7 +435,9 @@ func (a *MainAgent) handleToolResult(evt Event) {
 	// after the hooks above so user-configured transformations are not
 	// overwritten. Only contextResult changes; displayResult (and the TUI)
 	// stays untouched.
-	contextResult = appendEditRetryAdvice(&a.editMatchFailStreak, contextResult, payload.Name, payload.ArgsJSON, a.toolExecutionPipeline().effectiveToolBaseDir(), payload.Error, isError)
+	toolBaseDir := a.toolExecutionPipeline().effectiveToolBaseDir()
+	a.applyPatchRetry.observeResult(payload.Name, payload.ArgsJSON, toolBaseDir, payload.Error)
+	contextResult = appendEditRetryAdvice(&a.editMatchFailStreak, contextResult, payload.Name, payload.ArgsJSON, toolBaseDir, payload.Error, isError)
 
 	if payload.Name == tools.NameHandoff && payload.Error == nil {
 		var pcData struct {

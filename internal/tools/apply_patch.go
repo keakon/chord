@@ -121,6 +121,7 @@ type PlannedMutation struct {
 	Added              int
 	Removed            int
 	PunctuationHunks   int
+	FuzzyHunks         int
 	// StrippedInvisible reports the invisible runes cleaned from the
 	// model-added text of this mutation while the plan was built — the
 	// floating-mark strip runs on added (+) lines and add-file content,
@@ -249,7 +250,9 @@ func (ApplyPatchTool) Description() string {
 	return "The `apply_patch` tool can be used to edit files. " +
 		"Your patch is a unified diff wrapped in a `*** Begin Patch` / `*** End Patch` envelope. " +
 		"Each operation starts with one of `*** Add File: <path>`, `*** Delete File: <path>`, `*** Update File: <path>` (optionally followed by `*** Move to: <new path>`). " +
-		"Hunks are introduced by `@@` and each line starts with `+` (added), `-` (removed), or a space (context); new file contents are `+` lines."
+		"Hunks are introduced by `@@` and each line starts with `+` (added), `-` (removed), or a space (context); new file contents are `+` lines. " +
+		"Context lines are literal complete source lines, not placeholders: do not use whitespace-only lines or `...` to omit context. " +
+		"Prefer the smallest hunk with distinctive context; after a mismatch, re-read the current target range and rebuild the hunk instead of retrying it unchanged."
 }
 func (ApplyPatchTool) Parameters() map[string]any {
 	return map[string]any{
@@ -257,7 +260,7 @@ func (ApplyPatchTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"patch": map[string]any{
 				"type":        "string",
-				"description": "Complete Codex apply_patch text: a `*** Begin Patch` / `*** End Patch` envelope wrapping Add/Delete/Update operations with `@@` hunks; new file contents are `+` lines. Paths are relative to the session working directory, or absolute.",
+				"description": "Complete Codex apply_patch text: a `*** Begin Patch` / `*** End Patch` envelope wrapping Add/Delete/Update operations with `@@` hunks; new file contents are `+` lines. Paths are relative to the session working directory, or absolute. Context lines must be literal complete source lines; do not use whitespace-only lines or `...` as placeholders. Prefer small hunks with distinctive context, and rebuild a hunk from a fresh read after a mismatch.",
 			},
 		},
 		"required":             []string{"patch"},
@@ -575,6 +578,11 @@ func ParseApplyPatch(text string) (applyPatchDocument, error) {
 				}
 				if len(h.Lines) == 0 {
 					return applyPatchDocument{}, fmt.Errorf("invalid empty update hunk for %s", op.Path)
+				}
+				if !slices.ContainsFunc(h.Lines, func(line applyPatchLine) bool {
+					return line.Kind == '+' || line.Kind == '-'
+				}) {
+					return applyPatchDocument{}, fmt.Errorf("invalid update hunk for %s: at least one added or removed line is required", op.Path)
 				}
 				op.Hunks = append(op.Hunks, h)
 			}
@@ -1105,6 +1113,7 @@ type applyPatchVirtualFile struct {
 	mode             os.FileMode
 	touched          bool
 	punctuationHunks int
+	fuzzyHunks       int
 	// cleanedInvisible accumulates the runes stripped from this file's
 	// model-added text while the plan is built (see cleanApplyPatchAddedLines)
 	// and is copied onto the committed mutation so the result note can
@@ -1213,11 +1222,12 @@ func applyPatchOperationToVirtualState(ctx context.Context, states map[string]*a
 			if err != nil {
 				return fmt.Errorf("read update source %s: %w", op.Path, err)
 			}
-			after, punctuationHunks, err := applyApplyPatchHunks(ctx, decoded.Text, hunks)
+			after, punctuationHunks, fuzzyHunks, err := applyApplyPatchHunks(ctx, decoded.Text, hunks)
 			if err != nil {
 				return fmt.Errorf("update %s: %w", op.Path, err)
 			}
 			state.punctuationHunks += punctuationHunks
+			state.fuzzyHunks += fuzzyHunks
 			if len(stripped) > 0 {
 				if state.cleanedInvisible == nil {
 					state.cleanedInvisible = map[rune]int{}
@@ -1249,6 +1259,7 @@ func applyPatchOperationToVirtualState(ctx context.Context, states map[string]*a
 		target.mode = state.mode
 		target.originPath = state.originPath
 		target.punctuationHunks += state.punctuationHunks
+		target.fuzzyHunks += state.fuzzyHunks
 		if len(state.cleanedInvisible) > 0 {
 			if target.cleanedInvisible == nil {
 				target.cleanedInvisible = map[rune]int{}
@@ -1262,6 +1273,7 @@ func applyPatchOperationToVirtualState(ctx context.Context, states map[string]*a
 		state.bytes = nil
 		state.originPath = ""
 		state.punctuationHunks = 0
+		state.fuzzyHunks = 0
 		return nil
 	default:
 		return fmt.Errorf("unsupported apply_patch operation %q", op.Kind)
@@ -1308,6 +1320,7 @@ func buildApplyPatchMutationPlan(states map[string]*applyPatchVirtualFile) Mutat
 				AfterBytes:         append([]byte(nil), target.bytes...),
 				AfterMode:          target.mode,
 				PunctuationHunks:   target.punctuationHunks,
+				FuzzyHunks:         target.fuzzyHunks,
 				StrippedInvisible:  target.cleanedInvisible,
 			}
 			populateApplyPatchMutationDiff(&mutation, source.displayPath, target.displayPath)
@@ -1337,6 +1350,7 @@ func buildApplyPatchMutationPlan(states map[string]*applyPatchVirtualFile) Mutat
 			AfterBytes:       append([]byte(nil), state.bytes...),
 			AfterMode:        state.mode,
 			PunctuationHunks: state.punctuationHunks,
+			FuzzyHunks:       state.fuzzyHunks,
 		}
 		switch {
 		case !state.initialExists && state.exists:
@@ -1468,7 +1482,7 @@ func cleanApplyPatchAddedLines(hunks []applyPatchHunk) ([]applyPatchHunk, map[ru
 	return cleaned, counts
 }
 
-func applyApplyPatchHunks(ctx context.Context, content string, hunks []applyPatchHunk) (string, int, error) {
+func applyApplyPatchHunks(ctx context.Context, content string, hunks []applyPatchHunk) (string, int, int, error) {
 	newline := "\n"
 	if strings.Contains(content, "\r\n") {
 		newline = "\r\n"
@@ -1480,6 +1494,7 @@ func applyApplyPatchHunks(ctx context.Context, content string, hunks []applyPatc
 	}
 	searchStart := 0
 	punctuationHunks := 0
+	fuzzyHunks := 0
 	for i, hunk := range hunks {
 		if len(hunks) > 1 {
 			reportToolProgress(ctx, ToolProgressSnapshot{Text: fmt.Sprintf("matching hunk %d/%d", i+1, len(hunks))})
@@ -1510,7 +1525,9 @@ func applyApplyPatchHunks(ctx context.Context, content string, hunks []applyPatc
 			match = findApplyPatchSequence(fileLines, oldSeq, headerPos, hunk.EndOfFile)
 		}
 		punctuationMatch := false
+		fuzzyMatch := false
 		var punctuationCandidates []int
+		var fuzzyCandidates []int
 		if match < 0 && len(oldSeq) > 0 {
 			match, punctuationCandidates = findUniqueApplyPatchSequence(
 				fileLines, oldSeq, searchStart, hunk.EndOfFile, normalizePatchTolerantLine,
@@ -1519,8 +1536,14 @@ func applyApplyPatchHunks(ctx context.Context, content string, hunks []applyPatc
 				punctuationMatch = true
 			}
 		}
+		if match < 0 && len(oldSeq) > 0 {
+			match, fuzzyCandidates = findUniqueFuzzyApplyPatchMatch(fileLines, hunk, oldSeq, searchStart)
+			if match >= 0 {
+				fuzzyMatch = true
+			}
+		}
 		if match < 0 {
-			return "", 0, applyPatchPartialHunkError(applyPatchHunkNotFoundError(fileLines, oldSeq, searchStart, i, len(hunks), hunk.EndOfFile, punctuationCandidates), i, len(hunks))
+			return "", 0, 0, applyPatchPartialHunkError(applyPatchHunkNotFoundErrorWithHints(fileLines, oldSeq, searchStart, i, len(hunks), hunk.EndOfFile, punctuationCandidates, fuzzyCandidates, hunkHasWhitespaceOnlyContext(hunk)), i, len(hunks))
 		}
 		matched := fileLines[match : match+len(oldSeq)]
 		newSeq := buildApplyPatchNewSequence(hunk, matched)
@@ -1528,9 +1551,12 @@ func applyApplyPatchHunks(ctx context.Context, content string, hunks []applyPatc
 			var ok bool
 			newSeq, ok = buildPunctuationTolerantApplyPatchSequence(hunk, matched)
 			if !ok {
-				return "", 0, applyPatchPartialHunkError(applyPatchUnsafePunctuationMatchError(oldSeq, i, len(hunks), match), i, len(hunks))
+				return "", 0, 0, applyPatchPartialHunkError(applyPatchUnsafePunctuationMatchError(oldSeq, i, len(hunks), match), i, len(hunks))
 			}
 			punctuationHunks++
+		}
+		if fuzzyMatch {
+			fuzzyHunks++
 		}
 		replaced := make([]string, 0, len(fileLines)-len(oldSeq)+len(newSeq))
 		replaced = append(replaced, fileLines[:match]...)
@@ -1548,7 +1574,112 @@ func applyApplyPatchHunks(ctx context.Context, content string, hunks []applyPatc
 	if newline == "\r\n" {
 		out = strings.ReplaceAll(out, "\n", "\r\n")
 	}
-	return out, punctuationHunks, nil
+	return out, punctuationHunks, fuzzyHunks, nil
+}
+
+const (
+	minApplyPatchFuzzySimilarity   = 0.8
+	minApplyPatchFuzzyContextRunes = 4
+)
+
+// findUniqueFuzzyApplyPatchMatch permits only a narrow stale-line recovery:
+// one changed removed line, two distinctive unchanged context lines on
+// opposite sides, and exactly one candidate window. The matched current line
+// is replaced, while all context bytes are preserved from the file.
+func findUniqueFuzzyApplyPatchMatch(fileLines []string, hunk applyPatchHunk, oldSeq []string, searchStart int) (int, []int) {
+	removedIndex := -1
+	removedCount := 0
+	addedCount := 0
+	contextCount := 0
+	contextRunes := 0
+	for _, line := range hunk.Lines {
+		switch line.Kind {
+		case '-':
+			removedCount++
+		case '+':
+			addedCount++
+		case ' ':
+			contextCount++
+			norm := normalizePatchTolerantLine(line.Text)
+			if norm == "" {
+				return -1, nil
+			}
+			contextRunes += len([]rune(norm))
+		}
+	}
+	if removedCount != 1 || addedCount != 1 || contextCount < 2 || contextRunes < minApplyPatchFuzzyContextRunes {
+		return -1, nil
+	}
+	oldIndex := 0
+	contextBefore := false
+	contextAfter := false
+	for _, line := range hunk.Lines {
+		switch line.Kind {
+		case '-':
+			removedIndex = oldIndex
+			oldIndex++
+		case ' ':
+			if removedIndex < 0 {
+				contextBefore = true
+			} else {
+				contextAfter = true
+			}
+			oldIndex++
+		}
+	}
+	if removedIndex < 0 || !contextBefore || !contextAfter || oldIndex != len(oldSeq) {
+		return -1, nil
+	}
+	oldRemoved := normalizePatchTolerantLine(oldSeq[removedIndex])
+	if oldRemoved == "" {
+		return -1, nil
+	}
+
+	maxStart := len(fileLines) - len(oldSeq)
+	if maxStart < 0 {
+		return -1, nil
+	}
+	start := max(0, searchStart)
+	if hunk.EndOfFile {
+		start = maxStart
+		maxStart = start
+	}
+	if start > maxStart {
+		return -1, nil
+	}
+	var candidates []int
+	for candidate := start; candidate <= maxStart; candidate++ {
+		matches := true
+		for i, expected := range oldSeq {
+			if i == removedIndex {
+				continue
+			}
+			if normalizePatchTolerantLine(fileLines[candidate+i]) != normalizePatchTolerantLine(expected) {
+				matches = false
+				break
+			}
+		}
+		if !matches {
+			continue
+		}
+		actual := normalizePatchTolerantLine(fileLines[candidate+removedIndex])
+		if actual == oldRemoved {
+			continue
+		}
+		longer := max(len([]rune(oldRemoved)), len([]rune(actual)))
+		if longer == 0 {
+			continue
+		}
+		similarity := 1 - float64(levenshteinDistance(oldRemoved, actual))/float64(longer)
+		if similarity < minApplyPatchFuzzySimilarity {
+			continue
+		}
+		candidates = append(candidates, candidate)
+	}
+	if len(candidates) == 1 {
+		return candidates[0], candidates
+	}
+	return -1, candidates
 }
 
 func buildApplyPatchNewSequence(hunk applyPatchHunk, matched []string) []string {
@@ -1710,10 +1841,29 @@ func findUniqueApplyPatchSequence(lines, pattern []string, start int, eof bool, 
 	return -1, candidates
 }
 
+func hunkHasWhitespaceOnlyContext(hunk applyPatchHunk) bool {
+	for _, line := range hunk.Lines {
+		if line.Kind == ' ' && strings.TrimSpace(line.Text) == "" {
+			return true
+		}
+	}
+	return false
+}
+
 func applyPatchHunkNotFoundError(fileLines, oldSeq []string, searchStart, index, total int, hunkEndOfFile bool, punctuationCandidates []int) error {
+	return applyPatchHunkNotFoundErrorWithHints(fileLines, oldSeq, searchStart, index, total, hunkEndOfFile, punctuationCandidates, nil, false)
+}
+
+func applyPatchHunkNotFoundErrorWithHints(fileLines, oldSeq []string, searchStart, index, total int, hunkEndOfFile bool, punctuationCandidates, fuzzyCandidates []int, whitespaceOnlyContext bool) error {
 	parts := []string{fmt.Sprintf("hunk not found (%d/%d)", index+1, total)}
+	if whitespaceOnlyContext {
+		parts = append(parts, "whitespace-only context lines are literal source lines; the leading space marks context, so do not use them as omitted-line placeholders")
+	}
 	if expected := applyPatchExpectedLineDescription(oldSeq); expected != "" {
 		parts = append(parts, expected)
+	}
+	if len(fuzzyCandidates) > 1 {
+		parts = append(parts, "safe fuzzy matching is ambiguous at lines "+formatApplyPatchCandidateLines(fuzzyCandidates))
 	}
 	if len(punctuationCandidates) > 1 {
 		parts = append(parts, tolerantMatchNote+" matching is ambiguous at lines "+formatApplyPatchCandidateLines(punctuationCandidates))
@@ -1767,7 +1917,7 @@ func applyPatchHunkNotFoundError(fileLines, oldSeq []string, searchStart, index,
 			detail += fmt.Sprintf("; line-count difference: your hunk has %d extra line(s), the file has %d extra line(s)%s", oldExtra, srcExtra, blankNote)
 		}
 		parts = append(parts, detail+"; the file may have changed — re-read the current target range and rebuild this hunk from current complete lines")
-	} else if len(punctuationCandidates) <= 1 {
+	} else if len(punctuationCandidates) <= 1 && len(fuzzyCandidates) <= 1 {
 		// With multiple tolerant candidates the match is ambiguous; a single
 		// closest line would masquerade as the unique suggestion and
 		// contradict the ambiguity note above, so require more context
@@ -2262,8 +2412,10 @@ func (t ApplyPatchTool) finishApplyPatch(ctx context.Context, plan MutationPlan)
 	}
 	var lines []string
 	punctuationHunks := 0
+	fuzzyHunks := 0
 	for _, mutation := range plan.Mutations {
 		punctuationHunks += mutation.PunctuationHunks
+		fuzzyHunks += mutation.FuzzyHunks
 		lines = append(lines, applyPatchMutationSummary(mutation, t.BaseDir))
 		invalidatePathCache(mutation.SourcePath)
 		invalidatePathCache(mutation.TargetPath)
@@ -2271,6 +2423,9 @@ func (t ApplyPatchTool) finishApplyPatch(ctx context.Context, plan MutationPlan)
 	sort.Strings(lines)
 	if punctuationHunks > 0 {
 		lines = append(lines, fmt.Sprintf("Note: used %s matching for %d hunk(s); unchanged text was preserved from the current file", tolerantMatchNote, punctuationHunks))
+	}
+	if fuzzyHunks > 0 {
+		lines = append(lines, fmt.Sprintf("Note: used safe fuzzy matching for %d hunk(s); only a unique near-match with unchanged context was accepted", fuzzyHunks))
 	}
 	out := "Applied patch:\n" + strings.Join(lines, "\n")
 	if t.LSP == nil {
