@@ -92,6 +92,11 @@ func wireMainAgentRuntime(ctx context.Context, mainAgent *agent.MainAgent, reg *
 			// paths and the accepted entries agree.
 			ContinuationStateMaxTokens: agent.CompactContinuationStateMaxTokens,
 			ProjectRoot:                mainAgent.ProjectRoot,
+			// Baked at registration so the description (hashed into the
+			// frozen tool surface) stays stable within the session; the
+			// todo-sync guidance only names todo_write when the model can
+			// actually call it.
+			TodoWriteVisible: mainAgent.MainToolVisible(tools.NameTodoWrite),
 			EstimateTokens: func(text string) int {
 				return mainAgent.EstimateTokensForText(text)
 			},

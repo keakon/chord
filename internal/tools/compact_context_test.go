@@ -385,6 +385,22 @@ func TestCompactContextDescriptionStatesBudget(t *testing.T) {
 	}
 }
 
+func TestCompactContextDescriptionTodoSyncTracksTodoWriteVisibility(t *testing.T) {
+	// The checkpoint snapshots runtime todos verbatim, so a todo list that
+	// drifted behind actual progress misleads the continuation. The sync
+	// guidance is baked at registration time — rendered only when todo_write
+	// is visible in the same surface, so the description never pushes a tool
+	// the model cannot call.
+	tool := NewCompactContextTool(CompactContextValidator{TodoWriteVisible: true})
+	if desc := tool.Description(); !strings.Contains(desc, "todo_write") {
+		t.Fatalf("description must advise syncing todos when todo_write is visible, got:\n%s", desc)
+	}
+	tool = NewCompactContextTool(CompactContextValidator{})
+	if desc := tool.Description(); strings.Contains(desc, "todo_write") {
+		t.Fatalf("description must not mention todo_write when it is not visible, got:\n%s", desc)
+	}
+}
+
 func TestCompactContextToolTraits(t *testing.T) {
 	tool := CompactContextTool{}
 	if tool.IsReadOnly() {

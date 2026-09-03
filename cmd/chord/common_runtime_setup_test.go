@@ -99,6 +99,18 @@ func TestCreateRuntimeModelDrivenCompactionWiresFlagAndTool(t *testing.T) {
 	if _, ok := ac.Registry.Get(tools.NameCompactContext); !ok {
 		t.Fatal("compact_context tool was not registered for model-driven compaction")
 	}
+	// The todo-sync guidance is gated on todo_write being visible in the same
+	// surface. This minimal harness does not register todo_write, so the
+	// baked TodoWriteVisible must be false and the description must not push
+	// todo_write. The visible case is covered by the agent MainToolVisible
+	// unit test and the tools description-gating test.
+	tool, ok := ac.Registry.Get(tools.NameCompactContext)
+	if !ok {
+		t.Fatal("compact_context tool was not registered for model-driven compaction")
+	}
+	if desc := tool.Description(); strings.Contains(desc, "todo_write") {
+		t.Fatalf("description must not mention todo_write when it is not visible, got:\n%s", desc)
+	}
 }
 
 func TestCreateRuntimeWithoutModelDrivenCompactionLeavesCapabilityOff(t *testing.T) {

@@ -61,6 +61,17 @@ type CompactContextValidator struct {
 	// they lexically resolve inside it and are normalized to
 	// workspace-relative form before storage.
 	ProjectRoot func() string
+	// TodoWriteVisible reports whether todo_write is part of the same
+	// live, model-appropriate tool surface the MainAgent builds for prompts
+	// (registered and not denied). When true, Description() adds guidance to
+	// sync the todo list with todo_write before requesting a checkpoint:
+	// the deterministic checkpoint snapshots runtime todos verbatim, and a
+	// list that has drifted behind actual progress misleads the
+	// continuation after the reset. It is baked at registration time rather
+	// than queried live so the tool description stays stable within a
+	// session — the description participates in the tool-surface hash and
+	// frozen prompt prefix, so a live value would churn both.
+	TodoWriteVisible bool
 }
 
 func (v CompactContextValidator) estimateTokens(text string) int {
@@ -281,6 +292,13 @@ func (t CompactContextTool) Description() string {
 	if limit := t.validator.ContinuationStateMaxTokens; limit > 0 {
 		budget = fmt.Sprintf("All text fields together (active_objective, next_step, completed, decisions, open_issues, state_files) must fit a combined budget of about %d estimated tokens; the per-field character limits are upper bounds that cannot all be used at once, so keep every item short.\n", limit)
 	}
+	// The todo-sync line is rendered only when todo_write is visible in the
+	// same surface, so the description never pushes a tool the model cannot
+	// call. Like the budget, it is baked at registration time.
+	todoSync := ""
+	if t.validator.TodoWriteVisible {
+		todoSync = "- your todo list reflects actual progress (the checkpoint snapshots runtime todos verbatim; sync drifted entries with todo_write before requesting);\n"
+	}
 	return "Request a durable context checkpoint once your current working state is fully externalized (written into state_files or fully expressible in structured arguments).\n" +
 		"Runtime pauses the next main-model request, applies the checkpoint atomically, and continues the same turn on the compacted context. This involves a session history rewrite; it is NOT read-only.\n" +
 		"Call it alone (no sibling tool calls in the same response) and only when:\n" +
@@ -288,6 +306,7 @@ func (t CompactContextTool) Description() string {
 		"all investigation, sibling tools, user decisions, and pending verification are done" +
 		");\n" +
 		"- every fact needed later is captured in state_files or in the structured arguments;\n" +
+		todoSync +
 		"- no key fact exists only in the current context that cannot be re-read or re-derived.\n" +
 		"Do not call it when still investigating, waiting on siblings, or wanting a smaller context for its own sake;\n" +
 		"do not call it when the context is already small (the runtime rejects low-gain resets).\n" +

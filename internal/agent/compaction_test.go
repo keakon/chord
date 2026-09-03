@@ -5788,6 +5788,7 @@ func TestEnsureCompactionTodoSnapshotPreservesEveryRuntimeTodo(t *testing.T) {
 	summary := ensureCompactionTodoSnapshot(validCompactionSummaryForTest("history-1.md"), todos)
 	for _, want := range []string{
 		"### Runtime TODO snapshot",
+		"classify against the latest user request and reconcile with ## Progress above",
 		"[in_progress] 1: inspect the parser | active: inspecting the parser",
 		"[pending] 2: run tests",
 		"> then report the result",

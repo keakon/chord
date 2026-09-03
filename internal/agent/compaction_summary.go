@@ -1050,7 +1050,7 @@ func ensureCompactionTodoSnapshot(summary string, todos []tools.TodoItem) string
 	}
 	var snapshot strings.Builder
 	snapshot.WriteString("### Runtime TODO snapshot\n")
-	snapshot.WriteString("- Complete pre-compaction runtime state; classify against the latest user request before acting:\n")
+	snapshot.WriteString("- Complete pre-compaction runtime state; classify against the latest user request and reconcile with ## Progress above before acting:\n")
 	for _, todo := range todos {
 		content := escapeTodoContentLine(todo.Content)
 		fmt.Fprintf(&snapshot, "  - [%s] %s: %s", todo.Status, todo.ID, content)

@@ -107,7 +107,7 @@ func TestFilterRestoredTodosKeepsFallbackLayoutTodos(t *testing.T) {
 - Stale/superseded:
   - (none classified by fallback)
 ### Runtime TODO snapshot
-- Complete pre-compaction runtime state; classify against the latest user request before acting:
+- Complete pre-compaction runtime state; classify against the latest user request and reconcile with ## Progress above before acting:
   - [in_progress] t1: task
 
 ## SubAgent State

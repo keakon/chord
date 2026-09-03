@@ -73,6 +73,21 @@ func (a *MainAgent) mainVisibleLLMTools() []toolpkg.Tool {
 	return filterEditToolsByModel(filtered, a.modelName, a.effectiveRuleset(), a.applyPatchSurfacePolicy())
 }
 
+// MainToolVisible reports whether the named tool is part of the MainAgent's
+// live, model-appropriate tool surface (the same source the capability prompt
+// and tool declarations are built from). Descriptions and prompt blocks that
+// reference another tool by name must gate on this so they never push a tool
+// the current model is not allowed to call. The result mirrors a frozen
+// decision (the tool surface is stable within a session), so it is safe to
+// bake into tool descriptions at registration time.
+func (a *MainAgent) MainToolVisible(name string) bool {
+	if a == nil {
+		return false
+	}
+	_, ok := a.mainVisibleLLMToolNames()[toolpkg.NormalizeName(name)]
+	return ok
+}
+
 // applyPatchSurfacePolicy resolves the apply_patch tool-surface decision from
 // the bound LLM client's stable primary model-pool entry. The agent layer
 // consumes the resolved policy instead of reading global configuration or
