@@ -89,8 +89,8 @@ Chord 为当前项目维护持久化会话。
 
 - `chord`：新建会话
 - `chord --continue`：恢复当前项目最近的非空会话
-- `chord --resume <session-id>`：恢复指定会话
-- `chord resume <session-id>`：跨 worktree 恢复——自动定位会话所在的 chord 管理 worktree（或主仓库），切换目录后恢复
+- `chord --resume <session-id>`：恢复当前项目内指定 session 的会话
+- `chord resume <session-id>`：从任意目录按 session id 恢复——自动定位会话所属的 chord 管理 worktree（或主仓库）并切换过去；带 `--fork-history[=N]` 则改为在某次压缩边界上 fork 出来再恢复（默认最近一次已应用边界；fork 原样复现那一代及压缩归档，usage 与运行状态从零开始）
 - `chord import <source> [file]`：导入外部会话到 Chord（支持 `opencode`/`codex`/`claude`）
 - `/new`：在 TUI 内创建新会话
 - `/resume`：在 TUI 内选择历史会话

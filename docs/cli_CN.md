@@ -60,16 +60,26 @@ chord [全局 flag] [命令] [命令 flag] [参数]
 
 | Flag                         | 说明                                                                                                                                                        |
 | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `-c`, `--continue`           | 恢复本项目最近一个非空会话                                                                                                                                  |
-| `-r`, `--resume <id>`        | 恢复指定 session id 的会话                                                                                                                                  |
+| `-c`, `--continue`           | 恢复本项目最近一个非空、且未被其它进程占用的会话                                                                                                            |
+| `-r`, `--resume <id>`        | 恢复当前项目内指定 session id 的会话（要恢复其它 chord 管理 worktree 里的会话，用 `chord resume <id>`）                                                     |
+| `--fork-history[=N]`         | 先把 `--resume` 指定的会话在某次压缩边界上 fork 出来，再恢复这个 fork：省略 N 表示最近一次已应用边界，或传 `history-N` 序号（如 `=2`）。只能与 `--resume` 一起用，且该会话必须属于当前项目——fork 其它 worktree 里的会话用 `chord resume <id> --fork-history`。源会话即使正被其它进程打开也可以 fork（见下文[恢复会话](#恢复会话)） |
 | `--yolo`                     | 启动时启用 YOLO 模式：临时绕过 MainAgent 工具权限，但不影响 handoff、delegate、cancel 和 done 权限                                                       |
 | `-w`, `--worktree [name]`    | 创建或进入 chord 管理的 git worktree（不传名字时自动命名）；与 `--continue` / `--resume` 配合可作用于该 worktree 自己的会话历史                              |
 
-`--continue` 与 `--resume` 互斥。
+`--continue` 与 `--resume` 互斥；`--fork-history` 只能与 `--resume` 搭配，不能与 `--continue` 或 `--worktree` 组合。
 
 `--continue` 取当前进程能够打开的、最近有活动的非空会话。Chord 按 `main.jsonl` 与已有 `usage-summary.json` 两个修改时间中较新的那个排序，不会扫描完整会话，也不会额外维护项目级索引。复制或恢复会话文件可能改动文件时间；没有更新这两个文件的活动，也不会改变排序。
 
 已被另一个运行中的 Chord 进程占用的会话会被跳过，改用下一个候选；跳过时会给出一条一次性提示（TUI 里是 toast，headless 的 ready 信封里有 `skipped_locked_sessions` 字段，日志里也会记录），不会静默切换。如果所有会话都被占用，Chord 会新建一个。`--resume <id>` 指定的是某一个具体会话，因此该会话已被占用时会报错，而不会替换成别的会话。
+
+### 恢复会话
+
+两条入口走的是同一条恢复管线，区别只在如何定位会话：
+
+- `chord --resume <id>`（别名 `-r`）恢复**当前项目内**的会话：该会话必须属于当前目录所在项目，Chord 不会切换目录。它可以与 `--continue` / `--worktree` 组合，也是脚本与 headless 使用的形态。如果会话属于其它 chord 管理 worktree，会以"找不到会话"报错。
+- `chord resume <id>` 从**任意目录**按 session id 恢复：它读取仓库索引，找到该会话属于哪个 chord 管理 worktree（或主仓库），切换过去再恢复。
+
+一句话选择：人已经在会话所在项目里 → 用 `chord --resume`；人在别处、或不确定会话在哪个 worktree → 用 `chord resume <id>`。
 
 ### 示例
 
@@ -343,11 +353,27 @@ chord worktree finish feat-auth --onto main -m "feat(auth): finalize auth flow"
 
 ## `chord resume <session-id>`
 
-按 session id 恢复会话。与 `chord --resume` 不同，此命令能自动定位该 session 所属的 chord 管理 worktree 并切换过去——即便当前 cwd 不在那个 worktree 内也可以。
+按 session id 恢复会话。与 `chord --resume` 不同，此命令能自动定位该 session 所属的 chord 管理 worktree 并切换过去——即便当前 cwd 不在那个 worktree 内也可以。何时用哪个入口见上文[恢复会话](#恢复会话)。
 
 ```bash
 chord resume 20260428064910975
 ```
+
+### 在某次压缩边界上 fork 会话
+
+带 `--fork-history` 时，不再恢复原会话，而是把该会话在某次压缩边界上的历史复制成一个**全新会话**再恢复它。原会话不会被改动，也不需要先关闭：fork 只读该会话的归档文件、另写一个新的会话目录，所以源会话即使正被另一个 Chord 进程占用也可以 fork（普通 resume 在这种情况下会报错）。
+
+```bash
+chord resume 20260428064910975 --fork-history      # fork 最近一次已应用的边界
+chord resume 20260428064910975 --fork-history=2    # fork 第 2 次已应用的边界
+```
+
+- 压缩边界就是会话中途应用过的 `[Context Summary]` checkpoint：每次压缩都会把压缩前的完整会话备份为 `main.pre-compress-N.jsonl`，并配套写入 `history-N.status.json`，只有应用全部完成才标记为 applied。fork 到已应用的边界 N 会还原那一代会话的真实状态：fork 的 `main.jsonl` 逐条取自 `main.pre-compress-N.jsonl`，正文记录原样复制——包括它开头的 checkpoint 摘要卡，那是当时真实看到的状态的一部分（fork 第 2 次边界时，第 1 次的摘要卡就在顶部）。更早的 `history-1..N-1.md` 压缩归档会一并复制过来，checkpoint 里的历史地图因此仍然有效：模型可以按需读取归档，查边界之前被压缩掉的内容。边界自身的 `history-N.md` 不会复制——被 fork 的 `pre-compress-N` 正文仍原样带着那些消息，复制它只会让内容重复。更早的内容通过归档查看，而不是拼回会话正文。
+- 消息正文（用户输入、助手回复、工具调用与结果、diff）原样保留：内容里的会话号、路径、命令是当时的历史事实，不做改写。图片/PDF 附件会复制进新会话并改写引用路径。
+- fork 出的新会话从零开始：usage/token 统计与运行状态不复制。`session-meta.json` 记录 `forked_from`，并沿用源会话的 worktree 归属与手动启用的 MCP server。
+- 新会话 id 会打印出来，随后自动恢复进入 TUI。会话至少要有一次已应用的压缩；请求超出可用范围的边界会报错，并列出合法的 `history-N` 取值。
+
+**不复制的内容：** fork 只带主会话正文与压缩归档，其余一律不复制。子代理的独立会话记录、委托任务（task）状态、mailbox、后台任务、artifacts，以及源会话 `subagents/`、`artifacts/`、`snapshot.json` 下的其他运行期状态——这些状态属于正在运行的源会话，无法在历史时间点如实重建，usage 统计同样绑定源会话。影响：浏览历史不受影响；但如果在 fork 里继续干活，fork 之前的委托任务只保留为可见的消息卡片——无法再 collect、查询或恢复执行，依赖那些子代理/任务的线也接不下去。fork 内部新发起的子代理与任务一切正常。
 
 ## `chord import <source> [file]`
 

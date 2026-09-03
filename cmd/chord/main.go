@@ -38,6 +38,7 @@ var (
 	flagAPIBase         string
 	flagContinueSession bool
 	flagResumeSession   string
+	flagForkHistory     string
 	flagWorktree        string
 	flagYolo            bool
 
@@ -156,6 +157,9 @@ func newRootCmd() *cobra.Command {
 		"Continue the latest non-empty session in the current project")
 	rootCmd.Flags().StringVarP(&flagResumeSession, "resume", "r", "",
 		"Resume a specific session ID in the current project")
+	rootCmd.Flags().StringVar(&flagForkHistory, "fork-history", "",
+		forkHistoryFlagHelp)
+	rootCmd.Flags().Lookup("fork-history").NoOptDefVal = "latest"
 	rootCmd.Flags().BoolVar(&flagYolo, "yolo", false,
 		"Temporarily bypass main-agent tool permissions except Handoff, Delegate, Cancel, and Done")
 	rootCmd.Flags().StringVarP(&flagWorktree, "worktree", "w", "",
@@ -190,6 +194,33 @@ func main() {
 // runRoot is the main execution path for TUI mode. In local mode, the TUI
 // runs in-process with the MainAgent — no IPC, no socket, no server spawn.
 func runRoot(cmd *cobra.Command, _ []string) error {
+	// --fork-history forks the session named by --resume before any plan or
+	// lock logic runs, then rewrites the resume id to the fresh fork. This is
+	// the root-command complement of `chord resume --fork-history` (which
+	// locates the session cross-worktree); here the session must live in the
+	// current project directory.
+	if strings.TrimSpace(flagForkHistory) != "" {
+		if strings.TrimSpace(flagResumeSession) == "" {
+			return errors.New("--fork-history requires --resume <session-id>")
+		}
+		if flagContinueSession {
+			return errors.New("--continue and --fork-history are mutually exclusive")
+		}
+		if cmd.Flags().Changed("worktree") {
+			return errors.New("--fork-history cannot be combined with --worktree; run it from the project directory that owns the session")
+		}
+		target, err := forkBoundaryFromFlag(flagForkHistory)
+		if err != nil {
+			return err
+		}
+		newSID, chosen, seeded, err := forkResumeSessionByCurrentProject(flagResumeSession, target)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "Forked session %s at compaction boundary history-%d into new session %s (%d messages)\n", flagResumeSession, chosen, newSID, seeded)
+		flagResumeSession = newSID
+	}
+
 	plan, err := planRootStartup(cmd, flagContinueSession, flagResumeSession, flagWorktree)
 	if err != nil {
 		if errors.Is(err, ErrInvalidPprofPort) {

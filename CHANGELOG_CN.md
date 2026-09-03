@@ -34,6 +34,7 @@
 - 消息目录里的工具卡条目现在在工具名旁附带首要参数（如 `Tool: shell go test ./...`、`Tool: edit internal/tui/app.go`），同一工具的多张调用卡一眼就能区分开。
 - HTTP MCP server 现在可以通过 `headers` 配置项给每个请求附加自定义请求头，例如 Exa 这类服务要求的 `x-api-key`。以 `$` 开头的值会从环境变量展开，密钥不用写进配置文件；`Content-Type`、`Accept`、`Mcp-Session-Id` 等协议管理的请求头仍由 Chord 控制，不受影响。
 - 在 OpenAI 兼容的 Responses 端点上，gpt-5 及之后家族模型现在把 `apply_patch` 作为 freeform custom tool（`type: "custom"` 携带 Lark grammar）发射，不再使用 JSON function tool，获得语法约束解码——模型产不出语法非法的补丁。其他模型与非 Responses wire 一律保持 JSON function 形态；发射形态可以用 `compat.apply_patch.freeform` 按 provider/模型配置。custom 工具调用会在 wire 边界归一化为 canonical `{"patch": ...}` function-call 形态，因此历史回放、hook、权限与审计在两种发射形态下行为完全一致；网关把 custom 工具降级错了时会返回指向 `compat.apply_patch.freeform: false` 的可操作错误。接受 Responses 但拒绝 custom tool 的主机不再有内置例外：请在那里配置 `compat.apply_patch.freeform: false`。
+- `chord resume <session-id>` 现在可以在某次上下文压缩边界上 fork 会话并恢复这个 fork：`--fork-history`（不带值）默认取最近一次已应用的边界，`--fork-history=2` 指定具体边界。fork 原样复现那一代会话状态——fork 的 `main.jsonl` 是 `main.pre-compress-N.jsonl` 的未改动副本，包括它开头的 `[Context Summary]` checkpoint 摘要卡（fork 第 2 次边界时第 1 次的摘要卡就在顶部）——并把会话已有的 `history-1..N.md` 压缩归档一并复制过来，checkpoint 的历史地图因此仍然有效，模型可以按需读取归档、查边界之前被压缩掉的内容。消息正文原样保留——其中的会话号、路径是当时的历史事实，不做改写；图片/PDF 附件复制进新会话并改写引用路径；新会话的元数据记录 `forked_from`，并沿用原会话的 worktree 归属与手动启用的 MCP 意图。usage 与运行状态从零开始——源会话 `subagents/`、`artifacts/` 下的子代理记录、委托任务状态、mailbox、后台任务与 artifacts 有意不复制，fork 之前的委托任务只保留为消息卡片，无法在 fork 中继续 collect 或恢复执行。原会话不会被改动，也不需要先关闭：和 `chord import` 一样，fork 只读归档文件、另写一个全新会话目录，然后直接恢复新会话，正在另一个 Chord 进程中运行的会话同样可以 fork。
 
 ### 改进
 

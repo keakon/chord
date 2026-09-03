@@ -89,8 +89,8 @@ Common workflows:
 
 - `chord`: create a new session
 - `chord --continue`: resume the most recent non-empty session for this project
-- `chord --resume <session-id>`: resume a specific session
-- `chord resume <session-id>`: resume a session by ID, auto-locating the chord-managed worktree it belongs to
+- `chord --resume <session-id>`: resume a specific session of the current project
+- `chord resume <session-id>`: resume a session by ID from any directory — auto-locates the chord-managed worktree the session belongs to and switches into it; add `--fork-history[=N]` to resume a fork at a compaction boundary instead (default: latest applied boundary; the fork reproduces that generation with its compaction archives and starts usage and runtime state fresh)
 - `chord import <source> [file]`: import an external session into Chord's session store
 - `/new`: create a new session in the TUI
 - `/resume`: pick a historical session in the TUI

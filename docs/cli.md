@@ -61,15 +61,25 @@ On the first run, if global `config.yaml` is missing and Chord can get a control
 | Flag                        | Description                                                                                                                                                                                  |
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `-c`, `--continue`          | Resume the most recent non-empty session for this project that is not already open elsewhere                                                                                                 |
-| `-r`, `--resume <id>`       | Resume a specific session ID for this project                                                                                                                                                |
+| `-r`, `--resume <id>`       | Resume a specific session ID of the current project (for a session in another chord-managed worktree, use `chord resume <id>`)                                                              |
+| `--fork-history[=N]`        | Fork the session named by `--resume` at a compaction boundary and resume the fork instead: omit N for the latest applied boundary or pass a `history-N` number (e.g. `=2`). Only valid with `--resume`, and the session must belong to the current project — use `chord resume <id> --fork-history` to fork a session in another worktree. Forking works while the source session is open elsewhere (see [Resuming sessions](#resuming-sessions)). |
 | `--yolo`                    | Start with YOLO mode enabled: temporarily bypass main-agent tool permissions except handoff, delegate, cancel, and done                                                                                 |
 | `-w`, `--worktree [name]`   | Create or enter a chord-managed git worktree by name (auto-named when no name is given). Combine with `--continue` / `--resume` to act on the worktree's own session history.                |
 
-`--continue` and `--resume` are mutually exclusive.
+`--continue` and `--resume` are mutually exclusive; `--fork-history` applies only with `--resume` and cannot be combined with `--continue` or `--worktree`.
 
 `--continue` picks the most recently active non-empty session that this process can open. Chord orders sessions by the newer of two modification times, `main.jsonl` and an existing `usage-summary.json`; it does not scan full transcripts or build a separate project-level index. Filesystem timestamps can become misleading after copying or restoring session files, and activity that updates neither file may not affect the order.
 
 A session that another running Chord process already owns is skipped, and the next candidate is used; the skip is announced with a one-time notice (a toast in the TUI, a `skipped_locked_sessions` field in the headless ready envelope, and the log), so the switch is never silent. If every session is owned elsewhere, Chord starts a new one. `--resume <id>` names one specific session instead, so it reports an error rather than substituting another when that session is already open.
+
+### Resuming sessions
+
+Both entry points run the same resume pipeline; they differ only in how the session is located:
+
+- `chord --resume <id>` (alias `-r`) resumes a session **of the current project**: the session must live in the project the current directory belongs to, and Chord does not switch directories. It composes with `--continue` / `--worktree` and is the form scripts and headless use. If the session belongs to another chord-managed worktree, the resume fails with a not-found error.
+- `chord resume <id>` resumes a session **by ID from anywhere**: it reads the repository index, finds which chord-managed worktree (or the main repository) the session belongs to, switches into it, and resumes there.
+
+Rule of thumb: when you are already inside the session's project use `chord --resume`; when you are anywhere else, or do not know which worktree the session lives in, use `chord resume <id>`.
 
 ### Examples
 
@@ -343,11 +353,27 @@ chord worktree finish feat-auth --onto main -m "feat(auth): finalize auth flow"
 
 ## `chord resume <session-id>`
 
-Resume a session by ID. Unlike `chord --resume`, this command can locate the session even when the original worktree differs from the current directory — it auto-detects which chord-managed worktree the session belongs to and switches into it.
+Resume a session by ID. Unlike `chord --resume`, this command can locate the session even when the original worktree differs from the current directory — it auto-detects which chord-managed worktree the session belongs to and switches into it. For when to use each entry point, see [Resuming sessions](#resuming-sessions).
 
 ```bash
 chord resume 20260428064910975
 ```
+
+### Forking a session at a compaction boundary
+
+With `--fork-history`, the command no longer resumes the original session. Instead it forks the session at one of its compaction boundaries — copying the history as it was at that moment into a brand-new session — and resumes that fork. The original session is never modified and does not need to be closed: forking reads only the session's archive files and writes a new session directory, so it works even while the source session is open in another Chord process.
+
+```bash
+chord resume 20260428064910975 --fork-history       # fork at the latest applied boundary
+chord resume 20260428064910975 --fork-history=2     # fork at the 2nd applied boundary
+```
+
+- A compaction boundary is a `[Context Summary]` checkpoint applied mid-session; each one kept the pre-compaction transcript as `main.pre-compress-N.jsonl`, with a `history-N.status.json` record marking it applied once the rewrite finished. Forking to an applied boundary N reproduces that generation's session state: the fork's `main.jsonl` is created record for record from `main.pre-compress-N.jsonl`, transcript records copied unchanged — including its leading checkpoint summary card, which was part of the real state you saw then (forking the 2nd boundary keeps the 1st summary card at the top). The earlier `history-1..N-1.md` compaction archives are copied alongside so the checkpoint's history map still resolves: the model can read the archives on demand to look up anything archived before that boundary. The boundary's own archive `history-N.md` is not copied — the forked `pre-compress-N` transcript still carries those messages inline, so copying it would only duplicate content. Earlier content is browsed through those archives rather than stitched back into the transcript.
+- Message text (user input, assistant replies, tool calls and results, diffs) is preserved verbatim: session ids, paths, and commands inside the content are historical facts and are never rewritten. Image/PDF attachments are copied into the new session and their references updated.
+- The fork is a fresh session: usage/token statistics and runtime state start from zero. `session-meta.json` records `forked_from` and keeps the source session's worktree provenance and manually enabled MCP servers.
+- The new session id is printed and the fork is resumed automatically, entering the TUI like any other session. The session must have at least one applied compaction; requesting a boundary outside the available range fails with the list of valid `history-N` values.
+
+**What is not copied:** the fork carries the main-session transcript plus the compaction archives, and nothing else. Sub-agent transcripts, delegated task records, mailbox state, background jobs, artifacts, and other runtime state under the source session's `subagents/` / `artifacts/` / `snapshot.json` are owned by the live source session and deliberately not copied — that state cannot be faithfully reconstructed at an earlier point in time, and usage statistics are tied to the source session as well. Consequences: browsing history is unaffected, but if you keep working in the fork, tasks delegated before the fork remain visible as message cards only — they cannot be collected, queried, or resumed in the fork, and continuing threads that depend on those agents is not possible. New sub-agent and task activity started inside the fork works normally.
 
 ## `chord import <source> [file]`
 
