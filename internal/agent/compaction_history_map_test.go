@@ -45,10 +45,10 @@ func TestFormatHistoryMapLinesPairsPathWithTopics(t *testing.T) {
 	a.sessionDir = sessionDir
 
 	// Export two generations so both carry topics in their status metadata.
-	if _, _, _, err := a.exportCompactionHistory([]message.Message{{Role: message.RoleUser, Content: "u1"}}, 2, []string{"first topic"}); err != nil {
+	if _, _, _, err := a.exportCompactionHistory([]message.Message{{Role: message.RoleUser, Content: "u1"}}, 2, []string{"first topic"}, a.captureCompactionArchiveMeta()); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := a.exportCompactionHistory([]message.Message{{Role: message.RoleUser, Content: "u2"}}, 3, []string{"second topic", "third topic"}); err != nil {
+	if _, _, _, err := a.exportCompactionHistory([]message.Message{{Role: message.RoleUser, Content: "u2"}}, 3, []string{"second topic", "third topic"}, a.captureCompactionArchiveMeta()); err != nil {
 		t.Fatal(err)
 	}
 	refs, err := listHistoryReferences(sessionDir)

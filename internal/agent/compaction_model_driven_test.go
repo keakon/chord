@@ -432,6 +432,7 @@ func TestModelDrivenAppliedDraftCarriesPreflightStats(t *testing.T) {
 		prepareReducedRequest:       a.compactionReductionScratch().prepareMessagesForLLM,
 		fixedRequestTokens:          1000,
 		postResetFixedRequestTokens: 4000,
+		archiveMeta:                 a.captureCompactionArchiveMeta(),
 	}
 	req := &modelDrivenCheckpointRequest{
 		ToolCallID: "cc-1",
@@ -748,6 +749,7 @@ func TestModelDrivenDraftCommittedArchiveSurvives(t *testing.T) {
 		prepareReducedRequest:       a.compactionReductionScratch().prepareMessagesForLLM,
 		fixedRequestTokens:          1000,
 		postResetFixedRequestTokens: 4000,
+		archiveMeta:                 a.captureCompactionArchiveMeta(),
 	}
 	req := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{ActiveObjective: "keep going", NextStep: "continue"}}
 
@@ -786,6 +788,7 @@ func TestModelDrivenDraftPreExportCancellationLeavesNoFiles(t *testing.T) {
 		prepareReducedRequest:       a.compactionReductionScratch().prepareMessagesForLLM,
 		fixedRequestTokens:          1000,
 		postResetFixedRequestTokens: 4000,
+		archiveMeta:                 a.captureCompactionArchiveMeta(),
 	}
 	req := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{ActiveObjective: "keep going", NextStep: "continue"}}
 
@@ -846,6 +849,83 @@ func TestModelDrivenIntervalVerdictStaleAnchorCountsAsSatisfied(t *testing.T) {
 	}
 }
 
+func TestModelDrivenPreflightReusesLastPreparedSurface(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.newTurn()
+	snapshot := []message.Message{
+		{Role: message.RoleUser, Content: "original user request"},
+		{Role: message.RoleAssistant, Content: strings.Repeat("analysis ", 4000)},
+	}
+	// This turn actually sent the above request, so the remembered reduced
+	// surface is the provider-truth baseline.
+	a.rememberPreparedLLMRequest(a.currentTurnID(), snapshot, snapshot, nil, nil, countToolResults(snapshot), a.contextReductionPolicy())
+	snapshot = append(snapshot,
+		message.Message{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{testToolCall("cc-1", tools.NameCompactContext)}},
+		message.Message{Role: message.RoleTool, ToolCallID: "cc-1", Content: requestAcceptedToolResult},
+	)
+	req := &modelDrivenCheckpointRequest{
+		ToolCallID: "cc-1",
+		Args:       tools.CompactContextArgs{ActiveObjective: "keep going", NextStep: "continue"},
+	}
+	bundle := a.captureModelDrivenBarrierSnapshot(snapshot)
+	reason, skip, preflight := a.modelDrivenLowGainPreflight(bundle, len(snapshot), snapshot, req)
+	if skip {
+		t.Fatalf("gate must pass on the reused baseline, got skip reason %q", reason)
+	}
+	if preflight.CurrentSource != "last_prepared" {
+		t.Fatalf("current source = %q, want last_prepared", preflight.CurrentSource)
+	}
+}
+
+func TestModelDrivenPreflightFallsBackToScratchWhenHeadChanged(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.newTurn()
+	snapshot := []message.Message{
+		{Role: message.RoleUser, Content: "original user request"},
+		{Role: message.RoleAssistant, Content: strings.Repeat("analysis ", 4000)},
+	}
+	a.rememberPreparedLLMRequest(a.currentTurnID(), snapshot, snapshot, nil, nil, countToolResults(snapshot), a.contextReductionPolicy())
+	// A mid-head change (the user edited the original request) invalidates the
+	// remembered prefix: the preflight must fall back to the scratch
+	// reduction instead of reusing a stale baseline.
+	snapshot[0] = message.Message{Role: message.RoleUser, Content: "edited user request"}
+	snapshot = append(snapshot,
+		message.Message{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{testToolCall("cc-1", tools.NameCompactContext)}},
+		message.Message{Role: message.RoleTool, ToolCallID: "cc-1", Content: requestAcceptedToolResult},
+	)
+	req := &modelDrivenCheckpointRequest{
+		ToolCallID: "cc-1",
+		Args:       tools.CompactContextArgs{ActiveObjective: "keep going", NextStep: "continue"},
+	}
+	bundle := a.captureModelDrivenBarrierSnapshot(snapshot)
+	_, skip, preflight := a.modelDrivenLowGainPreflight(bundle, len(snapshot), snapshot, req)
+	if skip {
+		t.Fatal("fixture must pass the gate")
+	}
+	if preflight.CurrentSource != "scratch" {
+		t.Fatalf("current source = %q, want scratch for a changed head", preflight.CurrentSource)
+	}
+	// With no remembered request at all the same fallback applies.
+	bundleNoPrep := modelDrivenBarrierSnapshot{
+		snapshot:                    snapshot,
+		maxTokens:                   a.ctxMgr.GetMaxTokens(),
+		sessionDir:                  a.sessionDir,
+		prepareReducedRequest:       a.compactionReductionScratch().prepareMessagesForLLM,
+		fixedRequestTokens:          1000,
+		postResetFixedRequestTokens: 4000,
+		archiveMeta:                 a.captureCompactionArchiveMeta(),
+	}
+	_, skip2, preflight2 := a.modelDrivenLowGainPreflight(bundleNoPrep, len(snapshot), snapshot, req)
+	if skip2 {
+		t.Fatal("fixture must pass the gate without a prepared surface")
+	}
+	if preflight2.CurrentSource != "scratch" {
+		t.Fatalf("current source = %q, want scratch without a prepared surface", preflight2.CurrentSource)
+	}
+}
+
 func TestModelDrivenCacheRebuildCostAmortizesProjectedPrefix(t *testing.T) {
 	// The rebuild charge is the write-read delta (1.15x) of the NEW checkpoint
 	// prefix, amortized over the minimum apply interval — never the archived
@@ -860,6 +940,45 @@ func TestModelDrivenCacheRebuildCostAmortizesProjectedPrefix(t *testing.T) {
 	}
 	if got := modelDrivenCacheRebuildCost(projected); got >= projected {
 		t.Fatalf("amortized rebuild cost %d must stay well below the projected prefix %d", got, projected)
+	}
+}
+
+func TestModelDrivenPreflightRecordsCacheRebuildCostWithoutSubtracting(t *testing.T) {
+	// The prompt-cache rebuild charge is telemetry: a cacheable session's
+	// preflight records the amortized cost on the stats while the gate keeps
+	// deciding on raw surface savings, so a charge that would have flipped the
+	// verdict under the old "net = saved − cost" rule no longer denies the
+	// reset — the §14.2 telemetry answers whether cache rebuilds eat the
+	// gains instead of pre-deciding it inside the gate.
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	snapshot := []message.Message{
+		{Role: message.RoleUser, Content: "original user request"},
+		{Role: message.RoleAssistant, Content: strings.Repeat("analysis ", 4000)},
+		{Role: message.RoleUser, Content: "follow up"},
+		{Role: message.RoleAssistant, Content: strings.Repeat("more analysis ", 4000)},
+		{Role: message.RoleUser, Content: "tail request"},
+	}
+	bundle := modelDrivenBarrierSnapshot{
+		snapshot:              snapshot,
+		maxTokens:             a.ctxMgr.GetMaxTokens(),
+		sessionDir:            a.sessionDir,
+		prepareReducedRequest: a.compactionReductionScratch().prepareMessagesForLLM,
+		promptCacheCapable:    true,
+	}
+	req := &modelDrivenCheckpointRequest{
+		ToolCallID: "cc-1",
+		Args:       tools.CompactContextArgs{ActiveObjective: "keep going", NextStep: "continue"},
+	}
+	reason, skip, preflight := a.modelDrivenLowGainPreflight(bundle, 4, snapshot, req)
+	if skip {
+		t.Fatalf("gate must pass on raw savings, got skip reason %q", reason)
+	}
+	if preflight.CacheRebuildCost <= 0 {
+		t.Fatalf("cache-capable preflight must record the rebuild cost, got %d", preflight.CacheRebuildCost)
+	}
+	if preflight.SavedTokens < modelDrivenLowGainMinTokens {
+		t.Fatalf("fixture must produce savings above the floor, got %d", preflight.SavedTokens)
 	}
 }
 
@@ -904,23 +1023,30 @@ func TestModelDrivenIntervalRejectionNotCooldownBlocked(t *testing.T) {
 	}
 }
 
-func TestModelDrivenLowGainCheckSubtractsCacheRebuildCost(t *testing.T) {
-	// Raw savings pass both gates...
-	if reason, skip := modelDrivenLowGainCheck(10000, 5000, 5000, 0); skip {
+func TestModelDrivenLowGainCheckComparesRawSavings(t *testing.T) {
+	// The gates compare raw surface savings; the cache rebuild charge is a
+	// per-provider billing weight recorded for telemetry, never subtracted
+	// here, so a cacheable session is not pre-denied inside the gate.
+	if reason, skip := modelDrivenLowGainCheck(10000, 5000, 5000); skip {
 		t.Fatalf("raw savings above the gate must pass, got reason %q", reason)
 	}
-	// ...but subtracting the cache rebuild cost drops them below the absolute
-	// floor (5000 - 4000 = 1000 < 2048).
-	if reason, skip := modelDrivenLowGainCheck(10000, 5000, 5000, 4000); !skip {
-		t.Fatal("savings net of cache rebuild cost below the gate must skip")
-	} else if !strings.Contains(reason, "cache rebuild") {
-		t.Fatalf("cache-gated skip reason must mention the rebuild cost, got %q", reason)
+	// Savings that would have fallen below the floor only after subtracting a
+	// 4000-token rebuild charge still pass: the cost no longer gates.
+	if reason, skip := modelDrivenLowGainCheck(10000, 5000, 5000); skip {
+		t.Fatalf("savings unaffected by the (telemetry-only) rebuild cost must pass, got reason %q", reason)
 	}
-	// The 10% relative gate applies to the net savings too.
-	if reason, skip := modelDrivenLowGainCheck(100000, 95000, 5000, 4000); !skip {
-		t.Fatalf("net savings below 10%% of the prepared surface must skip, got %q", reason)
-	} else if !strings.Contains(reason, "cache rebuild") {
-		t.Fatalf("relative-gate skip reason must mention the rebuild cost, got %q", reason)
+	// The absolute floor still applies to raw savings.
+	if reason, skip := modelDrivenLowGainCheck(10000, 9000, 1000); !skip {
+		t.Fatal("raw savings below the absolute floor must skip")
+	} else if !strings.Contains(reason, "below the low-gain gate") {
+		t.Fatalf("floor skip reason must mention the gate, got %q", reason)
+	}
+	// The 10% relative gate applies to the raw savings against the current
+	// prepared surface.
+	if reason, skip := modelDrivenLowGainCheck(100000, 95000, 4000); !skip {
+		t.Fatalf("raw savings below 10%% of the prepared surface must skip, got %q", reason)
+	} else if !strings.Contains(reason, "below the low-gain gate") {
+		t.Fatalf("relative-gate skip reason must mention the gate, got %q", reason)
 	}
 }
 

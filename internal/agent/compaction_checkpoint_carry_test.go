@@ -129,7 +129,7 @@ func TestCompactionDraftCarriesPriorCheckpointBody(t *testing.T) {
 
 	first, err := a.produceCompactionDraftAsync(t.Context(), snapshot, false, 1,
 		compactionTarget{sessionEpoch: a.sessionEpoch}, len(snapshot), compactionProfileArchival,
-		"port the config loader to the new schema", evidenceItems)
+		"port the config loader to the new schema", evidenceItems, a.captureCompactionArchiveMeta())
 	if err != nil {
 		t.Fatalf("first produceCompactionDraftAsync: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestCompactionDraftCarriesPriorCheckpointBody(t *testing.T) {
 	secondEvidence := a.evidenceItemsForCompaction(a.ctxMgr.GetMaxTokens())
 	second, err := a.produceCompactionDraftAsync(t.Context(), next, false, 2,
 		compactionTarget{sessionEpoch: a.sessionEpoch}, len(next), compactionProfileArchival,
-		first.NewMessages[0].Content, secondEvidence)
+		first.NewMessages[0].Content, secondEvidence, a.captureCompactionArchiveMeta())
 	if err != nil {
 		t.Fatalf("second produceCompactionDraftAsync: %v", err)
 	}

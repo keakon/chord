@@ -196,7 +196,7 @@ func TestExportCompactionHistoryWritesArchiveIndex(t *testing.T) {
 		{Role: message.RoleTool, ToolCallID: "c1", Content: "package parser\n\nfunc Parse(...) {}"},
 		{Role: message.RoleAssistant, Content: "Done inspecting."},
 	}
-	absPath, _, _, err := a.exportCompactionHistory(msgs, 1, []string{"parser inspection"})
+	absPath, _, _, err := a.exportCompactionHistory(msgs, 1, []string{"parser inspection"}, a.captureCompactionArchiveMeta())
 	if err != nil {
 		t.Fatalf("exportCompactionHistory: %v", err)
 	}

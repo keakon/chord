@@ -105,6 +105,10 @@ func (a *MainAgent) startCompactionAsyncWithContinuation(snapshot []message.Mess
 	// consults the usage ledger and the pre-rewrite session log, and must not
 	// race the apply step that replaces both.
 	originalRequest := a.captureOriginalFirstUserHint()
+	// Capture the archive metadata on the event loop: the worker exports the
+	// head to the session directory and stamps model/project/session identity,
+	// and must not read live MainAgent fields from its goroutine.
+	archiveMeta := a.captureCompactionArchiveMeta()
 
 	ctx, cancel := context.WithTimeout(a.parentCtx, compactionDraftTimeout)
 	// The worker may outlive the turn that scheduled it because compaction runs
@@ -119,7 +123,7 @@ func (a *MainAgent) startCompactionAsyncWithContinuation(snapshot []message.Mess
 	a.emitCompactionSlotActivity()
 	a.emitToTUI(a.compactionStatusEvent(CompactionStatusStarted, ""))
 	a.compactionWg.Add(1)
-	go func(ctx context.Context, snapshot []message.Message, planID uint64, target compactionTarget, headSplit int, profile compactionProfile, manual bool, originalRequest string, evidenceItems []evidenceItem) {
+	go func(ctx context.Context, snapshot []message.Message, planID uint64, target compactionTarget, headSplit int, profile compactionProfile, manual bool, originalRequest string, evidenceItems []evidenceItem, archiveMeta compactionArchiveMeta) {
 		defer a.compactionWg.Done()
 		defer cancel()
 
@@ -140,7 +144,7 @@ func (a *MainAgent) startCompactionAsyncWithContinuation(snapshot []message.Mess
 			}
 		}()
 
-		draft, err := a.produceCompactionDraftAsync(ctx, snapshot, manual, planID, target, headSplit, profile, originalRequest, evidenceItems)
+		draft, err := a.produceCompactionDraftAsync(ctx, snapshot, manual, planID, target, headSplit, profile, originalRequest, evidenceItems, archiveMeta)
 		if err != nil {
 			a.sendEvent(Event{Type: EventCompactionFailed, Payload: &compactionFailure{planID: planID, target: target, err: err, absHistoryPath: getAbsHistoryPathFromDraft(draft)}})
 			return
@@ -151,7 +155,7 @@ func (a *MainAgent) startCompactionAsyncWithContinuation(snapshot []message.Mess
 			draft.HeadSplit = headSplit
 		}
 		a.sendEvent(Event{Type: EventCompactionReady, Payload: draft})
-	}(ctx, snapshot, planID, target, headSplit, profile, manual, originalRequest, evidenceItems)
+	}(ctx, snapshot, planID, target, headSplit, profile, manual, originalRequest, evidenceItems, archiveMeta)
 }
 
 func (a *MainAgent) maybeRunAutoCompaction() {
@@ -191,7 +195,7 @@ func (a *MainAgent) handleCompactCommand() {
 // new message list. Safe to call from a background goroutine (read-only use of
 // MainAgent fields + LLM / filesystem). Tail messages [headSplit:) are preserved
 // by ReplacePrefixAtomic at apply time, so the draft only carries the summary.
-func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []message.Message, manual bool, planID uint64, target compactionTarget, headSplit int, profile compactionProfile, originalRequest string, evidenceItems []evidenceItem) (*compactionDraft, error) {
+func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []message.Message, manual bool, planID uint64, target compactionTarget, headSplit int, profile compactionProfile, originalRequest string, evidenceItems []evidenceItem, archiveMeta compactionArchiveMeta) (*compactionDraft, error) {
 	// Check for cancellation before starting expensive work
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
@@ -252,7 +256,7 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 		return nil, fmt.Errorf("determine compaction index: %w", err)
 	}
 
-	absHistoryPath, sourceRefs, sourceFingerprint, err := a.exportCompactionHistory(head, index, evidenceItemTopics(evidenceItems))
+	absHistoryPath, sourceRefs, sourceFingerprint, err := a.exportCompactionHistory(head, index, evidenceItemTopics(evidenceItems), archiveMeta)
 	if err != nil {
 		return nil, fmt.Errorf("export compacted history: %w", err)
 	}

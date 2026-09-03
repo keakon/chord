@@ -48,7 +48,7 @@ func TestCheckpointSourceRefsValidateGenerationScopedOrdinals(t *testing.T) {
 
 func TestCompactionHistoryReferencesAreAbsolute(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	absPath, _, _, err := a.exportCompactionHistory([]message.Message{{Role: message.RoleUser, Content: "request"}}, 2, nil)
+	absPath, _, _, err := a.exportCompactionHistory([]message.Message{{Role: message.RoleUser, Content: "request"}}, 2, nil, a.captureCompactionArchiveMeta())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestExportCompactionHistoryWritesSourceProvenance(t *testing.T) {
 		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-1", Name: tools.NameRead}}},
 		{Role: message.RoleTool, ToolCallID: "call-1", Content: "file contents"},
 	}
-	_, refs, fingerprint, err := a.exportCompactionHistory(messages, 4, nil)
+	_, refs, fingerprint, err := a.exportCompactionHistory(messages, 4, nil, a.captureCompactionArchiveMeta())
 	if err != nil {
 		t.Fatal(err)
 	}

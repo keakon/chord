@@ -330,7 +330,7 @@ func TestCompactionDraftEmbedsAndInheritsSessionAnchors(t *testing.T) {
 	evidenceItems := a.evidenceItemsForCompaction(a.ctxMgr.GetMaxTokens())
 	draft, err := a.produceCompactionDraftAsync(t.Context(), snapshot, false, 1,
 		compactionTarget{sessionEpoch: a.sessionEpoch}, len(snapshot), compactionProfileArchival,
-		"port the config loader to the new schema", evidenceItems)
+		"port the config loader to the new schema", evidenceItems, a.captureCompactionArchiveMeta())
 	if err != nil {
 		t.Fatalf("produceCompactionDraftAsync: %v", err)
 	}
@@ -359,7 +359,7 @@ func TestCompactionDraftEmbedsAndInheritsSessionAnchors(t *testing.T) {
 	secondEvidence := a.evidenceItemsForCompaction(a.ctxMgr.GetMaxTokens())
 	secondDraft, err := a.produceCompactionDraftAsync(t.Context(), next, false, 2,
 		compactionTarget{sessionEpoch: a.sessionEpoch}, len(next), compactionProfileArchival,
-		checkpoint.Content, secondEvidence)
+		checkpoint.Content, secondEvidence, a.captureCompactionArchiveMeta())
 	if err != nil {
 		t.Fatalf("second produceCompactionDraftAsync: %v", err)
 	}

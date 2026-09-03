@@ -14,6 +14,7 @@ func TestStaleReadyCompactionCleansExportedArchive(t *testing.T) {
 		[]message.Message{{Role: message.RoleUser, Content: "stale archive"}},
 		5,
 		nil,
+		a.captureCompactionArchiveMeta(),
 	)
 	if err != nil {
 		t.Fatalf("export stale history: %v", err)

@@ -147,6 +147,21 @@ type modelDrivenBarrierSnapshot struct {
 	// the built-in default). Read from the merged config on the event loop
 	// like every other config read; the worker never touches live config.
 	retainRecentTokens int
+	// archiveMeta is the session/model identity the history export stamps,
+	// captured on the event loop at the barrier (exportCompactionHistory runs
+	// in the worker and reads only this bundle).
+	archiveMeta compactionArchiveMeta
+	// lastPreparedTurnID / lastPreparedSource / lastPreparedPrefix are the
+	// most recent request surface this turn actually sent to the provider
+	// (rememberPreparedLLMRequest): the reduced prefix and the original source
+	// copy it was reduced from. When the barrier snapshot still begins with
+	// that source unchanged, the preflight reuses the sent prefix as the
+	// current-side baseline — the provider already saw it, so the estimate is
+	// exact for the head — instead of re-running a full scratch reduction.
+	// Captured under loopReductionMu on the event loop (2.6).
+	lastPreparedTurnID uint64
+	lastPreparedSource []message.Message
+	lastPreparedPrefix []message.Message
 }
 
 // estimateTokens estimates the input tokens of a message slice on the barrier
@@ -174,10 +189,17 @@ type modelDrivenPreflightStats struct {
 	AnchorBytes        int
 	HistoryMapBytes    int
 	ContinuationTokens int
-	// CacheRebuildCost is the prompt-cache rewrite cost charged to the
-	// projected side of the low-gain gate for prompt-cache-capable sessions
-	// (rewritten-prefix tokens × (write − read) multiplier). Zero for
-	// non-cacheable sessions.
+	// CurrentSource records which current-side baseline produced the preflight
+	// estimate: "last_prepared" (the most recent request surface this turn
+	// actually sent to the provider, reused when the head is unchanged) or
+	// "scratch" (a full reduction re-scan). Telemetry compares the estimate
+	// against the provider's own input usage to gauge both baselines.
+	CurrentSource string
+	// CacheRebuildCost is the prompt-cache rewrite cost of the projected
+	// prefix for prompt-cache-capable sessions (rewritten-prefix tokens ×
+	// amortized write−read multiplier). Telemetry only: the low-gain gate
+	// compares raw surface savings and never subtracts this per-provider
+	// billing weight.
 	CacheRebuildCost int
 }
 
@@ -340,6 +362,7 @@ func (a *MainAgent) discardCompactionForModelOverride() {
 // state the model-driven worker may need, on the event loop. The returned
 // bundle is immutable; the worker only ever reads it.
 func (a *MainAgent) captureModelDrivenBarrierSnapshot(snapshot []message.Message) modelDrivenBarrierSnapshot {
+	lastPreparedTurnID, lastPreparedSource, lastPreparedPrefix := a.captureLastPreparedSurfaceForPreflight()
 	return modelDrivenBarrierSnapshot{
 		snapshot:                    snapshot,
 		evidenceItems:               a.evidenceItemsForCompaction(a.ctxMgr.GetMaxTokens()),
@@ -361,7 +384,23 @@ func (a *MainAgent) captureModelDrivenBarrierSnapshot(snapshot []message.Message
 		promptCacheCapable:          a.currentModelPromptCacheCapable(),
 		calibratedRatio:             a.ctxMgr.CalibratedRatio(),
 		retainRecentTokens:          a.effectiveCompactionRetainRecentTokens(),
+		archiveMeta:                 a.captureCompactionArchiveMeta(),
+		lastPreparedTurnID:          lastPreparedTurnID,
+		lastPreparedSource:          lastPreparedSource,
+		lastPreparedPrefix:          lastPreparedPrefix,
 	}
+}
+
+// captureLastPreparedSurfaceForPreflight snapshots the most recent sent
+// request surface under loopReductionMu — the remember path writes these
+// fields from the LLM goroutine under the same lock, so reading them on the
+// event loop must hold it too.
+func (a *MainAgent) captureLastPreparedSurfaceForPreflight() (turnID uint64, source, prefix []message.Message) {
+	a.loopReductionMu.Lock()
+	defer a.loopReductionMu.Unlock()
+	return a.lastPreparedLLMTurnID,
+		append([]message.Message(nil), a.lastPreparedLLMShapeSource...),
+		cloneMessageSliceForRequestShape(a.lastPreparedLLMRequestPrefix)
 }
 
 // currentModelPromptCacheCapable reports whether the running model supports
@@ -562,7 +601,7 @@ func (a *MainAgent) produceModelDrivenDraftAsync(ctx context.Context, bundle mod
 	if err != nil {
 		return nil, fmt.Errorf("determine compaction index: %w", err)
 	}
-	absHistoryPath, sourceRefs, sourceFingerprint, err := a.exportCompactionHistory(head, index, evidenceItemTopics(evidenceItems))
+	absHistoryPath, sourceRefs, sourceFingerprint, err := a.exportCompactionHistory(head, index, evidenceItemTopics(evidenceItems), bundle.archiveMeta)
 	if err != nil {
 		return nil, fmt.Errorf("export compacted history: %w", err)
 	}
@@ -610,7 +649,7 @@ func (a *MainAgent) produceModelDrivenDraftAsync(ctx context.Context, bundle mod
 	if preflight.CurrentTokens > 0 {
 		preflight.SavedRatioPct = saved * 100 / preflight.CurrentTokens
 	}
-	if reason, skip := modelDrivenLowGainCheck(preflight.CurrentTokens, projectedTokens, saved, preflight.CacheRebuildCost); skip {
+	if reason, skip := modelDrivenLowGainCheck(preflight.CurrentTokens, projectedTokens, saved); skip {
 		return modelDrivenSkipDraft(planID, target, reason, "low_gain", bundle.currentRequestBatch, &preflight), nil
 	}
 	contextSummaryMsg := message.Message{
@@ -645,6 +684,24 @@ func (a *MainAgent) produceModelDrivenDraftAsync(ctx context.Context, bundle mod
 
 // ------------------------------------------------------------- preflight ---
 
+// modelDrivenCurrentSurfaceBaseline returns the prepared current-side message
+// surface for the low-gain preflight plus a provenance label for telemetry.
+// When the snapshot is still an append-only extension of the source messages
+// of this turn's most recent sent request, that request's reduced prefix is
+// reused (the provider already saw it, so the estimate is exact for the head)
+// and the appended tail is added unreduced; otherwise the scratch reduction
+// re-scans the whole snapshot as an approximation of the next real request.
+func (a *MainAgent) modelDrivenCurrentSurfaceBaseline(bundle modelDrivenBarrierSnapshot, snapshot []message.Message) ([]message.Message, string) {
+	if bundle.lastPreparedTurnID != 0 && len(bundle.lastPreparedSource) > 0 && len(bundle.lastPreparedPrefix) > 0 {
+		if reusableMessagePrefixLen(bundle.lastPreparedSource, snapshot) == len(bundle.lastPreparedSource) {
+			out := cloneMessageSliceForRequestShape(bundle.lastPreparedPrefix)
+			out = append(out, snapshot[len(bundle.lastPreparedSource):]...)
+			return out, "last_prepared"
+		}
+	}
+	return bundle.prepareReducedRequest(snapshot), "scratch"
+}
+
 // modelDrivenLowGainPreflight estimates the prepared request surface with and
 // without the reset. The current side is the next real request's reduced
 // message surface; the projected side is the complete checkpoint (wrapper,
@@ -656,11 +713,12 @@ func (a *MainAgent) produceModelDrivenDraftAsync(ctx context.Context, bundle mod
 // overestimated, never ignored, so a reset is only skipped for clearly
 // insufficient gain.
 func (a *MainAgent) modelDrivenLowGainPreflight(bundle modelDrivenBarrierSnapshot, headSplit int, snapshot []message.Message, req *modelDrivenCheckpointRequest) (string, bool, modelDrivenPreflightStats) {
-	currentSurface := bundle.prepareReducedRequest(snapshot)
+	currentSurface, currentSource := a.modelDrivenCurrentSurfaceBaseline(bundle, snapshot)
 	// Queued user messages are merged after reduction on the real request
 	// path, so they append to the prepared surface on both sides.
 	currentSurface = append(currentSurface, bundle.queuedUserMessages...)
 	checkpointContent, preflight := a.buildModelDrivenCheckpointContent(bundle, snapshot, headSplit, req)
+	preflight.CurrentSource = currentSource
 	projected := []message.Message{{Role: message.RoleUser, Content: checkpointContent, IsCompactionSummary: true}}
 	projected = append(projected, snapshot[headSplit:]...)
 	projected = append(projected, bundle.queuedUserMessages...)
@@ -683,16 +741,18 @@ func (a *MainAgent) modelDrivenLowGainPreflight(bundle modelDrivenBarrierSnapsho
 	// cache-written once (write ≈ 1.25×) where a kept prefix would only have
 	// been cache-read (≈ 0.1×). The rewritten prefix is the projected surface,
 	// not the archived head, and the one-time delta is amortized over the
-	// minimum apply interval so the gate compares amortized per-request net
-	// gain, not a single request's. The cost is charged to the savings before
-	// the low-gain gates, so a cacheable session cannot approve a reset whose
-	// amortized net gain falls below the gate.
+	// minimum apply interval. The cost is recorded on the preflight stats for
+	// the §14.2 cost telemetry only; the low-gain gates below compare raw
+	// surface savings, keeping pure surface semantics — the rebuild delta is a
+	// per-provider billing weight, not a token the model attends to, and
+	// whether it systematically eats the gains is answered by the telemetry
+	// instead of being pre-decided inside the gate.
 	var cacheRebuildCost int
 	if bundle.promptCacheCapable && headSplit > 0 {
 		cacheRebuildCost = modelDrivenCacheRebuildCost(projectedTokens)
 	}
 	preflight.CacheRebuildCost = cacheRebuildCost
-	if reason, skip := modelDrivenLowGainCheck(currentTokens, projectedTokens, saved, cacheRebuildCost); skip {
+	if reason, skip := modelDrivenLowGainCheck(currentTokens, projectedTokens, saved); skip {
 		return reason, true, preflight
 	}
 	return "", false, preflight
@@ -701,18 +761,16 @@ func (a *MainAgent) modelDrivenLowGainPreflight(bundle modelDrivenBarrierSnapsho
 // modelDrivenLowGainCheck applies the fixed low-gain gates to a savings
 // estimate and returns the skip reason when either gate fails. Both the
 // pre-export preflight and the post-export re-check share it so the refined
-// checkpoint cannot be approved on a stale estimate. cacheRebuildCost is
-// subtracted from the raw savings before the gates: prompt-cache-capable
-// sessions pay the cache rewrite of the archived prefix on the projected
-// side, so a reset is only approved when the net gain survives that cost.
-func modelDrivenLowGainCheck(currentTokens, projectedTokens, saved, cacheRebuildCost int) (string, bool) {
-	net := saved - cacheRebuildCost
-	if net < modelDrivenLowGainMinTokens || net < int(float64(currentTokens)*modelDrivenLowGainMinRatio) {
-		reason := fmt.Sprintf("projected savings %d tokens is below the low-gain gate (%d tokens and %d%% of the prepared surface)", saved, modelDrivenLowGainMinTokens, int(modelDrivenLowGainMinRatio*100))
-		if cacheRebuildCost > 0 {
-			reason += fmt.Sprintf("; prompt-cache rebuild cost %d tokens was subtracted", cacheRebuildCost)
-		}
-		return reason, true
+// checkpoint cannot be approved on a stale estimate. The gates compare raw
+// surface savings only: the prompt-cache rebuild cost is recorded on the
+// preflight stats for telemetry but deliberately NOT subtracted here, so the
+// gate keeps a pure surface semantics (the one-off cache rewrite of a kept
+// prefix is a per-provider billing weight, not a token the model attends to);
+// whether cache rebuilds systematically eat the gains is answered by the
+// §14.2 cost telemetry instead of being pre-decided inside the gate.
+func modelDrivenLowGainCheck(currentTokens, projectedTokens, saved int) (string, bool) {
+	if saved < modelDrivenLowGainMinTokens || saved < int(float64(currentTokens)*modelDrivenLowGainMinRatio) {
+		return fmt.Sprintf("projected savings %d tokens is below the low-gain gate (%d tokens and %d%% of the prepared surface)", saved, modelDrivenLowGainMinTokens, int(modelDrivenLowGainMinRatio*100)), true
 	}
 	return "", false
 }
@@ -1016,6 +1074,9 @@ func (a *MainAgent) settleModelDrivenOutcome(status string, reason string, prefl
 		diagnostic["projected_tokens"] = strconv.Itoa(preflight.ProjectedTokens)
 		diagnostic["saved_tokens"] = strconv.Itoa(preflight.SavedTokens)
 		diagnostic["saved_ratio_pct"] = strconv.Itoa(preflight.SavedRatioPct)
+		if preflight.CurrentSource != "" {
+			diagnostic["current_source"] = preflight.CurrentSource
+		}
 		diagnostic["current_bytes"] = strconv.Itoa(preflight.CurrentBytes)
 		diagnostic["projected_bytes"] = strconv.Itoa(preflight.ProjectedBytes)
 		diagnostic["checkpoint_bytes"] = strconv.Itoa(preflight.CheckpointBytes)

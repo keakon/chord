@@ -4678,7 +4678,7 @@ func TestProduceCompactionDraftArchivalProfileOmitsRecentTail(t *testing.T) {
 	// Test bypasses ctxmgr so use a non-zero headSplit directly. The async path
 	// requires headSplit > 0 because tail is preserved by ReplacePrefixAtomic.
 	headSplit := len(snapshot)
-	draft, err := a.produceCompactionDraftAsync(t.Context(), snapshot, false, 1, compactionTarget{sessionEpoch: a.sessionEpoch}, headSplit, compactionProfileArchival, "", nil)
+	draft, err := a.produceCompactionDraftAsync(t.Context(), snapshot, false, 1, compactionTarget{sessionEpoch: a.sessionEpoch}, headSplit, compactionProfileArchival, "", nil, a.captureCompactionArchiveMeta())
 	if err != nil {
 		t.Fatalf("produceCompactionDraftAsync error: %v", err)
 	}
@@ -4725,7 +4725,7 @@ func TestProduceCompactionDraftCapturesSummaryKeyFileRevision(t *testing.T) {
 		{Role: message.RoleTool, ToolCallID: "read-1", Content: "READ_RESULT lines=1-1 total=1\npackage current"},
 		{Role: message.RoleAssistant, Content: "continue"},
 	}
-	draft, err := a.produceCompactionDraftAsync(t.Context(), snapshot, false, 1, compactionTarget{sessionEpoch: a.sessionEpoch}, len(snapshot), compactionProfileArchival, "", nil)
+	draft, err := a.produceCompactionDraftAsync(t.Context(), snapshot, false, 1, compactionTarget{sessionEpoch: a.sessionEpoch}, len(snapshot), compactionProfileArchival, "", nil, a.captureCompactionArchiveMeta())
 	if err != nil {
 		t.Fatalf("produceCompactionDraftAsync: %v", err)
 	}
@@ -5345,7 +5345,7 @@ func TestExportCompactionHistoryMetaPendingThenApplied(t *testing.T) {
 	a := newTestMainAgent(t, projectRoot)
 	msgs := []message.Message{{Role: "user", Content: "hello"}}
 
-	absPath, sourceRefs, sourceFingerprint, err := a.exportCompactionHistory(msgs, 1, nil)
+	absPath, sourceRefs, sourceFingerprint, err := a.exportCompactionHistory(msgs, 1, nil, a.captureCompactionArchiveMeta())
 	if err != nil {
 		t.Fatalf("exportCompactionHistory: %v", err)
 	}

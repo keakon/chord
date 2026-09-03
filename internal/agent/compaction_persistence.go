@@ -20,18 +20,42 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-func (a *MainAgent) exportCompactionHistory(messages []message.Message, index int, topics []string) (absPath string, sourceRefs []checkpointSourceRef, sourceFingerprint string, err error) {
-	// The compaction workers call this from their goroutines while a session
-	// switch may rewrite a.sessionDir under stateMu on the event loop: read it
-	// once through the locked accessor and use that one value for the archive,
-	// its permission root, and its status file.
-	sessionDir := a.SessionDir()
+// compactionArchiveMeta is the immutable metadata an archive export needs
+// from the MainAgent. Compaction workers run on their own goroutines while
+// the event loop may switch sessions, so the caller captures these values
+// once at the barrier/event loop and exportCompactionHistory reads only this
+// bundle — it never touches live MainAgent fields.
+type compactionArchiveMeta struct {
+	sessionDir          string
+	modelName           string
+	projectRoot         string
+	persistentSessionID string
+	instanceID          string
+}
+
+// captureCompactionArchiveMeta snapshots the archive metadata on the event
+// loop. Call before handing a compaction draft off to a worker goroutine.
+func (a *MainAgent) captureCompactionArchiveMeta() compactionArchiveMeta {
+	return compactionArchiveMeta{
+		sessionDir:          a.SessionDir(),
+		modelName:           a.ModelName(),
+		projectRoot:         a.projectRoot,
+		persistentSessionID: a.exportPersistentSessionID(),
+		instanceID:          a.instanceID,
+	}
+}
+
+func (a *MainAgent) exportCompactionHistory(messages []message.Message, index int, topics []string, meta compactionArchiveMeta) (absPath string, sourceRefs []checkpointSourceRef, sourceFingerprint string, err error) {
+	// The archive, its permission root, and its status file all belong to the
+	// session captured at the barrier; a session switch cannot change where
+	// this draft writes.
+	sessionDir := meta.sessionDir
 	absPath = filepath.Join(sessionDir, fmt.Sprintf("history-%d.md", index))
 	metadata := map[string]string{
-		session.MetadataKeyModel:       a.ModelName(),
-		session.MetadataKeyProjectPath: a.projectRoot,
-		session.MetadataKeySessionID:   a.exportPersistentSessionID(),
-		session.MetadataKeyInstanceID:  a.instanceID,
+		session.MetadataKeyModel:       meta.modelName,
+		session.MetadataKeyProjectPath: meta.projectRoot,
+		session.MetadataKeySessionID:   meta.persistentSessionID,
+		session.MetadataKeyInstanceID:  meta.instanceID,
 	}
 	exported, err := session.Export(messages, nil, metadata)
 	if err != nil {
@@ -46,7 +70,7 @@ func (a *MainAgent) exportCompactionHistory(messages []message.Message, index in
 		return "", nil, "", err
 	}
 	generation := fmt.Sprintf("compaction-%d", index)
-	sourceRefs, err = buildCheckpointSourceRefs(a.exportPersistentSessionID(), generation, filepath.Base(absPath), messages)
+	sourceRefs, err = buildCheckpointSourceRefs(meta.persistentSessionID, generation, filepath.Base(absPath), messages)
 	if err != nil {
 		return "", nil, "", err
 	}
