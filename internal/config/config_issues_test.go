@@ -228,6 +228,39 @@ func TestCollectConfigFileIssuesReportsOutOfRangeModelCompactionValues(t *testin
 	}
 }
 
+func TestCollectConfigFileIssuesReportsInheritedReminderAtOrAboveModelThreshold(t *testing.T) {
+	// A model that overrides only its threshold inherits the global
+	// reminder; when the inherited line sits at or above the model's own
+	// threshold the reminder never injects for that model, which is silent
+	// without this report.
+	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "context:\n  compaction:\n    threshold: 0.8\n    reminder: 0.9\nproviders:\n  openai:\n    type: responses\n    models:\n      gpt-5.6-luna:\n        compaction:\n          threshold: 0.85\n      gpt-5.6-sol:\n        compaction:\n          threshold: 0.95\n")
+	issues, err := CollectConfigFileIssues(path, true)
+	if err != nil {
+		t.Fatalf("CollectConfigFileIssues: %v", err)
+	}
+	joined := strings.Join(issues, "\n")
+	if !strings.Contains(joined, "openai/gpt-5.6-luna: inherits context.compaction.reminder 0.9, which is at or above this model's compaction.threshold 0.85") {
+		t.Fatalf("issues = %q, want the inherited-reminder trap report for gpt-5.6-luna", joined)
+	}
+	if strings.Contains(joined, "gpt-5.6-sol") {
+		t.Fatalf("issues = %q, a model whose threshold clears the inherited reminder must not be reported", joined)
+	}
+}
+
+func TestCollectConfigFileIssuesDoesNotReportDerivedReminderAgainstModelThreshold(t *testing.T) {
+	// A derived global reminder (reminder unset/0) is always below the
+	// threshold, so a threshold-only model override must not be flagged.
+	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "context:\n  compaction:\n    threshold: 0.8\nproviders:\n  openai:\n    type: responses\n    models:\n      gpt-5.6-luna:\n        compaction:\n          threshold: 0.5\n")
+	issues, err := CollectConfigFileIssues(path, true)
+	if err != nil {
+		t.Fatalf("CollectConfigFileIssues: %v", err)
+	}
+	joined := strings.Join(issues, "\n")
+	if strings.Contains(joined, "inherits context.compaction.reminder") {
+		t.Fatalf("issues = %q, derived reminder must not be reported against a model threshold", joined)
+	}
+}
+
 func TestLoadConfigFromPathFallsBackForOutOfRangeCompactionValues(t *testing.T) {
 	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "context:\n  compaction:\n    threshold: 1.5\n    reminder: 2\n")
 	cfg, err := LoadConfigFromPath(path)

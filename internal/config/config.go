@@ -1493,10 +1493,13 @@ func validCompactionReminder(v float64) bool {
 //   - A reminder set against a disabled compaction (threshold 0) never fires —
 //     threshold 0 disables both auto-compaction and reminders — so the
 //     combination is reported so the user knows the reminder is dead. A
-//     reminder at or above the threshold is *not* an issue: the reminder fires
-//     on the threshold crossing itself (the caller takes min(reminder,
-//     threshold)), and the crossing starts the automatic compaction right away,
-//     so the reminder and the start share the request.
+//     reminder at or above the threshold is *not* an issue: the reminder never
+//     injects on its own once its resolved line sits at or above the
+//     threshold, because the request that crosses the line and every
+//     grace-deferred request already carry the "compaction imminent" notice
+//     (or the externalization warning once the grace is spent) with the same
+//     wrap-up and externalize instructions, so stacking the reminder would
+//     only duplicate the prompt.
 //
 // Global compaction is checked directly; per-model compaction lives on the
 // model definitions (ModelConfig.Compaction) and is checked in
@@ -1525,7 +1528,10 @@ func collectCompactionConfigIssues(cfg *Config) []string {
 // inherits the global line again instead of running its runtime on a broken
 // value; a reminder set against a model threshold of 0 never fires (threshold
 // 0 disables auto-compaction and reminders for that model), which is reported
-// so the user fixes it on the model side.
+// so the user fixes it on the model side. A model that overrides only its
+// threshold inherits the global reminder; when the inherited line sits at or
+// above the model's threshold the reminder never injects for that model, so
+// the combination is reported as a silent footgun.
 func collectModelCompactionIssues(cfg *Config) []string {
 	var issues []string
 	global := compThresholdConfig(cfg)
@@ -1555,6 +1561,18 @@ func collectModelCompactionIssues(cfg *Config) []string {
 			threshold := compThresholdForModel(global, mc)
 			if threshold <= 0 && comp.Reminder != nil && *comp.Reminder > 0 {
 				issues = append(issues, fmt.Sprintf("model %s/%s: compaction.reminder is set but its threshold is 0 (auto-compaction disabled); the reminder will never fire", providerName, modelID))
+			}
+			// Inheritance footgun: a model that overrides only its
+			// threshold inherits the global reminder; when that line
+			// sits at or above the model's own threshold the reminder
+			// never injects for the model (the crossing and grace
+			// requests carry the imminent notice instead), with no
+			// other hint. A derived global reminder (Reminder 0)
+			// cannot trap: its derived value is always below the
+			// threshold. A model that disabled compaction (threshold
+			// 0) is excluded — there is nothing to remind toward.
+			if comp.Threshold != nil && comp.Reminder == nil && threshold > 0 && global.Reminder > 0 && global.Reminder >= threshold {
+				issues = append(issues, fmt.Sprintf("model %s/%s: inherits context.compaction.reminder %v, which is at or above this model's compaction.threshold %v; the reminder never injects for this model — set a per-model reminder below the threshold or disable it with -1", providerName, modelID, global.Reminder, threshold))
 			}
 		}
 		if modelsChanged {
