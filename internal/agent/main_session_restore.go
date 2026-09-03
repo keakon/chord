@@ -715,6 +715,10 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	a.lastModelDrivenApplyBatch = loaded.LastModelDrivenApplyBatch
 	a.lastModelDrivenSkipBatch = 0
 	a.lastModelDrivenSkipReason = ""
+	// Restore starts a fresh compaction window for the reminder-class overlay
+	// claims (the session epoch also advances, so the claim keys change
+	// anyway; resetting the generation keeps the two windows consistent).
+	a.compactionWindowGeneration = 0
 	a.clearCompactionGrace()
 	a.autoCompactRequestGeneration.Store(loaded.AutoCompactRequestGeneration)
 	if resume := a.pendingCompactionResume; resume != nil &&

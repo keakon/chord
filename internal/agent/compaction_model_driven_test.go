@@ -1158,23 +1158,23 @@ func TestModelDrivenLowGainCheckComparesRawSavings(t *testing.T) {
 	// The gates compare raw surface savings; the cache rebuild charge is a
 	// per-provider billing weight recorded for telemetry, never subtracted
 	// here, so a cacheable session is not pre-denied inside the gate.
-	if reason, skip := modelDrivenLowGainCheck(10000, 5000, 5000); skip {
+	if reason, skip := modelDrivenLowGainCheck(10000, 5000); skip {
 		t.Fatalf("raw savings above the gate must pass, got reason %q", reason)
 	}
 	// Savings that would have fallen below the floor only after subtracting a
 	// 4000-token rebuild charge still pass: the cost no longer gates.
-	if reason, skip := modelDrivenLowGainCheck(10000, 5000, 5000); skip {
+	if reason, skip := modelDrivenLowGainCheck(10000, 5000); skip {
 		t.Fatalf("savings unaffected by the (telemetry-only) rebuild cost must pass, got reason %q", reason)
 	}
 	// The absolute floor still applies to raw savings.
-	if reason, skip := modelDrivenLowGainCheck(10000, 9000, 1000); !skip {
+	if reason, skip := modelDrivenLowGainCheck(10000, 1000); !skip {
 		t.Fatal("raw savings below the absolute floor must skip")
 	} else if !strings.Contains(reason, "below the low-gain gate") {
 		t.Fatalf("floor skip reason must mention the gate, got %q", reason)
 	}
 	// The 10% relative gate applies to the raw savings against the current
 	// prepared surface.
-	if reason, skip := modelDrivenLowGainCheck(100000, 95000, 4000); !skip {
+	if reason, skip := modelDrivenLowGainCheck(100000, 4000); !skip {
 		t.Fatalf("raw savings below 10%% of the prepared surface must skip, got %q", reason)
 	} else if !strings.Contains(reason, "below the low-gain gate") {
 		t.Fatalf("relative-gate skip reason must mention the gate, got %q", reason)
@@ -1208,6 +1208,22 @@ func TestModelDrivenApplyRecordsLastApplyBatch(t *testing.T) {
 	}
 	if a.lastModelDrivenSkipBatch != 0 || a.lastModelDrivenSkipReason != "" {
 		t.Fatalf("apply must clear the skip-cooldown state, got batch=%d reason=%q", a.lastModelDrivenSkipBatch, a.lastModelDrivenSkipReason)
+	}
+	// The checkpoint message itself carries the apply batch so a restart whose
+	// transcript is a lone checkpoint restores the sequence continuously
+	// instead of restarting at 0.
+	checkpoint := a.ctxMgr.Snapshot()
+	if len(checkpoint) == 0 || checkpoint[0].RequestBatch != 1 {
+		var got uint64
+		if len(checkpoint) > 0 {
+			got = checkpoint[0].RequestBatch
+		}
+		t.Fatalf("checkpoint message RequestBatch = %d, want the apply batch 1", got)
+	}
+	// A durable apply advances the in-memory overlay window key: the reminder
+	// claim keys on it, so the next window re-arms delivered and ccCalled.
+	if a.compactionWindowGeneration != 1 {
+		t.Fatalf("compactionWindowGeneration = %d, want 1 after the apply", a.compactionWindowGeneration)
 	}
 }
 

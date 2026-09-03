@@ -632,7 +632,6 @@ func (a *MainAgent) handleToolResult(evt Event) {
 			if a.maybeStartModelDrivenBarrier() {
 				return
 			}
-			log.Warn("model-driven checkpoint barrier did not start; continuing without reset")
 		}
 		if a.pendingHandoff != nil {
 			pc := a.pendingHandoff

@@ -117,7 +117,7 @@ func (a *MainAgent) syncOverlayWindowClaim(claim *reminderOverlayClaim, windowEp
 // must not stamp ccCalled onto the stale pre-apply claim.
 func (a *MainAgent) markReminderCompactContextCalled() {
 	windowEpoch := a.sessionEpoch
-	windowIndex := nextHistoryIndexMinusOne(a.sessionDir)
+	windowIndex := int(a.compactionWindowGeneration)
 	budgetEpoch := a.ctxMgr.TokenBudgetsEpoch()
 	a.overlayClaims.mu.Lock()
 	defer a.overlayClaims.mu.Unlock()
@@ -303,7 +303,7 @@ func (a *MainAgent) queueContextPressureReminder(decision ctxmgr.AutoCompactDeci
 		return
 	}
 	windowEpoch := a.sessionEpoch
-	windowIndex := nextHistoryIndexMinusOne(a.sessionDir)
+	windowIndex := int(a.compactionWindowGeneration)
 	budgetEpoch := a.ctxMgr.TokenBudgetsEpoch()
 	claim := a.syncOverlayWindowClaim(&a.overlayClaims.reminder, windowEpoch, windowIndex, budgetEpoch)
 	// The model already called compact_context in this window: whatever

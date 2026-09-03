@@ -287,6 +287,9 @@ func (a *MainAgent) installSessionTarget(sessionDir string) {
 	a.lastModelDrivenApplyBatch = 0
 	a.lastModelDrivenSkipBatch = 0
 	a.lastModelDrivenSkipReason = ""
+	// A session switch starts a fresh compaction window for the
+	// reminder-class overlay claims too.
+	a.compactionWindowGeneration = 0
 	a.clearCompactionGrace()
 	a.resetThinkingTranslationSeen()
 	a.stateMu.Lock()

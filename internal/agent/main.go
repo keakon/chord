@@ -680,6 +680,16 @@ type MainAgent struct {
 	// the per-generation externalization warning claim. Cross-goroutine: the
 	// event loop queues, the main LLM goroutine confirms delivery at dispatch.
 	overlayClaims overlayClaimState
+	// compactionWindowGeneration is the in-memory monotonic compaction-window
+	// id used by the reminder-class overlay claims: every durable apply
+	// increments it, and a session switch / restore resets it to 0. It
+	// replaces the on-disk history file count as the window key so the key
+	// only changes when a checkpoint actually applies — a usage-driven worker
+	// writes its history file before the summary model runs, which would
+	// rotate the key mid-window and re-arm (or permanently suppress) the
+	// reminder for requests racing that window. Event-loop owned: queued,
+	// advanced, and reset only on the event loop, so it needs no lock.
+	compactionWindowGeneration uint64
 	// appliedCompactionModelRef records the model reference whose per-model
 	// compaction threshold is currently applied to ctxmgr. A change re-applies
 	// the threshold; not persisted, so after a restore the threshold is

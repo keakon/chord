@@ -681,7 +681,7 @@ func (a *MainAgent) produceModelDrivenDraftAsync(ctx context.Context, bundle mod
 	if preflight.CurrentTokens > 0 {
 		preflight.SavedRatioPct = saved * 100 / preflight.CurrentTokens
 	}
-	if reason, skip := modelDrivenLowGainCheck(preflight.CurrentTokens, projectedTokens, saved); skip {
+	if reason, skip := modelDrivenLowGainCheck(preflight.CurrentTokens, saved); skip {
 		return modelDrivenSkipDraft(planID, target, reason, "low_gain", bundle.currentRequestBatch, &preflight), nil
 	}
 	contextSummaryMsg := message.Message{
@@ -784,7 +784,7 @@ func (a *MainAgent) modelDrivenLowGainPreflight(bundle modelDrivenBarrierSnapsho
 		cacheRebuildCost = modelDrivenCacheRebuildCost(projectedTokens)
 	}
 	preflight.CacheRebuildCost = cacheRebuildCost
-	if reason, skip := modelDrivenLowGainCheck(currentTokens, projectedTokens, saved); skip {
+	if reason, skip := modelDrivenLowGainCheck(currentTokens, saved); skip {
 		return reason, true, preflight
 	}
 	return "", false, preflight
@@ -800,7 +800,7 @@ func (a *MainAgent) modelDrivenLowGainPreflight(bundle modelDrivenBarrierSnapsho
 // prefix is a per-provider billing weight, not a token the model attends to);
 // whether cache rebuilds systematically eat the gains is answered by the
 // cost telemetry instead of being pre-decided inside the gate.
-func modelDrivenLowGainCheck(currentTokens, projectedTokens, saved int) (string, bool) {
+func modelDrivenLowGainCheck(currentTokens, saved int) (string, bool) {
 	if saved < modelDrivenLowGainMinTokens || saved < int(float64(currentTokens)*modelDrivenLowGainMinRatio) {
 		return fmt.Sprintf("projected savings %d tokens is below the low-gain gate (%d tokens and %d%% of the prepared surface)", saved, modelDrivenLowGainMinTokens, int(modelDrivenLowGainMinRatio*100)), true
 	}

@@ -429,6 +429,15 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 		a.recordCompactionProvenanceEvent("legacy_unvalidated", map[string]string{"head_split": strconv.Itoa(headSplit)})
 	}
 	d.NewMessages = a.refreshCompactionFileRevisions(d.NewMessages)
+	// Stamp the checkpoint message with the request batch of this apply — the
+	// same value lastModelDrivenApplyBatch records below. RequestBatch is
+	// otherwise only stamped on assistant messages, so after a restart whose
+	// transcript is a lone checkpoint (archival apply left no live tail) the
+	// restored counter would restart from 0 and read as a stale anchor,
+	// re-admitting requests the interval gate meant to throttle. The stamp
+	// keeps the persisted sequence continuous across the restart.
+	applyBatch := a.currentRequestBatch(a.ctxMgr.Snapshot())
+	d.NewMessages[0].RequestBatch = applyBatch
 
 	// Capture the original first user message BEFORE entering ReplacePrefixAtomic,
 	// because the rewrite callback runs while ctxmgr's write lock is held and
@@ -482,6 +491,10 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	// beginMainLLMAfterPreparation re-queues against the new window claims.
 	a.pendingContextPressureReminder = ""
 	a.pendingCompactionWarning = ""
+	// The apply itself — not the worker's history export — advances the
+	// overlay window key, so requests dispatched while an async compaction is
+	// still running (or was discarded) stay on the pre-apply window claim.
+	a.compactionWindowGeneration++
 	// A successful model-driven apply records its request batch as the new
 	// interval anchor: the next model-driven request must wait
 	// minModelDrivenApplyIntervalBatches batches. Every durable apply — model-
@@ -490,7 +503,7 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	// was computed on no longer exists, and the new window re-derives its own
 	// grace from a fresh crossing.
 	if d.SummaryMode == compactionSummaryModeModelDriven {
-		a.lastModelDrivenApplyBatch = a.currentRequestBatch(a.ctxMgr.Snapshot())
+		a.lastModelDrivenApplyBatch = applyBatch
 	}
 	a.lastModelDrivenSkipBatch = 0
 	a.lastModelDrivenSkipReason = ""
