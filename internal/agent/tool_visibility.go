@@ -28,7 +28,17 @@ func visibleLLMTools(registry *toolpkg.Registry, ruleset permission.Ruleset, kee
 		if controlled, ok := tool.(toolpkg.RulesetAwareVisibilityTool); ok && !controlled.VisibleWithRuleset(ruleset) {
 			continue
 		}
-		if !keepInternal(name) && ruleset.IsDisabled(name) {
+		disabled := ruleset.IsDisabled(name)
+		// compact_context is registered only while the model-driven compaction
+		// feature is enabled, so registration is the user's authorization:
+		// wildcard-only rules (an allowlist's `"*": deny`) must not silently
+		// hide the tool. Non-global rules whose tool pattern matches
+		// compact_context still apply, so an explicit deny keeps IsDisabled
+		// true.
+		if name == toolpkg.NameCompactContext && compactContextPermissionAction(ruleset) != permission.ActionDeny {
+			disabled = false
+		}
+		if !keepInternal(name) && disabled {
 			continue
 		}
 		if available, ok := tool.(toolpkg.AvailableTool); ok && !available.IsAvailable() {

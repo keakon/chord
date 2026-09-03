@@ -654,6 +654,11 @@ type MainAgent struct {
 	// wiring; the capability is decided at construction, never toggled at
 	// runtime.
 	modelDrivenCompactionEnabled atomic.Bool
+	// modelDrivenDenyDiagnosticOnce gates the one-time diagnostic reported
+	// when model_driven is enabled but the permission rules explicitly deny
+	// compact_context (the model-driven checkpoint feature is then
+	// unavailable).
+	modelDrivenDenyDiagnosticOnce sync.Once
 	// autoCompactRequestGeneration is a monotonic id for each usage-driven
 	// auto-compact request instance. It increments when the request is armed
 	// (false->true) and is never reset by apply/skip/clear; it binds the

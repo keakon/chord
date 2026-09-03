@@ -38,13 +38,13 @@ func (rs Ruleset) lastMatch(permission, pattern string, skipCompoundShellAllow b
 	return MatchResult{}
 }
 
-// LastSpecificToolMatch returns the last rule that names toolName specifically
-// (wildcard-only "*" tool rules are skipped) and whose argument pattern matches.
-// It answers "did the user write a rule for this particular tool?" so callers
-// can layer tool-specific constraints without inheriting wildcard defaults.
-// Only the literal "*" is treated as non-specific: a glob tool name such as
-// "del*" still counts as specific, since the user deliberately targeted a
-// narrower tool set than the wildcard default.
+// LastSpecificToolMatch returns the last non-global rule whose tool pattern
+// matches toolName and whose argument pattern matches. It answers "did the
+// user write a rule for this particular tool?" so callers can layer
+// tool-specific constraints without inheriting wildcard defaults. Only the
+// literal "*" is treated as non-specific: a glob tool name such as "del*"
+// still counts as specific, since the user deliberately targeted a narrower
+// tool set than the wildcard default.
 func (rs Ruleset) LastSpecificToolMatch(permission, pattern string) MatchResult {
 	permission = toolname.Normalize(permission)
 	for _, r := range slices.Backward(rs) {

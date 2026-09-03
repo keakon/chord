@@ -35,6 +35,26 @@ func normalizeToolPermissionAction(toolName string, action permission.Action) pe
 	return action
 }
 
+// compactContextPermissionAction resolves the effective permission action for
+// the compact_context tool. The tool is registered only while the
+// context.compaction.model_driven feature is enabled, so registration itself
+// is the user's authorization: wildcard-only rules — such as an allowlist's
+// `"*": deny` — must neither hide the tool nor block its calls, or a user who
+// enables model_driven would silently lose the feature unless they also knew
+// to allow the internal tool name. Only a non-global rule whose tool pattern
+// matches compact_context (an explicit deny / ask / allow) overrides that
+// default; an explicit deny keeps the tool hidden and its calls rejected.
+// Narrow globs such as compact_* are specific rules too.
+func compactContextPermissionAction(ruleset permission.Ruleset) permission.Action {
+	if len(ruleset) == 0 {
+		return permission.ActionAllow
+	}
+	if match := ruleset.LastSpecificToolMatch(tools.NameCompactContext, "*"); match.Found {
+		return match.Rule.Action
+	}
+	return permission.ActionAllow
+}
+
 func evaluateToolPermission(ruleset permission.Ruleset, toolName string, args json.RawMessage) toolPermissionDecision {
 	return evaluateToolPermissionInDir(ruleset, toolName, args, "")
 }
@@ -66,6 +86,14 @@ func evaluateToolPermissionInDir(ruleset permission.Ruleset, toolName string, ar
 		return evaluateShellToolPermission(ruleset, unwrapped)
 	case tools.NameWebFetch:
 		return evaluateWebFetchToolPermission(ruleset, unwrapped)
+	case tools.NameCompactContext:
+		// The tool is registered only while the model-driven compaction
+		// feature is enabled, so registration is the user's authorization:
+		// wildcard-only rules (an allowlist's `"*": deny`) do not block its
+		// calls. Non-global rules whose tool pattern matches compact_context
+		// still apply — deny rejects, ask confirms, allow passes — see
+		// compactContextPermissionAction.
+		return toolPermissionDecision{Action: compactContextPermissionAction(ruleset), MatchArgument: "*"}
 	default:
 		arg := extractToolArgument(toolName, unwrapped)
 		if isPathToolPermission(toolName) && strings.TrimSpace(cwd) != "" {

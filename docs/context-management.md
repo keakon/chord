@@ -232,7 +232,14 @@ compaction once it applies.
 ### Model-driven context checkpoint (experimental)
 
 When `context.compaction.model_driven: true`, the main agent gains the
-`compact_context` tool. The model calls it alone (no sibling tool calls in the
+`compact_context` tool. Registration is part of enabling the feature, so
+wildcard-only permission rules — such as an allowlist's `"*": deny` plus a few
+explicitly allowed tools — never hide the tool or block its calls; only a
+non-global tool rule whose pattern matches `compact_context` still applies
+(`deny` removes the tool and reports a one-time diagnostic, `ask` keeps it
+behind confirmation, and `allow` matches the default). Narrow patterns such as
+`compact_*` count as matching rules. A role whose allowlist grants no file-writing
+tools can still checkpoint its state in the structured arguments. The model calls it alone (no sibling tool calls in the
 same response) once its working state is fully externalized — the facts it
 needs later are written into files named in `state_files`, or fully expressed
 in the structured `active_objective` / `completed` / `decisions` /
@@ -264,8 +271,10 @@ keeps working exactly as before.
 A skip is a normal policy result: retrying the same request immediately is
 cooled down briefly and does not change the outcome — the model should wait or
 move on. When context usage stays above the reminder line, requests carry a
-context-pressure reminder: the full text once per compaction window, then a
-one-line pointer back to it, telling the model to prepare for the compaction
+context-pressure reminder: the full text once per compaction window, then a short,
+self-contained line restating the action — the reminder is a transient overlay
+rebuilt on every request, so a repeat cannot assume the full text is still in
+context — and telling the model to prepare for the compaction
 (call `compact_context` alone if the current phase is wrapped up, otherwise
 keep externalizing findings to project files as phases settle) instead of
 quoting how much context is left. Re-attachment stops once the model calls
@@ -300,7 +309,10 @@ task-notes file under `.chord/notes/` or a plan document under `.chord/plans/`
 `compact_context` alone only at a real phase boundary,
 and read the archived history files for exact past facts after a checkpoint
 applies. SubAgents never receive this section or the tool. The guidance is
-advisory, not a required workflow.
+advisory, not a mandatory workflow: under context pressure it outranks
+open-ended exploration and optional work, but it never overrides a newer user
+request or Done rejection, a cancellation, permission or security rules, or
+tool dependency ordering.
 
 Compaction is recursive: the next automatic summary is written over a history
 that already begins with a checkpoint. The session anchors (original request,

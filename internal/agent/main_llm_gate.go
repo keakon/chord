@@ -379,6 +379,43 @@ func (a *MainAgent) applyAnthropicCacheHints(stableLen, metaPrefixCount, durable
 	a.applyMainLLMRequestTuningOverride(llm.RequestTuning{Anthropic: tuning})
 }
 
+// modelDrivenDenyDiagnosticMessage describes the usage-driven automatic
+// compaction state when model_driven is enabled but compact_context is denied
+// by the permission rules. Automatic compaction is a configurable feature and
+// its failure breaker can pause it temporarily, so the diagnostic must report
+// the current state instead of promising that it always runs.
+func (a *MainAgent) modelDrivenDenyDiagnosticMessage() string {
+	if a == nil || a.ctxMgr == nil {
+		return "automatic compaction availability depends on the current configuration and failure policy"
+	}
+	decision := a.ctxMgr.AutoCompactDecision()
+	if decision.Threshold <= 0 || decision.UsableInputBudget <= 0 {
+		return "automatic compaction is disabled by configuration"
+	}
+	if a.isUsageDrivenAutoCompactSuppressed() {
+		return "automatic compaction is temporarily paused after recent failures"
+	}
+	return "automatic compaction remains available without model cooperation"
+}
+
+// noteModelDrivenDenyDiagnosticOnce reports once per agent lifetime when
+// model-driven compaction is enabled but the permission rules explicitly deny
+// compact_context: the model-driven checkpoint path is unavailable even
+// though the user enabled the feature. Runs on the event loop before the
+// compaction gate; idempotent and cheap.
+func (a *MainAgent) noteModelDrivenDenyDiagnosticOnce() {
+	if a == nil || !a.modelDrivenCompactionEnabled.Load() || a.compactContextVisible() {
+		return
+	}
+	a.modelDrivenDenyDiagnosticOnce.Do(func() {
+		log.Warnf("model_driven compaction enabled but compact_context is denied by the permission rules; model-driven checkpoints unavailable")
+		a.emitToTUI(ToastEvent{
+			Message: "context.compaction.model_driven is enabled, but the permission rules deny compact_context, so model-driven checkpoints are unavailable; " + a.modelDrivenDenyDiagnosticMessage() + ".",
+			Level:   "warn",
+		})
+	})
+}
+
 func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID uint64, agentErrSourceID string) {
 	a.applyPendingModelPoolSwitchesAtRequestBoundary()
 	// Apply the per-model compaction threshold for the current model
@@ -397,6 +434,7 @@ func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID
 	// assembled for this request. The usage-driven externalization warning is
 	// queued further below, only once the gate actually starts the compaction.
 	a.queueContextPressureReminderForNextRequest()
+	a.noteModelDrivenDenyDiagnosticOnce()
 	// Continuation barrier: apply any ready compaction draft first. When the
 	// apply path resumes a saved continuation (handled=true), it owns control
 	// flow from here; otherwise this fresh pre-request path should continue on

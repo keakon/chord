@@ -6,6 +6,7 @@ import (
 
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/ctxmgr"
+	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -226,9 +227,13 @@ func (a *MainAgent) markOverlayClaimsDelivered() {
 
 // compactContextVisible reports whether the compact_context tool is present in
 // the effective surface: the model-driven feature is enabled, the tool is
-// registered, and permission rules do not disable it. Only then may a reminder
-// name the tool; a denied or invisible tool must never be pushed onto the
-// model as an option.
+// registered, and no non-global permission rule whose tool pattern matches
+// compact_context denies it. Wildcard-only rules (such as an allowlist's
+// `"*": deny`) never hide the tool — registration is gated by the
+// model_driven feature flag, which is the user's authorization
+// (see compactContextPermissionAction). Only then may a reminder name the
+// tool; a denied or invisible tool must never be pushed onto the model as an
+// option.
 func (a *MainAgent) compactContextVisible() bool {
 	if a == nil || !a.modelDrivenCompactionEnabled.Load() || a.tools == nil {
 		return false
@@ -236,11 +241,7 @@ func (a *MainAgent) compactContextVisible() bool {
 	if _, ok := a.tools.Get(tools.NameCompactContext); !ok {
 		return false
 	}
-	ruleset := a.effectiveRuleset()
-	if len(ruleset) == 0 {
-		return true
-	}
-	return !ruleset.IsDisabled(tools.NameCompactContext)
+	return compactContextPermissionAction(a.effectiveRuleset()) != permission.ActionDeny
 }
 
 // queueContextPressureReminderForNextRequest queues the context-pressure
@@ -348,13 +349,15 @@ func (a *MainAgent) queueCompactionWarning() {
 	a.pendingCompactionWarning = compactionWarningText
 }
 
-// contextPressureReminderShortText is the one-line re-attachment used on
-// requests after the full reminder already dispatched in the same window. The
-// model saw the full instructions on the first
-// delivery, so a single line that it is still above the reminder line and
-// points back at the full notice is enough to keep the phase open and
-// externalizing without re-quoting the whole contract on every request.
-const contextPressureReminderShortText = "Context pressure reminder still active; see the earlier notice."
+// contextPressureReminderShortText is the short re-attachment used on requests
+// after the full reminder already dispatched in the same window. It must stay
+// self-contained: reminders are request-scoped overlays rebuilt from scratch
+// on every request, so a later request — or a fallback or replay of one — is
+// never guaranteed to still carry the full notice this text would otherwise
+// point back at. The short form therefore restates the action instead of
+// referencing the earlier notice.
+const contextPressureReminderShortText = "Context pressure is still active and the context may be compacted soon.\n" +
+	"If the current phase is wrapped up and its working state is externalized, call compact_context alone; otherwise keep writing key findings and decisions to a project file your role may write as they settle."
 
 // buildContextPressureReminderText renders the full reminder text. It does not
 // quote the current usage ratio or the remaining budget: the model cannot act
