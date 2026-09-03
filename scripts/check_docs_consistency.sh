@@ -100,8 +100,8 @@ fi
 
 for path in "${public_docs[@]}"; do
  [[ -e "$path" ]] || continue
- if grep -RIn --exclude-dir=.git --exclude='check_docs_consistency.sh' '\.internal-docs' "$path" >/dev/null; then
-  fail "$path must not reference .internal-docs"
+ if grep -RIn --exclude-dir=.git --exclude='check_docs_consistency.sh' '\.chord/docs' "$path" >/dev/null; then
+  fail "$path must not reference .chord/docs"
  fi
 done
 

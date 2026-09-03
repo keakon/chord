@@ -104,6 +104,10 @@ Usage statistics use the current `usage.jsonl` ledger format. Session restore an
 
 Custom titles are shown in the session picker and terminal title. They are metadata only: `/rename` does not change the session ID, directory, transcript, or resume command.
 
+### Editing after resuming a session
+
+When you resume a session, Chord rebuilds only the safety state needed to allow later edits. It does not re-read files or reload their contents into the conversation. If you edit a file that was changed on disk since the session ended, or whose read history was not durable, the next `edit` / `apply_patch` on that file may be blocked and the agent will re-`read` it first. This is intentional: it keeps edits from being applied against stale file contents.
+
 ### Importing external sessions
 
 Chord can import an external agent session into a resumable Chord session.

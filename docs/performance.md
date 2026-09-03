@@ -25,6 +25,10 @@ Not all performance work is UI-side. Chord also reduces model-side cost by pruni
 
 See [Context management — Reduction](./context-management.md#context-reduction) for the available context reduction settings.
 
+## Streaming tool early execution
+
+Chord also cuts perceived latency by starting safe tools before the model's response has fully finished. As the model streams a tool call's arguments, once those arguments are complete and valid, Chord may begin executing the tool immediately instead of waiting for the provider's end-of-response signal — then shows the result as soon as it is ready. This applies to local low-side-effect tools such as `read`, `grep`, `glob`, and read-only shell commands; network calls such as `web_fetch` wait for the stream to finish, and file-changing tools only commit when the call is confirmed final (with rollback if it is discarded). Chord enables this by default for the tools it deems safe; no configuration is needed. Which tools run early and what they may touch is governed by the same permission rules as ordinary tool calls.
+
 ## If Chord feels slow
 
 - Reduce the current session context size: run `/compact`, or start a new session for unrelated work.
