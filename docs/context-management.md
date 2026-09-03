@@ -305,7 +305,11 @@ on the summarizer happening to restate it, and chained compactions cannot
 erode it one summary at a time.
 
 `state_files` are pure path references: Chord never reads or injects them, so
-the tool cannot bypass read permissions. The checkpoint's `Current User
+the tool cannot bypass read permissions. Entries are normally
+workspace-relative paths such as `docs/usage.md`; absolute, `~`-prefixed,
+`./`- or `../`-prefixed spellings are also accepted when they lexically
+resolve inside the project root, and are normalized to workspace-relative form
+before the checkpoint is built. The checkpoint's `Current User
 Request` always comes from your real messages, never from the model's
 arguments. A success result only means the request was accepted; a later
 model-driven `[Context Summary]` checkpoint confirms the reset applied. If the

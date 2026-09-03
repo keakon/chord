@@ -3,6 +3,8 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -69,13 +71,14 @@ func TestCompactContextTrimsFields(t *testing.T) {
 }
 
 func TestCompactContextStateFilesLexicalValidation(t *testing.T) {
+	// Without a ProjectRoot provider the strict subset applies: only plain
+	// relative spellings that stay under the root after cleaning are accepted.
 	v := testCompactValidator()
 	for name, raw := range map[string]string{
 		"empty":        `{"active_objective":"a","next_step":"b","state_files":[""]}`,
 		"absolute":     `{"active_objective":"a","next_step":"b","state_files":["/etc/passwd"]}`,
 		"dotdot":       `{"active_objective":"a","next_step":"b","state_files":["../secret.md"]}`,
 		"inner_dotdot": `{"active_objective":"a","next_step":"b","state_files":["a/../../secret.md"]}`,
-		"dot_segment":  `{"active_objective":"a","next_step":"b","state_files":["a/./b.md"]}`,
 		"backslash":    `{"active_objective":"a","next_step":"b","state_files":["a\\b.md"]}`,
 		"tilde":        `{"active_objective":"a","next_step":"b","state_files":["~/secret.md"]}`,
 	} {
@@ -88,9 +91,9 @@ func TestCompactContextStateFilesLexicalValidation(t *testing.T) {
 }
 
 func TestCompactContextStateFilesRejectionGuidesRemediation(t *testing.T) {
-	// Absolute and home-relative paths have no guaranteed workspace-relative
-	// spelling, so the rejection must tell the model what to do instead
-	// (rewrite when in-project, otherwise fold the state into text fields).
+	// Without a project root, absolute and home-relative spellings cannot be
+	// checked for containment, so the rejection must tell the model what to do
+	// instead (rewrite when in-project, otherwise fold the state into text).
 	v := testCompactValidator()
 	for name, raw := range map[string]string{
 		"absolute": `{"active_objective":"a","next_step":"b","state_files":["/tmp/scratch"]}`,
@@ -114,13 +117,90 @@ func TestCompactContextStateFilesRejectionGuidesRemediation(t *testing.T) {
 func TestCompactContextStateFilesDedupedAndNormalized(t *testing.T) {
 	args, err := testCompactValidator().ParseCompactContextArgs(json.RawMessage(`{
 		"active_objective":"a","next_step":"b",
-		"state_files":["docs/x.md","docs//x.md","docs/x.md","other.md"]
+		"state_files":["docs/x.md","docs//x.md","docs/x.md","other.md","docs/../notes/x.md"]
 	}`))
 	if err != nil {
 		t.Fatalf("ParseCompactContextArgs: %v", err)
 	}
-	if len(args.StateFiles) != 2 || args.StateFiles[0] != "docs/x.md" || args.StateFiles[1] != "other.md" {
-		t.Fatalf("state_files = %#v, want deduped [docs/x.md other.md]", args.StateFiles)
+	if len(args.StateFiles) != 3 || args.StateFiles[0] != "docs/x.md" || args.StateFiles[1] != "other.md" || args.StateFiles[2] != "notes/x.md" {
+		t.Fatalf("state_files = %#v, want deduped [docs/x.md other.md notes/x.md]", args.StateFiles)
+	}
+}
+
+// rootedCompactValidator returns a validator whose ProjectRoot provider serves
+// root, with HOME pinned to its parent so "~" spellings expand deterministically.
+// The root is a short fixed lexical path under os.TempDir: validation never
+// stats the filesystem, so the directory need not exist, and staying under the
+// 128-rune raw-spelling cap keeps the absolute/tilde fixtures themselves valid.
+func rootedCompactValidator(t *testing.T, root string) CompactContextValidator {
+	t.Helper()
+	t.Setenv("HOME", filepath.Dir(root))
+	return CompactContextValidator{
+		ContinuationStateMaxTokens: 2048,
+		ProjectRoot:                func() string { return root },
+	}
+}
+
+func ccTestRoot(name string) string { return filepath.Join(os.TempDir(), "chord-cc-"+name) }
+
+func TestCompactContextStateFilesAcceptsInProjectSpellings(t *testing.T) {
+	root := ccTestRoot("accept")
+	v := rootedCompactValidator(t, root)
+	abs := filepath.Join(root, "docs", "x.md")
+	for name, raw := range map[string]string{
+		"relative":              `{"active_objective":"a","next_step":"b","state_files":["docs/x.md"]}`,
+		"dot_slash":             `{"active_objective":"a","next_step":"b","state_files":["./docs/x.md"]}`,
+		"inner_dot":             `{"active_objective":"a","next_step":"b","state_files":["docs/./x.md"]}`,
+		"inner_dotdot":          `{"active_objective":"a","next_step":"b","state_files":["docs/../docs/x.md"]}`,
+		"absolute":              `{"active_objective":"a","next_step":"b","state_files":["` + abs + `"]}`,
+		"tilde":                 `{"active_objective":"a","next_step":"b","state_files":["~/chord-cc-accept/docs/x.md"]}`,
+		"leading_dotdot_inside": `{"active_objective":"a","next_step":"b","state_files":["sub/../../chord-cc-accept/docs/x.md"]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			args, err := v.ParseCompactContextArgs(json.RawMessage(raw))
+			if err != nil {
+				t.Fatalf("expected %q to be accepted: %v", raw, err)
+			}
+			if len(args.StateFiles) != 1 || args.StateFiles[0] != "docs/x.md" {
+				t.Fatalf("state_files = %#v, want normalized [docs/x.md]", args.StateFiles)
+			}
+		})
+	}
+}
+
+func TestCompactContextStateFilesRejectsOutsideRootEvenWithRoot(t *testing.T) {
+	root := ccTestRoot("reject")
+	v := rootedCompactValidator(t, root)
+	sibling := filepath.Join(os.TempDir(), "chord-cc-other.md")
+	for name, raw := range map[string]string{
+		"absolute_outside":    `{"active_objective":"a","next_step":"b","state_files":["` + sibling + `"]}`,
+		"tilde_outside":       `{"active_objective":"a","next_step":"b","state_files":["~/chord-cc-other.md"]}`,
+		"dotdot_outside":      `{"active_objective":"a","next_step":"b","state_files":["../other.md"]}`,
+		"system_path":         `{"active_objective":"a","next_step":"b","state_files":["/etc/passwd"]}`,
+		"tilde_home_dir":      `{"active_objective":"a","next_step":"b","state_files":["~"]}`,
+		"project_root_itself": `{"active_objective":"a","next_step":"b","state_files":["` + root + `"]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := v.ParseCompactContextArgs(json.RawMessage(raw)); err == nil {
+				t.Fatalf("expected %q to be rejected", raw)
+			}
+		})
+	}
+}
+
+func TestCompactContextStateFilesCollapsesEquivalentSpellings(t *testing.T) {
+	root := ccTestRoot("collapse")
+	v := rootedCompactValidator(t, root)
+	abs := filepath.Join(root, "notes", "task.md")
+	args, err := v.ParseCompactContextArgs(json.RawMessage(`{
+		"active_objective":"a","next_step":"b",
+		"state_files":["notes/task.md","./notes/task.md","notes/../notes/task.md","` + abs + `","~/chord-cc-collapse/notes/task.md"]
+	}`))
+	if err != nil {
+		t.Fatalf("ParseCompactContextArgs: %v", err)
+	}
+	if len(args.StateFiles) != 1 || args.StateFiles[0] != "notes/task.md" {
+		t.Fatalf("state_files = %#v, want single normalized [notes/task.md]", args.StateFiles)
 	}
 }
 
@@ -205,17 +285,56 @@ func TestCompactContextRejectsListOverMaxItems(t *testing.T) {
 	}
 }
 
+// repeatCompactContextStrings builds n items of runes repeated chars for
+// budget-at-caps fixtures.
+func repeatCompactContextStrings(n, runes int) []any {
+	items := make([]any, n)
+	for i := range items {
+		items[i] = strings.Repeat("i", runes)
+	}
+	return items
+}
+
 func TestCompactContextRejectsFieldOverMaxLength(t *testing.T) {
 	v := testCompactValidator()
-	long := strings.Repeat("x", 1001)
+	long := strings.Repeat("x", compactContextObjectiveMaxRunes+1)
 	raw := `{"active_objective":"` + long + `","next_step":"b"}`
 	if _, err := v.ParseCompactContextArgs(json.RawMessage(raw)); err == nil {
 		t.Fatal("expected maxLength rejection for active_objective")
 	}
-	longItem := strings.Repeat("y", 501)
+	longItem := strings.Repeat("y", compactContextItemMaxRunes+1)
 	raw = `{"active_objective":"a","next_step":"b","completed":["` + longItem + `"]}`
 	if _, err := v.ParseCompactContextArgs(json.RawMessage(raw)); err == nil {
 		t.Fatal("expected maxLength rejection for completed item")
+	}
+}
+
+func TestCompactContextAllFieldsAtCapsPassBudget(t *testing.T) {
+	// The per-field rune caps are a cheap prefilter; the aggregated
+	// estimated-token budget is the binding limit. An all-ASCII worst case
+	// that fills every field to its cap must pass the default agent budget
+	// (~10.2k chars ≈ 3.4k tokens at the len/3 fallback), so the schema no
+	// longer forces a rewrite of a legitimately full state. Denser CJK text
+	// still relies on the budget declared in the description.
+	v := CompactContextValidator{ContinuationStateMaxTokens: 4096}
+	args := map[string]any{
+		"active_objective": strings.Repeat("o", compactContextObjectiveMaxRunes),
+		"next_step":        strings.Repeat("n", compactContextObjectiveMaxRunes),
+		"completed":        repeatCompactContextStrings(12, compactContextItemMaxRunes),
+		"decisions":        repeatCompactContextStrings(8, compactContextItemMaxRunes),
+		"open_issues":      repeatCompactContextStrings(8, compactContextItemMaxRunes),
+	}
+	paths := make([]any, 16)
+	for i := range paths {
+		paths[i] = strings.Repeat("p", compactContextStateFileMaxRunes-3) + ".md"
+	}
+	args["state_files"] = paths
+	raw, err := json.Marshal(args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.ParseCompactContextArgs(raw); err != nil {
+		t.Fatalf("all-ASCII caps must pass a 4096 budget: %v", err)
 	}
 }
 
@@ -257,9 +376,9 @@ func TestCompactContextExecuteRejectsInvalid(t *testing.T) {
 }
 
 func TestCompactContextDescriptionStatesBudget(t *testing.T) {
-	// The combined budget is the binding limit and is several times smaller
-	// than the per-field character caps add up to, so the description must
-	// state it up front; a validator without a budget must not invent one.
+	// The combined estimated-token budget is the binding limit (the per-field
+	// caps only prefilter), so the description must state it up front; a
+	// validator without a budget must not invent one.
 	tool := NewCompactContextTool(CompactContextValidator{ContinuationStateMaxTokens: 2048})
 	if desc := tool.Description(); !strings.Contains(desc, "about 2048 estimated tokens") {
 		t.Fatalf("description must state the combined continuation-state budget, got:\n%s", desc)

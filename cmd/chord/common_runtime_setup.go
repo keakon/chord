@@ -87,8 +87,11 @@ func wireMainAgentRuntime(ctx context.Context, mainAgent *agent.MainAgent, reg *
 			// event-loop validation applies (agent.CompactEvidenceMaxTokens);
 			// estimation is inherited from the agent's calibrated estimator at
 			// validation time and falls back to the conservative bytes/3
-			// default here.
+			// default here. ProjectRoot anchors state_files spellings the same
+			// way the file tools' BaseDir does, so the model-facing display
+			// paths and the accepted entries agree.
 			ContinuationStateMaxTokens: agent.CompactEvidenceMaxTokens,
+			ProjectRoot:                mainAgent.ProjectRoot,
 			EstimateTokens: func(text string) int {
 				return mainAgent.EstimateTokensForText(text)
 			},

@@ -227,6 +227,7 @@ func (a *MainAgent) validateCompactContextResult(callID string, rawArgs string) 
 func (a *MainAgent) parseCompactContextArgs(raw json.RawMessage) (tools.CompactContextArgs, error) {
 	validator := tools.CompactContextValidator{
 		ContinuationStateMaxTokens: CompactEvidenceMaxTokens,
+		ProjectRoot:                a.ProjectRoot,
 		EstimateTokens:             a.EstimateTokensForText,
 	}
 	return validator.ParseCompactContextArgs(raw)

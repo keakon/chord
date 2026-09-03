@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"path"
+	"path/filepath"
 	"strings"
+
+	"github.com/keakon/chord/internal/pathutil"
 )
 
 // CompactContextArgs is the structured continuation state the model submits
@@ -27,10 +29,23 @@ type CompactContextArgs struct {
 // accounting convention as other context-pressure decisions.
 type TokenEstimator func(text string) int
 
+// Per-field rune caps are only a cheap prefilter; the aggregated
+// estimated-token budget (ContinuationStateMaxTokens) is the authoritative
+// constraint. They are tightened so an all-ASCII worst case that fills every
+// field to its cap still fits a 4096-token budget (~10.2k chars ≈ 3.4k tokens
+// at the len/3 fallback), keeping the budget the binding limit instead of the
+// schema. The caps and the schema in Parameters() must stay in sync.
+const (
+	compactContextObjectiveMaxRunes = 600 // active_objective / next_step
+	compactContextItemMaxRunes      = 250 // completed / decisions / open_issues items
+	compactContextStateFileMaxRunes = 128
+)
+
 // CompactContextValidator validates CompactContext tool arguments without
-// touching the filesystem or the permission system: state_files stays a pure
-// lexical workspace-relative path reference, so this tool can never act as
-// a read-permission bypass or an existence probe.
+// touching the filesystem or the permission system: state_files resolution is
+// pure lexical work (tilde expansion via the environment, Clean/Join/Rel
+// against the project root), so this tool can never act as a read-permission
+// bypass, an existence probe, or a symlink-resolution oracle.
 type CompactContextValidator struct {
 	// ContinuationStateMaxTokens caps the estimated token cost of all text
 	// fields combined (matching the evidence-budget tier); zero means no cap.
@@ -39,6 +54,13 @@ type CompactContextValidator struct {
 	// EstimateTokens converts text to an estimated token count; nil falls
 	// back to len(text)/3.
 	EstimateTokens TokenEstimator
+	// ProjectRoot returns the absolute project root that state_files
+	// spellings resolve against. nil or an empty result keeps the strict
+	// subset: only plain workspace-relative entries are accepted. With a
+	// root, absolute and "~"/"./"/"../"-prefixed spellings are accepted when
+	// they lexically resolve inside it and are normalized to
+	// workspace-relative form before storage.
+	ProjectRoot func() string
 }
 
 func (v CompactContextValidator) estimateTokens(text string) int {
@@ -68,22 +90,22 @@ func (v CompactContextValidator) ParseCompactContextArgs(raw json.RawMessage) (C
 		return CompactContextArgs{}, fmt.Errorf("missing required argument: next_step")
 	}
 	var err error
-	if args.Completed, err = validateCompactContextList(args.Completed, 12, 500, "completed"); err != nil {
+	if args.Completed, err = validateCompactContextList(args.Completed, 12, compactContextItemMaxRunes, "completed"); err != nil {
 		return CompactContextArgs{}, err
 	}
-	if args.Decisions, err = validateCompactContextList(args.Decisions, 8, 500, "decisions"); err != nil {
+	if args.Decisions, err = validateCompactContextList(args.Decisions, 8, compactContextItemMaxRunes, "decisions"); err != nil {
 		return CompactContextArgs{}, err
 	}
-	if args.OpenIssues, err = validateCompactContextList(args.OpenIssues, 8, 500, "open_issues"); err != nil {
+	if args.OpenIssues, err = validateCompactContextList(args.OpenIssues, 8, compactContextItemMaxRunes, "open_issues"); err != nil {
 		return CompactContextArgs{}, err
 	}
-	if err := validateCompactContextField(args.ActiveObjective, 1000, "active_objective"); err != nil {
+	if err := validateCompactContextField(args.ActiveObjective, compactContextObjectiveMaxRunes, "active_objective"); err != nil {
 		return CompactContextArgs{}, err
 	}
-	if err := validateCompactContextField(args.NextStep, 1000, "next_step"); err != nil {
+	if err := validateCompactContextField(args.NextStep, compactContextObjectiveMaxRunes, "next_step"); err != nil {
 		return CompactContextArgs{}, err
 	}
-	stateFiles, err := validateStateFiles(args.StateFiles, 16, 512)
+	stateFiles, err := validateStateFiles(args.StateFiles, 16, compactContextStateFileMaxRunes, v.currentProjectRoot())
 	if err != nil {
 		return CompactContextArgs{}, err
 	}
@@ -138,13 +160,34 @@ func validateCompactContextList(items []string, maxItems int, itemMaxRunes int, 
 	return out, nil
 }
 
-// validateStateFiles applies the lexical workspace-relative path contract to
-// state_files: "/"-separated, relative, no empty/./.. segments, no
-// backslashes, no control characters or newlines. Duplicates are dropped,
-// order preserved. The filesystem is never touched.
-func validateStateFiles(paths []string, maxItems int, maxRunes int) ([]string, error) {
+// currentProjectRoot returns the project root spellings resolve against, or
+// "" when no provider is wired (strict plain-relative mode).
+func (v CompactContextValidator) currentProjectRoot() string {
+	if v.ProjectRoot == nil {
+		return ""
+	}
+	return v.ProjectRoot()
+}
+
+// validateStateFiles applies the lexical project-root path contract to
+// state_files. Entries may be workspace-relative or absolute / "~"-prefixed /
+// "./"- / "../"-prefixed spellings of files inside the project root; accepted
+// entries are normalized to their workspace-relative form so equivalent
+// spellings deduplicate and the reference stays valid after the project moves
+// or a session is restored elsewhere. Spellings that resolve outside the root
+// are rejected. The filesystem is never touched: resolution is pure lexical
+// (tilde expansion via the environment, Clean/Join/Rel), so the tool cannot
+// act as an existence probe or read-permission bypass. Without a project root
+// only plain relative entries are accepted (cleaned and escape-checked).
+func validateStateFiles(paths []string, maxItems int, maxRunes int, projectRoot string) ([]string, error) {
 	if len(paths) > maxItems {
 		return nil, fmt.Errorf("state_files contains %d paths, exceeding the maximum of %d", len(paths), maxItems)
+	}
+	root := ""
+	if trimmed := strings.TrimSpace(projectRoot); trimmed != "" {
+		if abs, err := filepath.Abs(filepath.Clean(trimmed)); err == nil {
+			root = abs
+		}
 	}
 	seen := make(map[string]bool, len(paths))
 	out := make([]string, 0, len(paths))
@@ -162,30 +205,39 @@ func validateStateFiles(paths []string, maxItems int, maxRunes int) ([]string, e
 		if strings.Contains(p, `\`) {
 			return nil, fmt.Errorf("state_files path %q must use '/' separators", p)
 		}
-		if strings.HasPrefix(p, "/") || strings.HasPrefix(p, "~") {
-			// Absolute and home-relative paths may or may not point inside the
-			// project, and the validator never stats the filesystem, so the
-			// model must resolve the location itself: rewrite to a relative
-			// path when the file is in-project, otherwise external state has
-			// no valid reference and must be folded into the text fields.
-			return nil, fmt.Errorf("state_files path %q must be workspace-relative (relative to the project root), not absolute or home-relative; if the file lives inside the project, pass its relative path (e.g. \"docs/usage.md\"), otherwise remove the entry and capture the state in completed/decisions/open_issues text instead", p)
+		expanded, err := expandTildePath(p)
+		if err != nil {
+			return nil, fmt.Errorf("state_files path %q starts with \"~\" but the home directory is unavailable; pass a workspace-relative path (e.g. \"docs/usage.md\"), or remove the entry and capture the state in completed/decisions/open_issues text instead", p)
 		}
-		rawSegments := strings.Split(p, "/")
-		for _, seg := range rawSegments {
-			if seg == "." || seg == ".." {
-				return nil, fmt.Errorf("state_files path %q must not contain '.' or '..' path segments", p)
-			}
+		candidate := expanded
+		if root != "" && !filepath.IsAbs(expanded) {
+			// Relative spellings (including "./" and "../" forms) anchor at
+			// the project root, matching the root-relative contract.
+			candidate = filepath.Join(root, expanded)
 		}
-		cleaned := path.Clean(p)
-		if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
-			return nil, fmt.Errorf("state_files path %q escapes the project root", p)
+		cleaned := filepath.Clean(candidate)
+		var rel string
+		within := false
+		if root != "" {
+			rel, within = pathutil.RelToBase(cleaned, root)
+		} else if !filepath.IsAbs(cleaned) {
+			// Without a root only plain relative spellings are verifiable;
+			// require the clean form not to walk above the (unknown) root.
+			rel = cleaned
+			within = rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 		}
-		// Normalize spellings like "a//b" to the clean form so deduplication
-		// compares the same reference. "." / ".." segments are rejected above.
-		p = cleaned
-		if !seen[p] {
-			seen[p] = true
-			out = append(out, p)
+		if !within {
+			return nil, fmt.Errorf("state_files path %q must resolve inside the project root: pass a workspace-relative path (e.g. \"docs/usage.md\") or an absolute / \"~\" / \"./\" / \"../\" spelling of a file inside the project; state outside the project cannot be referenced, so remove the entry and capture it in completed/decisions/open_issues text instead", p)
+		}
+		if rel == "." {
+			return nil, fmt.Errorf("state_files path %q resolves to the project root directory itself; list a file or directory inside it", p)
+		}
+		// Store the normalized workspace-relative form so equivalent
+		// spellings (absolute, ~-, ./-, ../-, plain) collapse to one entry.
+		normalized := filepath.ToSlash(rel)
+		if !seen[normalized] {
+			seen[normalized] = true
+			out = append(out, normalized)
 		}
 	}
 	return out, nil
@@ -239,7 +291,7 @@ func (t CompactContextTool) Description() string {
 		"The runtime may also skip the checkpoint when the minimum apply interval has not elapsed or projected savings are too small; that is a normal policy result, not an error, and retrying the same request repeatedly will not change the outcome.\n" +
 		"Prefer Delegate (SubAgent) for separable sub-tasks whose results the main thread can consume; use compact_context only when the main thread itself must keep reasoning across the phase boundary.\n" +
 		"A success result only means the request was accepted; a later model-driven [Context Summary] checkpoint confirms the reset was applied.\n" +
-		"state_files entries must be workspace-relative paths (relative to the project root, e.g. \"docs/usage.md\"); absolute (\"/tmp/...\") and home-relative (\"~/...\") paths are rejected.\n" +
+		"state_files entries must resolve inside the project root: workspace-relative paths (e.g. \"docs/usage.md\") are expected, and absolute, \"~\"-, \"./\"- or \"../\"-prefixed spellings of in-project files are accepted too and stored normalized as workspace-relative paths; spellings that resolve outside the project root are rejected.\n" +
 		"Entries are pure references: never read, injected, or existence-verified, so only list project files you intend to re-read with the read tool.\n" +
 		"Roles that are allowed to write plan or notes files (for example .chord/plans/YYYYMMDD-<slug>.md or a task-notes file under .chord/notes/ in a planner role) may list those files here; state_files itself never reads or writes anything, and write permissions are still governed by the role's permission rules.\n" +
 		"State outside the project (temp dirs, logs, session files, other checkouts) cannot be referenced here; capture it in completed/decisions/open_issues text instead.\n" +
@@ -254,38 +306,38 @@ func (CompactContextTool) Parameters() map[string]any {
 			"active_objective": map[string]any{
 				"type":        "string",
 				"minLength":   1,
-				"maxLength":   1000,
+				"maxLength":   compactContextObjectiveMaxRunes,
 				"description": "The single current goal to keep advancing after the reset. Do not restate the user request.",
 			},
 			"completed": map[string]any{
 				"type":        "array",
 				"maxItems":    12,
-				"items":       map[string]any{"type": "string", "minLength": 1, "maxLength": 500},
+				"items":       map[string]any{"type": "string", "minLength": 1, "maxLength": compactContextItemMaxRunes},
 				"description": "Concrete progress completed and safe to rely on later.",
 			},
 			"decisions": map[string]any{
 				"type":        "array",
 				"maxItems":    8,
-				"items":       map[string]any{"type": "string", "minLength": 1, "maxLength": 500},
+				"items":       map[string]any{"type": "string", "minLength": 1, "maxLength": compactContextItemMaxRunes},
 				"description": "Important decisions that must stay in effect, with a one-line reason each.",
 			},
 			"open_issues": map[string]any{
 				"type":        "array",
 				"maxItems":    8,
-				"items":       map[string]any{"type": "string", "minLength": 1, "maxLength": 500},
+				"items":       map[string]any{"type": "string", "minLength": 1, "maxLength": compactContextItemMaxRunes},
 				"description": "Unresolved blockers, risks, or facts awaiting confirmation.",
 			},
 			"next_step": map[string]any{
 				"type":        "string",
 				"minLength":   1,
-				"maxLength":   1000,
+				"maxLength":   compactContextObjectiveMaxRunes,
 				"description": "One concrete action executable immediately after the checkpoint applies.",
 			},
 			"state_files": map[string]any{
 				"type":        "array",
 				"maxItems":    16,
-				"items":       map[string]any{"type": "string", "minLength": 1, "maxLength": 512},
-				"description": "Workspace-relative paths (relative to the project root, e.g. docs/usage.md) of files carrying externalized state; absolute and ~-prefixed paths are rejected, and out-of-project state must be captured in completed/decisions/open_issues text instead. References only: never read, injected, or existence-verified.",
+				"items":       map[string]any{"type": "string", "minLength": 1, "maxLength": compactContextStateFileMaxRunes},
+				"description": "Paths of files carrying externalized state: workspace-relative (e.g. docs/usage.md), or absolute / ~-prefixed / ./- / ../-prefixed spellings that resolve inside the project root (stored normalized as workspace-relative); out-of-project state must be captured in completed/decisions/open_issues text instead. References only: never read, injected, or existence-verified.",
 			},
 		},
 		"required":             []string{"active_objective", "next_step"},
