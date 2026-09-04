@@ -258,6 +258,13 @@ func (a *MainAgent) terminalLoopAssessment(msg message.Message, suspectedStall b
 		}
 	}
 	reasons := addSuspected(a.currentLoopContinuationReasonsForContent(msg.Content, "missing_done_tool", "terminal_reply"))
+	if !a.doneToolPermitted() {
+		// Reached only inside a loop, where entering mounted done; a denial
+		// here means a rule changed mid-loop. With no reachable exit signal
+		// the continuation must state the remaining work instead of demanding
+		// a tool call the model cannot make.
+		return &LoopAssessment{Action: LoopAssessmentActionContinue, Message: "Loop continuing: the " + toolPromptName(tools.NameDone) + " completion tool is not available in this role; continue the remaining in-scope work.", Reasons: reasons, TriggerStopReason: strings.TrimSpace(msg.StopReason)}
+	}
 	return &LoopAssessment{Action: LoopAssessmentActionContinue, Message: "Loop continuing: end this round with a " + toolPromptName(tools.NameDone) + " tool call to request loop exit.", Reasons: reasons, TriggerStopReason: strings.TrimSpace(msg.StopReason)}
 }
 

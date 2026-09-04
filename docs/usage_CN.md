@@ -278,7 +278,7 @@ Project 统计自动从本地 sessions 目录聚合，支持 `today`、`7d`、`3
 
 持续执行模式让 agent 在每一轮结束后自动继续，无需反复催促。适合那种“帮我搞定这个功能”的一次性指令——你只需发一条消息，agent 会自己迭代、验证、直到完成、确实卡住，或你明确确认退出。
 
-只有当当前 MainAgent 角色可以使用 `done` 工具时，`/loop` 才可用；如果该角色把 `done` 隐藏或拒绝，`/loop` 就不可用。
+只有当当前 MainAgent 角色可以使用 `done` 工具时，`/loop` 才可用——即 `done` 已注册且没有规则拒绝它。纯通配的 `"*": deny` 不算拒绝：挂载 `done` 正是进入 loop 模式这个动作本身，因此 loop 本身就是授权。想让某个角色用不了 loop 模式，写 `done: deny`，此时 `/loop on` 会被拒绝并给出 toast。
 
 启用方式：
 
@@ -300,7 +300,7 @@ Project 统计自动从本地 sessions 目录聚合，支持 `today`、`7d`、`3
 
 Agent 申请结束时，Chord 会检查退出条件，并用本地确认框展示完成报告。确认后停止；拒绝则继续运行。YOLO 模式不会绕过这次确认，也不会绕过 `done` 权限。
 
-大多数情况下，切换 loop 模式不会改动顶层可见工具列表中的 `done`。但如果模型显式支持 Chord 的 request-only 动态工具挂载，而你又是在请求进行中执行 `/loop on`，只要当前冻结的顶层工具表面里还没有 `done`，Chord 就可能在下一次 loop 请求里把它作为一次性的动态工具声明补进去；如果 `done` 本来就在冻结工具表面里，则不会重复注入。不支持这类动态工具能力的模型仍沿用原来的行为，因此如果启用 loop 需要改动工具表面，下一次请求依然可能打断 prompt cache 复用。普通模式下，除非另有明确的 runtime 或工作流要求必须发出工具化完成信号，否则 agent 必须直接使用常规 assistant 正文结束；仅仅完成工作或发现 `done` 可用，都不能作为调用理由。Loop 模式则通过当前 runtime 的工具调用要求和 continuation 指令，把 `done` 作为明确的退出请求。执行 `/loop off` 后，后续工作恢复普通响应方式，同时取消尚未发送给模型的 loop continuation。
+`done` 工具只在 loop 运行期间挂载。不在 loop 中时，它根本不在工具面上，因此普通会话不必携带它的定义，模型也不用在“直接回复”和“调用完成工具”之间做选择——普通模式下 agent 直接用常规 assistant 正文结束即可。执行 `/loop on` 时才挂载它：支持 Chord request-only 动态工具挂载的模型（Responses 系模型与 Kimi dynamic tools）会在下一次请求里把它作为一次性动态工具声明补进去，不损失 prompt cache；其余模型则重建一次工具面，那一次请求会打断 prompt cache 复用。如果 `done` 已经在工具面里，Chord 会跳过挂载，不会重复注入。随后 loop 模式通过当前 runtime 的工具调用要求和 continuation 指令，把 `done` 作为明确的退出请求。执行 `/loop off` 会把 `done` 从工具面收回，后续工作恢复普通响应方式，同时取消尚未发送给模型的 loop continuation。
 
 Loop 模式还会检测连续重复的相同工具调用。发现卡住后，Chord 会打断重复；多次触发后，会询问你是停止还是继续。
 

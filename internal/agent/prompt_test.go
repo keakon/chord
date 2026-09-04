@@ -702,9 +702,11 @@ func TestMainAgentResponseClosurePrompt_RequiresContinueUnlessBlocked(t *testing
 		"Within a normal turn, continue until the current in-scope work package is finished",
 		"A regular assistant response is not the end of the task when in-scope, low-risk work still remains; continue instead of stopping with a partial summary or optional offer",
 		"ask exactly the necessary high-context question instead of pretending the task is complete",
-		"By default, return that completion report directly in the final assistant response",
-		"call the `done` tool only when an explicit workflow instruction in the conversation designates it as the required completion signal",
-		"never merely because work is complete or `done` is available",
+		// done is mounted only while a loop runs, so the visible branch is the
+		// in-loop wording: route the report through the tool rather than
+		// arguing about whether the tool applies at all.
+		"Return that completion report through the `done` tool's `report` argument",
+		"following the active loop workflow's completion contract",
 		"After reporting completion, stop there; do not append routine in-scope follow-up work as an optional invitation",
 	} {
 		if !strings.Contains(got, want) {

@@ -1070,6 +1070,11 @@ permission:
   write: ask
 ```
 
+在这样的 allowlist 里，开头的 `"*": deny` 覆盖了所有你没列出的工具，因此角色需要什么就必须写什么。有两个例外值得知道，否则容易被误认为功能坏了：
+
+- `compact_context` 和 `done` **不受**该通配规则约束。让它们各自变得可用的那个开关——前者是 `context.compaction.model_driven`，后者是开启 loop——本身就是授权，因此这个角色不必列出它们也能使用模型驱动压缩和 loop 模式。确实想收回某个工具时，指名写出来即可（例如 `done: deny`）。详见[权限与安全](./permissions-and-safety_CN.md)。
+- 其余工具都按常规规则处理。`todo_write` 和 `question` 在这里就是普通工具：不列出它们，意味着模型不再维护 TODO 列表，并改用纯文本向用户提问而不是结构化弹窗。两者都会平滑降级，按需添加即可。
+
 ## 上下文管理
 
 长会话的上下文处理——**上下文压缩（Compaction）**（调用 LLM 生成摘要并改写会话历史）和**上下文剪裁（Reduction）**（请求前裁剪过时工具输出）——通过顶层 `context:` 配置，详见独立页面：[上下文管理](./context-management_CN.md)。

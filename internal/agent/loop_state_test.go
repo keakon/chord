@@ -1520,11 +1520,13 @@ func TestHandleUserMessageTreatsLoopOnAsBusyControlCommand(t *testing.T) {
 
 	a.handleUserMessage(Event{Type: EventUserMessage, Payload: "/loop on finish current task"})
 
-	if a.loopState.Enabled {
-		t.Fatal("loop should remain disabled when Done tool is unavailable")
+	// The command is handled inline as a control command rather than queued as
+	// a user message for the busy turn.
+	if !a.loopState.Enabled {
+		t.Fatal("loop should be enabled when the Done tool can be mounted")
 	}
 	if got := len(a.pendingUserMessages); got != 0 {
-		t.Fatalf("len(pendingUserMessages) = %d, want 0 when /loop on is rejected", got)
+		t.Fatalf("len(pendingUserMessages) = %d, want 0 for a busy /loop on", got)
 	}
 }
 
@@ -1597,7 +1599,33 @@ func TestShouldEmitLoopContinuationForAssessmentRespectsDeferredGate(t *testing.
 	}
 }
 
-func TestHandleUserMessageRejectsLoopOnWithoutDoneTool(t *testing.T) {
+func TestHandleUserMessageRejectsLoopOnWhenDoneIsDenied(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.newTurn()
+	a.tools.Register(tools.ReadTool{})
+	// Only a rule naming done keeps a role out of loop mode; see
+	// donePermissionAction.
+	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
+"*": deny
+read: allow
+done: deny
+`)}
+	a.rebuildRuleset()
+
+	a.handleUserMessage(Event{Type: EventUserMessage, Payload: "/loop on finish current task"})
+
+	if a.loopState.Enabled {
+		t.Fatal("loop should remain disabled when Done tool is denied")
+	}
+	if got := len(a.pendingUserMessages); got != 0 {
+		t.Fatalf("len(pendingUserMessages) = %d, want 0", got)
+	}
+}
+
+// An allowlist role must be able to run a loop without knowing that it also
+// has to allow the loop's internal exit tool: entering loop mode is the
+// authorization for done, so a wildcard-only deny does not reach it.
+func TestHandleUserMessageAllowsLoopOnUnderWildcardOnlyDeny(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn()
 	a.tools.Register(tools.ReadTool{})
@@ -1609,11 +1637,8 @@ read: allow
 
 	a.handleUserMessage(Event{Type: EventUserMessage, Payload: "/loop on finish current task"})
 
-	if a.loopState.Enabled {
-		t.Fatal("loop should remain disabled when Done tool is unavailable")
-	}
-	if got := len(a.pendingUserMessages); got != 0 {
-		t.Fatalf("len(pendingUserMessages) = %d, want 0", got)
+	if !a.loopState.Enabled {
+		t.Fatal("a wildcard-only deny must not keep an allowlist role out of loop mode")
 	}
 }
 

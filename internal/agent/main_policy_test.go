@@ -609,6 +609,11 @@ func newTestMainAgent(t *testing.T, projectRoot string) *MainAgent {
 		nil,
 		mcp.ClientInfo{Name: "chord-test", Version: "test"},
 	)
+	// done is registered unconditionally in production (wireMainAgentRuntime),
+	// and loop entry depends on it being registered even though it only joins
+	// the tool surface while a loop runs. Mirror that here so loop-facing tests
+	// see the same availability the runtime gives them.
+	a.tools.Register(tools.NewDoneTool())
 	a.startPersistLoop()
 	if a.usageLedger == nil {
 		t.Fatal("NewMainAgent should initialize usageLedger for tests")

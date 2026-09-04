@@ -27,11 +27,15 @@ const CompletionReportStructure = "- **Completion status**: one line summary (e.
 
 func (DoneTool) Name() string { return NameDone }
 
+// Description is written for the only situation in which the tool is mounted:
+// an active loop, whose completion contract designates it as the required exit
+// signal. It therefore states when exit is warranted instead of arguing
+// against being called at all — the runtime keeps the tool off the surface
+// outside a loop, so that argument no longer has an audience.
 func (DoneTool) Description() string {
-	return "Exceptional tool-based completion signal, not the default way to end a conversation.\n" +
-		"Call this tool only when an explicit workflow instruction in the current conversation (for example a loop anchor stating that `" + NameDone + "` is required to exit) designates it as the required completion signal; otherwise DO NOT call it and return the final answer directly as assistant text. Tool availability, completed work, or this tool's required report argument do not by themselves require a `" + NameDone + "` call.\n" +
-		"When such an instruction is active, first use any available tool that can make real progress; call `" + NameDone + "` only when the current objective is fully complete, no unresolved user decision, error, or verification remains, and no other tool call is necessary or appropriate. Never call it for partial progress or while you still need to investigate, edit, test, or ask the user. If you are unsure whether the task is truly complete, continue working instead of calling `" + NameDone + "`.\n" +
-		"When calling `" + NameDone + "`, provide a non-empty 'report' argument containing the complete final Markdown completion report; put the full completion summary in the report argument itself and do not rely on the surrounding assistant message to carry it.\n" +
+	return "Requests exit from the active loop workflow, which requires this tool as its completion signal.\n" +
+		"First use any available tool that can make real progress; call `" + NameDone + "` only when the current objective is fully complete, no unresolved user decision, error, or verification remains, and no other tool call is necessary or appropriate. Never call it for partial progress or while you still need to investigate, edit, test, or ask the user. If you are unsure whether the task is truly complete, continue working instead of calling `" + NameDone + "`.\n" +
+		"Provide a non-empty 'report' argument containing the complete final Markdown completion report; put the full completion summary in the report argument itself and do not rely on the surrounding assistant message to carry it.\n" +
 		"The report must include:\n" + CompletionReportStructure
 }
 
@@ -41,7 +45,7 @@ func (DoneTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"report": map[string]any{
 				"type":        "string",
-				"description": "When the runtime explicitly requires this exceptional completion tool, provide the complete final Markdown report describing completion status, changes, verification, and remaining issues. Otherwise, do not call `" + NameDone + "`; return the result directly as assistant text. Write the report in the user's current language unless the user explicitly asked for a different language.",
+				"description": "The complete final Markdown report describing completion status, changes, verification, and remaining issues. Write it in the user's current language unless the user explicitly asked for a different language.",
 				"minLength":   1,
 			},
 		},

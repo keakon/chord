@@ -73,7 +73,7 @@ func TestVisibleLLMToolsKeepsCompactContextUnderWildcardDeny(t *testing.T) {
 	reg := tools.NewRegistry()
 	reg.Register(tools.NewCompactContextTool(tools.CompactContextValidator{ContinuationStateMaxTokens: CompactContinuationStateMaxTokens}))
 	rs := permissionRuleset(t, `"*": deny`)
-	visible := visibleLLMTools(reg, rs, func(string) bool { return false })
+	visible := visibleLLMTools(reg, rs, func(string) bool { return false }, toolPermissionContext{})
 	if !containsToolNamed(visible, tools.NameCompactContext) {
 		t.Fatal("wildcard-only deny must not drop compact_context from the LLM tool surface")
 	}
@@ -82,7 +82,7 @@ func TestVisibleLLMToolsKeepsCompactContextUnderWildcardDeny(t *testing.T) {
 "*": deny
 compact_context: deny
 `)
-	visible = visibleLLMTools(reg, rs, func(string) bool { return false })
+	visible = visibleLLMTools(reg, rs, func(string) bool { return false }, toolPermissionContext{})
 	if containsToolNamed(visible, tools.NameCompactContext) {
 		t.Fatal("an explicit compact_context deny must drop the tool from the LLM tool surface")
 	}
@@ -147,7 +147,7 @@ compact_*: `+tc.rule)
 
 			registry := tools.NewRegistry()
 			registry.Register(tools.NewCompactContextTool(tools.CompactContextValidator{ContinuationStateMaxTokens: CompactContinuationStateMaxTokens}))
-			visible := containsToolNamed(visibleLLMTools(registry, rs, func(string) bool { return false }), tools.NameCompactContext)
+			visible := containsToolNamed(visibleLLMTools(registry, rs, func(string) bool { return false }, toolPermissionContext{}), tools.NameCompactContext)
 			if visible != (tc.want != permission.ActionDeny) {
 				t.Fatalf("compact_* %s visibility = %v, want %v", tc.rule, visible, tc.want != permission.ActionDeny)
 			}

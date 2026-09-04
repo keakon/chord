@@ -9,7 +9,7 @@ import (
 	toolpkg "github.com/keakon/chord/internal/tools"
 )
 
-func visibleLLMTools(registry *toolpkg.Registry, ruleset permission.Ruleset, keepInternal func(string) bool) []toolpkg.Tool {
+func visibleLLMTools(registry *toolpkg.Registry, ruleset permission.Ruleset, keepInternal func(string) bool, pctx toolPermissionContext) []toolpkg.Tool {
 	if registry == nil {
 		return nil
 	}
@@ -28,6 +28,16 @@ func visibleLLMTools(registry *toolpkg.Registry, ruleset permission.Ruleset, kee
 		if controlled, ok := tool.(toolpkg.RulesetAwareVisibilityTool); ok && !controlled.VisibleWithRuleset(ruleset) {
 			continue
 		}
+		// done exists to signal loop exit and nothing else, so it is mounted
+		// only while loop mode is active. Keeping it off the surface otherwise
+		// saves its definition on every request and spares the model the
+		// "reply directly or call done?" decision that its own description
+		// spends half its length arguing about. Loop entry mounts it — as a
+		// late-mounted additional tool where the provider supports one, and
+		// through a tool-surface rebuild elsewhere (mountDoneForLoopEntry).
+		if name == toolpkg.NameDone && !pctx.LoopExitAuthorized {
+			continue
+		}
 		disabled := ruleset.IsDisabled(name)
 		// compact_context is registered only while the model-driven compaction
 		// feature is enabled, so registration is the user's authorization:
@@ -36,6 +46,13 @@ func visibleLLMTools(registry *toolpkg.Registry, ruleset permission.Ruleset, kee
 		// compact_context still apply, so an explicit deny keeps IsDisabled
 		// true.
 		if name == toolpkg.NameCompactContext && compactContextPermissionAction(ruleset) != permission.ActionDeny {
+			disabled = false
+		}
+		// Loop mode is the user's authorization for the loop's own exit
+		// signal, so a wildcard-only deny must not strip it — an allowlist
+		// role would otherwise be unable to run a loop at all. A rule naming
+		// done still wins. See donePermissionAction.
+		if name == toolpkg.NameDone && donePermissionAction(ruleset) != permission.ActionDeny {
 			disabled = false
 		}
 		if !keepInternal(name) && disabled {
@@ -77,7 +94,7 @@ func (a *MainAgent) mainVisibleLLMTools() []toolpkg.Tool {
 	if a == nil {
 		return nil
 	}
-	visible := visibleLLMTools(a.tools, a.effectiveRuleset(), isInternalControlTool)
+	visible := visibleLLMTools(a.tools, a.effectiveRuleset(), isInternalControlTool, a.toolPermissionContext())
 	filtered := filterVisibleTools(visible, isMainAgentReservedTool)
 	// Apply per-model edit tool selection
 	return filterEditToolsByModel(filtered, a.modelName, a.effectiveRuleset(), a.applyPatchSurfacePolicy())

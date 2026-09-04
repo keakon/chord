@@ -41,56 +41,61 @@ func (a *MainAgent) mcpToolMountMode() mcpToolMountMode {
 	return mcpMountFullInjection
 }
 
+// doneToolPermitted reports whether done could be mounted for this role: it is
+// registered and no rule denies it. This is deliberately independent of
+// whether done is on the current tool surface, because done is mounted only
+// while a loop is active — gating loop entry on present visibility would make
+// loop mode unreachable. Wildcard-only rules do not deny it (loop mode is the
+// authorization); a rule naming done does. See donePermissionAction.
 func (a *MainAgent) doneToolPermitted() bool {
-	if a.tools == nil {
+	if a == nil || a.tools == nil {
 		return false
 	}
 	if _, ok := a.tools.Get(toolpkg.NameDone); !ok {
 		return false
 	}
 	ruleset := a.effectiveRuleset()
-	if len(ruleset) > 0 && normalizeToolPermissionAction(toolpkg.NameDone, ruleset.Evaluate(toolpkg.NameDone, "*")) == permission.ActionDeny {
+	if len(ruleset) > 0 && normalizeToolPermissionAction(toolpkg.NameDone, donePermissionAction(ruleset)) == permission.ActionDeny {
 		return false
 	}
 	return true
 }
 
-func (a *MainAgent) armLoopDoneLateMount() {
-	if a == nil || !a.doneToolPermitted() {
-		return
-	}
-	mode := a.mcpToolMountMode()
-	if !mode.cacheFriendly() {
-		return
-	}
-	if defs := a.mainLLMToolDefinitions(); len(defs) > 0 {
-		for _, def := range defs {
-			if def.Name == toolpkg.NameDone {
-				return
-			}
+// doneOnFrozenToolSurface reports whether done is already part of the frozen
+// tool surface the session is currently sending.
+func (a *MainAgent) doneOnFrozenToolSurface() bool {
+	for _, def := range a.mainLLMToolDefinitions() {
+		if def.Name == toolpkg.NameDone {
+			return true
 		}
 	}
-	a.loopDoneLateMount.Store(true)
+	return false
+}
+
+// mountDoneForLoopEntry puts done on the tool surface when a loop starts.
+// done is absent otherwise (see visibleLLMTools), so loop entry is the only
+// place that mounts it. Providers that accept an additional tool mid-session
+// get it late-mounted at no prompt-cache cost; everywhere else the tool
+// surface is rebuilt, which costs one cache miss that a loop — a long-running
+// task by construction — absorbs.
+func (a *MainAgent) mountDoneForLoopEntry() {
+	if a == nil || !a.doneToolPermitted() || a.doneOnFrozenToolSurface() {
+		return
+	}
+	if a.mcpToolMountMode().cacheFriendly() {
+		a.loopDoneLateMount.Store(true)
+		return
+	}
+	a.markRuntimeSurfaceDirty()
 }
 
 func (a *MainAgent) loopDoneLateMountDefinition() []message.ToolDefinition {
 	if a == nil || !a.loopDoneLateMount.Load() {
 		return nil
 	}
-	a.loopReductionMu.Lock()
-	loopEnabled := a.loopState.Enabled
-	a.loopReductionMu.Unlock()
-	if !loopEnabled || !a.doneToolPermitted() {
+	if !a.loopExitAuthorized() || !a.doneToolPermitted() || a.doneOnFrozenToolSurface() {
 		a.clearLoopDoneLateMount()
 		return nil
-	}
-	if defs := a.mainLLMToolDefinitions(); len(defs) > 0 {
-		for _, def := range defs {
-			if def.Name == toolpkg.NameDone {
-				a.clearLoopDoneLateMount()
-				return nil
-			}
-		}
 	}
 	tool, ok := a.tools.Get(toolpkg.NameDone)
 	if !ok {

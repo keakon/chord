@@ -220,8 +220,10 @@ func TestYoloRulesetKeepsNarrowGlobRules(t *testing.T) {
 		{Permission: "sh*", Pattern: "*", Action: permission.ActionAllow},
 	}
 	filtered := yoloRuleset(ruleset)
-	if len(filtered) != 2 {
-		t.Fatalf("YOLO ruleset = %+v, want the compact_* and handoff* rules only", filtered)
+	// The seeded denies for the capability-granting tools come first, then the
+	// two surviving user rules; the wildcard and `sh*` rules are dropped.
+	if len(filtered) != len(yoloDeniedByDefaultTools)+2 {
+		t.Fatalf("YOLO ruleset = %+v, want the seeded denies plus the compact_* and handoff* rules only", filtered)
 	}
 	if got := compactContextPermissionAction(filtered); got != permission.ActionDeny {
 		t.Fatalf("compact_* deny must survive YOLO, got %v", got)

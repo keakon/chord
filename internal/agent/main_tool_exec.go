@@ -91,7 +91,8 @@ func (a *MainAgent) toolExecutionPipeline() toolExecutionPipeline {
 		bypassPermission: func(name string) bool {
 			return a.YoloEnabled() && !yoloProtectedPermissionTool(name)
 		},
-		visibleToolNames: a.mainVisibleLLMToolNames,
+		loopExitAuthorized: a.loopExitAuthorized,
+		visibleToolNames:   a.mainVisibleLLMToolNames,
 		appendToolActivity: func(rec recovery.ToolActivityRecord) error {
 			// Tool goroutines outlive a session switch, so the manager is
 			// resolved per record rather than captured with the pipeline.

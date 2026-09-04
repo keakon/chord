@@ -160,14 +160,31 @@ func (a *MainAgent) questionToolAvailable() bool {
 	return true
 }
 
-func (a *MainAgent) doneToolAvailable() bool {
-	visible := a.mainLLMVisibleToolNames()
-	if len(visible) > 0 {
+// doneToolVisibleNow reports whether done is on the live tool surface, or
+// armed to be late-mounted into it, so the model can actually call it on the
+// next request. Prompt blocks that name done must gate on this rather than on
+// doneToolPermitted: outside a loop the tool is not mounted, and naming it
+// would point the model at a tool it cannot call.
+func (a *MainAgent) doneToolVisibleNow() bool {
+	if !a.doneToolPermitted() {
+		return false
+	}
+	// done is mounted for the duration of a loop (mountDoneForLoopEntry), so an
+	// active loop is what makes it callable. Consulting only the live tool
+	// surface would race loop entry: the surface is rebuilt on the next
+	// request, while the loop's completion contract is rendered the moment the
+	// loop starts, and the contract would then describe a role without done.
+	if a.loopExitAuthorized() {
+		return true
+	}
+	// Outside a loop, done can still sit on a surface frozen while one was
+	// running, or be armed for late mount into it.
+	if visible := a.mainLLMVisibleToolNames(); len(visible) > 0 {
 		if _, ok := visible[tools.NameDone]; ok {
-			return a.doneToolPermitted()
+			return true
 		}
 	}
-	return a.loopDoneLateMount.Load() && a.doneToolPermitted()
+	return a.loopDoneLateMount.Load()
 }
 
 // responseClosurePromptBlock renders the Response Closure section with the
@@ -175,7 +192,7 @@ func (a *MainAgent) doneToolAvailable() bool {
 // availability source as questionToolAvailable), so the prompt never
 // references a tool the model cannot call.
 func (a *MainAgent) responseClosurePromptBlock() string {
-	return mainAgentResponseClosurePromptText(a.doneToolAvailable())
+	return mainAgentResponseClosurePromptText(a.doneToolVisibleNow())
 }
 
 func (a *MainAgent) userConfirmationPromptBlock() string {
@@ -256,7 +273,17 @@ func (a *MainAgent) loopContinuationDecisionInstructionLine() string {
 	return "- Continue autonomously from the existing context. Request user input only when a real external decision is strictly required to proceed, and do not ask merely because the automatic " + toolPromptName(tools.NameDone) + " interception budget is low."
 }
 
+// loopCompletionDecisionRequirementLine renders the loop's exit contract.
+// These lines are only ever rendered inside a loop, and entering a loop mounts
+// done, so the question here is whether done *can* be mounted rather than
+// whether it is on the surface at this instant — the latter would race the
+// tool-surface rebuild that loop entry schedules. The fallback covers a
+// mid-loop rule change that denies done, because a contract demanding a tool
+// the model cannot call would leave the loop with no clean way to finish.
 func (a *MainAgent) loopCompletionDecisionRequirementLine() string {
+	if !a.doneToolPermitted() {
+		return "- The " + toolPromptName(tools.NameDone) + " completion tool is not available in this role; write the complete final Markdown completion report directly in the final assistant response instead"
+	}
 	done := toolPromptName(tools.NameDone)
 	return "- In this loop workflow, the " + done + " tool is the explicitly required completion signal\n" +
 		"- Do not call the " + done + " tool unless the task is actually complete and no unresolved user decision, error, or verification remains; if you are unsure, or still need to investigate, edit, test, or ask the user, continue working instead of calling " + done + "\n" +

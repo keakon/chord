@@ -61,7 +61,7 @@ done: allow
 	}
 }
 
-func TestArmLoopDoneLateMountRequiresDynamicCapability(t *testing.T) {
+func TestMountDoneForLoopEntryRequiresDynamicCapability(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools = tools.NewRegistry()
 	a.tools.Register(tools.NewDoneTool())
@@ -71,9 +71,15 @@ done: allow
 `)}
 	a.rebuildRuleset()
 	a.freezeToolSurfaceFromDefinitions(nil)
-	a.armLoopDoneLateMount()
+	a.surfaceDirty.Store(false)
+	a.mountDoneForLoopEntry()
 	if a.loopDoneLateMount.Load() {
 		t.Fatal("late mount should stay disabled without dynamic capability")
+	}
+	// Without a late-mount path the tool surface must be rebuilt instead, or
+	// the loop would run without the exit signal it requires.
+	if !a.surfaceDirty.Load() {
+		t.Fatal("loop entry without a late-mount path must mark the tool surface dirty")
 	}
 
 	provider := llm.NewProviderConfig("sample", config.ProviderConfig{
@@ -83,13 +89,17 @@ done: allow
 		Models: map[string]config.ModelConfig{"model-1": {Limit: config.ModelLimit{Context: 128000, Output: 4096}}},
 	}, []string{"test-key"})
 	a.llmClient = llm.NewClient(provider, nil, "model-1", 512, "")
-	a.armLoopDoneLateMount()
+	a.surfaceDirty.Store(false)
+	a.mountDoneForLoopEntry()
 	if !a.loopDoneLateMount.Load() {
 		t.Fatal("late mount should enable with dynamic capability")
 	}
+	if a.surfaceDirty.Load() {
+		t.Fatal("a late mount must not cost a tool-surface rebuild")
+	}
 }
 
-func TestArmLoopDoneLateMountSkipsWhenRealFrozenSurfaceAlreadyContainsDone(t *testing.T) {
+func TestMountDoneForLoopEntrySkipsWhenRealFrozenSurfaceAlreadyContainsDone(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools = tools.NewRegistry()
 	a.tools.Register(tools.NewDoneTool())
@@ -107,12 +117,15 @@ done: allow
 	}, []string{"test-key"})
 	a.llmClient = llm.NewClient(provider, nil, "model-1", 512, "")
 
+	// done joins the tool surface only while a loop is active, so the surface
+	// has to be frozen with the loop already running for it to contain done.
+	a.loopState.enableWithTarget("finish current task")
 	a.freezeToolSurface()
-	a.armLoopDoneLateMount()
+	a.mountDoneForLoopEntry()
 	if a.loopDoneLateMount.Load() {
 		t.Fatal("late mount should stay disabled when frozen surface already contains done")
 	}
-	if !a.doneToolAvailable() {
+	if !a.doneToolVisibleNow() {
 		t.Fatal("done should remain available from the frozen visible surface")
 	}
 }

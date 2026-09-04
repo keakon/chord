@@ -57,6 +57,22 @@ func permissionRuleTargetsTool(rule permission.Rule, toolName string) bool {
 	return permission.Ruleset{rule}.LastSpecificToolMatch(toolName, rule.Pattern).Found
 }
 
+// specificToolRuleAction resolves a control tool's action from the rules that
+// name it directly, ignoring the wildcard default entirely, and falls back to
+// fallback when no rule names it. Narrow globs such as compact_* are specific
+// rules too, and so are rules written with an argument pattern
+// (`compact_context: {"anything": deny}`): the tools resolved here take no
+// permission-matching argument, so any rule naming one applies, and the last
+// such rule wins.
+func specificToolRuleAction(ruleset permission.Ruleset, toolName string, fallback permission.Action) permission.Action {
+	for _, rule := range slices.Backward(ruleset) {
+		if permissionRuleTargetsTool(rule, toolName) {
+			return rule.Action
+		}
+	}
+	return fallback
+}
+
 // compactContextPermissionAction resolves the effective permission action for
 // the compact_context tool. The tool is registered only while the
 // context.compaction.model_driven feature is enabled, so registration itself
@@ -66,17 +82,40 @@ func permissionRuleTargetsTool(rule permission.Rule, toolName string) bool {
 // to allow the internal tool name. Only a non-global rule whose tool pattern
 // matches compact_context (an explicit deny / ask / allow) overrides that
 // default; an explicit deny keeps the tool hidden and its calls rejected.
-// Narrow globs such as compact_* are specific rules too, and so are rules
-// written with an argument pattern (`compact_context: {"anything": deny}`):
-// the tool takes no permission-matching argument, so any rule naming it
-// applies, and the last such rule wins.
 func compactContextPermissionAction(ruleset permission.Ruleset) permission.Action {
-	for _, rule := range slices.Backward(ruleset) {
-		if permissionRuleTargetsTool(rule, tools.NameCompactContext) {
-			return rule.Action
-		}
-	}
-	return permission.ActionAllow
+	return specificToolRuleAction(ruleset, tools.NameCompactContext, permission.ActionAllow)
+}
+
+// donePermissionAction resolves the effective permission action for the done
+// tool while loop mode is active. Loop mode is entered explicitly by the user
+// (`/loop`), and its completion contract designates done as the required exit
+// signal, so that opt-in is the authorization — the same reasoning that makes
+// registering compact_context authorization for compact_context. Without this,
+// an allowlist role (`"*": deny` plus a few tools) would enter a loop it cannot
+// finish: done is hidden and its calls rejected, leaving only the
+// `<blocked>` escape hatch or exhausting the interception budget.
+//
+// done carries no external side effect to protect here — it is read-only and
+// its executor only echoes the report back, while the runtime intercepts the
+// result and independently decides whether exit is granted. A rule naming done
+// still wins, so `done: deny` keeps a loop under human-only termination.
+//
+// Callers must gate this on loop mode being active (toolPermissionContext.
+// LoopExitAuthorized). Outside a loop, done keeps plain wildcard semantics:
+// nothing requires it there, and both its tool description and the Response
+// Closure prompt block actively tell the model not to call it.
+func donePermissionAction(ruleset permission.Ruleset) permission.Action {
+	return specificToolRuleAction(ruleset, tools.NameDone, permission.ActionAllow)
+}
+
+// toolPermissionContext carries the agent-state gates that a few control tools
+// need on top of the ruleset itself. The zero value is the conservative
+// default: no runtime mode is active, so every gated tool falls back to plain
+// wildcard semantics.
+type toolPermissionContext struct {
+	// LoopExitAuthorized reports that loop mode is currently active, which
+	// authorizes done against wildcard-only rules. See donePermissionAction.
+	LoopExitAuthorized bool
 }
 
 func evaluateToolPermission(ruleset permission.Ruleset, toolName string, args json.RawMessage) toolPermissionDecision {
@@ -88,7 +127,15 @@ func evaluateToolPermission(ruleset permission.Ruleset, toolName string, args js
 // is non-empty, path-taking tools are matched with EvaluatePath so relative
 // and absolute spellings of the same file converge on one rule. An empty cwd
 // degrades to the plain lexical matching of evaluateToolPermission.
+//
+// It evaluates with a zero toolPermissionContext, so the loop-gated done
+// exemption is off. Callers that own the loop state must use
+// evaluateToolPermissionInDirWithContext instead.
 func evaluateToolPermissionInDir(ruleset permission.Ruleset, toolName string, args json.RawMessage, cwd string) toolPermissionDecision {
+	return evaluateToolPermissionInDirWithContext(ruleset, toolName, args, cwd, toolPermissionContext{})
+}
+
+func evaluateToolPermissionInDirWithContext(ruleset permission.Ruleset, toolName string, args json.RawMessage, cwd string, pctx toolPermissionContext) toolPermissionDecision {
 	toolName = tools.NormalizeName(toolName)
 	decision := toolPermissionDecision{Action: permission.ActionDeny, MatchArgument: "*"}
 	if strings.TrimSpace(toolName) == "" {
@@ -96,6 +143,12 @@ func evaluateToolPermissionInDir(ruleset permission.Ruleset, toolName string, ar
 	}
 	if toolName == tools.NameCancel && ruleset.IsDisabled(tools.NameDelegate) {
 		return decision
+	}
+	if toolName == tools.NameDone && pctx.LoopExitAuthorized {
+		// Loop mode is the user's authorization for the loop's own exit
+		// signal, so wildcard-only rules do not reject it. A rule naming done
+		// still wins — see donePermissionAction.
+		return toolPermissionDecision{Action: donePermissionAction(ruleset), MatchArgument: "*"}
 	}
 
 	unwrapped := llm.UnwrapToolArgs(args)

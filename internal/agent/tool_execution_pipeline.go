@@ -58,9 +58,13 @@ type toolExecutionPipeline struct {
 	updatePending                 func(PendingToolCall)
 	reservedToolError             func(string) error
 	bypassPermission              func(string) bool
-	visibleToolNames              func() map[string]struct{}
-	appendToolActivity            func(recovery.ToolActivityRecord) error
-	captureWalltimeTarget         func() *walltimeTarget
+	// loopExitAuthorized reports whether loop mode is active, which authorizes
+	// done against wildcard-only rules. nil means "not a loop-capable agent"
+	// (SubAgents), so done keeps plain wildcard semantics there.
+	loopExitAuthorized    func() bool
+	visibleToolNames      func() map[string]struct{}
+	appendToolActivity    func(recovery.ToolActivityRecord) error
+	captureWalltimeTarget func() *walltimeTarget
 }
 
 func (p toolExecutionPipeline) validateWriteScope(tc message.ToolCall) error {
@@ -992,7 +996,11 @@ func (p toolExecutionPipeline) applyPermission(ctx context.Context, tc *message.
 		return nil
 	}
 
-	decision := evaluateToolPermissionInDir(ruleset, tc.Name, tc.Args, p.effectiveToolBaseDir())
+	pctx := toolPermissionContext{}
+	if p.loopExitAuthorized != nil {
+		pctx.LoopExitAuthorized = p.loopExitAuthorized()
+	}
+	decision := evaluateToolPermissionInDirWithContext(ruleset, tc.Name, tc.Args, p.effectiveToolBaseDir(), pctx)
 	switch decision.Action {
 	case permission.ActionDeny:
 		logToolPermissionDenied(p.logPrefix, p.agentID, tc.Name, decision.MatchArgument)

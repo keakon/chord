@@ -54,11 +54,11 @@ In the TUI, an `lsp` card shows the operation and query position in its header (
 
 ## Orchestration and control
 
-These tools control agent workflows rather than local side effects. YOLO mode does **not** bypass permissions for `handoff`, `delegate`, `cancel`, and `done`, and a broad `"*": allow` rule does not grant them by itself — configure each one directly when a role should use it.
+These tools control agent workflows rather than local side effects, so YOLO mode does **not** bypass their permissions — YOLO removes the friction of confirming file edits and shell commands, not the role's boundary. `handoff`, `delegate`, and `cancel` grant a capability the role did not have, so a broad `"*": allow` does not grant them by itself; configure each one directly when a role should use it. `done` and `compact_context` only end or shrink the current unit of work, so the runtime mode that mounts them is their authorization and a wildcard-only rule does not reach them. See [Permissions & Safety](./permissions-and-safety.md).
 
 | Tool | What it does |
 | --- | --- |
-| `done` | Send a final report only when the active runtime or workflow explicitly requires a tool-based completion signal, primarily to request loop exit. Ordinary completion must be returned directly as assistant text; merely finishing the work or having `done` available is not a reason to call it. Loop exits remain gated by exit conditions and local confirmation. |
+| `done` | Request loop exit with a final Markdown report. Mounted only while a loop is running, so ordinary sessions never see it and return their completion directly as assistant text. Loop exits remain gated by exit conditions and local confirmation. |
 | `handoff` | Transfer a plan/work to another role for execution. |
 | `delegate` | Start a delegated SubAgent workstream and return its startup handle (`task_id` / `agent_id`) immediately. It does not wait for completion. Denying it also disables `cancel` and nested delegation for that role. |
 | `cancel` | Cancel a delegated worker; requires `delegate` to be enabled. |

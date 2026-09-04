@@ -169,8 +169,11 @@ func (a *MainAgent) CurrentLoopMaxIterations() int {
 	return a.loopState.MaxIterations
 }
 
+// CanUseLoopMode reports whether the TUI should offer loop mode for this role.
+// Like canUseLoopMode it asks whether done could be mounted, not whether it is
+// mounted right now — done only joins the tool surface once a loop is running.
 func (a *MainAgent) CanUseLoopMode() bool {
-	return a.doneToolAvailable()
+	return a.doneToolPermitted()
 }
 
 func (a *MainAgent) emitLoopStateChanged() {
@@ -311,6 +314,10 @@ func (a *MainAgent) EnableLoopMode(target string) {
 	maxIterationsSet := a.loopState.MaxIterationsSet
 	a.loopReductionMu.Unlock()
 
+	// done lives on the tool surface only while a loop is active, so entering
+	// one has to mount it before the next request goes out.
+	a.mountDoneForLoopEntry()
+
 	a.emitLoopStateChanged()
 	msg := fmt.Sprintf("Loop enabled. Automatic Done interceptions: %d.", maxIterations)
 	if maxIterationsSet && maxIterations == 0 {
@@ -325,6 +332,14 @@ func (a *MainAgent) DisableLoopMode() {
 	a.loopState.disable()
 	a.pendingLoopContinuation = nil
 	a.loopReductionMu.Unlock()
+	// Leaving the loop takes done back off the surface, so a non-loop session
+	// stops paying for a tool it must not call. The rebuild is skipped when
+	// done was never mounted (late mount already cleared above, or a role that
+	// cannot use it at all), so an ordinary /loop off on a cache-friendly
+	// provider costs nothing.
+	if a.doneOnFrozenToolSurface() {
+		a.markRuntimeSurfaceDirty()
+	}
 	a.emitLoopStateChanged()
 	a.emitToTUI(InfoEvent{Message: "Loop disabled."})
 }

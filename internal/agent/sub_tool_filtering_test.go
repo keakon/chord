@@ -63,7 +63,7 @@ func TestSubAgent_AppliesModelEditToolFilter(t *testing.T) {
 			s.tools.Register(tools.EditTool{})
 
 			// Get visible tools through the filtering logic
-			visibleTools := visibleLLMTools(s.tools, s.ruleset, isSubAgentInternalTool)
+			visibleTools := visibleLLMTools(s.tools, s.ruleset, isSubAgentInternalTool, toolPermissionContext{})
 			filteredTools := filterEditToolsByModel(visibleTools, s.modelName, s.ruleset, nil)
 
 			// Check which tools are visible
@@ -100,7 +100,7 @@ func TestSubAgent_ToolFilteringInAllVisibilityPaths(t *testing.T) {
 	modelName := "gpt-5.5"          // gpt-5 family model should see patch tool
 
 	// Simulate what SubAgent does: apply model filter
-	visibleTools := visibleLLMTools(baseTools, ruleset, isSubAgentInternalTool)
+	visibleTools := visibleLLMTools(baseTools, ruleset, isSubAgentInternalTool, toolPermissionContext{})
 	filteredTools := filterEditToolsByModel(visibleTools, modelName, ruleset, nil)
 
 	// Convert to tool names map (simulates visibleToolNames)
@@ -246,7 +246,7 @@ func TestSubAgent_EditPatchPermissionFallback(t *testing.T) {
 			baseTools.Register(tools.EditTool{})
 
 			// Test the filtering logic directly
-			visibleTools := visibleLLMTools(baseTools, tt.ruleset, isSubAgentInternalTool)
+			visibleTools := visibleLLMTools(baseTools, tt.ruleset, isSubAgentInternalTool, toolPermissionContext{})
 			filteredTools := filterEditToolsByModel(visibleTools, tt.modelName, tt.ruleset, nil)
 
 			visibleNames := make(map[string]struct{})

@@ -128,6 +128,27 @@ func (a *MainAgent) maybeInterceptRepeatedToolCall(ctx context.Context, tc messa
 	return &repeatedToolCallInterceptResult{toolResult: a.repeatedToolCallRejectResult(tc, streak)}, true
 }
 
+// loopExitAuthorized reports whether loop mode is active. Loop mode is the
+// user's opt-in to a workflow whose completion contract requires done, so it
+// both mounts done on the tool surface and authorizes it against wildcard-only
+// permission rules. Read under loopReductionMu: permission evaluation and tool
+// visibility run on tool-execution and request-preparation goroutines while
+// the event loop may be handling a busy /loop command.
+func (a *MainAgent) loopExitAuthorized() bool {
+	if a == nil {
+		return false
+	}
+	a.loopReductionMu.Lock()
+	defer a.loopReductionMu.Unlock()
+	return a.loopState.Enabled
+}
+
+// toolPermissionContext snapshots the agent-state gates that tool permission
+// evaluation and tool visibility need beyond the ruleset itself.
+func (a *MainAgent) toolPermissionContext() toolPermissionContext {
+	return toolPermissionContext{LoopExitAuthorized: a.loopExitAuthorized()}
+}
+
 func (a *MainAgent) loopExitConditionsSatisfied() bool {
 	if !a.loopState.Enabled {
 		return false

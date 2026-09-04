@@ -104,12 +104,15 @@ const mainAgentCommunicationPrompt = `## User Communication
 
 // mainAgentResponseClosurePromptText renders the Response Closure section.
 // The done tool line is included only when the done tool is actually visible,
-// so the rendered prompt never references a tool the model cannot call.
+// so the rendered prompt never references a tool the model cannot call. done
+// is mounted only for the duration of a loop, so the branch is effectively the
+// loop/non-loop split: outside a loop there is no tool to mention, and inside
+// one the loop's own completion contract carries the details.
 func mainAgentResponseClosurePromptText(doneVisible bool) string {
 	completionReportLine := "- Return that completion report directly in the final assistant response"
 	if doneVisible {
 		done := toolPromptName(tools.NameDone)
-		completionReportLine = "- By default, return that completion report directly in the final assistant response; call the " + done + " tool only when an explicit workflow instruction in the conversation designates it as the required completion signal, never merely because work is complete or " + done + " is available"
+		completionReportLine = "- Return that completion report through the " + done + " tool's `report` argument, following the active loop workflow's completion contract"
 	}
 	return `## Response Closure
 - Within a normal turn, continue until the current in-scope work package is finished, a real blocker appears, or a materially different user decision is required

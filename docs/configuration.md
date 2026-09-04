@@ -1196,6 +1196,21 @@ permission:
   write: ask
 ```
 
+In an allowlist like this, the leading `"*": deny` covers every tool you did not
+list, so anything the role needs must be named. Two exceptions are worth
+knowing, because they would otherwise look like the feature is broken:
+
+- `compact_context` and `done` are **not** covered by the wildcard. The switch
+  that makes each reachable — `context.compaction.model_driven` for the former,
+  starting a loop for the latter — is itself the authorization, so this role can
+  run model-driven compaction and loop mode without listing them. Name a tool
+  explicitly (`done: deny`) when you do want to withhold it. See
+  [Permissions & Safety](./permissions-and-safety.md).
+- Everything else is covered normally. `todo_write` and `question` are ordinary
+  tools here: leaving them out means the model tracks no TODO list and asks the
+  user in plain assistant text instead of a structured prompt. Both degrade
+  cleanly, so add them only if you want those channels.
+
 ## Context management
 
 Long-session context handling — **context compaction** (LLM-generated summaries

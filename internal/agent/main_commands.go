@@ -77,8 +77,12 @@ func expandCommandTemplate(tmpl, args string) string {
 	return tmpl
 }
 
+// canUseLoopMode reports whether this role may enter loop mode. It asks
+// whether done *could* be mounted, not whether it is mounted right now: done
+// only joins the tool surface once a loop is active, so asking about present
+// visibility would deadlock loop entry against itself.
 func (a *MainAgent) canUseLoopMode() bool {
-	return a.doneToolAvailable()
+	return a.doneToolPermitted()
 }
 
 func isLoopSlashCommand(content string) bool {
@@ -175,11 +179,8 @@ func (a *MainAgent) tryHandleLoopSlashCommand(content string, busy bool) bool {
 			}
 			return true
 		}
+		// EnableLoopMode mounts done itself, on both the busy and idle paths.
 		a.EnableLoopMode(target)
-		if busy {
-			a.freezeLoopReductionPrefixForCurrentTurn()
-			a.armLoopDoneLateMount()
-		}
 		if maxSet || busy {
 			a.loopReductionMu.Lock()
 			if maxSet {

@@ -23,16 +23,10 @@ func TestDoneToolParameters(t *testing.T) {
 	if !strings.Contains(desc, "user's current language") {
 		t.Fatalf("report description missing user language guidance: %q", desc)
 	}
-	for _, want := range []string{
-		"When the runtime explicitly requires this exceptional completion tool",
-		"Otherwise, do not call `done`; return the result directly as assistant text",
-	} {
-		if !strings.Contains(desc, want) {
-			t.Fatalf("report description missing %q: %q", want, desc)
-		}
-	}
-	if strings.HasPrefix(desc, "Required final") {
-		t.Fatalf("report description should not imply every completion requires Done: %q", desc)
+	// The tool is mounted only while a loop runs, so the argument description
+	// states what to write rather than re-litigating whether to call the tool.
+	if !strings.Contains(desc, "completion status, changes, verification, and remaining issues") {
+		t.Fatalf("report description missing report contents: %q", desc)
 	}
 	required, ok := params["required"].([]string)
 	if !ok {
@@ -43,22 +37,28 @@ func TestDoneToolParameters(t *testing.T) {
 	}
 }
 
-func TestDoneToolDescriptionUsesRequiredToolFallbackProtocol(t *testing.T) {
+// The runtime mounts done only while a loop is active, so its description is
+// written for that single situation: it states the exit bar instead of
+// arguing against being called, which is what the old always-mounted wording
+// had to spend half its length on.
+func TestDoneToolDescriptionTargetsActiveLoop(t *testing.T) {
 	desc := NewDoneTool().Description()
 	for _, want := range []string{
-		"Call this tool only when an explicit workflow instruction in the current conversation",
-		"designates it as the required completion signal; otherwise DO NOT call it",
-		"return the final answer directly as assistant text",
-		"Tool availability, completed work, or this tool's required report argument do not by themselves require a `done` call",
+		"Requests exit from the active loop workflow",
+		"only when the current objective is fully complete",
 		"no other tool call is necessary or appropriate",
+		"Never call it for partial progress",
+		"continue working instead of calling `done`",
 	} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("Done description missing %q: %q", want, desc)
 		}
 	}
-	for _, unwanted := range []string{"In loop mode", "outside loop mode", "user approval"} {
+	// The tool is absent outside a loop, so the description must not spend
+	// tokens telling the model when not to call it.
+	for _, unwanted := range []string{"otherwise DO NOT call it", "return the final answer directly as assistant text", "user approval"} {
 		if strings.Contains(desc, unwanted) {
-			t.Fatalf("Done description contains mode-dependent guidance %q: %q", unwanted, desc)
+			t.Fatalf("Done description still carries not-mounted guidance %q: %q", unwanted, desc)
 		}
 	}
 }
