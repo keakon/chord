@@ -1178,6 +1178,99 @@ func TestClient_InterruptedPartialEscalatesForContinuation(t *testing.T) {
 	}
 }
 
+// TestClient_VisibleInterruptedStreamCoolsKeyForEscalation guards the retry
+// governance behind an uncapped preserved-interruption resume: instead of a
+// round cap, each escalated interruption cools the key that streamed the
+// partial, so a restart through the normal key/fallback rotation skips the key
+// (or waits out the cooldown when every key is cooling) rather than immediately
+// reusing the same key that just truncated. A single blip costs only the base
+// wait.
+func TestClient_VisibleInterruptedStreamCoolsKeyForEscalation(t *testing.T) {
+	t.Run("stream_error", func(t *testing.T) {
+		primaryCfg := testProviderConfigWithKeys("sample", "gpt-5.4", []string{"key-a"})
+		impl := &scriptedProvider{calls: []scriptedCall{
+			{streams: []message.StreamDelta{{Type: "text", Text: "partial "}}, err: io.ErrUnexpectedEOF},
+		}}
+		c := NewClient(primaryCfg, impl, "gpt-5.4", 4096, "sys")
+		_, err := callCompleteStreamWithRetryForTest(
+			c,
+			context.Background(),
+			primaryCfg,
+			impl,
+			"gpt-5.4",
+			4096,
+			RequestTuning{},
+			"",
+			[]message.Message{{Role: "user", Content: "hi"}},
+			nil,
+			nil,
+			true,
+			nil,
+			0,
+			&CallStatus{},
+		)
+		if !errors.Is(err, io.ErrUnexpectedEOF) {
+			t.Fatalf("err = %v, want io.ErrUnexpectedEOF escalated for continuation", err)
+		}
+		ks := *primaryCfg.keyStates[0]
+		if !ks.CooldownEnd.After(time.Now()) {
+			t.Fatalf("key cooldown_end = %v, want a future cooldown after the escalation", ks.CooldownEnd)
+		}
+		if ks.CooldownCount != 1 {
+			t.Fatalf("key cooldown_count = %d, want 1", ks.CooldownCount)
+		}
+		if !ks.Recovering {
+			t.Fatal("cooled key should be marked recovering")
+		}
+		// A restart through the normal rotation must not immediately reuse the
+		// cooled key: with a single key the next selection waits for cooldown.
+		if _, _, err := primaryCfg.SelectKeyWithContext(context.Background()); err == nil {
+			t.Fatal("SelectKeyWithContext succeeded, want AllKeysCoolingError while the key is cooled")
+		}
+	})
+	t.Run("interrupted_response", func(t *testing.T) {
+		primaryCfg := testProviderConfigWithKeys("sample", "gpt-5.4", []string{"key-a"})
+		impl := &scriptedProvider{calls: []scriptedCall{
+			{resp: &message.Response{Content: "partial ", StopReason: "interrupted"}},
+		}}
+		c := NewClient(primaryCfg, impl, "gpt-5.4", 4096, "sys")
+		_, err := callCompleteStreamWithRetryForTest(
+			c,
+			context.Background(),
+			primaryCfg,
+			impl,
+			"gpt-5.4",
+			4096,
+			RequestTuning{},
+			"",
+			[]message.Message{{Role: "user", Content: "hi"}},
+			nil,
+			nil,
+			true,
+			nil,
+			0,
+			&CallStatus{},
+		)
+		if _, ok := errors.AsType[*InterruptedResponseError](err); !ok {
+			t.Fatalf("err = %v, want *InterruptedResponseError escalated", err)
+		}
+		ks := *primaryCfg.keyStates[0]
+		if !ks.CooldownEnd.After(time.Now()) {
+			t.Fatalf("key cooldown_end = %v, want a future cooldown after the escalation", ks.CooldownEnd)
+		}
+		if !ks.Recovering {
+			t.Fatal("cooled key should be marked recovering")
+		}
+		// The interrupted-response settle path calls MarkKeySuccess before the
+		// escalation, so the count restarts at the base wait every round; the
+		// stream-error path keeps the count and therefore backs off
+		// exponentially across consecutive truncations.
+		if _, _, err := primaryCfg.SelectKeyWithContext(context.Background()); err == nil {
+			t.Fatal("SelectKeyWithContext succeeded, want AllKeysCoolingError while the key is cooled")
+		}
+	})
+}
+
 // TestClient_InterruptedPartialResponseRespectsExplicitRetryCap guards the
 // retry counter: an interrupted-with-text response is discarded as a failed
 // attempt and must count against an explicit cap. Counting it as a usable

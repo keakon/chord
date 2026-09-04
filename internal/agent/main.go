@@ -2278,14 +2278,15 @@ const streamContinueMessageText = "Your previous reply was interrupted before it
 // resumeAfterPreservedStreamInterruption saves the turn's streamed partial
 // text as an interrupted assistant message and restarts the main LLM request so
 // the model continues from where it stopped. The restart runs the full retry
-// rotation (key switch, fallback models, cooling waits), so a persistently
-// failing transport behaves like any other error — while the partial reply is
-// never discarded. Continuation is not capped: the restart repeats until the
-// reply completes, an interruption carries no new visible text, the turn is
-// cancelled or goes stale, or a non-resumable error ends the turn normally. It
-// reports false when the turn is stale or no body text was streamed, letting
-// the caller fall through to ordinary error handling. Event-loop-goroutine
-// only.
+// rotation (key switch, fallback models, cooling waits): the client cooled the
+// interrupted key before escalating, so a transport that keeps truncating
+// mid-stream rotates across keys and fallback models and waits out cooldowns
+// instead of restarting back-to-back. Continuation is not capped: the restart
+// repeats until the reply completes, an interruption carries no new visible
+// text, the turn is cancelled or goes stale, or a non-resumable error ends the
+// turn normally. It reports false when the turn is stale or no body text was
+// streamed, letting the caller fall through to ordinary error handling.
+// Event-loop-goroutine only.
 func (a *MainAgent) resumeAfterPreservedStreamInterruption(turnID uint64, cause error) bool {
 	if a.turn == nil || turnID == 0 || a.turn.ID != turnID {
 		return false
@@ -2366,10 +2367,12 @@ func (a *MainAgent) handleAgentError(evt Event) {
 		// it stopped. The restart runs the full retry rotation (key switch,
 		// fallback models, cooling waits) without a round cap, so a
 		// persistently failing transport behaves like any other error without
-		// ever throwing away produced text. When nothing visible was streamed,
-		// this falls through to ordinary error handling below — which then
-		// discards nothing, since the partial text has already been drained
-		// and saved.
+		// ever throwing away produced text; the client cools the interrupted
+		// key before escalating so repeated interruptions rotate keys and
+		// fallback models and wait out cooldowns rather than restarting
+		// back-to-back. When nothing visible was streamed, this falls through
+		// to ordinary error handling below — which then discards nothing,
+		// since the partial text has already been drained and saved.
 		if a.turn != nil && llm.IsPreservableStreamInterruption(err) {
 			if a.resumeAfterPreservedStreamInterruption(evt.TurnID, err) {
 				return

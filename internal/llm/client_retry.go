@@ -169,6 +169,17 @@ func isAllKeysCoolingError(err error) bool {
 // deterministic, so retrying forever would only burn time.
 const upstreamStreamFailureRetryRounds = 2
 
+// preservedInterruptionCooldownBase seeds the cooldown applied to the key that
+// just streamed a preserved partial before the interruption is escalated for
+// continuation. ProviderConfig.MarkCooldown grows the wait for the key's
+// consecutive failures (capped at maxProviderRetryDelay), so a transport that
+// keeps truncating mid-stream backs off over time instead of firing
+// back-to-back, while a single blip recovers after the base wait. This throttle
+// replaces a round cap: resumption itself is uncapped and only ends on
+// completion, no new visible text, cancellation, staleness, or a non-resumable
+// error.
+const preservedInterruptionCooldownBase = time.Second
+
 func shouldContinueRetry(retryCount, maxAttempts int, lastErr error) bool {
 	return shouldContinueRetryMode(retryCount, maxAttempts, lastErr, false)
 }
@@ -978,16 +989,20 @@ func (c *Client) completeStreamTarget(
 		// This attempt streamed resumable body text without a tool card and
 		// the failure is a stream interruption. preservablePartial already
 		// implies both, so it is the only gate needed here. The partial text
-		// stays on screen: mark the key recovering so the caller's restart
-		// prefers another key/fallback model, and escalate the error so the
-		// caller can save the partial reply and resume it with a continuation
-		// prompt. Silently retrying the same key here would regenerate the
-		// whole reply and discard every attempt's partial output. Keep
-		// pendingRollback empty so the retry-layer deferred rollback does not
-		// wipe the preserved text when this error unwinds.
+		// stays on screen: cool the key so the caller's restart (a fresh
+		// request through the normal key/fallback rotation) skips it or waits
+		// out the cooldown instead of immediately reusing the same key that
+		// just truncated — MarkCooldown grows the wait for the key's
+		// consecutive failures, throttling the restart cadence without a round
+		// cap — and escalate the error so the caller can save the partial
+		// reply and resume it with a continuation prompt. Silently retrying
+		// the same key here would regenerate the whole reply and discard
+		// every attempt's partial output. Keep pendingRollback empty so the
+		// retry-layer deferred rollback does not wipe the preserved text when
+		// this error unwinds.
 		if preservablePartial {
-			t.provider.MarkRecovering(apiKey)
-			log.Warnf("interrupted visible stream with preserved partial text; escalating for continuation provider=%v model=%v key_id=%v error=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), err)
+			t.provider.MarkCooldown(apiKey, preservedInterruptionCooldownBase)
+			log.Warnf("interrupted visible stream with preserved partial text; cooling key and escalating for continuation provider=%v model=%v key_id=%v error=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), err)
 			pendingRollback = ""
 			return result, lastInputTokens, err
 		}
@@ -1043,12 +1058,16 @@ func (c *Client) completeStreamTarget(
 				// keep the old silent-retry behavior.
 				return result, lastInputTokens, nil
 			}
-			// Preservable partial text is on screen: mark the key recovering so
-			// the caller's restart prefers another key/fallback model, and keep
+			// Preservable partial text is on screen: cool the key so the
+			// caller's restart (a fresh request through the normal key/fallback
+			// rotation) skips it or waits out the cooldown instead of
+			// immediately reusing the same key that just truncated —
+			// MarkCooldown grows the wait for the key's consecutive failures,
+			// throttling the restart cadence without a round cap — and keep
 			// pendingRollback empty so the retry-layer deferred rollback does
 			// not wipe the preserved text when this error unwinds.
-			t.provider.MarkRecovering(apiKey)
-			log.Warnf("interrupted response with preserved partial text; escalating for continuation provider=%v model=%v key_id=%v content_len=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), len(resp.Content))
+			t.provider.MarkCooldown(apiKey, preservedInterruptionCooldownBase)
+			log.Warnf("interrupted response with preserved partial text; cooling key and escalating for continuation provider=%v model=%v key_id=%v content_len=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), len(resp.Content))
 			pendingRollback = ""
 			return result, lastInputTokens, interruptedErr
 		}

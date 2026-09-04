@@ -354,7 +354,10 @@ func TestHandleAgentErrorPrefillCapablePoolSkipsContinuationMessage(t *testing.T
 // TestHandleAgentErrorAutoContinueIsUnbounded verifies that preserved stream
 // interruptions keep resuming across consecutive rounds instead of stopping at
 // a round cap: every round saves its partial text and appends another durable
-// continuation message, and no explanatory terminal error is emitted.
+// continuation message, and no explanatory terminal error is emitted. The
+// client cools the failed key on each interruption, so the restarts wait out
+// cooldowns and rotate keys or fallback models rather than firing
+// back-to-back; the round count itself is not the stop condition.
 func TestHandleAgentErrorAutoContinueIsUnbounded(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn()
