@@ -26,7 +26,7 @@ When a patch-native model keeps `apply_patch`, Chord also hides `write` and `del
 
 ### Freeform (custom tool) emission
 
-On OpenAI-compatible **Responses** endpoints, a gpt-5-and-later family model or `codex-auto-review` additionally receives `apply_patch` as a **freeform custom tool** (`type: "custom"` with a Lark grammar), instead of a JSON function tool. Freeform gives the model grammar-constrained decoding — it cannot produce a syntax-invalid patch — and avoids JSON escaping overhead. All other models receive the JSON function shape, and non-Responses endpoints always use the function shape (they have no custom tool type).
+On OpenAI-compatible **Responses** endpoints, a gpt-5-and-later family model or `codex-auto-review` additionally receives `apply_patch` as a **freeform custom tool** (`type: "custom"` with a Lark grammar), instead of a JSON function tool. Chord sends the grammar in the request's `format.definition` field; when the server supports constrained decoding, it restricts the patch protocol during model generation, rather than only affecting client-side parsing. The grammar currently matches Codex's definition and requires at least one file operation, non-empty added-file content, and valid patch-line structure. The client still validates and executes the returned text with its own parser, so responses from a gateway that strips or rewrites the grammar, and legacy responses, retain a tolerant fallback path. Grammar cannot determine whether context came from the latest file or whether the requested change is semantically correct. All other models receive the JSON function shape, and non-Responses endpoints always use the function shape (they have no custom tool type).
 
 Hosts that accept Responses requests but reject custom tools do not get a built-in exception: a patch-native model there will emit the freeform shape by default, and the gateway rejects it with an actionable error. Set `compat.apply_patch.freeform: false` for such hosts to force the JSON function shape.
 
@@ -62,6 +62,8 @@ If a gateway lowers a custom tool into `{"input": "..."}` instead of `{"patch": 
 ## apply_patch Tool (Codex envelope)
 
 ### Format
+
+For the Responses freeform shape, the Lark grammar is sent to the server as a generation constraint with the custom tool; it is not only a client-side parsing format. It constrains the patch protocol skeleton: the complete patch has at least one file operation, added files have at least one `+` content line, and update chunks follow Codex's line and hunk structure. It cannot verify that a file anchor is unique, that the file was unchanged after reading, or that the edit is semantically correct. Chord still revalidates and executes the returned text with its client parser and transactional executor, so a missing or unenforced grammar leaves the client responsible for rejecting invalid results or applying its compatibility rules.
 
 The single `patch` argument carries the Codex patch body. Chord accepts the normal complete envelope and also repairs a missing `*** Begin Patch` and/or `*** End Patch` wrapper before parsing. Inside the body, you can include any number of file operations:
 
