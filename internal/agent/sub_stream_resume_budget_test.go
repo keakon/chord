@@ -1,6 +1,9 @@
 package agent
 
 import (
+	"errors"
+	"fmt"
+	"net"
 	"strings"
 	"testing"
 
@@ -73,4 +76,67 @@ func TestSubAgentPreservesPartialWhenResumeBudgetIsSpent(t *testing.T) {
 	if got := len(sub.ctxMgr.Snapshot()); got != before+1 {
 		t.Fatalf("history length after a second preserve = %d, want %d", got, before+1)
 	}
+}
+
+// TestSubAgentPreservesPartialOnEveryTransportInterruptionRound drives the whole
+// give-up path through handleLLMResponse for consecutive interruptions, instead
+// of calling the recovery helper directly. It covers the round that runs out of
+// budget as well as the ones that resume, for both an error the stream-level
+// classifier recognizes and one only the sub-agent's transport classifier does
+// (a reset socket). The give-up branch used to test the narrower of the two
+// conditions, so a reset mid-reply was preserved on the rounds that resumed and
+// then discarded on the round that gave up.
+func TestSubAgentPreservesPartialOnEveryTransportInterruptionRound(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		cause error
+	}{
+		{name: "connection reset", cause: &net.OpError{Op: "read", Err: errors.New("connection reset by peer")}},
+		{name: "interrupted stream", cause: &llm.InterruptedResponseError{StopReason: "interrupted"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, sub := newMixedBatchTestSubAgent(t)
+			if sub.turn == nil {
+				t.Fatal("test sub-agent has no live turn")
+			}
+			before := len(sub.ctxMgr.Snapshot())
+
+			// One round past the budget: the last one ends the turn instead of
+			// resuming, and is the round that used to drop its text.
+			rounds := maxSubAgentStreamResumes + 1
+			for round := 1; round <= rounds; round++ {
+				sub.turn.appendPartialText(fmt.Sprintf("round %d partial reply", round))
+				sub.handleLLMResponse(&llmResult{err: tc.cause, turnID: sub.turn.ID})
+
+				preserved := preservedInterruptedContents(sub.ctxMgr.Snapshot()[before:])
+				if len(preserved) != round {
+					t.Fatalf("round %d: history holds %d preserved partials, want %d (one per round)", round, len(preserved), round)
+				}
+				if want := fmt.Sprintf("round %d partial reply", round); !strings.Contains(preserved[round-1], want) {
+					t.Fatalf("round %d: preserved content = %q, want it to carry %q", round, preserved[round-1], want)
+				}
+			}
+
+			if got := sub.turn.SubAgentStreamResumeCount; got != maxSubAgentStreamResumes {
+				t.Fatalf("stream resumes spent = %d, want the budget of %d fully spent", got, maxSubAgentStreamResumes)
+			}
+			if got := sub.turn.SubAgentTerminalRecoveryCount; got != 0 {
+				t.Fatalf("terminal nudge budget spent = %d, want 0", got)
+			}
+		})
+	}
+}
+
+// preservedInterruptedContents returns the bodies of the interrupted assistant
+// messages in msgs, in order. Rounds that resume also append the continuation
+// instruction as a user message, so counting the preserved partials is what
+// isolates "the produced text was kept" from the rest of the round.
+func preservedInterruptedContents(msgs []message.Message) []string {
+	var contents []string
+	for _, msg := range msgs {
+		if msg.Role == message.RoleAssistant && msg.StopReason == "interrupted" {
+			contents = append(contents, msg.Content)
+		}
+	}
+	return contents
 }

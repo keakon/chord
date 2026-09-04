@@ -41,10 +41,13 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 		if !llm.IsContextLengthExceeded(result.err) && s.recoverTerminalResponse(s.interruptedRequestRecoveryInstruction(), result.err) {
 			return
 		}
-		if llm.IsPreservableStreamInterruption(result.err) {
-			// Out of resume budget, or the error is not resumable: the turn
-			// ends here, but the text the reply already streamed still belongs
-			// in history rather than being dropped on the floor.
+		if isTransientSubAgentTransportError(result.err) {
+			// Out of resume budget: the turn ends here, but the text the reply
+			// already streamed still belongs in history rather than being
+			// dropped on the floor. The condition matches the one that decides
+			// a resume, so a given transport failure preserves the same way on
+			// the last round as on the ones that resumed — a timeout used to
+			// save its partial for three rounds and then discard the fourth.
 			s.preserveInterruptedPartial()
 		}
 		s.sendEvent(Event{
