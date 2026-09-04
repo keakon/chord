@@ -2480,7 +2480,7 @@ func updateHunksFor(t *testing.T, patch string) []applyPatchHunk {
 func TestApplyPatchTolerantMatchCoversWhitespaceAndPunctuation(t *testing.T) {
 	file := "alpha\nit’s here\nbeta\n"
 	hunks := updateHunksFor(t, "*** Begin Patch\n*** Update File: f\n@@\n-alpha\n it's here  \n+new\n*** End Patch")
-	got, _, _, err := applyApplyPatchHunks(context.Background(), file, hunks)
+	got, _, _, _, err := applyApplyPatchHunks(context.Background(), file, hunks)
 	if err != nil {
 		t.Fatalf("applyApplyPatchHunks error = %v, want tolerance to cover trailing whitespace plus punctuation", err)
 	}
@@ -2492,7 +2492,7 @@ func TestApplyPatchTolerantMatchCoversWhitespaceAndPunctuation(t *testing.T) {
 func TestApplyPatchTolerantMatchCoversFullWidthPunctuation(t *testing.T) {
 	file := "alpha\n注意：这里\nbeta\n"
 	hunks := updateHunksFor(t, "*** Begin Patch\n*** Update File: f\n@@\n alpha\n 注意: 这里\n-beta\n+new\n*** End Patch")
-	got, _, _, err := applyApplyPatchHunks(context.Background(), file, hunks)
+	got, _, _, _, err := applyApplyPatchHunks(context.Background(), file, hunks)
 	if err != nil {
 		t.Fatalf("applyApplyPatchHunks error = %v, want full-width punctuation tolerance", err)
 	}
@@ -2507,7 +2507,7 @@ func TestApplyPatchTolerantMatchCoversFullWidthPunctuation(t *testing.T) {
 func TestApplyPatchTolerantMatchRejectsAmbiguousCandidates(t *testing.T) {
 	file := "it’s here\nx\nit’s here\nx\nit’s here\n"
 	hunks := updateHunksFor(t, "*** Begin Patch\n*** Update File: f\n@@\n it's here\n+y\n*** End Patch")
-	_, _, _, err := applyApplyPatchHunks(context.Background(), file, hunks)
+	_, _, _, _, err := applyApplyPatchHunks(context.Background(), file, hunks)
 	if err == nil {
 		t.Fatal("applyApplyPatchHunks error = nil, want the ambiguous tolerant match rejected")
 	}
@@ -2518,9 +2518,9 @@ func TestApplyPatchTolerantMatchRejectsAmbiguousCandidates(t *testing.T) {
 }
 
 func TestApplyPatchFuzzyMatchReplacesUniqueNearMatch(t *testing.T) {
-	file := "before anchor\nold code\nafter anchor\n"
-	hunks := updateHunksFor(t, "*** Begin Patch\n*** Update File: f\n@@\n before anchor\n-old cod\n+replacement\n after anchor\n*** End Patch")
-	got, _, fuzzy, err := applyApplyPatchHunks(context.Background(), file, hunks)
+	file := "before anchor\nfunc retryCount := 3 // number of attempts left\nafter anchor\n"
+	hunks := updateHunksFor(t, "*** Begin Patch\n*** Update File: f\n@@\n before anchor\n-func retryCount := 2 // number of attempts left\n+replacement\n after anchor\n*** End Patch")
+	got, _, fuzzy, _, err := applyApplyPatchHunks(context.Background(), file, hunks)
 	if err != nil {
 		t.Fatalf("applyApplyPatchHunks error = %v, want unique fuzzy match to apply", err)
 	}
@@ -2533,9 +2533,9 @@ func TestApplyPatchFuzzyMatchReplacesUniqueNearMatch(t *testing.T) {
 }
 
 func TestApplyPatchFuzzyMatchRejectsAmbiguousNearMatches(t *testing.T) {
-	file := "before anchor\nold code\nafter anchor\nbefore anchor\nold code\nafter anchor\n"
-	hunks := updateHunksFor(t, "*** Begin Patch\n*** Update File: f\n@@\n before anchor\n-old code!\n+replacement\n after anchor\n*** End Patch")
-	_, _, _, err := applyApplyPatchHunks(context.Background(), file, hunks)
+	file := "before anchor\nfunc retryCount := 3 // number of attempts left\nafter anchor\nbefore anchor\nfunc retryCount := 3 // number of attempts left\nafter anchor\n"
+	hunks := updateHunksFor(t, "*** Begin Patch\n*** Update File: f\n@@\n before anchor\n-func retryCount := 2 // number of attempts left\n+replacement\n after anchor\n*** End Patch")
+	_, _, _, _, err := applyApplyPatchHunks(context.Background(), file, hunks)
 	if err == nil {
 		t.Fatal("applyApplyPatchHunks error = nil, want ambiguous fuzzy match rejected")
 	}

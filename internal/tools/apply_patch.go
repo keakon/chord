@@ -122,6 +122,10 @@ type PlannedMutation struct {
 	Removed            int
 	PunctuationHunks   int
 	FuzzyHunks         int
+	// FuzzyReplacements records, per accepted fuzzy hunk, the hunk's claimed
+	// removed line, the file line it actually replaced, and the added line
+	// written in its place so the result note can audit what changed.
+	FuzzyReplacements []applyPatchFuzzyReplacement
 	// StrippedInvisible reports the invisible runes cleaned from the
 	// model-added text of this mutation while the plan was built — the
 	// floating-mark strip runs on added (+) lines and add-file content,
@@ -1074,6 +1078,8 @@ func replaySuccessfulApplyPatchOperations(ctx context.Context, states map[string
 		state.mode = state.initialMode
 		state.touched = false
 		state.punctuationHunks = 0
+		state.fuzzyHunks = 0
+		state.fuzzyReplacements = nil
 		state.cleanedInvisible = nil
 		if state.initialExists {
 			state.originPath = path
@@ -1102,18 +1108,19 @@ func failedApplyPatchOpResult(op applyPatchOperation, err error) applyPatchOpRes
 }
 
 type applyPatchVirtualFile struct {
-	path             string
-	displayPath      string
-	originPath       string
-	initialExists    bool
-	initialBytes     []byte
-	initialMode      os.FileMode
-	exists           bool
-	bytes            []byte
-	mode             os.FileMode
-	touched          bool
-	punctuationHunks int
-	fuzzyHunks       int
+	path              string
+	displayPath       string
+	originPath        string
+	initialExists     bool
+	initialBytes      []byte
+	initialMode       os.FileMode
+	exists            bool
+	bytes             []byte
+	mode              os.FileMode
+	touched           bool
+	punctuationHunks  int
+	fuzzyHunks        int
+	fuzzyReplacements []applyPatchFuzzyReplacement
 	// cleanedInvisible accumulates the runes stripped from this file's
 	// model-added text while the plan is built (see cleanApplyPatchAddedLines)
 	// and is copied onto the committed mutation so the result note can
@@ -1222,12 +1229,13 @@ func applyPatchOperationToVirtualState(ctx context.Context, states map[string]*a
 			if err != nil {
 				return fmt.Errorf("read update source %s: %w", op.Path, err)
 			}
-			after, punctuationHunks, fuzzyHunks, err := applyApplyPatchHunks(ctx, decoded.Text, hunks)
+			after, punctuationHunks, fuzzyHunks, fuzzyReplacements, err := applyApplyPatchHunks(ctx, decoded.Text, hunks)
 			if err != nil {
 				return fmt.Errorf("update %s: %w", op.Path, err)
 			}
 			state.punctuationHunks += punctuationHunks
 			state.fuzzyHunks += fuzzyHunks
+			state.fuzzyReplacements = append(state.fuzzyReplacements, fuzzyReplacements...)
 			if len(stripped) > 0 {
 				if state.cleanedInvisible == nil {
 					state.cleanedInvisible = map[rune]int{}
@@ -1260,6 +1268,7 @@ func applyPatchOperationToVirtualState(ctx context.Context, states map[string]*a
 		target.originPath = state.originPath
 		target.punctuationHunks += state.punctuationHunks
 		target.fuzzyHunks += state.fuzzyHunks
+		target.fuzzyReplacements = append(target.fuzzyReplacements, state.fuzzyReplacements...)
 		if len(state.cleanedInvisible) > 0 {
 			if target.cleanedInvisible == nil {
 				target.cleanedInvisible = map[rune]int{}
@@ -1274,6 +1283,7 @@ func applyPatchOperationToVirtualState(ctx context.Context, states map[string]*a
 		state.originPath = ""
 		state.punctuationHunks = 0
 		state.fuzzyHunks = 0
+		state.fuzzyReplacements = nil
 		return nil
 	default:
 		return fmt.Errorf("unsupported apply_patch operation %q", op.Kind)
@@ -1321,6 +1331,7 @@ func buildApplyPatchMutationPlan(states map[string]*applyPatchVirtualFile) Mutat
 				AfterMode:          target.mode,
 				PunctuationHunks:   target.punctuationHunks,
 				FuzzyHunks:         target.fuzzyHunks,
+				FuzzyReplacements:  target.fuzzyReplacements,
 				StrippedInvisible:  target.cleanedInvisible,
 			}
 			populateApplyPatchMutationDiff(&mutation, source.displayPath, target.displayPath)
@@ -1342,15 +1353,16 @@ func buildApplyPatchMutationPlan(states map[string]*applyPatchVirtualFile) Mutat
 			continue
 		}
 		mutation := PlannedMutation{
-			SourcePath:       path,
-			TargetPath:       path,
-			BeforeExists:     state.initialExists,
-			BeforeBytes:      append([]byte(nil), state.initialBytes...),
-			BeforeMode:       state.initialMode,
-			AfterBytes:       append([]byte(nil), state.bytes...),
-			AfterMode:        state.mode,
-			PunctuationHunks: state.punctuationHunks,
-			FuzzyHunks:       state.fuzzyHunks,
+			SourcePath:        path,
+			TargetPath:        path,
+			BeforeExists:      state.initialExists,
+			BeforeBytes:       append([]byte(nil), state.initialBytes...),
+			BeforeMode:        state.initialMode,
+			AfterBytes:        append([]byte(nil), state.bytes...),
+			AfterMode:         state.mode,
+			PunctuationHunks:  state.punctuationHunks,
+			FuzzyHunks:        state.fuzzyHunks,
+			FuzzyReplacements: state.fuzzyReplacements,
 		}
 		switch {
 		case !state.initialExists && state.exists:
@@ -1482,7 +1494,7 @@ func cleanApplyPatchAddedLines(hunks []applyPatchHunk) ([]applyPatchHunk, map[ru
 	return cleaned, counts
 }
 
-func applyApplyPatchHunks(ctx context.Context, content string, hunks []applyPatchHunk) (string, int, int, error) {
+func applyApplyPatchHunks(ctx context.Context, content string, hunks []applyPatchHunk) (string, int, int, []applyPatchFuzzyReplacement, error) {
 	newline := "\n"
 	if strings.Contains(content, "\r\n") {
 		newline = "\r\n"
@@ -1495,6 +1507,7 @@ func applyApplyPatchHunks(ctx context.Context, content string, hunks []applyPatc
 	searchStart := 0
 	punctuationHunks := 0
 	fuzzyHunks := 0
+	var fuzzyReplacements []applyPatchFuzzyReplacement
 	for i, hunk := range hunks {
 		if len(hunks) > 1 {
 			reportToolProgress(ctx, ToolProgressSnapshot{Text: fmt.Sprintf("matching hunk %d/%d", i+1, len(hunks))})
@@ -1543,7 +1556,7 @@ func applyApplyPatchHunks(ctx context.Context, content string, hunks []applyPatc
 			}
 		}
 		if match < 0 {
-			return "", 0, 0, applyPatchPartialHunkError(applyPatchHunkNotFoundErrorWithHints(fileLines, oldSeq, searchStart, i, len(hunks), hunk.EndOfFile, punctuationCandidates, fuzzyCandidates, hunkHasWhitespaceOnlyContext(hunk)), i, len(hunks))
+			return "", 0, 0, nil, applyPatchPartialHunkError(applyPatchHunkNotFoundErrorWithHints(fileLines, oldSeq, searchStart, i, len(hunks), hunk.EndOfFile, punctuationCandidates, fuzzyCandidates, hunkHasWhitespaceOnlyContext(hunk)), i, len(hunks))
 		}
 		matched := fileLines[match : match+len(oldSeq)]
 		newSeq := buildApplyPatchNewSequence(hunk, matched)
@@ -1551,12 +1564,34 @@ func applyApplyPatchHunks(ctx context.Context, content string, hunks []applyPatc
 			var ok bool
 			newSeq, ok = buildPunctuationTolerantApplyPatchSequence(hunk, matched)
 			if !ok {
-				return "", 0, 0, applyPatchPartialHunkError(applyPatchUnsafePunctuationMatchError(oldSeq, i, len(hunks), match), i, len(hunks))
+				return "", 0, 0, nil, applyPatchPartialHunkError(applyPatchUnsafePunctuationMatchError(oldSeq, i, len(hunks), match), i, len(hunks))
 			}
 			punctuationHunks++
 		}
 		if fuzzyMatch {
 			fuzzyHunks++
+			// The guard admits exactly one changed removed line and one added
+			// line; map the removed line's hunk position onto oldSeq/fileLines
+			// so the audit record quotes real file bytes, not the hunk's.
+			removedIndex := -1
+			var addedText string
+			seqIndex := 0
+			for _, line := range hunk.Lines {
+				switch line.Kind {
+				case ' ':
+					seqIndex++
+				case '-':
+					removedIndex = seqIndex
+					seqIndex++
+				case '+':
+					addedText = line.Text
+				}
+			}
+			fuzzyReplacements = append(fuzzyReplacements, applyPatchFuzzyReplacement{
+				removed: oldSeq[removedIndex],
+				actual:  fileLines[match+removedIndex],
+				added:   addedText,
+			})
 		}
 		replaced := make([]string, 0, len(fileLines)-len(oldSeq)+len(newSeq))
 		replaced = append(replaced, fileLines[:match]...)
@@ -1574,13 +1609,28 @@ func applyApplyPatchHunks(ctx context.Context, content string, hunks []applyPatc
 	if newline == "\r\n" {
 		out = strings.ReplaceAll(out, "\n", "\r\n")
 	}
-	return out, punctuationHunks, fuzzyHunks, nil
+	return out, punctuationHunks, fuzzyHunks, fuzzyReplacements, nil
 }
 
+// minApplyPatchFuzzySimilarity gates the safe fuzzy recovery of a stale
+// removed line. 0.9 keeps transcription-style slips recoverable (a <=1-rune
+// difference on a line of 10+ runes) while rejecting edits that diverge more
+// broadly: below the threshold the model must re-read the file and rebuild the
+// hunk instead of silently overwriting a line it only half remembers.
 const (
-	minApplyPatchFuzzySimilarity   = 0.8
+	minApplyPatchFuzzySimilarity   = 0.9
 	minApplyPatchFuzzyContextRunes = 4
 )
+
+// applyPatchFuzzyReplacement records one fuzzy hunk replacement for the result
+// Note so the model can audit what was actually overwritten: removed is the
+// hunk's claimed line, actual is the file line it replaced, and added is the
+// line written in their place.
+type applyPatchFuzzyReplacement struct {
+	removed string
+	actual  string
+	added   string
+}
 
 // findUniqueFuzzyApplyPatchMatch permits only a narrow stale-line recovery:
 // one changed removed line, two distinctive unchanged context lines on
@@ -2426,6 +2476,11 @@ func (t ApplyPatchTool) finishApplyPatch(ctx context.Context, plan MutationPlan)
 	}
 	if fuzzyHunks > 0 {
 		lines = append(lines, fmt.Sprintf("Note: used safe fuzzy matching for %d hunk(s); only a unique near-match with unchanged context was accepted", fuzzyHunks))
+		for _, mutation := range plan.Mutations {
+			for _, replacement := range mutation.FuzzyReplacements {
+				lines = append(lines, fmt.Sprintf("Note: fuzzy hunk replaced the file's actual line %q with %q; your hunk claimed %q", replacement.actual, replacement.added, replacement.removed))
+			}
+		}
 	}
 	out := "Applied patch:\n" + strings.Join(lines, "\n")
 	if t.LSP == nil {
