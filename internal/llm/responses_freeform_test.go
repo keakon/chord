@@ -3,7 +3,6 @@ package llm
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -154,10 +153,9 @@ func TestConvertToolsToResponsesForTarget(t *testing.T) {
 	})
 
 	t.Run("azure_follows_model_whitelist", func(t *testing.T) {
-		// Azure OpenAI's Responses API supports custom tools, so a patch-native
-		// model on an Azure host emits the freeform shape at the wire. Hosts
-		// that reject custom tools use the escape hatch
-		// compat.apply_patch.freeform: false.
+		// A gpt-5 family model on an Azure OpenAI Responses host is patch-native,
+		// so it emits the freeform shape at the wire by default. Hosts that
+		// reject custom tools use the escape hatch compat.apply_patch.freeform: false.
 		provider := responsesProviderFor(t, config.ProviderConfig{
 			APIURL: "https://example.openai.azure.com/openai/v1/responses?api-version=preview",
 		})
@@ -890,8 +888,21 @@ func TestResponsesToolCustomShapeMarshal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal custom tool: %v", err)
 	}
-	want := fmt.Sprintf("{\"type\":\"custom\",\"name\":\"apply_patch\",\"description\":\"The `apply_patch` tool can be used to edit files. This is a FREEFORM tool, so do not wrap the patch in JSON.\",\"format\":{\"type\":\"grammar\",\"syntax\":\"lark\",\"definition\":%q}}", responsesApplyPatchLarkGrammar)
-	if string(raw) != want {
+	wantTool := responsesTool{
+		Type:        "custom",
+		Name:        "apply_patch",
+		Description: "The `apply_patch` tool can be used to edit files. This is a FREEFORM tool, so do not wrap the patch in JSON.",
+		Format: &responsesToolFormat{
+			Type:       "grammar",
+			Syntax:     "lark",
+			Definition: responsesApplyPatchLarkGrammar,
+		},
+	}
+	want, err := json.Marshal(wantTool)
+	if err != nil {
+		t.Fatalf("marshal expected custom tool: %v", err)
+	}
+	if string(raw) != string(want) {
 		t.Errorf("custom tool marshal =\n%s\nwant\n%s", raw, want)
 	}
 }

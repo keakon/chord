@@ -9,30 +9,29 @@ import (
 	"github.com/keakon/chord/internal/toolname"
 )
 
-// responsesApplyPatchLarkGrammar is the freeform apply_patch grammar attached
-// to custom tool definitions. It constrains only the protocol skeleton —
-// Begin/End envelopes, operation headers, hunk headers and line prefixes —
-// while content lines and filenames stay permissive, matching the tolerant
-// ParseApplyPatch semantics (implicit first hunk, blank-line separators,
-// "*** End of File" hunk tails).
-const responsesApplyPatchLarkGrammar = `start: "*** Begin Patch" newline (operation | newline)* "*** End Patch" newline?
+// responsesApplyPatchLarkGrammar is the Codex apply_patch grammar attached to
+// custom tool definitions. The client-side ParseApplyPatch implementation
+// remains more tolerant so legacy or unconstrained responses still have a
+// fallback parser.
+const responsesApplyPatchLarkGrammar = `start: begin_patch hunk+ end_patch
+begin_patch: "*** Begin Patch" LF
+end_patch: "*** End Patch" LF?
 
-operation: add_file | delete_file | update_file
+hunk: add_hunk | delete_hunk | update_hunk
+add_hunk: "*** Add File: " filename LF add_line+
+delete_hunk: "*** Delete File: " filename LF
+update_hunk: "*** Update File: " filename LF change_move? change?
 
-add_file: "*** Add File: " filename newline (add_line | newline)*
-add_line: "+" line_text newline
+filename: /(.+)/
+add_line: "+" /(.*)/ LF -> line
 
-delete_file: "*** Delete File: " filename newline
+change_move: "*** Move to: " filename LF
+change: (change_context | change_line)+ eof_line?
+change_context: ("@@" | "@@ " /(.+)/) LF
+change_line: ("+" | "-" | " ") /(.*)/ LF
+eof_line: "*** End of File" LF
 
-update_file: "*** Update File: " filename newline move_to? (hunk | hunk_line | newline)*
-move_to: "*** Move to: " filename newline
-hunk: hunk_header (hunk_line | newline)*
-hunk_header: "@@" line_text newline
-hunk_line: (" " | "+" | "-") line_text newline | "*** End of File" newline
-
-filename: /[^\n]+/
-line_text: /[^\n]*/
-newline: /[ \t]*\r?\n/
+%import common.LF
 `
 
 // responsesToolFormat is the constraint-decoding format block of a custom tool
