@@ -3414,7 +3414,7 @@ func TestClampEffectiveMaxTokensUsesSmallerDefaultOrModelOutputLimit(t *testing.
 	}
 }
 
-func TestInputLimitForModelRefDerivesContextMinusOutputBudget(t *testing.T) {
+func TestInputLimitForModelRefReservesModelOutputCap(t *testing.T) {
 	cfg := NewProviderConfig("prov", config.ProviderConfig{
 		Type: config.ProviderTypeChatCompletions,
 		Models: map[string]config.ModelConfig{
@@ -3423,6 +3423,31 @@ func TestInputLimitForModelRefDerivesContextMinusOutputBudget(t *testing.T) {
 	}, []string{"k"})
 	c := NewClient(cfg, &scriptedProvider{}, "model", 128000, "")
 
+	// The derivation reserves the model's own output cap (128000), so the
+	// budget is the provider-published 400000 - 128000 = 272000 input
+	// allocation, not 400000 - DefaultOutputTokenMax.
+	if got := c.InputLimitForModelRef("prov/model"); got != 272000 {
+		t.Fatalf("default InputLimitForModelRef() = %d, want 272000", got)
+	}
+	// A configured output cap below the model's does not shrink the
+	// reservation: limit.output is authoritative for the derivation.
+	c.SetOutputTokenMax(8192)
+	if got := c.InputLimitForModelRef("prov/model"); got != 272000 {
+		t.Fatalf("configured InputLimitForModelRef() = %d, want 272000", got)
+	}
+}
+
+func TestInputLimitForModelRefFallsBackToOutputCapSetting(t *testing.T) {
+	cfg := NewProviderConfig("prov", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"model": {Limit: config.ModelLimit{Context: 400000}},
+		},
+	}, []string{"k"})
+	c := NewClient(cfg, &scriptedProvider{}, "model", 128000, "")
+
+	// No limit.output declared: the reservation is the effective default
+	// output cap and tracks the configured max_output_tokens.
 	if got := c.InputLimitForModelRef("prov/model"); got != 336000 {
 		t.Fatalf("default InputLimitForModelRef() = %d, want 336000", got)
 	}
@@ -3452,7 +3477,10 @@ func TestClientFallbackRunningInputLimitRecomputesDerivedBudgetAfterOutputCapCha
 	fallbackCfg := NewProviderConfig("fallback-prov", config.ProviderConfig{
 		Type: config.ProviderTypeChatCompletions,
 		Models: map[string]config.ModelConfig{
-			"fallback-model": {Limit: config.ModelLimit{Context: 400000, Output: 128000}},
+			// No limit.output declared: the derived input budget follows the
+			// configured max_output_tokens, so a runtime output-cap change
+			// recomputes it.
+			"fallback-model": {Limit: config.ModelLimit{Context: 400000}},
 		},
 	}, []string{"k2"})
 
@@ -3474,7 +3502,7 @@ func TestClientFallbackRunningInputLimitRecomputesDerivedBudgetAfterOutputCapCha
 		ModelID:          "fallback-model",
 		MaxTokens:        128000,
 		ContextLimit:     400000,
-		InputLimit:       368000,
+		InputLimit:       336000,
 		DeriveInputLimit: true,
 	}}, 0)
 	c.SetOutputTokenMax(8192)

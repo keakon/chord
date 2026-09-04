@@ -132,9 +132,12 @@ chord doctor models --model openai/gpt-5.5@high
 ```yaml
 model_templates:
   gpt-5.6-base: &gpt-5-6-base
+    # Codex 订阅 2026-09 服务端档位：872K input + 128K output = 1M
+    # （max_context_window=872000）。账号/中转仍是旧档位时回落
+    # 400000/272000/128000；直连官方 API 用后面的 full-window 模板。
     limit:
-      context: 400000
-      input: 272000
+      context: 1000000
+      input: 872000
       output: 128000
     reasoning:
       effort: medium
@@ -252,12 +255,14 @@ providers:
 
 要点：
 
-- GPT-5.6 示例默认使用 `400000 / 272000 / 128000`，适合 Codex 账号和
-  常见中转。除非上游明确公布了不同配额，否则应保留这三个值。
+- GPT-5.6 示例对 Codex 订阅用 `1000000 / 872000 / 128000`（2026-09 服务端
+  档位：872K input + 128K output = 1M，对应 `max_context_window=872000`）；
+  账号/中转若仍是旧档位则回落 `400000 / 272000 / 128000`。
 - 使用 OpenAI 官方 API，或已确认网关开放完整 API 窗口时，把 `context`
-  改成 `1050000` 并删除 `input`。Chord 会从总上下文中预留实际请求输出后
-  推导可用输入预算。不要继续保留 `input: 272000`：超过 272K 是长上下文
-  计价阈值，不是完整 API 的输入硬上限。
+  改成 `1050000` 并删除 `input`。Chord 按 `context` 减去模型声明的
+  `limit.output` 推导可用输入预算（此模板为 128000，得 922000）；只有模型
+  未声明 `limit.output` 时才回退到默认 64000 输出上限。不要继续保留
+  `input: 272000`：超过 272K 是长上下文计价阈值，不是完整 API 的输入硬上限。
 - `gpt-5.6` 当前会解析到 Sol，因此它的 `cost` 应按 Sol 费率填写。
 - GPT-5.6 API 可用的 reasoning effort 包括 `none`、`low`、`medium`、`high`、`xhigh`、`max`。
 - Responses 在启用 reasoning 时默认使用 `reasoning.summary: auto`；如果不希望 Chord 请求可读 reasoning 摘要，请显式配置 `reasoning.summary: none`。
@@ -293,9 +298,10 @@ chord doctor models --model openai/gpt-5.6@max
 
 ##### 官方 API 全窗口（1.05M）
 
-删掉 `input`，可用输入预算由 `context` 减去请求输出上限推出：默认输出
-上限 64K 时约 986K，`max_output_tokens: 128000` 时约 922K。272K 计价线约
-占预算的 28%–30%，所以成本优先档落在 0.2 区间，不是笔误。
+删掉 `input`，可用输入预算由 `context` 减去模型声明的 `limit.output` 推出：
+此模板声明 `output: 128000`，得 922K，与全局请求输出上限（默认 64K）无关
+——只有模型未声明 `limit.output` 时才预留默认 64000。272K 计价线约占预算
+的 29%，所以成本优先档落在 0.2 区间，不是笔误。
 
 成本优先（Sol/Terra/Luna 共用：把用量留在 272K 计价档内，同时避开 Luna
 的 256K+ 崩塌区）：
@@ -332,14 +338,30 @@ model_templates:
 别把旧的 Luna 0.3 配方搬到这里：该窗口下 0.3 在约 277K–296K 才触发，
 已经越过计价线。
 
-##### Codex / 272K 受限接入
+##### Codex 订阅通道：窗口由服务端目录控制，配置前先实测
 
-`limit.input: 272000` 是实际输入上限，阈值是它的比例，也不存在需要躲的
-长上下文计价档——中转或 Codex 的价格本来就覆盖整个窗口。Sol/Terra 用
-0.7 在约 190K 触发，给工具输出和异步压缩留出约 82K 余量，合理；全局默
-认 0.8（约 218K）也可以用。Luna 在这个窗口内没有公开的长上下文评测，
-单独给它设 0.3（约 82K 触发）没有依据：先跟 Sol/Terra 一样用 0.7–0.8，
-实际遇到质量问题或 oversize 拒绝再下调。
+走 Codex 订阅端点（`preset: codex` 或 `/codex/responses` 中转）时，
+ChatGPT 账号拿到的窗口来自服务端模型目录（`context_window` /
+`max_context_window`）。Codex 把上下文算作**输入 + 输出**：目录里的
+`max_context_window = 872000` 是 1M 档的输入侧——872K 输入 + 128K 输出
+= 1M，正是官方 `model_context_window: 1000000` 配置要的值。95% 因子只是
+客户端把 raw 转成 usable 输入（约 828.4K），Codex 自己的自动压缩默认在
+解析后 raw 窗口的 90%（约 784.8K），都不是"总窗口被钳制"。
+
+目录值历史上多次变动、账号间也不一致：输入侧长期是 272K（400K 档 =
+272K + 128K），2026-08 中旬放开到 872K 上限，2026-09 初服务端开始下发
+扩大后的档位。账号可能滞后，且 `/status` 在首个请求前可能显示配置值、
+请求后才回落真实值。因此：
+
+- 设 `limit.input` 前先实测该端点实际接受的输入量（配候选值跑长会话，
+  观察日志是否出现 `context_length_exceeded` / oversize 拒绝）。
+- 订阅端点按服务端状态取值：2026-09 放开后为 `input: 872000`（1M 档）；
+  若你的账号/中转仍是旧档位则回落 `input: 272000`。`threshold` 与窗口
+  解耦：它是"在可用预算的多少比例处压缩"，按质量/成本权衡选——但 API
+  的 >272K 输入整单 2× 计价悬崖与窗口无关，若你的路由适用该计价，触发
+  线仍应压在悬崖内。
+- 只有直连 OpenAI API（`api.openai.com/v1/responses`）才适用官方 922K
+  输入上限（1.05M 窗口 − 128K 输出）；仍建议留出压缩与单批暴涨余量。
 
 其余规则不变：`compaction` 写在模型模板上，引用它的 provider 都会继
 承；`reminder` 省略时按 `min(0.60, threshold × 0.90)` 派生；这两个字段
@@ -357,7 +379,7 @@ model_templates:
 | --- | ---: | ---: | ---: |
 | GPT-5.4 | 1,050,000 | 950,000 | 128,000 |
 | GPT-5.5 | 400,000 | 272,000 | 128,000 |
-| GPT-5.6 Sol / Terra / Luna | 400,000 | 272,000 | 128,000 |
+| GPT-5.6 Sol / Terra / Luna | 1,000,000 | 872,000 | 128,000 |
 
 三个字段都要保留：`context` 表示 Codex 开放的输入加输出总窗口，`input`
 和 `output` 则是其中各自独立的硬上限。两个独立上限不必相加等于
@@ -391,8 +413,8 @@ providers:
           output: 128000
       gpt-5.6-sol:
         limit:
-          context: 400000
-          input: 272000
+          context: 1000000
+          input: 872000
           output: 128000
 
 model_pools:
@@ -409,8 +431,10 @@ chord auth codex
 要点：
 
 - 同时使用 API key 和 Codex OAuth 时，因为凭据和模型配额不同，应保留两个 provider，并分别配置模型限制。
-- GPT-5.4 使用 `1050000 / 950000 / 128000`，分别对应 1.05M 总窗口、Codex 的有效输入预算（约为窗口的 90%；Chord 每次请求还会把输入钳制到 `context - output` 以内）和模型最大输出。
-- `gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-5.6-luna` 都使用 `400000 / 272000 / 128000`。
+- GPT-5.4 使用 `1050000 / 950000 / 128000`，分别对应 1.05M 总窗口、Codex 的有效输入预算（约为窗口的 90%；显式声明的输入始终按原值使用，与 `output` 不满足加和关系时也不会被钳制到 `context - output` 以内）和模型最大输出。
+- `gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-5.6-luna` 都使用 `1000000 /
+  872000 / 128000`（Codex 订阅 2026-09 服务端档位；旧档位账号回落
+  `400000 / 272000 / 128000`）。
 - 这些数值跟随当前 Codex 模型目录，未来 Codex 版本可能调整。后端配额变化时，要同时更新三个字段。
 
 ## Anthropic Claude

@@ -786,22 +786,33 @@ type ModelLimit struct {
 	ContextDerived bool `json:"-" yaml:"-"`
 }
 
-// EffectiveInputBudget returns the input-side budget for request sizing and
-// automatic compaction. When limit.input is configured it is used, clamped so
-// input + effective requested output still fits inside limit.context; otherwise
-// the budget is derived as limit.context minus the effective requested output.
+// EffectiveInputBudget returns the input-side budget used for request sizing
+// and automatic compaction. An explicit limit.input is authoritative and used
+// as-is, even when it is not additive with limit.output inside the context
+// window: providers publish such non-additive caps (e.g. gpt-5.4's 950000
+// input in a 1050000 window), and clamping the declared value would compact
+// against a smaller budget than the model actually accepts. Without
+// limit.input the budget derives as limit.context minus the model's own
+// output cap (limit.output) — the provider-published input allocation, e.g.
+// the Codex 400000-window/128000-output pair yielding a 272000 input budget.
+// Only when limit.output is also unset does the reservation fall back to the
+// effective default output cap (the max_output_tokens setting, else
+// defaultOutputCap).
 func (l ModelLimit) EffectiveInputBudget(outputCapSetting, defaultOutputCap int) int {
-	outputBudget := l.EffectiveOutputBudget(outputCapSetting, defaultOutputCap)
-	if l.Input > 0 && (l.Context <= 0 || outputBudget <= 0 || l.Input <= l.Context-outputBudget) {
+	if l.Input > 0 {
 		return l.Input
 	}
 	if l.Context <= 0 {
 		return 0
 	}
-	if outputBudget <= 0 {
-		return l.Context
+	reserve := l.Output
+	if reserve <= 0 {
+		reserve = l.EffectiveOutputBudget(outputCapSetting, defaultOutputCap)
 	}
-	budget := l.Context - outputBudget
+	if reserve < 0 {
+		reserve = 0
+	}
+	budget := l.Context - reserve
 	if budget < 1 {
 		return 1
 	}

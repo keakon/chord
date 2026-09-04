@@ -141,9 +141,13 @@ maintained here).
 ```yaml
 model_templates:
   gpt-5.6-base: &gpt-5-6-base
+    # Codex subscription profile as of 2026-09: 872K input + 128K output = 1M
+    # (max_context_window=872000). Fall back to 400000/272000/128000 when
+    # your account/relay still serves the older profile; for the official
+    # OpenAI API use the full-window template below.
     limit:
-      context: 400000
-      input: 272000
+      context: 1000000
+      input: 872000
       output: 128000
     reasoning:
       effort: medium
@@ -261,13 +265,17 @@ providers:
 
 Notes:
 
-- The GPT-5.6 examples default to `400000 / 272000 / 128000`, which is safe
-  for Codex-backed accounts and common relays. Keep all three values unless
-  your upstream explicitly documents a different allocation.
+- The GPT-5.6 examples use `1000000 / 872000 / 128000` for Codex-backed
+  accounts and relays: the 2026-09 server catalog sets
+  `max_context_window = 872000`, and Codex counts context as input + output,
+  so 872K + 128K = 1M (the documented `model_context_window: 1000000`). If
+  your account/relay still serves the older profile, fall back to
+  `400000 / 272000 / 128000`.
 - For the official OpenAI API, or a gateway confirmed to expose the full API
-  window, change `context` to `1050000` and remove `input`. Chord will then
-  derive the usable input budget from the total context after reserving the
-  effective requested output. Do not keep `input: 272000`: above 272K is the
+  window, change `context` to `1050000` and remove `input`. Chord then derives
+  the usable input budget as `context` minus the model's `output` (128000 →
+  922000); the `64000` output-cap default is only reserved for models that
+  declare no `limit.output`. Do not keep `input: 272000`: above 272K is the
   long-context pricing threshold, not the full API input cap.
 - `gpt-5.6` currently resolves to Sol, so its `cost` block should match Sol pricing.
 - GPT-5.6 API reasoning efforts can include `none`, `low`, `medium`, `high`, `xhigh`, and `max`.
@@ -311,10 +319,12 @@ so compressing too eagerly can cost more than the tier it avoids.
 
 ##### Full API window (1.05M)
 
-Remove `input`; the usable input budget then derives from `context` minus the
-requested output cap — 986K under the default 64K output cap, 922K with
-`max_output_tokens: 128000`. The 272K pricing line is roughly 28–30% of that
-budget, which is why the cost-first answer sits in the 0.2 range, not a typo.
+Remove `input`; the usable input budget then derives as `context` minus the
+model's declared `limit.output` — 922K for the 1.05M/128K template below,
+regardless of the 64K default request-output cap (that default is reserved
+only when the model declares no `limit.output`). The 272K pricing line is
+roughly 29% of that budget, which is why the cost-first answer sits in the 0.2
+range, not a typo.
 
 Cost-first (Sol/Terra/Luna share this: it keeps usage under the 272K tier
 and below Luna's 256K+ collapse zone):
@@ -352,17 +362,38 @@ the long-context rate and some quality loss, and 0.8 (~738K–789K) even more
 so. Do not reuse the old 0.3 Luna recipe under this window: it fires at
 ~277K–296K, already past the pricing line.
 
-##### 272K-limited access (Codex / relay allocation)
+##### Codex subscription windows are server-controlled — verify before setting `limit.input`
 
-`limit.input: 272000` is the real input cap, thresholds are fractions of
-272K, and there is no long-context pricing tier to dodge — the relay or Codex
-price already covers the whole window. For Sol/Terra, 0.7 fires at ~190K and
-leaves ~82K of headroom for tool output and the asynchronous compaction
-window, which is reasonable; the global default 0.8 (~218K) works too. Luna
-has no published long-context measurements inside this window, so singling it
-out at 0.3 (~82K) has no evidence behind it: start from the same 0.7–0.8
-range and tune down only if you actually observe quality problems or oversize
-rejections.
+On a Codex subscription endpoint (`preset: codex`, or a `/codex/responses`
+relay), the window a ChatGPT account gets comes from the server-delivered
+model catalog (`context_window` / `max_context_window`). Codex counts context
+as *input + output*, so a `max_context_window` of 872000 is the raw input
+side of the 1M budget — 872K input + 128K output = 1M, which is exactly what
+the documented `model_context_window: 1000000` configuration asks for. The
+95% factor only turns that into a client-side usable-input figure (~828.4K),
+and Codex's own automatic compaction defaults to 90% of the resolved raw
+window (~784.8K); none of those is a total-window clamp.
+
+The catalog values have changed repeatedly and have differed between
+accounts: the input side long sat at 272K (the 400K allocation = 272K + 128K),
+expanded to a 872K maximum in mid-August 2026, and the server began
+delivering the expanded profile in early September 2026. Accounts can still
+lag, and `/status` may show the configured value before the first request and
+the real cap only after it. So:
+
+- Before setting `limit.input`, measure what the endpoint actually accepts:
+  configure the candidate value, run a long session, and watch the logs for
+  `context_length_exceeded` / oversize rejections.
+- On the subscription endpoint, `input: 872000` is the expanded 1M profile
+  (2026-09 state); fall back to `input: 272000` if your account/relay still
+  serves the older profile. `threshold` is decoupled from the window: it is
+  the fraction of the usable budget at which to compact, chosen by your
+  quality/cost tradeoff — but the API's >272K-input whole-request 2× pricing
+  cliff applies regardless of the window, so keep the trigger inside it if
+  that pricing applies to your route.
+- The 922K input cap (1.05M window − 128K output) applies only when hitting
+  the OpenAI API directly (`api.openai.com/v1/responses`); still leave
+  headroom for compaction and oversized single batches.
 
 As everywhere on this page, the `compaction` block lives on the model
 template so every provider referencing it inherits it, and the fields tune
@@ -382,7 +413,7 @@ The Codex GPT-5.x limits used in this section are:
 | --- | ---: | ---: | ---: |
 | GPT-5.4 | 1,050,000 | 950,000 | 128,000 |
 | GPT-5.5 | 400,000 | 272,000 | 128,000 |
-| GPT-5.6 Sol / Terra / Luna | 400,000 | 272,000 | 128,000 |
+| GPT-5.6 Sol / Terra / Luna | 1,000,000 | 872,000 | 128,000 |
 
 Keep all three fields: `context` is the total input-plus-output window exposed
 by Codex, while `input` and `output` are the separate hard allocations within
@@ -417,8 +448,8 @@ providers:
           output: 128000
       gpt-5.6-sol:
         limit:
-          context: 400000
-          input: 272000
+          context: 1000000
+          input: 872000
           output: 128000
 
 model_pools:
@@ -435,8 +466,13 @@ chord auth codex
 Notes:
 
 - Keep API-key and Codex OAuth providers separate when you use both because their credentials and model allocations differ.
-- GPT-5.4 uses `1050000 / 950000 / 128000`: the 1.05M total window, Codex's effective input budget (about 90% of the window; Chord additionally clamps input to `context - output` per request), and the model's maximum output.
-- Use `400000 / 272000 / 128000` for `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`.
+- GPT-5.4 uses `1050000 / 950000 / 128000`: the 1.05M total window, Codex's effective input budget (about 90% of the window; Chord uses the declared input as-is — like other published non-additive caps it is not clamped to `context - output`), and the model's maximum output.
+- GPT-5.6 Sol/Terra/Luna use the expanded Codex profile `1000000 / 872000 /
+  128000` (872K input + 128K output = 1M, matching the documented
+  `model_context_window: 1000000`; the API's `>272K` whole-request 2× pricing
+  cliff still applies if your route bills that way). If the server catalog for
+  your account/relay has not rolled out the expanded profile yet, fall back to
+  `400000 / 272000 / 128000`.
 - These values track the current Codex model catalog and may change with a future Codex release. Update all three fields together when the backend allocation changes.
 
 ## Anthropic Claude

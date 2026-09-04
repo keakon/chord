@@ -144,9 +144,11 @@ openai:
 - The conservative default is `400000 / 272000 / 128000`, which matches the
   Codex allocation and is suitable for many Codex-backed Responses relays. If
   your account or gateway explicitly supports the full 1.05M OpenAI API
-  window, change `context` to `1050000` and remove `input`; Chord will derive
-  the usable input budget after reserving the effective requested output.
-  Above 272K is then a pricing threshold, not an input cap.
+  window, change `context` to `1050000` and remove `input`; Chord then derives
+  the usable input budget as `context` minus the model's own `output` cap
+  (`1050000 − 128000 = 922000`), and reserves the default `64000` output cap
+  only for models that declare no `limit.output`. Above 272K is then a pricing
+  threshold, not an input cap.
 - Supported API reasoning efforts are `none`, `low`, `medium`, `high`, `xhigh`, and `max`; select a configured variant with a ref such as `openai/gpt-5.6@max`.
 - When reasoning is active, Responses defaults `reasoning.summary` to `auto`; set it to `none` to opt out explicitly. Chord does not currently expose GPT-5.6 `reasoning.mode: pro`.
 - `preset: codex` providers can also use `max` when the selected model/backend supports it. Whether a given effort level is accepted is model/provider-specific.
@@ -158,7 +160,7 @@ follow the gateway's published model catalog.
 Read model limits in this order:
 
 1. `limit.context` is the total window. For most models, input + requested output just needs to fit inside this number.
-2. `limit.input` is only needed when the provider also lists a separate input cap. Some GPT models work this way; if you omit it, Chord derives the usable input budget from `limit.context` after reserving effective requested output.
+2. `limit.input` is only needed when the provider also lists a separate input cap. Some GPT models work this way; if you omit it, Chord derives the usable input budget as `limit.context` minus the model's own `limit.output` (only a model declaring no output cap falls back to the global `max_output_tokens` default). A declared `limit.input` is always used as-is.
 3. `limit.output` is the model's own output capacity. Chord's default requested output cap (`max_output_tokens`) is `64000`, so real requests use `min(64000, limit.output)` before the available-context clamp. Set `max_output_tokens` explicitly to choose a different global cap. If a model's real output capacity is below `64000` and `limit.output` is omitted, backends that validate the requested `max_tokens` server-side will reject those requests — declare `limit.output` for such models, or lower the global `max_output_tokens`.
 
 The current GPT-5.6 Codex allocation is a 400K total window with a 272K input
@@ -635,12 +637,13 @@ Model field semantics:
 - `limit.context`: total request window when the provider publishes one. If it
   is omitted and both `limit.input` and `limit.output` are positive, Chord
   derives it as `input + output`; an explicit `context` always takes priority.
-- `limit.input`: independent input cap when published. If omitted, Chord derives
-  the prompt budget from `limit.context` minus the effective requested output.
-  When both are set and the published limits are not additive (`input + output`
-  exceeds `context`), Chord clamps the prompt budget to `limit.context` minus
-  the effective requested output, since the total window is what the provider
-  enforces per request.
+- `limit.input`: independent input cap when published. A declared value is
+  authoritative and used as-is, even when it is not additive with
+  `limit.output` inside the window — providers publish such caps (e.g.
+  gpt-5.4's 950000 input in a 1050000 window). If omitted, Chord derives the
+  prompt budget as `limit.context` minus the model's `limit.output`; only a
+  model declaring no output cap falls back to reserving the effective default
+  output cap (`max_output_tokens`, default `64000`).
 - `limit.output`: model output capacity. Runtime requests are also capped by the
   global `max_output_tokens` setting and remaining total-context space.
 - `reasoning.effort`: reasoning depth/budget. Chord normalizes whitespace and
@@ -1357,7 +1360,7 @@ cached-content APIs/usage fields, not from a Chord session id header.
 
 | Field             | Type   | Description                                                                                                            |
 | ----------------- | ------ | ---------------------------------------------------------------------------------------------------------------------- |
-| `limit.context`   | int    | Total request window in tokens when known. If `limit.input` is omitted, Chord derives the input budget from this minus effective requested output. |
+| `limit.context`   | int    | Total request window in tokens when known. If `limit.input` is omitted, Chord derives the input budget from this minus the model's `limit.output` (falling back to the `max_output_tokens` default when no output cap is declared). |
 | `limit.input`     | int    | Separate input cap when a provider publishes one. Chord uses it to compact or retry before the prompt is too large.               |
 | `limit.output`    | int    | Maximum output tokens; runtime is also clamped by `max_output_tokens`.                                                             |
 | `compaction`      | object | Per-model compaction overrides: `compaction.threshold` (auto-compaction usage ratio; `0` disables for this model) and `compaction.reminder` (pressure-reminder line; `0`/absent derives `min(0.60, threshold×0.90)`, `-1` disables the reminder only). Unset fields inherit the global `context.compaction.*`. Out-of-range values are rejected with a warning and inherit the global value. See [Context compaction](./context-management.md#context-compaction). |

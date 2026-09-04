@@ -383,16 +383,21 @@ func TestModelLimitEffectiveInputBudget(t *testing.T) {
 			want:             272000,
 		},
 		{
-			name:             "default output reserved from context",
+			// No limit.input: the derived budget reserves the model's own
+			// output cap (the provider-published input allocation), not the
+			// smaller global request-output default.
+			name:             "model output reserved from context",
 			limit:            ModelLimit{Context: 400000, Output: 128000},
 			outputCapSetting: 0,
-			want:             368000,
+			want:             272000,
 		},
 		{
-			name:             "configured output cap reserved from context",
+			// A declared limit.output is authoritative for the derivation even
+			// when a global output cap is configured below it.
+			name:             "model output reserved regardless of configured cap",
 			limit:            ModelLimit{Context: 400000, Output: 128000},
 			outputCapSetting: 8192,
-			want:             391808,
+			want:             272000,
 		},
 		{
 			name:             "model output cap bounds reservation",
@@ -402,27 +407,49 @@ func TestModelLimitEffectiveInputBudget(t *testing.T) {
 		},
 		{
 			// Non-additive published limits (gpt-5.4 shape): 950000 + 128000
-			// exceeds the 1050000 window, so the input budget is clamped to
-			// context minus the effective requested output.
-			name:             "explicit input clamped to context minus output",
+			// exceeds the 1050000 window. The explicit input is authoritative
+			// and is never clamped down to what fits additively.
+			name:             "explicit input trusted despite non-additive output",
 			limit:            ModelLimit{Context: 1050000, Input: 950000, Output: 128000},
 			outputCapSetting: 128000,
-			want:             922000,
+			want:             950000,
 		},
 		{
-			// A smaller requested output leaves room for the full input limit.
-			name:             "explicit input fits with small requested output",
+			name:             "explicit input wins regardless of configured cap",
 			limit:            ModelLimit{Context: 1050000, Input: 950000, Output: 128000},
 			outputCapSetting: 8192,
 			want:             950000,
 		},
 		{
-			// Degenerate configuration: output consumes the whole window; the
-			// clamp still returns a positive budget.
-			name:             "clamp floors at one token",
+			// No limit.output declared: the derivation falls back to the
+			// default output cap (the max_output_tokens setting, else the
+			// passed default).
+			name:             "default output fallback when model output unset",
+			limit:            ModelLimit{Context: 400000},
+			outputCapSetting: 0,
+			want:             368000,
+		},
+		{
+			name:             "configured output cap fallback when model output unset",
+			limit:            ModelLimit{Context: 400000},
+			outputCapSetting: 8192,
+			want:             391808,
+		},
+		{
+			// Degenerate configuration: the reservation exceeds the whole
+			// window; the budget still floors at one token.
+			name:             "floor at one token when reservation exceeds context",
+			limit:            ModelLimit{Context: 1000},
+			outputCapSetting: 0,
+			want:             1,
+		},
+		{
+			// Degenerate configuration: the explicit input exceeds the window;
+			// it is still used as-is.
+			name:             "explicit input trusted even beyond window",
 			limit:            ModelLimit{Context: 1000, Input: 900, Output: 1000},
 			outputCapSetting: 1000,
-			want:             1,
+			want:             900,
 		},
 	}
 
