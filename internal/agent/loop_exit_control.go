@@ -155,7 +155,7 @@ func doneAutoRejectionReasonLine(reason string) string {
 func (a *MainAgent) loopExitRejectionToolResult() string {
 	reasons := a.currentLoopContinuationReasons()
 	if len(reasons) == 0 {
-		return "Done rejected automatically: loop exit conditions are not satisfied yet. Finish the remaining work before calling Done again."
+		return "Done rejected automatically: loop exit conditions are not satisfied yet. Finish the remaining work before calling `done` again."
 	}
 	lines := make([]string, 0, len(reasons))
 	for _, reason := range reasons {
@@ -166,9 +166,9 @@ func (a *MainAgent) loopExitRejectionToolResult() string {
 		lines = append(lines, line)
 	}
 	if len(lines) == 0 {
-		return "Done rejected automatically: loop exit conditions are not satisfied yet. Finish the remaining work before calling Done again."
+		return "Done rejected automatically: loop exit conditions are not satisfied yet. Finish the remaining work before calling `done` again."
 	}
-	return "Done rejected automatically: loop exit conditions are not satisfied yet: " + strings.Join(lines, "; ") + ". Finish the remaining work before calling Done again."
+	return "Done rejected automatically: loop exit conditions are not satisfied yet: " + strings.Join(lines, "; ") + ". Finish the remaining work before calling `done` again."
 }
 
 func (a *MainAgent) loopExitInterceptLimitResult() string {

@@ -239,7 +239,7 @@ func duplicateTaskHandle(existing *DurableTaskRecord, conflict bool) tools.TaskH
 		Status:             "already_exists",
 		TaskID:             existing.TaskID,
 		AgentID:            existing.LatestInstanceID,
-		Message:            "matching task already exists; continue it with Notify instead of creating a duplicate delegate",
+		Message:            "matching task already exists; continue it with `" + tools.NameNotify + "` instead of creating a duplicate delegate",
 		PlanTaskRef:        existing.PlanTaskRef,
 		SemanticTaskKey:    existing.SemanticTaskKey,
 		ExpectedWriteScope: existing.ExpectedWriteScope,
@@ -481,12 +481,14 @@ func (a *MainAgent) handleAgentIdle(evt Event) {
 		a.queueLoopEvent(Event{Type: EventAgentError, SourceID: evt.SourceID, Payload: fmt.Errorf("SubAgent idle after %d nudges (timeout=%v each)", n, timeout)})
 		return
 	}
-	message := "You appear to be idle. If the task is complete, call Complete with a summary. "
+	// complete is always registered and never ruleset-filtered
+	// (isSubAgentInternalTool), so this nudge can name it unconditionally.
+	message := "You appear to be idle. If the task is complete, call " + toolPromptName(tools.NameComplete) + " with a summary. "
 	switch {
 	case sub.hasVisibleTool(tools.NameEscalate):
-		message += "If you need help, call Escalate. "
+		message += "If you need help, call " + toolPromptName(tools.NameEscalate) + ". "
 	case sub.hasVisibleTool(tools.NameNotify):
-		message += "If you need help or owner-agent input, use Notify because Escalate is unavailable in this role. "
+		message += "If you need help or owner-agent input, use " + toolPromptName(tools.NameNotify) + " because " + toolPromptName(tools.NameEscalate) + " is unavailable in this role. "
 	default:
 		message += "If you are blocked and no control tool is available, explain the blocker clearly in assistant text. "
 	}

@@ -20,8 +20,8 @@ func (a *MainAgent) primaryAgentCoordinationPromptBlock() string {
 // Delegation", so the Delegate tool description can defer to the surrounding
 // prompt in both roles without naming a role-specific section.
 func delegationStrategyPromptLines() string {
-	return "- For the same deliverable's follow-up, clarification, rework, added tests, added verification, or acceptance work, prefer Notify on the existing task instead of creating a new delegate.\n" +
-		"- For a genuinely new objective with low overlap and a separately trackable result, prefer a new Delegate instead of overloading an existing worker.\n" +
+	return "- For the same deliverable's follow-up, clarification, rework, added tests, added verification, or acceptance work, prefer " + toolPromptName(tools.NameNotify) + " on the existing task instead of creating a new delegate.\n" +
+		"- For a genuinely new objective with low overlap and a separately trackable result, prefer a new " + toolPromptName(tools.NameDelegate) + " instead of overloading an existing worker.\n" +
 		"- If continuity is stronger than independence, continue the existing task; if independence is stronger than continuity, create a new delegate.\n" +
 		"- Dispatch tasks in parallel only when their write scopes are clearly independent; do not run parallel SubAgents that may edit the same file or tightly coupled targets.\n"
 }
@@ -31,8 +31,9 @@ func (a *MainAgent) subAgentWorkflowPromptBlock() string {
 		return ""
 	}
 	agents := a.availableSubAgentsForPrompt()
+	delegate := toolPromptName(tools.NameDelegate)
 	var sb strings.Builder
-	sb.WriteString("## Available Agent Types (for Delegate tool)\n")
+	sb.WriteString("## Available Agent Types (for the " + delegate + " tool)\n")
 	for _, ac := range agents {
 		desc := ac.Description
 		if desc == "" {
@@ -57,17 +58,17 @@ func (a *MainAgent) subAgentWorkflowPromptBlock() string {
 		fmt.Fprintf(&sb, "- **%s**: %s\n", ac.Name, desc)
 	}
 	sb.WriteString("\n## SubAgent Workflow\n")
-	sb.WriteString("- The Delegate tool call returns immediately; MainAgent receives SubAgent progress and completion updates automatically through the runtime coordination flow (see the Delegate tool description for its call semantics).\n")
+	sb.WriteString("- The " + delegate + " tool call returns immediately; MainAgent receives SubAgent progress and completion updates automatically through the runtime coordination flow (see the " + delegate + " tool description for its call semantics).\n")
 	sb.WriteString(delegationStrategyPromptLines())
 	if a.compactContextVisible() {
 		// The compact_context tool exists only when it is visible and
 		// executable; without it this guidance has no referent (a denied or
 		// invisible tool must never be pushed onto the model as an option).
-		sb.WriteString("- For sub-tasks that can be described and executed independently with results the main thread can consume, prefer Delegate (SubAgent): the SubAgent runs in a fresh window and only the final result reaches the main thread, so its intermediate tool output never pollutes the main context. Use compact_context only when the main thread itself must keep reasoning across a wrapped-up phase and only its conclusions need to be preserved.\n")
+		sb.WriteString("- For sub-tasks that can be described and executed independently with results the main thread can consume, prefer " + delegate + " (SubAgent): the SubAgent runs in a fresh window and only the final result reaches the main thread, so its intermediate tool output never pollutes the main context. Use " + toolPromptName(tools.NameCompactContext) + " only when the main thread itself must keep reasoning across a wrapped-up phase and only its conclusions need to be preserved.\n")
 	}
 	sb.WriteString("- For implementation tasks, first dispatch all currently independent tasks whose write scopes are clearly disjoint.\n")
 	sb.WriteString("- After dispatching the current independent implementation tasks, if there is no new independent task to send, stop doing implementation work in MainAgent and wait for runtime coordination to deliver the next decision point.\n")
-	sb.WriteString("- Until you receive Escalate, Complete, or a clear error/blocked signal, do not take over implementation just because a SubAgent is briefly quiet, has not written files yet, or has not produced immediate visible output.\n")
+	sb.WriteString("- Until you receive an escalation, a completion, or a clear error/blocked signal from a worker, do not take over implementation just because a SubAgent is briefly quiet, has not written files yet, or has not produced immediate visible output.\n")
 	sb.WriteString("- You may dispatch multiple SubAgents in parallel or continue working on other non-implementation tasks while they run.\n")
 	return sb.String()
 }

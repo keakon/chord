@@ -226,7 +226,11 @@ func authorizationAndDecisionsPromptBlock(visible map[string]struct{}, audience 
 	} else if hasVisibleTool(visible, tools.NameQuestion) {
 		lines = append(lines, "- See Structured User Confirmation for when to use "+toolPromptName(tools.NameQuestion)+" versus plain assistant text.")
 	} else {
-		lines = append(lines, "- Ask the user for clarification when they need to choose between materially different options.")
+		// Without question, userConfirmationPromptBlock renders the
+		// Plain-Text User Confirmation section, which already states the
+		// threshold and the information standard; restating it here would give
+		// the same rule a second source that can drift.
+		lines = append(lines, "- See Plain-Text User Confirmation for how to raise a necessary user decision.")
 	}
 	return "## Authorization & Decisions\n" + strings.Join(lines, "\n")
 }

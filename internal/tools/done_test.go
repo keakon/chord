@@ -25,7 +25,7 @@ func TestDoneToolParameters(t *testing.T) {
 	}
 	for _, want := range []string{
 		"When the runtime explicitly requires this exceptional completion tool",
-		"Otherwise, do not call Done; return the result directly as assistant text",
+		"Otherwise, do not call `done`; return the result directly as assistant text",
 	} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("report description missing %q: %q", want, desc)
@@ -49,7 +49,7 @@ func TestDoneToolDescriptionUsesRequiredToolFallbackProtocol(t *testing.T) {
 		"Call this tool only when an explicit workflow instruction in the current conversation",
 		"designates it as the required completion signal; otherwise DO NOT call it",
 		"return the final answer directly as assistant text",
-		"Tool availability, completed work, or this tool's required report argument do not by themselves require a Done call",
+		"Tool availability, completed work, or this tool's required report argument do not by themselves require a `done` call",
 		"no other tool call is necessary or appropriate",
 	} {
 		if !strings.Contains(desc, want) {

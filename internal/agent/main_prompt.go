@@ -253,7 +253,7 @@ func hasEnabledLSPServers(globalCfg, projectCfg *config.Config) bool {
 }
 
 func (a *MainAgent) loopContinuationDecisionInstructionLine() string {
-	return "- Continue autonomously from the existing context. Request user input only when a real external decision is strictly required to proceed, and do not ask merely because the automatic " + tools.NameDone + " interception budget is low."
+	return "- Continue autonomously from the existing context. Request user input only when a real external decision is strictly required to proceed, and do not ask merely because the automatic " + toolPromptName(tools.NameDone) + " interception budget is low."
 }
 
 func (a *MainAgent) loopCompletionDecisionRequirementLine() string {

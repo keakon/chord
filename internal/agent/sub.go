@@ -1231,8 +1231,10 @@ func (s *SubAgent) hasVisibleTool(name string) bool {
 	return ok
 }
 
-func (s *SubAgent) subAgentCoordinationPromptBlock() string {
-	visible := s.visibleToolNames()
+// subAgentCoordinationPromptText is the single source for which control tool a
+// SubAgent uses to report progress, escalate, and close its task; the closure
+// block points here instead of restating the routing.
+func subAgentCoordinationPromptText(visible map[string]struct{}) string {
 	lines := []string{"## SubAgent Coordination"}
 	if hasVisibleTool(visible, tools.NameNotify) {
 		lines = append(lines, "- Use "+toolPromptName(tools.NameNotify)+" to surface progress, clarifications, or intermediate results that the owner agent should know before the task is finished")
@@ -1246,16 +1248,24 @@ func (s *SubAgent) subAgentCoordinationPromptBlock() string {
 	} else {
 		lines = append(lines, "- "+toolPromptName(tools.NameEscalate)+" is unavailable in this role; if you cannot proceed independently, explain the blocker clearly in assistant text and wait for owner follow-up")
 	}
+	// complete needs no visibility branch: isSubAgentInternalTool keeps it out
+	// of ruleset filtering and every SubAgent registers it, so a worker can
+	// always close its own lifecycle.
 	lines = append(lines, "- Call "+toolPromptName(tools.NameComplete)+" when the task is done; plain text alone does not mark the task complete")
 	return strings.Join(lines, "\n")
 }
 
-func (s *SubAgent) taskCompletionInstruction() string {
+// taskCompletionInstruction closes the "## Your Task" section. The escalation
+// path is resolved from the same visibility snapshot the coordination block
+// used, so the task instruction never tells a worker to call a control tool
+// this role does not expose. complete is exempt: it is always registered and
+// never ruleset-filtered (isSubAgentInternalTool).
+func taskCompletionInstruction(visible map[string]struct{}) string {
 	base := "Focus only on this task. Call " + toolPromptName(tools.NameComplete) + " when done."
 	switch {
-	case s.hasVisibleTool(tools.NameEscalate):
+	case hasVisibleTool(visible, tools.NameEscalate):
 		return base + " Call " + toolPromptName(tools.NameEscalate) + " if you are blocked."
-	case s.hasVisibleTool(tools.NameNotify):
+	case hasVisibleTool(visible, tools.NameNotify):
 		return base + " Use " + toolPromptName(tools.NameNotify) + " if you are blocked or need owner-agent input because " + toolPromptName(tools.NameEscalate) + " is unavailable in this role."
 	default:
 		return base + " If you are blocked and no control tool is available, explain the blocker clearly in assistant text and wait for owner follow-up."
@@ -1272,14 +1282,20 @@ func (s *SubAgent) taskCompletionInstruction() string {
 func (s *SubAgent) buildSystemPrompt() string {
 	var parts []string
 
-	parts = append(parts, subAgentIdentityPrompt, sharedAgentValuesPrompt, subAgentCodingGuidelinesPrompt, sharedReasoningDisciplinePrompt, s.subAgentCoordinationPromptBlock(), subAgentResponseClosurePrompt)
+	// One visibility snapshot feeds every block that names a control tool
+	// (coordination, capabilities, the task instruction). Separate snapshots
+	// could disagree and reintroduce "`notify` is unavailable in this role"
+	// next to "use `notify`"; the closure block names no control tool at all
+	// and points back at the coordination section instead.
+	visible := s.visibleToolNames()
+	parts = append(parts, subAgentIdentityPrompt, sharedAgentValuesPrompt, subAgentCodingGuidelinesPrompt, sharedReasoningDisciplinePrompt, subAgentCoordinationPromptText(visible), subAgentResponseClosurePrompt)
 	if s.customPrompt != "" {
 		parts = append(parts, s.customPrompt)
 	}
 	if block := s.delegationPromptBlock(); block != "" {
 		parts = append(parts, block)
 	}
-	if block := s.capabilityPromptBlock(); block != "" {
+	if block := s.capabilityPromptBlock(visible); block != "" {
 		parts = append(parts, block)
 	}
 
@@ -1289,7 +1305,7 @@ func (s *SubAgent) buildSystemPrompt() string {
 	// prefix-cacheable.
 
 	// Task description (core difference from MainAgent).
-	parts = append(parts, fmt.Sprintf("## Your Task\n\n%s\n\n%s", s.taskDesc, s.taskCompletionInstruction()))
+	parts = append(parts, fmt.Sprintf("## Your Task\n\n%s\n\n%s", s.taskDesc, taskCompletionInstruction(visible)))
 
 	if block := agentsMDReminderFramingPromptBlock(s.agentsMD); block != "" {
 		parts = append(parts, block)
@@ -1306,8 +1322,9 @@ func (s *SubAgent) buildSystemPrompt() string {
 	return strings.Join(parts, "\n\n---\n\n")
 }
 
-func (s *SubAgent) capabilityPromptBlock() string {
-	visible := toolNamesFromVisibleTools(s.filteredVisibleTools())
+// capabilityPromptBlock takes the caller's visibility snapshot so every block
+// in one system prompt describes the same tool surface.
+func (s *SubAgent) capabilityPromptBlock(visible map[string]struct{}) string {
 	return buildDynamicCapabilityPromptBlock(visible, s.ruleset, capabilityPromptAudienceSub)
 }
 

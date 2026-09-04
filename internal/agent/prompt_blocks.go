@@ -1,5 +1,7 @@
 package agent
 
+import "github.com/keakon/chord/internal/tools"
+
 // Prompt building blocks shared across main agents and subagents.
 const mainAgentIdentityPrompt = `You are an expert coding assistant. You help users with software development tasks.`
 
@@ -106,7 +108,8 @@ const mainAgentCommunicationPrompt = `## User Communication
 func mainAgentResponseClosurePromptText(doneVisible bool) string {
 	completionReportLine := "- Return that completion report directly in the final assistant response"
 	if doneVisible {
-		completionReportLine = "- By default, return that completion report directly in the final assistant response; call the Done tool only when an explicit workflow instruction in the conversation designates it as the required completion signal, never merely because work is complete or Done is available"
+		done := toolPromptName(tools.NameDone)
+		completionReportLine = "- By default, return that completion report directly in the final assistant response; call the " + done + " tool only when an explicit workflow instruction in the conversation designates it as the required completion signal, never merely because work is complete or " + done + " is available"
 	}
 	return `## Response Closure
 - Within a normal turn, continue until the current in-scope work package is finished, a real blocker appears, or a materially different user decision is required
@@ -117,9 +120,15 @@ func mainAgentResponseClosurePromptText(doneVisible bool) string {
 - After reporting completion, stop there; do not append routine in-scope follow-up work as an optional invitation`
 }
 
-const subAgentResponseClosurePrompt = `## SubAgent Task Closure
+// subAgentResponseClosurePrompt is the SubAgent Task Closure section. Which
+// control tool carries a blocker is owned by the SubAgent Coordination section
+// (single source, rendered from the live visibility snapshot), so this block
+// points at it instead of naming Escalate/Notify itself — naming them here
+// would reference tools this role may not have. complete needs no branch: it
+// is always registered and never ruleset-filtered (isSubAgentInternalTool).
+var subAgentResponseClosurePrompt = `## SubAgent Task Closure
 - Focus on finishing the assigned task or reaching a real blocker; do not stop at a partial summary when in-scope work still remains
 - If more in-scope, low-risk work remains, continue instead of presenting routine next steps as optional follow-up for the owner agent
-- If blocked, use the available control path (Escalate, Notify, or clear assistant-text fallback) rather than implying the task is complete
-- Call Complete only when the assigned task is actually done, and include the key result and verification status in that completion
+- If blocked, use the control path named in the SubAgent Coordination section rather than implying the task is complete
+- Call ` + toolPromptName(tools.NameComplete) + ` only when the assigned task is actually done, and include the key result and verification status in that completion
 - After reporting completion, stop there; do not append routine in-scope follow-up work as an optional invitation to the owner agent`

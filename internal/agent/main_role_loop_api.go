@@ -219,14 +219,15 @@ func (a *MainAgent) loopCompletionRequirementLines() []string {
 		lines = append(lines, "- No active subagents remain after all subagent work is done")
 	}
 	if a.hasOpenTodos() {
+		todoWrite := toolPromptName(tools.NameTodoWrite)
 		if a.hasTodoWriteAccess() {
-			lines = append(lines, "- Mark every remaining open TODO item completed or cancelled with TodoWrite before finishing:")
+			lines = append(lines, "- Mark every remaining open TODO item completed or cancelled with "+todoWrite+" before finishing:")
 			for _, line := range a.openTodoContinuationLines() {
 				lines = append(lines, "  "+line)
 			}
-			lines = append(lines, "- No open TODO items remain after that final TodoWrite sync")
+			lines = append(lines, "- No open TODO items remain after that final "+todoWrite+" sync")
 		} else {
-			lines = append(lines, "- The following open TODO items exist but TodoWrite is not available in this role; finish the remaining work they describe:")
+			lines = append(lines, "- The following open TODO items exist but "+todoWrite+" is not available in this role; finish the remaining work they describe:")
 			for _, line := range a.openTodoContinuationLines() {
 				lines = append(lines, "  "+line)
 			}

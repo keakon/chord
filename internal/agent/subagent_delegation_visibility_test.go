@@ -182,8 +182,8 @@ func TestSubAgentSystemPromptIncludesDelegationStrategyWhenNested(t *testing.T) 
 	prompt := sub.buildSystemPrompt()
 	for _, want := range []string{
 		"## Nested Delegation",
-		"prefer Notify on the existing task instead of creating a new delegate",
-		"prefer a new Delegate instead of overloading an existing worker",
+		"prefer `notify` on the existing task instead of creating a new delegate",
+		"prefer a new `delegate` instead of overloading an existing worker",
 		"Dispatch tasks in parallel only when their write scopes are clearly independent",
 	} {
 		if !strings.Contains(prompt, want) {

@@ -117,7 +117,7 @@ todo_write: allow
 	}
 	desc := tools.TodoWriteTool{}.Description()
 	for _, want := range []string{
-		"Before the final response — if you used TodoWrite, sync once more (all completed or cancelled)",
+		"Before the final response — if you used this tool, sync once more (all completed or cancelled)",
 		"do not finish with pending/in_progress items unless you say what is left and why",
 		"bug triage",
 		"multiple in_progress items are allowed when each maps to a distinct live workstream and has a unique active_form",
@@ -703,8 +703,8 @@ func TestMainAgentResponseClosurePrompt_RequiresContinueUnlessBlocked(t *testing
 		"A regular assistant response is not the end of the task when in-scope, low-risk work still remains; continue instead of stopping with a partial summary or optional offer",
 		"ask exactly the necessary high-context question instead of pretending the task is complete",
 		"By default, return that completion report directly in the final assistant response",
-		"call the Done tool only when an explicit workflow instruction in the conversation designates it as the required completion signal",
-		"never merely because work is complete or Done is available",
+		"call the `done` tool only when an explicit workflow instruction in the conversation designates it as the required completion signal",
+		"never merely because work is complete or `done` is available",
 		"After reporting completion, stop there; do not append routine in-scope follow-up work as an optional invitation",
 	} {
 		if !strings.Contains(got, want) {
@@ -837,7 +837,7 @@ func TestPrimaryAgentCoordinationPromptBlock_DependsOnVisibleTools(t *testing.T)
 	a.rebuildCachedSubAgents()
 	a.tools.Register(tools.NewDelegateTool(taskCreatorStub{agents: []tools.AgentInfo{{Name: "builder", Description: "General coding"}}}))
 	got = a.primaryAgentCoordinationPromptBlock()
-	if !strings.Contains(got, "## Available Agent Types (for Delegate tool)") {
+	if !strings.Contains(got, "## Available Agent Types (for the `delegate` tool)") {
 		t.Fatalf("expected Delegate block once Delegate is visible, got %q", got)
 	}
 }
@@ -857,13 +857,13 @@ delegate: allow
 
 	got := a.primaryAgentCoordinationPromptBlock()
 	for _, want := range []string{
-		"## Available Agent Types (for Delegate tool)",
+		"## Available Agent Types (for the `delegate` tool)",
 		"## SubAgent Workflow",
-		"prefer Notify on the existing task instead of creating a new delegate",
+		"prefer `notify` on the existing task instead of creating a new delegate",
 		"Dispatch tasks in parallel only when their write scopes are clearly independent",
 		"For implementation tasks, first dispatch all currently independent tasks whose write scopes are clearly disjoint",
 		"if there is no new independent task to send, stop doing implementation work in MainAgent",
-		"Until you receive Escalate, Complete, or a clear error/blocked signal, do not take over implementation just because a SubAgent is briefly quiet",
+		"Until you receive an escalation, a completion, or a clear error/blocked signal from a worker, do not take over implementation just because a SubAgent is briefly quiet",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected %q in subagent workflow block, got %q", want, got)
@@ -887,7 +887,7 @@ todo_write: allow
 	a.rebuildCachedSubAgents()
 
 	got := a.primaryAgentCoordinationPromptBlock()
-	if strings.Contains(got, "## Available Agent Types (for Delegate tool)") {
+	if strings.Contains(got, "## Available Agent Types (for the `delegate` tool)") {
 		t.Fatalf("did not expect agent types when Delegate is denied, got %q", got)
 	}
 	if strings.Contains(got, "## SubAgent Workflow") {
@@ -1100,7 +1100,7 @@ shell: allow
 		"Do not use `shell`, shell redirection, or inline scripts to simulate file edits, writes, or deletes.",
 		"## Authorization & Decisions",
 		"Execution authorization is handled by the permission system",
-		"Ask the user for clarification when they need to choose between materially different options.",
+		"See Plain-Text User Confirmation for how to raise a necessary user decision.",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("mainAgentCapabilityPromptBlock() missing %q in %q", want, got)
@@ -1312,8 +1312,10 @@ question: deny
 	if strings.Contains(got, "`question`") {
 		t.Fatalf("mainAgentCapabilityPromptBlock() should not mention hidden Question tool, got %q", got)
 	}
-	if !strings.Contains(got, "Ask the user for clarification when they need to choose between materially different options.") {
-		t.Fatalf("mainAgentCapabilityPromptBlock() missing generic clarification guidance, got %q", got)
+	// The threshold and information standard for a question live in Guidelines
+	// and the confirmation block; this block only routes to them.
+	if !strings.Contains(got, "See Plain-Text User Confirmation for how to raise a necessary user decision.") {
+		t.Fatalf("mainAgentCapabilityPromptBlock() missing plain-text confirmation routing, got %q", got)
 	}
 }
 
@@ -1573,7 +1575,7 @@ edit:
 	s := &SubAgent{tools: reg, ruleset: ruleset}
 
 	mainBlock := a.mainAgentCapabilityPromptBlock()
-	subBlock := s.capabilityPromptBlock()
+	subBlock := s.capabilityPromptBlock(s.visibleToolNames())
 	if !strings.Contains(mainBlock, "ask to adjust permissions, scope, or approach") {
 		t.Fatalf("main capability block missing user-facing escalation wording: %q", mainBlock)
 	}
@@ -1596,7 +1598,7 @@ notify: allow
 `)
 	ruleset = permission.ParsePermission(&permNode)
 	s = &SubAgent{tools: reg, ruleset: ruleset}
-	subBlock = s.capabilityPromptBlock()
+	subBlock = s.capabilityPromptBlock(s.visibleToolNames())
 	if !strings.Contains(subBlock, "Use `notify` to surface materially different decisions or owner-agent intervention because `escalate` is unavailable") {
 		t.Fatalf("sub capability block should fall back to Notify when Escalate is unavailable, got %q", subBlock)
 	}

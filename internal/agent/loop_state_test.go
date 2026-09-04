@@ -778,7 +778,7 @@ done: allow
 			if !ok || result.CallID != firstCallID || result.Name != tools.NameDone {
 				continue
 			}
-			want := "Done rejected: only one Done call can be handled in a batch; keep a single final Done call after the remaining tool work is complete."
+			want := "Done rejected: only one `done` call can be handled in a batch; keep a single final `done` call after the remaining tool work is complete."
 			if result.Result != want {
 				t.Fatalf("ToolResultEvent.Result = %q, want %q", result.Result, want)
 			}
@@ -2049,8 +2049,8 @@ func TestLoopAnchorOmitsTodoRequirementWhenNoOpenTodos(t *testing.T) {
 	if strings.Contains(found.Content, "No open TODO items remain") {
 		t.Fatalf("loop notice should NOT contain 'No open TODO items remain' when no TODOs exist, got: %q", found.Content)
 	}
-	if strings.Contains(found.Content, "TodoWrite") {
-		t.Fatalf("loop notice should NOT contain 'TodoWrite' when no TODOs exist, got: %q", found.Content)
+	if strings.Contains(found.Content, tools.NameTodoWrite) {
+		t.Fatalf("loop notice should NOT contain %q when no TODOs exist, got: %q", tools.NameTodoWrite, found.Content)
 	}
 }
 
@@ -2073,8 +2073,8 @@ func TestLoopAnchorIncludesTodoRequirementWhenOpenTodosWithTodoWrite(t *testing.
 	if !strings.Contains(found.Content, "No open TODO items remain") {
 		t.Fatalf("loop notice should contain 'No open TODO items remain' when TODOs exist and TodoWrite is available, got: %q", found.Content)
 	}
-	if !strings.Contains(found.Content, "TodoWrite") {
-		t.Fatalf("loop notice should contain 'TodoWrite' when TODOs exist and TodoWrite is available, got: %q", found.Content)
+	if !strings.Contains(found.Content, tools.NameTodoWrite) {
+		t.Fatalf("loop notice should name %q when TODOs exist and it is available, got: %q", tools.NameTodoWrite, found.Content)
 	}
 	if !strings.Contains(found.Content, "Open TODO items:") {
 		t.Fatalf("loop notice should list open TODOs section when TODOs exist, got: %q", found.Content)
@@ -2097,11 +2097,11 @@ func TestLoopAnchorIncludesTodoRequirementWhenOpenTodosWithoutTodoWrite(t *testi
 	if found == nil {
 		t.Fatal("expected persisted loop notice message")
 	}
-	if strings.Contains(found.Content, "Mark every remaining open TODO item completed or cancelled with TodoWrite") {
-		t.Fatalf("loop notice should NOT instruct model to use TodoWrite when the tool is unavailable, got: %q", found.Content)
+	if strings.Contains(found.Content, "Mark every remaining open TODO item completed or cancelled with `"+tools.NameTodoWrite+"`") {
+		t.Fatalf("loop notice should NOT instruct model to use %q when the tool is unavailable, got: %q", tools.NameTodoWrite, found.Content)
 	}
-	if !strings.Contains(found.Content, "TodoWrite is not available") {
-		t.Fatalf("loop notice should explain TodoWrite is unavailable, got: %q", found.Content)
+	if !strings.Contains(found.Content, "`"+tools.NameTodoWrite+"` is not available") {
+		t.Fatalf("loop notice should explain %q is unavailable, got: %q", tools.NameTodoWrite, found.Content)
 	}
 	if !strings.Contains(found.Content, "finish the remaining work") {
 		t.Fatalf("loop notice should instruct to finish remaining work, got: %q", found.Content)
@@ -2124,8 +2124,8 @@ func TestLoopContinuationOmitsTodoRequirementWhenNoOpenTodos(t *testing.T) {
 	if strings.Contains(note.Text, "No open TODO items remain") {
 		t.Fatalf("LOOP CONTINUE should NOT contain 'No open TODO items remain' when no TODOs exist, got: %q", note.Text)
 	}
-	if strings.Contains(note.Text, "TodoWrite") {
-		t.Fatalf("LOOP CONTINUE should NOT contain 'TodoWrite' when no TODOs exist, got: %q", note.Text)
+	if strings.Contains(note.Text, tools.NameTodoWrite) {
+		t.Fatalf("LOOP CONTINUE should NOT contain %q when no TODOs exist, got: %q", tools.NameTodoWrite, note.Text)
 	}
 }
 
@@ -2141,8 +2141,8 @@ func TestLoopContinuationIncludesTodoRequirementWhenOpenTodosWithTodoWrite(t *te
 	if !strings.Contains(note.Text, "No open TODO items remain") {
 		t.Fatalf("LOOP CONTINUE should contain 'No open TODO items remain' when TODOs exist and TodoWrite is available, got: %q", note.Text)
 	}
-	if !strings.Contains(note.Text, "TodoWrite") {
-		t.Fatalf("LOOP CONTINUE should contain 'TodoWrite' when TODOs exist and TodoWrite is available, got: %q", note.Text)
+	if !strings.Contains(note.Text, tools.NameTodoWrite) {
+		t.Fatalf("LOOP CONTINUE should name %q when TODOs exist and it is available, got: %q", tools.NameTodoWrite, note.Text)
 	}
 }
 
@@ -2155,8 +2155,8 @@ func TestLoopContinuationIncludesTodoRequirementWhenOpenTodosWithoutTodoWrite(t 
 	if note == nil {
 		t.Fatal("expected continuation note")
 	}
-	if strings.Contains(note.Text, "Mark every remaining open TODO item completed or cancelled with TodoWrite") {
-		t.Fatalf("LOOP CONTINUE should NOT tell model to use TodoWrite when the tool is unavailable, got: %q", note.Text)
+	if strings.Contains(note.Text, "Mark every remaining open TODO item completed or cancelled with `"+tools.NameTodoWrite+"`") {
+		t.Fatalf("LOOP CONTINUE should NOT tell model to use %q when the tool is unavailable, got: %q", tools.NameTodoWrite, note.Text)
 	}
 	if !strings.Contains(note.Text, "Open TODO items:") {
 		t.Fatalf("LOOP CONTINUE should list open TODOs even when TodoWrite is unavailable, got: %q", note.Text)
@@ -2351,7 +2351,7 @@ func TestLoopExitRejectionToolResultUsesHumanReadableReasons(t *testing.T) {
 		"Done rejected automatically: loop exit conditions are not satisfied yet:",
 		"open TODO items remain",
 		"active subagents are still running",
-		"Finish the remaining work before calling Done again.",
+		"Finish the remaining work before calling `done` again.",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("loopExitRejectionToolResult() = %q, want substring %q", got, want)
