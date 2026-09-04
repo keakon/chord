@@ -106,8 +106,7 @@ providers:
     models:
       gpt-5.6:
         limit:
-          context: 400000
-          input: 272000
+          context: 1050000
           output: 128000
         reasoning:
           effort: medium
@@ -141,14 +140,18 @@ openai:
 ```
 
 - Replace both `gpt-5.6` occurrences with `gpt-5.6-sol`, `gpt-5.6-terra`, or `gpt-5.6-luna` to pin an explicit model ID.
-- The conservative default is `400000 / 272000 / 128000`, which matches the
-  Codex allocation and is suitable for many Codex-backed Responses relays. If
-  your account or gateway explicitly supports the full 1.05M OpenAI API
-  window, change `context` to `1050000` and remove `input`; Chord then derives
-  the usable input budget as `context` minus the model's own `output` cap
-  (`1050000 − 128000 = 922000`), and reserves the default `64000` output cap
-  only for models that declare no `limit.output`. Above 272K is then a pricing
-  threshold, not an input cap.
+- This snippet targets the **official OpenAI API**, so it declares the full
+  `1050000` window with no `input`: Chord then derives the usable input budget
+  as `context` minus the model's own `output` cap (`1050000 − 128000 = 922000`),
+  and reserves the default `64000` output cap only for models that declare no
+  `limit.output`. Above 272K is a pricing threshold here, not an input cap, so
+  do not add `input: 272000`.
+- A Codex-backed provider is a different allocation: `preset: codex` and most
+  Codex-backed Responses relays serve `1000000 / 872000 / 128000`
+  (872K input + 128K output = 1M), falling back to `400000 / 272000 / 128000`
+  on the older profile. Do not copy this API snippet's window onto a Codex
+  provider — see [Model configuration recipes](./model-configs.md#gpt-56-alias-gpt-56--sol)
+  for the Codex-profile examples and the reasoning behind both numbers.
 - Supported API reasoning efforts are `none`, `low`, `medium`, `high`, `xhigh`, and `max`; select a configured variant with a ref such as `openai/gpt-5.6@max`.
 - When reasoning is active, Responses defaults `reasoning.summary` to `auto`; set it to `none` to opt out explicitly. Chord does not currently expose GPT-5.6 `reasoning.mode: pro`.
 - `preset: codex` providers can also use `max` when the selected model/backend supports it. Whether a given effort level is accepted is model/provider-specific.
@@ -211,14 +214,15 @@ providers:
           output: 128000
       gpt-5.6-sol:
         limit:
-          context: 400000
-          input: 272000
+          context: 1000000
+          input: 872000
           output: 128000
 ```
 
 GPT-5.4 uses `1050000 / 950000 / 128000`. GPT-5.5 uses `400000 / 272000 / 128000`;
-GPT-5.6 Sol, Terra, and Luna use `400000 / 272000 / 128000` (`context / input /
-output`). See [Model configuration recipes](./model-configs.md#codex-oauth-preset)
+GPT-5.6 Sol, Terra, and Luna use `1000000 / 872000 / 128000` (`context / input /
+output`), falling back to `400000 / 272000 / 128000` when the account or relay
+still serves the older Codex profile. See [Model configuration recipes](./model-configs.md#codex-oauth-preset)
 for complete examples.
 
 `preset: codex` can use OpenAI / ChatGPT OAuth credentials from `auth.yaml`. OAuth entries are mappings:
@@ -1293,7 +1297,9 @@ The full top-level keys of `config.yaml` (both global `~/.config/chord/config.ya
 Chord automatically propagates the current Chord session id to OpenAI-family
 providers as cache/routing affinity metadata: OpenAI Responses requests include
 `prompt_cache_key`, and OpenAI Chat Completions / Responses HTTP requests include
-`X-Session-Id` and `session-id` headers when a session id is available. These
+`X-Session-Id` and `session-id` headers when a session id is available. The key is per client rather than per provider: the main agent uses the current
+Chord session id, and each SubAgent derives its own `<session>:sub:<instanceID>`
+key so one agent's requests never inherit another's cache identity. These
 fields are not user-configurable; they follow the active Chord session and are
 cleared or changed on session switch/resume. Anthropic prompt caching is driven
 by `cache_control` blocks, and Chord also sends JSON-formatted

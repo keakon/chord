@@ -34,10 +34,12 @@ Use this page when you already know which provider/model family you want and jus
 
 ## OpenAI Responses-compatible: GPT-5.4 / GPT-5.5 / GPT-5.6
 
-The GPT-5.6 snippets use the conservative Codex/common-relay allocation by
-default (`400000` context / `272000` input / `128000` output), because many
-Responses relays expose Codex-backed limits rather than the full OpenAI API
-window. If your account or gateway explicitly supports the full GPT-5.6 API
+The GPT-5.6 snippets use the Codex-backed allocation by default
+(`1000000` context / `872000` input / `128000` output — the 2026-09 server
+catalog, where 872K input + 128K output = 1M), because many Responses relays
+expose Codex-backed limits rather than the full OpenAI API window. Fall back to
+`400000 / 272000 / 128000` when your account or relay still serves the older
+profile. If your account or gateway explicitly supports the full GPT-5.6 API
 window, the notes below show how to opt in to 1.05M context manually. The cost
 blocks use OpenAI API pricing; override them when your relay charges different
 rates. Codex OAuth has a separate preset block below. Pair API-key providers

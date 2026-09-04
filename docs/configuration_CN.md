@@ -99,8 +99,7 @@ providers:
     models:
       gpt-5.6:
         limit:
-          context: 400000
-          input: 272000
+          context: 1050000
           output: 128000
         reasoning:
           effort: medium
@@ -134,12 +133,16 @@ openai:
 ```
 
 - 如需固定模型 ID，把配置中的两处 `gpt-5.6` 同时替换为 `gpt-5.6-sol`、`gpt-5.6-terra` 或 `gpt-5.6-luna`。
-- 保守默认值为 `400000 / 272000 / 128000`，与 Codex 配额一致，也适合许多
-  基于 Codex 的 Responses 中转。如果账号或网关明确支持完整的 1.05M OpenAI
-  API 窗口，把 `context` 改成 `1050000` 并删除 `input`；Chord 按 `context`
-  减去模型声明的 `limit.output` 推导可用输入预算（此处为 `1050000 - 128000
-  = 922000`）。只有未声明 `limit.output` 的模型才回退到默认输出上限
-  （`64000`）。此时超过 272K 是计价阈值，不是输入上限。
+- 这份片段面向**官方 OpenAI API**，因此直接声明 `1050000` 全窗口且不写
+  `input`：Chord 按 `context` 减去模型声明的 `limit.output` 推导可用输入预算
+  （此处为 `1050000 - 128000 = 922000`）；只有未声明 `limit.output` 的模型才回退到
+  默认输出上限（`64000`）。这里超过 272K 是计价阈值，不是输入上限，因此**不要**
+  再补 `input: 272000`。
+- Codex 通道是另一套档位：`preset: codex` 以及大多数基于 Codex 的 Responses 中转
+  提供 `1000000 / 872000 / 128000`（872K 输入 + 128K 输出 = 1M），旧档位账号回落
+  `400000 / 272000 / 128000`。不要把这份 API 片段的窗口照抄到 Codex provider 上——
+  Codex 档位的示例与两组数字的由来见
+  [模型配置速查](./model-configs_CN.md#gpt-56-aliasgpt-56--sol)。
 - API 支持的 reasoning effort 为 `none`、`low`、`medium`、`high`、`xhigh`、`max`；可用 `openai/gpt-5.6@max` 这样的 ref 选择已配置 variant。
 - Responses 在启用 reasoning 时默认使用 `reasoning.summary: auto`；如需明确关闭，请配置为 `none`。Chord 当前尚未暴露 GPT-5.6 的 `reasoning.mode: pro`。
 - `preset: codex` provider 也可以使用 `max`；是否接受该 effort 由具体模型 / 后端决定。
@@ -202,14 +205,15 @@ providers:
           output: 128000
       gpt-5.6-sol:
         limit:
-          context: 400000
-          input: 272000
+          context: 1000000
+          input: 872000
           output: 128000
 ```
 
 GPT-5.4 使用 `1050000 / 950000 / 128000`；GPT-5.5 使用
 `400000 / 272000 / 128000`；GPT-5.6 Sol、Terra、Luna 使用
-`400000 / 272000 / 128000`（依次为 `context / input / output`）。完整示例见
+`1000000 / 872000 / 128000`（依次为 `context / input / output`），账号或中转
+仍是旧 Codex 档位时回落 `400000 / 272000 / 128000`。完整示例见
 [模型配置速查](./model-configs_CN.md#codex-oauth-preset)。
 
 `preset: codex` 可使用 `auth.yaml` 中的 OpenAI / ChatGPT OAuth 凭据。OAuth 条目通常是 mapping：
@@ -1161,7 +1165,7 @@ chord doctor models --pool thinking
 
 ### Provider 字段参考
 
-Chord 会把当前 Chord session id 自动传给 OpenAI 系 provider，作为缓存 / 路由亲和元数据：OpenAI Responses 请求会包含 `prompt_cache_key`，OpenAI Chat Completions / Responses HTTP 请求会在有 session id 时包含 `X-Session-Id` 和 `session-id` header。这些字段不能手动配置，会随当前 Chord session 自动切换 / 恢复。Anthropic prompt caching 由 `cache_control` block 驱动；Chord 还会自动发送 JSON 格式的 `metadata.user_id`，其中包含稳定匿名的 `device_id`，以及由本地 / provider 身份派生出的稳定路由 `session_id`。这些 Anthropic metadata 字段不能手动配置。在 `explicit` 模式（Anthropic 模型默认）下，Chord 按优先级放置最多 4 个 `cache_control` 断点：最后一个 system block、冻结的已剪裁前缀边界（当渐进式剪裁已冻结稳定前缀时）、最新的持久化消息、最后一条 assistant 消息——使长 agent loop 能复用冻结的历史前缀，而不是每轮重新写入移动的尾部。最新断点会刻意跳过 request-scoped overlay（追加在对话尾部的运行时提示），因为这些内容在下一次请求中就不存在了，写在它们之后的缓存条目永远不可能被读回。
+Chord 会把当前 Chord session id 自动传给 OpenAI 系 provider，作为缓存 / 路由亲和元数据：OpenAI Responses 请求会包含 `prompt_cache_key`，OpenAI Chat Completions / Responses HTTP 请求会在有 session id 时包含 `X-Session-Id` 和 `session-id` header。该 key 按 client 而非 provider 隔离：main agent 用当前 Chord session id，每个 SubAgent 另行派生 `<session>:sub:<instanceID>` 形式的 key，因此一个 agent 的请求不会继承另一个的缓存身份。这些字段不能手动配置，会随当前 Chord session 自动切换 / 恢复。Anthropic prompt caching 由 `cache_control` block 驱动；Chord 还会自动发送 JSON 格式的 `metadata.user_id`，其中包含稳定匿名的 `device_id`，以及由本地 / provider 身份派生出的稳定路由 `session_id`。这些 Anthropic metadata 字段不能手动配置。在 `explicit` 模式（Anthropic 模型默认）下，Chord 按优先级放置最多 4 个 `cache_control` 断点：最后一个 system block、冻结的已剪裁前缀边界（当渐进式剪裁已冻结稳定前缀时）、最新的持久化消息、最后一条 assistant 消息——使长 agent loop 能复用冻结的历史前缀，而不是每轮重新写入移动的尾部。最新断点会刻意跳过 request-scoped overlay（追加在对话尾部的运行时提示），因为这些内容在下一次请求中就不存在了，写在它们之后的缓存条目永远不可能被读回。
 
 对于 Anthropic 模型，`prompt_cache.ttl` 接受 `5m`（省略时的默认值）和 `1h`，且在 `auto` 与 `explicit` 两种模式下都会应用到 Chord 放置的每一个断点：
 

@@ -26,7 +26,7 @@ gpt-4/4o、gpt-3.5 和 o 系列家族**不是**补丁原生：`apply_patch` 工�
 
 ### Freeform（custom tool）发射
 
-在 OpenAI 兼容的 **Responses** 端点上，gpt-5 及之后家族或 `codex-auto-review` 模型还会把 `apply_patch` 作为 **freeform custom tool**（`type: "custom"` 携带 Lark grammar）发射，而不是 JSON function tool。Chord 会把 grammar 放进请求的 `format.definition` 字段；服务端支持约束解码时，它会在模型生成过程中限制补丁的协议结构，而不只是影响客户端解析。当前 grammar 与 Codex 的定义保持一致，要求至少一个文件操作、非空新增文件和合法的补丁行结构。客户端仍会用自己的解析器和执行器再次校验，因此未携带 grammar、被网关改写或来自历史会话的响应仍可走兼容兜底；grammar 不负责判断上下文是否来自最新文件，也不保证修改符合用户意图。其他模型一律收到 JSON function 形态；非 Responses 端点没有 custom tool 类型，一律使用 function 形态。
+在 OpenAI 兼容的 **Responses** 端点上，gpt-5 及之后家族或 `codex-auto-review` 模型还会把 `apply_patch` 作为 **freeform custom tool**（`type: "custom"` 携带 Lark grammar）发射，而不是 JSON function tool。Chord 会把 grammar 放进请求的 `format.definition` 字段；服务端支持约束解码时，它会在模型生成过程中限制补丁的协议结构，而不只是影响客户端解析。当前 grammar 与 Codex 的定义保持一致，要求至少一个文件操作、非空新增文件和合法的补丁行结构。客户端仍会用自己的解析器和执行器再次校验，因此未受约束的响应——未携带 grammar、被网关改写，或服务端并未执行约束——仍可走兼容兜底；grammar 不负责判断上下文是否来自最新文件，也不保证修改符合用户意图。其他模型一律收到 JSON function 形态；非 Responses 端点没有 custom tool 类型，一律使用 function 形态。
 
 接受 Responses 请求但拒绝 custom tool 的主机没有内置例外：那里的补丁原生模型默认会发射 freeform 形态，网关会报出带操作指引的错误。这类主机请设置 `compat.apply_patch.freeform: false` 强制使用 JSON function 形态。
 

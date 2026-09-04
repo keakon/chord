@@ -98,7 +98,7 @@ providers:
 设置 `context.compaction.model_driven: true` 后，主 agent 获得 `compact_context` 工具。注册该工具是启用功能的一部分：仅含通配符的权限规则（例如 allowlist 式的 `"*": deny` 加少量显式放行的工具）不会隐藏或拦截它——只有匹配 `compact_context` 的非全局工具规则仍然生效（`deny` 会移除工具并给出一次性诊断，`ask` 保留工具但每次调用需确认，`allow` 与默认一致）。像 `compact_*` 这样的窄匹配也算匹配规则。即使角色的 allowlist 没有放行任何文件工具，模型仍可把状态完整写进结构化参数来完成 checkpoint。模型在状态充分外化后单独调用它（同一响应里不能有其他工具调用）——后续需要的事实要么写在 `state_files` 指出的文件里，要么完整表达在 `active_objective` / `completed` / `decisions` / `open_issues` / `next_step` 结构化参数中。runtime 校验请求，等工具批次收口后：
 
 1. 快照对话并归档 head（不调用摘要模型，checkpoint 由确定性构造）；
-2. 当预计收益低于保守门槛（2048 tokens 且占 prepared surface 的 10%，可缓存会话还会扣除 prompt-cache 重写成本）时拒绝 reset；距上次成功 apply 不足 3 个主模型请求批次时同样会跳过；
+2. 当预计收益低于保守门槛（2048 tokens 且占 prepared surface 的 10%）时拒绝 reset；距上次成功 apply 不足 3 个主模型请求批次时同样会跳过；
 3. 原子应用 checkpoint，快照后追加的内容作为 live tail 保留，并在压缩后的上下文上继续同一 turn。
 
 自动压缩不会把模型的 checkpoint 锁死。当 usage-driven 压缩已在运行（threshold 越线启动了后台 worker，或 draft 已 ready、正在等 continuation barrier）时，与它并行的那次请求仍可提交 `compact_context`。模型是自己挑的边界，所以它的 checkpoint 优先：runtime 丢弃自动 draft，改应用模型 checkpoint。自动压缩是兜底而不是锁——threshold 越线不会夺走正在收尾的模型的 reset 机会。一次性外化提示不会提及这种覆盖（模型不需要知道有自动压缩在跑，只需要知道当前上下文即将结束）；模型之前主动提交的 checkpoint 照常工作。

@@ -28,9 +28,10 @@
 
 ## OpenAI Responses 兼容接口：GPT-5.4 / GPT-5.5 / GPT-5.6
 
-GPT-5.6 片段默认使用保守的 Codex / 常见中转配额（`400000` context /
-`272000` input / `128000` output），因为许多 Responses 中转开放的是
-Codex 受限窗口，而不是完整的 OpenAI API 窗口。如果账号或网关明确支持
+GPT-5.6 片段默认使用 Codex 档位配额（`1000000` context / `872000` input /
+`128000` output——2026-09 服务端档位，872K 输入 + 128K 输出 = 1M），因为许多
+Responses 中转开放的是 Codex 受限窗口，而不是完整的 OpenAI API 窗口。账号或
+中转若仍是旧档位，回落 `400000 / 272000 / 128000`。如果账号或网关明确支持
 GPT-5.6 完整 API 窗口，可按下方说明手动启用 1.05M 上下文。价格块使用
 OpenAI API 费率；中转收费不同时需要自行覆盖。Codex OAuth 使用下方单独的
 preset 配置。使用 API key 的 provider 需要在
@@ -746,6 +747,26 @@ model_pools:
   `enabled`（无法关闭思考），chat 模板已配置好。第三方中转可能只实现了
   旧的仅 URL 形式 `file_url`，依赖 Base64 `file_data` 前先确认中转支持。
 
+#### GLM-5.x 的压缩调优
+
+GLM-5.2/5.3 标称 1M 窗口，但独立的长上下文评测把 GLM/Qwen 这一类开放权重
+模型的可靠工作窗口放在 200K–256K 左右（大约是标称 1M 的 20–25%）。如果你在
+GLM 上跑长探索型会话，请在可用预算的四分之一附近压缩：
+
+```yaml
+# 给你已经在用的 glm 模板（glm-5.2-chat / glm-5.2-messages /
+# glm-5.3-chat ...）加上 compaction；引用该模板的模型条目全部继承。
+model_templates:
+  glm-5.2-chat: &glm-5-2-chat
+    limit: {context: 1000000, output: 128000}
+    compaction: {threshold: 0.25, reminder: 0.2}
+```
+
+上面的配方里 GLM-5.2 由多个 provider 提供（`bigmodel` chat、
+`bigmodel-messages`、`glm-responses`）；每个引用该模板的模型条目都会拿到同一份
+`compaction`。如果你的工作负载本来就短，省略 `compaction` 块、让模型用全局
+默认即可。
+
 ## DeepSeek V4（Flash / Pro）
 
 在 `~/.config/chord/auth.yaml` 中配置：
@@ -973,6 +994,28 @@ providers:
 `file_id`。[`view_image`](./tools_CN.md) 工具能把本地图片加载进上下文，但只有
 把这个模型放在 `messages` 或 `responses` provider 的池首才行：
 `chat-completions`（`deepseek`）provider 能在用户消息里收图，却无法在 tool result 里返回图片。
+
+#### DeepSeek V4 的压缩调优
+
+DeepSeek V4 Pro/Flash 标称 1M 窗口，但 MLA 架构在长距离上退化明显：独立的
+multi-needle 评测中 V4 Pro 在 1M 处只有约 41%（8-needle），而单 needle 约
+78%——这种陡降和 Gemini 的悬崖如出一辙。在 1M 窗口上，可靠工作窗口大约
+200K。V4 即使全部缓存未命中也远比同级模型便宜，因此频繁压缩的代价比在高端
+模型上低得多——尽早压、多压几次：
+
+```yaml
+# 上面的配方里 deepseek-v4-chat / deepseek-v4-messages /
+# deepseek-v4-responses 已经共用同一个基模板；把 compaction 加在共享模板上，
+# 每个 deepseek-v4-pro / deepseek-v4-flash 条目都会继承。
+model_templates:
+  deepseek-v4-chat: &deepseek-v4-chat
+    limit: {context: 1000000, output: 128000}
+    compaction: {threshold: 0.25, reminder: 0.2}
+```
+
+DeepSeek 的缓存命中价是业界最低的（$0.0036/M），因此一次能保住可缓存前缀的
+压缩，在重复读取场景下几乎是免费的。短的交互式会话保持全局默认即可，只有真正
+跑长时间 agentic 任务时才需要单独给模型条目调参。
 
 ## Qwen 保留历史思考
 
