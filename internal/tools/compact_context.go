@@ -29,17 +29,14 @@ type CompactContextArgs struct {
 // accounting convention as other context-pressure decisions.
 type TokenEstimator func(text string) int
 
-// Per-field rune caps are only a cheap prefilter; the aggregated
-// estimated-token budget (ContinuationStateMaxTokens) is the authoritative
-// constraint. They are tightened so an all-ASCII worst case that fills every
-// field to its cap still fits a 4096-token budget (~10.2k chars ≈ 3.4k tokens
-// at the len/3 fallback), keeping the budget the binding limit instead of the
-// schema. The caps and the schema in Parameters() must stay in sync.
-const (
-	compactContextObjectiveMaxRunes = 600 // active_objective / next_step
-	compactContextItemMaxRunes      = 250 // completed / decisions / open_issues items
-	compactContextStateFileMaxRunes = 128
-)
+// The continuation state has no per-field or per-item character caps: a
+// dense single item (e.g. one bullet carrying several commit summaries) can
+// legitimately exceed a few hundred characters, and rejecting it forces the
+// model to rewrite an otherwise valid state on the compaction barrier's
+// critical path — a full round trip that costs far more than the few extra
+// tokens the item adds. The aggregated estimated-token budget
+// (ContinuationStateMaxTokens) is the only length constraint, so the schema
+// in Parameters() must stay in sync by declaring no maxLength values.
 
 // CompactContextValidator validates CompactContext tool arguments without
 // touching the filesystem or the permission system: state_files resolution is
@@ -82,11 +79,12 @@ func (v CompactContextValidator) estimateTokens(text string) int {
 }
 
 // ParseCompactContextArgs trims all strings, rejects empty required fields,
-// empty list items, arrays over their declared limits, fields over their
-// declared length limits, and validates state-file constraints lexically. It
-// never stats, reads, or resolves symlinks. The generic schema validator only
-// enforces types and minItems, so the model-authored limits live here; both
-// Execute and the MainAgent runtime barrier run this same parser.
+// empty list items and arrays over their declared limits, validates
+// state-file constraints lexically, and rejects state whose combined
+// estimated token cost exceeds the configured budget. It never stats, reads,
+// or resolves symlinks. The generic schema validator only enforces types and
+// minItems, so the model-facing limits live here; both Execute and the
+// MainAgent runtime barrier run this same parser.
 func (v CompactContextValidator) ParseCompactContextArgs(raw json.RawMessage) (CompactContextArgs, error) {
 	var args CompactContextArgs
 	if err := json.Unmarshal(raw, &args); err != nil {
@@ -101,22 +99,16 @@ func (v CompactContextValidator) ParseCompactContextArgs(raw json.RawMessage) (C
 		return CompactContextArgs{}, fmt.Errorf("missing required argument: next_step")
 	}
 	var err error
-	if args.Completed, err = validateCompactContextList(args.Completed, 12, compactContextItemMaxRunes, "completed"); err != nil {
+	if args.Completed, err = validateCompactContextList(args.Completed, 12, "completed"); err != nil {
 		return CompactContextArgs{}, err
 	}
-	if args.Decisions, err = validateCompactContextList(args.Decisions, 8, compactContextItemMaxRunes, "decisions"); err != nil {
+	if args.Decisions, err = validateCompactContextList(args.Decisions, 8, "decisions"); err != nil {
 		return CompactContextArgs{}, err
 	}
-	if args.OpenIssues, err = validateCompactContextList(args.OpenIssues, 8, compactContextItemMaxRunes, "open_issues"); err != nil {
+	if args.OpenIssues, err = validateCompactContextList(args.OpenIssues, 8, "open_issues"); err != nil {
 		return CompactContextArgs{}, err
 	}
-	if err := validateCompactContextField(args.ActiveObjective, compactContextObjectiveMaxRunes, "active_objective"); err != nil {
-		return CompactContextArgs{}, err
-	}
-	if err := validateCompactContextField(args.NextStep, compactContextObjectiveMaxRunes, "next_step"); err != nil {
-		return CompactContextArgs{}, err
-	}
-	stateFiles, err := validateStateFiles(args.StateFiles, 16, compactContextStateFileMaxRunes, v.currentProjectRoot())
+	stateFiles, err := validateStateFiles(args.StateFiles, 16, v.currentProjectRoot())
 	if err != nil {
 		return CompactContextArgs{}, err
 	}
@@ -141,19 +133,10 @@ func (v CompactContextValidator) ParseCompactContextArgs(raw json.RawMessage) (C
 	return args, nil
 }
 
-// validateCompactContextField enforces the per-field rune cap declared in the
-// JSON schema. Rune counts are only a cheap prefilter; the aggregated token
-// estimate is the authoritative budget.
-func validateCompactContextField(text string, maxRunes int, name string) error {
-	if len([]rune(text)) > maxRunes {
-		return fmt.Errorf("argument %s exceeds the %d-character limit", name, maxRunes)
-	}
-	return nil
-}
-
 // validateCompactContextList trims every item, rejects empty items and arrays
-// over the declared maxItems/items.maxLength, and returns the trimmed items.
-func validateCompactContextList(items []string, maxItems int, itemMaxRunes int, name string) ([]string, error) {
+// over the declared maxItems, and returns the trimmed items. Items carry no
+// length cap of their own; the aggregated token budget bounds them.
+func validateCompactContextList(items []string, maxItems int, name string) ([]string, error) {
 	if len(items) > maxItems {
 		return nil, fmt.Errorf("argument %s contains %d items, exceeding the maximum of %d", name, len(items), maxItems)
 	}
@@ -162,9 +145,6 @@ func validateCompactContextList(items []string, maxItems int, itemMaxRunes int, 
 		item = strings.TrimSpace(item)
 		if item == "" {
 			return nil, fmt.Errorf("argument %s contains an empty item at index %d", name, i)
-		}
-		if len([]rune(item)) > itemMaxRunes {
-			return nil, fmt.Errorf("argument %s item at index %d exceeds the %d-character limit", name, i, itemMaxRunes)
 		}
 		out = append(out, item)
 	}
@@ -190,7 +170,7 @@ func (v CompactContextValidator) currentProjectRoot() string {
 // (tilde expansion via the environment, Clean/Join/Rel), so the tool cannot
 // act as an existence probe or read-permission bypass. Without a project root
 // only plain relative entries are accepted (cleaned and escape-checked).
-func validateStateFiles(paths []string, maxItems int, maxRunes int, projectRoot string) ([]string, error) {
+func validateStateFiles(paths []string, maxItems int, projectRoot string) ([]string, error) {
 	if len(paths) > maxItems {
 		return nil, fmt.Errorf("state_files contains %d paths, exceeding the maximum of %d", len(paths), maxItems)
 	}
@@ -242,13 +222,9 @@ func validateStateFiles(paths []string, maxItems int, maxRunes int, projectRoot 
 		}
 		// Store the normalized workspace-relative form so equivalent
 		// spellings (absolute, ~-, ./-, ../-, plain) collapse to one entry.
+		// Paths carry no length cap of their own; the aggregated token budget
+		// bounds them like any other model-authored text.
 		normalized := filepath.ToSlash(rel)
-		// The rune cap applies to the stored form — what the checkpoint
-		// renders and counts toward the budget — not to the raw spelling, so
-		// a deep absolute spelling whose relative form is short still passes.
-		if len([]rune(normalized)) > maxRunes {
-			return nil, fmt.Errorf("state_files path %q exceeds the %d-character limit in its workspace-relative form", normalized, maxRunes)
-		}
 		if !seen[normalized] {
 			seen[normalized] = true
 			out = append(out, normalized)
@@ -284,13 +260,12 @@ func NewCompactContextTool(validator CompactContextValidator) CompactContextTool
 func (CompactContextTool) Name() string { return NameCompactContext }
 
 func (t CompactContextTool) Description() string {
-	// The combined continuation-state budget is the binding limit; the
-	// per-field character caps in the schema add up to several times more
-	// than it, so the model is told the budget up front instead of learning it
-	// from a rejection after it has already authored the whole state.
+	// The combined continuation-state budget is the only length limit, so the
+	// model is told it up front instead of learning it from a rejection after
+	// it has already authored the whole state.
 	budget := ""
 	if limit := t.validator.ContinuationStateMaxTokens; limit > 0 {
-		budget = fmt.Sprintf("All text fields together (active_objective, next_step, completed, decisions, open_issues, state_files) must fit a combined budget of about %d estimated tokens; the per-field character limits are upper bounds that cannot all be used at once, so keep every item short.\n", limit)
+		budget = fmt.Sprintf("All text fields together (active_objective, next_step, completed, decisions, open_issues, state_files) must fit a combined budget of about %d estimated tokens; there are no per-field or per-item caps, so a long item is fine as long as the whole state stays within the budget.\n", limit)
 	}
 	// The todo-sync line is rendered only when todo_write is visible in the
 	// same surface, so the description never pushes a tool the model cannot
@@ -328,38 +303,36 @@ func (CompactContextTool) Parameters() map[string]any {
 			"active_objective": map[string]any{
 				"type":        "string",
 				"minLength":   1,
-				"maxLength":   compactContextObjectiveMaxRunes,
 				"description": "The single current goal to keep advancing after the reset. Do not restate the user request.",
 			},
 			"completed": map[string]any{
 				"type":        "array",
 				"maxItems":    12,
-				"items":       map[string]any{"type": "string", "minLength": 1, "maxLength": compactContextItemMaxRunes},
+				"items":       map[string]any{"type": "string", "minLength": 1},
 				"description": "Concrete progress completed and safe to rely on later.",
 			},
 			"decisions": map[string]any{
 				"type":        "array",
 				"maxItems":    8,
-				"items":       map[string]any{"type": "string", "minLength": 1, "maxLength": compactContextItemMaxRunes},
+				"items":       map[string]any{"type": "string", "minLength": 1},
 				"description": "Important decisions that must stay in effect, with a one-line reason each.",
 			},
 			"open_issues": map[string]any{
 				"type":        "array",
 				"maxItems":    8,
-				"items":       map[string]any{"type": "string", "minLength": 1, "maxLength": compactContextItemMaxRunes},
+				"items":       map[string]any{"type": "string", "minLength": 1},
 				"description": "Unresolved blockers, risks, or facts awaiting confirmation.",
 			},
 			"next_step": map[string]any{
 				"type":        "string",
 				"minLength":   1,
-				"maxLength":   compactContextObjectiveMaxRunes,
 				"description": "One concrete action executable immediately after the checkpoint applies.",
 			},
 			"state_files": map[string]any{
 				"type":        "array",
 				"maxItems":    16,
-				"items":       map[string]any{"type": "string", "minLength": 1, "maxLength": compactContextStateFileMaxRunes},
-				"description": "Paths of files carrying externalized state: workspace-relative (e.g. docs/usage.md), or absolute / ~-prefixed / ./- / ../-prefixed spellings that resolve inside the project root (stored normalized as workspace-relative); out-of-project state must be captured in completed/decisions/open_issues text instead. The per-path character limit applies to the stored workspace-relative form. References only: never read, injected, or existence-verified.",
+				"items":       map[string]any{"type": "string", "minLength": 1},
+				"description": "Paths of files carrying externalized state: workspace-relative (e.g. docs/usage.md), or absolute / ~-prefixed / ./- / ../-prefixed spellings that resolve inside the project root (stored normalized as workspace-relative); out-of-project state must be captured in completed/decisions/open_issues text instead. References only: never read, injected, or existence-verified.",
 			},
 		},
 		"required":             []string{"active_objective", "next_step"},

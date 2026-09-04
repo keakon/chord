@@ -282,56 +282,36 @@ func TestCompactContextRejectsListOverMaxItems(t *testing.T) {
 	}
 }
 
-// repeatCompactContextStrings builds n items of runes repeated chars for
-// budget-at-caps fixtures.
-func repeatCompactContextStrings(n, runes int) []any {
-	items := make([]any, n)
-	for i := range items {
-		items[i] = strings.Repeat("i", runes)
-	}
-	return items
-}
-
-func TestCompactContextRejectsFieldOverMaxLength(t *testing.T) {
-	v := testCompactValidator()
-	long := strings.Repeat("x", compactContextObjectiveMaxRunes+1)
-	raw := `{"active_objective":"` + long + `","next_step":"b"}`
-	if _, err := v.ParseCompactContextArgs(json.RawMessage(raw)); err == nil {
-		t.Fatal("expected maxLength rejection for active_objective")
-	}
-	longItem := strings.Repeat("y", compactContextItemMaxRunes+1)
-	raw = `{"active_objective":"a","next_step":"b","completed":["` + longItem + `"]}`
-	if _, err := v.ParseCompactContextArgs(json.RawMessage(raw)); err == nil {
-		t.Fatal("expected maxLength rejection for completed item")
-	}
-}
-
-func TestCompactContextAllFieldsAtCapsPassBudget(t *testing.T) {
-	// The per-field rune caps are a cheap prefilter; the aggregated
-	// estimated-token budget is the binding limit. An all-ASCII worst case
-	// that fills every field to its cap must pass the default agent budget
-	// (~10.2k chars ≈ 3.4k tokens at the len/3 fallback), so the schema no
-	// longer forces a rewrite of a legitimately full state. Denser CJK text
-	// still relies on the budget declared in the description.
-	v := CompactContextValidator{ContinuationStateMaxTokens: 4096}
+// TestCompactContextAcceptsLongItemsWithoutFieldCaps is the regression for
+// the removed per-field/per-item character caps: the original failing call
+// packed several dense commit summaries into a single completed item and was
+// rejected at the 250-rune item cap even though the whole state sat far below
+// the token budget. Any per-field shape must now pass as long as the
+// aggregated budget holds.
+func TestCompactContextAcceptsLongItemsWithoutFieldCaps(t *testing.T) {
 	args := map[string]any{
-		"active_objective": strings.Repeat("o", compactContextObjectiveMaxRunes),
-		"next_step":        strings.Repeat("n", compactContextObjectiveMaxRunes),
-		"completed":        repeatCompactContextStrings(12, compactContextItemMaxRunes),
-		"decisions":        repeatCompactContextStrings(8, compactContextItemMaxRunes),
-		"open_issues":      repeatCompactContextStrings(8, compactContextItemMaxRunes),
+		"active_objective": strings.Repeat("o", 1200), // ~400 estimated tokens
+		"next_step":        "run the agent tests",
+		"completed":        []string{strings.Repeat("c", 1500)}, // single ~500-token item
+		"decisions":        []string{strings.Repeat("d", 1200)}, // ~400 estimated tokens
+		"state_files":      []string{strings.Repeat("p", 300) + "/x.md"},
 	}
-	paths := make([]any, 16)
-	for i := range paths {
-		paths[i] = strings.Repeat("p", compactContextStateFileMaxRunes-3) + ".md"
-	}
-	args["state_files"] = paths
 	raw, err := json.Marshal(args)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := v.ParseCompactContextArgs(raw); err != nil {
-		t.Fatalf("all-ASCII caps must pass a 4096 budget: %v", err)
+	if _, err := (CompactContextValidator{ContinuationStateMaxTokens: 2048}).ParseCompactContextArgs(raw); err != nil {
+		t.Fatalf("long fields/items within the budget must be accepted: %v", err)
+	}
+	// The same state must fail once the aggregate exceeds the budget, even
+	// though no single item is individually oversized.
+	v := CompactContextValidator{ContinuationStateMaxTokens: 500}
+	_, err = v.ParseCompactContextArgs(raw)
+	if err == nil {
+		t.Fatal("expected token budget rejection")
+	}
+	if !strings.Contains(err.Error(), "token budget") {
+		t.Fatalf("error = %q, want token budget mention", err)
 	}
 }
 
