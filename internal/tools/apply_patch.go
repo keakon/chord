@@ -254,8 +254,9 @@ func (ApplyPatchTool) Description() string {
 	return "The `apply_patch` tool can be used to edit files. " +
 		"Your patch is a unified diff wrapped in a `*** Begin Patch` / `*** End Patch` envelope. " +
 		"Each operation starts with one of `*** Add File: <path>`, `*** Delete File: <path>`, `*** Update File: <path>` (optionally followed by `*** Move to: <new path>`). " +
-		"Hunks are introduced by `@@` and each line starts with `+` (added), `-` (removed), or a space (context); new file contents are `+` lines. " +
-		"Context lines are literal complete source lines, not placeholders: do not use whitespace-only lines or `...` to omit context. " +
+		"Hunks are introduced by `@@` and each line's first character is its marker: `+` (added), `-` (removed), or a space (context); new file contents are `+` lines. " +
+		"`+` or `-` must be the first character of the line; preserve source indentation after the marker (`-old` is a deletion, while ` -old` is context text). Every hunk must contain at least one `+` or `-` line. " +
+		"Context lines are literal complete source lines, not placeholders: a blank or whitespace-only line is a real source line, and `...` never omits context. " +
 		"Prefer the smallest hunk with distinctive context; after a mismatch, re-read the current target range and rebuild the hunk instead of retrying it unchanged."
 }
 func (ApplyPatchTool) Parameters() map[string]any {
@@ -264,7 +265,7 @@ func (ApplyPatchTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"patch": map[string]any{
 				"type":        "string",
-				"description": "Complete Codex apply_patch text: a `*** Begin Patch` / `*** End Patch` envelope wrapping Add/Delete/Update operations with `@@` hunks; new file contents are `+` lines. Paths are relative to the session working directory, or absolute. Context lines must be literal complete source lines; do not use whitespace-only lines or `...` as placeholders. Prefer small hunks with distinctive context, and rebuild a hunk from a fresh read after a mismatch.",
+				"description": "Complete Codex apply_patch text: a `*** Begin Patch` / `*** End Patch` envelope wrapping Add/Delete/Update operations with `@@` hunks; new file contents are `+` lines. Paths are relative to the session working directory, or absolute. The first character of each hunk line must be its marker (`+` added, `-` removed, space context); do not add a space before `+` or `-`, and preserve source indentation after it (`-old` is a deletion, while ` -old` is context text). Every hunk must contain at least one `+` or `-` line. Context lines must be literal complete source lines; blank or whitespace-only lines are real source lines, not omission placeholders, and `...` never omits context. Prefer small hunks with distinctive context, and rebuild a hunk from a fresh read after a mismatch.",
 			},
 		},
 		"required":             []string{"patch"},
@@ -552,6 +553,7 @@ func ParseApplyPatch(text string) (applyPatchDocument, error) {
 					return applyPatchDocument{}, fmt.Errorf("invalid update hunk at line %d: expected @@", i+1)
 				}
 				var h applyPatchHunk
+				hunkStartLine := i + 1
 				if !implicitFirstHunk {
 					h.Header = strings.TrimSpace(strings.TrimPrefix(lines[i], "@@"))
 					i++
@@ -586,7 +588,7 @@ func ParseApplyPatch(text string) (applyPatchDocument, error) {
 				if !slices.ContainsFunc(h.Lines, func(line applyPatchLine) bool {
 					return line.Kind == '+' || line.Kind == '-'
 				}) {
-					return applyPatchDocument{}, fmt.Errorf("invalid update hunk for %s: at least one added or removed line is required", op.Path)
+					return applyPatchDocument{}, fmt.Errorf("invalid update hunk for %s at line %d: at least one added or removed line is required; context-only or whitespace-only lines are not omission placeholders", op.Path, hunkStartLine)
 				}
 				op.Hunks = append(op.Hunks, h)
 			}

@@ -143,7 +143,7 @@ func TestApplyPatchRejectsContextOnlyUpdate(t *testing.T) {
 		" ## 5. Related docs\n" +
 		"*** End Patch"
 	_, err := ParseApplyPatch(patch)
-	if err == nil || !strings.Contains(err.Error(), "at least one added or removed line is required") {
+	if err == nil || !strings.Contains(err.Error(), "at least one added or removed line is required") || !strings.Contains(err.Error(), "whitespace-only lines are not omission placeholders") {
 		t.Fatalf("err = %v, want context-only hunk rejection", err)
 	}
 }
