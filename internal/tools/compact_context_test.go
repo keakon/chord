@@ -394,3 +394,31 @@ func TestCompactContextToolTraits(t *testing.T) {
 		t.Fatalf("concurrency mode = %q, want exclusive", policy.Mode)
 	}
 }
+
+// With per-field caps gone, one dense field can eat the whole budget on its
+// own. The rejection must say which one, or the model shortens the state
+// blindly and usually trims the fields that were never the problem.
+func TestCompactContextTokenBudgetNamesLargestFields(t *testing.T) {
+	v := CompactContextValidator{ContinuationStateMaxTokens: 60}
+	raw := `{
+		"active_objective": "a",
+		"next_step": "b",
+		"completed": ["` + strings.Repeat("c", 900) + `"],
+		"decisions": ["` + strings.Repeat("d", 300) + `"]
+	}`
+	_, err := v.ParseCompactContextArgs(json.RawMessage(raw))
+	if err == nil {
+		t.Fatal("expected token budget rejection")
+	}
+	msg := err.Error()
+	// bytes/3 default estimator: completed ~300 tokens, decisions ~100.
+	for _, want := range []string{"largest: completed≈300", "decisions≈100"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error = %q, want substring %q", msg, want)
+		}
+	}
+	// Only the top two are named; the tiny fields must not pad the message.
+	if strings.Contains(msg, "active_objective≈") {
+		t.Fatalf("error = %q, want only the two largest fields named", msg)
+	}
+}

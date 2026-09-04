@@ -285,7 +285,12 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 				}
 				fmt.Fprintf(&b, "  line-count difference: your old_string has %d extra line(s), the file has %d extra line(s)%s\n", closest.LineDiffOldExtra, closest.LineDiffSrcExtra, blankNote)
 			}
-			for _, d := range closest.Diffs[1:] {
+			// Diffs[0] is already rendered above as the first mismatch; the
+			// rest are listed here. The slice can be empty when the diagnostic
+			// normalizer is more tolerant than the matcher that rejected the
+			// block — the window is "closest" yet has no differing line under
+			// the looser comparison — so the skip must not assume an element.
+			for _, d := range restAfterFirst(closest.Diffs) {
 				fmt.Fprintf(&b, "  differing line %d (file %d): expected %s\n    actual %s\n", d.ExpectedLine, d.FileLine, d.Expected, d.Actual)
 			}
 			// When whole lines drifted, the few differing lines shown above
@@ -493,4 +498,15 @@ func punctuationTolerantEdit(content, oldText, newText string, replaceAll bool) 
 	b.WriteString(string(contentRunes[prev:]))
 	lines = tolerantMatchLines(content, contentSpans, starts)
 	return b.String(), len(starts), lines, true
+}
+
+// restAfterFirst returns everything after the first element, or nothing when
+// the slice is empty. It exists so the closest-match diagnostic can skip the
+// already-rendered first difference without indexing into a slice that a more
+// tolerant diagnostic normalizer may have left empty.
+func restAfterFirst[T any](s []T) []T {
+	if len(s) <= 1 {
+		return nil
+	}
+	return s[1:]
 }

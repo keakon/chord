@@ -664,3 +664,82 @@ func TestCountStrippedInvisibleReportsCombiningMarks(t *testing.T) {
 		t.Errorf("kept mark should not be counted: %v", got)
 	}
 }
+
+// The line-scoped normalizer folds runs of whitespace, so re-spacing an
+// aligned assignment is invisible to apply_patch's exact/tolerant matching.
+// Real content differences (an operator, a digit) must stay visible: before
+// the fold those two classes were ranked backwards by the similarity ratio —
+// harmless re-spacing scored 0.71..0.89 (refused by the tolerant layer, then
+// resolved by the fuzzy layer) while an operator change scored 0.90+.
+func TestNormalizePatchTolerantLineFoldsWhitespaceRuns(t *testing.T) {
+	same := [][2]string{
+		{"count   = 1", "count = 1"},
+		{"x = 1", "x  =  1"},
+		{"foo(a, b)", "foo(a,  b)"},
+		{"    foo", "\tfoo"},
+		{"a\t\tb", "a b"},
+	}
+	for _, p := range same {
+		if got, want := normalizePatchTolerantLine(p[0]), normalizePatchTolerantLine(p[1]); got != want {
+			t.Errorf("normalizePatchTolerantLine(%q) = %q, want it to equal normalizePatchTolerantLine(%q) = %q", p[0], got, p[1], want)
+		}
+	}
+	differ := [][2]string{
+		{"if a >= b {", "if a > b {"},
+		{"const n = 30", "const n = 10"},
+	}
+	for _, p := range differ {
+		if got, other := normalizePatchTolerantLine(p[0]), normalizePatchTolerantLine(p[1]); got == other {
+			t.Errorf("normalizePatchTolerantLine(%q) == normalizePatchTolerantLine(%q) = %q, want a real content change to survive normalization", p[0], p[1], got)
+		}
+	}
+}
+
+// The fold is line-scoped on purpose. Edit's old_string spans lines, so at the
+// sequence level a whitespace run is indentation, alignment, or list
+// structure; folding it there would let an edit match a block whose layout it
+// misquoted. Line terminators are never part of a run either way.
+func TestNormalizePunctWithSpaceFoldingKeepsWhitespaceRuns(t *testing.T) {
+	seq := func(s string) string {
+		norm, _ := normalizePunctWithSpaceFolding([]rune(s))
+		return string(norm)
+	}
+	if seq("a  b") == seq("a b") {
+		t.Errorf("sequence-level normalization folded a double space; Edit keeps whitespace runs significant")
+	}
+	if got := seq("alpha\n\nbeta"); got != "alpha\n\nbeta" {
+		t.Errorf("seq(%q) = %q, want blank lines preserved", "alpha\n\nbeta", got)
+	}
+	line := func(s string) string {
+		norm, _ := normalizePunctLineWithSpaceFolding([]rune(s))
+		return string(norm)
+	}
+	if got := line("alpha\n\nbeta"); got != "alpha\n\nbeta" {
+		t.Errorf("line(%q) = %q, want line terminators excluded from whitespace runs", "alpha\n\nbeta", got)
+	}
+}
+
+// Splice-back indexes the original runes through the spans, so a folded run
+// must be carried entirely by the span of the rune that replaced it: the spans
+// have to tile the input contiguously or a tolerant replacement writes
+// mangled bytes.
+func TestNormalizePunctLineWithSpaceFoldingSpansTileInput(t *testing.T) {
+	for _, in := range []string{"count   = 1", "foo(a,  b)", "\t\tif x  ==  y {", "a  ", "  a", "  "} {
+		rs := []rune(in)
+		norm, spans := normalizePunctLineWithSpaceFolding(rs)
+		if len(norm) != len(spans) {
+			t.Fatalf("%q: %d normalized runes but %d spans", in, len(norm), len(spans))
+		}
+		if len(spans) == 0 {
+			continue
+		}
+		if spans[0].start != 0 || spans[len(spans)-1].end != len(rs) {
+			t.Errorf("%q: spans cover [%d,%d), want [0,%d)", in, spans[0].start, spans[len(spans)-1].end, len(rs))
+		}
+		for i := 1; i < len(spans); i++ {
+			if spans[i-1].end != spans[i].start {
+				t.Errorf("%q: span gap/overlap between %v and %v", in, spans[i-1], spans[i])
+			}
+		}
+	}
+}

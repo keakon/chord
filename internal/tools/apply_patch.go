@@ -1541,6 +1541,7 @@ func applyApplyPatchHunks(ctx context.Context, content string, hunks []applyPatc
 		}
 		punctuationMatch := false
 		fuzzyMatch := false
+		fuzzyRemovedIndex := -1
 		var punctuationCandidates []int
 		var fuzzyCandidates []int
 		if match < 0 && len(oldSeq) > 0 {
@@ -1552,7 +1553,7 @@ func applyApplyPatchHunks(ctx context.Context, content string, hunks []applyPatc
 			}
 		}
 		if match < 0 && len(oldSeq) > 0 {
-			match, fuzzyCandidates = findUniqueFuzzyApplyPatchMatch(fileLines, hunk, oldSeq, searchStart)
+			match, fuzzyRemovedIndex, fuzzyCandidates = findUniqueFuzzyApplyPatchMatch(fileLines, hunk, oldSeq, searchStart)
 			if match >= 0 {
 				fuzzyMatch = true
 			}
@@ -1572,27 +1573,23 @@ func applyApplyPatchHunks(ctx context.Context, content string, hunks []applyPatc
 		}
 		if fuzzyMatch {
 			fuzzyHunks++
-			// The guard admits exactly one changed removed line and one added
-			// line; map the removed line's hunk position onto oldSeq/fileLines
-			// so the audit record quotes real file bytes, not the hunk's.
-			removedIndex := -1
+			// The removed line's offset comes from the matcher itself, which
+			// derived it from the same guards that admitted the hunk. Deriving
+			// it a second time here would be a copy of those guards that a
+			// future relaxation could silently outgrow — the old copy indexed
+			// oldSeq[-1] whenever the removed line was no longer guaranteed to
+			// exist.
 			var addedText string
-			seqIndex := 0
 			for _, line := range hunk.Lines {
-				switch line.Kind {
-				case ' ':
-					seqIndex++
-				case '-':
-					removedIndex = seqIndex
-					seqIndex++
-				case '+':
+				if line.Kind == '+' {
 					addedText = line.Text
 				}
 			}
 			fuzzyReplacements = append(fuzzyReplacements, applyPatchFuzzyReplacement{
-				removed: oldSeq[removedIndex],
-				actual:  fileLines[match+removedIndex],
+				removed: oldSeq[fuzzyRemovedIndex],
+				actual:  fileLines[match+fuzzyRemovedIndex],
 				added:   addedText,
+				line:    match + fuzzyRemovedIndex + 1,
 			})
 		}
 		replaced := make([]string, 0, len(fileLines)-len(oldSeq)+len(newSeq))
@@ -1614,36 +1611,64 @@ func applyApplyPatchHunks(ctx context.Context, content string, hunks []applyPatc
 	return out, punctuationHunks, fuzzyHunks, fuzzyReplacements, nil
 }
 
-// minApplyPatchFuzzySimilarity gates the safe fuzzy recovery of a stale
-// removed line. 0.9 keeps transcription-style slips recoverable (a <=1-rune
-// difference on a line of 10+ runes) while rejecting edits that diverge more
-// broadly: below the threshold the model must re-read the file and rebuild the
-// hunk instead of silently overwriting a line it only half remembers.
+// The fuzzy layer's acceptance gates. It is the only layer that writes the
+// model's line over a file line the model quoted wrongly, so it is bounded on
+// two axes at once:
+//
+//   - maxApplyPatchFuzzyRuneDistance is the hard limit: at most one rune of
+//     the normalized removed line may differ from the file's. Everything a
+//     tolerant normalizer can forgive (punctuation variants, indentation,
+//     inter-word and repeated whitespace) has already been folded out by the
+//     time a candidate reaches here, so a surviving difference is real
+//     content, and one rune is where a transcription slip stops and a
+//     semantic change begins.
+//   - minApplyPatchFuzzySimilarity keeps the proportional check as a second,
+//     narrower gate: on a very short line even one rune is most of the line.
+//     It cannot be the only gate — a ratio grows the allowance with line
+//     length (0.9 permits six runes on a 66-rune line), which is backwards:
+//     "const n = 30" vs "const n = 10" scores 0.909 while being a real value
+//     change.
+//
+// minApplyPatchFuzzyContextRunes is the distinctiveness floor for context:
+// at least one context line must carry this many runes after normalization,
+// so a hunk anchored only on "}" and "return" is not treated as uniquely
+// placed.
 const (
+	maxApplyPatchFuzzyRuneDistance = 1
 	minApplyPatchFuzzySimilarity   = 0.9
 	minApplyPatchFuzzyContextRunes = 4
 )
 
 // applyPatchFuzzyReplacement records one fuzzy hunk replacement for the result
 // Note so the model can audit what was actually overwritten: removed is the
-// hunk's claimed line, actual is the file line it replaced, and added is the
-// line written in their place.
+// hunk's claimed line, actual is the file line it replaced, added is the line
+// written in their place, and line is the 1-based position of the replaced
+// line in the file as it stood when the hunk was applied (earlier hunks of the
+// same patch have already shifted it).
 type applyPatchFuzzyReplacement struct {
 	removed string
 	actual  string
 	added   string
+	line    int
 }
 
 // findUniqueFuzzyApplyPatchMatch permits only a narrow stale-line recovery:
-// one changed removed line, two distinctive unchanged context lines on
-// opposite sides, and exactly one candidate window. The matched current line
-// is replaced, while all context bytes are preserved from the file.
-func findUniqueFuzzyApplyPatchMatch(fileLines []string, hunk applyPatchHunk, oldSeq []string, searchStart int) (int, []int) {
-	removedIndex := -1
+// one changed removed line differing from the file by at most
+// maxApplyPatchFuzzyRuneDistance runes after normalization, distinctive
+// unchanged context on both sides of it, and exactly one candidate window. The
+// matched current line is replaced, while all context bytes are preserved from
+// the file.
+//
+// It returns the matched window start, the removed line's offset inside the
+// window (so the caller can quote and locate the replaced line without
+// recomputing an offset that must stay in step with these guards), and the
+// candidate list for the ambiguity hint. removedIndex is -1 when there is no
+// unique match.
+func findUniqueFuzzyApplyPatchMatch(fileLines []string, hunk applyPatchHunk, oldSeq []string, searchStart int) (match, removedIndex int, candidates []int) {
+	removedIndex = -1
 	removedCount := 0
 	addedCount := 0
-	contextCount := 0
-	contextRunes := 0
+	distinctiveContext := false
 	for _, line := range hunk.Lines {
 		switch line.Kind {
 		case '-':
@@ -1651,16 +1676,20 @@ func findUniqueFuzzyApplyPatchMatch(fileLines []string, hunk applyPatchHunk, old
 		case '+':
 			addedCount++
 		case ' ':
-			contextCount++
 			norm := normalizePatchTolerantLine(line.Text)
 			if norm == "" {
-				return -1, nil
+				return -1, -1, nil
 			}
-			contextRunes += len([]rune(norm))
+			// Distinctiveness is a per-line property, not a sum: "}" plus
+			// "return" clears a combined four runes while anchoring the hunk
+			// to boilerplate that repeats all over the file.
+			if len([]rune(norm)) >= minApplyPatchFuzzyContextRunes {
+				distinctiveContext = true
+			}
 		}
 	}
-	if removedCount != 1 || addedCount != 1 || contextCount < 2 || contextRunes < minApplyPatchFuzzyContextRunes {
-		return -1, nil
+	if removedCount != 1 || addedCount != 1 || !distinctiveContext {
+		return -1, -1, nil
 	}
 	oldIndex := 0
 	contextBefore := false
@@ -1679,17 +1708,24 @@ func findUniqueFuzzyApplyPatchMatch(fileLines []string, hunk applyPatchHunk, old
 			oldIndex++
 		}
 	}
+	// contextBefore && contextAfter already implies at least two context
+	// lines, so no separate count check is needed.
 	if removedIndex < 0 || !contextBefore || !contextAfter || oldIndex != len(oldSeq) {
-		return -1, nil
+		return -1, -1, nil
 	}
-	oldRemoved := normalizePatchTolerantLine(oldSeq[removedIndex])
+	normOld := make([]string, len(oldSeq))
+	for i, line := range oldSeq {
+		normOld[i] = normalizePatchTolerantLine(line)
+	}
+	oldRemoved := normOld[removedIndex]
 	if oldRemoved == "" {
-		return -1, nil
+		return -1, -1, nil
 	}
+	oldRemovedRunes := len([]rune(oldRemoved))
 
 	maxStart := len(fileLines) - len(oldSeq)
 	if maxStart < 0 {
-		return -1, nil
+		return -1, -1, nil
 	}
 	start := max(0, searchStart)
 	if hunk.EndOfFile {
@@ -1697,16 +1733,31 @@ func findUniqueFuzzyApplyPatchMatch(fileLines []string, hunk applyPatchHunk, old
 		maxStart = start
 	}
 	if start > maxStart {
-		return -1, nil
+		return -1, -1, nil
 	}
-	var candidates []int
+	// Normalize each file line in the search window once, not once per
+	// candidate position it participates in — mirroring
+	// findUniqueApplyPatchSequence, where the same quadratic re-normalization
+	// was the cost being removed.
+	normFile := make([]string, len(fileLines)-start)
+	for i := start; i < len(fileLines); i++ {
+		normFile[i-start] = normalizePatchTolerantLine(fileLines[i])
+	}
+	// Distance work is charged against a budget, like
+	// applyPatchHunkClosestLine's closestScanBudget: a large file must not turn
+	// a near-miss hunk into a full-file Levenshtein sweep. An exhausted budget
+	// abandons the fuzzy layer entirely (returning no candidate) rather than
+	// accepting whatever it found first, so the verdict never depends on where
+	// the budget happened to run out.
+	const fuzzyScanBudget = 200_000 // total (removed × line) rune-pair budget
+	budget := fuzzyScanBudget
 	for candidate := start; candidate <= maxStart; candidate++ {
 		matches := true
-		for i, expected := range oldSeq {
+		for i := range oldSeq {
 			if i == removedIndex {
 				continue
 			}
-			if normalizePatchTolerantLine(fileLines[candidate+i]) != normalizePatchTolerantLine(expected) {
+			if normFile[candidate-start+i] != normOld[i] {
 				matches = false
 				break
 			}
@@ -1714,24 +1765,38 @@ func findUniqueFuzzyApplyPatchMatch(fileLines []string, hunk applyPatchHunk, old
 		if !matches {
 			continue
 		}
-		actual := normalizePatchTolerantLine(fileLines[candidate+removedIndex])
+		actual := normFile[candidate-start+removedIndex]
 		if actual == oldRemoved {
 			continue
 		}
-		longer := max(len([]rune(oldRemoved)), len([]rune(actual)))
-		if longer == 0 {
+		actualRunes := len([]rune(actual))
+		if actualRunes == 0 {
 			continue
 		}
-		similarity := 1 - float64(levenshteinDistance(oldRemoved, actual))/float64(longer)
-		if similarity < minApplyPatchFuzzySimilarity {
+		// A length gap alone is a lower bound on the edit distance, so an
+		// over-long candidate is rejected without running the distance.
+		if absInt(actualRunes-oldRemovedRunes) > maxApplyPatchFuzzyRuneDistance {
+			continue
+		}
+		work := oldRemovedRunes * actualRunes
+		if work > budget {
+			return -1, -1, nil
+		}
+		budget -= work
+		distance := levenshteinDistance(oldRemoved, actual)
+		if distance > maxApplyPatchFuzzyRuneDistance {
+			continue
+		}
+		longer := max(oldRemovedRunes, actualRunes)
+		if 1-float64(distance)/float64(longer) < minApplyPatchFuzzySimilarity {
 			continue
 		}
 		candidates = append(candidates, candidate)
 	}
 	if len(candidates) == 1 {
-		return candidates[0], candidates
+		return candidates[0], removedIndex, candidates
 	}
-	return -1, candidates
+	return -1, -1, candidates
 }
 
 func buildApplyPatchNewSequence(hunk applyPatchHunk, matched []string) []string {
@@ -1803,12 +1868,12 @@ func punctuationTolerantReplacementLine(current, oldText, newText string) (strin
 	currentRunes := []rune(current)
 	oldRunes := []rune(oldText)
 	newRunes := []rune(newText)
-	normCurrent, currentSpans := normalizePunctWithSpaceFolding(currentRunes)
-	normOld, oldSpans := normalizePunctWithSpaceFolding(oldRunes)
+	normCurrent, currentSpans := normalizePunctLineWithSpaceFolding(currentRunes)
+	normOld, oldSpans := normalizePunctLineWithSpaceFolding(oldRunes)
 	if !slices.Equal(normCurrent, normOld) {
 		return "", false
 	}
-	normNew, newSpans := normalizePunctWithSpaceFolding(newRunes)
+	normNew, newSpans := normalizePunctLineWithSpaceFolding(newRunes)
 
 	// Common prefix/suffix in normalized space, extended only while the
 	// original bytes also match: where old/new differ in original bytes
@@ -2458,6 +2523,17 @@ func applyPatchMutationSummary(mutation PlannedMutation, baseDir string) string 
 	return marker + " " + displayPathForBaseDir(path, baseDir)
 }
 
+// applyPatchMutationNotePath is the file a per-hunk note should name: the path
+// the patched content ends up at. For a move-with-changes that is the
+// destination — the source no longer exists once the patch is applied, so
+// pointing the model at it would send it to re-read a deleted file.
+func applyPatchMutationNotePath(mutation PlannedMutation) string {
+	if mutation.TargetPath != "" {
+		return mutation.TargetPath
+	}
+	return mutation.SourcePath
+}
+
 func (t ApplyPatchTool) finishApplyPatch(ctx context.Context, plan MutationPlan) string {
 	if len(plan.Mutations) == 0 {
 		return "Applied patch:\nNo net file changes"
@@ -2479,8 +2555,18 @@ func (t ApplyPatchTool) finishApplyPatch(ctx context.Context, plan MutationPlan)
 	if fuzzyHunks > 0 {
 		lines = append(lines, fmt.Sprintf("Note: used safe fuzzy matching for %d hunk(s); only a unique near-match with unchanged context was accepted", fuzzyHunks))
 		for _, mutation := range plan.Mutations {
+			// The audit line names the file and the 1-based line it
+			// overwrote: with several mutations in one patch, "the file's
+			// actual line" alone does not say which file, and without the
+			// number the model cannot go look at what it got wrong. The
+			// quoted text goes through the same truncate-and-escape helper as
+			// every other tool diagnostic, so trailing whitespace and
+			// invisible runes stay visible and one pathological line cannot
+			// inflate the result.
+			path := displayPathForBaseDir(applyPatchMutationNotePath(mutation), t.BaseDir)
 			for _, replacement := range mutation.FuzzyReplacements {
-				lines = append(lines, fmt.Sprintf("Note: fuzzy hunk replaced the file's actual line %q with %q; your hunk claimed %q", replacement.actual, replacement.added, replacement.removed))
+				lines = append(lines, fmt.Sprintf("Note: fuzzy hunk replaced %s line %d: the file's actual line %s with %s; your hunk claimed %s",
+					path, replacement.line, truncateToolLine(replacement.actual), truncateToolLine(replacement.added), truncateToolLine(replacement.removed)))
 			}
 		}
 	}

@@ -392,25 +392,140 @@ func mergeInvisibleCounts(maps ...map[rune]int) map[rune]int {
 	return out
 }
 
-// normalizePunctWithSpaceFolding applies the 1:1 punctuation mapping
-// (normalizeProsePunctuationRune) and then folds whitespace out of the
-// normalized sequence in two narrow cases: one ASCII space adjacent to
-// separator punctuation (after ", ; : . ! ? (" or before ")"), making "："
-// and ": " equivalent; and one inter-word space (exactly one U+0020 between
-// two word characters), making "diff and" and "diffand" equivalent. Both
-// cover models that tokenize ": " as one token and re-emit it as "：", drop
-// the space ("refusal:the caller"), or drop/insert a word-boundary space.
+// isHorizontalSpace reports whether r is whitespace that stays inside one
+// line. Line terminators are deliberately excluded: run folding (see
+// foldRepeatedHorizontalSpace) must never collapse a blank line away, because
+// Edit matches across lines and line structure is content there.
+func isHorizontalSpace(r rune) bool {
+	if !unicode.IsSpace(r) {
+		return false
+	}
+	switch r {
+	case '\n', '\r', '\u0085', '\u2028', '\u2029':
+		return false
+	}
+	return true
+}
+
+// foldRepeatedHorizontalSpace collapses every maximal run of two or more
+// horizontal whitespace runes into a single U+0020 before the punctuation
+// pass runs, and reports the rune range each surviving rune came from.
 //
-// Folding is deliberately narrow: double spaces, leading/trailing spaces,
-// tabs, and spaces adjacent to quotes, dashes, or punctuation stay
-// significant, so indentation, alignment, and list structure still fail with
-// the fresh-read hint. Each absorbed space is merged into the previous rune's
-// span, so splicing a normalized match back into the file keeps the original
-// bytes. Invisible format runes do not count as space neighbors and are looked
-// through in both directions: a copy that leaks one beside a word-boundary
-// space must normalize to the file's clean shape instead of keeping the space
-// significant on one side only.
+// A run of repeated whitespace is pure typesetting: "count   = 1" and
+// "count = 1", "x = 1" and "x  =  1", "foo(a, b)" and "foo(a,  b)" mean the
+// same thing, and a matcher that rejects them pushes the difference down into
+// the fuzzy layer, which resolves it by writing the model's line over the
+// file's. Folding it here instead makes those pairs match in the tolerant
+// layer, which splices the file's own bytes back for unchanged text and is
+// therefore risk-free. Runs are folded before punctuation-space absorption so
+// ",  b" and ", b" reach that rule in the same shape.
+//
+// A lone whitespace rune is left exactly as it is: folding it would make a tab
+// equal a space at the Edit sequence level, and Edit deliberately keeps a
+// single indentation character significant. Line matching (see
+// normalizePatchPunctuationLine) maps the survivor to a plain space anyway.
+//
+// spans is nil when nothing was folded, so the common case allocates nothing
+// and the caller keeps identity offsets.
+func foldRepeatedHorizontalSpace(rs []rune) ([]rune, []punctSpan) {
+	hasRun := false
+	for i := 1; i < len(rs); i++ {
+		if isHorizontalSpace(rs[i]) && isHorizontalSpace(rs[i-1]) {
+			hasRun = true
+			break
+		}
+	}
+	if !hasRun {
+		return rs, nil
+	}
+	folded := make([]rune, 0, len(rs))
+	spans := make([]punctSpan, 0, len(rs))
+	for i := 0; i < len(rs); i++ {
+		if !isHorizontalSpace(rs[i]) {
+			folded = append(folded, rs[i])
+			spans = append(spans, punctSpan{start: i, end: i + 1})
+			continue
+		}
+		end := i + 1
+		for end < len(rs) && isHorizontalSpace(rs[end]) {
+			end++
+		}
+		if end-i == 1 {
+			folded = append(folded, rs[i])
+		} else {
+			folded = append(folded, ' ')
+		}
+		spans = append(spans, punctSpan{start: i, end: end})
+		i = end - 1
+	}
+	return folded, spans
+}
+
+// normalizePunctWithSpaceFolding is the sequence-level tolerance normalizer,
+// used by Edit: the 1:1 punctuation mapping (normalizeProsePunctuationRune)
+// plus two narrow whitespace folds — one ASCII space adjacent to separator
+// punctuation (after ", ; : . ! ? (" or before ")"), making "：" and ": "
+// equivalent, and one inter-word space (exactly one U+0020 between two word
+// characters), making "diff and" and "diffand" equivalent. Both cover models
+// that tokenize ": " as one token and re-emit it as "：", drop the space
+// ("refusal:the caller"), or drop/insert a word-boundary space.
+//
+// Repeated whitespace is NOT folded here. Edit's old_string spans lines, so
+// whitespace runs carry indentation, alignment, and list structure at this
+// level; the line-scoped variant folds them (see
+// normalizePunctLineWithSpaceFolding), where a fold provably cannot cross a
+// line boundary.
+//
+// Folding is otherwise deliberately narrow: double spaces, leading/trailing
+// spaces, tabs, and spaces adjacent to quotes or dashes stay significant, so a
+// real layout mismatch still fails with the fresh-read hint. Each absorbed
+// space is merged into the previous rune's span, so splicing a normalized
+// match back into the file keeps the original bytes. Invisible format runes do
+// not count as space neighbors and are looked through in both directions: a
+// copy that leaks one beside a word-boundary space must normalize to the
+// file's clean shape instead of keeping the space significant on one side
+// only.
 func normalizePunctWithSpaceFolding(rs []rune) (norm []rune, spans []punctSpan) {
+	return normalizePunctSpans(rs, false)
+}
+
+// normalizePunctLineWithSpaceFolding is the line-scoped tolerance normalizer,
+// used by apply_patch: everything normalizePunctWithSpaceFolding folds, plus
+// every run of two or more horizontal whitespace runes collapsed to a single
+// space (see foldRepeatedHorizontalSpace).
+//
+// The extra fold is safe exactly because the unit is one line: collapsing
+// whitespace inside a line cannot mask line structure, which is the same
+// reason normalizePatchPunctuationLine already folds every Unicode space to a
+// plain one. It is also load-bearing rather than cosmetic — "count   = 1" vs
+// "count = 1" is pure re-spacing, and without the fold that pair falls through
+// to the fuzzy layer, which resolves it by overwriting the file's line with
+// the model's. Matching it here instead splices the file's own bytes back for
+// unchanged text, so the re-spacing is preserved rather than guessed at.
+//
+// Both apply_patch layers must use this same normalizer: the line matcher
+// (normalizePatchPunctuationLine) decides *that* a line matched, and
+// punctuationTolerantReplacementLine decides *what bytes* to write for it. A
+// normalizer mismatch between the two turns a good match into an
+// unsafe-tolerance refusal.
+func normalizePunctLineWithSpaceFolding(rs []rune) (norm []rune, spans []punctSpan) {
+	return normalizePunctSpans(rs, true)
+}
+
+// normalizePunctSpans is the shared body of the two normalizers above.
+// foldRuns selects the line-scoped extra fold; everything else is identical,
+// so the two tolerance surfaces can never drift apart in the rules they share.
+func normalizePunctSpans(rs []rune, foldRuns bool) (norm []rune, spans []punctSpan) {
+	// Repeated-whitespace runs are folded first (line scope only), so every
+	// later rule sees one space where the text had many — ",  b" must reach
+	// the separator-space rule in the same shape as ", b". runSpans maps each
+	// folded rune back to the original rune range it stands for; the
+	// punctuation pass below works in folded coordinates and its spans are
+	// translated back at the end.
+	var runSpans []punctSpan
+	if foldRuns {
+		rs, runSpans = foldRepeatedHorizontalSpace(rs)
+	}
 	norm = make([]rune, 0, len(rs))
 	spans = make([]punctSpan, 0, len(rs))
 	for i := 0; i < len(rs); i++ {
@@ -485,19 +600,37 @@ func normalizePunctWithSpaceFolding(rs []rune) (norm []rune, spans []punctSpan) 
 		norm = append(norm, r)
 		spans = append(spans, punctSpan{start: start, end: i + 1})
 	}
+	if runSpans != nil {
+		// Translate folded coordinates back to the caller's original runes.
+		// Every span is non-empty (end > start) and ends on a rune that
+		// exists in the folded slice, so end-1 is always a valid index.
+		for i, s := range spans {
+			spans[i] = punctSpan{start: runSpans[s.start].start, end: runSpans[s.end-1].end}
+		}
+	}
 	return norm, spans
 }
 
-// normalizePatchPunctuationLine is the line-level punctuation tolerance: the
-// shared punctuation core (1:1 mapping plus separator-space folding) followed
-// by folding any remaining Unicode space to a plain space, plus the narrow
-// no-break spaces (NBSP, figure space, narrow no-break space) the core leaves
-// alone because they are meaningful inside prose. Line-level matching cannot
-// cross lines, so folding whitespace inside a line cannot mask line
-// structure; Edit deliberately keeps whitespace significant at the sequence
-// level because old_string can span lines.
+// normalizePatchPunctuationLine is the line-level punctuation tolerance for
+// Edit's diagnostics: the sequence-level punctuation core (1:1 mapping plus
+// separator-space and inter-word-space folding) followed by folding any
+// remaining Unicode space to a plain space, including the narrow no-break
+// spaces (NBSP, figure space, narrow no-break space) the core leaves alone
+// because they are meaningful inside prose.
+//
+// It deliberately stops short of the repeated-whitespace fold that
+// apply_patch's normalizePatchTolerantLine applies. This normalizer decides
+// which lines editClosestMatch reports as differing, and a diagnostic that
+// folds more than Edit's matcher does would report "no differing line" for a
+// block Edit just refused to match — leaving the failure unexplained.
 func normalizePatchPunctuationLine(s string) string {
 	norm, _ := normalizePunctWithSpaceFolding([]rune(s))
+	return foldLineSpaces(norm)
+}
+
+// foldLineSpaces renders a normalized rune sequence with every Unicode space
+// mapped to a plain U+0020, the last step both line normalizers share.
+func foldLineSpaces(norm []rune) string {
 	var b strings.Builder
 	b.Grow(len(norm))
 	for _, r := range norm {
@@ -512,10 +645,13 @@ func normalizePatchPunctuationLine(s string) string {
 }
 
 // normalizePatchTolerantLine is the single tolerance normalizer for apply_patch
-// line matching: the shared punctuation core applied to whitespace-trimmed
-// text. Trimming first is what makes a line whose only difference is leading
-// or trailing whitespace match, on top of the punctuation and inter-word
-// spacing the core already folds.
+// line matching: the line-scoped punctuation core (see
+// normalizePunctLineWithSpaceFolding) applied to whitespace-trimmed text.
+// Trimming first is what makes a line whose only difference is leading or
+// trailing whitespace match, on top of the punctuation, inter-word spacing,
+// and repeated-whitespace runs the core already folds — so a re-spaced
+// "count   = 1" matches "count = 1" here instead of falling through to the
+// fuzzy layer, which would resolve it by overwriting the file's line.
 //
 // There is deliberately only one tolerance normalizer. Matching that needs it
 // runs through findUniqueApplyPatchSequence, which rejects ambiguous matches
@@ -523,7 +659,8 @@ func normalizePatchPunctuationLine(s string) string {
 // tolerance into the plain first-match cascade would silently pick one of
 // several equally plausible positions.
 func normalizePatchTolerantLine(s string) string {
-	return normalizePatchPunctuationLine(strings.TrimSpace(s))
+	norm, _ := normalizePunctLineWithSpaceFolding([]rune(strings.TrimSpace(s)))
+	return foldLineSpaces(norm)
 }
 
 // editDiffLine is one differing line inside the matched window: the file's

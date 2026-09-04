@@ -2638,3 +2638,187 @@ func TestApplyPatchHunkClosestLineRespectsSearchStartOnEOF(t *testing.T) {
 		t.Fatalf("got line=%d, want a suggestion at or after index 3", line)
 	}
 }
+
+// The fuzzy layer is the only one that writes the model's line over a file
+// line the model quoted wrongly, so its refusals need regression coverage of
+// their own: without it the guard can be loosened (or its threshold nudged)
+// without a single test turning red.
+//
+// Two runes of drift on a short line clears the 0.9 similarity ratio (0.933
+// here) while being a real value change — "100" is not "250". It must be
+// refused, and the refusal must name the exact rune that differs so the model
+// can fix the hunk without re-reading the whole file.
+func TestApplyPatchFuzzyRejectsTwoRuneDrift(t *testing.T) {
+	dir := t.TempDir()
+	const actualLine = "limit := 100 // maximum retries"
+	const claimedLine = "limit := 250 // maximum retries"
+	file := "before anchor\n" + actualLine + "\nafter anchor\n"
+	writeEditFixture(t, dir, "a.txt", file)
+	patch := "*** Begin Patch\n" +
+		"*** Update File: " + filepath.Join(dir, "a.txt") + "\n" +
+		"@@\n" +
+		" before anchor\n" +
+		"-" + claimedLine + "\n" +
+		"+limit := 250 // maximum retries, doubled\n" +
+		" after anchor\n" +
+		"*** End Patch\n"
+
+	_, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+	if err == nil {
+		t.Fatal("Execute error = nil, want the two-rune drift refused")
+	}
+	for _, want := range []string{
+		"hunk not found",
+		"first mismatch at rune 9: your line has U+0032, file has U+0031",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("err = %q, want substring %q", err, want)
+		}
+	}
+	got, readErr := os.ReadFile(filepath.Join(dir, "a.txt"))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(got) != file {
+		t.Fatalf("a.txt = %q, want unchanged %q", got, file)
+	}
+}
+
+// A similarity ratio grows its allowance with line length, which is exactly
+// backwards for this guard: five changed runes on a 67-rune line still scores
+// 0.925 and would sail past a ratio-only check. The absolute rune-distance cap
+// is what refuses it.
+func TestApplyPatchFuzzyRejectsLongLineDrift(t *testing.T) {
+	dir := t.TempDir()
+	const actualLine = "const defaultRetryBudgetForBackgroundCompactionRuns = 12345 // tuned"
+	const claimedLine = "const defaultRetryBudgetForBackgroundCompactionRuns = 67890 // tuned"
+	file := "package config\n" + actualLine + "\nvar enabled = true\n"
+	writeEditFixture(t, dir, "a.go", file)
+	patch := "*** Begin Patch\n" +
+		"*** Update File: " + filepath.Join(dir, "a.go") + "\n" +
+		"@@\n" +
+		" package config\n" +
+		"-" + claimedLine + "\n" +
+		"+const defaultRetryBudgetForBackgroundCompactionRuns = 99999 // tuned\n" +
+		" var enabled = true\n" +
+		"*** End Patch\n"
+
+	_, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+	if err == nil {
+		t.Fatal("Execute error = nil, want the five-rune drift refused")
+	}
+	if !strings.Contains(err.Error(), "hunk not found") {
+		t.Fatalf("err = %q, want a hunk-not-found refusal", err)
+	}
+	got, readErr := os.ReadFile(filepath.Join(dir, "a.go"))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(got) != file {
+		t.Fatalf("a.go = %q, want unchanged %q", got, file)
+	}
+}
+
+// Repeated whitespace is pure typesetting, so a hunk that re-spaces an aligned
+// assignment must match in the tolerant layer — which splices the file's own
+// bytes back for everything the hunk did not change — instead of falling
+// through to the fuzzy layer, which would overwrite the file's alignment with
+// the model's spacing.
+func TestApplyPatchTolerantMatchFoldsRepeatedWhitespace(t *testing.T) {
+	dir := t.TempDir()
+	file := "var (\n\tcount   = 1\n\tenabled = true\n)\n"
+	writeEditFixture(t, dir, "a.go", file)
+	patch := "*** Begin Patch\n" +
+		"*** Update File: " + filepath.Join(dir, "a.go") + "\n" +
+		"@@\n" +
+		" var (\n" +
+		"-\tcount = 1\n" +
+		"+\tcount = 2\n" +
+		" \tenabled = true\n" +
+		"*** End Patch\n"
+
+	out, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+	if err != nil {
+		t.Fatalf("Execute error = %v, want the re-spaced hunk to match tolerantly", err)
+	}
+	if !strings.Contains(out, tolerantMatchNote) {
+		t.Fatalf("result = %q, want the %s note", out, tolerantMatchNote)
+	}
+	if strings.Contains(out, "safe fuzzy matching") {
+		t.Fatalf("result = %q, must not reach the fuzzy layer for a pure re-spacing", out)
+	}
+	got, readErr := os.ReadFile(filepath.Join(dir, "a.go"))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	// The file's own alignment survives: only the value the hunk actually
+	// changed comes from the model's line.
+	if want := "var (\n\tcount   = 2\n\tenabled = true\n)\n"; string(got) != want {
+		t.Fatalf("a.go = %q, want %q", got, want)
+	}
+}
+
+// The parser's hunk-level errors carry the patch line they refer to; a patch
+// with several hunks is unactionable without it. The number must track the
+// offending hunk, not just be present.
+func TestApplyPatchParserErrorsNameTheHunkLine(t *testing.T) {
+	firstHunkBad := "*** Begin Patch\n" +
+		"*** Update File: unchanged.md\n" +
+		"@@\n" +
+		" ## 5. Related docs\n" +
+		"*** End Patch"
+	_, err := ParseApplyPatch(firstHunkBad)
+	if err == nil || !strings.Contains(err.Error(), "at line 3") {
+		t.Fatalf("err = %v, want the context-only hunk reported at line 3", err)
+	}
+	secondHunkBad := "*** Begin Patch\n" +
+		"*** Update File: unchanged.md\n" +
+		"@@\n" +
+		" keep\n" +
+		"-drop\n" +
+		"@@\n" +
+		" ## 5. Related docs\n" +
+		"*** End Patch"
+	_, err = ParseApplyPatch(secondHunkBad)
+	if err == nil || !strings.Contains(err.Error(), "at line 6") {
+		t.Fatalf("err = %v, want the context-only second hunk reported at line 6", err)
+	}
+	notAHunk := "*** Begin Patch\n" +
+		"*** Update File: unchanged.md\n" +
+		"@@\n" +
+		" keep\n" +
+		"-drop\n" +
+		"garbage\n" +
+		"*** End Patch"
+	if _, err := ParseApplyPatch(notAHunk); err == nil || !strings.Contains(err.Error(), "line 6") {
+		t.Fatalf("err = %v, want the stray line reported at line 6", err)
+	}
+}
+
+// Distinctive context is a per-line property. Summing the context lines'
+// lengths let "}" plus "});" clear the floor together, anchoring a fuzzy
+// rewrite on boilerplate that repeats throughout a real file.
+func TestApplyPatchFuzzyRejectsBoilerplateContext(t *testing.T) {
+	dir := t.TempDir()
+	file := "}\n\tretries := 3\n});\n"
+	writeEditFixture(t, dir, "a.js", file)
+	patch := "*** Begin Patch\n" +
+		"*** Update File: " + filepath.Join(dir, "a.js") + "\n" +
+		"@@\n" +
+		" }\n" +
+		"-\tretries := 2\n" +
+		"+\tretries := 9\n" +
+		" });\n" +
+		"*** End Patch\n"
+
+	if _, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch)); err == nil {
+		t.Fatal("Execute error = nil, want the boilerplate-anchored fuzzy hunk refused")
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "a.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != file {
+		t.Fatalf("a.js = %q, want unchanged %q", got, file)
+	}
+}

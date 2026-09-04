@@ -1,10 +1,12 @@
 package tools
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/keakon/chord/internal/pathutil"
@@ -45,8 +47,10 @@ type TokenEstimator func(text string) int
 // bypass, an existence probe, or a symlink-resolution oracle.
 type CompactContextValidator struct {
 	// ContinuationStateMaxTokens caps the estimated token cost of all text
-	// fields combined (matching the evidence-budget tier); zero means no cap.
-
+	// fields combined; zero means no cap. It is the only size limit on the
+	// state — there are no per-field or per-item caps — and it is budgeted
+	// independently of the evidence tier, so a long single field is fine as
+	// long as the whole state fits.
 	ContinuationStateMaxTokens int
 	// EstimateTokens converts text to an estimated token count; nil falls
 	// back to len(text)/3.
@@ -118,17 +122,50 @@ func (v CompactContextValidator) ParseCompactContextArgs(raw json.RawMessage) (C
 	// accounting as other context-pressure decisions. state_files paths are
 	// model-authored text too and count against the budget, so a checkpoint's
 	// self-description cannot crowd out an entire evidence tier.
-	aggregated := strings.Join([]string{
-		args.ActiveObjective,
-		args.NextStep,
-		strings.Join(args.Completed, "\n"),
-		strings.Join(args.Decisions, "\n"),
-		strings.Join(args.OpenIssues, "\n"),
-		strings.Join(args.StateFiles, "\n"),
-	}, "\n")
+	fields := []struct {
+		name string
+		text string
+	}{
+		{"active_objective", args.ActiveObjective},
+		{"next_step", args.NextStep},
+		{"completed", strings.Join(args.Completed, "\n")},
+		{"decisions", strings.Join(args.Decisions, "\n")},
+		{"open_issues", strings.Join(args.OpenIssues, "\n")},
+		{"state_files", strings.Join(args.StateFiles, "\n")},
+	}
+	texts := make([]string, len(fields))
+	for i, f := range fields {
+		texts[i] = f.text
+	}
+	aggregated := strings.Join(texts, "\n")
 	cost := v.estimateTokens(aggregated)
 	if limit := v.ContinuationStateMaxTokens; limit > 0 && cost > limit {
-		return CompactContextArgs{}, fmt.Errorf("continuation state exceeds the token budget (estimated_cost=%d, budget=%d); shorten active_objective/next_step/completed/decisions/open_issues/state_files and retry", cost, limit)
+		// Name the heaviest fields. With no per-field cap left, one dense
+		// field can consume the whole budget on its own, and a rejection that
+		// only lists every field name makes the model shorten the state
+		// blindly — usually trimming the fields that were never the problem.
+		type fieldCost struct {
+			name string
+			cost int
+		}
+		costs := make([]fieldCost, 0, len(fields))
+		for _, f := range fields {
+			if f.text == "" {
+				continue
+			}
+			costs = append(costs, fieldCost{name: f.name, cost: v.estimateTokens(f.text)})
+		}
+		// Descending by cost, ties by field order, so the message is stable.
+		slices.SortStableFunc(costs, func(a, b fieldCost) int { return cmp.Compare(b.cost, a.cost) })
+		largest := ""
+		if len(costs) > 0 {
+			parts := make([]string, 0, 2)
+			for _, c := range costs[:min(2, len(costs))] {
+				parts = append(parts, fmt.Sprintf("%s≈%d", c.name, c.cost))
+			}
+			largest = fmt.Sprintf("; largest: %s", strings.Join(parts, ", "))
+		}
+		return CompactContextArgs{}, fmt.Errorf("continuation state exceeds the token budget (estimated_cost=%d, budget=%d)%s; shorten active_objective/next_step/completed/decisions/open_issues/state_files and retry", cost, limit, largest)
 	}
 	return args, nil
 }

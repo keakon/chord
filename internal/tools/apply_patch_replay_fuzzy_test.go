@@ -80,7 +80,10 @@ func TestApplyPatchFuzzyResultNoteShowsActualLine(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Note: used safe fuzzy matching for 1 hunk(s)",
-		`Note: fuzzy hunk replaced the file's actual line "` + actualLine + `" with "replacement"; your hunk claimed "` + claimedLine + `"`,
+		// The note names the file and the 1-based line it overwrote, so a
+		// multi-file patch says which file drifted and the model can go read
+		// the exact line back.
+		`Note: fuzzy hunk replaced a.txt line 2: the file's actual line "` + actualLine + `" with "replacement"; your hunk claimed "` + claimedLine + `"`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("result = %q, want it to contain %q", out, want)
