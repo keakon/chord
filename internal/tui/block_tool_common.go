@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -571,6 +572,44 @@ func toolSummarySuppressesErrors(name string) bool {
 	return false
 }
 
+// spawnResultIDMaxWidth caps the ID shown in the collapsed summary so a
+// malformed result cannot push the one-line summary past the card width. Real
+// IDs are short opaque tokens (e.g. "svc-64"). It bounds display columns, not
+// rune count, so a wide-glyph ID is capped by what it actually occupies.
+const spawnResultIDMaxWidth = 24
+
+// parseSpawnResultID extracts the background process ID from a spawn result,
+// e.g. "id: svc-64\nstatus: running\n...". spawn reports the ID on its first
+// line and it is the handle for every later spawn_status / spawn_stop call, so
+// the collapsed card can name the process without being expanded. Returns ""
+// when the result is not in that shape, which lets callers fall back to the
+// bare state label.
+func parseSpawnResultID(result string) string {
+	for line := range strings.SplitSeq(result, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// spawn always emits "id:" first. Any other leading line means this is
+		// a different result shape (an error message, say), so stop rather than
+		// scanning for an "id:" later in the body.
+		value, ok := strings.CutPrefix(line, "id:")
+		if !ok {
+			return ""
+		}
+		id := strings.TrimSpace(value)
+		if id == "" || strings.ContainsFunc(id, unicode.IsSpace) {
+			return ""
+		}
+		id = sanitizeToolDisplayText(id)
+		if runewidth.StringWidth(id) > spawnResultIDMaxWidth {
+			id = runewidth.Truncate(id, spawnResultIDMaxWidth, "…")
+		}
+		return id
+	}
+	return ""
+}
+
 // formatToolResultSummaryLine returns the one-line state summary under the
 // tool header. Error results render their detail in the ↳ Error block, so
 // error states return "" instead of a redundant label like "Search failed".
@@ -596,6 +635,13 @@ func formatToolResultSummaryLine(b *Block) string {
 		// Shell expands with explicit exit-code detail, so avoid a redundant summary like "Passed".
 		return ""
 	case tools.NameSpawn:
+		// The ID is the handle for every later spawn_status / spawn_stop call,
+		// so surface it collapsed; expanding only repeats the same fields.
+		// spawn_stop is deliberately left as a bare label: its ID is an argument,
+		// so the header already names it and echoing it here would just repeat.
+		if id := parseSpawnResultID(trimmed); id != "" {
+			return fmt.Sprintf("Started · %s", id)
+		}
 		return "Started"
 	case tools.NameSpawnStop:
 		return "Stopped"
