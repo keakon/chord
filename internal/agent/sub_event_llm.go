@@ -41,6 +41,12 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 		if !llm.IsContextLengthExceeded(result.err) && s.recoverTerminalResponse(s.interruptedRequestRecoveryInstruction(), result.err) {
 			return
 		}
+		if llm.IsPreservableStreamInterruption(result.err) {
+			// Out of resume budget, or the error is not resumable: the turn
+			// ends here, but the text the reply already streamed still belongs
+			// in history rather than being dropped on the floor.
+			s.preserveInterruptedPartial()
+		}
 		s.sendEvent(Event{
 			Type:    EventAgentError,
 			Payload: result.err,
@@ -510,20 +516,54 @@ func (s *SubAgent) interruptedRequestRecoveryInstruction() string {
 	return "The previous model request was interrupted by a transient transport error. Re-check the task state and finish coordination now. If the task is complete, call Complete with a concise summary. If blocked or parent input is required, call Escalate or Notify instead of stopping after plain text."
 }
 
+// maxSubAgentStreamResumes bounds how many times one sub-agent turn restarts
+// after a preserved stream interruption. Unlike the main agent — where the user
+// watches the reply and can cancel — a sub-agent runs unattended and often in
+// parallel with siblings, so an unbounded loop would multiply across the fleet.
+// The client's transport cooldown paces each restart, so a handful is enough to
+// ride out a flaky gateway without turning one delegated task into a cost sink.
+const maxSubAgentStreamResumes = 3
+
+// preserveInterruptedPartial saves whatever body text the interrupted request
+// had already streamed as a durable interrupted assistant message. It is the
+// single place that honours the "produced text is never discarded" contract for
+// sub-agents, so it must run on the give-up path too, not only when a resume is
+// still available.
+func (s *SubAgent) preserveInterruptedPartial() {
+	if s == nil || s.turn == nil {
+		return
+	}
+	partial := strings.TrimSpace(s.turn.drainPartialText())
+	if partial == "" {
+		return
+	}
+	msg := message.Message{Role: "assistant", Content: partial, StopReason: "interrupted"}
+	s.ctxMgr.Append(msg)
+	s.persistMessageAsync(msg, "interrupted assistant message", nil)
+}
+
 func (s *SubAgent) recoverTerminalResponse(instruction string, cause error) bool {
-	if s == nil || s.turn == nil || s.turn.SubAgentTerminalRecoveryCount >= 1 {
+	if s == nil || s.turn == nil {
 		return false
 	}
 	if cause != nil && !isTransientSubAgentTransportError(cause) {
 		return false
 	}
-	if partial := strings.TrimSpace(s.turn.drainPartialText()); partial != "" {
-		msg := message.Message{Role: "assistant", Content: partial, StopReason: "interrupted"}
-		s.ctxMgr.Append(msg)
-		s.persistMessageAsync(msg, "interrupted assistant message", nil)
+	// A transport interruption and a reply that stopped at plain text are
+	// different failures with different budgets; charge the right one.
+	if cause != nil {
+		if s.turn.SubAgentStreamResumeCount >= maxSubAgentStreamResumes {
+			return false
+		}
+		s.turn.SubAgentStreamResumeCount++
+	} else {
+		if s.turn.SubAgentTerminalRecoveryCount >= 1 {
+			return false
+		}
+		s.turn.SubAgentTerminalRecoveryCount++
 	}
+	s.preserveInterruptedPartial()
 	s.parent.discardSpeculativeStreamToolsAndClearToolTrace(s.turn, "terminal_recovery")
-	s.turn.SubAgentTerminalRecoveryCount++
 	s.appendPendingUserMessage(pendingUserMessage{Content: instruction})
 	s.asyncCallLLMWithFlightMarked(s.turn, s.ctxMgr.Snapshot())
 	return true

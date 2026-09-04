@@ -1216,8 +1216,8 @@ func TestClient_VisibleInterruptedStreamCoolsKeyForEscalation(t *testing.T) {
 		if !ks.CooldownEnd.After(time.Now()) {
 			t.Fatalf("key cooldown_end = %v, want a future cooldown after the escalation", ks.CooldownEnd)
 		}
-		if ks.CooldownCount != 1 {
-			t.Fatalf("key cooldown_count = %d, want 1", ks.CooldownCount)
+		if ks.TransportFailureCount != 1 {
+			t.Fatalf("key transport_failure_count = %d, want 1", ks.TransportFailureCount)
 		}
 		if !ks.Recovering {
 			t.Fatal("cooled key should be marked recovering")
@@ -1261,14 +1261,105 @@ func TestClient_VisibleInterruptedStreamCoolsKeyForEscalation(t *testing.T) {
 		if !ks.Recovering {
 			t.Fatal("cooled key should be marked recovering")
 		}
-		// The interrupted-response settle path calls MarkKeySuccess before the
-		// escalation, so the count restarts at the base wait every round; the
-		// stream-error path keeps the count and therefore backs off
-		// exponentially across consecutive truncations.
+		// An interrupted response is a failed attempt, so it must not be
+		// marked as a key success: doing so would reset CooldownCount and pin
+		// this path at the base wait forever, however often the gateway
+		// truncates.
+		if ks.TransportFailureCount != 1 {
+			t.Fatalf("key transport_failure_count = %d, want 1", ks.TransportFailureCount)
+		}
 		if _, _, err := primaryCfg.SelectKeyWithContext(context.Background()); err == nil {
 			t.Fatal("SelectKeyWithContext succeeded, want AllKeysCoolingError while the key is cooled")
 		}
 	})
+}
+
+// TestClient_RepeatedInterruptionsGrowTheTransportCooldown pins the throttle
+// that replaces a round cap: consecutive truncations must back off, otherwise a
+// gateway that truncates after a few tokens keeps the agent restarting at a
+// fixed cadence while the history grows by two messages per round. Both shapes
+// of interruption are covered because they settle through different branches
+// and only one of them used to keep the failure count.
+func TestClient_RepeatedInterruptionsGrowTheTransportCooldown(t *testing.T) {
+	run := func(t *testing.T, call scriptedCall) time.Duration {
+		t.Helper()
+		cfg := testProviderConfigWithKeys("sample", "gpt-5.4", []string{"key-a"})
+		var waits []time.Duration
+		for round := 1; round <= 2; round++ {
+			impl := &scriptedProvider{calls: []scriptedCall{call}}
+			c := NewClient(cfg, impl, "gpt-5.4", 4096, "sys")
+			_, err := callCompleteStreamWithRetryForTest(
+				c, context.Background(), cfg, impl, "gpt-5.4", 4096,
+				RequestTuning{}, "", []message.Message{{Role: "user", Content: "hi"}},
+				nil, nil, true, nil, 0, &CallStatus{},
+			)
+			if err == nil {
+				t.Fatalf("round %d: err = nil, want an escalated interruption", round)
+			}
+			ks := *cfg.keyStates[0]
+			if ks.TransportFailureCount != round {
+				t.Fatalf("round %d: transport_failure_count = %d, want %d (first visible output must not clear the truncation backoff)", round, ks.TransportFailureCount, round)
+			}
+			waits = append(waits, time.Until(ks.CooldownEnd))
+		}
+		if waits[1] <= waits[0] {
+			t.Fatalf("cooldown did not grow across consecutive interruptions: %v then %v", waits[0], waits[1])
+		}
+		return waits[1]
+	}
+	t.Run("stream_error", func(t *testing.T) {
+		run(t, scriptedCall{streams: []message.StreamDelta{{Type: "text", Text: "partial "}}, err: io.ErrUnexpectedEOF})
+	})
+	t.Run("interrupted_response", func(t *testing.T) {
+		grown := run(t, scriptedCall{resp: &message.Response{Content: "partial ", StopReason: "interrupted"}})
+		// The throttle saturates far below maxProviderRetryDelay: the same
+		// ProviderConfig serves compaction, sub-agents and title generation,
+		// which must not be starved while one reply keeps truncating.
+		if grown > preservedInterruptionCooldownMax+time.Second {
+			t.Fatalf("cooldown = %v, want it capped near %v", grown, preservedInterruptionCooldownMax)
+		}
+	})
+}
+
+// TestProviderConfig_KeylessTransportCooldownStillThrottles covers providers
+// configured without an API key (local gateways, public endpoints). Their
+// selected credential is the empty string, so a key-scoped cooldown is a no-op
+// and the caller would restart a preserved interruption back-to-back with no
+// wait at all.
+func TestProviderConfig_KeylessTransportCooldownStillThrottles(t *testing.T) {
+	cfg := testProviderConfigWithKeys("local", "llama", nil)
+	if len(cfg.keyStates) != 0 {
+		t.Fatalf("keyStates = %d, want a keyless provider for this test", len(cfg.keyStates))
+	}
+	if _, _, err := cfg.SelectKeyWithContext(context.Background()); err != nil {
+		t.Fatalf("baseline SelectKeyWithContext err = %v, want nil", err)
+	}
+	cfg.MarkTransportCooldown("", preservedInterruptionCooldownBase, preservedInterruptionCooldownMax)
+	_, _, err := cfg.SelectKeyWithContext(context.Background())
+	cooling, ok := errors.AsType[*AllKeysCoolingError](err)
+	if !ok {
+		t.Fatalf("SelectKeyWithContext err = %v, want AllKeysCoolingError while the provider is cooling", err)
+	}
+	if cooling.RetryAfter <= 0 {
+		t.Fatalf("RetryAfter = %v, want a positive wait", cooling.RetryAfter)
+	}
+	first := cooling.RetryAfter
+	cfg.MarkTransportCooldown("", preservedInterruptionCooldownBase, preservedInterruptionCooldownMax)
+	_, _, err = cfg.SelectKeyWithContext(context.Background())
+	cooling, ok = errors.AsType[*AllKeysCoolingError](err)
+	if !ok {
+		t.Fatalf("second SelectKeyWithContext err = %v, want AllKeysCoolingError", err)
+	}
+	if cooling.RetryAfter <= first {
+		t.Fatalf("keyless cooldown did not grow: %v then %v", first, cooling.RetryAfter)
+	}
+	// A completed reply clears the backoff. With no second credential to fall
+	// back to, holding the door shut after the endpoint proved healthy would
+	// only stall the next request.
+	cfg.ClearTransportCooldown("")
+	if _, _, err := cfg.SelectKeyWithContext(context.Background()); err != nil {
+		t.Fatalf("after success SelectKeyWithContext err = %v, want nil", err)
+	}
 }
 
 // TestClient_InterruptedPartialResponseRespectsExplicitRetryCap guards the

@@ -73,6 +73,10 @@ func (p *ProviderConfig) markCooldownLocked(ks *KeyState, d time.Duration) {
 }
 
 func (p *ProviderConfig) markCooldownWithModeLocked(ks *KeyState, d time.Duration, exponential bool) {
+	p.markCooldownWithCapLocked(ks, d, exponential, maxProviderRetryDelay)
+}
+
+func (p *ProviderConfig) markCooldownWithCapLocked(ks *KeyState, d time.Duration, exponential bool, cap time.Duration) {
 	if ks == nil {
 		return
 	}
@@ -85,12 +89,69 @@ func (p *ProviderConfig) markCooldownWithModeLocked(ks *KeyState, d time.Duratio
 	ks.Recovering = true
 	effective := d
 	if exponential {
-		effective = saturatingDoublingDuration(d, maxProviderRetryDelay, ks.CooldownCount-1)
+		effective = saturatingDoublingDuration(d, cap, ks.CooldownCount-1)
 	}
 	end := time.Now().Add(effective)
 	if end.After(ks.CooldownEnd) {
 		ks.CooldownEnd = end
 	}
+}
+
+// MarkTransportCooldown paces retries after a transport-level failure that the
+// caller handles itself (a preserved stream interruption escalated for
+// continuation) rather than retrying in place. It grows with the credential's
+// consecutive failures like an ordinary cooldown but saturates at its own cap,
+// which is deliberately far below maxProviderRetryDelay: this cooldown throttles
+// one caller's restart cadence, and the same ProviderConfig is shared with
+// compaction, sub-agents and title generation, which must not be starved for a
+// minute because one reply kept truncating.
+//
+// Providers configured without keys carry the wait on the provider itself, so
+// the throttle still applies where there is no credential to rotate to.
+func (p *ProviderConfig) MarkTransportCooldown(key string, base, cap time.Duration) {
+	if base <= 0 {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.keyStates) == 0 {
+		p.keylessCooldownCount++
+		effective := saturatingDoublingDuration(base, cap, p.keylessCooldownCount-1)
+		if end := time.Now().Add(effective); end.After(p.keylessCooldownEnd) {
+			p.keylessCooldownEnd = end
+		}
+		return
+	}
+	p.forEachKeyStateByKeyLocked(key, func(ks *KeyState) {
+		ks.TransportFailureCount++
+		ks.Recovering = true
+		effective := saturatingDoublingDuration(base, cap, ks.TransportFailureCount-1)
+		if end := time.Now().Add(effective); end.After(ks.CooldownEnd) {
+			ks.CooldownEnd = end
+		}
+	})
+}
+
+// ClearTransportCooldown resets the truncation backoff after a reply completes
+// end to end. First visible output is not enough: that is exactly what a
+// gateway which truncates every reply produces.
+//
+// For a keyed provider it clears only the growth counter, leaving any wait
+// already in flight to expire like every other cooldown. A keyless provider
+// also has its wait cleared: there is no second credential to rotate to, so
+// keeping the door shut after the endpoint proved healthy would stall the next
+// request for nothing.
+func (p *ProviderConfig) ClearTransportCooldown(key string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.keyStates) == 0 {
+		p.keylessCooldownCount = 0
+		p.keylessCooldownEnd = time.Time{}
+		return
+	}
+	p.forEachKeyStateByKeyLocked(key, func(ks *KeyState) {
+		ks.TransportFailureCount = 0
+	})
 }
 
 func (p *ProviderConfig) markQuotaExhaustedLocked(ks *KeyState, until time.Time) {
@@ -324,6 +385,13 @@ func (p *ProviderConfig) SelectKeyWithContext(ctx context.Context) (string, bool
 		// No keys configured — return empty string for providers that don't require auth
 		// (e.g., local services, public APIs). The provider implementation should handle
 		// empty keys gracefully (e.g., omit Authorization header).
+		// A provider-scoped cooldown still gates the call: with no credential to
+		// rotate to, waiting it out is the only way a transport backoff can
+		// apply here (see MarkTransportCooldown).
+		if wait := time.Until(p.keylessCooldownEnd); wait > 0 {
+			p.mu.Unlock()
+			return "", false, &AllKeysCoolingError{RetryAfter: wait}
+		}
 		p.mu.Unlock()
 		return "", false, nil
 	}

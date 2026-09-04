@@ -262,10 +262,14 @@ func (e *EmptyResponseError) Error() string {
 // attempt, but its text is never thrown away: the partial stays on screen, the
 // error is escalated to the caller, and the caller saves the partial reply and
 // resumes it with a continuation prompt through the normal key/fallback
-// rotation. The caller caps automatic continuation rounds, after which the
-// preserved text is left in history for the user to resume by hand. An attempt
-// that streamed no body text — reasoning only, or a tool preview — keeps the
-// old silent retry instead of escalating.
+// rotation. Continuation is not capped by a round count: the credential that
+// truncated is put on a transport cooldown before the error is escalated, so
+// repeated interruptions rotate keys and fallback models and wait out cooldowns
+// instead of restarting back-to-back, and the loop ends when the reply
+// completes, an interruption carries no new visible text, the turn is cancelled
+// or goes stale, or a non-resumable error ends the turn. An attempt that
+// streamed no body text — reasoning only, or a tool preview — keeps the old
+// silent retry instead of escalating.
 type InterruptedResponseError struct {
 	StopReason string
 }

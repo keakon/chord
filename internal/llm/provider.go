@@ -125,17 +125,25 @@ type Provider interface {
 
 // KeyState tracks the state of a single API key for cooldown and load balancing.
 type KeyState struct {
-	Key               string
-	LastUsed          time.Time
-	CooldownEnd       time.Time
-	CooldownCount     int                             // consecutive cooldowns for exponential backoff
-	OAuthInfo         *OAuthKeyInfo                   // nil if not OAuth
-	RateLimit         *ratelimit.KeyRateLimitSnapshot // latest rate-limit snapshot (nil = no data yet)
-	Recovering        bool                            // true until the key proves healthy again via visible output after a failure/cooldown
-	ExhaustedUntil    time.Time                       // confirmed quota exhaustion (e.g. Codex OAuth) until real reset
-	Invalid           bool                            // permanently unusable (OAuth account deactivated or refresh token expired)
-	EverSelected      bool                            // true once this slot has been selected in the current process
-	SoftCooldownUntil time.Time                       // persisted Codex soft hint: latest known future reset across windows
+	Key           string
+	LastUsed      time.Time
+	CooldownEnd   time.Time
+	CooldownCount int // consecutive cooldowns for exponential backoff
+	// TransportFailureCount counts consecutive replies this credential
+	// truncated mid-stream. It is deliberately separate from CooldownCount:
+	// the stream tracker marks a key successful as soon as it emits its first
+	// visible token, which is the right signal for auth and rate-limit health
+	// but would clear the backoff of a gateway that reliably produces a few
+	// tokens and then drops the connection. Only a reply that actually
+	// completes clears this counter.
+	TransportFailureCount int
+	OAuthInfo             *OAuthKeyInfo                   // nil if not OAuth
+	RateLimit             *ratelimit.KeyRateLimitSnapshot // latest rate-limit snapshot (nil = no data yet)
+	Recovering            bool                            // true until the key proves healthy again via visible output after a failure/cooldown
+	ExhaustedUntil        time.Time                       // confirmed quota exhaustion (e.g. Codex OAuth) until real reset
+	Invalid               bool                            // permanently unusable (OAuth account deactivated or refresh token expired)
+	EverSelected          bool                            // true once this slot has been selected in the current process
+	SoftCooldownUntil     time.Time                       // persisted Codex soft hint: latest known future reset across windows
 }
 
 // OAuthKeySetup mirrors auth.yaml OAuth credential state needed to initialize a key slot.
@@ -189,13 +197,20 @@ func OAuthKeySetupSlotKey(slot int, key string) string {
 //     We only fetch usage for the currently selected OAuth credential (codex-rs style on-demand), and
 //     we debounce refreshes to avoid noisy background polling.
 type ProviderConfig struct {
-	mu                         sync.Mutex
-	name                       string
-	typeName                   string
-	apiURL                     string
-	oauthProfile               string
-	authScheme                 string // resolved request auth scheme; set once at construction, then read-only
-	keyStates                  []*KeyState
+	mu           sync.Mutex
+	name         string
+	typeName     string
+	apiURL       string
+	oauthProfile string
+	authScheme   string // resolved request auth scheme; set once at construction, then read-only
+	keyStates    []*KeyState
+	// keylessCooldownEnd/keylessCooldownCount back the same cooldown pacing for
+	// providers configured without any API key (local gateways, public
+	// endpoints). Those providers have no KeyState to carry the wait, so a
+	// key-scoped cooldown would silently be a no-op and leave the caller free
+	// to restart back-to-back.
+	keylessCooldownEnd         time.Time
+	keylessCooldownCount       int
 	limiter                    *rate.Limiter // optional rate limiter (nil = no rate limiting)
 	models                     map[string]config.ModelConfig
 	compat                     *config.ProviderCompatConfig // provider-level compat defaults

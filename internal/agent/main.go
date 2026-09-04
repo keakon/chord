@@ -100,9 +100,16 @@ type Turn struct {
 	partialTextMu sync.Mutex
 	partialText   strings.Builder
 	// SubAgent terminal recovery is intentionally bounded to one additional
-	// request so transport failures or text-only replies cannot spin forever.
+	// request so a text-only reply that never calls a coordination tool cannot
+	// spin forever.
 	SubAgentTerminalRecoveryCount int
-	SubAgentContextRecoveryCount  int
+	// Resuming a preserved stream interruption has its own budget: it is a
+	// transport failure, not a model that refuses to finish, and the client
+	// already paces each restart behind a credential cooldown. Sharing the
+	// terminal budget meant one network blip spent the wrap-up nudge, and a
+	// second blip dropped the text the reply had already produced.
+	SubAgentStreamResumeCount    int
+	SubAgentContextRecoveryCount int
 	// MalformedCount tracks consecutive LLM rounds where tool calls had
 	// abnormal arguments — either the malformed sentinel (invalid JSON) or
 	// empty "{}" for tools with required parameters (output truncation).

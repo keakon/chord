@@ -566,7 +566,16 @@ func assistantPrefillContinuationSupported(target FallbackModel) bool {
 		// rejected continuation is far worse than a redundant user turn,
 		// Anthropic targets always take the user-turn path.
 		return false
-	case modelcompat.WireFamilyOpenAIChat, modelcompat.WireFamilyOpenAIResponses, modelcompat.WireFamilyGemini:
+	case modelcompat.WireFamilyOpenAIChat:
+		// Chat Completions accepts a trailing assistant turn, with one known
+		// exception: backends that stream visible reasoning_content (the
+		// DeepSeek family and its compatibles) reject a request whose last
+		// message is an assistant turn unless prefix mode is explicitly
+		// enabled on it. Fall back to the portable user-turn path there for
+		// the same reason Anthropic does — a rejected continuation costs the
+		// whole turn, a redundant user turn costs a few tokens.
+		return reasoningContinuityCompatMode(target.ProviderConfig, target.ModelID) != modelcompat.ReasoningContinuityOpenAIVisible
+	case modelcompat.WireFamilyOpenAIResponses, modelcompat.WireFamilyGemini:
 		return true
 	default:
 		return false
@@ -1216,6 +1225,12 @@ func (c *Client) CompleteStreamWithOptions(
 		}
 	case errorsIsContextCanceled(err):
 	// User cancellation should not move the sticky model cursor.
+	case IsPreservableStreamInterruption(err):
+		// The reply was truncated in transport, not refused by the model, and
+		// the caller is about to resume it. Advancing the cursor here would
+		// hand the rest of one reply to a different model and — once that
+		// continuation succeeds — pin the whole session to the fallback for a
+		// single network blip.
 	default:
 		if len(pool) > 1 {
 			c.poolCursor = (startIdx + 1) % len(pool)

@@ -169,16 +169,24 @@ func isAllKeysCoolingError(err error) bool {
 // deterministic, so retrying forever would only burn time.
 const upstreamStreamFailureRetryRounds = 2
 
-// preservedInterruptionCooldownBase seeds the cooldown applied to the key that
-// just streamed a preserved partial before the interruption is escalated for
-// continuation. ProviderConfig.MarkCooldown grows the wait for the key's
-// consecutive failures (capped at maxProviderRetryDelay), so a transport that
-// keeps truncating mid-stream backs off over time instead of firing
-// back-to-back, while a single blip recovers after the base wait. This throttle
-// replaces a round cap: resumption itself is uncapped and only ends on
-// completion, no new visible text, cancellation, staleness, or a non-resumable
-// error.
-const preservedInterruptionCooldownBase = time.Second
+// preservedInterruptionCooldownBase seeds the cooldown applied to the
+// credential that just streamed a preserved partial before the interruption is
+// escalated for continuation. ProviderConfig.MarkTransportCooldown grows the
+// wait for that credential's consecutive failures, so a transport that keeps
+// truncating mid-stream backs off over time instead of firing back-to-back,
+// while a single blip recovers after the base wait. This throttle replaces a
+// round cap: resumption itself is uncapped and only ends on completion, no new
+// visible text, cancellation, staleness, or a non-resumable error.
+//
+// preservedInterruptionCooldownMax saturates that growth well below
+// maxProviderRetryDelay on purpose. The cooldown exists to pace one caller's
+// restarts, but it sits on a ProviderConfig shared with compaction, sub-agents
+// and title generation; letting it reach a minute would starve exactly the
+// compaction that a long continuation loop needs.
+const (
+	preservedInterruptionCooldownBase = time.Second
+	preservedInterruptionCooldownMax  = 8 * time.Second
+)
 
 func shouldContinueRetry(retryCount, maxAttempts int, lastErr error) bool {
 	return shouldContinueRetryMode(retryCount, maxAttempts, lastErr, false)
@@ -768,10 +776,22 @@ func (c *Client) completeStreamTarget(
 			// A response discarded below as StopReason "interrupted" is a
 			// failed attempt: counting it as a usable reply would reset the
 			// retry counter every round and defeat an explicit retry cap.
-			if resp.StopReason != "interrupted" && responseHasUsableOutput(resp) {
-				result.roundHadUsableReply = true
+			// The same reasoning applies to the key's health: marking the key
+			// successful here would clear CooldownCount, so the cooldown the
+			// interrupted branch applies below would restart at its base wait
+			// every round and never grow for a gateway that keeps truncating.
+			if resp.StopReason != "interrupted" {
+				if responseHasUsableOutput(resp) {
+					result.roundHadUsableReply = true
+				}
+				t.provider.MarkKeySuccess(apiKey)
+				// The reply ran to completion, so the credential is not the
+				// one truncating: drop the transport backoff. First visible
+				// output (where the stream tracker marks the key successful)
+				// is deliberately not enough — that is exactly what a gateway
+				// which truncates every reply produces.
+				t.provider.ClearTransportCooldown(apiKey)
 			}
-			t.provider.MarkKeySuccess(apiKey)
 			t.provider.WakeCodexRateLimitPolling()
 			inputTok, outputTok := 0, 0
 			if resp.Usage != nil {
@@ -1001,8 +1021,13 @@ func (c *Client) completeStreamTarget(
 		// retry-layer deferred rollback does not wipe the preserved text when
 		// this error unwinds.
 		if preservablePartial {
-			t.provider.MarkCooldown(apiKey, preservedInterruptionCooldownBase)
-			log.Warnf("interrupted visible stream with preserved partial text; cooling key and escalating for continuation provider=%v model=%v key_id=%v error=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), err)
+			t.provider.MarkTransportCooldown(apiKey, preservedInterruptionCooldownBase, preservedInterruptionCooldownMax)
+			log.Warnf("interrupted visible stream with preserved partial text; cooling credential and escalating for continuation provider=%v model=%v key_id=%v error=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), err)
+			// Record the cause like an ordinary silent retry so the failure is
+			// visible in the sidebar: the continuation itself only shows a
+			// resumed reply, which on a prefill-capable pool renders nothing
+			// at all.
+			emitRetryErrorForKey(cb, err, t.provider, t.modelID, apiKey)
 			pendingRollback = ""
 			return result, lastInputTokens, err
 		}
@@ -1066,8 +1091,9 @@ func (c *Client) completeStreamTarget(
 			// throttling the restart cadence without a round cap — and keep
 			// pendingRollback empty so the retry-layer deferred rollback does
 			// not wipe the preserved text when this error unwinds.
-			t.provider.MarkCooldown(apiKey, preservedInterruptionCooldownBase)
-			log.Warnf("interrupted response with preserved partial text; cooling key and escalating for continuation provider=%v model=%v key_id=%v content_len=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), len(resp.Content))
+			t.provider.MarkTransportCooldown(apiKey, preservedInterruptionCooldownBase, preservedInterruptionCooldownMax)
+			log.Warnf("interrupted response with preserved partial text; cooling credential and escalating for continuation provider=%v model=%v key_id=%v content_len=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), len(resp.Content))
+			emitRetryErrorForKey(cb, interruptedErr, t.provider, t.modelID, apiKey)
 			pendingRollback = ""
 			return result, lastInputTokens, interruptedErr
 		}
@@ -1383,6 +1409,15 @@ func (c *Client) completeStreamWithRetry(
 				oversizeSeen,
 				pendingRollback,
 			); err != nil {
+				// An escalated preserved interruption carries the partial text
+				// forward: the caller saves it as the interrupted assistant
+				// message and resumes it. A pendingRollback still armed by an
+				// earlier target (a thinking-only interruption that retried
+				// silently) would make the deferred rollback above wipe that
+				// text on the way out, so disarm it here.
+				if IsPreservableStreamInterruption(err) {
+					pendingRollback = ""
+				}
 				return nil, err
 			} else {
 				if _, repeatedEcho := errors.AsType[*ReplayEvidenceEchoError](targetResult.lastErr); repeatedEcho {

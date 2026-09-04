@@ -492,7 +492,9 @@ func TestSubAgentRecoveryRequestsKeepInFlightGateClosed(t *testing.T) {
 
 func TestSubAgentTerminalRecoveryIsBounded(t *testing.T) {
 	parent, sub := newMixedBatchTestSubAgent(t)
-	sub.turn.SubAgentTerminalRecoveryCount = 1
+	// Transport interruptions draw on their own budget, so exhaust that one:
+	// the terminal nudge is reserved for a reply that stopped at plain text.
+	sub.turn.SubAgentStreamResumeCount = maxSubAgentStreamResumes
 	sub.handleLLMResponse(&llmResult{turnID: 1, err: io.ErrUnexpectedEOF})
 
 	select {
