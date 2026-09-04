@@ -149,3 +149,53 @@ func TestApplyModelCompactionConfigReportsModelChange(t *testing.T) {
 		t.Fatal("a same-model re-apply must not report modelChanged")
 	}
 }
+
+// TestIdleDownshiftAutoContinueAwaitsUserInput pins the idle model-downshift
+// semantics: a compaction triggered by switching models while idle uses the
+// standard auto-continue continuation (so a fresh user message queued during
+// compaction still drains into a new turn), but the apply must surface idle
+// instead of re-firing the last user message in a brand-new LLM turn. The
+// awaitUserInput marker is what the resume branch keys on.
+func TestIdleDownshiftAutoContinueAwaitsUserInput(t *testing.T) {
+	a := modelDownshiftTestAgent(t, 1000000)
+	// A real session always has an earlier user message; without the marker
+	// the auto-continue resume would replay it (compactionResumeModeReplayUserIntent).
+	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "please inspect the failing test"})
+
+	const planID = uint64(8)
+	a.startCompactionState(planID, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerModelDownshift, continuationPlan{
+		kind:           compactionResumeAutoContinue,
+		awaitUserInput: true,
+	})
+	pending := a.currentCompactionPendingCall()
+	if pending == nil || !pending.awaitUserInput {
+		t.Fatal("the pending call must carry the awaitUserInput marker from the continuation plan")
+	}
+	if !a.resumePendingMainLLMAfterCompaction(pending, true) {
+		t.Fatal("an idle downshift apply must handle its own resume barrier")
+	}
+	if a.turn != nil {
+		t.Fatal("an idle model-downshift apply must not start a new turn that replays the last user message")
+	}
+	if a.mainLLMRequestInFlight.Load() {
+		t.Fatal("an idle model-downshift apply must not spawn an LLM request")
+	}
+}
+
+// TestActiveTurnAutoContinueResumeStillContinues guards the other side of the
+// same branch: a usage-driven auto-continue without the marker keeps its
+// replay-to-continue behavior (compactionResumeModeReplayUserIntent) instead
+// of being forced idle by the new flag.
+func TestActiveTurnAutoContinueResumeStillContinues(t *testing.T) {
+	a := modelDownshiftTestAgent(t, 1000000)
+	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "please inspect the failing test"})
+
+	const planID = uint64(9)
+	a.startCompactionState(planID, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerUsageDriven, continuationPlan{
+		kind: compactionResumeAutoContinue,
+	})
+	pending := a.currentCompactionPendingCall()
+	if pending == nil || pending.awaitUserInput {
+		t.Fatal("a usage-driven auto-continue must not carry the awaitUserInput marker")
+	}
+}

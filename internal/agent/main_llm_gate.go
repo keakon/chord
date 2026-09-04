@@ -19,6 +19,12 @@ type continuationPlan struct {
 	turnID           uint64
 	turnEpoch        uint64
 	agentErrSourceID string
+	// awaitUserInput marks a compactionResumeAutoContinue that must surface
+	// idle instead of re-firing the last user message when its draft applies:
+	// the compaction was triggered while the agent was idle (an idle
+	// model-downshift compaction after a /models switch), so only genuinely
+	// queued fresh input should wake a new turn.
+	awaitUserInput bool
 }
 
 type compactionTarget struct {
@@ -73,6 +79,7 @@ type pendingMainLLMCall struct {
 	planID             uint64
 	sessionEpoch       uint64
 	continuation       compactionContinuationKind
+	awaitUserInput     bool
 	oversizeSuspended  bool
 	downshiftSuspended bool
 	selectedModelRef   string
@@ -94,6 +101,7 @@ func (s *compactionState) pendingCall() *pendingMainLLMCall {
 		planID:             s.planID,
 		sessionEpoch:       s.target.sessionEpoch,
 		continuation:       s.continuation.kind,
+		awaitUserInput:     s.continuation.awaitUserInput,
 		oversizeSuspended:  s.oversizeSuspended,
 		downshiftSuspended: s.downshiftSuspended,
 	}
@@ -967,8 +975,14 @@ func (a *MainAgent) resumePendingMainLLMAfterCompaction(pending *pendingMainLLMC
 		return true
 	}
 	if pending.continuation == compactionResumeAutoContinue {
-		if a.pendingCompactionResume != nil && a.pendingCompactionResume.AwaitUserInput {
-			a.clearPendingCompactionResume()
+		// A continuation marked awaitUserInput (idle model-downshift
+		// compaction) or an oversize resume that found nothing to replay
+		// surfaces idle and only drains genuinely queued fresh input — it
+		// must not re-fire the last user message in a new turn.
+		if pending.awaitUserInput || (a.pendingCompactionResume != nil && a.pendingCompactionResume.AwaitUserInput) {
+			if a.pendingCompactionResume != nil {
+				a.clearPendingCompactionResume()
+			}
 			a.emitActivity("main", ActivityIdle, "")
 			if a.turn == nil {
 				a.emitInteractiveToTUI(a.parentCtx, IdleEvent{})

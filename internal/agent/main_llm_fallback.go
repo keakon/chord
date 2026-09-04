@@ -86,18 +86,27 @@ func (a *MainAgent) deferFallbackModelDownshift(payload *llmFallbackBoundaryPayl
 		a.effectiveCompactionReservedInput(),
 	)
 	a.applyModelCompactionConfig()
-	if !a.modelDownshiftCrossing() {
+	// Crossing must be evaluated without modelDownshiftCrossing's "not already
+	// running" gate: when a compaction is already in flight (e.g. the
+	// usage-driven compaction this round started in parallel at the gate), the
+	// else branch below still has to fold this round onto it and return the
+	// pending error — returning nil here would let the smaller-window fallback
+	// request go out over the line.
+	if !a.modelDownshiftLineCrossed() {
 		return nil
 	}
-	if !a.IsCompactionRunning() {
-		a.startDownshiftCompactionWithContinuation(a.ctxMgr.Snapshot(), payload.turnID, "")
-	} else {
+	if a.IsCompactionRunning() {
+		// Do not start a second worker for the same switch: fold the deferred
+		// round into the running compaction so its apply resumes this request
+		// (compactionResumeMainLLM) on the compacted context.
 		a.compactionState.continuation = continuationPlan{
 			kind:      compactionResumeMainLLM,
 			turnID:    payload.turnID,
 			turnEpoch: a.currentTurnEpoch(),
 		}
 		a.compactionState.downshiftSuspended = true
+	} else {
+		a.startDownshiftCompactionWithContinuation(a.ctxMgr.Snapshot(), payload.turnID, "")
 	}
 	return &fallbackModelDownshiftCompactionPendingError{
 		planID:           a.compactionState.planID,

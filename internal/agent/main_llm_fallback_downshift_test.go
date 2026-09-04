@@ -327,3 +327,71 @@ responseLoop:
 		t.Fatal("expected the resumed round to finish and settle the turn")
 	}
 }
+
+// TestFallbackBoundaryFoldsOntoRunningCompaction covers the running-compaction
+// arm of the fallback downshift deferral: a usage-driven compaction may already
+// be in flight (the pre-request gate starts it in parallel with the round) when
+// the fallback boundary arrives with a smaller window. The deferral must not
+// read the running compaction as "no crossing" — it folds the round onto the
+// running compaction and returns the pending error so the round is suspended
+// until that draft applies, instead of letting the smaller-window request go
+// out over the line.
+func TestFallbackBoundaryFoldsOntoRunningCompaction(t *testing.T) {
+	a := newReadyTestMainAgent(t)
+	a.globalConfig = &config.Config{
+		Context: config.ContextConfig{
+			Compaction: config.CompactionConfig{Threshold: 0.8},
+		},
+	}
+	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(1000, 1000, 0, 0.8)
+	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "continue the task"})
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 900})
+	a.newTurn()
+	a.started.Store(true)
+
+	// The round's gate started a usage-driven compaction in parallel; it is
+	// still in flight when the fallback boundary arrives.
+	const planID = uint64(4242)
+	a.startCompactionState(planID, compactionTarget{
+		sessionEpoch: a.sessionEpoch,
+		turnID:       a.turn.ID,
+		turnEpoch:    a.turn.Epoch,
+	}, compactionTriggerUsageDriven, continuationPlan{kind: compactionResumeAutoContinue})
+	t.Cleanup(func() {
+		if a.IsCompactionRunning() {
+			a.handleCompactionCancel()
+		}
+		a.compactionWg.Wait()
+	})
+
+	reply := make(chan llmFallbackBoundaryResult, 1)
+	a.handleLLMFallbackBoundary(Event{
+		Type:   EventLLMFallbackBoundary,
+		TurnID: a.turn.ID,
+		Payload: &llmFallbackBoundaryPayload{
+			turnID:               a.turn.ID,
+			messages:             a.ctxMgr.Snapshot(),
+			fallbackModelRef:     "provider/smaller-model",
+			fallbackContextLimit: 500,
+			fallbackInputLimit:   500,
+			reply:                reply,
+		},
+	})
+
+	result := <-reply
+	if !isFallbackModelDownshiftCompactionPending(result.err) {
+		t.Fatalf("fallback boundary error = %v, want pending model-downshift compaction", result.err)
+	}
+	if a.compactionState.planID != planID {
+		t.Fatalf("compaction plan changed = %v, want the running plan %v (no second worker may start)", a.compactionState.planID, planID)
+	}
+	if got := a.compactionState.continuation.kind; got != compactionResumeMainLLM {
+		t.Fatalf("folded continuation kind = %q, want %q", got, compactionResumeMainLLM)
+	}
+	if a.compactionState.continuation.turnID != a.turn.ID {
+		t.Fatalf("folded continuation turn = %d, want %d", a.compactionState.continuation.turnID, a.turn.ID)
+	}
+	if !a.compactionState.downshiftSuspended {
+		t.Fatal("the fallback round must be marked downshiftSuspended onto the running compaction")
+	}
+}

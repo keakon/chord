@@ -12,17 +12,32 @@ import (
 // for it to describe.
 const modelDownshiftNoticeText = "Context compacted to fit the new model's smaller window."
 
+// modelDownshiftLineCrossed reports whether the current context already
+// crosses the running model's auto-compaction line while an automatic
+// compaction is not suppressed. Unlike modelDownshiftCrossing it does not
+// require a compaction to be free: the fallback-boundary deferral must still
+// fold a round onto an already-running compaction instead of letting the
+// smaller-window request go out over the line.
+func (a *MainAgent) modelDownshiftLineCrossed() bool {
+	if a == nil || a.ctxMgr == nil || a.isUsageDrivenAutoCompactSuppressed() {
+		return false
+	}
+	return a.ctxMgr.AutoCompactDecision().ShouldCompact
+}
+
 // modelDownshiftCrossing reports whether the current context already crosses
 // the running model's auto-compaction line and an automatic compaction is not
 // suppressed or already in flight. It is the shared trigger condition for the
 // model-downshift compaction: moving to a smaller window makes this newly true
 // at the switch moment, while plain usage-driven compaction otherwise waits for
-// the next response finalize to arm.
+// the next response finalize to arm. The running gate keeps a second worker
+// from starting for one switch; callers that must act while a compaction is in
+// flight (the fallback boundary) use modelDownshiftLineCrossed instead.
 func (a *MainAgent) modelDownshiftCrossing() bool {
-	if a == nil || a.ctxMgr == nil || a.isUsageDrivenAutoCompactSuppressed() || a.IsCompactionRunning() {
+	if a == nil || a.IsCompactionRunning() {
 		return false
 	}
-	return a.ctxMgr.AutoCompactDecision().ShouldCompact
+	return a.modelDownshiftLineCrossed()
 }
 
 // maybeRunModelDownshiftCompaction starts the model-downshift compaction from
@@ -63,13 +78,22 @@ func (a *MainAgent) deferModelDownshiftCompactionAtGate(turnID uint64, agentErrS
 }
 
 // startDownshiftCompaction starts a model-downshift compaction with the
-// standard automatic continuation: after the draft applies the agent stays idle
-// unless fresh user input was queued meanwhile (compactionResumeAutoContinue).
+// standard automatic continuation, marked awaitUserInput: after the draft
+// applies the agent stays idle and waits for the user — the switch to the
+// smaller model is not a request, so the resume must not re-fire the last user
+// message. Fresh user input queued while the compaction ran is drained into a
+// new turn as usual (compactionResumeAutoContinue).
 func (a *MainAgent) startDownshiftCompaction() {
 	snapshot := a.ctxMgr.Snapshot()
 	a.fireBeforeCompressHook(snapshot, false)
 	planID, target := a.nextCompactionPlan()
 	a.scheduleCompactionAsync(snapshot, planID, target, compactionTriggerModelDownshift)
+	// scheduleCompactionAsync keeps kind compactionResumeAutoContinue (which
+	// also selects the continuation compaction profile), so the apply must
+	// learn from this flag that the resume has nothing to continue. Owned by
+	// the event loop like all of compactionState; set right after the plan was
+	// started.
+	a.compactionState.continuation.awaitUserInput = true
 }
 
 // startDownshiftCompactionWithContinuation starts a model-downshift compaction
