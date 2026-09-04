@@ -134,7 +134,16 @@ type SubAgent struct {
 	parent      *MainAgent      // reference to parent for event forwarding
 	parentCtx   context.Context
 	cancel      context.CancelFunc
-	recovery    *recovery.RecoveryManager // shared with MainAgent, thread-safe
+	// recovery is the fallback manager for a parentless sub-agent (tests and
+	// standalone runs). With a parent, writes resolve the manager per write
+	// through recoveryManager(): compaction replaces the parent's manager
+	// mid-session, and a pointer captured at spawn time would keep writing to
+	// the closed one — silently, since a write after Close is not a disk fault.
+	recovery *recovery.RecoveryManager
+	// sessionEpoch is the parent session this sub-agent persists for. A switch
+	// advances the parent's epoch, which stops this agent's in-flight writes
+	// from landing in the session that replaced its own.
+	sessionEpoch uint64
 
 	// turnMu guards concurrent CancelSubAgent vs runLoop turn creation.
 	turnMu sync.Mutex
@@ -263,13 +272,28 @@ func (s *SubAgent) startRunLoop() {
 	go s.runLoop()
 }
 
+// recoveryManager resolves the manager this sub-agent's writes belong to. With
+// a parent it is resolved per write and epoch-checked, so the agent follows a
+// compaction that replaced the manager and stops writing once a session switch
+// replaced its session. Without a parent (tests, standalone runs) it is the
+// manager handed in at construction.
+func (s *SubAgent) recoveryManager() *recovery.RecoveryManager {
+	if s == nil {
+		return nil
+	}
+	if s.parent == nil {
+		return s.recovery
+	}
+	return s.parent.recoveryManagerForEpoch(s.sessionEpoch)
+}
+
 func (s *SubAgent) persistMessageAsync(msg message.Message, description string, after func()) {
 	if s == nil {
 		return
 	}
 	if s.parent == nil {
-		if s.recovery != nil {
-			if err := s.recovery.PersistMessage(s.instanceID, msg); err != nil {
+		if manager := s.recoveryManager(); manager != nil {
+			if err := manager.PersistMessage(s.instanceID, msg); err != nil {
 				log.Warnf("SubAgent: failed to persist %s agent=%v error=%v", description, s.instanceID, err)
 				s.notePersistenceFailure(err)
 				return
@@ -280,7 +304,7 @@ func (s *SubAgent) persistMessageAsync(msg message.Message, description string, 
 		}
 		return
 	}
-	s.notePersistenceEnqueue(s.parent.persistAsyncAfter(s.instanceID, msg, func(err error) {
+	s.notePersistenceEnqueue(s.parent.persistAsyncForEpoch(s.sessionEpoch, s.instanceID, msg, func(err error) {
 		if err != nil {
 			s.notePersistenceFailure(err)
 			return
@@ -306,13 +330,14 @@ func (s *SubAgent) notePersistenceEnqueue(enqueued bool) bool {
 // callers can wait uniformly.
 func (s *SubAgent) persistMessageBarrier(msg message.Message, description string) (<-chan error, bool) {
 	barrier := make(chan error, 1)
-	if s == nil || s.recovery == nil {
+	manager := s.recoveryManager()
+	if s == nil || manager == nil {
 		barrier <- nil
 		return barrier, true
 	}
 	if s.parent == nil {
 		var err error
-		if writeErr := s.recovery.PersistMessage(s.instanceID, msg); writeErr != nil {
+		if writeErr := manager.PersistMessage(s.instanceID, msg); writeErr != nil {
 			log.Warnf("SubAgent: failed to persist %s agent=%v error=%v", description, s.instanceID, writeErr)
 			err = writeErr
 		}
@@ -322,7 +347,7 @@ func (s *SubAgent) persistMessageBarrier(msg message.Message, description string
 		barrier <- err
 		return barrier, true
 	}
-	enqueued := s.parent.persistAsyncAfter(s.instanceID, msg, func(err error) {
+	enqueued := s.parent.persistAsyncForEpoch(s.sessionEpoch, s.instanceID, msg, func(err error) {
 		if err != nil {
 			s.notePersistenceFailure(err)
 		}
@@ -381,14 +406,15 @@ func (s *SubAgent) notePersistenceFailure(err error) {
 }
 
 func (s *SubAgent) checkpointTranscript() error {
-	if s == nil || s.recovery == nil || !s.persistenceHealth.beginRecovery() {
+	manager := s.recoveryManager()
+	if s == nil || manager == nil || !s.persistenceHealth.beginRecovery() {
 		return nil
 	}
 	if s.parent != nil {
 		_ = s.parent.persistSubAgentMeta(s)
 		s.parent.updateTaskRecordFromSub(s, "")
 	}
-	if err := s.recovery.RewriteLog(s.instanceID, s.ctxMgr.Snapshot()); err != nil {
+	if err := manager.RewriteLog(s.instanceID, s.ctxMgr.Snapshot()); err != nil {
 		s.notePersistenceFailure(err)
 		return err
 	}
@@ -444,6 +470,7 @@ type SubAgentConfig struct {
 	SystemPrompt   string // custom role instructions from agent YAML body; empty = use built-in
 	LLMClient      *llm.Client
 	Recovery       *recovery.RecoveryManager
+	SessionEpoch   uint64 // parent session epoch this agent's writes belong to
 	Parent         *MainAgent
 	ParentCtx      context.Context
 	Cancel         context.CancelFunc
@@ -584,6 +611,7 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 		parentCtx:         cfg.ParentCtx,
 		cancel:            cfg.Cancel,
 		recovery:          cfg.Recovery,
+		sessionEpoch:      cfg.SessionEpoch,
 		ruleset:           cfg.Ruleset,
 		workDir:           cfg.WorkDir,
 		venvPath:          cfg.VenvPath,

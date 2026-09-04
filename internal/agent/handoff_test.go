@@ -111,7 +111,7 @@ func TestHandoffApproveSettlesResultBeforeSessionSwitch(t *testing.T) {
 	setupHandoffTurn(t, a, planPath)
 	reqID := a.pendingHandoff.RequestID
 	plannerSessionDir := a.SessionDir()
-	if err := a.recovery.PersistMessage(identity.MainAgentID, a.ctxMgr.Snapshot()[0]); err != nil {
+	if err := a.recoveryManager().PersistMessage(identity.MainAgentID, a.ctxMgr.Snapshot()[0]); err != nil {
 		t.Fatalf("persist planner tool call: %v", err)
 	}
 

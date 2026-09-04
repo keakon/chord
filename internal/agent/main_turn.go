@@ -137,7 +137,7 @@ func (a *MainAgent) recordCommittedUserMessage(userMsg message.Message) {
 			}
 		})
 	}
-	if a.recovery != nil {
+	if a.recoveryManager() != nil {
 		a.persistAsync(identity.MainAgentID, userMsg)
 	}
 }

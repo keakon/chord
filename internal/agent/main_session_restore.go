@@ -759,11 +759,12 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	}
 	a.skillsMu.Unlock()
 
-	if a.recovery != nil {
+	if manager := a.recoveryManager(); manager != nil {
 		if a.walltime != nil {
 			a.walltime.flush()
 		}
-		a.recovery.Close()
+		a.clearRecoveryManagerIf(manager)
+		manager.Close()
 	}
 	a.sessionEpoch++
 	a.resetThinkingTranslationSeen()
@@ -779,7 +780,7 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	// so the per-directory map cannot grow with every restore.
 	a.pruneCompactionIndexAllocators(loaded.SessionPath)
 	cleanupStalePendingCompactions(a.sessionDir, 5*time.Minute)
-	a.recovery = recovery.NewRecoveryManager(loaded.SessionPath)
+	a.installRecoveryManager(recovery.NewRecoveryManager(loaded.SessionPath))
 	a.usageLedger = analytics.NewUsageLedger(loaded.SessionPath, a.projectRoot)
 	if a.fileBackups != nil {
 		// activateLoadedSession bypasses installSessionTarget (which switches

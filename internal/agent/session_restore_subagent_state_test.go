@@ -268,7 +268,7 @@ func TestRestoreLoadedSubAgentsPreservesCompletedTaskState(t *testing.T) {
 	a.SetLLMFactory(func(systemPrompt string, agentModels []string, variant string) *llm.Client {
 		return newTestLLMClient()
 	})
-	if a.recovery == nil {
+	if a.recoveryManager() == nil {
 		t.Fatal("expected recovery manager")
 	}
 
@@ -693,11 +693,11 @@ func TestCancelledSubAgentSnapshotRestoresParkedCancelledTask(t *testing.T) {
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "cancelled-sub-state")
 	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
-	if err := a.recovery.PersistMessage("main", message.Message{Role: "user", Content: "main work"}); err != nil {
+	if err := a.recoveryManager().PersistMessage("main", message.Message{Role: "user", Content: "main work"}); err != nil {
 		t.Fatalf("PersistMessage(main): %v", err)
 	}
 	sub := newControllableTestSubAgent(t, a, "adhoc-7")
-	if err := a.recovery.PersistMessage(sub.instanceID, message.Message{Role: "user", Content: "worker task"}); err != nil {
+	if err := a.recoveryManager().PersistMessage(sub.instanceID, message.Message{Role: "user", Content: "worker task"}); err != nil {
 		t.Fatalf("PersistMessage(sub): %v", err)
 	}
 	a.saveRecoverySnapshot()
@@ -777,15 +777,15 @@ func TestMailboxReplyChainPersistsAcrossResume(t *testing.T) {
 	}
 	a := newTestMainAgent(t, projectRoot)
 	a.sessionDir = sessionDir
-	a.recovery = recovery.NewRecoveryManager(sessionDir)
-	if err := a.recovery.PersistMessage("main", message.Message{Role: "user", Content: "resume worker conversation"}); err != nil {
+	a.installRecoveryManager(recovery.NewRecoveryManager(sessionDir))
+	if err := a.recoveryManager().PersistMessage("main", message.Message{Role: "user", Content: "resume worker conversation"}); err != nil {
 		t.Fatalf("PersistMessage(main): %v", err)
 	}
 	a.ctxMgr.Append(message.Message{Role: "user", Content: "resume worker conversation"})
 	sub := newControllableTestSubAgent(t, a, "adhoc-7")
 	sub.agentDefName = "restorer"
 	sub.setState(SubAgentStateWaitingMain, "need decision")
-	if err := a.recovery.PersistMessage(sub.instanceID, message.Message{Role: "user", Content: "Investigate issue"}); err != nil {
+	if err := a.recoveryManager().PersistMessage(sub.instanceID, message.Message{Role: "user", Content: "Investigate issue"}); err != nil {
 		t.Fatalf("PersistMessage(sub): %v", err)
 	}
 	sub.ctxMgr.Append(message.Message{Role: "user", Content: "Investigate issue"})
@@ -892,7 +892,7 @@ func TestRestoreSessionCompletedTaskCanRehydrateFollowUp(t *testing.T) {
 
 	a := newTestMainAgent(t, projectRoot)
 	a.sessionDir = sessionDir
-	a.recovery = recovery.NewRecoveryManager(sessionDir)
+	a.installRecoveryManager(recovery.NewRecoveryManager(sessionDir))
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
 		"restorer": {
 			Name:   "restorer",
@@ -903,7 +903,7 @@ func TestRestoreSessionCompletedTaskCanRehydrateFollowUp(t *testing.T) {
 	a.SetLLMFactory(func(systemPrompt string, agentModels []string, variant string) *llm.Client {
 		return newTestLLMClient()
 	})
-	if err := a.recovery.PersistMessage("main", message.Message{Role: "user", Content: "resume this session"}); err != nil {
+	if err := a.recoveryManager().PersistMessage("main", message.Message{Role: "user", Content: "resume this session"}); err != nil {
 		t.Fatalf("PersistMessage(main): %v", err)
 	}
 	a.ctxMgr.Append(message.Message{Role: "user", Content: "resume this session"})
@@ -911,7 +911,7 @@ func TestRestoreSessionCompletedTaskCanRehydrateFollowUp(t *testing.T) {
 	sub.agentDefName = "restorer"
 	sub.taskDesc = "Investigate issue"
 	sub.ctxMgr.Append(message.Message{Role: "user", Content: "Investigate issue"})
-	if err := a.recovery.PersistMessage(sub.instanceID, message.Message{Role: "user", Content: "Investigate issue"}); err != nil {
+	if err := a.recoveryManager().PersistMessage(sub.instanceID, message.Message{Role: "user", Content: "Investigate issue"}); err != nil {
 		t.Fatalf("PersistMessage(sub): %v", err)
 	}
 	a.handleAgentDone(Event{

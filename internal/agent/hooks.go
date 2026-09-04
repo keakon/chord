@@ -437,7 +437,7 @@ func (a *MainAgent) appendHookFeedback(content string) {
 	// anchor of a context checkpoint or a terminal title.
 	msg := message.Message{Role: "user", Content: content, Kind: message.KindHookFeedback}
 	a.ctxMgr.Append(msg)
-	if a.recovery != nil {
+	if a.recoveryManager() != nil {
 		a.persistAsync(identity.MainAgentID, msg)
 	}
 }

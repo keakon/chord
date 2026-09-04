@@ -68,10 +68,13 @@ func (s *SubAgent) toolExecutionPipeline() toolExecutionPipeline {
 		},
 		visibleToolNames: s.visibleToolNames,
 		appendToolActivity: func(rec recovery.ToolActivityRecord) error {
-			if s.recovery == nil {
+			// Resolved per record, not captured with the pipeline: compaction
+			// replaces the manager and a switch retires it entirely.
+			manager := s.recoveryManager()
+			if manager == nil {
 				return nil
 			}
-			return s.recovery.AppendToolActivity(rec)
+			return manager.AppendToolActivity(rec)
 		},
 	}
 }

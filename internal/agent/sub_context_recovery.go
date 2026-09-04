@@ -95,11 +95,11 @@ func (s *SubAgent) compactContextForTarget(messages []message.Message, target in
 	} else {
 		compressed = append(compressed[:1], append([]message.Message{checkpoint}, compressed[1:]...)...)
 	}
-	if s.recovery != nil {
+	if manager := s.recoveryManager(); manager != nil {
 		if s.parent != nil {
 			s.parent.flushPersist()
 		}
-		if rewriteErr := s.recovery.RewriteLog(s.instanceID, compressed); rewriteErr != nil {
+		if rewriteErr := manager.RewriteLog(s.instanceID, compressed); rewriteErr != nil {
 			log.Warnf("SubAgent context compression could not rewrite durable history agent=%v error=%v", s.instanceID, rewriteErr)
 			return nil, false
 		}

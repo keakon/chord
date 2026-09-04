@@ -505,7 +505,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 	// so the intent barrier below can gate tool dispatch on it.
 	persistBarrier := make(chan error, 1)
 	persistPending := false
-	if a.recovery != nil {
+	if a.recoveryManager() != nil {
 		persistPending = a.persistAsyncAfter(identity.MainAgentID, assistantMsg, func(err error) {
 			a.notePersistenceFailure(err)
 			persistBarrier <- err
@@ -555,7 +555,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 
 	// Intent barrier: the assistant message carrying these tool calls must be
 	// process-crash durable before any tool body can produce side effects.
-	if len(batches) > 0 && a.recovery != nil {
+	if len(batches) > 0 && a.recoveryManager() != nil {
 		if err := a.waitPersistBarrier(persistBarrier, persistPending); err != nil {
 			a.failIntentBarrier(validCalls, err)
 			return
@@ -915,7 +915,7 @@ func (a *MainAgent) savePartialAssistantMsgForTurn(turn *Turn) bool {
 		StopReason: "interrupted",
 	}
 	a.ctxMgr.Append(msg)
-	if a.recovery != nil {
+	if a.recoveryManager() != nil {
 		a.persistAsync(identity.MainAgentID, msg)
 	}
 	log.Debugf("saved partial assistant message after stream interruption len=%v turn_id=%v", len(text), turn.ID)

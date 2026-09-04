@@ -161,12 +161,32 @@ func (a *MainAgent) persistAsync(agentID string, msg message.Message) {
 	a.persistAsyncAfter(agentID, msg, after)
 }
 
+// persistAsyncAfter enqueues a write for the live session. Callers that belong
+// to a specific session epoch must use persistAsyncForEpoch instead.
 func (a *MainAgent) persistAsyncAfter(agentID string, msg message.Message, after func(error)) bool {
+	return a.persistAsyncThrough(a.recoveryManager(), agentID, msg, after)
+}
+
+// persistAsyncForEpoch enqueues a write on behalf of a worker that belongs to
+// sessionEpoch — a sub-agent, whose goroutine outlives the switch that froze
+// its session. Resolving the manager here rather than at spawn time is what
+// makes the write follow a compaction that replaced the manager, and the epoch
+// check is what keeps a frozen agent's message out of the successor session's
+// transcript.
+func (a *MainAgent) persistAsyncForEpoch(sessionEpoch uint64, agentID string, msg message.Message, after func(error)) bool {
+	return a.persistAsyncThrough(a.recoveryManagerForEpoch(sessionEpoch), agentID, msg, after)
+}
+
+// persistAsyncThrough queues one write against an already-resolved manager. A
+// nil manager still queues and still reports success to the caller: there is no
+// session file to write for, which is not a durability fault the writer can act
+// on (the same reasoning as ignoring ErrClosed in notePersistenceFailure).
+func (a *MainAgent) persistAsyncThrough(manager *recovery.RecoveryManager, agentID string, msg message.Message, after func(error)) bool {
 	if a.shuttingDown.Load() {
 		return false
 	}
 	start := time.Now()
-	if !a.persist.enqueue(persistEntry{agentID: agentID, msg: msg, recovery: a.recovery, after: after}, a.stoppingCh) {
+	if !a.persist.enqueue(persistEntry{agentID: agentID, msg: msg, recovery: manager, after: after}, a.stoppingCh) {
 		return false
 	}
 	blocked := time.Since(start)
@@ -329,14 +349,18 @@ func (a *MainAgent) resetPersistenceHealthForSessionTarget() {
 // transcript. Success restores healthy; failure stays degraded while the
 // Q&A-only turn is still allowed to proceed.
 func (a *MainAgent) tryRecoverPersistenceBeforeTurn() {
-	if a == nil || a.recovery == nil || !a.persistenceDegraded() {
+	if a == nil {
+		return
+	}
+	manager := a.recoveryManager()
+	if manager == nil || !a.persistenceDegraded() {
 		return
 	}
 	if !a.persistenceHealth.beginRecovery() {
 		return
 	}
 	a.flushPersist()
-	if err := a.recovery.RewriteLog(identity.MainAgentID, a.ctxMgr.Snapshot()); err != nil {
+	if err := manager.RewriteLog(identity.MainAgentID, a.ctxMgr.Snapshot()); err != nil {
 		a.notePersistenceFailure(err)
 		return
 	}

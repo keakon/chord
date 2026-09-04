@@ -69,7 +69,7 @@ func (a *MainAgent) clearPendingCompactionResume() {
 }
 
 func (a *MainAgent) syncPendingCompactionResumeSnapshot() {
-	if a == nil || a.recovery == nil || a.shuttingDown.Load() {
+	if a == nil || a.recoveryManager() == nil || a.shuttingDown.Load() {
 		return
 	}
 	a.setPendingCompactionResume(a.snapshotPendingCompactionResume())

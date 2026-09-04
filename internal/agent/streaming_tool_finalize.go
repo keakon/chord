@@ -19,7 +19,7 @@ func (a *MainAgent) commitPromotedToolSideEffects(tc message.ToolCall, payload *
 		return nil
 	}
 	if payload.speculativeHooks != nil && payload.speculativeHooks.commit != nil {
-		if err := appendPromotedTodoActivity(a.recovery, identity.MainAgentID, payload.TurnID, tc); err != nil {
+		if err := appendPromotedTodoActivity(a.recoveryManager(), identity.MainAgentID, payload.TurnID, tc); err != nil {
 			return err
 		}
 		if err := payload.speculativeHooks.commit(); err != nil {

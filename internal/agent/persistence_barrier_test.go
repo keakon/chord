@@ -94,7 +94,7 @@ func TestPromotedTodoWritesStartedJournalBeforeCommit(t *testing.T) {
 	rm := recovery.NewRecoveryManager(t.TempDir())
 	t.Cleanup(rm.Close)
 	committed := false
-	a := &MainAgent{recovery: rm}
+	a := &MainAgent{recoveryOwner: &recoveryOwnership{manager: rm}}
 	call := message.ToolCall{ID: "todo-1", Name: tools.NameTodoWrite, Args: json.RawMessage(`{"todos":[]}`)}
 	payload := &ToolResultPayload{
 		TurnID: 7,
@@ -122,7 +122,7 @@ func TestPromotedTodoJournalFailureBlocksCommit(t *testing.T) {
 	rm := recovery.NewRecoveryManager(t.TempDir())
 	rm.Close()
 	committed := false
-	a := &MainAgent{recovery: rm}
+	a := &MainAgent{recoveryOwner: &recoveryOwnership{manager: rm}}
 	call := message.ToolCall{ID: "todo-1", Name: tools.NameTodoWrite, Args: json.RawMessage(`{"todos":[]}`)}
 	payload := &ToolResultPayload{
 		TurnID: 7,
@@ -231,7 +231,7 @@ func TestToolExecutionPipelineJournalFailureBlocksExecute(t *testing.T) {
 func TestIntentBarrierPersistsAssistantBeforeToolDispatch(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.sessionDir = filepath.Join(t.TempDir(), "session")
-	a.recovery = recovery.NewRecoveryManager(a.sessionDir)
+	a.installRecoveryManager(recovery.NewRecoveryManager(a.sessionDir))
 	a.newTurn()
 
 	payload := &LLMResponsePayload{
@@ -242,7 +242,7 @@ func TestIntentBarrierPersistsAssistantBeforeToolDispatch(t *testing.T) {
 
 	// The barrier is synchronous inside handleLLMResponse: by the time it
 	// returns, the assistant tool-call message must already be on disk.
-	msgs, err := a.recovery.LoadMessages(identity.MainAgentID)
+	msgs, err := a.recoveryManager().LoadMessages(identity.MainAgentID)
 	if err != nil {
 		t.Fatalf("LoadMessages: %v", err)
 	}
@@ -301,7 +301,7 @@ func newBrokenPathRecoveryManager(t *testing.T) *recovery.RecoveryManager {
 
 func TestAssistantPersistenceFailureWithoutToolsDegradesMainAgent(t *testing.T) {
 	a := newReadyTestMainAgent(t)
-	a.recovery = newBrokenPathRecoveryManager(t)
+	a.installRecoveryManager(newBrokenPathRecoveryManager(t))
 	a.newTurn()
 
 	a.handleLLMResponse(Event{Type: EventLLMResponse, TurnID: a.turn.ID, Payload: &LLMResponsePayload{
@@ -410,7 +410,7 @@ func TestLoopPausedWhenPersistenceDegraded(t *testing.T) {
 func TestTryRecoverPersistenceBeforeTurnRecoversAfterCheckpoint(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.sessionDir = filepath.Join(t.TempDir(), "session")
-	a.recovery = recovery.NewRecoveryManager(a.sessionDir)
+	a.installRecoveryManager(recovery.NewRecoveryManager(a.sessionDir))
 	a.ctxMgr.Append(message.Message{Role: "user", Content: "hi"})
 	a.persistenceHealth.markDegraded(errors.New("disk full"))
 
@@ -487,7 +487,7 @@ func awaitSyntheticToolResult(t *testing.T, a *MainAgent) {
 
 func TestFailIntentBarrierSynthesizesNotStartedResults(t *testing.T) {
 	a := newReadyTestMainAgent(t)
-	a.recovery = newBrokenPathRecoveryManager(t) // force the intent barrier to fail closed
+	a.installRecoveryManager(newBrokenPathRecoveryManager(t)) // force the intent barrier to fail closed
 	a.newTurn()
 
 	payload := &LLMResponsePayload{
@@ -524,8 +524,8 @@ func TestFailIntentBarrierSynthesizesNotStartedResults(t *testing.T) {
 func TestRepeatedIntentBarrierFailuresAbortTurn(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.sessionDir = filepath.Join(t.TempDir(), "session")
-	a.recovery = recovery.NewRecoveryManager(a.sessionDir)
-	a.recovery.Close() // force every intent barrier to fail closed
+	a.installRecoveryManager(recovery.NewRecoveryManager(a.sessionDir))
+	a.recoveryManager().Close() // force every intent barrier to fail closed
 	a.newTurn()
 	// Simulate a prior LLM round in this turn whose dispatch already failed the
 	// barrier; this round's failure is the second consecutive one.
@@ -558,8 +558,8 @@ func TestRepeatedIntentBarrierFailuresAbortTurn(t *testing.T) {
 func TestIntentBarrierSuccessResetsBarrierFailureRounds(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.sessionDir = filepath.Join(t.TempDir(), "session")
-	a.recovery = recovery.NewRecoveryManager(a.sessionDir)
-	t.Cleanup(a.recovery.Close)
+	a.installRecoveryManager(recovery.NewRecoveryManager(a.sessionDir))
+	t.Cleanup(a.recoveryManager().Close)
 	a.startPersistLoop()
 	t.Cleanup(a.closePersistLoop)
 	a.newTurn()

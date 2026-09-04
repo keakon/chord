@@ -18,7 +18,7 @@ func newPeerTestSubAgent(t *testing.T, parent *MainAgent, instanceID, taskID str
 	ctx, cancel := context.WithCancel(parent.parentCtx)
 	sub := NewSubAgent(SubAgentConfig{
 		InstanceID: instanceID, TaskID: taskID, AgentDefName: "worker", TaskDesc: "peer work",
-		LLMClient: newTestLLMClient(), Recovery: parent.recovery, Parent: parent,
+		LLMClient: newTestLLMClient(), Recovery: parent.recoveryManager(), Parent: parent,
 		ParentCtx: ctx, Cancel: cancel, BaseTools: parent.tools, WorkDir: parent.projectRoot,
 		SessionDir: parent.sessionDir, ModelName: "test-model",
 	})
@@ -204,7 +204,7 @@ func TestRespondedAgentRequestUsesDurableTranscriptEvidence(t *testing.T) {
 	a.subs.agentRequests[request.CorrelationID] = cloneDurableAgentRequest(request)
 	a.subs.mu.Unlock()
 	mailbox := &message.MailboxMetadata{MessageID: request.Response.ResponseID, MessageType: string(AgentMessageTypeResponse)}
-	if err := a.recovery.PersistMessage(sub.instanceID, message.Message{Role: "user", Content: "option A", Kind: message.KindSubAgentMailbox, Mailbox: mailbox}); err != nil {
+	if err := a.recoveryManager().PersistMessage(sub.instanceID, message.Message{Role: "user", Content: "option A", Kind: message.KindSubAgentMailbox, Mailbox: mailbox}); err != nil {
 		t.Fatal(err)
 	}
 	a.subs.mu.Lock()

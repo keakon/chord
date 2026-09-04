@@ -628,8 +628,8 @@ func newTestMainAgent(t *testing.T, projectRoot string) *MainAgent {
 		a.cancel()
 		a.outputWg.Wait()
 		_ = a.Shutdown(2 * time.Second)
-		if a.recovery != nil {
-			a.recovery.Close()
+		if a.recoveryManager() != nil {
+			a.recoveryManager().Close()
 		}
 	})
 	return a
@@ -1421,7 +1421,7 @@ func TestRunningModelRefAndKeyStatsFollowFocusedSubAgent(t *testing.T) {
 		parent:     a,
 		parentCtx:  context.Background(),
 		cancel:     cancel,
-		recovery:   a.recovery,
+		recovery:   a.recoveryManager(),
 		ctxMgr:     ctxmgr.NewManager(100, 0),
 		turn: &Turn{
 			ID:              1,
@@ -1643,7 +1643,7 @@ func TestStartPlanExecutionLoopAssessmentWaitsForActiveSubAgentSignals(t *testin
 		parentCtx:  ctx,
 		cancel:     cancel,
 		inputCh:    make(chan pendingUserMessage, 1),
-		recovery:   a.recovery,
+		recovery:   a.recoveryManager(),
 		ctxMgr:     ctxmgr.NewManager(100, 0),
 	}
 	a.subs.mu.Lock()

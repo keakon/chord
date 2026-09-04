@@ -52,7 +52,8 @@ func (a *MainAgent) baseSubAgentConfig(agentDef *config.AgentConfig, instanceID 
 		Color:         agentDef.Color,
 		SystemPrompt:  agentDef.SystemPrompt,
 		LLMClient:     client,
-		Recovery:      a.recovery,
+		Recovery:      a.recoveryManager(),
+		SessionEpoch:  a.recoverySessionEpoch(),
 		Parent:        a,
 		ParentCtx:     parentCtx,
 		Cancel:        cancel,
@@ -944,7 +945,7 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 	a.subs.taskRecords[taskID] = cloneDurableTaskRecord(registrationRecord)
 	a.subs.notifyTaskChangeLocked()
 	a.subs.mu.Unlock()
-	if a.recovery != nil {
+	if a.recoveryManager() != nil {
 		if err := a.persistSnapshotLocked(a.buildRecoverySnapshot); err != nil {
 			a.subs.mu.Lock()
 			delete(a.subs.subAgents, sub.instanceID)

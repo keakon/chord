@@ -560,7 +560,8 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 	if a.llmFactory == nil {
 		return nil, "", false, fmt.Errorf("LLM client factory not configured; call SetLLMFactory before rehydrating SubAgents")
 	}
-	msgs, err := loadTaskHistoryMessages(a.recovery, record, loadToolActivityStarted(a.recovery))
+	manager := a.recoveryManager()
+	msgs, err := loadTaskHistoryMessages(manager, record, loadToolActivityStarted(manager))
 	if err != nil {
 		return nil, "", false, fmt.Errorf("load task history for %s: %w", record.TaskID, err)
 	}
@@ -703,7 +704,7 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 	a.subs.taskRecords[taskID] = cloneDurableTaskRecord(rehydratedRecord)
 	a.subs.notifyTaskChangeLocked()
 	a.subs.mu.Unlock()
-	if a.recovery != nil {
+	if a.recoveryManager() != nil {
 		if snapshotErr := a.persistSnapshotLocked(a.buildRecoverySnapshot); snapshotErr != nil {
 			a.subs.mu.Lock()
 			delete(a.subs.subAgents, sub.instanceID)

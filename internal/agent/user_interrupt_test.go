@@ -106,7 +106,7 @@ func TestCancelCurrentTurnInterruptsRunningSubAgents(t *testing.T) {
 		}},
 	}
 	sub.ctxMgr.Append(assistant)
-	if err := a.recovery.PersistMessage(sub.instanceID, assistant); err != nil {
+	if err := a.recoveryManager().PersistMessage(sub.instanceID, assistant); err != nil {
 		t.Fatalf("PersistMessage(sub assistant): %v", err)
 	}
 	sub.turn.PendingToolCalls.Store(1)
@@ -136,7 +136,7 @@ func TestCancelCurrentTurnInterruptsRunningSubAgents(t *testing.T) {
 		t.Fatalf("sub tool message = %q, want %q", got, toolCallFailureMessage(context.Canceled))
 	}
 
-	restored, err := a.recovery.LoadMessages(sub.instanceID)
+	restored, err := a.recoveryManager().LoadMessages(sub.instanceID)
 	if err != nil {
 		t.Fatalf("LoadMessages(sub): %v", err)
 	}
@@ -161,7 +161,7 @@ func TestCancelCurrentTurnReportsIdleSubAgentCancellationAndSnapshotsState(t *te
 		t.Fatalf("sub.State() = %q, want %q", got, SubAgentStateCancelled)
 	}
 
-	snapshot, err := a.recovery.Recover()
+	snapshot, err := a.recoveryManager().Recover()
 	if err != nil {
 		t.Fatalf("Recover(): %v", err)
 	}

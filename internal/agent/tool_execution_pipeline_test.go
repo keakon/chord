@@ -1009,7 +1009,7 @@ func newToolPipelineConsistencyAgents(t *testing.T) (*MainAgent, *SubAgent) {
 		AgentDefName: "worker",
 		TaskDesc:     "check tool execution",
 		LLMClient:    newTestLLMClient(),
-		Recovery:     parent.recovery,
+		Recovery:     parent.recoveryManager(),
 		Parent:       parent,
 		ParentCtx:    parent.parentCtx,
 		Cancel:       func() {},

@@ -17,7 +17,7 @@ func newSubtreeTestSubAgent(t *testing.T, parent *MainAgent, instanceID, taskID 
 		AgentDefName: "worker",
 		TaskDesc:     "do work",
 		LLMClient:    newTestLLMClient(),
-		Recovery:     parent.recovery,
+		Recovery:     parent.recoveryManager(),
 		Parent:       parent,
 		ParentCtx:    ctx,
 		Cancel:       cancel,

@@ -116,7 +116,7 @@ func TestCancelCurrentTurnWithPendingToolsPersistsCancelledToolResult(t *testing
 		t.Fatalf("second message = %#v, want cancelled tool result", msgs[1])
 	}
 
-	restored, err := a.recovery.LoadMessages("main")
+	restored, err := a.recoveryManager().LoadMessages("main")
 	if err != nil {
 		t.Fatalf("LoadMessages(main): %v", err)
 	}
@@ -226,7 +226,7 @@ func TestCancelCurrentTurnDiscardsSpeculativeToolCardWithoutPersistingToolMessag
 	if msgs := a.GetMessages(); len(msgs) != 0 {
 		t.Fatalf("len(GetMessages()) = %d, want 0 (speculative tool call must not persist)", len(msgs))
 	}
-	if restored, err := a.recovery.LoadMessages("main"); err != nil {
+	if restored, err := a.recoveryManager().LoadMessages("main"); err != nil {
 		t.Fatalf("LoadMessages(main): %v", err)
 	} else if len(restored) != 0 {
 		t.Fatalf("len(restored main messages) = %d, want 0", len(restored))
@@ -314,7 +314,7 @@ func TestAppendCompletedInterruptedToolResultPersistsPayload(t *testing.T) {
 		t.Fatal("expected completed speculative tool result to be persisted immediately")
 	}
 
-	restored, err := a.recovery.LoadMessages("main")
+	restored, err := a.recoveryManager().LoadMessages("main")
 	if err != nil {
 		t.Fatalf("LoadMessages(main): %v", err)
 	}

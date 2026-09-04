@@ -471,9 +471,13 @@ func (a *MainAgent) rewriteSessionAfterCompaction(index int, messages []message.
 		}
 	}
 
-	if a.recovery != nil {
-		a.recovery.Close()
-		a.recovery = nil
+	// The rewrite replaces the manager within the same session, so sub-agents
+	// and tool goroutines must follow it: they resolve the manager per write
+	// through the ownership rather than caching one, and see nil for the span
+	// where the transcript file is being swapped underneath them.
+	if manager := a.recoveryManager(); manager != nil {
+		a.clearRecoveryManagerIf(manager)
+		manager.Close()
 	}
 
 	if hadMain {
@@ -490,11 +494,11 @@ func (a *MainAgent) rewriteSessionAfterCompaction(index int, messages []message.
 			if hadMain {
 				_ = os.Rename(backupPath, mainPath)
 			}
-			a.recovery = recovery.NewRecoveryManager(a.sessionDir)
+			a.installRecoveryManager(recovery.NewRecoveryManager(a.sessionDir))
 			return "", err
 		}
 	}
-	a.recovery = rm
+	a.installRecoveryManager(rm)
 	if a.usageLedger != nil {
 		firstUser := ""
 		for _, msg := range messages {
@@ -566,18 +570,21 @@ func spawnStatesForSnapshot() []recovery.BackgroundObjectState {
 // the whole build + SaveSnapshot runs under recoverySnapshotMu so concurrent
 // writers (the event loop's apply/TodoWrite/freeze paths and SubAgent
 // persistence callbacks) can never interleave a stale build after a fresher
-// write. The recovery manager is captured inside the lock, so a session
-// switch cannot swap a.recovery between the guard and the write.
+// write. The recovery manager is resolved inside the same guard that
+// installRecoveryManager and clearRecoveryManagerIf take, so a session switch
+// really cannot swap it between the guard and the write: the snapshot is built
+// from, and written through, one session's state.
 func (a *MainAgent) persistSnapshotLocked(build func() *recovery.SessionSnapshot) error {
 	if a == nil {
 		return nil
 	}
 	a.recoverySnapshotMu.Lock()
 	defer a.recoverySnapshotMu.Unlock()
-	if a.recovery == nil {
+	manager := a.recoveryManager()
+	if manager == nil {
 		return nil
 	}
-	return a.recovery.SaveSnapshot(build())
+	return manager.SaveSnapshot(build())
 }
 
 func (a *MainAgent) saveRecoverySnapshot() {

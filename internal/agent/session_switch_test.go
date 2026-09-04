@@ -997,7 +997,7 @@ func TestHandleForkSessionCommandTailUserEditsInPlaceWithoutFork(t *testing.T) {
 	a.ctxMgr.RestoreMessages(msgs)
 	a.fileTrack = filelock.NewFileTracker()
 	a.restoreMainTrackedFileState(msgs)
-	if err := a.recovery.RewriteLog("main", msgs); err != nil {
+	if err := a.recoveryManager().RewriteLog("main", msgs); err != nil {
 		t.Fatalf("RewriteLog(main): %v", err)
 	}
 	if err := a.usageLedger.SetFirstUserMessage("read alpha"); err != nil {
@@ -1022,7 +1022,7 @@ func TestHandleForkSessionCommandTailUserEditsInPlaceWithoutFork(t *testing.T) {
 		t.Fatal("tracked snapshot for prefix message should be preserved after in-place tail edit")
 	}
 
-	persisted, err := a.recovery.LoadMessages("main")
+	persisted, err := a.recoveryManager().LoadMessages("main")
 	if err != nil {
 		t.Fatalf("LoadMessages(main): %v", err)
 	}

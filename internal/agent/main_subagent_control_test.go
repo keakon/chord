@@ -28,7 +28,7 @@ func newControllableTestSubAgent(t *testing.T, parent *MainAgent, taskID string)
 		AgentDefName: "worker",
 		TaskDesc:     "do work",
 		LLMClient:    newTestLLMClient(),
-		Recovery:     parent.recovery,
+		Recovery:     parent.recoveryManager(),
 		Parent:       parent,
 		ParentCtx:    ctx,
 		Cancel:       cancel,
@@ -1955,7 +1955,7 @@ func TestOwnerReactivationSavesFreshSnapshot(t *testing.T) {
 		t.Fatal("routeOwnedSubAgentMailbox() = false, want true")
 	}
 
-	snap, err := a.recovery.Recover()
+	snap, err := a.recoveryManager().Recover()
 	if err != nil {
 		t.Fatalf("Recover(): %v", err)
 	}
@@ -2250,7 +2250,7 @@ func TestSendMessageToCompletedTaskRehydratesParkedWorker(t *testing.T) {
 	sub.semanticTaskKey = "investigate-issue"
 	sub.writeScope = tools.WriteScope{Files: []string{"internal/agent/main_subagent_control.go"}}
 	sub.ctxMgr.Append(message.Message{Role: "user", Content: "Investigate issue"})
-	if err := a.recovery.PersistMessage(sub.instanceID, message.Message{Role: "user", Content: "Investigate issue"}); err != nil {
+	if err := a.recoveryManager().PersistMessage(sub.instanceID, message.Message{Role: "user", Content: "Investigate issue"}); err != nil {
 		t.Fatalf("PersistMessage(sub): %v", err)
 	}
 	oldInstanceID := sub.instanceID
@@ -2810,7 +2810,7 @@ func TestOwnedProgressMailboxPersistsDurableMetadata(t *testing.T) {
 	if msgs[0].Mailbox.MessageID != mailbox.MessageID || msgs[0].Mailbox.Kind != string(SubAgentMailboxKindProgress) {
 		t.Fatalf("mailbox metadata = %#v", msgs[0].Mailbox)
 	}
-	persisted, err := a.recovery.LoadMessages(owner.instanceID)
+	persisted, err := a.recoveryManager().LoadMessages(owner.instanceID)
 	if err != nil {
 		t.Fatalf("LoadMessages(owner): %v", err)
 	}
@@ -2831,7 +2831,7 @@ func TestParkSubAgentWaitsForPendingTranscriptPersistence(t *testing.T) {
 		t.Fatal("parkSubAgent() = false")
 	}
 	rec := a.taskRecordByTaskID(sub.taskID)
-	msgs, err := loadTaskHistoryMessages(a.recovery, rec, nil)
+	msgs, err := loadTaskHistoryMessages(a.recoveryManager(), rec, nil)
 	if err != nil {
 		t.Fatalf("loadTaskHistoryMessages: %v", err)
 	}
@@ -2886,7 +2886,7 @@ func TestParkSubAgentRecoversDegradedTranscriptWithCheckpoint(t *testing.T) {
 	if rec == nil || rec.Persistence.State != PersistenceHealthy {
 		t.Fatalf("task persistence = %#v, want healthy", rec)
 	}
-	msgs, err := loadTaskHistoryMessages(a.recovery, rec, nil)
+	msgs, err := loadTaskHistoryMessages(a.recoveryManager(), rec, nil)
 	if err != nil {
 		t.Fatalf("loadTaskHistoryMessages: %v", err)
 	}
@@ -2899,14 +2899,14 @@ func TestParkedSubAgentRemoveLastMessageDoesNotRewriteMainTranscript(t *testing.
 	a := newTestMainAgent(t, t.TempDir())
 	mainMsgs := []message.Message{{Role: "user", Content: "keep main"}}
 	a.ctxMgr.RestoreMessages(mainMsgs)
-	if err := a.recovery.RewriteLog("main", mainMsgs); err != nil {
+	if err := a.recoveryManager().RewriteLog("main", mainMsgs); err != nil {
 		t.Fatalf("RewriteLog(main): %v", err)
 	}
 
 	sub := newControllableTestSubAgent(t, a, "adhoc-park-remove")
 	subMsgs := []message.Message{{Role: "user", Content: "worker prompt"}, {Role: "assistant", Content: "remove worker reply"}}
 	sub.ctxMgr.RestoreMessages(subMsgs)
-	if err := a.recovery.RewriteLog(sub.instanceID, subMsgs); err != nil {
+	if err := a.recoveryManager().RewriteLog(sub.instanceID, subMsgs); err != nil {
 		t.Fatalf("RewriteLog(sub): %v", err)
 	}
 	sub.setState(SubAgentStateCompleted, "done")
@@ -2918,7 +2918,7 @@ func TestParkedSubAgentRemoveLastMessageDoesNotRewriteMainTranscript(t *testing.
 
 	a.RemoveLastMessage()
 
-	gotMain, err := a.recovery.LoadMessages("main")
+	gotMain, err := a.recoveryManager().LoadMessages("main")
 	if err != nil {
 		t.Fatalf("LoadMessages(main): %v", err)
 	}
@@ -3066,7 +3066,7 @@ func TestSubAgentPersistencePumpPreservesMessageOrder(t *testing.T) {
 	}
 	a.flushPersist()
 
-	msgs, err := a.recovery.LoadMessages(sub.instanceID)
+	msgs, err := a.recoveryManager().LoadMessages(sub.instanceID)
 	if err != nil {
 		t.Fatalf("LoadMessages: %v", err)
 	}
@@ -3094,7 +3094,7 @@ func TestSubAgentControlToolPersistenceKeepsResultAfterRestore(t *testing.T) {
 	}, "control tool result", nil)
 	a.flushPersist()
 
-	msgs, err := a.recovery.LoadMessages(sub.instanceID)
+	msgs, err := a.recoveryManager().LoadMessages(sub.instanceID)
 	if err != nil {
 		t.Fatalf("LoadMessages: %v", err)
 	}

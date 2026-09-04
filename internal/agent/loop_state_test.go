@@ -999,7 +999,7 @@ func TestNextLoopAssessmentFromAssistantRequiresNoActiveSubAgentsBeforeCompleted
 		parentCtx:  ctx,
 		cancel:     cancel,
 		inputCh:    make(chan pendingUserMessage, 1),
-		recovery:   a.recovery,
+		recovery:   a.recoveryManager(),
 		ctxMgr:     ctxmgr.NewManager(100, 0),
 	}
 	a.subs.mu.Lock()
@@ -2195,7 +2195,7 @@ func TestLoopAnchorIncludesSubAgentRequirementWhenActiveSubAgents(t *testing.T) 
 		parentCtx:  ctx,
 		cancel:     cancel,
 		inputCh:    make(chan pendingUserMessage, 1),
-		recovery:   a.recovery,
+		recovery:   a.recoveryManager(),
 		ctxMgr:     ctxmgr.NewManager(100, 0),
 	}
 	a.subs.mu.Lock()
@@ -2244,7 +2244,7 @@ func TestLoopContinuationIncludesSubAgentRequirementWhenActiveSubAgents(t *testi
 		parentCtx:  ctx,
 		cancel:     cancel,
 		inputCh:    make(chan pendingUserMessage, 1),
-		recovery:   a.recovery,
+		recovery:   a.recoveryManager(),
 		ctxMgr:     ctxmgr.NewManager(100, 0),
 	}
 	a.subs.mu.Lock()
@@ -2339,7 +2339,7 @@ func TestLoopExitRejectionToolResultUsesHumanReadableReasons(t *testing.T) {
 		parentCtx:  ctx,
 		cancel:     cancel,
 		inputCh:    make(chan pendingUserMessage, 1),
-		recovery:   a.recovery,
+		recovery:   a.recoveryManager(),
 		ctxMgr:     ctxmgr.NewManager(100, 0),
 	}
 	a.subs.mu.Lock()
@@ -2388,7 +2388,7 @@ func TestLoopContinuationSubAgentStuckInstruction(t *testing.T) {
 		parentCtx:  ctx,
 		cancel:     cancel,
 		inputCh:    make(chan pendingUserMessage, 1),
-		recovery:   a.recovery,
+		recovery:   a.recoveryManager(),
 		ctxMgr:     ctxmgr.NewManager(100, 0),
 	}
 	a.subs.mu.Lock()
@@ -2415,7 +2415,7 @@ func TestCurrentLoopContinuationReasonsUsesHasActiveSubAgents(t *testing.T) {
 		parentCtx:  ctx,
 		cancel:     cancel,
 		inputCh:    make(chan pendingUserMessage, 1),
-		recovery:   a.recovery,
+		recovery:   a.recoveryManager(),
 		ctxMgr:     ctxmgr.NewManager(100, 0),
 	}
 	sub.setState(SubAgentStateCompleted, "")

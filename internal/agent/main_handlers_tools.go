@@ -206,7 +206,7 @@ func (a *MainAgent) persistInterruptedToolResults(calls []PendingToolCall, statu
 			log.Warnf("skipping synthetic tool persistence for call_ids absent from assistant history dropped=%v", dropped)
 		},
 		func(toolMsg message.Message) bool {
-			if a.recovery != nil {
+			if a.recoveryManager() != nil {
 				a.persistAsync(identity.MainAgentID, toolMsg)
 			}
 			return true
@@ -300,7 +300,7 @@ func (a *MainAgent) appendCompletedInterruptedToolResult(payload *ToolResultPayl
 	a.queueLSPDiagnosticOverlay(snapshot, payload)
 	toolMsg := a.buildToolResultMessage(payload, contextResult, parts, isError, snapshot)
 	a.ctxMgr.Append(toolMsg)
-	if a.recovery != nil {
+	if a.recoveryManager() != nil {
 		a.persistAsync(identity.MainAgentID, toolMsg)
 	}
 	a.recordEvidenceFromMessage(toolMsg)
@@ -528,7 +528,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 	if !deferToolResultEmission {
 		toolMsg := a.buildToolResultMessage(payload, contextResult, parts, isError, a.ctxMgr.Snapshot())
 		a.ctxMgr.Append(toolMsg)
-		if a.recovery != nil {
+		if a.recoveryManager() != nil {
 			a.persistAsync(identity.MainAgentID, toolMsg)
 		}
 		a.recordEvidenceFromMessage(toolMsg)

@@ -427,7 +427,7 @@ func TestResumePendingMainLLMAfterCompactionOversizeResumeInjectsReplayOverlay(t
 	projectRoot := t.TempDir()
 	a := newReadyTestMainAgent(t)
 	a.sessionDir = testProjectSessionDir(t, projectRoot, "oversize-overlay")
-	a.recovery = recovery.NewRecoveryManager(a.sessionDir)
+	a.installRecoveryManager(recovery.NewRecoveryManager(a.sessionDir))
 	a.newTurn()
 	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(400000, 272000, 0, 0.8)
 	a.ctxMgr.Append(message.Message{Role: "user", Content: "finish the refactor safely"})

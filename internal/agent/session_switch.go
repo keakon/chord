@@ -134,7 +134,7 @@ func (a *MainAgent) prepareSessionSwitch() (*recovery.RecoveryManager, context.C
 	defer a.admissionMu.Unlock()
 	a.admissionPaused.Store(true)
 	a.admissionEpoch.Add(1)
-	oldRecovery := a.recovery
+	oldRecovery := a.recoveryManager()
 	a.subs.cancelTaskActivations(fmt.Errorf("task activation cancelled by session switch"))
 	a.cancelSubAgentAdmissions()
 	a.focusedAgent.Store(nil)
@@ -222,10 +222,12 @@ func (a *MainAgent) freezeCurrentSession(oldRecovery *recovery.RecoveryManager) 
 	}
 	a.flushPersist()
 	a.saveRecoverySnapshot()
+	// Unpublish before closing: a sub-agent or tool goroutine that outlives the
+	// switch then resolves nil instead of a manager whose handles are gone, and
+	// the epoch check in recoveryManagerForEpoch keeps it from ever resolving
+	// the successor session's manager for this session's work.
+	a.clearRecoveryManagerIf(oldRecovery)
 	oldRecovery.Close()
-	if a.recovery == oldRecovery {
-		a.recovery = nil
-	}
 }
 
 func (a *MainAgent) resetSessionRuntimeState() {
@@ -308,7 +310,7 @@ func (a *MainAgent) installSessionTarget(sessionDir string) {
 	if a.fileBackups != nil {
 		a.fileBackups.SetSessionDir(sessionDir)
 	}
-	a.recovery = recovery.NewRecoveryManager(sessionDir)
+	a.installRecoveryManager(recovery.NewRecoveryManager(sessionDir))
 	a.usageLedger = analytics.NewUsageLedger(sessionDir, a.projectRoot)
 	if a.walltime != nil {
 		a.walltime.repointLedger(a.usageLedger)
@@ -351,8 +353,8 @@ func (a *MainAgent) ForkSession(msgIndex int) {
 }
 
 func (a *MainAgent) editTailUserMessageInPlace(prefix []message.Message, forkMsg message.Message) error {
-	if a.recovery != nil {
-		if err := a.recovery.RewriteLog("main", prefix); err != nil {
+	if manager := a.recoveryManager(); manager != nil {
+		if err := manager.RewriteLog("main", prefix); err != nil {
 			return fmt.Errorf("rewrite current session log: %w", err)
 		}
 	}

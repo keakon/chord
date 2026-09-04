@@ -133,7 +133,7 @@ func TestHandleBackgroundObjectFinishedForMainQueuesWhileBusy(t *testing.T) {
 	if got := a.turn.PendingToolCalls.Load(); got != 1 {
 		t.Fatalf("PendingToolCalls = %d, want 1", got)
 	}
-	if restored, err := a.recovery.LoadMessages("main"); err != nil {
+	if restored, err := a.recoveryManager().LoadMessages("main"); err != nil {
 		t.Fatalf("LoadMessages(main): %v", err)
 	} else if len(restored) != 1 {
 		t.Fatalf("len(restored) = %d, want 1 assistant tool-call message only", len(restored))

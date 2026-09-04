@@ -142,7 +142,8 @@ func (a *MainAgent) GetContextMessageCount() int {
 		return target.sub.GetContextMessageCount()
 	}
 	if target.parked {
-		msgs, err := loadTaskHistoryMessages(a.recovery, target.task, loadToolActivityStarted(a.recovery))
+		manager := a.recoveryManager()
+		msgs, err := loadTaskHistoryMessages(manager, target.task, loadToolActivityStarted(manager))
 		if err != nil {
 			return 0
 		}
@@ -157,7 +158,8 @@ func (a *MainAgent) GetContextBytes() int {
 		return target.sub.GetContextBytes()
 	}
 	if target.parked {
-		msgs, err := loadTaskHistoryMessages(a.recovery, target.task, loadToolActivityStarted(a.recovery))
+		manager := a.recoveryManager()
+		msgs, err := loadTaskHistoryMessages(manager, target.task, loadToolActivityStarted(manager))
 		if err != nil {
 			return 0
 		}
@@ -230,7 +232,7 @@ func (a *MainAgent) handleSpawnResultForMain(payload *tools.SpawnFinishedPayload
 	msg := a.mainBackgroundResultMessage(payload)
 	a.ctxMgr.Append(msg)
 	a.recordEvidenceFromMessage(msg)
-	if a.recovery != nil {
+	if a.recoveryManager() != nil {
 		a.persistAsync(identity.MainAgentID, msg)
 	}
 }

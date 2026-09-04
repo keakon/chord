@@ -718,6 +718,13 @@ type MainAgent struct {
 	// across build + write makes the last writer's snapshot reflect the
 	// freshest state.
 	recoverySnapshotMu sync.Mutex
+	// recoveryOwner holds the live recovery manager together with the session
+	// identity it writes for; see recovery_owner.go. Every read goes through
+	// recoveryManager / recoveryManagerForEpoch and every replacement through
+	// installRecoveryManager / clearRecoveryManagerIf, because sub-agent and
+	// tool goroutines persist through it while the event loop swaps sessions.
+	recoveryOwnerMu sync.RWMutex
+	recoveryOwner   *recoveryOwnership
 	// appliedCompactionModelRef records the model reference whose per-model
 	// compaction threshold is currently applied to ctxmgr. A change re-applies
 	// the threshold; not persisted, so after a restore the threshold is
@@ -747,17 +754,16 @@ type MainAgent struct {
 	settlementJournalMu      sync.Mutex
 	taskGroupPersistMu       sync.Mutex
 	agentRequestPersistMu    sync.Mutex
-	taskRegistryPersistHook  func()                    // test-only barrier after snapshot, before durable write
-	rehydrateCommitHook      func()                    // test-only barrier between rehydrate attempt decision and final commit
-	sem                      chan struct{}             // compatibility view of governor normal runtime slots
-	fileTrack                *filelock.FileTracker     // file write conflict detection
-	fileBackups              *fileBackupManager        // session-scoped risky write backups
-	runtimeStartedAt         time.Time                 // when this agent runtime started; drift warnings omit mtimes predating it
-	recovery                 *recovery.RecoveryManager // session persistence and crash recovery
-	sessionLock              *recovery.SessionLock     // cross-process exclusive ownership of sessionDir
-	sessionArtifactsDirFn    func() string             // active session artifacts directory for exports / dumps
-	sessionTargetChangedFn   func(string)              // notified after active sessionDir changes
-	focusedAgent             atomic.Pointer[SubAgent]  // currently focused SubAgent (nil = main)
+	taskRegistryPersistHook  func()                   // test-only barrier after snapshot, before durable write
+	rehydrateCommitHook      func()                   // test-only barrier between rehydrate attempt decision and final commit
+	sem                      chan struct{}            // compatibility view of governor normal runtime slots
+	fileTrack                *filelock.FileTracker    // file write conflict detection
+	fileBackups              *fileBackupManager       // session-scoped risky write backups
+	runtimeStartedAt         time.Time                // when this agent runtime started; drift warnings omit mtimes predating it
+	sessionLock              *recovery.SessionLock    // cross-process exclusive ownership of sessionDir
+	sessionArtifactsDirFn    func() string            // active session artifacts directory for exports / dumps
+	sessionTargetChangedFn   func(string)             // notified after active sessionDir changes
+	focusedAgent             atomic.Pointer[SubAgent] // currently focused SubAgent (nil = main)
 	focusedTaskMu            sync.RWMutex
 	focusedTaskID            string // focused durable task when its runtime is parked
 	subAgentInbox            subAgentInbox
@@ -1006,7 +1012,7 @@ type MainAgent struct {
 type persistEntry struct {
 	agentID        string
 	msg            message.Message
-	recovery       *recovery.RecoveryManager // snapshot of a.recovery at enqueue time
+	recovery       *recovery.RecoveryManager // manager resolved at enqueue time; nil means the write's session is gone
 	after          func(error)
 	walltimeLedger *analytics.UsageLedger
 	walltimeEvent  *analytics.UsageEvent
@@ -1103,7 +1109,7 @@ func NewMainAgent(
 		subAgentMailboxIDs:      make(map[string]struct{}),
 		subAgentMailboxConsumed: make(map[string]struct{}),
 		subAgentUrgentCounts:    make(map[string]int),
-		recovery:                recovery.NewRecoveryManager(sessionDir),
+		recoveryOwner:           &recoveryOwnership{manager: recovery.NewRecoveryManager(sessionDir), dir: sessionDir},
 		persist:                 newPersistencePump(256),
 		cachedWorkDir:           workDir,
 		gitStatusReady:          gitStatusReady,
@@ -1629,12 +1635,15 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 	}
 
 	// Save final snapshot and close recovery manager (flush JSONL file handles).
-	if a.recovery != nil {
+	if manager := a.recoveryManager(); manager != nil {
 		if err := a.persistSnapshotLocked(a.buildShutdownSnapshot); err != nil {
 			log.Warnf("failed to save final recovery snapshot error=%v", err)
 		}
 
-		a.recovery.Close()
+		// Unpublish before closing so a straggling worker resolves nil instead
+		// of a closed manager it would report as a persistence failure.
+		a.clearRecoveryManagerIf(manager)
+		manager.Close()
 	}
 
 	if a.sessionLock != nil {
@@ -1654,7 +1663,7 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 // manager stays open: the stuck persist loop may still be writing JSONL, and
 // Close would turn those writes into silent no-ops.
 func (a *MainAgent) shutdownTimeoutError(timeout time.Duration) error {
-	if a.recovery != nil {
+	if a.recoveryManager() != nil {
 		if err := a.persistSnapshotLocked(a.buildShutdownSnapshot); err != nil {
 			log.Warnf("failed to save best-effort recovery snapshot on shutdown timeout error=%v", err)
 		}
@@ -2012,7 +2021,7 @@ func (a *MainAgent) consumePendingUserMessagesForRequest(messages []message.Mess
 		a.ctxMgr.Append(item.msg)
 		requestMessages = append(requestMessages, item.msg)
 		a.recordEvidenceFromMessage(item.msg)
-		if a.recovery != nil {
+		if a.recoveryManager() != nil {
 			a.persistAsync(identity.MainAgentID, item.msg)
 		}
 		a.emitPendingDraftConsumed(item.draftID, item.msg)
@@ -2189,7 +2198,7 @@ func (a *MainAgent) handleAppendContext(evt Event) {
 	msg.Role = "user"
 	a.ctxMgr.Append(msg)
 	a.recordEvidenceFromMessage(msg)
-	if a.recovery != nil {
+	if a.recoveryManager() != nil {
 		persistMsg := msg
 		if strings.TrimSpace(persistMsg.Content) == "" {
 			persistMsg.Content = message.UserPromptPlainText(msg)
@@ -2336,7 +2345,7 @@ func (a *MainAgent) prepareStreamContinuation() {
 	}
 	msg := message.Message{Role: message.RoleUser, Content: streamContinueMessageText, Kind: message.KindStreamContinue}
 	a.ctxMgr.Append(msg)
-	if a.recovery != nil {
+	if a.recoveryManager() != nil {
 		a.persistAsync(identity.MainAgentID, msg)
 	}
 	log.Debugf("persisted stream continuation message turn_id=%v", a.turn.ID)

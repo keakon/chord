@@ -411,7 +411,7 @@ func TestRestoreTrackedFileStateUsesPersistedHookOnlyEffectiveArgs(t *testing.T)
 		t.Fatal("expected persisted audit to mark hook-only args mutation as user_modified")
 	}
 
-	restored, err := a.recovery.LoadMessages("main")
+	restored, err := a.recoveryManager().LoadMessages("main")
 	if err != nil {
 		t.Fatalf("LoadMessages(main): %v", err)
 	}

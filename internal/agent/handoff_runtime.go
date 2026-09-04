@@ -110,7 +110,7 @@ func (a *MainAgent) handleHandoffResolveEvent(evt Event) {
 		}
 		a.ctxMgr.Append(msg)
 		a.recordEvidenceFromMessage(msg)
-		if a.recovery != nil {
+		if a.recoveryManager() != nil {
 			a.persistAsync(identity.MainAgentID, msg)
 		}
 		a.handleContinueFromContext(Event{Type: EventContinue})
@@ -167,8 +167,8 @@ func (a *MainAgent) settlePendingHandoffAtShutdown() {
 	}
 	a.ctxMgr.Append(toolMsg)
 	a.recordEvidenceFromMessage(toolMsg)
-	if a.recovery != nil {
-		if err := a.recovery.PersistMessage(identity.MainAgentID, toolMsg); err != nil {
+	if manager := a.recoveryManager(); manager != nil {
+		if err := manager.PersistMessage(identity.MainAgentID, toolMsg); err != nil {
 			log.Warnf("failed to persist cancelled handoff result at shutdown error=%v", err)
 		}
 	}
@@ -199,7 +199,7 @@ func (a *MainAgent) emitDeferredHandoffToolResult(pc *HandoffResult, result stri
 	}
 	a.ctxMgr.Append(toolMsg)
 	a.recordEvidenceFromMessage(toolMsg)
-	if a.recovery != nil {
+	if a.recoveryManager() != nil {
 		a.persistAsync(identity.MainAgentID, toolMsg)
 	}
 }

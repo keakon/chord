@@ -426,14 +426,14 @@ func (s *SubAgent) persistInterruptedToolResults(calls []PendingToolCall, status
 		},
 		func(toolMsg message.Message) bool {
 			if s.parent != nil {
-				return s.notePersistenceEnqueue(s.parent.persistAsyncAfter(s.instanceID, toolMsg, func(err error) {
+				return s.notePersistenceEnqueue(s.parent.persistAsyncForEpoch(s.sessionEpoch, s.instanceID, toolMsg, func(err error) {
 					if err != nil {
 						s.notePersistenceFailure(err)
 					}
 				}))
 			}
-			if s.recovery != nil {
-				if err := s.recovery.PersistMessage(s.instanceID, toolMsg); err != nil {
+			if manager := s.recoveryManager(); manager != nil {
+				if err := manager.PersistMessage(s.instanceID, toolMsg); err != nil {
 					log.Warnf("SubAgent: failed to persist interrupted tool result agent=%v call_id=%v error=%v", s.instanceID, toolMsg.ToolCallID, err)
 					return false
 				}
@@ -501,9 +501,9 @@ func (s *SubAgent) continueWithContextAppends(drainContextAppends, restartStoppe
 // which is mutex-protected. The persistence rewrite is best-effort.
 func (s *SubAgent) RemoveLastMessage() {
 	s.ctxMgr.DropLastMessage()
-	if s.recovery != nil {
+	if manager := s.recoveryManager(); manager != nil {
 		remaining := s.ctxMgr.Snapshot()
-		if err := s.recovery.RewriteLog(s.instanceID, remaining); err != nil {
+		if err := manager.RewriteLog(s.instanceID, remaining); err != nil {
 			log.Warnf("SubAgent.RemoveLastMessage: failed to rewrite log agent=%v error=%v", s.instanceID, err)
 			s.notePersistenceFailure(err)
 		}

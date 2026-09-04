@@ -20,7 +20,7 @@ func TestUpdateTodosPreservesModelDrivenApplyAnchor(t *testing.T) {
 	}}); err != nil {
 		t.Fatalf("update todos: %v", err)
 	}
-	snapshot, err := a.recovery.Recover()
+	snapshot, err := a.recoveryManager().Recover()
 	if err != nil {
 		t.Fatalf("recover snapshot: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestConcurrentSnapshotWritersLeaveSnapshotEqualToLiveState(t *testing.T) {
 	want := snapshotTodos(a.todoItems)
 	a.todoMu.RUnlock()
 
-	snapshot, err := a.recovery.Recover()
+	snapshot, err := a.recoveryManager().Recover()
 	if err != nil {
 		t.Fatalf("recover snapshot: %v", err)
 	}

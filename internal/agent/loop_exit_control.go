@@ -204,7 +204,7 @@ func (a *MainAgent) appendDeferredModelDrivenToolResult(payload *ToolResultPaylo
 	// audit, LSP reviews and provenance from silently going missing here.
 	toolMsg := a.buildToolResultMessage(payload, strings.TrimSpace(contextResult), parts, isError, a.ctxMgr.Snapshot())
 	a.ctxMgr.Append(toolMsg)
-	if a.recovery != nil {
+	if a.recoveryManager() != nil {
 		a.persistAsync(identity.MainAgentID, toolMsg)
 	}
 	a.recordEvidenceFromMessage(toolMsg)
@@ -229,7 +229,7 @@ func (a *MainAgent) persistLoopDoneToolResult(callID, result string) {
 	}
 	toolMsg := message.Message{Role: message.RoleTool, Content: result, ToolCallID: callID, ToolStatus: string(ToolResultStatusSuccess)}
 	a.ctxMgr.Append(toolMsg)
-	if a.recovery != nil {
+	if a.recoveryManager() != nil {
 		a.persistAsync(identity.MainAgentID, toolMsg)
 	}
 	if a.turn != nil {

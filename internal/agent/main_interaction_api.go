@@ -187,7 +187,8 @@ func (a *MainAgent) GetMessagesForTarget(conversation ConversationTarget) []mess
 		return target.sub.GetMessages()
 	}
 	if target.parked {
-		msgs, err := loadTaskHistoryMessages(a.recovery, target.task, loadToolActivityStarted(a.recovery))
+		manager := a.recoveryManager()
+		msgs, err := loadTaskHistoryMessages(manager, target.task, loadToolActivityStarted(manager))
 		if err != nil {
 			log.Warnf("GetMessages: failed to load parked subagent transcript task_id=%v error=%v", target.task.TaskID, err)
 			return nil
@@ -264,7 +265,8 @@ func (a *MainAgent) RemoveLastMessageForTarget(conversation ConversationTarget) 
 		return
 	}
 	if target.parked {
-		msgs, err := loadTaskHistoryMessagesRaw(a.recovery, target.task)
+		manager := a.recoveryManager()
+		msgs, err := loadTaskHistoryMessagesRaw(manager, target.task)
 		if err != nil {
 			log.Warnf("RemoveLastMessage: failed to load parked subagent transcript task_id=%v error=%v", target.task.TaskID, err)
 			return
@@ -272,7 +274,7 @@ func (a *MainAgent) RemoveLastMessageForTarget(conversation ConversationTarget) 
 		if len(msgs) == 0 {
 			return
 		}
-		if err := rewriteTaskHistoryMessages(a.recovery, target.task, msgs[:len(msgs)-1]); err != nil {
+		if err := rewriteTaskHistoryMessages(manager, target.task, msgs[:len(msgs)-1]); err != nil {
 			log.Warnf("RemoveLastMessage: failed to rewrite parked subagent transcript task_id=%v error=%v", target.task.TaskID, err)
 		}
 		return
@@ -284,9 +286,9 @@ func (a *MainAgent) RemoveLastMessageForTarget(conversation ConversationTarget) 
 		return
 	}
 	a.ctxMgr.DropLastMessage()
-	if a.recovery != nil {
+	if manager := a.recoveryManager(); manager != nil {
 		remaining := a.ctxMgr.Snapshot()
-		if err := a.recovery.RewriteLog("main", remaining); err != nil {
+		if err := manager.RewriteLog("main", remaining); err != nil {
 			log.Warnf("RemoveLastMessage: failed to rewrite main log error=%v", err)
 		}
 	}

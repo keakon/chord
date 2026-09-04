@@ -85,7 +85,7 @@ func newPersistenceTestSubAgent(parent *MainAgent, instanceID string) *SubAgent 
 		parent:     parent,
 		parentCtx:  context.Background(),
 		cancel:     cancel,
-		recovery:   parent.recovery,
+		recovery:   parent.recoveryManager(),
 		ctxMgr:     ctxmgr.NewManager(8192, 0),
 		turn: &Turn{
 			ID:              1,
@@ -128,8 +128,8 @@ func TestHandleAgentErrorFailsPendingToolCalls(t *testing.T) {
 		a.closePersistLoop()
 		<-a.persist.done
 		a.cancel()
-		if a.recovery != nil {
-			a.recovery.Close()
+		if a.recoveryManager() != nil {
+			a.recoveryManager().Close()
 		}
 	}()
 
@@ -193,7 +193,7 @@ func TestHandleAgentErrorDiscardsCompletedSpeculativeToolWithoutAssistantDeclara
 			t.Fatalf("unexpected persisted orphan tool message: %#v", msg)
 		}
 	}
-	restored, err := a.recovery.LoadMessages("main")
+	restored, err := a.recoveryManager().LoadMessages("main")
 	if err != nil {
 		t.Fatalf("LoadMessages(main): %v", err)
 	}
@@ -266,7 +266,7 @@ func TestHandleAgentErrorPersistsFailedPendingToolCalls(t *testing.T) {
 		t.Fatalf("persisted audit = %#v, want %#v", msgs[1].Audit, audit)
 	}
 
-	restored, err := a.recovery.LoadMessages("main")
+	restored, err := a.recoveryManager().LoadMessages("main")
 	if err != nil {
 		t.Fatalf("LoadMessages(main): %v", err)
 	}
@@ -310,7 +310,7 @@ func TestHandleAgentErrorPreservesPartialAssistantTextAndResumes(t *testing.T) {
 		t.Fatalf("continuation message = %#v, want durable KindStreamContinue with %q", msgs[1], streamContinueMessageText)
 	}
 
-	restored, err := a.recovery.LoadMessages("main")
+	restored, err := a.recoveryManager().LoadMessages("main")
 	if err != nil {
 		t.Fatalf("LoadMessages(main): %v", err)
 	}
@@ -342,7 +342,7 @@ func TestHandleAgentErrorPrefillCapablePoolSkipsContinuationMessage(t *testing.T
 	if msgs[0].Role != "assistant" || msgs[0].StopReason != "interrupted" {
 		t.Fatalf("saved message = %#v, want interrupted assistant partial", msgs[0])
 	}
-	restored, err := a.recovery.LoadMessages("main")
+	restored, err := a.recoveryManager().LoadMessages("main")
 	if err != nil {
 		t.Fatalf("LoadMessages(main): %v", err)
 	}
@@ -413,7 +413,7 @@ func TestCancelCurrentTurnRoutesToFocusedSubAgentAndPersistsFailedToolResult(t *
 		}},
 	}
 	sub.ctxMgr.Append(assistant)
-	if err := a.recovery.PersistMessage(sub.instanceID, assistant); err != nil {
+	if err := a.recoveryManager().PersistMessage(sub.instanceID, assistant); err != nil {
 		t.Fatalf("PersistMessage(sub assistant): %v", err)
 	}
 	sub.turn.PendingToolCalls.Store(1)
@@ -432,7 +432,7 @@ func TestCancelCurrentTurnRoutesToFocusedSubAgentAndPersistsFailedToolResult(t *
 		t.Fatalf("sub tool message = %#v, want failed result", msgs[1])
 	}
 
-	restored, err := a.recovery.LoadMessages(sub.instanceID)
+	restored, err := a.recoveryManager().LoadMessages(sub.instanceID)
 	if err != nil {
 		t.Fatalf("LoadMessages(sub): %v", err)
 	}
@@ -455,7 +455,7 @@ func TestHandleAgentErrorPersistsFailedSubAgentPendingToolCalls(t *testing.T) {
 		}},
 	}
 	sub.ctxMgr.Append(assistant)
-	if err := a.recovery.PersistMessage(sub.instanceID, assistant); err != nil {
+	if err := a.recoveryManager().PersistMessage(sub.instanceID, assistant); err != nil {
 		t.Fatalf("PersistMessage(sub assistant): %v", err)
 	}
 	sub.turn.PendingToolCalls.Store(1)
@@ -466,7 +466,7 @@ func TestHandleAgentErrorPersistsFailedSubAgentPendingToolCalls(t *testing.T) {
 
 	a.handleAgentError(Event{Type: EventAgentError, SourceID: sub.instanceID, TurnID: sub.turn.ID, Payload: context.DeadlineExceeded})
 
-	restored, err := a.recovery.LoadMessages(sub.instanceID)
+	restored, err := a.recoveryManager().LoadMessages(sub.instanceID)
 	if err != nil {
 		t.Fatalf("LoadMessages(sub): %v", err)
 	}
@@ -492,7 +492,7 @@ func TestHandleAgentErrorWaitsForFailedToolPersistenceBarrier(t *testing.T) {
 		}},
 	}
 	sub.ctxMgr.Append(assistant)
-	if err := a.recovery.PersistMessage(sub.instanceID, assistant); err != nil {
+	if err := a.recoveryManager().PersistMessage(sub.instanceID, assistant); err != nil {
 		t.Fatalf("PersistMessage(sub assistant): %v", err)
 	}
 	sub.turn.PendingToolCalls.Store(1)
@@ -536,7 +536,7 @@ func TestHandleAgentErrorWaitsForFailedToolPersistenceBarrier(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("terminal SubAgent error did not complete after persistence barrier release")
 	}
-	restored, err := a.recovery.LoadMessages(sub.instanceID)
+	restored, err := a.recoveryManager().LoadMessages(sub.instanceID)
 	if err != nil {
 		t.Fatalf("LoadMessages(sub): %v", err)
 	}

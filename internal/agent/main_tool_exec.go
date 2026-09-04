@@ -93,10 +93,13 @@ func (a *MainAgent) toolExecutionPipeline() toolExecutionPipeline {
 		},
 		visibleToolNames: a.mainVisibleLLMToolNames,
 		appendToolActivity: func(rec recovery.ToolActivityRecord) error {
-			if a.recovery == nil {
+			// Tool goroutines outlive a session switch, so the manager is
+			// resolved per record rather than captured with the pipeline.
+			manager := a.recoveryManager()
+			if manager == nil {
 				return nil
 			}
-			return a.recovery.AppendToolActivity(rec)
+			return manager.AppendToolActivity(rec)
 		},
 	}
 }

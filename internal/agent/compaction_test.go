@@ -3278,7 +3278,7 @@ func focusTestSubAgent(t *testing.T, a *MainAgent, instanceID, providerName, pre
 		parent:     a,
 		parentCtx:  ctx,
 		cancel:     cancel,
-		recovery:   a.recovery,
+		recovery:   a.recoveryManager(),
 		ctxMgr:     ctxmgr.NewManager(100, 0),
 	}
 	a.subs.mu.Lock()
@@ -6082,7 +6082,7 @@ func TestApplyReadyDraftAutoContinueFailureEmitsSingleIdleEvent(t *testing.T) {
 	}
 	// Force applyCompactionDraft to fail by making the backup path a directory,
 	// so rewriteSessionAfterCompaction cannot rename main.jsonl over it.
-	if err := a.recovery.PersistMessage("main", message.Message{Role: "user", Content: "before compaction"}); err != nil {
+	if err := a.recoveryManager().PersistMessage("main", message.Message{Role: "user", Content: "before compaction"}); err != nil {
 		t.Fatalf("PersistMessage before compaction: %v", err)
 	}
 	backupPath := filepath.Join(a.sessionDir, "main.pre-compress-1.jsonl")
@@ -6117,10 +6117,10 @@ func TestCaptureOriginalFirstUserHintPrefersRecoverableMessageOverPollutedSummar
 		t.Fatalf("RewriteFirstUserMessageWithOriginalForCompaction polluted summary: %v", err)
 	}
 	original := "Original user request from disk"
-	if err := a.recovery.PersistMessage("main", message.Message{Role: "user", Content: original}); err != nil {
+	if err := a.recoveryManager().PersistMessage("main", message.Message{Role: "user", Content: original}); err != nil {
 		t.Fatalf("PersistMessage original user: %v", err)
 	}
-	if err := a.recovery.PersistMessage("main", message.Message{Role: "assistant", Content: "ack"}); err != nil {
+	if err := a.recoveryManager().PersistMessage("main", message.Message{Role: "assistant", Content: "ack"}); err != nil {
 		t.Fatalf("PersistMessage assistant: %v", err)
 	}
 

@@ -507,7 +507,7 @@ func TestMainMailboxOverlayPersistsExactModelMessage(t *testing.T) {
 		t.Fatalf("context messages = %#v, want exact overlay persisted in context", ctx)
 	}
 	a.flushPersist()
-	persisted, err := a.recovery.LoadMessages("main")
+	persisted, err := a.recoveryManager().LoadMessages("main")
 	if err != nil {
 		t.Fatalf("LoadMessages(main): %v", err)
 	}
@@ -551,7 +551,7 @@ func TestMainMailboxRetryDoesNotDuplicateDurableMessage(t *testing.T) {
 	if got := countSubAgentMailboxMessages(a.ctxMgr.Snapshot(), mailbox.MessageID); got != 1 {
 		t.Fatalf("context mailbox copies = %d, want 1", got)
 	}
-	persisted, err := a.recovery.LoadMessages("main")
+	persisted, err := a.recoveryManager().LoadMessages("main")
 	if err != nil {
 		t.Fatalf("LoadMessages(main): %v", err)
 	}
