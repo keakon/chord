@@ -105,6 +105,23 @@ func TestOpenAIProvider_SuppressesForcedToolChoiceUnderThinking(t *testing.T) {
 			wantPresent: true,
 		},
 		{
+			// Regression: replay-compatible degradation sets DisableReasoning,
+			// which strips the request-side thinking fields the probe below
+			// relies on. That strip does not turn off server-side thinking on
+			// suppress_in_thinking models, so "required" must still be dropped
+			// (see the DisableReasoning branch in CompleteStream).
+			name:        "suppressed when replay disables reasoning",
+			compat:      &config.ModelCompatConfig{ForcedToolChoice: &config.ForcedToolChoiceCompatConfig{SuppressInThinking: new(true)}},
+			tuning:      RequestTuning{DisableReasoning: true, OpenAI: OpenAITuning{ToolChoice: "required"}},
+			wantPresent: false,
+		},
+		{
+			name:        "kept when replay disables reasoning without suppression flag",
+			compat:      nil,
+			tuning:      RequestTuning{DisableReasoning: true, OpenAI: OpenAITuning{ToolChoice: "required"}},
+			wantPresent: true,
+		},
+		{
 			name:        "kept without suppression flag",
 			compat:      nil,
 			tuning:      RequestTuning{OpenAI: OpenAITuning{ToolChoice: "required", ReasoningEffort: "high"}},

@@ -347,14 +347,25 @@ func (o *OpenAIProvider) CompleteStream(
 	}
 	suppressForcedToolChoice := false
 	if ot.ToolChoice == "required" && forcedToolChoiceSuppressedInThinking(o.provider, model) {
-		reasoningProbe := make(map[string]any, 1)
-		if effort := ot.EffectiveReasoningEffort(); effort != "" {
-			reasoningProbe["reasoning_effort"] = effort
-		}
-		var err error
-		suppressForcedToolChoice, err = effectiveRequestReasoningActive(reasoningProbe, overrides)
-		if err != nil {
-			return nil, err
+		if tuning.DisableReasoning {
+			// The DisableReasoning strip above only silences the request-side
+			// reasoning controls for replay compatibility; it never turns off
+			// server-side thinking, and suppress_in_thinking models are exactly
+			// the backends that keep thinking enabled by default (DeepSeek
+			// family behind gateways). The strip must therefore not count as
+			// "reasoning inactive": keep suppressing forced tool_choice, or the
+			// request ships thinking + tool_choice=required and gets a 400.
+			suppressForcedToolChoice = true
+		} else {
+			reasoningProbe := make(map[string]any, 1)
+			if effort := ot.EffectiveReasoningEffort(); effort != "" {
+				reasoningProbe["reasoning_effort"] = effort
+			}
+			var err error
+			suppressForcedToolChoice, err = effectiveRequestReasoningActive(reasoningProbe, overrides)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 	if ot.ToolChoice != "" && !suppressForcedToolChoice && len(apiTools) > 0 {
