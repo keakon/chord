@@ -95,19 +95,15 @@ func (a *MainAgent) deferFallbackModelDownshift(payload *llmFallbackBoundaryPayl
 	if !a.modelDownshiftLineCrossed() {
 		return nil
 	}
-	if a.IsCompactionRunning() {
-		// Do not start a second worker for the same switch: fold the deferred
-		// round into the running compaction so its apply resumes this request
-		// (compactionResumeMainLLM) on the compacted context.
-		a.compactionState.continuation = continuationPlan{
-			kind:      compactionResumeMainLLM,
-			turnID:    payload.turnID,
-			turnEpoch: a.currentTurnEpoch(),
-		}
-		a.compactionState.downshiftSuspended = true
-	} else {
+	if !a.IsCompactionRunning() {
 		a.startDownshiftCompactionWithContinuation(a.ctxMgr.Snapshot(), payload.turnID, "")
 	}
+	// When a compaction is already running the round is folded onto it rather
+	// than starting a second worker. That fold is armed by
+	// handleCompactionDownshiftSuspend, which the pending error below routes
+	// to: arming it here as well would make the continuation plan have two
+	// sources that must be kept in step, and only the handler also hands off
+	// the activity slot and applies a draft already parked at the barrier.
 	return &fallbackModelDownshiftCompactionPendingError{
 		planID:           a.compactionState.planID,
 		selectedModelRef: a.ProviderModelRef(),

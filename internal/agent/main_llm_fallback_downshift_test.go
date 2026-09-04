@@ -385,6 +385,22 @@ func TestFallbackBoundaryFoldsOntoRunningCompaction(t *testing.T) {
 	if a.compactionState.planID != planID {
 		t.Fatalf("compaction plan changed = %v, want the running plan %v (no second worker may start)", a.compactionState.planID, planID)
 	}
+
+	// The fold itself is armed where every other suspension is armed: the
+	// event the pending error routes to. Driving that event here is what the
+	// LLM goroutine does once the error unwinds.
+	a.handleCompactionDownshiftSuspend(Event{
+		Type:   EventCompactionDownshiftSuspend,
+		TurnID: a.turn.ID,
+		Payload: &pendingMainLLMCall{
+			continuation: compactionResumeMainLLM,
+			turnID:       a.turn.ID,
+			turnEpoch:    a.turn.Epoch,
+			sessionEpoch: a.sessionEpoch,
+			planID:       planID,
+		},
+	})
+
 	if got := a.compactionState.continuation.kind; got != compactionResumeMainLLM {
 		t.Fatalf("folded continuation kind = %q, want %q", got, compactionResumeMainLLM)
 	}

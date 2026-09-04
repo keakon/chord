@@ -143,6 +143,29 @@ func (a *MainAgent) finishCompactionState() (pending *pendingMainLLMCall, discar
 	return pending, discard
 }
 
+// resumeModelDrivenTurnAfterDiscard continues a turn whose next request the
+// model-driven barrier deferred, when the compaction was then discarded rather
+// than applied. finishCompactionState drops the pending call for a discarded
+// compaction, so without this the deferred request has no consumer left: the
+// turn stays alive with no LLM call in flight, every later user message queues
+// behind it, and the session looks frozen until the turn is cancelled.
+//
+// The settle path has already emitted the compact_context tool result, so the
+// turn only needs its request restarted on the unchanged context. It reports
+// whether it took over settling the turn.
+func (a *MainAgent) resumeModelDrivenTurnAfterDiscard(plan continuationPlan) bool {
+	if a == nil || a.turn == nil || plan.kind != compactionResumeModelDriven {
+		return false
+	}
+	if plan.turnID == 0 || plan.turnID != a.turn.ID || plan.turnEpoch != a.turn.Epoch {
+		return false
+	}
+	log.Infof("resuming turn deferred by a discarded model-driven checkpoint turn_id=%v", plan.turnID)
+	a.appendModelDrivenContinuationNotice()
+	a.beginMainLLMAfterPreparation(a.turn.Ctx, a.turn.ID, plan.agentErrSourceID)
+	return true
+}
+
 func (a *MainAgent) markCompactionDiscard() {
 	if a.compactionState.running {
 		a.compactionState.discard = true
@@ -800,9 +823,13 @@ func (a *MainAgent) handleCompactionReady(evt Event) {
 		}
 	}
 
+	settledPlan := a.compactionState.continuation
 	pending, _ = a.finishCompactionState()
 	a.emitActivity("main", ActivityIdle, "")
 	if pending == nil {
+		if a.resumeModelDrivenTurnAfterDiscard(settledPlan) {
+			return
+		}
 		a.drainPendingUserMessages()
 		return
 	}
@@ -921,6 +948,25 @@ func (a *MainAgent) handleCompactionOversizeSuspend(evt Event) {
 	// The provider response has reached the event loop and is now suspended;
 	// only now may the background compaction reclaim the shared activity slot.
 	a.handoffMainActivityToCompaction()
+	a.applyDraftParkedAtBarrier()
+}
+
+// applyDraftParkedAtBarrier applies a draft that handleCompactionReady parked
+// because the turn was still active when it became ready. Arming a suspension
+// is exactly the condition that barrier was waiting for: the turn's request has
+// come off the wire and is now held by the compaction continuation, so the
+// draft can be applied and the request resumed on the compacted context.
+//
+// Without this the parked draft has no remaining consumer. The LLM goroutine
+// already returned with the pending-compaction error and emits no further
+// event, and the compaction slot stays claimed, so neither the pre-request gate
+// nor setIdleAndDrainPending is reached again and the turn never settles.
+func (a *MainAgent) applyDraftParkedAtBarrier() {
+	if a.compactionState.readyDraft == nil {
+		return
+	}
+	log.Infof("applying compaction draft parked at barrier after suspension plan_id=%v", a.compactionState.readyDraft.PlanID)
+	a.applyReadyDraft()
 }
 
 func (a *MainAgent) resumePendingMainLLMAfterCompaction(pending *pendingMainLLMCall, recheckGate bool) (handledIdleBarrier bool) {
@@ -1251,9 +1297,13 @@ func (a *MainAgent) handleCompactionFailed(evt Event) {
 		// Cancellation does NOT count as a failure for breaker purposes
 	}
 
+	settledPlan := a.compactionState.continuation
 	pending, _ = a.finishCompactionState()
 	a.emitActivity("main", ActivityIdle, "")
 	if pending == nil {
+		if a.resumeModelDrivenTurnAfterDiscard(settledPlan) {
+			return
+		}
 		// Auto compaction (not during an LLM call): drain any pending user messages
 		// to continue the conversation automatically.
 		a.drainPendingUserMessages()

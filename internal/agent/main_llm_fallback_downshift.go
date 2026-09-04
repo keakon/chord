@@ -21,14 +21,25 @@ func (a *MainAgent) handleCompactionDownshiftSuspend(evt Event) {
 		log.Debugf("downshift suspension arrived after compaction settled turn_id=%v plan_id=%v", payload.turnID, payload.planID)
 		return
 	}
-	a.compactionState.continuation = continuationPlan{
-		kind:             compactionResumeMainLLM,
-		turnID:           payload.turnID,
-		turnEpoch:        payload.turnEpoch,
-		agentErrSourceID: payload.agentErrSourceID,
+	if a.compactionState.continuation.kind == compactionResumeModelDriven {
+		// A model-driven checkpoint already owns this turn's continuation: its
+		// settle path is what emits the compact_context tool result. Replacing
+		// it with a plain main_llm resume would leave that tool call
+		// unanswered and break the next request's message structure. The
+		// barrier freezes the turn's request, so no in-flight call should
+		// reach the fallback boundary while one is running.
+		log.Warnf("downshift suspension arrived while a model-driven checkpoint owns the continuation; keeping it turn_id=%v plan_id=%v", payload.turnID, payload.planID)
+	} else {
+		a.compactionState.continuation = continuationPlan{
+			kind:             compactionResumeMainLLM,
+			turnID:           payload.turnID,
+			turnEpoch:        payload.turnEpoch,
+			agentErrSourceID: payload.agentErrSourceID,
+		}
 	}
 	a.compactionState.downshiftSuspended = true
 	// The provider response has reached the event loop and is now suspended;
 	// only now may the background compaction reclaim the shared activity slot.
 	a.handoffMainActivityToCompaction()
+	a.applyDraftParkedAtBarrier()
 }
