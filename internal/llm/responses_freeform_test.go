@@ -130,6 +130,13 @@ func TestConvertToolsToResponsesForTarget(t *testing.T) {
 		if tools[1].Type != "function" {
 			t.Errorf("non-apply_patch tool type = %q, want function", tools[1].Type)
 		}
+		// The function shape must keep carrying the shared ToolDefinition
+		// description: it is the single source for per-tool usage rules
+		// (todo_write's when-to-use, done's report structure, ...), and
+		// dropping it silently deletes that whole prompt layer.
+		if tools[1].Description != "Read a file" {
+			t.Errorf("function tool description = %q, want the ToolDefinition description", tools[1].Description)
+		}
 	})
 
 	t.Run("function_fallback_non_gpt5", func(t *testing.T) {
@@ -148,6 +155,9 @@ func TestConvertToolsToResponsesForTarget(t *testing.T) {
 			}
 			if tools[0].Parameters == nil {
 				t.Errorf("model %q apply_patch must send parameters as function tool", model)
+			}
+			if tools[0].Description != "Apply a Codex-compatible patch" {
+				t.Errorf("model %q apply_patch description = %q, want the ToolDefinition description", model, tools[0].Description)
 			}
 		}
 	})
@@ -221,20 +231,6 @@ func TestConvertToolsToResponsesForTarget(t *testing.T) {
 			t.Errorf("nil provider deepseek apply_patch type = %q, want function", tools[0].Type)
 		}
 	})
-}
-
-func TestResponsesToolsHasCustom(t *testing.T) {
-	if responsesToolsHasCustom(nil) {
-		t.Error("nil tools must not contain custom")
-	}
-	plain := []responsesTool{{Type: "function", Name: "Read"}}
-	if responsesToolsHasCustom(plain) {
-		t.Error("function-only tools must not contain custom")
-	}
-	mixed := []responsesTool{{Type: "function", Name: "Read"}, {Type: "custom", Name: toolname.ApplyPatch}}
-	if !responsesToolsHasCustom(mixed) {
-		t.Error("custom tool must be detected")
-	}
 }
 
 func TestCanonicalApplyPatchArgs(t *testing.T) {
@@ -743,7 +739,7 @@ func TestParseResponsesSSE_CustomToolCall(t *testing.T) {
 }
 
 func TestResponsesParallelToolCallsWithCustomTool(t *testing.T) {
-	captureBody := func(serverURL string) map[string]any {
+	captureBody := func() map[string]any {
 		var gotBody map[string]any
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_ = json.NewDecoder(r.Body).Decode(&gotBody)
@@ -769,11 +765,11 @@ func TestResponsesParallelToolCallsWithCustomTool(t *testing.T) {
 		return gotBody
 	}
 
-	t.Run("custom_apply_patch_forces_parallel_false", func(t *testing.T) {
-		body := captureBody("")
+	t.Run("custom_apply_patch_keeps_parallel_emission", func(t *testing.T) {
+		body := captureBody()
 		tools, ok := body["tools"].([]any)
-		if !ok || len(tools) == 0 {
-			t.Fatalf("request tools = %#v, want custom apply_patch tool", body["tools"])
+		if !ok || len(tools) < 2 {
+			t.Fatalf("request tools = %#v, want custom apply_patch plus a function tool", body["tools"])
 		}
 		first := tools[0].(map[string]any)
 		if first["type"] != "custom" {
@@ -785,8 +781,15 @@ func TestResponsesParallelToolCallsWithCustomTool(t *testing.T) {
 		if first["format"] == nil {
 			t.Error("custom tool must carry format block")
 		}
-		if got := body["parallel_tool_calls"]; got != false {
-			t.Errorf("parallel_tool_calls = %#v, want false with custom apply_patch", got)
+		// parallel_tool_calls bounds how many calls one response may carry;
+		// the Tool Selection prompt asks the model to batch independent
+		// read-only calls, so a custom tool must not silently forbid it.
+		if got := body["parallel_tool_calls"]; got != true {
+			t.Errorf("parallel_tool_calls = %#v, want true alongside a custom apply_patch", got)
+		}
+		second := tools[1].(map[string]any)
+		if second["description"] != "Read a file" {
+			t.Errorf("function tool description on the wire = %#v, want the ToolDefinition description", second["description"])
 		}
 	})
 
@@ -823,14 +826,19 @@ func TestCompactParallelToolCalls(t *testing.T) {
 	custom := []responsesTool{{Type: "custom", Name: "apply_patch", Format: &responsesToolFormat{}}}
 	plain := []responsesTool{{Type: "function", Name: "apply_patch", Parameters: map[string]any{}}}
 
-	t.Run("custom_forces_false", func(t *testing.T) {
-		if got := compactParallelToolCalls(custom, nil); got == nil || *got {
-			t.Fatalf("compactParallelToolCalls(custom, nil) = %v, want false", got)
+	t.Run("custom_keeps_omit", func(t *testing.T) {
+		// A custom (freeform) tool is not a reason to force serial emission:
+		// concurrency is decided by the local tool pipeline, not the wire.
+		if got := compactParallelToolCalls(custom, nil); got != nil {
+			t.Fatalf("compactParallelToolCalls(custom, nil) = %v, want nil (omit)", got)
 		}
 	})
-	t.Run("explicit_wins_over_custom", func(t *testing.T) {
+	t.Run("explicit_wins", func(t *testing.T) {
 		if got := compactParallelToolCalls(custom, new(true)); got == nil || !*got {
 			t.Fatalf("compactParallelToolCalls(custom, true) = %v, want true", got)
+		}
+		if got := compactParallelToolCalls(plain, new(false)); got == nil || *got {
+			t.Fatalf("compactParallelToolCalls(function, false) = %v, want false", got)
 		}
 	})
 	t.Run("plain_function_keeps_omit", func(t *testing.T) {

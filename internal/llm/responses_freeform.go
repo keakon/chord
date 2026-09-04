@@ -76,23 +76,13 @@ func convertToolsToResponsesForTarget(provider *ProviderConfig, modelID string, 
 			continue
 		}
 		result = append(result, responsesTool{
-			Type:       "function",
-			Name:       t.Name,
-			Parameters: t.InputSchema,
+			Type:        "function",
+			Name:        t.Name,
+			Description: t.Description,
+			Parameters:  t.InputSchema,
 		})
 	}
 	return result
-}
-
-// responsesToolsHasCustom reports whether any converted tool definition is a
-// custom (freeform) tool.
-func responsesToolsHasCustom(tools []responsesTool) bool {
-	for _, t := range tools {
-		if t.Type == "custom" {
-			return true
-		}
-	}
-	return false
 }
 
 // shouldEmitFreeformApplyPatch reports whether apply_patch should be emitted as

@@ -69,21 +69,15 @@ func compactSummaryFromResponsesOutput(output []message.ResponsesOutputItem) (st
 }
 
 // compactParallelToolCalls mirrors the main Responses request's parallel
-// tool-call policy for compact traffic: an explicit tuning value wins; a
-// custom (freeform) tool forces serial (false) because custom tools do not
-// reliably support parallel execution across gateways; otherwise nil keeps the
-// existing omit-when-unset behavior (server default).
+// tool-call policy for compact traffic: an explicit tuning value wins,
+// otherwise nil keeps the omit-when-unset behavior (server default). Compact
+// traffic asks for one summary rather than a batch of tool calls, so it never
+// needs to force the field on by itself.
 func compactParallelToolCalls(tools []responsesTool, explicit *bool) *bool {
 	if len(tools) == 0 {
 		return nil
 	}
-	if explicit != nil {
-		return explicit
-	}
-	if responsesToolsHasCustom(tools) {
-		return new(false)
-	}
-	return nil
+	return explicit
 }
 
 func (r *ResponsesProvider) Compact(

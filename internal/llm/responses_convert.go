@@ -529,9 +529,10 @@ func convertToolsToResponses(tools []message.ToolDefinition) []responsesTool {
 
 	for _, t := range tools {
 		result = append(result, responsesTool{
-			Type:       "function",
-			Name:       t.Name,
-			Parameters: t.InputSchema,
+			Type:        "function",
+			Name:        t.Name,
+			Description: t.Description,
+			Parameters:  t.InputSchema,
 		})
 	}
 	return result

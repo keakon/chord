@@ -391,6 +391,12 @@ func TestConvertToolsToResponses(t *testing.T) {
 	if items[0].Name != "Read" {
 		t.Errorf("tool name = %q, want %q", items[0].Name, "Read")
 	}
+	// Tool descriptions are the single source for per-tool usage rules and are
+	// also the only documentation an MCP tool carries (this converter renders
+	// the additional_tools item too), so the wire must keep them.
+	if items[0].Description != "Read a file" {
+		t.Errorf("tool description = %q, want %q", items[0].Description, "Read a file")
+	}
 }
 
 func TestApplyResponsesCompletionPayload(t *testing.T) {

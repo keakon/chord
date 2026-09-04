@@ -460,15 +460,17 @@ func (r *ResponsesProvider) CompleteStream(
 	}
 	// Tool-only fields are rejected by some Responses-compatible relays when
 	// no tools are declared. Mirror the chat-completions gating: with tools
-	// present, an explicit tuning override wins. Custom (freeform) tools do
-	// not reliably support parallel execution across gateways, so a custom
-	// apply_patch forces parallel_tool_calls: false unless the user configured
-	// an explicit value; plain function tools keep the current true default.
+	// present, an explicit tuning override wins, otherwise default to true.
+	// parallel_tool_calls governs how many tool calls one response may carry,
+	// which is exactly what the Tool Selection prompt asks the model to batch;
+	// whether those calls then run concurrently is decided by the local tool
+	// pipeline (it serializes dependent and side-effecting calls), so a custom
+	// (freeform) apply_patch is no reason to forbid the emission. Gateways that
+	// reject the combination are handled by configuring parallel_tool_calls:
+	// false explicitly.
 	if len(apiTools) > 0 {
 		if ot.ParallelToolCalls != nil {
 			reqBody.ParallelToolCalls = ot.ParallelToolCalls
-		} else if responsesToolsHasCustom(apiTools) {
-			reqBody.ParallelToolCalls = new(false)
 		} else {
 			reqBody.ParallelToolCalls = new(true)
 		}
