@@ -70,3 +70,31 @@ func TestSplitStyleRenderParity(t *testing.T) {
 		}
 	}
 }
+
+func TestFirstSentenceSplitsOnCommonDelimiters(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"完成用户的最终汇报。接下来是验证。", "完成用户的最终汇报。"},
+		{"Hello world. Second sentence here.", "Hello world."},
+		{"No terminator at all", "No terminator at all"},
+		{"  trim me first  ", "trim me first"},
+		{"Has! punctuation?", "Has!"},
+		{"", ""},
+		// An ASCII terminator needs trailing whitespace: paths, commands and
+		// version numbers must not be cut at their inner dots.
+		{"Fix internal/tui/block.go rendering so cards wrap", "Fix internal/tui/block.go rendering so cards wrap"},
+		{"Run go test ./... and report the failures", "Run go test ./..."},
+		{"Bump to v1.2 and verify. Then ship.", "Bump to v1.2 and verify."},
+		{"Ends on a path internal/tui/block.go", "Ends on a path internal/tui/block.go"},
+		{"Trailing terminator.", "Trailing terminator."},
+		{"CJK 无空格。下一句", "CJK 无空格。"},
+		{"Newline after terminator.\nSecond line", "Newline after terminator."},
+	}
+	for _, c := range cases {
+		got := firstSentence(c.in)
+		if got != c.want {
+			t.Errorf("firstSentence(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}

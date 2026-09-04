@@ -4962,6 +4962,438 @@ func TestNotifyCallKeepsInvalidArgsVisible(t *testing.T) {
 	}
 }
 
+func TestCompactContextCallRendersStructuredSections(t *testing.T) {
+	block := &Block{
+		ID:         1,
+		Type:       BlockToolCall,
+		ToolName:   tools.NameCompactContext,
+		Content:    `{"active_objective":"完成用户的最终汇报：按主题提交已完成（5 个纯净本地 commit, 作者 keakon, 未 push）","completed":["5 纯净提交已建（本地未 push, 作者 keakon）35725e09 fix(cli)","fix(agent) downs hift 边界 1d3a4b96"],"decisions":["D1+D4 合并 downs hift 主体:避免二个分支 hug"],"open_issues":["唯一一次会话失败报告，已 autosquash"],"next_step":"先按输出最终完成报告：5 个提交列表 + 验证","state_files":[".chord/notes/20260904-continuation-review.md"]}`,
+		RawArgs:    `{"active_objective":"完成用户的最终汇报：按主题提交已完成（5 个纯净本地 commit, 作者 keakon, 未 push）","completed":["5 纯净提交已建（本地未 push, 作者 keakon）35725e09 fix(cli)","fix(agent) downs hift 边界 1d3a4b96"],"decisions":["D1+D4 合并 downs hift 主体:避免二个分支 hug"],"open_issues":["唯一一次会话失败报告，已 autosquash"],"next_step":"先按输出最终完成报告：5 个提交列表 + 验证","state_files":[".chord/notes/20260904-continuation-review.md"]}`,
+		ResultDone: true,
+	}
+	block.ToolCallDetailExpanded = true
+
+	plain := stripANSI(strings.Join(block.renderCompactContextCall(140, ""), "\n"))
+
+	// Each section gets its own "↳" header instead of a flat key-value dump.
+	for _, want := range []string{"↳ Objective:", "↳ Completed:", "↳ Decisions:", "↳ Open issues:", "↳ Next:", "↳ State files:"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("expected section header %q in compact_context card, got:\n%s", want, plain)
+		}
+	}
+	// Array fields must be split into bullets, not serialized as a single
+	// JSON list value sitting on the "key:" line.
+	if strings.Contains(plain, "completed:") && !strings.Contains(plain, "Completed") {
+		t.Fatalf("expected array field to render under the Completed section, got:\n%s", plain)
+	}
+	for _, bullet := range []string{
+		"• 5 纯净提交已建",
+		"• fix(agent) downs hift 边界 1d3a4b96",
+		"• D1+D4 合并 downs hift 主体",
+		"• 唯一一次会话失败报告",
+		"• .chord/notes/20260904-continuation-review.md",
+	} {
+		if !strings.Contains(plain, bullet) {
+			t.Fatalf("expected bullet %q in compact_context card, got:\n%s", bullet, plain)
+		}
+	}
+	// The generic "completed:" inline key-value line must NOT appear.
+	if strings.Contains(plain, "completed: [") {
+		t.Fatalf("expected completed array not to be serialized as inline JSON, got:\n%s", plain)
+	}
+}
+
+func TestCompactContextCallCollapsedShowsObjectiveAndNextOnly(t *testing.T) {
+	block := &Block{
+		ID:         1,
+		Type:       BlockToolCall,
+		ToolName:   tools.NameCompactContext,
+		Content:    `{"active_objective":"完成用户的最终汇报","completed":["a","b","c"],"decisions":["d"],"open_issues":["o"],"next_step":"先按输出最终完成报告","state_files":["n.md"]}`,
+		RawArgs:    `{"active_objective":"完成用户的最终汇报","completed":["a","b","c"],"decisions":["d"],"open_issues":["o"],"next_step":"先按输出最终完成报告","state_files":["n.md"]}`,
+		ResultDone: true,
+	}
+	// collapsed (default for compact_context)
+	plain := stripANSI(strings.Join(block.renderCompactContextCall(140, ""), "\n"))
+
+	if strings.Contains(plain, "↳ Completed:") {
+		t.Fatalf("expected collapsed card to hide section headers, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "完成用户的最终汇报") {
+		t.Fatalf("expected collapsed card to surface the objective, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "先按输出最终完成报告") {
+		t.Fatalf("expected collapsed card to surface the next_step, got:\n%s", plain)
+	}
+	// The objective and the next step share one "↳" body row, and the
+	// disclosure marker stays in the header: a body-level ▸ read as a
+	// second, nested toggle.
+	if got := strings.Count(plain, "↳"); got != 1 {
+		t.Fatalf("expected exactly one collapsed summary row, got %d:\n%s", got, plain)
+	}
+	if got := strings.Count(plain, "▸"); got != 1 {
+		t.Fatalf("expected the ▸ marker only in the header, got %d:\n%s", got, plain)
+	}
+}
+
+func TestCompactContextCallStaysCollapsedWhileRunning(t *testing.T) {
+	// The card is a checkpoint marker, not a document: while the arguments
+	// stream the header's "N chars received" progress is the whole card, and
+	// once they decode the body is one summary row - otherwise the six
+	// sections flash open and then fold away the moment the call finishes,
+	// and a resumed session (whose compact_context call carries no result)
+	// opens with a screenful per checkpoint.
+	streaming := &Block{
+		ID:       1,
+		Type:     BlockToolCall,
+		ToolName: tools.NameCompactContext,
+		RawArgs:  `{"active_objective":"完成用户的最终`,
+	}
+	plain := stripANSI(strings.Join(streaming.renderCompactContextCall(140, ""), "\n"))
+	if strings.Contains(plain, "↳") {
+		t.Fatalf("expected a bare header while arguments stream, got:\n%s", plain)
+	}
+
+	running := &Block{
+		ID:       1,
+		Type:     BlockToolCall,
+		ToolName: tools.NameCompactContext,
+		RawArgs:  `{"active_objective":"完成用户的最终汇报","completed":["a","b"],"decisions":["d"],"next_step":"输出最终完成报告"}`,
+	}
+	plain = stripANSI(strings.Join(running.renderCompactContextCall(140, ""), "\n"))
+	for _, sec := range []string{"↳ Objective:", "↳ Completed:", "↳ Decisions:", "↳ Next:"} {
+		if strings.Contains(plain, sec) {
+			t.Fatalf("expected a running card to stay collapsed, found %q:\n%s", sec, plain)
+		}
+	}
+	if !strings.Contains(plain, "↳ 完成用户的最终汇报 · → 输出最终完成报告") {
+		t.Fatalf("expected the collapsed summary row on a running card, got:\n%s", plain)
+	}
+
+	// A restored call with no result still collapses.
+	restored := &Block{
+		ID:        1,
+		Type:      BlockToolCall,
+		ToolName:  tools.NameCompactContext,
+		Content:   running.RawArgs,
+		RawArgs:   running.RawArgs,
+		Collapsed: true,
+	}
+	plain = stripANSI(strings.Join(restored.Render(140, ""), "\n"))
+	if strings.Contains(plain, "↳ Completed:") {
+		t.Fatalf("expected a restored card to stay collapsed, got:\n%s", plain)
+	}
+}
+
+func TestCompactContextCallSuccessExpandedShowsResult(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameCompactContext,
+		RawArgs:       `{"active_objective":"完成用户的最终汇报","next_step":"先按输出最终完成报告"}`,
+		ResultDone:    true,
+		ResultContent: "Context checkpoint request accepted. No reset has occurred yet; only a later model-driven context checkpoint confirms successful application.",
+	}
+	block.ToolCallDetailExpanded = true
+
+	plain := stripANSI(strings.Join(block.renderCompactContextCall(140, ""), "\n"))
+
+	// The acknowledgement carries the "no reset has occurred yet" caveat, so
+	// an expanded successful card must keep it below the sections.
+	if !strings.Contains(plain, "↳ Result:") {
+		t.Fatalf("expected ↳ Result: header on an expanded successful card, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "No reset has occurred yet") {
+		t.Fatalf("expected the success acknowledgement to stay visible, got:\n%s", plain)
+	}
+	resultIdx := strings.Index(plain, "↳ Result:")
+	if objectiveIdx := strings.Index(plain, "↳ Objective:"); objectiveIdx == -1 || objectiveIdx > resultIdx {
+		t.Fatalf("expected the sections to render above the result envelope, got:\n%s", plain)
+	}
+	// Collapsed cards stay terse: no result body, no section headers.
+	block.ToolCallDetailExpanded = false
+	block.InvalidateCache()
+	collapsed := stripANSI(strings.Join(block.renderCompactContextCall(140, ""), "\n"))
+	if strings.Contains(collapsed, "↳ Result:") || strings.Contains(collapsed, "No reset has occurred yet") {
+		t.Fatalf("expected collapsed card to stay terse, got:\n%s", collapsed)
+	}
+}
+
+func TestCompactContextCallUnknownFieldsKeepSubmittedArgs(t *testing.T) {
+	// A payload that nests the whole state under an unexpected key decodes
+	// strictly (unknown fields are ignored) yet resolves no schema field —
+	// exactly what the validator rejects, so the card must still show what
+	// the model sent instead of rendering an empty body.
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameCompactContext,
+		RawArgs:       `{"state":{"active_objective":"wrapped under a nested key","next_step":"x"}}`,
+		ResultDone:    true,
+		ResultStatus:  agent.ToolResultStatusError,
+		ResultContent: "Error: missing required argument: active_objective",
+	}
+	block.ToolCallDetailExpanded = true
+
+	plain := stripANSI(strings.Join(block.renderCompactContextCall(140, ""), "\n"))
+
+	if !strings.Contains(plain, "↳ Arguments:") {
+		t.Fatalf("expected the raw-arguments fallback header, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "wrapped under a nested key") {
+		t.Fatalf("expected the submitted payload to stay visible, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "↳ Error:") {
+		t.Fatalf("expected the error envelope below the arguments, got:\n%s", plain)
+	}
+	// Collapsed keeps the failure terse: status only, no argument dump.
+	block.ToolCallDetailExpanded = false
+	block.InvalidateCache()
+	collapsed := stripANSI(strings.Join(block.renderCompactContextCall(140, ""), "\n"))
+	if strings.Contains(collapsed, "↳ Arguments:") {
+		t.Fatalf("expected collapsed failure to hide the argument dump, got:\n%s", collapsed)
+	}
+	if !strings.Contains(collapsed, "missing required argument") {
+		t.Fatalf("expected collapsed failure to keep the error message, got:\n%s", collapsed)
+	}
+}
+
+func TestCompactContextCallRawArgFallbackIsBounded(t *testing.T) {
+	// One wrong key can carry the whole continuation state; the fallback
+	// must not grow the card to a hundred lines.
+	var sb strings.Builder
+	sb.WriteString(`{"wrong_key":"`)
+	sb.WriteString(strings.Repeat("bounded fallback payload ", 200))
+	sb.WriteString(`"}`)
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameCompactContext,
+		RawArgs:       sb.String(),
+		ResultDone:    true,
+		ResultStatus:  agent.ToolResultStatusError,
+		ResultContent: "Error: missing required argument: active_objective",
+	}
+	block.ToolCallDetailExpanded = true
+
+	plain := stripANSI(strings.Join(block.renderCompactContextCall(140, ""), "\n"))
+
+	if !strings.Contains(plain, "more lines hidden.") {
+		t.Fatalf("expected the bounded fallback to report hidden lines, got:\n%s", plain)
+	}
+	payloadLines := 0
+	for line := range strings.SplitSeq(plain, "\n") {
+		if strings.Contains(line, "bounded fallback payload") {
+			payloadLines++
+		}
+	}
+	if payloadLines == 0 || payloadLines > compactContextRawArgMaxLines {
+		t.Fatalf("expected 1..%d payload lines, got %d:\n%s", compactContextRawArgMaxLines, payloadLines, plain)
+	}
+}
+
+func TestCompactContextCallRenderDispatchesStructuredCard(t *testing.T) {
+	// renderToolCall must route compact_context to the structured renderer,
+	// and the space toggle must keep flipping the card open and closed.
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameCompactContext,
+		RawArgs:       `{"active_objective":"完成用户的最终汇报","completed":["a"],"next_step":"先按输出最终完成报告"}`,
+		ResultDone:    true,
+		ResultContent: "Context checkpoint request accepted.",
+	}
+
+	collapsed := stripANSI(strings.Join(block.Render(140, ""), "\n"))
+	if strings.Contains(collapsed, "↳ Completed:") {
+		t.Fatalf("expected the collapsed structured card from Render, got:\n%s", collapsed)
+	}
+	if !strings.Contains(collapsed, "↳ 完成用户的最终汇报") {
+		t.Fatalf("expected the collapsed summary row from Render, got:\n%s", collapsed)
+	}
+
+	if !block.ToggleAtWidth(140) || !block.ToolCallDetailExpanded {
+		t.Fatalf("expected the toggle to expand the card, expanded=%v", block.ToolCallDetailExpanded)
+	}
+	expanded := stripANSI(strings.Join(block.Render(140, ""), "\n"))
+	if !strings.Contains(expanded, "↳ Completed:") {
+		t.Fatalf("expected the expanded structured card from Render, got:\n%s", expanded)
+	}
+	if !block.ToggleAtWidth(140) || block.ToolCallDetailExpanded {
+		t.Fatalf("expected the toggle to collapse the card again, expanded=%v", block.ToolCallDetailExpanded)
+	}
+}
+
+func TestBenchmarkCompactContextFixtureDecodesStrictly(t *testing.T) {
+	// The benchmark claims to measure the strict-decode path with all six
+	// sections; a typo in the fixture JSON silently moved it onto the
+	// tolerant fallback and dropped two fields.
+	fixture := benchmarkCompactContextBlock()
+	var args tools.CompactContextArgs
+	if err := json.Unmarshal([]byte(fixture.Content), &args); err != nil {
+		t.Fatalf("benchmark fixture must be schema-valid JSON: %v", err)
+	}
+	if args.ActiveObjective == "" || args.NextStep == "" || len(args.Completed) == 0 ||
+		len(args.Decisions) == 0 || len(args.OpenIssues) == 0 || len(args.StateFiles) == 0 {
+		t.Fatalf("benchmark fixture must populate all six fields, got %+v", args)
+	}
+}
+
+func TestCompactContextCallErrorExpandedShowsArgsAndError(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameCompactContext,
+		Content:       `{"active_objective":"完成用户的最终汇报","completed":"not-an-array","next_step":"先按输出最终完成报告"}`,
+		RawArgs:       `{"active_objective":"完成用户的最终汇报","completed":"not-an-array","next_step":"先按输出最终完成报告"}`,
+		ResultDone:    true,
+		ResultStatus:  agent.ToolResultStatusError,
+		ResultContent: "Error: arguments do not match compact_context schema: args.completed must be an array, got string \"not-an-array\"",
+	}
+	block.ToolCallDetailExpanded = true
+
+	plain := stripANSI(strings.Join(block.renderCompactContextCall(140, ""), "\n"))
+
+	// The error envelope closes the body, after the submitted args.
+	if !strings.Contains(plain, "↳ Error:") {
+		t.Fatalf("expected ↳ Error: header in error state, got:\n%s", plain)
+	}
+	errorIdx := strings.Index(plain, "↳ Error:")
+	for _, sec := range []string{"↳ Objective:", "↳ Next:"} {
+		secIdx := strings.Index(plain, sec)
+		if secIdx == -1 {
+			t.Fatalf("expected failed expanded card to still show %q section, got:\n%s", sec, plain)
+		}
+		if secIdx > errorIdx {
+			t.Fatalf("expected %q section to render above the ↳ Error: envelope, got:\n%s", sec, plain)
+		}
+	}
+	if !strings.Contains(plain, "args.completed must be an array") {
+		t.Fatalf("expected validator message in error body, got:\n%s", plain)
+	}
+	// The envelope's "Error: " prefix must NOT be repeated under our own
+	// "↳ Error:" header.
+	if strings.Contains(plain, "↳ Error:\n    Error:") {
+		t.Fatalf("expected the inner Error: prefix to be stripped, got:\n%s", plain)
+	}
+	// An expanded failed card exposes the submitted args, matching
+	// renderQuestionCall's "show args, then error" convention.
+	for _, sec := range []string{"↳ Objective:", "↳ Next:"} {
+		if !strings.Contains(plain, sec) {
+			t.Fatalf("expected failed expanded card to still show %q section, got:\n%s", sec, plain)
+		}
+	}
+	if !strings.Contains(plain, "完成用户的最终汇报") {
+		t.Fatalf("expected submitted active_objective to remain visible on error, got:\n%s", plain)
+	}
+}
+
+func TestCompactContextCallErrorCollapsedHidesSections(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameCompactContext,
+		Content:       `{"active_objective":"完成用户的最终汇报","completed":["a","b","c"],"decisions":["d"],"open_issues":["o"],"next_step":"先按输出最终完成报告","state_files":["n.md"]}`,
+		RawArgs:       `{"active_objective":"完成用户的最终汇报","completed":["a","b","c"],"decisions":["d"],"open_issues":["o"],"next_step":"先按输出最终完成报告","state_files":["n.md"]}`,
+		ResultDone:    true,
+		ResultStatus:  agent.ToolResultStatusError,
+		ResultContent: "Error: arguments do not match compact_context schema",
+	}
+	// Collapsed default (ToolCallDetailExpanded left false).
+
+	plain := stripANSI(strings.Join(block.renderCompactContextCall(140, ""), "\n"))
+
+	// Collapsed error stays terse: the error envelope plus the objective /
+	// next summary, never the full section dump.
+	if !strings.Contains(plain, "↳ Error:") {
+		t.Fatalf("expected ↳ Error: header in collapsed error state, got:\n%s", plain)
+	}
+	for _, sec := range []string{"↳ Completed:", "↳ Decisions:", "↳ Open issues:", "↳ State files:"} {
+		if strings.Contains(plain, sec) {
+			t.Fatalf("expected collapsed error state to hide %q section, got:\n%s", sec, plain)
+		}
+	}
+}
+
+func TestCompactContextCallErrorCollapsedShowsDisclosureGlyph(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameCompactContext,
+		Content:       `{"active_objective":"完成用户的最终汇报","next_step":"先按输出最终完成报告"}`,
+		RawArgs:       `{"active_objective":"完成用户的最终汇报","next_step":"先按输出最终完成报告"}`,
+		ResultDone:    true,
+		ResultStatus:  agent.ToolResultStatusError,
+		ResultContent: "Error: arguments do not match compact_context schema",
+	}
+	// Collapsed default (ToolCallDetailExpanded left false).
+
+	plain := stripANSI(strings.Join(block.renderCompactContextCall(140, ""), "\n"))
+
+	// A failed card still expands to the submitted args, so the collapsed
+	// header must carry the ▸ disclosure glyph (✗ ▸) like the generic
+	// expandable tool cards — otherwise it looks non-expandable.
+	if !strings.Contains(plain, "▸") {
+		t.Fatalf("expected collapsed error card to show the ▸ disclosure glyph, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "✗") {
+		t.Fatalf("expected collapsed error card to show the ✗ status glyph, got:\n%s", plain)
+	}
+}
+
+func TestEscalateCallErrorCollapsedShowsDisclosureGlyph(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameEscalate,
+		Content:       `{"reason":"Need approval to rotate credentials","files_changed":"src/auth.go"}`,
+		ResultDone:    true,
+		ResultStatus:  agent.ToolResultStatusError,
+		ResultContent: "arguments do not match escalate schema: args.files_changed must be an array, got string \"src/auth.go\"",
+	}
+	// Collapsed default.
+
+	plain := stripANSI(strings.Join(block.renderProseControlCall(140, ""), "\n"))
+
+	// A failed Complete/Escalate card still expands to its report, so the
+	// collapsed header must carry the ▸ disclosure glyph (✗ ▸) like the
+	// generic expandable tool cards.
+	if !strings.Contains(plain, "▸") {
+		t.Fatalf("expected collapsed error escalate card to show the ▸ disclosure glyph, got:\n%s", plain)
+	}
+}
+
+func TestCompactContextCallCancelledExpandedShowsArgsAndCancelled(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameCompactContext,
+		Content:       `{"active_objective":"完成用户的最终汇报","completed":["a"],"next_step":"先按输出最终完成报告"}`,
+		RawArgs:       `{"active_objective":"完成用户的最终汇报","completed":["a"],"next_step":"先按输出最终完成报告"}`,
+		ResultDone:    true,
+		ResultStatus:  agent.ToolResultStatusCancelled,
+		ResultContent: "Cancelled",
+	}
+	block.ToolCallDetailExpanded = true
+
+	plain := stripANSI(strings.Join(block.renderCompactContextCall(140, ""), "\n"))
+
+	cancelledIdx := strings.Index(plain, "↳ Cancelled")
+	if cancelledIdx == -1 {
+		t.Fatalf("expected Cancelled label in cancelled state, got:\n%s", plain)
+	}
+	// Expanded cancelled card still exposes the submitted args, and the
+	// cancellation envelope closes the body below them.
+	for _, sec := range []string{"↳ Objective:", "↳ Completed:", "↳ Next:"} {
+		secIdx := strings.Index(plain, sec)
+		if secIdx == -1 {
+			t.Fatalf("expected cancelled expanded card to show %q section, got:\n%s", sec, plain)
+		}
+		if secIdx > cancelledIdx {
+			t.Fatalf("expected %q section to render above the ↳ Cancelled envelope, got:\n%s", sec, plain)
+		}
+	}
+}
+
 func TestHandoffHeaderRecoversInvalidPlanPath(t *testing.T) {
 	block := &Block{
 		ID:            1,

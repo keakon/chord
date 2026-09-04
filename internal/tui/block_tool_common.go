@@ -167,6 +167,11 @@ func toolCollapsedSummaryText(s string) string {
 	return strings.Join(parts, " · ")
 }
 
+// appendCollapsedSummaryLines writes the one-line body summary of a
+// collapsed card. The header owns the disclosure marker, so the body carries
+// only "↳": every caller reaches this helper on a card whose header already
+// went through renderToolDisclosurePrefix, and repeating the ▸ read as a
+// second, nested toggle.
 func appendCollapsedSummaryLines(result *[]string, summary string, width int, style lipgloss.Style) {
 	trimmed := strings.TrimSpace(sanitizeToolDisplayText(summary))
 	if trimmed == "" {
@@ -176,7 +181,7 @@ func appendCollapsedSummaryLines(result *[]string, summary string, width int, st
 	if oneLine == "" {
 		return
 	}
-	*result = append(*result, style.Render("  ▸ ↳ "+oneLine))
+	*result = append(*result, style.Render("  ↳ "+oneLine))
 }
 
 func toolExpandedTextLines(s string, width int) []string {

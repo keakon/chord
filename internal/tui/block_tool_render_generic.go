@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -201,6 +203,9 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 	}
 	if b.ToolName == tools.NameNotify {
 		return b.renderNotifyCall(width, spinnerFrame)
+	}
+	if b.ToolName == tools.NameCompactContext {
+		return b.renderCompactContextCall(width, spinnerFrame)
 	}
 	if toolUsesCompactDetailToggle(b.ToolName) {
 		return b.renderCompactExpandableToolCall(width, spinnerFrame)
@@ -406,7 +411,11 @@ func (b *Block) renderProseControlCall(width int, spinnerFrame string) []string 
 	contentWidth := metrics.contentWidth
 
 	prefix := b.renderToolPrefixForExpanded(spinnerFrame, b.ToolCallDetailExpanded)
-	if b.ResultDone && !b.toolResultIsError() && !b.toolResultIsCancelled() {
+	if b.ResultDone {
+		// Keep the disclosure glyph in error / cancelled states too: a
+		// failed Complete/Escalate card still expands to its report, so it
+		// must read as expandable (✗ ▸ / ✗ ▾) like the generic expandable
+		// tool cards, not a flat non-expandable row.
 		prefix = renderToolDisclosurePrefix(prefix, b.ToolCallDetailExpanded)
 	}
 	headerLine := renderToolHeaderLine(prefix, b.ToolName)
@@ -497,6 +506,284 @@ func (b *Block) renderProseControlCall(width int, spinnerFrame string) []string 
 
 	result = appendToolElapsedToHeader(result, b, cardWidth)
 	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
+}
+
+// compactContextDisplaySection describes one labelled section in the
+// compact_context card body. The label is rendered with the standard "↳ X:"
+// header style and the value is either prose (a single wrapped paragraph)
+// or a list (one wrapped bullet per item).
+type compactContextDisplaySection struct {
+	label  string
+	prose  string
+	values []string
+}
+
+// renderCompactContextCall renders compact_context cards as structured
+// sections (Objective / Completed / Decisions / Open issues / Next / State
+// files) instead of the generic flat "key: value" surface. The generic path
+// folds the six fields into the header parameter summary, where the card
+// width truncates them away entirely — the continuation state was
+// effectively invisible. This path mirrors renderProseControlCall's section
+// + bullet layout so six long fields stay navigable. The model-driven schema
+// is unchanged.
+func (b *Block) renderCompactContextCall(width int, spinnerFrame string) []string {
+	metrics := newDoneToolCardMetrics(width)
+	blockStyle := metrics.blockStyle
+	toolCardBg := metrics.toolCardBg
+	cardWidth := metrics.cardWidth
+	contentWidth := metrics.contentWidth
+
+	prefix := b.renderToolPrefixForExpanded(spinnerFrame, b.ToolCallDetailExpanded)
+	if b.ResultDone {
+		// Keep the disclosure glyph in error / cancelled states too: a
+		// failed compact_context card still expands to the submitted args,
+		// so it must read as expandable (✗ ▸ / ✗ ▾) like the other
+		// expandable tool cards, not a flat non-expandable row.
+		prefix = renderToolDisclosurePrefix(prefix, b.ToolCallDetailExpanded)
+	}
+	headerLine := renderToolHeaderLine(prefix, b.ToolName)
+	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent, b.toolExecutionIsRunning())
+	result := []string{headerLine}
+
+	argsJSON := b.RawArgs
+	if strings.TrimSpace(argsJSON) == "" {
+		argsJSON = b.Content
+	}
+	// decodeCompactContextArgs resolves every field, including the array
+	// fields, so the sections below consume its result directly rather than
+	// re-parsing argsJSON per field.
+	args, argsReady := decodeCompactContextArgs(argsJSON)
+	objective := strings.TrimSpace(args.ActiveObjective)
+	next := strings.TrimSpace(args.NextStep)
+
+	switch {
+	case !argsReady && !b.ToolCallDetailExpanded:
+		// Nothing decodable yet: the arguments are still streaming, and the
+		// header already carries the "N chars received" progress. Rendering a
+		// half-decoded state here would flash sections that the finished card
+		// then folds away.
+	case !b.ToolCallDetailExpanded:
+		// Collapsed default, whether the call is still running, finished or
+		// rejected: one body row carrying the objective and next-step first
+		// sentences. The card is a checkpoint marker, not a document - the
+		// six sections only appear when the user opens it, which also means a
+		// resumed session opens with a one-line card instead of a screenful.
+		summary := make([]string, 0, 2)
+		if objective != "" {
+			summary = append(summary, firstSentence(objective))
+		}
+		if next != "" {
+			summary = append(summary, "→ "+firstSentence(next))
+		}
+		// appendCollapsedSummaryLines folds the two lines into one " · "
+		// separated row.
+		appendCollapsedSummaryLines(&result, strings.Join(summary, "\n"), cardWidth-10, ToolResultStyle)
+	case argsReady:
+		appendCompactContextSections(&result, []compactContextDisplaySection{
+			{label: "Objective", prose: objective},
+			{label: "Completed", values: args.Completed},
+			{label: "Decisions", values: args.Decisions},
+			{label: "Open issues", values: args.OpenIssues},
+			{label: "Next", prose: next},
+			{label: "State files", values: args.StateFiles},
+		}, contentWidth)
+	default:
+		// Expanded, but no schema field resolved: the payload nests the state
+		// under an unexpected key or misspells every field name — exactly the
+		// shapes the validator rejects. Fall back to the submitted keys so the
+		// failure stays diagnosable instead of leaving an empty card.
+		appendCompactContextRawArgs(&result, argsJSON, contentWidth)
+	}
+
+	// The result envelope closes the body, after the submitted args on
+	// expanded cards.
+	switch {
+	case b.ResultDone && (b.toolResultIsError() || b.toolResultIsCancelled()):
+		if strings.TrimSpace(b.ResultContent) == "" {
+			break
+		}
+		result = append(result, "")
+		label, style := "  ↳ Cancelled:", DimStyle
+		if b.toolResultIsError() {
+			label, style = "  ↳ Error:", ErrorStyle
+		}
+		result = append(result, style.Render(label))
+		display := toolDisplayResultContent(b)
+		// The error envelope prefixes every tool result with "Error: ";
+		// strip it so the card does not print "Error: Error: <message>".
+		if b.toolResultIsError() {
+			display = toolErrorDisplayContent(display)
+		}
+		for _, line := range wrapText(sanitizeToolDisplayText(display), contentWidth) {
+			result = append(result, style.Render("    "+line))
+		}
+	case b.ResultDone && b.ToolCallDetailExpanded:
+		// The success acknowledgement carries the "no reset has occurred
+		// yet" caveat, so an expanded card must keep it: only a later
+		// checkpoint event confirms the reset actually applied.
+		display := strings.TrimSpace(toolDisplayResultContent(b))
+		if display == "" {
+			break
+		}
+		result = append(result, "", ToolResultExpandedStyle.Render("  ↳ Result:"))
+		for _, line := range wrapText(sanitizeToolDisplayText(display), contentWidth) {
+			result = append(result, DimStyle.Render("    "+line))
+		}
+	}
+
+	result = appendToolElapsedToHeader(result, b, cardWidth)
+	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
+}
+
+// appendCompactContextSections writes a sequence of labelled sections into
+// the card body: empty sections are skipped, prose sections become a single
+// wrapped paragraph under the header, list sections become "•" bullets with
+// per-item wrapping. Sections are separated by blank lines to give the eye
+// an anchor between groups.
+func appendCompactContextSections(result *[]string, sections []compactContextDisplaySection, contentWidth int) {
+	wrote := false
+	for _, sec := range sections {
+		prose := strings.TrimSpace(sec.prose)
+		values := sec.values
+		if prose == "" && len(values) == 0 {
+			continue
+		}
+		if wrote {
+			*result = append(*result, "")
+		}
+		*result = append(*result, ToolResultExpandedStyle.Render("  ↳ "+sec.label+":"))
+		if prose != "" {
+			for _, line := range wrapText(sanitizeToolDisplayText(prose), contentWidth) {
+				*result = append(*result, DimStyle.Render("    "+line))
+			}
+		} else {
+			for _, value := range values {
+				for i, line := range wrapText(sanitizeToolDisplayText(value), contentWidth-2) {
+					bullet := "  "
+					if i == 0 {
+						bullet = "• "
+					}
+					*result = append(*result, DimStyle.Render("    "+bullet+line))
+				}
+			}
+		}
+		wrote = true
+	}
+}
+
+// compactContextRawArgMaxLines bounds the fallback dump below: a rejected
+// payload can carry the whole continuation state under one wrong key, and
+// the card must not grow to a hundred lines just to say "these are not the
+// fields".
+const compactContextRawArgMaxLines = 12
+
+// appendCompactContextRawArgs writes the submitted payload under an
+// "Arguments" header when no schema field could be resolved, so a rejected
+// call still shows what the model actually sent. Recognisable JSON objects
+// render on the generic "key: value" surface; anything else falls back to
+// the raw text.
+func appendCompactContextRawArgs(result *[]string, argsJSON string, contentWidth int) {
+	trimmed := strings.TrimSpace(argsJSON)
+	if trimmed == "" {
+		return
+	}
+	var lines []string
+	keys, vals := parseToolArgs(trimmed)
+	if len(keys) == 0 {
+		lines = wrapText(sanitizeToolDisplayText(trimmed), contentWidth)
+	} else {
+		for _, k := range keys {
+			lines = append(lines, wrapText(sanitizeToolDisplayText(k+": "+vals[k]), contentWidth)...)
+			if len(lines) > compactContextRawArgMaxLines {
+				break
+			}
+		}
+	}
+	if len(lines) == 0 {
+		return
+	}
+	hidden := 0
+	if len(lines) > compactContextRawArgMaxLines {
+		hidden = len(lines) - compactContextRawArgMaxLines
+		lines = lines[:compactContextRawArgMaxLines]
+	}
+	*result = append(*result, ToolResultExpandedStyle.Render("  ↳ Arguments:"))
+	for _, line := range lines {
+		*result = append(*result, DimStyle.Render("    "+line))
+	}
+	if hidden > 0 {
+		*result = append(*result, DimStyle.Render(fmt.Sprintf("    ... %d more lines hidden.", hidden)))
+	}
+}
+
+// decodeCompactContextArgs parses compact_context arguments strictly when
+// possible and falls back to tolerant field recovery otherwise, so a single
+// wrongly-typed field (the schema is open enough to admit "everything is a
+// string" mistakes) does not blank the whole continuation state card.
+// Returns the parsed state plus argsReady, which reports whether at least
+// one schema field resolved: a strict decode also succeeds on a payload
+// that carries none of them (unknown keys are ignored), and the caller must
+// fall back to the raw arguments in that case instead of rendering an empty
+// set of sections.
+func decodeCompactContextArgs(argsJSON string) (tools.CompactContextArgs, bool) {
+	var args tools.CompactContextArgs
+	trimmed := strings.TrimSpace(argsJSON)
+	if trimmed == "" {
+		return args, false
+	}
+	if json.Unmarshal([]byte(trimmed), &args) != nil {
+		_, vals := parseToolArgs(trimmed)
+		args.ActiveObjective = vals["active_objective"]
+		args.NextStep = vals["next_step"]
+		if vals["completed"] != "" {
+			args.Completed = paramStringList(vals["completed"])
+		}
+		if vals["decisions"] != "" {
+			args.Decisions = paramStringList(vals["decisions"])
+		}
+		if vals["open_issues"] != "" {
+			args.OpenIssues = paramStringList(vals["open_issues"])
+		}
+		if vals["state_files"] != "" {
+			args.StateFiles = paramStringList(vals["state_files"])
+		}
+	}
+	ready := strings.TrimSpace(args.ActiveObjective) != "" || strings.TrimSpace(args.NextStep) != "" ||
+		len(args.Completed) > 0 || len(args.Decisions) > 0 || len(args.OpenIssues) > 0 || len(args.StateFiles) > 0
+	return args, ready
+}
+
+// firstSentence returns the first sentence of s, trimmed of whitespace.
+// Used to extract a one-line summary for the collapsed compact_context
+// card so a 5-line objective does not blow the width budget. Iterates by
+// rune so multibyte CJK terminators are not sliced in half.
+//
+// An ASCII terminator ('.', '!', '?') only ends a sentence when whitespace
+// or the end of the string follows it: continuation state is full of paths
+// ("internal/tui/block.go"), commands ("go test ./...") and versions
+// ("v1.2"), and cutting at their inner dots truncated the summary mid-token.
+// Fullwidth terminators ('。', '！', '？') need no trailing whitespace —
+// CJK prose does not put a space after them.
+func firstSentence(s string) string {
+	trimmed := strings.TrimSpace(s)
+	if trimmed == "" {
+		return ""
+	}
+	for i, r := range trimmed {
+		switch r {
+		case '。', '！', '？':
+		case '.', '!', '?':
+			if rest := trimmed[i+len(string(r)):]; rest != "" {
+				if next, _ := utf8.DecodeRuneInString(rest); !unicode.IsSpace(next) {
+					continue
+				}
+			}
+		default:
+			continue
+		}
+		return strings.TrimSpace(trimmed[:i+len(string(r))])
+	}
+	return trimmed
 }
 
 func doneResultIsRejected(result string) bool {

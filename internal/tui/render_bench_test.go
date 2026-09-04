@@ -113,6 +113,19 @@ func benchmarkCompactToolBlock() *Block {
 	}
 }
 
+func benchmarkCompactContextBlock() *Block {
+	return &Block{
+		ID:                     3,
+		Type:                   BlockToolCall,
+		ToolName:               tools.NameCompactContext,
+		Content:                `{"active_objective":"完成用户的最终汇报：按主题提交已完成（5 个纯净本地 commit, 作者 keakon, 未 push），说明历史改写/合并为何未执行，并给出验证结果","completed":["5 纯净提交已建（本地未 push, 作者 keakon）35725e09 fix(cli)","fix(agent) downs hift 边界 1d3a4b96","fork 边界 b7937bc2"],"decisions":["D1+D4 合并 downs hift 主体:避免二个分支 hug 重新评审","D3+P3a 合并 fuzzy 主线 (049ebcfe)"],"open_issues":["唯一一次会话失败报告，已 autosquash 吞下，验收回归"],"next_step":"先按输出最终完成报告：5 个提交列表","state_files":[".chord/notes/20260904-continuation-review.md"]}`,
+		ResultContent:          "Context checkpoint request accepted. No reset has occurred yet; only a later model-driven context checkpoint confirms successful application.",
+		ResultDone:             true,
+		Collapsed:              false,
+		ToolCallDetailExpanded: true,
+	}
+}
+
 func benchmarkAssistantStreamingTextBlock() *Block {
 	b := benchmarkAssistantStreamingBlock()
 	b.Content = strings.Repeat("streaming cheap path line with no markdown fences or bullets ", 8)
@@ -602,6 +615,25 @@ func BenchmarkRenderEditDiffLargeUnevenBlock(b *testing.B) {
 func BenchmarkRenderCompactToolCallCard(b *testing.B) {
 	ApplyTheme(DefaultTheme())
 	block := benchmarkCompactToolBlock()
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		block.InvalidateCache()
+		_ = block.Render(100, "")
+	}
+}
+
+// BenchmarkRenderCompactContextCall measures the structured-sections render
+// path for compact_context. The fixture is schema-valid, so the renderer
+// takes the strict-decode path and renders all six sections (the tolerant
+// parseToolArgs fallback is deliberately not what this benchmark covers —
+// TestBenchmarkCompactContextFixtureDecodesStrictly pins that). The
+// benchmark protects that the per-call cost stays in line with
+// proseControlCall's hot tier so the compaction barrier does not regress
+// scroll latency.
+func BenchmarkRenderCompactContextCall(b *testing.B) {
+	ApplyTheme(DefaultTheme())
+	block := benchmarkCompactContextBlock()
 	b.ResetTimer()
 	b.ReportAllocs()
 	for b.Loop() {

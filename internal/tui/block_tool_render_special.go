@@ -46,7 +46,7 @@ func (b *Block) renderTaskCall(width int, spinnerFrame string) []string {
 			appendCollapsedSummaryLines(&result, b.DoneSummary, cardWidth-26, ToolResultStyle)
 		case hasResultText:
 			summary := truncateOneLine(sanitizeToolDisplayText(taskToolCollapsedHandleSummary(b.ResultContent)), cardWidth-20)
-			result = append(result, ToolResultStyle.Render("  ▸ ↳ "+summary))
+			result = append(result, ToolResultStyle.Render("  ↳ "+summary))
 		case b.toolResultIsError() && strings.TrimSpace(b.ResultContent) != "":
 			appendCollapsedSummaryLines(&result, b.ResultContent, cardWidth-26, ErrorStyle)
 		case b.toolResultIsCancelled() && strings.TrimSpace(b.ResultContent) != "":
