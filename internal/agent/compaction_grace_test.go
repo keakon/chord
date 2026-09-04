@@ -222,13 +222,13 @@ func TestCompactionImminentClaimAndOverlay(t *testing.T) {
 		t.Fatalf("re-attach must consume the re-queued notice, got %#v", overlays)
 	}
 	a.markOverlayClaimsDelivered()
-	claim := a.syncOverlayWindowClaim(&a.overlayClaims.imminent, a.sessionEpoch, int(a.compactionWindowGeneration), a.ctxMgr.TokenBudgetsEpoch())
+	claim := a.syncOverlayWindowClaim(&a.overlayClaims.imminent, a.overlayWindowKey(a.sessionEpoch, int(a.compactionWindowGeneration), a.ctxMgr.TokenBudgetsEpoch()))
 	if !claim.delivered || claim.deliveryPending {
 		t.Fatalf("dispatch must confirm the imminent delivery, got %+v", claim)
 	}
 	// The reminder claim is independent of the imminent claim: delivering the
 	// imminent notice never consumes a fresh reminder claim.
-	if claim := a.syncOverlayWindowClaim(&a.overlayClaims.reminder, a.sessionEpoch, int(a.compactionWindowGeneration), a.ctxMgr.TokenBudgetsEpoch()); claim.delivered || claim.ccCalled {
+	if claim := a.syncOverlayWindowClaim(&a.overlayClaims.reminder, a.overlayWindowKey(a.sessionEpoch, int(a.compactionWindowGeneration), a.ctxMgr.TokenBudgetsEpoch())); claim.delivered || claim.ccCalled {
 		t.Fatal("imminent delivery must not leak into the reminder claim")
 	}
 	// A new compaction window resets the imminent claim, so the next grace in
@@ -236,7 +236,7 @@ func TestCompactionImminentClaimAndOverlay(t *testing.T) {
 	a.overlayClaims.mu.Lock()
 	a.overlayClaims.imminent = reminderOverlayClaim{windowEpoch: a.sessionEpoch, windowIndex: int(a.compactionWindowGeneration), budgetEpoch: a.ctxMgr.TokenBudgetsEpoch(), delivered: true}
 	a.overlayClaims.mu.Unlock()
-	if claim := a.syncOverlayWindowClaim(&a.overlayClaims.imminent, a.sessionEpoch, int(a.compactionWindowGeneration)+1, a.ctxMgr.TokenBudgetsEpoch()); claim.delivered {
+	if claim := a.syncOverlayWindowClaim(&a.overlayClaims.imminent, a.overlayWindowKey(a.sessionEpoch, int(a.compactionWindowGeneration)+1, a.ctxMgr.TokenBudgetsEpoch())); claim.delivered {
 		t.Fatal("a new compaction window must reset the imminent claim")
 	}
 }

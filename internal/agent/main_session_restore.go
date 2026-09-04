@@ -775,6 +775,9 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	if err := a.reseedCompactionIndexAllocator(loaded.SessionPath); err != nil {
 		log.Warnf("reseed compaction index allocator for restored session error=%v path=%v", err, loaded.SessionPath)
 	}
+	// Allocators for directories this process no longer works on are dropped
+	// so the per-directory map cannot grow with every restore.
+	a.pruneCompactionIndexAllocators(loaded.SessionPath)
 	cleanupStalePendingCompactions(a.sessionDir, 5*time.Minute)
 	a.recovery = recovery.NewRecoveryManager(loaded.SessionPath)
 	a.usageLedger = analytics.NewUsageLedger(loaded.SessionPath, a.projectRoot)

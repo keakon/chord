@@ -79,3 +79,65 @@ func TestFormatHistoryMapLinesToleratesMissingMeta(t *testing.T) {
 		t.Fatalf("missing meta should fall back to a plain path line, got %v", lines)
 	}
 }
+
+// TestListCheckpointHistoryReferencesSkipsForeignPendingArchives pins that a
+// checkpoint never advertises an archive that a cancelled worker is about to
+// delete: pending_apply entries are dropped unless they belong to this draft.
+func TestListCheckpointHistoryReferencesSkipsForeignPendingArchives(t *testing.T) {
+	sessionDir := t.TempDir()
+	a := newTestMainAgent(t, sessionDir)
+	a.sessionDir = sessionDir
+	meta := a.captureCompactionArchiveMeta()
+
+	applied, _, _, err := a.exportCompactionHistory([]message.Message{{Role: message.RoleUser, Content: "u1"}}, 1, []string{"applied topic"}, meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The applied archive's status flips to applied when its draft lands.
+	appliedMeta, err := readCompactionHistoryMeta(compactionHistoryMetaPath(applied))
+	if err != nil {
+		t.Fatal(err)
+	}
+	appliedMeta.Status = "applied"
+	if err := writeCompactionHistoryMeta(sessionDir, compactionHistoryMetaPath(applied), appliedMeta); err != nil {
+		t.Fatal(err)
+	}
+	// A concurrently cancelled worker's archive: still pending_apply, its
+	// cleanup has not run yet.
+	orphan, _, _, err := a.exportCompactionHistory([]message.Message{{Role: message.RoleUser, Content: "u2"}}, 2, []string{"orphan topic"}, meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// This draft's own freshly exported archive: pending_apply by construction.
+	self, _, _, err := a.exportCompactionHistory([]message.Message{{Role: message.RoleUser, Content: "u3"}}, 3, []string{"self topic"}, meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	refs, metas, err := listCheckpointHistoryReferences(sessionDir, self)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Join(formatHistoryMapLines(refs, metas), "\n")
+	if !strings.Contains(lines, filepath.Base(applied)) {
+		t.Fatalf("applied archive must stay in the map, got %q", lines)
+	}
+	if !strings.Contains(lines, filepath.Base(self)) {
+		t.Fatalf("the draft's own archive must be listed while pending, got %q", lines)
+	}
+	if strings.Contains(lines, filepath.Base(orphan)) {
+		t.Fatalf("a foreign pending_apply archive must not be advertised (it may be deleted), got %q", lines)
+	}
+
+	// Without a self path (the pre-export preflight) every pending archive is
+	// dropped, including the one that is not ours.
+	refs, _, err = listCheckpointHistoryReferences(sessionDir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ref := range refs {
+		if filepath.Base(ref) == filepath.Base(orphan) || filepath.Base(ref) == filepath.Base(self) {
+			t.Fatalf("pre-export listing must drop pending archives, got %v", refs)
+		}
+	}
+}

@@ -247,3 +247,45 @@ func TestYoloLowQuotaCodexKeepsPromptAndToolSurfaceFrozen(t *testing.T) {
 		t.Fatalf("tool surface changed under low-quota codex: %#v", defs)
 	}
 }
+
+// TestYoloRulesetKeepsNarrowGlobRules pins that YOLO's protected-rule filter
+// matches tool names the way the permission engine does — normalization plus
+// globs — instead of comparing exact strings. A narrow glob such as
+// `compact_*` is a rule about a protected tool and must survive YOLO; a
+// wildcard-only rule must not.
+func TestYoloRulesetKeepsNarrowGlobRules(t *testing.T) {
+	ruleset := permission.Ruleset{
+		{Permission: "*", Pattern: "*", Action: permission.ActionDeny},
+		{Permission: "compact_*", Pattern: "*", Action: permission.ActionDeny},
+		{Permission: "handoff*", Pattern: "*", Action: permission.ActionAsk},
+		{Permission: "sh*", Pattern: "*", Action: permission.ActionAllow},
+	}
+	filtered := yoloRuleset(ruleset)
+	if len(filtered) != 2 {
+		t.Fatalf("YOLO ruleset = %+v, want the compact_* and handoff* rules only", filtered)
+	}
+	if got := compactContextPermissionAction(filtered); got != permission.ActionDeny {
+		t.Fatalf("compact_* deny must survive YOLO, got %v", got)
+	}
+	if got := evaluateToolPermission(filtered, tools.NameHandoff, json.RawMessage(`{"agent":"planner"}`)); got.Action != permission.ActionAsk {
+		t.Fatalf("handoff* ask must survive YOLO, got %v", got.Action)
+	}
+	// A glob that only reaches unprotected tools is still dropped: YOLO
+	// relaxes everything but the control tools.
+	if got := evaluateToolPermission(filtered, tools.NameShell, json.RawMessage(`{"command":"ls"}`)); got.Action != permission.ActionDeny {
+		t.Fatalf("Shell rule must be dropped under YOLO, got %v", got.Action)
+	}
+}
+
+// TestYoloProtectedPermissionToolNormalizesNames pins that an alias spelling of
+// a protected tool cannot slip past the execution-time bypass.
+func TestYoloProtectedPermissionToolNormalizesNames(t *testing.T) {
+	for _, name := range []string{tools.NameCompactContext, " " + tools.NameDone, tools.NameHandoff + "\t"} {
+		if !yoloProtectedPermissionTool(name) {
+			t.Fatalf("%q must stay protected under YOLO", name)
+		}
+	}
+	if yoloProtectedPermissionTool(tools.NameShell) {
+		t.Fatal("shell must not be protected under YOLO")
+	}
+}

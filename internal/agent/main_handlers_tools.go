@@ -233,6 +233,39 @@ func todoWriteArgsAllDone(argsJSON string) bool {
 	return true
 }
 
+// buildToolResultMessage builds the durable tool message for a completed tool
+// call. Every append path — the normal batch path, the interruption path, and
+// the deferred model-driven / control-tool paths — constructs its message here
+// so a restored transcript carries the same fields regardless of which path
+// wrote it (payload/notes split, diffs, audit, LSP reviews, file state and
+// provenance used to drift between hand-assembled copies).
+//
+// snapshot is the conversation the provenance lookup runs against; callers
+// that already hold one pass it in instead of paying for a second copy.
+func (a *MainAgent) buildToolResultMessage(payload *ToolResultPayload, contextResult string, parts []message.ContentPart, isError bool, snapshot []message.Message) message.Message {
+	return message.Message{
+		Role:       message.RoleTool,
+		Content:    contextResult,
+		Parts:      parts,
+		ToolCallID: payload.CallID,
+		// Content is the model-visible combination of payload and notes; both
+		// are also stored apart so a restored transcript can show the tool's own
+		// output without splitting the notes back out.
+		ToolPayload:       payload.Payload,
+		ToolNotes:         append([]string(nil), payload.Notes...),
+		ToolDiff:          payload.Diff,
+		ToolDiffAdded:     payload.DiffAdded,
+		ToolDiffRemoved:   payload.DiffRemoved,
+		ToolDurationMs:    payload.Duration.Milliseconds(),
+		ToolStatus:        string(toolResultStatusFromError(isError)),
+		Audit:             payload.Audit.Clone(),
+		LSPReviews:        append([]message.LSPReview(nil), payload.LSPReviews...),
+		FileState:         payload.FileState.Clone(),
+		Provenance:        toolProvenanceForCall(snapshot, payload.CallID),
+		ToolRecoveryState: payload.RecoveryState,
+	}
+}
+
 // appendCompletedInterruptedToolResult persists a fully completed tool result
 // during turn interruption paths (cancel/replace/terminal error), without
 // driving normal turn continuation.
@@ -265,26 +298,7 @@ func (a *MainAgent) appendCompletedInterruptedToolResult(payload *ToolResultPayl
 
 	snapshot := a.ctxMgr.Snapshot()
 	a.queueLSPDiagnosticOverlay(snapshot, payload)
-	toolMsg := message.Message{
-		Role:       "tool",
-		Content:    contextResult,
-		Parts:      parts,
-		ToolCallID: payload.CallID,
-		// Content is the model-visible combination of payload and notes; both
-		// are also stored apart so a restored transcript can show the tool's own
-		// output without splitting the notes back out.
-		ToolPayload:     payload.Payload,
-		ToolNotes:       append([]string(nil), payload.Notes...),
-		ToolDiff:        payload.Diff,
-		ToolDiffAdded:   payload.DiffAdded,
-		ToolDiffRemoved: payload.DiffRemoved,
-		ToolDurationMs:  payload.Duration.Milliseconds(),
-		ToolStatus:      string(toolResultStatusFromError(isError)),
-		Audit:           payload.Audit.Clone(),
-		LSPReviews:      append([]message.LSPReview(nil), payload.LSPReviews...),
-		FileState:       payload.FileState.Clone(),
-		Provenance:      toolProvenanceForCall(snapshot, payload.CallID),
-	}
+	toolMsg := a.buildToolResultMessage(payload, contextResult, parts, isError, snapshot)
 	a.ctxMgr.Append(toolMsg)
 	if a.recovery != nil {
 		a.persistAsync(identity.MainAgentID, toolMsg)
@@ -512,24 +526,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 
 	a.queueLSPDiagnosticOverlay(a.ctxMgr.Snapshot(), payload)
 	if !deferToolResultEmission {
-		toolMsg := message.Message{
-			Role:              "tool",
-			Content:           contextResult,
-			Parts:             parts,
-			ToolCallID:        payload.CallID,
-			ToolPayload:       payload.Payload,
-			ToolNotes:         append([]string(nil), payload.Notes...),
-			ToolDiff:          payload.Diff,
-			ToolDiffAdded:     payload.DiffAdded,
-			ToolDiffRemoved:   payload.DiffRemoved,
-			ToolDurationMs:    payload.Duration.Milliseconds(),
-			ToolStatus:        string(toolResultStatusFromError(isError)),
-			Audit:             payload.Audit.Clone(),
-			LSPReviews:        append([]message.LSPReview(nil), payload.LSPReviews...),
-			FileState:         payload.FileState.Clone(),
-			Provenance:        toolProvenanceForCall(a.ctxMgr.Snapshot(), payload.CallID),
-			ToolRecoveryState: payload.RecoveryState,
-		}
+		toolMsg := a.buildToolResultMessage(payload, contextResult, parts, isError, a.ctxMgr.Snapshot())
 		a.ctxMgr.Append(toolMsg)
 		if a.recovery != nil {
 			a.persistAsync(identity.MainAgentID, toolMsg)

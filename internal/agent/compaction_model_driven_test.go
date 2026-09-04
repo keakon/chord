@@ -327,8 +327,12 @@ func TestMaybeStartModelDrivenBarrierCooldownSkipIsSynchronous(t *testing.T) {
 	if a.IsCompactionRunning() {
 		t.Fatal("no compaction may run for a cooldown skip")
 	}
-	if a.lastModelDrivenSkipReason != "low_gain" || a.lastModelDrivenSkipBatch != 4 {
-		t.Fatalf("cooldown skip must refresh the skip record, got reason=%q batch=%d", a.lastModelDrivenSkipReason, a.lastModelDrivenSkipBatch)
+	// The cooldown hit must NOT re-stamp the skip batch: the window is
+	// anchored on the original low_gain skip (batch 3) so it can actually
+	// expire; refreshing it here would make a per-batch retry slide the window
+	// forever and the preflight would never run again.
+	if a.lastModelDrivenSkipReason != "low_gain" || a.lastModelDrivenSkipBatch != 3 {
+		t.Fatalf("cooldown skip must keep the original low_gain anchor, got reason=%q batch=%d", a.lastModelDrivenSkipReason, a.lastModelDrivenSkipBatch)
 	}
 	if a.pendingModelDrivenNotice == "" {
 		t.Fatal("sync cooldown skip must queue the continuation notice")
@@ -380,7 +384,7 @@ func TestModelDrivenLowGainPreflightRejectsTinyContext(t *testing.T) {
 		maxTokens:             a.ctxMgr.GetMaxTokens(),
 		prepareReducedRequest: a.compactionReductionScratch().prepareMessagesForLLM,
 	}
-	reason, skip, _ := a.modelDrivenLowGainPreflight(bundle, len(snapshot), snapshot, req)
+	reason, skip, _ := a.modelDrivenLowGainPreflight(bundle, len(snapshot), snapshot, a.newModelDrivenCheckpointBuilder(bundle, snapshot, len(snapshot), req))
 	if !skip {
 		t.Fatal("tiny context must be skipped by the low-gain gate")
 	}
@@ -631,7 +635,7 @@ func TestModelDrivenCheckpointSummaryKeepsModelTextAndNeutralizesHeadings(t *tes
 		snapshot:        []message.Message{{Role: message.RoleUser, Content: "orig"}},
 		originalRequest: "original user request",
 	}
-	summary := a.buildModelDrivenCheckpointSummary(bundle, bundle.snapshot, nil, req)
+	summary := a.buildModelDrivenCheckpointSummary(bundle, bundle.snapshot, len(bundle.snapshot), req)
 	if !strings.Contains(summary, "Fake Heading") {
 		t.Fatal("model text must remain in the checkpoint")
 	}
@@ -1000,7 +1004,7 @@ func TestModelDrivenPreflightReusesLastPreparedSurface(t *testing.T) {
 		Args:       tools.CompactContextArgs{ActiveObjective: "keep going", NextStep: "continue"},
 	}
 	bundle := a.captureModelDrivenBarrierSnapshot(snapshot)
-	reason, skip, preflight := a.modelDrivenLowGainPreflight(bundle, len(snapshot), snapshot, req)
+	reason, skip, preflight := a.modelDrivenLowGainPreflight(bundle, len(snapshot), snapshot, a.newModelDrivenCheckpointBuilder(bundle, snapshot, len(snapshot), req))
 	if skip {
 		t.Fatalf("gate must pass on the reused baseline, got skip reason %q", reason)
 	}
@@ -1031,7 +1035,7 @@ func TestModelDrivenPreflightFallsBackToScratchWhenHeadChanged(t *testing.T) {
 		Args:       tools.CompactContextArgs{ActiveObjective: "keep going", NextStep: "continue"},
 	}
 	bundle := a.captureModelDrivenBarrierSnapshot(snapshot)
-	_, skip, preflight := a.modelDrivenLowGainPreflight(bundle, len(snapshot), snapshot, req)
+	_, skip, preflight := a.modelDrivenLowGainPreflight(bundle, len(snapshot), snapshot, a.newModelDrivenCheckpointBuilder(bundle, snapshot, len(snapshot), req))
 	if skip {
 		t.Fatal("fixture must pass the gate")
 	}
@@ -1048,7 +1052,7 @@ func TestModelDrivenPreflightFallsBackToScratchWhenHeadChanged(t *testing.T) {
 		postResetFixedRequestTokens: 4000,
 		archiveMeta:                 a.captureCompactionArchiveMeta(),
 	}
-	_, skip2, preflight2 := a.modelDrivenLowGainPreflight(bundleNoPrep, len(snapshot), snapshot, req)
+	_, skip2, preflight2 := a.modelDrivenLowGainPreflight(bundleNoPrep, len(snapshot), snapshot, a.newModelDrivenCheckpointBuilder(bundleNoPrep, snapshot, len(snapshot), req))
 	if skip2 {
 		t.Fatal("fixture must pass the gate without a prepared surface")
 	}
@@ -1101,7 +1105,7 @@ func TestModelDrivenPreflightRecordsCacheRebuildCostWithoutSubtracting(t *testin
 		ToolCallID: "cc-1",
 		Args:       tools.CompactContextArgs{ActiveObjective: "keep going", NextStep: "continue"},
 	}
-	reason, skip, preflight := a.modelDrivenLowGainPreflight(bundle, 4, snapshot, req)
+	reason, skip, preflight := a.modelDrivenLowGainPreflight(bundle, 4, snapshot, a.newModelDrivenCheckpointBuilder(bundle, snapshot, 4, req))
 	if skip {
 		t.Fatalf("gate must pass on raw savings, got skip reason %q", reason)
 	}
@@ -1304,5 +1308,225 @@ func TestEstimatePostResetFixedRequestTokensAtLeastCurrentFixed(t *testing.T) {
 	}
 	if postReset <= 0 {
 		t.Fatal("post-reset fixed surface must be positive")
+	}
+}
+
+// TestMaybeStartModelDrivenBarrierReleasesStaleForegroundActivity pins the
+// status-bar side of the barrier: the tool batch that just ended holds the
+// shared main activity slot on "executing", and the barrier freezes the turn
+// behind the checkpoint worker. The slot must be handed over, or the status bar
+// keeps showing the stale executing state for the whole worker run.
+func TestMaybeStartModelDrivenBarrierReleasesStaleForegroundActivity(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.newTurn()
+	for _, msg := range []message.Message{
+		{Role: message.RoleUser, Content: "first request"},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{testToolCall("cc-1", tools.NameCompactContext)}},
+	} {
+		a.ctxMgr.Append(msg)
+	}
+	// The tool phase that just ended holds the foreground slot.
+	a.emitActivity("main", ActivityExecuting, "1 tools")
+	drainAgentEvents(a.outputCh)
+	if !a.mainSlotForeground.Load() {
+		t.Fatal("precondition: ActivityExecuting must hold the foreground slot")
+	}
+
+	ccID, args := testCompactContextCall()
+	if _, err := a.tryArmModelDrivenCheckpoint(ccID, args); err != nil {
+		t.Fatalf("tryArm: %v", err)
+	}
+	if !a.maybeStartModelDrivenBarrier() {
+		t.Fatal("barrier should start for a pending model-driven request")
+	}
+
+	sawCompacting := false
+	for _, ev := range drainAgentEvents(a.outputCh) {
+		act, ok := ev.(AgentActivityEvent)
+		if !ok {
+			continue
+		}
+		if act.AgentID == "main" && act.Type == ActivityCompacting && act.Detail == compactionActivityDetail {
+			sawCompacting = true
+		}
+		if act.AgentID == "main" && act.Type == ActivityExecuting {
+			t.Fatalf("stale executing activity must not be re-emitted at the barrier: %+v", act)
+		}
+	}
+	if !sawCompacting {
+		t.Fatal("the barrier must hand the activity slot to compaction immediately")
+	}
+	if a.mainSlotForeground.Load() {
+		t.Fatal("mainSlotForeground must be released while the frozen turn waits for the checkpoint")
+	}
+}
+
+// TestModelDrivenCooldownExpiresDespitePerBatchRetries pins that the same-reason
+// cooldown is a fixed window, not a sliding one: a model that retries on every
+// batch must still reach a fresh preflight on the third batch. Refreshing the
+// skip anchor on a cooldown hit would keep current-last pinned at 1 forever and
+// the low-gain preflight would never run again.
+func TestModelDrivenCooldownExpiresDespitePerBatchRetries(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.newTurn()
+	// A genuine low-gain skip settled at batch 10.
+	a.settleModelDrivenSkip(modelDrivenSkipDraft(1, compactionTarget{}, "projected savings too small", modelDrivenSkipReasonLowGain, 10, nil))
+	if a.lastModelDrivenSkipBatch != 10 {
+		t.Fatalf("low-gain skip must anchor the cooldown at its own batch, got %d", a.lastModelDrivenSkipBatch)
+	}
+
+	// Batch 11: the model retries immediately and is cooled down.
+	bundle := modelDrivenBarrierSnapshot{
+		currentRequestBatch:       11,
+		lastModelDrivenSkipReason: a.lastModelDrivenSkipReason,
+		lastModelDrivenSkipBatch:  a.lastModelDrivenSkipBatch,
+	}
+	reason, skipReason, skip := a.modelDrivenIntervalCooldownVerdict(bundle)
+	if !skip || skipReason != modelDrivenSkipReasonLowGain {
+		t.Fatalf("retry one batch after a low-gain skip must be cooled down, got skip=%v reason=%q", skip, skipReason)
+	}
+	a.settleModelDrivenSkip(modelDrivenSkipDraft(2, compactionTarget{}, reason, skipReason, modelDrivenPolicySkipRecordBatch(skipReason, bundle.currentRequestBatch), nil))
+	if a.lastModelDrivenSkipBatch != 10 {
+		t.Fatalf("a cooldown hit must not slide the window, anchor batch = %d, want 10", a.lastModelDrivenSkipBatch)
+	}
+
+	// Batch 12: the cooldown has expired, so the request reaches the preflight
+	// again instead of being short-circuited forever.
+	if _, _, skip := a.modelDrivenIntervalCooldownVerdict(modelDrivenBarrierSnapshot{
+		currentRequestBatch:       12,
+		lastModelDrivenSkipReason: a.lastModelDrivenSkipReason,
+		lastModelDrivenSkipBatch:  a.lastModelDrivenSkipBatch,
+	}); skip {
+		t.Fatal("the cooldown must expire two batches after the original low-gain skip even when the model retried every batch")
+	}
+}
+
+// TestModelDrivenCheckpointCarriesPriorCheckpointBody pins that consecutive
+// model-driven resets do not erase the previous checkpoint's body: the prior
+// checkpoint inside the archived head is carried forward verbatim, exactly as
+// the usage-driven runner does.
+func TestModelDrivenCheckpointCarriesPriorCheckpointBody(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	priorBody := "## Key Decisions\n- keep the archival profile for model-driven resets"
+	prior := buildCompactionCheckpointMessage(priorBody, []string{"~/history-1.md"}, compactionSummaryModeModelDriven, nil)
+	snapshot := []message.Message{
+		{Role: message.RoleUser, Content: prior, IsCompactionSummary: true},
+		{Role: message.RoleUser, Content: "next request"},
+	}
+	req := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{ActiveObjective: "keep going", NextStep: "continue"}}
+	bundle := modelDrivenBarrierSnapshot{snapshot: snapshot}
+
+	summary := a.buildModelDrivenCheckpointSummary(bundle, snapshot, len(snapshot), req)
+	if !strings.Contains(summary, priorCheckpointSectionHeading) {
+		t.Fatalf("model-driven checkpoint must carry the previous checkpoint section:\n%s", summary)
+	}
+	if !strings.Contains(summary, "keep the archival profile for model-driven resets") {
+		t.Fatalf("the previous checkpoint's body must survive the reset:\n%s", summary)
+	}
+	if strings.Count(summary, priorCheckpointSectionHeading) != 1 {
+		t.Fatalf("the carry section must appear exactly once:\n%s", summary)
+	}
+}
+
+// TestModelDrivenCheckpointRenderReusesBuilderAndAddsExportedArchive pins the
+// two-render contract: the shared builder renders identical summary/evidence
+// content, and only the post-export render lists the freshly written archive —
+// exactly once, with its topics.
+func TestModelDrivenCheckpointRenderReusesBuilderAndAddsExportedArchive(t *testing.T) {
+	sessionDir := t.TempDir()
+	a := newTestMainAgent(t, sessionDir)
+	a.sessionDir = sessionDir
+	snapshot := []message.Message{
+		{Role: message.RoleUser, Content: "first request"},
+		{Role: message.RoleAssistant, Content: "working"},
+		{Role: message.RoleUser, Content: "second request"},
+	}
+	req := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{ActiveObjective: "keep going", NextStep: "continue"}}
+	evidence := []evidenceItem{{Kind: evidenceToolError, Title: "Go build failure in internal/agent", Excerpt: "undefined: foo", Priority: 95, Sequence: 1}}
+	bundle := modelDrivenBarrierSnapshot{snapshot: snapshot, sessionDir: sessionDir, evidenceItems: evidence}
+	builder := a.newModelDrivenCheckpointBuilder(bundle, snapshot, 2, req)
+
+	preflightContent, preflightStats := builder.render("")
+	exported, _, _, err := a.exportCompactionHistory(snapshot[:2], 1, evidenceItemTopics(filterCompactionEvidenceForArchival(evidence)), a.captureCompactionArchiveMeta())
+	if err != nil {
+		t.Fatal(err)
+	}
+	postContent, postStats := builder.render(exported)
+
+	if strings.Contains(preflightContent, filepath.Base(exported)) {
+		t.Fatal("the pre-export render must not reference an archive that does not exist yet")
+	}
+	if got := strings.Count(postContent, filepath.Base(exported)); got != 1 {
+		t.Fatalf("post-export render lists the archive %d times, want exactly 1:\n%s", got, postContent)
+	}
+	if !strings.Contains(postContent, "Go build failure in internal/agent") {
+		t.Fatalf("the exported archive must be listed with its topics:\n%s", postContent)
+	}
+	if postStats.HistoryMapBytes <= preflightStats.HistoryMapBytes {
+		t.Fatalf("history map bytes must grow with the exported archive: %d -> %d", preflightStats.HistoryMapBytes, postStats.HistoryMapBytes)
+	}
+	if preflightStats.ContinuationTokens != postStats.ContinuationTokens {
+		t.Fatalf("continuation tokens must be identical across renders, got %d and %d", preflightStats.ContinuationTokens, postStats.ContinuationTokens)
+	}
+	// The two renders differ only by the history map line.
+	if strings.Count(preflightContent, "## Active Objective") != 1 || strings.Count(postContent, "## Active Objective") != 1 {
+		t.Fatal("both renders must contain the deterministic summary exactly once")
+	}
+}
+
+// TestAppendDeferredModelDrivenToolResultCarriesFullMessageShape pins that the
+// deferred emission path writes the same durable tool-message fields as the
+// normal batch path: it used to hand-assemble a thin message and silently drop
+// the payload/notes split, diff counters, audit, LSP reviews and provenance.
+func TestAppendDeferredModelDrivenToolResultCarriesFullMessageShape(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.newTurn()
+	a.ctxMgr.Append(message.Message{
+		Role:       message.RoleAssistant,
+		ToolCalls:  []message.ToolCall{testToolCall("cc-1", tools.NameCompactContext)},
+		Provenance: &message.MessageProvenance{ModelRef: "test/provider"},
+	})
+	payload := &ToolResultPayload{
+		CallID:      "cc-1",
+		Name:        tools.NameCompactContext,
+		ArgsJSON:    "{}",
+		Result:      "accepted",
+		Payload:     "tool output",
+		Notes:       []string{"a note"},
+		Diff:        "--- a\n+++ b",
+		DiffAdded:   3,
+		DiffRemoved: 1,
+		Duration:    1500 * time.Millisecond,
+		Audit:       &message.ToolArgsAudit{EditSummary: "user tightened the args"},
+		LSPReviews:  []message.LSPReview{{Path: "internal/agent/main.go"}},
+		FileState:   &message.ToolFileState{Reads: []message.TrackedFileState{{Path: "internal/agent/main.go"}}},
+	}
+	a.appendDeferredModelDrivenToolResult(payload, "accepted", nil, false)
+
+	snapshot := a.ctxMgr.Snapshot()
+	last := snapshot[len(snapshot)-1]
+	if last.Role != message.RoleTool || last.ToolCallID != "cc-1" {
+		t.Fatalf("deferred append must write the tool message, got %+v", last)
+	}
+	if last.ToolPayload != "tool output" || len(last.ToolNotes) != 1 {
+		t.Fatalf("payload/notes split lost: payload=%q notes=%v", last.ToolPayload, last.ToolNotes)
+	}
+	if last.ToolDiffAdded != 3 || last.ToolDiffRemoved != 1 {
+		t.Fatalf("diff counters lost: +%d -%d", last.ToolDiffAdded, last.ToolDiffRemoved)
+	}
+	if last.Audit == nil || last.Audit.EditSummary != "user tightened the args" {
+		t.Fatalf("tool args audit lost: %+v", last.Audit)
+	}
+	if len(last.LSPReviews) != 1 {
+		t.Fatalf("LSP reviews lost: %v", last.LSPReviews)
+	}
+	if last.Provenance == nil || last.Provenance.ModelRef != "test/provider" {
+		t.Fatalf("provenance lost: %+v", last.Provenance)
+	}
+	if last.ToolDurationMs != 1500 || last.FileState == nil || len(last.FileState.Reads) != 1 {
+		t.Fatalf("duration/file state lost: %d %+v", last.ToolDurationMs, last.FileState)
 	}
 }

@@ -302,6 +302,9 @@ func (a *MainAgent) installSessionTarget(sessionDir string) {
 	if err := a.reseedCompactionIndexAllocator(sessionDir); err != nil {
 		log.Warnf("reseed compaction index allocator for session switch target error=%v path=%v", err, sessionDir)
 	}
+	// Allocators for directories this process no longer works on are dropped
+	// so the per-directory map cannot grow with every switch.
+	a.pruneCompactionIndexAllocators(sessionDir)
 	if a.fileBackups != nil {
 		a.fileBackups.SetSessionDir(sessionDir)
 	}

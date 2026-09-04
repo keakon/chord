@@ -185,7 +185,9 @@ func TestIdleDownshiftAutoContinueAwaitsUserInput(t *testing.T) {
 // TestActiveTurnAutoContinueResumeStillContinues guards the other side of the
 // same branch: a usage-driven auto-continue without the marker keeps its
 // replay-to-continue behavior (compactionResumeModeReplayUserIntent) instead
-// of being forced idle by the new flag.
+// of being forced idle by the new flag. It runs the resume for real and pins
+// that a fresh turn is spawned on the compacted context — asserting only that
+// the pending call lacks the marker would pass with the resume branch removed.
 func TestActiveTurnAutoContinueResumeStillContinues(t *testing.T) {
 	a := modelDownshiftTestAgent(t, 1000000)
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "please inspect the failing test"})
@@ -197,5 +199,21 @@ func TestActiveTurnAutoContinueResumeStillContinues(t *testing.T) {
 	pending := a.currentCompactionPendingCall()
 	if pending == nil || pending.awaitUserInput {
 		t.Fatal("a usage-driven auto-continue must not carry the awaitUserInput marker")
+	}
+
+	// The apply landed: the slot is free and the compacted context is back
+	// below the auto-compaction threshold, so the resume gate does not re-arm
+	// another compaction.
+	a.resetCompactionState()
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 1000})
+
+	if !a.resumePendingMainLLMAfterCompaction(pending, true) {
+		t.Fatal("a usage-driven auto-continue apply must handle its own resume barrier")
+	}
+	if a.IsCompactionRunning() {
+		t.Fatal("no compaction may be re-armed below the threshold")
+	}
+	if a.turn == nil {
+		t.Fatal("the auto-continue resume must spawn a fresh turn so the agent keeps making progress")
 	}
 }

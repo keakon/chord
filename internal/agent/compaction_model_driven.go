@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -334,7 +335,7 @@ func (a *MainAgent) maybeStartModelDrivenBarrier() bool {
 			"max_tokens":     strconv.Itoa(bundle.maxTokens),
 		})
 		a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusStarted, Trigger: string(compactionTriggerModelDriven), PlanID: strconv.FormatUint(planID, 10), Synthetic: true})
-		draft := modelDrivenSkipDraft(planID, target, reason, skipReason, bundle.currentRequestBatch, nil)
+		draft := modelDrivenSkipDraft(planID, target, reason, skipReason, modelDrivenPolicySkipRecordBatch(skipReason, bundle.currentRequestBatch), nil)
 		a.settleModelDrivenSkip(draft)
 		a.appendModelDrivenContinuationNotice()
 		return false
@@ -355,9 +356,6 @@ func (a *MainAgent) maybeStartModelDrivenBarrier() bool {
 	// handleCompactionReady / handleCompactionFailed.
 	a.discardCompactionForModelOverride()
 	a.startModelDrivenCompactionAsync(bundle, planID, target, continuation, req)
-	// The worker is now in charge: the next main LLM request must wait for
-	// the checkpoint barrier instead of running on the old context.
-	a.emitCompactionSlotActivity()
 	return true
 }
 
@@ -524,7 +522,15 @@ func (a *MainAgent) startModelDrivenCompactionAsync(bundle modelDrivenBarrierSna
 		a.walltime.startCompactionAt(planID, a.currentAgentName(), target.turnID)
 	}
 
-	a.emitCompactionSlotActivity()
+	// The barrier freezes this turn's next request until the checkpoint
+	// settles, so there is no live foreground work left to protect: the tool
+	// batch that just ended left the shared main activity slot on
+	// "executing N tools" (mainSlotForeground held) and nobody else releases
+	// it. Hand the slot to compaction — a plain emitCompactionSlotActivity
+	// would be swallowed by the foreground guard and the status bar would show
+	// the stale executing state for the whole worker run (same fix as the
+	// model-downshift deferral path).
+	a.handoffMainActivityToCompaction()
 	a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusStarted, Trigger: string(compactionTriggerModelDriven), PlanID: strconv.FormatUint(planID, 10)})
 	a.compactionWg.Add(1)
 	go func(ctx context.Context, bundle modelDrivenBarrierSnapshot, planID uint64, target compactionTarget, headSplit int, req *modelDrivenCheckpointRequest) {
@@ -614,15 +620,16 @@ func (a *MainAgent) produceModelDrivenDraftAsync(ctx context.Context, bundle mod
 	// verdict batch/reason ride on the draft so the event-loop settlement
 	// records exactly the numbers the worker decided on.
 	if reason, skipReason, ok := a.modelDrivenIntervalCooldownVerdict(bundle); ok {
-		return modelDrivenSkipDraft(planID, target, reason, skipReason, bundle.currentRequestBatch, nil), nil
+		return modelDrivenSkipDraft(planID, target, reason, skipReason, modelDrivenPolicySkipRecordBatch(skipReason, bundle.currentRequestBatch), nil), nil
 	}
 
 	// Low-gain preflight BEFORE history export. A skip here must not produce
 	// orphan history-*.md / metadata / backup files. The preflight stats ride
 	// on the returned draft so the event-loop settlement records them once.
-	skipReason, skip, preflight := a.modelDrivenLowGainPreflight(bundle, headSplit, snapshot, req)
+	checkpointBuilder := a.newModelDrivenCheckpointBuilder(bundle, snapshot, headSplit, req)
+	skipReason, skip, preflight := a.modelDrivenLowGainPreflight(bundle, headSplit, snapshot, checkpointBuilder)
 	if skip {
-		return modelDrivenSkipDraft(planID, target, skipReason, "low_gain", bundle.currentRequestBatch, &preflight), nil
+		return modelDrivenSkipDraft(planID, target, skipReason, modelDrivenSkipReasonLowGain, bundle.currentRequestBatch, &preflight), nil
 	}
 
 	if ctx.Err() != nil {
@@ -659,7 +666,7 @@ func (a *MainAgent) produceModelDrivenDraftAsync(ctx context.Context, bundle mod
 	// on the refined numbers — a threshold-edge reset must not be approved on
 	// the smaller estimate. A skip here cleans up the exported archive (the
 	// pre-export gate exists to keep this the rare path).
-	checkpointContent, contentStats := a.buildModelDrivenCheckpointContent(bundle, snapshot, headSplit, req)
+	checkpointContent, contentStats := checkpointBuilder.render(absHistoryPath)
 	// The build is the worker's heaviest step; honour a cancellation that
 	// landed during it so the deferred cleanup above removes the archive
 	// instead of producing a draft the event loop would discard.
@@ -682,7 +689,7 @@ func (a *MainAgent) produceModelDrivenDraftAsync(ctx context.Context, bundle mod
 		preflight.SavedRatioPct = saved * 100 / preflight.CurrentTokens
 	}
 	if reason, skip := modelDrivenLowGainCheck(preflight.CurrentTokens, saved); skip {
-		return modelDrivenSkipDraft(planID, target, reason, "low_gain", bundle.currentRequestBatch, &preflight), nil
+		return modelDrivenSkipDraft(planID, target, reason, modelDrivenSkipReasonLowGain, bundle.currentRequestBatch, &preflight), nil
 	}
 	contextSummaryMsg := message.Message{
 		Role:                "user",
@@ -744,12 +751,12 @@ func (a *MainAgent) modelDrivenCurrentSurfaceBaseline(bundle modelDrivenBarrierS
 // measured against the full request. Uncertain post-reset costs are
 // overestimated, never ignored, so a reset is only skipped for clearly
 // insufficient gain.
-func (a *MainAgent) modelDrivenLowGainPreflight(bundle modelDrivenBarrierSnapshot, headSplit int, snapshot []message.Message, req *modelDrivenCheckpointRequest) (string, bool, modelDrivenPreflightStats) {
+func (a *MainAgent) modelDrivenLowGainPreflight(bundle modelDrivenBarrierSnapshot, headSplit int, snapshot []message.Message, builder *modelDrivenCheckpointBuilder) (string, bool, modelDrivenPreflightStats) {
 	currentSurface, currentSource := a.modelDrivenCurrentSurfaceBaseline(bundle, snapshot)
 	// Queued user messages are merged after reduction on the real request
 	// path, so they append to the prepared surface on both sides.
 	currentSurface = append(currentSurface, bundle.queuedUserMessages...)
-	checkpointContent, preflight := a.buildModelDrivenCheckpointContent(bundle, snapshot, headSplit, req)
+	checkpointContent, preflight := builder.render("")
 	preflight.CurrentSource = currentSource
 	projected := []message.Message{{Role: message.RoleUser, Content: checkpointContent, IsCompactionSummary: true}}
 	projected = append(projected, snapshot[headSplit:]...)
@@ -819,6 +826,29 @@ func modelDrivenCacheRebuildCost(projectedTokens int) int {
 	return projectedTokens * modelDrivenCacheRebuildDeltaNumer / modelDrivenCacheRebuildDeltaDenom / minModelDrivenApplyIntervalBatches
 }
 
+const (
+	// modelDrivenSkipReasonLowGain / modelDrivenSkipReasonInterval are the
+	// bound skip reasons recorded on the cooldown state.
+	modelDrivenSkipReasonLowGain  = "low_gain"
+	modelDrivenSkipReasonInterval = "interval"
+)
+
+// modelDrivenPolicySkipRecordBatch returns the batch a pre-preflight policy
+// skip records on the cooldown state. A cooldown short-circuit records nothing
+// (batch 0, which settleModelDrivenSkip ignores): the cooldown window is
+// anchored on the ORIGINAL low-gain skip, and re-stamping the current batch on
+// every cooled-down retry would turn a fixed window into a sliding one — a
+// model that retries on every batch keeps current-last at 1, the window never
+// expires, and the low-gain preflight would never run again. An interval skip
+// has no such feedback loop (it is re-decided from the apply anchor) and
+// records normally.
+func modelDrivenPolicySkipRecordBatch(skipReason string, current uint64) uint64 {
+	if skipReason == modelDrivenSkipReasonLowGain {
+		return 0
+	}
+	return current
+}
+
 // modelDrivenSkipDraft builds a policy skip draft carrying the verdict batch
 // and reason so the event-loop settlement records exactly the numbers the
 // worker decided on. Preflight stays nil for skips that never ran it (interval
@@ -865,44 +895,83 @@ func (a *MainAgent) modelDrivenIntervalCooldownVerdict(bundle modelDrivenBarrier
 	// a genuine zero-batch gap and stays throttled.
 	if bundle.lastModelDrivenApplyBatch > 0 && current >= bundle.lastModelDrivenApplyBatch &&
 		current-bundle.lastModelDrivenApplyBatch < minModelDrivenApplyIntervalBatches {
-		return fmt.Sprintf("the minimum %d-request-batch interval since the last applied context checkpoint has not elapsed", minModelDrivenApplyIntervalBatches), "interval", true
+		return fmt.Sprintf("the minimum %d-request-batch interval since the last applied context checkpoint has not elapsed", minModelDrivenApplyIntervalBatches), modelDrivenSkipReasonInterval, true
 	}
-	if bundle.lastModelDrivenSkipReason == "low_gain" &&
+	if bundle.lastModelDrivenSkipReason == modelDrivenSkipReasonLowGain &&
 		current > bundle.lastModelDrivenSkipBatch &&
 		current-bundle.lastModelDrivenSkipBatch < minModelDrivenSkipCooldownBatches {
-		return "cooling down after a previous low_gain skip; wait a couple of model requests before retrying", "low_gain", true
+		return "cooling down after a previous low_gain skip; wait a couple of model requests before retrying", modelDrivenSkipReasonLowGain, true
 	}
 	return "", "", false
 }
 
 // --------------------------------------------------------------- checkpoint ---
 
-// buildModelDrivenCheckpointContent renders the deterministic checkpoint the
-// way it will appear in the transcript: the summary sections wrapped in the
-// canonical checkpoint envelope (header, archived history map, evidence
-// artifact, display hint) plus the model-driven wrapper copy. historyRefs are
-// listed from the session dir at call time, so the post-export draft naturally
-// includes the just-written history file. The returned stats describe the
-// checkpoint for the low-gain preflight and lifecycle telemetry.
-func (a *MainAgent) buildModelDrivenCheckpointContent(bundle modelDrivenBarrierSnapshot, snapshot []message.Message, headSplit int, req *modelDrivenCheckpointRequest) (string, modelDrivenPreflightStats) {
-	headSnapshot := snapshot[:headSplit]
-	recentTail := snapshot[headSplit:]
-	summaryText := a.buildModelDrivenCheckpointSummary(bundle, headSnapshot, recentTail, req)
-	historyRefs, err := listHistoryReferences(bundle.sessionDir)
+// modelDrivenCheckpointBuilder holds the parts of a model-driven checkpoint
+// that are identical on both renders of the same draft: the deterministic
+// summary body, the archival evidence selection, the retained recent messages
+// and the archived-history map of the already-committed chain. The draft
+// renders the checkpoint twice — once for the pre-export low-gain preflight
+// and once after the archive was written — and only the history map differs
+// between them (by exactly the one line of the just-exported archive). Sharing
+// the builder keeps the expensive parts (anchor resolution over the whole
+// snapshot, one directory listing plus one meta read per archive) to a single
+// pass instead of paying them twice per checkpoint.
+type modelDrivenCheckpointBuilder struct {
+	bundle        modelDrivenBarrierSnapshot
+	req           *modelDrivenCheckpointRequest
+	summaryText   string
+	evidenceItems []evidenceItem
+	// retainedRecent is the rendered `## Retained Recent Messages` section.
+	retainedRecent string
+	// historyLines are the rendered map lines of the committed archive chain
+	// (this draft's own archive is added at render time by the post-export
+	// call, which is the only caller that knows its path).
+	historyLines []string
+}
+
+// newModelDrivenCheckpointBuilder performs the one-time work for a draft's
+// checkpoint renders. All inputs come from the immutable barrier snapshot.
+func (a *MainAgent) newModelDrivenCheckpointBuilder(bundle modelDrivenBarrierSnapshot, snapshot []message.Message, headSplit int, req *modelDrivenCheckpointRequest) *modelDrivenCheckpointBuilder {
+	historyChain, historyMetas, err := listCheckpointHistoryReferences(bundle.sessionDir, "")
 	if err != nil {
 		log.Warnf("model-driven checkpoint: list history references error=%v", err)
 	}
-	historyRefs = formatHistoryMapLines(historyRefs, readCompactionHistoryMetas(historyRefs))
-	evidenceItems := filterCompactionEvidenceForArchival(bundle.evidenceItems)
-	// The newest real user messages of the archived head (and any dangling
-	// interrupted reply) stay verbatim inside the checkpoint within the
-	// retention budget, deterministic like the rest of this path — no model
-	// call is involved, and the preflight counts the section because it is
-	// part of checkpointContent.
-	retainedRecent := renderCheckpointRetainedRecentMessages(headSnapshot, compactRetainRecentUserMessages, bundle.retainRecentTokens, func(text string) int {
-		return ctxmgr.EstimateMessagesTokensWithRatio([]message.Message{{Role: message.RoleUser, Content: text}}, bundle.calibratedRatio)
-	})
-	checkpointContent := buildCompactionCheckpointMessage(summaryText, historyRefs, compactionSummaryModeModelDriven, evidenceItems, retainedRecent)
+	headSnapshot := snapshot[:headSplit]
+	return &modelDrivenCheckpointBuilder{
+		bundle:        bundle,
+		req:           req,
+		summaryText:   a.buildModelDrivenCheckpointSummary(bundle, snapshot, headSplit, req),
+		evidenceItems: filterCompactionEvidenceForArchival(bundle.evidenceItems),
+		// The newest real user messages of the archived head (and any dangling
+		// interrupted reply) stay verbatim inside the checkpoint within the
+		// retention budget, deterministic like the rest of this path — no model
+		// call is involved, and the preflight counts the section because it is
+		// part of checkpointContent.
+		retainedRecent: renderCheckpointRetainedRecentMessages(headSnapshot, compactRetainRecentUserMessages, bundle.retainRecentTokens, func(text string) int {
+			return ctxmgr.EstimateMessagesTokensWithRatio([]message.Message{{Role: message.RoleUser, Content: text}}, bundle.calibratedRatio)
+		}),
+		historyLines: formatHistoryMapLines(historyChain, historyMetas),
+	}
+}
+
+// render renders the deterministic checkpoint the way it will appear in the
+// transcript: the summary sections wrapped in the canonical checkpoint
+// envelope (header, archived history map, evidence artifact, display hint)
+// plus the model-driven wrapper copy. exportedArchive, when non-empty, is this
+// draft's freshly written archive: it is appended to the map with its own
+// topics (it is the newest index, so it sorts last). The returned stats
+// describe the checkpoint for the low-gain preflight and lifecycle telemetry.
+func (b *modelDrivenCheckpointBuilder) render(exportedArchive string) (string, modelDrivenPreflightStats) {
+	historyRefs := b.historyLines
+	if exportedArchive != "" {
+		base := filepath.Base(exportedArchive)
+		exportedLine := formatHistoryMapLines([]string{exportedArchive}, map[string]*compactionHistoryMeta{
+			base: {Topics: evidenceItemTopics(b.evidenceItems)},
+		})
+		historyRefs = append(append(make([]string, 0, len(b.historyLines)+1), b.historyLines...), exportedLine...)
+	}
+	checkpointContent := buildCompactionCheckpointMessage(b.summaryText, historyRefs, compactionSummaryModeModelDriven, b.evidenceItems, b.retainedRecent)
 
 	var historyMapBytes int
 	for _, ref := range historyRefs {
@@ -911,17 +980,18 @@ func (a *MainAgent) buildModelDrivenCheckpointContent(bundle modelDrivenBarrierS
 	// AnchorBytes measures the latest-request anchor section (the checkpoint's
 	// continuation core), not the raw summary head/tail whitespace.
 	anchorBytes := 0
-	if _, section, ok := strings.Cut(summaryText, "## Current User Request"); ok {
+	if _, section, ok := strings.Cut(b.summaryText, "## Current User Request"); ok {
 		if before, _, found := strings.Cut(section, "\n## "); found {
 			section = before
 		}
 		anchorBytes = len("## Current User Request") + len(section)
 	}
+	req := b.req
 	return checkpointContent, modelDrivenPreflightStats{
 		CheckpointBytes:    len(checkpointContent),
 		AnchorBytes:        anchorBytes,
 		HistoryMapBytes:    historyMapBytes,
-		ContinuationTokens: bundle.estimateTokens([]message.Message{{Role: message.RoleUser, Content: req.Args.ActiveObjective + "\n" + req.Args.NextStep + "\n" + strings.Join(req.Args.Completed, "\n") + "\n" + strings.Join(req.Args.Decisions, "\n") + "\n" + strings.Join(req.Args.OpenIssues, "\n") + "\n" + strings.Join(req.Args.StateFiles, "\n")}}),
+		ContinuationTokens: b.bundle.estimateTokens([]message.Message{{Role: message.RoleUser, Content: req.Args.ActiveObjective + "\n" + req.Args.NextStep + "\n" + strings.Join(req.Args.Completed, "\n") + "\n" + strings.Join(req.Args.Decisions, "\n") + "\n" + strings.Join(req.Args.OpenIssues, "\n") + "\n" + strings.Join(req.Args.StateFiles, "\n")}}),
 	}
 }
 
@@ -933,8 +1003,14 @@ func (a *MainAgent) buildModelDrivenCheckpointContent(bundle modelDrivenBarrierS
 // verbatim except that column-zero ATX heading markers are stripped, so the
 // model cannot open a new section from inside one; state_files are labeled as
 // model-declared references.
-func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierSnapshot, headSnapshot []message.Message, recentTail []message.Message, req *modelDrivenCheckpointRequest) string {
-	snapshot := append(append([]message.Message(nil), headSnapshot...), recentTail...)
+//
+// snapshot is the whole barrier snapshot and headSplit its archive boundary:
+// the anchor resolver reads the full history, the anchors/carry only the
+// archived head. Both are slices of the same immutable snapshot — copying the
+// history into a fresh slice just to concatenate head and tail would duplicate
+// the entire conversation for no gain.
+func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierSnapshot, snapshot []message.Message, headSplit int, req *modelDrivenCheckpointRequest) string {
+	headSnapshot := snapshot[:headSplit]
 	anchor := resolveLatestUserRequestAnchor(snapshot)
 	constraints := renderEvidenceKindForFallback(&compactionInput{EvidenceItems: bundle.evidenceItems}, evidenceUserCorrection, "- No preserved user constraints.")
 	openIssues := renderModelStateList(req.Args.OpenIssues, "(none reported by the model)")
@@ -964,6 +1040,18 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 	// its section. The stale bucket must stay empty: restore only drops
 	// runtime todos when it sees entries there.
 	summary = ensureCompactionTodoSnapshot(summary, bundle.todos)
+	// A prior checkpoint inside the archived head is carried forward verbatim
+	// as a final section, exactly as the usage-driven runner does. The
+	// guarantee is deterministic and summarizer-independent, so it must hold
+	// here too: without it, two consecutive model-driven resets would erase
+	// the previous checkpoint's Progress/Decisions body — the model only
+	// submits the state it considers current, and everything it did not
+	// restate would exist solely in the archive. The helper strips the anchors
+	// block and any earlier carry section, so the carry stays bounded at one
+	// checkpoint body and cannot duplicate the model's own sections (their
+	// column-zero heading markers are stripped, so model text can never open a
+	// `## Previous Checkpoint` section of its own).
+	summary = appendPriorCheckpointCarry(summary, latestPriorCheckpointBody(headSnapshot))
 	anchors := buildCompactionAnchors(latestCompactionAnchors(headSnapshot), bundle.originalRequest, bundle.evidenceItems)
 	return withCompactionAnchors(summary, anchors)
 }

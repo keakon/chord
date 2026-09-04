@@ -78,6 +78,40 @@ func readCompactionHistoryMetas(chainRefs []string) map[string]*compactionHistor
 	return out
 }
 
+// listCheckpointHistoryReferences lists the archived history files a new
+// checkpoint may advertise, together with their metas.
+//
+// An archive whose .status.json still says pending_apply belongs to a draft
+// that has not been applied: a cancelled or failed worker removes it, and that
+// cleanup runs asynchronously, so an unfiltered listing can advertise a file
+// the model would then fail to read. Such entries are dropped — except
+// selfHistoryPath, the archive this very draft just exported, which is
+// pending_apply by construction and is exactly what the checkpoint must point
+// at. Archives with no readable meta are kept: a meta write still in flight
+// must not make an otherwise valid archive disappear from the chain.
+func listCheckpointHistoryReferences(sessionDir, selfHistoryPath string) ([]string, map[string]*compactionHistoryMeta, error) {
+	refs, err := listHistoryReferences(sessionDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	metas := readCompactionHistoryMetas(refs)
+	self := ""
+	if selfHistoryPath != "" {
+		self = filepath.Base(selfHistoryPath)
+	}
+	kept := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		base := filepath.Base(ref)
+		if base != self {
+			if meta, ok := metas[base]; ok && meta.Status == compactionHistoryPending {
+				continue
+			}
+		}
+		kept = append(kept, ref)
+	}
+	return kept, metas, nil
+}
+
 // formatHistoryMapLines renders the bounded "archived history map" inside the
 // checkpoint wrapper: one line per archived history file, paired with its
 // content topics. The model sees at a glance what each archive covers and

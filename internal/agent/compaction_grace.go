@@ -154,9 +154,6 @@ func (a *MainAgent) recordCompactionGraceEvent(stage string, batch uint64) {
 // reports its true countdown. The claim shares the reminder's (session, window,
 // model, budget) key but only records first/repeat delivery stages for telemetry.
 func (a *MainAgent) queueCompactionImminentNotice(remaining int) {
-	windowEpoch := a.sessionEpoch
-	windowIndex := int(a.compactionWindowGeneration)
-	budgetEpoch := a.ctxMgr.TokenBudgetsEpoch()
-	a.syncOverlayWindowClaim(&a.overlayClaims.imminent, windowEpoch, windowIndex, budgetEpoch)
+	a.syncOverlayWindowClaim(&a.overlayClaims.imminent, a.currentOverlayWindowKey())
 	a.pendingCompactionImminent = compactionImminentText(remaining)
 }

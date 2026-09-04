@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -150,5 +151,63 @@ func TestNextCompactionIndexForAgentReseedRaisesFloorWithoutLowering(t *testing.
 	}
 	if got != 11 {
 		t.Fatalf("post-second-reseed allocation = %d, want 11 (floor must never drop)", got)
+	}
+}
+
+// TestPruneCompactionIndexAllocatorsDropsSettledDirs pins the map's bound: a
+// session switch drops allocators for directories whose handed-out indexes are
+// all on disk, keeps the active one, and keeps an entry whose allocation has
+// not landed yet (a late worker must not be handed the same index twice).
+func TestPruneCompactionIndexAllocatorsDropsSettledDirs(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	settled := t.TempDir()
+	inflight := t.TempDir()
+	active := t.TempDir()
+
+	// A settled directory: the index it handed out is visible on disk.
+	idx, err := a.nextCompactionIndexForAgent(settled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(settled, fmt.Sprintf("history-%d.md", idx)), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// An in-flight directory: the index was handed out but no file exists yet.
+	if _, err := a.nextCompactionIndexForAgent(inflight); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.nextCompactionIndexForAgent(active); err != nil {
+		t.Fatal(err)
+	}
+
+	a.pruneCompactionIndexAllocators(active)
+
+	a.compactionIndexAllocsMu.Lock()
+	_, keptSettled := a.compactionIndexAllocs[filepath.Clean(settled)]
+	_, keptInflight := a.compactionIndexAllocs[filepath.Clean(inflight)]
+	_, keptActive := a.compactionIndexAllocs[filepath.Clean(active)]
+	total := len(a.compactionIndexAllocs)
+	a.compactionIndexAllocsMu.Unlock()
+
+	if keptSettled {
+		t.Fatal("an allocator whose indexes are all on disk must be pruned")
+	}
+	if !keptInflight {
+		t.Fatal("an allocator with an index not yet written must survive so it cannot re-hand it out")
+	}
+	if !keptActive {
+		t.Fatal("the active session's allocator must never be pruned")
+	}
+	if total != 2 {
+		t.Fatalf("allocator map size = %d, want 2", total)
+	}
+
+	// The pruned directory re-seeds from disk and never reuses its index.
+	reallocated, err := a.nextCompactionIndexForAgent(settled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reallocated <= idx {
+		t.Fatalf("re-created allocator handed out index %d again (previous %d)", reallocated, idx)
 	}
 }

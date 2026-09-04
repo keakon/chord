@@ -1,11 +1,13 @@
 package agent
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -17,25 +19,25 @@ func TestContextPressureReminderClaimWindowBinding(t *testing.T) {
 	a.overlayClaims.mu.Lock()
 	a.overlayClaims.reminder = reminderOverlayClaim{windowEpoch: 1, windowIndex: 0, budgetEpoch: 0, delivered: true, ccCalled: true}
 	a.overlayClaims.mu.Unlock()
-	claim := a.syncOverlayWindowClaim(&a.overlayClaims.reminder, 1, 0, 0)
+	claim := a.syncOverlayWindowClaim(&a.overlayClaims.reminder, a.overlayWindowKey(1, 0, 0))
 	if !claim.delivered || !claim.ccCalled {
 		t.Fatalf("same-key sync must preserve the claim, got %+v", claim)
 	}
-	claim = a.syncOverlayWindowClaim(&a.overlayClaims.reminder, 1, 1, 0)
+	claim = a.syncOverlayWindowClaim(&a.overlayClaims.reminder, a.overlayWindowKey(1, 1, 0))
 	if claim.delivered || claim.ccCalled {
 		t.Fatal("new window index must reset delivered and ccCalled")
 	}
 	a.overlayClaims.mu.Lock()
 	a.overlayClaims.reminder = reminderOverlayClaim{windowEpoch: 1, windowIndex: 1, budgetEpoch: 0, delivered: true, ccCalled: true}
 	a.overlayClaims.mu.Unlock()
-	claim = a.syncOverlayWindowClaim(&a.overlayClaims.reminder, 1, 1, 1)
+	claim = a.syncOverlayWindowClaim(&a.overlayClaims.reminder, a.overlayWindowKey(1, 1, 1))
 	if claim.delivered || claim.ccCalled {
 		t.Fatal("new budget epoch must reset delivered and ccCalled")
 	}
 	a.overlayClaims.mu.Lock()
 	a.overlayClaims.reminder = reminderOverlayClaim{windowEpoch: 1, windowIndex: 1, budgetEpoch: 1, delivered: true, ccCalled: true}
 	a.overlayClaims.mu.Unlock()
-	claim = a.syncOverlayWindowClaim(&a.overlayClaims.reminder, 2, 1, 1)
+	claim = a.syncOverlayWindowClaim(&a.overlayClaims.reminder, a.overlayWindowKey(2, 1, 1))
 	if claim.delivered || claim.ccCalled {
 		t.Fatal("new session epoch must reset delivered and ccCalled")
 	}
@@ -46,20 +48,20 @@ func TestContextPressureReminderClaimWindowBinding(t *testing.T) {
 	a.overlayClaims.reminder = reminderOverlayClaim{windowEpoch: 2, windowIndex: 1, budgetEpoch: 1}
 	a.overlayClaims.mu.Unlock()
 	a.noteContextPressureReminderAttached()
-	claim = a.syncOverlayWindowClaim(&a.overlayClaims.reminder, 2, 1, 1)
+	claim = a.syncOverlayWindowClaim(&a.overlayClaims.reminder, a.overlayWindowKey(2, 1, 1))
 	if claim.deliveryPending != true || claim.delivered {
 		t.Fatalf("attach must mark deliveryPending without consuming the claim, got %+v", claim)
 	}
 	// A dispatch confirmation marks delivered with a delivered_first stage
 	// (first delivery in the window).
 	a.markOverlayClaimsDelivered()
-	claim = a.syncOverlayWindowClaim(&a.overlayClaims.reminder, 2, 1, 1)
+	claim = a.syncOverlayWindowClaim(&a.overlayClaims.reminder, a.overlayWindowKey(2, 1, 1))
 	if !claim.delivered || claim.deliveryPending {
 		t.Fatalf("dispatch must confirm the delivery, got %+v", claim)
 	}
 	// The imminent claim is tracked separately under the same window key:
 	// claiming it never touches the reminder claim and vice versa.
-	claim = a.syncOverlayWindowClaim(&a.overlayClaims.imminent, 2, 1, 1)
+	claim = a.syncOverlayWindowClaim(&a.overlayClaims.imminent, a.overlayWindowKey(2, 1, 1))
 	if claim.delivered || claim.ccCalled {
 		t.Fatal("reminder state must not leak into the imminent claim")
 	}
@@ -445,5 +447,40 @@ func TestAppendContextPressureVerificationGuidance(t *testing.T) {
 	got := appendContextPressureVerificationGuidance(base)
 	if !strings.Contains(got, base) || !strings.Contains(got, "state_files") {
 		t.Fatalf("guidance append = %q, want base + verification guidance", got)
+	}
+}
+
+// TestCompactContextPermissionActionHonoursArgumentRules pins that any rule
+// naming compact_context applies. The tool has no permission-matching
+// argument, so a rule written with an argument pattern must not be silently
+// treated as "no rule at all" (matching it against a literal "*" argument used
+// to drop it), while a wildcard-only rule still never blocks the tool.
+func TestCompactContextPermissionActionHonoursArgumentRules(t *testing.T) {
+	cases := []struct {
+		name    string
+		ruleset permission.Ruleset
+		want    permission.Action
+	}{
+		{"no rules", nil, permission.ActionAllow},
+		{"wildcard deny does not apply", permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionDeny}}, permission.ActionAllow},
+		{"exact deny", permission.Ruleset{{Permission: tools.NameCompactContext, Pattern: "*", Action: permission.ActionDeny}}, permission.ActionDeny},
+		{"narrow glob deny", permission.Ruleset{{Permission: "compact_*", Pattern: "*", Action: permission.ActionDeny}}, permission.ActionDeny},
+		{"argument-pattern deny", permission.Ruleset{{Permission: tools.NameCompactContext, Pattern: "anything", Action: permission.ActionDeny}}, permission.ActionDeny},
+		{"argument-pattern ask", permission.Ruleset{{Permission: tools.NameCompactContext, Pattern: "some-arg", Action: permission.ActionAsk}}, permission.ActionAsk},
+		{"last matching rule wins", permission.Ruleset{
+			{Permission: tools.NameCompactContext, Pattern: "anything", Action: permission.ActionDeny},
+			{Permission: tools.NameCompactContext, Pattern: "*", Action: permission.ActionAllow},
+		}, permission.ActionAllow},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := compactContextPermissionAction(tc.ruleset); got != tc.want {
+				t.Fatalf("compactContextPermissionAction = %v, want %v", got, tc.want)
+			}
+			decision := evaluateToolPermission(tc.ruleset, tools.NameCompactContext, json.RawMessage(`{}`))
+			if decision.Action != tc.want {
+				t.Fatalf("evaluateToolPermission action = %v, want %v", decision.Action, tc.want)
+			}
+		})
 	}
 }

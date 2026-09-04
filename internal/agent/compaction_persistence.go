@@ -329,6 +329,48 @@ func (a *MainAgent) reseedCompactionIndexAllocator(sessionDir string) error {
 	return nil
 }
 
+// pruneCompactionIndexAllocators drops per-directory allocators that the
+// process no longer needs, so a long-lived session that switches between many
+// session directories cannot accumulate one map entry per directory forever.
+// Call on session activation (switch / restore) with the directory that just
+// became active.
+//
+// keepDir is always kept. Any other entry is dropped only once every index it
+// handed out is already visible on disk (the on-disk floor has caught up with
+// the in-memory one): re-creating that allocator later re-seeds from the same
+// or a higher floor, so a late worker still holding the directory can never be
+// handed an index a previous worker already used. An entry whose allocations
+// have not landed yet simply stays until a later activation.
+func (a *MainAgent) pruneCompactionIndexAllocators(keepDir string) {
+	keepDir = filepath.Clean(keepDir)
+	a.compactionIndexAllocsMu.Lock()
+	candidates := make([]string, 0, len(a.compactionIndexAllocs))
+	for dir := range a.compactionIndexAllocs {
+		if dir != keepDir {
+			candidates = append(candidates, dir)
+		}
+	}
+	a.compactionIndexAllocsMu.Unlock()
+
+	for _, dir := range candidates {
+		diskNext, err := nextCompactionIndex(dir)
+		if err != nil {
+			continue
+		}
+		a.compactionIndexAllocsMu.Lock()
+		alloc := a.compactionIndexAllocs[dir]
+		if alloc != nil {
+			alloc.mu.Lock()
+			settled := !alloc.seeded || diskNext >= alloc.next
+			alloc.mu.Unlock()
+			if settled {
+				delete(a.compactionIndexAllocs, dir)
+			}
+		}
+		a.compactionIndexAllocsMu.Unlock()
+	}
+}
+
 // captureOriginalFirstUserHint returns the best-known original first user
 // message. It must be called BEFORE the on-disk main.jsonl has been replaced
 // (otherwise FirstUserMessageFromFile would read the new compacted content).

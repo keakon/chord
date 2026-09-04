@@ -2,22 +2,38 @@ package agent
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/keakon/chord/internal/permission"
+	"github.com/keakon/chord/internal/toolname"
 	"github.com/keakon/chord/internal/tools"
 )
 
+// yoloProtectedTools are the control tools whose permission rules stay
+// enforced under YOLO mode.
+var yoloProtectedTools = []string{tools.NameHandoff, tools.NameDelegate, tools.NameCancel, tools.NameDone, tools.NameCompactContext}
+
 // yoloProtectedPermissionTool reports whether the tool's permission rules must
-// still be enforced under YOLO mode. Tool names come from the registry without
-// surrounding whitespace, so no trimming is needed here.
+// still be enforced under YOLO mode. The name is normalized first so an alias
+// spelling of a protected tool cannot slip through the bypass.
 func yoloProtectedPermissionTool(toolName string) bool {
-	switch toolName {
-	case tools.NameHandoff, tools.NameDelegate, tools.NameCancel, tools.NameDone, tools.NameCompactContext:
-		return true
-	default:
-		return false
+	return slices.Contains(yoloProtectedTools, toolname.Normalize(toolName))
+}
+
+// yoloProtectedPermissionRule reports whether a rule must survive the YOLO
+// filter: its tool pattern names one of the protected tools. Matching goes
+// through the shared normalization + glob helper, so a narrow glob such as
+// `compact_*` or `handoff*` keeps its rule instead of being dropped by an
+// exact-string comparison — the documented contract is that any non-wildcard
+// rule matching a protected tool still applies under YOLO.
+func yoloProtectedPermissionRule(rule permission.Rule) bool {
+	for _, name := range yoloProtectedTools {
+		if permissionRuleTargetsTool(rule, name) {
+			return true
+		}
 	}
+	return false
 }
 
 // yoloRuleset returns a ruleset containing only the protected-tool rules.
@@ -32,7 +48,7 @@ func yoloRuleset(ruleset permission.Ruleset) permission.Ruleset {
 	}
 	filtered := make(permission.Ruleset, 0, len(ruleset))
 	for _, rule := range ruleset {
-		if yoloProtectedPermissionTool(rule.Permission) {
+		if yoloProtectedPermissionRule(rule) {
 			filtered = append(filtered, rule)
 		}
 	}

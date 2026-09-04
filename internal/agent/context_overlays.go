@@ -95,18 +95,73 @@ type overlayClaimState struct {
 	imminent reminderOverlayClaim
 }
 
+// overlayWindowKey is the (session epoch, compaction window, model, budget
+// epoch) identity a reminder-class claim binds to. It exists so the four
+// components are assembled in exactly one place: every site that used to spell
+// the triple out by hand — and then compare it field by field — now goes
+// through overlayWindowKey / bindTo.
+type overlayWindowKey struct {
+	windowEpoch uint64
+	windowIndex int
+	modelRef    string
+	budgetEpoch uint64
+}
+
+// overlayWindowKey builds the key for an explicit window, filling in the
+// running model identity.
+func (a *MainAgent) overlayWindowKey(windowEpoch uint64, windowIndex int, budgetEpoch uint64) overlayWindowKey {
+	return overlayWindowKey{
+		windowEpoch: windowEpoch,
+		windowIndex: windowIndex,
+		modelRef:    a.reminderClaimModelRef(),
+		budgetEpoch: budgetEpoch,
+	}
+}
+
+// currentOverlayWindowKey reads the live window identity. Call on the event
+// loop (it reads sessionEpoch / compactionWindowGeneration).
+func (a *MainAgent) currentOverlayWindowKey() overlayWindowKey {
+	return a.overlayWindowKey(a.sessionEpoch, int(a.compactionWindowGeneration), a.ctxMgr.TokenBudgetsEpoch())
+}
+
+// key returns the window identity a claim is currently bound to.
+func (c *reminderOverlayClaim) key() overlayWindowKey {
+	return overlayWindowKey{windowEpoch: c.windowEpoch, windowIndex: c.windowIndex, modelRef: c.modelRef, budgetEpoch: c.budgetEpoch}
+}
+
+// bindTo rebinds the claim to key, resetting it — including delivered and
+// ccCalled — when any component changed. Callers must hold overlayClaims.mu.
+func (c *reminderOverlayClaim) bindTo(key overlayWindowKey) {
+	if c.key() != key {
+		*c = reminderOverlayClaim{windowEpoch: key.windowEpoch, windowIndex: key.windowIndex, modelRef: key.modelRef, budgetEpoch: key.budgetEpoch}
+	}
+}
+
+// confirmDelivery consumes a pending attachment at dispatch and reports the
+// delivery stage ("" when nothing was attached). The first delivery in a
+// window is distinguished from the sticky repeats.
+func (c *reminderOverlayClaim) confirmDelivery() string {
+	if !c.deliveryPending {
+		return ""
+	}
+	stage := "delivered_first"
+	if c.delivered {
+		stage = "delivered_repeat"
+	}
+	c.deliveryPending = false
+	c.delivered = true
+	return stage
+}
+
 // syncOverlayWindowClaim binds a reminder-class claim (the context-pressure
-// reminder or the grace-period imminent notice) to the current
-// (session, window, model, budget) key, resetting the claim — including
-// delivered and ccCalled — when a component changed, and returns a snapshot
-// for the queue decision. Call on the event loop before queuing overlay text.
-func (a *MainAgent) syncOverlayWindowClaim(claim *reminderOverlayClaim, windowEpoch uint64, windowIndex int, budgetEpoch uint64) reminderOverlayClaim {
-	modelRef := a.reminderClaimModelRef()
+// reminder or the grace-period imminent notice) to a window key, resetting the
+// claim — including delivered and ccCalled — when a component changed, and
+// returns a snapshot for the queue decision. Call on the event loop before
+// queuing overlay text.
+func (a *MainAgent) syncOverlayWindowClaim(claim *reminderOverlayClaim, key overlayWindowKey) reminderOverlayClaim {
 	a.overlayClaims.mu.Lock()
 	defer a.overlayClaims.mu.Unlock()
-	if claim.windowEpoch != windowEpoch || claim.windowIndex != windowIndex || claim.modelRef != modelRef || claim.budgetEpoch != budgetEpoch {
-		*claim = reminderOverlayClaim{windowEpoch: windowEpoch, windowIndex: windowIndex, modelRef: modelRef, budgetEpoch: budgetEpoch}
-	}
+	claim.bindTo(key)
 	return *claim
 }
 
@@ -130,16 +185,11 @@ func (a *MainAgent) reminderClaimModelRef() string {
 // queue — a call that arrived after a background apply advanced the window
 // must not stamp ccCalled onto the stale pre-apply claim.
 func (a *MainAgent) markReminderCompactContextCalled() {
-	windowEpoch := a.sessionEpoch
-	windowIndex := int(a.compactionWindowGeneration)
-	budgetEpoch := a.ctxMgr.TokenBudgetsEpoch()
-	modelRef := a.reminderClaimModelRef()
+	key := a.currentOverlayWindowKey()
 	a.overlayClaims.mu.Lock()
 	defer a.overlayClaims.mu.Unlock()
 	c := &a.overlayClaims.reminder
-	if c.windowEpoch != windowEpoch || c.windowIndex != windowIndex || c.modelRef != modelRef || c.budgetEpoch != budgetEpoch {
-		*c = reminderOverlayClaim{windowEpoch: windowEpoch, windowIndex: windowIndex, modelRef: modelRef, budgetEpoch: budgetEpoch}
-	}
+	c.bindTo(key)
 	c.ccCalled = true
 }
 
@@ -195,26 +245,10 @@ func (a *MainAgent) noteCompactionWarningAttached() {
 // delivered_repeat on later ones. The warning stays one-shot per generation
 // and keeps a plain delivered stage.
 func (a *MainAgent) markOverlayClaimsDelivered() {
-	reminderStage := ""
 	warningDelivered := false
-	imminentStage := ""
 	a.overlayClaims.mu.Lock()
-	if a.overlayClaims.imminent.deliveryPending {
-		imminentStage = "delivered_first"
-		if a.overlayClaims.imminent.delivered {
-			imminentStage = "delivered_repeat"
-		}
-		a.overlayClaims.imminent.deliveryPending = false
-		a.overlayClaims.imminent.delivered = true
-	}
-	if a.overlayClaims.reminder.deliveryPending {
-		reminderStage = "delivered_first"
-		if a.overlayClaims.reminder.delivered {
-			reminderStage = "delivered_repeat"
-		}
-		a.overlayClaims.reminder.deliveryPending = false
-		a.overlayClaims.reminder.delivered = true
-	}
+	imminentStage := a.overlayClaims.imminent.confirmDelivery()
+	reminderStage := a.overlayClaims.reminder.confirmDelivery()
 	if a.overlayClaims.warning.deliveryPending {
 		a.overlayClaims.warning.deliveryPending = false
 		a.overlayClaims.warning.delivered = true
@@ -317,10 +351,7 @@ func (a *MainAgent) queueContextPressureReminder(decision ctxmgr.AutoCompactDeci
 	if reminderPct >= threshold {
 		return
 	}
-	windowEpoch := a.sessionEpoch
-	windowIndex := int(a.compactionWindowGeneration)
-	budgetEpoch := a.ctxMgr.TokenBudgetsEpoch()
-	claim := a.syncOverlayWindowClaim(&a.overlayClaims.reminder, windowEpoch, windowIndex, budgetEpoch)
+	claim := a.syncOverlayWindowClaim(&a.overlayClaims.reminder, a.currentOverlayWindowKey())
 	// The model already called compact_context in this window: whatever
 	// that attempt settles to — an apply that advances the window and resets
 	// the claim, or a skip/failure surfaced by the continuation notice — the

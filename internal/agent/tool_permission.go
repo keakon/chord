@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/keakon/chord/internal/llm"
@@ -35,6 +36,27 @@ func normalizeToolPermissionAction(toolName string, action permission.Action) pe
 	return action
 }
 
+// permissionRuleTargetsTool reports whether one rule names toolName through a
+// non-global tool pattern: an exact spelling, a narrow glob such as
+// `compact_*`, or any alias that normalizes to the same tool. The literal `*`
+// tool pattern is never a match — it is the wildcard default, not a rule about
+// this particular tool.
+//
+// The rule's own argument pattern is passed through as the lookup argument, so
+// the answer is "does this rule name the tool?" independently of what the
+// argument pattern happens to be. Tools whose permission decision has no
+// meaningful matching argument (compact_context, and the YOLO-protected
+// control tools) need exactly that question answered; matching them against a
+// literal "*" argument would silently drop every parameterized rule, because
+// globMatch("*", "some-argument") is false.
+//
+// The repo's canonical glob + tool-name normalization live in the permission
+// package (LastSpecificToolMatch); wrapping a single rule in a ruleset reuses
+// them instead of re-implementing a matcher here.
+func permissionRuleTargetsTool(rule permission.Rule, toolName string) bool {
+	return permission.Ruleset{rule}.LastSpecificToolMatch(toolName, rule.Pattern).Found
+}
+
 // compactContextPermissionAction resolves the effective permission action for
 // the compact_context tool. The tool is registered only while the
 // context.compaction.model_driven feature is enabled, so registration itself
@@ -44,13 +66,15 @@ func normalizeToolPermissionAction(toolName string, action permission.Action) pe
 // to allow the internal tool name. Only a non-global rule whose tool pattern
 // matches compact_context (an explicit deny / ask / allow) overrides that
 // default; an explicit deny keeps the tool hidden and its calls rejected.
-// Narrow globs such as compact_* are specific rules too.
+// Narrow globs such as compact_* are specific rules too, and so are rules
+// written with an argument pattern (`compact_context: {"anything": deny}`):
+// the tool takes no permission-matching argument, so any rule naming it
+// applies, and the last such rule wins.
 func compactContextPermissionAction(ruleset permission.Ruleset) permission.Action {
-	if len(ruleset) == 0 {
-		return permission.ActionAllow
-	}
-	if match := ruleset.LastSpecificToolMatch(tools.NameCompactContext, "*"); match.Found {
-		return match.Rule.Action
+	for _, rule := range slices.Backward(ruleset) {
+		if permissionRuleTargetsTool(rule, tools.NameCompactContext) {
+			return rule.Action
+		}
 	}
 	return permission.ActionAllow
 }

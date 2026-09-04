@@ -47,13 +47,13 @@ func TestReminderClaimResetsWhenModelIdentityChangesWithSameBudget(t *testing.T)
 	}
 	a.overlayClaims.mu.Unlock()
 
-	claim := a.syncOverlayWindowClaim(&a.overlayClaims.reminder, 1, 2, 3)
+	claim := a.syncOverlayWindowClaim(&a.overlayClaims.reminder, a.overlayWindowKey(1, 2, 3))
 	if !claim.delivered || !claim.ccCalled {
 		t.Fatalf("same-model claim must be preserved, got %+v", claim)
 	}
 
 	a.SetProviderModelRef("sample/provider-model-2")
-	claim = a.syncOverlayWindowClaim(&a.overlayClaims.reminder, 1, 2, 3)
+	claim = a.syncOverlayWindowClaim(&a.overlayClaims.reminder, a.overlayWindowKey(1, 2, 3))
 	if claim.delivered || claim.ccCalled {
 		t.Fatalf("same-budget model switch must reset claim, got %+v", claim)
 	}

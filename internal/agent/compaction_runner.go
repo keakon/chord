@@ -305,14 +305,16 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 		return nil, ctx.Err()
 	}
 
-	historyRefs, err := listHistoryReferences(archiveMeta.sessionDir)
+	historyChain, historyMetas, err := listCheckpointHistoryReferences(archiveMeta.sessionDir, absHistoryPath)
 	if err != nil {
 		return nil, fmt.Errorf("list history references: %w", err)
 	}
 	// The checkpoint lists the archived history files as a content map (path +
 	// topics) so the model knows what each archive covers and can read the exact
-	// archive back by its stable relative address.
-	historyRefs = formatHistoryMapLines(historyRefs, readCompactionHistoryMetas(historyRefs))
+	// archive back by its stable relative address. Archives still pending apply
+	// (a concurrently cancelled draft whose cleanup has not landed) are left
+	// out; only this draft's own archive is listed while pending.
+	historyRefs := formatHistoryMapLines(historyChain, historyMetas)
 	summaryText = ensureCompactionSummaryKeyFiles(strings.TrimSpace(summaryText), keyFiles)
 	// A prior checkpoint inside the archived head is carried forward verbatim
 	// as a final section, so the checkpoint that replaces it always references
