@@ -621,8 +621,8 @@ type ApplyPatchCompatConfig struct {
 	// Freeform controls the Responses wire shape: true emits apply_patch as a
 	// custom tool with a grammar, false emits a JSON function tool. Nil infers
 	// from the model name and the wire type (non-Responses endpoints default to
-	// false); hosts that reject custom tools on the Responses wire — Azure
-	// OpenAI, GPT-OSS endpoints and friends — should set Freeform to false.
+	// false). Hosts that accept Responses requests but reject custom tools have
+	// no built-in exception: set Freeform to false there (see docs/edit-tools.md).
 	Freeform *bool `json:"freeform,omitempty" yaml:"freeform,omitempty"`
 }
 
