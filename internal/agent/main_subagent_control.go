@@ -704,7 +704,7 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 	a.subs.notifyTaskChangeLocked()
 	a.subs.mu.Unlock()
 	if a.recovery != nil {
-		if snapshotErr := a.recovery.SaveSnapshot(a.buildRecoverySnapshot()); snapshotErr != nil {
+		if snapshotErr := a.persistSnapshotLocked(a.buildRecoverySnapshot); snapshotErr != nil {
 			a.subs.mu.Lock()
 			delete(a.subs.subAgents, sub.instanceID)
 			a.subs.taskRecords[taskID] = cloneDurableTaskRecord(record)

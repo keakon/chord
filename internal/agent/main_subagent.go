@@ -945,7 +945,7 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 	a.subs.notifyTaskChangeLocked()
 	a.subs.mu.Unlock()
 	if a.recovery != nil {
-		if err := a.recovery.SaveSnapshot(a.buildRecoverySnapshot()); err != nil {
+		if err := a.persistSnapshotLocked(a.buildRecoverySnapshot); err != nil {
 			a.subs.mu.Lock()
 			delete(a.subs.subAgents, sub.instanceID)
 			delete(a.subs.taskRecords, taskID)

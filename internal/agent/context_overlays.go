@@ -39,12 +39,11 @@ const (
 
 // reminderOverlayClaim is the per-window claim shared by the context-pressure
 // reminder and the grace-period "compaction imminent" notice. It binds to
-// (compaction_window_id, budget_epoch): a durable apply
-// (model-driven or usage-driven), a session reset/restore, or a usage-baseline
-// model/provider/budget switch changes one of the three components and starts
-// a fresh claim, so a reset that is followed by a new full reminder is
-// intended — each compaction window delivers the full reminder text at most
-// once.
+// (session_epoch, compaction_window_id, model_ref, budget_epoch): a durable
+// apply (model-driven or usage-driven), a session reset/restore, or a
+// model/provider/budget switch changes one component and starts a fresh claim,
+// so a reset that is followed by a new full reminder is intended — each
+// compaction window delivers the full reminder text at most once.
 //
 // The claim never suppresses an attach by itself: the reminder overlay is
 // sticky while usage stays above the reminder line (the full text before the
@@ -57,8 +56,9 @@ const (
 // confirmed only when a request carrying the overlay actually dispatches.
 type reminderOverlayClaim struct {
 	windowEpoch     uint64
-	windowIndex     int    // compaction index (history file count); 0 = no history yet
-	budgetEpoch     uint64 // ctxmgr token-budget switch counter (model/provider/budget changes)
+	windowIndex     int    // compaction window generation; 0 = initial window
+	modelRef        string // running/selected provider/model identity
+	budgetEpoch     uint64 // ctxmgr token-budget switch counter
 	deliveryPending bool   // overlay attached to the current in-flight request
 	delivered       bool   // overlay attached to a request that actually dispatched
 	ccCalled        bool   // model called compact_context in this window
@@ -96,17 +96,30 @@ type overlayClaimState struct {
 }
 
 // syncOverlayWindowClaim binds a reminder-class claim (the context-pressure
-// reminder or the grace-period imminent notice) to the given (window, budget)
-// key, resetting the claim — including delivered and ccCalled — when a
-// component changed, and returns a snapshot for the queue decision. Call on
-// the event loop before queuing overlay text.
+// reminder or the grace-period imminent notice) to the current
+// (session, window, model, budget) key, resetting the claim — including
+// delivered and ccCalled — when a component changed, and returns a snapshot
+// for the queue decision. Call on the event loop before queuing overlay text.
 func (a *MainAgent) syncOverlayWindowClaim(claim *reminderOverlayClaim, windowEpoch uint64, windowIndex int, budgetEpoch uint64) reminderOverlayClaim {
+	modelRef := a.reminderClaimModelRef()
 	a.overlayClaims.mu.Lock()
 	defer a.overlayClaims.mu.Unlock()
-	if claim.windowEpoch != windowEpoch || claim.windowIndex != windowIndex || claim.budgetEpoch != budgetEpoch {
-		*claim = reminderOverlayClaim{windowEpoch: windowEpoch, windowIndex: windowIndex, budgetEpoch: budgetEpoch}
+	if claim.windowEpoch != windowEpoch || claim.windowIndex != windowIndex || claim.modelRef != modelRef || claim.budgetEpoch != budgetEpoch {
+		*claim = reminderOverlayClaim{windowEpoch: windowEpoch, windowIndex: windowIndex, modelRef: modelRef, budgetEpoch: budgetEpoch}
 	}
 	return *claim
+}
+
+func (a *MainAgent) reminderClaimModelRef() string {
+	if a == nil {
+		return ""
+	}
+	a.llmMu.RLock()
+	defer a.llmMu.RUnlock()
+	if ref := strings.TrimSpace(a.runningModelRef); ref != "" {
+		return ref
+	}
+	return strings.TrimSpace(a.providerModelRef)
 }
 
 // markReminderCompactContextCalled records that the model called
@@ -120,11 +133,12 @@ func (a *MainAgent) markReminderCompactContextCalled() {
 	windowEpoch := a.sessionEpoch
 	windowIndex := int(a.compactionWindowGeneration)
 	budgetEpoch := a.ctxMgr.TokenBudgetsEpoch()
+	modelRef := a.reminderClaimModelRef()
 	a.overlayClaims.mu.Lock()
 	defer a.overlayClaims.mu.Unlock()
 	c := &a.overlayClaims.reminder
-	if c.windowEpoch != windowEpoch || c.windowIndex != windowIndex || c.budgetEpoch != budgetEpoch {
-		*c = reminderOverlayClaim{windowEpoch: windowEpoch, windowIndex: windowIndex, budgetEpoch: budgetEpoch}
+	if c.windowEpoch != windowEpoch || c.windowIndex != windowIndex || c.modelRef != modelRef || c.budgetEpoch != budgetEpoch {
+		*c = reminderOverlayClaim{windowEpoch: windowEpoch, windowIndex: windowIndex, modelRef: modelRef, budgetEpoch: budgetEpoch}
 	}
 	c.ccCalled = true
 }

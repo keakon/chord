@@ -107,10 +107,10 @@ func (a *MainAgent) effectiveReminderPctForModelRef(modelRef string, threshold f
 
 // applyModelCompactionConfig applies the per-model compaction threshold for the
 // current model reference to ctxmgr. Called at request boundaries after
-// pending model-pool switches are applied; a model change bumps the budget
-// epoch through SetThreshold, which resets the reminder-class overlay claims
-// for the new window (full reminder text becomes available again; the warning
-// claim resets with the request generation). It returns whether the running
+// pending model-pool switches are applied; a model change changes the reminder
+// claim's model identity, which resets the reminder-class overlay claims for
+// the new window (full reminder text becomes available again; the warning claim
+// resets with the request generation). It returns whether the running
 // model changed since the last application — the caller (the pre-request gate
 // or the idle switch path) uses that to start the model-downshift compaction
 // when the new line is crossed.

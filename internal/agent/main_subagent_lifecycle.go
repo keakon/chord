@@ -115,7 +115,7 @@ func (a *MainAgent) parkSubAgent(agentID string) bool {
 	a.subs.taskRecords[sub.taskID] = cloneDurableTaskRecord(parkedRecord)
 	a.subs.mu.Unlock()
 	if a.recovery != nil {
-		if err := a.recovery.SaveSnapshot(a.buildRecoverySnapshot()); err != nil {
+		if err := a.persistSnapshotLocked(a.buildRecoverySnapshot); err != nil {
 			a.subs.mu.Lock()
 			if removed == sub {
 				a.subs.subAgents[agentID] = sub

@@ -770,12 +770,11 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	a.stateMu.Lock()
 	a.sessionDir = loaded.SessionPath
 	a.stateMu.Unlock()
-	// The restored session dir has its own on-disk history maximum: reseed
-	// the index allocator lazily against it on the next allocation.
-	a.compactionIndexAlloc.mu.Lock()
-	a.compactionIndexAlloc.seeded = false
-	a.compactionIndexAlloc.next = 0
-	a.compactionIndexAlloc.mu.Unlock()
+	// The restored directory may have been compacted by another process since
+	// this snapshot was taken; see installSessionTarget.
+	if err := a.reseedCompactionIndexAllocator(loaded.SessionPath); err != nil {
+		log.Warnf("reseed compaction index allocator for restored session error=%v path=%v", err, loaded.SessionPath)
+	}
 	cleanupStalePendingCompactions(a.sessionDir, 5*time.Minute)
 	a.recovery = recovery.NewRecoveryManager(loaded.SessionPath)
 	a.usageLedger = analytics.NewUsageLedger(loaded.SessionPath, a.projectRoot)

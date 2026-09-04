@@ -6,14 +6,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/keakon/golog/log"
-
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
-	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -281,20 +278,9 @@ func (a *MainAgent) UpdateTodos(todos []tools.TodoItem) error {
 	a.todoMu.Lock()
 	a.todoItems = make([]tools.TodoItem, len(todos))
 	copy(a.todoItems, todos)
-
-	if a.recovery != nil && !a.shuttingDown.Load() {
-		todoStates := snapshotTodos(todos)
-		if err := a.recovery.SaveSnapshot(&recovery.SessionSnapshot{
-			Todos:                  todoStates,
-			ModelName:              a.ModelName(),
-			ActiveRole:             a.CurrentRole(),
-			LastInputTokens:        a.ctxMgr.LastInputTokens(),
-			LastTotalContextTokens: a.ctxMgr.LastTotalContextTokens(),
-		}); err != nil {
-			log.Warnf("failed to save todo snapshot error=%v", err)
-		}
-	}
 	a.todoMu.Unlock()
+
+	a.saveRecoverySnapshot()
 
 	todoCopy := make([]tools.TodoItem, len(todos))
 	copy(todoCopy, todos)

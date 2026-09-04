@@ -151,8 +151,8 @@ func (a *MainAgent) recordCompactionGraceEvent(stage string, batch uint64) {
 // attach it, it is by definition still inside the window. remaining is the
 // number of main-model request batches left before compaction starts; the
 // crossing request reports the full window and every later deferred request
-// reports its true countdown. The claim shares the reminder's (window,
-// budget) key but only records first/repeat delivery stages for telemetry.
+// reports its true countdown. The claim shares the reminder's (session, window,
+// model, budget) key but only records first/repeat delivery stages for telemetry.
 func (a *MainAgent) queueCompactionImminentNotice(remaining int) {
 	windowEpoch := a.sessionEpoch
 	windowIndex := int(a.compactionWindowGeneration)

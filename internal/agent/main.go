@@ -695,12 +695,22 @@ type MainAgent struct {
 	// reminder for requests racing that window. Event-loop owned: queued,
 	// advanced, and reset only on the event loop, so it needs no lock.
 	compactionWindowGeneration uint64
-	// compactionIndexAlloc hands out history file indexes without re-scanning
-	// the disk, so a discarded worker's deferred orphan cleanup can never race
-	// a fresh worker into reusing the same index (see
-	// nextCompactionIndexForAgent). Guarded by its own mutex: compaction
-	// workers allocate from their own goroutines. Reseeds on session switch.
-	compactionIndexAlloc compactionIndexAllocator
+	// compactionIndexAllocs hands out history file indexes without re-scanning
+	// the disk. They are keyed by captured session directory so a worker that
+	// outlives a session switch cannot allocate from the new live session.
+	// The map mutex protects lookup/creation; each allocator serializes its
+	// own directory's worker allocations.
+	compactionIndexAllocsMu sync.Mutex
+	compactionIndexAllocs   map[string]*compactionIndexAllocator
+	// recoverySnapshotMu serializes building + writing one recovery snapshot
+	// (snapshot.json). Writers run on several goroutines — the event loop's
+	// apply / TodoWrite / session-freeze paths and SubAgent persistence
+	// callbacks — and SaveSnapshot replaces the whole file, so a build that
+	// started before a newer state update could otherwise finish after that
+	// update's write and clobber it with stale contents. Holding the lock
+	// across build + write makes the last writer's snapshot reflect the
+	// freshest state.
+	recoverySnapshotMu sync.Mutex
 	// appliedCompactionModelRef records the model reference whose per-model
 	// compaction threshold is currently applied to ctxmgr. A change re-applies
 	// the threshold; not persisted, so after a restore the threshold is
@@ -1613,7 +1623,7 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 
 	// Save final snapshot and close recovery manager (flush JSONL file handles).
 	if a.recovery != nil {
-		if err := a.recovery.SaveSnapshot(a.buildShutdownSnapshot()); err != nil {
+		if err := a.persistSnapshotLocked(a.buildShutdownSnapshot); err != nil {
 			log.Warnf("failed to save final recovery snapshot error=%v", err)
 		}
 
@@ -1630,15 +1640,15 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 }
 
 // shutdownTimeoutError persists a best-effort snapshot before Shutdown aborts
-// with workers still live. buildRecoverySnapshot takes its own locks and
-// UpdateTodos saves the same snapshot concurrently during normal operation,
-// while SaveSnapshot writes atomically via temp+rename, so racing a wedged
-// loop can only yield a slightly stale snapshot — never a corrupt one. The
-// recovery manager stays open: the stuck persist loop may still be writing
-// JSONL, and Close would turn those writes into silent no-ops.
+// with workers still live. persistSnapshotLocked serializes the snapshot build
+// and write against the concurrent TodoWrite / SubAgent persistence writers,
+// and SaveSnapshot writes atomically via temp+rename, so racing a wedged loop
+// can only yield a slightly stale snapshot — never a corrupt one. The recovery
+// manager stays open: the stuck persist loop may still be writing JSONL, and
+// Close would turn those writes into silent no-ops.
 func (a *MainAgent) shutdownTimeoutError(timeout time.Duration) error {
 	if a.recovery != nil {
-		if err := a.recovery.SaveSnapshot(a.buildShutdownSnapshot()); err != nil {
+		if err := a.persistSnapshotLocked(a.buildShutdownSnapshot); err != nil {
 			log.Warnf("failed to save best-effort recovery snapshot on shutdown timeout error=%v", err)
 		}
 	}

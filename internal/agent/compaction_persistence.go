@@ -230,8 +230,8 @@ func listHistoryReferences(sessionDir string) ([]string, error) {
 	return refs, nil
 }
 
-// compactionIndexAllocator serializes history index allocation across
-// compaction worker goroutines.
+// compactionIndexAllocator holds the monotonic history index for one session
+// directory.
 type compactionIndexAllocator struct {
 	mu     sync.Mutex
 	next   int
@@ -265,29 +265,68 @@ func nextCompactionIndex(sessionDir string) (int, error) {
 	return maxIndex + 1, nil
 }
 
-// nextCompactionIndexForAgent allocates the next history index for this
-// agent's session dir through the in-memory monotonic allocator seeded from
-// the on-disk maximum. A purely disk-derived index is racy against the
-// deferred orphan cleanup of a discarded worker: a usage-driven worker whose
-// cancellation landed mid-export still finishes writing history-N.md and
-// removes it asynchronously, while the overriding model-driven worker that
-// scanned before the write became visible allocates the same N — the late
-// cleanup then deletes the new worker's archive. Once an index is handed out
-// it is never reused, so any cleanup can only ever remove files written for
-// that index by this process.
-func (a *MainAgent) nextCompactionIndexForAgent() (int, error) {
-	a.compactionIndexAlloc.mu.Lock()
-	defer a.compactionIndexAlloc.mu.Unlock()
-	if !a.compactionIndexAlloc.seeded {
-		next, err := nextCompactionIndex(a.sessionDir)
+// nextCompactionIndexForAgent allocates the next history index for sessionDir
+// through an in-memory monotonic allocator seeded from that directory's
+// on-disk maximum. Allocators are kept per directory because a worker may
+// outlive a watchdog failure and a later session switch; the late worker must
+// continue allocating against its captured target instead of the new live
+// session. Once an index is handed out it is never reused, so deferred orphan
+// cleanup can only remove files written for that index by this process.
+func (a *MainAgent) nextCompactionIndexForAgent(sessionDir string) (int, error) {
+	sessionDir = filepath.Clean(sessionDir)
+	a.compactionIndexAllocsMu.Lock()
+	if a.compactionIndexAllocs == nil {
+		a.compactionIndexAllocs = make(map[string]*compactionIndexAllocator)
+	}
+	alloc := a.compactionIndexAllocs[sessionDir]
+	if alloc == nil {
+		alloc = &compactionIndexAllocator{}
+		a.compactionIndexAllocs[sessionDir] = alloc
+	}
+	a.compactionIndexAllocsMu.Unlock()
+
+	alloc.mu.Lock()
+	defer alloc.mu.Unlock()
+	if !alloc.seeded {
+		next, err := nextCompactionIndex(sessionDir)
 		if err != nil {
 			return 0, err
 		}
-		a.compactionIndexAlloc.next = next
-		a.compactionIndexAlloc.seeded = true
+		alloc.next = next
+		alloc.seeded = true
 	}
-	a.compactionIndexAlloc.next++
-	return a.compactionIndexAlloc.next - 1, nil
+	alloc.next++
+	return alloc.next - 1, nil
+}
+
+// reseedCompactionIndexAllocator raises the in-memory floor to the maximum
+// index currently visible on disk without lowering indexes already handed
+// out. Session activation calls this because another process may have written
+// an archive while this session was not active.
+func (a *MainAgent) reseedCompactionIndexAllocator(sessionDir string) error {
+	sessionDir = filepath.Clean(sessionDir)
+	a.compactionIndexAllocsMu.Lock()
+	if a.compactionIndexAllocs == nil {
+		a.compactionIndexAllocs = make(map[string]*compactionIndexAllocator)
+	}
+	alloc := a.compactionIndexAllocs[sessionDir]
+	if alloc == nil {
+		alloc = &compactionIndexAllocator{}
+		a.compactionIndexAllocs[sessionDir] = alloc
+	}
+	a.compactionIndexAllocsMu.Unlock()
+
+	next, err := nextCompactionIndex(sessionDir)
+	if err != nil {
+		return err
+	}
+	alloc.mu.Lock()
+	defer alloc.mu.Unlock()
+	if !alloc.seeded || next > alloc.next {
+		alloc.next = next
+		alloc.seeded = true
+	}
+	return nil
 }
 
 // captureOriginalFirstUserHint returns the best-known original first user
@@ -481,11 +520,29 @@ func spawnStatesForSnapshot() []recovery.BackgroundObjectState {
 	return states
 }
 
+// persistSnapshotLocked builds and writes one recovery snapshot atomically:
+// the whole build + SaveSnapshot runs under recoverySnapshotMu so concurrent
+// writers (the event loop's apply/TodoWrite/freeze paths and SubAgent
+// persistence callbacks) can never interleave a stale build after a fresher
+// write. The recovery manager is captured inside the lock, so a session
+// switch cannot swap a.recovery between the guard and the write.
+func (a *MainAgent) persistSnapshotLocked(build func() *recovery.SessionSnapshot) error {
+	if a == nil {
+		return nil
+	}
+	a.recoverySnapshotMu.Lock()
+	defer a.recoverySnapshotMu.Unlock()
+	if a.recovery == nil {
+		return nil
+	}
+	return a.recovery.SaveSnapshot(build())
+}
+
 func (a *MainAgent) saveRecoverySnapshot() {
-	if a.recovery == nil || a.shuttingDown.Load() {
+	if a.shuttingDown.Load() {
 		return
 	}
-	if err := a.recovery.SaveSnapshot(a.buildRecoverySnapshot()); err != nil {
+	if err := a.persistSnapshotLocked(a.buildRecoverySnapshot); err != nil {
 		log.Warnf("failed to save recovery snapshot error=%v", err)
 	}
 }

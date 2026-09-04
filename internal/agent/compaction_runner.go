@@ -251,7 +251,7 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 		return nil, ctx.Err()
 	}
 
-	index, err := a.nextCompactionIndexForAgent()
+	index, err := a.nextCompactionIndexForAgent(archiveMeta.sessionDir)
 	if err != nil {
 		return nil, fmt.Errorf("determine compaction index: %w", err)
 	}
@@ -305,7 +305,7 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 		return nil, ctx.Err()
 	}
 
-	historyRefs, err := listHistoryReferences(a.sessionDir)
+	historyRefs, err := listHistoryReferences(archiveMeta.sessionDir)
 	if err != nil {
 		return nil, fmt.Errorf("list history references: %w", err)
 	}
