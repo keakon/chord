@@ -32,7 +32,7 @@ A user-togglable request tier (`/tier standard|fast|slow`) that asks the active 
 
 ## Loop mode
 
-A specialized execution mode where Chord runs autonomously in a continuous loop — processing tasks, tools, and results — without waiting for user input. Essential for long-running tasks. While loop mode is active, context reduction (request-level trimming) is disabled for newly added messages so the agent can retain its working state across iterations; context compaction remains enabled so long sessions can continue after the context budget is spent.
+A specialized execution mode where Chord runs autonomously in a continuous loop — processing tasks, tools, and results — without waiting for user input. Essential for long-running tasks. Loop mode does not change context handling: request-level reduction and context compaction both stay enabled, so long sessions can keep going after the context budget is spent.
 
 ## Thinking
 

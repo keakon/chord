@@ -356,7 +356,7 @@ github.com/keakon/chord/internal/tui.renderMarkdownContent
 4. `/compact --no` 会临时关闭当前会话的自动压缩；重新启动会话或执行 `/compact` 可恢复。
 5. 如果网关返回缺失或为 0 的用量数据，请开启 `log_level: debug`，并在自动压缩日志中查看 `estimated_input_tokens` 和 `effective_input_tokens`。
 
-**注意**：loop 模式不会禁用自动压缩；它只会对新增消息禁用请求级上下文剪裁。
+**注意**：loop 模式既不会改变自动压缩，也不会改变请求级上下文剪裁，两者都保持启用。
 
 ## 上下文剪裁误裁重要内容
 

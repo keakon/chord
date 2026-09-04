@@ -387,7 +387,7 @@ What to check:
 4. `/compact --no` temporarily disables automatic compaction for the current session. Restart the session or run `/compact` to re-enable.
 5. If your gateway returns missing or zero usage, enable `log_level: debug` and look for `estimated_input_tokens` and `effective_input_tokens` in automatic-compaction logs.
 
-Note: loop mode does not disable automatic compaction. It only disables request-level context reduction for newly added messages.
+Note: loop mode changes neither automatic compaction nor request-level context reduction; both stay enabled.
 
 ## Reduction trimming important content
 

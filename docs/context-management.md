@@ -20,7 +20,7 @@ the surrounding configuration model (files, layers, providers), see
 | When it fires | Threshold is reached and a main-model request is about to start / manual `/compact` / error recovery | Before every LLM request |
 | Typical latency | Seconds to tens of seconds (waits for LLM) | Milliseconds (in-memory rule matching) |
 | User visibility | TUI shows "Compacting context..." progress | Silent (invisible) |
-| Loop mode | Enabled; compaction still runs so long sessions can continue | Disabled for new messages; see [Loop mode and the Codex quota freeze](#loop-mode-and-the-codex-quota-freeze) |
+| Loop mode | Enabled; compaction still runs so long sessions can continue | Enabled; loop mode does not change reduction, see [Loop mode](#loop-mode) |
 
 **How they work together**: Reduction is the lightweight first line of defense —
 it trims stale tool output before every request, slowing down context growth.
@@ -528,17 +528,14 @@ Unset or non-positive threshold fields use these defaults. Project-level
 - Reduction diagnostics keep the aggregate `reread_after_reduction` counter and additionally distinguish same-revision re-reads from changed-revision refreshes when both reads carry durable hashes.
 - Re-fetch evidence feeds back into retention: when the model re-issues a call identical to one whose output was reduced earlier (a re-read, re-search, or read-only shell re-run), the newest output of that input becomes exempt from reduction for the rest of the session and the skip is recorded as `recalled_input_protect`. Older duplicates still collapse to repeated markers, a read known to be stale keeps its stale marker, and re-running a mutating command (such as a test) earns no exemption — that seeks fresh state, not lost content. The exemption set is in-memory session state; it is dropped with the reduction caches on restore or model switch and rebuilds from live evidence.
 
-### Loop mode and the Codex quota freeze
+### Loop mode
 
-In loop mode, reduction is not applied to newly added messages. If you enable
-`/loop on` while an LLM request is already in flight, Chord freezes and reuses
-that request's already-prepared prefix for subsequent loop requests. This avoids
-flipping old history from a reduced form back to full raw tool output, preserving
-prompt-cache prefix stability; messages produced during the loop remain
-unreduced until loop mode is turned off. Switching loop mode itself does not add,
-remove, or rewrite stable system-prompt text. Changing the system prompt on a
-loop toggle would invalidate prompt-cache reuse even when the underlying task
-context did not otherwise change.
+Loop mode does not change how reduction works: requests made in loop mode go
+through the same request-level reduction and stable-prefix reuse as any other
+request. Switching loop mode itself does not add, remove, or rewrite stable
+system-prompt text. Changing the system prompt on a loop toggle would invalidate
+prompt-cache reuse even when the underlying task context did not otherwise
+change.
 
 On models that explicitly support Chord's request-only dynamic tool mounts
 (`compat.chat_completions.mcp_system_tools_message` or
@@ -552,20 +549,6 @@ Models that do not support these request-only dynamic tool mounts keep the
 existing behavior: if enabling loop mode requires a tool-surface change, the
 next request may still lose prompt-cache reuse because the top-level tool
 definitions changed.
-
-When the active main-agent provider uses the Codex rate-limit surface and a 5h
-or 7d quota window has less than 10% remaining, Chord temporarily freezes the
-LLM-facing request surface for continuous automatic continuations. The frozen
-surface includes request-level reduction, the installed system prompt, and the
-visible tool definitions. This is intentional: near quota exhaustion, Codex can
-continue a `stop_reason=tool_call` chain until `end_turn` only when the context
-surface is unchanged. Changing the context shape at that point can prevent Codex
-from continuing after the quota is exhausted. The freeze is lifted at an
-interactive boundary — when the agent returns to idle or the user sends a real
-new message — so explicit user changes such as MCP or YOLO toggles can rebuild
-the surface on the next request. If the key or running model changes, Chord also
-allows the next request to rebuild the surface, because the previous frozen
-surface no longer matches the active Codex identity.
 
 ### Reduction categories
 

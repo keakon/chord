@@ -109,7 +109,7 @@ func TestStableReductionSurfaceSurvivesUserTurnBoundary(t *testing.T) {
 		t.Fatal("fresh webfetch result was unexpectedly reduced")
 	}
 
-	a.clearLoopReductionCache(false)
+	a.clearReductionCache(false)
 	setTestRequestBatch(a, nil, 2)
 	msgs = append(msgs,
 		message.Message{Role: message.RoleAssistant, Content: "done"},

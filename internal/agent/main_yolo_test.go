@@ -6,10 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
-	"github.com/keakon/chord/internal/ratelimit"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -206,45 +204,6 @@ func TestYoloToggleReturningToSameStateKeepsFrozenContext(t *testing.T) {
 	}
 	if a.surfaceDirty.Load() {
 		t.Fatal("surface dirty flag should clear after unchanged surface comparison")
-	}
-}
-
-func TestYoloLowQuotaCodexKeepsPromptAndToolSurfaceFrozen(t *testing.T) {
-	projectRoot := t.TempDir()
-	a := newTestMainAgent(t, projectRoot)
-	a.markAgentsMDReady()
-	a.MarkSkillsReady()
-	a.markMCPReady()
-	a.projectConfig = &config.Config{Providers: map[string]config.ProviderConfig{"codex": {Preset: config.ProviderPresetCodex}}}
-	a.providerModelRef = "codex/gpt-5.5"
-	a.llmMu.Lock()
-	a.runningModelRef = "codex/gpt-5.5"
-	a.llmMu.Unlock()
-	a.rateLimitSnaps = map[string]*ratelimit.KeyRateLimitSnapshot{"codex": {
-		Primary: &ratelimit.RateLimitWindow{UsedPct: 95},
-	}}
-	a.tools.Register(tools.GlobTool{})
-	a.ruleset = permission.Ruleset{{Permission: tools.NameGlob, Pattern: "*", Action: permission.ActionDeny}}
-	a.sessionBuilt.Store(true)
-	a.freezeToolSurface()
-	beforePrompt := a.installedSysPrompt
-
-	a.handleYoloCommand("/yolo on", true)
-	if !a.YoloEnabled() {
-		t.Fatal("YOLO should enable while busy")
-	}
-	decision := evaluateToolPermission(a.effectiveRuleset(), tools.NameGlob, json.RawMessage(`{"patterns":["*"]}`))
-	if decision.Action != permission.ActionDeny {
-		t.Fatalf("effective Glob action after YOLO = %v, want deny via empty YOLO ruleset", decision.Action)
-	}
-	if err := a.ensureSessionBuilt(context.Background()); err != nil {
-		t.Fatalf("ensureSessionBuilt: %v", err)
-	}
-	if got := a.installedSysPrompt; got != beforePrompt {
-		t.Fatalf("system prompt changed under low-quota codex")
-	}
-	if defs := a.mainLLMToolDefinitions(); len(defs) != 0 {
-		t.Fatalf("tool surface changed under low-quota codex: %#v", defs)
 	}
 }
 

@@ -511,7 +511,7 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	a.lastModelDrivenSkipReason = ""
 	a.clearCompactionGrace()
 	a.resetContextReductionStats()
-	a.clearLoopFrozenReductionPrefix()
+	a.clearPreparedReductionCache()
 	if a.llmClient != nil {
 		a.llmClient.ResetReplayCompatibility()
 		if modelcompat.HasNativeReplayPayload(compactedMessages) {

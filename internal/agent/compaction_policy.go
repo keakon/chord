@@ -16,7 +16,6 @@ import (
 
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/message"
-	"github.com/keakon/chord/internal/ratelimit"
 	"github.com/keakon/chord/internal/toolname"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -102,7 +101,7 @@ func (a *MainAgent) refreshVisibleContextReductionStats(messages []message.Messa
 	if a == nil {
 		return
 	}
-	a.clearLoopReductionCache(true)
+	a.clearReductionCache(true)
 	_ = a.prepareMessagesForLLMWithOptions(messages, false)
 }
 
@@ -175,13 +174,6 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 					}
 				}
 			}
-		}
-	}
-	if a != nil {
-		loopEnabled, frozen := a.contextSurfaceReductionSnapshot()
-		if loopEnabled && (len(frozen.Messages) == 0 || !stableReductionSurfaceNeedsReview(frozen, scan, currentBatch, externalReadInvalidated)) {
-			prepared := append([]message.Message(nil), messages...)
-			return a.applyLoopFrozenReductionPrefix(prepared, frozen)
 		}
 	}
 	if a != nil {
@@ -981,7 +973,7 @@ func (a *MainAgent) resetLLMModelRun() {
 }
 
 // modelChangedSinceLastPreparedRequest reports whether the running model
-// differs from the one used by the previous prepared LLM request. The frozen
+// differs from the one used by the previous prepared LLM request. The stable
 // reduction surface was produced under the previous model's budget, so a change
 // here means it must not be reused: the new model is entitled to its own
 // reduction. Returns false when there was no previous prepared request (fresh
@@ -1329,8 +1321,8 @@ func reuseStableReductionPrefix(previous stableReductionSurface, current, shapeS
 // messages of the current request still match the surface's recorded shape.
 // When the surface carries its shape source, plain field equality is used:
 // unchanged messages share string backing with the source copies, so each
-// comparison is O(1) and allocation-free. Without a source (loop-frozen
-// surfaces) it falls back to hashing the current prefix.
+// comparison is O(1) and allocation-free. Without a matching source it falls
+// back to hashing the current prefix.
 func stableReductionPrefixCompatible(previous stableReductionSurface, currentPrefix []message.Message) bool {
 	if len(previous.ShapeSource) == len(previous.Shape) && len(previous.ShapeSource) == len(currentPrefix) {
 		return stableReductionMessagesEquivalent(previous.ShapeSource, currentPrefix)
@@ -1951,24 +1943,22 @@ func topContextContributors(mgr *ctxmgr.Manager, messages []message.Message, lim
 	return contributors
 }
 
-func (a *MainAgent) clearLoopFrozenReductionPrefix() {
-	a.clearLoopReductionCache(true)
+// clearPreparedReductionCache drops the prepared-request reduction caches
+// along with the visible stats derived from them.
+func (a *MainAgent) clearPreparedReductionCache() {
+	a.clearReductionCache(true)
 }
 
-func (a *MainAgent) clearLoopReductionCache(clearVisibleStats bool) {
+// clearReductionCache resets the transient reduction state. The wrap-up grace
+// window always goes; clearVisibleStats additionally drops the cached prepared
+// surface, so callers that only close a turn keep the last request's stats
+// visible in the UI.
+func (a *MainAgent) clearReductionCache(clearVisibleStats bool) {
 	if a == nil {
 		return
 	}
 	a.loopReductionMu.Lock()
 	defer a.loopReductionMu.Unlock()
-	a.loopState.FrozenReductionPrefix = nil
-	a.loopState.FrozenReductionShape = nil
-	a.loopState.FrozenReductionReducedIndices = nil
-	a.loopState.FrozenReductionNextReviewAge = nil
-	a.loopState.FrozenReductionToolResults = 0
-	a.loopState.FrozenReductionPolicy = contextReductionPolicy{}
-	a.loopState.FrozenReductionToolDefHash = [sha256.Size]byte{}
-	a.loopState.FrozenReductionStats = ContextReductionStats{}
 	a.wrapUpGraceTurnID = 0
 	a.wrapUpGraceRemaining = 0
 	if clearVisibleStats {
@@ -2082,152 +2072,16 @@ func (a *MainAgent) preparedContextReductionStatsForTurn(turnID uint64) ContextR
 	return cloneContextReductionStats(a.lastPreparedReductionStats)
 }
 
-func (a *MainAgent) freezeLoopReductionPrefixForCurrentTurn() {
-	if a == nil {
-		return
-	}
-	turnID := a.currentTurnID()
-	if turnID == 0 {
-		return
-	}
-	a.loopReductionMu.Lock()
-	defer a.loopReductionMu.Unlock()
-	if a.lastPreparedLLMTurnID != turnID || len(a.lastPreparedLLMRequestPrefix) == 0 {
-		a.lastPreparedLLMRequestShape = nil
-		a.lastPreparedLLMShapeSource = nil
-		a.lastPreparedLLMRequestPrefix = nil
-		a.lastPreparedLLMReducedIndices = nil
-		// lastPreparedLLMDiscardedInputs survives: it is session-scoped recall
-		// evidence, not a property of the invalidated request snapshot.
-		a.lastPreparedLLMToolDefHash = [sha256.Size]byte{}
-		a.lastPreparedReductionStats = ContextReductionStats{}
-		return
-	}
-	a.loopState.FrozenReductionShape = append([]stableReductionMessageShape(nil), a.lastPreparedLLMRequestShape...)
-	a.loopState.FrozenReductionPrefix = cloneMessageSliceForRequestShape(a.lastPreparedLLMRequestPrefix)
-	a.loopState.FrozenReductionReducedIndices = append([]bool(nil), a.lastPreparedLLMReducedIndices...)
-	a.loopState.FrozenReductionNextReviewAge = append([]int(nil), a.lastPreparedLLMNextReviewAge...)
-	a.loopState.FrozenReductionToolResults = a.lastPreparedLLMToolResults
-	a.loopState.FrozenReductionPolicy = a.lastPreparedReductionPolicy
-	a.loopState.FrozenReductionToolDefHash = a.lastPreparedLLMToolDefHash
-	a.loopState.FrozenReductionStats = cloneContextReductionStats(a.lastPreparedReductionStats)
-	a.contextReductionStats = cloneContextReductionStats(a.lastPreparedReductionStats)
-}
-
-func (a *MainAgent) contextSurfaceReductionSnapshot() (enabled bool, frozen stableReductionSurface) {
-	if a == nil {
-		return false, stableReductionSurface{}
-	}
-	if !a.shouldFreezeLLMContextSurface() {
-		return false, stableReductionSurface{}
-	}
-	turnID := a.currentTurnID()
-	a.loopReductionMu.Lock()
-	defer a.loopReductionMu.Unlock()
-	if len(a.loopState.FrozenReductionPrefix) == 0 && turnID != 0 && a.lastPreparedLLMTurnID == turnID {
-		a.loopState.FrozenReductionShape = append([]stableReductionMessageShape(nil), a.lastPreparedLLMRequestShape...)
-		a.loopState.FrozenReductionPrefix = cloneMessageSliceForRequestShape(a.lastPreparedLLMRequestPrefix)
-		a.loopState.FrozenReductionReducedIndices = append([]bool(nil), a.lastPreparedLLMReducedIndices...)
-		a.loopState.FrozenReductionNextReviewAge = append([]int(nil), a.lastPreparedLLMNextReviewAge...)
-		a.loopState.FrozenReductionToolResults = a.lastPreparedLLMToolResults
-		a.loopState.FrozenReductionPolicy = a.lastPreparedReductionPolicy
-		a.loopState.FrozenReductionToolDefHash = a.lastPreparedLLMToolDefHash
-		a.loopState.FrozenReductionStats = cloneContextReductionStats(a.lastPreparedReductionStats)
-	}
-	return true, stableReductionSurface{
-		Messages:       cloneMessageSliceForRequestShape(a.loopState.FrozenReductionPrefix),
-		Shape:          append([]stableReductionMessageShape(nil), a.loopState.FrozenReductionShape...),
-		Stats:          cloneContextReductionStats(a.loopState.FrozenReductionStats),
-		ReducedIndices: append([]bool(nil), a.loopState.FrozenReductionReducedIndices...),
-		NextReviewAge:  append([]int(nil), a.loopState.FrozenReductionNextReviewAge...),
-		ToolResults:    a.loopState.FrozenReductionToolResults,
-		Policy:         a.loopState.FrozenReductionPolicy,
-		ToolDefHash:    a.loopState.FrozenReductionToolDefHash,
-	}
-}
-
-func (a *MainAgent) allowContextSurfaceRefreshAtUserBoundary() {
-	if a == nil {
-		return
-	}
-	a.contextSurfaceRefreshAllowed.Store(true)
-}
-
+// noteContextSurfaceIdentityChanged drops the prepared-request caches when the
+// identity behind the request surface changes (model switch, key rotation).
+// The cached surface was produced under the previous identity, so neither its
+// reduced prefix nor the model-run counter may carry over.
 func (a *MainAgent) noteContextSurfaceIdentityChanged() {
 	if a == nil {
 		return
 	}
-	a.clearLoopFrozenReductionPrefix()
+	a.clearPreparedReductionCache()
 	a.resetLLMModelRun()
-	a.contextSurfaceRefreshAllowed.Store(true)
-}
-
-func (a *MainAgent) consumeContextSurfaceRefreshAllowance() bool {
-	if a == nil {
-		return false
-	}
-	return a.contextSurfaceRefreshAllowed.Swap(false)
-}
-
-func (a *MainAgent) shouldFreezeLLMContextSurface() bool {
-	if a == nil {
-		return false
-	}
-	if a.contextSurfaceRefreshAllowed.Load() {
-		return false
-	}
-	providerName := a.mainRateLimitProviderName()
-	if providerName == "" || !a.providerUsesCodexRateLimit(providerName) {
-		return false
-	}
-	return codexQuotaRemainingAtMostTenPercent(a.mainRateLimitSnapshot())
-}
-
-func codexQuotaRemainingAtMostTenPercent(snap *ratelimit.KeyRateLimitSnapshot) bool {
-	if snap == nil {
-		return false
-	}
-	for _, window := range []*ratelimit.RateLimitWindow{snap.Primary, snap.Secondary} {
-		if window == nil {
-			continue
-		}
-		used := window.UsedPercent()
-		if used >= 90 {
-			return true
-		}
-	}
-	return false
-}
-
-func (a *MainAgent) applyLoopFrozenReductionPrefix(prepared []message.Message, frozen stableReductionSurface) []message.Message {
-	if a == nil {
-		return prepared
-	}
-	if len(frozen.Messages) == 0 {
-		stats := ContextReductionStats{}
-		a.setCurrentRequestSurface(&stats, prepared)
-		a.setContextReductionStats(stats)
-		return prepared
-	}
-	original := cloneMessageSliceForRequestShape(prepared)
-	reused, compatible := reuseStableReductionPrefix(frozen, prepared, prepared)
-	if !compatible {
-		stats := ContextReductionStats{}
-		a.setCurrentRequestSurface(&stats, prepared)
-		a.setContextReductionStats(stats)
-		return prepared
-	}
-	prepared = reused
-	updatedStats := highLevelContextReductionStats(a.ctxMgr, original, prepared)
-	if len(updatedStats.ByToolAndRule) == 0 {
-		updatedStats.ByToolAndRule = cloneContextReductionBuckets(frozen.Stats.ByToolAndRule)
-	}
-	updatedStats.Protected = frozen.Stats.Protected
-	updatedStats.ReusedStable = true
-	a.setCurrentRequestSurface(&updatedStats, prepared)
-	a.setContextReductionStats(updatedStats)
-	a.setPreparedStablePrefixLen(len(frozen.Messages))
-	return prepared
 }
 
 func cloneMessageSliceForRequestShape(messages []message.Message) []message.Message {

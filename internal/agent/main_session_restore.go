@@ -694,7 +694,7 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 
 	a.resetCacheRoutingState()
 	a.restoreCacheHitStats(loaded.UsageStats)
-	a.clearLoopReductionCache(true)
+	a.clearReductionCache(true)
 	a.resetLLMModelRun()
 	a.ctxMgr.RestoreMessages(append([]message.Message(nil), loaded.Messages...))
 	a.mailboxDeliveryPaused.Store(true)

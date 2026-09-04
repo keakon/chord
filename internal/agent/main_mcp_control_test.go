@@ -10,7 +10,6 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/permission"
-	"github.com/keakon/chord/internal/ratelimit"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -396,49 +395,6 @@ func TestRuntimeMCPDiscoveryGenerationCannotOverwriteNewerRestore(t *testing.T) 
 	}
 	if got := a.mcpServersPrompt; got != "current" {
 		t.Fatalf("MCP prompt = %q, want current", got)
-	}
-}
-
-func TestMCPLowQuotaCodexKeepsPromptAndToolSurfaceFrozen(t *testing.T) {
-	projectRoot := t.TempDir()
-	a := newTestMainAgent(t, projectRoot)
-	a.markAgentsMDReady()
-	a.MarkSkillsReady()
-	a.markMCPReady()
-	a.projectConfig = &config.Config{Providers: map[string]config.ProviderConfig{"codex": {Preset: config.ProviderPresetCodex}}}
-	a.providerModelRef = "codex/gpt-5.5"
-	a.llmMu.Lock()
-	a.runningModelRef = "codex/gpt-5.5"
-	a.llmMu.Unlock()
-	a.rateLimitSnaps = map[string]*ratelimit.KeyRateLimitSnapshot{"codex": {
-		Primary: &ratelimit.RateLimitWindow{UsedPct: 95},
-	}}
-	a.tools.Register(tools.GlobTool{})
-	a.sessionBuilt.Store(true)
-	a.freezeToolSurface()
-	a.newTurn()
-	beforePrompt := a.installedSysPrompt
-
-	a.handleMCPControlDoneEvent(Event{Payload: mcpControlDonePayload{
-		readyGen: a.ResetMCPReady(),
-		req:      MCPControlRequest{Action: MCPControlEnable, Servers: []string{"manual"}},
-		result: MCPControlResult{
-			Tools:       []tools.Tool{tools.ReadTool{}},
-			PromptBlock: "MCP updated prompt",
-		},
-	}})
-	if err := a.ensureSessionBuilt(context.Background()); err != nil {
-		t.Fatalf("ensureSessionBuilt: %v", err)
-	}
-	if _, ok := a.tools.Get(tools.NameRead); !ok {
-		t.Fatal("new MCP runtime tool should still register under low-quota codex")
-	}
-	if got := a.installedSysPrompt; got != beforePrompt {
-		t.Fatalf("system prompt changed under low-quota codex: %q", got)
-	}
-	defs := a.mainLLMToolDefinitions()
-	if got := len(defs); got != 1 || defs[0].Name != tools.NameGlob {
-		t.Fatalf("tool surface changed under low-quota codex loop: %#v", defs)
 	}
 }
 

@@ -48,28 +48,6 @@ func (a *MainAgent) mainLLMAndRef() (client *llm.Client, ref string) {
 	return client, ref
 }
 
-func (a *MainAgent) mainRateLimitProviderName() string {
-	_, ref := a.mainLLMAndRef()
-	return providerNameFromModelRef(ref)
-}
-
-func (a *MainAgent) mainRateLimitSnapshot() *ratelimit.KeyRateLimitSnapshot {
-	providerName := a.mainRateLimitProviderName()
-	if providerName == "" || !a.providerUsesCodexRateLimit(providerName) {
-		return nil
-	}
-	client, ref := a.mainLLMAndRef()
-	if client != nil {
-		if snap := client.CurrentRateLimitSnapshotForRef(ref); snap != nil {
-			return snap
-		}
-	}
-	a.rateLimitMu.Lock()
-	snap := a.rateLimitSnaps[providerName]
-	a.rateLimitMu.Unlock()
-	return snap
-}
-
 // tuiFocusedLLMAndRef returns the LLM client and provider/model ref for the
 // agent currently shown in the TUI (focused SubAgent, else MainAgent). Used by
 // sidebar MODEL/Keys and Codex rate-limit snapshot selection.

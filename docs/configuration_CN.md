@@ -994,8 +994,6 @@ mcp:
 - Agent 运行中也可以执行 `/mcp enable|disable`。当前正在进行的请求继续使用启动时的工具表面；下一次 LLM 请求（包括自动重试 / 恢复请求）才会应用新的执行状态。
 - 默认情况下，下一次请求会重建顶层 MCP 工具表面，因此已有提示词缓存可能无法命中。模型显式开启 `compat.chat_completions.mcp_system_tools_message` 或 `compat.responses.mcp_additional_tools` 后，Chord 会把工具声明挂在固定的对话位置，并在后续请求里原位回放。禁用 server 只会拦截执行，不删除已经发出的声明，因此前缀保持稳定。模型切换、会话恢复/切换或上下文压缩后，Chord 会退回顶层工具并提示缓存复用可能下降——这些边界会破坏提示词缓存复用，固定挂载位置也不再可信。
 - manual server 的启用 / 禁用意图会随会话保存：`/mcp enable` 写入该意图，`/mcp disable` 清除它；之后 resume 该会话（包括重启后 resume）时会重新连接上次处于启用状态的 manual server。连接失败不会清除意图，server 会保持「enabled (unavailable)」状态，方便之后重试，而不是悄悄退回禁用。
-- 在 Codex loop 模式下，如果任一受跟踪的 Codex 额度窗口剩余不到 10%，Chord 会保留现有的 LLM 可见上下文表面，不重写工具描述或 system prompt。运行时权限与 MCP 工具执行状态仍会变化，但模型继续看到之前的工具列表 / prompt，以便低额度 loop 能在同一个 Codex 会话上继续推进，避免因为上下文形态变化而无法续用。
-  这是有意的取舍。在额度恢复或构建新的会话 / 上下文表面之前，模型看到的状态可能会短暂不同于运行时状态：新启用的 MCP 工具可能不会被模型发现；已禁用的 MCP 工具可能仍看起来可调用，但执行时失败；权限从 `deny` / `ask` 改为 `allow` 时，prompt / 工具描述中可能仍未体现；权限从 `allow` 改为 `deny` / `ask` 时，模型可能以为可以调用，但实际调用时会被拦截。Chord 接受这种短期不一致，以避免 Codex loop 在额度窗口末尾因上下文形态变化而耗尽或无法继续复用当前会话。
 
 ### 启动一致性
 

@@ -1,14 +1,12 @@
 package agent
 
 import (
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"regexp"
 	"slices"
 	"strings"
 
-	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -58,33 +56,15 @@ type loopRuntimeState struct {
 	// injection is suppressed until a terminal assistant stop_reason=done is
 	// observed, or a Done tool exit attempt is rejected.
 	DeferContinuationPromptUntilDone bool
-	// FrozenReductionPrefix stores the already-sent request prefix while the Codex
-	// quota is low enough to freeze the LLM context surface. Low-quota requests
-	// reuse this prefix shape so old messages do not flip from pruned to unpruned,
-	// while later messages are left unpruned until the surface can refresh.
-	FrozenReductionPrefix []message.Message
-	// FrozenReductionShape is the original request shape for FrozenReductionPrefix.
-	// It lets reuse reject stale prefixes when the apparent prefix length still
-	// matches but tool-call chains or other model-visible fields changed.
-	FrozenReductionShape          []stableReductionMessageShape
-	FrozenReductionReducedIndices []bool
-	FrozenReductionNextReviewAge  []int
-	FrozenReductionToolResults    int
-	FrozenReductionPolicy         contextReductionPolicy
-	FrozenReductionToolDefHash    [sha256.Size]byte
-	// FrozenReductionStats is the request-level reduction effect of the frozen
-	// prefix. It remains stable while the low-quota surface freeze is active because
-	// later messages are appended unreduced.
-	FrozenReductionStats   ContextReductionStats
-	ConsecutiveNoProgress  int
-	LastProgressSignature  string
-	LastAssessmentMessage  string
-	ProgressVersion        uint64
-	LastAssessmentVersion  uint64
-	Iteration              int
-	MaxIterations          int
-	MaxIterationsSet       bool
-	RepeatedToolCallStreak []loopToolCallFingerprint
+	ConsecutiveNoProgress            int
+	LastProgressSignature            string
+	LastAssessmentMessage            string
+	ProgressVersion                  uint64
+	LastAssessmentVersion            uint64
+	Iteration                        int
+	MaxIterations                    int
+	MaxIterationsSet                 bool
+	RepeatedToolCallStreak           []loopToolCallFingerprint
 }
 
 type loopToolCallFingerprint struct {
@@ -127,14 +107,6 @@ func (s *loopRuntimeState) disable() {
 	s.MaxIterationsSet = false
 	s.RepeatedToolCallStreak = nil
 	s.DeferContinuationPromptUntilDone = false
-	s.FrozenReductionPrefix = nil
-	s.FrozenReductionShape = nil
-	s.FrozenReductionReducedIndices = nil
-	s.FrozenReductionNextReviewAge = nil
-	s.FrozenReductionToolResults = 0
-	s.FrozenReductionPolicy = contextReductionPolicy{}
-	s.FrozenReductionToolDefHash = [sha256.Size]byte{}
-	s.FrozenReductionStats = ContextReductionStats{}
 	s.Enabled = false
 }
 

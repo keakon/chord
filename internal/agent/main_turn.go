@@ -457,8 +457,7 @@ func (a *MainAgent) setIdleAndDrainPending() {
 	a.pendingModelDriven = nil
 	a.turnMu.Unlock()
 	a.rememberIdleTurn(turnID)
-	a.allowContextSurfaceRefreshAtUserBoundary()
-	a.clearLoopReductionCache(false)
+	a.clearReductionCache(false)
 	a.setBugTriagePromptActive(false)
 	pausePendingDrain := a.pausePendingUserDrainOnce
 	a.pausePendingUserDrainOnce = false
@@ -571,8 +570,7 @@ func (a *MainAgent) setIdleForComposerEdit() {
 	a.pendingModelDriven = nil
 	a.turnMu.Unlock()
 	a.rememberIdleTurn(turnID)
-	a.allowContextSurfaceRefreshAtUserBoundary()
-	a.clearLoopReductionCache(false)
+	a.clearReductionCache(false)
 	a.setBugTriagePromptActive(false)
 	a.emitInteractiveToTUI(a.parentCtx, IdleEvent{})
 	// Foreground is idle again: wake the memory worker (see setIdleAndDrainPending).

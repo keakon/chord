@@ -510,13 +510,12 @@ type MainAgent struct {
 	// compatibility checks use direct field equality (O(1) per unchanged
 	// message thanks to shared string backing) instead of re-hashing every
 	// message's content on each request. Read-only after store.
-	lastPreparedLLMShapeSource   []message.Message
-	wrapUpGraceTurnID            uint64
-	wrapUpGraceRemaining         int
-	contextReductionStats        ContextReductionStats
-	contextSurfaceRefreshAllowed atomic.Bool
-	lastLLMRequestModelRef       string
-	llmModelRunLength            int
+	lastPreparedLLMShapeSource []message.Message
+	wrapUpGraceTurnID          uint64
+	wrapUpGraceRemaining       int
+	contextReductionStats      ContextReductionStats
+	lastLLMRequestModelRef     string
+	llmModelRunLength          int
 
 	// recalledReductionInputs remembers tool-input keys (normalized tool + raw args)
 	// whose reduced output the model later re-fetched with an identical call —

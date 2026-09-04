@@ -150,12 +150,6 @@ func (a *MainAgent) ensureSessionBuiltWithoutPreparation(ctx context.Context) er
 		a.tools.Register(t)
 	}
 
-	if a.shouldFreezeLLMContextSurface() {
-		a.refreshSessionReminderIfMemoryChanged()
-		a.sessionBuilt.Store(true)
-		return nil
-	}
-
 	if !a.surfaceDirty.Load() {
 		a.refreshSystemPrompt()
 		a.refreshSessionContextReminder()
@@ -546,7 +540,6 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 	// the model has repository context without polluting the stable system prompt.
 	a.injectGitStatusIntoFirstUserMessage(messages)
 	a.updatePreparedLLMRequestSurface(a.currentTurnID(), messages)
-	a.consumeContextSurfaceRefreshAllowance()
 
 	mountMode := a.mcpToolMountMode()
 	messages, fallbackMCPToolDefs, mountFellBack := a.mountRuntimeMCPTools(messages, mountMode)
