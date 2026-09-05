@@ -50,13 +50,11 @@ func (b *Block) renderHandoffCall(width int, spinnerFrame string) []string {
 		// the runtime; the plan path is already in the header, so show only the
 		// rejected-reason form when the user rejected the handoff.
 		if statusText := handoffRejectedReason(b.ResultContent); statusText != "" {
-			result = append(result, "")
-			for i, line := range wrapText(sanitizeToolDisplayText(statusText), contentWidth-len("  ↳ rejected reason: ")) {
-				if i == 0 {
-					result = append(result, ErrorStyle.Render("  ↳ rejected reason: "+line))
-				} else {
-					result = append(result, ErrorStyle.Render("    "+line))
-				}
+			// A rejection is not a schema error, so it keeps its own label -
+			// on the shared "↳ Label:" shape the done card also uses.
+			result = append(result, ErrorStyle.Render("  ↳ Rejected:"))
+			for _, line := range wrapText(sanitizeToolDisplayText(statusText), contentWidth) {
+				result = append(result, ErrorStyle.Render("    "+line))
 			}
 		}
 	}

@@ -37,7 +37,8 @@ func renderCommandBlock(title string, lines []string, contentWidth int) []string
 		return nil
 	}
 	out := make([]string, 0, len(lines)+1)
-	out = append(out, DimStyle.Render("  "+title+":"))
+	// Section headers carry the "↳" marker everywhere else in the card set.
+	out = append(out, DimStyle.Render("  ↳ "+title+":"))
 	for _, line := range lines {
 		line = sanitizeToolDisplayText(line)
 		for _, w := range wrapIndentedText(line, contentWidth) {
@@ -62,16 +63,19 @@ func bashMetaLines(vals map[string]string, contentWidth int) []string {
 			out = append(out, DimStyle.Render("    "+w))
 		}
 	}
+	// description / workdir / timeout are call arguments, so all three share
+	// the 4-space argument indent and lowercase key style instead of mixing
+	// "    description:" with "  Workdir:".
 	if workdir := strings.TrimSpace(vals["workdir"]); workdir != "" {
-		line := fmt.Sprintf("Workdir: %s", workdir)
+		line := fmt.Sprintf("workdir: %s", workdir)
 		for _, w := range wrapIndentedText(line, contentWidth) {
-			out = append(out, DimStyle.Render("  "+w))
+			out = append(out, DimStyle.Render("    "+w))
 		}
 	}
 	if timeout := strings.TrimSpace(vals["timeout"]); timeout != "" {
-		line := fmt.Sprintf("Timeout: %ss", timeout)
+		line := fmt.Sprintf("timeout: %ss", timeout)
 		for _, w := range wrapIndentedText(line, contentWidth) {
-			out = append(out, DimStyle.Render("  "+w))
+			out = append(out, DimStyle.Render("    "+w))
 		}
 	}
 	return out
@@ -84,21 +88,18 @@ func appendBashCollapsedSummary(result *[]string, b *Block, vals map[string]stri
 	if !b.toolResultIsError() && !b.toolResultIsCancelled() {
 		return
 	}
-	isError := b.toolResultIsError()
-	style := DimStyle
-	if isError {
-		style = ErrorStyle
+	// The description belongs to the call, not to the outcome, so it stays on
+	// its own row; the outcome then goes through the shared envelope every
+	// other card uses instead of a bare "exit code 1" line with no label.
+	if includeDescription {
+		if desc := strings.TrimSpace(vals["description"]); desc != "" {
+			for _, wrapped := range wrapIndentedText(sanitizeToolDisplayText(desc), contentWidth) {
+				*result = append(*result, DimStyle.Render("    "+wrapped))
+			}
+		}
 	}
-	line, lineIsError := bashCollapsedSummaryLine(b, vals, contentWidth, includeDescription)
-	if line == "" {
-		return
-	}
-	if lineIsError {
-		style = ErrorStyle
-	}
-	for _, wrapped := range wrapIndentedText(line, contentWidth) {
-		*result = append(*result, style.Render("  "+wrapped))
-	}
+	summary, _ := bashCollapsedOutcomeSummary(b)
+	appendToolOutcomeBody(result, toolOutcomeKindOf(b), summary, contentWidth, false)
 }
 
 // splitStyleRender splits style.Render around a single-line probe so repeated
@@ -140,20 +141,30 @@ func appendBashExpandedResult(result *[]string, b *Block, contentWidth int) {
 	if b == nil {
 		return
 	}
-	stderr, stdout := bashSplitResultStreams(b)
+	if b.toolResultIsCancelled() {
+		// bashSplitResultStreams drops the body of a cancelled run, so the
+		// shared envelope is the only thing that reports the cancellation.
+		appendToolOutcomeBody(result, toolOutcomeCancelled, toolDisplayResultContent(b), contentWidth, true)
+		return
+	}
+	failed, output := bashSplitResultStreams(b)
 	exitLabel := bashExpandedExitLine(b)
 	if exitLabel != "" {
 		for _, wrapped := range wrapIndentedText(exitLabel, contentWidth) {
-			*result = append(*result, DimStyle.Render("  "+wrapped))
+			*result = append(*result, DimStyle.Render("  ↳ "+wrapped))
 		}
 	}
-	if stderr != "" {
-		*result = append(*result, ErrorStyle.Render("  Stderr:"))
-		appendStyledWrappedBody(result, ErrorStyle, "    ", stderr, contentWidth)
+	// The runtime hands the card one merged stream, so the body is labelled
+	// "Output" rather than claiming a stdout/stderr split it cannot make: a
+	// failing command that writes its diagnostics to stdout (go test, most
+	// build tools) was previously mislabelled as stderr.
+	if failed != "" {
+		*result = append(*result, ErrorStyle.Render("  ↳ Output:"))
+		appendStyledWrappedBody(result, ErrorStyle, "    ", failed, contentWidth)
 	}
-	if stdout != "" {
-		*result = append(*result, ToolResultExpandedStyle.Render("  Stdout:"))
-		appendStyledWrappedBody(result, ToolResultExpandedStyle, "    ", stdout, contentWidth)
+	if output != "" {
+		*result = append(*result, ToolResultExpandedStyle.Render("  ↳ Output:"))
+		appendStyledWrappedBody(result, ToolResultExpandedStyle, "    ", output, contentWidth)
 	}
 }
 
@@ -235,21 +246,13 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 
 		if b.DoneSummary != "" {
 			summary := truncateOneLine(sanitizeToolDisplayText(b.DoneSummary), cardWidth-26)
-			result = append(result, ToolResultStyle.Render(fmt.Sprintf("  ▸ ↳ ✓ %s", summary)))
+			result = append(result, ToolResultStyle.Render(fmt.Sprintf("  ↳ ✓ %s", summary)))
+		} else if kind := toolOutcomeKindOf(b); kind != toolOutcomeNone {
+			appendToolOutcomeBody(&result, kind, toolDisplayResultContent(b), contentWidth, false)
 		} else if b.ResultContent != "" {
-			displayContent := toolDisplayResultContent(b)
-			if b.toolResultIsError() {
-				displayContent = toolErrorDisplayContent(displayContent)
-			}
-			displayResult := sanitizeToolDisplayText(toolCollapsedResultContent(b.ToolName, displayContent))
+			displayResult := sanitizeToolDisplayText(toolCollapsedResultContent(b.ToolName, toolDisplayResultContent(b)))
 			summary := truncateOneLine(displayResult, cardWidth-26)
-			if b.toolResultIsError() {
-				result = append(result, ErrorStyle.Render(fmt.Sprintf("  ▸ ↳ Error: %s", summary)))
-			} else if b.toolResultIsCancelled() {
-				result = append(result, DimStyle.Render("  ▸ ↳ cancelled"))
-			} else {
-				result = append(result, ToolResultStyle.Render(fmt.Sprintf("  ▸ ↳ %s", summary)))
-			}
+			result = append(result, ToolResultStyle.Render(fmt.Sprintf("  ↳ %s", summary)))
 		}
 	} else {
 		prefix := b.renderToolPrefix(spinnerFrame)
@@ -274,25 +277,14 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 		if summary := formatToolResultSummaryLine(b); summary != "" && !b.toolExecutionIsQueued() {
 			result = append(result, toolSummaryLine(summary))
 		}
-		if b.ResultContent != "" {
-			if len(result) > 0 {
-				result = append(result, "")
-			}
-			if b.toolResultIsError() {
-				result = append(result, ErrorStyle.Render("  ↳ Error:"))
-			} else if b.toolResultIsCancelled() {
-				result = appendCancelledResultLines(result, b.ResultContent, contentWidth)
-			}
+		if kind := toolOutcomeKindOf(b); kind != toolOutcomeNone {
+			appendToolOutcomeBody(&result, kind, toolDisplayResultContent(b), contentWidth, true)
+		} else if b.ResultContent != "" {
 			lineStyle := DimStyle
-			if b.ToolName == tools.NameDelete && !b.toolResultIsError() && !b.toolResultIsCancelled() {
+			if b.ToolName == tools.NameDelete {
 				lineStyle = ToolResultExpandedStyle
 			}
-			displayContent := toolDisplayResultContent(b)
-			if b.toolResultIsError() {
-				displayContent = toolErrorDisplayContent(displayContent)
-			}
-			displayResult := sanitizeToolDisplayText(displayContent)
-			for _, line := range wrapText(displayResult, contentWidth) {
+			for _, line := range wrapText(sanitizeToolDisplayText(toolDisplayResultContent(b)), contentWidth) {
 				result = append(result, lineStyle.Render("    "+line))
 			}
 		}
@@ -332,31 +324,32 @@ func (b *Block) renderDoneCall(width int, spinnerFrame string) []string {
 		if b.toolResultIsError() {
 			statusText = toolErrorDisplayContent(statusText)
 		}
-		if doneResultIsRejected(statusText) {
-			statusText = doneRejectedReason(statusText)
-			result = append(result, "")
-			for i, line := range wrapText(sanitizeToolDisplayText(statusText), contentWidth-len("  ↳ rejected reason: ")) {
-				if i == 0 {
-					result = append(result, ErrorStyle.Render("  ↳ rejected reason: "+line))
-				} else {
-					result = append(result, ErrorStyle.Render("    "+line))
-				}
+		// A blank line only separates the status from a report above it; a
+		// card whose whole body is the status must not open with one.
+		separate := func() {
+			if len(result) > 1 {
+				result = append(result, "")
 			}
-		} else if report == "" {
-			result = append(result, "")
-			label := ToolResultExpandedStyle.Render("  ↳ Status:")
-			if b.toolResultIsError() {
-				label = ErrorStyle.Render("  ↳ Error:")
-			} else if b.toolResultIsCancelled() {
-				label = DimStyle.Render("  ↳ Cancelled:")
+		}
+		switch {
+		case doneResultIsRejected(statusText):
+			// A rejection is not a schema error: keep its own label, but on
+			// the shared "↳ Label:" shape.
+			separate()
+			result = append(result, ErrorStyle.Render("  ↳ Rejected:"))
+			for _, line := range wrapText(sanitizeToolDisplayText(doneRejectedReason(statusText)), contentWidth) {
+				result = append(result, ErrorStyle.Render("    "+line))
 			}
-			result = append(result, label)
-			style := DimStyle
-			if b.toolResultIsError() {
-				style = ErrorStyle
-			}
+		case report != "":
+			// The report above already carries the outcome.
+		case toolOutcomeKindOf(b) != toolOutcomeNone:
+			separate()
+			appendToolOutcome(&result, b, contentWidth, true)
+		default:
+			separate()
+			result = append(result, ToolResultExpandedStyle.Render("  ↳ Status:"))
 			for _, line := range wrapText(sanitizeToolDisplayText(statusText), contentWidth) {
-				result = append(result, style.Render("    "+line))
+				result = append(result, DimStyle.Render("    "+line))
 			}
 		}
 	}
@@ -492,15 +485,13 @@ func (b *Block) renderProseControlCall(width int, spinnerFrame string) []string 
 		}
 	}
 
-	if b.ResultDone && (b.toolResultIsError() || b.toolResultIsCancelled()) && strings.TrimSpace(b.ResultContent) != "" {
-		result = append(result, "")
-		label, style := "  ↳ Cancelled:", DimStyle
-		if b.toolResultIsError() {
-			label, style = "  ↳ Error:", ErrorStyle
-		}
-		result = append(result, style.Render(label))
-		for _, line := range wrapText(sanitizeToolDisplayText(toolDisplayResultContent(b)), contentWidth) {
-			result = append(result, style.Render("    "+line))
+	if toolOutcomeKindOf(b) != toolOutcomeNone {
+		before := len(result)
+		appendToolOutcome(&result, b, contentWidth, true)
+		if len(result) > before && before > 1 {
+			// Separate the envelope from the report above it, without
+			// opening the body with a blank line.
+			result = slices.Insert(result, before, "")
 		}
 	}
 
@@ -596,26 +587,14 @@ func (b *Block) renderCompactContextCall(width int, spinnerFrame string) []strin
 	}
 
 	// The result envelope closes the body, after the submitted args on
-	// expanded cards.
+	// expanded cards. Collapsed cards keep it on one line, so the failure
+	// reads at a glance without opening the card.
 	switch {
-	case b.ResultDone && (b.toolResultIsError() || b.toolResultIsCancelled()):
-		if strings.TrimSpace(b.ResultContent) == "" {
-			break
-		}
-		result = append(result, "")
-		label, style := "  ↳ Cancelled:", DimStyle
-		if b.toolResultIsError() {
-			label, style = "  ↳ Error:", ErrorStyle
-		}
-		result = append(result, style.Render(label))
-		display := toolDisplayResultContent(b)
-		// The error envelope prefixes every tool result with "Error: ";
-		// strip it so the card does not print "Error: Error: <message>".
-		if b.toolResultIsError() {
-			display = toolErrorDisplayContent(display)
-		}
-		for _, line := range wrapText(sanitizeToolDisplayText(display), contentWidth) {
-			result = append(result, style.Render("    "+line))
+	case toolOutcomeKindOf(b) != toolOutcomeNone:
+		before := len(result)
+		appendToolOutcome(&result, b, contentWidth, b.ToolCallDetailExpanded)
+		if len(result) > before && before > 1 && b.ToolCallDetailExpanded {
+			result = slices.Insert(result, before, "")
 		}
 	case b.ResultDone && b.ToolCallDetailExpanded:
 		// The success acknowledgement carries the "no reset has occurred
@@ -999,33 +978,12 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 			if expanded {
 				appendBashExpandedResult(&result, b, contentWidth)
 			}
-		} else {
-			displayResult := strings.TrimSpace(toolDisplayResultContent(b))
-			if !expanded {
-				switch {
-				case b.toolResultIsError() && displayResult != "":
-					detail := truncateOneLine(sanitizeToolDisplayText(toolErrorDisplayContent(displayResult)), contentWidth-len("  ↳ Error: "))
-					result = append(result, ErrorStyle.Render("  ↳ Error: "+detail))
-				case b.toolResultIsCancelled():
-					line := "  ↳ Cancelled"
-					if detail := toolCancelledDetailText(displayResult); detail != "" {
-						line += ": " + truncateOneLine(sanitizeToolDisplayText(detail), contentWidth-len("  ↳ Cancelled: "))
-					}
-					result = append(result, DimStyle.Render(line))
-				}
-			} else if displayResult != "" && !(b.toolResultIsCancelled() && toolCancelledDetailText(displayResult) == "") {
-				if b.toolResultIsError() {
-					result = append(result, ErrorStyle.Render("  ↳ Error:"))
-					displayResult = toolErrorDisplayContent(displayResult)
-				} else if b.toolResultIsCancelled() {
-					result = append(result, DimStyle.Render("  ↳ Cancelled:"))
-				}
-				lineStyle := DimStyle
-				if b.toolResultIsError() {
-					lineStyle = ErrorStyle
-				}
+		} else if kind := toolOutcomeKindOf(b); kind != toolOutcomeNone {
+			appendToolOutcomeBody(&result, kind, toolDisplayResultContent(b), contentWidth, expanded)
+		} else if expanded {
+			if displayResult := strings.TrimSpace(toolDisplayResultContent(b)); displayResult != "" {
 				for _, line := range toolExpandedTextLines(displayResult, contentWidth) {
-					result = append(result, lineStyle.Render(toolResultIndent+line))
+					result = append(result, DimStyle.Render(toolResultIndent+line))
 				}
 			}
 		}

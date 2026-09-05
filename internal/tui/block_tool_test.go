@@ -1201,7 +1201,7 @@ func TestExpandedShellToolCardKeepsElapsedOnHeader(t *testing.T) {
 			t.Fatalf("expected elapsed only on the header, but found it on a body line:\n%s", line)
 		}
 	}
-	if !strings.Contains(strings.Join(lines, "\n"), "Stdout:") || !strings.Contains(strings.Join(lines, "\n"), "file changed, 6 insertions") {
+	if !strings.Contains(strings.Join(lines, "\n"), "↳ Output:") || !strings.Contains(strings.Join(lines, "\n"), "file changed, 6 insertions") {
 		t.Fatalf("expected expanded stdout body; got:\n%s", strings.Join(lines, "\n"))
 	}
 }
@@ -4515,7 +4515,7 @@ func TestDoneCallRejectedUsesCrossAndSimplifiedReason(t *testing.T) {
 	if !strings.Contains(plain, "✗ done") {
 		t.Fatalf("expected rejected Done to use failure icon, got:\n%s", plain)
 	}
-	if !strings.Contains(plain, "rejected reason: require all checks to pass before exit and include") ||
+	if !strings.Contains(plain, "↳ Rejected:") || !strings.Contains(plain, "require all checks to pass before exit and include") ||
 		!strings.Contains(plain, "verification results") {
 		t.Fatalf("expected simplified rejected reason text, got:\n%s", plain)
 	}
@@ -4542,7 +4542,7 @@ func TestDoneCallAutoRejectedUsesCrossAndSimplifiedReason(t *testing.T) {
 	if !strings.Contains(plain, "✗ done") {
 		t.Fatalf("expected auto-rejected Done to use failure icon, got:\n%s", plain)
 	}
-	for _, want := range []string{"rejected reason: loop exit conditions are not", "satisfied yet: open TODO items remain.", "Finish the remaining work before calling", "Done again."} {
+	for _, want := range []string{"↳ Rejected:", "loop exit conditions are not satisfied yet: open TODO items remain.", "Finish the remaining", "work before calling Done again."} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected auto-rejected Done render to contain %q, got:\n%s", want, plain)
 		}
@@ -4568,12 +4568,12 @@ func TestDoneCallRejectedRendersReportAndSingleReason(t *testing.T) {
 	}
 
 	plain := stripANSI(strings.Join(block.Render(72, ""), "\n"))
-	for _, want := range []string{"Completion status", "Report body stays visible", "rejected reason: coverage must be >= 70% before", "exiting"} {
+	for _, want := range []string{"Completion status", "Report body stays visible", "↳ Rejected:", "coverage must be >= 70% before"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected rejected Done render to contain %q, got:\n%s", want, plain)
 		}
 	}
-	if strings.Count(plain, "rejected reason:") != 1 {
+	if strings.Count(plain, "↳ Rejected:") != 1 {
 		t.Fatalf("expected exactly one rejected reason line, got:\n%s", plain)
 	}
 	if strings.Contains(plain, "Done rejected:") || strings.Contains(plain, "Status:") {
@@ -4600,7 +4600,7 @@ func TestDoneCallAcceptedOmitsStatusAndRejectedReason(t *testing.T) {
 			t.Fatalf("expected accepted Done render to contain %q, got:\n%s", want, plain)
 		}
 	}
-	for _, unwanted := range []string{"Status:", "rejected reason:", "Done rejected:"} {
+	for _, unwanted := range []string{"Status:", "↳ Rejected:", "Done rejected:"} {
 		if strings.Contains(plain, unwanted) {
 			t.Fatalf("expected accepted Done render to omit %q, got:\n%s", unwanted, plain)
 		}

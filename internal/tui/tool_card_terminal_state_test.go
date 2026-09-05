@@ -16,9 +16,11 @@ func TestToolResultSummaryLineShowsTerminalStates(t *testing.T) {
 		want string
 	}{
 		{
+			// The shared ↳ Cancelled envelope owns the cancellation, so the
+			// summary line must stay empty instead of printing it twice.
 			name: "cancelled generic",
 			blk:  &Block{ToolName: "write", ResultDone: true, ResultStatus: agent.ToolResultStatusCancelled, ResultContent: "cancelled"},
-			want: "Cancelled",
+			want: "",
 		},
 		{
 			name: "spawn failed",

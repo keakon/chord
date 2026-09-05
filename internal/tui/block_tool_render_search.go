@@ -43,21 +43,13 @@ func (b *Block) renderSearchResultToolCall(width int, spinnerFrame string) []str
 	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent, b.toolExecutionIsRunning())
 	result := []string{headerLine}
 
-	if b.toolResultIsError() && strings.TrimSpace(b.ResultContent) != "" {
-		result = append(result, ErrorStyle.Render("  ↳ Error:"))
-		for _, line := range wrapText(sanitizeToolDisplayText(toolDisplayResultContent(b)), contentWidth) {
-			result = append(result, ErrorStyle.Render("    "+line))
-		}
+	if kind := toolOutcomeKindOf(b); kind == toolOutcomeError {
+		appendToolOutcomeBody(&result, kind, toolDisplayResultContent(b), contentWidth, expanded)
 		result = appendToolElapsedToHeader(result, b, cardWidth)
 		return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 	}
-	if b.toolResultIsCancelled() && strings.TrimSpace(b.ResultContent) != "" {
-		result = append(result, DimStyle.Render("  ↳ Cancelled"))
-		if detail := toolCancelledDetailText(b.ResultContent); detail != "" {
-			for _, line := range wrapText(sanitizeToolDisplayText(detail), contentWidth) {
-				result = append(result, DimStyle.Render("    "+line))
-			}
-		}
+	if b.toolResultIsCancelled() {
+		appendToolOutcomeBody(&result, toolOutcomeCancelled, toolDisplayResultContent(b), contentWidth, expanded)
 		result = appendToolElapsedToHeader(result, b, cardWidth)
 		return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 	}

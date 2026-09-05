@@ -42,15 +42,15 @@ func (b *Block) renderTaskCall(width int, spinnerFrame string) []string {
 			}
 		}
 		switch {
+		case toolOutcomeKindOf(b) != toolOutcomeNone:
+			// The outcome outranks the handle summary: a failed delegate must
+			// report the failure, not the worker line it never got.
+			appendToolOutcome(&result, b, contentWidth, false)
 		case strings.TrimSpace(b.DoneSummary) != "":
 			appendCollapsedSummaryLines(&result, b.DoneSummary, cardWidth-26, ToolResultStyle)
 		case hasResultText:
 			summary := truncateOneLine(sanitizeToolDisplayText(taskToolCollapsedHandleSummary(b.ResultContent)), cardWidth-20)
 			result = append(result, ToolResultStyle.Render("  ↳ "+summary))
-		case b.toolResultIsError() && strings.TrimSpace(b.ResultContent) != "":
-			appendCollapsedSummaryLines(&result, b.ResultContent, cardWidth-26, ErrorStyle)
-		case b.toolResultIsCancelled() && strings.TrimSpace(b.ResultContent) != "":
-			appendCollapsedSummaryLines(&result, b.ResultContent, cardWidth-26, DimStyle)
 		}
 	} else {
 		if subType != "" {
@@ -70,16 +70,8 @@ func (b *Block) renderTaskCall(width int, spinnerFrame string) []string {
 					result = append(result, DimStyle.Render("    "+wrapped))
 				}
 			}
-		} else if b.toolResultIsError() && strings.TrimSpace(b.ResultContent) != "" {
-			result = append(result, ErrorStyle.Render("  ↳ Error:"))
-			for _, line := range wrapText(sanitizeToolDisplayText(strings.TrimSpace(b.ResultContent)), contentWidth) {
-				result = append(result, ErrorStyle.Render("    "+line))
-			}
-		} else if b.toolResultIsCancelled() && strings.TrimSpace(b.ResultContent) != "" {
-			result = append(result, DimStyle.Render("  ↳ Cancelled:"))
-			for _, line := range wrapText(sanitizeToolDisplayText(strings.TrimSpace(b.ResultContent)), contentWidth) {
-				result = append(result, DimStyle.Render("    "+line))
-			}
+		} else {
+			appendToolOutcome(&result, b, contentWidth, true)
 		}
 		if strings.TrimSpace(b.DoneSummary) != "" {
 			result = append(result, ToolResultExpandedStyle.Render("  ↳ Completed:"))
@@ -399,10 +391,7 @@ func (b *Block) renderCancelCall(width int, spinnerFrame string) []string {
 		if summary := formatToolResultSummaryLine(b); summary != "" {
 			result = append(result, toolSummaryLine(summary))
 		}
-		if b.toolResultIsError() && strings.TrimSpace(b.ResultContent) != "" {
-			summary := truncateOneLine(sanitizeToolDisplayText(strings.TrimSpace(b.ResultContent)), contentWidth-10)
-			result = append(result, ErrorStyle.Render("    error: "+summary))
-		}
+		appendToolOutcome(&result, b, contentWidth, false)
 	} else {
 		if args.Reason != "" {
 			result = append(result, DimStyle.Render("    reason:"))
@@ -436,17 +425,7 @@ func (b *Block) renderCancelCall(width int, spinnerFrame string) []string {
 				}
 			}
 		}
-		if b.toolResultIsError() && strings.TrimSpace(b.ResultContent) != "" {
-			result = append(result, ErrorStyle.Render("  ↳ Error:"))
-			for _, line := range wrapText(sanitizeToolDisplayText(strings.TrimSpace(b.ResultContent)), contentWidth) {
-				result = append(result, ErrorStyle.Render("    "+line))
-			}
-		} else if b.toolResultIsCancelled() && strings.TrimSpace(b.ResultContent) != "" {
-			result = append(result, DimStyle.Render("  ↳ Cancelled:"))
-			for _, line := range wrapText(sanitizeToolDisplayText(strings.TrimSpace(b.ResultContent)), contentWidth) {
-				result = append(result, DimStyle.Render("    "+line))
-			}
-		}
+		appendToolOutcome(&result, b, contentWidth, true)
 		if strings.TrimSpace(b.DoneSummary) != "" {
 			result = append(result, ToolResultExpandedStyle.Render("  ↳ Completed:"))
 			for _, line := range wrapText(sanitizeToolDisplayText(b.DoneSummary), contentWidth) {
@@ -508,10 +487,7 @@ func (b *Block) renderNotifyCall(width int, spinnerFrame string) []string {
 		if summary := formatToolResultSummaryLine(b); summary != "" {
 			result = append(result, toolSummaryLine(summary))
 		}
-		if b.toolResultIsError() && strings.TrimSpace(b.ResultContent) != "" {
-			summary := truncateOneLine(sanitizeToolDisplayText(strings.TrimSpace(b.ResultContent)), contentWidth-10)
-			result = append(result, ErrorStyle.Render("    error: "+summary))
-		}
+		appendToolOutcome(&result, b, contentWidth, false)
 	} else {
 		if args.Message != "" {
 			result = append(result, DimStyle.Render("    message:"))
@@ -545,17 +521,7 @@ func (b *Block) renderNotifyCall(width int, spinnerFrame string) []string {
 				}
 			}
 		}
-		if b.toolResultIsError() && strings.TrimSpace(b.ResultContent) != "" {
-			result = append(result, ErrorStyle.Render("  ↳ Error:"))
-			for _, line := range wrapText(sanitizeToolDisplayText(strings.TrimSpace(b.ResultContent)), contentWidth) {
-				result = append(result, ErrorStyle.Render("    "+line))
-			}
-		} else if b.toolResultIsCancelled() && strings.TrimSpace(b.ResultContent) != "" {
-			result = append(result, DimStyle.Render("  ↳ Cancelled:"))
-			for _, line := range wrapText(sanitizeToolDisplayText(strings.TrimSpace(b.ResultContent)), contentWidth) {
-				result = append(result, DimStyle.Render("    "+line))
-			}
-		}
+		appendToolOutcome(&result, b, contentWidth, true)
 		if strings.TrimSpace(b.DoneSummary) != "" {
 			result = append(result, ToolResultExpandedStyle.Render("  ↳ Completed:"))
 			for _, line := range wrapText(sanitizeToolDisplayText(b.DoneSummary), contentWidth) {

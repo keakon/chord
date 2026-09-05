@@ -57,7 +57,9 @@ func (b *Block) renderDeleteCall(width int, spinnerFrame string) []string {
 	if b.toolResultIsError() {
 		failureSummary = deleteFailureSummary(headline)
 		if failureSummary != "" {
-			result = append(result, ErrorStyle.Render("  ↳ "+failureSummary))
+			// Same "↳ Error: <summary>" envelope as every other card; the
+			// per-path sections below carry the detail.
+			appendToolOutcomeBody(&result, toolOutcomeError, failureSummary, contentWidth, false)
 		}
 	}
 	for _, section := range sections {

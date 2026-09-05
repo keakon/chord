@@ -82,10 +82,8 @@ func (b *Block) renderReadCall(width int, spinnerFrame string) []string {
 	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, false, b.toolExecutionIsRunning())
 	result = append(result, headerLine)
 
-	if b.toolResultIsError() && b.ResultContent != "" {
-		result = appendErrorResultLines(result, b.ResultContent, contentWidth)
-	} else if b.toolResultIsCancelled() && b.ResultContent != "" {
-		result = appendCancelledResultLines(result, b.ResultContent, contentWidth)
+	if kind := toolOutcomeKindOf(b); kind != toolOutcomeNone {
+		appendToolOutcomeBody(&result, kind, toolDisplayResultContent(b), contentWidth, !b.Collapsed)
 	} else if b.ResultContent != "" {
 		if !b.Collapsed {
 			// The model-facing offset is already a 1-based start line; when the

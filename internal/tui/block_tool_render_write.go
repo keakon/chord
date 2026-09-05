@@ -168,18 +168,8 @@ func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
 	result := []string{headerLine}
 
 	if b.Collapsed {
-		if b.toolResultIsError() && strings.TrimSpace(b.ResultContent) != "" {
-			result = append(result, ErrorStyle.Render("  ↳ Error:"))
-			for _, line := range wrapText(sanitizeToolDisplayText(toolDisplayResultContent(b)), contentWidth) {
-				result = append(result, ErrorStyle.Render("    "+line))
-			}
-		} else if b.toolResultIsCancelled() && strings.TrimSpace(b.ResultContent) != "" {
-			result = append(result, DimStyle.Render("  ↳ Cancelled"))
-			if detail := toolCancelledDetailText(b.ResultContent); detail != "" {
-				for _, line := range wrapText(sanitizeToolDisplayText(detail), contentWidth) {
-					result = append(result, DimStyle.Render("    "+line))
-				}
-			}
+		if kind := toolOutcomeKindOf(b); kind != toolOutcomeNone {
+			appendToolOutcomeBody(&result, kind, toolDisplayResultContent(b), contentWidth, false)
 		} else {
 			// Collapsed success is a single header line like read/grep/glob:
 			// path, parameters and the line/byte counts merge into the header
@@ -213,13 +203,12 @@ func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
 	}
 
 	if b.toolResultIsError() && b.ResultContent != "" {
+		// The diagnostics renderer keeps LSP paths aligned, so this card
+		// formats its own body under the shared "↳ Error:" header.
 		result = append(result, ErrorStyle.Render("  ↳ Error:"))
-		result = append(result, renderLSPDiagnosticsLines(b.ResultContent, "    ", cardWidth-4)...)
-	} else if b.toolResultIsCancelled() && b.ResultContent != "" {
-		result = append(result, DimStyle.Render("  ↳ Cancelled"))
-		if detail := toolCancelledDetailText(b.ResultContent); detail != "" {
-			result = append(result, renderLSPDiagnosticsLines(detail, "    ", cardWidth-4)...)
-		}
+		result = append(result, renderLSPDiagnosticsLines(toolErrorDisplayContent(b.ResultContent), "    ", cardWidth-4)...)
+	} else if b.toolResultIsCancelled() {
+		appendToolOutcomeBody(&result, toolOutcomeCancelled, toolDisplayResultContent(b), cardWidth-4, true)
 	}
 	result = appendToolElapsedToHeader(result, b, cardWidth)
 	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))

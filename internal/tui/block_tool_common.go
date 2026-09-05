@@ -257,13 +257,85 @@ func toolCancelledDetailText(result string) string {
 }
 
 func appendCancelledResultLines(result []string, content string, width int) []string {
-	result = append(result, DimStyle.Render("  ↳ Cancelled"))
-	if detail := toolCancelledDetailText(content); detail != "" {
-		for _, line := range wrapText(sanitizeToolDisplayText(detail), width) {
-			result = append(result, DimStyle.Render("    "+line))
-		}
-	}
+	appendToolOutcomeBody(&result, toolOutcomeCancelled, content, width, true)
 	return result
+}
+
+// toolOutcomeKind selects the envelope appendToolOutcomeBody renders.
+type toolOutcomeKind int
+
+const (
+	toolOutcomeNone toolOutcomeKind = iota
+	toolOutcomeError
+	toolOutcomeCancelled
+)
+
+// toolOutcomeKindOf reports which outcome envelope a finished card owes the
+// user. Callers that render their own status surface (shell's exit line, the
+// done card's rejection reason) resolve the kind themselves.
+func toolOutcomeKindOf(b *Block) toolOutcomeKind {
+	switch {
+	case b == nil || !b.ResultDone:
+		return toolOutcomeNone
+	case b.toolResultIsError():
+		return toolOutcomeError
+	case b.toolResultIsCancelled():
+		return toolOutcomeCancelled
+	}
+	return toolOutcomeNone
+}
+
+// appendToolOutcomeBody renders the one failure/cancellation surface every
+// tool card shares, so the 15 renderers stop drifting apart:
+//
+//   - collapsed: a single "↳ Error: <summary>" / "↳ Cancelled[: <detail>]" row
+//   - expanded:  "↳ Error:" / "↳ Cancelled:" followed by the wrapped body
+//   - the "Error: " prefix the tool-result envelope adds is stripped, so the
+//     label is never printed twice
+//   - a cancellation whose whole text is "Cancelled" renders the label alone
+//     instead of repeating itself, and the colon appears only when a detail
+//     follows
+//
+// content is the already-resolved display text (callers pass
+// toolDisplayResultContent or a tool-specific variant).
+func appendToolOutcomeBody(result *[]string, kind toolOutcomeKind, content string, contentWidth int, expanded bool) {
+	if kind == toolOutcomeNone {
+		return
+	}
+	style := ErrorStyle
+	label := "Error"
+	body := strings.TrimSpace(sanitizeToolDisplayText(toolErrorDisplayContent(content)))
+	if kind == toolOutcomeCancelled {
+		style, label = DimStyle, "Cancelled"
+		body = strings.TrimSpace(sanitizeToolDisplayText(toolCancelledDetailText(content)))
+	}
+	if body == "" {
+		if kind == toolOutcomeCancelled {
+			*result = append(*result, style.Render("  ↳ "+label))
+		}
+		return
+	}
+	if !expanded {
+		width := max(contentWidth-len("↳ "+label+": "), 12)
+		if oneLine := truncateOneLine(toolCollapsedSummaryText(body), width); oneLine != "" {
+			*result = append(*result, style.Render("  ↳ "+label+": "+oneLine))
+		}
+		return
+	}
+	*result = append(*result, style.Render("  ↳ "+label+":"))
+	for _, line := range wrapText(body, contentWidth) {
+		*result = append(*result, style.Render("    "+line))
+	}
+}
+
+// appendToolOutcome renders the shared envelope for a finished card using the
+// block's own display result.
+func appendToolOutcome(result *[]string, b *Block, contentWidth int, expanded bool) {
+	kind := toolOutcomeKindOf(b)
+	if kind == toolOutcomeNone {
+		return
+	}
+	appendToolOutcomeBody(result, kind, toolDisplayResultContent(b), contentWidth, expanded)
 }
 
 // appendToolElapsedToHeader appends the tool elapsed label to the header line
@@ -344,39 +416,8 @@ func shellDurationNoteLabel(result string) string {
 }
 
 func appendErrorResultLines(result []string, content string, width int) []string {
-	trimmed := strings.TrimSpace(sanitizeToolDisplayText(content))
-	if trimmed == "" {
-		return result
-	}
-	result = append(result, ErrorStyle.Render("  ↳ Error:"))
-	for _, line := range wrapText(trimmed, width) {
-		result = append(result, ErrorStyle.Render("    "+line))
-	}
+	appendToolOutcomeBody(&result, toolOutcomeError, content, width, true)
 	return result
-}
-
-func bashCollapsedSummaryLine(b *Block, vals map[string]string, width int, includeDescription bool) (string, bool) {
-	if b == nil || !b.ResultDone {
-		return "", false
-	}
-	parts := make([]string, 0, 2)
-	if includeDescription {
-		if desc := strings.TrimSpace(vals["description"]); desc != "" {
-			parts = append(parts, desc)
-		}
-	}
-	summary, isError := bashCollapsedOutcomeSummary(b)
-	if summary != "" {
-		parts = append(parts, summary)
-	}
-	if len(parts) == 0 {
-		return "", isError
-	}
-	line := strings.Join(parts, " · ")
-	if width > 0 && runewidth.StringWidth(line) > width {
-		return runewidth.Truncate(line, width, "…"), isError
-	}
-	return line, isError
 }
 
 func bashCollapsedOutcomeSummary(b *Block) (string, bool) {
@@ -431,8 +472,15 @@ func bashExpandedExitLine(b *Block) string {
 		if timedOut := bashTimeoutSummary(b.ResultContent); timedOut != "" {
 			return "Exit: timeout"
 		}
+		// bashExitCodeAnywhere also matches the common
+		// "<output>\n\nError: exit code N" shape, which the leading-prefix
+		// form misses: the collapsed card reported the exit code while the
+		// expanded card fell back to a bare "Exit: error".
 		if exit := bashExitCodeFromError(b.ResultContent); exit != "" {
 			return "Exit: " + strings.TrimSpace(exit)
+		}
+		if exit := bashExitCodeAnywhere(b.ResultContent); exit != "" {
+			return "Exit: " + strings.TrimSpace(strings.TrimPrefix(exit, "exit code "))
 		}
 		return "Exit: error"
 	}
@@ -611,15 +659,16 @@ func parseSpawnResultID(result string) string {
 }
 
 // formatToolResultSummaryLine returns the one-line state summary under the
-// tool header. Error results render their detail in the ↳ Error block, so
-// error states return "" instead of a redundant label like "Search failed".
+// tool header. Error and cancelled results render their detail in the shared
+// ↳ Error / ↳ Cancelled envelope, so they return "" instead of a redundant
+// label like "Search failed" or a second "Cancelled" row above the envelope.
 func formatToolResultSummaryLine(b *Block) string {
 	if b == nil {
 		return ""
 	}
 	b.ToolName = toolNameKey(b.ToolName)
 	if b.toolResultIsCancelled() {
-		return "Cancelled"
+		return ""
 	}
 	if !b.ResultDone {
 		return ""

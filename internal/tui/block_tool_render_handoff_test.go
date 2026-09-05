@@ -63,7 +63,7 @@ func TestHandoffCardRejectedShowsReason(t *testing.T) {
 	if !strings.Contains(joined, "✗") {
 		t.Fatalf("expected rejection marker on rejected handoff; got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "rejected reason: use reviewer first") {
+	if !strings.Contains(joined, "↳ Rejected:") || !strings.Contains(joined, "use reviewer first") {
 		t.Fatalf("expected rejected reason text; got:\n%s", joined)
 	}
 	if strings.Contains(joined, `{"plan_path"`) {

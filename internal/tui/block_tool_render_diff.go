@@ -166,18 +166,8 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, false, b.toolExecutionIsRunning())
 	result = append(result, headerLine)
 	if b.Collapsed {
-		if b.toolResultIsError() && strings.TrimSpace(b.ResultContent) != "" {
-			result = append(result, ErrorStyle.Render("  ↳ Error:"))
-			for _, line := range wrapText(sanitizeToolDisplayText(toolDisplayResultContent(b)), max(textWrap-4, 10)) {
-				result = append(result, ErrorStyle.Render("    "+line))
-			}
-		} else if b.toolResultIsCancelled() && strings.TrimSpace(b.ResultContent) != "" {
-			result = append(result, DimStyle.Render("  ↳ Cancelled"))
-			if detail := toolCancelledDetailText(b.ResultContent); detail != "" {
-				for _, line := range wrapText(sanitizeToolDisplayText(detail), max(textWrap-4, 10)) {
-					result = append(result, DimStyle.Render("    "+line))
-				}
-			}
+		if kind := toolOutcomeKindOf(b); kind != toolOutcomeNone {
+			appendToolOutcomeBody(&result, kind, toolDisplayResultContent(b), max(textWrap-4, 10), false)
 		}
 		return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 	}
@@ -382,11 +372,8 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 			result = append(result, ErrorStyle.Render("  ↳ Error:"))
 			result = append(result, renderLSPDiagnosticsLines(toolErrorDisplayContent(b.ResultContent), "    ", textWrap)...)
 		}
-	} else if b.toolResultIsCancelled() && b.ResultContent != "" {
-		result = append(result, DimStyle.Render("  ↳ Cancelled"))
-		if detail := toolCancelledDetailText(b.ResultContent); detail != "" {
-			result = append(result, renderLSPDiagnosticsLines(detail, "    ", textWrap)...)
-		}
+	} else if b.toolResultIsCancelled() {
+		appendToolOutcomeBody(&result, toolOutcomeCancelled, toolDisplayResultContent(b), textWrap, true)
 	}
 	result = appendToolElapsedToHeader(result, b, cardWidth)
 	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
