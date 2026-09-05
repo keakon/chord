@@ -93,6 +93,26 @@ func TestCollapsedToolCardsKeepTheOutcomeOnOneLine(t *testing.T) {
 	}
 }
 
+// TestCollapsedToggleableCardShowsDisclosureMarker pins the marker rule: the
+// marker states what the toggle can do, so a collapsed card that opens into a
+// fuller body carries ▸ even when the collapsed body already fits.
+func TestCollapsedToggleableCardShowsDisclosureMarker(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	for _, name := range []string{tools.NameWebFetch, tools.NameSkill, tools.NameSpawn, tools.NameShell} {
+		block := outcomeCardFixture(name, outcomeCardArgs[name], "Error: 404 Not Found", agent.ToolResultStatusError)
+		collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+		if !strings.Contains(collapsed, "✗ ▸ "+name) {
+			t.Errorf("%s collapsed card is missing the ▸ disclosure marker:\n%s", name, collapsed)
+		}
+		block.ToolCallDetailExpanded = true
+		block.InvalidateCache()
+		expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+		if !strings.Contains(expanded, "✗ ▾ "+name) {
+			t.Errorf("%s expanded card is missing the ▾ disclosure marker:\n%s", name, expanded)
+		}
+	}
+}
+
 // TestShellCardKeepsExitCodeAndLabelsOutputHonestly pins the two shell
 // regressions: the expanded card reported "Exit: error" while the collapsed
 // card knew the exit code, and every failing run's output was labelled

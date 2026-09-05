@@ -914,26 +914,14 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 	if b.ToolName == tools.NameShell && !expanded && collapsedOK {
 		mainPart, grayPart = collapsedMain, collapsedGray
 	}
-	hiddenDetail := 0
-	if !expanded {
-		hiddenDetail = compactToolHiddenDetailLines(b, keys, vals, mainPart, contentWidth, false)
-	}
-
 	result := make([]string, 0, 16)
 	prefix := b.renderToolPrefixForExpanded(spinnerFrame, expanded)
-	if b.ResultDone {
-		switch {
-		case b.ToolName == tools.NameShell:
-			prefix = renderToolDisclosurePrefix(prefix, expanded)
-		case expanded:
-			// Only expanded cards the toggle can collapse again get a ▾;
-			// force-expanded cards are stuck and must not claim one.
-			if b.ToolCallDetailExpanded && !b.compactToolResultForceExpanded(contentWidth) {
-				prefix = renderToolDisclosurePrefix(prefix, expanded)
-			}
-		case hiddenDetail > 0:
-			prefix = renderToolDisclosurePrefix(prefix, expanded)
-		}
+	// The marker states what the toggle can do, not how much text is hidden:
+	// a collapsed card with nothing hidden still opens on space, so it earns
+	// a ▸ like every other toggleable card. Force-expanded cards are stuck
+	// and must not claim a marker the toggle cannot honour.
+	if b.ResultDone && (b.ToolName == tools.NameShell || !b.compactToolResultForceExpanded(contentWidth)) {
+		prefix = renderToolDisclosurePrefix(prefix, expanded)
 	}
 	toolHeaderLine := renderToolHeaderLine(prefix, b.ToolName)
 	toolHeaderLine = appendToolHeaderSummary(toolHeaderLine, mainPart, grayPart, paramSummary, cardWidth-4)
