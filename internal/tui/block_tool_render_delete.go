@@ -20,19 +20,27 @@ func (b *Block) renderDeleteCall(width int, spinnerFrame string) []string {
 	contentWidth := metrics.contentWidth
 
 	_, vals := b.toolArgsParsed()
-	reason := strings.TrimSpace(vals["reason"])
-	mainPart := reason
-	if mainPart == "" {
-		paths := parseDeleteHeaderPaths(vals)
-		switch len(paths) {
-		case 1:
-			mainPart = b.displayToolPath(paths[0])
-		case 0:
-		default:
-			mainPart = fmt.Sprintf("%d files", len(paths))
+	// The subject of a delete is what it deletes, so the paths own the header
+	// and the reason joins the option group beside them; the reason only takes
+	// the subject slot when there is no path to name.
+	paths := parseDeleteHeaderPaths(vals)
+	mainPart := ""
+	switch len(paths) {
+	case 1:
+		mainPart = b.displayToolPath(paths[0])
+	case 0:
+	default:
+		mainPart = fmt.Sprintf("%d files", len(paths))
+	}
+	reason := firstDisplayLine(strings.TrimSpace(vals["reason"]))
+	headerOptions := b.diagnosticHeaderOptions()
+	if reason != "" {
+		if mainPart == "" {
+			mainPart = reason
+		} else {
+			headerOptions = append([]string{reason}, headerOptions...)
 		}
 	}
-	headerOptions := b.diagnosticHeaderOptions()
 	if b.Audit != nil && b.Audit.UserModified {
 		headerOptions = append([]string{"edited before approval"}, headerOptions...)
 	}

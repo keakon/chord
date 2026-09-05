@@ -185,6 +185,15 @@ func appendCollapsedSummaryLines(result *[]string, summary string, width int, st
 	*result = append(*result, style.Render("  ↳ "+oneLine))
 }
 
+// toolHeaderProseSummary folds a prose argument into the one line a header can
+// carry: the first two non-empty lines joined with " · ", cut at the first
+// sentence terminator. Cards whose subject is prose (a report, a reason, a
+// message, an objective) put this in the header, so the body never has to
+// repeat it in a summary row.
+func toolHeaderProseSummary(prose string) string {
+	return firstSentence(toolCollapsedSummaryText(strings.TrimSpace(prose)))
+}
+
 func toolExpandedTextLines(s string, width int) []string {
 	trimmed := strings.TrimSpace(sanitizeToolDisplayText(s))
 	if trimmed == "" {

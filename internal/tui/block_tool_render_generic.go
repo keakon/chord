@@ -53,27 +53,16 @@ func appendBashCommandBlock(result *[]string, command string, contentWidth int, 
 	*result = append(*result, renderCommandBlock("Command", lines, contentWidth)...)
 }
 
-// bashMetaLines returns the wrapped, styled meta lines (description, Workdir,
-// Timeout) displayed in the expanded Shell card body.
+// bashMetaLines returns the wrapped, styled meta lines displayed under the
+// expanded Shell command block. Only the working directory is left: it
+// qualifies the command it sits under and can be a long path, while the
+// description is the header's subject and a non-default timeout is already in
+// the header's option group - repeating either put the same value on screen
+// twice.
 func bashMetaLines(vals map[string]string, contentWidth int) []string {
 	var out []string
-	if desc := strings.TrimSpace(vals["description"]); desc != "" {
-		line := fmt.Sprintf("description: %s", desc)
-		for _, w := range wrapIndentedText(line, contentWidth) {
-			out = append(out, DimStyle.Render("    "+w))
-		}
-	}
-	// description / workdir / timeout are call arguments, so all three share
-	// the 4-space argument indent and lowercase key style instead of mixing
-	// "    description:" with "  Workdir:".
 	if workdir := strings.TrimSpace(vals["workdir"]); workdir != "" {
 		line := fmt.Sprintf("workdir: %s", workdir)
-		for _, w := range wrapIndentedText(line, contentWidth) {
-			out = append(out, DimStyle.Render("    "+w))
-		}
-	}
-	if timeout := strings.TrimSpace(vals["timeout"]); timeout != "" {
-		line := fmt.Sprintf("timeout: %ss", timeout)
 		for _, w := range wrapIndentedText(line, contentWidth) {
 			out = append(out, DimStyle.Render("    "+w))
 		}
@@ -307,12 +296,13 @@ func (b *Block) renderDoneCall(width int, spinnerFrame string) []string {
 	cardWidth := metrics.cardWidth
 	contentWidth := metrics.contentWidth
 
+	report := strings.TrimSpace(b.DoneReport)
 	prefix := b.renderToolPrefix(spinnerFrame)
 	headerLine := renderToolHeaderLine(prefix, b.ToolName)
+	headerLine = appendToolHeaderSummary(headerLine, toolHeaderProseSummary(report), "", "", cardWidth-4)
 	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent, b.toolExecutionIsRunning())
 	result := []string{headerLine}
 
-	report := strings.TrimSpace(b.DoneReport)
 	if report != "" {
 		result = append(result, "")
 		for _, line := range renderRichMarkdownContent(report, contentWidth, &b.richMarkdownHL) {
@@ -411,10 +401,6 @@ func (b *Block) renderProseControlCall(width int, spinnerFrame string) []string 
 		// tool cards, not a flat non-expandable row.
 		prefix = renderToolDisclosurePrefix(prefix, b.ToolCallDetailExpanded)
 	}
-	headerLine := renderToolHeaderLine(prefix, b.ToolName)
-	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent, b.toolExecutionIsRunning())
-	result := []string{headerLine}
-
 	var args proseControlArgs
 	argsJSON := b.RawArgs
 	if strings.TrimSpace(argsJSON) == "" {
@@ -429,9 +415,15 @@ func (b *Block) renderProseControlCall(width int, spinnerFrame string) []string 
 	}
 	argsReady := b.ResultDone || strings.TrimSpace(argsJSON) != ""
 
-	if argsReady && !b.ToolCallDetailExpanded && b.ResultDone && !b.toolResultIsError() && !b.toolResultIsCancelled() {
-		appendCollapsedSummaryLines(&result, prose, cardWidth-10, ToolResultStyle)
-	} else if argsReady && prose != "" {
+	// The header is the index line: it names what the report is about, so a
+	// collapsed card needs no summary row of its own and an expanded one does
+	// not repeat the sentence outside its prose.
+	headerLine := renderToolHeaderLine(prefix, b.ToolName)
+	headerLine = appendToolHeaderSummary(headerLine, toolHeaderProseSummary(prose), "", "", cardWidth-4)
+	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent, b.toolExecutionIsRunning())
+	result := []string{headerLine}
+
+	if b.ToolCallDetailExpanded && argsReady && prose != "" {
 		result = append(result, "")
 		for _, line := range renderRichMarkdownContent(prose, contentWidth, &b.richMarkdownHL) {
 			result = append(result, "    "+line)
@@ -532,10 +524,6 @@ func (b *Block) renderCompactContextCall(width int, spinnerFrame string) []strin
 		// expandable tool cards, not a flat non-expandable row.
 		prefix = renderToolDisclosurePrefix(prefix, b.ToolCallDetailExpanded)
 	}
-	headerLine := renderToolHeaderLine(prefix, b.ToolName)
-	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent, b.toolExecutionIsRunning())
-	result := []string{headerLine}
-
 	argsJSON := b.RawArgs
 	if strings.TrimSpace(argsJSON) == "" {
 		argsJSON = b.Content
@@ -547,6 +535,13 @@ func (b *Block) renderCompactContextCall(width int, spinnerFrame string) []strin
 	objective := strings.TrimSpace(args.ActiveObjective)
 	next := strings.TrimSpace(args.NextStep)
 
+	// The objective is what the checkpoint is about, so it belongs on the
+	// header index line; the body row is left to the next step.
+	headerLine := renderToolHeaderLine(prefix, b.ToolName)
+	headerLine = appendToolHeaderSummary(headerLine, toolHeaderProseSummary(objective), "", "", cardWidth-4)
+	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent, b.toolExecutionIsRunning())
+	result := []string{headerLine}
+
 	switch {
 	case !argsReady && !b.ToolCallDetailExpanded:
 		// Nothing decodable yet: the arguments are still streaming, and the
@@ -555,20 +550,14 @@ func (b *Block) renderCompactContextCall(width int, spinnerFrame string) []strin
 		// then folds away.
 	case !b.ToolCallDetailExpanded:
 		// Collapsed default, whether the call is still running, finished or
-		// rejected: one body row carrying the objective and next-step first
-		// sentences. The card is a checkpoint marker, not a document - the
-		// six sections only appear when the user opens it, which also means a
-		// resumed session opens with a one-line card instead of a screenful.
-		summary := make([]string, 0, 2)
-		if objective != "" {
-			summary = append(summary, firstSentence(objective))
-		}
+		// rejected: the header carries the objective, so the body is one row
+		// with the next step. The card is a checkpoint marker, not a document
+		// - the six sections only appear when the user opens it, which also
+		// means a resumed session opens with a one-line card instead of a
+		// screenful.
 		if next != "" {
-			summary = append(summary, "→ "+firstSentence(next))
+			appendCollapsedSummaryLines(&result, "→ "+toolHeaderProseSummary(next), cardWidth-10, ToolResultStyle)
 		}
-		// appendCollapsedSummaryLines folds the two lines into one " · "
-		// separated row.
-		appendCollapsedSummaryLines(&result, strings.Join(summary, "\n"), cardWidth-10, ToolResultStyle)
 	case argsReady:
 		appendCompactContextSections(&result, []compactContextDisplaySection{
 			{label: "Objective", prose: objective},

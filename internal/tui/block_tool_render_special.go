@@ -31,16 +31,13 @@ func (b *Block) renderTaskCall(width int, spinnerFrame string) []string {
 	if subType != "" {
 		headerLine += " " + DimStyle.Render("("+sanitizeToolDisplayText(subType)+")")
 	}
+	// The task description is what the delegation is about, so it leads the
+	// header; the body keeps the full text under its own section.
+	headerLine = appendToolHeaderSummary(headerLine, toolHeaderProseSummary(args.Description), "", "", cardWidth-4)
 	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent, isActive)
 
 	result := []string{headerLine}
 	if b.Collapsed {
-		descLines := taskToolCollapsedDescriptionLines(b.Content, contentWidth-4)
-		if len(descLines) > 0 {
-			for _, line := range descLines {
-				result = append(result, "    "+line)
-			}
-		}
 		switch {
 		case toolOutcomeKindOf(b) != toolOutcomeNone:
 			// The outcome outranks the handle summary: a failed delegate must
@@ -53,9 +50,6 @@ func (b *Block) renderTaskCall(width int, spinnerFrame string) []string {
 			result = append(result, ToolResultStyle.Render("  ↳ "+summary))
 		}
 	} else {
-		if subType != "" {
-			result = append(result, DimStyle.Render("    type: "+subType))
-		}
 		descLines := taskToolExpandedDescriptionLines(b.Content, contentWidth-4)
 		if len(descLines) > 0 {
 			result = append(result, ToolResultExpandedStyle.Render("  ↳ Description:"))
@@ -380,23 +374,24 @@ func (b *Block) renderCancelCall(width int, spinnerFrame string) []string {
 
 	var result []string
 	headerLine := renderToolHeaderLine(prefix, b.ToolName) + " " + target
+	// The target is the subject; the reason rides along as the option group,
+	// the same shape delete uses for its own reason.
+	if reason := toolHeaderProseSummary(args.Reason); reason != "" {
+		headerLine = appendToolHeaderSummary(headerLine, "", "("+reason+")", "", cardWidth-4)
+	}
 	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent, b.toolExecutionIsRunning())
 	result = append(result, headerLine)
 
 	if b.Collapsed {
-		if args.Reason != "" {
-			reasonSummary := truncateOneLine(sanitizeToolDisplayText(args.Reason), contentWidth-10)
-			result = append(result, DimStyle.Render("    reason: "+reasonSummary))
-		}
 		if summary := formatToolResultSummaryLine(b); summary != "" {
 			result = append(result, toolSummaryLine(summary))
 		}
 		appendToolOutcome(&result, b, contentWidth, false)
 	} else {
 		if args.Reason != "" {
-			result = append(result, DimStyle.Render("    reason:"))
-			for _, line := range wrapText(sanitizeToolDisplayText(args.Reason), contentWidth-4) {
-				result = append(result, DimStyle.Render("      "+line))
+			result = append(result, ToolResultExpandedStyle.Render("  ↳ Reason:"))
+			for _, line := range wrapText(sanitizeToolDisplayText(args.Reason), contentWidth) {
+				result = append(result, DimStyle.Render("    "+line))
 			}
 		}
 		if summary := formatToolResultSummaryLine(b); summary != "" {
@@ -462,6 +457,7 @@ func (b *Block) renderNotifyCall(width int, spinnerFrame string) []string {
 		if args.Kind != "" {
 			headerLine += " " + DimStyle.Render("("+args.Kind+")")
 		}
+		headerLine = appendToolHeaderSummary(headerLine, toolHeaderProseSummary(args.Message), "", "", cardWidth-4)
 		headerLine = appendToolProgressSuffix(headerLine, b.ToolProgress, cardWidth-4)
 		result = append(result, headerLine)
 	} else {
@@ -472,6 +468,9 @@ func (b *Block) renderNotifyCall(width int, spinnerFrame string) []string {
 		if args.Kind != "" {
 			headerLine += " " + DimStyle.Render("("+args.Kind+")")
 		}
+		// The message is what the notification is about, so it leads the
+		// header; the body keeps the full text under ↳ Message:.
+		headerLine = appendToolHeaderSummary(headerLine, toolHeaderProseSummary(args.Message), "", "", cardWidth-4)
 		headerLine = appendToolProgressSuffix(headerLine, b.ToolProgress, cardWidth-4)
 		if b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent {
 			headerLine = renderQueuedToolHeaderBadge(headerLine, cardWidth)
@@ -480,19 +479,15 @@ func (b *Block) renderNotifyCall(width int, spinnerFrame string) []string {
 	}
 
 	if b.Collapsed {
-		if args.Message != "" {
-			msgSummary := truncateOneLine(firstDisplayLine(sanitizeToolDisplayText(args.Message)), contentWidth-10)
-			result = append(result, DimStyle.Render("    message: "+msgSummary))
-		}
 		if summary := formatToolResultSummaryLine(b); summary != "" {
 			result = append(result, toolSummaryLine(summary))
 		}
 		appendToolOutcome(&result, b, contentWidth, false)
 	} else {
 		if args.Message != "" {
-			result = append(result, DimStyle.Render("    message:"))
-			for _, line := range wrapText(sanitizeToolDisplayText(args.Message), contentWidth-4) {
-				result = append(result, DimStyle.Render("      "+line))
+			result = append(result, ToolResultExpandedStyle.Render("  ↳ Message:"))
+			for _, line := range wrapText(sanitizeToolDisplayText(args.Message), contentWidth) {
+				result = append(result, DimStyle.Render("    "+line))
 			}
 		}
 		if summary := formatToolResultSummaryLine(b); summary != "" {

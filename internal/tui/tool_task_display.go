@@ -5,8 +5,6 @@ import (
 	"strings"
 )
 
-const maxTaskCollapsedPreviewLogicalLines = 2
-
 type taskToolArgs struct {
 	Description string `json:"description"`
 	AgentType   string `json:"agent_type"`
@@ -74,28 +72,6 @@ func taskToolDescriptionContent(argsJSON string) string {
 	desc := strings.ReplaceAll(args.Description, "\r\n", "\n")
 	desc = strings.ReplaceAll(desc, "\r", "\n")
 	return strings.TrimSpace(desc)
-}
-
-func taskToolCollapsedDescriptionLines(argsJSON string, width int) []string {
-	desc := taskToolDescriptionContent(argsJSON)
-	if desc == "" {
-		return nil
-	}
-	rawLines := strings.Split(desc, "\n")
-	previewLines := make([]string, 0, maxTaskCollapsedPreviewLogicalLines)
-	for _, line := range rawLines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
-		}
-		if len(previewLines) < maxTaskCollapsedPreviewLogicalLines {
-			previewLines = append(previewLines, trimmed)
-		}
-	}
-	if len(previewLines) == 0 {
-		return nil
-	}
-	return wrapText(strings.Join(previewLines, "\n"), width)
 }
 
 func taskToolExpandedDescriptionLines(argsJSON string, width int) []string {

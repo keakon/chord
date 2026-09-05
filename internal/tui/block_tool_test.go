@@ -2068,8 +2068,9 @@ func TestExpandedBashMultilineKeepsCommandHeaderEvenWithDescription(t *testing.T
 	if !strings.Contains(joined, "Command:") || !strings.Contains(joined, "python3 - <<'PY'") || !strings.Contains(joined, "from pathlib import Path") || !strings.Contains(joined, "print('ok')") {
 		t.Fatalf("expected expanded Shell to show full command block; got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "description: Search existing permission-related tests") {
-		t.Fatalf("expected expanded Shell detail lines to still include description metadata; got:\n%s", joined)
+	// The description is the header's subject, so the body must not repeat it.
+	if strings.Count(joined, "Search existing permission-related tests") != 1 {
+		t.Fatalf("expected the description only on the header; got:\n%s", joined)
 	}
 }
 
@@ -2918,8 +2919,9 @@ func TestDeleteHeaderShowsRelativePathInsideWorkingDir(t *testing.T) {
 		displayWorkingDir: wd,
 	}
 	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if !strings.Contains(joined, "delete remove obsolete file") || !strings.Contains(joined, "Deleted internal/tui/obsolete.go") {
-		t.Fatalf("expected delete card to show reason first and relative result path below; got:\n%s", joined)
+	if !strings.Contains(joined, "delete internal/tui/obsolete.go (remove obsolete file)") ||
+		!strings.Contains(joined, "Deleted internal/tui/obsolete.go") {
+		t.Fatalf("expected the relative path in the header and below; got:\n%s", joined)
 	}
 	if strings.Contains(joined, abs) {
 		t.Fatalf("did not expect delete header to show absolute path; got:\n%s", joined)
@@ -2938,11 +2940,11 @@ func TestDeleteHeaderShowsFilePath(t *testing.T) {
 	}
 
 	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if !strings.Contains(joined, "delete remove obsolete file") || !strings.Contains(joined, "Deleted internal/tui/obsolete.go") {
-		t.Fatalf("expected delete card to show the reason and path once each; got:\n%s", joined)
-	}
-	if strings.Count(joined, "internal/tui/obsolete.go") != 1 {
-		t.Fatalf("expected deleted path exactly once; got:\n%s", joined)
+	// The paths are the subject of a delete, so they lead the header and the
+	// reason joins the option group beside them.
+	if !strings.Contains(joined, "delete internal/tui/obsolete.go (remove obsolete file)") ||
+		!strings.Contains(joined, "Deleted internal/tui/obsolete.go") {
+		t.Fatalf("expected the path in the header and the per-path outcome below; got:\n%s", joined)
 	}
 }
 
@@ -2996,7 +2998,7 @@ func TestDeleteAlwaysShowsAllPartialResultsAndCannotCollapse(t *testing.T) {
 
 	before := stripANSI(strings.Join(block.Render(120, ""), "\n"))
 	for _, want := range []string{
-		"delete remove obsolete generated files",
+		"delete 3 files (remove obsolete generated files)",
 		"Stopped after an execution error",
 		"Deleted a.go",
 		"Failed b.go — permission denied",
@@ -5065,8 +5067,11 @@ func TestCompactContextCallStaysCollapsedWhileRunning(t *testing.T) {
 			t.Fatalf("expected a running card to stay collapsed, found %q:\n%s", sec, plain)
 		}
 	}
-	if !strings.Contains(plain, "↳ 完成用户的最终汇报 · → 输出最终完成报告") {
-		t.Fatalf("expected the collapsed summary row on a running card, got:\n%s", plain)
+	if !strings.Contains(plain, "compact_context 完成用户的最终汇报") {
+		t.Fatalf("expected the objective on the header index line, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "↳ → 输出最终完成报告") {
+		t.Fatalf("expected the next step on the collapsed body row, got:\n%s", plain)
 	}
 
 	// A restored call with no result still collapses.
@@ -5207,8 +5212,11 @@ func TestCompactContextCallRenderDispatchesStructuredCard(t *testing.T) {
 	if strings.Contains(collapsed, "↳ Completed:") {
 		t.Fatalf("expected the collapsed structured card from Render, got:\n%s", collapsed)
 	}
-	if !strings.Contains(collapsed, "↳ 完成用户的最终汇报") {
-		t.Fatalf("expected the collapsed summary row from Render, got:\n%s", collapsed)
+	if !strings.Contains(collapsed, "compact_context 完成用户的最终汇报") {
+		t.Fatalf("expected the objective on the header from Render, got:\n%s", collapsed)
+	}
+	if !strings.Contains(collapsed, "↳ → 先按输出最终完成报告") {
+		t.Fatalf("expected the next step on the collapsed body row, got:\n%s", collapsed)
 	}
 
 	if !block.ToggleAtWidth(140) || !block.ToolCallDetailExpanded {
@@ -5834,7 +5842,7 @@ func TestCancelSubAgentExpandedShowsStructuredDetails(t *testing.T) {
 	if !strings.Contains(joined, "cancel") {
 		t.Fatalf("expected cancel header to show tool name; got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "reason:") || !strings.Contains(joined, "task superseded") {
+	if !strings.Contains(joined, "↳ Reason:") || !strings.Contains(joined, "task superseded") {
 		t.Fatalf("expected cancel expanded to show reason; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "Stopped") {
@@ -5915,7 +5923,7 @@ func TestNotifySubAgentExpandedShowsStructuredDetails(t *testing.T) {
 	if !strings.Contains(joined, "notify") {
 		t.Fatalf("expected notify header to show tool name; got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "message:") || !strings.Contains(joined, "continue with option B") {
+	if !strings.Contains(joined, "↳ Message:") || !strings.Contains(joined, "continue with option B") {
 		t.Fatalf("expected notify expanded to show message; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "Delivered") {

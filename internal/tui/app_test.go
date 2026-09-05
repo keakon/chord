@@ -5078,7 +5078,7 @@ func TestMessagesToBlocksRestoredFileMutationResultsUseLiveExpandedState(t *test
 			args:     json.RawMessage(`{"paths":["/tmp/obsolete.go"],"reason":"remove obsolete file"}`),
 			content:  "Deleted (1):\n- /tmp/obsolete.go",
 			status:   agent.ToolResultStatusSuccess,
-			want:     []string{"delete remove obsolete file", "Deleted /tmp/obsolete.go"},
+			want:     []string{"delete /tmp/obsolete.go (remove obsolete file)", "Deleted /tmp/obsolete.go"},
 		},
 	}
 
@@ -5194,8 +5194,8 @@ func TestSessionRestoredDeleteToolShowsReasonAndPersistedDuration(t *testing.T) 
 		t.Fatal("expected restored Delete tool block")
 	}
 	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if !strings.Contains(joined, "delete remove obsolete file") {
-		t.Fatalf("expected restored Delete header to show reason; got:\n%s", joined)
+	if !strings.Contains(joined, "delete /tmp/obsolete.go (remove obsolete file)") {
+		t.Fatalf("expected restored Delete header to lead with the path; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "remove obsolete file") {
 		t.Fatalf("expected restored Delete header to show reason; got:\n%s", joined)
