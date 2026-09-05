@@ -274,7 +274,7 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 		return nil, ctx.Err()
 	}
 
-	summaryMode := "model_summary"
+	summaryMode := message.CompactionSummaryModeModelSummary
 	backendName := config.CompactionPresetGeneric
 	modelRef := ""
 	keepAlive := newCompactionKeepAlive(a)
@@ -284,14 +284,14 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 		backendName = backendUsed
 	}
 	if summarizeErr != nil {
-		summaryMode = "structured_fallback"
+		summaryMode = message.CompactionSummaryModeStructuredFallback
 		modelRef = "fallback"
 		input, inputErr := a.buildCompactionInputWithOptions(head, a.ctxMgr.GetMaxTokens(), evidenceItems, recentTail, sessionAnchors)
 		if inputErr == nil {
 			input.EvidenceItems = evidenceItems
 			summaryText = buildStructuredFallbackSummary(pathutil.AbbreviateHome(absHistoryPath), input, summarizeErr, keyFiles, todos, subAgents, backgroundObjects)
 		} else {
-			summaryMode = "truncate_only"
+			summaryMode = message.CompactionSummaryModeTruncateOnly
 			summaryText = buildTruncateOnlySummary(pathutil.AbbreviateHome(absHistoryPath), summarizeErr, keyFiles, todos, subAgents, backgroundObjects)
 		}
 	} else {
@@ -346,6 +346,7 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 		Role:                    "user",
 		Content:                 checkpointContent,
 		IsCompactionSummary:     true,
+		CompactionSummaryMode:   summaryMode,
 		CompactionFileRevisions: keyFileRevisions,
 	}
 

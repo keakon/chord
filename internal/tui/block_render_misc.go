@@ -1,6 +1,10 @@
 package tui
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/keakon/chord/internal/message"
+)
 
 func (b *Block) renderError(width int) []string {
 	style := ErrorCardStyle
@@ -85,6 +89,45 @@ func (b *Block) renderBoundaryMarker(width int) []string {
 	return lines
 }
 
+// compactionSummaryModeLabel names the compaction mode on the card label. The
+// four modes preserve very different amounts of the archived history, and that
+// is exactly what a reader scrolling back needs in order to decide whether the
+// checkpoint can be trusted or the archives have to be re-read: a model-driven
+// checkpoint is built from runtime facts, while a truncate-only one carries no
+// summary at all.
+func compactionSummaryModeLabel(mode string) (string, bool) {
+	switch mode {
+	case message.CompactionSummaryModeModelDriven:
+		return "MODEL-DRIVEN", false
+	case message.CompactionSummaryModeModelSummary:
+		return "AUTO", false
+	case message.CompactionSummaryModeStructuredFallback:
+		return "FALLBACK", true
+	case message.CompactionSummaryModeTruncateOnly:
+		return "TRUNCATED", true
+	}
+	// Unknown or unrecorded (pre-mode sessions whose body no longer carries the
+	// generated sentence): claim nothing rather than guess.
+	return "", false
+}
+
+func renderCompactionSummaryLabel(b *Block) string {
+	label := blockLabelWithID("CONTEXT SUMMARY", b.displayLabelID())
+	mode, degraded := compactionSummaryModeLabel(b.CompactionSummaryMode)
+	switch {
+	case mode == "":
+		return ThinkingLabelStyle.Render(label)
+	case degraded:
+		// A degraded checkpoint (a fallback digest, or no summary at all) is a
+		// warning about the history behind it, so its mode is styled apart
+		// from the badge. The badge's own padding separates the two.
+		return ThinkingLabelStyle.Render(label) + LSPWarnStyle.Render("· "+mode)
+	default:
+		// One badge, so the label does not carry two lots of badge padding.
+		return ThinkingLabelStyle.Render(label + " · " + mode)
+	}
+}
+
 func (b *Block) renderCompactionSummary(width int) []string {
 	style := CompactionSummaryCardStyle
 	// Reserve a column for the conversation rail (foreground-only "│" prepended
@@ -92,7 +135,7 @@ func (b *Block) renderCompactionSummary(width int) []string {
 	boxWidth := max((width-railWidthToReserve(style))-style.GetHorizontalMargins(), 10)
 	innerWidth := max(boxWidth-style.GetHorizontalPadding()-style.GetHorizontalBorderSize(), 10)
 	contentWidth := min(innerWidth, maxProseWidth)
-	label := ThinkingLabelStyle.Render(blockLabelWithID("CONTEXT SUMMARY", b.displayLabelID()))
+	label := renderCompactionSummaryLabel(b)
 	// Compaction summaries are always fully expanded (see Block.Toggle); the
 	// complete raw content including any [Context compressed] archive section
 	// stays visible, so no [space] hints are rendered.

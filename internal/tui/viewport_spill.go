@@ -239,6 +239,7 @@ func preserveMutableBlockState(src, dst *Block) {
 	dst.StartedAt = src.StartedAt
 	dst.SettledAt = src.SettledAt
 	dst.CompactionSummaryRaw = src.CompactionSummaryRaw
+	dst.CompactionSummaryMode = src.CompactionSummaryMode
 }
 
 func (b *Block) estimatedHotBytes() int64 {

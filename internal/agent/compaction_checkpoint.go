@@ -258,9 +258,9 @@ func buildCompactionCheckpointMessage(summary string, historyRefs []string, mode
 	sb.WriteString(message.CompactionCompressedTag)
 	sb.WriteString("\n")
 	switch mode {
-	case "truncate_only":
+	case message.CompactionSummaryModeTruncateOnly:
 		sb.WriteString("Earlier conversation was compacted without a model-generated summary.\n")
-	case "structured_fallback":
+	case message.CompactionSummaryModeStructuredFallback:
 		sb.WriteString("Earlier conversation was compacted using a structured fallback summary after model summarization was weak or unavailable.\n")
 	case compactionSummaryModeModelDriven:
 		sb.WriteString("Earlier conversation was compacted into this model-driven context checkpoint. The checkpoint was built deterministically from runtime facts (current request, todos, subagents, background objects, anchors, and the newest real messages retained below) and the continuation state the model submitted through the compact_context tool; no summarization model was called. The archived history files below remain the authoritative record.\n")

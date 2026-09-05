@@ -37,7 +37,7 @@ const (
 	// compactionSummaryModeModelDriven is the stable summary-mode marker for
 	// model-driven checkpoints (mirrors model_summary / structured_fallback /
 	// truncate_only).
-	compactionSummaryModeModelDriven = "model_driven_checkpoint"
+	compactionSummaryModeModelDriven = message.CompactionSummaryModeModelDriven
 	// modelDrivenLowGainMinTokens and modelDrivenLowGainMinRatio are the fixed
 	// conservative low-gain gates: a reset must save at least this many
 	// estimated tokens and this fraction of the prepared surface. Both must
@@ -692,9 +692,10 @@ func (a *MainAgent) produceModelDrivenDraftAsync(ctx context.Context, bundle mod
 		return modelDrivenSkipDraft(planID, target, reason, modelDrivenSkipReasonLowGain, bundle.currentRequestBatch, &preflight), nil
 	}
 	contextSummaryMsg := message.Message{
-		Role:                "user",
-		Content:             checkpointContent,
-		IsCompactionSummary: true,
+		Role:                  "user",
+		Content:               checkpointContent,
+		IsCompactionSummary:   true,
+		CompactionSummaryMode: compactionSummaryModeModelDriven,
 	}
 
 	newMessages := []message.Message{contextSummaryMsg}

@@ -229,6 +229,11 @@ type Block struct {
 	// TUI can switch between preview and full preserved-context views without
 	// losing the expanded content.
 	CompactionSummaryRaw string
+	// CompactionSummaryMode records how the archived history was preserved
+	// (message.CompactionSummaryMode*), so the card can say whether the
+	// checkpoint is model-driven, model-summarized, a structured fallback or a
+	// bare truncation. Empty for sessions written before the mode was recorded.
+	CompactionSummaryMode string
 	// richMarkdownHL caches lexer detection and rendered snippets for Chord-owned
 	// markdown cards that share assistant fenced-code rendering.
 	richMarkdownHL *codeHighlighter

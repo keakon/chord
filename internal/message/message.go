@@ -267,6 +267,7 @@ type Message struct {
 	LSPReviews                []LSPReview        `json:"lsp_reviews,omitempty"`                 // per-file, per-server last-review snapshots for directly edited files
 	Audit                     *ToolArgsAudit     `json:"audit,omitempty"`                       // tool-call audit metadata when effective args differ after confirmation
 	IsCompactionSummary       bool               `json:"is_compaction_summary,omitempty"`       // first user message after compaction (summary of archived history)
+	CompactionSummaryMode     string             `json:"compaction_summary_mode,omitempty"`     // how the archived history was preserved (see CompactionSummaryMode* constants)
 	CompactionFileRevisions   map[string]string  `json:"compaction_file_revisions,omitempty"`   // key-file revisions captured when this checkpoint was created
 	StopReason                string             `json:"stop_reason,omitempty"`                 // assistant only; e.g. "stop", "end_turn", "max_tokens", "tool_use"
 	Provenance                *MessageProvenance `json:"provenance,omitempty"`                  // optional producer/source metadata for model-compat replay decisions

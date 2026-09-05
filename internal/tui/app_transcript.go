@@ -670,11 +670,12 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 			if userBlock == nil {
 				if msg.IsCompactionSummary {
 					userBlock = &Block{
-						ID:                   *nextID,
-						Type:                 BlockCompactionSummary,
-						CompactionSummaryRaw: content,
-						Content:              content,
-						MsgIndex:             -1,
+						ID:                    *nextID,
+						Type:                  BlockCompactionSummary,
+						CompactionSummaryRaw:  content,
+						CompactionSummaryMode: strings.TrimSpace(msg.CompactionSummaryMode),
+						Content:               content,
+						MsgIndex:              -1,
 					}
 				} else {
 					userBlock = &Block{
