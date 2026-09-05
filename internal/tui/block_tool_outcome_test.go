@@ -289,3 +289,39 @@ func TestGenericToolCardUsesTheSharedShape(t *testing.T) {
 		t.Fatalf("expected a collapsed generic card to hide its argument sections, got:\n%s", collapsed)
 	}
 }
+
+// TestQuestionCardCarriesItsSubjectAndSections pins the question card on the
+// shared shape: the question rides the header, each question block opens with
+// a "↳ Header:" section rather than a "▸" separator (which now means "this
+// card toggles"), and the selection stays visible after the answer arrives.
+func TestQuestionCardCarriesItsSubjectAndSections(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	args := `{"questions":[{"question":"Which branch?","header":"Target branch","options":[{"label":"main","description":"trunk"},{"label":"develop","description":"integration"}]}]}`
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameQuestion,
+		Content:       args,
+		RawArgs:       args,
+		ResultDone:    true,
+		ResultPayload: `[{"header":"Target branch","selected":["main"]}]`,
+		ResultContent: `[{"header":"Target branch","selected":["main"]}]`,
+	}
+
+	plain := stripANSI(strings.Join(block.Render(96, ""), "\n"))
+
+	if !strings.Contains(plain, "question Which branch?") {
+		t.Fatalf("expected the question on the header, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "↳ Target branch:") {
+		t.Fatalf("expected the question header as a section, got:\n%s", plain)
+	}
+	if strings.Contains(plain, "▸") {
+		t.Fatalf("expected no disclosure glyph on a non-toggleable card, got:\n%s", plain)
+	}
+	for _, want := range []string{"✓ 1. main — trunk", "2. develop — integration"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("expected the answered options to stay visible (%q), got:\n%s", want, plain)
+		}
+	}
+}

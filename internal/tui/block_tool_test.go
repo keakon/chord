@@ -4390,7 +4390,7 @@ func TestQuestionCallKeepsArgDiagnosticsOffTheHeader(t *testing.T) {
 	// Nothing is lost: the parameters render in the body and the schema
 	// message — which names the field and the rejected value — renders below.
 	plain := stripANSI(strings.Join(invalidLines, "\n"))
-	if !strings.Contains(plain, "  ▸ H") {
+	if !strings.Contains(plain, "  ↳ H:") {
 		t.Fatalf("expected the question to keep rendering its parameters below the header, got:\n%s", plain)
 	}
 	if !strings.Contains(plain, "↳ Error:") {

@@ -189,6 +189,27 @@ func decodeQuestionAnswers(payload string) (answers []tools.QuestionAnswer, rest
 	return answers, rest, true
 }
 
+// questionCardHeaderSubject names what the card is asking: the first question's
+// text (its header when the text is empty), plus a count when a batch carries
+// more than one.
+func questionCardHeaderSubject(questions []tools.QuestionItem) string {
+	if len(questions) == 0 {
+		return ""
+	}
+	first := strings.TrimSpace(questions[0].Question)
+	if first == "" {
+		first = strings.TrimSpace(questions[0].Header)
+	}
+	subject := toolHeaderProseSummary(strings.ReplaceAll(first, "<br>", "\n"))
+	if subject == "" {
+		return ""
+	}
+	if len(questions) > 1 {
+		subject += fmt.Sprintf(" (+%d more)", len(questions)-1)
+	}
+	return subject
+}
+
 // renderQuestionCall renders a Question tool call showing the question text and options.
 func (b *Block) renderQuestionCall(width int, spinnerFrame string) []string {
 	metrics := newToolCardMetrics(width)
@@ -222,6 +243,11 @@ func (b *Block) renderQuestionCall(width int, spinnerFrame string) []string {
 
 	prefix := b.renderToolPrefix(spinnerFrame)
 	headerLine := renderToolHeaderLine(prefix, b.ToolName)
+	// The question being asked is the subject of the card, so it rides the
+	// header; a batch names the first one and counts the rest.
+	if subject := questionCardHeaderSubject(questions); subject != "" {
+		headerLine = appendToolHeaderSummary(headerLine, subject, "", "", cardWidth-4)
+	}
 	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent, b.toolExecutionIsRunning())
 
 	var result []string
@@ -231,7 +257,9 @@ func (b *Block) renderQuestionCall(width int, spinnerFrame string) []string {
 		answer, hasAnswer := questionAnswerForRender(answers, i, q.Header)
 		selectedOptions, customAnswers := splitQuestionSelections(q, answer)
 		if q.Header != "" {
-			result = append(result, QuestionSeparatorStyle.Render("  ▸ "+sanitizeToolDisplayText(q.Header)))
+			// "↳ Label:" like every other card section: ▸ now means "this card
+			// toggles", so it cannot double as a section separator.
+			result = append(result, QuestionSeparatorStyle.Render("  ↳ "+sanitizeToolDisplayText(q.Header)+":"))
 		}
 		if q.Question != "" {
 			qText := sanitizeToolDisplayText(strings.ReplaceAll(q.Question, "<br>", "\n"))
@@ -246,8 +274,9 @@ func (b *Block) renderQuestionCall(width int, spinnerFrame string) []string {
 			if q.Multiple {
 				mode = "Multi-select"
 			}
+			// The numbered list below is self-evidently the options, so the
+			// mode carries the only label this section needs.
 			result = append(result, DimStyle.Render("    Mode: "+mode))
-			result = append(result, DimStyle.Render("    Options:"))
 			for i, opt := range q.Options {
 				displayLabel := sanitizeToolDisplayText(opt.Label)
 				_, isSelected := selectedOptions[displayLabel]
