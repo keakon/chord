@@ -58,6 +58,11 @@ func applyBlockStyles(t Theme) {
 	ThinkingLabelStyle = LabelStyle.
 		Background(lipgloss.Color(t.ThinkingLabelBg)).
 		Foreground(lipgloss.Color(t.LabelBadgeFg))
+	// The error card carries the same badge as every other card; it borrows the
+	// error rail colour so the badge and the rail beside it read as one signal.
+	ErrorLabelStyle = LabelStyle.
+		Background(lipgloss.Color(t.RailErrorFg)).
+		Foreground(lipgloss.Color(t.LabelBadgeFg))
 	// Section labels sit inside the checkpoint card, so they are plain emphasis
 	// rather than a badge: a second badge style would read as a nested card.
 	CompactionSectionLabelStyle = lipgloss.NewStyle().

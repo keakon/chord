@@ -17,6 +17,10 @@ import (
 // share this chrome so the card looks identical before and after a restore.
 const streamContinueCardTitle = "REPLY RESUMED"
 
+// infoCardTitle names the card built from a plain runtime info event, which
+// carries no title of its own.
+const infoCardTitle = "NOTICE"
+
 func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEffects) {
 	var effects agentEventEffects
 	switch evt := event.(type) {
@@ -110,7 +114,7 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			return true, effects
 		}
 		m.finalizeAgentStream(evt.AgentID)
-		block := &Block{ID: m.nextBlockID, Type: BlockStatus, Content: evt.Message, AgentID: evt.AgentID}
+		block := &Block{ID: m.nextBlockID, Type: BlockStatus, StatusTitle: infoCardTitle, Content: evt.Message, AgentID: evt.AgentID}
 		m.nextBlockID++
 		m.appendViewportBlock(block)
 		m.markBlockSettled(block)

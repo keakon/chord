@@ -50,6 +50,7 @@ var (
 	AssistantLabelStyle          lipgloss.Style
 	ToolLabelStyle               lipgloss.Style
 	ThinkingLabelStyle           lipgloss.Style
+	ErrorLabelStyle              lipgloss.Style
 	CompactionSectionLabelStyle  lipgloss.Style
 	ThinkingTranslationStyle     lipgloss.Style
 	ThinkingTranslationRuleStyle lipgloss.Style

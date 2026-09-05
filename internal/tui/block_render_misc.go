@@ -8,30 +8,35 @@ import (
 
 func (b *Block) renderError(width int) []string {
 	style := ErrorCardStyle
-	// v2: Width() sets border-box (excl margin).
-	boxWidth := max(width-style.GetHorizontalMargins(), 10)
+	// Reserve a column for the conversation rail (foreground-only "│" prepended
+	// outside the card width); otherwise a full-width card overflows the
+	// terminal. v2: Width() sets border-box (excl margin).
+	boxWidth := max((width-railWidthToReserve(style))-style.GetHorizontalMargins(), 10)
 	innerWidth := max(boxWidth-style.GetHorizontalPadding()-style.GetHorizontalBorderSize(), 10)
-	lines := []string{ErrorStyle.Render(blockLabelWithID("ERROR", b.displayLabelID())), ""}
-	wrapped := wrapText(sanitizeDisplayText(b.Content), min(innerWidth, maxProseWidth))
-	for i, line := range wrapped {
-		if i == 0 {
-			lines = append(lines, ErrorStyle.Render("✗ "+line))
-		} else {
-			lines = append(lines, ErrorStyle.Render("  "+line))
-		}
-	}
+	contentWidth := min(innerWidth-2, maxProseWidth)
+	// Same shape as the status and checkpoint cards: badge, blank line, body
+	// indented by two. The badge, the error background and the error rail
+	// already say this is a failure, so the body carries no extra glyph.
+	lines := []string{ErrorLabelStyle.Render(blockLabelWithID("ERROR", b.displayLabelID())), ""}
+	wrapped := wrapText(sanitizeDisplayText(b.Content), contentWidth)
 	if len(wrapped) == 0 {
-		lines = append(lines, ErrorStyle.Render("✗ unknown error"))
+		wrapped = []string{"unknown error"}
+	}
+	for _, line := range wrapped {
+		lines = append(lines, ErrorStyle.Render("  "+line))
 	}
 	if b.errorHint != "" {
 		// The error panel holds the structured details (provider, model, masked
 		// key, status code, retry history) this card intentionally omits.
-		lines = append(lines, "", DimStyle.Render(sanitizeDisplayText(b.errorHint)))
+		lines = append(lines, "")
+		for _, line := range wrapText(sanitizeDisplayText(b.errorHint), contentWidth) {
+			lines = append(lines, DimStyle.Render("  "+line))
+		}
 	}
 
 	cardBg := currentTheme.ErrorCardBg
 	lines = preserveCardBg(lines, cardBg)
-	return renderPrewrappedCard(style, innerWidth, lines, cardBg, "")
+	return renderPrewrappedCard(style, innerWidth, lines, cardBg, railANSISeq("error", b.Focused))
 }
 
 func (b *Block) renderStatus(width int) []string {
@@ -45,12 +50,12 @@ func (b *Block) renderStatus(width int) []string {
 	innerWidth := max(boxWidth-style.GetHorizontalPadding()-style.GetHorizontalBorderSize(), 10)
 	contentWidth := min(innerWidth-2, maxProseWidth)
 
-	title := sanitizeDisplayText(b.StatusTitle)
+	title := strings.TrimSpace(sanitizeDisplayText(b.StatusTitle))
 	if title == "" {
-		// Fallback: extract title from first line of Content (session restore).
-		if idx := strings.Index(b.Content, "\n"); idx >= 0 {
-			title = strings.TrimSpace(sanitizeDisplayText(b.Content[:idx]))
-		}
+		// An untitled card used to borrow its first body line as the badge,
+		// which both duplicated that line and left a blank badge whenever the
+		// body was a single line. Name it instead.
+		title = infoCardTitle
 	}
 	label := ThinkingLabelStyle.Render(blockLabelWithID(title, b.displayLabelID()))
 
@@ -134,7 +139,7 @@ func (b *Block) renderCompactionSummary(width int) []string {
 	// outside the card width); otherwise a full-width card overflows the terminal.
 	boxWidth := max((width-railWidthToReserve(style))-style.GetHorizontalMargins(), 10)
 	innerWidth := max(boxWidth-style.GetHorizontalPadding()-style.GetHorizontalBorderSize(), 10)
-	contentWidth := min(innerWidth, maxProseWidth)
+	contentWidth := min(innerWidth-2, maxProseWidth)
 	label := renderCompactionSummaryLabel(b)
 	// Compaction summaries are always fully expanded (see Block.Toggle); the
 	// complete raw content including any [Context compressed] archive section
@@ -163,7 +168,9 @@ func (b *Block) renderCompactionSummary(width int) []string {
 	}
 	lines := make([]string, 0, len(bodyLines)+2)
 	lines = append(lines, label, "")
-	lines = append(lines, bodyLines...)
+	for _, line := range bodyLines {
+		lines = append(lines, "  "+line)
+	}
 	cardBg := currentTheme.CompactionSummaryBg
 	lines = preserveCardBg(lines, cardBg)
 	return renderPrewrappedCard(style, innerWidth, lines, cardBg, railANSISeq("assistant", b.Focused))
