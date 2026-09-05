@@ -2308,11 +2308,13 @@ func TestToolCardKeepsModelArgumentsWhenEffectiveArgumentsDiffer(t *testing.T) {
 	if block.RawArgs != modelArgs {
 		t.Fatalf("RawArgs = %q, want model args %q", block.RawArgs, modelArgs)
 	}
-	header := formatToolHeaderParams(block.ToolName, block.RawArgs)
+	keys, vals := parseToolArgs(block.RawArgs)
+	mainPart, grayPart, _ := genericToolHeaderParts(keys, vals)
+	header := mainPart + " " + grayPart
 	if strings.Contains(header, "runtime-secret") {
 		t.Fatalf("tool card exposed effective argument: %q", header)
 	}
-	if !strings.Contains(header, "query=cats") {
+	if !strings.Contains(header, "cats") {
 		t.Fatalf("tool card omitted model argument: %q", header)
 	}
 }

@@ -255,3 +255,37 @@ func TestShellCardKeepsArgumentsOffTheBody(t *testing.T) {
 		t.Fatalf("expected the workdir under the command block, got:\n%s", plain)
 	}
 }
+
+// TestGenericToolCardUsesTheSharedShape pins the rendering half of the generic
+// rule: a tool with no dedicated header entry (here an MCP tool) puts its
+// subject and short options on the header, keeps long or structured arguments
+// in labelled body sections, and labels its result so it does not read as a
+// continuation of the last section.
+func TestGenericToolCardUsesTheSharedShape(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	args := `{"repo":"keakon/chord","title":"unify the cards","body":"first line\nsecond line","labels":["ui","tui"]}`
+	block := outcomeCardFixture("mcp__github__create_issue", args, "issue #42 created", "")
+	block.ToolCallDetailExpanded = true
+
+	plain := stripANSI(strings.Join(block.Render(96, ""), "\n"))
+
+	if !strings.Contains(plain, "mcp__github__create_issue keakon/chord (title=unify the cards)") {
+		t.Fatalf("expected subject and options on the header, got:\n%s", plain)
+	}
+	for _, want := range []string{"↳ Body:", "second line", "↳ Labels:", "• ui", "• tui", "↳ Result:"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("expected %q in the body, got:\n%s", want, plain)
+		}
+	}
+	// The header line never carries a raw newline from a multi-line argument.
+	if strings.Contains(strings.SplitN(plain, "\n", 5)[3], "first line") {
+		t.Fatalf("expected the multi-line argument to stay off the header, got:\n%s", plain)
+	}
+
+	block.ToolCallDetailExpanded = false
+	block.InvalidateCache()
+	collapsed := stripANSI(strings.Join(block.Render(96, ""), "\n"))
+	if strings.Contains(collapsed, "↳ Body:") {
+		t.Fatalf("expected a collapsed generic card to hide its argument sections, got:\n%s", collapsed)
+	}
+}

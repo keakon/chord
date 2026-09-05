@@ -58,10 +58,21 @@ func TestNormalizeCodeFenceLanguage(t *testing.T) {
 	}
 }
 
-func TestGenericToolParamSummaryShowsValues(t *testing.T) {
+func TestGenericToolHeaderPartsShapeUnknownTools(t *testing.T) {
+	// An MCP tool has no dedicated header entry, so the generic rule shapes
+	// it: the conventional subject key loses its label and leads, the other
+	// short scalars keep theirs in the option group, and structured values
+	// drop to the body instead of being flattened onto the header.
 	keys, vals := parseToolArgs(`{"numResults":8,"query":"file path typo suggestion ranking","maxToken":4096,"tokenCount":12,"temperature":0.7,"filters":{"language":"go"},"urls":["a","b"]}`)
-	if got := formatToolHeaderParamsWithParsed("mcp_exa_web_search_exa", keys, vals); got != `numResults=8 · query=file path typo suggestion ranking · maxToken=4096 · tokenCount=12 · temperature=0.7 · filters={1 fields} · urls=[2 items]` {
-		t.Fatalf("summary = %q", got)
+	mainPart, grayPart, bodyKeys := genericToolHeaderParts(keys, vals)
+	if mainPart != "file path typo suggestion ranking" {
+		t.Fatalf("mainPart = %q", mainPart)
+	}
+	if grayPart != "(numResults=8, maxToken=4096, tokenCount=12, temperature=0.7)" {
+		t.Fatalf("grayPart = %q", grayPart)
+	}
+	if want := []string{"filters", "urls"}; !slices.Equal(bodyKeys, want) {
+		t.Fatalf("bodyKeys = %v, want %v", bodyKeys, want)
 	}
 }
 
@@ -99,13 +110,17 @@ func TestParseToolArgsLastHiddenDuplicateRemovesEarlierValue(t *testing.T) {
 	}
 }
 
-func TestGenericToolParamSummaryShowsModelArguments(t *testing.T) {
+func TestGenericToolHeaderPartsShowModelArguments(t *testing.T) {
 	keys, vals := parseToolArgs(`{"query":"search","apiKey":"model-supplied-value","filters":{"language":"go"},"urls":["a","b"]}`)
-	got := formatToolHeaderParamsWithParsed("mcp_any_tool", keys, vals)
-	for _, want := range []string{"query=search", "apiKey=model-supplied-value", "filters={1 fields}", "urls=[2 items]"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("summary = %q, want %q", got, want)
-		}
+	mainPart, grayPart, bodyKeys := genericToolHeaderParts(keys, vals)
+	if mainPart != "search" {
+		t.Fatalf("mainPart = %q", mainPart)
+	}
+	if !strings.Contains(grayPart, "apiKey=model-supplied-value") {
+		t.Fatalf("grayPart = %q", grayPart)
+	}
+	if want := []string{"filters", "urls"}; !slices.Equal(bodyKeys, want) {
+		t.Fatalf("bodyKeys = %v, want %v", bodyKeys, want)
 	}
 }
 
@@ -138,11 +153,17 @@ func TestGenericToolParamSummarySanitizesParameterNames(t *testing.T) {
 	}
 }
 
-func TestGenericToolParamSummaryTruncatesLongStrings(t *testing.T) {
-	keys, vals := parseToolArgs(`{"query":"abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"}`)
-	got := formatToolHeaderParamsWithParsed("mcp_any_tool", keys, vals)
-	if !strings.HasSuffix(got, "...") {
-		t.Fatalf("summary = %q, want truncated value", got)
+func TestGenericToolHeaderKeepsLongOptionsOffTheHeader(t *testing.T) {
+	// A long value under a non-subject key is content, not an option: it drops
+	// to the body rather than stretching the header line.
+	long := strings.Repeat("abcdefghij", 13)
+	keys, vals := parseToolArgs(fmt.Sprintf(`{"query":"search","note":%q}`, long))
+	mainPart, grayPart, bodyKeys := genericToolHeaderParts(keys, vals)
+	if mainPart != "search" || grayPart != "" {
+		t.Fatalf("mainPart = %q grayPart = %q", mainPart, grayPart)
+	}
+	if want := []string{"note"}; !slices.Equal(bodyKeys, want) {
+		t.Fatalf("bodyKeys = %v, want %v", bodyKeys, want)
 	}
 }
 
@@ -3109,8 +3130,9 @@ func TestCollapsedGenericToolDeduplicatesMatchingParamAndResultPreview(t *testin
 	}
 
 	joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
-	if got := strings.Count(joined, "command: [Image #1]"); got != 1 {
-		t.Fatalf("expected collapsed preview line to appear once, got %d\n%s", got, joined)
+	// The first argument is the card's subject, so it rides the header.
+	if !strings.Contains(joined, "Task [Image #1]") {
+		t.Fatalf("expected the subject on the header, got:\n%s", joined)
 	}
 	if strings.Count(joined, "[Image #1]") != 1 {
 		t.Fatalf("expected duplicated result first line to be suppressed, got:\n%s", joined)

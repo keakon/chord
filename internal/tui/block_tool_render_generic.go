@@ -603,6 +603,38 @@ func (b *Block) renderCompactContextCall(width int, spinnerFrame string) []strin
 	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
 
+// appendGenericToolArgSections renders the arguments a generic card could not
+// fit on its header: each one becomes a "↳ Label:" section, with JSON arrays
+// broken into bullets the way the dedicated cards render their lists.
+func appendGenericToolArgSections(result *[]string, keys []string, vals map[string]string, contentWidth int) {
+	for _, k := range keys {
+		value := strings.TrimSpace(vals[k])
+		if value == "" {
+			continue
+		}
+		label := toolArgSectionLabel(k)
+		if label == "" {
+			continue
+		}
+		*result = append(*result, ToolResultExpandedStyle.Render("  ↳ "+label+":"))
+		if items, isList := genericToolArgList(value); isList {
+			for _, item := range items {
+				for i, line := range wrapText(sanitizeToolDisplayText(item), contentWidth-2) {
+					bullet := "  "
+					if i == 0 {
+						bullet = "• "
+					}
+					*result = append(*result, DimStyle.Render("    "+bullet+line))
+				}
+			}
+			continue
+		}
+		for _, line := range wrapText(sanitizeToolDisplayText(value), contentWidth) {
+			*result = append(*result, DimStyle.Render("    "+line))
+		}
+	}
+}
+
 // appendCompactContextSections writes a sequence of labelled sections into
 // the card body: empty sections are skipped, prose sections become a single
 // wrapped paragraph under the header, list sections become "•" bullets with
@@ -903,6 +935,16 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 	if b.ToolName == tools.NameShell && !expanded && collapsedOK {
 		mainPart, grayPart = collapsedMain, collapsedGray
 	}
+	// Tools with no dedicated header entry (artifact/result/task helpers, and
+	// any MCP tool) get the shared shape from the generic rule instead of a
+	// body full of "key: value" lines.
+	var genericBodyKeys []string
+	genericArgs := false
+	if mainPart == "" && grayPart == "" && paramSummary == "" && len(keys) > 0 && len(b.toolArgDiagnostics()) == 0 {
+		mainPart, grayPart, genericBodyKeys = genericToolHeaderParts(keys, vals)
+		genericArgs = mainPart != "" || grayPart != "" || len(genericBodyKeys) > 0
+	}
+
 	result := make([]string, 0, 16)
 	prefix := b.renderToolPrefixForExpanded(spinnerFrame, expanded)
 	// The marker states what the toggle can do, not how much text is hidden:
@@ -924,19 +966,17 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 		} else {
 			appendBashCollapsedSummary(&result, b, vals, contentWidth, !collapsedOK)
 		}
-	} else if mainPart == "" && paramSummary == "" && len(keys) > 0 && len(b.toolArgDiagnostics()) == 0 {
-		if expanded {
-			for _, k := range keys {
-				line := fmt.Sprintf("%s: %s", k, vals[k])
-				for _, w := range wrapIndentedText(line, contentWidth) {
-					result = append(result, DimStyle.Render("    "+w))
-				}
-			}
-		} else {
-			k0 := keys[0]
-			line := fmt.Sprintf("%s: %s", k0, vals[k0])
-			for _, w := range wrapIndentedText(line, contentWidth) {
-				result = append(result, DimStyle.Render("    "+w))
+	} else if genericArgs {
+		// The header carries the subject and the short options; only the long
+		// or structured arguments are left, and only an expanded card shows
+		// them.
+		if expanded && len(genericBodyKeys) > 0 {
+			appendGenericToolArgSections(&result, genericBodyKeys, vals, contentWidth)
+			// The result body below is unlabelled on generic cards; with
+			// argument sections above it, it needs its own header or it reads
+			// as part of the last section.
+			if strings.TrimSpace(toolDisplayResultContent(b)) != "" && toolOutcomeKindOf(b) == toolOutcomeNone {
+				result = append(result, ToolResultExpandedStyle.Render("  ↳ Result:"))
 			}
 		}
 	} else if mainPart == "" && paramSummary == "" && len(keys) > 0 {

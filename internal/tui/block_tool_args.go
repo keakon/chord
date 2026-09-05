@@ -736,10 +736,12 @@ func formatToolHeaderParamsWithParsed(toolName string, keys []string, vals map[s
 		}
 		return name
 	default:
-		if !strings.HasPrefix(toolName, "mcp_") {
-			return ""
-		}
-		return genericToolParamSummary(keys, vals)
+		// Tools without an entry here - including MCP tools, whose names the
+		// TUI never sees ahead of time - are shaped by genericToolHeaderParts
+		// instead: a subject, an option group, and the rest in the body. The
+		// flat "k=v · k=v" summary this used to build for them put whole
+		// argument values, newlines and all, on the header line.
+		return ""
 	}
 }
 
@@ -754,19 +756,121 @@ func genericToolParamSummary(keys []string, vals map[string]string) string {
 	return strings.Join(parts, " · ")
 }
 
+// genericToolHeaderOptionMaxRunes bounds what may join the header's option
+// group. The subject itself is exempt: a card with no subject reads worse than
+// one whose subject the header truncates.
+const genericToolHeaderOptionMaxRunes = 48
+
+// genericToolHeaderParts gives a tool with no dedicated header entry the same
+// shape as the ones that have one: the first header-sized scalar becomes the
+// subject, the remaining header-sized scalars become the "(k=v, …)" option
+// group, and long or structured values are left for the body. New tools (and
+// MCP tools, whose names the TUI never sees ahead of time) therefore get a
+// readable card without a per-tool table entry.
+func genericToolHeaderParts(keys []string, vals map[string]string) (mainPart, grayPart string, bodyKeys []string) {
+	subjectKey := ""
+	for _, k := range keys {
+		if genericToolSubjectKeys[k] && isGenericToolHeaderScalar(strings.TrimSpace(vals[k])) && strings.TrimSpace(vals[k]) != "" {
+			subjectKey = k
+			break
+		}
+	}
+	var opts []string
+	for _, k := range keys {
+		value := strings.TrimSpace(vals[k])
+		if value == "" {
+			continue
+		}
+		if !isGenericToolHeaderScalar(value) {
+			bodyKeys = append(bodyKeys, k)
+			continue
+		}
+		if k == subjectKey {
+			// The subject drops its key and takes any length: the header
+			// truncates it if it does not fit, and a card with no subject
+			// reads worse than one with a shortened one.
+			mainPart = sanitizeToolDisplayText(value)
+			continue
+		}
+		if utf8.RuneCountInString(value) > genericToolHeaderOptionMaxRunes {
+			bodyKeys = append(bodyKeys, k)
+			continue
+		}
+		opts = append(opts, sanitizeToolDisplayText(k)+"="+sanitizeToolDisplayText(value))
+	}
+	if len(opts) > 0 {
+		grayPart = "(" + strings.Join(opts, ", ") + ")"
+	}
+	return mainPart, grayPart, bodyKeys
+}
+
+// genericToolSubjectKeys are the conventional names for "the thing this call
+// acts on". Only these lose their key on the header line: for an unknown tool
+// a bare value under any other name is ambiguous, so it keeps its "k=v" label
+// in the option group.
+var genericToolSubjectKeys = map[string]bool{
+	"path": true, "paths": true, "file": true, "file_path": true, "filename": true,
+	"url": true, "uri": true, "name": true, "id": true, "key": true, "ref": true,
+	"command": true, "cmd": true, "query": true, "pattern": true, "target": true,
+	"title": true, "repo": true, "message": true, "text": true, "prompt": true,
+}
+
+// isGenericToolHeaderScalar reports whether a value can sit on a header line at
+// all: one line, and not a JSON array or object. "[Image #1]" is a string, not
+// a list, so the check parses rather than sniffing the first byte.
+func isGenericToolHeaderScalar(value string) bool {
+	if strings.ContainsAny(value, "\n\r") {
+		return false
+	}
+	_, isList := genericToolArgList(value)
+	return !isList
+}
+
+// genericToolArgList reports whether a raw argument value is a JSON array or
+// object, and returns its items rendered for display.
+func genericToolArgList(value string) ([]string, bool) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" || (trimmed[0] != '[' && trimmed[0] != '{') {
+		return nil, false
+	}
+	var parsed any
+	if json.Unmarshal([]byte(trimmed), &parsed) != nil {
+		return nil, false
+	}
+	switch parsed.(type) {
+	case []any, map[string]any:
+		return paramStringList(trimmed), true
+	}
+	return nil, false
+}
+
+// toolArgSectionLabel turns an argument key into the section header the body
+// uses ("state_files" -> "State files"), matching the labels the dedicated
+// cards write by hand.
+func toolArgSectionLabel(key string) string {
+	label := strings.TrimSpace(strings.ReplaceAll(key, "_", " "))
+	if label == "" {
+		return ""
+	}
+	r, size := utf8.DecodeRuneInString(label)
+	return string(unicode.ToUpper(r)) + label[size:]
+}
+
 func genericToolParamValue(value string) string {
 	var parsed any
 	if json.Unmarshal([]byte(value), &parsed) == nil {
 		switch v := parsed.(type) {
 		case string:
-			return truncateToolParamValue(sanitizeToolDisplayText(v))
+			// Header lines are single-line: fold a multi-line value to its
+			// first line rather than letting the newline break the layout.
+			return truncateToolParamValue(firstDisplayLine(sanitizeToolDisplayText(v)))
 		case []any:
 			return fmt.Sprintf("[%d items]", len(v))
 		case map[string]any:
 			return fmt.Sprintf("{%d fields}", len(v))
 		}
 	}
-	return truncateToolParamValue(value)
+	return truncateToolParamValue(firstDisplayLine(sanitizeToolDisplayText(value)))
 }
 
 func formatToolHeaderParams(toolName, argsJSON string) string {
