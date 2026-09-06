@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -6569,4 +6571,69 @@ func TestFilterCompactionEvidenceForArchivalKeepsStatedConstraints(t *testing.T)
 	if len(kept) != 2 || kinds[0] != evidenceUserCorrection || kinds[1] != evidenceStatedConstraint {
 		t.Fatalf("kept kinds = %v, want the user correction and the stated constraint preserved", kinds)
 	}
+}
+
+// A checkpoint must not grow without bound. The runtime TODO snapshot and the
+// archived history map are the only parts that would otherwise gain content
+// every compaction, and that growth feeds back into the model-driven low-gain
+// gate, which compares projected against current size.
+func TestCheckpointGrowingSectionsAreBounded(t *testing.T) {
+	todos := make([]tools.TodoItem, 0, 40)
+	for i := range 40 {
+		status := "completed"
+		if i >= 38 {
+			status = "pending"
+		}
+		todos = append(todos, tools.TodoItem{
+			ID:      fmt.Sprintf("t%d", i),
+			Status:  status,
+			Content: strings.Repeat("todo detail ", 40),
+		})
+	}
+	kept, omitted := boundedTodoSnapshotItems(todos)
+	if len(kept) != compactTodoSnapshotMaxItems || omitted != len(todos)-compactTodoSnapshotMaxItems {
+		t.Fatalf("kept=%d omitted=%d, want %d kept", len(kept), omitted, compactTodoSnapshotMaxItems)
+	}
+	for _, want := range []string{"t38", "t39"} {
+		if !slices.ContainsFunc(kept, func(item tools.TodoItem) bool { return item.ID == want }) {
+			t.Fatalf("unfinished todo %s must survive the cap, kept=%v", want, kept)
+		}
+	}
+	if !slices.IsSortedFunc(kept, func(a, b tools.TodoItem) int {
+		return mustTodoIndex(t, a.ID) - mustTodoIndex(t, b.ID)
+	}) {
+		t.Fatalf("kept todos must stay in their original order, got %v", kept)
+	}
+	summary := "## Todo State\n- see snapshot\n\n## Next Step\n- continue\n"
+	rendered := ensureCompactionTodoSnapshot(summary, todos)
+	if !strings.Contains(rendered, "earlier completed/cancelled todos omitted") {
+		t.Fatalf("snapshot must disclose the omission, got %q", rendered)
+	}
+	if strings.Contains(rendered, strings.Repeat("todo detail ", 40)) {
+		t.Fatal("snapshot must truncate long todo content")
+	}
+
+	refs := make([]string, 0, 30)
+	for i := 1; i <= 30; i++ {
+		refs = append(refs, fmt.Sprintf("/tmp/session/history-%d.md", i))
+	}
+	lines := formatHistoryMapLines(refs, nil)
+	if len(lines) != compactHistoryMapMaxEntries+1 {
+		t.Fatalf("history map lines = %d, want %d entries plus one omission note", len(lines), compactHistoryMapMaxEntries)
+	}
+	if !strings.Contains(lines[0], "earlier archives omitted") {
+		t.Fatalf("history map must disclose the omission, got %q", lines[0])
+	}
+	if !strings.Contains(lines[len(lines)-1], "history-30.md") {
+		t.Fatalf("history map must keep the newest archive, got %q", lines[len(lines)-1])
+	}
+}
+
+func mustTodoIndex(t *testing.T, id string) int {
+	t.Helper()
+	n, err := strconv.Atoi(strings.TrimPrefix(id, "t"))
+	if err != nil {
+		t.Fatalf("bad todo id %q: %v", id, err)
+	}
+	return n
 }

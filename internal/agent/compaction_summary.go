@@ -1051,13 +1051,17 @@ func ensureCompactionTodoSnapshot(summary string, todos []tools.TodoItem) string
 	var snapshot strings.Builder
 	snapshot.WriteString("### Runtime TODO snapshot\n")
 	snapshot.WriteString("- Complete pre-compaction runtime state; classify against the latest user request and reconcile with ## Progress above before acting:\n")
-	for _, todo := range todos {
-		content := escapeTodoContentLine(todo.Content)
+	kept, omitted := boundedTodoSnapshotItems(todos)
+	for _, todo := range kept {
+		content := escapeTodoContentLine(compactTextSnippet(todo.Content, compactTodoSnapshotItemChars))
 		fmt.Fprintf(&snapshot, "  - [%s] %s: %s", todo.Status, todo.ID, content)
 		if activeForm := strings.TrimSpace(todo.ActiveForm); activeForm != "" {
-			fmt.Fprintf(&snapshot, " | active: %s", escapeTodoContentLine(activeForm))
+			fmt.Fprintf(&snapshot, " | active: %s", escapeTodoContentLine(compactTextSnippet(activeForm, compactTodoSnapshotItemChars)))
 		}
 		snapshot.WriteByte('\n')
+	}
+	if omitted > 0 {
+		fmt.Fprintf(&snapshot, "  - (%d earlier completed/cancelled todos omitted; the archived history holds them)\n", omitted)
 	}
 	snapshotText := strings.TrimRight(snapshot.String(), "\n")
 	tail := strings.TrimLeft(summary[sectionEnd:], "\n")
@@ -1066,6 +1070,54 @@ func ensureCompactionTodoSnapshot(summary string, todos []tools.TodoItem) string
 		return out
 	}
 	return out + "\n\n" + tail
+}
+
+// boundedTodoSnapshotItems caps the snapshot while preferring the items that
+// still describe outstanding work. Unfinished todos are what a continuation
+// acts on, so they claim the budget first, in list order so the ones nearest
+// the current position survive; finished ones backfill any remaining room,
+// newest first. The cap binds unconditionally — a list that is all unfinished
+// is exactly the case where an unbounded section would keep growing.
+func boundedTodoSnapshotItems(todos []tools.TodoItem) ([]tools.TodoItem, int) {
+	if len(todos) <= compactTodoSnapshotMaxItems {
+		return todos, 0
+	}
+	// Marked by position, not by ID: todo IDs carry no uniqueness guarantee,
+	// and the snapshot has to come back out in the list's original order.
+	keep := make([]bool, len(todos))
+	kept := 0
+	for i, todo := range todos {
+		if kept >= compactTodoSnapshotMaxItems {
+			break
+		}
+		if !isFinishedTodoStatus(todo.Status) {
+			keep[i] = true
+			kept++
+		}
+	}
+	// Backfill with the newest finished todos: they carry the most recent
+	// progress, which is what a reader reconciles against ## Progress.
+	for i := len(todos) - 1; i >= 0 && kept < compactTodoSnapshotMaxItems; i-- {
+		if !keep[i] && isFinishedTodoStatus(todos[i].Status) {
+			keep[i] = true
+			kept++
+		}
+	}
+	out := make([]tools.TodoItem, 0, kept)
+	for i, todo := range todos {
+		if keep[i] {
+			out = append(out, todo)
+		}
+	}
+	return out, len(todos) - len(out)
+}
+
+func isFinishedTodoStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case tools.TodoStatusCompleted, tools.TodoStatusCancelled:
+		return true
+	}
+	return false
 }
 
 func subAgentStateNeedsPromptContext(state string) bool {

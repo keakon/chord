@@ -99,7 +99,7 @@ func (TodoWriteTool) Parameters() map[string]any {
 						"status": map[string]any{
 							"type":        "string",
 							"description": "Task status",
-							"enum":        []string{"pending", "in_progress", "completed", "cancelled"},
+							"enum":        []string{TodoStatusPending, TodoStatusInProgress, TodoStatusCompleted, TodoStatusCancelled},
 						},
 						"active_form": map[string]any{
 							"type":        "string",
@@ -117,7 +117,22 @@ func (TodoWriteTool) Parameters() map[string]any {
 
 func (TodoWriteTool) IsReadOnly() bool { return false }
 
-var validStatuses = map[string]bool{"pending": true, "in_progress": true, "completed": true, "cancelled": true}
+// Todo item statuses. This is the whole accepted set: the tool publishes it in
+// its schema and rejects anything else on input, so readers elsewhere compare
+// against these rather than respelling them.
+const (
+	TodoStatusPending    = "pending"
+	TodoStatusInProgress = "in_progress"
+	TodoStatusCompleted  = "completed"
+	TodoStatusCancelled  = "cancelled"
+)
+
+var validStatuses = map[string]bool{
+	TodoStatusPending:    true,
+	TodoStatusInProgress: true,
+	TodoStatusCompleted:  true,
+	TodoStatusCancelled:  true,
+}
 
 func (t *TodoWriteTool) allowMultipleInProgressTodos() bool {
 	policy, ok := t.store.(MultiInProgressTodoPolicy)
@@ -134,7 +149,7 @@ func (t *TodoWriteTool) validateInProgressItems(todos []TodoItem, inProgress int
 
 	activeForms := make(map[string]string, inProgress)
 	for i, item := range todos {
-		if item.Status != "in_progress" {
+		if item.Status != TodoStatusInProgress {
 			continue
 		}
 		activeForm := strings.TrimSpace(item.ActiveForm)
@@ -199,7 +214,7 @@ func (t *TodoWriteTool) ParseTodos(raw json.RawMessage) ([]TodoItem, error) {
 		if !validStatuses[item.Status] {
 			return nil, fmt.Errorf("todos[%d]: invalid status %q (must be pending, in_progress, completed, or cancelled)", i, item.Status)
 		}
-		if item.Status == "in_progress" {
+		if item.Status == TodoStatusInProgress {
 			inProgress++
 		}
 	}
@@ -216,14 +231,14 @@ func RenderTodoMarkdown(todos []TodoItem) string {
 	for _, item := range todos {
 		var check string
 		switch item.Status {
-		case "completed":
+		case TodoStatusCompleted:
 			check = "x"
-		case "cancelled":
+		case TodoStatusCancelled:
 			check = "-"
 		default: // pending, in_progress
 			check = " "
 		}
-		if item.Status == "in_progress" {
+		if item.Status == TodoStatusInProgress {
 			fmt.Fprintf(&sb, "- [%s] **%s. %s**\n", check, item.ID, item.Content)
 			if af := strings.TrimSpace(item.ActiveForm); af != "" {
 				fmt.Fprintf(&sb, "  - active: %s\n", af)

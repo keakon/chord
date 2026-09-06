@@ -50,6 +50,18 @@ const (
 	// checkpoint retention may keep (a dangling interrupted assistant reply is
 	// kept in addition, at most one).
 	compactRetainRecentUserMessages = 4
+
+	// compactTodoSnapshotMaxItems and compactTodoSnapshotItemChars bound the
+	// runtime TODO snapshot, and compactHistoryMapMaxEntries bounds the
+	// archived history map. Both were unbounded and are the only parts of a
+	// checkpoint that grow monotonically with session length: the map gains a
+	// line per compaction forever, and a long session accumulates todos. That
+	// growth feeds back into the model-driven low-gain gate, which compares
+	// projected against current size, so an ever-larger checkpoint eventually
+	// makes a model-requested reset impossible to justify on a small window.
+	compactTodoSnapshotMaxItems  = 24
+	compactTodoSnapshotItemChars = 200
+	compactHistoryMapMaxEntries  = 12
 	// compactRecentTailAnchorMessages bounds how many tail messages are echoed
 	// into the summarize prompt. The tail survives verbatim in the context
 	// anyway; the anchor only has to tell the summarizer what not to duplicate.

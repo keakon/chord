@@ -224,9 +224,7 @@ func todoWriteArgsAllDone(argsJSON string) bool {
 		return false
 	}
 	for _, todo := range payload.Todos {
-		switch strings.ToLower(strings.TrimSpace(todo.Status)) {
-		case "completed", "cancelled":
-		default:
+		if !isFinishedTodoStatus(todo.Status) {
 			return false
 		}
 	}

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -119,7 +120,27 @@ func listCheckpointHistoryReferences(sessionDir, selfHistoryPath string) ([]stri
 // guessing which file to open. Files without readable topics metadata fall
 // back to the plain path line.
 func formatHistoryMapLines(chainRefs []string, metas map[string]*compactionHistoryMeta) []string {
-	lines := make([]string, 0, len(chainRefs))
+	// Bounded to the newest entries. The list gains a line per compaction and
+	// never shrinks, so an old session spends a growing slice of every
+	// checkpoint restating archives it will almost never reopen. The omitted
+	// ones stay addressable because the note names the range it dropped: the
+	// indices are handed out monotonically but are not contiguous, since a
+	// cancelled or failed compaction removes its archive, so the range is read
+	// off the dropped entries themselves rather than derived from the count.
+	omitted := 0
+	var dropped []string
+	if len(chainRefs) > compactHistoryMapMaxEntries {
+		omitted = len(chainRefs) - compactHistoryMapMaxEntries
+		dropped = chainRefs[:omitted]
+		chainRefs = chainRefs[omitted:]
+	}
+	lines := make([]string, 0, len(chainRefs)+1)
+	if omitted == 1 {
+		lines = append(lines, fmt.Sprintf("(1 earlier archive omitted: %s in the same directory)", filepath.Base(dropped[0])))
+	} else if omitted > 1 {
+		lines = append(lines, fmt.Sprintf("(%d earlier archives omitted, from %s to %s in the same directory)",
+			omitted, filepath.Base(dropped[0]), filepath.Base(dropped[len(dropped)-1])))
+	}
 	for _, ref := range chainRefs {
 		line := pathutil.AbbreviateHome(ref)
 		if meta, ok := metas[filepath.Base(ref)]; ok && len(meta.Topics) > 0 {
