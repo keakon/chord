@@ -18,11 +18,18 @@ English pages are written under `src/content/docs/`, and Chinese pages under
 those files directly. Always edit the source under `../docs/` and let `sync`
 regenerate the content collection.
 
+The same step copies the root-served brand files (favicon, touch icon, social
+card) from `../assets/logo/` into `public/`. That directory is generated and
+gitignored too — edit the originals in `../assets/logo/` instead. The header
+wordmark is referenced straight out of `../assets/logo/` by
+`astro.config.mjs`, so it does not need copying.
+
 ## Layout
 
 ```
 website/
-├── astro.config.mjs        # Starlight config (sidebar, locales, base URL)
+├── astro.config.mjs        # Starlight config (sidebar, locales, base URL, logo)
+├── public/                 # GENERATED from ../assets/logo/ — do not edit
 ├── package.json
 ├── tsconfig.json
 ├── src/

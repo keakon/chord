@@ -1,17 +1,20 @@
-/* Chord docs site — light theme tweaks. Starlight already provides a solid
-   dark/light pair; the variables below adjust the accent to match Chord's
-   identity without overriding readability. */
+/* Chord docs site — accent tuned to the logo amber (#E8A33D, assets/logo/).
+   Starlight maps these three steps differently per theme: in dark mode links
+   use accent-high and accent-low is the text on accent-coloured buttons; in
+   light mode links use accent, with white text on the same colour. Every pair
+   below clears WCAG AA (4.5:1); the raw brand amber only manages 2.16:1 on
+   white, which is why light mode runs a darkened version of it. */
 
 :root {
-  --sl-color-accent-low: #1d2c3f;
-  --sl-color-accent: #4f8cff;
-  --sl-color-accent-high: #cce0ff;
+  --sl-color-accent-low: #33240e; /* button text on accent-high — 6.96:1 */
+  --sl-color-accent: #c8811f;
+  --sl-color-accent-high: #e8a33d; /* brand amber; links on dark bg — 8.23:1 */
 }
 
 :root[data-theme='light'] {
-  --sl-color-accent-low: #e0ecff;
-  --sl-color-accent: #2a6cff;
-  --sl-color-accent-high: #1a3a86;
+  --sl-color-accent-low: #faebd3;
+  --sl-color-accent: #9a6410; /* links on white — 4.99:1 */
+  --sl-color-accent-high: #6b4409;
 }
 
 .chord-screenshot {

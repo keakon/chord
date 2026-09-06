@@ -7,6 +7,7 @@ on:
     paths:
       - "docs/**"
       - "website/**"
+      - "assets/logo/**"
       - "scripts/sync-docs.mjs"
       - "scripts/check_docs_consistency.sh"
       - "scripts/check_docs_examples.sh"
@@ -24,6 +25,7 @@ on:
     paths:
       - "docs/**"
       - "website/**"
+      - "assets/logo/**"
       - "scripts/sync-docs.mjs"
       - "scripts/check_docs_consistency.sh"
       - "scripts/check_docs_examples.sh"

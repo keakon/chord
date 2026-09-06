@@ -3,16 +3,39 @@ import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 
 const repo = 'https://github.com/keakon/chord';
+const site = 'https://keakon.github.io';
+const base = '/chord';
 
 export default defineConfig({
-  site: 'https://keakon.github.io',
-  base: '/chord',
+  site,
+  base,
   trailingSlash: 'always',
   integrations: [
     starlight({
       title: 'Chord',
       description: 'Calm AI coding in your terminal — a lightweight, local-first coding agent.',
       social: [{ icon: 'github', label: 'GitHub', href: repo }],
+      // assets/logo/ is the source of truth; scripts/sync-docs.mjs copies the
+      // root-served files into website/public/ before every dev/build run.
+      logo: {
+        light: '../assets/logo/chord-wordmark-light.svg',
+        dark: '../assets/logo/chord-wordmark-dark.svg',
+        replacesTitle: true,
+      },
+      favicon: '/favicon.svg',
+      head: [
+        // Raster fallbacks for browsers that ignore the SVG favicon.
+        { tag: 'link', attrs: { rel: 'icon', href: `${base}/favicon.ico`, sizes: '16x16 32x32 48x48' } },
+        { tag: 'link', attrs: { rel: 'apple-touch-icon', href: `${base}/apple-touch-icon.png`, sizes: '180x180' } },
+        // Starlight already emits twitter:card=summary_large_image, which
+        // renders an empty card without an image behind it. Crawlers fetch
+        // these from another host, so the URL has to be absolute.
+        { tag: 'meta', attrs: { property: 'og:image', content: `${site}${base}/og.png` } },
+        { tag: 'meta', attrs: { property: 'og:image:width', content: '1200' } },
+        { tag: 'meta', attrs: { property: 'og:image:height', content: '630' } },
+        { tag: 'meta', attrs: { property: 'og:image:alt', content: 'Chord' } },
+        { tag: 'meta', attrs: { name: 'twitter:image', content: `${site}${base}/og.png` } },
+      ],
       defaultLocale: 'root',
       locales: {
         root: { label: 'English', lang: 'en' },

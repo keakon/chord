@@ -13,7 +13,7 @@
 //
 // Source of truth stays in docs/. The sync target markdown files are gitignored — never edit them by hand.
 
-import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -25,6 +25,18 @@ const docsDir = path.join(repoRoot, 'docs');
 const websiteContentDir = path.join(repoRoot, 'website', 'src', 'content', 'docs');
 const enDir = websiteContentDir;
 const zhDir = path.join(websiteContentDir, 'zh');
+const logoDir = path.join(repoRoot, 'assets', 'logo');
+const websitePublicDir = path.join(repoRoot, 'website', 'public');
+
+// Brand files served verbatim from the site root. assets/logo/ stays the single
+// source; website/public/ is generated and gitignored like the synced markdown.
+const PUBLIC_ASSETS = [
+  'favicon.svg',
+  'favicon.ico',
+  'apple-touch-icon.png',
+  'icon-512.png',
+  'og.png',
+];
 
 // Pages we manage as hand-written Starlight (skip from sync to avoid clobbering).
 const SKIP_FILES = new Set(['index.md', 'index_CN.md']);
@@ -179,8 +191,17 @@ async function clean() {
   }
 }
 
+async function syncPublicAssets() {
+  await rm(websitePublicDir, { recursive: true, force: true });
+  await mkdir(websitePublicDir, { recursive: true });
+  for (const name of PUBLIC_ASSETS) {
+    await copyFile(path.join(logoDir, name), path.join(websitePublicDir, name));
+  }
+}
+
 async function main() {
   await clean();
+  await syncPublicAssets();
 
   const entries = await readdir(docsDir, { withFileTypes: true });
   for (const entry of entries) {
@@ -206,6 +227,7 @@ async function main() {
   }
 
   console.log('Synced docs/ → website/src/content/docs/*.md and website/src/content/docs/zh/*.md.');
+  console.log(`Copied ${PUBLIC_ASSETS.length} brand assets from assets/logo/ → website/public/.`);
 }
 
 main().catch((err) => {
