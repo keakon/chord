@@ -15,7 +15,7 @@ func TestBuildInitialSetupConfigYAML_OpenAIResponses(t *testing.T) {
 		ProviderName: "openai",
 		ProviderType: "responses",
 		APIURL:       "https://api.openai.com/v1/responses",
-		ModelName:    "gpt-5.6",
+		ModelName:    "gpt-6-astra",
 		ContextLimit: 1050000,
 		OutputLimit:  128000,
 	})
@@ -29,15 +29,15 @@ func TestBuildInitialSetupConfigYAML_OpenAIResponses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConfigFromPath: %v", err)
 	}
-	if got := cfg.ModelPools["default"]; len(got) != 1 || got[0] != "openai/gpt-5.6" {
-		t.Fatalf("model_pools.default = %#v, want openai/gpt-5.6", got)
+	if got := cfg.ModelPools["default"]; len(got) != 1 || got[0] != "openai/gpt-6-astra" {
+		t.Fatalf("model_pools.default = %#v, want openai/gpt-6-astra", got)
 	}
 	prov := cfg.Providers["openai"]
 	if prov.APIURL != "https://api.openai.com/v1/responses" || prov.Type != "responses" {
 		t.Fatalf("provider = %#v", prov)
 	}
-	if prov.Models["gpt-5.6"].Limit.Context != 1050000 || prov.Models["gpt-5.6"].Limit.Input != 0 || prov.Models["gpt-5.6"].Limit.Output != 128000 {
-		t.Fatalf("model limits = %#v", prov.Models["gpt-5.6"].Limit)
+	if prov.Models["gpt-6-astra"].Limit.Context != 1050000 || prov.Models["gpt-6-astra"].Limit.Input != 0 || prov.Models["gpt-6-astra"].Limit.Output != 128000 {
+		t.Fatalf("model limits = %#v", prov.Models["gpt-6-astra"].Limit)
 	}
 	if normalized, err := normalizeProviderConfig("openai", prov, nil); err != nil {
 		t.Fatalf("normalizeProviderConfig: %v", err)
@@ -53,7 +53,7 @@ func TestBuildInitialSetupConfigYAML_OpenAIChatCompletions(t *testing.T) {
 		ProviderName: "gateway",
 		ProviderType: "chat-completions",
 		APIURL:       "https://gateway.example/v1/chat/completions",
-		ModelName:    "gpt-5.6",
+		ModelName:    "gpt-6-astra",
 		ContextLimit: 128000,
 		OutputLimit:  32768,
 	})
@@ -130,7 +130,7 @@ func TestBuildInitialSetupConfigYAML_Codex(t *testing.T) {
 	if prov.Preset != config.ProviderPresetCodex || prov.Type != config.ProviderTypeResponses {
 		t.Fatalf("provider = %#v", prov)
 	}
-	wantPool := []string{"codex/gpt-5.6-sol", "codex/gpt-5.6-terra", "codex/gpt-5.6-luna", "codex/gpt-5.2", "codex/gpt-5.3-codex", "codex/gpt-5.4", "codex/gpt-5.5"}
+	wantPool := []string{"codex/gpt-6-astra", "codex/gpt-5.6-sol", "codex/gpt-5.6-terra", "codex/gpt-5.6-luna", "codex/gpt-5.2", "codex/gpt-5.3-codex", "codex/gpt-5.4", "codex/gpt-5.5"}
 	gotPool := cfg.ModelPools["default"]
 	if len(gotPool) != len(wantPool) {
 		t.Fatalf("model_pools.default = %#v, want %#v", gotPool, wantPool)
@@ -140,12 +140,12 @@ func TestBuildInitialSetupConfigYAML_Codex(t *testing.T) {
 			t.Fatalf("model_pools.default[%d] = %q, want %q", i, gotPool[i], wantPool[i])
 		}
 	}
-	for _, model := range []string{"gpt-5.2", "gpt-5.3-codex", "gpt-5.4", "gpt-5.5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"} {
+	for _, model := range []string{"gpt-5.2", "gpt-5.3-codex", "gpt-5.4", "gpt-5.5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-astra"} {
 		if _, ok := prov.Models[model]; !ok {
 			t.Fatalf("missing codex model %q in %#v", model, prov.Models)
 		}
 	}
-	for _, model := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"} {
+	for _, model := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-astra"} {
 		limit := prov.Models[model].Limit
 		if limit.Context != 400000 || limit.Input != 272000 || limit.Output != 128000 {
 			t.Fatalf("codex %s limits = %#v, want 400000/272000/128000", model, limit)
@@ -163,7 +163,7 @@ func TestBuildInitialSetupConfigYAML_Codex(t *testing.T) {
 
 func TestInitialSetupDefaultsForProviderType(t *testing.T) {
 	defaults := initialSetupDefaultsForProviderType("responses")
-	if defaults.APIURL != "https://api.openai.com/v1/responses" || defaults.ProviderName != "openai" || defaults.ModelName != "gpt-5.6" {
+	if defaults.APIURL != "https://api.openai.com/v1/responses" || defaults.ProviderName != "openai" || defaults.ModelName != "gpt-6-astra" {
 		t.Fatalf("responses defaults = %#v", defaults)
 	}
 	if defaults.InputLimit != 0 || defaults.ContextLimit != 1050000 || defaults.OutputLimit != 128000 {

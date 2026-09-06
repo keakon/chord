@@ -369,15 +369,140 @@ ChatGPT 账号拿到的窗口来自服务端模型目录（`context_window` /
 调 usage-driven 自动压缩，与 `model_driven` 是否开启无关。用 `gpt-5.6`
 别名（解析到 Sol）时，把 `compaction` 加到该别名对应的模板上。
 
+## OpenAI Responses 兼容接口：GPT-6 Astra
+
+GPT-6 Astra 是 OpenAI 当前的旗舰模型（模型 ID `gpt-6-astra`）：1,050,000
+上下文窗口，最大输出 128,000，可用输入 922,000（不设 `input` 时由
+`context` 减去 `output` 推出）。reasoning effort 支持 `low`、`medium`、
+`high`、`xhigh`、`max`，**没有 `none`**。标准定价每 1M token：输入 $10 /
+输出 $50 / 缓存读取 $1 / 缓存写入 $12.50；prompt 输入超过 272K 时整次请求
+按输入/缓存 2×、输出 1.5× 计费。与 GPT-5.6 不同，Astra 没有 Sol/Terra/Luna
+分档——`gpt-6-astra` 是单一模型 ID，所以配方里也没有档位 variants。使用
+API key 的 provider 需要在 `~/.config/chord/auth.yaml` 中配置同名条目：
+
+```yaml
+openai:
+  - "$OPENAI_API_KEY"
+```
+
+### GPT-6 Astra
+
+基础模板默认带 cost-first 的 `compaction` 块：272K 是计价悬崖（整次请求
+重定价，不是只对超出部分计价），把用量压在悬崖下面是最大的成本杠杆，而
+Astra 在远低于悬崖的区间仍保持满格长上下文质量（OpenAI 公布 MRCR v2
+8-needle 在 256K–512K 段 100%）。只有当你愿意接受 2× 长上下文费率时，才
+把 `threshold` 调过 0.29。
+
+```yaml
+model_templates:
+  gpt-6-astra-base: &gpt-6-astra-base
+    limit:
+      context: 1050000
+      output: 128000        # 官方全窗口：不写 input；可用输入按 922K 推出
+    cost:
+      input: 10
+      output: 50
+      cache_read: 1
+      cache_write: 12.5
+      input_tiers:
+        - above_input_tokens: 272000
+          input: 20
+          output: 75
+          cache_read: 2
+          cache_write: 25
+    reasoning:
+      effort: medium
+      summary: auto
+    variants:
+      low:
+        reasoning:
+          effort: low
+      high:
+        reasoning:
+          effort: high
+      xhigh:
+        reasoning:
+          effort: xhigh
+      max:
+        reasoning:
+          effort: max
+    modalities:
+      input: [text, image, pdf]
+    compaction:
+      threshold: 0.25       # 约 231K 触发，低于 272K 计价悬崖
+      reminder: 0.2
+
+providers:
+  openai:
+    type: responses
+    api_url: https://api.openai.com/v1/responses
+    models:
+      gpt-6-astra: *gpt-6-astra-base
+
+model_pools:
+  default:
+    - openai/gpt-6-astra@high
+```
+
+验证：
+
+```bash
+chord doctor models --model openai/gpt-6-astra@high
+```
+
+要点：
+
+- 这段针对**官方 OpenAI API**，所以声明完整 `1050000` 窗口、不写
+  `input`：Chord 按 `context` 减去模型自己声明的 `limit.output` 推出可用
+  输入预算（`1050000 − 128000 = 922000`），只在模型未声明 `limit.output`
+  时才预留默认 `64000` 输出上限。超过 272K 在这里是计价阈值，不是输入硬
+  上限，所以不要写 `input: 272000`。
+- Codex 受限窗口是另一种配额，见下方 [Codex OAuth preset](#codex-oauth-preset)
+  的 Codex 档位示例。不要把这段 API 窗口直接搬到 Codex provider 上。
+- API 可用的 reasoning effort 是 `low`、`medium`、`high`、`xhigh`、`max`，
+  用 `openai/gpt-6-astra@max` 这样的引用选 variant。GPT-6 Astra 没有
+  `none` effort。
+- Responses 在启用 reasoning 时默认用 `reasoning.summary: auto`；不希望
+  Chord 请求可读摘要时显式设 `reasoning.summary: none`。
+
+#### GPT-6 Astra 的压缩调优
+
+上面的基础模板已经带了 cost-first 的 `compaction`（0.25/0.2）。272K 计价
+悬崖是硬约束，质量天花板却不是——OpenAI 公布 GPT-6 Astra 在 MRCR v2
+8-needle 的 256K–512K 段 100%、512K–1M 段 96.3%，是缓坡而不是 GPT-5.6 Sol
+那种悬崖（Sol 在 512K–1M 掉到 73.8%）。所以 Astra 在 cost-first 之外调
+阈值，权衡的是价格/容量，不是保质量。
+
+**成本优先**（基础模板，0.25/0.2）：约 231K 触发，低于 272K 悬崖。推荐
+默认——2× 重定价比任何其他杠杆都大，触发点又稳稳落在满格质量区段里。
+
+**质量优先 / 容量优先**（接受 2× 长上下文费率）：因为 Astra 在约 512K 之前
+没有质量悬崖，阈值可以推到 GPT-5.6 Sol 不敢碰的位置，仍处在高质量区段。
+0.6–0.7（约 553K–645K）能买到很大的窗口，MRCR 还在 96% 以上；0.7–0.8
+（约 645K–738K）更偏容量，质量代价更明显。覆盖基础模板的 `compaction`：
+
+```yaml
+model_templates:
+  gpt-6-astra-quality: &gpt-6-astra-quality
+    <<: *gpt-6-astra-base
+    compaction:
+      threshold: 0.65      # 约 600K 触发；接受 2× 长上下文费率
+```
+
+省略 `reminder` 时按 `min(0.60, threshold × 0.90)` 派生。在 Codex 受限
+provider 上（其窗口由服务端控制、Astra 尚未实测），把 `compaction` 写到
+那个 provider 的模型条目上，阈值按实测窗口调，而不是按 API 全窗口。
+
 ## Codex OAuth preset
 
 当你要使用 ChatGPT/Codex OAuth，而不是 API key 时，用这个配置。Codex 使用
 独立的模型配额；与上方 API key 示例的区别不只是 provider preset 和认证方式。
 
-本节使用以下 Codex GPT-5.x 限制：
+本节使用以下 Codex 模型限制：
 
 | 模型 | `limit.context` | `limit.input` | `limit.output` |
 | --- | ---: | ---: | ---: |
+| GPT-6 Astra | 1,000,000 | 872,000 | 128,000 |
 | GPT-5.4 | 1,050,000 | 950,000 | 128,000 |
 | GPT-5.5 | 400,000 | 272,000 | 128,000 |
 | GPT-5.6 Sol / Terra / Luna | 1,000,000 | 872,000 | 128,000 |
@@ -392,6 +517,21 @@ providers:
     preset: codex
     type: responses
     models:
+      gpt-6-astra:
+        limit:
+          context: 1000000
+          input: 872000
+          output: 128000
+        variants:
+          high:
+            reasoning:
+              effort: high
+          xhigh:
+            reasoning:
+              effort: xhigh
+          max:
+            reasoning:
+              effort: max
       gpt-5.5:
         limit:
           context: 400000
@@ -420,6 +560,7 @@ providers:
 
 model_pools:
   default:
+    - codex/gpt-6-astra@high
     - codex/gpt-5.5@high
 ```
 
@@ -432,6 +573,10 @@ chord auth codex
 要点：
 
 - 同时使用 API key 和 Codex OAuth 时，因为凭据和模型配额不同，应保留两个 provider，并分别配置模型限制。
+- GPT-6 Astra 正在上线后头几周内向 Codex 推出（需要 Codex CLI 0.153.0
+  或更新版本），Codex 订阅窗口官方尚未公布。配方沿用 GPT-5.6 Sol 的
+  `1000000 / 872000 / 128000` 作为保守起点；上线后请按账号的服务端目录
+  核对，并把三个字段都调成实测窗口再用于长会话。
 - GPT-5.4 使用 `1050000 / 950000 / 128000`，分别对应 1.05M 总窗口、Codex 的有效输入预算（约为窗口的 90%；显式声明的输入始终按原值使用，与 `output` 不满足加和关系时也不会被钳制到 `context - output` 以内）和模型最大输出。
 - `gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-5.6-luna` 都使用 `1000000 /
   872000 / 128000`（Codex 订阅 2026-09 服务端档位；旧档位账号回落

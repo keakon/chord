@@ -402,16 +402,151 @@ the usage-driven automatic-compaction path regardless of `model_driven`. If
 you use the `gpt-5.6` alias (it resolves to Sol), put its `compaction` on
 the alias' template.
 
+## OpenAI Responses-compatible: GPT-6 Astra
+
+GPT-6 Astra is OpenAI's current flagship (`gpt-6-astra`): a 1,050,000-token
+context window with 128,000 max output and 922,000 usable input (derived as
+`context` minus `output` when `input` is unset). Reasoning supports `low`,
+`medium`, `high`, `xhigh`, and `max` — there is no `none` effort. Standard
+pricing is $10 input / $50 output per 1M with $1 cached input and $12.50
+cache writes; prompts above 272K input bill the whole request at 2×
+input/cache and 1.5× output. Unlike GPT-5.6 there are no Sol/Terra/Luna tiers
+— `gpt-6-astra` is a single model ID, so its recipe carries no tier variants.
+Pair the API-key provider with an entry in `~/.config/chord/auth.yaml`:
+
+```yaml
+openai:
+  - "$OPENAI_API_KEY"
+```
+
+### GPT-6 Astra
+
+The base template carries a cost-first `compaction` block by default: 272K is
+a pricing cliff (the whole request reprices, not just the tokens above the
+line), so keeping usage under it is the largest cost lever, and Astra stays at
+full long-context quality well below it (OpenAI reports 100% on MRCR v2
+8-needle at 256K–512K). Raise `threshold` past 0.29 only when you accept the
+2× long-context rate.
+
+```yaml
+model_templates:
+  gpt-6-astra-base: &gpt-6-astra-base
+    limit:
+      context: 1050000
+      output: 128000        # full API window: no `input`; usable input derives as 922K
+    cost:
+      input: 10
+      output: 50
+      cache_read: 1
+      cache_write: 12.5
+      input_tiers:
+        - above_input_tokens: 272000
+          input: 20
+          output: 75
+          cache_read: 2
+          cache_write: 25
+    reasoning:
+      effort: medium
+      summary: auto
+    variants:
+      low:
+        reasoning:
+          effort: low
+      high:
+        reasoning:
+          effort: high
+      xhigh:
+        reasoning:
+          effort: xhigh
+      max:
+        reasoning:
+          effort: max
+    modalities:
+      input: [text, image, pdf]
+    compaction:
+      threshold: 0.25       # fires at ~231K, under the 272K pricing cliff
+      reminder: 0.2
+
+providers:
+  openai:
+    type: responses
+    api_url: https://api.openai.com/v1/responses
+    models:
+      gpt-6-astra: *gpt-6-astra-base
+
+model_pools:
+  default:
+    - openai/gpt-6-astra@high
+```
+
+Verify:
+
+```bash
+chord doctor models --model openai/gpt-6-astra@high
+```
+
+Notes:
+
+- This snippet targets the **official OpenAI API**, so it declares the full
+  `1050000` window with no `input`: Chord derives the usable input budget as
+  `context` minus the model's own `output` cap (`1050000 − 128000 = 922000`),
+  and reserves the default `64000` output cap only for models that declare no
+  `limit.output`. Above 272K is a pricing threshold here, not an input cap, so
+  do not add `input: 272000`.
+- A Codex-backed provider is a different allocation: see
+  [Codex OAuth preset](#codex-oauth-preset) for the Codex-profile examples.
+  Do not copy this API snippet's window onto a Codex provider.
+- Supported API reasoning efforts are `low`, `medium`, `high`, `xhigh`, and
+  `max`; select a configured variant with a ref such as `openai/gpt-6-astra@max`.
+  GPT-6 Astra has no `none` effort.
+- Responses defaults `reasoning.summary` to `auto` while reasoning is active;
+  set `reasoning.summary: none` when you do not want Chord to request a
+  readable summary.
+
+#### Compaction tuning for GPT-6 Astra
+
+The base template above already carries the cost-first `compaction`
+(0.25/0.2). The 272K pricing cliff is the hard constraint; the quality
+ceiling is not — OpenAI reports GPT-6 Astra at 100% on MRCR v2 8-needle at
+256K–512K and 96.3% at 512K–1M, a gentle slope rather than the cliff GPT-5.6
+Sol hits (73.8% at 512K–1M). So Astra's threshold choice beyond cost-first is
+a price/capacity tradeoff, not a quality-preservation one.
+
+**Cost-first** (the base template, 0.25/0.2): fires at ~231K, under the 272K
+cliff. Recommended default — the 2× repricing dwarfs any other lever, and
+the trigger sits well inside the full-quality band.
+
+**Quality-first / capacity-first** (accept the 2× long-context rate): because
+Astra has no quality cliff before ~512K, you can push the threshold well past
+where GPT-5.6 Sol would, while staying in a high-quality band. 0.6–0.7
+(~553K–645K) buys a large window while keeping MRCR above 96%; 0.7–0.8
+(~645K–738K) leans further into capacity at some quality cost. Override the
+base template's `compaction`:
+
+```yaml
+model_templates:
+  gpt-6-astra-quality: &gpt-6-astra-quality
+    <<: *gpt-6-astra-base
+    compaction:
+      threshold: 0.65      # fires at ~600K; accepts the 2× long-context rate
+```
+
+The `reminder` derives as `min(0.60, threshold × 0.90)` when omitted. On a
+Codex-backed provider (its window is server-controlled and unverified for
+Astra), put the `compaction` on that provider's model entry and tune the
+threshold to the actual measured window, not the API full window.
+
 ## Codex OAuth preset
 
 Use this when you want ChatGPT/Codex OAuth instead of API keys. Codex uses its
 own model allocation; its model limits, provider preset, and authentication
 method can all differ from the API-key examples above.
 
-The Codex GPT-5.x limits used in this section are:
+The Codex model limits used in this section are:
 
 | Model | `limit.context` | `limit.input` | `limit.output` |
 | --- | ---: | ---: | ---: |
+| GPT-6 Astra | 1,000,000 | 872,000 | 128,000 |
 | GPT-5.4 | 1,050,000 | 950,000 | 128,000 |
 | GPT-5.5 | 400,000 | 272,000 | 128,000 |
 | GPT-5.6 Sol / Terra / Luna | 1,000,000 | 872,000 | 128,000 |
@@ -427,6 +562,21 @@ providers:
     preset: codex
     type: responses
     models:
+      gpt-6-astra:
+        limit:
+          context: 1000000
+          input: 872000
+          output: 128000
+        variants:
+          high:
+            reasoning:
+              effort: high
+          xhigh:
+            reasoning:
+              effort: xhigh
+          max:
+            reasoning:
+              effort: max
       gpt-5.5:
         limit:
           context: 400000
@@ -455,6 +605,7 @@ providers:
 
 model_pools:
   default:
+    - codex/gpt-6-astra@high
     - codex/gpt-5.5@high
 ```
 
@@ -467,6 +618,12 @@ chord auth codex
 Notes:
 
 - Keep API-key and Codex OAuth providers separate when you use both because their credentials and model allocations differ.
+- GPT-6 Astra is rolling out to Codex over the first weeks after launch (it
+  requires Codex CLI 0.153.0 or newer) and its Codex subscription window is
+  not published. The recipe uses the same `1000000 / 872000 / 128000`
+  allocation as GPT-5.6 Sol as a conservative starting point; verify against
+  your account's server catalog and adjust all three fields to the measured
+  window before relying on it for long sessions.
 - GPT-5.4 uses `1050000 / 950000 / 128000`: the 1.05M total window, Codex's effective input budget (about 90% of the window; Chord uses the declared input as-is — like other published non-additive caps it is not clamped to `context - output`), and the model's maximum output.
 - GPT-5.6 Sol/Terra/Luna use the expanded Codex profile `1000000 / 872000 /
   128000` (872K input + 128K output = 1M, matching the documented

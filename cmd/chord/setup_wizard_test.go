@@ -69,7 +69,7 @@ func TestRunInitialSetupWizardWritesFilesAndHidesAPIKey(t *testing.T) {
 	if cfg.Providers["openai"].Type != config.ProviderTypeResponses {
 		t.Fatalf("provider type = %q", cfg.Providers["openai"].Type)
 	}
-	if got := cfg.ModelPools["default"]; len(got) != 1 || got[0] != "openai/gpt-5.6" {
+	if got := cfg.ModelPools["default"]; len(got) != 1 || got[0] != "openai/gpt-6-astra" {
 		t.Fatalf("model_pools.default = %#v", got)
 	}
 	if runtime.GOOS == "darwin" {
@@ -408,7 +408,7 @@ func TestRunInitialSetupWizardCodexSkeletonSupportsAuthCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile(output): %v", err)
 	}
-	if strings.Contains(string(outData), "Model [gpt-5.6]:") {
+	if strings.Contains(string(outData), "Model [gpt-6-astra]:") {
 		t.Fatalf("unexpected Codex model prompt in output: %s", string(outData))
 	}
 	if !loginCalled {
@@ -424,7 +424,7 @@ func TestRunInitialSetupWizardCodexSkeletonSupportsAuthCommand(t *testing.T) {
 	if !strings.EqualFold(strings.TrimSpace(providerCfg.Preset), config.ProviderPresetCodex) {
 		t.Fatalf("provider preset = %q, want %q", providerCfg.Preset, config.ProviderPresetCodex)
 	}
-	wantModels := []string{"gpt-5.2", "gpt-5.3-codex", "gpt-5.4", "gpt-5.5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"}
+	wantModels := []string{"gpt-5.2", "gpt-5.3-codex", "gpt-5.4", "gpt-5.5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-astra"}
 	for _, model := range wantModels {
 		if _, ok := providerCfg.Models[model]; !ok {
 			t.Fatalf("missing configured codex model %q", model)
