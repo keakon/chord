@@ -14,6 +14,8 @@ const (
 var (
 	ViewportLineStyle            lipgloss.Style
 	HeaderStyle                  lipgloss.Style
+	SplashStyle                  lipgloss.Style
+	SplashAccentStyle            lipgloss.Style
 	UserCardStyle                lipgloss.Style
 	AssistantCardStyle           lipgloss.Style
 	ThinkingCardStyle            lipgloss.Style

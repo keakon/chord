@@ -145,17 +145,23 @@ func (m *Model) drawMainLayer(scr uv.Screen, layout tuiLayout) {
 			if m.startupRestorePending {
 				emptyMessage = DimStyle.Render("Restoring session...")
 			}
+			splashReveal := splashStepCount(viewportWidth, m.viewport.height)
+			if m.splashAnimating {
+				splashReveal = m.splashStep
+			}
+			splashLines, splashSwash := splashFrame(viewportWidth, m.viewport.height, splashReveal)
+			welcomeParts := append(splashLines, splashSwash...)
+			welcomeParts = append(welcomeParts,
+				"",
+				DimStyle.Render(buildinfo.Current().Short()),
+				"",
+				emptyMessage,
+				"",
+				strings.Join(welcomeHints, "\n"),
+			)
 			welcome := lipgloss.Place(viewportWidth, m.viewport.height,
 				lipgloss.Center, lipgloss.Center,
-				lipgloss.JoinVertical(lipgloss.Center,
-					HeaderStyle.Render(" CHORD "),
-					"",
-					DimStyle.Render(buildinfo.Current().Short()),
-					"",
-					emptyMessage,
-					"",
-					strings.Join(welcomeHints, "\n"),
-				),
+				lipgloss.JoinVertical(lipgloss.Center, welcomeParts...),
 			)
 			mainContent = welcome
 		}

@@ -29,6 +29,14 @@ func applyBlockStyles(t Theme) {
 		Foreground(lipgloss.Color(t.HeaderFg)).
 		Padding(0, 1)
 
+	SplashStyle = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color(t.SplashFg))
+
+	SplashAccentStyle = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color(t.SplashAccentFg))
+
 	UserCardStyle = baseCardStyle.
 		Background(lipgloss.Color(t.UserCardBg))
 

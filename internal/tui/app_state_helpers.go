@@ -38,6 +38,12 @@ type startupRestoreState struct {
 }
 
 type renderRuntimeState struct {
+	// Startup wordmark reveal. splashStep is only consulted while
+	// splashAnimating is set, so a zero-value Model renders the finished mark
+	// instead of an empty one. No tick generation is needed: the step only
+	// climbs and clamps, making a stray duplicate tick harmless.
+	splashAnimating                  bool
+	splashStep                       int
 	animRunning                      bool
 	animTickGeneration               uint64
 	activitySpinnerFrameIndex        int

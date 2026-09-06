@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -4533,9 +4534,6 @@ func TestViewShowsWelcomeVersionOnEmptySession(t *testing.T) {
 	m.layout = m.generateLayout(m.width, m.height)
 
 	got := stripANSI(m.View().Content)
-	if !strings.Contains(got, "CHORD") {
-		t.Fatalf("View() should show welcome title, got %q", got)
-	}
 	wantVersion := buildinfo.Current().Short()
 	if !strings.Contains(got, wantVersion) {
 		t.Fatalf("View() should show welcome version %q, got %q", wantVersion, got)
@@ -4549,16 +4547,30 @@ func TestViewShowsWelcomeVersionOnEmptySession(t *testing.T) {
 	if strings.Contains(got, "cmd+v: paste text") || strings.Contains(got, "ctrl+shift+v: paste text") {
 		t.Fatalf("View() should not infer the terminal paste shortcut from the host OS, got %q", got)
 	}
+	// The wordmark (block art, or "chor♩" on small viewports) is closed by its
+	// swash, then one blank line, then the version.
 	lines := strings.Split(got, "\n")
 	for i, line := range lines {
-		if strings.Contains(line, "CHORD") {
-			if i+2 >= len(lines) || strings.TrimSpace(lines[i+1]) != "" || !strings.Contains(lines[i+2], wantVersion) {
-				t.Fatalf("View() should leave one blank line between welcome title and version, got:\n%s", got)
-			}
-			return
+		if !strings.Contains(line, wantVersion) {
+			continue
 		}
+		if i < 3 {
+			t.Fatalf("View() should render the wordmark above the version, got:\n%s", got)
+		}
+		if strings.TrimSpace(lines[i-1]) != "" {
+			t.Fatalf("View() should leave one blank line between the wordmark and version, got:\n%s", got)
+		}
+		if strings.TrimSpace(lines[i-2]) == "" {
+			t.Fatalf("View() should render the swash above that blank line, got:\n%s", got)
+		}
+		// The large wordmark keeps a baseline gap between its letters and the
+		// swash, so the art is a row or two further up.
+		if !slices.ContainsFunc(lines[:i-2], func(l string) bool { return strings.TrimSpace(l) != "" }) {
+			t.Fatalf("View() should render the wordmark above its swash, got:\n%s", got)
+		}
+		return
 	}
-	// The title presence is checked above; this is unreachable unless that check changes.
+	t.Fatalf("View() should show the welcome version %q, got %q", wantVersion, got)
 }
 
 func TestViewShowsRestoringSessionPlaceholderDuringStartupRestore(t *testing.T) {

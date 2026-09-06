@@ -54,6 +54,12 @@ type Theme struct {
 	HeaderBg string
 	HeaderFg string
 
+	// Startup splash wordmark (see assets/logo/splash.txt). SplashFg inks the
+	// letters, SplashAccentFg the quarter note and the swash beneath — the same
+	// two-colour split the SVG wordmark uses.
+	SplashFg       string
+	SplashAccentFg string
+
 	// Message labels
 	UserFg      string
 	AssistantFg string
@@ -238,9 +244,13 @@ func DefaultTheme() Theme {
 	accentThinkingBadge := "243"
 
 	return Theme{
-		Name:                    "dark",
-		HeaderBg:                "63",
-		HeaderFg:                "230",
+		Name:     "dark",
+		HeaderBg: "63",
+		HeaderFg: "230",
+		// 255 (#eeeeee) is the closest 256-colour match to the wordmark ink
+		// #F6F4EF; 179 (#d7af5f) the closest to the logo amber #E8A33D.
+		SplashFg:                "255",
+		SplashAccentFg:          "179",
 		UserFg:                  "82",
 		AssistantFg:             "69",
 		UserCardBg:              surfaceUser,

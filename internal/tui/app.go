@@ -628,7 +628,38 @@ func (m *Model) Init() tea.Cmd {
 	}
 	cmds = append(cmds, waitForConfirmRequest(m.confirmCh))
 	cmds = append(cmds, waitForQuestionRequest(m.questionCh))
+	if cmd := m.startSplashReveal(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
 	return tea.Batch(cmds...)
+}
+
+// startSplashReveal animates the startup wordmark, but only when the welcome
+// screen is what the user is about to see. Resuming into an existing
+// transcript renders no wordmark, so there is nothing to reveal.
+func (m *Model) startSplashReveal() tea.Cmd {
+	if m.viewport == nil || len(m.viewport.blocks) > 0 {
+		return nil
+	}
+	m.splashAnimating = true
+	m.splashStep = 0
+	return splashTickCmd(1)
+}
+
+// handleSplashTick reveals the next glyph and schedules the following one,
+// stopping the chain for good on the last step.
+func (m *Model) handleSplashTick() tea.Cmd {
+	if !m.splashAnimating {
+		return nil
+	}
+	m.splashStep++
+	// Recomputed each tick: a resize mid-run can swap the large wordmark for
+	// the compact one, which has fewer swash steps.
+	if m.viewport == nil || m.splashStep >= splashStepCount(m.viewport.width, m.viewport.height) {
+		m.splashAnimating = false
+		return nil
+	}
+	return splashTickCmd(m.splashStep + 1)
 }
 
 func streamFlushTick(generation uint64, delay time.Duration) tea.Cmd {
@@ -949,6 +980,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case animTickMsg:
 		return m, m.handleAnimTick(msg)
+
+	case splashTickMsg:
+		return m, m.handleSplashTick()
 
 	case idleSweepTickMsg:
 		return m, m.handleIdleSweepTick(msg)
