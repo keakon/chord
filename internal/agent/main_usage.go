@@ -130,6 +130,11 @@ func (a *MainAgent) contextReductionDiagnosticForTurn(turnID uint64) map[string]
 			diagnostic["overcompression."+key] = strconv.Itoa(value)
 		}
 	}
+	for key, value := range stats.OverCompressionByTool {
+		if value > 0 {
+			diagnostic["overcompression_by_tool."+key] = strconv.Itoa(value)
+		}
+	}
 	for key, bucket := range stats.ByToolAndRule {
 		if bucket.Messages > 0 {
 			diagnostic["reduction_rule."+key] = strconv.Itoa(bucket.Messages)

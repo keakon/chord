@@ -29,6 +29,11 @@ type fileEvidenceObservation struct {
 	ChangedEnd       int
 	LineDelta        int
 	Validity         fileEvidenceValidity
+	// PriorContentLost carries readValidity.PriorContentLost for a stale read:
+	// the observed bytes exist nowhere else in the transcript. The reduction
+	// pass reads it back through validityByMessage, so it must survive this
+	// round-trip.
+	PriorContentLost bool
 }
 
 type fileEvidenceView map[string][]fileEvidenceObservation
@@ -81,8 +86,9 @@ func (v fileEvidenceView) validityByMessage() map[int]readValidity {
 				result = make(map[int]readValidity)
 			}
 			result[observation.MessageIndex] = readValidity{
-				Invalidated: observation.Validity == fileEvidenceStale,
-				Superseded:  observation.Validity == fileEvidenceSuperseded,
+				Invalidated:      observation.Validity == fileEvidenceStale,
+				Superseded:       observation.Validity == fileEvidenceSuperseded,
+				PriorContentLost: observation.PriorContentLost,
 			}
 		}
 	}
@@ -114,6 +120,7 @@ func buildFileEvidenceViewWithMeta(messages []message.Message, meta map[string]t
 				if state, ok := validity[index]; ok {
 					if state.Invalidated {
 						observation.Validity = fileEvidenceStale
+						observation.PriorContentLost = state.PriorContentLost
 					} else if state.Superseded {
 						observation.Validity = fileEvidenceSuperseded
 					}

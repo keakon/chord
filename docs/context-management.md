@@ -456,9 +456,13 @@ payload larger than 2000 bytes, it first writes the full output to the session's
 reference to the marker, so nothing this layer drops is unrecoverable. Archives
 are content-addressed: identical payloads share one file, so repeated copies of
 the same output do not each cost a write. Summaries that already carry their own
-recovery route are exempt, because an extra copy would buy nothing: a stale or
-superseded read tells the model to re-read the file or points at the newer copy,
-diagnostics keep their structured body, and a confirmation has no payload.
+recovery route are exempt, because an extra copy would buy nothing: a superseded
+read points at the newer copy, a read invalidated by an edit or a patch can be
+re-read for the parts that did not change while the replaced text stays in the
+edit's own arguments, diagnostics keep their structured body, and a confirmation
+has no payload. A read invalidated by a whole-file write, a delete or a change
+made outside the editing tools is archived instead — re-reading returns the new
+content, so the version that was actually observed exists nowhere else.
 
 ### First-use tool-output budget
 

@@ -134,6 +134,29 @@ func SyncDir(dir string) error {
 	return nil
 }
 
+// Stat reports the file info for path without creating anything, applying the
+// same root confinement and symlink rejection as the write helpers. A missing
+// file returns an error satisfying os.IsNotExist.
+func Stat(root, path string) (os.FileInfo, error) {
+	rel, err := relativePath(root, path)
+	if err != nil {
+		return nil, err
+	}
+	r, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+	info, err := r.Lstat(rel)
+	if err != nil {
+		return nil, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("private file %q is a symbolic link", path)
+	}
+	return info, nil
+}
+
 func OpenFile(root, path string, flag int) (*os.File, error) {
 	if err := EnsureDir(root, filepath.Dir(path)); err != nil {
 		return nil, err

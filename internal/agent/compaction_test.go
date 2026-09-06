@@ -2777,6 +2777,17 @@ func TestPrepareMessagesForLLM_RecordsSkipAndOverCompressionStats(t *testing.T) 
 	if stats.OverCompression[contextReductionOverCompressionReread] == 0 {
 		t.Fatalf("expected reread over-compression signal, stats=%+v", stats)
 	}
+	// The aggregate says reduction went too far somewhere; the per-tool key is
+	// what makes the signal actionable — it names whose summary provoked the
+	// re-fetch, which is the input a per-shape retention tune needs.
+	if got := stats.OverCompressionByTool[contextReductionOverCompressionReread+"/"+tools.NameWebFetch]; got == 0 {
+		t.Fatalf("reread signal not attributed to %s: over_compression_by_tool=%+v", tools.NameWebFetch, stats.OverCompressionByTool)
+	}
+	// The aggregate stays summable: the per-tool breakdown lives in its own map,
+	// so totalling OverCompression cannot double-count the same event.
+	if got := stats.OverCompression[contextReductionOverCompressionReread]; got != 1 {
+		t.Fatalf("aggregate reread count = %d, want exactly 1: over_compression=%+v", got, stats.OverCompression)
+	}
 	if stats.SkippedByReason[contextReductionSkipRecentHighRisk] == 0 {
 		t.Fatalf("expected recent high-risk skip reason, stats=%+v", stats)
 	}

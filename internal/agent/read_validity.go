@@ -19,6 +19,14 @@ import (
 type readValidity struct {
 	Invalidated bool
 	Superseded  bool
+	// PriorContentLost marks an invalidated read whose output is the only
+	// surviving record of the file bytes it observed. An edit or apply_patch
+	// carries the replaced text in its own call arguments (old_string, the
+	// patch body), and assistant messages are never reduced, so the pre-edit
+	// bytes stay in context without help. A whole-file write, a delete, a
+	// mutating shell command or an external process leaves nothing behind:
+	// re-reading the file yields the new content, not what this read saw.
+	PriorContentLost bool
 }
 
 type readValidityRecord struct {
@@ -66,6 +74,10 @@ type editValidityRecord struct {
 	end       int
 	lineDelta int
 	canonical bool
+	// preservesPrior reports whether the mutating call keeps the bytes it
+	// overwrote somewhere the model can still see: edit and apply_patch echo
+	// them in their own arguments, write and delete do not.
+	preservesPrior bool
 }
 
 // analyzeReadValidity maps tool-result message indices of successful reads to
@@ -107,7 +119,7 @@ func analyzeReadValidity(messages []message.Message, callMeta map[string]toolCal
 				}
 			}
 		case tools.NameEdit, tools.NameApplyPatch, tools.NameWrite, tools.NameDelete:
-			for key, edit := range editTargetRecords(i, meta.Args, msg.FileState) {
+			for key, edit := range editTargetRecords(i, meta.Name, meta.Args, msg.FileState) {
 				editsByKey[key] = append(editsByKey[key], edit)
 			}
 		}
@@ -140,8 +152,9 @@ func analyzeReadValidity(messages []message.Message, callMeta map[string]toolCal
 		validity := readValidity{Superseded: supersededReads[readIdx]}
 		for keyIndex := 0; keyIndex < record.keys.len(); keyIndex++ {
 			key := record.keys.at(keyIndex)
-			if editedAfter(editsByKey, key, record) {
+			if invalidated, priorLost := editedAfter(editsByKey, key, record); invalidated {
 				validity.Invalidated = true
+				validity.PriorContentLost = validity.PriorContentLost || priorLost
 			}
 		}
 		if !validity.Invalidated {
@@ -152,8 +165,12 @@ func analyzeReadValidity(messages []message.Message, callMeta map[string]toolCal
 						return
 					}
 					for _, editKey := range editKeysBySuffix[suffix] {
-						if editKey != key && pathSuffixMatch(editKey, key) && editedAfterSuffixFallback(editsByKey, editKey, record) {
+						if editKey == key || !pathSuffixMatch(editKey, key) {
+							continue
+						}
+						if invalidated, priorLost := editedAfterSuffixFallback(editsByKey, editKey, record); invalidated {
 							validity.Invalidated = true
+							validity.PriorContentLost = validity.PriorContentLost || priorLost
 							return
 						}
 					}
@@ -219,15 +236,21 @@ func fenwickUpdateMax(tree []int, pos, value int) {
 	}
 }
 
-func editedAfter(editsByKey map[string][]editValidityRecord, key string, read readValidityRecord) bool {
+func editedAfter(editsByKey map[string][]editValidityRecord, key string, read readValidityRecord) (invalidated, priorLost bool) {
 	return editedAfterMatching(editsByKey[key], read, false)
 }
 
-func editedAfterSuffixFallback(editsByKey map[string][]editValidityRecord, key string, read readValidityRecord) bool {
+func editedAfterSuffixFallback(editsByKey map[string][]editValidityRecord, key string, read readValidityRecord) (invalidated, priorLost bool) {
 	return editedAfterMatching(editsByKey[key], read, read.canonicalPath)
 }
 
-func editedAfterMatching(edits []editValidityRecord, read readValidityRecord, skipCanonical bool) bool {
+// editedAfterMatching reports whether a later mutating call invalidated this
+// read, and whether any of those calls destroyed the bytes the read observed
+// without echoing them in its arguments. priorLost scans every later edit, not
+// just the one that triggered invalidation: a whole-file write anywhere after
+// the read overwrites the observed revision even when a narrower edit is what
+// crossed the range test.
+func editedAfterMatching(edits []editValidityRecord, read readValidityRecord, skipCanonical bool) (invalidated, priorLost bool) {
 	laterEdits := 0
 	hasLineShift := false
 	for i := len(edits) - 1; i >= 0 && edits[i].index > read.index; i-- {
@@ -237,20 +260,23 @@ func editedAfterMatching(edits []editValidityRecord, read readValidityRecord, sk
 		}
 		laterEdits++
 		hasLineShift = hasLineShift || edit.lineDelta != 0
-		if edit.start == 0 || edit.end == 0 ||
+		if !edit.preservesPrior {
+			priorLost = true
+		}
+		if !invalidated && (edit.start == 0 || edit.end == 0 ||
 			(edit.start <= read.end && edit.end >= read.start) ||
-			(edit.lineDelta != 0 && edit.start < read.start) {
-			return true
+			(edit.lineDelta != 0 && edit.start < read.start)) {
+			invalidated = true
 		}
 	}
 	// Changed ranges use each edit's immediate pre-edit coordinates. After a
 	// line-count-changing edit, a later edit's coordinates cannot be compared
 	// directly with an older read without replaying every delta; conservatively
 	// invalidate instead of treating potentially shifted line numbers as current.
-	if laterEdits > 1 && hasLineShift {
-		return true
+	if !invalidated && laterEdits > 1 && hasLineShift {
+		invalidated = true
 	}
-	return false
+	return invalidated, priorLost
 }
 
 // pathSuffixMatch reports whether the shorter of two normalized paths is a
@@ -320,7 +346,22 @@ func buildReadValidityRecord(index int, meta *toolCallMeta, msg *message.Message
 	return record, true
 }
 
-func editTargetRecords(index int, argsJSON string, state *message.ToolFileState) map[string]editValidityRecord {
+// editPreservesPriorContent reports whether a mutating tool call leaves the
+// bytes it replaced visible in its own arguments, which assistant messages keep
+// verbatim: edit carries old_string, apply_patch carries the patch body with its
+// context and removed lines. A whole-file write carries only the new content and
+// a delete carries only a path, so neither can reconstruct what was there.
+func editPreservesPriorContent(toolName string) bool {
+	switch strings.TrimSpace(toolName) {
+	case tools.NameEdit, tools.NameApplyPatch:
+		return true
+	default:
+		return false
+	}
+}
+
+func editTargetRecords(index int, toolName, argsJSON string, state *message.ToolFileState) map[string]editValidityRecord {
+	preservesPrior := editPreservesPriorContent(toolName)
 	var keys validityKeySet
 	var parsed struct {
 		Path  string   `json:"path"`
@@ -341,7 +382,7 @@ func editTargetRecords(index int, argsJSON string, state *message.ToolFileState)
 		}
 	}
 	records := make(map[string]editValidityRecord)
-	localized := editValidityRecord{index: index}
+	localized := editValidityRecord{index: index, preservesPrior: preservesPrior}
 	if state != nil {
 		for _, write := range state.Writes {
 			if localized.start == 0 && write.ChangedStart > 0 && write.ChangedEnd >= write.ChangedStart {
@@ -349,12 +390,14 @@ func editTargetRecords(index int, argsJSON string, state *message.ToolFileState)
 			}
 			key := reductionNormalizePath(write.Path)
 			if key != "" {
-				records[key] = editValidityRecord{index: index, start: write.ChangedStart, end: write.ChangedEnd, lineDelta: write.LineDelta, canonical: filepath.IsAbs(strings.TrimSpace(write.Path))}
+				records[key] = editValidityRecord{index: index, start: write.ChangedStart, end: write.ChangedEnd, lineDelta: write.LineDelta, canonical: filepath.IsAbs(strings.TrimSpace(write.Path)), preservesPrior: preservesPrior}
 			}
 		}
 		for _, deleted := range state.Deletes {
 			key := reductionNormalizePath(deleted.Path)
 			if key != "" {
+				// A removed file has no later revision to re-read, whichever
+				// tool removed it.
 				records[key] = editValidityRecord{index: index, canonical: filepath.IsAbs(strings.TrimSpace(deleted.Path))}
 			}
 		}

@@ -240,7 +240,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		}
 		stats.SkippedByReason[reason]++
 	}
-	noteOverCompression := func(kind string) {
+	noteOverCompression := func(kind, toolName string) {
 		if kind == "" {
 			return
 		}
@@ -248,6 +248,16 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 			stats.OverCompression = make(map[string]int)
 		}
 		stats.OverCompression[kind]++
+		// Per-tool breakdown alongside the aggregate. The aggregate answers how
+		// often reduction went too far; deciding which shape should compress
+		// less needs to know whose summary provoked the re-fetch. Tool name is
+		// the discriminator available here: the re-fetched output is still too
+		// young to have been classified, so the summary shape that caused this
+		// is only reachable through the tool that produced it.
+		if stats.OverCompressionByTool == nil {
+			stats.OverCompressionByTool = make(map[string]int)
+		}
+		stats.OverCompressionByTool[kind+"/"+toolNameOrUnknown(toolName)]++
 	}
 
 	// callMeta and repeated are computed over the original messages but are
@@ -275,6 +285,11 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		validity := readValidityByIndex[index]
 		validity.Invalidated = true
 		validity.Superseded = false
+		// Neither source of external invalidation leaves the replaced bytes in
+		// the transcript: a mutating shell command reports its own output, not
+		// the file it rewrote, and an out-of-band edit is invisible until the
+		// stat check notices it. The read output is the only record left.
+		validity.PriorContentLost = true
 		readValidityByIndex[index] = validity
 	}
 	// discardedInputs is the recall-protection evidence base: input key ->
@@ -360,16 +375,18 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 				continue
 			}
 			ctx := requestReductionContext{
-				ToolName:        toolName,
-				Meta:            meta,
-				Content:         messages[i].Content,
-				ToolStatus:      messages[i].ToolStatus,
-				FileState:       messages[i].FileState,
-				Age:             age,
-				Policy:          policy,
-				ToolResults:     toolResults,
-				ReadInvalidated: validity.Invalidated,
-				ReadSuperseded:  validity.Superseded,
+				ToolName:             toolName,
+				Meta:                 meta,
+				Content:              messages[i].Content,
+				ToolStatus:           messages[i].ToolStatus,
+				FileState:            messages[i].FileState,
+				Age:                  age,
+				Policy:               policy,
+				ToolResults:          toolResults,
+				ReadInvalidated:      validity.Invalidated,
+				ReadSuperseded:       validity.Superseded,
+				ReadPriorContentLost: validity.PriorContentLost,
+				ArchiveDir:           a.sessionDir,
 			}
 			reduced, rule, ok := reduceRequestToolOutput(requestReductionReadLike, ctx)
 			if ok {
@@ -389,15 +406,20 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		}
 		if externalReadInvalidated[i] && toolName == tools.NameRead {
 			ctx := requestReductionContext{
-				ToolName:        toolName,
-				Meta:            meta,
-				Content:         messages[i].Content,
-				ToolStatus:      messages[i].ToolStatus,
-				FileState:       messages[i].FileState,
-				Age:             age,
-				Policy:          policy,
-				ToolResults:     toolResults,
-				ReadInvalidated: true,
+				ToolName:    toolName,
+				Meta:        meta,
+				Content:     messages[i].Content,
+				ToolStatus:  messages[i].ToolStatus,
+				FileState:   messages[i].FileState,
+				Age:         age,
+				Policy:      policy,
+				ToolResults: toolResults,
+				// A mutating shell command or an out-of-band process replaced the
+				// file: nothing in the transcript holds the bytes this read saw,
+				// so the summary must carry an archive address.
+				ReadInvalidated:      true,
+				ReadPriorContentLost: true,
+				ArchiveDir:           a.sessionDir,
 			}
 			if reduced, rule, ok := reduceRequestToolOutput(requestReductionReadLike, ctx); ok {
 				proposals = append(proposals, reductionProposal{
@@ -432,6 +454,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 			ShellReadOnly:         toolName == tools.NameShell && a.shellCommandReadOnly(prepared[i].ToolCallID, meta.Args),
 			ReadInvalidated:       validity.Invalidated,
 			ReadSuperseded:        validity.Superseded,
+			ReadPriorContentLost:  validity.PriorContentLost,
 			DiagnosticsSuperseded: diagnosticsSuperseded[i],
 			ArchiveDir:            a.sessionDir,
 		}
@@ -464,20 +487,20 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 					noteRecalledInput(inputKey)
 				}
 				if contextReductionIsReadLike(toolName) {
-					noteOverCompression(contextReductionOverCompressionReread)
+					noteOverCompression(contextReductionOverCompressionReread, toolName)
 					if toolName == tools.NameRead {
 						previousRevision := discardedReadRevisions[inputKey]
 						currentRevision := reductionReadRevision(&meta, prepared[i].FileState)
 						if previousRevision != "" && currentRevision != "" {
 							if previousRevision == currentRevision {
-								noteOverCompression(contextReductionOverCompressionRereadSameRevision)
+								noteOverCompression(contextReductionOverCompressionRereadSameRevision, toolName)
 							} else {
-								noteOverCompression(contextReductionOverCompressionRereadChangedRevision)
+								noteOverCompression(contextReductionOverCompressionRereadChangedRevision, toolName)
 							}
 						}
 					}
 				} else if looksLikeSearchResult(ctx) {
-					noteOverCompression(contextReductionOverCompressionResearch)
+					noteOverCompression(contextReductionOverCompressionResearch, toolName)
 				}
 			}
 			continue
@@ -1899,6 +1922,7 @@ func cloneContextReductionStats(stats ContextReductionStats) ContextReductionSta
 	stats.ByToolAndRule = cloneContextReductionBuckets(stats.ByToolAndRule)
 	stats.SkippedByReason = cloneContextReductionIntMap(stats.SkippedByReason)
 	stats.OverCompression = cloneContextReductionIntMap(stats.OverCompression)
+	stats.OverCompressionByTool = cloneContextReductionIntMap(stats.OverCompressionByTool)
 	return stats
 }
 
@@ -2099,7 +2123,8 @@ func isZeroContextReductionStats(stats ContextReductionStats) bool {
 		!stats.ReusedStable &&
 		len(stats.ByToolAndRule) == 0 &&
 		len(stats.SkippedByReason) == 0 &&
-		len(stats.OverCompression) == 0
+		len(stats.OverCompression) == 0 &&
+		len(stats.OverCompressionByTool) == 0
 }
 
 func (a *MainAgent) preparedContextReductionStatsForTurn(turnID uint64) ContextReductionStats {

@@ -22,24 +22,30 @@ import (
 )
 
 type ContextReductionStats struct {
-	Messages                  int
-	Bytes                     int
-	CurrentBytes              int
-	CurrentMessages           int
-	TokensBefore              int
-	TokensAfter               int
-	TokensSaved               int
-	Protected                 bool
-	ReusedStable              bool
-	ProtectReason             string
-	ReuseReason               string
-	SavedDelta                int
-	PreviousModel             string
-	ModelChanged              bool
-	ModelRunLength            int
-	ByToolAndRule             map[string]ContextReductionBucket
-	SkippedByReason           map[string]int
-	OverCompression           map[string]int
+	Messages        int
+	Bytes           int
+	CurrentBytes    int
+	CurrentMessages int
+	TokensBefore    int
+	TokensAfter     int
+	TokensSaved     int
+	Protected       bool
+	ReusedStable    bool
+	ProtectReason   string
+	ReuseReason     string
+	SavedDelta      int
+	PreviousModel   string
+	ModelChanged    bool
+	ModelRunLength  int
+	ByToolAndRule   map[string]ContextReductionBucket
+	SkippedByReason map[string]int
+	OverCompression map[string]int
+	// OverCompressionByTool breaks the same events down by the tool that
+	// produced the re-fetched output. It is a separate map so OverCompression
+	// stays summable and bounded: tool names include dynamic MCP names, so
+	// mixing the two would make any total double-count and give the key space
+	// no ceiling.
+	OverCompressionByTool     map[string]int
 	EvidenceRebuildDurationUS int64
 	EvidenceFiles             int
 	EvidenceObservations      int
@@ -311,6 +317,7 @@ const (
 	requestReductionJSON        requestReductionClass = "json_blob"
 	requestReductionLongLog     requestReductionClass = "long_log"
 	requestReductionShellOK     requestReductionClass = "shell_success"
+	requestReductionListing     requestReductionClass = "record_listing"
 	requestReductionGeneric     requestReductionClass = "generic_stale"
 )
 
@@ -333,6 +340,9 @@ type requestReductionContext struct {
 	// a read output (see analyzeReadValidity).
 	ReadInvalidated bool
 	ReadSuperseded  bool
+	// ReadPriorContentLost marks an invalidated read whose bytes survive nowhere
+	// else, so its summary must carry an archive address (see readValidity).
+	ReadPriorContentLost bool
 	// DiagnosticsSuperseded marks an edit-like result whose diagnostics section
 	// was followed by a newer diagnostics-bearing result; the later output
 	// carries the fresher LSP state, mirroring the read superseded semantics.
@@ -427,6 +437,12 @@ func classifyRequestReductionToolOutput(ctx requestReductionContext) requestRedu
 		return requestReductionDiagnostics
 	}
 	if ctx.Age >= ctx.Policy.ShellSuccessAgeTurns && len(ctx.Content) > ctx.Policy.ShellSuccessBytes && ctx.ToolName == tools.NameShell {
+		// The command line is a first-hand statement of what this output is;
+		// the heuristics below are second-hand inference from the bytes. Prefer
+		// the former wherever it is conclusive.
+		if shape, ok := commandDerivedShellShape(ctx); ok {
+			return shape
+		}
 		if looksLikeSearchResult(ctx) {
 			return requestReductionSearch
 		}
@@ -451,6 +467,14 @@ func classifyRequestReductionToolOutput(ctx requestReductionContext) requestRedu
 	// An invalidated or superseded read was already classified above; a web
 	// fetch or other read-like output waits for the age gate here.
 	if ctx.Age >= ctx.Policy.ReadLikeAgeTurns && len(ctx.Content) > ctx.Policy.ReadLikeOutputBytes {
+		// Reached by a shell result only when the shell gate above is
+		// configured looser than this one (higher ShellSuccessAgeTurns or
+		// ShellSuccessBytes); at the default equal thresholds that gate already
+		// returned. Kept so a custom policy does not silently fall back to
+		// sniffing the bytes.
+		if shape, ok := commandDerivedShellShape(ctx); ok {
+			return shape
+		}
 		switch {
 		case looksLikeSearchResult(ctx):
 			return requestReductionSearch
@@ -471,6 +495,12 @@ func classifyRequestReductionToolOutput(ctx requestReductionContext) requestRedu
 		}
 	}
 	if ctx.ToolResults >= ctx.Policy.MinToolResultsPrune && ctx.Age >= ctx.Policy.StaleAgeTurns && len(ctx.Content) > ctx.Policy.StaleOutputBytes {
+		// This is the widest gate (1500 bytes), so it is where a real
+		// `git log --oneline -30` actually lands — the shell branch above never
+		// sees it. The command signal has to be applied here too.
+		if shape, ok := commandDerivedShellShape(ctx); ok {
+			return shape
+		}
 		if looksLikeSearchResult(ctx) {
 			return requestReductionSearch
 		}
@@ -728,6 +758,8 @@ func reduceRequestToolOutput(class requestReductionClass, ctx requestReductionCo
 		reduced, rule = reduceLongLogOutputSummary(ctx), "long_log"
 	case requestReductionShellOK:
 		reduced, rule = reduceShellSuccessOutputSummary(ctx), "shell_success"
+	case requestReductionListing:
+		reduced, rule = reduceRecordListingOutputSummary(ctx), "record_listing"
 	case requestReductionGeneric:
 		// One-shot, non-rebuildable outputs are archived in full so the model
 		// can read them back by stable address instead of losing the payload
@@ -752,8 +784,17 @@ func reduceRequestToolOutput(class requestReductionClass, ctx requestReductionCo
 }
 
 // minRecoverableArchiveBytes is the payload size above which a lossy summary
-// must leave a recovery address behind.
-const minRecoverableArchiveBytes = 2000
+// must leave a recovery address behind. It tracks the widest byte gate any
+// reduction rule uses, so there is no band that is large enough to be
+// summarized yet too small to be archived.
+const minRecoverableArchiveBytes = compactStaleOutputBytes
+
+// archivedOutputMarkerFragment identifies a summary that already archived its
+// own payload. Both the marker's format string and this probe must move
+// together: if they drift apart the recoverability check silently starts
+// reporting "not yet archived" (an extra copy, harmless) or "already archived"
+// (a payload dropped with no address, the invariant this file exists to hold).
+const archivedOutputMarkerFragment = " output archived at "
 
 // ensureReducedOutputRecoverable upholds the layer's restorable invariant:
 // never drop payload without leaving an address to get it back. The tool layer
@@ -764,18 +805,26 @@ const minRecoverableArchiveBytes = 2000
 // and it is why a misclassified summary could cost real work: the payload was
 // gone, not merely summarized.
 //
-// Classes whose summary already carries its own recovery route are skipped: a
-// stale or superseded read tells the model to re-read or points at the newer
-// copy, diagnostics keep their structured body, and a confirmation has no
-// payload. Archives are content-addressed, so identical copies (the repeated
-// case) share one file rather than writing one each.
+// Classes whose summary already carries its own recovery route are skipped:
+// diagnostics keep their structured body and a confirmation has no payload.
+// Archives are content-addressed, so identical copies (the repeated case) share
+// one file rather than writing one each.
+//
+// A read is the delicate case. "Re-read the file" is a real recovery route only
+// while the bytes the read observed are still reachable — either on disk (the
+// range was superseded by a newer read, so nothing changed underneath) or in
+// the arguments of whatever edited it (edit's old_string, apply_patch's body).
+// When a whole-file write, a delete, a mutating shell command or an external
+// process replaced the file, re-reading returns the new content and the observed
+// revision is gone: that read output is its only record, so it must be archived
+// like any other lossy summary. This was the layer's last outright-destructive
+// path.
 func ensureReducedOutputRecoverable(class requestReductionClass, reduced string, ctx requestReductionContext) (string, bool) {
 	switch class {
 	case requestReductionConfirm, requestReductionDiagnostics:
 		return "", false
 	case requestReductionReadLike:
-		// A read's recovery route is re-reading the file itself.
-		if toolname.Normalize(ctx.ToolName) == tools.NameRead {
+		if toolname.Normalize(ctx.ToolName) == tools.NameRead && !ctx.ReadPriorContentLost {
 			return "", false
 		}
 	}
@@ -783,8 +832,12 @@ func ensureReducedOutputRecoverable(class requestReductionClass, reduced string,
 		return "", false
 	}
 	// Already recoverable: the tool layer's own reference survived into the
-	// summary, or this class archived the payload itself.
-	if len(tools.ExtractArtifactReferences(reduced)) > 0 || strings.Contains(reduced, "archived at ") {
+	// summary, or this class archived the payload itself. A read whose prior
+	// content is gone never takes this exit: its summary quotes the head of the
+	// payload, so a file that merely mentions an archive address would spoof
+	// the check into dropping the only copy of what the read observed.
+	if !ctx.ReadPriorContentLost &&
+		(len(tools.ExtractArtifactReferences(reduced)) > 0 || strings.Contains(reduced, archivedOutputMarkerFragment)) {
 		return "", false
 	}
 	path, ok := writeReducedOutputArchive(ctx)
@@ -805,11 +858,14 @@ func writeReducedOutputArchive(ctx requestReductionContext) (string, bool) {
 	}
 	sum := sha256.Sum256([]byte(ctx.Content))
 	fileName := fmt.Sprintf("%s-%s.txt", toolNameOrUnknown(ctx.ToolName), hex.EncodeToString(sum[:6]))
-	relDir := "reduced-artifacts"
-	if err := privatefs.EnsureDir(ctx.ArchiveDir, filepath.Join(ctx.ArchiveDir, relDir)); err != nil {
-		return "", false
+	absPath := filepath.Join(ctx.ArchiveDir, "reduced-artifacts", fileName)
+	// Content-addressed: a file of the right size under this name already holds
+	// these bytes. Skipping the rewrite keeps a deferred proposal from paying
+	// the write on every request, and keeps a concurrent reader from observing
+	// the truncated window of a rewrite that could not change the contents.
+	if info, err := privatefs.Stat(ctx.ArchiveDir, absPath); err == nil && info.Size() == int64(len(ctx.Content)) {
+		return absPath, true
 	}
-	absPath := filepath.Join(ctx.ArchiveDir, relDir, fileName)
 	if err := privatefs.WriteFile(ctx.ArchiveDir, absPath, []byte(ctx.Content)); err != nil {
 		return "", false
 	}
@@ -906,7 +962,8 @@ func archiveIrreducibleToolOutput(ctx requestReductionContext) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	return fmt.Sprintf("[Older %s output archived at %s; read it back to recover the full payload (bytes=%d).]", toolNameOrUnknown(ctx.ToolName), absPath, len(ctx.Content)), true
+	return fmt.Sprintf("[Older %s%s%s; read it back to recover the full payload (bytes=%d).]",
+		toolNameOrUnknown(ctx.ToolName), archivedOutputMarkerFragment, absPath, len(ctx.Content)), true
 }
 
 func reduceNumberedSourceOutputSummary(ctx requestReductionContext) string {
@@ -1581,6 +1638,46 @@ func reduceLongLogOutputSummary(ctx requestReductionContext) string {
 	return fmt.Sprintf("[Older %s log summarized for this request to save context; lines=%d errors=%d warnings=%d failed=%d]\n%s", toolNameOrUnknown(ctx.ToolName), total, counts.Errors, counts.Warnings, counts.Failures, strings.Join(lines, "\n"))
 }
 
+// compactListingHeadLines bounds how many leading records a listing summary
+// keeps.
+const compactListingHeadLines = 8
+
+// reduceRecordListingOutputSummary summarizes output that the command line
+// identified as one record per line. Marker-based selection is wrong for this
+// shape: the records are peers, so "salient" is not a property any single line
+// has, and the substrings that would be scored (`updated`, `created`,
+// `completed`) are ordinary words in commit subjects and branch names. Position
+// carries the meaning instead — these listings print newest or current first —
+// so the head is kept and the drop is stated as a count rather than inferred
+// from what survived.
+func reduceRecordListingOutputSummary(ctx requestReductionContext) string {
+	lines := make([]string, 0, compactListingHeadLines)
+	total := 0
+	forEachLine(ctx.Content, func(line string) bool {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			return true
+		}
+		total++
+		if len(lines) < compactListingHeadLines {
+			lines = append(lines, "- "+compactTextSnippet(trimmed, summaryLineSnippetChars))
+		}
+		return true
+	})
+	if len(lines) == 0 {
+		lines = append(lines, "- (no records preserved)")
+	}
+	if omitted := total - len(lines); omitted > 0 {
+		noun := "records"
+		if omitted == 1 {
+			noun = "record"
+		}
+		lines = append(lines, fmt.Sprintf("- ... (%d later %s omitted) ...", omitted, noun))
+	}
+	return fmt.Sprintf("[Older %s listing summarized for this request to save context; bytes=%d records=%d]\n%s",
+		toolNameOrUnknown(ctx.ToolName), len(ctx.Content), total, strings.Join(lines, "\n"))
+}
+
 func reduceShellSuccessOutputSummary(ctx requestReductionContext) string {
 	if summary, ok := reduceGoTestSuccessOutputSummary(ctx); ok {
 		return summary
@@ -1806,19 +1903,111 @@ func reduceGoTestSuccessOutputSummary(ctx requestReductionContext) (string, bool
 	), true
 }
 
-func isDirectGoTestCommand(argsJSON string) bool {
+// commandDerivedShellShape is the gate-agnostic wrapper each shape branch
+// consults. It is deliberately not hoisted above the branches: the three of
+// them apply different age, size and tool-count gates, and the command may only
+// decide *which* summary an output gets, never *whether* it is summarized at
+// all. Hoisting it would silently widen the reduction surface.
+func commandDerivedShellShape(ctx requestReductionContext) (requestReductionClass, bool) {
+	if ctx.ToolName != tools.NameShell {
+		return requestReductionNone, false
+	}
+	return shellOutputShapeFromCommand(ctx.Meta.Args)
+}
+
+// shellOutputShapeFromCommand returns the reduction class a shell result takes
+// when the command that produced it settles the shape, and false when it does
+// not. Reading the command beats sniffing the bytes it printed: the reduction
+// layer holds the exact command line, while the shape rules below it inspect
+// the output, where a payload can imitate a shape it does not have. `git log
+// --oneline` is the standing example — a couple of commit subjects containing
+// "fail" are all looksLikeBuildLikeLog needs to route a whole commit listing
+// through the failure-signal log summary and keep one line of it. A command
+// name cannot be imitated that way.
+//
+// The table stays deliberately small: only commands whose output shape is
+// unambiguous, and only when the command is a single invocation, so a pipeline
+// that reshapes the output (`... | jq`) keeps the heuristics. Everything
+// unmapped falls through unchanged, which makes this a subtraction from the
+// sniffing surface rather than a replacement for it.
+func shellOutputShapeFromCommand(argsJSON string) (requestReductionClass, bool) {
+	literal, ok := singleShellInvocationLiteralArgs(argsJSON, "git")
+	if !ok || literal[0] != "git" {
+		return requestReductionNone, false
+	}
+	sub, ok := gitSubcommand(literal)
+	if !ok {
+		return requestReductionNone, false
+	}
+	switch sub {
+	// Listing and status subcommands print one record per line: durable
+	// evidence the model reads as a whole, and never a build log, a search
+	// result or a JSON document. `git log -p` and `git show` do emit a diff,
+	// but the diff rules run ahead of the shell branch and claim them first.
+	case "log", "status", "branch", "tag", "remote", "rev-parse", "stash":
+		return requestReductionListing, true
+	}
+	return requestReductionNone, false
+}
+
+// gitSubcommand returns the subcommand of a git invocation, skipping the global
+// options that may precede it (`git -C dir log`, `git --no-pager log`). An
+// unrecognised option reports false rather than guessing: mistaking an option
+// for the subcommand would reintroduce exactly the misreading the command table
+// exists to remove.
+func gitSubcommand(literal []string) (string, bool) {
+	for i := 1; i < len(literal); {
+		arg := literal[i]
+		if !strings.HasPrefix(arg, "-") {
+			return arg, true
+		}
+		switch {
+		case arg == "-C" || arg == "-c" || arg == "--git-dir" || arg == "--work-tree" ||
+			arg == "--namespace" || arg == "--exec-path":
+			i += 2 // option and its separate value
+		case arg == "--no-pager" || arg == "-p" || arg == "--paginate" || arg == "--bare" ||
+			arg == "--no-replace-objects" || arg == "--literal-pathspecs" ||
+			arg == "--no-optional-locks" || strings.HasPrefix(arg, "--git-dir=") ||
+			strings.HasPrefix(arg, "--work-tree=") || strings.HasPrefix(arg, "--namespace=") ||
+			strings.HasPrefix(arg, "--exec-path="):
+			i++
+		default:
+			return "", false
+		}
+	}
+	return "", false
+}
+
+// singleShellInvocationLiteralArgs returns the literal argv of a shell tool call
+// that is exactly one invocation, so a pipeline or a substitution that reshapes
+// the output never reaches a command-derived rule. program is the name the
+// caller is looking for: it is checked as a plain substring first, which is a
+// necessary condition and lets a command line that never mentions it skip the
+// AST parse — that parse runs for every shell result on every request.
+func singleShellInvocationLiteralArgs(argsJSON, program string) ([]string, bool) {
 	var args struct {
 		Command string `json:"command"`
 	}
 	if json.Unmarshal([]byte(argsJSON), &args) != nil {
-		return false
+		return nil, false
+	}
+	if !strings.Contains(args.Command, program) {
+		return nil, false
 	}
 	analysis, err := tools.AnalyzeShellCommand(args.Command)
 	if err != nil || len(analysis.Subcommands) != 1 {
-		return false
+		return nil, false
 	}
 	literal := analysis.Subcommands[0].LiteralArgs
-	if len(literal) < 2 || literal[0] != "go" || literal[1] != "test" {
+	if len(literal) < 2 {
+		return nil, false
+	}
+	return literal, true
+}
+
+func isDirectGoTestCommand(argsJSON string) bool {
+	literal, ok := singleShellInvocationLiteralArgs(argsJSON, "go")
+	if !ok || literal[0] != "go" || literal[1] != "test" {
 		return false
 	}
 	for _, arg := range literal[2:] {
@@ -2302,10 +2491,15 @@ func parseLegacyDisplayedReadRange(line string) displayedReadRange {
 // trailing note for a trimmed read output based on its conversation-level
 // validity. Reads reach reduction only when invalidated or superseded; the
 // distinction matters to the model: stale content must not be trusted, while
-// superseded content exists fresher later in context.
+// superseded content exists fresher later in context. When the prior content is
+// gone, "re-read the file" is not a recovery route at all — re-reading returns
+// the replacement — so that case does not offer it.
 func readReductionTruncatedKind(ctx requestReductionContext) (kind, note string) {
 	if ctx.ReadSuperseded && !ctx.ReadInvalidated {
 		return tools.ReadTruncatedSuperseded, "[A newer read of this range appears later in this conversation; prefer that output.]"
+	}
+	if ctx.ReadPriorContentLost {
+		return tools.ReadTruncatedStale, "[File replaced after this read; re-reading returns the current content, not the version above.]"
 	}
 	return tools.ReadTruncatedStale, "[File modified after this read; the content above may be outdated. Re-read before relying on it.]"
 }
