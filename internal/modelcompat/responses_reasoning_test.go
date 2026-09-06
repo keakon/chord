@@ -442,6 +442,73 @@ func TestNormalizeStrictTextifiesCompletedTrajectoryAcrossWireFamilies(t *testin
 	}
 }
 
+func TestNormalizeSynthesizedLevelStripsSameProvenanceResponsesReasoning(t *testing.T) {
+	msgs := []message.Message{
+		responsesOutputMsg("openai", "gpt-5.6-sol"),
+		{Role: message.RoleTool, ToolCallID: "call_1", Content: "ok"},
+	}
+	target := TargetModel{
+		ProviderID: "openai", WireFamily: WireFamilyOpenAIResponses, ModelID: "gpt-5.6-sol",
+		ToolResultEncoding: ToolResultEncodingOpenAIToolRole, SupportsStructuredTools: true,
+	}
+
+	// Native replays the full native item list.
+	native, nativeReport := NormalizeForTarget(msgs, target, NormalizeOptions{StructuredTools: true, ReplayCompat: ReplayCompatNative})
+	if len(native) != 2 || len(native[0].ResponsesOutput) != 2 {
+		t.Fatalf("native level must keep same-provenance items whole: %+v (report %+v)", native, nativeReport)
+	}
+	if nativeReport.DowngradedReasoning != 0 || nativeReport.ForeignNativeReplays != 0 {
+		t.Fatalf("native report = %+v, want no downgrade", nativeReport)
+	}
+
+	// Synthesized drops only the reasoning items (the encrypted payload is
+	// what binds replay to the producing backend); message/function_call
+	// items and the tool trajectory stay — the X1 recovery shape.
+	synthesized, synthesizedReport := NormalizeForTarget(msgs, target, NormalizeOptions{StructuredTools: true, ReplayCompat: ReplayCompatSynthesized})
+	if len(synthesized) != 2 {
+		t.Fatalf("messages = %d, want assistant turn and tool result kept: %+v", len(synthesized), synthesized)
+	}
+	if len(synthesized[0].ResponsesOutput) != 1 || synthesized[0].ResponsesOutput[0].Type != "function_call" {
+		t.Fatalf("native items = %+v, want reasoning stripped with function_call kept", synthesized[0].ResponsesOutput)
+	}
+	if len(synthesized[0].ToolCalls) != 1 || synthesized[0].ToolCalls[0].ID != "call_1" {
+		t.Fatalf("tool calls = %+v, want kept in synthesized form", synthesized[0].ToolCalls)
+	}
+	if synthesized[1].Role != message.RoleTool || synthesized[1].ToolCallID != "call_1" {
+		t.Fatalf("tool result = %+v, want kept", synthesized[1])
+	}
+	if synthesizedReport.DowngradedReasoning != 1 {
+		t.Fatalf("DowngradedReasoning = %d, want 1 for the stripped reasoning item", synthesizedReport.DowngradedReasoning)
+	}
+
+	// A text-only same-provenance turn (no tool calls) degrades the same way:
+	// reasoning goes, the message item with the reply text stays.
+	textOnly := []message.Message{{
+		Role:    message.RoleAssistant,
+		Content: "the reply",
+		ResponsesOutput: []message.ResponsesOutputItem{
+			{Type: "reasoning", ID: "rs_1", EncryptedContent: "enc-1"},
+			{Type: "message", ID: "msg_1", Content: []message.ResponsesOutputContent{{Type: "output_text", Text: "the reply"}}},
+		},
+		Provenance: &message.MessageProvenance{WireFamily: WireFamilyOpenAIResponses, ProviderID: "openai", ModelID: "gpt-5.6-sol"},
+	}}
+	out, report := NormalizeForTarget(textOnly, target, NormalizeOptions{StructuredTools: true, ReplayCompat: ReplayCompatSynthesized})
+	if len(out) != 1 || len(out[0].ResponsesOutput) != 1 || out[0].ResponsesOutput[0].Type != "message" || out[0].Content != "the reply" {
+		t.Fatalf("text-only same-provenance degrade = %+v (report %+v), want reasoning stripped with message kept", out, report)
+	}
+	if report.DowngradedReasoning != 1 {
+		t.Fatalf("DowngradedReasoning = %d, want 1", report.DowngradedReasoning)
+	}
+
+	// Strict still textifies the completed tool trajectory once the stripped
+	// shape is rejected too.
+	strict, strictReport := NormalizeForTarget(msgs, target, NormalizeOptions{StructuredTools: true, ReplayCompat: ReplayCompatStrict})
+	requireHistoricalToolEvidence(t, strict, "read", "call_1")
+	if strictReport.DowngradedToolCalls == 0 {
+		t.Fatalf("strict report = %+v, want textified tool trajectory reported", strictReport)
+	}
+}
+
 func TestNormalizeKeepsRedactedThinkingForAnthropicTarget(t *testing.T) {
 	msg := message.Message{
 		Role:           message.RoleAssistant,

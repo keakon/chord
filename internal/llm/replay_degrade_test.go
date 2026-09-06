@@ -141,6 +141,33 @@ func requireStrictReplayEvidence(t *testing.T, messages []message.Message, toolN
 	return evidence
 }
 
+// requireReasoningStrippedProbeShape asserts a synthesized-level probe attempt
+// kept the structured tool trajectory but dropped the reasoning items — the
+// same-provenance recovery shape (message/function_call items replay as plain
+// content while the encrypted reasoning payload, which binds replay to the
+// producing backend, is removed).
+func requireReasoningStrippedProbeShape(t *testing.T, messages []message.Message) {
+	t.Helper()
+	callKept := false
+	toolResultKept := false
+	for _, msg := range messages {
+		for _, item := range msg.ResponsesOutput {
+			if item.Type == "reasoning" {
+				t.Fatalf("synthesized probe retained reasoning items: %+v", messages)
+			}
+			if item.Type == "function_call" && item.CallID == "call_1" {
+				callKept = true
+			}
+		}
+		if msg.Role == message.RoleTool && msg.ToolCallID == "call_1" {
+			toolResultKept = true
+		}
+	}
+	if !callKept || !toolResultKept {
+		t.Fatalf("synthesized probe did not keep the structured tool trajectory: %+v", messages)
+	}
+}
+
 type replayEchoProvider struct {
 	mu         sync.Mutex
 	attempts   [][]message.Message
@@ -838,14 +865,82 @@ func TestCompleteStreamAmbiguousFailureProbeIsRequestScoped(t *testing.T) {
 	impl.mu.Lock()
 	defer impl.mu.Unlock()
 	if len(impl.attempts) != 3 {
-		t.Fatalf("attempts = %d, want native, unchanged native, strict probe", len(impl.attempts))
+		t.Fatalf("attempts = %d, want native, unchanged native, reasoning-stripped probe", len(impl.attempts))
 	}
 	if !reflect.DeepEqual(impl.attempts[0], impl.attempts[1]) {
 		t.Fatalf("second attempt should preserve the original request shape")
 	}
-	requireStrictReplayEvidence(t, impl.attempts[2], "read", "call_1")
+	requireReasoningStrippedProbeShape(t, impl.attempts[2])
 	if got := client.replayCompatLevelFor(cfg.Name(), "gpt-5.6-sol", "", lastUserMessageIndex(messages)); got != modelcompat.ReplayCompatNative {
 		t.Fatalf("request-scoped probe persisted replay level = %d, want native", got)
+	}
+}
+
+func TestCompleteStreamProbesRelayWrappedParam400WithReplaySensitiveInput(t *testing.T) {
+	cfg := NewProviderConfig("responses", config.ProviderConfig{
+		Type:   config.ProviderTypeResponses,
+		Models: map[string]config.ModelConfig{"gpt-5.6-sol": {}},
+	}, []string{"key"})
+	wrapped400 := func() error {
+		return &APIError{StatusCode: 400, Type: "invalid_request_error", Code: "invalid_value", Param: "input", Message: "bad response status code 400 (request id: req-0001)"}
+	}
+	impl := &replayRejectingProvider{scriptedErrs: []error{wrapped400(), wrapped400()}}
+	client := NewClient(cfg, impl, "gpt-5.6-sol", 4096, "sys")
+	messages := crossProviderReplayMessages()
+	messages[1].Provenance.ProviderID = cfg.Name()
+	messages[1].Provenance.ModelID = "gpt-5.6-sol"
+	result, _, err := client.completeStreamTarget(
+		context.Background(), streamRetryTarget{
+			provider: cfg, impl: impl, modelID: "gpt-5.6-sol", maxTokens: 4096,
+			contextLimit: 128000, inputLimit: 128000,
+		},
+		0, messages, nil, nil, false, nil, 0, false,
+		&CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "",
+	)
+	if err != nil || result.resp == nil {
+		t.Fatalf("completeStreamTarget = (%+v, %v), want relay-wrapped replay probe recovery", result, err)
+	}
+	impl.mu.Lock()
+	defer impl.mu.Unlock()
+	if len(impl.attempts) != 3 {
+		t.Fatalf("attempts = %d, want native, unchanged native retry, reasoning-stripped probe", len(impl.attempts))
+	}
+	if !reflect.DeepEqual(impl.attempts[0], impl.attempts[1]) {
+		t.Fatal("second attempt should preserve the original request shape")
+	}
+	requireReasoningStrippedProbeShape(t, impl.attempts[2])
+	if got := client.replayCompatLevelFor(cfg.Name(), "gpt-5.6-sol", "", lastUserMessageIndex(messages)); got != modelcompat.ReplayCompatNative {
+		t.Fatalf("request-scoped probe persisted replay level = %d, want native", got)
+	}
+}
+
+func TestCompleteStreamOfficialParam400DoesNotProbe(t *testing.T) {
+	cfg := NewProviderConfig("codex", config.ProviderConfig{
+		Type:         config.ProviderTypeResponses,
+		Models:       map[string]config.ModelConfig{"gpt-5.6-sol": {}},
+		TrustHTTP400: new(true),
+	}, []string{"key"})
+	wrapped := &APIError{StatusCode: 400, Type: "invalid_request_error", Code: "invalid_value", Param: "input", Message: "bad response status code 400"}
+	impl := &replayRejectingProvider{scriptedErrs: []error{wrapped}}
+	client := NewClient(cfg, impl, "gpt-5.6-sol", 4096, "sys")
+	messages := crossProviderReplayMessages()
+	messages[1].Provenance.ProviderID = cfg.Name()
+	messages[1].Provenance.ModelID = "gpt-5.6-sol"
+	result, _, err := client.completeStreamTarget(
+		context.Background(), streamRetryTarget{
+			provider: cfg, impl: impl, modelID: "gpt-5.6-sol", maxTokens: 4096,
+			contextLimit: 128000, inputLimit: 128000,
+		},
+		0, messages, nil, nil, false, nil, 0, false,
+		&CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "",
+	)
+	if err == nil {
+		t.Fatalf("completeStreamTarget = (%+v, %v), want the official 400 to stay terminal", result.resp, err)
+	}
+	impl.mu.Lock()
+	defer impl.mu.Unlock()
+	if len(impl.attempts) != 1 {
+		t.Fatalf("attempts = %d, want a single official attempt with no probe", len(impl.attempts))
 	}
 }
 
@@ -1107,8 +1202,9 @@ func TestCompleteStreamExplicitRejectionOverridesSameTargetProvenance(t *testing
 
 	client, cfg, impl := replayTestClient(0)
 	// Always reject so the call never succeeds; we only care about attempt
-	// content. A hard cap of 2 rounds forces the outer retry loop to make at
-	// most two attempts on the single key.
+	// content. A hard cap of 2 rounds bounds the outer retry loop; the
+	// per-round replay ladder may still escalate native -> reasoning-stripped
+	// -> strict within one round.
 	impl.rejectCount = 100
 
 	_, err := callCompleteStreamWithRetryForTest(
@@ -1134,13 +1230,14 @@ func TestCompleteStreamExplicitRejectionOverridesSameTargetProvenance(t *testing
 	impl.mu.Lock()
 	attempts := impl.attempts
 	impl.mu.Unlock()
-	if len(attempts) < 2 {
-		t.Fatalf("attempts = %d, want >= 2 to compare degradation", len(attempts))
+	if len(attempts) < 3 {
+		t.Fatalf("attempts = %d, want >= 3 to walk native -> reasoning-stripped -> strict", len(attempts))
 	}
 	if reflect.DeepEqual(attempts[0], attempts[1]) {
-		t.Fatal("explicit rejection did not produce a distinct strict request")
+		t.Fatal("explicit rejection did not produce a distinct reasoning-stripped request")
 	}
-	requireStrictReplayEvidence(t, attempts[1], "read", "call_1")
+	requireReasoningStrippedProbeShape(t, attempts[1])
+	requireStrictReplayEvidence(t, attempts[2], "read", "call_1")
 	if got := client.replayCompatLevelFor(cfg.Name(), "gpt-5.6-sol", "", lastUserMessageIndex(msgs)); got != modelcompat.ReplayCompatStrict {
 		t.Fatalf("remembered replay level = %v, want strict after explicit rejection", got)
 	}

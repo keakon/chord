@@ -416,14 +416,37 @@ func isAmbiguousReplayRecoveryCandidate(err error, provider *ProviderConfig, rep
 	if hasUpstreamFailureSignal(apiErr) {
 		return false
 	}
-	if isReasoningReplayRejection(apiErr) || hasExplicitRequestOrParamSignal(apiErr) ||
-		classifyContextLengthExceeded(apiErr) || hasTerminalNonRetriable400Signal(apiErr) {
+	if isReasoningReplayRejection(apiErr) || classifyContextLengthExceeded(apiErr) {
+		return false
+	}
+	// A terminal structural 400 (invalid assistant message, invalid tool
+	// schema, thinking-mode flags) describes a defect of the request itself,
+	// which a degraded replay cannot repair. That holds on every transport, so
+	// it is decided before the stream-event branch: an error delivered inside
+	// the stream carries no status code but the same verdict.
+	if hasTerminalStructural400Signal(apiErr) {
 		return false
 	}
 	if apiErr.isStreamEvent() {
 		return true
 	}
-	return apiErr.StatusCode == 400 && provider != nil && !providerTrustsHTTP400(provider)
+	trusted := provider != nil && providerTrustsHTTP400(provider)
+	if trusted {
+		// Official gateways are the source of truth for a structured 400:
+		// the failure is explained by the provider's own code/type/param or
+		// terminal message fields, so a replay probe would only add a wasted
+		// attempt.
+		return false
+	}
+	// Compatible relays generate their own 400 wrappers, so an explicit
+	// request/param wrapper (code/type/param, missing or unsupported
+	// parameter) does not prove the request shape is wrong: it often masks an
+	// upstream trajectory-replay rejection — for example an encrypted
+	// reasoning item that cannot be replayed outside the degraded context
+	// that produced it. Allow the request-local probe then so a
+	// poisoned reasoning/trajectory item still recovers instead of failing
+	// the whole turn. Terminal structural 400s were already ruled out above.
+	return apiErr.StatusCode == 400 && provider != nil
 }
 
 // hasUpstreamFailureSignal reports whether a provider SSE error event
@@ -876,6 +899,20 @@ func hasExplicitRequestOrParamSignal(apiErr *APIError) bool {
 func hasTerminalNonRetriable400Signal(apiErr *APIError) bool {
 	if hasExplicitRequestOrParamSignal(apiErr) {
 		return true
+	}
+	return hasTerminalStructural400Signal(apiErr)
+}
+
+// hasTerminalStructural400Signal reports a 400 that describes a defect of the
+// request itself that a degraded replay cannot repair: an invalid assistant
+// message or tool schema, or a thinking-mode flag requirement. Unlike the
+// explicit request/param wrapper (which a relay generates itself), these
+// describe the transcript or conversion, so they stay terminal even on
+// compatible relays — replaying without reasoning items cannot fix a
+// genuinely malformed request.
+func hasTerminalStructural400Signal(apiErr *APIError) bool {
+	if apiErr == nil {
+		return false
 	}
 	return apiErrMessageContainsAny(apiErr,
 		"invalid assistant message",

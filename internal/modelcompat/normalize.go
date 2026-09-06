@@ -97,7 +97,12 @@ const (
 	// native payloads. Foreign native Responses items are re-synthesized as
 	// plain call_id-only function_call items — the same shape used for turns
 	// that never had native output. Reasoning continuity is lost but the
-	// action history stays intact.
+	// action history stays intact. Even items whose provenance matches the
+	// target lose their reasoning items at this level: encrypted reasoning
+	// payloads are what bind replay to the producing backend, so a backend
+	// that rejected them may still accept the plain message/function_call
+	// items — the strip gives the retry ladder a distinct intermediate shape
+	// for same-provenance rejections instead of skipping straight to strict.
 	ReplayCompatSynthesized = 1
 	// ReplayCompatStrict textifies completed tool trajectories whose native
 	// reasoning cannot be replayed. This is the last resort for backends that
@@ -328,6 +333,32 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 				msg.ResponsesOutput = nil
 				if !routePortableReasoning(portableSummary, &portableReasoningForChat, &portableReasoningForUnsignedThinking, target, opts.ReplayCompat) {
 					report.DowngradedReasoning++
+				}
+			} else if opts.ReplayCompat >= ReplayCompatSynthesized {
+				// Same-provenance native items replay whole at the native
+				// level, but a backend may still reject the turn even though
+				// its provenance matches the request target: encrypted
+				// reasoning payloads are what bind replay to the producing
+				// backend, and a gateway that routes across upstreams can
+				// serve the recording request from one backend and reject the
+				// replay from another. Message text and function_call items
+				// replay as plain content, so the recovery shape filters out
+				// only the reasoning items — the strip is what gives the
+				// retry ladder a distinct intermediate probe for
+				// same-provenance rejections instead of skipping straight to
+				// strict textification of the tool trajectory.
+				kept := msg.ResponsesOutput[:0]
+				reasoning := 0
+				for _, item := range msg.ResponsesOutput {
+					if item.Type == "reasoning" {
+						reasoning++
+						continue
+					}
+					kept = append(kept, item)
+				}
+				if reasoning > 0 {
+					msg.ResponsesOutput = kept
+					report.DowngradedReasoning += reasoning
 				}
 			}
 		}

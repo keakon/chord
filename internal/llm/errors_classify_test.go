@@ -292,6 +292,48 @@ func TestAmbiguousReplayRecoveryCandidateRequiresUnclassifiedReplayExposure(t *t
 	}
 }
 
+func TestAmbiguousReplayRecoveryCandidateProbesRelayWrappedParam400(t *testing.T) {
+	t.Parallel()
+	report := modelcompat.NormalizeReport{ReplaySensitiveItems: 1}
+	relay := NewProviderConfig("gateway", config.ProviderConfig{TrustHTTP400: new(false)}, nil)
+	official := NewProviderConfig("official", config.ProviderConfig{TrustHTTP400: new(true)}, nil)
+	wrapped := &APIError{
+		StatusCode: 400,
+		Type:       "invalid_request_error",
+		Code:       "invalid_value",
+		Param:      "input",
+		Message:    "bad response status code 400 (request id: req-0001)",
+	}
+	if !isAmbiguousReplayRecoveryCandidate(wrapped, relay, report) {
+		t.Fatal("relay-wrapped param 400 with replay-sensitive input must allow a request-scoped replay probe: the code/type/param fields are relay-generated and do not explain a replay failure")
+	}
+	if isAmbiguousReplayRecoveryCandidate(wrapped, official, report) {
+		t.Fatal("official provider's structured param 400 is explained by its own fields and must skip the probe")
+	}
+	if isAmbiguousReplayRecoveryCandidate(wrapped, relay, modelcompat.NormalizeReport{}) {
+		t.Fatal("request without replay-sensitive items must not enter replay recovery even when relay-wrapped")
+	}
+}
+
+func TestAmbiguousReplayRecoveryCandidateRelayStructural400StaysTerminal(t *testing.T) {
+	t.Parallel()
+	report := modelcompat.NormalizeReport{ReplaySensitiveItems: 1}
+	relay := NewProviderConfig("gateway", config.ProviderConfig{TrustHTTP400: new(false)}, nil)
+	official := NewProviderConfig("official", config.ProviderConfig{TrustHTTP400: new(true)}, nil)
+	for _, msg := range []string{
+		"Invalid assistant message: content or tool_calls must be set",
+		"Invalid tool schema for function 'read'",
+		"The `reasoning_content` in the thinking mode must be set to true",
+	} {
+		if isAmbiguousReplayRecoveryCandidate(&APIError{StatusCode: 400, Message: msg}, relay, report) {
+			t.Fatalf("relay structural 400 %q describes the transcript/conversion itself and must not enter a replay probe", msg)
+		}
+		if isAmbiguousReplayRecoveryCandidate(&APIError{StatusCode: 400, Message: msg}, official, report) {
+			t.Fatalf("official structural 400 %q must not enter a replay probe", msg)
+		}
+	}
+}
+
 func TestUpstreamFailureSignalStreamEventIsDeterministic(t *testing.T) {
 	t.Parallel()
 	provider := NewProviderConfig("gateway", config.ProviderConfig{TrustHTTP400: new(false)}, nil)
