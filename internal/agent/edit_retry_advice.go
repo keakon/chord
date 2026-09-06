@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 
@@ -132,11 +133,8 @@ func (g *applyPatchRetryGuard) observeResult(name, argsJSON, baseDir string, err
 		}
 		g.mu.Lock()
 		for fingerprint, record := range g.blocked {
-			for _, target := range record.paths {
-				if target == path {
-					delete(g.blocked, fingerprint)
-					break
-				}
+			if slices.Contains(record.paths, path) {
+				delete(g.blocked, fingerprint)
 			}
 		}
 		g.mu.Unlock()

@@ -1053,8 +1053,8 @@ func alignEditWindowLines(oldLines, srcLines []string, srcStart int, norm func(s
 	}
 	substitutions := 0
 	prevOld, prevSrc := 0, 0
-	for k := len(matches) - 1; k >= 0; k-- {
-		i, j := matches[k][0], matches[k][1]
+	for _, match := range slices.Backward(matches) {
+		i, j := match[0], match[1]
 		substitutions += min(i-1-prevOld, j-1-prevSrc)
 		prevOld, prevSrc = i, j
 	}

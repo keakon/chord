@@ -26,9 +26,7 @@ func TestConcurrentPersistenceDuringSessionSwitchIsRaceFree(t *testing.T) {
 	stop := make(chan struct{})
 	var wg sync.WaitGroup
 	for range writers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range rounds {
 				select {
 				case <-stop:
@@ -48,7 +46,7 @@ func TestConcurrentPersistenceDuringSessionSwitchIsRaceFree(t *testing.T) {
 					})
 				}
 			}
-		}()
+		})
 	}
 
 	// Freeze the live session and install a successor, exactly as

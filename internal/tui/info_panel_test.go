@@ -2472,7 +2472,7 @@ func TestRenderInfoPanelContextColorFollowsPressureLines(t *testing.T) {
 		backend.contextThreshold = 0.8
 		m := NewModel(backend)
 		rendered := m.renderInfoPanel(44, 24)
-		for _, line := range strings.Split(rendered, "\n") {
+		for line := range strings.SplitSeq(rendered, "\n") {
 			if strings.Contains(line, "Context") {
 				return line
 			}
@@ -2523,7 +2523,7 @@ func TestRenderInfoPanelContextColorFollowsPendingModelSwitch(t *testing.T) {
 		}
 		m := NewModel(backend)
 		rendered := m.renderInfoPanel(44, 24)
-		for _, line := range strings.Split(rendered, "\n") {
+		for line := range strings.SplitSeq(rendered, "\n") {
 			if strings.Contains(line, "Context") {
 				return line
 			}

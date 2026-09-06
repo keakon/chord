@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -259,8 +260,7 @@ func (a *MainAgent) parseCompactContextArgs(raw json.RawMessage) (tools.CompactC
 // compactContextSoleToolCall reports whether the declaring assistant message
 // carries exactly this one tool call and no sibling calls.
 func compactContextSoleToolCall(messages []message.Message, callID string) bool {
-	for i := len(messages) - 1; i >= 0; i-- {
-		msg := messages[i]
+	for _, msg := range slices.Backward(messages) {
 		if len(msg.ToolCalls) == 0 {
 			continue
 		}
@@ -1120,7 +1120,7 @@ func renderModelStateList(items []string, empty string) string {
 		if i > 0 {
 			sb.WriteByte('\n')
 		}
-		for _, line := range strings.Split(item, "\n") {
+		for line := range strings.SplitSeq(item, "\n") {
 			sb.WriteString("- ")
 			sb.WriteString(stripLeadingHeadingMarkers(line))
 			sb.WriteByte('\n')
@@ -1165,7 +1165,7 @@ func renderStateFilesSection(paths []string) string {
 	var sb strings.Builder
 	sb.WriteString("- Model-declared references only; existence is not verified at checkpoint time. Use the read tool to load any path before relying on it:\n")
 	for _, p := range paths {
-		for _, line := range strings.Split(p, "\n") {
+		for line := range strings.SplitSeq(p, "\n") {
 			sb.WriteString("- ")
 			sb.WriteString(line)
 			sb.WriteByte('\n')

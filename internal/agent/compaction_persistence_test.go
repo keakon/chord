@@ -78,11 +78,9 @@ func TestNextCompactionIndexForAgentConcurrentAllocationsAreUnique(t *testing.T)
 	seen := make(map[int]struct{})
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-	for w := 0; w < workers; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for i := 0; i < perWorker; i++ {
+	for range workers {
+		wg.Go(func() {
+			for range perWorker {
 				idx, err := a.nextCompactionIndexForAgent(a.sessionDir)
 				if err != nil {
 					t.Errorf("allocation: %v", err)
@@ -95,7 +93,7 @@ func TestNextCompactionIndexForAgentConcurrentAllocationsAreUnique(t *testing.T)
 				seen[idx] = struct{}{}
 				mu.Unlock()
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	if len(seen) != workers*perWorker {

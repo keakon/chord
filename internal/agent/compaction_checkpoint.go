@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -71,8 +72,7 @@ func selectCheckpointRetainedRecentBlocks(messages []message.Message, maxUserMes
 	partialKept := false
 	ccKept := false
 	seenAssistant := false
-	for i := len(messages) - 1; i >= 0; i-- {
-		msg := messages[i]
+	for _, msg := range slices.Backward(messages) {
 		switch {
 		case msg.Role == message.RoleUser && !message.IsUserAuthored(msg):
 			// Synthetic user-role plumbing: never a real instruction.
@@ -202,12 +202,11 @@ func renderCheckpointRetainedRecentMessages(messages []message.Message, maxUserM
 	var sb strings.Builder
 	sb.WriteString(retainedRecentMessagesHeading)
 	sb.WriteString("\nReal messages kept verbatim from just before the checkpoint so the conversation continues on the actual work boundary; everything older lives in the summarized sections above and the archived history files.\n")
-	for i := len(blocks) - 1; i >= 0; i-- {
-		block := blocks[i]
+	for _, block := range slices.Backward(blocks) {
 		sb.WriteByte('\n')
 		sb.WriteString(block.label)
 		sb.WriteString(":\n")
-		for _, line := range strings.Split(block.text, "\n") {
+		for line := range strings.SplitSeq(block.text, "\n") {
 			sb.WriteString("> ")
 			sb.WriteString(line)
 			sb.WriteByte('\n')

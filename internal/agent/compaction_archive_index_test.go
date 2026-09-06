@@ -130,7 +130,7 @@ func TestBuildCompactionArchiveIndexLineNumbersMatchDocument(t *testing.T) {
 
 func TestBuildCompactionArchiveIndexFlagsLargeToolResults(t *testing.T) {
 	var big strings.Builder
-	for i := 0; i < archiveIndexLargeLines+5; i++ {
+	for range archiveIndexLargeLines + 5 {
 		big.WriteString("payload line\n")
 	}
 	md := "Session Export\n\n---\n\n" +
@@ -159,7 +159,7 @@ func TestBuildCompactionArchiveIndexTruncatesSnippetsRuneSafe(t *testing.T) {
 		"---\n\n" +
 		"Assistant:\n\nok\n"
 	final := buildCompactionArchiveIndexedMarkdown(md)
-	for _, line := range strings.Split(final, "\n") {
+	for line := range strings.SplitSeq(final, "\n") {
 		if !utf8.ValidString(line) {
 			t.Fatalf("index produced invalid UTF-8: %q", line)
 		}
@@ -209,7 +209,7 @@ func TestExportCompactionHistoryWritesArchiveIndex(t *testing.T) {
 		t.Fatalf("archive missing index heading:\n%s", content)
 	}
 	// Every index entry points at a real message-block start in the file.
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		if !strings.HasPrefix(line, "- ") {
 			continue
 		}

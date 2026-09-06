@@ -842,8 +842,8 @@ func latestRequestOrDoneRejectedAnchor(input *compactionInput) (fallbackAnchor, 
 // authoritative exists.
 func resolveLatestUserRequestAnchor(messages []message.Message) fallbackAnchor {
 	lastCheckpointIdx := -1
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].IsCompactionSummary {
+	for i, message := range slices.Backward(messages) {
+		if message.IsCompactionSummary {
 			lastCheckpointIdx = i
 			break
 		}

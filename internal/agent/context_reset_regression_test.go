@@ -75,11 +75,11 @@ func TestConcurrentSnapshotWritersLeaveSnapshotEqualToLiveState(t *testing.T) {
 	const writers = 4
 	const rounds = 20
 	var wg sync.WaitGroup
-	for w := 0; w < writers; w++ {
+	for w := range writers {
 		wg.Add(1)
 		go func(w int) {
 			defer wg.Done()
-			for i := 0; i < rounds; i++ {
+			for i := range rounds {
 				if err := a.UpdateTodos([]tools.TodoItem{{
 					ID:      fmt.Sprintf("w%d-%d", w, i),
 					Status:  "in_progress",

@@ -422,8 +422,8 @@ func checkpointHistoryMapHasSourcePath(content, srcPrefix string) bool {
 		if !inHistoryMap {
 			continue
 		}
-		if strings.HasPrefix(line, "- ") {
-			ref := strings.TrimSpace(strings.TrimPrefix(line, "- "))
+		if after, ok := strings.CutPrefix(line, "- "); ok {
+			ref := strings.TrimSpace(after)
 			if checkpointHistoryMapSourcePath(ref, srcPrefix) {
 				return true
 			}

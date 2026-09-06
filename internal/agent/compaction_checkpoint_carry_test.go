@@ -163,11 +163,11 @@ func TestCompactionDraftCarriesPriorCheckpointBody(t *testing.T) {
 		t.Fatalf("second checkpoint must carry exactly one previous-checkpoint section:\n%s", secondContent)
 	}
 	expectedCarry := latestPriorCheckpointBody(first.NewMessages)
-	idx := strings.Index(secondContent, "\n"+priorCheckpointSectionHeading+"\n")
-	if idx < 0 {
+	_, after, ok := strings.Cut(secondContent, "\n"+priorCheckpointSectionHeading+"\n")
+	if !ok {
 		t.Fatalf("second checkpoint carries no previous-checkpoint section:\n%s", secondContent)
 	}
-	carried := strings.TrimSpace(secondContent[idx+len("\n"+priorCheckpointSectionHeading+"\n"):])
+	carried := strings.TrimSpace(after)
 	carried = strings.TrimSpace(strings.Split(carried, "[Context compressed]")[0])
 	if carried != expectedCarry {
 		t.Fatalf("carried body = %q, want %q", carried, expectedCarry)

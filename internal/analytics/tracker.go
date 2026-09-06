@@ -2,6 +2,7 @@ package analytics
 
 import (
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 	"sync"
@@ -418,9 +419,7 @@ func cloneStringInt64Map(in map[string]int64) map[string]int64 {
 		return make(map[string]int64)
 	}
 	out := make(map[string]int64, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
+	maps.Copy(out, in)
 	return out
 }
 
