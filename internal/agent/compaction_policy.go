@@ -595,19 +595,61 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 			stats.TokensSaved = stats.TokensBefore - stats.TokensAfter
 		}
 		if !semanticRefresh && wrapUpGraceActive && stats.TokensSaved < policy.MinIncrementalTokens {
+			// The grace suppresses *new* low-gain reductions; it must not undo
+			// the ones already frozen. Returning the raw messages here would
+			// restore tool output the model was already told was omitted,
+			// rewrite the cached prefix, and grow the context the wrap-up
+			// request was meant to leave alone. Keep the established reduced
+			// prefix and only leave the fresh tail verbatim.
+			// With no established reduced prefix there is nothing the model was
+			// told was omitted, so the raw messages are the correct verbatim
+			// surface.
+			surface := messages
+			surfaceReduced := false
+			prefixLen := 0
+			var reusedFrom stableReductionSurface
+			if previous, ok := a.stableReductionSurfaceCandidate(a.currentTurnID()); ok &&
+				hasReductionSavings(previous.Stats) && len(previous.Messages) > 0 && len(messages) >= len(previous.Messages) {
+				if reused, compatible := reuseStableReductionPrefix(previous, prepared, messages); compatible {
+					surface, prefixLen, reusedFrom = reused, len(previous.Messages), previous
+				} else {
+					// A reduced prefix is established but cannot be reused as
+					// it stands. Raw messages would resurrect the very output
+					// that prefix already reported as omitted, so fall back to
+					// this request's prepared surface instead.
+					surface, surfaceReduced = prepared, true
+				}
+			}
 			preserved := ContextReductionStats{
 				TokensBefore:  stats.TokensBefore,
 				TokensAfter:   stats.TokensBefore,
 				Protected:     true,
 				ProtectReason: contextProtectReasonWrapUpGrace,
 			}
+			if surfaceReduced {
+				preserved.TokensAfter = stats.TokensAfter
+			}
+			if prefixLen > 0 {
+				preserved = highLevelContextReductionStats(a.ctxMgr, messages, surface)
+				if len(preserved.ByToolAndRule) == 0 {
+					preserved.ByToolAndRule = cloneContextReductionBuckets(reusedFrom.Stats.ByToolAndRule)
+				}
+				preserved.Protected = true
+				preserved.ProtectReason = contextProtectReasonWrapUpGrace
+				preserved.ReusedStable = true
+			}
 			preserved.fillModelContinuity(modelSnapshot)
-			a.setCurrentRequestSurface(&preserved, messages)
+			a.setCurrentRequestSurface(&preserved, surface)
 			a.setContextReductionStats(preserved)
 			if rememberPrepared {
-				a.rememberPreparedLLMRequest(a.currentTurnID(), messages, messages, nil, nextReviewAge, toolResults, policy)
+				a.setPreparedStablePrefixLen(prefixLen)
+				if prefixLen > 0 {
+					a.rememberPreparedLLMRequest(a.currentTurnID(), messages, surface, nil, reusedFrom.NextReviewAge, reusedFrom.ToolResults, reusedFrom.Policy)
+				} else {
+					a.rememberPreparedLLMRequest(a.currentTurnID(), messages, surface, nil, nextReviewAge, toolResults, policy)
+				}
 			}
-			return messages
+			return surface
 		}
 		if rememberPrepared && !semanticRefresh {
 			if previous, ok := a.stableReductionSurfaceCandidate(a.currentTurnID()); ok &&
