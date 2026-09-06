@@ -2,6 +2,9 @@
 title: Chord
 description: Calm AI coding in your terminal — a lightweight, local-first coding agent with reliable long sessions, hot-swappable model setups, and remote operation.
 template: splash
+head:
+  - tag: title
+    content: Chord — Calm AI coding in your terminal
 hero:
   tagline: Calm AI coding in your terminal — stable long sessions, model setups you can swap at runtime, and remote operation when you cannot be at the keyboard.
   actions:
@@ -25,7 +28,7 @@ import screenshot from '../../../../docs/assets/screenshot.png';
 ## Three-step setup
 
 <CardGrid>
-  <Card title="1. Install" icon="seti:go">
+  <Card title="1. Install" icon="download">
     Prebuilt binaries do not require Go. If you already have Go 1.27.0+ installed:
 
     ```bash
@@ -34,7 +37,7 @@ import screenshot from '../../../../docs/assets/screenshot.png';
 
     If not, download a prebuilt binary from [GitHub Releases](https://github.com/keakon/chord/releases), extract it, and put `chord` on your `PATH`.
   </Card>
-  <Card title="2. Run setup once" icon="seti:lock">
+  <Card title="2. Run setup once" icon="pen">
     Run `chord` in an interactive terminal:
 
     ```bash
@@ -45,7 +48,7 @@ import screenshot from '../../../../docs/assets/screenshot.png';
 
     Prefer to write YAML manually or need a different provider/model setup? See [Quickstart](/chord/quickstart/).
   </Card>
-  <Card title="3. Run from your project" icon="rocket">
+  <Card title="3. Run from your project" icon="window">
     ```bash
     cd my-project
     chord
@@ -54,39 +57,10 @@ import screenshot from '../../../../docs/assets/screenshot.png';
   </Card>
 </CardGrid>
 
-## Find docs by task
-
-<CardGrid>
-  <Card title="Start quickly" icon="rocket">
-    Install, initialize a provider, run `chord doctor models`, and send the first task.
-    [Open →](/chord/quickstart/)
-  </Card>
-  <Card title="Configure models" icon="seti:config">
-    Provider/auth schema plus copy-paste examples for common setups.
-    [Config →](/chord/configuration/) · [Examples →](/chord/examples/)
-  </Card>
-  <Card title="Remote control" icon="external">
-    Use `chord headless` and chord-gateway safely from another surface.
-    [Open →](/chord/headless/)
-  </Card>
-  <Card title="Long tasks" icon="list-format">
-    Use `/loop` and `Done` for multi-step implementation work.
-    [Open →](/chord/usage/#loop--continuous-execution-mode)
-  </Card>
-  <Card title="Extend and customize" icon="puzzle">
-    Agents, skills, MCP, hooks, and custom slash commands.
-    [Customize →](/chord/customization/) · [Hooks →](/chord/hooks/)
-  </Card>
-  <Card title="Troubleshoot" icon="warning">
-    Startup, auth, model, TUI, context, and integration symptoms.
-    [Open →](/chord/troubleshooting/)
-  </Card>
-</CardGrid>
-
 ## Why Chord
 
 <CardGrid>
-  <Card title="Long sessions use less context" icon="seti:clock">
+  <Card title="Long sessions use less context" icon="database">
     Chord trims stale tool output at request time, keeps typed summaries for
     large results, and compacts earlier turns before context pressure breaks
     the flow.
@@ -95,7 +69,7 @@ import screenshot from '../../../../docs/assets/screenshot.png';
     Loads sessions with thousands of messages almost instantly, exits without
     a shutdown wait, keeps memory low, and unloads idle LSP/MCP resources.
   </Card>
-  <Card title="You see the network state" icon="information">
+  <Card title="You see the network state" icon="analytics">
     Precise request status and elapsed wait time during model calls. Never
     wonder if it's stuck again.
   </Card>
@@ -109,24 +83,27 @@ import screenshot from '../../../../docs/assets/screenshot.png';
 ## More capabilities
 
 <CardGrid>
-  <Card title="Keyboard-first, Vim-style" icon="seti:shell">
+  <Card title="Keyboard-first, Vim-style" icon="vim">
     Built for keyboard-heavy workflows: Insert / Normal modes, Vim-flavoured
     navigation, and message search.
   </Card>
-  <Card title="Project context" icon="seti:code-search">
+  <Card title="Project context" icon="magnifier">
     LSP diagnostics, definition/reference/implementation lookups, Git status,
     and `@` file completion.
   </Card>
-  <Card title="Images and PDFs" icon="seti:image">
+  <Card title="Images and PDFs" icon="document">
     Paste images, attach image/PDF files when supported, preview images in
     supported terminals, and use `view_image` for local PNG/JPEG files.
   </Card>
-  <Card title="Remote control" icon="external">
-    `chord headless` exposes a stdio JSON control plane; pair with
-    [chord-gateway](https://github.com/keakon/chord-gateway) to operate Chord
-    from chat surfaces.
+  <Card title="Multi-agent collaboration" icon="comment">
+    A main agent with focused SubAgents, each with its own context, switchable
+    via `Shift+Tab`.
   </Card>
-  <Card title="Import existing sessions" icon="import">
+  <Card title="Parallel work via git worktrees" icon="code-branch">
+    `chord --worktree feat-auth` spins up an isolated working copy so several
+    tasks on the same repo do not stomp on each other.
+  </Card>
+  <Card title="Import existing sessions" icon="cloud-download">
     Migrate Claude Code, Codex, and OpenCode sessions into resumable Chord
     sessions.
   </Card>
@@ -134,58 +111,43 @@ import screenshot from '../../../../docs/assets/screenshot.png';
 
 ## Performance
 
-These measurements are scenario-specific proof points, not universal guarantees. They show where Chord's context trimming, low-overhead TUI, and predictable shutdown behavior matter most.
+On a real-world Pebble database task, Chord finished **24% faster** than Codex-CLI while using **63% fewer input tokens** at **63% lower cost**. The app shell starts and exits in **under 1s** and holds an empty session in **31.6MB**.
 
-### Real-world coding task
+These are scenario-specific proof points, not universal guarantees. Full tables, methodology, and caveats: [Performance — Measured results](/chord/performance/#measured-results).
 
-We benchmarked Chord v0.6.3 against Codex-CLI v0.136.0 on a [real-world database system task](https://github.com/datacurve-ai/deep-swe/tree/main/tasks/pebble-durability-wait-apis): implementing durability wait APIs in Pebble. Far from simple CRUD, the task requires understanding commit/WAL sync and concurrency semantics, reasoning across write paths, event listeners, and DB lifecycle subsystems.
-
-| Metric | Chord v0.6.3 | Codex-CLI v0.136.0 | Improvement |
-|--------|--------------|---------------------|-------------|
-| **Time** | **46m21s** | 61m18s | **24% faster** |
-| **LLM calls** | **93** | 118 | **21% fewer** |
-| **Input tokens** | **6.86M** | 18.47M | **63% fewer** |
-| **Output tokens** | **25K** | 74K | **66% fewer** |
-| **Cache read tokens** | **6.55M** | 17.64M | **63% fewer** |
-| **Cost** | **$5.58** | $15.15 | **63% cheaper** |
-
-Notes:
-- Both runs used GPT-5.5 (xhigh).
-- Time excludes environment setup and final wrap-up, but includes model interaction, code changes, and test execution.
-- The task's reference solution spans 8 files and 670 changed lines; actual model output may be larger or smaller depending on tests, comments, and implementation choices.
-
-### App startup and memory
-
-We also measured the interactive app shell: time from launch to accepting input, normal exit time, and memory with an empty session and after loading 200 messages.
-
-| App | Startup to input | Normal exit | Empty session memory | 200-message memory |
-|-----|------------------|-------------|----------------------|--------------------|
-| Chord v0.6.3 | **&lt;1s** | **&lt;1s** | **31.6MB** | **~40MB** |
-| Codex-CLI v0.136.0 | **&lt;1s** | ~20s | 35.8MB | ~80MB |
-| Claude Code v2.1.163 | 32s | ~2s | 156.3MB | &gt;300MB |
-
-Notes:
-- Codex-CLI waits for shutdown wrap-up and exits after about a 20-second timeout.
-- Claude Code waits on startup and becomes ready for input after about a 30-second timeout.
-- Memory use varies by session content and environment, so these numbers are only estimates for this measured scenario.
-
-## Where to next
+## Find docs by task
 
 <CardGrid>
-  <Card title="CLI reference" icon="seti:shell">
+  <Card title="Start quickly" icon="rocket">
+    Install, initialize a provider, run `chord doctor models`, and send the first task.
+    [Open →](/chord/quickstart/)
+  </Card>
+  <Card title="Configure models" icon="setting">
+    Provider/auth schema plus copy-paste examples for common setups.
+    [Config →](/chord/configuration/) · [Examples →](/chord/examples/)
+  </Card>
+  <Card title="CLI reference" icon="laptop">
     Every command, subcommand, and flag — including `chord cleanup`, worktrees, and headless.
     [Open →](/chord/cli/)
   </Card>
-  <Card title="Configuration & Auth" icon="seti:config">
-    Provider, model pool, LSP, MCP, hooks — full schema in one cheatsheet.
-    [Open →](/chord/configuration/)
+  <Card title="Permissions and safety" icon="padlock">
+    The permission model, approval flow, and the security boundaries Chord enforces.
+    [Open →](/chord/permissions-and-safety/)
   </Card>
-  <Card title="Examples" icon="seti:yml">
-    Copy-paste-ready `config.yaml` for the four most common setups.
-    [Open →](/chord/examples/)
+  <Card title="Long tasks" icon="list-format">
+    Use `/loop` and `Done` for multi-step implementation work.
+    [Open →](/chord/usage/#loop--continuous-execution-mode)
   </Card>
-  <Card title="Headless integration" icon="external">
-    Build bots, gateways, or scripts on top of Chord.
+  <Card title="Extend and customize" icon="puzzle">
+    Agents, skills, MCP, hooks, and custom slash commands.
+    [Customize →](/chord/customization/) · [Hooks →](/chord/hooks/)
+  </Card>
+  <Card title="Remote control" icon="server">
+    Use `chord headless` and chord-gateway safely from another surface.
     [Open →](/chord/headless/)
+  </Card>
+  <Card title="Troubleshoot" icon="warning">
+    Startup, auth, model, TUI, context, and integration symptoms.
+    [Open →](/chord/troubleshooting/)
   </Card>
 </CardGrid>
