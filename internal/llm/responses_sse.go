@@ -976,6 +976,32 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 			if state.partial != nil {
 				state.partial.textDone = true
 			}
+		case "reasoning":
+			// A finalized reasoning item carries its encrypted_content and id.
+			// Streaming does not fold reasoning into resp.ResponsesOutput (that
+			// only happens at response.completed/incomplete via
+			// collectResponsesOutput), so without capturing it here an
+			// interrupted turn loses the reasoning entirely. Persisting the
+			// message without its preceding reasoning item then violates the
+			// Responses API pairing constraint on the next request (400).
+			// Only an encrypted item is worth carrying. The completed path also
+			// copies reasoning_text and summary, which this event does not even
+			// parse, but those are human-readable annotations that replay
+			// ignores — the interrupted message keeps its prose in Content. An
+			// item with no encrypted payload would replay as a bare id
+			// referencing state the target may never have stored, which is a
+			// fresh 400 rather than the one this preserves against.
+			if state.cb != nil && done.Item.ID != "" && done.Item.EncryptedContent != "" {
+				item := message.ResponsesOutputItem{
+					Type:             "reasoning",
+					ID:               done.Item.ID,
+					EncryptedContent: done.Item.EncryptedContent,
+				}
+				state.cb(message.StreamDelta{
+					Type:          message.StreamDeltaReasoningItem,
+					ReasoningItem: &item,
+				})
+			}
 		}
 		// Mark the item done for every type that was opened by output_item.added
 		// (reasoning, function_call, message, ...). markOutputItemAdded fires for

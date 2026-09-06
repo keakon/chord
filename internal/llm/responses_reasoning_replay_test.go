@@ -380,3 +380,61 @@ func TestFillResponsesReasoningForReplay(t *testing.T) {
 		t.Fatalf("synthesized stateless reasoning item must not carry an id: %s", raw)
 	}
 }
+
+// TestConvertMessagesInterruptedMessageReplaysReasoningBeforeMessage locks in
+// the interrupted-turn fix: a partial assistant message that was persisted with
+// its finalized reasoning items (the shape the agent builds for an interrupted
+// stream) must replay as reasoning immediately followed by the message. Without
+// the preceding reasoning the gateway rejects the message with "X without
+// required preceding reasoning" (400).
+func TestConvertMessagesInterruptedMessageReplaysReasoningBeforeMessage(t *testing.T) {
+	msgs := []message.Message{
+		{Role: message.RoleUser, Content: "keep going"},
+		{
+			Role:       message.RoleAssistant,
+			Content:    "partial body",
+			StopReason: "interrupted",
+			ResponsesOutput: []message.ResponsesOutputItem{
+				{Type: "reasoning", ID: "rs_1", EncryptedContent: "opaque-blob"},
+				{Type: "message", Role: "assistant", Content: []message.ResponsesOutputContent{{Type: "output_text", Text: "partial body"}}},
+			},
+		},
+	}
+
+	items := convertMessagesToResponsesWithItemIDs("", msgs, true, false)
+	// user message, reasoning (preceded-by message requirement satisfied by the
+	// message item that follows it), assistant message with the partial text.
+	want := []struct {
+		typ     string
+		id      string
+		content string
+	}{
+		{typ: "message"},
+		{typ: "reasoning", id: "rs_1"},
+		{typ: "message", content: "partial body"},
+	}
+	if len(items) != len(want) {
+		t.Fatalf("item count = %d, want %d (%+v)", len(items), len(want), items)
+	}
+	for i, w := range want {
+		item := items[i]
+		if item.Type != w.typ {
+			t.Fatalf("item %d type = %q, want %q", i, item.Type, w.typ)
+		}
+		if w.id != "" && item.ID != w.id {
+			t.Fatalf("item %d id = %q, want %q", i, item.ID, w.id)
+		}
+		if w.content != "" {
+			blocks, ok := item.Content.([]responsesContentBlock)
+			if !ok || len(blocks) != 1 || blocks[0].Text != w.content {
+				t.Fatalf("item %d content = %#v, want text %q", i, item.Content, w.content)
+			}
+		}
+	}
+	if items[1].EncryptedContent != "opaque-blob" {
+		t.Fatalf("reasoning encrypted_content lost on replay: %+v", items[1])
+	}
+	if items[2].Content == nil {
+		t.Fatalf("interrupted message content missing on replay: %+v", items[2])
+	}
+}

@@ -23,7 +23,8 @@ type streamContentReducer struct {
 	agentID string
 	emit    func(AgentEvent)
 
-	appendPartialText func(string)
+	appendPartialText            func(string)
+	appendPartialResponsesOutput func(message.ResponsesOutputItem)
 
 	scrubThinkingDelta bool
 	scrubThinkingFinal bool
@@ -61,6 +62,11 @@ func (r *streamContentReducer) Handle(delta message.StreamDelta) bool {
 		return true
 	case message.StreamDeltaThinkingEnd:
 		r.closeThinkingBlock()
+		return true
+	case message.StreamDeltaReasoningItem:
+		if r.appendPartialResponsesOutput != nil && delta.ReasoningItem != nil {
+			r.appendPartialResponsesOutput(*delta.ReasoningItem)
+		}
 		return true
 	default:
 		return false

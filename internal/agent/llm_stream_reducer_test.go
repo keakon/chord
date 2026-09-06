@@ -259,3 +259,53 @@ func TestSubLLMStreamReducerEmitsRequestProgress(t *testing.T) {
 		t.Fatalf("progress state = %#v, want bytes=40934 events=95", state)
 	}
 }
+
+// TestLLMStreamReducerRoutesReasoningItemDeltaToAccumulator verifies a
+// StreamDeltaReasoningItem delta flows through the top-level reducer (which
+// routes tool deltas first, then content) into the turn's partial-reasoning
+// accumulator via the appendPartialResponsesOutput callback.
+func TestLLMStreamReducerRoutesReasoningItemDeltaToAccumulator(t *testing.T) {
+	turn := &Turn{}
+	var events []AgentEvent
+	reducer := &llmStreamReducer{}
+	reducer.content = streamContentReducer{
+		emit:                         func(evt AgentEvent) { events = append(events, evt) },
+		appendPartialText:            turn.appendPartialText,
+		appendPartialResponsesOutput: turn.appendPartialResponsesOutput,
+		textFlushInterval:            time.Hour,
+		thinkingFlushInterval:        time.Hour,
+	}
+	reducer.tool = streamToolDeltaReducer{emit: func(evt AgentEvent) { events = append(events, evt) }}
+
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaText, Text: "visible"})
+	reducer.Handle(message.StreamDelta{
+		Type:          message.StreamDeltaReasoningItem,
+		ReasoningItem: &message.ResponsesOutputItem{Type: "reasoning", ID: "rs_1", EncryptedContent: "opaque-blob"},
+	})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaText, Text: " more"})
+
+	if got := turn.drainPartialResponsesOutput(); len(got) != 1 || got[0].ID != "rs_1" || got[0].EncryptedContent != "opaque-blob" {
+		t.Fatalf("accumulated reasoning = %+v, want rs_1/opaque-blob", got)
+	}
+	if got := turn.drainPartialText(); got != "visible more" {
+		t.Fatalf("partial text = %q, want interleaved text intact", got)
+	}
+}
+
+// TestStreamContentReducerReasoningItemWithoutCallbackIsIgnored verifies the
+// reasoning_item case is a no-op when no accumulator callback is wired (e.g. in
+// isolated reducer tests or callers that do not persist partial reasoning).
+func TestStreamContentReducerReasoningItemWithoutCallbackIsIgnored(t *testing.T) {
+	var events []AgentEvent
+	reducer := streamContentReducer{emit: func(evt AgentEvent) { events = append(events, evt) }}
+
+	if !reducer.Handle(message.StreamDelta{
+		Type:          message.StreamDeltaReasoningItem,
+		ReasoningItem: &message.ResponsesOutputItem{Type: "reasoning", ID: "rs_1"},
+	}) {
+		t.Fatal("reasoning_item delta was not handled")
+	}
+	if len(events) != 0 {
+		t.Fatalf("events = %#v, want none for reasoning_item", events)
+	}
+}

@@ -376,6 +376,11 @@ func (a *MainAgent) newMainLLMStreamReducer(llmClient *llm.Client, selectedRef, 
 				turn.appendPartialText(text)
 			}
 		},
+		appendPartialResponsesOutput: func(item message.ResponsesOutputItem) {
+			if turn != nil {
+				turn.appendPartialResponsesOutput(item)
+			}
+		},
 		scrubThinkingDelta:      scrubThinkingMarkers,
 		scrubThinkingFinal:      scrubThinkingMarkers,
 		emitThinkingStarted:     true,
@@ -403,7 +408,7 @@ func (a *MainAgent) newMainLLMStreamReducer(llmClient *llm.Client, selectedRef, 
 		discardSpeculativeOnRollback: func(turn *Turn, reason string) {
 			a.discardSpeculativeStreamToolsAndClearToolTrace(turn, reason)
 		},
-		drainPartialTextOnRollback: true,
+		drainPartialOnRollback: true,
 	}
 	streamReducer.emitActivity = func(activity ActivityType, detail string) {
 		a.emitActivity("main", activity, detail)

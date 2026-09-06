@@ -35,6 +35,10 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 			// turn. Mirrors MainAgent.handleAgentError's routing-invalidated path.
 			log.Infof("SubAgent routing invalidated during active turn; restarting request agent=%v turn_id=%v", s.instanceID, result.turnID)
 			s.parent.discardSpeculativeStreamToolsAndClearToolTrace(s.turn, "routing_invalidated")
+			// The restart can land on a different model or backend, and a
+			// finalized reasoning item only replays to the one that produced
+			// it. The partial text is provider-neutral and stays.
+			s.turn.drainPartialResponsesOutput()
 			s.continueLLMWithPendingUserMessages()
 			return
 		}
@@ -58,7 +62,10 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	}
 	// A successful response contains the authoritative full content. Discard
 	// the streaming accumulator so terminal recovery cannot append it twice.
+	// The successful response also carries its own reasoning, so drop any
+	// reasoning items the stream callback accumulated for this round.
 	s.turn.drainPartialText()
+	s.turn.drainPartialResponsesOutput()
 
 	resp := result.resp
 	resp.Content = message.NormalizeInvisibleText(resp.Content)
@@ -531,16 +538,24 @@ const maxSubAgentStreamResumes = 3
 // had already streamed as a durable interrupted assistant message. It is the
 // single place that honours the "produced text is never discarded" contract for
 // sub-agents, so it must run on the give-up path too, not only when a resume is
-// still available.
+// still available. Finalized reasoning items are preserved alongside the text
+// so the message keeps its required preceding reasoning item on replay.
 func (s *SubAgent) preserveInterruptedPartial() {
 	if s == nil || s.turn == nil {
 		return
 	}
 	partial := strings.TrimSpace(s.turn.drainPartialText())
+	reasoning := s.turn.drainPartialResponsesOutput()
 	if partial == "" {
 		return
 	}
-	msg := message.Message{Role: "assistant", Content: partial, StopReason: "interrupted"}
+	msg := message.Message{
+		Role:            "assistant",
+		Content:         partial,
+		StopReason:      "interrupted",
+		ResponsesOutput: interruptedAssistantResponsesOutput(reasoning, partial),
+		Provenance:      subAssistantProvenance(s),
+	}
 	s.ctxMgr.Append(msg)
 	s.persistMessageAsync(msg, "interrupted assistant message", nil)
 }

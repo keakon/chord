@@ -546,10 +546,10 @@ func TestStreamToolDeltaReducerRollbackDrainsPartialTextAndEmitsEvent(t *testing
 	var discardedTurn *Turn
 	var events []AgentEvent
 	reducer := streamToolDeltaReducer{
-		agentID:                    "agent-1",
-		turn:                       turn,
-		emit:                       func(evt AgentEvent) { events = append(events, evt) },
-		drainPartialTextOnRollback: true,
+		agentID:                "agent-1",
+		turn:                   turn,
+		emit:                   func(evt AgentEvent) { events = append(events, evt) },
+		drainPartialOnRollback: true,
 		discardSpeculativeOnRollback: func(t *Turn, reason string) {
 			discardedTurn = t
 			discardedReason = reason

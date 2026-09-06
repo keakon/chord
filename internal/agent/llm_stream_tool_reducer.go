@@ -22,7 +22,13 @@ type streamToolDeltaReducer struct {
 	promoteStreamingActivity     func(source string)
 	recordToolUseEnd             func(callID, callName, agentID string, at time.Time)
 	discardSpeculativeOnRollback func(turn *Turn, reason string)
-	drainPartialTextOnRollback   bool
+	// drainPartialOnRollback clears the turn's partial-text accumulator when a
+	// streamed attempt is rolled back to retry, so the abandoned attempt's text
+	// does not concatenate with the replacement. Sub-agents leave this false:
+	// their contract is that produced text is never discarded, and partial text
+	// from an abandoned attempt still reads as prose. Reasoning is not covered
+	// by this switch — see handleRollback.
+	drainPartialOnRollback bool
 }
 
 func (r streamToolDeltaReducer) Handle(delta message.StreamDelta) bool {
@@ -226,7 +232,12 @@ func (r streamToolDeltaReducer) checkVisibleSpeculativeTool(name string) specula
 
 func (r streamToolDeltaReducer) handleRollback(delta message.StreamDelta) {
 	if r.turn != nil {
-		if r.drainPartialTextOnRollback {
+		// Reasoning is always dropped, whatever the text policy is. A finalized
+		// reasoning item is bound to the attempt that produced it, so keeping
+		// it would pair the replacement message with items from a response the
+		// backend abandoned — a rejected replay, not merely stale prose.
+		r.turn.drainPartialResponsesOutput()
+		if r.drainPartialOnRollback {
 			r.turn.drainPartialText()
 		}
 		if r.discardSpeculativeOnRollback != nil {

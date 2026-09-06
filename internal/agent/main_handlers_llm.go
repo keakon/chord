@@ -238,8 +238,12 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 	// Finalized response received: snapshot any streamed partial text first for
 	// diagnostics, then clear it so later replacement/cancel paths do not persist
 	// a duplicate interrupted assistant message for a round that already reached
-	// finalize.
+	// finalize. The finalized response carries its own reasoning in
+	// payload.ResponsesOutput, so any reasoning items accumulated by the stream
+	// callback are dropped here too — keeping them would duplicate the reasoning
+	// that finalize already persists.
 	streamedText := message.NormalizeInvisibleText(a.turn.drainPartialText())
+	a.turn.drainPartialResponsesOutput()
 	payload.Content = message.NormalizeInvisibleText(payload.Content)
 	if strings.TrimSpace(streamedText) != "" || strings.TrimSpace(payload.Content) != "" {
 		log.Debugf("main finalize assistant payload turn_id=%v final_content_len=%v streamed_text_len=%v tool_calls=%v thinking_blocks=%v stop_reason=%v", evt.TurnID, len(payload.Content), len(streamedText), len(payload.ToolCalls), len(payload.ThinkingBlocks), payload.StopReason)
@@ -898,48 +902,56 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 // savePartialAssistantMsgForTurn drains any accumulated streaming text from the
 // provided turn and, if non-empty, appends a partial assistant message to the
 // context so the model can see what it had already written when it resumes.
-// Only pure-text content is saved; incomplete tool calls are intentionally
-// dropped because dangling tool_use blocks would cause API errors. It reports
-// whether a partial message was actually saved.
+// Finalized reasoning items streamed before the interruption are preserved in
+// the message's ResponsesOutput so the reasoning pairs with the message on
+// replay; without it the next request fails the Responses API pairing
+// constraint (a message without its preceding reasoning item). Incomplete tool
+// calls are intentionally dropped because dangling tool_use blocks would cause
+// API errors. It reports whether a partial message was actually saved.
 func (a *MainAgent) savePartialAssistantMsgForTurn(turn *Turn) bool {
 	if turn == nil {
 		return false
 	}
 	text := turn.drainPartialText()
+	reasoning := turn.drainPartialResponsesOutput()
 	if strings.TrimSpace(text) == "" {
 		return false
 	}
 	msg := message.Message{
-		Role:       "assistant",
-		Content:    text,
-		StopReason: "interrupted",
+		Role:            "assistant",
+		Content:         text,
+		StopReason:      "interrupted",
+		ResponsesOutput: interruptedAssistantResponsesOutput(reasoning, text),
+		Provenance:      mainAssistantProvenance(a),
 	}
 	a.ctxMgr.Append(msg)
 	if a.recoveryManager() != nil {
 		a.persistAsync(identity.MainAgentID, msg)
 	}
-	log.Debugf("saved partial assistant message after stream interruption len=%v turn_id=%v", len(text), turn.ID)
+	log.Debugf("saved partial assistant message after stream interruption len=%v reasoning_items=%v turn_id=%v", len(text), len(reasoning), turn.ID)
 	return true
 }
 
-// savePartialAssistantMsg drains any accumulated streaming text from the
-// current turn and, if non-empty, appends a partial assistant message to the
-// context so the model can see what it had already written when it resumes.
-// Only pure-text content is saved; incomplete tool calls are intentionally
-// dropped because dangling tool_use blocks would cause API errors.
+// savePartialAssistantMsg drains any accumulated streaming text (and the
+// finalized reasoning items) from the current turn and, if text is non-empty,
+// appends a partial assistant message to the context so the model can see what
+// it had already written when it resumes. Incomplete tool calls are
+// intentionally dropped because dangling tool_use blocks would cause API errors.
 func (a *MainAgent) savePartialAssistantMsg() {
 	a.savePartialAssistantMsgForTurn(a.turn)
 }
 
-// discardPartialAssistantMsg drops text emitted by an LLM request that ended
-// in an error. A failed request has no resumable assistant turn; retaining its
-// tool-preface text would make an incomplete response look complete in history.
+// discardPartialAssistantMsg drops text and reasoning emitted by an LLM request
+// that ended in an error. A failed request has no resumable assistant turn;
+// retaining its tool-preface text would make an incomplete response look
+// complete in history.
 func (a *MainAgent) discardPartialAssistantMsg() {
 	if a.turn == nil {
 		return
 	}
 	text := a.turn.drainPartialText()
-	if strings.TrimSpace(text) != "" {
-		log.Debugf("discarded partial assistant message after LLM error len=%v turn_id=%v", len(text), a.turn.ID)
+	reasoningItems := len(a.turn.drainPartialResponsesOutput())
+	if strings.TrimSpace(text) != "" || reasoningItems > 0 {
+		log.Debugf("discarded partial assistant message after LLM error len=%v reasoning_items=%v turn_id=%v", len(text), reasoningItems, a.turn.ID)
 	}
 }

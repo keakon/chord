@@ -1023,14 +1023,15 @@ func (s *SubAgent) newSubLLMStreamReducer(turn *Turn, promoteStreamingActivity f
 		s.parent.emitToTUI(RunningModelChangedEvent{AgentID: s.instanceID, ProviderModelRef: client.PrimaryModelRef(), RunningModelRef: runningRef})
 	}
 	streamReducer.content = streamContentReducer{
-		agentID:               s.instanceID,
-		emit:                  s.parent.emitToTUI,
-		appendPartialText:     turn.appendPartialText,
-		scrubThinkingDelta:    false,
-		scrubThinkingFinal:    scrubThinkingMarkers,
-		thinkingCommitMode:    streamContentCommitFullText,
-		textFlushInterval:     defaultStreamTextFlushInterval,
-		thinkingFlushInterval: 0,
+		agentID:                      s.instanceID,
+		emit:                         s.parent.emitToTUI,
+		appendPartialText:            turn.appendPartialText,
+		appendPartialResponsesOutput: turn.appendPartialResponsesOutput,
+		scrubThinkingDelta:           false,
+		scrubThinkingFinal:           scrubThinkingMarkers,
+		thinkingCommitMode:           streamContentCommitFullText,
+		textFlushInterval:            defaultStreamTextFlushInterval,
+		thinkingFlushInterval:        0,
 	}
 	streamReducer.tool = streamToolDeltaReducer{
 		agentID:          s.instanceID,

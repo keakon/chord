@@ -7,6 +7,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -364,6 +365,62 @@ func (t *Turn) drainPartialText() string {
 	s := t.partialText.String()
 	t.partialText.Reset()
 	return s
+}
+
+// appendPartialResponsesOutput adds a finalized reasoning output item to the
+// turn's accumulator. It mirrors appendPartialText so an interrupted stream can
+// persist the reasoning that was already finalized before the interruption.
+func (t *Turn) appendPartialResponsesOutput(item message.ResponsesOutputItem) {
+	if t == nil {
+		return
+	}
+	t.partialResponsesOutputMu.Lock()
+	defer t.partialResponsesOutputMu.Unlock()
+	t.partialResponsesOutput = append(t.partialResponsesOutput, item)
+}
+
+// drainPartialResponsesOutput returns and clears the accumulated finalized
+// reasoning items. Callers that persist an interrupted assistant message pass
+// the result to interruptedAssistantResponsesOutput so the reasoning pairs
+// with the message; callers on the success/rollback/discard paths ignore the
+// return to drop reasoning that the completed response already carries or that
+// belongs to an abandoned attempt.
+func (t *Turn) drainPartialResponsesOutput() []message.ResponsesOutputItem {
+	if t == nil {
+		return nil
+	}
+	t.partialResponsesOutputMu.Lock()
+	defer t.partialResponsesOutputMu.Unlock()
+	out := t.partialResponsesOutput
+	t.partialResponsesOutput = nil
+	return out
+}
+
+// interruptedAssistantResponsesOutput builds the ResponsesOutput that must
+// accompany a partial-text interrupted assistant message: the finalized
+// reasoning items (in provider order) followed by a message item carrying the
+// partial text. The Responses API requires a message item to be preceded by its
+// reasoning item; since replay replays msg.ResponsesOutput verbatim and ignores
+// msg.Content when it is non-empty, the message must appear here too, paired
+// with the reasoning. Tool calls are intentionally excluded (a dangling
+// function_call without its output is an API error).
+func interruptedAssistantResponsesOutput(reasoning []message.ResponsesOutputItem, text string) []message.ResponsesOutputItem {
+	if len(reasoning) == 0 {
+		// Nothing to pair the message with, so a native payload would only cost
+		// replay headroom: any ResponsesOutput forces the request-level replay
+		// floor up to synthesized for every later request in the session.
+		return nil
+	}
+	out := make([]message.ResponsesOutputItem, 0, len(reasoning)+1)
+	out = append(out, reasoning...)
+	out = append(out, message.ResponsesOutputItem{
+		Type: "message",
+		Role: "assistant",
+		Content: []message.ResponsesOutputContent{
+			{Type: "output_text", Text: text},
+		},
+	})
+	return out
 }
 
 func (a *MainAgent) recordToolTraceToolUseEnd(callID, name, agentID string, at time.Time) {

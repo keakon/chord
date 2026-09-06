@@ -348,37 +348,44 @@ func NewSystemToolsMessage(tools []ToolDefinition) Message {
 // StreamDelta represents an incremental piece of a streaming LLM response.
 type StreamDelta struct {
 	// Type is one of: "text", "tool_use_start", "tool_use_delta", "tool_use_end",
-	// "thinking", "thinking_end", "error", "status", "rate_limits", "rollback",
-	// "key_switched", "key_confirmed", "key_deactivated", "key_invalidated",
-	// "key_expired", "retry_error".
+	// "thinking", "thinking_end", "reasoning_item", "error", "status",
+	// "rate_limits", "rollback", "key_switched", "key_confirmed",
+	// "key_deactivated", "key_invalidated", "key_expired", "retry_error".
 	//
 	// key_confirmed may carry Status.ModelRef/Status.Reason to identify the
 	// effective model that produced the first visible token for the current
 	// streaming attempt (used for confirming fallback/key-switch UI toasts).
-	Type      string                          // delta category
-	Text      string                          // for Type="text" or "thinking"
-	ToolCall  *ToolCallDelta                  // for Type="tool_use_*"
-	Status    *StatusDelta                    // for Type="status"
-	RateLimit *ratelimit.KeyRateLimitSnapshot // for Type="rate_limits"
-	Rollback  *RollbackDelta                  // for Type="rollback"
-	AccountID string                          // for Type="key_deactivated"/"key_invalidated"/"key_expired"/"retry_error": the OAuth account ID
-	Email     string                          // for Type="key_deactivated"/"key_invalidated"/"key_expired"/"retry_error": the OAuth account email, if available
-	Err       error                           // for Type="retry_error": the error from a failed retry attempt
-	Provider  string                          // for Type="retry_error": provider name
-	Model     string                          // for Type="retry_error": model ID
-	MaskedKey string                          // for Type="retry_error": masked key label (safe for logs/UI, not guaranteed unique)
-	Progress  *StreamProgressDelta            // optional cumulative/request progress hint for status bar or transport diagnostics
-	Event     *StreamEventDelta               // optional low-level provider stream event diagnostics
+	//
+	// reasoning_item carries a finalized reasoning output item (with its
+	// encrypted_content) so an interrupted turn can persist the reasoning
+	// alongside its partial message and replay it as the message's required
+	// preceding item.
+	Type          string                          // delta category
+	Text          string                          // for Type="text" or "thinking"
+	ToolCall      *ToolCallDelta                  // for Type="tool_use_*"
+	Status        *StatusDelta                    // for Type="status"
+	RateLimit     *ratelimit.KeyRateLimitSnapshot // for Type="rate_limits"
+	Rollback      *RollbackDelta                  // for Type="rollback"
+	ReasoningItem *ResponsesOutputItem            // for Type="reasoning_item"
+	AccountID     string                          // for Type="key_deactivated"/"key_invalidated"/"key_expired"/"retry_error": the OAuth account ID
+	Email         string                          // for Type="key_deactivated"/"key_invalidated"/"key_expired"/"retry_error": the OAuth account email, if available
+	Err           error                           // for Type="retry_error": the error from a failed retry attempt
+	Provider      string                          // for Type="retry_error": provider name
+	Model         string                          // for Type="retry_error": model ID
+	MaskedKey     string                          // for Type="retry_error": masked key label (safe for logs/UI, not guaranteed unique)
+	Progress      *StreamProgressDelta            // optional cumulative/request progress hint for status bar or transport diagnostics
+	Event         *StreamEventDelta               // optional low-level provider stream event diagnostics
 }
 
 const (
-	StreamDeltaText        = "text"
-	StreamDeltaThinking    = "thinking"
-	StreamDeltaThinkingEnd = "thinking_end"
-	StreamDeltaError       = "error"
-	StreamDeltaStatus      = "status"
-	StreamDeltaRateLimits  = "rate_limits"
-	StreamDeltaRollback    = "rollback"
+	StreamDeltaText          = "text"
+	StreamDeltaThinking      = "thinking"
+	StreamDeltaThinkingEnd   = "thinking_end"
+	StreamDeltaReasoningItem = "reasoning_item"
+	StreamDeltaError         = "error"
+	StreamDeltaStatus        = "status"
+	StreamDeltaRateLimits    = "rate_limits"
+	StreamDeltaRollback      = "rollback"
 
 	StreamDeltaToolUseStart = "tool_use_start"
 	StreamDeltaToolUseDelta = "tool_use_delta"

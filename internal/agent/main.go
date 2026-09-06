@@ -99,6 +99,16 @@ type Turn struct {
 	// callback runs on a separate goroutine from the event loop.
 	partialTextMu sync.Mutex
 	partialText   strings.Builder
+	// partialResponsesOutput accumulates finalized reasoning items streamed
+	// during the current LLM round so they can be saved with the partial
+	// assistant message if the stream is interrupted before
+	// response.completed. Without it the persisted message lacks its
+	// preceding reasoning item and the next request fails the Responses API
+	// pairing constraint (400). Protected by partialResponsesOutputMu because
+	// the stream callback runs on a separate goroutine from the event loop,
+	// like partialText.
+	partialResponsesOutputMu sync.Mutex
+	partialResponsesOutput   []message.ResponsesOutputItem
 	// SubAgent terminal recovery is intentionally bounded to one additional
 	// request so a text-only reply that never calls a coordination tool cannot
 	// spin forever.
@@ -2385,6 +2395,10 @@ func (a *MainAgent) handleAgentError(evt Event) {
 		if llm.IsRoutingInvalidated(err) {
 			log.Infof("routing invalidated during active turn; restarting request turn_id=%v instance=%v", evt.TurnID, a.instanceID)
 			a.applyPendingModelPoolSwitchesAtRequestBoundary()
+			// The restart can land on a different model or backend, and a
+			// finalized reasoning item only replays to the one that produced
+			// it. The partial text is provider-neutral and stays.
+			a.turn.drainPartialResponsesOutput()
 			if a.resumeTurnAfterRoutingInvalidation(evt.TurnID) {
 				return
 			}

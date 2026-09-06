@@ -112,3 +112,90 @@ func TestParseResponsesSSECustomToolCallEmitsInputDeltas(t *testing.T) {
 		t.Fatalf("final tool args = %q, want complete canonical patch", resp.ToolCalls[0].Args)
 	}
 }
+
+// TestParseResponsesSSEEmitsReasoningItemDeltaOnDone verifies that a finalized
+// reasoning item (response.output_item.done with encrypted_content) is surfaced
+// via a StreamDeltaReasoningItem delta even when response.completed never
+// arrives. Streaming does not fold reasoning into resp.ResponsesOutput until the
+// terminal event, so without this delta an interrupted turn loses the reasoning
+// and the next request sees an orphan message (Responses API 400).
+func TestParseResponsesSSEEmitsReasoningItemDeltaOnDone(t *testing.T) {
+	stream := buildSSEStream([]string{
+		`{"type":"response.output_item.added","output_index":0,"item":{"type":"reasoning","id":"rs_1","encrypted_content":"opaque-reasoning-blob"}}`,
+		`{"type":"response.output_item.done","output_index":0,"item":{"type":"reasoning","id":"rs_1","encrypted_content":"opaque-reasoning-blob"}}`,
+		`{"type":"response.created","response":{"id":"resp_1","status":"in_progress"}}`,
+		`{"type":"response.output_item.added","output_index":1,"item":{"type":"message","id":"msg_1","role":"assistant"}}`,
+		`{"type":"response.output_text.delta","item_id":"msg_1","output_index":1,"content_index":0,"delta":"partial reply"}`,
+		`{"type":"[DONE]"}`,
+	})
+	var got []message.ResponsesOutputItem
+	if _, err := parseResponsesSSE(stream, func(delta message.StreamDelta) {
+		if delta.Type == message.StreamDeltaReasoningItem && delta.ReasoningItem != nil {
+			got = append(got, *delta.ReasoningItem)
+		}
+	}, nil); err != nil {
+		t.Fatalf("parseResponsesSSE: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("reasoning_item delta count = %d, want 1 (%+v)", len(got), got)
+	}
+	item := got[0]
+	if item.Type != "reasoning" || item.ID != "rs_1" || item.EncryptedContent != "opaque-reasoning-blob" {
+		t.Fatalf("reasoning_item delta = %+v, want reasoning/rs_1/opaque-reasoning-blob", item)
+	}
+}
+
+// A reasoning item with no encrypted payload carries nothing replay can use:
+// the summary and reasoning_text this event does not parse are human-readable
+// annotations, and an id-only item would replay as a reference to state the
+// target may never have stored. It must not be surfaced.
+func TestParseResponsesSSESkipsReasoningItemWithoutEncryptedContent(t *testing.T) {
+	stream := buildSSEStream([]string{
+		`{"type":"response.output_item.added","output_index":0,"item":{"type":"reasoning","id":"rs_1"}}`,
+		`{"type":"response.output_item.done","output_index":0,"item":{"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"thought about it"}]}}`,
+		`{"type":"response.output_item.added","output_index":1,"item":{"type":"message","id":"msg_1","role":"assistant"}}`,
+		`{"type":"response.output_text.delta","item_id":"msg_1","output_index":1,"content_index":0,"delta":"partial reply"}`,
+		`{"type":"[DONE]"}`,
+	})
+	var got []message.ResponsesOutputItem
+	if _, err := parseResponsesSSE(stream, func(delta message.StreamDelta) {
+		if delta.Type == message.StreamDeltaReasoningItem && delta.ReasoningItem != nil {
+			got = append(got, *delta.ReasoningItem)
+		}
+	}, nil); err != nil {
+		t.Fatalf("parseResponsesSSE: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("reasoning_item deltas = %+v, want none for an item with no encrypted payload", got)
+	}
+}
+
+// TestParseResponsesSSEEmitsReasoningItemDeltaPerFinalizedItem verifies each
+// finalized reasoning item emits exactly one delta (one per output_item.done),
+// and output_item.added does not emit one.
+func TestParseResponsesSSEEmitsReasoningItemDeltaPerFinalizedItem(t *testing.T) {
+	stream := buildSSEStream([]string{
+		`{"type":"response.output_item.added","output_index":0,"item":{"type":"reasoning","id":"rs_1","encrypted_content":"a"}}`,
+		`{"type":"response.output_item.added","output_index":1,"item":{"type":"reasoning","id":"rs_2","encrypted_content":"b"}}`,
+		`{"type":"response.output_item.done","output_index":0,"item":{"type":"reasoning","id":"rs_1","encrypted_content":"a"}}`,
+		`{"type":"response.output_item.done","output_index":1,"item":{"type":"reasoning","id":"rs_2","encrypted_content":"b"}}`,
+		`{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[{"type":"reasoning","id":"rs_1","encrypted_content":"a"},{"type":"reasoning","id":"rs_2","encrypted_content":"b"}]}}`,
+	})
+	var got []string
+	if _, err := parseResponsesSSE(stream, func(delta message.StreamDelta) {
+		if delta.Type == message.StreamDeltaReasoningItem && delta.ReasoningItem != nil {
+			got = append(got, delta.ReasoningItem.ID)
+		}
+	}, nil); err != nil {
+		t.Fatalf("parseResponsesSSE: %v", err)
+	}
+	want := []string{"rs_1", "rs_2"}
+	if len(got) != len(want) {
+		t.Fatalf("reasoning_item delta ids = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("reasoning_item delta %d = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
