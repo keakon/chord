@@ -17,6 +17,7 @@ import (
 	"github.com/keakon/chord/internal/lsp"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/privatefs"
+	"github.com/keakon/chord/internal/toolname"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -743,7 +744,76 @@ func reduceRequestToolOutput(class requestReductionClass, ctx requestReductionCo
 	default:
 		return "", "", false
 	}
-	return appendPreservedArtifactReferences(reduced, ctx.Content), rule, true
+	reduced = appendPreservedArtifactReferences(reduced, ctx.Content)
+	if address, ok := ensureReducedOutputRecoverable(class, reduced, ctx); ok {
+		reduced += "\n" + address
+	}
+	return reduced, rule, true
+}
+
+// minRecoverableArchiveBytes is the payload size above which a lossy summary
+// must leave a recovery address behind.
+const minRecoverableArchiveBytes = 2000
+
+// ensureReducedOutputRecoverable upholds the layer's restorable invariant:
+// never drop payload without leaving an address to get it back. The tool layer
+// already archives anything over its inline budget and durable compaction
+// exports history before rewriting it, but request-level reduction used to
+// archive only five one-shot tools, so everything between the byte gates and
+// the inline budget was lost outright. That is the band this layer works in,
+// and it is why a misclassified summary could cost real work: the payload was
+// gone, not merely summarized.
+//
+// Classes whose summary already carries its own recovery route are skipped: a
+// stale or superseded read tells the model to re-read or points at the newer
+// copy, diagnostics keep their structured body, and a confirmation has no
+// payload. Archives are content-addressed, so identical copies (the repeated
+// case) share one file rather than writing one each.
+func ensureReducedOutputRecoverable(class requestReductionClass, reduced string, ctx requestReductionContext) (string, bool) {
+	switch class {
+	case requestReductionConfirm, requestReductionDiagnostics:
+		return "", false
+	case requestReductionReadLike:
+		// A read's recovery route is re-reading the file itself.
+		if toolname.Normalize(ctx.ToolName) == tools.NameRead {
+			return "", false
+		}
+	}
+	if ctx.ArchiveDir == "" || len(ctx.Content) < minRecoverableArchiveBytes {
+		return "", false
+	}
+	// Already recoverable: the tool layer's own reference survived into the
+	// summary, or this class archived the payload itself.
+	if len(tools.ExtractArtifactReferences(reduced)) > 0 || strings.Contains(reduced, "archived at ") {
+		return "", false
+	}
+	path, ok := writeReducedOutputArchive(ctx)
+	if !ok {
+		return "", false
+	}
+	// Canonical reference form: the trailing period is what makes this parse
+	// as an artifact reference, so later reductions of this marker carry the
+	// address forward instead of dropping it.
+	return tools.ArtifactReferencePrefix + path + ".", true
+}
+
+// writeReducedOutputArchive persists content under a content-addressed name so
+// repeated writes of the same payload converge on one file.
+func writeReducedOutputArchive(ctx requestReductionContext) (string, bool) {
+	if strings.TrimSpace(ctx.Content) == "" {
+		return "", false
+	}
+	sum := sha256.Sum256([]byte(ctx.Content))
+	fileName := fmt.Sprintf("%s-%s.txt", toolNameOrUnknown(ctx.ToolName), hex.EncodeToString(sum[:6]))
+	relDir := "reduced-artifacts"
+	if err := privatefs.EnsureDir(ctx.ArchiveDir, filepath.Join(ctx.ArchiveDir, relDir)); err != nil {
+		return "", false
+	}
+	absPath := filepath.Join(ctx.ArchiveDir, relDir, fileName)
+	if err := privatefs.WriteFile(ctx.ArchiveDir, absPath, []byte(ctx.Content)); err != nil {
+		return "", false
+	}
+	return absPath, true
 }
 
 func appendPreservedArtifactReferences(reduced, original string) string {
@@ -832,14 +902,8 @@ func archiveIrreducibleToolOutput(ctx requestReductionContext) (string, bool) {
 	if ctx.ArchiveDir == "" || strings.TrimSpace(ctx.Content) == "" {
 		return "", false
 	}
-	sum := sha256.Sum256([]byte(ctx.Content))
-	fileName := fmt.Sprintf("%s-%s.txt", toolNameOrUnknown(ctx.ToolName), hex.EncodeToString(sum[:6]))
-	relDir := "reduced-artifacts"
-	if err := privatefs.EnsureDir(ctx.ArchiveDir, filepath.Join(ctx.ArchiveDir, relDir)); err != nil {
-		return "", false
-	}
-	absPath := filepath.Join(ctx.ArchiveDir, relDir, fileName)
-	if err := privatefs.WriteFile(ctx.ArchiveDir, absPath, []byte(ctx.Content)); err != nil {
+	absPath, ok := writeReducedOutputArchive(ctx)
+	if !ok {
 		return "", false
 	}
 	return fmt.Sprintf("[Older %s output archived at %s; read it back to recover the full payload (bytes=%d).]", toolNameOrUnknown(ctx.ToolName), absPath, len(ctx.Content)), true
@@ -967,9 +1031,36 @@ func parseSearchResultLine(line string) (path, lineNo, snippet string, ok bool) 
 		path = strings.TrimSpace(trimmed[:i])
 		lineNo = strings.TrimSpace(trimmed[i+1 : j])
 		snippet = strings.TrimSpace(trimmed[j+1:])
+		if !looksLikeSearchResultPath(path) {
+			continue
+		}
 		return path, lineNo, snippet, path != "" && lineNo != "" && snippet != ""
 	}
 	return "", "", "", false
+}
+
+// looksLikeSearchResultPath rejects the `path` half of a `path:line:text`
+// candidate when it cannot plausibly be a file path. Without it a timestamped
+// log line — `12:34:56 INFO ...`, or `2026-09-06 12:34:56 ...` — parses as a
+// hit at line 34 of a file named "12", two such lines make the whole output
+// look like a search result, and the summary then asserts a match count and a
+// preserved query for output that never was a search.
+func looksLikeSearchResultPath(path string) bool {
+	if path == "" || strings.ContainsAny(path, " \t") {
+		return false
+	}
+	digitsOnly := true
+	for i := 0; i < len(path); i++ {
+		if !isASCIIDigit(path[i]) {
+			digitsOnly = false
+			break
+		}
+	}
+	if digitsOnly {
+		return false
+	}
+	// Real hits name a file: either a directory component or an extension.
+	return strings.ContainsAny(path, "/\\.")
 }
 
 func isASCIIDigit(b byte) bool {
@@ -1036,23 +1127,40 @@ func looksLikeBuildLikeLog(ctx requestReductionContext) bool {
 	if content == "" {
 		return false
 	}
-	found := false
+	// A single incidental marker must not classify an ordinary listing as a
+	// build log. `git log --oneline` prints one commit per line, and a subject
+	// such as "fix(tools): improve match-failure recovery" contains "fail";
+	// treating that listing as a build log routes it through the signal-based
+	// log summary, which keeps only the marker lines and drops every other
+	// commit. Require either a line that leads with a failure verdict (a real
+	// runner always emits one) or at least two marker lines.
+	matches := 0
+	strong := false
 	forEachLine(content, func(line string) bool {
 		lower := strings.ToLower(strings.TrimSpace(line))
 		if lower == "" {
 			return true
 		}
-		if containsAnyMarker(lower, buildLogMarkers) ||
-			strings.HasPrefix(lower, "fail ") ||
+		if strings.HasPrefix(lower, "fail ") ||
+			strings.HasPrefix(lower, "fail\t") ||
 			strings.HasPrefix(lower, "--- fail") ||
 			strings.HasPrefix(lower, "build failed") ||
-			strings.HasPrefix(lower, "lint failed") {
-			found = true
+			strings.HasPrefix(lower, "lint failed") ||
+			strings.HasPrefix(lower, "panic:") ||
+			strings.HasPrefix(lower, "traceback") ||
+			strings.HasPrefix(lower, "diagnostics:") {
+			strong = true
 			return false
+		}
+		if containsAnyMarker(lower, buildLogMarkers) {
+			matches++
+			if matches >= 2 {
+				return false
+			}
 		}
 		return true
 	})
-	return found
+	return strong || matches >= 2
 }
 
 func reduceSearchLikeOutputSummary(ctx requestReductionContext) string {
@@ -1455,10 +1563,22 @@ func summarizeJSONArrayItems(items []any, limit int) []string {
 func reduceLongLogOutputSummary(ctx requestReductionContext) string {
 	counts := summarizeLogSignalCounts(ctx.Content)
 	lines := summarizeRepresentativeLogLines(ctx.Content, 6)
-	if len(lines) == 0 {
+	preserved := len(lines)
+	if preserved == 0 {
 		lines = []string{"- (no preserved log lines)"}
 	}
-	return fmt.Sprintf("[Older %s log summarized for this request to save context; errors=%d warnings=%d failed=%d]\n%s", toolNameOrUnknown(ctx.ToolName), counts.Errors, counts.Warnings, counts.Failures, strings.Join(lines, "\n"))
+	// State how much was dropped. This summary keeps only marker lines, so
+	// without a count the model cannot tell "one matching line" from "the
+	// output only had one line" and may read the summary as the whole result.
+	total := countMeaningfulLines(ctx.Content)
+	if omitted := total - preserved; omitted > 0 {
+		noun := "lines"
+		if omitted == 1 {
+			noun = "line"
+		}
+		lines = append(lines, fmt.Sprintf("- ... (%d more %s omitted) ...", omitted, noun))
+	}
+	return fmt.Sprintf("[Older %s log summarized for this request to save context; lines=%d errors=%d warnings=%d failed=%d]\n%s", toolNameOrUnknown(ctx.ToolName), total, counts.Errors, counts.Warnings, counts.Failures, strings.Join(lines, "\n"))
 }
 
 func reduceShellSuccessOutputSummary(ctx requestReductionContext) string {

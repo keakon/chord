@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -581,5 +582,150 @@ func TestParseNumberedSourceLine(t *testing.T) {
 		if ok != tc.wantOk || (ok && num != tc.wantNum) {
 			t.Fatalf("parseNumberedSourceLine(%q) = (%d, %v), want num=%d ok=%v", tc.line, num, ok, tc.wantNum, tc.wantOk)
 		}
+	}
+}
+
+// A commit listing is not a build log. `git log --oneline` prints one commit
+// per line, and a subject such as "fix(tools): improve match-failure recovery"
+// contains "fail"; classifying the listing as a build log routes it through
+// the signal-based log summary, which keeps only the marker line and drops
+// every other commit. That misread a 30-commit range as a single commit and
+// held the wrong conclusion for dozens of requests.
+func TestLooksLikeBuildLikeLogIgnoresIncidentalMarkerInListing(t *testing.T) {
+	commitLog := strings.Join([]string{
+		"cde48810 feat(agent): add the context reduction frontier",
+		"58ba8e1d fix(tools): improve edit/apply_patch match-failure recovery",
+		"a625b9b8 docs: describe the retained recent messages budget",
+		"7f10c2d4 refactor(llm): fold the retry helpers together",
+	}, "\n")
+	ctx := requestReductionContext{ToolName: tools.NameShell, Content: commitLog}
+	if looksLikeBuildLikeLog(ctx) {
+		t.Fatal("a commit listing with one incidental 'failure' subject must not be a build log")
+	}
+	// A real runner still classifies: it leads a line with the verdict.
+	ctx.Content = "ok  \tgithub.com/x/y\t0.2s\n--- FAIL: TestThing (0.00s)\n"
+	if !looksLikeBuildLikeLog(ctx) {
+		t.Fatal("a failing test run must still be treated as a build log")
+	}
+	// So does output whose markers span more than one line.
+	ctx.Content = "warning: unused import\nerror: undefined name\n"
+	if !looksLikeBuildLikeLog(ctx) {
+		t.Fatal("multi-marker output must still be treated as a build log")
+	}
+}
+
+// A timestamp is not a path:line:text hit. Parsing `12:34:56 INFO ...` as line
+// 34 of a file named "12" made plain logs look like search results, and the
+// search summary then asserts a match count and a preserved query for output
+// that never was a search.
+func TestSearchResultParsingRejectsTimestampedLogLines(t *testing.T) {
+	for _, line := range []string{
+		"12:34:56 INFO starting the worker pool",
+		"2026-09-06 12:34:56 WARN retrying the upstream call",
+		"10:00:03 request completed in 12ms",
+	} {
+		if _, _, _, ok := parseSearchResultLine(line); ok {
+			t.Fatalf("timestamped log line parsed as a search hit: %q", line)
+		}
+	}
+	logOutput := "12:34:56 INFO starting\n12:34:57 INFO listening on :8080\n12:34:58 INFO ready\n"
+	if looksLikeSearchResultContent(logOutput) {
+		t.Fatal("a timestamped log must not be classified as search output")
+	}
+	// Real hits still parse.
+	path, lineNo, snippet, ok := parseSearchResultLine("internal/agent/main.go:120: func run() error {")
+	if !ok || path != "internal/agent/main.go" || lineNo != "120" || snippet == "" {
+		t.Fatalf("real search hit failed to parse: path=%q line=%q snippet=%q ok=%v", path, lineNo, snippet, ok)
+	}
+}
+
+// The long-log summary keeps only marker lines, so it must say how many lines
+// it dropped. Without a count the model cannot tell "one matching line" from
+// "the output only had one line" and may read the summary as the whole result.
+func TestLongLogSummaryReportsOmittedLineCount(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("error: first problem\n")
+	for i := range 40 {
+		fmt.Fprintf(&b, "step %d completed\n", i)
+	}
+	ctx := requestReductionContext{ToolName: tools.NameShell, Content: b.String()}
+	summary := reduceLongLogOutputSummary(ctx)
+	if !strings.Contains(summary, "lines=41") {
+		t.Fatalf("summary should report the total meaningful line count, got %q", summary)
+	}
+	if !strings.Contains(summary, "40 more lines omitted") {
+		t.Fatalf("summary should report how many lines it dropped, got %q", summary)
+	}
+}
+
+// The restorable invariant: a lossy summary must leave an address the model
+// can read back. The tool layer archives anything over its inline budget and
+// compaction exports history before rewriting it; request-level reduction
+// works in the band between the byte gates and that budget, so without this it
+// is the one layer that can destroy a payload outright.
+func TestLossySummaryLeavesRecoveryAddress(t *testing.T) {
+	dir := t.TempDir()
+	content := strings.Repeat("build step ok line\n", 400)
+	ctx := requestReductionContext{
+		ToolName:   tools.NameShell,
+		Meta:       toolCallMeta{Name: tools.NameShell},
+		Content:    content,
+		Age:        3,
+		Policy:     defaultContextReductionPolicy(),
+		ArchiveDir: dir,
+	}
+	reduced, _, ok := reduceRequestToolOutput(requestReductionShellOK, ctx)
+	if !ok {
+		t.Fatal("shell success output should reduce")
+	}
+	refs := tools.ExtractArtifactReferences(reduced)
+	if len(refs) == 0 {
+		t.Fatalf("lossy summary must carry a recovery address, got %q", reduced)
+	}
+	path := strings.TrimSuffix(strings.TrimPrefix(refs[0], tools.ArtifactReferencePrefix), ".")
+	saved, err := os.ReadFile(strings.TrimSpace(path))
+	if err != nil {
+		t.Fatalf("archived payload unreadable: %v", err)
+	}
+	if string(saved) != content {
+		t.Fatalf("archived payload differs from the original (%d vs %d bytes)", len(saved), len(content))
+	}
+
+	// Identical payloads are content-addressed, so repeated copies converge on
+	// one file instead of writing one archive each.
+	repeated, _, ok := reduceRequestToolOutput(requestReductionRepeated, ctx)
+	if !ok {
+		t.Fatal("repeated output should reduce")
+	}
+	repeatedRefs := tools.ExtractArtifactReferences(repeated)
+	if len(repeatedRefs) == 0 || repeatedRefs[0] != refs[0] {
+		t.Fatalf("identical payloads should share one archive, got %v want %v", repeatedRefs, refs)
+	}
+
+	// A stale read already carries its own recovery route (re-read the file),
+	// so it must not spend a disk write on an archive.
+	readCtx := requestReductionContext{
+		ToolName:        tools.NameRead,
+		Meta:            toolCallMeta{Name: tools.NameRead},
+		Content:         "READ_RESULT lines=1-400 total=400\n" + strings.Repeat("stale line\n", 300),
+		Age:             3,
+		Policy:          defaultContextReductionPolicy(),
+		ReadInvalidated: true,
+		ArchiveDir:      dir,
+	}
+	readReduced, _, ok := reduceRequestToolOutput(requestReductionReadLike, readCtx)
+	if !ok {
+		t.Fatal("stale read should reduce")
+	}
+	if len(tools.ExtractArtifactReferences(readReduced)) > 0 {
+		t.Fatalf("a stale read guides a re-read and must not be archived, got %q", readReduced)
+	}
+
+	// Small payloads are not worth an archive.
+	smallCtx := ctx
+	smallCtx.Content = "ok\n"
+	small, _, ok := reduceRequestToolOutput(requestReductionShellOK, smallCtx)
+	if ok && len(tools.ExtractArtifactReferences(small)) > 0 {
+		t.Fatalf("small payload should not be archived, got %q", small)
 	}
 }

@@ -15,7 +15,7 @@ the surrounding configuration model (files, layers, providers), see
 | Aspect | Context compaction | Context reduction |
 |--------|-----------|-----------|
 | What it does | Calls an LLM to generate a structured summary and replaces old history | Applies deterministic rules to trim stale tool output from the current request |
-| Writes to disk | ✅ Rewrites session files | ❌ Session files unchanged |
+| Writes to disk | ✅ Rewrites session files | ❌ Conversation unchanged (archives dropped payloads) |
 | Uses an LLM | ✅ (configurable model pool) | ❌ (heuristic rules only) |
 | When it fires | Threshold is reached and a main-model request is about to start / manual `/compact` / error recovery | Before every LLM request |
 | Typical latency | Seconds to tens of seconds (waits for LLM) | Milliseconds (in-memory rule matching) |
@@ -78,10 +78,12 @@ stays visible in the anchors block with a `~` prefix so the model can see the
 direction change. Declarative constraints you state in a plain message — for
 example "keep the existing API behavior" — get the same anchor authority as
 imperative corrections, because they too are standing instructions that would
-otherwise erode over repeated compactions. The checkpoint also lists every
-archived `history-N.md` file with its content topics as a **history map**, so
-the model can read the exact archive back with the read tool when it needs the
-original wording instead of guessing which file to open. Each archive also
+otherwise erode over repeated compactions. The checkpoint also lists the most
+recently archived `history-N.md` files with their content topics as a **history
+map**, so the model can read the exact archive back with the read tool when it
+needs the original wording instead of guessing which file to open. Older entries
+collapse into a single count so the map cannot grow without bound; their names
+follow the same `history-N.md` pattern and stay readable. Each archive also
 starts with a short **message index** (one line per message segment: start
 line, block kind, first-line snippet, `LARGE` marker for oversized tool
 output); the checkpoint tells the model to read the index first and then only
@@ -444,9 +446,19 @@ selected models have smaller input budgets or split input/output limits.
 
 Before each LLM request, Chord applies deterministic rules to inspect tool
 results and trim large, stale output. **This only affects the current request
-prompt — it never rewrites session files on disk.** Decisions use tool type,
-actual main-model request batches, size, and local validity state. Context usage
-affects durable compaction only and cannot change the reduction surface.
+prompt — it never rewrites the conversation stored on disk.** Decisions use tool
+type, actual main-model request batches, size, and local validity state. Context
+usage affects durable compaction only and cannot change the reduction surface.
+
+**Every lossy summary leaves a recovery address.** When reduction summarizes a
+payload larger than 2000 bytes, it first writes the full output to the session's
+`reduced-artifacts/` directory and appends a `Full output saved to <path>`
+reference to the marker, so nothing this layer drops is unrecoverable. Archives
+are content-addressed: identical payloads share one file, so repeated copies of
+the same output do not each cost a write. Summaries that already carry their own
+recovery route are exempt, because an extra copy would buy nothing: a stale or
+superseded read tells the model to re-read the file or points at the newer copy,
+diagnostics keep their structured body, and a confirmation has no payload.
 
 ### First-use tool-output budget
 
