@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
@@ -174,23 +175,64 @@ func TestCompactionGraceEndsWhenModelDrivenSettlesAfterArmedCrossing(t *testing.
 	}
 }
 
+// Batch 0 is a legitimate start batch: before any request batch has been
+// reserved the gate reads 0. A zero start batch must therefore not be read as
+// "no grace running", or the first crossing would restart the grace on every
+// request and re-record its analytics stage each time.
+func TestCompactionGraceStartsAtBatchZeroWithoutRestarting(t *testing.T) {
+	a := graceTestAgent(t, 0.85)
+	// Undo the helper's reservation so currentRequestBatch reports 0.
+	a.requestBatches = requestBatchState{}
+	snapshot := a.ctxMgr.Snapshot()
+	if got := a.currentRequestBatch(snapshot); got != 0 {
+		t.Fatalf("premise broken: current batch = %d, want 0 so the zero-value case is exercised", got)
+	}
+
+	// The observable symptom of treating batch 0 as "not started" is a repeated
+	// "started" stage: the state after either code path looks the same, but a
+	// restart re-records the analytics event on every request.
+	started := 0
+	a.usageEventSink = func(evt analytics.UsageEvent) {
+		if evt.Purpose == analytics.UsagePurposeCompactionGrace && evt.Diagnostic["stage"] == "started" {
+			started++
+		}
+	}
+
+	if !a.usageDrivenCompactionGraceDefers(snapshot) {
+		t.Fatal("first crossing must defer")
+	}
+	if !a.compactionGraceActive || a.compactionGraceStartBatch != 0 {
+		t.Fatalf("grace active=%v start=%d, want active at batch 0", a.compactionGraceActive, a.compactionGraceStartBatch)
+	}
+	// A second crossing at the same batch must be recognised as the same grace
+	// still running, not as a fresh start.
+	if !a.usageDrivenCompactionGraceDefers(snapshot) {
+		t.Fatal("second crossing inside the grace must still defer")
+	}
+	if started != 1 {
+		t.Fatalf("grace recorded %d 'started' stages at batch 0, want exactly 1", started)
+	}
+}
+
 func TestCompactionGraceClearedOnModelChangeAndSessionSwitch(t *testing.T) {
 	a := graceTestAgent(t, 0.85)
 	a.compactionGraceStartBatch = 1
+	a.compactionGraceActive = true
 	a.compactionGraceExhausted = true
 	a.pendingCompactionImminent = "stale"
 	// A real model change (appliedCompactionModelRef already set to another
 	// model) re-derives the threshold and drops the old window's grace.
 	a.appliedCompactionModelRef = "other/model"
 	a.applyModelCompactionConfig()
-	if a.compactionGraceStartBatch != 0 || a.compactionGraceExhausted || a.pendingCompactionImminent != "" {
+	if a.compactionGraceStartBatch != 0 || a.compactionGraceActive || a.compactionGraceExhausted || a.pendingCompactionImminent != "" {
 		t.Fatal("model change must clear the grace state")
 	}
 
 	a.compactionGraceStartBatch = 1
+	a.compactionGraceActive = true
 	a.compactionGraceExhausted = true
 	a.installSessionTarget(a.sessionDir)
-	if a.compactionGraceStartBatch != 0 || a.compactionGraceExhausted {
+	if a.compactionGraceStartBatch != 0 || a.compactionGraceActive || a.compactionGraceExhausted {
 		t.Fatal("session switch must clear the grace state")
 	}
 }

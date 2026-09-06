@@ -66,7 +66,8 @@ func (a *MainAgent) usageDrivenCompactionGraceDefers(snapshot []message.Message)
 		a.endCompactionGrace("hard_ceiling", current)
 		return false
 	}
-	if a.compactionGraceStartBatch == 0 {
+	if !a.compactionGraceActive {
+		a.compactionGraceActive = true
 		a.compactionGraceStartBatch = current
 		a.queueCompactionImminentNotice(minCompactionGracePeriodBatches)
 		a.recordCompactionGraceEvent("started", current)
@@ -95,7 +96,8 @@ func (a *MainAgent) endCompactionGrace(reason string, current uint64) {
 	if a == nil {
 		return
 	}
-	active := a.compactionGraceStartBatch != 0
+	active := a.compactionGraceActive
+	a.compactionGraceActive = false
 	a.compactionGraceStartBatch = 0
 	a.compactionGraceExhausted = true
 	a.pendingCompactionImminent = ""
@@ -119,7 +121,7 @@ func (a *MainAgent) exhaustCompactionGraceAfterModelDriven() {
 	if a == nil || a.ctxMgr == nil || a.compactionGraceExhausted {
 		return
 	}
-	if a.compactionGraceStartBatch == 0 && !a.autoCompactRequested.Load() {
+	if !a.compactionGraceActive && !a.autoCompactRequested.Load() {
 		return
 	}
 	a.endCompactionGrace("model_driven_settled", a.currentRequestBatch(a.ctxMgr.Snapshot()))
@@ -132,6 +134,7 @@ func (a *MainAgent) clearCompactionGrace() {
 		return
 	}
 	a.compactionGraceStartBatch = 0
+	a.compactionGraceActive = false
 	a.compactionGraceExhausted = false
 	a.pendingCompactionImminent = ""
 }

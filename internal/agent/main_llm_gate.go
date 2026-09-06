@@ -748,7 +748,11 @@ func (a *MainAgent) handleCompactionReady(evt Event) {
 		a.compactionState.continuation.kind == compactionResumeLengthRecovery ||
 		modelDriven
 
-	if asyncPath && !canApplyNow {
+	// A discard request must never be parked: the flag was cleared above, so a
+	// parked draft would lose the cancellation and still rewrite history at the
+	// next barrier. Fall through to the immediate path, whose `if !discard`
+	// branch settles the draft as cancelled and cleans its archive files.
+	if asyncPath && !canApplyNow && !discard {
 		// Case C: Turn is active and no pending call means we're mid-LLM/tool.
 		// Defer application to the next continuation barrier.
 		a.compactionState.readyDraft = draft
@@ -797,6 +801,9 @@ func (a *MainAgent) handleCompactionReady(evt Event) {
 			a.recordCompactionFailureAnalyticsEvent(err, class, "apply")
 			a.noteCompactionFailure(err)
 			log.Warnf("apply compaction draft failed error=%v", err)
+			// Apply left main.jsonl untouched, so the exported archive is an
+			// orphan. Without this it survives until the next restore sweep.
+			cleanupOrphanCompactionFiles(draft.AbsHistoryPath)
 			if modelDriven {
 				// Same-turn continuation with the real reason: the model must
 				// not misread an apply failure as a low-gain skip.
@@ -815,9 +822,15 @@ func (a *MainAgent) handleCompactionReady(evt Event) {
 			}
 		}
 	} else {
-		log.Infof("discarding ready compaction draft due to higher-priority queued work turn_id=%v instance=%v plan_id=%v", evt.TurnID, a.instanceID, draft.PlanID)
+		// The discard flag is only ever set by the two cancellation paths, both
+		// of which are the user abandoning this work (ESC, or cancelling the
+		// turn that armed the checkpoint).
+		log.Infof("discarding ready compaction draft cancelled by the user turn_id=%v instance=%v plan_id=%v", evt.TurnID, a.instanceID, draft.PlanID)
+		// The draft never reaches main.jsonl, so its archive is an orphan: the
+		// live history still holds every message it exported.
+		cleanupOrphanCompactionFiles(draft.AbsHistoryPath)
 		if modelDriven {
-			a.settleModelDrivenCancelled("the checkpoint draft was discarded due to higher-priority queued user input")
+			a.settleModelDrivenCancelled("the checkpoint draft was cancelled by the user")
 		} else {
 			a.emitToTUI(a.compactionStatusEvent(CompactionStatusCancelled, ""))
 		}
@@ -865,6 +878,8 @@ func (a *MainAgent) applyReadyDraft() (applySucceeded bool, handledIdleBarrier b
 		a.recordCompactionFailureAnalyticsEvent(err, class, "apply_barrier")
 		a.noteCompactionFailure(err)
 		log.Warnf("apply compaction draft at barrier failed error=%v", err)
+		// See handleCompactionReady: a failed apply leaves the archive orphaned.
+		cleanupOrphanCompactionFiles(draft.AbsHistoryPath)
 		a.emitToTUI(ToastEvent{
 			Message: fmt.Sprintf("Context compaction failed: %v", err),
 			Level:   "warn",

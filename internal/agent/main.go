@@ -652,8 +652,13 @@ type MainAgent struct {
 	// grace period (compaction_grace.go): the request batch at which the
 	// usage-driven crossing was first deferred, and whether this compaction
 	// window already spent its grace. Runtime memory only; a durable apply,
-	// a session switch, or a model change clears both.
+	// a session switch, or a model change clears all three.
+	// compactionGraceActive tracks "a grace is running" separately because
+	// batch 0 is a legitimate start batch: before any request batch has been
+	// reserved in this window the gate reads 0, so a zero start batch cannot
+	// double as "not started".
 	compactionGraceStartBatch uint64
+	compactionGraceActive     bool
 	compactionGraceExhausted  bool
 	// modelDrivenCompactionEnabled reflects the effective
 	// context.compaction.model_driven configuration. It is set once at runtime
