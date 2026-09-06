@@ -93,7 +93,7 @@ GitHub Releases 提供多个支持平台的预构建二进制。macOS 下载版�
 
 在 Chord v0.6.3 的一次[真实 Pebble 数据库任务](https://github.com/datacurve-ai/deep-swe/tree/main/tasks/pebble-durability-wait-apis)测试中，Chord 用时 46m21s，使用 6.86M 输入 token，估算成本为 $5.58。同样使用 GPT-5.5（xhigh）的 Codex-CLI v0.136.0 对照运行用时 61m18s，使用 18.47M 输入 token，估算成本为 $15.15。
 
-这只是单次场景实测，不代表普遍结果。硬件、运行环境、会话内容、模型行为和实现路径都会影响结果。Chord 如何保持长会话流畅，以及遇到性能问题时应收集哪些信息，见[性能](./docs/performance_CN.md)。
+这只是单次场景实测，不代表普遍结果。硬件、运行环境、会话内容、模型行为和实现路径都会影响结果。完整数据表（含应用启动与内存）、Chord 如何保持长会话流畅，以及遇到性能问题时应收集哪些信息，见[性能 — 实测数据](./docs/performance_CN.md#实测数据)。
 
 ## 项目链接
 

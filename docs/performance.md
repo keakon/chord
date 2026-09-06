@@ -2,6 +2,47 @@
 
 Chord is optimized for long interactive sessions: large transcripts, streaming model output, scrolling, and background agent activity. This page explains what Chord does to stay fast, what you can do when something feels slow, and what to collect for a useful bug report.
 
+## Measured results
+
+These measurements are scenario-specific proof points, not universal guarantees. They show where Chord's context trimming, low-overhead TUI, and predictable shutdown behavior matter most. Results vary with hardware, environment, session content, model behavior, and implementation choices.
+
+Both benchmarks below were run against the versions named in the tables; Chord v0.6.3 was released 2026-06-05.
+
+### Real-world coding task
+
+We benchmarked Chord against Codex-CLI on a [real-world database system task](https://github.com/datacurve-ai/deep-swe/tree/main/tasks/pebble-durability-wait-apis): implementing durability wait APIs in Pebble. Far from simple CRUD, the task requires understanding commit/WAL sync and concurrency semantics, reasoning across write paths, event listeners, and DB lifecycle subsystems.
+
+| Metric | Chord v0.6.3 | Codex-CLI v0.136.0 | Improvement |
+|--------|--------------|---------------------|-------------|
+| **Time** | **46m21s** | 61m18s | **24% faster** |
+| **LLM calls** | **93** | 118 | **21% fewer** |
+| **Input tokens** | **6.86M** | 18.47M | **63% fewer** |
+| **Output tokens** | **25K** | 74K | **66% fewer** |
+| **Cache read tokens** | **6.55M** | 17.64M | **63% fewer** |
+| **Cost** | **$5.58** | $15.15 | **63% cheaper** |
+
+Notes:
+
+- Both runs used GPT-5.5 (xhigh).
+- Time excludes environment setup and final wrap-up, but includes model interaction, code changes, and test execution.
+- The task's reference solution spans 8 files and 670 changed lines; actual model output may be larger or smaller depending on tests, comments, and implementation choices.
+
+### App startup and memory
+
+We also measured the interactive app shell: time from launch to accepting input, normal exit time, and memory with an empty session and after loading 200 messages.
+
+| App | Startup to input | Normal exit | Empty session memory | 200-message memory |
+|-----|------------------|-------------|----------------------|--------------------|
+| Chord v0.6.3 | **<1s** | **<1s** | **31.6MB** | **~40MB** |
+| Codex-CLI v0.136.0 | **<1s** | ~20s | 35.8MB | ~80MB |
+| Claude Code v2.1.163 | 32s | ~2s | 156.3MB | >300MB |
+
+Notes:
+
+- Codex-CLI waits for shutdown wrap-up and exits after about a 20-second timeout.
+- Claude Code waits on startup and becomes ready for input after about a 30-second timeout.
+- Memory use varies by session content and environment, so these numbers are only estimates for this measured scenario.
+
 ## What Chord optimizes
 
 1. The TUI stays responsive while the model streams text or thinking output.

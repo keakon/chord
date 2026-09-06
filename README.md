@@ -93,7 +93,7 @@ GitHub Releases provide prebuilt binaries for supported platforms. On macOS, the
 
 In one Chord v0.6.3 run of a [real-world Pebble database task](https://github.com/datacurve-ai/deep-swe/tree/main/tasks/pebble-durability-wait-apis), Chord completed the task in 46m21s using 6.86M input tokens and an estimated $5.58. A Codex-CLI v0.136.0 comparison run using the same GPT-5.5 (xhigh) model took 61m18s, 18.47M input tokens, and an estimated $15.15.
 
-This is a single measured scenario, not a general guarantee. Results vary with hardware, environment, session content, model behavior, and implementation choices. See [Performance](./docs/performance.md) for how Chord manages long-session responsiveness and what to collect when investigating slowdowns.
+This is a single measured scenario, not a general guarantee. Results vary with hardware, environment, session content, model behavior, and implementation choices. See [Performance — Measured results](./docs/performance.md#measured-results) for the full tables, including app startup and memory, plus how Chord manages long-session responsiveness and what to collect when investigating slowdowns.
 
 ## Project links
 
