@@ -597,7 +597,7 @@ model_pools:
 - `type` 可以省略；Chord 会根据 `/models` 路径自动识别 Gemini。
 - Gemini 3.7 Flash（2026 年 8 月 GA）是目前的主力模型：促销价每百万 token $0.75 / $3.75 到 2026 年底，2027 年起 $1.50 / $7.50。它的 thinking 级别只有 `low` / `medium` / `high`——不支持 `minimal`，且 `thinking_budget` 已废弃，所以上面模板省略了 `budget`。Gemini 3.5 / 3.6 Flash 仍可用旧模板。
 
-#### Gemini 的压缩调优
+### Gemini 的压缩调优
 
 Gemini 3.x 是目前前沿模型里长上下文悬崖最陡的：128K 处很强（MRCR v2 8-needle 84.9%），到 1M 崩到 ~26%——所以尽管窗口标称 1M，可靠窗口其实只有 128K–200K 左右。Gemini 会话应远早于此压缩：把该模型的 `threshold` 调到可用预算的 ~0.15–0.25（1M 窗口约合 150K–250K），`reminder` 设在它下方一点，让模型在自动压缩前先收到压力提示并有机会主动 reset。
 
@@ -747,7 +747,7 @@ model_pools:
   `enabled`（无法关闭思考），chat 模板已配置好。第三方中转可能只实现了
   旧的仅 URL 形式 `file_url`，依赖 Base64 `file_data` 前先确认中转支持。
 
-#### GLM-5.x 的压缩调优
+### GLM-5.x 的压缩调优
 
 GLM-5.2/5.3 标称 1M 窗口，但独立的长上下文评测把 GLM/Qwen 这一类开放权重
 模型的可靠工作窗口放在 200K–256K 左右（大约是标称 1M 的 20–25%）。如果你在

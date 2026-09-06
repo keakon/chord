@@ -31,7 +31,6 @@ Use this page when you already know which provider/model family you want and jus
 > model's long-context reliability is not documented here, omit the
 > `compaction` block and let it use the global default.
 
-
 ## OpenAI Responses-compatible: GPT-5.4 / GPT-5.5 / GPT-5.6
 
 The GPT-5.6 snippets use the Codex-backed allocation by default
@@ -654,7 +653,7 @@ Notes:
 - `type` can be omitted; Chord auto-detects Gemini from the `/models` path.
 - Gemini 3.7 Flash (GA August 2026) is the current workhorse: introductory $0.75 / $3.75 per 1M tokens through 2026, then $1.50 / $7.50 from 2027. Its thinking levels are `low` / `medium` / `high` only — `minimal` is not supported, and `thinking_budget` is deprecated, so the template above omits `budget`. Gemini 3.5/3.6 Flash remain available with the older template.
 
-#### Compaction tuning for Gemini
+### Compaction tuning for Gemini
 
 Gemini 3.x is the steepest long-context cliff of the current frontier: strong
 at 128K (84.9% MRCR v2 8-needle) but collapsing to ~26% at 1M, so the
@@ -823,7 +822,7 @@ Notes:
   URL-only `file_url` form; check the relay before relying on Base64
   `file_data`.
 
-#### Compaction tuning for GLM-5.x
+### Compaction tuning for GLM-5.x
 
 GLM-5.2/5.3 advertise a 1M window, but independent long-context evals put the
 reliable working window of the open-weight GLM/Qwen-class models around
