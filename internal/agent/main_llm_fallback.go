@@ -115,6 +115,9 @@ type llmFallbackBoundaryPayload struct {
 	turnID                  uint64
 	messages                []message.Message
 	tailOverlayCount        int
+	primaryContextLimit     int
+	primaryInputLimit       int
+	primaryModelRef         string
 	fallbackModelRef        string
 	fallbackContextLimit    int
 	fallbackInputLimit      int
@@ -145,6 +148,9 @@ func (a *MainAgent) updateMainLLMRequestBeforeFallback(ctx context.Context, turn
 		turnID:                  turnID,
 		messages:                messages,
 		tailOverlayCount:        tailOverlayCount,
+		primaryContextLimit:     a.ctxMgr.GetMaxTokens(),
+		primaryInputLimit:       a.ctxMgr.GetInputBudget(),
+		primaryModelRef:         a.ProviderModelRef(),
 		fallbackModelRef:        fallbackModelDisplayRef(fallback),
 		fallbackContextLimit:    fallback.ContextLimit,
 		fallbackInputLimit:      fallback.InputLimit,
@@ -185,5 +191,41 @@ func (a *MainAgent) handleLLMFallbackBoundary(evt Event) {
 			return
 		}
 	}
+	// A prepared surface is only reusable when the fallback has the same
+	// effective input budget. A smaller target window can require additional
+	// reduction even when the primary request already passed admission. Rebuild
+	// from the current request surface here; reduction is idempotent for markers
+	// and artifacts, while the existing fast path remains intact for equivalent
+	// model budgets.
+	if fallbackRequiresFreshAdmission(payload) {
+		messages = a.prepareMessagesForLLMWithOptions(messages, false)
+	}
 	payload.reply <- llmFallbackBoundaryResult{messages: messages}
+}
+
+func fallbackRequiresFreshAdmission(payload *llmFallbackBoundaryPayload) bool {
+	if payload == nil || payload.fallbackContextLimit <= 0 {
+		return false
+	}
+	if payload.fallbackContextLimit < payload.primaryContextLimit {
+		return true
+	}
+	// Chord's token estimate is model-agnostic: a usage-calibrated character
+	// estimate (estimateMessagesTokens / ctxmgr.EstimateMessagesTokens) shared
+	// by every provider, not a per-model tokenizer. Reduction is budget-driven,
+	// so when the downshift left the budget unchanged this branch rebuilds the
+	// same budget into the same surface — an idempotent no-op — and a real
+	// rebuild only happens when the smaller fallback window already shrank the
+	// budget above. The branch is kept as an explicit admission boundary for a
+	// future per-model tokenizer. The unknown-limit early return above skips it
+	// deliberately: no budget update follows an unknown limit, so re-admission
+	// would change nothing, and an actually-too-small window surfaces as a
+	// provider overflow error at runtime.
+	if payload.primaryModelRef != "" && payload.fallbackModelRef != "" &&
+		payload.primaryModelRef != payload.fallbackModelRef {
+		return true
+	}
+	return payload.fallbackInputLimit > 0 &&
+		payload.primaryInputLimit > 0 &&
+		payload.fallbackInputLimit < payload.primaryInputLimit
 }

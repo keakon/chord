@@ -819,3 +819,79 @@ func TestCallLLMFailedFallbackPersistsLastRunningModel(t *testing.T) {
 		}
 	}
 }
+
+func TestFallbackRequiresFreshAdmission(t *testing.T) {
+	tests := []struct {
+		name string
+		got  llmFallbackBoundaryPayload
+		want bool
+	}{
+		{
+			name: "smaller context",
+			got: llmFallbackBoundaryPayload{
+				primaryContextLimit:  128000,
+				primaryInputLimit:    96000,
+				fallbackContextLimit: 64000,
+				fallbackInputLimit:   48000,
+			},
+			want: true,
+		},
+		{
+			name: "smaller input",
+			got: llmFallbackBoundaryPayload{
+				primaryContextLimit:  128000,
+				primaryInputLimit:    96000,
+				fallbackContextLimit: 128000,
+				fallbackInputLimit:   64000,
+			},
+			want: true,
+		},
+		{
+			name: "different model",
+			got: llmFallbackBoundaryPayload{
+				primaryModelRef:      "provider/model-1",
+				primaryContextLimit:  128000,
+				primaryInputLimit:    96000,
+				fallbackModelRef:     "provider/model-2",
+				fallbackContextLimit: 128000,
+				fallbackInputLimit:   96000,
+			},
+			want: true,
+		},
+		{
+			name: "equivalent budgets",
+			got: llmFallbackBoundaryPayload{
+				primaryContextLimit:  128000,
+				primaryInputLimit:    96000,
+				fallbackContextLimit: 128000,
+				fallbackInputLimit:   96000,
+			},
+			want: false,
+		},
+		{
+			name: "unknown fallback budget",
+			got: llmFallbackBoundaryPayload{
+				primaryContextLimit: 128000,
+				primaryInputLimit:   96000,
+			},
+			want: false,
+		},
+		{
+			name: "unknown fallback budget with a different model",
+			got: llmFallbackBoundaryPayload{
+				primaryModelRef:     "provider/model-1",
+				primaryContextLimit: 128000,
+				primaryInputLimit:   96000,
+				fallbackModelRef:    "provider/model-2",
+			},
+			want: false,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := fallbackRequiresFreshAdmission(&test.got); got != test.want {
+				t.Fatalf("fallbackRequiresFreshAdmission() = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
