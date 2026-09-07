@@ -5507,15 +5507,24 @@ func TestSpaceToggleInvalidatesMainRenderCache(t *testing.T) {
 	}
 }
 
-func TestHandleNormalKeySpaceLeavesLinkedTaskCardAlone(t *testing.T) {
-	backend := &sessionControlAgent{}
+func TestHandleNormalKeySpaceOpensLinkedTaskWorkerView(t *testing.T) {
+	backend := &sessionControlAgent{
+		messagesByFocus: map[string][]message.Message{
+			"": {
+				{Role: "assistant", Content: "main history"},
+			},
+			"agent-1": {
+				{Role: "assistant", Content: "worker history"},
+			},
+		},
+	}
 	m := NewModelWithSize(backend, 100, 24)
 	m.mode = ModeNormal
 	task := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
 		ToolName:      "delegate",
-		Collapsed:     true,
+		Collapsed:     false,
 		LinkedAgentID: "agent-1",
 		Content:       `{"description":"review tests\ncheck coverage\nupdate docs","agent_type":"reviewer"}`,
 		ResultContent: `{"status":"started","task_id":"adhoc-7","agent_id":"reviewer-2"}`,
@@ -5528,13 +5537,16 @@ func TestHandleNormalKeySpaceLeavesLinkedTaskCardAlone(t *testing.T) {
 
 	_ = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Code: tea.KeySpace}))
 
-	if m.focusedAgentID != "" || backend.focused != "" {
-		t.Fatalf("space should not switch focus, got model=%q backend=%q", m.focusedAgentID, backend.focused)
+	if m.focusedAgentID != "agent-1" {
+		t.Fatalf("focusedAgentID = %q, want agent-1", m.focusedAgentID)
 	}
-	// Delegation cards are always expanded, so space has nothing to toggle:
-	// it must not silently flip state the renderer ignores either.
-	if !task.Collapsed {
-		t.Fatal("space should leave the always-expanded Delegate card untouched")
+	if backend.focused != "agent-1" {
+		t.Fatalf("backend focused = %q, want agent-1", backend.focused)
+	}
+	// Delegation cards are always expanded: space opens the worker view, it
+	// never collapses the card (the expand/collapse toggle does not apply).
+	if task.Collapsed {
+		t.Fatal("space should not collapse the always-expanded Delegate card")
 	}
 }
 

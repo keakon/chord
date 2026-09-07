@@ -91,7 +91,7 @@ func (km KeyMap) HelpGroups() []HelpGroup {
 		helpBinding(km.Quit, "quit"),
 	}
 	if keyBindingContains(km.ToggleCollapse, "enter") {
-		normalBindings = append(normalBindings, helpBinding([]string{"enter"}, "open linked delegate worker"))
+		normalBindings = append(normalBindings, helpBinding([]string{"enter", "space"}, "open linked delegate worker"))
 	}
 
 	return []HelpGroup{

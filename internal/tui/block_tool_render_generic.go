@@ -1068,10 +1068,11 @@ func (b *Block) renderToolPrefixForExpanded(spinnerFrame string, compactExpanded
 		if b.ResultDone || strings.TrimSpace(b.ResultContent) != "" {
 			return "✓"
 		}
-		if b.Collapsed {
-			return toolDisclosureCollapsed
-		}
-		return toolDisclosureExpanded
+		// The delegation card is always expanded and carries no expand/collapse
+		// toggle, so it must never show a disclosure marker. While the worker
+		// is still spinning up (not running, not yet done, no result yet) it is
+		// simply pending.
+		return pendingToolGlyph
 	}
 	if toolUsesCompactDetailToggle(b.ToolName) {
 		if !b.ResultDone {

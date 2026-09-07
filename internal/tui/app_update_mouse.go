@@ -507,8 +507,6 @@ func (m *Model) handleViewportSelectionClick(mouse tea.Mouse, block *Block, line
 
 	if block.ID != m.focusedBlockID {
 		m.setFocusedViewportBlock(block)
-		// Clicking a Delegate block that has a linked subagent switches to that agent's view.
-		m.maybeSwitchToTaskAgent(block)
 		if part, ok := block.imagePartAtPoint(lineInBlock, col, m.viewport.width); ok {
 			m.clearMouseSelection()
 			m.mouseDown = false
@@ -516,8 +514,6 @@ func (m *Model) handleViewportSelectionClick(mouse tea.Mouse, block *Block, line
 		}
 		// Do not scroll on click; only j/k/g/G etc. reposition the view.
 	} else {
-		// Already focused: clicking again on a Delegate block still switches to subagent view.
-		m.maybeSwitchToTaskAgent(block)
 		if part, ok := block.imagePartAtPoint(lineInBlock, col, m.viewport.width); ok {
 			m.clearMouseSelection()
 			m.mouseDown = false
@@ -573,7 +569,6 @@ func (m *Model) handleOutsideViewportMouseClick(mouse tea.Mouse) tea.Cmd {
 		}
 		if b.ID != m.focusedBlockID {
 			m.setFocusedViewportBlock(b)
-			m.maybeSwitchToTaskAgent(b)
 		}
 		break
 	}

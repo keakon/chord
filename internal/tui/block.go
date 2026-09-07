@@ -106,8 +106,9 @@ type Block struct {
 	BackgroundCopyContent string
 
 	// LinkedAgentID is set for Delegate tool blocks when the result contains the
-	// created subagent's instance ID (e.g. "agent-1"). Clicking the block
-	// switches the view to that agent.
+	// created subagent's instance ID (e.g. "agent-1"). The card is always
+	// expanded and cannot be collapsed; pressing space/enter on the focused card
+	// (not a mouse click) switches the view to that agent.
 	LinkedAgentID string
 	LinkedTaskID  string
 
