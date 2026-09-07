@@ -18,8 +18,8 @@ import (
 // are bounded below by the min-wait guard (minutes at the default), and a
 // stalled worker only matters minutes after its heartbeat goes quiet, so a
 // per-minute check keeps reclaim/notify latency negligible without polling the
-// loop any faster. The trigger event is only queued while a waiting_main or
-// live-running worker exists.
+// loop any faster. The trigger event is only queued while a waiting_main,
+// live-running, or pending-mailbox-work candidate exists.
 const subAgentLifecycleSweepInterval = time.Minute
 
 // EventSubAgentLifecycleSweep is the loop event the periodic wall-clock trigger
@@ -417,7 +417,9 @@ func (a *MainAgent) sweepSubAgentLifecycle() {
 // silent session would never reclaim a parked worker or surface a stalled
 // worker. The trigger deliberately avoids the idle/nudge chain so it survives
 // the removal of that dead code; it wakes the loop at most once per interval
-// and only while a waiting_main or live-running candidate exists.
+// and only while a waiting_main, live-running, or not-globally-idle candidate
+// exists (the last term keeps draining stranded owned mailboxes after every
+// worker is gone).
 func (a *MainAgent) startSubAgentLifecycleSweep(ctx context.Context) {
 	go func() {
 		ticker := time.NewTicker(subAgentLifecycleSweepInterval)
@@ -439,9 +441,17 @@ func (a *MainAgent) startSubAgentLifecycleSweep(ctx context.Context) {
 }
 
 // hasSubAgentLifecycleSweepCandidates reports whether the periodic sweep could
-// find something to act on: a waiting_main expiry candidate, or a live Running
-// worker whose stall/health the sweep must keep watching. The periodic trigger
-// gates on it so sessions that never delegate do not wake the event loop.
+// find something to act on: a waiting_main expiry candidate, a live Running
+// worker whose stall/health the sweep must keep watching, or a loop that is
+// not globally idle. The last term keeps the cadence alive after every worker
+// has gone terminal: a stranded owned mailbox (for example a child completion
+// queued under an owner that already finished) is queued mailbox work, so it
+// suppresses global idle, and no worker remains to ever fire another event —
+// the periodic sweep is the only retry that can drain it into a main turn. The
+// gate reads the global-idle flag rather than the mailbox queues because it
+// runs on the trigger goroutine while the queues belong to the event loop. The
+// trigger stays silent for sessions that never delegate and have no pending
+// mailbox work, so a truly idle main is not woken.
 func (a *MainAgent) hasSubAgentLifecycleSweepCandidates() bool {
 	if a.hasWaitingMainExpiryCandidates() {
 		return true
@@ -451,7 +461,7 @@ func (a *MainAgent) hasSubAgentLifecycleSweepCandidates() bool {
 			return true
 		}
 	}
-	return false
+	return !a.globalIdle.Load()
 }
 
 // hasWaitingMainExpiryCandidates reports whether a live worker or a parked task

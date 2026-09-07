@@ -223,7 +223,11 @@ func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
 	}
 	if owner == nil {
 		if rec := a.taskRecordByInstanceID(ownerAgentID); rec != nil && !isNonTerminalTaskState(rec.State) {
+			// Forward to main as a main-owned message: clear both owner
+			// fields so the mailbox metadata, injection text, and durable
+			// task-record sync cannot re-associate it with the finished owner.
 			msg.OwnerAgentID = ""
+			msg.OwnerTaskID = ""
 			a.enqueueSubAgentMailbox(msg)
 			return true
 		}

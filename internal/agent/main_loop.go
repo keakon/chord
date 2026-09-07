@@ -162,6 +162,14 @@ func (a *MainAgent) dispatch(evt Event) {
 		a.handleSubAgentStopEvent(evt)
 	case EventSubAgentLifecycleSweep:
 		if !a.admissionPaused.Load() {
+			// The periodic sweep is also the reclaim/retry net for owned
+			// mailbox residue once every worker is gone (see
+			// hasSubAgentLifecycleSweepCandidates): drain first so a queued
+			// descendant mailbox still wakes its parked owner before the
+			// WaitingMain expiry below could cancel that owner, and stranded
+			// terminal-owner mailboxes route to the main inbox instead of
+			// waiting for the next user message.
+			a.drainRunnableMailboxWork()
 			a.sweepSubAgentLifecycle()
 		}
 	case EventAgentLog:
