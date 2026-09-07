@@ -3830,3 +3830,103 @@ func TestAgentDoneCompletionMailboxEventDeliversExactlyOnceWithoutRewriting(t *t
 		t.Fatalf("mailbox log entries = %d, want exactly one (neither dispatch may rewrite the message)", entryCount)
 	}
 }
+
+// TestHandleAgentErrorPersistsRiskAlertMailboxBeforeTerminalCommit pins the
+// durable ordering fix for the failure half of the "settled but never
+// notified" crash window: the risk_alert mailbox must be persisted before the
+// terminal commit, because a crash after the Failed commit but before the
+// mailbox delivery would otherwise leave a durable failed task whose owner
+// never receives the failure notification. After handleAgentError returns, the
+// risk_alert mailbox must already be in the mailbox log and the task record
+// already terminal Failed, and the queued mailbox delivery event must not
+// write a second copy.
+func TestHandleAgentErrorPersistsRiskAlertMailboxBeforeTerminalCommit(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	if err := os.MkdirAll(filepath.Join(a.sessionDir, "subagents"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(subagents): %v", err)
+	}
+	sub := newControllableTestSubAgent(t, a, "adhoc-risk-durable-first")
+	a.newTurn() // keep a busy turn so dispatching delivery does not start an LLM turn
+
+	a.handleAgentError(Event{Type: EventAgentError, SourceID: sub.instanceID, Payload: context.DeadlineExceeded})
+
+	msgs, err := loadSubAgentMailboxMessages(a.sessionDir)
+	if err != nil {
+		t.Fatalf("loadSubAgentMailboxMessages: %v", err)
+	}
+	var alert *SubAgentMailboxMessage
+	for i := range msgs {
+		if msgs[i].Kind == SubAgentMailboxKindRiskAlert && strings.TrimSpace(msgs[i].TaskID) == sub.taskID {
+			alert = &msgs[i]
+		}
+	}
+	if alert == nil {
+		t.Fatalf("risk_alert mailbox not durable after handleAgentError (before delivery), log=%#v", msgs)
+	}
+	rec := a.taskRecordByTaskID(sub.taskID)
+	if rec == nil || rec.State != string(SubAgentStateFailed) {
+		t.Fatalf("task record after handleAgentError = %#v, want terminal failed", rec)
+	}
+	if rec.LastMailboxID != alert.MessageID {
+		t.Fatalf("task record LastMailboxID = %q, want risk_alert %q (mailbox must be persisted before the terminal commit)", rec.LastMailboxID, alert.MessageID)
+	}
+
+	dispatchQueuedEvents(t, a)
+
+	raw, err := os.ReadFile(filepath.Join(a.sessionDir, "subagents", "mailbox.jsonl"))
+	if err != nil {
+		t.Fatalf("read mailbox log: %v", err)
+	}
+	entryCount := 0
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.Contains(line, `"risk_alert"`) {
+			entryCount++
+		}
+	}
+	if entryCount != 1 {
+		t.Fatalf("risk_alert mailbox log entries = %d, want exactly one (delivery must not rewrite the message)", entryCount)
+	}
+}
+
+// TestWaitingMainExpiryPersistsRiskAlertMailboxBeforeTerminalCommit pins the
+// same durable ordering for the live-worker branch of the WaitingMain expiry
+// sweep: the sweep must persist the expiry risk_alert mailbox before its
+// terminal Cancelled commit, so the owner notification cannot be lost to a
+// crash between the commit and the queued mailbox delivery.
+func TestWaitingMainExpiryPersistsRiskAlertMailboxBeforeTerminalCommit(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	if err := os.MkdirAll(filepath.Join(a.sessionDir, "subagents"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(subagents): %v", err)
+	}
+	sub := newControllableTestSubAgent(t, a, "adhoc-expiry-durable")
+	sub.setState(SubAgentStateWaitingMain, "need answer")
+	a.noteSubAgentStateTransition(sub, SubAgentStateWaitingMain)
+	a.waitingMainExpiry = waitingMainExpiryPolicy{turns: 1 << 30, minWait: time.Hour, maxWait: time.Nanosecond}
+	a.mailboxDeliveryPaused.Store(true) // keep the expiry mailbox out of a live turn
+
+	a.sweepSubAgentLifecycle()
+
+	msgs, err := loadSubAgentMailboxMessages(a.sessionDir)
+	if err != nil {
+		t.Fatalf("loadSubAgentMailboxMessages: %v", err)
+	}
+	var alert *SubAgentMailboxMessage
+	for i := range msgs {
+		if msgs[i].Kind == SubAgentMailboxKindRiskAlert && strings.TrimSpace(msgs[i].TaskID) == sub.taskID {
+			alert = &msgs[i]
+		}
+	}
+	if alert == nil {
+		t.Fatalf("expiry risk_alert mailbox not durable after the sweep (before delivery), log=%#v", msgs)
+	}
+	if !strings.Contains(alert.Summary, "expired waiting for main reply") {
+		t.Fatalf("expiry risk_alert summary = %q, want the expiry reason", alert.Summary)
+	}
+	rec := a.taskRecordByTaskID(sub.taskID)
+	if rec == nil || rec.State != string(SubAgentStateCancelled) {
+		t.Fatalf("task record after expiry sweep = %#v, want terminal cancelled", rec)
+	}
+	if rec.LastMailboxID != alert.MessageID {
+		t.Fatalf("task record LastMailboxID = %q, want expiry risk_alert %q (mailbox must be persisted before the terminal commit)", rec.LastMailboxID, alert.MessageID)
+	}
+}

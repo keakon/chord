@@ -1372,3 +1372,374 @@ func TestRestoreSessionSynthesizesCompletionForSettledTaskWithLostMailbox(t *tes
 		t.Fatalf("synthesized completion not persisted for future restores: on-disk=%#v firstLostID=%q", onDisk, firstLostID)
 	}
 }
+
+func restoredRiskAlertsForTask(a *MainAgent, taskID string) []SubAgentMailboxMessage {
+	var out []SubAgentMailboxMessage
+	collect := func(msgs []SubAgentMailboxMessage) {
+		for _, msg := range msgs {
+			if msg.Kind == SubAgentMailboxKindRiskAlert && strings.TrimSpace(msg.TaskID) == taskID {
+				out = append(out, msg)
+			}
+		}
+	}
+	collect(a.subAgentInbox.urgent)
+	collect(a.subAgentInbox.normal)
+	return out
+}
+
+// restoreFailedRiskAlertFixture writes a durable terminal-Failed task record
+// and its settlement with no risk_alert in the mailbox log — the crash shape
+// this extension fixes for handleAgentError (the failure mailbox persist is
+// deferred past the terminal commit in older builds, so the notification can
+// be lost between the commit and the delivery).
+func restoreFailedRiskAlertFixture(t *testing.T, projectRoot, sessionDir string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(sessionDir, "subagents"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(subagents): %v", err)
+	}
+	rm := recovery.NewRecoveryManager(sessionDir)
+	if err := rm.PersistMessage("main", message.Message{Role: "user", Content: "resume this session"}); err != nil {
+		t.Fatalf("PersistMessage(main): %v", err)
+	}
+	rm.Close()
+
+	now := time.Now()
+	failureSummary := "SubAgent failed (exit): worker panicked while patching"
+	failedSettlement := &TaskSettlement{
+		TaskID:           "adhoc-lost-failure",
+		Attempt:          1,
+		TerminalRevision: 2,
+		Outcome:          string(SubAgentStateFailed),
+		Summary:          failureSummary,
+		SettledAt:        now,
+	}
+	if err := appendTaskSettlement(sessionDir, failedSettlement); err != nil {
+		t.Fatalf("appendTaskSettlement: %v", err)
+	}
+	records := map[string]*DurableTaskRecord{
+		"adhoc-lost-failure": {
+			TaskID:            "adhoc-lost-failure",
+			AgentDefName:      "restorer",
+			TaskDesc:          "Investigate issue",
+			State:             string(SubAgentStateFailed),
+			ResumePolicy:      durableTaskResumePolicy(SubAgentStateFailed),
+			LatestInstanceID:  "agent-lost-failure",
+			InstanceHistory:   []string{"agent-lost-failure"},
+			LastSummary:       failureSummary,
+			Attempt:           1,
+			LifecycleRevision: failedSettlement.TerminalRevision,
+			LatestSettlement:  cloneTaskSettlement(failedSettlement),
+			SettlementDurable: true,
+			CreatedAt:         now,
+			UpdatedAt:         now,
+			RuntimeParked:     true,
+		},
+	}
+	if err := persistDurableTaskRecords(sessionDir, records); err != nil {
+		t.Fatalf("persistDurableTaskRecords: %v", err)
+	}
+}
+
+// TestRestoreSessionSynthesizesRiskAlertForFailedTaskWithLostMailbox covers the
+// restore-side closure of the failure/expiry crash window: a task whose
+// durable record is terminal Failed but whose risk_alert mailbox never reached
+// the mailbox log (handleAgentError committed the failure after only queueing
+// the mailbox). After restart the owner inbox must still receive exactly one
+// risk_alert, and a second restore of the same session must not notify again —
+// the synthesized message is itself persisted, so both restores converge on
+// the same physical message id.
+func TestRestoreSessionSynthesizesRiskAlertForFailedTaskWithLostMailbox(t *testing.T) {
+	const taskID = "adhoc-lost-failure"
+	projectRoot := t.TempDir()
+	sessionDir := testProjectSessionDir(t, projectRoot, "lost-failure-mailbox")
+	restoreFailedRiskAlertFixture(t, projectRoot, sessionDir)
+
+	restoreAgent := func() *MainAgent {
+		a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
+		a.SetAgentConfigs(map[string]*config.AgentConfig{
+			"restorer": {Name: "restorer", Mode: "subagent", Models: map[string][]string{"default": {"test/test-model"}}},
+		})
+		a.SetLLMFactory(func(string, []string, string) *llm.Client { return newTestLLMClient() })
+		if _, err := a.restoreSessionState(sessionDir); err != nil {
+			t.Fatalf("restoreSessionState: %v", err)
+		}
+		return a
+	}
+	first := restoreAgent()
+	second := restoreAgent()
+
+	var firstAlertID string
+	for _, a := range []*MainAgent{first, second} {
+		alerts := restoredRiskAlertsForTask(a, taskID)
+		if len(alerts) != 1 {
+			t.Fatalf("restored owner inbox risk_alert mailboxes for %q = %d, want exactly one synthesized alert", taskID, len(alerts))
+		}
+		alert := alerts[0]
+		if alert.Summary != "SubAgent failed (exit): worker panicked while patching" {
+			t.Fatalf("synthesized risk_alert summary = %q, want the failure summary", alert.Summary)
+		}
+		if !strings.Contains(alert.Payload, "terminated without completion") {
+			t.Fatalf("synthesized risk_alert payload = %q, want the failure guidance", alert.Payload)
+		}
+		if alert.AgentID != "agent-lost-failure" || alert.Attempt != 1 {
+			t.Fatalf("synthesized risk_alert source = (%q, attempt %d), want (agent-lost-failure, attempt 1)", alert.AgentID, alert.Attempt)
+		}
+		if firstAlertID == "" {
+			firstAlertID = alert.MessageID
+		} else if alert.MessageID != firstAlertID {
+			t.Fatalf("second restore re-synthesized a different alert message: first=%q second=%q", firstAlertID, alert.MessageID)
+		}
+	}
+	onDisk, err := loadSubAgentMailboxMessages(sessionDir)
+	if err != nil {
+		t.Fatalf("loadSubAgentMailboxMessages: %v", err)
+	}
+	var synthesizedOnDisk *SubAgentMailboxMessage
+	for i := range onDisk {
+		if onDisk[i].TaskID == taskID && onDisk[i].Kind == SubAgentMailboxKindRiskAlert {
+			synthesizedOnDisk = &onDisk[i]
+		}
+	}
+	if synthesizedOnDisk == nil || synthesizedOnDisk.MessageID != firstAlertID {
+		t.Fatalf("synthesized risk_alert not persisted for future restores: on-disk=%#v firstAlertID=%q", onDisk, firstAlertID)
+	}
+}
+
+// TestRestoreSessionSynthesizesExpiryRiskAlertButNotForUserStop covers the
+// expiry branch of the crash-window synthesis and its discriminator: a task
+// cancelled by the WaitingMain expiry sweep loses its risk_alert to the window
+// between the terminal Cancelled commit and the mailbox delivery and must be
+// re-notified after restart, while a task cancelled by a user stop (which never
+// queues a risk_alert before its terminal commit) must not gain a notification
+// from restore.
+func TestRestoreSessionSynthesizesExpiryRiskAlertButNotForUserStop(t *testing.T) {
+	const (
+		expiredTaskID = "adhoc-expired"
+		stoppedTaskID = "adhoc-stopped"
+	)
+	projectRoot := t.TempDir()
+	sessionDir := testProjectSessionDir(t, projectRoot, "lost-expiry-mailbox")
+	if err := os.MkdirAll(filepath.Join(sessionDir, "subagents"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(subagents): %v", err)
+	}
+	rm := recovery.NewRecoveryManager(sessionDir)
+	if err := rm.PersistMessage("main", message.Message{Role: "user", Content: "resume this session"}); err != nil {
+		t.Fatalf("PersistMessage(main): %v", err)
+	}
+	rm.Close()
+
+	now := time.Now()
+	expiredReason := "expired waiting for main reply (no reply within 1h0m0s)"
+	stoppedReason := "stopped by user"
+	fixtures := []struct {
+		taskID     string
+		instanceID string
+		reason     string
+		closed     string
+	}{
+		{taskID: expiredTaskID, instanceID: "agent-expired", reason: expiredReason, closed: expiredReason},
+		{taskID: stoppedTaskID, instanceID: "agent-stopped", reason: stoppedReason, closed: stoppedReason},
+	}
+	records := make(map[string]*DurableTaskRecord, len(fixtures))
+	for _, fx := range fixtures {
+		settlement := &TaskSettlement{
+			TaskID:           fx.taskID,
+			Attempt:          1,
+			TerminalRevision: 2,
+			Outcome:          string(SubAgentStateCancelled),
+			Summary:          fx.reason,
+			SettledAt:        now,
+		}
+		if err := appendTaskSettlement(sessionDir, settlement); err != nil {
+			t.Fatalf("appendTaskSettlement(%s): %v", fx.taskID, err)
+		}
+		records[fx.taskID] = &DurableTaskRecord{
+			TaskID:            fx.taskID,
+			AgentDefName:      "restorer",
+			TaskDesc:          "Investigate issue",
+			State:             string(SubAgentStateCancelled),
+			ResumePolicy:      durableTaskResumePolicy(SubAgentStateCancelled),
+			LatestInstanceID:  fx.instanceID,
+			InstanceHistory:   []string{fx.instanceID},
+			LastSummary:       fx.reason,
+			Attempt:           1,
+			LifecycleRevision: settlement.TerminalRevision,
+			LatestSettlement:  cloneTaskSettlement(settlement),
+			SettlementDurable: true,
+			ClosedReason:      fx.closed,
+			CreatedAt:         now,
+			UpdatedAt:         now,
+			RuntimeParked:     true,
+		}
+	}
+	if err := persistDurableTaskRecords(sessionDir, records); err != nil {
+		t.Fatalf("persistDurableTaskRecords: %v", err)
+	}
+
+	restoreAgent := func() *MainAgent {
+		a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
+		a.SetAgentConfigs(map[string]*config.AgentConfig{
+			"restorer": {Name: "restorer", Mode: "subagent", Models: map[string][]string{"default": {"test/test-model"}}},
+		})
+		a.SetLLMFactory(func(string, []string, string) *llm.Client { return newTestLLMClient() })
+		if _, err := a.restoreSessionState(sessionDir); err != nil {
+			t.Fatalf("restoreSessionState: %v", err)
+		}
+		return a
+	}
+	first := restoreAgent()
+	second := restoreAgent()
+
+	for _, a := range []*MainAgent{first, second} {
+		expired := restoredRiskAlertsForTask(a, expiredTaskID)
+		if len(expired) != 1 {
+			t.Fatalf("restored owner inbox risk_alert mailboxes for expired task %q = %d, want exactly one", expiredTaskID, len(expired))
+		}
+		if alert := expired[0]; !strings.Contains(alert.Summary, "expired waiting for main reply") || alert.AgentID != "agent-expired" {
+			t.Fatalf("synthesized expiry risk_alert = %#v, want the expiry reason from agent-expired", alert)
+		}
+		if stopped := restoredRiskAlertsForTask(a, stoppedTaskID); len(stopped) != 0 {
+			t.Fatalf("restored owner inbox risk_alert mailboxes for user-stopped task %q = %d, want none (user stops never notify)", stoppedTaskID, len(stopped))
+		}
+	}
+}
+
+// TestRestoreSessionSynthesisSurvivesStaleLastMailboxIDFromEarlierAttempt pins
+// the gate refinement for re-synthesizing a lost completion on attempt>=2: a
+// completed attempt-2 task whose attempt-2 completion mailbox never reached the
+// log (persist failure followed by a crash) still carries the attempt-1
+// completion's MessageID as LastMailboxID, because rehydrate retains the
+// previous attempt's last mailbox. The coarse "LastMailboxID empty means never
+// notified" gate would skip this task and lose the completion forever; the
+// covering-proof gate must recognize that the retained attempt-1 message does
+// not cover attempt-2 and synthesize the lost completion.
+func TestRestoreSessionSynthesisSurvivesStaleLastMailboxIDFromEarlierAttempt(t *testing.T) {
+	const (
+		taskID          = "adhoc-stale-attempt"
+		attempt1MsgID   = "agent-stale-completion-1"
+		attempt2AgentID = "agent-stale-attempt2"
+	)
+	projectRoot := t.TempDir()
+	sessionDir := testProjectSessionDir(t, projectRoot, "stale-attempt-completion")
+	if err := os.MkdirAll(filepath.Join(sessionDir, "subagents"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(subagents): %v", err)
+	}
+	rm := recovery.NewRecoveryManager(sessionDir)
+	if err := rm.PersistMessage("main", message.Message{Role: "user", Content: "resume this session"}); err != nil {
+		t.Fatalf("PersistMessage(main): %v", err)
+	}
+	rm.Close()
+
+	now := time.Now()
+	attempt2Completion := &CompletionEnvelope{Summary: "second attempt complete"}
+	attempt2Settlement := &TaskSettlement{
+		TaskID:           taskID,
+		Attempt:          2,
+		TerminalRevision: 4,
+		Outcome:          string(SubAgentStateCompleted),
+		Summary:          "second attempt complete",
+		Completion:       attempt2Completion,
+		SettledAt:        now,
+	}
+	if err := appendTaskSettlement(sessionDir, attempt2Settlement); err != nil {
+		t.Fatalf("appendTaskSettlement: %v", err)
+	}
+	records := map[string]*DurableTaskRecord{
+		taskID: {
+			TaskID:            taskID,
+			AgentDefName:      "restorer",
+			TaskDesc:          "Investigate issue",
+			State:             string(SubAgentStateCompleted),
+			ResumePolicy:      durableTaskResumePolicy(SubAgentStateCompleted),
+			LatestInstanceID:  attempt2AgentID,
+			InstanceHistory:   []string{"agent-stale-attempt1", attempt2AgentID},
+			LastSummary:       "second attempt complete",
+			LastMailboxID:     attempt1MsgID, // retained from attempt 1 by rehydrate
+			Attempt:           2,
+			LifecycleRevision: attempt2Settlement.TerminalRevision,
+			LatestSettlement:  cloneTaskSettlement(attempt2Settlement),
+			LastCompletion:    normalizeCompletionEnvelope(attempt2Completion),
+			SettlementDurable: true,
+			CreatedAt:         now,
+			UpdatedAt:         now,
+			RuntimeParked:     true,
+		},
+	}
+	if err := persistDurableTaskRecords(sessionDir, records); err != nil {
+		t.Fatalf("persistDurableTaskRecords: %v", err)
+	}
+	// The attempt-1 completion is durably delivered (consumed) but no longer
+	// queued anywhere; it stays in the log with a consumed ack so restore does
+	// not replay it. The attempt-2 completion is absent entirely — the crash
+	// shape under test.
+	mailboxFile, err := os.OpenFile(filepath.Join(sessionDir, "subagents", "mailbox.jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatalf("open mailbox log: %v", err)
+	}
+	if err := json.NewEncoder(mailboxFile).Encode(SubAgentMailboxMessage{
+		MessageID:  attempt1MsgID,
+		AgentID:    "agent-stale-attempt1",
+		TaskID:     taskID,
+		Attempt:    1,
+		Kind:       SubAgentMailboxKindCompleted,
+		Priority:   SubAgentMailboxPriorityUrgent,
+		Summary:    "first attempt complete",
+		Payload:    "first attempt complete",
+		Completion: &CompletionEnvelope{Summary: "first attempt complete"},
+		CreatedAt:  now,
+	}); err != nil {
+		_ = mailboxFile.Close()
+		t.Fatalf("encode attempt-1 completion: %v", err)
+	}
+	if err := mailboxFile.Close(); err != nil {
+		t.Fatalf("close mailbox log: %v", err)
+	}
+	ackFile, err := os.OpenFile(filepath.Join(sessionDir, "subagents", "mailbox-acks.jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatalf("open ack log: %v", err)
+	}
+	if err := json.NewEncoder(ackFile).Encode(SubAgentMailboxAckRecord{MessageID: attempt1MsgID, Outcome: "consumed", AckedAt: now}); err != nil {
+		_ = ackFile.Close()
+		t.Fatalf("encode consumed ack: %v", err)
+	}
+	if err := ackFile.Close(); err != nil {
+		t.Fatalf("close ack log: %v", err)
+	}
+
+	restoreAgent := func() *MainAgent {
+		a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
+		a.SetAgentConfigs(map[string]*config.AgentConfig{
+			"restorer": {Name: "restorer", Mode: "subagent", Models: map[string][]string{"default": {"test/test-model"}}},
+		})
+		a.SetLLMFactory(func(string, []string, string) *llm.Client { return newTestLLMClient() })
+		if _, err := a.restoreSessionState(sessionDir); err != nil {
+			t.Fatalf("restoreSessionState: %v", err)
+		}
+		return a
+	}
+	first := restoreAgent()
+	second := restoreAgent()
+
+	for _, a := range []*MainAgent{first, second} {
+		completed := restoredCompletedMailboxesForTask(a, taskID)
+		if len(completed) != 1 {
+			t.Fatalf("restored owner inbox completed mailboxes for %q = %d, want exactly one synthesized attempt-2 completion (stale LastMailboxID must not block synthesis)", taskID, len(completed))
+		}
+		if msg := completed[0]; msg.Attempt != 2 || msg.Summary != "second attempt complete" || msg.MessageID == attempt1MsgID {
+			t.Fatalf("synthesized completion = %#v, want the attempt-2 completion, not the retained attempt-1 message %q", msg, attempt1MsgID)
+		}
+	}
+	onDisk, err := loadSubAgentMailboxMessages(sessionDir)
+	if err != nil {
+		t.Fatalf("loadSubAgentMailboxMessages: %v", err)
+	}
+	var synthesizedOnDisk *SubAgentMailboxMessage
+	for i := range onDisk {
+		if onDisk[i].TaskID == taskID && onDisk[i].Attempt == 2 && onDisk[i].Kind == SubAgentMailboxKindCompleted {
+			synthesizedOnDisk = &onDisk[i]
+		}
+	}
+	if synthesizedOnDisk == nil {
+		t.Fatalf("attempt-2 completion not persisted for future restores: on-disk=%#v", onDisk)
+	}
+}

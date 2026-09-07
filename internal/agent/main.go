@@ -2509,7 +2509,7 @@ func (a *MainAgent) handleAgentError(evt Event) {
 		failureSummary := fmt.Sprintf("SubAgent failed (%s): %s", errorKind, err.Error())
 		a.releaseSubAgentSlot(sub2)
 		a.emitActivity(evt.SourceID, ActivityIdle, "")
-		a.queueLoopEvent(Event{Type: EventSubAgentMailbox, SourceID: evt.SourceID, Payload: &SubAgentMailboxMessage{
+		mailbox := &SubAgentMailboxMessage{
 			AgentID:      evt.SourceID,
 			TaskID:       sub2.taskID,
 			OwnerAgentID: sub2.OwnerAgentID(),
@@ -2523,7 +2523,23 @@ func (a *MainAgent) handleAgentError(evt Event) {
 				sub2.taskID, evt.SourceID, errorKind, err.Error(),
 			),
 			RequiresAck: false,
-		}})
+		}
+		// Terminal-commit ordering (mirror of the completion path in
+		// handleAgentDone): persist and apply the risk_alert mailbox before the
+		// close handler below commits the task Failed, so a crash after the
+		// terminal commit can no longer lose the failure notification; the
+		// queued mailbox event then only delivers the already-durable message.
+		// Persistence stays best-effort: a failure is retried through the
+		// queued event's own persist path and must never block the terminal
+		// commit.
+		if err := a.prepareSubAgentMailboxMessage(mailbox); err != nil {
+			log.Warnf("risk_alert mailbox durability degraded task_id=%v agent_id=%v error=%v (will retry through the mailbox queue)", sub2.taskID, evt.SourceID, err)
+		} else if messageID := strings.TrimSpace(mailbox.MessageID); messageID != "" {
+			// Already durably recorded and applied here; the mailbox event must
+			// only deliver it, not write or apply it a second time.
+			a.markSubAgentMailboxSeen(messageID)
+		}
+		a.queueLoopEvent(Event{Type: EventSubAgentMailbox, SourceID: evt.SourceID, Payload: mailbox})
 		a.emitToTUI(AgentNotifyEvent{
 			AgentID:       evt.SourceID,
 			TaskID:        sub2.taskID,

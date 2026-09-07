@@ -28,6 +28,15 @@ const subAgentLifecycleSweepInterval = time.Minute
 // main_loop.go.
 const EventSubAgentLifecycleSweep = "subagent_lifecycle_sweep"
 
+// waitingMainExpiryClosedReasonPrefix is the text prefix every WaitingMain
+// expiry records as the task's terminal ClosedReason (see policy.reason and
+// the parked-record default below). The terminal state itself is Cancelled —
+// the same state a user stop or a cascade cancellation writes — so restore
+// uses this prefix to tell an expiry apart from those other cancellations,
+// which never queue a risk_alert mailbox before their terminal commit and must
+// not gain a notification from the restore-side re-synthesis.
+const waitingMainExpiryClosedReasonPrefix = "expired waiting for main reply"
+
 // waitingMainExpiryPolicy is the resolved two-clock policy for abandoning a
 // worker that parked waiting for its owner's reply. See the
 // DefaultWaitingMain* constants for why one clock is not enough.
@@ -75,9 +84,9 @@ func (p waitingMainExpiryPolicy) expired(currentTurn, enteredTurn uint64, since,
 // the user see is not just "expired".
 func (p waitingMainExpiryPolicy) reason(currentTurn, enteredTurn uint64, since, now time.Time) string {
 	if since.IsZero() || currentTurn >= enteredTurn+p.turns {
-		return fmt.Sprintf("expired waiting for main reply (no reply within %d user turns)", p.turns)
+		return fmt.Sprintf("%s (no reply within %d user turns)", waitingMainExpiryClosedReasonPrefix, p.turns)
 	}
-	return fmt.Sprintf("expired waiting for main reply (no reply within %s)", now.Sub(since).Round(time.Minute))
+	return fmt.Sprintf("%s (no reply within %s)", waitingMainExpiryClosedReasonPrefix, now.Sub(since).Round(time.Minute))
 }
 
 func (a *MainAgent) noteSubAgentStateTransition(sub *SubAgent, state SubAgentState) {
@@ -323,7 +332,7 @@ func (a *MainAgent) sweepSubAgentLifecycle() {
 				// alert the owner through a risk_alert mailbox and settle the
 				// still-pending escalation request as expired instead of
 				// cancelling silently.
-				a.queueWaitingMainExpiryAlert(sub, nil, reason)
+				a.queueWaitingMainExpiryAlert(sub, reason)
 				a.handleSubAgentCloseRequestedEvent(Event{
 					Type:     EventSubAgentCloseRequested,
 					SourceID: sub.instanceID,
@@ -363,10 +372,19 @@ func (a *MainAgent) sweepSubAgentLifecycle() {
 			policy.expired(currentTurn, rec.LastUpdatedTurn, rec.UpdatedAt, now)
 	}
 	for _, taskID := range expiredTaskIDs {
-		reason := "expired waiting for main reply"
+		reason := waitingMainExpiryClosedReasonPrefix
 		if rec := a.taskRecordByTaskID(taskID); rec != nil {
 			reason = policy.reason(currentTurn, rec.LastUpdatedTurn, rec.UpdatedAt, now)
 		}
+		// Terminal-commit ordering (mirror of the completion path in
+		// handleAgentDone): persist the expiry risk_alert mailbox BEFORE the
+		// guarded settle below commits the terminal cancellation, so a crash
+		// after the commit can no longer lose the owner notification. The
+		// mailbox is persisted but not applied yet: applying would refresh the
+		// parked record's update clock through syncTaskRecordFromMailbox and
+		// make the settle's re-run of the expiry predicate back off. Apply and
+		// delivery happen only after the guarded settle wins.
+		alert, alertDurable := a.prepareWaitingMainExpiryAlert(nil, a.taskRecordByTaskID(taskID), reason)
 		outcome := a.settleDetachedTerminalTaskGuarded(taskID, SubAgentStateCancelled, reason, reason, stillExpiredParkedWaiting)
 		if outcome != SubAgentStateCancelled {
 			continue
@@ -375,7 +393,7 @@ func (a *MainAgent) sweepSubAgentLifecycle() {
 		// cancellation to the owner and move the pending escalation request to
 		// expired instead of leaving both the mailbox and the ledger silent.
 		if settled := a.taskRecordByTaskID(taskID); settled != nil {
-			a.queueWaitingMainExpiryAlert(nil, settled, reason)
+			a.deliverSettledWaitingMainExpiryAlert(alert, alertDurable, settled)
 		}
 		a.expireAgentRequestsAfterCancellation(taskID)
 		changed = true
@@ -484,32 +502,59 @@ func (a *MainAgent) hasWaitingMainExpiryCandidates() bool {
 	return false
 }
 
-// queueWaitingMainExpiryAlert makes an expired WaitingMain wait visible to the
-// worker's owner: a risk_alert mailbox is queued through the same event path
-// the failure handler uses (see handleAgentError), plus the matching
-// control-plane AgentNotifyEvent. Pass the live worker or the parked record —
-// whichever the sweep is settling. The mailbox is durable and routed to the
-// owner's own inbox/queue even when the owner is parked or the main agent is
-// idle.
-func (a *MainAgent) queueWaitingMainExpiryAlert(sub *SubAgent, record *DurableTaskRecord, reason string) {
-	var agentID, taskID, ownerAgentID, ownerTaskID, agentType, inReplyTo string
+// queueWaitingMainExpiryAlert makes an expired live WaitingMain wait visible to
+// the worker's owner: a risk_alert mailbox is queued through the same event
+// path the failure handler uses (see handleAgentError), plus the matching
+// control-plane AgentNotifyEvent. Terminal-commit ordering mirrors the
+// completion path (see handleAgentDone): the mailbox is persisted and applied
+// before the sweep's close-requested handler commits the task Cancelled, so a
+// crash after the terminal commit can no longer lose the notification; the
+// queued mailbox event then only delivers the already-durable message.
+// Persistence stays best-effort and must never block the terminal commit.
+func (a *MainAgent) queueWaitingMainExpiryAlert(sub *SubAgent, reason string) {
+	mailbox := a.buildWaitingMainExpiryAlertMailbox(sub, nil, reason)
+	if mailbox == nil {
+		return
+	}
+	if err := a.prepareSubAgentMailboxMessage(mailbox); err != nil {
+		log.Warnf("expiry risk_alert mailbox durability degraded task_id=%v agent_id=%v error=%v (will retry through the mailbox queue)", mailbox.TaskID, mailbox.AgentID, err)
+	} else if messageID := strings.TrimSpace(mailbox.MessageID); messageID != "" {
+		// Already durably recorded and applied here; the mailbox event must
+		// only deliver it, not write or apply it a second time.
+		a.markSubAgentMailboxSeen(messageID)
+	}
+	a.queueLoopEvent(Event{Type: EventSubAgentMailbox, SourceID: strings.TrimSpace(mailbox.AgentID), Payload: mailbox})
+	a.emitWaitingMainExpiryAlertNotify(mailbox, sub, nil)
+}
+
+// buildWaitingMainExpiryAlertMailbox constructs the risk_alert mailbox that
+// surfaces an expired WaitingMain wait to its owner. The expiry sweep (both
+// branches) and the restore-side re-synthesis of an alert lost to the
+// terminal-commit crash window build through this helper so the delivered
+// notification stays identical across paths.
+func (a *MainAgent) buildWaitingMainExpiryAlertMailbox(sub *SubAgent, record *DurableTaskRecord, reason string) *SubAgentMailboxMessage {
+	agentID, taskID, ownerAgentID, ownerTaskID, inReplyTo := "", "", "", "", ""
 	if sub != nil {
 		agentID = sub.instanceID
 		taskID = sub.taskID
 		ownerAgentID, ownerTaskID, _, _ = sub.ownerSnapshot()
-		agentType = sub.agentDefName
 		inReplyTo = firstReplyMessageID(sub)
 	} else if record != nil {
-		agentID = record.LatestInstanceID
-		taskID = record.TaskID
+		agentID = strings.TrimSpace(record.LatestInstanceID)
+		taskID = strings.TrimSpace(record.TaskID)
 		ownerAgentID = strings.TrimSpace(record.OwnerAgentID)
 		ownerTaskID = strings.TrimSpace(record.OwnerTaskID)
-		agentType = record.AgentDefName
 	}
-	if strings.TrimSpace(taskID) == "" {
-		return
+	agentID = strings.TrimSpace(agentID)
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return nil
 	}
-	mailbox := &SubAgentMailboxMessage{
+	summary := strings.TrimSpace(reason)
+	if summary == "" {
+		summary = waitingMainExpiryClosedReasonPrefix
+	}
+	return &SubAgentMailboxMessage{
 		AgentID:      agentID,
 		TaskID:       taskID,
 		OwnerAgentID: ownerAgentID,
@@ -517,14 +562,72 @@ func (a *MainAgent) queueWaitingMainExpiryAlert(sub *SubAgent, record *DurableTa
 		InReplyTo:    inReplyTo,
 		Kind:         SubAgentMailboxKindRiskAlert,
 		Priority:     SubAgentMailboxPriorityInterrupt,
-		Summary:      reason,
+		Summary:      summary,
 		Payload: fmt.Sprintf(
 			"SubAgent task was abandoned because its wait for a main-agent reply expired and the work was not completed.\n- task_id: %s\n- agent_id: %s\n- required_action: re-delegate the work or explicitly resume the task; the pending agent request for this task is now expired, so a later reply to it will be rejected.",
 			taskID, agentID,
 		),
 		RequiresAck: false,
 	}
-	a.queueLoopEvent(Event{Type: EventSubAgentMailbox, SourceID: agentID, Payload: mailbox})
+}
+
+// prepareWaitingMainExpiryAlert persists the expiry risk_alert mailbox for a
+// parked WaitingMain record ahead of its guarded terminal settle, without
+// applying it. The parked sweep branch deliberately defers the apply until the
+// guarded settle wins: applying would refresh the parked record's update clock
+// through syncTaskRecordFromMailbox and make the settle's re-run of the expiry
+// predicate back off. A persistence failure stays best-effort: the message is
+// not marked seen, so the queued delivery event retries the write through its
+// own persist path.
+func (a *MainAgent) prepareWaitingMainExpiryAlert(sub *SubAgent, record *DurableTaskRecord, reason string) (*SubAgentMailboxMessage, bool) {
+	mailbox := a.buildWaitingMainExpiryAlertMailbox(sub, record, reason)
+	if mailbox == nil {
+		return nil, false
+	}
+	a.normalizeSubAgentMailboxMessage(mailbox)
+	if err := a.persistSubAgentMailboxMessage(*mailbox); err != nil {
+		log.Warnf("expiry risk_alert mailbox durability degraded task_id=%v agent_id=%v error=%v (will retry through the mailbox queue)", mailbox.TaskID, mailbox.AgentID, err)
+		return mailbox, false
+	}
+	a.markSubAgentMailboxSeen(mailbox.MessageID)
+	return mailbox, true
+}
+
+// deliverSettledWaitingMainExpiryAlert applies and delivers the expiry
+// risk_alert mailbox that prepareWaitingMainExpiryAlert persisted before the
+// parked task's guarded settle won. Applying only now is safe: the record is
+// already terminal Cancelled, so refreshing its LastMailboxID and summary
+// cannot make an expiry guard back off. When the pre-settle persist failed the
+// message was not marked seen, so the queued delivery event performs the
+// apply, persistence retry, and delivery by itself.
+func (a *MainAgent) deliverSettledWaitingMainExpiryAlert(mailbox *SubAgentMailboxMessage, durable bool, settled *DurableTaskRecord) {
+	if mailbox == nil {
+		return
+	}
+	if durable {
+		a.applyPersistedSubAgentMailboxMessage(mailbox)
+	}
+	a.queueLoopEvent(Event{Type: EventSubAgentMailbox, SourceID: strings.TrimSpace(mailbox.AgentID), Payload: mailbox})
+	a.emitWaitingMainExpiryAlertNotify(mailbox, nil, settled)
+}
+
+// emitWaitingMainExpiryAlertNotify emits the control-plane AgentNotifyEvent
+// that accompanies an expiry risk_alert mailbox (see queueWaitingMainExpiryAlert
+// and deliverSettledWaitingMainExpiryAlert).
+func (a *MainAgent) emitWaitingMainExpiryAlertNotify(mailbox *SubAgentMailboxMessage, sub *SubAgent, record *DurableTaskRecord) {
+	if mailbox == nil {
+		return
+	}
+	agentType := ""
+	if sub != nil {
+		agentType = sub.agentDefName
+	} else if record != nil {
+		agentType = record.AgentDefName
+	}
+	agentID := strings.TrimSpace(mailbox.AgentID)
+	taskID := strings.TrimSpace(mailbox.TaskID)
+	ownerAgentID := strings.TrimSpace(mailbox.OwnerAgentID)
+	ownerTaskID := strings.TrimSpace(mailbox.OwnerTaskID)
 	a.emitToTUI(AgentNotifyEvent{
 		AgentID:       agentID,
 		TaskID:        taskID,
@@ -534,7 +637,7 @@ func (a *MainAgent) queueWaitingMainExpiryAlert(sub *SubAgent, record *DurableTa
 		TargetAgentID: controlPlaneAgentID(ownerAgentID),
 		TargetTaskID:  ownerTaskID,
 		Kind:          string(SubAgentMailboxKindRiskAlert),
-		Message:       reason,
+		Message:       strings.TrimSpace(mailbox.Summary),
 	})
 }
 
