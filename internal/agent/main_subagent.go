@@ -314,6 +314,75 @@ func (a *MainAgent) cancelSubAgentAdmissions() {
 	}
 }
 
+// countRuntimeSlotHolders returns how many pending admissions and live
+// SubAgents are recorded as holding a runtime-pool token. Borrowed and bypass
+// grants are excluded because they occupy the governor's borrow/bypass
+// counters, not the runtime channel. The count is a best-effort signal rather
+// than a lock-step invariant: park/close release their slot in two phases
+// (registry removal, then flag clear), so a snapshot taken in that window can
+// transiently under-count while the token is still in the channel.
+func (a *MainAgent) countRuntimeSlotHolders() int {
+	if a == nil {
+		return 0
+	}
+	a.subs.mu.RLock()
+	defer a.subs.mu.RUnlock()
+	holders := 0
+	for _, admission := range a.subs.admissions {
+		if admission != nil && admission.slotHeld {
+			holders++
+		}
+	}
+	for _, sub := range a.subs.subAgents {
+		if sub == nil {
+			continue
+		}
+		sub.semMu.Lock()
+		held := sub.semHeld && !sub.semBorrowed && !sub.semBypassed
+		sub.semMu.Unlock()
+		if held {
+			holders++
+		}
+	}
+	return holders
+}
+
+// warnOnRuntimeSlotDrift logs an anomaly when the runtime pool holds tokens
+// that no admission or live SubAgent is recorded as owning (or holder
+// bookkeeping ran ahead of the pool). A leaked slot is only directly
+// observable when it makes a later acquisition refuse, so the capacity-refusal
+// path of CreateSubAgent is its alarm point; the underlying delta stays
+// available on resourceGovernorSnapshot for any sampler via
+// runtimeGovernorSnapshot.
+func (a *MainAgent) warnOnRuntimeSlotDrift(where string) {
+	snap := a.runtimeGovernorSnapshot()
+	if snap.RuntimeSlotDrift == 0 {
+		return
+	}
+	log.Warnf("runtime slot accounting drift during %s runtime_in_use=%d runtime_holders=%d drift=%d; a leaked or over-released SubAgent slot is suspected", where, snap.RuntimeInUse, snap.RuntimeHolders, snap.RuntimeSlotDrift)
+}
+
+// runtimeGovernorSnapshot fills the runtime-pool holder count and its drift
+// from the raw channel occupancy into a governor snapshot. RuntimeHolders is
+// only computable from the admission/SubAgent registries this agent owns, so
+// it is filled here instead of in (*resourceGovernor).snapshot. A positive
+// RuntimeSlotDrift means runtime tokens are held by no recorded owner (a
+// leaked slot, e.g. the CreateSubAgent failure branch that used to drop a
+// committed sub without releasing its slot); a negative drift means holder
+// bookkeeping ran ahead of the pool.
+func (a *MainAgent) runtimeGovernorSnapshot() resourceGovernorSnapshot {
+	snap := resourceGovernorSnapshot{}
+	if a.governor != nil {
+		snap = a.governor.snapshot()
+	} else {
+		snap.RuntimeCapacity = cap(a.sem)
+		snap.RuntimeInUse = len(a.sem)
+	}
+	snap.RuntimeHolders = a.countRuntimeSlotHolders()
+	snap.RuntimeSlotDrift = snap.RuntimeInUse - snap.RuntimeHolders
+	return snap
+}
+
 func (a *MainAgent) outstandingJoinChildTaskIDsLocked(taskID string) []string {
 	taskID = strings.TrimSpace(taskID)
 	if taskID == "" {
@@ -838,6 +907,7 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 	} else {
 		a.subs.mu.Unlock()
 		a.admissionMu.Unlock()
+		a.warnOnRuntimeSlotDrift("CreateSubAgent capacity refusal")
 		return tools.TaskHandle{}, fmt.Errorf("max concurrent agents reached (cap=%d), wait for a running agent to complete", cap(a.sem))
 	}
 	a.subs.addAdmissionLocked(admission)
@@ -946,23 +1016,9 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 	sub.semMu.Lock()
 	sub.semHeld = true
 	sub.semMu.Unlock()
-	a.subs.subAgents[sub.instanceID] = sub
-	a.subs.taskRecords[taskID] = cloneDurableTaskRecord(registrationRecord)
-	a.subs.notifyTaskChangeLocked()
+	a.publishSubAgentLocked(sub, taskID, registrationRecord)
 	a.subs.mu.Unlock()
-	if a.recoveryManager() != nil {
-		if err := a.persistSnapshotLocked(a.buildRecoverySnapshot); err != nil {
-			a.subs.mu.Lock()
-			delete(a.subs.subAgents, sub.instanceID)
-			delete(a.subs.taskRecords, taskID)
-			a.subs.mu.Unlock()
-			_ = os.Remove(subAgentMetaPath(registrationSessionDir, sub.instanceID))
-			_ = a.persistTaskRegistryRecord(registrationSessionDir, taskID, nil)
-			a.admissionMu.Unlock()
-			cancel()
-			return tools.TaskHandle{}, fmt.Errorf("persist initial recovery snapshot: %w", err)
-		}
-	}
+	a.persistSubAgentRecoverySnapshot(sub, taskID)
 	admissionCommitted = true
 	clientCommitted = true
 	initialMessageCommitted = true
@@ -990,6 +1046,36 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 		ExpectedWriteScope: expectedWriteScope,
 	}
 	return handle, nil
+}
+
+// publishSubAgentLocked makes sub visible to the runtime (the live-agent
+// registry, the durable task record, and the task-change signal). The caller
+// must hold a.subs.mu. This is the shared commit step of CreateSubAgent and
+// rehydrateTaskAsActivationLeader: both call it only after their durable
+// registration writes have succeeded and their admission/activation slot
+// ownership has been transferred, so from this point on nothing is rolled back
+// and the two failure paths stay symmetric by construction.
+func (a *MainAgent) publishSubAgentLocked(sub *SubAgent, taskID string, record *DurableTaskRecord) {
+	a.subs.subAgents[sub.instanceID] = sub
+	a.subs.taskRecords[taskID] = cloneDurableTaskRecord(record)
+	a.subs.notifyTaskChangeLocked()
+}
+
+// persistSubAgentRecoverySnapshot best-effort persists a recovery snapshot
+// that reflects sub's publish. A write failure must not fail the surrounding
+// creation or reactivation: the task registry and the instance meta file are
+// the durable source of truth for restore, and the next saveRecoverySnapshot
+// rewrites the snapshot from live state, so the only cost of a failed write is
+// a wider pre-existing crash-to-next-snapshot window. Log instead of rolling
+// the already-published sub back (rolling back would also need to release the
+// runtime slot, which is exactly the asymmetric path that used to leak it).
+func (a *MainAgent) persistSubAgentRecoverySnapshot(sub *SubAgent, taskID string) {
+	if a.recoveryManager() == nil {
+		return
+	}
+	if err := a.persistSnapshotLocked(a.buildRecoverySnapshot); err != nil {
+		log.Warnf("failed to persist recovery snapshot after publishing SubAgent instance=%v task_id=%v error=%v", sub.instanceID, taskID, err)
+	}
 }
 
 func (a *MainAgent) subAgentByID(agentID string) *SubAgent {

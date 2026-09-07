@@ -16,6 +16,7 @@ import (
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
+	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -1091,6 +1092,9 @@ func TestCreateSubAgentPersistenceFailureDoesNotStartRuntime(t *testing.T) {
 	if got := len(a.sem); got != 0 {
 		t.Fatalf("semaphore use = %d, want 0 after failed registration", got)
 	}
+	if got := len(a.subs.admissions); got != 0 {
+		t.Fatalf("pending admissions = %d, want 0 after failed registration", got)
+	}
 	if rec := a.taskRecordByTaskID("adhoc-1"); rec != nil {
 		t.Fatalf("task record = %#v, want nil after failed registration", rec)
 	}
@@ -1131,6 +1135,9 @@ func TestCreateSubAgentCancellationDuringPersistenceDoesNotStartRuntime(t *testi
 	}
 	if got := len(a.sem); got != 0 {
 		t.Fatalf("semaphore use = %d, want 0 after cancellation", got)
+	}
+	if got := len(a.subs.admissions); got != 0 {
+		t.Fatalf("pending admissions = %d, want 0 after cancellation", got)
 	}
 	if rec := a.taskRecordByTaskID("adhoc-1"); rec != nil {
 		t.Fatalf("task record = %#v, want nil after cancellation", rec)
@@ -1377,6 +1384,12 @@ func TestCreateSubAgentRejectsRegistrationAfterOwnerCompletes(t *testing.T) {
 	}
 	if child := a.subAgentByTaskID("adhoc-1"); child != nil {
 		t.Fatalf("unexpected child registered after owner completion: %s", child.instanceID)
+	}
+	if got := len(a.subs.admissions); got != 0 {
+		t.Fatalf("pending admissions = %d, want 0 after owner completion", got)
+	}
+	if got := len(a.sem); got != 0 {
+		t.Fatalf("semaphore use = %d, want 0 after owner completion", got)
 	}
 }
 
@@ -3202,5 +3215,162 @@ func TestTerminalSubAgentsRemainAvailableAfterLifecycleSweep(t *testing.T) {
 	}
 	if got := a.subAgentByID(cancelled.instanceID); got != cancelled {
 		t.Fatal("cancelled SubAgent was removed by lifecycle sweep")
+	}
+}
+
+// installSnapshotBlockingRecoveryManager installs a real recovery manager whose
+// snapshot.json path is already a directory, so every SaveSnapshot fails with a
+// filesystem error while message, meta, and task-registry writes keep working.
+// It is the deterministic injection point for the recovery-snapshot failure
+// branch of CreateSubAgent and rehydrateTaskAsActivationLeader.
+func installSnapshotBlockingRecoveryManager(t *testing.T, a *MainAgent) {
+	t.Helper()
+	blocker := filepath.Join(a.sessionDir, "snapshot.json")
+	if err := os.Mkdir(blocker, 0o755); err != nil {
+		t.Fatalf("mkdir snapshot blocker: %v", err)
+	}
+	a.installRecoveryManager(recovery.NewRecoveryManager(a.sessionDir))
+}
+
+func TestCreateSubAgentSnapshotPersistFailureDoesNotLeakSlot(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	configureNestedDelegationTestRuntime(a, 2)
+	installSnapshotBlockingRecoveryManager(t, a)
+
+	// The snapshot write after the commit must be non-fatal: the registration
+	// (task registry + instance meta) is already durable and the next
+	// saveRecoverySnapshot rewrites the snapshot from live state. Failing the
+	// creation here was the historical path that leaked the runtime slot.
+	handle, err := a.CreateSubAgent(context.Background(), "snapshot write fails", "worker", "", "", tools.WriteScope{})
+	if err != nil {
+		t.Fatalf("CreateSubAgent: %v", err)
+	}
+	if handle.Status != "started" {
+		t.Fatalf("handle.Status = %q, want started despite snapshot failure", handle.Status)
+	}
+	sub := a.subAgentByTaskID(handle.TaskID)
+	if sub == nil {
+		t.Fatal("expected the published SubAgent to stay live after a non-fatal snapshot failure")
+	}
+	if got := len(a.subs.snapshotSubAgents()); got != 1 {
+		t.Fatalf("live SubAgents = %d, want 1", got)
+	}
+	snap := a.runtimeGovernorSnapshot()
+	if snap.RuntimeInUse != 1 || snap.RuntimeHolders != 1 || snap.RuntimeSlotDrift != 0 {
+		t.Fatalf("governor after publish = in_use:%d holders:%d drift:%d, want 1/1/0", snap.RuntimeInUse, snap.RuntimeHolders, snap.RuntimeSlotDrift)
+	}
+	if rec := a.taskRecordByTaskID(handle.TaskID); rec == nil || rec.LatestInstanceID != sub.instanceID {
+		t.Fatalf("task record after publish = %#v, want the live instance", rec)
+	}
+
+	a.closeSubAgent(sub.instanceID)
+	snap = a.runtimeGovernorSnapshot()
+	if snap.RuntimeInUse != 0 || snap.RuntimeHolders != 0 || snap.RuntimeSlotDrift != 0 {
+		t.Fatalf("governor after close = in_use:%d holders:%d drift:%d, want 0/0/0", snap.RuntimeInUse, snap.RuntimeHolders, snap.RuntimeSlotDrift)
+	}
+}
+
+func TestRehydrateSnapshotPersistFailureDoesNotLeakSlot(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	configureNestedDelegationTestRuntime(a, 2)
+	installSnapshotBlockingRecoveryManager(t, a)
+	record := &DurableTaskRecord{
+		TaskID:           "adhoc-rehydrate-snap",
+		AgentDefName:     "worker",
+		TaskDesc:         "resume after snapshot failure",
+		State:            string(SubAgentStateIdle),
+		RuntimeParked:    true,
+		ResumePolicy:     taskResumePolicyNotify,
+		LatestInstanceID: "worker-old",
+	}
+	a.setTaskRecords(map[string]*DurableTaskRecord{record.TaskID: cloneDurableTaskRecord(record)})
+
+	sub, _, err := a.rehydrateTask(cloneDurableTaskRecord(record))
+	if err != nil {
+		t.Fatalf("rehydrateTask: %v", err)
+	}
+	if sub == nil {
+		t.Fatal("rehydrateTask returned no SubAgent")
+	}
+	snap := a.runtimeGovernorSnapshot()
+	if snap.RuntimeInUse != 1 || snap.RuntimeHolders != 1 || snap.RuntimeSlotDrift != 0 {
+		t.Fatalf("governor after rehydrate = in_use:%d holders:%d drift:%d, want 1/1/0", snap.RuntimeInUse, snap.RuntimeHolders, snap.RuntimeSlotDrift)
+	}
+	if rec := a.taskRecordByTaskID(record.TaskID); rec == nil || rec.LatestInstanceID != sub.instanceID {
+		t.Fatalf("task record after rehydrate = %#v, want the new live instance", rec)
+	}
+
+	a.closeSubAgent(sub.instanceID)
+	if snap := a.runtimeGovernorSnapshot(); snap.RuntimeInUse != 0 || snap.RuntimeHolders != 0 || snap.RuntimeSlotDrift != 0 {
+		t.Fatalf("governor after close = %+v, want runtime 0/0/0", snap)
+	}
+}
+
+func TestCreateSubAgentMCPServerFailureReleasesAdmissionSlot(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	configureNestedDelegationTestRuntime(a, 2)
+	// Agent-scoped MCP servers cannot be enabled at runtime, so a manual entry
+	// makes getOrCreateAgentMCP fail after the admission already holds a slot.
+	a.agentConfigs["worker"].MCP = config.MCPConfig{"runtime-only": {Manual: true}}
+
+	_, err := a.CreateSubAgent(context.Background(), "mcp must fail", "worker", "", "", tools.WriteScope{})
+	if err == nil || !strings.Contains(err.Error(), "manual") {
+		t.Fatalf("CreateSubAgent() err = %v, want agent-scoped MCP manual rejection", err)
+	}
+	if got := len(a.subs.snapshotSubAgents()); got != 0 {
+		t.Fatalf("live SubAgents = %d, want 0 after MCP failure", got)
+	}
+	if got := len(a.subs.admissions); got != 0 {
+		t.Fatalf("pending admissions = %d, want 0 after MCP failure", got)
+	}
+	if got := a.governor.snapshot().RuntimeInUse; got != 0 {
+		t.Fatalf("runtime in use = %d, want 0 after MCP failure", got)
+	}
+}
+
+func TestCancelSubAgentAdmissionsDuringCreateReleasesSlotOnce(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	configureNestedDelegationTestRuntime(a, 2)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	a.taskRegistryPersistHook = func() {
+		close(entered)
+		<-release
+	}
+	type outcome struct {
+		handle tools.TaskHandle
+		err    error
+	}
+	result := make(chan outcome, 1)
+	go func() {
+		handle, err := a.CreateSubAgent(context.Background(), "cancel vs create", "worker", "plan-race", "semantic-race", tools.WriteScope{})
+		result <- outcome{handle: handle, err: err}
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("create did not reach durable persistence")
+	}
+	// Cancel while the create is inside registration persistence: the admission
+	// is still recorded as holding the slot, so the canceller releases it once.
+	// The create's post-persistence recheck then backs off without a second
+	// release (the admission is already gone from the registry).
+	a.cancelSubAgentAdmissions()
+	close(release)
+	got := <-result
+	if got.err == nil || !strings.Contains(got.err.Error(), "admission was cancelled after persistence") {
+		t.Fatalf("CreateSubAgent() = (%#v, %v), want post-persistence cancellation", got.handle, got.err)
+	}
+	if pending := len(a.subs.admissions); pending != 0 {
+		t.Fatalf("pending admissions = %d, want 0", pending)
+	}
+	if live := len(a.subs.snapshotSubAgents()); live != 0 {
+		t.Fatalf("live SubAgents = %d, want 0", live)
+	}
+	if rec := a.taskRecordByTaskID("adhoc-1"); rec != nil {
+		t.Fatalf("task record = %#v, want nil after cancellation", rec)
+	}
+	if got := a.governor.snapshot().RuntimeInUse; got != 0 {
+		t.Fatalf("runtime in use = %d, want 0: the slot must be released exactly once across cancel and create rollback", got)
 	}
 }

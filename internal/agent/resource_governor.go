@@ -55,17 +55,26 @@ type resourceGovernor struct {
 type resourceGovernorSnapshot struct {
 	RuntimeCapacity int
 	RuntimeInUse    int
-	BorrowedLimit   int
-	BorrowedInUse   int
-	BypassLimit     int
-	BypassInUse     int
-	LLMLimit        int
-	LLMActive       int
-	LLMQueued       int
-	ProviderActive  map[string]int
-	ModelActive     map[string]int
-	LeaseActive     int
-	LeaseQueued     int
+	// RuntimeHolders is the number of pending admissions and live SubAgents
+	// the MainAgent currently records as owning a runtime-pool token. It is
+	// filled by (*MainAgent).runtimeGovernorSnapshot, not by snapshot(),
+	// because only the MainAgent can see the admission/SubAgent registries.
+	RuntimeHolders int
+	// RuntimeSlotDrift is RuntimeInUse - RuntimeHolders. A positive value means
+	// runtime tokens are occupied with no recorded owner (a leaked slot); a
+	// negative value means holder bookkeeping got ahead of the pool.
+	RuntimeSlotDrift int
+	BorrowedLimit    int
+	BorrowedInUse    int
+	BypassLimit      int
+	BypassInUse      int
+	LLMLimit         int
+	LLMActive        int
+	LLMQueued        int
+	ProviderActive   map[string]int
+	ModelActive      map[string]int
+	LeaseActive      int
+	LeaseQueued      int
 }
 
 func newResourceGovernor(cfg config.OrchestrationConfig) *resourceGovernor {

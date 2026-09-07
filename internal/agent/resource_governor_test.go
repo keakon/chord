@@ -363,3 +363,44 @@ func TestResourceGovernorProviderKeyStripsVariant(t *testing.T) {
 		}
 	}
 }
+
+func TestRuntimeGovernorSnapshotExposesRuntimeSlotDrift(t *testing.T) {
+	g := newResourceGovernor(config.OrchestrationConfig{MaxLiveRuntimes: 2})
+	a := &MainAgent{governor: g, sem: g.runtimeSlots, subs: newSubAgentRegistry()}
+
+	snap := a.runtimeGovernorSnapshot()
+	if snap.RuntimeInUse != 0 || snap.RuntimeHolders != 0 || snap.RuntimeSlotDrift != 0 {
+		t.Fatalf("idle governor snapshot = in_use:%d holders:%d drift:%d, want 0/0/0", snap.RuntimeInUse, snap.RuntimeHolders, snap.RuntimeSlotDrift)
+	}
+
+	// A token sitting in the pool with no recorded owner is exactly the leak
+	// this drift metric exists to surface: the CreateSubAgent failure branch
+	// used to drop a committed SubAgent without releasing its slot.
+	if !g.tryAcquireRuntime() {
+		t.Fatal("runtime acquire failed with a free slot")
+	}
+	snap = a.runtimeGovernorSnapshot()
+	if snap.RuntimeInUse != 1 || snap.RuntimeHolders != 0 || snap.RuntimeSlotDrift != 1 {
+		t.Fatalf("leaked token snapshot = in_use:%d holders:%d drift:%d, want 1/0/1", snap.RuntimeInUse, snap.RuntimeHolders, snap.RuntimeSlotDrift)
+	}
+
+	// A live SubAgent recorded as holding that token closes the drift.
+	sub := &SubAgent{instanceID: "worker-1", taskID: "adhoc-1"}
+	a.subs.mu.Lock()
+	a.subs.subAgents[sub.instanceID] = sub
+	a.subs.mu.Unlock()
+	sub.semMu.Lock()
+	sub.semHeld = true
+	sub.semMu.Unlock()
+	snap = a.runtimeGovernorSnapshot()
+	if snap.RuntimeInUse != 1 || snap.RuntimeHolders != 1 || snap.RuntimeSlotDrift != 0 {
+		t.Fatalf("held token snapshot = in_use:%d holders:%d drift:%d, want 1/1/0", snap.RuntimeInUse, snap.RuntimeHolders, snap.RuntimeSlotDrift)
+	}
+
+	// Releasing through the normal path pops the token and clears the flags.
+	a.releaseSubAgentSlot(sub)
+	snap = a.runtimeGovernorSnapshot()
+	if snap.RuntimeInUse != 0 || snap.RuntimeHolders != 0 || snap.RuntimeSlotDrift != 0 {
+		t.Fatalf("after release snapshot = in_use:%d holders:%d drift:%d, want 0/0/0", snap.RuntimeInUse, snap.RuntimeHolders, snap.RuntimeSlotDrift)
+	}
+}

@@ -711,24 +711,9 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 		}
 		return nil, "", false, fmt.Errorf("task %s activation was superseded after persistence", taskID)
 	}
-	a.subs.subAgents[sub.instanceID] = sub
-	a.subs.taskRecords[taskID] = cloneDurableTaskRecord(rehydratedRecord)
-	a.subs.notifyTaskChangeLocked()
+	a.publishSubAgentLocked(sub, taskID, rehydratedRecord)
 	a.subs.mu.Unlock()
-	if a.recoveryManager() != nil {
-		if snapshotErr := a.persistSnapshotLocked(a.buildRecoverySnapshot); snapshotErr != nil {
-			a.subs.mu.Lock()
-			delete(a.subs.subAgents, sub.instanceID)
-			a.subs.taskRecords[taskID] = cloneDurableTaskRecord(record)
-			a.subs.mu.Unlock()
-			_ = os.Remove(subAgentMetaPath(registrationSessionDir, sub.instanceID))
-			_ = a.persistTaskRegistryRecord(registrationSessionDir, taskID, record)
-			a.releaseSubAgentSlot(sub)
-			a.admissionMu.Unlock()
-			cancel()
-			return nil, "", false, fmt.Errorf("persist rehydrated recovery snapshot: %w", snapshotErr)
-		}
-	}
+	a.persistSubAgentRecoverySnapshot(sub, taskID)
 	clientCommitted = true
 	a.admissionMu.Unlock()
 	a.migrateSubAgentOwnerIdentity(previousAgentID, sub.instanceID)
