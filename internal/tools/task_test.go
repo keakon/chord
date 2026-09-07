@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -49,7 +50,7 @@ func TestDelegateToolParametersExposeIdentityScopeAndAgentMetadata(t *testing.T)
 
 func TestDelegateToolReturnsSingleBackgroundHandle(t *testing.T) {
 	creator := &countingTaskCreator{}
-	result, err := NewDelegateTool(creator).Execute(context.Background(), json.RawMessage(`{"description":"implement feature","agent_type":"builder"}`))
+	result, err := NewDelegateTool(creator).Execute(context.Background(), json.RawMessage(`{"description":"implement feature","agent_type":"builder","expected_write_scope":{"path_prefix":["internal/agent"]}}`))
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
@@ -62,6 +63,60 @@ func TestDelegateToolReturnsSingleBackgroundHandle(t *testing.T) {
 	}
 	if handle.Status != "started" || handle.TaskID != "adhoc-7" || handle.AgentID != "agent-7" || handle.Message != "running in background" {
 		t.Fatalf("handle = %#v, want one asynchronous startup handle", handle)
+	}
+}
+
+func TestDelegateToolRequiresUsableWriteScope(t *testing.T) {
+	tests := []struct {
+		name string
+		args string
+	}{
+		{name: "omitted", args: `{"description":"implement feature","agent_type":"builder"}`},
+		{name: "empty object", args: `{"description":"implement feature","agent_type":"builder","expected_write_scope":{}}`},
+		{
+			name: "blank entries only",
+			args: `{"description":"implement feature","agent_type":"builder","expected_write_scope":{"files":["  "]}}`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			creator := &countingTaskCreator{}
+			_, err := NewDelegateTool(creator).Execute(context.Background(), json.RawMessage(tc.args))
+			if err == nil {
+				t.Fatal("Execute() error = nil, want a write-scope repair instruction")
+			}
+			for _, want := range []string{"read_only=true", "files/path_prefix/modules"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("Execute() error = %q, want it to mention %q", err, want)
+				}
+			}
+			if creator.calls != 0 {
+				t.Fatalf("CreateSubAgent() calls = %d, want the delegation rejected before admission", creator.calls)
+			}
+		})
+	}
+}
+
+func TestDelegateToolAcceptsReadOnlyScope(t *testing.T) {
+	creator := &countingTaskCreator{}
+	if _, err := NewDelegateTool(creator).Execute(context.Background(), json.RawMessage(
+		`{"description":"survey the parser","agent_type":"builder","expected_write_scope":{"read_only":true}}`,
+	)); err != nil {
+		t.Fatalf("Execute() error = %v, want read-only scope accepted", err)
+	}
+	if creator.calls != 1 {
+		t.Fatalf("CreateSubAgent() calls = %d, want 1", creator.calls)
+	}
+}
+
+func TestDelegateToolParametersMarkWriteScopeRequired(t *testing.T) {
+	params := NewDelegateTool(taskTestCreator{}).Parameters()
+	required, ok := params["required"].([]string)
+	if !ok {
+		t.Fatalf("Parameters()[\"required\"] = %#v, want []string", params["required"])
+	}
+	if !slices.Contains(required, "expected_write_scope") {
+		t.Fatalf("required = %v, want expected_write_scope included", required)
 	}
 }
 

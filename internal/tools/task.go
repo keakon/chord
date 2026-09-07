@@ -121,11 +121,13 @@ func NewDelegateTool(creator SubAgentCreator) *DelegateTool {
 }
 
 type delegateArgs struct {
-	Description        string     `json:"description"`
-	AgentType          string     `json:"agent_type"`
-	PlanTaskRef        string     `json:"plan_task_ref,omitempty"`
-	SemanticTaskKey    string     `json:"semantic_task_key,omitempty"`
-	ExpectedWriteScope WriteScope `json:"expected_write_scope"`
+	Description     string `json:"description"`
+	AgentType       string `json:"agent_type"`
+	PlanTaskRef     string `json:"plan_task_ref,omitempty"`
+	SemanticTaskKey string `json:"semantic_task_key,omitempty"`
+	// Pointer so an omitted scope is distinguishable from an explicitly empty
+	// one: both are rejected, but only the first is a missing-argument error.
+	ExpectedWriteScope *WriteScope `json:"expected_write_scope"`
 }
 
 func (DelegateTool) Name() string { return NameDelegate }
@@ -202,7 +204,7 @@ func (t *DelegateTool) Parameters() map[string]any {
 			},
 			"expected_write_scope": map[string]any{
 				"type":        "object",
-				"description": "Optional write-scope declaration used for concurrency guardrails. Set read_only=true for research-only tasks. If omitted for a task that may write, the task is treated as having an unknown global write scope and runs exclusively with respect to other writing tasks.",
+				"description": "Required write-scope declaration used for concurrency guardrails. Set read_only=true for research-only tasks; otherwise declare at least one of files, path_prefix, or modules. An undeclared scope would have to run exclusively against every other writing task, so it is rejected instead: declare the narrowest scope that covers the task to keep independent delegates running in parallel.",
 				"properties": map[string]any{
 					"files":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 					"path_prefix": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
@@ -217,12 +219,20 @@ func (t *DelegateTool) Parameters() map[string]any {
 				"enum":        enum,
 			},
 		},
-		"required":             []string{"description", "agent_type"},
+		"required":             []string{"description", "agent_type", "expected_write_scope"},
 		"additionalProperties": false,
 	}
 }
 
 func (DelegateTool) IsReadOnly() bool { return false }
+
+// errDelegateWriteScopeRequired is the operator-facing repair instruction for a
+// Delegate call that declares no usable write scope. The schema marks the field
+// required, but a model can still send `{}`, which would silently reacquire the
+// global exclusive scope the requirement exists to prevent.
+var errDelegateWriteScopeRequired = fmt.Errorf(
+	"expected_write_scope is required: set read_only=true for a research-only task, " +
+		"or declare at least one of files/path_prefix/modules covering what this task will write")
 
 func (t *DelegateTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	var a delegateArgs
@@ -232,12 +242,19 @@ func (t *DelegateTool) Execute(ctx context.Context, raw json.RawMessage) (string
 	if a.Description == "" {
 		return "", fmt.Errorf("description is required")
 	}
+	if a.ExpectedWriteScope == nil {
+		return "", errDelegateWriteScopeRequired
+	}
+	expectedWriteScope := a.ExpectedWriteScope.Normalized()
+	if expectedWriteScope.Empty() {
+		return "", errDelegateWriteScopeRequired
+	}
 
 	if t.creator == nil {
 		return "", fmt.Errorf("task creation not available (no SubAgentCreator configured)")
 	}
 
-	handle, err := t.creator.CreateSubAgent(ctx, a.Description, a.AgentType, a.PlanTaskRef, a.SemanticTaskKey, a.ExpectedWriteScope.Normalized())
+	handle, err := t.creator.CreateSubAgent(ctx, a.Description, a.AgentType, a.PlanTaskRef, a.SemanticTaskKey, expectedWriteScope)
 	if err != nil {
 		return "", err
 	}
