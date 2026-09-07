@@ -6,6 +6,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -49,6 +50,16 @@ type AgentConfig struct {
 	Prompt           string           `json:"-" yaml:"prompt,omitempty"`
 	PromptAlt        string           `json:"-" yaml:"system_prompt,omitempty"`
 	SystemPrompt     string           `json:"-" yaml:"-"`
+	// PromptPreset selects a built-in role prompt block by capability instead of
+	// by agent name, so a role named anything can reuse the planning prompt and
+	// a role named "planner" can opt out of it. Empty means "decide from the
+	// agent name" for backward compatibility; see resolvePromptPreset.
+	PromptPreset string `json:"prompt_preset,omitempty" yaml:"prompt_preset,omitempty"`
+	// PromptAppend is appended after the effective role prompt (a built-in
+	// preset block, or SystemPrompt when the agent replaces it) so a role can
+	// add project conventions without taking over maintenance of the whole
+	// block. SystemPrompt keeps its replacing semantics.
+	PromptAppend string `json:"-" yaml:"prompt_append,omitempty"`
 }
 
 type DelegationConfig struct {
@@ -76,7 +87,41 @@ const (
 	AgentModeSubAgent      = "subagent"
 	AgentModeSubAgentSnake = "sub_agent"
 	AgentModeSubAgentShort = "sub"
+
+	// PromptPresetPlanning requests the built-in planning prompt block, which
+	// covers plan-document naming, the direct-answer/plan decision, handoff
+	// ordering, and plan quality rules. The block adapts to the role's visible
+	// tools at render time, which a prompt copied into agent YAML cannot do.
+	PromptPresetPlanning = "planning"
+	// PromptPresetNone suppresses any built-in role prompt block, including the
+	// one an agent would otherwise get from its name.
+	PromptPresetNone = "none"
 )
+
+// KnownPromptPresets lists the accepted prompt_preset values, for validation
+// and error messages.
+var KnownPromptPresets = []string{PromptPresetPlanning, PromptPresetNone}
+
+// ResolvePromptPreset returns the canonical prompt preset for an agent.
+//
+// An explicit prompt_preset always decides. When it is absent, the agent name
+// decides so that a role named "planner" keeps the planning block it had
+// before prompt_preset existed; every other name resolves to no preset.
+func (c *AgentConfig) ResolvePromptPreset() string {
+	if c == nil {
+		return ""
+	}
+	if preset := strings.ToLower(strings.TrimSpace(c.PromptPreset)); preset != "" {
+		if preset == PromptPresetNone {
+			return ""
+		}
+		return preset
+	}
+	if strings.EqualFold(strings.TrimSpace(c.Name), "planner") {
+		return PromptPresetPlanning
+	}
+	return ""
+}
 
 func isAgentModeSubAgent(mode string) bool {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
@@ -283,6 +328,16 @@ func finalizeAgentConfig(path string, cfg *AgentConfig) (*AgentConfig, error) {
 		return nil, fmt.Errorf("agent config %s: delegation.max_depth must not be negative", path)
 	}
 
+	// An unknown prompt_preset is an explicit error rather than a silently
+	// ignored field: a typo would otherwise leave the role with no prompt block
+	// at all, which is hard to notice from the outside.
+	if preset := strings.ToLower(strings.TrimSpace(cfg.PromptPreset)); preset != "" {
+		if !slices.Contains(KnownPromptPresets, preset) {
+			return nil, fmt.Errorf("agent config %s: unknown prompt_preset %q; expected one of %s", path, cfg.PromptPreset, strings.Join(KnownPromptPresets, ", "))
+		}
+		cfg.PromptPreset = preset
+	}
+
 	// model_pools list validation.
 	seenPools := make(map[string]struct{})
 	for _, name := range cfg.ModelPools {
@@ -394,6 +449,10 @@ func DefaultPlannerAgent() *AgentConfig {
 		Description: "Planning agent for requirement analysis, codebase exploration, and task decomposition. Explores the codebase, creates a plan document, and calls Handoff when done.",
 		Mode:        AgentModeMain,
 		Permission:  inner,
+		// Declared explicitly so the built-in role selects its prompt the same
+		// way a user-defined planning role does, instead of relying on the
+		// name-based fallback in ResolvePromptPreset.
+		PromptPreset: PromptPresetPlanning,
 	}
 }
 

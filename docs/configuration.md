@@ -1199,7 +1199,28 @@ Common fields include:
 - `permission`: per-tool permission policy for this agent. Permissions live directly in agent config files; when the confirmation popup remembers a rule, `project` updates the current project's `.chord/agents/<role>.yaml`, and `global` updates the user config directory's `agents/<role>.yaml` (default: `~/.config/chord/agents/<role>.yaml`). Chord no longer writes a separate permissions directory. Some orchestration tools have special semantics (`delegate` patterns match `agent_type` and also gate delegated-work controls such as `cancel`; `handoff` and `done` treat `allow` and `ask` as workflow-available states with Chord's own confirmation gates). See [Permissions & Safety](./permissions-and-safety.md#special-permission-semantics) before relying on fine-grained control-tool rules.
 - `mcp`: additional auto-start MCP servers scoped to this agent. Agent MCP is additive: a server name already present in the effective global/project `mcp` config is a startup error. Agent-scoped servers cannot use `manual: true` because runtime MCP controls manage the top-level server surface; configure a manual server at the project/global level instead. Remove an agent entry to inherit a top-level server, rename it for a separate private server, or override the top-level server in `.chord/config.yaml` for the whole project. Different agents may reuse the same private server name without sharing the connection unless they are instances of the same agent definition.
 - `delegation`: limits such as `max_children`, `max_depth`, and `child_join`. `max_children` defaults to `10` and cannot exceed `64`; `max_depth` defaults to `1` and cannot exceed `8`. Values above those ceilings or negative values are configuration errors.
-- `prompt` / `system_prompt`: system prompt for plain YAML files.
+- `prompt` / `system_prompt`: system prompt for plain YAML files. Setting either one **replaces** any built-in prompt block the role would otherwise get.
+- `prompt_preset`: selects a built-in role prompt block by capability instead of by role name. Accepted values are `planning` and `none`. `planning` injects the built-in planning block (plan-document naming and format, the direct-answer-versus-plan decision, handoff ordering, and plan quality rules); it also suppresses the bug-triage block, which would otherwise duplicate the planning workflow's own investigation outline. `none` suppresses any built-in block. When the field is omitted, a role named `planner` gets the `planning` block and every other name gets none, so existing configs keep their current behavior. Unknown values are a configuration error.
+- `prompt_append`: text appended after the effective role prompt — after the preset block, or after `prompt` / `system_prompt` when the role replaces it. Use this to add project conventions without taking over maintenance of the whole block, which also keeps the preset's tool-aware wording (it adapts to the tools the role can actually see).
+
+A custom planning role that reuses the built-in block:
+
+```yaml
+name: architect
+description: Architecture planning role
+mode: main
+prompt_preset: planning
+prompt_append: |
+  Reference the relevant ADR number in every plan document.
+permission:
+  "*": deny
+  read: allow
+  grep: allow
+  glob: allow
+  write:
+    .chord/plans/*: allow
+  handoff: allow
+```
 
 Example:
 

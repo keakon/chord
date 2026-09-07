@@ -1064,7 +1064,28 @@ prompt: |
 - `permission`：该 agent 的逐工具权限策略。权限直接保存在 agent 配置文件中；确认弹窗里选择“记住规则”时，`project` 会更新当前项目的 `.chord/agents/<role>.yaml`，`global` 会更新用户配置目录的 `agents/<role>.yaml`（默认 `~/.config/chord/agents/<role>.yaml`），不会写入单独的 permissions 文件夹。部分编排工具有特殊语义（`delegate` 的 pattern 会匹配 `agent_type`，并联动控制委派工作相关能力，如 `cancel`；`handoff` 和 `done` 的 `allow` / `ask` 都表示工作流可用，并由 Chord 自己的确认 gate 控制关键节点）。依赖精细控制工具规则前，请先阅读[权限与安全](./permissions-and-safety_CN.md#特殊权限语义)。
 - `mcp`：作用域限定在该 agent 的增量、自动启动 MCP 配置。Agent MCP 不能与最终生效的全局/项目 `mcp` server 重名，否则启动时报错；也不能设置 `manual: true`，因为运行时 MCP 控制只管理顶层 server，如需手动启停请改在项目/全局配置中声明。要继承顶层 server，请删除 agent 中的重复项；要使用独立私有 server，请改名；要为整个项目替换顶层 server，请在 `.chord/config.yaml` 中覆盖。不同 agent 可以使用相同的私有 server 名称而互不共享连接，同一 agent 定义的多个实例则会复用连接。
 - `delegation`：如 `max_children`、`max_depth`、`child_join` 等委派限制。`max_children` 默认值为 `10`，不能超过 `64`；`max_depth` 默认值为 `1`，不能超过 `8`。超过上限或使用负数会导致配置报错。
-- `prompt` / `system_prompt`：纯 YAML agent 文件中的 system prompt。
+- `prompt` / `system_prompt`：纯 YAML agent 文件中的 system prompt。设置其中任一个会**整块替换**该角色本来会获得的内置 prompt 块。
+- `prompt_preset`：按能力而非角色名选择内置角色 prompt 块，可选值为 `planning` 和 `none`。`planning` 会注入内置规划块（计划文档命名与格式、直接回答与产出计划的判断、handoff 时序、计划质量要求），同时抑制 bug triage 块 —— 后者与规划工作流自带的调查提纲重复。`none` 表示不注入任何内置块。省略该字段时，名为 `planner` 的角色获得 `planning` 块，其他名称不获得内置块，因此已有配置行为不变。填写未知值会导致配置报错。
+- `prompt_append`：追加在最终生效的角色 prompt 之后 —— 即 preset 块之后，或角色用 `prompt` / `system_prompt` 替换了基础块时追加在其后。用它可以在不接管整块维护责任的前提下补充项目约定，同时保留 preset 中随角色可见工具自适应的措辞。
+
+复用内置规划块的自定义角色：
+
+```yaml
+name: architect
+description: 架构规划角色
+mode: main
+prompt_preset: planning
+prompt_append: |
+  每份计划文档都要引用对应的 ADR 编号。
+permission:
+  "*": deny
+  read: allow
+  grep: allow
+  glob: allow
+  write:
+    .chord/plans/*: allow
+  handoff: allow
+```
 
 示例：
 

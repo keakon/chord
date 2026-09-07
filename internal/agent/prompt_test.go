@@ -2199,3 +2199,92 @@ func TestModelDrivenContextPromptBlockNotInSubAgentPrompt(t *testing.T) {
 		t.Fatalf("SubAgent prompt must not include model-driven context guidance")
 	}
 }
+
+func TestMainAgentRolePromptBlock_PlanningPresetDecidesInsteadOfRoleName(t *testing.T) {
+	const planningMarker = "Save the plan document under .chord/plans/ as YYYYMMDD-<slug>.md"
+
+	// A custom role name reuses the built-in block by declaring the preset,
+	// which is the whole point of keying on capability rather than on name.
+	a := &MainAgent{}
+	a.activeConfig = &config.AgentConfig{Name: "architect", PromptPreset: config.PromptPresetPlanning}
+	if got := a.mainAgentRolePromptBlock(); !strings.Contains(got, planningMarker) {
+		t.Fatalf("architect role with planning preset missing planning block, got %q", got)
+	}
+
+	// A role named planner can decline the block.
+	a.activeConfig = &config.AgentConfig{Name: "planner", PromptPreset: config.PromptPresetNone}
+	if got := a.mainAgentRolePromptBlock(); got != "" {
+		t.Fatalf("planner role with prompt_preset none should emit no block, got %q", got)
+	}
+
+	// The name-based fallback still applies when no preset is declared.
+	a.activeConfig = &config.AgentConfig{Name: "planner"}
+	if got := a.mainAgentRolePromptBlock(); !strings.Contains(got, planningMarker) {
+		t.Fatalf("planner role without an explicit preset lost its planning block, got %q", got)
+	}
+}
+
+func TestMainAgentRolePromptBlock_PromptAppendLayersOnTopOfBase(t *testing.T) {
+	const planningMarker = "Save the plan document under .chord/plans/ as YYYYMMDD-<slug>.md"
+	const extra = "Always cite the ADR number."
+
+	// prompt_append keeps the preset block and adds to it, so the role does not
+	// have to own the whole block to add one convention.
+	a := &MainAgent{}
+	a.activeConfig = &config.AgentConfig{
+		Name:         "architect",
+		PromptPreset: config.PromptPresetPlanning,
+		PromptAppend: extra,
+	}
+	got := a.mainAgentRolePromptBlock()
+	if !strings.Contains(got, planningMarker) {
+		t.Fatalf("append must not drop the preset block, got %q", got)
+	}
+	if !strings.Contains(got, extra) {
+		t.Fatalf("append missing %q in %q", extra, got)
+	}
+	if !strings.HasSuffix(strings.TrimSpace(got), extra) {
+		t.Fatalf("append must come last, got %q", got)
+	}
+
+	// system_prompt keeps replacing the base; append then applies to it.
+	a.activeConfig = &config.AgentConfig{
+		Name:         "architect",
+		PromptPreset: config.PromptPresetPlanning,
+		SystemPrompt: "Custom body.",
+		PromptAppend: extra,
+	}
+	got = a.mainAgentRolePromptBlock()
+	if strings.Contains(got, planningMarker) {
+		t.Fatalf("system_prompt must still replace the preset block, got %q", got)
+	}
+	if !strings.Contains(got, "Custom body.") || !strings.Contains(got, extra) {
+		t.Fatalf("replaced base plus append expected, got %q", got)
+	}
+
+	// Append alone, with no preset and no system_prompt, is the whole block.
+	a.activeConfig = &config.AgentConfig{Name: "reviewer", PromptAppend: extra}
+	if got := a.mainAgentRolePromptBlock(); got != extra {
+		t.Fatalf("append-only role block = %q, want %q", got, extra)
+	}
+}
+
+func TestBugTriagePromptBlock_SuppressedByPlanningPreset(t *testing.T) {
+	a := &MainAgent{}
+	a.bugTriagePromptActive.Store(true)
+
+	a.activeConfig = &config.AgentConfig{Name: "architect", PromptPreset: config.PromptPresetPlanning}
+	if got := a.bugTriagePromptBlock(); got != "" {
+		t.Fatalf("planning-preset role should suppress the bug triage block, got %q", got)
+	}
+
+	a.activeConfig = &config.AgentConfig{Name: "planner", PromptPreset: config.PromptPresetNone}
+	if got := a.bugTriagePromptBlock(); got == "" {
+		t.Fatal("role opting out of the planning preset should still get the bug triage block")
+	}
+
+	a.activeConfig = &config.AgentConfig{Name: "builder"}
+	if got := a.bugTriagePromptBlock(); got == "" {
+		t.Fatal("builder role should get the bug triage block")
+	}
+}

@@ -163,8 +163,10 @@ func newAgentPermissionDocumentFromBase(base *AgentConfig, rule permission.Rule)
 	if base.Permission.Kind != 0 {
 		mapping.Content = append(mapping.Content, scalarNode("permission"), cloneYAMLNode(&base.Permission))
 	}
+	appendScalarField(mapping, "prompt_preset", strings.TrimSpace(base.PromptPreset))
 	appendScalarField(mapping, "prompt", strings.TrimSpace(base.Prompt))
 	appendScalarField(mapping, "system_prompt", strings.TrimSpace(base.PromptAlt))
+	appendScalarField(mapping, "prompt_append", strings.TrimSpace(base.PromptAppend))
 	_, _ = upsertPermissionRuleNode(mapping, rule)
 	return &yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{mapping}}
 }

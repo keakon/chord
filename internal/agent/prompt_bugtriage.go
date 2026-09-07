@@ -96,11 +96,11 @@ func (a *MainAgent) bugTriagePromptBlock() string {
 	if a == nil || !a.bugTriagePromptActive.Load() {
 		return ""
 	}
-	if cfg := a.currentActiveConfig(); cfg != nil {
-		name := strings.TrimSpace(cfg.Name)
-		if strings.EqualFold(name, "planner") {
-			return ""
-		}
+	// A planning role already opens with its own investigation outline, so this
+	// block would duplicate it. Keyed on the resolved preset rather than the
+	// role name so a user-defined planning role suppresses it too.
+	if a.shouldUsePlannerPrompt(a.currentActiveConfig()) {
+		return ""
 	}
 	return "## Bug Triage Workflow\n" +
 		"- For non-trivial bug analysis, start with a short 3-5 step investigation outline before the first substantial tool call.\n" +

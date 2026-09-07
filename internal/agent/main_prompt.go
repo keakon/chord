@@ -399,15 +399,33 @@ Rules:
 `)
 }
 
+// mainAgentRolePromptBlock renders the active role's prompt block.
+//
+// Layering: a built-in preset block supplies the base, an agent's own
+// prompt/system_prompt replaces that base (unchanged from before prompt_preset
+// existed), and prompt_append is added after whichever base survived so a role
+// can add project conventions without owning the whole block.
 func (a *MainAgent) mainAgentRolePromptBlock() string {
 	activeCfg := a.currentActiveConfig()
-	if activeCfg != nil && strings.TrimSpace(activeCfg.SystemPrompt) != "" {
-		return activeCfg.SystemPrompt
-	}
+	base := ""
 	if a.shouldUsePlannerPrompt(activeCfg) {
-		return a.plannerModePromptBlock()
+		base = a.plannerModePromptBlock()
 	}
-	return ""
+	if activeCfg == nil {
+		return base
+	}
+	if custom := strings.TrimSpace(activeCfg.SystemPrompt); custom != "" {
+		base = custom
+	}
+	extra := strings.TrimSpace(activeCfg.PromptAppend)
+	switch {
+	case extra == "":
+		return base
+	case base == "":
+		return extra
+	default:
+		return base + "\n\n" + extra
+	}
 }
 
 func (a *MainAgent) mainAgentCapabilityPromptBlock() string {
@@ -440,11 +458,12 @@ func (a *MainAgent) modelDrivenContextPromptBlock() string {
 		"- Do not treat completing a small task or TODO as a reason to checkpoint; the runtime rejects low-gain resets."
 }
 
+// shouldUsePlannerPrompt reports whether the active role gets the built-in
+// planning block. The decision is the role's resolved prompt preset, not its
+// name, so a role named anything can request the block and a role named
+// "planner" can decline it with prompt_preset: none.
 func (a *MainAgent) shouldUsePlannerPrompt(activeCfg *config.AgentConfig) bool {
-	if activeCfg == nil {
-		return false
-	}
-	return strings.EqualFold(strings.TrimSpace(activeCfg.Name), "planner")
+	return activeCfg.ResolvePromptPreset() == config.PromptPresetPlanning
 }
 
 func (a *MainAgent) promptMetaSnapshot() (workDir, gitStatus, agentsMD, venvPath string) {
