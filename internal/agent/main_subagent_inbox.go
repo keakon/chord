@@ -482,6 +482,15 @@ func (a *MainAgent) enqueueSubAgentMailbox(msg SubAgentMailboxMessage) {
 			return
 		}
 	}
+	a.deliverSubAgentMailbox(msg)
+}
+
+// deliverSubAgentMailbox routes an already-persisted mailbox message to its
+// destination (owner runtime reactivation, the main-agent inbox, or the
+// per-owner queue). It never writes the message again — callers must have
+// persisted it first, either through prepareSubAgentMailboxMessage or because
+// the message was loaded from the durable mailbox log.
+func (a *MainAgent) deliverSubAgentMailbox(msg SubAgentMailboxMessage) {
 	if !a.mailboxDeliveryPaused.Load() && a.routeOwnedSubAgentMailbox(msg) {
 		return
 	}
@@ -743,13 +752,102 @@ func (a *MainAgent) handleSubAgentMailboxEvent(evt Event) {
 		return
 	}
 	messageID := strings.TrimSpace(msg.MessageID)
-	if messageID != "" && (!a.markSubAgentMailboxSeen(messageID) || a.isSubAgentMailboxConsumed(messageID)) {
+	if messageID != "" && a.isSubAgentMailboxConsumed(messageID) {
 		return
 	}
-	a.enqueueSubAgentMailbox(*msg)
+	// Drop events whose message is already queued for delivery in this
+	// session. Restore re-delivers every unconsumed mailbox message from the
+	// durable log into the delivery pipeline at startup, so a later event
+	// carrying the same MessageID would otherwise queue a second copy for the
+	// owner. The completion event below is the one legitimate in-process
+	// arrival of an already-persisted message, and only because its message
+	// has not been queued yet — the check here keeps replay of an
+	// already-restored message (or a repeated dispatch of the same event)
+	// idempotent.
+	if messageID != "" && a.hasQueuedMailboxMessage(messageID) {
+		return
+	}
+	// A message that is already durably recorded and applied in this process
+	// (the completion path persists and applies before its terminal commit,
+	// then queues this event for delivery only) must not be persisted or
+	// applied again — writing it twice would duplicate the entry in the
+	// mailbox log and applying it twice would double-count delivery
+	// bookkeeping. The event is that message's delivery, so it is routed below
+	// through the same path as a fresh message.
+	alreadyApplied := messageID != "" && !a.markSubAgentMailboxSeen(messageID)
+	if alreadyApplied {
+		a.deliverSubAgentMailbox(*msg)
+	} else {
+		a.enqueueSubAgentMailbox(*msg)
+	}
 	if msg.Kind != SubAgentMailboxKindProgress && !a.mailboxDeliveryPaused.Load() {
 		a.drainSubAgentInbox()
 	}
+}
+
+// hasQueuedMailboxMessage reports whether a message with the given ID is
+// already staged in this agent's mailbox delivery pipeline: queued for the
+// main inbox (in memory or in the durable spool), waiting in the pending
+// batch, active in the current turn, or parked in an owner's queue. A message
+// found here has already been delivered to its destination in this session
+// (restored from the durable log, or produced by an earlier dispatch of the
+// same event), so handling its mailbox event again would double-queue the
+// owner.
+func (a *MainAgent) hasQueuedMailboxMessage(messageID string) bool {
+	messageID = strings.TrimSpace(messageID)
+	if a == nil || messageID == "" {
+		return false
+	}
+	for _, msg := range a.subAgentInbox.urgent {
+		if msg.MessageID == messageID {
+			return true
+		}
+	}
+	for _, msg := range a.subAgentInbox.normal {
+		if msg.MessageID == messageID {
+			return true
+		}
+	}
+	for _, msg := range a.subAgentInbox.progress {
+		if msg.MessageID == messageID {
+			return true
+		}
+	}
+	for _, id := range a.subAgentInbox.spoolUrgent {
+		if id == messageID {
+			return true
+		}
+	}
+	for _, id := range a.subAgentInbox.spoolNormal {
+		if id == messageID {
+			return true
+		}
+	}
+	for _, queued := range a.ownedSubAgentMailboxes {
+		for _, msg := range queued {
+			if msg.MessageID == messageID {
+				return true
+			}
+		}
+	}
+	for _, spooled := range a.ownedMailboxSpool {
+		for _, id := range spooled {
+			if id == messageID {
+				return true
+			}
+		}
+	}
+	for _, msg := range a.pendingSubAgentMailboxes {
+		if msg != nil && msg.MessageID == messageID {
+			return true
+		}
+	}
+	for _, msg := range a.activeSubAgentMailboxes {
+		if msg != nil && msg.MessageID == messageID {
+			return true
+		}
+	}
+	return a.activeSubAgentMailbox != nil && a.activeSubAgentMailbox.MessageID == messageID
 }
 
 func (a *MainAgent) emitSubAgentMailboxUI(msg SubAgentMailboxMessage) {

@@ -868,20 +868,16 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 		if msg.Consumed {
 			continue
 		}
-		a.orchestrationMetrics.recordMailboxCreated(msg.MessageID, msg.CreatedAt)
-		if strings.TrimSpace(msg.OwnerAgentID) != "" {
-			a.enqueueOwnedSubAgentMailbox(msg)
-			continue
-		}
-		if msg.Kind == SubAgentMailboxKindProgress {
-			a.replaceProgressMailboxWithinBudget(msg)
-			continue
-		}
-		if !a.storeMailboxInMemory(msg, false) {
-			a.spoolMailboxMessage(msg, false)
-			a.orchestrationMetrics.mailboxSpoolQueued.Add(1)
-		}
+		a.enqueueRestoredMailboxMessage(msg)
 	}
+	// A task whose durable record is settled-completed but never notified (no
+	// LastMailboxID and no completion message in the mailbox log) lost its
+	// completion mailbox to the crash window between the terminal commit and
+	// the mailbox delivery. Re-synthesize the completion so the owner's inbox
+	// still receives it after this restore. The scan above suppresses it when
+	// the completion is already in the mailbox log, and the synthesized
+	// message is itself persisted, so repeated restores cannot notify twice.
+	a.restoreSynthesizeUndeliveredCompletionMailboxes(loaded.MailboxMessages)
 	a.refreshSubAgentInboxSummary()
 
 	agentCount := a.restoreLoadedSubAgents(loaded.SubAgentStates)
@@ -891,6 +887,104 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 		TodoCount:    restoredTodoCount,
 		AgentCount:   agentCount,
 	}
+}
+
+// enqueueRestoredMailboxMessage delivers a mailbox message that is already
+// durably persisted (loaded from the mailbox log, or synthesized during
+// restore) into the owner's inbox without re-writing it.
+func (a *MainAgent) enqueueRestoredMailboxMessage(msg SubAgentMailboxMessage) {
+	a.orchestrationMetrics.recordMailboxCreated(msg.MessageID, msg.CreatedAt)
+	a.deliverSubAgentMailbox(msg)
+}
+
+// restoreSynthesizeUndeliveredCompletionMailboxes replays the completion
+// mailbox for every task whose durable record is settled-completed but was
+// never notified: the record carries no LastMailboxID and no completion
+// message for the same task/attempt exists in the mailbox log. handleAgentDone
+// persists the completion before its terminal commit, so reaching this path
+// means that write failed, was reverted by an older build, or the process died
+// between the durable write and the apply. It is idempotent: the synthesized
+// message is persisted here, and the mailbox-log scan suppresses re-synthesis
+// on later restores.
+func (a *MainAgent) restoreSynthesizeUndeliveredCompletionMailboxes(mailboxMsgs []SubAgentMailboxMessage) {
+	now := time.Now()
+	a.subs.mu.RLock()
+	records := make([]*DurableTaskRecord, 0, len(a.subs.taskRecords))
+	for _, rec := range a.subs.taskRecords {
+		if rec != nil {
+			records = append(records, cloneDurableTaskRecord(rec))
+		}
+	}
+	a.subs.mu.RUnlock()
+	for _, rec := range records {
+		if SubAgentState(strings.TrimSpace(rec.State)) != SubAgentStateCompleted {
+			continue
+		}
+		if strings.TrimSpace(rec.LastMailboxID) != "" {
+			continue
+		}
+		completion := normalizeCompletionEnvelope(rec.LastCompletion)
+		if completion == nil {
+			a.subs.mu.RLock()
+			if settlement := a.subs.settlements[taskAttemptKey{TaskID: rec.TaskID, Attempt: rec.Attempt}]; settlement != nil {
+				completion = normalizeCompletionEnvelope(settlement.Completion)
+			}
+			a.subs.mu.RUnlock()
+		}
+		if completion == nil {
+			continue
+		}
+		instanceID := strings.TrimSpace(rec.LatestInstanceID)
+		if instanceID == "" && len(rec.InstanceHistory) > 0 {
+			instanceID = strings.TrimSpace(rec.InstanceHistory[len(rec.InstanceHistory)-1])
+		}
+		if instanceID == "" || restoredMailboxHasCompletionForTask(mailboxMsgs, rec) {
+			continue
+		}
+		summary := strings.TrimSpace(rec.LastSummary)
+		if summary == "" {
+			summary = completion.Summary
+		}
+		msg := SubAgentMailboxMessage{
+			MessageID:    a.nextSubAgentMailboxMessageID(instanceID),
+			AgentID:      instanceID,
+			TaskID:       rec.TaskID,
+			Attempt:      rec.Attempt,
+			OwnerAgentID: strings.TrimSpace(rec.OwnerAgentID),
+			OwnerTaskID:  strings.TrimSpace(rec.OwnerTaskID),
+			Kind:         SubAgentMailboxKindCompleted,
+			Priority:     SubAgentMailboxPriorityUrgent,
+			Summary:      summary,
+			Payload:      summary,
+			Completion:   completion,
+			CreatedAt:    now,
+		}
+		a.normalizeSubAgentMailboxMessage(&msg)
+		if err := a.persistSubAgentMailboxMessage(msg); err != nil {
+			log.Warnf("synthesized completion mailbox durability degraded task_id=%v error=%v", rec.TaskID, err)
+		}
+		a.enqueueRestoredMailboxMessage(msg)
+		log.Infof("synthesized lost completion mailbox for settled task task_id=%v attempt=%v instance_id=%v", rec.TaskID, rec.Attempt, instanceID)
+	}
+}
+
+func restoredMailboxHasCompletionForTask(msgs []SubAgentMailboxMessage, rec *DurableTaskRecord) bool {
+	taskID := strings.TrimSpace(rec.TaskID)
+	if taskID == "" {
+		return true
+	}
+	for _, msg := range msgs {
+		if msg.Kind != SubAgentMailboxKindCompleted || strings.TrimSpace(msg.TaskID) != taskID {
+			continue
+		}
+		// A completion already in the durable log covers this attempt; messages
+		// without an attempt stamp (legacy or synthesized) are treated as
+		// covering too so a settled completion is never notified twice.
+		if msg.Attempt == 0 || msg.Attempt == rec.Attempt {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *MainAgent) restoreMainRoleFromSession(roleName string) error {

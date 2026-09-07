@@ -995,6 +995,14 @@ func TestRestoreSessionAtStartupSkipsConsumedMailboxMessages(t *testing.T) {
 	}
 }
 
+// TestRestoredMailboxEventDeduplicatesQueuedMessageID pins that a mailbox
+// event whose MessageID is already queued for delivery in this session (here:
+// the message was re-delivered from the durable log by RestoreSessionAtStartup)
+// is dropped instead of queueing a second copy for the owner. It is the
+// duplicate side of the completion-event discriminator; the legitimate
+// in-process deliver-only dispatch — a completion mailbox that handleAgentDone
+// persisted and applied but has not queued yet — is pinned by
+// TestAgentDoneCompletionMailboxEventDeliversExactlyOnceWithoutRewriting.
 func TestRestoredMailboxEventDeduplicatesQueuedMessageID(t *testing.T) {
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "mailbox-replay-queued")

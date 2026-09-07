@@ -1189,3 +1189,186 @@ func TestMailboxLongPayloadPersistsArtifact(t *testing.T) {
 		t.Fatalf("artifact file missing: %v", err)
 	}
 }
+
+func restoredCompletedMailboxesForTask(a *MainAgent, taskID string) []SubAgentMailboxMessage {
+	var out []SubAgentMailboxMessage
+	collect := func(msgs []SubAgentMailboxMessage) {
+		for _, msg := range msgs {
+			if msg.Kind == SubAgentMailboxKindCompleted && strings.TrimSpace(msg.TaskID) == taskID {
+				out = append(out, msg)
+			}
+		}
+	}
+	collect(a.subAgentInbox.urgent)
+	collect(a.subAgentInbox.normal)
+	return out
+}
+
+// TestRestoreSessionSynthesizesCompletionForSettledTaskWithLostMailbox covers
+// the restore-side closure of the "settled but never notified" crash window: a
+// task whose terminal settlement and registry record are durable completed but
+// whose completion mailbox never reached the mailbox log (crash landed between
+// the terminal commit and the mailbox delivery; no LastMailboxID, no mailbox
+// log entry). After restart the owner inbox must still receive exactly one
+// completion. A sibling completed task whose completion mailbox IS in the log
+// (the durable-write crash shape: message persisted, apply never ran) must not
+// be synthesized a second time on top of the log replay, and a second restore
+// of the same session must not notify again — both restores must converge on
+// the same physical message ids.
+func TestRestoreSessionSynthesizesCompletionForSettledTaskWithLostMailbox(t *testing.T) {
+	const (
+		lostTaskID     = "adhoc-lost-completion"
+		lostInstanceID = "agent-lost-completion"
+		notifiedTaskID = "adhoc-notified-completion"
+		notifiedMsgID  = "agent-notified-completion-1"
+	)
+	projectRoot := t.TempDir()
+	sessionDir := testProjectSessionDir(t, projectRoot, "lost-completion-mailbox")
+	if err := os.MkdirAll(filepath.Join(sessionDir, "subagents"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(subagents): %v", err)
+	}
+	rm := recovery.NewRecoveryManager(sessionDir)
+	if err := rm.PersistMessage("main", message.Message{Role: "user", Content: "resume this session"}); err != nil {
+		t.Fatalf("PersistMessage(main): %v", err)
+	}
+	rm.Close()
+
+	now := time.Now()
+	lostCompletion := &CompletionEnvelope{
+		Summary:      "investigation complete",
+		FilesChanged: []string{"internal/agent/main_subagent.go"},
+	}
+	lostSettlement := &TaskSettlement{
+		TaskID:           lostTaskID,
+		Attempt:          1,
+		TerminalRevision: 2,
+		Outcome:          string(SubAgentStateCompleted),
+		Summary:          "investigation complete",
+		Completion:       lostCompletion,
+		SettledAt:        now,
+	}
+	if err := appendTaskSettlement(sessionDir, lostSettlement); err != nil {
+		t.Fatalf("appendTaskSettlement: %v", err)
+	}
+	records := map[string]*DurableTaskRecord{
+		lostTaskID: {
+			TaskID:            lostTaskID,
+			AgentDefName:      "restorer",
+			TaskDesc:          "Investigate issue",
+			State:             string(SubAgentStateCompleted),
+			ResumePolicy:      durableTaskResumePolicy(SubAgentStateCompleted),
+			LatestInstanceID:  lostInstanceID,
+			InstanceHistory:   []string{lostInstanceID},
+			LastSummary:       lostSettlement.Summary,
+			Attempt:           1,
+			LifecycleRevision: lostSettlement.TerminalRevision,
+			LatestSettlement:  cloneTaskSettlement(lostSettlement),
+			LastCompletion:    normalizeCompletionEnvelope(lostCompletion),
+			SettlementDurable: true,
+			CreatedAt:         now,
+			UpdatedAt:         now,
+			RuntimeParked:     true,
+		},
+		notifiedTaskID: {
+			TaskID:            notifiedTaskID,
+			AgentDefName:      "restorer",
+			TaskDesc:          "Investigate issue",
+			State:             string(SubAgentStateCompleted),
+			ResumePolicy:      durableTaskResumePolicy(SubAgentStateCompleted),
+			LatestInstanceID:  "agent-notified-completion",
+			InstanceHistory:   []string{"agent-notified-completion"},
+			LastSummary:       "reported complete",
+			Attempt:           1,
+			LifecycleRevision: 2,
+			LatestSettlement: &TaskSettlement{
+				TaskID: notifiedTaskID, Attempt: 1, TerminalRevision: 2,
+				Outcome: string(SubAgentStateCompleted), Summary: "reported complete",
+				Completion: &CompletionEnvelope{Summary: "reported complete"}, SettledAt: now,
+			},
+			LastCompletion:    &CompletionEnvelope{Summary: "reported complete"},
+			SettlementDurable: true,
+			CreatedAt:         now,
+			UpdatedAt:         now,
+			RuntimeParked:     true,
+		},
+	}
+	if err := persistDurableTaskRecords(sessionDir, records); err != nil {
+		t.Fatalf("persistDurableTaskRecords: %v", err)
+	}
+	// The notified task's completion IS in the mailbox log (persisted, never
+	// applied): restore replays it and must not synthesize a second one.
+	mailboxFile, err := os.OpenFile(filepath.Join(sessionDir, "subagents", "mailbox.jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatalf("open mailbox log: %v", err)
+	}
+	if err := json.NewEncoder(mailboxFile).Encode(SubAgentMailboxMessage{
+		MessageID:  notifiedMsgID,
+		AgentID:    "agent-notified-completion",
+		TaskID:     notifiedTaskID,
+		Attempt:    1,
+		Kind:       SubAgentMailboxKindCompleted,
+		Priority:   SubAgentMailboxPriorityUrgent,
+		Summary:    "reported complete",
+		Payload:    "reported complete",
+		Completion: &CompletionEnvelope{Summary: "reported complete"},
+		CreatedAt:  now,
+	}); err != nil {
+		_ = mailboxFile.Close()
+		t.Fatalf("encode mailbox message: %v", err)
+	}
+	if err := mailboxFile.Close(); err != nil {
+		t.Fatalf("close mailbox log: %v", err)
+	}
+
+	restoreAgent := func() *MainAgent {
+		a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
+		a.SetAgentConfigs(map[string]*config.AgentConfig{
+			"restorer": {Name: "restorer", Mode: "subagent", Models: map[string][]string{"default": {"test/test-model"}}},
+		})
+		a.SetLLMFactory(func(string, []string, string) *llm.Client { return newTestLLMClient() })
+		if _, err := a.restoreSessionState(sessionDir); err != nil {
+			t.Fatalf("restoreSessionState: %v", err)
+		}
+		return a
+	}
+	first := restoreAgent()
+	second := restoreAgent()
+
+	var firstLostID string
+	for _, a := range []*MainAgent{first, second} {
+		lost := restoredCompletedMailboxesForTask(a, lostTaskID)
+		if len(lost) != 1 {
+			t.Fatalf("restored owner inbox completed mailboxes for %q = %d, want exactly one synthesized completion", lostTaskID, len(lost))
+		}
+		if lost[0].Summary != "investigation complete" || lost[0].Completion == nil || lost[0].Completion.Summary != "investigation complete" {
+			t.Fatalf("synthesized completion = %#v, want investigation complete", lost[0])
+		}
+		if strings.TrimSpace(lost[0].OwnerAgentID) != "" || lost[0].AgentID != lostInstanceID {
+			t.Fatalf("synthesized completion owner/source = (%q, %q), want main-owned from %q", lost[0].OwnerAgentID, lost[0].AgentID, lostInstanceID)
+		}
+		if firstLostID == "" {
+			firstLostID = lost[0].MessageID
+		} else if lost[0].MessageID != firstLostID {
+			t.Fatalf("second restore re-synthesized a different completion message: first=%q second=%q", firstLostID, lost[0].MessageID)
+		}
+		notified := restoredCompletedMailboxesForTask(a, notifiedTaskID)
+		if len(notified) != 1 || notified[0].MessageID != notifiedMsgID {
+			t.Fatalf("restored owner inbox completed mailboxes for %q = %#v, want only the original log message %q (no re-synthesis)", notifiedTaskID, notified, notifiedMsgID)
+		}
+	}
+	// The synthesized completion is itself persisted, which is what keeps the
+	// second restore from notifying again.
+	onDisk, err := loadSubAgentMailboxMessages(sessionDir)
+	if err != nil {
+		t.Fatalf("loadSubAgentMailboxMessages: %v", err)
+	}
+	var synthesizedOnDisk *SubAgentMailboxMessage
+	for i := range onDisk {
+		if onDisk[i].TaskID == lostTaskID && onDisk[i].Kind == SubAgentMailboxKindCompleted {
+			synthesizedOnDisk = &onDisk[i]
+		}
+	}
+	if synthesizedOnDisk == nil || synthesizedOnDisk.MessageID != firstLostID {
+		t.Fatalf("synthesized completion not persisted for future restores: on-disk=%#v firstLostID=%q", onDisk, firstLostID)
+	}
+}

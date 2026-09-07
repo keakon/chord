@@ -516,6 +516,21 @@ func (a *MainAgent) handleAgentDone(evt Event) {
 		RequiresAck:  false,
 	}
 	a.normalizeSubAgentMailboxMessage(mailbox)
+	// Terminal-commit ordering: the completion mailbox must be persisted and
+	// applied before commitTerminalTask (invoked through the close handler
+	// below) makes the task terminal. The queued mailbox event below only
+	// delivers it afterwards, so a crash after the settlement/registry write
+	// can no longer lose the completion; restore then re-delivers it from the
+	// mailbox log. Persistence stays best-effort: a failure is retried through
+	// the queued event's own persist path and must never block the terminal
+	// commit or leave the task stuck in a non-terminal state.
+	if err := a.prepareSubAgentMailboxMessage(mailbox); err != nil {
+		log.Warnf("completion mailbox durability degraded task_id=%v agent_id=%v error=%v (will retry through the mailbox queue)", sub.taskID, evt.SourceID, err)
+	} else if messageID := strings.TrimSpace(mailbox.MessageID); messageID != "" {
+		// Already durably recorded and applied here; the mailbox event must
+		// only deliver it, not write or apply it a second time.
+		a.markSubAgentMailboxSeen(messageID)
+	}
 	a.queueLoopEvent(Event{Type: EventSubAgentMailbox, SourceID: evt.SourceID, Payload: mailbox})
 	mailboxMessage := formatSubAgentMailboxInjectionText(mailbox)
 	if ownerAgentID == "" {
