@@ -374,14 +374,11 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg) tea.Cmd {
 		}
 
 	// -- multi-agent switch (Shift+Tab: cycle view) ----------------------
+	// Normal mode cycles the view, not the role: a view change is normally
+	// followed by scrolling and reading, which is what this mode is for.
+	// Role switching lives in Insert mode, where typing follows it.
 	case keyMatches(key, m.keyMap.SwitchAgent):
 		return m.handleSwitchAgent()
-
-	// -- main agent role switch (Tab: only in main view) ------------------
-	case keyMatches(key, m.keyMap.SwitchRole):
-		if m.focusedAgentID == "" {
-			m.handleSwitchRole()
-		}
 
 	// -- MCP selector --------------------------------------------------------
 	case keyMatches(key, m.keyMap.MCP):

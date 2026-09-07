@@ -499,14 +499,26 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 				return nil
 			}
 		}
-		if key == "tab" {
+		// Insert mode owns role switching: a role change is normally followed by
+		// typing a message, so it belongs where the composer already has focus
+		// instead of costing an Esc/i round trip. Checked before the bare tab
+		// guard below so a keymap that rebinds switch_role back to tab works.
+		if keyMatches(key, m.keyMap.SwitchRole) {
 			if m.focusedAgentID == "" {
-				m.handleSwitchRole()
+				return m.handleSwitchRole()
 			}
-			return nil
-		}
-		if key == "shift+tab" {
+			// Role switching does not apply to a SubAgent view. Cycle the view
+			// instead so the key always has a visible effect rather than
+			// silently doing nothing.
 			return m.handleSwitchAgent()
+		}
+		// Tab reaches here only when it completes nothing above. It is
+		// deliberately inert in Insert mode: binding it to a role change made
+		// the terminal's completion key mutate permissions, the prompt surface
+		// and the selected model mid-typing. Leaving it free also keeps it
+		// available for path completion later.
+		if key == "tab" {
+			return nil
 		}
 		if key == "@" && !m.atMentionOpen {
 			col := m.input.Column()

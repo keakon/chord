@@ -9858,3 +9858,105 @@ func TestHandleStatusCopyClickIgnoresNonStatusPoint(t *testing.T) {
 		t.Fatalf("non-status click handled/cmd = %v/%#v, want false/nil", handled, cmd)
 	}
 }
+
+// Shift+Tab switches the role in Insert mode and the view in Normal mode. Tab
+// no longer switches either: it used to change permissions, the prompt surface
+// and possibly the model from the terminal's completion key, mid-typing.
+func TestShiftTabSwitchesRoleInInsertModeOnly(t *testing.T) {
+	newModel := func() (Model, *sessionControlAgent) {
+		backend := &sessionControlAgent{
+			events:         make(chan agent.AgentEvent, 1),
+			currentRole:    "builder",
+			availableRoles: []string{"builder", "planner"},
+		}
+		return NewModelWithSize(backend, 100, 24), backend
+	}
+	shiftTab := tea.KeyPressMsg(tea.Key{Code: tea.KeyTab, Mod: tea.ModShift})
+	plainTab := tea.KeyPressMsg(tea.Key{Code: tea.KeyTab})
+
+	m, backend := newModel()
+	m.mode = ModeInsert
+	if cmd := m.handleInsertKey(shiftTab); cmd == nil {
+		t.Fatal("Shift+Tab in Insert mode should return the role-switch toast command")
+	}
+	if got := backend.currentRole; got != "planner" {
+		t.Fatalf("Insert mode Shift+Tab: currentRole = %q, want planner", got)
+	}
+
+	m, backend = newModel()
+	m.mode = ModeInsert
+	_ = m.handleInsertKey(plainTab)
+	if got := backend.currentRole; got != "builder" {
+		t.Fatalf("Insert mode Tab must not switch role, currentRole = %q", got)
+	}
+
+	m, backend = newModel()
+	m.mode = ModeNormal
+	_ = m.handleNormalKey(shiftTab)
+	if got := backend.currentRole; got != "builder" {
+		t.Fatalf("Normal mode Shift+Tab must switch the view, not the role; currentRole = %q", got)
+	}
+
+	m, backend = newModel()
+	m.mode = ModeNormal
+	_ = m.handleNormalKey(plainTab)
+	if got := backend.currentRole; got != "builder" {
+		t.Fatalf("Normal mode Tab must not switch role, currentRole = %q", got)
+	}
+}
+
+// On a SubAgent view a role switch does not apply, so the key cycles the view
+// instead of silently doing nothing.
+func TestShiftTabOnSubAgentViewDoesNotSwitchRole(t *testing.T) {
+	backend := &sessionControlAgent{
+		events:         make(chan agent.AgentEvent, 1),
+		currentRole:    "builder",
+		availableRoles: []string{"builder", "planner"},
+	}
+	m := NewModelWithSize(backend, 100, 24)
+	m.mode = ModeInsert
+	m.focusedAgentID = "sub-1"
+
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab, Mod: tea.ModShift}))
+	if got := backend.currentRole; got != "builder" {
+		t.Fatalf("role must not change while a SubAgent view is focused, currentRole = %q", got)
+	}
+}
+
+// A keymap that rebinds switch_role back to tab must still work: the inert-tab
+// guard is checked after the configured binding, not before it.
+func TestInsertTabStillSwitchesRoleWhenRebound(t *testing.T) {
+	backend := &sessionControlAgent{
+		events:         make(chan agent.AgentEvent, 1),
+		currentRole:    "builder",
+		availableRoles: []string{"builder", "planner"},
+	}
+	m := NewModelWithSize(backend, 100, 24)
+	m.mode = ModeInsert
+	m.keyMap.SwitchRole = []string{"tab"}
+
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab}))
+	if got := backend.currentRole; got != "planner" {
+		t.Fatalf("rebound tab should switch role, currentRole = %q", got)
+	}
+}
+
+// Cycling a single configured role would land back on the same role, and the
+// switch itself is not free: it rebuilds the ruleset and writes a recovery
+// snapshot. The no-op is dropped before that cost.
+func TestHandleSwitchRoleSkipsSingleRoleCycle(t *testing.T) {
+	backend := &sessionControlAgent{
+		events:         make(chan agent.AgentEvent, 1),
+		currentRole:    "builder",
+		availableRoles: []string{"builder"},
+	}
+	m := NewModelWithSize(backend, 100, 24)
+	m.cachedStatusKey = "cached-status"
+
+	if cmd := m.handleSwitchRole(); cmd != nil {
+		t.Fatal("single-role cycle should not report a switch")
+	}
+	if m.cachedStatusKey != "cached-status" {
+		t.Fatal("single-role cycle should not invalidate draw caches")
+	}
+}

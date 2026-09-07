@@ -27,6 +27,8 @@ TUI 有两种模式：
 | `Cmd+V` / 普通粘贴 | 只粘贴文本；终端 paste 事件不会探测剪贴板附件                                          |
 | `Ctrl+U`           | 清空输入框和待发送附件                                                                              |
 | `PgUp` / `PgDown`  | 不离开 Insert 模式直接向上 / 向下翻页会话记录                                                       |
+| `Shift+Tab`        | 循环切换状态栏显示的主 agent role。切换会通过 toast 提示（`role: planner → builder`），因为它会重建权限、使缓存的 prompt 前缀失效，并可能切到该 role 自己的模型。在 SubAgent 视图下 role 切换不适用，此时改为切换查看的 agent 视图 |
+| `Tab`              | 补全当前显示的 slash 命令或 `@` mention 候选；没有候选时无动作                                       |
 
 ### Normal 模式 — 退出与元操作
 
@@ -37,6 +39,9 @@ TUI 有两种模式：
 | `Ctrl+C`           | 2 秒内连按两次退出；在任意浮层/对话框内则与 `Esc` 一样关闭浮层 |
 | `?`                | 切换内置帮助/键位速查浮层                         |
 | `Esc`              | （agent 运行中）取消当前轮次                      |
+| `Shift+Tab`        | 循环切换当前查看的 agent 视图；main 始终可达，停止但未完成的 SubAgent 仍可切换查看 |
+
+`Shift+Tab` 在两种模式下是同一个键，由所处模式决定动作：切 role 之后通常紧接着要输入消息，因此归属 Insert 模式；切视图之后通常紧接着要滚动阅读，因此归属 Normal 模式。由于每次只会查询当前模式对应的那个动作，`switch_role` 和 `switch_agent` 共用同一个默认键位并不构成冲突。按 `?` 可以分别查看两种模式下实际生效的键位。
 
 ### Normal 模式 — 滚动
 
@@ -88,8 +93,6 @@ TUI 有两种模式：
 
 | 按键          | 动作                                                                                                            |
 | ------------- | --------------------------------------------------------------------------------------------------------------- |
-| `Tab`         | 循环切换主 agent 的模式（role，显示在状态栏；仅在 main 视图生效）                                             |
-| `Shift+Tab`   | 循环切换当前查看的 agent 视图；main 始终可达，停止但未完成的 SubAgent 仍可切换查看                         |
 | `Ctrl+P`      | 在 Insert 和 Normal 两种模式下都打开模型池选择器                                                   |
 | `Ctrl+R`      | 在当前 provider/model 支持的 tier 中循环切换后续模型请求的 service tier；`/tier` slash 补全会预测相同的下一个 tier，没有实际可切换目标时隐藏 |
 | `Ctrl+Y`      | 切换 YOLO 模式；绕过 MainAgent 权限，但不影响 handoff、delegate、cancel 和 done 权限                         |
@@ -196,8 +199,8 @@ action 名是 [`internal/tui/keymap.go` 中 `KeyMap` 字段](https://github.com/
 | `search_start`             | `["/"]`                           |
 | `search_next`              | `["n"]`                           |
 | `search_prev`              | `["N"]`                           |
-| `switch_agent`             | `["shift+tab"]`                   |
-| `switch_role`              | `["tab"]`                         |
+| `switch_agent`             | `["shift+tab"]`（仅 Normal 模式）  |
+| `switch_role`              | `["shift+tab"]`（仅 Insert 模式）  |
 | `switch_model`             | `["ctrl+p"]`                      |
 | `service_tier`             | `["ctrl+r"]`                      |
 | `yolo`                     | `["ctrl+y"]`                      |

@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"fmt"
+
 	tea "github.com/keakon/bubbletea/v2"
 
 	agentrt "github.com/keakon/chord/internal/agent"
@@ -162,13 +164,19 @@ func mergeFocusedToolBlockRuntimeState(dst, src *Block) {
 	dst.InvalidateCache()
 }
 
-func (m *Model) handleSwitchRole() {
+// handleSwitchRole cycles the main agent's role and reports the switch.
+//
+// A role change rebuilds the permission ruleset, marks the prompt and tool
+// surface dirty (one prompt-cache miss), may apply a different model, and is
+// persisted to the recovery snapshot right away — so an accidental press has
+// to be visible rather than only showing up as a changed sidebar label.
+func (m *Model) handleSwitchRole() tea.Cmd {
 	if m.agent == nil {
-		return
+		return nil
 	}
 	roles := m.agent.AvailableRoles()
 	if len(roles) == 0 {
-		return
+		return nil
 	}
 	current := m.agent.CurrentRole()
 	nextIdx := 0
@@ -178,8 +186,15 @@ func (m *Model) handleSwitchRole() {
 			break
 		}
 	}
-	m.agent.SwitchRole(roles[nextIdx])
+	next := roles[nextIdx]
+	// A single configured role cycles back to itself. Switching would still pay
+	// for a ruleset rebuild and a snapshot write, so stop before the no-op.
+	if next == current {
+		return nil
+	}
+	m.agent.SwitchRole(next)
 	m.invalidateDrawCaches()
+	return m.enqueueToast(fmt.Sprintf("role: %s → %s", current, next), "info")
 }
 
 func (m *Model) maybeSwitchToTaskAgent(block *Block) {

@@ -27,6 +27,8 @@ Press `Esc` to leave Insert mode for Normal mode; press `i` (or any unbound prin
 | `Cmd+V` / paste    | Paste text only; terminal paste events never probe clipboard attachments                       |
 | `Ctrl+U`           | Clear the input box and pending attachments                                                    |
 | `PgUp` / `PgDown`  | Page the transcript up / down without leaving Insert mode                                      |
+| `Shift+Tab`        | Cycle the main agent role shown in the status bar. A switch is announced with a toast (`role: planner → builder`) because it rebuilds permissions, invalidates the cached prompt prefix, and may select the role's own model. On a SubAgent view, where a role switch does not apply, it cycles the focused view instead |
+| `Tab`              | Complete the visible slash-command or `@`-mention suggestion; otherwise does nothing            |
 
 ### Normal mode — leaving and meta
 
@@ -37,6 +39,15 @@ Press `Esc` to leave Insert mode for Normal mode; press `i` (or any unbound prin
 | `Ctrl+C`           | Press twice within ~2s to quit; inside any overlay or dialog it closes the overlay instead (like `Esc`) |
 | `?`                | Toggle the in-app help / cheatsheet overlay     |
 | `Esc`              | (when agent is running) Cancel the current turn |
+| `Shift+Tab`        | Cycle the focused agent view. Main is always available; stopped-but-incomplete SubAgents remain switchable |
+
+`Shift+Tab` is deliberately the same key in both modes, and the mode decides
+what it does: a role change is normally followed by typing a message, so it
+belongs in Insert mode, while a view change is normally followed by scrolling
+and reading, so it belongs in Normal mode. Because only the action belonging to
+the current mode is consulted, `switch_role` and `switch_agent` sharing a
+default binding is not a conflict. Press `?` to see each mode's effective
+bindings separately.
 
 ### Normal mode — scrolling
 
@@ -88,8 +99,6 @@ Search also covers older regions of lazily loaded large sessions. Chord loads a 
 
 | Key          | Action                                                                                                    |
 | ------------ | --------------------------------------------------------------------------------------------------------- |
-| `Tab`        | Cycle the main agent mode (role) shown in the status bar (main view only)                                    |
-| `Shift+Tab`  | Cycle the focused agent view. Main is always available; stopped-but-incomplete SubAgents remain switchable.   |
 | `Ctrl+P`     | Open the model-pool selector in both Insert and Normal modes.                                          |
 | `Ctrl+R`     | Cycle service tier for subsequent model requests, limited to tiers supported by the current provider/model; `/tier` slash completion predicts the same next tier and is hidden when there is no actual switch target |
 | `Ctrl+Y`     | Toggle YOLO mode; bypasses main-agent permissions except handoff, delegate, cancel, and done                 |
@@ -196,8 +205,8 @@ Action names here are the names used in `config.yaml` (for `keymap:`).
 | `search_start`             | `["/"]`                          |
 | `search_next`              | `["n"]`                          |
 | `search_prev`              | `["N"]`                          |
-| `switch_agent`             | `["shift+tab"]`                  |
-| `switch_role`              | `["tab"]`                        |
+| `switch_agent`             | `["shift+tab"]` (Normal mode only) |
+| `switch_role`              | `["shift+tab"]` (Insert mode only) |
 | `switch_model`             | `["ctrl+p"]`                     |
 | `service_tier`             | `["ctrl+r"]`                     |
 | `yolo`                     | `["ctrl+y"]`                     |
