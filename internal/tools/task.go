@@ -138,8 +138,8 @@ func (DelegateTool) Description() string {
 		"Prefer using Read, Grep, and Shell directly when one or a few tool calls suffice; " +
 		"use Delegate only for substantial sub-work that benefits from a dedicated agent (e.g. multi-file edits or independent plan items). " +
 		"Your system prompt's delegation workflow section governs when to continue an existing task with Notify versus creating a new delegate, and when parallel delegates are safe. " +
-		"IMPORTANT: The result is delivered asynchronously — do NOT poll or retrieve SubAgent results with Spawn/SpawnStop. " +
-		"The returned task_id is the stable durable handle for that delegate; reuse it with Notify or Cancel instead of spawning a duplicate delegate for follow-up."
+		"IMPORTANT: The result is delivered asynchronously and flows back to you automatically — do NOT poll or retrieve SubAgent results. " +
+		"The returned task_id is the stable durable handle for that delegate; reuse it with Notify or Cancel for follow-up instead of creating a duplicate delegate."
 }
 
 // IsAvailable reports whether the DelegateTool should be registered.

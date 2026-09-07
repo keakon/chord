@@ -41,7 +41,7 @@ func (CancelTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"target_task_id": map[string]any{
 				"type":        "string",
-				"description": "Stable durable task handle returned by Delegate, for example 'adhoc-3' or a plan task ID.",
+				"description": "Stable durable task handle of the delegated worker to stop, for example the task_id returned by Delegate ('adhoc-3').",
 			},
 			"reason": map[string]any{
 				"type":        "string",

@@ -123,8 +123,8 @@ func TestDelegateToolParametersMarkWriteScopeRequired(t *testing.T) {
 func TestDelegateToolDescriptionKeepsUsageSemantics(t *testing.T) {
 	desc := NewDelegateTool(taskTestCreator{}).Description()
 	for _, want := range []string{
-		"reuse it with Notify or Cancel instead of spawning a duplicate delegate for follow-up",
-		"do NOT poll or retrieve SubAgent results with Spawn/SpawnStop",
+		"delivered asynchronously and flows back to you automatically",
+		"reuse it with Notify or Cancel for follow-up instead of creating a duplicate delegate",
 		"delegation workflow section governs when to continue an existing task with Notify versus creating a new delegate, and when parallel delegates are safe",
 	} {
 		if !strings.Contains(desc, want) {
@@ -134,6 +134,7 @@ func TestDelegateToolDescriptionKeepsUsageSemantics(t *testing.T) {
 	// Orchestration strategy (Notify-vs-new-delegate, write-scope parallelism)
 	// lives in the SubAgent Workflow prompt block, not the tool description.
 	for _, unwanted := range []string{
+		"Spawn", // Delegate results flow back asynchronously; no background-process tool references belong here
 		"Use Notify(existing) for the same task's follow-up",
 		"Only parallelize tasks when their write scopes are clearly independent",
 	} {

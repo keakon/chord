@@ -486,7 +486,6 @@ func sanitizeArtifactFilename(s string) string {
 type ReadArtifactTool struct{}
 
 type readArtifactArgs struct {
-	ID             string `json:"id,omitempty"`
 	Path           string `json:"path,omitempty"`
 	RelPath        string `json:"rel_path,omitempty"`
 	Offset         *int   `json:"offset,omitempty"`
@@ -511,10 +510,6 @@ func (ReadArtifactTool) Parameters() map[string]any {
 			"rel_path": map[string]any{
 				"type":        "string",
 				"description": "Alias for path.",
-			},
-			"id": map[string]any{
-				"type":        "string",
-				"description": "Optional artifact id for logs; path or rel_path is still required.",
 			},
 			"offset":          map[string]any{"type": "integer", "minimum": 0, "description": "1-based line number to start reading from (1 = the first line); 0 or omitted means the first line. Defaults to 1."},
 			"limit":           map[string]any{"type": "integer", "minimum": 1, "maximum": MaxOutputLines, "description": "Maximum lines to return. Defaults to 2000."},

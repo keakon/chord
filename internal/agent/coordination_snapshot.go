@@ -144,27 +144,24 @@ func (a *MainAgent) buildCoordinationSnapshotOverlayForRequest(injectedMailboxID
 		b.WriteString("\n- task_id: ")
 		b.WriteString(rec.TaskID)
 		if strings.TrimSpace(rec.AgentDefName) != "" {
-			b.WriteString(" agent: ")
+			b.WriteString(" agent_type: ")
 			b.WriteString(rec.AgentDefName)
 		}
 		if strings.TrimSpace(rec.LatestInstanceID) != "" {
-			b.WriteString(" instance: ")
+			b.WriteString(" agent_id: ")
 			b.WriteString(rec.LatestInstanceID)
 		}
 		if strings.TrimSpace(rec.State) != "" {
 			b.WriteString(" state: ")
 			b.WriteString(rec.State)
 		}
-		if strings.TrimSpace(rec.OwnerTaskID) != "" || strings.TrimSpace(rec.OwnerAgentID) != "" {
-			b.WriteString(" owner:")
-			if strings.TrimSpace(rec.OwnerAgentID) != "" {
-				b.WriteString(" agent=")
-				b.WriteString(rec.OwnerAgentID)
-			}
-			if strings.TrimSpace(rec.OwnerTaskID) != "" {
-				b.WriteString(" task=")
-				b.WriteString(rec.OwnerTaskID)
-			}
+		if strings.TrimSpace(rec.OwnerAgentID) != "" {
+			b.WriteString(" owner_agent_id: ")
+			b.WriteString(rec.OwnerAgentID)
+		}
+		if strings.TrimSpace(rec.OwnerTaskID) != "" {
+			b.WriteString(" owner_task_id: ")
+			b.WriteString(rec.OwnerTaskID)
 		}
 		if strings.TrimSpace(rec.PlanTaskRef) != "" {
 			b.WriteString(" plan_ref: ")
