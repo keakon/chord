@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -105,6 +106,67 @@ model_pools: [default]
 	}
 	if got := err.Error(); got == "" || !strings.Contains(got, "missing frontmatter closing delimiter") {
 		t.Fatalf("LoadAgentConfig error = %v, want missing frontmatter closing delimiter", err)
+	}
+}
+
+func TestLoadAgentConfigRejectsDelegationLimitsAboveTheCeiling(t *testing.T) {
+	tests := []struct {
+		name       string
+		delegation string
+		wantErr    string
+	}{
+		{
+			name:       "max_children above ceiling",
+			delegation: fmt.Sprintf("  max_children: %d\n", MaxDelegationMaxChildren+1),
+			wantErr:    "delegation.max_children",
+		},
+		{
+			name:       "max_depth above ceiling",
+			delegation: fmt.Sprintf("  max_depth: %d\n", MaxDelegationMaxDepth+1),
+			wantErr:    "delegation.max_depth",
+		},
+		{
+			name:       "negative max_children",
+			delegation: "  max_children: -1\n",
+			wantErr:    "delegation.max_children",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "worker.md")
+			content := "---\nname: worker\nmode: subagent\nmodel_pools: [default]\ndelegation:\n" + tc.delegation + "---\nBody.\n"
+			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+				t.Fatalf("WriteFile: %v", err)
+			}
+			_, err := LoadAgentConfig(path)
+			if err == nil {
+				t.Fatal("LoadAgentConfig() = nil error, want an explicit rejection instead of a silent clamp")
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("LoadAgentConfig error = %v, want it to name %s", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestDelegationConfigClampsToCeilings(t *testing.T) {
+	// Built-in definitions and tests construct DelegationConfig directly, so the
+	// ceilings must also hold outside the config loader.
+	cfg := DelegationConfig{MaxChildren: MaxDelegationMaxChildren * 10, MaxDepth: MaxDelegationMaxDepth * 10}
+	if got := cfg.EffectiveMaxChildren(); got != MaxDelegationMaxChildren {
+		t.Fatalf("EffectiveMaxChildren() = %d, want the ceiling %d", got, MaxDelegationMaxChildren)
+	}
+	if got := cfg.EffectiveMaxDepth(); got != MaxDelegationMaxDepth {
+		t.Fatalf("EffectiveMaxDepth() = %d, want the ceiling %d", got, MaxDelegationMaxDepth)
+	}
+}
+
+func TestDelegationConfigHonoursConfiguredChildrenBelowCeiling(t *testing.T) {
+	// A configured fan-out above the default must not be clamped back down to
+	// it: the default is a default, not a limit.
+	cfg := DelegationConfig{MaxChildren: DefaultDelegationMaxChildren + 5}
+	if got := cfg.EffectiveMaxChildren(); got != DefaultDelegationMaxChildren+5 {
+		t.Fatalf("EffectiveMaxChildren() = %d, want the configured %d", got, DefaultDelegationMaxChildren+5)
 	}
 }
 

@@ -61,6 +61,17 @@ const (
 	DefaultDelegationMaxChildren = 10
 	DefaultDelegationMaxDepth    = 1
 
+	// MaxDelegationMaxChildren and MaxDelegationMaxDepth are the ceilings the
+	// runtime enforces on any single agent definition. Both exist to keep a
+	// self-delegating agent definition from expanding the task tree without
+	// bound: children caps the fan-out per owner, depth caps the chain length.
+	// They are validated at config load so an over-large value is an explicit
+	// error instead of a silently clamped one, and clamped again at admission
+	// because built-in definitions and tests construct DelegationConfig
+	// directly without going through the loader.
+	MaxDelegationMaxChildren = 64
+	MaxDelegationMaxDepth    = 8
+
 	AgentModeMain          = "main"
 	AgentModeSubAgent      = "subagent"
 	AgentModeSubAgentSnake = "sub_agent"
@@ -78,14 +89,14 @@ func isAgentModeSubAgent(mode string) bool {
 
 func (c DelegationConfig) EffectiveMaxChildren() int {
 	if c.MaxChildren > 0 {
-		return c.MaxChildren
+		return min(c.MaxChildren, MaxDelegationMaxChildren)
 	}
 	return DefaultDelegationMaxChildren
 }
 
 func (c DelegationConfig) EffectiveMaxDepth() int {
 	if c.MaxDepth > 0 {
-		return c.MaxDepth
+		return min(c.MaxDepth, MaxDelegationMaxDepth)
 	}
 	return DefaultDelegationMaxDepth
 }
@@ -257,6 +268,19 @@ func finalizeAgentConfig(path string, cfg *AgentConfig) (*AgentConfig, error) {
 		// wholesale by an unrelated file that happened to declare name:
 		// "builder".
 		return nil, fmt.Errorf("agent config %s: declared name %q does not match filename; rename the file to %q or set name to match", path, cfg.Name, strings.TrimSuffix(base, filepath.Ext(base)))
+	}
+
+	if cfg.Delegation.MaxChildren > MaxDelegationMaxChildren {
+		return nil, fmt.Errorf("agent config %s: delegation.max_children %d exceeds the maximum of %d", path, cfg.Delegation.MaxChildren, MaxDelegationMaxChildren)
+	}
+	if cfg.Delegation.MaxChildren < 0 {
+		return nil, fmt.Errorf("agent config %s: delegation.max_children must not be negative", path)
+	}
+	if cfg.Delegation.MaxDepth > MaxDelegationMaxDepth {
+		return nil, fmt.Errorf("agent config %s: delegation.max_depth %d exceeds the maximum of %d", path, cfg.Delegation.MaxDepth, MaxDelegationMaxDepth)
+	}
+	if cfg.Delegation.MaxDepth < 0 {
+		return nil, fmt.Errorf("agent config %s: delegation.max_depth must not be negative", path)
 	}
 
 	// model_pools list validation.

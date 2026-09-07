@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/keakon/golog/log"
 	"gopkg.in/yaml.v3"
@@ -73,8 +74,15 @@ type Config struct {
 }
 
 const (
-	DefaultMaxLiveRuntimes       = 10
-	DefaultMaxBorrowedRuntimes   = 1
+	DefaultMaxLiveRuntimes     = 10
+	DefaultMaxBorrowedRuntimes = 1
+	// DefaultMaxBypassRuntimes bounds the deadlock-avoidance safety valve used
+	// when a parked worker must be woken to receive a durable message and both
+	// the runtime and borrow pools are exhausted. Wake reactivations run on the
+	// main event loop, so they cannot block on capacity that only that loop can
+	// release; the grant is uncounted against the runtime pool but must still be
+	// finite, otherwise max_live_runtimes stops being an upper bound.
+	DefaultMaxBypassRuntimes     = 4
 	DefaultMaxActiveLLMRequests  = 10
 	DefaultSubAgentQueueMessages = 256
 	DefaultSubAgentQueueBytes    = 4 << 20
@@ -82,6 +90,18 @@ const (
 	DefaultMailboxMemoryBytes    = 8 << 20
 	DefaultContextCompactUsage   = 0.8
 	DefaultSubAgentCompactUsage  = DefaultContextCompactUsage
+
+	// A worker that escalated parks until its owner replies. Two independent
+	// clocks decide when that wait is abandoned, because neither is sufficient
+	// alone: explicit user turns alone would cancel a worker that escalated
+	// seconds ago just because the user held five quick exchanges with the main
+	// agent, and would never fire at all in a headless run or while the user is
+	// away. The wait expires when the turn budget is spent AND at least
+	// WaitingMainMinWait has passed, or unconditionally after
+	// WaitingMainMaxWait.
+	DefaultWaitingMainExpiryTurns = 5
+	DefaultWaitingMainMinWait     = 5 * time.Minute
+	DefaultWaitingMainMaxWait     = time.Hour
 )
 
 // OrchestrationConfig controls process-local multi-agent resource admission.
@@ -89,6 +109,7 @@ const (
 type OrchestrationConfig struct {
 	MaxLiveRuntimes           int            `json:"max_live_runtimes,omitempty" yaml:"max_live_runtimes,omitempty"`
 	MaxBorrowedRuntimes       int            `json:"max_borrowed_runtimes,omitempty" yaml:"max_borrowed_runtimes,omitempty"`
+	MaxBypassRuntimes         int            `json:"max_bypass_runtimes,omitempty" yaml:"max_bypass_runtimes,omitempty"`
 	MaxActiveLLMRequests      int            `json:"max_active_llm_requests,omitempty" yaml:"max_active_llm_requests,omitempty"`
 	ProviderMaxActiveRequests map[string]int `json:"provider_max_active_requests,omitempty" yaml:"provider_max_active_requests,omitempty"`
 	ModelMaxActiveRequests    map[string]int `json:"model_max_active_requests,omitempty" yaml:"model_max_active_requests,omitempty"`
@@ -97,6 +118,33 @@ type OrchestrationConfig struct {
 	MailboxMemoryMessages     int            `json:"mailbox_memory_messages,omitempty" yaml:"mailbox_memory_messages,omitempty"`
 	MailboxMemoryBytes        int            `json:"mailbox_memory_bytes,omitempty" yaml:"mailbox_memory_bytes,omitempty"`
 	SubAgentCompactUsage      float64        `json:"subagent_compact_usage,omitempty" yaml:"subagent_compact_usage,omitempty"`
+	WaitingMainExpiryTurns    int            `json:"waiting_main_expiry_turns,omitempty" yaml:"waiting_main_expiry_turns,omitempty"`
+	WaitingMainMinWaitSec     int            `json:"waiting_main_min_wait_sec,omitempty" yaml:"waiting_main_min_wait_sec,omitempty"`
+	WaitingMainMaxWaitSec     int            `json:"waiting_main_max_wait_sec,omitempty" yaml:"waiting_main_max_wait_sec,omitempty"`
+}
+
+func (c OrchestrationConfig) EffectiveWaitingMainExpiryTurns() uint64 {
+	if c.WaitingMainExpiryTurns > 0 {
+		return uint64(c.WaitingMainExpiryTurns)
+	}
+	return DefaultWaitingMainExpiryTurns
+}
+
+func (c OrchestrationConfig) EffectiveWaitingMainMinWait() time.Duration {
+	if c.WaitingMainMinWaitSec > 0 {
+		return time.Duration(c.WaitingMainMinWaitSec) * time.Second
+	}
+	return DefaultWaitingMainMinWait
+}
+
+// EffectiveWaitingMainMaxWait never returns less than the min wait: a config
+// that inverts the two would otherwise make the unconditional clock fire before
+// the guarded one, cancelling escalations the min wait exists to protect.
+func (c OrchestrationConfig) EffectiveWaitingMainMaxWait() time.Duration {
+	if c.WaitingMainMaxWaitSec > 0 {
+		return max(time.Duration(c.WaitingMainMaxWaitSec)*time.Second, c.EffectiveWaitingMainMinWait())
+	}
+	return max(DefaultWaitingMainMaxWait, c.EffectiveWaitingMainMinWait())
 }
 
 func (c OrchestrationConfig) EffectiveSubAgentQueueMessages() int {
@@ -146,6 +194,13 @@ func (c OrchestrationConfig) EffectiveMaxBorrowedRuntimes() int {
 		return c.MaxBorrowedRuntimes
 	}
 	return DefaultMaxBorrowedRuntimes
+}
+
+func (c OrchestrationConfig) EffectiveMaxBypassRuntimes() int {
+	if c.MaxBypassRuntimes > 0 {
+		return c.MaxBypassRuntimes
+	}
+	return DefaultMaxBypassRuntimes
 }
 
 func (c OrchestrationConfig) EffectiveMaxActiveLLMRequests() int {
