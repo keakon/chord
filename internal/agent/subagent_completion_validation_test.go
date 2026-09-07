@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -22,7 +23,8 @@ func TestSubAgentInvalidCompleteGetsRejectedToolResultAndBoundedFollowUp(t *test
 		{name: "json parse error", args: map[string]any{"summary": 123}, wantReason: "cannot unmarshal number"},
 		{name: "blank summary", args: map[string]any{"summary": "   "}, wantReason: "summary is required"},
 		{name: "artifact outside session", args: map[string]any{"summary": "done", "artifacts": []map[string]any{{"rel_path": "../outside.txt"}}}, wantReason: "artifact path escapes"},
-		{name: "typed result without result_type", args: map[string]any{"summary": "done", "result": map[string]any{"value": 1}}, wantReason: "result_type is required"},
+		{name: "typed result without result_type", args: map[string]any{"summary": "done", "result": map[string]any{"value": 1}}, wantReason: "result or result_ref requires result_type"},
+		{name: "result_type without result or result_ref", args: map[string]any{"summary": "done", "result_type": "type/test"}, wantReason: "result_type requires result or result_ref"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -175,7 +177,7 @@ func TestSubAgentCoReturnedInvalidCompleteRejectedAfterSiblingsSettle(t *testing
 		if msg.Role != "tool" || msg.ToolCallID != "call-1" {
 			continue
 		}
-		foundRejected = strings.HasPrefix(msg.Content, "Completion rejected:") && strings.Contains(msg.Content, "result_type is required")
+		foundRejected = strings.HasPrefix(msg.Content, "Completion rejected:") && strings.Contains(msg.Content, "result or result_ref requires result_type")
 		break
 	}
 	if !foundRejected {
@@ -412,5 +414,55 @@ func TestCoordinationSnapshotDoesNotDeadlockOnWaitingDescendant(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("buildCoordinationSnapshotOverlay appears deadlocked")
+	}
+}
+
+// TestCompleteParametersSchemaEncodesResultPairing pins the structural form of
+// the Complete argument schema: the result fields must form two anyOf groups —
+// a summary-only completion that carries no result field, and a typed-result
+// completion that pairs result_type with exactly one of result/result_ref — so
+// the pairing constraint is visible to the model while it constructs
+// arguments. The runtime validator in validateCompleteTypedResult stays as the
+// fallback.
+func TestCompleteParametersSchemaEncodesResultPairing(t *testing.T) {
+	params := (tools.CompleteTool{}).Parameters()
+	if got, ok := params["required"].([]string); !ok || !slices.Equal(got, []string{"summary"}) {
+		t.Fatalf(`Parameters()["required"] = %#v, want ["summary"]`, params["required"])
+	}
+	groups, ok := params["anyOf"].([]map[string]any)
+	if !ok || len(groups) != 2 {
+		t.Fatalf(`Parameters()["anyOf"] = %#v, want the summary-only and typed-result groups`, params["anyOf"])
+	}
+
+	summaryGroup := groups[0]
+	if got, ok := summaryGroup["required"].([]string); !ok || !slices.Equal(got, []string{"summary"}) {
+		t.Fatalf("summary-only group required = %#v, want [summary]", summaryGroup["required"])
+	}
+	not, ok := summaryGroup["not"].(map[string]any)
+	if !ok {
+		t.Fatalf("summary-only group = %#v, want not to exclude every result field", summaryGroup)
+	}
+	forbidden, ok := not["anyOf"].([]map[string]any)
+	if !ok || len(forbidden) != 3 {
+		t.Fatalf(`summary-only group not["anyOf"] = %#v, want result_type/result/result_ref`, not["anyOf"])
+	}
+	for i, want := range [][]string{{"result_type"}, {"result"}, {"result_ref"}} {
+		if got, ok := forbidden[i]["required"].([]string); !ok || !slices.Equal(got, want) {
+			t.Fatalf("summary-only group not.anyOf[%d] required = %#v, want %v", i, forbidden[i]["required"], want)
+		}
+	}
+
+	typedGroup := groups[1]
+	if got, ok := typedGroup["required"].([]string); !ok || !slices.Equal(got, []string{"summary", "result_type"}) {
+		t.Fatalf("typed-result group required = %#v, want [summary result_type]", typedGroup["required"])
+	}
+	pair, ok := typedGroup["anyOf"].([]map[string]any)
+	if !ok || len(pair) != 2 {
+		t.Fatalf(`typed-result group anyOf = %#v, want the result and result_ref alternatives`, typedGroup["anyOf"])
+	}
+	for i, want := range [][]string{{"result"}, {"result_ref"}} {
+		if got, ok := pair[i]["required"].([]string); !ok || !slices.Equal(got, want) {
+			t.Fatalf("typed-result group anyOf[%d] required = %#v, want %v", i, pair[i]["required"], want)
+		}
 	}
 }

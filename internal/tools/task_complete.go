@@ -34,6 +34,11 @@ func (CompleteTool) Description() string {
 		"If a true blocker prevents completion, escalate to your owner agent for intervention instead of complete; when escalate is unavailable in your role, surface the blocker via notify. This is the ONLY way to signal completion — do NOT simply stop responding."
 }
 
+// Parameters declares result_type/result/result_ref as a pairwise group in
+// anyOf: a completion either carries none of them (summary only) or supplies
+// result_type together with exactly one of result/result_ref. Expressing the
+// pairing structurally lets the model see the constraint while constructing
+// arguments; the runtime validation stays as the fallback.
 func (CompleteTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",
@@ -97,6 +102,28 @@ func (CompleteTool) Parameters() map[string]any {
 		},
 		"required":             []string{"summary"},
 		"additionalProperties": false,
+		"anyOf": []map[string]any{
+			{
+				"required": []string{"summary"},
+				"not": map[string]any{
+					"anyOf": []map[string]any{
+						{"required": []string{"result_type"}},
+						{"required": []string{"result"}},
+						{"required": []string{"result_ref"}},
+					},
+				},
+			},
+			{
+				"required": []string{"summary", "result_type"},
+				"not": map[string]any{
+					"required": []string{"result", "result_ref"},
+				},
+				"anyOf": []map[string]any{
+					{"required": []string{"result"}},
+					{"required": []string{"result_ref"}},
+				},
+			},
+		},
 	}
 }
 

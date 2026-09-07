@@ -16,7 +16,7 @@ func validateCompleteTypedResult(sessionDir, resultType string, result json.RawM
 		return "", nil, nil, nil
 	}
 	if resultType == "" {
-		return "", nil, nil, fmt.Errorf("result_type is required when result or result_ref is provided")
+		return "", nil, nil, fmt.Errorf("result_type, result, and result_ref must be provided together: result or result_ref requires result_type")
 	}
 	var ref *tools.ResultRef
 	if suppliedRef != nil {
@@ -41,7 +41,7 @@ func validateCompleteTypedResult(sessionDir, resultType string, result json.RawM
 		result = canonical
 	}
 	if ref == nil {
-		return "", nil, nil, fmt.Errorf("result or result_ref is required when result_type is provided")
+		return "", nil, nil, fmt.Errorf("result_type, result, and result_ref must be provided together: result_type requires result or result_ref")
 	}
 	return resultType, append(json.RawMessage(nil), result...), ref, nil
 }
