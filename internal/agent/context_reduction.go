@@ -45,7 +45,29 @@ type ContextReductionStats struct {
 	// stays summable and bounded: tool names include dynamic MCP names, so
 	// mixing the two would make any total double-count and give the key space
 	// no ceiling.
-	OverCompressionByTool     map[string]int
+	OverCompressionByTool map[string]int
+	// ByRetentionLevel counts tool results per retention level, including the
+	// ones kept complete. ByToolAndRule only records what was reduced, so it
+	// cannot answer how much of the request is still full-fidelity evidence —
+	// the question the valid-read retention policy has to be decided on.
+	ByRetentionLevel map[string]int
+	// ProtectedReadTokens is what current, non-superseded reads cost in this
+	// request. Reclaiming them is the single largest change the retention
+	// policy could make, so its price is measured before it is considered.
+	ProtectedReadTokens int
+	// UnrecoverableReductions counts lossy renderings that left neither key
+	// fields nor an address behind. It must stay zero: it is the layer's
+	// destructive failure mode, not a tuning knob.
+	UnrecoverableReductions int
+	// ReferencePinned counts results kept out of a bare omission marker
+	// because later assistant text cites their specifics.
+	ReferencePinned int
+	// ArchiveReads / ArchiveReadFailures count how often the model actually
+	// followed a recovery address, and how often that read failed. A recovery
+	// route nobody can use is indistinguishable from a dropped payload until
+	// these are measured.
+	ArchiveReads              int
+	ArchiveReadFailures       int
 	EvidenceRebuildDurationUS int64
 	EvidenceFiles             int
 	EvidenceObservations      int

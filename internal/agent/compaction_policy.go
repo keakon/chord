@@ -240,6 +240,18 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		}
 		stats.SkippedByReason[reason]++
 	}
+	noteRetention := func(decision retentionDecision) {
+		if decision.Level == "" {
+			return
+		}
+		if stats.ByRetentionLevel == nil {
+			stats.ByRetentionLevel = make(map[string]int)
+		}
+		stats.ByRetentionLevel[string(decision.Level)]++
+		if !decision.retentionDecisionRecoverable() {
+			stats.UnrecoverableReductions++
+		}
+	}
 	noteOverCompression := func(kind, toolName string) {
 		if kind == "" {
 			return
@@ -327,6 +339,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		toolName   string
 		rule       string
 		reduced    string
+		decision   retentionDecision
 		force      bool
 		recallable bool
 		// repeated marks outputs whose content survives in an identical later
@@ -396,6 +409,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 					toolName:   toolName,
 					rule:       rule,
 					reduced:    reduced,
+					decision:   retentionDecisionFor(ctx, requestReductionReadLike, rule, reduced),
 					force:      true,
 					recallable: true,
 					repeated:   repeated[i],
@@ -428,6 +442,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 					toolName:   toolName,
 					rule:       rule,
 					reduced:    reduced,
+					decision:   retentionDecisionFor(ctx, requestReductionReadLike, rule, reduced),
 					force:      true,
 					recallable: true,
 					repeated:   repeated[i],
@@ -476,6 +491,10 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		}
 		class := classifyRequestReductionToolOutput(ctx)
 		if class == requestReductionNone {
+			noteRetention(retentionDecisionFor(ctx, class, "", ""))
+			if ctx.readRetentionProtects() {
+				stats.ProtectedReadTokens += estimateMessageTokens(a.ctxMgr, message.Message{Content: prepared[i].Content})
+			}
 			nextReviewAge[i] = nextContextReductionReviewAge(ctx)
 			if age < policy.HighRiskProtectAgeTurns && isHighRiskToolOutput(ctx) {
 				noteSkip(contextReductionSkipRecentHighRisk)
@@ -522,6 +541,22 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		if !ok {
 			continue
 		}
+		decision := retentionDecisionFor(ctx, class, rule, reduced)
+		// A bare omission marker keeps neither key fields nor an address. When
+		// later assistant reasoning cites this output's specifics, that
+		// reasoning stays in the request while its evidence would not: replace
+		// the marker with the excerpt-bearing summary (and its recovery
+		// address) rather than leaving a claim the model can no longer check.
+		if decision.Level == retentionHidden && laterAssistantReferencesToolResult(prepared, i) {
+			if pinned := reduceGenericStaleOutputSummary(ctx); pinned != "" && len(pinned) < len(ctx.Content) {
+				if address, addressed := ensureReducedOutputRecoverable(requestReductionGeneric, pinned, ctx); addressed {
+					pinned += "\n" + address
+				}
+				reduced, rule = pinned, rule+"_referenced"
+				decision = retentionDecisionFor(ctx, class, rule, reduced)
+				stats.ReferencePinned++
+			}
+		}
 		// discardedInputs is consumed only by recall protection (content-fetch
 		// shapes) and over-compression stats (read-like or search shapes).
 		// Keys outside those shapes — mutating shells, edit/apply_patch
@@ -536,6 +571,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 			toolName:   toolName,
 			rule:       rule,
 			reduced:    reduced,
+			decision:   decision,
 			recallable: recallable,
 			repeated:   ctx.Repeated,
 		})
@@ -591,6 +627,10 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 	for _, p := range proposals {
 		if !p.force && !applyBoundary && incrementalEnabled && p.index < frozenBoundary {
 			noteSkip(contextReductionSkipDeferredCache)
+			// The message keeps its original bytes this request, so the
+			// retention ledger must report it as full rather than as the
+			// reduction that was only proposed.
+			noteRetention(retentionDecision{Level: retentionFull, Complete: true, Reason: contextReductionSkipDeferredCache})
 			continue
 		}
 		if !p.repeated && p.recallable && incrementalEnabled && p.index < frozenBoundary {
@@ -603,6 +643,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 			prepared[p.index].ToolDiff = ""
 		}
 		noteReduction(p.toolName, p.rule, original, prepared[p.index].Content)
+		noteRetention(p.decision)
 	}
 
 	if a != nil {
@@ -612,6 +653,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		stats.EvidenceCurrent = evidenceStats.Current
 		stats.EvidenceStale = evidenceStats.Stale
 		stats.EvidenceSuperseded = evidenceStats.Superseded
+		stats.ArchiveReads, stats.ArchiveReadFailures = artifactReadbackStats(prepared, callMeta, a.sessionDir)
 		stats.TokensAfter = estimateMessagesTokens(a.ctxMgr, prepared)
 		a.setCurrentRequestSurface(&stats, prepared)
 		if stats.TokensSaved == 0 && stats.TokensBefore > stats.TokensAfter {
@@ -1923,6 +1965,7 @@ func cloneContextReductionStats(stats ContextReductionStats) ContextReductionSta
 	stats.SkippedByReason = cloneContextReductionIntMap(stats.SkippedByReason)
 	stats.OverCompression = cloneContextReductionIntMap(stats.OverCompression)
 	stats.OverCompressionByTool = cloneContextReductionIntMap(stats.OverCompressionByTool)
+	stats.ByRetentionLevel = cloneContextReductionIntMap(stats.ByRetentionLevel)
 	return stats
 }
 
