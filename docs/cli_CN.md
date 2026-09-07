@@ -373,7 +373,7 @@ chord resume 20260428064910975 --fork-history=2    # fork 第 2 次已应用的�
 - fork 出的新会话从零开始：usage/token 统计与运行状态不复制。`session-meta.json` 记录 `forked_from`，并沿用源会话的 worktree 归属与手动启用的 MCP server。
 - 新会话 id 会打印出来，随后自动恢复进入 TUI。会话至少要有一次已应用的压缩；请求超出可用范围的边界会报错，并列出合法的 `history-N` 取值。
 
-**不复制的内容：** fork 只带主会话正文与压缩归档，其余一律不复制。子代理的独立会话记录、委托任务（task）状态、mailbox、后台任务、artifacts，以及源会话 `subagents/`、`artifacts/`、`snapshot.json` 下的其他运行期状态——这些状态属于正在运行的源会话，无法在历史时间点如实重建，usage 统计同样绑定源会话。影响：浏览历史不受影响；但如果在 fork 里继续干活，fork 之前的委托任务只保留为可见的消息卡片——无法再 collect、查询或恢复执行，依赖那些子代理/任务的线也接不下去。fork 内部新发起的子代理与任务一切正常。
+**不复制的内容：** fork 只带主会话正文与压缩归档，其余一律不复制。子代理的独立会话记录、委托任务（task）状态、mailbox、后台任务、artifacts，以及源会话 `subagents/`、`artifacts/`、`snapshot.json` 下的其他运行期状态——这些状态属于正在运行的源会话，无法在历史时间点如实重建，usage 统计同样绑定源会话。影响：浏览历史不受影响；但如果在 fork 里继续干活，fork 之前的委托任务只保留为可见的消息卡片——无法再查询或恢复执行，依赖那些子代理/任务的线也接不下去。fork 内部新发起的子代理与任务一切正常。
 
 ## `chord import <source> [file]`
 

@@ -49,8 +49,10 @@
 | `todo_write` | 维护当前任务的可见 TODO 列表。 |
 | `question` | 向用户提出结构化问题并等待回答。该工具的 `ask` 会被归一化为 `allow`。 |
 | `skill` | 按需加载已发现 skill 的内容。 |
-| `save_artifact` | 在会话 artifacts 目录下保存或更新会话产物（报告、任务图、日志等）。 |
+| `save_artifact` | 在会话 artifacts 目录下保存或更新会话产物（报告、任务图、日志等），或保存不可变的机器可读结果。 |
 | `read_artifact` | 按会话相对路径读取会话产物。 |
+
+`save_artifact` 有两种互斥的参数形态：用 `filename` 加 `content`（必要时配 `mode: create / append / overwrite`）写入或更新会话产物；或者改用 `result_type` 加 `result` 参数对——`result` 必须是 JSON object——把载荷作为不可变、内容寻址的结果存入 `artifacts/results/`，返回的 ResultRef（`id`、`result_type`、`rel_path`、`sha256`、`size_bytes`）可以直接作为 `complete` 的 `result_ref` 传入。
 
 ## 编排与控制
 
@@ -65,7 +67,6 @@
 | `complete` | SubAgent 侧：携带摘要把当前委派任务标记为完成。 |
 | `escalate` | SubAgent 侧：请求父 agent 介入，但不结束自己的任务。 |
 | `notify` | 向 owner 或指定的被委派 worker 发送非阻塞通知。`message_type: response` 配合 `target_task_id` 和可选的 `correlation_id` 可向被委派 worker 发送结构化回复；`payload` 接受不超过 32 KiB 的 JSON 对象。 |
-| `notify_peer` | SubAgent 侧：向同一个直接 owner 的存活兄弟任务发送非阻塞通知。它不会授予对 peer 的控制权——需要回复或决策时请使用 owner 中转的 `escalate` / `notify`。 |
 
 ### 长文本控制工具
 
@@ -75,7 +76,7 @@
 
 `delegate` 只有一个工具结果，即异步启动句柄。后续 `complete` 调用和 mailbox 更新是独立的 runtime 事件，按稳定的 `task_id` 更新已有委派任务/卡片，不会生成额外的 `delegate` 工具结果。每次 `complete` 报告都会在 owner 视图创建一张 **AGENT COMPLETE** 通知卡；worker 终止失败显示为 **AGENT BLOCKED**，并唤醒直接 owner。
 
-agent 间消息遵守请求边界：目标 busy 时，消息只入队并随其下一次 LLM 请求一并处理，不打断当前请求；目标空闲但可恢复时，Chord 会唤醒它；纯 progress 更新不会强制本来空闲的 agent 启动。mailbox 与协调状态具备持久性：父子请求/响应记录、peer 路由与排队载荷都能跨 compaction 与重启存活，投递跨任务水合保持幂等。`notify_peer` 只会发送给同一个直接 owner 下的存活兄弟任务。
+agent 间消息遵守请求边界：目标 busy 时，消息只入队并随其下一次 LLM 请求一并处理，不打断当前请求；目标空闲但可恢复时，Chord 会唤醒它；纯 progress 更新不会强制本来空闲的 agent 启动。mailbox 与协调状态具备持久性：父子请求/响应记录与排队载荷都能跨 compaction 与重启存活，投递跨任务水合保持幂等。
 
 委派的写入范围既是并发声明，也是执行边界。只读工作必须设置 `read_only: true`；可能修改工作区时，至少要声明一个文件、路径前缀或模块。带范围的 worker 不能执行任意 Shell 命令，嵌套委派也不能声明比父任务更宽的范围。只声明任务确实需要的路径，这样互不相关的委派工作才能并行。
 

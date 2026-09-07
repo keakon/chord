@@ -49,8 +49,10 @@ In the TUI, an `lsp` card shows the operation and query position in its header (
 | `todo_write` | Maintain the visible TODO list for the current task. |
 | `question` | Ask the user a structured question and wait for the answer. `ask` is normalized to `allow` for this tool. |
 | `skill` | Load a discovered skill's content on demand. |
-| `save_artifact` | Save or update a session artifact (report, task graph, log) under the session's artifacts directory. |
+| `save_artifact` | Save or update a session artifact (report, task graph, log) or store an immutable machine-readable result, under the session's artifacts directory. |
 | `read_artifact` | Read a session artifact by session-relative path. |
+
+`save_artifact` takes two mutually exclusive parameter shapes. `filename` with `content` (plus `mode: create` / `append` / `overwrite` when needed) writes or updates a session artifact; alternatively, the `result_type` + `result` pair — `result` must be a JSON object — stores the payload as an immutable, content-addressed result under `artifacts/results/` and returns a ResultRef (`id`, `result_type`, `rel_path`, `sha256`, `size_bytes`), which `complete` accepts directly as its `result_ref`.
 
 ## Orchestration and control
 
@@ -65,7 +67,6 @@ These tools control agent workflows rather than local side effects, so YOLO mode
 | `complete` | SubAgent-side: mark the current delegated task as complete with a summary. |
 | `escalate` | SubAgent-side: request parent-agent intervention without ending the task. |
 | `notify` | Send a non-blocking update to the owner or a specific delegated worker. `message_type: response` with `target_task_id` and optional `correlation_id` delivers a structured reply to a delegated worker; `payload` accepts a JSON object up to 32 KiB. |
-| `notify_peer` | SubAgent-side: send a non-blocking notice to a live sibling task that has the same direct owner. It does not grant control over the peer — use owner-mediated `escalate` / `notify` when a reply or decision is required. |
 
 ### Long-text control tools
 
@@ -75,7 +76,7 @@ These cards are always expanded and their header is only the tool name: the repo
 
 `delegate` has one tool result: the asynchronous startup handle. Later `complete` calls and mailbox updates are separate runtime events that update the existing delegated task/card by stable `task_id`; they never produce additional `delegate` tool results. Each `complete` report raises an owner-visible **AGENT COMPLETE** notification card, and terminal worker failures are shown as **AGENT BLOCKED** and wake the direct owner.
 
-Agent-to-agent messages respect request boundaries: if the target is busy, the message is queued and included in its next LLM request instead of interrupting the active one; if the target is idle but resumable, Chord wakes it; progress-only updates never force an otherwise idle agent to run. Mailbox and coordination state is durable: parent-child request/response records, peer routing, and queued payloads survive compaction and restart, and delivery stays idempotent across task rehydration. `notify_peer` targets only live sibling tasks with the same direct owner.
+Agent-to-agent messages respect request boundaries: if the target is busy, the message is queued and included in its next LLM request instead of interrupting the active one; if the target is idle but resumable, Chord wakes it; progress-only updates never force an otherwise idle agent to run. Mailbox and coordination state is durable: parent-child request/response records and queued payloads survive compaction and restart, and delivery stays idempotent across task rehydration.
 
 The delegated write scope is both a concurrency declaration and an execution boundary. Read-only work must set `read_only: true`; work that can modify the workspace must name at least one file, path prefix, or module. A scoped worker cannot use arbitrary Shell commands, and nested delegation cannot declare a scope broader than its parent's scope. Declare only the paths the task actually needs so unrelated delegated work can run in parallel.
 
