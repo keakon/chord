@@ -40,28 +40,44 @@ func (a *MainAgent) GetUsageStats() analytics.SessionStats {
 	return a.usageTracker.SessionStats()
 }
 
-// GetSidebarUsageStats returns usage for the TUI-focused agent only (main or SubAgent),
-// matching GetContextStats / GetTokenUsage routing.
+// GetSidebarUsageStats returns usage for the TUI-focused agent only (main or
+// SubAgent), matching GetContextStats / GetTokenUsage routing.
+//
+// A focused worker is billed per task, not per runtime instance: a task resumed
+// for a second attempt runs under a new instance ID, and reporting only that
+// instance would erase the earlier attempts from the panel while the worker is
+// live and bring them back the moment it parked.
 func (a *MainAgent) GetSidebarUsageStats() analytics.SessionStats {
 	if a.usageTracker == nil {
 		return analytics.SessionStats{}
 	}
 	target := a.focusedAgentSnapshot()
+	if target.sub == nil && target.task == nil {
+		return a.usageTracker.SessionStatsForAgent(identity.MainAgentID)
+	}
+	live := ""
 	if target.sub != nil {
-		return a.usageTracker.SessionStatsForAgent(target.sub.instanceID)
+		live = target.sub.instanceID
 	}
-	if target.parked {
-		return a.usageStatsForTask(target.task)
-	}
-	return a.usageTracker.SessionStatsForAgent(identity.MainAgentID)
+	return a.usageStatsForTask(target.task, live)
 }
 
-func (a *MainAgent) usageStatsForTask(rec *DurableTaskRecord) analytics.SessionStats {
+// usageStatsForTask sums the usage of every runtime instance a task has run
+// under. liveInstanceID is folded in so a worker that has not yet been written
+// back to its record still reports its own usage.
+func (a *MainAgent) usageStatsForTask(rec *DurableTaskRecord, liveInstanceID string) analytics.SessionStats {
 	out := analytics.SessionStats{ByModel: make(map[string]*analytics.ModelStats), ByAgent: make(map[string]*analytics.AgentStats)}
-	if rec == nil || a.usageTracker == nil {
+	if a.usageTracker == nil {
 		return out
 	}
-	for _, instanceID := range dedupeTaskInstanceHistory(rec.InstanceHistory) {
+	instances := []string(nil)
+	if rec != nil {
+		instances = rec.InstanceHistory
+	}
+	if strings.TrimSpace(liveInstanceID) != "" {
+		instances = append(append([]string(nil), instances...), liveInstanceID)
+	}
+	for _, instanceID := range dedupeTaskInstanceHistory(instances) {
 		stats := a.usageTracker.SessionStatsForAgent(instanceID)
 		out.InputTokens += stats.InputTokens
 		out.OutputTokens += stats.OutputTokens

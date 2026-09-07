@@ -4022,3 +4022,47 @@ func TestSendMessageToCancelledTaskIsRejectedWithDelegateGuidance(t *testing.T) 
 		t.Fatalf("error = %q, want it to name the cancellation and point at re-delegation", err.Error())
 	}
 }
+
+// The status bar reads one number for the focused agent's prompt side, and it
+// has to mean the same thing before and after that agent parks. Reading a live
+// agent from its context manager broke that: a context manager belongs to one
+// runtime instance, so a task resumed for a second attempt reported only the
+// current attempt while live and every attempt once parked — the number jumped
+// on parking without any work happening. Both sides now read the ledger, which
+// accounts per task.
+func TestFocusedTokenUsageCoversEveryAttemptWhileLive(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.SetAgentConfigs(map[string]*config.AgentConfig{
+		"worker": {Name: "worker", Mode: config.AgentModeSubAgent, Models: map[string][]string{"default": {"test/worker"}}},
+	})
+	a.usageTracker.RecordForAgent(identity.MainAgentID, "test/main", nil, message.TokenUsage{InputTokens: 900, OutputTokens: 90})
+
+	sub := newControllableTestSubAgent(t, a, "adhoc-usage-frame")
+	sub.agentDefName = "worker"
+	// A first attempt that already ended, and the live attempt that replaced it.
+	a.usageTracker.RecordForAgent("worker-earlier", "test/worker", nil, message.TokenUsage{InputTokens: 300, OutputTokens: 30})
+	current := message.TokenUsage{InputTokens: 1000, OutputTokens: 40, CacheReadTokens: 800, CacheWriteTokens: 50}
+	a.usageTracker.RecordForAgent(sub.instanceID, "test/worker", nil, current)
+	sub.ctxMgr.UpdateFromUsage(current)
+	sub.setState(SubAgentStateCompleted, "done")
+	a.syncTaskRecordFromSub(sub, "")
+	record := a.taskRecordByTaskID("adhoc-usage-frame")
+	record.InstanceHistory = []string{"worker-earlier", sub.instanceID}
+	a.setTaskRecords(map[string]*DurableTaskRecord{"adhoc-usage-frame": record})
+
+	a.SwitchFocus(sub.instanceID)
+	live := a.GetTokenUsage()
+	if live.OutputTokens != 70 {
+		t.Fatalf("live focused OutputTokens = %d, want 70 (both attempts of this task, not just the live instance)", live.OutputTokens)
+	}
+	if live.InputTokens != 1300 {
+		t.Fatalf("live focused InputTokens = %d, want 1300 (both attempts, prompt side including the cached prefix)", live.InputTokens)
+	}
+
+	if !a.parkSubAgent(sub.instanceID) {
+		t.Fatal("parkSubAgent() = false")
+	}
+	if parked := a.GetTokenUsage(); parked != live {
+		t.Fatalf("parked focused usage = %#v, want the live reading %#v unchanged by parking", parked, live)
+	}
+}
