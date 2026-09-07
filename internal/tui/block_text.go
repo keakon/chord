@@ -257,11 +257,44 @@ func preserveBackground(line, bgColor string) string {
 	if bgSeq == "" {
 		return line
 	}
-	line = strings.ReplaceAll(line, "\x1b[0m", "\x1b[0m"+bgSeq)
-	line = strings.ReplaceAll(line, "\x1b[m", "\x1b[m"+bgSeq)
-	line = strings.ReplaceAll(line, "\x1b[49m", "\x1b[49m"+bgSeq)
-	line = strings.ReplaceAll(line, "\x1b[39m", "\x1b[39m"+bgSeq)
-	return line
+	// One pass replaces the four ReplaceAll rounds below. Every target is a
+	// reset sequence, so a single scan that recognises ESC '[' runs can emit
+	// the background sequence in place. Card rendering calls this for every
+	// body line of every frame, and the four passes each rescanned and
+	// reallocated the whole line — the dominant cost of a large streaming
+	// apply_patch card.
+	var b strings.Builder
+	b.Grow(len(line) + 4*len(bgSeq))
+	last := 0
+	for i := 0; i+2 < len(line); i++ {
+		if line[i] != '\x1b' || line[i+1] != '[' {
+			continue
+		}
+		end := -1
+		for j := i + 2; j < len(line); j++ {
+			c := line[j]
+			if c == 'm' {
+				end = j + 1
+				break
+			}
+			if c < '0' || c > '9' {
+				break
+			}
+		}
+		if end < 0 {
+			continue
+		}
+		if seq := line[i:end]; seq == "\x1b[0m" || seq == "\x1b[m" || seq == "\x1b[49m" || seq == "\x1b[39m" {
+			b.WriteString(line[last:end])
+			b.WriteString(bgSeq)
+			last = end
+		}
+	}
+	if last == 0 {
+		return line
+	}
+	b.WriteString(line[last:])
+	return b.String()
 }
 
 // preserveCardBg re-inserts the card's background ANSI sequence after full

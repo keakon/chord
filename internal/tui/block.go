@@ -146,6 +146,16 @@ type Block struct {
 	patchPreviewLen  int
 	patchPreviewText string
 
+	// previewRendered memoizes the rendered lines of the live apply_patch
+	// preview so a growing patch only re-renders its tail. Keyed implicitly by
+	// previewRenderedPatch (the patch text they were rendered from) and
+	// previewRenderedWidth: both must still match for the memo to be reused.
+	// Without it, every coalesced stream step re-highlights all N lines, which
+	// is linear per step and quadratic over the stream.
+	previewRenderedPatch string
+	previewRenderedWidth int
+	previewRenderedLines []string
+
 	// toolArgsCache memoizes parsed JSON arguments for tool-call rendering.
 	// It must be invalidated whenever ToolName or Content changes.
 	toolArgsCacheToolName string

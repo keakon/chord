@@ -699,3 +699,53 @@ func TestRenderPrewrappedCardMarginBottomNoBgWithoutCard(t *testing.T) {
 		t.Fatalf("marginBottom row should not emit ANSI when bgColorNum is empty: %q", last)
 	}
 }
+
+// preserveBackgroundReference is the four-ReplaceAll implementation the
+// single-pass version replaced. It is kept only as the oracle for
+// TestPreserveBackgroundMatchesReference.
+func preserveBackgroundReference(line, bgColor string) string {
+	if bgColor == "" || line == "" {
+		return line
+	}
+	if !strings.Contains(line, "\x1b[") {
+		return line
+	}
+	bgSeq := colorToANSIBgSeq(bgColor)
+	if bgSeq == "" {
+		return line
+	}
+	line = strings.ReplaceAll(line, "\x1b[0m", "\x1b[0m"+bgSeq)
+	line = strings.ReplaceAll(line, "\x1b[m", "\x1b[m"+bgSeq)
+	line = strings.ReplaceAll(line, "\x1b[49m", "\x1b[49m"+bgSeq)
+	line = strings.ReplaceAll(line, "\x1b[39m", "\x1b[39m"+bgSeq)
+	return line
+}
+
+func TestPreserveBackgroundMatchesReference(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	bgColors := []string{"", "236", "52", "#1f2430"}
+	pieces := []string{
+		"", "text", "\x1b[0m", "\x1b[m", "\x1b[49m", "\x1b[39m",
+		"\x1b[38;5;120m", "\x1b[1;31m", "\x1b[K", "\x1b[", "\x1b", "[0m",
+		"\x1b[0", "\x1b[0mm", "\x1b[m0m", "\x1b]8;;url\x07", "\x1b[1000m",
+	}
+	var cases []string
+	for i := range pieces {
+		cases = append(cases, pieces[i])
+		for j := range pieces {
+			cases = append(cases, pieces[i]+pieces[j])
+			for k := range pieces {
+				cases = append(cases, pieces[i]+pieces[j]+pieces[k])
+			}
+		}
+	}
+	for _, line := range cases {
+		for _, bg := range bgColors {
+			want := preserveBackgroundReference(line, bg)
+			got := preserveBackground(line, bg)
+			if got != want {
+				t.Fatalf("preserveBackground(%q,%q)\n got=%q\nwant=%q", line, bg, got, want)
+			}
+		}
+	}
+}

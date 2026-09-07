@@ -526,6 +526,10 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		}
 		if argsStreamingDone {
 			delete(m.toolArgRenderState, evt.ID)
+			// The live preview is over: drop the per-line render memo so a
+			// finished card does not retain the streaming preview's rendered
+			// lines for the rest of the session.
+			block.clearApplyPatchPreviewMemo()
 			// Args have finished streaming but the tool may not have been dispatched yet
 			// (execution-state events arrive only after the model response finalizes).
 			// Mark as queued so fully-formed cards (notably TodoWrite) stop animating

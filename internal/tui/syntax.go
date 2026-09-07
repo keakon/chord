@@ -196,6 +196,10 @@ type codeHighlighter struct {
 	cachedLexer   chroma.Lexer
 	lexerResolved bool
 	renderCache   map[uint64]string // key: FNV-1a 64-bit hash of (bgTerm + "\x00" + source)
+	// renderCacheBytes approximates the memory held by renderCache, including
+	// per-entry map overhead, so the cache can be bounded by size instead of
+	// entry count (entries vary from a few bytes to a full wrapped line).
+	renderCacheBytes int
 }
 
 func newCodeHighlighterWithLanguage(filePath, sample, language string) *codeHighlighter {
@@ -278,23 +282,48 @@ func normalizeCodeFenceLanguage(language string) string {
 	}
 }
 
-// updateContext refreshes file/sample detection inputs and clears cached lexer
-// and render results when either input changes.
+// updateContext refreshes file/sample detection inputs and clears the cached
+// lexer and render results when the resolved lexer may no longer apply. A
+// sample that only grew keeps them: see the append-only case below.
 func (h *codeHighlighter) updateContext(filePath, sample string) {
-	reset := false
-	if h.filePath != filePath {
+	pathChanged := h.filePath != filePath
+	sampleChanged := sample != "" && h.sample != sample
+	if !pathChanged && !sampleChanged {
+		return
+	}
+	// A sample that only grows is the streaming case. Once a lexer has been
+	// resolved, appending to the sample cannot change that choice, but
+	// re-resolving would drop the per-line render cache and force every line
+	// to be re-highlighted on every streamed fragment — linear work per
+	// fragment, quadratic over the stream. Keep both and let the appended
+	// lines be the only new work.
+	// Content analysis without a path or explicit language is provisional: an
+	// incomplete streaming prefix may not contain enough evidence to choose
+	// the final lexer. Keep the fast append-only path only when the language is
+	// already anchored by a file path or explicit language.
+	appendOnly := h.lexerResolved && !pathChanged &&
+		(filePath != "" || h.language != "") && strings.HasPrefix(sample, h.sample)
+	if pathChanged {
 		h.filePath = filePath
-		reset = true
 	}
-	if sample != "" && h.sample != sample {
+	if sampleChanged {
 		h.sample = sample
-		reset = true
 	}
-	if reset {
-		h.cachedLexer = nil
-		h.lexerResolved = false
-		h.renderCache = make(map[uint64]string)
+	if appendOnly {
+		return
 	}
+	h.resetLexer()
+}
+
+func (h *codeHighlighter) resetLexer() {
+	h.cachedLexer = nil
+	h.lexerResolved = false
+	h.clearRenderCache()
+}
+
+func (h *codeHighlighter) clearRenderCache() {
+	h.renderCache = make(map[uint64]string)
+	h.renderCacheBytes = 0
 }
 
 func (h *codeHighlighter) updateLanguage(language string) {
@@ -303,9 +332,7 @@ func (h *codeHighlighter) updateLanguage(language string) {
 		return
 	}
 	h.language = language
-	h.cachedLexer = nil
-	h.lexerResolved = false
-	h.renderCache = make(map[uint64]string)
+	h.resetLexer()
 }
 
 // getLexer returns the cached lexer, initialising it on first call.
@@ -396,16 +423,52 @@ func (h *codeHighlighter) highlightRendered(source, bgTerm string) string {
 	return h.cacheRendered(key, buf.String())
 }
 
+const (
+	// maxRenderCacheBytes bounds the memory one highlighter spends on cached
+	// highlighted lines. The cache is per-Block, so this is per-Block too.
+	maxRenderCacheBytes = 512 << 10
+	// renderCacheEntryOverhead approximates the map bookkeeping (key, bucket
+	// slot, string header) on top of the cached string's own bytes.
+	renderCacheEntryOverhead = 96
+)
+
 func (h *codeHighlighter) cacheRendered(key uint64, result string) string {
-	// Evict the entire cache when it grows too large to bound memory usage.
-	// A simple full-clear is sufficient: the cache is per-Block and a single
-	// diff rarely exceeds 1024 unique lines in practice.
-	const maxRenderCacheSize = 1024
-	if len(h.renderCache) > maxRenderCacheSize {
-		h.renderCache = make(map[uint64]string, maxRenderCacheSize)
+	if h.renderCache == nil {
+		h.renderCache = make(map[uint64]string)
+	}
+	cost := len(result) + renderCacheEntryOverhead
+	// A single huge line cannot fit the cache budget. Do not evict useful
+	// entries just to retain an item that would still exceed the budget.
+	if cost > maxRenderCacheBytes {
+		return result
+	}
+	if h.renderCacheBytes+cost > maxRenderCacheBytes {
+		h.evictRenderCache()
+	}
+	if _, dup := h.renderCache[key]; !dup {
+		h.renderCacheBytes += cost
 	}
 	h.renderCache[key] = result
 	return result
+}
+
+// evictRenderCache drops roughly half the cached lines. Map iteration order is
+// randomised, so this approximates random eviction. Clearing the whole cache
+// instead would make a snippet with more lines than the cache holds miss on
+// every line of every frame, which is the pathological case for a large
+// streaming apply_patch preview.
+func (h *codeHighlighter) evictRenderCache() {
+	target := h.renderCacheBytes / 2
+	for key, value := range h.renderCache {
+		delete(h.renderCache, key)
+		h.renderCacheBytes -= len(value) + renderCacheEntryOverhead
+		if h.renderCacheBytes <= target {
+			break
+		}
+	}
+	if h.renderCacheBytes < 0 {
+		h.renderCacheBytes = 0
+	}
 }
 
 func renderPlainWithBackground(source string, bg color.Color) string {

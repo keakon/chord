@@ -1586,3 +1586,88 @@ func TestApplyPatchStreamingPreviewRendersHighlightedWithoutFullParse(t *testing
 	added := renderedLineContaining(t, lines, "func main")
 	assertRenderedTextBackground(t, added, "func", colorOfTheme(currentTheme.DiffAddLineBg))
 }
+
+// TestApplyPatchPreviewIncrementalRenderEqualsCold confirms the line-level
+// render memo (appendApplyPatchPreviewLines) and the resolved highlighter
+// produce the same card as a cold full render, and that streaming a growing
+// patch reuses the rendered prefix instead of diverging. The patch is large
+// enough to engage the adaptive coalesce window.
+func TestApplyPatchPreviewIncrementalRenderEqualsCold(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	const width = 100
+	var sb strings.Builder
+	sb.WriteString("*** Begin Patch\n")
+	sb.WriteString("*** Update File: internal/tui/streamed_preview.go\n")
+	sb.WriteString("@@ import (\n")
+	for i := range 700 {
+		switch i % 3 {
+		case 0:
+			sb.WriteString(fmt.Sprintf("+\tif err := runStep%d(ctx, value); err != nil {\n", i))
+		case 1:
+			sb.WriteString(fmt.Sprintf("-\t\treturn nil, fmt.Errorf(\"step %d: %%w\", err)\n", i))
+		default:
+			sb.WriteString(fmt.Sprintf(" \t\tlogger.Info(\"completed\", zap.Int(\"idx\", %d))\n", i))
+		}
+	}
+	sb.WriteString("*** End Patch")
+	patch := sb.String()
+	if len(patch) < 16<<10 {
+		t.Fatalf("test patch too small (%d bytes) to engage adaptive window", len(patch))
+	}
+	fullArgs, _ := json.Marshal(map[string]string{"patch": patch})
+
+	stream := &Block{ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch}
+	for frac := 1; frac <= 100; frac++ {
+		args := string(fullArgs[:len(fullArgs)*frac/100])
+		stream.RawArgs = args
+		if d := stream.cachedApplyPatchStreamingArgs(args); d != "" {
+			stream.Content = d
+		}
+		stream.InvalidateCache()
+		_ = stream.Render(width, "")
+	}
+	// argsStreamingDone finalises the card with the complete args.
+	stream.RawArgs = string(fullArgs)
+	stream.Content = applyPatchToolDisplayArgs(string(fullArgs))
+	stream.InvalidateCache()
+	incremental := strings.Join(stream.Render(width, ""), "\n")
+
+	cold := &Block{ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch,
+		RawArgs: string(fullArgs), Content: applyPatchToolDisplayArgs(string(fullArgs))}
+	coldLines := strings.Join(cold.Render(width, ""), "\n")
+
+	if incremental != coldLines {
+		t.Fatalf("incremental render diverged from cold render\n--- cold ---\n%s\n--- incremental ---\n%s", coldLines, incremental)
+	}
+	if !strings.Contains(incremental, "runStep0") || !strings.Contains(incremental, "Errorf") {
+		t.Fatalf("preview missing expected patch lines:\n%s", incremental)
+	}
+}
+
+func TestCodeHighlighterReevaluatesUnanchoredStreamingSample(t *testing.T) {
+	h := newCodeHighlighterWithLanguage("", "plain text", "")
+	first := h.getLexer(h.sample)
+	if first == nil {
+		t.Fatal("expected an initial lexer")
+	}
+	h.updateContext("", "plain text\nfunc main() {}")
+	second := h.getLexer(h.sample)
+	if second == nil {
+		t.Fatal("expected a lexer after the sample grew")
+	}
+	if second == first {
+		t.Fatal("unanchored content lexer should be reevaluated after streaming sample growth")
+	}
+}
+
+func TestCodeHighlighterSkipsOversizedRenderCacheEntry(t *testing.T) {
+	h := newCodeHighlighterWithLanguage("demo.go", "", "")
+	oversized := strings.Repeat("x", maxRenderCacheBytes)
+	got := h.cacheRendered(1, oversized)
+	if got != oversized {
+		t.Fatal("cacheRendered changed the oversized result")
+	}
+	if len(h.renderCache) != 0 || h.renderCacheBytes != 0 {
+		t.Fatalf("oversized result entered cache: entries=%d bytes=%d", len(h.renderCache), h.renderCacheBytes)
+	}
+}

@@ -561,16 +561,31 @@ func appendEditPatchPreview(result []string, argsJSON string, width int) []strin
 	return result
 }
 
-const patchPreviewCoalesceBytes = 256
+const (
+	// patchPreviewCoalesceBytes is the minimum growth between preview
+	// refreshes while the patch is still small enough that a refresh is cheap.
+	patchPreviewCoalesceBytes = 256
+	// patchPreviewCoalesceGrowthFrom is the accumulated-args size past which a
+	// refresh stops being cheap: every refresh re-measures the whole card, so a
+	// fixed window costs one linear pass per window and the stream is
+	// quadratic in the patch. Past this point the window grows with the patch,
+	// which makes the refresh count logarithmic. Small patches keep the tight
+	// window so the preview still tracks the stream closely.
+	patchPreviewCoalesceGrowthFrom = 16 << 10
+	// patchPreviewCoalesceDivisor sets how fast the grown window widens: one
+	// refresh per 1/divisor of the accumulated args.
+	patchPreviewCoalesceDivisor = 16
+)
 
 // cachedApplyPatchStreamingArgs mirrors streamingToolDisplayArgs for a live
 // apply_patch card. Extracting the streaming preview is linear in the
 // accumulated args, so re-running it per streamed fragment would be
-// quadratic; the preview refreshes at most once per
-// patchPreviewCoalesceBytes of growth instead. Complete-JSON and path-only
+// quadratic; the preview refreshes at most once per coalesce window of growth
+// instead (see patchPreviewCoalesceWindow). Complete-JSON and path-only
 // displays are stable or cheap and re-evaluate each call.
 func (b *Block) cachedApplyPatchStreamingArgs(argsJSON string) string {
-	if b.patchPreviewText != "" && len(argsJSON) >= b.patchPreviewLen && len(argsJSON)-b.patchPreviewLen < patchPreviewCoalesceBytes {
+	if b.patchPreviewText != "" && len(argsJSON) >= b.patchPreviewLen &&
+		len(argsJSON)-b.patchPreviewLen < b.patchPreviewCoalesceWindow() {
 		return b.patchPreviewText
 	}
 	display := applyPatchToolDisplayArgs(argsJSON)
@@ -586,6 +601,25 @@ func (b *Block) cachedApplyPatchStreamingArgs(argsJSON string) string {
 		return fileToolPathDisplayArgs(path)
 	}
 	return ""
+}
+
+// clearApplyPatchPreviewMemo drops the rendered-line memo used only while the
+// patch is still streaming, so a finished card does not retain it.
+func (b *Block) clearApplyPatchPreviewMemo() {
+	b.previewRenderedPatch = ""
+	b.previewRenderedWidth = 0
+	b.previewRenderedLines = nil
+}
+
+// patchPreviewCoalesceWindow returns how much the accumulated args must grow
+// before the live preview refreshes again. It is the tight
+// patchPreviewCoalesceBytes window until the args pass
+// patchPreviewCoalesceGrowthFrom, then widens in proportion to them.
+func (b *Block) patchPreviewCoalesceWindow() int {
+	if b.patchPreviewLen <= patchPreviewCoalesceGrowthFrom {
+		return patchPreviewCoalesceBytes
+	}
+	return b.patchPreviewLen / patchPreviewCoalesceDivisor
 }
 
 func appendApplyPatchPreview(result []string, b *Block, filePath string, width int) []string {
@@ -604,12 +638,46 @@ func appendApplyPatchPreview(result []string, b *Block, filePath string, width i
 	if patch == "" {
 		return result
 	}
-	hl := ensureCodeHighlighterWithLanguage(&b.previewHL, filePath, applyPatchCodeSample(patch), "")
+	hl := b.applyPatchPreviewHighlighter(filePath, patch)
 	result = append(result, ToolResultExpandedStyle.Render("  ↳ Requested patch:"))
-	for _, line := range editPatchPreviewLines(patch) {
-		result = append(result, renderApplyPatchPreviewLine(line, width, hl))
-	}
+	result = append(result, b.appendApplyPatchPreviewLines(patch, width, hl)...)
 	return result
+}
+
+// applyPatchPreviewHighlighter returns the block's preview highlighter,
+// building the lexer-detection sample only while the highlighter still needs
+// it. The sample is a linear function of the patch and the preview is rebuilt
+// on every coalesced stream step, so skipping it once the lexer is resolved
+// keeps each step's cost proportional to the newly streamed text.
+func (b *Block) applyPatchPreviewHighlighter(filePath, patch string) *codeHighlighter {
+	if h := b.previewHL; h != nil && h.lexerResolved && h.filePath == filePath {
+		return h
+	}
+	return ensureCodeHighlighterWithLanguage(&b.previewHL, filePath, applyPatchCodeSample(patch), "")
+}
+
+// appendApplyPatchPreviewLines renders the patch preview lines, reusing the
+// previously rendered prefix when the patch only grew. The last memoized line
+// is always re-rendered because the stream may still be extending it.
+func (b *Block) appendApplyPatchPreviewLines(patch string, width int, hl *codeHighlighter) []string {
+	lines := editPatchPreviewLines(patch)
+	reuse := 0
+	if b.previewRenderedWidth == width && b.previewRenderedPatch != "" &&
+		len(b.previewRenderedLines) > 0 && len(lines) >= len(b.previewRenderedLines) &&
+		strings.HasPrefix(patch, b.previewRenderedPatch) {
+		reuse = len(b.previewRenderedLines) - 1
+	}
+	out := make([]string, 0, len(lines))
+	if reuse > 0 {
+		out = append(out, b.previewRenderedLines[:reuse]...)
+	}
+	for _, line := range lines[reuse:] {
+		out = append(out, renderApplyPatchPreviewLine(line, width, hl))
+	}
+	b.previewRenderedPatch = patch
+	b.previewRenderedWidth = width
+	b.previewRenderedLines = out
+	return out
 }
 
 func renderApplyPatchPreviewLine(line string, width int, hl *codeHighlighter) string {
