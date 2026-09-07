@@ -718,7 +718,7 @@ func (r *ResponsesProvider) sendAndParse(
 	applyResponsesTurnStateHeader(req.Header, turnState, turnStateIdentity)
 
 	// Apply request body compression if configured
-	req, _ = compressRequestBody(req, bodyBytes, r.provider.CompressEnabled())
+	req, _ = compressRequestBody(req, bodyBytes, r.provider.RequestCompression())
 	applyRequestHeaderOverrides(req.Header, overrides)
 
 	// Send request.

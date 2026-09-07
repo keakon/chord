@@ -17,6 +17,7 @@
 - `done` 工具现在只在 loop 运行期间挂载，不再常驻每个请求的工具面。普通会话不必再携带它的定义，模型也不用在「直接回复」和「调用完成工具」之间做选择——它的工具描述此前有一半篇幅在论证这件事，现在已删除。`/loop on` 时才挂载：provider 支持会话中途追加工具的（Responses 系模型、Kimi dynamic tools）在下一次请求里作为附加工具挂上，其余情况通过一次工具面重建注入，代价是一次 prompt cache 失效；`/loop off` 会把它收回。loop 的准入条件也相应改为「`done` 是否**能**挂载」而不是「它现在是否可见」，因此该改动不会让 loop 模式变得无法进入。
 - 纯通配的权限规则不再影响 `done`。与 `compact_context` 一致：挂载该工具的那个运行时模式本身就是授权，因此 allowlist 角色（`"*": deny` 加少量工具）无需单独放行 loop 自己的退出工具就能运行 loop。只有指名 `done` 的规则仍然生效——写 `done: deny` 即可把 loop 的终止权保留给自己。此前必须额外加 `done: allow` 才能用 `/loop` 的角色，现在不需要了。
 - YOLO 下，`handoff`、`delegate`、`cancel` 现在除非有规则直接指名，否则一律拒绝。此前 YOLO 的规则过滤会丢弃所有未指名受保护工具的规则，而一个都没指名的角色——任何 allowlist 角色，以及只写了 `"*": allow` 的角色——会被过滤成空规则集，执行门把空规则集读作「未配置任何权限」从而全部放行。于是打开 YOLO 反而把这些角色明确拒绝过的控制工具授予了它们，与文档承诺的「宽泛 `"*": allow` 不会授予它们」正好相反。YOLO 下需要用到这些工具的角色，现在必须显式配置。
+- `providers.<name>.compress` 从布尔值改为编码字符串（`gzip` 或 `zstd`）。残留的 `compress: true` 不再启用 gzip：会被忽略、请求压缩保持关闭，`chord doctor config` 会报告并给出迁移提示——想恢复旧行为就写 `compress: gzip`。`compress: zstd` 发送 zstd 压缩的请求体，即 Codex 客户端发给 codex-backend 请求所用的编码。详见[Provider 请求压缩](./docs/configuration_CN.md#provider-请求压缩)。
 
 ### 新功能
 

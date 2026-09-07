@@ -716,15 +716,20 @@ HTTP，确保最终 JSON patch 生效。
 
 ## Provider 请求压缩
 
-Provider 级别的 `compress` 控制上游 HTTP 请求体的 gzip 压缩。它和上下文管理（compaction / reduction）是两回事——只影响请求传输编码，不会总结或移除对话历史。
+Provider 级别的 `compress` 选择上游 HTTP 请求体的压缩编码：`gzip` 或 `zstd`（`zstd` 是 Codex 客户端发给 codex-backend 请求体用的编码）。它和上下文管理（compaction / reduction）是两回事——只影响请求传输编码，不会总结或移除对话历史。
 
 ```yaml
 providers:
   openai:
-    compress: true
+    compress: gzip
+  codex:
+    preset: codex
+    compress: zstd   # codex-backend 接受 zstd 请求体
 ```
 
-启用后，Chord 仅在 gzip 能减小体积时才发送压缩请求。除非你的 provider 或网关明确受益于请求体压缩，否则无需配置。
+Chord 仅在压缩能减小体积时才发送压缩请求体，否则按原文发送；压缩失败同样回退为原文并记日志。响应方向不受影响：仍然只声明并自己解压 gzip 响应。除非确定 provider 或网关接受压缩请求体，否则保持不配置——官方 Codex backend 和 `api.anthropic.com` 接受（Anthropic 只收 `gzip`，不收 `zstd`），多数 OpenAI-compatible 网关不接受。
+
+1.0 前的布尔写法（`compress: true`）已不再接受：会被忽略（压缩保持关闭），并由 `chord doctor config` 报告。想恢复旧行为就写 `compress: gzip`。
 
 Provider / 模型请求默认用 `User-Agent: chord/<version>` 标识客户端。仅当某个 provider 或网关要求特定值时，才配置 provider 级 `user_agent`：
 
@@ -1194,7 +1199,7 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `key_order`   | string | `sequential`（非 Codex 默认）/ `random` / `smart`（仅 Codex）。控制在候选 key 中如何选择。                                               |
 | `retry_backoff`| string | `exponential`（默认）/ `fixed` / `none`。控制完整重试轮之间由 Chord 生成的等待；显式设置后也控制普通 HTTP 429 的 key 冷却，并替换这类响应的 `Retry-After`。已确认的配额重置与凭据硬状态仍然优先。 |
 | `retry_delay_ms`| int   | 轮间退避和普通 429 冷却的基准值或固定值，单位毫秒，可取 `0` 到 `60000`；`0` / 省略默认 1000ms。即使省略 `retry_backoff`，只要写出该字段（包括显式 `0`）就算覆盖。`none` 模式下忽略。超出范围的值会记录日志并回退默认值，不会中断启动。 |
-| `compress`    | bool   | gzip 能减小体积时启用请求体压缩。默认关闭。                                                                                                      |
+| `compress`    | string | 上游请求体的压缩编码：`gzip` 或 `zstd`；不设即关闭。只在压缩能缩小体积时生效。旧的布尔写法 `compress: true` 已删除——会被忽略并由 `chord doctor config` 报告（改成 `compress: gzip` 即可）。 |
 | `response_header_timeout` | int | 从开始该 provider 的流式 HTTP 请求到收到响应头的超时，单位秒，包括连接建立与请求体上传。`0` / 省略表示使用内置默认值；健康流由 `stream_idle_timeout` 约束，而不是总请求计时器。 |
 | `stream_idle_timeout` | int | 该 provider 的流式空闲超时，单位秒。`0` / 省略表示使用内置 SSE/WebSocket idle 默认值。 |
 | `websocket_handshake_timeout` | int | Responses WebSocket 握手超时，单位秒。`0` / 省略表示使用内置默认值。 |

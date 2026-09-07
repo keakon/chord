@@ -173,6 +173,68 @@ func TestCollectProjectConfigIssuesMissingFile(t *testing.T) {
 	}
 }
 
+func TestCollectConfigFileIssuesReportsLegacyBooleanCompress(t *testing.T) {
+	// The pre-1.0 boolean compress form (`compress: true` / `compress:
+	// false`) silently enabled gzip; it is now rejected so users migrate to
+	// the explicit encoding, with a hint naming the replacement.
+	for _, value := range []string{"true", "false"} {
+		path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "providers:\n  sample:\n    type: responses\n    compress: "+value+"\n")
+		issues, err := CollectConfigFileIssues(path, true)
+		if err != nil {
+			t.Fatalf("CollectConfigFileIssues(%v): %v", value, err)
+		}
+		joined := strings.Join(issues, "\n")
+		if !strings.Contains(joined, "removed boolean form") || !strings.Contains(joined, "gzip") {
+			t.Fatalf("issues for compress: %v = %q, want a removed-boolean-form hint naming gzip", value, joined)
+		}
+	}
+}
+
+func TestLoadConfigFromPathIgnoresLegacyBooleanCompress(t *testing.T) {
+	// The tolerant loader treats compress: true as invalid and falls back to
+	// no compression instead of silently enabling gzip.
+	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "providers:\n  sample:\n    type: responses\n    compress: true\n")
+	cfg, err := LoadConfigFromPath(path)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath: %v", err)
+	}
+	if got := cfg.Providers["sample"].Compress; got != "" {
+		t.Fatalf("compress after legacy true = %q, want empty (compression off)", got)
+	}
+}
+
+func TestCollectConfigFileIssuesReportsUnknownCompressEncoding(t *testing.T) {
+	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "providers:\n  sample:\n    type: responses\n    compress: brotli\n")
+	issues, err := CollectConfigFileIssues(path, true)
+	if err != nil {
+		t.Fatalf("CollectConfigFileIssues: %v", err)
+	}
+	joined := strings.Join(issues, "\n")
+	if !strings.Contains(joined, "invalid compress value") || !strings.Contains(joined, "gzip") || !strings.Contains(joined, "zstd") {
+		t.Fatalf("issues = %q, want an invalid-compress report naming gzip and zstd", joined)
+	}
+}
+
+func TestCollectConfigFileIssuesAllowsRequestCompressionEncodings(t *testing.T) {
+	for _, value := range []string{"gzip", "zstd"} {
+		path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "providers:\n  sample:\n    type: responses\n    compress: "+value+"\n")
+		issues, err := CollectConfigFileIssues(path, true)
+		if err != nil {
+			t.Fatalf("CollectConfigFileIssues(%v): %v", value, err)
+		}
+		if len(issues) != 0 {
+			t.Fatalf("issues for compress: %v = %#v, want none", value, issues)
+		}
+		cfg, err := LoadConfigFromPath(path)
+		if err != nil {
+			t.Fatalf("LoadConfigFromPath(%v): %v", value, err)
+		}
+		if got := cfg.Providers["sample"].Compress; got != value {
+			t.Fatalf("compress after load = %q, want %q", got, value)
+		}
+	}
+}
+
 func TestCompactionReminderMinusOneDisablesWithoutIssue(t *testing.T) {
 	// reminder: -1 is the explicit "no context-pressure reminder" switch; it
 	// keeps automatic compaction on and must neither be reported nor reset,

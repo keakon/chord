@@ -248,7 +248,7 @@ type ProviderConfig struct {
 	onPolledUpdate             func() // called after polled snapshot writes a new snapshot
 	effectiveProxyURL          string
 	userAgent                  string
-	compress                   bool // whether gzip request compression is enabled
+	requestCompression         string // upstream request body compression encoding: "" | "gzip" | "zstd"
 	authStatePath              string
 	authState                  config.AuthStateFile
 	authStateMTime             time.Time
@@ -351,7 +351,7 @@ func NewProviderConfig(name string, cfg config.ProviderConfig, keys []string) *P
 		lastSelectedSlot:           -1,
 		effectiveProxyURL:          "",
 		userAgent:                  strings.TrimSpace(cfg.UserAgent),
-		compress:                   cfg.Compress,
+		requestCompression:         strings.TrimSpace(cfg.Compress),
 		polledRateLimitByCredIdx:   polledRateLimitByCredIdx,
 		polledRateLimitAttemptedAt: polledRateLimitAttemptedAt,
 		polledRateLimitSucceededAt: polledRateLimitSucceededAt,
@@ -832,18 +832,20 @@ func (p *ProviderConfig) UserAgent() string {
 	return p.userAgent
 }
 
-// CompressEnabled reports whether upstream request body compression is enabled.
-func (p *ProviderConfig) CompressEnabled() bool {
+// RequestCompression returns the configured upstream request body compression
+// encoding: "" (disabled), "gzip", or "zstd".
+func (p *ProviderConfig) RequestCompression() string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.compress
+	return p.requestCompression
 }
 
-// SetCompressEnabled sets whether upstream request body compression is enabled.
-func (p *ProviderConfig) SetCompressEnabled(enabled bool) {
+// SetRequestCompression sets the upstream request body compression encoding
+// ("" | "gzip" | "zstd").
+func (p *ProviderConfig) SetRequestCompression(encoding string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.compress = enabled
+	p.requestCompression = encoding
 }
 
 func (p *ProviderConfig) Name() string {

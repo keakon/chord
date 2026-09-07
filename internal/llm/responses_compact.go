@@ -161,7 +161,7 @@ func (r *ResponsesProvider) Compact(
 	applyResponsesTurnStateHeader(req.Header, turnState, turnStateIdentity)
 
 	// Apply request body compression if configured
-	req, _ = compressRequestBody(req, bodyBytes, r.provider.CompressEnabled())
+	req, _ = compressRequestBody(req, bodyBytes, r.provider.RequestCompression())
 	// Native remote compaction v2 rides the ordinary /responses streaming wire;
 	// advertise the session-level beta feature like the real Codex client.
 	req.Header.Set(headerCodexBetaFeatures, headerValueRemoteCompactV2)

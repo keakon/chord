@@ -424,7 +424,7 @@ func (o *OpenAIProvider) CompleteStream(
 	applySessionIDHeaders(req.Header, tuning.SessionKey)
 
 	// Apply request body compression if configured
-	req, _ = compressRequestBody(req, bodyBytes, o.provider.CompressEnabled())
+	req, _ = compressRequestBody(req, bodyBytes, o.provider.RequestCompression())
 	applyRequestHeaderOverrides(req.Header, overrides)
 
 	log.Debugf("openai request model=%v max_tokens=%v messages=%v tools=%v", model, maxTokens, len(messages), len(tools))

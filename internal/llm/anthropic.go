@@ -271,7 +271,7 @@ func (a *AnthropicProvider) CompleteStream(
 	log.Debugf("anthropic request model=%v max_tokens=%v thinking_type=%v thinking_budget=%v messages=%v tools=%v", model, maxTokens, at.ThinkingType, at.ThinkingBudget, len(messages), len(tools))
 
 	// Apply request body compression if configured
-	req, _ = compressRequestBody(req, bodyBytes, a.provider.CompressEnabled())
+	req, _ = compressRequestBody(req, bodyBytes, a.provider.RequestCompression())
 	applyRequestHeaderOverrides(req.Header, overrides)
 
 	// Send the request.

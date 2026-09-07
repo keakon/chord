@@ -367,8 +367,15 @@ type ProviderConfig struct {
 	KeyOrder                  string                 `json:"key_order" yaml:"key_order"`                               // "sequential" (default, non-Codex) | "random" | "smart" (default for preset: codex)
 	RetryBackoff              string                 `json:"retry_backoff,omitempty" yaml:"retry_backoff,omitempty"`   // "exponential" (default) | "fixed" | "none"
 	RetryDelayMS              *int                   `json:"retry_delay_ms,omitempty" yaml:"retry_delay_ms,omitempty"` // millisecond delay for retry backoff; nil = omitted, 0 = explicit default
-	Compress                  bool                   `json:"compress,omitempty" yaml:"compress,omitempty"`             // enable gzip request compression for this provider
+	Compress                  string                 `json:"compress,omitempty" yaml:"compress,omitempty"`             // upstream request body compression encoding: "" (off) | "gzip" | "zstd"
 }
+
+// Request compression encodings for ProviderConfig.Compress. An empty string
+// disables upstream request body compression.
+const (
+	RequestCompressionGzip = "gzip"
+	RequestCompressionZstd = "zstd"
+)
 
 // ModelModalities declares which input modalities a model supports.
 type ModelModalities struct {
@@ -1648,11 +1655,14 @@ func collectConfigIssues(data []byte, cfg *Config) []string {
 	return append(issues, collectSemanticIssues(cfg)...)
 }
 
-// collectProviderIssues returns the retry and key-selection problems for one
-// provider config.
+// collectProviderIssues returns the retry, compression, and key-selection
+// problems for one provider config.
 func collectProviderIssues(providerName string, cfg *ProviderConfig) []string {
 	var issues []string
 	if err := ValidateProviderRetry(providerName, *cfg); err != nil {
+		issues = append(issues, err.Error())
+	}
+	if err := ValidateProviderCompression(providerName, *cfg); err != nil {
 		issues = append(issues, err.Error())
 	}
 	if err := ValidateProviderKeySelection(providerName, *cfg); err != nil {
@@ -1679,6 +1689,9 @@ func resetInvalidProviderFields(cfg ProviderConfig) ProviderConfig {
 	}
 	if !validKeyOrder(cfg.KeyOrder, cfg.Preset) {
 		cfg.KeyOrder = ""
+	}
+	if !validRequestCompression(cfg.Compress) {
+		cfg.Compress = ""
 	}
 	return cfg
 }

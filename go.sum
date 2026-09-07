@@ -91,6 +91,8 @@ github.com/keakon/ultraviolet v0.0.1-fork.4 h1:0oA5vST4k6Bl9rKajjj2nMpQXxqKkqVQl
 github.com/keakon/ultraviolet v0.0.1-fork.4/go.mod h1:iuYlFEcftBeT5Cc/uPLHgJ0ucPUY4guq8JqcRsi/XYE=
 github.com/keakon/x/powernap v0.1.5-fork.1 h1:lLtdZ0esEtcVqulf5unB9NCRUT+Z5Cxv2+SCeY56x+k=
 github.com/keakon/x/powernap v0.1.5-fork.1/go.mod h1:w8nObTAIcIPJI/msiOXCFs6utx3yuLVl7lm0oa2/DAY=
+github.com/klauspost/compress v1.20.0 h1:a3C1ke2ohxFymNlb2HWAHjDeKCI90scRskErZkR0ezA=
+github.com/klauspost/compress v1.20.0/go.mod h1:LUdAzn7YLVvxLpc7y3V1m40wESHTgc1422pwwBSKYuI=
 github.com/klauspost/cpuid/v2 v2.4.0 h1:S6Hrbc7+ywsr0r+RLapfGBHfyefhCTwEh3A0tV913Dw=
 github.com/klauspost/cpuid/v2 v2.4.0/go.mod h1:19jmZ9mjzoF//ddRSUsv0zfBTJWh3QJh9FNxZTMrGxU=
 github.com/kr/pretty v0.3.1 h1:flRD4NNwYAUpkphVc1HcthR4KEIFJ65n8Mw5qdRn3LE=

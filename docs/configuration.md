@@ -769,19 +769,33 @@ Common uses include:
 
 ## Provider request compression
 
-Provider-level `compress` controls gzip compression for upstream request bodies.
-It is different from context management (compaction / reduction): it only changes HTTP request transfer
-encoding and does not summarize or remove conversation history.
+Provider-level `compress` selects the encoding for compressed upstream request
+bodies: `gzip` or `zstd` (`zstd` is the codec the Codex client uses for
+codex-backend request bodies). It is different from context management
+(compaction / reduction): it only changes HTTP request transfer encoding and
+does not summarize or remove conversation history.
 
 ```yaml
 providers:
   openai:
-    compress: true
+    compress: gzip
+  codex:
+    preset: codex
+    compress: zstd   # codex-backend accepts zstd request bodies
 ```
 
-When enabled, Chord gzip-compresses the request body only if compression reduces
-the payload size; otherwise it sends the request uncompressed. Leave this unset
-unless your provider or gateway benefits from compressed request bodies.
+Chord compresses the request body only if compression reduces the payload
+size; otherwise it sends the request uncompressed. Compression failures are
+logged and the request is sent uncompressed too. The response direction is
+unaffected: Chord still advertises only `gzip` responses and decodes them
+itself. Leave `compress` unset unless your provider or gateway is known to
+accept compressed request bodies — the official Codex backend and
+`api.anthropic.com` do (Anthropic accepts `gzip`, not `zstd`), most
+OpenAI-compatible gateways do not.
+
+The pre-1.0 boolean form (`compress: true`) is no longer accepted: it is
+ignored (compression stays off) and `chord doctor config` reports it. Set
+`compress: gzip` to restore the old behavior.
 
 Provider/model requests identify the client with `User-Agent: chord/<version>` by default. Set provider-level `user_agent` only when a provider or gateway requires a specific value:
 
@@ -1356,7 +1370,7 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | `key_order`    | string | `sequential` (non-Codex default) / `random` / `smart` (Codex only). Controls how Chord chooses among selectable keys.                                   |
 | `retry_backoff`| string | `exponential` (default) / `fixed` / `none`. Controls generated delay between complete rounds and, when explicitly set, ordinary HTTP 429 key cooldown. Explicit settings replace `Retry-After` for ordinary 429s; confirmed quota resets and hard credential states still win. |
 | `retry_delay_ms`| int   | Base/fixed round and ordinary-429 delay in milliseconds, from `0` through `60000`; `0` / omitted defaults to 1000ms. Setting the field—including explicit `0`—is an override even when `retry_backoff` is omitted. Ignored for `none`. Out-of-range values are logged and fall back to the default instead of failing startup. |
-| `compress`     | bool   | gzip request bodies when compression saves bytes. Off by default.                                                                                       |
+| `compress`     | string | Upstream request body compression encoding: `gzip` or `zstd`; unset = off. Applies only when compression shrinks the payload. The boolean `compress: true` form is gone — it is ignored and reported by `chord doctor config` (migrate to `compress: gzip`). |
 | `response_header_timeout` | int | Timeout in seconds from starting a streaming HTTP request until response headers arrive, including connection setup and request-body upload. `0` / omitted uses the built-in default; healthy streams are bounded by `stream_idle_timeout`, not a total request timer. |
 | `stream_idle_timeout` | int | Stream idle timeout in seconds for this provider. `0` / omitted uses built-in SSE/WebSocket idle defaults. |
 | `websocket_handshake_timeout` | int | Responses WebSocket handshake timeout in seconds. `0` / omitted uses the built-in default. |

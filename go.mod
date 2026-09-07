@@ -21,6 +21,7 @@ require (
 	github.com/keakon/golog v0.4.1
 	github.com/keakon/ultraviolet v0.0.1-fork.4
 	github.com/keakon/x/powernap v0.1.5-fork.1
+	github.com/klauspost/compress v1.20.0
 	github.com/mackee/go-readability v0.3.1
 	github.com/mattn/go-runewidth v0.0.28
 	github.com/muesli/cancelreader v0.2.2

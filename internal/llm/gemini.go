@@ -255,7 +255,7 @@ func (g *GeminiProvider) CompleteStream(
 	req.Header.Set("x-goog-api-key", apiKey)
 	setProviderLLMUserAgent(req.Header, g.provider)
 
-	req, _ = compressRequestBody(req, bodyBytes, g.provider.CompressEnabled())
+	req, _ = compressRequestBody(req, bodyBytes, g.provider.RequestCompression())
 	applyRequestHeaderOverrides(req.Header, overrides)
 
 	log.Debugf("gemini request model=%v max_tokens=%v messages=%v tools=%v", model, maxTokens, len(messages), len(tools))
