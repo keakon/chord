@@ -258,9 +258,12 @@ func orderSidebarTaskTree(entries []SidebarEntry) []SidebarEntry {
 
 // sidebarStatusPriority returns a sort key for agent status strings.
 // Lower values sort first (more active agents appear before quieter ones).
+// The main agent is forced to the top of the list elsewhere (Sidebar.Update
+// keeps entries[0] for it) and never passes through this sort, so its own
+// status does not affect ordering.
 func sidebarStatusPriority(status string) int {
 	switch status {
-	case "streaming", "executing":
+	case "streaming", "executing", "running":
 		return 0
 	case "connecting", "waiting_headers", "waiting_token":
 		return 1
@@ -272,10 +275,12 @@ func sidebarStatusPriority(status string) int {
 		return 4
 	case "done", "completed":
 		return 5
-	case "cancelled":
-		return 5
-	default:
+	case "cancelled", "error", "failed":
 		return 6
+	default:
+		// Unknown states sink to the bottom rather than floating above
+		// running workers.
+		return 7
 	}
 }
 

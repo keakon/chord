@@ -108,6 +108,7 @@
 ### 修复
 
 - 侧边栏的 `AGENTS` 区块不再把长列表折叠成一行 `+N more`：info panel 本身支持滚动，所以侧边栏跟踪到的每个 agent 都会渲染出来、滚动即可查看。此前 agent 超过 10 个时尾部会被整个丢弃，一旦排在前面的已完成条目足够多，仍在运行的 worker 就可能被隐藏起来。agent 数量在上游由 `delegation.max_children` 约束，因此展开后的列表仍在面板滚动可覆盖的范围内。
+- 侧边栏 `AGENTS` 列表现在会把正在执行的 SubAgent 排到已完成和等待中的 agent 之前。`sidebarStatusPriority` 之前漏掉了 `"running"` 状态，导致真正在干活的 worker 掉进默认（最低）桶，反而排在已完成 agent **之下**——与「活跃 worker 优先」正好相反。现在 `running` 与 `streaming`/`executing` 同处最高优先级，`error`/`failed` 与 `cancelled` 一起固定在最末；main agent 仍不受自身状态影响、永远排在列表首位。
 - Responses 服务商重新发送工具描述。此前每个 JSON function tool 只声明了名字与参数 schema，整层「每个工具自己的使用规则」在 OpenAI Responses 与 Codex OAuth 传输上被静默丢弃——`todo_write` 的使用时机、`done` 要求的报告结构、`read`/`shell`/`compact_context` 的语义，以及所有 MCP 工具的唯一说明，默认配置下约 17 KB——而 Anthropic 与 Chat Completions 服务商一直正常携带。因此 loop 模式里「按其工具描述中的报告结构」这类指令，指向的是模型根本没收到的文本。freeform `apply_patch` custom tool 仍使用它自己的 Codex 原文描述。由于声明的工具面发生变化，这些服务商上已有的 prompt cache 会失效一次，随后重新填充。
 - freeform `apply_patch` custom tool 不再强制 Responses 请求使用 `parallel_tool_calls: false`，gpt-5 及之后的模型恢复文档所述的 `true` 默认值。该字段限制的是一次响应最多能携带多少个工具调用，而这正是提示词要求模型对独立只读查询做批量输出的前提；这些调用之后是否真的并发执行，由本地工具管线决定，它本就会串行化有依赖和有副作用的调用。若某个网关拒绝这一组合，仍可在服务商、模型或变体上显式配置 `parallel_tool_calls: false`。Codex 压缩请求在未配置时依旧省略该字段。
 - 提示词、工具描述与运行期指令现在统一按工具的注册名引用工具（`` `done` ``、`` `todo_write` ``、`` `delegate` ``、`` `notify` ``、`` `complete` ``），不再使用 `Done`、`TodoWrite` 这类 PascalCase 写法。工具名查找区分大小写，模型照抄提示词里的拼写可能发出运行时无法识别的调用。用于解析而非调用的结构化前缀（`Done rejected:`）与面向用户的界面文案保持不变。

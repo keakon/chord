@@ -469,3 +469,43 @@ func TestSidebarTaskTreeKeepsMalformedOwnerGraphVisible(t *testing.T) {
 		t.Fatalf("sidebar agents = %d, want all 4 visible: %#v", len(sidebar.agents), sidebar.agents)
 	}
 }
+
+// "running" was missing from sidebarStatusPriority, so a live SubAgent fell to
+// the default bucket (below completed) instead of the top. It must sort ahead
+// of waiting and completed agents. The main agent stays first regardless.
+func TestSidebarOrdersRunningAgentBeforeCompleted(t *testing.T) {
+	sidebar := NewSidebar(DefaultTheme())
+	sidebar.Update([]agent.SubAgentInfo{
+		{InstanceID: "agent-done", State: "completed"},
+		{InstanceID: "agent-wait", State: "waiting_main"},
+		{InstanceID: "agent-run", State: "running"},
+	}, "main", "builder")
+
+	if sidebar.Agents()[0].ID != "main" {
+		t.Fatalf("main must stay first even when idle; got %q", sidebar.Agents()[0].ID)
+	}
+	order := make([]string, 0, len(sidebar.Agents()))
+	for _, e := range sidebar.Agents() {
+		if e.ID == "main" {
+			continue
+		}
+		order = append(order, e.ID)
+	}
+	runIdx, waitIdx, doneIdx := -1, -1, -1
+	for i, id := range order {
+		switch id {
+		case "agent-run":
+			runIdx = i
+		case "agent-wait":
+			waitIdx = i
+		case "agent-done":
+			doneIdx = i
+		}
+	}
+	if runIdx < 0 || waitIdx < 0 || doneIdx < 0 {
+		t.Fatalf("expected agents missing from order %#v", order)
+	}
+	if runIdx > waitIdx || runIdx > doneIdx {
+		t.Fatalf("running agent must sort before waiting/completed; order=%#v", order)
+	}
+}
