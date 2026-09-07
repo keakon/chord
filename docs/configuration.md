@@ -1025,6 +1025,7 @@ Most users should keep the built-in defaults. Configure these limits when a prov
 orchestration:
   max_live_runtimes: 10
   max_borrowed_runtimes: 1
+  max_bypass_runtimes: 4
   max_active_llm_requests: 10
   provider_max_active_requests:
     openai: 6
@@ -1036,12 +1037,16 @@ orchestration:
   mailbox_memory_messages: 512
   mailbox_memory_bytes: 8388608       # 8 MiB
   subagent_compact_usage: 0.8
+  waiting_main_expiry_turns: 5
+  waiting_main_min_wait_sec: 300      # 5 minutes
+  waiting_main_max_wait_sec: 3600     # 1 hour
 ```
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `max_live_runtimes` | `10` | Maximum normally admitted Agent runtimes. Further normal runtime acquisition waits until a slot is released. This is a soft process-local limit: a wake reactivation may use the bounded borrowed pool or, only when both pools are exhausted, an uncounted emergency bypass to avoid deadlocking the event loop. |
-| `max_borrowed_runtimes` | `1` | Additional temporary runtime admissions used to wake orchestration work that must make progress, such as a parent resuming after a child event. Borrowing is bounded separately; emergency bypasses are observable in `RuntimeBypassActive` / `RuntimeBypassPeak` orchestration stats. |
+| `max_live_runtimes` | `10` | Maximum normally admitted Agent runtimes. Further normal runtime acquisition waits until a slot is released. Wake reactivation may use the separately bounded borrowed or bypass pools when ordinary capacity is exhausted. |
+| `max_borrowed_runtimes` | `1` | Additional temporary runtime admissions used to wake orchestration work that must make progress, such as a parent resuming after a child event. Borrowing is bounded separately from normal runtime slots. |
+| `max_bypass_runtimes` | `4` | Maximum wake reactivations that may bypass both the normal and borrowed runtime pools. This separate safety pool prevents the event loop from deadlocking while keeping the escape hatch bounded; when it is exhausted, the wake is refused and the durable message remains queued. |
 | `max_active_llm_requests` | `10` | Process-wide maximum concurrent LLM requests across orchestrated agents. Eligible requests wait when the limit is full. |
 | `provider_max_active_requests` | none | Optional concurrent-request limits keyed by provider name, for example `openai`. A request must satisfy this limit and the process-wide limit. |
 | `model_max_active_requests` | none | Optional concurrent-request limits keyed by `provider/model`. Inline variants such as `@high` are ignored for matching, so `openai/gpt-5.5` covers all variants of that model. |
@@ -1050,6 +1055,9 @@ orchestration:
 | `mailbox_memory_messages` | `512` | Maximum SubAgent mailbox messages retained in memory across the MainAgent inbox and owner-specific mailboxes. |
 | `mailbox_memory_bytes` | `8388608` | Maximum estimated bytes retained by those in-memory mailboxes. Durable non-progress messages that exceed the memory budget are referenced through the on-disk mailbox spool; progress updates may be coalesced or omitted from memory. |
 | `subagent_compact_usage` | `0.8` | Proactively compress a SubAgent's context when estimated usage reaches this fraction of its usable input budget. The default matches `context.compaction.threshold`; this separate setting remains available because SubAgents use local token estimates and a lightweight sliding-window checkpoint rather than MainAgent's usage-driven compaction pipeline. Must be greater than `0` and less than `1`. |
+| `waiting_main_expiry_turns` | `5` | User-turn budget for a SubAgent parked while waiting for its owner. The turn budget expires only after `waiting_main_min_wait_sec` has also elapsed; `waiting_main_max_wait_sec` still expires the wait unconditionally. |
+| `waiting_main_min_wait_sec` | `300` | Minimum wall-clock wait, in seconds, before the turn budget can expire a `waiting_main` task. |
+| `waiting_main_max_wait_sec` | `3600` | Maximum wall-clock wait, in seconds, after which a `waiting_main` task expires regardless of user-turn activity. The effective value is never below `waiting_main_min_wait_sec`. |
 
 ### Precedence and value rules
 
@@ -1062,9 +1070,11 @@ orchestration:
 ### Tuning guidance
 
 - To comply with an API quota, set the provider or model limit first; keep `max_active_llm_requests` as the overall safety ceiling.
+- Keep `max_bypass_runtimes` small and positive. It exists only to let wake reactivations make progress when normal and borrowed capacity cannot be released by the event loop; it is not ordinary throughput capacity.
 - On a memory-constrained host, reduce mailbox byte/message limits gradually. Overflow uses durable storage, so lower limits trade memory for additional disk I/O.
 - Reduce SubAgent queue limits only when producers can handle enqueue rejection. These queues do not spill to disk, and overly small limits can interrupt parent/child coordination.
 - Keep `max_borrowed_runtimes` small but positive. Borrowed slots exist to break orchestration progress stalls, not to increase ordinary throughput.
+- A `waiting_main` task expires when its turn budget and minimum wait are both satisfied, or when the maximum wait is reached. Increase the turn budget or minimum wait when owners need more time to respond; increase the maximum only when parked tasks should remain recoverable for longer.
 - Lowering `subagent_compact_usage` reduces context-overflow risk but causes earlier and more frequent compression. Raising it reduces compression work but leaves less recovery headroom.
 - Increasing concurrency is not automatically faster: provider throttling, model latency, local memory pressure, and workspace lease contention can reduce effective throughput. Change limits using observed queue/rejection metrics and end-to-end latency rather than CPU count alone.
 
@@ -1188,7 +1198,7 @@ Common fields include:
 - `variant`: default variant when a model ref does not include `@variant`.
 - `permission`: per-tool permission policy for this agent. Permissions live directly in agent config files; when the confirmation popup remembers a rule, `project` updates the current project's `.chord/agents/<role>.yaml`, and `global` updates the user config directory's `agents/<role>.yaml` (default: `~/.config/chord/agents/<role>.yaml`). Chord no longer writes a separate permissions directory. Some orchestration tools have special semantics (`delegate` patterns match `agent_type` and also gate delegated-work controls such as `cancel`; `handoff` and `done` treat `allow` and `ask` as workflow-available states with Chord's own confirmation gates). See [Permissions & Safety](./permissions-and-safety.md#special-permission-semantics) before relying on fine-grained control-tool rules.
 - `mcp`: additional auto-start MCP servers scoped to this agent. Agent MCP is additive: a server name already present in the effective global/project `mcp` config is a startup error. Agent-scoped servers cannot use `manual: true` because runtime MCP controls manage the top-level server surface; configure a manual server at the project/global level instead. Remove an agent entry to inherit a top-level server, rename it for a separate private server, or override the top-level server in `.chord/config.yaml` for the whole project. Different agents may reuse the same private server name without sharing the connection unless they are instances of the same agent definition.
-- `delegation`: limits such as `max_children`, `max_depth`, and `child_join`.
+- `delegation`: limits such as `max_children`, `max_depth`, and `child_join`. `max_children` defaults to `10` and cannot exceed `64`; `max_depth` defaults to `1` and cannot exceed `8`. Values above those ceilings or negative values are configuration errors.
 - `prompt` / `system_prompt`: system prompt for plain YAML files.
 
 Example:

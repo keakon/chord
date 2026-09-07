@@ -892,6 +892,7 @@ memory:
 orchestration:
   max_live_runtimes: 10
   max_borrowed_runtimes: 1
+  max_bypass_runtimes: 4
   max_active_llm_requests: 10
   provider_max_active_requests:
     openai: 6
@@ -903,12 +904,16 @@ orchestration:
   mailbox_memory_messages: 512
   mailbox_memory_bytes: 8388608       # 8 MiB
   subagent_compact_usage: 0.8
+  waiting_main_expiry_turns: 5
+  waiting_main_min_wait_sec: 300      # 5 分钟
+  waiting_main_max_wait_sec: 3600     # 1 小时
 ```
 
 | 字段 | 默认值 | 说明 |
 |------|--------|------|
-| `max_live_runtimes` | `10` | 正常准入的 Agent runtime 最大数量。达到上限后，后续普通 runtime 获取会等待已有槽位释放。这是进程内软上限：唤醒重激活可使用有界 borrowed pool；仅当两个池都耗尽时，才使用不计数的紧急 bypass，避免 event loop 死锁。 |
-| `max_borrowed_runtimes` | `1` | 为必须继续推进的编排工作临时增加的 runtime 准入量，例如子 Agent 事件到达后恢复父 Agent。借用额度单独设限；紧急 bypass 可通过编排统计中的 `RuntimeBypassActive` / `RuntimeBypassPeak` 观察。 |
+| `max_live_runtimes` | `10` | 正常准入的 Agent runtime 最大数量。达到上限后，后续普通 runtime 获取会等待已有槽位释放。唤醒重激活在普通容量耗尽时，还可以使用单独设限的 borrowed pool 或 bypass pool。 |
+| `max_borrowed_runtimes` | `1` | 为必须继续推进的编排工作临时增加的 runtime 准入量，例如子 Agent 事件到达后恢复父 Agent。借用额度与正常 runtime 槽位分开设限。 |
+| `max_bypass_runtimes` | `4` | 唤醒重激活在正常 runtime 池和 borrowed pool 都耗尽时可以使用的最大 bypass 数量。这个独立的安全池既避免 event loop 因等待自身释放容量而死锁，也让应急通道保持有界；达到上限后，唤醒会被拒绝，持久化消息留在队列中等待后续处理。 |
 | `max_active_llm_requests` | `10` | 进程内所有编排 Agent 的 LLM 请求总并发上限。达到上限后，符合条件的请求等待。 |
 | `provider_max_active_requests` | 无 | 可选的 provider 级请求并发上限，key 如 `openai`。请求必须同时满足该限制和进程总限制。 |
 | `model_max_active_requests` | 无 | 可选的 `provider/model` 级请求并发上限。匹配时忽略 `@high` 等 inline variant，因此 `openai/gpt-5.5` 覆盖该模型的所有 variant。 |
@@ -917,6 +922,9 @@ orchestration:
 | `mailbox_memory_messages` | `512` | MainAgent inbox 和按 owner 分类的 mailbox 在内存中保留的 SubAgent 消息总数上限。 |
 | `mailbox_memory_bytes` | `8388608` | 上述内存 mailbox 的估算总字节数上限。超过内存预算的持久化非 progress 消息会通过磁盘 mailbox spool 引用；progress 更新可能在内存中合并或省略。 |
 | `subagent_compact_usage` | `0.8` | 当 SubAgent 的估算上下文用量达到可用输入预算的这一比例时，主动压缩其上下文。默认值与 `context.compaction.threshold` 一致；之所以保留单独配置，是因为 SubAgent 使用本地 token 估算和轻量滑动窗口 checkpoint，而不是 MainAgent 的 usage 驱动压缩管线。有效值必须严格大于 `0` 且小于 `1`。 |
+| `waiting_main_expiry_turns` | `5` | SubAgent 停在 `waiting_main`、等待 owner 回复时允许经过的用户回合数。只有同时满足 `waiting_main_min_wait_sec` 后，这条回合数限制才会让任务过期；`waiting_main_max_wait_sec` 仍会无条件结束等待。 |
+| `waiting_main_min_wait_sec` | `300` | 回合数限制可以让 `waiting_main` 任务过期前必须经过的最短墙钟时间，单位为秒。 |
+| `waiting_main_max_wait_sec` | `3600` | `waiting_main` 任务最多等待的墙钟时间，单位为秒。达到后不论用户回合数如何都会过期；实际值不会小于 `waiting_main_min_wait_sec`。 |
 
 ### 优先级和值规则
 
@@ -929,9 +937,11 @@ orchestration:
 ### 调优建议
 
 - 为满足 API 配额，优先设置 provider 或 model 限制，并将 `max_active_llm_requests` 保留为整体安全上限。
+- `max_bypass_runtimes` 应保持较小的正数。它只用于普通槽位和 borrowed 容量都无法由 event loop 及时释放时，让唤醒重激活继续推进，不是普通吞吐量配额。
 - 在内存有限的主机上，逐步降低 mailbox 消息数/字节数限制。overflow 使用持久化存储，因此更低的内存限制会以更多磁盘 I/O 为代价。
 - 只有当消息生产方能够处理入队拒绝时，才降低 SubAgent 队列限制。这些队列不会溢写到磁盘，限制过小可能中断父子 Agent 协作。
 - `max_borrowed_runtimes` 应保持较小的正数。借用槽位用于解除编排推进停滞，不用于提高普通吞吐量。
+- `waiting_main` 任务会在「回合数限制与最短等待时间都满足」或「达到最长等待时间」时过期。owner 需要更多时间回复时，可提高回合数限制或最短等待时间；只有希望任务更久保持可恢复状态时，才提高最长等待时间。
 - 降低 `subagent_compact_usage` 可减少上下文溢出风险，但会更早、更频繁地压缩；提高它可减少压缩开销，但会缩小恢复余量。
 - 提高并发不一定更快：provider 限流、模型延迟、本地内存压力和 workspace lease 竞争都可能降低实际吞吐。应依据排队/拒绝指标和端到端延迟调参，而不是只看 CPU 数量。
 
@@ -1053,7 +1063,7 @@ prompt: |
 - `variant`：model ref 未写 `@variant` 时的默认 variant。
 - `permission`：该 agent 的逐工具权限策略。权限直接保存在 agent 配置文件中；确认弹窗里选择“记住规则”时，`project` 会更新当前项目的 `.chord/agents/<role>.yaml`，`global` 会更新用户配置目录的 `agents/<role>.yaml`（默认 `~/.config/chord/agents/<role>.yaml`），不会写入单独的 permissions 文件夹。部分编排工具有特殊语义（`delegate` 的 pattern 会匹配 `agent_type`，并联动控制委派工作相关能力，如 `cancel`；`handoff` 和 `done` 的 `allow` / `ask` 都表示工作流可用，并由 Chord 自己的确认 gate 控制关键节点）。依赖精细控制工具规则前，请先阅读[权限与安全](./permissions-and-safety_CN.md#特殊权限语义)。
 - `mcp`：作用域限定在该 agent 的增量、自动启动 MCP 配置。Agent MCP 不能与最终生效的全局/项目 `mcp` server 重名，否则启动时报错；也不能设置 `manual: true`，因为运行时 MCP 控制只管理顶层 server，如需手动启停请改在项目/全局配置中声明。要继承顶层 server，请删除 agent 中的重复项；要使用独立私有 server，请改名；要为整个项目替换顶层 server，请在 `.chord/config.yaml` 中覆盖。不同 agent 可以使用相同的私有 server 名称而互不共享连接，同一 agent 定义的多个实例则会复用连接。
-- `delegation`：如 `max_children`、`max_depth`、`child_join` 等委派限制。
+- `delegation`：如 `max_children`、`max_depth`、`child_join` 等委派限制。`max_children` 默认值为 `10`，不能超过 `64`；`max_depth` 默认值为 `1`，不能超过 `8`。超过上限或使用负数会导致配置报错。
 - `prompt` / `system_prompt`：纯 YAML agent 文件中的 system prompt。
 
 示例：

@@ -60,7 +60,7 @@
 | --- | --- |
 | `done` | 携带最终 Markdown 报告申请 loop 退出。仅在 loop 运行期间挂载，因此普通会话根本看不到它，完成结果直接用 assistant 正文返回。Loop 退出仍受退出条件和本地确认门控。 |
 | `handoff` | 把计划/工作移交给另一个角色执行。 |
-| `delegate` | 启动一个委派的 SubAgent 工作流，并立即返回启动句柄（`task_id` / `agent_id`）；不会等待任务完成。拒绝它会同时禁用该角色的 `cancel` 和嵌套委派。 |
+| `delegate` | 启动一个委派的 SubAgent 工作流，并立即返回启动句柄（`task_id` / `agent_id`）；不会等待任务完成。调用必须带上 `expected_write_scope`：只做研究时设为 `read_only: true`，可能修改工作区时声明覆盖任务所需内容的最窄 `files`、`path_prefix` 或 `modules` 范围；空范围会被拒绝。拒绝 `delegate` 会同时禁用该角色的 `cancel` 和嵌套委派。 |
 | `cancel` | 取消一个被委派的 worker；前提是 `delegate` 已启用。 |
 | `complete` | SubAgent 侧：携带摘要把当前委派任务标记为完成。 |
 | `escalate` | SubAgent 侧：请求父 agent 介入，但不结束自己的任务。 |
@@ -74,6 +74,8 @@
 `delegate` 只有一个工具结果，即异步启动句柄。后续 `complete` 调用和 mailbox 更新是独立的 runtime 事件，按稳定的 `task_id` 更新已有委派任务/卡片，不会生成额外的 `delegate` 工具结果。每次 `complete` 报告都会在 owner 视图创建一张 **AGENT COMPLETE** 通知卡；worker 终止失败显示为 **AGENT BLOCKED**，并唤醒直接 owner。
 
 agent 间消息遵守请求边界：目标 busy 时，消息只入队并随其下一次 LLM 请求一并处理，不打断当前请求；目标空闲但可恢复时，Chord 会唤醒它；纯 progress 更新不会强制本来空闲的 agent 启动。mailbox 与协调状态具备持久性：父子请求/响应记录、peer 路由与排队载荷都能跨 compaction 与重启存活，投递跨任务水合保持幂等。`notify_peer` 只会发送给同一个直接 owner 下的存活兄弟任务。
+
+委派的写入范围既是并发声明，也是执行边界。只读工作必须设置 `read_only: true`；可能修改工作区时，至少要声明一个文件、路径前缀或模块。带范围的 worker 不能执行任意 Shell 命令，嵌套委派也不能声明比父任务更宽的范围。只声明任务确实需要的路径，这样互不相关的委派工作才能并行。
 
 委派状态以 runtime 为准，而不是以模型输出为准。worker 未能调用协调工具（`complete`、`escalate` 或 `notify`）时，会获得一次有界的后续请求；若仍然无法完成，或 provider/模型重试耗尽，Chord 会将其标记为 failed、记录 `risk_alert` 并唤醒 owner。Rehydrate 后的 runtime 可能获得新的 `agent_id`；后续协调应使用稳定的委派 `task_id`。
 

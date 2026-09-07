@@ -60,7 +60,7 @@ These tools control agent workflows rather than local side effects, so YOLO mode
 | --- | --- |
 | `done` | Request loop exit with a final Markdown report. Mounted only while a loop is running, so ordinary sessions never see it and return their completion directly as assistant text. Loop exits remain gated by exit conditions and local confirmation. |
 | `handoff` | Transfer a plan/work to another role for execution. |
-| `delegate` | Start a delegated SubAgent workstream and return its startup handle (`task_id` / `agent_id`) immediately. It does not wait for completion. Denying it also disables `cancel` and nested delegation for that role. |
+| `delegate` | Start a delegated SubAgent workstream and return its startup handle (`task_id` / `agent_id`) immediately. It does not wait for completion. The call must include an `expected_write_scope`: use `read_only: true` for research-only work, or declare the narrowest `files`, `path_prefix`, or `modules` scope that covers the work. An empty scope is rejected. Denying `delegate` also disables `cancel` and nested delegation for that role. |
 | `cancel` | Cancel a delegated worker; requires `delegate` to be enabled. |
 | `complete` | SubAgent-side: mark the current delegated task as complete with a summary. |
 | `escalate` | SubAgent-side: request parent-agent intervention without ending the task. |
@@ -74,6 +74,8 @@ These tools control agent workflows rather than local side effects, so YOLO mode
 `delegate` has one tool result: the asynchronous startup handle. Later `complete` calls and mailbox updates are separate runtime events that update the existing delegated task/card by stable `task_id`; they never produce additional `delegate` tool results. Each `complete` report raises an owner-visible **AGENT COMPLETE** notification card, and terminal worker failures are shown as **AGENT BLOCKED** and wake the direct owner.
 
 Agent-to-agent messages respect request boundaries: if the target is busy, the message is queued and included in its next LLM request instead of interrupting the active one; if the target is idle but resumable, Chord wakes it; progress-only updates never force an otherwise idle agent to run. Mailbox and coordination state is durable: parent-child request/response records, peer routing, and queued payloads survive compaction and restart, and delivery stays idempotent across task rehydration. `notify_peer` targets only live sibling tasks with the same direct owner.
+
+The delegated write scope is both a concurrency declaration and an execution boundary. Read-only work must set `read_only: true`; work that can modify the workspace must name at least one file, path prefix, or module. A scoped worker cannot use arbitrary Shell commands, and nested delegation cannot declare a scope broader than its parent's scope. Declare only the paths the task actually needs so unrelated delegated work can run in parallel.
 
 The runtime, not the model, is the source of truth for delegation state. A worker that fails to emit a coordination tool (`complete`, `escalate`, or `notify`) receives one bounded follow-up request; if it still cannot comply, or provider/model retries are exhausted, Chord marks it failed, records a `risk_alert`, and wakes the owner. A rehydrated runtime may receive a new `agent_id`; coordination should continue through the stable delegated `task_id`.
 
