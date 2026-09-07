@@ -93,6 +93,38 @@ func TestCollapsedToolCardsKeepTheOutcomeOnOneLine(t *testing.T) {
 	}
 }
 
+// TestCollapsedReadErrorWithSuggestionsShowsFullBody pins the multi-line outcome
+// rule: a "file not found" error that carries a "Did you mean:" suggestion list
+// must render its whole body even when the card is collapsed. The old one-row
+// summary joined "file not found:" with "Did you mean:" and truncated the rest,
+// hiding the very path the user needed — so collapses are no longer a guessing
+// game. Shell-style single-line errors still fold to one row (see
+// TestCollapsedToolCardsKeepTheOutcomeOnOneLine).
+func TestCollapsedReadErrorWithSuggestionsShowsFullBody(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := outcomeCardFixture(tools.NameRead, outcomeCardArgs[tools.NameRead],
+		"file not found: internal/tools/ignore.go\nDid you mean:\n- internal/tools/ignore.go",
+		agent.ToolResultStatusError)
+	block.Collapsed = true
+
+	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	for _, want := range []string{
+		"↳ Error:",
+		"file not found: internal/tools/ignore.go",
+		"Did you mean:",
+		"- internal/tools/ignore.go",
+	} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("expected collapsed read error to contain %q, got:\n%s", want, plain)
+		}
+	}
+	// The prompt header must not be collapsed into the cause on one row; the
+	// suggestion list stays on its own lines so the suggested path is visible.
+	if strings.Contains(plain, "· Did you mean:") {
+		t.Fatalf("expected the collapsed read error to keep the body on separate lines, got:\n%s", plain)
+	}
+}
+
 // TestCollapsedToggleableCardShowsDisclosureMarker pins the marker rule: the
 // marker states what the toggle can do, so a collapsed card that opens into a
 // fuller body carries ▸ even when the collapsed body already fits.

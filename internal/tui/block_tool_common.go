@@ -342,16 +342,52 @@ func appendToolOutcomeBody(result *[]string, kind toolOutcomeKind, content strin
 		return
 	}
 	if !expanded {
-		width := max(contentWidth-len("↳ "+label+": "), 12)
-		if oneLine := truncateOneLine(toolCollapsedSummaryText(body), width); oneLine != "" {
-			*result = append(*result, style.Render("  ↳ "+label+": "+oneLine))
+		// A single logical line (a rejection reason, "exit code 1", a short
+		// permission denial) folds to one compact summary row. A multi-line
+		// outcome — most often a "file not found" error followed by a
+		// "Did you mean:" suggestion list — must keep its whole body when
+		// collapsed: toolCollapsedSummaryText joins the prompt header with the
+		// cause into one row and truncates the rest, hiding exactly the
+		// suggestion the user needs to act on. Expanding costs only the error's
+		// own (short) length, so collapsed cards no longer force a toggle just
+		// to read why a call failed.
+		if !toolOutcomeBodyIsMultiLine(body) {
+			width := max(contentWidth-len("↳ "+label+": "), 12)
+			if oneLine := truncateOneLine(toolCollapsedSummaryText(body), width); oneLine != "" {
+				*result = append(*result, style.Render("  ↳ "+label+": "+oneLine))
+			}
+			return
 		}
-		return
 	}
 	*result = append(*result, style.Render("  ↳ "+label+":"))
 	for _, line := range wrapText(body, contentWidth) {
 		*result = append(*result, style.Render("    "+line))
 	}
+}
+
+// toolOutcomeBodyIsMultiLine reports whether an outcome body carries more than
+// one logical line (blank lines ignored), so a collapsed card can choose
+// between a one-row summary and the full body. A single long logical line still
+// folds to one truncated row; only genuinely multi-line outcomes (e.g. a "Did
+// you mean:" suggestion list) expand in place.
+func toolOutcomeBodyIsMultiLine(s string) bool {
+	trimmed := strings.TrimSpace(s)
+	if trimmed == "" {
+		return false
+	}
+	trimmed = strings.ReplaceAll(trimmed, "\r\n", "\n")
+	trimmed = strings.ReplaceAll(trimmed, "\r", "\n")
+	count := 0
+	for _, line := range strings.Split(trimmed, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		count++
+		if count > 1 {
+			return true
+		}
+	}
+	return false
 }
 
 // appendToolOutcome renders the shared envelope for a finished card using the
