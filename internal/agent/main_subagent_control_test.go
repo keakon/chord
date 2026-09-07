@@ -3929,3 +3929,96 @@ func TestWaitingMainExpiryPersistsRiskAlertMailboxBeforeTerminalCommit(t *testin
 		t.Fatalf("task record LastMailboxID = %q, want expiry risk_alert %q (mailbox must be persisted before the terminal commit)", rec.LastMailboxID, alert.MessageID)
 	}
 }
+
+// A worker that failed still holds the transcript that produced the failure, so
+// telling it what went wrong resumes that run instead of making a fresh worker
+// rediscover the whole context. This is the path a wrap-up rejection needs: the
+// deliverable is already in that worker's history.
+func TestSendMessageToFailedTaskRehydratesWorkerForAnotherAttempt(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.SetAgentConfigs(map[string]*config.AgentConfig{
+		"fixer": {
+			Name:   "fixer",
+			Mode:   "subagent",
+			Models: map[string][]string{"default": {"test/test-model"}},
+		},
+	})
+	a.SetLLMFactory(func(systemPrompt string, agentModels []string, variant string) *llm.Client {
+		return newTestLLMClient()
+	})
+	sub := newControllableTestSubAgent(t, a, "adhoc-failed-resume")
+	sub.agentDefName = "fixer"
+	sub.taskDesc = "Fix the parser"
+	sub.writeScope = tools.WriteScope{Files: []string{"internal/parser/parse.go"}}
+	sub.ctxMgr.Append(message.Message{Role: "user", Content: "Fix the parser"})
+	if err := a.recoveryManager().PersistMessage(sub.instanceID, message.Message{Role: "user", Content: "Fix the parser"}); err != nil {
+		t.Fatalf("PersistMessage(sub): %v", err)
+	}
+	oldInstanceID := sub.instanceID
+	a.handleAgentError(Event{Type: EventAgentError, SourceID: sub.instanceID, Payload: context.DeadlineExceeded})
+
+	record := a.taskRecordByTaskID("adhoc-failed-resume")
+	if record == nil || SubAgentState(record.State) != SubAgentStateFailed {
+		t.Fatalf("record state = %#v, want a failed task", record)
+	}
+	priorAttempt := record.Attempt
+
+	handle, err := a.NotifySubAgent(context.Background(), "adhoc-failed-resume", "the wrap-up call was malformed; re-send it", "correction")
+	if err != nil {
+		t.Fatalf("NotifySubAgent on a failed task: %v", err)
+	}
+	if !handle.Rehydrated {
+		t.Fatal("failed worker should rehydrate for another attempt")
+	}
+	if handle.PreviousAgentID != oldInstanceID {
+		t.Fatalf("handle.PreviousAgentID = %q, want %q", handle.PreviousAgentID, oldInstanceID)
+	}
+
+	restored := a.subAgentByTaskID("adhoc-failed-resume")
+	if restored == nil {
+		t.Fatal("expected a live worker after rehydrating the failed task")
+	}
+	if restored.State() == SubAgentStateFailed {
+		t.Fatal("restored.State() = failed; a resumed worker must not stay terminal")
+	}
+	// The transcript that produced the failure is what makes resuming cheaper
+	// than re-delegating, so it has to come back with the worker.
+	restoredMsgs := restored.ctxMgr.Snapshot()
+	if len(restoredMsgs) == 0 || restoredMsgs[0].Content != "Fix the parser" {
+		t.Fatalf("restored transcript = %#v, want the original task history", restoredMsgs)
+	}
+	record = a.taskRecordByTaskID("adhoc-failed-resume")
+	if record.Attempt != priorAttempt+1 {
+		t.Fatalf("record.Attempt = %d, want %d (a resumed terminal task starts a new attempt)", record.Attempt, priorAttempt+1)
+	}
+	if record.LatestSettlement != nil {
+		t.Fatalf("record.LatestSettlement = %#v, want the previous attempt's settlement cleared", record.LatestSettlement)
+	}
+	if record.ExpectedWriteScope.Files[0] != "internal/parser/parse.go" {
+		t.Fatalf("rehydrated write scope = %#v, want the original file scope", record.ExpectedWriteScope)
+	}
+}
+
+// Cancellation is a decision someone made. A follow-up message must not quietly
+// reverse it, and the rejection has to point at the way forward.
+func TestSendMessageToCancelledTaskIsRejectedWithDelegateGuidance(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.setTaskRecords(map[string]*DurableTaskRecord{
+		"adhoc-cancelled": {
+			TaskID:            "adhoc-cancelled",
+			AgentDefName:      "fixer",
+			State:             string(SubAgentStateCancelled),
+			ResumePolicy:      taskResumePolicyExplicitOnly,
+			RuntimeParked:     true,
+			SettlementDurable: true,
+		},
+	})
+
+	_, err := a.NotifySubAgent(context.Background(), "adhoc-cancelled", "please continue", "follow_up")
+	if err == nil {
+		t.Fatal("NotifySubAgent on a cancelled task = nil error, want a rejection")
+	}
+	if !strings.Contains(err.Error(), "cancelled") || !strings.Contains(err.Error(), "delegate the work again") {
+		t.Fatalf("error = %q, want it to name the cancellation and point at re-delegation", err.Error())
+	}
+}

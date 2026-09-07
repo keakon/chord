@@ -271,11 +271,44 @@ func (r *DurableTaskRecord) allowsRehydrate(trigger taskResumeTrigger) bool {
 		}
 		return false
 	case taskResumeByTargetedNotify:
-		return strings.TrimSpace(r.ResumePolicy) == taskResumePolicyNotify &&
-			(state == SubAgentStateIdle || state == SubAgentStateWaitingMain || state == SubAgentStateWaitingDescendant || state == SubAgentStateCompleted)
+		switch strings.TrimSpace(r.ResumePolicy) {
+		case taskResumePolicyNotify:
+			return state == SubAgentStateIdle || state == SubAgentStateWaitingMain ||
+				state == SubAgentStateWaitingDescendant || state == SubAgentStateCompleted
+		case taskResumePolicyExplicitOnly:
+			// A targeted follow-up is the explicit act this policy waits for.
+			// It applies to a failed worker: the transcript that produced the
+			// failure is still on disk, so telling that worker what went wrong
+			// is far cheaper than making a fresh one re-derive the context —
+			// and the run that failed on its wrap-up call usually has the whole
+			// deliverable sitting in its own history. Cancelled stays excluded:
+			// someone (a user, an owner, a cascade) decided to stop that task,
+			// and a message must not quietly undo the decision.
+			return state == SubAgentStateFailed
+		}
+		return false
 	default:
 		return false
 	}
+}
+
+// stillOwnsItsDeliverable reports whether this record is where a re-delegation
+// of the same deliverable would land — the question duplicate detection asks.
+// It is deliberately narrower than allowsRehydrate: a failed task can be
+// continued by a targeted follow-up, but an owner delegating the work again is
+// making a legitimate fresh start, and rejecting that as a duplicate would
+// leave no way to retry a failure from scratch. Only work that is still live,
+// or completed under a resume policy that treats a follow-up as continuing the
+// same deliverable, keeps ownership.
+func (r *DurableTaskRecord) stillOwnsItsDeliverable() bool {
+	if r == nil {
+		return false
+	}
+	if isNonTerminalTaskState(r.State) {
+		return true
+	}
+	return strings.TrimSpace(r.ResumePolicy) == taskResumePolicyNotify &&
+		r.allowsRehydrate(taskResumeByTargetedNotify)
 }
 
 // semanticTaskKeyFallback derives a duplicate key from the task description a
@@ -454,7 +487,7 @@ func duplicateOrConflictingTaskRecord(rec *DurableTaskRecord, ownerAgentID, owne
 	if strings.TrimSpace(rec.OwnerAgentID) == strings.TrimSpace(ownerAgentID) && strings.TrimSpace(rec.OwnerTaskID) == strings.TrimSpace(ownerTaskID) && strings.TrimSpace(rec.AgentDefName) == strings.TrimSpace(agentType) {
 		keyMatched := semanticTaskKey != "" && strings.TrimSpace(rec.SemanticTaskKey) == semanticTaskKey
 		planTaskRefMatched := planTaskRef != "" && strings.TrimSpace(rec.PlanTaskRef) == planTaskRef
-		if (keyMatched || planTaskRefMatched) && (isNonTerminalTaskState(rec.State) || rec.allowsRehydrate(taskResumeByTargetedNotify)) {
+		if (keyMatched || planTaskRefMatched) && rec.stillOwnsItsDeliverable() {
 			if keyMatched && semanticKeyExplicit {
 				return taskDuplicateExplicitKey, false
 			}

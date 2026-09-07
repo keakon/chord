@@ -64,13 +64,21 @@ type AgentNotifyPayload struct {
 
 func (NotifyTool) Name() string { return NameNotify }
 
+// targetedNotifyResumeNote states which workers a targeted message can still
+// reach. A worker that finished or failed is restarted with its full transcript,
+// which is what makes "tell the worker what to fix" cheaper than delegating the
+// same work to someone who has to rediscover the context.
+const targetedNotifyResumeNote = "A worker that already finished or failed is resumed with its own history, " +
+	"so send it the correction rather than delegating the same work to a fresh worker. " +
+	"A cancelled task is not resumable; delegate again if the work should still happen."
+
 func (t *NotifyTool) Description() string {
 	switch {
 	case t.allowOwner && t.allowTarget:
 		return "Send a non-blocking update. Without target_task_id, notify your direct owner / coordination chain and continue working. " +
-			"With target_task_id, deliver a clarification, correction, or follow-up to a specific delegated worker without escalating."
+			"With target_task_id, deliver a clarification, correction, or follow-up to a specific delegated worker without escalating. " + targetedNotifyResumeNote
 	case t.allowTarget:
-		return "Send a non-blocking clarification, decision, or correction to a delegated worker identified by target_task_id."
+		return "Send a non-blocking clarification, decision, or correction to a delegated worker identified by target_task_id. " + targetedNotifyResumeNote
 	default:
 		return "Send a non-blocking progress update or intermediate result to your direct owner / coordination chain and continue working."
 	}

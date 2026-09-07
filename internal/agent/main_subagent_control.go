@@ -268,7 +268,7 @@ func (a *MainAgent) sendMessageToSubAgentWithTrigger(callerAgentID, callerTaskID
 	if err != nil {
 		return tools.TaskHandle{}, err
 	}
-	if strings.TrimSpace(record.State) == string(SubAgentStateCompleted) && !record.SettlementDurable {
+	if isTerminalSubAgentState(SubAgentState(strings.TrimSpace(record.State))) && !record.SettlementDurable {
 		record, err = a.retryTaskSettlementDurability(taskID)
 		if err != nil || !record.SettlementDurable {
 			return tools.TaskHandle{}, fmt.Errorf("task %s cannot start a new attempt until its terminal settlement is durable: %w", taskID, err)
@@ -279,6 +279,9 @@ func (a *MainAgent) sendMessageToSubAgentWithTrigger(callerAgentID, callerTaskID
 	previousAgentID := ""
 	if sub == nil {
 		if !record.allowsRehydrate(trigger) {
+			if SubAgentState(strings.TrimSpace(record.State)) == SubAgentStateCancelled {
+				return tools.TaskHandle{}, fmt.Errorf("task %s was cancelled; a message must not undo that decision — delegate the work again if it should still be done", taskID)
+			}
 			return tools.TaskHandle{}, fmt.Errorf("task %s is %s; follow-up is not allowed without a live worker", taskID, strings.TrimSpace(record.State))
 		}
 		sub, previousAgentID, rehydrated, err = a.getOrRehydrateTask(record)
@@ -597,7 +600,12 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 	sub = NewSubAgent(subCfg)
 	sub.RestoreMessages(msgs)
 	state := SubAgentState(strings.TrimSpace(record.State))
-	if state == "" || state == SubAgentStateRunning {
+	if state == "" || state == SubAgentStateRunning || isTerminalSubAgentState(state) {
+		// A terminal record only reaches rehydration through a resume trigger
+		// that already authorized a new attempt (see allowsRehydrate), and the
+		// attempt bookkeeping below clears the previous settlement. Carrying the
+		// terminal state into the fresh runtime would leave a worker that can
+		// never accept work.
 		state = SubAgentStateIdle
 	}
 	sub.setState(state, strings.TrimSpace(record.LastSummary))
