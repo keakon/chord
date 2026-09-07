@@ -12,6 +12,13 @@ import (
 const (
 	coordinationSnapshotMaxTasks        = 8
 	coordinationSnapshotSummaryMaxRunes = 160
+	// Per-list cap for the completion lists a task contributes to the
+	// coordination snapshot. One task's reported files/commands/limitations are
+	// only runtime hints on top of the terminal state, so a small bound keeps a
+	// single verbose completion from dominating the overlay token budget under
+	// the 8-task ceiling; the truncated tail stays visible through the
+	// "...N more" hint.
+	coordinationSnapshotMaxListItems    = 3
 	coordinationSnapshotStallAfter      = 10 * time.Minute
 	coordinationSnapshotRecentTaskTurns = uint64(1)
 )
@@ -26,6 +33,45 @@ func truncateCoordinationSnapshotText(s string, maxRunes int) string {
 		return s
 	}
 	return string(runes[:maxRunes]) + "..."
+}
+
+// joinCoordinationSnapshotItems joins a reported completion list for the
+// coordination snapshot under the per-list length cap, mirroring the style of
+// the rune-truncated summary: the retained head is joined verbatim and an
+// explicit "...N more" hint reports how many items were cut, so the reader
+// still knows the list continues past the cap.
+func joinCoordinationSnapshotItems(items []string) string {
+	if len(items) == 0 {
+		return ""
+	}
+	if len(items) <= coordinationSnapshotMaxListItems {
+		return strings.Join(items, ", ")
+	}
+	joined := strings.Join(items[:coordinationSnapshotMaxListItems], ", ")
+	return joined + fmt.Sprintf(", ...%d more", len(items)-coordinationSnapshotMaxListItems)
+}
+
+// completionAlreadyDeliveredByMailbox reports whether a terminal completion's
+// fact is already expressed in the current request by its own completed
+// mailbox text. When the mailbox that recorded the completion is already part
+// of the request (delivered as a pending batch now or durable in the
+// conversation), re-listing the task in the coordination snapshot would bill
+// the same completion fact to the model twice. Non-terminal tasks are never
+// elided here: their snapshot entry is ongoing coordination state, not a
+// delivered mailbox fact.
+func completionAlreadyDeliveredByMailbox(rec *DurableTaskRecord, injectedMailboxIDs map[string]struct{}) bool {
+	if len(injectedMailboxIDs) == 0 {
+		return false
+	}
+	if rec == nil || strings.TrimSpace(rec.State) != string(SubAgentStateCompleted) {
+		return false
+	}
+	mailboxID := strings.TrimSpace(rec.LastMailboxID)
+	if mailboxID == "" {
+		return false
+	}
+	_, ok := injectedMailboxIDs[mailboxID]
+	return ok
 }
 
 func isRelevantCoordinationTask(rec *DurableTaskRecord, currentTurn uint64) bool {
@@ -47,17 +93,34 @@ func isRelevantCoordinationTask(rec *DurableTaskRecord, currentTurn uint64) bool
 	return false
 }
 
+// buildCoordinationSnapshotOverlay formats the relevant task records without a
+// request context (no mailbox-dedupe input, stall markers not refreshed here).
+// It exists for callers that render the snapshot outside request assembly
+// (tests); the production request path uses
+// buildCoordinationSnapshotOverlayForRequest.
 func (a *MainAgent) buildCoordinationSnapshotOverlay() string {
+	return a.buildCoordinationSnapshotOverlayForRequest(nil)
+}
+
+// buildCoordinationSnapshotOverlayForRequest formats the relevant task records
+// for the request being assembled. It is deliberately side-effect free: stall
+// markers are refreshed by the caller at the request-dispatch boundary
+// (buildTurnOverlayMessages) before this formatter runs, and
+// injectedMailboxIDs carries the mailbox message IDs already part of the
+// request's context so a terminal completion whose mailbox text is in the same
+// request is not listed a second time.
+func (a *MainAgent) buildCoordinationSnapshotOverlayForRequest(injectedMailboxIDs map[string]struct{}) string {
 	if a == nil {
 		return ""
 	}
-	a.updateSubAgentStallMarkers()
-
 	currentTurn := a.explicitUserTurnCount.Load()
 	a.subs.mu.RLock()
 	records := make([]*DurableTaskRecord, 0, len(a.subs.taskRecords))
 	for _, rec := range a.subs.taskRecords {
 		if clone := cloneDurableTaskRecord(rec); clone != nil && isRelevantCoordinationTask(clone, currentTurn) {
+			if completionAlreadyDeliveredByMailbox(clone, injectedMailboxIDs) {
+				continue
+			}
 			records = append(records, clone)
 		}
 	}
@@ -130,11 +193,11 @@ func (a *MainAgent) buildCoordinationSnapshotOverlay() string {
 			}
 			if len(rec.LastCompletion.FilesChanged) > 0 {
 				b.WriteString("\n  files_changed: ")
-				b.WriteString(strings.Join(rec.LastCompletion.FilesChanged, ", "))
+				b.WriteString(joinCoordinationSnapshotItems(rec.LastCompletion.FilesChanged))
 			}
 			if len(rec.LastCompletion.VerificationRun) > 0 {
 				b.WriteString("\n  verification_run: ")
-				b.WriteString(strings.Join(rec.LastCompletion.VerificationRun, ", "))
+				b.WriteString(joinCoordinationSnapshotItems(rec.LastCompletion.VerificationRun))
 			}
 			if len(rec.LastCompletion.VerificationRecords) > 0 {
 				b.WriteString("\n  verification:")
@@ -152,11 +215,11 @@ func (a *MainAgent) buildCoordinationSnapshotOverlay() string {
 			}
 			if len(rec.LastCompletion.RemainingLimitations) > 0 {
 				b.WriteString("\n  remaining_limitations: ")
-				b.WriteString(strings.Join(rec.LastCompletion.RemainingLimitations, ", "))
+				b.WriteString(joinCoordinationSnapshotItems(rec.LastCompletion.RemainingLimitations))
 			}
 			if len(rec.LastCompletion.KnownRisks) > 0 {
 				b.WriteString("\n  known_risks: ")
-				b.WriteString(strings.Join(rec.LastCompletion.KnownRisks, ", "))
+				b.WriteString(joinCoordinationSnapshotItems(rec.LastCompletion.KnownRisks))
 			}
 		}
 		refs := tools.NormalizeArtifactRefs(rec.LastArtifactRefs)
@@ -233,6 +296,12 @@ func formatWriteScope(scope tools.WriteScope) string {
 	return strings.Join(parts, ",")
 }
 
+// updateSubAgentStallMarkers recomputes the SuspectedStallReason stored on each
+// coordination task record from the live worker's current state and activity
+// heartbeat. It is the only writer of that marker and is invoked at the main
+// request-dispatch boundary (buildTurnOverlayMessages) so the coordination
+// snapshot that reads the marker for relevance and rendering always sees a
+// fresh evaluation; buildCoordinationSnapshotOverlay itself stays read-only.
 func (a *MainAgent) updateSubAgentStallMarkers() {
 	if a == nil {
 		return

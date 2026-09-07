@@ -1206,7 +1206,14 @@ func formatSubAgentMailboxInjectionText(msg *SubAgentMailboxMessage) string {
 	b.WriteString(string(msg.Priority))
 	b.WriteString("\n- summary: ")
 	b.WriteString(msg.Summary)
-	if strings.TrimSpace(msg.Payload) != "" {
+	// Summary and Payload are rendered together only when they differ: several
+	// mailbox producers (completion, notify, escalate) fill both fields with
+	// the same text, so writing both lines billed the identical content twice
+	// inside one mailbox. Payload stays stored on the message for its other
+	// consumers (mailbox memory, artifact-body fallback, spool text); only the
+	// model-facing text elides the copy.
+	summary := strings.TrimSpace(msg.Summary)
+	if payload := strings.TrimSpace(msg.Payload); payload != "" && payload != summary {
 		b.WriteString("\n- payload: ")
 		b.WriteString(msg.Payload)
 	}
@@ -1222,6 +1229,24 @@ func formatSubAgentMailboxInjectionText(msg *SubAgentMailboxMessage) string {
 		}
 	}
 	if msg.Completion != nil {
+		// The completed mailbox text is the single in-request expression of the
+		// completion when the coordination snapshot elides the task (see
+		// completionAlreadyDeliveredByMailbox), so the typed-result handle the
+		// snapshot would otherwise surface is carried here instead.
+		if msg.Completion.ResultType != "" {
+			b.WriteString("\n- result_type: ")
+			b.WriteString(msg.Completion.ResultType)
+		}
+		if msg.Completion.ResultRef != nil {
+			label := strings.TrimSpace(msg.Completion.ResultRef.RelPath)
+			if label == "" {
+				label = strings.TrimSpace(msg.Completion.ResultRef.ID)
+			}
+			if label != "" {
+				b.WriteString("\n- result_ref: ")
+				b.WriteString(label)
+			}
+		}
 		if len(msg.Completion.FilesChanged) > 0 {
 			b.WriteString("\n- files_changed: ")
 			b.WriteString(strings.Join(msg.Completion.FilesChanged, ", "))

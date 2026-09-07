@@ -101,8 +101,12 @@ func TestRunningWorkerActivityHeartbeatClearsSuspectedStall(t *testing.T) {
 	a.syncTaskRecordFromSub(sub, "")
 
 	// The worker has been in Running since before the stall threshold with no
-	// refresh: the coordination snapshot must suspect a stall.
+	// refresh: the coordination snapshot must suspect a stall. Snapshot
+	// formatting is read-only — stall markers are refreshed at the
+	// request-dispatch boundary (buildTurnOverlayMessages) — so the test runs
+	// that same refresh before rendering.
 	sub.runtimeState.stateChangedAt = time.Now().Add(-coordinationSnapshotStallAfter - time.Minute)
+	a.updateSubAgentStallMarkers()
 	block := a.buildCoordinationSnapshotOverlay()
 	if !strings.Contains(block, "suspected_stall: running with no recent state/progress update") {
 		t.Fatalf("stale-running worker not flagged before heartbeat refresh:\n%s", block)
@@ -114,6 +118,7 @@ func TestRunningWorkerActivityHeartbeatClearsSuspectedStall(t *testing.T) {
 	for range 10 {
 		sub.markActivity()
 	}
+	a.updateSubAgentStallMarkers()
 	block = a.buildCoordinationSnapshotOverlay()
 	if strings.Contains(block, "suspected_stall:") {
 		t.Fatalf("busy running worker flagged as suspected_stall after heartbeat refresh:\n%s", block)

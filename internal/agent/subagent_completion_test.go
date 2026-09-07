@@ -714,6 +714,79 @@ func TestCoordinationSnapshotIncludesDurableCompletionAndArtifact(t *testing.T) 
 	}
 }
 
+// TestCoordinationSnapshotCapsCompletionLists pins the per-list length cap on
+// the files_changed / verification_run / remaining_limitations / known_risks
+// lines: an unbounded list from one verbose completion could otherwise dominate
+// the overlay token budget under the 8-task ceiling. The truncated tail is
+// reported as an explicit "...N more" hint so the reader knows the list
+// continues past the cap.
+func TestCoordinationSnapshotCapsCompletionLists(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.explicitUserTurnCount.Store(7)
+	a.subs.taskRecords["task-1"] = &DurableTaskRecord{
+		TaskID:          "task-1",
+		State:           string(SubAgentStateCompleted),
+		ResumePolicy:    taskResumePolicyNotify,
+		LastSummary:     "big completion",
+		LastUpdatedTurn: 7,
+		LastCompletion: &CompletionEnvelope{
+			FilesChanged:         []string{"f-1", "f-2", "f-3", "f-4", "f-5"},
+			VerificationRun:      []string{"v-1", "v-2", "v-3", "v-4"},
+			RemainingLimitations: []string{"l-1", "l-2", "l-3", "l-4", "l-5", "l-6"},
+			KnownRisks:           []string{"r-1", "r-2", "r-3", "r-4"},
+		},
+	}
+	block := a.buildCoordinationSnapshotOverlay()
+	for _, want := range []string{
+		"files_changed: f-1, f-2, f-3, ...2 more",
+		"verification_run: v-1, v-2, v-3, ...1 more",
+		"remaining_limitations: l-1, l-2, l-3, ...3 more",
+		"known_risks: r-1, r-2, r-3, ...1 more",
+	} {
+		if !strings.Contains(block, want) {
+			t.Fatalf("snapshot missing capped list %q:\n%s", want, block)
+		}
+	}
+	for _, leaked := range []string{"f-4", "v-4", "l-4", "r-4"} {
+		if strings.Contains(block, leaked) {
+			t.Fatalf("snapshot leaked list item past the cap (%q):\n%s", leaked, block)
+		}
+	}
+}
+
+// TestCoordinationSnapshotOmitsCompletionDeliveredByInjectedMailbox pins the
+// same-request dedupe between the completed mailbox and the coordination
+// snapshot: when the mailbox that recorded a terminal completion is already
+// part of the request (delivered in the pending batch or durable in the
+// conversation), the snapshot must not list the completion a second time. The
+// mailbox text is the single expression of the fact then.
+func TestCoordinationSnapshotOmitsCompletionDeliveredByInjectedMailbox(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.explicitUserTurnCount.Store(6)
+	a.subs.taskRecords["task-1"] = &DurableTaskRecord{
+		TaskID:          "task-1",
+		State:           string(SubAgentStateCompleted),
+		ResumePolicy:    taskResumePolicyNotify,
+		LastMailboxID:   "worker-1-1",
+		LastSummary:     "research complete",
+		LastUpdatedTurn: 6,
+		LastCompletion:  &CompletionEnvelope{Summary: "research complete", FilesChanged: []string{"internal/a.go"}},
+	}
+
+	block := a.buildCoordinationSnapshotOverlayForRequest(map[string]struct{}{"worker-1-1": {}})
+	if strings.Contains(block, "task_id: task-1") {
+		t.Fatalf("completed task re-listed although its mailbox is in the request:\n%s", block)
+	}
+
+	// Control: without the mailbox in the request the same completion is still
+	// listed, so the snapshot remains the fallback that keeps terminal
+	// completions visible when no mailbox text expresses them.
+	block = a.buildCoordinationSnapshotOverlay()
+	if !strings.Contains(block, "task_id: task-1") || !strings.Contains(block, "files_changed: internal/a.go") {
+		t.Fatalf("snapshot missing completion without injected mailbox:\n%s", block)
+	}
+}
+
 func TestCoordinationSnapshotMarksRunningWorkerStallButNotWaitingMain(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	running := newControllableTestSubAgent(t, a, "task-running")
@@ -732,6 +805,10 @@ func TestCoordinationSnapshotMarksRunningWorkerStallButNotWaitingMain(t *testing
 	}
 	a.subs.taskRecords[waiting.TaskID] = waiting
 
+	// Overlay formatting is read-only; stall markers are refreshed at the
+	// request-dispatch boundary (buildTurnOverlayMessages), so the test invokes
+	// the same refresh explicitly before rendering the snapshot.
+	a.updateSubAgentStallMarkers()
 	block := a.buildCoordinationSnapshotOverlay()
 	if !strings.Contains(block, "task_id: task-running") || !strings.Contains(block, "suspected_stall: running with no recent state/progress update") {
 		t.Fatalf("snapshot missing running stall:\n%s", block)
@@ -753,4 +830,94 @@ func mustMarshalJSON(t *testing.T, v any) json.RawMessage {
 		t.Fatal(err)
 	}
 	return data
+}
+
+// TestCompletedMailboxTextExpressesContentOnce pins the mailbox-text dedupe:
+// mailbox producers set Summary and Payload to the same string for terminal
+// events, and the model-facing text must not write the identical content on
+// both lines. The typed-result handle that the coordination snapshot would
+// otherwise surface is part of the mailbox text instead, so eliding the task
+// from the snapshot (same-request dedupe) loses nothing.
+func TestCompletedMailboxTextExpressesContentOnce(t *testing.T) {
+	summary := "alpha refactor landed"
+	msg := &SubAgentMailboxMessage{
+		MessageID: "msg-1", AgentID: "worker-1", TaskID: "task-1",
+		Kind: SubAgentMailboxKindCompleted, Summary: summary, Payload: summary,
+		Completion: &CompletionEnvelope{
+			Summary: summary, FilesChanged: []string{"internal/a.go"},
+			ResultType: "type/report", ResultRef: &tools.ResultRef{ID: "sha-1", RelPath: "artifacts/results/result.json"},
+		},
+	}
+	text := formatSubAgentMailboxInjectionText(msg)
+	if n := strings.Count(text, summary); n != 1 {
+		t.Fatalf("completion content appears %d times, want once:\n%s", n, text)
+	}
+	if strings.Contains(text, "\n- payload: ") {
+		t.Fatalf("payload line duplicates an identical summary:\n%s", text)
+	}
+	for _, want := range []string{"result_type: type/report", "result_ref: artifacts/results/result.json"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("mailbox text missing %q:\n%s", want, text)
+		}
+	}
+}
+
+// TestMailboxTextKeepsDistinctPayload guards the other half of the dedupe
+// contract: a payload that genuinely differs from the summary is still
+// rendered, so distinct message bodies are not lost by the equal-text elision.
+func TestMailboxTextKeepsDistinctPayload(t *testing.T) {
+	msg := &SubAgentMailboxMessage{
+		MessageID: "msg-2", AgentID: "worker-1", TaskID: "task-1",
+		Kind: SubAgentMailboxKindProgress, Summary: "short headline", Payload: "long detail body for the mailbox",
+	}
+	text := formatSubAgentMailboxInjectionText(msg)
+	for _, want := range []string{"- summary: short headline", "- payload: long detail body for the mailbox"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("mailbox text missing %q:\n%s", want, text)
+		}
+	}
+}
+
+// TestMainMailboxAndSnapshotDoNotDoubleBillSameCompletion exercises the
+// request-assembly path (buildTurnOverlayMessages): a completion whose
+// completed mailbox is delivered in the same request must produce exactly the
+// mailbox overlay — the coordination snapshot must not list the task again —
+// and a later request in the same turn that already carries the durable
+// mailbox message in its conversation must stay deduplicated too.
+func TestMainMailboxAndSnapshotDoNotDoubleBillSameCompletion(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.explicitUserTurnCount.Store(8)
+	summary := "complete refactor alpha"
+	a.subs.taskRecords["task-1"] = &DurableTaskRecord{
+		TaskID:          "task-1",
+		State:           string(SubAgentStateCompleted),
+		ResumePolicy:    taskResumePolicyNotify,
+		LastMailboxID:   "worker-1-1",
+		LastSummary:     summary,
+		LastUpdatedTurn: 8,
+		LastCompletion:  &CompletionEnvelope{Summary: summary, FilesChanged: []string{"internal/a.go"}},
+	}
+	a.pendingSubAgentMailboxes = []*SubAgentMailboxMessage{{
+		MessageID: "worker-1-1", AgentID: "worker-1", TaskID: "task-1",
+		Kind: SubAgentMailboxKindCompleted, Summary: summary, Payload: summary,
+	}}
+
+	overlays := a.buildTurnOverlayMessages()
+	if len(overlays) != 1 || overlays[0].Kind != message.KindSubAgentMailbox {
+		t.Fatalf("overlays = %#v, want exactly the completed mailbox (no snapshot repeat)", overlays)
+	}
+	if strings.Contains(overlays[0].Content, "SubAgent coordination snapshot") {
+		t.Fatalf("mailbox overlay unexpectedly contains the coordination snapshot:\n%s", overlays[0].Content)
+	}
+	if n := strings.Count(overlays[0].Content, summary); n != 1 {
+		t.Fatalf("completion summary appears %d times in the mailbox overlay, want once:\n%s", n, overlays[0].Content)
+	}
+
+	// A later request in the same turn already carries the durable mailbox
+	// message in its conversation, so the snapshot stays deduplicated.
+	for _, overlay := range a.buildTurnOverlayMessages() {
+		if strings.Contains(overlay.Content, "task_id: task-1") || strings.Contains(overlay.Content, "SubAgent coordination snapshot") {
+			t.Fatalf("later request re-listed the completed task despite its durable mailbox:\n%s", overlay.Content)
+		}
+	}
 }

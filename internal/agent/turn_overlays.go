@@ -20,7 +20,23 @@ const pendingLSPDiagnosticOverlayText = "LSP diagnostics changed after one or mo
 func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 	var overlays []message.Message
 
-	if block := strings.TrimSpace(a.buildCoordinationSnapshotOverlay()); block != "" {
+	// Snapshot the durable conversation and take the pending mailbox batch up
+	// front: together they define which mailbox messages this request already
+	// carries (durable deliveries from earlier requests plus the batch appended
+	// below), and the coordination snapshot must not repeat a terminal
+	// completion that one of them already expresses.
+	conversation := a.ctxMgr.Snapshot()
+	pendingMailboxes := a.takePendingSubAgentMailboxes()
+
+	// Stall markers feed both the relevance filter and the rendered stall lines
+	// of the coordination snapshot, so they are refreshed here at the
+	// request-dispatch boundary rather than inside
+	// buildCoordinationSnapshotOverlay, keeping that formatter free of state
+	// writes. Because this refresh always precedes the snapshot, the stored
+	// SuspectedStallReason stays a live decision input for it.
+	a.updateSubAgentStallMarkers()
+
+	if block := strings.TrimSpace(a.buildCoordinationSnapshotOverlayForRequest(requestInjectedMailboxIDs(conversation, pendingMailboxes))); block != "" {
 		overlays = append(overlays, message.Message{
 			Role:    "user",
 			Kind:    message.KindTurnOverlay,
@@ -28,9 +44,8 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 		})
 	}
 
-	if msgs := a.takePendingSubAgentMailboxes(); len(msgs) > 0 {
-		conversation := a.ctxMgr.Snapshot()
-		for _, mailbox := range msgs {
+	if len(pendingMailboxes) > 0 {
+		for _, mailbox := range pendingMailboxes {
 			if mailbox == nil {
 				continue
 			}
@@ -320,4 +335,30 @@ func containsSubAgentMailboxMessage(messages []message.Message, messageID string
 		}
 	}
 	return false
+}
+
+// requestInjectedMailboxIDs collects the message IDs of every SubAgent mailbox
+// already part of the request being assembled: mailbox messages durable in the
+// conversation (delivered on earlier requests) plus the pending batch about to
+// be appended now. buildCoordinationSnapshotOverlay uses this set to skip
+// terminal completions whose completed-mailbox text is in the same request.
+func requestInjectedMailboxIDs(conversation []message.Message, pendingMailboxes []*SubAgentMailboxMessage) map[string]struct{} {
+	injected := make(map[string]struct{})
+	for _, msg := range conversation {
+		if msg.Kind != message.KindSubAgentMailbox || msg.Mailbox == nil {
+			continue
+		}
+		if id := strings.TrimSpace(msg.Mailbox.MessageID); id != "" {
+			injected[id] = struct{}{}
+		}
+	}
+	for _, mailbox := range pendingMailboxes {
+		if mailbox == nil {
+			continue
+		}
+		if id := strings.TrimSpace(mailbox.MessageID); id != "" {
+			injected[id] = struct{}{}
+		}
+	}
+	return injected
 }
