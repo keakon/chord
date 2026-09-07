@@ -448,6 +448,12 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	// snapshot here keeps rewriteSessionAfterCompaction lock-free with respect
 	// to ctxmgr.
 	originalFirstUserHint := a.captureOriginalFirstUserHint()
+	// Measured before the replace so the apply log can report what durable
+	// compaction actually reclaimed. Without it the only published number is
+	// "archived N messages", which says nothing about the context those
+	// messages occupied and cannot be compared against what request-level
+	// reduction saves.
+	tokensBeforeApply := estimateMessagesTokens(a.ctxMgr, a.ctxMgr.Snapshot())
 	var compactedMessages []message.Message
 
 	// Use ReplacePrefixAtomic: replace [0, headSplit) with d.NewMessages,
@@ -585,7 +591,8 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	a.emitModelDownshiftAppliedNotice()
 	a.emitToTUI(SessionRestoredEvent{PreserveRequestActivity: true})
 
-	log.Infof("context compacted (async) mode=%v summary_mode=%v backend=%v profile=%v model=%v history_path=%v backup_path=%v archived_messages=%v evidence_artifacts=%v head_split=%v", modeLabel, d.SummaryMode, d.Backend, d.Profile, d.ModelRef, d.AbsHistoryPath, backupPath, d.ArchivedCount, d.EvidenceArtifacts, headSplit)
+	tokensAfterApply := estimateMessagesTokens(a.ctxMgr, compactedMessages)
+	log.Infof("context compacted (async) mode=%v summary_mode=%v backend=%v profile=%v model=%v history_path=%v backup_path=%v archived_messages=%v evidence_artifacts=%v head_split=%v tokens_before=%v tokens_after=%v tokens_reclaimed=%v", modeLabel, d.SummaryMode, d.Backend, d.Profile, d.ModelRef, d.AbsHistoryPath, backupPath, d.ArchivedCount, d.EvidenceArtifacts, headSplit, tokensBeforeApply, tokensAfterApply, max(tokensBeforeApply-tokensAfterApply, 0))
 	if _, err := a.fireHook(a.parentCtx, hook.OnAfterCompress, 0, map[string]any{
 		"message_count":      a.ctxMgr.MessageCount(),
 		"context_tokens":     a.ctxMgr.LastTotalContextTokens(),
