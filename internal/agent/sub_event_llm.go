@@ -259,7 +259,10 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	// call in this response. The failed call is reported to the model with a
 	// "Completion rejected" tool result and one bounded follow-up (see
 	// rejectInvalidCompleteArguments) instead of failing the task outright.
+	// completeDegraded is the delivery that survives that rejection when only
+	// the typed-result group was malformed; nil for every other failure.
 	var completeRejection error
+	var completeDegraded *AgentResult
 	var wakeMainCallID string
 	var wakeMainReason string
 	var wakeMainRequest *tools.AgentRequestPayload
@@ -298,6 +301,24 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 			if err != nil {
 				completeRejection = fmt.Errorf("invalid Complete args: %w", err)
 				taskCompleteCallID = tc.ID
+				// An incomplete typed-result group is the one rejection that
+				// leaves a usable delivery behind: everything except the group
+				// validated. Keep that delivery as the fallback the rejection
+				// path settles once the correction budget is spent.
+				if _, ok := errors.AsType[typedResultPairingError](err); ok {
+					completeDegraded = &AgentResult{
+						Summary: strings.TrimSpace(args.Summary),
+						Envelope: normalizeCompletionEnvelope(&CompletionEnvelope{
+							Summary:              args.Summary,
+							FilesChanged:         args.FilesChanged,
+							VerificationRun:      args.VerificationRun,
+							RemainingLimitations: append(append([]string(nil), args.RemainingLimitations...), droppedTypedResultLimitation),
+							KnownRisks:           args.KnownRisks,
+							FollowUpRecommended:  args.FollowUpRecommended,
+							Artifacts:            artifacts,
+						}),
+					}
+				}
 				break
 			}
 			taskCompleteCallID = tc.ID
@@ -397,7 +418,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	if len(regularToolCalls) == 0 {
 		s.parent.discardSpeculativeStreamToolsAndClearToolTrace(s.turn, "complete_only")
 		if completeRejection != nil {
-			s.rejectInvalidCompleteArguments(taskCompleteCallID, completeRejection)
+			s.rejectInvalidCompleteArguments(taskCompleteCallID, completeRejection, completeDegraded)
 			return
 		}
 		if wakeMainCallID != "" {
@@ -443,6 +464,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 		if completeRejection != nil {
 			s.pendingRejectedCompleteCallID = taskCompleteCallID
 			s.pendingRejectedCompleteErr = completeRejection
+			s.pendingRejectedCompleteDegraded = completeDegraded
 		} else {
 			s.pendingComplete = taskComplete
 			s.pendingCompleteCallID = taskCompleteCallID

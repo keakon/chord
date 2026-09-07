@@ -448,9 +448,11 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 	if s.pendingRejectedCompleteErr != nil {
 		callID := s.pendingRejectedCompleteCallID
 		rejectErr := s.pendingRejectedCompleteErr
+		degraded := s.pendingRejectedCompleteDegraded
 		s.pendingRejectedCompleteCallID = ""
 		s.pendingRejectedCompleteErr = nil
-		s.rejectInvalidCompleteArguments(callID, rejectErr)
+		s.pendingRejectedCompleteDegraded = nil
+		s.rejectInvalidCompleteArguments(callID, rejectErr, degraded)
 		return
 	}
 

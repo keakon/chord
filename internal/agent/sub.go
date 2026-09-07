@@ -209,13 +209,17 @@ type SubAgent struct {
 	// giving the model one bounded follow-up to fix the call. Unlike
 	// pendingComplete it is never persisted: a crash mid-batch replays the
 	// invalid Complete from the transcript instead.
-	pendingRejectedCompleteCallID string
-	pendingRejectedCompleteErr    error
-	pendingEscalate               string
-	pendingEscalateRequest        *tools.AgentRequestPayload
-	verificationLedger            []verificationLedgerEntry
-	workspaceMutationEpoch        uint64
-	acceptedMailboxIDs            map[string]struct{} // guarded by inputQueueMu; de-duplicates durable deliveries
+	// pendingRejectedCompleteDegraded carries the delivery that survives the
+	// rejection when only the typed-result group was malformed (see
+	// rejectInvalidCompleteArguments); nil for every other failure.
+	pendingRejectedCompleteCallID   string
+	pendingRejectedCompleteErr      error
+	pendingRejectedCompleteDegraded *AgentResult
+	pendingEscalate                 string
+	pendingEscalateRequest          *tools.AgentRequestPayload
+	verificationLedger              []verificationLedgerEntry
+	workspaceMutationEpoch          uint64
+	acceptedMailboxIDs              map[string]struct{} // guarded by inputQueueMu; de-duplicates durable deliveries
 
 	// Permission: merged ruleset (global + project + agent-level).
 	//

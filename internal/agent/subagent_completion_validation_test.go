@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -464,5 +465,123 @@ func TestCompleteParametersSchemaEncodesResultPairing(t *testing.T) {
 		if got, ok := pair[i]["required"].([]string); !ok || !slices.Equal(got, want) {
 			t.Fatalf("typed-result group anyOf[%d] required = %#v, want %v", i, pair[i]["required"], want)
 		}
+	}
+}
+
+// A rejection the model cannot place is a rejection it repeats: the observed
+// failure mode is a worker answering "result_type is required" by nesting
+// result_type inside result and failing the identical check twice. The message
+// therefore has to name the level the fields live at and the way out for
+// completions that carry no machine-readable result.
+func TestTypedResultPairingRejectionNamesTopLevelShapeAndOptOut(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args map[string]any
+	}{
+		{name: "result without result_type", args: map[string]any{"summary": "done", "result": map[string]any{"value": 1}}},
+		{name: "result_type without result", args: map[string]any{"summary": "done", "result_type": "type/test"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var args struct {
+				ResultType string           `json:"result_type"`
+				Result     json.RawMessage  `json:"result"`
+				ResultRef  *tools.ResultRef `json:"result_ref"`
+			}
+			raw, err := json.Marshal(tc.args)
+			if err != nil {
+				t.Fatalf("marshal args: %v", err)
+			}
+			if err := json.Unmarshal(raw, &args); err != nil {
+				t.Fatalf("unmarshal args: %v", err)
+			}
+			_, _, _, err = validateCompleteTypedResult(t.TempDir(), args.ResultType, args.Result, args.ResultRef)
+			if err == nil {
+				t.Fatal("validateCompleteTypedResult() = nil, want a pairing rejection")
+			}
+			if _, ok := errors.AsType[typedResultPairingError](err); !ok {
+				t.Fatalf("error %#v is not a typedResultPairingError; the degraded delivery path keys off that type", err)
+			}
+			for _, want := range []string{"top-level Complete arguments", "not fields inside result", "omit result_type, result and result_ref entirely"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("rejection %q does not contain %q", err.Error(), want)
+				}
+			}
+		})
+	}
+}
+
+// The typed-result group is optional metadata. Once the model has spent its one
+// correction and still cannot pair the fields, destroying a finished task is a
+// worse outcome than delivering it without the group, so the completion settles
+// with the summary intact and the drop recorded as a limitation.
+func TestUnpairedTypedResultSettlesDegradedAfterRecoveryBudgetSpent(t *testing.T) {
+	parent, sub := newMixedBatchTestSubAgent(t)
+	sub.turn.SubAgentCompletionRecoveryCount = 1
+	sub.handleLLMResponse(&llmResult{turnID: 1, resp: &message.Response{ToolCalls: convertCalls([]messageToolCall{
+		mustJSONToolCall(t, "call-1", "complete", map[string]any{
+			"summary":               "implemented the parser fix",
+			"files_changed":         []string{"internal/parser/parse.go"},
+			"remaining_limitations": []string{"docs not updated"},
+			"result":                map[string]any{"value": 1},
+		}),
+	})}})
+
+	select {
+	case evt := <-parent.eventCh:
+		if evt.Type != EventAgentDone {
+			t.Fatalf("event.Type = %q, want %q (an unpaired typed result must not destroy the delivery)", evt.Type, EventAgentDone)
+		}
+		result, ok := evt.Payload.(*AgentResult)
+		if !ok {
+			t.Fatalf("payload = %#v, want *AgentResult", evt.Payload)
+		}
+		if result.Summary != "implemented the parser fix" {
+			t.Fatalf("summary = %q, want the model's summary preserved", result.Summary)
+		}
+		if result.Envelope == nil {
+			t.Fatal("envelope = nil, want the structured fields preserved")
+		}
+		if !slices.Contains(result.Envelope.FilesChanged, "internal/parser/parse.go") {
+			t.Fatalf("files_changed = %#v, want the declared file preserved", result.Envelope.FilesChanged)
+		}
+		if result.Envelope.ResultType != "" || len(result.Envelope.Result) != 0 || result.Envelope.ResultRef != nil {
+			t.Fatalf("typed result = (%q, %s, %#v), want it stripped", result.Envelope.ResultType, result.Envelope.Result, result.Envelope.ResultRef)
+		}
+		if !slices.Contains(result.Envelope.RemainingLimitations, "docs not updated") {
+			t.Fatalf("remaining_limitations = %#v, want the model's own limitations kept", result.Envelope.RemainingLimitations)
+		}
+		if !slices.Contains(result.Envelope.RemainingLimitations, droppedTypedResultLimitation) {
+			t.Fatalf("remaining_limitations = %#v, want the dropped-result note appended", result.Envelope.RemainingLimitations)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the degraded completion")
+	}
+}
+
+// Degrading the optional result group must not degrade the claim that
+// verification ran: an unbacked verification_run still fails the task, and the
+// reported cause names the verification gap rather than the pairing error.
+func TestDegradedCompletionStillRejectsUnbackedVerificationClaim(t *testing.T) {
+	parent, sub := newMixedBatchTestSubAgent(t)
+	sub.turn.SubAgentCompletionRecoveryCount = 1
+	sub.handleLLMResponse(&llmResult{turnID: 1, resp: &message.Response{ToolCalls: convertCalls([]messageToolCall{
+		mustJSONToolCall(t, "call-1", "complete", map[string]any{
+			"summary":          "done",
+			"verification_run": []string{"go test ./..."},
+			"result":           map[string]any{"value": 1},
+		}),
+	})}})
+
+	select {
+	case evt := <-parent.eventCh:
+		if evt.Type != EventAgentError {
+			t.Fatalf("event.Type = %q, want %q", evt.Type, EventAgentError)
+		}
+		err, ok := evt.Payload.(error)
+		if !ok || !strings.Contains(err.Error(), "was not found among finalized Shell calls") {
+			t.Fatalf("error payload = %#v, want the verification cause, not the pairing cause", evt.Payload)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the verification rejection")
 	}
 }

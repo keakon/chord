@@ -116,19 +116,67 @@ func (s *SubAgent) retryCompletionVerification(cause error) {
 
 // rejectInvalidCompleteArguments handles a Complete call whose arguments failed
 // validation — a JSON parse error, an empty summary, an artifact outside the
-// session, or an invalid typed result. It appends a "Completion rejected" tool
-// result (so the transcript keeps its tool-call pairing) and, within the shared
-// rejected-completion budget, gives the model one follow-up request to call
-// Complete again with corrected arguments instead of failing the task outright.
-func (s *SubAgent) rejectInvalidCompleteArguments(callID string, cause error) {
+// session, or an invalid typed result. Within the shared rejected-completion
+// budget it appends a "Completion rejected" tool result (so the transcript
+// keeps its tool-call pairing) and gives the model one follow-up request to
+// call Complete again with corrected arguments.
+//
+// degraded is the fallback delivery for the one rejection class that leaves a
+// usable completion behind (an incomplete typed-result group, see
+// typedResultPairingError): once the budget is spent, settling it keeps the
+// summary and the rest of the structured payload instead of destroying a
+// finished task over an optional metadata field. Every other rejection class
+// still fails the task, because nothing dependable is left to deliver.
+func (s *SubAgent) rejectInvalidCompleteArguments(callID string, cause error, degraded *AgentResult) {
 	if s == nil || s.turn == nil {
 		return
 	}
-	s.appendCompleteToolResult(callID, "Completion rejected: "+cause.Error())
-	if !s.completionRecoveryBudgetAvailable() {
-		s.sendEvent(Event{Type: EventAgentError, Payload: fmt.Errorf("completion was rejected after retry: %w", cause)})
+	if s.completionRecoveryBudgetAvailable() {
+		s.appendCompleteToolResult(callID, "Completion rejected: "+cause.Error())
+		s.appendPendingUserMessage(pendingUserMessage{Content: fmt.Sprintf("Completion was rejected: %v. Call Complete again with corrected, valid arguments.", cause)})
+		s.asyncCallLLMWithFlightMarked(s.turn, s.ctxMgr.Snapshot())
 		return
 	}
-	s.appendPendingUserMessage(pendingUserMessage{Content: fmt.Sprintf("Completion was rejected: %v. Call Complete again with corrected, valid arguments.", cause)})
-	s.asyncCallLLMWithFlightMarked(s.turn, s.ctxMgr.Snapshot())
+	if degraded != nil {
+		if err := s.settleDegradedCompletion(callID, degraded); err == nil {
+			return
+		} else if !errors.Is(err, errDegradedCompletionUnavailable) {
+			// The degraded payload failed a check of its own (an unbacked
+			// verification claim). Report that cause rather than the pairing
+			// error, so the failure names what actually blocked delivery.
+			cause = err
+		}
+	}
+	s.appendCompleteToolResult(callID, "Completion rejected: "+cause.Error())
+	s.sendEvent(Event{Type: EventAgentError, Payload: fmt.Errorf("completion was rejected after retry: %w", cause)})
+}
+
+// errDegradedCompletionUnavailable reports that the degraded delivery could not
+// be settled here and the caller should fall back to failing the task.
+var errDegradedCompletionUnavailable = errors.New("degraded completion unavailable")
+
+// settleDegradedCompletion delivers a completion whose typed-result group was
+// stripped. It mirrors the normal closure path — verification claims are still
+// validated (honesty about what ran is never degraded), outstanding join
+// children still defer the completion — so the only difference from a regular
+// Complete is the dropped result group, which the envelope records as a
+// remaining limitation.
+func (s *SubAgent) settleDegradedCompletion(callID string, degraded *AgentResult) error {
+	if degraded == nil || degraded.Envelope == nil {
+		return errDegradedCompletionUnavailable
+	}
+	if err := s.validateCompletionVerification(degraded.Envelope); err != nil {
+		return err
+	}
+	if outstanding := s.parent.outstandingJoinChildTaskIDs(s.taskID); len(outstanding) > 0 {
+		s.appendCompleteToolResult(callID, deferredCompleteResult(len(outstanding)))
+		s.setPendingCompleteIntent(degraded)
+		s.enterWaitingDescendant(deferredCompleteResult(len(outstanding)))
+		return nil
+	}
+	s.clearPendingCompleteIntent()
+	degraded = s.enrichCompletionResult(degraded)
+	s.appendCompleteToolResult(callID, degraded.Summary, degraded.Envelope.VerificationRecords)
+	s.sendEvent(Event{Type: EventAgentDone, Payload: degraded})
+	return nil
 }
