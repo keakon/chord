@@ -5507,7 +5507,7 @@ func TestSpaceToggleInvalidatesMainRenderCache(t *testing.T) {
 	}
 }
 
-func TestHandleNormalKeySpaceTogglesLinkedTaskCardWithoutSwitchingFocus(t *testing.T) {
+func TestHandleNormalKeySpaceLeavesLinkedTaskCardAlone(t *testing.T) {
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 100, 24)
 	m.mode = ModeNormal
@@ -5531,8 +5531,10 @@ func TestHandleNormalKeySpaceTogglesLinkedTaskCardWithoutSwitchingFocus(t *testi
 	if m.focusedAgentID != "" || backend.focused != "" {
 		t.Fatalf("space should not switch focus, got model=%q backend=%q", m.focusedAgentID, backend.focused)
 	}
-	if task.Collapsed {
-		t.Fatal("space should expand linked Delegate card")
+	// Delegation cards are always expanded, so space has nothing to toggle:
+	// it must not silently flip state the renderer ignores either.
+	if !task.Collapsed {
+		t.Fatal("space should leave the always-expanded Delegate card untouched")
 	}
 }
 

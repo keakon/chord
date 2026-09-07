@@ -298,8 +298,10 @@ func (b *Block) renderDoneCall(width int, spinnerFrame string) []string {
 
 	report := strings.TrimSpace(b.DoneReport)
 	prefix := b.renderToolPrefix(spinnerFrame)
+	// The full report renders right under the header, so the header stays a
+	// bare index line: repeating the report's opening line (and the elapsed
+	// suffix) only duplicated content the card already shows.
 	headerLine := renderToolHeaderLine(prefix, b.ToolName)
-	headerLine = appendToolHeaderSummary(headerLine, toolHeaderProseSummary(report), "", "", cardWidth-4)
 	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent, b.toolExecutionIsRunning())
 	result := []string{headerLine}
 
@@ -343,7 +345,6 @@ func (b *Block) renderDoneCall(width int, spinnerFrame string) []string {
 			}
 		}
 	}
-	result = appendToolElapsedToHeader(result, b, cardWidth)
 	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
 
@@ -393,14 +394,10 @@ func (b *Block) renderProseControlCall(width int, spinnerFrame string) []string 
 	cardWidth := metrics.cardWidth
 	contentWidth := metrics.contentWidth
 
-	prefix := b.renderToolPrefixForExpanded(spinnerFrame, b.ToolCallDetailExpanded)
-	if b.ResultDone {
-		// Keep the disclosure glyph in error / cancelled states too: a
-		// failed Complete/Escalate card still expands to its report, so it
-		// must read as expandable (✗ ▸ / ✗ ▾) like the generic expandable
-		// tool cards, not a flat non-expandable row.
-		prefix = renderToolDisclosurePrefix(prefix, b.ToolCallDetailExpanded)
-	}
+	// Completion cards are always expanded behind a bare tool-name header:
+	// the summary/reason they would summarize is the body's own prose
+	// section, so there is nothing for a disclosure marker to reveal.
+	prefix := b.renderToolPrefix(spinnerFrame)
 	var args proseControlArgs
 	argsJSON := b.RawArgs
 	if strings.TrimSpace(argsJSON) == "" {
@@ -415,22 +412,18 @@ func (b *Block) renderProseControlCall(width int, spinnerFrame string) []string 
 	}
 	argsReady := b.ResultDone || strings.TrimSpace(argsJSON) != ""
 
-	// The header is the index line: it names what the report is about, so a
-	// collapsed card needs no summary row of its own and an expanded one does
-	// not repeat the sentence outside its prose.
 	headerLine := renderToolHeaderLine(prefix, b.ToolName)
-	headerLine = appendToolHeaderSummary(headerLine, toolHeaderProseSummary(prose), "", "", cardWidth-4)
 	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent, b.toolExecutionIsRunning())
 	result := []string{headerLine}
 
-	if b.ToolCallDetailExpanded && argsReady && prose != "" {
+	if argsReady && prose != "" {
 		result = append(result, "")
 		for _, line := range renderRichMarkdownContent(prose, contentWidth, &b.richMarkdownHL) {
 			result = append(result, "    "+line)
 		}
 	}
 
-	if b.ToolCallDetailExpanded && b.ToolName == tools.NameComplete {
+	if b.ToolName == tools.NameComplete {
 		appendList := func(label string, values []string) {
 			if len(values) == 0 {
 				return
@@ -486,7 +479,6 @@ func (b *Block) renderProseControlCall(width int, spinnerFrame string) []string 
 			result = slices.Insert(result, before, "")
 		}
 	}
-
 	result = appendToolElapsedToHeader(result, b, cardWidth)
 	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
@@ -516,14 +508,10 @@ func (b *Block) renderCompactContextCall(width int, spinnerFrame string) []strin
 	cardWidth := metrics.cardWidth
 	contentWidth := metrics.contentWidth
 
-	prefix := b.renderToolPrefixForExpanded(spinnerFrame, b.ToolCallDetailExpanded)
-	if b.ResultDone {
-		// Keep the disclosure glyph in error / cancelled states too: a
-		// failed compact_context card still expands to the submitted args,
-		// so it must read as expandable (✗ ▸ / ✗ ▾) like the other
-		// expandable tool cards, not a flat non-expandable row.
-		prefix = renderToolDisclosurePrefix(prefix, b.ToolCallDetailExpanded)
-	}
+	// The checkpoint card is always expanded behind a bare tool-name header:
+	// the objective it would summarize is the body's own ↳ Objective:
+	// section.
+	prefix := b.renderToolPrefix(spinnerFrame)
 	argsJSON := b.RawArgs
 	if strings.TrimSpace(argsJSON) == "" {
 		argsJSON = b.Content
@@ -535,29 +523,16 @@ func (b *Block) renderCompactContextCall(width int, spinnerFrame string) []strin
 	objective := strings.TrimSpace(args.ActiveObjective)
 	next := strings.TrimSpace(args.NextStep)
 
-	// The objective is what the checkpoint is about, so it belongs on the
-	// header index line; the body row is left to the next step.
 	headerLine := renderToolHeaderLine(prefix, b.ToolName)
-	headerLine = appendToolHeaderSummary(headerLine, toolHeaderProseSummary(objective), "", "", cardWidth-4)
 	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent, b.toolExecutionIsRunning())
 	result := []string{headerLine}
 
 	switch {
-	case !argsReady && !b.ToolCallDetailExpanded:
+	case !argsReady && !b.ResultDone:
 		// Nothing decodable yet: the arguments are still streaming, and the
 		// header already carries the "N chars received" progress. Rendering a
 		// half-decoded state here would flash sections that the finished card
 		// then folds away.
-	case !b.ToolCallDetailExpanded:
-		// Collapsed default, whether the call is still running, finished or
-		// rejected: the header carries the objective, so the body is one row
-		// with the next step. The card is a checkpoint marker, not a document
-		// - the six sections only appear when the user opens it, which also
-		// means a resumed session opens with a one-line card instead of a
-		// screenful.
-		if next != "" {
-			appendCollapsedSummaryLines(&result, "→ "+toolHeaderProseSummary(next), cardWidth-10, ToolResultStyle)
-		}
 	case argsReady:
 		appendCompactContextSections(&result, []compactContextDisplaySection{
 			{label: "Objective", prose: objective},
@@ -581,11 +556,11 @@ func (b *Block) renderCompactContextCall(width int, spinnerFrame string) []strin
 	switch {
 	case toolOutcomeKindOf(b) != toolOutcomeNone:
 		before := len(result)
-		appendToolOutcome(&result, b, contentWidth, b.ToolCallDetailExpanded)
-		if len(result) > before && before > 1 && b.ToolCallDetailExpanded {
+		appendToolOutcome(&result, b, contentWidth, true)
+		if len(result) > before && before > 1 {
 			result = slices.Insert(result, before, "")
 		}
-	case b.ResultDone && b.ToolCallDetailExpanded:
+	case b.ResultDone:
 		// The success acknowledgement carries the "no reset has occurred
 		// yet" caveat, so an expanded card must keep it: only a later
 		// checkpoint event confirms the reset actually applied.

@@ -114,6 +114,23 @@ func toolUsesCompactDetailToggle(toolName string) bool {
 	return true
 }
 
+// toolCardAlwaysExpanded names the cards that render their whole body under a
+// bare tool-name header: report-style cards (done / complete / escalate /
+// compact_context), the delegation card (delegate), the interactive card
+// (question) and the notification card (notify). Their subject is prose the
+// body already renders in full, so a disclosure marker would only offer to
+// hide content the header no longer summarizes: pressing space on them is a
+// no-op, exactly like Delete cards.
+func toolCardAlwaysExpanded(toolName string) bool {
+	switch toolName {
+	case tools.NameDone, tools.NameComplete, tools.NameEscalate,
+		tools.NameCompactContext, tools.NameDelegate, tools.NameQuestion,
+		tools.NameNotify:
+		return true
+	}
+	return false
+}
+
 func toolDefaultsExpanded(toolName string) bool {
 	// Completion reports (complete/escalate) and delegated task cards render
 	// their full content by default; the user collapses them explicitly with

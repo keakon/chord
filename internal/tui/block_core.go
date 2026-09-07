@@ -283,9 +283,10 @@ func (b *Block) ToggleAtWidth(width int) bool {
 			return true
 		}
 	case BlockToolCall, BlockToolResult:
-		// Delete and Question cards keep their full content visible; the
-		// disclosure hint only means the card can be expanded or collapsed.
-		if b.Type == BlockToolCall && (b.ToolName == tools.NameDelete || b.ToolName == tools.NameQuestion) {
+		// Delete and the always-expanded report cards keep their full content
+		// visible; the disclosure hint only means the card can be expanded or
+		// collapsed.
+		if b.Type == BlockToolCall && (b.ToolName == tools.NameDelete || toolCardAlwaysExpanded(b.ToolName)) {
 			return false
 		}
 		if b.Type == BlockToolCall && (b.ToolName == tools.NameWrite || b.ToolName == tools.NameRead) {

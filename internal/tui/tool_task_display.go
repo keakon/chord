@@ -119,7 +119,9 @@ func taskToolExpandedHandleLines(result string) []string {
 		lines = append(lines, "previous_agent_id: "+sanitizeToolDisplayText(handle.PreviousAgentID))
 	}
 	if handle.TaskID != "" {
-		lines = append(lines, "task_id: "+sanitizeToolDisplayText(handle.TaskID))
+		// The readable form drops the internal "adhoc-" prefix, which the UI
+		// never surfaces (see the collapsed control-tool cards).
+		lines = append(lines, "task_id: "+sanitizeToolDisplayText(extractReadableTarget(handle.TaskID)))
 	}
 	if handle.Status != "" {
 		lines = append(lines, "status: "+sanitizeToolDisplayText(handle.Status))

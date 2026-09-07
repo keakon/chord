@@ -2253,7 +2253,9 @@ func TestExpandedUserTerminalMatchesBashContinuationFormatting(t *testing.T) {
 	}
 }
 
-func TestCollapsedCompleteShowsSummaryPreviewInsteadOfFullBody(t *testing.T) {
+func TestCompleteCardAlwaysRendersItsFullSummaryUnderABareHeader(t *testing.T) {
+	// Completion cards are always expanded behind a bare tool-name header:
+	// the summary is the body's prose section, not a header preview.
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
@@ -2265,14 +2267,20 @@ func TestCollapsedCompleteShowsSummaryPreviewInsteadOfFullBody(t *testing.T) {
 	}
 
 	joined := stripANSI(strings.Join(block.Render(88, ""), "\n"))
-	if !strings.Contains(joined, "Status: success · Changes: line one") {
-		t.Fatalf("expected collapsed Complete to show summary preview; got:\n%s", joined)
+	if !strings.Contains(joined, "line twelve") {
+		t.Fatalf("expected the Complete card to render its whole summary; got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "✓ ▸ complete") {
-		t.Fatalf("expected collapsed Complete header to show ▸ disclosure marker; got:\n%s", joined)
+	if !strings.Contains(joined, "✓ complete") {
+		t.Fatalf("expected Complete header to show the bare tool name; got:\n%s", joined)
 	}
-	if strings.Contains(joined, "line twelve") {
-		t.Fatalf("did not expect collapsed Complete to render full body; got:\n%s", joined)
+	if strings.Contains(joined, "▸") || strings.Contains(joined, "▾") {
+		t.Fatalf("expected Complete card to drop the disclosure marker; got:\n%s", joined)
+	}
+	if strings.Count(joined, "Status: success") < 1 {
+		t.Fatalf("expected the summary to stay visible; got:\n%s", joined)
+	}
+	if block.ToggleAtWidth(88) {
+		t.Fatalf("expected Complete card to ignore the expand/collapse toggle")
 	}
 }
 
@@ -3057,63 +3065,40 @@ func TestWebFetchHeaderShowsURLAndTimeout(t *testing.T) {
 	}
 }
 
-func TestCollapsedTaskShowsSpawnedSummary(t *testing.T) {
-	block := &Block{
-		ID:                     1,
-		Type:                   BlockToolCall,
-		ToolName:               "delegate",
-		Collapsed:              true,
-		Content:                `{"description":"review tests","agent_type":"reviewer"}`,
-		ResultContent:          `{"status":"started","task_id":"adhoc-7","agent_id":"reviewer-2","message":"running in background"}`,
-		ResultDone:             true,
-		ToolCallDetailExpanded: false,
-	}
-
-	joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
-	if strings.Contains(joined, "description:") {
-		t.Fatalf("expected Delegate view to avoid raw description label; got:\n%s", joined)
-	}
-	if !strings.Contains(joined, "delegate (reviewer)") {
-		t.Fatalf("expected Delegate header to show tool name + agent type only; got:\n%s", joined)
-	}
-	if strings.Contains(joined, "review tests") && !strings.Contains(joined, "(reviewer)") {
-		t.Fatalf("expected description to appear in body, not header; got:\n%s", joined)
-	}
-	if !strings.Contains(joined, "Spawned · reviewer-2") {
-		t.Fatalf("expected Delegate collapsed summary to show spawned agent; got:\n%s", joined)
-	}
-	if strings.Contains(joined, "adhoc-7") {
-		t.Fatalf("expected Delegate collapsed summary to not include task_id; got:\n%s", joined)
-	}
-}
-
-func TestCollapsedTaskShowsMultilineDescription(t *testing.T) {
+func TestTaskCardAlwaysRendersItsBodyUnderABareHeader(t *testing.T) {
+	// Delegation cards are always expanded: the header is the bare tool
+	// name (+ agent type), and the description it used to summarize belongs
+	// to the body's own section.
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
 		ToolName:               "delegate",
 		Collapsed:              true,
 		Content:                `{"description":"review tests\ncheck coverage\nupdate docs","agent_type":"reviewer"}`,
-		ResultContent:          `{"status":"started","task_id":"adhoc-7","agent_id":"reviewer-2"}`,
+		ResultContent:          `{"status":"started","task_id":"adhoc-7","agent_id":"reviewer-2","message":"running in background"}`,
 		ResultDone:             true,
 		ToolCallDetailExpanded: false,
 	}
 
 	joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
-	if !strings.Contains(joined, "review tests") {
-		t.Fatalf("expected collapsed Delegate to show first description line; got:\n%s", joined)
+	if !strings.Contains(joined, "✓ delegate (reviewer)") {
+		t.Fatalf("expected Delegate header to show the tool name and agent type; got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "check coverage") {
-		t.Fatalf("expected collapsed Delegate to show second description line; got:\n%s", joined)
+	if strings.Contains(joined, "▸") || strings.Contains(joined, "▾") {
+		t.Fatalf("expected Delegate card to drop the disclosure marker; got:\n%s", joined)
 	}
-	if strings.Contains(joined, "update docs") {
-		t.Fatalf("expected collapsed Delegate preview to hide later description lines; got:\n%s", joined)
+	for _, want := range []string{"↳ Description:", "review tests", "check coverage", "update docs", "↳ Worker:", "agent_id: reviewer-2", "task_id: 7"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected Delegate body to contain %q; got:\n%s", want, joined)
+		}
 	}
-	if !strings.Contains(joined, "✓ ▸ delegate (reviewer)") {
-		t.Fatalf("expected collapsed Delegate header to show ▸ disclosure marker and agent type; got:\n%s", joined)
+	if strings.Contains(joined, "adhoc-") {
+		t.Fatalf("expected Delegate body to not include the internal adhoc- prefix; got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "(reviewer)") {
-		t.Fatalf("expected Delegate header to show agent type; got:\n%s", joined)
+	// The collapsed flag no longer hides anything: the card renders the same
+	// body either way.
+	if block.ToggleAtWidth(90) {
+		t.Fatalf("expected Delegate card to ignore the expand/collapse toggle")
 	}
 }
 
@@ -3198,8 +3183,13 @@ func TestExpandedTaskShowsDescriptionAndWorkerWithTaskID(t *testing.T) {
 	if !strings.Contains(joined, "Worker:") {
 		t.Fatalf("expected expanded Delegate to show Worker section; got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "task_id:") || !strings.Contains(joined, "adhoc-7") {
-		t.Fatalf("expected expanded Delegate worker area to include task_id; got:\n%s", joined)
+	// The worker area keeps the task id in its readable form: the internal
+	// "adhoc-" prefix never reaches the UI.
+	if !strings.Contains(joined, "task_id: 7") {
+		t.Fatalf("expected expanded Delegate worker area to include the readable task_id; got:\n%s", joined)
+	}
+	if strings.Contains(joined, "adhoc-") {
+		t.Fatalf("expected the internal adhoc- prefix to stay hidden; got:\n%s", joined)
 	}
 }
 
@@ -4651,6 +4641,41 @@ func TestDoneCallRendersDoneReportMarkdown(t *testing.T) {
 	}
 }
 
+func TestDoneCallHeaderKeepsBareToolLine(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+
+	block := &Block{
+		ID:                1,
+		Type:              BlockToolCall,
+		ToolName:          "done",
+		ResultDone:        true,
+		ResultStatus:      agent.ToolResultStatusSuccess,
+		ResultContent:     "done",
+		DoneReport:        "## Completion status\n改动已全部提交",
+		PersistedDuration: 19 * time.Second,
+	}
+
+	lines := stripANSILines(block.renderDoneCall(100, ""))
+	var header string
+	for _, line := range lines {
+		if strings.Contains(line, "done") {
+			header = line
+			break
+		}
+	}
+	if header == "" {
+		t.Fatalf("expected a header line naming the tool, got:\n%s", strings.Join(lines, "\n"))
+	}
+	if strings.Contains(header, "Completion status") || strings.Contains(header, "改动已全部提交") {
+		t.Fatalf("expected header to omit the report summary, got %q", header)
+	}
+	for _, line := range lines {
+		if strings.Contains(line, "⏱") {
+			t.Fatalf("expected done card to omit the elapsed suffix, got:\n%s", strings.Join(lines, "\n"))
+		}
+	}
+}
+
 func TestDoneCallUsesProseWidthForReportCard(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 
@@ -5027,7 +5052,10 @@ func TestCompactContextCallRendersStructuredSections(t *testing.T) {
 	}
 }
 
-func TestCompactContextCallCollapsedShowsObjectiveAndNextOnly(t *testing.T) {
+func TestCompactContextCallAlwaysShowsEverySectionUnderABareHeader(t *testing.T) {
+	// The checkpoint card is always expanded behind a bare tool-name
+	// header: the objective it used to summarize is the body's own
+	// ↳ Objective: section.
 	block := &Block{
 		ID:         1,
 		Type:       BlockToolCall,
@@ -5036,36 +5064,28 @@ func TestCompactContextCallCollapsedShowsObjectiveAndNextOnly(t *testing.T) {
 		RawArgs:    `{"active_objective":"完成用户的最终汇报","completed":["a","b","c"],"decisions":["d"],"open_issues":["o"],"next_step":"先按输出最终完成报告","state_files":["n.md"]}`,
 		ResultDone: true,
 	}
-	// collapsed (default for compact_context)
 	plain := stripANSI(strings.Join(block.renderCompactContextCall(140, ""), "\n"))
 
-	if strings.Contains(plain, "↳ Completed:") {
-		t.Fatalf("expected collapsed card to hide section headers, got:\n%s", plain)
+	for _, want := range []string{"↳ Objective:", "↳ Completed:", "↳ Decisions:", "↳ Open issues:", "↳ Next:", "↳ State files:"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("expected the always-expanded card to show %q, got:\n%s", want, plain)
+		}
 	}
-	if !strings.Contains(plain, "完成用户的最终汇报") {
-		t.Fatalf("expected collapsed card to surface the objective, got:\n%s", plain)
+	if strings.Contains(plain, "compact_context 完成用户的最终汇报") {
+		t.Fatalf("expected the objective to stay off the header, got:\n%s", plain)
 	}
-	if !strings.Contains(plain, "先按输出最终完成报告") {
-		t.Fatalf("expected collapsed card to surface the next_step, got:\n%s", plain)
+	if strings.Contains(plain, "▸") || strings.Contains(plain, "▾") {
+		t.Fatalf("expected the disclosure marker to be gone, got:\n%s", plain)
 	}
-	// The objective and the next step share one "↳" body row, and the
-	// disclosure marker stays in the header: a body-level ▸ read as a
-	// second, nested toggle.
-	if got := strings.Count(plain, "↳"); got != 1 {
-		t.Fatalf("expected exactly one collapsed summary row, got %d:\n%s", got, plain)
-	}
-	if got := strings.Count(plain, "▸"); got != 1 {
-		t.Fatalf("expected the ▸ marker only in the header, got %d:\n%s", got, plain)
+	if block.ToggleAtWidth(140) {
+		t.Fatalf("expected the checkpoint card to ignore the expand/collapse toggle")
 	}
 }
 
-func TestCompactContextCallStaysCollapsedWhileRunning(t *testing.T) {
-	// The card is a checkpoint marker, not a document: while the arguments
-	// stream the header's "N chars received" progress is the whole card, and
-	// once they decode the body is one summary row - otherwise the six
-	// sections flash open and then fold away the moment the call finishes,
-	// and a resumed session (whose compact_context call carries no result)
-	// opens with a screenful per checkpoint.
+func TestCompactContextCallStaysBareWhileArgumentsStream(t *testing.T) {
+	// While the arguments stream, nothing decodes: the header's "N chars
+	// received" progress is the whole card, so the six sections never flash
+	// half-decoded and then fold away when the call finishes.
 	streaming := &Block{
 		ID:       1,
 		Type:     BlockToolCall,
@@ -5085,18 +5105,15 @@ func TestCompactContextCallStaysCollapsedWhileRunning(t *testing.T) {
 	}
 	plain = stripANSI(strings.Join(running.renderCompactContextCall(140, ""), "\n"))
 	for _, sec := range []string{"↳ Objective:", "↳ Completed:", "↳ Decisions:", "↳ Next:"} {
-		if strings.Contains(plain, sec) {
-			t.Fatalf("expected a running card to stay collapsed, found %q:\n%s", sec, plain)
+		if !strings.Contains(plain, sec) {
+			t.Fatalf("expected a running card with decodable args to show %q:\n%s", sec, plain)
 		}
 	}
-	if !strings.Contains(plain, "compact_context 完成用户的最终汇报") {
-		t.Fatalf("expected the objective on the header index line, got:\n%s", plain)
-	}
-	if !strings.Contains(plain, "↳ → 输出最终完成报告") {
-		t.Fatalf("expected the next step on the collapsed body row, got:\n%s", plain)
+	if strings.Contains(plain, "compact_context 完成用户的最终汇报") {
+		t.Fatalf("expected the objective to stay off the header, got:\n%s", plain)
 	}
 
-	// A restored call with no result still collapses.
+	// A restored call with no result renders the same body.
 	restored := &Block{
 		ID:        1,
 		Type:      BlockToolCall,
@@ -5106,8 +5123,8 @@ func TestCompactContextCallStaysCollapsedWhileRunning(t *testing.T) {
 		Collapsed: true,
 	}
 	plain = stripANSI(strings.Join(restored.Render(140, ""), "\n"))
-	if strings.Contains(plain, "↳ Completed:") {
-		t.Fatalf("expected a restored card to stay collapsed, got:\n%s", plain)
+	if !strings.Contains(plain, "↳ Completed:") {
+		t.Fatalf("expected a restored card to show its sections, got:\n%s", plain)
 	}
 }
 
@@ -5136,12 +5153,14 @@ func TestCompactContextCallSuccessExpandedShowsResult(t *testing.T) {
 	if objectiveIdx := strings.Index(plain, "↳ Objective:"); objectiveIdx == -1 || objectiveIdx > resultIdx {
 		t.Fatalf("expected the sections to render above the result envelope, got:\n%s", plain)
 	}
-	// Collapsed cards stay terse: no result body, no section headers.
+	// The collapsed flag no longer hides the body: the card is always
+	// expanded, so the acknowledgement stays visible either way.
+	block.Collapsed = true
 	block.ToolCallDetailExpanded = false
 	block.InvalidateCache()
 	collapsed := stripANSI(strings.Join(block.renderCompactContextCall(140, ""), "\n"))
-	if strings.Contains(collapsed, "↳ Result:") || strings.Contains(collapsed, "No reset has occurred yet") {
-		t.Fatalf("expected collapsed card to stay terse, got:\n%s", collapsed)
+	if !strings.Contains(collapsed, "↳ Result:") || !strings.Contains(collapsed, "No reset has occurred yet") {
+		t.Fatalf("expected the card to keep the acknowledgement regardless of the collapse flags, got:\n%s", collapsed)
 	}
 }
 
@@ -5172,15 +5191,17 @@ func TestCompactContextCallUnknownFieldsKeepSubmittedArgs(t *testing.T) {
 	if !strings.Contains(plain, "↳ Error:") {
 		t.Fatalf("expected the error envelope below the arguments, got:\n%s", plain)
 	}
-	// Collapsed keeps the failure terse: status only, no argument dump.
+	// The card is always expanded, so the failure reads the same regardless
+	// of the collapse flags.
+	block.Collapsed = true
 	block.ToolCallDetailExpanded = false
 	block.InvalidateCache()
 	collapsed := stripANSI(strings.Join(block.renderCompactContextCall(140, ""), "\n"))
-	if strings.Contains(collapsed, "↳ Arguments:") {
-		t.Fatalf("expected collapsed failure to hide the argument dump, got:\n%s", collapsed)
+	if !strings.Contains(collapsed, "↳ Arguments:") {
+		t.Fatalf("expected the argument dump to stay visible, got:\n%s", collapsed)
 	}
 	if !strings.Contains(collapsed, "missing required argument") {
-		t.Fatalf("expected collapsed failure to keep the error message, got:\n%s", collapsed)
+		t.Fatalf("expected the error message to stay visible, got:\n%s", collapsed)
 	}
 }
 
@@ -5220,7 +5241,7 @@ func TestCompactContextCallRawArgFallbackIsBounded(t *testing.T) {
 
 func TestCompactContextCallRenderDispatchesStructuredCard(t *testing.T) {
 	// renderToolCall must route compact_context to the structured renderer,
-	// and the space toggle must keep flipping the card open and closed.
+	// and the card is always expanded: the space toggle is a no-op.
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
@@ -5230,26 +5251,19 @@ func TestCompactContextCallRenderDispatchesStructuredCard(t *testing.T) {
 		ResultContent: "Context checkpoint request accepted.",
 	}
 
-	collapsed := stripANSI(strings.Join(block.Render(140, ""), "\n"))
-	if strings.Contains(collapsed, "↳ Completed:") {
-		t.Fatalf("expected the collapsed structured card from Render, got:\n%s", collapsed)
+	rendered := stripANSI(strings.Join(block.Render(140, ""), "\n"))
+	if !strings.Contains(rendered, "↳ Completed:") {
+		t.Fatalf("expected the structured card from Render, got:\n%s", rendered)
 	}
-	if !strings.Contains(collapsed, "compact_context 完成用户的最终汇报") {
-		t.Fatalf("expected the objective on the header from Render, got:\n%s", collapsed)
+	if !strings.Contains(rendered, "↳ Next:") || !strings.Contains(rendered, "先按输出最终完成报告") {
+		t.Fatalf("expected the next step under its own section, got:\n%s", rendered)
 	}
-	if !strings.Contains(collapsed, "↳ → 先按输出最终完成报告") {
-		t.Fatalf("expected the next step on the collapsed body row, got:\n%s", collapsed)
+	if block.ToggleAtWidth(140) {
+		t.Fatalf("expected the compact_context card to ignore the expand/collapse toggle")
 	}
-
-	if !block.ToggleAtWidth(140) || !block.ToolCallDetailExpanded {
-		t.Fatalf("expected the toggle to expand the card, expanded=%v", block.ToolCallDetailExpanded)
-	}
-	expanded := stripANSI(strings.Join(block.Render(140, ""), "\n"))
-	if !strings.Contains(expanded, "↳ Completed:") {
-		t.Fatalf("expected the expanded structured card from Render, got:\n%s", expanded)
-	}
-	if !block.ToggleAtWidth(140) || block.ToolCallDetailExpanded {
-		t.Fatalf("expected the toggle to collapse the card again, expanded=%v", block.ToolCallDetailExpanded)
+	after := stripANSI(strings.Join(block.Render(140, ""), "\n"))
+	if after != rendered {
+		t.Fatalf("expected the card to render identically after the toggle:\n%s", after)
 	}
 }
 
@@ -5317,7 +5331,7 @@ func TestCompactContextCallErrorExpandedShowsArgsAndError(t *testing.T) {
 	}
 }
 
-func TestCompactContextCallErrorCollapsedHidesSections(t *testing.T) {
+func TestCompactContextCallErrorShowsSections(t *testing.T) {
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
@@ -5328,23 +5342,23 @@ func TestCompactContextCallErrorCollapsedHidesSections(t *testing.T) {
 		ResultStatus:  agent.ToolResultStatusError,
 		ResultContent: "Error: arguments do not match compact_context schema",
 	}
-	// Collapsed default (ToolCallDetailExpanded left false).
+	// The card is always expanded (ToolCallDetailExpanded left false).
 
 	plain := stripANSI(strings.Join(block.renderCompactContextCall(140, ""), "\n"))
 
-	// Collapsed error stays terse: the error envelope plus the objective /
-	// next summary, never the full section dump.
+	// The error envelope closes the body, after the submitted args: a
+	// failure is exactly when the six sections matter most.
 	if !strings.Contains(plain, "↳ Error:") {
-		t.Fatalf("expected ↳ Error: header in collapsed error state, got:\n%s", plain)
+		t.Fatalf("expected ↳ Error: header in error state, got:\n%s", plain)
 	}
 	for _, sec := range []string{"↳ Completed:", "↳ Decisions:", "↳ Open issues:", "↳ State files:"} {
-		if strings.Contains(plain, sec) {
-			t.Fatalf("expected collapsed error state to hide %q section, got:\n%s", sec, plain)
+		if !strings.Contains(plain, sec) {
+			t.Fatalf("expected error state to show %q section, got:\n%s", sec, plain)
 		}
 	}
 }
 
-func TestCompactContextCallErrorCollapsedShowsDisclosureGlyph(t *testing.T) {
+func TestCompactContextCallErrorDropsDisclosureGlyph(t *testing.T) {
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
@@ -5355,22 +5369,21 @@ func TestCompactContextCallErrorCollapsedShowsDisclosureGlyph(t *testing.T) {
 		ResultStatus:  agent.ToolResultStatusError,
 		ResultContent: "Error: arguments do not match compact_context schema",
 	}
-	// Collapsed default (ToolCallDetailExpanded left false).
+	// The card is always expanded (ToolCallDetailExpanded left false).
 
 	plain := stripANSI(strings.Join(block.renderCompactContextCall(140, ""), "\n"))
 
-	// A failed card still expands to the submitted args, so the collapsed
-	// header must carry the ▸ disclosure glyph (✗ ▸) like the generic
-	// expandable tool cards — otherwise it looks non-expandable.
-	if !strings.Contains(plain, "▸") {
-		t.Fatalf("expected collapsed error card to show the ▸ disclosure glyph, got:\n%s", plain)
+	// A failed card shows its submitted args without being opened, so the
+	// header carries no ▸ glyph — only the ✗ status.
+	if strings.Contains(plain, "▸") || strings.Contains(plain, "▾") {
+		t.Fatalf("expected the error card to drop the disclosure glyph, got:\n%s", plain)
 	}
 	if !strings.Contains(plain, "✗") {
-		t.Fatalf("expected collapsed error card to show the ✗ status glyph, got:\n%s", plain)
+		t.Fatalf("expected the error card to show the ✗ status glyph, got:\n%s", plain)
 	}
 }
 
-func TestEscalateCallErrorCollapsedShowsDisclosureGlyph(t *testing.T) {
+func TestEscalateCallErrorDropsDisclosureGlyphAndKeepsReason(t *testing.T) {
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
@@ -5380,15 +5393,20 @@ func TestEscalateCallErrorCollapsedShowsDisclosureGlyph(t *testing.T) {
 		ResultStatus:  agent.ToolResultStatusError,
 		ResultContent: "arguments do not match escalate schema: args.files_changed must be an array, got string \"src/auth.go\"",
 	}
-	// Collapsed default.
+	// Always expanded: the flags no longer gate the body.
 
 	plain := stripANSI(strings.Join(block.renderProseControlCall(140, ""), "\n"))
 
-	// A failed Complete/Escalate card still expands to its report, so the
-	// collapsed header must carry the ▸ disclosure glyph (✗ ▸) like the
-	// generic expandable tool cards.
-	if !strings.Contains(plain, "▸") {
-		t.Fatalf("expected collapsed error escalate card to show the ▸ disclosure glyph, got:\n%s", plain)
+	// A failed Complete/Escalate card shows its report and the envelope
+	// without being opened, so the header carries no ▸ glyph.
+	if strings.Contains(plain, "▸") || strings.Contains(plain, "▾") {
+		t.Fatalf("expected the error escalate card to drop the disclosure glyph, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "Need approval to rotate credentials") {
+		t.Fatalf("expected the escalate reason to stay visible, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "↳ Error:") {
+		t.Fatalf("expected the error envelope in the body, got:\n%s", plain)
 	}
 }
 

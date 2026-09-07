@@ -84,7 +84,7 @@ func TestToolCardsReportCancellationOnce(t *testing.T) {
 // indented body.
 func TestCollapsedToolCardsKeepTheOutcomeOnOneLine(t *testing.T) {
 	ApplyTheme(DefaultTheme())
-	for _, name := range []string{tools.NameShell, tools.NameWebFetch, tools.NameSkill, tools.NameSpawn, tools.NameCompactContext} {
+	for _, name := range []string{tools.NameShell, tools.NameWebFetch, tools.NameSkill, tools.NameSpawn} {
 		block := outcomeCardFixture(name, outcomeCardArgs[name], "Error: exit code 1", agent.ToolResultStatusError)
 		plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
 		if !strings.Contains(plain, "↳ Error: exit code 1") {
@@ -155,11 +155,10 @@ func TestShellCancelledCardReportsTheCancellation(t *testing.T) {
 	}
 }
 
-// TestCardSubjectsRideTheHeader pins the header/body split: the argument that
-// says what a call is about belongs on the header index line, and the body
-// must not repeat it. Prose subjects (a report, a description, a message, an
-// objective) are folded to their first sentence; path-shaped subjects go up
-// whole, with their qualifier in the option group beside them.
+// TestCardSubjectsRideTheHeader pins the header/body split for the cards that
+// still index by an argument: the argument that says what a call is about
+// belongs on the header line, and the body must not repeat it. Path-shaped
+// subjects go up whole, with their qualifier in the option group beside them.
 func TestCardSubjectsRideTheHeader(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	cases := []struct {
@@ -168,32 +167,9 @@ func TestCardSubjectsRideTheHeader(t *testing.T) {
 		args       string
 		result     string
 		wantHeader string
-		// notInBody must not appear a second time anywhere in the card.
+		// once must not appear a second time anywhere in the card.
 		once string
 	}{
-		{
-			name:       "complete summary",
-			tool:       tools.NameComplete,
-			args:       `{"summary":"Unified the card surfaces. Follow-up work remains."}`,
-			result:     "accepted",
-			wantHeader: "complete Unified the card surfaces.",
-		},
-		{
-			name:       "delegate description",
-			tool:       tools.NameDelegate,
-			args:       `{"agent_type":"reviewer","description":"Audit the tool card styles"}`,
-			result:     "task handle: t-1",
-			wantHeader: "delegate (reviewer) Audit the tool card styles",
-			once:       "Audit the tool card styles",
-		},
-		{
-			name:       "notify message",
-			tool:       tools.NameNotify,
-			args:       `{"message":"build finished","kind":"info"}`,
-			result:     "delivered",
-			wantHeader: "notify (info) build finished",
-			once:       "build finished",
-		},
 		{
 			name:       "delete paths",
 			tool:       tools.NameDelete,
@@ -201,14 +177,6 @@ func TestCardSubjectsRideTheHeader(t *testing.T) {
 			result:     "delete completed.\n\nDeleted (2):\n- tmp/a.go\n- tmp/b.go",
 			wantHeader: "delete 2 files (clean up)",
 			once:       "clean up",
-		},
-		{
-			name:       "compact_context objective",
-			tool:       tools.NameCompactContext,
-			args:       `{"active_objective":"Audit the card styles","next_step":"Commit and report"}`,
-			result:     "accepted",
-			wantHeader: "compact_context Audit the card styles",
-			once:       "Audit the card styles",
 		},
 	}
 	for _, c := range cases {
@@ -224,6 +192,65 @@ func TestCardSubjectsRideTheHeader(t *testing.T) {
 			}
 			if c.once != "" && strings.Count(plain, c.once) != 1 {
 				t.Fatalf("expected %q only on the header, got:\n%s", c.once, plain)
+			}
+		})
+	}
+}
+
+// TestAlwaysExpandedCardsKeepProseOffTheHeader pins the other half of the
+// split: report-style cards (complete / delegate / notify / compact_context)
+// render the whole prose in their body, so their header is the bare tool name
+// and the subject must not appear twice.
+func TestAlwaysExpandedCardsKeepProseOffTheHeader(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	cases := []struct {
+		name    string
+		tool    string
+		args    string
+		subject string
+	}{
+		{
+			name:    "complete summary",
+			tool:    tools.NameComplete,
+			args:    `{"summary":"Unified the card surfaces. Follow-up work remains."}`,
+			subject: "Unified the card surfaces.",
+		},
+		{
+			name:    "delegate description",
+			tool:    tools.NameDelegate,
+			args:    `{"agent_type":"reviewer","description":"Audit the tool card styles"}`,
+			subject: "Audit the tool card styles",
+		},
+		{
+			name:    "notify message",
+			tool:    tools.NameNotify,
+			args:    `{"message":"build finished","kind":"info"}`,
+			subject: "build finished",
+		},
+		{
+			name:    "compact_context objective",
+			tool:    tools.NameCompactContext,
+			args:    `{"active_objective":"Audit the card styles","next_step":"Commit and report"}`,
+			subject: "Audit the card styles",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			block := outcomeCardFixture(c.tool, c.args, "accepted", "")
+			for _, collapsed := range []bool{true, false} {
+				block.Collapsed = collapsed
+				block.ToolCallDetailExpanded = !collapsed
+				block.InvalidateCache()
+				plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+				if strings.Contains(plain, c.tool+" "+c.subject) {
+					t.Fatalf("expected %q off the header (collapsed=%v), got:\n%s", c.subject, collapsed, plain)
+				}
+				if !strings.Contains(plain, c.subject) {
+					t.Fatalf("expected %q in the body (collapsed=%v), got:\n%s", c.subject, collapsed, plain)
+				}
+				if strings.Contains(plain, "▸") || strings.Contains(plain, "▾") {
+					t.Fatalf("expected no disclosure glyph (collapsed=%v), got:\n%s", collapsed, plain)
+				}
 			}
 		})
 	}
@@ -290,11 +317,12 @@ func TestGenericToolCardUsesTheSharedShape(t *testing.T) {
 	}
 }
 
-// TestQuestionCardCarriesItsSubjectAndSections pins the question card on the
-// shared shape: the question rides the header, each question block opens with
-// a "↳ Header:" section rather than a "▸" separator (which now means "this
-// card toggles"), and the selection stays visible after the answer arrives.
-func TestQuestionCardCarriesItsSubjectAndSections(t *testing.T) {
+// TestQuestionCardCarriesItsSectionsUnderABareHeader pins the question card on
+// the shared shape: the header is the bare tool name because every question is
+// rendered in full below it, each question block opens with a "↳ Header:"
+// section rather than a "▸" separator (which now means "this card toggles"),
+// and the selection stays visible after the answer arrives.
+func TestQuestionCardCarriesItsSectionsUnderABareHeader(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	args := `{"questions":[{"question":"Which branch?","header":"Target branch","options":[{"label":"main","description":"trunk"},{"label":"develop","description":"integration"}]}]}`
 	block := &Block{
@@ -310,8 +338,14 @@ func TestQuestionCardCarriesItsSubjectAndSections(t *testing.T) {
 
 	plain := stripANSI(strings.Join(block.Render(96, ""), "\n"))
 
-	if !strings.Contains(plain, "question Which branch?") {
-		t.Fatalf("expected the question on the header, got:\n%s", plain)
+	if !strings.Contains(plain, "✓ question") {
+		t.Fatalf("expected the bare tool-name header, got:\n%s", plain)
+	}
+	if strings.Contains(plain, "question Which branch?") {
+		t.Fatalf("expected the question off the header, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "Which branch?") {
+		t.Fatalf("expected the question in the body, got:\n%s", plain)
 	}
 	if !strings.Contains(plain, "↳ Target branch:") {
 		t.Fatalf("expected the question header as a section, got:\n%s", plain)

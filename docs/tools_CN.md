@@ -69,7 +69,9 @@
 
 ### 长文本控制工具
 
-`done`、`complete` 和 `escalate` 可能携带较长的 Markdown 报告、总结或升级原因。参数仍在流式接收时，TUI 会临时显示 `N chars received`；接收完成后，展开工具卡即可看到按 Markdown 渲染的正文。`complete` 还会保留结构化完成信息，例如修改文件、验证命令、限制、风险、后续建议和 artifact 引用。
+`done`、`complete` 和 `escalate` 可能携带较长的 Markdown 报告、总结或升级原因。参数仍在流式接收时，TUI 会临时显示 `N chars received`；接收完成后，正文按 Markdown 直接渲染在卡片里。`complete` 还会保留结构化完成信息，例如修改文件、验证命令、限制、风险、后续建议和 artifact 引用。
+
+这类卡片恒展开，标题行只有工具名：报告本身就是卡片的全部内容，折叠成一行预览、再把摘要压回标题，只是把正文里已有的内容重说一遍。`compact_context`（目标、已完成、决策、遗留问题、下一步、状态文件）、`delegate`（描述、worker 句柄、完成信息）、`question`（每个问题、选项与选中项）和 `notify`（target、kind、消息）同样如此：没有折叠标记，`o` / `Enter` / `Space` 对它们不生效。以参数作为索引的卡片——`read`、`write`、`edit`、`apply_patch`、`delete`、`grep`、`glob`、`handoff` 等——保留可折叠正文和标题索引行；`cancel` 也照旧可折叠，并在标题保留 `cancel <task_id> (<原因>)`。
 
 `delegate` 只有一个工具结果，即异步启动句柄。后续 `complete` 调用和 mailbox 更新是独立的 runtime 事件，按稳定的 `task_id` 更新已有委派任务/卡片，不会生成额外的 `delegate` 工具结果。每次 `complete` 报告都会在 owner 视图创建一张 **AGENT COMPLETE** 通知卡；worker 终止失败显示为 **AGENT BLOCKED**，并唤醒直接 owner。
 

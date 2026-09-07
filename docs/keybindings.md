@@ -68,7 +68,7 @@ bindings separately.
 | `}` / `{`                 | Jump to the next / previous user message card (turn boundary)                         |
 | `)` / `(`                 | Jump to the next / previous assistant message card                                    |
 | `]` / `[`                 | Jump to the next / previous message card of the same type as the current card          |
-| `o` / `Enter` / `Space`   | Toggle collapse / expand on the current card; on an image card, open the image       |
+| `o` / `Enter` / `Space`   | Toggle collapse / expand on the current card (cards that are always expanded ignore it); on an image card, open the image       |
 | `e`                       | Edit the focused user message; forks only when that message is not the transcript tail |
 
 The structural jumps (`}`, `)`, `]` and their counterparts) accept a count prefix, so `3}` moves three user cards forward and `2(` moves two assistant cards backward. Each jump skips all other card types and never lands on error cards; when no matching card exists in that direction the view stays put. `]` / `[` use the focused card's type as the template, or the card at the top of the viewport when nothing is focused.
