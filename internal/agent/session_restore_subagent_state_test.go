@@ -621,6 +621,179 @@ func TestRestoreSessionAtStartupUsesSnapshotSubAgentState(t *testing.T) {
 	}
 }
 
+// seedSettledSnapshotConflictSession lays out a session that crashed in the
+// window where the terminal outcome is already durable (settlement journal
+// settled, tasks.json record terminal) but the recovery snapshot still lists
+// instanceID as a running SubAgent under taskID. The snapshot predates the
+// terminal transition, so it must not be allowed to downgrade the settled
+// record during restore. tasks.json is left for the caller so each test can
+// choose whether the registry record mirrors the settlement (the durable shape
+// commitTerminalTask persists) or lost that mirror.
+func seedSettledSnapshotConflictSession(t *testing.T, taskID, instanceID string) (projectRoot, sessionDir string, settlement *TaskSettlement) {
+	t.Helper()
+	projectRoot = t.TempDir()
+	sessionDir = testProjectSessionDir(t, projectRoot, "settled-snapshot-conflict")
+	if err := os.MkdirAll(filepath.Join(sessionDir, "subagents"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(subagents): %v", err)
+	}
+	rm := recovery.NewRecoveryManager(sessionDir)
+	if err := rm.PersistMessage("main", message.Message{Role: "user", Content: "resume this session"}); err != nil {
+		t.Fatalf("PersistMessage(main): %v", err)
+	}
+	if err := rm.PersistMessage(instanceID, message.Message{Role: "user", Content: "Investigate issue"}); err != nil {
+		t.Fatalf("PersistMessage(%s): %v", instanceID, err)
+	}
+	if err := rm.SaveSnapshot(&recovery.SessionSnapshot{
+		CreatedAt: time.Now(),
+		ActiveAgents: []recovery.AgentSnapshot{{
+			InstanceID:   instanceID,
+			TaskID:       taskID,
+			AgentDefName: "restorer",
+			TaskDesc:     "Investigate issue",
+			State:        string(SubAgentStateRunning),
+			LastSummary:  "running the investigation",
+		}},
+	}); err != nil {
+		t.Fatalf("SaveSnapshot: %v", err)
+	}
+	rm.Close()
+	settlement = &TaskSettlement{
+		TaskID:           taskID,
+		Attempt:          1,
+		TerminalRevision: 2,
+		Outcome:          string(SubAgentStateCompleted),
+		Summary:          "investigation done",
+		SettledAt:        time.Now(),
+	}
+	if err := appendTaskSettlement(sessionDir, settlement); err != nil {
+		t.Fatalf("appendTaskSettlement: %v", err)
+	}
+	return projectRoot, sessionDir, settlement
+}
+
+// assertRestoredTaskStillCompleted checks the settled-completed invariant after
+// a full restoreSessionState pass: the task record State, the registry on disk
+// (restore repersists it), the mirrored settlement, and the restored agent's
+// visible state must all stay completed even though the recovery snapshot said
+// the instance was running.
+func assertRestoredTaskStillCompleted(t *testing.T, a *MainAgent, sessionDir, taskID, instanceID string) {
+	t.Helper()
+	rec := a.taskRecordByTaskID(taskID)
+	if rec == nil {
+		t.Fatalf("task record for %q missing after restore", taskID)
+	}
+	if rec.State != string(SubAgentStateCompleted) {
+		t.Fatalf("task record State = %q after restore, want %q: a stale snapshot-derived state downgraded the settled completed record", rec.State, SubAgentStateCompleted)
+	}
+	if rec.LatestSettlement == nil || rec.LatestSettlement.Outcome != string(SubAgentStateCompleted) {
+		t.Fatalf("task record lost its completed settlement after restore: %#v", rec.LatestSettlement)
+	}
+	onDisk, err := loadDurableTaskRecords(sessionDir)
+	if err != nil {
+		t.Fatalf("loadDurableTaskRecords: %v", err)
+	}
+	if got := onDisk[taskID]; got == nil || got.State != string(SubAgentStateCompleted) {
+		t.Fatalf("persisted task record after restore = %#v, want State completed", got)
+	}
+	found := false
+	for _, info := range a.GetSubAgents() {
+		if info.InstanceID != instanceID {
+			continue
+		}
+		found = true
+		if info.State != string(SubAgentStateCompleted) {
+			t.Fatalf("restored agent %q visible state = %q, want %q", instanceID, info.State, SubAgentStateCompleted)
+		}
+	}
+	if !found {
+		t.Fatalf("restored agent %q not visible after restore", instanceID)
+	}
+}
+
+// TestRestoreSessionDurableSettledRecordSurvivesStaleRunningSnapshot is the
+// conflict case where tasks.json and the settlement journal both say completed
+// while the recovery snapshot still lists the instance as running, and the
+// tasks.json record already mirrors the durable settlement (the shape
+// commitTerminalTask persists). Restore must keep the record completed; the
+// snapshot only records which instances were once live and must not flip the
+// terminal state back to the non-terminal state it derives from the stale
+// snapshot.
+func TestRestoreSessionDurableSettledRecordSurvivesStaleRunningSnapshot(t *testing.T) {
+	const (
+		taskID     = "adhoc-settled-mirror"
+		instanceID = "agent-settled-mirror"
+	)
+	projectRoot, sessionDir, settlement := seedSettledSnapshotConflictSession(t, taskID, instanceID)
+	record := &DurableTaskRecord{
+		TaskID:            taskID,
+		AgentDefName:      "restorer",
+		TaskDesc:          "Investigate issue",
+		State:             string(SubAgentStateCompleted),
+		ResumePolicy:      durableTaskResumePolicy(SubAgentStateCompleted),
+		LatestInstanceID:  instanceID,
+		InstanceHistory:   []string{instanceID},
+		LastSummary:       settlement.Summary,
+		Attempt:           1,
+		LifecycleRevision: settlement.TerminalRevision,
+		LatestSettlement:  cloneTaskSettlement(settlement),
+		SettlementDurable: true,
+		CreatedAt:         time.Now(),
+		UpdatedAt:         time.Now(),
+	}
+	if err := persistDurableTaskRecords(sessionDir, map[string]*DurableTaskRecord{taskID: record}); err != nil {
+		t.Fatalf("persistDurableTaskRecords: %v", err)
+	}
+	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
+	a.SetAgentConfigs(map[string]*config.AgentConfig{
+		"restorer": {Name: "restorer", Mode: "subagent", Models: map[string][]string{"default": {"test/test-model"}}},
+	})
+	a.SetLLMFactory(func(string, []string, string) *llm.Client { return newTestLLMClient() })
+	if _, err := a.restoreSessionState(sessionDir); err != nil {
+		t.Fatalf("restoreSessionState: %v", err)
+	}
+	assertRestoredTaskStillCompleted(t, a, sessionDir, taskID, instanceID)
+}
+
+// TestRestoreSessionSettlementRepairSurvivesStaleRunningSnapshotRestore covers
+// the conflict case where the registry write lost the settlement mirror (the
+// crash landed between the journal append and the registry persist), so
+// repairTaskRecordsFromSettlements is the step that re-establishes completed
+// during restore. That repair result must survive the rest of the restore
+// instead of being flipped back to the snapshot-derived state.
+func TestRestoreSessionSettlementRepairSurvivesStaleRunningSnapshotRestore(t *testing.T) {
+	const (
+		taskID     = "adhoc-settled-repair"
+		instanceID = "agent-settled-repair"
+	)
+	projectRoot, sessionDir, settlement := seedSettledSnapshotConflictSession(t, taskID, instanceID)
+	record := &DurableTaskRecord{
+		TaskID:            taskID,
+		AgentDefName:      "restorer",
+		TaskDesc:          "Investigate issue",
+		State:             string(SubAgentStateCompleted),
+		ResumePolicy:      durableTaskResumePolicy(SubAgentStateCompleted),
+		LatestInstanceID:  instanceID,
+		InstanceHistory:   []string{instanceID},
+		LastSummary:       settlement.Summary,
+		Attempt:           1,
+		LifecycleRevision: settlement.TerminalRevision,
+		CreatedAt:         time.Now(),
+		UpdatedAt:         time.Now(),
+	}
+	if err := persistDurableTaskRecords(sessionDir, map[string]*DurableTaskRecord{taskID: record}); err != nil {
+		t.Fatalf("persistDurableTaskRecords: %v", err)
+	}
+	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
+	a.SetAgentConfigs(map[string]*config.AgentConfig{
+		"restorer": {Name: "restorer", Mode: "subagent", Models: map[string][]string{"default": {"test/test-model"}}},
+	})
+	a.SetLLMFactory(func(string, []string, string) *llm.Client { return newTestLLMClient() })
+	if _, err := a.restoreSessionState(sessionDir); err != nil {
+		t.Fatalf("restoreSessionState: %v", err)
+	}
+	assertRestoredTaskStillCompleted(t, a, sessionDir, taskID, instanceID)
+}
+
 func TestRestoreSessionRebuildsTaskIdentityFromSnapshot(t *testing.T) {
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "snapshot-task-identity")

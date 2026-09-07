@@ -552,7 +552,26 @@ func (a *MainAgent) loadSessionState(sessionPath string) (*loadedSessionState, e
 	if usageLedgerEventCount == 0 && legacyUsageSnapshotPresent(sessionPath) {
 		log.Warnf("session restore: legacy usage fields found but not migrated; session=%v", filepath.Base(sessionPath))
 	}
+	// The durable task registry plus the settlement repair below is the sole
+	// authority for a terminal task state during restore. The records rebuilt
+	// from loaded subagent states derive their state from the recovery
+	// snapshot, which can lag the registry (a stale "running" snapshot) and
+	// must not flip a settled terminal record back to that derived state.
+	// mergeDurableTaskRecords lets a non-empty extra state win, so re-assert
+	// the terminal states captured from the durable registry after the merge.
+	settledStates := make(map[string]string)
+	for taskID, rec := range loaded.TaskRecords {
+		if rec != nil && isTerminalSubAgentState(SubAgentState(strings.TrimSpace(rec.State))) {
+			settledStates[taskID] = rec.State
+		}
+	}
 	loaded.TaskRecords = mergeDurableTaskRecords(loaded.TaskRecords, buildDurableTaskRecordsFromLoadedStates(loaded.SubAgentStates))
+	for taskID, state := range settledStates {
+		if rec := loaded.TaskRecords[taskID]; rec != nil && rec.State != state {
+			rec.State = state
+			rec.ResumePolicy = durableTaskResumePolicy(SubAgentState(state))
+		}
+	}
 	if repairRestoredTaskTree(loaded.TaskRecords) {
 		log.Warnf("repaired inconsistent SubAgent task tree during restore session=%v", sessionPath)
 	}
@@ -1035,8 +1054,16 @@ func (a *MainAgent) restoreLoadedSubAgents(states []loadedSubAgentState) int {
 			if agentDefName := strings.TrimSpace(state.AgentDefName); agentDefName != "" {
 				rec.AgentDefName = agentDefName
 			}
-			rec.State = string(restoreState)
-			rec.ResumePolicy = durableTaskResumePolicy(restoreState)
+			// A restored instance's snapshot-derived state only fills an empty
+			// or non-terminal record state. Once the record is terminal
+			// (tasks.json plus the settlement repair during load) it stays
+			// terminal: the recovery snapshot may still list the instance as
+			// running and must not flip the settled terminal state back to the
+			// non-terminal state it derives.
+			if !isTerminalSubAgentState(SubAgentState(strings.TrimSpace(rec.State))) {
+				rec.State = string(restoreState)
+				rec.ResumePolicy = durableTaskResumePolicy(restoreState)
+			}
 			rec.RuntimeParked = true
 			rec.LastSummary = restoreSummary
 			rec.Persistence = state.Persistence
@@ -1053,6 +1080,9 @@ func (a *MainAgent) restoreLoadedSubAgents(states []loadedSubAgentState) int {
 				}
 			}
 			a.subs.taskRecords[state.TaskID] = rec
+			// Report the record's final state (a settled terminal record stays
+			// terminal) instead of the snapshot-derived restoreState.
+			restoreState = SubAgentState(strings.TrimSpace(rec.State))
 		}
 		a.subs.mu.Unlock()
 		restoreStatus := string(restoreState)
