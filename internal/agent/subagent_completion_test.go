@@ -750,7 +750,7 @@ func TestCoordinationSnapshotIncludesDurableCompletionAndArtifact(t *testing.T) 
 		ExpectedWriteScope: tools.WriteScope{Files: []string{"internal/a.go"}},
 	}
 	block := a.buildCoordinationSnapshotOverlay()
-	for _, want := range []string{"SubAgent coordination snapshot", "task_id: task-1", "artifact_refs: artifacts/subagents/worker-1/report.md(research_report)", "files_changed: internal/a.go", "verification_run: go test ./internal/a", "verification:", "go test ./internal/a [passed]: ok", "write_scope: file:internal/a.go"} {
+	for _, want := range []string{"SubAgent coordination snapshot", "task_id: task-1", "agent_type: explorer", "artifact_refs: artifacts/subagents/worker-1/report.md(research_report)", "files_changed: internal/a.go", "verification_run: go test ./internal/a", "verification:", "go test ./internal/a [passed]: ok", "write_scope: file:internal/a.go"} {
 		if !strings.Contains(block, want) {
 			t.Fatalf("snapshot missing %q:\n%s", want, block)
 		}
@@ -863,6 +863,11 @@ func TestCoordinationSnapshotMarksRunningWorkerStallButNotWaitingMain(t *testing
 	waitingSection := block[idx:]
 	if strings.Contains(waitingSection, "suspected_stall:") && !strings.Contains(waitingSection, "task_id: task-running") {
 		t.Fatalf("waiting_main should not be marked stalled:\n%s", block)
+	}
+	// The aligned labels render as a per-record header suffix, so pin the exact
+	// formatted substring to lock agent_type/agent_id values and order.
+	if !strings.Contains(waitingSection, "task_id: task-waiting agent_type: worker agent_id: worker-waiting") {
+		t.Fatalf("waiting task missing agent_type/agent_id labels:\n%s", block)
 	}
 }
 
