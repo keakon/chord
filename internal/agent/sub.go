@@ -1253,12 +1253,6 @@ func (s *SubAgent) filteredVisibleToolsForModel(modelName string, client *llm.Cl
 	return filterEditToolsByModel(visibleTools, modelName, s.currentRuleset(), patchSurfaceDecision)
 }
 
-func (s *SubAgent) hasVisibleTool(name string) bool {
-	visible := s.visibleToolNames()
-	_, ok := visible[name]
-	return ok
-}
-
 // subAgentCoordinationPromptText is the single source for which control tool a
 // SubAgent uses to report progress, escalate, and close its task; the closure
 // block points here instead of restating the routing.

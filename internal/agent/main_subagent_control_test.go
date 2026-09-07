@@ -3534,8 +3534,7 @@ func TestWaitingMainLifecycleSweepNotifiesAndExpiresForLiveWaitingMainWorker(t *
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-live-expiry")
 	sub.agentDefName = "worker"
-	request, err := a.createAgentRequest(sub, tools.AgentRequestPayload{Reason: "need a decision"})
-	if err != nil {
+	if _, err := a.createAgentRequest(sub, tools.AgentRequestPayload{Reason: "need a decision"}); err != nil {
 		t.Fatalf("createAgentRequest: %v", err)
 	}
 	a.handleSubAgentStateChangedEvent(Event{
@@ -3558,7 +3557,7 @@ func TestWaitingMainLifecycleSweepNotifiesAndExpiresForLiveWaitingMainWorker(t *
 	if rec == nil || SubAgentState(rec.State) != SubAgentStateCancelled || !rec.RuntimeParked {
 		t.Fatalf("task record after live expiry = %#v, want parked cancelled worker", rec)
 	}
-	request = pendingAgentRequestForSource(t, a, sub.taskID)
+	request := pendingAgentRequestForSource(t, a, sub.taskID)
 	if request == nil || request.State != "expired" {
 		t.Fatalf("escalation request after live expiry = %#v, want expired", request)
 	}

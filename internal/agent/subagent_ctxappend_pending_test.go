@@ -389,10 +389,12 @@ func summarizeMessages(msgs []message.Message) string {
 			for _, tc := range m.ToolCalls {
 				ids = append(ids, tc.ID)
 			}
-			b.WriteString(" tool_calls=" + strings.Join(ids, ","))
+			b.WriteString(" tool_calls=")
+			b.WriteString(strings.Join(ids, ","))
 		}
 		if m.ToolCallID != "" {
-			b.WriteString(" tool_call_id=" + m.ToolCallID)
+			b.WriteString(" tool_call_id=")
+			b.WriteString(m.ToolCallID)
 		}
 		if m.Content != "" {
 			b.WriteString(fmt.Sprintf(" content=%q", shortLine(m.Content)))

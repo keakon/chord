@@ -86,52 +86,6 @@ func loadArchivedTaskRecordByTaskID(sessionDir, taskID string) (*DurableTaskReco
 	})
 }
 
-func loadArchivedTaskRecordsByTaskIDs(sessionDir string, taskIDs []string) (map[string]*DurableTaskRecord, error) {
-	wanted := make(map[string]struct{}, len(taskIDs))
-	for _, taskID := range taskIDs {
-		if taskID = strings.TrimSpace(taskID); taskID != "" {
-			wanted[taskID] = struct{}{}
-		}
-	}
-	if len(wanted) == 0 {
-		return nil, nil
-	}
-	path := durableTaskArchivePath(sessionDir)
-	if path == "" {
-		return nil, nil
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("open task archive: %w", err)
-	}
-	defer f.Close()
-	out := make(map[string]*DurableTaskRecord)
-	dec := json.NewDecoder(f)
-	for {
-		var entry archivedTaskRecord
-		if err := dec.Decode(&entry); err != nil {
-			if err == io.EOF {
-				break
-			}
-			return nil, fmt.Errorf("decode task archive: %w", err)
-		}
-		rec := cloneDurableTaskRecord(entry.Task)
-		if rec == nil {
-			continue
-		}
-		if _, ok := wanted[rec.TaskID]; ok {
-			out[rec.TaskID] = rec
-		}
-	}
-	if len(out) == 0 {
-		return nil, nil
-	}
-	return out, nil
-}
-
 func loadArchivedTaskRecordByInstanceID(sessionDir, instanceID string) (*DurableTaskRecord, error) {
 	instanceID = strings.TrimSpace(instanceID)
 	if instanceID == "" {

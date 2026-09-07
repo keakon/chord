@@ -215,7 +215,7 @@ func TestLLMRequestSilenceWatchdogBoundsNeverReturningRequest(t *testing.T) {
 				t.Fatalf("silence watchdog error = %#v, want silent-stall failure", evt.Payload)
 			}
 			return
-		case <-time.After(deadline.Sub(time.Now())):
+		case <-time.After(time.Until(deadline)):
 			t.Fatal("silence watchdog never produced the bounded fallback error")
 		}
 	}
