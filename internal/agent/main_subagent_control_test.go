@@ -3374,3 +3374,270 @@ func TestCancelSubAgentAdmissionsDuringCreateReleasesSlotOnce(t *testing.T) {
 		t.Fatalf("runtime in use = %d, want 0: the slot must be released exactly once across cancel and create rollback", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// WaitingMain expiry trigger, owner notification, and request-expired ledger
+// (regression: expiry previously depended on user speech)
+// ---------------------------------------------------------------------------
+
+// pendingAgentRequestForSource returns the durable escalation request a source
+// task owns in the sweep tests below, cloned under the registry lock.
+func pendingAgentRequestForSource(t *testing.T, a *MainAgent, taskID string) *DurableAgentRequest {
+	t.Helper()
+	a.subs.mu.RLock()
+	defer a.subs.mu.RUnlock()
+	for _, request := range a.subs.agentRequests {
+		if request != nil && strings.TrimSpace(request.SourceTaskID) == taskID {
+			return cloneDurableAgentRequest(request)
+		}
+	}
+	return nil
+}
+
+// dispatchQueuedEvents runs every already-queued event through dispatch until
+// the queues are empty. It is the test-side stand-in for the Run loop; new
+// events produced during dispatch are drained as well, so callers must keep
+// mailbox delivery paused unless a real turn is wanted.
+func dispatchQueuedEvents(t *testing.T, a *MainAgent) {
+	t.Helper()
+	for {
+		evt, ok := a.popQueuedEvent()
+		if !ok {
+			return
+		}
+		a.dispatch(evt)
+	}
+}
+
+// findRiskAlertForTask locates the expiry risk_alert mailbox in the main-agent
+// inbox (memory or spool) for the given task.
+func findRiskAlertForTask(a *MainAgent, taskID string) *SubAgentMailboxMessage {
+	collect := func() []SubAgentMailboxMessage {
+		out := append([]SubAgentMailboxMessage{}, a.subAgentInbox.urgent...)
+		out = append(out, a.subAgentInbox.normal...)
+		for _, id := range a.subAgentInbox.spoolUrgent {
+			if msg, found, err := a.loadSpooledMailbox(id); err == nil && found {
+				out = append(out, *msg)
+			}
+		}
+		for _, id := range a.subAgentInbox.spoolNormal {
+			if msg, found, err := a.loadSpooledMailbox(id); err == nil && found {
+				out = append(out, *msg)
+			}
+		}
+		return out
+	}
+	for _, msg := range collect() {
+		if msg.Kind == SubAgentMailboxKindRiskAlert && strings.TrimSpace(msg.TaskID) == taskID {
+			duplicate := msg
+			return &duplicate
+		}
+	}
+	return nil
+}
+
+// sawRiskAlertNotify drains the TUI output channel looking for the
+// control-plane AgentNotifyEvent that accompanies the expiry mailbox.
+func sawRiskAlertNotify(a *MainAgent, taskID string) bool {
+	for {
+		select {
+		case evt := <-a.outputCh:
+			notify, ok := evt.(AgentNotifyEvent)
+			if ok && strings.TrimSpace(notify.TaskID) == taskID && notify.Kind == string(SubAgentMailboxKindRiskAlert) {
+				return true
+			}
+		default:
+			return false
+		}
+	}
+}
+
+// TestWaitingMainLifecycleSweepReclaimsParkedWorkerNotifiesOwnerAndExpiresRequest
+// is the end-to-end regression for the "expiry depends on user speech" defect:
+// a delegated worker parks waiting for the main agent, wall clock advances past
+// maxWait with no user message, and the independent lifecycle-sweep event must
+// reclaim the task, deliver a risk_alert mailbox to the owner, and move the
+// durable escalation request to expired.
+func TestWaitingMainLifecycleSweepReclaimsParkedWorkerNotifiesOwnerAndExpiresRequest(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "adhoc-expiry-e2e")
+	sub.agentDefName = "worker"
+
+	// A delegated worker asks its owner (the main agent) for a decision through
+	// the production escalate path, which parks the worker in waiting_main and
+	// writes a pending durable agent request.
+	a.waitingMainExpiry = waitingMainExpiryPolicy{turns: config.DefaultWaitingMainExpiryTurns, minWait: 5 * time.Minute, maxWait: time.Hour}
+	a.handleEscalate(Event{
+		Type:     EventEscalate,
+		SourceID: sub.instanceID,
+		Payload:  tools.AgentRequestPayload{Reason: "which API should I use"},
+	})
+
+	rec := a.taskRecordByTaskID(sub.taskID)
+	if rec == nil || SubAgentState(rec.State) != SubAgentStateWaitingMain || !rec.RuntimeParked {
+		t.Fatalf("after escalate task record = %#v, want parked waiting_main worker", rec)
+	}
+	if live := a.subAgentByTaskID(sub.taskID); live != nil {
+		t.Fatal("worker must be parked (no live runtime) while waiting for main")
+	}
+	request := pendingAgentRequestForSource(t, a, sub.taskID)
+	if request == nil || request.State != "pending" {
+		t.Fatalf("escalation request = %#v, want pending", request)
+	}
+
+	// Wall clock advances past maxWait while the user stays silent, then the
+	// periodic trigger fires its sweep event. No EventUserMessage is involved.
+	a.mailboxDeliveryPaused.Store(true)
+	a.waitingMainExpiry = waitingMainExpiryPolicy{turns: 1 << 30, minWait: time.Hour, maxWait: time.Nanosecond}
+	a.dispatch(Event{Type: EventSubAgentLifecycleSweep})
+
+	rec = a.taskRecordByTaskID(sub.taskID)
+	if rec == nil || SubAgentState(rec.State) != SubAgentStateCancelled || !rec.RuntimeParked {
+		t.Fatalf("after expiry task record = %#v, want parked cancelled worker", rec)
+	}
+	request = pendingAgentRequestForSource(t, a, sub.taskID)
+	if request == nil || request.State != "expired" {
+		t.Fatalf("escalation request after expiry = %#v, want expired", request)
+	}
+	loaded, err := loadAgentRequests(a.sessionDir)
+	if err != nil {
+		t.Fatalf("loadAgentRequests: %v", err)
+	}
+	if got := loaded[request.CorrelationID]; got == nil || got.State != "expired" {
+		t.Fatalf("persisted request = %#v, want expired on disk too", got)
+	}
+	if !sawRiskAlertNotify(a, sub.taskID) {
+		t.Fatal("owner did not receive the expiry AgentNotifyEvent")
+	}
+
+	// Drain the queued mailbox events (the escalate decision request and the
+	// new expiry risk alert) so the owner-facing mailbox lands in the inbox.
+	dispatchQueuedEvents(t, a)
+	risk := findRiskAlertForTask(a, sub.taskID)
+	if risk == nil {
+		t.Fatalf("expected a risk_alert mailbox for task %s in the owner inbox, urgent=%v normal=%v spool=%v/%v",
+			sub.taskID, a.subAgentInbox.urgent, a.subAgentInbox.normal, a.subAgentInbox.spoolUrgent, a.subAgentInbox.spoolNormal)
+	}
+	if risk.OwnerAgentID != "" || risk.OwnerTaskID != "" {
+		t.Fatalf("expiry mailbox owner = (%q,%q), want main-owned empty owner", risk.OwnerAgentID, risk.OwnerTaskID)
+	}
+	if !strings.Contains(risk.Summary, "expired") {
+		t.Fatalf("expiry mailbox summary = %q, want the expiry reason", risk.Summary)
+	}
+}
+
+// TestWaitingMainLifecycleSweepNotifiesAndExpiresForLiveWaitingMainWorker covers
+// the same notification contract for the live-worker branch of the sweep: a
+// worker still registered in waiting_main (park refused or never attempted)
+// must alert its owner and expire its pending request when collected.
+func TestWaitingMainLifecycleSweepNotifiesAndExpiresForLiveWaitingMainWorker(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "adhoc-live-expiry")
+	sub.agentDefName = "worker"
+	request, err := a.createAgentRequest(sub, tools.AgentRequestPayload{Reason: "need a decision"})
+	if err != nil {
+		t.Fatalf("createAgentRequest: %v", err)
+	}
+	a.handleSubAgentStateChangedEvent(Event{
+		Type:     EventSubAgentStateChanged,
+		SourceID: sub.instanceID,
+		Payload:  &SubAgentStateChangedPayload{State: SubAgentStateWaitingMain, Summary: "need a decision"},
+	})
+	if live := a.subAgentByTaskID(sub.taskID); live == nil {
+		t.Fatal("worker must stay live for the live-waiting_main sweep branch")
+	}
+
+	a.mailboxDeliveryPaused.Store(true)
+	a.waitingMainExpiry = waitingMainExpiryPolicy{turns: 1 << 30, minWait: time.Hour, maxWait: time.Nanosecond}
+	a.dispatch(Event{Type: EventSubAgentLifecycleSweep})
+
+	if live := a.subAgentByTaskID(sub.taskID); live != nil {
+		t.Fatal("live waiting_main worker survived the lifecycle sweep")
+	}
+	rec := a.taskRecordByTaskID(sub.taskID)
+	if rec == nil || SubAgentState(rec.State) != SubAgentStateCancelled || !rec.RuntimeParked {
+		t.Fatalf("task record after live expiry = %#v, want parked cancelled worker", rec)
+	}
+	request = pendingAgentRequestForSource(t, a, sub.taskID)
+	if request == nil || request.State != "expired" {
+		t.Fatalf("escalation request after live expiry = %#v, want expired", request)
+	}
+	if !sawRiskAlertNotify(a, sub.taskID) {
+		t.Fatal("owner did not receive the expiry AgentNotifyEvent")
+	}
+	dispatchQueuedEvents(t, a)
+	risk := findRiskAlertForTask(a, sub.taskID)
+	if risk == nil {
+		t.Fatalf("expected a risk_alert mailbox for task %s in the owner inbox", sub.taskID)
+	}
+	if risk.TaskID != request.SourceTaskID {
+		t.Fatalf("expiry mailbox task = %q, want %q", risk.TaskID, request.SourceTaskID)
+	}
+}
+
+// TestWaitingMainLifecycleSweepCandidatesPinsLiveAndParkedWaits pins the gate
+// the periodic trigger relies on: only live or parked waiting_main state counts
+// as a candidate, so the trigger stays silent for sessions that never delegate.
+func TestWaitingMainLifecycleSweepCandidatesPinsLiveAndParkedWaits(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	if a.hasWaitingMainExpiryCandidates() {
+		t.Fatal("empty session must not produce expiry candidates")
+	}
+	live := newControllableTestSubAgent(t, a, "adhoc-candidate-live")
+	live.setState(SubAgentStateWaitingMain, "waiting")
+	if !a.hasWaitingMainExpiryCandidates() {
+		t.Fatal("live waiting_main worker not detected as candidate")
+	}
+	live.setState(SubAgentStateRunning, "")
+	rec := &DurableTaskRecord{
+		TaskID:        "adhoc-candidate-parked",
+		AgentDefName:  "worker",
+		State:         string(SubAgentStateWaitingMain),
+		RuntimeParked: true,
+		Attempt:       1,
+	}
+	a.subs.mu.Lock()
+	a.subs.taskRecords[rec.TaskID] = rec
+	a.subs.mu.Unlock()
+	if !a.hasWaitingMainExpiryCandidates() {
+		t.Fatal("parked waiting_main record not detected as candidate")
+	}
+	a.subs.mu.Lock()
+	a.subs.taskRecords[rec.TaskID].State = string(SubAgentStateCancelled)
+	a.subs.mu.Unlock()
+	if a.hasWaitingMainExpiryCandidates() {
+		t.Fatal("terminal parked record must not remain an expiry candidate")
+	}
+}
+
+// TestExpiredAgentRequestRejectsLateNotify pins the consumer-facing effect of
+// the new "expired" ledger write: a reply to an expired request is refused with
+// an explicit state instead of being treated as pending.
+func TestExpiredAgentRequestRejectsLateNotify(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "adhoc-expired-notify")
+	request, err := a.createAgentRequest(sub, tools.AgentRequestPayload{Reason: "need a decision"})
+	if err != nil {
+		t.Fatalf("createAgentRequest: %v", err)
+	}
+	// Stand in for the expiry sweep's terminal settle (commitTerminalTask with
+	// SubAgentStateCancelled), which is the only state under which the request
+	// ledger moves to expired.
+	a.handleSubAgentCloseRequestedEvent(Event{
+		Type:     EventSubAgentCloseRequested,
+		SourceID: sub.instanceID,
+		Payload: &SubAgentCloseRequestedPayload{
+			Reason:       "expired waiting for main reply",
+			ClosedReason: "expired waiting for main reply",
+			FinalState:   SubAgentStateCancelled,
+		},
+	})
+	a.expireAgentRequestsAfterCancellation(sub.taskID)
+
+	_, err = a.NotifySubAgentMessage(context.Background(), tools.AgentResponseRequest{
+		TargetTaskID: sub.taskID, CorrelationID: request.CorrelationID, Message: "too late",
+	})
+	if err == nil || !strings.Contains(err.Error(), "expired") {
+		t.Fatalf("late NotifySubAgentMessage error = %v, want expired-state rejection", err)
+	}
+}

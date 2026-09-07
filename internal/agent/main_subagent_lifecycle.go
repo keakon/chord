@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -11,6 +12,19 @@ import (
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/tools"
 )
+
+// subAgentLifecycleSweepInterval is the coarse wall-clock cadence of the
+// WaitingMain expiry sweep. Waiting waits are bounded below by the min-wait
+// guard (minutes at the default), so a per-minute check keeps reclaim latency
+// negligible without polling the loop any faster. The trigger event is only
+// queued while a waiting_main worker or parked record exists.
+const subAgentLifecycleSweepInterval = time.Minute
+
+// EventSubAgentLifecycleSweep is the loop event the periodic wall-clock trigger
+// dispatches to re-run the WaitingMain expiry sweep without any user message.
+// Kept next to the sweeper because it is lifecycle-internal; dispatch lives in
+// main_loop.go.
+const EventSubAgentLifecycleSweep = "subagent_lifecycle_sweep"
 
 // waitingMainExpiryPolicy is the resolved two-clock policy for abandoning a
 // worker that parked waiting for its owner's reply. See the
@@ -303,6 +317,11 @@ func (a *MainAgent) sweepSubAgentLifecycle() {
 		case SubAgentStateWaitingMain:
 			if policy.expired(currentTurn, enteredTurn, sub.StateChangedAt(), now) {
 				reason := policy.reason(currentTurn, enteredTurn, sub.StateChangedAt(), now)
+				// An expiry is an owner-visible failure of the wait contract:
+				// alert the owner through a risk_alert mailbox and settle the
+				// still-pending escalation request as expired instead of
+				// cancelling silently.
+				a.queueWaitingMainExpiryAlert(sub, nil, reason)
 				a.handleSubAgentCloseRequestedEvent(Event{
 					Type:     EventSubAgentCloseRequested,
 					SourceID: sub.instanceID,
@@ -312,6 +331,7 @@ func (a *MainAgent) sweepSubAgentLifecycle() {
 						FinalState:   SubAgentStateCancelled,
 					},
 				})
+				a.expireAgentRequestsAfterCancellation(sub.taskID)
 				changed = true
 			}
 		case SubAgentStateWaitingDescendant:
@@ -345,9 +365,18 @@ func (a *MainAgent) sweepSubAgentLifecycle() {
 		if rec := a.taskRecordByTaskID(taskID); rec != nil {
 			reason = policy.reason(currentTurn, rec.LastUpdatedTurn, rec.UpdatedAt, now)
 		}
-		if a.settleDetachedTerminalTaskGuarded(taskID, SubAgentStateCancelled, reason, reason, stillExpiredParkedWaiting) != "" {
-			changed = true
+		outcome := a.settleDetachedTerminalTaskGuarded(taskID, SubAgentStateCancelled, reason, reason, stillExpiredParkedWaiting)
+		if outcome != SubAgentStateCancelled {
+			continue
 		}
+		// The guarded settle won: the parked wait really expired. Surface the
+		// cancellation to the owner and move the pending escalation request to
+		// expired instead of leaving both the mailbox and the ledger silent.
+		if settled := a.taskRecordByTaskID(taskID); settled != nil {
+			a.queueWaitingMainExpiryAlert(nil, settled, reason)
+		}
+		a.expireAgentRequestsAfterCancellation(taskID)
+		changed = true
 	}
 	if changed {
 		// Both settle paths (commitTerminalTask via the close-requested handler
@@ -355,5 +384,140 @@ func (a *MainAgent) sweepSubAgentLifecycle() {
 		// registry per task; only the recovery snapshot still needs to observe
 		// the batch.
 		a.saveRecoverySnapshot()
+	}
+}
+
+// startSubAgentLifecycleSweep runs the periodic trigger that keeps WaitingMain
+// expiry independent of user speech. Without it the sweep only runs inside
+// handleUserMessage, so a headless or silent session would never reclaim a
+// parked worker. The trigger deliberately avoids the idle/nudge chain so it
+// survives the removal of that dead code; it wakes the loop at most once per
+// interval and only while a waiting_main candidate exists.
+func (a *MainAgent) startSubAgentLifecycleSweep(ctx context.Context) {
+	go func() {
+		ticker := time.NewTicker(subAgentLifecycleSweepInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-a.stoppingCh:
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if a.admissionPaused.Load() || !a.hasWaitingMainExpiryCandidates() {
+					continue
+				}
+				a.sendEvent(Event{Type: EventSubAgentLifecycleSweep})
+			}
+		}
+	}()
+}
+
+// hasWaitingMainExpiryCandidates reports whether a live worker or a parked task
+// record is currently in waiting_main, i.e. a lifecycle sweep could find
+// something to expire. The periodic trigger gates on it so sessions that never
+// delegate do not wake the event loop.
+func (a *MainAgent) hasWaitingMainExpiryCandidates() bool {
+	for _, sub := range a.subs.snapshotSubAgents() {
+		if sub != nil && sub.State() == SubAgentStateWaitingMain {
+			return true
+		}
+	}
+	a.subs.mu.RLock()
+	defer a.subs.mu.RUnlock()
+	for _, rec := range a.subs.taskRecords {
+		if rec != nil && rec.RuntimeParked && SubAgentState(rec.State) == SubAgentStateWaitingMain {
+			return true
+		}
+	}
+	return false
+}
+
+// queueWaitingMainExpiryAlert makes an expired WaitingMain wait visible to the
+// worker's owner: a risk_alert mailbox is queued through the same event path
+// the failure handler uses (see handleAgentError), plus the matching
+// control-plane AgentNotifyEvent. Pass the live worker or the parked record —
+// whichever the sweep is settling. The mailbox is durable and routed to the
+// owner's own inbox/queue even when the owner is parked or the main agent is
+// idle.
+func (a *MainAgent) queueWaitingMainExpiryAlert(sub *SubAgent, record *DurableTaskRecord, reason string) {
+	var agentID, taskID, ownerAgentID, ownerTaskID, agentType, inReplyTo string
+	if sub != nil {
+		agentID = sub.instanceID
+		taskID = sub.taskID
+		ownerAgentID, ownerTaskID, _, _ = sub.ownerSnapshot()
+		agentType = sub.agentDefName
+		inReplyTo = firstReplyMessageID(sub)
+	} else if record != nil {
+		agentID = record.LatestInstanceID
+		taskID = record.TaskID
+		ownerAgentID = strings.TrimSpace(record.OwnerAgentID)
+		ownerTaskID = strings.TrimSpace(record.OwnerTaskID)
+		agentType = record.AgentDefName
+	}
+	if strings.TrimSpace(taskID) == "" {
+		return
+	}
+	mailbox := &SubAgentMailboxMessage{
+		AgentID:      agentID,
+		TaskID:       taskID,
+		OwnerAgentID: ownerAgentID,
+		OwnerTaskID:  ownerTaskID,
+		InReplyTo:    inReplyTo,
+		Kind:         SubAgentMailboxKindRiskAlert,
+		Priority:     SubAgentMailboxPriorityInterrupt,
+		Summary:      reason,
+		Payload: fmt.Sprintf(
+			"SubAgent task was abandoned because its wait for a main-agent reply expired and the work was not completed.\n- task_id: %s\n- agent_id: %s\n- required_action: re-delegate the work or explicitly resume the task; the pending agent request for this task is now expired, so a later reply to it will be rejected.",
+			taskID, agentID,
+		),
+		RequiresAck: false,
+	}
+	a.queueLoopEvent(Event{Type: EventSubAgentMailbox, SourceID: agentID, Payload: mailbox})
+	a.emitToTUI(AgentNotifyEvent{
+		AgentID:       agentID,
+		TaskID:        taskID,
+		AgentType:     agentType,
+		ParentAgentID: controlPlaneAgentID(ownerAgentID),
+		ParentTaskID:  ownerTaskID,
+		TargetAgentID: controlPlaneAgentID(ownerAgentID),
+		TargetTaskID:  ownerTaskID,
+		Kind:          string(SubAgentMailboxKindRiskAlert),
+		Message:       reason,
+	})
+}
+
+// expireAgentRequestsAfterCancellation records a WaitingMain expiry in the
+// durable request ledger. Without this write the "expired" state has no writer:
+// a pending escalation request whose source task was just expiry-cancelled
+// would otherwise stay pending forever until a later Notify marks it orphaned.
+// The transition only applies to still-pending requests and only after the task
+// record actually reads cancelled, so a guarded sweep that backed off or a
+// conflicting settlement never expires a request whose worker still waits.
+func (a *MainAgent) expireAgentRequestsAfterCancellation(taskID string) {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return
+	}
+	if rec := a.taskRecordByTaskID(taskID); rec == nil || SubAgentState(rec.State) != SubAgentStateCancelled {
+		return
+	}
+	a.agentRequestPersistMu.Lock()
+	defer a.agentRequestPersistMu.Unlock()
+	records := a.snapshotAgentRequests()
+	changed := false
+	for id, request := range records {
+		if request == nil || request.State != "pending" || strings.TrimSpace(request.SourceTaskID) != taskID {
+			continue
+		}
+		request.State = "expired"
+		records[id] = request
+		changed = true
+	}
+	if !changed {
+		return
+	}
+	if err := a.persistAndPublishAgentRequests(records); err != nil {
+		log.Warnf("failed to mark agent requests expired task_id=%v error=%v", taskID, err)
 	}
 }

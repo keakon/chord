@@ -44,6 +44,11 @@ func (a *MainAgent) Run(ctx context.Context) error {
 	// Start the async persistence loop.
 	a.startPersistLoop()
 
+	// WaitingMain expiry must not depend on user speech: parked workers are
+	// reclaimed by an independent wall-clock trigger (see
+	// startSubAgentLifecycleSweep), not only when a user message arrives.
+	a.startSubAgentLifecycleSweep(ctx)
+
 	// Startup backfill: queue extraction for at most two recent, non-active
 	// sessions (excludes the active session and imports). Runs once; the
 	// worker only dispatches when auto-extraction is enabled and idle, and
@@ -157,6 +162,10 @@ func (a *MainAgent) dispatch(evt Event) {
 		a.handleSubAgentSendMessageEvent(evt)
 	case EventSubAgentStop:
 		a.handleSubAgentStopEvent(evt)
+	case EventSubAgentLifecycleSweep:
+		if !a.admissionPaused.Load() {
+			a.sweepSubAgentLifecycle()
+		}
 	case EventAgentLog:
 		a.handleAgentLog(evt)
 	case EventResetNudge:
