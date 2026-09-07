@@ -825,3 +825,277 @@ func TestProjectWhitelistCoversAllConfigKeys(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Orchestration load-time validation and project-merge semantics.
+//
+// New contract enforced by the loader:
+//   - waiting_main_max_wait_sec explicitly below waiting_main_min_wait_sec is
+//     a configuration error and fails the load. Both values used to be
+//     silently coerced by the effective-value layer, hiding likely unit or
+//     meaning mistakes.
+//   - A single-sided waiting_main value or zero/negative scalars keep their
+//     documented default-retaining semantics ("effective maximum is never
+//     below the effective minimum", "zero or negative retain the inherited or
+//     built-in default") and never fail the load.
+//   - subagent_compact_usage outside (0,1) falls back to the default with a
+//     visible issue instead of silently riding through.
+//   - At the project layer, zero or negative orchestration scalar overrides
+//     are stripped before the merge so the global line they overlay survives
+//     (only positive project scalar values override per the docs); before
+//     this fix a project max_live_runtimes: 0 clobbered the global value and
+//     the effective-value layer fell back to the built-in default instead.
+// ---------------------------------------------------------------------------
+
+func TestLoadConfigRejectsOrchestrationWaitingMaxBelowMin(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeTestFile(t, path, "orchestration:\n  waiting_main_min_wait_sec: 600\n  waiting_main_max_wait_sec: 300\n")
+	_, err := LoadConfigFromPath(path)
+	if err == nil {
+		t.Fatal("LoadConfigFromPath: want error for inverted waiting_main clocks")
+	}
+	for _, want := range []string{"waiting_main_max_wait_sec 300", "waiting_main_min_wait_sec 600"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("LoadConfigFromPath error = %q, want it mentioning %q", err, want)
+		}
+	}
+}
+
+func TestCollectConfigFileIssuesReportsOrchestrationWaitingInversion(t *testing.T) {
+	// The same contradiction surfaces through the issue collector (doctor /
+	// startup config issues), so it is visible even where the loader itself
+	// does not run.
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeTestFile(t, path, "orchestration:\n  waiting_main_min_wait_sec: 600\n  waiting_main_max_wait_sec: 300\n")
+	issues, err := CollectConfigFileIssues(path, true)
+	if err != nil {
+		t.Fatalf("CollectConfigFileIssues: %v", err)
+	}
+	if joined := strings.Join(issues, "\n"); !strings.Contains(joined, "waiting_main_max_wait_sec 300 is below waiting_main_min_wait_sec 600") {
+		t.Fatalf("issues = %q, want the waiting_main clock inversion report", joined)
+	}
+}
+
+func TestLoadConfigAllowsOrchestrationWaitingMaxAtOrAboveMin(t *testing.T) {
+	// Equal clocks are coherent (guarded and unconditional expiry share one
+	// bound); min below max is the normal arrangement. Neither may fail.
+	for _, body := range []string{
+		"orchestration:\n  waiting_main_min_wait_sec: 600\n  waiting_main_max_wait_sec: 600\n",
+		"orchestration:\n  waiting_main_min_wait_sec: 300\n  waiting_main_max_wait_sec: 3600\n",
+	} {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		writeTestFile(t, path, body)
+		cfg, err := LoadConfigFromPath(path)
+		if err != nil {
+			t.Fatalf("LoadConfigFromPath(%q): %v", body, err)
+		}
+		if cfg.Orchestration.WaitingMainMinWaitSec <= 0 || cfg.Orchestration.WaitingMainMaxWaitSec < cfg.Orchestration.WaitingMainMinWaitSec {
+			t.Fatalf("loaded clocks = min %d max %d for %q, want both kept with max >= min", cfg.Orchestration.WaitingMainMinWaitSec, cfg.Orchestration.WaitingMainMaxWaitSec, body)
+		}
+	}
+}
+
+func TestLoadConfigOrchestrationZeroAndSingleSidedValuesKeepDocumentedSemantics(t *testing.T) {
+	// Zero or negative scalars keep the built-in default, and a single-sided
+	// waiting_main value relies on the documented fallback where the effective
+	// maximum is never below the effective minimum (an explicit minimum above
+	// the default maximum raises the effective maximum to match). None of
+	// these may fail the load or be rewritten.
+	body := "orchestration:\n  max_live_runtimes: 0\n  max_borrowed_runtimes: -1\n  max_bypass_runtimes: 0\n  subagent_compact_usage: 0\n  waiting_main_min_wait_sec: 7200\n"
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeTestFile(t, path, body)
+	cfg, err := LoadConfigFromPath(path)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath: %v", err)
+	}
+	if got := cfg.Orchestration.EffectiveMaxLiveRuntimes(); got != DefaultMaxLiveRuntimes {
+		t.Fatalf("EffectiveMaxLiveRuntimes = %d, want default %d", got, DefaultMaxLiveRuntimes)
+	}
+	if got := cfg.Orchestration.EffectiveMaxBorrowedRuntimes(); got != DefaultMaxBorrowedRuntimes {
+		t.Fatalf("EffectiveMaxBorrowedRuntimes = %d, want default %d", got, DefaultMaxBorrowedRuntimes)
+	}
+	if got := cfg.Orchestration.EffectiveMaxBypassRuntimes(); got != DefaultMaxBypassRuntimes {
+		t.Fatalf("EffectiveMaxBypassRuntimes = %d, want default %d", got, DefaultMaxBypassRuntimes)
+	}
+	if got := cfg.Orchestration.EffectiveSubAgentCompactUsage(); got != DefaultSubAgentCompactUsage {
+		t.Fatalf("EffectiveSubAgentCompactUsage = %v, want default %v", got, DefaultSubAgentCompactUsage)
+	}
+	if got, want := cfg.Orchestration.EffectiveWaitingMainMinWait().Seconds(), float64(7200); got != want {
+		t.Fatalf("EffectiveWaitingMainMinWait = %v, want %v", got, want)
+	}
+	if got, want := cfg.Orchestration.EffectiveWaitingMainMaxWait().Seconds(), float64(7200); got != want {
+		t.Fatalf("EffectiveWaitingMainMaxWait = %v, want %v (effective max never below min)", got, want)
+	}
+}
+
+func TestLoadConfigOrchestrationCompactUsageOutOfRangeFallsBackToDefault(t *testing.T) {
+	// A subagent_compact_usage outside (0,1) — including exactly 1, which is
+	// rejected here unlike context.compaction.threshold, and NaN/±Inf — is
+	// reset to the unset state so the effective default applies, and reported
+	// by the issue collector instead of silently riding through. The reset
+	// also proves NaN/Inf did not survive: a NaN value compares unequal to 0.
+	for _, value := range []string{"1.5", "1", "-0.5", ".nan", ".inf"} {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		writeTestFile(t, path, "orchestration:\n  subagent_compact_usage: "+value+"\n")
+		cfg, err := LoadConfigFromPath(path)
+		if err != nil {
+			t.Fatalf("LoadConfigFromPath(usage %s): %v", value, err)
+		}
+		if cfg.Orchestration.SubAgentCompactUsage != 0 {
+			t.Fatalf("subagent_compact_usage %s = %v after load, want reset to 0 (unset)", value, cfg.Orchestration.SubAgentCompactUsage)
+		}
+		if got := cfg.Orchestration.EffectiveSubAgentCompactUsage(); got != DefaultSubAgentCompactUsage {
+			t.Fatalf("EffectiveSubAgentCompactUsage for %s = %v, want default %v", value, got, DefaultSubAgentCompactUsage)
+		}
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeTestFile(t, path, "orchestration:\n  subagent_compact_usage: 1.5\n")
+	issues, err := CollectConfigFileIssues(path, true)
+	if err != nil {
+		t.Fatalf("CollectConfigFileIssues: %v", err)
+	}
+	if joined := strings.Join(issues, "\n"); !strings.Contains(joined, "orchestration.subagent_compact_usage") {
+		t.Fatalf("issues = %q, want an orchestration.subagent_compact_usage report", joined)
+	}
+}
+
+func TestLoadConfigOrchestrationKeepsValidCompactUsage(t *testing.T) {
+	for _, value := range []string{"0.4", "0.999", "0.001"} {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		writeTestFile(t, path, "orchestration:\n  subagent_compact_usage: "+value+"\n")
+		cfg, err := LoadConfigFromPath(path)
+		if err != nil {
+			t.Fatalf("LoadConfigFromPath(usage %s): %v", value, err)
+		}
+		if got := cfg.Orchestration.SubAgentCompactUsage; got <= 0 || got >= 1 {
+			t.Fatalf("subagent_compact_usage %s = %v after load, want it kept in (0,1)", value, got)
+		}
+	}
+}
+
+// A project layer zero on an orchestration scalar means "keep the inherited
+// line". The project merge used to overlay it raw, so the global value was
+// clobbered and the effective-value layer fell back to the built-in default.
+func TestMergeProjectConfigOrchestrationZeroDoesNotClobberGlobalScalar(t *testing.T) {
+	global := DefaultConfig()
+	global.Orchestration.MaxLiveRuntimes = 8
+	global.Orchestration.WaitingMainMaxWaitSec = 1800
+	projectPath := filepath.Join(t.TempDir(), ".chord", "config.yaml")
+	writeTestFile(t, projectPath, "orchestration:\n  max_live_runtimes: 0\n  waiting_main_max_wait_sec: 0\n")
+
+	_, merged, err := MergeProjectConfig(global, projectPath)
+	if err != nil {
+		t.Fatalf("MergeProjectConfig: %v", err)
+	}
+	if got := merged.Orchestration.MaxLiveRuntimes; got != 8 {
+		t.Fatalf("merged max_live_runtimes = %d, want the inherited global 8", got)
+	}
+	if got := merged.Orchestration.EffectiveMaxLiveRuntimes(); got != 8 {
+		t.Fatalf("EffectiveMaxLiveRuntimes = %d, want inherited 8", got)
+	}
+	if got := merged.Orchestration.WaitingMainMaxWaitSec; got != 1800 {
+		t.Fatalf("merged waiting_main_max_wait_sec = %d, want the inherited global 1800", got)
+	}
+}
+
+func TestMergeProjectConfigOrchestrationNegativeScalarDoesNotClobberGlobal(t *testing.T) {
+	global := DefaultConfig()
+	global.Orchestration.MaxBypassRuntimes = 4
+	global.Orchestration.MailboxMemoryMessages = 96
+	projectPath := filepath.Join(t.TempDir(), ".chord", "config.yaml")
+	writeTestFile(t, projectPath, "orchestration:\n  max_bypass_runtimes: -2\n  mailbox_memory_messages: -10\n")
+
+	_, merged, err := MergeProjectConfig(global, projectPath)
+	if err != nil {
+		t.Fatalf("MergeProjectConfig: %v", err)
+	}
+	if got := merged.Orchestration.MaxBypassRuntimes; got != 4 {
+		t.Fatalf("merged max_bypass_runtimes = %d, want inherited global 4", got)
+	}
+	if got := merged.Orchestration.MailboxMemoryMessages; got != 96 {
+		t.Fatalf("merged mailbox_memory_messages = %d, want inherited global 96", got)
+	}
+}
+
+func TestMergeProjectConfigOrchestrationStripsZeroLeafKeepsValidSibling(t *testing.T) {
+	global := DefaultConfig()
+	global.Orchestration.MaxLiveRuntimes = 8
+	projectPath := filepath.Join(t.TempDir(), ".chord", "config.yaml")
+	writeTestFile(t, projectPath, "orchestration:\n  max_live_runtimes: 0\n  max_borrowed_runtimes: 2\n")
+
+	_, merged, err := MergeProjectConfig(global, projectPath)
+	if err != nil {
+		t.Fatalf("MergeProjectConfig: %v", err)
+	}
+	if got := merged.Orchestration.MaxLiveRuntimes; got != 8 {
+		t.Fatalf("merged max_live_runtimes = %d, want inherited global 8", got)
+	}
+	if got := merged.Orchestration.MaxBorrowedRuntimes; got != 2 {
+		t.Fatalf("merged max_borrowed_runtimes = %d, want the valid project 2 kept", got)
+	}
+}
+
+func TestMergeProjectConfigOrchestrationCompactUsageOverrideHandling(t *testing.T) {
+	global := DefaultConfig()
+	global.Orchestration.SubAgentCompactUsage = 0.6
+
+	// A valid project fraction overrides the global line...
+	projectPath := filepath.Join(t.TempDir(), ".chord", "config.yaml")
+	writeTestFile(t, projectPath, "orchestration:\n  subagent_compact_usage: 0.4\n")
+	_, merged, err := MergeProjectConfig(global, projectPath)
+	if err != nil {
+		t.Fatalf("MergeProjectConfig(valid): %v", err)
+	}
+	if got := merged.Orchestration.SubAgentCompactUsage; got != 0.4 {
+		t.Fatalf("merged subagent_compact_usage = %v, want project 0.4", got)
+	}
+
+	// ...while out-of-range project fractions (0, 1.5, NaN) must not clobber
+	// the global line: the runtime would otherwise silently fall back to the
+	// built-in 0.8 instead of the inherited 0.6.
+	for _, value := range []string{"0", "1.5", ".nan"} {
+		projectPath := filepath.Join(t.TempDir(), ".chord", "config.yaml")
+		writeTestFile(t, projectPath, "orchestration:\n  subagent_compact_usage: "+value+"\n")
+		_, merged, err := MergeProjectConfig(global, projectPath)
+		if err != nil {
+			t.Fatalf("MergeProjectConfig(usage %s): %v", value, err)
+		}
+		if got := merged.Orchestration.SubAgentCompactUsage; got != 0.6 {
+			t.Fatalf("merged subagent_compact_usage for %s = %v, want inherited global 0.6", value, got)
+		}
+	}
+}
+
+func TestMergeProjectConfigOrchestrationWaitingClockPairFails(t *testing.T) {
+	// An inverted pair inside the project file is a contradiction on its own
+	// and must fail the merge (like malformed project YAML) instead of being
+	// silently clamped.
+	projectPath := filepath.Join(t.TempDir(), ".chord", "config.yaml")
+	writeTestFile(t, projectPath, "orchestration:\n  waiting_main_min_wait_sec: 600\n  waiting_main_max_wait_sec: 300\n")
+	_, _, err := MergeProjectConfig(DefaultConfig(), projectPath)
+	if err == nil || !strings.Contains(err.Error(), "waiting_main_max_wait_sec 300 is below waiting_main_min_wait_sec 600") {
+		t.Fatalf("MergeProjectConfig(inverted pair) error = %v, want the waiting_main clock inversion error", err)
+	}
+
+	// The inversion can also materialize only after merging, when the project
+	// lowers the maximum below an explicit global minimum.
+	global := DefaultConfig()
+	global.Orchestration.WaitingMainMinWaitSec = 600
+	projectPath = filepath.Join(t.TempDir(), ".chord", "config.yaml")
+	writeTestFile(t, projectPath, "orchestration:\n  waiting_main_max_wait_sec: 300\n")
+	if _, _, err := MergeProjectConfig(global, projectPath); err == nil {
+		t.Fatal("MergeProjectConfig(project max below global min) error = nil, want inversion error")
+	}
+
+	// The valid direction — a project raising the maximum above the global
+	// minimum — keeps applying.
+	projectPath = filepath.Join(t.TempDir(), ".chord", "config.yaml")
+	writeTestFile(t, projectPath, "orchestration:\n  waiting_main_max_wait_sec: 3600\n")
+	_, merged, err := MergeProjectConfig(global, projectPath)
+	if err != nil {
+		t.Fatalf("MergeProjectConfig(valid max): %v", err)
+	}
+	if got := merged.Orchestration.WaitingMainMaxWaitSec; got != 3600 {
+		t.Fatalf("merged waiting_main_max_wait_sec = %d, want 3600", got)
+	}
+}

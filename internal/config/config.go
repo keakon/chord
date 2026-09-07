@@ -1533,6 +1533,7 @@ func collectSemanticIssues(cfg *Config) []string {
 	resetInvalidDiagnosticsFields(&cfg.Diagnostics)
 	issues = append(issues, collectCompactionConfigIssues(cfg)...)
 	issues = append(issues, collectModelCompactionIssues(cfg)...)
+	issues = append(issues, collectOrchestrationConfigIssues(cfg)...)
 	return issues
 }
 
@@ -1655,6 +1656,97 @@ func collectModelCompactionIssues(cfg *Config) []string {
 	return issues
 }
 
+// Orchestration load-time validation.
+//
+// Two failure classes are handled differently:
+//   - Explicit contradictions between configured values fail the load
+//     (orchestrationConfigLoadError). Every scalar is zero when unset, so a
+//     single-key problem can never be told apart from "key omitted" at the
+//     decoded struct level; only relations between two non-zero values are
+//     detectable. The Effective* fallbacks stay in place as the documented
+//     semantics for unset or default-retaining values.
+//   - Detectably out-of-range single values are reset to their unset state
+//     and reported as issues, mirroring how the compaction thresholds are
+//     handled (collectOrchestrationConfigIssues), so a broken value behaves
+//     as not configured instead of riding through to the runtime.
+//
+// The three runtime pools (max_live_runtimes / max_borrowed_runtimes /
+// max_bypass_runtimes) are independent capacity tiers with a strictly ordered
+// fallback (runtime → borrow → bypass → refuse), so no arithmetic relation
+// between them is required; the only cross-field constraint in the section is
+// the waiting_main clock pair below.
+
+// orchestrationConfigLoadError reports orchestration configurations whose
+// explicitly set values contradict each other. A waiting_main_max_wait_sec
+// below waiting_main_min_wait_sec would force the effective-value layer to
+// silently raise the explicit maximum (or, when only one side is set, rewrite
+// the default line), hiding a likely unit or meaning mistake. Both clocks must
+// therefore be explicit and inverted for the load to fail; a single-sided
+// value keeps the documented fallback where the effective maximum is never
+// below the effective minimum, and zero values on either side retain the
+// default.
+func orchestrationConfigLoadError(cfg *Config) error {
+	orch := cfg.Orchestration
+	if orch.WaitingMainMinWaitSec > 0 && orch.WaitingMainMaxWaitSec > 0 && orch.WaitingMainMaxWaitSec < orch.WaitingMainMinWaitSec {
+		return fmt.Errorf("orchestration: waiting_main_max_wait_sec %d is below waiting_main_min_wait_sec %d; the unconditional expiry clock must not run before the guarded one — raise the maximum or lower the minimum", orch.WaitingMainMaxWaitSec, orch.WaitingMainMinWaitSec)
+	}
+	return nil
+}
+
+// validOrchestrationCompactUsage reports whether a subagent_compact_usage line
+// is usable. It is a usage fraction strictly between 0 and 1; unlike
+// context.compaction.threshold there is no zero-off switch, and unlike that
+// threshold a value of exactly 1 is not accepted either because the usable
+// budget boundary itself must stay protected.
+func validOrchestrationCompactUsage(v float64) bool {
+	return v > 0 && v < 1
+}
+
+// collectOrchestrationConfigIssues reports orchestration values that are
+// detectably out of range and resets them to their unset state so the
+// effective-value fallback applies. Only values that cannot come from an
+// omitted key are flagged: an explicit 0 is indistinguishable from "not set"
+// at the decoded struct level and keeps its documented default-retaining
+// meaning (it cannot disable SubAgent compaction).
+func collectOrchestrationConfigIssues(cfg *Config) []string {
+	orch := cfg.Orchestration
+	var issues []string
+	if v := orch.SubAgentCompactUsage; v != 0 && !validOrchestrationCompactUsage(v) {
+		issues = append(issues, fmt.Sprintf("orchestration.subagent_compact_usage must be a usage fraction strictly between 0 and 1; got %v, using the default %v", v, DefaultSubAgentCompactUsage))
+		orch.SubAgentCompactUsage = 0
+	}
+	cfg.Orchestration = orch
+	return issues
+}
+
+// orchestrationScalarLeaf pairs one scalar orchestration leaf path with the
+// value decoded from the merged config under evaluation.
+type orchestrationScalarLeaf struct {
+	path  []string
+	value int
+}
+
+// orchestrationScalarLeafValues lists the scalar orchestration keys. At the
+// project layer a value of zero or below means "keep the inherited line"
+// (documented: only positive project scalar values override the corresponding
+// global values), so the semantic strip pass evaluates each leaf against the
+// merged candidate through these values.
+func orchestrationScalarLeafValues(o OrchestrationConfig) []orchestrationScalarLeaf {
+	return []orchestrationScalarLeaf{
+		{[]string{"orchestration", "max_live_runtimes"}, o.MaxLiveRuntimes},
+		{[]string{"orchestration", "max_borrowed_runtimes"}, o.MaxBorrowedRuntimes},
+		{[]string{"orchestration", "max_bypass_runtimes"}, o.MaxBypassRuntimes},
+		{[]string{"orchestration", "max_active_llm_requests"}, o.MaxActiveLLMRequests},
+		{[]string{"orchestration", "subagent_queue_messages"}, o.SubAgentQueueMessages},
+		{[]string{"orchestration", "subagent_queue_bytes"}, o.SubAgentQueueBytes},
+		{[]string{"orchestration", "mailbox_memory_messages"}, o.MailboxMemoryMessages},
+		{[]string{"orchestration", "mailbox_memory_bytes"}, o.MailboxMemoryBytes},
+		{[]string{"orchestration", "waiting_main_expiry_turns"}, o.WaitingMainExpiryTurns},
+		{[]string{"orchestration", "waiting_main_min_wait_sec"}, o.WaitingMainMinWaitSec},
+		{[]string{"orchestration", "waiting_main_max_wait_sec"}, o.WaitingMainMaxWaitSec},
+	}
+}
+
 // compThresholdConfig returns the effective global compaction threshold config.
 func compThresholdConfig(cfg *Config) CompactionConfig {
 	if cfg == nil {
@@ -1676,6 +1768,10 @@ func compThresholdForModel(global CompactionConfig, mc ModelConfig) float64 {
 // loadConfigData loads configuration from raw YAML bytes. Malformed YAML is a
 // fatal error; unknown keys, wrong types, and semantically invalid values are
 // logged and treated as not configured while valid siblings still apply.
+// Contradictory orchestration clocks (an explicitly configured
+// waiting_main_max_wait_sec below waiting_main_min_wait_sec) are a fatal
+// error too: the effective-value layer would otherwise have to silently
+// rewrite one of the two explicit values.
 func loadConfigData(path string, data []byte, withDefaults bool) (*Config, error) {
 	cfg := &Config{}
 	if withDefaults {
@@ -1687,6 +1783,9 @@ func loadConfigData(path string, data []byte, withDefaults bool) (*Config, error
 	}
 	for _, issue := range terrors {
 		log.Warnf("config %s: ignoring invalid value: %s", path, issue)
+	}
+	if err := orchestrationConfigLoadError(cfg); err != nil {
+		return nil, fmt.Errorf("config %s: %w", path, err)
 	}
 	for _, issue := range collectSemanticIssues(cfg) {
 		log.Warnf("config %s: ignoring invalid value(s): %s", path, issue)
@@ -1707,7 +1806,11 @@ func collectConfigIssues(data []byte, cfg *Config) []string {
 		return []string{err.Error()}
 	}
 	issues := append([]string(nil), terrors...)
-	return append(issues, collectSemanticIssues(cfg)...)
+	issues = append(issues, collectSemanticIssues(cfg)...)
+	if lerr := orchestrationConfigLoadError(cfg); lerr != nil {
+		issues = append(issues, lerr.Error())
+	}
+	return issues
 }
 
 // collectProviderIssues returns the retry, compression, and key-selection
@@ -2106,7 +2209,9 @@ func marshalSanitizedMerge(baseMap, overrideMap map[string]any, path string) ([]
 
 // semanticInvalidOverridePaths evaluates a merged candidate config and returns
 // the paths of leaves that violate semantic validation (invalid retry/key
-// settings, out-of-range diagnostics values). Values that only fail because of
+// settings, out-of-range diagnostics values, orchestration scalar leaves that
+// a project override wrote as zero or negative, out-of-range compaction or
+// subagent_compact_usage fractions). Values that only fail because of
 // cross-layer inheritance (for example key_order=smart without a codex preset
 // in the same override) are intentionally left in place: the final decode
 // resets them against the fully merged preset instead of guessing here.
@@ -2166,6 +2271,22 @@ func semanticInvalidOverridePaths(data []byte) ([][]string, error) {
 				paths = append(paths, append(base[:len(base):len(base)], "reminder"))
 			}
 		}
+	}
+	// Orchestration scalar leaves: only positive project scalar values override
+	// the corresponding global values, so a project leaf that merged to zero or
+	// below must be stripped for the global line it overlays to survive. The
+	// same applies to an out-of-range subagent_compact_usage (including NaN
+	// and ±Inf). The waiting_main clock pair is deliberately not listed here:
+	// an inversion is a contradiction between two individually valid leaves
+	// that cannot be fixed by dropping either one, so it fails the final merge
+	// decode instead of guessing a side.
+	for _, leaf := range orchestrationScalarLeafValues(cfg.Orchestration) {
+		if leaf.value <= 0 {
+			paths = append(paths, leaf.path)
+		}
+	}
+	if !validOrchestrationCompactUsage(cfg.Orchestration.SubAgentCompactUsage) {
+		paths = append(paths, []string{"orchestration", "subagent_compact_usage"})
 	}
 	return paths, nil
 }
