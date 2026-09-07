@@ -80,8 +80,8 @@ func TestMainAgentFocusedSkillsUsesFocusedSubAgentPermissions(t *testing.T) {
 	sub := &SubAgent{
 		instanceID:   "agent-1",
 		loadedSkills: a.loadedSkillsSnapshot(),
-		ruleset:      permission.Ruleset{{Permission: "skill", Pattern: "*", Action: permission.ActionAllow}},
 	}
+	sub.setRuleset(permission.Ruleset{{Permission: "skill", Pattern: "*", Action: permission.ActionAllow}})
 	a.subs.subAgents[sub.instanceID] = sub
 
 	if got := a.ListSkills(); len(got) != 0 {
@@ -120,11 +120,11 @@ func TestMainAgentInvokedSkillsForFocusedSubAgentDoesNotReenterFocusedRouter(t *
 			"visible": {Name: "visible", Invoked: true},
 			"hidden":  {Name: "hidden", Invoked: true},
 		},
-		ruleset: permission.Ruleset{
-			{Permission: "skill", Pattern: "*", Action: permission.ActionAllow},
-			{Permission: "skill", Pattern: "hidden", Action: permission.ActionDeny},
-		},
 	}
+	sub.setRuleset(permission.Ruleset{
+		{Permission: "skill", Pattern: "*", Action: permission.ActionAllow},
+		{Permission: "skill", Pattern: "hidden", Action: permission.ActionDeny},
+	})
 	a.subs.subAgents[sub.instanceID] = sub
 	a.SwitchFocus(sub.instanceID)
 

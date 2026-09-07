@@ -1461,11 +1461,11 @@ shell: allow
 	ruleset := permission.ParsePermission(&permNode)
 	s := &SubAgent{
 		tools:        reg,
-		ruleset:      ruleset,
 		customPrompt: "## Custom SubAgent Role\n- Stay focused on the assigned task",
 		workDir:      "/tmp/project",
 		taskDesc:     "Inspect the parser and report findings.",
 	}
+	s.setRuleset(ruleset)
 
 	got := s.buildSystemPrompt()
 	for _, want := range []string{subAgentIdentityPrompt, sharedAgentValuesPrompt, "## Guidelines", "## Reasoning Discipline", "## SubAgent Coordination", "## SubAgent Task Closure", "## Custom SubAgent Role", "## Tool Selection", "Prefer the smallest safe number of tool calls. If one tool call can complete the task clearly and safely, do not split it into multiple steps.", "Use `read` for file contents when the target path is already known or has been verified.", "## Your Task", "surface the open product decisions to the owner agent (through the coordination tools available in this role)"} {
@@ -1519,7 +1519,8 @@ read: allow
 shell: allow
 `)
 	ruleset := permission.ParsePermission(&permNode)
-	s := &SubAgent{tools: reg, ruleset: ruleset, workDir: "/tmp/project", taskDesc: "Inspect the parser and report findings."}
+	s := &SubAgent{tools: reg, workDir: "/tmp/project", taskDesc: "Inspect the parser and report findings."}
+	s.setRuleset(ruleset)
 	got := s.buildSystemPrompt()
 	for _, want := range []string{
 		"`notify` is unavailable in this role; do not assume you can send non-blocking progress updates to the owner agent",
@@ -1541,7 +1542,8 @@ escalate: allow
 notify: allow
 `)
 	ruleset = permission.ParsePermission(&permNode)
-	s = &SubAgent{tools: reg, ruleset: ruleset, workDir: "/tmp/project", taskDesc: "Inspect the parser and report findings."}
+	s = &SubAgent{tools: reg, workDir: "/tmp/project", taskDesc: "Inspect the parser and report findings."}
+	s.setRuleset(ruleset)
 	got = s.buildSystemPrompt()
 	for _, want := range []string{
 		"Use `notify` to surface progress, clarifications, or intermediate results",
@@ -1574,7 +1576,8 @@ edit:
 
 	a := &MainAgent{tools: reg, activeConfig: &config.AgentConfig{Permission: permNode}}
 	a.rebuildRuleset()
-	s := &SubAgent{tools: reg, ruleset: ruleset}
+	s := &SubAgent{tools: reg}
+	s.setRuleset(ruleset)
 
 	mainBlock := a.mainAgentCapabilityPromptBlock()
 	subBlock := s.capabilityPromptBlock(s.visibleToolNames())
@@ -1599,7 +1602,8 @@ shell: allow
 notify: allow
 `)
 	ruleset = permission.ParsePermission(&permNode)
-	s = &SubAgent{tools: reg, ruleset: ruleset}
+	s = &SubAgent{tools: reg}
+	s.setRuleset(ruleset)
 	subBlock = s.capabilityPromptBlock(s.visibleToolNames())
 	if !strings.Contains(subBlock, "Use `notify` to surface materially different decisions or owner-agent intervention because `escalate` is unavailable") {
 		t.Fatalf("sub capability block should fall back to Notify when Escalate is unavailable, got %q", subBlock)

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -86,6 +87,50 @@ func TestResourceGovernorWorkspaceLeaseScopesExclusiveByResource(t *testing.T) {
 	releaseShell()
 	if got := g.snapshot(); got.LeaseActive != 0 || got.LeaseQueued != 0 {
 		t.Fatalf("after release = %+v", got)
+	}
+}
+
+func TestAcquireWakeReactivationSlotBoundsTheBypassPool(t *testing.T) {
+	g := newResourceGovernor(config.OrchestrationConfig{MaxLiveRuntimes: 1, MaxBorrowedRuntimes: 1, MaxBypassRuntimes: 1})
+	a := &MainAgent{parentCtx: context.Background(), governor: g, sem: g.runtimeSlots}
+	live, borrowed, bypassed, refused := &SubAgent{}, &SubAgent{}, &SubAgent{}, &SubAgent{}
+
+	for _, sub := range []*SubAgent{live, borrowed, bypassed} {
+		if err := a.acquireWakeReactivationSlot(sub); err != nil {
+			t.Fatalf("acquireWakeReactivationSlot: %v", err)
+		}
+	}
+	if !bypassed.semBypassed {
+		t.Fatal("third grant did not come from the bypass pool")
+	}
+
+	// The bypass pool is the last resort, so exhausting it must refuse rather
+	// than grant an unbounded number of uncounted runtimes: max_live_runtimes
+	// would otherwise stop being an upper bound.
+	err := a.acquireWakeReactivationSlot(refused)
+	if err == nil {
+		t.Fatal("acquireWakeReactivationSlot() = nil, want refusal once every pool is exhausted")
+	}
+	if !strings.Contains(err.Error(), "bypass pool is exhausted") {
+		t.Fatalf("error = %q, want it to name the exhausted bypass pool", err)
+	}
+	if refused.semHeld {
+		t.Fatal("refused worker still holds a slot")
+	}
+	if got := a.OrchestrationStats().RuntimeBypassRejected; got != 1 {
+		t.Fatalf("RuntimeBypassRejected = %d, want 1", got)
+	}
+
+	// A released bypass grant returns capacity to the bypass pool only.
+	a.releaseSubAgentSlot(bypassed)
+	if got := g.snapshot(); got.BypassInUse != 0 || got.RuntimeInUse != 1 || got.BorrowedInUse != 1 {
+		t.Fatalf("after bypass release = %+v, want only the bypass pool freed", got)
+	}
+	if err := a.acquireWakeReactivationSlot(refused); err != nil {
+		t.Fatalf("acquireWakeReactivationSlot after release: %v", err)
+	}
+	if !refused.semBypassed {
+		t.Fatal("reclaimed grant did not come from the bypass pool")
 	}
 }
 

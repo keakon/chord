@@ -1,16 +1,68 @@
 package agent
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/tools"
 )
 
-const waitingMainExpiryUserTurns = uint64(5)
+// waitingMainExpiryPolicy is the resolved two-clock policy for abandoning a
+// worker that parked waiting for its owner's reply. See the
+// DefaultWaitingMain* constants for why one clock is not enough.
+type waitingMainExpiryPolicy struct {
+	turns   uint64
+	minWait time.Duration
+	maxWait time.Duration
+}
+
+func resolveWaitingMainExpiryPolicy(cfg config.OrchestrationConfig) waitingMainExpiryPolicy {
+	return waitingMainExpiryPolicy{
+		turns:   cfg.EffectiveWaitingMainExpiryTurns(),
+		minWait: cfg.EffectiveWaitingMainMinWait(),
+		maxWait: cfg.EffectiveWaitingMainMaxWait(),
+	}
+}
+
+// waitingMainExpiryPolicy returns the resolved policy. It is resolved once at
+// construction; a zero turns budget means this agent was built without going
+// through the constructor (tests), so fall back to resolving it on demand
+// rather than treating every wait as instantly expired.
+func (a *MainAgent) waitingMainExpiryPolicy() waitingMainExpiryPolicy {
+	if a.waitingMainExpiry.turns > 0 {
+		return a.waitingMainExpiry
+	}
+	return resolveWaitingMainExpiryPolicy(effectiveOrchestrationConfig(a.globalConfig, a.projectConfig))
+}
+
+// expired reports whether a wait that started at (enteredTurn, since) is over.
+// A zero since means the entry time was never recorded, in which case only the
+// turn budget applies so the wait can still be collected.
+func (p waitingMainExpiryPolicy) expired(currentTurn, enteredTurn uint64, since, now time.Time) bool {
+	turnBudgetSpent := currentTurn >= enteredTurn+p.turns
+	if since.IsZero() {
+		return turnBudgetSpent
+	}
+	waited := now.Sub(since)
+	if turnBudgetSpent && waited >= p.minWait {
+		return true
+	}
+	return waited >= p.maxWait
+}
+
+// reason describes which clock fired, so the cancellation summary the owner and
+// the user see is not just "expired".
+func (p waitingMainExpiryPolicy) reason(currentTurn, enteredTurn uint64, since, now time.Time) string {
+	if since.IsZero() || currentTurn >= enteredTurn+p.turns {
+		return fmt.Sprintf("expired waiting for main reply (no reply within %d user turns)", p.turns)
+	}
+	return fmt.Sprintf("expired waiting for main reply (no reply within %s)", now.Sub(since).Round(time.Minute))
+}
 
 func (a *MainAgent) noteSubAgentStateTransition(sub *SubAgent, state SubAgentState) {
 	if a == nil || sub == nil {
@@ -238,6 +290,8 @@ func (a *MainAgent) removeSubAgentMailboxState(agentID string) {
 
 func (a *MainAgent) sweepSubAgentLifecycle() {
 	currentTurn := a.explicitUserTurnCount.Load()
+	policy := a.waitingMainExpiryPolicy()
+	now := time.Now()
 	changed := false
 	for _, sub := range a.subs.snapshotSubAgents() {
 		if sub == nil {
@@ -247,13 +301,14 @@ func (a *MainAgent) sweepSubAgentLifecycle() {
 		enteredTurn := a.subs.stateEnteredTurnFor(sub.instanceID)
 		switch state {
 		case SubAgentStateWaitingMain:
-			if currentTurn >= enteredTurn+waitingMainExpiryUserTurns {
+			if policy.expired(currentTurn, enteredTurn, sub.StateChangedAt(), now) {
+				reason := policy.reason(currentTurn, enteredTurn, sub.StateChangedAt(), now)
 				a.handleSubAgentCloseRequestedEvent(Event{
 					Type:     EventSubAgentCloseRequested,
 					SourceID: sub.instanceID,
 					Payload: &SubAgentCloseRequestedPayload{
-						Reason:       "expired waiting for main reply",
-						ClosedReason: "expired waiting for main reply",
+						Reason:       reason,
+						ClosedReason: reason,
 						FinalState:   SubAgentStateCancelled,
 					},
 				})
@@ -270,7 +325,7 @@ func (a *MainAgent) sweepSubAgentLifecycle() {
 		if rec == nil || !rec.RuntimeParked || SubAgentState(rec.State) != SubAgentStateWaitingMain {
 			continue
 		}
-		if currentTurn >= rec.LastUpdatedTurn+waitingMainExpiryUserTurns {
+		if policy.expired(currentTurn, rec.LastUpdatedTurn, rec.UpdatedAt, now) {
 			expiredTaskIDs = append(expiredTaskIDs, taskID)
 		}
 	}
@@ -283,10 +338,14 @@ func (a *MainAgent) sweepSubAgentLifecycle() {
 	stillExpiredParkedWaiting := func(rec *DurableTaskRecord) bool {
 		return rec != nil && rec.RuntimeParked &&
 			SubAgentState(rec.State) == SubAgentStateWaitingMain &&
-			currentTurn >= rec.LastUpdatedTurn+waitingMainExpiryUserTurns
+			policy.expired(currentTurn, rec.LastUpdatedTurn, rec.UpdatedAt, now)
 	}
 	for _, taskID := range expiredTaskIDs {
-		if a.settleDetachedTerminalTaskGuarded(taskID, SubAgentStateCancelled, "expired waiting for main reply", "expired waiting for main reply", stillExpiredParkedWaiting) != "" {
+		reason := "expired waiting for main reply"
+		if rec := a.taskRecordByTaskID(taskID); rec != nil {
+			reason = policy.reason(currentTurn, rec.LastUpdatedTurn, rec.UpdatedAt, now)
+		}
+		if a.settleDetachedTerminalTaskGuarded(taskID, SubAgentStateCancelled, reason, reason, stillExpiredParkedWaiting) != "" {
 			changed = true
 		}
 	}

@@ -57,14 +57,14 @@ func TestSubAgent_AppliesModelEditToolFilter(t *testing.T) {
 			s := &SubAgent{
 				modelName: tt.modelName,
 				tools:     tools.NewRegistry(),
-				ruleset:   permission.Ruleset{}, // empty ruleset = all allowed
 			}
+			s.setRuleset(permission.Ruleset{}) // empty ruleset = all allowed
 			s.tools.Register(tools.ApplyPatchTool{})
 			s.tools.Register(tools.EditTool{})
 
 			// Get visible tools through the filtering logic
-			visibleTools := visibleLLMTools(s.tools, s.ruleset, isSubAgentInternalTool, toolPermissionContext{})
-			filteredTools := filterEditToolsByModel(visibleTools, s.modelName, s.ruleset, nil)
+			visibleTools := visibleLLMTools(s.tools, s.currentRuleset(), isSubAgentInternalTool, toolPermissionContext{})
+			filteredTools := filterEditToolsByModel(visibleTools, s.modelName, s.currentRuleset(), nil)
 
 			// Check which tools are visible
 			hasPatch := false
@@ -142,9 +142,9 @@ func TestSubAgentSwitchModelRefreshesFrozenToolDefinitions(t *testing.T) {
 		parent:     &MainAgent{outputCh: make(chan AgentEvent, 1), stoppingCh: make(chan struct{})},
 		ctxMgr:     ctxmgr.NewManager(4096, 0),
 		tools:      registry,
-		ruleset:    permission.Ruleset{},
 		modelName:  "gpt-5.5",
 	}
+	s.setRuleset(permission.Ruleset{})
 	s.frozenToolDefs = llmToolDefinitionsFromVisibleTools(s.filteredVisibleTools())
 	if !hasToolDefinition(s.frozenToolDefs, tools.NameApplyPatch) || hasToolDefinition(s.frozenToolDefs, tools.NameEdit) {
 		t.Fatalf("initial frozen tools = %v, want patch only", toolDefinitionNames(s.frozenToolDefs))

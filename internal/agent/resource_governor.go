@@ -35,6 +35,8 @@ type resourceGovernor struct {
 	runtimeSlots chan struct{}
 	maxBorrowed  int64
 	borrowed     atomic.Int64
+	maxBypassed  int64
+	bypassed     atomic.Int64
 
 	llmMu          sync.Mutex
 	llmLimit       int
@@ -55,6 +57,8 @@ type resourceGovernorSnapshot struct {
 	RuntimeInUse    int
 	BorrowedLimit   int
 	BorrowedInUse   int
+	BypassLimit     int
+	BypassInUse     int
 	LLMLimit        int
 	LLMActive       int
 	LLMQueued       int
@@ -83,6 +87,7 @@ func newResourceGovernor(cfg config.OrchestrationConfig) *resourceGovernor {
 	return &resourceGovernor{
 		runtimeSlots:   make(chan struct{}, runtimeLimit),
 		maxBorrowed:    int64(cfg.EffectiveMaxBorrowedRuntimes()),
+		maxBypassed:    int64(cfg.EffectiveMaxBypassRuntimes()),
 		llmLimit:       cfg.EffectiveMaxActiveLLMRequests(),
 		providerLimits: providerLimits,
 		providerActive: make(map[string]int),
@@ -106,6 +111,18 @@ func effectiveOrchestrationConfig(globalCfg, projectCfg *config.Config) config.O
 	}
 	if override.MaxBorrowedRuntimes > 0 {
 		out.MaxBorrowedRuntimes = override.MaxBorrowedRuntimes
+	}
+	if override.MaxBypassRuntimes > 0 {
+		out.MaxBypassRuntimes = override.MaxBypassRuntimes
+	}
+	if override.WaitingMainExpiryTurns > 0 {
+		out.WaitingMainExpiryTurns = override.WaitingMainExpiryTurns
+	}
+	if override.WaitingMainMinWaitSec > 0 {
+		out.WaitingMainMinWaitSec = override.WaitingMainMinWaitSec
+	}
+	if override.WaitingMainMaxWaitSec > 0 {
+		out.WaitingMainMaxWaitSec = override.WaitingMainMaxWaitSec
 	}
 	if override.MaxActiveLLMRequests > 0 {
 		out.MaxActiveLLMRequests = override.MaxActiveLLMRequests
@@ -163,6 +180,37 @@ func (g *resourceGovernor) tryBorrowRuntime() bool {
 		}
 		if g.borrowed.CompareAndSwap(current, current+1) {
 			return true
+		}
+	}
+}
+
+// tryBypassRuntime grants an uncounted runtime slot for a wake reactivation
+// that cannot wait for capacity. Unlike the runtime and borrow pools this one
+// is a last-resort valve, so it is deliberately small: exhausting it makes the
+// caller leave the message queued rather than exceed the configured ceiling.
+func (g *resourceGovernor) tryBypassRuntime() bool {
+	if g == nil || g.maxBypassed <= 0 {
+		return false
+	}
+	for {
+		current := g.bypassed.Load()
+		if current >= g.maxBypassed {
+			return false
+		}
+		if g.bypassed.CompareAndSwap(current, current+1) {
+			return true
+		}
+	}
+}
+
+func (g *resourceGovernor) releaseBypassRuntime() {
+	if g == nil {
+		return
+	}
+	for {
+		current := g.bypassed.Load()
+		if current <= 0 || g.bypassed.CompareAndSwap(current, current-1) {
+			return
 		}
 	}
 }
@@ -316,6 +364,8 @@ func (g *resourceGovernor) snapshot() resourceGovernorSnapshot {
 		RuntimeInUse:    len(g.runtimeSlots),
 		BorrowedLimit:   int(g.maxBorrowed),
 		BorrowedInUse:   int(g.borrowed.Load()),
+		BypassLimit:     int(g.maxBypassed),
+		BypassInUse:     int(g.bypassed.Load()),
 		ProviderActive:  make(map[string]int),
 		ModelActive:     make(map[string]int),
 	}

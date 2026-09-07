@@ -195,9 +195,9 @@ func writeOrchestrationDiagnostics(sb *strings.Builder, stats agent.Orchestratio
 	fmt.Fprintf(sb, "orchestration_event_queue: overflow=%d overflow_peak=%d coalesced=%d backpressure=%d\n",
 		stats.EventQueue.OverflowCurrent, stats.EventQueue.OverflowPeak,
 		stats.EventQueue.Coalesced, stats.EventQueue.Backpressure)
-	fmt.Fprintf(sb, "orchestration_runtimes: normal=%d/%d borrowed=%d/%d bypass_active=%d bypass_peak=%d bypass_grants=%d\n",
+	fmt.Fprintf(sb, "orchestration_runtimes: normal=%d/%d borrowed=%d/%d bypass_active=%d bypass_peak=%d bypass_grants=%d bypass_rejected=%d\n",
 		stats.SemaphoreInUse, stats.SemaphoreCapacity, stats.BorrowedInUse, stats.BorrowedCapacity,
-		stats.RuntimeBypassActive, stats.RuntimeBypassPeak, stats.RuntimeBypassGrants)
+		stats.RuntimeBypassActive, stats.RuntimeBypassPeak, stats.RuntimeBypassGrants, stats.RuntimeBypassRejected)
 	fmt.Fprintf(sb, "orchestration_llm_requests: active=%d capacity=%d queued=%d\n",
 		stats.LLMRequestsActive, stats.LLMRequestCapacity, stats.LLMRequestsQueued)
 	fmt.Fprintf(sb, "orchestration_workspace_leases: active=%d queued=%d\n",

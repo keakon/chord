@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/keakon/golog/log"
 
@@ -22,6 +23,9 @@ const (
 	taskResumePolicyNotify       = "notify"
 	taskResumePolicyExplicitOnly = "explicit_only"
 	maxRetainedTerminalTasks     = 256
+	// semanticTaskKeyWords bounds the derived duplicate-detection key so two
+	// wordings of the same deliverable still collide on their opening clause.
+	semanticTaskKeyWords = 12
 )
 
 type taskResumeTrigger string
@@ -260,16 +264,40 @@ func (r *DurableTaskRecord) allowsRehydrate(trigger taskResumeTrigger) bool {
 	}
 }
 
+// semanticTaskKeyFallback derives a duplicate-detection key from the task
+// description a caller passed to Delegate. It is the fallback for callers that
+// supply no explicit semantic_task_key: plan_task_ref is compared separately in
+// duplicateOrConflictingTaskRecord, so deriving the key from it too would leave
+// the most common case — a description and nothing else — with no key at all
+// and no duplicate detection.
+//
+// Words are lowercased and split on non-alphanumeric runes so "Fix the parser
+// bug." and "fix the parser bug" produce the same key.
 func semanticTaskKeyFallback(desc string) string {
-	desc = strings.ToLower(strings.TrimSpace(desc))
+	desc = strings.TrimSpace(desc)
 	if desc == "" {
 		return ""
 	}
-	fields := strings.Fields(desc)
-	if len(fields) > 12 {
-		fields = fields[:12]
+	fields := strings.FieldsFunc(strings.ToLower(desc), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+	if len(fields) == 0 {
+		return ""
+	}
+	if len(fields) > semanticTaskKeyWords {
+		fields = fields[:semanticTaskKeyWords]
 	}
 	return strings.Join(fields, " ")
+}
+
+// resolveSemanticTaskKey returns the semantic key a delegation should be
+// recorded and matched under. Callers must resolve it once at admission so the
+// key stored on the durable record and the key used for lookups agree.
+func resolveSemanticTaskKey(semanticTaskKey, description string) string {
+	if key := strings.TrimSpace(semanticTaskKey); key != "" {
+		return key
+	}
+	return semanticTaskKeyFallback(description)
 }
 
 func writeScopesOverlap(a, b tools.WriteScope, baseDir string) bool {
@@ -319,10 +347,10 @@ func writeScopesOverlap(a, b tools.WriteScope, baseDir string) bool {
 
 func (a *MainAgent) findDuplicateOrConflictingTaskLocked(ownerAgentID, ownerTaskID, agentType, planTaskRef, semanticTaskKey string, expectedWriteScope tools.WriteScope) (*DurableTaskRecord, bool) {
 	planTaskRef = strings.TrimSpace(planTaskRef)
+	// The caller resolves the semantic key at admission (resolveSemanticTaskKey);
+	// re-deriving it here from a different field would compare a key that was
+	// never stored on any record.
 	semanticTaskKey = strings.TrimSpace(semanticTaskKey)
-	if semanticTaskKey == "" {
-		semanticTaskKey = semanticTaskKeyFallback(planTaskRef)
-	}
 	expectedWriteScope = expectedWriteScope.Normalized()
 	ownerLineage := a.taskOwnerLineageLocked(ownerTaskID)
 	for _, rec := range a.subs.taskRecords {

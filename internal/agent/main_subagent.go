@@ -125,7 +125,7 @@ func (a *MainAgent) delegationCallerFromContext(ctx context.Context) (delegation
 		TaskID:     sub.taskID,
 		Depth:      depth,
 		Delegation: sub.delegation,
-		Ruleset:    append(permission.Ruleset(nil), sub.ruleset...),
+		Ruleset:    sub.currentRuleset(),
 		WriteScope: sub.writeScope.Normalized(),
 		WorkDir:    sub.workDir,
 		IsMain:     false,
@@ -141,12 +141,13 @@ func isNonTerminalTaskState(state string) bool {
 	}
 }
 
+// effectiveDirectActiveChildLimit is the per-owner fan-out cap. It honours the
+// configured value instead of silently clamping it to the default: the ceiling
+// that keeps the task tree bounded is MaxDelegationMaxChildren, already applied
+// by EffectiveMaxChildren and rejected at config load when exceeded, and live
+// concurrency is separately bounded by the runtime slot pool.
 func effectiveDirectActiveChildLimit(cfg config.DelegationConfig) int {
-	limit := cfg.EffectiveMaxChildren()
-	if limit > config.DefaultDelegationMaxChildren {
-		return config.DefaultDelegationMaxChildren
-	}
-	return limit
+	return cfg.EffectiveMaxChildren()
 }
 
 func childWriteScopeWithinParent(parent, child tools.WriteScope, baseDir string) bool {
@@ -374,9 +375,14 @@ func (a *MainAgent) canCallerDelegate(ctx context.Context) (delegationCaller, er
 	if err != nil {
 		return delegationCaller{}, err
 	}
+	// EffectiveMaxDepth already clamps to MaxDelegationMaxDepth, so a caller
+	// definition cannot lift its own ceiling: a parent's limit does not bind its
+	// children (each worker evaluates its own delegation policy), which without
+	// a global ceiling would let one self-delegating definition grow the chain
+	// without bound.
 	maxDepth := caller.Delegation.EffectiveMaxDepth()
 	if !caller.IsMain && caller.Depth >= maxDepth {
-		return delegationCaller{}, fmt.Errorf("nested Delegate is not available at depth %d (max_depth=%d)", caller.Depth, maxDepth)
+		return delegationCaller{}, fmt.Errorf("nested Delegate is not available at depth %d (max_depth=%d, ceiling=%d)", caller.Depth, maxDepth, config.MaxDelegationMaxDepth)
 	}
 	return caller, nil
 }
@@ -753,10 +759,7 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 	n := a.adhocSeq.Add(1)
 	taskID := fmt.Sprintf("adhoc-%d", n)
 	planTaskRef = strings.TrimSpace(planTaskRef)
-	semanticTaskKey = strings.TrimSpace(semanticTaskKey)
-	if semanticTaskKey == "" {
-		semanticTaskKey = semanticTaskKeyFallback(planTaskRef)
-	}
+	semanticTaskKey = resolveSemanticTaskKey(semanticTaskKey, description)
 	expectedWriteScope = expectedWriteScope.Normalized()
 	if !caller.IsMain && !childWriteScopeWithinParent(caller.WriteScope, expectedWriteScope, caller.WorkDir) {
 		return tools.TaskHandle{}, fmt.Errorf("child expected_write_scope must not be broader than the parent SubAgent task scope")

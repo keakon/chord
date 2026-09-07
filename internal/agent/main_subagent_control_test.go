@@ -149,9 +149,9 @@ func TestSyncSubAgentOverlayPreservesSubAgentPermissions(t *testing.T) {
 		},
 	}
 	sub := newControllableTestSubAgent(t, a, "adhoc-rules")
-	sub.ruleset = a.buildSubAgentRuleset(a.agentConfigs[sub.agentDefName])
+	sub.setRuleset(a.buildSubAgentRuleset(a.agentConfigs[sub.agentDefName]))
 
-	if got := sub.ruleset.Evaluate(tools.NameWrite, "notes.txt"); got != permission.ActionDeny {
+	if got := sub.currentRuleset().Evaluate(tools.NameWrite, "notes.txt"); got != permission.ActionDeny {
 		t.Fatalf("initial subagent Write permission = %q, want deny", got)
 	}
 
@@ -159,10 +159,10 @@ func TestSyncSubAgentOverlayPreservesSubAgentPermissions(t *testing.T) {
 		t.Fatalf("AddOverlayRule: %v", err)
 	}
 
-	if got := sub.ruleset.Evaluate(tools.NameShell, "git status --short"); got != permission.ActionAllow {
+	if got := sub.currentRuleset().Evaluate(tools.NameShell, "git status --short"); got != permission.ActionAllow {
 		t.Fatalf("subagent overlay Shell permission = %q, want allow", got)
 	}
-	if got := sub.ruleset.Evaluate(tools.NameWrite, "notes.txt"); got != permission.ActionDeny {
+	if got := sub.currentRuleset().Evaluate(tools.NameWrite, "notes.txt"); got != permission.ActionDeny {
 		t.Fatalf("subagent Write permission after overlay sync = %q, want deny", got)
 	}
 }
@@ -219,7 +219,7 @@ func TestSubAgentRuleIntentRefreshPreservesSubAgentPermissions(t *testing.T) {
 		},
 	}
 	sub := newControllableTestSubAgent(t, a, "adhoc-rule-intent")
-	sub.ruleset = a.buildSubAgentRuleset(a.agentConfigs[sub.agentDefName])
+	sub.setRuleset(a.buildSubAgentRuleset(a.agentConfigs[sub.agentDefName]))
 
 	pipeline := sub.toolExecutionPipeline()
 	refreshed := pipeline.refreshRulesetAfterRuleIntent(tools.NameShell, &ConfirmRuleIntent{
@@ -233,7 +233,7 @@ func TestSubAgentRuleIntentRefreshPreservesSubAgentPermissions(t *testing.T) {
 	if got := refreshed.Evaluate(tools.NameWrite, "notes.txt"); got != permission.ActionDeny {
 		t.Fatalf("subagent Write permission after rule-intent refresh = %q, want deny", got)
 	}
-	if got := sub.ruleset.Evaluate(tools.NameWrite, "notes.txt"); got != permission.ActionDeny {
+	if got := sub.currentRuleset().Evaluate(tools.NameWrite, "notes.txt"); got != permission.ActionDeny {
 		t.Fatalf("stored subagent Write permission after rule-intent refresh = %q, want deny", got)
 	}
 }
@@ -1436,11 +1436,15 @@ func TestCreateSubAgentCapsActiveChildrenAtTen(t *testing.T) {
 	configureNestedDelegationTestRuntime(a, 2)
 	parent := newControllableTestSubAgent(t, a, "adhoc-parent")
 	parent.depth = 1
-	parent.delegation = config.DelegationConfig{MaxChildren: 20, MaxDepth: 2}
+	// MaxChildren is honoured as configured rather than silently clamped to the
+	// default. Set it to 10 so the cap fires at ten, and give each child a
+	// distinct description so the semantic-key duplicate guard does not flag
+	// the fan-out as a re-delegation of the same deliverable.
+	parent.delegation = config.DelegationConfig{MaxChildren: 10, MaxDepth: 2}
 
 	ctx := tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID)
 	for i := range 10 {
-		handle, err := a.CreateSubAgent(ctx, "child work", "worker", "", "", tools.WriteScope{PathPrefix: []string{fmt.Sprintf("module-%d", i)}})
+		handle, err := a.CreateSubAgent(ctx, fmt.Sprintf("child work %d", i), "worker", "", "", tools.WriteScope{PathPrefix: []string{fmt.Sprintf("module-%d", i)}})
 		if err != nil {
 			t.Fatalf("CreateSubAgent(%d): %v", i, err)
 		}
@@ -2687,11 +2691,15 @@ func TestOwnerMailboxQueuesDurablyWhenOwnerParksDuringDelivery(t *testing.T) {
 
 func TestWaitingMainLifecycleExpiresAfterUserTurns(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
+	// The turn budget only expires a wait once the minimum wall-clock wait has
+	// also elapsed; this case exercises the turn clock, so the wall-clock guard
+	// is disabled rather than slept through.
+	a.waitingMainExpiry = waitingMainExpiryPolicy{turns: config.DefaultWaitingMainExpiryTurns, minWait: 0, maxWait: time.Hour}
 	sub := newControllableTestSubAgent(t, a, "adhoc-6")
 	sub.setState(SubAgentStateWaitingMain, "need answer")
 	a.noteSubAgentStateTransition(sub, SubAgentStateWaitingMain)
 
-	for range waitingMainExpiryUserTurns {
+	for range a.waitingMainExpiry.turns {
 		a.explicitUserTurnCount.Add(1)
 	}
 	a.sweepSubAgentLifecycle()
@@ -2699,8 +2707,48 @@ func TestWaitingMainLifecycleExpiresAfterUserTurns(t *testing.T) {
 	if got := a.subAgentByID(sub.instanceID); got != nil {
 		t.Fatal("expected expired waiting_main worker to be parked")
 	}
-	if rec := a.taskRecordByTaskID(sub.taskID); rec == nil || rec.State != string(SubAgentStateCancelled) || !rec.RuntimeParked {
+	rec := a.taskRecordByTaskID(sub.taskID)
+	if rec == nil || rec.State != string(SubAgentStateCancelled) || !rec.RuntimeParked {
 		t.Fatalf("task record = %#v, want parked cancelled task", rec)
+	}
+	if !strings.Contains(rec.LastSummary, "user turns") && !strings.Contains(rec.ClosedReason, "user turns") {
+		t.Fatalf("task record summary/reason = (%q, %q), want the turn clock named", rec.LastSummary, rec.ClosedReason)
+	}
+}
+
+func TestWaitingMainLifecycleKeepsWorkerBeforeMinimumWait(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	// A user holding several quick exchanges with the main agent must not
+	// cancel a worker that escalated moments ago.
+	a.waitingMainExpiry = waitingMainExpiryPolicy{turns: 2, minWait: time.Hour, maxWait: 24 * time.Hour}
+	sub := newControllableTestSubAgent(t, a, "adhoc-min-wait")
+	sub.setState(SubAgentStateWaitingMain, "need answer")
+	a.noteSubAgentStateTransition(sub, SubAgentStateWaitingMain)
+
+	a.explicitUserTurnCount.Add(10)
+	a.sweepSubAgentLifecycle()
+
+	if got := a.subAgentByID(sub.instanceID); got == nil {
+		t.Fatal("waiting_main worker was cancelled before the minimum wall-clock wait elapsed")
+	}
+}
+
+func TestWaitingMainLifecycleExpiresOnMaxWaitWithoutUserTurns(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	// Headless runs and an absent user produce no explicit turns at all, so the
+	// unconditional clock is the only thing that can collect the wait.
+	a.waitingMainExpiry = waitingMainExpiryPolicy{turns: 1 << 30, minWait: time.Hour, maxWait: time.Nanosecond}
+	sub := newControllableTestSubAgent(t, a, "adhoc-max-wait")
+	sub.setState(SubAgentStateWaitingMain, "need answer")
+	a.noteSubAgentStateTransition(sub, SubAgentStateWaitingMain)
+
+	a.sweepSubAgentLifecycle()
+
+	if got := a.subAgentByID(sub.instanceID); got != nil {
+		t.Fatal("waiting_main worker outlived the unconditional maximum wait")
+	}
+	if rec := a.taskRecordByTaskID(sub.taskID); rec == nil || rec.State != string(SubAgentStateCancelled) {
+		t.Fatalf("task record = %#v, want cancelled task", rec)
 	}
 }
 
@@ -3146,7 +3194,7 @@ func TestTerminalSubAgentsRemainAvailableAfterLifecycleSweep(t *testing.T) {
 	cancelled.setState(SubAgentStateCancelled, "cancelled by user")
 	a.noteSubAgentStateTransition(cancelled, SubAgentStateCancelled)
 
-	a.explicitUserTurnCount.Add(waitingMainExpiryUserTurns + 1)
+	a.explicitUserTurnCount.Add(config.DefaultWaitingMainExpiryTurns + 1)
 	a.sweepSubAgentLifecycle()
 
 	if got := a.subAgentByID(failed.instanceID); got != failed {

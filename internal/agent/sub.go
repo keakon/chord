@@ -202,7 +202,14 @@ type SubAgent struct {
 	acceptedMailboxIDs     map[string]struct{} // guarded by inputQueueMu; de-duplicates durable deliveries
 
 	// Permission: merged ruleset (global + project + agent-level).
-	ruleset permission.Ruleset
+	//
+	// Published as an immutable snapshot behind an atomic pointer: the batch
+	// scheduler and the MainAgent's event loop read it while a parallel tool
+	// goroutine can replace it after a confirmation rule intent
+	// (refreshRulesetAfterRuleIntent), so a plain field would be a data race.
+	// Every writer stores a freshly built ruleset and never appends to a
+	// published one.
+	rulesetPtr atomic.Pointer[permission.Ruleset]
 
 	// Repetition detection removed; tool execution no longer rejects repeated
 	// (name, args) calls at the agent layer.
@@ -509,7 +516,7 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 		parent: cfg.Parent,
 		ruleset: func() permission.Ruleset {
 			if s != nil {
-				return s.ruleset
+				return s.currentRuleset()
 			}
 			return cfg.Ruleset
 		},
@@ -612,7 +619,6 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 		cancel:            cfg.Cancel,
 		recovery:          cfg.Recovery,
 		sessionEpoch:      cfg.SessionEpoch,
-		ruleset:           cfg.Ruleset,
 		workDir:           cfg.WorkDir,
 		venvPath:          cfg.VenvPath,
 		sessionDir:        cfg.SessionDir,
@@ -633,6 +639,7 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 		continueCh:        make(chan continueMsg, 1),
 		wakeCh:            make(chan struct{}, 1),
 	}
+	s.setRuleset(cfg.Ruleset)
 	s.runtimeState.set(SubAgentStateRunning, "")
 	if hasSkillTool && !cfg.Ruleset.IsDisabled(tools.NameSkill) {
 		s.tools.Register(tools.NewSkillTool(s))
@@ -1037,7 +1044,7 @@ func (s *SubAgent) newSubLLMStreamReducer(turn *Turn, promoteStreamingActivity f
 		agentID:          s.instanceID,
 		turn:             turn,
 		registry:         s.tools,
-		ruleset:          func() permission.Ruleset { return s.ruleset },
+		ruleset:          func() permission.Ruleset { return s.currentRuleset() },
 		toolBaseDir:      s.workDir,
 		visibleToolNames: s.visibleToolNames,
 		emit:             s.parent.emitToTUI,
@@ -1218,14 +1225,14 @@ func (s *SubAgent) filteredVisibleTools() []tools.Tool {
 func (s *SubAgent) filteredVisibleToolsForModel(modelName string, client *llm.Client) []tools.Tool {
 	// A zero context is correct for SubAgents: loop mode is a main-agent
 	// workflow, and neither done nor compact_context is ever registered here.
-	visibleTools := visibleLLMTools(s.tools, s.ruleset, isSubAgentInternalTool, toolPermissionContext{})
+	visibleTools := visibleLLMTools(s.tools, s.currentRuleset(), isSubAgentInternalTool, toolPermissionContext{})
 	var patchSurfaceDecision *bool
 	if client != nil {
 		// The client resolves compat + primary model inference (stable tool
 		// surface); name-based inference stays the fallback when unbound.
 		patchSurfaceDecision = new(client.UsesApplyPatchSurface())
 	}
-	return filterEditToolsByModel(visibleTools, modelName, s.ruleset, patchSurfaceDecision)
+	return filterEditToolsByModel(visibleTools, modelName, s.currentRuleset(), patchSurfaceDecision)
 }
 
 func (s *SubAgent) hasVisibleTool(name string) bool {
@@ -1328,7 +1335,7 @@ func (s *SubAgent) buildSystemPrompt() string {
 // capabilityPromptBlock takes the caller's visibility snapshot so every block
 // in one system prompt describes the same tool surface.
 func (s *SubAgent) capabilityPromptBlock(visible map[string]struct{}) string {
-	return buildDynamicCapabilityPromptBlock(visible, s.ruleset, capabilityPromptAudienceSub)
+	return buildDynamicCapabilityPromptBlock(visible, s.currentRuleset(), capabilityPromptAudienceSub)
 }
 
 func (s *SubAgent) delegationPromptBlock() string {
@@ -1338,7 +1345,7 @@ func (s *SubAgent) delegationPromptBlock() string {
 	if _, ok := s.tools.Get(tools.NameDelegate); !ok {
 		return ""
 	}
-	agents := s.parent.availableSubAgentsForRuleset(s.ruleset, "")
+	agents := s.parent.availableSubAgentsForRuleset(s.currentRuleset(), "")
 	if len(agents) == 0 {
 		return ""
 	}

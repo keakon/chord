@@ -215,7 +215,7 @@ func TestSubAgentScopeRejectsUserEditedArgsOutsideScope(t *testing.T) {
 	sub.workDir = root
 	sub.writeScope = tools.WriteScope{PathPrefix: []string{"allowed"}}
 	sub.tools.Register(tools.WriteTool{BaseDir: root})
-	sub.ruleset = permission.Ruleset{{Permission: tools.NameWrite, Pattern: "*", Action: permission.ActionAsk}}
+	sub.setRuleset(permission.Ruleset{{Permission: tools.NameWrite, Pattern: "*", Action: permission.ActionAsk}})
 	parent.confirmFn = func(context.Context, string, string, []string, []string, []string, []string) (ConfirmResponse, error) {
 		return ConfirmResponse{
 			Approved:      true,

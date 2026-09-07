@@ -766,6 +766,7 @@ type MainAgent struct {
 	subs                     subAgentRegistry
 	orchestrationMetrics     orchestrationRuntimeMetrics
 	governor                 *resourceGovernor
+	waitingMainExpiry        waitingMainExpiryPolicy // resolved once; see waitingMainExpiryPolicy()
 	admissionMu              sync.Mutex
 	admissionEpoch           atomic.Uint64
 	admissionPaused          atomic.Bool
@@ -1086,7 +1087,8 @@ func NewMainAgent(
 		workDir = projectRoot
 	}
 	gitStatusReady := make(chan struct{})
-	governor := newResourceGovernor(effectiveOrchestrationConfig(globalCfg, projectCfg))
+	orchestrationCfg := effectiveOrchestrationConfig(globalCfg, projectCfg)
+	governor := newResourceGovernor(orchestrationCfg)
 
 	a := &MainAgent{
 		parentCtx:               parentCtx,
@@ -1119,6 +1121,7 @@ func NewMainAgent(
 		pathLocator:             pathLocator,
 		subs:                    newSubAgentRegistry(),
 		governor:                governor,
+		waitingMainExpiry:       resolveWaitingMainExpiryPolicy(orchestrationCfg),
 		sem:                     governor.runtimeSlots,
 		fileTrack:               filelock.NewFileTracker(),
 		fileBackups:             newFileBackupManager(sessionDir),

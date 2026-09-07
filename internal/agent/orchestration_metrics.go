@@ -50,6 +50,7 @@ type orchestrationRuntimeMetrics struct {
 	runtimeBypassGrants    atomic.Uint64
 	runtimeBypassActive    atomic.Int64
 	runtimeBypassPeak      atomic.Uint64
+	runtimeBypassRejected  atomic.Uint64
 
 	mailboxMu sync.Mutex
 	mailboxes map[string]mailboxMetricState
@@ -111,6 +112,7 @@ type OrchestrationStats struct {
 	RuntimeBypassGrants           uint64
 	RuntimeBypassActive           int64
 	RuntimeBypassPeak             uint64
+	RuntimeBypassRejected         uint64
 }
 
 func (m *orchestrationRuntimeMetrics) acquireRuntimeBypass() {
@@ -125,6 +127,16 @@ func (m *orchestrationRuntimeMetrics) acquireRuntimeBypass() {
 			return
 		}
 	}
+}
+
+// rejectRuntimeBypass records a wake reactivation that could not be granted
+// even from the bypass pool. A rising count means durable messages are being
+// left queued because every runtime pool is saturated.
+func (m *orchestrationRuntimeMetrics) rejectRuntimeBypass() {
+	if m == nil {
+		return
+	}
+	m.runtimeBypassRejected.Add(1)
 }
 
 func (m *orchestrationRuntimeMetrics) releaseRuntimeBypass() {
@@ -434,6 +446,7 @@ func (a *MainAgent) OrchestrationStats() OrchestrationStats {
 		RuntimeBypassGrants:           metrics.runtimeBypassGrants.Load(),
 		RuntimeBypassActive:           metrics.runtimeBypassActive.Load(),
 		RuntimeBypassPeak:             metrics.runtimeBypassPeak.Load(),
+		RuntimeBypassRejected:         metrics.runtimeBypassRejected.Load(),
 		TasksByState:                  make(map[string]uint64),
 		TerminalReasons:               make(map[string]uint64),
 	}

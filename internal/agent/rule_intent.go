@@ -160,7 +160,7 @@ func (a *MainAgent) syncSubAgentOverlay() {
 	defer a.subs.mu.Unlock()
 	for _, update := range updates {
 		if current := a.subs.subAgents[update.instanceID]; current == update.sub {
-			current.ruleset = update.ruleset
+			current.setRuleset(update.ruleset)
 		}
 	}
 }

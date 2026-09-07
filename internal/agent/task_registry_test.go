@@ -91,6 +91,94 @@ func TestWriteScopesOverlapMatchesExactAndNestedPathsOnly(t *testing.T) {
 	}
 }
 
+func TestResolveSemanticTaskKeyDerivesFromDescription(t *testing.T) {
+	tests := []struct {
+		name        string
+		key         string
+		description string
+		want        string
+	}{
+		{
+			name:        "explicit key wins",
+			key:         "  restore-identity  ",
+			description: "Restore the durable identity",
+			want:        "restore-identity",
+		},
+		{
+			name:        "derived from description",
+			key:         "",
+			description: "Fix the parser bug.",
+			want:        "fix the parser bug",
+		},
+		{
+			// Two wordings of the same deliverable must collide, otherwise the
+			// duplicate guard never fires for the common case of a description
+			// and nothing else.
+			name:        "punctuation and case normalized",
+			key:         "",
+			description: "FIX the Parser  bug!!",
+			want:        "fix the parser bug",
+		},
+		{
+			name:        "truncated to the opening clause",
+			key:         "",
+			description: "one two three four five six seven eight nine ten eleven twelve thirteen fourteen",
+			want:        "one two three four five six seven eight nine ten eleven twelve",
+		},
+		{
+			name:        "no usable words",
+			key:         "",
+			description: "   ...   ",
+			want:        "",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := resolveSemanticTaskKey(tc.key, tc.description); got != tc.want {
+				t.Fatalf("resolveSemanticTaskKey(%q, %q) = %q, want %q", tc.key, tc.description, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFindDuplicateOrConflictingTaskMatchesDescriptionDerivedKey(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	// The derived key covers the opening clause only, so two descriptions match
+	// when they open the same way — that is the whole reach of the fallback, and
+	// it is what a re-delegation of one deliverable actually looks like.
+	description := "Add regression coverage for the parser fallback path so the duplicate guard has a stable key"
+	rewordedTail := "Add regression coverage for the parser fallback path so the duplicate guard is exercised end to end"
+	a.setTaskRecords(map[string]*DurableTaskRecord{
+		"adhoc-1": {
+			TaskID:             "adhoc-1",
+			OwnerAgentID:       "",
+			OwnerTaskID:        "",
+			AgentDefName:       "worker",
+			SemanticTaskKey:    resolveSemanticTaskKey("", description),
+			ExpectedWriteScope: tools.WriteScope{Files: []string{"internal/parser/parser_test.go"}},
+			State:              string(SubAgentStateRunning),
+		},
+	})
+
+	// A re-delegation of the same deliverable, described the same way and with
+	// no explicit semantic key, must be recognised as the existing task rather
+	// than starting a second worker on it.
+	existing, conflict := a.findDuplicateOrConflictingTask(
+		"",
+		"",
+		"worker",
+		"",
+		resolveSemanticTaskKey("", rewordedTail),
+		tools.WriteScope{Files: []string{"internal/parser/parser_test.go"}},
+	)
+	if existing == nil || existing.TaskID != "adhoc-1" {
+		t.Fatalf("findDuplicateOrConflictingTask() = (%#v, %v), want the existing task", existing, conflict)
+	}
+	if conflict {
+		t.Fatal("same-deliverable re-delegation reported a scope conflict instead of a duplicate")
+	}
+}
+
 func TestMergeDurableTaskRecordsPreservesCoordinationIdentity(t *testing.T) {
 	base := map[string]*DurableTaskRecord{
 		"adhoc-identity": {

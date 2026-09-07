@@ -46,8 +46,8 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 		}
 
 		// Only attempt to reuse speculative results when permission is non-interactive.
-		if len(s.ruleset) > 0 && !isSubAgentInternalTool(tc.Name) {
-			decision := evaluateToolPermissionInDir(s.ruleset, tc.Name, tc.Args, s.workDir)
+		if ruleset := s.currentRuleset(); len(ruleset) > 0 && !isSubAgentInternalTool(tc.Name) {
+			decision := evaluateToolPermissionInDir(ruleset, tc.Name, tc.Args, s.workDir)
 			if decision.Action != permission.ActionAllow {
 				pendingCalls = append(pendingCalls, tc)
 				continue

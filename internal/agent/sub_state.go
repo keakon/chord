@@ -6,8 +6,29 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
+
+// currentRuleset returns the SubAgent's published permission snapshot. Callers
+// must treat the result as immutable; see the rulesetPtr field comment.
+func (s *SubAgent) currentRuleset() permission.Ruleset {
+	if s == nil {
+		return nil
+	}
+	if published := s.rulesetPtr.Load(); published != nil {
+		return *published
+	}
+	return nil
+}
+
+// setRuleset publishes a freshly built ruleset snapshot for this SubAgent.
+func (s *SubAgent) setRuleset(ruleset permission.Ruleset) {
+	if s == nil {
+		return
+	}
+	s.rulesetPtr.Store(&ruleset)
+}
 
 func (s *SubAgent) State() SubAgentState {
 	state, _ := s.runtimeState.snapshot()

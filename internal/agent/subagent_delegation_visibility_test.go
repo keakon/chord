@@ -226,7 +226,7 @@ func TestSubAgentDisableStarKeepsOnlyCompleteAsInternalControlTool(t *testing.T)
 	if _, ok := sub.tools.Get("complete"); !ok {
 		t.Fatal("sub.tools should retain Complete even when disable=*")
 	}
-	visible := visibleLLMTools(sub.tools, sub.ruleset, isSubAgentInternalTool, toolPermissionContext{})
+	visible := visibleLLMTools(sub.tools, sub.currentRuleset(), isSubAgentInternalTool, toolPermissionContext{})
 	foundComplete := false
 	for _, tool := range visible {
 		if tools.NormalizeName(tool.Name()) == tools.NameComplete {

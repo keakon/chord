@@ -27,7 +27,7 @@ func (s *SubAgent) visibleSkillsSnapshot() []*skill.Meta {
 		}
 		ruleset = s.parent.buildSubAgentRuleset(cfg)
 	} else {
-		ruleset = s.ruleset
+		ruleset = s.currentRuleset()
 	}
 	if len(catalog) == 0 {
 		return nil

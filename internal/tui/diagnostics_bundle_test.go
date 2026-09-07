@@ -190,11 +190,12 @@ func TestWriteOrchestrationDiagnostics(t *testing.T) {
 		SubAgentQueueRejected: 2,
 		RuntimeBypassGrants:   1,
 		RuntimeBypassPeak:     1,
+		RuntimeBypassRejected: 1,
 	})
 	got := sb.String()
 	for _, want := range []string{
 		"orchestration_event_queue: overflow=2 overflow_peak=4",
-		"orchestration_runtimes: normal=4/10 borrowed=1/1",
+		"orchestration_runtimes: normal=4/10 borrowed=1/1 bypass_active=0 bypass_peak=1 bypass_grants=1 bypass_rejected=1",
 		"orchestration_llm_requests: active=3 capacity=8 queued=2",
 		"orchestration_tasks: total=6 scope_conflicts=1",
 	} {

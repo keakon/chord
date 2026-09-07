@@ -1188,7 +1188,7 @@ func TestMainAndSubToolExecutionPipelineConsistentPermissionDecisions(t *testing
 		t.Run(tc.name, func(t *testing.T) {
 			mainAgent, subAgent := newToolPipelineConsistencyAgents(t)
 			mainAgent.ruleset = tc.ruleset
-			subAgent.ruleset = tc.ruleset
+			subAgent.setRuleset(tc.ruleset)
 			mainAgent.confirmFn = tc.confirm
 			call := message.ToolCall{ID: "call-1", Name: "RequiredValue", Args: json.RawMessage(`{"value":"old"}`)}
 

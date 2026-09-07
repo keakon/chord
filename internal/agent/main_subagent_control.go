@@ -54,13 +54,22 @@ func (a *MainAgent) acquireSubAgentSlotWithBypass(sub *SubAgent, allowBypass boo
 	}
 	// Both pools are exhausted. Wake reactivations run on the main event loop,
 	// and the releases that would free capacity are processed by that same
-	// loop, so blocking here can deadlock the whole agent. Fall back to an
-	// uncounted bypass grant — bounded by the number of existing parked tasks —
-	// and surface the overflow through metrics instead.
-	sub.semHeld, sub.semBorrowed, sub.semBypassed = true, false, true
-	a.orchestrationMetrics.acquireRuntimeBypass()
-	log.Warnf("SubAgent wake reactivation exceeded runtime and borrow capacity; granting uncounted bypass agent_id=%v task_id=%v", sub.instanceID, sub.taskID)
-	return nil
+	// loop, so blocking here can deadlock the whole agent. Fall back to a
+	// bounded pool of uncounted bypass grants and surface the overflow through
+	// metrics.
+	if governor.tryBypassRuntime() {
+		sub.semHeld, sub.semBorrowed, sub.semBypassed = true, false, true
+		a.orchestrationMetrics.acquireRuntimeBypass()
+		log.Warnf("SubAgent wake reactivation exceeded runtime and borrow capacity; granting bounded bypass agent_id=%v task_id=%v bypass_limit=%v", sub.instanceID, sub.taskID, governor.maxBypassed)
+		return nil
+	}
+	// Every pool is exhausted, including the safety valve. Refuse instead of
+	// exceeding the configured ceiling: the caller leaves the durable message
+	// queued (owned mailbox / spool keeps FIFO order) and the next release
+	// drains it.
+	a.orchestrationMetrics.rejectRuntimeBypass()
+	log.Warnf("SubAgent wake reactivation refused; runtime, borrow, and bypass pools exhausted agent_id=%v task_id=%v", sub.instanceID, sub.taskID)
+	return fmt.Errorf("max concurrent agents reached (cap=%d) and the wake bypass pool is exhausted (cap=%d), wait for a running agent to complete", cap(a.sem), governor.maxBypassed)
 }
 
 func (a *MainAgent) releaseSubAgentSlot(sub *SubAgent) {
@@ -78,10 +87,12 @@ func (a *MainAgent) releaseSubAgentSlot(sub *SubAgent) {
 	sub.semBorrowed = false
 	sub.semBypassed = false
 	sub.semMu.Unlock()
-	if bypassed || a.governor == nil {
-		if bypassed {
-			a.orchestrationMetrics.releaseRuntimeBypass()
-		}
+	if bypassed {
+		a.orchestrationMetrics.releaseRuntimeBypass()
+		a.governor.releaseBypassRuntime()
+		return
+	}
+	if a.governor == nil {
 		return
 	}
 	a.governor.releaseRuntime(borrowed)
@@ -754,11 +765,7 @@ func (a *MainAgent) stopSubAgentNow(callerAgentID, callerTaskID, taskID, reason 
 	if sub == nil {
 		record := a.taskRecordByTaskID(taskID)
 		if record != nil && record.RuntimeParked {
-			for _, childTaskID := range a.directChildTaskIDs(taskID) {
-				if _, err := a.stopSubAgentNow(record.LatestInstanceID, taskID, childTaskID, fmt.Sprintf("cancelled because ancestor task %s was stopped", taskID)); err != nil {
-					return tools.TaskHandle{}, err
-				}
-			}
+			cascadeFailures := a.cancelDescendantTasks(record.LatestInstanceID, taskID)
 			reasonText := blankToDefault(reason, "stopped by main agent")
 			outcome := a.settleDetachedTerminalTask(taskID, SubAgentStateCancelled, reasonText, reasonText)
 			if outcome == "" {
@@ -781,7 +788,7 @@ func (a *MainAgent) stopSubAgentNow(callerAgentID, callerTaskID, taskID, reason 
 				}
 			}
 			a.emitToTUI(AgentStatusEvent{AgentID: record.LatestInstanceID, Status: string(outcome), Message: eventMessage})
-			return tools.TaskHandle{Status: string(outcome), TaskID: taskID, AgentID: record.LatestInstanceID, Message: handleMessage}, nil
+			return tools.TaskHandle{Status: string(outcome), TaskID: taskID, AgentID: record.LatestInstanceID, Message: appendCascadeFailures(handleMessage, cascadeFailures)}, nil
 		}
 		return tools.TaskHandle{}, fmt.Errorf("unknown task_id %q; cannot stop a missing worker", taskID)
 	}
@@ -799,14 +806,7 @@ func (a *MainAgent) stopSubAgentNow(callerAgentID, callerTaskID, taskID, reason 
 		reason = "Stopped by MainAgent"
 	}
 
-	for _, childTaskID := range a.directChildTaskIDs(sub.taskID) {
-		if childTaskID == "" || childTaskID == taskID {
-			continue
-		}
-		if _, err := a.stopSubAgentNow(sub.instanceID, sub.taskID, childTaskID, fmt.Sprintf("cancelled because ancestor task %s was stopped", sub.taskID)); err != nil {
-			return tools.TaskHandle{}, err
-		}
-	}
+	cascadeFailures := a.cancelDescendantTasks(sub.instanceID, sub.taskID)
 
 	// Cancel synchronously for deterministic shutdown and tests.
 	sub.cancelCurrentTurnFromLoop()
@@ -832,8 +832,40 @@ func (a *MainAgent) stopSubAgentNow(callerAgentID, callerTaskID, taskID, reason 
 		Status:  "cancelled",
 		TaskID:  sub.taskID,
 		AgentID: sub.instanceID,
-		Message: "worker stopped",
+		Message: appendCascadeFailures("worker stopped", cascadeFailures),
 	}, nil
+}
+
+// cancelDescendantTasks cancels every direct child of ownerTaskID and returns a
+// description of the ones that could not be cancelled.
+//
+// A failed child must not abort the ancestor's own cancellation: doing so left
+// the subtree half-cancelled with no compensation and no retry, and reported
+// only the first failure. The ancestor is stopped regardless and the residue is
+// surfaced on the handle so the caller can retry those task IDs explicitly.
+func (a *MainAgent) cancelDescendantTasks(ownerAgentID, ownerTaskID string) []string {
+	ownerTaskID = strings.TrimSpace(ownerTaskID)
+	if ownerTaskID == "" {
+		return nil
+	}
+	var failures []string
+	for _, childTaskID := range a.directChildTaskIDs(ownerTaskID) {
+		if childTaskID == "" || childTaskID == ownerTaskID {
+			continue
+		}
+		if _, err := a.stopSubAgentNow(ownerAgentID, ownerTaskID, childTaskID, fmt.Sprintf("cancelled because ancestor task %s was stopped", ownerTaskID)); err != nil {
+			failures = append(failures, fmt.Sprintf("%s (%v)", childTaskID, err))
+			log.Warnf("cascade cancel failed for child task owner_task_id=%v child_task_id=%v error=%v", ownerTaskID, childTaskID, err)
+		}
+	}
+	return failures
+}
+
+func appendCascadeFailures(message string, failures []string) string {
+	if len(failures) == 0 {
+		return message
+	}
+	return fmt.Sprintf("%s; %d child task(s) still need an explicit cancel: %s", message, len(failures), strings.Join(failures, ", "))
 }
 
 func (a *MainAgent) NotifySubAgent(ctx context.Context, taskID, message, kind string) (tools.TaskHandle, error) {

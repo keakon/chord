@@ -46,15 +46,13 @@ func (s *SubAgent) toolExecutionPipeline() toolExecutionPipeline {
 		toolBaseDir:      s.workDir,
 		writeScope:       &s.writeScope,
 		writeScopeDir:    s.workDir,
-		currentRuleset: func() permission.Ruleset {
-			return s.ruleset
-		},
+		currentRuleset:   s.currentRuleset,
 		refreshRulesetAfterRuleIntent: func(toolName string, intent *ConfirmRuleIntent) permission.Ruleset {
 			if s.parent != nil {
 				s.parent.processRuleIntent(toolName, intent)
-				s.ruleset = s.parent.buildSubAgentRuleset(s.parent.agentConfigs[s.agentDefName])
+				s.setRuleset(s.parent.buildSubAgentRuleset(s.parent.agentConfigs[s.agentDefName]))
 			}
-			return s.ruleset
+			return s.currentRuleset()
 		},
 		isInternalTool:        isSubAgentInternalTool,
 		confirm:               confirm,
