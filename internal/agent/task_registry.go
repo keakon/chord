@@ -23,8 +23,10 @@ const (
 	taskResumePolicyNotify       = "notify"
 	taskResumePolicyExplicitOnly = "explicit_only"
 	maxRetainedTerminalTasks     = 256
-	// semanticTaskKeyWords bounds the derived duplicate-detection key so two
-	// wordings of the same deliverable still collide on their opening clause.
+	// semanticTaskKeyWords bounds the derived duplicate key so two wordings of
+	// the same deliverable still collide on their opening clause. The derived
+	// key is a hint only: it also collides for any two delegations that merely
+	// open the same way, so it must never reject a delegation by itself.
 	semanticTaskKeyWords = 12
 )
 
@@ -276,15 +278,18 @@ func (r *DurableTaskRecord) allowsRehydrate(trigger taskResumeTrigger) bool {
 	}
 }
 
-// semanticTaskKeyFallback derives a duplicate-detection key from the task
-// description a caller passed to Delegate. It is the fallback for callers that
-// supply no explicit semantic_task_key: plan_task_ref is compared separately in
-// duplicateOrConflictingTaskRecord, so deriving the key from it too would leave
-// the most common case — a description and nothing else — with no key at all
-// and no duplicate detection.
-//
-// Words are lowercased and split on non-alphanumeric runes so "Fix the parser
-// bug." and "fix the parser bug" produce the same key.
+// semanticTaskKeyFallback derives a duplicate key from the task description a
+// caller passed to Delegate. It is the fallback for callers that supply no
+// explicit semantic_task_key, so a description and nothing else still gets a
+// key to compare against. The derivation is intentionally crude: words are
+// lowercased and split on non-alphanumeric runes ("Fix the parser bug." ==
+// "fix the parser bug") and truncated to the opening clause, so two wordings
+// of one deliverable collide — but so do unrelated deliverables that merely
+// share an opening clause, and CJK sentences without word separators collapse
+// into one token that only an identical sentence matches. A collision on this
+// heuristic is therefore never enough to reject a delegation by itself: it
+// only marks the new task as a probable duplicate (see
+// duplicateOrConflictingTaskRecord).
 func semanticTaskKeyFallback(desc string) string {
 	desc = strings.TrimSpace(desc)
 	if desc == "" {
@@ -304,13 +309,33 @@ func semanticTaskKeyFallback(desc string) string {
 
 // resolveSemanticTaskKey returns the semantic key a delegation should be
 // recorded and matched under. Callers must resolve it once at admission so the
-// key stored on the durable record and the key used for lookups agree.
+// key stored on the durable record and the key used for lookups agree, and
+// they must remember whether the key was supplied explicitly or derived here:
+// only an explicit key can justify the hard already_exists rejection.
 func resolveSemanticTaskKey(semanticTaskKey, description string) string {
 	if key := strings.TrimSpace(semanticTaskKey); key != "" {
 		return key
 	}
 	return semanticTaskKeyFallback(description)
 }
+
+// taskDuplicateDisposition classifies a collision the registry found between a
+// new delegation and an existing task record (or in-flight admission).
+// taskDuplicateExplicitKey is a confirmed duplicate — the incoming delegation
+// supplied the same explicit semantic_task_key the record stores — and is the
+// only collision that may reject the call with already_exists. Everything the
+// registry matches by heuristic (the description-derived fallback key, or a
+// shared plan_task_ref without an explicit key in common) is
+// taskDuplicateProbable: the caller still creates the new task and only marks
+// the returned handle as a detected duplicate, leaving the decision of whether
+// both describe the same deliverable to the model.
+type taskDuplicateDisposition uint8
+
+const (
+	taskDuplicateNone taskDuplicateDisposition = iota
+	taskDuplicateExplicitKey
+	taskDuplicateProbable
+)
 
 func writeScopesOverlap(a, b tools.WriteScope, baseDir string) bool {
 	a = a.Normalized()
@@ -357,25 +382,40 @@ func writeScopesOverlap(a, b tools.WriteScope, baseDir string) bool {
 	return false
 }
 
-func (a *MainAgent) findDuplicateOrConflictingTaskLocked(ownerAgentID, ownerTaskID, agentType, planTaskRef, semanticTaskKey string, expectedWriteScope tools.WriteScope) (*DurableTaskRecord, bool) {
+func (a *MainAgent) findDuplicateOrConflictingTaskLocked(ownerAgentID, ownerTaskID, agentType, planTaskRef, semanticTaskKey string, semanticKeyExplicit bool, expectedWriteScope tools.WriteScope) (*DurableTaskRecord, taskDuplicateDisposition, bool) {
 	planTaskRef = strings.TrimSpace(planTaskRef)
 	// The caller resolves the semantic key at admission (resolveSemanticTaskKey);
 	// re-deriving it here from a different field would compare a key that was
-	// never stored on any record.
+	// never stored on any record. semanticKeyExplicit records whether the
+	// caller supplied that key explicitly instead of deriving it from the
+	// description; only an explicit key can classify a match as
+	// taskDuplicateExplicitKey.
 	semanticTaskKey = strings.TrimSpace(semanticTaskKey)
 	expectedWriteScope = expectedWriteScope.Normalized()
 	ownerLineage := a.taskOwnerLineageLocked(ownerTaskID)
+	var probable *DurableTaskRecord
 	for _, rec := range a.subs.taskRecords {
 		if rec != nil {
 			if _, ancestor := ownerLineage[strings.TrimSpace(rec.TaskID)]; ancestor {
 				continue
 			}
 		}
-		if duplicate, conflict := duplicateOrConflictingTaskRecord(rec, ownerAgentID, ownerTaskID, agentType, planTaskRef, semanticTaskKey, expectedWriteScope, a.projectRoot); duplicate {
-			return cloneDurableTaskRecord(rec), conflict
+		disposition, conflict := duplicateOrConflictingTaskRecord(rec, ownerAgentID, ownerTaskID, agentType, planTaskRef, semanticTaskKey, semanticKeyExplicit, expectedWriteScope, a.projectRoot)
+		if conflict || disposition == taskDuplicateExplicitKey {
+			// A rejection (scope conflict or confirmed duplicate) always stops
+			// the scan. A probable match is remembered instead and only used if
+			// no rejecting record exists: a fallback-key collision must never
+			// hide a real scope conflict or explicit-key duplicate.
+			return cloneDurableTaskRecord(rec), disposition, conflict
+		}
+		if disposition == taskDuplicateProbable && probable == nil {
+			probable = cloneDurableTaskRecord(rec)
 		}
 	}
-	return nil, false
+	if probable != nil {
+		return probable, taskDuplicateProbable, false
+	}
+	return nil, taskDuplicateNone, false
 }
 
 func (a *MainAgent) taskOwnerLineageLocked(ownerTaskID string) map[string]struct{} {
@@ -394,27 +434,47 @@ func (a *MainAgent) taskOwnerLineageLocked(ownerTaskID string) map[string]struct
 	return lineage
 }
 
-func duplicateOrConflictingTaskRecord(rec *DurableTaskRecord, ownerAgentID, ownerTaskID, agentType, planTaskRef, semanticTaskKey string, expectedWriteScope tools.WriteScope, projectRoot string) (duplicate, conflict bool) {
+// duplicateOrConflictingTaskRecord classifies one existing record against a new
+// delegation. The first branch detects duplicates of the same deliverable: same
+// owner agent, owner task and agent type, with the plan_task_ref or the
+// semantic key in common and a state that may still be continued (non-terminal,
+// or completed under the notify resume policy). Only a match through an
+// explicit semantic_task_key — the identity the caller deliberately asserts —
+// returns taskDuplicateExplicitKey and may reject the delegation. A match
+// through the description-derived fallback key, or through plan_task_ref alone,
+// returns taskDuplicateProbable: word-level fallback keys over-collide (a
+// shared long preamble makes unrelated English delegates collide) and
+// under-collide (CJK sentences do not split into words), so the runtime must
+// not merge or reject on them — it creates the new task and lets the model
+// decide.
+func duplicateOrConflictingTaskRecord(rec *DurableTaskRecord, ownerAgentID, ownerTaskID, agentType, planTaskRef, semanticTaskKey string, semanticKeyExplicit bool, expectedWriteScope tools.WriteScope, projectRoot string) (taskDuplicateDisposition, bool) {
 	if rec == nil {
-		return false, false
+		return taskDuplicateNone, false
 	}
 	if strings.TrimSpace(rec.OwnerAgentID) == strings.TrimSpace(ownerAgentID) && strings.TrimSpace(rec.OwnerTaskID) == strings.TrimSpace(ownerTaskID) && strings.TrimSpace(rec.AgentDefName) == strings.TrimSpace(agentType) {
-		if (planTaskRef != "" && strings.TrimSpace(rec.PlanTaskRef) == planTaskRef) || (semanticTaskKey != "" && strings.TrimSpace(rec.SemanticTaskKey) == semanticTaskKey) {
-			if isNonTerminalTaskState(rec.State) || rec.allowsRehydrate(taskResumeByTargetedNotify) {
-				return true, false
+		keyMatched := semanticTaskKey != "" && strings.TrimSpace(rec.SemanticTaskKey) == semanticTaskKey
+		planTaskRefMatched := planTaskRef != "" && strings.TrimSpace(rec.PlanTaskRef) == planTaskRef
+		if (keyMatched || planTaskRefMatched) && (isNonTerminalTaskState(rec.State) || rec.allowsRehydrate(taskResumeByTargetedNotify)) {
+			if keyMatched && semanticKeyExplicit {
+				return taskDuplicateExplicitKey, false
 			}
+			// A probable duplicate on a live record with an overlapping write
+			// scope is still a scope conflict: the heuristic may be wrong about
+			// the deliverable, but it never justifies running two concurrent
+			// writers over the same scope.
+			return taskDuplicateProbable, isNonTerminalTaskState(rec.State) && writeScopesOverlap(expectedWriteScope, rec.ExpectedWriteScope, projectRoot)
 		}
 	}
 	// A parent delegates work from within its own write lease. The child scope
 	// is separately required to be no broader than the parent, so treating the
 	// owner record as a competing task would reject every nested delegation.
 	if strings.TrimSpace(rec.TaskID) == strings.TrimSpace(ownerTaskID) {
-		return false, false
+		return taskDuplicateNone, false
 	}
 	if isNonTerminalTaskState(rec.State) && writeScopesOverlap(expectedWriteScope, rec.ExpectedWriteScope, projectRoot) {
-		return true, true
+		return taskDuplicateNone, true
 	}
-	return false, false
+	return taskDuplicateNone, false
 }
 
 func (a *MainAgent) taskRecordByTaskID(taskID string) *DurableTaskRecord {

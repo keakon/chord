@@ -235,12 +235,18 @@ func (a *MainAgent) directNonTerminalChildCountLocked(ownerAgentID, ownerTaskID 
 	return count
 }
 
+// duplicateTaskHandle builds the hard rejection for a delegation that collided
+// with an existing task. It is returned only for a write-scope conflict or for
+// a confirmed duplicate — an identical explicit semantic_task_key. A probable
+// duplicate (the description-derived fallback key or plan_task_ref reuse
+// without an explicit key in common) must never be rejected; it gets a started
+// handle annotated by duplicateHintedTaskHandle instead.
 func duplicateTaskHandle(existing *DurableTaskRecord, conflict bool) tools.TaskHandle {
 	handle := tools.TaskHandle{
 		Status:             "already_exists",
 		TaskID:             existing.TaskID,
 		AgentID:            existing.LatestInstanceID,
-		Message:            "matching task already exists; continue it with `" + tools.NameNotify + "` instead of creating a duplicate delegate",
+		Message:            "a task with the same explicit semantic_task_key already exists; continue it with `" + tools.NameNotify + "` instead of creating a duplicate delegate",
 		PlanTaskRef:        existing.PlanTaskRef,
 		SemanticTaskKey:    existing.SemanticTaskKey,
 		ExpectedWriteScope: existing.ExpectedWriteScope,
@@ -258,7 +264,47 @@ func duplicateTaskHandle(existing *DurableTaskRecord, conflict bool) tools.TaskH
 	return handle
 }
 
-func (a *MainAgent) findPendingDuplicateOrConflictingTaskLocked(ownerAgentID, ownerTaskID, agentType, planTaskRef, semanticTaskKey string, expectedWriteScope tools.WriteScope) (*DurableTaskRecord, bool, *subAgentAdmission) {
+// duplicateHintedTaskHandle annotates a started handle when the new task
+// collided with a probable duplicate: the description-derived fallback key or a
+// plan_task_ref points at another task (or in-flight admission) from the same
+// delegation context, but that collision is a heuristic, not proof that both
+// are one deliverable. The new task is kept and the caller is told about the
+// other task so the model can decide: continue the existing task with notify
+// and cancel the fresh copy if they really are the same deliverable, or keep
+// both if they are not.
+func duplicateHintedTaskHandle(started tools.TaskHandle, existing *DurableTaskRecord, pending *subAgentAdmission) tools.TaskHandle {
+	taskID := ""
+	if existing != nil {
+		taskID = strings.TrimSpace(existing.TaskID)
+	} else if pending != nil {
+		taskID = strings.TrimSpace(pending.taskID)
+	}
+	if taskID == "" {
+		return started
+	}
+	started.DuplicateDetected = true
+	started.SuggestedTaskID = taskID
+	if existing != nil {
+		started.SuggestedAgentID = strings.TrimSpace(existing.LatestInstanceID)
+	}
+	started.SuggestedAction = "notify_existing_if_same_deliverable"
+	started.Message = fmt.Sprintf(
+		"task started, but it may duplicate an earlier task %s from the same caller: if both are the same deliverable, continue that task with %s (target_task_id=%s) and %s this new one instead of running both; otherwise ignore this note and let the new task run",
+		taskID, tools.NameNotify, taskID, tools.NameCancel)
+	return started
+}
+
+// findPendingDuplicateOrConflictingTaskLocked is the admissions equivalent of
+// findDuplicateOrConflictingTaskLocked: it screens still-admitting tasks
+// (subAgentAdmission entries) as if they were running records, using the same
+// disposition rules. A caller may only wait for and reuse a pending task's
+// admission result when the match is taskDuplicateExplicitKey — the pending
+// call asserted the same explicit semantic_task_key, so both really are the
+// same deliverable. A probable match must never block the caller on another
+// admission's handle.
+func (a *MainAgent) findPendingDuplicateOrConflictingTaskLocked(ownerAgentID, ownerTaskID, agentType, planTaskRef, semanticTaskKey string, semanticKeyExplicit bool, expectedWriteScope tools.WriteScope) (*DurableTaskRecord, taskDuplicateDisposition, bool, *subAgentAdmission) {
+	var probable *DurableTaskRecord
+	var probableAdmission *subAgentAdmission
 	for _, pending := range a.subs.admissions {
 		if pending == nil {
 			continue
@@ -273,11 +319,19 @@ func (a *MainAgent) findPendingDuplicateOrConflictingTaskLocked(ownerAgentID, ow
 			OwnerTaskID:        pending.ownerTaskID,
 			State:              string(SubAgentStateRunning),
 		}
-		if duplicate, conflict := duplicateOrConflictingTaskRecord(rec, ownerAgentID, ownerTaskID, agentType, planTaskRef, semanticTaskKey, expectedWriteScope, a.projectRoot); duplicate {
-			return rec, conflict, pending
+		disposition, conflict := duplicateOrConflictingTaskRecord(rec, ownerAgentID, ownerTaskID, agentType, planTaskRef, semanticTaskKey, semanticKeyExplicit, expectedWriteScope, a.projectRoot)
+		if conflict || disposition == taskDuplicateExplicitKey {
+			return rec, disposition, conflict, pending
+		}
+		if disposition == taskDuplicateProbable && probable == nil {
+			probable = rec
+			probableAdmission = pending
 		}
 	}
-	return nil, false, nil
+	if probable != nil {
+		return probable, taskDuplicateProbable, false, probableAdmission
+	}
+	return nil, taskDuplicateNone, false, nil
 }
 
 func (a *MainAgent) releaseSubAgentAdmission(admission *subAgentAdmission) {
@@ -807,6 +861,10 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 	n := a.adhocSeq.Add(1)
 	taskID := fmt.Sprintf("adhoc-%d", n)
 	planTaskRef = strings.TrimSpace(planTaskRef)
+	// Only an explicitly supplied semantic_task_key is a confirmed duplicate
+	// identity; the key derived from the description is a heuristic that may
+	// only hint at duplicates (see duplicateOrConflictingTaskRecord).
+	semanticKeyExplicit := strings.TrimSpace(semanticTaskKey) != ""
 	semanticTaskKey = resolveSemanticTaskKey(semanticTaskKey, description)
 	expectedWriteScope = expectedWriteScope.Normalized()
 	if !caller.IsMain && !childWriteScopeWithinParent(caller.WriteScope, expectedWriteScope, caller.WorkDir) {
@@ -853,12 +911,34 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 			Message: fmt.Sprintf("direct non-terminal child limit reached (max_children=%d)", maxChildren),
 		}, nil
 	}
-	existing, conflict := a.findDuplicateOrConflictingTaskLocked(caller.AgentID, caller.TaskID, agentType, planTaskRef, semanticTaskKey, expectedWriteScope)
+	existing, duplicate, conflict := a.findDuplicateOrConflictingTaskLocked(caller.AgentID, caller.TaskID, agentType, planTaskRef, semanticTaskKey, semanticKeyExplicit, expectedWriteScope)
 	var pendingDuplicate *subAgentAdmission
-	if existing == nil {
-		existing, conflict, pendingDuplicate = a.findPendingDuplicateOrConflictingTaskLocked(caller.AgentID, caller.TaskID, agentType, planTaskRef, semanticTaskKey, expectedWriteScope)
+	rejected := existing != nil && (conflict || duplicate == taskDuplicateExplicitKey)
+	if !rejected {
+		// A probable registry match (or no registry match at all) still leaves
+		// pending admissions to screen: a rejecting pending admission — scope
+		// conflict or the identical explicit semantic_task_key — dominates, and
+		// only an explicit-key pending match may later be waited on.
+		var pendingExisting *DurableTaskRecord
+		var pendingDup taskDuplicateDisposition
+		var pendingConflict bool
+		pendingExisting, pendingDup, pendingConflict, pendingDuplicate = a.findPendingDuplicateOrConflictingTaskLocked(caller.AgentID, caller.TaskID, agentType, planTaskRef, semanticTaskKey, semanticKeyExplicit, expectedWriteScope)
+		if pendingExisting != nil && (pendingConflict || pendingDup == taskDuplicateExplicitKey) {
+			existing, duplicate, conflict = pendingExisting, pendingDup, pendingConflict
+			rejected = true
+		} else if existing == nil && pendingExisting != nil {
+			existing, duplicate, conflict = pendingExisting, pendingDup, pendingConflict
+		}
 	}
-	if existing != nil {
+	// Only a write-scope conflict or a confirmed duplicate — the identical
+	// explicit semantic_task_key — rejects the delegation here. A probable
+	// duplicate (the description-derived fallback key or a plan_task_ref match
+	// without an explicit key) falls through and creates a real task: that key
+	// is a heuristic, and whether the two descriptions really are one
+	// deliverable is the model's decision. A probable match must also never
+	// join a pending admission, so it never waits for another task's handle.
+	probableDuplicate := !rejected && existing != nil && duplicate == taskDuplicateProbable
+	if rejected {
 		a.subs.mu.Unlock()
 		if conflict {
 			a.orchestrationMetrics.scopeConflicts.Add(1)
@@ -1023,6 +1103,9 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 		PlanTaskRef:        planTaskRef,
 		SemanticTaskKey:    semanticTaskKey,
 		ExpectedWriteScope: expectedWriteScope,
+	}
+	if probableDuplicate {
+		handle = duplicateHintedTaskHandle(handle, existing, pendingDuplicate)
 	}
 	return handle, nil
 }
