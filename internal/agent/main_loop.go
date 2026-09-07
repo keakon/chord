@@ -144,8 +144,6 @@ func (a *MainAgent) dispatch(evt Event) {
 		a.handleMCPControlDoneEvent(evt)
 	case EventAgentDone:
 		a.handleAgentDone(evt)
-	case EventAgentIdle:
-		a.handleAgentIdle(evt)
 	case EventAgentNotify:
 		a.handleAgentNotify(evt)
 	case EventEscalate:
@@ -168,8 +166,6 @@ func (a *MainAgent) dispatch(evt Event) {
 		}
 	case EventAgentLog:
 		a.handleAgentLog(evt)
-	case EventResetNudge:
-		a.handleResetNudge(evt)
 	case EventSubAgentRequestBoundary:
 		a.handleSubAgentRequestBoundary(evt)
 	case EventSpawnFinished:

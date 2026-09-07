@@ -62,7 +62,6 @@ type subAgentRegistry struct {
 	taskRecords      map[string]*DurableTaskRecord  // taskID → durable task record
 	activations      map[string]*subAgentActivation // taskID → in-flight runtime rehydration
 	admissions       map[string]*subAgentAdmission  // taskID → in-flight new-task admission
-	nudgeCounts      map[string]int                 // agentID → idle nudge count
 	stateEnteredTurn map[string]uint64              // agentID → turn it entered a waiting/terminal state
 	settlements      map[taskAttemptKey]*TaskSettlement
 	taskGroups       map[string]*DurableTaskGroup
@@ -78,7 +77,6 @@ func newSubAgentRegistry() subAgentRegistry {
 		taskRecords:      make(map[string]*DurableTaskRecord),
 		activations:      make(map[string]*subAgentActivation),
 		admissions:       make(map[string]*subAgentAdmission),
-		nudgeCounts:      make(map[string]int),
 		stateEnteredTurn: make(map[string]uint64),
 		settlements:      make(map[taskAttemptKey]*TaskSettlement),
 		taskGroups:       make(map[string]*DurableTaskGroup),
@@ -234,10 +232,9 @@ func (r *subAgentRegistry) add(sub *SubAgent) {
 	r.mu.Unlock()
 }
 
-// remove deletes a sub-agent and all of its per-agent bookkeeping (nudge count,
-// state-entered-turn) under one lock, returning the removed SubAgent (or nil).
-// Consolidating the three deletes prevents the partial-cleanup hazard of doing
-// them separately.
+// remove deletes a sub-agent and its per-agent bookkeeping (state-entered-turn)
+// under one lock, returning the removed SubAgent (or nil). Consolidating the
+// deletes prevents the partial-cleanup hazard of doing them separately.
 func (r *subAgentRegistry) remove(instanceID string) *SubAgent {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -247,7 +244,6 @@ func (r *subAgentRegistry) remove(instanceID string) *SubAgent {
 func (r *subAgentRegistry) removeLocked(instanceID string) *SubAgent {
 	sub := r.subAgents[instanceID]
 	delete(r.subAgents, instanceID)
-	delete(r.nudgeCounts, instanceID)
 	delete(r.stateEnteredTurn, instanceID)
 	return sub
 }
@@ -270,21 +266,6 @@ func (r *subAgentRegistry) stateEnteredTurnFor(instanceID string) uint64 {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.stateEnteredTurn[instanceID]
-}
-
-func (r *subAgentRegistry) incrementNudge(instanceID string) int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.nudgeCounts[instanceID]++
-	return r.nudgeCounts[instanceID]
-}
-
-func (r *subAgentRegistry) resetNudge(instanceID string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if _, ok := r.nudgeCounts[instanceID]; ok {
-		r.nudgeCounts[instanceID] = 0
-	}
 }
 
 func (r *subAgentRegistry) resetStateEnteredTurns() {

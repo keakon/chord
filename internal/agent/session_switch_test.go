@@ -816,7 +816,6 @@ func TestHandleNewSessionCommandStartsFreshSessionAndIgnoresLateSubAgent(t *test
 	}
 	a.subs.mu.Lock()
 	a.subs.subAgents[sub.instanceID] = sub
-	a.subs.nudgeCounts[sub.instanceID] = 1
 	a.subs.mu.Unlock()
 	a.focusedAgent.Store(sub)
 	a.sem <- struct{}{}

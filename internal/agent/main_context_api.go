@@ -313,12 +313,8 @@ func (a *MainAgent) SendAgentEvent(eventType, sourceID string, payload any) {
 		mapped = EventAgentNotify
 	case "agent_done":
 		mapped = EventAgentDone
-	case "agent_idle":
-		mapped = EventAgentIdle
 	case "agent_log":
 		mapped = EventAgentLog
-	case "reset_nudge":
-		mapped = EventResetNudge
 	case "background_object_finished":
 		mapped = EventSpawnFinished
 	}

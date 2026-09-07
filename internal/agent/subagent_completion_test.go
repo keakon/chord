@@ -281,7 +281,7 @@ func TestSubAgentPureTextGetsSingleTerminalRecoveryRequest(t *testing.T) {
 }
 
 func TestSubAgentUnparseableThinkingToolcallGetsTerminalRecoveryRequest(t *testing.T) {
-	_, sub := newMixedBatchTestSubAgent(t)
+	parent, sub := newMixedBatchTestSubAgent(t)
 	enabled := true
 	providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
 		Type: config.ProviderTypeChatCompletions,
@@ -313,8 +313,26 @@ func TestSubAgentUnparseableThinkingToolcallGetsTerminalRecoveryRequest(t *testi
 	if sub.turn.SubAgentTerminalRecoveryCount != 1 {
 		t.Fatalf("terminal recovery count = %d, want 1", sub.turn.SubAgentTerminalRecoveryCount)
 	}
-	if sub.idleTimer != nil {
-		t.Fatal("unparseable thinking toolcall entered idle wait")
+	// The terminal recovery budget is one per turn: a second text-only reply
+	// must fail with EventAgentError for owner notification instead of
+	// parking in an idle wait.
+	sub.handleLLMResponse(&llmResult{turnID: 1, resp: &message.Response{Content: "still not calling a coordination tool"}})
+	// The unparseable-drift recovery above already emitted an agent_log event;
+	// skip unrelated events queued before the terminal failure.
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case evt := <-parent.eventCh:
+			if evt.Type != EventAgentError || evt.SourceID != sub.instanceID {
+				continue
+			}
+			if err, ok := evt.Payload.(error); !ok || !strings.Contains(err.Error(), "without a coordination tool") {
+				t.Fatalf("error payload = %#v", evt.Payload)
+			}
+			return
+		case <-deadline:
+			t.Fatal("timed out waiting for text-only terminal failure after recovery")
+		}
 	}
 }
 

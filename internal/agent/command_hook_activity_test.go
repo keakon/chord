@@ -361,7 +361,7 @@ func TestEmitGlobalIdleWaitsForQueuedAutomaticWork(t *testing.T) {
 		{
 			name: "internal event",
 			queue: func(a *MainAgent) {
-				a.sendEvent(Event{Type: EventResetNudge})
+				a.sendEvent(Event{Type: EventSubAgentStateChanged})
 			},
 		},
 	}

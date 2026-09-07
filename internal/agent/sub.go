@@ -183,10 +183,6 @@ type SubAgent struct {
 	// goroutines consult it, so the guard synchronizes its own state.
 	applyPatchRetry applyPatchRetryGuard
 
-	// Idle timeout: starts when LLM returns pure text (no tool_calls).
-	// MainAgent auto-intervenes on timeout.
-	idleTimer      *time.Timer
-	idleTimeout    time.Duration // default 120s
 	startupTimeout time.Duration
 
 	// In-flight LLM silence watchdog: bounds how long a request may produce
@@ -462,17 +458,9 @@ func (s *SubAgent) checkpointTranscript() error {
 	return nil
 }
 
-// maxIdleNudges is the maximum number of idle nudges before escalating to
-// MainAgent as an error. Tracked in MainAgent (nudgeCounts map), not here.
-const maxIdleNudges = 3
-
-// DefaultIdleTimeout is the default duration before a SubAgent is considered
-// idle after receiving a pure-text LLM response.
-const DefaultIdleTimeout = 120 * time.Second
-
 // DefaultSubAgentStartupTimeout bounds how long a running worker may retain
-// queued input without creating a turn. It catches lost wakeups before the
-// normal post-response idle watchdog can exist.
+// queued input without creating a turn. It catches lost wakeups that the
+// in-flight silence watchdog cannot see (no request was ever started).
 const DefaultSubAgentStartupTimeout = 15 * time.Second
 
 // defaultSubAgentLLMSilenceBudget bounds how long an in-flight LLM request may
@@ -527,7 +515,6 @@ type SubAgentConfig struct {
 	AgentsMD       string
 	Skills         []*skill.Meta
 	ModelName      string
-	IdleTimeout    time.Duration // 0 → DefaultIdleTimeout
 	StartupTimeout time.Duration // 0 → DefaultSubAgentStartupTimeout
 	Orchestration  config.OrchestrationConfig
 }
@@ -535,9 +522,6 @@ type SubAgentConfig struct {
 // NewSubAgent creates a fully-initialised SubAgent. The caller must invoke
 // runLoop in a separate goroutine to start the event loop.
 func NewSubAgent(cfg SubAgentConfig) *SubAgent {
-	if cfg.IdleTimeout <= 0 {
-		cfg.IdleTimeout = DefaultIdleTimeout
-	}
 	if cfg.StartupTimeout <= 0 {
 		cfg.StartupTimeout = DefaultSubAgentStartupTimeout
 	}
@@ -675,7 +659,6 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 		queueByteLimit:    cfg.Orchestration.EffectiveSubAgentQueueBytes(),
 		compactUsage:      cfg.Orchestration.EffectiveSubAgentCompactUsage(),
 		customPrompt:      cfg.SystemPrompt,
-		idleTimeout:       cfg.IdleTimeout,
 		startupTimeout:    cfg.StartupTimeout,
 		llmSilenceBudget:  defaultSubAgentLLMSilenceBudget,
 		inputCh:           make(chan pendingUserMessage, inputChanCap),
@@ -1239,24 +1222,6 @@ func (s *SubAgent) currentTurnID() uint64 {
 		return 0
 	}
 	return s.turn.ID
-}
-
-// ---------------------------------------------------------------------------
-// Idle timer
-// ---------------------------------------------------------------------------
-
-// resetIdleTimer stops the idle timer and notifies MainAgent to reset
-// the nudge counter for this SubAgent.
-func (s *SubAgent) resetIdleTimer() {
-	if s.idleTimer != nil {
-		s.idleTimer.Stop()
-		s.idleTimer = nil
-	}
-	// idleNudges is in MainAgent.subs.nudgeCounts; reset via dedicated event.
-	s.parent.sendEvent(Event{
-		Type:     EventResetNudge,
-		SourceID: s.instanceID,
-	})
 }
 
 // ---------------------------------------------------------------------------

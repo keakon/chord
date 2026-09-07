@@ -67,7 +67,6 @@ func (s *SubAgent) runLoop() {
 		}
 		if s.canStartUserTurn() {
 			if input, ok := s.tryReceiveUserInput(); ok {
-				s.resetIdleTimer()
 				s.handleUserInput(input)
 				continue
 			}
@@ -79,15 +78,10 @@ func (s *SubAgent) runLoop() {
 			continue
 		}
 		if result, ok := s.dequeuePromotedToolResult(); ok {
-			s.resetIdleTimer()
 			s.handleToolResult(result)
 			continue
 		}
 
-		var idleCh <-chan time.Time
-		if s.idleTimer != nil {
-			idleCh = s.idleTimer.C
-		}
 		var inputCh <-chan pendingUserMessage
 		if s.canStartUserTurn() {
 			inputCh = s.inputCh
@@ -116,7 +110,6 @@ func (s *SubAgent) runLoop() {
 		select {
 		case input := <-inputCh:
 			s.accountDequeuedUserMessage(input)
-			s.resetIdleTimer()
 			s.handleUserInput(input)
 			s.refillInputChannelFromOverflow()
 
@@ -149,12 +142,7 @@ func (s *SubAgent) runLoop() {
 			}
 
 		case result := <-s.toolCh:
-			s.resetIdleTimer()
 			s.handleToolResult(result)
-
-		case <-idleCh:
-			s.sendEvent(Event{Type: EventAgentIdle, Payload: s.idleTimeout})
-			s.idleTimer = nil
 
 		case <-silenceCh:
 			s.stopLLMSilenceTimer()
@@ -162,9 +150,6 @@ func (s *SubAgent) runLoop() {
 
 		case <-s.parentCtx.Done():
 			s.stopLLMSilenceTimer()
-			if s.idleTimer != nil {
-				s.idleTimer.Stop()
-			}
 			if s.turn != nil {
 				cancelledExec := s.turn.cancelPendingToolCalls()
 				cancelledStream := s.turn.drainStreamingToolCalls()
@@ -353,7 +338,7 @@ func (s *SubAgent) canStartUserTurn() bool {
 	if s == nil || s.State() != SubAgentStateRunning || s.llmRequestInFlight.Load() {
 		return false
 	}
-	if s.turn == nil || s.idleTimer != nil {
+	if s.turn == nil {
 		return true
 	}
 	s.turnMu.Lock()

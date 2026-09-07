@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -171,28 +170,6 @@ func TestHandleEscalateQueuesFollowUpWithoutBlockingOnFullExternalQueue(t *testi
 	}
 }
 
-func TestHandleAgentIdleEscalatesWhenNudgeQueueRejects(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	a.started.Store(true)
-	sub := newControllableTestSubAgent(t, a, "task-idle-nudge-reject")
-	sub.queueByteLimit = 1
-
-	a.handleAgentIdle(Event{SourceID: sub.instanceID, Payload: time.Second})
-
-	a.eventMu.Lock()
-	defer a.eventMu.Unlock()
-	if len(a.loopEvents) != 1 || a.loopEvents[0].Type != EventAgentError {
-		t.Fatalf("loop follow-ups = %#v, want one agent error", a.loopEvents)
-	}
-	err, ok := a.loopEvents[0].Payload.(error)
-	if !ok || !strings.Contains(err.Error(), "idle nudge 1 could not be queued") {
-		t.Fatalf("queued payload = %#v, want idle nudge queue error", a.loopEvents[0].Payload)
-	}
-	if sub.hasPendingUserInput() {
-		t.Fatal("rejected idle nudge remained queued")
-	}
-}
-
 func TestEventOverflowCoalescingPreservesInterveningEventOrder(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.eventCh = make(chan Event, 1)
@@ -219,15 +196,17 @@ func TestEventOverflowCoalescingPreservesInterveningEventOrder(t *testing.T) {
 	}
 }
 
-func TestEventOverflowDoesNotCoalesceResetNudgeAcrossIdle(t *testing.T) {
+func TestEventOverflowKeepsStateChangesAcrossInterveningProgress(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.eventCh = make(chan Event, 1)
 	a.sendEvent(Event{Type: "channel"})
-	a.sendEvent(Event{Type: EventResetNudge, SourceID: "worker-1"})
-	a.sendEvent(Event{Type: EventAgentIdle, SourceID: "worker-1"})
-	a.sendEvent(Event{Type: EventResetNudge, SourceID: "worker-1"})
+	a.sendEvent(Event{Type: EventSubAgentStateChanged, SourceID: "worker-1"})
+	a.sendEvent(Event{Type: EventSubAgentProgressUpdated, SourceID: "worker-1", Payload: &SubAgentProgressUpdatedPayload{Summary: "interim"}})
+	a.sendEvent(Event{Type: EventSubAgentStateChanged, SourceID: "worker-1"})
 
-	wants := []string{"channel", EventResetNudge, EventAgentIdle, EventResetNudge}
+	// state_changed events are not coalescible: a progress update between two
+	// state changes must not cause the earlier state change to be dropped.
+	wants := []string{"channel", EventSubAgentStateChanged, EventSubAgentProgressUpdated, EventSubAgentStateChanged}
 	for i, want := range wants {
 		evt, err := a.nextEvent(context.Background())
 		if err != nil {

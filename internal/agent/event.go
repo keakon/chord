@@ -30,7 +30,6 @@ const (
 
 	// Multi-agent orchestration event types.
 	EventAgentDone               = "agent_done"       // SubAgent completed its task
-	EventAgentIdle               = "agent_idle"       // SubAgent idle timeout (no tool calls, no Complete)
 	EventAgentNotify             = "agent_notify"     // SubAgent non-blocking notify update
 	EventEscalate                = "escalate"         // SubAgent requests owner/MainAgent intervention
 	EventSubAgentMailbox         = "subagent_mailbox" // structured mailbox message from or about a SubAgent
@@ -40,7 +39,6 @@ const (
 	EventSubAgentSendMessage     = "subagent_send_message"
 	EventSubAgentStop            = "subagent_stop"
 	EventAgentLog                = "agent_log"                  // Informational log from SubAgent (e.g. buffer overflow warning)
-	EventResetNudge              = "reset_nudge"                // SubAgent activity detected; reset idle nudge counter
 	EventSubAgentRequestBoundary = "subagent_request_boundary"  // SubAgent LLM request finished; apply deferred routing changes
 	EventSpawnFinished           = "background_object_finished" // Spawned background process finished; runtime-only notification
 	EventContinue                = "continue"                   // re-run LLM with existing context (no new user message)

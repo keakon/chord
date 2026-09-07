@@ -558,38 +558,6 @@ func (a *MainAgent) handleAgentDone(evt Event) {
 	})
 }
 
-func (a *MainAgent) handleAgentIdle(evt Event) {
-	a.subs.mu.RLock()
-	sub := a.subs.subAgents[evt.SourceID]
-	a.subs.mu.RUnlock()
-	if sub == nil {
-		return
-	}
-	n := a.subs.incrementNudge(evt.SourceID)
-	if n > maxIdleNudges {
-		timeout, _ := evt.Payload.(time.Duration)
-		a.queueLoopEvent(Event{Type: EventAgentError, SourceID: evt.SourceID, Payload: fmt.Errorf("SubAgent idle after %d nudges (timeout=%v each)", n, timeout)})
-		return
-	}
-	// complete is always registered and never ruleset-filtered
-	// (isSubAgentInternalTool), so this nudge can name it unconditionally.
-	message := "You appear to be idle. If the task is complete, call " + toolPromptName(tools.NameComplete) + " with a summary. "
-	switch {
-	case sub.hasVisibleTool(tools.NameEscalate):
-		message += "If you need help, call " + toolPromptName(tools.NameEscalate) + ". "
-	case sub.hasVisibleTool(tools.NameNotify):
-		message += "If you need help or owner-agent input, use " + toolPromptName(tools.NameNotify) + " because " + toolPromptName(tools.NameEscalate) + " is unavailable in this role. "
-	default:
-		message += "If you are blocked and no control tool is available, explain the blocker clearly in assistant text. "
-	}
-	message += "If you are waiting for user input, continue waiting."
-	if !sub.InjectUserMessage(message) {
-		a.queueLoopEvent(Event{Type: EventAgentError, SourceID: evt.SourceID, Payload: fmt.Errorf("SubAgent idle nudge %d could not be queued within the configured input limits", n)})
-		return
-	}
-	log.Infof("nudged idle SubAgent agent=%v nudge_count=%v", evt.SourceID, n)
-}
-
 func (a *MainAgent) handleAgentNotify(evt Event) {
 	payload, ok := evt.Payload.(tools.AgentNotifyPayload)
 	if !ok {
@@ -702,10 +670,6 @@ func (a *MainAgent) handleAgentLog(evt Event) {
 	msg, _ := evt.Payload.(string)
 	log.Debugf("SubAgent log agent=%v message=%v", evt.SourceID, msg)
 	a.emitToTUI(InfoEvent{Message: msg, AgentID: evt.SourceID})
-}
-
-func (a *MainAgent) handleResetNudge(evt Event) {
-	a.subs.resetNudge(evt.SourceID)
 }
 
 func (a *MainAgent) handleSpawnFinished(evt Event) {

@@ -8,7 +8,6 @@ import (
 	"io"
 	"net"
 	"strings"
-	"time"
 
 	"github.com/keakon/golog/log"
 
@@ -392,11 +391,6 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 			})
 			return
 		}
-		// Stop any previous idle timer to prevent leaking timers when
-		// consecutive pure-text responses arrive (e.g. multi-turn Q&A).
-		s.resetIdleTimer()
-		s.idleTimer = time.NewTimer(s.idleTimeout)
-		return
 	}
 
 	// Complete only, no other tools → trigger done immediately.

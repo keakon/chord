@@ -769,7 +769,7 @@ type MainAgent struct {
 
 	// Multi-agent orchestration. subs owns the live sub-agent maps and the
 	// RWMutex that guards them (formerly inline MainAgent fields mu/subAgents/
-	// taskRecords/nudgeCounts/subAgentStateEnteredTurn).
+	// taskRecords/subAgentStateEnteredTurn).
 	subs                     subAgentRegistry
 	orchestrationMetrics     orchestrationRuntimeMetrics
 	governor                 *resourceGovernor
