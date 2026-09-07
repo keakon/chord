@@ -1401,3 +1401,23 @@ func TestAppendIgnoredArgsNoteCapsPathCount(t *testing.T) {
 		t.Fatalf("note should report how many paths were elided, got %q", note)
 	}
 }
+
+// TestAppendIgnoredArgsNoteSeparatesNullOptionals verifies optional fields the
+// model set to null get their own feedback line instead of being lumped in
+// with unrecognized parameters, whose removal advice does not fit.
+func TestAppendIgnoredArgsNoteSeparatesNullOptionals(t *testing.T) {
+	ignored := []message.IgnoredToolArg{
+		{Path: "args.todos[1].active_form", ValueJSON: "null", Reason: message.IgnoredToolArgReasonNull},
+		{Path: "args.bogus", Reason: message.IgnoredToolArgReasonUnrecognized},
+	}
+	note := appendIgnoredArgsNote("ok", ignored)
+	if !strings.Contains(note, "ignored null parameter(s): args.todos[1].active_form") {
+		t.Fatalf("note should list the null parameter under its own heading, got %q", note)
+	}
+	if !strings.Contains(note, "treated as unset") {
+		t.Fatalf("note should explain null was treated as unset, got %q", note)
+	}
+	if !strings.Contains(note, "ignored unrecognized parameter(s): args.bogus") {
+		t.Fatalf("note should keep unrecognized parameters separate, got %q", note)
+	}
+}

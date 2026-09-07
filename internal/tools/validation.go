@@ -299,8 +299,11 @@ func applyArgumentAliases(value any, aliases map[string]string) any {
 // validateValueAgainstSchema enforces required fields, types, enums and array
 // coercion against a JSON-schema-like description. Fields the schema does not
 // declare under "additionalProperties": false are removed from value rather
-// than rejected, and recorded in ignored. Validation failures are recorded in
-// invalid when a diagnostic sink is provided; nil sinks skip that metadata.
+// than rejected, and recorded in ignored. An explicit null for an optional
+// declared field is removed the same way: it decodes exactly like an omitted
+// field, so it is tolerated as an omission instead of failing the call.
+// Validation failures are recorded in invalid when a diagnostic sink is
+// provided; nil sinks skip that metadata.
 func validateValueAgainstSchema(value any, schema map[string]any, path string, ignored *[]message.IgnoredToolArg, invalid *[]message.InvalidToolArg) error {
 	if len(schema) == 0 {
 		return nil
@@ -342,7 +345,30 @@ func validateValueAgainstSchema(value any, schema map[string]any, path string, i
 			}
 			delete(obj, key)
 		}
-		for _, key := range requiredFields(schema["required"]) {
+		required := requiredFields(schema["required"])
+		isRequired := make(map[string]bool, len(required))
+		for _, key := range required {
+			isRequired[key] = true
+		}
+		// An explicit null for an optional declared field is JSON's "no value"
+		// spelling and means the same as omitting the field, so tolerate it as
+		// an omission instead of failing the call and forcing a model retry.
+		// The dropped value is recorded as ignored so the model still learns
+		// the parameter took no effect. Required fields stay strict: null there
+		// fails the type check below with the same message as any wrong type.
+		for key, raw := range obj {
+			if raw != nil || isRequired[key] {
+				continue
+			}
+			if _, declared := props[key].(map[string]any); !declared {
+				continue
+			}
+			if err := appendIgnoredToolArg(ignored, path+"."+key, raw, message.IgnoredToolArgReasonNull); err != nil {
+				return err
+			}
+			delete(obj, key)
+		}
+		for _, key := range required {
 			if _, ok := obj[key]; !ok {
 				if invalid != nil {
 					*invalid = append(*invalid, message.InvalidToolArg{Path: path + "." + key, Reason: message.InvalidToolArgReasonMissing})

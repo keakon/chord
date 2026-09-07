@@ -66,9 +66,15 @@ func (p ContentPart) IsBinary() bool {
 
 type IgnoredToolArgReason string
 
+// Each ignored-argument reason describes why a value did not participate in
+// execution: the field was never declared ("unrecognized"), an earlier
+// duplicate occurrence lost to last-value-wins ("shadowed"), or an optional
+// field was given an explicit null, which validation accepts as omission
+// ("null").
 const (
 	IgnoredToolArgReasonUnrecognized IgnoredToolArgReason = "unrecognized"
 	IgnoredToolArgReasonShadowed     IgnoredToolArgReason = "shadowed"
+	IgnoredToolArgReasonNull         IgnoredToolArgReason = "null"
 )
 
 // IgnoredToolArg records one argument value that was present in the requested

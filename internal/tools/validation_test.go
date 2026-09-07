@@ -148,6 +148,72 @@ func TestValidateToolArgsTypeErrorsTruncateLongValues(t *testing.T) {
 	}
 }
 
+func TestNullOptionalFieldsTreatedAsOmitted(t *testing.T) {
+	tool := validationStubTool{
+		name: "TodoWrite",
+		schema: map[string]any{
+			"type":     "object",
+			"required": []string{"todos"},
+			"properties": map[string]any{
+				"todos": map[string]any{
+					"type": "array",
+					"items": map[string]any{
+						"type":     "object",
+						"required": []string{"id"},
+						"properties": map[string]any{
+							"id":          map[string]any{"type": "string"},
+							"active_form": map[string]any{"type": "string"},
+						},
+					},
+				},
+			},
+			"additionalProperties": false,
+		},
+	}
+	raw := json.RawMessage(`{"todos":[{"id":"1","active_form":null},{"id":"2"}]}`)
+	if err := ValidateToolArgs(tool, raw); err != nil {
+		t.Fatalf("ValidateToolArgs = %v, want null optional field tolerated as omitted", err)
+	}
+	sanitized, ignored, err := SanitizeUnknownArgs(tool, raw)
+	if err != nil {
+		t.Fatalf("SanitizeUnknownArgs = %v, want null optional field tolerated as omitted", err)
+	}
+	want := []message.IgnoredToolArg{{Path: "args.todos[0].active_form", ValueJSON: "null", Reason: message.IgnoredToolArgReasonNull}}
+	if !reflect.DeepEqual(ignored, want) {
+		t.Fatalf("ignored = %#v, want %#v", ignored, want)
+	}
+	if strings.Contains(string(sanitized), "active_form") {
+		t.Fatalf("sanitized args still carry the null field: %s", sanitized)
+	}
+	if err := ValidateToolArgs(tool, sanitized); err != nil {
+		t.Fatalf("re-validating sanitized args failed: %v", err)
+	}
+}
+
+func TestNullRequiredFieldStillRejected(t *testing.T) {
+	tool := validationStubTool{
+		name: "Stub",
+		schema: map[string]any{
+			"type":     "object",
+			"required": []string{"path"},
+			"properties": map[string]any{
+				"path": map[string]any{"type": "string"},
+			},
+		},
+	}
+	err := ValidateToolArgs(tool, json.RawMessage(`{"path":null}`))
+	if err == nil || !strings.Contains(err.Error(), "args.path must be a string") {
+		t.Fatalf("err = %v, want null required field rejected by the type check", err)
+	}
+	_, _, invalid, err := SanitizeUnknownArgsWithDiagnostics(tool, json.RawMessage(`{"path":null}`))
+	if err == nil {
+		t.Fatal("SanitizeUnknownArgsWithDiagnostics = nil err, want null required field rejected")
+	}
+	if len(invalid) != 1 || invalid[0].Path != "args.path" || invalid[0].Reason != message.InvalidToolArgReasonInvalid {
+		t.Fatalf("invalid = %#v, want args.path recorded as invalid", invalid)
+	}
+}
+
 func TestSanitizeUnknownArgsRemovesUnrecognizedFields(t *testing.T) {
 	tool := validationStubTool{
 		name: "Read",

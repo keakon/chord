@@ -370,22 +370,27 @@ func ignoredArgsNotes(ignored []message.IgnoredToolArg) []string {
 	if len(ignored) == 0 {
 		return nil
 	}
-	var unrecognized, shadowed []string
+	var unrecognized, shadowed, nullOptional []string
 	for _, item := range ignored {
 		path := truncateIgnoredArgPath(item.Path)
 		switch item.Reason {
 		case message.IgnoredToolArgReasonShadowed:
 			shadowed = appendUniqueString(shadowed, path)
+		case message.IgnoredToolArgReasonNull:
+			nullOptional = appendUniqueString(nullOptional, path)
 		default:
 			unrecognized = appendUniqueString(unrecognized, path)
 		}
 	}
-	notes := make([]string, 0, 2)
+	notes := make([]string, 0, 3)
 	if len(unrecognized) > 0 {
 		notes = append(notes, "Note: ignored unrecognized parameter(s): "+joinIgnoredArgPaths(unrecognized))
 	}
 	if len(shadowed) > 0 {
 		notes = append(notes, "Note: ignored earlier duplicate parameter value(s): "+joinIgnoredArgPaths(shadowed)+"; the last values were used")
+	}
+	if len(nullOptional) > 0 {
+		notes = append(notes, "Note: ignored null parameter(s): "+joinIgnoredArgPaths(nullOptional)+"; treated as unset, so pass a value or omit the parameter")
 	}
 	return notes
 }
