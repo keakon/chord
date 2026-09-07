@@ -839,7 +839,7 @@ func TestPrimaryAgentCoordinationPromptBlock_DependsOnVisibleTools(t *testing.T)
 	a.rebuildCachedSubAgents()
 	a.tools.Register(tools.NewDelegateTool(taskCreatorStub{agents: []tools.AgentInfo{{Name: "builder", Description: "General coding"}}}))
 	got = a.primaryAgentCoordinationPromptBlock()
-	if !strings.Contains(got, "## Available Agent Types (for the `delegate` tool)") {
+	if !strings.Contains(got, "## SubAgent Workflow") {
 		t.Fatalf("expected Delegate block once Delegate is visible, got %q", got)
 	}
 }
@@ -859,7 +859,6 @@ delegate: allow
 
 	got := a.primaryAgentCoordinationPromptBlock()
 	for _, want := range []string{
-		"## Available Agent Types (for the `delegate` tool)",
 		"## SubAgent Workflow",
 		"prefer `notify` on the existing task instead of creating a new delegate",
 		"Dispatch tasks in parallel only when their write scopes are clearly independent",
@@ -889,9 +888,6 @@ todo_write: allow
 	a.rebuildCachedSubAgents()
 
 	got := a.primaryAgentCoordinationPromptBlock()
-	if strings.Contains(got, "## Available Agent Types (for the `delegate` tool)") {
-		t.Fatalf("did not expect agent types when Delegate is denied, got %q", got)
-	}
 	if strings.Contains(got, "## SubAgent Workflow") {
 		t.Fatalf("did not expect subagent workflow when Task is denied, got %q", got)
 	}
@@ -913,14 +909,9 @@ delegate:
 	a.rebuildCachedSubAgents()
 	a.tools.Register(tools.NewDelegateTool(a))
 
-	got := a.primaryAgentCoordinationPromptBlock()
-	if !strings.Contains(got, "**reviewer**") {
-		t.Fatalf("expected allowed reviewer in Delegate prompt, got %q", got)
-	}
-	if strings.Contains(got, "**tester**") {
-		t.Fatalf("did not expect denied tester in Delegate prompt, got %q", got)
-	}
-
+	// Allowed-target filtering is asserted on the Delegate tool schema below:
+	// the prompt no longer lists agent types (the role list moved into the
+	// agent_type parameter description, whose enum is filtered per ruleset).
 	tool, ok := a.tools.Get(tools.NameDelegate)
 	if !ok {
 		t.Fatal("Delegate tool missing")
@@ -1486,7 +1477,7 @@ shell: allow
 		"If you are blocked and no control tool is available, explain the blocker clearly in assistant text and wait for owner follow-up.",
 		"Focus on finishing the assigned task or reaching a real blocker; do not stop at a partial summary when in-scope work still remains",
 		"continue instead of presenting routine next steps as optional follow-up for the owner agent",
-		"include the key result and verification status in that completion",
+		"Include the key result and verification status in the `complete` call",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("buildSystemPrompt() missing coordination guidance %q in %q", want, got)

@@ -138,10 +138,10 @@ func TestSubAgentDelegateTargetsUseSubAgentRuleset(t *testing.T) {
 	if len(enum) != 1 || enum[0] != "reviewer" {
 		t.Fatalf("nested Delegate agent_type enum = %v, want [reviewer]", enum)
 	}
-	prompt := sub.delegationPromptBlock()
-	if !strings.Contains(prompt, "**reviewer**") || strings.Contains(prompt, "**tester**") {
-		t.Fatalf("nested delegation prompt does not match filtered targets: %q", prompt)
-	}
+	// Allowed-target filtering is asserted on the nested Delegate tool schema
+	// above: the delegation prompt no longer lists agent types (role
+	// visibility moved into the agent_type parameter description, whose enum
+	// is filtered per ruleset).
 }
 
 // A SubAgent with nested delegation must receive the shared delegation

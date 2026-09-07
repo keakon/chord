@@ -240,7 +240,6 @@ func TestStartPlanExecutionPromptUsesGenericPlanExecutionModeWithDelegateAvailab
 		"## Execution Mode — Delegate Orchestrator",
 		"## Execution Mode — Direct Plan Execution",
 		"Your job is to **delegate** each task",
-		"### Available Agent Types",
 	} {
 		if strings.Contains(got, unwanted) {
 			t.Fatalf("generic execution prompt should omit %q in %q", unwanted, got)

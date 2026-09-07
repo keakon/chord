@@ -2826,6 +2826,12 @@ func (a *MainAgent) buildExecuteSystemPrompt(planPath string) string {
 	var sb strings.Builder
 	sb.WriteString(base)
 
+	// Parallel-dispatch and wait-for-coordination rules are not restated here:
+	// when this role can delegate, base already carries the "## SubAgent
+	// Workflow" rules (their single source); a role without delegation has no
+	// workers to dispatch, so restating them would reference unavailable
+	// machinery.
+
 	if hasTodoWrite {
 		fmt.Fprintf(&sb, `
 
@@ -2849,20 +2855,10 @@ Path: %s
 5. **Track progress**: update TodoWrite as work progresses (statuses:
    pending, in_progress, completed, cancelled). Before your final summary, leave
    no pending/in_progress items unless you explain why.
-6. **For implementation tasks, first dispatch all currently independent tasks
-   whose write scopes are clearly disjoint.**
-7. **Dispatch tasks in parallel only when their write scopes are clearly independent;
-   do not run parallel SubAgents that may edit the same file or tightly coupled targets.**
-8. **After dispatching the current independent implementation tasks, if there is
-   no new independent task to send, stop doing implementation work in MainAgent and
-   wait for runtime coordination to deliver the next decision point.**
-9. **Until you receive Escalate, Complete, or a clear error/blocked signal, do not
-   take over implementation just because a SubAgent is briefly quiet, has not written
-   files yet, or has not produced immediate visible output.**
-10. **Report real blockers**: if the current role lacks a needed capability or
+6. **Report real blockers**: if the current role lacks a needed capability or
    permission, explain the blocker instead of assuming hidden capabilities or
    nonexistent workers.
-11. **Finish**: when everything is done, give a concise final summary.
+7. **Finish**: when everything is done, give a concise final summary.
 `, planPath)
 	} else {
 		fmt.Fprintf(&sb, `
@@ -2883,20 +2879,10 @@ Path: %s
    hidden orchestration mode or unavailable workers.
 3. **Respect dependencies**: do NOT begin a task until its dependencies are
    satisfied. For independent tasks, use a pragmatic order and keep moving.
-4. **For implementation tasks, first dispatch all currently independent tasks
-   whose write scopes are clearly disjoint.**
-5. **Dispatch tasks in parallel only when their write scopes are clearly independent;
-   do not run parallel SubAgents that may edit the same file or tightly coupled targets.**
-6. **After dispatching the current independent implementation tasks, if there is
-   no new independent task to send, stop doing implementation work in MainAgent and
-   wait for runtime coordination to deliver the next decision point.**
-7. **Until you receive Escalate, Complete, or a clear error/blocked signal, do not
-   take over implementation just because a SubAgent is briefly quiet, has not written
-   files yet, or has not produced immediate visible output.**
-8. **Report real blockers**: if the current role lacks a needed capability or
+4. **Report real blockers**: if the current role lacks a needed capability or
    permission, explain the blocker instead of assuming hidden capabilities or
    nonexistent workers.
-9. **Finish**: when everything is done, give a concise final summary.
+5. **Finish**: when everything is done, give a concise final summary.
 `, planPath)
 	}
 

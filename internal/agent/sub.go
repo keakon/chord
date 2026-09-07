@@ -1289,7 +1289,9 @@ func subAgentCoordinationPromptText(visible map[string]struct{}) string {
 // this role does not expose. complete is exempt: it is always registered and
 // never ruleset-filtered (isSubAgentInternalTool).
 func taskCompletionInstruction(visible map[string]struct{}) string {
-	base := "Focus only on this task. Call " + toolPromptName(tools.NameComplete) + " when done."
+	// When to call complete is not restated here: the SubAgent Coordination
+	// section and the Complete tool description are its single source.
+	base := "Focus only on this task."
 	switch {
 	case hasVisibleTool(visible, tools.NameEscalate):
 		return base + " Call " + toolPromptName(tools.NameEscalate) + " if you are blocked."
@@ -1375,14 +1377,10 @@ func (s *SubAgent) delegationPromptBlock() string {
 	sb.WriteString("- When `child_join` is enabled, do not consider your task complete until all joined child tasks have finished or been explicitly stopped.\n")
 	sb.WriteString("- If you need to finish early, explicitly stop the child task first; do not assume a later ancestor will clean it up for you.\n")
 	sb.WriteString("- Use child control tools only for your own direct children.\n")
-	sb.WriteString("\n### Available Child Agent Types\n")
-	for _, ac := range agents {
-		desc := ac.Description
-		if desc == "" {
-			desc = "(no description)"
-		}
-		fmt.Fprintf(&sb, "- **%s**: %s\n", ac.Name, desc)
-	}
+	// The child role catalogue is not re-listed here: the delegate tool's
+	// agent_type parameter (name, description, capabilities, preferred tasks,
+	// write_mode, delegation_policy, filtered to this role's allowed targets)
+	// is the single source for which child agent types exist.
 	return strings.TrimSpace(sb.String())
 }
 

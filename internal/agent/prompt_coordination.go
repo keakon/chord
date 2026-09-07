@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/keakon/chord/internal/tools"
@@ -30,34 +29,14 @@ func (a *MainAgent) subAgentWorkflowPromptBlock() string {
 	if !a.hasDelegateWorkflowAccess() {
 		return ""
 	}
-	agents := a.availableSubAgentsForPrompt()
 	delegate := toolPromptName(tools.NameDelegate)
 	var sb strings.Builder
-	sb.WriteString("## Available Agent Types (for the " + delegate + " tool)\n")
-	for _, ac := range agents {
-		desc := ac.Description
-		if desc == "" {
-			desc = "(no description)"
-		}
-		meta := make([]string, 0, 4)
-		if len(ac.Capabilities) > 0 {
-			meta = append(meta, "capabilities="+strings.Join(ac.Capabilities, ","))
-		}
-		if len(ac.PreferredTasks) > 0 {
-			meta = append(meta, "preferred="+strings.Join(ac.PreferredTasks, ","))
-		}
-		if strings.TrimSpace(ac.WriteMode) != "" {
-			meta = append(meta, "write_mode="+strings.TrimSpace(ac.WriteMode))
-		}
-		if strings.TrimSpace(ac.DelegationPolicy) != "" {
-			meta = append(meta, "delegation_policy="+strings.TrimSpace(ac.DelegationPolicy))
-		}
-		if len(meta) > 0 {
-			desc += " [" + strings.Join(meta, "; ") + "]"
-		}
-		fmt.Fprintf(&sb, "- **%s**: %s\n", ac.Name, desc)
-	}
-	sb.WriteString("\n## SubAgent Workflow\n")
+	// The delegate-able role catalogue (name, description, capabilities,
+	// preferred tasks, write_mode, delegation_policy) is rendered once by the
+	// Delegate tool's agent_type parameter description, which ships with the
+	// tool schema on every request where delegation is visible; it is not
+	// duplicated as a prompt list here.
+	sb.WriteString("## SubAgent Workflow\n")
 	sb.WriteString("- The " + delegate + " tool call returns immediately; MainAgent receives SubAgent progress and completion updates automatically through the runtime coordination flow (see the " + delegate + " tool description for its call semantics).\n")
 	sb.WriteString(delegationStrategyPromptLines())
 	if a.compactContextVisible() {

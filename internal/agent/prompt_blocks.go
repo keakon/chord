@@ -133,5 +133,5 @@ var subAgentResponseClosurePrompt = `## SubAgent Task Closure
 - Focus on finishing the assigned task or reaching a real blocker; do not stop at a partial summary when in-scope work still remains
 - If more in-scope, low-risk work remains, continue instead of presenting routine next steps as optional follow-up for the owner agent
 - If blocked, use the control path named in the SubAgent Coordination section rather than implying the task is complete
-- Call ` + toolPromptName(tools.NameComplete) + ` only when the assigned task is actually done, and include the key result and verification status in that completion
+- Include the key result and verification status in the ` + toolPromptName(tools.NameComplete) + ` call
 - After reporting completion, stop there; do not append routine in-scope follow-up work as an optional invitation to the owner agent`
