@@ -45,8 +45,10 @@ const (
 // checkpoint in messages, or "" when none exists. The body is the checkpoint's
 // content between the [Context Summary] header and the [Context compressed]
 // footer, with the [Session Anchors] block removed (anchors are carried by
-// their own mechanism) and any previously appended `## Previous Checkpoint`
-// section removed (the carry must not compound across generations).
+// their own mechanism), the `## Skills Invoked Earlier` section removed (also
+// carried separately, by name merge) and any previously appended
+// `## Previous Checkpoint` section removed (the carry must not compound across
+// generations).
 func latestPriorCheckpointBody(messages []message.Message) string {
 	for _, msg := range slices.Backward(messages) {
 		if msg.Role != message.RoleUser || !msg.IsCompactionSummary {
@@ -54,6 +56,7 @@ func latestPriorCheckpointBody(messages []message.Message) string {
 		}
 		body := compactionSummaryBody(msg.Content)
 		body = stripCompactionAnchorsBlock(body)
+		body = stripCheckpointSkillsSection(body)
 		body = stripPriorCheckpointCarrySection(body)
 		body = compactTextSnippet(body, compactCheckpointCarryMaxChars)
 		if body == "" {

@@ -105,6 +105,10 @@ func (s *SubAgent) compactContextForTarget(messages []message.Message, target in
 		}
 	}
 	s.ctxMgr.RestoreMessages(compressed)
+	// The dropped messages carried whatever skill instructions this subagent
+	// had loaded, so its invoked-skill state is recomputed from what remains —
+	// the same rebuild restore performs, for the same reason.
+	s.restoreInvokedSkills(compressed)
 	stats := highLevelContextReductionStats(s.ctxMgr, messages, compressed)
 	s.reductionMu.Lock()
 	s.reductionStats = stats

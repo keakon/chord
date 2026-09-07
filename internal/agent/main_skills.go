@@ -7,6 +7,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/skill"
 	"github.com/keakon/chord/internal/tools"
@@ -103,6 +104,27 @@ func (a *MainAgent) MarkSkillInvoked(meta *skill.Meta) {
 	copyMeta.Invoked = true
 	copyMeta.Discovered = true
 	a.invokedSkills[copyMeta.Name] = &copyMeta
+	a.skillsMu.Unlock()
+}
+
+// resetInvokedSkillsFromMessages recomputes the invoked-skill state from the
+// messages that are actually in context. A skill's instructions live only in
+// its tool result, so a durable compaction that archives the head takes them
+// out of the context entirely — the state must stop reporting those skills as
+// invoked, exactly as it already does after a restart, where session restore
+// rebuilds this map from the same messages. Without it the sidebar keeps
+// asserting the model is following a workflow it can no longer see, and the
+// same session reports different skills before and after a reload.
+func (a *MainAgent) resetInvokedSkillsFromMessages(msgs []message.Message) {
+	invoked := rebuildInvokedSkillsFromMessages(msgs, a.visibleSkillsSnapshot())
+	a.skillsMu.Lock()
+	a.invokedSkills = make(map[string]*skill.Meta, len(invoked))
+	for _, meta := range invoked {
+		if meta == nil {
+			continue
+		}
+		a.invokedSkills[meta.Name] = meta
+	}
 	a.skillsMu.Unlock()
 }
 

@@ -764,19 +764,9 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	if a.lspSessionLoadFn != nil {
 		a.lspSessionLoadFn(restoredMessages)
 	}
-	var invokedSkills []*skill.Meta
-	if len(restoredMessages) > 0 {
-		invokedSkills = rebuildInvokedSkillsFromMessages(restoredMessages, a.visibleSkillsSnapshot())
-	}
-	a.skillsMu.Lock()
-	a.invokedSkills = make(map[string]*skill.Meta)
-	for _, meta := range invokedSkills {
-		if meta == nil {
-			continue
-		}
-		a.invokedSkills[meta.Name] = meta
-	}
-	a.skillsMu.Unlock()
+	// Shared with the post-compaction reset so a restored session and a live
+	// compacted one always derive the same state from the same messages.
+	a.resetInvokedSkillsFromMessages(restoredMessages)
 
 	if manager := a.recoveryManager(); manager != nil {
 		if a.walltime != nil {

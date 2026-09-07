@@ -1041,6 +1041,12 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 	// its section. The stale bucket must stay empty: restore only drops
 	// runtime todos when it sees entries there.
 	summary = ensureCompactionTodoSnapshot(summary, bundle.todos)
+	// Skills loaded in the archived head are recorded by name, exactly as the
+	// summarization runner does: the instructions live only in the transcript,
+	// so this reset would otherwise leave the model following a workflow it can
+	// no longer see — and unable to tell that it should re-load it.
+	skillNames, skillsOmitted := collectCheckpointSkillNames(headSnapshot)
+	summary = ensureCheckpointSkillsSection(summary, skillNames, skillsOmitted)
 	// A prior checkpoint inside the archived head is carried forward verbatim
 	// as a final section, exactly as the usage-driven runner does. The
 	// guarantee is deterministic and summarizer-independent, so it must hold

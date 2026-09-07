@@ -316,6 +316,12 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 	// out; only this draft's own archive is listed while pending.
 	historyRefs := formatHistoryMapLines(historyChain, historyMetas)
 	summaryText = ensureCompactionSummaryKeyFiles(strings.TrimSpace(summaryText), keyFiles)
+	// The archived head is the only place a loaded skill's instructions ever
+	// existed (the system prompt lists names, not bodies), so the checkpoint
+	// records the names before the head goes away. Runtime-owned like the todo
+	// snapshot above: whatever the summarizer wrote is replaced.
+	skillNames, skillsOmitted := collectCheckpointSkillNames(headSnapshot)
+	summaryText = ensureCheckpointSkillsSection(summaryText, skillNames, skillsOmitted)
 	// A prior checkpoint inside the archived head is carried forward verbatim
 	// as a final section, so the checkpoint that replaces it always references
 	// the structured content of the one before (recursive compaction must not
@@ -493,6 +499,13 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	// round at a time; the archived head is replaced by the checkpoint and never
 	// re-scanned.
 	a.resetRuntimeEvidenceFromMessages(compactedMessages)
+	// Skill instructions only ever existed in the archived tool results, so the
+	// invoked-skill state is recomputed from what survived the apply (the
+	// checkpoint plus the preserved tail — a skill loaded in that tail is still
+	// in context and stays marked). The checkpoint's `## Skills Invoked
+	// Earlier` section is deliberately not counted: it records names, not
+	// instructions, and a name is not what "invoked" claims.
+	a.resetInvokedSkillsFromMessages(compactedMessages)
 	a.recordCompactionAppliedAnalyticsEvent(d, headSplit, compactedMessages)
 	// A durable apply starts a fresh compaction window: drop any overlay texts
 	// queued for the pre-apply window (the reminder reported the old usage
