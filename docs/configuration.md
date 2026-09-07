@@ -1149,8 +1149,10 @@ Auto-start MCP servers still connect asynchronously after the TUI starts, but **
 
 ## Agent config
 
-Built-in roles include `builder` and `planner`. You can also add custom agents
-or override built-ins. Agent files can live in:
+Built-in roles include `builder` and `planner`. Both are main-mode, so
+`delegate` is not registered until you define at least one `mode: subagent`
+role of your own — see [`mode`](#agent-config) below. You can also add custom
+agents or override built-ins. Agent files can live in:
 
 - `~/.config/chord/agents/`
 - `.chord/agents/`
@@ -1193,7 +1195,8 @@ Common fields include:
 - `name`: agent name. If omitted, Chord uses the filename without extension. If specified, it must match the filename without extension (for example, `builder.yaml` must declare `name: builder`). A single directory cannot contain duplicate agent names, including duplicates across `.md`, `.yaml`, and `.yml`. Project-level agents may still override same-named global agents by design.
 - `description`: short description shown to the main agent when delegation is available.
 - `capabilities` / `preferred_tasks` / `write_mode` / `delegation_policy`: optional annotations describing what the agent is for; useful on `subagent` definitions you delegate to. Chord does not parse or enforce their values — they are surfaced to the delegating model as short meta text (`capabilities=…`, `preferred=…`, `write_mode=…`, `delegation_policy=…`) on the agent choices it sees, so it can pick a fitting type. `capabilities` and `preferred_tasks` are string lists; `write_mode` and `delegation_policy` are single strings. Keep them short and self-describing; put longer context in `description`.
-- `mode`: `main` for a MainAgent role, or `subagent` for a SubAgent. Empty and unknown values behave as `main`; `sub_agent` and `sub` are accepted as SubAgent aliases.
+- `mode`: `main` for a MainAgent role, or `subagent` for a SubAgent. Empty and unknown values behave as `main`; `sub_agent` and `sub` are accepted as SubAgent aliases. The `delegate` tool is registered only when at least one `subagent` role is visible to the delegating role, so a configuration with no subagent definitions has no delegation surface at all — that is the usual reason `delegate` appears to be missing.
+- A delegated worker's ability to run commands is decided twice: by this role's `shell` permission, and by the `verification_commands` in the `expected_write_scope` of each delegation. A task with a non-empty scope (including `read_only: true`) runs only the commands its delegator listed, whatever the role allows, because arbitrary command side effects cannot be validated against a path scope. Allowing `shell` on a research role is therefore safe and useful — it lets the role run authorized checks — but it is the delegation, not the role, that decides which commands exist. Denying `shell` outright is still the way to say "this role never runs anything", including when it is used as a main role.
 - `model_pools`: optional ordered list of pool names this agent can use. Pool definitions live in `config.yaml` top-level `model_pools`; when omitted, the agent can use all top-level pools sorted by name.
   Inline variants such as `openai/gpt-5.5@high` are specified in the pool definitions.
 - `variant`: default variant when a model ref does not include `@variant`.

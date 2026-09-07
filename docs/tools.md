@@ -62,11 +62,11 @@ These tools control agent workflows rather than local side effects, so YOLO mode
 | --- | --- |
 | `done` | Request loop exit with a final Markdown report. Mounted only while a loop is running, so ordinary sessions never see it and return their completion directly as assistant text. Loop exits remain gated by exit conditions and local confirmation. |
 | `handoff` | Transfer a plan/work to another role for execution. |
-| `delegate` | Start a delegated SubAgent workstream and return its startup handle (`task_id` / `agent_id`) immediately. It does not wait for completion. The call must include an `expected_write_scope`: use `read_only: true` for research-only work, or declare the narrowest `files`, `path_prefix`, or `modules` scope that covers the work. An empty scope is rejected. Denying `delegate` also disables `cancel` and nested delegation for that role. |
+| `delegate` | Start a delegated SubAgent workstream and return its startup handle (`task_id` / `agent_id`) immediately. It does not wait for completion. The call must include an `expected_write_scope`: use `read_only: true` for research-only work, or declare the narrowest `files`, `path_prefix`, or `modules` scope that covers the work. An empty scope is rejected. The same declaration carries `verification_commands`: a scoped task cannot run any command without it, so list the exact build/lint/test commands the worker may run (matched literally; chaining, redirection, and substitution are rejected). Denying `delegate` also disables `cancel` and nested delegation for that role. |
 | `cancel` | Cancel a delegated worker; requires `delegate` to be enabled. |
 | `complete` | SubAgent-side: mark the current delegated task as complete with a summary. |
 | `escalate` | SubAgent-side: request parent-agent intervention without ending the task. |
-| `notify` | Send a non-blocking update to the owner or a specific delegated worker. `message_type: response` with `target_task_id` and optional `correlation_id` delivers a structured reply to a delegated worker; `payload` accepts a JSON object up to 32 KiB. |
+| `notify` | Send a non-blocking update to the owner or a specific delegated worker. `message_type: response` with `target_task_id` and optional `correlation_id` delivers a structured reply to a delegated worker; `payload` accepts a JSON object up to 32 KiB. A targeted message resumes a worker that already finished or failed, with its own transcript, so a correction goes to the worker that did the work instead of a fresh delegate; a cancelled task is not resumable. `grant_write_scope` adds paths to the target's `expected_write_scope` before delivery, so a missing file does not cost the whole worker. |
 
 ### Long-text control tools
 

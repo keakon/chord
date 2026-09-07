@@ -411,11 +411,17 @@ func BuiltinAgentConfigs() map[string]*AgentConfig {
 }
 
 // DefaultPlannerAgent returns the built-in planner agent configuration.
-// The planner agent is specialised for codebase exploration and plan generation.
-// It is read-heavy by default: read/grep/glob/shell are allowed, writes are limited
-// to plan documents under .chord/plans/ and task notes under .chord/notes/,
-// compact_context is allowed so planning sessions can checkpoint at phase boundaries,
-// and it can use Handoff to signal plan completion.
+// The planner agent is specialised for codebase exploration and plan generation:
+// read/grep/glob/shell are allowed, the file-writing tools are limited to plan
+// documents under .chord/plans/ and task notes under .chord/notes/,
+// compact_context is allowed so planning sessions can checkpoint at phase
+// boundaries, and it can use Handoff to signal plan completion.
+//
+// The write restriction covers the writing tools, not the role: shell is
+// unrestricted, so a planner can still change anything through a command. It is
+// a default that keeps ordinary planning work off the working tree, not a
+// sandbox — tighten shell in your own role definition if you need the boundary
+// enforced.
 func DefaultPlannerAgent() *AgentConfig {
 	// Build permission node: read-heavy, free exploration, plan/notes-file changes only.
 	permYAML := fmt.Sprintf(`

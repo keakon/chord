@@ -62,11 +62,11 @@
 | --- | --- |
 | `done` | 携带最终 Markdown 报告申请 loop 退出。仅在 loop 运行期间挂载，因此普通会话根本看不到它，完成结果直接用 assistant 正文返回。Loop 退出仍受退出条件和本地确认门控。 |
 | `handoff` | 把计划/工作移交给另一个角色执行。 |
-| `delegate` | 启动一个委派的 SubAgent 工作流，并立即返回启动句柄（`task_id` / `agent_id`）；不会等待任务完成。调用必须带上 `expected_write_scope`：只做研究时设为 `read_only: true`，可能修改工作区时声明覆盖任务所需内容的最窄 `files`、`path_prefix` 或 `modules` 范围；空范围会被拒绝。拒绝 `delegate` 会同时禁用该角色的 `cancel` 和嵌套委派。 |
+| `delegate` | 启动一个委派的 SubAgent 工作流，并立即返回启动句柄（`task_id` / `agent_id`）；不会等待任务完成。调用必须带上 `expected_write_scope`：只做研究时设为 `read_only: true`，可能修改工作区时声明覆盖任务所需内容的最窄 `files`、`path_prefix` 或 `modules` 范围；空范围会被拒绝。同一份声明里的 `verification_commands` 决定该任务能跑哪些命令 —— 不声明则受限任务无法执行任何命令，因此需列出确切的构建 / lint / 测试命令（逐字匹配，含链接、重定向、替换的声明会被拒绝）。拒绝 `delegate` 会同时禁用该角色的 `cancel` 和嵌套委派。 |
 | `cancel` | 取消一个被委派的 worker；前提是 `delegate` 已启用。 |
 | `complete` | SubAgent 侧：携带摘要把当前委派任务标记为完成。 |
 | `escalate` | SubAgent 侧：请求父 agent 介入，但不结束自己的任务。 |
-| `notify` | 向 owner 或指定的被委派 worker 发送非阻塞通知。`message_type: response` 配合 `target_task_id` 和可选的 `correlation_id` 可向被委派 worker 发送结构化回复；`payload` 接受不超过 32 KiB 的 JSON 对象。 |
+| `notify` | 向 owner 或指定的被委派 worker 发送非阻塞通知。`message_type: response` 配合 `target_task_id` 和可选的 `correlation_id` 可向被委派 worker 发送结构化回复；`payload` 接受不超过 32 KiB 的 JSON 对象。定向消息可唤醒已完成或已失败的 worker（带它自己的完整 transcript），因此纠正应发给做过这份工作的 worker，而不是新派一个；已取消的任务不可恢复。`grant_write_scope` 会在投递前把路径加进目标的 `expected_write_scope`，避免为补一个文件而丢掉整个 worker。 |
 
 ### 长文本控制工具
 

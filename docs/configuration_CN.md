@@ -1016,7 +1016,7 @@ mcp:
 
 ## Agent 配置
 
-内置角色包括 `builder`、`planner`。可新增自定义 agent 或覆盖内置 agent。Agent 文件可放在：
+内置角色包括 `builder`、`planner`。两者都是 main 模式，因此在你自行定义至少一个 `mode: subagent` 角色之前，`delegate` 不会被注册 —— 见下方的 `mode` 字段说明。可新增自定义 agent 或覆盖内置 agent。Agent 文件可放在：
 
 - `~/.config/chord/agents/`
 - `.chord/agents/`
@@ -1059,7 +1059,8 @@ prompt: |
 - `name`：agent 名称。省略时使用不带扩展名的文件名；显式填写时，必须与不带扩展名的文件名一致（例如 `builder.yaml` 必须声明 `name: builder`）。同一目录内不能存在重名 agent，包括 `.md`、`.yaml`、`.yml` 之间的重名；项目级 agent 仍可按既有设计覆盖同名的全局 agent。
 - `description`：简短描述，在可委派给该 agent 时展示给 main agent。
 - `capabilities` / `preferred_tasks` / `write_mode` / `delegation_policy`：描述该 agent 用途的可选标注，用于你要委派给的 `subagent` 定义时最有价值。Chord 不解析也不强制这些值——它们只是以 `capabilities=…`、`preferred=…`、`write_mode=…`、`delegation_policy=…` 这样的短 meta 文本出现在委派模型看到的 agent 选择上，帮助它选对类型。前两个是字符串列表，后两个是单个字符串；写得简短、能自解释即可，长的内容放 `description`。
-- `mode`：`main` 表示 MainAgent 角色，`subagent` 表示 SubAgent。为空或其他值时按 `main` 处理；`sub_agent` 和 `sub` 也可作为 SubAgent 别名。
+- `mode`：`main` 表示 MainAgent 角色，`subagent` 表示 SubAgent。为空或其他值时按 `main` 处理；`sub_agent` 和 `sub` 也可作为 SubAgent 别名。只有当委派角色能看到至少一个 `subagent` 角色时，`delegate` 工具才会注册；因此没有任何 subagent 定义的配置根本不存在委派面 —— 这通常就是 `delegate` 看起来消失的原因。
+- 被委派 worker 能否执行命令由两处共同决定：该角色的 `shell` 权限，以及每次委派 `expected_write_scope` 中的 `verification_commands`。只要 scope 非空（含 `read_only: true`），无论角色允许什么，任务都只能运行委派方列出的命令 —— 因为命令的副作用无法按路径校验。因此给研究型角色开放 `shell` 既安全又有用（可执行被授权的检查），但决定「有哪些命令」的是委派而非角色。若要表达「该角色永不执行任何命令」（包括用作主角色时），仍应直接 `shell: deny`。
 - `model_pools`：可选的有序池名列表，用于限制该 agent 可使用的池。池定义位于 `config.yaml` 顶层 `model_pools`；省略时，该 agent 可使用所有顶层池并按池名排序。`openai/gpt-5.5@high` 这类 inline variant 写在池定义中。
 - `variant`：model ref 未写 `@variant` 时的默认 variant。
 - `permission`：该 agent 的逐工具权限策略。权限直接保存在 agent 配置文件中；确认弹窗里选择“记住规则”时，`project` 会更新当前项目的 `.chord/agents/<role>.yaml`，`global` 会更新用户配置目录的 `agents/<role>.yaml`（默认 `~/.config/chord/agents/<role>.yaml`），不会写入单独的 permissions 文件夹。部分编排工具有特殊语义（`delegate` 的 pattern 会匹配 `agent_type`，并联动控制委派工作相关能力，如 `cancel`；`handoff` 和 `done` 的 `allow` / `ask` 都表示工作流可用，并由 Chord 自己的确认 gate 控制关键节点）。依赖精细控制工具规则前，请先阅读[权限与安全](./permissions-and-safety_CN.md#特殊权限语义)。
