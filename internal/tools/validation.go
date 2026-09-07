@@ -35,6 +35,18 @@ func decodeArgsForSchema(tool Tool, args json.RawMessage, ignored *[]message.Ign
 		return nil, fmt.Errorf("arguments must be valid JSON")
 	}
 
+	// Shape tolerated alias values before renaming aliases: the shaper then
+	// sees the alias key exactly as written by the model, so canonical fields
+	// keep the types declared in Parameters() instead of being reshaped too.
+	if shaper, ok := tool.(aliasArgumentValueShaper); ok {
+		if obj, ok := value.(map[string]any); ok {
+			for key, raw := range obj {
+				if shaped, done := shaper.shapeAliasArgument(key, raw); done {
+					obj[key] = shaped
+				}
+			}
+		}
+	}
 	if aliaser, ok := tool.(argumentAliaser); ok {
 		value = applyArgumentAliases(value, aliaser.argumentAliases())
 	}
@@ -270,6 +282,19 @@ func encodeSanitizedArgs(value any) (json.RawMessage, error) {
 // so models only see the canonical field names.
 type argumentAliaser interface {
 	argumentAliases() map[string]string
+}
+
+// aliasArgumentValueShaper is implemented by tools whose tolerated alias value
+// carries a different JSON shape than the canonical field, so a plain rename
+// would still fail type checking (for example an array where the canonical
+// field is a single string). shapeAliasArgument is called before aliases are
+// applied, with the alias key exactly as written by the model; it returns the
+// shaped value and true when it converted the value, false to leave it for
+// ordinary validation (which then reports the mismatch). Implementers must
+// only shape values under their own tolerated alias names: canonical fields
+// keep the types declared in Parameters() and are validated unchanged.
+type aliasArgumentValueShaper interface {
+	shapeAliasArgument(aliasKey string, value any) (shaped any, ok bool)
 }
 
 // applyArgumentAliases rewrites a decoded argument object in place, renaming

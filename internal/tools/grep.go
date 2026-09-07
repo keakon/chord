@@ -33,13 +33,18 @@ type grepArgs struct {
 	IncludesCoerced bool     `json:"-"`
 }
 
-// UnmarshalJSON accepts either a string or array of strings for paths and
-// includes, recording whether a scalar was coerced into a single-element list.
-// This keeps strict array semantics in the documented schema while preventing
-// hard failures when models supply a single string by habit.
+// UnmarshalJSON accepts a string or array of strings for paths, includes, and
+// the plural "patterns" alias of pattern, recording whether a scalar was
+// coerced into a single-element list. This keeps strict array semantics in the
+// documented schema while preventing hard failures when models supply a single
+// string by habit. The canonical "pattern" field itself stays a single string:
+// a list under it is a type error, and the plural patterns list means "a line
+// matches when any of them does", so it decodes to the alternation of the
+// individual regexes.
 func (a *grepArgs) UnmarshalJSON(data []byte) error {
 	var raw struct {
-		Pattern  string          `json:"pattern"`
+		Pattern  json.RawMessage `json:"pattern"`
+		Patterns json.RawMessage `json:"patterns,omitempty"`
 		Paths    json.RawMessage `json:"paths,omitempty"`
 		Includes json.RawMessage `json:"includes,omitempty"`
 		Path     json.RawMessage `json:"path,omitempty"`
@@ -48,14 +53,32 @@ func (a *grepArgs) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-	a.Pattern = raw.Pattern
-	// Accept deprecated singular fields when their current counterparts are
-	// absent so legacy-shaped calls still work; current fields always win.
+	// Accept deprecated singular/plural spellings when their current
+	// counterparts are absent so habit-shaped calls still work; current fields
+	// always win.
 	if len(raw.Paths) == 0 {
 		raw.Paths = raw.Path
 	}
 	if len(raw.Includes) == 0 {
 		raw.Includes = raw.Glob
+	}
+	var pattern []string
+	if len(raw.Pattern) == 0 {
+		// Canonical field absent: fall back to the tolerated plural alias,
+		// whose list means "match when any pattern matches" (an alternation).
+		var err error
+		pattern, _, err = DecodeStringOrList(raw.Patterns)
+		if err != nil {
+			return fmt.Errorf("patterns: %w", err)
+		}
+	} else {
+		// Canonical "pattern" is a single string; a list under it is a type
+		// error — the plural "patterns" field is where lists belong.
+		var single string
+		if err := json.Unmarshal(raw.Pattern, &single); err != nil {
+			return fmt.Errorf("pattern: expected a single string; an array of patterns belongs under the plural \"patterns\" field")
+		}
+		pattern = []string{single}
 	}
 	paths, pathsCoerced, err := DecodeStringOrList(raw.Paths)
 	if err != nil {
@@ -65,6 +88,7 @@ func (a *grepArgs) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		return fmt.Errorf("includes: %w", err)
 	}
+	a.Pattern = strings.Join(pattern, "|")
 	a.Paths = paths
 	a.Includes = includes
 	a.PathsCoerced = pathsCoerced
@@ -129,11 +153,40 @@ func (GrepTool) ConcurrencySafeReadOnly(json.RawMessage) bool { return true }
 
 func (GrepTool) CanRenderBeforeToolUseEnd(json.RawMessage) bool { return true }
 
-// argumentAliases maps tolerated singular field names to the current plural
+// argumentAliases maps tolerated singular/plural field names to the canonical
 // schema fields so model-generated variants validate without exposing the
-// alternate names in Parameters().
+// alternate names in Parameters(). The plural "patterns" mirrors glob's field
+// name and carries an array, which shapeAliasArgument collapses into the
+// canonical single pattern string before the alias is renamed.
 func (GrepTool) argumentAliases() map[string]string {
-	return map[string]string{"path": "paths", "glob": "includes"}
+	return map[string]string{"path": "paths", "glob": "includes", "patterns": "pattern"}
+}
+
+// shapeAliasArgument implements aliasArgumentValueShaper for the plural
+// "patterns" alias: a list of patterns means "match a line when any of them
+// matches", which for a line-oriented search is exactly the alternation of the
+// individual regexes. A non-empty list of strings is joined with "|"; anything
+// else (a scalar, an empty list, a non-string element) is left untouched so
+// ordinary type validation reports it instead of guessing. The shaper only
+// fires for the alias key as written by the model: the canonical "pattern"
+// field is never shaped and keeps its declared single-string type.
+func (GrepTool) shapeAliasArgument(aliasKey string, value any) (any, bool) {
+	if aliasKey != "patterns" {
+		return nil, false
+	}
+	items, ok := value.([]any)
+	if !ok || len(items) == 0 {
+		return nil, false
+	}
+	parts := make([]string, 0, len(items))
+	for _, item := range items {
+		part, ok := item.(string)
+		if !ok {
+			return nil, false
+		}
+		parts = append(parts, part)
+	}
+	return strings.Join(parts, "|"), true
 }
 
 func (t GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {

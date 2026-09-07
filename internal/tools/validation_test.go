@@ -475,6 +475,67 @@ func TestSanitizeUnknownArgsPreservesAliasParameters(t *testing.T) {
 	}
 }
 
+func TestGrepPluralPatternsToleratedAsAlternation(t *testing.T) {
+	// Models reach for glob's plural "patterns" field when searching with
+	// Grep. A list of patterns means "a line matches when any of them does",
+	// which is exactly the alternation of the individual regexes, so the list
+	// must validate and decode into the canonical single pattern instead of
+	// failing with "args.pattern is required".
+	raw := json.RawMessage(`{"patterns":["func compactTextSnippet","CompactionAnchorsOpenTag|CompactionAnchorsSection"],"path":"internal"}`)
+	if err := ValidateToolArgs(GrepTool{}, raw); err != nil {
+		t.Fatalf("ValidateToolArgs = %v, want plural patterns accepted", err)
+	}
+	if _, ignored, err := SanitizeUnknownArgs(GrepTool{}, raw); err != nil {
+		t.Fatalf("SanitizeUnknownArgs returned error: %v", err)
+	} else if len(ignored) != 0 {
+		t.Fatalf("plural patterns alias should be consumed, not ignored: ignored=%v", ignored)
+	}
+	var a grepArgs
+	if err := json.Unmarshal(raw, &a); err != nil {
+		t.Fatalf("grepArgs decode = %v", err)
+	}
+	if a.Pattern != "func compactTextSnippet|CompactionAnchorsOpenTag|CompactionAnchorsSection" {
+		t.Fatalf("Pattern = %q, want alternation of the plural list", a.Pattern)
+	}
+	if len(a.Paths) != 1 || a.Paths[0] != "internal" {
+		t.Fatalf("Paths = %v, want the aliased path decoded", a.Paths)
+	}
+	// A single string under the plural key needs no joining.
+	var single grepArgs
+	if err := json.Unmarshal([]byte(`{"patterns":"x"}`), &single); err != nil || single.Pattern != "x" {
+		t.Fatalf("single-string patterns: Pattern=%q err=%v, want x", single.Pattern, err)
+	}
+	// The canonical field wins when the model supplies both spellings.
+	var both grepArgs
+	if err := json.Unmarshal([]byte(`{"patterns":["x"],"pattern":"y"}`), &both); err != nil || both.Pattern != "y" {
+		t.Fatalf("canonical + plural: Pattern=%q err=%v, want canonical y", both.Pattern, err)
+	}
+	// A list under the canonical "pattern" field is a type error, not an
+	// alternation — lists belong under the plural "patterns" key.
+	if err := json.Unmarshal([]byte(`{"pattern":["a","b"]}`), &grepArgs{}); err == nil || !strings.Contains(err.Error(), "\"patterns\"") {
+		t.Fatalf("canonical pattern array: err = %v, want rejection naming the plural field", err)
+	}
+}
+
+func TestGrepPluralPatternsRejectsUnshapableValue(t *testing.T) {
+	tool := GrepTool{}
+	// A plural value that cannot become a single regex — a non-string element
+	// or an empty list — is left for the type check to report instead of being
+	// silently dropped or guessed.
+	if err := ValidateToolArgs(tool, json.RawMessage(`{"patterns":["a",5]}`)); err == nil || !strings.Contains(err.Error(), "args.pattern must be a string") {
+		t.Fatalf("err = %v, want non-string plural element rejected", err)
+	}
+	if err := ValidateToolArgs(tool, json.RawMessage(`{"patterns":[]}`)); err == nil || !strings.Contains(err.Error(), "args.pattern must be a string") {
+		t.Fatalf("err = %v, want empty plural list rejected", err)
+	}
+	// The canonical "pattern" field is never plural-shaped: a list under it
+	// keeps failing type validation even though the same list would be a legal
+	// value under the "patterns" alias.
+	if err := ValidateToolArgs(tool, json.RawMessage(`{"pattern":["a","b"]}`)); err == nil || !strings.Contains(err.Error(), "args.pattern must be a string") {
+		t.Fatalf("err = %v, want canonical pattern array rejected", err)
+	}
+}
+
 func TestSanitizeUnknownArgsKeepsHTMLCharactersUnescaped(t *testing.T) {
 	tool := validationStubTool{
 		name: "Write",
