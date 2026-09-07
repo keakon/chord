@@ -181,9 +181,9 @@ func TestLoadSessionPreservesValidSettlementPrefixBeforeCorruption(t *testing.T)
 	}
 }
 
-func TestLoadSessionDegradesCorruptCoordinationFiles(t *testing.T) {
+func TestLoadSessionDegradesCorruptAgentRequestFile(t *testing.T) {
 	projectRoot := t.TempDir()
-	sessionDir := testProjectSessionDir(t, projectRoot, "corrupt-coordination")
+	sessionDir := testProjectSessionDir(t, projectRoot, "corrupt-agent-requests")
 	rm := recovery.NewRecoveryManager(sessionDir)
 	if err := rm.PersistMessage("main", message.Message{Role: "user", Content: "resume this session"}); err != nil {
 		t.Fatalf("PersistMessage(main): %v", err)
@@ -191,41 +191,23 @@ func TestLoadSessionDegradesCorruptCoordinationFiles(t *testing.T) {
 	rm.Close()
 
 	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
-	for _, path := range []string{taskGroupsPath(sessionDir), agentRequestsPath(sessionDir)} {
-		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-			t.Fatalf("MkdirAll(%s): %v", path, err)
-		}
-		if err := os.WriteFile(path, []byte("{broken"), 0o600); err != nil {
-			t.Fatalf("write corrupt %s: %v", path, err)
-		}
+	path := agentRequestsPath(sessionDir)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("MkdirAll(%s): %v", path, err)
+	}
+	if err := os.WriteFile(path, []byte("{broken"), 0o600); err != nil {
+		t.Fatalf("write corrupt %s: %v", path, err)
 	}
 
 	loaded, err := a.loadSessionState(sessionDir)
 	if err != nil {
-		t.Fatalf("corrupt coordination files must degrade the slice, not fail restore: %v", err)
-	}
-	if !loaded.TaskGroupsDegraded {
-		t.Fatal("TaskGroupsDegraded flag not set for a corrupt task-groups file")
+		t.Fatalf("a corrupt coordination file must degrade the slice, not fail restore: %v", err)
 	}
 	if !loaded.AgentRequestsDegraded {
 		t.Fatal("AgentRequestsDegraded flag not set for a corrupt agent-requests file")
 	}
-	if len(loaded.TaskGroups) != 0 || len(loaded.AgentRequests) != 0 {
-		t.Fatalf("degraded coordination state = %v / %v, want empty", loaded.TaskGroups, loaded.AgentRequests)
-	}
-}
-
-func TestGuardDegradedTaskGroupSeqAvoidsIDReuse(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	a.guardDegradedTaskGroupSeq(false)
-	if got := a.taskGroupSeq.Load(); got != 0 {
-		t.Fatalf("a healthy restore must keep the loaded sequence, got %d", got)
-	}
-	// After a degraded restore the transcript may still reference old
-	// group-N IDs; the wall-clock floor keeps new IDs disjoint from them.
-	a.guardDegradedTaskGroupSeq(true)
-	if got := a.taskGroupSeq.Load(); got < 1_700_000_000 {
-		t.Fatalf("a degraded restore must raise the sequence floor, got %d", got)
+	if len(loaded.AgentRequests) != 0 {
+		t.Fatalf("degraded coordination state = %v, want empty", loaded.AgentRequests)
 	}
 }
 

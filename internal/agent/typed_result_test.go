@@ -74,30 +74,3 @@ func TestCompletionEnvelopeLegacyJSONStillRestores(t *testing.T) {
 		t.Fatalf("envelope = %#v", got)
 	}
 }
-
-func TestTypedResultSettlementCollectReturnsRefWithoutInlinePayload(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	ref, inline, err := tools.SaveImmutableResult(a.sessionDir, "type/test", json.RawMessage(`{"value":1}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	settlement := testSettlement("task-a", 1, 2)
-	settlement.Completion = &CompletionEnvelope{Summary: "done", ResultType: "type/test", Result: inline, ResultRef: &ref}
-	settlement.ResultRef = &ref
-	installCollectTask(a, &DurableTaskRecord{TaskID: "task-a", Attempt: 1, State: string(SubAgentStateCompleted)}, settlement, true)
-	result, err := a.CollectTasks(t.Context(), tools.TaskCollectRequest{TaskIDs: []string{"task-a"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	item := result.Tasks[0]
-	if item.ResultType != "type/test" || item.ResultRef == nil || item.ResultRef.ID != ref.ID {
-		t.Fatalf("collect item = %#v", item)
-	}
-	encoded, err := json.Marshal(item)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(encoded), `"result":`) || strings.Contains(string(encoded), `"value":1`) {
-		t.Fatalf("collect expanded inline result: %s", encoded)
-	}
-}

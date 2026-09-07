@@ -272,7 +272,6 @@ func (a *MainAgent) resetSessionRuntimeState() {
 	a.skillsMu.Unlock()
 	a.setTaskRecords(nil)
 	a.resetTaskCoordination(a.sessionEpoch, nil)
-	a.resetTaskGroups(nil)
 	a.resetAgentRequests(nil)
 	a.gitStatusInjected.Store(false)
 	a.explicitUserTurnCount.Store(0)
@@ -318,7 +317,6 @@ func (a *MainAgent) installSessionTarget(sessionDir string) {
 	}
 	a.setTaskRecords(nil)
 	a.resetTaskCoordination(a.sessionEpoch, nil)
-	a.resetTaskGroups(nil)
 	a.resetAgentRequests(nil)
 	a.setSessionSummary(buildSessionSummaryForDir(sessionDir, a.sessionLock != nil))
 	a.resetSessionBuildState()

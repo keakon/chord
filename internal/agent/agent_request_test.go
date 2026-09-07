@@ -13,22 +13,6 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-func newPeerTestSubAgent(t *testing.T, parent *MainAgent, instanceID, taskID string) *SubAgent {
-	t.Helper()
-	ctx, cancel := context.WithCancel(parent.parentCtx)
-	sub := NewSubAgent(SubAgentConfig{
-		InstanceID: instanceID, TaskID: taskID, AgentDefName: "worker", TaskDesc: "peer work",
-		LLMClient: newTestLLMClient(), Recovery: parent.recoveryManager(), Parent: parent,
-		ParentCtx: ctx, Cancel: cancel, BaseTools: parent.tools, WorkDir: parent.projectRoot,
-		SessionDir: parent.sessionDir, ModelName: "test-model",
-	})
-	parent.subs.mu.Lock()
-	parent.subs.subAgents[sub.instanceID] = sub
-	parent.subs.mu.Unlock()
-	parent.syncTaskRecordFromSub(sub, "")
-	return sub
-}
-
 func createMainOwnedTestRequest(t *testing.T) (*MainAgent, *SubAgent, *DurableAgentRequest) {
 	t.Helper()
 	a := newTestMainAgent(t, t.TempDir())
@@ -349,88 +333,5 @@ func TestAgentResponseExpiresAndOrphansChangedSourceAttempt(t *testing.T) {
 				t.Fatalf("state = %q, want %q", state, tc.state)
 			}
 		})
-	}
-}
-
-func TestPeerNoticeUsesCommonOwnerAndCurrentAttempts(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	source := newPeerTestSubAgent(t, a, "worker-a", "task-a")
-	target := newPeerTestSubAgent(t, a, "worker-b", "task-b")
-	sourceCtx := tools.WithTaskID(tools.WithAgentID(context.Background(), source.instanceID), source.taskID)
-	handle, err := a.NotifyPeerMessage(sourceCtx, tools.AgentPeerNoticeRequest{
-		TargetTaskID: target.taskID, Message: "schema v1 is ready", Kind: "dependency_update",
-	})
-	if err != nil {
-		t.Fatalf("NotifyPeerMessage: %v", err)
-	}
-	if handle.TaskID != target.taskID || handle.AgentID != target.instanceID {
-		t.Fatalf("handle = %#v", handle)
-	}
-	select {
-	case input := <-target.inputCh:
-		if input.Mailbox == nil || input.Mailbox.MessageType != "notice" || input.Mailbox.CorrelationID != "" || input.Mailbox.SourceTaskID != source.taskID || input.Mailbox.SourceAttempt != 1 || input.Mailbox.TargetTaskID != target.taskID || input.Mailbox.TargetAttempt != 1 {
-			t.Fatalf("notice mailbox = %#v", input.Mailbox)
-		}
-	default:
-		t.Fatal("target did not receive peer notice")
-	}
-	loaded, err := loadAgentRequests(a.sessionDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(loaded) != 0 {
-		t.Fatalf("peer notice unexpectedly created request ledger: %#v", loaded)
-	}
-}
-
-func TestPeerNoticeRejectsWhileSessionTransitionIsPaused(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	source := newPeerTestSubAgent(t, a, "worker-a", "task-a")
-	target := newPeerTestSubAgent(t, a, "worker-b", "task-b")
-	ctx := tools.WithTaskID(tools.WithAgentID(context.Background(), source.instanceID), source.taskID)
-	a.admissionPaused.Store(true)
-
-	if _, err := a.NotifyPeerMessage(ctx, tools.AgentPeerNoticeRequest{TargetTaskID: target.taskID, Message: "old-session data"}); err == nil || !strings.Contains(err.Error(), "session transition") {
-		t.Fatalf("NotifyPeerMessage error = %v, want transition rejection", err)
-	}
-	select {
-	case input := <-target.inputCh:
-		t.Fatalf("target received peer notice during transition: %#v", input)
-	default:
-	}
-
-	a.admissionPaused.Store(false)
-	if _, err := a.NotifyPeerMessage(ctx, tools.AgentPeerNoticeRequest{TargetTaskID: target.taskID, Message: "current-session data"}); err != nil {
-		t.Fatalf("NotifyPeerMessage after transition: %v", err)
-	}
-}
-
-func TestPeerRoutingRejectsNonSiblingTerminalAndRehydrate(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	source := newPeerTestSubAgent(t, a, "worker-a", "task-a")
-	target := newPeerTestSubAgent(t, a, "worker-b", "task-b")
-	ctx := tools.WithTaskID(tools.WithAgentID(context.Background(), source.instanceID), source.taskID)
-
-	a.subs.mu.Lock()
-	a.subs.taskRecords[target.taskID].OwnerTaskID = "different-owner"
-	a.subs.mu.Unlock()
-	if _, err := a.NotifyPeerMessage(ctx, tools.AgentPeerNoticeRequest{TargetTaskID: target.taskID, Message: "data"}); err == nil || !strings.Contains(err.Error(), "not a sibling") {
-		t.Fatalf("non-sibling error = %v", err)
-	}
-
-	a.subs.mu.Lock()
-	a.subs.taskRecords[target.taskID].OwnerTaskID = ""
-	a.subs.taskRecords[target.taskID].State = string(SubAgentStateCompleted)
-	a.subs.mu.Unlock()
-	if _, err := a.NotifyPeerMessage(ctx, tools.AgentPeerNoticeRequest{TargetTaskID: target.taskID, Message: "data"}); err == nil || !strings.Contains(err.Error(), "non-terminal") {
-		t.Fatalf("terminal target error = %v", err)
-	}
-
-	a.subs.mu.Lock()
-	a.subs.taskRecords[target.taskID].State = string(SubAgentStateRunning)
-	delete(a.subs.subAgents, target.instanceID)
-	a.subs.mu.Unlock()
-	if _, err := a.NotifyPeerMessage(ctx, tools.AgentPeerNoticeRequest{TargetTaskID: target.taskID, Message: "data"}); err == nil || !strings.Contains(err.Error(), "no live worker") {
-		t.Fatalf("missing live target error = %v", err)
 	}
 }

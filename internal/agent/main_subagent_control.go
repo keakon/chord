@@ -370,10 +370,6 @@ func (a *MainAgent) deliverMessageToSubAgentWithMetadata(sub *SubAgent, message,
 	return a.deliverMessageToSubAgentWithMetadataMode(sub, message, kind, manual, metadata, true)
 }
 
-func (a *MainAgent) deliverPeerMessageToSubAgent(sub *SubAgent, message, kind string, metadata *message.MailboxMetadata) (string, string, error) {
-	return a.deliverMessageToSubAgentWithMetadataMode(sub, message, kind, false, metadata, false)
-}
-
 func (a *MainAgent) deliverMessageToSubAgentWithMetadataMode(sub *SubAgent, message, kind string, manual bool, metadata *message.MailboxMetadata, trackReply bool) (string, string, error) {
 	if sub == nil {
 		return "", "", fmt.Errorf("missing worker")

@@ -550,7 +550,7 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 	// when this instance's depth/config does not allow nested delegation.
 	for _, t := range cfg.BaseTools.ListTools() {
 		switch t.Name() {
-		case tools.NameTodoWrite, tools.NameHandoff, tools.NameTaskCollect, tools.NameTaskGroupCreate, tools.NameReadArtifact, tools.NameSaveArtifact, tools.NameSaveResult, tools.NameCompactContext:
+		case tools.NameTodoWrite, tools.NameHandoff, tools.NameReadArtifact, tools.NameSaveArtifact, tools.NameSaveResult, tools.NameCompactContext:
 			// Skip MainAgent-only tools.
 		case tools.NameNotify:
 			// SubAgents get a dedicated Notify tool so owner-notify and
@@ -618,10 +618,6 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 	if notifyVisible || delegateVisible {
 		subTools.Register(tools.NewNotifyTool(sender, cfg.Parent, notifyVisible, notifyVisible && delegateVisible))
 	}
-	if cfg.Ruleset.Evaluate(tools.NameNotifyPeer, "*") != permission.ActionDeny {
-		subTools.Register(tools.NewNotifyPeerTool(cfg.Parent))
-	}
-
 	// Build the SubAgent's own context manager; sub-agents do not auto-compact.
 	ctxMgr := ctxmgr.NewManager(0, 0)
 

@@ -965,7 +965,7 @@ func reduceGenericStaleOutputSummary(ctx requestReductionContext) string {
 // survive reduction as an archived artifact instead of a generic marker.
 func irreducibleToolOutputRequiresArchive(toolName string) bool {
 	switch tools.NormalizeName(toolName) {
-	case tools.NameSpawn, tools.NameDelegate, tools.NameNotify, tools.NameNotifyPeer, tools.NameQuestion:
+	case tools.NameSpawn, tools.NameDelegate, tools.NameNotify, tools.NameQuestion:
 		return true
 	}
 	return false

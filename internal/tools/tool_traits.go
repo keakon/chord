@@ -5,37 +5,34 @@ import (
 )
 
 const (
-	NameRead            = toolname.Read
-	NameWrite           = toolname.Write
-	NameEdit            = toolname.Edit
-	NameApplyPatch      = toolname.ApplyPatch
-	NameDelete          = toolname.Delete
-	NameGrep            = toolname.Grep
-	NameGlob            = toolname.Glob
-	NameWebFetch        = toolname.WebFetch
-	NameShell           = toolname.Shell
-	NameSpawn           = toolname.Spawn
-	NameSpawnStatus     = toolname.SpawnStatus
-	NameSpawnStop       = toolname.SpawnStop
-	NameLsp             = toolname.Lsp
-	NameTodoWrite       = toolname.TodoWrite
-	NameQuestion        = toolname.Question
-	NameDone            = toolname.Done
-	NameDelegate        = toolname.Delegate
-	NameNotify          = toolname.Notify
-	NameNotifyPeer      = toolname.NotifyPeer
-	NameSkill           = toolname.Skill
-	NameHandoff         = toolname.Handoff
-	NameEscalate        = toolname.Escalate
-	NameCancel          = toolname.Cancel
-	NameComplete        = toolname.Complete
-	NameTaskCollect     = toolname.TaskCollect
-	NameTaskGroupCreate = toolname.TaskGroupCreate
-	NameSaveArtifact    = toolname.SaveArtifact
-	NameReadArtifact    = toolname.ReadArtifact
-	NameSaveResult      = toolname.SaveResult
-	NameViewImage       = toolname.ViewImage
-	NameCompactContext  = toolname.CompactContext
+	NameRead           = toolname.Read
+	NameWrite          = toolname.Write
+	NameEdit           = toolname.Edit
+	NameApplyPatch     = toolname.ApplyPatch
+	NameDelete         = toolname.Delete
+	NameGrep           = toolname.Grep
+	NameGlob           = toolname.Glob
+	NameWebFetch       = toolname.WebFetch
+	NameShell          = toolname.Shell
+	NameSpawn          = toolname.Spawn
+	NameSpawnStatus    = toolname.SpawnStatus
+	NameSpawnStop      = toolname.SpawnStop
+	NameLsp            = toolname.Lsp
+	NameTodoWrite      = toolname.TodoWrite
+	NameQuestion       = toolname.Question
+	NameDone           = toolname.Done
+	NameDelegate       = toolname.Delegate
+	NameNotify         = toolname.Notify
+	NameSkill          = toolname.Skill
+	NameHandoff        = toolname.Handoff
+	NameEscalate       = toolname.Escalate
+	NameCancel         = toolname.Cancel
+	NameComplete       = toolname.Complete
+	NameSaveArtifact   = toolname.SaveArtifact
+	NameReadArtifact   = toolname.ReadArtifact
+	NameSaveResult     = toolname.SaveResult
+	NameViewImage      = toolname.ViewImage
+	NameCompactContext = toolname.CompactContext
 )
 
 var NormalizeName = toolname.Normalize

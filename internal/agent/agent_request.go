@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/keakon/golog/log"
@@ -184,6 +185,23 @@ func (a *MainAgent) guardDegradedAgentRequestSeq(degraded bool) {
 	raiseDegradedSeqFloor(&a.agentRequestSeq, degraded)
 }
 
+// raiseDegradedSeqFloor raises an ID sequence to a wall-clock floor after a
+// soft-degraded restore dropped its backing file: restarting the sequence at 1
+// would alias IDs the restored transcript still references onto unrelated new
+// records.
+func raiseDegradedSeqFloor(seq *atomic.Uint64, degraded bool) {
+	if !degraded {
+		return
+	}
+	floor := uint64(time.Now().Unix())
+	for {
+		current := seq.Load()
+		if current >= floor || seq.CompareAndSwap(current, floor) {
+			return
+		}
+	}
+}
+
 func (a *MainAgent) createAgentRequest(sub *SubAgent, payload tools.AgentRequestPayload) (*DurableAgentRequest, error) {
 	if sub == nil {
 		return nil, fmt.Errorf("missing request source")
@@ -222,79 +240,6 @@ func (a *MainAgent) createAgentRequest(sub *SubAgent, payload tools.AgentRequest
 		return nil, err
 	}
 	return cloneDurableAgentRequest(request), nil
-}
-
-func (a *MainAgent) peerRouteRecords(ctx context.Context, targetTaskID string) (delegationCaller, *DurableTaskRecord, *DurableTaskRecord, error) {
-	caller, err := a.delegationCallerFromContext(ctx)
-	if err != nil {
-		return delegationCaller{}, nil, nil, err
-	}
-	if caller.IsMain || caller.TaskID == "" {
-		return delegationCaller{}, nil, nil, fmt.Errorf("peer routing is only available to delegated tasks")
-	}
-	targetTaskID = strings.TrimSpace(targetTaskID)
-	if targetTaskID == "" || targetTaskID == caller.TaskID {
-		return delegationCaller{}, nil, nil, fmt.Errorf("target_task_id must identify another task")
-	}
-	source := a.taskRecordByTaskID(caller.TaskID)
-	target := a.taskRecordByTaskID(targetTaskID)
-	if source == nil || target == nil {
-		return delegationCaller{}, nil, nil, fmt.Errorf("unknown peer task %q", targetTaskID)
-	}
-	if source.Attempt == 0 || target.Attempt == 0 || !isNonTerminalTaskState(source.State) || !isNonTerminalTaskState(target.State) {
-		return delegationCaller{}, nil, nil, fmt.Errorf("peer routing requires current non-terminal tasks")
-	}
-	if strings.TrimSpace(source.OwnerAgentID) != strings.TrimSpace(target.OwnerAgentID) || strings.TrimSpace(source.OwnerTaskID) != strings.TrimSpace(target.OwnerTaskID) {
-		return delegationCaller{}, nil, nil, fmt.Errorf("task %s is not a sibling with the same direct owner", targetTaskID)
-	}
-	return caller, source, target, nil
-}
-
-func (a *MainAgent) NotifyPeerMessage(ctx context.Context, peer tools.AgentPeerNoticeRequest) (tools.TaskHandle, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	peer.TargetTaskID = strings.TrimSpace(peer.TargetTaskID)
-	peer.Message = strings.TrimSpace(peer.Message)
-	peer.Kind = strings.TrimSpace(peer.Kind)
-	if a.shuttingDown.Load() || a.admissionPaused.Load() {
-		return tools.TaskHandle{}, fmt.Errorf("cannot notify peer during shutdown or session transition")
-	}
-	admissionEpoch := a.admissionEpoch.Load()
-	a.admissionMu.Lock()
-	defer a.admissionMu.Unlock()
-	if a.shuttingDown.Load() || a.admissionPaused.Load() || a.admissionEpoch.Load() != admissionEpoch {
-		return tools.TaskHandle{}, fmt.Errorf("peer notification invalidated by session or lifecycle change")
-	}
-	if err := ctx.Err(); err != nil {
-		return tools.TaskHandle{}, err
-	}
-	caller, source, target, err := a.peerRouteRecords(ctx, peer.TargetTaskID)
-	if err != nil {
-		return tools.TaskHandle{}, err
-	}
-	targetSub := a.subAgentByTaskID(target.TaskID)
-	if targetSub == nil {
-		return tools.TaskHandle{}, fmt.Errorf("peer target task %s has no live worker", target.TaskID)
-	}
-	metadata := &message.MailboxMetadata{
-		MessageID: a.nextSubAgentMailboxMessageID(targetSub.instanceID),
-		TaskID:    target.TaskID, SourceTaskID: source.TaskID, SourceAttempt: source.Attempt,
-		TargetTaskID: target.TaskID, TargetAttempt: target.Attempt, MessageType: string(AgentMessageTypeNotice),
-	}
-	status, statusMessage, err := a.deliverPeerMessageToSubAgent(targetSub, peer.Message, peer.Kind, metadata)
-	if err != nil {
-		return tools.TaskHandle{}, err
-	}
-	a.emitPeerNotifyAudit(caller, source, target, peer)
-	return tools.TaskHandle{Status: status, TaskID: target.TaskID, AgentID: targetSub.instanceID, Message: statusMessage}, nil
-}
-
-func (a *MainAgent) emitPeerNotifyAudit(caller delegationCaller, source, target *DurableTaskRecord, peer tools.AgentPeerNoticeRequest) {
-	a.emitToTUI(AgentNotifyEvent{
-		AgentID: caller.AgentID, TaskID: source.TaskID, ParentAgentID: controlPlaneAgentID(source.OwnerAgentID), ParentTaskID: source.OwnerTaskID,
-		TargetAgentID: target.LatestInstanceID, TargetTaskID: target.TaskID, Kind: peer.Kind, Message: peer.Message,
-	})
 }
 
 // snapshotAgentRequests deep-clones the durable agent-request map under the

@@ -37,8 +37,6 @@ type loadedSessionState struct {
 	TodoItems                    []tools.TodoItem
 	TaskRecords                  map[string]*DurableTaskRecord
 	TaskSettlements              map[taskAttemptKey]*TaskSettlement
-	TaskGroups                   map[string]*DurableTaskGroup
-	TaskGroupsDegraded           bool
 	AgentRequests                map[string]*DurableAgentRequest
 	AgentRequestsDegraded        bool
 	ActiveRole                   string
@@ -521,12 +519,6 @@ func (a *MainAgent) loadSessionState(sessionPath string) (*loadedSessionState, e
 	} else {
 		loaded.TaskSettlements = settlements
 	}
-	if groups, groupErr := loadTaskGroups(sessionPath); groupErr != nil {
-		log.Warnf("failed to load task groups session=%v error=%v", sessionPath, groupErr)
-		loaded.TaskGroupsDegraded = true
-	} else {
-		loaded.TaskGroups = groups
-	}
 	if requests, requestErr := loadAgentRequests(sessionPath); requestErr != nil {
 		log.Warnf("failed to load agent requests session=%v error=%v", sessionPath, requestErr)
 		loaded.AgentRequestsDegraded = true
@@ -815,8 +807,6 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	a.forceFullMCPToolInjection()
 	a.setTaskRecords(loaded.TaskRecords)
 	a.resetTaskCoordination(a.sessionEpoch, loaded.TaskSettlements)
-	a.resetTaskGroups(loaded.TaskGroups)
-	a.guardDegradedTaskGroupSeq(loaded.TaskGroupsDegraded)
 	a.resetAgentRequests(loaded.AgentRequests)
 	a.guardDegradedAgentRequestSeq(loaded.AgentRequestsDegraded)
 	advanceInstanceCountersForTaskRecords(loaded.TaskRecords)

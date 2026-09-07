@@ -167,7 +167,7 @@ func (p toolExecutionPipeline) recordToolActivityStarted(tc message.ToolCall) er
 
 func writeScopeKnownNonWorkspaceMutation(name string) bool {
 	switch name {
-	case tools.NameComplete, tools.NameNotify, tools.NameEscalate, tools.NameCancel, tools.NameDelegate, tools.NameTaskCollect, tools.NameTaskGroupCreate, tools.NameHandoff, tools.NameSaveArtifact, tools.NameReadArtifact, tools.NameSaveResult, tools.NameSpawnStatus, tools.NameSpawnStop, tools.NameTodoWrite:
+	case tools.NameComplete, tools.NameNotify, tools.NameEscalate, tools.NameCancel, tools.NameDelegate, tools.NameHandoff, tools.NameSaveArtifact, tools.NameReadArtifact, tools.NameSaveResult, tools.NameSpawnStatus, tools.NameSpawnStop, tools.NameTodoWrite:
 		return true
 	default:
 		return false
