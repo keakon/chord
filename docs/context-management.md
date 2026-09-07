@@ -115,6 +115,13 @@ so the model's own analysis written just before the reset survives into the
 new window. Retention never substitutes for the summary: it only pins the
 newest instruction boundary so the continuation can resume without re-reading
 the archives.
+After a checkpoint applies, the continuation guidance states the precedence
+explicitly: when the checkpoint conflicts with a newer source, the newer one
+wins — latest user message or Done rejection, then current runtime state
+(todos, subagents, background tasks), then the files on disk, then tool results
+still in this conversation, then archived artifacts, and only then the
+checkpoint's own text. A summary is navigation and candidate working memory; it
+never becomes the authority for runtime, file, or transcript facts.
 Key files reloaded from the checkpoint are request-local overlays read from disk
 on every request; each `<file>` block includes its SHA-256 revision and whether
 it changed since that checkpoint's first injection. The overlay is injected only
@@ -326,14 +333,17 @@ objective, decisions, open problems, next step, ...) therefore never depends
 on the summarizer happening to restate it, and chained compactions cannot
 erode it one summary at a time.
 
-`state_files` are pure path references: Chord never reads or injects them, so
-the tool cannot bypass read permissions. Entries are normally
-workspace-relative paths such as `docs/usage.md`; absolute, `~`-prefixed,
-`./`- or `../`-prefixed spellings are also accepted when they lexically
-resolve inside the project root, and are normalized to workspace-relative form
-before the checkpoint is built. The checkpoint's `Current User
-Request` always comes from your real messages, never from the model's
-arguments. A success result only means the request was accepted; a later
+`state_files` are pure path references: Chord never reads, injects, or
+existence-checks them, so the tool cannot bypass read permissions and cannot
+be used as an existence probe. Entries are normally workspace-relative paths
+such as `docs/usage.md`; absolute, `~`-prefixed, `./`- or `../`-prefixed
+spellings are also accepted when they lexically resolve inside the project
+root, and are normalized to workspace-relative form before the checkpoint is
+built. Each entry stays a model-declared reference: a stale or missing path is
+surfaced only when the file is actually read — the read tool reports the
+missing file — rather than by a silent checkpoint-time probe. The checkpoint's
+`Current User Request` always comes from your real messages, never from the
+model's arguments. A success result only means the request was accepted; a later
 model-driven `[Context Summary]` checkpoint confirms the reset applied. If the
 request is skipped or fails, the session continues on the old context and the
 usage-driven automatic-compaction safety net stays armed.

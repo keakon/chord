@@ -37,6 +37,7 @@ Compaction 在把历史交给摘要模型之前，会先对其应用一次 Reduc
 
 除此之外，每个 checkpoint 都会把被归档 head 中最新的**真实用户消息**原样嵌入自身——若会话恰好结束在一条被中断的 assistant 回复上，这条未完成的回复片段也会一并保留——放在 checkpoint 内的 `## Retained Recent Messages` 段，受 `retain_recent_tokens` 这个估计 token 预算约束（内置默认 4096）。继续执行的 profile 会把最近几轮作为原始消息保留在 checkpoint 之后，保留段覆盖的正是它们前面的消息；`archival` profile 没有原始尾部、其余内容只剩摘要，保留段就是最新指令唯一的原文残留。模型驱动的 archival 压缩没有 live tail 时，声明 `compact_context` 调用那条 assistant 消息的正文也按同样方式保留，模型 reset 前自己写下的分析能进入新窗口。保留段不替代摘要，只把最新的指令边界钉在上下文里，让续写不必先重读归档就能接上。
 
+checkpoint 应用之后，续接提示会显式写出优先级：checkpoint 与更新的来源冲突时以更新者为准——最新用户消息或 Done 拒绝、当前运行时状态（todo、子代理、后台任务）、磁盘上的文件、仍在本次对话中的工具结果、归档 artifact，最后才是 checkpoint 自身的文字。摘要用于导航和候选工作记忆，永远不会成为运行时、文件或 transcript 事实的权威。
 checkpoint 恢复的关键文件是每次请求从磁盘现读的 request-local overlay；每个 `<file>` 块都会带 SHA-256 revision，以及相对该 checkpoint 首次注入是否已变化的标记。该 overlay 只在稳定剪裁 surface 记录完成后注入，因此不会进入前缀兼容性检查，也不会让增量剪裁复用失效。
 
 **最小配置**（启用自动压缩）：
@@ -109,7 +110,7 @@ skip 是正常的策略结果：立即用相同请求重试会被短暂冷却，
 
 压缩是递归的：下一次自动摘要写在一段以 checkpoint 开头的历史之上。会话锚点（原始请求、standing constraints）逐字前向携带，前一个 checkpoint 的结构化正文也一样——摘要模型始终把它作为受保护的输入段收到，应用后的 checkpoint 还会把它逐字追加为 `## Previous Checkpoint` 段。因此 checkpoint 的结构化内容（目标、决策、未决问题、下一步……）从不依赖摘要模型恰好复述它，链式压缩也无法一次摘要一点地侵蚀它。
 
-`state_files` 只是路径引用：Chord 从不读取或注入这些文件，因此该工具无法绕过 Read 权限。条目通常写成相对项目根的路径（如 `docs/usage.md`）；绝对路径以及 `~`、`./`、`../` 开头的写法，只要词法解析后落在项目根内也一样接受，并在构建 checkpoint 前统一归一成相对项目根的路径。checkpoint 的 `Current User Request` 永远来自你的真实消息，不会采用模型参数。工具 success 只表示请求被接受；之后出现的 model-driven `[Context Summary]` checkpoint 才表示 reset 已应用。请求被跳过或失败时会继续使用旧上下文，usage-driven 自动压缩兜底保持生效。
+`state_files` 只是路径引用：Chord 从不读取、注入或校验这些文件的存在性，因此该工具无法绕过 Read 权限，也不可能被当成存在性探针使用。条目通常写成相对项目根的路径（如 `docs/usage.md`）；绝对路径以及 `~`、`./`、`../` 开头的写法，只要词法解析后落在项目根内也一样接受，并在构建 checkpoint 前统一归一成相对项目根的路径。每个条目始终是模型声明的引用：过期或不存在的路径只在真正读取时才会暴露——read 工具会报告文件缺失——而不是靠 checkpoint 时刻的静默探测。checkpoint 的 `Current User Request` 永远来自你的真实消息，不会采用模型参数。工具 success 只表示请求被接受；之后出现的 model-driven `[Context Summary]` checkpoint 才表示 reset 已应用。请求被跳过或失败时会继续使用旧上下文，usage-driven 自动压缩兜底保持生效。
 
 可观测性：TUI 状态栏会把模型请求的 checkpoint 与 usage-driven 压缩区分开显示（「model checkpoint」），并在跳过/失败时短暂展示原因；`/stats` 新增「Context Compaction」分区，按 stage 和 trigger 统计生命周期事件（如 `applied/model_driven`、`skipped/model_driven`），方便观察模型请求重置的频率与实际应用情况。
 

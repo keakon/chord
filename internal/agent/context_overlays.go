@@ -422,5 +422,20 @@ func buildContextPressureReminderText() string {
 // recovery that depended on it) adds it; skip/failure/non-checkpoint
 // continuations never do.
 func appendContextPressureVerificationGuidance(text string) string {
-	return strings.TrimSpace(text) + "\nBefore continuing, confirm that the preserved Current User Request and Next Step still match the actual state. Re-read any referenced state_files when needed before acting."
+	return strings.TrimSpace(text) + "\n" + checkpointVerificationGuidance
 }
+
+// checkpointVerificationGuidance is the post-checkpoint reading rule, stated
+// once and used by every continuation path (overlay and auto-continue prompt).
+//
+// The precedence clause exists because a checkpoint is the one place where
+// model-authored text sits next to runtime facts in the same shape. Without an
+// explicit order, a summary written before the last user message reads exactly
+// like the user's current instruction, and a preserved Next Step outranks a
+// todo list that has moved on. The order below is the authority model: newest
+// user intent, then live runtime state, then the file system, then this
+// conversation's tool results, then archived payloads, and only then the
+// checkpoint's own prose.
+const checkpointVerificationGuidance = "Before continuing, confirm that the preserved Current User Request and Next Step still match the actual state. " +
+	"Re-read any referenced state_files when needed before acting. " +
+	"If the checkpoint conflicts with a newer source, the newer source wins, in this order: the latest user message or Done rejection, then current runtime state (todos, subagents, background tasks), then the files on disk, then tool results still in this conversation, then archived artifacts, and only then the checkpoint's own text."

@@ -1155,15 +1155,21 @@ func stripLeadingHeadingMarkers(line string) string {
 }
 
 // renderStateFilesSection renders the Externalized State section: every path
-// is a model-declared reference rendered as its own bullet, explicitly
-// labeled as existence-unverified so the checkpoint cannot be read as a
-// file-existence probe.
+// is a model-declared reference rendered as its own bullet.
+//
+// The model submits these paths as part of its checkpoint; the system treats
+// each as an unverified claim. Existence is not checked at checkpoint time:
+// the compact_context contract says state_files are pure references, never
+// read, injected, or existence-verified, so stamping them would turn a
+// checkpoint request into a cross-permission-boundary existence probe. The
+// continuation must re-read any path with the read tool before relying on it,
+// and a missing file surfaces then.
 func renderStateFilesSection(paths []string) string {
 	if len(paths) == 0 {
-		return "- (none reported by the model)\n- Model-declared references only; existence is not verified at checkpoint time."
+		return "- (none reported by the model)\n- Model-declared references only; existence is not verified."
 	}
 	var sb strings.Builder
-	sb.WriteString("- Model-declared references only; existence is not verified at checkpoint time. Use the read tool to load any path before relying on it:\n")
+	sb.WriteString("- Model-declared references only; existence is not verified. Use the read tool to load any path before relying on it:\n")
 	for _, p := range paths {
 		for line := range strings.SplitSeq(p, "\n") {
 			sb.WriteString("- ")
