@@ -189,6 +189,17 @@ type SubAgent struct {
 	idleTimeout    time.Duration // default 120s
 	startupTimeout time.Duration
 
+	// In-flight LLM silence watchdog: bounds how long a request may produce
+	// nothing before the run loop cancels it and runs bounded recovery, so a
+	// lost request goroutine can never park the loop on llmCh forever. All
+	// fields are owned by the runLoop goroutine; see runLoop in sub_event.go.
+	llmSilenceBudget          time.Duration // 0 disables the watchdog
+	llmSilenceTimer           *time.Timer
+	pendingLLMSilenceRecovery string    // recovery instruction awaiting a free in-flight gate
+	llmSilenceEscalatedAt     time.Time // when the current recovery wait started
+	llmSilenceRecoveries      int       // watchdog restarts since the last real request boundary
+	llmSilenceAbandonedTurnID uint64    // turn failed for silence; its late results are dropped
+
 	// pendingComplete is set when Complete appears alongside other tool
 	// calls in one LLM response. The other tools execute first; EventAgentDone
 	// is sent once all of them complete. This prevents the last batch of file
@@ -464,6 +475,23 @@ const DefaultIdleTimeout = 120 * time.Second
 // normal post-response idle watchdog can exist.
 const DefaultSubAgentStartupTimeout = 15 * time.Second
 
+// defaultSubAgentLLMSilenceBudget bounds how long an in-flight LLM request may
+// produce nothing (no stream delta, no completion) before the run-loop
+// watchdog intervenes. Healthy transports already abort silence far sooner
+// through the client's per-chunk idle timeouts, so this only catches the
+// residual gap (a request wedged before chunk-level enforcement starts, or a
+// transport that stops erroring entirely). It is deliberately generous — well
+// above slow-phase thinking windows and retry cooldowns — yet below the
+// coordination stall threshold so a wedged request self-heals before the
+// main-side stall sweep would flag the worker.
+const defaultSubAgentLLMSilenceBudget = 6 * time.Minute
+
+// maxSubAgentLLMSilentRecoveries bounds how many times the silence watchdog
+// restarts a wedged request before it abandons the turn with
+// EventAgentError (which surfaces a risk alert to the owner). One bounded
+// recovery keeps the worst-case silent window at roughly twice the budget.
+const maxSubAgentLLMSilentRecoveries = 1
+
 // ---------------------------------------------------------------------------
 // Constructor
 // ---------------------------------------------------------------------------
@@ -649,6 +677,7 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 		customPrompt:      cfg.SystemPrompt,
 		idleTimeout:       cfg.IdleTimeout,
 		startupTimeout:    cfg.StartupTimeout,
+		llmSilenceBudget:  defaultSubAgentLLMSilenceBudget,
 		inputCh:           make(chan pendingUserMessage, inputChanCap),
 		ctxAppendCh:       make(chan message.Message, 16),
 		llmCh:             make(chan *llmResult, 1),
@@ -829,6 +858,9 @@ func subAgentToolWithBaseDir(t tools.Tool, workDir string) tools.Tool {
 // ---------------------------------------------------------------------------
 
 func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.Message) {
+	// Issuing a request is real activity: refresh the coordination heartbeat so
+	// a long single request is not mistaken for a stalled worker.
+	s.markActivity()
 	// Arm the in-flight gate up front (idempotent). Relying on every caller to
 	// Store(true) after finishLLMRequest cleared the gate has repeatedly left
 	// the gate down, letting runLoop treat a busy sub-agent as idle and consume
@@ -879,6 +911,11 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.M
 			if !resultQueued {
 				s.llmRequestInFlight.Store(false)
 				s.parent.sendEvent(Event{Type: EventSubAgentRequestBoundary, SourceID: s.instanceID})
+				// The request was aborted without queuing a result (cancelled
+				// turn or no client). Wake the run loop so a pending silence
+				// recovery is issued as soon as the gate clears instead of
+				// waiting out the watchdog grace window.
+				s.signalWake()
 			}
 		}()
 
@@ -1083,6 +1120,10 @@ func (s *SubAgent) newSubLLMStreamReducer(turn *Turn, promoteStreamingActivity f
 	var lastProgressEmitBytes int64
 	var lastProgressEmitEvents int64
 	streamReducer.onProgress = func(progress *message.StreamProgressDelta) {
+		// Transport-level progress (bytes/events flowing) is the worker's
+		// heartbeat: a request that keeps streaming — even a long single
+		// generation — must not look stalled.
+		s.markActivity()
 		state.requestProgressBytes = progress.Bytes
 		state.requestProgressEvents = progress.Events
 		now := time.Now()

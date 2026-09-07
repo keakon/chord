@@ -23,6 +23,11 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 		log.Debugf("SubAgent: discarding stale LLM response agent=%v result_turn=%v current_turn=%v", s.instanceID, result.turnID, s.currentTurnID())
 		return
 	}
+	// A completed request is real worker progress: refresh the heartbeat and
+	// clear the silence-watchdog recovery tally so a healthy round trip never
+	// counts against future watchdog budgets.
+	s.markActivity()
+	s.llmSilenceRecoveries = 0
 
 	if result.err != nil {
 		if s.recoverFromContextLength(result.err) {
@@ -457,6 +462,10 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 			s.pendingEscalateRequest = &request
 		}
 	}
+
+	// Dispatching tools for parallel execution is real activity too: a long
+	// tool batch is not a stall even though its result only arrives later.
+	s.markActivity()
 
 	// Dispatch concurrency-safe finalize-time batches.
 	turn := s.turn

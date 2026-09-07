@@ -34,7 +34,18 @@ type subAgentRuntimeState struct {
 	lastReplySummary     string
 	lastArtifact         tools.ArtifactRef
 	pendingComplete      *AgentResult
-	stateChangedAt       time.Time
+	// stateChangedAt is the worker's activity metric: it is refreshed both on
+	// state transitions (set) and on real progress (markActivity), so the
+	// coordination layer can tell a busy worker that merely stays in Running
+	// from one that has produced no state change and no activity for a long
+	// wall-clock window. WaitingMain expiry reads the same clock as its
+	// wait-since anchor; waiting workers do not generate activity, so the two
+	// uses stay coherent.
+	stateChangedAt time.Time
+	// stallAlertRaised deduplicates the owner-facing stall risk alert: the
+	// periodic lifecycle sweep notifies once per stall episode and clears the
+	// flag when the worker shows activity again.
+	stallAlertRaised bool
 }
 
 func (s *subAgentRuntimeState) set(state SubAgentState, summary string) {
@@ -45,6 +56,28 @@ func (s *subAgentRuntimeState) set(state SubAgentState, summary string) {
 	if summary != "" {
 		s.lastSummary = summary
 	}
+}
+
+// markActivity refreshes the activity metric on real worker progress (LLM
+// request issue, stream deltas, tool results, response handling). It is the
+// heartbeat the coordination stall detection reads; state transitions alone
+// were too coarse and mislabelled long-running but busy workers as stalled.
+func (s *subAgentRuntimeState) markActivity() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.stateChangedAt = time.Now()
+}
+
+func (s *subAgentRuntimeState) stallAlerted() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.stallAlertRaised
+}
+
+func (s *subAgentRuntimeState) setStallAlerted(raised bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.stallAlertRaised = raised
 }
 
 func (s *subAgentRuntimeState) setPendingComplete(result *AgentResult) {
@@ -104,4 +137,37 @@ func (s *subAgentRuntimeState) artifactSnapshot() (tools.ArtifactRef, time.Time)
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.lastArtifact, s.stateChangedAt
+}
+
+// markActivity records real worker progress so coordination stall detection
+// stops mislabelling long-running but active workers (see
+// subAgentRuntimeState.stateChangedAt).
+func (s *SubAgent) markActivity() {
+	if s == nil {
+		return
+	}
+	s.runtimeState.markActivity()
+}
+
+// stallAlertRaised reports whether the main-side lifecycle sweep already
+// notified this worker's owner about its current stall episode.
+func (s *SubAgent) stallAlertRaised() bool {
+	if s == nil {
+		return false
+	}
+	return s.runtimeState.stallAlerted()
+}
+
+func (s *SubAgent) raiseStallAlert() {
+	if s == nil {
+		return
+	}
+	s.runtimeState.setStallAlerted(true)
+}
+
+func (s *SubAgent) clearStallAlert() {
+	if s == nil {
+		return
+	}
+	s.runtimeState.setStallAlerted(false)
 }

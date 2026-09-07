@@ -192,6 +192,26 @@ func (a *MainAgent) buildCoordinationSnapshotOverlay() string {
 	return b.String()
 }
 
+// runningSubAgentStallReason reports why a live Running worker is suspected of
+// stalling, or "" while it is healthy. It compares the worker's activity
+// heartbeat — refreshed on state transitions AND real progress (LLM request
+// issue, stream deltas, tool results, response handling) — against the wall
+// clock, so a busy worker that merely stays in Running is never flagged, while
+// one that has produced no state change and no activity for the full threshold
+// is. Only slot holders are coordination-tracked work.
+func runningSubAgentStallReason(sub *SubAgent, now time.Time) string {
+	if sub == nil {
+		return ""
+	}
+	if held, _ := sub.slotState(); !held {
+		return ""
+	}
+	if now.Sub(sub.StateChangedAt()) > coordinationSnapshotStallAfter {
+		return "running with no recent state/progress update"
+	}
+	return ""
+}
+
 func formatWriteScope(scope tools.WriteScope) string {
 	scope = scope.Normalized()
 	if scope.Empty() {
@@ -235,10 +255,7 @@ func (a *MainAgent) updateSubAgentStallMarkers() {
 					reason = "waiting_descendant without active child progress"
 				}
 			case SubAgentStateRunning:
-				held, _ := sub.slotState()
-				if held && now.Sub(sub.StateChangedAt()) > coordinationSnapshotStallAfter {
-					reason = "running with no recent state/progress update"
-				}
+				reason = runningSubAgentStallReason(sub, now)
 			}
 		}
 		if rec.SuspectedStallReason != reason {

@@ -14,10 +14,12 @@ import (
 )
 
 // subAgentLifecycleSweepInterval is the coarse wall-clock cadence of the
-// WaitingMain expiry sweep. Waiting waits are bounded below by the min-wait
-// guard (minutes at the default), so a per-minute check keeps reclaim latency
-// negligible without polling the loop any faster. The trigger event is only
-// queued while a waiting_main worker or parked record exists.
+// WaitingMain expiry sweep and the Running-worker stall watchdog. Waiting waits
+// are bounded below by the min-wait guard (minutes at the default), and a
+// stalled worker only matters minutes after its heartbeat goes quiet, so a
+// per-minute check keeps reclaim/notify latency negligible without polling the
+// loop any faster. The trigger event is only queued while a waiting_main or
+// live-running worker exists.
 const subAgentLifecycleSweepInterval = time.Minute
 
 // EventSubAgentLifecycleSweep is the loop event the periodic wall-clock trigger
@@ -385,14 +387,37 @@ func (a *MainAgent) sweepSubAgentLifecycle() {
 		// the batch.
 		a.saveRecoverySnapshot()
 	}
+	// Running-worker stall watchdog. A Running worker whose activity heartbeat
+	// has gone quiet for the coordination stall threshold is not progressing
+	// and has no in-flight request to self-heal (the sub-side silence watchdog
+	// bounds request windows well below this threshold). Notify the owner once
+	// per stall episode through a risk_alert mailbox instead of killing the
+	// worker; the flag is cleared again on the next sweep that finds the
+	// worker healthy.
+	for _, sub := range a.subs.snapshotSubAgents() {
+		if sub == nil || sub.State() != SubAgentStateRunning {
+			continue
+		}
+		reason := runningSubAgentStallReason(sub, now)
+		if reason == "" {
+			sub.clearStallAlert()
+			continue
+		}
+		if sub.stallAlertRaised() {
+			continue
+		}
+		sub.raiseStallAlert()
+		a.queueSubAgentStallAlert(sub, reason)
+	}
 }
 
 // startSubAgentLifecycleSweep runs the periodic trigger that keeps WaitingMain
-// expiry independent of user speech. Without it the sweep only runs inside
-// handleUserMessage, so a headless or silent session would never reclaim a
-// parked worker. The trigger deliberately avoids the idle/nudge chain so it
-// survives the removal of that dead code; it wakes the loop at most once per
-// interval and only while a waiting_main candidate exists.
+// expiry and the Running-worker stall watchdog independent of user speech.
+// Without it the sweep only runs inside handleUserMessage, so a headless or
+// silent session would never reclaim a parked worker or surface a stalled
+// worker. The trigger deliberately avoids the idle/nudge chain so it survives
+// the removal of that dead code; it wakes the loop at most once per interval
+// and only while a waiting_main or live-running candidate exists.
 func (a *MainAgent) startSubAgentLifecycleSweep(ctx context.Context) {
 	go func() {
 		ticker := time.NewTicker(subAgentLifecycleSweepInterval)
@@ -404,13 +429,29 @@ func (a *MainAgent) startSubAgentLifecycleSweep(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if a.admissionPaused.Load() || !a.hasWaitingMainExpiryCandidates() {
+				if a.admissionPaused.Load() || !a.hasSubAgentLifecycleSweepCandidates() {
 					continue
 				}
 				a.sendEvent(Event{Type: EventSubAgentLifecycleSweep})
 			}
 		}
 	}()
+}
+
+// hasSubAgentLifecycleSweepCandidates reports whether the periodic sweep could
+// find something to act on: a waiting_main expiry candidate, or a live Running
+// worker whose stall/health the sweep must keep watching. The periodic trigger
+// gates on it so sessions that never delegate do not wake the event loop.
+func (a *MainAgent) hasSubAgentLifecycleSweepCandidates() bool {
+	if a.hasWaitingMainExpiryCandidates() {
+		return true
+	}
+	for _, sub := range a.subs.snapshotSubAgents() {
+		if sub != nil && sub.State() == SubAgentStateRunning {
+			return true
+		}
+	}
+	return false
 }
 
 // hasWaitingMainExpiryCandidates reports whether a live worker or a parked task
@@ -478,6 +519,50 @@ func (a *MainAgent) queueWaitingMainExpiryAlert(sub *SubAgent, record *DurableTa
 		AgentID:       agentID,
 		TaskID:        taskID,
 		AgentType:     agentType,
+		ParentAgentID: controlPlaneAgentID(ownerAgentID),
+		ParentTaskID:  ownerTaskID,
+		TargetAgentID: controlPlaneAgentID(ownerAgentID),
+		TargetTaskID:  ownerTaskID,
+		Kind:          string(SubAgentMailboxKindRiskAlert),
+		Message:       reason,
+	})
+}
+
+// queueSubAgentStallAlert makes a stalled Running worker visible to its owner:
+// a risk_alert mailbox is queued through the same event path the failure
+// handler uses (see handleAgentError), plus the matching control-plane
+// AgentNotifyEvent. Conservative by design: the worker is not killed — the
+// owner checks the transcript/logs and decides whether to resume, re-delegate,
+// or cancel. The sweep deduplicates per stall episode via stallAlertRaised.
+func (a *MainAgent) queueSubAgentStallAlert(sub *SubAgent, reason string) {
+	if a == nil || sub == nil {
+		return
+	}
+	taskID := strings.TrimSpace(sub.taskID)
+	if taskID == "" {
+		return
+	}
+	ownerAgentID, ownerTaskID, _, _ := sub.ownerSnapshot()
+	mailbox := &SubAgentMailboxMessage{
+		AgentID:      sub.instanceID,
+		TaskID:       taskID,
+		OwnerAgentID: ownerAgentID,
+		OwnerTaskID:  ownerTaskID,
+		InReplyTo:    firstReplyMessageID(sub),
+		Kind:         SubAgentMailboxKindRiskAlert,
+		Priority:     SubAgentMailboxPriorityInterrupt,
+		Summary:      reason,
+		Payload: fmt.Sprintf(
+			"SubAgent is suspected of stalling: it is still running but has shown no state change or activity for an extended period.\n- task_id: %s\n- agent_id: %s\n- required_action: check the worker's transcript/logs for progress; re-delegate, resume, or cancel it explicitly if it is stuck.",
+			taskID, sub.instanceID,
+		),
+		RequiresAck: false,
+	}
+	a.queueLoopEvent(Event{Type: EventSubAgentMailbox, SourceID: sub.instanceID, Payload: mailbox})
+	a.emitToTUI(AgentNotifyEvent{
+		AgentID:       sub.instanceID,
+		TaskID:        taskID,
+		AgentType:     sub.agentDefName,
 		ParentAgentID: controlPlaneAgentID(ownerAgentID),
 		ParentTaskID:  ownerTaskID,
 		TargetAgentID: controlPlaneAgentID(ownerAgentID),

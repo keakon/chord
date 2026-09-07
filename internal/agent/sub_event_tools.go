@@ -242,6 +242,9 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 		log.Debugf("SubAgent: discarding stale tool result agent=%v result_turn=%v current_turn=%v", s.instanceID, result.TurnID, s.currentTurnID())
 		return
 	}
+	// A completed tool call is real worker progress: refresh the heartbeat so
+	// a worker that only does tool round trips is never marked as stalled.
+	s.markActivity()
 
 	rawResult := result.Result
 	displayResult, contextResult, errorText, isError := composeToolResultTexts(rawResult, result.Error)
