@@ -255,7 +255,19 @@ func (r *DurableTaskRecord) allowsRehydrate(trigger taskResumeTrigger) bool {
 	state := SubAgentState(strings.TrimSpace(r.State))
 	switch trigger {
 	case taskResumeByDescendantMailbox:
-		return state == SubAgentStateWaitingDescendant
+		// A descendant mailbox (a child completion or a child request for a
+		// decision) is exactly the input a parked owner is waiting on, so it
+		// may wake any parked non-terminal owner. waiting_descendant is the
+		// classic case; an owner parked in waiting_main or idle (for example
+		// escalated to main while one of its children later finished) would
+		// otherwise strand the child's completion in its owned queue forever.
+		// Terminal states stay excluded: their mailboxes are forwarded to the
+		// main inbox instead of being rehydrated.
+		switch state {
+		case SubAgentStateIdle, SubAgentStateWaitingMain, SubAgentStateWaitingDescendant:
+			return true
+		}
+		return false
 	case taskResumeByTargetedNotify:
 		return strings.TrimSpace(r.ResumePolicy) == taskResumePolicyNotify &&
 			(state == SubAgentStateIdle || state == SubAgentStateWaitingMain || state == SubAgentStateWaitingDescendant || state == SubAgentStateCompleted)

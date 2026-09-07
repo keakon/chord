@@ -465,16 +465,30 @@ func (a *MainAgent) hasRunnableMailboxWork() bool {
 		a.activeSubAgentMailbox != nil {
 		return true
 	}
+	// Only owned messages that are routable right now count as pending mailbox
+	// work. A message spooled under a parked owner that this mailbox cannot
+	// wake (for example one not addressed by the owner's own descendant) is
+	// temporarily unroutable: routing refuses it on every drain, so counting it
+	// here would suppress global idle forever.
 	for _, queued := range a.ownedSubAgentMailboxes {
 		for _, msg := range queued {
-			if msg.Kind != SubAgentMailboxKindProgress {
+			if msg.Kind != SubAgentMailboxKindProgress && a.ownedMailboxMessageRoutable(msg) {
 				return true
 			}
 		}
 	}
-	for _, queued := range a.ownedMailboxSpool {
-		if len(queued) > 0 {
-			return true
+	for _, spooled := range a.ownedMailboxSpool {
+		for _, messageID := range spooled {
+			msg, found, err := a.loadSpooledMailbox(messageID)
+			if err != nil || !found || msg == nil {
+				// A message that cannot even be reloaded is not actionable work;
+				// drainOwnedSubAgentMailboxes drops or keeps it on the same
+				// verdict, so it must not suppress global idle either.
+				continue
+			}
+			if msg.Kind != SubAgentMailboxKindProgress && a.ownedMailboxMessageRoutable(*msg) {
+				return true
+			}
 		}
 	}
 	return false

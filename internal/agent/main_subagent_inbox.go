@@ -209,13 +209,15 @@ func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
 		if rec != nil && !rec.RuntimeParked {
 			owner = a.subAgentByTaskID(rec.TaskID)
 		}
-		if owner == nil && msg.Kind != SubAgentMailboxKindProgress {
-			if rec != nil && rec.RuntimeParked && rec.allowsRehydrate(taskResumeByDescendantMailbox) {
-				var err error
-				owner, _, err = a.rehydrateTask(rec)
-				if err != nil {
-					return false
-				}
+		// A parked owner may be woken by a descendant mailbox (child completion
+		// or child decision request); only genuine descendant messages wake it,
+		// so unrelated messages spooled under its queue stay queued instead.
+		if owner == nil && rec != nil && rec.RuntimeParked && msg.Kind != SubAgentMailboxKindProgress &&
+			rec.allowsRehydrate(taskResumeByDescendantMailbox) && a.ownedMailboxIsFromDescendant(msg, rec) {
+			var err error
+			owner, _, err = a.rehydrateTask(rec)
+			if err != nil {
+				return false
 			}
 		}
 	}
@@ -353,6 +355,57 @@ func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
 	default:
 		return enqueueForProcessing(text, "Child task sent an update")
 	}
+}
+
+// ownedMailboxIsFromDescendant reports whether an owned mailbox message is a
+// genuine descendant mailbox of a parked owner record: each worker addresses
+// its completion and decision requests to its direct parent, so the sender's
+// durable task record and the message itself must both name this owner's task,
+// and the owner instance the message was addressed to must be the instance the
+// sender records as its owner. Only such messages may wake a parked owner; an
+// unrelated message that happens to be spooled under the owner's queue must
+// stay queued instead of rehydrating the owner.
+func (a *MainAgent) ownedMailboxIsFromDescendant(msg SubAgentMailboxMessage, owner *DurableTaskRecord) bool {
+	if owner == nil || strings.TrimSpace(owner.TaskID) == "" {
+		return false
+	}
+	sender := a.taskRecordByTaskID(strings.TrimSpace(msg.TaskID))
+	if sender == nil {
+		return false
+	}
+	return strings.TrimSpace(sender.OwnerAgentID) == strings.TrimSpace(msg.OwnerAgentID) &&
+		strings.TrimSpace(sender.OwnerTaskID) == strings.TrimSpace(owner.TaskID) &&
+		strings.TrimSpace(msg.OwnerTaskID) == strings.TrimSpace(owner.TaskID)
+}
+
+// ownedMailboxMessageRoutable mirrors the routing decision of
+// routeOwnedSubAgentMailbox without performing any delivery side effects: an
+// owned queue message counts as routable when it could be delivered right now —
+// to a live owner runtime, to a parked owner that a descendant mailbox may
+// wake, or forward to the main inbox once the owner record is terminal. A
+// message that is only temporarily unroutable (spooled under a parked owner
+// with no live runtime that this mailbox cannot wake) must not be reported as
+// runnable mailbox work, or a stranded message would suppress global idle
+// forever.
+func (a *MainAgent) ownedMailboxMessageRoutable(msg SubAgentMailboxMessage) bool {
+	ownerAgentID := strings.TrimSpace(msg.OwnerAgentID)
+	if ownerAgentID == "" {
+		return false
+	}
+	if a.subAgentByID(ownerAgentID) != nil {
+		return true
+	}
+	rec := a.taskRecordByInstanceID(ownerAgentID)
+	if rec == nil {
+		return false
+	}
+	if !rec.RuntimeParked && a.subAgentByTaskID(rec.TaskID) != nil {
+		return true
+	}
+	if rec.RuntimeParked && msg.Kind != SubAgentMailboxKindProgress && rec.allowsRehydrate(taskResumeByDescendantMailbox) {
+		return a.ownedMailboxIsFromDescendant(msg, rec)
+	}
+	return !isNonTerminalTaskState(rec.State)
 }
 
 func (a *MainAgent) enqueueOwnedSubAgentMailbox(msg SubAgentMailboxMessage) {
