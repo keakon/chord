@@ -54,7 +54,7 @@ In the TUI, an `lsp` card shows the operation and query position in its header (
 
 ## Orchestration and control
 
-These tools control agent workflows rather than local side effects, so YOLO mode does **not** bypass their permissions — YOLO removes the friction of confirming file edits and shell commands, not the role's boundary. `handoff`, `delegate`, and `cancel` grant a capability the role did not have, so a broad `"*": allow` does not grant them by itself; configure each one directly when a role should use it. `done` and `compact_context` only end or shrink the current unit of work, so the runtime mode that mounts them is their authorization and a wildcard-only rule does not reach them. See [Permissions & Safety](./permissions-and-safety.md).
+These tools control agent workflows rather than local side effects, so YOLO mode does **not** bypass their permissions — YOLO removes the friction of confirming file edits and shell commands, not the role's boundary. `handoff`, `delegate`, and `cancel` grant a capability the role did not have. Outside YOLO they follow ordinary permission rules, so a broad `"*": allow` grants them like any other tool — which is why the built-in `builder` denies `handoff` and `delegate` explicitly to stay single-agent. Under YOLO, by contrast, a wildcard never reaches them: they stay denied unless a rule names them directly. `done` and `compact_context` only end or shrink the current unit of work, so the runtime mode that mounts them is their authorization and a wildcard-only rule does not reach them. See [Permissions & Safety](./permissions-and-safety.md).
 
 | Tool | What it does |
 | --- | --- |

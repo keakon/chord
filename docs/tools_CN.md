@@ -54,7 +54,7 @@
 
 ## 编排与控制
 
-这些工具控制的是 agent 工作流而不是本地副作用，因此 YOLO 模式**不会**绕过它们的权限——YOLO 消除的是确认文件编辑和 shell 命令的摩擦，不是角色的边界。`handoff`、`delegate`、`cancel` 会带来角色原本没有的能力，宽泛的 `"*": allow` 不会自动授予它们，角色需要哪一个就单独配置哪一个。`done` 和 `compact_context` 只是结束或收缩当前这段工作，挂载它们的那个运行时模式本身就是授权，纯通配规则不会影响它们。详见[权限与安全](./permissions-and-safety_CN.md)。
+这些工具控制的是 agent 工作流而不是本地副作用，因此 YOLO 模式**不会**绕过它们的权限——YOLO 消除的是确认文件编辑和 shell 命令的摩擦，不是角色的边界。`handoff`、`delegate`、`cancel` 会带来角色原本没有的能力。非 YOLO 模式下它们走普通权限规则，宽泛的 `"*": allow` 会像授予其它工具一样授予它们——内置 `builder` 必须显式 deny `handoff` 和 `delegate`，正是为了在默认规则下保持单 agent。只有在 YOLO 下通配符才够不着它们：默认拒绝，除非规则直接指名对应工具。`done` 和 `compact_context` 只是结束或收缩当前这段工作，挂载它们的那个运行时模式本身就是授权，纯通配规则不会影响它们。详见[权限与安全](./permissions-and-safety_CN.md)。
 
 | 工具 | 用途 |
 | --- | --- |

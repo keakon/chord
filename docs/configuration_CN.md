@@ -924,13 +924,13 @@ orchestration:
 | `subagent_compact_usage` | `0.8` | 当 SubAgent 的估算上下文用量达到可用输入预算的这一比例时，主动压缩其上下文。默认值与 `context.compaction.threshold` 一致；之所以保留单独配置，是因为 SubAgent 使用本地 token 估算和轻量滑动窗口 checkpoint，而不是 MainAgent 的 usage 驱动压缩管线。有效值必须严格大于 `0` 且小于 `1`。 |
 | `waiting_main_expiry_turns` | `5` | SubAgent 停在 `waiting_main`、等待 owner 回复时允许经过的用户回合数。只有同时满足 `waiting_main_min_wait_sec` 后，这条回合数限制才会让任务过期；`waiting_main_max_wait_sec` 仍会无条件结束等待。 |
 | `waiting_main_min_wait_sec` | `300` | 回合数限制可以让 `waiting_main` 任务过期前必须经过的最短墙钟时间，单位为秒。 |
-| `waiting_main_max_wait_sec` | `3600` | `waiting_main` 任务最多等待的墙钟时间，单位为秒。达到后不论用户回合数如何都会过期；实际值不会小于 `waiting_main_min_wait_sec`。 |
+| `waiting_main_max_wait_sec` | `3600` | `waiting_main` 任务最多等待的墙钟时间，单位为秒。达到后不论用户回合数如何都会过期；实际值不会小于 `waiting_main_min_wait_sec`。若两者都显式配置且该最大值小于最小值，配置加载会直接失败，而不是静默钳制。 |
 
 ### 优先级和值规则
 
 - 这些设置既可写在全局配置，也可写在项目 `.chord/config.yaml` 中。项目配置中的正数标量会覆盖对应的全局值。
 - `provider_max_active_requests` 和 `model_max_active_requests` 按 key 合并：项目配置替换同名全局条目，同时保留其他全局条目。
-- 标量为零或负数不表示“无限制”，而是保留继承值或内置默认值。`subagent_compact_usage` 只有严格位于 `(0, 1)` 时才有效，否则回退到 `0.8`；与 `context.compaction.threshold: 0` 不同，零不会关闭 SubAgent 上下文保护。
+- 标量为零或负数不表示“无限制”，而是保留继承值或内置默认值。`subagent_compact_usage` 只有严格位于 `(0, 1)` 时才有效：越界值（含 `0`）会被忽略并记录警告，项目层此时继承合并后的全局值，全局未配置时回退到 `0.8`。与 `context.compaction.threshold: 0` 不同，零不会关闭 SubAgent 上下文保护。
 - provider/model map 中只有正数限制会生效。建议使用明确的 key 和正整数，不要把零当作通用的“无限制”开关。
 - 所有限制只在单个进程内生效，不会协调多个 Chord 进程之间的配额。
 
@@ -1058,12 +1058,16 @@ prompt: |
 
 - `name`：agent 名称。省略时使用不带扩展名的文件名；显式填写时，必须与不带扩展名的文件名一致（例如 `builder.yaml` 必须声明 `name: builder`）。同一目录内不能存在重名 agent，包括 `.md`、`.yaml`、`.yml` 之间的重名；项目级 agent 仍可按既有设计覆盖同名的全局 agent。
 - `description`：简短描述，在可委派给该 agent 时展示给 main agent。
+- `capabilities` / `preferred_tasks` / `write_mode` / `delegation_policy`：描述该 agent 用途的可选标注，用于你要委派给的 `subagent` 定义时最有价值。Chord 不解析也不强制这些值——它们只是以 `capabilities=…`、`preferred=…`、`write_mode=…`、`delegation_policy=…` 这样的短 meta 文本出现在委派模型看到的 agent 选择上，帮助它选对类型。前两个是字符串列表，后两个是单个字符串；写得简短、能自解释即可，长的内容放 `description`。
 - `mode`：`main` 表示 MainAgent 角色，`subagent` 表示 SubAgent。为空或其他值时按 `main` 处理；`sub_agent` 和 `sub` 也可作为 SubAgent 别名。
 - `model_pools`：可选的有序池名列表，用于限制该 agent 可使用的池。池定义位于 `config.yaml` 顶层 `model_pools`；省略时，该 agent 可使用所有顶层池并按池名排序。`openai/gpt-5.5@high` 这类 inline variant 写在池定义中。
 - `variant`：model ref 未写 `@variant` 时的默认 variant。
 - `permission`：该 agent 的逐工具权限策略。权限直接保存在 agent 配置文件中；确认弹窗里选择“记住规则”时，`project` 会更新当前项目的 `.chord/agents/<role>.yaml`，`global` 会更新用户配置目录的 `agents/<role>.yaml`（默认 `~/.config/chord/agents/<role>.yaml`），不会写入单独的 permissions 文件夹。部分编排工具有特殊语义（`delegate` 的 pattern 会匹配 `agent_type`，并联动控制委派工作相关能力，如 `cancel`；`handoff` 和 `done` 的 `allow` / `ask` 都表示工作流可用，并由 Chord 自己的确认 gate 控制关键节点）。依赖精细控制工具规则前，请先阅读[权限与安全](./permissions-and-safety_CN.md#特殊权限语义)。
 - `mcp`：作用域限定在该 agent 的增量、自动启动 MCP 配置。Agent MCP 不能与最终生效的全局/项目 `mcp` server 重名，否则启动时报错；也不能设置 `manual: true`，因为运行时 MCP 控制只管理顶层 server，如需手动启停请改在项目/全局配置中声明。要继承顶层 server，请删除 agent 中的重复项；要使用独立私有 server，请改名；要为整个项目替换顶层 server，请在 `.chord/config.yaml` 中覆盖。不同 agent 可以使用相同的私有 server 名称而互不共享连接，同一 agent 定义的多个实例则会复用连接。
-- `delegation`：如 `max_children`、`max_depth`、`child_join` 等委派限制。`max_children` 默认值为 `10`，不能超过 `64`；`max_depth` 默认值为 `1`，不能超过 `8`。超过上限或使用负数会导致配置报错。
+- `delegation`：本 agent 定义的委派限制；超过上限或使用负数会导致配置报错：
+  - `max_children`：该 agent 同一时刻可拥有的直接活跃子任务数上限。默认 `10`，上限 `64`。
+  - `max_depth`：嵌套委派可达到的深度。它按**被委派 worker 自己的定义**生效——一个 SubAgent 能否再往下委派，看的是它自己声明的 `delegation.max_depth` 和当前所处深度，而不是父角色或根角色的设置；根角色把 `max_depth` 设为 `1`，挡不住一个声明 `max_depth: 8` 的子角色继续嵌套。默认 `1`（第一层 SubAgent 要往下委派，必须由它自己的定义提高该值），上限 `8`。
+  - `child_join`：SubAgent 委派出的子任务是否并入它自己的任务生命周期（默认 `true`）。开启时，owner 不能在有已加入的子任务仍在运行时完成——`complete` 会被延迟，直到这些子任务结束或被显式停止；owner 若被取消或失败，也会连带取消已加入的子任务。关闭时，owner 可以提前收工，仍在运行中的子任务会与它解绑并转由 main agent 继续托管，而不是被连带取消。该选项只影响嵌套委派：main agent 直接委派出的子任务从不并入，因为 main 本身不是任务。
 - `prompt` / `system_prompt`：纯 YAML agent 文件中的 system prompt。设置其中任一个会**整块替换**该角色本来会获得的内置 prompt 块。
 - `prompt_preset`：按能力而非角色名选择内置角色 prompt 块，可选值为 `planning` 和 `none`。`planning` 会注入内置规划块（计划文档命名与格式、直接回答与产出计划的判断、handoff 时序、计划质量要求），同时抑制 bug triage 块 —— 后者与规划工作流自带的调查提纲重复。`none` 表示不注入任何内置块。省略该字段时，名为 `planner` 的角色获得 `planning` 块，其他名称不获得内置块，因此已有配置行为不变。填写未知值会导致配置报错。
 - `prompt_append`：追加在最终生效的角色 prompt 之后 —— 即 preset 块之后，或角色用 `prompt` / `system_prompt` 替换了基础块时追加在其后。用它可以在不接管整块维护责任的前提下补充项目约定，同时保留 preset 中随角色可见工具自适应的措辞。
