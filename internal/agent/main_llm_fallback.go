@@ -197,9 +197,16 @@ func (a *MainAgent) handleLLMFallbackBoundary(evt Event) {
 	// from the current request surface here; reduction is idempotent for markers
 	// and artifacts, while the existing fast path remains intact for equivalent
 	// model budgets.
-	if fallbackRequiresFreshAdmission(payload) {
+	rebuild := fallbackRequiresFreshAdmission(payload)
+	primarySurface := newRequestSurfaceFingerprint(requestSurfacePrimary, payload.primaryModelRef, messages, nil,
+		estimateMessagesTokens(a.ctxMgr, messages), payload.primaryInputLimit)
+	if rebuild {
 		messages = a.prepareMessagesForLLMWithOptions(messages, false)
 	}
+	targetSurface := newRequestSurfaceFingerprint(requestSurfaceFallback, payload.fallbackModelRef, messages, nil,
+		estimateMessagesTokens(a.ctxMgr, messages), payload.fallbackInputLimit)
+	a.noteFallbackSurfaceDecision(rebuild)
+	log.Debugf("LLM fallback %s", describeSurfaceDecision(primarySurface, targetSurface, rebuild))
 	payload.reply <- llmFallbackBoundaryResult{messages: messages}
 }
 

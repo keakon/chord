@@ -527,6 +527,12 @@ type MainAgent struct {
 	lastLLMRequestModelRef     string
 	llmModelRunLength          int
 
+	// fallbackSurfaceRebuilds / fallbackSurfaceReuses count how fallback
+	// boundaries resolved the "may this prepared surface go to another model"
+	// question. Session-scoped counters, read for telemetry only.
+	fallbackSurfaceRebuilds atomic.Int64
+	fallbackSurfaceReuses   atomic.Int64
+
 	// recalledReductionInputs remembers tool-input keys (normalized tool + raw args)
 	// whose reduced output the model later re-fetched with an identical call —
 	// direct evidence that reduction discarded content the model still needed.
