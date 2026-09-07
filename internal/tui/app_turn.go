@@ -81,7 +81,35 @@ func (m *Model) finalizeAssistantBlock() {
 	for agentID := range m.subAgentStreamStates {
 		m.finalizeAgentStream(agentID)
 	}
+	// Streaming ended without a finalized response, so no execution-state event
+	// will arrive to settle tool cards that are still mid-arguments.
+	m.markAllReceivingToolCallsComplete()
 	m.flushPendingLocalStatusCards()
+}
+
+// markAllReceivingToolCallsComplete settles every tool card still stuck in the
+// argument-receiving state.
+//
+// Chat-completions providers give the UI no per-call args-end event; completion
+// is inferred only when a later call starts streaming. A call with no successor
+// — the last one in a batch, or any call in a truncated response — has no way
+// out of the receiving state on its own and would keep rendering a live char
+// counter indefinitely. Callers are the paths where streaming ends without a
+// finalized response; the normal finalize path settles cards through
+// execution-state events instead.
+func (m *Model) markAllReceivingToolCallsComplete() {
+	if m == nil || m.viewport == nil {
+		return
+	}
+	for _, block := range m.viewport.blocks {
+		if block == nil || block.Type != BlockToolCall || !block.toolArgumentsAreReceiving() {
+			continue
+		}
+		if markToolArgsComplete(block) {
+			block.InvalidateCache()
+			m.updateViewportBlock(block)
+		}
+	}
 }
 
 func (m *Model) finalizeAgentStream(agentID string) {

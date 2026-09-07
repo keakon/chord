@@ -155,6 +155,16 @@ func markToolArgsComplete(block *Block) bool {
 		block.ToolQueuedByExecutionEvent = false
 		changed = true
 	}
+	// Re-derive the body from the accumulated arguments. Streaming deltas are
+	// throttled, so a card inferred-complete can still be showing its very first
+	// frame — often a truncated JSON prefix — while RawArgs already holds the
+	// whole argument object. Providers that emit a real args-end event refreshed
+	// Content from those same args just before calling this, so this is a no-op
+	// for them.
+	if displayArgs := stableToolDisplayArgs(block.ToolName, block.RawArgs, block.ResultContent); displayArgs != "" && displayArgs != block.Content {
+		block.Content = displayArgs
+		changed = true
+	}
 	if block.ToolProgress != nil {
 		block.ToolProgress = nil
 		changed = true
@@ -478,6 +488,15 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		// refreshing once the patch grows past the coalesce window rather than on
 		// a timer.
 		livePatchPreview := !evt.ArgsStreamingDone && block != nil && toolNameKey(block.ToolName) == tools.NameApplyPatch
+		// Keep RawArgs current even when this delta is throttled below: it is the
+		// card's only copy of the accumulated arguments, and the completion path
+		// re-derives the body from it. Assigning the string does not mark the
+		// block updated, so it stays off the re-measure path that the coalesce
+		// window exists to avoid.
+		rawArgsChanged := block != nil && evt.ArgsJSON != "" && evt.ArgsJSON != block.RawArgs
+		if rawArgsChanged {
+			block.RawArgs = evt.ArgsJSON
+		}
 		allowArgRenderUpdate := evt.ArgsStreamingDone || livePatchPreview || m.shouldRefreshToolArgRender(evt.ID, evt.ArgsJSON, now)
 		if !allowArgRenderUpdate {
 			m.markStreamRenderDirty()
@@ -503,8 +522,7 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		if argsStreamingDone {
 			displayArgs = stableToolDisplayArgs(evt.Name, evt.ArgsJSON, block.ResultContent)
 		}
-		if evt.ArgsJSON != "" && evt.ArgsJSON != block.RawArgs {
-			block.RawArgs = evt.ArgsJSON
+		if rawArgsChanged {
 			// A live patch preview must not count the raw args as a visible
 			// change. RawArgs grows with every delta, and marking the block
 			// updated re-measures the card — measureSpanLines renders it in

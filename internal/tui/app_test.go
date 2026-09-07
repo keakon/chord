@@ -2399,6 +2399,90 @@ func TestToolCallUpdateEventArgsStreamingDoneMarksQueuedBeforeExecution(t *testi
 	}
 }
 
+// Chat-completions providers emit no per-call args-end event, so a card is
+// completed by inference when a later call starts streaming. Body text must be
+// re-derived from the accumulated arguments then: streaming deltas are
+// throttled, so the card can otherwise stay pinned to its first partial frame.
+func TestInferredArgsCompleteRebuildsContentFromAccumulatedArgs(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 12)
+
+	const first, full = `{"task":"invest`, `{"task":"investigate the delegate path"}`
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
+		ID:       "call-inferred-a",
+		Name:     "delegate",
+		AgentID:  "",
+		ArgsJSON: first,
+	}})
+	// This delta lands inside the render cadence and is throttled away, but it
+	// must still reach RawArgs.
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallUpdateEvent{
+		ID:       "call-inferred-a",
+		Name:     "delegate",
+		AgentID:  "",
+		ArgsJSON: full,
+	}})
+	// The next call's start is the only completion signal available.
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
+		ID:       "call-inferred-b",
+		Name:     "delegate",
+		AgentID:  "",
+		ArgsJSON: `{"task":"`,
+	}})
+
+	block, ok := m.viewport.FindBlockByToolID("call-inferred-a")
+	if !ok {
+		t.Fatal("expected first delegate tool block")
+	}
+	if block.ToolExecutionState != agent.ToolCallExecutionStateQueued {
+		t.Fatalf("ToolExecutionState = %q, want %q", block.ToolExecutionState, agent.ToolCallExecutionStateQueued)
+	}
+	if block.ToolQueuedByExecutionEvent {
+		t.Fatal("inferred completion must not earn the execution-queued badge")
+	}
+	if block.RawArgs != full {
+		t.Fatalf("RawArgs = %q, want %q — throttled deltas must still update RawArgs", block.RawArgs, full)
+	}
+	if !strings.Contains(block.Content, "investigate the delegate path") {
+		t.Fatalf("Content = %q, want the completed arguments rather than the throttled first frame", block.Content)
+	}
+	if block.ToolProgress != nil {
+		t.Fatalf("ToolProgress = %+v, want nil once arguments are complete", block.ToolProgress)
+	}
+}
+
+// The last call in a batch gets no successor, so nothing infers its completion.
+// On the normal path finalize dispatches an execution event soon after, but when
+// streaming ends without a finalized response the card would keep rendering a
+// live char counter forever.
+func TestStreamEndWithoutFinalizeSettlesReceivingToolCards(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 12)
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
+		ID:       "call-unsignalled",
+		Name:     "delegate",
+		AgentID:  "",
+		ArgsJSON: `{"task":"orphan`,
+	}})
+
+	block, ok := m.viewport.FindBlockByToolID("call-unsignalled")
+	if !ok {
+		t.Fatal("expected delegate tool block")
+	}
+	if !block.toolArgumentsAreReceiving() {
+		t.Fatalf("ToolExecutionState = %q, want receiving before the fallback runs", block.ToolExecutionState)
+	}
+
+	m.finalizeAssistantBlock()
+
+	if block.ToolExecutionState != agent.ToolCallExecutionStateQueued {
+		t.Fatalf("ToolExecutionState = %q, want %q after streaming ended", block.ToolExecutionState, agent.ToolCallExecutionStateQueued)
+	}
+	if block.ToolProgress != nil {
+		t.Fatalf("ToolProgress = %+v, want nil — a stale char counter must not survive", block.ToolProgress)
+	}
+}
+
 func TestFinalWriteUpdateCreatesFullPreviewWithoutStartEvent(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 12)
 	args := `{"path":"src/demo.go","content":"package main\n"}`
