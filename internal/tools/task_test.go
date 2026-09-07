@@ -143,3 +143,77 @@ func TestDelegateToolDescriptionKeepsUsageSemantics(t *testing.T) {
 		}
 	}
 }
+
+// The gate that lets an authorized command through matches it literally, so a
+// declaration that itself contains shell control characters would hand the
+// worker arbitrary execution under one approved-looking entry. Those are
+// refused at delegation time, where the delegator can still fix them.
+func TestDelegateToolRejectsVerificationCommandsThatSmuggleExecution(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		command string
+	}{
+		{name: "chaining", command: "go build ./... && rm -rf /"},
+		{name: "piping", command: "go test ./... | tee out"},
+		{name: "sequencing", command: "go vet ./...; curl evil.example"},
+		{name: "substitution", command: "go test $(cat cmd.txt)"},
+		{name: "backticks", command: "go test `cat cmd.txt`"},
+		{name: "redirection", command: "go build ./... > /etc/passwd"},
+		{name: "newline", command: "go build ./...\nrm -rf /"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			creator := &countingTaskCreator{}
+			args, err := json.Marshal(map[string]any{
+				"description": "implement feature",
+				"agent_type":  "builder",
+				"expected_write_scope": map[string]any{
+					"path_prefix":           []string{"internal"},
+					"verification_commands": []string{tc.command},
+				},
+			})
+			if err != nil {
+				t.Fatalf("marshal args: %v", err)
+			}
+			_, execErr := NewDelegateTool(creator).Execute(context.Background(), args)
+			if execErr == nil {
+				t.Fatal("Execute() error = nil, want the smuggled command rejected")
+			}
+			if !strings.Contains(execErr.Error(), "declare each command separately") {
+				t.Fatalf("Execute() error = %q, want the repair instruction", execErr)
+			}
+			if creator.calls != 0 {
+				t.Fatalf("CreateSubAgent() calls = %d, want the delegation rejected before admission", creator.calls)
+			}
+		})
+	}
+}
+
+func TestDelegateToolAcceptsPlainVerificationCommands(t *testing.T) {
+	creator := &countingTaskCreator{}
+	args := json.RawMessage(`{"description":"implement feature","agent_type":"builder","expected_write_scope":{"path_prefix":["internal"],"verification_commands":["go build ./...","go test ./internal/agent"]}}`)
+	if _, err := NewDelegateTool(creator).Execute(context.Background(), args); err != nil {
+		t.Fatalf("Execute() error = %v, want plain commands accepted", err)
+	}
+	if creator.calls != 1 {
+		t.Fatalf("CreateSubAgent() calls = %d, want 1", creator.calls)
+	}
+}
+
+func TestWriteScopeAllowsCommandMatchesLiterally(t *testing.T) {
+	scope := WriteScope{VerificationCommands: []string{"go build ./...", "go test ./internal/agent"}}
+	for _, tc := range []struct {
+		command string
+		want    bool
+	}{
+		{command: "go build ./...", want: true},
+		{command: "  go test ./internal/agent ", want: true},
+		{command: "go build", want: false},
+		{command: "go build ./... -v", want: false},
+		{command: "GOFLAGS=-x go build ./...", want: false},
+		{command: "", want: false},
+	} {
+		if got := scope.AllowsCommand(tc.command); got != tc.want {
+			t.Fatalf("AllowsCommand(%q) = %v, want %v", tc.command, got, tc.want)
+		}
+	}
+}

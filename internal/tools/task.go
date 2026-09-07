@@ -17,20 +17,71 @@ type AgentInfo struct {
 	DelegationPolicy string
 }
 
+// WriteScope declares what a delegated task is allowed to do: which paths it
+// may write, whether it may write at all, and which commands it may run.
+//
+// VerificationCommands is part of this declaration rather than a separate
+// argument because it answers the same question — the scoped shell gate exists
+// because arbitrary command side effects cannot be path-validated, and the way
+// past it is the delegator vouching for specific commands. Without it a scoped
+// worker cannot run anything, which silently disables build/lint/test
+// verification for every delegated task and moves that work to the owner.
 type WriteScope struct {
-	Files      []string `json:"files,omitempty"`
-	PathPrefix []string `json:"path_prefix,omitempty"`
-	Modules    []string `json:"modules,omitempty"`
-	ReadOnly   bool     `json:"read_only,omitempty"`
+	Files                []string `json:"files,omitempty"`
+	PathPrefix           []string `json:"path_prefix,omitempty"`
+	Modules              []string `json:"modules,omitempty"`
+	ReadOnly             bool     `json:"read_only,omitempty"`
+	VerificationCommands []string `json:"verification_commands,omitempty"`
 }
 
 func (s WriteScope) Normalized() WriteScope {
 	return WriteScope{
-		Files:      dedupeTrimmedStrings(s.Files),
-		PathPrefix: dedupeTrimmedStrings(s.PathPrefix),
-		Modules:    dedupeTrimmedStrings(s.Modules),
-		ReadOnly:   s.ReadOnly,
+		Files:                dedupeTrimmedStrings(s.Files),
+		PathPrefix:           dedupeTrimmedStrings(s.PathPrefix),
+		Modules:              dedupeTrimmedStrings(s.Modules),
+		ReadOnly:             s.ReadOnly,
+		VerificationCommands: dedupeTrimmedStrings(s.VerificationCommands),
 	}
+}
+
+// AllowsCommand reports whether cmd is one of the commands the delegator
+// authorized. The match is literal after trimming: no prefix matching, no extra
+// arguments, no substitution. A worker that needs a different command has to
+// ask its owner, which is the point — the owner is the one who can judge what
+// the command will do to the workspace.
+func (s WriteScope) AllowsCommand(cmd string) bool {
+	cmd = strings.TrimSpace(cmd)
+	if cmd == "" {
+		return false
+	}
+	for _, allowed := range s.VerificationCommands {
+		if strings.TrimSpace(allowed) == cmd {
+			return true
+		}
+	}
+	return false
+}
+
+// shellControlCharacters are the constructs that turn one authorized command
+// into an arbitrary one. A declaration containing any of them is rejected at
+// delegation time, so the literal match in AllowsCommand cannot be widened by
+// chaining, substitution, or redirection hidden inside the declaration itself.
+const shellControlCharacters = ";|&`$><\n\r"
+
+// ValidateVerificationCommands rejects declarations that would smuggle
+// arbitrary execution past the literal match.
+func ValidateVerificationCommands(commands []string) error {
+	for _, cmd := range commands {
+		trimmed := strings.TrimSpace(cmd)
+		if trimmed == "" {
+			return fmt.Errorf("verification_commands must not contain empty entries")
+		}
+		if i := strings.IndexAny(trimmed, shellControlCharacters); i >= 0 {
+			return fmt.Errorf("verification command %q contains %q: declare each command separately, without chaining, substitution, or redirection",
+				trimmed, string(trimmed[i]))
+		}
+	}
+	return nil
 }
 
 func (s WriteScope) Empty() bool {
@@ -204,12 +255,17 @@ func (t *DelegateTool) Parameters() map[string]any {
 			},
 			"expected_write_scope": map[string]any{
 				"type":        "object",
-				"description": "Required write-scope declaration used for concurrency guardrails. Set read_only=true for research-only tasks; otherwise declare at least one of files, path_prefix, or modules. An undeclared scope would have to run exclusively against every other writing task, so it is rejected instead: declare the narrowest scope that covers the task to keep independent delegates running in parallel.",
+				"description": "Required declaration of what this task may do, used for concurrency guardrails. Set read_only=true for research-only tasks; otherwise declare at least one of files, path_prefix, or modules. An undeclared scope would have to run exclusively against every other writing task, so it is rejected instead: declare the narrowest scope that covers the task to keep independent delegates running in parallel.",
 				"properties": map[string]any{
 					"files":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 					"path_prefix": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 					"modules":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 					"read_only":   map[string]any{"type": "boolean"},
+					"verification_commands": map[string]any{
+						"type":        "array",
+						"description": "Commands this task may run, matched literally. A scoped task cannot otherwise execute anything, so without this it can neither build nor test its own work and you have to verify it yourself. List the exact build/lint/test commands for this task (for example \"go build ./...\", \"go test ./internal/agent\"); one command per entry, no chaining, redirection, or substitution.",
+						"items":       map[string]any{"type": "string"},
+					},
 				},
 				"additionalProperties": false,
 			},
@@ -248,6 +304,9 @@ func (t *DelegateTool) Execute(ctx context.Context, raw json.RawMessage) (string
 	expectedWriteScope := a.ExpectedWriteScope.Normalized()
 	if expectedWriteScope.Empty() {
 		return "", errDelegateWriteScopeRequired
+	}
+	if err := ValidateVerificationCommands(expectedWriteScope.VerificationCommands); err != nil {
+		return "", err
 	}
 
 	if t.creator == nil {

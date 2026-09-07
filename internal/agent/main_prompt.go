@@ -431,7 +431,7 @@ func (a *MainAgent) mainAgentRolePromptBlock() string {
 func (a *MainAgent) mainAgentCapabilityPromptBlock() string {
 	visibleTools := a.mainVisibleLLMTools()
 	visible := toolNamesFromVisibleTools(visibleTools)
-	return buildDynamicCapabilityPromptBlock(visible, a.effectiveRuleset(), capabilityPromptAudienceMain)
+	return buildDynamicCapabilityPromptBlock(visible, a.effectiveRuleset(), capabilityPromptAudienceMain, tools.WriteScope{})
 }
 
 // modelDrivenContextPromptBlock renders passive long-session guidance for the

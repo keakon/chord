@@ -17,12 +17,12 @@ const (
 	capabilityPromptAudienceSub
 )
 
-func buildDynamicCapabilityPromptBlock(visible map[string]struct{}, ruleset permission.Ruleset, audience capabilityPromptAudience) string {
+func buildDynamicCapabilityPromptBlock(visible map[string]struct{}, ruleset permission.Ruleset, audience capabilityPromptAudience, scope tools.WriteScope) string {
 	blocks := make([]string, 0, 5)
 	if block := toolSelectionPromptBlock(visible); block != "" {
 		blocks = append(blocks, block)
 	}
-	if block := shellExecutionBoundaryPromptBlock(visible, audience); block != "" {
+	if block := shellExecutionBoundaryPromptBlock(visible, audience, scope); block != "" {
 		blocks = append(blocks, block)
 	}
 	if block := fileInspectionConstraintsPromptBlock(visible, ruleset, audience); block != "" {
@@ -37,22 +37,40 @@ func buildDynamicCapabilityPromptBlock(visible map[string]struct{}, ruleset perm
 	return strings.Join(blocks, "\n\n")
 }
 
-// shellExecutionBoundaryPromptBlock renders an explicit boundary when a
-// SubAgent cannot execute shell commands: a scoped or read-only delegated task
-// never registers Shell, and a role ruleset may deny it outright. Without the
-// block, the shared Guidelines' incremental-verification advice ("first
-// compile, then run the changed package's tests") would push the worker toward
-// builds and tests it can never run, after which it could only fabricate a
-// verification_run declaration (which completion validation would reject) or
-// get stuck. The block tells the worker that command execution and
-// execution-based verification belong to the owner agent, and to report
-// verification honestly as not run.
-func shellExecutionBoundaryPromptBlock(visible map[string]struct{}, audience capabilityPromptAudience) string {
-	if audience != capabilityPromptAudienceSub || hasVisibleTool(visible, tools.NameShell) {
+// shellExecutionBoundaryPromptBlock renders the command-execution boundary a
+// delegated task actually has. Without it, the shared Guidelines' incremental
+// verification advice ("first compile, then run the changed package's tests")
+// pushes the worker toward runs it cannot perform, after which it can only
+// fabricate a verification_run declaration (which completion validation
+// rejects) or get stuck.
+//
+// A scoped task has two shapes of boundary. With authorized commands it may run
+// exactly those, matched literally, so the block lists them — a worker that
+// does not know the list would fall back to whatever command it would normally
+// reach for and be refused. Without them it cannot run anything, and
+// execution-based verification belongs to the owner agent.
+func shellExecutionBoundaryPromptBlock(visible map[string]struct{}, audience capabilityPromptAudience, scope tools.WriteScope) string {
+	if audience != capabilityPromptAudienceSub {
 		return ""
 	}
+	shell := toolPromptName(tools.NameShell)
+	if hasVisibleTool(visible, tools.NameShell) {
+		scope = scope.Normalized()
+		if scope.Empty() || len(scope.VerificationCommands) == 0 {
+			return ""
+		}
+		var sb strings.Builder
+		sb.WriteString("## Command Execution Boundary\n")
+		sb.WriteString("- This task may run only the commands its owner agent authorized, through " + shell + ", matched exactly as written:\n")
+		for _, cmd := range scope.VerificationCommands {
+			sb.WriteString("  - `" + cmd + "`\n")
+		}
+		sb.WriteString("- Any other command is refused, including a variation of one above with extra arguments, chaining, or redirection. Use these for verification and declare in `verification_run` the ones you actually ran.\n")
+		sb.WriteString("- If verifying this task genuinely needs a command that is not listed, ask the owner agent rather than working around the boundary.")
+		return sb.String()
+	}
 	return "## Command Execution Boundary\n" +
-		"- The " + toolPromptName(tools.NameShell) + " tool is not available in this task: you cannot run commands, builds, or tests.\n" +
+		"- The " + shell + " tool is not available in this task: you cannot run commands, builds, or tests.\n" +
 		"- Treat missing command execution as a real boundary. Do not claim a command ran, and do not declare `verification_run` commands you could not execute.\n" +
 		"- Execution-based verification is the owner agent's responsibility. Report verification honestly as not run (for example in `remaining_limitations`) instead of fabricating results."
 }
