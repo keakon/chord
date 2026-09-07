@@ -155,6 +155,49 @@ func TestCompleteSchemaAndParserAcceptTypedResult(t *testing.T) {
 	}
 }
 
+// TestCompleteAcceptsResultRefFromSaveArtifactResultMode pins the merged
+// result-mode-in-save_artifact contract end to end: the ResultRef returned by
+// SaveArtifactTool's result mode must pass Complete's result_ref validation
+// unchanged when the agent hands it back.
+func TestCompleteAcceptsResultRefFromSaveArtifactResultMode(t *testing.T) {
+	parent, sub := newMixedBatchTestSubAgent(t)
+	ctx := tools.WithSessionDir(context.Background(), sub.sessionDir)
+	out, err := (tools.SaveArtifactTool{}).Execute(ctx, mustMarshalJSON(t, map[string]any{
+		"result_type": "type/test", "result": map[string]any{"value": 1},
+	}))
+	if err != nil {
+		t.Fatalf("SaveArtifact result mode: %v", err)
+	}
+	var ref tools.ResultRef
+	if err := json.Unmarshal([]byte(out), &ref); err != nil {
+		t.Fatalf("unmarshal ResultRef: %v", err)
+	}
+	sub.handleLLMResponse(&llmResult{
+		turnID: 1,
+		resp: &message.Response{ToolCalls: convertCalls([]messageToolCall{
+			mustJSONToolCall(t, "call-1", "complete", map[string]any{
+				"summary": "done", "result_type": "type/test",
+				"result_ref": map[string]any{
+					"id": ref.ID, "result_type": ref.ResultType, "rel_path": ref.RelPath,
+					"sha256": ref.SHA256, "size_bytes": ref.SizeBytes,
+				},
+			}),
+		})},
+	})
+	select {
+	case evt := <-parent.eventCh:
+		if evt.Type != EventAgentDone {
+			t.Fatalf("event = %#v", evt)
+		}
+		result := evt.Payload.(*AgentResult)
+		if result.Envelope == nil || result.Envelope.ResultRef == nil || result.Envelope.ResultRef.ID != ref.ID {
+			t.Fatalf("envelope = %#v, want result_ref %s", result.Envelope, ref.ID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for typed Complete with save_artifact result_ref")
+	}
+}
+
 func TestSubAgentCompletionMergesObservedFileState(t *testing.T) {
 	_, sub := newMixedBatchTestSubAgent(t)
 	changedPath := filepath.Join(sub.workDir, "internal", "observed.go")

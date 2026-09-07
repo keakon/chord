@@ -2,6 +2,7 @@ package tools
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -115,22 +116,143 @@ func ArtifactSHA256(path string) (string, error) {
 	return fileSHA256(path)
 }
 
+const (
+	maxImmutableResultBytes = 10 * 1024 * 1024
+	MaxInlineResultBytes    = 32 * 1024
+)
+
+func canonicalResultObject(resultType string, raw json.RawMessage, maxBytes int) (string, []byte, error) {
+	resultType = strings.TrimSpace(resultType)
+	if resultType == "" {
+		return "", nil, fmt.Errorf("result_type is required")
+	}
+	if len(resultType) > 256 {
+		return "", nil, fmt.Errorf("result_type exceeds maximum size 256 bytes")
+	}
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return "", nil, fmt.Errorf("result must be a JSON object")
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(trimmed, &object); err != nil || object == nil {
+		return "", nil, fmt.Errorf("result must be a JSON object")
+	}
+	canonical, err := json.Marshal(object)
+	if err != nil {
+		return "", nil, fmt.Errorf("canonicalize result: %w", err)
+	}
+	canonical = append(canonical, '\n')
+	if maxBytes > 0 && len(canonical) > maxBytes {
+		return "", nil, fmt.Errorf("result exceeds maximum size %d bytes", maxBytes)
+	}
+	return resultType, canonical, nil
+}
+
+func resultRefID(resultType, digest string) string {
+	typeSum := sha256.Sum256([]byte(resultType + "\x00" + digest))
+	return "sha256-" + hex.EncodeToString(typeSum[:])
+}
+
+func SaveImmutableResult(sessionDir, resultType string, raw json.RawMessage) (ResultRef, json.RawMessage, error) {
+	resultType, canonical, err := canonicalResultObject(resultType, raw, maxImmutableResultBytes)
+	if err != nil {
+		return ResultRef{}, nil, err
+	}
+	sessionDir = strings.TrimSpace(sessionDir)
+	if sessionDir == "" {
+		return ResultRef{}, nil, fmt.Errorf("session directory is unavailable")
+	}
+	sum := sha256.Sum256(canonical)
+	digest := hex.EncodeToString(sum[:])
+	id := resultRefID(resultType, digest)
+	relPath := filepath.ToSlash(filepath.Join("artifacts", "results", id+".json"))
+	abs := filepath.Join(sessionDir, filepath.FromSlash(relPath))
+	f, err := privatefs.OpenFile(sessionDir, abs, os.O_WRONLY|os.O_CREATE|os.O_EXCL)
+	if err != nil {
+		if !os.IsExist(err) {
+			return ResultRef{}, nil, err
+		}
+		existingDigest, hashErr := fileSHA256(abs)
+		if hashErr != nil || existingDigest != digest {
+			return ResultRef{}, nil, fmt.Errorf("immutable result path collision for %s", id)
+		}
+	} else {
+		written, err := f.Write(canonical)
+		if err == nil && written != len(canonical) {
+			err = io.ErrShortWrite
+		}
+		if err != nil {
+			_ = f.Close()
+			_ = os.Remove(abs)
+			return ResultRef{}, nil, err
+		}
+		if err := f.Sync(); err != nil {
+			_ = f.Close()
+			_ = os.Remove(abs)
+			return ResultRef{}, nil, err
+		}
+		if err := f.Close(); err != nil {
+			_ = os.Remove(abs)
+			return ResultRef{}, nil, err
+		}
+	}
+	ref := ResultRef{ID: id, ResultType: resultType, RelPath: relPath, SHA256: digest, SizeBytes: int64(len(canonical))}
+	inline := append(json.RawMessage(nil), canonical[:len(canonical)-1]...)
+	return ref, inline, nil
+}
+
+func ValidateResultRef(sessionDir string, ref ResultRef, expectedType string) (ResultRef, error) {
+	ref.ID = strings.TrimSpace(ref.ID)
+	ref.ResultType = strings.TrimSpace(ref.ResultType)
+	ref.RelPath = filepath.ToSlash(strings.TrimSpace(ref.RelPath))
+	ref.SHA256 = strings.ToLower(strings.TrimSpace(ref.SHA256))
+	if ref.ID == "" || ref.ResultType == "" || ref.RelPath == "" || ref.SHA256 == "" || ref.SizeBytes <= 0 {
+		return ResultRef{}, fmt.Errorf("result_ref requires id, result_type, rel_path, sha256, and positive size_bytes")
+	}
+	if expectedType = strings.TrimSpace(expectedType); expectedType != "" && ref.ResultType != expectedType {
+		return ResultRef{}, fmt.Errorf("result_ref result_type %q does not match %q", ref.ResultType, expectedType)
+	}
+	if len(ref.SHA256) != sha256.Size*2 {
+		return ResultRef{}, fmt.Errorf("result_ref sha256 must be a 64-character digest")
+	}
+	if _, err := hex.DecodeString(ref.SHA256); err != nil {
+		return ResultRef{}, fmt.Errorf("result_ref sha256 must be hexadecimal")
+	}
+	if ref.ID != resultRefID(ref.ResultType, ref.SHA256) {
+		return ResultRef{}, fmt.Errorf("result_ref id does not match result_type and sha256")
+	}
+	expectedRelPath := filepath.ToSlash(filepath.Join("artifacts", "results", ref.ID+".json"))
+	if ref.RelPath != expectedRelPath {
+		return ResultRef{}, fmt.Errorf("result_ref rel_path does not match id")
+	}
+	validated, err := ValidateArtifactRefs(sessionDir, []ArtifactRef{{RelPath: ref.RelPath, SHA256: ref.SHA256, SizeBytes: ref.SizeBytes}})
+	if err != nil {
+		return ResultRef{}, err
+	}
+	if len(validated) != 1 {
+		return ResultRef{}, fmt.Errorf("result_ref validation failed")
+	}
+	return ref, nil
+}
+
 // SaveArtifactTool writes a runtime artifact under the active session artifacts dir.
 type SaveArtifactTool struct{}
 
 type saveArtifactArgs struct {
-	Filename    string `json:"filename"`
-	Type        string `json:"type,omitempty"`
-	Description string `json:"description,omitempty"`
-	Content     string `json:"content"`
-	MimeType    string `json:"mime_type,omitempty"`
-	Mode        string `json:"mode,omitempty"`
+	Filename    string          `json:"filename"`
+	Type        string          `json:"type,omitempty"`
+	Description string          `json:"description,omitempty"`
+	Content     string          `json:"content"`
+	MimeType    string          `json:"mime_type,omitempty"`
+	Mode        string          `json:"mode,omitempty"`
+	ResultType  string          `json:"result_type,omitempty"`
+	Result      json.RawMessage `json:"result,omitempty"`
 }
 
 func (SaveArtifactTool) Name() string { return NameSaveArtifact }
 
 func (SaveArtifactTool) Description() string {
-	return "Save or update a runtime artifact for optional downstream worker handoff, such as a research report, task graph, review report, or verification log. This writes only under the current session's artifacts directory and does not modify project files. Multiple artifacts are allowed. Use mode=create for a new artifact, mode=append to add to an existing artifact, and mode=overwrite to replace an existing artifact intentionally."
+	return "Save or update a runtime artifact for optional downstream worker handoff, such as a research report, task graph, review report, or verification log. This writes only under the current session's artifacts directory and does not modify project files. Multiple artifacts are allowed. Use mode=create for a new artifact, mode=append to add to an existing artifact, and mode=overwrite to replace an existing artifact intentionally. Alternatively, provide result_type with a JSON-object result (instead of filename, content, and mode) to store it as an immutable content-addressed result under artifacts/results/; the returned ResultRef can be passed directly as complete's result_ref."
 }
 
 func (SaveArtifactTool) Parameters() map[string]any {
@@ -162,8 +284,19 @@ func (SaveArtifactTool) Parameters() map[string]any {
 				"description": "Write mode: create (default, fail if file exists), append (append content), or overwrite (replace existing content).",
 				"enum":        []string{"create", "append", "overwrite"},
 			},
+			"result_type": map[string]any{
+				"type":        "string",
+				"description": "Application-defined result media type. Must be given together with result and without filename, content, or mode.",
+			},
+			"result": map[string]any{
+				"type":        "object",
+				"description": "JSON object to persist without runtime interpretation. Must be given together with result_type and without filename, content, or mode.",
+			},
 		},
-		"required":             []string{"filename", "content"},
+		"anyOf": []map[string]any{
+			{"required": []string{"filename", "content"}},
+			{"required": []string{"result_type", "result"}},
+		},
 		"additionalProperties": false,
 	}
 }
@@ -180,6 +313,32 @@ func (SaveArtifactTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 		return "", fmt.Errorf("session directory is unavailable")
 	}
 	content := strings.TrimSpace(args.Content)
+	rawResult := bytes.TrimSpace(args.Result)
+	// A present-but-invalid result (including explicit JSON null) counts as
+	// provided: it falls through to canonicalResultObject's object check so
+	// the caller sees "result must be a JSON object" instead of a misleading
+	// "result is required".
+	resultProvided := len(rawResult) > 0
+	if args.ResultType != "" || resultProvided {
+		if strings.TrimSpace(args.Filename) != "" || content != "" || strings.TrimSpace(args.Mode) != "" {
+			return "", fmt.Errorf("result_type/result cannot be combined with filename, content, or mode")
+		}
+		if strings.TrimSpace(args.ResultType) == "" {
+			return "", fmt.Errorf("result_type is required when result is provided")
+		}
+		if !resultProvided {
+			return "", fmt.Errorf("result is required when result_type is provided")
+		}
+		ref, _, err := SaveImmutableResult(sessionDir, args.ResultType, args.Result)
+		if err != nil {
+			return "", err
+		}
+		out, err := json.Marshal(ref)
+		if err != nil {
+			return "", err
+		}
+		return string(out), nil
+	}
 	if content == "" {
 		return "", fmt.Errorf("content is required")
 	}

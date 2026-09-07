@@ -28,7 +28,7 @@ func validateCompleteTypedResult(sessionDir, resultType string, result json.RawM
 	}
 	if len(result) > 0 {
 		if len(result) > tools.MaxInlineResultBytes {
-			return "", nil, nil, fmt.Errorf("inline result exceeds maximum size %d bytes; use save_result and provide result_ref", tools.MaxInlineResultBytes)
+			return "", nil, nil, fmt.Errorf("inline result exceeds maximum size %d bytes; use save_artifact with result and result_type, then pass result_ref", tools.MaxInlineResultBytes)
 		}
 		created, canonical, err := tools.SaveImmutableResult(sessionDir, resultType, result)
 		if err != nil {

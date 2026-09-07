@@ -30,7 +30,6 @@ const (
 	NameComplete       = toolname.Complete
 	NameSaveArtifact   = toolname.SaveArtifact
 	NameReadArtifact   = toolname.ReadArtifact
-	NameSaveResult     = toolname.SaveResult
 	NameViewImage      = toolname.ViewImage
 	NameCompactContext = toolname.CompactContext
 )

@@ -171,3 +171,118 @@ func TestValidateArtifactRefsChecksSnapshotMetadata(t *testing.T) {
 		t.Fatalf("error = %v", err)
 	}
 }
+
+func TestSaveArtifactResultModeStoresImmutableResultRef(t *testing.T) {
+	dir := t.TempDir()
+	ctx := WithSessionDir(context.Background(), dir)
+	args := mustMarshal(t, map[string]any{"result_type": "application/vnd.test+json", "result": map[string]any{"b": 2, "a": 1}})
+	firstOut, err := (SaveArtifactTool{}).Execute(ctx, args)
+	if err != nil {
+		t.Fatalf("Execute first: %v", err)
+	}
+	var ref ResultRef
+	if err := json.Unmarshal([]byte(firstOut), &ref); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(ref.ID, "sha256-") || ref.SHA256 == "" || ref.ResultType != "application/vnd.test+json" || !strings.HasPrefix(ref.RelPath, "artifacts/results/") || ref.SizeBytes == 0 {
+		t.Fatalf("ref = %#v", ref)
+	}
+	if ref.ID != resultRefID(ref.ResultType, ref.SHA256) {
+		t.Fatalf("ref id %q does not match result_type and sha256", ref.ID)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(ref.RelPath)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "{\"a\":1,\"b\":2}\n" {
+		t.Fatalf("canonical result = %q", data)
+	}
+	// Same result_type and content reuse the same immutable object.
+	secondOut, err := (SaveArtifactTool{}).Execute(ctx, args)
+	if err != nil {
+		t.Fatalf("Execute second: %v", err)
+	}
+	if secondOut != firstOut {
+		t.Fatalf("idempotent refs differ: %s != %s", firstOut, secondOut)
+	}
+}
+
+func TestSaveArtifactResultModeRejectsNonObjectResult(t *testing.T) {
+	ctx := WithSessionDir(context.Background(), t.TempDir())
+	for _, raw := range []string{
+		`{"result_type":"test","result":[1,2]}`,
+		`{"result_type":"test","result":"text"}`,
+		`{"result_type":"test","result":null}`,
+	} {
+		if _, err := (SaveArtifactTool{}).Execute(ctx, json.RawMessage(raw)); err == nil || !strings.Contains(err.Error(), "must be a JSON object") {
+			t.Fatalf("input %s error = %v", raw, err)
+		}
+	}
+}
+
+func TestSaveArtifactResultModeIdentityIncludesResultType(t *testing.T) {
+	dir := t.TempDir()
+	ctx := WithSessionDir(context.Background(), dir)
+	first, err := (SaveArtifactTool{}).Execute(ctx, json.RawMessage(`{"result_type":"type/a","result":{"value":1}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := (SaveArtifactTool{}).Execute(ctx, json.RawMessage(`{"result_type":"type/b","result":{"value":1}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second {
+		t.Fatalf("different result types produced same ref: %s", first)
+	}
+}
+
+func TestSaveArtifactResultModeRequiresResultTypeAndResultPair(t *testing.T) {
+	ctx := WithSessionDir(context.Background(), t.TempDir())
+	if _, err := (SaveArtifactTool{}).Execute(ctx, json.RawMessage(`{"result_type":"type/test"}`)); err == nil || !strings.Contains(err.Error(), "result is required when result_type is provided") {
+		t.Fatalf("missing result error = %v", err)
+	}
+	if _, err := (SaveArtifactTool{}).Execute(ctx, json.RawMessage(`{"result":{"value":1}}`)); err == nil || !strings.Contains(err.Error(), "result_type is required when result is provided") {
+		t.Fatalf("missing result_type error = %v", err)
+	}
+}
+
+func TestSaveArtifactResultModeRejectsFileGroupMix(t *testing.T) {
+	ctx := WithSessionDir(context.Background(), t.TempDir())
+	for _, raw := range []string{
+		`{"result_type":"type/test","result":{"value":1},"filename":"report.md","content":"body"}`,
+		`{"result_type":"type/test","result":{"value":1},"filename":"report.md","content":"body","mode":"create"}`,
+		`{"result_type":"type/test","result":{"value":1},"mode":"overwrite"}`,
+	} {
+		if _, err := (SaveArtifactTool{}).Execute(ctx, json.RawMessage(raw)); err == nil || !strings.Contains(err.Error(), "cannot be combined with filename, content, or mode") {
+			t.Fatalf("input %s error = %v", raw, err)
+		}
+	}
+}
+
+func TestValidateResultRefRejectsTamperedIdentity(t *testing.T) {
+	dir := t.TempDir()
+	ref, _, err := SaveImmutableResult(dir, "type/test", json.RawMessage(`{"value":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref.ID = "sha256-" + strings.Repeat("0", 64)
+	if _, err := ValidateResultRef(dir, ref, "type/test"); err == nil || !strings.Contains(err.Error(), "id does not match") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestValidateResultRefRejectsNonCanonicalArtifactPath(t *testing.T) {
+	dir := t.TempDir()
+	ref, canonical, err := SaveImmutableResult(dir, "type/test", json.RawMessage(`{"value":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutablePath := filepath.Join(dir, "artifacts", "mutable.json")
+	if err := os.WriteFile(mutablePath, append(canonical, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ref.RelPath = "artifacts/results/../mutable.json"
+	if _, err := ValidateResultRef(dir, ref, "type/test"); err == nil || !strings.Contains(err.Error(), "rel_path does not match id") {
+		t.Fatalf("error = %v", err)
+	}
+}

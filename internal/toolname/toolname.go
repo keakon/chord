@@ -28,7 +28,6 @@ const (
 	Complete       = "complete"
 	SaveArtifact   = "save_artifact"
 	ReadArtifact   = "read_artifact"
-	SaveResult     = "save_result"
 	ViewImage      = "view_image"
 	CompactContext = "compact_context"
 )

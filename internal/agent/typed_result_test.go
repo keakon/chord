@@ -45,7 +45,7 @@ func TestValidateCompleteTypedResultRejectsInvalidShapesAndSize(t *testing.T) {
 		}
 	}
 	large := json.RawMessage(`{"value":"` + strings.Repeat("x", tools.MaxInlineResultBytes) + `"}`)
-	if _, _, _, err := validateCompleteTypedResult(dir, "type/test", large, nil); err == nil || !strings.Contains(err.Error(), "use save_result") {
+	if _, _, _, err := validateCompleteTypedResult(dir, "type/test", large, nil); err == nil || !strings.Contains(err.Error(), "use save_artifact") {
 		t.Fatalf("large result error = %v", err)
 	}
 }

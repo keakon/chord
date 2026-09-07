@@ -30,7 +30,7 @@ func (CompleteTool) Name() string { return NameComplete }
 
 func (CompleteTool) Description() string {
 	return "Mark the current delegated task as complete. Call this only after all non-blocked work is finished. " +
-		"Provide a concise summary plus structured completion details when available. For generic machine-readable output, set result_type and provide either a small JSON-object result or an immutable result_ref from save_result — result_type, result, and result_ref are interdependent: result and result_ref are only accepted together with result_type, so provide all of them or none. " +
+		"Provide a concise summary plus structured completion details when available. For generic machine-readable output, set result_type and provide either a small JSON-object result or an immutable result_ref from save_artifact's result mode — result_type, result, and result_ref are interdependent: result and result_ref are only accepted together with result_type, so provide all of them or none. " +
 		"If a true blocker prevents completion, use escalate/notify/blocked flow instead of complete. This is the ONLY way to signal completion — do NOT simply stop responding."
 }
 
@@ -87,7 +87,7 @@ func (CompleteTool) Parameters() map[string]any {
 			"result_type": map[string]any{"type": "string", "description": "Application-defined type for a generic machine-readable result. Required whenever result or result_ref is supplied: provide result_type together with exactly one of result or result_ref."},
 			"result":      map[string]any{"type": "object", "description": "Small JSON-object result. Only accepted when result_type is also provided (they must be supplied together). Runtime persists an immutable ResultRef automatically."},
 			"result_ref": map[string]any{
-				"type": "object", "description": "Immutable ResultRef returned by save_result. Only accepted when result_type is also provided (they must be supplied together).",
+				"type": "object", "description": "Immutable ResultRef returned by save_artifact when saving with the result parameter group. Only accepted when result_type is also provided (they must be supplied together).",
 				"properties": map[string]any{
 					"id": map[string]any{"type": "string"}, "result_type": map[string]any{"type": "string"},
 					"rel_path": map[string]any{"type": "string"}, "sha256": map[string]any{"type": "string"}, "size_bytes": map[string]any{"type": "integer"},
