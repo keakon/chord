@@ -126,7 +126,7 @@ func (a *MainAgent) delegationCallerFromContext(ctx context.Context) (delegation
 		Depth:      depth,
 		Delegation: sub.delegation,
 		Ruleset:    sub.currentRuleset(),
-		WriteScope: sub.writeScope.Normalized(),
+		WriteScope: sub.currentWriteScope(),
 		WorkDir:    sub.workDir,
 		IsMain:     false,
 	}, nil

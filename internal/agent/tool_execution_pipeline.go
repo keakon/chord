@@ -45,7 +45,7 @@ type toolExecutionPipeline struct {
 	logPrefix        string
 	projectRoot      string
 	toolBaseDir      string
-	writeScope       *tools.WriteScope
+	writeScope       tools.WriteScope
 	writeScopeDir    string
 	applyPatchRetry  *applyPatchRetryGuard
 
@@ -81,9 +81,6 @@ func shellCommandArgument(tc message.ToolCall) (string, error) {
 }
 
 func (p toolExecutionPipeline) validateWriteScope(tc message.ToolCall) error {
-	if p.writeScope == nil {
-		return nil
-	}
 	scope := p.writeScope.Normalized()
 	if scope.Empty() {
 		return nil

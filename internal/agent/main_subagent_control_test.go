@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -4064,5 +4065,71 @@ func TestFocusedTokenUsageCoversEveryAttemptWhileLive(t *testing.T) {
 	}
 	if parked := a.GetTokenUsage(); parked != live {
 		t.Fatalf("parked focused usage = %#v, want the live reading %#v unchanged by parking", parked, live)
+	}
+}
+
+// Discovering a missing path used to cost the whole worker: a running task's
+// scope is fixed at delegation time, so the owner had to cancel and re-delegate
+// with a corrected scope, throwing away everything the worker had done.
+func TestNotifyWithScopeGrantWidensALiveWorkersScope(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	root := t.TempDir()
+	a.projectRoot = root
+	a.SetAgentConfigs(map[string]*config.AgentConfig{
+		"worker": {Name: "worker", Mode: config.AgentModeSubAgent, Models: map[string][]string{"default": {"test/test-model"}}},
+	})
+	a.SetLLMFactory(func(string, []string, string) *llm.Client { return newTestLLMClient() })
+	sub := newControllableTestSubAgent(t, a, "adhoc-scope-grant")
+	sub.agentDefName = "worker"
+	sub.workDir = root
+	sub.writeScope = tools.WriteScope{PathPrefix: []string{"internal/agent"}}
+	sub.tools.Register(tools.WriteTool{BaseDir: root})
+	sub.setState(SubAgentStateIdle, "idle")
+	a.syncTaskRecordFromSub(sub, "")
+
+	blocked, _ := json.Marshal(map[string]string{"path": "internal/tools/task.go", "content": "x"})
+	if _, err := sub.executeToolCall(context.Background(), message.ToolCall{ID: "before", Name: tools.NameWrite, Args: blocked}); err == nil || !strings.Contains(err.Error(), "outside") {
+		t.Fatalf("pre-grant write error = %v, want a scope rejection", err)
+	}
+
+	if _, err := a.NotifySubAgentWithScopeGrant(context.Background(), "adhoc-scope-grant", "you also need internal/tools", "constraint_update",
+		tools.WriteScope{PathPrefix: []string{"internal/tools"}}); err != nil {
+		t.Fatalf("NotifySubAgentWithScopeGrant: %v", err)
+	}
+
+	if _, err := sub.executeToolCall(context.Background(), message.ToolCall{ID: "after", Name: tools.NameWrite, Args: blocked}); err != nil {
+		t.Fatalf("post-grant write error = %v, want the granted path allowed", err)
+	}
+	// The original path stays writable: a grant adds, it does not replace.
+	original, _ := json.Marshal(map[string]string{"path": "internal/agent/sub.go", "content": "y"})
+	if _, err := sub.executeToolCall(context.Background(), message.ToolCall{ID: "original", Name: tools.NameWrite, Args: original}); err != nil {
+		t.Fatalf("originally-scoped write error = %v, want it still allowed", err)
+	}
+	record := a.taskRecordByTaskID("adhoc-scope-grant")
+	if len(record.ExpectedWriteScope.PathPrefix) != 2 {
+		t.Fatalf("record scope = %#v, want both path prefixes so a rehydrate keeps the grant", record.ExpectedWriteScope)
+	}
+}
+
+func TestNotifyScopeGrantRejectsNoOpAndReadOnlyTargets(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.setTaskRecords(map[string]*DurableTaskRecord{
+		"adhoc-writer": {
+			TaskID: "adhoc-writer", AgentDefName: "worker", State: string(SubAgentStateIdle),
+			ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{"internal/agent"}},
+		},
+		"adhoc-reader": {
+			TaskID: "adhoc-reader", AgentDefName: "worker", State: string(SubAgentStateIdle),
+			ExpectedWriteScope: tools.WriteScope{ReadOnly: true},
+		},
+	})
+
+	_, err := a.NotifySubAgentWithScopeGrant(context.Background(), "adhoc-writer", "msg", "", tools.WriteScope{PathPrefix: []string{"internal/agent"}})
+	if err == nil || !strings.Contains(err.Error(), "already covers every path") {
+		t.Fatalf("no-op grant error = %v, want the caller told it changes nothing", err)
+	}
+	_, err = a.NotifySubAgentWithScopeGrant(context.Background(), "adhoc-reader", "msg", "", tools.WriteScope{PathPrefix: []string{"internal/agent"}})
+	if err == nil || !strings.Contains(err.Error(), "read-only") {
+		t.Fatalf("read-only grant error = %v, want it refused with a re-delegation hint", err)
 	}
 }

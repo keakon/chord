@@ -78,7 +78,7 @@ func (a *MainAgent) persistSubAgentMetaToSession(sub *SubAgent, sessionDir strin
 		TaskDesc:              sub.taskDesc,
 		PlanTaskRef:           sub.planTaskRef,
 		SemanticTaskKey:       sub.semanticTaskKey,
-		ExpectedWriteScope:    sub.writeScope.Normalized(),
+		ExpectedWriteScope:    sub.currentWriteScope(),
 		SelectedModelRef:      subSelectedModelRef(sub),
 		RunningModelRef:       subRunningModelRef(sub),
 		OwnerAgentID:          ownerAgentID,

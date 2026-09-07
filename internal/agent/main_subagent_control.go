@@ -858,6 +858,16 @@ func appendCascadeFailures(message string, failures []string) string {
 }
 
 func (a *MainAgent) NotifySubAgent(ctx context.Context, taskID, message, kind string) (tools.TaskHandle, error) {
+	return a.NotifySubAgentWithScopeGrant(ctx, taskID, message, kind, tools.WriteScope{})
+}
+
+// NotifySubAgentWithScopeGrant delivers a targeted message and, when grant is
+// non-empty, widens the target task's write scope first. The grant is applied
+// on the event loop alongside the delivery so the worker never observes the
+// message before the paths it needs: an owner that discovers a missing path
+// mid-task can hand it over instead of cancelling a worker that has already
+// done most of the work.
+func (a *MainAgent) NotifySubAgentWithScopeGrant(ctx context.Context, taskID, message, kind string, grant tools.WriteScope) (tools.TaskHandle, error) {
 	if ctx == nil {
 		ctx = a.parentCtx
 		if ctx == nil {
@@ -870,19 +880,23 @@ func (a *MainAgent) NotifySubAgent(ctx context.Context, taskID, message, kind st
 		callerAgentID = ""
 	}
 	if !a.started.Load() {
+		if err := a.grantSubAgentWriteScope(callerAgentID, callerTaskID, taskID, grant); err != nil {
+			return tools.TaskHandle{}, err
+		}
 		return a.sendMessageToSubAgentNow(callerAgentID, callerTaskID, taskID, message, kind)
 	}
 	reply := make(chan subAgentControlResult, 1)
 	a.sendEvent(Event{
 		Type: EventSubAgentSendMessage,
 		Payload: &SubAgentSendMessagePayload{
-			Ctx:           ctx,
-			CallerAgentID: callerAgentID,
-			CallerTaskID:  callerTaskID,
-			TaskID:        taskID,
-			Message:       message,
-			Kind:          kind,
-			Reply:         reply,
+			Ctx:             ctx,
+			CallerAgentID:   callerAgentID,
+			CallerTaskID:    callerTaskID,
+			TaskID:          taskID,
+			Message:         message,
+			Kind:            kind,
+			GrantWriteScope: grant,
+			Reply:           reply,
 		},
 	})
 	select {
@@ -941,8 +955,59 @@ func (a *MainAgent) handleSubAgentSendMessageEvent(evt Event) {
 		respondSubAgentControl(payload.Reply, tools.TaskHandle{}, payload.Ctx.Err())
 		return
 	}
+	if err := a.grantSubAgentWriteScope(payload.CallerAgentID, payload.CallerTaskID, payload.TaskID, payload.GrantWriteScope); err != nil {
+		respondSubAgentControl(payload.Reply, tools.TaskHandle{}, err)
+		return
+	}
 	handle, err := a.sendMessageToSubAgentNow(payload.CallerAgentID, payload.CallerTaskID, payload.TaskID, payload.Message, payload.Kind)
 	respondSubAgentControl(payload.Reply, handle, err)
+}
+
+// grantSubAgentWriteScope widens a task's write scope in place. Discovering a
+// missing path mid-task otherwise forces the owner to cancel the worker and
+// re-delegate the whole thing with a corrected scope, because a running task's
+// scope is fixed at delegation time and no amount of instruction can widen it.
+//
+// The grant only ever adds paths. Narrowing would retroactively invalidate
+// writes the worker was allowed to make, and the read-only flag and command
+// allowlist stay fixed because the task's tool surface was already built from
+// them. Nesting keeps its invariant: a child can never be granted more than its
+// parent holds.
+func (a *MainAgent) grantSubAgentWriteScope(callerAgentID, callerTaskID, taskID string, grant tools.WriteScope) error {
+	grant = grant.Normalized()
+	if len(grant.Files) == 0 && len(grant.PathPrefix) == 0 && len(grant.Modules) == 0 {
+		return nil
+	}
+	record, err := a.canCallerControlTask(callerAgentID, callerTaskID, taskID)
+	if err != nil {
+		return err
+	}
+	if record.ExpectedWriteScope.Normalized().ReadOnly {
+		return fmt.Errorf("task %s was delegated read-only; its tool surface has no write tools, so delegate the writing work as a new task", taskID)
+	}
+	if grant.AddsNothingTo(record.ExpectedWriteScope) {
+		return fmt.Errorf("task %s already covers every path in the grant", taskID)
+	}
+	widened := tools.WidenWriteScope(record.ExpectedWriteScope, grant)
+	if ownerTaskID := strings.TrimSpace(record.OwnerTaskID); ownerTaskID != "" {
+		if owner := a.taskRecordByTaskID(ownerTaskID); owner != nil && !owner.ExpectedWriteScope.Empty() &&
+			!childWriteScopeWithinParent(owner.ExpectedWriteScope, widened, a.projectRoot) {
+			return fmt.Errorf("the widened scope for task %s would be broader than its parent task %s", taskID, ownerTaskID)
+		}
+	}
+	if sub := a.subAgentByTaskID(taskID); sub != nil {
+		widened = sub.widenWriteScope(grant)
+	}
+	updated := cloneDurableTaskRecord(record)
+	updated.ExpectedWriteScope = widened
+	if err := a.persistTaskRegistryRecord(a.sessionDir, taskID, updated); err != nil {
+		return fmt.Errorf("persist widened write scope for %s: %w", taskID, err)
+	}
+	a.subs.mu.Lock()
+	a.subs.taskRecords[taskID] = cloneDurableTaskRecord(updated)
+	a.subs.mu.Unlock()
+	log.Infof("SubAgent write scope widened task_id=%v scope=%v", taskID, widened.Summary())
+	return nil
 }
 
 func (a *MainAgent) handleSubAgentStopEvent(evt Event) {

@@ -19,6 +19,14 @@ type StructuredSubAgentMessenger interface {
 	NotifySubAgentMessage(ctx context.Context, request AgentResponseRequest) (TaskHandle, error)
 }
 
+// ScopeGrantingSubAgentMessenger delivers a targeted message together with a
+// widening of the target task's write scope. A running task's scope is fixed at
+// delegation time, so without this the only way to hand a worker one more file
+// is to cancel it and re-delegate the whole task.
+type ScopeGrantingSubAgentMessenger interface {
+	NotifySubAgentWithScopeGrant(ctx context.Context, taskID, message, kind string, grant WriteScope) (TaskHandle, error)
+}
+
 type AgentResponseRequest struct {
 	TargetTaskID  string
 	Message       string
@@ -50,6 +58,7 @@ type notifyArgs struct {
 	Subtype       string          `json:"subtype,omitempty"`
 	CorrelationID string          `json:"correlation_id,omitempty"`
 	Payload       json.RawMessage `json:"payload,omitempty"`
+	GrantScope    *WriteScope     `json:"grant_write_scope,omitempty"`
 }
 
 // AgentNotifyPayload is the structured owner-update payload emitted by Notify.
@@ -110,6 +119,16 @@ func (t *NotifyTool) Parameters() map[string]any {
 		}
 		if !t.allowOwner {
 			required = append(required, "target_task_id")
+		}
+		properties["grant_write_scope"] = map[string]any{
+			"type":        "object",
+			"description": "Optional. Add paths to the target worker's expected_write_scope before delivering the message, for when it turns out to need a file you did not declare. Paths are only ever added. Use this instead of cancelling and re-delegating a worker that is already most of the way through its task.",
+			"properties": map[string]any{
+				"files":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+				"path_prefix": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+				"modules":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			},
+			"additionalProperties": false,
 		}
 	}
 	return map[string]any{
@@ -200,7 +219,21 @@ func (t *NotifyTool) Execute(ctx context.Context, raw json.RawMessage) (string, 
 		if t.messenger == nil {
 			return "", fmt.Errorf("targeted notify is not available")
 		}
-		handle, err := t.messenger.NotifySubAgent(ctx, a.TargetTaskID, a.Message, a.Kind)
+		var handle TaskHandle
+		var err error
+		if a.GrantScope != nil {
+			granter, ok := t.messenger.(ScopeGrantingSubAgentMessenger)
+			if !ok {
+				return "", fmt.Errorf("grant_write_scope is unavailable")
+			}
+			grant := a.GrantScope.Normalized()
+			if grant.ReadOnly || len(grant.VerificationCommands) > 0 {
+				return "", fmt.Errorf("grant_write_scope adds paths only; read_only and verification_commands are fixed when the task is delegated")
+			}
+			handle, err = granter.NotifySubAgentWithScopeGrant(ctx, a.TargetTaskID, a.Message, a.Kind, grant)
+		} else {
+			handle, err = t.messenger.NotifySubAgent(ctx, a.TargetTaskID, a.Message, a.Kind)
+		}
 		if err != nil {
 			return "", err
 		}

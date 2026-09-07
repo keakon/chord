@@ -45,7 +45,7 @@ func (a *MainAgent) buildRecoverySnapshot() *recovery.SessionSnapshot {
 			TaskDesc:              sub.taskDesc,
 			PlanTaskRef:           sub.planTaskRef,
 			SemanticTaskKey:       sub.semanticTaskKey,
-			ExpectedWriteScope:    sub.writeScope.Normalized(),
+			ExpectedWriteScope:    sub.currentWriteScope(),
 			SelectedModelRef:      subSelectedModelRef(sub),
 			RunningModelRef:       subRunningModelRef(sub),
 			OwnerAgentID:          sub.OwnerAgentID(),

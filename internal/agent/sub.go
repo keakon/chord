@@ -105,6 +105,7 @@ type SubAgent struct {
 	taskDesc             string // task description (from Plan or ad-hoc)
 	planTaskRef          string
 	semanticTaskKey      string
+	writeScopeMu         sync.RWMutex
 	writeScope           tools.WriteScope
 	ownerMu              sync.RWMutex
 	ownerAgentID         string
@@ -1355,7 +1356,7 @@ func (s *SubAgent) buildSystemPrompt() string {
 // capabilityPromptBlock takes the caller's visibility snapshot so every block
 // in one system prompt describes the same tool surface.
 func (s *SubAgent) capabilityPromptBlock(visible map[string]struct{}) string {
-	return buildDynamicCapabilityPromptBlock(visible, s.currentRuleset(), capabilityPromptAudienceSub, s.writeScope)
+	return buildDynamicCapabilityPromptBlock(visible, s.currentRuleset(), capabilityPromptAudienceSub, s.currentWriteScope())
 }
 
 func (s *SubAgent) delegationPromptBlock() string {

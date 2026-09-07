@@ -702,7 +702,7 @@ func buildTaskRecordFromSub(sub *SubAgent, previous *DurableTaskRecord, closedRe
 	if semanticTaskKey := strings.TrimSpace(sub.semanticTaskKey); semanticTaskKey != "" || rec.SemanticTaskKey == "" {
 		rec.SemanticTaskKey = semanticTaskKey
 	}
-	if writeScope := sub.writeScope.Normalized(); !writeScope.Empty() || rec.ExpectedWriteScope.Empty() {
+	if writeScope := sub.currentWriteScope(); !writeScope.Empty() || rec.ExpectedWriteScope.Empty() {
 		rec.ExpectedWriteScope = writeScope
 	}
 	rec.OwnerAgentID = ownerAgentID

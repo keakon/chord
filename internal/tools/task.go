@@ -329,3 +329,30 @@ func (t *DelegateTool) Execute(ctx context.Context, raw json.RawMessage) (string
 	}
 	return string(out), nil
 }
+
+// WidenWriteScope returns base extended with grant's paths. It never removes
+// anything and never flips read_only: a scope that shrank under a running
+// worker would retroactively invalidate writes it had already been allowed to
+// make, and turning a writing task read-only mid-flight would strand it. Only
+// files, path prefixes and modules are widened — the command allowlist and the
+// read-only flag are fixed when the task's tool surface is built.
+func WidenWriteScope(base, grant WriteScope) WriteScope {
+	base = base.Normalized()
+	grant = grant.Normalized()
+	out := base
+	out.Files = dedupeTrimmedStrings(append(append([]string(nil), base.Files...), grant.Files...))
+	out.PathPrefix = dedupeTrimmedStrings(append(append([]string(nil), base.PathPrefix...), grant.PathPrefix...))
+	out.Modules = dedupeTrimmedStrings(append(append([]string(nil), base.Modules...), grant.Modules...))
+	return out
+}
+
+// AddsNothingTo reports whether every path in this scope is already covered by
+// base, which makes a grant a no-op the caller should be told about rather than
+// silently accept.
+func (s WriteScope) AddsNothingTo(base WriteScope) bool {
+	widened := WidenWriteScope(base, s)
+	base = base.Normalized()
+	return len(widened.Files) == len(base.Files) &&
+		len(widened.PathPrefix) == len(base.PathPrefix) &&
+		len(widened.Modules) == len(base.Modules)
+}

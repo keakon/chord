@@ -39,7 +39,7 @@ func buildSubAgentStructuredCheckpoint(s *SubAgent, messages []message.Message, 
 	b.WriteString(blankToUnknown(ownerLabel))
 	b.WriteByte('\n')
 	b.WriteString("- Write scope: ")
-	b.WriteString(blankToUnknown(s.writeScope.Summary()))
+	b.WriteString(blankToUnknown(s.currentWriteScope().Summary()))
 	b.WriteByte('\n')
 	b.WriteString("- Latest owner/user instruction: ")
 	b.WriteString(latestOwnerInstructionForCheckpoint(messages))
