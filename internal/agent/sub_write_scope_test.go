@@ -145,6 +145,117 @@ func TestSubAgentPathScopeRejectsMutatingShell(t *testing.T) {
 	}
 }
 
+// TestSubAgentPathScopeRejectsReadOnlyShellCommand pins the P1-4 contract that
+// a path-scoped task rejects every shell command — including one whose command
+// line looks read-only — because command side effects cannot be path-validated.
+// The scoped worker therefore cannot execute any verification command, which is
+// why its tool surface no longer advertises Shell at all.
+func TestSubAgentPathScopeRejectsReadOnlyShellCommand(t *testing.T) {
+	parent, sub := newMixedBatchTestSubAgent(t)
+	root := t.TempDir()
+	parent.projectRoot = root
+	sub.workDir = root
+	sub.writeScope = tools.WriteScope{PathPrefix: []string{"internal"}}
+	sub.tools.Register(tools.ShellTool{})
+
+	args, _ := json.Marshal(map[string]string{"command": "git status", "description": "read-only status check"})
+	if _, err := sub.executeToolCall(context.Background(), message.ToolCall{ID: "shell-readonly", Name: tools.NameShell, Args: args}); err == nil || !strings.Contains(err.Error(), "shell is unavailable") {
+		t.Fatalf("read-only shell error = %v, want scope-safe rejection", err)
+	}
+}
+
+// newScopedToolSurfaceTestSubAgent builds a SubAgent whose base registry
+// contains Shell so tests can assert what the registration path keeps for a
+// given write scope.
+func newScopedToolSurfaceTestSubAgent(t *testing.T, scope tools.WriteScope) (*MainAgent, *SubAgent) {
+	t.Helper()
+	parent := newTestMainAgent(t, t.TempDir())
+	reg := tools.NewRegistry()
+	reg.Register(tools.ReadTool{})
+	reg.Register(tools.WriteTool{})
+	reg.Register(tools.NewShellTool("bash"))
+	sub := NewSubAgent(SubAgentConfig{
+		InstanceID:   "worker-scoped",
+		TaskID:       "adhoc-scoped",
+		AgentDefName: "worker",
+		TaskDesc:     "do scoped work",
+		LLMClient:    newTestLLMClient(),
+		Recovery:     parent.recoveryManager(),
+		SessionEpoch: parent.recoverySessionEpoch(),
+		Parent:       parent,
+		ParentCtx:    parent.parentCtx,
+		Cancel:       func() {},
+		BaseTools:    reg,
+		WriteScope:   scope,
+		WorkDir:      t.TempDir(),
+		SessionDir:   parent.sessionDir,
+		ModelName:    "test-model",
+	})
+	sub.turn = &Turn{ID: 1, Epoch: 1, Ctx: context.Background()}
+	return parent, sub
+}
+
+// TestSubAgentScopedAndReadOnlySurfaceOmitsShell pins the P1-4 fix: scoped
+// (path/file/module) and read-only delegated tasks no longer register Shell, so
+// Shell disappears from the tool registry, the frozen tool definitions sent to
+// the model, and the capability prompt — and the prompt explicitly says command
+// execution and execution-based verification belong to the owner agent instead
+// of guiding the worker to run tests it can never execute.
+func TestSubAgentScopedAndReadOnlySurfaceOmitsShell(t *testing.T) {
+	for _, scope := range []tools.WriteScope{
+		{PathPrefix: []string{"internal"}},
+		{Files: []string{"internal/a.go"}},
+		{Modules: []string{"backend"}},
+		{ReadOnly: true},
+	} {
+		scope := scope
+		t.Run(scope.Summary(), func(t *testing.T) {
+			_, sub := newScopedToolSurfaceTestSubAgent(t, scope)
+			if _, ok := sub.tools.Get(tools.NameShell); ok {
+				t.Fatal("scoped SubAgent registry still contains Shell")
+			}
+			for _, def := range sub.frozenToolDefs {
+				if def.Name == tools.NameShell {
+					t.Fatalf("scoped SubAgent frozen tool definitions still contain Shell: %#v", def)
+				}
+			}
+			prompt := sub.buildSystemPrompt()
+			for _, want := range []string{
+				"## Command Execution Boundary",
+				"`shell` tool is not available in this task",
+				"Execution-based verification is the owner agent's responsibility",
+			} {
+				if !strings.Contains(prompt, want) {
+					t.Fatalf("scoped SubAgent prompt missing %q:\n%s", want, prompt)
+				}
+			}
+		})
+	}
+}
+
+// TestSubAgentUnscopedSurfaceKeepsShell guards the opposite side of the P1-4
+// fix: an unscoped delegated task still advertises Shell and gets no command
+// execution boundary block.
+func TestSubAgentUnscopedSurfaceKeepsShell(t *testing.T) {
+	_, sub := newScopedToolSurfaceTestSubAgent(t, tools.WriteScope{})
+	if _, ok := sub.tools.Get(tools.NameShell); !ok {
+		t.Fatal("unscoped SubAgent registry lost Shell")
+	}
+	foundShell := false
+	for _, def := range sub.frozenToolDefs {
+		if def.Name == tools.NameShell {
+			foundShell = true
+			break
+		}
+	}
+	if !foundShell {
+		t.Fatal("unscoped SubAgent frozen tool definitions lost Shell")
+	}
+	if prompt := sub.buildSystemPrompt(); strings.Contains(prompt, "## Command Execution Boundary") {
+		t.Fatalf("unscoped SubAgent prompt unexpectedly got a command execution boundary:\n%s", prompt)
+	}
+}
+
 func TestSubAgentModuleOnlyScopeRequiresPathDeclaration(t *testing.T) {
 	parent, sub := newMixedBatchTestSubAgent(t)
 	root := t.TempDir()

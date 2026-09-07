@@ -113,6 +113,13 @@ type Turn struct {
 	// request so a text-only reply that never calls a coordination tool cannot
 	// spin forever.
 	SubAgentTerminalRecoveryCount int
+	// SubAgentCompletionRecoveryCount bounds the follow-up for a rejected
+	// Complete call (invalid arguments or failed verification) to one request.
+	// It is separate from SubAgentTerminalRecoveryCount so a text-only reply
+	// that already spent the wrap-up nudge does not consume the model's one
+	// chance to repair a malformed Complete, and a rejected Complete does not
+	// eat the wrap-up nudge either.
+	SubAgentCompletionRecoveryCount int
 	// Resuming a preserved stream interruption has its own budget: it is a
 	// transport failure, not a model that refuses to finish, and the client
 	// already paces each restart behind a credential cooldown. Sharing the

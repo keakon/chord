@@ -18,8 +18,11 @@ const (
 )
 
 func buildDynamicCapabilityPromptBlock(visible map[string]struct{}, ruleset permission.Ruleset, audience capabilityPromptAudience) string {
-	blocks := make([]string, 0, 4)
+	blocks := make([]string, 0, 5)
 	if block := toolSelectionPromptBlock(visible); block != "" {
+		blocks = append(blocks, block)
+	}
+	if block := shellExecutionBoundaryPromptBlock(visible, audience); block != "" {
 		blocks = append(blocks, block)
 	}
 	if block := fileInspectionConstraintsPromptBlock(visible, ruleset, audience); block != "" {
@@ -32,6 +35,26 @@ func buildDynamicCapabilityPromptBlock(visible map[string]struct{}, ruleset perm
 		blocks = append(blocks, block)
 	}
 	return strings.Join(blocks, "\n\n")
+}
+
+// shellExecutionBoundaryPromptBlock renders an explicit boundary when a
+// SubAgent cannot execute shell commands: a scoped or read-only delegated task
+// never registers Shell, and a role ruleset may deny it outright. Without the
+// block, the shared Guidelines' incremental-verification advice ("first
+// compile, then run the changed package's tests") would push the worker toward
+// builds and tests it can never run, after which it could only fabricate a
+// verification_run declaration (which completion validation would reject) or
+// get stuck. The block tells the worker that command execution and
+// execution-based verification belong to the owner agent, and to report
+// verification honestly as not run.
+func shellExecutionBoundaryPromptBlock(visible map[string]struct{}, audience capabilityPromptAudience) string {
+	if audience != capabilityPromptAudienceSub || hasVisibleTool(visible, tools.NameShell) {
+		return ""
+	}
+	return "## Command Execution Boundary\n" +
+		"- The " + toolPromptName(tools.NameShell) + " tool is not available in this task: you cannot run commands, builds, or tests.\n" +
+		"- Treat missing command execution as a real boundary. Do not claim a command ran, and do not declare `verification_run` commands you could not execute.\n" +
+		"- Execution-based verification is the owner agent's responsibility. Report verification honestly as not run (for example in `remaining_limitations`) instead of fabricating results."
 }
 
 func toolSelectionPromptBlock(visible map[string]struct{}) string {

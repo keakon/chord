@@ -193,13 +193,22 @@ type SubAgent struct {
 	// calls in one LLM response. The other tools execute first; EventAgentDone
 	// is sent once all of them complete. This prevents the last batch of file
 	// edits from being silently dropped.
-	pendingComplete        *AgentResult
-	pendingCompleteCallID  string
-	pendingEscalate        string
-	pendingEscalateRequest *tools.AgentRequestPayload
-	verificationLedger     []verificationLedgerEntry
-	workspaceMutationEpoch uint64
-	acceptedMailboxIDs     map[string]struct{} // guarded by inputQueueMu; de-duplicates durable deliveries
+	pendingComplete       *AgentResult
+	pendingCompleteCallID string
+	// pendingRejectedCompleteCallID / pendingRejectedCompleteErr record a
+	// Complete call whose arguments failed validation while other tool calls
+	// in the same response were still executing. The rejection is appended as
+	// a tool result once those calls settle (finalize in handleToolResult),
+	// giving the model one bounded follow-up to fix the call. Unlike
+	// pendingComplete it is never persisted: a crash mid-batch replays the
+	// invalid Complete from the transcript instead.
+	pendingRejectedCompleteCallID string
+	pendingRejectedCompleteErr    error
+	pendingEscalate               string
+	pendingEscalateRequest        *tools.AgentRequestPayload
+	verificationLedger            []verificationLedgerEntry
+	workspaceMutationEpoch        uint64
+	acceptedMailboxIDs            map[string]struct{} // guarded by inputQueueMu; de-duplicates durable deliveries
 
 	// Permission: merged ruleset (global + project + agent-level).
 	//
@@ -555,6 +564,14 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 			}
 			subTools.Register(t)
 		default:
+			// Scoped and read-only delegated tasks never register Shell: the
+			// execution-time write-scope gate rejects every shell call because
+			// arbitrary command side effects cannot be path-validated, so a
+			// registered Shell would only advertise (and the prompt push the
+			// worker towards) verification runs it can never perform.
+			if tools.NormalizeName(t.Name()) == tools.NameShell && !cfg.WriteScope.Normalized().Empty() {
+				continue
+			}
 			// Skip MainAgent-only tools.
 			if cfg.Ruleset.IsDisabled(t.Name()) {
 				continue

@@ -251,6 +251,11 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	// silently dropped.
 	var taskCompleteCallID string
 	var taskComplete *AgentResult
+	// completeRejection carries a validation failure from the first Complete
+	// call in this response. The failed call is reported to the model with a
+	// "Completion rejected" tool result and one bounded follow-up (see
+	// rejectInvalidCompleteArguments) instead of failing the task outright.
+	var completeRejection error
 	var wakeMainCallID string
 	var wakeMainReason string
 	var wakeMainRequest *tools.AgentRequestPayload
@@ -270,28 +275,26 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 				ResultRef            *tools.ResultRef    `json:"result_ref,omitempty"`
 			}
 			if err := json.Unmarshal(tc.Args, &args); err != nil {
-				s.sendEvent(Event{
-					Type:    EventAgentError,
-					Payload: fmt.Errorf("invalid Complete args: %w", err),
-				})
-				return
+				completeRejection = fmt.Errorf("invalid Complete args: %w", err)
+				taskCompleteCallID = tc.ID
+				break
 			}
 			if strings.TrimSpace(args.Summary) == "" {
-				s.sendEvent(Event{
-					Type:    EventAgentError,
-					Payload: fmt.Errorf("invalid Complete args: summary is required"),
-				})
-				return
+				completeRejection = fmt.Errorf("invalid Complete args: summary is required")
+				taskCompleteCallID = tc.ID
+				break
 			}
 			artifacts, err := tools.ValidateArtifactRefs(s.sessionDir, args.Artifacts)
 			if err != nil {
-				s.sendEvent(Event{Type: EventAgentError, Payload: fmt.Errorf("invalid Complete args: %w", err)})
-				return
+				completeRejection = fmt.Errorf("invalid Complete args: %w", err)
+				taskCompleteCallID = tc.ID
+				break
 			}
 			resultType, result, resultRef, err := validateCompleteTypedResult(s.sessionDir, args.ResultType, args.Result, args.ResultRef)
 			if err != nil {
-				s.sendEvent(Event{Type: EventAgentError, Payload: fmt.Errorf("invalid Complete args: %w", err)})
-				return
+				completeRejection = fmt.Errorf("invalid Complete args: %w", err)
+				taskCompleteCallID = tc.ID
+				break
 			}
 			taskCompleteCallID = tc.ID
 			taskComplete = &AgentResult{
@@ -394,6 +397,10 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	// Complete only, no other tools → trigger done immediately.
 	if len(regularToolCalls) == 0 {
 		s.parent.discardSpeculativeStreamToolsAndClearToolTrace(s.turn, "complete_only")
+		if completeRejection != nil {
+			s.rejectInvalidCompleteArguments(taskCompleteCallID, completeRejection)
+			return
+		}
 		if wakeMainCallID != "" {
 			s.sendEvent(Event{
 				Type:     EventEscalate,
@@ -434,8 +441,13 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	// If Complete was also in this batch, store it as pending.
 	if taskCompleteCallID != "" {
 		log.Infof("Complete co-returned with other tools; executing others first agent=%v other_tools=%v", s.instanceID, len(regularToolCalls))
-		s.pendingComplete = taskComplete
-		s.pendingCompleteCallID = taskCompleteCallID
+		if completeRejection != nil {
+			s.pendingRejectedCompleteCallID = taskCompleteCallID
+			s.pendingRejectedCompleteErr = completeRejection
+		} else {
+			s.pendingComplete = taskComplete
+			s.pendingCompleteCallID = taskCompleteCallID
+		}
 	}
 	if wakeMainCallID != "" {
 		log.Infof("Escalate co-returned with other tools; executing others first agent=%v other_tools=%v", s.instanceID, len(regularToolCalls))

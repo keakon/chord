@@ -84,15 +84,51 @@ func (s *SubAgent) validateCompletionVerification(env *CompletionEnvelope) error
 	return nil
 }
 
+// completionRecoveryBudgetAvailable consumes the single bounded follow-up for a
+// rejected Complete call (invalid arguments or failed verification). It returns
+// true when the follow-up request may proceed; once spent, any later rejection
+// in the same turn fails the agent instead. The budget is deliberately separate
+// from SubAgentTerminalRecoveryCount (the pure-text wrap-up nudge), so a
+// text-only reply that already used its nudge still leaves the model one chance
+// to repair a rejected Complete, and vice versa.
+func (s *SubAgent) completionRecoveryBudgetAvailable() bool {
+	if s == nil || s.turn == nil {
+		return false
+	}
+	if s.turn.SubAgentCompletionRecoveryCount >= 1 {
+		return false
+	}
+	s.turn.SubAgentCompletionRecoveryCount++
+	return true
+}
+
 func (s *SubAgent) retryCompletionVerification(cause error) {
 	if s == nil || s.turn == nil {
 		return
 	}
-	if s.turn.SubAgentTerminalRecoveryCount >= 1 {
+	if !s.completionRecoveryBudgetAvailable() {
 		s.sendEvent(Event{Type: EventAgentError, Payload: fmt.Errorf("completion verification failed after retry: %w", cause)})
 		return
 	}
-	s.turn.SubAgentTerminalRecoveryCount++
 	s.appendPendingUserMessage(pendingUserMessage{Content: fmt.Sprintf("Completion was rejected: %v. Re-run the declared verification command(s) so they are the most recent workspace activity, then call Complete again with the exact command(s).", cause)})
+	s.asyncCallLLMWithFlightMarked(s.turn, s.ctxMgr.Snapshot())
+}
+
+// rejectInvalidCompleteArguments handles a Complete call whose arguments failed
+// validation — a JSON parse error, an empty summary, an artifact outside the
+// session, or an invalid typed result. It appends a "Completion rejected" tool
+// result (so the transcript keeps its tool-call pairing) and, within the shared
+// rejected-completion budget, gives the model one follow-up request to call
+// Complete again with corrected arguments instead of failing the task outright.
+func (s *SubAgent) rejectInvalidCompleteArguments(callID string, cause error) {
+	if s == nil || s.turn == nil {
+		return
+	}
+	s.appendCompleteToolResult(callID, "Completion rejected: "+cause.Error())
+	if !s.completionRecoveryBudgetAvailable() {
+		s.sendEvent(Event{Type: EventAgentError, Payload: fmt.Errorf("completion was rejected after retry: %w", cause)})
+		return
+	}
+	s.appendPendingUserMessage(pendingUserMessage{Content: fmt.Sprintf("Completion was rejected: %v. Call Complete again with corrected, valid arguments.", cause)})
 	s.asyncCallLLMWithFlightMarked(s.turn, s.ctxMgr.Snapshot())
 }

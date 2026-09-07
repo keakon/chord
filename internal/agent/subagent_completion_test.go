@@ -121,27 +121,6 @@ func TestStructuredCompleteEnvelopeParsedFromCompleteTool(t *testing.T) {
 	}
 }
 
-func TestCompleteRejectsArtifactOutsideSessionBoundary(t *testing.T) {
-	parent, sub := newMixedBatchTestSubAgent(t)
-	sub.handleLLMResponse(&llmResult{
-		turnID: 1,
-		resp: &message.Response{ToolCalls: convertCalls([]messageToolCall{
-			mustJSONToolCall(t, "call-1", "complete", map[string]any{
-				"summary":   "done",
-				"artifacts": []map[string]any{{"rel_path": "../outside.txt"}},
-			}),
-		})},
-	})
-	select {
-	case evt := <-parent.eventCh:
-		if evt.Type != EventAgentError || !strings.Contains(evt.Payload.(error).Error(), "artifact path escapes") {
-			t.Fatalf("event = %#v", evt)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for invalid Complete error")
-	}
-}
-
 func TestCompleteSchemaAndParserAcceptTypedResult(t *testing.T) {
 	parent, sub := newMixedBatchTestSubAgent(t)
 	completeTool, ok := sub.tools.Get(tools.NameComplete)

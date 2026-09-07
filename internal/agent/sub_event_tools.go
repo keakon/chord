@@ -438,6 +438,19 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 	s.turn.CompletedToolCalls = nil
 	s.turn.ChangedFiles = nil
 
+	// A Complete whose arguments failed validation and that was co-returned
+	// with other tools is rejected once those tools settle, keeping the
+	// transcript's tool-call pairing intact and letting the sibling calls'
+	// side effects land before the model fixes the call.
+	if s.pendingRejectedCompleteErr != nil {
+		callID := s.pendingRejectedCompleteCallID
+		rejectErr := s.pendingRejectedCompleteErr
+		s.pendingRejectedCompleteCallID = ""
+		s.pendingRejectedCompleteErr = nil
+		s.rejectInvalidCompleteArguments(callID, rejectErr)
+		return
+	}
+
 	outstandingJoinChildren := s.parent.outstandingJoinChildTaskIDs(s.taskID)
 	if len(outstandingJoinChildren) > 0 {
 		if s.pendingComplete != nil {
