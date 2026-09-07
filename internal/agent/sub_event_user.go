@@ -121,6 +121,24 @@ func (s *SubAgent) takePendingUserMessagesForContinuation() []pendingUserMessage
 	return pending
 }
 
+// openToolBatchDefersContextAppends reports whether context-only appends must
+// stay queued instead of being drained into ctxmgr. While the current turn has
+// dispatched tool calls whose results have not been backfilled, appending a
+// user message would place it between the assistant tool_calls message and the
+// tool results that close the batch — a sequence strict chat APIs reject
+// (OpenAI chat requires the tool results to follow their tool_calls message;
+// Anthropic keys block ordering off the same pairing). The queue itself is the
+// deferral buffer, so FIFO order is preserved and an ack still only fires once
+// the append is really applied (and persisted) at the batch-closure boundary.
+func (s *SubAgent) openToolBatchDefersContextAppends() bool {
+	if s == nil {
+		return false
+	}
+	s.turnMu.Lock()
+	defer s.turnMu.Unlock()
+	return s.turn != nil && s.turn.PendingToolCalls.Load() > 0
+}
+
 func (s *SubAgent) drainContextAppendsBeforeTurn() {
 	for {
 		s.refillContextAppendChannelFromOverflow()

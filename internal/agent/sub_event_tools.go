@@ -489,6 +489,9 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 			s.appendCompleteToolResult(s.pendingCompleteCallID, "Completion deferred: received new user input before completion.")
 			s.pendingComplete = nil
 			s.pendingCompleteCallID = ""
+			// Deferred context appends drained at this batch-closure LLM
+			// boundary precede the pending user input and the next snapshot.
+			s.drainContextAppendsBeforeTurn()
 			s.appendPendingUserMessages(pending)
 			s.asyncCallLLMWithFlightMarked(s.turn, s.ctxMgr.Snapshot())
 			return
@@ -530,6 +533,10 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 		return
 	}
 
-	// Normal: continue LLM conversation.
+	// Normal: continue LLM conversation. The tool batch has now closed, so
+	// context appends that were deferred while its results were outstanding are
+	// drained here: they follow every tool result in the transcript and are
+	// included in the continuation's prompt snapshot.
+	s.drainContextAppendsBeforeTurn()
 	s.continueLLMWithPendingUserMessages()
 }

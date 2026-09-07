@@ -54,9 +54,16 @@ func (s *SubAgent) runLoop() {
 			// freed in-flight gate issues the recovery request immediately.
 			continue
 		}
-		if msg, ok := s.tryReceiveContextAppend(); ok {
-			s.appendContextOnly(msg)
-			continue
+		// Context appends must not be applied while an open tool batch still
+		// has results outstanding (see openToolBatchDefersContextAppends): the
+		// appended user message would land between the assistant tool_calls
+		// message and the tool results that close the batch. They stay queued
+		// and are drained once the batch closes.
+		if !s.openToolBatchDefersContextAppends() {
+			if msg, ok := s.tryReceiveContextAppend(); ok {
+				s.appendContextOnly(msg)
+				continue
+			}
 		}
 		if s.canStartUserTurn() {
 			if input, ok := s.tryReceiveUserInput(); ok {
@@ -85,6 +92,10 @@ func (s *SubAgent) runLoop() {
 		if s.canStartUserTurn() {
 			inputCh = s.inputCh
 		}
+		var ctxAppendCh <-chan message.Message
+		if !s.openToolBatchDefersContextAppends() {
+			ctxAppendCh = s.ctxAppendCh
+		}
 		// Arm the in-flight LLM silence watchdog for the current deadline; the
 		// case below fires when the request stays silent past its budget.
 		var silenceCh <-chan time.Time
@@ -109,7 +120,7 @@ func (s *SubAgent) runLoop() {
 			s.handleUserInput(input)
 			s.refillInputChannelFromOverflow()
 
-		case msg := <-s.ctxAppendCh:
+		case msg := <-ctxAppendCh:
 			s.accountDequeuedContextAppend(msg)
 			s.appendContextOnly(msg)
 			s.refillContextAppendChannelFromOverflow()
