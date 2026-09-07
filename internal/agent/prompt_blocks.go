@@ -129,9 +129,15 @@ func mainAgentResponseClosurePromptText(doneVisible bool) string {
 // points at it instead of naming Escalate/Notify itself — naming them here
 // would reference tools this role may not have. complete needs no branch: it
 // is always registered and never ruleset-filtered (isSubAgentInternalTool).
+//
+// The delivery-channel line exists because workers do not otherwise know where
+// their output goes: measured across one orchestration session, the assistant
+// text written alongside complete matched the call's own arguments in volume —
+// the same report composed twice, of which only the call reached the owner.
 var subAgentResponseClosurePrompt = `## SubAgent Task Closure
 - Focus on finishing the assigned task or reaching a real blocker; do not stop at a partial summary when in-scope work still remains
 - If more in-scope, low-risk work remains, continue instead of presenting routine next steps as optional follow-up for the owner agent
 - If blocked, use the control path named in the SubAgent Coordination section rather than implying the task is complete
-- Include the key result and verification status in the ` + toolPromptName(tools.NameComplete) + ` call
+- The ` + toolPromptName(tools.NameComplete) + ` call is the only thing the owner agent receives: put the key result, the changed files and the verification status in its arguments
+- Assistant text alongside that call is read by the human watching this task, not by the owner: keep it to what a reader needs beyond the call, and do not compose the report a second time there
 - After reporting completion, stop there; do not append routine in-scope follow-up work as an optional invitation to the owner agent`

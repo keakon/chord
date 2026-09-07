@@ -1477,7 +1477,8 @@ shell: allow
 		"If you are blocked and no control tool is available, explain the blocker clearly in assistant text and wait for owner follow-up.",
 		"Focus on finishing the assigned task or reaching a real blocker; do not stop at a partial summary when in-scope work still remains",
 		"continue instead of presenting routine next steps as optional follow-up for the owner agent",
-		"Include the key result and verification status in the `complete` call",
+		"The `complete` call is the only thing the owner agent receives: put the key result, the changed files and the verification status in its arguments",
+		"do not compose the report a second time there",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("buildSystemPrompt() missing coordination guidance %q in %q", want, got)
