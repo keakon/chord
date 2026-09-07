@@ -1718,6 +1718,41 @@ func TestRenderInfoPanelCollapsedAgentsShowsHeaderOnly(t *testing.T) {
 	}
 }
 
+// The info panel scrolls, so a display budget on AGENTS would only make rows
+// unreachable: render every agent the sidebar still tracks and let the panel's
+// own scrolling cover long lists. Same rule as CHANGED FILES.
+func TestRenderInfoPanelAgentsRendersEveryAgentWithoutOverflowRow(t *testing.T) {
+	backend := newInfoPanelAgent()
+	m := NewModel(backend)
+	const agents = 15 // above the old 10-row display budget
+	subs := make([]agent.SubAgentInfo, 0, agents)
+	for i := range agents {
+		subs = append(subs, agent.SubAgentInfo{
+			InstanceID: fmt.Sprintf("agent-%02d", i),
+			TaskDesc:   fmt.Sprintf("task-%02d", i),
+		})
+	}
+	m.sidebar.Update(subs, "main", "builder")
+
+	// Height is generous so panel-level clipping does not hide rows here.
+	section := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(48, agents+20)), "▼ AGENTS")
+	if got, want := len(section), agents+1; got != want {
+		t.Fatalf("AGENTS rows = %d, want %d (main + every SubAgent); section=%#v", got, want, section)
+	}
+	if joined := strings.Join(section, "\n"); strings.Contains(joined, "more") {
+		t.Fatalf("AGENTS must not collapse the tail behind an overflow row; section=%#v", section)
+	}
+	if section[0] != "● builder" {
+		t.Fatalf("AGENTS main row = %q, want %q", section[0], "● builder")
+	}
+	joined := strings.Join(section, "\n")
+	for i := range agents {
+		if want := fmt.Sprintf("task-%02d", i); !strings.Contains(joined, want) {
+			t.Fatalf("AGENTS section is missing %q; section=%#v", want, section)
+		}
+	}
+}
+
 func TestRenderInfoPanelPendingAgentPlaceholderUsesIconOnly(t *testing.T) {
 	backend := newInfoPanelAgent()
 	m := NewModel(backend)

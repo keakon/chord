@@ -598,13 +598,11 @@ func (m *Model) buildInfoPanelAgentListBlockWithHits(lineW int) (string, []infoP
 		return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(blockLines)), nil
 	}
 
-	// Limit total agent lines to avoid dominating the panel.
-	const maxAgentLines = 10
-	totalLines := len(agentRows)
-	truncated := totalLines > maxAgentLines
-	if truncated {
-		agentRows = agentRows[:maxAgentLines]
-	}
+	// Every agent the sidebar still tracks is rendered: the info panel scrolls,
+	// so a display budget here would only make rows unreachable. The agent count
+	// is already bounded upstream by delegation.max_children, so this cannot
+	// grow without limit. See infoPanelEditedFilesHardLimit for the same rule
+	// applied to CHANGED FILES.
 	var rowHits []infoPanelAgentRowHitBox
 	for _, row := range agentRows {
 		lineIndex := len(blockLines)
@@ -616,11 +614,6 @@ func (m *Model) buildInfoPanelAgentListBlockWithHits(lineW int) (string, []infoP
 				endLine:   lineIndex + 1,
 			})
 		}
-	}
-	if truncated {
-		blockLines = append(blockLines, renderInfoPanelCollapsibleContentLine(lineW,
-			InfoPanelDim.Render(fmt.Sprintf("+%d more", totalLines-maxAgentLines)),
-		))
 	}
 	return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(blockLines)), rowHits
 }
