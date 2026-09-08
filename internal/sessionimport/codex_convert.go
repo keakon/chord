@@ -31,6 +31,8 @@ const (
 	codexResponseItemTypeReasoning            = "reasoning"
 )
 
+var errEmptyInput = fmt.Errorf("codex import: empty input")
+
 // ---------------------------------------------------------------------------
 // Parse JSONL → Codex IR
 // ---------------------------------------------------------------------------

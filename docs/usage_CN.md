@@ -148,7 +148,7 @@ chord import claude --id <session-id> [--root ~/.claude/projects]
 
 - `--project <path>`：写入哪个 project（默认当前目录）
 - `--sid <id>`：指定 session id（默认自动生成）
-- `--id <session-id>`：按来源 session id 查找输入文件（支持 `codex` / `claude`）
+- `--id <session-id>`：按来源工具自带的 session id 查找而非文件路径——Codex 的就是 `codex resume` 退出时打印的那个（支持 `codex` / `claude`）
 - `--root <path>`：`--id` 查找的根目录
 - `--reasoning off|visible|strict`：reasoning 导入策略（默认 `strict`）
 - `--dry-run`：只解析输出报告，不写入 session

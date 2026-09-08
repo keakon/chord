@@ -150,7 +150,7 @@ Common flags:
 
 - `--project <path>`: which project to write into (default: current directory)
 - `--sid <id>`: specify session id (default: auto-generated)
-- `--id <session-id>`: import by source session id instead of file path (supported for `codex` and `claude`)
+- `--id <session-id>`: import by the source tool's own session id instead of file path — for Codex this is the id `codex resume` prints (supported for `codex` and `claude`)
 - `--root <path>`: root directory for `--id` lookup
 - `--reasoning off|visible|strict`: reasoning import policy (default: `strict`)
 - `--dry-run`: parse and report only, no writes

@@ -100,6 +100,14 @@ func chooseSingleSourceMatch(source, sourceID string, matches []string) (string,
 	return matches[0], nil
 }
 
+// codexFileContainsSessionID reports whether the rollout at path belongs to
+// the given source id. Codex identifies a rollout by the id in its first
+// session_meta line (the thread's own id, also encoded in the filename
+// suffix), which is exactly how `codex resume <id>` resolves a file. The
+// session_id field is intentionally not consulted: in forked/sub-agent
+// rollouts it points back to the parent session, so it matches multiple files
+// for one id. Only the first session_meta is examined because a forked rollout
+// replays the parent's session_meta on a later line.
 func codexFileContainsSessionID(path string, sourceID string) (bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -113,19 +121,32 @@ func codexFileContainsSessionID(path string, sourceID string) (bool, error) {
 		if line == "" {
 			continue
 		}
-		var obj map[string]json.RawMessage
-		if err := json.Unmarshal([]byte(line), &obj); err != nil {
+		var lineObj map[string]json.RawMessage
+		if err := importJSONUnmarshalString(line, &lineObj); err != nil {
 			continue
 		}
-		itemObj, err := normalizeCodexLine(obj)
-		if err == nil {
-			if sid, ok := extractCodexSessionID(itemObj); ok && sid == sourceID {
-				return true, nil
-			}
+		rawType, ok := lineObj["type"]
+		if !ok {
+			continue
 		}
-		if sid, ok := pickFirstStringRaw(obj, "session_id", "sessionId", "sessionID", "id"); ok && sid == sourceID {
+		var typeStr string
+		if err := importJSONUnmarshal(rawType, &typeStr); err != nil || typeStr == "" {
+			continue
+		}
+		if typeStr != codexTopLevelTypeSessionMeta {
+			continue
+		}
+		payload := lineObj["payload"]
+		if len(payload) == 0 {
+			return false, nil
+		}
+		var meta struct {
+			ID string `json:"id"`
+		}
+		if importJSONUnmarshal(payload, &meta) == nil && meta.ID == sourceID {
 			return true, nil
 		}
+		return false, nil
 	}
 	return false, scanner.Err()
 }

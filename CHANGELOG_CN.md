@@ -226,6 +226,8 @@
 - 折叠的工具卡片不再把多行错误截成第一行。真正有用的部分在第一行之下的失败——例如路径不存在后面跟着的 `Did you mean:` 建议，或 `apply_patch` 按文件列出的失败清单——恰好被藏掉了。折叠卡片现在会显示错误正文，并限制在若干行内、其余部分提示展开查看，因此任意长的工具错误也不会淹没整个对话记录。
 - 首次运行的配置向导现在写入当前的 Codex 模型额度。GPT-6 Astra、GPT-5.4 与 GPT-5.6 Sol / Terra / Luna 改为 `1050000 / 922000 / 128000`，不再是较老的 `400000 / 272000` 档（以及 GPT-5.4 那个已过时的 `950000` 输入上限），与[模型配置示例](./docs/model-configs_CN.md#codex-oauth-preset)一致。GPT-5.5、GPT-5.2 与 GPT-5.3-codex 保持 `400000 / 272000 / 128000`。
 
+- `chord import codex --id <id>` 现在能解析 `codex resume` 退出时打印的那个 id。Codex 会话如果派生过 fork 或 sub-agent thread，会留下另一个 rollout 文件，里面的记录仍写着父 session 的 id，导入这个 id 时就会匹配到两个文件并报 "multiple files matched"。现在按 Codex 自己解析 `codex resume <id>` 所用的 thread id 来识别 rollout，派生过子线程的会话可以直接用 id 导入，不必再手动指定文件路径。
+
 ## 0.7.3 - 2026-08-08
 
 ### 不兼容变更

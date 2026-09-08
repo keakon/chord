@@ -226,6 +226,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Collapsed tool cards no longer truncate a multi-line error to its first line. A failure whose useful part is below the first line — a missing path followed by `Did you mean:` suggestions, or a per-file `apply_patch` failure list — hid exactly the information needed to fix it. The collapsed card now shows the error body, bounded to a few lines with a pointer to expand for the rest, so an unbounded tool error cannot take over the transcript.
 - The first-run setup wizard writes the current Codex model allocations. GPT-6 Astra, GPT-5.4, and GPT-5.6 Sol / Terra / Luna now get `1050000 / 922000 / 128000` instead of the older `400000 / 272000` profile (and GPT-5.4's stale `950000` input cap), matching the recipe in [Model configuration recipes](./docs/model-configs.md#codex-oauth-preset). GPT-5.5, GPT-5.2, and GPT-5.3-codex keep `400000 / 272000 / 128000`.
 
+- `chord import codex --id <id>` now resolves the id `codex resume` prints on exit. A Codex session that had spawned a forked or sub-agent thread left a second rollout file whose records still named the parent session, so importing that id matched two files and aborted with "multiple files matched". The lookup now identifies a rollout by the thread id Codex itself uses for `codex resume <id>`, so resumed or forked sessions import directly instead of requiring an explicit file path.
+
 ## 0.7.3 - 2026-08-08
 
 ### Breaking Changes
