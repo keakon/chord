@@ -12,22 +12,32 @@ import (
 	"github.com/keakon/chord/internal/pathutil"
 )
 
+func claimEvidenceText(claims map[string][]string) string {
+	var parts []string
+	for claim, refs := range claims {
+		parts = append(parts, claim+"\n"+strings.Join(refs, ","))
+	}
+	slices.Sort(parts)
+	return strings.Join(parts, "\n")
+}
+
 // CompactContextArgs is the structured continuation state the model submits
 // when requesting a model-driven context checkpoint. Every field is
 // model-authored; runtime facts (current user request, todos, subagents,
 // anchors, history map) are captured separately at checkpoint build time.
 type CompactContextArgs struct {
-	ActiveObjective   string   `json:"active_objective"`
-	Completed         []string `json:"completed"`
-	Decisions         []string `json:"decisions"`
-	OpenIssues        []string `json:"open_issues"`
-	NextStep          string   `json:"next_step"`
-	StateFiles        []string `json:"state_files"`
-	PlannedStateFiles []string `json:"planned_state_files"`
-	EvidenceRefs      []string `json:"evidence_refs"`
-	StageID           string   `json:"stage_id"`
-	StageStatus       string   `json:"stage_status"`
-	CheckpointKind    string   `json:"checkpoint_kind"`
+	ActiveObjective   string              `json:"active_objective"`
+	Completed         []string            `json:"completed"`
+	Decisions         []string            `json:"decisions"`
+	OpenIssues        []string            `json:"open_issues"`
+	NextStep          string              `json:"next_step"`
+	StateFiles        []string            `json:"state_files"`
+	PlannedStateFiles []string            `json:"planned_state_files"`
+	EvidenceRefs      []string            `json:"evidence_refs"`
+	ClaimEvidence     map[string][]string `json:"claim_evidence"`
+	StageID           string              `json:"stage_id"`
+	StageStatus       string              `json:"stage_status"`
+	CheckpointKind    string              `json:"checkpoint_kind"`
 }
 
 // TokenEstimator estimates the input-token cost of a string. Defaults to a
@@ -139,6 +149,20 @@ func (v CompactContextValidator) ParseCompactContextArgs(raw json.RawMessage) (C
 	if args.EvidenceRefs, err = validateCompactContextList(args.EvidenceRefs, 24, "evidence_refs"); err != nil {
 		return CompactContextArgs{}, err
 	}
+	if len(args.ClaimEvidence) > 20 {
+		return CompactContextArgs{}, fmt.Errorf("claim_evidence contains %d claims, exceeding the maximum of 20", len(args.ClaimEvidence))
+	}
+	for claim, refs := range args.ClaimEvidence {
+		if strings.TrimSpace(claim) == "" {
+			return CompactContextArgs{}, fmt.Errorf("claim_evidence contains an empty claim")
+		}
+		normalized, err := validateCompactContextList(refs, 8, "claim_evidence")
+		if err != nil {
+			return CompactContextArgs{}, err
+		}
+		delete(args.ClaimEvidence, claim)
+		args.ClaimEvidence[strings.TrimSpace(claim)] = normalized
+	}
 
 	// The continuation-state budget uses the same usage-calibrated token
 	// accounting as other context-pressure decisions. state_files paths are
@@ -159,6 +183,7 @@ func (v CompactContextValidator) ParseCompactContextArgs(raw json.RawMessage) (C
 		{"stage_id", args.StageID},
 		{"stage_status", args.StageStatus},
 		{"checkpoint_kind", args.CheckpointKind},
+		{"claim_evidence", claimEvidenceText(args.ClaimEvidence)},
 	}
 	texts := make([]string, len(fields))
 	for i, f := range fields {
@@ -411,6 +436,7 @@ func (CompactContextTool) Parameters() map[string]any {
 			"stage_id":        map[string]any{"type": "string", "description": "Stable identifier for the current work stage."},
 			"stage_status":    map[string]any{"type": "string", "enum": []string{"active", "candidate", "completed", "blocked", "superseded"}, "description": "Whether this stage is still active or is a checkpoint candidate/completed."},
 			"checkpoint_kind": map[string]any{"type": "string", "enum": []string{"provisional", "committed"}, "description": "Provisional reduces context but is not authoritative; committed requires runtime validation."},
+			"claim_evidence":  map[string]any{"type": "object", "maxProperties": 20, "additionalProperties": map[string]any{"type": "array", "maxItems": 8, "items": map[string]any{"type": "string", "minLength": 1}}, "description": "Maps each completed or decision claim to the evidence IDs supporting it."},
 		},
 		"required":             []string{"active_objective", "next_step"},
 		"additionalProperties": false,

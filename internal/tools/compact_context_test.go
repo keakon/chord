@@ -454,3 +454,13 @@ func TestCompactContextRejectsUnknownStageMetadata(t *testing.T) {
 		}
 	}
 }
+
+func TestCompactContextClaimEvidenceIsTrimmed(t *testing.T) {
+	args, err := testCompactValidator().ParseCompactContextArgs(json.RawMessage(`{"active_objective":"a","next_step":"b","claim_evidence":{"tests pass":["  ev-1  "]}}`))
+	if err != nil {
+		t.Fatalf("ParseCompactContextArgs: %v", err)
+	}
+	if !slices.Equal(args.ClaimEvidence["tests pass"], []string{"ev-1"}) {
+		t.Fatalf("claim_evidence = %#v", args.ClaimEvidence)
+	}
+}

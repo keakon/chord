@@ -293,6 +293,11 @@ func (a *MainAgent) tryArmModelDrivenCheckpoint(callID string, rawArgs string) (
 	if err := a.validateModelDrivenEvidenceRefs(args.EvidenceRefs); err != nil {
 		return "", err
 	}
+	for claim, refs := range args.ClaimEvidence {
+		if err := a.validateModelDrivenEvidenceRefs(refs); err != nil {
+			return "", fmt.Errorf("claim_evidence %q: %w", claim, err)
+		}
+	}
 	if err := validateModelDrivenCheckpointKind(args); err != nil {
 		return "", err
 	}
@@ -1080,6 +1085,7 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 	stateFiles := renderStateFilesSection(req.Args.StateFiles)
 	plannedStateFiles := renderPlannedStateFilesSection(req.Args.PlannedStateFiles)
 	evidenceRefs := renderEvidenceRefsSection(req.Args.EvidenceRefs)
+	claimEvidence := renderClaimEvidenceSection(req.Args.ClaimEvidence)
 	stage := renderModelDrivenStageSection(req.Args.StageID, req.Args.StageStatus, req.Args.CheckpointKind)
 
 	sections := []fallbackSummarySection{
@@ -1093,6 +1099,7 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 		{"## Externalized State", stateFiles},
 		{"## Planned Externalized State", plannedStateFiles},
 		{"## Evidence References", evidenceRefs},
+		{"## Claim Evidence", claimEvidence},
 		{"## Checkpoint Stage", stage},
 		{"## Todo State", formatTodosAsRelevanceBullets(bundle.todos, anchor)},
 		{"## SubAgent State", formatSubAgentsAsBullets(bundle.subAgents)},
@@ -1271,6 +1278,22 @@ func renderEvidenceRefsSection(refs []string) string {
 		return "- (none reported by the model)"
 	}
 	return "- Model-declared evidence references; runtime verified that these IDs exist:\n- " + strings.Join(refs, "\n- ")
+}
+
+func renderClaimEvidenceSection(claims map[string][]string) string {
+	if len(claims) == 0 {
+		return "- (none reported by the model)"
+	}
+	keys := make([]string, 0, len(claims))
+	for key := range claims {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	var b strings.Builder
+	for _, key := range keys {
+		fmt.Fprintf(&b, "- %s | evidence: %s\n", key, strings.Join(claims[key], ", "))
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 func renderModelDrivenStageSection(id, status, kind string) string {
