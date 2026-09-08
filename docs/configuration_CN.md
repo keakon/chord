@@ -138,11 +138,8 @@ openai:
   （此处为 `1050000 - 128000 = 922000`）；只有未声明 `limit.output` 的模型才回退到
   默认输出上限（`64000`）。这里超过 272K 是计价阈值，不是输入上限，因此**不要**
   再补 `input: 272000`。
-- Codex 通道是另一套档位：`preset: codex` 以及大多数基于 Codex 的 Responses 中转
-  提供 `1000000 / 872000 / 128000`（872K 输入 + 128K 输出 = 1M），旧档位账号回落
-  `400000 / 272000 / 128000`。不要把这份 API 片段的窗口照抄到 Codex provider 上——
-  Codex 档位的示例与两组数字的由来见
-  [模型配置速查](./model-configs_CN.md#gpt-56-aliasgpt-56--sol)。
+- Codex OAuth 与 API 使用相同的模型窗口：GPT-5.4 / 5.6 / 6 在 Codex 上同样是
+  `1050000 / 922000 / 128000` 档位（见下方 [OpenAI Codex preset](#openai-codex-preset)）。
 - API 支持的 reasoning effort 为 `none`、`low`、`medium`、`high`、`xhigh`、`max`；可用 `openai/gpt-5.6@max` 这样的 ref 选择已配置 variant。
 - Responses 在启用 reasoning 时默认使用 `reasoning.summary: auto`；如需明确关闭，请配置为 `none`。Chord 当前尚未暴露 GPT-5.6 的 `reasoning.mode: pro`。
 - `preset: codex` provider 也可以使用 `max`；是否接受该 effort 由具体模型 / 后端决定。
@@ -156,9 +153,6 @@ openai:
 1. `limit.context` 是总窗口。对大多数模型，只要“输入 + 请求输出”放得进这个数字即可。
 2. `limit.input` 只在 provider 还单独列出输入上限时才需要。部分 GPT 模型属于这种情况；如果省略，Chord 按 `limit.context` 减去模型自身的 `limit.output` 推导可用输入预算，只有模型未声明 `limit.output` 时才回退到全局默认输出上限（`max_output_tokens`，默认 `64000`）。显式声明的 `limit.input` 始终按原值使用。
 3. `limit.output` 是模型的最大输出能力。Chord 默认 `max_output_tokens` 为 `64000`，因此在按可用上下文继续收缩前，实际请求上限为 `min(64000, limit.output)`。如需不同的全局上限，请显式设置 `max_output_tokens`。若某模型实际输出能力低于 `64000` 且未配置 `limit.output`，在服务端校验 `max_tokens` 的后端会直接拒绝这类请求——请为该模型声明 `limit.output`，或调低全局 `max_output_tokens`。
-
-当前 GPT-5.6 Codex 配额为 400K 总窗口、272K 输入上限和 128K 输出上限，
-因此默认应显式配置这三个字段。
 
 Responses 和 Chat Completions 服务商的 `parallel_tool_calls` 默认都是 `true`。只有后端或工作流要求串行工具调用时，才在服务商、模型或变体上设为 `false`。部分网关要求特定客户端标识时，还可以配置服务商级 `user_agent`。
 
@@ -184,8 +178,7 @@ Azure OpenAI Responses endpoint 用普通 `type: responses` provider 配置：`a
 
 ### OpenAI Codex preset
 
-Codex OAuth 使用与 Responses 兼容 API 示例不同的独立模型限制；provider
-preset 和认证方式也不同。
+Codex OAuth 与 API 示例使用相同的模型窗口，区别只在 provider preset 与认证方式。
 
 ```yaml
 providers:
@@ -201,20 +194,19 @@ providers:
       gpt-5.4:
         limit:
           context: 1050000
-          input: 950000
+          input: 922000
           output: 128000
       gpt-5.6-sol:
         limit:
-          context: 1000000
-          input: 872000
+          context: 1050000
+          input: 922000
           output: 128000
 ```
 
-GPT-5.4 使用 `1050000 / 950000 / 128000`；GPT-5.5 使用
-`400000 / 272000 / 128000`；GPT-5.6 Sol、Terra、Luna 使用
-`1000000 / 872000 / 128000`（依次为 `context / input / output`），账号或中转
-仍是旧 Codex 档位时回落 `400000 / 272000 / 128000`。完整示例见
-[模型配置速查](./model-configs_CN.md#codex-oauth-preset)。
+GPT-5.4 / GPT-5.6 Sol / Terra / Luna / GPT-6 Astra 使用 `1050000 / 922000 / 128000`
+（1.05M 总窗口；922K 输入预算由 `context` − `output` 推导，这些模型不公布
+独立输入上限）；GPT-5.5 与 GPT-5.2 使用 `400000 / 272000 / 128000`。
+完整示例见 [模型配置速查](./model-configs_CN.md#codex-oauth-preset)。
 
 `preset: codex` 可使用 `auth.yaml` 中的 OpenAI / ChatGPT OAuth 凭据。OAuth 条目通常是 mapping：
 
@@ -540,6 +532,21 @@ Chord 没有 `model_templates` 配置字段，但可以在该顶层容器中使�
 anchor 和 merge key。Chord 会忽略容器本身，只读取 `providers` 下展开后的
 模型配置。
 
+merge key（`<<:`）把被引用映射**按键级别**复制进当前条目，冲突时当前条目
+胜出：
+
+- 标量字段（`reasoning.effort`、`compaction` 比例）直接替换继承值。
+- 嵌套对象是**整块替换**，不是逐字段合并：在已声明
+  `limit: {context: 1000000, output: 128000}` 的模板上覆盖
+  `limit: {context: 1050000}`，会悄悄丢掉继承的 `output`。凡是覆盖嵌套
+  对象（`limit`、`cost`、`compaction`、`variants` 条目、`modalities`……）
+  都要写全整块。
+- 链式继承同理（`gpt-5.6-luna: &gpt-5-6-luna {<<: *gpt-5-6-base}`）：
+  越深层的条目按整个 key 胜出。
+- 无法“撤销”祖先模板声明的字段——要么用具体值覆盖，要么不再引用该模板。
+  `compaction.threshold: 0` 与 `compaction.reminder: -1` 是例外，用来显式
+  关闭这两个行为。
+
 本页只介绍协议和字段语义。当前模型限制、价格以及 GPT / Claude / Gemini /
 GLM / DeepSeek 的完整可复制配置见[模型配置速查](./model-configs_CN.md)。
 
@@ -613,10 +620,10 @@ providers:
   显式配置的 `context` 始终优先。
 - `limit.input`：provider 单独公布的输入上限。显式声明的值始终按原值使用，
   即使与 `limit.output` 在窗口内不满足加和关系（`input + output` 超过
-  `context`）也不收敛——provider 会公布这类上限（如 gpt-5.4 在 1050000
-  窗口内公布 950000 输入）。省略时，Chord 按 `limit.context` 减去模型声明
-  的 `limit.output` 推导 prompt 预算；只有模型未声明 `limit.output` 时，
-  才回退到有效默认输出上限（`max_output_tokens`，默认 `64000`）。
+  `context`）也不收敛。省略时，Chord 按 `limit.context` 减去模型声明的
+  `limit.output` 推导 prompt 预算（1.05M GPT 家族即 1050000 − 128000 =
+  922000）；只有模型未声明 `limit.output` 时，才回退到有效默认输出上限
+  （`max_output_tokens`，默认 `64000`）。
 - `limit.output`：模型输出能力上限。实际请求还受全局
   `max_output_tokens` 和总窗口剩余空间限制。
 - `reasoning.effort`：推理深度或预算。Chord 规范化空格和大小写后，将

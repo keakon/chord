@@ -33,16 +33,16 @@ Use this page when you already know which provider/model family you want and jus
 
 ## OpenAI Responses-compatible: GPT-5.4 / GPT-5.5 / GPT-5.6
 
-The GPT-5.6 snippets use the Codex-backed allocation by default
-(`1000000` context / `872000` input / `128000` output — the 2026-09 server
-catalog, where 872K input + 128K output = 1M), because many Responses relays
-expose Codex-backed limits rather than the full OpenAI API window. Fall back to
-`400000 / 272000 / 128000` when your account or relay still serves the older
-profile. If your account or gateway explicitly supports the full GPT-5.6 API
-window, the notes below show how to opt in to 1.05M context manually. The cost
-blocks use OpenAI API pricing; override them when your relay charges different
-rates. Codex OAuth has a separate preset block below. Pair API-key providers
-with the matching entry in
+The GPT-5.4 / GPT-5.5 / GPT-5.6 / GPT-6 Astra snippets use the limits published
+on the OpenAI model pages: GPT-5.4 / 5.6 / 6 run a `1050000 / 922000 / 128000`
+allocation (1.05M total window; the 922K input budget derives as `context`
+minus `output` — these models publish no separate input cap) on both the API
+and the current Codex catalog, while GPT-5.5 stays on
+`400000 / 272000 / 128000`. If your account or relay still serves an older
+profile, fall back to `400000 / 272000 / 128000` for the affected models. The
+cost blocks use OpenAI API pricing; override them when your relay charges
+different rates. Codex OAuth has a separate preset block below. Pair API-key
+providers with the matching entry in
 `~/.config/chord/auth.yaml`:
 
 ```yaml
@@ -62,7 +62,7 @@ providers:
       gpt-5.4:
         limit:
           context: 1050000
-          input: 950000
+          input: 922000
           output: 128000
         cost:
           input: 2.5
@@ -142,13 +142,14 @@ maintained here).
 ```yaml
 model_templates:
   gpt-5.6-base: &gpt-5-6-base
-    # Codex subscription profile as of 2026-09: 872K input + 128K output = 1M
-    # (max_context_window=872000). Fall back to 400000/272000/128000 when
-    # your account/relay still serves the older profile; for the official
-    # OpenAI API use the full-window template below.
+    # 1.05M model-page limits, shared by the API and the current Codex
+    # catalog: 1050000 total window / 922000 input budget (context minus
+    # output; these models publish no separate input cap) / 128000 output.
+    # Fall back to 400000/272000/128000 when your account or relay still
+    # serves the older profile.
     limit:
-      context: 1000000
-      input: 872000
+      context: 1050000
+      input: 922000
       output: 128000
     reasoning:
       effort: medium
@@ -157,6 +158,9 @@ model_templates:
       low:
         reasoning:
           effort: low
+      medium:
+        reasoning:
+          effort: medium
       high:
         reasoning:
           effort: high
@@ -266,18 +270,12 @@ providers:
 
 Notes:
 
-- The GPT-5.6 examples use `1000000 / 872000 / 128000` for Codex-backed
-  accounts and relays: the 2026-09 server catalog sets
-  `max_context_window = 872000`, and Codex counts context as input + output,
-  so 872K + 128K = 1M (the documented `model_context_window: 1000000`). If
-  your account/relay still serves the older profile, fall back to
-  `400000 / 272000 / 128000`.
-- For the official OpenAI API, or a gateway confirmed to expose the full API
-  window, change `context` to `1050000` and remove `input`. Chord then derives
-  the usable input budget as `context` minus the model's `output` (128000 →
-  922000); the `64000` output-cap default is only reserved for models that
-  declare no `limit.output`. Do not keep `input: 272000`: above 272K is the
-  long-context pricing threshold, not the full API input cap.
+- The 5.6 examples declare the model-page window directly as
+  `1050000 / 922000 / 128000`: the 922K input budget derives as `context`
+  minus `output` (these models publish no separate input cap) and needs no
+  explicit `input`. Only the 400K-allocation models (GPT-5.5 / 5.2 above)
+  keep `input: 272000`. If your account or relay still serves the older
+  Codex profile, fall back to `400000 / 272000 / 128000` for the 5.6 tiers.
 - `gpt-5.6` currently resolves to Sol, so its `cost` block should match Sol pricing.
 - GPT-5.6 API reasoning efforts can include `none`, `low`, `medium`, `high`, `xhigh`, and `max`.
 - Responses defaults `reasoning.summary` to `auto` while reasoning is active; set `reasoning.summary: none` when you do not want Chord to request a readable summary.
@@ -291,12 +289,14 @@ chord doctor models --model openai/gpt-5.6@max
 
 #### Compaction tuning for GPT-5.6
 
-Start from two separate questions: **which window the model runs in** — the
-272K-input Codex/relay allocation or the full 1.05M API window — and **what
-the threshold is for**: keeping quality up, staying under the 272K
-long-context pricing tier, or using the window for raw capacity. The same
-ratio fires at very different token counts under the two windows, so a recipe
-tuned for one does not transfer to the other.
+Start from two questions: **which budget the model runs against** — the
+1.05M / 922K allocation used by the examples above, or a
+`400000 / 272000` fallback profile when your account/relay still serves the
+older Codex catalog — and **what the threshold is for**: keeping quality up,
+staying under the 272K long-context pricing tier, or using the window for raw
+capacity. The trigger is `threshold × usable input budget`, so the same ratio
+fires at very different token counts under the two budgets; a recipe tuned
+for one does not transfer to the other.
 
 **Long-context quality** (MRCR v2 8-needle results as reported by OpenAI):
 Sol/Terra stay strong in the 256K–512K band (91.5% / 89.6%) and drop to ~73%
@@ -318,27 +318,15 @@ requests run before compaction starts. Leave headroom below the line — and
 note that every compaction costs a summarization call and loses raw context,
 so compressing too eagerly can cost more than the tier it avoids.
 
-##### Full API window (1.05M)
-
-Remove `input`; the usable input budget then derives as `context` minus the
-model's declared `limit.output` — 922K for the 1.05M/128K template below,
-regardless of the 64K default request-output cap (that default is reserved
-only when the model declares no `limit.output`). The 272K pricing line is
-roughly 29% of that budget, which is why the cost-first answer sits in the 0.2
-range, not a typo.
-
 Cost-first (Sol/Terra/Luna share this: it keeps usage under the 272K tier
 and below Luna's 256K+ collapse zone):
 
 ```yaml
 model_templates:
-  gpt-5.6-full-cost: &gpt-5.6-full-cost
+  gpt-5.6-cost-first: &gpt-5.6-cost-first
     <<: *gpt-5-6-base
-    limit:
-      context: 1050000      # full API window: `input` removed
-      output: 128000
     compaction:
-      threshold: 0.25       # fires at ~231K–247K, under the 272K tier
+      threshold: 0.25       # 0.25 × 922K ≈ 231K, under the 272K pricing tier
       reminder: 0.2
 ```
 
@@ -346,13 +334,10 @@ Quality-first (Sol/Terra; Luna has no strong long-context band to aim for):
 
 ```yaml
 model_templates:
-  gpt-5.6-sol-quality: &gpt-5.6-sol-quality
+  gpt-5.6-quality-first: &gpt-5.6-quality-first
     <<: *gpt-5-6-base
-    limit:
-      context: 1050000
-      output: 128000
     compaction:
-      threshold: 0.55       # fires at ~507K–542K; 0.5–0.65 are reasonable
+      threshold: 0.55       # ≈ 507K; 0.5–0.65 are reasonable
 ```
 
 The `reminder` above is optional: it derives as `min(0.60, threshold × 0.90)`
@@ -366,35 +351,26 @@ so. Do not reuse the old 0.3 Luna recipe under this window: it fires at
 ##### Codex subscription windows are server-controlled — verify before setting `limit.input`
 
 On a Codex subscription endpoint (`preset: codex`, or a `/codex/responses`
-relay), the window a ChatGPT account gets comes from the server-delivered
-model catalog (`context_window` / `max_context_window`). Codex counts context
-as *input + output*, so a `max_context_window` of 872000 is the raw input
-side of the 1M budget — 872K input + 128K output = 1M, which is exactly what
-the documented `model_context_window: 1000000` configuration asks for. The
-95% factor only turns that into a client-side usable-input figure (~828.4K),
-and Codex's own automatic compaction defaults to 90% of the resolved raw
-window (~784.8K); none of those is a total-window clamp.
+relay), the window a ChatGPT account actually gets comes from the
+server-delivered model catalog (`context_window` / `max_context_window`),
+not from the model page: those catalog values have changed repeatedly and
+differed between accounts (input-side caps as low as 272K have shipped while
+the model page advertised 1.05M). `/status` may show the configured value
+before the first request and the real cap only after it. So:
 
-The catalog values have changed repeatedly and have differed between
-accounts: the input side long sat at 272K (the 400K allocation = 272K + 128K),
-expanded to a 872K maximum in mid-August 2026, and the server began
-delivering the expanded profile in early September 2026. Accounts can still
-lag, and `/status` may show the configured value before the first request and
-the real cap only after it. So:
-
-- Before setting `limit.input`, measure what the endpoint actually accepts:
-  configure the candidate value, run a long session, and watch the logs for
-  `context_length_exceeded` / oversize rejections.
-- On the subscription endpoint, `input: 872000` is the expanded 1M profile
-  (2026-09 state); fall back to `input: 272000` if your account/relay still
-  serves the older profile. `threshold` is decoupled from the window: it is
-  the fraction of the usable budget at which to compact, chosen by your
-  quality/cost tradeoff — but the API's >272K-input whole-request 2× pricing
-  cliff applies regardless of the window, so keep the trigger inside it if
-  that pricing applies to your route.
-- The 922K input cap (1.05M window − 128K output) applies only when hitting
-  the OpenAI API directly (`api.openai.com/v1/responses`); still leave
-  headroom for compaction and oversized single batches.
+- Before relying on the 1.05M allocation for long sessions, measure what the
+  endpoint actually accepts: configure the candidate `limit`, run a long
+  session, and watch the logs for `context_length_exceeded` / oversize
+  rejections.
+- If your account or relay still serves the older profile, fall back to
+  `400000 / 272000 / 128000` for that provider.
+- `threshold` is decoupled from the window: it is the fraction of the usable
+  budget at which to compact, chosen by your quality/cost tradeoff — but the
+  API's >272K-input whole-request 2× pricing cliff applies regardless of the
+  window, so keep the trigger inside it if that pricing applies to your
+  route. Leave headroom: the trigger compares the last provider-reported
+  usage against the budget, and a single large tool result can push the next
+  prompt past the line.
 
 As everywhere on this page, the `compaction` block lives on the model
 template so every provider referencing it inherits it, and the fields tune
@@ -538,18 +514,18 @@ threshold to the actual measured window, not the API full window.
 
 ## Codex OAuth preset
 
-Use this when you want ChatGPT/Codex OAuth instead of API keys. Codex uses its
-own model allocation; its model limits, provider preset, and authentication
-method can all differ from the API-key examples above.
+Use this when you want ChatGPT/Codex OAuth instead of API keys. Codex OAuth
+differs from the API-key examples only in the provider preset and the
+authentication method — the model windows match the API allocation.
 
-The Codex model limits used in this section are:
+The model allocations used in this section are:
 
 | Model | `limit.context` | `limit.input` | `limit.output` |
 | --- | ---: | ---: | ---: |
-| GPT-6 Astra | 1,000,000 | 872,000 | 128,000 |
-| GPT-5.4 | 1,050,000 | 950,000 | 128,000 |
+| GPT-6 Astra | 1,050,000 | 922,000 | 128,000 |
+| GPT-5.4 | 1,050,000 | 922,000 | 128,000 |
 | GPT-5.5 | 400,000 | 272,000 | 128,000 |
-| GPT-5.6 Sol / Terra / Luna | 1,000,000 | 872,000 | 128,000 |
+| GPT-5.6 Sol / Terra / Luna | 1,050,000 | 922,000 | 128,000 |
 
 Keep all three fields: `context` is the total input-plus-output window exposed
 by Codex, while `input` and `output` are the separate hard allocations within
@@ -564,8 +540,8 @@ providers:
     models:
       gpt-6-astra:
         limit:
-          context: 1000000
-          input: 872000
+          context: 1050000
+          input: 922000
           output: 128000
         variants:
           high:
@@ -595,12 +571,12 @@ providers:
       gpt-5.4:
         limit:
           context: 1050000
-          input: 950000
+          input: 922000
           output: 128000
       gpt-5.6-sol:
         limit:
-          context: 1000000
-          input: 872000
+          context: 1050000
+          input: 922000
           output: 128000
 
 model_pools:
@@ -620,17 +596,16 @@ Notes:
 - Keep API-key and Codex OAuth providers separate when you use both because their credentials and model allocations differ.
 - GPT-6 Astra is rolling out to Codex over the first weeks after launch (it
   requires Codex CLI 0.153.0 or newer) and its Codex subscription window is
-  not published. The recipe uses the same `1000000 / 872000 / 128000`
+  not published. The recipe uses the same `1050000 / 922000 / 128000`
   allocation as GPT-5.6 Sol as a conservative starting point; verify against
   your account's server catalog and adjust all three fields to the measured
   window before relying on it for long sessions.
-- GPT-5.4 uses `1050000 / 950000 / 128000`: the 1.05M total window, Codex's effective input budget (about 90% of the window; Chord uses the declared input as-is — like other published non-additive caps it is not clamped to `context - output`), and the model's maximum output.
-- GPT-5.6 Sol/Terra/Luna use the expanded Codex profile `1000000 / 872000 /
-  128000` (872K input + 128K output = 1M, matching the documented
-  `model_context_window: 1000000`; the API's `>272K` whole-request 2× pricing
-  cliff still applies if your route bills that way). If the server catalog for
-  your account/relay has not rolled out the expanded profile yet, fall back to
-  `400000 / 272000 / 128000`.
+- GPT-5.4, GPT-5.6 Sol / Terra / Luna, and GPT-6 Astra use the model-page
+  allocation `1050000 / 922000 / 128000` (the 922K input budget derives as
+  `context` minus `output`; these models publish no separate input cap). The
+  API's >272K whole-request 2× pricing cliff still applies if your route bills
+  that way. If the server catalog for your account/relay still serves the
+  older profile, fall back to `400000 / 272000 / 128000`.
 - These values track the current Codex model catalog and may change with a future Codex release. Update all three fields together when the backend allocation changes.
 
 ## Anthropic Claude
@@ -777,26 +752,24 @@ gemini:
 ```
 
 ```yaml
+model_templates:
+  # Shared shape for Gemini 3.x Flash models: 1M window, `level`-controlled
+  # thinking.
+  gemini-flash: &gemini-flash
+    limit:
+      context: 1048576
+      output: 65536
+    modalities:
+      input: [text, image, pdf]
+    thinking:
+      level: high
+
 providers:
   gemini:
     api_url: https://generativelanguage.googleapis.com/v1beta/models
     models:
-      gemini-3.5-flash:
-        limit:
-          context: 1048576
-          output: 65536
-        modalities:
-          input: [text, image, pdf]
-        thinking:
-          level: high
-      gemini-3.7-flash:
-        limit:
-          context: 1048576
-          output: 65536
-        modalities:
-          input: [text, image, pdf]
-        thinking:
-          level: high
+      gemini-3.5-flash: *gemini-flash
+      gemini-3.7-flash: *gemini-flash
 
 model_pools:
   default:
@@ -829,14 +802,6 @@ model_templates:
   gemini-pro: &gemini-pro
     limit: {context: 1048576, output: 65536}
     compaction: {threshold: 0.2, reminder: 0.15}
-    thinking:
-      include_thoughts: true
-    variants:
-      high: {thinking: {level: "high"}}
-      minimal: {thinking: {level: "minimal"}}
-    modalities: {input: [text, image, pdf]}
-  gemini-flash: &gemini-flash
-    limit: {context: 1048576, output: 65536}
     thinking:
       include_thoughts: true
     variants:

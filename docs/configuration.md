@@ -146,12 +146,9 @@ openai:
   and reserves the default `64000` output cap only for models that declare no
   `limit.output`. Above 272K is a pricing threshold here, not an input cap, so
   do not add `input: 272000`.
-- A Codex-backed provider is a different allocation: `preset: codex` and most
-  Codex-backed Responses relays serve `1000000 / 872000 / 128000`
-  (872K input + 128K output = 1M), falling back to `400000 / 272000 / 128000`
-  on the older profile. Do not copy this API snippet's window onto a Codex
-  provider — see [Model configuration recipes](./model-configs.md#gpt-56-alias-gpt-56--sol)
-  for the Codex-profile examples and the reasoning behind both numbers.
+- Codex OAuth uses the same model windows as the API: GPT-5.4 / 5.6 / 6 run
+  the `1050000 / 922000 / 128000` allocation there too (see
+  [OpenAI Codex preset](#openai-codex-preset) below).
 - Supported API reasoning efforts are `none`, `low`, `medium`, `high`, `xhigh`, and `max`; select a configured variant with a ref such as `openai/gpt-5.6@max`.
 - When reasoning is active, Responses defaults `reasoning.summary` to `auto`; set it to `none` to opt out explicitly. Chord does not currently expose GPT-5.6 `reasoning.mode: pro`.
 - `preset: codex` providers can also use `max` when the selected model/backend supports it. Whether a given effort level is accepted is model/provider-specific.
@@ -165,9 +162,6 @@ Read model limits in this order:
 1. `limit.context` is the total window. For most models, input + requested output just needs to fit inside this number.
 2. `limit.input` is only needed when the provider also lists a separate input cap. Some GPT models work this way; if you omit it, Chord derives the usable input budget as `limit.context` minus the model's own `limit.output` (only a model declaring no output cap falls back to the global `max_output_tokens` default). A declared `limit.input` is always used as-is.
 3. `limit.output` is the model's own output capacity. Chord's default requested output cap (`max_output_tokens`) is `64000`, so real requests use `min(64000, limit.output)` before the available-context clamp. Set `max_output_tokens` explicitly to choose a different global cap. If a model's real output capacity is below `64000` and `limit.output` is omitted, backends that validate the requested `max_tokens` server-side will reject those requests — declare `limit.output` for such models, or lower the global `max_output_tokens`.
-
-The current GPT-5.6 Codex allocation is a 400K total window with a 272K input
-cap and a 128K output cap, so configure all three fields explicitly by default.
 
 `parallel_tool_calls` defaults to `true` for Responses and Chat Completions providers. Set it to `false` on a provider, model, or variant only when the backend or workflow requires serial tool calls. Provider-level `user_agent` is also available for gateways that require a specific client identifier.
 
@@ -193,8 +187,7 @@ For Anthropic's gated 1M context beta, Chord opts in only when the model declare
 
 ### OpenAI Codex preset
 
-Codex OAuth uses a separate set of model limits from the Responses-compatible
-API examples. The provider preset and authentication method also change.
+Codex OAuth uses the same model windows as the API examples.
 
 ```yaml
 providers:
@@ -210,19 +203,19 @@ providers:
       gpt-5.4:
         limit:
           context: 1050000
-          input: 950000
+          input: 922000
           output: 128000
       gpt-5.6-sol:
         limit:
-          context: 1000000
-          input: 872000
+          context: 1050000
+          input: 922000
           output: 128000
 ```
 
-GPT-5.4 uses `1050000 / 950000 / 128000`. GPT-5.5 uses `400000 / 272000 / 128000`;
-GPT-5.6 Sol, Terra, and Luna use `1000000 / 872000 / 128000` (`context / input /
-output`), falling back to `400000 / 272000 / 128000` when the account or relay
-still serves the older Codex profile. See [Model configuration recipes](./model-configs.md#codex-oauth-preset)
+GPT-5.4 / 5.6 Sol / Terra / Luna / GPT-6 Astra use `1050000 / 922000 / 128000`
+(1.05M total window; the 922K input budget derives as `context` − `output`,
+since these models publish no separate input cap); GPT-5.5 and
+GPT-5.2 use `400000 / 272000 / 128000`. See [Model configuration recipes](./model-configs.md#codex-oauth-preset)
 for complete examples.
 
 `preset: codex` can use OpenAI / ChatGPT OAuth credentials from `auth.yaml`. OAuth entries are mappings:
@@ -568,6 +561,23 @@ Chord has no `model_templates` schema field. You can still use YAML anchors and
 merge keys under that top-level container; Chord ignores the container itself
 and reads the expanded model entries under `providers`.
 
+Merge keys (`<<:`) copy the referenced mapping into the current entry **at the
+key level**, and the current entry wins on conflict:
+
+- Scalar fields (`reasoning.effort`, a `compaction` fraction) simply replace
+  the inherited value.
+- Nested objects are replaced **as a whole**, not merged field by field:
+  overriding with `limit: {context: 1050000}` on a template that already
+  declared `limit: {context: 1000000, output: 128000}` silently drops the
+  inherited `output`. Write the complete block for anything you override
+  (`limit`, `cost`, `compaction`, `variants` entries, `modalities`, ...).
+- The same rule holds along a chain (`gpt-5.6-luna: &gpt-5-6-luna {<<: *gpt-5-6-base}`):
+  the deepest entry wins per whole key.
+- You cannot *unset* a field an ancestor template declares — override it with
+  a concrete value, or stop referencing that template. `compaction.threshold: 0`
+  and `compaction.reminder: -1` are the documented exceptions that disable
+  those two behaviors explicitly.
+
 Keep this page focused on protocol semantics. For current model limits, pricing,
 and complete GPT / Claude / Gemini / GLM / DeepSeek snippets, use
 [Model configuration recipes](./model-configs.md).
@@ -643,11 +653,11 @@ Model field semantics:
   derives it as `input + output`; an explicit `context` always takes priority.
 - `limit.input`: independent input cap when published. A declared value is
   authoritative and used as-is, even when it is not additive with
-  `limit.output` inside the window — providers publish such caps (e.g.
-  gpt-5.4's 950000 input in a 1050000 window). If omitted, Chord derives the
-  prompt budget as `limit.context` minus the model's `limit.output`; only a
-  model declaring no output cap falls back to reserving the effective default
-  output cap (`max_output_tokens`, default `64000`).
+  `limit.output` inside the window. If omitted, Chord derives the prompt
+  budget as `limit.context` minus the model's `limit.output` (so the 1.05M
+  GPT family gets 1050000 − 128000 = 922000); only a model declaring no
+  output cap falls back to reserving the effective default output cap
+  (`max_output_tokens`, default `64000`).
 - `limit.output`: model output capacity. Runtime requests are also capped by the
   global `max_output_tokens` setting and remaining total-context space.
 - `reasoning.effort`: reasoning depth/budget. Chord normalizes whitespace and

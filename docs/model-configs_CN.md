@@ -28,13 +28,13 @@
 
 ## OpenAI Responses 兼容接口：GPT-5.4 / GPT-5.5 / GPT-5.6
 
-GPT-5.6 片段默认使用 Codex 档位配额（`1000000` context / `872000` input /
-`128000` output——2026-09 服务端档位，872K 输入 + 128K 输出 = 1M），因为许多
-Responses 中转开放的是 Codex 受限窗口，而不是完整的 OpenAI API 窗口。账号或
-中转若仍是旧档位，回落 `400000 / 272000 / 128000`。如果账号或网关明确支持
-GPT-5.6 完整 API 窗口，可按下方说明手动启用 1.05M 上下文。价格块使用
-OpenAI API 费率；中转收费不同时需要自行覆盖。Codex OAuth 使用下方单独的
-preset 配置。使用 API key 的 provider 需要在
+GPT-5.4 / GPT-5.5 / GPT-5.6 / GPT-6 Astra 片段使用 OpenAI 模型页公布的
+档位：GPT-5.4 / 5.6 / 6 为 `1050000 / 922000 / 128000`（1.05M 总窗口；
+922K 输入预算由 `context` 减 `output` 推导——这些模型不公布独立输入上
+限），API 与当前 Codex 目录一致；GPT-5.5 保持 `400000 / 272000 / 128000`。
+账号或中转仍是旧档位时，相应模型回落 `400000 / 272000 / 128000`。价格块
+使用 OpenAI API 费率；中转收费不同时需要自行覆盖。Codex OAuth 使用下方
+单独的 preset 配置。使用 API key 的 provider 需要在
 `~/.config/chord/auth.yaml` 中配置同名条目：
 
 ```yaml
@@ -54,7 +54,7 @@ providers:
       gpt-5.4:
         limit:
           context: 1050000
-          input: 950000
+          input: 922000
           output: 128000
         cost:
           input: 2.5
@@ -133,12 +133,12 @@ chord doctor models --model openai/gpt-5.5@high
 ```yaml
 model_templates:
   gpt-5.6-base: &gpt-5-6-base
-    # Codex 订阅 2026-09 服务端档位：872K input + 128K output = 1M
-    # （max_context_window=872000）。账号/中转仍是旧档位时回落
-    # 400000/272000/128000；直连官方 API 用后面的 full-window 模板。
+    # 1.05M 模型页档位，API 与当前 Codex 目录一致：1050000 总窗口 /
+    # 922000 输入预算（`context` 减 `output` 推导，不公布独立输入上限）
+    # / 128000 输出。账号/中转仍是旧档位时回落 400000/272000/128000。
     limit:
-      context: 1000000
-      input: 872000
+      context: 1050000
+      input: 922000
       output: 128000
     reasoning:
       effort: medium
@@ -147,6 +147,9 @@ model_templates:
       low:
         reasoning:
           effort: low
+      medium:
+        reasoning:
+          effort: medium
       high:
         reasoning:
           effort: high
@@ -256,14 +259,10 @@ providers:
 
 要点：
 
-- GPT-5.6 示例对 Codex 订阅用 `1000000 / 872000 / 128000`（2026-09 服务端
-  档位：872K input + 128K output = 1M，对应 `max_context_window=872000`）；
-  账号/中转若仍是旧档位则回落 `400000 / 272000 / 128000`。
-- 使用 OpenAI 官方 API，或已确认网关开放完整 API 窗口时，把 `context`
-  改成 `1050000` 并删除 `input`。Chord 按 `context` 减去模型声明的
-  `limit.output` 推导可用输入预算（此模板为 128000，得 922000）；只有模型
-  未声明 `limit.output` 时才回退到默认 64000 输出上限。不要继续保留
-  `input: 272000`：超过 272K 是长上下文计价阈值，不是完整 API 的输入硬上限。
+- 5.6 示例直接声明模型页窗口 `1050000 / 922000 / 128000`：922K 输入预算
+  由 `context` 减 `output` 推导（这些模型不公布独立输入上限），无需显式
+  `input`。只有 400K 档模型（上面的 GPT-5.5 / 5.2）才保留 `input: 272000`。
+  账号/中转仍是旧 Codex 档位时，5.6 各档回落 `400000 / 272000 / 128000`。
 - `gpt-5.6` 当前会解析到 Sol，因此它的 `cost` 应按 Sol 费率填写。
 - GPT-5.6 API 可用的 reasoning effort 包括 `none`、`low`、`medium`、`high`、`xhigh`、`max`。
 - Responses 在启用 reasoning 时默认使用 `reasoning.summary: auto`；如果不希望 Chord 请求可读 reasoning 摘要，请显式配置 `reasoning.summary: none`。
@@ -277,10 +276,11 @@ chord doctor models --model openai/gpt-5.6@max
 
 #### GPT-5.6 的压缩调优
 
-先分清两件事再定阈值：**模型跑在哪个窗口**——Codex/中转的 272K 输入
-配额，还是官方 API 的 1.05M 全窗口——以及**阈值为什么调**：保质量、
-避开 272K 长上下文计价档，还是把窗口当容量用。同一比例在两个窗口下的
-触发点相差近 4 倍，针对一个窗口调出来的配方不能直接搬给另一个。
+先分清两件事再定阈值：**模型按哪个预算跑**——上面示例用的
+1.05M / 922K 档位，还是账号/中转仍是旧目录时的 `400000 / 272000`
+回落档——以及**阈值为什么调**：保质量、避开 272K 长上下文计价档，还是
+把窗口当容量用。触发点 = `threshold × usable input budget`，同一比例在
+两种预算下的触发点相差很大，针对一种预算调出来的配方不能直接搬给另一种。
 
 **长上下文质量**（OpenAI 公布的 MRCR v2 8-needle 数据）：Sol/Terra 在
 256K–512K 段保持 91.5% / 89.6%，到 512K–1M 段降到 73.8% / 72.5%；Luna
@@ -297,25 +297,15 @@ chord doctor models --model openai/gpt-5.6@max
 272K 线留点余量；另外每次压缩都要调用摘要模型并丢失原始上下文，阈值压
 得过低省下的输入费可能还抵不上压缩开销。
 
-##### 官方 API 全窗口（1.05M）
-
-删掉 `input`，可用输入预算由 `context` 减去模型声明的 `limit.output` 推出：
-此模板声明 `output: 128000`，得 922K，与全局请求输出上限（默认 64K）无关
-——只有模型未声明 `limit.output` 时才预留默认 64000。272K 计价线约占预算
-的 29%，所以成本优先档落在 0.2 区间，不是笔误。
-
 成本优先（Sol/Terra/Luna 共用：把用量留在 272K 计价档内，同时避开 Luna
 的 256K+ 崩塌区）：
 
 ```yaml
 model_templates:
-  gpt-5.6-full-cost: &gpt-5.6-full-cost
+  gpt-5.6-cost-first: &gpt-5.6-cost-first
     <<: *gpt-5-6-base
-    limit:
-      context: 1050000      # 官方全窗口：不写 input
-      output: 128000
     compaction:
-      threshold: 0.25       # 约 231K–247K 触发，低于 272K 计价线
+      threshold: 0.25       # 0.25 × 922K ≈ 231K，低于 272K 计价线
       reminder: 0.2
 ```
 
@@ -323,13 +313,10 @@ model_templates:
 
 ```yaml
 model_templates:
-  gpt-5.6-sol-quality: &gpt-5.6-sol-quality
+  gpt-5.6-quality-first: &gpt-5.6-quality-first
     <<: *gpt-5-6-base
-    limit:
-      context: 1050000
-      output: 128000
     compaction:
-      threshold: 0.55       # 约 507K–542K 触发；0.5–0.65 都合理
+      threshold: 0.55       # ≈ 507K；0.5–0.65 都合理
 ```
 
 上面示例里的 `reminder` 可以省略：省略时按 `min(0.60, threshold × 0.90)`
@@ -342,27 +329,19 @@ model_templates:
 ##### Codex 订阅通道：窗口由服务端目录控制，配置前先实测
 
 走 Codex 订阅端点（`preset: codex` 或 `/codex/responses` 中转）时，
-ChatGPT 账号拿到的窗口来自服务端模型目录（`context_window` /
-`max_context_window`）。Codex 把上下文算作**输入 + 输出**：目录里的
-`max_context_window = 872000` 是 1M 档的输入侧——872K 输入 + 128K 输出
-= 1M，正是官方 `model_context_window: 1000000` 配置要的值。95% 因子只是
-客户端把 raw 转成 usable 输入（约 828.4K），Codex 自己的自动压缩默认在
-解析后 raw 窗口的 90%（约 784.8K），都不是"总窗口被钳制"。
+ChatGPT 账号实际拿到的窗口来自服务端模型目录（`context_window` /
+`max_context_window`），不是模型页：目录值历史上多次变动、账号间也不
+一致（输入侧出现过低至 272K 的档位，而模型页宣传 1.05M）。`/status`
+在首个请求前可能显示配置值、请求后才回落真实值。因此：
 
-目录值历史上多次变动、账号间也不一致：输入侧长期是 272K（400K 档 =
-272K + 128K），2026-08 中旬放开到 872K 上限，2026-09 初服务端开始下发
-扩大后的档位。账号可能滞后，且 `/status` 在首个请求前可能显示配置值、
-请求后才回落真实值。因此：
-
-- 设 `limit.input` 前先实测该端点实际接受的输入量（配候选值跑长会话，
-  观察日志是否出现 `context_length_exceeded` / oversize 拒绝）。
-- 订阅端点按服务端状态取值：2026-09 放开后为 `input: 872000`（1M 档）；
-  若你的账号/中转仍是旧档位则回落 `input: 272000`。`threshold` 与窗口
-  解耦：它是"在可用预算的多少比例处压缩"，按质量/成本权衡选——但 API
-  的 >272K 输入整单 2× 计价悬崖与窗口无关，若你的路由适用该计价，触发
-  线仍应压在悬崖内。
-- 只有直连 OpenAI API（`api.openai.com/v1/responses`）才适用官方 922K
-  输入上限（1.05M 窗口 − 128K 输出）；仍建议留出压缩与单批暴涨余量。
+- 在长会话依赖 1.05M 档位前先实测该端点实际接受的输入量（配候选
+  `limit` 跑长会话，观察日志是否出现 `context_length_exceeded` /
+  oversize 拒绝）。
+- 账号/中转仍是旧档位时，为该 provider 回落 `400000 / 272000 / 128000`。
+- `threshold` 与窗口解耦：它是"在可用预算的多少比例处压缩"，按质量/成本
+  权衡选——但 API 的 >272K 输入整单 2× 计价悬崖与窗口无关，若你的路由
+  适用该计价，触发线仍应压在悬崖内。留足余量：触发比较的是上一次
+  provider 返回的 usage，一次大工具结果就可能把下一次请求推过线。
 
 其余规则不变：`compaction` 写在模型模板上，引用它的 provider 都会继
 承；`reminder` 省略时按 `min(0.60, threshold × 0.90)` 派生；这两个字段
@@ -495,17 +474,18 @@ provider 上（其窗口由服务端控制、Astra 尚未实测），把 `compac
 
 ## Codex OAuth preset
 
-当你要使用 ChatGPT/Codex OAuth，而不是 API key 时，用这个配置。Codex 使用
-独立的模型配额；与上方 API key 示例的区别不只是 provider preset 和认证方式。
+当你要使用 ChatGPT/Codex OAuth，而不是 API key 时，用这个配置。Codex OAuth
+与上方 API key 示例的区别只在 provider preset 和认证方式——模型窗口与 API
+一致。
 
-本节使用以下 Codex 模型限制：
+本节使用的模型档位：
 
 | 模型 | `limit.context` | `limit.input` | `limit.output` |
 | --- | ---: | ---: | ---: |
-| GPT-6 Astra | 1,000,000 | 872,000 | 128,000 |
-| GPT-5.4 | 1,050,000 | 950,000 | 128,000 |
+| GPT-6 Astra | 1,050,000 | 922,000 | 128,000 |
+| GPT-5.4 | 1,050,000 | 922,000 | 128,000 |
 | GPT-5.5 | 400,000 | 272,000 | 128,000 |
-| GPT-5.6 Sol / Terra / Luna | 1,000,000 | 872,000 | 128,000 |
+| GPT-5.6 Sol / Terra / Luna | 1,050,000 | 922,000 | 128,000 |
 
 三个字段都要保留：`context` 表示 Codex 开放的输入加输出总窗口，`input`
 和 `output` 则是其中各自独立的硬上限。两个独立上限不必相加等于
@@ -519,8 +499,8 @@ providers:
     models:
       gpt-6-astra:
         limit:
-          context: 1000000
-          input: 872000
+          context: 1050000
+          input: 922000
           output: 128000
         variants:
           high:
@@ -550,12 +530,12 @@ providers:
       gpt-5.4:
         limit:
           context: 1050000
-          input: 950000
+          input: 922000
           output: 128000
       gpt-5.6-sol:
         limit:
-          context: 1000000
-          input: 872000
+          context: 1050000
+          input: 922000
           output: 128000
 
 model_pools:
@@ -575,12 +555,13 @@ chord auth codex
 - 同时使用 API key 和 Codex OAuth 时，因为凭据和模型配额不同，应保留两个 provider，并分别配置模型限制。
 - GPT-6 Astra 正在上线后头几周内向 Codex 推出（需要 Codex CLI 0.153.0
   或更新版本），Codex 订阅窗口官方尚未公布。配方沿用 GPT-5.6 Sol 的
-  `1000000 / 872000 / 128000` 作为保守起点；上线后请按账号的服务端目录
+  `1050000 / 922000 / 128000` 作为保守起点；上线后请按账号的服务端目录
   核对，并把三个字段都调成实测窗口再用于长会话。
-- GPT-5.4 使用 `1050000 / 950000 / 128000`，分别对应 1.05M 总窗口、Codex 的有效输入预算（约为窗口的 90%；显式声明的输入始终按原值使用，与 `output` 不满足加和关系时也不会被钳制到 `context - output` 以内）和模型最大输出。
-- `gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-5.6-luna` 都使用 `1000000 /
-  872000 / 128000`（Codex 订阅 2026-09 服务端档位；旧档位账号回落
-  `400000 / 272000 / 128000`）。
+- GPT-5.4、GPT-5.6 Sol / Terra / Luna 与 GPT-6 Astra 使用模型页档位
+  `1050000 / 922000 / 128000`（922K 输入预算由 `context` 减 `output` 推导，
+  这些模型不公布独立输入上限）。API 的 >272K 整单 2× 计价悬崖若适用于
+  你的路由仍照常生效。账号/中转的服务端目录仍是旧档位时，回落
+  `400000 / 272000 / 128000`。
 - 这些数值跟随当前 Codex 模型目录，未来 Codex 版本可能调整。后端配额变化时，要同时更新三个字段。
 
 ## Anthropic Claude
@@ -709,26 +690,23 @@ gemini:
 ```
 
 ```yaml
+model_templates:
+  # Gemini 3.x Flash 共用形状：1M 窗口、`level` 控制的 thinking。
+  gemini-flash: &gemini-flash
+    limit:
+      context: 1048576
+      output: 65536
+    modalities:
+      input: [text, image, pdf]
+    thinking:
+      level: high
+
 providers:
   gemini:
     api_url: https://generativelanguage.googleapis.com/v1beta/models
     models:
-      gemini-3.5-flash:
-        limit:
-          context: 1048576
-          output: 65536
-        modalities:
-          input: [text, image, pdf]
-        thinking:
-          level: high
-      gemini-3.7-flash:
-        limit:
-          context: 1048576
-          output: 65536
-        modalities:
-          input: [text, image, pdf]
-        thinking:
-          level: high
+      gemini-3.5-flash: *gemini-flash
+      gemini-3.7-flash: *gemini-flash
 
 model_pools:
   default:
@@ -754,14 +732,6 @@ model_templates:
   gemini-pro: &gemini-pro
     limit: {context: 1048576, output: 65536}
     compaction: {threshold: 0.2, reminder: 0.15}
-    thinking:
-      include_thoughts: true
-    variants:
-      high: {thinking: {level: "high"}}
-      minimal: {thinking: {level: "minimal"}}
-    modalities: {input: [text, image, pdf]}
-  gemini-flash: &gemini-flash
-    limit: {context: 1048576, output: 65536}
     thinking:
       include_thoughts: true
     variants:
