@@ -1634,3 +1634,11 @@ func TestValidateModelDrivenCheckpointKindRequiresEvidence(t *testing.T) {
 		t.Fatalf("valid committed checkpoint rejected: %v", err)
 	}
 }
+
+func TestValidateModelDrivenEvidenceRefsUsesFullTracker(t *testing.T) {
+	a := &MainAgent{}
+	a.evidence.add(evidenceItem{Kind: evidenceToolDiff, Key: "full-evidence", Excerpt: "important"})
+	if err := a.validateModelDrivenEvidenceRefs([]string{evidenceItemID(a.evidence.snapshot()[0])}); err != nil {
+		t.Fatalf("full tracker evidence was rejected: %v", err)
+	}
+}

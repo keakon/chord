@@ -315,7 +315,7 @@ func (a *MainAgent) validateModelDrivenEvidenceRefs(refs []string) error {
 		return nil
 	}
 	known := make(map[string]struct{})
-	for _, item := range a.evidenceItemsForCompaction(a.ctxMgr.GetMaxTokens()) {
+	for _, item := range a.evidence.snapshot() {
 		known[evidenceItemID(item)] = struct{}{}
 	}
 	for _, ref := range refs {
