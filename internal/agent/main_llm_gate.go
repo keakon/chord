@@ -1013,13 +1013,22 @@ func (a *MainAgent) resumePendingMainLLMAfterCompaction(pending *pendingMainLLMC
 			return false
 		}
 		if recheckGate {
-			// Apply succeeded: merge queued user input and the SubAgent mailbox
-			// (they outrank the checkpoint's older continuation state), surface a
-			// transient auto-continue overlay, and continue the same turn through
-			// the normal pre-request gate (usage-driven gate runs on the
+			// Apply succeeded: continue the same turn on the compacted context
+			// through the normal pre-request gate (usage-driven gate runs on the
 			// compacted context). No new logical turn is created — there was no
-			// fresh user message.
-			a.processPendingUserMessagesBeforeLLMInTurn()
+			// fresh user message yet.
+			//
+			// Queued user messages are deliberately NOT merged here. A real
+			// user message that arrived while the checkpoint was pending is
+			// newer than the checkpoint's archived boundary and belongs to the
+			// next turn: it stays queued and drains through the normal idle
+			// path once this continuation finishes, so the model sees it as a
+			// fresh request on the compacted context. Merging it into this
+			// continuation would append it directly behind the context-summary
+			// message while this turn is still finishing the checkpoint's
+			// older objective — the model then reads it as part of the summary
+			// (often the very historical message the summary quotes) and never
+			// acts on it.
 			a.prepareSubAgentMailboxBatchForTurnContinuation()
 			if a.turn == nil || a.turn.ID != pending.turnID || a.turn.Epoch != pending.turnEpoch {
 				return false

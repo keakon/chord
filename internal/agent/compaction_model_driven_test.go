@@ -1530,3 +1530,45 @@ func TestAppendDeferredModelDrivenToolResultCarriesFullMessageShape(t *testing.T
 		t.Fatalf("duration/file state lost: %d %+v", last.ToolDurationMs, last.FileState)
 	}
 }
+
+// TestModelDrivenResumeKeepsQueuedUserMessageForNextTurn pins the boundary
+// between a model-driven checkpoint and a real user message that arrived while
+// the checkpoint was pending: the queued message must not be merged into the
+// continuation requests of the checkpoint's own turn. The continuation runs on
+// the compacted context to finish the archived objective; the message belongs
+// to the next turn and must stay queued until that continuation reaches idle.
+// Appending it earlier would put the fresh user request directly behind the
+// context-summary message while the old objective is still being finished, and
+// the model reads it as part of the summary instead of acting on it.
+func TestModelDrivenResumeKeepsQueuedUserMessageForNextTurn(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.newTurn()
+	turnID := a.turn.ID
+	target := compactionTarget{turnID: turnID, turnEpoch: a.turn.Epoch, sessionEpoch: a.sessionEpoch}
+	a.startCompactionState(11, target, compactionTriggerModelDriven, continuationPlan{kind: compactionResumeModelDriven, turnID: turnID, turnEpoch: a.turn.Epoch, agentErrSourceID: "main"})
+	pending := a.currentCompactionPendingCall()
+	if pending == nil {
+		t.Fatal("startCompactionState must arm a pending model-driven call")
+	}
+	// The apply landed: the slot is free and the compacted context is live.
+	a.resetCompactionState()
+
+	// A real user message arrived while the checkpoint was pending.
+	a.pendingUserMessages = []pendingUserMessage{{Content: "commit the pending changes", FromUser: true}}
+
+	if !a.resumePendingMainLLMAfterCompaction(pending, true) {
+		t.Fatal("a successful model-driven apply must handle its own resume barrier")
+	}
+	if a.turn == nil || a.turn.ID != turnID {
+		t.Fatal("the continuation must keep running in the checkpoint's own turn")
+	}
+	if len(a.pendingUserMessages) != 1 {
+		t.Fatalf("queued user message must stay queued for the next turn, got %d queued", len(a.pendingUserMessages))
+	}
+	for _, m := range a.ctxMgr.Snapshot() {
+		if m.Role == message.RoleUser && strings.Contains(m.Content, "commit the pending changes") {
+			t.Fatal("queued user message must not be appended into the checkpoint turn's continuation context")
+		}
+	}
+}
