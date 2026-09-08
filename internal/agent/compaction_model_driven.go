@@ -1171,6 +1171,7 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 	// merge's list bound so the renderer discloses the omission.
 	var stateCarryOmitted int
 	req, stateCarryOmitted = mergePriorTypedCheckpointState(req, latestPriorCheckpointBody(snapshot[:headSplit]))
+	markTypedClaimsInvalidated(req, bundle.evidenceItems)
 	headSnapshot := snapshot[:headSplit]
 	anchor := resolveLatestUserRequestAnchor(snapshot)
 	constraints := renderEvidenceKindForFallback(&compactionInput{EvidenceItems: bundle.evidenceItems}, evidenceUserCorrection, "- No preserved user constraints.")
@@ -1235,6 +1236,27 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 	// history files rather than as a growing verbatim appendix.
 	anchors := buildCompactionAnchors(latestCompactionAnchors(headSnapshot), bundle.originalRequest, bundle.evidenceItems)
 	return withCompactionAnchors(summary, anchors)
+}
+
+func markTypedClaimsInvalidated(req *modelDrivenCheckpointRequest, evidenceItems []evidenceItem) {
+	if req == nil || len(req.Args.ClaimEvidence) == 0 || len(req.Args.ClaimKinds) == 0 {
+		return
+	}
+	validity := make(map[string]evidenceValidity, len(evidenceItems))
+	for _, item := range evidenceItems {
+		validity[evidenceItemID(item)] = item.Validity
+	}
+	for claim, refs := range req.Args.ClaimEvidence {
+		for _, ref := range refs {
+			if validity[ref] == evidenceValidityInvalidated || validity[ref] == evidenceValidityUnavailable {
+				if req.Args.ClaimKinds == nil {
+					req.Args.ClaimKinds = map[string]string{}
+				}
+				req.Args.ClaimKinds[claim] = "invalidated"
+				break
+			}
+		}
+	}
 }
 
 // mergePriorTypedCheckpointState merges the typed state carried by the most

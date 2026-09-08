@@ -227,3 +227,14 @@ func TestTypedClaimsCarryIdentityAndStatus(t *testing.T) {
 		t.Fatalf("claim state did not round-trip: %#v", decoded.Claims)
 	}
 }
+
+func TestTypedClaimsInvalidateOnEvidenceStatus(t *testing.T) {
+	req := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{
+		ClaimKinds:    map[string]string{"tests pass": "observed"},
+		ClaimEvidence: map[string][]string{"tests pass": {evidenceItemID(evidenceItem{Key: "ev-1"})}},
+	}}
+	markTypedClaimsInvalidated(req, []evidenceItem{{Key: "ev-1", Validity: evidenceValidityInvalidated}})
+	if req.Args.ClaimKinds["tests pass"] != "invalidated" {
+		t.Fatalf("claim kind = %q, want invalidated", req.Args.ClaimKinds["tests pass"])
+	}
+}
