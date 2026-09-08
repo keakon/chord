@@ -1464,27 +1464,29 @@ func newTestMainAgentForRestore(t *testing.T, projectRoot, sessionDir string) *M
 	return a
 }
 
-func TestRecoverySnapshotPreservesPendingModelDrivenRequestID(t *testing.T) {
+func TestRecoverySnapshotPreservesModelDrivenProposal(t *testing.T) {
 	a := &MainAgent{
-		pendingModelDrivenRequestID: "call-restore",
-		pendingModelDrivenStatus:    "accepted",
-		pendingModelDriven: &modelDrivenCheckpointRequest{
-			ToolCallID: "call-restore",
-			Args:       tools.CompactContextArgs{ActiveObjective: "preserve state"},
+		modelDrivenProposal: modelDrivenProposalState{
+			requestID: "call-restore",
+			status:    "accepted",
+			argsJSON:  `{"active_objective":"preserve state"}`,
 		},
 		ctxMgr:                          ctxmgr.NewManager(1000, 1000),
 		stageCompletionCandidateTurnID:  7,
 		stageCompletionCandidatePending: true,
 	}
 	snapshot := a.buildRecoverySnapshot()
-	if snapshot.PendingModelDrivenRequestID != "call-restore" {
-		t.Fatalf("pending model-driven request ID = %q", snapshot.PendingModelDrivenRequestID)
+	if snapshot.ModelDrivenProposal == nil {
+		t.Fatal("model-driven proposal snapshot = nil")
 	}
-	if snapshot.PendingModelDrivenStatus != "accepted" {
-		t.Fatalf("pending model-driven request status = %q", snapshot.PendingModelDrivenStatus)
+	if snapshot.ModelDrivenProposal.RequestID != "call-restore" {
+		t.Fatalf("proposal request ID = %q", snapshot.ModelDrivenProposal.RequestID)
 	}
-	if !strings.Contains(snapshot.PendingModelDrivenArgsJSON, "preserve state") {
-		t.Fatalf("pending model-driven request args = %q", snapshot.PendingModelDrivenArgsJSON)
+	if snapshot.ModelDrivenProposal.Status != "accepted" {
+		t.Fatalf("proposal status = %q", snapshot.ModelDrivenProposal.Status)
+	}
+	if !strings.Contains(snapshot.ModelDrivenProposal.ArgsJSON, "preserve state") {
+		t.Fatalf("proposal args = %q", snapshot.ModelDrivenProposal.ArgsJSON)
 	}
 	if snapshot.StageCompletionCandidateTurnID != 7 || !snapshot.StageCompletionCandidatePending {
 		t.Fatalf("stage completion candidate = turn=%d pending=%v", snapshot.StageCompletionCandidateTurnID, snapshot.StageCompletionCandidatePending)

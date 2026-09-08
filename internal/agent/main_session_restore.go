@@ -51,12 +51,7 @@ type loadedSessionState struct {
 	PendingCompactionResume         *recovery.PendingCompactionResume
 	LastModelDrivenApplyBatch       uint64
 	AutoCompactRequestGeneration    uint64
-	PendingModelDrivenRequestID     string
-	LastModelDrivenRequestID        string
-	PendingModelDrivenStatus        string
-	PendingModelDrivenArgsJSON      string
-	ModelDrivenProposalReason       string
-	ModelDrivenProposalUpdatedAt    time.Time
+	ModelDrivenProposal             *recovery.ModelDrivenProposalSnapshot
 	StageCompletionCandidateTurnID  uint64
 	StageCompletionCandidatePending bool
 	SubAgentStates                  []loadedSubAgentState
@@ -426,29 +421,7 @@ func (a *MainAgent) applySessionSnapshot(loaded *loadedSessionState, sessionPath
 	loaded.PendingCompactionResume = clonePendingCompactionResume(snap.PendingCompactionResume)
 	loaded.LastModelDrivenApplyBatch = snap.LastModelDrivenApplyBatch
 	loaded.AutoCompactRequestGeneration = snap.AutoCompactRequestGeneration
-	loaded.PendingModelDrivenRequestID = strings.TrimSpace(snap.PendingModelDrivenRequestID)
-	loaded.LastModelDrivenRequestID = strings.TrimSpace(snap.LastModelDrivenRequestID)
-	loaded.PendingModelDrivenStatus = strings.TrimSpace(snap.PendingModelDrivenStatus)
-	loaded.PendingModelDrivenArgsJSON = strings.TrimSpace(snap.PendingModelDrivenArgsJSON)
-	loaded.ModelDrivenProposalReason = strings.TrimSpace(snap.ModelDrivenProposalReason)
-	loaded.ModelDrivenProposalUpdatedAt = snap.ModelDrivenProposalUpdatedAt
-	if proposal := snap.ModelDrivenProposal; proposal != nil {
-		if loaded.PendingModelDrivenRequestID == "" {
-			loaded.PendingModelDrivenRequestID = strings.TrimSpace(proposal.RequestID)
-		}
-		if loaded.PendingModelDrivenStatus == "" {
-			loaded.PendingModelDrivenStatus = strings.TrimSpace(proposal.Status)
-		}
-		if loaded.PendingModelDrivenArgsJSON == "" {
-			loaded.PendingModelDrivenArgsJSON = strings.TrimSpace(proposal.ArgsJSON)
-		}
-		if loaded.ModelDrivenProposalReason == "" {
-			loaded.ModelDrivenProposalReason = strings.TrimSpace(proposal.Reason)
-		}
-		if loaded.ModelDrivenProposalUpdatedAt.IsZero() {
-			loaded.ModelDrivenProposalUpdatedAt = proposal.UpdatedAt
-		}
-	}
+	loaded.ModelDrivenProposal = cloneModelDrivenProposalSnapshot(snap.ModelDrivenProposal)
 	loaded.StageCompletionCandidateTurnID = snap.StageCompletionCandidateTurnID
 	loaded.StageCompletionCandidatePending = snap.StageCompletionCandidatePending
 	subAgentStarted := time.Now()
@@ -741,13 +714,17 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	}
 	a.setPendingCompactionResume(loaded.PendingCompactionResume)
 	a.lastModelDrivenApplyBatch = loaded.LastModelDrivenApplyBatch
-	a.lastModelDrivenRequestID = loaded.LastModelDrivenRequestID
-	if loaded.PendingModelDrivenRequestID != "" && modelDrivenProposalNeedsRecoveryNotice(loaded.PendingModelDrivenStatus) {
-		a.pendingModelDrivenStatus = loaded.PendingModelDrivenStatus
-		a.pendingModelDrivenAuditArgsJSON = loaded.PendingModelDrivenArgsJSON
-		a.modelDrivenProposalReason = loaded.ModelDrivenProposalReason
-		a.modelDrivenProposalUpdatedAt = loaded.ModelDrivenProposalUpdatedAt
-		a.pendingModelDrivenNotice = "A model-driven checkpoint request was accepted before the previous session ended but was not applied; the previous context remains authoritative. The request arguments were preserved for audit only and will not be applied automatically."
+	if proposal := loaded.ModelDrivenProposal; proposal != nil {
+		a.modelDrivenProposal = modelDrivenProposalState{
+			requestID: strings.TrimSpace(proposal.RequestID),
+			status:    strings.TrimSpace(proposal.Status),
+			reason:    strings.TrimSpace(proposal.Reason),
+			updatedAt: proposal.UpdatedAt,
+			argsJSON:  strings.TrimSpace(proposal.ArgsJSON),
+		}
+		if strings.TrimSpace(proposal.RequestID) != "" && modelDrivenProposalNeedsRecoveryNotice(proposal.Status) {
+			a.pendingModelDrivenNotice = "A model-driven checkpoint request was accepted before the previous session ended but was not applied; the previous context remains authoritative. The request arguments were preserved for audit only and will not be applied automatically."
+		}
 	}
 	a.stageCompletionCandidateTurnID = loaded.StageCompletionCandidateTurnID
 	a.stageCompletionCandidatePending = loaded.StageCompletionCandidatePending

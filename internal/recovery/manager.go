@@ -83,14 +83,14 @@ type SessionSnapshot struct {
 	// AutoCompactRequestGeneration is the monotonic id of the last armed
 	// usage-driven auto-compact request. It is persisted so a restored session
 	// never reuses a generation (and its externalization-warning claim).
-	AutoCompactRequestGeneration    uint64                       `json:"auto_compact_request_generation,omitempty"`
-	PendingModelDrivenRequestID     string                       `json:"pending_model_driven_request_id,omitempty"`
-	LastModelDrivenRequestID        string                       `json:"last_model_driven_request_id,omitempty"`
-	PendingModelDrivenStatus        string                       `json:"pending_model_driven_status,omitempty"`
-	PendingModelDrivenArgsJSON      string                       `json:"pending_model_driven_args_json,omitempty"`
+	AutoCompactRequestGeneration uint64 `json:"auto_compact_request_generation,omitempty"`
+	// ModelDrivenProposal is the single persisted record of the most recent
+	// model-driven compact_context attempt (identity, lifecycle status,
+	// runtime-owned reason/time and the audit copy of the accepted arguments).
+	// It is written and read back as one object so a crash between acceptance
+	// and apply restores a not-applied proposal instead of losing it or
+	// mistaking it for an applied reset.
 	ModelDrivenProposal             *ModelDrivenProposalSnapshot `json:"model_driven_proposal,omitempty"`
-	ModelDrivenProposalReason       string                       `json:"model_driven_proposal_reason,omitempty"`
-	ModelDrivenProposalUpdatedAt    time.Time                    `json:"model_driven_proposal_updated_at,omitempty"`
 	StageCompletionCandidateTurnID  uint64                       `json:"stage_completion_candidate_turn_id,omitempty"`
 	StageCompletionCandidatePending bool                         `json:"stage_completion_candidate_pending,omitempty"`
 }

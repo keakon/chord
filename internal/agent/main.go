@@ -646,16 +646,19 @@ type MainAgent struct {
 	pathLocator    *config.PathLocator // resolved startup paths; nil falls back to DefaultPathLocator
 	lastPlanPath   string
 	pendingHandoff *HandoffResult // deferred Handoff action; processed after all sibling tools finish
-	// pendingModelDriven is the accepted-but-not-yet-started compact_context
-	// checkpoint request. Armed by handleToolResult after control-plane
-	// validation and consumed at the tool-batch barrier.
-	pendingModelDriven              *modelDrivenCheckpointRequest
-	pendingModelDrivenRequestID     string
-	lastModelDrivenRequestID        string
-	pendingModelDrivenStatus        string
-	pendingModelDrivenAuditArgsJSON string
-	modelDrivenProposalReason       string
-	modelDrivenProposalUpdatedAt    time.Time
+	// pendingModelDriven is the armed-but-not-yet-barriered compact_context
+	// checkpoint request (the payload form of the accepted proposal). Armed by
+	// handleToolResult after control-plane validation and consumed at the
+	// tool-batch barrier. The proposal's lifecycle record — identity, status,
+	// runtime-owned reason/time and audit args — lives in modelDrivenProposal
+	// below and survives past this armed payload (see compaction_proposal.go).
+	pendingModelDriven *modelDrivenCheckpointRequest
+	// modelDrivenProposal is the single event-loop-owned lifecycle record of
+	// the most recent model-driven compact_context attempt, from acceptance
+	// through its terminal settle. All mutations funnel through
+	// armModelDrivenProposal / transitionModelDrivenProposal, which persist
+	// the recovery snapshot after every change.
+	modelDrivenProposal modelDrivenProposalState
 	// modelDrivenSkipNotice carries the low-gain skip reason from the worker
 	// settle to the continuation, which surfaces it as a transient notice.
 	modelDrivenSkipNotice string

@@ -402,8 +402,8 @@ func TestModelDrivenSkipSettlesWithoutClearingUsageState(t *testing.T) {
 	a.ctxMgr.RestoreStats(message.TokenUsage{InputTokens: 1000})
 	a.modelDrivenSkipNotice = ""
 	a.settleModelDrivenSkip(&compactionDraft{Skip: true, InfoMessage: "projected savings too small"})
-	if a.pendingModelDrivenStatus != string(CompactionStatusSkipped) {
-		t.Fatalf("checkpoint status after skip = %q", a.pendingModelDrivenStatus)
+	if a.modelDrivenProposal.status != string(CompactionStatusSkipped) {
+		t.Fatalf("checkpoint status after skip = %q", a.modelDrivenProposal.status)
 	}
 	if !a.autoCompactRequested.Load() {
 		t.Fatal("model-driven skip must NOT clear autoCompactRequested")
@@ -447,16 +447,16 @@ func TestModelDrivenSettleRecordsLifecycleAndTerminalTrigger(t *testing.T) {
 
 	// Failure and cancel settlements also settle exactly once with the trigger.
 	a.settleModelDrivenFailure(errCompactionWatchdog)
-	if a.pendingModelDrivenStatus != string(CompactionStatusFailed) {
-		t.Fatalf("checkpoint status after failure = %q", a.pendingModelDrivenStatus)
+	if a.modelDrivenProposal.status != string(CompactionStatusFailed) {
+		t.Fatalf("checkpoint status after failure = %q", a.modelDrivenProposal.status)
 	}
 	stats = a.usageTracker.SessionStats()
 	if stats.CompactionLifecycle["failed/model_driven"] != 1 {
 		t.Fatalf("failed/model_driven count = %d, want 1", stats.CompactionLifecycle["failed/model_driven"])
 	}
 	a.settleModelDrivenCancelled("cancelled by the user")
-	if a.pendingModelDrivenStatus != string(CompactionStatusCancelled) {
-		t.Fatalf("checkpoint status after cancellation = %q", a.pendingModelDrivenStatus)
+	if a.modelDrivenProposal.status != string(CompactionStatusCancelled) {
+		t.Fatalf("checkpoint status after cancellation = %q", a.modelDrivenProposal.status)
 	}
 	stats = a.usageTracker.SessionStats()
 	if stats.CompactionLifecycle["cancelled/model_driven"] != 1 {
@@ -1595,15 +1595,20 @@ func TestModelDrivenResumeKeepsQueuedUserMessageForNextTurn(t *testing.T) {
 }
 
 func TestModelDrivenCheckpointRequestIDUsesToolCallID(t *testing.T) {
-	if got := (&modelDrivenCheckpointRequest{ToolCallID: "call-42"}).requestID(); got != "call-42" {
-		t.Fatalf("request ID = %q, want call-42", got)
+	a := &MainAgent{}
+	a.armModelDrivenProposal("call-42", tools.CompactContextArgs{ActiveObjective: "x"}, `{"active_objective":"x"}`, "accepted by runtime validation")
+	if got := a.modelDrivenProposal.requestID; got != "call-42" {
+		t.Fatalf("proposal request ID = %q, want call-42", got)
 	}
-	if got := (&modelDrivenCheckpointRequest{}).requestID(); got != "unknown" {
-		t.Fatalf("empty request ID = %q, want unknown", got)
+	if a.modelDrivenProposal.status != modelDrivenProposalAccepted || a.modelDrivenProposal.reason != "accepted by runtime validation" {
+		t.Fatalf("proposal metadata = status %q reason %q", a.modelDrivenProposal.status, a.modelDrivenProposal.reason)
 	}
-	var request *modelDrivenCheckpointRequest
-	if got := request.requestID(); got != "unknown" {
-		t.Fatalf("nil request ID = %q, want unknown", got)
+	// The identity survives past the terminal settle (a settle can arrive
+	// after the armed request was consumed by the barrier), so diagnostics can
+	// still correlate back to the request that produced the attempt.
+	a.transitionModelDrivenProposal(CompactionStatusSkipped, "projected savings too small")
+	if got := a.modelDrivenProposal.requestID; got != "call-42" {
+		t.Fatalf("settled proposal request ID = %q, want call-42", got)
 	}
 }
 
@@ -1710,14 +1715,14 @@ func TestModelDrivenProposalTransitionUpdatesMetadata(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	before := time.Now()
 	a.transitionModelDrivenProposal(modelDrivenProposalAccepted, " accepted ")
-	if a.pendingModelDrivenStatus != modelDrivenProposalAccepted || a.modelDrivenProposalReason != "accepted" {
-		t.Fatalf("proposal metadata = status %q reason %q", a.pendingModelDrivenStatus, a.modelDrivenProposalReason)
+	if a.modelDrivenProposal.status != modelDrivenProposalAccepted || a.modelDrivenProposal.reason != "accepted" {
+		t.Fatalf("proposal metadata = status %q reason %q", a.modelDrivenProposal.status, a.modelDrivenProposal.reason)
 	}
-	if a.modelDrivenProposalUpdatedAt.Before(before) {
-		t.Fatalf("proposal timestamp = %v, before %v", a.modelDrivenProposalUpdatedAt, before)
+	if a.modelDrivenProposal.updatedAt.Before(before) {
+		t.Fatalf("proposal timestamp = %v, before %v", a.modelDrivenProposal.updatedAt, before)
 	}
 	a.transitionModelDrivenProposal(CompactionStatusFailed, " failed ")
-	if a.pendingModelDrivenStatus != CompactionStatusFailed || a.modelDrivenProposalReason != "failed" {
-		t.Fatalf("terminal metadata = status %q reason %q", a.pendingModelDrivenStatus, a.modelDrivenProposalReason)
+	if a.modelDrivenProposal.status != CompactionStatusFailed || a.modelDrivenProposal.reason != "failed" {
+		t.Fatalf("terminal metadata = status %q reason %q", a.modelDrivenProposal.status, a.modelDrivenProposal.reason)
 	}
 }

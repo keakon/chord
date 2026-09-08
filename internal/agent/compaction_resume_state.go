@@ -16,6 +16,17 @@ func clonePendingCompactionResume(state *recovery.PendingCompactionResume) *reco
 	return &copy
 }
 
+// cloneModelDrivenProposalSnapshot returns a shallow copy of the proposal
+// snapshot carried through a restore, so the loaded state never aliases the
+// session file's decoded object.
+func cloneModelDrivenProposalSnapshot(state *recovery.ModelDrivenProposalSnapshot) *recovery.ModelDrivenProposalSnapshot {
+	if state == nil {
+		return nil
+	}
+	copy := *state
+	return &copy
+}
+
 func (a *MainAgent) snapshotPendingCompactionResume() *recovery.PendingCompactionResume {
 	if a == nil {
 		return nil

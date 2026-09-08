@@ -546,7 +546,6 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 			a.clearPendingThinkingReplay()
 			a.turn = nil
 			a.pendingModelDriven = nil
-			a.pendingModelDrivenRequestID = ""
 			a.queueLoopEvent(Event{Type: EventLoopAssessment, Payload: assessment})
 			return
 		}

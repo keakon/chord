@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"encoding/json"
 	"strings"
 	"time"
 
@@ -71,7 +70,6 @@ func (a *MainAgent) buildRecoverySnapshot() *recovery.SessionSnapshot {
 	a.subs.mu.RUnlock()
 
 	modelPoolCurrentModelPool, modelPoolAgentOverrides := a.snapshotModelPoolState()
-	proposal := a.modelDrivenProposalSnapshot()
 	return &recovery.SessionSnapshot{
 		Todos:                           todoStates,
 		ActiveAgents:                    agents,
@@ -89,36 +87,26 @@ func (a *MainAgent) buildRecoverySnapshot() *recovery.SessionSnapshot {
 		PendingCompactionResume:         a.snapshotPendingCompactionResume(),
 		LastModelDrivenApplyBatch:       a.lastModelDrivenApplyBatch,
 		AutoCompactRequestGeneration:    a.autoCompactRequestGeneration.Load(),
-		PendingModelDrivenRequestID:     a.pendingModelDrivenRequestID,
-		LastModelDrivenRequestID:        a.lastModelDrivenRequestID,
-		PendingModelDrivenStatus:        a.pendingModelDrivenStatus,
-		PendingModelDrivenArgsJSON:      a.pendingModelDrivenAuditArgsSnapshot(),
-		ModelDrivenProposalReason:       a.modelDrivenProposalReason,
-		ModelDrivenProposalUpdatedAt:    a.modelDrivenProposalUpdatedAt,
-		ModelDrivenProposal:             proposal,
+		ModelDrivenProposal:             a.modelDrivenProposalSnapshot(),
 		StageCompletionCandidateTurnID:  a.stageCompletionCandidateTurnID,
 		StageCompletionCandidatePending: a.stageCompletionCandidatePending,
 	}
 }
 
+// modelDrivenProposalSnapshot renders the proposal lifecycle record for the
+// recovery snapshot. The snapshot carries exactly the same object a restore
+// reads back, so an accepted/preparing proposal that a crash interrupted is
+// recovered as a not-applied record instead of being lost or mistaken for an
+// applied reset.
 func (a *MainAgent) modelDrivenProposalSnapshot() *recovery.ModelDrivenProposalSnapshot {
-	if a == nil || (a.pendingModelDrivenRequestID == "" && a.lastModelDrivenRequestID == "" && a.pendingModelDrivenStatus == "" && a.modelDrivenProposalReason == "") {
+	if a == nil || a.modelDrivenProposal.isEmpty() {
 		return nil
 	}
-	requestID := a.pendingModelDrivenRequestID
-	if requestID == "" {
-		requestID = a.lastModelDrivenRequestID
+	return &recovery.ModelDrivenProposalSnapshot{
+		RequestID: a.modelDrivenProposal.requestID,
+		Status:    a.modelDrivenProposal.status,
+		ArgsJSON:  a.modelDrivenProposal.argsJSON,
+		Reason:    a.modelDrivenProposal.reason,
+		UpdatedAt: a.modelDrivenProposal.updatedAt,
 	}
-	return &recovery.ModelDrivenProposalSnapshot{RequestID: requestID, Status: a.pendingModelDrivenStatus, ArgsJSON: a.pendingModelDrivenAuditArgsSnapshot(), Reason: a.modelDrivenProposalReason, UpdatedAt: a.modelDrivenProposalUpdatedAt}
-}
-
-func (a *MainAgent) pendingModelDrivenAuditArgsSnapshot() string {
-	if a == nil || a.pendingModelDriven == nil {
-		return ""
-	}
-	data, err := json.Marshal(a.pendingModelDriven.Args)
-	if err != nil {
-		return ""
-	}
-	return string(data)
 }

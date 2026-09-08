@@ -30,32 +30,12 @@ type modelDrivenCheckpointRequest struct {
 	Args       tools.CompactContextArgs
 }
 
-func (a *MainAgent) transitionModelDrivenProposal(status, reason string) {
-	if a == nil {
-		return
-	}
-	a.pendingModelDrivenStatus = status
-	a.modelDrivenProposalReason = strings.TrimSpace(reason)
-	a.modelDrivenProposalUpdatedAt = time.Now()
-	a.saveRecoverySnapshot()
-}
-
-func (r *modelDrivenCheckpointRequest) requestID() string {
-	if r == nil || strings.TrimSpace(r.ToolCallID) == "" {
-		return "unknown"
-	}
-	return r.ToolCallID
-}
-
 // requestAcceptedToolResult is the canonical compact_context success text. It
 // deliberately says "accepted", not "applied": a crash between acceptance and
 // apply must not let the restored transcript read as a successful reset.
 const requestAcceptedToolResult = "Context checkpoint request accepted. No reset has occurred yet; only a later model-driven context checkpoint confirms successful application."
 
 const (
-	modelDrivenProposalAccepted  = "accepted"
-	modelDrivenProposalPreparing = "preparing"
-	modelDrivenProposalApplied   = "applied"
 	// compactionSummaryModeModelDriven is the stable summary-mode marker for
 	// model-driven checkpoints (mirrors model_summary / structured_fallback /
 	// truncate_only).
@@ -324,10 +304,8 @@ func (a *MainAgent) tryArmModelDrivenCheckpoint(callID string, rawArgs string) (
 		ToolCallID: callID,
 		Args:       args,
 	}
-	a.pendingModelDrivenRequestID = callID
-	a.lastModelDrivenRequestID = callID
-	a.pendingModelDrivenAuditArgsJSON = rawArgs
-	a.transitionModelDrivenProposal(modelDrivenProposalAccepted, "accepted by runtime validation")
+	auditJSON := marshalCompactContextArgsForAudit(args)
+	a.armModelDrivenProposal(callID, args, auditJSON, "accepted by runtime validation")
 	diagnostic := map[string]string{"request_id": callID}
 	if a.stageCompletionCandidatePending && a.stageCompletionCandidateTurnID > 0 && a.turn != nil && a.stageCompletionCandidateTurnID != a.turn.ID {
 		a.clearStageCompletionCandidate()
@@ -455,9 +433,8 @@ func (a *MainAgent) maybeStartModelDrivenBarrier() bool {
 		return false
 	}
 	req := a.pendingModelDriven
-	a.transitionModelDrivenProposal(modelDrivenProposalPreparing, "preparing durable checkpoint")
 	a.pendingModelDriven = nil
-	a.pendingModelDrivenRequestID = ""
+	a.transitionModelDrivenProposal(modelDrivenProposalPreparing, "preparing durable checkpoint")
 	if a.turn == nil {
 		log.Warn("model-driven checkpoint pending but turn is gone; dropping request")
 		return false
@@ -667,7 +644,7 @@ func (a *MainAgent) estimatePostResetFixedRequestTokens() int {
 func (a *MainAgent) startModelDrivenCompactionAsync(bundle modelDrivenBarrierSnapshot, planID uint64, target compactionTarget, continuation continuationPlan, req *modelDrivenCheckpointRequest) {
 	a.recordCompactionLifecycleEvent("started", map[string]string{
 		"trigger":        compactionTriggerModelDriven.analyticsName(),
-		"request_id":     req.requestID(),
+		"request_id":     a.modelDrivenProposal.requestID,
 		"plan_id":        strconv.FormatUint(planID, 10),
 		"turn_id":        strconv.FormatUint(target.turnID, 10),
 		"message_count":  strconv.Itoa(len(bundle.snapshot)),
@@ -726,7 +703,7 @@ func (a *MainAgent) startModelDrivenCompactionAsync(bundle modelDrivenBarrierSna
 			draft.HeadSplit = headSplit
 			draft.RuntimeGeneration = bundle.currentRequestBatch
 			draft.RuntimeStateFingerprint = bundle.runtimeStateFingerprint
-			draft.ModelDrivenRequestID = req.requestID()
+			draft.ModelDrivenRequestID = a.modelDrivenProposal.requestID
 		}
 		a.sendEvent(Event{Type: EventCompactionReady, Payload: draft})
 	}(ctx, bundle, planID, target, headSplit, req)
@@ -1506,11 +1483,8 @@ func (a *MainAgent) settleModelDrivenOutcome(status string, reason string, prefl
 		"trigger": compactionTriggerModelDriven.analyticsName(),
 		"reason":  a.modelDrivenSkipNotice,
 	}
-	if a.lastModelDrivenRequestID != "" {
-		diagnostic["request_id"] = a.lastModelDrivenRequestID
-	}
-	if a.pendingModelDriven != nil {
-		diagnostic["request_id"] = a.pendingModelDriven.requestID()
+	if requestID := strings.TrimSpace(a.modelDrivenProposal.requestID); requestID != "" {
+		diagnostic["request_id"] = requestID
 	}
 	if preflight != nil {
 		diagnostic["current_tokens"] = strconv.Itoa(preflight.CurrentTokens)
