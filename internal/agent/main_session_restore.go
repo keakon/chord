@@ -432,6 +432,23 @@ func (a *MainAgent) applySessionSnapshot(loaded *loadedSessionState, sessionPath
 	loaded.PendingModelDrivenArgsJSON = strings.TrimSpace(snap.PendingModelDrivenArgsJSON)
 	loaded.ModelDrivenProposalReason = strings.TrimSpace(snap.ModelDrivenProposalReason)
 	loaded.ModelDrivenProposalUpdatedAt = snap.ModelDrivenProposalUpdatedAt
+	if proposal := snap.ModelDrivenProposal; proposal != nil {
+		if loaded.PendingModelDrivenRequestID == "" {
+			loaded.PendingModelDrivenRequestID = strings.TrimSpace(proposal.RequestID)
+		}
+		if loaded.PendingModelDrivenStatus == "" {
+			loaded.PendingModelDrivenStatus = strings.TrimSpace(proposal.Status)
+		}
+		if loaded.PendingModelDrivenArgsJSON == "" {
+			loaded.PendingModelDrivenArgsJSON = strings.TrimSpace(proposal.ArgsJSON)
+		}
+		if loaded.ModelDrivenProposalReason == "" {
+			loaded.ModelDrivenProposalReason = strings.TrimSpace(proposal.Reason)
+		}
+		if loaded.ModelDrivenProposalUpdatedAt.IsZero() {
+			loaded.ModelDrivenProposalUpdatedAt = proposal.UpdatedAt
+		}
+	}
 	loaded.StageCompletionCandidateTurnID = snap.StageCompletionCandidateTurnID
 	loaded.StageCompletionCandidatePending = snap.StageCompletionCandidatePending
 	subAgentStarted := time.Now()

@@ -83,15 +83,24 @@ type SessionSnapshot struct {
 	// AutoCompactRequestGeneration is the monotonic id of the last armed
 	// usage-driven auto-compact request. It is persisted so a restored session
 	// never reuses a generation (and its externalization-warning claim).
-	AutoCompactRequestGeneration    uint64    `json:"auto_compact_request_generation,omitempty"`
-	PendingModelDrivenRequestID     string    `json:"pending_model_driven_request_id,omitempty"`
-	LastModelDrivenRequestID        string    `json:"last_model_driven_request_id,omitempty"`
-	PendingModelDrivenStatus        string    `json:"pending_model_driven_status,omitempty"`
-	PendingModelDrivenArgsJSON      string    `json:"pending_model_driven_args_json,omitempty"`
-	ModelDrivenProposalReason       string    `json:"model_driven_proposal_reason,omitempty"`
-	ModelDrivenProposalUpdatedAt    time.Time `json:"model_driven_proposal_updated_at,omitempty"`
-	StageCompletionCandidateTurnID  uint64    `json:"stage_completion_candidate_turn_id,omitempty"`
-	StageCompletionCandidatePending bool      `json:"stage_completion_candidate_pending,omitempty"`
+	AutoCompactRequestGeneration    uint64                       `json:"auto_compact_request_generation,omitempty"`
+	PendingModelDrivenRequestID     string                       `json:"pending_model_driven_request_id,omitempty"`
+	LastModelDrivenRequestID        string                       `json:"last_model_driven_request_id,omitempty"`
+	PendingModelDrivenStatus        string                       `json:"pending_model_driven_status,omitempty"`
+	PendingModelDrivenArgsJSON      string                       `json:"pending_model_driven_args_json,omitempty"`
+	ModelDrivenProposal             *ModelDrivenProposalSnapshot `json:"model_driven_proposal,omitempty"`
+	ModelDrivenProposalReason       string                       `json:"model_driven_proposal_reason,omitempty"`
+	ModelDrivenProposalUpdatedAt    time.Time                    `json:"model_driven_proposal_updated_at,omitempty"`
+	StageCompletionCandidateTurnID  uint64                       `json:"stage_completion_candidate_turn_id,omitempty"`
+	StageCompletionCandidatePending bool                         `json:"stage_completion_candidate_pending,omitempty"`
+}
+
+type ModelDrivenProposalSnapshot struct {
+	RequestID string    `json:"request_id,omitempty"`
+	Status    string    `json:"status,omitempty"`
+	ArgsJSON  string    `json:"args_json,omitempty"`
+	Reason    string    `json:"reason,omitempty"`
+	UpdatedAt time.Time `json:"updated_at,omitempty"`
 }
 
 // BackgroundObjectState captures the durable summary of an active background object.
