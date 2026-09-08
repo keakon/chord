@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"strings"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
 )
 
 func TestFallbackRequestIncludesQueuedUserInput(t *testing.T) {
@@ -820,6 +822,53 @@ func TestCallLLMFailedFallbackPersistsLastRunningModel(t *testing.T) {
 	}
 }
 
+// TestFallbackBoundaryDefersReductionToTheCaller pins where the rebuild runs.
+// handleLLMFallbackBoundary is an event-loop handler: it owns the pending user
+// queue and the downshifted budgets, so the decision has to be taken there, but
+// re-running request preparation there stalls the whole UI event loop for the
+// length of a full reduction pass over the session. The handler reports the
+// decision and the requesting goroutine does the work.
+func TestFallbackBoundaryDefersReductionToTheCaller(t *testing.T) {
+	a := &MainAgent{parentCtx: context.Background()}
+	a.ctxMgr = ctxmgr.NewManager(128000, 4096)
+	a.newTurn()
+	toolOutput := strings.Repeat("processed record without a recognizable shape\n", 400)
+	messages := []message.Message{
+		{Role: message.RoleUser, Content: "run it"},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "c1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"make"}`)}}},
+		{Role: message.RoleTool, ToolCallID: "c1", Content: toolOutput, ToolStatus: "success"},
+		{Role: message.RoleUser, Content: "u1"},
+		{Role: message.RoleUser, Content: "u2"},
+		{Role: message.RoleUser, Content: "u3"},
+		{Role: message.RoleUser, Content: "u4"},
+	}
+	payload := &llmFallbackBoundaryPayload{
+		turnID:                  a.turn.ID,
+		messages:                messages,
+		primaryContextLimit:     128000,
+		primaryInputLimit:       96000,
+		primaryModelRef:         "provider/model-1",
+		fallbackModelRef:        "provider/model-2",
+		fallbackContextLimit:    64000,
+		fallbackInputLimit:      48000,
+		fallbackDownshiftBypass: true,
+		reply:                   make(chan llmFallbackBoundaryResult, 1),
+	}
+	a.handleLLMFallbackBoundary(Event{Type: EventLLMFallbackBoundary, TurnID: payload.turnID, Payload: payload})
+
+	result := <-payload.reply
+	if result.err != nil {
+		t.Fatalf("boundary returned an error: %v", result.err)
+	}
+	if !result.rebuild {
+		t.Fatal("a narrower fallback budget must ask for a rebuild")
+	}
+	if len(result.messages) != len(messages) || result.messages[2].Content != toolOutput {
+		t.Fatalf("the event-loop handler reduced the surface itself: %q",
+			compactTextSnippet(result.messages[2].Content, 160))
+	}
+}
+
 func TestFallbackRequiresFreshAdmission(t *testing.T) {
 	tests := []struct {
 		name string
@@ -847,7 +896,11 @@ func TestFallbackRequiresFreshAdmission(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "different model",
+			// Every fallback is by definition a different model, so a rebuild
+			// keyed on that is a rebuild on every fallback. The token estimate
+			// is model-agnostic and reduction is budget-driven: with the same
+			// budget the rebuild reproduces the same bytes.
+			name: "different model on the same budget",
 			got: llmFallbackBoundaryPayload{
 				primaryModelRef:      "provider/model-1",
 				primaryContextLimit:  128000,
@@ -856,7 +909,19 @@ func TestFallbackRequiresFreshAdmission(t *testing.T) {
 				fallbackContextLimit: 128000,
 				fallbackInputLimit:   96000,
 			},
-			want: true,
+			want: false,
+		},
+		{
+			// An unset fallback input limit means the whole window feeds the
+			// prompt; it must be normalized rather than read as "no limit
+			// information", which is how the downshift check reads it.
+			name: "unset fallback input limit narrower than the primary input budget",
+			got: llmFallbackBoundaryPayload{
+				primaryContextLimit:  128000,
+				primaryInputLimit:    96000,
+				fallbackContextLimit: 128000,
+			},
+			want: false,
 		},
 		{
 			name: "equivalent budgets",

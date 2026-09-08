@@ -644,6 +644,10 @@ func TestFindDuplicateOrConflictingTaskCanonicalizesScopeAliases(t *testing.T) {
 	root := t.TempDir()
 	a := newTestMainAgent(t, root)
 	a.projectRoot = root
+	// Scope comparisons resolve relative declarations against the agent's
+	// working directory (writeScopeBaseDir), so the fixture must make the
+	// cached workdir the same root the absolute path below names.
+	a.cachedWorkDir = root
 	a.setTaskRecords(map[string]*DurableTaskRecord{
 		"running-task": {
 			TaskID:             "running-task",

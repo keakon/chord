@@ -61,9 +61,13 @@ func shellExecutionBoundaryPromptBlock(visible map[string]struct{}, audience cap
 		}
 		var sb strings.Builder
 		sb.WriteString("## Command Execution Boundary\n")
-		sb.WriteString("- This task may run only the commands its owner agent authorized, through " + shell + ", matched exactly as written:\n")
+		sb.WriteString("- This task may run only the commands its owner agent authorized, through ")
+		sb.WriteString(shell)
+		sb.WriteString(", matched exactly as written:\n")
 		for _, cmd := range scope.VerificationCommands {
-			sb.WriteString("  - `" + cmd + "`\n")
+			sb.WriteString("  - `")
+			sb.WriteString(cmd)
+			sb.WriteString("`\n")
 		}
 		sb.WriteString("- Any other command is refused, including a variation of one above with extra arguments, chaining, or redirection. Use these for verification and declare in `verification_run` the ones you actually ran.\n")
 		sb.WriteString("- If verifying this task genuinely needs a command that is not listed, ask the owner agent rather than working around the boundary.")

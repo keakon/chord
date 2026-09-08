@@ -44,6 +44,18 @@ func (a *MainAgent) subAgentWorkDir() string {
 	return workDir
 }
 
+// writeScopeBaseDir is the one directory every write-scope comparison resolves
+// relative declarations against — parent/child containment at delegation and at
+// grant time, overlap detection between concurrent tasks, and the runtime gate
+// that finally allows or refuses a write. It is the worker's working directory
+// because that is the base its tools resolve relative paths against: a scope
+// judged against the project root while writes are judged against the working
+// directory lets a child be granted paths its parent cannot write whenever
+// chord is started from a subdirectory.
+func (a *MainAgent) writeScopeBaseDir() string {
+	return a.subAgentWorkDir()
+}
+
 func (a *MainAgent) baseSubAgentConfig(agentDef *config.AgentConfig, instanceID string, client *llm.Client, parentCtx context.Context, cancel context.CancelFunc, extraMCPTools []tools.Tool) SubAgentConfig {
 	return SubAgentConfig{
 		InstanceID:    instanceID,
@@ -111,7 +123,7 @@ func (a *MainAgent) delegationCallerFromContext(ctx context.Context) (delegation
 			Delegation: cfg.Delegation,
 			Ruleset:    a.effectiveRuleset(),
 			WriteScope: tools.WriteScope{},
-			WorkDir:    a.projectRoot,
+			WorkDir:    a.writeScopeBaseDir(),
 			IsMain:     true,
 		}, nil
 	}
@@ -324,7 +336,7 @@ func (a *MainAgent) findPendingDuplicateOrConflictingTaskLocked(ownerAgentID, ow
 			OwnerTaskID:        pending.ownerTaskID,
 			State:              string(SubAgentStateRunning),
 		}
-		disposition, conflict := duplicateOrConflictingTaskRecord(rec, ownerAgentID, ownerTaskID, agentType, planTaskRef, semanticTaskKey, semanticKeyExplicit, expectedWriteScope, a.projectRoot)
+		disposition, conflict := duplicateOrConflictingTaskRecord(rec, ownerAgentID, ownerTaskID, agentType, planTaskRef, semanticTaskKey, semanticKeyExplicit, expectedWriteScope, a.writeScopeBaseDir())
 		if conflict || disposition == taskDuplicateExplicitKey {
 			return rec, disposition, conflict, pending
 		}

@@ -6,6 +6,10 @@ const (
 	agentMessageSubtypeTaskCompletion = "task_completion"
 	agentMessageSubtypeTaskFailure    = "task_failure"
 	agentMessageSubtypeWaitingExpiry  = "waiting_main_expiry"
+	// agentMessageSubtypeUndeliveredInput reports messages that reached a task
+	// after it had already settled and were therefore never read. It carries no
+	// terminal outcome of its own: the task's own settlement already happened.
+	agentMessageSubtypeUndeliveredInput = "undelivered_input"
 )
 
 func terminalMailboxOutcome(msg SubAgentMailboxMessage) SubAgentState {

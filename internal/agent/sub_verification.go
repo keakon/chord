@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -15,16 +14,11 @@ func (s *SubAgent) recordVerificationToolResult(result *toolResult, contextResul
 	if s == nil || result == nil || tools.NormalizeName(result.Name) != tools.NameShell {
 		return
 	}
-	var args struct {
-		Command string `json:"command"`
-	}
-	if err := json.Unmarshal(llm.UnwrapToolArgs(json.RawMessage(result.ArgsJSON)), &args); err != nil {
+	shell, err := decodeShellCallArguments(json.RawMessage(result.ArgsJSON))
+	if err != nil || shell.Command == "" {
 		return
 	}
-	command := strings.TrimSpace(args.Command)
-	if command == "" {
-		return
-	}
+	command := shell.Command
 	status := "passed"
 	if isError {
 		status = "failed"

@@ -248,9 +248,10 @@ func TestStateMachineFailedBuildFixRebuild(t *testing.T) {
 }
 
 // TestStateMachineReferencedResultKeepsItsEvidence covers the dependency rule:
-// when later assistant reasoning cites a result's specifics, that result may
-// not collapse to a bare omission marker — the claim would stay in the request
-// while the evidence for it left.
+// when later assistant reasoning cites a result's specifics, the request must
+// still contain those specifics — the identifier the reasoning names, or an
+// address the model can read it back from. Otherwise the claim stays in the
+// request while the evidence for it left.
 func TestStateMachineReferencedResultKeepsItsEvidence(t *testing.T) {
 	sessionDir := t.TempDir()
 	a := &MainAgent{parentCtx: context.Background(), sessionDir: sessionDir}
@@ -271,13 +272,17 @@ func TestStateMachineReferencedResultKeepsItsEvidence(t *testing.T) {
 		)
 	}
 
+	const citedIdentifier = "internal/agent/context_reduction.go"
 	prepared := a.prepareMessagesForLLM(msgs)
 	rendering := prepared[2].Content
 	if rendering == output {
-		return // still protected by an age gate; nothing to check yet
+		// The fixture ages the result past every gate on purpose. Returning
+		// early here once let a policy change turn this test into a no-op.
+		t.Fatal("the fixture no longer reduces the cited result; the rule it pins is untested")
 	}
-	if !strings.Contains(rendering, "\n") {
-		t.Fatalf("a result cited by later reasoning collapsed to a bare marker: %q", rendering)
+	if !strings.Contains(rendering, citedIdentifier) && !strings.Contains(rendering, reducedArtifactDirName) {
+		t.Fatalf("the reasoning still cites %q but the request keeps neither the identifier nor an address for it: %q",
+			citedIdentifier, compactTextSnippet(rendering, 300))
 	}
 	assertRequestSurfaceInvariants(t, prepared, sessionDir)
 }

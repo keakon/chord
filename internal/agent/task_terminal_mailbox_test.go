@@ -142,6 +142,9 @@ func TestRestoreDoesNotReplayExpiryWithdrawnByResponse(t *testing.T) {
 		t.Fatal(err)
 	}
 	sub := newControllableTestSubAgent(t, a, "task-waiting")
+	// The correlated response revives this parked worker through rehydration,
+	// which refuses scope-less records; carry the boundary here.
+	sub.writeScope = tools.WriteScope{PathPrefix: []string{"internal/agent"}}
 	sub.setState(SubAgentStateWaitingMain, "Choose an option")
 	request, err := a.createAgentRequest(sub, tools.AgentRequestPayload{Reason: "Choose an option"})
 	if err != nil {

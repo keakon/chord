@@ -212,6 +212,15 @@ func (a *MainAgent) ContinueFromContextForTarget(conversation ConversationTarget
 		return
 	}
 	if sub := target.sub; sub != nil {
+		// A settled worker that has not been parked yet must open a new attempt
+		// before it resumes, exactly like the parked branch below does through
+		// rehydration: reusing the settled attempt would make the continued
+		// run's completion collide with the immutable settlement already on
+		// record and leave the earlier outcome standing.
+		if err := a.beginNextTaskAttemptForLiveSub(sub); err != nil {
+			a.emitToTUI(ToastEvent{Message: err.Error(), Level: "warn", AgentID: sub.instanceID})
+			return
+		}
 		state := sub.State()
 		restartStoppedTurn := state != SubAgentStateRunning
 		switch state {

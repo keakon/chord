@@ -131,7 +131,7 @@ func (s *SubAgent) archiveContextRecoveryHistory(messages []message.Message) (st
 		return "", fmt.Errorf("marshal context archive: %w", err)
 	}
 	baseID := fmt.Sprintf("context-recovery-%d-%d-%d", s.turn.ID, s.turn.SubAgentContextRecoveryCount+1, time.Now().UnixNano())
-	_, relPath, err := persistSubAgentArtifact(
+	_, relPath, _, _, err := persistSubAgentArtifact(
 		s.sessionDir,
 		s.instanceID,
 		baseID,

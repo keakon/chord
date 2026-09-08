@@ -68,12 +68,8 @@ func (a *MainAgent) deferFallbackModelDownshift(payload *llmFallbackBoundaryPayl
 	// downshift must be detected against both windows: a fallback whose input
 	// budget is smaller (even when its total context window is unchanged)
 	// re-evaluates the same context against a lower line and can cross it.
-	fallbackInput := payload.fallbackInputLimit
-	if fallbackInput <= 0 {
-		fallbackInput = payload.fallbackContextLimit
-	}
-	if payload.fallbackContextLimit >= a.ctxMgr.GetMaxTokens() &&
-		fallbackInput >= a.ctxMgr.GetInputBudget() {
+	if !fallbackNarrowsRequestBudget(payload.fallbackContextLimit, payload.fallbackInputLimit,
+		a.ctxMgr.GetMaxTokens(), a.ctxMgr.GetInputBudget()) {
 		return nil
 	}
 
@@ -127,7 +123,11 @@ type llmFallbackBoundaryPayload struct {
 
 type llmFallbackBoundaryResult struct {
 	messages []message.Message
-	err      error
+	// rebuild asks the requesting goroutine to re-run request preparation on
+	// the returned messages. The decision needs event-loop state (the pending
+	// user queue and the downshifted budgets); the work it implies does not.
+	rebuild bool
+	err     error
 }
 
 // updateMainLLMRequestBeforeFallback pauses the retry worker at the boundary
@@ -164,7 +164,21 @@ func (a *MainAgent) updateMainLLMRequestBeforeFallback(ctx context.Context, turn
 	})
 	select {
 	case result := <-payload.reply:
-		return result.messages, result.err
+		if result.err != nil {
+			return result.messages, result.err
+		}
+		messages = result.messages
+		rebuilt := result.rebuild
+		primarySurface := newRequestSurfaceFingerprint(requestSurfacePrimary, payload.primaryModelRef, messages,
+			estimateMessagesTokens(a.ctxMgr, messages), payload.primaryInputLimit)
+		if rebuilt {
+			messages = a.prepareMessagesForLLMWithOptions(messages, false)
+		}
+		targetSurface := newRequestSurfaceFingerprint(requestSurfaceFallback, payload.fallbackModelRef, messages,
+			estimateMessagesTokens(a.ctxMgr, messages), payload.fallbackInputLimit)
+		a.noteFallbackSurfaceDecision(rebuilt)
+		log.Debugf("LLM fallback %s", describeSurfaceDecision(primarySurface, targetSurface, rebuilt))
+		return messages, nil
 	case <-ctx.Done():
 		return nil, fmt.Errorf("fallback request update cancelled: %w", ctx.Err())
 	case <-a.parentCtx.Done():
@@ -191,48 +205,53 @@ func (a *MainAgent) handleLLMFallbackBoundary(evt Event) {
 			return
 		}
 	}
-	// A prepared surface is only reusable when the fallback has the same
-	// effective input budget. A smaller target window can require additional
-	// reduction even when the primary request already passed admission. Rebuild
-	// from the current request surface here; reduction is idempotent for markers
-	// and artifacts, while the existing fast path remains intact for equivalent
-	// model budgets.
-	rebuild := fallbackRequiresFreshAdmission(payload)
-	primarySurface := newRequestSurfaceFingerprint(requestSurfacePrimary, payload.primaryModelRef, messages, nil,
-		estimateMessagesTokens(a.ctxMgr, messages), payload.primaryInputLimit)
-	if rebuild {
-		messages = a.prepareMessagesForLLMWithOptions(messages, false)
+	// A prepared surface is only reusable when the fallback admits the request
+	// against the same effective budget; a narrower target window can require
+	// additional reduction even though the primary request already passed. The
+	// rebuild itself runs on the requesting goroutine (see
+	// updateMainLLMRequestBeforeFallback): it re-runs the whole reduction pass,
+	// including the file-evidence rebuild and one archive stat per pending
+	// message, which on a long session is far too much work to do inside an
+	// event-loop handler.
+	payload.reply <- llmFallbackBoundaryResult{
+		messages: messages,
+		rebuild:  fallbackRequiresFreshAdmission(payload),
 	}
-	targetSurface := newRequestSurfaceFingerprint(requestSurfaceFallback, payload.fallbackModelRef, messages, nil,
-		estimateMessagesTokens(a.ctxMgr, messages), payload.fallbackInputLimit)
-	a.noteFallbackSurfaceDecision(rebuild)
-	log.Debugf("LLM fallback %s", describeSurfaceDecision(primarySurface, targetSurface, rebuild))
-	payload.reply <- llmFallbackBoundaryResult{messages: messages}
 }
 
+// fallbackRequiresFreshAdmission reports whether the fallback target has to
+// re-run admission on its own budget. Chord's token estimate is model-agnostic
+// — a usage-calibrated character estimate shared by every provider, not a
+// per-model tokenizer — so reduction is driven purely by the budget: an
+// unchanged budget always rebuilds the same bytes and only a narrower window
+// can change the surface.
 func fallbackRequiresFreshAdmission(payload *llmFallbackBoundaryPayload) bool {
-	if payload == nil || payload.fallbackContextLimit <= 0 {
+	if payload == nil {
 		return false
 	}
-	if payload.fallbackContextLimit < payload.primaryContextLimit {
+	return fallbackNarrowsRequestBudget(payload.fallbackContextLimit, payload.fallbackInputLimit,
+		payload.primaryContextLimit, payload.primaryInputLimit)
+}
+
+// fallbackNarrowsRequestBudget reports whether a fallback model re-evaluates
+// the request against a smaller window than the one it was admitted on. It is
+// the single definition of "downshift": the auto-compaction line and the
+// request surface must agree on it, or one of them acts on a budget the other
+// never applied. An unknown fallback window is not a downshift — no budget
+// update follows it, and a window that is actually too small surfaces as a
+// provider overflow error instead.
+func fallbackNarrowsRequestBudget(fallbackContextLimit, fallbackInputLimit, primaryContextLimit, primaryInputLimit int) bool {
+	if fallbackContextLimit <= 0 {
+		return false
+	}
+	if fallbackContextLimit < primaryContextLimit {
 		return true
 	}
-	// Chord's token estimate is model-agnostic: a usage-calibrated character
-	// estimate (estimateMessagesTokens / ctxmgr.EstimateMessagesTokens) shared
-	// by every provider, not a per-model tokenizer. Reduction is budget-driven,
-	// so when the downshift left the budget unchanged this branch rebuilds the
-	// same budget into the same surface — an idempotent no-op — and a real
-	// rebuild only happens when the smaller fallback window already shrank the
-	// budget above. The branch is kept as an explicit admission boundary for a
-	// future per-model tokenizer. The unknown-limit early return above skips it
-	// deliberately: no budget update follows an unknown limit, so re-admission
-	// would change nothing, and an actually-too-small window surfaces as a
-	// provider overflow error at runtime.
-	if payload.primaryModelRef != "" && payload.fallbackModelRef != "" &&
-		payload.primaryModelRef != payload.fallbackModelRef {
-		return true
+	// An unset fallback input limit means the whole window is available to the
+	// prompt, which is how the token budgets are applied downstream.
+	fallbackInput := fallbackInputLimit
+	if fallbackInput <= 0 {
+		fallbackInput = fallbackContextLimit
 	}
-	return payload.fallbackInputLimit > 0 &&
-		payload.primaryInputLimit > 0 &&
-		payload.fallbackInputLimit < payload.primaryInputLimit
+	return primaryInputLimit > 0 && fallbackInput < primaryInputLimit
 }

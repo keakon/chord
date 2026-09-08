@@ -26,11 +26,6 @@ const (
 	// retentionArchived drops the body from the request but leaves an address
 	// from which the complete payload can be read back.
 	retentionArchived retentionLevel = "archived"
-	// retentionHidden means the content only exists in the durable transcript
-	// or the diagnostic layer and must not drive current working memory.
-	// Request-level reduction never produces it: every lossy rendering it
-	// emits keeps either an excerpt or a recovery address.
-	retentionHidden retentionLevel = "hidden"
 )
 
 // retentionRecovery names the action that gets the omitted bytes back. The
@@ -54,29 +49,6 @@ const (
 	retentionRecoveryUnavailable retentionRecovery = "unavailable"
 )
 
-// retentionValidity separates "this still describes current state" from "this
-// is a historical observation". Conflating the two is what lets a stale read
-// keep reading as the current file.
-type retentionValidity string
-
-const (
-	retentionValidityCurrent    retentionValidity = "current"
-	retentionValidityHistorical retentionValidity = "historical"
-	retentionValidityStale      retentionValidity = "stale"
-	retentionValiditySuperseded retentionValidity = "superseded"
-)
-
-// retentionConfidence separates decisions taken from a first-hand signal
-// (tool status, tracked file revision, the command line itself) from decisions
-// inferred by sniffing the output bytes. Only the former may justify a lossy
-// rendering without an excerpt.
-type retentionConfidence string
-
-const (
-	retentionConfidenceVerified retentionConfidence = "verified"
-	retentionConfidenceInferred retentionConfidence = "inferred"
-)
-
 // Reasons for keeping a result complete. They name the authority that
 // protected it, not the shape of the bytes.
 const (
@@ -91,62 +63,45 @@ const (
 )
 
 // retentionDecision is the unified statement of what happened to one tool
-// result on this request: how much of it survives, why, whether it still
-// describes current state, and how the model gets the rest back.
+// result on this request: how much of it survives, why, and how the model gets
+// the rest back.
 //
-// It is deliberately not a persisted record. Request-level reduction rebuilds
-// it from the transcript on every request, so it can never drift from the
-// history it describes, and nothing downstream can mistake it for a second
-// source of truth.
+// It is derived, not persisted, and it is read by exactly one consumer: the
+// per-request retention ledger behind the debug log. Nothing on the request
+// surface branches on it, so it is only built when that ledger is being kept —
+// a field nobody reads still costs a scan of the payload to fill in.
 type retentionDecision struct {
 	Level       retentionLevel
-	Class       requestReductionClass
-	Rule        string
 	Reason      string
 	Recovery    retentionRecovery
 	ArtifactRef string
-	Validity    retentionValidity
-	Confidence  retentionConfidence
 	// Complete reports whether the rendering carries the whole payload. A
 	// repeated marker is not complete even though no bytes were lost overall:
 	// the complete copy lives in another message.
 	Complete bool
-	// Excerpt reports whether the rendering still carries key fields or lines
-	// from the payload rather than only a pointer to it. Level alone cannot
-	// answer this: an archived rendering usually keeps its summary as well,
-	// and the difference decides whether the model can act without first
-	// paying a round trip to the address.
-	Excerpt bool
 }
 
-// retentionDecisionFor derives the decision for one tool result. class and
-// rule come from the classification and reduction that already ran; reduced is
-// the rendering they produced (empty when the result was kept complete).
-func retentionDecisionFor(ctx requestReductionContext, class requestReductionClass, rule, reduced string) retentionDecision {
-	decision := retentionDecision{
-		Class:      class,
-		Rule:       rule,
-		Validity:   retentionValidityFor(ctx, class),
-		Confidence: retentionConfidenceFor(ctx, class),
-	}
-	if class == requestReductionNone {
+// retentionDecisionFor derives the decision for one tool result. verdict is the
+// classification that already ran, rule and reduced the rendering it produced
+// (both empty when the result was kept complete).
+func retentionDecisionFor(ctx requestReductionContext, verdict requestReductionVerdict, rule, reduced string) retentionDecision {
+	decision := retentionDecision{Reason: verdict.Reason}
+	if verdict.Class == requestReductionNone {
 		decision.Level = retentionFull
 		decision.Complete = true
 		decision.Recovery = retentionRecoveryNone
-		decision.Reason = retentionProtectionReason(ctx)
 		return decision
+	}
+	if decision.Reason == "" {
+		decision.Reason = string(verdict.Class)
 	}
 	if refs := tools.ExtractArtifactReferences(reduced); len(refs) > 0 {
 		decision.ArtifactRef = refs[0]
 	} else if address, ok := archivedOutputMarkerAddress(reduced); ok {
 		decision.ArtifactRef = address
 	}
-	// A rendering that spans more than its own marker line kept something of
-	// the payload: an excerpt, a file list, a diagnostics body.
-	decision.Excerpt = strings.Contains(strings.TrimSpace(reduced), "\n")
-	decision.Reason = string(class)
-	decision.Level = retentionLevelFor(ctx, class, rule, reduced, decision.ArtifactRef)
-	decision.Recovery = retentionRecoveryFor(ctx, class, decision.ArtifactRef)
+	decision.Level = retentionLevelFor(ctx, verdict.Class, rule, reduced, decision.ArtifactRef)
+	decision.Recovery = retentionRecoveryFor(ctx, verdict.Class, decision.ArtifactRef)
 	return decision
 }
 
@@ -154,7 +109,7 @@ func retentionDecisionFor(ctx requestReductionContext, class requestReductionCla
 // archive address wins over the shape of the summary: once the full payload is
 // addressable, how much of it was inlined no longer decides what was lost.
 func retentionLevelFor(ctx requestReductionContext, class requestReductionClass, rule, reduced, artifactRef string) retentionLevel {
-	if artifactRef != "" || rule == "archived" {
+	if artifactRef != "" || rule == reductionRuleArchived {
 		return retentionArchived
 	}
 	switch class {
@@ -166,11 +121,6 @@ func retentionLevelFor(ctx requestReductionContext, class requestReductionClass,
 		if toolname.Normalize(ctx.ToolName) == tools.NameRead && !strings.Contains(reduced, "\n") {
 			return retentionReference
 		}
-	}
-	if rule == "stale" && !strings.Contains(reduced, "\n") {
-		// The bare "[Older X output omitted]" marker carries neither excerpt
-		// nor address. Nothing above the archive gate should reach it.
-		return retentionHidden
 	}
 	return retentionStructured
 }
@@ -222,95 +172,6 @@ func retentionRecoveryFor(ctx requestReductionContext, class requestReductionCla
 	return retentionRecoveryRerunTool
 }
 
-// retentionValidityFor answers whether the rendering still describes current
-// state. Only reads carry tracked validity; every other output is a historical
-// observation the moment a later turn could have changed the world, which is
-// why an aged-out result is never reported as current.
-func retentionValidityFor(ctx requestReductionContext, class requestReductionClass) retentionValidity {
-	if toolname.Normalize(ctx.ToolName) == tools.NameRead {
-		switch {
-		case ctx.ReadInvalidated:
-			return retentionValidityStale
-		case ctx.ReadSuperseded:
-			return retentionValiditySuperseded
-		}
-	}
-	if ctx.DiagnosticsSuperseded {
-		return retentionValiditySuperseded
-	}
-	if class == requestReductionNone {
-		return retentionValidityCurrent
-	}
-	return retentionValidityHistorical
-}
-
-// retentionConfidenceFor separates first-hand signals from byte sniffing.
-func retentionConfidenceFor(ctx requestReductionContext, class requestReductionClass) retentionConfidence {
-	toolName := toolname.Normalize(ctx.ToolName)
-	if toolName == tools.NameRead {
-		// Read validity and read retention both come from tracked file state.
-		return retentionConfidenceVerified
-	}
-	switch class {
-	case requestReductionNone:
-		if isToolResultUnsuccessfulStatus(ctx.ToolStatus) || ctx.ShellReadOnly {
-			return retentionConfidenceVerified
-		}
-	case requestReductionToolError:
-		if isToolResultErrorStatus(ctx.ToolStatus) {
-			return retentionConfidenceVerified
-		}
-	case requestReductionRepeated:
-		// Repetition is decided by comparing recorded call arguments and
-		// output bytes, not by guessing at the shape.
-		return retentionConfidenceVerified
-	}
-	if _, ok := commandDerivedShellShape(ctx); ok {
-		return retentionConfidenceVerified
-	}
-	return retentionConfidenceInferred
-}
-
-// retentionProtectionReason names which rule kept a result complete. The order
-// mirrors classifyRequestReductionToolOutput so the reason a reader sees is the
-// branch that actually fired.
-func retentionProtectionReason(ctx requestReductionContext) string {
-	if ctx.Age < ctx.Policy.HighRiskProtectAgeTurns && isHighRiskToolOutput(ctx) {
-		return retentionReasonRecentHighRisk
-	}
-	if ctx.readRetentionProtects() {
-		return retentionReasonCurrentRead
-	}
-	failed := isToolResultErrorStatus(ctx.ToolStatus) ||
-		(strings.TrimSpace(ctx.ToolStatus) == "" && isToolErrorContent(ctx.Content))
-	if failed && ctx.Age < ctx.Policy.ErrorAgeTurns {
-		return retentionReasonRecentError
-	}
-	if editLikeToolCarriesDiagnostics(ctx) && ctx.Age < ctx.Policy.ErrorAgeTurns {
-		return retentionReasonRecentDiagnostics
-	}
-	if ctx.ShellReadOnly && ctx.Age < ctx.Policy.ShellReadOnlyAgeTurns {
-		return retentionReasonReadOnlyShell
-	}
-	if ctx.Age < ctx.Policy.DiffProtectAgeTurns && looksLikeDiffOrPatch(ctx.Content) {
-		return retentionReasonRecentDiff
-	}
-	if ctx.Age < ctx.Policy.StaleAgeTurns && looksLikeStructuredJSON(ctx.Content) && !looksLikeJSONLinesLog(ctx.Content) {
-		return retentionReasonJSONAwaitsStale
-	}
-	return retentionReasonNoRuleMatched
-}
-
-// editLikeToolCarriesDiagnostics reports whether this is an edit-shaped result
-// whose body carries an LSP diagnostics section.
-func editLikeToolCarriesDiagnostics(ctx requestReductionContext) bool {
-	switch toolname.Normalize(ctx.ToolName) {
-	case tools.NameEdit, tools.NameApplyPatch, tools.NameWrite:
-		return strings.Contains(ctx.Content, diagnosticsSectionLabel)
-	}
-	return false
-}
-
 // retentionDecisionRecoverable reports whether the decision leaves the model a
 // way back to the omitted bytes. It is the invariant the reduction layer must
 // hold: a lossy rendering always keeps either the payload's key fields or an
@@ -360,118 +221,4 @@ func artifactReadbackStats(messages []message.Message, callMeta map[string]toolC
 		}
 	}
 	return reads, failures
-}
-
-// laterAssistantReferencesToolResult reports whether an assistant message
-// after this tool result leans on its specifics — a quoted identifier from the
-// output, or an explicit deictic reference to it. Such a result must not be
-// rendered as a bare omission marker: the reasoning that cites it stays in the
-// request, so removing what it cites leaves the model with a conclusion whose
-// evidence it can no longer check.
-//
-// The scan is deliberately narrow. It looks only at assistant text between
-// this result and the end of the transcript, and it only accepts a token that
-// is specific enough to have come from this output, so an unrelated later turn
-// does not pin every earlier result in place.
-func laterAssistantReferencesToolResult(messages []message.Message, idx int) bool {
-	if idx < 0 || idx >= len(messages) {
-		return false
-	}
-	tokens := referenceTokensFromToolOutput(messages[idx].Content)
-	if len(tokens) == 0 {
-		return false
-	}
-	for i := idx + 1; i < len(messages); i++ {
-		if messages[i].Role != message.RoleAssistant {
-			continue
-		}
-		text := messages[i].Content
-		if strings.TrimSpace(text) == "" {
-			continue
-		}
-		for _, token := range tokens {
-			if strings.Contains(text, token) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-const (
-	// referenceTokenMinLen keeps short, ambiguous fragments (a bare "go", a
-	// two-digit number) from pinning a result: they collide with ordinary
-	// prose and would make every output look referenced.
-	referenceTokenMinLen = 8
-	// referenceTokenScanLines bounds the scan so a megabyte log does not cost
-	// a full pass per request; identifiers a later turn cites almost always
-	// appear in the head of the output, which is also the part any summary
-	// keeps.
-	referenceTokenScanLines = 60
-	// referenceTokenLimit bounds how many candidates one output contributes.
-	referenceTokenLimit = 24
-)
-
-// referenceTokensFromToolOutput collects the identifiers from a tool output
-// that are distinctive enough that finding one in later assistant text implies
-// the text is talking about this output: paths, path:line locations, error
-// codes and quoted symbols.
-func referenceTokensFromToolOutput(content string) []string {
-	if content == "" {
-		return nil
-	}
-	var tokens []string
-	seen := make(map[string]struct{})
-	lines := 0
-	forEachLine(content, func(line string) bool {
-		lines++
-		if lines > referenceTokenScanLines || len(tokens) >= referenceTokenLimit {
-			return false
-		}
-		for _, field := range strings.FieldsFunc(line, isReferenceTokenSeparator) {
-			field = strings.Trim(field, ".,:;")
-			if len(field) < referenceTokenMinLen || !isDistinctiveReferenceToken(field) {
-				continue
-			}
-			if _, dup := seen[field]; dup {
-				continue
-			}
-			seen[field] = struct{}{}
-			tokens = append(tokens, field)
-			if len(tokens) >= referenceTokenLimit {
-				return false
-			}
-		}
-		return true
-	})
-	return tokens
-}
-
-func isReferenceTokenSeparator(r rune) bool {
-	switch r {
-	case ' ', '\t', '"', '\'', '`', '(', ')', '[', ']', '{', '}', ',', ';', '<', '>':
-		return true
-	}
-	return false
-}
-
-// isDistinctiveReferenceToken accepts tokens that carry structure a prose
-// sentence would not produce by accident: a path separator, a file extension,
-// a path:line location, or an identifier written in snake/camel case.
-func isDistinctiveReferenceToken(token string) bool {
-	if strings.ContainsAny(token, "/\\") {
-		return true
-	}
-	if strings.Contains(token, ":") && strings.ContainsAny(token, "0123456789") {
-		return true
-	}
-	if strings.Contains(token, "_") {
-		return true
-	}
-	if strings.Contains(token, ".") && !strings.HasSuffix(token, ".") {
-		return true
-	}
-	hasUpper := strings.ToLower(token) != token
-	hasLower := strings.ToUpper(token) != token
-	return hasUpper && hasLower
 }

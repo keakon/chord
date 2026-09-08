@@ -54,15 +54,13 @@ func resolveWaitingMainExpiryPolicy(cfg config.OrchestrationConfig) waitingMainE
 	}
 }
 
-// waitingMainExpiryPolicy returns the resolved policy. It is resolved once at
-// construction; a zero turns budget means this agent was built without going
-// through the constructor (tests), so fall back to resolving it on demand
-// rather than treating every wait as instantly expired.
+// waitingMainExpiryPolicy returns the policy the sweep runs under. It is
+// resolved once from the effective orchestration config when the agent is
+// built, which is the only way a MainAgent that can run a sweep comes into
+// existence; a test that drives the sweep on a hand-built agent sets the same
+// field to the budget it wants to exercise.
 func (a *MainAgent) waitingMainExpiryPolicy() waitingMainExpiryPolicy {
-	if a.waitingMainExpiry.turns > 0 {
-		return a.waitingMainExpiry
-	}
-	return resolveWaitingMainExpiryPolicy(effectiveOrchestrationConfig(a.globalConfig, a.projectConfig))
+	return a.waitingMainExpiry
 }
 
 // expired reports whether a wait that started at (enteredTurn, since) is over.
@@ -135,6 +133,11 @@ func (a *MainAgent) parkSubAgent(agentID string) bool {
 	}
 	sub.lifecycleMu.Lock()
 	defer sub.lifecycleMu.Unlock()
+	// Messages that landed in the queue before the task settled would otherwise
+	// make canPark refuse forever; see dropSettledTaskQueuedInput.
+	if state := sub.State(); isTerminalSubAgentState(state) && sub.hasPendingUserInput() {
+		a.dropSettledTaskQueuedInput(sub, state)
+	}
 	if !sub.canPark() {
 		return false
 	}
@@ -153,14 +156,21 @@ func (a *MainAgent) parkSubAgent(agentID string) bool {
 		return false
 	}
 	if sub.hasPendingUserInput() {
-		switch sub.State() {
-		case SubAgentStateIdle, SubAgentStateWaitingMain, SubAgentStateWaitingDescendant:
+		switch state := sub.State(); {
+		case !isTerminalSubAgentState(state):
+			// A worker that can still be woken consumes the queue itself.
 			if err := a.acquireWakeReactivationSlot(sub); err == nil {
 				a.markSubAgentReactivated(sub, "Queued input arrived before parking")
 				sub.armStartupWatchdog()
 			}
+			return false
+		default:
+			// A settled task cannot: nothing moves it back to Running, so the
+			// queue would keep it unparkable forever — its run loop and LLM
+			// client leaking, and global idle pinned to false. Drop the
+			// messages, tell the owner they were never read, and park.
+			a.dropSettledTaskQueuedInput(sub, state)
 		}
-		return false
 	}
 	if !sub.canPark() {
 		return false
@@ -318,7 +328,11 @@ func (a *MainAgent) sweepSubAgentLifecycle() {
 	policy := a.waitingMainExpiryPolicy()
 	now := time.Now()
 	changed := false
-	for _, sub := range a.subs.snapshotSubAgents() {
+	// One snapshot for both passes below: the expiry pass can only settle
+	// workers it already sees, and a worker it settles leaves Running, so the
+	// stall pass skips it on the state check anyway.
+	subs := a.subs.snapshotSubAgents()
+	for _, sub := range subs {
 		if sub == nil {
 			continue
 		}
@@ -372,9 +386,10 @@ func (a *MainAgent) sweepSubAgentLifecycle() {
 			policy.expired(currentTurn, rec.LastUpdatedTurn, rec.UpdatedAt, now)
 	}
 	for _, taskID := range expiredTaskIDs {
+		expired := a.taskRecordByTaskID(taskID)
 		reason := waitingMainExpiryClosedReasonPrefix
-		if rec := a.taskRecordByTaskID(taskID); rec != nil {
-			reason = policy.reason(currentTurn, rec.LastUpdatedTurn, rec.UpdatedAt, now)
+		if expired != nil {
+			reason = policy.reason(currentTurn, expired.LastUpdatedTurn, expired.UpdatedAt, now)
 		}
 		// Terminal-commit ordering (mirror of the completion path in
 		// handleAgentDone): persist the expiry risk_alert mailbox BEFORE the
@@ -384,7 +399,7 @@ func (a *MainAgent) sweepSubAgentLifecycle() {
 		// parked record's update clock through syncTaskRecordFromMailbox and
 		// make the settle's re-run of the expiry predicate back off. Apply and
 		// delivery happen only after the guarded settle wins.
-		alert, alertDurable := a.prepareWaitingMainExpiryAlert(nil, a.taskRecordByTaskID(taskID), reason)
+		alert, alertDurable := a.prepareWaitingMainExpiryAlert(nil, expired, reason)
 		outcome := a.settleDetachedTerminalTaskGuarded(taskID, SubAgentStateCancelled, reason, reason, stillExpiredParkedWaiting)
 		if outcome != SubAgentStateCancelled {
 			continue
@@ -412,7 +427,7 @@ func (a *MainAgent) sweepSubAgentLifecycle() {
 	// per stall episode through a risk_alert mailbox instead of killing the
 	// worker; the flag is cleared again on the next sweep that finds the
 	// worker healthy.
-	for _, sub := range a.subs.snapshotSubAgents() {
+	for _, sub := range subs {
 		if sub == nil || sub.State() != SubAgentStateRunning {
 			continue
 		}
@@ -471,13 +486,14 @@ func (a *MainAgent) startSubAgentLifecycleSweep(ctx context.Context) {
 // trigger stays silent for sessions that never delegate and have no pending
 // mailbox work, so a truly idle main is not woken.
 func (a *MainAgent) hasSubAgentLifecycleSweepCandidates() bool {
-	if a.hasWaitingMainExpiryCandidates() {
-		return true
-	}
-	for _, sub := range a.subs.snapshotSubAgents() {
+	subs := a.subs.snapshotSubAgents()
+	for _, sub := range subs {
 		if sub != nil && sub.State() == SubAgentStateRunning {
 			return true
 		}
+	}
+	if a.waitingMainExpiryCandidatesAmong(subs) {
+		return true
 	}
 	return !a.globalIdle.Load()
 }
@@ -487,7 +503,11 @@ func (a *MainAgent) hasSubAgentLifecycleSweepCandidates() bool {
 // something to expire. The periodic trigger gates on it so sessions that never
 // delegate do not wake the event loop.
 func (a *MainAgent) hasWaitingMainExpiryCandidates() bool {
-	for _, sub := range a.subs.snapshotSubAgents() {
+	return a.waitingMainExpiryCandidatesAmong(a.subs.snapshotSubAgents())
+}
+
+func (a *MainAgent) waitingMainExpiryCandidatesAmong(subs []*SubAgent) bool {
+	for _, sub := range subs {
 		if sub != nil && sub.State() == SubAgentStateWaitingMain {
 			return true
 		}
@@ -500,6 +520,95 @@ func (a *MainAgent) hasWaitingMainExpiryCandidates() bool {
 		}
 	}
 	return false
+}
+
+// newSubAgentRiskAlertMailbox builds the risk_alert mailbox every owner-visible
+// worker alert shares. The task is identified by its live runtime when there is
+// one and by its durable record otherwise; subtype, summary and payload
+// describe the specific alert.
+func newSubAgentRiskAlertMailbox(sub *SubAgent, record *DurableTaskRecord, subtype, summary, payload string) *SubAgentMailboxMessage {
+	agentID, taskID, ownerAgentID, ownerTaskID, inReplyTo := "", "", "", "", ""
+	if sub != nil {
+		agentID = sub.instanceID
+		taskID = sub.taskID
+		ownerAgentID, ownerTaskID, _, _ = sub.ownerSnapshot()
+		inReplyTo = firstReplyMessageID(sub)
+	} else if record != nil {
+		agentID = strings.TrimSpace(record.LatestInstanceID)
+		taskID = strings.TrimSpace(record.TaskID)
+		ownerAgentID = strings.TrimSpace(record.OwnerAgentID)
+		ownerTaskID = strings.TrimSpace(record.OwnerTaskID)
+	}
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return nil
+	}
+	return &SubAgentMailboxMessage{
+		AgentID:      strings.TrimSpace(agentID),
+		TaskID:       taskID,
+		OwnerAgentID: ownerAgentID,
+		OwnerTaskID:  ownerTaskID,
+		InReplyTo:    inReplyTo,
+		Kind:         SubAgentMailboxKindRiskAlert,
+		Subtype:      subtype,
+		Priority:     SubAgentMailboxPriorityInterrupt,
+		Summary:      strings.TrimSpace(summary),
+		Payload:      payload,
+		RequiresAck:  false,
+	}
+}
+
+// dispatchSubAgentRiskAlert hands a built risk_alert mailbox to the delivery
+// queue and emits the matching control-plane AgentNotifyEvent. Every risk-alert
+// producer ends this way; how durable the message already is differs per
+// producer and is settled by the caller before it dispatches.
+func (a *MainAgent) dispatchSubAgentRiskAlert(mailbox *SubAgentMailboxMessage, sub *SubAgent, record *DurableTaskRecord) {
+	if mailbox == nil {
+		return
+	}
+	agentType := ""
+	if sub != nil {
+		agentType = sub.agentDefName
+	} else if record != nil {
+		agentType = record.AgentDefName
+	}
+	ownerAgentID := strings.TrimSpace(mailbox.OwnerAgentID)
+	ownerTaskID := strings.TrimSpace(mailbox.OwnerTaskID)
+	a.queueLoopEvent(Event{Type: EventSubAgentMailbox, SourceID: strings.TrimSpace(mailbox.AgentID), Payload: mailbox})
+	a.emitToTUI(AgentNotifyEvent{
+		AgentID:       strings.TrimSpace(mailbox.AgentID),
+		TaskID:        strings.TrimSpace(mailbox.TaskID),
+		AgentType:     agentType,
+		ParentAgentID: controlPlaneAgentID(ownerAgentID),
+		ParentTaskID:  ownerTaskID,
+		TargetAgentID: controlPlaneAgentID(ownerAgentID),
+		TargetTaskID:  ownerTaskID,
+		Kind:          string(SubAgentMailboxKindRiskAlert),
+		Message:       strings.TrimSpace(mailbox.Summary),
+	})
+}
+
+// dropSettledTaskQueuedInput discards the messages a settled task can no longer
+// read and tells its owner they were dropped. Keeping them queued instead is
+// not an option: no path returns a terminal runtime to Running, so the queue
+// would block parking forever and with it the worker's cancel, its LLM client
+// release and the global idle transition. Durability is the same best-effort
+// contract the stall alert uses — the queued mailbox event persists the message
+// on its own path — because a notification must never block terminal cleanup.
+func (a *MainAgent) dropSettledTaskQueuedInput(sub *SubAgent, state SubAgentState) {
+	dropped := sub.discardPendingUserInput()
+	if dropped == 0 {
+		return
+	}
+	taskID := strings.TrimSpace(sub.taskID)
+	log.Warnf("dropping messages queued for a settled SubAgent task agent_id=%v task_id=%v state=%v dropped=%v", sub.instanceID, taskID, state, dropped)
+	summary := fmt.Sprintf("%d message(s) were dropped because task %s had already finished as %s", dropped, taskID, state)
+	mailbox := newSubAgentRiskAlertMailbox(sub, nil, agentMessageSubtypeUndeliveredInput, summary,
+		fmt.Sprintf(
+			"Messages arrived for a SubAgent task that had already reached its final state, so they were never read.\n- task_id: %s\n- agent_id: %s\n- final_state: %s\n- dropped_messages: %d\n- required_action: the instruction was not applied; delegate the remaining work again if it still matters.",
+			taskID, sub.instanceID, state, dropped,
+		))
+	a.dispatchSubAgentRiskAlert(mailbox, sub, nil)
 }
 
 // queueWaitingMainExpiryAlert makes an expired live WaitingMain wait visible to
@@ -523,8 +632,7 @@ func (a *MainAgent) queueWaitingMainExpiryAlert(sub *SubAgent, reason string) {
 		// only deliver it, not write or apply it a second time.
 		a.markSubAgentMailboxSeen(messageID)
 	}
-	a.queueLoopEvent(Event{Type: EventSubAgentMailbox, SourceID: strings.TrimSpace(mailbox.AgentID), Payload: mailbox})
-	a.emitWaitingMainExpiryAlertNotify(mailbox, sub, nil)
+	a.dispatchSubAgentRiskAlert(mailbox, sub, nil)
 }
 
 // buildWaitingMainExpiryAlertMailbox constructs the risk_alert mailbox that
@@ -533,43 +641,19 @@ func (a *MainAgent) queueWaitingMainExpiryAlert(sub *SubAgent, reason string) {
 // terminal-commit crash window build through this helper so the delivered
 // notification stays identical across paths.
 func (a *MainAgent) buildWaitingMainExpiryAlertMailbox(sub *SubAgent, record *DurableTaskRecord, reason string) *SubAgentMailboxMessage {
-	agentID, taskID, ownerAgentID, ownerTaskID, inReplyTo := "", "", "", "", ""
-	if sub != nil {
-		agentID = sub.instanceID
-		taskID = sub.taskID
-		ownerAgentID, ownerTaskID, _, _ = sub.ownerSnapshot()
-		inReplyTo = firstReplyMessageID(sub)
-	} else if record != nil {
-		agentID = strings.TrimSpace(record.LatestInstanceID)
-		taskID = strings.TrimSpace(record.TaskID)
-		ownerAgentID = strings.TrimSpace(record.OwnerAgentID)
-		ownerTaskID = strings.TrimSpace(record.OwnerTaskID)
-	}
-	agentID = strings.TrimSpace(agentID)
-	taskID = strings.TrimSpace(taskID)
-	if taskID == "" {
-		return nil
-	}
 	summary := strings.TrimSpace(reason)
 	if summary == "" {
 		summary = waitingMainExpiryClosedReasonPrefix
 	}
-	return &SubAgentMailboxMessage{
-		AgentID:      agentID,
-		TaskID:       taskID,
-		OwnerAgentID: ownerAgentID,
-		OwnerTaskID:  ownerTaskID,
-		InReplyTo:    inReplyTo,
-		Kind:         SubAgentMailboxKindRiskAlert,
-		Subtype:      agentMessageSubtypeWaitingExpiry,
-		Priority:     SubAgentMailboxPriorityInterrupt,
-		Summary:      summary,
-		Payload: fmt.Sprintf(
-			"SubAgent task was abandoned because its wait for a main-agent reply expired and the work was not completed.\n- task_id: %s\n- agent_id: %s\n- required_action: re-delegate the work; the pending agent request for this task is now expired, so a later reply to it will be rejected.",
-			taskID, agentID,
-		),
-		RequiresAck: false,
+	mailbox := newSubAgentRiskAlertMailbox(sub, record, agentMessageSubtypeWaitingExpiry, summary, "")
+	if mailbox == nil {
+		return nil
 	}
+	mailbox.Payload = fmt.Sprintf(
+		"SubAgent task was abandoned because its wait for a main-agent reply expired and the work was not completed.\n- task_id: %s\n- agent_id: %s\n- required_action: re-delegate the work; the pending agent request for this task is now expired, so a later reply to it will be rejected.",
+		mailbox.TaskID, mailbox.AgentID,
+	)
+	return mailbox
 }
 
 // prepareWaitingMainExpiryAlert persists the expiry risk_alert mailbox for a
@@ -608,38 +692,7 @@ func (a *MainAgent) deliverSettledWaitingMainExpiryAlert(mailbox *SubAgentMailbo
 	if durable {
 		a.applyPersistedSubAgentMailboxMessage(mailbox)
 	}
-	a.queueLoopEvent(Event{Type: EventSubAgentMailbox, SourceID: strings.TrimSpace(mailbox.AgentID), Payload: mailbox})
-	a.emitWaitingMainExpiryAlertNotify(mailbox, nil, settled)
-}
-
-// emitWaitingMainExpiryAlertNotify emits the control-plane AgentNotifyEvent
-// that accompanies an expiry risk_alert mailbox (see queueWaitingMainExpiryAlert
-// and deliverSettledWaitingMainExpiryAlert).
-func (a *MainAgent) emitWaitingMainExpiryAlertNotify(mailbox *SubAgentMailboxMessage, sub *SubAgent, record *DurableTaskRecord) {
-	if mailbox == nil {
-		return
-	}
-	agentType := ""
-	if sub != nil {
-		agentType = sub.agentDefName
-	} else if record != nil {
-		agentType = record.AgentDefName
-	}
-	agentID := strings.TrimSpace(mailbox.AgentID)
-	taskID := strings.TrimSpace(mailbox.TaskID)
-	ownerAgentID := strings.TrimSpace(mailbox.OwnerAgentID)
-	ownerTaskID := strings.TrimSpace(mailbox.OwnerTaskID)
-	a.emitToTUI(AgentNotifyEvent{
-		AgentID:       agentID,
-		TaskID:        taskID,
-		AgentType:     agentType,
-		ParentAgentID: controlPlaneAgentID(ownerAgentID),
-		ParentTaskID:  ownerTaskID,
-		TargetAgentID: controlPlaneAgentID(ownerAgentID),
-		TargetTaskID:  ownerTaskID,
-		Kind:          string(SubAgentMailboxKindRiskAlert),
-		Message:       strings.TrimSpace(mailbox.Summary),
-	})
+	a.dispatchSubAgentRiskAlert(mailbox, nil, settled)
 }
 
 // queueSubAgentStallAlert makes a stalled Running worker visible to its owner:
@@ -652,38 +705,11 @@ func (a *MainAgent) queueSubAgentStallAlert(sub *SubAgent, reason string) {
 	if a == nil || sub == nil {
 		return
 	}
-	taskID := strings.TrimSpace(sub.taskID)
-	if taskID == "" {
-		return
-	}
-	ownerAgentID, ownerTaskID, _, _ := sub.ownerSnapshot()
-	mailbox := &SubAgentMailboxMessage{
-		AgentID:      sub.instanceID,
-		TaskID:       taskID,
-		OwnerAgentID: ownerAgentID,
-		OwnerTaskID:  ownerTaskID,
-		InReplyTo:    firstReplyMessageID(sub),
-		Kind:         SubAgentMailboxKindRiskAlert,
-		Priority:     SubAgentMailboxPriorityInterrupt,
-		Summary:      reason,
-		Payload: fmt.Sprintf(
-			"SubAgent is suspected of stalling: it is still running but has shown no state change or activity for an extended period.\n- task_id: %s\n- agent_id: %s\n- required_action: check the worker's transcript/logs for progress; re-delegate, resume, or cancel it explicitly if it is stuck.",
-			taskID, sub.instanceID,
-		),
-		RequiresAck: false,
-	}
-	a.queueLoopEvent(Event{Type: EventSubAgentMailbox, SourceID: sub.instanceID, Payload: mailbox})
-	a.emitToTUI(AgentNotifyEvent{
-		AgentID:       sub.instanceID,
-		TaskID:        taskID,
-		AgentType:     sub.agentDefName,
-		ParentAgentID: controlPlaneAgentID(ownerAgentID),
-		ParentTaskID:  ownerTaskID,
-		TargetAgentID: controlPlaneAgentID(ownerAgentID),
-		TargetTaskID:  ownerTaskID,
-		Kind:          string(SubAgentMailboxKindRiskAlert),
-		Message:       reason,
-	})
+	mailbox := newSubAgentRiskAlertMailbox(sub, nil, "", reason, fmt.Sprintf(
+		"SubAgent is suspected of stalling: it is still running but has shown no state change or activity for an extended period.\n- task_id: %s\n- agent_id: %s\n- required_action: check the worker's transcript/logs for progress; re-delegate, resume, or cancel it explicitly if it is stuck.",
+		strings.TrimSpace(sub.taskID), sub.instanceID,
+	))
+	a.dispatchSubAgentRiskAlert(mailbox, sub, nil)
 }
 
 // expireAgentRequestsAfterCancellation records a WaitingMain expiry in the
@@ -705,12 +731,11 @@ func (a *MainAgent) expireAgentRequestsAfterCancellation(taskID string) {
 	defer a.agentRequestPersistMu.Unlock()
 	records := a.snapshotAgentRequests()
 	changed := false
-	for id, request := range records {
+	for _, request := range records {
 		if request == nil || request.State != "pending" || strings.TrimSpace(request.SourceTaskID) != taskID {
 			continue
 		}
 		request.State = "expired"
-		records[id] = request
 		changed = true
 	}
 	if !changed {

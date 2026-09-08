@@ -178,19 +178,40 @@ func (g *resourceGovernor) tryAcquireRuntime() bool {
 	}
 }
 
-func (g *resourceGovernor) tryBorrowRuntime() bool {
-	if g == nil || g.maxBorrowed <= 0 {
+// tryAcquireCountedSlot grants one unit of a counter-backed runtime pool, or
+// reports that the pool is at its limit. The borrow and bypass pools are
+// counters rather than channels because they are overflow valves sized from
+// config, so they share this acquire/release pair instead of each carrying its
+// own copy of the compare-and-swap loop.
+func tryAcquireCountedSlot(counter *atomic.Int64, limit int64) bool {
+	if limit <= 0 {
 		return false
 	}
 	for {
-		current := g.borrowed.Load()
-		if current >= g.maxBorrowed {
+		current := counter.Load()
+		if current >= limit {
 			return false
 		}
-		if g.borrowed.CompareAndSwap(current, current+1) {
+		if counter.CompareAndSwap(current, current+1) {
 			return true
 		}
 	}
+}
+
+func releaseCountedSlot(counter *atomic.Int64) {
+	for {
+		current := counter.Load()
+		if current <= 0 || counter.CompareAndSwap(current, current-1) {
+			return
+		}
+	}
+}
+
+func (g *resourceGovernor) tryBorrowRuntime() bool {
+	if g == nil {
+		return false
+	}
+	return tryAcquireCountedSlot(&g.borrowed, g.maxBorrowed)
 }
 
 // tryBypassRuntime grants an uncounted runtime slot for a wake reactivation
@@ -198,30 +219,17 @@ func (g *resourceGovernor) tryBorrowRuntime() bool {
 // is a last-resort valve, so it is deliberately small: exhausting it makes the
 // caller leave the message queued rather than exceed the configured ceiling.
 func (g *resourceGovernor) tryBypassRuntime() bool {
-	if g == nil || g.maxBypassed <= 0 {
+	if g == nil {
 		return false
 	}
-	for {
-		current := g.bypassed.Load()
-		if current >= g.maxBypassed {
-			return false
-		}
-		if g.bypassed.CompareAndSwap(current, current+1) {
-			return true
-		}
-	}
+	return tryAcquireCountedSlot(&g.bypassed, g.maxBypassed)
 }
 
 func (g *resourceGovernor) releaseBypassRuntime() {
 	if g == nil {
 		return
 	}
-	for {
-		current := g.bypassed.Load()
-		if current <= 0 || g.bypassed.CompareAndSwap(current, current-1) {
-			return
-		}
-	}
+	releaseCountedSlot(&g.bypassed)
 }
 
 func (g *resourceGovernor) releaseRuntime(borrowed bool) {
@@ -229,12 +237,7 @@ func (g *resourceGovernor) releaseRuntime(borrowed bool) {
 		return
 	}
 	if borrowed {
-		for {
-			current := g.borrowed.Load()
-			if current <= 0 || g.borrowed.CompareAndSwap(current, current-1) {
-				break
-			}
-		}
+		releaseCountedSlot(&g.borrowed)
 		return
 	}
 	select {

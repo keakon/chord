@@ -87,18 +87,11 @@ func (a *MainAgent) normalizeSubAgentMailboxMessage(msg *SubAgentMailboxMessage)
 	if len(msg.MessagePayload) > mailboxArtifactPayloadThreshold {
 		artifactType := "agent_message_payload"
 		title := fmt.Sprintf("%s %s payload", msg.AgentID, msg.MessageType)
-		artifactID, artifactRelPath, err := persistSubAgentArtifact(a.sessionDir, msg.AgentID, msg.MessageID, artifactType, title, string(msg.MessagePayload))
+		artifactID, artifactRelPath, sizeBytes, digest, err := persistSubAgentArtifact(a.sessionDir, msg.AgentID, msg.MessageID, artifactType, title, string(msg.MessagePayload))
 		if err == nil && artifactRelPath != "" {
-			abs, resolveErr := tools.ResolveSessionArtifactPath(a.sessionDir, artifactRelPath)
-			if resolveErr == nil {
-				if info, statErr := os.Stat(abs); statErr == nil {
-					if digest, hashErr := tools.ArtifactSHA256(abs); hashErr == nil {
-						ref := tools.ArtifactRef{ID: artifactID, RelPath: artifactRelPath, Type: artifactType, SizeBytes: info.Size(), SHA256: digest}
-						msg.ArtifactRefs = mergeArtifactRefs(msg.ArtifactRefs, []tools.ArtifactRef{ref})
-						msg.MessagePayload = nil
-					}
-				}
-			}
+			ref := tools.ArtifactRef{ID: artifactID, RelPath: artifactRelPath, Type: artifactType, SizeBytes: sizeBytes, SHA256: digest}
+			msg.ArtifactRefs = mergeArtifactRefs(msg.ArtifactRefs, []tools.ArtifactRef{ref})
+			msg.MessagePayload = nil
 		}
 	}
 	if shouldPersistMailboxArtifact(*msg) {
@@ -108,7 +101,7 @@ func (a *MainAgent) normalizeSubAgentMailboxMessage(msg *SubAgentMailboxMessage)
 		if body == "" {
 			body = strings.TrimSpace(msg.Summary)
 		}
-		artifactID, artifactRelPath, err := persistSubAgentArtifact(a.sessionDir, msg.AgentID, msg.MessageID, artifactType, title, body)
+		artifactID, artifactRelPath, _, _, err := persistSubAgentArtifact(a.sessionDir, msg.AgentID, msg.MessageID, artifactType, title, body)
 		if err == nil && artifactRelPath != "" {
 			ref := tools.ArtifactRef{ID: artifactID, RelPath: artifactRelPath, Path: artifactRelPath, Type: artifactType}
 			if msg.Completion == nil {
@@ -198,39 +191,88 @@ func validateAgentMessageContract(msg *SubAgentMailboxMessage) error {
 	return nil
 }
 
-func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
+// ownedMailboxRoute is where an owned-queue message can go right now.
+type ownedMailboxRoute uint8
+
+const (
+	// ownedMailboxRouteNone covers the only-temporarily-unroutable case: a
+	// message spooled under a parked owner that this mailbox may not wake. It
+	// must never be reported as runnable mailbox work, or a stranded message
+	// would suppress global idle forever.
+	ownedMailboxRouteNone ownedMailboxRoute = iota
+	ownedMailboxRouteLiveOwner
+	ownedMailboxRouteWakeParkedOwner
+	ownedMailboxRouteForwardToMain
+)
+
+// resolveOwnedMailboxRoute decides where an owned-queue message goes, with no
+// delivery side effects. It is the single answer to that question:
+// routeOwnedSubAgentMailbox performs the route it returns and
+// ownedMailboxMessageRoutable only asks whether a route exists, so the
+// "is this deliverable" predicate cannot drift from the delivery itself.
+func (a *MainAgent) resolveOwnedMailboxRoute(msg SubAgentMailboxMessage) (ownedMailboxRoute, *SubAgent, *DurableTaskRecord) {
 	ownerAgentID := strings.TrimSpace(msg.OwnerAgentID)
 	if ownerAgentID == "" {
+		return ownedMailboxRouteNone, nil, nil
+	}
+	if owner := unsettledMailboxOwner(a.subAgentByID(ownerAgentID)); owner != nil {
+		return ownedMailboxRouteLiveOwner, owner, nil
+	}
+	rec := a.taskRecordByInstanceID(ownerAgentID)
+	if rec == nil {
+		return ownedMailboxRouteNone, nil, nil
+	}
+	if !rec.RuntimeParked {
+		// The owner may have been rehydrated under a new instance ID.
+		if owner := unsettledMailboxOwner(a.subAgentByTaskID(rec.TaskID)); owner != nil {
+			return ownedMailboxRouteLiveOwner, owner, rec
+		}
+	}
+	// A parked owner may be woken by a descendant mailbox (child completion or
+	// child decision request); only genuine descendant messages wake it, so
+	// unrelated messages spooled under its queue stay queued instead.
+	if rec.RuntimeParked && msg.Kind != SubAgentMailboxKindProgress &&
+		rec.allowsRehydrate(taskResumeByDescendantMailbox) && a.ownedMailboxIsFromDescendant(msg, rec) {
+		return ownedMailboxRouteWakeParkedOwner, nil, rec
+	}
+	if !isNonTerminalTaskState(rec.State) {
+		return ownedMailboxRouteForwardToMain, nil, rec
+	}
+	return ownedMailboxRouteNone, nil, rec
+}
+
+// unsettledMailboxOwner drops a runtime whose task already settled: a child
+// mailbox must not resurrect a finished owner just because its runtime has not
+// been parked yet. Such a message is forwarded to the main inbox, exactly as it
+// is once only the owner's terminal record remains.
+func unsettledMailboxOwner(sub *SubAgent) *SubAgent {
+	if sub == nil || isTerminalSubAgentState(sub.State()) {
+		return nil
+	}
+	return sub
+}
+
+func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
+	route, owner, rec := a.resolveOwnedMailboxRoute(msg)
+	switch route {
+	case ownedMailboxRouteLiveOwner:
+	case ownedMailboxRouteWakeParkedOwner:
+		var err error
+		if owner, _, err = a.rehydrateTask(rec); err != nil {
+			return false
+		}
+	case ownedMailboxRouteForwardToMain:
+		// Forward to main as a main-owned message: clear both owner fields so
+		// the mailbox metadata, injection text, and durable task-record sync
+		// cannot re-associate it with the finished owner.
+		msg.OwnerAgentID = ""
+		msg.OwnerTaskID = ""
+		a.enqueueSubAgentMailbox(msg)
+		return true
+	default:
 		return false
 	}
-	owner := a.subAgentByID(ownerAgentID)
 	if owner == nil {
-		rec := a.taskRecordByInstanceID(ownerAgentID)
-		if rec != nil && !rec.RuntimeParked {
-			owner = a.subAgentByTaskID(rec.TaskID)
-		}
-		// A parked owner may be woken by a descendant mailbox (child completion
-		// or child decision request); only genuine descendant messages wake it,
-		// so unrelated messages spooled under its queue stay queued instead.
-		if owner == nil && rec != nil && rec.RuntimeParked && msg.Kind != SubAgentMailboxKindProgress &&
-			rec.allowsRehydrate(taskResumeByDescendantMailbox) && a.ownedMailboxIsFromDescendant(msg, rec) {
-			var err error
-			owner, _, err = a.rehydrateTask(rec)
-			if err != nil {
-				return false
-			}
-		}
-	}
-	if owner == nil {
-		if rec := a.taskRecordByInstanceID(ownerAgentID); rec != nil && !isNonTerminalTaskState(rec.State) {
-			// Forward to main as a main-owned message: clear both owner
-			// fields so the mailbox metadata, injection text, and durable
-			// task-record sync cannot re-associate it with the finished owner.
-			msg.OwnerAgentID = ""
-			msg.OwnerTaskID = ""
-			a.enqueueSubAgentMailbox(msg)
-			return true
-		}
 		return false
 	}
 	text := formatSubAgentMailboxInjectionText(&msg)
@@ -382,34 +424,11 @@ func (a *MainAgent) ownedMailboxIsFromDescendant(msg SubAgentMailboxMessage, own
 		strings.TrimSpace(msg.OwnerTaskID) == strings.TrimSpace(owner.TaskID)
 }
 
-// ownedMailboxMessageRoutable mirrors the routing decision of
-// routeOwnedSubAgentMailbox without performing any delivery side effects: an
-// owned queue message counts as routable when it could be delivered right now —
-// to a live owner runtime, to a parked owner that a descendant mailbox may
-// wake, or forward to the main inbox once the owner record is terminal. A
-// message that is only temporarily unroutable (spooled under a parked owner
-// with no live runtime that this mailbox cannot wake) must not be reported as
-// runnable mailbox work, or a stranded message would suppress global idle
-// forever.
+// ownedMailboxMessageRoutable reports whether an owned queue message could be
+// delivered right now, without delivering it.
 func (a *MainAgent) ownedMailboxMessageRoutable(msg SubAgentMailboxMessage) bool {
-	ownerAgentID := strings.TrimSpace(msg.OwnerAgentID)
-	if ownerAgentID == "" {
-		return false
-	}
-	if a.subAgentByID(ownerAgentID) != nil {
-		return true
-	}
-	rec := a.taskRecordByInstanceID(ownerAgentID)
-	if rec == nil {
-		return false
-	}
-	if !rec.RuntimeParked && a.subAgentByTaskID(rec.TaskID) != nil {
-		return true
-	}
-	if rec.RuntimeParked && msg.Kind != SubAgentMailboxKindProgress && rec.allowsRehydrate(taskResumeByDescendantMailbox) {
-		return a.ownedMailboxIsFromDescendant(msg, rec)
-	}
-	return !isNonTerminalTaskState(rec.State)
+	route, _, _ := a.resolveOwnedMailboxRoute(msg)
+	return route != ownedMailboxRouteNone
 }
 
 func (a *MainAgent) enqueueOwnedSubAgentMailbox(msg SubAgentMailboxMessage) {
@@ -870,15 +889,11 @@ func (a *MainAgent) hasQueuedMailboxMessage(messageID string) bool {
 			return true
 		}
 	}
-	for _, id := range a.subAgentInbox.spoolUrgent {
-		if id == messageID {
-			return true
-		}
+	if slices.Contains(a.subAgentInbox.spoolUrgent, messageID) {
+		return true
 	}
-	for _, id := range a.subAgentInbox.spoolNormal {
-		if id == messageID {
-			return true
-		}
+	if slices.Contains(a.subAgentInbox.spoolNormal, messageID) {
+		return true
 	}
 	for _, queued := range a.ownedSubAgentMailboxes {
 		for _, msg := range queued {
@@ -888,10 +903,8 @@ func (a *MainAgent) hasQueuedMailboxMessage(messageID string) bool {
 		}
 	}
 	for _, spooled := range a.ownedMailboxSpool {
-		for _, id := range spooled {
-			if id == messageID {
-				return true
-			}
+		if slices.Contains(spooled, messageID) {
+			return true
 		}
 	}
 	for _, msg := range a.pendingSubAgentMailboxes {

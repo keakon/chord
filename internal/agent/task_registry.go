@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -250,6 +251,24 @@ func durableTaskResumePolicy(state SubAgentState) string {
 	}
 }
 
+// hydratableWriteScope returns the boundary a rehydrated runtime must run
+// under, or an error when the record carries none. Delegate refuses to create a
+// task without an expected_write_scope, but a record read back from disk was
+// never re-checked, and an empty scope short-circuits the whole runtime gate:
+// no path validation, no command allow-list, and Shell registered as usual. A
+// record without a scope is therefore not hydratable — reviving it would mint
+// an unrestricted worker from data that never passed admission.
+func (r *DurableTaskRecord) hydratableWriteScope() (tools.WriteScope, error) {
+	if r == nil {
+		return tools.WriteScope{}, fmt.Errorf("missing task record")
+	}
+	scope := r.ExpectedWriteScope.Normalized()
+	if scope.Empty() {
+		return tools.WriteScope{}, fmt.Errorf("task %s cannot be reactivated because its record declares no expected_write_scope, so the runtime has no boundary to enforce; delegate the remaining work again with an explicit expected_write_scope", strings.TrimSpace(r.TaskID))
+	}
+	return scope, nil
+}
+
 func (r *DurableTaskRecord) allowsRehydrate(trigger taskResumeTrigger) bool {
 	if r == nil {
 		return false
@@ -433,7 +452,7 @@ func (a *MainAgent) findDuplicateOrConflictingTaskLocked(ownerAgentID, ownerTask
 				continue
 			}
 		}
-		disposition, conflict := duplicateOrConflictingTaskRecord(rec, ownerAgentID, ownerTaskID, agentType, planTaskRef, semanticTaskKey, semanticKeyExplicit, expectedWriteScope, a.projectRoot)
+		disposition, conflict := duplicateOrConflictingTaskRecord(rec, ownerAgentID, ownerTaskID, agentType, planTaskRef, semanticTaskKey, semanticKeyExplicit, expectedWriteScope, a.writeScopeBaseDir())
 		if conflict || disposition == taskDuplicateExplicitKey {
 			// A rejection (scope conflict or confirmed duplicate) always stops
 			// the scan. A probable match is remembered instead and only used if
@@ -480,7 +499,7 @@ func (a *MainAgent) taskOwnerLineageLocked(ownerTaskID string) map[string]struct
 // under-collide (CJK sentences do not split into words), so the runtime must
 // not merge or reject on them — it creates the new task and lets the model
 // decide.
-func duplicateOrConflictingTaskRecord(rec *DurableTaskRecord, ownerAgentID, ownerTaskID, agentType, planTaskRef, semanticTaskKey string, semanticKeyExplicit bool, expectedWriteScope tools.WriteScope, projectRoot string) (taskDuplicateDisposition, bool) {
+func duplicateOrConflictingTaskRecord(rec *DurableTaskRecord, ownerAgentID, ownerTaskID, agentType, planTaskRef, semanticTaskKey string, semanticKeyExplicit bool, expectedWriteScope tools.WriteScope, baseDir string) (taskDuplicateDisposition, bool) {
 	if rec == nil {
 		return taskDuplicateNone, false
 	}
@@ -495,7 +514,7 @@ func duplicateOrConflictingTaskRecord(rec *DurableTaskRecord, ownerAgentID, owne
 			// scope is still a scope conflict: the heuristic may be wrong about
 			// the deliverable, but it never justifies running two concurrent
 			// writers over the same scope.
-			return taskDuplicateProbable, isNonTerminalTaskState(rec.State) && writeScopesOverlap(expectedWriteScope, rec.ExpectedWriteScope, projectRoot)
+			return taskDuplicateProbable, isNonTerminalTaskState(rec.State) && writeScopesOverlap(expectedWriteScope, rec.ExpectedWriteScope, baseDir)
 		}
 	}
 	// A parent delegates work from within its own write lease. The child scope
@@ -504,7 +523,7 @@ func duplicateOrConflictingTaskRecord(rec *DurableTaskRecord, ownerAgentID, owne
 	if strings.TrimSpace(rec.TaskID) == strings.TrimSpace(ownerTaskID) {
 		return taskDuplicateNone, false
 	}
-	if isNonTerminalTaskState(rec.State) && writeScopesOverlap(expectedWriteScope, rec.ExpectedWriteScope, projectRoot) {
+	if isNonTerminalTaskState(rec.State) && writeScopesOverlap(expectedWriteScope, rec.ExpectedWriteScope, baseDir) {
 		return taskDuplicateNone, true
 	}
 	return taskDuplicateNone, false

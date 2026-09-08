@@ -274,7 +274,9 @@ func TestSyncBugTriagePromptFromSnapshot_UsesCurrentContext(t *testing.T) {
 func TestBugTriagePromptBlock_HiddenForPlannerRole(t *testing.T) {
 	a := &MainAgent{}
 	a.bugTriagePromptActive.Store(true)
-	a.activeConfig = &config.AgentConfig{Name: "planner"}
+	// The built-in planner ships with the planning preset declared; role names
+	// no longer select prompt behavior on their own.
+	a.activeConfig = &config.AgentConfig{Name: "planner", PromptPreset: config.PromptPresetPlanning}
 	if got := a.bugTriagePromptBlock(); got != "" {
 		t.Fatalf("planner should not get bug triage block, got %q", got)
 	}
@@ -725,7 +727,9 @@ func TestMainAgentResponseClosurePrompt_RequiresContinueUnlessBlocked(t *testing
 
 func TestMainAgentRolePromptBlock_UsesPlannerPromptOnlyForPlannerRole(t *testing.T) {
 	a := &MainAgent{}
-	a.activeConfig = &config.AgentConfig{Name: "planner"}
+	// The planning preset (which the built-in planner declares explicitly)
+	// selects the block; the bare role name no longer does.
+	a.activeConfig = &config.AgentConfig{Name: "planner", PromptPreset: config.PromptPresetPlanning}
 	got := a.mainAgentRolePromptBlock()
 	for _, want := range []string{"Save the plan document under .chord/plans/ as YYYYMMDD-<slug>.md, using today's date and a short descriptive slug derived from the task title", "Explore the codebase using the tools and permissions available in this role.", "Answer directly and stop (no plan file, no Handoff) when the user asks for any", "When the user rejects Handoff"} {
 		if !strings.Contains(got, want) {
@@ -746,7 +750,9 @@ func TestMainAgentRolePromptBlock_UsesPlannerPromptOnlyForPlannerRole(t *testing
 
 func TestPlannerModePromptBlock_UsesPermissionSpecificInstructions(t *testing.T) {
 	a := &MainAgent{}
-	a.activeConfig = &config.AgentConfig{Name: "planner"}
+	// The planning preset (declared explicitly by the built-in planner) gates
+	// the block; the role name no longer decides.
+	a.activeConfig = &config.AgentConfig{Name: "planner", PromptPreset: config.PromptPresetPlanning}
 	got := a.mainAgentRolePromptBlock()
 	if !strings.Contains(got, "If this role cannot write the plan file, explain the limitation and ask the user in plain assistant text to adjust permissions, scope, or approach.") {
 		t.Fatalf("planner prompt without Write/Question should explain plain-text limitation handling, got %q", got)
@@ -759,7 +765,7 @@ func TestPlannerModePromptBlock_UsesPermissionSpecificInstructions(t *testing.T)
 	a.tools.Register(tools.WriteTool{})
 	a.tools.Register(tools.NewQuestionTool(nil))
 	a.tools.Register(tools.HandoffTool{})
-	a.activeConfig = &config.AgentConfig{Name: "planner", Permission: parsePermissionNode(t, `
+	a.activeConfig = &config.AgentConfig{Name: "planner", PromptPreset: config.PromptPresetPlanning, Permission: parsePermissionNode(t, `
 "*": deny
 write: allow
 question: allow
@@ -2209,10 +2215,13 @@ func TestMainAgentRolePromptBlock_PlanningPresetDecidesInsteadOfRoleName(t *test
 		t.Fatalf("planner role with prompt_preset none should emit no block, got %q", got)
 	}
 
-	// The name-based fallback still applies when no preset is declared.
+	// The name alone selects nothing: a role named planner with no preset gets
+	// no block. The built-in planner ships with the preset declared; the
+	// name-based fallback it once relied on is gone (and pinned gone here, so
+	// it cannot silently come back as an implicit capability for other names).
 	a.activeConfig = &config.AgentConfig{Name: "planner"}
-	if got := a.mainAgentRolePromptBlock(); !strings.Contains(got, planningMarker) {
-		t.Fatalf("planner role without an explicit preset lost its planning block, got %q", got)
+	if got := a.mainAgentRolePromptBlock(); got != "" {
+		t.Fatalf("planner role without an explicit preset must not get the planning block by name, got %q", got)
 	}
 }
 

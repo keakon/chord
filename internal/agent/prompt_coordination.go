@@ -37,13 +37,21 @@ func (a *MainAgent) subAgentWorkflowPromptBlock() string {
 	// tool schema on every request where delegation is visible; it is not
 	// duplicated as a prompt list here.
 	sb.WriteString("## SubAgent Workflow\n")
-	sb.WriteString("- The " + delegate + " tool call returns immediately; MainAgent receives SubAgent progress and completion updates automatically through the runtime coordination flow (see the " + delegate + " tool description for its call semantics).\n")
+	sb.WriteString("- The ")
+	sb.WriteString(delegate)
+	sb.WriteString(" tool call returns immediately; MainAgent receives SubAgent progress and completion updates automatically through the runtime coordination flow (see the ")
+	sb.WriteString(delegate)
+	sb.WriteString(" tool description for its call semantics).\n")
 	sb.WriteString(delegationStrategyPromptLines())
 	if a.compactContextVisible() {
 		// The compact_context tool exists only when it is visible and
 		// executable; without it this guidance has no referent (a denied or
 		// invisible tool must never be pushed onto the model as an option).
-		sb.WriteString("- For sub-tasks that can be described and executed independently with results the main thread can consume, prefer " + delegate + " (SubAgent): the SubAgent runs in a fresh window and only the final result reaches the main thread, so its intermediate tool output never pollutes the main context. Use " + toolPromptName(tools.NameCompactContext) + " only when the main thread itself must keep reasoning across a wrapped-up phase and only its conclusions need to be preserved.\n")
+		sb.WriteString("- For sub-tasks that can be described and executed independently with results the main thread can consume, prefer ")
+		sb.WriteString(delegate)
+		sb.WriteString(" (SubAgent): the SubAgent runs in a fresh window and only the final result reaches the main thread, so its intermediate tool output never pollutes the main context. Use ")
+		sb.WriteString(toolPromptName(tools.NameCompactContext))
+		sb.WriteString(" only when the main thread itself must keep reasoning across a wrapped-up phase and only its conclusions need to be preserved.\n")
 	}
 	sb.WriteString("- For implementation tasks, first dispatch all currently independent tasks whose write scopes are clearly disjoint.\n")
 	sb.WriteString("- After dispatching the current independent implementation tasks, if there is no new independent task to send, stop doing implementation work in MainAgent and wait for runtime coordination to deliver the next decision point.\n")

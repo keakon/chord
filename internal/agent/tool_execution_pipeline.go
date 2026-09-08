@@ -67,17 +67,23 @@ type toolExecutionPipeline struct {
 	captureWalltimeTarget func() *walltimeTarget
 }
 
-// shellCommandArgument extracts the command a Shell call would run. An
-// unreadable argument is a scope failure rather than an execution failure: the
-// gate cannot decide whether the call is authorized, so it must not run.
-func shellCommandArgument(tc message.ToolCall) (string, error) {
-	var args struct {
-		Command string `json:"command"`
+// shellCallArguments describes a Shell call the way every caller in this
+// package needs to reason about it: what it runs and where. Decoding happens
+// here alone so the scope gate, the permission/tool-card argument summary and
+// the verification ledger cannot disagree about what a given Shell call is.
+type shellCallArguments struct {
+	Command string `json:"command"`
+	Workdir string `json:"workdir,omitempty"`
+}
+
+func decodeShellCallArguments(args json.RawMessage) (shellCallArguments, error) {
+	var parsed shellCallArguments
+	if err := json.Unmarshal(llm.UnwrapToolArgs(args), &parsed); err != nil {
+		return shellCallArguments{}, err
 	}
-	if err := json.Unmarshal(llm.UnwrapToolArgs(tc.Args), &args); err != nil {
-		return "", fmt.Errorf("shell arguments could not be read, so this scoped SubAgent task cannot verify the command against its authorized list: %w", err)
-	}
-	return strings.TrimSpace(args.Command), nil
+	parsed.Command = strings.TrimSpace(parsed.Command)
+	parsed.Workdir = strings.TrimSpace(parsed.Workdir)
+	return parsed, nil
 }
 
 func (p toolExecutionPipeline) validateWriteScope(tc message.ToolCall) error {
@@ -90,19 +96,22 @@ func (p toolExecutionPipeline) validateWriteScope(tc message.ToolCall) error {
 	}
 	if tc.Name == tools.NameShell {
 		// Arbitrary command side effects cannot be path-validated, so a scoped
-		// task may only run commands its delegator vouched for by name.
-		command, err := shellCommandArgument(tc)
+		// task may only run commands its delegator vouched for by name. An
+		// unreadable argument is a scope failure rather than an execution
+		// failure: the gate cannot decide whether the call is authorized, so it
+		// must not run.
+		shell, err := decodeShellCallArguments(tc.Args)
 		if err != nil {
-			return err
+			return fmt.Errorf("shell arguments could not be read, so this scoped SubAgent task cannot verify the command against its authorized list: %w", err)
 		}
-		if !scope.AllowsCommand(command) {
+		if !scope.AllowsCommand(shell.Command) {
 			if len(scope.VerificationCommands) == 0 {
 				return fmt.Errorf("shell is unavailable for a scoped SubAgent task because arbitrary command side effects cannot be path-validated; ask the owner agent to authorize the command through the task's verification_commands")
 			}
 			return fmt.Errorf("command %q is not among this task's authorized commands (%s); run one of those or ask the owner agent to authorize this one",
-				command, strings.Join(scope.VerificationCommands, ", "))
+				shell.Command, strings.Join(scope.VerificationCommands, ", "))
 		}
-		return nil
+		return p.validateShellWorkdir(scope, shell.Workdir)
 	}
 	if scope.ReadOnly {
 		if tools.IsFileMutation(tc.Name) || tc.Name == tools.NameSpawn {
@@ -128,10 +137,7 @@ func (p toolExecutionPipeline) validateWriteScope(tc message.ToolCall) error {
 	if len(scope.Files) == 0 && len(scope.PathPrefix) == 0 {
 		return fmt.Errorf("tool %q cannot be path-validated because expected_write_scope declares only logical modules", tc.Name)
 	}
-	baseDir := p.writeScopeDir
-	if strings.TrimSpace(baseDir) == "" {
-		baseDir = p.projectRoot
-	}
+	baseDir := p.writeScopeBaseDir()
 	paths, err := writeScopeToolPaths(tc, baseDir)
 	if err != nil {
 		return fmt.Errorf("validate expected_write_scope for %s: %w", tc.Name, err)
@@ -142,6 +148,38 @@ func (p toolExecutionPipeline) validateWriteScope(tc message.ToolCall) error {
 		}
 	}
 	return nil
+}
+
+// writeScopeBaseDir is the directory every scope comparison resolves relative
+// declarations against. It is the worker's own working directory, which is
+// also what its tools resolve relative paths against, so a declaration reads
+// the same way to the model, to the tool and to this gate.
+func (p toolExecutionPipeline) writeScopeBaseDir() string {
+	if strings.TrimSpace(p.writeScopeDir) != "" {
+		return p.writeScopeDir
+	}
+	return p.projectRoot
+}
+
+// validateShellWorkdir keeps an authorized command inside the task's boundary.
+// The authorized command line says nothing about where it runs — the same
+// `go test ./...` is a different act in a different tree — so vouching for a
+// command must not hand the task every directory on the machine. The command
+// may run where the task itself runs, or inside a path the scope already
+// authorizes; anywhere else needs a new authorization from the owner.
+func (p toolExecutionPipeline) validateShellWorkdir(scope tools.WriteScope, workdir string) error {
+	if workdir == "" {
+		return nil
+	}
+	baseDir := p.writeScopeBaseDir()
+	resolved := normalizedScopeAbsPath(workdir, baseDir)
+	if resolved == normalizedScopeAbsPath(".", baseDir) {
+		return nil
+	}
+	if writeScopeAllowsPath(scope, resolved, baseDir) {
+		return nil
+	}
+	return fmt.Errorf("workdir %q is outside this SubAgent task's expected_write_scope; run the authorized command in the task's working directory or ask the owner agent to authorize that directory", workdir)
 }
 
 func (p toolExecutionPipeline) effectiveToolBaseDir() string {

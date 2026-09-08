@@ -145,6 +145,9 @@ func TestActivateLoadedSessionKeepsServiceTierForMainAndRestoredSubAgents(t *tes
 			AgentDefName: "worker",
 			TaskDesc:     "restored work",
 			State:        SubAgentStateIdle,
+			// The record is rehydrated by the assertion below; rehydration
+			// refuses scope-less records.
+			ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{"internal/agent"}},
 		}},
 	}
 

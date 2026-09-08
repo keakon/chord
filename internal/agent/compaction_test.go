@@ -1510,7 +1510,7 @@ func TestPrepareMessagesForLLM_GoTestSummaryCountsPackagesAndCachedResults(t *te
 	}
 }
 
-func TestPrepareMessagesForLLM_GoTestJSONUsesExistingStructuredFallback(t *testing.T) {
+func TestPrepareMessagesForLLM_GoTestJSONKeepsExcerptFallback(t *testing.T) {
 	a := &MainAgent{}
 	largeOutput := strings.Repeat(`{"Action":"pass","Package":"github.com/example/project"}`+"\n", compactBashSuccessBytes)
 	msgs := []message.Message{
@@ -1525,8 +1525,12 @@ func TestPrepareMessagesForLLM_GoTestJSONUsesExistingStructuredFallback(t *testi
 	if strings.Contains(got, "go test success summarized") {
 		t.Fatalf("structured go test output must not use line-oriented command summary, got %q", got)
 	}
-	if !strings.Contains(got, "Older shell output omitted") {
-		t.Fatalf("expected existing structured-output fallback for go test -json, got %q", got)
+	// An NDJSON stream folds into no JSON skeleton, so the JSON branch falls
+	// back to the excerpt-bearing stale summary. A bare "omitted" marker would
+	// leave the request citing nothing for the run it summarized; the
+	// fallback keeps representative lines instead.
+	if !strings.Contains(got, "Older shell output summarized") || !strings.Contains(got, `{"Action":"pass"`) {
+		t.Fatalf("expected excerpt-bearing fallback for go test -json output, got %q", got)
 	}
 }
 

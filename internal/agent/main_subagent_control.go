@@ -277,17 +277,29 @@ func (a *MainAgent) sendMessageToSubAgentWithTrigger(callerAgentID, callerTaskID
 	sub := a.subAgentByTaskID(taskID)
 	rehydrated := false
 	previousAgentID := ""
-	if sub == nil {
+	// Admission is decided from the task's settlement state, not from whether a
+	// runtime happens to still be live. A settled task whose worker has not been
+	// parked yet must answer the same two questions a parked one does — may this
+	// trigger start a new attempt at all, and has the attempt moved past the
+	// immutable settlement of the previous one. Skipping them for a live runtime
+	// let a message undo a cancel, and let the second attempt's completion be
+	// discarded as a settlement conflict while the owner was handed the first
+	// attempt's result.
+	if sub == nil || taskAlreadySettled(record, sub) {
 		if !record.allowsRehydrate(trigger) {
 			if SubAgentState(strings.TrimSpace(record.State)) == SubAgentStateCancelled {
 				return tools.TaskHandle{}, fmt.Errorf("task %s was cancelled; a message must not undo that decision — delegate the work again if it should still be done", taskID)
 			}
 			return tools.TaskHandle{}, fmt.Errorf("task %s is %s; follow-up is not allowed without a live worker", taskID, strings.TrimSpace(record.State))
 		}
+	}
+	if sub == nil {
 		sub, previousAgentID, rehydrated, err = a.getOrRehydrateTask(record)
 		if err != nil {
 			return tools.TaskHandle{}, err
 		}
+	} else if err := a.beginNextTaskAttemptForLiveSub(sub); err != nil {
+		return tools.TaskHandle{}, err
 	}
 
 	status, statusMessage, err := a.deliverMessageToSubAgent(sub, message, kind)
@@ -488,7 +500,7 @@ func (a *MainAgent) prepareSubAgentDelivery(sub *SubAgent, message, kind string,
 		prep.replySummary = truncateMailboxReplySummary(message)
 		if len(strings.TrimSpace(message)) > replyArtifactPayloadThreshold {
 			artifactType := "execution_spec"
-			artifactID, artifactRelPath, err := persistSubAgentArtifact(a.sessionDir, sub.instanceID, prep.replyMessageID, artifactType, "MainAgent follow-up", message)
+			artifactID, artifactRelPath, _, _, err := persistSubAgentArtifact(a.sessionDir, sub.instanceID, prep.replyMessageID, artifactType, "MainAgent follow-up", message)
 			if err == nil && artifactRelPath != "" {
 				prep.replyArtifact = tools.ArtifactRef{ID: artifactID, RelPath: artifactRelPath, Path: artifactRelPath, Type: artifactType}
 				payload = fmt.Sprintf("[%s] Summary: %s\nDetailed instruction artifact: %s", prep.replyKind, truncateMailboxReplySummary(message), artifactRelPath)
@@ -527,6 +539,78 @@ func (a *MainAgent) prepareSubAgentDelivery(sub *SubAgent, message, kind string,
 	return prep, nil
 }
 
+// taskAlreadySettled reports whether the task's current attempt has reached a
+// terminal outcome, whether that outcome is recorded on the durable record, on
+// the still-live runtime, or on both. Parking is what usually removes such a
+// runtime, so any window before it — and any park that was refused — leaves a
+// settled task with a live worker attached.
+func taskAlreadySettled(record *DurableTaskRecord, sub *SubAgent) bool {
+	if record != nil && isTerminalSubAgentState(SubAgentState(strings.TrimSpace(record.State))) {
+		return true
+	}
+	return sub != nil && isTerminalSubAgentState(sub.State())
+}
+
+// beginNextTaskAttemptForLiveSub opens a new attempt on a task whose runtime is
+// still live but whose current attempt already settled. A settlement is
+// immutable per attempt: without the bump the worker's second completion is
+// rejected as a conflicting settlement, terminalStatusAfterCommit pins the
+// runtime back to the first outcome, and the owner receives the first attempt's
+// summary and artifacts for work it asked to have redone. Parked tasks get the
+// same treatment from rehydrateTaskAsActivationLeader; this is the live half of
+// that rule.
+func (a *MainAgent) beginNextTaskAttemptForLiveSub(sub *SubAgent) error {
+	if a == nil || sub == nil {
+		return nil
+	}
+	taskID := strings.TrimSpace(sub.taskID)
+	if taskID == "" {
+		return nil
+	}
+	a.settlementJournalMu.Lock()
+	defer a.settlementJournalMu.Unlock()
+	a.subs.mu.RLock()
+	previous := cloneDurableTaskRecord(a.subs.taskRecords[taskID])
+	a.subs.mu.RUnlock()
+	if !taskAlreadySettled(previous, sub) {
+		return nil
+	}
+	if previous != nil {
+		next := cloneDurableTaskRecord(previous)
+		next.Attempt = previous.Attempt + 1
+		next.LatestSettlement = nil
+		next.SettlementDurable = false
+		next.LastCompletion = nil
+		next.ClosedReason = ""
+		next.State = string(SubAgentStateIdle)
+		next.ResumePolicy = durableTaskResumePolicy(SubAgentStateIdle)
+		next.LifecycleRevision = previous.LifecycleRevision + 1
+		next.LastUpdatedTurn = a.explicitUserTurnCount.Load()
+		next.UpdatedAt = time.Now()
+		// Persist before publishing: a failed write must not leave memory
+		// claiming an attempt the journal never saw.
+		if err := a.persistTaskRegistryRecord(a.sessionDir, taskID, next); err != nil {
+			return fmt.Errorf("persist new attempt for task %s: %w", taskID, err)
+		}
+		a.subs.mu.Lock()
+		if current := a.subs.taskRecords[taskID]; current != nil && current.Attempt != previous.Attempt {
+			a.subs.mu.Unlock()
+			return fmt.Errorf("task %s attempt changed while starting a new one", taskID)
+		}
+		a.subs.taskRecords[taskID] = next
+		a.subs.notifyTaskChangeLocked()
+		a.subs.mu.Unlock()
+	}
+	// A runtime left in a terminal state can never accept a turn again
+	// (canStartUserTurn requires Running), so the fresh attempt starts from the
+	// same idle state a rehydrated one does.
+	if isTerminalSubAgentState(sub.State()) {
+		sub.setState(SubAgentStateIdle, sub.LastSummary())
+		a.noteSubAgentStateTransition(sub, SubAgentStateIdle)
+	}
+	return nil
+}
+
 func (a *MainAgent) getOrRehydrateTask(record *DurableTaskRecord) (*SubAgent, string, bool, error) {
 	if record == nil {
 		return nil, "", false, fmt.Errorf("missing task record")
@@ -563,6 +647,10 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 	defer func() {
 		a.subs.completeTaskActivation(taskID, activation, sub, previousAgentID, err)
 	}()
+	writeScope, err := record.hydratableWriteScope()
+	if err != nil {
+		return nil, "", false, err
+	}
 	agentDef, err := a.resolveAgentDef(record.AgentDefName)
 	if err != nil {
 		return nil, "", false, err
@@ -592,7 +680,7 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 	subCfg.TaskDesc = record.TaskDesc
 	subCfg.PlanTaskRef = record.PlanTaskRef
 	subCfg.SemanticKey = record.SemanticTaskKey
-	subCfg.WriteScope = record.ExpectedWriteScope
+	subCfg.WriteScope = writeScope
 	subCfg.OwnerAgentID = record.OwnerAgentID
 	subCfg.OwnerTaskID = record.OwnerTaskID
 	subCfg.Depth = record.Depth

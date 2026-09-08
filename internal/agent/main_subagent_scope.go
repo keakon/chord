@@ -41,7 +41,7 @@ func (a *MainAgent) grantSubAgentWriteScope(callerAgentID, callerTaskID, taskID 
 	widened := tools.WidenWriteScope(record.ExpectedWriteScope, grant)
 	if ownerTaskID := record.OwnerTaskID; ownerTaskID != "" {
 		if owner := a.taskRecordByTaskID(ownerTaskID); owner != nil &&
-			!childWriteScopeWithinParent(owner.ExpectedWriteScope, widened, a.projectRoot) {
+			!childWriteScopeWithinParent(owner.ExpectedWriteScope, widened, a.writeScopeBaseDir()) {
 			return fmt.Errorf("the widened scope for task %s would be broader than its parent task %s", taskID, ownerTaskID)
 		}
 	}
@@ -95,7 +95,7 @@ func (a *MainAgent) findWriteScopeGrantConflictLocked(target *DurableTaskRecord,
 		if _, descendant := a.taskOwnerLineageLocked(ownerTaskID)[target.TaskID]; descendant {
 			return false
 		}
-		return writeScopesOverlap(widened, scope, a.projectRoot)
+		return writeScopesOverlap(widened, scope, a.writeScopeBaseDir())
 	}
 	for taskID, rec := range a.subs.taskRecords {
 		if rec != nil && isNonTerminalTaskState(rec.State) && conflicts(taskID, rec.OwnerTaskID, rec.ExpectedWriteScope) {

@@ -369,6 +369,22 @@ func (s *SubAgent) hasPendingUserInput() bool {
 	return len(s.inputCh) > 0 || len(s.inputOverflow) > 0 || s.inputQueueReservedMessages > 0
 }
 
+// discardPendingUserInput drops every queued user message and reports how many
+// were dropped. It exists for the one case where the queue can no longer be
+// consumed at all: a task that has already settled. Its runtime never starts
+// another turn (canStartUserTurn requires Running), so leaving the queue in
+// place would keep the worker unparkable — leaking its run loop and LLM client
+// and pinning global idle to false — while the messages were never going to be
+// read either way. The caller is responsible for telling the sender.
+func (s *SubAgent) discardPendingUserInput() int {
+	if s == nil {
+		return 0
+	}
+	s.inputQueueMu.Lock()
+	defer s.inputQueueMu.Unlock()
+	return len(s.takePendingUserMessagesLocked())
+}
+
 func (s *SubAgent) removeInitialUserMessage() {
 	if s == nil {
 		return

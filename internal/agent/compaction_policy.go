@@ -14,6 +14,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/keakon/golog"
+	"github.com/keakon/golog/log"
+
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/toolname"
@@ -240,8 +243,19 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		}
 		stats.SkippedByReason[reason]++
 	}
+	// The retention ledger has exactly one consumer: the per-request debug log
+	// line. Building it costs a payload scan per protected result and a full
+	// readback pass over the surface, so at the default log level none of it is
+	// computed rather than computed and discarded.
+	retentionLedger := log.IsEnabledFor(golog.DebugLevel)
+	decisionFor := func(ctx requestReductionContext, verdict requestReductionVerdict, rule, reduced string) retentionDecision {
+		if !retentionLedger {
+			return retentionDecision{}
+		}
+		return retentionDecisionFor(ctx, verdict, rule, reduced)
+	}
 	noteRetention := func(decision retentionDecision) {
-		if decision.Level == "" {
+		if !retentionLedger || decision.Level == "" {
 			return
 		}
 		if stats.ByRetentionLevel == nil {
@@ -409,7 +423,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 					toolName:   toolName,
 					rule:       rule,
 					reduced:    reduced,
-					decision:   retentionDecisionFor(ctx, requestReductionReadLike, rule, reduced),
+					decision:   decisionFor(ctx, reducedVerdict(requestReductionReadLike), rule, reduced),
 					force:      true,
 					recallable: true,
 					repeated:   repeated[i],
@@ -442,7 +456,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 					toolName:   toolName,
 					rule:       rule,
 					reduced:    reduced,
-					decision:   retentionDecisionFor(ctx, requestReductionReadLike, rule, reduced),
+					decision:   decisionFor(ctx, reducedVerdict(requestReductionReadLike), rule, reduced),
 					force:      true,
 					recallable: true,
 					repeated:   repeated[i],
@@ -489,14 +503,17 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 				continue
 			}
 		}
-		class := classifyRequestReductionToolOutput(ctx)
+		verdict := classifyRequestReduction(ctx)
+		class := verdict.Class
 		if class == requestReductionNone {
-			noteRetention(retentionDecisionFor(ctx, class, "", ""))
-			if ctx.readRetentionProtects() {
+			noteRetention(decisionFor(ctx, verdict, "", ""))
+			if retentionLedger && ctx.readRetentionProtects() {
 				stats.ProtectedReadTokens += estimateMessageTokens(a.ctxMgr, message.Message{Content: prepared[i].Content})
 			}
 			nextReviewAge[i] = nextContextReductionReviewAge(ctx)
-			if age < policy.HighRiskProtectAgeTurns && isHighRiskToolOutput(ctx) {
+			// The classification already decided which protection fired; asking
+			// isHighRiskToolOutput again would re-scan the whole payload.
+			if verdict.Reason == retentionReasonRecentHighRisk {
 				noteSkip(contextReductionSkipRecentHighRisk)
 			} else if len(prepared[i].Content) > policy.StaleOutputBytes {
 				noteSkip(contextReductionSkipLargeUnreduced)
@@ -541,22 +558,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		if !ok {
 			continue
 		}
-		decision := retentionDecisionFor(ctx, class, rule, reduced)
-		// A bare omission marker keeps neither key fields nor an address. When
-		// later assistant reasoning cites this output's specifics, that
-		// reasoning stays in the request while its evidence would not: replace
-		// the marker with the excerpt-bearing summary (and its recovery
-		// address) rather than leaving a claim the model can no longer check.
-		if decision.Level == retentionHidden && laterAssistantReferencesToolResult(prepared, i) {
-			if pinned := reduceGenericStaleOutputSummary(ctx); pinned != "" && len(pinned) < len(ctx.Content) {
-				if address, addressed := ensureReducedOutputRecoverable(requestReductionGeneric, pinned, ctx); addressed {
-					pinned += "\n" + address
-				}
-				reduced, rule = pinned, rule+"_referenced"
-				decision = retentionDecisionFor(ctx, class, rule, reduced)
-				stats.ReferencePinned++
-			}
-		}
+		decision := decisionFor(ctx, verdict, rule, reduced)
 		// discardedInputs is consumed only by recall protection (content-fetch
 		// shapes) and over-compression stats (read-like or search shapes).
 		// Keys outside those shapes — mutating shells, edit/apply_patch
@@ -653,7 +655,9 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		stats.EvidenceCurrent = evidenceStats.Current
 		stats.EvidenceStale = evidenceStats.Stale
 		stats.EvidenceSuperseded = evidenceStats.Superseded
-		stats.ArchiveReads, stats.ArchiveReadFailures = artifactReadbackStats(prepared, callMeta, a.sessionDir)
+		if retentionLedger {
+			stats.ArchiveReads, stats.ArchiveReadFailures = artifactReadbackStats(prepared, callMeta, a.sessionDir)
+		}
 		stats.TokensAfter = estimateMessagesTokens(a.ctxMgr, prepared)
 		a.setCurrentRequestSurface(&stats, prepared)
 		if stats.TokensSaved == 0 && stats.TokensBefore > stats.TokensAfter {

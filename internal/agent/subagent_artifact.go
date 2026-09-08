@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -60,14 +62,19 @@ func sessionRelativePath(sessionDir, absPath string) string {
 	return filepath.ToSlash(rel)
 }
 
-func persistSubAgentArtifact(sessionDir, agentID, baseID, artifactType, title, body string) (artifactID, artifactRelPath string, err error) {
+// persistSubAgentArtifact writes one subagent artifact and returns its stable
+// identity plus the size and SHA-256 of the bytes actually written. The digest
+// is computed from the in-memory body before the write, so callers that need a
+// content-addressed ArtifactRef never have to stat and re-read the file they
+// just wrote.
+func persistSubAgentArtifact(sessionDir, agentID, baseID, artifactType, title, body string) (artifactID, artifactRelPath string, sizeBytes int64, sha256Hex string, err error) {
 	sessionDir = strings.TrimSpace(sessionDir)
 	agentID = strings.TrimSpace(agentID)
 	baseID = strings.TrimSpace(baseID)
 	artifactType = sanitizeArtifactType(artifactType)
 	body = strings.TrimSpace(body)
 	if sessionDir == "" || agentID == "" || baseID == "" || body == "" {
-		return "", "", nil
+		return "", "", 0, "", nil
 	}
 	dir := filepath.Join(sessionDir, "artifacts", "subagents", agentID)
 	artifactID = fmt.Sprintf("%s-%s", baseID, artifactType)
@@ -80,8 +87,10 @@ func persistSubAgentArtifact(sessionDir, agentID, baseID, artifactType, title, b
 	}
 	b.WriteString(body)
 	b.WriteString("\n")
-	if err := privatefs.WriteFile(sessionDir, path, []byte(b.String())); err != nil {
-		return "", "", err
+	data := []byte(b.String())
+	sum := sha256.Sum256(data)
+	if err := privatefs.WriteFile(sessionDir, path, data); err != nil {
+		return "", "", 0, "", err
 	}
-	return artifactID, sessionRelativePath(sessionDir, path), nil
+	return artifactID, sessionRelativePath(sessionDir, path), int64(len(data)), hex.EncodeToString(sum[:]), nil
 }

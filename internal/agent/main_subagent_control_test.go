@@ -1179,6 +1179,10 @@ func TestRehydratePersistenceFailureDoesNotRegisterRuntime(t *testing.T) {
 		RuntimeParked:    true,
 		ResumePolicy:     taskResumePolicyNotify,
 		LatestInstanceID: "worker-old",
+		// A rehydratable record must carry the write boundary it was admitted
+		// under (rehydrateTask refuses scope-less records outright), even
+		// though this test only exercises the persistence-failure path.
+		ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{"internal/agent"}},
 	}
 	a.setTaskRecords(map[string]*DurableTaskRecord{record.TaskID: record})
 	blockedRoot := filepath.Join(t.TempDir(), "not-a-directory")
@@ -1483,7 +1487,7 @@ func TestDirectOwnerOnlyControlAppliesToLiveChildAndCompletedRehydrate(t *testin
 	parent.depth = 1
 	parent.delegation = config.DelegationConfig{MaxChildren: 2, MaxDepth: 2}
 
-	handle, err := a.CreateSubAgent(tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID), "child work", "worker", "", "", tools.WriteScope{})
+	handle, err := a.CreateSubAgent(tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID), "child work", "worker", "", "", tools.WriteScope{PathPrefix: []string{"internal/agent/main.go"}})
 	if err != nil {
 		t.Fatalf("CreateSubAgent: %v", err)
 	}
@@ -2076,6 +2080,11 @@ func TestSendMessageToCompletedWorkerCreatesFollowupWithoutNewTaskID(t *testing.
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-3")
 	sub.setState(SubAgentStateCompleted, "finished initial pass")
+	// Keep the durable record in step with the runtime: a settled task that
+	// still has a live worker attached is admitted for a follow-up attempt
+	// from the record's terminal state, not from the stale running snapshot
+	// the helper's initial sync left behind.
+	a.syncTaskRecordFromSub(sub, "task completed")
 	sub.setLastMailboxID("worker-1-9")
 
 	handle, err := a.NotifySubAgent(context.Background(), "adhoc-3", "follow up on edge cases", "follow_up")
@@ -2351,6 +2360,10 @@ func TestRehydratePreservesConfiguredOrchestrationAndWorkDir(t *testing.T) {
 		LatestInstanceID: "restorer-old",
 		InstanceHistory:  []string{"restorer-old"},
 		RuntimeParked:    true,
+		// The completed worker may only be revived under the write boundary
+		// its admission recorded; this test pins the orchestration/limits it
+		// resumes with, not the scope itself.
+		ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{"internal/agent"}},
 	}
 	a.setTaskRecords(map[string]*DurableTaskRecord{record.TaskID: record})
 
@@ -2413,6 +2426,10 @@ func TestConcurrentTaskRehydratePublishesOneRuntime(t *testing.T) {
 		LatestInstanceID: "restorer-40",
 		InstanceHistory:  []string{"restorer-40"},
 		RuntimeParked:    true,
+		// Scope-less records are refused outright by rehydrateTask, so the
+		// concurrent-activation fixture must carry the boundary a real
+		// delegated task would have been admitted under.
+		ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{"internal/agent"}},
 	}
 	a.setTaskRecords(map[string]*DurableTaskRecord{record.TaskID: record})
 
@@ -2488,6 +2505,10 @@ func newRevivalRaceTestMainAgent(t *testing.T) (*MainAgent, *DurableTaskRecord) 
 		LatestInstanceID: "restorer-9",
 		InstanceHistory:  []string{"restorer-9"},
 		RuntimeParked:    true,
+		// Rehydration refuses scope-less records, and both revival-race tests
+		// pin the attempt/settlement handling around rehydration — not the
+		// write boundary itself — so the fixture carries a plausible one.
+		ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{"internal/agent"}},
 	}
 	a.setTaskRecords(map[string]*DurableTaskRecord{record.TaskID: cloneDurableTaskRecord(record)})
 	return a, record
@@ -2788,6 +2809,9 @@ func TestParkedCancelledTaskAllowsExplicitUserResume(t *testing.T) {
 	a.SetLLMFactory(func(string, []string, string) *llm.Client { return newTestLLMClient() })
 	sub := newControllableTestSubAgent(t, a, "adhoc-cancelled-user")
 	sub.agentDefName = "restorer"
+	// The explicit user resume revives the parked record through rehydration,
+	// which refuses scope-less records; carry the boundary a real task had.
+	sub.writeScope = tools.WriteScope{PathPrefix: []string{"internal/agent"}}
 	sub.setState(SubAgentStateCancelled, "stopped by user")
 	a.syncTaskRecordFromSub(sub, "stopped by user")
 	if !a.parkSubAgent(sub.instanceID) {
@@ -2809,6 +2833,9 @@ func TestDescendantMailboxRoutesThroughRehydratedOwnerAlias(t *testing.T) {
 	})
 	a.SetLLMFactory(func(string, []string, string) *llm.Client { return newTestLLMClient() })
 	owner := newControllableTestSubAgent(t, a, "adhoc-owner-alias")
+	// The owner parks and is rehydrated from its durable record later in this
+	// test; give the record the write boundary a rehydrated runtime requires.
+	owner.writeScope = tools.WriteScope{PathPrefix: []string{"internal/agent"}}
 	owner.setState(SubAgentStateWaitingDescendant, "waiting")
 	a.syncTaskRecordFromSub(owner, "")
 	oldOwnerID := owner.instanceID
@@ -3042,6 +3069,9 @@ func TestParkBarrierConcurrentFocusedInputPreventsParkingAndPreservesMessage(t *
 	})
 	a.SetLLMFactory(func(string, []string, string) *llm.Client { return newTestLLMClient() })
 	sub := newControllableTestSubAgent(t, a, "adhoc-park-input-race")
+	// The message racing the park barrier is delivered through a rehydrated
+	// runtime, which requires the record to carry a write boundary.
+	sub.writeScope = tools.WriteScope{PathPrefix: []string{"internal/agent"}}
 	sub.setState(SubAgentStateIdle, "idle")
 	a.syncTaskRecordFromSub(sub, "")
 	a.SwitchFocus(sub.instanceID)
@@ -3283,6 +3313,9 @@ func TestRehydrateSnapshotPersistFailureDoesNotLeakSlot(t *testing.T) {
 		RuntimeParked:    true,
 		ResumePolicy:     taskResumePolicyNotify,
 		LatestInstanceID: "worker-old",
+		// This test pins slot governance around a refused snapshot persist,
+		// so the rehydratable record carries the boundary real tasks ship with.
+		ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{"internal/agent"}},
 	}
 	a.setTaskRecords(map[string]*DurableTaskRecord{record.TaskID: cloneDurableTaskRecord(record)})
 
@@ -3706,7 +3739,7 @@ func TestHandleAgentDonePersistsCompletionMailboxBeforeTerminalCommit(t *testing
 		t.Fatalf("read mailbox log: %v", err)
 	}
 	entryCount := 0
-	for _, line := range strings.Split(string(raw), "\n") {
+	for line := range strings.SplitSeq(string(raw), "\n") {
 		if strings.Contains(line, `"message_id":`) {
 			entryCount++
 		}
@@ -3821,7 +3854,7 @@ func TestAgentDoneCompletionMailboxEventDeliversExactlyOnceWithoutRewriting(t *t
 		t.Fatalf("read mailbox log: %v", err)
 	}
 	entryCount := 0
-	for _, line := range strings.Split(string(raw), "\n") {
+	for line := range strings.SplitSeq(string(raw), "\n") {
 		if strings.Contains(line, `"message_id":`) {
 			entryCount++
 		}
@@ -3878,7 +3911,7 @@ func TestHandleAgentErrorPersistsRiskAlertMailboxBeforeTerminalCommit(t *testing
 		t.Fatalf("read mailbox log: %v", err)
 	}
 	entryCount := 0
-	for _, line := range strings.Split(string(raw), "\n") {
+	for line := range strings.SplitSeq(string(raw), "\n") {
 		if strings.Contains(line, `"risk_alert"`) {
 			entryCount++
 		}

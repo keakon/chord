@@ -50,6 +50,10 @@ type ContextReductionStats struct {
 	// ones kept complete. ByToolAndRule only records what was reduced, so it
 	// cannot answer how much of the request is still full-fidelity evidence —
 	// the question the valid-read retention policy has to be decided on.
+	//
+	// This field and the four below make up the retention ledger, which is only
+	// filled in when the request debug log is enabled: they answer questions a
+	// reader asks, not questions the request surface branches on.
 	ByRetentionLevel map[string]int
 	// ProtectedReadTokens is what current, non-superseded reads cost in this
 	// request. Reclaiming them is the single largest change the retention
@@ -59,9 +63,6 @@ type ContextReductionStats struct {
 	// fields nor an address behind. It must stay zero: it is the layer's
 	// destructive failure mode, not a tuning knob.
 	UnrecoverableReductions int
-	// ReferencePinned counts results kept out of a bare omission marker
-	// because later assistant text cites their specifics.
-	ReferencePinned int
 	// ArchiveReads / ArchiveReadFailures count how often the model actually
 	// followed a recovery address, and how often that read failed. A recovery
 	// route nobody can use is indistinguishable from a dropped payload until
@@ -343,6 +344,22 @@ const (
 	requestReductionGeneric     requestReductionClass = "generic_stale"
 )
 
+// Reduction rules name the rendering a class actually produced. Most are only
+// reported in the per-tool/rule statistics, but these three are also read back
+// as decisions — a class can fall back to another class's rendering, so the
+// rule, not the class, says what the request surface ended up carrying.
+const (
+	// reductionRuleDiagnostics marks a structured diagnostics body: the
+	// rendering the diagnostics class exists to produce.
+	reductionRuleDiagnostics = "diagnostics"
+	// reductionRuleArchived marks a rendering whose whole payload was written
+	// to the session archive and replaced by its address.
+	reductionRuleArchived = "archived"
+	// reductionRuleStale marks the excerpt-bearing fallback summary used when a
+	// class-specific renderer could not frame the payload.
+	reductionRuleStale = "stale"
+)
+
 type requestReductionContext struct {
 	ToolName    string
 	Meta        toolCallMeta
@@ -391,7 +408,34 @@ func (ctx requestReductionContext) readRetentionProtects() bool {
 	return !ctx.ReadInvalidated && !ctx.ReadSuperseded
 }
 
+// requestReductionVerdict is what one classification pass concluded about a
+// tool result: the class that decides the rendering, plus the branch that
+// decided it. Reason is only meaningful for a result kept complete — it names
+// which protection fired — and it travels with the class so no second pass has
+// to re-derive it from the same bytes. A hand-copied second pass is exactly how
+// the reported reason and the branch that actually fired drift apart.
+type requestReductionVerdict struct {
+	Class  requestReductionClass
+	Reason string
+}
+
+// protectedVerdict states that a named protection kept this result complete.
+func protectedVerdict(reason string) requestReductionVerdict {
+	return requestReductionVerdict{Class: requestReductionNone, Reason: reason}
+}
+
+// reducedVerdict states that a shape rule claimed this result.
+func reducedVerdict(class requestReductionClass) requestReductionVerdict {
+	return requestReductionVerdict{Class: class, Reason: string(class)}
+}
+
+// classifyRequestReductionToolOutput reports only the class. Callers that also
+// report why a result survived use classifyRequestReduction.
 func classifyRequestReductionToolOutput(ctx requestReductionContext) requestReductionClass {
+	return classifyRequestReduction(ctx).Class
+}
+
+func classifyRequestReduction(ctx requestReductionContext) requestReductionVerdict {
 	// An invalidated or superseded read must render its validity marker as
 	// soon as the state is known — stale file content is misleading at any age
 	// and at any size, and a superseded range is carried verbatim by the newer
@@ -403,16 +447,16 @@ func classifyRequestReductionToolOutput(ctx requestReductionContext) requestRedu
 	// It also takes precedence over the repeated marker, whose "identical call
 	// appears later" wording is weaker guidance than the validity note.
 	if ctx.ToolName == tools.NameRead && (ctx.ReadInvalidated || ctx.ReadSuperseded) {
-		return requestReductionReadLike
+		return reducedVerdict(requestReductionReadLike)
 	}
 	if ctx.Repeated && ctx.Age >= 1 {
-		return requestReductionRepeated
+		return reducedVerdict(requestReductionRepeated)
 	}
 	if ctx.Age < ctx.Policy.HighRiskProtectAgeTurns && isHighRiskToolOutput(ctx) {
-		return requestReductionNone
+		return protectedVerdict(retentionReasonRecentHighRisk)
 	}
 	if ctx.readRetentionProtects() {
-		return requestReductionNone
+		return protectedVerdict(retentionReasonCurrentRead)
 	}
 	failed := isToolResultErrorStatus(ctx.ToolStatus) ||
 		(strings.TrimSpace(ctx.ToolStatus) == "" && isToolErrorContent(ctx.Content))
@@ -422,10 +466,10 @@ func classifyRequestReductionToolOutput(ctx requestReductionContext) requestRedu
 		// model sees the exact failure while it is about to act on it. A failing
 		// build's path:line:col lines must not be misread as a search result,
 		// and a cancelled status must not behave like an error.
-		return requestReductionNone
+		return protectedVerdict(retentionReasonRecentError)
 	}
 	if ctx.Age >= ctx.Policy.ErrorAgeTurns && failed {
-		return requestReductionToolError
+		return reducedVerdict(requestReductionToolError)
 	}
 	// Edit-like results carrying a diagnostics section stay complete until the
 	// diagnostics summary age (ErrorAgeTurns): the LSP state is the feedback
@@ -433,16 +477,16 @@ func classifyRequestReductionToolOutput(ctx requestReductionContext) requestRedu
 	// read-like gates must not miscast a diagnostics block as a long log.
 	if (ctx.ToolName == tools.NameEdit || ctx.ToolName == tools.NameApplyPatch || ctx.ToolName == tools.NameWrite) &&
 		strings.Contains(ctx.Content, diagnosticsSectionLabel) && ctx.Age < ctx.Policy.ErrorAgeTurns {
-		return requestReductionNone
+		return protectedVerdict(retentionReasonRecentDiagnostics)
 	}
 	// Read-only shell output (cat, ls, git log, ...) is the shell-based analogue
 	// of a read: unlike the read tool it has no validity tracking, so it relies
 	// on a longer protection age before any size-based rule may reduce it.
 	if ctx.ShellReadOnly && ctx.Age < ctx.Policy.ShellReadOnlyAgeTurns {
-		return requestReductionNone
+		return protectedVerdict(retentionReasonReadOnlyShell)
 	}
 	if ctx.Age < ctx.Policy.DiffProtectAgeTurns && looksLikeDiffOrPatch(ctx.Content) {
-		return requestReductionNone
+		return protectedVerdict(retentionReasonRecentDiff)
 	}
 	// Diffs are durable review evidence, not build logs. Keep them on a
 	// dedicated path so source identifiers such as "error" and "failed" do
@@ -450,23 +494,23 @@ func classifyRequestReductionToolOutput(ctx requestReductionContext) requestRedu
 	if ctx.Age >= ctx.Policy.ShellSuccessAgeTurns &&
 		len(ctx.Content) > max(ctx.Policy.ShellSuccessBytes, ctx.Policy.ReadLikeOutputBytes) &&
 		looksLikeDiffOrPatch(ctx.Content) {
-		return requestReductionDiff
+		return reducedVerdict(requestReductionDiff)
 	}
 	if ctx.Age >= ctx.Policy.ConfirmAgeTurns && isConfirmationOutput(ctx.Content) {
-		return requestReductionConfirm
+		return reducedVerdict(requestReductionConfirm)
 	}
 	if ctx.Age >= ctx.Policy.ErrorAgeTurns && (ctx.ToolName == tools.NameEdit || ctx.ToolName == tools.NameApplyPatch || ctx.ToolName == tools.NameWrite) && strings.Contains(ctx.Content, diagnosticsSectionLabel) {
-		return requestReductionDiagnostics
+		return reducedVerdict(requestReductionDiagnostics)
 	}
 	if ctx.Age >= ctx.Policy.ShellSuccessAgeTurns && len(ctx.Content) > ctx.Policy.ShellSuccessBytes && ctx.ToolName == tools.NameShell {
 		// The command line is a first-hand statement of what this output is;
 		// the heuristics below are second-hand inference from the bytes. Prefer
 		// the former wherever it is conclusive.
 		if shape, ok := commandDerivedShellShape(ctx); ok {
-			return shape
+			return reducedVerdict(shape)
 		}
 		if looksLikeSearchResult(ctx) {
-			return requestReductionSearch
+			return reducedVerdict(requestReductionSearch)
 		}
 		if looksLikeStructuredJSON(ctx.Content) {
 			// The JSON skeleton (top-level keys / first items) is the lossiest
@@ -474,17 +518,17 @@ func classifyRequestReductionToolOutput(ctx requestReductionContext) requestRedu
 			// requests, so a JSON document waits for the stale age instead of
 			// the shell age. NDJSON log streams get no such retention.
 			if !looksLikeJSONLinesLog(ctx.Content) && ctx.Age < ctx.Policy.StaleAgeTurns {
-				return requestReductionNone
+				return protectedVerdict(retentionReasonJSONAwaitsStale)
 			}
-			return requestReductionJSON
+			return reducedVerdict(requestReductionJSON)
 		}
 		if looksLikeNumberedSourceOutput(ctx.Content) {
-			return requestReductionNumberedSrc
+			return reducedVerdict(requestReductionNumberedSrc)
 		}
 		if looksLikeBuildLikeLog(ctx) {
-			return requestReductionLongLog
+			return reducedVerdict(requestReductionLongLog)
 		}
-		return requestReductionShellOK
+		return reducedVerdict(requestReductionShellOK)
 	}
 	// An invalidated or superseded read was already classified above; a web
 	// fetch or other read-like output waits for the age gate here.
@@ -495,25 +539,25 @@ func classifyRequestReductionToolOutput(ctx requestReductionContext) requestRedu
 		// returned. Kept so a custom policy does not silently fall back to
 		// sniffing the bytes.
 		if shape, ok := commandDerivedShellShape(ctx); ok {
-			return shape
+			return reducedVerdict(shape)
 		}
 		switch {
 		case looksLikeSearchResult(ctx):
-			return requestReductionSearch
+			return reducedVerdict(requestReductionSearch)
 		// Read-like tools take precedence over the JSON shape: a web fetch
 		// of a JSON document must keep its URL rather than collapsing to a
 		// key list.
 		case contextReductionIsReadLike(ctx.ToolName):
-			return requestReductionReadLike
+			return reducedVerdict(requestReductionReadLike)
 		case looksLikeStructuredJSON(ctx.Content):
 			if !looksLikeJSONLinesLog(ctx.Content) && ctx.Age < ctx.Policy.StaleAgeTurns {
-				return requestReductionNone
+				return protectedVerdict(retentionReasonJSONAwaitsStale)
 			}
-			return requestReductionJSON
+			return reducedVerdict(requestReductionJSON)
 		case looksLikeNumberedSourceOutput(ctx.Content):
-			return requestReductionNumberedSrc
+			return reducedVerdict(requestReductionNumberedSrc)
 		case looksLikeBuildLikeLog(ctx):
-			return requestReductionLongLog
+			return reducedVerdict(requestReductionLongLog)
 		}
 	}
 	if ctx.ToolResults >= ctx.Policy.MinToolResultsPrune && ctx.Age >= ctx.Policy.StaleAgeTurns && len(ctx.Content) > ctx.Policy.StaleOutputBytes {
@@ -521,26 +565,26 @@ func classifyRequestReductionToolOutput(ctx requestReductionContext) requestRedu
 		// `git log --oneline -30` actually lands — the shell branch above never
 		// sees it. The command signal has to be applied here too.
 		if shape, ok := commandDerivedShellShape(ctx); ok {
-			return shape
+			return reducedVerdict(shape)
 		}
 		if looksLikeSearchResult(ctx) {
-			return requestReductionSearch
+			return reducedVerdict(requestReductionSearch)
 		}
 		if contextReductionIsReadLike(ctx.ToolName) {
-			return requestReductionReadLike
+			return reducedVerdict(requestReductionReadLike)
 		}
 		if looksLikeStructuredJSON(ctx.Content) {
-			return requestReductionJSON
+			return reducedVerdict(requestReductionJSON)
 		}
 		if looksLikeNumberedSourceOutput(ctx.Content) {
-			return requestReductionNumberedSrc
+			return reducedVerdict(requestReductionNumberedSrc)
 		}
 		if looksLikeBuildLikeLog(ctx) {
-			return requestReductionLongLog
+			return reducedVerdict(requestReductionLongLog)
 		}
-		return requestReductionGeneric
+		return reducedVerdict(requestReductionGeneric)
 	}
-	return requestReductionNone
+	return protectedVerdict(retentionReasonNoRuleMatched)
 }
 
 // nextContextReductionReviewAge returns the next request age at which an
@@ -753,10 +797,16 @@ func reduceRequestToolOutput(class requestReductionClass, ctx requestReductionCo
 		reduced, rule = "[Confirmed]", "confirmation"
 	case requestReductionDiagnostics:
 		if compacted, ok := reduceDiagnosticsToolOutput(ctx.Content, ctx.DiagnosticsSuperseded); ok {
-			reduced, rule = compacted, "diagnostics"
+			reduced, rule = compacted, reductionRuleDiagnostics
 			break
 		}
-		reduced, rule = staleOutputOmittedMarker(ctx.Meta.Name), "stale"
+		// The structured diagnostics body is this class's entire recovery
+		// route, so a payload the renderer could not frame must not fall back
+		// to a bare marker: the routing gate only looks for the section label
+		// anywhere in the content while the renderer needs the exact framing,
+		// and any output that mentions the label in passing lands here. Render
+		// an excerpt instead and let the archive gate below add an address.
+		reduced, rule = reduceGenericStaleOutputSummary(ctx), reductionRuleStale
 	case requestReductionDiff:
 		reduced, rule = reduceDiffOutputSummary(ctx.Content), "diff"
 	case requestReductionReadLike:
@@ -770,9 +820,13 @@ func reduceRequestToolOutput(class requestReductionClass, ctx requestReductionCo
 			reduced, rule = compacted, "json_blob"
 			break
 		}
-		omitted := staleOutputOmittedMarker(ctx.Meta.Name)
-		if len(omitted) < len(ctx.Content) {
-			reduced, rule = omitted, "stale"
+		// A JSON document the skeleton renderer could not shrink still has to
+		// keep an excerpt: the head/tail summary is the model's only in-request
+		// evidence of what the document held while the archive address below is
+		// being fetched.
+		summary := reduceGenericStaleOutputSummary(ctx)
+		if len(summary) < len(ctx.Content) {
+			reduced, rule = summary, reductionRuleStale
 			break
 		}
 		return "", "", false
@@ -788,18 +842,18 @@ func reduceRequestToolOutput(class requestReductionClass, ctx requestReductionCo
 		// to a generic marker; rebuildable outputs keep their ordinary summary.
 		if irreducibleToolOutputRequiresArchive(ctx.ToolName) {
 			if marker, ok := archiveIrreducibleToolOutput(ctx); ok {
-				reduced, rule = marker, "archived"
+				reduced, rule = marker, reductionRuleArchived
 				break
 			}
 		}
 		if reduced == "" {
-			reduced, rule = reduceGenericStaleOutputSummary(ctx), "stale"
+			reduced, rule = reduceGenericStaleOutputSummary(ctx), reductionRuleStale
 		}
 	default:
 		return "", "", false
 	}
 	reduced = appendPreservedArtifactReferences(reduced, ctx.Content)
-	if address, ok := ensureReducedOutputRecoverable(class, reduced, ctx); ok {
+	if address, ok := ensureReducedOutputRecoverable(class, rule, reduced, ctx); ok {
 		reduced += "\n" + address
 	}
 	return reduced, rule, true
@@ -827,8 +881,13 @@ const archivedOutputMarkerFragment = " output archived at "
 // and it is why a misclassified summary could cost real work: the payload was
 // gone, not merely summarized.
 //
-// Classes whose summary already carries its own recovery route are skipped:
-// diagnostics keep their structured body and a confirmation has no payload.
+// Renderings that already carry their own recovery route are skipped: a
+// confirmation has no payload, and a diagnostics summary keeps the structured
+// body it was framed from. The diagnostics exemption is keyed on the rule the
+// renderer actually applied, not on the class the router picked: the router
+// only requires the section label to appear somewhere in the content while the
+// renderer requires the exact framing, so a class that fell back to an excerpt
+// must be archived like any other lossy summary.
 // Archives are content-addressed, so identical copies (the repeated case) share
 // one file rather than writing one each.
 //
@@ -841,9 +900,12 @@ const archivedOutputMarkerFragment = " output archived at "
 // revision is gone: that read output is its only record, so it must be archived
 // like any other lossy summary. This was the layer's last outright-destructive
 // path.
-func ensureReducedOutputRecoverable(class requestReductionClass, reduced string, ctx requestReductionContext) (string, bool) {
+func ensureReducedOutputRecoverable(class requestReductionClass, rule, reduced string, ctx requestReductionContext) (string, bool) {
+	if rule == reductionRuleDiagnostics {
+		return "", false
+	}
 	switch class {
-	case requestReductionConfirm, requestReductionDiagnostics:
+	case requestReductionConfirm:
 		return "", false
 	case requestReductionReadLike:
 		if toolname.Normalize(ctx.ToolName) == tools.NameRead && !ctx.ReadPriorContentLost {
@@ -895,8 +957,17 @@ func writeReducedOutputArchive(ctx requestReductionContext) (string, bool) {
 }
 
 func appendPreservedArtifactReferences(reduced, original string) string {
-	for _, ref := range tools.ExtractArtifactReferences(original) {
-		if strings.Contains(reduced, ref) {
+	refs := tools.ExtractArtifactReferences(original)
+	if len(refs) == 0 {
+		return reduced
+	}
+	// Compare against what the reference parser finds in the summary, not
+	// against raw containment: an excerpt line can quote an address behind a
+	// list bullet, where the parser no longer recognizes it. A summary of a
+	// summary would then mention an address the model cannot follow.
+	kept := tools.ExtractArtifactReferences(reduced)
+	for _, ref := range refs {
+		if slices.Contains(kept, ref) {
 			continue
 		}
 		if reduced != "" {

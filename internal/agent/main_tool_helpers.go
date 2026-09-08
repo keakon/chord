@@ -83,11 +83,8 @@ func extractToolArgumentInDir(toolName string, args []byte, projectRoot string) 
 			return strings.TrimSpace(parsed.AgentType)
 		}
 	case tools.NameShell:
-		var parsed struct {
-			Command string `json:"command"`
-		}
-		if err := json.Unmarshal(args, &parsed); err == nil && parsed.Command != "" {
-			return parsed.Command
+		if shell, err := decodeShellCallArguments(args); err == nil && shell.Command != "" {
+			return shell.Command
 		}
 	case tools.NameEdit, tools.NameApplyPatch:
 		// Both edit and patch tools use path extraction

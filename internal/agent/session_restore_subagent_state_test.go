@@ -310,6 +310,9 @@ func TestRestoredCancelledSubAgentContinueReactivatesWithoutAppendingMessage(t *
 		State:        SubAgentStateCancelled,
 		LastSummary:  "Cancelled before shutdown",
 		Messages:     []message.Message{{Role: "user", Content: "Investigate issue"}},
+		// The explicit continue revives this record through rehydration,
+		// which refuses scope-less records.
+		ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{"internal/agent"}},
 	}})
 	if count != 1 {
 		t.Fatalf("restoreLoadedSubAgents() = %d, want 1", count)
@@ -467,6 +470,9 @@ func TestRestoreLoadedSubAgentsKeepsOwnedMailboxQueuedUntilManualContinue(t *tes
 		TaskDesc:     "Investigate issue",
 		State:        SubAgentStateRunning,
 		LastSummary:  "restored parent",
+		// Manual continue wakes the parked parent through rehydration, which
+		// refuses scope-less records.
+		ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{"internal/agent"}},
 	}})
 	if count != 1 {
 		t.Fatalf("restoreLoadedSubAgents() = %d, want 1", count)
@@ -939,6 +945,9 @@ func TestMailboxReplyChainPersistsAcrossResume(t *testing.T) {
 	a.ctxMgr.Append(message.Message{Role: "user", Content: "resume worker conversation"})
 	sub := newControllableTestSubAgent(t, a, "adhoc-7")
 	sub.agentDefName = "restorer"
+	// The reply chain is replayed through a rehydrated worker after restore;
+	// its durable record must carry a write boundary to be rehydratable.
+	sub.writeScope = tools.WriteScope{PathPrefix: []string{"internal/agent"}}
 	sub.setState(SubAgentStateWaitingMain, "need decision")
 	if err := a.recoveryManager().PersistMessage(sub.instanceID, message.Message{Role: "user", Content: "Investigate issue"}); err != nil {
 		t.Fatalf("PersistMessage(sub): %v", err)
@@ -1065,6 +1074,10 @@ func TestRestoreSessionCompletedTaskCanRehydrateFollowUp(t *testing.T) {
 	sub := newControllableTestSubAgent(t, a, "adhoc-21")
 	sub.agentDefName = "restorer"
 	sub.taskDesc = "Investigate issue"
+	// handleAgentDone below persists this worker's durable record, which the
+	// second agent revives by rehydrating after restore — a scope-less record
+	// is refused outright, so carry the boundary a real task was admitted with.
+	sub.writeScope = tools.WriteScope{PathPrefix: []string{"internal/agent"}}
 	sub.ctxMgr.Append(message.Message{Role: "user", Content: "Investigate issue"})
 	if err := a.recoveryManager().PersistMessage(sub.instanceID, message.Message{Role: "user", Content: "Investigate issue"}); err != nil {
 		t.Fatalf("PersistMessage(sub): %v", err)

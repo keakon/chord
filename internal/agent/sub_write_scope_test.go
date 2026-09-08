@@ -195,12 +195,13 @@ func newScopedToolSurfaceTestSubAgent(t *testing.T, scope tools.WriteScope) (*Ma
 	return parent, sub
 }
 
-// TestSubAgentScopedAndReadOnlySurfaceOmitsShell pins the P1-4 fix: scoped
-// (path/file/module) and read-only delegated tasks no longer register Shell, so
-// Shell disappears from the tool registry, the frozen tool definitions sent to
-// the model, and the capability prompt — and the prompt explicitly says command
-// execution and execution-based verification belong to the owner agent instead
-// of guiding the worker to run tests it can never execute.
+// TestSubAgentScopedAndReadOnlySurfaceOmitsShell pins the write-scope fix:
+// scoped (path/file/module) and read-only delegated tasks no longer register
+// Shell, so Shell disappears from the tool registry, the frozen tool
+// definitions sent to the model, and the capability prompt — and the prompt
+// explicitly says command execution and execution-based verification belong to
+// the owner agent instead of guiding the worker to run tests it can never
+// execute.
 func TestSubAgentScopedAndReadOnlySurfaceOmitsShell(t *testing.T) {
 	for _, scope := range []tools.WriteScope{
 		{PathPrefix: []string{"internal"}},
@@ -208,7 +209,6 @@ func TestSubAgentScopedAndReadOnlySurfaceOmitsShell(t *testing.T) {
 		{Modules: []string{"backend"}},
 		{ReadOnly: true},
 	} {
-		scope := scope
 		t.Run(scope.Summary(), func(t *testing.T) {
 			_, sub := newScopedToolSurfaceTestSubAgent(t, scope)
 			if _, ok := sub.tools.Get(tools.NameShell); ok {
@@ -233,9 +233,9 @@ func TestSubAgentScopedAndReadOnlySurfaceOmitsShell(t *testing.T) {
 	}
 }
 
-// TestSubAgentUnscopedSurfaceKeepsShell guards the opposite side of the P1-4
-// fix: an unscoped delegated task still advertises Shell and gets no command
-// execution boundary block.
+// TestSubAgentUnscopedSurfaceKeepsShell guards the opposite side of the
+// write-scope fix: an unscoped delegated task still advertises Shell and gets
+// no command execution boundary block.
 func TestSubAgentUnscopedSurfaceKeepsShell(t *testing.T) {
 	_, sub := newScopedToolSurfaceTestSubAgent(t, tools.WriteScope{})
 	if _, ok := sub.tools.Get(tools.NameShell); !ok {

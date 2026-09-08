@@ -27,6 +27,9 @@ func TestDescendantCompletionWakesParkedWaitingMainOwner(t *testing.T) {
 
 	owner := newControllableTestSubAgent(t, a, "adhoc-woken-owner")
 	owner.instanceID = "worker-woken-owner"
+	// The completion wakes the parked owner through rehydration, which
+	// refuses scope-less records; carry the boundary a delegated owner had.
+	owner.writeScope = tools.WriteScope{PathPrefix: []string{"internal/agent"}}
 	a.subs.mu.Lock()
 	delete(a.subs.subAgents, "worker-1")
 	a.subs.subAgents[owner.instanceID] = owner

@@ -27,6 +27,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -87,7 +88,7 @@ func TestSubAgentCtxAppendDuringPendingToolBatchDeferredToBatchClosure(t *testin
 
 	releases := [2]chan struct{}{make(chan struct{}), make(chan struct{})}
 	toolNames := [2]string{"gatecall1", "gatecall2"}
-	for i := 0; i < len(toolNames); i++ {
+	for i := range len(toolNames) {
 		sub.tools.Register(releaseGatedTool{name: toolNames[i], release: releases[i]})
 	}
 
@@ -335,12 +336,7 @@ func isToolResultForAny(m message.Message, callIDs ...string) bool {
 	if m.Role != message.RoleTool || m.ToolCallID == "" {
 		return false
 	}
-	for _, callID := range callIDs {
-		if m.ToolCallID == callID {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(callIDs, m.ToolCallID)
 }
 
 func indexOfContent(msgs []message.Message, content string) int {
@@ -372,12 +368,7 @@ func consumedAckIDs(parent *MainAgent) []string {
 }
 
 func hasConsumedAckID(parent *MainAgent, want string) bool {
-	for _, id := range consumedAckIDs(parent) {
-		if id == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(consumedAckIDs(parent), want)
 }
 
 func summarizeMessages(msgs []message.Message) string {

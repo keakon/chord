@@ -259,7 +259,7 @@ func (a *MainAgent) prepareSubAgentMailboxReply(agentID, messageID string, turnI
 	artifact := tools.ArtifactRef{}
 	if len(strings.TrimSpace(replyBody)) > replyArtifactPayloadThreshold {
 		artifactType := "execution_spec"
-		artifactID, artifactRelPath, _ := persistSubAgentArtifact(a.sessionDir, agentID, replyMessageID, artifactType, "MainAgent follow-up", replyBody)
+		artifactID, artifactRelPath, _, _, _ := persistSubAgentArtifact(a.sessionDir, agentID, replyMessageID, artifactType, "MainAgent follow-up", replyBody)
 		if artifactRelPath != "" {
 			artifact = tools.ArtifactRef{ID: artifactID, RelPath: artifactRelPath, Path: artifactRelPath, Type: artifactType}
 		}
