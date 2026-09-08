@@ -49,7 +49,7 @@ func (*ViewImageTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"path": map[string]any{
 				"type":        "string",
-				"description": "Absolute or relative path to a PNG or JPEG file. Relative paths resolve from the session working directory. Supports ~ for the current user's home directory.",
+				"description": "Relative (preferred) or absolute path to a PNG or JPEG file. Relative paths resolve from the session working directory. Supports ~ for the current user's home directory.",
 			},
 			"label": map[string]any{
 				"type":        "string",

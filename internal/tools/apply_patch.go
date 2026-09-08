@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -108,6 +109,11 @@ type PlannedMutation struct {
 	Kind       MutationKind
 	SourcePath string
 	TargetPath string
+	// DisplayPath is the working-directory-relative spelling of SourcePath
+	// captured while the plan was built. Commit-time errors are reported with
+	// it so the model is told the short form it should resubmit instead of a
+	// resolved absolute path it must shorten itself.
+	DisplayPath string
 
 	BeforeExists       bool
 	BeforeBytes        []byte
@@ -255,6 +261,7 @@ func (ApplyPatchTool) Description() string {
 		"Your patch is a unified diff wrapped in a `*** Begin Patch` / `*** End Patch` envelope. " +
 		"Each operation starts with one of `*** Add File: <path>`, `*** Delete File: <path>`, `*** Update File: <path>` (optionally followed by `*** Move to: <new path>`). " +
 		"Hunks are introduced by `@@` and each line's first character is its marker: `+` (added), `-` (removed), or a space (context); new file contents are `+` lines. " +
+		"One `@@` line starts exactly one hunk: put any section context on that same line (`@@ func greet():`) rather than on a line after it, since a later `@@` starts the next hunk, and never prefix it with a unified-diff range like `@@ -19,10 +19,8 @@` — Chord anchors on the header text, not on line numbers, so a range is dead weight and any useful anchor is the section name itself. " +
 		"`+` or `-` must be the first character of the line; preserve source indentation after the marker (`-old` is a deletion, while ` -old` is context text). Every hunk must contain at least one `+` or `-` line. " +
 		"Context lines are literal complete source lines, not placeholders: a blank or whitespace-only line is a real source line, and `...` never omits context. " +
 		"Prefer the smallest hunk with distinctive context; after a mismatch, re-read the current target range and rebuild the hunk instead of retrying it unchanged."
@@ -265,7 +272,7 @@ func (ApplyPatchTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"patch": map[string]any{
 				"type":        "string",
-				"description": "Complete Codex apply_patch text: a `*** Begin Patch` / `*** End Patch` envelope wrapping Add/Delete/Update operations with `@@` hunks; new file contents are `+` lines. Paths are relative to the session working directory, or absolute. The first character of each hunk line must be its marker (`+` added, `-` removed, space context); do not add a space before `+` or `-`, and preserve source indentation after it (`-old` is a deletion, while ` -old` is context text). Every hunk must contain at least one `+` or `-` line. Context lines must be literal complete source lines; blank or whitespace-only lines are real source lines, not omission placeholders, and `...` never omits context. Prefer small hunks with distinctive context, and rebuild a hunk from a fresh read after a mismatch.",
+				"description": "Complete Codex apply_patch text: a `*** Begin Patch` / `*** End Patch` envelope wrapping Add/Delete/Update operations with `@@` hunks; new file contents are `+` lines. Prefer paths relative to the session working directory when the file is inside it; use an absolute path only for files outside it. One `@@` line starts exactly one hunk, so any section context belongs on that line (`@@ func greet():`) and a second `@@` starts the next hunk. The first character of each hunk line must be its marker (`+` added, `-` removed, space context); do not add a space before `+` or `-`, and preserve source indentation after it (`-old` is a deletion, while ` -old` is context text). Every hunk must contain at least one `+` or `-` line. Context lines must be literal complete source lines; blank or whitespace-only lines are real source lines, not omission placeholders, and `...` never omits context. Prefer small hunks with distinctive context, and rebuild a hunk from a fresh read after a mismatch.",
 			},
 		},
 		"required":             []string{"patch"},
@@ -381,7 +388,7 @@ func (t ApplyPatchTool) applyPatchPartial(ctx context.Context, result ApplyPatch
 		if !ok {
 			index = len(failedFiles)
 			failedIndex[key] = index
-			failedFiles = append(failedFiles, failedFile{path: o.op.Path})
+			failedFiles = append(failedFiles, failedFile{path: applyPatchPathHint(o.op.Path, t.BaseDir)})
 		}
 		failedFiles[index].reasons = append(failedFiles[index].reasons, o.reason)
 		// rolledBack/skipped ops are descriptive; the root cause is the op
@@ -492,6 +499,54 @@ func skipApplyPatchSeparatorRun(lines []string, i int, allowHunk bool) (int, boo
 	return j, false
 }
 
+// applyPatchCarriedHeader reports whether hunk is the empty shell a model
+// leaves behind when it writes the two-line header spelling — `@@`, one
+// section-context line, then the hunk's own `@@`. Chord starts a new hunk at
+// every `@@`, so that shell holds exactly one context line and no change; the
+// line is the section the model wanted to anchor on, and it is carried onto
+// the next hunk's header instead.
+//
+// Only a single non-blank context line qualifies. A longer context-only block
+// stays an error: with two or more lines there is no way to tell the anchor
+// from context the model meant to keep, and guessing would mis-anchor the
+// following hunk.
+func applyPatchCarriedHeader(hunk applyPatchHunk) (bool, string) {
+	if len(hunk.Lines) != 1 {
+		return false, ""
+	}
+	line := hunk.Lines[0]
+	if line.Kind != ' ' {
+		return false, ""
+	}
+	text := strings.TrimSpace(line.Text)
+	if text == "" {
+		return false, ""
+	}
+	return true, text
+}
+
+// unifiedDiffHeaderRE matches the line-range prefix of a unified-diff hunk
+// header, e.g. "-19,10 +19,8" inside "@@ -19,10 +19,8 @@ func foo()". Chord
+// anchors on the header text itself, not on line numbers, so the range is noise
+// it can never locate; group 1 captures any trailing section text worth keeping
+// as the real anchor.
+var unifiedDiffHeaderRE = regexp.MustCompile(`^-\d+(?:,\d+)? \+\d+(?:,\d+)? @@\s?(.*)$`)
+
+// applyPatchNormalizeHeader strips the unified-diff line-range noise from an @@
+// header so it neither wastes tokens nor masquerades as an unlocatable anchor. A
+// header that is only the range (e.g. "-19,10 +19,8 @@") collapses to empty,
+// letting the hunk body anchor instead; a header with a trailing section (e.g.
+// "@@ -19,10 +19,8 @@ func foo()") keeps that section as the real anchor. Headers
+// in Chord's own spelling ("@@ func greet():") never start with "-<digits> +<digits>",
+// so they pass through untouched.
+func applyPatchNormalizeHeader(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if m := unifiedDiffHeaderRE.FindStringSubmatch(raw); m != nil {
+		return strings.TrimSpace(m[1])
+	}
+	return raw
+}
+
 func ParseApplyPatch(text string) (applyPatchDocument, error) {
 	text = strings.ReplaceAll(strings.TrimSpace(text), "\r\n", "\n")
 	lines, err := normalizeApplyPatchEnvelope(text)
@@ -541,6 +596,11 @@ func ParseApplyPatch(text string) (applyPatchDocument, error) {
 				op.MovePath = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(lines[i]), ApplyPatchMoveToMarker))
 				i++
 			}
+			// carriedHeader collects a lone context line stranded between two
+			// `@@` markers by the two-line header spelling some models emit
+			// (see applyPatchCarriedHeader). It only ever survives until the
+			// next `@@`, so it cannot leak across operations.
+			carriedHeader := ""
 			for i < len(lines)-1 && !isApplyPatchMarker(lines[i]) {
 				if lines[i] == "" {
 					if next, ok := skipApplyPatchSeparatorRun(lines, i, true); ok {
@@ -555,7 +615,11 @@ func ParseApplyPatch(text string) (applyPatchDocument, error) {
 				var h applyPatchHunk
 				hunkStartLine := i + 1
 				if !implicitFirstHunk {
-					h.Header = strings.TrimSpace(strings.TrimPrefix(lines[i], "@@"))
+					h.Header = applyPatchNormalizeHeader(strings.TrimSpace(strings.TrimPrefix(lines[i], "@@")))
+					if h.Header == "" {
+						h.Header = carriedHeader
+					}
+					carriedHeader = ""
 					i++
 				}
 				for i < len(lines)-1 && !strings.HasPrefix(lines[i], "@@") && !isApplyPatchMarker(lines[i]) {
@@ -582,13 +646,23 @@ func ParseApplyPatch(text string) (applyPatchDocument, error) {
 					h.EndOfFile = true
 					i++
 				}
+				// A context-only hunk stranded directly before another `@@` is
+				// the two-line header spelling, not a navigation placeholder:
+				// carry its single line forward as the next hunk's header and
+				// drop the shell instead of failing. The rejection below only
+				// covers orphans at the end of an operation, where the model
+				// really did emit context with nothing to change.
+				if carried, text := applyPatchCarriedHeader(h); carried && i < len(lines)-1 && strings.HasPrefix(lines[i], "@@") {
+					carriedHeader = text
+					continue
+				}
 				if len(h.Lines) == 0 {
 					return applyPatchDocument{}, fmt.Errorf("invalid empty update hunk for %s", op.Path)
 				}
 				if !slices.ContainsFunc(h.Lines, func(line applyPatchLine) bool {
 					return line.Kind == '+' || line.Kind == '-'
 				}) {
-					return applyPatchDocument{}, fmt.Errorf("invalid update hunk for %s at line %d: at least one added or removed line is required; context-only or whitespace-only lines are not omission placeholders", op.Path, hunkStartLine)
+					return applyPatchDocument{}, fmt.Errorf("invalid update hunk for %s at line %d: at least one added or removed line is required; context-only or whitespace-only lines are not omission placeholders. To anchor a hunk, put its section context on the `@@` line itself (`@@ func foo():`) and rebuild the hunk from a fresh read of the target range", op.Path, hunkStartLine)
 				}
 				op.Hunks = append(op.Hunks, h)
 			}
@@ -790,7 +864,7 @@ func resolveApplyPatchOperationPaths(op applyPatchOperation, baseDir string) (so
 			return source, "", err
 		}
 		if target == source {
-			return source, target, fmt.Errorf("apply_patch move source and target are the same: %s", source)
+			return source, target, fmt.Errorf("apply_patch move source and target are the same: %s", applyPatchPathHint(source, baseDir))
 		}
 	}
 	return source, target, nil
@@ -832,6 +906,16 @@ func resolveApplyPatchPath(path, baseDir string) (string, error) {
 	return resolved, nil
 }
 
+// applyPatchPathHint renders path the way the model should spell it back in a
+// follow-up patch: relative to the session working directory when the file
+// lives inside it, ~/... when it lives under home, and absolute only as a last
+// resort. Every model-visible hint gets echoed into the next patch, so a long
+// absolute prefix is pure token cost on a path the model could have written
+// relative in the first place.
+func applyPatchPathHint(path, baseDir string) string {
+	return formatToolPathInDir(path, baseDir, path)
+}
+
 // isCleanPathWithin reports whether child is inside parent or equal to it.
 // Both paths must already be filepath.Clean+Abs (as resolveApplyPatchPath
 // guarantees), so the check is a zero-allocation prefix comparison.
@@ -852,7 +936,7 @@ func BuildApplyPatchPlan(ctx context.Context, patch, baseDir string) (MutationPl
 	if err != nil {
 		return MutationPlan{}, err
 	}
-	states, err := snapshotApplyPatchStates(targets)
+	states, err := snapshotApplyPatchStates(targets, baseDir)
 	if err != nil {
 		return MutationPlan{}, err
 	}
@@ -922,7 +1006,7 @@ func buildApplyPatchPlanWithOutcomes(ctx context.Context, patch, baseDir string)
 	if err != nil {
 		return ApplyPatchPlanResult{}, err
 	}
-	states, err := snapshotApplyPatchStates(targets)
+	states, err := snapshotApplyPatchStates(targets, baseDir)
 	if err != nil {
 		return ApplyPatchPlanResult{}, err
 	}
@@ -1011,7 +1095,7 @@ func buildApplyPatchPlanWithOutcomes(ctx context.Context, patch, baseDir string)
 			groupPaths = append(groupPaths, target)
 		}
 		if resolveErr != nil {
-			if err := rollbackGroup(source, fmt.Sprintf("a later operation that modified %s could not be resolved; keep it with the failed operation when revising", source)); err != nil {
+			if err := rollbackGroup(source, fmt.Sprintf("a later operation that modified %s could not be resolved; keep it with the failed operation when revising", applyPatchPathHint(source, baseDir))); err != nil {
 				return ApplyPatchPlanResult{}, err
 			}
 			for _, path := range groupPaths {
@@ -1036,11 +1120,12 @@ func buildApplyPatchPlanWithOutcomes(ctx context.Context, patch, baseDir string)
 			}
 		}
 		if dependencyPath != "" {
-			if err := rollbackGroup(source, fmt.Sprintf("a prior operation touching %s failed, so this operation was not applied and must remain with that dependency when revised", dependencyPath)); err != nil {
+			dependencyHint := applyPatchPathHint(dependencyPath, baseDir)
+			if err := rollbackGroup(source, fmt.Sprintf("a prior operation touching %s failed, so this operation was not applied and must remain with that dependency when revised", dependencyHint)); err != nil {
 				return ApplyPatchPlanResult{}, err
 			}
 			idx := len(outcomes)
-			outcomes = append(outcomes, failedApplyPatchOpResult(op, fmt.Errorf("skipped: a prior operation touching %s failed, so this operation was not applied and must remain with that dependency when revised", dependencyPath)))
+			outcomes = append(outcomes, failedApplyPatchOpResult(op, fmt.Errorf("skipped: a prior operation touching %s failed, so this operation was not applied and must remain with that dependency when revised", dependencyHint)))
 			outcomes[idx].rolledBack = true
 			continue
 		}
@@ -1052,7 +1137,7 @@ func buildApplyPatchPlanWithOutcomes(ctx context.Context, patch, baseDir string)
 			// Earlier matched-but-uncommitted ops in this same group must remain
 			// with the failing operation: nothing from this group was committed,
 			// so revising it must preserve the matched hunks too.
-			if replayErr := rollbackGroup(source, fmt.Sprintf("a later operation that modified %s failed, so this matched operation was not written to disk; keep it with the failed operation when revising the group", source)); replayErr != nil {
+			if replayErr := rollbackGroup(source, fmt.Sprintf("a later operation that modified %s failed, so this matched operation was not written to disk; keep it with the failed operation when revising the group", applyPatchPathHint(source, baseDir))); replayErr != nil {
 				return ApplyPatchPlanResult{}, replayErr
 			}
 			outcomes = append(outcomes, failedApplyPatchOpResult(op, err))
@@ -1073,7 +1158,7 @@ func buildApplyPatchPlanWithOutcomes(ctx context.Context, patch, baseDir string)
 
 func replaySuccessfulApplyPatchOperations(ctx context.Context, states map[string]*applyPatchVirtualFile, outcomes []applyPatchOpResult, baseDir string) error {
 	for path, state := range states {
-		state.displayPath = path
+		state.displayPath = applyPatchPathHint(path, baseDir)
 		state.originPath = ""
 		state.exists = state.initialExists
 		state.bytes = append(state.bytes[:0], state.initialBytes...)
@@ -1130,11 +1215,11 @@ type applyPatchVirtualFile struct {
 	cleanedInvisible map[rune]int
 }
 
-func snapshotApplyPatchStates(targets []MutationTarget) (map[string]*applyPatchVirtualFile, error) {
+func snapshotApplyPatchStates(targets []MutationTarget, baseDir string) (map[string]*applyPatchVirtualFile, error) {
 	states := make(map[string]*applyPatchVirtualFile, len(targets)*2)
 	type existingFile struct {
-		path string
-		info os.FileInfo
+		display string
+		info    os.FileInfo
 	}
 	var existingFiles []existingFile
 	for _, target := range targets {
@@ -1145,26 +1230,27 @@ func snapshotApplyPatchStates(targets []MutationTarget) (map[string]*applyPatchV
 			if _, ok := states[path]; ok {
 				continue
 			}
-			state := &applyPatchVirtualFile{path: path, displayPath: path}
+			display := applyPatchPathHint(path, baseDir)
+			state := &applyPatchVirtualFile{path: path, displayPath: display}
 			info, err := os.Lstat(path)
 			if os.IsNotExist(err) {
 				states[path] = state
 				continue
 			}
 			if err != nil {
-				return nil, fmt.Errorf("inspect apply_patch path %s: %w. No files were modified", path, err)
+				return nil, fmt.Errorf("inspect apply_patch path %s: %w. No files were modified", display, err)
 			}
 			if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-				return nil, fmt.Errorf("apply_patch path is not a regular file: %s. No files were modified", path)
+				return nil, fmt.Errorf("apply_patch path is not a regular file: %s. No files were modified", display)
 			}
 			for _, existing := range existingFiles {
 				if os.SameFile(existing.info, info) {
-					return nil, fmt.Errorf("apply_patch contains overlapping operations for %s and %s", existing.path, path)
+					return nil, fmt.Errorf("apply_patch contains overlapping operations for %s and %s", existing.display, display)
 				}
 			}
 			data, err := os.ReadFile(path)
 			if err != nil {
-				return nil, fmt.Errorf("read apply_patch path %s: %w. No files were modified", path, err)
+				return nil, fmt.Errorf("read apply_patch path %s: %w. No files were modified", display, err)
 			}
 			state.initialExists = true
 			// ReadFile's buffer has no other referent: transfer ownership to
@@ -1176,7 +1262,7 @@ func snapshotApplyPatchStates(targets []MutationTarget) (map[string]*applyPatchV
 			state.bytes = append([]byte(nil), data...)
 			state.mode = info.Mode()
 			states[path] = state
-			existingFiles = append(existingFiles, existingFile{path: path, info: info})
+			existingFiles = append(existingFiles, existingFile{display: display, info: info})
 		}
 	}
 	return states, nil
@@ -1188,12 +1274,13 @@ func applyPatchOperationToVirtualState(ctx context.Context, states map[string]*a
 		return err
 	}
 	state := states[source]
-	state.displayPath = op.Path
+	display := applyPatchPathHint(op.Path, baseDir)
+	state.displayPath = display
 	state.touched = true
 	switch op.Kind {
 	case MutationAdd:
 		if state.exists {
-			return fmt.Errorf("cannot add file that already exists: %s", op.Path)
+			return fmt.Errorf("cannot add file that already exists: %s", display)
 		}
 		state.mode = 0o644
 		state.exists = true
@@ -1209,7 +1296,7 @@ func applyPatchOperationToVirtualState(ctx context.Context, states map[string]*a
 		return nil
 	case MutationDelete:
 		if !state.exists {
-			return applyPatchMissingSourceError(op.Path, baseDir)
+			return applyPatchMissingSourceError(display, baseDir)
 		}
 		state.exists = false
 		state.bytes = nil
@@ -1218,7 +1305,7 @@ func applyPatchOperationToVirtualState(ctx context.Context, states map[string]*a
 		return nil
 	case MutationUpdate:
 		if !state.exists {
-			return applyPatchMissingSourceError(op.Path, baseDir)
+			return applyPatchMissingSourceError(display, baseDir)
 		}
 		if len(op.Hunks) > 0 {
 			// Only the model's added (+) lines carry model text into the
@@ -1229,11 +1316,11 @@ func applyPatchOperationToVirtualState(ctx context.Context, states map[string]*a
 			hunks, stripped := cleanApplyPatchAddedLines(op.Hunks)
 			decoded, err := decodeTextBytes(state.bytes, source)
 			if err != nil {
-				return fmt.Errorf("read update source %s: %w", op.Path, err)
+				return fmt.Errorf("read update source %s: %w", display, err)
 			}
 			after, punctuationHunks, fuzzyHunks, fuzzyReplacements, err := applyApplyPatchHunks(ctx, decoded.Text, hunks)
 			if err != nil {
-				return fmt.Errorf("update %s: %w", op.Path, err)
+				return fmt.Errorf("update %s: %w", display, err)
 			}
 			state.punctuationHunks += punctuationHunks
 			state.fuzzyHunks += fuzzyHunks
@@ -1248,7 +1335,7 @@ func applyPatchOperationToVirtualState(ctx context.Context, states map[string]*a
 			}
 			state.bytes, err = encodeString(after, decoded.Encoding)
 			if err != nil {
-				return fmt.Errorf("encode update %s: %w", op.Path, err)
+				return fmt.Errorf("encode update %s: %w", display, err)
 			}
 		}
 		if op.MovePath == "" {
@@ -1259,10 +1346,10 @@ func applyPatchOperationToVirtualState(ctx context.Context, states map[string]*a
 			return err
 		}
 		if targetPath == source {
-			return fmt.Errorf("apply_patch move source and target are the same: %s", source)
+			return fmt.Errorf("apply_patch move source and target are the same: %s", display)
 		}
 		target := states[targetPath]
-		target.displayPath = op.MovePath
+		target.displayPath = applyPatchPathHint(op.MovePath, baseDir)
 		target.touched = true
 		target.exists = true
 		target.bytes = append([]byte(nil), state.bytes...)
@@ -1323,6 +1410,7 @@ func buildApplyPatchMutationPlan(states map[string]*applyPatchVirtualFile) Mutat
 				Kind:               MutationMove,
 				SourcePath:         sourcePath,
 				TargetPath:         targetPath,
+				DisplayPath:        source.displayPath,
 				BeforeExists:       true,
 				BeforeBytes:        append([]byte(nil), source.initialBytes...),
 				BeforeMode:         source.initialMode,
@@ -1357,6 +1445,7 @@ func buildApplyPatchMutationPlan(states map[string]*applyPatchVirtualFile) Mutat
 		mutation := PlannedMutation{
 			SourcePath:        path,
 			TargetPath:        path,
+			DisplayPath:       state.displayPath,
 			BeforeExists:      state.initialExists,
 			BeforeBytes:       append([]byte(nil), state.initialBytes...),
 			BeforeMode:        state.initialMode,
@@ -2367,17 +2456,26 @@ func rollbackFailedMutation(m PlannedMutation) error {
 	return nil
 }
 
+// displaySource returns the path spelling the model should resubmit: the
+// plan-time relative form when one was captured, otherwise the resolved path.
+func (m PlannedMutation) displaySource() string {
+	if m.DisplayPath != "" {
+		return m.DisplayPath
+	}
+	return m.SourcePath
+}
+
 func revalidateMutation(m PlannedMutation) error {
 	current, err := os.ReadFile(m.SourcePath)
 	currentInfo, statErr := os.Stat(m.SourcePath)
 	switch m.Kind {
 	case MutationAdd:
 		if err == nil || !os.IsNotExist(err) {
-			return fmt.Errorf("apply_patch target changed after planning: %s. No files were modified", m.SourcePath)
+			return fmt.Errorf("apply_patch target changed after planning: %s. No files were modified", m.displaySource())
 		}
 	case MutationUpdate, MutationDelete, MutationMove:
 		if err != nil || statErr != nil || currentInfo.Mode() != m.BeforeMode || !bytes.Equal(current, m.BeforeBytes) {
-			return fmt.Errorf("apply_patch source changed after planning: %s. No files were modified", m.SourcePath)
+			return fmt.Errorf("apply_patch source changed after planning: %s. No files were modified", m.displaySource())
 		}
 	}
 	if m.Kind == MutationMove && m.TargetPath != m.SourcePath {

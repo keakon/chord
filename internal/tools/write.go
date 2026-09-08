@@ -44,7 +44,7 @@ func (t WriteTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"path": map[string]any{
 				"type":        "string",
-				"description": "Absolute or relative path to the file to write. Relative paths resolve from the session working directory. Supports ~ for the current user's home directory.",
+				"description": "Relative (preferred) or absolute path to the file to write. Relative paths resolve from the session working directory. Supports ~ for the current user's home directory.",
 			},
 			"content": map[string]any{
 				"type":        "string",

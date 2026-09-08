@@ -63,7 +63,7 @@ func (t DeleteTool) Parameters() map[string]any {
 					"type": "string",
 				},
 				"minItems":    1,
-				"description": "Absolute or relative paths to verified files or symlinks to delete. Relative paths resolve from the session working directory. Supports ~ for the current user's home directory. Does not delete directories. Do not guess paths for destructive operations.",
+				"description": "Relative (preferred) or absolute paths to verified files or symlinks to delete. Relative paths resolve from the session working directory. Supports ~ for the current user's home directory. Does not delete directories. Do not guess paths for destructive operations.",
 			},
 			"reason": map[string]any{
 				"type":        "string",

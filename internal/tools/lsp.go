@@ -64,7 +64,7 @@ func (t LspTool) Parameters() map[string]any {
 			},
 			"path": map[string]any{
 				"type":        "string",
-				"description": "Absolute or relative path to the verified file. Relative paths resolve from the session working directory. Supports ~ for the current user's home directory. Do not guess paths.",
+				"description": "Relative (preferred) or absolute path to the verified file. Relative paths resolve from the session working directory. Supports ~ for the current user's home directory. Do not guess paths.",
 			},
 			"line": map[string]any{
 				"type":        "integer",

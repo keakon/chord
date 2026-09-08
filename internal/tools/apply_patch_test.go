@@ -148,6 +148,104 @@ func TestApplyPatchRejectsContextOnlyUpdate(t *testing.T) {
 	}
 }
 
+func TestApplyPatchAnchorsSplitHunkHeaderContext(t *testing.T) {
+	// Models trained on the Codex spelling emit the two-line header form:
+	// `@@`, one section-context line, then the hunk's own `@@`. Chord starts a
+	// new hunk at every `@@`, so the naive read leaves the first hunk with
+	// context only — which used to fail the whole patch and cost the model
+	// several recovery round trips. The lone context line is now carried onto
+	// the next hunk as its anchor, matching Codex's "one change" reading.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.go")
+	original := "package x\n\nfunc TestDegraded(t *testing.T) {\n\tif true {\n\t}\n}\n"
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	split := "*** Begin Patch\n" +
+		"*** Update File: " + path + "\n" +
+		"@@\n" +
+		" func TestDegraded(t *testing.T) {\n" +
+		"@@\n" +
+		" \t}\n" +
+		" }\n" +
+		"+\n" +
+		"+func TestAdded(t *testing.T) {}\n" +
+		"*** End Patch"
+	out, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, split))
+	if err != nil {
+		t.Fatalf("split @@ header not tolerated: %v (output %q)", err, out)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "package x\n\nfunc TestDegraded(t *testing.T) {\n\tif true {\n\t}\n}\n\nfunc TestAdded(t *testing.T) {}\n"
+	if string(got) != want {
+		t.Fatalf("file = %q, want %q", got, want)
+	}
+}
+
+func TestApplyPatchRejectsContextOnlyHunkAtOperationEnd(t *testing.T) {
+	// The guardrail that survives the split-header tolerance: a context-only
+	// hunk with no following `@@` is a navigation placeholder, not an anchor,
+	// and stays an error so the model cannot believe a no-op succeeded.
+	trailing := "*** Begin Patch\n" +
+		"*** Update File: unchanged.md\n" +
+		"@@\n" +
+		" ## 5. Related docs\n" +
+		"*** End Patch"
+	if _, err := ParseApplyPatch(trailing); err == nil || !strings.Contains(err.Error(), "at least one added or removed line is required") {
+		t.Fatalf("err = %v, want the trailing context-only hunk rejected", err)
+	}
+
+	twoLines := "*** Begin Patch\n" +
+		"*** Update File: unchanged.md\n" +
+		"@@\n" +
+		" ## 5. Related docs\n" +
+		" ## 6. Appendix\n" +
+		"@@\n" +
+		" old\n" +
+		"+new\n" +
+		"*** End Patch"
+	if _, err := ParseApplyPatch(twoLines); err == nil || !strings.Contains(err.Error(), "at least one added or removed line is required") {
+		t.Fatalf("err = %v, want an ambiguous multi-line context block rejected", err)
+	}
+
+	inline := "*** Begin Patch\n" +
+		"*** Update File: unchanged.md\n" +
+		"@@ ## 5. Related docs\n" +
+		" old\n" +
+		"+new\n" +
+		"*** End Patch"
+	if _, err := ParseApplyPatch(inline); err != nil {
+		t.Fatalf("single-line @@ header rejected: %v", err)
+	}
+}
+
+func TestApplyPatchErrorUsesRelativePathHint(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "internal", "agent"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(dir, "internal", "agent", "missing.go")
+	patch := "*** Begin Patch\n" +
+		"*** Update File: " + missing + "\n" +
+		"@@\n" +
+		"-old\n" +
+		"+new\n" +
+		"*** End Patch"
+	_, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+	if err == nil {
+		t.Fatal("expected the missing source to fail")
+	}
+	if strings.Contains(err.Error(), dir) {
+		t.Fatalf("error repeated the absolute working directory: %v", err)
+	}
+	if want := filepath.ToSlash(filepath.Join("internal", "agent", "missing.go")); !strings.Contains(err.Error(), want) {
+		t.Fatalf("error = %v, want the relative hint %q", err, want)
+	}
+}
+
 func TestApplyPatchReportsModeOnlyUpdate(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows does not preserve Unix executable mode bits")
@@ -1247,6 +1345,71 @@ func assertApplyPatchFileBytes(t *testing.T, path string, want []byte) {
 	if !bytes.Equal(got, want) {
 		t.Fatalf("%s = %X, want %X", path, got, want)
 	}
+}
+
+func TestApplyPatchNormalizesUnifiedDiffHeader(t *testing.T) {
+	// Models copy the unified-diff header spelling ("@@ -19,10 +19,8 @@"),
+	// whose "-l,s +l,s" range is line-number noise Chord can never anchor on.
+	// It must be stripped: a range-only header collapses to empty (the hunk
+	// body anchors), and a range with a trailing section keeps that section as
+	// the real anchor. Both must still apply end to end.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.go")
+	original := "package x\n\nfunc TestDegraded(t *testing.T) {\n\tif true {\n\t}\n}\n"
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	want := "package x\n\nfunc TestDegraded(t *testing.T) {\n\tif true {\n\t}\n}\n\nfunc TestAdded(t *testing.T) {}\n"
+
+	// Range-only header: collapses to empty, body still anchors and applies.
+	rangeOnly := "*** Begin Patch\n" +
+		"*** Update File: " + path + "\n" +
+		"@@ -19,10 +19,8 @@\n" +
+		" func TestDegraded(t *testing.T) {\n" +
+		" \tif true {\n" +
+		" \t}\n" +
+		" }\n" +
+		"+\n" +
+		"+func TestAdded(t *testing.T) {}\n" +
+		"*** End Patch"
+	doc, err := ParseApplyPatch(rangeOnly)
+	if err != nil {
+		t.Fatalf("parse range-only header: %v", err)
+	}
+	if got := doc.Operations[0].Hunks[0].Header; got != "" {
+		t.Fatalf("range-only header = %q, want empty", got)
+	}
+	if _, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, rangeOnly)); err != nil {
+		t.Fatalf("range-only header did not apply: %v", err)
+	}
+	assertApplyPatchFile(t, path, want)
+
+	// Reset the file; the range-with-section case applies from the original.
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Range with a trailing section: the section becomes the anchor.
+	withSection := "*** Begin Patch\n" +
+		"*** Update File: " + path + "\n" +
+		"@@ -19,10 +19,8 @@ func TestDegraded(t *testing.T) {\n" +
+		" \tif true {\n" +
+		" \t}\n" +
+		" }\n" +
+		"+\n" +
+		"+func TestAdded(t *testing.T) {}\n" +
+		"*** End Patch"
+	doc, err = ParseApplyPatch(withSection)
+	if err != nil {
+		t.Fatalf("parse header with section: %v", err)
+	}
+	if got := doc.Operations[0].Hunks[0].Header; got != "func TestDegraded(t *testing.T) {" {
+		t.Fatalf("header with section = %q, want %q", got, "func TestDegraded(t *testing.T) {")
+	}
+	if _, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, withSection)); err != nil {
+		t.Fatalf("header with section did not apply: %v", err)
+	}
+	assertApplyPatchFile(t, path, want)
 }
 
 func TestRollbackMutationsRestoresFileModes(t *testing.T) {

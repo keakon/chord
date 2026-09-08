@@ -74,7 +74,7 @@ func (ReadTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"path": map[string]any{
 				"type":        "string",
-				"description": "Absolute or relative path to an existing file to read. Relative paths resolve from the session working directory. Supports ~ for the current user's home directory. Do not guess paths; verify uncertain paths before reading.",
+				"description": "Relative (preferred) or absolute path to an existing file to read. Relative paths resolve from the session working directory. Supports ~ for the current user's home directory. Do not guess paths; verify uncertain paths before reading.",
 			},
 			"offset": map[string]any{
 				"type":        "integer",
