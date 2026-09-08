@@ -1572,3 +1572,16 @@ func TestModelDrivenResumeKeepsQueuedUserMessageForNextTurn(t *testing.T) {
 		}
 	}
 }
+
+func TestModelDrivenCheckpointRequestIDUsesToolCallID(t *testing.T) {
+	if got := (&modelDrivenCheckpointRequest{ToolCallID: "call-42"}).requestID(); got != "call-42" {
+		t.Fatalf("request ID = %q, want call-42", got)
+	}
+	if got := (&modelDrivenCheckpointRequest{}).requestID(); got != "unknown" {
+		t.Fatalf("empty request ID = %q, want unknown", got)
+	}
+	var request *modelDrivenCheckpointRequest
+	if got := request.requestID(); got != "unknown" {
+		t.Fatalf("nil request ID = %q, want unknown", got)
+	}
+}
