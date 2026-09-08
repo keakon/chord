@@ -163,6 +163,18 @@ func (v CompactContextValidator) ParseCompactContextArgs(raw json.RawMessage) (C
 		delete(args.ClaimEvidence, claim)
 		args.ClaimEvidence[strings.TrimSpace(claim)] = normalized
 	}
+	claims := make(map[string]struct{}, len(args.Completed)+len(args.Decisions))
+	for _, claim := range args.Completed {
+		claims[claim] = struct{}{}
+	}
+	for _, claim := range args.Decisions {
+		claims[claim] = struct{}{}
+	}
+	for claim := range args.ClaimEvidence {
+		if _, ok := claims[claim]; !ok {
+			return CompactContextArgs{}, fmt.Errorf("claim_evidence claim %q must match an item in completed or decisions", claim)
+		}
+	}
 
 	// The continuation-state budget uses the same usage-calibrated token
 	// accounting as other context-pressure decisions. state_files paths are
