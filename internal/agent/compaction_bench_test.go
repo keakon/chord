@@ -203,3 +203,125 @@ func BenchmarkPrepareMessagesForLLMStablePrefixReuse(b *testing.B) {
 		})
 	}
 }
+
+// benchmarkTypedCheckpointList builds a bounded list of distinct items, one
+// per slot of the merged-list cap the typed block is bound by.
+func benchmarkTypedCheckpointList(prefix string, count int) []string {
+	items := make([]string, 0, count)
+	for i := range count {
+		items = append(items, fmt.Sprintf("%s-%d: a realistic carried item that survives the recursion", prefix, i))
+	}
+	return items
+}
+
+// benchmarkPriorTypedCheckpointMessage renders a previous checkpoint message
+// carrying full-cap typed lists, so the next generation's builder exercises
+// the merge-and-bound path on a real prior body.
+func benchmarkPriorTypedCheckpointMessage() message.Message {
+	prior := checkpointTypedState{
+		Decisions:    benchmarkTypedCheckpointList("d", typedStateCarryMaxDecisions),
+		OpenIssues:   benchmarkTypedCheckpointList("o", typedStateCarryMaxOpenIssues),
+		EvidenceRefs: benchmarkTypedCheckpointList("ev", typedStateCarryMaxEvidenceRefs),
+		StageID:      "impl",
+		StageStatus:  "candidate",
+		Kind:         "provisional",
+	}
+	body := "## Current User Request\n- Latest user request: continue\n\n## Typed Checkpoint State\n" + renderTypedStateJSON(prior)
+	return message.Message{Role: message.RoleUser, Content: body, IsCompactionSummary: true}
+}
+
+// benchmarkTypedCheckpointRender measures the deterministic checkpoint render
+// (summary sections + typed block + envelope) and its typed-state parse-back,
+// with the typed carry lists at their caps. It guards the per-request cost of
+// rendering a model-driven checkpoint, which would otherwise regress
+// invisibly: the render runs once per checkpoint build, but a later change
+// that re-renders per section or grows the envelope linearly with the carried
+// state would not fail any functional test.
+func BenchmarkModelDrivenCheckpointTypedRender(b *testing.B) {
+	for _, mergePrior := range []bool{false, true} {
+		name := "fresh_at_cap"
+		if mergePrior {
+			name = "merge_at_cap"
+		}
+		b.Run(name, func(b *testing.B) {
+			a := &MainAgent{turn: &Turn{ID: 1}}
+			messages := benchmarkContextReductionMessages(30)
+			if mergePrior {
+				messages = append([]message.Message{benchmarkPriorTypedCheckpointMessage()}, messages...)
+			}
+			req := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{
+				ActiveObjective: "implement the unified context-management optimization",
+				NextStep:        "continue",
+				Decisions:       benchmarkTypedCheckpointList("d", typedStateCarryMaxDecisions),
+				OpenIssues:      benchmarkTypedCheckpointList("o", typedStateCarryMaxOpenIssues),
+				EvidenceRefs:    benchmarkTypedCheckpointList("ev", typedStateCarryMaxEvidenceRefs),
+				StageID:         "impl",
+				StageStatus:     "candidate",
+				CheckpointKind:  "provisional",
+			}}
+			bundle := modelDrivenBarrierSnapshot{snapshot: messages}
+			headSplit := len(messages) - 1
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				summary := a.buildModelDrivenCheckpointSummary(bundle, messages, headSplit, req)
+				content := buildCompactionCheckpointMessage(summary, nil, compactionSummaryModeModelDriven, nil)
+				state, ok := parseCheckpointTypedState(compactionSummaryBody(content))
+				if !ok || len(state.Decisions) == 0 {
+					b.Fatalf("typed state must survive the render round-trip ok=%v decisions=%d", ok, len(state.Decisions))
+				}
+			}
+		})
+	}
+}
+
+// TestModelDrivenCheckpointTypedRenderGuard bounds the typed checkpoint
+// render's allocation and produced-size budgets. Unlike the benchmark, this
+// runs in every test pass and fails on a regression: rendering must stay
+// linear in the (capped) carried state, and the checkpoint must not grow a
+// natural-language appendix of prior content. Keep the fixture at full caps —
+// the merge-and-bound path is where an unbounded carry would first show up.
+func TestModelDrivenCheckpointTypedRenderGuard(t *testing.T) {
+	a := &MainAgent{turn: &Turn{ID: 1}}
+	messages := append([]message.Message{benchmarkPriorTypedCheckpointMessage()}, benchmarkContextReductionMessages(30)...)
+	req := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{
+		ActiveObjective: "implement the unified context-management optimization",
+		NextStep:        "continue",
+		Decisions:       benchmarkTypedCheckpointList("d", typedStateCarryMaxDecisions),
+		OpenIssues:      benchmarkTypedCheckpointList("o", typedStateCarryMaxOpenIssues),
+		EvidenceRefs:    benchmarkTypedCheckpointList("ev", typedStateCarryMaxEvidenceRefs),
+		StageID:         "impl",
+		StageStatus:     "candidate",
+		CheckpointKind:  "provisional",
+	}}
+	bundle := modelDrivenBarrierSnapshot{snapshot: messages}
+	headSplit := len(messages) - 1
+
+	var content string
+	allocs := testing.AllocsPerRun(100, func() {
+		summary := a.buildModelDrivenCheckpointSummary(bundle, messages, headSplit, req)
+		content = buildCompactionCheckpointMessage(summary, nil, compactionSummaryModeModelDriven, nil)
+		state, ok := parseCheckpointTypedState(compactionSummaryBody(content))
+		if !ok || len(state.Decisions) != typedStateCarryMaxDecisions {
+			t.Fatalf("typed state must round-trip at cap ok=%v decisions=%d", ok, len(state.Decisions))
+		}
+	})
+	// The merged list cannot exceed the single-submission caps, so the typed
+	// block is bounded; the guard catches a regression that carries the prior
+	// body as natural-language Markdown or re-renders per carried item.
+	if len(content) > 60_000 {
+		t.Fatalf("typed checkpoint content = %d bytes, want ≤60000 (bounded carry)", len(content))
+	}
+	maxAllocs := 250.0
+	mode := "normal"
+	if testBinaryBuiltWithRace() {
+		// Race instrumentation adds allocations to this path. Keep a separate
+		// budget so normal builds retain the tighter performance guard while
+		// race builds still catch meaningful allocation regressions.
+		maxAllocs = 450
+		mode = "race"
+	}
+	if allocs > maxAllocs {
+		t.Fatalf("typed checkpoint render allocs = %.0f, want ≤%.0f (%s build)", allocs, maxAllocs, mode)
+	}
+}
