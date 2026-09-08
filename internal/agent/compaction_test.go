@@ -6660,3 +6660,15 @@ func mustTodoIndex(t *testing.T, id string) int {
 	}
 	return n
 }
+
+func TestEvidenceItemIDIsShortAndStable(t *testing.T) {
+	item := evidenceItem{Kind: evidenceToolDiff, Key: "tool\x00" + strings.Repeat("large", 500)}
+	first := evidenceItemID(item)
+	second := evidenceItemID(item)
+	if first != second || !strings.HasPrefix(first, "ev-") || len(first) != 15 {
+		t.Fatalf("evidence ID = %q, want stable short ev ID", first)
+	}
+	if strings.ContainsRune(first, '\x00') {
+		t.Fatalf("evidence ID contains internal separator: %q", first)
+	}
+}

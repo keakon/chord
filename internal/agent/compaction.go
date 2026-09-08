@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"slices"
 	"sort"
@@ -239,10 +240,12 @@ type evidenceItem struct {
 }
 
 func evidenceItemID(item evidenceItem) string {
-	if strings.TrimSpace(item.Key) != "" {
-		return item.Key
+	key := strings.TrimSpace(item.Key)
+	if key == "" {
+		key = fmt.Sprintf("%s:%d:%s", item.Kind, item.Sequence, item.Title)
 	}
-	return fmt.Sprintf("%s:%d", item.Kind, item.Sequence)
+	sum := sha256.Sum256([]byte(key))
+	return fmt.Sprintf("ev-%x", sum[:6])
 }
 
 type compactionHistoryMeta struct {
