@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/keakon/golog/log"
@@ -401,6 +402,10 @@ func (a *MainAgent) handleToolResult(evt Event) {
 			a.beginContextReductionWrapUpGrace()
 			a.stageCompletionCandidateTurnID = a.turn.ID
 			a.stageCompletionCandidatePending = true
+			a.recordCompactionLifecycleEvent("stage_candidate", map[string]string{
+				"turn_id": strconv.FormatUint(a.turn.ID, 10),
+				"source":  tools.NameTodoWrite,
+			})
 		}
 		if tools.NormalizeName(payload.Name) == tools.NameSkill {
 			if skillName := toolCallSkillName(a.ctxMgr.Snapshot(), payload.CallID, payload.ArgsJSON); skillName != "" {
