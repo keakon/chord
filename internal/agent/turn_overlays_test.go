@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/keakon/chord/internal/ctxmgr"
@@ -74,5 +75,20 @@ func BenchmarkBuildTurnOverlayMessagesWithoutSubAgents(b *testing.B) {
 		if overlays := a.buildTurnOverlayMessages(); len(overlays) != 0 {
 			b.Fatalf("overlays = %d, want none", len(overlays))
 		}
+	}
+}
+
+func TestStageCompletionCandidateOverlayIsOneShot(t *testing.T) {
+	a := turnOverlayBenchAgent(1)
+	a.stageCompletionCandidatePending = true
+	overlays := a.buildTurnOverlayMessages()
+	if len(overlays) != 1 || !strings.Contains(overlays[0].Content, "provisional context checkpoint") {
+		t.Fatalf("stage completion overlays = %#v", overlays)
+	}
+	if a.stageCompletionCandidatePending {
+		t.Fatal("stage completion candidate overlay was not consumed")
+	}
+	if len(a.ctxMgr.Snapshot()) != 1 {
+		t.Fatal("stage completion overlay must not be durable")
 	}
 }
