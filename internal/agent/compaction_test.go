@@ -6720,3 +6720,27 @@ func TestRefreshEvidenceValidityInvalidatesChangedToolFile(t *testing.T) {
 		t.Fatalf("evidence validity = %q, want invalidated", got)
 	}
 }
+
+func TestCompactionPromptInputsDegradeByAuthority(t *testing.T) {
+	keyFiles := []string{"key"}
+	todos := []tools.TodoItem{{ID: "todo"}}
+	subAgents := []SubAgentInfo{{TaskID: "task"}}
+	background := []recovery.BackgroundObjectState{{ID: "background"}}
+
+	cases := []struct {
+		attempt                                    int
+		wantKey, wantTodo, wantSub, wantBackground int
+	}{
+		{0, 1, 1, 1, 1},
+		{1, 1, 1, 1, 0},
+		{2, 0, 1, 1, 0},
+		{3, 0, 1, 0, 0},
+		{4, 0, 0, 0, 0},
+	}
+	for _, test := range cases {
+		gotKey, gotTodo, gotSub, gotBackground := compactionPromptInputsForAttempt(keyFiles, todos, subAgents, background, test.attempt)
+		if len(gotKey) != test.wantKey || len(gotTodo) != test.wantTodo || len(gotSub) != test.wantSub || len(gotBackground) != test.wantBackground {
+			t.Fatalf("attempt %d inputs = (%d, %d, %d, %d), want (%d, %d, %d, %d)", test.attempt, len(gotKey), len(gotTodo), len(gotSub), len(gotBackground), test.wantKey, test.wantTodo, test.wantSub, test.wantBackground)
+		}
+	}
+}
