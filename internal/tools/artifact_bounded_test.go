@@ -36,6 +36,24 @@ func TestReadArtifactPagesAndReportsDigest(t *testing.T) {
 	}
 }
 
+// TestSaveImmutableResultEnforcesStoreCeiling pins the size ceiling that
+// canonicalResultObject applies on behalf of the immutable result store, and
+// that a rejected result leaves nothing behind.
+func TestSaveImmutableResultEnforcesStoreCeiling(t *testing.T) {
+	dir := t.TempDir()
+	oversized := json.RawMessage(`{"value":"` + strings.Repeat("x", maxImmutableResultBytes) + `"}`)
+	if _, _, err := SaveImmutableResult(dir, "sample/report", oversized); err == nil ||
+		!strings.Contains(err.Error(), "exceeds maximum size") {
+		t.Fatalf("err = %v, want the oversized result rejected", err)
+	}
+	if entries, err := os.ReadDir(filepath.Join(dir, "artifacts", "results")); err == nil && len(entries) > 0 {
+		t.Fatalf("rejected result wrote %d file(s)", len(entries))
+	}
+	if _, _, err := SaveImmutableResult(dir, "sample/report", json.RawMessage(`{"value":"small"}`)); err != nil {
+		t.Fatalf("SaveImmutableResult: %v", err)
+	}
+}
+
 func TestReadArtifactRejectsChangedSnapshotDigest(t *testing.T) {
 	dir := t.TempDir()
 	ctx := WithSessionDir(context.Background(), dir)

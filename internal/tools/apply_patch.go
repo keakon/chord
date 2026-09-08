@@ -89,6 +89,16 @@ const (
 	ApplyPatchMoveToMarker     = "*** Move to: "
 )
 
+// applyPatchHunkMarker introduces a hunk. It opens Chord's own header spelling
+// ("@@ func greet():") and closes the unified-diff line range models sometimes
+// emit ("@@ -19,10 +19,8 @@"), so the scanner and the header normalizer must
+// agree on it. The other unified-diff header patterns in this repository match
+// different things — the TUI captures line numbers to renumber a rendered
+// diff, and context reduction detects whole header lines including combined
+// diffs — and live in packages that already depend on this one, so they cannot
+// share this definition without inverting that dependency.
+const applyPatchHunkMarker = "@@"
+
 type MutationTarget struct {
 	Kind       MutationKind
 	SourcePath string
@@ -493,7 +503,7 @@ func skipApplyPatchSeparatorRun(lines []string, i int, allowHunk bool) (int, boo
 	if j == i {
 		return i, false
 	}
-	if j == len(lines)-1 || isApplyPatchMarker(lines[j]) || (allowHunk && strings.HasPrefix(lines[j], "@@")) {
+	if j == len(lines)-1 || isApplyPatchMarker(lines[j]) || (allowHunk && strings.HasPrefix(lines[j], applyPatchHunkMarker)) {
 		return j, true
 	}
 	return j, false
@@ -530,7 +540,7 @@ func applyPatchCarriedHeader(hunk applyPatchHunk) (bool, string) {
 // anchors on the header text itself, not on line numbers, so the range is noise
 // it can never locate; group 1 captures any trailing section text worth keeping
 // as the real anchor.
-var unifiedDiffHeaderRE = regexp.MustCompile(`^-\d+(?:,\d+)? \+\d+(?:,\d+)? @@\s?(.*)$`)
+var unifiedDiffHeaderRE = regexp.MustCompile(`^-\d+(?:,\d+)? \+\d+(?:,\d+)? ` + applyPatchHunkMarker + `\s?(.*)$`)
 
 // applyPatchNormalizeHeader strips the unified-diff line-range noise from an @@
 // header so it neither wastes tokens nor masquerades as an unlocatable anchor. A
@@ -609,20 +619,20 @@ func ParseApplyPatch(text string) (applyPatchDocument, error) {
 					}
 				}
 				implicitFirstHunk := len(op.Hunks) == 0 && (lines[i] == "" || strings.ContainsRune(" +-", rune(lines[i][0])))
-				if !strings.HasPrefix(lines[i], "@@") && !implicitFirstHunk {
+				if !strings.HasPrefix(lines[i], applyPatchHunkMarker) && !implicitFirstHunk {
 					return applyPatchDocument{}, fmt.Errorf("invalid update hunk at line %d: expected @@", i+1)
 				}
 				var h applyPatchHunk
 				hunkStartLine := i + 1
 				if !implicitFirstHunk {
-					h.Header = applyPatchNormalizeHeader(strings.TrimSpace(strings.TrimPrefix(lines[i], "@@")))
+					h.Header = applyPatchNormalizeHeader(strings.TrimSpace(strings.TrimPrefix(lines[i], applyPatchHunkMarker)))
 					if h.Header == "" {
 						h.Header = carriedHeader
 					}
 					carriedHeader = ""
 					i++
 				}
-				for i < len(lines)-1 && !strings.HasPrefix(lines[i], "@@") && !isApplyPatchMarker(lines[i]) {
+				for i < len(lines)-1 && !strings.HasPrefix(lines[i], applyPatchHunkMarker) && !isApplyPatchMarker(lines[i]) {
 					if lines[i] == "" {
 						next, ok := skipApplyPatchSeparatorRun(lines, i, true)
 						if ok {
@@ -652,7 +662,7 @@ func ParseApplyPatch(text string) (applyPatchDocument, error) {
 				// drop the shell instead of failing. The rejection below only
 				// covers orphans at the end of an operation, where the model
 				// really did emit context with nothing to change.
-				if carried, text := applyPatchCarriedHeader(h); carried && i < len(lines)-1 && strings.HasPrefix(lines[i], "@@") {
+				if carried, text := applyPatchCarriedHeader(h); carried && i < len(lines)-1 && strings.HasPrefix(lines[i], applyPatchHunkMarker) {
 					carriedHeader = text
 					continue
 				}
@@ -731,7 +741,7 @@ func isApplyPatchImplicitEOF(line string) bool {
 	if strings.HasPrefix(trimmed, ApplyPatchDeleteFileMarker) || strings.HasPrefix(trimmed, ApplyPatchMoveToMarker) {
 		return true
 	}
-	if strings.HasPrefix(line, "@@") {
+	if strings.HasPrefix(line, applyPatchHunkMarker) {
 		return true
 	}
 	kind := line[0]
@@ -2605,20 +2615,24 @@ func rollbackMutations(committed []PlannedMutation) error {
 }
 
 // applyPatchMutationSummary renders one mutation as a single display line
-// ("A path", "M path", "D path", "R src -> dst"), with paths shown relative to
-// baseDir. Both the success path and the partial-failure "applied" list go
-// through finishApplyPatch, so committed files are always reported identically.
+// ("A path", "M path", "D path", "R src -> dst"). Every path goes through
+// applyPatchPathHint, the one spelling this tool shows the model, so a summary
+// line and a commit-time error name the same file the same way. A move renders
+// each side on its own: the joined "src -> dst" string is not a path and would
+// survive path formatting unchanged, leaving one line absolute while the rest
+// of the patch report stays relative. Both the success path and the
+// partial-failure "applied" list go through finishApplyPatch, so committed
+// files are always reported identically.
 func applyPatchMutationSummary(mutation PlannedMutation, baseDir string) string {
-	marker, path := "M", mutation.SourcePath
 	switch mutation.Kind {
 	case MutationAdd:
-		marker, path = "A", mutation.TargetPath
+		return "A " + applyPatchPathHint(mutation.TargetPath, baseDir)
 	case MutationDelete:
-		marker = "D"
+		return "D " + applyPatchPathHint(mutation.SourcePath, baseDir)
 	case MutationMove:
-		marker, path = "R", mutation.SourcePath+" -> "+mutation.TargetPath
+		return "R " + applyPatchPathHint(mutation.SourcePath, baseDir) + " -> " + applyPatchPathHint(mutation.TargetPath, baseDir)
 	}
-	return marker + " " + displayPathForBaseDir(path, baseDir)
+	return "M " + applyPatchPathHint(mutation.SourcePath, baseDir)
 }
 
 // applyPatchMutationNotePath is the file a per-hunk note should name: the path
@@ -2661,7 +2675,7 @@ func (t ApplyPatchTool) finishApplyPatch(ctx context.Context, plan MutationPlan)
 			// every other tool diagnostic, so trailing whitespace and
 			// invisible runes stay visible and one pathological line cannot
 			// inflate the result.
-			path := displayPathForBaseDir(applyPatchMutationNotePath(mutation), t.BaseDir)
+			path := applyPatchPathHint(applyPatchMutationNotePath(mutation), t.BaseDir)
 			for _, replacement := range mutation.FuzzyReplacements {
 				lines = append(lines, fmt.Sprintf("Note: fuzzy hunk replaced %s line %d: the file's actual line %s with %s; your hunk claimed %s",
 					path, replacement.line, truncateToolLine(replacement.actual), truncateToolLine(replacement.added), truncateToolLine(replacement.removed)))

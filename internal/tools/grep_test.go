@@ -144,6 +144,125 @@ func TestGrepInvalidRegexFallsBackToLiteralSearch(t *testing.T) {
 	}
 }
 
+// TestGrepPluralPatternsSearchEachPatternIndependently pins the meaning of the
+// plural "patterns" list: every element is its own regex, and one element can
+// neither disable, widen, nor flag-contaminate the others.
+func TestGrepPluralPatternsSearchEachPatternIndependently(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sample.go")
+	content := "func Foo(x int) {}\nfunc Bar(y int) {}\nplain line\nBAR upper\nbar lower\nfoo lower\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name     string
+		patterns []string
+		want     []string
+		reject   []string
+	}{
+		{
+			// Both elements are unparseable regexes; each must degrade to a
+			// literal search of itself rather than joining into one expression
+			// that compiles as neither.
+			name:     "invalid elements fall back per element",
+			patterns: []string{"func Foo(", "func Bar("},
+			want:     []string{"func Foo(x int)", "func Bar(y int)"},
+		},
+		{
+			// An empty element would become a bare alternation arm matching
+			// every line of every file.
+			name:     "empty element does not match every line",
+			patterns: []string{"foo", ""},
+			want:     []string{"foo lower"},
+			reject:   []string{"plain line"},
+		},
+		{
+			// An inline flag group applies to the element that carries it.
+			name:     "inline flags stay scoped to their element",
+			patterns: []string{"(?i)foo", "bar"},
+			want:     []string{"foo lower", "bar lower"},
+			reject:   []string{"BAR upper"},
+		},
+		{
+			// A literal fallback for one element must not strip regex meaning
+			// from its neighbours.
+			name:     "valid neighbours keep regex meaning",
+			patterns: []string{"func Foo(", "^bar"},
+			want:     []string{"func Foo(x int)", "bar lower"},
+			reject:   []string{"func Bar(y int)"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, _ := json.Marshal(map[string]any{"patterns": tc.patterns, "paths": []string{dir}})
+			out, err := GrepTool{}.Execute(context.Background(), raw)
+			if err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(out, want) {
+					t.Fatalf("output missing %q:\n%s", want, out)
+				}
+			}
+			for _, reject := range tc.reject {
+				if strings.Contains(out, reject) {
+					t.Fatalf("output wrongly matched %q:\n%s", reject, out)
+				}
+			}
+		})
+	}
+}
+
+// TestGrepLiteralFallbackNamesTheAffectedPatterns pins that the result says
+// which patterns lost their regex meaning, so a multi-pattern search does not
+// leave the caller guessing which element was quoted.
+func TestGrepLiteralFallbackNamesTheAffectedPatterns(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "sample.go"), []byte("func Foo(x int) {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(map[string]any{"patterns": []string{"func Foo(", "^bar"}, "paths": []string{dir}})
+	out, err := GrepTool{}.Execute(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out, "searched as literal text") || !strings.Contains(out, `"func Foo("`) {
+		t.Fatalf("output does not name the literal pattern:\n%s", out)
+	}
+	if strings.Contains(out, `"^bar"`) {
+		t.Fatalf("valid pattern wrongly reported as literal:\n%s", out)
+	}
+}
+
+// TestGrepPluralPatternsShapeMatchesDecoding pins that the validation-time
+// alias shaper and grepArgs decoding produce the same regex source: they are
+// two encodings of one rule and must not drift.
+func TestGrepPluralPatternsShapeMatchesDecoding(t *testing.T) {
+	for _, patterns := range [][]string{
+		{"func Foo(", "func Bar("},
+		{"foo", ""},
+		{"(?i)foo", "bar"},
+		{"solo"},
+	} {
+		items := make([]any, 0, len(patterns))
+		for _, pattern := range patterns {
+			items = append(items, pattern)
+		}
+		shaped, ok := GrepTool{}.shapeAliasArgument("patterns", items)
+		if !ok {
+			t.Fatalf("shapeAliasArgument(%v) declined to shape the list", patterns)
+		}
+		raw, _ := json.Marshal(map[string]any{"patterns": patterns})
+		var a grepArgs
+		if err := json.Unmarshal(raw, &a); err != nil {
+			t.Fatalf("grepArgs decode %v: %v", patterns, err)
+		}
+		if shaped != a.Pattern {
+			t.Fatalf("shaped = %q, decoded = %q for %v", shaped, a.Pattern, patterns)
+		}
+	}
+}
+
 func TestGrepPathsParameterDescribesMultiplePaths(t *testing.T) {
 	params := GrepTool{}.Parameters()
 	props, ok := params["properties"].(map[string]any)

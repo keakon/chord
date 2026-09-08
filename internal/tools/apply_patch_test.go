@@ -339,6 +339,39 @@ func TestApplyPatchMove(t *testing.T) {
 	}
 }
 
+// TestApplyPatchReportsOnePathSpelling pins that the summary lines use the same
+// path spelling as every other apply_patch message: the model resubmits what it
+// is shown, so a report mixing relative hints with resolved absolute paths
+// teaches two spellings for one file.
+func TestApplyPatchReportsOnePathSpelling(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "old.txt"), []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	patch := "*** Begin Patch\n*** Update File: old.txt\n*** Move to: sub/new.txt\n@@\n-old\n+new\n*** End Patch"
+	result, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result != "Applied patch:\nR old.txt -> sub/new.txt" {
+		t.Fatalf("result = %q, want both sides of the move spelled relative to the session directory", result)
+	}
+
+	// Outside the session directory both the summary and the error hint fall
+	// back to the same spelling instead of one going absolute.
+	root := t.TempDir()
+	t.Chdir(root)
+	outside := filepath.Join(root, "outside.txt")
+	mutation := PlannedMutation{Kind: MutationUpdate, SourcePath: outside}
+	summary := applyPatchMutationSummary(mutation, filepath.Join(root, "session"))
+	if want := "M " + applyPatchPathHint(outside, filepath.Join(root, "session")); summary != want {
+		t.Fatalf("summary = %q, want %q", summary, want)
+	}
+	if summary != "M outside.txt" {
+		t.Fatalf("summary = %q, want the working-directory-relative spelling", summary)
+	}
+}
+
 func TestApplyPatchCodexSequentialFileOperations(t *testing.T) {
 	t.Run("move then recreate source", func(t *testing.T) {
 		dir := t.TempDir()
@@ -1410,6 +1443,28 @@ func TestApplyPatchNormalizesUnifiedDiffHeader(t *testing.T) {
 		t.Fatalf("header with section did not apply: %v", err)
 	}
 	assertApplyPatchFile(t, path, want)
+}
+
+// TestApplyPatchHunkMarkerDrivesHeaderNormalization pins that the scanner's
+// hunk marker is the same token the header normalizer's pattern is built from.
+// If the two ever named it separately, a patch could be split on one spelling
+// while its line-range noise was stripped by another, leaving the range in
+// place as an anchor no file can match.
+func TestApplyPatchHunkMarkerDrivesHeaderNormalization(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		want string
+	}{
+		{raw: "-19,10 +19,8 " + applyPatchHunkMarker, want: ""},
+		{raw: "-19,10 +19,8 " + applyPatchHunkMarker + " func greet():", want: "func greet():"},
+		{raw: "-1 +1 " + applyPatchHunkMarker + " func greet():", want: "func greet():"},
+		// Chord's own spelling carries no range and passes through untouched.
+		{raw: "func greet():", want: "func greet():"},
+	} {
+		if got := applyPatchNormalizeHeader(tc.raw); got != tc.want {
+			t.Fatalf("applyPatchNormalizeHeader(%q) = %q, want %q", tc.raw, got, tc.want)
+		}
+	}
 }
 
 func TestRollbackMutationsRestoresFileModes(t *testing.T) {

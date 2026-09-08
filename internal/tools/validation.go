@@ -371,18 +371,16 @@ func validateValueAgainstSchema(value any, schema map[string]any, path string, i
 			delete(obj, key)
 		}
 		required := requiredFields(schema["required"])
-		isRequired := make(map[string]bool, len(required))
-		for _, key := range required {
-			isRequired[key] = true
-		}
+		mandatory := mandatoryFields(schema)
 		// An explicit null for an optional declared field is JSON's "no value"
 		// spelling and means the same as omitting the field, so tolerate it as
 		// an omission instead of failing the call and forcing a model retry.
 		// The dropped value is recorded as ignored so the model still learns
-		// the parameter took no effect. Required fields stay strict: null there
-		// fails the type check below with the same message as any wrong type.
+		// the parameter took no effect. Fields any required group names stay
+		// strict: null there fails the type check below with the same message
+		// as any wrong type.
 		for key, raw := range obj {
-			if raw != nil || isRequired[key] {
+			if raw != nil || mandatory[key] {
 				continue
 			}
 			if _, declared := props[key].(map[string]any); !declared {
@@ -515,6 +513,48 @@ func schemaCoercesFromObject(schema map[string]any, value any) bool {
 	itemSchema, _ := schema["items"].(map[string]any)
 	itemType, _ := itemSchema["type"].(string)
 	return itemType == "" || itemType == "object"
+}
+
+// mandatoryFields lists every property some required group of the schema names:
+// the object's own "required" plus the "required" of each anyOf alternative.
+// A schema that offers several argument spellings (save_artifact's file pair vs
+// its result pair, read_artifact's path vs rel_path) can only express that
+// through anyOf, which leaves each individual property optional. Treating those
+// properties as droppable would silently strip an explicit null and then report
+// the field as missing, hiding the real mistake — the null itself — behind a
+// message the model cannot act on. anyOf is the only combinator Chord's tool
+// schemas use to express a required group; a "not" branch states the opposite
+// (a forbidden combination) and is never read here.
+func mandatoryFields(schema map[string]any) map[string]bool {
+	fields := make(map[string]bool)
+	for _, key := range requiredFields(schema["required"]) {
+		fields[key] = true
+	}
+	for _, branch := range schemaBranches(schema["anyOf"]) {
+		for _, key := range requiredFields(branch["required"]) {
+			fields[key] = true
+		}
+	}
+	return fields
+}
+
+// schemaBranches normalizes a combinator's branch list. Schemas written in Go
+// use []map[string]any; the same document decoded from JSON arrives as []any.
+func schemaBranches(raw any) []map[string]any {
+	switch branches := raw.(type) {
+	case []map[string]any:
+		return branches
+	case []any:
+		out := make([]map[string]any, 0, len(branches))
+		for _, branch := range branches {
+			if object, ok := branch.(map[string]any); ok {
+				out = append(out, object)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func requiredFields(raw any) []string {

@@ -39,6 +39,15 @@ func (CompleteTool) Description() string {
 // result_type together with exactly one of result/result_ref. Expressing the
 // pairing structurally lets the model see the constraint while constructing
 // arguments; the runtime validation stays as the fallback.
+//
+// Both alternatives need "not": JSON Schema has no positive spelling for
+// "none of these fields" or "exactly one of these two", and dropping the
+// clauses would leave a summary-only alternative that every argument object
+// satisfies, making the whole group vacuous. The keyword therefore depends on
+// provider schema conversion filtering out what the target API cannot express
+// (Gemini's Schema has no "not" field, and an unconverted one fails the whole
+// request); losing it there costs only the structural hint, since the field
+// descriptions state the same rule and the completion path enforces it.
 func (CompleteTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",

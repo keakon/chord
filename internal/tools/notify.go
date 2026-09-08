@@ -127,28 +127,37 @@ func (t *NotifyTool) Parameters() map[string]any {
 			required = append(required, "target_task_id")
 		}
 		properties["grant_write_scope"] = map[string]any{
-			"type":        "object",
-			"description": "Add paths to the target worker's expected_write_scope before delivering a plain targeted message. Requires target_task_id and cannot be combined with message_type=response. Paths are only added; read_only and verification_commands cannot change. Use this instead of cancelling and re-delegating work for a missing path.",
-			"properties": map[string]any{
-				"files":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-				"path_prefix": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-				"modules":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-			},
+			"type":                 "object",
+			"description":          "Add paths to the target worker's expected_write_scope before delivering a plain targeted message. Requires target_task_id and cannot be combined with message_type=response. Paths are only added; read_only and verification_commands cannot change. Use this instead of cancelling and re-delegating work for a missing path.",
+			"properties":           writeScopePathProperties(),
 			"additionalProperties": false,
 		}
 	}
-	return map[string]any{
-		"type":       "object",
-		"properties": properties,
-		"required":   required,
-		"not": map[string]any{
+	params := map[string]any{
+		"type":                 "object",
+		"properties":           properties,
+		"required":             required,
+		"additionalProperties": false,
+	}
+	if t.allowTarget {
+		// A scope grant widens a plain targeted message and has no meaning on a
+		// structured reply. JSON Schema has no positive spelling for "these two
+		// fields must not appear together", so the constraint stays a "not" and
+		// relies on provider schema conversion dropping keywords the target API
+		// cannot represent (Gemini's Schema has no "not" field, and an
+		// unconverted one fails the whole request). Execute rejects the same
+		// combination at runtime, and both property descriptions state it, so a
+		// provider that drops the clause loses nothing but the structural hint.
+		// Roles without grant_write_scope omit it entirely: the property cannot
+		// appear there, which would make the clause vacuous.
+		params["not"] = map[string]any{
 			"required": []string{"message_type", "grant_write_scope"},
 			"properties": map[string]any{
 				"message_type": map[string]any{"enum": []string{"response"}},
 			},
-		},
-		"additionalProperties": false,
+		}
 	}
+	return params
 }
 
 func (NotifyTool) IsReadOnly() bool { return false }

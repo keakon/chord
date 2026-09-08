@@ -100,6 +100,14 @@ func TestNotifyParametersMatchRoleCapabilities(t *testing.T) {
 			if got := properties["message_type"].(map[string]any)["enum"].([]string); !slices.Equal(got, tc.messageType) {
 				t.Fatalf("message types = %v, want %v", got, tc.messageType)
 			}
+			// The clause forbidding a scope grant on a structured reply is
+			// only carried by roles that can actually grant scope. Emitting it
+			// for an owner-only role would ship a keyword some providers
+			// cannot represent in exchange for a constraint that names a
+			// property the role's schema does not even declare.
+			if _, restricted := params["not"]; restricted != tc.target {
+				t.Fatalf("grant/response exclusion present = %t, want %t", restricted, tc.target)
+			}
 		})
 	}
 }

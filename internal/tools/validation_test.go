@@ -214,6 +214,75 @@ func TestNullRequiredFieldStillRejected(t *testing.T) {
 	}
 }
 
+// TestNullFieldOfAnyOfRequiredGroupStillRejected pins that a property named by
+// an anyOf alternative's "required" is treated as required for the null-drop
+// rule. Schemas offering alternative argument spellings can only express their
+// mandatory fields through anyOf, so dropping an explicit null there would
+// replace an accurate type error with a report about a field the model did
+// supply.
+func TestNullFieldOfAnyOfRequiredGroupStillRejected(t *testing.T) {
+	tool := validationStubTool{
+		name: "SaveArtifact",
+		schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"filename":    map[string]any{"type": "string"},
+				"content":     map[string]any{"type": "string"},
+				"result_type": map[string]any{"type": "string"},
+				"result":      map[string]any{"type": "object"},
+				"mode":        map[string]any{"type": "string"},
+			},
+			"anyOf": []map[string]any{
+				{"required": []string{"filename", "content"}},
+				{"required": []string{"result_type", "result"}},
+			},
+			"additionalProperties": false,
+		},
+	}
+	for _, tc := range []struct {
+		raw  string
+		want string
+	}{
+		{raw: `{"filename":null,"content":"body"}`, want: "args.filename must be a string"},
+		{raw: `{"result_type":"sample","result":null}`, want: "args.result must be an object"},
+	} {
+		err := ValidateToolArgs(tool, json.RawMessage(tc.raw))
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("ValidateToolArgs(%s) = %v, want %q", tc.raw, err, tc.want)
+		}
+	}
+	// Properties no required group names keep the tolerant null handling.
+	raw := json.RawMessage(`{"filename":"report.md","content":"body","mode":null}`)
+	if err := ValidateToolArgs(tool, raw); err != nil {
+		t.Fatalf("ValidateToolArgs = %v, want null optional field tolerated", err)
+	}
+	sanitized, ignored, err := SanitizeUnknownArgs(tool, raw)
+	if err != nil {
+		t.Fatalf("SanitizeUnknownArgs = %v", err)
+	}
+	want := []message.IgnoredToolArg{{Path: "args.mode", ValueJSON: "null", Reason: message.IgnoredToolArgReasonNull}}
+	if !reflect.DeepEqual(ignored, want) {
+		t.Fatalf("ignored = %#v, want %#v", ignored, want)
+	}
+	if strings.Contains(string(sanitized), "mode") {
+		t.Fatalf("sanitized args still carry the null field: %s", sanitized)
+	}
+}
+
+// TestSaveArtifactRejectsExplicitNullResult pins the same rule on the real
+// schema: the null reaches the type check instead of being stripped into a
+// report that the field is missing.
+func TestSaveArtifactRejectsExplicitNullResult(t *testing.T) {
+	err := ValidateToolArgs(SaveArtifactTool{}, json.RawMessage(`{"result_type":"sample","result":null}`))
+	if err == nil || !strings.Contains(err.Error(), "args.result must be an object") {
+		t.Fatalf("err = %v, want the explicit null reported as a wrong type", err)
+	}
+	if err := ValidateToolArgs(ReadArtifactTool{}, json.RawMessage(`{"path":null}`)); err == nil ||
+		!strings.Contains(err.Error(), "args.path must be a string") {
+		t.Fatalf("err = %v, want the explicit null reported as a wrong type", err)
+	}
+}
+
 func TestSanitizeUnknownArgsRemovesUnrecognizedFields(t *testing.T) {
 	tool := validationStubTool{
 		name: "Read",
@@ -494,8 +563,8 @@ func TestGrepPluralPatternsToleratedAsAlternation(t *testing.T) {
 	if err := json.Unmarshal(raw, &a); err != nil {
 		t.Fatalf("grepArgs decode = %v", err)
 	}
-	if a.Pattern != "func compactTextSnippet|CompactionAnchorsOpenTag|CompactionAnchorsSection" {
-		t.Fatalf("Pattern = %q, want alternation of the plural list", a.Pattern)
+	if a.Pattern != "(?:func compactTextSnippet)|(?:CompactionAnchorsOpenTag|CompactionAnchorsSection)" {
+		t.Fatalf("Pattern = %q, want grouped alternation of the plural list", a.Pattern)
 	}
 	if len(a.Paths) != 1 || a.Paths[0] != "internal" {
 		t.Fatalf("Paths = %v, want the aliased path decoded", a.Paths)

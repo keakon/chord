@@ -164,7 +164,7 @@ func shellReadOnlyCommandAllowed(args json.RawMessage) bool {
 		return false
 	}
 	command := strings.TrimSpace(parsed.Command)
-	if command == "" || containsShellMetachar(command) {
+	if command == "" || containsShellConstruct(command) {
 		return false
 	}
 	fields := strings.Fields(command)
@@ -189,14 +189,27 @@ func shellReadOnlyCommandAllowed(args json.RawMessage) bool {
 	}
 }
 
-func containsShellMetachar(command string) bool {
-	for _, r := range command {
-		switch r {
-		case '|', '&', ';', '>', '<', '$', '`', '\\', '(', ')', '*', '?', '[', ']', '{', '}', '\n', '\r':
-			return true
-		}
-	}
-	return false
+// shellCommandChainingCharacters are the constructs that turn one command into
+// a different or additional one: chaining, command substitution, redirection,
+// and the newlines that start a fresh command. Any string containing one of
+// them cannot be reasoned about as "this single command".
+const shellCommandChainingCharacters = ";|&`$><\n\r"
+
+// shellArgumentExpansionCharacters are the constructs the shell expands within
+// a single command's own arguments: escapes, grouping, globs, and brace
+// expansion. They cannot introduce a second command by themselves, which is why
+// a delegator's verification declaration (ValidateVerificationCommands) may
+// contain them — it authorizes that exact string — while
+// shellReadOnlyCommandAllowed refuses them, because for `ls`, `cat` and
+// friends the expanded argument list is what decides which files the command
+// actually touches.
+const shellArgumentExpansionCharacters = `\()*?[]{}`
+
+// containsShellConstruct reports whether a command carries any shell syntax
+// beyond a plain word list, so it cannot be classified from its first words
+// alone.
+func containsShellConstruct(command string) bool {
+	return strings.ContainsAny(command, shellCommandChainingCharacters+shellArgumentExpansionCharacters)
 }
 
 func (t ShellTool) Description() string {

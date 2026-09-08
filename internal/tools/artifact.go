@@ -121,7 +121,11 @@ const (
 	MaxInlineResultBytes    = 32 * 1024
 )
 
-func canonicalResultObject(resultType string, raw json.RawMessage, maxBytes int) (string, []byte, error) {
+// canonicalResultObject validates a typed result and returns its canonical
+// encoding: the trimmed result type plus the re-marshalled object with a
+// trailing newline. The size ceiling is maxImmutableResultBytes, the limit of
+// the store the canonical form is written to.
+func canonicalResultObject(resultType string, raw json.RawMessage) (string, []byte, error) {
 	resultType = strings.TrimSpace(resultType)
 	if resultType == "" {
 		return "", nil, fmt.Errorf("result_type is required")
@@ -142,8 +146,8 @@ func canonicalResultObject(resultType string, raw json.RawMessage, maxBytes int)
 		return "", nil, fmt.Errorf("canonicalize result: %w", err)
 	}
 	canonical = append(canonical, '\n')
-	if maxBytes > 0 && len(canonical) > maxBytes {
-		return "", nil, fmt.Errorf("result exceeds maximum size %d bytes", maxBytes)
+	if len(canonical) > maxImmutableResultBytes {
+		return "", nil, fmt.Errorf("result exceeds maximum size %d bytes", maxImmutableResultBytes)
 	}
 	return resultType, canonical, nil
 }
@@ -154,7 +158,7 @@ func resultRefID(resultType, digest string) string {
 }
 
 func SaveImmutableResult(sessionDir, resultType string, raw json.RawMessage) (ResultRef, json.RawMessage, error) {
-	resultType, canonical, err := canonicalResultObject(resultType, raw, maxImmutableResultBytes)
+	resultType, canonical, err := canonicalResultObject(resultType, raw)
 	if err != nil {
 		return ResultRef{}, nil, err
 	}
@@ -315,9 +319,12 @@ func (SaveArtifactTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 	content := strings.TrimSpace(args.Content)
 	rawResult := bytes.TrimSpace(args.Result)
 	// A present-but-invalid result (including explicit JSON null) counts as
-	// provided: it falls through to canonicalResultObject's object check so
-	// the caller sees "result must be a JSON object" instead of a misleading
-	// "result is required".
+	// provided, so it falls through to canonicalResultObject's object check
+	// instead of being reported as an absent result. Schema validation gets
+	// there first for a model-issued call — the anyOf groups in Parameters()
+	// mark result as required, so an explicit null is rejected as a wrong type
+	// rather than dropped as an omission — and this check is what an
+	// unvalidated direct call falls back on.
 	resultProvided := len(rawResult) > 0
 	if args.ResultType != "" || resultProvided {
 		if strings.TrimSpace(args.Filename) != "" || content != "" || strings.TrimSpace(args.Mode) != "" {

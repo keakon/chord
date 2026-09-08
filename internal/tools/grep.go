@@ -26,9 +26,12 @@ type GrepTool struct {
 }
 
 type grepArgs struct {
-	Pattern         string   `json:"pattern"`
-	Paths           []string `json:"paths,omitempty"`
-	Includes        []string `json:"includes,omitempty"`
+	Pattern  string   `json:"pattern"`
+	Paths    []string `json:"paths,omitempty"`
+	Includes []string `json:"includes,omitempty"`
+	// LiteralPatterns are the supplied patterns that were not valid regexes and
+	// were quoted into literal text, in the order they were given.
+	LiteralPatterns []string `json:"-"`
 	PathsCoerced    bool     `json:"-"`
 	IncludesCoerced bool     `json:"-"`
 }
@@ -88,12 +91,74 @@ func (a *grepArgs) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		return fmt.Errorf("includes: %w", err)
 	}
-	a.Pattern = strings.Join(pattern, "|")
+	a.Pattern, a.LiteralPatterns = grepPatternAlternation(pattern)
 	a.Paths = paths
 	a.Includes = includes
 	a.PathsCoerced = pathsCoerced
 	a.IncludesCoerced = includesCoerced
 	return nil
+}
+
+// grepPatternAlternation combines the supplied patterns into the single regexp
+// source meaning "a line matches when any of them does", and reports which of
+// them had to be searched as literal text. It is the one place that decides
+// what a list of patterns means: both the plural alias shaper (which runs at
+// validation time) and grepArgs decoding call it, so the schema-visible value
+// and the executed pattern can never drift apart.
+//
+// Each element is wrapped in a non-capturing group before joining, so the
+// alternation binds per element and an inline flag group such as "(?i)" stays
+// scoped to the pattern that carries it instead of leaking into its
+// neighbours. Empty elements are dropped: a bare alternation arm matches every
+// line, which would report arbitrary lines of the whole tree as matches.
+// Elements that do not compile are quoted individually, so one unparseable
+// pattern (typically pasted source such as "func Foo(") degrades to a literal
+// search of itself while the remaining elements keep their regex meaning.
+//
+// The combined source is empty when no usable pattern remains; callers report
+// that as a missing pattern.
+func grepPatternAlternation(patterns []string) (combined string, literal []string) {
+	parts := make([]string, 0, len(patterns))
+	for _, pattern := range patterns {
+		if pattern == "" {
+			continue
+		}
+		source := pattern
+		if _, err := regexp.Compile(source); err != nil {
+			source = regexp.QuoteMeta(source)
+			literal = append(literal, pattern)
+		}
+		parts = append(parts, source)
+	}
+	switch len(parts) {
+	case 0:
+		return "", nil
+	case 1:
+		// A lone pattern needs no grouping: keeping the caller's own spelling
+		// keeps search logs and error text showing what was actually written.
+		return parts[0], literal
+	}
+	for i, part := range parts {
+		parts[i] = "(?:" + part + ")"
+	}
+	return strings.Join(parts, "|"), literal
+}
+
+// grepLiteralFallbackNote describes which patterns were searched as literal
+// text, or returns an empty string when every pattern compiled as a regex.
+func grepLiteralFallbackNote(literal []string) string {
+	switch len(literal) {
+	case 0:
+		return ""
+	case 1:
+		return fmt.Sprintf("pattern %q was invalid regex; searched as literal text", literal[0])
+	default:
+		quoted := make([]string, 0, len(literal))
+		for _, pattern := range literal {
+			quoted = append(quoted, fmt.Sprintf("%q", pattern))
+		}
+		return "patterns " + strings.Join(quoted, ", ") + " were invalid regex; searched as literal text"
+	}
 }
 
 const (
@@ -165,10 +230,12 @@ func (GrepTool) argumentAliases() map[string]string {
 // shapeAliasArgument implements aliasArgumentValueShaper for the plural
 // "patterns" alias: a list of patterns means "match a line when any of them
 // matches", which for a line-oriented search is exactly the alternation of the
-// individual regexes. A non-empty list of strings is joined with "|"; anything
-// else (a scalar, an empty list, a non-string element) is left untouched so
-// ordinary type validation reports it instead of guessing. The shaper only
-// fires for the alias key as written by the model: the canonical "pattern"
+// individual regexes built by grepPatternAlternation. A list of strings is
+// collapsed into that single source; anything else (a scalar, an empty list, a
+// non-string element) is left untouched so ordinary type validation reports it
+// instead of guessing. A list whose entries are all empty strings collapses to
+// an empty pattern, which the executor reports as a missing pattern. The shaper
+// only fires for the alias key as written by the model: the canonical "pattern"
 // field is never shaped and keeps its declared single-string type.
 func (GrepTool) shapeAliasArgument(aliasKey string, value any) (any, bool) {
 	if aliasKey != "patterns" {
@@ -186,7 +253,8 @@ func (GrepTool) shapeAliasArgument(aliasKey string, value any) (any, bool) {
 		}
 		parts = append(parts, part)
 	}
-	return strings.Join(parts, "|"), true
+	combined, _ := grepPatternAlternation(parts)
+	return combined, true
 }
 
 func (t GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
@@ -202,12 +270,15 @@ func (t GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		return "", fmt.Errorf("pattern is required")
 	}
 
+	// grepPatternAlternation already quoted every element that is not a valid
+	// regex, so a failure here is the combined expression exceeding regexp's
+	// own limits. Report it instead of quoting the whole alternation, which
+	// would search for a literal string no file can contain.
 	re, err := regexp.Compile(a.Pattern)
-	literalFallback := false
 	if err != nil {
-		re = regexp.MustCompile(regexp.QuoteMeta(a.Pattern))
-		literalFallback = true
+		return "", fmt.Errorf("compile search pattern: %w", err)
 	}
+	literalNote := grepLiteralFallbackNote(a.LiteralPatterns)
 
 	var matches []string
 	var outputBytes int
@@ -265,8 +336,8 @@ func (t GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	if len(matches) == 0 {
 		logSlowSearch("Grep", searchLabel, a.Pattern, filter, startedAt, "scanned_files", int(scannedFiles), 0, truncated)
 		msg := "No matches found."
-		if literalFallback {
-			msg = "No matches found. (pattern was invalid regex; searched as literal text)"
+		if literalNote != "" {
+			msg = "No matches found. (" + literalNote + ")"
 		}
 		msg += " If the symbol or phrase is expected, try alternate naming, a narrower literal, or broaden the search scope (paths/includes) before assuming absence."
 		return prependNotes(notes, msg), nil
@@ -277,8 +348,8 @@ func (t GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	}
 
 	result := strings.Join(matches, "\n")
-	if literalFallback {
-		result = "Note: pattern was invalid regex; searched as literal text.\n" + result
+	if literalNote != "" {
+		result = "Note: " + literalNote + ".\n" + result
 	}
 	result = prependNotes(notes, result)
 	if truncated || len(matches) == maxGrepMatches || len(result) >= maxGrepOutputBytes {

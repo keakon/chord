@@ -34,6 +34,20 @@ type WriteScope struct {
 	VerificationCommands []string `json:"verification_commands,omitempty"`
 }
 
+// writeScopePathProperties returns the schema for the path lists a write scope
+// declares. Delegation states them up front as expected_write_scope and notify
+// adds to them later as grant_write_scope; both name the same three lists, so
+// they are built here rather than spelled out twice — a model told one shape
+// and then the other would have to guess which spelling the runtime honors.
+// The map is freshly allocated because callers extend their own copy.
+func writeScopePathProperties() map[string]any {
+	return map[string]any{
+		"files":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+		"path_prefix": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+		"modules":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+	}
+}
+
 func (s WriteScope) Normalized() WriteScope {
 	return WriteScope{
 		Files:                dedupeTrimmedStrings(s.Files),
@@ -62,21 +76,22 @@ func (s WriteScope) AllowsCommand(cmd string) bool {
 	return false
 }
 
-// shellControlCharacters are the constructs that turn one authorized command
-// into an arbitrary one. A declaration containing any of them is rejected at
-// delegation time, so the literal match in AllowsCommand cannot be widened by
-// chaining, substitution, or redirection hidden inside the declaration itself.
-const shellControlCharacters = ";|&`$><\n\r"
-
 // ValidateVerificationCommands rejects declarations that would smuggle
-// arbitrary execution past the literal match.
+// arbitrary execution past the literal match. The rejected set is
+// shellCommandChainingCharacters: exactly the constructs that turn one
+// authorized command into an arbitrary one, so the literal match in
+// AllowsCommand cannot be widened by chaining, substitution, or redirection
+// hidden inside the declaration itself. Argument-level expansion is not
+// rejected here — a glob or brace only varies the arguments of the one command
+// the delegator vouched for — which is where this differs from the stricter
+// read-only classifier in shell.go.
 func ValidateVerificationCommands(commands []string) error {
 	for _, cmd := range commands {
 		trimmed := strings.TrimSpace(cmd)
 		if trimmed == "" {
 			return fmt.Errorf("verification_commands must not contain empty entries")
 		}
-		if i := strings.IndexAny(trimmed, shellControlCharacters); i >= 0 {
+		if i := strings.IndexAny(trimmed, shellCommandChainingCharacters); i >= 0 {
 			return fmt.Errorf("verification command %q contains %q: declare each command separately, without chaining, substitution, or redirection",
 				trimmed, string(trimmed[i]))
 		}
@@ -238,6 +253,14 @@ func (t *DelegateTool) Parameters() map[string]any {
 		sb.WriteByte('\n')
 	}
 
+	scopeProperties := writeScopePathProperties()
+	scopeProperties["read_only"] = map[string]any{"type": "boolean"}
+	scopeProperties["verification_commands"] = map[string]any{
+		"type":        "array",
+		"description": "Commands this task may run, matched literally. A scoped task cannot otherwise execute anything, so without this it can neither build nor test its own work and you have to verify it yourself. List the exact build/lint/test commands for this task (for example \"go build ./...\", \"go test ./internal/agent\"); one command per entry, no chaining, redirection, or substitution.",
+		"items":       map[string]any{"type": "string"},
+	}
+
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -254,19 +277,9 @@ func (t *DelegateTool) Parameters() map[string]any {
 				"description": "Optional semantic key for duplicate detection. Use a concise stable identifier for the same deliverable, not for unrelated new work.",
 			},
 			"expected_write_scope": map[string]any{
-				"type":        "object",
-				"description": "Required declaration of what this task may do, used for concurrency guardrails. Set read_only=true for research-only tasks; otherwise declare at least one of files, path_prefix, or modules. An undeclared scope would have to run exclusively against every other writing task, so it is rejected instead: declare the narrowest scope that covers the task to keep independent delegates running in parallel.",
-				"properties": map[string]any{
-					"files":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-					"path_prefix": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-					"modules":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-					"read_only":   map[string]any{"type": "boolean"},
-					"verification_commands": map[string]any{
-						"type":        "array",
-						"description": "Commands this task may run, matched literally. A scoped task cannot otherwise execute anything, so without this it can neither build nor test its own work and you have to verify it yourself. List the exact build/lint/test commands for this task (for example \"go build ./...\", \"go test ./internal/agent\"); one command per entry, no chaining, redirection, or substitution.",
-						"items":       map[string]any{"type": "string"},
-					},
-				},
+				"type":                 "object",
+				"description":          "Required declaration of what this task may do, used for concurrency guardrails. Set read_only=true for research-only tasks; otherwise declare at least one of files, path_prefix, or modules. An undeclared scope would have to run exclusively against every other writing task, so it is rejected instead: declare the narrowest scope that covers the task to keep independent delegates running in parallel.",
+				"properties":           scopeProperties,
 				"additionalProperties": false,
 			},
 			"agent_type": map[string]any{
