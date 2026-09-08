@@ -561,10 +561,11 @@ func (a *MainAgent) buildWaitingMainExpiryAlertMailbox(sub *SubAgent, record *Du
 		OwnerTaskID:  ownerTaskID,
 		InReplyTo:    inReplyTo,
 		Kind:         SubAgentMailboxKindRiskAlert,
+		Subtype:      agentMessageSubtypeWaitingExpiry,
 		Priority:     SubAgentMailboxPriorityInterrupt,
 		Summary:      summary,
 		Payload: fmt.Sprintf(
-			"SubAgent task was abandoned because its wait for a main-agent reply expired and the work was not completed.\n- task_id: %s\n- agent_id: %s\n- required_action: re-delegate the work or explicitly resume the task; the pending agent request for this task is now expired, so a later reply to it will be rejected.",
+			"SubAgent task was abandoned because its wait for a main-agent reply expired and the work was not completed.\n- task_id: %s\n- agent_id: %s\n- required_action: re-delegate the work; the pending agent request for this task is now expired, so a later reply to it will be rejected.",
 			taskID, agentID,
 		),
 		RequiresAck: false,

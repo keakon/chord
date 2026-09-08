@@ -156,6 +156,11 @@ func childWriteScopeWithinParent(parent, child tools.WriteScope, baseDir string)
 	if parent.Empty() {
 		return true
 	}
+	for _, command := range child.VerificationCommands {
+		if !parent.AllowsCommand(command) {
+			return false
+		}
+	}
 	if parent.ReadOnly {
 		return child.ReadOnly
 	}
@@ -562,7 +567,7 @@ func (a *MainAgent) handleAgentDone(evt Event) {
 		InReplyTo:    replyMessageID,
 		Kind:         SubAgentMailboxKindCompleted,
 		MessageType:  AgentMessageTypeNotice,
-		Subtype:      "task_completion",
+		Subtype:      agentMessageSubtypeTaskCompletion,
 		Priority:     SubAgentMailboxPriorityUrgent,
 		Summary:      result.Summary,
 		Payload:      result.Summary,

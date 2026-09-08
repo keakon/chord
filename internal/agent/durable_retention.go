@@ -155,6 +155,10 @@ func compactSubAgentMailboxLogs(sessionDir string, msgs []SubAgentMailboxMessage
 	if len(msgs) < mailboxCompactionThreshold {
 		return nil
 	}
+	records, err := loadDurableTaskRecords(sessionDir)
+	if err != nil {
+		return fmt.Errorf("load task records for mailbox retention: %w", err)
+	}
 	latestProgress := make(map[string]int)
 	for i, msg := range msgs {
 		if msg.Kind == SubAgentMailboxKindProgress {
@@ -183,6 +187,11 @@ func compactSubAgentMailboxLogs(sessionDir string, msgs []SubAgentMailboxMessage
 			continue
 		}
 		if i >= keepConsumedFrom {
+			kept = append(kept, msg)
+		} else if rec := records[msg.TaskID]; rec != nil && rec.Attempt == msg.Attempt && terminalMailboxOutcome(msg) != "" {
+			// Keep the current attempt's consumed notification and its ack as
+			// proof of delivery, even if the registry's settlement mirror lags
+			// the journal. Older attempts and archived tasks can age out.
 			kept = append(kept, msg)
 		}
 	}

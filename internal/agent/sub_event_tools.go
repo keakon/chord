@@ -456,14 +456,20 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 		return
 	}
 
+	if s.pendingComplete != nil {
+		complete := s.pendingComplete
+		callID := s.pendingCompleteCallID
+		s.pendingComplete = nil
+		s.pendingCompleteCallID = ""
+		if err := s.finishCompletion(callID, complete); err != nil {
+			s.appendCompleteToolResult(callID, "Completion rejected: "+err.Error())
+			s.retryCompletionVerification(err)
+		}
+		return
+	}
+
 	outstandingJoinChildren := s.parent.outstandingJoinChildTaskIDs(s.taskID)
 	if len(outstandingJoinChildren) > 0 {
-		if s.pendingComplete != nil {
-			s.appendCompleteToolResult(s.pendingCompleteCallID, deferredCompleteResult(len(outstandingJoinChildren)))
-			s.setPendingCompleteIntent(s.pendingComplete)
-			s.pendingComplete = nil
-			s.pendingCompleteCallID = ""
-		}
 		if s.pendingEscalate != "" {
 			reason := s.pendingEscalate
 			s.pendingEscalate = ""
@@ -484,38 +490,6 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 	}
 	s.clearPendingCompleteIntent()
 
-	// If Complete was co-returned, trigger EventAgentDone now.
-	if s.pendingComplete != nil {
-		complete := s.pendingComplete
-		if pending := s.takePendingUserMessagesForContinuation(); len(pending) > 0 {
-			s.appendCompleteToolResult(s.pendingCompleteCallID, "Completion deferred: received new user input before completion.")
-			s.pendingComplete = nil
-			s.pendingCompleteCallID = ""
-			// Deferred context appends drained at this batch-closure LLM
-			// boundary precede the pending user input and the next snapshot.
-			s.drainContextAppendsBeforeTurn()
-			s.appendPendingUserMessages(pending)
-			s.asyncCallLLMWithFlightMarked(s.turn, s.ctxMgr.Snapshot())
-			return
-		}
-		if err := s.validateCompletionVerification(complete.Envelope); err != nil {
-			s.appendCompleteToolResult(s.pendingCompleteCallID, "Completion rejected: "+err.Error())
-			s.pendingComplete = nil
-			s.pendingCompleteCallID = ""
-			s.retryCompletionVerification(err)
-			return
-		}
-		complete = s.enrichCompletionResult(complete)
-		s.appendCompleteToolResult(s.pendingCompleteCallID, complete.Summary, complete.Envelope.VerificationRecords)
-		s.pendingComplete = nil
-		s.pendingCompleteCallID = ""
-		s.clearPendingCompleteIntent()
-		s.sendEvent(Event{
-			Type:    EventAgentDone,
-			Payload: complete,
-		})
-		return
-	}
 	if s.pendingEscalate != "" {
 		reason := s.pendingEscalate
 		s.pendingEscalate = ""

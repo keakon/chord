@@ -2517,6 +2517,7 @@ func (a *MainAgent) handleAgentError(evt Event) {
 			OwnerTaskID:  sub2.OwnerTaskID(),
 			InReplyTo:    firstReplyMessageID(sub2),
 			Kind:         SubAgentMailboxKindRiskAlert,
+			Subtype:      agentMessageSubtypeTaskFailure,
 			Priority:     SubAgentMailboxPriorityInterrupt,
 			Summary:      failureSummary,
 			Payload: fmt.Sprintf(

@@ -19,10 +19,8 @@ type StructuredSubAgentMessenger interface {
 	NotifySubAgentMessage(ctx context.Context, request AgentResponseRequest) (TaskHandle, error)
 }
 
-// ScopeGrantingSubAgentMessenger delivers a targeted message together with a
-// widening of the target task's write scope. A running task's scope is fixed at
-// delegation time, so without this the only way to hand a worker one more file
-// is to cancel it and re-delegate the whole task.
+// ScopeGrantingSubAgentMessenger widens a task's path authority before
+// delivering a plain targeted message.
 type ScopeGrantingSubAgentMessenger interface {
 	NotifySubAgentWithScopeGrant(ctx context.Context, taskID, message, kind string, grant WriteScope) (TaskHandle, error)
 }
@@ -104,13 +102,21 @@ func (t *NotifyTool) Parameters() map[string]any {
 			"description": "Optional message kind hint such as progress, clarification, correction, or constraint_update.",
 		},
 		"message_type": map[string]any{
-			"type": "string", "enum": []string{"progress", "notice", "response"},
-			"description": "Optional communication category. Owner notifications support progress/notice; a targeted response uses message, kind, target_task_id, and correlation_id only.",
+			"type":        "string",
+			"description": "Owner notifications support progress/notice. A targeted response requires message_type=response and correlation_id, and accepts message/kind but not subtype, payload, or grant_write_scope. Omit message_type for a plain targeted message.",
 		},
-		"subtype":        map[string]any{"type": "string", "description": "Optional application-defined subtype. Runtime does not interpret it."},
-		"correlation_id": map[string]any{"type": "string", "description": "Optional application correlation ID for owner-visible notices."},
-		"payload":        map[string]any{"type": "object", "description": "Optional JSON object payload, limited to 32 KiB. Runtime does not interpret business fields."},
+		"correlation_id": map[string]any{"type": "string", "description": "Required for message_type=response: use the pending request's correlation_id. Omit for plain targeted messages. Optional for owner-visible notices."},
 	}
+	messageTypes := []string{"response"}
+	if t.allowOwner {
+		messageTypes = []string{"progress", "notice"}
+		if t.allowTarget {
+			messageTypes = append(messageTypes, "response")
+		}
+		properties["subtype"] = map[string]any{"type": "string", "description": "Optional application-defined subtype for an owner notification, not a targeted message."}
+		properties["payload"] = map[string]any{"type": "object", "description": "Optional JSON object for an owner notification, limited to 32 KiB. Not available for targeted messages."}
+	}
+	properties["message_type"].(map[string]any)["enum"] = messageTypes
 	required := []string{"message"}
 	if t.allowTarget {
 		properties["target_task_id"] = map[string]any{
@@ -122,7 +128,7 @@ func (t *NotifyTool) Parameters() map[string]any {
 		}
 		properties["grant_write_scope"] = map[string]any{
 			"type":        "object",
-			"description": "Optional. Add paths to the target worker's expected_write_scope before delivering the message, for when it turns out to need a file you did not declare. Paths are only ever added. Use this instead of cancelling and re-delegating a worker that is already most of the way through its task.",
+			"description": "Add paths to the target worker's expected_write_scope before delivering a plain targeted message. Requires target_task_id and cannot be combined with message_type=response. Paths are only added; read_only and verification_commands cannot change. Use this instead of cancelling and re-delegating work for a missing path.",
 			"properties": map[string]any{
 				"files":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 				"path_prefix": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
@@ -132,9 +138,15 @@ func (t *NotifyTool) Parameters() map[string]any {
 		}
 	}
 	return map[string]any{
-		"type":                 "object",
-		"properties":           properties,
-		"required":             required,
+		"type":       "object",
+		"properties": properties,
+		"required":   required,
+		"not": map[string]any{
+			"required": []string{"message_type", "grant_write_scope"},
+			"properties": map[string]any{
+				"message_type": map[string]any{"enum": []string{"response"}},
+			},
+		},
 		"additionalProperties": false,
 	}
 }
@@ -185,8 +197,32 @@ func (t *NotifyTool) Execute(ctx context.Context, raw json.RawMessage) (string, 
 	if a.Message == "" {
 		return "", fmt.Errorf("message is required")
 	}
+	if a.MessageType == "response" && a.TargetTaskID == "" {
+		return "", fmt.Errorf("message_type=response requires target_task_id and correlation_id")
+	}
+	if a.MessageType != "" && a.MessageType != "progress" && a.MessageType != "notice" && a.MessageType != "response" {
+		return "", fmt.Errorf("message_type must be progress, notice, or response")
+	}
+	if a.GrantScope != nil {
+		if a.TargetTaskID == "" {
+			return "", fmt.Errorf("grant_write_scope requires target_task_id")
+		}
+		if a.MessageType == "response" {
+			return "", fmt.Errorf("grant_write_scope cannot be combined with message_type=response; grant paths with a separate plain targeted notify")
+		}
+		a.GrantScope = new(a.GrantScope.Normalized())
+		if a.GrantScope.ReadOnly || len(a.GrantScope.VerificationCommands) > 0 {
+			return "", fmt.Errorf("grant_write_scope adds paths only; read_only and verification_commands are fixed when the task is delegated")
+		}
+		if a.GrantScope.Empty() {
+			return "", fmt.Errorf("grant_write_scope must add at least one file, path_prefix, or module")
+		}
+	}
 
 	if a.TargetTaskID != "" {
+		if !t.allowTarget {
+			return "", fmt.Errorf("target_task_id is not available in this role")
+		}
 		if a.MessageType == "response" {
 			messenger, ok := t.messenger.(StructuredSubAgentMessenger)
 			if !ok {
@@ -211,10 +247,7 @@ func (t *NotifyTool) Execute(ctx context.Context, raw json.RawMessage) (string, 
 			return string(out), nil
 		}
 		if a.MessageType != "" || a.Subtype != "" || a.CorrelationID != "" || len(a.Payload) != 0 {
-			return "", fmt.Errorf("structured message fields are unavailable with target_task_id until durable owner-to-child delivery is implemented")
-		}
-		if !t.allowTarget {
-			return "", fmt.Errorf("target_task_id is not available in this role")
+			return "", fmt.Errorf("plain targeted notify accepts message and kind; structured replies require message_type=response and correlation_id, without subtype or payload")
 		}
 		if t.messenger == nil {
 			return "", fmt.Errorf("targeted notify is not available")
@@ -226,11 +259,7 @@ func (t *NotifyTool) Execute(ctx context.Context, raw json.RawMessage) (string, 
 			if !ok {
 				return "", fmt.Errorf("grant_write_scope is unavailable")
 			}
-			grant := a.GrantScope.Normalized()
-			if grant.ReadOnly || len(grant.VerificationCommands) > 0 {
-				return "", fmt.Errorf("grant_write_scope adds paths only; read_only and verification_commands are fixed when the task is delegated")
-			}
-			handle, err = granter.NotifySubAgentWithScopeGrant(ctx, a.TargetTaskID, a.Message, a.Kind, grant)
+			handle, err = granter.NotifySubAgentWithScopeGrant(ctx, a.TargetTaskID, a.Message, a.Kind, *a.GrantScope)
 		} else {
 			handle, err = t.messenger.NotifySubAgent(ctx, a.TargetTaskID, a.Message, a.Kind)
 		}

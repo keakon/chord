@@ -429,31 +429,10 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 			})
 			return
 		}
-		if pending := s.takePendingUserMessagesForContinuation(); len(pending) > 0 {
-			s.appendCompleteToolResult(taskCompleteCallID, "Completion deferred: received new user input before completion.")
-			s.appendPendingUserMessages(pending)
-			s.asyncCallLLMWithFlightMarked(s.turn, s.ctxMgr.Snapshot())
-			return
-		}
-		outstandingChildren := s.parent.outstandingJoinChildTaskIDs(s.taskID)
-		if len(outstandingChildren) > 0 {
-			s.appendCompleteToolResult(taskCompleteCallID, deferredCompleteResult(len(outstandingChildren)))
-			s.setPendingCompleteIntent(taskComplete)
-			s.enterWaitingDescendant(deferredCompleteResult(len(outstandingChildren)))
-			return
-		}
-		if err := s.validateCompletionVerification(taskComplete.Envelope); err != nil {
+		if err := s.finishCompletion(taskCompleteCallID, taskComplete); err != nil {
 			s.appendCompleteToolResult(taskCompleteCallID, "Completion rejected: "+err.Error())
 			s.retryCompletionVerification(err)
-			return
 		}
-		s.clearPendingCompleteIntent()
-		taskComplete = s.enrichCompletionResult(taskComplete)
-		s.appendCompleteToolResult(taskCompleteCallID, taskComplete.Summary, taskComplete.Envelope.VerificationRecords)
-		s.sendEvent(Event{
-			Type:    EventAgentDone,
-			Payload: taskComplete,
-		})
 		return
 	}
 

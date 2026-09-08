@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -194,4 +195,123 @@ func TestCompactSubAgentMailboxLogsPreservesUnconsumedAndLatestProgress(t *testi
 	if progressCount != 1 || urgentCount != 10 || consumedCount != 10 {
 		t.Fatalf("compacted counts progress=%d urgent=%d consumed=%d, want 1/10/10", progressCount, urgentCount, consumedCount)
 	}
+}
+
+// TestCompactSubAgentMailboxLogsKeepsTerminalEvidenceForCurrentAttempt pins
+// the retention half of restore's notification coverage: a consumed terminal
+// mailbox older than the sliding window survives compaction while its task
+// record still names the same attempt, so restore can prove the notification
+// was delivered (restoredTerminalNotificationCovered) instead of synthesizing
+// a duplicate. The message and its ack must both survive: the ack is what
+// re-marks it consumed on load, which is what keeps restore from redelivering
+// it. Consumed messages without a matching record age out.
+func TestCompactSubAgentMailboxLogsKeepsTerminalEvidenceForCurrentAttempt(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	if err := os.MkdirAll(filepath.Join(a.sessionDir, "subagents"), 0o700); err != nil {
+		t.Fatalf("mkdir subagents: %v", err)
+	}
+	a.setTaskRecords(map[string]*DurableTaskRecord{
+		"evidence-task": {
+			TaskID:            "evidence-task",
+			State:             string(SubAgentStateCompleted),
+			ResumePolicy:      taskResumePolicyNotify,
+			SettlementDurable: true,
+			Attempt:           1,
+			UpdatedAt:         time.Now(),
+		},
+	})
+	if err := a.persistTaskRegistry(); err != nil {
+		t.Fatalf("persist task registry: %v", err)
+	}
+
+	mailboxFile, err := os.Create(filepath.Join(a.sessionDir, "subagents", "mailbox.jsonl"))
+	if err != nil {
+		t.Fatalf("create mailbox log: %v", err)
+	}
+	mailboxEncoder := json.NewEncoder(mailboxFile)
+	ackFile, err := os.Create(filepath.Join(a.sessionDir, "subagents", "mailbox-acks.jsonl"))
+	if err != nil {
+		_ = mailboxFile.Close()
+		t.Fatalf("create ack log: %v", err)
+	}
+	ackEncoder := json.NewEncoder(ackFile)
+	writeMessage := func(msg SubAgentMailboxMessage) {
+		t.Helper()
+		if err := mailboxEncoder.Encode(msg); err != nil {
+			t.Fatalf("encode mailbox: %v", err)
+		}
+		if err := ackEncoder.Encode(SubAgentMailboxAckRecord{MessageID: msg.MessageID, Outcome: "consumed", AckedAt: time.Now()}); err != nil {
+			t.Fatalf("encode ack: %v", err)
+		}
+	}
+	// evidence-* is this task's attempt-1 completion: the delivery evidence
+	// that must outlive the sliding window. filler-* belongs to a task with no
+	// durable record, so nothing anchors it past the window.
+	for i := range 10 {
+		writeMessage(SubAgentMailboxMessage{
+			MessageID: fmt.Sprintf("evidence-%04d", i),
+			TaskID:    "evidence-task",
+			Attempt:   1,
+			Kind:      SubAgentMailboxKindCompleted,
+			Priority:  SubAgentMailboxPriorityUrgent,
+			Summary:   "task completed",
+		})
+	}
+	for i := range 1490 {
+		writeMessage(SubAgentMailboxMessage{
+			MessageID: fmt.Sprintf("filler-%04d", i),
+			TaskID:    "other-task",
+			Attempt:   1,
+			Kind:      SubAgentMailboxKindCompleted,
+			Priority:  SubAgentMailboxPriorityUrgent,
+			Summary:   "completed",
+		})
+	}
+	if err := mailboxFile.Close(); err != nil {
+		t.Fatalf("close mailbox log: %v", err)
+	}
+	if err := ackFile.Close(); err != nil {
+		t.Fatalf("close ack log: %v", err)
+	}
+
+	msgs, err := loadSubAgentMailboxMessages(a.sessionDir)
+	if err != nil {
+		t.Fatalf("load mailbox messages before compaction: %v", err)
+	}
+	if err := compactSubAgentMailboxLogs(a.sessionDir, msgs); err != nil {
+		t.Fatalf("compactSubAgentMailboxLogs: %v", err)
+	}
+	msgs, err = loadSubAgentMailboxMessages(a.sessionDir)
+	if err != nil {
+		t.Fatalf("load compacted mailbox messages: %v", err)
+	}
+	if len(msgs) != mailboxConsumedHistoryKeep+10 {
+		t.Fatalf("compacted messages = %d, want window %d + evidence 10", len(msgs), mailboxConsumedHistoryKeep)
+	}
+	evidence, filler := 0, 0
+	for _, msg := range msgs {
+		if strings.HasPrefix(msg.MessageID, "evidence-") {
+			evidence++
+			if !msg.Consumed {
+				t.Fatalf("evidence message %s reloaded unconsumed: its ack must survive so restore does not redeliver it", msg.MessageID)
+			}
+		} else if strings.HasPrefix(msg.MessageID, "filler-") {
+			filler++
+			if !msg.Consumed {
+				t.Fatalf("kept filler message %s reloaded unconsumed", msg.MessageID)
+			}
+		}
+	}
+	if evidence != 10 || filler != mailboxConsumedHistoryKeep {
+		t.Fatalf("compacted evidence=%d filler=%d, want evidence 10 and window %d of filler", evidence, filler, mailboxConsumedHistoryKeep)
+	}
+	for _, msg := range msgs {
+		if msg.MessageID == "evidence-0000" {
+			if msg.TaskID != "evidence-task" || msg.Attempt != 1 || msg.Kind != SubAgentMailboxKindCompleted {
+				t.Fatalf("kept evidence = %#v, want the original completed attempt-1 message", msg)
+			}
+			return
+		}
+	}
+	t.Fatal("evidence-0000 was dropped: current-attempt terminal evidence must survive compaction")
 }

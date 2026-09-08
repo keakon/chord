@@ -544,26 +544,10 @@ func (a *MainAgent) loadSessionState(sessionPath string) (*loadedSessionState, e
 	if usageLedgerEventCount == 0 && legacyUsageSnapshotPresent(sessionPath) {
 		log.Warnf("session restore: legacy usage fields found but not migrated; session=%v", filepath.Base(sessionPath))
 	}
-	// The durable task registry plus the settlement repair below is the sole
-	// authority for a terminal task state during restore. The records rebuilt
-	// from loaded subagent states derive their state from the recovery
-	// snapshot, which can lag the registry (a stale "running" snapshot) and
-	// must not flip a settled terminal record back to that derived state.
-	// mergeDurableTaskRecords lets a non-empty extra state win, so re-assert
-	// the terminal states captured from the durable registry after the merge.
-	settledStates := make(map[string]string)
-	for taskID, rec := range loaded.TaskRecords {
-		if rec != nil && isTerminalSubAgentState(SubAgentState(strings.TrimSpace(rec.State))) {
-			settledStates[taskID] = rec.State
-		}
-	}
-	loaded.TaskRecords = mergeDurableTaskRecords(loaded.TaskRecords, buildDurableTaskRecordsFromLoadedStates(loaded.SubAgentStates))
-	for taskID, state := range settledStates {
-		if rec := loaded.TaskRecords[taskID]; rec != nil && rec.State != state {
-			rec.State = state
-			rec.ResumePolicy = durableTaskResumePolicy(SubAgentState(state))
-		}
-	}
+	// Snapshots carry runtime projections, not attempt identity. In particular,
+	// their synthetic attempt 1 must not replace a resumed task's durable
+	// attempt and select an earlier settlement during repair.
+	loaded.TaskRecords = mergeDurableTaskRecords(buildDurableTaskRecordsFromLoadedStates(loaded.SubAgentStates), loaded.TaskRecords)
 	if repairRestoredTaskTree(loaded.TaskRecords) {
 		log.Warnf("repaired inconsistent SubAgent task tree during restore session=%v", sessionPath)
 	}
@@ -850,15 +834,8 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 		}
 		a.enqueueRestoredMailboxMessage(msg)
 	}
-	// A task whose durable record settled terminal but never notified (no
-	// covering completion or risk_alert for the attempt in the mailbox log and
-	// no LastMailboxID naming one) lost its terminal mailbox to the crash
-	// window between the terminal commit and the mailbox delivery. Re-synthesize
-	// the notification (completion for completed tasks; risk_alert for failed
-	// tasks and WaitingMain-expiry cancellations) so the owner's inbox still
-	// receives it after this restore. The scan above suppresses it when the
-	// message is already in the mailbox log, and the synthesized message is
-	// itself persisted, so repeated restores cannot notify twice.
+	// Rebuild notifications missing from committed terminal outcomes. A
+	// prepared mailbox without its settlement is not a terminal outcome.
 	a.restoreSynthesizeUndeliveredTerminalMailboxes(loaded.MailboxMessages)
 	a.refreshSubAgentInboxSummary()
 
@@ -875,30 +852,25 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 // durably persisted (loaded from the mailbox log, or synthesized during
 // restore) into the owner's inbox without re-writing it.
 func (a *MainAgent) enqueueRestoredMailboxMessage(msg SubAgentMailboxMessage) {
+	if terminalMailboxOutcome(msg) != "" {
+		a.subs.mu.RLock()
+		settlement := a.subs.settlements[taskAttemptKey{TaskID: msg.TaskID, Attempt: msg.Attempt}]
+		committed := terminalMailboxMatchesSettlement(msg, settlement)
+		a.subs.mu.RUnlock()
+		if !committed {
+			return
+		}
+	}
 	a.orchestrationMetrics.recordMailboxCreated(msg.MessageID, msg.CreatedAt)
 	a.deliverSubAgentMailbox(msg)
 }
 
-// restoreSynthesizeUndeliveredTerminalMailboxes replays the terminal mailbox
-// (a completion for Completed tasks, a risk_alert for Failed tasks and
-// WaitingMain-expiry cancellations) for every task whose durable record is
-// terminal but whose notification never reached the mailbox log: no covering
-// message for the same task/attempt exists there and the record's LastMailboxID
-// does not name one. handleAgentDone, handleAgentError and the WaitingMain
-// expiry sweep persist their terminal mailbox before the terminal commit, so
-// reaching this path means that write failed, was reverted by an older build,
-// or the process died between the durable write and the apply. Only the expiry
-// sweep queues a risk_alert before cancelling, so among cancelled records only
-// those whose ClosedReason names the WaitingMain expiry are eligible; a user
-// stop or a cascade cancellation never notifies and must not gain a
-// notification from restore. Synthesis is idempotent: the synthesized message
-// is persisted here, the mailbox-log scan suppresses re-synthesis on later
-// restores, and an already-delivered alert that mailbox compaction removed
-// from the log is never re-notified (see restoredTerminalNotificationCovered).
-// When the synthesized message's own persistence fails (degraded double fault)
-// the alert is still delivered to the inbox this run, but a later restart
-// could re-synthesize and notify again — the same accepted trade-off the
-// completion path already carries, so no extra mechanism is added.
+// restoreSynthesizeUndeliveredTerminalMailboxes rebuilds notifications for
+// committed outcomes not covered by the mailbox log. Retention preserves each
+// current settlement's consumed terminal message and ack as delivery evidence.
+// Explicit stops and cascade cancellations do not notify; only expiry does.
+// If synthesis itself cannot persist, this run still delivers the notification,
+// but a restart may repeat it.
 func (a *MainAgent) restoreSynthesizeUndeliveredTerminalMailboxes(mailboxMsgs []SubAgentMailboxMessage) {
 	now := time.Now()
 	a.subs.mu.RLock()
@@ -987,6 +959,7 @@ func (a *MainAgent) buildRestoredTerminalMailboxMessage(rec *DurableTaskRecord, 
 			summary = strings.TrimSpace(completion.Summary)
 		}
 		msg.Kind = SubAgentMailboxKindCompleted
+		msg.Subtype = agentMessageSubtypeTaskCompletion
 		msg.Priority = SubAgentMailboxPriorityUrgent
 		msg.Summary = summary
 		msg.Payload = summary
@@ -997,6 +970,7 @@ func (a *MainAgent) buildRestoredTerminalMailboxMessage(rec *DurableTaskRecord, 
 		msg.Kind = SubAgentMailboxKindRiskAlert
 		msg.Priority = SubAgentMailboxPriorityInterrupt
 		if SubAgentState(strings.TrimSpace(rec.State)) == SubAgentStateFailed {
+			msg.Subtype = agentMessageSubtypeTaskFailure
 			summary := strings.TrimSpace(rec.LastSummary)
 			if summary == "" {
 				summary = "SubAgent task failed"
@@ -1039,64 +1013,12 @@ func recordWasWaitingMainExpiry(rec *DurableTaskRecord) bool {
 	return rec != nil && strings.HasPrefix(strings.TrimSpace(rec.ClosedReason), waitingMainExpiryClosedReasonPrefix)
 }
 
-// restoredTerminalNotificationCovered reports whether the terminal notification
-// of kind for rec's attempt is already accounted for, so restore must not
-// synthesize it again. It is covered when
-//   - a covering message (same kind, same task, same attempt) is still in the
-//     mailbox log: unconsumed entries replay into the owner's inbox above,
-//     consumed entries were already delivered; or
-//   - the record's LastMailboxID references a message the log no longer holds.
-//     Mailbox compaction drops consumed messages (and superseded progress
-//     messages, which can never be the record's last mailbox because the last
-//     progress of a task is always kept), and "consumed" means the message's
-//     content already entered the receiver's context, so re-notifying would
-//     duplicate a delivered notification.
-//
-// A LastMailboxID that is still in the log but names an earlier attempt's
-// message or another kind does not cover: records reused across attempts keep
-// the previous attempt's last mailbox, so the current attempt's terminal
-// notification may still be lost. Synthesis then runs and the in-log scan
-// above is what dedups when the covering message is actually present.
+// A missing LastMailboxID is not delivery evidence: it may belong to an earlier
+// attempt, or to a non-terminal alert. Retention keeps the current settlement's
+// terminal message and ack so coverage can be proven from the mailbox itself.
 func restoredTerminalNotificationCovered(msgs []SubAgentMailboxMessage, rec *DurableTaskRecord, kind SubAgentMailboxKind) bool {
-	taskID := strings.TrimSpace(rec.TaskID)
-	if taskID == "" {
-		return true
-	}
-	if restoredMailboxHasKindForTask(msgs, rec, kind) {
-		return true
-	}
-	lastID := strings.TrimSpace(rec.LastMailboxID)
-	if lastID == "" {
-		return false
-	}
 	for _, msg := range msgs {
-		if strings.TrimSpace(msg.MessageID) == lastID {
-			// The record's last mailbox is still in the log but is not a
-			// covering message (an earlier attempt's message, a progress or a
-			// decision mailbox): stale, so the terminal notification may be
-			// lost and must be synthesized.
-			return false
-		}
-	}
-	// The record's last mailbox is missing from the log: mailbox compaction
-	// removed it after delivery. Treat the terminal notification as covered.
-	return true
-}
-
-// restoredMailboxHasKindForTask reports whether the mailbox log already holds a
-// message of the covering kind for the record's terminal attempt. Messages
-// without an attempt stamp (legacy or synthesized) are treated as covering too
-// so a settled task is never notified twice for the same attempt.
-func restoredMailboxHasKindForTask(msgs []SubAgentMailboxMessage, rec *DurableTaskRecord, kind SubAgentMailboxKind) bool {
-	taskID := strings.TrimSpace(rec.TaskID)
-	if taskID == "" {
-		return true
-	}
-	for _, msg := range msgs {
-		if msg.Kind != kind || strings.TrimSpace(msg.TaskID) != taskID {
-			continue
-		}
-		if msg.Attempt == 0 || msg.Attempt == rec.Attempt {
+		if msg.Kind == kind && terminalMailboxMatchesSettlement(msg, rec.LatestSettlement) {
 			return true
 		}
 	}
@@ -1264,20 +1186,21 @@ func (a *MainAgent) restoreLoadedSubAgents(states []loadedSubAgentState) int {
 			if agentDefName := strings.TrimSpace(state.AgentDefName); agentDefName != "" {
 				rec.AgentDefName = agentDefName
 			}
-			// A restored instance's snapshot-derived state only fills an empty
-			// or non-terminal record state. Once the record is terminal
-			// (tasks.json plus the settlement repair during load) it stays
-			// terminal: the recovery snapshot may still list the instance as
-			// running and must not flip the settled terminal state back to the
-			// non-terminal state it derives.
-			if !isTerminalSubAgentState(SubAgentState(strings.TrimSpace(rec.State))) {
-				rec.State = string(restoreState)
-				rec.ResumePolicy = durableTaskResumePolicy(restoreState)
+			if rec.State != "" {
+				restoreState = SubAgentState(rec.State)
+			}
+			if restoreState == SubAgentStateRunning {
+				restoreState = SubAgentStateIdle
+			}
+			rec.State = string(restoreState)
+			rec.ResumePolicy = durableTaskResumePolicy(restoreState)
+			if rec.LastSummary != "" {
+				restoreSummary = rec.LastSummary
 			}
 			rec.RuntimeParked = true
 			rec.LastSummary = restoreSummary
 			rec.Persistence = state.Persistence
-			if state.PendingCompleteIntent {
+			if state.PendingCompleteIntent && !isTerminalSubAgentState(restoreState) {
 				pending := state.PendingComplete
 				if pending == nil && strings.TrimSpace(state.PendingCompleteSummary) != "" {
 					pending = &AgentResult{Summary: state.PendingCompleteSummary, Envelope: unmarshalCompletionEnvelope(state.PendingCompleteEnvelope)}

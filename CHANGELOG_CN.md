@@ -109,6 +109,8 @@
 
 ### 修复
 
+- 恢复会话时保留委派任务最近一次续跑的状态和已保存结果，不再让较早的子代理快照把任务退回先前的执行轮次。
+- `notify` 只向当前角色展示可用字段，并拒绝仅能向上级汇报的角色发送定向回复。请求回复必须带 `correlation_id`，不接受 `subtype` 或 `payload`，工具参数说明不再引导模型发出无法投递的调用。
 - 侧边栏的 `AGENTS` 区块不再把长列表折叠成一行 `+N more`：info panel 本身支持滚动，所以侧边栏跟踪到的每个 agent 都会渲染出来、滚动即可查看。此前 agent 超过 10 个时尾部会被整个丢弃，一旦排在前面的已完成条目足够多，仍在运行的 worker 就可能被隐藏起来。agent 数量在上游由 `delegation.max_children` 约束，因此展开后的列表仍在面板滚动可覆盖的范围内。
 - 侧边栏 `AGENTS` 列表现在会把正在执行的 SubAgent 排到已完成和等待中的 agent 之前。`sidebarStatusPriority` 之前漏掉了 `"running"` 状态，导致真正在干活的 worker 掉进默认（最低）桶，反而排在已完成 agent **之下**——与「活跃 worker 优先」正好相反。现在 `running` 与 `streaming`/`executing` 同处最高优先级，`error`/`failed` 与 `cancelled` 一起固定在最末；main agent 仍不受自身状态影响、永远排在列表首位。
 - Responses 服务商重新发送工具描述。此前每个 JSON function tool 只声明了名字与参数 schema，整层「每个工具自己的使用规则」在 OpenAI Responses 与 Codex OAuth 传输上被静默丢弃——`todo_write` 的使用时机、`done` 要求的报告结构、`read`/`shell`/`compact_context` 的语义，以及所有 MCP 工具的唯一说明，默认配置下约 17 KB——而 Anthropic 与 Chat Completions 服务商一直正常携带。因此 loop 模式里「按其工具描述中的报告结构」这类指令，指向的是模型根本没收到的文本。freeform `apply_patch` custom tool 仍使用它自己的 Codex 原文描述。由于声明的工具面发生变化，这些服务商上已有的 prompt cache 会失效一次，随后重新填充。

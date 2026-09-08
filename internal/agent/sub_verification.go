@@ -138,9 +138,9 @@ func (s *SubAgent) rejectInvalidCompleteArguments(callID string, cause error, de
 		return
 	}
 	if degraded != nil {
-		if err := s.settleDegradedCompletion(callID, degraded); err == nil {
+		if err := s.finishCompletion(callID, degraded); err == nil {
 			return
-		} else if !errors.Is(err, errDegradedCompletionUnavailable) {
+		} else {
 			// The degraded payload failed a check of its own (an unbacked
 			// verification claim). Report that cause rather than the pairing
 			// error, so the failure names what actually blocked delivery.
@@ -149,34 +149,4 @@ func (s *SubAgent) rejectInvalidCompleteArguments(callID string, cause error, de
 	}
 	s.appendCompleteToolResult(callID, "Completion rejected: "+cause.Error())
 	s.sendEvent(Event{Type: EventAgentError, Payload: fmt.Errorf("completion was rejected after retry: %w", cause)})
-}
-
-// errDegradedCompletionUnavailable reports that the degraded delivery could not
-// be settled here and the caller should fall back to failing the task.
-var errDegradedCompletionUnavailable = errors.New("degraded completion unavailable")
-
-// settleDegradedCompletion delivers a completion whose typed-result group was
-// stripped. It mirrors the normal closure path — verification claims are still
-// validated (honesty about what ran is never degraded), outstanding join
-// children still defer the completion — so the only difference from a regular
-// Complete is the dropped result group, which the envelope records as a
-// remaining limitation.
-func (s *SubAgent) settleDegradedCompletion(callID string, degraded *AgentResult) error {
-	if degraded == nil || degraded.Envelope == nil {
-		return errDegradedCompletionUnavailable
-	}
-	if err := s.validateCompletionVerification(degraded.Envelope); err != nil {
-		return err
-	}
-	if outstanding := s.parent.outstandingJoinChildTaskIDs(s.taskID); len(outstanding) > 0 {
-		s.appendCompleteToolResult(callID, deferredCompleteResult(len(outstanding)))
-		s.setPendingCompleteIntent(degraded)
-		s.enterWaitingDescendant(deferredCompleteResult(len(outstanding)))
-		return nil
-	}
-	s.clearPendingCompleteIntent()
-	degraded = s.enrichCompletionResult(degraded)
-	s.appendCompleteToolResult(callID, degraded.Summary, degraded.Envelope.VerificationRecords)
-	s.sendEvent(Event{Type: EventAgentDone, Payload: degraded})
-	return nil
 }
