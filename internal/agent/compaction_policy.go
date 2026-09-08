@@ -2114,6 +2114,12 @@ func (a *MainAgent) clearContextReductionWrapUpGrace() {
 	a.loopReductionMu.Unlock()
 }
 
+func (a *MainAgent) clearStageCompletionCandidate() {
+	if a != nil {
+		a.stageCompletionCandidateTurnID = 0
+	}
+}
+
 func (a *MainAgent) consumeContextReductionWrapUpGrace(turnID uint64) bool {
 	if a == nil || turnID == 0 {
 		return false
