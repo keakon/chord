@@ -25,6 +25,9 @@ type CompactContextArgs struct {
 	StateFiles        []string `json:"state_files"`
 	PlannedStateFiles []string `json:"planned_state_files"`
 	EvidenceRefs      []string `json:"evidence_refs"`
+	StageID           string   `json:"stage_id"`
+	StageStatus       string   `json:"stage_status"`
+	CheckpointKind    string   `json:"checkpoint_kind"`
 }
 
 // TokenEstimator estimates the input-token cost of a string. Defaults to a
@@ -98,11 +101,20 @@ func (v CompactContextValidator) ParseCompactContextArgs(raw json.RawMessage) (C
 	}
 	args.ActiveObjective = strings.TrimSpace(args.ActiveObjective)
 	args.NextStep = strings.TrimSpace(args.NextStep)
+	args.StageID = strings.TrimSpace(args.StageID)
+	args.StageStatus = strings.TrimSpace(args.StageStatus)
+	args.CheckpointKind = strings.TrimSpace(args.CheckpointKind)
 	if args.ActiveObjective == "" {
 		return CompactContextArgs{}, fmt.Errorf("missing required argument: active_objective")
 	}
 	if args.NextStep == "" {
 		return CompactContextArgs{}, fmt.Errorf("missing required argument: next_step")
+	}
+	if args.StageStatus != "" && !slices.Contains([]string{"active", "candidate", "completed", "blocked", "superseded"}, args.StageStatus) {
+		return CompactContextArgs{}, fmt.Errorf("invalid stage_status %q", args.StageStatus)
+	}
+	if args.CheckpointKind != "" && !slices.Contains([]string{"provisional", "committed"}, args.CheckpointKind) {
+		return CompactContextArgs{}, fmt.Errorf("invalid checkpoint_kind %q", args.CheckpointKind)
 	}
 	var err error
 	if args.Completed, err = validateCompactContextList(args.Completed, 12, "completed"); err != nil {
@@ -144,6 +156,9 @@ func (v CompactContextValidator) ParseCompactContextArgs(raw json.RawMessage) (C
 		{"state_files", strings.Join(args.StateFiles, "\n")},
 		{"planned_state_files", strings.Join(args.PlannedStateFiles, "\n")},
 		{"evidence_refs", strings.Join(args.EvidenceRefs, "\n")},
+		{"stage_id", args.StageID},
+		{"stage_status", args.StageStatus},
+		{"checkpoint_kind", args.CheckpointKind},
 	}
 	texts := make([]string, len(fields))
 	for i, f := range fields {
@@ -393,6 +408,9 @@ func (CompactContextTool) Parameters() map[string]any {
 				"items":       map[string]any{"type": "string", "minLength": 1},
 				"description": "Stable evidence IDs from the checkpoint evidence pack that support completed work or decisions.",
 			},
+			"stage_id":        map[string]any{"type": "string", "description": "Stable identifier for the current work stage."},
+			"stage_status":    map[string]any{"type": "string", "enum": []string{"active", "candidate", "completed", "blocked", "superseded"}, "description": "Whether this stage is still active or is a checkpoint candidate/completed."},
+			"checkpoint_kind": map[string]any{"type": "string", "enum": []string{"provisional", "committed"}, "description": "Provisional reduces context but is not authoritative; committed requires runtime validation."},
 		},
 		"required":             []string{"active_objective", "next_step"},
 		"additionalProperties": false,

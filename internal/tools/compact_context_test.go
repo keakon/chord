@@ -443,3 +443,14 @@ func TestCompactContextTokenBudgetNamesLargestFields(t *testing.T) {
 		t.Fatalf("error = %q, want only the two largest fields named", msg)
 	}
 }
+
+func TestCompactContextRejectsUnknownStageMetadata(t *testing.T) {
+	for _, raw := range []string{
+		`{"active_objective":"a","next_step":"b","stage_status":"done"}`,
+		`{"active_objective":"a","next_step":"b","checkpoint_kind":"authoritative"}`,
+	} {
+		if _, err := testCompactValidator().ParseCompactContextArgs(json.RawMessage(raw)); err == nil {
+			t.Fatalf("expected invalid stage metadata to be rejected: %s", raw)
+		}
+	}
+}

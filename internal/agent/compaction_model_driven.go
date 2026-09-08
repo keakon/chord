@@ -1066,6 +1066,7 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 	stateFiles := renderStateFilesSection(req.Args.StateFiles)
 	plannedStateFiles := renderPlannedStateFilesSection(req.Args.PlannedStateFiles)
 	evidenceRefs := renderEvidenceRefsSection(req.Args.EvidenceRefs)
+	stage := renderModelDrivenStageSection(req.Args.StageID, req.Args.StageStatus, req.Args.CheckpointKind)
 
 	sections := []fallbackSummarySection{
 		{"## Current User Request", modelDrivenCurrentUserRequestSection(anchor)},
@@ -1078,6 +1079,7 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 		{"## Externalized State", stateFiles},
 		{"## Planned Externalized State", plannedStateFiles},
 		{"## Evidence References", evidenceRefs},
+		{"## Checkpoint Stage", stage},
 		{"## Todo State", formatTodosAsRelevanceBullets(bundle.todos, anchor)},
 		{"## SubAgent State", formatSubAgentsAsBullets(bundle.subAgents)},
 		{"## Open Problems", openIssues},
@@ -1255,6 +1257,13 @@ func renderEvidenceRefsSection(refs []string) string {
 		return "- (none reported by the model)"
 	}
 	return "- Model-declared evidence references; runtime verified that these IDs exist:\n- " + strings.Join(refs, "\n- ")
+}
+
+func renderModelDrivenStageSection(id, status, kind string) string {
+	if id == "" && status == "" && kind == "" {
+		return "- No stage metadata reported by the model."
+	}
+	return fmt.Sprintf("- Stage ID: %s\n- Stage status: %s\n- Checkpoint kind: %s\n- Stage metadata is model-declared; runtime facts and acceptance evidence remain authoritative.", id, status, kind)
 }
 
 // settleModelDrivenOutcome is the single settlement point for model-driven
