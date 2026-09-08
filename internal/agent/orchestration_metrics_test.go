@@ -24,8 +24,12 @@ func TestOrchestrationStatsAggregatesRuntimeAndDurableState(t *testing.T) {
 	a.subs.mu.Lock()
 	a.subs.taskRecords["task-running"] = &DurableTaskRecord{TaskID: "task-running", State: string(SubAgentStateRunning)}
 	a.subs.taskRecords["task-failed"] = &DurableTaskRecord{TaskID: "task-failed", State: string(SubAgentStateFailed), ClosedReason: "verification failed"}
-	a.subs.taskRecords["task-completed"] = &DurableTaskRecord{TaskID: "task-completed", State: string(SubAgentStateCompleted)}
+	a.subs.taskRecords["task-completed"] = &DurableTaskRecord{TaskID: "task-completed", State: string(SubAgentStateCompleted), LatestInstanceID: "agent-9", Attempt: 2, LifecycleRevision: 7, SettlementDurable: true}
 	a.subs.mu.Unlock()
+	a.subAgentMailboxIDsMu.Lock()
+	a.ownedSubAgentMailboxes = map[string][]SubAgentMailboxMessage{"agent-9": {{MessageID: "m1"}}}
+	a.ownedMailboxSpool = map[string][]string{"agent-9": {"m2", "m3"}}
+	a.subAgentMailboxIDsMu.Unlock()
 
 	stats := a.OrchestrationStats()
 	if stats.SemaphoreCapacity != cap(a.sem) || stats.SemaphoreInUse != 1 {
@@ -51,6 +55,18 @@ func TestOrchestrationStatsAggregatesRuntimeAndDurableState(t *testing.T) {
 	}
 	if stats.TasksTotal != 3 || stats.TasksByState[string(SubAgentStateRunning)] != 1 || stats.TasksByState[string(SubAgentStateFailed)] != 1 || stats.TasksByState[string(SubAgentStateCompleted)] != 1 {
 		t.Fatalf("task stats = total %d states %#v", stats.TasksTotal, stats.TasksByState)
+	}
+	if len(stats.Tasks) != 3 {
+		t.Fatalf("task snapshot rows = %d, want 3", len(stats.Tasks))
+	}
+	if stats.Tasks[0].TaskID != "task-completed" || stats.Tasks[0].Attempt != 2 || stats.Tasks[0].LifecycleRevision != 7 || !stats.Tasks[0].SettlementDurable {
+		t.Fatalf("completed snapshot row = %#v", stats.Tasks[0])
+	}
+	if stats.Tasks[0].MailboxBacklog != 3 {
+		t.Fatalf("completed mailbox backlog = %d, want 3 (1 owned + 2 spooled)", stats.Tasks[0].MailboxBacklog)
+	}
+	if stats.Tasks[2].TaskID != "task-running" || stats.Tasks[2].MailboxBacklog != 0 {
+		t.Fatalf("running snapshot row = %#v", stats.Tasks[2])
 	}
 	if stats.TerminalReasons["verification failed"] != 1 || stats.TerminalReasons[string(SubAgentStateCompleted)] != 1 {
 		t.Fatalf("terminal reasons = %#v", stats.TerminalReasons)

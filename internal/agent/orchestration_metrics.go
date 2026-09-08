@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -65,6 +66,21 @@ type orchestrationRuntimeMetrics struct {
 	parkedID  uint64
 }
 
+// TaskDiagnosticSnapshot is a per-task row of the coordination snapshot: the
+// durable record identity/state plus how many descendant mailbox messages are
+// still waiting for this task's owner to deliver.
+type TaskDiagnosticSnapshot struct {
+	TaskID            string
+	OwnerTaskID       string
+	State             string
+	LatestInstanceID  string
+	ClosedReason      string
+	Attempt           uint64
+	LifecycleRevision uint64
+	SettlementDurable bool
+	MailboxBacklog    int
+}
+
 // OrchestrationStats is a process-local, read-only snapshot of multi-agent
 // coordination health. Counters reset when a MainAgent is reconstructed.
 type OrchestrationStats struct {
@@ -86,6 +102,7 @@ type OrchestrationStats struct {
 	TasksTotal      uint64
 	TasksByState    map[string]uint64
 	TerminalReasons map[string]uint64
+	Tasks           []TaskDiagnosticSnapshot
 
 	AdmissionWaitCount    uint64
 	AdmissionWaitTotal    time.Duration
@@ -479,6 +496,16 @@ func (a *MainAgent) OrchestrationStats() OrchestrationStats {
 			state = "unknown"
 		}
 		stats.TasksByState[state]++
+		stats.Tasks = append(stats.Tasks, TaskDiagnosticSnapshot{
+			TaskID:            strings.TrimSpace(rec.TaskID),
+			OwnerTaskID:       strings.TrimSpace(rec.OwnerTaskID),
+			State:             state,
+			LatestInstanceID:  strings.TrimSpace(rec.LatestInstanceID),
+			ClosedReason:      strings.TrimSpace(rec.ClosedReason),
+			Attempt:           rec.Attempt,
+			LifecycleRevision: rec.LifecycleRevision,
+			SettlementDurable: rec.SettlementDurable,
+		})
 		if isNonTerminalTaskState(state) {
 			continue
 		}
@@ -489,5 +516,22 @@ func (a *MainAgent) OrchestrationStats() OrchestrationStats {
 		stats.TerminalReasons[reason]++
 	}
 	a.subs.mu.RUnlock()
+
+	// Mailbox backlog is read under the mailbox lock after releasing the task
+	// registry lock to avoid nesting the two locks.
+	if len(stats.Tasks) > 0 {
+		a.subAgentMailboxIDsMu.Lock()
+		for i := range stats.Tasks {
+			owner := stats.Tasks[i].LatestInstanceID
+			if owner == "" {
+				continue
+			}
+			stats.Tasks[i].MailboxBacklog = len(a.ownedSubAgentMailboxes[owner]) + len(a.ownedMailboxSpool[owner])
+		}
+		a.subAgentMailboxIDsMu.Unlock()
+		sort.Slice(stats.Tasks, func(i, j int) bool {
+			return stats.Tasks[i].TaskID < stats.Tasks[j].TaskID
+		})
+	}
 	return stats
 }

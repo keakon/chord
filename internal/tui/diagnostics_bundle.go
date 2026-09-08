@@ -204,6 +204,11 @@ func writeOrchestrationDiagnostics(sb *strings.Builder, stats agent.Orchestratio
 		stats.WorkspaceLeasesActive, stats.WorkspaceLeasesQueued)
 	fmt.Fprintf(sb, "orchestration_tasks: total=%d scope_conflicts=%d rehydrates=%d parks=%d queue_rejected=%d\n",
 		stats.TasksTotal, stats.ScopeConflicts, stats.Rehydrates, stats.Parks, stats.SubAgentQueueRejected)
+	for _, task := range stats.Tasks {
+		fmt.Fprintf(sb, "orchestration_task: id=%s owner=%s state=%s instance=%s attempt=%d revision=%d durable=%t closed=%s mailbox_backlog=%d\n",
+			task.TaskID, task.OwnerTaskID, task.State, task.LatestInstanceID,
+			task.Attempt, task.LifecycleRevision, task.SettlementDurable, task.ClosedReason, task.MailboxBacklog)
+	}
 	fmt.Fprintf(sb, "orchestration_mailbox: deliveries=%d delivery_avg=%s acks=%d ack_avg=%s spool_queued=%d spool_rehydrated=%d tracking_evictions=%d\n",
 		stats.MailboxDeliveries, stats.MailboxDeliveryLatencyAverage, stats.MailboxAcks, stats.MailboxAckLatencyAverage,
 		stats.MailboxSpoolQueued, stats.MailboxSpoolRehydrated, stats.MailboxTrackingEvictions)
