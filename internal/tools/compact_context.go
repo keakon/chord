@@ -229,7 +229,7 @@ func (v CompactContextValidator) ParseCompactContextArgs(raw json.RawMessage) (C
 			}
 			largest = fmt.Sprintf("; largest: %s", strings.Join(parts, ", "))
 		}
-		return CompactContextArgs{}, fmt.Errorf("continuation state exceeds the token budget (estimated_cost=%d, budget=%d)%s; shorten active_objective/next_step/completed/decisions/open_issues/state_files and retry", cost, limit, largest)
+		return CompactContextArgs{}, fmt.Errorf("continuation state exceeds the token budget (estimated_cost=%d, budget=%d)%s; shorten active_objective/next_step/completed/decisions/open_issues/state_files/planned_state_files/evidence_refs/claim_evidence and retry", cost, limit, largest)
 	}
 	return args, nil
 }
@@ -366,7 +366,7 @@ func (t CompactContextTool) Description() string {
 	// it has already authored the whole state.
 	budget := ""
 	if limit := t.validator.ContinuationStateMaxTokens; limit > 0 {
-		budget = fmt.Sprintf("All text fields together (active_objective, next_step, completed, decisions, open_issues, state_files) must fit a combined budget of about %d estimated tokens; there are no per-field or per-item caps, so a long item is fine as long as the whole state stays within the budget.\n", limit)
+		budget = fmt.Sprintf("All text fields together (active_objective, next_step, completed, decisions, open_issues, state_files, planned_state_files, evidence_refs, claim_evidence) must fit a combined budget of about %d estimated tokens; there are no per-field or per-item caps, so a long item is fine as long as the whole state stays within the budget.\n", limit)
 	}
 	// The todo-sync line is rendered only when todo_write is visible in the
 	// same surface, so the description never pushes a tool the model cannot
@@ -375,7 +375,7 @@ func (t CompactContextTool) Description() string {
 	if t.validator.TodoWriteVisible {
 		todoSync = "- your todo list reflects actual progress (the checkpoint snapshots runtime todos verbatim; sync drifted entries with todo_write before requesting);\n"
 	}
-	return "Request a durable context checkpoint once your current working state is fully externalized (written into state_files or fully expressible in structured arguments).\n" +
+	return "Request a durable context checkpoint once your current working state is fully externalized (written into state_files or planned_state_files, or fully expressible in structured arguments).\n" +
 		"Runtime pauses the next main-model request, applies the checkpoint atomically, and continues the same turn on the compacted context. This involves a session history rewrite; it is NOT read-only.\n" +
 		"Call it alone (no sibling tool calls in the same response) and only when:\n" +
 		"- the current phase is wrapped up (" +
