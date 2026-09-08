@@ -243,19 +243,12 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		}
 		stats.SkippedByReason[reason]++
 	}
-	// The retention ledger has exactly one consumer: the per-request debug log
-	// line. Building it costs a payload scan per protected result and a full
-	// readback pass over the surface, so at the default log level none of it is
-	// computed rather than computed and discarded.
-	retentionLedger := log.IsEnabledFor(golog.DebugLevel)
 	decisionFor := func(ctx requestReductionContext, verdict requestReductionVerdict, rule, reduced string) retentionDecision {
-		if !retentionLedger {
-			return retentionDecision{}
-		}
 		return retentionDecisionFor(ctx, verdict, rule, reduced)
 	}
+	retentionLedger := log.IsEnabledFor(golog.DebugLevel)
 	noteRetention := func(decision retentionDecision) {
-		if !retentionLedger || decision.Level == "" {
+		if decision.Level == "" {
 			return
 		}
 		if stats.ByRetentionLevel == nil {
