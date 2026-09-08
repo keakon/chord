@@ -3,6 +3,7 @@ package agent
 import (
 	"crypto/sha256"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -912,6 +913,18 @@ func (a *MainAgent) refreshEvidenceValidity() {
 		item := &a.evidence.items[index]
 		if _, ok := byCallID[item.SourceID]; ok {
 			item.Validity = evidenceValidityInvalidated
+			continue
+		}
+		for path, expected := range item.Revisions {
+			resolved := path
+			if !filepath.IsAbs(resolved) && a.projectRoot != "" {
+				resolved = filepath.Join(a.projectRoot, resolved)
+			}
+			current, exists, _, err := verifiedCurrentFileHash(resolved)
+			if err != nil || !exists || current != expected {
+				item.Validity = evidenceValidityInvalidated
+				break
+			}
 		}
 	}
 }
