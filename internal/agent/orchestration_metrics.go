@@ -53,6 +53,9 @@ type orchestrationRuntimeMetrics struct {
 	runtimeBypassPeak        atomic.Uint64
 	runtimeBypassRejected    atomic.Uint64
 	rejectedStateTransitions atomic.Uint64
+	rejectedTerminalState    atomic.Uint64
+	rejectedUnknownState     atomic.Uint64
+	rejectedOtherState       atomic.Uint64
 
 	mailboxMu sync.Mutex
 	mailboxes map[string]mailboxMetricState
@@ -131,6 +134,7 @@ type OrchestrationStats struct {
 	RuntimeBypassPeak             uint64
 	RuntimeBypassRejected         uint64
 	StateTransitionsRejected      uint64
+	StateTransitionRejections     map[string]uint64
 }
 
 // OrchestrationTaskDiagnostics returns a best-effort view of durable task
@@ -203,11 +207,18 @@ func (m *orchestrationRuntimeMetrics) rejectRuntimeBypass() {
 // rejected by the runtime state guard. A non-zero count indicates a
 // coordination-layer invariant violation that was surfaced instead of silently
 // dropping the write.
-func (m *orchestrationRuntimeMetrics) recordRejectedStateTransition() {
+func (m *orchestrationRuntimeMetrics) recordRejectedStateTransition(from, to SubAgentState) {
 	if m == nil {
 		return
 	}
 	m.rejectedStateTransitions.Add(1)
+	if !isKnownSubAgentState(from) || !isKnownSubAgentState(to) {
+		m.rejectedUnknownState.Add(1)
+	} else if isTerminalSubAgentState(from) {
+		m.rejectedTerminalState.Add(1)
+	} else {
+		m.rejectedOtherState.Add(1)
+	}
 }
 
 func (m *orchestrationRuntimeMetrics) releaseRuntimeBypass() {
@@ -519,8 +530,13 @@ func (a *MainAgent) OrchestrationStats() OrchestrationStats {
 		RuntimeBypassPeak:             metrics.runtimeBypassPeak.Load(),
 		RuntimeBypassRejected:         metrics.runtimeBypassRejected.Load(),
 		StateTransitionsRejected:      metrics.rejectedStateTransitions.Load(),
-		TasksByState:                  make(map[string]uint64),
-		TerminalReasons:               make(map[string]uint64),
+		StateTransitionRejections: map[string]uint64{
+			"terminal": metrics.rejectedTerminalState.Load(),
+			"unknown":  metrics.rejectedUnknownState.Load(),
+			"other":    metrics.rejectedOtherState.Load(),
+		},
+		TasksByState:    make(map[string]uint64),
+		TerminalReasons: make(map[string]uint64),
 	}
 	if stats.SemaphoreCapacity > 0 {
 		stats.SemaphoreUtilization = float64(stats.SemaphoreInUse) / float64(stats.SemaphoreCapacity)

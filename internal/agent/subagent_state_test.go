@@ -89,6 +89,9 @@ func TestSubAgentRejectedStateTransitionIsRecorded(t *testing.T) {
 	if got := a.OrchestrationStats().StateTransitionsRejected; got != 1 {
 		t.Fatalf("rejected transition count = %d, want 1", got)
 	}
+	if got := a.OrchestrationStats().StateTransitionRejections["terminal"]; got != 1 {
+		t.Fatalf("terminal rejection count = %d, want 1", got)
+	}
 	if got := sub.State(); got != SubAgentStateCompleted {
 		t.Fatalf("state after rejected transition = %q, want completed", got)
 	}

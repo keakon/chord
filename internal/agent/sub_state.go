@@ -185,7 +185,7 @@ func (s *SubAgent) setState(state SubAgentState, summary string) bool {
 		// layer, not a user-visible failure: surface it loudly instead of
 		// silently dropping the write.
 		if s.parent != nil {
-			s.parent.orchestrationMetrics.recordRejectedStateTransition()
+			s.parent.orchestrationMetrics.recordRejectedStateTransition(s.State(), state)
 		}
 		log.Warnf("sub-agent state transition rejected agent=%v from=%q to=%q", s.instanceID, s.State(), state)
 		return false
