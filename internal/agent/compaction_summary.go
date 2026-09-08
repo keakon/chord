@@ -244,6 +244,9 @@ func (a *MainAgent) fitCompactionInputToContextLimit(head []message.Message, inp
 	normalized := normalizeMessagesForSummary(pruned)
 	budget := compactionInputBudget(contextLimit)
 	for attempts := range 6 {
+		candidateKeyFiles, candidateTodos, candidateSubAgents, candidateBackground := compactionPromptInputsForAttempt(
+			keyFiles, todos, subAgents, backgroundObjects, attempts,
+		)
 		trimmed, omittedMessages := trimMessagesToBudgetWithReservedTail(a.ctxMgr, normalized, budget, attempts*512)
 		if len(trimmed) == 0 {
 			continue
@@ -255,7 +258,7 @@ func (a *MainAgent) fitCompactionInputToContextLimit(head []message.Message, inp
 		candidate := *input
 		candidate.Transcript = session.ExportToMarkdown(exported)
 		candidate.OmittedMessages = omittedMessages
-		if compactionPromptTokenEstimate(&candidate, historyPath, keyFiles, todos, subAgents, backgroundObjects) <= allowedInput {
+		if compactionPromptTokenEstimate(&candidate, historyPath, candidateKeyFiles, candidateTodos, candidateSubAgents, candidateBackground) <= allowedInput {
 			return &candidate, nil
 		}
 		budget -= max(512, budget/8)
@@ -264,6 +267,25 @@ func (a *MainAgent) fitCompactionInputToContextLimit(head []message.Message, inp
 		}
 	}
 	return nil, fmt.Errorf("compaction prompt still exceeds reserved context budget")
+}
+
+// compactionPromptInputsForAttempt drops only reconstructable or lower-authority
+// auxiliary sections when transcript trimming alone cannot fit the prompt. The
+// durable checkpoint still carries the transcript and authoritative anchors;
+// these sections are presentation aids that can be rebuilt on the next pass.
+func compactionPromptInputsForAttempt(keyFiles []string, todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState, attempt int) ([]string, []tools.TodoItem, []SubAgentInfo, []recovery.BackgroundObjectState) {
+	switch attempt {
+	case 0:
+		return keyFiles, todos, subAgents, backgroundObjects
+	case 1:
+		return keyFiles, todos, subAgents, nil
+	case 2:
+		return nil, todos, subAgents, nil
+	case 3:
+		return nil, todos, nil, nil
+	default:
+		return nil, nil, nil, nil
+	}
 }
 
 func buildGoalAnchor(messages []message.Message) string {
