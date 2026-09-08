@@ -145,14 +145,20 @@ func TestBuildInitialSetupConfigYAML_Codex(t *testing.T) {
 			t.Fatalf("missing codex model %q in %#v", model, prov.Models)
 		}
 	}
-	for _, model := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-astra"} {
+	// The 1.05M-window models publish no separate input cap, so the wizard
+	// writes context minus output as the input budget, matching the Codex
+	// OAuth preset table in docs/model-configs.md.
+	for _, model := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-astra", "gpt-5.4"} {
+		limit := prov.Models[model].Limit
+		if limit.Context != 1050000 || limit.Input != 922000 || limit.Output != 128000 {
+			t.Fatalf("codex %s limits = %#v, want 1050000/922000/128000", model, limit)
+		}
+	}
+	for _, model := range []string{"gpt-5.5", "gpt-5.2", "gpt-5.3-codex"} {
 		limit := prov.Models[model].Limit
 		if limit.Context != 400000 || limit.Input != 272000 || limit.Output != 128000 {
 			t.Fatalf("codex %s limits = %#v, want 400000/272000/128000", model, limit)
 		}
-	}
-	if limit := prov.Models["gpt-5.4"].Limit; limit.Context != 1050000 || limit.Input != 950000 || limit.Output != 128000 {
-		t.Fatalf("codex gpt-5.4 limits = %#v, want 1050000/950000/128000", limit)
 	}
 	if normalized, err := normalizeProviderConfig("codex", prov, nil); err != nil {
 		t.Fatalf("normalizeProviderConfig: %v", err)

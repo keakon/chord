@@ -74,9 +74,7 @@
 - **普通定向消息：**提供 `target_task_id`、`message`，可选填 `kind`；省略 `message_type`、`subtype`、`correlation_id` 和 `payload`。纠正或追加工作使用此形式。
 - **回复待处理请求：**除 `target_task_id`、`message_type: response` 和 `message` 外，**必须**提供该请求的 `correlation_id`；可选填 `kind`。此形式不接受 `subtype`、`payload` 或 `grant_write_scope`。只能向上级汇报的角色不能发送定向回复。
 
-`grant_write_scope` 只适用于普通定向消息，用来向任务已有写域追加 `files`、`path_prefix` 或 `modules`，不能改变 `read_only` 或 `verification_commands`。追加范围不能超过父任务权限，也不能与其他独立、尚未结束的写任务重叠，包括仍在准入中的任务。授权持久化失败时，原有写域保持不变；若授权已提交、随后消息投递失败，授权不会撤销。追加授权与关联请求回复需要分别调用，不是一个原子操作。
-
-### 委派任务边界
+`grant_write_scope` 只适用于普通定向消息，用来向任务已有写域追加 `files`、`path_prefix` 或 `modules`，不能改变 `read_only` 或 `verification_commands`。只读任务会被直接拒绝而不是升级为可写——它的工具面本就没有写入工具——写入工作应当作为新任务另行委派。追加范围不能超过父任务权限，也不能与其他独立、尚未结束的写任务重叠，包括仍在准入中的任务。授权持久化失败时，原有写域保持不变；若授权已提交、随后消息投递失败，授权不会撤销。追加授权与关联请求回复需要分别调用，不是一个原子操作。
 
 ### 长文本控制工具
 
@@ -85,6 +83,8 @@
 这类卡片恒展开，标题行只有工具名：报告本身就是卡片的全部内容，折叠成一行预览、再把摘要压回标题，只是把正文里已有的内容重说一遍。`compact_context`（目标、已完成、决策、遗留问题、下一步、状态文件）、`delegate`（描述、worker 句柄、完成信息）、`question`（每个问题、选项与选中项）和 `notify`（target、kind、消息）同样如此：没有折叠标记，`o` / `Enter` / `Space` 对它们不生效。以参数作为索引的卡片——`read`、`write`、`edit`、`apply_patch`、`delete`、`grep`、`glob`、`handoff` 等——保留可折叠正文和标题索引行；`cancel` 也照旧可折叠，并在标题保留 `cancel <task_id> (<原因>)`。
 
 `delegate` 只有一个工具结果，即异步启动句柄。后续 `complete` 调用和 mailbox 更新是独立的 runtime 事件，按稳定的 `task_id` 更新已有委派任务/卡片，不会生成额外的 `delegate` 工具结果。每次 `complete` 报告都会在 owner 视图创建一张 **AGENT COMPLETE** 通知卡；worker 终止失败显示为 **AGENT BLOCKED**，并唤醒直接 owner。
+
+### 委派任务边界
 
 agent 间消息遵守请求边界：目标 busy 时，消息只入队并随其下一次 LLM 请求一并处理，不打断当前请求；目标空闲但可恢复时，Chord 会唤醒它；纯 progress 更新不会强制本来空闲的 agent 启动。mailbox 与协调状态具备持久性：父子请求/响应记录与排队载荷都能跨 compaction 与重启存活，投递跨任务水合保持幂等。
 

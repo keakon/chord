@@ -1077,7 +1077,7 @@ prompt: |
   - `max_depth`：嵌套委派可达到的深度。它按**被委派 worker 自己的定义**生效——一个 SubAgent 能否再往下委派，看的是它自己声明的 `delegation.max_depth` 和当前所处深度，而不是父角色或根角色的设置；根角色把 `max_depth` 设为 `1`，挡不住一个声明 `max_depth: 8` 的子角色继续嵌套。默认 `1`（第一层 SubAgent 要往下委派，必须由它自己的定义提高该值），上限 `8`。
   - `child_join`：SubAgent 委派出的子任务是否并入它自己的任务生命周期（默认 `true`）。开启时，owner 不能在有已加入的子任务仍在运行时完成——`complete` 会被延迟，直到这些子任务结束或被显式停止；owner 若被取消或失败，也会连带取消已加入的子任务。关闭时，owner 可以提前收工，仍在运行中的子任务会与它解绑并转由 main agent 继续托管，而不是被连带取消。该选项只影响嵌套委派：main agent 直接委派出的子任务从不并入，因为 main 本身不是任务。
 - `prompt` / `system_prompt`：纯 YAML agent 文件中的 system prompt。设置其中任一个会**整块替换**该角色本来会获得的内置 prompt 块。
-- `prompt_preset`：按能力而非角色名选择内置角色 prompt 块，可选值为 `planning` 和 `none`。`planning` 会注入内置规划块（计划文档命名与格式、直接回答与产出计划的判断、handoff 时序、计划质量要求），同时抑制 bug triage 块 —— 后者与规划工作流自带的调查提纲重复。`none` 表示不注入任何内置块。省略该字段时，名为 `planner` 的角色获得 `planning` 块，其他名称不获得内置块，因此已有配置行为不变。填写未知值会导致配置报错。
+- `prompt_preset`：按能力而非角色名选择内置角色 prompt 块，可选值为 `planning` 和 `none`。`planning` 会注入内置规划块（计划文档命名与格式、直接回答与产出计划的判断、handoff 时序、计划质量要求），同时抑制 bug triage 块 —— 后者与规划工作流自带的调查提纲重复。`none` 表示不注入任何内置块。省略该字段时，无论角色叫什么都不获得内置块 —— 角色名不参与选择，因此自定义的 `planner` 角色需要显式声明 `prompt_preset: planning` 才能保留规划块。填写未知值会导致配置报错。
 - `prompt_append`：追加在最终生效的角色 prompt 之后 —— 即 preset 块之后，或角色用 `prompt` / `system_prompt` 替换了基础块时追加在其后。用它可以在不接管整块维护责任的前提下补充项目约定，同时保留 preset 中随角色可见工具自适应的措辞。
 
 复用内置规划块的自定义角色：

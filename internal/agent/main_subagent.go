@@ -44,14 +44,9 @@ func (a *MainAgent) subAgentWorkDir() string {
 	return workDir
 }
 
-// writeScopeBaseDir is the one directory every write-scope comparison resolves
-// relative declarations against — parent/child containment at delegation and at
-// grant time, overlap detection between concurrent tasks, and the runtime gate
-// that finally allows or refuses a write. It is the worker's working directory
-// because that is the base its tools resolve relative paths against: a scope
-// judged against the project root while writes are judged against the working
-// directory lets a child be granted paths its parent cannot write whenever
-// chord is started from a subdirectory.
+// writeScopeBaseDir is the worker execution root. Delegation containment,
+// overlap detection, and runtime tool checks all resolve relative declarations
+// against this same directory.
 func (a *MainAgent) writeScopeBaseDir() string {
 	return a.subAgentWorkDir()
 }

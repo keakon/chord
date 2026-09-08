@@ -49,6 +49,24 @@ func TestSubAgentWriteScopeAllowsDeclaredFileAndRejectsOtherFile(t *testing.T) {
 	}
 }
 
+func TestSubAgentScopeAndToolsUseTheSameExecutionRoot(t *testing.T) {
+	parent, sub := newMixedBatchTestSubAgent(t)
+	root := t.TempDir()
+	parent.cachedWorkDir = filepath.Join(root, "workspace")
+	sub.workDir = parent.cachedWorkDir
+
+	pipeline := sub.toolExecutionPipeline()
+	if got := parent.writeScopeBaseDir(); got != sub.workDir {
+		t.Fatalf("scope base = %q, want worker root %q", got, sub.workDir)
+	}
+	if pipeline.toolBaseDir != sub.workDir {
+		t.Fatalf("tool base = %q, want worker root %q", pipeline.toolBaseDir, sub.workDir)
+	}
+	if pipeline.writeScopeDir != sub.workDir {
+		t.Fatalf("scope runtime base = %q, want worker root %q", pipeline.writeScopeDir, sub.workDir)
+	}
+}
+
 func TestSubAgentWriteScopeRejectsLaterApplyPatchTargetOutsideScope(t *testing.T) {
 	parent, sub := newMixedBatchTestSubAgent(t)
 	root := t.TempDir()

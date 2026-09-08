@@ -117,9 +117,9 @@ func TestResolvePromptPreset(t *testing.T) {
 			want: "",
 		},
 		{
-			name: "name decides when no preset is declared",
+			name: "the name planner selects nothing on its own",
 			cfg:  &AgentConfig{Name: "planner"},
-			want: PromptPresetPlanning,
+			want: "",
 		},
 		{
 			name: "unrelated name resolves to no preset",

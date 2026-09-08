@@ -125,15 +125,21 @@ func buildInitialSetupConfigYAML(input initialSetupConfigInput) ([]byte, error) 
 	return data, nil
 }
 
+// initialSetupCodexModels returns the model allocations the first-run wizard
+// writes for a Codex OAuth provider. They must stay in step with the Codex
+// OAuth preset table in docs/model-configs.md: the 1.05M-window models publish
+// no separate input cap, so their input budget is context minus output
+// (1050000 - 128000 = 922000), while the older catalog entries keep the
+// 400000 / 272000 / 128000 profile.
 func initialSetupCodexModels() []initialSetupModelDefaults {
 	return []initialSetupModelDefaults{
-		{Name: "gpt-6-astra", ContextLimit: 400000, InputLimit: 272000, OutputLimit: 128000},
-		{Name: "gpt-5.6-sol", ContextLimit: 400000, InputLimit: 272000, OutputLimit: 128000},
-		{Name: "gpt-5.6-terra", ContextLimit: 400000, InputLimit: 272000, OutputLimit: 128000},
-		{Name: "gpt-5.6-luna", ContextLimit: 400000, InputLimit: 272000, OutputLimit: 128000},
+		{Name: "gpt-6-astra", ContextLimit: 1050000, InputLimit: 922000, OutputLimit: 128000},
+		{Name: "gpt-5.6-sol", ContextLimit: 1050000, InputLimit: 922000, OutputLimit: 128000},
+		{Name: "gpt-5.6-terra", ContextLimit: 1050000, InputLimit: 922000, OutputLimit: 128000},
+		{Name: "gpt-5.6-luna", ContextLimit: 1050000, InputLimit: 922000, OutputLimit: 128000},
 		{Name: "gpt-5.2", ContextLimit: 400000, InputLimit: 272000, OutputLimit: 128000},
 		{Name: "gpt-5.3-codex", ContextLimit: 400000, InputLimit: 272000, OutputLimit: 128000},
-		{Name: "gpt-5.4", ContextLimit: 1050000, InputLimit: 950000, OutputLimit: 128000},
+		{Name: "gpt-5.4", ContextLimit: 1050000, InputLimit: 922000, OutputLimit: 128000},
 		{Name: "gpt-5.5", ContextLimit: 400000, InputLimit: 272000, OutputLimit: 128000},
 	}
 }

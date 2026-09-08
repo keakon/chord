@@ -74,9 +74,7 @@ These tools control agent workflows rather than local side effects, so YOLO mode
 - **Plain targeted message:** provide `target_task_id`, `message`, and optionally `kind`. Omit `message_type`, `subtype`, `correlation_id`, and `payload`. Use this form for corrections or follow-up work.
 - **Reply to a pending request:** provide `target_task_id`, `message_type: response`, and the request's **required** `correlation_id`, together with `message` and optionally `kind`. This form does not accept `subtype`, `payload`, or `grant_write_scope`. Roles that can only notify their owner cannot send targeted replies.
 
-`grant_write_scope` is available only on a plain targeted message. It adds `files`, `path_prefix`, or `modules` to the task's existing scope; it cannot change `read_only` or `verification_commands`. Grants must remain within the parent's authority and cannot overlap another independent non-terminal writer, including a task still being admitted. A persistence failure leaves the existing scope unchanged; a later delivery failure does not revoke an already committed grant. Scope authorization and a correlated response are separate calls, not one atomic operation.
-
-### Delegated task boundaries
+`grant_write_scope` is available only on a plain targeted message. It adds `files`, `path_prefix`, or `modules` to the task's existing scope; it cannot change `read_only` or `verification_commands`. A read-only task is refused outright rather than upgraded — its tool surface was built without write tools — so delegate the writing work as a new task instead. Grants must remain within the parent's authority and cannot overlap another independent non-terminal writer, including a task still being admitted. A persistence failure leaves the existing scope unchanged; a later delivery failure does not revoke an already committed grant. Scope authorization and a correlated response are separate calls, not one atomic operation.
 
 ### Long-text control tools
 
@@ -85,6 +83,8 @@ These tools control agent workflows rather than local side effects, so YOLO mode
 These cards are always expanded and their header is only the tool name: the report is the card, so a collapsed preview with a one-line summary of it on the header would only repeat what the body already shows. The same applies to `compact_context` (objective, completed work, decisions, open issues, next step, state files), `delegate` (description, worker handle, completion), `question` (every question, its options and the selection) and `notify` (target, kind, message): no disclosure marker, and `o` / `Enter` / `Space` leaves them as they are. Cards indexed by an argument instead — `read`, `write`, `edit`, `apply_patch`, `delete`, `grep`, `glob`, `handoff` and the rest — keep their collapsible body and their header index line, and `cancel` keeps both its collapsed form and its `cancel <task_id> (<reason>)` header.
 
 `delegate` has one tool result: the asynchronous startup handle. Later `complete` calls and mailbox updates are separate runtime events that update the existing delegated task/card by stable `task_id`; they never produce additional `delegate` tool results. Each `complete` report raises an owner-visible **AGENT COMPLETE** notification card, and terminal worker failures are shown as **AGENT BLOCKED** and wake the direct owner.
+
+### Delegated task boundaries
 
 Agent-to-agent messages respect request boundaries: if the target is busy, the message is queued and included in its next LLM request instead of interrupting the active one; if the target is idle but resumable, Chord wakes it; progress-only updates never force an otherwise idle agent to run. Mailbox and coordination state is durable: parent-child request/response records and queued payloads survive compaction and restart, and delivery stays idempotent across task rehydration.
 

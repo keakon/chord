@@ -52,8 +52,8 @@ type AgentConfig struct {
 	SystemPrompt     string           `json:"-" yaml:"-"`
 	// PromptPreset selects a built-in role prompt block by capability instead of
 	// by agent name, so a role named anything can reuse the planning prompt and
-	// a role named "planner" can opt out of it. Empty means "decide from the
-	// agent name" for backward compatibility; see resolvePromptPreset.
+	// a role named "planner" can opt out of it. Empty means no built-in role
+	// block; the agent name never selects one. See ResolvePromptPreset.
 	PromptPreset string `json:"prompt_preset,omitempty" yaml:"prompt_preset,omitempty"`
 	// PromptAppend is appended after the effective role prompt (a built-in
 	// preset block, or SystemPrompt when the agent replaces it) so a role can
@@ -104,23 +104,19 @@ var KnownPromptPresets = []string{PromptPresetPlanning, PromptPresetNone}
 
 // ResolvePromptPreset returns the canonical prompt preset for an agent.
 //
-// An explicit prompt_preset always decides. When it is absent, the agent name
-// decides so that a role named "planner" keeps the planning block it had
-// before prompt_preset existed; every other name resolves to no preset.
+// Only an explicit prompt_preset selects a built-in role block. The agent name
+// carries no meaning here: a role that wants the planning block declares
+// prompt_preset: planning whatever it is called, and the built-in planner
+// declares it like any other role.
 func (c *AgentConfig) ResolvePromptPreset() string {
 	if c == nil {
 		return ""
 	}
-	if preset := strings.ToLower(strings.TrimSpace(c.PromptPreset)); preset != "" {
-		if preset == PromptPresetNone {
-			return ""
-		}
-		return preset
+	preset := strings.ToLower(strings.TrimSpace(c.PromptPreset))
+	if preset == PromptPresetNone {
+		return ""
 	}
-	if strings.EqualFold(strings.TrimSpace(c.Name), "planner") {
-		return PromptPresetPlanning
-	}
-	return ""
+	return preset
 }
 
 func isAgentModeSubAgent(mode string) bool {
@@ -455,9 +451,8 @@ func DefaultPlannerAgent() *AgentConfig {
 		Description: "Planning agent for requirement analysis, codebase exploration, and task decomposition. Explores the codebase, creates a plan document, and calls Handoff when done.",
 		Mode:        AgentModeMain,
 		Permission:  inner,
-		// Declared explicitly so the built-in role selects its prompt the same
-		// way a user-defined planning role does, instead of relying on the
-		// name-based fallback in ResolvePromptPreset.
+		// Declared like any other role: the name "planner" selects nothing on
+		// its own, so the built-in has to ask for the planning block too.
 		PromptPreset: PromptPresetPlanning,
 	}
 }
