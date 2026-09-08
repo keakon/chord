@@ -241,3 +241,19 @@ func TestSessionRetentionSignalsResetClearsBothLayers(t *testing.T) {
 		t.Fatalf("session reset left requests session/window = %v/%v, want 0/0", input.Session.Requests, input.Window.Requests)
 	}
 }
+
+func TestRetentionPolicyEligibilityIsConservative(t *testing.T) {
+	input := retentionPolicyInput{Session: retentionSignalSummary{Requests: 20, ReducedToolResults: 1}}
+	if !retentionPolicyEligibility(input) {
+		t.Fatal("stable low-risk observations should be eligible for evaluation")
+	}
+	input.Session.Rereads = 1
+	if retentionPolicyEligibility(input) {
+		t.Fatal("reread evidence must block policy eligibility")
+	}
+	input.Session.Rereads = 0
+	input.Session.ArchiveFailureRate = 0.01
+	if retentionPolicyEligibility(input) {
+		t.Fatal("archive failures must block policy eligibility")
+	}
+}

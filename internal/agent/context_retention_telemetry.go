@@ -260,3 +260,13 @@ func windowRetentionSignalsDebugLine(totals retentionWindowTotals) string {
 		" evidence_stale=" + strconv.FormatInt(totals.EvidenceStale, 10) +
 		" evidence_superseded=" + strconv.FormatInt(totals.EvidenceSuperseded, 10)
 }
+
+// retentionPolicyEligibility is a conservative, read-only gate for future
+// bounded retention changes. It never authorizes valid-read eviction by itself;
+// it only proves that enough low-risk observations exist to evaluate a policy.
+func retentionPolicyEligibility(input retentionPolicyInput) bool {
+	if input.Session.Requests < 20 || input.Session.Rereads > 0 || input.Session.ArchiveFailureRate > 0 {
+		return false
+	}
+	return input.Session.ReducedToolResults > 0
+}
