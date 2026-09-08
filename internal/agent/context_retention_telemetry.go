@@ -139,7 +139,8 @@ type retentionPolicyInput struct {
 // Rates default to zero when their denominator is empty; they are window
 // self-ratios, not session-vs-window comparisons.
 type retentionSignalSummary struct {
-	Requests int64
+	Requests           int64
+	ReducedToolResults int64
 	// Rereads is the number of read-like outputs the model re-issued after
 	// reduction had discarded the earlier copy; RereadsPerRequest normalizes
 	// it over the requests that prepared a surface.
@@ -171,6 +172,7 @@ type retentionSignalSummary struct {
 func summarizeRetentionWindow(totals retentionWindowTotals) retentionSignalSummary {
 	summary := retentionSignalSummary{
 		Requests:               totals.Requests,
+		ReducedToolResults:     totals.ReducedToolResults,
 		Rereads:                totals.RereadAfterReduction,
 		RevisionKnownRereads:   totals.RereadSameRevision + totals.RereadChangedRevision,
 		ChangedRevisionRereads: totals.RereadChangedRevision,
