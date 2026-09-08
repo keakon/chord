@@ -742,7 +742,7 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	a.setPendingCompactionResume(loaded.PendingCompactionResume)
 	a.lastModelDrivenApplyBatch = loaded.LastModelDrivenApplyBatch
 	a.lastModelDrivenRequestID = loaded.LastModelDrivenRequestID
-	if loaded.PendingModelDrivenRequestID != "" {
+	if loaded.PendingModelDrivenRequestID != "" && modelDrivenProposalNeedsRecoveryNotice(loaded.PendingModelDrivenStatus) {
 		a.pendingModelDrivenStatus = loaded.PendingModelDrivenStatus
 		a.pendingModelDrivenAuditArgsJSON = loaded.PendingModelDrivenArgsJSON
 		a.modelDrivenProposalReason = loaded.ModelDrivenProposalReason
@@ -888,6 +888,15 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 		MessageCount: len(restoredMessages),
 		TodoCount:    restoredTodoCount,
 		AgentCount:   agentCount,
+	}
+}
+
+func modelDrivenProposalNeedsRecoveryNotice(status string) bool {
+	switch strings.TrimSpace(status) {
+	case "", modelDrivenProposalAccepted, modelDrivenProposalPreparing:
+		return true
+	default:
+		return false
 	}
 }
 
