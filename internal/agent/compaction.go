@@ -888,7 +888,32 @@ func selectEvidenceItems(messages []message.Message, contextLimit int) []evidenc
 // must be called on the event loop; it returns an independent slice, so the
 // result can be handed to the compaction worker without sharing tracker state.
 func (a *MainAgent) evidenceItemsForCompaction(contextLimit int) []evidenceItem {
+	a.refreshEvidenceValidity()
 	return evidenceItemsFromCandidates(a.evidence.snapshot(), contextLimit)
+}
+
+func (a *MainAgent) refreshEvidenceValidity() {
+	if a == nil || a.ctxMgr == nil || a.tools == nil || len(a.evidence.items) == 0 {
+		return
+	}
+	messages := a.ctxMgr.Snapshot()
+	var scan reductionHistoryScan
+	invalidated := a.externalReadsInvalidatedLazy(messages, &scan)
+	if len(invalidated) == 0 {
+		return
+	}
+	byCallID := make(map[string]struct{})
+	for index := range invalidated {
+		if index >= 0 && index < len(messages) && messages[index].ToolCallID != "" {
+			byCallID[messages[index].ToolCallID] = struct{}{}
+		}
+	}
+	for index := range a.evidence.items {
+		item := &a.evidence.items[index]
+		if _, ok := byCallID[item.SourceID]; ok {
+			item.Validity = evidenceValidityInvalidated
+		}
+	}
 }
 
 func isConfirmationOutput(content string) bool {
