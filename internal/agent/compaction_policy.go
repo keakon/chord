@@ -14,9 +14,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/keakon/golog"
-	"github.com/keakon/golog/log"
-
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/toolname"
@@ -246,7 +243,6 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 	decisionFor := func(ctx requestReductionContext, verdict requestReductionVerdict, rule, reduced string) retentionDecision {
 		return retentionDecisionFor(ctx, verdict, rule, reduced)
 	}
-	retentionLedger := log.IsEnabledFor(golog.DebugLevel)
 	noteRetention := func(decision retentionDecision) {
 		if decision.Level == "" {
 			return
@@ -500,7 +496,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		class := verdict.Class
 		if class == requestReductionNone {
 			noteRetention(decisionFor(ctx, verdict, "", ""))
-			if retentionLedger && ctx.readRetentionProtects() {
+			if ctx.readRetentionProtects() {
 				stats.ProtectedReadTokens += estimateMessageTokens(a.ctxMgr, message.Message{Content: prepared[i].Content})
 			}
 			nextReviewAge[i] = nextContextReductionReviewAge(ctx)
@@ -648,9 +644,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		stats.EvidenceCurrent = evidenceStats.Current
 		stats.EvidenceStale = evidenceStats.Stale
 		stats.EvidenceSuperseded = evidenceStats.Superseded
-		if retentionLedger {
-			stats.ArchiveReads, stats.ArchiveReadFailures = artifactReadbackStats(prepared, callMeta, a.sessionDir)
-		}
+		stats.ArchiveReads, stats.ArchiveReadFailures = artifactReadbackStats(prepared, callMeta, a.sessionDir)
 		stats.TokensAfter = estimateMessagesTokens(a.ctxMgr, prepared)
 		a.setCurrentRequestSurface(&stats, prepared)
 		if stats.TokensSaved == 0 && stats.TokensBefore > stats.TokensAfter {
