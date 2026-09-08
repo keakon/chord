@@ -29,6 +29,13 @@ type modelDrivenCheckpointRequest struct {
 	Args       tools.CompactContextArgs
 }
 
+func (r *modelDrivenCheckpointRequest) requestID() string {
+	if r == nil || strings.TrimSpace(r.ToolCallID) == "" {
+		return "unknown"
+	}
+	return r.ToolCallID
+}
+
 // requestAcceptedToolResult is the canonical compact_context success text. It
 // deliberately says "accepted", not "applied": a crash between acceptance and
 // apply must not let the restored transcript read as a successful reset.
@@ -285,6 +292,7 @@ func (a *MainAgent) tryArmModelDrivenCheckpoint(callID string, rawArgs string) (
 		ToolCallID: callID,
 		Args:       args,
 	}
+	a.recordCompactionLifecycleEvent("accepted", map[string]string{"request_id": callID})
 	// The model called compact_context in this window:
 	// whatever the attempt settles to, the reminder nudge has been answered,
 	// so the sticky reminder stops re-attaching until a fresh window resets
@@ -503,6 +511,7 @@ func (a *MainAgent) estimatePostResetFixedRequestTokens() int {
 func (a *MainAgent) startModelDrivenCompactionAsync(bundle modelDrivenBarrierSnapshot, planID uint64, target compactionTarget, continuation continuationPlan, req *modelDrivenCheckpointRequest) {
 	a.recordCompactionLifecycleEvent("started", map[string]string{
 		"trigger":        compactionTriggerModelDriven.analyticsName(),
+		"request_id":     req.requestID(),
 		"plan_id":        strconv.FormatUint(planID, 10),
 		"turn_id":        strconv.FormatUint(target.turnID, 10),
 		"message_count":  strconv.Itoa(len(bundle.snapshot)),
@@ -1201,6 +1210,9 @@ func (a *MainAgent) settleModelDrivenOutcome(status string, reason string, prefl
 	diagnostic := map[string]string{
 		"trigger": compactionTriggerModelDriven.analyticsName(),
 		"reason":  a.modelDrivenSkipNotice,
+	}
+	if a.pendingModelDriven != nil {
+		diagnostic["request_id"] = a.pendingModelDriven.requestID()
 	}
 	if preflight != nil {
 		diagnostic["current_tokens"] = strconv.Itoa(preflight.CurrentTokens)
