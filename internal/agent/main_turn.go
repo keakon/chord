@@ -455,6 +455,7 @@ func (a *MainAgent) setIdleAndDrainPending() {
 	}
 	a.turn = nil
 	a.pendingModelDriven = nil
+	a.pendingModelDrivenRequestID = ""
 	a.turnMu.Unlock()
 	a.rememberIdleTurn(turnID)
 	a.clearReductionCache(false)
@@ -568,6 +569,7 @@ func (a *MainAgent) setIdleForComposerEdit() {
 	}
 	a.turn = nil
 	a.pendingModelDriven = nil
+	a.pendingModelDrivenRequestID = ""
 	a.turnMu.Unlock()
 	a.rememberIdleTurn(turnID)
 	a.clearReductionCache(false)
