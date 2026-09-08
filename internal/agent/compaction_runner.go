@@ -414,6 +414,12 @@ func (a *MainAgent) applyCompactionDraft(d *compactionDraft) error {
 // preserving tail messages that were added during the async compaction goroutine.
 func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	headSplit := d.HeadSplit
+	if d.SummaryMode == compactionSummaryModeModelDriven && d.RuntimeGeneration > 0 {
+		currentGeneration := a.currentRequestBatch(a.ctxMgr.Snapshot())
+		if currentGeneration != d.RuntimeGeneration {
+			return fmt.Errorf("model-driven compaction draft is stale: runtime generation changed from %d to %d", d.RuntimeGeneration, currentGeneration)
+		}
+	}
 	if len(d.SourceRefs) > 0 {
 		started := time.Now()
 		currentMessages := a.ctxMgr.Snapshot()

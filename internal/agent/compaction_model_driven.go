@@ -568,6 +568,7 @@ func (a *MainAgent) startModelDrivenCompactionAsync(bundle modelDrivenBarrierSna
 			draft.PlanID = planID
 			draft.Target = target
 			draft.HeadSplit = headSplit
+			draft.RuntimeGeneration = bundle.currentRequestBatch
 		}
 		a.sendEvent(Event{Type: EventCompactionReady, Payload: draft})
 	}(ctx, bundle, planID, target, headSplit, req)

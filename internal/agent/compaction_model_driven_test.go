@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -1583,5 +1584,20 @@ func TestModelDrivenCheckpointRequestIDUsesToolCallID(t *testing.T) {
 	var request *modelDrivenCheckpointRequest
 	if got := request.requestID(); got != "unknown" {
 		t.Fatalf("nil request ID = %q, want unknown", got)
+	}
+}
+
+func TestApplyModelDrivenDraftRejectsChangedRuntimeGeneration(t *testing.T) {
+	a := &MainAgent{}
+	a.ctxMgr = ctxmgr.NewManager(10000, 10000)
+	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "request", RequestBatch: 2})
+	err := a.applyCompactionDraftAsync(&compactionDraft{
+		SummaryMode:       compactionSummaryModeModelDriven,
+		RuntimeGeneration: 1,
+		HeadSplit:         1,
+		NewMessages:       []message.Message{{Role: message.RoleUser, Content: "summary"}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "runtime generation changed") {
+		t.Fatalf("stale model-driven draft error = %v", err)
 	}
 }
