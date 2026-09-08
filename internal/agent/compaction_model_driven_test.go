@@ -1673,3 +1673,12 @@ func TestValidateObservedClaimEvidenceRejectsErrorEvidence(t *testing.T) {
 		t.Fatal("error evidence should not support observed completion")
 	}
 }
+
+func TestValidateCommittedEvidenceRejectsErrorEvidence(t *testing.T) {
+	a := &MainAgent{}
+	a.evidence.add(evidenceItem{Kind: evidenceToolError, Key: "err", Excerpt: "failed"})
+	id := evidenceItemID(a.evidence.snapshot()[0])
+	if err := a.validateCommittedEvidence(tools.CompactContextArgs{CheckpointKind: "committed", EvidenceRefs: []string{id}}); err == nil {
+		t.Fatal("committed checkpoint should reject error evidence")
+	}
+}

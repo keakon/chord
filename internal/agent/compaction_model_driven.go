@@ -304,6 +304,9 @@ func (a *MainAgent) tryArmModelDrivenCheckpoint(callID string, rawArgs string) (
 	if err := a.validateObservedClaimEvidence(args); err != nil {
 		return "", err
 	}
+	if err := a.validateCommittedEvidence(args); err != nil {
+		return "", err
+	}
 	a.pendingModelDriven = &modelDrivenCheckpointRequest{
 		ToolCallID: callID,
 		Args:       args,
@@ -352,6 +355,26 @@ func (a *MainAgent) validateObservedClaimEvidence(args tools.CompactContextArgs)
 			if item.Kind == evidenceToolError || item.Kind == evidenceDoneRejected {
 				return fmt.Errorf("observed claim %q cannot use %s evidence %q", claim, item.Kind, ref)
 			}
+		}
+	}
+	return nil
+}
+
+func (a *MainAgent) validateCommittedEvidence(args tools.CompactContextArgs) error {
+	if args.CheckpointKind != "committed" && args.StageStatus != "completed" {
+		return nil
+	}
+	byID := make(map[string]evidenceItem)
+	for _, item := range a.evidence.snapshot() {
+		byID[evidenceItemID(item)] = item
+	}
+	for _, ref := range args.EvidenceRefs {
+		item, ok := byID[ref]
+		if !ok {
+			continue
+		}
+		if item.Kind == evidenceToolError || item.Kind == evidenceDoneRejected {
+			return fmt.Errorf("committed checkpoint cannot use %s evidence %q", item.Kind, ref)
 		}
 	}
 	return nil
