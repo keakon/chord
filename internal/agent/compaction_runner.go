@@ -365,25 +365,26 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 
 	historyCommitted = true
 	return &compactionDraft{
-		PlanID:             planID,
-		Target:             target,
-		NewMessages:        newMessages,
-		HeadSplit:          headSplit,
-		Index:              index,
-		AbsHistoryPath:     absHistoryPath,
-		AbsHistoryMetaPath: absHistoryMetaPath,
-		SourceRefs:         sourceRefs,
-		SourceFingerprint:  sourceFingerprint,
-		TransactionID:      transactionID,
-		SummaryMode:        summaryMode,
-		Backend:            backendName,
-		Profile:            string(profile),
-		ModelRef:           modelRef,
-		SummarizeErr:       summarizeErr,
-		Manual:             manual,
-		ArchivedCount:      len(head),
-		EvidenceCount:      len(evidenceItems),
-		EvidenceArtifacts:  len(evidenceMsgs),
+		PlanID:                planID,
+		Target:                target,
+		NewMessages:           newMessages,
+		HeadSplit:             headSplit,
+		Index:                 index,
+		AbsHistoryPath:        absHistoryPath,
+		AbsHistoryMetaPath:    absHistoryMetaPath,
+		SourceRefs:            sourceRefs,
+		SourceFingerprint:     sourceFingerprint,
+		TransactionID:         transactionID,
+		TransactionSessionDir: archiveMeta.sessionDir,
+		SummaryMode:           summaryMode,
+		Backend:               backendName,
+		Profile:               string(profile),
+		ModelRef:              modelRef,
+		SummarizeErr:          summarizeErr,
+		Manual:                manual,
+		ArchivedCount:         len(head),
+		EvidenceCount:         len(evidenceItems),
+		EvidenceArtifacts:     len(evidenceMsgs),
 	}, nil
 }
 
@@ -422,7 +423,7 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	if d.TransactionID != "" {
 		defer func() {
 			if !transactionCommitted {
-				if err := updateCompactionTransactionStatus(a.sessionDir, d.TransactionID, compactionTransactionAborted); err != nil {
+				if err := updateCompactionTransactionStatus(d.TransactionSessionDir, d.TransactionID, compactionTransactionAborted); err != nil {
 					log.Warnf("failed to abort compaction transaction transaction_id=%v error=%v", d.TransactionID, err)
 				}
 			}
@@ -510,7 +511,7 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 		return err
 	}
 	if d.TransactionID != "" {
-		if err := updateCompactionTransactionStatus(a.sessionDir, d.TransactionID, compactionTransactionCommitted); err != nil {
+		if err := updateCompactionTransactionStatus(d.TransactionSessionDir, d.TransactionID, compactionTransactionCommitted); err != nil {
 			return fmt.Errorf("commit compaction transaction: %w", err)
 		}
 		transactionCommitted = true

@@ -138,23 +138,24 @@ type compactionDraft struct {
 	RuntimeStateFingerprint string
 	ModelDrivenRequestID    string
 
-	NewMessages        []message.Message
-	HeadSplit          int // Async mode: snapshot boundary for tail preservation
-	Index              int
-	AbsHistoryPath     string
-	AbsHistoryMetaPath string
-	SourceRefs         []checkpointSourceRef
-	SourceFingerprint  string
-	TransactionID      string
-	SummaryMode        string
-	Backend            string
-	Profile            string
-	ModelRef           string
-	SummarizeErr       error
-	Manual             bool
-	ArchivedCount      int
-	EvidenceCount      int
-	EvidenceArtifacts  int
+	NewMessages           []message.Message
+	HeadSplit             int // Async mode: snapshot boundary for tail preservation
+	Index                 int
+	AbsHistoryPath        string
+	AbsHistoryMetaPath    string
+	SourceRefs            []checkpointSourceRef
+	SourceFingerprint     string
+	TransactionID         string
+	TransactionSessionDir string
+	SummaryMode           string
+	Backend               string
+	Profile               string
+	ModelRef              string
+	SummarizeErr          error
+	Manual                bool
+	ArchivedCount         int
+	EvidenceCount         int
+	EvidenceArtifacts     int
 	// ModelDrivenPreflight carries the low-gain preflight estimates produced
 	// by the model-driven worker so the event-loop settlement can record them
 	// in lifecycle analytics. Nil for generic drafts and early skips.
