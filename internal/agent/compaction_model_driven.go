@@ -316,6 +316,9 @@ func (a *MainAgent) tryArmModelDrivenCheckpoint(callID string, rawArgs string) (
 	a.pendingModelDrivenStatus = "accepted"
 	a.pendingModelDrivenAuditArgsJSON = rawArgs
 	diagnostic := map[string]string{"request_id": callID}
+	if a.stageCompletionCandidatePending && a.stageCompletionCandidateTurnID > 0 && a.turn != nil && a.stageCompletionCandidateTurnID != a.turn.ID {
+		a.clearStageCompletionCandidate()
+	}
 	if a.stageCompletionCandidatePending && a.stageCompletionCandidateTurnID > 0 {
 		diagnostic["stage_candidate_turn_id"] = strconv.FormatUint(a.stageCompletionCandidateTurnID, 10)
 		diagnostic["stage_candidate_consumed"] = "true"
