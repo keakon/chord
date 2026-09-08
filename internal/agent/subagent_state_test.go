@@ -1,6 +1,9 @@
 package agent
 
-import "testing"
+import (
+	"math/rand"
+	"testing"
+)
 
 func TestValidateSubAgentStateTransition(t *testing.T) {
 	tests := []struct {
@@ -62,5 +65,47 @@ func TestSubAgentRejectedStateTransitionIsRecorded(t *testing.T) {
 	}
 	if got := sub.State(); got != SubAgentStateCompleted {
 		t.Fatalf("state after rejected transition = %q, want completed", got)
+	}
+}
+
+func TestSubAgentStateMachineRandomWalkInvariants(t *testing.T) {
+	states := []SubAgentState{
+		"", SubAgentStateRunning, SubAgentStateWaitingMain, SubAgentStateWaitingDescendant,
+		SubAgentStateCompleted, SubAgentStateFailed, SubAgentStateCancelled, SubAgentStateIdle,
+		SubAgentState("unknown-state"),
+	}
+	for seed := int64(0); seed < 50; seed++ {
+		rng := rand.New(rand.NewSource(seed))
+		var state subAgentRuntimeState
+		state.set(SubAgentStateRunning, "init")
+		for step := 0; step < 500; step++ {
+			from, previousSummary := state.snapshot()
+			to := states[rng.Intn(len(states))]
+			beforeChangedAt := state.stateChangedAt
+			applied := state.set(to, "step")
+			want := validSubAgentStateTransition(from, to)
+			if applied != want {
+				t.Fatalf("seed=%d step=%d set(%q -> %q) applied=%v, spec says %v", seed, step, from, to, applied, want)
+			}
+			got, gotSummary := state.snapshot()
+			if applied {
+				if got != to {
+					t.Fatalf("seed=%d step=%d applied transition left state=%q, want %q", seed, step, got, to)
+				}
+			} else {
+				if got != from {
+					t.Fatalf("seed=%d step=%d rejected transition changed state to %q, want %q", seed, step, got, from)
+				}
+				if gotSummary != previousSummary {
+					t.Fatalf("seed=%d step=%d rejected transition changed summary to %q, want %q", seed, step, gotSummary, previousSummary)
+				}
+				if state.stateChangedAt != beforeChangedAt {
+					t.Fatalf("seed=%d step=%d rejected transition refreshed activity timestamp", seed, step)
+				}
+			}
+			if got == "" {
+				t.Fatalf("seed=%d step=%d state became empty", seed, step)
+			}
+		}
 	}
 }

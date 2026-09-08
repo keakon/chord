@@ -24,6 +24,18 @@ func normalizeSubAgentState(state SubAgentState) SubAgentState {
 	return state
 }
 
+// validSubAgentStateTransition is the single authority for sub-agent runtime
+// state changes. Rules:
+//
+//   - An empty state may bootstrap into any non-empty state (tests and
+//     standalone sub-agents construct records directly at terminal states).
+//   - Re-setting the current state is idempotent.
+//   - A terminal state (completed/failed/cancelled) is absorbing except for an
+//     explicit reactivation into running (focused follow-up, queued user input
+//     wake, child event reactivation). Terminal tasks are continued by design;
+//     they are not monotonically frozen.
+//   - All non-terminal states may move to any real state; unknown states are
+//     rejected unless already current.
 func validSubAgentStateTransition(from, to SubAgentState) bool {
 	if from == "" {
 		return to != ""
