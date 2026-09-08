@@ -102,7 +102,6 @@ type OrchestrationStats struct {
 	TasksTotal      uint64
 	TasksByState    map[string]uint64
 	TerminalReasons map[string]uint64
-	Tasks           []TaskDiagnosticSnapshot
 
 	AdmissionWaitCount    uint64
 	AdmissionWaitTotal    time.Duration
@@ -132,6 +131,48 @@ type OrchestrationStats struct {
 	RuntimeBypassPeak             uint64
 	RuntimeBypassRejected         uint64
 	StateTransitionsRejected      uint64
+}
+
+// OrchestrationTaskDiagnostics returns a best-effort view of durable task
+// records and current mailbox backlog. It is intentionally separate from
+// OrchestrationStats so aggregate metrics do not copy every task by default.
+func (a *MainAgent) OrchestrationTaskDiagnostics() []TaskDiagnosticSnapshot {
+	if a == nil {
+		return nil
+	}
+	var tasks []TaskDiagnosticSnapshot
+	a.subs.mu.RLock()
+	for _, rec := range a.subs.taskRecords {
+		if rec == nil {
+			continue
+		}
+		state := strings.TrimSpace(rec.State)
+		if state == "" {
+			state = "unknown"
+		}
+		tasks = append(tasks, TaskDiagnosticSnapshot{
+			TaskID:            strings.TrimSpace(rec.TaskID),
+			OwnerTaskID:       strings.TrimSpace(rec.OwnerTaskID),
+			State:             state,
+			LatestInstanceID:  strings.TrimSpace(rec.LatestInstanceID),
+			ClosedReason:      strings.TrimSpace(rec.ClosedReason),
+			Attempt:           rec.Attempt,
+			LifecycleRevision: rec.LifecycleRevision,
+			SettlementDurable: rec.SettlementDurable,
+		})
+	}
+	a.subs.mu.RUnlock()
+
+	a.subAgentMailboxIDsMu.Lock()
+	for i := range tasks {
+		owner := tasks[i].LatestInstanceID
+		if owner != "" {
+			tasks[i].MailboxBacklog = len(a.ownedSubAgentMailboxes[owner]) + len(a.ownedMailboxSpool[owner])
+		}
+	}
+	a.subAgentMailboxIDsMu.Unlock()
+	sort.Slice(tasks, func(i, j int) bool { return tasks[i].TaskID < tasks[j].TaskID })
+	return tasks
 }
 
 func (m *orchestrationRuntimeMetrics) acquireRuntimeBypass() {
@@ -496,16 +537,6 @@ func (a *MainAgent) OrchestrationStats() OrchestrationStats {
 			state = "unknown"
 		}
 		stats.TasksByState[state]++
-		stats.Tasks = append(stats.Tasks, TaskDiagnosticSnapshot{
-			TaskID:            strings.TrimSpace(rec.TaskID),
-			OwnerTaskID:       strings.TrimSpace(rec.OwnerTaskID),
-			State:             state,
-			LatestInstanceID:  strings.TrimSpace(rec.LatestInstanceID),
-			ClosedReason:      strings.TrimSpace(rec.ClosedReason),
-			Attempt:           rec.Attempt,
-			LifecycleRevision: rec.LifecycleRevision,
-			SettlementDurable: rec.SettlementDurable,
-		})
 		if isNonTerminalTaskState(state) {
 			continue
 		}
@@ -517,21 +548,5 @@ func (a *MainAgent) OrchestrationStats() OrchestrationStats {
 	}
 	a.subs.mu.RUnlock()
 
-	// Mailbox backlog is read under the mailbox lock after releasing the task
-	// registry lock to avoid nesting the two locks.
-	if len(stats.Tasks) > 0 {
-		a.subAgentMailboxIDsMu.Lock()
-		for i := range stats.Tasks {
-			owner := stats.Tasks[i].LatestInstanceID
-			if owner == "" {
-				continue
-			}
-			stats.Tasks[i].MailboxBacklog = len(a.ownedSubAgentMailboxes[owner]) + len(a.ownedMailboxSpool[owner])
-		}
-		a.subAgentMailboxIDsMu.Unlock()
-		sort.Slice(stats.Tasks, func(i, j int) bool {
-			return stats.Tasks[i].TaskID < stats.Tasks[j].TaskID
-		})
-	}
 	return stats
 }

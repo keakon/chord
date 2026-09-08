@@ -132,7 +132,10 @@ func (s *SubAgent) enterWaitingDescendant(reason string) {
 	if reason == "" {
 		reason = "Waiting for child task"
 	}
-	s.setState(SubAgentStateWaitingDescendant, reason)
+	if !s.setState(SubAgentStateWaitingDescendant, reason) {
+		log.Warnf("sub-agent cannot enter waiting_descendant agent=%v", s.instanceID)
+		return
+	}
 	s.parent.noteSubAgentStateTransition(s, SubAgentStateWaitingDescendant)
 	s.parent.releaseSubAgentSlot(s)
 	s.parent.emitActivity(s.instanceID, ActivityIdle, "")

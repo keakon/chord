@@ -191,7 +191,7 @@ func TestWriteOrchestrationDiagnostics(t *testing.T) {
 		RuntimeBypassGrants:   1,
 		RuntimeBypassPeak:     1,
 		RuntimeBypassRejected: 1,
-	})
+	}, nil)
 	got := sb.String()
 	for _, want := range []string{
 		"orchestration_event_queue: overflow=2 overflow_peak=4",

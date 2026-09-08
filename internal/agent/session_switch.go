@@ -198,7 +198,9 @@ func (a *MainAgent) abandonSubAgentsForSessionSwitch() int {
 
 	for i, id := range ids {
 		if subs[i] != nil {
-			subs[i].setState(SubAgentStateCancelled, "terminated on session switch")
+			if !subs[i].setState(SubAgentStateCancelled, "terminated on session switch") {
+				log.Warnf("sub-agent session switch cancellation rejected agent=%v", id)
+			}
 			a.syncTaskRecordFromSub(subs[i], "terminated on session switch")
 		}
 		a.fileTrack.ReleaseAll(id)

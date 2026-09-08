@@ -185,13 +185,14 @@ func (m *Model) buildDiagnosticsMetadata(now time.Time, trigger, baseDir, bundle
 	}
 	if provider, ok := m.agent.(interface {
 		OrchestrationStats() agent.OrchestrationStats
+		OrchestrationTaskDiagnostics() []agent.TaskDiagnosticSnapshot
 	}); ok {
-		writeOrchestrationDiagnostics(&sb, provider.OrchestrationStats())
+		writeOrchestrationDiagnostics(&sb, provider.OrchestrationStats(), provider.OrchestrationTaskDiagnostics())
 	}
 	return sb.String()
 }
 
-func writeOrchestrationDiagnostics(sb *strings.Builder, stats agent.OrchestrationStats) {
+func writeOrchestrationDiagnostics(sb *strings.Builder, stats agent.OrchestrationStats, tasks []agent.TaskDiagnosticSnapshot) {
 	fmt.Fprintf(sb, "orchestration_event_queue: overflow=%d overflow_peak=%d coalesced=%d backpressure=%d\n",
 		stats.EventQueue.OverflowCurrent, stats.EventQueue.OverflowPeak,
 		stats.EventQueue.Coalesced, stats.EventQueue.Backpressure)
@@ -204,7 +205,7 @@ func writeOrchestrationDiagnostics(sb *strings.Builder, stats agent.Orchestratio
 		stats.WorkspaceLeasesActive, stats.WorkspaceLeasesQueued)
 	fmt.Fprintf(sb, "orchestration_tasks: total=%d scope_conflicts=%d rehydrates=%d parks=%d queue_rejected=%d\n",
 		stats.TasksTotal, stats.ScopeConflicts, stats.Rehydrates, stats.Parks, stats.SubAgentQueueRejected)
-	for _, task := range stats.Tasks {
+	for _, task := range tasks {
 		fmt.Fprintf(sb, "orchestration_task: id=%s owner=%s state=%s instance=%s attempt=%d revision=%d durable=%t closed=%s mailbox_backlog=%d\n",
 			task.TaskID, task.OwnerTaskID, task.State, task.LatestInstanceID,
 			task.Attempt, task.LifecycleRevision, task.SettlementDurable, task.ClosedReason, task.MailboxBacklog)

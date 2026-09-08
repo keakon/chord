@@ -32,6 +32,7 @@ func TestOrchestrationStatsAggregatesRuntimeAndDurableState(t *testing.T) {
 	a.subAgentMailboxIDsMu.Unlock()
 
 	stats := a.OrchestrationStats()
+	tasks := a.OrchestrationTaskDiagnostics()
 	if stats.SemaphoreCapacity != cap(a.sem) || stats.SemaphoreInUse != 1 {
 		t.Fatalf("semaphore stats = %d/%d, want 1/%d", stats.SemaphoreInUse, stats.SemaphoreCapacity, cap(a.sem))
 	}
@@ -56,17 +57,17 @@ func TestOrchestrationStatsAggregatesRuntimeAndDurableState(t *testing.T) {
 	if stats.TasksTotal != 3 || stats.TasksByState[string(SubAgentStateRunning)] != 1 || stats.TasksByState[string(SubAgentStateFailed)] != 1 || stats.TasksByState[string(SubAgentStateCompleted)] != 1 {
 		t.Fatalf("task stats = total %d states %#v", stats.TasksTotal, stats.TasksByState)
 	}
-	if len(stats.Tasks) != 3 {
-		t.Fatalf("task snapshot rows = %d, want 3", len(stats.Tasks))
+	if len(tasks) != 3 {
+		t.Fatalf("task snapshot rows = %d, want 3", len(tasks))
 	}
-	if stats.Tasks[0].TaskID != "task-completed" || stats.Tasks[0].Attempt != 2 || stats.Tasks[0].LifecycleRevision != 7 || !stats.Tasks[0].SettlementDurable {
-		t.Fatalf("completed snapshot row = %#v", stats.Tasks[0])
+	if tasks[0].TaskID != "task-completed" || tasks[0].Attempt != 2 || tasks[0].LifecycleRevision != 7 || !tasks[0].SettlementDurable {
+		t.Fatalf("completed snapshot row = %#v", tasks[0])
 	}
-	if stats.Tasks[0].MailboxBacklog != 3 {
-		t.Fatalf("completed mailbox backlog = %d, want 3 (1 owned + 2 spooled)", stats.Tasks[0].MailboxBacklog)
+	if tasks[0].MailboxBacklog != 3 {
+		t.Fatalf("completed mailbox backlog = %d, want 3 (1 owned + 2 spooled)", tasks[0].MailboxBacklog)
 	}
-	if stats.Tasks[2].TaskID != "task-running" || stats.Tasks[2].MailboxBacklog != 0 {
-		t.Fatalf("running snapshot row = %#v", stats.Tasks[2])
+	if tasks[2].TaskID != "task-running" || tasks[2].MailboxBacklog != 0 {
+		t.Fatalf("running snapshot row = %#v", tasks[2])
 	}
 	if stats.TerminalReasons["verification failed"] != 1 || stats.TerminalReasons[string(SubAgentStateCompleted)] != 1 {
 		t.Fatalf("terminal reasons = %#v", stats.TerminalReasons)

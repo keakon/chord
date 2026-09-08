@@ -671,7 +671,9 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 		wakeCh:            make(chan struct{}, 1),
 	}
 	s.setRuleset(cfg.Ruleset)
-	s.setState(SubAgentStateRunning, "")
+	if !s.setState(SubAgentStateRunning, "") {
+		panic(fmt.Sprintf("new SubAgent %s rejected initial running state", s.instanceID))
+	}
 	if hasSkillTool && !cfg.Ruleset.IsDisabled(tools.NameSkill) {
 		s.tools.Register(tools.NewSkillTool(s))
 	}
@@ -1413,11 +1415,15 @@ func (e *subAgentEventSender) SendAgentEvent(eventType, sourceID string, payload
 	switch eventType {
 	case EventEscalate:
 		reason, _ := payload.(string)
-		s.setState(SubAgentStateWaitingMain, reason)
+		if !s.setState(SubAgentStateWaitingMain, reason) {
+			log.Warnf("sub-agent escalation state transition rejected agent=%v", s.instanceID)
+		}
 	case EventAgentNotify:
 		msg, _ := payload.(string)
 		if strings.TrimSpace(msg) != "" {
-			s.setState(SubAgentStateRunning, msg)
+			if !s.setState(SubAgentStateRunning, msg) {
+				log.Warnf("sub-agent notification state transition rejected agent=%v", s.instanceID)
+			}
 		}
 	}
 	if eventType == EventSpawnFinished || eventType == "background_object_finished" {
