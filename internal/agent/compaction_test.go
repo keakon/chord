@@ -6608,6 +6608,15 @@ func TestFilterCompactionEvidenceForArchivalDropsUnavailableEvidence(t *testing.
 	}
 }
 
+func TestRenderEvidenceArtifactIncludesValidityAndRecovery(t *testing.T) {
+	content := renderEvidenceArtifactContent([]evidenceItem{{
+		Title: "Observed state", Excerpt: "value", Validity: evidenceValidityValid, Recovery: "reread source",
+	}})
+	if !strings.Contains(content, "Validity: valid") || !strings.Contains(content, "Recovery: reread source") {
+		t.Fatalf("evidence artifact = %q", content)
+	}
+}
+
 // A checkpoint must not grow without bound. The runtime TODO snapshot and the
 // archived history map are the only parts that would otherwise gain content
 // every compaction, and that growth feeds back into the model-driven low-gain

@@ -235,6 +235,12 @@ func renderEvidenceArtifactContent(items []evidenceItem) string {
 		if item.WhyNeeded != "" {
 			fmt.Fprintf(&sb, "Why it matters: %s\n", item.WhyNeeded)
 		}
+		if item.Validity != "" {
+			fmt.Fprintf(&sb, "Validity: %s\n", item.Validity)
+		}
+		if item.Recovery != "" {
+			fmt.Fprintf(&sb, "Recovery: %s\n", item.Recovery)
+		}
 		if item.Excerpt != "" {
 			sb.WriteString("Excerpt:\n")
 			sb.WriteString(item.Excerpt)
