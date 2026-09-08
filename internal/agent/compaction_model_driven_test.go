@@ -1652,3 +1652,14 @@ func TestValidateModelDrivenClaimKindsObservedRequiresEvidence(t *testing.T) {
 		t.Fatal("observed claim without evidence should be rejected")
 	}
 }
+
+func TestValidateObservedClaimEvidenceMustBeListed(t *testing.T) {
+	args := tools.CompactContextArgs{
+		Completed: []string{"tests pass"}, EvidenceRefs: []string{"ev-1"},
+		ClaimKinds:    map[string]string{"tests pass": "observed"},
+		ClaimEvidence: map[string][]string{"tests pass": {"ev-2"}},
+	}
+	if err := validateModelDrivenCheckpointKind(args); err == nil {
+		t.Fatal("observed claim evidence outside evidence_refs should be rejected")
+	}
+}

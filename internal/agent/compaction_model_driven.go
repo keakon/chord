@@ -342,6 +342,17 @@ func validateModelDrivenCheckpointKind(args tools.CompactContextArgs) error {
 		if kind == "observed" && len(args.ClaimEvidence[claim]) == 0 {
 			return fmt.Errorf("claim_kinds %q is observed but has no claim_evidence", claim)
 		}
+		if kind == "observed" {
+			refs := make(map[string]struct{}, len(args.EvidenceRefs))
+			for _, ref := range args.EvidenceRefs {
+				refs[ref] = struct{}{}
+			}
+			for _, ref := range args.ClaimEvidence[claim] {
+				if _, ok := refs[ref]; !ok {
+					return fmt.Errorf("observed claim %q references evidence %q that is not listed in evidence_refs", claim, ref)
+				}
+			}
+		}
 	}
 	return nil
 }
