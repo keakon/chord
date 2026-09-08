@@ -2117,6 +2117,8 @@ func (a *MainAgent) clearContextReductionWrapUpGrace() {
 func (a *MainAgent) clearStageCompletionCandidate() {
 	if a != nil {
 		a.stageCompletionCandidateTurnID = 0
+		a.stageCompletionCandidatePending = false
+		a.stageCompletionCandidatePromptDelivered = false
 	}
 }
 
