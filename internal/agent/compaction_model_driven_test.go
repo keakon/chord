@@ -1432,6 +1432,17 @@ func TestModelDrivenCheckpointCarriesPriorCheckpointBody(t *testing.T) {
 	}
 }
 
+func TestModelDrivenCheckpointCarriesTypedStateAcrossGenerations(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	prior := buildCompactionCheckpointMessage("## Typed Checkpoint State\n- {\"evidence_refs\":[\"ev-old\"],\"stage_status\":\"completed\"}", nil, compactionSummaryModeModelDriven, nil)
+	snapshot := []message.Message{{Role: message.RoleUser, Content: prior, IsCompactionSummary: true}, {Role: message.RoleUser, Content: "new request"}}
+	req := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{ActiveObjective: "continue", NextStep: "verify", EvidenceRefs: []string{"ev-new"}, StageStatus: "candidate", CheckpointKind: "provisional"}}
+	summary := a.buildModelDrivenCheckpointSummary(modelDrivenBarrierSnapshot{snapshot: snapshot}, snapshot, len(snapshot), req)
+	if !strings.Contains(summary, "evidence_refs") || !strings.Contains(summary, "ev-old") {
+		t.Fatalf("typed checkpoint state was not carried: %s", summary)
+	}
+}
+
 // TestModelDrivenCheckpointRenderReusesBuilderAndAddsExportedArchive pins the
 // two-render contract: the shared builder renders identical summary/evidence
 // content, and only the post-export render lists the freshly written archive —
