@@ -844,14 +844,6 @@ func (p *ProviderConfig) RequestCompression() string {
 	return p.requestCompression
 }
 
-// SetRequestCompression sets the upstream request body compression encoding
-// ("" | "gzip" | "zstd").
-func (p *ProviderConfig) SetRequestCompression(encoding string) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.requestCompression = encoding
-}
-
 func (p *ProviderConfig) Name() string {
 	return p.name
 }

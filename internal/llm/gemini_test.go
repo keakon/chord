@@ -1,9 +1,11 @@
 package llm
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -582,5 +584,98 @@ func TestGeminiCompleteStreamOmitsThinkingBudgetWhenLevelSet(t *testing.T) {
 	}
 	if cfg.ThinkingBudget != nil {
 		t.Fatalf("thinkingBudget = %d, want omitted alongside thinkingLevel", *cfg.ThinkingBudget)
+	}
+}
+
+// TestGeminiRequestDropsUnrepresentableSchemaKeywords covers the whole path a
+// tool schema takes onto the wire. Gemini parses the request as proto-JSON,
+// where a field its Schema message does not have fails the entire request, so
+// a "not" nested inside an anyOf branch — the shape the completion and notify
+// tools use — must not survive conversion, and the branches around it must.
+func TestGeminiRequestDropsUnrepresentableSchemaKeywords(t *testing.T) {
+	var rawBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		rawBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"code":400,"message":"forced","status":"INVALID_ARGUMENT"}}`))
+	}))
+	defer srv.Close()
+
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"summary":     map[string]any{"type": "string"},
+			"result_type": map[string]any{"type": "string"},
+			"result":      map[string]any{"type": "object"},
+		},
+		"required": []string{"summary"},
+		"not": map[string]any{
+			"required": []string{"result", "result_type"},
+		},
+		"anyOf": []map[string]any{
+			{
+				"required": []string{"summary"},
+				"not": map[string]any{
+					"anyOf": []map[string]any{
+						{"required": []string{"result_type"}},
+						{"required": []string{"result"}},
+					},
+				},
+			},
+			{"required": []string{"summary", "result_type"}},
+		},
+	}
+
+	provider := NewProviderConfig("gemini", config.ProviderConfig{Type: config.ProviderTypeGenerateContent, APIURL: srv.URL + "/models"}, []string{"test-key"})
+	geminiProvider, err := NewGeminiProvider(provider, "")
+	if err != nil {
+		t.Fatalf("NewGeminiProvider: %v", err)
+	}
+	_, err = geminiProvider.CompleteStream(
+		context.Background(),
+		"test-key",
+		"gemini-test",
+		"",
+		[]message.Message{{Role: "user", Content: "hello"}},
+		[]message.ToolDefinition{{Name: "task_complete", Description: "finish", InputSchema: schema}},
+		128,
+		RequestTuning{},
+		func(message.StreamDelta) {},
+	)
+	if err == nil {
+		t.Fatal("expected forced server error")
+	}
+	if len(rawBody) == 0 {
+		t.Fatal("server captured no request body")
+	}
+	if bytes.Contains(rawBody, []byte(`"not"`)) {
+		t.Fatalf("request body still carries a \"not\" keyword: %s", rawBody)
+	}
+	// The surviving alternatives must still be there: dropping the keyword must
+	// not take the branch that carried it with it.
+	var body struct {
+		Tools []struct {
+			FunctionDeclarations []struct {
+				Parameters map[string]any `json:"parameters"`
+			} `json:"functionDeclarations"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(rawBody, &body); err != nil {
+		t.Fatalf("decode request body: %v", err)
+	}
+	if len(body.Tools) != 1 || len(body.Tools[0].FunctionDeclarations) != 1 {
+		t.Fatalf("tools = %#v", body.Tools)
+	}
+	params := body.Tools[0].FunctionDeclarations[0].Parameters
+	branches, ok := params["anyOf"].([]any)
+	if !ok || len(branches) != 2 {
+		t.Fatalf("anyOf = %#v, want two surviving branches", params["anyOf"])
+	}
+	for i, branch := range branches {
+		if _, ok := branch.(map[string]any)["required"]; !ok {
+			t.Fatalf("anyOf[%d] lost its required clause: %#v", i, branch)
+		}
 	}
 }

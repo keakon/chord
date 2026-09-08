@@ -580,6 +580,11 @@ func convertToolsToGemini(tools []message.ToolDefinition) []geminiTool {
 	return []geminiTool{{FunctionDeclarations: decls}}
 }
 
+// convertSchemaToGemini rewrites a JSON Schema into the subset Gemini's Schema
+// message accepts. Keywords it has no field for are dropped rather than passed
+// through: the API parses the schema as proto-JSON, where an unknown field
+// fails the whole request — not just the tool that carried it — so one tool
+// using an unrepresentable keyword would take every request with it.
 func convertSchemaToGemini(schema map[string]any) map[string]any {
 	if schema == nil {
 		return nil
@@ -589,6 +594,23 @@ func convertSchemaToGemini(schema map[string]any) map[string]any {
 		switch k {
 		case "nullable", "default", "$schema", "additionalProperties", "coerceFromString", "coerceFromObject":
 			continue
+		case "not":
+			// "not" has no Schema field at all. The tools that use it also
+			// enforce the same constraint at execution time and state it in
+			// their descriptions, so dropping it costs a structural hint.
+			log.Debugf("dropping JSON Schema keyword Gemini cannot represent keyword=%v", k)
+			continue
+		case "anyOf", "allOf", "oneOf":
+			// Gemini accepts these, but each element is a schema in its own
+			// right: an unconverted branch carries the dropped keywords —
+			// including a nested "not" — straight onto the wire.
+			if converted, ok := convertSchemaListToGemini(v); ok {
+				if len(converted) == 0 {
+					continue
+				}
+				out[k] = converted
+				continue
+			}
 		case "type":
 			if s, ok := v.(string); ok {
 				out[k] = strings.ToUpper(s)
@@ -616,6 +638,37 @@ func convertSchemaToGemini(schema map[string]any) map[string]any {
 		out[k] = v
 	}
 	return out
+}
+
+// convertSchemaListToGemini converts the subschemas of a combinator keyword.
+// Tool definitions build these lists as []map[string]any while a schema decoded
+// from JSON carries []any, and both reach this converter. A branch left empty
+// by the dropped keywords is removed: it would constrain nothing while reading
+// as a wildcard alternative that always matches.
+func convertSchemaListToGemini(value any) ([]map[string]any, bool) {
+	var raw []any
+	switch list := value.(type) {
+	case []map[string]any:
+		raw = make([]any, 0, len(list))
+		for _, child := range list {
+			raw = append(raw, child)
+		}
+	case []any:
+		raw = list
+	default:
+		return nil, false
+	}
+	converted := make([]map[string]any, 0, len(raw))
+	for _, item := range raw {
+		child, ok := item.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		if child := convertSchemaToGemini(child); len(child) > 0 {
+			converted = append(converted, child)
+		}
+	}
+	return converted, true
 }
 
 func parseGeminiSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector) (*message.Response, error) {

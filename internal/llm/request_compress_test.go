@@ -213,27 +213,23 @@ func TestDefaultHTTPClientSendsOnlyGzipAcceptEncoding(t *testing.T) {
 	}
 }
 
+// TestProviderConfig_RequestCompression pins the only way the encoding is ever
+// set: the provider configuration it was constructed from.
 func TestProviderConfig_RequestCompression(t *testing.T) {
-	p := NewProviderConfig("test", config.ProviderConfig{Type: config.ProviderTypeChatCompletions}, []string{"key"})
-
-	if enc := p.RequestCompression(); enc != "" {
-		t.Errorf("default RequestCompression = %q, want empty", enc)
-	}
-
-	p.SetRequestCompression(config.RequestCompressionZstd)
-	if enc := p.RequestCompression(); enc != config.RequestCompressionZstd {
-		t.Errorf("after SetRequestCompression(zstd), got %q, want %q", enc, config.RequestCompressionZstd)
-	}
-
-	p.SetRequestCompression("")
-	if enc := p.RequestCompression(); enc != "" {
-		t.Errorf("after SetRequestCompression(\"\"), got %q, want empty", enc)
-	}
-}
-
-func TestProviderConfig_RequestCompressionFromProviderConfig(t *testing.T) {
-	p := NewProviderConfig("test", config.ProviderConfig{Type: config.ProviderTypeChatCompletions, Compress: config.RequestCompressionZstd}, []string{"key"})
-	if enc := p.RequestCompression(); enc != config.RequestCompressionZstd {
-		t.Fatalf("RequestCompression = %q, want %q", enc, config.RequestCompressionZstd)
+	for _, tc := range []struct {
+		name     string
+		compress string
+		want     string
+	}{
+		{name: "unset", compress: "", want: ""},
+		{name: "gzip", compress: config.RequestCompressionGzip, want: config.RequestCompressionGzip},
+		{name: "zstd", compress: config.RequestCompressionZstd, want: config.RequestCompressionZstd},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := NewProviderConfig("test", config.ProviderConfig{Type: config.ProviderTypeChatCompletions, Compress: tc.compress}, []string{"key"})
+			if enc := p.RequestCompression(); enc != tc.want {
+				t.Fatalf("RequestCompression() = %q, want %q", enc, tc.want)
+			}
+		})
 	}
 }
