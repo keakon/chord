@@ -1644,6 +1644,40 @@ func TestApplyPatchPreviewIncrementalRenderEqualsCold(t *testing.T) {
 	}
 }
 
+// TestApplyPatchPreviewMemoDropsLinesFromAStaleHighlighter pins the memo key:
+// the rendered-prefix memo is keyed by the highlighter that produced it, not
+// only by the patch text and the width. A multi-file patch (or a first coalesced
+// frame whose path has not been parsed out yet) resolves a new file path
+// mid-stream, which rebuilds the lexer in place — reusing the memo then left the
+// preview in two colour schemes for the rest of the stream, with nothing to heal
+// it until the args finished and the memo was cleared.
+func TestApplyPatchPreviewMemoDropsLinesFromAStaleHighlighter(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	const width = 80
+
+	firstFile := "*** Begin Patch\n*** Update File: demo.py\n@@\n+def main(value):\n+    return {\"key\": value}\n"
+	bothFiles := firstFile + "*** Update File: demo.go\n@@\n+func main(value int) map[string]int {\n+\treturn map[string]int{\"key\": value}\n+}\n"
+
+	streamed := &Block{ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch}
+	// Frame 1: only the Python file has been streamed, so that is the path the
+	// preview highlighter resolves.
+	_ = streamed.appendApplyPatchPreviewLines(firstFile, width, streamed.applyPatchPreviewHighlighter("demo.py", firstFile))
+	// Frame 2: the stream reaches the second file and the path flips to Go.
+	got := streamed.appendApplyPatchPreviewLines(bothFiles, width, streamed.applyPatchPreviewHighlighter("demo.go", bothFiles))
+
+	cold := &Block{ID: 2, Type: BlockToolCall, ToolName: tools.NameApplyPatch}
+	want := cold.appendApplyPatchPreviewLines(bothFiles, width, cold.applyPatchPreviewHighlighter("demo.go", bothFiles))
+
+	if len(got) != len(want) {
+		t.Fatalf("streamed preview has %d lines, cold render has %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("line %d kept the highlighting of the previous file\n got=%q\nwant=%q", i, got[i], want[i])
+		}
+	}
+}
+
 func TestCodeHighlighterReevaluatesUnanchoredStreamingSample(t *testing.T) {
 	h := newCodeHighlighterWithLanguage("", "plain text", "")
 	first := h.getLexer(h.sample)

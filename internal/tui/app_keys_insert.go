@@ -512,6 +512,14 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 			// silently doing nothing.
 			return m.handleSwitchAgent()
 		}
+		// Checked after SwitchRole so the shared default (both bound to
+		// shift+tab) keeps switching the role here. It matters once the two
+		// bindings differ — a keymap that moves switch_role back to tab leaves
+		// shift+tab to cycle the agent view, the same as in Normal mode,
+		// instead of turning it into a dead key.
+		if keyMatches(key, m.keyMap.SwitchAgent) {
+			return m.handleSwitchAgent()
+		}
 		// Tab reaches here only when it completes nothing above. It is
 		// deliberately inert in Insert mode: binding it to a role change made
 		// the terminal's completion key mutate permissions, the prompt surface

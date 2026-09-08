@@ -10039,6 +10039,63 @@ func TestInsertTabStillSwitchesRoleWhenRebound(t *testing.T) {
 	}
 }
 
+// The documented escape hatch for the Tab → Shift+Tab move is
+// keymap.switch_role: ["tab"], and it must restore *both* halves of the old
+// behaviour: Tab switches the role and Shift+Tab goes back to cycling the agent
+// view in Insert mode, exactly as it does in Normal mode. Insert mode only
+// consulted SwitchRole, so the rebind turned Shift+Tab into a dead key there.
+func TestInsertShiftTabCyclesAgentViewWhenSwitchRoleIsRebound(t *testing.T) {
+	backend := &sessionControlAgent{
+		events:         make(chan agent.AgentEvent, 1),
+		currentRole:    "builder",
+		availableRoles: []string{"builder", "planner"},
+		subAgents: []agent.SubAgentInfo{{
+			InstanceID:   "agent-1",
+			AgentDefName: "reviewer",
+			TaskDesc:     "check code",
+		}},
+	}
+	m := NewModelWithSize(backend, 100, 24)
+	m.refreshSidebar()
+	m.mode = ModeInsert
+	m.keyMap.SwitchRole = []string{"tab"}
+
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab, Mod: tea.ModShift}))
+	if got := m.focusedAgentID; got != "agent-1" {
+		t.Fatalf("Insert mode Shift+Tab should cycle the agent view, focusedAgentID = %q", got)
+	}
+	if got := backend.currentRole; got != "builder" {
+		t.Fatalf("Insert mode Shift+Tab must not switch the role, currentRole = %q", got)
+	}
+}
+
+// The default keymap binds switch_role and switch_agent to the same key, and
+// the role must keep winning there: adding the SwitchAgent branch must not
+// reorder the default. Shift+Tab on the main view still cycles the role.
+func TestInsertShiftTabStillSwitchesRoleUnderTheDefaultKeymap(t *testing.T) {
+	backend := &sessionControlAgent{
+		events:         make(chan agent.AgentEvent, 1),
+		currentRole:    "builder",
+		availableRoles: []string{"builder", "planner"},
+		subAgents: []agent.SubAgentInfo{{
+			InstanceID:   "agent-1",
+			AgentDefName: "reviewer",
+			TaskDesc:     "check code",
+		}},
+	}
+	m := NewModelWithSize(backend, 100, 24)
+	m.refreshSidebar()
+	m.mode = ModeInsert
+
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab, Mod: tea.ModShift}))
+	if got := backend.currentRole; got != "planner" {
+		t.Fatalf("default Shift+Tab should switch the role, currentRole = %q", got)
+	}
+	if got := m.focusedAgentID; got != "" {
+		t.Fatalf("default Shift+Tab must not cycle the agent view, focusedAgentID = %q", got)
+	}
+}
+
 // Cycling a single configured role would land back on the same role, and the
 // switch itself is not free: it rebuilds the ruleset and writes a recovery
 // snapshot. The no-op is dropped before that cost.

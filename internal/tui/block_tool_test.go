@@ -2434,6 +2434,58 @@ func TestQueuedToolHeaderShowsQueuedLabelWithoutSpinner(t *testing.T) {
 	}
 }
 
+// The notify card used to build its header inline instead of going through
+// buildToolHeaderLine. It now shares the helper, so this pins both halves of
+// the badge rule it has to keep: a card queued by the scheduler shows the badge,
+// and a running one does not.
+func TestNotifyCardHeaderFollowsTheSharedQueuedBadgeRule(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{
+		ID:                         1,
+		Type:                       BlockToolCall,
+		ToolName:                   tools.NameNotify,
+		Content:                    `{"message":"build finished"}`,
+		ToolExecutionState:         agent.ToolCallExecutionStateQueued,
+		ToolQueuedByExecutionEvent: true,
+	}
+	joined := stripANSI(strings.Join(block.Render(96, "●"), "\n"))
+	if !strings.Contains(joined, "Queued") {
+		t.Fatalf("expected the queued notify card to carry the badge; got:\n%s", joined)
+	}
+
+	block.ToolExecutionState = agent.ToolCallExecutionStateRunning
+	block.ToolQueuedByExecutionEvent = false
+	block.InvalidateCache()
+	running := stripANSI(strings.Join(block.Render(96, "●"), "\n"))
+	if strings.Contains(running, "Queued") {
+		t.Fatalf("a running notify card must not carry the queued badge; got:\n%s", running)
+	}
+}
+
+// toolOutcomeNonEmptyLineCount is the single implementation behind the
+// collapsed-card body decision and the shell status line, so it has to count
+// real content across every line terminator a tool result can arrive with.
+func TestToolOutcomeNonEmptyLineCount(t *testing.T) {
+	cases := []struct {
+		in   string
+		want int
+	}{
+		{"", 0},
+		{"   \n\t\n", 0},
+		{"exit code 1", 1},
+		{"  exit code 1  \n\n", 1},
+		{"file not found\nDid you mean:\n- a.go", 3},
+		{"first\r\nsecond\r\n", 2},
+		{"first\rsecond", 2},
+		{"first\n\n\nsecond", 2},
+	}
+	for _, c := range cases {
+		if got := toolOutcomeNonEmptyLineCount(c.in); got != c.want {
+			t.Errorf("toolOutcomeNonEmptyLineCount(%q) = %d, want %d", c.in, got, c.want)
+		}
+	}
+}
+
 func TestGenericToolHeaderAndExpandedResultEscapesANSIRichText(t *testing.T) {
 	block := &Block{
 		ID:            1,

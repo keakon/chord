@@ -257,38 +257,34 @@ func preserveBackground(line, bgColor string) string {
 	if bgSeq == "" {
 		return line
 	}
-	// One pass replaces the four ReplaceAll rounds below. Every target is a
-	// reset sequence, so a single scan that recognises ESC '[' runs can emit
-	// the background sequence in place. Card rendering calls this for every
-	// body line of every frame, and the four passes each rescanned and
-	// reallocated the whole line — the dominant cost of a large streaming
-	// apply_patch card.
+	// One pass replaces the four ReplaceAll rounds it used to take. Every target
+	// is a reset sequence, so a single scan over the escape sequences can emit
+	// the background sequence in place. Card rendering calls this for every body
+	// line of every frame, and the four passes each rescanned and reallocated
+	// the whole line — the dominant cost of a large streaming apply_patch card.
+	//
+	// A sequence that is not one of the four resets resumes the scan one byte in
+	// rather than past the sequence: a reset can start inside what looks like an
+	// unterminated escape (`ESC [ ESC [ 0 m`), and skipping the outer run whole
+	// would swallow it. That keeps this byte-identical to the plain substring
+	// replacement it replaced.
 	var b strings.Builder
 	b.Grow(len(line) + 4*len(bgSeq))
 	last := 0
-	for i := 0; i+2 < len(line); i++ {
-		if line[i] != '\x1b' || line[i+1] != '[' {
+	for i := 0; i < len(line); {
+		if line[i] != '\x1b' {
+			i++
 			continue
 		}
-		end := -1
-		for j := i + 2; j < len(line); j++ {
-			c := line[j]
-			if c == 'm' {
-				end = j + 1
-				break
-			}
-			if c < '0' || c > '9' {
-				break
-			}
-		}
-		if end < 0 {
-			continue
-		}
+		end := skipANSISequence(line, i)
 		if seq := line[i:end]; seq == "\x1b[0m" || seq == "\x1b[m" || seq == "\x1b[49m" || seq == "\x1b[39m" {
 			b.WriteString(line[last:end])
 			b.WriteString(bgSeq)
 			last = end
+			i = end
+			continue
 		}
+		i++
 	}
 	if last == 0 {
 		return line

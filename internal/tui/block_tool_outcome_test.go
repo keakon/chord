@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -122,6 +123,102 @@ func TestCollapsedReadErrorWithSuggestionsShowsFullBody(t *testing.T) {
 	// suggestion list stays on its own lines so the suggested path is visible.
 	if strings.Contains(plain, "· Did you mean:") {
 		t.Fatalf("expected the collapsed read error to keep the body on separate lines, got:\n%s", plain)
+	}
+}
+
+// TestCollapsedMultiLineOutcomeIsBounded pins the cap on the in-place body a
+// collapsed card grants a multi-line failure. The bounded "Did you mean:" case
+// that motivated showing the body at all stays whole, but unbounded producers
+// exist (apply_patch aggregates one reason per file, an MCP tool may return any
+// multi-line error) and a collapsed card must not be able to grow past a
+// screenful with no way to shrink it.
+func TestCollapsedMultiLineOutcomeIsBounded(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+
+	short := make([]string, 0, collapsedToolOutcomeMaxLines)
+	for i := range collapsedToolOutcomeMaxLines {
+		short = append(short, fmt.Sprintf("reason line %d", i))
+	}
+	var result []string
+	appendToolOutcomeBody(&result, toolOutcomeError, strings.Join(short, "\n"), 60, false)
+	plain := stripANSI(strings.Join(result, "\n"))
+	for _, want := range short {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("a body at the cap must render whole, missing %q:\n%s", want, plain)
+		}
+	}
+	if strings.Contains(plain, "more lines") {
+		t.Fatalf("a body at the cap must not claim hidden lines:\n%s", plain)
+	}
+
+	long := make([]string, 0, collapsedToolOutcomeMaxLines+12)
+	for i := range collapsedToolOutcomeMaxLines + 12 {
+		long = append(long, fmt.Sprintf("reason line %d", i))
+	}
+	result = nil
+	appendToolOutcomeBody(&result, toolOutcomeError, strings.Join(long, "\n"), 60, false)
+	plain = stripANSI(strings.Join(result, "\n"))
+	// header row + capped body + hint row
+	if got, want := len(result), collapsedToolOutcomeMaxLines+2; got != want {
+		t.Fatalf("collapsed rows = %d, want %d:\n%s", got, want, plain)
+	}
+	if !strings.Contains(plain, long[collapsedToolOutcomeMaxLines-1]) {
+		t.Fatalf("the last kept line is missing:\n%s", plain)
+	}
+	if strings.Contains(plain, long[collapsedToolOutcomeMaxLines]) {
+		t.Fatalf("a line past the cap leaked into the collapsed card:\n%s", plain)
+	}
+	if !strings.Contains(plain, "... 12 more lines, press space to expand.") {
+		t.Fatalf("the truncation hint is missing or miscounted:\n%s", plain)
+	}
+
+	// Expanding still shows everything, so the hint is honest.
+	result = nil
+	appendToolOutcomeBody(&result, toolOutcomeError, strings.Join(long, "\n"), 60, true)
+	plain = stripANSI(strings.Join(result, "\n"))
+	for _, want := range long {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("an expanded card must render the whole body, missing %q:\n%s", want, plain)
+		}
+	}
+	if strings.Contains(plain, "more lines") {
+		t.Fatalf("an expanded card must not show the truncation hint:\n%s", plain)
+	}
+}
+
+// TestCollapsedReadCardBoundsALongError pins the same cap through a real card:
+// the collapsed read card is the one that opted into the in-place body, so it
+// is also the one that could grow unbounded.
+func TestCollapsedReadCardBoundsALongError(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	lines := make([]string, 0, 40)
+	lines = append(lines, "file not found: internal/tools/ignore.go", "Did you mean:")
+	for i := range 38 {
+		lines = append(lines, fmt.Sprintf("- internal/tools/candidate%02d.go", i))
+	}
+	block := outcomeCardFixture(tools.NameRead, outcomeCardArgs[tools.NameRead],
+		strings.Join(lines, "\n"), agent.ToolResultStatusError)
+	block.Collapsed = true
+
+	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(plain, "file not found: internal/tools/ignore.go") || !strings.Contains(plain, "Did you mean:") {
+		t.Fatalf("the collapsed card dropped the cause:\n%s", plain)
+	}
+	if strings.Contains(plain, "candidate37.go") {
+		t.Fatalf("the collapsed card rendered the whole unbounded body:\n%s", plain)
+	}
+	if !strings.Contains(plain, "more lines, press space to expand.") {
+		t.Fatalf("the collapsed card truncated without saying so:\n%s", plain)
+	}
+	if got := len(block.Render(120, "")); got > collapsedToolOutcomeMaxLines+8 {
+		t.Fatalf("collapsed card height = %d, want it bounded:\n%s", got, plain)
+	}
+
+	block.Collapsed = false
+	block.InvalidateCache()
+	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(expanded, "candidate37.go") {
+		t.Fatalf("the expanded card must still show the whole body:\n%s", expanded)
 	}
 }
 

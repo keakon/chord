@@ -351,7 +351,7 @@ func appendToolOutcomeBody(result *[]string, kind toolOutcomeKind, content strin
 		// suggestion the user needs to act on. Expanding costs only the error's
 		// own (short) length, so collapsed cards no longer force a toggle just
 		// to read why a call failed.
-		if !toolOutcomeBodyIsMultiLine(body) {
+		if toolOutcomeNonEmptyLineCount(body) < 2 {
 			width := max(contentWidth-len("↳ "+label+": "), 12)
 			if oneLine := truncateOneLine(toolCollapsedSummaryText(body), width); oneLine != "" {
 				*result = append(*result, style.Render("  ↳ "+label+": "+oneLine))
@@ -360,34 +360,62 @@ func appendToolOutcomeBody(result *[]string, kind toolOutcomeKind, content strin
 		}
 	}
 	*result = append(*result, style.Render("  ↳ "+label+":"))
-	for _, line := range wrapText(body, contentWidth) {
+	lines := wrapText(body, contentWidth)
+	if !expanded {
+		appendBoundedOutcomeLines(result, style, lines, contentWidth)
+		return
+	}
+	for _, line := range lines {
 		*result = append(*result, style.Render("    "+line))
 	}
 }
 
-// toolOutcomeBodyIsMultiLine reports whether an outcome body carries more than
-// one logical line (blank lines ignored), so a collapsed card can choose
-// between a one-row summary and the full body. A single long logical line still
-// folds to one truncated row; only genuinely multi-line outcomes (e.g. a "Did
-// you mean:" suggestion list) expand in place.
-func toolOutcomeBodyIsMultiLine(s string) bool {
-	trimmed := strings.TrimSpace(s)
-	if trimmed == "" {
-		return false
+// collapsedToolOutcomeMaxLines bounds the in-place body a collapsed card grants
+// a multi-line failure. The bounded case that motivated showing the body at all
+// — a "file not found" plus its "Did you mean:" suggestions — is a handful of
+// candidates and fits inside it. Unbounded producers do exist (apply_patch
+// aggregates one failure reason per file, and an MCP server may return an
+// arbitrarily long multi-line error), and with no cap a card that is already
+// collapsed can grow past a screenful with nothing left to fold.
+//
+// The budget is the collapsed card's own output budget: a failure body has no
+// claim to more room than a successful result gets before the same space press.
+const collapsedToolOutcomeMaxLines = maxToolCallCompactResultLines
+
+// appendBoundedOutcomeLines emits at most collapsedToolOutcomeMaxLines body
+// rows and, when it drops any, a final row naming the remainder and the key that
+// reveals it. The hint is truncated to the content width like any other row.
+func appendBoundedOutcomeLines(result *[]string, style lipgloss.Style, lines []string, contentWidth int) {
+	hidden := 0
+	if len(lines) > collapsedToolOutcomeMaxLines {
+		hidden = len(lines) - collapsedToolOutcomeMaxLines
+		lines = lines[:collapsedToolOutcomeMaxLines]
 	}
-	trimmed = strings.ReplaceAll(trimmed, "\r\n", "\n")
-	trimmed = strings.ReplaceAll(trimmed, "\r", "\n")
+	for _, line := range lines {
+		*result = append(*result, style.Render("    "+line))
+	}
+	if hidden > 0 {
+		hint := fmt.Sprintf("... %d more lines, press space to expand.", hidden)
+		*result = append(*result, DimStyle.Render("    "+truncateOneLine(hint, max(contentWidth, 12))))
+	}
+}
+
+// toolOutcomeNonEmptyLineCount counts the logical lines a tool result carries,
+// ignoring blank separators, so "is this a single logical line?" is judged on
+// real content. Splitting on both CR and LF covers results that arrive with
+// either terminator, and dropping empty fields makes CRLF count once.
+//
+// Callers use it for two decisions: a collapsed card picks between a one-row
+// summary and an in-place body, and the shell status line only quotes an error
+// verbatim when it is the whole cause.
+func toolOutcomeNonEmptyLineCount(s string) int {
 	count := 0
-	for _, line := range strings.Split(trimmed, "\n") {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		count++
-		if count > 1 {
-			return true
+	for line := range strings.FieldsFuncSeq(s, func(r rune) bool { return r == '\n' || r == '\r' }) {
+		if strings.TrimSpace(line) != "" {
+			count++
 		}
 	}
-	return false
+	return count
 }
 
 // appendToolOutcome renders the shared envelope for a finished card using the
@@ -497,7 +525,7 @@ func bashCollapsedOutcomeSummary(b *Block) (string, bool) {
 		// the real cause, so keep only a concise status (exit code / timeout)
 		// and leave the detail to the expanded card.
 		content := strings.TrimSpace(b.ResultContent)
-		if bashNonEmptyLineCount(content) == 1 {
+		if toolOutcomeNonEmptyLineCount(content) == 1 {
 			if line := bashFirstNonEmptyLine(sanitizeToolDisplayText(bashErrorText(content))); line != "" {
 				return truncateOneLine(line, 120), true
 			}
@@ -624,18 +652,6 @@ func bashErrorText(content string) string {
 		}
 	}
 	return trimmed
-}
-
-// bashNonEmptyLineCount counts the non-whitespace lines in content, ignoring
-// blank separator lines, so a "single-line" error is judged on real content.
-func bashNonEmptyLineCount(content string) int {
-	count := 0
-	for line := range strings.SplitSeq(strings.ReplaceAll(content, "\r\n", "\n"), "\n") {
-		if strings.TrimSpace(line) != "" {
-			count++
-		}
-	}
-	return count
 }
 
 // bashExitCodeAnywhere reports an "exit code N" status found on any line of an

@@ -148,14 +148,22 @@ type Block struct {
 	patchPreviewText string
 
 	// previewRendered memoizes the rendered lines of the live apply_patch
-	// preview so a growing patch only re-renders its tail. Keyed implicitly by
-	// previewRenderedPatch (the patch text they were rendered from) and
-	// previewRenderedWidth: both must still match for the memo to be reused.
-	// Without it, every coalesced stream step re-highlights all N lines, which
-	// is linear per step and quadratic over the stream.
-	previewRenderedPatch string
-	previewRenderedWidth int
-	previewRenderedLines []string
+	// preview so a growing patch only re-renders its tail. Keyed by
+	// previewRenderedPatch (the patch text they were rendered from),
+	// previewRenderedWidth, and the highlighter that produced them
+	// (previewRenderedHL plus the file path it was resolved for): all of them
+	// must still match for the memo to be reused. The highlighter belongs in the
+	// key because a multi-file patch resolves a new file path mid-stream and
+	// rebuilds the lexer in place — reusing lines rendered by the previous one
+	// would leave the card in two colour schemes, with no way to recover until
+	// the stream ends and the memo is dropped. Without the memo, every coalesced
+	// stream step re-highlights all N lines, which is linear per step and
+	// quadratic over the stream.
+	previewRenderedPatch  string
+	previewRenderedWidth  int
+	previewRenderedHL     *codeHighlighter
+	previewRenderedHLPath string
+	previewRenderedLines  []string
 
 	// toolArgsCache memoizes parsed JSON arguments for tool-call rendering.
 	// It must be invalidated whenever ToolName or Content changes.

@@ -444,10 +444,7 @@ func (b *Block) renderNotifyCall(width int, spinnerFrame string) []string {
 	// section, and a target/kind prefix would be the one fact the body
 	// never repeats.
 	headerLine := renderToolHeaderLine(prefix, b.ToolName)
-	headerLine = appendToolProgressSuffix(headerLine, b.ToolProgress, cardWidth-4)
-	if !isActive && b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent {
-		headerLine = renderQueuedToolHeaderBadge(headerLine, cardWidth)
-	}
+	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent, isActive)
 	result = append(result, headerLine)
 
 	if target != "" {

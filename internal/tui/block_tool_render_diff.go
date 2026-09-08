@@ -608,6 +608,8 @@ func (b *Block) cachedApplyPatchStreamingArgs(argsJSON string) string {
 func (b *Block) clearApplyPatchPreviewMemo() {
 	b.previewRenderedPatch = ""
 	b.previewRenderedWidth = 0
+	b.previewRenderedHL = nil
+	b.previewRenderedHLPath = ""
 	b.previewRenderedLines = nil
 }
 
@@ -657,12 +659,25 @@ func (b *Block) applyPatchPreviewHighlighter(filePath, patch string) *codeHighli
 }
 
 // appendApplyPatchPreviewLines renders the patch preview lines, reusing the
-// previously rendered prefix when the patch only grew. The last memoized line
-// is always re-rendered because the stream may still be extending it.
+// previously rendered prefix when the patch only grew and the same highlighter
+// state still applies. The last memoized line is always re-rendered because the
+// stream may still be extending it.
+//
+// hl is compared by identity and by the file path it is currently resolved for:
+// a multi-file patch (or a first coalesced frame whose path has not been parsed
+// out yet) swaps the lexer in place mid-stream, and reusing lines highlighted by
+// the previous lexer would leave the preview in two colour schemes for the rest
+// of the stream. Dropping the memo re-renders every line once with the new
+// lexer instead.
 func (b *Block) appendApplyPatchPreviewLines(patch string, width int, hl *codeHighlighter) []string {
 	lines := editPatchPreviewLines(patch)
+	hlPath := ""
+	if hl != nil {
+		hlPath = hl.filePath
+	}
 	reuse := 0
 	if b.previewRenderedWidth == width && b.previewRenderedPatch != "" &&
+		b.previewRenderedHL == hl && b.previewRenderedHLPath == hlPath &&
 		len(b.previewRenderedLines) > 0 && len(lines) >= len(b.previewRenderedLines) &&
 		strings.HasPrefix(patch, b.previewRenderedPatch) {
 		reuse = len(b.previewRenderedLines) - 1
@@ -676,6 +691,8 @@ func (b *Block) appendApplyPatchPreviewLines(patch string, width int, hl *codeHi
 	}
 	b.previewRenderedPatch = patch
 	b.previewRenderedWidth = width
+	b.previewRenderedHL = hl
+	b.previewRenderedHLPath = hlPath
 	b.previewRenderedLines = out
 	return out
 }

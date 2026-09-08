@@ -20,9 +20,7 @@ func cloneBlockForDeferredSource(src *Block) *Block {
 	clone.previewHL = nil
 	clone.patchPreviewLen = 0
 	clone.patchPreviewText = ""
-	clone.previewRenderedPatch = ""
-	clone.previewRenderedWidth = 0
-	clone.previewRenderedLines = nil
+	clone.clearApplyPatchPreviewMemo()
 	clone.richMarkdownHL = nil
 	clone.compactionSectionHL = nil
 	clone.thinkingStreamSettled = nil

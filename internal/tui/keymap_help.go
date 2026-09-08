@@ -94,25 +94,36 @@ func (km KeyMap) HelpGroups() []HelpGroup {
 		normalBindings = append(normalBindings, helpBinding([]string{"enter", "space"}, "open linked delegate worker"))
 	}
 
+	insertBindings := []HelpBinding{
+		helpBinding(km.InsertEscape, "exit insert mode"),
+		helpBinding(km.InsertSubmit, "send or continue"),
+		helpBinding(km.InsertNewline, "insert newline"),
+		helpBinding(km.InsertHistoryUp, "previous history"),
+		helpBinding(km.InsertHistoryDown, "next history"),
+		helpBinding(km.InsertAttachClipboard, "attach clipboard image or PDF"),
+		helpBinding(km.InsertClearInput, "clear input"),
+		helpBinding(km.InsertPageUp, "page transcript up"),
+		helpBinding(km.InsertPageDown, "page transcript down"),
+		helpBinding(km.SwitchRole, "switch main agent role (cycle; switches focused agent instead on a SubAgent view)"),
+	}
+	// Insert mode also honours switch_agent, but under the default keymap it
+	// shares a key with switch_role and the row above already describes what
+	// that key does. List it only once a keymap splits the two, which is
+	// exactly when Insert mode gains a distinct view-cycling key.
+	if !slices.Equal(km.SwitchRole, km.SwitchAgent) {
+		insertBindings = append(insertBindings, helpBinding(km.SwitchAgent, "switch focused agent (cycle)"))
+	}
+	insertBindings = append(insertBindings,
+		helpBinding(km.SwitchModel, "open model pool selector"),
+		helpBinding(km.ServiceTier, "switch service tier for subsequent model requests"),
+		helpBinding(km.Yolo, "toggle YOLO permission bypass"),
+		helpBinding(km.Diagnostics, "export diagnostics bundle"),
+	)
+
 	return []HelpGroup{
 		{
-			Title: "Insert Mode",
-			Bindings: []HelpBinding{
-				helpBinding(km.InsertEscape, "exit insert mode"),
-				helpBinding(km.InsertSubmit, "send or continue"),
-				helpBinding(km.InsertNewline, "insert newline"),
-				helpBinding(km.InsertHistoryUp, "previous history"),
-				helpBinding(km.InsertHistoryDown, "next history"),
-				helpBinding(km.InsertAttachClipboard, "attach clipboard image or PDF"),
-				helpBinding(km.InsertClearInput, "clear input"),
-				helpBinding(km.InsertPageUp, "page transcript up"),
-				helpBinding(km.InsertPageDown, "page transcript down"),
-				helpBinding(km.SwitchRole, "switch main agent role (cycle; switches focused agent instead on a SubAgent view)"),
-				helpBinding(km.SwitchModel, "open model pool selector"),
-				helpBinding(km.ServiceTier, "switch service tier for subsequent model requests"),
-				helpBinding(km.Yolo, "toggle YOLO permission bypass"),
-				helpBinding(km.Diagnostics, "export diagnostics bundle"),
-			},
+			Title:    "Insert Mode",
+			Bindings: insertBindings,
 		},
 		{
 			Title:    "Normal Mode",

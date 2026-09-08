@@ -9,6 +9,8 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	uv "github.com/keakon/ultraviolet"
+
+	"github.com/keakon/chord/internal/tools"
 )
 
 var osc8Regex = regexp.MustCompile(`\x1b\]8;[^\x07\x1b]*(?:\x07|\x1b\\)`)
@@ -648,6 +650,28 @@ func TestCloneBlockForDeferredSourceClearsThinkingStreamCache(t *testing.T) {
 	clone.ThinkingParts[0] = "## Clone\n\nsettled\n\ntail"
 	if block.ThinkingParts[0] == clone.ThinkingParts[0] {
 		t.Fatal("clone should not share ThinkingParts slice with source")
+	}
+}
+
+// The clone used to zero the apply_patch preview memo field by field, which
+// silently kept whatever field the memo grew next. It now goes through
+// clearApplyPatchPreviewMemo, so every part of the memo key is dropped —
+// including the highlighter the lines were rendered with, which the clone must
+// not share with the source.
+func TestCloneBlockForDeferredSourceClearsApplyPatchPreviewMemo(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	patch := "*** Begin Patch\n*** Update File: demo.go\n@@\n+func main() {}\n"
+	block := &Block{ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch}
+	_ = block.appendApplyPatchPreviewLines(patch, 80, block.applyPatchPreviewHighlighter("demo.go", patch))
+	if block.previewRenderedPatch == "" || block.previewRenderedHL == nil || len(block.previewRenderedLines) == 0 {
+		t.Fatal("expected the source preview memo to be populated")
+	}
+
+	clone := cloneBlockForDeferredSource(block)
+	if clone.previewRenderedPatch != "" || clone.previewRenderedWidth != 0 ||
+		clone.previewRenderedHL != nil || clone.previewRenderedHLPath != "" ||
+		clone.previewRenderedLines != nil {
+		t.Fatalf("deferred source clone kept part of the preview memo: %#v", clone)
 	}
 }
 

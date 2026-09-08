@@ -100,6 +100,36 @@ func TestKeyMapHelpShowsConfiguredStructuralJumpKeys(t *testing.T) {
 	}
 }
 
+// Insert mode honours switch_agent as well as switch_role. Under the default
+// keymap the two share a key and one row covers both, but a keymap that moves
+// switch_role back to tab leaves shift+tab cycling the agent view — and the
+// help has to say so, or the documented escape hatch is undiscoverable.
+func TestInsertModeHelpListsSwitchAgentOnlyWhenItHasItsOwnKey(t *testing.T) {
+	insertAgentKeys := func(km KeyMap) []string {
+		for _, group := range km.HelpGroups() {
+			if group.Title != "Insert Mode" {
+				continue
+			}
+			for _, binding := range group.Bindings {
+				if binding.Help == "switch focused agent (cycle)" {
+					return binding.Keys
+				}
+			}
+		}
+		return nil
+	}
+
+	if keys := insertAgentKeys(DefaultKeyMap()); keys != nil {
+		t.Fatalf("default keymap should not list a separate Insert-mode agent row, got %v", keys)
+	}
+
+	km := KeyMapFromConfig(map[string][]string{"switch_role": {"tab"}})
+	keys := insertAgentKeys(km)
+	if len(keys) != 1 || keys[0] != "shift+tab" {
+		t.Fatalf("rebound switch_role should surface shift+tab as the Insert-mode agent key, got %v", keys)
+	}
+}
+
 func TestNormalModeHelpListsCountedChordBindings(t *testing.T) {
 	m := NewModel(nil)
 	lines := m.helpLines(120)
