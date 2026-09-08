@@ -32,7 +32,7 @@ func TestModelDrivenProposalTransitionAllowedMatrix(t *testing.T) {
 				from string
 				to   string
 				want bool
-			}{name: "terminal settle from " + from, from: from, to: to, want: from == "" || from == modelDrivenProposalAccepted || from == modelDrivenProposalPreparing})
+			}{name: "terminal settle from " + from, from: from, to: to, want: from != modelDrivenProposalApplied})
 		}
 	}
 	for _, tc := range tests {

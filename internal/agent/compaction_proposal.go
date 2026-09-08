@@ -157,6 +157,7 @@ func modelDrivenProposalTransitionAllowed(from, to string) bool {
 		// already a successful terminal state; stale worker events must not
 		// overwrite it.
 		return isModelDrivenProposalTerminal(to) &&
-			(from == "" || from == modelDrivenProposalAccepted || from == modelDrivenProposalPreparing)
+			(from == "" || from == modelDrivenProposalAccepted || from == modelDrivenProposalPreparing ||
+				(from != modelDrivenProposalApplied && isModelDrivenProposalTerminal(from)))
 	}
 }
