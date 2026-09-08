@@ -305,6 +305,7 @@ func (a *MainAgent) tryArmModelDrivenCheckpoint(callID string, rawArgs string) (
 		ToolCallID: callID,
 		Args:       args,
 	}
+	a.pendingModelDrivenRequestID = callID
 	a.recordCompactionLifecycleEvent("accepted", map[string]string{"request_id": callID})
 	// The model called compact_context in this window:
 	// whatever the attempt settles to, the reminder nudge has been answered,
@@ -371,6 +372,7 @@ func (a *MainAgent) maybeStartModelDrivenBarrier() bool {
 	}
 	req := a.pendingModelDriven
 	a.pendingModelDriven = nil
+	a.pendingModelDrivenRequestID = ""
 	if a.turn == nil {
 		log.Warn("model-driven checkpoint pending but turn is gone; dropping request")
 		return false

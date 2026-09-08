@@ -51,6 +51,7 @@ type loadedSessionState struct {
 	PendingCompactionResume      *recovery.PendingCompactionResume
 	LastModelDrivenApplyBatch    uint64
 	AutoCompactRequestGeneration uint64
+	PendingModelDrivenRequestID  string
 	SubAgentStates               []loadedSubAgentState
 	MailboxMessages              []SubAgentMailboxMessage
 	MailboxSeqMax                uint64
@@ -418,6 +419,7 @@ func (a *MainAgent) applySessionSnapshot(loaded *loadedSessionState, sessionPath
 	loaded.PendingCompactionResume = clonePendingCompactionResume(snap.PendingCompactionResume)
 	loaded.LastModelDrivenApplyBatch = snap.LastModelDrivenApplyBatch
 	loaded.AutoCompactRequestGeneration = snap.AutoCompactRequestGeneration
+	loaded.PendingModelDrivenRequestID = strings.TrimSpace(snap.PendingModelDrivenRequestID)
 	subAgentStarted := time.Now()
 	loaded.SubAgentStates = a.loadRestoredSubAgentStates(sessionPath, tmpRecovery, snap, loaded.MailboxMessages, loaded.TaskRecords, started)
 	subAgentRestoreDuration = time.Since(subAgentStarted)
@@ -708,6 +710,9 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	}
 	a.setPendingCompactionResume(loaded.PendingCompactionResume)
 	a.lastModelDrivenApplyBatch = loaded.LastModelDrivenApplyBatch
+	if loaded.PendingModelDrivenRequestID != "" {
+		a.pendingModelDrivenNotice = "A model-driven checkpoint request was accepted before the previous session ended but was not applied; the previous context remains authoritative."
+	}
 	a.lastModelDrivenSkipBatch = 0
 	a.lastModelDrivenSkipReason = ""
 	// Restore starts a fresh compaction window for the reminder-class overlay

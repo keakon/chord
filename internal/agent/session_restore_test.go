@@ -1463,3 +1463,11 @@ func newTestMainAgentForRestore(t *testing.T, projectRoot, sessionDir string) *M
 	})
 	return a
 }
+
+func TestRecoverySnapshotPreservesPendingModelDrivenRequestID(t *testing.T) {
+	a := &MainAgent{pendingModelDrivenRequestID: "call-restore", ctxMgr: ctxmgr.NewManager(1000, 1000)}
+	snapshot := a.buildRecoverySnapshot()
+	if snapshot.PendingModelDrivenRequestID != "call-restore" {
+		t.Fatalf("pending model-driven request ID = %q", snapshot.PendingModelDrivenRequestID)
+	}
+}
