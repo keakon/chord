@@ -62,6 +62,14 @@ type checkpointTypedState struct {
 	StageID      string
 	StageStatus  string
 	Kind         string
+	Claims       map[string]checkpointClaim
+}
+
+type checkpointClaim struct {
+	Kind         string   `json:"kind,omitempty"`
+	Certainty    string   `json:"certainty,omitempty"`
+	EvidenceRefs []string `json:"evidence_refs,omitempty"`
+	Status       string   `json:"status,omitempty"`
 }
 
 // typedStateFromArgs extracts the machine-carryable subset of a fresh
@@ -74,7 +82,27 @@ func typedStateFromArgs(args tools.CompactContextArgs) checkpointTypedState {
 		StageID:      args.StageID,
 		StageStatus:  args.StageStatus,
 		Kind:         args.CheckpointKind,
+		Claims:       typedClaimsFromArgs(args),
 	}
+}
+
+func typedClaimsFromArgs(args tools.CompactContextArgs) map[string]checkpointClaim {
+	if len(args.ClaimKinds) == 0 && len(args.ClaimEvidence) == 0 {
+		return nil
+	}
+	out := make(map[string]checkpointClaim, len(args.ClaimKinds)+len(args.ClaimEvidence))
+	for claim, kind := range args.ClaimKinds {
+		out[claim] = checkpointClaim{Kind: kind, EvidenceRefs: append([]string(nil), args.ClaimEvidence[claim]...), Status: "active"}
+	}
+	for claim, refs := range args.ClaimEvidence {
+		item := out[claim]
+		item.EvidenceRefs = append([]string(nil), refs...)
+		if item.Status == "" {
+			item.Status = "active"
+		}
+		out[claim] = item
+	}
+	return out
 }
 
 // parseCheckpointTypedState reads the typed state block out of a checkpoint
@@ -94,12 +122,13 @@ func parseCheckpointTypedState(body string) (checkpointTypedState, bool) {
 	line := strings.TrimSpace(strings.SplitN(rest, "\n", 2)[0])
 	line = strings.TrimSpace(strings.TrimPrefix(line, "-"))
 	var state struct {
-		Decisions    []string `json:"decisions"`
-		OpenIssues   []string `json:"open_issues"`
-		EvidenceRefs []string `json:"evidence_refs"`
-		StageID      string   `json:"stage_id"`
-		StageStatus  string   `json:"stage_status"`
-		Kind         string   `json:"checkpoint_kind"`
+		Decisions    []string                   `json:"decisions"`
+		OpenIssues   []string                   `json:"open_issues"`
+		EvidenceRefs []string                   `json:"evidence_refs"`
+		StageID      string                     `json:"stage_id"`
+		StageStatus  string                     `json:"stage_status"`
+		Kind         string                     `json:"checkpoint_kind"`
+		Claims       map[string]checkpointClaim `json:"claims"`
 	}
 	if json.Unmarshal([]byte(line), &state) != nil {
 		return checkpointTypedState{}, false
@@ -111,6 +140,7 @@ func parseCheckpointTypedState(body string) (checkpointTypedState, bool) {
 		StageID:      strings.TrimSpace(state.StageID),
 		StageStatus:  strings.TrimSpace(state.StageStatus),
 		Kind:         strings.TrimSpace(state.Kind),
+		Claims:       state.Claims,
 	}, true
 }
 
@@ -119,12 +149,13 @@ func parseCheckpointTypedState(body string) (checkpointTypedState, bool) {
 // the JSON stays parseable by parseCheckpointTypedState.
 func renderTypedStateJSON(state checkpointTypedState) string {
 	payload := struct {
-		Decisions    []string `json:"decisions,omitempty"`
-		OpenIssues   []string `json:"open_issues,omitempty"`
-		EvidenceRefs []string `json:"evidence_refs,omitempty"`
-		StageID      string   `json:"stage_id,omitempty"`
-		StageStatus  string   `json:"stage_status,omitempty"`
-		Kind         string   `json:"checkpoint_kind,omitempty"`
+		Decisions    []string                   `json:"decisions,omitempty"`
+		OpenIssues   []string                   `json:"open_issues,omitempty"`
+		EvidenceRefs []string                   `json:"evidence_refs,omitempty"`
+		StageID      string                     `json:"stage_id,omitempty"`
+		StageStatus  string                     `json:"stage_status,omitempty"`
+		Kind         string                     `json:"checkpoint_kind,omitempty"`
+		Claims       map[string]checkpointClaim `json:"claims,omitempty"`
 	}{
 		Decisions:    boundTypedStateItems(state.Decisions),
 		OpenIssues:   boundTypedStateItems(state.OpenIssues),
@@ -132,6 +163,7 @@ func renderTypedStateJSON(state checkpointTypedState) string {
 		StageID:      state.StageID,
 		StageStatus:  state.StageStatus,
 		Kind:         state.Kind,
+		Claims:       state.Claims,
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
@@ -220,7 +252,25 @@ func mergeCheckpointTypedStates(prior, current checkpointTypedState) (merged che
 	if merged.Kind == "" {
 		merged.Kind = prior.Kind
 	}
+	merged.Claims = mergeTypedClaims(prior.Claims, current.Claims)
 	return merged, omitted
+}
+
+func mergeTypedClaims(prior, current map[string]checkpointClaim) map[string]checkpointClaim {
+	if len(prior) == 0 && len(current) == 0 {
+		return nil
+	}
+	out := make(map[string]checkpointClaim, len(prior)+len(current))
+	for claim, item := range prior {
+		out[claim] = item
+	}
+	for claim, item := range current {
+		if item.Status == "" {
+			item.Status = "active"
+		}
+		out[claim] = item
+	}
+	return out
 }
 
 func mergeTypedStateList(prior, current []string, cap int) ([]string, int) {

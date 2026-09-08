@@ -205,3 +205,25 @@ func containsString(items []string, want string) bool {
 	}
 	return false
 }
+
+func TestTypedClaimsCarryIdentityAndStatus(t *testing.T) {
+	prior := checkpointTypedState{Claims: map[string]checkpointClaim{
+		"tests pass": {Kind: "observed", EvidenceRefs: []string{"ev-old"}, Status: "active"},
+	}}
+	current := checkpointTypedState{Claims: map[string]checkpointClaim{
+		"tests pass": {Kind: "derived", EvidenceRefs: []string{"ev-new"}, Status: "superseded"},
+		"next step":  {Kind: "proposed", Status: "active"},
+	}}
+	merged, _ := mergeCheckpointTypedStates(prior, current)
+	if got := merged.Claims["tests pass"]; got.Status != "superseded" || got.Kind != "derived" || len(got.EvidenceRefs) != 1 || got.EvidenceRefs[0] != "ev-new" {
+		t.Fatalf("fresh claim did not replace prior identity: %#v", got)
+	}
+	if got := merged.Claims["next step"]; got.Status != "active" {
+		t.Fatalf("new claim status = %q", got.Status)
+	}
+	encoded := renderTypedStateJSON(merged)
+	decoded, ok := parseCheckpointTypedState("## Typed Checkpoint State\n" + encoded)
+	if !ok || decoded.Claims["tests pass"].Status != "superseded" {
+		t.Fatalf("claim state did not round-trip: %#v", decoded.Claims)
+	}
+}
