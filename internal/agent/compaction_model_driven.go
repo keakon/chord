@@ -1173,6 +1173,7 @@ func (b *modelDrivenCheckpointBuilder) render(exportedArchive string) (string, m
 // history into a fresh slice just to concatenate head and tail would duplicate
 // the entire conversation for no gain.
 func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierSnapshot, snapshot []message.Message, headSplit int, req *modelDrivenCheckpointRequest) string {
+	req = mergePriorTypedCheckpointState(req, latestPriorCheckpointBody(snapshot[:headSplit]))
 	headSnapshot := snapshot[:headSplit]
 	anchor := resolveLatestUserRequestAnchor(snapshot)
 	constraints := renderEvidenceKindForFallback(&compactionInput{EvidenceItems: bundle.evidenceItems}, evidenceUserCorrection, "- No preserved user constraints.")
@@ -1235,6 +1236,38 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 	summary = appendPriorCheckpointCarry(summary, latestPriorCheckpointBody(headSnapshot))
 	anchors := buildCompactionAnchors(latestCompactionAnchors(headSnapshot), bundle.originalRequest, bundle.evidenceItems)
 	return withCompactionAnchors(summary, anchors)
+}
+
+func mergePriorTypedCheckpointState(req *modelDrivenCheckpointRequest, prior string) *modelDrivenCheckpointRequest {
+	if req == nil || prior == "" {
+		return req
+	}
+	start := strings.Index(prior, "## Typed Checkpoint State")
+	if start < 0 {
+		return req
+	}
+	line := strings.TrimSpace(strings.TrimPrefix(strings.Split(strings.TrimSpace(prior[start+len("## Typed Checkpoint State"):]), "\n")[0], "-"))
+	var state struct {
+		Decisions, OpenIssues, Evidence []string
+		StageID, StageStatus, Kind      string
+	}
+	if json.Unmarshal([]byte(line), &state) != nil {
+		return req
+	}
+	copyReq := *req
+	copyReq.Args.Decisions = append(append([]string{}, state.Decisions...), copyReq.Args.Decisions...)
+	copyReq.Args.OpenIssues = append(append([]string{}, state.OpenIssues...), copyReq.Args.OpenIssues...)
+	copyReq.Args.EvidenceRefs = append(append([]string{}, state.Evidence...), copyReq.Args.EvidenceRefs...)
+	if copyReq.Args.StageID == "" {
+		copyReq.Args.StageID = state.StageID
+	}
+	if copyReq.Args.StageStatus == "" {
+		copyReq.Args.StageStatus = state.StageStatus
+	}
+	if copyReq.Args.CheckpointKind == "" {
+		copyReq.Args.CheckpointKind = state.Kind
+	}
+	return &copyReq
 }
 
 func renderTypedCheckpointState(req *modelDrivenCheckpointRequest) string {
