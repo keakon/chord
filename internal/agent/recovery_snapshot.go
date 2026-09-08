@@ -71,39 +71,45 @@ func (a *MainAgent) buildRecoverySnapshot() *recovery.SessionSnapshot {
 	a.subs.mu.RUnlock()
 
 	modelPoolCurrentModelPool, modelPoolAgentOverrides := a.snapshotModelPoolState()
+	proposal := a.modelDrivenProposalSnapshot()
 	return &recovery.SessionSnapshot{
-		Todos:                        todoStates,
-		ActiveAgents:                 agents,
-		ModelName:                    a.ModelName(),
-		ActiveRole:                   a.CurrentRole(),
-		ModelPoolCurrentModelPool:    modelPoolCurrentModelPool,
-		ModelPoolAgentOverrides:      modelPoolAgentOverrides,
-		CreatedAt:                    time.Now(),
-		LastInputTokens:              a.ctxMgr.LastInputTokens(),
-		LastTotalContextTokens:       a.ctxMgr.LastTotalContextTokens(),
-		CompactionGeneration:         a.nextCompactionPlanID,
-		LastHistoryIndex:             nextHistoryIndexMinusOne(a.sessionDir),
-		SessionEpoch:                 a.sessionEpoch,
-		ActiveBackgroundObjects:      spawnStatesForSnapshot(),
-		PendingCompactionResume:      a.snapshotPendingCompactionResume(),
-		LastModelDrivenApplyBatch:    a.lastModelDrivenApplyBatch,
-		AutoCompactRequestGeneration: a.autoCompactRequestGeneration.Load(),
-		PendingModelDrivenRequestID:  a.pendingModelDrivenRequestID,
-		LastModelDrivenRequestID:     a.lastModelDrivenRequestID,
-		PendingModelDrivenStatus:     a.pendingModelDrivenStatus,
-		PendingModelDrivenArgsJSON:   a.pendingModelDrivenAuditArgsSnapshot(),
-		ModelDrivenProposalReason:    a.modelDrivenProposalReason,
-		ModelDrivenProposalUpdatedAt: a.modelDrivenProposalUpdatedAt,
-		ModelDrivenProposal: &recovery.ModelDrivenProposalSnapshot{
-			RequestID: a.pendingModelDrivenRequestID,
-			Status:    a.pendingModelDrivenStatus,
-			ArgsJSON:  a.pendingModelDrivenAuditArgsSnapshot(),
-			Reason:    a.modelDrivenProposalReason,
-			UpdatedAt: a.modelDrivenProposalUpdatedAt,
-		},
+		Todos:                           todoStates,
+		ActiveAgents:                    agents,
+		ModelName:                       a.ModelName(),
+		ActiveRole:                      a.CurrentRole(),
+		ModelPoolCurrentModelPool:       modelPoolCurrentModelPool,
+		ModelPoolAgentOverrides:         modelPoolAgentOverrides,
+		CreatedAt:                       time.Now(),
+		LastInputTokens:                 a.ctxMgr.LastInputTokens(),
+		LastTotalContextTokens:          a.ctxMgr.LastTotalContextTokens(),
+		CompactionGeneration:            a.nextCompactionPlanID,
+		LastHistoryIndex:                nextHistoryIndexMinusOne(a.sessionDir),
+		SessionEpoch:                    a.sessionEpoch,
+		ActiveBackgroundObjects:         spawnStatesForSnapshot(),
+		PendingCompactionResume:         a.snapshotPendingCompactionResume(),
+		LastModelDrivenApplyBatch:       a.lastModelDrivenApplyBatch,
+		AutoCompactRequestGeneration:    a.autoCompactRequestGeneration.Load(),
+		PendingModelDrivenRequestID:     a.pendingModelDrivenRequestID,
+		LastModelDrivenRequestID:        a.lastModelDrivenRequestID,
+		PendingModelDrivenStatus:        a.pendingModelDrivenStatus,
+		PendingModelDrivenArgsJSON:      a.pendingModelDrivenAuditArgsSnapshot(),
+		ModelDrivenProposalReason:       a.modelDrivenProposalReason,
+		ModelDrivenProposalUpdatedAt:    a.modelDrivenProposalUpdatedAt,
+		ModelDrivenProposal:             proposal,
 		StageCompletionCandidateTurnID:  a.stageCompletionCandidateTurnID,
 		StageCompletionCandidatePending: a.stageCompletionCandidatePending,
 	}
+}
+
+func (a *MainAgent) modelDrivenProposalSnapshot() *recovery.ModelDrivenProposalSnapshot {
+	if a == nil || (a.pendingModelDrivenRequestID == "" && a.lastModelDrivenRequestID == "" && a.pendingModelDrivenStatus == "" && a.modelDrivenProposalReason == "") {
+		return nil
+	}
+	requestID := a.pendingModelDrivenRequestID
+	if requestID == "" {
+		requestID = a.lastModelDrivenRequestID
+	}
+	return &recovery.ModelDrivenProposalSnapshot{RequestID: requestID, Status: a.pendingModelDrivenStatus, ArgsJSON: a.pendingModelDrivenAuditArgsSnapshot(), Reason: a.modelDrivenProposalReason, UpdatedAt: a.modelDrivenProposalUpdatedAt}
 }
 
 func (a *MainAgent) pendingModelDrivenAuditArgsSnapshot() string {
