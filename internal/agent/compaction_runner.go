@@ -419,6 +419,10 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 		if currentGeneration != d.RuntimeGeneration {
 			return fmt.Errorf("model-driven compaction draft is stale: runtime generation changed from %d to %d", d.RuntimeGeneration, currentGeneration)
 		}
+		currentBundle := a.captureModelDrivenBarrierSnapshot(a.ctxMgr.Snapshot())
+		if d.RuntimeStateFingerprint != "" && currentBundle.runtimeStateFingerprint != d.RuntimeStateFingerprint {
+			return fmt.Errorf("model-driven compaction draft is stale: runtime state fingerprint changed")
+		}
 	}
 	if len(d.SourceRefs) > 0 {
 		started := time.Now()

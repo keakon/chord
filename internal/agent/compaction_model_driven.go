@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -133,7 +134,8 @@ type modelDrivenBarrierSnapshot struct {
 	// to maxRequestBatch(messages) after a process restart). The interval and
 	// cooldown verdicts and their settlement recording all use this one
 	// number, captured once on the event loop.
-	currentRequestBatch uint64
+	currentRequestBatch     uint64
+	runtimeStateFingerprint string
 	// lastModelDrivenApplyBatch / lastModelDrivenSkipBatch /
 	// lastModelDrivenSkipReason are the event-loop-owned apply/skip records at
 	// the barrier. The worker decides the interval and cooldown verdicts from
@@ -420,7 +422,7 @@ func (a *MainAgent) discardCompactionForModelOverride() {
 // bundle is immutable; the worker only ever reads it.
 func (a *MainAgent) captureModelDrivenBarrierSnapshot(snapshot []message.Message) modelDrivenBarrierSnapshot {
 	lastPreparedTurnID, lastPreparedSource, lastPreparedPrefix := a.captureLastPreparedSurfaceForPreflight()
-	return modelDrivenBarrierSnapshot{
+	bundle := modelDrivenBarrierSnapshot{
 		snapshot:                    snapshot,
 		evidenceItems:               a.evidenceItemsForCompaction(a.ctxMgr.GetMaxTokens()),
 		todos:                       a.GetTodos(),
@@ -446,6 +448,20 @@ func (a *MainAgent) captureModelDrivenBarrierSnapshot(snapshot []message.Message
 		lastPreparedSource:          lastPreparedSource,
 		lastPreparedPrefix:          lastPreparedPrefix,
 	}
+	bundle.runtimeStateFingerprint = modelDrivenRuntimeStateFingerprint(bundle)
+	return bundle
+}
+
+func modelDrivenRuntimeStateFingerprint(bundle modelDrivenBarrierSnapshot) string {
+	payload, _ := json.Marshal(struct {
+		Todos      []tools.TodoItem
+		SubAgents  []SubAgentInfo
+		Background []recovery.BackgroundObjectState
+		Queued     []message.Message
+		Evidence   []evidenceItem
+	}{bundle.todos, bundle.subAgents, bundle.backgroundObjects, bundle.queuedUserMessages, bundle.evidenceItems})
+	sum := sha256.Sum256(payload)
+	return fmt.Sprintf("%x", sum[:])
 }
 
 // captureLastPreparedSurfaceForPreflight snapshots the most recent sent
@@ -588,6 +604,7 @@ func (a *MainAgent) startModelDrivenCompactionAsync(bundle modelDrivenBarrierSna
 			draft.Target = target
 			draft.HeadSplit = headSplit
 			draft.RuntimeGeneration = bundle.currentRequestBatch
+			draft.RuntimeStateFingerprint = bundle.runtimeStateFingerprint
 		}
 		a.sendEvent(Event{Type: EventCompactionReady, Payload: draft})
 	}(ctx, bundle, planID, target, headSplit, req)

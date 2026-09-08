@@ -1601,3 +1601,22 @@ func TestApplyModelDrivenDraftRejectsChangedRuntimeGeneration(t *testing.T) {
 		t.Fatalf("stale model-driven draft error = %v", err)
 	}
 }
+
+func TestApplyModelDrivenDraftRejectsChangedRuntimeStateFingerprint(t *testing.T) {
+	a := &MainAgent{}
+	a.ctxMgr = ctxmgr.NewManager(10000, 10000)
+	a.sessionDir = t.TempDir()
+	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "request", RequestBatch: 1})
+	bundle := a.captureModelDrivenBarrierSnapshot(a.ctxMgr.Snapshot())
+	a.pendingUserMessages = []pendingUserMessage{{Content: "queued", FromUser: true}}
+	err := a.applyCompactionDraftAsync(&compactionDraft{
+		SummaryMode:             compactionSummaryModeModelDriven,
+		RuntimeGeneration:       1,
+		RuntimeStateFingerprint: bundle.runtimeStateFingerprint,
+		HeadSplit:               1,
+		NewMessages:             []message.Message{{Role: message.RoleUser, Content: "summary"}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "runtime state fingerprint changed") {
+		t.Fatalf("stale runtime state error = %v", err)
+	}
+}
