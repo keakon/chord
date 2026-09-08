@@ -1472,7 +1472,9 @@ func TestRecoverySnapshotPreservesPendingModelDrivenRequestID(t *testing.T) {
 			ToolCallID: "call-restore",
 			Args:       tools.CompactContextArgs{ActiveObjective: "preserve state"},
 		},
-		ctxMgr: ctxmgr.NewManager(1000, 1000),
+		ctxMgr:                          ctxmgr.NewManager(1000, 1000),
+		stageCompletionCandidateTurnID:  7,
+		stageCompletionCandidatePending: true,
 	}
 	snapshot := a.buildRecoverySnapshot()
 	if snapshot.PendingModelDrivenRequestID != "call-restore" {
@@ -1483,5 +1485,8 @@ func TestRecoverySnapshotPreservesPendingModelDrivenRequestID(t *testing.T) {
 	}
 	if !strings.Contains(snapshot.PendingModelDrivenArgsJSON, "preserve state") {
 		t.Fatalf("pending model-driven request args = %q", snapshot.PendingModelDrivenArgsJSON)
+	}
+	if snapshot.StageCompletionCandidateTurnID != 7 || !snapshot.StageCompletionCandidatePending {
+		t.Fatalf("stage completion candidate = turn=%d pending=%v", snapshot.StageCompletionCandidateTurnID, snapshot.StageCompletionCandidatePending)
 	}
 }
