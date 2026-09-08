@@ -40,6 +40,13 @@ func TestCompactionGraceDefersTwoBatchesThenExpires(t *testing.T) {
 	if notice == "" || !strings.Contains(notice, "compact_context") || !strings.Contains(notice, "after the next 2 requests") || strings.Contains(notice, "<") {
 		t.Fatalf("imminent notice = %q, want bare text naming compact_context and the 2-request window", notice)
 	}
+	// The retention semantics must stay in this notice: the checkpoint wrapper
+	// states them too, but the model only reads that after the switch, so
+	// dropping them here leaves it deciding whether to checkpoint while it
+	// still reads compaction as a reset.
+	if !strings.Contains(notice, "archived history files") {
+		t.Fatalf("imminent notice = %q, want the post-compaction retention semantics", notice)
+	}
 	a.pendingCompactionImminent = ""
 
 	// Same batch again (the request was cancelled before dispatch and is

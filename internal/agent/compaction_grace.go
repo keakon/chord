@@ -31,6 +31,15 @@ const (
 // every later deferred request reports its true remaining count, so the model
 // always sees how much room is actually left. It is bare
 // content; the turn-overlay injector wraps it in a <system-reminder> block.
+//
+// The closing line states what a compaction actually preserves. The checkpoint
+// wrapper explains this in detail (archived history map, read-back guidance,
+// verbatim recent tail), but the model only sees that wrapper *after* the
+// switch; before it, this notice is the only place the retention semantics can
+// come from, and a model that reads "compaction" as "reset" has no reason to
+// spend a turn checkpointing. The trailing clause keeps that reassurance from
+// undercutting the externalization instruction above it: recovery exists, but
+// it costs a tool call, so writing state out is still the cheaper path.
 func compactionImminentText(requests int) string {
 	countdown := fmt.Sprintf("the next %d requests", requests)
 	if requests == 1 {
@@ -38,7 +47,8 @@ func compactionImminentText(requests int) string {
 	}
 	return fmt.Sprintf("The context has crossed the automatic-compaction threshold. Automatic compaction will start after %s unless a context checkpoint is applied first.\n", countdown) +
 		"If the current phase is wrapped up and its working state is externalized, call compact_context alone on this turn to checkpoint it now.\n" +
-		"Otherwise write important findings, decisions, and working state to a project file your role may write (for example a task-notes file under .chord/notes/, named with a YYYYMMDD date prefix) so they survive the compaction."
+		"Otherwise write important findings, decisions, and working state to a project file your role may write (for example a task-notes file under .chord/notes/, named with a YYYYMMDD date prefix) so they survive the compaction.\n" +
+		"Compaction is recoverable rather than a reset: earlier messages are exported to archived history files whose paths are listed in the new context and can be read back with the read tool, and the newest messages are kept verbatim. Reading an archive back still costs a tool call, so externalizing the state that matters remains the cheaper path."
 }
 
 // usageDrivenCompactionGraceDefers decides, on the pre-request gate after the
