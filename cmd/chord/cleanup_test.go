@@ -196,3 +196,115 @@ func TestWriteCleanupCandidateSkip(t *testing.T) {
 		t.Fatalf("cleanup candidate skip output = %q, want %q", got, want)
 	}
 }
+
+func TestWriteCleanupSummarySessions(t *testing.T) {
+	removed := []maintenance.CleanupCandidate{
+		{Path: "/sessions/p1/s1", Kind: "session", Bytes: 1000},
+		{Path: "/sessions/p1/s2", Kind: "session", Bytes: 1000},
+		{Path: "/sessions/p2", Kind: "empty project sessions", Bytes: 490},
+	}
+
+	var buf bytes.Buffer
+	writeCleanupSummary(&buf, "removed", "sessions", removed)
+
+	want := "removed 2 sessions, 1 empty project dirs, total 2.4 KB\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("cleanup sessions summary output = %q, want %q", got, want)
+	}
+}
+
+func TestWriteCleanupSummarySessionsSingleKind(t *testing.T) {
+	removed := []maintenance.CleanupCandidate{
+		{Path: "/sessions/p1/s1", Kind: "session", Bytes: 1000},
+	}
+
+	var buf bytes.Buffer
+	writeCleanupSummary(&buf, "would remove", "sessions", removed)
+
+	want := "would remove 1 sessions, total 1000 B\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("cleanup sessions summary output = %q, want %q", got, want)
+	}
+}
+
+func TestWriteCleanupSummaryOtherKinds(t *testing.T) {
+	removed := []maintenance.CleanupCandidate{
+		{Path: "/logs/chord.log.1", Kind: "logs", Bytes: 1000},
+		{Path: "/logs/chord.log.2", Kind: "logs", Bytes: 2000},
+		{Path: "/logs/chord.log.3", Kind: "logs", Bytes: 3000},
+	}
+
+	var buf bytes.Buffer
+	writeCleanupSummary(&buf, "removed", "logs", removed)
+
+	want := "removed 3 items, total 5.9 KB\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("cleanup logs summary output = %q, want %q", got, want)
+	}
+}
+
+func TestWriteCleanupSummaryEmpty(t *testing.T) {
+	var buf bytes.Buffer
+	writeCleanupSummary(&buf, "removed", "sessions", nil)
+	if got := buf.String(); got != "" {
+		t.Fatalf("cleanup summary for nothing removed = %q, want empty", got)
+	}
+}
+
+func TestCleanupSessionsCommandYesPrintsSummary(t *testing.T) {
+	_, _, sessionsDir, _ := setCleanupPathEnv(t)
+	old := time.Now().Add(-2 * time.Hour)
+	for _, project := range []string{"HOME-Workspace-p1", "HOME-Workspace-p2"} {
+		projectDir := filepath.Join(sessionsDir, project)
+		if err := os.MkdirAll(projectDir, 0o755); err != nil {
+			t.Fatalf("MkdirAll %s: %v", projectDir, err)
+		}
+		if err := os.WriteFile(filepath.Join(projectDir, "project.json"), []byte("{}"), 0o600); err != nil {
+			t.Fatalf("write project.json: %v", err)
+		}
+	}
+	for _, sid := range []string{"20260101000000000", "20260102000000000"} {
+		sessionDir := filepath.Join(sessionsDir, "HOME-Workspace-p1", sid)
+		if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+			t.Fatalf("MkdirAll %s: %v", sessionDir, err)
+		}
+		if err := os.WriteFile(filepath.Join(sessionDir, "main.jsonl"), []byte("line\n"), 0o600); err != nil {
+			t.Fatalf("write main.jsonl: %v", err)
+		}
+	}
+	// Age the whole tree last so creating session dirs does not refresh the
+	// project dir mtimes past the cutoff.
+	for _, project := range []string{"HOME-Workspace-p1", "HOME-Workspace-p2"} {
+		projectDir := filepath.Join(sessionsDir, project)
+		for _, sid := range []string{"20260101000000000", "20260102000000000"} {
+			sessionDir := filepath.Join(projectDir, sid)
+			if info, err := os.Stat(sessionDir); err == nil && info.IsDir() {
+				if err := os.Chtimes(sessionDir, old, old); err != nil {
+					t.Fatalf("Chtimes %s: %v", sessionDir, err)
+				}
+			}
+		}
+		if err := os.Chtimes(projectDir, old, old); err != nil {
+			t.Fatalf("Chtimes %s: %v", projectDir, err)
+		}
+	}
+
+	var buf bytes.Buffer
+	cmd := newCleanupCmd()
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"sessions", "--older-than", "1h", "--yes"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("cleanup sessions --yes Execute: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "removed 2 sessions, 2 empty project dirs, total ") {
+		t.Fatalf("cleanup sessions --yes output = %q, want summary line", out)
+	}
+	if strings.Contains(out, "dry-run") {
+		t.Fatalf("cleanup sessions --yes output = %q, must not mention dry-run", out)
+	}
+	if _, err := os.Stat(filepath.Join(sessionsDir, "HOME-Workspace-p1", "20260101000000000")); !os.IsNotExist(err) {
+		t.Fatalf("cleanup sessions --yes should remove old session, stat err=%v", err)
+	}
+}

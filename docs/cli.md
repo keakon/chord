@@ -300,7 +300,16 @@ Sample output:
 
 ```text
 would remove /Users/me/.local/state/chord/sessions/project-a/202605120001 (263.5 MB)
+would remove /Users/me/.local/state/chord/sessions/project-b (490 B)
+would remove 1 sessions, 1 empty project dirs, total 263.5 MB
 dry-run: pass --yes to delete
+```
+
+The last line summarizes what would be removed. Session directories and empty project dirs (which hold only a leftover `project.json`) are counted separately, so the byte total is not read as belonging to the empty dirs. With `--yes`, the same lines use `removed` instead of `would remove`, with no `dry-run` trailer.
+
+```text
+removed /Users/me/.local/state/chord/sessions/project-a/202605120001 (263.5 MB)
+removed 1 sessions, total 263.5 MB
 ```
 
 ## `chord worktree`

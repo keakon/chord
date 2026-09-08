@@ -3295,6 +3295,11 @@ func TestCreateSubAgentSnapshotPersistFailureDoesNotLeakSlot(t *testing.T) {
 	}
 
 	a.closeSubAgent(sub.instanceID)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := sub.waitDone(ctx); err != nil {
+		t.Fatalf("wait for SubAgent shutdown: %v", err)
+	}
 	snap = a.runtimeGovernorSnapshot()
 	if snap.RuntimeInUse != 0 || snap.RuntimeHolders != 0 || snap.RuntimeSlotDrift != 0 {
 		t.Fatalf("governor after close = in_use:%d holders:%d drift:%d, want 0/0/0", snap.RuntimeInUse, snap.RuntimeHolders, snap.RuntimeSlotDrift)

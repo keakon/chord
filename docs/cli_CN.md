@@ -300,7 +300,16 @@ chord cleanup cache --yes
 
 ```text
 would remove /Users/me/.local/state/chord/sessions/project-a/202605120001 (263.5 MB)
+would remove /Users/me/.local/state/chord/sessions/project-b (490 B)
+would remove 1 sessions, 1 empty project dirs, total 263.5 MB
 dry-run: pass --yes to delete
+```
+
+最后一行汇总本次将要删除的条目与总大小。会话目录与空壳项目目录（只剩一个 `project.json`）分开计数，字节总量不会让人误以为是空壳目录占用的。加 `--yes` 后同样输出这些行，只是 `would remove` 变为 `removed`，末尾不再有 `dry-run` 提示。
+
+```text
+removed /Users/me/.local/state/chord/sessions/project-a/202605120001 (263.5 MB)
+removed 1 sessions, total 263.5 MB
 ```
 
 ## `chord worktree`

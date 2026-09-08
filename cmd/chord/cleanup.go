@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -58,6 +59,16 @@ func newCleanupCmd() *cobra.Command {
 		for _, c := range res.Candidates {
 			writeCleanupCandidate(out, verb, c)
 		}
+		removed := res.Deleted
+		if !yes {
+			removed = nil
+			for _, c := range res.Candidates {
+				if c.Skip == "" {
+					removed = append(removed, c)
+				}
+			}
+		}
+		writeCleanupSummary(out, verb, kind, removed)
 		if !yes {
 			fmt.Fprintln(out, "dry-run: pass --yes to delete")
 		}
@@ -87,4 +98,38 @@ func writeCleanupCandidate(w io.Writer, verb string, candidate maintenance.Clean
 		return
 	}
 	fmt.Fprintf(w, "%s %s (%s)\n", verb, candidate.Path, bytefmt.Short(candidate.Bytes))
+}
+
+// writeCleanupSummary prints one aggregate line after the per-entry lines. Empty
+// project dirs hold only a leftover project.json, so sessions are counted
+// separately from them and the byte total is not read as belonging to the dirs.
+func writeCleanupSummary(w io.Writer, verb, kind string, removed []maintenance.CleanupCandidate) {
+	if len(removed) == 0 {
+		return
+	}
+	var total int64
+	for _, c := range removed {
+		total += c.Bytes
+	}
+	what := fmt.Sprintf("%d items", len(removed))
+	if kind == "sessions" {
+		var sessions, emptyDirs int
+		for _, c := range removed {
+			switch c.Kind {
+			case "session":
+				sessions++
+			case "empty project sessions":
+				emptyDirs++
+			}
+		}
+		parts := make([]string, 0, 2)
+		if sessions > 0 {
+			parts = append(parts, fmt.Sprintf("%d sessions", sessions))
+		}
+		if emptyDirs > 0 {
+			parts = append(parts, fmt.Sprintf("%d empty project dirs", emptyDirs))
+		}
+		what = strings.Join(parts, ", ")
+	}
+	fmt.Fprintf(w, "%s %s, total %s\n", verb, what, bytefmt.Short(total))
 }
