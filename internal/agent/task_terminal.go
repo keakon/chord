@@ -35,7 +35,9 @@ func (a *MainAgent) terminalStatusAfterCommit(sub *SubAgent, requested SubAgentS
 		// A conflicting settlement returns before updating the runtime. Pin it
 		// to the immutable winner so terminal cleanup can still park it.
 		if sub != nil && !isTerminalSubAgentState(sub.State()) {
-			sub.setState(status, rec.LastSummary)
+			if !sub.setState(status, rec.LastSummary) {
+				log.Warnf("terminal winner could not be applied to runtime agent=%v task_id=%v state=%v", sub.instanceID, taskID, status)
+			}
 		}
 		return status
 	}
