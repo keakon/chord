@@ -3,6 +3,7 @@ package agent
 import (
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/keakon/chord/internal/message"
 )
@@ -58,13 +59,48 @@ func latestPriorCheckpointBody(messages []message.Message) string {
 		body = stripCompactionAnchorsBlock(body)
 		body = stripCheckpointSkillsSection(body)
 		body = stripPriorCheckpointCarrySection(body)
-		body = compactTextSnippet(body, compactCheckpointCarryMaxChars)
+		body = truncateCheckpointCarryLines(body, compactCheckpointCarryMaxChars)
 		if body == "" {
 			return ""
 		}
 		return body
 	}
 	return ""
+}
+
+func truncateCheckpointCarryLines(body string, maxChars int) string {
+	const omitted = "[Earlier checkpoint content omitted; read the archive for the complete record.]"
+	body = strings.TrimSpace(body)
+	if body == "" || maxChars <= 0 {
+		return ""
+	}
+	if utf8.RuneCountInString(body) <= maxChars {
+		return body
+	}
+	omittedChars := utf8.RuneCountInString(omitted)
+	if maxChars < omittedChars {
+		return ""
+	}
+	lines := strings.Split(body, "\n")
+	kept := make([]string, 0, len(lines))
+	used := 0
+	for _, line := range lines {
+		lineChars := utf8.RuneCountInString(line)
+		separatorChars := 0
+		if len(kept) > 0 {
+			separatorChars = 1
+		}
+		const omissionSeparatorChars = 1
+		if used+separatorChars+lineChars+omissionSeparatorChars+omittedChars > maxChars {
+			break
+		}
+		kept = append(kept, line)
+		used += separatorChars + lineChars
+	}
+	if len(kept) == 0 {
+		return omitted
+	}
+	return strings.TrimSpace(strings.Join(kept, "\n")) + "\n" + omitted
 }
 
 // stripCompactionAnchorsBlock removes the verbatim [Session Anchors] block from

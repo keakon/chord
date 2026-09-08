@@ -3,6 +3,7 @@ package agent
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/keakon/chord/internal/message"
 )
@@ -70,6 +71,76 @@ func TestLatestPriorCheckpointBodyReturnsNewestAndSkipsPlainMessages(t *testing.
 	}
 	if latestPriorCheckpointBody(nil) != "" {
 		t.Fatal("empty messages must yield no carried body")
+	}
+}
+
+func TestLatestPriorCheckpointBodyTruncatesAtLineBoundary(t *testing.T) {
+	lines := "## Decisions\n- keep the parser contract\n- preserve tool ordering\n## Next Step\n- run the focused tests\n"
+	msg := checkpointMessageForCarryTest(lines+strings.Repeat("x", compactCheckpointCarryMaxChars), nil)
+
+	got := latestPriorCheckpointBody([]message.Message{msg})
+	if !strings.Contains(got, "- preserve tool ordering") {
+		t.Fatalf("carry dropped a complete preceding item: %q", got)
+	}
+	if !strings.Contains(got, "Earlier checkpoint content omitted") {
+		t.Fatalf("truncated carry must disclose omitted content: %q", got)
+	}
+	if strings.Contains(got, strings.Repeat("x", 32)) {
+		t.Fatalf("carry must not include a partial oversized line: %q", got)
+	}
+}
+
+func TestCheckpointCarryBudgetAndFormatting(t *testing.T) {
+	body := "## Decision\n- preserve ordering\n  continuation of the decision\n\n" + strings.Repeat("oversized ", 300)
+	for _, budget := range []int{-1, 0, 1, 77, 78, 100, 160, 2400} {
+		got := truncateCheckpointCarryLines(body, budget)
+		if len([]rune(got)) > max(budget, 0) {
+			t.Fatalf("budget %d exceeded: %d", budget, len([]rune(got)))
+		}
+	}
+	got := truncateCheckpointCarryLines(body, 200)
+	if !strings.Contains(got, "\n  continuation of the decision") {
+		t.Fatalf("indentation was changed: %q", got)
+	}
+	if got := truncateCheckpointCarryLines("## Decision\n- complete", 200); got != "## Decision\n- complete" {
+		t.Fatalf("untruncated content changed: %q", got)
+	}
+}
+
+func TestCheckpointCarryTruncationBoundaries(t *testing.T) {
+	const omitted = "[Earlier checkpoint content omitted; read the archive for the complete record.]"
+	omittedChars := utf8.RuneCountInString(omitted)
+	oversized := strings.Repeat("x", omittedChars+20)
+	for _, test := range []struct {
+		name   string
+		body   string
+		budget int
+		want   string
+	}{
+		{name: "empty", body: " \n ", budget: 200},
+		{name: "negative budget", body: oversized, budget: -1},
+		{name: "zero budget", body: oversized, budget: 0},
+		{name: "short content", body: "keep", budget: 4, want: "keep"},
+		{name: "below omission budget", body: oversized, budget: omittedChars - 1},
+		{name: "exact omission budget", body: oversized, budget: omittedChars, want: omitted},
+		{name: "oversized first line", body: oversized + "\nkeep", budget: omittedChars + 10, want: omitted},
+		{name: "exact line budget", body: "keep\n" + oversized, budget: omittedChars + 5, want: "keep\n" + omitted},
+		{name: "line exceeds budget", body: "keep\n" + oversized, budget: omittedChars + 4, want: omitted},
+		{name: "unicode exact content", body: "保持顺序", budget: 4, want: "保持顺序"},
+		{name: "unicode exact line", body: "保持顺序\n" + oversized, budget: omittedChars + 5, want: "保持顺序\n" + omitted},
+		{name: "unicode line exceeds budget", body: "保持顺序\n" + oversized, budget: omittedChars + 4, want: omitted},
+		{name: "CRLF intact", body: "keep\r\norder", budget: 200, want: "keep\r\norder"},
+		{name: "CRLF truncated", body: "keep\r\norder\r\n" + oversized, budget: omittedChars + 13, want: "keep\r\norder\n" + omitted},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := truncateCheckpointCarryLines(test.body, test.budget)
+			if got != test.want {
+				t.Fatalf("truncateCheckpointCarryLines() = %q, want %q", got, test.want)
+			}
+			if !utf8.ValidString(got) || utf8.RuneCountInString(got) > max(test.budget, 0) {
+				t.Fatalf("invalid output or exceeded budget: %q", got)
+			}
+		})
 	}
 }
 
