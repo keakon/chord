@@ -900,9 +900,6 @@ func (a *MainAgent) refreshEvidenceValidity() {
 	messages := a.ctxMgr.Snapshot()
 	var scan reductionHistoryScan
 	invalidated := a.externalReadsInvalidatedLazy(messages, &scan)
-	if len(invalidated) == 0 {
-		return
-	}
 	byCallID := make(map[string]struct{})
 	for index := range invalidated {
 		if index >= 0 && index < len(messages) && messages[index].ToolCallID != "" {

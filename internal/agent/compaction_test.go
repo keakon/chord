@@ -6706,3 +6706,17 @@ func TestAddToolEvidenceCandidateBindsToolStateAndRevision(t *testing.T) {
 		t.Fatalf("tool evidence = %#v", items)
 	}
 }
+
+func TestRefreshEvidenceValidityInvalidatesChangedToolFile(t *testing.T) {
+	projectRoot := t.TempDir()
+	path := filepath.Join(projectRoot, "main.go")
+	if err := os.WriteFile(path, []byte("before\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := &MainAgent{projectRoot: projectRoot, tools: tools.NewRegistry(), ctxMgr: ctxmgr.NewManager(10000, 1000)}
+	a.evidence.add(evidenceItem{Kind: evidenceToolDiff, SourceID: "call-1", Excerpt: "diff", Revisions: map[string]string{path: "bad-revision"}, Validity: evidenceValidityValid})
+	a.refreshEvidenceValidity()
+	if got := a.evidence.snapshot()[0].Validity; got != evidenceValidityInvalidated {
+		t.Fatalf("evidence validity = %q, want invalidated", got)
+	}
+}
