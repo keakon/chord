@@ -18,6 +18,21 @@ func (a *MainAgent) handleSubAgentStateChangedEvent(evt Event) {
 	if sub == nil {
 		return
 	}
+	if payload.InstanceID != "" && payload.InstanceID != sub.instanceID {
+		log.Debugf("dropping stale subagent state event instance=%v current=%v", payload.InstanceID, sub.instanceID)
+		return
+	}
+	if payload.TaskID != "" && payload.TaskID != sub.taskID {
+		log.Debugf("dropping stale subagent state event task=%v current=%v", payload.TaskID, sub.taskID)
+		return
+	}
+	if payload.Attempt != 0 {
+		record := a.taskRecordByTaskID(sub.taskID)
+		if record == nil || record.Attempt != payload.Attempt {
+			log.Debugf("dropping stale subagent state event task=%v attempt=%v", sub.taskID, payload.Attempt)
+			return
+		}
+	}
 	if !sub.setState(payload.State, payload.Summary) {
 		return
 	}

@@ -711,7 +711,7 @@ func (a *MainAgent) handleEscalate(evt Event) {
 	a.handleSubAgentStateChangedEvent(Event{
 		Type:     EventSubAgentStateChanged,
 		SourceID: evt.SourceID,
-		Payload:  &SubAgentStateChangedPayload{State: SubAgentStateWaitingMain, Summary: reason},
+		Payload:  &SubAgentStateChangedPayload{State: SubAgentStateWaitingMain, Summary: reason, InstanceID: sub.instanceID, TaskID: sub.taskID},
 	})
 	ownerAgentID, ownerTaskID, _, _ := sub.ownerSnapshot()
 	a.releaseSubAgentSlot(sub)

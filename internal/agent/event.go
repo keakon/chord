@@ -162,8 +162,11 @@ type loopExitResult struct {
 }
 
 type SubAgentStateChangedPayload struct {
-	State   SubAgentState
-	Summary string
+	State      SubAgentState
+	Summary    string
+	InstanceID string
+	TaskID     string
+	Attempt    uint64
 }
 
 type SubAgentCloseRequestedPayload struct {
