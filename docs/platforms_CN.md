@@ -27,7 +27,7 @@ Chord 主要在 macOS 上开发和测试。其他平台不同程度可用：大�
 [^clip]: `Ctrl+V` / `Alt+V` 通过原生后端读取系统剪贴板。是否可用仍取决于本机 display/clipboard 环境；远程 SSH 会话通常读取远端主机剪贴板，而不是终端客户端剪贴板。Windows Terminal 会占用 `Ctrl+V`，因此 Windows 及其承载的 WSL 会话请使用 `Alt+V`。
 [^img]: 图片渲染当前自动检测 Kitty graphics 与 iTerm2 inline images（Ghostty 走 Kitty，WezTerm 走 iTerm2）。三者都不支持时，图片附件仍可发给模型，但 TUI 内无预览。`tmux` / `zellij` 内默认保守禁用。
 [^lsp]: 需要本地装好对应 language server（如 `gopls`、`typescript-language-server`、`rust-analyzer`）。Chord 不打包它们。
-[^py-unix]: 类 Unix 下 Chord 在 LSP root 下依次探测 `.venv/bin/python`、`venv/bin/python`、`env/bin/python`。
+[^py-unix]: 类 Unix 下 Chord 从 LSP root 向上查找最近的 `.venv/bin/python`、`venv/bin/python`、`env/bin/python`。
 [^py-win]: Windows 下 Chord 探测 `.venv\Scripts\python.exe`、`venv\Scripts\python.exe`、`env\Scripts\python.exe`。
 
 图例：✅ 支持 · ⚠️ 有注意事项 · ❌ 不支持 / no-op。
@@ -115,7 +115,7 @@ Chord 当前自动检测并启用：
 
 ### Pyright venv 自动探测
 
-未在配置中手动指定 Python 解释器时，Chord 在 LSP root 下按以下顺序找项目 venv：
+未在配置中手动指定 Python 解释器时，Chord 从 LSP root 向上按以下顺序查找最近的项目 venv，且不会越过 Chord 项目根：
 
 - 类 Unix（macOS、Linux、WSL）：`.venv/bin/python` → `venv/bin/python` → `env/bin/python`
 - Windows：`.venv\Scripts\python.exe` → `venv\Scripts\python.exe` → `env\Scripts\python.exe`

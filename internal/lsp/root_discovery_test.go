@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -33,7 +34,7 @@ func TestDiscoverWorkspaceRootNestedPackage(t *testing.T) {
 	cfg := config.LSPServerConfig{
 		RootMarkers: []string{"tsconfig.json", "jsconfig.json", "package.json", ".git"},
 	}
-	got, markerMatched, ok := m.discoverWorkspaceRoot(cfg, target)
+	got, markerMatched, ok := m.discoverWorkspaceRoot("sample", cfg, target)
 	if !ok {
 		t.Fatal("expected a workspace root to be resolvable")
 	}
@@ -54,7 +55,7 @@ func TestDiscoverWorkspaceRootRootedProject(t *testing.T) {
 
 	m := &Manager{projectRoot: root}
 	cfg := config.LSPServerConfig{RootMarkers: []string{"tsconfig.json"}}
-	got, markerMatched, ok := m.discoverWorkspaceRoot(cfg, target)
+	got, markerMatched, ok := m.discoverWorkspaceRoot("sample", cfg, target)
 	if !ok {
 		t.Fatal("expected a workspace root to be resolvable")
 	}
@@ -76,7 +77,7 @@ func TestDiscoverWorkspaceRootNoMarkerFallsBackToProjectRoot(t *testing.T) {
 
 	m := &Manager{projectRoot: root}
 	cfg := config.LSPServerConfig{RootMarkers: []string{"tsconfig.json", ".git"}}
-	got, markerMatched, ok := m.discoverWorkspaceRoot(cfg, target)
+	got, markerMatched, ok := m.discoverWorkspaceRoot("sample", cfg, target)
 	if !ok {
 		t.Fatal("expected a workspace root to be resolvable")
 	}
@@ -103,7 +104,7 @@ func TestDiscoverWorkspaceRootStopsAtProjectRoot(t *testing.T) {
 
 	m := &Manager{projectRoot: root}
 	cfg := config.LSPServerConfig{RootMarkers: []string{".git"}}
-	got, markerMatched, ok := m.discoverWorkspaceRoot(cfg, target)
+	got, markerMatched, ok := m.discoverWorkspaceRoot("sample", cfg, target)
 	if !ok {
 		t.Fatal("expected a workspace root to be resolvable")
 	}
@@ -133,7 +134,7 @@ func TestDiscoverWorkspaceRootStopsAtProjectRootForPathItself(t *testing.T) {
 
 	m := &Manager{projectRoot: root}
 	cfg := config.LSPServerConfig{RootMarkers: []string{".git"}}
-	got, markerMatched, ok := m.discoverWorkspaceRoot(cfg, root)
+	got, markerMatched, ok := m.discoverWorkspaceRoot("sample", cfg, root)
 	if !ok {
 		t.Fatal("expected a workspace root to be resolvable")
 	}
@@ -505,7 +506,7 @@ func TestServerRootForPathFallsBackWhenMarkerAbsent(t *testing.T) {
 	root := t.TempDir()
 	m := &Manager{projectRoot: root}
 	cfg := config.LSPServerConfig{FileTypes: []string{".ts"}, RootMarkers: []string{"tsconfig.json"}}
-	gotRoot, ok := m.serverRootForPath(cfg, filepath.Join(root, "src", "app.ts"))
+	gotRoot, ok := m.serverRootForPath("sample", cfg, filepath.Join(root, "src", "app.ts"))
 	if !ok {
 		t.Fatal("serverRootForPath rejected a file outside any marker directory")
 	}
@@ -548,5 +549,69 @@ func TestStartFallsBackToProjectRootWhenNoMarkerMatches(t *testing.T) {
 	m.startFailMu.Unlock()
 	if !failed {
 		t.Fatalf("typescript was not started for %s (no fallback to project root)", target)
+	}
+}
+
+func TestEffectiveRootMarkersForCommonServers(t *testing.T) {
+	pythonMarkers := []string{"pyrightconfig.json", "pyproject.toml", "requirements.txt"}
+	typescriptMarkers := []string{"tsconfig.json", "jsconfig.json", "package.json"}
+	for _, test := range []struct {
+		name    string
+		server  string
+		command string
+		markers []string
+		want    []string
+	}{
+		{name: "pyright command", command: "pyright-langserver", want: pythonMarkers},
+		{name: "basedpyright command", command: "basedpyright-langserver", want: pythonMarkers},
+		{name: "typescript command", command: "typescript-language-server", want: typescriptMarkers},
+		{name: "command path", command: filepath.Join("bin", "pyright-langserver"), want: pythonMarkers},
+		{name: "windows command", command: "PYRIGHT-LANGSERVER.CMD", want: pythonMarkers},
+		{name: "python wrapper", server: "pyright", command: "python-wrapper", want: pythonMarkers},
+		{name: "typescript wrapper", server: "typescript", command: "tsserver-wrapper", want: typescriptMarkers},
+		{name: "unknown", command: "gopls"},
+		{name: "substring", command: "not-pyright-langserver"},
+		{name: "unknown wrapper", command: "typescript-wrapper"},
+		{name: "override", server: "pyright", command: "pyright-langserver", markers: []string{"custom.toml"}, want: []string{"custom.toml"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := config.LSPServerConfig{Command: test.command, RootMarkers: test.markers}
+			if got := effectiveRootMarkers(test.server, cfg); !slices.Equal(got, test.want) {
+				t.Fatalf("effectiveRootMarkers() = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestDiscoverWorkspaceRootIgnoresOtherLanguageMarkers(t *testing.T) {
+	for _, test := range []struct {
+		server        string
+		command       string
+		marker        string
+		foreignMarker string
+		filename      string
+	}{
+		{server: "pyright", command: "python-wrapper", marker: "pyproject.toml", foreignMarker: "package.json", filename: "app.py"},
+		{server: "typescript", command: "tsserver-wrapper", marker: "tsconfig.json", foreignMarker: "requirements.txt", filename: "app.ts"},
+	} {
+		t.Run(test.server, func(t *testing.T) {
+			root := t.TempDir()
+			project := filepath.Join(root, "package")
+			nested := filepath.Join(project, "nested")
+			if err := os.MkdirAll(nested, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			for _, path := range []string{filepath.Join(root, test.marker), filepath.Join(project, test.marker), filepath.Join(nested, test.foreignMarker)} {
+				if err := os.WriteFile(path, nil, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			manager := &Manager{projectRoot: root}
+			cfg := config.LSPServerConfig{Command: test.command}
+			rootForFile, matched, ok := manager.discoverWorkspaceRoot(test.server, cfg, filepath.Join(nested, test.filename))
+			if !ok || !matched || rootForFile != project {
+				t.Fatalf("discoverWorkspaceRoot() = (%q, %t, %t), want (%q, true, true)", rootForFile, matched, ok, project)
+			}
+		})
 	}
 }

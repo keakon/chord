@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 
 	"github.com/keakon/x/powernap/pkg/lsp/protocol"
@@ -596,5 +597,90 @@ func TestFindImplementationsNullResultReturnsEmpty(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("FindImplementations() = %#v, want empty", got)
+	}
+}
+
+func TestDiscoverPythonInterpreterWalksUpToNearestEnvironment(t *testing.T) {
+	root := t.TempDir()
+	child := filepath.Join(root, "api", "app")
+	if err := os.MkdirAll(child, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pythonPath := filepath.Join(root, "api", ".venv", "bin", "python")
+	if err := os.MkdirAll(filepath.Dir(pythonPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pythonPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := discoverPythonInterpreterBoundedForGOOS(child, root, "darwin"); got != pythonPath {
+		t.Fatalf("got %q, want %q", got, pythonPath)
+	}
+}
+
+func TestDiscoverPythonInterpreterDoesNotCrossProjectRoot(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "project")
+	child := filepath.Join(root, "src")
+	if err := os.MkdirAll(child, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pythonPath := filepath.Join(parent, ".venv", "bin", "python")
+	if err := os.MkdirAll(filepath.Dir(pythonPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pythonPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := discoverPythonInterpreterBoundedForGOOS(child, root, "darwin"); got != "" {
+		t.Fatalf("got %q, want no interpreter", got)
+	}
+}
+
+func TestDiscoverPythonInterpreterRejectsOutsideWorkspace(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	pythonPath := filepath.Join(outside, ".venv", "bin", "python")
+	if err := os.MkdirAll(filepath.Dir(pythonPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pythonPath, nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := discoverPythonInterpreterBoundedForGOOS(outside, root, "linux"); got != "" {
+		t.Fatalf("got %q for workspace outside project root", got)
+	}
+}
+
+func TestDiscoverPythonInterpreterRejectsUnresolvablePaths(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("removing the working directory is unsupported on Windows")
+	}
+	root := t.TempDir()
+	pythonPath := filepath.Join(root, ".venv", "bin", "python")
+	if err := os.MkdirAll(filepath.Dir(pythonPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pythonPath, nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	workingDir := t.TempDir()
+	t.Chdir(workingDir)
+	if err := os.Remove(workingDir); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name string
+		cwd  string
+		root string
+	}{
+		{name: "workspace", cwd: ".", root: root},
+		{name: "project", cwd: root, root: "."},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := discoverPythonInterpreterBoundedForGOOS(test.cwd, test.root, "linux"); got != "" {
+				t.Fatalf("got %q for unresolvable path", got)
+			}
+		})
 	}
 }

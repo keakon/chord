@@ -293,7 +293,7 @@ func (m *Manager) Start(ctx context.Context, path string) {
 		if srvCfg.Disabled {
 			continue
 		}
-		root, ok := m.serverRootForPath(srvCfg, path)
+		root, ok := m.serverRootForPath(name, srvCfg, path)
 		if !ok {
 			continue
 		}
@@ -326,7 +326,7 @@ func (m *Manager) startServer(ctx context.Context, key clientKey, srvCfg config.
 	delete(m.startFail, key)
 	m.startFailMu.Unlock()
 
-	client, err := NewClient(ctx, key.name, srvCfg, key.root, false)
+	client, err := newClient(ctx, key.name, srvCfg, key.root, m.projectRoot, false)
 	if err != nil {
 		log.Errorf("lsp: create client name=%v root=%v error=%v", key.name, key.root, err)
 		m.startFailMu.Lock()
@@ -391,7 +391,7 @@ func (m *Manager) startServer(ctx context.Context, key clientKey, srvCfg config.
 // This is the single ancestor walk behind both "does this server cover the
 // file" and "where must its client be rooted"; the two questions used to be
 // answered by separate functions that stat'ed the same chain twice per call.
-func (m *Manager) discoverWorkspaceRoot(srvCfg config.LSPServerConfig, path string) (root string, markerMatched, ok bool) {
+func (m *Manager) discoverWorkspaceRoot(name string, srvCfg config.LSPServerConfig, path string) (root string, markerMatched, ok bool) {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return "", false, false
@@ -404,7 +404,8 @@ func (m *Manager) discoverWorkspaceRoot(srvCfg config.LSPServerConfig, path stri
 	if err != nil || relPathEscapesDir(rel) {
 		return "", false, false
 	}
-	if len(srvCfg.RootMarkers) == 0 {
+	markers := effectiveRootMarkers(name, srvCfg)
+	if len(markers) == 0 {
 		return projectRoot, false, true
 	}
 	// absPath and projectRoot are both absolute and cleaned, so walking parents
@@ -418,7 +419,7 @@ func (m *Manager) discoverWorkspaceRoot(srvCfg config.LSPServerConfig, path stri
 		dir = absPath
 	}
 	for {
-		for _, marker := range srvCfg.RootMarkers {
+		for _, marker := range markers {
 			if pathExists(filepath.Join(dir, marker)) {
 				return dir, true, true
 			}
@@ -437,11 +438,11 @@ func (m *Manager) discoverWorkspaceRoot(srvCfg config.LSPServerConfig, path stri
 // root_markers roots at the nearest ancestor directory containing a marker,
 // falling back to the project root when none matches, so the server still
 // serves files outside any marker directory.
-func (m *Manager) serverRootForPath(srvCfg config.LSPServerConfig, path string) (string, bool) {
+func (m *Manager) serverRootForPath(name string, srvCfg config.LSPServerConfig, path string) (string, bool) {
 	if !matchesFileType(srvCfg, path) {
 		return "", false
 	}
-	root, _, ok := m.discoverWorkspaceRoot(srvCfg, path)
+	root, _, ok := m.discoverWorkspaceRoot(name, srvCfg, path)
 	if !ok {
 		return "", false
 	}
@@ -797,7 +798,7 @@ func (m *Manager) hasPendingStartForPathLocked(path string) bool {
 		// Only a server whose configured file types and root markers cover the
 		// path can be "starting for" it; otherwise a Go read would count a
 		// TypeScript startup as pending for that path.
-		if root, ok := m.serverRootForPath(srvCfg, path); ok && root == key.root {
+		if root, ok := m.serverRootForPath(key.name, srvCfg, path); ok && root == key.root {
 			return true
 		}
 	}

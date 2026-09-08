@@ -118,15 +118,17 @@ lsp:
 
 这种 LSP 反馈是编辑后的增量检查，不能替代 CI 中的全仓门禁。若项目要在 CI 中采用独立的 `modernize` 命令，应先清理并审查现有发现，再固定命令版本，而不是使用 `@latest`；部分建议修复（例如把 `omitempty` 改为 `omitzero`）会有意改变序列化行为，必须人工审查。
 
-需要先在本机安装对应语言服务器才能使用。对于 Pyright，未配置 Python 解释器时，Chord 会自动使用 LSP root 下的项目本地虚拟环境，并按当前运行平台探测对应布局：类 Unix（含 WSL）查找 `.venv/bin/python`、`venv/bin/python` 和 `env/bin/python`；Windows 查找 `.venv\Scripts\python.exe`、`venv\Scripts\python.exe` 和 `env\Scripts\python.exe`。WSL 自动发现有意识避开 Windows 虚拟环境中的 `Scripts\python.exe`；建议在 WSL 内创建 Linux venv，确需自定义解释器时再显式配置 `python.pythonPath`。
+需要先在本机安装对应语言服务器才能使用。对于 Pyright，未配置 Python 解释器时，Chord 会从 LSP workspace root 向上寻找最近的有效虚拟环境，不越过项目根；类 Unix 查找 `.venv/bin/python`、`venv/bin/python` 和 `env/bin/python`，Windows 查找对应的 `Scripts\python.exe`。同一 workspace root 的发现结果会随 LSP client 缓存，避免重复探测。
 
-需要语言服务器跨特定项目目录运行时，可配置 `root_markers`；省略时仅由 `file_types` 决定是否处理某文件。
+`file_types` 决定语言服务器处理哪些文件，`root_markers` 决定工作区根目录。省略 `root_markers` 时，TypeScript/JavaScript 使用 `tsconfig.json`、`jsconfig.json` 和 `package.json`，Pyright 使用 `pyrightconfig.json`、`pyproject.toml` 和 `requirements.txt`，两类服务器不会把另一种语言的标记当作项目边界。其他服务器回退到 Chord 项目根；显式配置 `root_markers` 会覆盖默认标记。
+
+Chord 根据配置中的服务器名或可执行文件名识别类型：`typescript` / `typescript-language-server`、`pyright` / `pyright-langserver`、`basedpyright` / `basedpyright-langserver`，也支持 Windows 可执行文件后缀。使用自定义包装脚本时，保留这些服务器名，或显式设置 `root_markers`。目录查找始终限制在项目根内。
 
 对匹配的文件，Chord 会按以下规则确定该语言服务器的 workspace root：从文件所在目录向上，取最近一个包含任一 `root_markers` 的目录（不越过项目根）；没有匹配则回退到项目根。发现是按文件进行的，所以不同文件可能落在不同的根上，同一个服务器名也能按根各起一个实例。这样嵌套前端工程（例如仓库根本身是后端项目、前端在 `frontend/` 子目录）就能得到 root 定位到该子包的语言服务器，直接在包内找它的 `node_modules`、`tsconfig.json` 等包级配置。单个服务器名最多保留 8 个存活实例；monorepo 中标记目录超出这个数量时，最久未使用的实例会被关闭，下次读取其根下的文件时再重启。
 
-对 Python 来说，通常不建议默认配置 `root_markers`。开启后会把 Pyright 限定到含 marker 的目录，往往会让合法的独立脚本或轻量项目无法启用 Pyright。确实需要更严格的项目范围控制时，再按仓库实际情况显式添加 `root_markers`，此时 workspace root 会如上所述重定向到最近的 `pyproject.toml`/`pyrightconfig.json` 所在目录。
+Python、TypeScript 和 JavaScript 都会按文件发现最近的 workspace root；同一服务器名可以为不同根目录缓存独立实例。
 
-通常无需手动设置 `python.pythonPath`。未显式配置解释器时，Chord 已在 LSP root 下自动发现项目本地的 `.venv`、`venv` 或 `env`。仅当需覆盖自动发现逻辑、改用自定义解释器路径时，才需设置 `python.pythonPath`。`python.analysis` 也是按需启用的 Pyright 行为调优项，如调整类型检查严格度。这类配置请使用嵌套 `options`：
+通常无需手动设置 `python.pythonPath`。仅当需覆盖自动发现逻辑、改用自定义解释器路径时，才需设置它。`python.analysis` 也是按需启用的 Pyright 行为调优项，如调整类型检查严格度。这类配置请使用嵌套 `options`：
 
 ```yaml
 lsp:

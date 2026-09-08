@@ -115,7 +115,7 @@ Notes:
 
 ### Pyright venv auto-discovery
 
-When no Python interpreter is configured for Pyright, Chord probes a project-local venv under the LSP root, in this order:
+When no Python interpreter is configured for Pyright, Chord searches upward from the LSP root for the nearest project-local venv without crossing the Chord project root, in this order:
 
 - Unix-like (macOS, Linux, WSL): `.venv/bin/python` → `venv/bin/python` → `env/bin/python`
 - Windows: `.venv\Scripts\python.exe` → `venv\Scripts\python.exe` → `env\Scripts\python.exe`

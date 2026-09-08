@@ -112,7 +112,7 @@ func (m *Manager) pythonSemanticBackendAvailable(path string, pyCfg config.Pytho
 		if !ok || srvCfg.Disabled {
 			return false
 		}
-		_, covered := m.serverRootForPath(srvCfg, path)
+		_, covered := m.serverRootForPath(serverName, srvCfg, path)
 		return covered
 	}
 	return m.HasServerForPath(path)

@@ -74,7 +74,11 @@ type Client struct {
 
 // NewClient creates an LSP client and starts the server process. Call Initialize next.
 func NewClient(ctx context.Context, name string, cfg config.LSPServerConfig, cwd string, debug bool) (*Client, error) {
-	cfg.Options = prepareWorkspaceSettings(name, cfg, cwd)
+	return newClient(ctx, name, cfg, cwd, cwd, debug)
+}
+
+func newClient(ctx context.Context, name string, cfg config.LSPServerConfig, cwd, projectRoot string, debug bool) (*Client, error) {
+	cfg.Options = prepareWorkspaceSettingsBounded(name, cfg, cwd, projectRoot)
 	c := &Client{
 		name:        name,
 		cwd:         cwd,
@@ -186,6 +190,10 @@ func settingsForSection(settings map[string]any, section string) any {
 }
 
 func prepareWorkspaceSettings(name string, cfg config.LSPServerConfig, cwd string) map[string]any {
+	return prepareWorkspaceSettingsBounded(name, cfg, cwd, "")
+}
+
+func prepareWorkspaceSettingsBounded(name string, cfg config.LSPServerConfig, cwd, projectRoot string) map[string]any {
 	settings := cloneSettings(cfg.Options)
 	if !isPyrightServer(name, cfg) {
 		return settings
@@ -193,7 +201,7 @@ func prepareWorkspaceSettings(name string, cfg config.LSPServerConfig, cwd strin
 	if normalizePythonInterpreterSettings(settings, cwd) || hasPythonVenvSetting(settings) {
 		return settings
 	}
-	pythonPath := discoverPythonInterpreter(cwd)
+	pythonPath := discoverPythonInterpreterBounded(cwd, projectRoot)
 	if pythonPath == "" {
 		return settings
 	}
@@ -233,12 +241,6 @@ func cloneSettingValue(v any) any {
 	}
 }
 
-func isPyrightServer(name string, cfg config.LSPServerConfig) bool {
-	serverName := strings.ToLower(name)
-	command := strings.ToLower(filepath.Base(cfg.Command))
-	return strings.Contains(serverName, "pyright") || strings.Contains(command, "pyright")
-}
-
 func hasPythonVenvSetting(settings map[string]any) bool {
 	pythonSettings, _ := settings["python"].(map[string]any)
 	if pythonSettings != nil {
@@ -274,23 +276,48 @@ func nonEmptyString(v any) bool {
 	return ok && strings.TrimSpace(s) != ""
 }
 
-func discoverPythonInterpreter(cwd string) string {
-	return discoverPythonInterpreterForGOOS(cwd, runtime.GOOS)
+func discoverPythonInterpreterForGOOS(cwd, goos string) string {
+	return discoverPythonInterpreterBoundedForGOOS(cwd, "", goos)
 }
 
-func discoverPythonInterpreterForGOOS(cwd, goos string) string {
+func discoverPythonInterpreterBounded(cwd, projectRoot string) string {
+	return discoverPythonInterpreterBoundedForGOOS(cwd, projectRoot, runtime.GOOS)
+}
+
+func discoverPythonInterpreterBoundedForGOOS(cwd, projectRoot, goos string) string {
 	if cwd == "" {
 		return ""
 	}
-	for _, dir := range []string{".venv", "venv", "env"} {
-		if goos == "windows" {
-			if p := filepath.Join(cwd, dir, "Scripts", "python.exe"); executableFileExistsForGOOS(p, goos) {
+	var err error
+	cwd, err = filepath.Abs(cwd)
+	if err != nil {
+		return ""
+	}
+	if projectRoot != "" {
+		projectRoot, err = filepath.Abs(projectRoot)
+		if err != nil {
+			return ""
+		}
+		rel, err := filepath.Rel(projectRoot, cwd)
+		if err != nil || relPathEscapesDir(rel) {
+			return ""
+		}
+	}
+	for current := filepath.Clean(cwd); ; current = filepath.Dir(current) {
+		for _, dir := range []string{".venv", "venv", "env"} {
+			if goos == "windows" {
+				if p := filepath.Join(current, dir, "Scripts", "python.exe"); executableFileExistsForGOOS(p, goos) {
+					return p
+				}
+				continue
+			}
+			if p := filepath.Join(current, dir, "bin", "python"); executableFileExistsForGOOS(p, goos) {
 				return p
 			}
-			continue
 		}
-		if p := filepath.Join(cwd, dir, "bin", "python"); executableFileExistsForGOOS(p, goos) {
-			return p
+		parent := filepath.Dir(current)
+		if parent == current || (projectRoot != "" && current == projectRoot) {
+			break
 		}
 	}
 	return ""

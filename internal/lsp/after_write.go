@@ -128,11 +128,11 @@ func (m *Manager) HasServerForPath(path string) bool {
 	if m.cfg == nil || len(m.cfg.LSP) == 0 {
 		return false
 	}
-	for _, srvCfg := range m.cfg.LSP {
+	for name, srvCfg := range m.cfg.LSP {
 		if srvCfg.Disabled {
 			continue
 		}
-		if _, ok := m.serverRootForPath(srvCfg, path); ok {
+		if _, ok := m.serverRootForPath(name, srvCfg, path); ok {
 			return true
 		}
 	}
@@ -151,7 +151,7 @@ func (m *Manager) startFailuresForPath(path string) []string {
 		if srvCfg.Disabled {
 			continue
 		}
-		if root, ok := m.serverRootForPath(srvCfg, path); ok {
+		if root, ok := m.serverRootForPath(name, srvCfg, path); ok {
 			matches = append(matches, clientKey{name: name, root: root})
 		}
 	}
