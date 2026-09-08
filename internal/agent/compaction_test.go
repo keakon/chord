@@ -6610,9 +6610,9 @@ func TestFilterCompactionEvidenceForArchivalDropsUnavailableEvidence(t *testing.
 
 func TestRenderEvidenceArtifactIncludesValidityAndRecovery(t *testing.T) {
 	content := renderEvidenceArtifactContent([]evidenceItem{{
-		Title: "Observed state", Excerpt: "value", Validity: evidenceValidityValid, Recovery: "reread source",
+		Title: "Observed state", Excerpt: "value", Validity: evidenceValidityValid, Recovery: "reread source", SourceID: "call-1", Revisions: map[string]string{"main.go": "abc"},
 	}})
-	if !strings.Contains(content, "Validity: valid") || !strings.Contains(content, "Recovery: reread source") {
+	if !strings.Contains(content, "Validity: valid") || !strings.Contains(content, "Recovery: reread source") || !strings.Contains(content, "Source ID: call-1") || !strings.Contains(content, "Revision: main.go=abc") {
 		t.Fatalf("evidence artifact = %q", content)
 	}
 }

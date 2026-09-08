@@ -232,6 +232,9 @@ func renderEvidenceArtifactContent(items []evidenceItem) string {
 		if item.Source != "" {
 			fmt.Fprintf(&sb, "Source: %s\n", item.Source)
 		}
+		if item.SourceID != "" {
+			fmt.Fprintf(&sb, "Source ID: %s\n", item.SourceID)
+		}
 		if item.WhyNeeded != "" {
 			fmt.Fprintf(&sb, "Why it matters: %s\n", item.WhyNeeded)
 		}
@@ -240,6 +243,9 @@ func renderEvidenceArtifactContent(items []evidenceItem) string {
 		}
 		if item.Recovery != "" {
 			fmt.Fprintf(&sb, "Recovery: %s\n", item.Recovery)
+		}
+		for path, revision := range item.Revisions {
+			fmt.Fprintf(&sb, "Revision: %s=%s\n", path, revision)
 		}
 		if item.Excerpt != "" {
 			sb.WriteString("Excerpt:\n")
