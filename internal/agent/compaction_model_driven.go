@@ -301,6 +301,9 @@ func (a *MainAgent) tryArmModelDrivenCheckpoint(callID string, rawArgs string) (
 	if err := validateModelDrivenCheckpointKind(args); err != nil {
 		return "", err
 	}
+	if err := a.validateObservedClaimEvidence(args); err != nil {
+		return "", err
+	}
 	a.pendingModelDriven = &modelDrivenCheckpointRequest{
 		ToolCallID: callID,
 		Args:       args,
@@ -327,6 +330,28 @@ func (a *MainAgent) validateModelDrivenEvidenceRefs(refs []string) error {
 	for _, ref := range refs {
 		if _, ok := known[ref]; !ok {
 			return fmt.Errorf("compact_context evidence_refs contains unknown evidence ID %q", ref)
+		}
+	}
+	return nil
+}
+
+func (a *MainAgent) validateObservedClaimEvidence(args tools.CompactContextArgs) error {
+	byID := make(map[string]evidenceItem)
+	for _, item := range a.evidence.snapshot() {
+		byID[evidenceItemID(item)] = item
+	}
+	for claim, kind := range args.ClaimKinds {
+		if kind != "observed" {
+			continue
+		}
+		for _, ref := range args.ClaimEvidence[claim] {
+			item, ok := byID[ref]
+			if !ok {
+				return fmt.Errorf("observed claim %q references unknown evidence %q", claim, ref)
+			}
+			if item.Kind == evidenceToolError || item.Kind == evidenceDoneRejected {
+				return fmt.Errorf("observed claim %q cannot use %s evidence %q", claim, item.Kind, ref)
+			}
 		}
 	}
 	return nil

@@ -1663,3 +1663,13 @@ func TestValidateObservedClaimEvidenceMustBeListed(t *testing.T) {
 		t.Fatal("observed claim evidence outside evidence_refs should be rejected")
 	}
 }
+
+func TestValidateObservedClaimEvidenceRejectsErrorEvidence(t *testing.T) {
+	a := &MainAgent{}
+	a.evidence.add(evidenceItem{Kind: evidenceToolError, Key: "err", Excerpt: "failed"})
+	id := evidenceItemID(a.evidence.snapshot()[0])
+	args := tools.CompactContextArgs{ClaimKinds: map[string]string{"tests pass": "observed"}, ClaimEvidence: map[string][]string{"tests pass": {id}}}
+	if err := a.validateObservedClaimEvidence(args); err == nil {
+		t.Fatal("error evidence should not support observed completion")
+	}
+}
