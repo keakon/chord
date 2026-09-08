@@ -400,6 +400,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		if tools.NormalizeName(payload.Name) == tools.NameTodoWrite && todoWriteArgsAllDone(payload.ArgsJSON) {
 			a.beginContextReductionWrapUpGrace()
 			a.stageCompletionCandidateTurnID = a.turn.ID
+			a.stageCompletionCandidatePending = true
 		}
 		if tools.NormalizeName(payload.Name) == tools.NameSkill {
 			if skillName := toolCallSkillName(a.ctxMgr.Snapshot(), payload.CallID, payload.ArgsJSON); skillName != "" {

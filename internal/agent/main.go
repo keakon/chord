@@ -527,13 +527,14 @@ type MainAgent struct {
 	// compatibility checks use direct field equality (O(1) per unchanged
 	// message thanks to shared string backing) instead of re-hashing every
 	// message's content on each request. Read-only after store.
-	lastPreparedLLMShapeSource     []message.Message
-	wrapUpGraceTurnID              uint64
-	wrapUpGraceRemaining           int
-	stageCompletionCandidateTurnID uint64
-	contextReductionStats          ContextReductionStats
-	lastLLMRequestModelRef         string
-	llmModelRunLength              int
+	lastPreparedLLMShapeSource      []message.Message
+	wrapUpGraceTurnID               uint64
+	wrapUpGraceRemaining            int
+	stageCompletionCandidateTurnID  uint64
+	stageCompletionCandidatePending bool
+	contextReductionStats           ContextReductionStats
+	lastLLMRequestModelRef          string
+	llmModelRunLength               int
 
 	// fallbackSurfaceRebuilds / fallbackSurfaceReuses count how fallback
 	// boundaries resolved the "may this prepared surface go to another model"
