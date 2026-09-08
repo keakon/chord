@@ -30,6 +30,16 @@ type modelDrivenCheckpointRequest struct {
 	Args       tools.CompactContextArgs
 }
 
+func (a *MainAgent) transitionModelDrivenProposal(status, reason string) {
+	if a == nil {
+		return
+	}
+	a.pendingModelDrivenStatus = status
+	a.modelDrivenProposalReason = strings.TrimSpace(reason)
+	a.modelDrivenProposalUpdatedAt = time.Now()
+	a.saveRecoverySnapshot()
+}
+
 func (r *modelDrivenCheckpointRequest) requestID() string {
 	if r == nil || strings.TrimSpace(r.ToolCallID) == "" {
 		return "unknown"
@@ -316,11 +326,8 @@ func (a *MainAgent) tryArmModelDrivenCheckpoint(callID string, rawArgs string) (
 	}
 	a.pendingModelDrivenRequestID = callID
 	a.lastModelDrivenRequestID = callID
-	a.pendingModelDrivenStatus = modelDrivenProposalAccepted
 	a.pendingModelDrivenAuditArgsJSON = rawArgs
-	a.modelDrivenProposalReason = "accepted by runtime validation"
-	a.modelDrivenProposalUpdatedAt = time.Now()
-	a.saveRecoverySnapshot()
+	a.transitionModelDrivenProposal(modelDrivenProposalAccepted, "accepted by runtime validation")
 	diagnostic := map[string]string{"request_id": callID}
 	if a.stageCompletionCandidatePending && a.stageCompletionCandidateTurnID > 0 && a.turn != nil && a.stageCompletionCandidateTurnID != a.turn.ID {
 		a.clearStageCompletionCandidate()
@@ -448,10 +455,7 @@ func (a *MainAgent) maybeStartModelDrivenBarrier() bool {
 		return false
 	}
 	req := a.pendingModelDriven
-	a.pendingModelDrivenStatus = modelDrivenProposalPreparing
-	a.modelDrivenProposalReason = "preparing durable checkpoint"
-	a.modelDrivenProposalUpdatedAt = time.Now()
-	a.saveRecoverySnapshot()
+	a.transitionModelDrivenProposal(modelDrivenProposalPreparing, "preparing durable checkpoint")
 	a.pendingModelDriven = nil
 	a.pendingModelDrivenRequestID = ""
 	if a.turn == nil {
@@ -1493,10 +1497,7 @@ func (a *MainAgent) settleModelDrivenOutcome(status string, reason string, prefl
 	// A terminal outcome must never survive into a later recovery snapshot as
 	// an accepted request. The lifecycle event has already captured the
 	// request identity before this state is cleared.
-	a.pendingModelDrivenStatus = status
-	a.modelDrivenProposalReason = strings.TrimSpace(reason)
-	a.modelDrivenProposalUpdatedAt = time.Now()
-	a.saveRecoverySnapshot()
+	a.transitionModelDrivenProposal(status, reason)
 	a.modelDrivenSkipNotice = strings.TrimSpace(reason)
 	// The model already took its shot at a checkpoint: the threshold grace
 	// (if any) ends here so the usage-driven safety net is not deferred again.

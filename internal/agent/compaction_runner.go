@@ -517,10 +517,7 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	// instructions, and a name is not what "invoked" claims.
 	a.resetInvokedSkillsFromMessages(compactedMessages)
 	if d.SummaryMode == compactionSummaryModeModelDriven {
-		a.pendingModelDrivenStatus = modelDrivenProposalApplied
-		a.modelDrivenProposalReason = "durable checkpoint applied"
-		a.modelDrivenProposalUpdatedAt = time.Now()
-		a.saveRecoverySnapshot()
+		a.transitionModelDrivenProposal(modelDrivenProposalApplied, "durable checkpoint applied")
 	}
 	a.recordCompactionAppliedAnalyticsEvent(d, headSplit, compactedMessages)
 	// A durable apply starts a fresh compaction window: drop any overlay texts
