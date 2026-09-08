@@ -618,6 +618,7 @@ func (a *MainAgent) startModelDrivenCompactionAsync(bundle modelDrivenBarrierSna
 			draft.HeadSplit = headSplit
 			draft.RuntimeGeneration = bundle.currentRequestBatch
 			draft.RuntimeStateFingerprint = bundle.runtimeStateFingerprint
+			draft.ModelDrivenRequestID = req.requestID()
 		}
 		a.sendEvent(Event{Type: EventCompactionReady, Payload: draft})
 	}(ctx, bundle, planID, target, headSplit, req)

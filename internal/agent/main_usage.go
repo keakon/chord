@@ -176,6 +176,9 @@ func (a *MainAgent) recordCompactionAppliedAnalyticsEvent(d *compactionDraft, he
 	if a.compactionState.trigger != "" {
 		diagnostic["trigger"] = a.compactionState.trigger.analyticsName()
 	}
+	if d.ModelDrivenRequestID != "" {
+		diagnostic["request_id"] = d.ModelDrivenRequestID
+	}
 	prev := a.lastCompactionMessageCount
 	a.lastCompactionMessageCount = len(compactedMessages)
 	if interval := len(compactedMessages) - prev; interval > 0 {
