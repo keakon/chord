@@ -314,7 +314,13 @@ func (a *MainAgent) tryArmModelDrivenCheckpoint(callID string, rawArgs string) (
 	a.pendingModelDrivenRequestID = callID
 	a.pendingModelDrivenStatus = "accepted"
 	a.pendingModelDrivenAuditArgsJSON = rawArgs
-	a.recordCompactionLifecycleEvent("accepted", map[string]string{"request_id": callID})
+	diagnostic := map[string]string{"request_id": callID}
+	if a.stageCompletionCandidatePending && a.stageCompletionCandidateTurnID > 0 {
+		diagnostic["stage_candidate_turn_id"] = strconv.FormatUint(a.stageCompletionCandidateTurnID, 10)
+		diagnostic["stage_candidate_consumed"] = "true"
+		a.stageCompletionCandidatePending = false
+	}
+	a.recordCompactionLifecycleEvent("accepted", diagnostic)
 	// The model called compact_context in this window:
 	// whatever the attempt settles to, the reminder nudge has been answered,
 	// so the sticky reminder stops re-attaching until a fresh window resets
