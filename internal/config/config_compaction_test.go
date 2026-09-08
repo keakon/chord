@@ -406,9 +406,9 @@ func TestModelLimitEffectiveInputBudget(t *testing.T) {
 			want:             395904,
 		},
 		{
-			// Non-additive published limits (gpt-5.4 shape): 950000 + 128000
-			// exceeds the 1050000 window. The explicit input is authoritative
-			// and is never clamped down to what fits additively.
+			// Non-additive published input cap: 950000 + 128000 exceeds the
+			// 1050000 window. The explicit input is authoritative and is
+			// never clamped down to what fits additively.
 			name:             "explicit input trusted despite non-additive output",
 			limit:            ModelLimit{Context: 1050000, Input: 950000, Output: 128000},
 			outputCapSetting: 128000,

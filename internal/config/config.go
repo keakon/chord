@@ -851,12 +851,12 @@ type ModelLimit struct {
 // EffectiveInputBudget returns the input-side budget used for request sizing
 // and automatic compaction. An explicit limit.input is authoritative and used
 // as-is, even when it is not additive with limit.output inside the context
-// window: providers publish such non-additive caps (e.g. gpt-5.4's 950000
-// input in a 1050000 window), and clamping the declared value would compact
-// against a smaller budget than the model actually accepts. Without
-// limit.input the budget derives as limit.context minus the model's own
-// output cap (limit.output) — the provider-published input allocation, e.g.
-// the Codex 400000-window/128000-output pair yielding a 272000 input budget.
+// window: clamping the declared value would compact against a smaller budget
+// than the model actually accepts. Without limit.input the budget derives as
+// limit.context minus the model's own output cap (limit.output) — the
+// provider-published input allocation, e.g. the 1.05M-window/128000-output
+// GPT family yielding 1050000 − 128000 = 922000, or the Codex
+// 400000-window/128000-output pair yielding a 272000 input budget.
 // Only when limit.output is also unset does the reservation fall back to the
 // effective default output cap (the max_output_tokens setting, else
 // defaultOutputCap).
