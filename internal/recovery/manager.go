@@ -83,10 +83,12 @@ type SessionSnapshot struct {
 	// AutoCompactRequestGeneration is the monotonic id of the last armed
 	// usage-driven auto-compact request. It is persisted so a restored session
 	// never reuses a generation (and its externalization-warning claim).
-	AutoCompactRequestGeneration uint64 `json:"auto_compact_request_generation,omitempty"`
-	PendingModelDrivenRequestID  string `json:"pending_model_driven_request_id,omitempty"`
-	PendingModelDrivenStatus     string `json:"pending_model_driven_status,omitempty"`
-	PendingModelDrivenArgsJSON   string `json:"pending_model_driven_args_json,omitempty"`
+	AutoCompactRequestGeneration    uint64 `json:"auto_compact_request_generation,omitempty"`
+	PendingModelDrivenRequestID     string `json:"pending_model_driven_request_id,omitempty"`
+	PendingModelDrivenStatus        string `json:"pending_model_driven_status,omitempty"`
+	PendingModelDrivenArgsJSON      string `json:"pending_model_driven_args_json,omitempty"`
+	StageCompletionCandidateTurnID  uint64 `json:"stage_completion_candidate_turn_id,omitempty"`
+	StageCompletionCandidatePending bool   `json:"stage_completion_candidate_pending,omitempty"`
 }
 
 // BackgroundObjectState captures the durable summary of an active background object.

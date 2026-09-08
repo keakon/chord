@@ -32,32 +32,34 @@ type sessionRestoreResult struct {
 }
 
 type loadedSessionState struct {
-	SessionPath                  string
-	Messages                     []message.Message
-	TodoItems                    []tools.TodoItem
-	TaskRecords                  map[string]*DurableTaskRecord
-	TaskSettlements              map[taskAttemptKey]*TaskSettlement
-	AgentRequests                map[string]*DurableAgentRequest
-	AgentRequestsDegraded        bool
-	ActiveRole                   string
-	ModelPoolCurrentModelPool    string
-	ModelPoolAgentOverrides      map[string]string
-	UsageStats                   analytics.SessionStats
-	WalltimeStats                map[string]*analytics.WalltimeStats
-	AgentModelRefs               map[string]analytics.AgentModelRefs
-	ContextUsage                 message.TokenUsage
-	LastInputTokens              int
-	LastTotalContextTokens       int
-	PendingCompactionResume      *recovery.PendingCompactionResume
-	LastModelDrivenApplyBatch    uint64
-	AutoCompactRequestGeneration uint64
-	PendingModelDrivenRequestID  string
-	PendingModelDrivenStatus     string
-	PendingModelDrivenArgsJSON   string
-	SubAgentStates               []loadedSubAgentState
-	MailboxMessages              []SubAgentMailboxMessage
-	MailboxSeqMax                uint64
-	Summary                      *SessionSummary
+	SessionPath                     string
+	Messages                        []message.Message
+	TodoItems                       []tools.TodoItem
+	TaskRecords                     map[string]*DurableTaskRecord
+	TaskSettlements                 map[taskAttemptKey]*TaskSettlement
+	AgentRequests                   map[string]*DurableAgentRequest
+	AgentRequestsDegraded           bool
+	ActiveRole                      string
+	ModelPoolCurrentModelPool       string
+	ModelPoolAgentOverrides         map[string]string
+	UsageStats                      analytics.SessionStats
+	WalltimeStats                   map[string]*analytics.WalltimeStats
+	AgentModelRefs                  map[string]analytics.AgentModelRefs
+	ContextUsage                    message.TokenUsage
+	LastInputTokens                 int
+	LastTotalContextTokens          int
+	PendingCompactionResume         *recovery.PendingCompactionResume
+	LastModelDrivenApplyBatch       uint64
+	AutoCompactRequestGeneration    uint64
+	PendingModelDrivenRequestID     string
+	PendingModelDrivenStatus        string
+	PendingModelDrivenArgsJSON      string
+	StageCompletionCandidateTurnID  uint64
+	StageCompletionCandidatePending bool
+	SubAgentStates                  []loadedSubAgentState
+	MailboxMessages                 []SubAgentMailboxMessage
+	MailboxSeqMax                   uint64
+	Summary                         *SessionSummary
 }
 
 type loadedSubAgentState struct {
@@ -424,6 +426,8 @@ func (a *MainAgent) applySessionSnapshot(loaded *loadedSessionState, sessionPath
 	loaded.PendingModelDrivenRequestID = strings.TrimSpace(snap.PendingModelDrivenRequestID)
 	loaded.PendingModelDrivenStatus = strings.TrimSpace(snap.PendingModelDrivenStatus)
 	loaded.PendingModelDrivenArgsJSON = strings.TrimSpace(snap.PendingModelDrivenArgsJSON)
+	loaded.StageCompletionCandidateTurnID = snap.StageCompletionCandidateTurnID
+	loaded.StageCompletionCandidatePending = snap.StageCompletionCandidatePending
 	subAgentStarted := time.Now()
 	loaded.SubAgentStates = a.loadRestoredSubAgentStates(sessionPath, tmpRecovery, snap, loaded.MailboxMessages, loaded.TaskRecords, started)
 	subAgentRestoreDuration = time.Since(subAgentStarted)
@@ -719,6 +723,8 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 		a.pendingModelDrivenAuditArgsJSON = loaded.PendingModelDrivenArgsJSON
 		a.pendingModelDrivenNotice = "A model-driven checkpoint request was accepted before the previous session ended but was not applied; the previous context remains authoritative. The request arguments were preserved for audit only and will not be applied automatically."
 	}
+	a.stageCompletionCandidateTurnID = loaded.StageCompletionCandidateTurnID
+	a.stageCompletionCandidatePending = loaded.StageCompletionCandidatePending
 	a.lastModelDrivenSkipBatch = 0
 	a.lastModelDrivenSkipReason = ""
 	// Restore starts a fresh compaction window for the reminder-class overlay
