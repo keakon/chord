@@ -24,6 +24,16 @@ func normalizeSubAgentState(state SubAgentState) SubAgentState {
 	return state
 }
 
+func isKnownSubAgentState(state SubAgentState) bool {
+	switch state {
+	case SubAgentStateRunning, SubAgentStateWaitingMain, SubAgentStateWaitingDescendant,
+		SubAgentStateCompleted, SubAgentStateFailed, SubAgentStateCancelled, SubAgentStateIdle:
+		return true
+	default:
+		return false
+	}
+}
+
 // validSubAgentStateTransition is the single authority for sub-agent runtime
 // state changes. Rules:
 //
@@ -38,7 +48,10 @@ func normalizeSubAgentState(state SubAgentState) SubAgentState {
 //     rejected unless already current.
 func validSubAgentStateTransition(from, to SubAgentState) bool {
 	if from == "" {
-		return to != ""
+		return isKnownSubAgentState(to)
+	}
+	if !isKnownSubAgentState(from) || !isKnownSubAgentState(to) {
+		return false
 	}
 	if from == to {
 		return true

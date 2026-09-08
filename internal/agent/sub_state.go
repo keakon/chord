@@ -176,7 +176,7 @@ func (s *SubAgent) StateChangedAt() time.Time {
 	return changedAt
 }
 
-func (s *SubAgent) setState(state SubAgentState, summary string) {
+func (s *SubAgent) setState(state SubAgentState, summary string) bool {
 	if !s.runtimeState.set(state, summary) {
 		// A rejected transition is an invariant violation in the coordination
 		// layer, not a user-visible failure: surface it loudly instead of
@@ -185,11 +185,12 @@ func (s *SubAgent) setState(state SubAgentState, summary string) {
 			s.parent.orchestrationMetrics.recordRejectedStateTransition()
 		}
 		log.Warnf("sub-agent state transition rejected agent=%v from=%q to=%q", s.instanceID, s.State(), state)
-		return
+		return false
 	}
 	if state == SubAgentStateRunning {
 		s.signalWake()
 	}
+	return true
 }
 
 func (s *SubAgent) setLastMailboxID(id string) {

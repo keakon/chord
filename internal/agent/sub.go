@@ -671,7 +671,7 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 		wakeCh:            make(chan struct{}, 1),
 	}
 	s.setRuleset(cfg.Ruleset)
-	s.runtimeState.set(SubAgentStateRunning, "")
+	s.setState(SubAgentStateRunning, "")
 	if hasSkillTool && !cfg.Ruleset.IsDisabled(tools.NameSkill) {
 		s.tools.Register(tools.NewSkillTool(s))
 	}

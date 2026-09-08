@@ -642,7 +642,9 @@ func (a *MainAgent) handleAgentNotify(evt Event) {
 		log.Debugf("dropping report from abandoned subagent agent_id=%v", evt.SourceID)
 		return
 	}
-	sub.setState(SubAgentStateRunning, msg)
+	if !sub.setState(SubAgentStateRunning, msg) {
+		return
+	}
 	a.noteSubAgentStateTransition(sub, SubAgentStateRunning)
 	a.persistSubAgentMeta(sub)
 	ownerAgentID, ownerTaskID, _, _ := sub.ownerSnapshot()

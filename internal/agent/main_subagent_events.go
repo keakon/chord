@@ -94,7 +94,9 @@ func (a *MainAgent) handleSubAgentCloseRequestedEvent(evt Event) {
 			statusState = a.terminalStatusAfterCommit(sub, finalState, err)
 		}
 	} else {
-		sub.setState(finalState, reason)
+		if !sub.setState(finalState, reason) {
+			return
+		}
 		a.noteSubAgentStateTransition(sub, finalState)
 		a.persistSubAgentMeta(sub)
 		a.syncTaskRecordFromSub(sub, closedReason)

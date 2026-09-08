@@ -15,6 +15,7 @@ func TestValidateSubAgentStateTransition(t *testing.T) {
 		{name: "initial running", to: SubAgentStateRunning, want: true},
 		{name: "initial completed", to: SubAgentStateCompleted, want: true},
 		{name: "initial empty rejected", to: SubAgentState("")},
+		{name: "initial unknown rejected", to: SubAgentState("unknown-state")},
 		{name: "waiting resumes", from: SubAgentStateWaitingMain, to: SubAgentStateRunning, want: true},
 		{name: "waiting descendant completes", from: SubAgentStateWaitingDescendant, to: SubAgentStateCompleted, want: true},
 		{name: "completed reactivates", from: SubAgentStateCompleted, to: SubAgentStateRunning, want: true},
@@ -27,6 +28,16 @@ func TestValidateSubAgentStateTransition(t *testing.T) {
 				t.Fatalf("validSubAgentStateTransition(%q, %q) = %v, want %v", test.from, test.to, got, test.want)
 			}
 		})
+	}
+}
+
+func TestSubAgentStateSetRejectsUnknownInitialState(t *testing.T) {
+	var state subAgentRuntimeState
+	if ok := state.set(SubAgentState("unknown-state"), "invalid"); ok {
+		t.Fatal("unknown initial state reported success")
+	}
+	if got, _ := state.snapshot(); got != "" {
+		t.Fatalf("state after rejected unknown initialization = %q, want empty", got)
 	}
 }
 
