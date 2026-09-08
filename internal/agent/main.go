@@ -654,6 +654,8 @@ type MainAgent struct {
 	lastModelDrivenRequestID        string
 	pendingModelDrivenStatus        string
 	pendingModelDrivenAuditArgsJSON string
+	modelDrivenProposalReason       string
+	modelDrivenProposalUpdatedAt    time.Time
 	// modelDrivenSkipNotice carries the low-gain skip reason from the worker
 	// settle to the continuation, which surfaces it as a transient notice.
 	modelDrivenSkipNotice string

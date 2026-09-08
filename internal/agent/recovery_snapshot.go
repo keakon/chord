@@ -92,6 +92,8 @@ func (a *MainAgent) buildRecoverySnapshot() *recovery.SessionSnapshot {
 		LastModelDrivenRequestID:        a.lastModelDrivenRequestID,
 		PendingModelDrivenStatus:        a.pendingModelDrivenStatus,
 		PendingModelDrivenArgsJSON:      a.pendingModelDrivenAuditArgsSnapshot(),
+		ModelDrivenProposalReason:       a.modelDrivenProposalReason,
+		ModelDrivenProposalUpdatedAt:    a.modelDrivenProposalUpdatedAt,
 		StageCompletionCandidateTurnID:  a.stageCompletionCandidateTurnID,
 		StageCompletionCandidatePending: a.stageCompletionCandidatePending,
 	}

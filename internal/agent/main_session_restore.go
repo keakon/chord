@@ -55,6 +55,8 @@ type loadedSessionState struct {
 	LastModelDrivenRequestID        string
 	PendingModelDrivenStatus        string
 	PendingModelDrivenArgsJSON      string
+	ModelDrivenProposalReason       string
+	ModelDrivenProposalUpdatedAt    time.Time
 	StageCompletionCandidateTurnID  uint64
 	StageCompletionCandidatePending bool
 	SubAgentStates                  []loadedSubAgentState
@@ -428,6 +430,8 @@ func (a *MainAgent) applySessionSnapshot(loaded *loadedSessionState, sessionPath
 	loaded.LastModelDrivenRequestID = strings.TrimSpace(snap.LastModelDrivenRequestID)
 	loaded.PendingModelDrivenStatus = strings.TrimSpace(snap.PendingModelDrivenStatus)
 	loaded.PendingModelDrivenArgsJSON = strings.TrimSpace(snap.PendingModelDrivenArgsJSON)
+	loaded.ModelDrivenProposalReason = strings.TrimSpace(snap.ModelDrivenProposalReason)
+	loaded.ModelDrivenProposalUpdatedAt = snap.ModelDrivenProposalUpdatedAt
 	loaded.StageCompletionCandidateTurnID = snap.StageCompletionCandidateTurnID
 	loaded.StageCompletionCandidatePending = snap.StageCompletionCandidatePending
 	subAgentStarted := time.Now()
@@ -724,6 +728,8 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	if loaded.PendingModelDrivenRequestID != "" {
 		a.pendingModelDrivenStatus = loaded.PendingModelDrivenStatus
 		a.pendingModelDrivenAuditArgsJSON = loaded.PendingModelDrivenArgsJSON
+		a.modelDrivenProposalReason = loaded.ModelDrivenProposalReason
+		a.modelDrivenProposalUpdatedAt = loaded.ModelDrivenProposalUpdatedAt
 		a.pendingModelDrivenNotice = "A model-driven checkpoint request was accepted before the previous session ended but was not applied; the previous context remains authoritative. The request arguments were preserved for audit only and will not be applied automatically."
 	}
 	a.stageCompletionCandidateTurnID = loaded.StageCompletionCandidateTurnID
