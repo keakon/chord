@@ -10,6 +10,8 @@ func TestValidateSubAgentStateTransition(t *testing.T) {
 		want bool
 	}{
 		{name: "initial running", to: SubAgentStateRunning, want: true},
+		{name: "initial completed", to: SubAgentStateCompleted, want: true},
+		{name: "initial empty rejected", to: SubAgentState("")},
 		{name: "waiting resumes", from: SubAgentStateWaitingMain, to: SubAgentStateRunning, want: true},
 		{name: "waiting descendant completes", from: SubAgentStateWaitingDescendant, to: SubAgentStateCompleted, want: true},
 		{name: "completed reactivates", from: SubAgentStateCompleted, to: SubAgentStateRunning, want: true},

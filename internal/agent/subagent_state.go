@@ -26,7 +26,7 @@ func normalizeSubAgentState(state SubAgentState) SubAgentState {
 
 func validSubAgentStateTransition(from, to SubAgentState) bool {
 	if from == "" {
-		return to == SubAgentStateRunning || to == SubAgentStateIdle
+		return to != ""
 	}
 	if from == to {
 		return true
@@ -77,6 +77,9 @@ type subAgentRuntimeState struct {
 func (s *subAgentRuntimeState) set(state SubAgentState, summary string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := validateSubAgentStateTransition(s.state, state); err != nil {
+		return
+	}
 	s.state = state
 	s.stateChangedAt = time.Now()
 	if summary != "" {
