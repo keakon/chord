@@ -389,6 +389,9 @@ func (a *MainAgent) validateCommittedEvidence(args tools.CompactContextArgs) err
 }
 
 func validateModelDrivenCheckpointKind(args tools.CompactContextArgs) error {
+	if args.CheckpointKind == "committed" && args.StageStatus != "completed" {
+		return fmt.Errorf("committed compact_context requires stage_status=completed")
+	}
 	if args.CheckpointKind == "committed" && len(args.EvidenceRefs) == 0 {
 		return fmt.Errorf("committed compact_context requires at least one evidence_refs entry")
 	}
