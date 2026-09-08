@@ -716,6 +716,7 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	a.lastModelDrivenApplyBatch = loaded.LastModelDrivenApplyBatch
 	if loaded.PendingModelDrivenRequestID != "" {
 		a.pendingModelDrivenStatus = loaded.PendingModelDrivenStatus
+		a.pendingModelDrivenAuditArgsJSON = loaded.PendingModelDrivenArgsJSON
 		a.pendingModelDrivenNotice = "A model-driven checkpoint request was accepted before the previous session ended but was not applied; the previous context remains authoritative. The request arguments were preserved for audit only and will not be applied automatically."
 	}
 	a.lastModelDrivenSkipBatch = 0

@@ -646,9 +646,10 @@ type MainAgent struct {
 	// pendingModelDriven is the accepted-but-not-yet-started compact_context
 	// checkpoint request. Armed by handleToolResult after control-plane
 	// validation and consumed at the tool-batch barrier.
-	pendingModelDriven          *modelDrivenCheckpointRequest
-	pendingModelDrivenRequestID string
-	pendingModelDrivenStatus    string
+	pendingModelDriven              *modelDrivenCheckpointRequest
+	pendingModelDrivenRequestID     string
+	pendingModelDrivenStatus        string
+	pendingModelDrivenAuditArgsJSON string
 	// modelDrivenSkipNotice carries the low-gain skip reason from the worker
 	// settle to the continuation, which surfaces it as a transient notice.
 	modelDrivenSkipNotice string

@@ -90,11 +90,11 @@ func (a *MainAgent) buildRecoverySnapshot() *recovery.SessionSnapshot {
 		AutoCompactRequestGeneration: a.autoCompactRequestGeneration.Load(),
 		PendingModelDrivenRequestID:  a.pendingModelDrivenRequestID,
 		PendingModelDrivenStatus:     a.pendingModelDrivenStatus,
-		PendingModelDrivenArgsJSON:   a.pendingModelDrivenArgsJSON(),
+		PendingModelDrivenArgsJSON:   a.pendingModelDrivenAuditArgsSnapshot(),
 	}
 }
 
-func (a *MainAgent) pendingModelDrivenArgsJSON() string {
+func (a *MainAgent) pendingModelDrivenAuditArgsSnapshot() string {
 	if a == nil || a.pendingModelDriven == nil {
 		return ""
 	}

@@ -313,6 +313,7 @@ func (a *MainAgent) tryArmModelDrivenCheckpoint(callID string, rawArgs string) (
 	}
 	a.pendingModelDrivenRequestID = callID
 	a.pendingModelDrivenStatus = "accepted"
+	a.pendingModelDrivenAuditArgsJSON = rawArgs
 	a.recordCompactionLifecycleEvent("accepted", map[string]string{"request_id": callID})
 	// The model called compact_context in this window:
 	// whatever the attempt settles to, the reminder nudge has been answered,
