@@ -469,6 +469,9 @@ func (a *MainAgent) loadSessionState(sessionPath string) (*loadedSessionState, e
 		Messages:    append([]message.Message(nil), msgs...),
 		Summary:     summary,
 	}
+	if err := reconcileCompactionTransactions(sessionPath, loaded.Messages); err != nil {
+		log.Warnf("failed to reconcile compaction transactions session=%v error=%v", sessionPath, err)
+	}
 
 	var (
 		usageLedgerDuration     time.Duration

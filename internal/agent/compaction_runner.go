@@ -512,6 +512,11 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 		return err
 	}
 	if d.TransactionID != "" {
+		if err := updateCompactionTransactionTarget(d.TransactionSessionDir, d.TransactionID, compactedMessages); err != nil {
+			return fmt.Errorf("record compaction transcript fingerprint: %w", err)
+		}
+	}
+	if d.TransactionID != "" {
 		if err := updateCompactionTransactionStatus(d.TransactionSessionDir, d.TransactionID, compactionTransactionCommitted); err != nil {
 			return fmt.Errorf("commit compaction transaction: %w", err)
 		}
