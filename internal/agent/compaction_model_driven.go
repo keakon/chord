@@ -312,6 +312,7 @@ func (a *MainAgent) tryArmModelDrivenCheckpoint(callID string, rawArgs string) (
 		Args:       args,
 	}
 	a.pendingModelDrivenRequestID = callID
+	a.pendingModelDrivenStatus = "accepted"
 	a.recordCompactionLifecycleEvent("accepted", map[string]string{"request_id": callID})
 	// The model called compact_context in this window:
 	// whatever the attempt settles to, the reminder nudge has been answered,
@@ -419,6 +420,7 @@ func (a *MainAgent) maybeStartModelDrivenBarrier() bool {
 		return false
 	}
 	req := a.pendingModelDriven
+	a.pendingModelDrivenStatus = "preparing"
 	a.pendingModelDriven = nil
 	a.pendingModelDrivenRequestID = ""
 	if a.turn == nil {
@@ -1395,6 +1397,10 @@ func renderModelDrivenStageSection(id, status, kind string) string {
 // autoCompactRequested, or the usage-driven failure state: the safety net
 // stays armed and the next gate decides.
 func (a *MainAgent) settleModelDrivenOutcome(status string, reason string, preflight *modelDrivenPreflightStats, eventPlanID uint64) {
+	// A terminal outcome must never survive into a later recovery snapshot as
+	// an accepted request. The lifecycle event has already captured the
+	// request identity before this state is cleared.
+	a.pendingModelDrivenStatus = status
 	a.modelDrivenSkipNotice = strings.TrimSpace(reason)
 	// The model already took its shot at a checkpoint: the threshold grace
 	// (if any) ends here so the usage-driven safety net is not deferred again.

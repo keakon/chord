@@ -648,6 +648,7 @@ type MainAgent struct {
 	// validation and consumed at the tool-batch barrier.
 	pendingModelDriven          *modelDrivenCheckpointRequest
 	pendingModelDrivenRequestID string
+	pendingModelDrivenStatus    string
 	// modelDrivenSkipNotice carries the low-gain skip reason from the worker
 	// settle to the continuation, which surfaces it as a transient notice.
 	modelDrivenSkipNotice string

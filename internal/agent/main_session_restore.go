@@ -52,6 +52,8 @@ type loadedSessionState struct {
 	LastModelDrivenApplyBatch    uint64
 	AutoCompactRequestGeneration uint64
 	PendingModelDrivenRequestID  string
+	PendingModelDrivenStatus     string
+	PendingModelDrivenArgsJSON   string
 	SubAgentStates               []loadedSubAgentState
 	MailboxMessages              []SubAgentMailboxMessage
 	MailboxSeqMax                uint64
@@ -420,6 +422,8 @@ func (a *MainAgent) applySessionSnapshot(loaded *loadedSessionState, sessionPath
 	loaded.LastModelDrivenApplyBatch = snap.LastModelDrivenApplyBatch
 	loaded.AutoCompactRequestGeneration = snap.AutoCompactRequestGeneration
 	loaded.PendingModelDrivenRequestID = strings.TrimSpace(snap.PendingModelDrivenRequestID)
+	loaded.PendingModelDrivenStatus = strings.TrimSpace(snap.PendingModelDrivenStatus)
+	loaded.PendingModelDrivenArgsJSON = strings.TrimSpace(snap.PendingModelDrivenArgsJSON)
 	subAgentStarted := time.Now()
 	loaded.SubAgentStates = a.loadRestoredSubAgentStates(sessionPath, tmpRecovery, snap, loaded.MailboxMessages, loaded.TaskRecords, started)
 	subAgentRestoreDuration = time.Since(subAgentStarted)
@@ -711,7 +715,8 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	a.setPendingCompactionResume(loaded.PendingCompactionResume)
 	a.lastModelDrivenApplyBatch = loaded.LastModelDrivenApplyBatch
 	if loaded.PendingModelDrivenRequestID != "" {
-		a.pendingModelDrivenNotice = "A model-driven checkpoint request was accepted before the previous session ended but was not applied; the previous context remains authoritative."
+		a.pendingModelDrivenStatus = loaded.PendingModelDrivenStatus
+		a.pendingModelDrivenNotice = "A model-driven checkpoint request was accepted before the previous session ended but was not applied; the previous context remains authoritative. The request arguments were preserved for audit only and will not be applied automatically."
 	}
 	a.lastModelDrivenSkipBatch = 0
 	a.lastModelDrivenSkipReason = ""

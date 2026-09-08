@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -88,5 +89,18 @@ func (a *MainAgent) buildRecoverySnapshot() *recovery.SessionSnapshot {
 		LastModelDrivenApplyBatch:    a.lastModelDrivenApplyBatch,
 		AutoCompactRequestGeneration: a.autoCompactRequestGeneration.Load(),
 		PendingModelDrivenRequestID:  a.pendingModelDrivenRequestID,
+		PendingModelDrivenStatus:     a.pendingModelDrivenStatus,
+		PendingModelDrivenArgsJSON:   a.pendingModelDrivenArgsJSON(),
 	}
+}
+
+func (a *MainAgent) pendingModelDrivenArgsJSON() string {
+	if a == nil || a.pendingModelDriven == nil {
+		return ""
+	}
+	data, err := json.Marshal(a.pendingModelDriven.Args)
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
