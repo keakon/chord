@@ -234,7 +234,7 @@ func TestTypedClaimsInvalidateOnEvidenceStatus(t *testing.T) {
 		ClaimEvidence: map[string][]string{"tests pass": {evidenceItemID(evidenceItem{Key: "ev-1"})}},
 	}}
 	markTypedClaimsInvalidated(req, []evidenceItem{{Key: "ev-1", Validity: evidenceValidityInvalidated}})
-	if req.Args.ClaimKinds["tests pass"] != "invalidated" {
-		t.Fatalf("claim kind = %q, want invalidated", req.Args.ClaimKinds["tests pass"])
+	if req.ClaimStatuses["tests pass"] != "invalidated" {
+		t.Fatalf("claim status = %q, want invalidated", req.ClaimStatuses["tests pass"])
 	}
 }

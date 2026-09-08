@@ -27,8 +27,9 @@ import (
 // tool-batch barrier (all sibling calls and batch hooks done) and never
 // touched from the compaction worker goroutine.
 type modelDrivenCheckpointRequest struct {
-	ToolCallID string
-	Args       tools.CompactContextArgs
+	ToolCallID    string
+	Args          tools.CompactContextArgs
+	ClaimStatuses map[string]string
 }
 
 // requestAcceptedToolResult is the canonical compact_context success text. It
@@ -1249,10 +1250,10 @@ func markTypedClaimsInvalidated(req *modelDrivenCheckpointRequest, evidenceItems
 	for claim, refs := range req.Args.ClaimEvidence {
 		for _, ref := range refs {
 			if validity[ref] == evidenceValidityInvalidated || validity[ref] == evidenceValidityUnavailable {
-				if req.Args.ClaimKinds == nil {
-					req.Args.ClaimKinds = map[string]string{}
+				if req.ClaimStatuses == nil {
+					req.ClaimStatuses = map[string]string{}
 				}
-				req.Args.ClaimKinds[claim] = "invalidated"
+				req.ClaimStatuses[claim] = "invalidated"
 				break
 			}
 		}
@@ -1292,7 +1293,13 @@ func renderTypedCheckpointState(req *modelDrivenCheckpointRequest) string {
 	if req == nil {
 		return "- (none)"
 	}
-	return renderTypedStateJSON(typedStateFromArgs(req.Args))
+	state := typedStateFromArgs(req.Args)
+	for claim, status := range req.ClaimStatuses {
+		item := state.Claims[claim]
+		item.Status = status
+		state.Claims[claim] = item
+	}
+	return renderTypedStateJSON(state)
 }
 
 // inheritedCheckpointLabel is the label prefixed to a `## Current User Request`
