@@ -333,7 +333,7 @@ objective, decisions, open problems, next step, ...) therefore never depends
 on the summarizer happening to restate it, and chained compactions cannot
 erode it one summary at a time.
 
-`state_files` are references to current external state; `planned_state_files`
+`evidence_refs` may reference stable IDs from the checkpoint evidence pack; Chord validates those IDs before the barrier. `state_files` are references to current external state; `planned_state_files`
 is for paths that are not written yet and is not completion evidence. Chord never reads, injects, or
 existence-checks them, so the tool cannot bypass read permissions and cannot
 be used as an existence probe. Entries are normally workspace-relative paths

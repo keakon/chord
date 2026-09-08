@@ -50,6 +50,13 @@ func TestCompactContextPlannedStateFilesAreNormalizedSeparately(t *testing.T) {
 	}
 }
 
+func TestCompactContextEvidenceRefsAreTrimmedAndBudgeted(t *testing.T) {
+	args, err := testCompactValidator().ParseCompactContextArgs(json.RawMessage(`{"active_objective":"a","next_step":"b","evidence_refs":["  e-1  "]}`))
+	if err != nil || !slices.Equal(args.EvidenceRefs, []string{"e-1"}) {
+		t.Fatalf("args=%#v err=%v", args, err)
+	}
+}
+
 func TestCompactContextMissingRequired(t *testing.T) {
 	v := testCompactValidator()
 	for name, raw := range map[string]string{

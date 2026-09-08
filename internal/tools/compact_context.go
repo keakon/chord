@@ -24,6 +24,7 @@ type CompactContextArgs struct {
 	NextStep          string   `json:"next_step"`
 	StateFiles        []string `json:"state_files"`
 	PlannedStateFiles []string `json:"planned_state_files"`
+	EvidenceRefs      []string `json:"evidence_refs"`
 }
 
 // TokenEstimator estimates the input-token cost of a string. Defaults to a
@@ -123,6 +124,9 @@ func (v CompactContextValidator) ParseCompactContextArgs(raw json.RawMessage) (C
 		return CompactContextArgs{}, fmt.Errorf("validate planned_state_files: %w", err)
 	}
 	args.PlannedStateFiles = plannedStateFiles
+	if args.EvidenceRefs, err = validateCompactContextList(args.EvidenceRefs, 24, "evidence_refs"); err != nil {
+		return CompactContextArgs{}, err
+	}
 
 	// The continuation-state budget uses the same usage-calibrated token
 	// accounting as other context-pressure decisions. state_files paths are
@@ -139,6 +143,7 @@ func (v CompactContextValidator) ParseCompactContextArgs(raw json.RawMessage) (C
 		{"open_issues", strings.Join(args.OpenIssues, "\n")},
 		{"state_files", strings.Join(args.StateFiles, "\n")},
 		{"planned_state_files", strings.Join(args.PlannedStateFiles, "\n")},
+		{"evidence_refs", strings.Join(args.EvidenceRefs, "\n")},
 	}
 	texts := make([]string, len(fields))
 	for i, f := range fields {
@@ -382,6 +387,11 @@ func (CompactContextTool) Parameters() map[string]any {
 				"type": "array", "maxItems": 16,
 				"items":       map[string]any{"type": "string", "minLength": 1},
 				"description": "Workspace-relative paths planned for future state. They are not evidence that a file exists or that work is complete.",
+			},
+			"evidence_refs": map[string]any{
+				"type": "array", "maxItems": 24,
+				"items":       map[string]any{"type": "string", "minLength": 1},
+				"description": "Stable evidence IDs from the checkpoint evidence pack that support completed work or decisions.",
 			},
 		},
 		"required":             []string{"active_objective", "next_step"},

@@ -237,6 +237,13 @@ type evidenceItem struct {
 	Sequence  int
 }
 
+func evidenceItemID(item evidenceItem) string {
+	if strings.TrimSpace(item.Key) != "" {
+		return item.Key
+	}
+	return fmt.Sprintf("%s:%d", item.Kind, item.Sequence)
+}
+
 type compactionHistoryMeta struct {
 	Version           int                   `json:"version"`
 	HistoryFile       string                `json:"history_file"`

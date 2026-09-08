@@ -572,7 +572,7 @@ func renderEvidenceItemsForPrompt(items []evidenceItem) string {
 	}
 	var sb strings.Builder
 	for _, item := range items {
-		fmt.Fprintf(&sb, "- %s", item.Title)
+		fmt.Fprintf(&sb, "- [evidence:%s] %s", evidenceItemID(item), item.Title)
 		if item.WhyNeeded != "" {
 			fmt.Fprintf(&sb, " | why: %s", item.WhyNeeded)
 		}

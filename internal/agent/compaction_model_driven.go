@@ -288,6 +288,9 @@ func (a *MainAgent) tryArmModelDrivenCheckpoint(callID string, rawArgs string) (
 	if err != nil {
 		return "", err
 	}
+	if err := a.validateModelDrivenEvidenceRefs(args.EvidenceRefs); err != nil {
+		return "", err
+	}
 	a.pendingModelDriven = &modelDrivenCheckpointRequest{
 		ToolCallID: callID,
 		Args:       args,
@@ -300,6 +303,22 @@ func (a *MainAgent) tryArmModelDrivenCheckpoint(callID string, rawArgs string) (
 	// surfaced by the continuation notice).
 	a.markReminderCompactContextCalled()
 	return result, nil
+}
+
+func (a *MainAgent) validateModelDrivenEvidenceRefs(refs []string) error {
+	if len(refs) == 0 {
+		return nil
+	}
+	known := make(map[string]struct{})
+	for _, item := range a.evidenceItemsForCompaction(a.ctxMgr.GetMaxTokens()) {
+		known[evidenceItemID(item)] = struct{}{}
+	}
+	for _, ref := range refs {
+		if _, ok := known[ref]; !ok {
+			return fmt.Errorf("compact_context evidence_refs contains unknown evidence ID %q", ref)
+		}
+	}
+	return nil
 }
 
 // ------------------------------------------------------------------ barrier ---
@@ -1029,6 +1048,7 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 	completed := renderModelStateList(req.Args.Completed, "(none reported by the model)")
 	stateFiles := renderStateFilesSection(req.Args.StateFiles)
 	plannedStateFiles := renderPlannedStateFilesSection(req.Args.PlannedStateFiles)
+	evidenceRefs := renderEvidenceRefsSection(req.Args.EvidenceRefs)
 
 	sections := []fallbackSummarySection{
 		{"## Current User Request", modelDrivenCurrentUserRequestSection(anchor)},
@@ -1040,6 +1060,7 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 		{"## Files and Evidence", "- Precise archived history is listed in the checkpoint wrapper's archived history map."},
 		{"## Externalized State", stateFiles},
 		{"## Planned Externalized State", plannedStateFiles},
+		{"## Evidence References", evidenceRefs},
 		{"## Todo State", formatTodosAsRelevanceBullets(bundle.todos, anchor)},
 		{"## SubAgent State", formatSubAgentsAsBullets(bundle.subAgents)},
 		{"## Open Problems", openIssues},
@@ -1210,6 +1231,13 @@ func renderPlannedStateFilesSection(paths []string) string {
 		sb.WriteByte('\n')
 	}
 	return strings.TrimRight(sb.String(), "\n")
+}
+
+func renderEvidenceRefsSection(refs []string) string {
+	if len(refs) == 0 {
+		return "- (none reported by the model)"
+	}
+	return "- Model-declared evidence references; runtime verified that these IDs exist:\n- " + strings.Join(refs, "\n- ")
 }
 
 // settleModelDrivenOutcome is the single settlement point for model-driven
