@@ -78,8 +78,12 @@ func (t OpenAITuning) EffectiveReasoningEffort() string {
 
 // GeminiTuning holds Gemini-specific request tuning parameters.
 type GeminiTuning struct {
-	ThinkingBudget  *int   // nil = omit; -1 dynamic; 0 disable (model-dependent); >0 fixed budget
-	ThinkingLevel   string // ""|"low"|"medium"|"high" (Gemini 3+)
+	ThinkingBudget *int // nil = omit; -1 dynamic; 0 disable (model-dependent); >0 fixed budget
+	// ThinkingLevel is ""|"minimal"|"low"|"medium"|"high" (Gemini 3+). Gemini
+	// rejects a request carrying both a budget and a level, so
+	// normalizeGeminiThinking drops the budget whenever a level is set; some
+	// models (e.g. Gemini 3.1 Pro, 3.7 Flash) reject "minimal" outright.
+	ThinkingLevel   string
 	IncludeThoughts *bool  // nil = omit; true/false explicit includeThoughts
 	ToolChoice      string // ""|"auto"|"required"|"none" (required maps to Gemini ANY)
 }

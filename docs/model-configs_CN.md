@@ -720,7 +720,6 @@ providers:
         modalities:
           input: [text, image, pdf]
         thinking:
-          budget: -1
           level: high
       gemini-3.7-flash:
         limit:
@@ -740,24 +739,38 @@ model_pools:
 
 - `api_url` 保持在 `/models` 基础路径即可；Chord 会自动追加 `/{model}:streamGenerateContent?alt=sse`。
 - `type` 可以省略；Chord 会根据 `/models` 路径自动识别 Gemini。
-- Gemini 3.7 Flash（2026 年 8 月 GA）是目前的主力模型：促销价每百万 token $0.75 / $3.75 到 2026 年底，2027 年起 $1.50 / $7.50。它的 thinking 级别只有 `low` / `medium` / `high`——不支持 `minimal`，且 `thinking_budget` 已废弃，所以上面模板省略了 `budget`。Gemini 3.5 / 3.6 Flash 仍可用旧模板。
+- Gemini 3.7 Flash（2026 年 8 月 GA）是目前的主力模型：促销价每百万 token $0.75 / $3.75 到 2026 年底，2027 年起 $1.50 / $7.50。它的 thinking 级别只有 `low` / `medium` / `high`——不支持 `minimal`，且 `thinking_budget` 已废弃，所以上面模板只用 `level`。Gemini 3.5 / 3.6 Flash 也是同一套结构（同样只接受 `level`）。
 
 ### Gemini 的压缩调优
 
-Gemini 3.x 是目前前沿模型里长上下文悬崖最陡的：128K 处很强（MRCR v2 8-needle 84.9%），到 1M 崩到 ~26%——所以尽管窗口标称 1M，可靠窗口其实只有 128K–200K 左右。Gemini 会话应远早于此压缩：把该模型的 `threshold` 调到可用预算的 ~0.15–0.25（1M 窗口约合 150K–250K），`reminder` 设在它下方一点，让模型在自动压缩前先收到压力提示并有机会主动 reset。
+Gemini 长上下文表现随档位差异极大，没有统一的压缩规则：
+
+- **Gemini 3.1 Pro** 的多针长上下文确实弱（公开 MRCR v2 8-needle 检索约 0.26），所以要保留激进压缩：`threshold` 取可用预算的约 0.2、`reminder` 约 0.15（1M 窗口约合 150K–210K）。
+- **Gemini 3.7 Flash / Flash-Lite** 长上下文表现很好（MRCR v2 8-needle 接近 0.97，在榜单上名列前茅），激进提前压缩只会丢掉它还能用的上下文。Flash 用全局默认（`threshold` 0.8）或直接不写该模板块即可。
 
 ```yaml
-# 在每个 Gemini 模型模板上加 compaction；引用该模板的 provider 全部继承
+# 按模型分别配 Gemini 的 compaction；引用该模板的 provider 全部继承。
 model_templates:
-  gemini-3.1-pro: &gemini-3.1-pro
+  gemini-pro: &gemini-pro
     limit: {context: 1048576, output: 65536}
     compaction: {threshold: 0.2, reminder: 0.15}
-  gemini-3.7-flash: &gemini-3.7-flash
+    thinking:
+      include_thoughts: true
+    variants:
+      high: {thinking: {level: "high"}}
+      minimal: {thinking: {level: "minimal"}}
+    modalities: {input: [text, image, pdf]}
+  gemini-flash: &gemini-flash
     limit: {context: 1048576, output: 65536}
-    compaction: {threshold: 0.25, reminder: 0.2}
+    thinking:
+      include_thoughts: true
+    variants:
+      high: {thinking: {level: "high"}}
+      minimal: {thinking: {level: "minimal"}}
+    modalities: {input: [text, image, pdf]}
 ```
 
-Gemini 在超过 200K 输入时也按整请求更高档计费（全请求进高价档），所以赶在 200K 前压缩既保质量又省钱。如果工作负载确实需要长上下文，建议改用 GPT-5.6 Sol / Claude 5 这类模型，而不是把 Gemini 硬推到它的可靠区间之外。
+计费提醒：只有 **Gemini 3.1 Pro** 在超过 200K 输入后进入更高输入档（整请求按高价档计费）；Gemini 3.7 Flash 与 Flash-Lite 在任何上下文长度下都是平价，所以 Flash 没有为省钱而提前压缩的理由——只有当你的工作负载确实出现质量退化时才压。如果你既要长可靠窗口、又要 Pro 级质量，那才是该换用 GPT-5.6 Sol / Claude 5 这类模型的场景。
 
 ## GLM-5.2 / BigModel Coding Plan
 
@@ -1144,7 +1157,7 @@ providers:
 
 DeepSeek V4 Pro/Flash 标称 1M 窗口，但 MLA 架构在长距离上退化明显：独立的
 multi-needle 评测中 V4 Pro 在 1M 处只有约 41%（8-needle），而单 needle 约
-78%——这种陡降和 Gemini 的悬崖如出一辙。在 1M 窗口上，可靠工作窗口大约
+78%——这种陡降和 Gemini 3.1 Pro 的悬崖如出一辙。在 1M 窗口上，可靠工作窗口大约
 200K。V4 即使全部缓存未命中也远比同级模型便宜，因此频繁压缩的代价比在高端
 模型上低得多——尽早压、多压几次：
 

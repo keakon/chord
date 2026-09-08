@@ -788,7 +788,6 @@ providers:
         modalities:
           input: [text, image, pdf]
         thinking:
-          budget: -1
           level: high
       gemini-3.7-flash:
         limit:
@@ -808,34 +807,50 @@ Notes:
 
 - Keep `api_url` at the `/models` base path. Chord appends `/{model}:streamGenerateContent?alt=sse` automatically.
 - `type` can be omitted; Chord auto-detects Gemini from the `/models` path.
-- Gemini 3.7 Flash (GA August 2026) is the current workhorse: introductory $0.75 / $3.75 per 1M tokens through 2026, then $1.50 / $7.50 from 2027. Its thinking levels are `low` / `medium` / `high` only — `minimal` is not supported, and `thinking_budget` is deprecated, so the template above omits `budget`. Gemini 3.5/3.6 Flash remain available with the older template.
+- Gemini 3.7 Flash (GA August 2026) is the current workhorse: introductory $0.75 / $3.75 per 1M tokens through 2026, then $1.50 / $7.50 from 2027. Its thinking levels are `low` / `medium` / `high` only — `minimal` is not supported, and `thinking_budget` is deprecated, so the template above uses `level` only. Gemini 3.5/3.6 Flash share this shape (they also accept `level`).
 
 ### Compaction tuning for Gemini
 
-Gemini 3.x is the steepest long-context cliff of the current frontier: strong
-at 128K (84.9% MRCR v2 8-needle) but collapsing to ~26% at 1M, so the
-*reliable* window is only around 128K–200K even though the window advertises
-1M. Keep Gemini sessions compacted well before that: tune the model's
-`threshold` to ~0.15–0.25 of the usable budget (roughly 150K–250K on a 1M
-window) and set `reminder` just below it, so the model gets a pressure hint
-and a chance to actively reset before auto-compaction runs.
+Gemini's long-context behavior differs sharply by tier, so there is no single
+compaction rule:
+
+- **Gemini 3.1 Pro** has a genuinely weak multi-needle long context (public
+  MRCR v2 8-needle retrieval lands around 0.26), so keep compaction aggressive:
+  `threshold` ~0.2 and `reminder` ~0.15 of the usable budget (roughly 150K–210K
+  on a 1M window).
+- **Gemini 3.7 Flash / Flash-Lite** hold up well at long context (MRCR v2 8-needle
+  near 0.97, among the best on the leaderboard), so aggressive early compaction
+  just discards context it can still use. Leave Flash at the global default
+  (`threshold` 0.8) or omit the per-model block entirely.
 
 ```yaml
-# Add compaction to each Gemini model template you already define; every
-# provider referencing the template inherits it.
+# Per-model Gemini compaction. Providers referencing the template inherit it.
 model_templates:
-  gemini-3.1-pro: &gemini-3.1-pro
+  gemini-pro: &gemini-pro
     limit: {context: 1048576, output: 65536}
     compaction: {threshold: 0.2, reminder: 0.15}
-  gemini-3.7-flash: &gemini-3.7-flash
+    thinking:
+      include_thoughts: true
+    variants:
+      high: {thinking: {level: "high"}}
+      minimal: {thinking: {level: "minimal"}}
+    modalities: {input: [text, image, pdf]}
+  gemini-flash: &gemini-flash
     limit: {context: 1048576, output: 65536}
-    compaction: {threshold: 0.25, reminder: 0.2}
+    thinking:
+      include_thoughts: true
+    variants:
+      high: {thinking: {level: "high"}}
+      minimal: {thinking: {level: "minimal"}}
+    modalities: {input: [text, image, pdf]}
 ```
 
-Gemini also doubles input pricing above 200K tokens (the whole request is
-billed at the higher tier), so compacting before 200K saves money as well as
-quality. If your workload truly needs long context, prefer a GPT-5.6 Sol /
-Claude 5-class model instead of pushing Gemini past its reliable band.
+Pricing note: only **Gemini 3.1 Pro** steps up to the higher input tier above
+200K tokens (the whole request is billed at the higher tier). Gemini 3.7 Flash
+and Flash-Lite are flat-priced at any context length, so there is no cost reason
+to compact Flash early — do it only if quality actually degrades for your
+workload. If you need both a long reliable window *and* Pro-class quality, that is
+the case where a GPT-5.6 Sol / Claude 5-class model is the better fit.
 
 ## GLM-5.2 / BigModel Coding Plan
 
@@ -1247,7 +1262,7 @@ cannot carry them back in tool results.
 DeepSeek V4 Pro/Flash advertise a 1M window, but the MLA architecture degrades
 noticeably at long range: independent multi-needle evals put V4 Pro around
 ~41% at 1M (8-needle) versus ~78% single-needle, a sharp drop that mirrors the
-Gemini cliff. The reliable working window is roughly 200K on the 1M window.
+Gemini 3.1 Pro cliff. The reliable working window is roughly 200K on the 1M window.
 V4 is the cheapest family by a wide margin even on cache misses, so frequent
 compaction is far cheaper than on premium models — compact early and often:
 

@@ -6253,11 +6253,44 @@ func TestClientEmptyNextRequestTuningOverridePreservesModelDefaults(t *testing.T
 			assert: func(t *testing.T, tuning RequestTuning) {
 				t.Helper()
 				got := tuning.Gemini
+				// The client keeps both configured knobs; the Gemini wire layer
+				// collapses them at request construction (explicit level wins),
+				// which the recording stub below bypasses.
+				if got.ThinkingLevel != "high" {
+					t.Fatalf("Gemini thinking level = %q, want high", got.ThinkingLevel)
+				}
+				if got.ThinkingBudget == nil || *got.ThinkingBudget != 1024 {
+					t.Fatalf("Gemini thinking budget = %#v, want 1024 alongside a level", got.ThinkingBudget)
+				}
+				if got.IncludeThoughts == nil || !*got.IncludeThoughts {
+					t.Fatalf("Gemini include thoughts = %#v, want true", got.IncludeThoughts)
+				}
+			},
+		},
+		{
+			name:       "gemini budget only",
+			providerID: "gemini",
+			provider: config.ProviderConfig{
+				Type: config.ProviderTypeGenerateContent,
+				Models: map[string]config.ModelConfig{
+					"gemini-test": {
+						Limit: config.ModelLimit{Context: 1000000, Output: 8192},
+						Thinking: &config.ThinkingConfig{
+							Budget:          1024,
+							IncludeThoughts: new(true),
+						},
+					},
+				},
+			},
+			modelID: "gemini-test",
+			assert: func(t *testing.T, tuning RequestTuning) {
+				t.Helper()
+				got := tuning.Gemini
 				if got.ThinkingBudget == nil || *got.ThinkingBudget != 1024 {
 					t.Fatalf("Gemini thinking budget = %#v, want 1024", got.ThinkingBudget)
 				}
-				if got.ThinkingLevel != "high" {
-					t.Fatalf("Gemini thinking level = %q, want high", got.ThinkingLevel)
+				if got.ThinkingLevel != "" {
+					t.Fatalf("Gemini thinking level = %q, want empty", got.ThinkingLevel)
 				}
 				if got.IncludeThoughts == nil || !*got.IncludeThoughts {
 					t.Fatalf("Gemini include thoughts = %#v, want true", got.IncludeThoughts)

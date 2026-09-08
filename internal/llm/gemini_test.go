@@ -497,3 +497,90 @@ func TestGeminiUserParts_AddsEmptyTextPartForEmptyTextOnlyMessage(t *testing.T) 
 		t.Fatalf("parts = %#v, want one empty text part", got)
 	}
 }
+
+func TestGeminiThinkingLevelDropsLegacyBudget(t *testing.T) {
+	// Gemini answers 400 when a request carries both thinkingBudget and
+	// thinkingLevel. Normalization is deliberately deferred to the single wire
+	// point — normalizeGeminiThinking, called from the Gemini request body
+	// construction — so the tuning builders and merge layers keep both knobs
+	// exactly as configured and no future merge path can ship a level-bearing
+	// request without passing through the collapse.
+	budget := -1
+	norm := normalizeGeminiThinking(GeminiTuning{ThinkingBudget: &budget, ThinkingLevel: "high"})
+	if norm.ThinkingLevel != "high" {
+		t.Fatalf("thinkingLevel = %q, want high", norm.ThinkingLevel)
+	}
+	if norm.ThinkingBudget != nil {
+		t.Fatalf("thinkingBudget = %d, want nil when a level is set", *norm.ThinkingBudget)
+	}
+
+	// A budget-only config keeps the legacy knob untouched.
+	only := normalizeGeminiThinking(GeminiTuning{ThinkingBudget: &budget})
+	if only.ThinkingBudget == nil || *only.ThinkingBudget != -1 {
+		t.Fatalf("thinkingBudget = %v, want -1 preserved", only.ThinkingBudget)
+	}
+
+	// The builders preserve config facts: a variant that only sets a level
+	// overlays the level while the inherited budget survives until the wire
+	// normalization collapses the pair.
+	base := tuningFromModel(config.ModelConfig{Thinking: &config.ThinkingConfig{Budget: -1}}, "", nil, nil)
+	if base.Gemini.ThinkingBudget == nil || *base.Gemini.ThinkingBudget != -1 {
+		t.Fatalf("base thinkingBudget = %v, want -1", base.Gemini.ThinkingBudget)
+	}
+	merged := mergeVariantTuning(base, config.ModelVariant{Thinking: &config.ThinkingConfig{Level: "low"}})
+	if merged.Gemini.ThinkingLevel != "low" {
+		t.Fatalf("thinkingLevel = %q, want low", merged.Gemini.ThinkingLevel)
+	}
+	if merged.Gemini.ThinkingBudget == nil || *merged.Gemini.ThinkingBudget != -1 {
+		t.Fatalf("thinkingBudget = %v, want -1 kept by the variant overlay", merged.Gemini.ThinkingBudget)
+	}
+	final := normalizeGeminiThinking(merged.Gemini)
+	if final.ThinkingLevel != "low" || final.ThinkingBudget != nil {
+		t.Fatalf("normalized = %+v, want level low and no budget", final)
+	}
+}
+
+func TestGeminiCompleteStreamOmitsThinkingBudgetWhenLevelSet(t *testing.T) {
+	var captured geminiRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"code":400,"message":"forced","status":"INVALID_ARGUMENT"}}`))
+	}))
+	defer srv.Close()
+
+	provider := NewProviderConfig("gemini", config.ProviderConfig{Type: config.ProviderTypeGenerateContent, APIURL: srv.URL + "/models"}, []string{"test-key"})
+	geminiProvider, err := NewGeminiProvider(provider, "")
+	if err != nil {
+		t.Fatalf("NewGeminiProvider: %v", err)
+	}
+	budget := -1
+	_, err = geminiProvider.CompleteStream(
+		context.Background(),
+		"test-key",
+		"gemini-test",
+		"",
+		[]message.Message{{Role: "user", Content: "hello"}},
+		nil,
+		128,
+		RequestTuning{Gemini: GeminiTuning{ThinkingBudget: &budget, ThinkingLevel: "high"}},
+		func(message.StreamDelta) {},
+	)
+	if err == nil {
+		t.Fatal("expected forced server error")
+	}
+	if captured.GenerationConfig == nil || captured.GenerationConfig.ThinkingConfig == nil {
+		t.Fatalf("thinkingConfig = %#v, want one", captured.GenerationConfig)
+	}
+	cfg := captured.GenerationConfig.ThinkingConfig
+	if cfg.ThinkingLevel != "high" {
+		t.Fatalf("thinkingLevel = %q, want high", cfg.ThinkingLevel)
+	}
+	if cfg.ThinkingBudget != nil {
+		t.Fatalf("thinkingBudget = %d, want omitted alongside thinkingLevel", *cfg.ThinkingBudget)
+	}
+}

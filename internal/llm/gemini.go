@@ -89,6 +89,24 @@ type geminiThinkingConfig struct {
 	IncludeThoughts *bool  `json:"includeThoughts,omitempty"`
 }
 
+// normalizeGeminiThinking collapses the Gemini thinking knobs into a shape the
+// API accepts. Gemini rejects a request that carries both thinkingBudget and
+// thinkingLevel with a 400, so an explicit level always wins: thinking_level is
+// the Gemini 3+ control, while thinking_budget only survives for backward
+// compatibility. Callers that configure both (a common copy-paste from older
+// recipes) would otherwise fail every request with no local explanation.
+//
+// This is deliberately the single normalization point: the tuning builders and
+// merge layers keep both knobs exactly as configured, and only the request
+// body construction here collapses them, so a future merge path cannot ship a
+// level-bearing request without passing through this shape.
+func normalizeGeminiThinking(t GeminiTuning) GeminiTuning {
+	if t.ThinkingLevel != "" {
+		t.ThinkingBudget = nil
+	}
+	return t
+}
+
 type geminiGenerationConfig struct {
 	MaxOutputTokens int                   `json:"maxOutputTokens,omitempty"`
 	ThinkingConfig  *geminiThinkingConfig `json:"thinkingConfig,omitempty"`
@@ -213,13 +231,17 @@ func (g *GeminiProvider) CompleteStream(
 	if maxTokens > 0 {
 		genCfg.MaxOutputTokens = maxTokens
 	}
-	if tuning.Gemini.ThinkingBudget != nil || tuning.Gemini.ThinkingLevel != "" || tuning.Gemini.IncludeThoughts != nil {
+	// Gemini rejects a request carrying both thinkingBudget and thinkingLevel,
+	// so normalize first and let the resolved shape drive the include_thoughts
+	// default too (a dropped budget must not imply active thinking).
+	geminiThinking := normalizeGeminiThinking(tuning.Gemini)
+	if geminiThinking.ThinkingBudget != nil || geminiThinking.ThinkingLevel != "" || geminiThinking.IncludeThoughts != nil {
 		// Gemini thinkingLevel values are documented as lowercase strings in the
 		// public Gemini API docs (e.g. "minimal"|"low"|"medium"|"high"). Keep the
 		// configured casing as-is.
-		includeThoughts := tuning.Gemini.IncludeThoughts
+		includeThoughts := geminiThinking.IncludeThoughts
 		if includeThoughts == nil &&
-			((tuning.Gemini.ThinkingBudget != nil && *tuning.Gemini.ThinkingBudget != 0) || tuning.Gemini.ThinkingLevel != "") {
+			((geminiThinking.ThinkingBudget != nil && *geminiThinking.ThinkingBudget != 0) || geminiThinking.ThinkingLevel != "") {
 			// Thought signatures are bound to the producing model, so the
 			// visible thought summary is the only reasoning text that survives
 			// a later switch to another provider or wire family. Capture it by
@@ -228,7 +250,7 @@ func (g *GeminiProvider) CompleteStream(
 			v := true
 			includeThoughts = &v
 		}
-		genCfg.ThinkingConfig = &geminiThinkingConfig{ThinkingBudget: tuning.Gemini.ThinkingBudget, ThinkingLevel: tuning.Gemini.ThinkingLevel, IncludeThoughts: includeThoughts}
+		genCfg.ThinkingConfig = &geminiThinkingConfig{ThinkingBudget: geminiThinking.ThinkingBudget, ThinkingLevel: geminiThinking.ThinkingLevel, IncludeThoughts: includeThoughts}
 	}
 	if genCfg.MaxOutputTokens > 0 || genCfg.ThinkingConfig != nil {
 		reqBody.GenerationConfig = &genCfg
