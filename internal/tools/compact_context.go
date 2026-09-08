@@ -394,7 +394,7 @@ func (t CompactContextTool) Description() string {
 	if t.validator.TodoWriteVisible {
 		todoSync = "- your todo list reflects actual progress (the checkpoint snapshots runtime todos verbatim; sync drifted entries with todo_write before requesting);\n"
 	}
-	return "Request a durable context checkpoint once your current working state is fully externalized (written into state_files or planned_state_files, or fully expressible in structured arguments).\n" +
+	return "Request a durable context checkpoint once your current working state is fully externalized (written into state_files, or fully expressible in structured arguments). Use planned_state_files only to record paths for future work; they do not externalize state.\n" +
 		"Runtime pauses the next main-model request, applies the checkpoint atomically, and continues the same turn on the compacted context. This involves a session history rewrite; it is NOT read-only.\n" +
 		"Call it alone (no sibling tool calls in the same response) and only when:\n" +
 		"- the current phase is wrapped up (" +

@@ -471,3 +471,10 @@ func TestCompactContextClaimEvidenceMustMatchClaim(t *testing.T) {
 		t.Fatal("orphan claim evidence should be rejected")
 	}
 }
+
+func TestCompactContextDescriptionDoesNotTreatPlannedFilesAsExternalized(t *testing.T) {
+	description := NewCompactContextTool(testCompactValidator()).Description()
+	if !strings.Contains(description, "planned_state_files") || !strings.Contains(description, "do not externalize state") {
+		t.Fatalf("description must distinguish planned files from externalized state: %q", description)
+	}
+}
