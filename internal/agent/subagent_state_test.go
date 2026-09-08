@@ -19,7 +19,7 @@ func TestValidateSubAgentStateTransition(t *testing.T) {
 		{name: "waiting resumes", from: SubAgentStateWaitingMain, to: SubAgentStateRunning, want: true},
 		{name: "waiting descendant completes", from: SubAgentStateWaitingDescendant, to: SubAgentStateCompleted, want: true},
 		{name: "completed reactivates", from: SubAgentStateCompleted, to: SubAgentStateRunning, want: true},
-		{name: "failed reactivation prepares idle", from: SubAgentStateFailed, to: SubAgentStateIdle, want: true},
+		{name: "failed idle reset is not an ordinary transition", from: SubAgentStateFailed, to: SubAgentStateIdle, want: false},
 		{name: "unknown destination rejected", from: SubAgentStateRunning, to: SubAgentState("unknown")},
 	}
 	for _, test := range tests {
@@ -60,6 +60,21 @@ func TestSubAgentRuntimeStateSetInvalidTransitionReturnsFalse(t *testing.T) {
 	got, summary := state.snapshot()
 	if got != SubAgentStateCompleted || summary != "done" {
 		t.Fatalf("state after rejected transition = (%q, %q), want (completed, done)", got, summary)
+	}
+}
+
+func TestSubAgentRuntimeStateResetForAttemptRequiresTerminalState(t *testing.T) {
+	var state subAgentRuntimeState
+	state.set(SubAgentStateCompleted, "done")
+	if !state.resetForAttempt("new attempt") {
+		t.Fatal("terminal runtime was not reset for a new attempt")
+	}
+	got, summary := state.snapshot()
+	if got != SubAgentStateIdle || summary != "new attempt" {
+		t.Fatalf("reset state = (%q, %q), want (idle, new attempt)", got, summary)
+	}
+	if state.resetForAttempt("invalid second reset") {
+		t.Fatal("non-terminal runtime reset unexpectedly succeeded")
 	}
 }
 

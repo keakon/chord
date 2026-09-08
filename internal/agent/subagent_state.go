@@ -40,10 +40,8 @@ func isKnownSubAgentState(state SubAgentState) bool {
 //   - An empty state may bootstrap into any non-empty state (tests and
 //     standalone sub-agents construct records directly at terminal states).
 //   - Re-setting the current state is idempotent.
-//   - A terminal state (completed/failed/cancelled) is absorbing except for an
-//     explicit reactivation into running (focused follow-up, queued user input
-//     wake, child event reactivation). Terminal tasks are continued by design;
-//     they are not monotonically frozen.
+//   - A terminal state is absorbing for ordinary events. Reuse of a terminal
+//     runtime is an explicit new-attempt operation, not a normal transition.
 //   - All non-terminal states may move to any real state; unknown states are
 //     rejected unless already current.
 func validSubAgentStateTransition(from, to SubAgentState) bool {
@@ -57,7 +55,7 @@ func validSubAgentStateTransition(from, to SubAgentState) bool {
 		return true
 	}
 	if from == SubAgentStateCompleted || from == SubAgentStateFailed || from == SubAgentStateCancelled {
-		return to == SubAgentStateRunning || to == SubAgentStateIdle
+		return to == SubAgentStateRunning
 	}
 	switch to {
 	case SubAgentStateRunning, SubAgentStateIdle, SubAgentStateWaitingMain, SubAgentStateWaitingDescendant, SubAgentStateCompleted, SubAgentStateFailed, SubAgentStateCancelled:
@@ -106,6 +104,30 @@ func (s *subAgentRuntimeState) set(state SubAgentState, summary string) bool {
 		return false
 	}
 	s.state = state
+	s.stateChangedAt = time.Now()
+	if summary != "" {
+		s.lastSummary = summary
+	}
+	return true
+}
+
+func (s *subAgentRuntimeState) restore(state SubAgentState, summary string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.state = state
+	s.stateChangedAt = time.Now()
+	if summary != "" {
+		s.lastSummary = summary
+	}
+}
+
+func (s *subAgentRuntimeState) resetForAttempt(summary string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !isTerminalSubAgentState(s.state) {
+		return false
+	}
+	s.state = SubAgentStateIdle
 	s.stateChangedAt = time.Now()
 	if summary != "" {
 		s.lastSummary = summary

@@ -193,6 +193,14 @@ func (s *SubAgent) setState(state SubAgentState, summary string) bool {
 	return true
 }
 
+func (s *SubAgent) restoreState(state SubAgentState, summary string) {
+	s.runtimeState.restore(state, summary)
+}
+
+func (s *SubAgent) resetForAttempt(summary string) bool {
+	return s.runtimeState.resetForAttempt(summary)
+}
+
 func (s *SubAgent) setLastMailboxID(id string) {
 	s.runtimeState.setLastMailboxID(id)
 }

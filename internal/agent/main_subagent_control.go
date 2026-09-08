@@ -610,7 +610,7 @@ func (a *MainAgent) beginNextTaskAttemptForLiveSub(sub *SubAgent) error {
 	// (canStartUserTurn requires Running), so the fresh attempt starts from the
 	// same idle state a rehydrated one does.
 	if isTerminalSubAgentState(sub.State()) {
-		if !sub.setState(SubAgentStateIdle, sub.LastSummary()) {
+		if !sub.resetForAttempt(sub.LastSummary()) {
 			return fmt.Errorf("SubAgent %s cannot prepare terminal runtime for reuse", sub.instanceID)
 		}
 		a.noteSubAgentStateTransition(sub, SubAgentStateIdle)
@@ -703,7 +703,7 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 		// never accept work.
 		state = SubAgentStateIdle
 	}
-	sub.setState(state, strings.TrimSpace(record.LastSummary))
+	sub.restoreState(state, strings.TrimSpace(record.LastSummary))
 	if record.PendingCompletion != nil {
 		sub.setPendingCompleteIntent(&AgentResult{Summary: record.PendingCompletion.Summary, Envelope: record.PendingCompletion})
 	}
