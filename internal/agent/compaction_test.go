@@ -3926,6 +3926,14 @@ func TestFitCompactionInputToContextLimitReturnsErrorForGrosslyOversizedPrompt(t
 	}
 }
 
+func TestFitCompactionInputToContextLimitRejectsUnavailableLimit(t *testing.T) {
+	input := &compactionInput{Transcript: "history"}
+	_, err := (&MainAgent{}).fitCompactionInputToContextLimit(nil, input, 0, "history.md", nil, nil, nil, nil, compactReservedOutput)
+	if err == nil || !strings.Contains(err.Error(), "context limit is unavailable") {
+		t.Fatalf("fitCompactionInputToContextLimit error = %v, want unavailable context limit error", err)
+	}
+}
+
 func TestBuildCompactionInputUsesProvidedEvidenceAndTail(t *testing.T) {
 	head := []message.Message{
 		{Role: "user", Content: "Improve extraction quality and prioritize candidate filtering."},

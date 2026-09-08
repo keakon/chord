@@ -230,7 +230,7 @@ func (a *MainAgent) fitCompactionInputToContextLimit(head []message.Message, inp
 		return nil, fmt.Errorf("compaction input is nil")
 	}
 	if contextLimit <= 0 {
-		return input, nil
+		return nil, fmt.Errorf("compaction context limit is unavailable; refusing unbounded admission")
 	}
 	preflightBuffer := max(contextLimit/compactPreflightBufferRatio, compactPreflightBufferMin)
 	allowedInput := contextLimit - maxOutputTokens - preflightBuffer
