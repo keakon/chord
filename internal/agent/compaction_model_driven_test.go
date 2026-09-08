@@ -1417,9 +1417,15 @@ func TestModelDrivenCooldownExpiresDespitePerBatchRetries(t *testing.T) {
 // model-driven resets do not erase the previous checkpoint's body: the prior
 // checkpoint inside the archived head is carried forward verbatim, exactly as
 // the usage-driven runner does.
-func TestModelDrivenCheckpointCarriesPriorCheckpointBody(t *testing.T) {
+func TestModelDrivenCheckpointDoesNotCarryPriorNaturalLanguageBody(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
+	// A prior checkpoint whose body is natural-language Markdown (a
+	// usage-driven summary or a pre-typed model-driven checkpoint) is not
+	// carried forward verbatim: recursion must not re-append whole previous
+	// bodies. Machine-carryable state travels only through the typed state
+	// block, and everything the new submission did not restate stays in the
+	// archived history files.
 	priorBody := "## Key Decisions\n- keep the archival profile for model-driven resets"
 	prior := buildCompactionCheckpointMessage(priorBody, []string{"~/history-1.md"}, compactionSummaryModeModelDriven, nil)
 	snapshot := []message.Message{
@@ -1430,25 +1436,39 @@ func TestModelDrivenCheckpointCarriesPriorCheckpointBody(t *testing.T) {
 	bundle := modelDrivenBarrierSnapshot{snapshot: snapshot}
 
 	summary := a.buildModelDrivenCheckpointSummary(bundle, snapshot, len(snapshot), req)
-	if !strings.Contains(summary, priorCheckpointSectionHeading) {
-		t.Fatalf("model-driven checkpoint must carry the previous checkpoint section:\n%s", summary)
+	if strings.Contains(summary, priorCheckpointSectionHeading) {
+		t.Fatalf("model-driven checkpoint must not carry a natural-language previous-checkpoint section:\n%s", summary)
 	}
-	if !strings.Contains(summary, "keep the archival profile for model-driven resets") {
-		t.Fatalf("the previous checkpoint's body must survive the reset:\n%s", summary)
-	}
-	if strings.Count(summary, priorCheckpointSectionHeading) != 1 {
-		t.Fatalf("the carry section must appear exactly once:\n%s", summary)
+	if strings.Contains(summary, "keep the archival profile for model-driven resets") {
+		t.Fatalf("the previous natural-language body must not survive the reset:\n%s", summary)
 	}
 }
 
 func TestModelDrivenCheckpointCarriesTypedStateAcrossGenerations(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
+	// The prior checkpoint's typed state block (decisions/open issues/evidence
+	// references/stage) is the only machine channel across generations: the
+	// merge keeps the fresh submission's items first and the carried ones
+	// after, and the new checkpoint re-renders both the readable sections and
+	// the typed block from the merged state.
 	prior := buildCompactionCheckpointMessage("## Typed Checkpoint State\n- {\"evidence_refs\":[\"ev-old\"],\"stage_status\":\"completed\"}", nil, compactionSummaryModeModelDriven, nil)
 	snapshot := []message.Message{{Role: message.RoleUser, Content: prior, IsCompactionSummary: true}, {Role: message.RoleUser, Content: "new request"}}
 	req := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{ActiveObjective: "continue", NextStep: "verify", EvidenceRefs: []string{"ev-new"}, StageStatus: "candidate", CheckpointKind: "provisional"}}
 	summary := a.buildModelDrivenCheckpointSummary(modelDrivenBarrierSnapshot{snapshot: snapshot}, snapshot, len(snapshot), req)
 	if !strings.Contains(summary, "evidence_refs") || !strings.Contains(summary, "ev-old") {
 		t.Fatalf("typed checkpoint state was not carried: %s", summary)
+	}
+	// The fresh submission's items precede the carried ones and its stage
+	// metadata overrides the carried one.
+	state, ok := parseCheckpointTypedState(compactionSummaryBody(summary))
+	if !ok {
+		t.Fatalf("typed state missing from the new checkpoint: %s", summary)
+	}
+	if len(state.EvidenceRefs) != 2 || state.EvidenceRefs[0] != "ev-new" || state.EvidenceRefs[1] != "ev-old" {
+		t.Fatalf("evidence refs = %v, want [ev-new ev-old]", state.EvidenceRefs)
+	}
+	if state.StageStatus != "candidate" || state.Kind != "provisional" {
+		t.Fatalf("stage = status %q kind %q, want candidate/provisional", state.StageStatus, state.Kind)
 	}
 }
 

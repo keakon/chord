@@ -325,13 +325,18 @@ tool dependency ordering.
 
 Compaction is recursive: the next automatic summary is written over a history
 that already begins with a checkpoint. The session anchors (original request,
-standing constraints) are carried forward verbatim, and so is the previous
-checkpoint's structured body — the summarizer always receives it as a
-protected input section, and the applied checkpoint appends it verbatim as a
-`## Previous Checkpoint` section. A checkpoint's structured content (its
-objective, decisions, open problems, next step, ...) therefore never depends
-on the summarizer happening to restate it, and chained compactions cannot
-erode it one summary at a time.
+standing constraints) are carried forward verbatim. A usage-driven summary
+receives the previous checkpoint's structured body as a protected input
+section and appends it verbatim as a `## Previous Checkpoint` section, so that
+content never depends on the summarizer happening to restate it. A
+model-driven checkpoint instead carries only machine state across generations:
+verified decisions, open problems, evidence references and stage metadata
+travel as a structured typed block (`## Typed Checkpoint State`) that the next
+model-driven checkpoint merges with the model's fresh submission (the fresh
+items win and the list is bounded; anything dropped is disclosed and remains
+recoverable in the archived history files). The previous natural-language body
+is not re-appended, and each round re-states the objective, progress and
+claims it considers current.
 
 `evidence_refs` may reference stable IDs `claim_kinds` classifies completed/decision claims as observed, derived, assumed, or proposed; observed claims require claim_evidence. from the checkpoint evidence pack; Chord validates those IDs before the barrier. `state_files` are references to current external state; `planned_state_files`
 is for paths that are not written yet and is not completion evidence. Chord never reads, injects, or

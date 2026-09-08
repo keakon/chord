@@ -1156,7 +1156,13 @@ func (b *modelDrivenCheckpointBuilder) render(exportedArchive string) (string, m
 // history into a fresh slice just to concatenate head and tail would duplicate
 // the entire conversation for no gain.
 func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierSnapshot, snapshot []message.Message, headSplit int, req *modelDrivenCheckpointRequest) string {
-	req = mergePriorTypedCheckpointState(req, latestPriorCheckpointBody(snapshot[:headSplit]))
+	// The prior checkpoint's machine-carryable state (decisions, open issues,
+	// evidence references, stage) is merged into this submission and rendered
+	// below; the whole prior body is never carried as natural-language
+	// Markdown. stateCarryOmitted reports carried decisions dropped by the
+	// merge's list bound so the renderer discloses the omission.
+	var stateCarryOmitted int
+	req, stateCarryOmitted = mergePriorTypedCheckpointState(req, latestPriorCheckpointBody(snapshot[:headSplit]))
 	headSnapshot := snapshot[:headSplit]
 	anchor := resolveLatestUserRequestAnchor(snapshot)
 	constraints := renderEvidenceKindForFallback(&compactionInput{EvidenceItems: bundle.evidenceItems}, evidenceUserCorrection, "- No preserved user constraints.")
@@ -1170,6 +1176,12 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 	claimKinds := renderClaimKindsSection(req.Args.ClaimKinds)
 	stage := renderModelDrivenStageSection(req.Args.StageID, req.Args.StageStatus, req.Args.CheckpointKind)
 	typedState := renderTypedCheckpointState(req)
+	if stateCarryOmitted > 0 {
+		// The dropped entries exist only in the archived history files. The
+		// note must say so: a bounded carry that silently looked complete
+		// would read as the full decision record.
+		decisions += "\n" + typedStateOmittedNote
+	}
 
 	sections := []fallbackSummarySection{
 		{"## Current User Request", modelDrivenCurrentUserRequestSection(anchor)},
@@ -1205,79 +1217,52 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 	// no longer see — and unable to tell that it should re-load it.
 	skillNames, skillsOmitted := collectCheckpointSkillNames(headSnapshot)
 	summary = ensureCheckpointSkillsSection(summary, skillNames, skillsOmitted)
-	// A prior checkpoint inside the archived head is carried forward verbatim
-	// as a final section, exactly as the usage-driven runner does. The
-	// guarantee is deterministic and summarizer-independent, so it must hold
-	// here too: without it, two consecutive model-driven resets would erase
-	// the previous checkpoint's Progress/Decisions body — the model only
-	// submits the state it considers current, and everything it did not
-	// restate would exist solely in the archive. The helper strips the anchors
-	// block and any earlier carry section, so the carry stays bounded at one
-	// checkpoint body and cannot duplicate the model's own sections (their
-	// column-zero heading markers are stripped, so model text can never open a
-	// `## Previous Checkpoint` section of its own).
-	summary = appendPriorCheckpointCarry(summary, latestPriorCheckpointBody(headSnapshot))
+	// The previous checkpoint's machine-carryable state was merged into the
+	// typed state block above; its natural-language body is deliberately NOT
+	// carried forward. The model re-states its current objective, progress and
+	// claims on every submission, and carried decisions/open issues/evidence
+	// references/stage travel structurally through the typed block — so two
+	// consecutive model-driven resets cannot erase prior verified decisions,
+	// and everything else the model did not restate exists in the archived
+	// history files rather than as a growing verbatim appendix.
 	anchors := buildCompactionAnchors(latestCompactionAnchors(headSnapshot), bundle.originalRequest, bundle.evidenceItems)
 	return withCompactionAnchors(summary, anchors)
 }
 
-func mergePriorTypedCheckpointState(req *modelDrivenCheckpointRequest, prior string) *modelDrivenCheckpointRequest {
-	if req == nil || prior == "" {
-		return req
+// mergePriorTypedCheckpointState merges the typed state carried by the most
+// recent prior checkpoint (inside the archived head) into the fresh model
+// submission, then writes the merged state back into the request arguments so
+// the rendered sections and the typed state block both reflect the carry. The
+// fresh submission wins (its items come first and its stage metadata
+// overrides); carried items fill the remaining list capacity. omittedDecisions
+// reports how many carried decisions were dropped to bound the list, so the
+// renderer can disclose it. A nil request, an empty prior body, or a prior
+// checkpoint without a typed state block (a usage-driven summary, an old
+// checkpoint) leaves the submission untouched.
+func mergePriorTypedCheckpointState(req *modelDrivenCheckpointRequest, prior string) (mergedReq *modelDrivenCheckpointRequest, omittedDecisions int) {
+	if req == nil {
+		return req, 0
 	}
-	start := strings.Index(prior, "## Typed Checkpoint State")
-	if start < 0 {
-		return req
+	priorState, ok := parseCheckpointTypedState(prior)
+	if !ok {
+		return req, 0
 	}
-	line := strings.TrimSpace(strings.TrimPrefix(strings.Split(strings.TrimSpace(prior[start+len("## Typed Checkpoint State"):]), "\n")[0], "-"))
-	var state struct {
-		Decisions, OpenIssues, Evidence []string
-		StageID, StageStatus, Kind      string
-	}
-	if json.Unmarshal([]byte(line), &state) != nil {
-		return req
-	}
+	merged, omitted := mergeCheckpointTypedStates(priorState, typedStateFromArgs(req.Args))
 	copyReq := *req
-	copyReq.Args.Decisions = append(append([]string{}, state.Decisions...), copyReq.Args.Decisions...)
-	copyReq.Args.OpenIssues = append(append([]string{}, state.OpenIssues...), copyReq.Args.OpenIssues...)
-	copyReq.Args.EvidenceRefs = append(append([]string{}, state.Evidence...), copyReq.Args.EvidenceRefs...)
-	if copyReq.Args.StageID == "" {
-		copyReq.Args.StageID = state.StageID
-	}
-	if copyReq.Args.StageStatus == "" {
-		copyReq.Args.StageStatus = state.StageStatus
-	}
-	if copyReq.Args.CheckpointKind == "" {
-		copyReq.Args.CheckpointKind = state.Kind
-	}
-	return &copyReq
+	copyReq.Args.Decisions = merged.Decisions
+	copyReq.Args.OpenIssues = merged.OpenIssues
+	copyReq.Args.EvidenceRefs = merged.EvidenceRefs
+	copyReq.Args.StageID = merged.StageID
+	copyReq.Args.StageStatus = merged.StageStatus
+	copyReq.Args.CheckpointKind = merged.Kind
+	return &copyReq, omitted
 }
 
 func renderTypedCheckpointState(req *modelDrivenCheckpointRequest) string {
 	if req == nil {
 		return "- (none)"
 	}
-	state := struct {
-		Constraints []string `json:"constraints,omitempty"`
-		Decisions   []string `json:"decisions,omitempty"`
-		OpenIssues  []string `json:"open_issues,omitempty"`
-		Evidence    []string `json:"evidence_refs,omitempty"`
-		StageID     string   `json:"stage_id,omitempty"`
-		StageStatus string   `json:"stage_status,omitempty"`
-		Kind        string   `json:"checkpoint_kind,omitempty"`
-	}{
-		Decisions:   req.Args.Decisions,
-		OpenIssues:  req.Args.OpenIssues,
-		Evidence:    req.Args.EvidenceRefs,
-		StageID:     req.Args.StageID,
-		StageStatus: req.Args.StageStatus,
-		Kind:        req.Args.CheckpointKind,
-	}
-	data, err := json.Marshal(state)
-	if err != nil {
-		return "- (unavailable)"
-	}
-	return "- " + string(data)
+	return renderTypedStateJSON(typedStateFromArgs(req.Args))
 }
 
 // inheritedCheckpointLabel is the label prefixed to a `## Current User Request`
