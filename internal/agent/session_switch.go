@@ -258,6 +258,7 @@ func (a *MainAgent) resetSessionRuntimeState() {
 	a.ctxMgr.SetLastInputTokens(0)
 	a.ctxMgr.SetLastTotalContextTokens(0)
 	a.resetContextReductionStats()
+	a.resetSessionRetentionSignals()
 	if a.usageTracker != nil {
 		a.usageTracker.RestoreStats(analytics.SessionStats{})
 	}

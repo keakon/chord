@@ -1114,6 +1114,12 @@ func (a *MainAgent) rememberPreparedLLMRequest(turnID uint64, original, prepared
 	a.lastPreparedReductionPolicy = policy
 	a.lastPreparedLLMToolDefHash = toolDefHash
 	a.lastPreparedReductionStats = cloneContextReductionStats(a.contextReductionStats)
+	// Fold this request's retention signals into the session and window
+	// aggregators. The request's stats are final here — every
+	// rememberPrepared=true exit of prepareMessagesForLLMWithOptions stores
+	// them into a.contextReductionStats before this call, so aggregation runs
+	// exactly once per prepared main request.
+	a.mergeRequestRetentionSignalsLocked(a.contextReductionStats)
 }
 
 // incrementalMessageShapesLocked computes shapes for original plus the source

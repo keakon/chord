@@ -534,8 +534,13 @@ type MainAgent struct {
 	stageCompletionCandidatePending         bool
 	stageCompletionCandidatePromptDelivered bool
 	contextReductionStats                   ContextReductionStats
-	lastLLMRequestModelRef                  string
-	llmModelRunLength                       int
+	// retentionSignals aggregates per-request retention signals (rereads,
+	// archive reads, evidence validity) into session and compaction-window
+	// totals. It survives resetContextReductionStats on compaction applies —
+	// only a session switch clears it. Guarded by loopReductionMu.
+	retentionSignals       retentionSignalAggregator
+	lastLLMRequestModelRef string
+	llmModelRunLength      int
 
 	// fallbackSurfaceRebuilds / fallbackSurfaceReuses count how fallback
 	// boundaries resolved the "may this prepared surface go to another model"

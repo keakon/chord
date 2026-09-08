@@ -222,6 +222,13 @@ func (a *MainAgent) recordCompactionAppliedAnalyticsEvent(d *compactionDraft, he
 			}
 		}
 	}
+	// Publish the retention signals accumulated since the previous apply: the
+	// apply immediately resets the per-request stats, so without this the
+	// window's reread/archive/evidence record would be lost. The window is
+	// cleared here; session totals survive every apply.
+	windowSignals := a.takeWindowRetentionSignals()
+	appendWindowRetentionSignalsDiagnostic(diagnostic, windowSignals)
+	log.Debugf("compaction applied window retention signals %v plan_id=%v", windowRetentionSignalsDebugLine(windowSignals), d.PlanID)
 	a.recordCompactionLifecycleEvent("applied", diagnostic)
 }
 
