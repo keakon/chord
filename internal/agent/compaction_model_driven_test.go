@@ -1620,3 +1620,17 @@ func TestApplyModelDrivenDraftRejectsChangedRuntimeStateFingerprint(t *testing.T
 		t.Fatalf("stale runtime state error = %v", err)
 	}
 }
+
+func TestValidateModelDrivenCheckpointKindRequiresEvidence(t *testing.T) {
+	for _, args := range []tools.CompactContextArgs{
+		{CheckpointKind: "committed"},
+		{StageStatus: "completed"},
+	} {
+		if err := validateModelDrivenCheckpointKind(args); err == nil {
+			t.Fatalf("expected evidence requirement for %#v", args)
+		}
+	}
+	if err := validateModelDrivenCheckpointKind(tools.CompactContextArgs{CheckpointKind: "committed", EvidenceRefs: []string{"e-1"}}); err != nil {
+		t.Fatalf("valid committed checkpoint rejected: %v", err)
+	}
+}

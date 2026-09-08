@@ -293,6 +293,9 @@ func (a *MainAgent) tryArmModelDrivenCheckpoint(callID string, rawArgs string) (
 	if err := a.validateModelDrivenEvidenceRefs(args.EvidenceRefs); err != nil {
 		return "", err
 	}
+	if err := validateModelDrivenCheckpointKind(args); err != nil {
+		return "", err
+	}
 	a.pendingModelDriven = &modelDrivenCheckpointRequest{
 		ToolCallID: callID,
 		Args:       args,
@@ -319,6 +322,16 @@ func (a *MainAgent) validateModelDrivenEvidenceRefs(refs []string) error {
 		if _, ok := known[ref]; !ok {
 			return fmt.Errorf("compact_context evidence_refs contains unknown evidence ID %q", ref)
 		}
+	}
+	return nil
+}
+
+func validateModelDrivenCheckpointKind(args tools.CompactContextArgs) error {
+	if args.CheckpointKind == "committed" && len(args.EvidenceRefs) == 0 {
+		return fmt.Errorf("committed compact_context requires at least one evidence_refs entry")
+	}
+	if args.StageStatus == "completed" && len(args.EvidenceRefs) == 0 {
+		return fmt.Errorf("completed compact_context stage requires evidence_refs")
 	}
 	return nil
 }
