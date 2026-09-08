@@ -1705,3 +1705,19 @@ func TestValidateCommittedEvidenceRejectsErrorEvidence(t *testing.T) {
 		t.Fatal("committed checkpoint should reject error evidence")
 	}
 }
+
+func TestModelDrivenProposalTransitionUpdatesMetadata(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	before := time.Now()
+	a.transitionModelDrivenProposal(modelDrivenProposalAccepted, " accepted ")
+	if a.pendingModelDrivenStatus != modelDrivenProposalAccepted || a.modelDrivenProposalReason != "accepted" {
+		t.Fatalf("proposal metadata = status %q reason %q", a.pendingModelDrivenStatus, a.modelDrivenProposalReason)
+	}
+	if a.modelDrivenProposalUpdatedAt.Before(before) {
+		t.Fatalf("proposal timestamp = %v, before %v", a.modelDrivenProposalUpdatedAt, before)
+	}
+	a.transitionModelDrivenProposal(CompactionStatusFailed, " failed ")
+	if a.pendingModelDrivenStatus != CompactionStatusFailed || a.modelDrivenProposalReason != "failed" {
+		t.Fatalf("terminal metadata = status %q reason %q", a.pendingModelDrivenStatus, a.modelDrivenProposalReason)
+	}
+}
