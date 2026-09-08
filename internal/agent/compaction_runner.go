@@ -261,6 +261,10 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 		return nil, fmt.Errorf("export compacted history: %w", err)
 	}
 	absHistoryMetaPath := compactionHistoryMetaPath(absHistoryPath)
+	transactionID := fmt.Sprintf("%d-%d", planID, index)
+	if err := writeCompactionTransactionManifest(archiveMeta.sessionDir, compactionTransactionManifest{TransactionID: transactionID, SourceFingerprint: sourceFingerprint, ArchivePath: absHistoryPath, ArchiveMetaPath: absHistoryMetaPath, TranscriptIndex: index, Status: compactionTransactionPrepared}); err != nil {
+		return nil, fmt.Errorf("write compaction transaction: %w", err)
+	}
 	// Any failure after the archive is written must remove it: a cancelled
 	// worker otherwise leaves orphan history-*.md / .status.json files behind.
 	historyCommitted := false
@@ -370,6 +374,7 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 		AbsHistoryMetaPath: absHistoryMetaPath,
 		SourceRefs:         sourceRefs,
 		SourceFingerprint:  sourceFingerprint,
+		TransactionID:      transactionID,
 		SummaryMode:        summaryMode,
 		Backend:            backendName,
 		Profile:            string(profile),
@@ -413,6 +418,16 @@ func (a *MainAgent) applyCompactionDraft(d *compactionDraft) error {
 // applyCompactionDraftAsync applies a compaction draft using ReplacePrefixAtomic,
 // preserving tail messages that were added during the async compaction goroutine.
 func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
+	transactionCommitted := false
+	if d.TransactionID != "" {
+		defer func() {
+			if !transactionCommitted {
+				if err := updateCompactionTransactionStatus(a.sessionDir, d.TransactionID, compactionTransactionAborted); err != nil {
+					log.Warnf("failed to abort compaction transaction transaction_id=%v error=%v", d.TransactionID, err)
+				}
+			}
+		}()
+	}
 	headSplit := d.HeadSplit
 	if d.SummaryMode == compactionSummaryModeModelDriven && d.RuntimeGeneration > 0 {
 		currentGeneration := a.currentRequestBatch(a.ctxMgr.Snapshot())
@@ -493,6 +508,12 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	})
 	if err != nil {
 		return err
+	}
+	if d.TransactionID != "" {
+		if err := updateCompactionTransactionStatus(a.sessionDir, d.TransactionID, compactionTransactionCommitted); err != nil {
+			return fmt.Errorf("commit compaction transaction: %w", err)
+		}
+		transactionCommitted = true
 	}
 
 	// Durable compaction rewrites the message prefix, so any cache-friendly

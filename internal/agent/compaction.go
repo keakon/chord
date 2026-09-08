@@ -145,6 +145,7 @@ type compactionDraft struct {
 	AbsHistoryMetaPath string
 	SourceRefs         []checkpointSourceRef
 	SourceFingerprint  string
+	TransactionID      string
 	SummaryMode        string
 	Backend            string
 	Profile            string

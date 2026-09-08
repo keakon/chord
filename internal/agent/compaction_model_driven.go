@@ -790,6 +790,10 @@ func (a *MainAgent) produceModelDrivenDraftAsync(ctx context.Context, bundle mod
 		return nil, fmt.Errorf("export compacted history: %w", err)
 	}
 	absHistoryMetaPath := compactionHistoryMetaPath(absHistoryPath)
+	transactionID := fmt.Sprintf("%d-%d", planID, index)
+	if err := writeCompactionTransactionManifest(bundle.archiveMeta.sessionDir, compactionTransactionManifest{TransactionID: transactionID, ProposalID: req.ToolCallID, SourceFingerprint: sourceFingerprint, ArchivePath: absHistoryPath, ArchiveMetaPath: absHistoryMetaPath, TranscriptIndex: index, Status: compactionTransactionPrepared}); err != nil {
+		return nil, fmt.Errorf("write compaction transaction: %w", err)
+	}
 	// Any failure after the archive is written must remove it: a cancelled or
 	// errored worker otherwise leaves orphan history-*.md / .status.json files
 	// that no draft path carries (getAbsHistoryPathFromDraft sees a nil draft
@@ -855,6 +859,7 @@ func (a *MainAgent) produceModelDrivenDraftAsync(ctx context.Context, bundle mod
 		AbsHistoryMetaPath:   absHistoryMetaPath,
 		SourceRefs:           sourceRefs,
 		SourceFingerprint:    sourceFingerprint,
+		TransactionID:        transactionID,
 		SummaryMode:          compactionSummaryModeModelDriven,
 		Backend:              config.CompactionPresetGeneric,
 		Profile:              string(compactionProfileArchival),
