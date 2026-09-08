@@ -1166,6 +1166,7 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 	claimEvidence := renderClaimEvidenceSection(req.Args.ClaimEvidence)
 	claimKinds := renderClaimKindsSection(req.Args.ClaimKinds)
 	stage := renderModelDrivenStageSection(req.Args.StageID, req.Args.StageStatus, req.Args.CheckpointKind)
+	typedState := renderTypedCheckpointState(req)
 
 	sections := []fallbackSummarySection{
 		{"## Current User Request", modelDrivenCurrentUserRequestSection(anchor)},
@@ -1181,6 +1182,7 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 		{"## Claim Evidence", claimEvidence},
 		{"## Claim Classification", claimKinds},
 		{"## Checkpoint Stage", stage},
+		{"## Typed Checkpoint State", typedState},
 		{"## Todo State", formatTodosAsRelevanceBullets(bundle.todos, anchor)},
 		{"## SubAgent State", formatSubAgentsAsBullets(bundle.subAgents)},
 		{"## Open Problems", openIssues},
@@ -1214,6 +1216,33 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 	summary = appendPriorCheckpointCarry(summary, latestPriorCheckpointBody(headSnapshot))
 	anchors := buildCompactionAnchors(latestCompactionAnchors(headSnapshot), bundle.originalRequest, bundle.evidenceItems)
 	return withCompactionAnchors(summary, anchors)
+}
+
+func renderTypedCheckpointState(req *modelDrivenCheckpointRequest) string {
+	if req == nil {
+		return "- (none)"
+	}
+	state := struct {
+		Constraints []string `json:"constraints,omitempty"`
+		Decisions   []string `json:"decisions,omitempty"`
+		OpenIssues  []string `json:"open_issues,omitempty"`
+		Evidence    []string `json:"evidence_refs,omitempty"`
+		StageID     string   `json:"stage_id,omitempty"`
+		StageStatus string   `json:"stage_status,omitempty"`
+		Kind        string   `json:"checkpoint_kind,omitempty"`
+	}{
+		Decisions:   req.Args.Decisions,
+		OpenIssues:  req.Args.OpenIssues,
+		Evidence:    req.Args.EvidenceRefs,
+		StageID:     req.Args.StageID,
+		StageStatus: req.Args.StageStatus,
+		Kind:        req.Args.CheckpointKind,
+	}
+	data, err := json.Marshal(state)
+	if err != nil {
+		return "- (unavailable)"
+	}
+	return "- " + string(data)
 }
 
 // inheritedCheckpointLabel is the label prefixed to a `## Current User Request`
