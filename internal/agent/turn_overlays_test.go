@@ -85,8 +85,8 @@ func TestStageCompletionCandidateOverlayIsOneShot(t *testing.T) {
 	if len(overlays) != 1 || !strings.Contains(overlays[0].Content, "provisional context checkpoint") {
 		t.Fatalf("stage completion overlays = %#v", overlays)
 	}
-	if a.stageCompletionCandidatePending {
-		t.Fatal("stage completion candidate overlay was not consumed")
+	if !a.stageCompletionCandidatePromptDelivered || !a.stageCompletionCandidatePending {
+		t.Fatal("stage completion candidate prompt was not delivered while candidate was retained")
 	}
 	if len(a.ctxMgr.Snapshot()) != 1 {
 		t.Fatal("stage completion overlay must not be durable")

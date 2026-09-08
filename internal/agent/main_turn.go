@@ -461,6 +461,7 @@ func (a *MainAgent) setIdleAndDrainPending() {
 	a.clearReductionCache(false)
 	a.clearStageCompletionCandidate()
 	a.stageCompletionCandidatePending = false
+	a.stageCompletionCandidatePromptDelivered = false
 	a.setBugTriagePromptActive(false)
 	pausePendingDrain := a.pausePendingUserDrainOnce
 	a.pausePendingUserDrainOnce = false
@@ -577,6 +578,7 @@ func (a *MainAgent) setIdleForComposerEdit() {
 	a.clearReductionCache(false)
 	a.clearStageCompletionCandidate()
 	a.stageCompletionCandidatePending = false
+	a.stageCompletionCandidatePromptDelivered = false
 	a.setBugTriagePromptActive(false)
 	a.emitInteractiveToTUI(a.parentCtx, IdleEvent{})
 	// Foreground is idle again: wake the memory worker (see setIdleAndDrainPending).

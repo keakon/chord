@@ -319,6 +319,7 @@ func (a *MainAgent) tryArmModelDrivenCheckpoint(callID string, rawArgs string) (
 		diagnostic["stage_candidate_turn_id"] = strconv.FormatUint(a.stageCompletionCandidateTurnID, 10)
 		diagnostic["stage_candidate_consumed"] = "true"
 		a.stageCompletionCandidatePending = false
+		a.stageCompletionCandidatePromptDelivered = false
 	}
 	a.recordCompactionLifecycleEvent("accepted", diagnostic)
 	// The model called compact_context in this window:

@@ -93,8 +93,8 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 			Content: "<system-reminder>\n" + notice + "\n</system-reminder>",
 		})
 	}
-	if a.stageCompletionCandidatePending {
-		a.stageCompletionCandidatePending = false
+	if a.stageCompletionCandidatePending && !a.stageCompletionCandidatePromptDelivered {
+		a.stageCompletionCandidatePromptDelivered = true
 		overlays = append(overlays, message.Message{Role: "user", Kind: message.KindTurnOverlay, Content: "<system-reminder>\nA task stage has reached a terminal TODO state. Decide whether earlier exploration is still needed; if not, record verified continuation state and request a provisional context checkpoint with compact_context. Do not claim completion without evidence.\n</system-reminder>"})
 	}
 

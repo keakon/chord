@@ -402,6 +402,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 			a.beginContextReductionWrapUpGrace()
 			a.stageCompletionCandidateTurnID = a.turn.ID
 			a.stageCompletionCandidatePending = true
+			a.stageCompletionCandidatePromptDelivered = false
 			a.recordCompactionLifecycleEvent("stage_candidate", map[string]string{
 				"turn_id": strconv.FormatUint(a.turn.ID, 10),
 				"source":  tools.NameTodoWrite,
