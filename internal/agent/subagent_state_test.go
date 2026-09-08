@@ -36,3 +36,31 @@ func TestSubAgentRuntimeStateSetAllowsExplicitTerminalReactivation(t *testing.T)
 		t.Fatalf("state after terminal reactivation = (%q, %q), want (running, follow-up)", got, summary)
 	}
 }
+
+func TestSubAgentRuntimeStateSetInvalidTransitionReturnsFalse(t *testing.T) {
+	var state subAgentRuntimeState
+	state.set(SubAgentStateCompleted, "done")
+	if ok := state.set(SubAgentStateIdle, "regress"); ok {
+		t.Fatal("invalid terminal transition reported success")
+	}
+	got, summary := state.snapshot()
+	if got != SubAgentStateCompleted || summary != "done" {
+		t.Fatalf("state after rejected transition = (%q, %q), want (completed, done)", got, summary)
+	}
+}
+
+func TestSubAgentRejectedStateTransitionIsRecorded(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := &SubAgent{parent: a, instanceID: "agent-1"}
+	sub.setState(SubAgentStateCompleted, "done")
+	if got := a.OrchestrationStats().StateTransitionsRejected; got != 0 {
+		t.Fatalf("legal transitions recorded as rejected: %d", got)
+	}
+	sub.setState(SubAgentStateIdle, "illegal regress")
+	if got := a.OrchestrationStats().StateTransitionsRejected; got != 1 {
+		t.Fatalf("rejected transition count = %d, want 1", got)
+	}
+	if got := sub.State(); got != SubAgentStateCompleted {
+		t.Fatalf("state after rejected transition = %q, want completed", got)
+	}
+}

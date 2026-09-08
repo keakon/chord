@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/keakon/golog/log"
+
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
@@ -175,7 +177,16 @@ func (s *SubAgent) StateChangedAt() time.Time {
 }
 
 func (s *SubAgent) setState(state SubAgentState, summary string) {
-	s.runtimeState.set(state, summary)
+	if !s.runtimeState.set(state, summary) {
+		// A rejected transition is an invariant violation in the coordination
+		// layer, not a user-visible failure: surface it loudly instead of
+		// silently dropping the write.
+		if s.parent != nil {
+			s.parent.orchestrationMetrics.recordRejectedStateTransition()
+		}
+		log.Warnf("sub-agent state transition rejected agent=%v from=%q to=%q", s.instanceID, s.State(), state)
+		return
+	}
 	if state == SubAgentStateRunning {
 		s.signalWake()
 	}

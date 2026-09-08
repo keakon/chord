@@ -74,17 +74,18 @@ type subAgentRuntimeState struct {
 	stallAlertRaised bool
 }
 
-func (s *subAgentRuntimeState) set(state SubAgentState, summary string) {
+func (s *subAgentRuntimeState) set(state SubAgentState, summary string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := validateSubAgentStateTransition(s.state, state); err != nil {
-		return
+		return false
 	}
 	s.state = state
 	s.stateChangedAt = time.Now()
 	if summary != "" {
 		s.lastSummary = summary
 	}
+	return true
 }
 
 // markActivity refreshes the activity metric on real worker progress (LLM

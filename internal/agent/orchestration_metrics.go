@@ -29,28 +29,29 @@ type metricQueueEntry struct {
 }
 
 type orchestrationRuntimeMetrics struct {
-	admissionWaitCount     atomic.Uint64
-	admissionWaitNanos     atomic.Uint64
-	scopeConflicts         atomic.Uint64
-	rehydrates             atomic.Uint64
-	parks                  atomic.Uint64
-	parkedSamples          atomic.Uint64
-	parkedNanos            atomic.Uint64
-	mailboxDeliveries      atomic.Uint64
-	mailboxDeliveryNs      atomic.Uint64
-	mailboxAcks            atomic.Uint64
-	mailboxAckNs           atomic.Uint64
-	mailboxEvictions       atomic.Uint64
-	parkedEvictions        atomic.Uint64
-	subAgentQueueRejected  atomic.Uint64
-	subAgentCompactions    atomic.Uint64
-	subAgentTokensSaved    atomic.Uint64
-	mailboxSpoolQueued     atomic.Uint64
-	mailboxSpoolRehydrated atomic.Uint64
-	runtimeBypassGrants    atomic.Uint64
-	runtimeBypassActive    atomic.Int64
-	runtimeBypassPeak      atomic.Uint64
-	runtimeBypassRejected  atomic.Uint64
+	admissionWaitCount       atomic.Uint64
+	admissionWaitNanos       atomic.Uint64
+	scopeConflicts           atomic.Uint64
+	rehydrates               atomic.Uint64
+	parks                    atomic.Uint64
+	parkedSamples            atomic.Uint64
+	parkedNanos              atomic.Uint64
+	mailboxDeliveries        atomic.Uint64
+	mailboxDeliveryNs        atomic.Uint64
+	mailboxAcks              atomic.Uint64
+	mailboxAckNs             atomic.Uint64
+	mailboxEvictions         atomic.Uint64
+	parkedEvictions          atomic.Uint64
+	subAgentQueueRejected    atomic.Uint64
+	subAgentCompactions      atomic.Uint64
+	subAgentTokensSaved      atomic.Uint64
+	mailboxSpoolQueued       atomic.Uint64
+	mailboxSpoolRehydrated   atomic.Uint64
+	runtimeBypassGrants      atomic.Uint64
+	runtimeBypassActive      atomic.Int64
+	runtimeBypassPeak        atomic.Uint64
+	runtimeBypassRejected    atomic.Uint64
+	rejectedStateTransitions atomic.Uint64
 
 	mailboxMu sync.Mutex
 	mailboxes map[string]mailboxMetricState
@@ -113,6 +114,7 @@ type OrchestrationStats struct {
 	RuntimeBypassActive           int64
 	RuntimeBypassPeak             uint64
 	RuntimeBypassRejected         uint64
+	StateTransitionsRejected      uint64
 }
 
 func (m *orchestrationRuntimeMetrics) acquireRuntimeBypass() {
@@ -137,6 +139,17 @@ func (m *orchestrationRuntimeMetrics) rejectRuntimeBypass() {
 		return
 	}
 	m.runtimeBypassRejected.Add(1)
+}
+
+// recordRejectedStateTransition records an illegal sub-agent state transition
+// rejected by the runtime state guard. A non-zero count indicates a
+// coordination-layer invariant violation that was surfaced instead of silently
+// dropping the write.
+func (m *orchestrationRuntimeMetrics) recordRejectedStateTransition() {
+	if m == nil {
+		return
+	}
+	m.rejectedStateTransitions.Add(1)
 }
 
 func (m *orchestrationRuntimeMetrics) releaseRuntimeBypass() {
@@ -447,6 +460,7 @@ func (a *MainAgent) OrchestrationStats() OrchestrationStats {
 		RuntimeBypassActive:           metrics.runtimeBypassActive.Load(),
 		RuntimeBypassPeak:             metrics.runtimeBypassPeak.Load(),
 		RuntimeBypassRejected:         metrics.runtimeBypassRejected.Load(),
+		StateTransitionsRejected:      metrics.rejectedStateTransitions.Load(),
 		TasksByState:                  make(map[string]uint64),
 		TerminalReasons:               make(map[string]uint64),
 	}
