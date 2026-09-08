@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -21,6 +22,31 @@ const (
 
 func normalizeSubAgentState(state SubAgentState) SubAgentState {
 	return state
+}
+
+func validSubAgentStateTransition(from, to SubAgentState) bool {
+	if from == "" {
+		return to == SubAgentStateRunning || to == SubAgentStateIdle
+	}
+	if from == to {
+		return true
+	}
+	if from == SubAgentStateCompleted || from == SubAgentStateFailed || from == SubAgentStateCancelled {
+		return to == SubAgentStateRunning
+	}
+	switch to {
+	case SubAgentStateRunning, SubAgentStateIdle, SubAgentStateWaitingMain, SubAgentStateWaitingDescendant, SubAgentStateCompleted, SubAgentStateFailed, SubAgentStateCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
+func validateSubAgentStateTransition(from, to SubAgentState) error {
+	if validSubAgentStateTransition(from, to) {
+		return nil
+	}
+	return fmt.Errorf("invalid sub-agent state transition: %q -> %q", from, to)
 }
 
 type subAgentRuntimeState struct {
