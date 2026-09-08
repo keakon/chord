@@ -198,10 +198,7 @@ func (a *MainAgent) abandonSubAgentsForSessionSwitch() int {
 
 	for i, id := range ids {
 		if subs[i] != nil {
-			if !subs[i].setState(SubAgentStateCancelled, "terminated on session switch") {
-				log.Warnf("sub-agent session switch cancellation rejected agent=%v", id)
-			}
-			a.syncTaskRecordFromSub(subs[i], "terminated on session switch")
+			a.terminateSubAgentForSessionSwitch(subs[i], id)
 		}
 		a.fileTrack.ReleaseAll(id)
 		a.releaseSubAgentSlot(subs[i])
@@ -213,6 +210,24 @@ func (a *MainAgent) abandonSubAgentsForSessionSwitch() int {
 	}
 
 	return len(ids)
+}
+
+func (a *MainAgent) terminateSubAgentForSessionSwitch(sub *SubAgent, agentID string) {
+	if sub == nil {
+		return
+	}
+	const reason = "terminated on session switch"
+	if strings.TrimSpace(sub.taskID) != "" {
+		if _, _, err := a.commitTerminalTask(sub, SubAgentStateCancelled, reason, reason, nil); err != nil {
+			log.Warnf("session switch settlement failed agent=%v task_id=%v error=%v", agentID, sub.taskID, err)
+		}
+	} else if !sub.setState(SubAgentStateCancelled, reason) {
+		log.Warnf("session switch cancellation rejected agent=%v", agentID)
+	} else {
+		a.noteSubAgentStateTransition(sub, SubAgentStateCancelled)
+		a.persistSubAgentMeta(sub)
+	}
+	a.syncTaskRecordFromSub(sub, reason)
 }
 
 func (a *MainAgent) freezeCurrentSession(oldRecovery *recovery.RecoveryManager) {
