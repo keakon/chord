@@ -271,6 +271,7 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 	defer func() {
 		if !historyCommitted {
 			cleanupOrphanCompactionFiles(absHistoryPath)
+			_ = os.Remove(compactionTransactionManifestPath(archiveMeta.sessionDir, transactionID))
 		}
 	}()
 

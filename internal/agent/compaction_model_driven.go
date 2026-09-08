@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -802,6 +803,7 @@ func (a *MainAgent) produceModelDrivenDraftAsync(ctx context.Context, bundle mod
 	defer func() {
 		if !historyCommitted {
 			cleanupOrphanCompactionFiles(absHistoryPath)
+			_ = os.Remove(compactionTransactionManifestPath(bundle.archiveMeta.sessionDir, transactionID))
 		}
 	}()
 
