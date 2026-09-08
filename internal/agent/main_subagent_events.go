@@ -18,7 +18,9 @@ func (a *MainAgent) handleSubAgentStateChangedEvent(evt Event) {
 	if sub == nil {
 		return
 	}
-	sub.setState(payload.State, payload.Summary)
+	if !sub.setState(payload.State, payload.Summary) {
+		return
+	}
 	a.noteSubAgentStateTransition(sub, payload.State)
 	a.persistSubAgentMeta(sub)
 	a.syncTaskRecordFromSub(sub, "")
@@ -58,7 +60,9 @@ func (a *MainAgent) handleSubAgentProgressUpdatedEvent(evt Event) {
 	if summary == "" {
 		return
 	}
-	sub.setState(SubAgentStateRunning, summary)
+	if !sub.setState(SubAgentStateRunning, summary) {
+		return
+	}
 	a.noteSubAgentStateTransition(sub, SubAgentStateRunning)
 	a.persistSubAgentMeta(sub)
 	a.syncTaskRecordFromSub(sub, "")

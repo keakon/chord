@@ -301,7 +301,12 @@ func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
 			}
 			return false
 		}
-		live.setState(SubAgentStateRunning, statusMsg)
+		if !live.setState(SubAgentStateRunning, statusMsg) {
+			if !held {
+				a.releaseSubAgentSlot(live)
+			}
+			return false
+		}
 		a.noteSubAgentStateTransition(live, SubAgentStateRunning)
 		a.emitActivity(live.instanceID, ActivityExecuting, "child event")
 		a.emitToTUI(AgentStatusEvent{AgentID: live.instanceID, Status: "running", Message: statusMsg})

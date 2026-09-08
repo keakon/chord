@@ -113,7 +113,9 @@ func (a *MainAgent) commitTerminalTask(sub *SubAgent, state SubAgentState, summa
 		durable = persistErr == nil
 	}
 
-	sub.setState(state, summary)
+	if !sub.setState(state, summary) {
+		return nil, false, fmt.Errorf("invalid terminal state transition for task %s", taskID)
+	}
 	a.noteSubAgentStateTransition(sub, state)
 	a.persistSubAgentMeta(sub)
 	now := time.Now()

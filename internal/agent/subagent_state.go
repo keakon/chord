@@ -57,7 +57,7 @@ func validSubAgentStateTransition(from, to SubAgentState) bool {
 		return true
 	}
 	if from == SubAgentStateCompleted || from == SubAgentStateFailed || from == SubAgentStateCancelled {
-		return to == SubAgentStateRunning
+		return to == SubAgentStateRunning || to == SubAgentStateIdle
 	}
 	switch to {
 	case SubAgentStateRunning, SubAgentStateIdle, SubAgentStateWaitingMain, SubAgentStateWaitingDescendant, SubAgentStateCompleted, SubAgentStateFailed, SubAgentStateCancelled:

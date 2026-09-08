@@ -46,7 +46,9 @@ func (a *MainAgent) interruptSubAgentTurnsForUserCancel() bool {
 				}
 				status = a.terminalStatusAfterCommit(sub, SubAgentStateCancelled, err)
 			} else {
-				sub.setState(SubAgentStateCancelled, "stopped by user")
+				if !sub.setState(SubAgentStateCancelled, "stopped by user") {
+					continue
+				}
 				a.noteSubAgentStateTransition(sub, SubAgentStateCancelled)
 				a.persistSubAgentMeta(sub)
 				a.syncTaskRecordFromSub(sub, "")

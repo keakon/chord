@@ -99,7 +99,9 @@ func (a *MainAgent) releaseSubAgentSlot(sub *SubAgent) {
 }
 
 func (a *MainAgent) markSubAgentReactivated(sub *SubAgent, summary string) {
-	sub.setState(SubAgentStateRunning, summary)
+	if !sub.setState(SubAgentStateRunning, summary) {
+		return
+	}
 	a.noteSubAgentStateTransition(sub, SubAgentStateRunning)
 	a.emitActivity(sub.instanceID, ActivityExecuting, "resumed")
 	a.emitToTUI(AgentStatusEvent{
@@ -408,7 +410,10 @@ func (a *MainAgent) deliverMessageToSubAgentWithMetadataMode(sub *SubAgent, mess
 	}
 	if !prep.reservation.Commit() {
 		if prep.needsResume {
-			sub.setState(prep.previousState, prep.previousSummary)
+			if !sub.setState(prep.previousState, prep.previousSummary) {
+				a.releaseSubAgentSlot(sub)
+				return "", "", fmt.Errorf("SubAgent %s cannot restore state %q", sub.instanceID, prep.previousState)
+			}
 			a.noteSubAgentStateTransition(sub, prep.previousState)
 			a.releaseSubAgentSlot(sub)
 		}
@@ -605,7 +610,9 @@ func (a *MainAgent) beginNextTaskAttemptForLiveSub(sub *SubAgent) error {
 	// (canStartUserTurn requires Running), so the fresh attempt starts from the
 	// same idle state a rehydrated one does.
 	if isTerminalSubAgentState(sub.State()) {
-		sub.setState(SubAgentStateIdle, sub.LastSummary())
+		if !sub.setState(SubAgentStateIdle, sub.LastSummary()) {
+			return fmt.Errorf("SubAgent %s cannot prepare terminal runtime for reuse", sub.instanceID)
+		}
 		a.noteSubAgentStateTransition(sub, SubAgentStateIdle)
 	}
 	return nil

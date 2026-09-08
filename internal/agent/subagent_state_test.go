@@ -19,7 +19,7 @@ func TestValidateSubAgentStateTransition(t *testing.T) {
 		{name: "waiting resumes", from: SubAgentStateWaitingMain, to: SubAgentStateRunning, want: true},
 		{name: "waiting descendant completes", from: SubAgentStateWaitingDescendant, to: SubAgentStateCompleted, want: true},
 		{name: "completed reactivates", from: SubAgentStateCompleted, to: SubAgentStateRunning, want: true},
-		{name: "failed cannot become idle", from: SubAgentStateFailed, to: SubAgentStateIdle},
+		{name: "failed reactivation prepares idle", from: SubAgentStateFailed, to: SubAgentStateIdle, want: true},
 		{name: "unknown destination rejected", from: SubAgentStateRunning, to: SubAgentState("unknown")},
 	}
 	for _, test := range tests {
@@ -54,7 +54,7 @@ func TestSubAgentRuntimeStateSetAllowsExplicitTerminalReactivation(t *testing.T)
 func TestSubAgentRuntimeStateSetInvalidTransitionReturnsFalse(t *testing.T) {
 	var state subAgentRuntimeState
 	state.set(SubAgentStateCompleted, "done")
-	if ok := state.set(SubAgentStateIdle, "regress"); ok {
+	if ok := state.set(SubAgentStateWaitingMain, "regress"); ok {
 		t.Fatal("invalid terminal transition reported success")
 	}
 	got, summary := state.snapshot()
@@ -70,7 +70,7 @@ func TestSubAgentRejectedStateTransitionIsRecorded(t *testing.T) {
 	if got := a.OrchestrationStats().StateTransitionsRejected; got != 0 {
 		t.Fatalf("legal transitions recorded as rejected: %d", got)
 	}
-	sub.setState(SubAgentStateIdle, "illegal regress")
+	sub.setState(SubAgentStateWaitingMain, "illegal regress")
 	if got := a.OrchestrationStats().StateTransitionsRejected; got != 1 {
 		t.Fatalf("rejected transition count = %d, want 1", got)
 	}
