@@ -110,7 +110,7 @@ skip 是正常的策略结果：立即用相同请求重试会被短暂冷却，
 
 压缩是递归的：下一次自动摘要写在一段以 checkpoint 开头的历史之上。会话锚点（原始请求、standing constraints）逐字前向携带，前一个 checkpoint 的结构化正文也一样——摘要模型始终把它作为受保护的输入段收到，应用后的 checkpoint 还会把它逐字追加为 `## Previous Checkpoint` 段。因此 checkpoint 的结构化内容（目标、决策、未决问题、下一步……）从不依赖摘要模型恰好复述它，链式压缩也无法一次摘要一点地侵蚀它。
 
-`evidence_refs` 可引用 checkpoint evidence pack 中已知的稳定证据 ID，Chord 会在 barrier 前校验 ID；`state_files` 只是当前外部状态的路径引用；`planned_state_files` 用于尚未写入、仅供后续动作参考的路径。两者都不会被 Chord 读取、注入或校验存在性，因此该工具无法绕过 Read 权限，也不可能被当成存在性探针使用。条目通常写成相对项目根的路径（如 `docs/usage.md`）；绝对路径以及 `~`、`./`、`../` 开头的写法，只要词法解析后落在项目根内也一样接受，并在构建 checkpoint 前统一归一成相对项目根的路径。每个条目始终是模型声明的引用：过期或不存在的路径只在真正读取时才会暴露——read 工具会报告文件缺失——而不是靠 checkpoint 时刻的静默探测。checkpoint 的 `Current User Request` 永远来自你的真实消息，不会采用模型参数。工具 success 只表示请求被接受；之后出现的 model-driven `[Context Summary]` checkpoint 才表示 reset 已应用。请求被跳过或失败时会继续使用旧上下文，usage-driven 自动压缩兜底保持生效。
+`evidence_refs` 可引用 checkpoint evidence pack `claim_kinds` 可将 completed/decisions 标记为 observed、derived、assumed 或 proposed；observed 必须有 claim_evidence。 中已知的稳定证据 ID，Chord 会在 barrier 前校验 ID；`state_files` 只是当前外部状态的路径引用；`planned_state_files` 用于尚未写入、仅供后续动作参考的路径。两者都不会被 Chord 读取、注入或校验存在性，因此该工具无法绕过 Read 权限，也不可能被当成存在性探针使用。条目通常写成相对项目根的路径（如 `docs/usage.md`）；绝对路径以及 `~`、`./`、`../` 开头的写法，只要词法解析后落在项目根内也一样接受，并在构建 checkpoint 前统一归一成相对项目根的路径。每个条目始终是模型声明的引用：过期或不存在的路径只在真正读取时才会暴露——read 工具会报告文件缺失——而不是靠 checkpoint 时刻的静默探测。checkpoint 的 `Current User Request` 永远来自你的真实消息，不会采用模型参数。工具 success 只表示请求被接受；之后出现的 model-driven `[Context Summary]` checkpoint 才表示 reset 已应用。请求被跳过或失败时会继续使用旧上下文，usage-driven 自动压缩兜底保持生效。
 
 可观测性：TUI 状态栏会把模型请求的 checkpoint 与 usage-driven 压缩区分开显示（「model checkpoint」），并在跳过/失败时短暂展示原因；`/stats` 新增「Context Compaction」分区，按 stage 和 trigger 统计生命周期事件（如 `applied/model_driven`、`skipped/model_driven`），方便观察模型请求重置的频率与实际应用情况。
 
