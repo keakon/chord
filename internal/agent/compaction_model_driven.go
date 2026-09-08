@@ -43,6 +43,9 @@ func (r *modelDrivenCheckpointRequest) requestID() string {
 const requestAcceptedToolResult = "Context checkpoint request accepted. No reset has occurred yet; only a later model-driven context checkpoint confirms successful application."
 
 const (
+	modelDrivenProposalAccepted  = "accepted"
+	modelDrivenProposalPreparing = "preparing"
+	modelDrivenProposalApplied   = "applied"
 	// compactionSummaryModeModelDriven is the stable summary-mode marker for
 	// model-driven checkpoints (mirrors model_summary / structured_fallback /
 	// truncate_only).
@@ -313,7 +316,7 @@ func (a *MainAgent) tryArmModelDrivenCheckpoint(callID string, rawArgs string) (
 	}
 	a.pendingModelDrivenRequestID = callID
 	a.lastModelDrivenRequestID = callID
-	a.pendingModelDrivenStatus = "accepted"
+	a.pendingModelDrivenStatus = modelDrivenProposalAccepted
 	a.pendingModelDrivenAuditArgsJSON = rawArgs
 	a.modelDrivenProposalReason = "accepted by runtime validation"
 	a.modelDrivenProposalUpdatedAt = time.Now()
@@ -444,7 +447,7 @@ func (a *MainAgent) maybeStartModelDrivenBarrier() bool {
 		return false
 	}
 	req := a.pendingModelDriven
-	a.pendingModelDrivenStatus = "preparing"
+	a.pendingModelDrivenStatus = modelDrivenProposalPreparing
 	a.modelDrivenProposalReason = "preparing durable checkpoint"
 	a.modelDrivenProposalUpdatedAt = time.Now()
 	a.pendingModelDriven = nil

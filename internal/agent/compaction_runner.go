@@ -517,7 +517,7 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	// instructions, and a name is not what "invoked" claims.
 	a.resetInvokedSkillsFromMessages(compactedMessages)
 	if d.SummaryMode == compactionSummaryModeModelDriven {
-		a.pendingModelDrivenStatus = "applied"
+		a.pendingModelDrivenStatus = modelDrivenProposalApplied
 		a.modelDrivenProposalReason = "durable checkpoint applied"
 		a.modelDrivenProposalUpdatedAt = time.Now()
 	}
