@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -33,6 +34,19 @@ func TestCompactContextParseValidArgs(t *testing.T) {
 	}
 	if len(args.StateFiles) != 1 || args.StateFiles[0] != "internal/agent/compaction_model_driven.go" {
 		t.Fatalf("state_files = %#v", args.StateFiles)
+	}
+}
+
+func TestCompactContextPlannedStateFilesAreNormalizedSeparately(t *testing.T) {
+	args, err := testCompactValidator().ParseCompactContextArgs(json.RawMessage(`{"active_objective":"a","next_step":"b","state_files":["notes/current.md"],"planned_state_files":["./notes/future.md"]}`))
+	if err != nil {
+		t.Fatalf("ParseCompactContextArgs: %v", err)
+	}
+	if !slices.Equal(args.StateFiles, []string{"notes/current.md"}) {
+		t.Fatalf("state_files = %#v", args.StateFiles)
+	}
+	if !slices.Equal(args.PlannedStateFiles, []string{"notes/future.md"}) {
+		t.Fatalf("planned_state_files = %#v", args.PlannedStateFiles)
 	}
 }
 

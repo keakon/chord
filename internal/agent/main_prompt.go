@@ -316,7 +316,7 @@ func (a *MainAgent) plannerModePromptBlock() string {
 		fileWriteStep += " If this role cannot write the plan file, explain the limitation and " + a.plannerPermissionAdjustmentInstruction() + "."
 	}
 	if a.compactContextVisible() {
-		fileWriteStep += " Once saved, this plan document can be listed in the compact_context tool's state_files parameter when you request a durable checkpoint at a real phase boundary: writing to .chord/plans/ is allowed in this role, state_files only references the file, and re-reading it later uses the read tool."
+		fileWriteStep += " Once saved, this plan document can be listed in the compact_context tool's state_files parameter when you request a durable checkpoint at a real phase boundary: writing to .chord/plans/ is allowed in this role, state_files only references the file, and re-reading it later uses the read tool. Use planned_state_files only for paths that are not yet written; those paths are not completion evidence."
 	}
 	handoffStep := "6. "
 	if hasHandoff {
