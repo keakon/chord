@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -119,6 +120,21 @@ func (s *subAgentRuntimeState) restore(state SubAgentState, summary string) {
 	if summary != "" {
 		s.lastSummary = summary
 	}
+}
+
+func (s *subAgentRuntimeState) updateProgress(summary string) bool {
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.state != SubAgentStateRunning {
+		return false
+	}
+	s.lastSummary = summary
+	s.stateChangedAt = time.Now()
+	return true
 }
 
 func (s *subAgentRuntimeState) resetForAttempt(summary string) bool {

@@ -1421,8 +1421,8 @@ func (e *subAgentEventSender) SendAgentEvent(eventType, sourceID string, payload
 	case EventAgentNotify:
 		msg, _ := payload.(string)
 		if strings.TrimSpace(msg) != "" {
-			if !s.setState(SubAgentStateRunning, msg) {
-				log.Warnf("sub-agent notification state transition rejected agent=%v", s.instanceID)
+			if !s.updateProgress(msg) {
+				log.Warnf("sub-agent notification progress rejected agent=%v", s.instanceID)
 			}
 		}
 	}

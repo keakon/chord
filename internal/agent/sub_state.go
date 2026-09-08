@@ -200,6 +200,10 @@ func (s *SubAgent) restoreState(state SubAgentState, summary string) {
 	s.runtimeState.restore(state, summary)
 }
 
+func (s *SubAgent) updateProgress(summary string) bool {
+	return s.runtimeState.updateProgress(summary)
+}
+
 func (s *SubAgent) resetForAttempt(summary string) bool {
 	return s.runtimeState.resetForAttempt(summary)
 }

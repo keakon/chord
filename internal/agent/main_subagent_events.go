@@ -60,10 +60,9 @@ func (a *MainAgent) handleSubAgentProgressUpdatedEvent(evt Event) {
 	if summary == "" {
 		return
 	}
-	if !sub.setState(SubAgentStateRunning, summary) {
+	if !sub.updateProgress(summary) {
 		return
 	}
-	a.noteSubAgentStateTransition(sub, SubAgentStateRunning)
 	a.persistSubAgentMeta(sub)
 	a.syncTaskRecordFromSub(sub, "")
 	log.Debugf("SubAgent progress updated agent=%v summary_len=%v", evt.SourceID, len(summary))
