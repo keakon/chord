@@ -327,13 +327,17 @@ func (a *MainAgent) validateModelDrivenEvidenceRefs(refs []string) error {
 	if len(refs) == 0 {
 		return nil
 	}
-	known := make(map[string]struct{})
+	known := make(map[string]evidenceItem)
 	for _, item := range a.evidence.snapshot() {
-		known[evidenceItemID(item)] = struct{}{}
+		known[evidenceItemID(item)] = item
 	}
 	for _, ref := range refs {
-		if _, ok := known[ref]; !ok {
+		item, ok := known[ref]
+		if !ok {
 			return fmt.Errorf("compact_context evidence_refs contains unknown evidence ID %q", ref)
+		}
+		if item.Validity == evidenceValidityInvalidated || item.Validity == evidenceValidityUnavailable {
+			return fmt.Errorf("compact_context evidence_refs contains %s evidence %q", item.Validity, ref)
 		}
 	}
 	return nil
@@ -355,6 +359,9 @@ func (a *MainAgent) validateObservedClaimEvidence(args tools.CompactContextArgs)
 			}
 			if item.Kind == evidenceToolError || item.Kind == evidenceDoneRejected {
 				return fmt.Errorf("observed claim %q cannot use %s evidence %q", claim, item.Kind, ref)
+			}
+			if item.Validity == evidenceValidityInvalidated || item.Validity == evidenceValidityUnavailable {
+				return fmt.Errorf("observed claim %q cannot use %s evidence %q", claim, item.Validity, ref)
 			}
 		}
 	}
