@@ -312,6 +312,7 @@ func (a *MainAgent) tryArmModelDrivenCheckpoint(callID string, rawArgs string) (
 		Args:       args,
 	}
 	a.pendingModelDrivenRequestID = callID
+	a.lastModelDrivenRequestID = callID
 	a.pendingModelDrivenStatus = "accepted"
 	a.pendingModelDrivenAuditArgsJSON = rawArgs
 	diagnostic := map[string]string{"request_id": callID}
@@ -1455,6 +1456,9 @@ func (a *MainAgent) settleModelDrivenOutcome(status string, reason string, prefl
 	diagnostic := map[string]string{
 		"trigger": compactionTriggerModelDriven.analyticsName(),
 		"reason":  a.modelDrivenSkipNotice,
+	}
+	if a.lastModelDrivenRequestID != "" {
+		diagnostic["request_id"] = a.lastModelDrivenRequestID
 	}
 	if a.pendingModelDriven != nil {
 		diagnostic["request_id"] = a.pendingModelDriven.requestID()

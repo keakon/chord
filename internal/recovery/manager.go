@@ -85,6 +85,7 @@ type SessionSnapshot struct {
 	// never reuses a generation (and its externalization-warning claim).
 	AutoCompactRequestGeneration    uint64 `json:"auto_compact_request_generation,omitempty"`
 	PendingModelDrivenRequestID     string `json:"pending_model_driven_request_id,omitempty"`
+	LastModelDrivenRequestID        string `json:"last_model_driven_request_id,omitempty"`
 	PendingModelDrivenStatus        string `json:"pending_model_driven_status,omitempty"`
 	PendingModelDrivenArgsJSON      string `json:"pending_model_driven_args_json,omitempty"`
 	StageCompletionCandidateTurnID  uint64 `json:"stage_completion_candidate_turn_id,omitempty"`

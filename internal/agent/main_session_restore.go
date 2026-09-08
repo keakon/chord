@@ -52,6 +52,7 @@ type loadedSessionState struct {
 	LastModelDrivenApplyBatch       uint64
 	AutoCompactRequestGeneration    uint64
 	PendingModelDrivenRequestID     string
+	LastModelDrivenRequestID        string
 	PendingModelDrivenStatus        string
 	PendingModelDrivenArgsJSON      string
 	StageCompletionCandidateTurnID  uint64
@@ -424,6 +425,7 @@ func (a *MainAgent) applySessionSnapshot(loaded *loadedSessionState, sessionPath
 	loaded.LastModelDrivenApplyBatch = snap.LastModelDrivenApplyBatch
 	loaded.AutoCompactRequestGeneration = snap.AutoCompactRequestGeneration
 	loaded.PendingModelDrivenRequestID = strings.TrimSpace(snap.PendingModelDrivenRequestID)
+	loaded.LastModelDrivenRequestID = strings.TrimSpace(snap.LastModelDrivenRequestID)
 	loaded.PendingModelDrivenStatus = strings.TrimSpace(snap.PendingModelDrivenStatus)
 	loaded.PendingModelDrivenArgsJSON = strings.TrimSpace(snap.PendingModelDrivenArgsJSON)
 	loaded.StageCompletionCandidateTurnID = snap.StageCompletionCandidateTurnID
@@ -718,6 +720,7 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	}
 	a.setPendingCompactionResume(loaded.PendingCompactionResume)
 	a.lastModelDrivenApplyBatch = loaded.LastModelDrivenApplyBatch
+	a.lastModelDrivenRequestID = loaded.LastModelDrivenRequestID
 	if loaded.PendingModelDrivenRequestID != "" {
 		a.pendingModelDrivenStatus = loaded.PendingModelDrivenStatus
 		a.pendingModelDrivenAuditArgsJSON = loaded.PendingModelDrivenArgsJSON

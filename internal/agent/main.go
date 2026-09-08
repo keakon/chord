@@ -651,6 +651,7 @@ type MainAgent struct {
 	// validation and consumed at the tool-batch barrier.
 	pendingModelDriven              *modelDrivenCheckpointRequest
 	pendingModelDrivenRequestID     string
+	lastModelDrivenRequestID        string
 	pendingModelDrivenStatus        string
 	pendingModelDrivenAuditArgsJSON string
 	// modelDrivenSkipNotice carries the low-gain skip reason from the worker

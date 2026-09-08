@@ -89,6 +89,7 @@ func (a *MainAgent) buildRecoverySnapshot() *recovery.SessionSnapshot {
 		LastModelDrivenApplyBatch:       a.lastModelDrivenApplyBatch,
 		AutoCompactRequestGeneration:    a.autoCompactRequestGeneration.Load(),
 		PendingModelDrivenRequestID:     a.pendingModelDrivenRequestID,
+		LastModelDrivenRequestID:        a.lastModelDrivenRequestID,
 		PendingModelDrivenStatus:        a.pendingModelDrivenStatus,
 		PendingModelDrivenArgsJSON:      a.pendingModelDrivenAuditArgsSnapshot(),
 		StageCompletionCandidateTurnID:  a.stageCompletionCandidateTurnID,
