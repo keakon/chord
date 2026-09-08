@@ -197,6 +197,20 @@ func (a *MainAgent) recordCompactionAppliedAnalyticsEvent(d *compactionDraft, he
 		diagnostic["continuation_tokens"] = strconv.Itoa(preflight.ContinuationTokens)
 		diagnostic["cache_rebuild_cost"] = strconv.Itoa(preflight.CacheRebuildCost)
 		diagnostic["post_apply_evidence_candidates"] = strconv.Itoa(a.evidence.len())
+		valid, invalidated, unavailable := 0, 0, 0
+		for _, item := range a.evidence.snapshot() {
+			switch item.Validity {
+			case evidenceValidityInvalidated:
+				invalidated++
+			case evidenceValidityUnavailable:
+				unavailable++
+			default:
+				valid++
+			}
+		}
+		diagnostic["evidence_valid"] = strconv.Itoa(valid)
+		diagnostic["evidence_invalidated"] = strconv.Itoa(invalidated)
+		diagnostic["evidence_unavailable"] = strconv.Itoa(unavailable)
 	}
 	// The request-batch interval since the last model-driven apply (measured
 	// in issued main-model requests, not call attempts). The first model-driven
