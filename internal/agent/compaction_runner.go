@@ -516,6 +516,9 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	// Earlier` section is deliberately not counted: it records names, not
 	// instructions, and a name is not what "invoked" claims.
 	a.resetInvokedSkillsFromMessages(compactedMessages)
+	if d.SummaryMode == compactionSummaryModeModelDriven {
+		a.pendingModelDrivenStatus = "applied"
+	}
 	a.recordCompactionAppliedAnalyticsEvent(d, headSplit, compactedMessages)
 	// A durable apply starts a fresh compaction window: drop any overlay texts
 	// queued for the pre-apply window (the reminder reported the old usage
