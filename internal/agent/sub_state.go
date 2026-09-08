@@ -208,6 +208,10 @@ func (s *SubAgent) resetForAttempt(summary string) bool {
 	return s.runtimeState.resetForAttempt(summary)
 }
 
+func (s *SubAgent) rollbackState(expected, state SubAgentState, summary string) bool {
+	return s.runtimeState.rollback(expected, state, summary)
+}
+
 func (s *SubAgent) setLastMailboxID(id string) {
 	s.runtimeState.setLastMailboxID(id)
 }

@@ -410,7 +410,7 @@ func (a *MainAgent) deliverMessageToSubAgentWithMetadataMode(sub *SubAgent, mess
 	}
 	if !prep.reservation.Commit() {
 		if prep.needsResume {
-			if !sub.setState(prep.previousState, prep.previousSummary) {
+			if !sub.rollbackState(SubAgentStateRunning, prep.previousState, prep.previousSummary) {
 				a.releaseSubAgentSlot(sub)
 				return "", "", fmt.Errorf("SubAgent %s cannot restore state %q", sub.instanceID, prep.previousState)
 			}

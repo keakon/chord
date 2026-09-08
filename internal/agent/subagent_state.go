@@ -151,6 +151,20 @@ func (s *subAgentRuntimeState) resetForAttempt(summary string) bool {
 	return true
 }
 
+func (s *subAgentRuntimeState) rollback(expected, state SubAgentState, summary string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.state != expected || !isKnownSubAgentState(state) {
+		return false
+	}
+	s.state = state
+	s.stateChangedAt = time.Now()
+	if summary != "" {
+		s.lastSummary = summary
+	}
+	return true
+}
+
 // markActivity refreshes the activity metric on real worker progress (LLM
 // request issue, stream deltas, tool results, response handling). It is the
 // heartbeat the coordination stall detection reads; state transitions alone
