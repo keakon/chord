@@ -402,6 +402,9 @@ func TestModelDrivenSkipSettlesWithoutClearingUsageState(t *testing.T) {
 	a.ctxMgr.RestoreStats(message.TokenUsage{InputTokens: 1000})
 	a.modelDrivenSkipNotice = ""
 	a.settleModelDrivenSkip(&compactionDraft{Skip: true, InfoMessage: "projected savings too small"})
+	if a.pendingModelDrivenStatus != string(CompactionStatusSkipped) {
+		t.Fatalf("checkpoint status after skip = %q", a.pendingModelDrivenStatus)
+	}
 	if !a.autoCompactRequested.Load() {
 		t.Fatal("model-driven skip must NOT clear autoCompactRequested")
 	}
@@ -444,11 +447,17 @@ func TestModelDrivenSettleRecordsLifecycleAndTerminalTrigger(t *testing.T) {
 
 	// Failure and cancel settlements also settle exactly once with the trigger.
 	a.settleModelDrivenFailure(errCompactionWatchdog)
+	if a.pendingModelDrivenStatus != string(CompactionStatusFailed) {
+		t.Fatalf("checkpoint status after failure = %q", a.pendingModelDrivenStatus)
+	}
 	stats = a.usageTracker.SessionStats()
 	if stats.CompactionLifecycle["failed/model_driven"] != 1 {
 		t.Fatalf("failed/model_driven count = %d, want 1", stats.CompactionLifecycle["failed/model_driven"])
 	}
 	a.settleModelDrivenCancelled("cancelled by the user")
+	if a.pendingModelDrivenStatus != string(CompactionStatusCancelled) {
+		t.Fatalf("checkpoint status after cancellation = %q", a.pendingModelDrivenStatus)
+	}
 	stats = a.usageTracker.SessionStats()
 	if stats.CompactionLifecycle["cancelled/model_driven"] != 1 {
 		t.Fatalf("cancelled/model_driven count = %d, want 1", stats.CompactionLifecycle["cancelled/model_driven"])
