@@ -119,6 +119,7 @@ func (a *MainAgent) transitionModelDrivenProposal(status, reason string) {
 	p := &a.modelDrivenProposal
 	if !modelDrivenProposalTransitionAllowed(p.status, status) {
 		log.Warnf("illegal model-driven proposal transition from=%q to=%q reason=%q", p.status, status, reason)
+		return
 	}
 	p.status = status
 	p.reason = strings.TrimSpace(reason)
@@ -152,10 +153,10 @@ func modelDrivenProposalTransitionAllowed(from, to string) bool {
 	case modelDrivenProposalApplied:
 		return from == modelDrivenProposalPreparing
 	default:
-		// Terminal settles (skipped/failed/cancelled). applied is included so
-		// a stale terminal event that leaks past the plan-id guards still
-		// settles the record instead of dead-locking it at applied.
+		// Terminal settles (skipped/failed/cancelled). An applied proposal is
+		// already a successful terminal state; stale worker events must not
+		// overwrite it.
 		return isModelDrivenProposalTerminal(to) &&
-			(from == "" || from == modelDrivenProposalAccepted || from == modelDrivenProposalPreparing || from == modelDrivenProposalApplied)
+			(from == "" || from == modelDrivenProposalAccepted || from == modelDrivenProposalPreparing)
 	}
 }

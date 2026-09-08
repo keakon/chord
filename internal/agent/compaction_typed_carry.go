@@ -198,9 +198,13 @@ func truncateRunes(s string, n int) string {
 // growing the list without bound. The returned lists are item-bounded, so the
 // readable sections and the machine typed block carry exactly the same text.
 func mergeCheckpointTypedStates(prior, current checkpointTypedState) (merged checkpointTypedState, omitted int) {
-	merged.Decisions, omitted = mergeTypedStateList(prior.Decisions, current.Decisions, typedStateCarryMaxDecisions)
-	merged.OpenIssues, _ = mergeTypedStateList(prior.OpenIssues, current.OpenIssues, typedStateCarryMaxOpenIssues)
-	merged.EvidenceRefs, _ = mergeTypedStateList(prior.EvidenceRefs, current.EvidenceRefs, typedStateCarryMaxEvidenceRefs)
+	var dropped int
+	merged.Decisions, dropped = mergeTypedStateList(prior.Decisions, current.Decisions, typedStateCarryMaxDecisions)
+	omitted += dropped
+	merged.OpenIssues, dropped = mergeTypedStateList(prior.OpenIssues, current.OpenIssues, typedStateCarryMaxOpenIssues)
+	omitted += dropped
+	merged.EvidenceRefs, dropped = mergeTypedStateList(prior.EvidenceRefs, current.EvidenceRefs, typedStateCarryMaxEvidenceRefs)
+	omitted += dropped
 	merged.Decisions = boundTypedStateItems(merged.Decisions)
 	merged.OpenIssues = boundTypedStateItems(merged.OpenIssues)
 	merged.EvidenceRefs = boundTypedStateItems(merged.EvidenceRefs)
@@ -225,8 +229,14 @@ func mergeTypedStateList(prior, current []string, cap int) ([]string, int) {
 		return nil, len(prior) + len(current)
 	}
 	out := make([]string, 0, min(capacity, len(current)+len(prior)))
-	out = append(out, current...)
 	omitted := 0
+	for _, item := range current {
+		if len(out) >= capacity {
+			omitted++
+			continue
+		}
+		out = append(out, item)
+	}
 	for _, item := range prior {
 		if len(out) >= capacity {
 			omitted++

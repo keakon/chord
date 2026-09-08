@@ -32,7 +32,7 @@ func TestModelDrivenProposalTransitionAllowedMatrix(t *testing.T) {
 				from string
 				to   string
 				want bool
-			}{name: "terminal settle from " + from, from: from, to: to, want: from == "" || from == modelDrivenProposalAccepted || from == modelDrivenProposalPreparing || from == modelDrivenProposalApplied})
+			}{name: "terminal settle from " + from, from: from, to: to, want: from == "" || from == modelDrivenProposalAccepted || from == modelDrivenProposalPreparing})
 		}
 	}
 	for _, tc := range tests {
@@ -60,6 +60,20 @@ func TestModelDrivenProposalTerminalClearsAuditArgs(t *testing.T) {
 	a.armModelDrivenProposal("call-2", tools.CompactContextArgs{ActiveObjective: "y"}, `{"active_objective":"y"}`, "accepted by runtime validation")
 	if a.modelDrivenProposal.requestID != "call-2" || a.modelDrivenProposal.argsJSON == "" {
 		t.Fatalf("re-armed proposal = %+v", a.modelDrivenProposal)
+	}
+}
+
+func TestModelDrivenProposalAppliedIsTerminal(t *testing.T) {
+	a := &MainAgent{}
+	a.armModelDrivenProposal("call-1", tools.CompactContextArgs{}, `{"active_objective":"x"}`, "accepted")
+	a.transitionModelDrivenProposal(modelDrivenProposalPreparing, "preparing")
+	a.transitionModelDrivenProposal(modelDrivenProposalApplied, "applied")
+	a.transitionModelDrivenProposal(CompactionStatusFailed, "late worker failure")
+	if a.modelDrivenProposal.status != modelDrivenProposalApplied {
+		t.Fatalf("applied proposal was overwritten by stale terminal status: %q", a.modelDrivenProposal.status)
+	}
+	if a.modelDrivenProposal.reason != "applied" {
+		t.Fatalf("applied proposal reason was overwritten: %q", a.modelDrivenProposal.reason)
 	}
 }
 

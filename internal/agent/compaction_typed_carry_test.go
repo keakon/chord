@@ -99,6 +99,23 @@ func TestMergeTypedStateKeepsNewestAndDisclosesOmission(t *testing.T) {
 		t.Fatalf("fresh submission items must come first: %v", merged.Decisions)
 	}
 
+	// Every bounded list contributes to the disclosure count, not only
+	// decisions. Current entries beyond a cap are bounded as well.
+	tooMany := checkpointTypedState{}
+	for i := 0; i < typedStateCarryMaxOpenIssues+2; i++ {
+		tooMany.OpenIssues = append(tooMany.OpenIssues, "issue-"+string(rune('a'+i)))
+	}
+	for i := 0; i < typedStateCarryMaxEvidenceRefs+2; i++ {
+		tooMany.EvidenceRefs = append(tooMany.EvidenceRefs, "ev-"+string(rune('a'+i)))
+	}
+	merged, omitted = mergeCheckpointTypedStates(checkpointTypedState{}, tooMany)
+	if len(merged.OpenIssues) != typedStateCarryMaxOpenIssues || len(merged.EvidenceRefs) != typedStateCarryMaxEvidenceRefs {
+		t.Fatalf("current typed lists exceeded bounds: open=%d evidence=%d", len(merged.OpenIssues), len(merged.EvidenceRefs))
+	}
+	if omitted != 4 {
+		t.Fatalf("current typed list omissions = %d, want 4", omitted)
+	}
+
 	// A carried item past the per-item cap is bounded on the way back out of
 	// the merge, so the readable sections and the typed block can never
 	// diverge on the same decision.
