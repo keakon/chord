@@ -320,6 +320,7 @@ func (a *MainAgent) tryArmModelDrivenCheckpoint(callID string, rawArgs string) (
 	a.pendingModelDrivenAuditArgsJSON = rawArgs
 	a.modelDrivenProposalReason = "accepted by runtime validation"
 	a.modelDrivenProposalUpdatedAt = time.Now()
+	a.saveRecoverySnapshot()
 	diagnostic := map[string]string{"request_id": callID}
 	if a.stageCompletionCandidatePending && a.stageCompletionCandidateTurnID > 0 && a.turn != nil && a.stageCompletionCandidateTurnID != a.turn.ID {
 		a.clearStageCompletionCandidate()
@@ -450,6 +451,7 @@ func (a *MainAgent) maybeStartModelDrivenBarrier() bool {
 	a.pendingModelDrivenStatus = modelDrivenProposalPreparing
 	a.modelDrivenProposalReason = "preparing durable checkpoint"
 	a.modelDrivenProposalUpdatedAt = time.Now()
+	a.saveRecoverySnapshot()
 	a.pendingModelDriven = nil
 	a.pendingModelDrivenRequestID = ""
 	if a.turn == nil {
@@ -1494,6 +1496,7 @@ func (a *MainAgent) settleModelDrivenOutcome(status string, reason string, prefl
 	a.pendingModelDrivenStatus = status
 	a.modelDrivenProposalReason = strings.TrimSpace(reason)
 	a.modelDrivenProposalUpdatedAt = time.Now()
+	a.saveRecoverySnapshot()
 	a.modelDrivenSkipNotice = strings.TrimSpace(reason)
 	// The model already took its shot at a checkpoint: the threshold grace
 	// (if any) ends here so the usage-driven safety net is not deferred again.

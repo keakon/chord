@@ -520,6 +520,7 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 		a.pendingModelDrivenStatus = modelDrivenProposalApplied
 		a.modelDrivenProposalReason = "durable checkpoint applied"
 		a.modelDrivenProposalUpdatedAt = time.Now()
+		a.saveRecoverySnapshot()
 	}
 	a.recordCompactionAppliedAnalyticsEvent(d, headSplit, compactedMessages)
 	// A durable apply starts a fresh compaction window: drop any overlay texts
