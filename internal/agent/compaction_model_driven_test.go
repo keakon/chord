@@ -1642,3 +1642,13 @@ func TestValidateModelDrivenEvidenceRefsUsesFullTracker(t *testing.T) {
 		t.Fatalf("full tracker evidence was rejected: %v", err)
 	}
 }
+
+func TestValidateModelDrivenClaimKindsObservedRequiresEvidence(t *testing.T) {
+	args := tools.CompactContextArgs{
+		Completed:  []string{"tests pass"},
+		ClaimKinds: map[string]string{"tests pass": "observed"},
+	}
+	if err := validateModelDrivenCheckpointKind(args); err == nil {
+		t.Fatal("observed claim without evidence should be rejected")
+	}
+}

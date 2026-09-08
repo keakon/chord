@@ -21,6 +21,15 @@ func claimEvidenceText(claims map[string][]string) string {
 	return strings.Join(parts, "\n")
 }
 
+func claimKindsText(kinds map[string]string) string {
+	parts := make([]string, 0, len(kinds))
+	for claim, kind := range kinds {
+		parts = append(parts, claim+"\n"+kind)
+	}
+	slices.Sort(parts)
+	return strings.Join(parts, "\n")
+}
+
 // CompactContextArgs is the structured continuation state the model submits
 // when requesting a model-driven context checkpoint. Every field is
 // model-authored; runtime facts (current user request, todos, subagents,
@@ -35,6 +44,7 @@ type CompactContextArgs struct {
 	PlannedStateFiles []string            `json:"planned_state_files"`
 	EvidenceRefs      []string            `json:"evidence_refs"`
 	ClaimEvidence     map[string][]string `json:"claim_evidence"`
+	ClaimKinds        map[string]string   `json:"claim_kinds"`
 	StageID           string              `json:"stage_id"`
 	StageStatus       string              `json:"stage_status"`
 	CheckpointKind    string              `json:"checkpoint_kind"`
@@ -175,6 +185,14 @@ func (v CompactContextValidator) ParseCompactContextArgs(raw json.RawMessage) (C
 			return CompactContextArgs{}, fmt.Errorf("claim_evidence claim %q must match an item in completed or decisions", claim)
 		}
 	}
+	for claim, kind := range args.ClaimKinds {
+		if _, ok := claims[claim]; !ok {
+			return CompactContextArgs{}, fmt.Errorf("claim_kinds claim %q must match an item in completed or decisions", claim)
+		}
+		if !slices.Contains([]string{"observed", "derived", "assumed", "proposed"}, kind) {
+			return CompactContextArgs{}, fmt.Errorf("invalid claim_kinds value %q for %q", kind, claim)
+		}
+	}
 
 	// The continuation-state budget uses the same usage-calibrated token
 	// accounting as other context-pressure decisions. state_files paths are
@@ -196,6 +214,7 @@ func (v CompactContextValidator) ParseCompactContextArgs(raw json.RawMessage) (C
 		{"stage_status", args.StageStatus},
 		{"checkpoint_kind", args.CheckpointKind},
 		{"claim_evidence", claimEvidenceText(args.ClaimEvidence)},
+		{"claim_kinds", claimKindsText(args.ClaimKinds)},
 	}
 	texts := make([]string, len(fields))
 	for i, f := range fields {
@@ -449,6 +468,7 @@ func (CompactContextTool) Parameters() map[string]any {
 			"stage_status":    map[string]any{"type": "string", "enum": []string{"active", "candidate", "completed", "blocked", "superseded"}, "description": "Whether this stage is still active or is a checkpoint candidate/completed."},
 			"checkpoint_kind": map[string]any{"type": "string", "enum": []string{"provisional", "committed"}, "description": "Provisional reduces context but is not authoritative; committed requires runtime validation."},
 			"claim_evidence":  map[string]any{"type": "object", "maxProperties": 20, "additionalProperties": map[string]any{"type": "array", "maxItems": 8, "items": map[string]any{"type": "string", "minLength": 1}}, "description": "Maps each completed or decision claim to the evidence IDs supporting it."},
+			"claim_kinds":     map[string]any{"type": "object", "maxProperties": 20, "additionalProperties": map[string]any{"type": "string", "enum": []string{"observed", "derived", "assumed", "proposed"}}, "description": "Classifies each completed or decision claim; observed requires runtime evidence, derived is inferred from evidence, assumed is unverified, and proposed is future work."},
 		},
 		"required":             []string{"active_objective", "next_step"},
 		"additionalProperties": false,

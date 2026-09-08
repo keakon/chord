@@ -338,6 +338,11 @@ func validateModelDrivenCheckpointKind(args tools.CompactContextArgs) error {
 	if args.StageStatus == "completed" && len(args.EvidenceRefs) == 0 {
 		return fmt.Errorf("completed compact_context stage requires evidence_refs")
 	}
+	for claim, kind := range args.ClaimKinds {
+		if kind == "observed" && len(args.ClaimEvidence[claim]) == 0 {
+			return fmt.Errorf("claim_kinds %q is observed but has no claim_evidence", claim)
+		}
+	}
 	return nil
 }
 
@@ -1086,6 +1091,7 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 	plannedStateFiles := renderPlannedStateFilesSection(req.Args.PlannedStateFiles)
 	evidenceRefs := renderEvidenceRefsSection(req.Args.EvidenceRefs)
 	claimEvidence := renderClaimEvidenceSection(req.Args.ClaimEvidence)
+	claimKinds := renderClaimKindsSection(req.Args.ClaimKinds)
 	stage := renderModelDrivenStageSection(req.Args.StageID, req.Args.StageStatus, req.Args.CheckpointKind)
 
 	sections := []fallbackSummarySection{
@@ -1100,6 +1106,7 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 		{"## Planned Externalized State", plannedStateFiles},
 		{"## Evidence References", evidenceRefs},
 		{"## Claim Evidence", claimEvidence},
+		{"## Claim Classification", claimKinds},
 		{"## Checkpoint Stage", stage},
 		{"## Todo State", formatTodosAsRelevanceBullets(bundle.todos, anchor)},
 		{"## SubAgent State", formatSubAgentsAsBullets(bundle.subAgents)},
@@ -1292,6 +1299,22 @@ func renderClaimEvidenceSection(claims map[string][]string) string {
 	var b strings.Builder
 	for _, key := range keys {
 		fmt.Fprintf(&b, "- %s | evidence: %s\n", key, strings.Join(claims[key], ", "))
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func renderClaimKindsSection(kinds map[string]string) string {
+	if len(kinds) == 0 {
+		return "- (none reported by the model)"
+	}
+	keys := make([]string, 0, len(kinds))
+	for key := range kinds {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	var b strings.Builder
+	for _, key := range keys {
+		fmt.Fprintf(&b, "- %s | kind: %s\n", key, kinds[key])
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
