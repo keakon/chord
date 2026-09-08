@@ -205,6 +205,11 @@ func writeOrchestrationDiagnostics(sb *strings.Builder, stats agent.Orchestratio
 		stats.WorkspaceLeasesActive, stats.WorkspaceLeasesQueued)
 	fmt.Fprintf(sb, "orchestration_tasks: total=%d scope_conflicts=%d rehydrates=%d parks=%d queue_rejected=%d\n",
 		stats.TasksTotal, stats.ScopeConflicts, stats.Rehydrates, stats.Parks, stats.SubAgentQueueRejected)
+	fmt.Fprintf(sb, "orchestration_state_transitions: rejected=%d terminal=%d unknown=%d other=%d\n",
+		stats.StateTransitionsRejected,
+		stats.StateTransitionRejections["terminal"],
+		stats.StateTransitionRejections["unknown"],
+		stats.StateTransitionRejections["other"])
 	for _, task := range tasks {
 		fmt.Fprintf(sb, "orchestration_task: id=%s owner=%s state=%s instance=%s attempt=%d revision=%d durable=%t closed=%s mailbox_backlog=%d\n",
 			task.TaskID, task.OwnerTaskID, task.State, task.LatestInstanceID,

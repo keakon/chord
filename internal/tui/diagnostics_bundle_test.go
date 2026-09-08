@@ -175,22 +175,24 @@ func TestBuildDiagnosticsMetadataIncludesProcessInstanceID(t *testing.T) {
 func TestWriteOrchestrationDiagnostics(t *testing.T) {
 	var sb strings.Builder
 	writeOrchestrationDiagnostics(&sb, agent.OrchestrationStats{
-		EventQueue:            agent.EventQueueStats{OverflowCurrent: 2, OverflowPeak: 4, Coalesced: 3, Backpressure: 1},
-		SemaphoreCapacity:     10,
-		SemaphoreInUse:        4,
-		BorrowedCapacity:      1,
-		BorrowedInUse:         1,
-		LLMRequestCapacity:    8,
-		LLMRequestsActive:     3,
-		LLMRequestsQueued:     2,
-		WorkspaceLeasesActive: 2,
-		WorkspaceLeasesQueued: 1,
-		TasksTotal:            6,
-		ScopeConflicts:        1,
-		SubAgentQueueRejected: 2,
-		RuntimeBypassGrants:   1,
-		RuntimeBypassPeak:     1,
-		RuntimeBypassRejected: 1,
+		EventQueue:                agent.EventQueueStats{OverflowCurrent: 2, OverflowPeak: 4, Coalesced: 3, Backpressure: 1},
+		SemaphoreCapacity:         10,
+		SemaphoreInUse:            4,
+		BorrowedCapacity:          1,
+		BorrowedInUse:             1,
+		LLMRequestCapacity:        8,
+		LLMRequestsActive:         3,
+		LLMRequestsQueued:         2,
+		WorkspaceLeasesActive:     2,
+		WorkspaceLeasesQueued:     1,
+		TasksTotal:                6,
+		ScopeConflicts:            1,
+		SubAgentQueueRejected:     2,
+		StateTransitionsRejected:  3,
+		StateTransitionRejections: map[string]uint64{"terminal": 1, "unknown": 1, "other": 1},
+		RuntimeBypassGrants:       1,
+		RuntimeBypassPeak:         1,
+		RuntimeBypassRejected:     1,
 	}, nil)
 	got := sb.String()
 	for _, want := range []string{
@@ -198,6 +200,7 @@ func TestWriteOrchestrationDiagnostics(t *testing.T) {
 		"orchestration_runtimes: normal=4/10 borrowed=1/1 bypass_active=0 bypass_peak=1 bypass_grants=1 bypass_rejected=1",
 		"orchestration_llm_requests: active=3 capacity=8 queued=2",
 		"orchestration_tasks: total=6 scope_conflicts=1",
+		"orchestration_state_transitions: rejected=3 terminal=1 unknown=1 other=1",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("diagnostics missing %q:\n%s", want, got)
