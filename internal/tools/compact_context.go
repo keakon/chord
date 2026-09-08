@@ -17,12 +17,13 @@ import (
 // model-authored; runtime facts (current user request, todos, subagents,
 // anchors, history map) are captured separately at checkpoint build time.
 type CompactContextArgs struct {
-	ActiveObjective string   `json:"active_objective"`
-	Completed       []string `json:"completed"`
-	Decisions       []string `json:"decisions"`
-	OpenIssues      []string `json:"open_issues"`
-	NextStep        string   `json:"next_step"`
-	StateFiles      []string `json:"state_files"`
+	ActiveObjective   string   `json:"active_objective"`
+	Completed         []string `json:"completed"`
+	Decisions         []string `json:"decisions"`
+	OpenIssues        []string `json:"open_issues"`
+	NextStep          string   `json:"next_step"`
+	StateFiles        []string `json:"state_files"`
+	PlannedStateFiles []string `json:"planned_state_files"`
 }
 
 // TokenEstimator estimates the input-token cost of a string. Defaults to a
@@ -117,6 +118,11 @@ func (v CompactContextValidator) ParseCompactContextArgs(raw json.RawMessage) (C
 		return CompactContextArgs{}, err
 	}
 	args.StateFiles = stateFiles
+	plannedStateFiles, err := validateStateFiles(args.PlannedStateFiles, 16, v.currentProjectRoot())
+	if err != nil {
+		return CompactContextArgs{}, fmt.Errorf("validate planned_state_files: %w", err)
+	}
+	args.PlannedStateFiles = plannedStateFiles
 
 	// The continuation-state budget uses the same usage-calibrated token
 	// accounting as other context-pressure decisions. state_files paths are
@@ -132,6 +138,7 @@ func (v CompactContextValidator) ParseCompactContextArgs(raw json.RawMessage) (C
 		{"decisions", strings.Join(args.Decisions, "\n")},
 		{"open_issues", strings.Join(args.OpenIssues, "\n")},
 		{"state_files", strings.Join(args.StateFiles, "\n")},
+		{"planned_state_files", strings.Join(args.PlannedStateFiles, "\n")},
 	}
 	texts := make([]string, len(fields))
 	for i, f := range fields {
@@ -370,6 +377,11 @@ func (CompactContextTool) Parameters() map[string]any {
 				"maxItems":    16,
 				"items":       map[string]any{"type": "string", "minLength": 1},
 				"description": "Paths of files carrying externalized state: workspace-relative (e.g. docs/usage.md), or absolute / ~-prefixed / ./- / ../-prefixed spellings that resolve inside the project root (stored normalized as workspace-relative); out-of-project state must be captured in completed/decisions/open_issues text instead. References only: never read, injected, or existence-verified.",
+			},
+			"planned_state_files": map[string]any{
+				"type": "array", "maxItems": 16,
+				"items":       map[string]any{"type": "string", "minLength": 1},
+				"description": "Workspace-relative paths planned for future state. They are not evidence that a file exists or that work is complete.",
 			},
 		},
 		"required":             []string{"active_objective", "next_step"},

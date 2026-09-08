@@ -1028,6 +1028,7 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 	decisions := renderModelStateList(req.Args.Decisions, "(none reported by the model)")
 	completed := renderModelStateList(req.Args.Completed, "(none reported by the model)")
 	stateFiles := renderStateFilesSection(req.Args.StateFiles)
+	plannedStateFiles := renderPlannedStateFilesSection(req.Args.PlannedStateFiles)
 
 	sections := []fallbackSummarySection{
 		{"## Current User Request", modelDrivenCurrentUserRequestSection(anchor)},
@@ -1038,6 +1039,7 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 		{"## Key Decisions", decisions},
 		{"## Files and Evidence", "- Precise archived history is listed in the checkpoint wrapper's archived history map."},
 		{"## Externalized State", stateFiles},
+		{"## Planned Externalized State", plannedStateFiles},
 		{"## Todo State", formatTodosAsRelevanceBullets(bundle.todos, anchor)},
 		{"## SubAgent State", formatSubAgentsAsBullets(bundle.subAgents)},
 		{"## Open Problems", openIssues},
@@ -1192,6 +1194,20 @@ func renderStateFilesSection(paths []string) string {
 			sb.WriteString(line)
 			sb.WriteByte('\n')
 		}
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+func renderPlannedStateFilesSection(paths []string) string {
+	if len(paths) == 0 {
+		return "- (none reported by the model)"
+	}
+	var sb strings.Builder
+	sb.WriteString("- Planned references only; they are not completion evidence and are not verified:\n")
+	for _, path := range paths {
+		sb.WriteString("- ")
+		sb.WriteString(path)
+		sb.WriteByte('\n')
 	}
 	return strings.TrimRight(sb.String(), "\n")
 }
