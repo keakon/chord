@@ -249,6 +249,9 @@ type evidenceItem struct {
 	Sequence  int
 	Validity  evidenceValidity
 	Recovery  string
+	SourceID  string
+	ToolState string
+	Revisions map[string]string
 }
 
 func evidenceItemID(item evidenceItem) string {
@@ -921,4 +924,21 @@ func toolNameOrUnknown(name string) string {
 		return "tool"
 	}
 	return name
+}
+
+func (a *MainAgent) addToolEvidenceCandidate(item evidenceItem, msg message.Message) {
+	item.SourceID = strings.TrimSpace(msg.ToolCallID)
+	item.ToolState = strings.TrimSpace(msg.ToolStatus)
+	if msg.FileState != nil {
+		item.Revisions = make(map[string]string)
+		for _, state := range append(append(append([]message.TrackedFileState{}, msg.FileState.Reads...), msg.FileState.Writes...), msg.FileState.Deletes...) {
+			if state.Path != "" && state.SHA256 != "" {
+				item.Revisions[state.Path] = state.SHA256
+			}
+		}
+		if len(item.Revisions) == 0 {
+			item.Revisions = nil
+		}
+	}
+	a.addEvidenceCandidate(item)
 }

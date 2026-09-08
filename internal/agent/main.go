@@ -1863,22 +1863,24 @@ func (a *MainAgent) recordEvidenceFromMessage(msg message.Message) {
 			a.addEvidenceCandidate(buildLatestUserRequestEvidence("runtime tool rejection reason", reason))
 		}
 		if isToolResultErrorMessage(msg) {
-			a.addEvidenceCandidate(buildEvidenceItem(
+			item := buildEvidenceItem(
 				evidenceToolError,
 				"Latest failing tool result",
 				"This looks like a current blocker; preserving the exact error helps the next continuation avoid guessing.",
 				"runtime tool result",
 				compactTextSnippet(text, 800),
-			))
+			)
+			a.addToolEvidenceCandidate(item, msg)
 		}
 		if strings.TrimSpace(msg.ToolDiff) != "" {
-			a.addEvidenceCandidate(buildEvidenceItem(
+			item := buildEvidenceItem(
 				evidenceToolDiff,
 				"Recent code diff",
 				"The next continuation may depend on the exact recent code change.",
 				"runtime tool diff",
 				compactTextSnippet(msg.ToolDiff, 700),
-			))
+			)
+			a.addToolEvidenceCandidate(item, msg)
 		}
 	}
 }

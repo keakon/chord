@@ -6693,3 +6693,16 @@ func TestEvidenceItemIDIsShortAndStable(t *testing.T) {
 		t.Fatalf("evidence ID contains internal separator: %q", first)
 	}
 }
+
+func TestAddToolEvidenceCandidateBindsToolStateAndRevision(t *testing.T) {
+	a := &MainAgent{}
+	a.addToolEvidenceCandidate(buildEvidenceItem(evidenceToolDiff, "diff", "needed", "tool", "changed"), message.Message{
+		ToolCallID: "call-1",
+		ToolStatus: "success",
+		FileState:  &message.ToolFileState{Writes: []message.TrackedFileState{{Path: "main.go", SHA256: "abc", Exists: true}}},
+	})
+	items := a.evidence.snapshot()
+	if len(items) != 1 || items[0].SourceID != "call-1" || items[0].ToolState != "success" || items[0].Revisions["main.go"] != "abc" {
+		t.Fatalf("tool evidence = %#v", items)
+	}
+}
