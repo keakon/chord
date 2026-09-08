@@ -6596,6 +6596,18 @@ func TestFilterCompactionEvidenceForArchivalKeepsStatedConstraints(t *testing.T)
 	}
 }
 
+func TestFilterCompactionEvidenceForArchivalDropsUnavailableEvidence(t *testing.T) {
+	items := []evidenceItem{
+		{Kind: evidenceUserCorrection, Excerpt: "keep this", Validity: evidenceValidityValid},
+		{Kind: evidenceUserCorrection, Excerpt: "source changed", Validity: evidenceValidityInvalidated},
+		{Kind: evidenceStatedConstraint, Excerpt: "source unavailable", Validity: evidenceValidityUnavailable},
+	}
+	kept := filterCompactionEvidenceForArchival(items)
+	if len(kept) != 1 || kept[0].Excerpt != "keep this" {
+		t.Fatalf("kept evidence = %#v, want only valid evidence", kept)
+	}
+}
+
 // A checkpoint must not grow without bound. The runtime TODO snapshot and the
 // archived history map are the only parts that would otherwise gain content
 // every compaction, and that growth feeds back into the model-driven low-gain

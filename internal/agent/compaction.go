@@ -217,6 +217,15 @@ Requirements:
 
 type evidenceKind string
 
+type evidenceValidity string
+
+const (
+	evidenceValidityValid       evidenceValidity = "valid"
+	evidenceValiditySuperseded  evidenceValidity = "superseded"
+	evidenceValidityInvalidated evidenceValidity = "invalidated"
+	evidenceValidityUnavailable evidenceValidity = "unavailable"
+)
+
 const (
 	evidenceUserCorrection   evidenceKind = "user_correction"
 	evidenceStatedConstraint evidenceKind = "stated_constraint"
@@ -238,6 +247,8 @@ type evidenceItem struct {
 	TokenCost int
 	Key       string
 	Sequence  int
+	Validity  evidenceValidity
+	Recovery  string
 }
 
 func evidenceItemID(item evidenceItem) string {
@@ -566,6 +577,8 @@ func buildEvidenceItem(kind evidenceKind, title, whyNeeded, source, excerpt stri
 		Priority:  evidencePriority(kind),
 		TokenCost: max(1, len(title)/3+len(whyNeeded)/3+len(source)/3+len(excerpt)/3),
 		Key:       key,
+		Validity:  evidenceValidityValid,
+		Recovery:  "re-read the source message or recover the archived artifact",
 	}
 }
 
