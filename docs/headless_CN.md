@@ -149,7 +149,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 }
 ```
 
-`list` 把当前角色放在 `role`，完整列表放在 `roles`，其中 `current: true` 的那一项就是当前角色。`set` 切换到指定角色并返回切换后的状态。有 `handoff_request` 待决时 `set` 会被拒绝（`resolve the pending handoff before switching role`），切到已是当前的角色（`already the active role: <name>`）、未知角色名、只作为 SubAgent 定义存在的角色同样会被拒绝。失败响应带 `ok: false` 和面向人的 `message`，原样展示给用户即可。订阅了 `role_change` 时，切换成功还会收到一条 `role_change` 推送；当前角色也会出现在 `status_response` 的 `current_role` 里。注意：`role_change` 事件与 `role_response` 由不同路径写出、先后顺序不定，客户端应以 `role_response` 为准。
+`list` 把当前角色放在 `role`，完整列表放在 `roles`，其中 `current: true` 的那一项就是当前角色。`set` 切换到指定角色并返回切换后的状态，切换立即生效——即使还有回合在跑也一样。有 `handoff_request` 待决时 `set` 会被拒绝（`resolve the pending handoff before switching role`），切到已是当前的角色（`already the active role: <name>`）、未知角色名、只作为 SubAgent 定义存在的角色同样会被拒绝。失败响应带 `ok: false` 和面向人的 `message`，原样展示给用户即可。订阅了 `role_change` 时，切换成功还会收到一条 `role_change` 推送；当前角色也会出现在 `status_response` 的 `current_role` 里。注意：`role_change` 事件与 `role_response` 由不同路径写出、先后顺序不定，客户端应以 `role_response` 为准。
 
 ### `confirm`
 
@@ -244,7 +244,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 | `role_change`        | 当前主角色已切换（经 TUI Shift+Tab 或 `role set` 命令） | `role` |
 | `local_shell_result` | `local_shell` 命令的执行结果                 | `command`、`output`、`failed`、`error` |
 | `agent_started`      | 某个委托的 SubAgent runtime 开始运行（包括 parked task 的按需 rehydrate） | `agent_id`、`previous_agent_id`（rehydrate 时存在）、`task_id`、`agent_type`、`description`、`parent_agent_id`、`parent_task_id` |
-| `agent_notify`       | 某个 agent 向 owner 或指定委派工作流发送非阻塞更新 | `agent_id`、`task_id`、`agent_type`、`parent_agent_id`、`parent_task_id`、`target_agent_id`、`target_task_id`、`kind`、`message` |
+| `agent_notify`       | 某个 agent 向 owner 或指定委派工作流发送非阻塞更新 | `agent_id`、`task_id`、`agent_type`、`parent_agent_id`、`parent_task_id`、`target_agent_id`、`target_task_id`、`kind`、`subtype`、`message` |
 | `agent_done`         | 某个 SubAgent 完成任务                       | `agent_id`、`task_id`、`agent_type`、`parent_agent_id`、`parent_task_id`、`summary` |
 | `assistant_rollback` | 丢弃尚未提交的流式 assistant 输出            | `agent_id`、`reason` |
 | `info`               | 运行时信息消息                               | `agent_id`、`message` |
