@@ -263,7 +263,7 @@ func renderEvidenceArtifactContent(items []evidenceItem) string {
 // buildCompactionCheckpointMessage renders the checkpoint message: the summary
 // body between the [Context Summary] / [Context compressed] markers, then the
 // wrapper (mode note, archived-history map, retained recent messages, evidence
-// artifact, display hint). retainedRecent, when non-empty, is the rendered
+// artifact). retainedRecent, when non-empty, is the rendered
 // `## Retained Recent Messages` section; the variadic form keeps the many
 // direct callers (tests, carry helpers) free of an always-empty argument.
 func buildCompactionCheckpointMessage(summary string, historyRefs []string, mode string, evidenceItems []evidenceItem, retainedRecent ...string) string {
@@ -299,8 +299,9 @@ func buildCompactionCheckpointMessage(summary string, historyRefs []string, mode
 		sb.WriteString(evidence)
 		sb.WriteByte('\n')
 	}
-	sb.WriteString(message.CompactionDisplayHint)
-	sb.WriteString("Press toggle-collapse to expand and inspect the full preserved context message.\n")
+	// The evidence artifact is the final region: the checkpoint card is always
+	// fully expanded (see Block.ToggleAtWidth), so no display-hint tail belongs
+	// in the persisted protocol content.
 	return strings.TrimRight(sb.String(), "\n")
 }
 

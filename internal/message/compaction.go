@@ -6,7 +6,10 @@ const (
 	CompactionSummaryHeader = "[Context Summary]\n"
 	CompactionCompressedTag = "\n\n[Context compressed]"
 	CompactionEvidenceTag   = "[Context Evidence]\n"
-	CompactionDisplayHint   = "\n\n[Context display hint]\n"
+	// CompactionDisplayHint is a legacy marker: checkpoints written before the
+	// display-hint tail was removed end with it. Nothing new appends it; parsers
+	// of persisted sessions still recognize it as a region/tail boundary.
+	CompactionDisplayHint = "\n\n[Context display hint]\n"
 
 	// Session anchors are the one part of a checkpoint that is copied forward
 	// verbatim instead of being regenerated. Compaction is recursive — each run
@@ -54,19 +57,4 @@ func CompactionAnchorsSection(content string) string {
 
 func IsCompactionEvidenceArtifactText(content string) bool {
 	return strings.HasPrefix(strings.TrimSpace(content), CompactionEvidenceTag)
-}
-
-func MergeCompactionSummaryAndEvidence(summaryContent, evidenceContent string) string {
-	summaryContent = strings.TrimRight(summaryContent, "\n")
-	evidenceContent = strings.TrimSpace(evidenceContent)
-	if summaryContent == "" || evidenceContent == "" {
-		return summaryContent
-	}
-	if strings.Contains(summaryContent, CompactionEvidenceTag) {
-		return summaryContent
-	}
-	if idx := strings.Index(summaryContent, CompactionDisplayHint); idx >= 0 {
-		return strings.TrimRight(summaryContent[:idx], "\n") + "\n\n" + evidenceContent + summaryContent[idx:]
-	}
-	return summaryContent + "\n\n" + evidenceContent
 }

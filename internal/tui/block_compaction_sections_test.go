@@ -18,7 +18,13 @@ func compactionCheckpointFixture() string {
 		"\nEarlier conversation was compacted into the summary above.\n" +
 		"Archived history files:\n- history-1.md\n\n" +
 		message.CompactionEvidenceTag +
-		"Verbatim excerpts preserved for the immediate continuation.\n\n1. Latest user request\nExcerpt:\nanalyze the feedback" +
+		"Verbatim excerpts preserved for the immediate continuation.\n\n1. Latest user request\nExcerpt:\nanalyze the feedback"
+}
+
+// legacyCheckpointFixture mirrors a checkpoint persisted by a build that still
+// appended the display-hint tail, to pin down how old content is handled.
+func legacyCheckpointFixture() string {
+	return compactionCheckpointFixture() +
 		message.CompactionDisplayHint +
 		"Press toggle-collapse to expand and inspect the full preserved context message."
 }
@@ -75,7 +81,6 @@ func TestSplitCompactionSectionsOrdersRegions(t *testing.T) {
 		"",
 		compactionArchiveSectionLabel,
 		compactionEvidenceSectionLabel,
-		compactionHintSectionLabel,
 	}
 	if len(labels) != len(want) {
 		t.Fatalf("labels = %v, want %v", labels, want)
@@ -90,6 +95,32 @@ func TestSplitCompactionSectionsOrdersRegions(t *testing.T) {
 	}
 	if strings.Contains(sections[1].body, "[Context") {
 		t.Fatalf("summary body still carries a marker: %q", sections[1].body)
+	}
+}
+
+// TestSplitCompactionSectionsDropsLegacyDisplayHintTail requires that a
+// display-hint tail persisted by an older build is cut off instead of rendered:
+// the checkpoint card is always fully expanded, so the hint is stale text that
+// must not surface as its own region or leak into the evidence section.
+func TestSplitCompactionSectionsDropsLegacyDisplayHintTail(t *testing.T) {
+	sections := splitCompactionSections(legacyCheckpointFixture())
+	var labels []string
+	for _, section := range sections {
+		labels = append(labels, section.label)
+	}
+	want := []string{
+		compactionAnchorsSectionLabel,
+		"",
+		compactionArchiveSectionLabel,
+		compactionEvidenceSectionLabel,
+	}
+	if len(labels) != len(want) {
+		t.Fatalf("labels = %v, want %v", labels, want)
+	}
+	for _, section := range sections {
+		if strings.Contains(section.body, "toggle-collapse") || strings.Contains(section.body, "[Context display hint]") {
+			t.Fatalf("legacy hint text leaked into section %q: %q", section.label, section.body)
+		}
 	}
 }
 

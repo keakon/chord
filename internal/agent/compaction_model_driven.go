@@ -398,8 +398,9 @@ func (a *MainAgent) contextRenderedEvidencePacks() map[string]struct{} {
 }
 
 // evidencePackRegion returns the machine-rendered evidence pack region of a
-// checkpoint message (between the [Context Evidence] tag and the display
-// hint), or "" when the message carries no pack.
+// checkpoint message (between the [Context Evidence] tag and the end of the
+// message; a legacy display-hint marker, when still present in an older
+// checkpoint, ends the region early), or "" when the message carries no pack.
 func evidencePackRegion(content string) string {
 	start := strings.Index(content, message.CompactionEvidenceTag)
 	if start < 0 {
@@ -1222,8 +1223,8 @@ func (a *MainAgent) newModelDrivenCheckpointBuilder(bundle modelDrivenBarrierSna
 
 // render renders the deterministic checkpoint the way it will appear in the
 // transcript: the summary sections wrapped in the canonical checkpoint
-// envelope (header, archived history map, evidence artifact, display hint)
-// plus the model-driven wrapper copy. exportedArchive, when non-empty, is this
+// envelope (header, archived history map, evidence artifact) plus the
+// model-driven wrapper copy. exportedArchive, when non-empty, is this
 // draft's freshly written archive: it is appended to the map with its own
 // topics (it is the newest index, so it sorts last). The returned stats
 // describe the checkpoint for the low-gain preflight and lifecycle telemetry.

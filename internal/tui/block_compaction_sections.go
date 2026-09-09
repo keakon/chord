@@ -29,7 +29,6 @@ const (
 	compactionAnchorsSectionLabel  = "SESSION ANCHORS"
 	compactionArchiveSectionLabel  = "ARCHIVED HISTORY"
 	compactionEvidenceSectionLabel = "PRESERVED EVIDENCE"
-	compactionHintSectionLabel     = "DISPLAY HINT"
 )
 
 // splitCompactionSections divides checkpoint content into labelled regions in
@@ -60,9 +59,11 @@ func splitCompactionSections(content string) []compactionSection {
 	// The trailing regions appear in a fixed order, each introduced by its own
 	// marker. Cut them off the end first so the leading remainder is the summary
 	// body itself.
-	hint := ""
+	//
+	// A legacy display-hint tail (written by checkpoints before the hint was
+	// removed) is cut off and dropped rather than rendered: the card is always
+	// fully expanded, so the "press toggle-collapse" text is stale scaffolding.
 	if idx := strings.Index(rest, strings.TrimSpace(message.CompactionDisplayHint)); idx >= 0 {
-		hint = rest[idx+len(strings.TrimSpace(message.CompactionDisplayHint)):]
 		rest = rest[:idx]
 	}
 	evidence := ""
@@ -79,7 +80,6 @@ func splitCompactionSections(content string) []compactionSection {
 	appendSection("", rest)
 	appendSection(compactionArchiveSectionLabel, archive)
 	appendSection(compactionEvidenceSectionLabel, evidence)
-	appendSection(compactionHintSectionLabel, hint)
 
 	if len(sections) == 0 {
 		return []compactionSection{{body: content}}

@@ -191,12 +191,19 @@ func TestRetainedRecentSectionPlacedBetweenHistoryMapAndEvidence(t *testing.T) {
 	historyAt := strings.Index(content, "Archived history files")
 	headingAt := strings.Index(content, retainedRecentMessagesHeading)
 	evidenceAt := strings.Index(content, message.CompactionEvidenceTag)
-	hintAt := strings.Index(content, "[Context display hint]")
-	if historyAt < 0 || headingAt < 0 || evidenceAt < 0 || hintAt < 0 {
+	if historyAt < 0 || headingAt < 0 || evidenceAt < 0 {
 		t.Fatalf("checkpoint missing expected sections:\n%s", content)
 	}
-	if !(historyAt < headingAt && headingAt < evidenceAt && evidenceAt < hintAt) {
+	if !(historyAt < headingAt && headingAt < evidenceAt) {
 		t.Fatalf("retained section must sit after the archived-history map and before the evidence artifact:\n%s", content)
+	}
+	// The evidence artifact is the checkpoint's final region: no display-hint
+	// tail follows it (the card is always fully expanded).
+	if strings.Contains(content, "[Context display hint]") {
+		t.Fatalf("checkpoint still carries the display-hint tail:\n%s", content)
+	}
+	if !strings.HasSuffix(strings.TrimSpace(content), "exact error text") {
+		t.Fatalf("evidence artifact must be the trailing section:\n%s", content)
 	}
 	if !strings.Contains(content, "> Keep the public API stable.") {
 		t.Fatalf("checkpoint missing retained message text:\n%s", content)
