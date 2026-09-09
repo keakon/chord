@@ -6765,14 +6765,14 @@ func TestFilterCompactionEvidenceForArchivalKeepsStatedConstraints(t *testing.T)
 	}
 }
 
-func TestFilterCompactionEvidenceForArchivalDropsUnavailableEvidence(t *testing.T) {
+func TestFilterCompactionEvidenceForArchivalDropsInvalidatedEvidence(t *testing.T) {
 	items := []evidenceItem{
 		{Kind: evidenceUserCorrection, Excerpt: "keep this", Validity: evidenceValidityValid},
 		{Kind: evidenceUserCorrection, Excerpt: "source changed", Validity: evidenceValidityInvalidated},
-		{Kind: evidenceStatedConstraint, Excerpt: "source unavailable", Validity: evidenceValidityUnavailable},
+		{Kind: evidenceStatedConstraint, Excerpt: "keep this too"},
 	}
 	kept := filterCompactionEvidenceForArchival(items)
-	if len(kept) != 1 || kept[0].Excerpt != "keep this" {
+	if len(kept) != 2 {
 		t.Fatalf("kept evidence = %#v, want only valid evidence", kept)
 	}
 }
@@ -6887,6 +6887,87 @@ func TestRefreshEvidenceValidityInvalidatesChangedToolFile(t *testing.T) {
 	a.refreshEvidenceValidity()
 	if got := a.evidence.snapshot()[0].Validity; got != evidenceValidityInvalidated {
 		t.Fatalf("evidence validity = %q, want invalidated", got)
+	}
+}
+
+// TestRefreshEvidenceValidityRehashesOnlyWhenFileChanges pins the hash cache
+// behind the event-loop validity refresh: two consecutive passes over an
+// unchanged tracked file must not re-read it (the content hash is reused from
+// the mtime/size key), and a real change must still be detected on the next
+// pass. Rewriting the file with identical content and restoring the original
+// mtime leaves an unchanged stat, which is exactly the fast path the memo
+// skips — a re-hash would see the new write only through stat or content.
+func TestRefreshEvidenceValidityRehashesOnlyWhenFileChanges(t *testing.T) {
+	projectRoot := t.TempDir()
+	path := filepath.Join(projectRoot, "main.go")
+	if err := os.WriteFile(path, []byte("v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	hash, _, _, err := verifiedCurrentFileHash(path)
+	if err != nil {
+		t.Fatalf("hash %s: %v", path, err)
+	}
+	a := &MainAgent{projectRoot: projectRoot, tools: tools.NewRegistry(), ctxMgr: ctxmgr.NewManager(10000, 1000)}
+	a.evidence.add(evidenceItem{Kind: evidenceToolDiff, SourceID: "call-1", Excerpt: "diff", Revisions: map[string]string{path: hash}, Validity: evidenceValidityValid})
+
+	a.refreshEvidenceValidity()
+	if got := a.evidence.snapshot()[0].Validity; got != evidenceValidityValid {
+		t.Fatalf("first refresh must keep the unchanged file valid, got %q", got)
+	}
+
+	// Rewrite with different content but restore the original mtime and keep
+	// the size identical: only a content re-hash could detect the change. The
+	// memo reuses the cached hash on the unchanged stat, mirroring the lazy
+	// external-read memo semantics.
+	originalInfo, err := os.Lstat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("v2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, originalInfo.ModTime(), originalInfo.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	a.refreshEvidenceValidity()
+	if got := a.evidence.snapshot()[0].Validity; got != evidenceValidityValid {
+		t.Fatalf("unchanged-stat file must reuse the cached hash without re-hashing, got %q", got)
+	}
+
+	// A real stat change (mtime bump) re-hashes and detects the content drift.
+	newTime := originalInfo.ModTime().Add(time.Second)
+	if err := os.Chtimes(path, newTime, newTime); err != nil {
+		t.Fatal(err)
+	}
+	a.refreshEvidenceValidity()
+	if got := a.evidence.snapshot()[0].Validity; got != evidenceValidityInvalidated {
+		t.Fatalf("mtime bump must re-hash and invalidate the drifted file, got %q", got)
+	}
+}
+
+// TestEvidenceFileRevisionMemoReusesHashOnUnchangedStat tests the memo
+// directly: the same file yields the cached content hash while the stat is
+// unchanged, and a fresh hash once the mtime/size differs.
+func TestEvidenceFileRevisionMemoReusesHashOnUnchangedStat(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.go")
+	if err := os.WriteFile(path, []byte("v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	hash, exists, err := evidenceFileRevisionMemoGlobal.verifiedHash(path)
+	if err != nil || !exists {
+		t.Fatalf("first hash = %q exists=%v err=%v", hash, exists, err)
+	}
+	second, exists, err := evidenceFileRevisionMemoGlobal.verifiedHash(path)
+	if err != nil || !exists || second != hash {
+		t.Fatalf("memo must reuse the cached hash on an unchanged stat: %q vs %q", second, hash)
+	}
+	// Deleted files are forgotten and reported as not existing.
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists, err := evidenceFileRevisionMemoGlobal.verifiedHash(path); err != nil || exists {
+		t.Fatalf("deleted file must be forgotten exists=%v err=%v", exists, err)
 	}
 }
 

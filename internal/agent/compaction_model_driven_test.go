@@ -1871,15 +1871,65 @@ func TestApplyModelDrivenDraftRejectsChangedRuntimeGeneration(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "runtime generation changed") {
 		t.Fatalf("stale model-driven draft error = %v", err)
 	}
+	for _, want := range []string{"new input was received after the checkpoint was prepared", "process that input first, then retry compact_context"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("generation rejection %q must guide the retry with %q", err, want)
+		}
+	}
 }
 
-func TestApplyModelDrivenDraftRejectsChangedRuntimeStateFingerprint(t *testing.T) {
+func TestApplyModelDrivenDraftKeepsQueuedUserInputCurrent(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.newTurn()
+	a.requestBatches.reserve(a.sessionEpoch, 0)
+
+	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "implement the parser contract"})
+	a.ctxMgr.Append(message.Message{Role: message.RoleAssistant, Content: "parser implementation in progress"})
+	// Barrier-time capture: the user has not typed yet.
+	bundle := a.captureModelDrivenBarrierSnapshot(a.ctxMgr.Snapshot())
+	// User input arrives while the checkpoint draft is pending. It is merged
+	// into the continuation request after the apply, never into the checkpoint,
+	// so it must not void the apply: rejecting the draft here would push the
+	// model into an unbounded prepare/void retry loop on every typed interrupt.
+	a.pendingUserMessages = []pendingUserMessage{{Content: "queued follow-up", FromUser: true}}
+
+	draft := &compactionDraft{
+		SummaryMode:             compactionSummaryModeModelDriven,
+		RuntimeGeneration:       bundle.currentRequestBatch,
+		RuntimeStateFingerprint: bundle.runtimeStateFingerprint,
+		HeadSplit:               1,
+		Index:                   1,
+		AbsHistoryPath:          filepath.Join(a.sessionDir, "history-1.md"),
+		NewMessages:             []message.Message{{Role: message.RoleUser, Content: "summary checkpoint", IsCompactionSummary: true}},
+		PlanID:                  1,
+		Target:                  compactionTarget{sessionEpoch: a.sessionEpoch},
+	}
+	if err := a.applyCompactionDraft(draft); err != nil {
+		t.Fatalf("queued user input alone must not void the draft: %v", err)
+	}
+	snapshot := a.ctxMgr.Snapshot()
+	if len(snapshot) == 0 || !snapshot[0].IsCompactionSummary {
+		t.Fatalf("checkpoint must be the transcript head after the apply, got %d messages", len(snapshot))
+	}
+	if len(a.pendingUserMessages) != 1 || a.pendingUserMessages[0].Content != "queued follow-up" {
+		t.Fatalf("queued user messages must stay queued after the apply, got %d", len(a.pendingUserMessages))
+	}
+}
+
+func TestApplyModelDrivenDraftGuidanceNamesNewStateOnStale(t *testing.T) {
 	a := &MainAgent{}
 	a.ctxMgr = ctxmgr.NewManager(10000, 10000)
 	a.sessionDir = t.TempDir()
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "request", RequestBatch: 1})
 	bundle := a.captureModelDrivenBarrierSnapshot(a.ctxMgr.Snapshot())
-	a.pendingUserMessages = []pendingUserMessage{{Content: "queued", FromUser: true}}
+	// A genuine runtime-state change between the barrier capture and the apply
+	// (here: a new todo item) must still void the draft — but the rejection has
+	// to tell the model what happened and how to proceed instead of silently
+	// dropping the attempt.
+	a.todoMu.Lock()
+	a.todoItems = append(a.todoItems, tools.TodoItem{ID: "t1", Content: "new work"})
+	a.todoMu.Unlock()
 	err := a.applyCompactionDraftAsync(&compactionDraft{
 		SummaryMode:             compactionSummaryModeModelDriven,
 		RuntimeGeneration:       1,
@@ -1887,8 +1937,13 @@ func TestApplyModelDrivenDraftRejectsChangedRuntimeStateFingerprint(t *testing.T
 		HeadSplit:               1,
 		NewMessages:             []message.Message{{Role: message.RoleUser, Content: "summary"}},
 	})
-	if err == nil || !strings.Contains(err.Error(), "runtime state fingerprint changed") {
-		t.Fatalf("stale runtime state error = %v", err)
+	if err == nil {
+		t.Fatal("changed runtime state must still void the draft")
+	}
+	for _, want := range []string{"runtime state fingerprint changed", "process the new state first, then retry compact_context"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("stale rejection %q must guide the retry with %q", err, want)
+		}
 	}
 }
 
@@ -2090,11 +2145,12 @@ func TestModelDrivenRuntimeStateFingerprintIgnoresSubAgentOrder(t *testing.T) {
 	}
 }
 
-// TestMaybeStartModelDrivenBarrierTurnNilSettlesProposal pins the W6 fix: a
-// pending request whose turn died before the tool-batch barrier must not
-// leave the proposal record stuck in preparing/accepted — the barrier settles
-// it through the normal terminal (cancelled) path so the persisted record and
-// a later restore never report intent that can no longer be applied.
+// TestMaybeStartModelDrivenBarrierTurnNilSettlesProposal pins the barrier
+// no-turn settle: a pending request whose turn died before the tool-batch
+// barrier must not leave the proposal record stuck in preparing/accepted — the
+// barrier settles it through the normal terminal (cancelled) path so the
+// persisted record and a later restore never report intent that can no longer
+// be applied.
 func TestMaybeStartModelDrivenBarrierTurnNilSettlesProposal(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
@@ -2136,5 +2192,110 @@ func TestValidateCommittedEvidenceRejectsEscalateEvidence(t *testing.T) {
 	id := evidenceItemID(a.evidence.snapshot()[0])
 	if err := a.validateCommittedEvidence(tools.CompactContextArgs{CheckpointKind: "committed", EvidenceRefs: []string{id}}); err == nil {
 		t.Fatal("committed checkpoint should reject escalate evidence")
+	}
+}
+
+// TestValidateModelDrivenEvidenceRefsResolvesCheckpointPackID pins the
+// previous-generation resolution half of the cross-generation evidence chain:
+// after an apply rebuilds the runtime tracker from the surviving messages, an
+// evidence ID that only survives inside the rendered evidence pack of a
+// checkpoint still in the context must validate — the checkpoint message is
+// the only place the archived item's ID remains visible. Invented IDs stay
+// rejected.
+func TestValidateModelDrivenEvidenceRefsResolvesCheckpointPackID(t *testing.T) {
+	item := buildEvidenceItem(evidenceToolDiff, "Recent code diff", "needed", "tool", "diff content")
+	checkpoint := buildCompactionCheckpointMessage(
+		"## Current User Request\n- continue",
+		nil, compactionSummaryModeModelDriven, []evidenceItem{item})
+	a := &MainAgent{tools: tools.NewRegistry(), ctxMgr: ctxmgr.NewManager(10000, 1000)}
+	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: checkpoint, IsCompactionSummary: true})
+	// The tracker is empty: the item's source messages were archived.
+	id := evidenceItemID(item)
+	if err := a.validateModelDrivenEvidenceRefs([]string{id}); err != nil {
+		t.Fatalf("checkpoint-pack evidence ID must validate after its source was archived: %v", err)
+	}
+	if err := a.validateObservedClaimEvidence(tools.CompactContextArgs{
+		ClaimKinds:    map[string]string{"tests pass": "observed"},
+		ClaimEvidence: map[string][]string{"tests pass": {id}},
+	}); err != nil {
+		t.Fatalf("observed claim over checkpoint-pack evidence must validate: %v", err)
+	}
+	if err := a.validateModelDrivenEvidenceRefs([]string{"ev-000000000000"}); err == nil {
+		t.Fatal("invented evidence ID must still be rejected")
+	}
+}
+
+// TestE2EModelDrivenEvidenceIDSurvivesApplyIntoNextGeneration drives the full
+// reported chain: a real durable apply archives the runtime evidence, rebuilds
+// the tracker empty, and leaves the checkpoint's evidence pack as the only
+// place its Evidence IDs remain visible. The next generation's arm validation
+// must accept those IDs (resolution against the checkpoint in context) instead
+// of starting a rejection chain.
+func TestE2EModelDrivenEvidenceIDSurvivesApplyIntoNextGeneration(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.newTurn()
+	a.requestBatches.reserve(a.sessionEpoch, 0)
+
+	// Round 1: real context whose tool diff becomes runtime evidence, then an
+	// archival model-driven apply renders the evidence pack inside the
+	// checkpoint message.
+	callID := "call-diff-1"
+	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "refactor the loader"})
+	a.ctxMgr.Append(message.Message{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: callID, Name: tools.NameEdit, Args: mustJSONRaw(t, map[string]any{"path": "loader.go"})}}})
+	a.ctxMgr.Append(message.Message{Role: message.RoleTool, ToolCallID: callID, ToolStatus: "success", Content: "applied", ToolDiff: "*** Update File: loader.go"})
+	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "keep the public API stable"})
+	a.ctxMgr.Append(message.Message{Role: message.RoleAssistant, Content: "checking"})
+
+	// Rebuild the evidence candidate list the way the event loop does at the
+	// barrier (captureModelDrivenBarrierSnapshot), then render a model-driven
+	// checkpoint that carries the archival evidence pack.
+	a.resetRuntimeEvidenceFromMessages(a.ctxMgr.Snapshot())
+	evidenceItems := filterCompactionEvidenceForArchival(a.evidenceItemsForCompaction(a.ctxMgr.GetMaxTokens()))
+	if len(evidenceItems) == 0 {
+		t.Fatal("fixture must produce archival evidence items")
+	}
+	var packID string
+	for _, item := range evidenceItems {
+		packID = evidenceItemID(item)
+	}
+	snapshot := a.ctxMgr.Snapshot()
+	req := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{ActiveObjective: "refactor the loader", NextStep: "continue", EvidenceRefs: []string{packID}}}
+	summary := a.buildModelDrivenCheckpointSummary(modelDrivenBarrierSnapshot{snapshot: snapshot}, snapshot, len(snapshot), req)
+	content := buildCompactionCheckpointMessage(summary, nil, compactionSummaryModeModelDriven, evidenceItems)
+	// The archival model-driven apply archives the whole head; after it only
+	// the checkpoint survives, so the archived evidence cannot re-enter the
+	// runtime tracker.
+	draft := &compactionDraft{
+		NewMessages:    []message.Message{{Role: message.RoleUser, Content: content, IsCompactionSummary: true, CompactionSummaryMode: compactionSummaryModeModelDriven}},
+		HeadSplit:      len(snapshot),
+		Index:          1,
+		AbsHistoryPath: filepath.Join(a.sessionDir, "history-1.md"),
+		SummaryMode:    compactionSummaryModeModelDriven,
+		PlanID:         1,
+		Target:         compactionTarget{sessionEpoch: a.sessionEpoch},
+	}
+	if err := a.applyCompactionDraft(draft); err != nil {
+		t.Fatalf("apply round-1 checkpoint: %v", err)
+	}
+
+	// The apply rebuilt the runtime evidence from the surviving messages; the
+	// checkpoint itself is skipped, so the pack's item is no longer a runtime
+	// candidate.
+	for _, item := range a.evidence.snapshot() {
+		if evidenceItemID(item) == packID {
+			t.Fatal("archived evidence must not survive as a runtime candidate after the apply")
+		}
+	}
+
+	// Next generation's arm validation references the previous pack's ID. It
+	// must resolve against the checkpoint still in the context (the reported
+	// chain rejected it as unknown).
+	live := a.ctxMgr.Snapshot()
+	if len(live) == 0 || !strings.Contains(live[0].Content, "Evidence ID: "+packID) {
+		t.Fatalf("checkpoint must render the evidence pack with the ID:\n%s", live[0].Content)
+	}
+	if err := a.validateModelDrivenEvidenceRefs([]string{packID}); err != nil {
+		t.Fatalf("previous-generation evidence pack ID rejected after apply: %v", err)
 	}
 }

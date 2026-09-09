@@ -221,8 +221,10 @@ type modelDrivenPreflightStats struct {
 
 // validateCompactContextResult performs the control-plane checks that must
 // happen before the tool result is written: single tool call in the declaring
-// response, no active/ready compaction, persistence healthy, and re-validated
-// arguments (trimmed, token-budgeted, lexically safe state_files). On success
+// response, persistence healthy, and re-validated arguments (trimmed,
+// token-budgeted, lexically safe state_files). An automatic compaction
+// already owning the slot does not reject the request: an explicit model
+// checkpoint may override it (see maybeStartModelDrivenBarrier). On success
 // it returns the canonical accepted text together with the parsed arguments,
 // so the caller arms the pending request without re-parsing the raw args on
 // the event loop.
@@ -336,25 +338,83 @@ func (a *MainAgent) tryArmModelDrivenCheckpoint(callID string, rawArgs string) (
 	return result, nil
 }
 
+// validateModelDrivenEvidenceRefs rejects evidence references the runtime
+// cannot resolve. Resolution covers the runtime evidence tracker (fresh items
+// derived from live messages) plus the evidence IDs rendered by checkpoint
+// evidence packs that are still in the context: after an apply, a previous
+// checkpoint's pack is the only place its Evidence IDs remain visible, and the
+// tool surface documents those checkpoint-pack IDs as the referenceable form.
+// Invented IDs stay rejected.
 func (a *MainAgent) validateModelDrivenEvidenceRefs(refs []string) error {
 	if len(refs) == 0 {
 		return nil
 	}
 	known := evidenceItemsByID(a.evidence.snapshot())
+	var rendered map[string]struct{}
 	for _, ref := range refs {
 		item, ok := known[ref]
-		if !ok {
-			return fmt.Errorf("compact_context evidence_refs contains unknown evidence ID %q", ref)
+		if ok {
+			if item.Validity == evidenceValidityInvalidated {
+				return fmt.Errorf("compact_context evidence_refs contains %s evidence %q", item.Validity, ref)
+			}
+			continue
 		}
-		if item.Validity == evidenceValidityInvalidated || item.Validity == evidenceValidityUnavailable {
-			return fmt.Errorf("compact_context evidence_refs contains %s evidence %q", item.Validity, ref)
+		if rendered == nil {
+			rendered = a.contextRenderedEvidencePacks()
+		}
+		if _, ok := rendered[ref]; !ok {
+			return fmt.Errorf("compact_context evidence_refs contains unknown evidence ID %q", ref)
 		}
 	}
 	return nil
 }
 
+// contextRenderedEvidencePacks returns the stable Evidence IDs rendered by the
+// evidence packs of checkpoint messages still in the live context. A pack
+// item whose source messages were archived stays citable while its checkpoint
+// remains in the transcript; once that checkpoint is archived by a later
+// apply, its IDs stop resolving here and are rejected as unknown again.
+func (a *MainAgent) contextRenderedEvidencePacks() map[string]struct{} {
+	out := make(map[string]struct{})
+	if a == nil || a.ctxMgr == nil {
+		return out
+	}
+	for _, msg := range a.ctxMgr.Snapshot() {
+		if msg.Role != message.RoleUser {
+			continue
+		}
+		if !msg.IsCompactionSummary && !message.IsCompactionEvidenceArtifactText(msg.Content) {
+			continue
+		}
+		for line := range strings.SplitSeq(evidencePackRegion(msg.Content), "\n") {
+			if rest, ok := strings.CutPrefix(line, "Evidence ID: "); ok {
+				if id := strings.TrimSpace(rest); id != "" {
+					out[id] = struct{}{}
+				}
+			}
+		}
+	}
+	return out
+}
+
+// evidencePackRegion returns the machine-rendered evidence pack region of a
+// checkpoint message (between the [Context Evidence] tag and the display
+// hint), or "" when the message carries no pack.
+func evidencePackRegion(content string) string {
+	start := strings.Index(content, message.CompactionEvidenceTag)
+	if start < 0 {
+		return ""
+	}
+	region := content[start:]
+	if idx := strings.Index(region, message.CompactionDisplayHint); idx >= 0 {
+		region = region[:idx]
+	}
+	return region
+}
+
 func (a *MainAgent) validateObservedClaimEvidence(args tools.CompactContextArgs) error {
 	byID := evidenceItemsByID(a.evidence.snapshot())
+	var rendered map[string]struct{}
 	for claim, kind := range args.ClaimKinds {
 		if kind != claimKindObserved {
 			continue
@@ -362,12 +422,25 @@ func (a *MainAgent) validateObservedClaimEvidence(args tools.CompactContextArgs)
 		for _, ref := range args.ClaimEvidence[claim] {
 			item, ok := byID[ref]
 			if !ok {
-				return fmt.Errorf("observed claim %q references unknown evidence %q", claim, ref)
+				// A reference that resolves to a checkpoint evidence pack in
+				// the context has no runtime item behind it (its source
+				// messages were archived), so the negative-kind checks below
+				// cannot be evaluated against it. The pack renders the item's
+				// full record for the model to judge, and the checkpoint build
+				// re-checks every carried claim against the runtime evidence
+				// before it can be rendered observed.
+				if rendered == nil {
+					rendered = a.contextRenderedEvidencePacks()
+				}
+				if _, ok := rendered[ref]; !ok {
+					return fmt.Errorf("observed claim %q references unknown evidence %q", claim, ref)
+				}
+				continue
 			}
 			if item.Kind == evidenceToolError || item.Kind == evidenceDoneRejected {
 				return fmt.Errorf("observed claim %q cannot use %s evidence %q", claim, item.Kind, ref)
 			}
-			if item.Validity == evidenceValidityInvalidated || item.Validity == evidenceValidityUnavailable {
+			if item.Validity == evidenceValidityInvalidated {
 				return fmt.Errorf("observed claim %q cannot use %s evidence %q", claim, item.Validity, ref)
 			}
 		}
@@ -585,13 +658,18 @@ func modelDrivenRuntimeStateFingerprint(bundle modelDrivenBarrierSnapshot) strin
 		}
 		return strings.Compare(a.TaskID, b.TaskID)
 	})
+	// queuedUserMessages is deliberately excluded: user input that arrives
+	// while the checkpoint draft is pending is merged into the continuation
+	// request after the apply (never into the checkpoint itself), so it is not
+	// state the apply depends on — counting it would void every draft that a
+	// user interrupts by typing. The draft's own boundary (generation) still
+	// guards against genuinely changed runtime state.
 	payload, _ := json.Marshal(struct {
 		Todos      []tools.TodoItem
 		SubAgents  []SubAgentInfo
 		Background []recovery.BackgroundObjectState
-		Queued     []message.Message
 		Evidence   []evidenceItem
-	}{bundle.todos, subAgents, bundle.backgroundObjects, bundle.queuedUserMessages, bundle.evidenceItems})
+	}{bundle.todos, subAgents, bundle.backgroundObjects, bundle.evidenceItems})
 	sum := sha256.Sum256(payload)
 	return fmt.Sprintf("%x", sum[:])
 }
@@ -1344,6 +1422,17 @@ func claimRenderMaps(req *modelDrivenCheckpointRequest) (evidence map[string][]s
 	return evidence, kinds
 }
 
+// markTypedClaimsInvalidated downgrades claims whose evidence can no longer
+// back them. A claim is invalidated when one of its evidence refs is
+// invalidated in the runtime evidence (a tracked file revision changed or the
+// underlying tool result was corrected). A ref that resolves to no item at all
+// means the evidence left the runtime evidence of this generation — its source
+// messages were archived by an earlier apply — and a claim the fresh
+// submission re-asserted against it (status active or unset) must not keep
+// rendering as an observed assertion: without this downgrade a carried claim
+// could keep an active/observed posture across generations while its evidence
+// was long gone. Already-demoted postures (stale carried claims, invalidated
+// claims) are left alone.
 func markTypedClaimsInvalidated(req *modelDrivenCheckpointRequest, evidenceItems []evidenceItem) {
 	claims := effectiveCheckpointClaims(req)
 	if len(claims) == 0 {
@@ -1351,15 +1440,27 @@ func markTypedClaimsInvalidated(req *modelDrivenCheckpointRequest, evidenceItems
 	}
 	byID := evidenceItemsByID(evidenceItems)
 	for claim, item := range claims {
+		demote := false
 		for _, ref := range item.EvidenceRefs {
-			validity := byID[ref].Validity
-			if validity == evidenceValidityInvalidated || validity == evidenceValidityUnavailable {
-				if req.ClaimStatuses == nil {
-					req.ClaimStatuses = map[string]string{}
+			evidence, ok := byID[ref]
+			if ok {
+				if evidence.Validity == evidenceValidityInvalidated {
+					demote = true
+					break
 				}
-				req.ClaimStatuses[claim] = typedClaimStatusInvalidated
+				continue
+			}
+			status := strings.TrimSpace(item.Status)
+			if status == "" || status == typedClaimStatusActive {
+				demote = true
 				break
 			}
+		}
+		if demote {
+			if req.ClaimStatuses == nil {
+				req.ClaimStatuses = map[string]string{}
+			}
+			req.ClaimStatuses[claim] = typedClaimStatusInvalidated
 		}
 	}
 }

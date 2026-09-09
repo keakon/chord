@@ -63,6 +63,59 @@ func compactionTransactionManifestPath(sessionDir, transactionID string) string 
 	return filepath.Join(sessionDir, "compaction-txn-"+transactionID+".json")
 }
 
+// compactionTransactionFile is one decoded compaction-txn-*.json manifest in a
+// session directory. Err carries a per-file read/decode failure so callers
+// with different error policies (abort the whole scan vs skip the entry) can
+// keep their own handling.
+type compactionTransactionFile struct {
+	TransactionID string
+	Path          string
+	Manifest      compactionTransactionManifest
+	Err           error
+}
+
+// isCompactionTransactionManifestFile reports whether a directory entry name
+// is a compaction transaction manifest.
+func isCompactionTransactionManifestFile(name string) bool {
+	return strings.HasPrefix(name, "compaction-txn-") && strings.HasSuffix(name, ".json")
+}
+
+// listCompactionTransactionManifests scans sessionDir for every
+// compaction-txn-*.json manifest. ReadDir failures abort the scan; a per-file
+// read or decode failure is recorded on the entry's Err field instead of
+// aborting, so the three consumers (reconcile, crash-window proof, stale
+// sweep) keep their distinct error handling.
+func listCompactionTransactionManifests(sessionDir string) ([]compactionTransactionFile, error) {
+	entries, err := os.ReadDir(sessionDir)
+	if err != nil {
+		return nil, err
+	}
+	var out []compactionTransactionFile
+	for _, entry := range entries {
+		if entry.IsDir() || !isCompactionTransactionManifestFile(entry.Name()) {
+			continue
+		}
+		path := filepath.Join(sessionDir, entry.Name())
+		file := compactionTransactionFile{
+			TransactionID: strings.TrimSuffix(strings.TrimPrefix(entry.Name(), "compaction-txn-"), ".json"),
+			Path:          path,
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			file.Err = err
+			out = append(out, file)
+			continue
+		}
+		if err := json.Unmarshal(data, &file.Manifest); err != nil {
+			file.Err = fmt.Errorf("decode %s: %w", entry.Name(), err)
+			out = append(out, file)
+			continue
+		}
+		out = append(out, file)
+	}
+	return out, nil
+}
+
 func writeCompactionTransactionManifest(sessionDir string, manifest compactionTransactionManifest) error {
 	if strings.TrimSpace(manifest.TransactionID) == "" {
 		return fmt.Errorf("empty compaction transaction ID")
@@ -94,32 +147,23 @@ func updateCompactionTransactionStatus(sessionDir, transactionID string, status 
 }
 
 func reconcileCompactionTransactions(sessionDir string, messages []message.Message) error {
-	entries, err := os.ReadDir(sessionDir)
+	files, err := listCompactionTransactionManifests(sessionDir)
 	if err != nil {
 		return err
 	}
 	fingerprint := compactionTranscriptFingerprint(messages)
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasPrefix(entry.Name(), "compaction-txn-") || !strings.HasSuffix(entry.Name(), ".json") {
-			continue
+	for _, file := range files {
+		if file.Err != nil {
+			return file.Err
 		}
-		path := filepath.Join(sessionDir, entry.Name())
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		var manifest compactionTransactionManifest
-		if err := json.Unmarshal(data, &manifest); err != nil {
-			return fmt.Errorf("decode %s: %w", entry.Name(), err)
-		}
-		if manifest.Status != compactionTransactionPrepared {
+		if file.Manifest.Status != compactionTransactionPrepared {
 			continue
 		}
 		status := compactionTransactionAborted
-		if manifest.TargetFingerprint != "" && manifest.TargetFingerprint == fingerprint {
+		if file.Manifest.TargetFingerprint != "" && file.Manifest.TargetFingerprint == fingerprint {
 			status = compactionTransactionCommitted
 		}
-		if err := updateCompactionTransactionStatus(sessionDir, manifest.TransactionID, status); err != nil {
+		if err := updateCompactionTransactionStatus(sessionDir, file.Manifest.TransactionID, status); err != nil {
 			return err
 		}
 	}
@@ -152,22 +196,15 @@ func modelDrivenCommittedApplyBatch(sessionDir string, messages []message.Messag
 		return 0, false
 	}
 	fingerprint := compactionTranscriptFingerprint(messages)
-	entries, err := os.ReadDir(sessionDir)
+	files, err := listCompactionTransactionManifests(sessionDir)
 	if err != nil {
 		return 0, false
 	}
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasPrefix(entry.Name(), "compaction-txn-") || !strings.HasSuffix(entry.Name(), ".json") {
+	for _, file := range files {
+		if file.Err != nil {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(sessionDir, entry.Name()))
-		if err != nil {
-			continue
-		}
-		var manifest compactionTransactionManifest
-		if err := json.Unmarshal(data, &manifest); err != nil {
-			continue
-		}
+		manifest := file.Manifest
 		if manifest.Status != compactionTransactionCommitted || strings.TrimSpace(manifest.ProposalID) != proposalID {
 			continue
 		}

@@ -76,13 +76,14 @@ const (
 	typedClaimStatusStale       = "stale"
 	// claimKindObserved / checkpointKindCommitted / stageStatusCompleted are
 	// the identifiers the runtime's committed/observed validation keys on.
-	// The compact_context tool schema declares the same enums in
-	// internal/tools/compact_context.go; tools cannot import the agent
-	// package, so the agent mirrors the values it enforces here instead of
-	// repeating the literals at each check site.
-	claimKindObserved       = "observed"
-	checkpointKindCommitted = "committed"
-	stageStatusCompleted    = "completed"
+	// The values come from the exported compact_context vocabulary in
+	// internal/tools/compact_context.go (the tool schema declares the same
+	// enums); the tool package cannot import the agent package, so the agent
+	// aliases the exported constants here instead of repeating the literals
+	// at each check site.
+	claimKindObserved       = tools.CompactContextClaimObserved
+	checkpointKindCommitted = tools.CompactContextCheckpointKindCommitted
+	stageStatusCompleted    = tools.CompactContextStageCompleted
 )
 
 // checkpointTypedState is the machine-carryable task state a checkpoint

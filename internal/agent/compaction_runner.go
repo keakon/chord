@@ -444,11 +444,11 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	if d.SummaryMode == compactionSummaryModeModelDriven && d.RuntimeGeneration > 0 {
 		currentGeneration := a.currentRequestBatch(a.ctxMgr.Snapshot())
 		if currentGeneration != d.RuntimeGeneration {
-			return fmt.Errorf("model-driven compaction draft is stale: runtime generation changed from %d to %d", d.RuntimeGeneration, currentGeneration)
+			return fmt.Errorf("model-driven compaction draft is stale: runtime generation changed from %d to %d; new input was received after the checkpoint was prepared — process that input first, then retry compact_context", d.RuntimeGeneration, currentGeneration)
 		}
 		currentBundle := a.captureModelDrivenBarrierSnapshot(a.ctxMgr.Snapshot())
 		if d.RuntimeStateFingerprint != "" && currentBundle.runtimeStateFingerprint != d.RuntimeStateFingerprint {
-			return fmt.Errorf("model-driven compaction draft is stale: runtime state fingerprint changed")
+			return fmt.Errorf("model-driven compaction draft is stale: runtime state fingerprint changed; new input or state arrived after the checkpoint was prepared — process the new state first, then retry compact_context")
 		}
 	}
 	if len(d.SourceRefs) > 0 {
@@ -587,10 +587,21 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	// Earlier` section is deliberately not counted: it records names, not
 	// instructions, and a name is not what "invoked" claims.
 	a.resetInvokedSkillsFromMessages(compactedMessages)
+	// The applied analytics record runs before the interval anchor advances
+	// below: it reports request_batches_since_last_apply against the previous
+	// anchor, which is exactly what the reset just made history.
+	a.recordCompactionAppliedAnalyticsEvent(d, headSplit, compactedMessages)
 	if d.SummaryMode == compactionSummaryModeModelDriven {
+		// A successful model-driven apply records its request batch as the new
+		// interval anchor: the next model-driven request must wait
+		// minModelDrivenApplyIntervalBatches batches. The anchor is assigned
+		// BEFORE the applied transition persists its recovery snapshot, so the
+		// snapshot that marks the proposal applied also carries the new anchor
+		// — a crash between "applied saved" and "anchor saved" could otherwise
+		// leave an applied record with the previous anchor on disk.
+		a.lastModelDrivenApplyBatch = applyBatch
 		a.transitionModelDrivenProposal(modelDrivenProposalApplied, "durable checkpoint applied")
 	}
-	a.recordCompactionAppliedAnalyticsEvent(d, headSplit, compactedMessages)
 	// A durable apply starts a fresh compaction window: drop any overlay texts
 	// queued for the pre-apply window (the reminder reported the old usage
 	// baseline and the warning is moot once auto-compact applied). The next
@@ -601,16 +612,10 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	// overlay window key, so requests dispatched while an async compaction is
 	// still running (or was discarded) stay on the pre-apply window claim.
 	a.compactionWindowGeneration++
-	// A successful model-driven apply records its request batch as the new
-	// interval anchor: the next model-driven request must wait
-	// minModelDrivenApplyIntervalBatches batches. Every durable apply — model-
-	// driven, usage-driven, or manual — clears the skip-cooldown state and the
-	// threshold grace window: the prepared surface the last low-gain verdict
-	// was computed on no longer exists, and the new window re-derives its own
-	// grace from a fresh crossing.
-	if d.SummaryMode == compactionSummaryModeModelDriven {
-		a.lastModelDrivenApplyBatch = applyBatch
-	}
+	// Every durable apply — model-driven, usage-driven, or manual — clears the
+	// skip-cooldown state and the threshold grace window: the prepared surface
+	// the last low-gain verdict was computed on no longer exists, and the new
+	// window re-derives its own grace from a fresh crossing.
 	a.lastModelDrivenSkipBatch = 0
 	a.lastModelDrivenSkipReason = ""
 	a.clearCompactionGrace()

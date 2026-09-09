@@ -114,11 +114,9 @@ func (a *MainAgent) armModelDrivenProposal(callID string, args tools.CompactCont
 // recorded the request identity.
 //
 // The move is checked against the documented lifecycle; an impossible move
-// (for example accepted -> applied without the preparing barrier) is logged as
-// a warning so a regression in the call graph surfaces in the log instead of
-// silently overwriting a settled record. The transition itself still applies:
-// refusing it would leave callers with a record that no longer matches what
-// the rest of the state machine did.
+// (for example accepted -> applied without the preparing barrier) is refused
+// and logged as a warning so a regression in the call graph surfaces in the
+// log instead of silently overwriting a settled record.
 func (a *MainAgent) transitionModelDrivenProposal(status, reason string) {
 	if a == nil {
 		return

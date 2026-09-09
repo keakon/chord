@@ -3,10 +3,12 @@ package agent
 import (
 	"crypto/sha256"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/keakon/chord/internal/llm"
@@ -222,11 +224,15 @@ type evidenceKind string
 
 type evidenceValidity string
 
+// Evidence validity is binary at runtime: an item is valid until
+// refreshEvidenceValidity invalidates it (its tool result was corrected, or a
+// tracked file revision no longer matches). The superseded/unavailable states
+// once had dedicated branches, but nothing in production ever assigned them,
+// so they were removed together with their dead decision points and the
+// always-zero telemetry key.
 const (
 	evidenceValidityValid       evidenceValidity = "valid"
-	evidenceValiditySuperseded  evidenceValidity = "superseded"
 	evidenceValidityInvalidated evidenceValidity = "invalidated"
-	evidenceValidityUnavailable evidenceValidity = "unavailable"
 )
 
 const (
@@ -909,6 +915,78 @@ func (a *MainAgent) evidenceItemsForCompaction(contextLimit int) []evidenceItem 
 	return evidenceItemsFromCandidates(a.evidence.snapshot(), contextLimit)
 }
 
+// evidenceFileHashEntry records the verified content hash of a file together
+// with the stat (mtime/size) it was computed from.
+type evidenceFileHashEntry struct {
+	mtimeNano int64
+	size      int64
+	hash      string
+}
+
+// evidenceFileRevisionMemo caches verified content hashes of evidence revision
+// files, keyed by absolute path. A cached hash is reused while the file's
+// mtime and size are unchanged, so refreshEvidenceValidity only reads files
+// that actually changed between passes. refreshEvidenceValidity runs on the
+// event loop at every model-driven barrier and again before an apply; without
+// the memo an unchanged tracked file would be re-read on each pass. The memo
+// is bounded and resets wholesale on overflow (same trade-off as
+// externalReadLazyMemo): it is a stat shortcut, and a reset only costs
+// re-hashing on the next pass.
+type evidenceFileRevisionMemo struct {
+	mu      sync.Mutex
+	entries map[string]evidenceFileHashEntry
+}
+
+// evidenceFileRevisionMemoMaxEntries bounds the evidence file hash memo. Each
+// entry is one tracked file; a long session tracking many distinct files
+// would otherwise grow the map without limit.
+const evidenceFileRevisionMemoMaxEntries = 1024
+
+// evidenceFileRevisionMemoGlobal is shared by all MainAgent instances in the
+// process. The cache key is the absolute file path and the memo only skips
+// hashing when the disk stat is byte-identical to the one the cached hash was
+// computed from, so its content is correct regardless of which agent owns the
+// evidence item.
+var evidenceFileRevisionMemoGlobal evidenceFileRevisionMemo
+
+func (m *evidenceFileRevisionMemo) verifiedHash(path string) (hash string, exists bool, err error) {
+	info, lerr := os.Lstat(path)
+	if lerr != nil {
+		m.forget(path)
+		if os.IsNotExist(lerr) {
+			return "", false, nil
+		}
+		return "", false, lerr
+	}
+	m.mu.Lock()
+	entry, ok := m.entries[path]
+	m.mu.Unlock()
+	if ok && entry.mtimeNano == info.ModTime().UnixNano() && entry.size == info.Size() {
+		return entry.hash, true, nil
+	}
+	hash, exists, _, herr := verifiedCurrentFileHash(path)
+	if herr != nil || !exists {
+		m.forget(path)
+		return hash, exists, herr
+	}
+	m.mu.Lock()
+	if m.entries == nil {
+		m.entries = make(map[string]evidenceFileHashEntry, 32)
+	}
+	if len(m.entries) >= evidenceFileRevisionMemoMaxEntries {
+		clear(m.entries)
+	}
+	m.entries[path] = evidenceFileHashEntry{mtimeNano: info.ModTime().UnixNano(), size: info.Size(), hash: hash}
+	m.mu.Unlock()
+	return hash, true, nil
+}
+
+func (m *evidenceFileRevisionMemo) forget(path string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.entries, path)
+}
+
 func (a *MainAgent) refreshEvidenceValidity() {
 	if a == nil || a.ctxMgr == nil || a.tools == nil || len(a.evidence.items) == 0 {
 		return
@@ -933,7 +1011,7 @@ func (a *MainAgent) refreshEvidenceValidity() {
 			if !filepath.IsAbs(resolved) && a.projectRoot != "" {
 				resolved = filepath.Join(a.projectRoot, resolved)
 			}
-			current, exists, _, err := verifiedCurrentFileHash(resolved)
+			current, exists, err := evidenceFileRevisionMemoGlobal.verifiedHash(resolved)
 			if err != nil || !exists || current != expected {
 				item.Validity = evidenceValidityInvalidated
 				break

@@ -67,16 +67,60 @@ func latestPriorCheckpointStrippedBody(messages []message.Message) string {
 // latestPriorCheckpointBody returns the display-truncated form of
 // latestPriorCheckpointStrippedBody, bounded to compactCheckpointCarryMaxChars
 // for the natural-language carry sections of the summary prompt and the
-// `## Previous Checkpoint` appendix. Callers that need the machine-carryable
-// typed state must read the untruncated body instead: the typed JSON line
-// sits late in a model-driven body and a long checkpoint would lose it before
-// it could be parsed.
+// `## Previous Checkpoint` appendix. The machine-carryable typed state is
+// deliberately exempt from the budget: the typed JSON line sits late in a
+// model-driven body (past the first 2400 runes once claims fill their cap), so
+// the natural-language lines before it are capped and the typed section is
+// re-appended whole — a later generation can still parse the prior
+// decisions/claims out of the carry instead of silently losing them.
 func latestPriorCheckpointBody(messages []message.Message) string {
 	body := latestPriorCheckpointStrippedBody(messages)
 	if body == "" {
 		return ""
 	}
-	return truncateCheckpointCarryLines(body, compactCheckpointCarryMaxChars)
+	return truncateCarryKeepingTypedState(body, compactCheckpointCarryMaxChars)
+}
+
+// truncateCarryKeepingTypedState bounds a prior checkpoint body to maxChars of
+// natural-language content while always keeping a parseable typed state block
+// when the body carries one. The prelude before the typed section goes through
+// the ordinary line truncation (which discloses dropped content); the typed
+// heading and its single JSON line are appended after it, so the result never
+// dangles a typed heading without its line. Bodies without a typed block — and
+// bodies that already fit — take the plain truncation/identity path.
+func truncateCarryKeepingTypedState(body string, maxChars int) string {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return ""
+	}
+	if utf8.RuneCountInString(body) <= maxChars {
+		return body
+	}
+	idx := strings.Index(body, typedStateSectionHeading)
+	if idx < 0 || maxChars <= 0 {
+		return truncateCheckpointCarryLines(body, maxChars)
+	}
+	line := typedStateJSONLine(body[idx+len(typedStateSectionHeading):])
+	if line == "" {
+		return truncateCheckpointCarryLines(body, maxChars)
+	}
+	kept := truncateCheckpointCarryLines(body[:idx], maxChars)
+	if kept == "" {
+		return typedStateSectionHeading + "\n" + line
+	}
+	return strings.TrimSpace(kept) + "\n" + typedStateSectionHeading + "\n" + line
+}
+
+// typedStateJSONLine returns the first non-empty line after a typed state
+// heading — the machine JSON line the parser reads, kept verbatim (including
+// the "- " bullet the renderer writes) — or "" when the section carries none.
+func typedStateJSONLine(after string) string {
+	for _, candidate := range strings.Split(after, "\n") {
+		if line := strings.TrimSpace(candidate); line != "" {
+			return line
+		}
+	}
+	return ""
 }
 
 func truncateCheckpointCarryLines(body string, maxChars int) string {

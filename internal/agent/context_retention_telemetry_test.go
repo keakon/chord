@@ -48,6 +48,28 @@ func TestRetentionWindowTotalsAddAccumulates(t *testing.T) {
 	}
 }
 
+// TestRetentionRequestsCountExactlyOncePerRequest pins the single-count
+// denominator of the retention statistics: one prepared request increments
+// the Requests counter of each aggregator layer by exactly one, no matter how
+// many retention signals the request carried. The reread rates divide by this
+// counter, so a request that double-counts would silently halve them.
+func TestRetentionRequestsCountExactlyOncePerRequest(t *testing.T) {
+	var totals retentionWindowTotals
+	totals.add(retentionStatsFixture())
+	if totals.Requests != 1 {
+		t.Fatalf("one request counted %d times, want exactly 1", totals.Requests)
+	}
+
+	// The real per-request finalization path counts each prepared request once
+	// per layer.
+	a := newTestMainAgent(t, t.TempDir())
+	a.setContextReductionStats(retentionStatsFixture())
+	a.rememberPreparedLLMRequest(1, nil, nil, nil, nil, 0, contextReductionPolicy{})
+	if a.retentionSignals.session.Requests != 1 || a.retentionSignals.window.Requests != 1 {
+		t.Fatalf("single request session/window = %v/%v, want 1/1", a.retentionSignals.session.Requests, a.retentionSignals.window.Requests)
+	}
+}
+
 func TestAppendWindowRetentionSignalsDiagnostic(t *testing.T) {
 	var totals retentionWindowTotals
 	totals.add(retentionStatsFixture())

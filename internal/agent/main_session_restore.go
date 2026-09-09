@@ -919,29 +919,46 @@ func modelDrivenProposalNeedsRecoveryNotice(status string) bool {
 
 // reconcileLoadedModelDrivenCrashWindow corrects the loaded model-driven
 // proposal record when the durable transcript proves the checkpoint apply
-// landed before the crash (see modelDrivenCommittedApplyBatch). The proposal
-// is moved to applied, its audit args copy is cleared, and the
-// lastModelDrivenApplyBatch anchor is restored from the batch the checkpoint
-// message stamped. It only ever upgrades a pre-apply proposal record that
-// modelDrivenCommittedApplyBatch can prove against durable state; anything
-// else keeps the recorded state untouched.
+// landed before the crash (see modelDrivenCommittedApplyBatch). A pre-apply
+// proposal record (accepted/preparing) is moved to applied, its audit args
+// copy is cleared, and the lastModelDrivenApplyBatch anchor is restored from
+// the batch the checkpoint message stamped. A record that was already
+// persisted as applied can still carry the previous anchor: the apply used to
+// persist the applied transition before assigning the new interval anchor, so
+// a crash between the two writes left an applied record with a stale anchor
+// that the next interval gate would read as an older apply. The anchor is
+// bumped whenever the committed transcript proves a newer apply than the
+// restored anchor, so the anchor is never lost for either crash shape. It only
+// ever upgrades a pre-apply or applied proposal record that
+// modelDrivenCommittedApplyBatch can prove against durable state; terminal
+// settles (skipped/failed/cancelled) and everything else keep the recorded
+// state untouched.
 func reconcileLoadedModelDrivenCrashWindow(loaded *loadedSessionState, sessionDir string) {
 	if loaded == nil {
 		return
 	}
 	proposal := loaded.ModelDrivenProposal
-	if proposal == nil || !modelDrivenProposalNeedsRecoveryNotice(proposal.Status) {
+	if proposal == nil || strings.TrimSpace(proposal.RequestID) == "" {
+		return
+	}
+	// A terminal settle other than applied never produced a committed apply
+	// manifest, so there is nothing to prove or heal.
+	if isModelDrivenProposalTerminal(proposal.Status) && proposal.Status != modelDrivenProposalApplied {
 		return
 	}
 	batch, ok := modelDrivenCommittedApplyBatch(sessionDir, loaded.Messages, proposal.RequestID)
 	if !ok {
 		return
 	}
-	proposal.Status = modelDrivenProposalApplied
-	proposal.Reason = "checkpoint apply was reconciled as applied after a crash between the durable rewrite and its settlement"
-	proposal.UpdatedAt = time.Now()
-	proposal.ArgsJSON = ""
-	loaded.LastModelDrivenApplyBatch = batch
+	if modelDrivenProposalNeedsRecoveryNotice(proposal.Status) {
+		proposal.Status = modelDrivenProposalApplied
+		proposal.Reason = "checkpoint apply was reconciled as applied after a crash between the durable rewrite and its settlement"
+		proposal.UpdatedAt = time.Now()
+		proposal.ArgsJSON = ""
+	}
+	if loaded.LastModelDrivenApplyBatch < batch {
+		loaded.LastModelDrivenApplyBatch = batch
+	}
 	log.Infof("restore reconciled model-driven apply crash window session=%v proposal_id=%v apply_batch=%v", filepath.Base(sessionDir), proposal.RequestID, batch)
 }
 

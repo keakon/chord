@@ -117,7 +117,7 @@ func filterCompactionEvidenceForArchival(items []evidenceItem) []evidenceItem {
 	}
 	out := make([]evidenceItem, 0, len(items))
 	for _, item := range items {
-		if item.Validity == evidenceValidityInvalidated || item.Validity == evidenceValidityUnavailable {
+		if item.Validity == evidenceValidityInvalidated {
 			continue
 		}
 		switch item.Kind {

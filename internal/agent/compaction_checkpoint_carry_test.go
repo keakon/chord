@@ -90,6 +90,77 @@ func TestLatestPriorCheckpointBodyTruncatesAtLineBoundary(t *testing.T) {
 	}
 }
 
+// TestLatestPriorCheckpointBodyRetainsTypedStateBeyondRuneCap pins the
+// typed-carry protection across the display truncation: the typed JSON line of
+// a model-driven checkpoint sits late in the body, past the first 2400 runes
+// once claims fill their cap, so a plain from-the-top truncation drops it. The
+// display carry must keep the typed section after the truncated
+// natural-language lines so the next generation can still parse the prior
+// decisions/claims out of the carry.
+func TestLatestPriorCheckpointBodyRetainsTypedStateBeyondRuneCap(t *testing.T) {
+	msg := benchmarkPriorTypedCheckpointMessage()
+	body := latestPriorCheckpointStrippedBody([]message.Message{msg})
+	if body == "" {
+		t.Fatal("prior checkpoint body must be found")
+	}
+	if runeCount(body) <= compactCheckpointCarryMaxChars {
+		t.Fatal("fixture prior body must exceed the display carry cap")
+	}
+	got := latestPriorCheckpointBody([]message.Message{msg})
+	state, found, malformed := typedStateFromBody(got)
+	if !found || malformed {
+		t.Fatalf("display carry must retain the typed state found=%v malformed=%v:\n%s", found, malformed, got)
+	}
+	hasCarried := false
+	for _, item := range state.Decisions {
+		if strings.HasPrefix(item, "carried-d-") {
+			hasCarried = true
+		}
+	}
+	if !hasCarried {
+		t.Fatalf("retained typed block must carry the prior decisions: %v", state.Decisions)
+	}
+	// The natural-language part above the retained typed section still
+	// respects the rune budget; only the machine block is exempt. In this
+	// fixture the prelude is short enough to survive the truncation verbatim,
+	// so no disclosure note is expected.
+	idx := strings.Index(got, typedStateSectionHeading)
+	if idx < 0 {
+		t.Fatalf("typed section missing from the retained carry:\n%s", got)
+	}
+	if runeCount(got[:idx]) > compactCheckpointCarryMaxChars {
+		t.Fatalf("natural-language carry exceeded the rune cap: %d", runeCount(got[:idx]))
+	}
+}
+
+// TestTruncateCarryKeepingTypedStateNoOpCases pins the guard rails of the
+// typed-carry truncation: a body that already fits, a body without a typed
+// block, and a typed heading without a JSON line all take the ordinary
+// truncation/identity paths.
+func TestTruncateCarryKeepingTypedStateNoOpCases(t *testing.T) {
+	// A body that fits is returned verbatim.
+	short := "## Next Step\n- run tests\n\n## Typed Checkpoint State\n- {\"decisions\":[\"d1\"]}"
+	if got := truncateCarryKeepingTypedState(short, 200); got != short {
+		t.Fatalf("fitting body must be returned unchanged: %q", got)
+	}
+	// No typed block: plain line truncation with the disclosure note.
+	plain := "## Next Step\n- run tests\n" + strings.Repeat("x", 300)
+	got := truncateCarryKeepingTypedState(plain, 100)
+	if strings.Contains(got, typedStateSectionHeading) {
+		t.Fatalf("body without a typed block must not gain one: %q", got)
+	}
+	if !strings.Contains(got, "Earlier checkpoint content omitted") {
+		t.Fatalf("plain truncation must disclose dropped content: %q", got)
+	}
+	// A typed heading that closes the body with no JSON line degrades to plain
+	// truncation (no dangling typed heading).
+	dangling := "## Next Step\n- run tests\n" + strings.Repeat("z", 300) + "\n## Typed Checkpoint State"
+	got = truncateCarryKeepingTypedState(dangling, 100)
+	if strings.Contains(got, typedStateSectionHeading) {
+		t.Fatalf("a typed heading without its JSON line must not be carried: %q", got)
+	}
+}
+
 func TestCheckpointCarryBudgetAndFormatting(t *testing.T) {
 	body := "## Decision\n- preserve ordering\n  continuation of the decision\n\n" + strings.Repeat("oversized ", 300)
 	for _, budget := range []int{-1, 0, 1, 77, 78, 100, 160, 2400} {

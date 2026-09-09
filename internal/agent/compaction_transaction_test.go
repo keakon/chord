@@ -468,3 +468,80 @@ func TestCleanupStalePendingCompactionsSweepsTransactionManifests(t *testing.T) 
 		}
 	}
 }
+
+// TestReconcileLoadedModelDrivenCrashWindowHealsAppliedAnchorLoss pins the
+// second crash shape of the apply window: the applied transition (and its
+// recovery snapshot) was persisted before the apply assigned the new interval
+// anchor, so a crash between the two writes leaves an applied proposal record
+// carrying the previous anchor. The restore reconciliation must bump the
+// anchor to the batch the committed checkpoint stamped whenever the durable
+// transcript proves a newer apply, without downgrading a record that already
+// carries the current anchor.
+func TestReconcileLoadedModelDrivenCrashWindowHealsAppliedAnchorLoss(t *testing.T) {
+	dir := t.TempDir()
+	head := message.Message{Role: message.RoleUser, Content: "checkpoint", IsCompactionSummary: true, CompactionSummaryMode: compactionSummaryModeModelDriven, RequestBatch: 9}
+	tail := message.Message{Role: message.RoleUser, Content: "tail"}
+	messages := []message.Message{head, tail}
+	if err := writeCompactionTransactionManifest(dir, compactionTransactionManifest{
+		TransactionID: "1-1", ProposalID: "call-1", TargetFingerprint: compactionTranscriptFingerprint(messages), Status: compactionTransactionCommitted,
+	}); err != nil {
+		t.Fatalf("write committed manifest: %v", err)
+	}
+
+	// Crash after the applied transition's snapshot but before the anchor
+	// assignment: the persisted record says applied yet keeps the OLD anchor.
+	staleAnchor := &loadedSessionState{
+		SessionPath:               dir,
+		Messages:                  messages,
+		LastModelDrivenApplyBatch: 4,
+		ModelDrivenProposal: &recovery.ModelDrivenProposalSnapshot{
+			RequestID: "call-1",
+			Status:    modelDrivenProposalApplied,
+			Reason:    "durable checkpoint applied",
+		},
+	}
+	reconcileLoadedModelDrivenCrashWindow(staleAnchor, dir)
+	if staleAnchor.ModelDrivenProposal.Status != modelDrivenProposalApplied {
+		t.Fatalf("reconciled proposal status = %q, want applied", staleAnchor.ModelDrivenProposal.Status)
+	}
+	if staleAnchor.LastModelDrivenApplyBatch != 9 {
+		t.Fatalf("applied record with stale anchor must heal to the checkpoint batch 9, got %d", staleAnchor.LastModelDrivenApplyBatch)
+	}
+
+	// A record that already carries the checkpoint's anchor (the fix ordering
+	// in place) is not lowered or rewritten.
+	current := &loadedSessionState{
+		SessionPath:               dir,
+		Messages:                  messages,
+		LastModelDrivenApplyBatch: 9,
+		ModelDrivenProposal: &recovery.ModelDrivenProposalSnapshot{
+			RequestID: "call-1",
+			Status:    modelDrivenProposalApplied,
+			Reason:    "durable checkpoint applied",
+		},
+	}
+	reconcileLoadedModelDrivenCrashWindow(current, dir)
+	if current.LastModelDrivenApplyBatch != 9 {
+		t.Fatalf("current-anchor record must not be lowered: %d", current.LastModelDrivenApplyBatch)
+	}
+	if current.ModelDrivenProposal.Reason != "durable checkpoint applied" {
+		t.Fatalf("current record's applied reason must stay untouched: %q", current.ModelDrivenProposal.Reason)
+	}
+
+	// A later apply is never healed past the transcript's own stamped batch:
+	// the anchor is capped by what the committed transcript proves.
+	newer := &loadedSessionState{
+		SessionPath:               dir,
+		Messages:                  messages,
+		LastModelDrivenApplyBatch: 11,
+		ModelDrivenProposal: &recovery.ModelDrivenProposalSnapshot{
+			RequestID: "call-1",
+			Status:    modelDrivenProposalApplied,
+			Reason:    "durable checkpoint applied",
+		},
+	}
+	reconcileLoadedModelDrivenCrashWindow(newer, dir)
+	if newer.LastModelDrivenApplyBatch != 11 {
+		t.Fatalf("newer-than-transcript anchor must be preserved: %d", newer.LastModelDrivenApplyBatch)
+	}
+}

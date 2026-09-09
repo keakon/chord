@@ -30,6 +30,33 @@ func claimKindsText(kinds map[string]string) string {
 	return strings.Join(parts, "\n")
 }
 
+// Claim-kind, checkpoint-kind and stage-status vocabulary of compact_context.
+// These exported constants are the single definition of the enum values the
+// tool schema declares and the MainAgent runtime enforces. The tool package
+// cannot import the agent package, so the agent mirrors these values by
+// referencing the exported constants instead of repeating the literals.
+const (
+	CompactContextClaimObserved = "observed"
+	CompactContextClaimDerived  = "derived"
+	CompactContextClaimAssumed  = "assumed"
+	CompactContextClaimProposed = "proposed"
+
+	CompactContextCheckpointKindProvisional = "provisional"
+	CompactContextCheckpointKindCommitted   = "committed"
+
+	CompactContextStageActive     = "active"
+	CompactContextStageCandidate  = "candidate"
+	CompactContextStageCompleted  = "completed"
+	CompactContextStageBlocked    = "blocked"
+	CompactContextStageSuperseded = "superseded"
+)
+
+var (
+	compactContextClaimKinds      = []string{CompactContextClaimObserved, CompactContextClaimDerived, CompactContextClaimAssumed, CompactContextClaimProposed}
+	compactContextCheckpointKinds = []string{CompactContextCheckpointKindProvisional, CompactContextCheckpointKindCommitted}
+	compactContextStageStatuses   = []string{CompactContextStageActive, CompactContextStageCandidate, CompactContextStageCompleted, CompactContextStageBlocked, CompactContextStageSuperseded}
+)
+
 // CompactContextArgs is the structured continuation state the model submits
 // when requesting a model-driven context checkpoint. Every field is
 // model-authored; runtime facts (current user request, todos, subagents,
@@ -130,10 +157,10 @@ func (v CompactContextValidator) ParseCompactContextArgs(raw json.RawMessage) (C
 	if args.NextStep == "" {
 		return CompactContextArgs{}, fmt.Errorf("missing required argument: next_step")
 	}
-	if args.StageStatus != "" && !slices.Contains([]string{"active", "candidate", "completed", "blocked", "superseded"}, args.StageStatus) {
+	if args.StageStatus != "" && !slices.Contains(compactContextStageStatuses, args.StageStatus) {
 		return CompactContextArgs{}, fmt.Errorf("invalid stage_status %q", args.StageStatus)
 	}
-	if args.CheckpointKind != "" && !slices.Contains([]string{"provisional", "committed"}, args.CheckpointKind) {
+	if args.CheckpointKind != "" && !slices.Contains(compactContextCheckpointKinds, args.CheckpointKind) {
 		return CompactContextArgs{}, fmt.Errorf("invalid checkpoint_kind %q", args.CheckpointKind)
 	}
 	var err error
@@ -184,7 +211,7 @@ func (v CompactContextValidator) ParseCompactContextArgs(raw json.RawMessage) (C
 	}
 	args.ClaimKinds = claimKinds
 	for claim, kind := range claimKinds {
-		if !slices.Contains([]string{"observed", "derived", "assumed", "proposed"}, kind) {
+		if !slices.Contains(compactContextClaimKinds, kind) {
 			return CompactContextArgs{}, fmt.Errorf("invalid claim_kinds value %q for %q", kind, claim)
 		}
 	}
@@ -496,10 +523,10 @@ func (CompactContextTool) Parameters() map[string]any {
 				"description": "Stable evidence IDs from the checkpoint evidence pack that support completed work or decisions. IDs render as ev-<hash> in the checkpoint's evidence pack (e.g. the Evidence ID line / [evidence:ev-...] entries); invented IDs are rejected, so leave this empty when no evidence pack is in view — only observed claims and committed checkpoints require evidence, not every completed stage. Every evidence ID an observed claim references in claim_evidence must be repeated here: when you fill claim_evidence for observed claims, also add those IDs to the top-level evidence_refs.",
 			},
 			"stage_id":        map[string]any{"type": "string", "description": "Stable identifier for the current work stage."},
-			"stage_status":    map[string]any{"type": "string", "enum": []string{"active", "candidate", "completed", "blocked", "superseded"}, "description": "Whether this stage is still active or is a checkpoint candidate/completed."},
-			"checkpoint_kind": map[string]any{"type": "string", "enum": []string{"provisional", "committed"}, "description": "Provisional reduces context but is not authoritative; committed requires runtime validation, and additionally requires stage_status=completed with at least one valid evidence_refs entry."},
+			"stage_status":    map[string]any{"type": "string", "enum": compactContextStageStatuses, "description": "Whether this stage is still active or is a checkpoint candidate/completed."},
+			"checkpoint_kind": map[string]any{"type": "string", "enum": compactContextCheckpointKinds, "description": "Provisional reduces context but is not authoritative; committed requires runtime validation, and additionally requires stage_status=completed with at least one valid evidence_refs entry."},
 			"claim_evidence":  map[string]any{"type": "object", "maxProperties": maxCompactContextClaims, "additionalProperties": map[string]any{"type": "array", "maxItems": 8, "items": map[string]any{"type": "string", "minLength": 1}}, "description": "Maps each claim to the evidence IDs supporting it. Claim keys are natural language: usually a condensed conclusion from completed/decisions, where paraphrasing is fine and verbatim matching is never required; standalone claims are also allowed. Evidence IDs must be real ev-<hash> IDs from a recent checkpoint's evidence pack. A claim classified observed in claim_kinds needs at least one evidence ID here, and every ID listed for it must also appear in the top-level evidence_refs."},
-			"claim_kinds":     map[string]any{"type": "object", "maxProperties": maxCompactContextClaims, "additionalProperties": map[string]any{"type": "string", "enum": []string{"observed", "derived", "assumed", "proposed"}}, "description": "Classifies each claim (usually from completed/decisions); observed requires runtime evidence listed in claim_evidence/evidence_refs, derived is inferred from evidence, assumed is unverified, and proposed is future work. When no valid evidence is in view, prefer derived or assumed over observed."},
+			"claim_kinds":     map[string]any{"type": "object", "maxProperties": maxCompactContextClaims, "additionalProperties": map[string]any{"type": "string", "enum": compactContextClaimKinds}, "description": "Classifies each claim (usually from completed/decisions); observed requires runtime evidence listed in claim_evidence/evidence_refs, derived is inferred from evidence, assumed is unverified, and proposed is future work. When no valid evidence is in view, prefer derived or assumed over observed."},
 		},
 		"required":             []string{"active_objective", "next_step"},
 		"additionalProperties": false,
