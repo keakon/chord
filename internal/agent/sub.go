@@ -572,9 +572,7 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 			// A task's write scope never removes command tools from the
 			// worker: shell/spawn side effects cannot be path-validated, so
 			// their availability follows the role's permission rules alone (a
-			// wildcard deny keeps them out of the registry), and the
-			// execution-time write-scope gate checks file-modifying tools
-			// only.
+			// wildcard deny keeps them out of the registry).
 			if cfg.Ruleset.IsDisabled(t.Name()) {
 				continue
 			}

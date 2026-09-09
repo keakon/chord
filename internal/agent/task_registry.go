@@ -526,9 +526,9 @@ func (a *MainAgent) duplicateOrConflictingTaskRecord(rec *DurableTaskRecord, own
 			return taskDuplicateProbable, isNonTerminalTaskState(rec.State) && a.taskScopesConflict(agentType, expectedWriteScope, rec.AgentDefName, rec.ExpectedWriteScope, baseDir)
 		}
 	}
-	// A parent delegates work from within its own write lease. The child scope
-	// is separately required to be no broader than the parent, so treating the
-	// owner record as a competing task would reject every nested delegation.
+	// A parent delegates work from within its own task; the owner record is
+	// not a competing task, so a nested delegation must never be rejected as a
+	// duplicate of the parent it belongs to.
 	if strings.TrimSpace(rec.TaskID) == strings.TrimSpace(ownerTaskID) {
 		return taskDuplicateNone, false
 	}
