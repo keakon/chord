@@ -421,18 +421,10 @@ func (b *Block) renderCancelCall(width int, spinnerFrame string) []string {
 			// readable "#N" form is reserved for the context-title layer (see
 			// the header comment above).
 			result = append(result, toolFieldSection(ToolResultExpandedStyle, "Result"))
-			if handle.Status != "" {
-				result = append(result, toolFieldNestedInline(DimStyle, toolArgSectionLabel("status"), sanitizeToolDisplayText(handle.Status)))
-			}
-			if handle.TaskID != "" {
-				result = append(result, toolFieldNestedInline(DimStyle, toolArgSectionLabel("task_id"), sanitizeToolDisplayText(handle.TaskID)))
-			}
-			if handle.AgentID != "" {
-				result = append(result, toolFieldNestedInline(DimStyle, toolArgSectionLabel("agent_id"), sanitizeToolDisplayText(handle.AgentID)))
-			}
-			if handle.Message != "" {
-				result = append(result, toolFieldNestedInline(DimStyle, toolArgSectionLabel("message"), sanitizeToolDisplayText(handle.Message)))
-			}
+			appendTaskHandleFieldRow(&result, "status", handle.Status)
+			appendTaskHandleFieldRow(&result, "task_id", handle.TaskID)
+			appendTaskHandleFieldRow(&result, "agent_id", handle.AgentID)
+			appendTaskHandleFieldRow(&result, "message", handle.Message)
 		} else if !b.toolResultIsError() && !b.toolResultIsCancelled() {
 			result = append(result, toolFieldSection(ToolResultExpandedStyle, "Result"))
 			for _, line := range wrapText(sanitizeToolDisplayText(strings.TrimSpace(b.ResultContent)), contentWidth) {
@@ -499,20 +491,14 @@ func (b *Block) renderNotifyCall(width int, spinnerFrame string) []string {
 		handle, _, ok := parseTaskToolHandle(b.ResultContent)
 		if ok {
 			result = append(result, toolFieldSection(ToolResultExpandedStyle, "Result"))
-			if handle.Status != "" {
-				result = append(result, toolFieldNestedInline(DimStyle, toolArgSectionLabel("status"), sanitizeToolDisplayText(handle.Status)))
-			}
+			appendTaskHandleFieldRow(&result, "status", handle.Status)
 			// The Target row above already names the task in its readable
 			// short form, so echoing the handle's own task_id under Result
 			// would only repeat it. The rows that do render carry full
 			// machine-readable values, matching the other expanded handle
 			// fields.
-			if handle.AgentID != "" {
-				result = append(result, toolFieldNestedInline(DimStyle, toolArgSectionLabel("agent_id"), sanitizeToolDisplayText(handle.AgentID)))
-			}
-			if handle.Message != "" {
-				result = append(result, toolFieldNestedInline(DimStyle, toolArgSectionLabel("message"), sanitizeToolDisplayText(handle.Message)))
-			}
+			appendTaskHandleFieldRow(&result, "agent_id", handle.AgentID)
+			appendTaskHandleFieldRow(&result, "message", handle.Message)
 		} else if !b.toolResultIsError() && !b.toolResultIsCancelled() {
 			result = append(result, toolFieldSection(ToolResultExpandedStyle, "Result"))
 			for _, line := range wrapText(sanitizeToolDisplayText(strings.TrimSpace(b.ResultContent)), contentWidth) {
@@ -531,6 +517,17 @@ func (b *Block) renderNotifyCall(width int, spinnerFrame string) []string {
 	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
 
+// appendTaskHandleFieldRow appends one machine-readable task-handle field as a
+// nested "↳ Label: value" row, skipping empty values. Every handle echo on the
+// task cards (cancel/notify Result sections and the delegate Worker section)
+// goes through this row shape so the expanded field layer renders identically.
+func appendTaskHandleFieldRow(out *[]string, label, value string) {
+	if value == "" {
+		return
+	}
+	*out = append(*out, toolFieldNestedInline(DimStyle, toolArgSectionLabel(label), sanitizeToolDisplayText(value)))
+}
+
 // appendTaskHandleFieldRows renders a parsed delegate/task handle as a
 // column of nested field rows under a "Worker" section header. Every
 // non-empty field gets its own row, ordered for scannability: identity
@@ -538,39 +535,29 @@ func (b *Block) renderNotifyCall(width int, spinnerFrame string) []string {
 // rehydrated), plan metadata, write scope, the runtime message, and
 // finally any conflict/duplicate warnings with their suggested fix.
 func appendTaskHandleFieldRows(out *[]string, h tools.TaskHandle) {
-	add := func(key, value string) {
-		if value == "" {
-			return
-		}
-		*out = append(*out, toolFieldNestedInline(DimStyle, toolArgSectionLabel(key), sanitizeToolDisplayText(value)))
-	}
-	add("status", h.Status)
-	add("agent_id", h.AgentID)
-	if h.TaskID != "" {
-		// Expanded field layer: the machine-readable task_id renders in full,
-		// adhoc- prefix included. The readable "#N" short form belongs to
-		// context titles and compact summaries, not to handle echo rows.
-		add("task_id", h.TaskID)
-	}
-	add("previous_agent_id", h.PreviousAgentID)
+	appendTaskHandleFieldRow(out, "status", h.Status)
+	appendTaskHandleFieldRow(out, "agent_id", h.AgentID)
+	// Expanded field layer: the machine-readable task_id renders in full,
+	// adhoc- prefix included. The readable "#N" short form belongs to
+	// context titles and compact summaries, not to handle echo rows.
+	appendTaskHandleFieldRow(out, "task_id", h.TaskID)
+	appendTaskHandleFieldRow(out, "previous_agent_id", h.PreviousAgentID)
 	if h.Rehydrated {
-		*out = append(*out, toolFieldNestedInline(DimStyle, toolArgSectionLabel("rehydrated"), "true"))
+		appendTaskHandleFieldRow(out, "rehydrated", "true")
 	}
-	add("plan_task_ref", h.PlanTaskRef)
-	add("semantic_task_key", h.SemanticTaskKey)
-	if summary := formatWriteScopeSummary(h.ExpectedWriteScope); summary != "" {
-		*out = append(*out, toolFieldNestedInline(DimStyle, toolArgSectionLabel("expected_write_scope"), summary))
-	}
-	add("message", h.Message)
+	appendTaskHandleFieldRow(out, "plan_task_ref", h.PlanTaskRef)
+	appendTaskHandleFieldRow(out, "semantic_task_key", h.SemanticTaskKey)
+	appendTaskHandleFieldRow(out, "expected_write_scope", formatWriteScopeSummary(h.ExpectedWriteScope))
+	appendTaskHandleFieldRow(out, "message", h.Message)
 	if h.ScopeConflict {
-		*out = append(*out, toolFieldNestedInline(DimStyle, toolArgSectionLabel("scope_conflict"), "true"))
+		appendTaskHandleFieldRow(out, "scope_conflict", "true")
 	}
 	if h.DuplicateDetected {
-		*out = append(*out, toolFieldNestedInline(DimStyle, toolArgSectionLabel("duplicate_detected"), "true"))
+		appendTaskHandleFieldRow(out, "duplicate_detected", "true")
 	}
-	add("suggested_task_id", h.SuggestedTaskID)
-	add("suggested_agent_id", h.SuggestedAgentID)
-	add("suggested_action", h.SuggestedAction)
+	appendTaskHandleFieldRow(out, "suggested_task_id", h.SuggestedTaskID)
+	appendTaskHandleFieldRow(out, "suggested_agent_id", h.SuggestedAgentID)
+	appendTaskHandleFieldRow(out, "suggested_action", h.SuggestedAction)
 }
 
 // formatWriteScopeSummary condenses a WriteScope declaration into a single

@@ -3128,10 +3128,13 @@ func TestTaskCardAlwaysRendersItsBodyUnderABareHeader(t *testing.T) {
 			t.Fatalf("expected Delegate body to contain %q; got:\n%s", want, joined)
 		}
 	}
-	// The full machine-readable task id is shown once, in its Worker field
-	// row; the readable "#N" short form is reserved for compact titles.
-	if got := strings.Count(joined, "adhoc-7"); got != 1 {
-		t.Fatalf("expected Delegate body to show the full task id exactly once; got %d:\n%s", got, joined)
+	// The full machine-readable task id is shown on exactly one field row;
+	// the readable "#N" short form is reserved for compact titles. Counting
+	// the bare id would misfire when the args body or the runtime note
+	// legally mentions the same id, so the row itself is the assertion
+	// target (a second row would mean the handle section rendered twice).
+	if got := strings.Count(joined, "↳ Task id: adhoc-7"); got != 1 {
+		t.Fatalf("expected Delegate body to render exactly one task id field row; got %d:\n%s", got, joined)
 	}
 	// The collapsed flag no longer hides anything: the card renders the same
 	// body either way.

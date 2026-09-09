@@ -153,10 +153,12 @@ func TestDelegateWorkerRendersHandleFieldsAndTrailingNote(t *testing.T) {
 			t.Fatalf("delegate Worker section leaks raw JSON %q; got:\n%s", banned, plain)
 		}
 	}
-	// The full machine-readable task id appears exactly once, in its field
-	// row: compact/title surfaces shorten an ad-hoc handle to "#N", but the
-	// expanded Worker rows echo the real handle.
-	if got := strings.Count(plain, "adhoc-7"); got != 1 {
-		t.Fatalf("delegate Worker section should show the full task id exactly once; got %d:\n%s", got, plain)
+	// The full machine-readable task id appears on exactly one field row:
+	// compact/title surfaces shorten an ad-hoc handle to "#N", and a second
+	// field row would mean the handle section rendered twice. Counting the
+	// bare id would misfire when the args body or the runtime note legally
+	// mentions the same id, so the row itself is the assertion target.
+	if got := strings.Count(plain, "↳ Task id: adhoc-7"); got != 1 {
+		t.Fatalf("delegate Worker section should render exactly one task id field row; got %d:\n%s", got, plain)
 	}
 }
