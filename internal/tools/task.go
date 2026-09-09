@@ -196,11 +196,13 @@ func (t *DelegateTool) Parameters() map[string]any {
 			meta = append(meta, "delegation_policy="+a.DelegationPolicy)
 		}
 		// Every row states the role's empty-scope rule so the model does not
-		// need to read the expected_write_scope prose to pick a role.
+		// need to read the expected_write_scope prose to pick a role. A role
+		// that registers no file-writing tools accepts an empty scope; a
+		// write-capable role requires a non-empty declaration.
 		if delegateTargetRoleRegistersNoFileWriteTools(t.creator, a.Name) {
 			meta = append(meta, "empty_scope=allowed")
 		} else {
-			meta = append(meta, "empty_scope=required")
+			meta = append(meta, "non_empty_scope=required")
 		}
 		if len(meta) > 0 {
 			sb.WriteString(" [")

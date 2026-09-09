@@ -195,10 +195,22 @@ func (*mixedRolesCreator) AvailableSubAgents() []AgentInfo {
 	}
 }
 
+// scopeRuleTokens extracts the bracketed meta tokens of a rendered agent_type
+// row so scope-rule assertions compare exact tokens instead of substrings.
+func scopeRuleTokens(row string) []string {
+	start := strings.Index(row, "[")
+	end := strings.Index(row, "]")
+	if start < 0 || end <= start {
+		return nil
+	}
+	return strings.Split(row[start+1:end], "; ")
+}
+
 // TestDelegateToolParametersAnnotateAgentRowsWithEmptyScopeRule verifies each
 // rendered agent_type row carries the empty-scope rule of its role:
 // empty_scope=allowed for a role that registers no file-writing tools, and
-// empty_scope=required for a role that can write files.
+// non_empty_scope=required for a role that can write files (which the runtime
+// rejects an empty scope for).
 func TestDelegateToolParametersAnnotateAgentRowsWithEmptyScopeRule(t *testing.T) {
 	params := NewDelegateTool(&mixedRolesCreator{}).Parameters()
 	text := fmt.Sprint(params)
@@ -211,11 +223,11 @@ func TestDelegateToolParametersAnnotateAgentRowsWithEmptyScopeRule(t *testing.T)
 			rows["surveyor"] = line
 		}
 	}
-	if !strings.Contains(rows["builder"], "empty_scope=required") || strings.Contains(rows["builder"], "empty_scope=allowed") {
-		t.Fatalf("builder row %q: want empty_scope=required only, text: %s", rows["builder"], text)
+	if got := scopeRuleTokens(rows["builder"]); !slices.Equal(got, []string{"non_empty_scope=required"}) {
+		t.Fatalf("builder row %q: scope rule tokens = %v, want [non_empty_scope=required], text: %s", rows["builder"], got, text)
 	}
-	if !strings.Contains(rows["surveyor"], "empty_scope=allowed") || strings.Contains(rows["surveyor"], "empty_scope=required") {
-		t.Fatalf("surveyor row %q: want empty_scope=allowed only, text: %s", rows["surveyor"], text)
+	if got := scopeRuleTokens(rows["surveyor"]); !slices.Equal(got, []string{"empty_scope=allowed"}) {
+		t.Fatalf("surveyor row %q: scope rule tokens = %v, want [empty_scope=allowed], text: %s", rows["surveyor"], got, text)
 	}
 }
 

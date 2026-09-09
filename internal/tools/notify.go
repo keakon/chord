@@ -72,13 +72,26 @@ const targetedNotifyResumeNote = "A worker that already finished or failed is re
 	"so send it the correction rather than delegating the same work to a fresh worker. " +
 	"A cancelled task is not resumable; delegate again if the work should still happen."
 
+// notifyResponseCorrelationHint is appended to response-delivery rejections
+// (a missing correlation_id, or one that does not match a pending request) so
+// the model can recover instead of retrying the same response with a guessed
+// id: message_type=response answers exactly one pending request, and a plain
+// follow-up is not a response.
+const notifyResponseCorrelationHint = "message_type=response answers only a real pending request: " +
+	"correlation_id must be the id that request actually carries, and must never be invented, guessed, or reused. " +
+	"If you meant a plain follow-up to the target, call notify again without the message_type and correlation_id keys, " +
+	"keeping target_task_id, message, and optionally kind. " +
+	"If you do need to answer but cannot find the genuine correlation_id, stop this response and ask for coordination instead of substituting any other id."
+
 func (t *NotifyTool) Description() string {
+	const usageRule = "For a plain note, call notify with only target_task_id, message, and optionally kind — do not send message_type or correlation_id. " +
+		"Use message_type=response only to answer a pending request that is genuinely waiting on you, passing exactly the correlation_id that request carries; never invent one. "
 	switch {
 	case t.allowOwner && t.allowTarget:
 		return "Send a non-blocking update. Without target_task_id, notify your direct owner / coordination chain and continue working. " +
-			"With target_task_id, deliver a clarification, correction, or follow-up to a specific delegated worker without escalating. " + targetedNotifyResumeNote
+			"With target_task_id, deliver a clarification, correction, or follow-up to a specific delegated worker without escalating. " + usageRule + targetedNotifyResumeNote
 	case t.allowTarget:
-		return "Send a non-blocking clarification, decision, or correction to a delegated worker identified by target_task_id. " + targetedNotifyResumeNote
+		return "Send a non-blocking clarification, decision, or correction to a delegated worker identified by target_task_id. " + usageRule + targetedNotifyResumeNote
 	default:
 		return "Send a non-blocking progress update or intermediate result to your direct owner / coordination chain and continue working."
 	}
@@ -98,7 +111,7 @@ func (t *NotifyTool) Parameters() map[string]any {
 			"type":        "string",
 			"description": "Owner notifications support progress/notice. A targeted response requires message_type=response and correlation_id, and accepts only message and kind. Omit message_type for a plain targeted message.",
 		},
-		"correlation_id": map[string]any{"type": "string", "description": "Required for message_type=response: use the pending request's correlation_id. Omit for plain targeted messages. Optional for owner-visible notices."},
+		"correlation_id": map[string]any{"type": "string", "description": "Required for message_type=response: use the exact correlation_id of the pending request being answered, never an invented, guessed, or reused one. Omit for plain targeted messages. Optional for owner-visible notices."},
 	}
 	messageTypes := []string{"response"}
 	if t.allowOwner {
@@ -192,7 +205,7 @@ func (t *NotifyTool) Execute(ctx context.Context, raw json.RawMessage) (string, 
 				return "", fmt.Errorf("structured response delivery is unavailable")
 			}
 			if a.CorrelationID == "" {
-				return "", fmt.Errorf("correlation_id is required for response")
+				return "", fmt.Errorf("correlation_id is required for response: %s", notifyResponseCorrelationHint)
 			}
 			if a.Subtype != "" || len(a.Payload) != 0 {
 				return "", fmt.Errorf("subtype and payload are unavailable for response")
@@ -201,6 +214,9 @@ func (t *NotifyTool) Execute(ctx context.Context, raw json.RawMessage) (string, 
 				TargetTaskID: a.TargetTaskID, Message: a.Message, Kind: a.Kind, CorrelationID: a.CorrelationID,
 			})
 			if err != nil {
+				if strings.Contains(err.Error(), "unknown pending request") {
+					return "", fmt.Errorf("%w: %s", err, notifyResponseCorrelationHint)
+				}
 				return "", err
 			}
 			out, err := json.Marshal(handle)
