@@ -1,12 +1,18 @@
 package agent
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/keakon/golog"
+	"github.com/keakon/golog/log"
+
 	"github.com/keakon/chord/internal/identity"
+	"github.com/keakon/chord/internal/logtest"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -102,6 +108,104 @@ func TestApplyCompactionDraftCommitsTransactionOnReplaceSuccess(t *testing.T) {
 	wantFingerprint := compactionTranscriptFingerprint(a.ctxMgr.Snapshot())
 	if recorded.TargetFingerprint != wantFingerprint {
 		t.Fatalf("target fingerprint = %q, want live transcript %q", recorded.TargetFingerprint, wantFingerprint)
+	}
+}
+
+// TestApplyCompactionDraftLogsOnlyWhenPostCommitAuditWriteFails pins the
+// best-effort tail of the C3 commit point through an independently injectable
+// sibling write: once ReplacePrefixAtomic succeeded and the transaction is
+// recorded committed, a failing post-commit audit write must only log — the
+// apply still returns nil, the runtime settlement still runs, and the
+// still-referenced archive is never deleted. The committed manifest update
+// itself cannot be fault-injected directly: it shares its manifest file (and
+// its atomic rewrite) with the target-fingerprint record written inside the
+// ReplacePrefixAtomic callback, so any durable fault hits that earlier write
+// first and aborts the whole replace. The history-meta audit write right
+// after the commit is the first best-effort write on this path with an
+// independent file and pins the same log-only contract.
+func TestApplyCompactionDraftLogsOnlyWhenPostCommitAuditWriteFails(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.newTurn()
+	a.requestBatches.reserve(a.sessionEpoch, 0)
+	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "first request"})
+	a.ctxMgr.Append(message.Message{Role: message.RoleAssistant, Content: "first reply"})
+
+	// The archive exists and must stay referenced after the apply. Its status
+	// path is taken by a directory so the post-commit audit write cannot land.
+	historyPath := filepath.Join(a.sessionDir, "history-1.md")
+	if err := os.WriteFile(historyPath, []byte("archived head"), 0o600); err != nil {
+		t.Fatalf("WriteFile(history): %v", err)
+	}
+	metaPath := filepath.Join(a.sessionDir, "history-1.md.status.json")
+	if err := os.MkdirAll(metaPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll(metaPath): %v", err)
+	}
+
+	const txnID = "3-1"
+	if err := writeCompactionTransactionManifest(a.sessionDir, compactionTransactionManifest{
+		TransactionID: txnID, TranscriptIndex: 1, Status: compactionTransactionPrepared,
+	}); err != nil {
+		t.Fatalf("write prepared manifest: %v", err)
+	}
+
+	var buf bytes.Buffer
+	logger := logtest.NewLogger(&buf, golog.DebugLevel)
+	log.SetDefaultLogger(logger)
+	defer log.SetDefaultLogger(logtest.NewLogger(nil, golog.InfoLevel))
+
+	draft := &compactionDraft{
+		NewMessages:           []message.Message{{Role: message.RoleUser, Content: "checkpoint content", IsCompactionSummary: true}},
+		HeadSplit:             1,
+		Index:                 1,
+		AbsHistoryPath:        historyPath,
+		AbsHistoryMetaPath:    metaPath,
+		SummaryMode:           compactionSummaryModeModelDriven,
+		PlanID:                3,
+		Target:                compactionTarget{sessionEpoch: a.sessionEpoch},
+		TransactionID:         txnID,
+		TransactionSessionDir: a.sessionDir,
+	}
+	windowBefore := a.compactionWindowGeneration
+	if err := a.applyCompactionDraft(draft); err != nil {
+		t.Fatalf("apply must not fail on a post-commit audit write error: %v", err)
+	}
+
+	// The committed transaction record was written before the injected fault,
+	// so it must read as committed with the live transcript fingerprint.
+	data, readErr := os.ReadFile(compactionTransactionManifestPath(a.sessionDir, txnID))
+	if readErr != nil {
+		t.Fatalf("read committed manifest: %v", readErr)
+	}
+	var recorded compactionTransactionManifest
+	if err := json.Unmarshal(data, &recorded); err != nil {
+		t.Fatalf("decode committed manifest: %v", err)
+	}
+	if recorded.Status != compactionTransactionCommitted {
+		t.Fatalf("transaction status = %q, want committed", recorded.Status)
+	}
+	wantFingerprint := compactionTranscriptFingerprint(a.ctxMgr.Snapshot())
+	if recorded.TargetFingerprint != wantFingerprint {
+		t.Fatalf("target fingerprint = %q, want live transcript %q", recorded.TargetFingerprint, wantFingerprint)
+	}
+	// The replace landed and the post-commit settlement still ran: the
+	// checkpoint is live, the compaction window advanced, and the apply was
+	// reported successful in the logs.
+	if got := a.ctxMgr.Snapshot()[0].Content; got != "checkpoint content" {
+		t.Fatalf("context head = %q, want the applied checkpoint", got)
+	}
+	if a.compactionWindowGeneration != windowBefore+1 {
+		t.Fatalf("compaction window generation = %d, want %d (settlement ran)", a.compactionWindowGeneration, windowBefore+1)
+	}
+	if _, err := os.Stat(historyPath); err != nil {
+		t.Fatalf("archive must stay referenced after a log-only audit failure: %v", err)
+	}
+	logs := buf.String()
+	if !strings.Contains(logs, "failed to update compaction history meta") {
+		t.Fatalf("audit write failure must be logged, got:\n%s", logs)
+	}
+	if !strings.Contains(logs, "context compacted (async)") {
+		t.Fatalf("apply must settle to the successful-compaction log, got:\n%s", logs)
 	}
 }
 
