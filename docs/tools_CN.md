@@ -62,17 +62,17 @@
 | --- | --- |
 | `done` | 携带最终 Markdown 报告申请 loop 退出。仅在 loop 运行期间挂载，因此普通会话根本看不到它，完成结果直接用 assistant 正文返回。Loop 退出仍受退出条件和本地确认门控。 |
 | `handoff` | 把计划/工作移交给另一个角色执行。 |
-| `delegate` | 启动一个委派的 SubAgent 工作流并立即返回它的启动句柄（`task_id` / `agent_id`），不等它完成。调用必须携带 `expected_write_scope`：声明覆盖工作范围的最小 `files` / `path_prefix` / `modules`。任务能否改文件由角色的权限规则决定，不由 delegate 调用本身决定：只读任务应选择 permission 配置里 deny 掉文件修改工具（`write` / `edit` / `delete` / `apply_patch`）的角色并传空 scope——空 scope 只对这种角色放行。声明路径约束 worker 角色实际注册的文件修改工具（目标落在声明路径之外会被拒绝），并驱动并行调度护栏；`shell` / `spawn` 这类命令工具不受 scope 约束，可用性仍由角色的权限规则决定。能写文件的角色传空 scope 会被拒绝。拒绝 `delegate` 会同时禁用该角色的 `cancel` 与嵌套委派。 |
+| `delegate` | 启动一个委派的 SubAgent 工作流并立即返回它的启动句柄（`task_id` / `agent_id`），不等它完成。调用必须携带 `expected_write_scope`：声明覆盖工作范围的最小 `files` / `path_prefix` / `modules`。这份声明是协调元数据，不是运行时边界——worker 能否改文件完全由角色的权限规则决定（deny 掉 `write` / `edit` / `delete` / `apply_patch` 的角色注册不到这些工具），声明路径之外的调用不会被运行时拦截。诚实声明最窄范围，兄弟任务的叠加提示才有意义：新任务的声明范围与另一个仍活跃的任务重叠时，委派照常启动，句柄会带 `scope_conflict: true`、`suggested_task_id` 和 `suggested_action: serialize_or_worktree`，提示你把两个任务串行执行、用 `notify` 协调共享文件的编辑，或让新 worker 在独立的 git worktree 里工作。只读任务应选择注册不到文件修改工具的角色并传空 scope——空 scope 只对这种角色放行，能写文件的角色必须声明非空范围，否则委派被拒绝。`shell` / `spawn` 这类命令工具不受 scope 约束，可用性由角色的权限规则决定。拒绝 `delegate` 会同时禁用该角色的 `cancel` 与嵌套委派。 |
 | `cancel` | 取消一个被委派的 worker；前提是 `delegate` 已启用。 |
 | `complete` | SubAgent 侧：携带摘要把当前委派任务标记为完成。 |
 | `escalate` | SubAgent 侧：请求父 agent 介入，但不结束自己的任务。 |
-| `notify` | 向上级代理或指定子代理发送非阻塞通知。定向消息可唤醒已完成或已失败的子代理，并保留它自己的会话历史；已取消的任务不可恢复。普通定向消息还可通过 `grant_write_scope` 追加写入路径，具体参数见下方。 |
+| `notify` | 向上级代理或指定子代理发送非阻塞通知。定向消息可唤醒已完成或已失败的子代理，并保留它自己的会话历史；已取消的任务不可恢复。具体参数见下方。 |
 
 ### 通知与请求回复
 
 - **向上级汇报：**省略 `target_task_id`，使用 `message_type: progress`（默认）或 `notice`。此形式可带 `subtype`、`correlation_id`，以及不超过 32 KiB 的 JSON 对象 `payload`。主代理没有上级，不能使用此形式。
 - **普通定向消息：**提供 `target_task_id`、`message`，可选填 `kind`；省略 `message_type`、`subtype`、`correlation_id` 和 `payload`。纠正或追加工作使用此形式。
-- **回复待处理请求：**除 `target_task_id`、`message_type: response` 和 `message` 外，**必须**提供该请求的 `correlation_id`；可选填 `kind`。此形式不接受 `subtype`、`payload` 或 `grant_write_scope`。只能向上级汇报的角色不能发送定向回复。
+- **回复待处理请求：**除 `target_task_id`、`message_type: response` 和 `message` 外，**必须**提供该请求的 `correlation_id`；可选填 `kind`。此形式不接受 `subtype` 与 `payload`。只能向上级汇报的角色不能发送定向回复。
 
 
 ### 长文本控制工具
