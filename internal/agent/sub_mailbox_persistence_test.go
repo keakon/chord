@@ -2,9 +2,12 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -328,5 +331,142 @@ func TestProgressMailboxKeepsLastKnownStatusWhenBudgetExhausted(t *testing.T) {
 	a.enqueueSubAgentMailbox(oversized)
 	if got := a.subAgentInbox.progress["worker-1"]; got.MessageID != "p-2" {
 		t.Fatalf("progress after oversized update = %#v, want retained p-2", got)
+	}
+}
+
+// TestConcurrentSpoolRebuildDoesNotDropQueuedMessage hammers the spool reload
+// path from the two roles that race in production: producers append durable
+// mailbox rows and queue their ids in the spool, a consumer dequeues and
+// reloads each id from the mailbox log. Every spool enqueue invalidates the
+// spool index, so each reload rebuilds it while producers keep appending; the
+// rebuild detects the concurrent growth and stays stale. The P2 fix makes a
+// lookup against that stale index report an error (so the consumer keeps the
+// id queued for a retry) instead of reporting "not found" (which would drop
+// the id after it was popped from the queue). The invariant checked here is
+// that every successfully enqueued id is eventually reloaded and delivered —
+// none is lost to the rebuild race.
+func TestConcurrentSpoolRebuildDoesNotDropQueuedMessage(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	// The hammer only needs a writable mailbox log, so give it its own session
+	// directory instead of relying on the agent's default and pre-create the
+	// subagents directory the way every other mailbox test does. A zero-message
+	// memory budget would force arrivals into the spool, but the producers here
+	// enqueue directly anyway.
+	a.sessionDir = filepath.Join(t.TempDir(), "session")
+	if err := os.MkdirAll(filepath.Join(a.sessionDir, "subagents"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(subagents): %v", err)
+	}
+	// Warm the mailbox log up synchronously: afterwards every producer append
+	// opens an existing file (plain O_APPEND) and the consumer can always index
+	// it, so the hammer exercises the append-during-rebuild race rather than
+	// any first-creation bookkeeping.
+	warmup := SubAgentMailboxMessage{
+		MessageID: "warmup-0",
+		AgentID:   "worker-1",
+		TaskID:    "task-1",
+		Kind:      SubAgentMailboxKindCompleted,
+		Summary:   strings.Repeat("x", 256),
+	}
+	if err := a.persistSubAgentMailboxMessage(warmup); err != nil {
+		t.Fatalf("warmup persist: %v", err)
+	}
+	if err := a.indexSpooledMailbox(filepath.Join(a.sessionDir, "subagents", "mailbox.jsonl")); err != nil {
+		t.Fatalf("warmup index: %v", err)
+	}
+
+	const producers = 3
+	const perProducer = 200
+
+	var mu sync.Mutex
+	enqueued := make(map[string]struct{})
+	delivered := make(map[string]struct{})
+	var persistErr error
+	var producersWG sync.WaitGroup
+	for g := 0; g < producers; g++ {
+		producersWG.Add(1)
+		go func(group int) {
+			defer producersWG.Done()
+			for i := 0; i < perProducer; i++ {
+				id := fmt.Sprintf("spool-%d-%d", group, i)
+				msg := SubAgentMailboxMessage{
+					MessageID: id,
+					AgentID:   "worker-1",
+					TaskID:    "task-1",
+					Kind:      SubAgentMailboxKindCompleted,
+					Summary:   strings.Repeat("x", 256),
+				}
+				if err := a.persistSubAgentMailboxMessage(msg); err != nil {
+					mu.Lock()
+					if persistErr == nil {
+						persistErr = err
+					}
+					mu.Unlock()
+					return
+				}
+				a.subAgentMailboxIDsMu.Lock()
+				a.spoolMailboxMessage(msg, false)
+				a.subAgentMailboxIDsMu.Unlock()
+				mu.Lock()
+				enqueued[id] = struct{}{}
+				mu.Unlock()
+			}
+		}(g)
+	}
+	done := make(chan struct{})
+	var consumerWG sync.WaitGroup
+	consumerWG.Add(1)
+	go func() {
+		defer consumerWG.Done()
+		for {
+			if msg := a.dequeueSpooledSubAgentMailbox(); msg != nil {
+				mu.Lock()
+				delivered[msg.MessageID] = struct{}{}
+				mu.Unlock()
+				continue
+			}
+			a.subAgentMailboxIDsMu.Lock()
+			empty := len(a.subAgentInbox.spoolNormal) == 0
+			a.subAgentMailboxIDsMu.Unlock()
+			if !empty {
+				continue
+			}
+			select {
+			case <-done:
+				return
+			default:
+				// Queue drained transiently while producers still enqueue;
+				// yield so they can make progress.
+				runtime.Gosched()
+			}
+		}
+	}()
+	producersWG.Wait()
+	close(done)
+	consumerWG.Wait()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if persistErr != nil {
+		t.Fatalf("producer persist failed: %v", persistErr)
+	}
+	a.subAgentMailboxIDsMu.Lock()
+	remaining := append([]string(nil), a.subAgentInbox.spoolNormal...)
+	a.subAgentMailboxIDsMu.Unlock()
+	if len(delivered)+len(remaining) != len(enqueued) {
+		t.Fatalf("spool accounting lost ids: enqueued=%d delivered=%d still-queued=%d", len(enqueued), len(delivered), len(remaining))
+	}
+	remained := make(map[string]struct{}, len(remaining))
+	for _, id := range remaining {
+		remained[id] = struct{}{}
+	}
+	for id := range enqueued {
+		_, got := delivered[id]
+		_, stillQueued := remained[id]
+		if !got && !stillQueued {
+			t.Fatalf("queued spool id %q was dropped by the reload race", id)
+		}
+		if got && stillQueued {
+			t.Fatalf("queued spool id %q was both delivered and still queued", id)
+		}
 	}
 }

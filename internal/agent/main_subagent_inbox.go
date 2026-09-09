@@ -665,6 +665,19 @@ func (a *MainAgent) replaceProgressMailboxWithinBudget(msg SubAgentMailboxMessag
 func (a *MainAgent) requeueSubAgentMailboxInMemory(msg SubAgentMailboxMessage) {
 	spooled := false
 	a.subAgentMailboxIDsMu.Lock()
+	spooled = a.requeueSubAgentMailboxInMemoryLocked(msg)
+	a.subAgentMailboxIDsMu.Unlock()
+	if spooled {
+		a.orchestrationMetrics.mailboxSpoolQueued.Add(1)
+	}
+	a.refreshSubAgentInboxSummary()
+}
+
+// requeueSubAgentMailboxInMemoryLocked requeues one mailbox message into its
+// in-memory queue (or the durable spool when the memory budget is exhausted)
+// under subAgentMailboxIDsMu, which the caller must hold. It reports whether
+// the message landed in the durable spool.
+func (a *MainAgent) requeueSubAgentMailboxInMemoryLocked(msg SubAgentMailboxMessage) bool {
 	if msg.Kind == SubAgentMailboxKindProgress {
 		if a.subAgentInbox.progress == nil {
 			a.subAgentInbox.progress = make(map[string]SubAgentMailboxMessage)
@@ -674,22 +687,22 @@ func (a *MainAgent) requeueSubAgentMailboxInMemory(msg SubAgentMailboxMessage) {
 		}
 		a.subAgentInbox.progress[msg.AgentID] = msg
 		a.subAgentInbox.memoryBytes += mailboxMessageBytes(msg)
-	} else if msg.persistPending {
+		return false
+	}
+	if msg.persistPending {
 		if msg.Priority == SubAgentMailboxPriorityInterrupt || msg.Priority == SubAgentMailboxPriorityUrgent {
 			a.subAgentInbox.urgent = append([]SubAgentMailboxMessage{msg}, a.subAgentInbox.urgent...)
 		} else {
 			a.subAgentInbox.normal = append([]SubAgentMailboxMessage{msg}, a.subAgentInbox.normal...)
 		}
 		a.subAgentInbox.memoryBytes += mailboxMessageBytes(msg)
-	} else if !a.storeMailboxInMemoryLocked(msg, true) {
-		a.spoolMailboxMessage(msg, true)
-		spooled = true
+		return false
 	}
-	a.subAgentMailboxIDsMu.Unlock()
-	if spooled {
-		a.orchestrationMetrics.mailboxSpoolQueued.Add(1)
+	if a.storeMailboxInMemoryLocked(msg, true) {
+		return false
 	}
-	a.refreshSubAgentInboxSummary()
+	a.spoolMailboxMessage(msg, true)
+	return true
 }
 
 func (a *MainAgent) loadSpooledMailbox(messageID string) (*SubAgentMailboxMessage, bool, error) {
@@ -703,8 +716,17 @@ func (a *MainAgent) loadSpooledMailbox(messageID string) (*SubAgentMailboxMessag
 	}
 	a.subAgentMailboxIDsMu.Lock()
 	location, ok := a.subAgentInbox.spoolIndex[messageID]
+	ready := a.subAgentInbox.spoolIndexReady
 	a.subAgentMailboxIDsMu.Unlock()
 	if !ok {
+		if !ready {
+			// The rebuild above was invalidated by a message appended while it
+			// read the log, so this id — enqueued inside that window — cannot
+			// be trusted absent from the index. Report the reload as failed so
+			// the queueing callers keep the id queued for a retry instead of
+			// treating it as a stale entry and dropping it forever.
+			return nil, false, fmt.Errorf("spool mailbox index stale for message_id=%v: a concurrent append invalidated the rebuild", messageID)
+		}
 		return nil, false, nil
 	}
 	msg, err := readSpooledMailboxAt(path, location)
@@ -1169,8 +1191,15 @@ func (a *MainAgent) stageNextSubAgentMailboxBatch() bool {
 		}
 	} else if msg.Kind == SubAgentMailboxKindProgress {
 		// Progress does not ride the urgent/normal queues as an actionable
-		// head; fold it into the snapshot set staged below.
-		progress = append(progress, *msg)
+		// head. Between turns it folds into the snapshot set staged below; a
+		// mid-turn continuation must not deliver it either (the same gate the
+		// snapshot claim above applies), so it goes back into the per-agent
+		// snapshot map for the next between-turns drain.
+		if a.turn == nil {
+			progress = append(progress, *msg)
+		} else {
+			a.requeueSubAgentMailboxInMemory(*msg)
+		}
 		msg = nil
 	}
 	if msg == nil && len(progress) == 0 {
@@ -1286,37 +1315,63 @@ func (a *MainAgent) markActiveSubAgentMailboxAck(ack bool) {
 	a.activeSubAgentMailboxAck = ack
 }
 
+// stagedActiveMailbox reports whether msg is still part of the staged active
+// batch, by pointer identity with the live fields that the manual-delivery
+// path (takeOutstandingMailboxForSub) and the lifecycle close path
+// (removeSubAgentMailboxState) mutate. Callers that snapshotted the batch re-
+// check each message before acting on it so a message already claimed or
+// removed is not acked or requeued by its former owner.
+func (a *MainAgent) stagedActiveMailbox(msg *SubAgentMailboxMessage) bool {
+	if msg == nil {
+		return false
+	}
+	a.subAgentMailboxIDsMu.Lock()
+	defer a.subAgentMailboxIDsMu.Unlock()
+	if a.activeSubAgentMailbox == msg {
+		return true
+	}
+	for _, staged := range a.activeSubAgentMailboxes {
+		if staged == msg {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *MainAgent) requeueActiveSubAgentMailbox() {
-	// The active batch is shared with the TUI-facing manual delivery path
-	// (takeOutstandingMailboxForSub claims it during a manual message), so the
-	// batch snapshot is taken under subAgentMailboxIDsMu and the requeue
-	// mutations run under it (per message, through the locked helpers).
+	// The active batch is shared with the TUI-facing manual-delivery path
+	// (takeOutstandingMailboxForSub claims messages out of it) and the
+	// lifecycle close path (removeSubAgentMailboxState drops messages of a
+	// closing agent), so the whole requeue runs in one subAgentMailboxIDsMu
+	// critical section over the live batch. Requeueing from a snapshot taken
+	// earlier would reinsert a message another path already claimed or
+	// removed, delivering it twice or resurrecting it after its agent closed.
+	// The batch is claimed (cleared) in the same section, so nothing staged
+	// can be claimed again after its message was requeued.
 	a.subAgentMailboxIDsMu.Lock()
 	if (len(a.activeSubAgentMailboxes) == 0 && a.activeSubAgentMailbox == nil) || a.activeSubAgentMailboxAck {
 		a.subAgentMailboxIDsMu.Unlock()
 		return
 	}
-	batch := append([]*SubAgentMailboxMessage(nil), a.activeSubAgentMailboxes...)
-	if len(batch) == 0 && a.activeSubAgentMailbox != nil {
-		batch = append(batch, a.activeSubAgentMailbox)
+	spooled := false
+	// Backwards iteration keeps the original batch order when requeueing
+	// pushes messages to the front of the in-memory queues.
+	for i := len(a.activeSubAgentMailboxes) - 1; i >= 0; i-- {
+		if msg := a.activeSubAgentMailboxes[i]; msg != nil && a.requeueSubAgentMailboxInMemoryLocked(*msg) {
+			spooled = true
+		}
+	}
+	if len(a.activeSubAgentMailboxes) == 0 && a.activeSubAgentMailbox != nil && a.requeueSubAgentMailboxInMemoryLocked(*a.activeSubAgentMailbox) {
+		spooled = true
+	}
+	a.activeSubAgentMailboxes = nil
+	a.activeSubAgentMailbox = nil
+	a.activeSubAgentMailboxAck = false
+	a.pendingSubAgentMailboxes = nil
+	if spooled {
+		a.orchestrationMetrics.mailboxSpoolQueued.Add(1)
 	}
 	a.subAgentMailboxIDsMu.Unlock()
-	for _, msg := range slices.Backward(batch) {
-		if msg == nil {
-			continue
-		}
-		if msg.Kind == SubAgentMailboxKindProgress {
-			a.subAgentMailboxIDsMu.Lock()
-			if previous, ok := a.subAgentInbox.progress[msg.AgentID]; ok {
-				a.releaseMailboxMemory(previous)
-			}
-			a.subAgentInbox.progress[msg.AgentID] = *msg
-			a.subAgentInbox.memoryBytes += mailboxMessageBytes(*msg)
-			a.subAgentMailboxIDsMu.Unlock()
-			continue
-		}
-		a.requeueSubAgentMailboxInMemory(*msg)
-	}
 	a.refreshSubAgentInboxSummary()
 }
 

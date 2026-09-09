@@ -4565,3 +4565,73 @@ func TestConcurrentMailboxQueueDeliveryKeepsStateConsistent(t *testing.T) {
 		t.Fatalf("mailbox memory counter = %d bytes, want %d (queue held %d messages)", gotBytes, wantBytes, remaining)
 	}
 }
+
+// TestRequeueActiveSubAgentMailboxSkipsClaimedMessages pins the P3-1 fix: the
+// active-batch requeue runs in one critical section over the live batch, so a
+// message already claimed by the manual-delivery path
+// (takeOutstandingMailboxForSub) is not reinserted into the queue from a stale
+// snapshot. Reinserting it would deliver the same message twice — once to the
+// main turn whose teardown is requeueing it, and once more after the claiming
+// manual delivery replies.
+func TestRequeueActiveSubAgentMailboxSkipsClaimedMessages(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "task-1") // instance ID worker-1
+	m1 := &SubAgentMailboxMessage{MessageID: "m1", AgentID: "worker-1", TaskID: "task-1", Kind: SubAgentMailboxKindDecisionRequired, Priority: SubAgentMailboxPriorityInterrupt, Summary: "one"}
+	m2 := &SubAgentMailboxMessage{MessageID: "m2", AgentID: "worker-2", TaskID: "task-2", Kind: SubAgentMailboxKindDecisionRequired, Priority: SubAgentMailboxPriorityInterrupt, Summary: "two"}
+	a.activeSubAgentMailboxes = []*SubAgentMailboxMessage{m1, m2}
+	a.activeSubAgentMailbox = m1
+	a.pendingSubAgentMailboxes = []*SubAgentMailboxMessage{m1, m2}
+	a.activeSubAgentMailboxAck = false
+
+	// The manual-delivery path claims m1 for the worker's follow-up reply.
+	if got := a.takeOutstandingMailboxForSub(sub); got != m1 {
+		t.Fatalf("takeOutstandingMailboxForSub() = %#v, want m1", got)
+	}
+
+	a.requeueActiveSubAgentMailbox()
+
+	queued := append([]SubAgentMailboxMessage{}, a.subAgentInbox.urgent...)
+	queued = append(queued, a.subAgentInbox.normal...)
+	if len(queued) != 1 || queued[0].MessageID != "m2" {
+		t.Fatalf("requeued mailbox queue = %#v, want only m2 (m1 was claimed)", queued)
+	}
+	if len(a.subAgentInbox.progress) != 0 {
+		t.Fatalf("claimed m1 was requeued into the progress map: %#v", a.subAgentInbox.progress)
+	}
+	if got, want := a.subAgentInbox.memoryBytes, mailboxMessageBytes(*m2); got != want {
+		t.Fatalf("mailbox memory counter = %d, want %d (only m2 requeued)", got, want)
+	}
+}
+
+// TestTurnContinuationStagingRequeuesQueueResidentProgressHead pins the P3-2
+// gate on the queue-head shape: a progress message dequeued as the batch head
+// mid-turn must return to the per-agent snapshot map instead of being
+// delivered, matching the turn==nil gate applied to the snapshot claims and to
+// the completed-batch inner loop.
+func TestTurnContinuationStagingRequeuesQueueResidentProgressHead(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.subAgentInbox.urgent = []SubAgentMailboxMessage{{
+		MessageID: "p-1",
+		AgentID:   "worker-1",
+		TaskID:    "task-a",
+		Kind:      SubAgentMailboxKindProgress,
+		Summary:   "still working",
+	}}
+	a.newTurn()
+	if a.currentTurn() == nil {
+		t.Fatal("active turn was not created")
+	}
+
+	if a.prepareSubAgentMailboxBatchForTurnContinuation() {
+		t.Fatal("mid-turn staging delivered a progress queue head")
+	}
+	if len(a.pendingSubAgentMailboxes) != 0 || len(a.activeSubAgentMailboxes) != 0 {
+		t.Fatalf("batch staged mid-turn: pending=%v active=%v", a.pendingSubAgentMailboxes, a.activeSubAgentMailboxes)
+	}
+	if got := a.subAgentInbox.progress["worker-1"]; got.MessageID != "p-1" {
+		t.Fatalf("progress snapshot = %#v, want the queue head requeued into the snapshot map", got)
+	}
+	if len(a.subAgentInbox.urgent) != 0 {
+		t.Fatalf("progress queue head not consumed from the queue: %#v", a.subAgentInbox.urgent)
+	}
+}

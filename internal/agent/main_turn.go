@@ -486,6 +486,13 @@ func (a *MainAgent) setIdleAndDrainPending() {
 				if msg == nil {
 					continue
 				}
+				if !a.stagedActiveMailbox(msg) {
+					// A message claimed by the manual-delivery path (or
+					// dropped by a lifecycle close) while this teardown ran is
+					// no longer this batch's to ack: the claiming delivery
+					// writes its own consumed ack with the worker reply.
+					continue
+				}
 				_, _, _, err := a.markSubAgentMailboxConsumedWithReply(
 					msg.AgentID,
 					msg.MessageID,
@@ -508,6 +515,12 @@ func (a *MainAgent) setIdleAndDrainPending() {
 		} else {
 			for _, msg := range batch {
 				if msg == nil {
+					continue
+				}
+				if !a.stagedActiveMailbox(msg) {
+					// As above: the claiming manual delivery owns this
+					// message's ack; writing a retryable ack after its
+					// consumed ack would make a restart replay it.
 					continue
 				}
 				if err := a.markSubAgentMailboxRetryable(msg.MessageID, turnID); err != nil {
