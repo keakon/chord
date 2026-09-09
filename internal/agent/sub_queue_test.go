@@ -266,7 +266,14 @@ func TestSubAgentTerminalStateDefersQueuedUserInputUntilReactivated(t *testing.T
 				t.Fatalf("queued input count = %d, want 1", got)
 			}
 
-			sub.setState(SubAgentStateRunning, "resumed")
+			// Reactivating a settled runtime is the explicit new-attempt
+			// path: reset to idle, then resume into running.
+			if !sub.resetForAttempt("resumed") {
+				t.Fatalf("terminal runtime was not reset for a new attempt")
+			}
+			if !sub.setState(SubAgentStateRunning, "resumed") {
+				t.Fatal("runtime did not resume into running after reset")
+			}
 			if !sub.canStartUserTurn() {
 				t.Fatal("canStartUserTurn() = false after explicit reactivation")
 			}

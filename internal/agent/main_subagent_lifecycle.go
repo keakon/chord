@@ -353,30 +353,34 @@ func (a *MainAgent) sweepSubAgentLifecycle() {
 				// still-pending escalation request as expired instead of
 				// cancelling silently. Terminal-commit ordering mirrors the
 				// completion path (see handleAgentDone): the alert is
-				// persisted before the close-requested handler commits the
+				// persisted before the guarded live settle commits the
 				// terminal Cancelled, so a crash after the commit can no
 				// longer lose the notification. The alert is delivered only
-				// after the commit wins — a conflicting settlement (the
-				// worker really completed or was stopped while the sweep
-				// ran) must not leave a phantom expiry behind (see
-				// withdrawPreparedWaitingMainExpiryAlert).
+				// after the guarded settle wins — a concurrent reactivation
+				// (a manual reply waking the worker) or a conflicting
+				// settlement (the worker really completed or was stopped
+				// while the sweep ran) must not leave a phantom expiry
+				// behind (see withdrawPreparedWaitingMainExpiryAlert).
 				alert, alertDurable := a.prepareWaitingMainExpiryAlert(sub, nil, reason)
-				a.handleSubAgentCloseRequestedEvent(Event{
-					Type:     EventSubAgentCloseRequested,
-					SourceID: sub.instanceID,
-					Payload: &SubAgentCloseRequestedPayload{
-						Reason:       reason,
-						ClosedReason: reason,
-						FinalState:   SubAgentStateCancelled,
-					},
-				})
-				if !a.waitingMainExpiryCancellationCommitted(sub.taskID) {
+				if a.settleLiveWaitingMainExpiry(sub, reason) {
+					// The finalization below mirrors the terminal tail of
+					// handleSubAgentCloseRequestedEvent, which the live expiry
+					// branch cannot reuse because its commit must first win the
+					// reactivation race under the lifecycle lock.
+					a.reconcileTerminalTaskChildren(sub.taskID, SubAgentStateCancelled, reason)
+					a.emitToTUI(AgentStatusEvent{AgentID: sub.instanceID, Status: "cancelled", Message: reason})
+					a.releaseSubAgentSlot(sub)
+					a.fileTrack.ReleaseAll(sub.instanceID)
+					tools.StopAllSpawnedForAgent(sub.instanceID, "terminated on waiting-main expiry")
+					a.parkSubAgent(sub.instanceID)
+					if settled := a.taskRecordByTaskID(sub.taskID); settled != nil {
+						a.deliverSettledWaitingMainExpiryAlert(alert, alertDurable, settled)
+					}
+					a.expireAgentRequestsAfterCancellation(sub.taskID)
+					changed = true
+				} else {
 					a.withdrawPreparedWaitingMainExpiryAlert(alert)
-				} else if settled := a.taskRecordByTaskID(sub.taskID); settled != nil {
-					a.deliverSettledWaitingMainExpiryAlert(alert, alertDurable, settled)
 				}
-				a.expireAgentRequestsAfterCancellation(sub.taskID)
-				changed = true
 			}
 		case SubAgentStateWaitingDescendant:
 			// Descendant waits are durable coordination state; do not expire via
@@ -674,6 +678,28 @@ func (a *MainAgent) dropSettledTaskQueuedInput(sub *SubAgent, state SubAgentStat
 	a.dispatchSubAgentRiskAlert(mailbox, sub, nil)
 }
 
+// settleLiveWaitingMainExpiry runs the guarded expiry settlement for a still
+// live WaitingMain worker. The expiry may only win while the worker is still
+// waiting: a manual reply or resume that reactivated it first means the wait
+// ended normally, so the commit is refused and the prepared alert is withdrawn
+// by the caller. The guard is twofold — the lifecycle lock serializes against
+// the manual-delivery and parking paths, and commitTerminalTaskFrom's
+// compare-and-transition serializes against every other reactivation that only
+// takes the runtime's state lock — so a freshly resumed attempt is never
+// cancelled as expired. Reports whether the expiry committed.
+func (a *MainAgent) settleLiveWaitingMainExpiry(sub *SubAgent, reason string) bool {
+	if a == nil || sub == nil {
+		return false
+	}
+	sub.lifecycleMu.Lock()
+	defer sub.lifecycleMu.Unlock()
+	if sub.State() != SubAgentStateWaitingMain {
+		return false
+	}
+	_, _, err := a.commitTerminalTaskFrom(sub, SubAgentStateWaitingMain, SubAgentStateCancelled, reason, reason, nil)
+	return err == nil
+}
+
 // settleExpiredParkedWaitingMainTask runs the guarded expiry settlement for
 // one parked WaitingMain record the sweep's collection pass found expired:
 // the expiry alert is persisted ahead of the guarded terminal commit
@@ -695,20 +721,6 @@ func (a *MainAgent) settleExpiredParkedWaitingMainTask(taskID string, expired *D
 		a.deliverSettledWaitingMainExpiryAlert(alert, alertDurable, settled)
 	}
 	return true
-}
-
-// waitingMainExpiryCancellationCommitted reports whether the live expiry
-// branch's close-requested commit really produced the expiry's Cancelled
-// state. The commit can lose to a conflicting terminal settlement (the worker
-// completed or was stopped while the sweep ran), and only an expiry-prefixed
-// cancellation backs the prepared alert.
-func (a *MainAgent) waitingMainExpiryCancellationCommitted(taskID string) bool {
-	taskID = strings.TrimSpace(taskID)
-	if taskID == "" {
-		return false
-	}
-	rec := a.taskRecordByTaskID(taskID)
-	return rec != nil && SubAgentState(rec.State) == SubAgentStateCancelled && recordWasWaitingMainExpiry(rec)
 }
 
 // withdrawPreparedWaitingMainExpiryAlert removes a WaitingMain expiry alert

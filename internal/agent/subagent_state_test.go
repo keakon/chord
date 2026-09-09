@@ -18,7 +18,7 @@ func TestValidateSubAgentStateTransition(t *testing.T) {
 		{name: "initial unknown rejected", to: SubAgentState("unknown-state")},
 		{name: "waiting resumes", from: SubAgentStateWaitingMain, to: SubAgentStateRunning, want: true},
 		{name: "waiting descendant completes", from: SubAgentStateWaitingDescendant, to: SubAgentStateCompleted, want: true},
-		{name: "completed reactivates", from: SubAgentStateCompleted, to: SubAgentStateRunning, want: true},
+		{name: "completed does not revive without an explicit reset", from: SubAgentStateCompleted, to: SubAgentStateRunning, want: false},
 		{name: "failed idle reset is not an ordinary transition", from: SubAgentStateFailed, to: SubAgentStateIdle, want: false},
 		{name: "unknown destination rejected", from: SubAgentStateRunning, to: SubAgentState("unknown")},
 	}
@@ -41,13 +41,46 @@ func TestSubAgentStateSetRejectsUnknownInitialState(t *testing.T) {
 	}
 }
 
-func TestSubAgentRuntimeStateSetAllowsExplicitTerminalReactivation(t *testing.T) {
+// TestSubAgentRuntimeStateNewAttemptGoesThroughIdle pins the rule that a
+// settled runtime never returns to Running by an ordinary transition: reuse is
+// the explicit reset-for-attempt path (terminal -> idle -> running), which the
+// attempt-bump machinery drives.
+func TestSubAgentRuntimeStateNewAttemptGoesThroughIdle(t *testing.T) {
 	var state subAgentRuntimeState
 	state.set(SubAgentStateCompleted, "done")
-	state.set(SubAgentStateRunning, "follow-up")
+	if ok := state.set(SubAgentStateRunning, "follow-up"); ok {
+		t.Fatal("terminal runtime revived directly into running")
+	}
+	if !state.resetForAttempt("done") {
+		t.Fatal("terminal runtime was not reset for a new attempt")
+	}
+	if !state.set(SubAgentStateRunning, "follow-up") {
+		t.Fatal("idle runtime did not resume into running")
+	}
 	got, summary := state.snapshot()
 	if got != SubAgentStateRunning || summary != "follow-up" {
-		t.Fatalf("state after terminal reactivation = (%q, %q), want (running, follow-up)", got, summary)
+		t.Fatalf("state after new attempt = (%q, %q), want (running, follow-up)", got, summary)
+	}
+}
+
+// TestSubAgentRuntimeStateSetFromOnlyTransitionsFromExpectedState pins the
+// compare-and-transition used by guarded terminal commits: it must not move a
+// runtime that a concurrent reactivation already took out of the expected
+// state.
+func TestSubAgentRuntimeStateSetFromOnlyTransitionsFromExpectedState(t *testing.T) {
+	var state subAgentRuntimeState
+	state.set(SubAgentStateWaitingMain, "waiting")
+	if ok := state.setFrom(SubAgentStateWaitingMain, SubAgentStateRunning, "resumed"); !ok {
+		t.Fatal("setFrom from the expected state reported failure")
+	}
+	if got, _ := state.snapshot(); got != SubAgentStateRunning {
+		t.Fatalf("state after setFrom = %q, want running", got)
+	}
+	if ok := state.setFrom(SubAgentStateWaitingMain, SubAgentStateCancelled, "expired"); ok {
+		t.Fatal("setFrom moved a runtime no longer in the expected state")
+	}
+	if got, _ := state.snapshot(); got != SubAgentStateRunning {
+		t.Fatalf("state after refused setFrom = %q, want running", got)
 	}
 }
 

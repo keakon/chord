@@ -462,6 +462,15 @@ func (a *MainAgent) prepareSubAgentDelivery(sub *SubAgent, message, kind string,
 		}, nil
 	}
 	state := sub.State()
+	// A terminal runtime must never be reactivated by a plain delivery. Only
+	// the explicit new-attempt machinery (resetForAttempt plus the task-record
+	// attempt bump, run before this point by sendMessageToSubAgentWithTrigger
+	// and the resume paths) may prepare a settled runtime for reuse; any other
+	// late or manual message reaching a settled worker is a resurrection of
+	// the finished attempt, so it is refused here at the shared delivery gate.
+	if isTerminalSubAgentState(state) {
+		return nil, fmt.Errorf("task %s has already finished as %s; a follow-up must delegate the work again or start a new attempt", strings.TrimSpace(sub.taskID), state)
+	}
 
 	a.subAgentMailboxIDsMu.Lock()
 	drainOwned := manual && (len(a.ownedSubAgentMailboxes[sub.instanceID]) > 0 || len(a.ownedMailboxSpool[sub.instanceID]) > 0)

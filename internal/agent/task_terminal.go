@@ -45,6 +45,18 @@ func (a *MainAgent) terminalStatusAfterCommit(sub *SubAgent, requested SubAgentS
 }
 
 func (a *MainAgent) commitTerminalTask(sub *SubAgent, state SubAgentState, summary, closedReason string, completion *CompletionEnvelope) (*TaskSettlement, bool, error) {
+	return a.commitTerminalTaskFrom(sub, "", state, summary, closedReason, completion)
+}
+
+// commitTerminalTaskFrom is commitTerminalTask with an optional runtime-state
+// precondition: when from is non-empty the runtime must still be in that state
+// for the commit to land. A guarded terminal commit — the live WaitingMain
+// expiry — must not cancel a worker that a concurrent manual reactivation
+// already moved back to Running: losing that race would cancel a freshly
+// resumed attempt and report an expiry that never happened. The
+// compare-and-transition runs under the runtime's own state lock, so it cannot
+// be interleaved with the reactivation's own state write.
+func (a *MainAgent) commitTerminalTaskFrom(sub *SubAgent, from, state SubAgentState, summary, closedReason string, completion *CompletionEnvelope) (*TaskSettlement, bool, error) {
 	if a == nil || sub == nil {
 		return nil, false, fmt.Errorf("missing task runtime")
 	}
@@ -115,7 +127,16 @@ func (a *MainAgent) commitTerminalTask(sub *SubAgent, state SubAgentState, summa
 		durable = persistErr == nil
 	}
 
-	if !sub.setState(state, summary) {
+	stateChanged := false
+	if from != "" {
+		stateChanged = sub.setStateFrom(from, state, summary)
+	} else {
+		stateChanged = sub.setState(state, summary)
+	}
+	if !stateChanged {
+		if from != "" {
+			return nil, false, fmt.Errorf("terminal state transition for task %s refused: runtime no longer in %q", taskID, from)
+		}
 		return nil, false, fmt.Errorf("invalid terminal state transition for task %s", taskID)
 	}
 	a.noteSubAgentStateTransition(sub, state)

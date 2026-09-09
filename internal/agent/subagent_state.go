@@ -37,8 +37,11 @@ func isKnownSubAgentState(state SubAgentState) bool {
 //   - An empty state may bootstrap into any non-empty state (tests and
 //     standalone sub-agents construct records directly at terminal states).
 //   - Re-setting the current state is idempotent.
-//   - A terminal state is absorbing for ordinary events. Reuse of a terminal
-//     runtime is an explicit new-attempt operation, not a normal transition.
+//   - A terminal state is absorbing: no ordinary transition leaves it. Reuse
+//     of a terminal runtime is an explicit new-attempt operation that first
+//     resets the runtime to Idle (resetForAttempt, always paired with the
+//     task-record attempt bump), so a late or manual delivery can never
+//     resurrect a settled attempt by flipping it straight back to Running.
 //   - All non-terminal states may move to any real state; unknown states are
 //     rejected unless already current.
 func validSubAgentStateTransition(from, to SubAgentState) bool {
@@ -51,8 +54,8 @@ func validSubAgentStateTransition(from, to SubAgentState) bool {
 	if from == to {
 		return true
 	}
-	if from == SubAgentStateCompleted || from == SubAgentStateFailed || from == SubAgentStateCancelled {
-		return to == SubAgentStateRunning
+	if isTerminalSubAgentState(from) {
+		return false
 	}
 	switch to {
 	case SubAgentStateRunning, SubAgentStateIdle, SubAgentStateWaitingMain, SubAgentStateWaitingDescendant, SubAgentStateCompleted, SubAgentStateFailed, SubAgentStateCancelled:
@@ -101,6 +104,27 @@ func (s *subAgentRuntimeState) set(state SubAgentState, summary string) bool {
 		return false
 	}
 	s.state = state
+	s.stateChangedAt = time.Now()
+	if summary != "" {
+		s.lastSummary = summary
+	}
+	return true
+}
+
+// setFrom transitions to state only when the runtime is still in from. The
+// compare-and-transition runs under the state lock, so a caller that requires
+// the transition to start from one specific state (a guarded terminal commit)
+// cannot be beaten by a concurrent reactivation that moved the runtime first.
+func (s *subAgentRuntimeState) setFrom(from, to SubAgentState, summary string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.state != from {
+		return false
+	}
+	if err := validateSubAgentStateTransition(from, to); err != nil {
+		return false
+	}
+	s.state = to
 	s.stateChangedAt = time.Now()
 	if summary != "" {
 		s.lastSummary = summary

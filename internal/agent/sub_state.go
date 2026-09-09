@@ -194,6 +194,27 @@ func (s *SubAgent) setState(state SubAgentState, summary string) bool {
 	return true
 }
 
+// setStateFrom is the SubAgent-level compare-and-transition wrapper used by a
+// guarded terminal commit (see commitTerminalTaskFrom): it only moves the
+// runtime from the expected state and reports failure when a concurrent
+// reactivation already moved it.
+func (s *SubAgent) setStateFrom(from, to SubAgentState, summary string) bool {
+	if s == nil {
+		return false
+	}
+	if !s.runtimeState.setFrom(from, to, summary) {
+		if s.parent != nil {
+			s.parent.orchestrationMetrics.recordRejectedStateTransition(s.State(), to)
+		}
+		log.Warnf("sub-agent state transition rejected agent=%v expected_from=%q actual=%q to=%q", s.instanceID, from, s.State(), to)
+		return false
+	}
+	if to == SubAgentStateRunning {
+		s.signalWake()
+	}
+	return true
+}
+
 func (s *SubAgent) restoreState(state SubAgentState, summary string) {
 	s.runtimeState.restore(state, summary)
 }
@@ -223,10 +244,10 @@ func (s *SubAgent) setLastArtifact(ref tools.ArtifactRef) {
 }
 
 // currentWriteScope returns the task record's advisory write-scope snapshot.
-// The declared scope no longer gates tool execution — file access is decided by
-// the role's permission rules — so it only feeds record sync, context
-// summaries, and later overlap advice. It is read under the lock because
-// activation publication can replace it while the worker runs.
+// The declared scope is advisory and never gates tool execution: file access
+// is decided by the role's permission rules. The snapshot only feeds record
+// sync, context summaries, and later overlap advice. It is read under the lock
+// because activation publication can replace it while the worker runs.
 func (s *SubAgent) currentWriteScope() tools.WriteScope {
 	s.writeScopeMu.RLock()
 	defer s.writeScopeMu.RUnlock()

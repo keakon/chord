@@ -117,6 +117,19 @@ func (a *MainAgent) SendUserMessageToTarget(conversation ConversationTarget, con
 		kind := "follow_up"
 		if focused.State() == SubAgentStateWaitingMain {
 			kind = "reply"
+		} else if state := focused.State(); isTerminalSubAgentState(state) {
+			// A finished worker still holding its runtime (settlement landed
+			// before parking) must be resumed through the explicit new-attempt
+			// machinery — a plain delivery may never revive the settled
+			// attempt. Cancelled stays cancelled.
+			if state == SubAgentStateCancelled {
+				a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Task %s was cancelled; delegate the work again if it should still be done", focused.taskID), Level: "warn", AgentID: focused.instanceID})
+				return
+			}
+			if err := a.beginNextTaskAttemptForLiveSub(focused); err != nil {
+				a.emitToTUI(ToastEvent{Message: err.Error(), Level: "warn", AgentID: focused.instanceID})
+				return
+			}
 		}
 		if _, _, err := a.deliverManualMessageToSubAgent(focused, content, kind); err != nil {
 			rec := a.taskRecordByTaskID(focused.taskID)
@@ -285,6 +298,21 @@ func (a *MainAgent) AppendContextMessage(msg message.Message) {
 func (a *MainAgent) reactivateFocusedSubAgentForManualInput(sub *SubAgent) bool {
 	if sub == nil || sub.State() == SubAgentStateRunning {
 		return true
+	}
+	if state := sub.State(); isTerminalSubAgentState(state) {
+		// A settled runtime can only accept input again through the explicit
+		// new-attempt machinery (attempt bump plus reset to Idle), never by
+		// flipping it straight back to Running. A cancelled task stays
+		// cancelled: the user stopped it, so a follow-up must be a fresh
+		// delegation instead.
+		if state == SubAgentStateCancelled {
+			a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Task %s was cancelled; delegate the work again if it should still be done", sub.taskID), Level: "warn", AgentID: sub.instanceID})
+			return false
+		}
+		if err := a.beginNextTaskAttemptForLiveSub(sub); err != nil {
+			a.emitToTUI(ToastEvent{Message: err.Error(), Level: "warn", AgentID: sub.instanceID})
+			return false
+		}
 	}
 	if err := a.acquireSubAgentSlot(sub); err != nil {
 		a.emitToTUI(ToastEvent{Message: err.Error(), Level: "warn", AgentID: sub.instanceID})
