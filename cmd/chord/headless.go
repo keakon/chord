@@ -57,6 +57,7 @@ type headlessConfirmPayload struct {
 	AlreadyAllowedRules []string `json:"already_allowed_rules,omitempty"`
 	DoneReport          string   `json:"done_report,omitempty"`
 	DoneReason          string   `json:"done_reason,omitempty"`
+	AgentID             string   `json:"agent_id,omitempty"`
 }
 
 type headlessQuestionPayload struct {
@@ -69,6 +70,7 @@ type headlessQuestionPayload struct {
 	Multiple      bool     `json:"multiple,omitempty"`
 	RequestID     string   `json:"request_id,omitempty"`
 	TimeoutMS     int64    `json:"timeout_ms,omitempty"`
+	AgentID       string   `json:"agent_id,omitempty"`
 }
 
 // headlessState holds mutex-protected state for the headless protocol.
@@ -372,7 +374,7 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 		if strings.TrimSpace(e.DoneReport) != "" {
 			doneReport = strings.TrimSpace(e.DoneReport)
 		}
-		state.pendingConfirm = &headlessConfirmPayload{ToolName: e.ToolName, ArgsJSON: e.ArgsJSON, RequestID: e.RequestID, TimeoutMS: e.Timeout.Milliseconds(), NeedsApproval: e.NeedsApproval, AlreadyAllowed: e.AlreadyAllowed, NeedsApprovalRules: e.NeedsApprovalRules, AlreadyAllowedRules: e.AlreadyAllowedRules, DoneReport: doneReport, DoneReason: doneReason}
+		state.pendingConfirm = &headlessConfirmPayload{ToolName: e.ToolName, ArgsJSON: e.ArgsJSON, RequestID: e.RequestID, TimeoutMS: e.Timeout.Milliseconds(), NeedsApproval: e.NeedsApproval, AlreadyAllowed: e.AlreadyAllowed, NeedsApprovalRules: e.NeedsApprovalRules, AlreadyAllowedRules: e.AlreadyAllowedRules, DoneReport: doneReport, DoneReason: doneReason, AgentID: e.AgentID}
 		state.updatedAt = time.Now()
 		if state.isSubscribed("confirm_request") {
 			out = append(out, &headlessEnvelope{Type: "confirm_request", Payload: map[string]any{
@@ -386,10 +388,11 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 				"already_allowed_rules": e.AlreadyAllowedRules,
 				"done_report":           doneReport,
 				"done_reason":           doneReason,
+				"agent_id":              e.AgentID,
 			}})
 		}
 	case agent.QuestionRequestEvent:
-		state.pendingQuestion = &headlessQuestionPayload{ToolName: e.ToolName, Header: e.Header, Question: e.Question, Options: e.Options, OptionDetails: e.OptionDetails, DefaultAnswer: e.DefaultAnswer, Multiple: e.Multiple, RequestID: e.RequestID, TimeoutMS: e.Timeout.Milliseconds()}
+		state.pendingQuestion = &headlessQuestionPayload{ToolName: e.ToolName, Header: e.Header, Question: e.Question, Options: e.Options, OptionDetails: e.OptionDetails, DefaultAnswer: e.DefaultAnswer, Multiple: e.Multiple, RequestID: e.RequestID, TimeoutMS: e.Timeout.Milliseconds(), AgentID: e.AgentID}
 		state.updatedAt = time.Now()
 		if state.isSubscribed("question_request") {
 			out = append(out, &headlessEnvelope{Type: "question_request", Payload: map[string]any{
@@ -402,6 +405,7 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 				"multiple":       e.Multiple,
 				"request_id":     e.RequestID,
 				"timeout_ms":     e.Timeout.Milliseconds(),
+				"agent_id":       e.AgentID,
 			}})
 		}
 	case agent.HandoffEvent:

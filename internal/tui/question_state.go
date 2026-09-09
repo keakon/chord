@@ -11,11 +11,14 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-// QuestionRequest is sent from the Question tool to the TUI via a channel.
 type QuestionRequest struct {
 	Questions  []tools.QuestionItem
 	Timeout    time.Duration       // if > 0, auto-cancel after this duration
 	ResponseCh chan QuestionResult // in-process only; request-scoped reply channel
+	// AgentID is the asking agent's instance id ("main" for the main agent),
+	// carried through from QuestionRequestEvent so the TUI can switch focus
+	// to the agent whose question needs an answer.
+	AgentID string
 }
 
 // QuestionResult is the TUI's response sent back to the blocking tool caller.

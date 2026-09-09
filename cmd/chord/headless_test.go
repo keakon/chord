@@ -1827,6 +1827,7 @@ func TestHeadlessConfirmRequestEventPayload(t *testing.T) {
 		AlreadyAllowed:      []string{"d.go"},
 		NeedsApprovalRules:  []string{"ask Shell(rm*)"},
 		AlreadyAllowedRules: []string{"allow Shell(ls*)"},
+		AgentID:             "main-1",
 	}
 
 	envs := filterHeadlessEvent(ev, state)
@@ -1855,6 +1856,9 @@ func TestHeadlessConfirmRequestEventPayload(t *testing.T) {
 	if payload["request_id"] != "req-1" {
 		t.Errorf("request_id = %v, want req-1", payload["request_id"])
 	}
+	if payload["agent_id"] != "main-1" {
+		t.Errorf("agent_id = %v, want main-1", payload["agent_id"])
+	}
 	if payload["timeout_ms"] != float64(30000) {
 		t.Errorf("timeout_ms = %v, want 30000", payload["timeout_ms"])
 	}
@@ -1874,6 +1878,9 @@ func TestHeadlessConfirmRequestEventPayload(t *testing.T) {
 	}
 	if pc.ToolName != "Shell" {
 		t.Errorf("pendingConfirm.ToolName = %q, want Shell", pc.ToolName)
+	}
+	if pc.AgentID != "main-1" {
+		t.Errorf("pendingConfirm.AgentID = %q, want main-1", pc.AgentID)
 	}
 	if !reflect.DeepEqual(pc.NeedsApprovalRules, ev.NeedsApprovalRules) {
 		t.Errorf("pendingConfirm.NeedsApprovalRules = %#v, want %#v", pc.NeedsApprovalRules, ev.NeedsApprovalRules)
@@ -1913,6 +1920,7 @@ func TestHeadlessQuestionRequestEventPayload(t *testing.T) {
 		Multiple:      false,
 		RequestID:     "req-2",
 		Timeout:       60 * time.Second,
+		AgentID:       "worker-1",
 	}
 
 	envs := filterHeadlessEvent(ev, state)
@@ -1947,6 +1955,9 @@ func TestHeadlessQuestionRequestEventPayload(t *testing.T) {
 	if payload["timeout_ms"] != float64(60000) {
 		t.Errorf("timeout_ms = %v, want 60000", payload["timeout_ms"])
 	}
+	if payload["agent_id"] != "worker-1" {
+		t.Errorf("agent_id = %v, want worker-1", payload["agent_id"])
+	}
 
 	state.mu.Lock()
 	pq := state.pendingQuestion
@@ -1957,6 +1968,9 @@ func TestHeadlessQuestionRequestEventPayload(t *testing.T) {
 	}
 	if pq.ToolName != "Question" {
 		t.Errorf("pendingQuestion.ToolName = %q, want Question", pq.ToolName)
+	}
+	if pq.AgentID != "worker-1" {
+		t.Errorf("pendingQuestion.AgentID = %q, want worker-1", pq.AgentID)
 	}
 }
 

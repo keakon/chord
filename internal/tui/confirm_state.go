@@ -43,6 +43,10 @@ type ConfirmRequest struct {
 	NeedsApprovalRules  []string
 	AlreadyAllowedRules []string
 	ForceDenyReason     bool
+	// AgentID is the asking agent's instance id ("main" for the main agent),
+	// carried through from ConfirmRequestEvent so the TUI can switch focus to
+	// the agent whose tool call needs a decision.
+	AgentID string
 }
 
 // ConfirmResult is the user's response to a ConfirmRequest.

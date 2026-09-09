@@ -856,6 +856,11 @@ type ConfirmRequestEvent struct {
 	DoneReport string
 	// ForceDenyReason means the dialog must only allow denial with a non-empty reason.
 	ForceDenyReason bool
+	// AgentID is the instance id of the agent whose tool call triggered the
+	// confirmation, normalized so "main" identifies the main agent. The TUI
+	// switches focus to this agent so the user sees the context the request
+	// originated from before answering.
+	AgentID string
 }
 
 func (ConfirmRequestEvent) agentEvent() {}
@@ -872,6 +877,11 @@ type QuestionRequestEvent struct {
 	Multiple      bool
 	RequestID     string
 	Timeout       time.Duration
+	// AgentID is the instance id of the agent whose question tool call
+	// triggered the request, normalized so "main" identifies the main agent.
+	// The TUI switches focus to this agent so the user sees the context the
+	// question originated from before answering.
+	AgentID string
 }
 
 func (QuestionRequestEvent) agentEvent() {}

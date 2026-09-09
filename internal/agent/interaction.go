@@ -98,6 +98,7 @@ func (a *MainAgent) awaitConfirm(ctx context.Context, toolName, argsJSON string,
 		AlreadyAllowedRules: append([]string(nil), alreadyAllowedRules...),
 		DoneReport:          summaryVal,
 		ForceDenyReason:     forceDenyReason,
+		AgentID:             ownerID,
 	}); err != nil {
 		return ConfirmResponse{}, err
 	}
@@ -154,6 +155,7 @@ func (a *MainAgent) AskQuestions(ctx context.Context, questions []tools.Question
 			Multiple:      q.Multiple,
 			RequestID:     requestID,
 			Timeout:       timeout,
+			AgentID:       ownerID,
 		}); err != nil {
 			a.interaction.unregisterQuestion(requestID)
 			return nil, err

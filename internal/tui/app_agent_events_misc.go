@@ -294,6 +294,7 @@ func injectQuestionRequestFromEvent(evt agent.QuestionRequestEvent) tea.Cmd {
 			Multiple: evt.Multiple,
 		}},
 		Timeout: evt.Timeout,
+		AgentID: evt.AgentID,
 	}
 	return func() tea.Msg {
 		return questionRequestMsg{request: req, requestID: evt.RequestID}

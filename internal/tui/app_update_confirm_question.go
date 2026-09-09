@@ -4,10 +4,29 @@ import (
 	"time"
 
 	tea "github.com/keakon/bubbletea/v2"
+
+	"github.com/keakon/chord/internal/identity"
 )
+
+// focusAgentForRequest orients the viewport to the agent whose confirm or
+// question request is about to open. Only a SubAgent asking arrives here:
+// "main" (and empty, the unset field) keeps the current view, because the main
+// agent is not a separate switchable pane and yanking focus back to it would
+// override the user's own navigation. When the asking agent is already
+// focused, nothing changes.
+func (m *Model) focusAgentForRequest(agentID string) {
+	if agentID == "" || agentID == identity.MainAgentID {
+		return
+	}
+	if agentID == m.focusedAgentIDOrMain() {
+		return
+	}
+	m.setFocusedAgent(agentID)
+}
 
 func (m *Model) handleConfirmRequest(msg confirmRequestMsg) tea.Cmd {
 	m.exitRenderFreeze()
+	m.focusAgentForRequest(msg.request.AgentID)
 	m.confirm = confirmState{
 		request:   &msg.request,
 		requestID: msg.request.RequestID,
@@ -47,6 +66,7 @@ func (m *Model) handleConfirmTimeoutTick() tea.Cmd {
 
 func (m *Model) handleQuestionRequest(msg questionRequestMsg) tea.Cmd {
 	m.exitRenderFreeze()
+	m.focusAgentForRequest(msg.request.AgentID)
 	ei := newQuestionTextarea(m.width)
 	m.question = questionState{
 		request:    &msg.request,
