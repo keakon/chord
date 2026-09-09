@@ -335,3 +335,118 @@ func TestAgentResponseExpiresAndOrphansChangedSourceAttempt(t *testing.T) {
 		})
 	}
 }
+
+// requestResponseAssertsRejectedAndUndelivered is a shared tail for the
+// rejection tests below: the ledger entry must stay in its given state and
+// nothing may be delivered to the source worker.
+func requestResponseAssertsRejectedAndUndelivered(t *testing.T, a *MainAgent, sub *SubAgent, correlationID, wantState string) {
+	t.Helper()
+	a.subs.mu.RLock()
+	state := a.subs.agentRequests[correlationID].State
+	a.subs.mu.RUnlock()
+	if state != wantState {
+		t.Fatalf("request state = %q, want %q", state, wantState)
+	}
+	select {
+	case delivered := <-sub.inputCh:
+		t.Fatalf("rejected response was delivered to the worker: %#v", delivered)
+	default:
+	}
+}
+
+// TestAgentResponseRejectsUnknownOrWrongTargetAndStaysPending pins the
+// targeted-response rejection branches for a correlation id with no ledger
+// record and for a record whose source task is not the requested target. Both
+// must reject before any delivery and leave the request pending.
+func TestAgentResponseRejectsUnknownOrWrongTargetAndStaysPending(t *testing.T) {
+	a, sub, request := createMainOwnedTestRequest(t)
+	// No ledger record at all.
+	if _, err := a.NotifySubAgentMessage(context.Background(), tools.AgentResponseRequest{
+		TargetTaskID: sub.taskID, CorrelationID: "corr-999999", Message: "answer",
+	}); err == nil || !strings.Contains(err.Error(), "unknown pending request") {
+		t.Fatalf("unknown correlation error = %v, want unknown pending request", err)
+	}
+	requestResponseAssertsRejectedAndUndelivered(t, a, sub, request.CorrelationID, "pending")
+	// The record exists, but the caller answers under a different target task.
+	if _, err := a.NotifySubAgentMessage(context.Background(), tools.AgentResponseRequest{
+		TargetTaskID: sub.taskID + "-other", CorrelationID: request.CorrelationID, Message: "answer",
+	}); err == nil || !strings.Contains(err.Error(), "unknown pending request") {
+		t.Fatalf("wrong target error = %v, want unknown pending request", err)
+	}
+	requestResponseAssertsRejectedAndUndelivered(t, a, sub, request.CorrelationID, "pending")
+}
+
+// TestAgentResponseRejectsNonOwnerCaller pins the ownership branch: only the
+// agent the request is addressed to may answer it. A caller that is neither
+// main nor the addressed owner must be rejected before any delivery and must
+// not mutate the ledger.
+func TestAgentResponseRejectsNonOwnerCaller(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	configureNestedDelegationTestRuntime(a, 2)
+	// The source worker belongs to an owner agent task.
+	source := newControllableTestSubAgent(t, a, "task-source-owned")
+	owner := newControllableTestSubAgent(t, a, "task-owner-request")
+	a.subs.mu.Lock()
+	if rec := a.subs.taskRecords[source.taskID]; rec != nil {
+		rec.OwnerAgentID = owner.instanceID
+		rec.OwnerTaskID = owner.taskID
+	}
+	if rec := a.subs.taskRecords[owner.taskID]; rec != nil {
+		rec.State = string(SubAgentStateRunning)
+	}
+	a.subs.mu.Unlock()
+	request, err := a.createAgentRequest(source, tools.AgentRequestPayload{Reason: "choose an API"})
+	if err != nil {
+		t.Fatalf("createAgentRequest: %v", err)
+	}
+	if request.TargetTaskID != owner.taskID {
+		t.Fatalf("request target = %q, want owner task %q", request.TargetTaskID, owner.taskID)
+	}
+	// An unrelated live worker tries to answer the request addressed to owner.
+	intruder := newControllableTestSubAgent(t, a, "task-intruder")
+	ctx := tools.WithTaskID(tools.WithAgentID(context.Background(), intruder.instanceID), intruder.taskID)
+	_, err = a.NotifySubAgentMessage(ctx, tools.AgentResponseRequest{
+		TargetTaskID: source.taskID, CorrelationID: request.CorrelationID, Message: "answer",
+	})
+	if err == nil || !strings.Contains(err.Error(), "not owned by caller") {
+		t.Fatalf("non-owner response error = %v, want not owned by caller", err)
+	}
+	requestResponseAssertsRejectedAndUndelivered(t, a, source, request.CorrelationID, "pending")
+}
+
+// TestAgentResponseRejectsStaleOwnerAttempt pins the owner-attempt branch of a
+// request addressed to a non-main owner: once the owner task moves to a newer
+// attempt, an answer to the stale request is orphaned instead of delivered.
+func TestAgentResponseRejectsStaleOwnerAttempt(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	configureNestedDelegationTestRuntime(a, 2)
+	source := newControllableTestSubAgent(t, a, "task-source-owner-attempt")
+	owner := newControllableTestSubAgent(t, a, "task-owner-attempt")
+	a.subs.mu.Lock()
+	if rec := a.subs.taskRecords[source.taskID]; rec != nil {
+		rec.OwnerAgentID = owner.instanceID
+		rec.OwnerTaskID = owner.taskID
+	}
+	if rec := a.subs.taskRecords[owner.taskID]; rec != nil {
+		rec.State = string(SubAgentStateRunning)
+	}
+	a.subs.mu.Unlock()
+	request, err := a.createAgentRequest(source, tools.AgentRequestPayload{Reason: "choose an API"})
+	if err != nil {
+		t.Fatalf("createAgentRequest: %v", err)
+	}
+	// The addressed owner moves to a fresh attempt before answering.
+	a.subs.mu.Lock()
+	if rec := a.subs.taskRecords[owner.taskID]; rec != nil {
+		rec.Attempt++
+	}
+	a.subs.mu.Unlock()
+	ctx := tools.WithTaskID(tools.WithAgentID(context.Background(), owner.instanceID), owner.taskID)
+	_, err = a.NotifySubAgentMessage(ctx, tools.AgentResponseRequest{
+		TargetTaskID: source.taskID, CorrelationID: request.CorrelationID, Message: "answer",
+	})
+	if err == nil || !strings.Contains(err.Error(), "owner attempt is no longer current") {
+		t.Fatalf("stale owner attempt error = %v, want owner attempt rejection", err)
+	}
+	requestResponseAssertsRejectedAndUndelivered(t, a, source, request.CorrelationID, "orphaned")
+}

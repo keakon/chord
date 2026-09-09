@@ -458,6 +458,16 @@ func (a *MainAgent) handleToolResult(evt Event) {
 	toolBaseDir := a.toolExecutionPipeline().effectiveToolBaseDir()
 	a.applyPatchRetry.observeResult(payload.Name, payload.ArgsJSON, toolBaseDir, payload.Error)
 	contextResult = appendEditRetryAdvice(&a.editMatchFailStreak, contextResult, payload.Name, payload.ArgsJSON, toolBaseDir, payload.Error, isError)
+	// Bounded stop-loss for the notify response-protocol error family: the
+	// second consecutive failure appends a reinforced corrective note, and the
+	// third flags the turn to pause at the batch closeout (see
+	// notify_protocol_guard.go). The model-visible context result changes, the
+	// display result stays untouched, and every tool error keeps its own
+	// terminal text — a response is never silently downgraded into a plain
+	// notification.
+	if note, _ := a.observeNotifyProtocolFailure(payload.Name, payload.ArgsJSON, payload.Error); note != "" {
+		contextResult = appendModelContextNote(contextResult, note)
+	}
 
 	if payload.Name == tools.NameHandoff && payload.Error == nil {
 		var pcData struct {
@@ -725,6 +735,15 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		}
 
 		if a.turn == nil {
+			return
+		}
+
+		// Repeated notify response-protocol failures pause the automatic retry
+		// at the tool-batch closeout: instead of starting the next LLM round,
+		// end the turn and ask the user to correct the intended notify. The
+		// flag is only set by observeNotifyProtocolFailure on the third
+		// consecutive failure, so a single isolated error never reaches here.
+		if a.consumeNotifyProtocolPause() {
 			return
 		}
 

@@ -112,6 +112,7 @@ func (a *MainAgent) commitTerminalTaskFrom(sub *SubAgent, from, state SubAgentSt
 
 	durable := false
 	var persistErr error
+	journalRollbackOffset := int64(-1)
 	if existing != nil {
 		if !taskSettlementContentEqual(existing, settlement) {
 			return nil, false, fmt.Errorf("conflicting terminal settlement for task %s attempt %d", taskID, previous.Attempt)
@@ -119,12 +120,33 @@ func (a *MainAgent) commitTerminalTaskFrom(sub *SubAgent, from, state SubAgentSt
 		settlement = existing
 		durable = previous.SettlementDurable
 		if !durable {
-			persistErr = appendTaskSettlement(a.sessionDir, settlement)
+			journalRollbackOffset, persistErr = appendTaskSettlementWithRollbackOffset(a.sessionDir, settlement)
 			durable = persistErr == nil
 		}
 	} else {
-		persistErr = appendTaskSettlement(a.sessionDir, settlement)
+		journalRollbackOffset, persistErr = appendTaskSettlementWithRollbackOffset(a.sessionDir, settlement)
 		durable = persistErr == nil
+	}
+
+	// The settlement journal append is durable before the runtime transitions.
+	// A guarded commit that then loses (a concurrent reactivation already moved
+	// the runtime out of the expected state, or the attempt changed under us)
+	// must roll that append back, exactly like the detached guarded path below;
+	// otherwise the journal carries a terminal outcome the runtime never
+	// accepted and a restore would read a phantom Cancelled. committed turns
+	// true only once the record itself carries the settlement, so a durability
+	// degradation of the registry write never triggers the rollback.
+	committed := false
+	defer func() {
+		if !committed {
+			rollbackAppendedSettlement(a.sessionDir, taskID, journalRollbackOffset, persistErr)
+		}
+	}()
+	if hook := a.terminalCommitGuardHook; hook != nil {
+		// Test-only deterministic interleaving point: the settlement journal
+		// append has landed and the runtime compare-and-transition has not run
+		// yet, which is exactly where a concurrent reactivation slips in.
+		hook()
 	}
 
 	stateChanged := false
@@ -165,6 +187,12 @@ func (a *MainAgent) commitTerminalTaskFrom(sub *SubAgent, from, state SubAgentSt
 	a.subs.notifyTaskChangeLocked()
 	a.subs.mu.Unlock()
 
+	// The terminal state is committed now: the runtime transitioned, the
+	// settlement is in the journal, and the in-memory record carries it. A
+	// registry write failure below must not roll the settlement back — it only
+	// degrades durability (persistErr is returned so callers can tell a real
+	// refusal from a committed-but-degraded outcome).
+	committed = true
 	if err := a.persistTaskRegistry(); err != nil && persistErr == nil {
 		persistErr = err
 	}
@@ -172,6 +200,43 @@ func (a *MainAgent) commitTerminalTaskFrom(sub *SubAgent, from, state SubAgentSt
 		log.Warnf("task settlement durability degraded task_id=%v attempt=%v error=%v", taskID, settlement.Attempt, persistErr)
 	}
 	return cloneTaskSettlement(settlement), durable, persistErr
+}
+
+// rollbackAppendedSettlement truncates a task-settlement journal append whose
+// guarded terminal commit lost after the append landed. The live and detached
+// guarded commits share the shape: they append/fsync the settlement before the
+// compare-and-transition, so an append whose transition backs off (the runtime
+// left the expected state, the attempt changed, or the record guard failed)
+// must be rolled back or a restore would read a terminal outcome the runtime
+// never accepted. persistErr guards the case where the append itself failed
+// (no line landed, offset is -1) and must not be "rolled back" into earlier
+// rows.
+func rollbackAppendedSettlement(sessionDir, taskID string, journalRollbackOffset int64, persistErr error) {
+	if journalRollbackOffset < 0 || persistErr != nil {
+		return
+	}
+	if err := truncateTaskSettlementJournal(sessionDir, journalRollbackOffset); err != nil {
+		// The journal now carries a settlement the registry never saw; a
+		// later restore reconciles it, but flag the divergence loudly.
+		log.Errorf("failed to roll back guarded task settlement task_id=%v error=%v", taskID, err)
+	}
+}
+
+// taskCommittedToState reports whether the in-memory durable record already
+// carries the given terminal outcome as its settlement, independent of whether
+// the registry write succeeded. commitTerminalTaskFrom commits the runtime and
+// the record before attempting persistTaskRegistry, so a caller that must tell
+// a refused commit apart from a committed-but-durability-degraded one reads the
+// record instead of treating any non-nil error as "nothing was committed".
+func (a *MainAgent) taskCommittedToState(taskID string, state SubAgentState) bool {
+	taskID = strings.TrimSpace(taskID)
+	if a == nil || taskID == "" {
+		return false
+	}
+	a.subs.mu.RLock()
+	rec := cloneDurableTaskRecord(a.subs.taskRecords[taskID])
+	a.subs.mu.RUnlock()
+	return rec != nil && rec.State == string(state) && rec.LatestSettlement != nil
 }
 
 // settleDetachedTerminalTask commits a terminal outcome for a task whose
@@ -263,13 +328,7 @@ func (a *MainAgent) settleDetachedTerminalTaskGuarded(taskID string, state SubAg
 	rec := a.subs.taskRecords[taskID]
 	if rec == nil || (rec.Attempt != 0 && rec.Attempt != attempt) || (guard != nil && !guard(rec)) {
 		a.subs.mu.Unlock()
-		if journalRollbackOffset >= 0 && persistErr == nil {
-			if err := truncateTaskSettlementJournal(a.sessionDir, journalRollbackOffset); err != nil {
-				// The journal now carries a settlement the registry never saw; a
-				// later restore reconciles it, but flag the divergence loudly.
-				log.Errorf("failed to roll back guarded task settlement task_id=%v error=%v", taskID, err)
-			}
-		}
+		rollbackAppendedSettlement(a.sessionDir, taskID, journalRollbackOffset, persistErr)
 		return ""
 	}
 	next := cloneDurableTaskRecord(rec)

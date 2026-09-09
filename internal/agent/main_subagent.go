@@ -678,6 +678,12 @@ func (a *MainAgent) handleAgentNotify(evt Event) {
 		Summary:        msg,
 		Payload:        msg,
 		RequiresAck:    false,
+		// A notify's kind/subtype describe what the worker says about itself;
+		// they are display metadata, never a trusted lifecycle event. Mark the
+		// row report-only so the registry keeps mirroring the notice's text but
+		// never flips the task to completed/blocked/decision_required on a
+		// running worker's say-so (see syncTaskRecordFromMailbox).
+		ReportOnly: true,
 	}
 	a.queueLoopEvent(Event{Type: EventSubAgentMailbox, SourceID: evt.SourceID, Payload: notifyMsg})
 	if strings.TrimSpace(notifyMsg.MessageID) == "" {

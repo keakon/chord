@@ -52,11 +52,27 @@ func (a *MainAgent) syncTaskRecordFromMailbox(msg SubAgentMailboxMessage) {
 	}
 	switch msg.Kind {
 	case SubAgentMailboxKindCompleted:
+		if msg.ReportOnly {
+			// A notify may describe itself as "completed", but a running
+			// worker's self-report is display text, not a terminal event: only
+			// the genuine completion mailbox (built by handleAgentDone from a
+			// real Complete) may move the record to completed. Honoring the
+			// forged kind here would let join skip a still-running child and
+			// let a later restore synthesize a settlement for work that never
+			// finished.
+			break
+		}
 		// The attempt gate above already returned on a mismatched non-zero
 		// attempt, so the message is authoritative for this record here.
 		rec.State = string(SubAgentStateCompleted)
 		rec.ResumePolicy = taskResumePolicyNotify
 	case SubAgentMailboxKindBlocked, SubAgentMailboxKindDecisionRequired:
+		if msg.ReportOnly {
+			// Same report-only rule: kind=blocked/decision_required on a
+			// notify is the worker describing itself, not the escalation state
+			// change handleEscalate records.
+			break
+		}
 		rec.State = string(SubAgentStateWaitingMain)
 		rec.ResumePolicy = taskResumePolicyNotify
 	case SubAgentMailboxKindProgress:

@@ -559,3 +559,126 @@ func TestTerminalStatusAfterCommitMirrorsSettledRecord(t *testing.T) {
 		t.Fatalf("status after success = %v, want the requested state", got)
 	}
 }
+
+// barrierTaskRegistryWrite makes the next durable task-registry writes fail by
+// replacing the tasks.json path with a directory, then returns a restore func.
+func barrierTaskRegistryWrite(t *testing.T, sessionDir string) (restore func()) {
+	t.Helper()
+	path := durableTaskRegistryPath(sessionDir)
+	if path == "" {
+		t.Fatal("empty task registry path")
+	}
+	saved := ""
+	if _, err := os.Stat(path); err == nil {
+		saved = path + ".saved"
+		if err := os.Rename(path, saved); err != nil {
+			t.Fatalf("move registry aside: %v", err)
+		}
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("stat registry: %v", err)
+	}
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatalf("mkdir registry barrier: %v", err)
+	}
+	return func() {
+		if err := os.Remove(path); err != nil {
+			t.Fatalf("remove registry barrier: %v", err)
+		}
+		if saved != "" {
+			if err := os.Rename(saved, path); err != nil {
+				t.Fatalf("restore registry: %v", err)
+			}
+		}
+	}
+}
+
+// TestLiveGuardedCommitRollsBackJournalWhenReactivationWins pins the S3 fix: a
+// live guarded terminal commit appends/fsyncs the settlement journal before
+// its compare-and-transition, and a reactivation that slips into that window
+// (moving the runtime back to Running) makes the CAS refuse. The refused
+// append must be rolled back, exactly like the detached guarded path; a
+// phantom Cancelled left on disk would let a restore read a terminal state the
+// runtime never accepted and would make a later genuine completion of the same
+// attempt conflict with it.
+func TestLiveGuardedCommitRollsBackJournalWhenReactivationWins(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "task-live-cas-rollback")
+	sub.setState(SubAgentStateWaitingMain, "needs main reply")
+	a.noteSubAgentStateTransition(sub, SubAgentStateWaitingMain)
+	a.subs.mu.Lock()
+	if rec := a.subs.taskRecords[sub.taskID]; rec != nil {
+		rec.State = string(SubAgentStateWaitingMain)
+	}
+	a.subs.mu.Unlock()
+
+	// The owner reply lands between the journal append and the guarded CAS.
+	a.terminalCommitGuardHook = func() {
+		a.terminalCommitGuardHook = nil
+		sub.setState(SubAgentStateRunning, "owner resumed the worker")
+	}
+	_, _, err := a.commitTerminalTaskFrom(sub, SubAgentStateWaitingMain, SubAgentStateCancelled, "expired", "expired", nil)
+	if err == nil || !strings.Contains(err.Error(), "refused") {
+		t.Fatalf("guarded terminal commit error = %v, want the reactivation to refuse the expiry", err)
+	}
+	settlements, err := loadTaskSettlements(a.sessionDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(settlements) != 0 {
+		t.Fatalf("settlement journal after refused live guard = %#v, want the Cancelled append rolled back", settlements)
+	}
+	if rec := a.taskRecordByTaskID(sub.taskID); rec == nil || rec.State != string(SubAgentStateWaitingMain) {
+		t.Fatalf("record after refused live guard = %#v, want untouched waiting_main", rec)
+	}
+	// A later genuine completion of the same attempt must not hit a
+	// conflicting phantom Cancelled left by the refused expiry.
+	if _, _, err := a.commitTerminalTask(sub, SubAgentStateCompleted, "done later", "task completed", nil); err != nil {
+		t.Fatalf("completion after rolled-back guard: %v", err)
+	}
+	settlements, err = loadTaskSettlements(a.sessionDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := settlements[taskAttemptKey{TaskID: sub.taskID, Attempt: 1}]; got == nil || got.Outcome != string(SubAgentStateCompleted) {
+		t.Fatalf("settlement after genuine completion = %#v, want attempt 1 completed", settlements)
+	}
+}
+
+// TestLiveExpirySettleStaysCommittedWhenRegistryWriteDegraded pins the S4 fix:
+// commitTerminalTaskFrom commits the journal, the runtime, and the in-memory
+// record before it attempts the durable task-registry write, so a tasks.json
+// write failure is a durability degradation, not a refused commit. The live
+// WaitingMain expiry must still report the settle as committed and continue its
+// closeout; treating the error as "not committed" withdrew the prepared alert
+// and skipped the requests/children/external-event closeout of a task that was
+// already Cancelled.
+func TestLiveExpirySettleStaysCommittedWhenRegistryWriteDegraded(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "task-live-expiry-degraded")
+	sub.setState(SubAgentStateWaitingMain, "needs main reply")
+	a.noteSubAgentStateTransition(sub, SubAgentStateWaitingMain)
+	a.subs.mu.Lock()
+	if rec := a.subs.taskRecords[sub.taskID]; rec != nil {
+		rec.State = string(SubAgentStateWaitingMain)
+	}
+	a.subs.mu.Unlock()
+	reason := waitingMainExpiryClosedReasonPrefix + " (no reply within the wait limit)"
+
+	restore := barrierTaskRegistryWrite(t, a.sessionDir)
+	committed := a.settleLiveWaitingMainExpiry(sub, reason)
+	restore()
+	if !committed {
+		t.Fatal("live expiry backed off although the terminal state committed (a degraded registry write is not a refused commit)")
+	}
+	rec := a.taskRecordByTaskID(sub.taskID)
+	if rec == nil || rec.State != string(SubAgentStateCancelled) || rec.LatestSettlement == nil {
+		t.Fatalf("record after degraded live expiry = %#v, want committed cancelled settlement", rec)
+	}
+	settlements, err := loadTaskSettlements(a.sessionDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := settlements[taskAttemptKey{TaskID: sub.taskID, Attempt: 1}]; got == nil || got.Outcome != string(SubAgentStateCancelled) {
+		t.Fatalf("journal after degraded live expiry = %#v, want the cancelled settlement", settlements)
+	}
+}

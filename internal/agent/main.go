@@ -132,6 +132,15 @@ type Turn struct {
 	// empty "{}" for tools with required parameters (output truncation).
 	// When this reaches maxMalformedToolCalls the turn is aborted.
 	MalformedCount int
+	// notifyProtocolStreak counts consecutive notify response-protocol
+	// failures (missing/unknown/mismatched response correlation) per target
+	// task in this turn. The second failure appends corrective guidance; the
+	// third pauses the turn's automatic retry for an explicit correction (see
+	// notify_protocol_guard.go). Event-loop-goroutine only, like
+	// MalformedCount; a fresh turn starts empty (turn/session reset).
+	notifyProtocolStreak    map[string]int
+	notifyProtocolPause     bool
+	notifyProtocolPauseTask string
 	// BarrierFailureRounds tracks consecutive LLM rounds in this turn whose
 	// tool dispatch was blocked by an intent-barrier persistence failure. The
 	// first failure is fed back to the model as not_started tool errors; when
@@ -810,6 +819,7 @@ type MainAgent struct {
 	agentRequestPersistMu    sync.Mutex
 	taskRegistryPersistHook  func()                   // test-only barrier after snapshot, before durable write
 	rehydrateCommitHook      func()                   // test-only barrier between rehydrate attempt decision and final commit
+	terminalCommitGuardHook  func()                   // test-only barrier between settlement journal append and runtime CAS
 	sem                      chan struct{}            // compatibility view of governor normal runtime slots
 	fileTrack                *filelock.FileTracker    // file write conflict detection
 	fileBackups              *fileBackupManager       // session-scoped risky write backups

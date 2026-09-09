@@ -243,14 +243,18 @@ func (s *SubAgent) enqueuePromotedToolResult(result *toolResult) {
 // threshold on its own, and without mid-execution refreshes the worker would
 // look stalled while the tool is genuinely progressing. The interval is a
 // parameter so the periodic refresh is testable at a short interval;
-// production callers pass subAgentToolHeartbeatInterval.
+// production callers pass subAgentToolHeartbeatInterval. stop blocks until the
+// heartbeat goroutine has fully exited, so a caller can assert on the
+// activity clock afterwards without racing a final in-flight refresh.
 func (s *SubAgent) runActivityHeartbeat(ctx context.Context, interval time.Duration) (stop func()) {
 	if s == nil {
 		return func() {}
 	}
 	s.markActivity()
 	done := make(chan struct{})
+	exited := make(chan struct{})
 	go func() {
+		defer close(exited)
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
@@ -264,7 +268,10 @@ func (s *SubAgent) runActivityHeartbeat(ctx context.Context, interval time.Durat
 			}
 		}
 	}()
-	return func() { close(done) }
+	return func() {
+		close(done)
+		<-exited
+	}
 }
 
 // handleToolResult processes a single tool execution result. When all pending

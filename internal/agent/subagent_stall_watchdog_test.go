@@ -255,13 +255,17 @@ func TestSubAgentToolHeartbeatRefreshesWhileRunningAndStops(t *testing.T) {
 	sub := &SubAgent{}
 	stop := sub.runActivityHeartbeat(context.Background(), 10*time.Millisecond)
 	time.Sleep(45 * time.Millisecond)
-	last := sub.StateChangedAt()
-	if elapsed := time.Since(sub.runtimeState.stateChangedAt); elapsed > 35*time.Millisecond {
+	// Read the activity clock through the locked accessor: the heartbeat
+	// goroutine writes it under the runtime state lock.
+	if elapsed := time.Since(sub.StateChangedAt()); elapsed > 35*time.Millisecond {
 		t.Fatalf("activity heartbeat was not refreshed periodically while running: last refresh %v ago", elapsed)
 	}
+	// stop joins the heartbeat goroutine, so no final in-flight refresh can
+	// land after it returns.
 	stop()
+	baseline := sub.StateChangedAt()
 	time.Sleep(25 * time.Millisecond)
-	if !sub.StateChangedAt().Equal(last) {
+	if !sub.StateChangedAt().Equal(baseline) {
 		t.Fatalf("activity heartbeat kept refreshing after stop")
 	}
 }
@@ -328,7 +332,7 @@ func TestStallSweepHoldsQuietWorkersWhileUserInteractionPending(t *testing.T) {
 			if got := countRiskAlertsForTask(a, sub.taskID); got != 0 {
 				t.Fatalf("stall risk_alert count = %d, want 0 while a user dialog is pending", got)
 			}
-			if time.Since(sub.runtimeState.stateChangedAt) > time.Minute {
+			if time.Since(sub.StateChangedAt()) > time.Minute {
 				t.Fatalf("user wait did not refresh the worker heartbeat")
 			}
 

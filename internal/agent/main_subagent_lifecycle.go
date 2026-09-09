@@ -690,7 +690,12 @@ func (a *MainAgent) dropSettledTaskQueuedInput(sub *SubAgent, state SubAgentStat
 // the manual-delivery and parking paths, and commitTerminalTaskFrom's
 // compare-and-transition serializes against every other reactivation that only
 // takes the runtime's state lock — so a freshly resumed attempt is never
-// cancelled as expired. Reports whether the expiry committed.
+// cancelled as expired. Reports whether the expiry committed. A returned error
+// alone does not mean the commit was refused: commitTerminalTaskFrom reports a
+// durability degradation (the registry write failed after the terminal state
+// was committed) as an error too, so the caller checks the committed record to
+// tell the two apart and still runs the expiry closeout for a task that is
+// already Cancelled.
 func (a *MainAgent) settleLiveWaitingMainExpiry(sub *SubAgent, reason string) bool {
 	if a == nil || sub == nil {
 		return false
@@ -700,8 +705,12 @@ func (a *MainAgent) settleLiveWaitingMainExpiry(sub *SubAgent, reason string) bo
 	if sub.State() != SubAgentStateWaitingMain {
 		return false
 	}
-	_, _, err := a.commitTerminalTaskFrom(sub, SubAgentStateWaitingMain, SubAgentStateCancelled, reason, reason, nil)
-	return err == nil
+	if _, _, err := a.commitTerminalTaskFrom(sub, SubAgentStateWaitingMain, SubAgentStateCancelled, reason, reason, nil); err != nil {
+		if !a.taskCommittedToState(sub.taskID, SubAgentStateCancelled) {
+			return false
+		}
+	}
+	return true
 }
 
 // settleExpiredParkedWaitingMainTask runs the guarded expiry settlement for
@@ -760,6 +769,12 @@ func (a *MainAgent) buildWaitingMainExpiryAlertMailbox(sub *SubAgent, record *Du
 		"SubAgent task was abandoned because its wait for a main-agent reply expired and the work was not completed.\n- task_id: %s\n- agent_id: %s\n- required_action: re-delegate the work; the pending agent request for this task is now expired, so a later reply to it will be rejected.",
 		mailbox.TaskID, mailbox.AgentID,
 	)
+	// No mailbox.jsonl line has been appended for this alert yet. The zero
+	// value would otherwise let a settle backoff roll the whole log back to
+	// byte zero (see rollbackSubAgentMailboxMessage, which only guards offset
+	// < 0), wiping earlier rows; keep -1 until persistSubAgentMailboxMessage
+	// returns a trusted start offset.
+	mailbox.rollbackAppendOffset = -1
 	return mailbox
 }
 

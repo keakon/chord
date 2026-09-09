@@ -100,7 +100,15 @@ type SubAgentMailboxMessage struct {
 	MessagePayload json.RawMessage         `json:"message_payload,omitempty"`
 	ArtifactRefs   []tools.ArtifactRef     `json:"artifact_refs,omitempty"`
 	Durability     AgentMessageDurability  `json:"durability,omitempty"`
-	persistPending bool                    `json:"-"`
+	// ReportOnly marks a mailbox row whose kind/subtype are user-supplied
+	// display text (a worker's notify), not a trusted lifecycle signal. The
+	// kind is preserved for card badges, retention, and restore replay, but it
+	// must never drive task-record state transitions (see
+	// syncTaskRecordFromMailbox): only rows produced by genuine lifecycle
+	// events (completion, failure, escalation) may flip a task to terminal or
+	// waiting state. Persisted so a replay keeps the distinction.
+	ReportOnly     bool `json:"report_only,omitempty"`
+	persistPending bool `json:"-"`
 	// rollbackAppendOffset records where the last persist of this message
 	// appended its mailbox.jsonl line (-1 when none or unknown), so a guarded
 	// settlement that decides the message must not survive can roll the line
