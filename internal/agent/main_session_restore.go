@@ -709,10 +709,12 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	a.resetLLMModelRun()
 	a.ctxMgr.RestoreMessages(append([]message.Message(nil), loaded.Messages...))
 	a.mailboxDeliveryPaused.Store(true)
+	a.subAgentMailboxIDsMu.Lock()
 	a.pendingSubAgentMailboxes = nil
 	a.activeSubAgentMailboxes = nil
 	a.activeSubAgentMailbox = nil
 	a.activeSubAgentMailboxAck = false
+	a.subAgentMailboxIDsMu.Unlock()
 	restoredMessages := a.ctxMgr.Snapshot()
 	a.resetRuntimeEvidenceFromMessages(restoredMessages)
 	a.fileTrack = filelock.NewFileTracker()
@@ -850,8 +852,8 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 			a.orchestrationMetrics.trackParked(rec.TaskID, rec.UpdatedAt)
 		}
 	}
-	a.subAgentInbox = newSubAgentInbox()
 	a.subAgentMailboxIDsMu.Lock()
+	a.subAgentInbox = newSubAgentInbox()
 	a.subAgentMailboxIDs = make(map[string]struct{}, len(loaded.MailboxMessages))
 	a.subAgentMailboxConsumed = make(map[string]struct{})
 	for _, msg := range loaded.MailboxMessages {
@@ -863,8 +865,21 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 		}
 	}
 	a.subAgentMailboxIDsMu.Unlock()
+	// A mailbox message whose delivery already reached the restored main
+	// transcript is not replayed. The message is appended to the main
+	// conversation at request dispatch (buildTurnOverlayMessages) but its
+	// consumed ack is only written at turn teardown, so a process that dies
+	// inside that window would otherwise re-deliver a report the model has
+	// already seen and acted on; the replayed copy would make the main agent
+	// act on the same report a second time. The at-least-once delivery window
+	// therefore ends at the durable transcript row, which is why restore
+	// treats an unconsumed-but-appended message as already delivered.
+	deliveredMessageIDs := conversationMailboxIDs(restoredMessages)
 	for _, msg := range loaded.MailboxMessages {
 		if msg.Consumed {
+			continue
+		}
+		if _, delivered := deliveredMessageIDs[strings.TrimSpace(msg.MessageID)]; delivered {
 			continue
 		}
 		a.enqueueRestoredMailboxMessage(msg)

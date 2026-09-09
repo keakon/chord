@@ -1071,6 +1071,120 @@ func TestRestoreSessionDeduplicatesPersistedMailboxMessageID(t *testing.T) {
 	}
 }
 
+// TestRestoreSkipsMailboxMessageWithDurableTranscriptRow pins the at-least-once
+// window fix for phenomenon two: a mailbox message is appended to the main
+// transcript at request dispatch, but its consumed ack is written only at turn
+// teardown. A process that dies inside that window leaves the message durable
+// in the mailbox log and unconsumed; restoring must not re-deliver it, because
+// the model has already seen (and may have acted on) its durable transcript
+// row. A not-yet-delivered message (no transcript row) must still replay.
+func TestRestoreSkipsMailboxMessageWithDurableTranscriptRow(t *testing.T) {
+	projectRoot := t.TempDir()
+	sessionDir := testProjectSessionDir(t, projectRoot, "mailbox-appended-no-ack")
+	if err := os.MkdirAll(filepath.Join(sessionDir, "subagents"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(subagents): %v", err)
+	}
+	rm := recovery.NewRecoveryManager(sessionDir)
+	delivered := []message.Message{
+		{Role: "user", Content: "hello"},
+		{Role: "assistant", Content: "Working on it"},
+		{
+			Role:    "user",
+			Kind:    message.KindSubAgentMailbox,
+			Content: "<system-reminder>\nSubAgent mailbox update for agent-1-1\n</system-reminder>",
+			Mailbox: &message.MailboxMetadata{
+				MessageID:     "agent-1-1",
+				AgentID:       "agent-1",
+				TaskID:        "restored",
+				Kind:          string(SubAgentMailboxKindDecisionRequired),
+				LifecycleKind: string(SubAgentMailboxKindDecisionRequired),
+				MessageType:   string(AgentMessageTypeRequest),
+			},
+		},
+	}
+	for _, msg := range delivered {
+		if err := rm.PersistMessage("main", msg); err != nil {
+			t.Fatalf("PersistMessage(main): %v", err)
+		}
+	}
+	for _, msg := range []message.Message{
+		{Role: "user", Content: "Investigate issue"},
+		{Role: "assistant", Content: "Investigating"},
+	} {
+		if err := rm.PersistMessage("agent-1", msg); err != nil {
+			t.Fatalf("PersistMessage(agent-1): %v", err)
+		}
+	}
+	if err := rm.SaveSnapshot(&recovery.SessionSnapshot{
+		LastInputTokens:        1,
+		LastTotalContextTokens: 2,
+		ActiveAgents: []recovery.AgentSnapshot{{
+			InstanceID:   "agent-1",
+			AgentDefName: "restorer",
+			TaskID:       "restored",
+			TaskDesc:     "Investigate issue",
+		}},
+	}); err != nil {
+		t.Fatalf("SaveSnapshot: %v", err)
+	}
+	f, err := os.Create(filepath.Join(sessionDir, "subagents", "mailbox.jsonl"))
+	if err != nil {
+		t.Fatalf("Create(mailbox.jsonl): %v", err)
+	}
+	enc := json.NewEncoder(f)
+	for _, msg := range []SubAgentMailboxMessage{
+		{
+			MessageID:   "agent-1-1",
+			AgentID:     "agent-1",
+			TaskID:      "restored",
+			Kind:        SubAgentMailboxKindDecisionRequired,
+			Priority:    SubAgentMailboxPriorityInterrupt,
+			Summary:     "already delivered, ack never persisted",
+			Payload:     "already delivered, ack never persisted",
+			RequiresAck: true,
+			CreatedAt:   time.Now(),
+		},
+		{
+			MessageID:   "agent-1-2",
+			AgentID:     "agent-1",
+			TaskID:      "restored",
+			Kind:        SubAgentMailboxKindDecisionRequired,
+			Priority:    SubAgentMailboxPriorityInterrupt,
+			Summary:     "never delivered before the crash",
+			Payload:     "never delivered before the crash",
+			RequiresAck: true,
+			CreatedAt:   time.Now(),
+		},
+	} {
+		if err := enc.Encode(msg); err != nil {
+			_ = f.Close()
+			t.Fatalf("Encode(mailbox): %v", err)
+		}
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("Close(mailbox): %v", err)
+	}
+	rm.Close()
+
+	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
+	if err := a.RestoreSessionAtStartup(); err != nil {
+		t.Fatalf("RestoreSessionAtStartup: %v", err)
+	}
+	queued := append([]SubAgentMailboxMessage{}, a.subAgentInbox.urgent...)
+	queued = append(queued, a.subAgentInbox.normal...)
+	if len(queued) != 1 || queued[0].MessageID != "agent-1-2" {
+		t.Fatalf("restored main inbox = %#v, want only agent-1-2 (agent-1-1 already durable in the transcript)", queued)
+	}
+	if _, ok := a.subAgentInbox.progress["agent-1"]; ok {
+		t.Fatalf("restored progress map unexpectedly holds a message: %#v", a.subAgentInbox.progress)
+	}
+	// Nothing was consumed by the restore itself: the durable messages stay
+	// pending delivery, exactly as before the fix.
+	if _, err := os.Stat(filepath.Join(sessionDir, "subagents", "mailbox-acks.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("restore wrote mailbox acks: %v", err)
+	}
+}
+
 func TestRestoreSessionAtStartupAdvancesSubAgentMailboxSeq(t *testing.T) {
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "mailbox-seq")
