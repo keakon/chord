@@ -392,20 +392,27 @@ func (m *Manager) startServer(ctx context.Context, key clientKey, srvCfg config.
 	client, err := newClient(ctx, key.name, srvCfg, key.root, m.projectRoot, false)
 	if err != nil {
 		log.Errorf("lsp: create client name=%v root=%v error=%v", key.name, key.root, err)
-		m.startFailMu.Lock()
-		m.startFail[key] = err.Error()
-		m.startFailMu.Unlock()
-		m.notifySidebarChanged()
+		// A Stop that cancelled this launch's start era is the cause, not the
+		// server: a stopped manager must not keep a start failure for a server
+		// it never started. Same gate as admitStartedClientLocked.
+		if entry.ctx.Err() == nil {
+			m.startFailMu.Lock()
+			m.startFail[key] = err.Error()
+			m.startFailMu.Unlock()
+			m.notifySidebarChanged()
+		}
 		return
 	}
 	client.SetOnDiagnostics(m.onDiagnostics(key))
 	if err := client.Initialize(ctx); err != nil {
 		log.Errorf("lsp: initialize client name=%v root=%v error=%v", key.name, key.root, err)
 		_ = client.Close(ctx)
-		m.startFailMu.Lock()
-		m.startFail[key] = err.Error()
-		m.startFailMu.Unlock()
-		m.notifySidebarChanged()
+		if entry.ctx.Err() == nil {
+			m.startFailMu.Lock()
+			m.startFail[key] = err.Error()
+			m.startFailMu.Unlock()
+			m.notifySidebarChanged()
+		}
 		return
 	}
 	// Wait for the server to be ready before exposing it (sidebar green + ClientForPath).

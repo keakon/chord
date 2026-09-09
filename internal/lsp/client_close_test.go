@@ -824,6 +824,63 @@ func TestManagerStopPreventsInFlightStartFromRegistering(t *testing.T) {
 	}
 }
 
+// TestManagerStopSuppressesStartFailFromStoppedLaunch pins that a launch whose
+// start era was cancelled by Stop records no start failure and sends no
+// sidebar update: the error belongs to the stop, not to the server, and a
+// stopped manager would otherwise keep a misleading failure entry until the
+// next start of that server.
+func TestManagerStopSuppressesStartFailFromStoppedLaunch(t *testing.T) {
+	root := t.TempDir()
+	key := clientKey{name: "typescript", root: root}
+	broadcastEvents := make(chan string, 8)
+	mgr := NewManager(&config.Config{
+		LSP: config.LSPConfig{
+			"typescript": {Command: "chord-no-such-typescript-server", FileTypes: []string{".ts"}},
+		},
+	}, root, func(ev string, _ any) {
+		select {
+		case broadcastEvents <- ev:
+		default:
+		}
+	})
+
+	// A Stop cancelled this launch's era before it settled; the nonexistent
+	// server command makes the launch fail fast inside startServer.
+	era, cancelEra := context.WithCancel(context.Background())
+	cancelEra()
+	entry := &startEntry{ctx: era, done: make(chan struct{})}
+	mgr.clientsMu.Lock()
+	mgr.starting[key] = true
+	mgr.launches[key] = entry
+	mgr.clientsMu.Unlock()
+
+	mgr.startServer(context.Background(), key, config.LSPServerConfig{Command: "chord-no-such-typescript-server", FileTypes: []string{".ts"}}, entry)
+
+	mgr.startFailMu.Lock()
+	_, failed := mgr.startFail[key]
+	mgr.startFailMu.Unlock()
+	if failed {
+		t.Fatal("a launch aborted by Stop recorded a start failure in the stopped manager")
+	}
+	mgr.clientsMu.RLock()
+	_, stillStarting := mgr.starting[key]
+	_, stillLaunched := mgr.launches[key]
+	mgr.clientsMu.RUnlock()
+	if stillStarting || stillLaunched {
+		t.Fatal("startServer left its starting/launches markers behind after a stopped launch")
+	}
+	select {
+	case <-entry.done:
+	default:
+		t.Fatal("stopped launch did not close its done channel")
+	}
+	select {
+	case ev := <-broadcastEvents:
+		t.Fatalf("stopped launch broadcast %q to the sidebar", ev)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
 // TestManagerStopConcurrentWithStartSettles drives Stop and Start against the
 // same manager from many goroutines (the idle-unload versus cold-start shape)
 // and then requires the manager to settle with no registered client and no

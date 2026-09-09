@@ -312,7 +312,8 @@ func TestStartDoesNotLaunchForUnmatchedFileType(t *testing.T) {
 }
 
 // waitForLSPStartDone waits until the async Start goroutine for key has
-// finished (the fast-fail path of NewClient clears m.starting).
+// finished. Every return path of startServer clears m.starting in its
+// top-level defer, so the marker disappearing means the launch fully settled.
 func waitForLSPStartDone(t *testing.T, m *Manager, key clientKey) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
