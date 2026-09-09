@@ -189,9 +189,22 @@ func prepareWorkspaceSettingsBounded(name string, cfg config.LSPServerConfig, cw
 	if !isPyrightServer(name, cfg) {
 		return settings
 	}
-	if normalizePythonInterpreterSettings(settings, cwd) || hasPythonVenvSetting(settings) {
+	// A relative interpreter path written in the config (".venv/bin/python")
+	// belongs to the config's own root, not to the workspace root this client
+	// was discovered for. A nested package with its own pyproject.toml would
+	// otherwise reinterpret the path as <nested>/.venv/bin/python, and because
+	// an explicit setting short-circuits discovery, the repository-level
+	// environment the user meant would silently be lost.
+	configRoot := projectRoot
+	if configRoot == "" {
+		configRoot = cwd
+	}
+	if normalizePythonInterpreterSettings(settings, configRoot) || hasPythonVenvSetting(settings) {
 		return settings
 	}
+	// Auto-discovery below is deliberately anchored at the nested workspace
+	// root: a venv inside the nested package is preferred over a repository
+	// one. Only explicit config paths resolve against the config root.
 	pythonPath := discoverPythonInterpreterBounded(cwd, projectRoot)
 	if pythonPath == "" {
 		return settings
@@ -242,23 +255,23 @@ func hasPythonVenvSetting(settings map[string]any) bool {
 	return nonEmptyString(settings["venvPath"]) || nonEmptyString(settings["venv"])
 }
 
-func normalizePythonInterpreterSettings(settings map[string]any, cwd string) bool {
+func normalizePythonInterpreterSettings(settings map[string]any, base string) bool {
 	pythonSettings, _ := settings["python"].(map[string]any)
 	if pythonSettings == nil {
 		return false
 	}
-	normalizePathSetting(pythonSettings, "pythonPath", cwd)
-	normalizePathSetting(pythonSettings, "defaultInterpreterPath", cwd)
-	normalizePathSetting(pythonSettings, "venvPath", cwd)
+	normalizePathSetting(pythonSettings, "pythonPath", base)
+	normalizePathSetting(pythonSettings, "defaultInterpreterPath", base)
+	normalizePathSetting(pythonSettings, "venvPath", base)
 	return nonEmptyString(pythonSettings["pythonPath"]) || nonEmptyString(pythonSettings["defaultInterpreterPath"])
 }
 
-func normalizePathSetting(settings map[string]any, key string, cwd string) bool {
+func normalizePathSetting(settings map[string]any, key string, base string) bool {
 	value, ok := settings[key].(string)
-	if !ok || strings.TrimSpace(value) == "" || filepath.IsAbs(value) || cwd == "" {
+	if !ok || strings.TrimSpace(value) == "" || filepath.IsAbs(value) || base == "" {
 		return false
 	}
-	settings[key] = filepath.Join(cwd, value)
+	settings[key] = filepath.Join(base, value)
 	return true
 }
 

@@ -250,6 +250,25 @@ func TestPrepareWorkspaceSettingsMakesExplicitRelativeVenvPathAbsolute(t *testin
 	}
 }
 
+func TestPrepareWorkspaceSettingsResolvesExplicitRelativeInterpreterAgainstConfigRoot(t *testing.T) {
+	// A nested workspace root (e.g. a package with its own pyproject.toml)
+	// must not reinterpret an explicit relative interpreter path: the path is
+	// written against the config root, so it keeps pointing at the
+	// repository-level environment instead of a non-existent nested one.
+	root := t.TempDir()
+	nested := filepath.Join(root, "api")
+	for _, key := range []string{"pythonPath", "defaultInterpreterPath"} {
+		t.Run(key, func(t *testing.T) {
+			explicit := map[string]any{"python": map[string]any{key: ".venv/bin/python"}}
+			got := prepareWorkspaceSettingsBounded("pyright", config.LSPServerConfig{Command: "pyright-langserver", Options: explicit}, nested, root)
+			want := map[string]any{"python": map[string]any{key: filepath.Join(root, ".venv", "bin", "python")}}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("prepareWorkspaceSettingsBounded() = %#v, want %#v", got, want)
+			}
+		})
+	}
+}
+
 func TestCloneSettingsDeepCopiesSlices(t *testing.T) {
 	original := map[string]any{
 		"python": map[string]any{

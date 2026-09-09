@@ -870,8 +870,12 @@ func (m *Manager) clientForPathLocked(path string) (*Client, bool) {
 	return found, found != nil
 }
 
-// hasPendingStartForPathLocked reports whether a matching server instance for
-// the given path is still starting. Caller must hold at least clientsMu.RLock().
+// hasPendingStartForPathLocked reports whether a launch for the workspace
+// root that would serve path is still in flight and its client is not yet
+// registered. A starting marker whose client already appeared counts as
+// settled: the launch finished and only its bookkeeping cleanup remains, so
+// readiness can use the registered client immediately. Caller must hold at
+// least clientsMu.RLock().
 func (m *Manager) hasPendingStartForPathLocked(path string) bool {
 	if m.cfg == nil || len(m.cfg.LSP) == 0 {
 		return false
@@ -885,7 +889,9 @@ func (m *Manager) hasPendingStartForPathLocked(path string) bool {
 		// path can be "starting for" it; otherwise a Go read would count a
 		// TypeScript startup as pending for that path.
 		if root, ok := m.serverRootForPath(key.name, srvCfg, path); ok && root == key.root {
-			return true
+			if _, ok := m.clients[key]; !ok {
+				return true
+			}
 		}
 	}
 	return false
@@ -901,11 +907,22 @@ func (m *Manager) waitForClientForPath(ctx context.Context, path string, timeout
 	check := func() (*Client, bool, bool) {
 		m.clientsMu.RLock()
 		defer m.clientsMu.RUnlock()
+		// Readiness waits for the target (name, root) launch to settle even
+		// when an ancestor client already handles the file: an instance rooted
+		// at the repository root also accepts files inside a nested package,
+		// so returning it while the nearer instance for this path is still
+		// starting would route the first navigation or the post-write sync to
+		// the old environment. Once the launch settles (its client registers,
+		// or the launch ends without one) the owner below is final and can be
+		// served; a failed nearer launch falls back to the ancestor.
+		if m.hasPendingStartForPathLocked(path) {
+			return nil, false, true
+		}
 		c, ok := m.clientForPathLocked(path)
 		if ok {
 			return c, true, false
 		}
-		return nil, false, m.hasPendingStartForPathLocked(path)
+		return nil, false, false
 	}
 
 	if c, ok, _ := check(); ok {

@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"reflect"
 	"sync"
@@ -257,6 +258,53 @@ func TestWaitForClientForPathReturnsWhenStartupSettles(t *testing.T) {
 	}
 }
 
+func TestWaitForClientForPathWaitsForNearestRootLaunchOverRunningAncestor(t *testing.T) {
+	root := t.TempDir()
+	frontend := filepath.Join(root, "frontend")
+	if err := os.MkdirAll(filepath.Join(frontend, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(frontend, "tsconfig.json"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mgr := NewManager(&config.Config{
+		LSP: config.LSPConfig{
+			"typescript": {
+				Command:     "ts",
+				FileTypes:   []string{".ts"},
+				RootMarkers: []string{"tsconfig.json"},
+			},
+		},
+	}, root, nil)
+	// An ancestor instance rooted at the repository root is already running
+	// (it also accepts files inside the nested package), while the nearer
+	// frontend instance is still launching. Readiness must wait for the target
+	// (name, root) pair instead of routing the first request to the ancestor.
+	ancestor := existingTrivialClient(root, ".ts")
+	mgr.clientsMu.Lock()
+	mgr.clients[clientKey{name: "typescript", root: root}] = ancestor
+	mgr.starting[clientKey{name: "typescript", root: frontend}] = true
+	mgr.clientsMu.Unlock()
+
+	path := filepath.Join(frontend, "src", "a.ts")
+	go func() {
+		time.Sleep(60 * time.Millisecond)
+		nested := existingTrivialClient(frontend, ".ts")
+		mgr.clientsMu.Lock()
+		mgr.clients[clientKey{name: "typescript", root: frontend}] = nested
+		delete(mgr.starting, clientKey{name: "typescript", root: frontend})
+		mgr.clientsMu.Unlock()
+	}()
+
+	client, ok := mgr.waitForClientForPath(context.Background(), path, time.Second)
+	if !ok {
+		t.Fatal("waitForClientForPath did not wait for the nearer-root launch")
+	}
+	if client == nil || client.cwd != frontend || client == ancestor {
+		t.Fatalf("waitForClientForPath returned client rooted at %q, want the frontend root client", client.cwd)
+	}
+}
+
 func TestSidebarEntriesIncludePerServerReviewedSnapshotsForTouchedFiles(t *testing.T) {
 	mgr := NewManager(&config.Config{
 		LSP: config.LSPConfig{
@@ -479,6 +527,30 @@ func TestAllDiagnosticsByAbsPathIgnoresDiagnosticsFromNonOwnerRoot(t *testing.T)
 	got := mgr.allDiagnosticsByAbsPath()[path]
 	if len(got) != 1 || got[0].Severity != int(protocol.SeverityWarning) || got[0].Message != "fresh inner" {
 		t.Fatalf("diagnostics = %+v, want only owner-root warning", got)
+	}
+}
+
+func TestAllDiagnosticsByAbsPathKeepsDistinctServerDiagnosticsPerPath(t *testing.T) {
+	mgr := NewManager(&config.Config{}, t.TempDir(), nil)
+	path := normalizeWaiterPath(filepath.Join(mgr.projectRoot, "pkg", "a.py"))
+	outer := &Client{cwd: mgr.projectRoot, cfg: config.LSPServerConfig{FileTypes: []string{".py"}}, diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{}}
+	inner := &Client{cwd: filepath.Join(mgr.projectRoot, "pkg"), cfg: config.LSPServerConfig{FileTypes: []string{".py"}}, diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{}}
+	uri := protocol.DocumentURI(protocol.URIFromPath(path))
+	outer.diagnostics[uri] = []protocol.Diagnostic{{Severity: protocol.SeverityWarning, Message: "outer server warning"}}
+	inner.diagnostics[uri] = []protocol.Diagnostic{{Severity: protocol.SeverityError, Message: "inner server error"}}
+	mgr.clients[clientKey{name: "pyright", root: mgr.projectRoot}] = outer
+	mgr.clients[clientKey{name: "basedpyright", root: filepath.Join(mgr.projectRoot, "pkg")}] = inner
+
+	// Two servers both own the same file, each from its own root. The owner
+	// cache must distinguish them; keying it by path alone reused the first
+	// server's owner roots and silently dropped the second server's diagnostics.
+	got := mgr.allDiagnosticsByAbsPath()[path]
+	messages := make(map[string]int, len(got))
+	for _, d := range got {
+		messages[d.Message]++
+	}
+	if messages["outer server warning"] != 1 || messages["inner server error"] != 1 {
+		t.Fatalf("diagnostics = %+v, want one entry from each server", got)
 	}
 }
 

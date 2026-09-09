@@ -353,7 +353,16 @@ func (m *Manager) allDiagnosticsByAbsPath() map[string][]Diagnostic {
 	m.clientsMu.RLock()
 	defer m.clientsMu.RUnlock()
 	merged := make(map[string][]Diagnostic)
-	ownersByPath := make(map[string]map[string]struct{})
+	// ownersByPath caches, per absolute path and server name, the workspace
+	// roots of the clients that own that path. The key must pair the path with
+	// the server name: two servers can own the same file from different roots,
+	// and reusing the first server's owner roots for the second would skip the
+	// second server's diagnostics below.
+	type ownerCacheKey struct {
+		path string
+		name string
+	}
+	ownersByPath := make(map[ownerCacheKey]map[string]struct{})
 	for key, c := range m.clients {
 		c.diagnosticsMu.RLock()
 		for uri, diags := range c.diagnostics {
@@ -367,7 +376,8 @@ func (m *Manager) allDiagnosticsByAbsPath() map[string][]Diagnostic {
 			} else {
 				absP = filepath.Clean(absP)
 			}
-			owners := ownersByPath[absP]
+			cacheKey := ownerCacheKey{path: absP, name: key.name}
+			owners := ownersByPath[cacheKey]
 			if owners == nil {
 				owners = make(map[string]struct{})
 				m.forEachClientForPathLocked(absP, func(ownerKey clientKey, _ *Client) {
@@ -375,7 +385,7 @@ func (m *Manager) allDiagnosticsByAbsPath() map[string][]Diagnostic {
 						owners[ownerKey.root] = struct{}{}
 					}
 				})
-				ownersByPath[absP] = owners
+				ownersByPath[cacheKey] = owners
 			}
 			if len(owners) > 0 {
 				if _, ok := owners[key.root]; !ok {
