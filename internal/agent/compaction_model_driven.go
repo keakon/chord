@@ -338,6 +338,21 @@ func (a *MainAgent) tryArmModelDrivenCheckpoint(callID string, rawArgs string) (
 	return result, nil
 }
 
+// evidenceKindSupportsCompletion reports whether an evidence record of the
+// given kind can support a completed/committed stage. Committed and observed
+// acceptance semantics anchor to positive outcome records — user corrections,
+// stated constraints, tool diffs and similar. tool_error, done_rejected and
+// escalate are negative outcome records (a failed action, a rejected Done, an
+// open intervention request) and cannot support a claim of completion.
+func evidenceKindSupportsCompletion(kind evidenceKind) bool {
+	switch kind {
+	case evidenceToolError, evidenceDoneRejected, evidenceEscalate:
+		return false
+	default:
+		return true
+	}
+}
+
 // validateModelDrivenEvidenceRefs rejects evidence references the runtime
 // cannot resolve. Resolution covers the runtime evidence tracker (fresh items
 // derived from live messages) plus the evidence IDs rendered by checkpoint
@@ -350,7 +365,7 @@ func (a *MainAgent) validateModelDrivenEvidenceRefs(refs []string) error {
 		return nil
 	}
 	known := evidenceItemsByID(a.evidence.snapshot())
-	var rendered map[string]struct{}
+	var carried map[string]evidencePackRefMeta
 	for _, ref := range refs {
 		item, ok := known[ref]
 		if ok {
@@ -359,23 +374,37 @@ func (a *MainAgent) validateModelDrivenEvidenceRefs(refs []string) error {
 			}
 			continue
 		}
-		if rendered == nil {
-			rendered = a.contextRenderedEvidencePacks()
+		if carried == nil {
+			carried = a.contextEvidencePackMetadata()
 		}
-		if _, ok := rendered[ref]; !ok {
+		meta, ok := carried[ref]
+		if !ok {
 			return fmt.Errorf("compact_context evidence_refs contains unknown evidence ID %q", ref)
+		}
+		if meta.invalidated {
+			return fmt.Errorf("compact_context evidence_refs contains %s evidence %q", evidenceValidityInvalidated, ref)
 		}
 	}
 	return nil
 }
 
-// contextRenderedEvidencePacks returns the stable Evidence IDs rendered by the
-// evidence packs of checkpoint messages still in the live context. A pack
-// item whose source messages were archived stays citable while its checkpoint
+// evidencePackRefMeta is the machine-readable metadata a checkpoint evidence
+// pack renders for one archived evidence ID. kind is empty when the pack
+// record carries no classification (an older pack format); invalidated records
+// a rendered Validity: invalidated line.
+type evidencePackRefMeta struct {
+	kind        evidenceKind
+	invalidated bool
+}
+
+// contextEvidencePackMetadata returns the machine metadata of every stable
+// Evidence ID rendered by the evidence packs of checkpoint messages still in
+// the live context. A pack item whose source messages were archived stays
+// citable — with its classification and validity — while its checkpoint
 // remains in the transcript; once that checkpoint is archived by a later
 // apply, its IDs stop resolving here and are rejected as unknown again.
-func (a *MainAgent) contextRenderedEvidencePacks() map[string]struct{} {
-	out := make(map[string]struct{})
+func (a *MainAgent) contextEvidencePackMetadata() map[string]evidencePackRefMeta {
+	out := make(map[string]evidencePackRefMeta)
 	if a == nil || a.ctxMgr == nil {
 		return out
 	}
@@ -386,12 +415,57 @@ func (a *MainAgent) contextRenderedEvidencePacks() map[string]struct{} {
 		if !msg.IsCompactionSummary && !message.IsCompactionEvidenceArtifactText(msg.Content) {
 			continue
 		}
-		for line := range strings.SplitSeq(evidencePackRegion(msg.Content), "\n") {
-			if rest, ok := strings.CutPrefix(line, "Evidence ID: "); ok {
-				if id := strings.TrimSpace(rest); id != "" {
-					out[id] = struct{}{}
-				}
+		for id, meta := range parseCheckpointEvidencePackMetadata(msg.Content) {
+			if _, exists := out[id]; !exists {
+				out[id] = meta
 			}
+		}
+	}
+	return out
+}
+
+// parseCheckpointEvidencePackMetadata scans a checkpoint message's rendered
+// evidence pack region for its Evidence IDs and the machine metadata each row
+// renders (the Evidence Kind and Validity lines). Excerpt text may quote the
+// same line shapes, so everything after an Excerpt: line until the next
+// Evidence ID: line is ignored.
+func parseCheckpointEvidencePackMetadata(content string) map[string]evidencePackRefMeta {
+	region := evidencePackRegion(content)
+	if region == "" {
+		return nil
+	}
+	out := make(map[string]evidencePackRefMeta)
+	current := ""
+	inExcerpt := false
+	for line := range strings.SplitSeq(region, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if rest, ok := strings.CutPrefix(trimmed, "Evidence ID: "); ok {
+			current = strings.TrimSpace(rest)
+			inExcerpt = false
+			if _, exists := out[current]; !exists && current != "" {
+				out[current] = evidencePackRefMeta{}
+			}
+			continue
+		}
+		if current == "" || inExcerpt {
+			continue
+		}
+		if rest, ok := strings.CutPrefix(trimmed, "Evidence Kind: "); ok {
+			meta := out[current]
+			meta.kind = evidenceKind(strings.TrimSpace(rest))
+			out[current] = meta
+			continue
+		}
+		if rest, ok := strings.CutPrefix(trimmed, "Validity: "); ok {
+			if strings.TrimSpace(rest) == string(evidenceValidityInvalidated) {
+				meta := out[current]
+				meta.invalidated = true
+				out[current] = meta
+			}
+			continue
+		}
+		if strings.HasPrefix(trimmed, "Excerpt:") {
+			inExcerpt = true
 		}
 	}
 	return out
@@ -415,7 +489,7 @@ func evidencePackRegion(content string) string {
 
 func (a *MainAgent) validateObservedClaimEvidence(args tools.CompactContextArgs) error {
 	byID := evidenceItemsByID(a.evidence.snapshot())
-	var rendered map[string]struct{}
+	var carried map[string]evidencePackRefMeta
 	for claim, kind := range args.ClaimKinds {
 		if kind != claimKindObserved {
 			continue
@@ -425,20 +499,29 @@ func (a *MainAgent) validateObservedClaimEvidence(args tools.CompactContextArgs)
 			if !ok {
 				// A reference that resolves to a checkpoint evidence pack in
 				// the context has no runtime item behind it (its source
-				// messages were archived), so the negative-kind checks below
-				// cannot be evaluated against it. The pack renders the item's
-				// full record for the model to judge, and the checkpoint build
-				// re-checks every carried claim against the runtime evidence
-				// before it can be rendered observed.
-				if rendered == nil {
-					rendered = a.contextRenderedEvidencePacks()
+				// messages were archived). Live and carried references share
+				// the same category and validity checks: when the pack renders
+				// the item's classification, a negative kind rejects the
+				// observed claim exactly like a live one would, and a rendered
+				// invalidation rejects it too. A record without a rendered
+				// classification (an older pack format) stays allowed: the
+				// pack still shows the full record for the model to judge.
+				if carried == nil {
+					carried = a.contextEvidencePackMetadata()
 				}
-				if _, ok := rendered[ref]; !ok {
+				meta, ok := carried[ref]
+				if !ok {
 					return fmt.Errorf("observed claim %q references unknown evidence %q", claim, ref)
+				}
+				if meta.kind != "" && !evidenceKindSupportsCompletion(meta.kind) {
+					return fmt.Errorf("observed claim %q cannot use %s evidence %q", claim, meta.kind, ref)
+				}
+				if meta.invalidated {
+					return fmt.Errorf("observed claim %q cannot use %s evidence %q", claim, evidenceValidityInvalidated, ref)
 				}
 				continue
 			}
-			if item.Kind == evidenceToolError || item.Kind == evidenceDoneRejected {
+			if !evidenceKindSupportsCompletion(item.Kind) {
 				return fmt.Errorf("observed claim %q cannot use %s evidence %q", claim, item.Kind, ref)
 			}
 			if item.Validity == evidenceValidityInvalidated {
@@ -454,19 +537,45 @@ func (a *MainAgent) validateCommittedEvidence(args tools.CompactContextArgs) err
 		return nil
 	}
 	byID := evidenceItemsByID(a.evidence.snapshot())
+	var carried map[string]evidencePackRefMeta
 	for _, ref := range args.EvidenceRefs {
 		item, ok := byID[ref]
-		if !ok {
+		if ok {
+			// Completed/committed semantics anchor to acceptance evidence only:
+			// user corrections, stated constraints, tool diffs and similar
+			// positive records. tool_error, done_rejected and escalate are
+			// negative outcome records (a failed action, a rejected Done, an
+			// open intervention request) and cannot support a claim of
+			// completion, so committed treats them uniformly.
+			if !evidenceKindSupportsCompletion(item.Kind) {
+				return fmt.Errorf("committed checkpoint cannot use %s evidence %q", item.Kind, ref)
+			}
+			if item.Validity == evidenceValidityInvalidated {
+				return fmt.Errorf("committed checkpoint cannot use %s evidence %q", item.Validity, ref)
+			}
 			continue
 		}
-		// Completed/committed semantics anchor to acceptance evidence only:
-		// user corrections, stated constraints, tool diffs and similar
-		// positive records. tool_error, done_rejected and escalate are
-		// negative outcome records (a failed action, a rejected Done, an open
-		// intervention request) and cannot support a claim of completion, so
-		// committed treats them uniformly.
-		if item.Kind == evidenceToolError || item.Kind == evidenceDoneRejected || item.Kind == evidenceEscalate {
-			return fmt.Errorf("committed checkpoint cannot use %s evidence %q", item.Kind, ref)
+		// The reference resolves through a checkpoint evidence pack in the
+		// context. A committed upgrade must prove the evidence is a positive
+		// acceptance record: a pack row that renders the item's kind is judged
+		// by the same category and validity rules as a live item, while a row
+		// that only proves the ID exists (an older pack format without a
+		// classification) cannot support the committed upgrade at all.
+		if carried == nil {
+			carried = a.contextEvidencePackMetadata()
+		}
+		meta, ok := carried[ref]
+		if !ok {
+			return fmt.Errorf("committed checkpoint cannot cite evidence %q that is not resolvable in the live context", ref)
+		}
+		if meta.kind == "" {
+			return fmt.Errorf("committed checkpoint cannot cite evidence %q: the archived record does not carry the classification needed to verify acceptance semantics; reference live evidence or rebuild the checkpoint first", ref)
+		}
+		if !evidenceKindSupportsCompletion(meta.kind) {
+			return fmt.Errorf("committed checkpoint cannot use %s evidence %q", meta.kind, ref)
+		}
+		if meta.invalidated {
+			return fmt.Errorf("committed checkpoint cannot use %s evidence %q", evidenceValidityInvalidated, ref)
 		}
 	}
 	return nil
@@ -643,7 +752,43 @@ func (a *MainAgent) captureModelDrivenBarrierSnapshot(snapshot []message.Message
 	return bundle
 }
 
+// modelDrivenRuntimeInput is the subset of live event-loop state the
+// runtime-state staleness fingerprint hashes: todos, live sub-agents,
+// background objects and the evidence candidates. Everything else the barrier
+// bundle carries (prepared surfaces, response state, estimates, transcripts)
+// is work the fingerprint never reads.
+type modelDrivenRuntimeInput struct {
+	todos             []tools.TodoItem
+	subAgents         []SubAgentInfo
+	backgroundObjects []recovery.BackgroundObjectState
+	evidenceItems     []evidenceItem
+}
+
+// captureModelDrivenRuntimeInput fetches only the four runtime inputs the
+// staleness fingerprint hashes. The apply-time re-check used to rebuild the
+// whole barrier bundle (cloned prepared surfaces, response state, token
+// estimates, a second transcript snapshot) just to re-derive the same
+// fingerprint, so the event-loop apply and the barrier capture share this
+// lean capture instead.
+func (a *MainAgent) captureModelDrivenRuntimeInput() modelDrivenRuntimeInput {
+	return modelDrivenRuntimeInput{
+		todos:             a.GetTodos(),
+		subAgents:         a.taskInfosForCompaction(),
+		backgroundObjects: spawnStatesForSnapshot(),
+		evidenceItems:     a.evidenceItemsForCompaction(a.ctxMgr.GetMaxTokens()),
+	}
+}
+
 func modelDrivenRuntimeStateFingerprint(bundle modelDrivenBarrierSnapshot) string {
+	return modelDrivenRuntimeInputFingerprint(modelDrivenRuntimeInput{
+		todos:             bundle.todos,
+		subAgents:         bundle.subAgents,
+		backgroundObjects: bundle.backgroundObjects,
+		evidenceItems:     bundle.evidenceItems,
+	})
+}
+
+func modelDrivenRuntimeInputFingerprint(input modelDrivenRuntimeInput) string {
 	// The live SubAgent slice is built from an unsorted map
 	// (taskInfosForCompaction iterates a.subs.subAgents), so two captures of
 	// unchanged state can order the entries differently. The fingerprint must
@@ -652,7 +797,7 @@ func modelDrivenRuntimeStateFingerprint(bundle modelDrivenBarrierSnapshot) strin
 	// apply-time re-capture are sorted canonically before hashing — they go
 	// through this one function, which makes the ordering identical on both
 	// sides.
-	subAgents := append([]SubAgentInfo(nil), bundle.subAgents...)
+	subAgents := append([]SubAgentInfo(nil), input.subAgents...)
 	slices.SortFunc(subAgents, func(a, b SubAgentInfo) int {
 		if c := strings.Compare(a.InstanceID, b.InstanceID); c != 0 {
 			return c
@@ -670,7 +815,7 @@ func modelDrivenRuntimeStateFingerprint(bundle modelDrivenBarrierSnapshot) strin
 		SubAgents  []SubAgentInfo
 		Background []recovery.BackgroundObjectState
 		Evidence   []evidenceItem
-	}{bundle.todos, subAgents, bundle.backgroundObjects, bundle.evidenceItems})
+	}{input.todos, subAgents, input.backgroundObjects, input.evidenceItems})
 	sum := sha256.Sum256(payload)
 	return fmt.Sprintf("%x", sum[:])
 }

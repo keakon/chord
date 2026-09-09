@@ -233,6 +233,13 @@ func renderEvidenceArtifactContent(items []evidenceItem) string {
 		// IDs in a later compact_context evidence_refs/claim_evidence instead
 		// of inventing them (the ID is deterministic for a given evidence key).
 		fmt.Fprintf(&sb, "Evidence ID: %s\n", evidenceItemID(item))
+		// Render the machine-readable category and validity alongside the ID so
+		// a later generation's runtime validation can verify an archived item's
+		// acceptance semantics from the checkpoint pack alone instead of only
+		// proving that the ID exists.
+		if item.Kind != "" {
+			fmt.Fprintf(&sb, "Evidence Kind: %s\n", item.Kind)
+		}
 		if item.Source != "" {
 			fmt.Fprintf(&sb, "Source: %s\n", item.Source)
 		}

@@ -60,7 +60,7 @@ func e2eApplyModelDrivenCheckpoint(t *testing.T, a *MainAgent, index, headSplit 
 // e2eTypedStateOf parses the typed carry block out of a checkpoint message.
 func e2eTypedStateOf(t *testing.T, checkpoint message.Message) checkpointTypedState {
 	t.Helper()
-	state, ok := parseCheckpointTypedState(compactionSummaryBody(checkpoint.Content))
+	state, ok := typedStateForTest(compactionSummaryBody(checkpoint.Content))
 	if !ok {
 		t.Fatalf("typed state missing from applied checkpoint:\n%s", checkpoint.Content)
 	}

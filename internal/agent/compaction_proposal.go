@@ -96,8 +96,10 @@ func marshalCompactContextArgsForAudit(args tools.CompactContextArgs) string {
 // armModelDrivenProposal records a freshly accepted compact_context request as
 // the current proposal, replacing whatever record existed before (an earlier
 // accepted proposal that a turn teardown dropped, or a settled one). The
-// snapshot is persisted once, after all fields are set.
-func (a *MainAgent) armModelDrivenProposal(callID string, args tools.CompactContextArgs, argsJSON, reason string) {
+// snapshot is persisted once, after all fields are set. The caller passes the
+// pre-rendered audit copy (argsJSON); the parsed arguments are not consumed
+// here.
+func (a *MainAgent) armModelDrivenProposal(callID string, _ tools.CompactContextArgs, argsJSON, reason string) {
 	p := &a.modelDrivenProposal
 	p.requestID = callID
 	p.argsJSON = argsJSON

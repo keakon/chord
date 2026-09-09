@@ -231,6 +231,18 @@ func cleanupStalePendingCompactions(sessionDir string, maxAge time.Duration) {
 					}
 				}
 			}
+			// A committed manifest with a proposal id is the crash-window proof
+			// of a model-driven apply whose settlement snapshot never saved
+			// (the apply only removes its manifest once that snapshot is
+			// durable). Age alone must not destroy that proof, so it is swept
+			// only when the session's recovery snapshot durably records the
+			// same proposal as applied. Committed manifests without a proposal
+			// id belong to usage/manual applies, which carry no proposal to
+			// prove, and keep their age-based sweep.
+			if manifest.Status == compactionTransactionCommitted && strings.TrimSpace(manifest.ProposalID) != "" &&
+				!compactionSnapshotProposalApplied(sessionDir, manifest.ProposalID) {
+				continue
+			}
 			removeCompactionTransactionManifest(sessionDir, file.TransactionID)
 		}
 	}
@@ -632,4 +644,42 @@ func (a *MainAgent) saveRecoverySnapshot() {
 	if err := a.persistSnapshotLocked(a.buildRecoverySnapshot); err != nil {
 		log.Warnf("failed to save recovery snapshot error=%v", err)
 	}
+}
+
+// saveRecoverySnapshotChecked persists the recovery snapshot and returns the
+// persistence error instead of logging it away. A caller that gates a cleanup
+// decision on durability — the model-driven apply's transaction-manifest
+// removal — must require positive evidence that the applied state actually
+// landed on disk: treating a skipped or failed save as durable would delete
+// the manifest that a later restore needs to reconcile the apply.
+func (a *MainAgent) saveRecoverySnapshotChecked() error {
+	if a == nil {
+		return fmt.Errorf("recovery snapshot save skipped: no agent")
+	}
+	if a.shuttingDown.Load() {
+		return fmt.Errorf("recovery snapshot save skipped: agent is shutting down")
+	}
+	if err := a.persistSnapshotLocked(a.buildRecoverySnapshot); err != nil {
+		return fmt.Errorf("persist recovery snapshot: %w", err)
+	}
+	return nil
+}
+
+// compactionSnapshotProposalApplied reports whether the session's recovery
+// snapshot durably records the given model-driven proposal as applied. A
+// committed transaction manifest is kept by the apply when the applied
+// settlement could not be saved, so it becomes the only durable proof of the
+// apply; the stale sweep must not age that proof out until the snapshot itself
+// carries the applied record.
+func compactionSnapshotProposalApplied(sessionDir, requestID string) bool {
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return false
+	}
+	snap, err := recovery.NewRecoveryManager(sessionDir).Recover()
+	if err != nil {
+		return false
+	}
+	proposal := snap.ModelDrivenProposal
+	return proposal != nil && strings.TrimSpace(proposal.RequestID) == requestID && strings.TrimSpace(proposal.Status) == modelDrivenProposalApplied
 }

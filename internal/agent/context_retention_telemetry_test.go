@@ -60,13 +60,12 @@ func TestRetentionRequestsCountExactlyOncePerRequest(t *testing.T) {
 		t.Fatalf("one request counted %d times, want exactly 1", totals.Requests)
 	}
 
-	// The real per-request finalization path counts each prepared request once
-	// per layer.
+	// The real per-request finalization path counts each prepared request once.
 	a := newTestMainAgent(t, t.TempDir())
 	a.setContextReductionStats(retentionStatsFixture())
 	a.rememberPreparedLLMRequest(1, nil, nil, nil, nil, 0, contextReductionPolicy{})
-	if a.retentionSignals.session.Requests != 1 || a.retentionSignals.window.Requests != 1 {
-		t.Fatalf("single request session/window = %v/%v, want 1/1", a.retentionSignals.session.Requests, a.retentionSignals.window.Requests)
+	if a.retentionSignals.Requests != 1 {
+		t.Fatalf("single request window requests = %v, want 1", a.retentionSignals.Requests)
 	}
 }
 
@@ -127,40 +126,34 @@ func TestRetentionSignalsAccumulateAcrossRequestsAndApply(t *testing.T) {
 	a.setContextReductionStats(second)
 	a.rememberPreparedLLMRequest(2, nil, nil, nil, nil, 0, contextReductionPolicy{})
 
-	// Both layers accumulate across requests. Session probes read the raw
-	// totals directly (the removed policy-summary layer used to present them).
-	session := a.retentionSignals.session
-	if session.Requests != 2 || a.retentionSignals.window.Requests != 2 {
-		t.Fatalf("requests session/window = %v/%v, want 2/2", session.Requests, a.retentionSignals.window.Requests)
+	// The window totals accumulate across requests.
+	if a.retentionSignals.Requests != 2 {
+		t.Fatalf("window requests = %v, want 2", a.retentionSignals.Requests)
 	}
-	if session.RereadAfterReduction != 2 || session.ArchiveReads != 5 {
-		t.Fatalf("session rereads/archive = %v/%v, want 2/5", session.RereadAfterReduction, session.ArchiveReads)
-	}
-	if known := session.RereadSameRevision + session.RereadChangedRevision; known != 3 || session.RereadChangedRevision != 2 {
-		t.Fatalf("session revision rereads = %v/%v, want 3/2", known, session.RereadChangedRevision)
+	if a.retentionSignals.RereadAfterReduction != 2 || a.retentionSignals.ArchiveReads != 5 {
+		t.Fatalf("window rereads/archive = %v/%v, want 2/5", a.retentionSignals.RereadAfterReduction, a.retentionSignals.ArchiveReads)
 	}
 
 	// ...and survive resetContextReductionStats (what a compaction apply does
 	// to the per-request stats).
 	a.resetContextReductionStats()
-	if got := a.retentionSignals.session.Requests; got != 2 {
-		t.Fatalf("session requests after resetContextReductionStats = %v, want 2", got)
+	if got := a.retentionSignals.Requests; got != 2 {
+		t.Fatalf("window requests after resetContextReductionStats = %v, want 2", got)
 	}
 
-	// Taking the window (the applied-event path) publishes and clears only the
-	// window layer.
+	// Taking the window (the applied-event path) publishes and clears it.
 	if window := a.takeWindowRetentionSignals(); window.Requests != 2 || window.RereadAfterReduction != 2 {
 		t.Fatalf("taken window = %+v, want requests 2 rereads 2", window)
 	}
-	if a.retentionSignals.window.Requests != 0 || a.retentionSignals.session.Requests != 2 {
-		t.Fatalf("after take window/session requests = %v/%v, want 0/2", a.retentionSignals.window.Requests, a.retentionSignals.session.Requests)
+	if a.retentionSignals.Requests != 0 {
+		t.Fatalf("window requests after take = %v, want 0", a.retentionSignals.Requests)
 	}
 
-	// A request after the apply starts a fresh window on top of the session.
+	// A request after the apply starts a fresh window.
 	a.setContextReductionStats(retentionStatsFixture())
 	a.rememberPreparedLLMRequest(3, nil, nil, nil, nil, 0, contextReductionPolicy{})
-	if a.retentionSignals.window.Requests != 1 || a.retentionSignals.session.Requests != 3 {
-		t.Fatalf("post-apply window/session requests = %v/%v, want 1/3", a.retentionSignals.window.Requests, a.retentionSignals.session.Requests)
+	if a.retentionSignals.Requests != 1 {
+		t.Fatalf("post-apply window requests = %v, want 1", a.retentionSignals.Requests)
 	}
 }
 
@@ -201,23 +194,20 @@ func TestCompactionAppliedEventCarriesWindowRetentionSignals(t *testing.T) {
 		}
 	}
 
-	// The apply consumed the window but kept the session totals.
-	if got := a.retentionSignals.window.Requests; got != 0 {
+	// The apply consumed the window totals.
+	if got := a.retentionSignals.Requests; got != 0 {
 		t.Fatalf("window requests after apply = %v, want 0", got)
-	}
-	if got := a.retentionSignals.session.Requests; got != 2 {
-		t.Fatalf("session requests after apply = %v, want 2", got)
 	}
 }
 
-func TestSessionRetentionSignalsResetClearsBothLayers(t *testing.T) {
+func TestSessionRetentionSignalsResetClearsWindow(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.setContextReductionStats(retentionStatsFixture())
 	a.rememberPreparedLLMRequest(1, nil, nil, nil, nil, 0, contextReductionPolicy{})
 
 	a.resetSessionRetentionSignals()
-	if a.retentionSignals.session.Requests != 0 || a.retentionSignals.window.Requests != 0 {
-		t.Fatalf("session reset left requests session/window = %v/%v, want 0/0", a.retentionSignals.session.Requests, a.retentionSignals.window.Requests)
+	if a.retentionSignals.Requests != 0 {
+		t.Fatalf("session reset left window requests = %v, want 0", a.retentionSignals.Requests)
 	}
 }
 
@@ -228,15 +218,15 @@ func TestActivateLoadedSessionRestartsRetentionSignals(t *testing.T) {
 	a.rememberPreparedLLMRequest(1, nil, nil, nil, nil, 0, contextReductionPolicy{})
 	a.setContextReductionStats(retentionStatsFixture())
 	a.rememberPreparedLLMRequest(2, nil, nil, nil, nil, 0, contextReductionPolicy{})
-	if got := a.retentionSignals.session.Requests; got != 2 {
-		t.Fatalf("session requests before activation = %v, want 2", got)
+	if got := a.retentionSignals.Requests; got != 2 {
+		t.Fatalf("window requests before activation = %v, want 2", got)
 	}
 
-	// Activating a loaded session is the /resume boundary: both aggregator
-	// layers restart at zero, exactly like the /new reset path.
+	// Activating a loaded session is the /resume boundary: the window signal
+	// totals restart at zero, exactly like the /new reset path.
 	a.activateLoadedSession(&loadedSessionState{SessionPath: a.sessionDir})
 
-	if a.retentionSignals.session.Requests != 0 || a.retentionSignals.window.Requests != 0 {
-		t.Fatalf("retention signals after session activation = session %v window %v requests, want 0/0", a.retentionSignals.session.Requests, a.retentionSignals.window.Requests)
+	if a.retentionSignals.Requests != 0 {
+		t.Fatalf("retention signals after session activation = %v requests, want 0", a.retentionSignals.Requests)
 	}
 }

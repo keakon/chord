@@ -4,37 +4,29 @@ import (
 	"strconv"
 )
 
-// Session-level retention signal aggregation.
+// Compaction-window retention signal aggregation.
 //
 // ContextReductionStats are per-request and are zeroed by
 // resetContextReductionStats on every compaction apply, so alone they cannot
 // answer whether reduction repeatedly discards output the model later
-// re-reads. retentionSignalAggregator keeps two monotonic layers that survive
-// those resets:
-//
-//   - session: totals since the current session boundary — cleared together
-//     with the usage tracker on every boundary (session switch, restore and
-//     /new), so the layer never spans two runs;
-//   - window: totals since the last durable compaction apply (published on
-//     the applied lifecycle event, then cleared).
+// re-reads. retentionWindowTotals keeps one monotonic layer that survives
+// those resets: the window totals since the last durable compaction apply,
+// published on the applied lifecycle event and then cleared. Every session
+// boundary (session switch, restore and /new) clears the window together with
+// the usage tracker, so the layer never spans two runs.
 //
 // Units follow ContextReductionStats: the over-compression keys count re-issue
 // incidents, archive reads count archive-addressed reads present in each
 // request surface, and the evidence fields count the file observations each
 // request saw, so the sums are in "per-request observed" units and the ratios
-// they feed are window-internal. Window totals are what each apply reports;
-// session totals are the raw read-only input a future retention policy can
-// consume.
+// they feed are window-internal.
 //
 // Nothing here changes retention behavior: valid-read protections stay
 // conservative until this telemetry proves they can relax.
-type retentionSignalAggregator struct {
-	session retentionWindowTotals
-	window  retentionWindowTotals
-}
 
 // retentionWindowTotals accumulates the retention-relevant half of
-// ContextReductionStats over a span of prepared main requests.
+// ContextReductionStats over one compaction window (the span since the last
+// durable apply, or since the session boundary when no apply ran yet).
 type retentionWindowTotals struct {
 	// Requests counts prepared main requests observed in the span. Production
 	// requests prepare exactly once per LLM call, so it is the reread-rate
@@ -67,9 +59,9 @@ type retentionWindowTotals struct {
 	EvidenceSuperseded int64
 }
 
-// add folds one prepared request's final stats into the totals. Reading from
-// a nil OverCompression map yields zero, so signal-less requests only move
-// the Requests and ReducedToolResults counters.
+// add folds one prepared request's final stats into the window totals.
+// Reading from a nil OverCompression map yields zero, so signal-less requests
+// only move the Requests and ReducedToolResults counters.
 func (t *retentionWindowTotals) add(stats ContextReductionStats) {
 	if t == nil {
 		return
@@ -88,46 +80,44 @@ func (t *retentionWindowTotals) add(stats ContextReductionStats) {
 }
 
 // mergeRequestRetentionSignalsLocked folds one prepared request's final
-// per-request stats into the session and window aggregators. The caller must
-// hold loopReductionMu; rememberPreparedLLMRequest is the single production
-// call site (it runs once per prepared main request, on the LLM worker
-// goroutine while the event loop may concurrently apply a compaction, hence
-// the lock).
+// per-request stats into the compaction-window totals. The caller must hold
+// loopReductionMu; rememberPreparedLLMRequest is the single production call
+// site (it runs once per prepared main request, on the LLM worker goroutine
+// while the event loop may concurrently apply a compaction, hence the lock).
 func (a *MainAgent) mergeRequestRetentionSignalsLocked(stats ContextReductionStats) {
 	if a == nil {
 		return
 	}
-	a.retentionSignals.session.add(stats)
-	a.retentionSignals.window.add(stats)
+	a.retentionSignals.add(stats)
 }
 
 // takeWindowRetentionSignals snapshots the compaction-window totals and starts
-// a fresh window, keeping the session totals intact. Called once per durable
-// compaction apply so the applied lifecycle event can publish the window's
-// signals before per-request stats are reset.
+// a fresh window. Called once per durable compaction apply so the applied
+// lifecycle event can publish the window's signals before per-request stats
+// are reset.
 func (a *MainAgent) takeWindowRetentionSignals() retentionWindowTotals {
 	if a == nil {
 		return retentionWindowTotals{}
 	}
 	a.loopReductionMu.Lock()
 	defer a.loopReductionMu.Unlock()
-	window := a.retentionSignals.window
-	a.retentionSignals.window = retentionWindowTotals{}
+	window := a.retentionSignals
+	a.retentionSignals = retentionWindowTotals{}
 	return window
 }
 
-// resetSessionRetentionSignals clears both aggregator layers. Every session
-// boundary — session switch, restore and /new — resets the usage tracker
-// together with the reduction caches, and the signal totals follow that
-// lifecycle: they describe the current loaded session run, never a span
-// across runs.
+// resetSessionRetentionSignals clears the compaction-window signal totals.
+// Every session boundary — session switch, restore and /new — resets the
+// usage tracker together with the reduction caches, and the signal totals
+// follow that lifecycle: they describe the current loaded session run, never
+// a span across runs.
 func (a *MainAgent) resetSessionRetentionSignals() {
 	if a == nil {
 		return
 	}
 	a.loopReductionMu.Lock()
 	defer a.loopReductionMu.Unlock()
-	a.retentionSignals = retentionSignalAggregator{}
+	a.retentionSignals = retentionWindowTotals{}
 }
 
 func int64Percent(num, den int64) int64 {

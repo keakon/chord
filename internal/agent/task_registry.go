@@ -2,7 +2,6 @@ package agent
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -240,6 +239,7 @@ func persistDurableTaskRecords(sessionDir string, records map[string]*DurableTas
 	return persistJSONAtomically(sessionDir, path, "tasks", ordered)
 }
 
+// durableTaskResumePolicy maps a task's restored state to the trigger policy
 func durableTaskResumePolicy(state SubAgentState) string {
 	switch state {
 	case SubAgentStateIdle, SubAgentStateWaitingMain, SubAgentStateWaitingDescendant, SubAgentStateCompleted:
@@ -249,22 +249,6 @@ func durableTaskResumePolicy(state SubAgentState) string {
 	default:
 		return taskResumePolicyLiveOnly
 	}
-}
-
-// hydratableWriteScope returns the boundary a rehydrated runtime must run
-// under. Delegate admits a task with an empty expected_write_scope only when
-// its role's permission rules register no file-modifying tools; under that
-// role the revived worker's tool surface is itself the boundary — no write,
-// edit, delete, or apply_patch tool is registered, so an empty scope means
-// "nothing to declare" rather than "unrestricted". A write-capable role cannot
-// produce an empty-scope record through Delegate (its empty delegation is
-// rejected), so no separate record-level check is needed: the role, re-derived
-// from the record's AgentDefName at rehydration, governs.
-func (r *DurableTaskRecord) hydratableWriteScope() (tools.WriteScope, error) {
-	if r == nil {
-		return tools.WriteScope{}, fmt.Errorf("missing task record")
-	}
-	return r.ExpectedWriteScope.Normalized(), nil
 }
 
 func (r *DurableTaskRecord) allowsRehydrate(trigger taskResumeTrigger) bool {

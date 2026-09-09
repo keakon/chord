@@ -151,7 +151,24 @@ func reconcileCompactionTransactions(sessionDir string, messages []message.Messa
 	if err != nil {
 		return err
 	}
-	fingerprint := compactionTranscriptFingerprint(messages)
+	// The transcript fingerprint is a full serialization of the message list;
+	// only a prepared manifest that records a target fingerprint can consume
+	// it, so it is computed lazily on the first such manifest and reused for
+	// the rest of the scan.
+	var (
+		fingerprint string
+		computed    bool
+	)
+	matches := func(target string) bool {
+		if target == "" {
+			return false
+		}
+		if !computed {
+			fingerprint = compactionTranscriptFingerprint(messages)
+			computed = true
+		}
+		return target == fingerprint
+	}
 	for _, file := range files {
 		if file.Err != nil {
 			return file.Err
@@ -160,7 +177,7 @@ func reconcileCompactionTransactions(sessionDir string, messages []message.Messa
 			continue
 		}
 		status := compactionTransactionAborted
-		if file.Manifest.TargetFingerprint != "" && file.Manifest.TargetFingerprint == fingerprint {
+		if matches(file.Manifest.TargetFingerprint) {
 			status = compactionTransactionCommitted
 		}
 		if err := updateCompactionTransactionStatus(sessionDir, file.Manifest.TransactionID, status); err != nil {
@@ -195,11 +212,17 @@ func modelDrivenCommittedApplyBatch(sessionDir string, messages []message.Messag
 	if !head.IsCompactionSummary || head.CompactionSummaryMode != compactionSummaryModeModelDriven || head.RequestBatch == 0 {
 		return 0, false
 	}
-	fingerprint := compactionTranscriptFingerprint(messages)
 	files, err := listCompactionTransactionManifests(sessionDir)
 	if err != nil {
 		return 0, false
 	}
+	// The transcript fingerprint serializes the whole message list; it is
+	// computed once and only when a committed manifest for this proposal with
+	// a recorded target fingerprint is actually found.
+	var (
+		fingerprint string
+		computed    bool
+	)
 	for _, file := range files {
 		if file.Err != nil {
 			continue
@@ -208,7 +231,14 @@ func modelDrivenCommittedApplyBatch(sessionDir string, messages []message.Messag
 		if manifest.Status != compactionTransactionCommitted || strings.TrimSpace(manifest.ProposalID) != proposalID {
 			continue
 		}
-		if manifest.TargetFingerprint != "" && manifest.TargetFingerprint == fingerprint {
+		if manifest.TargetFingerprint == "" {
+			continue
+		}
+		if !computed {
+			fingerprint = compactionTranscriptFingerprint(messages)
+			computed = true
+		}
+		if manifest.TargetFingerprint == fingerprint {
 			return head.RequestBatch, true
 		}
 	}

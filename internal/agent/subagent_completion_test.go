@@ -951,10 +951,8 @@ func TestMainMailboxAndSnapshotDoNotDoubleBillSameCompletion(t *testing.T) {
 	}
 }
 
-// The following completion-rejection tests were migrated back from
-// subagent_completion_validation_test.go (deleted with the verification gate
-// in 289a1cd0): they cover rejectInvalidCompleteArguments and the degraded
-// typed-result delivery, which remain live code.
+// The following completion-rejection tests cover rejectInvalidCompleteArguments
+// and the degraded typed-result delivery, which remain live code.
 
 func TestSubAgentInvalidCompleteGetsRejectedToolResultAndBoundedFollowUp(t *testing.T) {
 	tests := []struct {

@@ -49,19 +49,57 @@ const (
 // (anchors are carried by their own mechanism), the `## Skills Invoked
 // Earlier` section removed (also carried separately, by name merge) and any
 // previously appended `## Previous Checkpoint` section removed (the carry must
-// not compound across generations). No display truncation is applied here.
+// not compound across generations). A typed state block that only lived in the
+// stripped appendix is re-appended as its own machine block, so stripping the
+// natural-language appendix never severs the typed chain. No display
+// truncation is applied here.
 func latestPriorCheckpointStrippedBody(messages []message.Message) string {
 	for _, msg := range slices.Backward(messages) {
 		if msg.Role != message.RoleUser || !msg.IsCompactionSummary {
 			continue
 		}
-		body := compactionSummaryBody(msg.Content)
-		body = stripCompactionAnchorsBlock(body)
+		raw := compactionSummaryBody(msg.Content)
+		if raw == "" {
+			continue
+		}
+		body := stripCompactionAnchorsBlock(raw)
 		body = stripCheckpointSkillsSection(body)
 		body = stripPriorCheckpointCarrySection(body)
+		// The strip above can remove the only typed block of a usage-driven
+		// checkpoint, whose machine state lives inside the carried appendix it
+		// replaced. The typed state is machine-carryable and must keep
+		// traveling as its own bounded block instead of being stripped away
+		// with the natural-language appendix.
+		body = restoreStrippedTypedState(body, raw)
 		return body
 	}
 	return ""
+}
+
+// restoreStrippedTypedState re-appends the typed state block of raw to body
+// when body no longer carries one but raw did. Stripping a previous
+// `## Previous Checkpoint` appendix can drop the only typed block of a
+// usage-driven checkpoint (its machine state only ever lived in the appendix
+// it replaced); without this the next carry would silently sever the typed
+// chain. When body already carries its own typed block the raw occurrence is
+// the older copy the strip removed and nothing is appended, so the carry never
+// duplicates state.
+func restoreStrippedTypedState(body, raw string) string {
+	if len(typedStateSectionRanges(body)) > 0 {
+		return body
+	}
+	for _, r := range typedStateSectionRanges(raw) {
+		line := typedStateJSONLine(raw[r.contentStart:r.contentEnd])
+		if line == "" {
+			continue
+		}
+		body = strings.TrimSpace(body)
+		if body == "" {
+			return typedStateSectionHeading + "\n" + line
+		}
+		return body + "\n\n" + typedStateSectionHeading + "\n" + line
+	}
+	return body
 }
 
 // latestPriorCheckpointBody returns the display-truncated form of
@@ -96,31 +134,31 @@ func truncateCarryKeepingTypedState(body string, maxChars int) string {
 	if utf8.RuneCountInString(body) <= maxChars {
 		return body
 	}
-	idx := strings.Index(body, typedStateSectionHeading)
-	if idx < 0 || maxChars <= 0 {
+	if maxChars <= 0 {
 		return truncateCheckpointCarryLines(body, maxChars)
 	}
-	line := typedStateJSONLine(body[idx+len(typedStateSectionHeading):])
-	if line == "" {
-		return truncateCheckpointCarryLines(body, maxChars)
-	}
-	kept := truncateCheckpointCarryLines(body[:idx], maxChars)
-	if kept == "" {
-		return typedStateSectionHeading + "\n" + line
-	}
-	return strings.TrimSpace(kept) + "\n" + typedStateSectionHeading + "\n" + line
-}
-
-// typedStateJSONLine returns the first non-empty line after a typed state
-// heading — the machine JSON line the parser reads, kept verbatim (including
-// the "- " bullet the renderer writes) — or "" when the section carries none.
-func typedStateJSONLine(after string) string {
-	for _, candidate := range strings.Split(after, "\n") {
-		if line := strings.TrimSpace(candidate); line != "" {
-			return line
+	// The typed section is located as a standalone heading line, never by the
+	// heading text appearing inside prose; the first such section whose
+	// payload is a JSON document is the machine block to retain. Its heading
+	// and payload are re-appended whole after the bounded natural-language
+	// prelude, so the result never dangles a typed heading without its line.
+	var keepStart int
+	keptJSON := ""
+	for _, r := range typedStateSectionRanges(body) {
+		if line := typedStateJSONLine(body[r.contentStart:r.contentEnd]); line != "" {
+			keepStart = r.headingStart
+			keptJSON = line
+			break
 		}
 	}
-	return ""
+	if keptJSON == "" {
+		return truncateCheckpointCarryLines(body, maxChars)
+	}
+	kept := truncateCheckpointCarryLines(body[:keepStart], maxChars)
+	if kept == "" {
+		return typedStateSectionHeading + "\n" + keptJSON
+	}
+	return strings.TrimSpace(kept) + "\n" + typedStateSectionHeading + "\n" + keptJSON
 }
 
 func truncateCheckpointCarryLines(body string, maxChars int) string {

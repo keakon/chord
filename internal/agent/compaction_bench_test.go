@@ -280,7 +280,7 @@ func BenchmarkModelDrivenCheckpointTypedRender(b *testing.B) {
 			for b.Loop() {
 				summary := a.buildModelDrivenCheckpointSummary(bundle, messages, headSplit, req)
 				content := buildCompactionCheckpointMessage(summary, nil, compactionSummaryModeModelDriven, nil)
-				state, ok := parseCheckpointTypedState(compactionSummaryBody(content))
+				state, ok := typedStateForTest(compactionSummaryBody(content))
 				if !ok || len(state.Decisions) == 0 {
 					b.Fatalf("typed state must survive the render round-trip ok=%v decisions=%d", ok, len(state.Decisions))
 				}
@@ -327,7 +327,7 @@ func TestModelDrivenCheckpointTypedRenderGuard(t *testing.T) {
 	allocs := testing.AllocsPerRun(100, func() {
 		summary := a.buildModelDrivenCheckpointSummary(bundle, messages, headSplit, req)
 		content = buildCompactionCheckpointMessage(summary, nil, compactionSummaryModeModelDriven, nil)
-		state, ok := parseCheckpointTypedState(compactionSummaryBody(content))
+		state, ok := typedStateForTest(compactionSummaryBody(content))
 		if !ok || len(state.Decisions) != typedStateCarryMaxDecisions {
 			t.Fatalf("typed state must round-trip at cap ok=%v decisions=%d", ok, len(state.Decisions))
 		}

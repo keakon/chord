@@ -1461,7 +1461,7 @@ func TestModelDrivenCheckpointCarriesTypedStateAcrossGenerations(t *testing.T) {
 	}
 	// The fresh submission's items precede the carried ones and its stage
 	// metadata overrides the carried one.
-	state, ok := parseCheckpointTypedState(compactionSummaryBody(summary))
+	state, ok := typedStateForTest(compactionSummaryBody(summary))
 	if !ok {
 		t.Fatalf("typed state missing from the new checkpoint: %s", summary)
 	}
@@ -2192,6 +2192,84 @@ func TestValidateCommittedEvidenceRejectsEscalateEvidence(t *testing.T) {
 	id := evidenceItemID(a.evidence.snapshot()[0])
 	if err := a.validateCommittedEvidence(tools.CompactContextArgs{CheckpointKind: "committed", EvidenceRefs: []string{id}}); err == nil {
 		t.Fatal("committed checkpoint should reject escalate evidence")
+	}
+}
+
+// TestValidateCommittedEvidenceJudgesArchivedPackEvidenceByRenderedKind pins
+// the archived half of the cross-generation evidence chain: after an apply
+// archives the negative record's source messages, its ID survives only inside
+// the checkpoint evidence pack. The pack now renders the machine category, so
+// committed acceptance judges carried references by the same rules as live
+// ones — an archived escalate/tool_error cannot upgrade a stage to committed —
+// while a record that only proves ID existence (an older pack format without a
+// classification) cannot support the committed upgrade either.
+func TestValidateCommittedEvidenceJudgesArchivedPackEvidenceByRenderedKind(t *testing.T) {
+	newAgentWithCheckpoint := func(item evidenceItem, content string) (*MainAgent, string) {
+		t.Helper()
+		checkpoint := buildCompactionCheckpointMessage("## Current User Request\n- continue", nil, compactionSummaryModeModelDriven, []evidenceItem{item})
+		a := &MainAgent{tools: tools.NewRegistry(), ctxMgr: ctxmgr.NewManager(10000, 1000)}
+		a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: checkpoint, IsCompactionSummary: true})
+		return a, checkpoint
+	}
+
+	// Archived negative records stay rejected for committed and for observed
+	// claims alike.
+	escalate := buildEvidenceItem(evidenceEscalate, "subagent intervention open", "needed", "tool", "requests intervention")
+	a, checkpoint := newAgentWithCheckpoint(escalate, "")
+	if !strings.Contains(checkpoint, "Evidence Kind: escalate") {
+		t.Fatalf("checkpoint pack must render the machine category:\n%s", checkpoint)
+	}
+	escalateID := evidenceItemID(escalate)
+	if err := a.validateCommittedEvidence(tools.CompactContextArgs{CheckpointKind: "committed", EvidenceRefs: []string{escalateID}}); err == nil {
+		t.Fatal("committed checkpoint over an archived escalate record must be rejected")
+	}
+	if err := a.validateObservedClaimEvidence(tools.CompactContextArgs{
+		ClaimKinds:    map[string]string{"tests pass": "observed"},
+		ClaimEvidence: map[string][]string{"tests pass": {escalateID}},
+	}); err == nil {
+		t.Fatal("observed claim over an archived escalate record must be rejected")
+	}
+
+	toolError := buildEvidenceItem(evidenceToolError, "Go build failure", "blocker", "tool", "undefined: foo")
+	b, _ := newAgentWithCheckpoint(toolError, "")
+	toolErrorID := evidenceItemID(toolError)
+	if err := b.validateCommittedEvidence(tools.CompactContextArgs{CheckpointKind: "committed", EvidenceRefs: []string{toolErrorID}}); err == nil {
+		t.Fatal("committed checkpoint over an archived tool_error record must be rejected")
+	}
+
+	// A positive archived record with a rendered kind still supports the
+	// committed upgrade: that is the primary cross-generation use case.
+	diff := buildEvidenceItem(evidenceToolDiff, "Recent code diff", "needed", "tool", "diff content")
+	c, _ := newAgentWithCheckpoint(diff, "")
+	diffID := evidenceItemID(diff)
+	if err := c.validateCommittedEvidence(tools.CompactContextArgs{CheckpointKind: "committed", EvidenceRefs: []string{diffID}}); err != nil {
+		t.Fatalf("committed checkpoint over an archived positive record must validate: %v", err)
+	}
+
+	// Presence-only proof (an older pack format without the kind line) must
+	// not upgrade to committed, but still resolves for evidence_refs and stays
+	// allowed for observed claims the pack's full record can back.
+	_, diffCheckpoint := newAgentWithCheckpoint(diff, "")
+	var legacyLines []string
+	for _, line := range strings.Split(diffCheckpoint, "\n") {
+		if !strings.HasPrefix(line, "Evidence Kind: ") {
+			legacyLines = append(legacyLines, line)
+		}
+	}
+	legacyContent := strings.Join(legacyLines, "\n")
+	legacyAgent := &MainAgent{tools: tools.NewRegistry(), ctxMgr: ctxmgr.NewManager(10000, 1000)}
+	legacyAgent.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: legacyContent, IsCompactionSummary: true})
+	if err := legacyAgent.validateModelDrivenEvidenceRefs([]string{diffID}); err != nil {
+		t.Fatalf("presence-only pack ID must still resolve as an evidence reference: %v", err)
+	}
+	if err := legacyAgent.validateObservedClaimEvidence(tools.CompactContextArgs{
+		ClaimKinds:    map[string]string{"tests pass": "observed"},
+		ClaimEvidence: map[string][]string{"tests pass": {diffID}},
+	}); err != nil {
+		t.Fatalf("presence-only pack ID must stay allowed for observed claims: %v", err)
+	}
+	if err := legacyAgent.validateCommittedEvidence(tools.CompactContextArgs{CheckpointKind: "committed", EvidenceRefs: []string{diffID}}); err == nil {
+		t.Fatal("committed checkpoint must not upgrade over ID-existence-only proof")
 	}
 }
 

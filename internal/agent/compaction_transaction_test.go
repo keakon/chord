@@ -54,8 +54,8 @@ func contains(text, fragment string) bool {
 }
 
 // TestApplyCompactionDraftCommitsTransactionOnReplaceSuccess drives a real
-// durable apply with a prepared transaction and pins the C3 commit-point
-// contract: once ReplacePrefixAtomic succeeds, the transaction manifest is
+// durable apply with a prepared transaction and pins the durable commit
+// boundary: once ReplacePrefixAtomic succeeds, the transaction manifest is
 // recorded committed with the target fingerprint of the live transcript, so a
 // later crash reconciles the apply as committed and the archive stays
 // referenced.
@@ -110,15 +110,15 @@ func TestApplyCompactionDraftCommitsTransactionOnReplaceSuccess(t *testing.T) {
 }
 
 // TestApplyCompactionDraftLogsOnlyWhenPostCommitAuditWriteFails pins the
-// best-effort tail of the C3 commit point through an independently injectable
-// sibling write: once ReplacePrefixAtomic succeeded and the transaction is
-// recorded committed, a failing post-commit audit write must only log — the
-// apply still returns nil, the runtime settlement still runs, and the
-// still-referenced archive is never deleted. The committed manifest update
-// itself cannot be fault-injected directly: it shares its manifest file (and
-// its atomic rewrite) with the target-fingerprint record written inside the
-// ReplacePrefixAtomic callback, so any durable fault hits that earlier write
-// first and aborts the whole replace. The history-meta audit write right
+// best-effort tail of the durable commit point through an independently
+// injectable sibling write: once ReplacePrefixAtomic succeeded and the
+// transaction is recorded committed, a failing post-commit audit write must
+// only log — the apply still returns nil, the runtime settlement still runs,
+// and the still-referenced archive is never deleted. The committed manifest
+// update itself cannot be fault-injected directly: it shares its manifest file
+// (and its atomic rewrite) with the target-fingerprint record written inside
+// the ReplacePrefixAtomic callback, so any durable fault hits that earlier
+// write first and aborts the whole replace. The history-meta audit write right
 // after the commit is the first best-effort write on this path with an
 // independent file and pins the same log-only contract.
 func TestApplyCompactionDraftLogsOnlyWhenPostCommitAuditWriteFails(t *testing.T) {
@@ -250,6 +250,90 @@ func TestFailedApplyLeavesTransactionAborted(t *testing.T) {
 	// committed.
 	if _, err := os.Stat(compactionTransactionManifestPath(a.sessionDir, txnID)); !os.IsNotExist(err) {
 		t.Fatalf("aborted transaction manifest must be removed, stat err = %v", err)
+	}
+}
+
+// TestApplyCompactionDraftKeepsManifestWhenAppliedSnapshotSaveFails pins the
+// crash-window guarantee on the snapshot side: when every recovery snapshot
+// save of a model-driven apply fails (the applied proposal state and the new
+// interval anchor never become durable), the apply still succeeds and settles,
+// but the committed transaction manifest is kept as the durable proof a
+// restore reconciles against. The stale sweep obeys the same condition: it
+// must not age the manifest out while the snapshot does not record the
+// proposal as applied, and only removes it once the applied state is durable.
+func TestApplyCompactionDraftKeepsManifestWhenAppliedSnapshotSaveFails(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.newTurn()
+	a.requestBatches.reserve(a.sessionEpoch, 0)
+	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "first request"})
+	a.ctxMgr.Append(message.Message{Role: message.RoleAssistant, Content: "first reply"})
+	// The armed proposal is already preparing (the barrier handed it to the
+	// worker), so the apply's applied transition is a legal move whose
+	// snapshot would normally persist the applied record.
+	a.modelDrivenProposal = modelDrivenProposalState{
+		requestID: "call-snap-1",
+		status:    modelDrivenProposalPreparing,
+		reason:    "preparing durable checkpoint",
+	}
+
+	const txnID = "snap-1"
+	manifestPath := compactionTransactionManifestPath(a.sessionDir, txnID)
+	if err := writeCompactionTransactionManifest(a.sessionDir, compactionTransactionManifest{
+		TransactionID: txnID, ProposalID: "call-snap-1", TranscriptIndex: 1, Status: compactionTransactionPrepared,
+	}); err != nil {
+		t.Fatalf("write prepared manifest: %v", err)
+	}
+	// Sabotage every recovery snapshot save: snapshot.json becomes a directory,
+	// so the atomic rename of the temp snapshot file onto it always fails.
+	snapshotPath := filepath.Join(a.sessionDir, "snapshot.json")
+	if err := os.Remove(snapshotPath); err != nil && !os.IsNotExist(err) {
+		t.Fatalf("remove existing snapshot: %v", err)
+	}
+	if err := os.MkdirAll(snapshotPath, 0o755); err != nil {
+		t.Fatalf("sabotage snapshot path: %v", err)
+	}
+
+	draft := &compactionDraft{
+		NewMessages:           []message.Message{{Role: message.RoleUser, Content: "checkpoint content", IsCompactionSummary: true}},
+		HeadSplit:             1,
+		Index:                 1,
+		AbsHistoryPath:        filepath.Join(a.sessionDir, "history-1.md"),
+		AbsHistoryMetaPath:    filepath.Join(a.sessionDir, "history-1.md.status.json"),
+		SummaryMode:           compactionSummaryModeModelDriven,
+		PlanID:                7,
+		Target:                compactionTarget{sessionEpoch: a.sessionEpoch},
+		TransactionID:         txnID,
+		TransactionSessionDir: a.sessionDir,
+	}
+	if err := a.applyCompactionDraft(draft); err != nil {
+		t.Fatalf("apply must still succeed when the applied snapshot cannot be saved: %v", err)
+	}
+	if got := a.ctxMgr.Snapshot()[0].Content; got != "checkpoint content" {
+		t.Fatalf("context head = %q, want the applied checkpoint", got)
+	}
+	if _, err := os.Stat(manifestPath); err != nil {
+		t.Fatalf("committed manifest must be kept while the applied snapshot is not durable, stat err = %v", err)
+	}
+	// The stale sweep agrees: with the snapshot unreadable, the manifest is
+	// still the only proof and must survive even a zero-age sweep.
+	cleanupStalePendingCompactions(a.sessionDir, 0)
+	if _, err := os.Stat(manifestPath); err != nil {
+		t.Fatalf("stale sweep must keep the manifest while the applied state is not durable, stat err = %v", err)
+	}
+
+	// Once a snapshot save lands (the sabotage is removed), the applied record
+	// with this proposal becomes durable and both the apply-time removal
+	// condition and the stale sweep may let the manifest go.
+	if err := os.RemoveAll(snapshotPath); err != nil {
+		t.Fatalf("remove snapshot sabotage: %v", err)
+	}
+	if err := a.saveRecoverySnapshotChecked(); err != nil {
+		t.Fatalf("recovery snapshot must save after the sabotage is removed: %v", err)
+	}
+	cleanupStalePendingCompactions(a.sessionDir, 0)
+	if _, err := os.Stat(manifestPath); !os.IsNotExist(err) {
+		t.Fatalf("manifest must be swept once the snapshot durably records the applied proposal, stat err = %v", err)
 	}
 }
 

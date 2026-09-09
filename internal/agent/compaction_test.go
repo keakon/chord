@@ -6971,6 +6971,121 @@ func TestEvidenceFileRevisionMemoReusesHashOnUnchangedStat(t *testing.T) {
 	}
 }
 
+// TestEvidenceFileRevisionMemoFollowsSymlinkTarget pins the target-following
+// stat semantics of the evidence hash memo: a write/edit evidence path that an
+// external process replaced with a symlink pointing at content identical at
+// replacement time must still invalidate when the symlink's target is later
+// edited or removed. The memo key follows the target like the hash it guards
+// (os.Stat, matching computeFileHash's open): caching under the link's own
+// mtime/size would pin the verdict to metadata that never changes while the
+// target does, and the replacement hash would stay current forever.
+func TestEvidenceFileRevisionMemoFollowsSymlinkTarget(t *testing.T) {
+	dir := t.TempDir()
+	targetPath := filepath.Join(dir, "target.go")
+	path := filepath.Join(dir, "evidence.go")
+	if err := os.WriteFile(targetPath, []byte("v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(targetPath, path); err != nil {
+		t.Fatal(err)
+	}
+	first, exists, err := evidenceFileRevisionMemoGlobal.verifiedHash(path)
+	if err != nil || !exists {
+		t.Fatalf("hash through symlink = %q exists=%v err=%v", first, exists, err)
+	}
+
+	// The target is edited; the symlink itself is untouched. The memo must
+	// re-hash (the target stat changed) and report the new content.
+	if err := os.WriteFile(targetPath, []byte("v2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stamp := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(targetPath, stamp, stamp); err != nil {
+		t.Fatal(err)
+	}
+	second, exists, err := evidenceFileRevisionMemoGlobal.verifiedHash(path)
+	if err != nil || !exists {
+		t.Fatalf("hash after target edit = %q exists=%v err=%v", second, exists, err)
+	}
+	if second == first {
+		t.Fatal("target edit must invalidate the memoized hash instead of reusing the stale one")
+	}
+
+	// Deleting the target makes the whole path unresolvable even though the
+	// link itself is untouched: the recorded revision cannot be current.
+	if err := os.Remove(targetPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists, err := evidenceFileRevisionMemoGlobal.verifiedHash(path); err != nil || exists {
+		t.Fatalf("deleted symlink target must read as not existing exists=%v err=%v", exists, err)
+	}
+}
+
+// TestRefreshEvidenceValidityInvalidatesReplacedSymlinkTarget drives the
+// reported scenario end to end at the validity level: a write/edit evidence
+// path is externally replaced by a symlink to content identical at replacement
+// time (so the evidence stays valid), and a later edit or removal of the
+// symlink's target — while the link itself never changes — must invalidate the
+// evidence instead of reusing a hash the link's own metadata still matches.
+func TestRefreshEvidenceValidityInvalidatesReplacedSymlinkTarget(t *testing.T) {
+	projectRoot := t.TempDir()
+	tracked := filepath.Join(projectRoot, "tracked.go")
+	alias := filepath.Join(projectRoot, "alias.go")
+	if err := os.WriteFile(tracked, []byte("v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := &MainAgent{projectRoot: projectRoot, tools: tools.NewRegistry(), ctxMgr: ctxmgr.NewManager(10000, 1000)}
+	hash, _, _, err := verifiedCurrentFileHash(tracked)
+	if err != nil {
+		t.Fatalf("hash %s: %v", tracked, err)
+	}
+	a.evidence.add(evidenceItem{Kind: evidenceToolDiff, SourceID: "call-1", Excerpt: "diff", Revisions: map[string]string{tracked: hash}, Validity: evidenceValidityValid})
+	a.refreshEvidenceValidity()
+	if got := a.evidence.snapshot()[0].Validity; got != evidenceValidityValid {
+		t.Fatalf("real-file evidence must start valid, got %q", got)
+	}
+
+	// External replacement: the tracked path becomes a symlink to a different
+	// file carrying the same content. The evidence stays valid.
+	if err := os.Remove(tracked); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(alias, []byte("v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(alias, tracked); err != nil {
+		t.Fatal(err)
+	}
+	a.refreshEvidenceValidity()
+	if got := a.evidence.snapshot()[0].Validity; got != evidenceValidityValid {
+		t.Fatalf("same-content symlink replacement must keep the evidence valid, got %q", got)
+	}
+
+	// Editing only the symlink's target invalidates the evidence.
+	if err := os.WriteFile(alias, []byte("v2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stamp := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(alias, stamp, stamp); err != nil {
+		t.Fatal(err)
+	}
+	a.refreshEvidenceValidity()
+	if got := a.evidence.snapshot()[0].Validity; got != evidenceValidityInvalidated {
+		t.Fatalf("edited symlink target must invalidate the evidence, got %q", got)
+	}
+
+	// Deleting the target (the link remains) also invalidates.
+	item := &a.evidence.items[0]
+	item.Validity = evidenceValidityValid
+	if err := os.Remove(alias); err != nil {
+		t.Fatal(err)
+	}
+	a.refreshEvidenceValidity()
+	if got := a.evidence.snapshot()[0].Validity; got != evidenceValidityInvalidated {
+		t.Fatalf("deleted symlink target must invalidate the evidence, got %q", got)
+	}
+}
+
 func TestCompactionPromptInputsDegradeByAuthority(t *testing.T) {
 	keyFiles := []string{"key"}
 	todos := []tools.TodoItem{{ID: "todo"}}
@@ -7050,8 +7165,8 @@ func (p *compactionPromptCaptureProvider) InvalidateRouting(string) {}
 
 // TestSummarizeCompactionHeadSendsExactlyTheBudgetedInputs drives the real
 // caller (summarizeCompactionHead) into the budget-fit degradation path and
-// pins the C2 fix: the prompt sent to the compaction model must be assembled
-// from the degraded auxiliary lists the admission gate accepted, not from the
+// pins that the prompt sent to the compaction model is assembled from the
+// degraded auxiliary lists the admission gate accepted, never from the
 // original full lists. Only an oversized auxiliary set forces a degradation,
 // and the full-lists prompt must then exceed the reserved budget while the
 // sent (degraded) prompt fits it.
@@ -7139,11 +7254,11 @@ func TestSummarizeCompactionHeadSendsExactlyTheBudgetedInputs(t *testing.T) {
 	}
 }
 
-// TestFitCompactionInputReturnsTheInputsUsedForPromptAssembly pins the C2 fix
-// at the admission boundary: when degradation is needed, the returned inputs
-// must be the degraded ones, and the prompt assembled from them must fit the
-// reserved budget. A caller that ignored the returned inputs and rebuilt the
-// prompt from the original full lists would exceed that budget.
+// TestFitCompactionInputReturnsTheInputsUsedForPromptAssembly pins the
+// admission boundary: when degradation is needed, the returned inputs must be
+// the degraded ones, and the prompt assembled from them must fit the reserved
+// budget. A caller that ignored the returned inputs and rebuilt the prompt
+// from the original full lists would exceed that budget.
 func TestFitCompactionInputReturnsTheInputsUsedForPromptAssembly(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)

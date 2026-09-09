@@ -256,6 +256,93 @@ func TestPriorCheckpointSurfacedInSummarizePrompt(t *testing.T) {
 // appends that checkpoint's durable body verbatim as the final section, so the
 // structured content the first checkpoint established is referenced
 // deterministically instead of being left to the summarizer's discretion.
+func TestPriorCheckpointCarryDoesNotConsumeProseQuotingTheTypedHeading(t *testing.T) {
+	// Prose that merely quotes the typed-state heading — inside a decision, a
+	// claim key, or a free line — is ordinary body text: parsing must not read
+	// it as the machine block, and the carry must keep it verbatim instead of
+	// deleting it.
+	body := "## Current User Request\n- finish the migration\n\n## Key Decisions\n- keep the literal `## Typed Checkpoint State` marker inside this decision\n\n## Active Objective\n- land it\n\n## Next Step\n- run the focused tests"
+	msg := checkpointMessageForCarryTest(body, nil)
+	if got := latestPriorCheckpointBody([]message.Message{msg}); got != body {
+		t.Fatalf("carry must preserve prose quoting the typed heading verbatim, got:\n%s", got)
+	}
+	if _, found, malformed := typedStateFromBody(body); found || malformed {
+		t.Fatalf("prose-only mention must not parse as a typed block found=%v malformed=%v", found, malformed)
+	}
+}
+
+func TestTypedStateSectionLocatedByStandaloneHeadingLine(t *testing.T) {
+	typed := renderTypedStateJSON(checkpointTypedState{Decisions: []string{"d1: real decision"}})
+	// Mid-line mentions of the heading text appear in prose and even inside a
+	// claim key rendered into the JSON payload; only the standalone heading
+	// line that opens the real section may start the machine block.
+	body := "## Key Decisions\n- the plan quotes `## Typed Checkpoint State` mid-sentence\n\n" +
+		"## Typed Checkpoint State\n" + typed
+	state, found, malformed := typedStateFromBody(body)
+	if !found || malformed {
+		t.Fatalf("real typed section must parse past mid-line prose found=%v malformed=%v:\n%s", found, malformed, body)
+	}
+	if !containsString(state.Decisions, "d1: real decision") {
+		t.Fatalf("decisions = %v, want the real block's decision", state.Decisions)
+	}
+
+	claimBody := "## Typed Checkpoint State\n" + renderTypedStateJSON(checkpointTypedState{Claims: map[string]checkpointClaim{
+		"## Typed Checkpoint State": {Kind: "observed", EvidenceRefs: []string{"ev-1"}, Status: typedClaimStatusActive},
+	}})
+	state, found, malformed = typedStateFromBody(claimBody)
+	if !found || malformed {
+		t.Fatalf("claim key equal to the heading text must parse as data, not section marker found=%v malformed=%v", found, malformed)
+	}
+	if got := state.Claims["## Typed Checkpoint State"]; got.Kind != "observed" || len(got.EvidenceRefs) != 1 {
+		t.Fatalf("heading-text claim key lost: %#v", got)
+	}
+
+	// A prose doppelgänger that renders the heading as its own line ahead of
+	// the real section is only a candidate; the parser skips it and reads the
+	// section whose payload is JSON.
+	fake := "## Key Decisions\n- summary\n\n## Typed Checkpoint State\n- plain prose that is not a JSON payload\n\n## Active Objective\n- still going\n\n## Typed Checkpoint State\n" + typed
+	state, found, malformed = typedStateFromBody(fake)
+	if !found || malformed {
+		t.Fatalf("real typed section must win over a prose doppelgänger found=%v malformed=%v:\n%s", found, malformed, fake)
+	}
+	if !containsString(state.Decisions, "d1: real decision") {
+		t.Fatalf("doppelgänger shadowed the real block: %v", state.Decisions)
+	}
+
+	// A carry that must truncate keeps the real JSON payload, never the prose
+	// doppelgänger line.
+	oversized := "## Active Objective\n- work\n\n" + fake + "\n" + strings.Repeat("- filler that pushes the body past the carry budget\n", 40)
+	carried := truncateCarryKeepingTypedState(oversized, compactCheckpointCarryMaxChars)
+	state, found, malformed = typedStateFromBody(carried)
+	if !found || malformed {
+		t.Fatalf("truncated carry must retain the real typed block found=%v malformed=%v:\n%s", found, malformed, carried)
+	}
+	if !containsString(state.Decisions, "d1: real decision") {
+		t.Fatalf("truncated carry lost the real decision: %v", state.Decisions)
+	}
+}
+
+func TestPriorCheckpointCarryKeepsRealTypedBlockPastQuotedHeading(t *testing.T) {
+	// End to end through the display carry: a model-driven checkpoint whose
+	// prose quotes the heading text and whose real typed section sits beyond
+	// the rune cap must still carry the parseable machine block.
+	typed := renderTypedStateJSON(checkpointTypedState{Decisions: []string{"carried-d-1"}})
+	filler := strings.Repeat("- a natural-language line quoted with `## Typed Checkpoint State` inside it\n", 40)
+	summary := "## Current User Request\n- continue\n\n## Key Decisions\n" + filler + "## Typed Checkpoint State\n" + typed
+	if runeCount(summary) <= compactCheckpointCarryMaxChars {
+		t.Fatal("fixture body must exceed the display carry cap")
+	}
+	msg := checkpointMessageForCarryTest(summary, nil)
+	got := latestPriorCheckpointBody([]message.Message{msg})
+	state, found, malformed := typedStateFromBody(got)
+	if !found || malformed {
+		t.Fatalf("display carry must keep the real typed block parseable found=%v malformed=%v:\n%s", found, malformed, got)
+	}
+	if !containsString(state.Decisions, "carried-d-1") {
+		t.Fatalf("carried decision lost: %v", state.Decisions)
+	}
+}
+
 func TestCompactionDraftCarriesPriorCheckpointBody(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)

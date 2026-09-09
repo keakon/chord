@@ -77,9 +77,8 @@ func TestCompletionEnvelopeLegacyJSONStillRestores(t *testing.T) {
 	}
 }
 
-// The following two tests migrated back from subagent_completion_validation_test.go
-// (deleted with the verification gate in 289a1cd0): the pairing schema and the
-// pairing-rejection text are live typed-result behavior.
+// The following two tests cover the live typed-result contract: the pairing
+// schema and its rejection text.
 
 // TestCompleteParametersSchemaEncodesResultPairing pins the structural form of
 // the Complete argument schema: the result fields must form two anyOf groups —

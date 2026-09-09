@@ -86,19 +86,23 @@ func (a *MainAgent) requeueMailboxMessagesAfterCompaction(replayIDs []string) {
 	if a == nil || len(replayIDs) == 0 {
 		return
 	}
-	msgs, err := loadSubAgentMailboxMessages(strings.TrimSpace(a.sessionDir))
-	if err != nil {
-		log.Errorf("reload mailbox log after compaction dropped transcript rows: %v", err)
-		return
-	}
-	byID := make(map[string]SubAgentMailboxMessage, len(msgs))
-	for _, msg := range msgs {
-		if id := strings.TrimSpace(msg.MessageID); id != "" {
-			byID[id] = msg
-		}
-	}
 	for _, id := range replayIDs {
-		msg, ok := byID[id]
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		// Reuse the spool index / per-record loader instead of re-reading the
+		// whole mailbox log for a handful of ids: loadSpooledMailbox skips
+		// consumed records, rebuilds the shared index only when a write left
+		// it stale, and reads exactly the record's own line. A reload failure
+		// leaves the record unconsumed in the log, where a future restore
+		// replays it — the replace has already committed, so nothing here may
+		// fail the apply.
+		msg, ok, err := a.loadSpooledMailbox(id)
+		if err != nil {
+			log.Warnf("failed to reload mailbox %s after compaction dropped its transcript row; the message stays unconsumed for a future restore: %v", id, err)
+			continue
+		}
 		if !ok {
 			log.Warnf("compaction dropped the transcript row of mailbox %s but the mailbox log holds no record; the message stays unconsumed for a future restore", id)
 			continue
@@ -112,6 +116,6 @@ func (a *MainAgent) requeueMailboxMessagesAfterCompaction(replayIDs []string) {
 		if a.hasQueuedMailboxMessage(id) {
 			continue
 		}
-		a.enqueueRestoredMailboxMessage(msg)
+		a.enqueueRestoredMailboxMessage(*msg)
 	}
 }

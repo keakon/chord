@@ -50,11 +50,11 @@ func TestHandleAgentNotifyBuildsStructuredNotice(t *testing.T) {
 	}
 }
 
-// TestHandleAgentNotifyCarriesExplicitKindToDurableRow pins the W2 contract
-// that an agent notify with an explicit kind stays non-progress on the durable
-// mailbox row (not just on the live AgentNotifyEvent). The durable row feeds
-// retention (compactSubAgentMailboxLogs keeps unconsumed non-progress rows)
-// and restore-time card classification, so a kind that vanished on the way to
+// TestHandleAgentNotifyCarriesExplicitKindToDurableRow pins that an agent
+// notify with an explicit kind stays non-progress on the durable mailbox row
+// (not just on the live AgentNotifyEvent). The durable row feeds retention
+// (compactSubAgentMailboxLogs keeps unconsumed non-progress rows) and
+// restore-time card classification, so a kind that vanished on the way to
 // disk would silently reclassify a blocked/risk notice as a progress snapshot.
 func TestHandleAgentNotifyCarriesExplicitKindToDurableRow(t *testing.T) {
 	a, sub := newMixedBatchTestSubAgent(t)

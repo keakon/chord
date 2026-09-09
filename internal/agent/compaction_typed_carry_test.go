@@ -20,7 +20,7 @@ func TestParseTypedStateRoundTripsThroughCheckpointBody(t *testing.T) {
 		Kind:         "provisional",
 	}
 	body := "## Key Decisions\n- keep the parser contract\n\n## Typed Checkpoint State\n" + renderTypedStateJSON(state)
-	parsed, ok := parseCheckpointTypedState(body)
+	parsed, ok := typedStateForTest(body)
 	if !ok {
 		t.Fatal("typed state not found in body")
 	}
@@ -33,22 +33,23 @@ func TestParseTypedStateRoundTripsThroughCheckpointBody(t *testing.T) {
 	if parsed.StageStatus != "candidate" || parsed.Kind != "provisional" || parsed.StageID != "impl" {
 		t.Fatalf("stage = %+v", parsed)
 	}
-	if _, ok := parseCheckpointTypedState("## Key Decisions\n- plain body"); ok {
+	if _, ok := typedStateForTest("## Key Decisions\n- plain body"); ok {
 		t.Fatal("body without a typed block must not parse")
 	}
-	if _, ok := parseCheckpointTypedState(""); ok {
+	if _, ok := typedStateForTest(""); ok {
 		t.Fatal("empty body must not parse")
 	}
 }
 
-func TestParseTypedStateIgnoresLegacyConstraintsKey(t *testing.T) {
-	// The legacy block declared a "constraints" key that was never populated.
-	// Old checkpoints that happen to carry it must still parse (the field is
-	// ignored), so a chain spanning the format change keeps its decisions.
-	body := "## Typed Checkpoint State\n- {\"constraints\":[\"c1\"],\"decisions\":[\"d1\"]}"
-	state, ok := parseCheckpointTypedState(body)
+func TestParseTypedStateIgnoresUnknownJSONFields(t *testing.T) {
+	// A block that carries a JSON field the typed decoder does not declare is
+	// still machine state: encoding/json ignores unknown fields, so a future
+	// key added by a newer writer must never make an old reader drop the
+	// decisions it does understand.
+	body := "## Typed Checkpoint State\n- {\"unknown_key\":[\"x\"],\"decisions\":[\"d1\"]}"
+	state, ok := typedStateForTest(body)
 	if !ok {
-		t.Fatal("legacy typed state must parse")
+		t.Fatal("typed state with an unknown field must parse")
 	}
 	if strings.Join(state.Decisions, "|") != "d1" {
 		t.Fatalf("decisions = %v, want [d1]", state.Decisions)
@@ -141,7 +142,7 @@ func TestRenderTypedStateBoundsOversizedCarriedItem(t *testing.T) {
 	if strings.Contains(rendered, strings.Repeat("x", typedStateCarryMaxItemRunes+10)) {
 		t.Fatal("truncated item leaked beyond the bound")
 	}
-	parsed, ok := parseCheckpointTypedState("## Typed Checkpoint State\n" + rendered)
+	parsed, ok := typedStateForTest("## Typed Checkpoint State\n" + rendered)
 	if !ok || !strings.HasSuffix(parsed.Decisions[0], typedStateItemTruncatedSuffix) {
 		t.Fatalf("truncated item must parse back with its marker: %+v ok=%v", parsed, ok)
 	}
@@ -153,7 +154,7 @@ func TestRenderTypedStateBoundsOversizedCarriedItem(t *testing.T) {
 	if !strings.Contains(out, typedStateItemTruncatedSuffix) {
 		t.Fatalf("multibyte item must be truncated: %s", out)
 	}
-	parsed, ok = parseCheckpointTypedState("## Typed Checkpoint State\n" + out)
+	parsed, ok = typedStateForTest("## Typed Checkpoint State\n" + out)
 	if !ok || !utf8.ValidString(parsed.Decisions[0]) {
 		t.Fatalf("truncated multibyte item must stay valid UTF-8: %+v ok=%v", parsed, ok)
 	}
@@ -181,7 +182,7 @@ func TestCheckpointBodyTypedStateSurvivesGenerationChain(t *testing.T) {
 	// 3 carries all three, newest submission first.
 	assertDecisions := func(summary string, want ...string) {
 		t.Helper()
-		state, ok := parseCheckpointTypedState(compactionSummaryBody(summary))
+		state, ok := typedStateForTest(compactionSummaryBody(summary))
 		if !ok {
 			t.Fatalf("typed block missing from generation:\n%s", summary)
 		}
@@ -207,6 +208,14 @@ func containsString(items []string, want string) bool {
 	return false
 }
 
+// typedStateForTest is the two-value convenience form of typedStateFromBody
+// the tests use: a parseable typed block (found and not malformed). Blocks
+// that must distinguish the malformed case call typedStateFromBody directly.
+func typedStateForTest(body string) (checkpointTypedState, bool) {
+	state, found, malformed := typedStateFromBody(body)
+	return state, found && !malformed
+}
+
 func TestTypedClaimsCarryIdentityAndStatus(t *testing.T) {
 	prior := checkpointTypedState{Claims: map[string]checkpointClaim{
 		"tests pass": {Kind: "observed", EvidenceRefs: []string{"ev-old"}, Status: "active"},
@@ -223,7 +232,7 @@ func TestTypedClaimsCarryIdentityAndStatus(t *testing.T) {
 		t.Fatalf("new claim status = %q", got.Status)
 	}
 	encoded := renderTypedStateJSON(merged)
-	decoded, ok := parseCheckpointTypedState("## Typed Checkpoint State\n" + encoded)
+	decoded, ok := typedStateForTest("## Typed Checkpoint State\n" + encoded)
 	if !ok || decoded.Claims["tests pass"].Status != "superseded" {
 		t.Fatalf("claim state did not round-trip: %#v", decoded.Claims)
 	}
@@ -431,7 +440,7 @@ func TestCrossGenerationCarriedClaimsSurviveWithoutRestatement(t *testing.T) {
 	}
 	second := a.buildModelDrivenCheckpointSummary(modelDrivenBarrierSnapshot{snapshot: two}, two, len(two), round2Req)
 
-	state, ok := parseCheckpointTypedState(compactionSummaryBody(second))
+	state, ok := typedStateForTest(compactionSummaryBody(second))
 	if !ok {
 		t.Fatalf("round-2 checkpoint must carry a typed block:\n%s", second)
 	}
@@ -487,7 +496,7 @@ func TestCarriedInvalidatedClaimStaysInvalidatedWithoutItsEvidence(t *testing.T)
 		{Role: message.RoleUser, Content: "second request"},
 	}
 	second := a.buildModelDrivenCheckpointSummary(modelDrivenBarrierSnapshot{snapshot: two}, two, len(two), round2Req)
-	state, ok := parseCheckpointTypedState(compactionSummaryBody(second))
+	state, ok := typedStateForTest(compactionSummaryBody(second))
 	if !ok {
 		t.Fatalf("round-2 checkpoint must carry a typed block:\n%s", second)
 	}
@@ -518,7 +527,7 @@ func TestRestatedInvalidatedClaimReadsFreshActive(t *testing.T) {
 		{Role: message.RoleAssistant, Content: "first work"},
 	}
 	first := a.buildModelDrivenCheckpointSummary(modelDrivenBarrierSnapshot{snapshot: one}, one, len(one), round1Req)
-	if state, ok := parseCheckpointTypedState(compactionSummaryBody(first)); !ok || state.Claims["claims A works"].Status != "invalidated" {
+	if state, ok := typedStateForTest(compactionSummaryBody(first)); !ok || state.Claims["claims A works"].Status != "invalidated" {
 		t.Fatalf("round-1 checkpoint must carry the claim as invalidated:\n%s", first)
 	}
 
@@ -538,7 +547,7 @@ func TestRestatedInvalidatedClaimReadsFreshActive(t *testing.T) {
 		{Role: message.RoleUser, Content: "second request"},
 	}
 	second := a.buildModelDrivenCheckpointSummary(modelDrivenBarrierSnapshot{snapshot: two, evidenceItems: []evidenceItem{{Key: "ev-new-1"}}}, two, len(two), round2Req)
-	state, ok := parseCheckpointTypedState(compactionSummaryBody(second))
+	state, ok := typedStateForTest(compactionSummaryBody(second))
 	if !ok {
 		t.Fatalf("round-2 checkpoint must carry a typed block:\n%s", second)
 	}
@@ -688,7 +697,7 @@ func TestMergeTypedClaimsBoundsCarriedSetAndDisclosesOmission(t *testing.T) {
 	if !strings.Contains(body, typedStateClaimsOmittedNote) {
 		t.Fatalf("claim omission must be disclosed in the checkpoint:\n%s", body)
 	}
-	if _, ok := parseCheckpointTypedState(body); !ok {
+	if _, ok := typedStateForTest(body); !ok {
 		t.Fatalf("disclosure note must not break the typed block:\n%s", body)
 	}
 }
@@ -734,7 +743,7 @@ func TestTypedCarrySurvivesUsageSummaryBetweenModelDrivenCheckpoints(t *testing.
 	}}
 	three := []message.Message{firstMsg, usageMsg, {Role: message.RoleUser, Content: "second request"}}
 	third := a.buildModelDrivenCheckpointSummary(modelDrivenBarrierSnapshot{snapshot: three}, three, len(three), round3Req)
-	state, ok := parseCheckpointTypedState(compactionSummaryBody(third))
+	state, ok := typedStateForTest(compactionSummaryBody(third))
 	if !ok {
 		t.Fatalf("round-3 checkpoint must carry a typed block:\n%s", third)
 	}
@@ -784,7 +793,7 @@ func TestTypedCarryRecoveredFromUsageCheckpointAppendix(t *testing.T) {
 	}}
 	snapshot := []message.Message{usageMsg, {Role: message.RoleUser, Content: "second request"}}
 	third := a.buildModelDrivenCheckpointSummary(modelDrivenBarrierSnapshot{snapshot: snapshot}, snapshot, len(snapshot), req)
-	state, ok := parseCheckpointTypedState(compactionSummaryBody(third))
+	state, ok := typedStateForTest(compactionSummaryBody(third))
 	if !ok {
 		t.Fatalf("round-3 checkpoint must carry a typed block:\n%s", third)
 	}
@@ -796,6 +805,106 @@ func TestTypedCarryRecoveredFromUsageCheckpointAppendix(t *testing.T) {
 	}
 	if state.StageID != "impl" || state.StageStatus != "candidate" {
 		t.Fatalf("carried stage must merge from the appendix: %+v", state)
+	}
+}
+
+// TestTypedStateSurvivesTwoRealGenericAppliesIntoModelDriven drives the typed
+// carry through real generic build + apply rounds: a model-driven checkpoint
+// that carries typed state is archived by a usage-driven apply, then archived
+// again by a second usage-driven apply, and only then does a model-driven
+// generation merge the carried state. Each usage apply really replaces the
+// transcript (ReplacePrefixAtomic), so the model-driven checkpoint of round 0
+// is gone from the live context after the first usage apply and its typed
+// block can only survive inside the carried `## Previous Checkpoint` appendix
+// chain. A generic carry that stripped the appendix before extracting the
+// typed state would silently sever the chain by the second usage round.
+func TestTypedStateSurvivesTwoRealGenericAppliesIntoModelDriven(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.newTurn()
+	a.requestBatches.reserve(a.sessionEpoch, 0)
+
+	// Round 0: real context plus a model-driven checkpoint carrying typed
+	// state (a decision and an observed claim over archived evidence).
+	mdSummary := "## Current User Request\n- finish the loader\n\n## Active Objective\n- port it\n\n## Key Decisions\n- fresh loader note\n\n## Typed Checkpoint State\n" +
+		renderTypedStateJSON(checkpointTypedState{
+			Decisions:   []string{"d1: loader port complete"},
+			StageID:     "impl",
+			StageStatus: "candidate",
+			Kind:        "provisional",
+		})
+	mdMsg := message.Message{
+		Role:                  message.RoleUser,
+		Content:               buildCompactionCheckpointMessage(mdSummary, nil, compactionSummaryModeModelDriven, nil),
+		IsCompactionSummary:   true,
+		CompactionSummaryMode: compactionSummaryModeModelDriven,
+	}
+	for i := 0; i < 4; i++ {
+		a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: fmt.Sprintf("base message %d", i)})
+	}
+	a.ctxMgr.Append(mdMsg)
+
+	genericApply := func(planID uint64) message.Message {
+		t.Helper()
+		snapshot := a.ctxMgr.Snapshot()
+		draft, err := a.produceCompactionDraftAsync(t.Context(), snapshot, false, planID,
+			compactionTarget{sessionEpoch: a.sessionEpoch}, len(snapshot), compactionProfileArchival,
+			snapshot[0].Content, nil, a.captureCompactionArchiveMeta())
+		if err != nil {
+			t.Fatalf("produce usage draft: %v", err)
+		}
+		if draft.Skip || len(draft.NewMessages) == 0 {
+			t.Fatalf("unexpected usage draft: %+v", draft)
+		}
+		if err := a.applyCompactionDraft(draft); err != nil {
+			t.Fatalf("apply usage draft: %v", err)
+		}
+		applied := a.ctxMgr.Snapshot()
+		if len(applied) != 1 {
+			t.Fatalf("usage apply must leave exactly the checkpoint, got %d messages", len(applied))
+		}
+		return applied[0]
+	}
+
+	// First generic build + apply archives the model-driven checkpoint; the
+	// typed JSON must survive inside the carried appendix of the new usage
+	// checkpoint.
+	cp1 := genericApply(1)
+	if !strings.Contains(cp1.Content, "d1: loader port complete") {
+		t.Fatalf("first usage checkpoint must carry the typed state in its appendix:\n%s", cp1.Content)
+	}
+
+	// Second generic build + apply archives the first usage checkpoint. The
+	// generic carry strips the previous `## Previous Checkpoint` appendix
+	// before re-carrying; the typed state it contained must be extracted and
+	// re-appended as its own machine block instead of being stripped away.
+	for i := 0; i < 3; i++ {
+		a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: fmt.Sprintf("continuation message %d", i)})
+	}
+	cp2 := genericApply(2)
+	if !strings.Contains(cp2.Content, "d1: loader port complete") {
+		t.Fatalf("second usage checkpoint must keep the typed state across the appendix strip:\n%s", cp2.Content)
+	}
+
+	// A following model-driven generation merges the typed state out of the
+	// second usage checkpoint instead of silently losing the round-0
+	// decisions.
+	head := a.ctxMgr.Snapshot()
+	req := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{
+		ActiveObjective: "continue",
+		NextStep:        "go",
+		Decisions:       []string{"fresh decision"},
+	}}
+	third := a.buildModelDrivenCheckpointSummary(modelDrivenBarrierSnapshot{snapshot: head}, head, len(head), req)
+	state, found, malformed := typedStateFromBody(compactionSummaryBody(third))
+	if !found || malformed {
+		t.Fatalf("model-driven generation after two usage applies must carry a parseable typed block found=%v malformed=%v:\n%s", found, malformed, third)
+	}
+	if !containsString(state.Decisions, "d1: loader port complete") {
+		t.Fatalf("round-0 decision must survive two real generic applies: %v", state.Decisions)
+	}
+	if state.Decisions[0] != "fresh decision" {
+		t.Fatalf("fresh decision must lead: %v", state.Decisions)
 	}
 }
 
@@ -823,7 +932,7 @@ func TestRestatedClaimWithArchivedEvidenceIsDemoted(t *testing.T) {
 		{Role: message.RoleAssistant, Content: "first work"},
 	}
 	summary := a.buildModelDrivenCheckpointSummary(modelDrivenBarrierSnapshot{snapshot: snapshot}, snapshot, len(snapshot), req)
-	state, ok := parseCheckpointTypedState(compactionSummaryBody(summary))
+	state, ok := typedStateForTest(compactionSummaryBody(summary))
 	if !ok {
 		t.Fatalf("checkpoint must carry a typed block:\n%s", summary)
 	}
@@ -970,7 +1079,7 @@ func TestTypedCarrySurvivesOverLimitAppendixThroughUsageSummary(t *testing.T) {
 	}}
 	snapshot := []message.Message{usageMsg, {Role: message.RoleUser, Content: "second request"}}
 	third := a.buildModelDrivenCheckpointSummary(modelDrivenBarrierSnapshot{snapshot: snapshot}, snapshot, len(snapshot), req)
-	thirdState, ok := parseCheckpointTypedState(compactionSummaryBody(third))
+	thirdState, ok := typedStateForTest(compactionSummaryBody(third))
 	if !ok {
 		t.Fatalf("round-3 checkpoint must carry a typed block:\n%s", third)
 	}

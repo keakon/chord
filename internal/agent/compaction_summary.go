@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/keakon/chord/internal/ctxmgr"
@@ -443,6 +444,13 @@ func validateCompactionSummary(summary string) error {
 var (
 	compactionMarkdownHeadingLineRe      = regexp.MustCompile(`(?m)^##\s+`)
 	compactionRequiredHeadingLineRegexps = buildCompactionRequiredHeadingLineRegexps()
+	// extraHeadingLineRegexps caches compiled full-line heading patterns for
+	// headings outside compactionRequiredHeadings (for example the typed
+	// checkpoint state section). The pattern is compiled once per heading and
+	// reused, so parsing a typed block does not allocate a fresh regexp on
+	// every checkpoint read.
+	extraHeadingLineRegexpsMu sync.Mutex
+	extraHeadingLineRegexps   = map[string]*regexp.Regexp{}
 )
 
 func buildCompactionRequiredHeadingLineRegexps() map[string]*regexp.Regexp {
@@ -604,7 +612,19 @@ func compactionHeadingPositions(summary string) []int {
 func findMarkdownHeadingLine(summary, heading string) int {
 	pattern := compactionRequiredHeadingLineRegexps[heading]
 	if pattern == nil {
-		return -1
+		// A heading outside the required section set (for example the typed
+		// checkpoint state section) matches the same full-line rule: the
+		// heading must start a line at column zero and be the line's entire
+		// content. A mid-prose occurrence of the heading text can therefore
+		// never be mistaken for the section. The pattern is cached, not
+		// recompiled per lookup.
+		extraHeadingLineRegexpsMu.Lock()
+		pattern = extraHeadingLineRegexps[heading]
+		if pattern == nil {
+			pattern = regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(heading) + `\s*$`)
+			extraHeadingLineRegexps[heading] = pattern
+		}
+		extraHeadingLineRegexpsMu.Unlock()
 	}
 	loc := pattern.FindStringIndex(summary)
 	if loc == nil {

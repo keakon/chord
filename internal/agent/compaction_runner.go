@@ -442,13 +442,19 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	}
 	headSplit := d.HeadSplit
 	if d.SummaryMode == compactionSummaryModeModelDriven && d.RuntimeGeneration > 0 {
-		currentGeneration := a.currentRequestBatch(a.ctxMgr.Snapshot())
-		if currentGeneration != d.RuntimeGeneration {
+		// One transcript snapshot serves both staleness guards; the runtime
+		// input capture below fetches only the four state slices the
+		// fingerprint hashes (never the full barrier bundle), so the apply
+		// never rebuilds the barrier for a fingerprint re-check.
+		currentSnapshot := a.ctxMgr.Snapshot()
+		if currentGeneration := a.currentRequestBatch(currentSnapshot); currentGeneration != d.RuntimeGeneration {
 			return fmt.Errorf("model-driven compaction draft is stale: runtime generation changed from %d to %d; new input was received after the checkpoint was prepared — process that input first, then retry compact_context", d.RuntimeGeneration, currentGeneration)
 		}
-		currentBundle := a.captureModelDrivenBarrierSnapshot(a.ctxMgr.Snapshot())
-		if d.RuntimeStateFingerprint != "" && currentBundle.runtimeStateFingerprint != d.RuntimeStateFingerprint {
-			return fmt.Errorf("model-driven compaction draft is stale: runtime state fingerprint changed; new input or state arrived after the checkpoint was prepared — process the new state first, then retry compact_context")
+		if d.RuntimeStateFingerprint != "" {
+			currentRuntime := a.captureModelDrivenRuntimeInput()
+			if modelDrivenRuntimeInputFingerprint(currentRuntime) != d.RuntimeStateFingerprint {
+				return fmt.Errorf("model-driven compaction draft is stale: runtime state fingerprint changed; new input or state arrived after the checkpoint was prepared — process the new state first, then retry compact_context")
+			}
 		}
 	}
 	if len(d.SourceRefs) > 0 {
@@ -630,16 +636,34 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 		a.llmClient.InvalidateRouting("context_compacted")
 	}
 	a.ctxMgr.ClearLastTokenUsage()
-	a.saveRecoverySnapshot()
+	// A model-driven apply's manifest removal is gated on durable evidence
+	// that the applied proposal state and the new interval anchor were
+	// actually persisted: the recovery snapshot carries both, and once it is
+	// durably saved the committed manifest has no further reconcile role. If
+	// the save fails, the apply still succeeded — nothing below may fail it —
+	// but the manifest stays as the crash-window proof a restore reconciles
+	// against. Other apply modes keep the best-effort save: their manifests
+	// carry no proposal record to prove, so they are removed unconditionally
+	// below.
+	appliedSettlementDurable := true
+	if d.SummaryMode == compactionSummaryModeModelDriven {
+		if err := a.saveRecoverySnapshotChecked(); err != nil {
+			appliedSettlementDurable = false
+			log.Warnf("applied model-driven checkpoint but its recovery snapshot could not be saved; keeping the transaction manifest as the crash-window proof transaction_id=%v error=%v", d.TransactionID, err)
+		}
+	} else {
+		a.saveRecoverySnapshot()
+	}
 	a.clearUsageDrivenAutoCompactRequest()
 	a.resetAutoCompactionFailureState()
-	// The committed transaction record has served its purpose: the
-	// crash-window reconciliation (restore reconcileCompactionTransactions
-	// plus the model-driven proposal fix) only ever needs it while the apply
-	// settlement did not become durable, which is exactly the case where this
-	// removal never ran. Removing it here keeps terminal manifests from
-	// accumulating in the session directory with every compaction.
-	if d.TransactionID != "" {
+	// The committed transaction record has served its purpose once the apply
+	// settlement is durable: the crash-window reconciliation (restore
+	// reconcileCompactionTransactions plus the model-driven proposal fix)
+	// only ever needs it while the applied state was not persisted, which is
+	// exactly the case where this removal did not run. Removing it here keeps
+	// terminal manifests from accumulating in the session directory with
+	// every compaction.
+	if d.TransactionID != "" && appliedSettlementDurable {
 		removeCompactionTransactionManifest(d.TransactionSessionDir, d.TransactionID)
 	}
 	if d.AbsHistoryMetaPath != "" {

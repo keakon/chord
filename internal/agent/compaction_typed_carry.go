@@ -140,62 +140,113 @@ func typedClaimsFromArgs(args tools.CompactContextArgs) map[string]checkpointCla
 	return out
 }
 
-// parseCheckpointTypedState reads the typed state block out of a checkpoint
-// body. It returns ok=false when the body carries no typed state (a
-// usage-driven summary, an old checkpoint, or a checkpoint that predates the
-// block). Unknown JSON fields — including the legacy "constraints" key, which
-// was declared but never populated — are ignored. A block that is present but
-// unparseable also reports ok=false; callers that must disclose that case use
-// typedStateFromBody.
-func parseCheckpointTypedState(body string) (checkpointTypedState, bool) {
-	state, found, malformed := typedStateFromBody(body)
-	if !found || malformed {
-		return checkpointTypedState{}, false
+// typedStateSectionRanges returns the byte ranges of every standalone typed
+// state heading in body. A section is located only by a full heading line at
+// column zero (the same rule markdownSectionBounds uses for summary
+// sections), so body text that merely quotes the heading mid-line can never
+// be mistaken for the machine block; prose that happens to render the exact
+// heading as its own line is only a candidate, and a candidate whose content
+// is not a JSON document is skipped by the parsers below.
+type typedSectionRange struct {
+	headingStart int
+	contentStart int
+	contentEnd   int
+}
+
+func typedStateSectionRanges(body string) []typedSectionRange {
+	if body == "" {
+		return nil
 	}
-	return state, true
+	var out []typedSectionRange
+	search := 0
+	for {
+		rel := findMarkdownHeadingLine(body[search:], typedStateSectionHeading)
+		if rel < 0 {
+			return out
+		}
+		headingStart := search + rel
+		contentStart := headingStart + len(typedStateSectionHeading)
+		contentEnd := len(body)
+		if loc := compactionMarkdownHeadingLineRe.FindStringIndex(body[contentStart:]); loc != nil {
+			contentEnd = contentStart + loc[0]
+		}
+		out = append(out, typedSectionRange{headingStart: headingStart, contentStart: contentStart, contentEnd: contentEnd})
+		search = contentStart
+	}
+}
+
+// typedStateJSONLine returns the machine JSON payload of a typed-state
+// section: the first non-empty line of the section body with the renderer's
+// "- " bullet stripped. When the section's first content line is not a JSON
+// document — a prose paragraph impersonating the heading, or a dangling
+// heading with no payload — "" is returned so callers never carry or parse a
+// non-machine block as typed state. Unknown JSON fields (for example a key a
+// future version adds) are ignored by the caller's decoder; the section only
+// has to be a JSON document to be treated as machine state.
+func typedStateJSONLine(section string) string {
+	for _, candidate := range strings.Split(section, "\n") {
+		line := strings.TrimSpace(candidate)
+		if line == "" {
+			continue
+		}
+		line = strings.TrimSpace(strings.TrimPrefix(line, "-"))
+		if line == "" || !json.Valid([]byte(line)) {
+			return ""
+		}
+		return line
+	}
+	return ""
 }
 
 // typedStateFromBody extracts the typed state block of a checkpoint body,
 // distinguishing "no typed block" (found=false) from "a typed block exists but
 // does not parse" (malformed=true) so a caller can disclose an unreadable
-// carry instead of silently treating it as absent.
+// carry instead of silently treating it as absent. Every standalone typed
+// heading is a candidate; the first candidate whose payload is a valid JSON
+// document wins, so a prose line quoting the heading ahead of the real block
+// can no longer shadow it. A body whose only candidates do not parse reports
+// malformed.
 func typedStateFromBody(body string) (state checkpointTypedState, found bool, malformed bool) {
-	if body == "" {
-		return checkpointTypedState{}, false, false
+	ranges := typedStateSectionRanges(body)
+	broken := false
+	for _, r := range ranges {
+		line := typedStateJSONLine(body[r.contentStart:r.contentEnd])
+		if line == "" {
+			broken = true
+			continue
+		}
+		var decoded struct {
+			Decisions    []string                   `json:"decisions"`
+			OpenIssues   []string                   `json:"open_issues"`
+			EvidenceRefs []string                   `json:"evidence_refs"`
+			StageID      string                     `json:"stage_id"`
+			StageStatus  string                     `json:"stage_status"`
+			Kind         string                     `json:"checkpoint_kind"`
+			Claims       map[string]checkpointClaim `json:"claims"`
+		}
+		if json.Unmarshal([]byte(line), &decoded) != nil {
+			broken = true
+			continue
+		}
+		return checkpointTypedState{
+			Decisions:    decoded.Decisions,
+			OpenIssues:   decoded.OpenIssues,
+			EvidenceRefs: decoded.EvidenceRefs,
+			StageID:      strings.TrimSpace(decoded.StageID),
+			StageStatus:  strings.TrimSpace(decoded.StageStatus),
+			Kind:         strings.TrimSpace(decoded.Kind),
+			Claims:       decoded.Claims,
+		}, true, false
 	}
-	idx := strings.Index(body, typedStateSectionHeading)
-	if idx < 0 {
-		return checkpointTypedState{}, false, false
-	}
-	rest := strings.TrimSpace(body[idx+len(typedStateSectionHeading):])
-	line := strings.TrimSpace(strings.SplitN(rest, "\n", 2)[0])
-	line = strings.TrimSpace(strings.TrimPrefix(line, "-"))
-	var decoded struct {
-		Decisions    []string                   `json:"decisions"`
-		OpenIssues   []string                   `json:"open_issues"`
-		EvidenceRefs []string                   `json:"evidence_refs"`
-		StageID      string                     `json:"stage_id"`
-		StageStatus  string                     `json:"stage_status"`
-		Kind         string                     `json:"checkpoint_kind"`
-		Claims       map[string]checkpointClaim `json:"claims"`
-	}
-	if json.Unmarshal([]byte(line), &decoded) != nil {
+	if broken {
 		return checkpointTypedState{}, true, true
 	}
-	return checkpointTypedState{
-		Decisions:    decoded.Decisions,
-		OpenIssues:   decoded.OpenIssues,
-		EvidenceRefs: decoded.EvidenceRefs,
-		StageID:      strings.TrimSpace(decoded.StageID),
-		StageStatus:  strings.TrimSpace(decoded.StageStatus),
-		Kind:         strings.TrimSpace(decoded.Kind),
-		Claims:       decoded.Claims,
-	}, true, false
+	return checkpointTypedState{}, false, false
 }
 
 // renderTypedStateJSON renders the typed state block as a single JSON line.
 // Carried items over the per-item cap are truncated with an explicit marker;
-// the JSON stays parseable by parseCheckpointTypedState.
+// the JSON stays parseable by typedStateFromBody.
 func renderTypedStateJSON(state checkpointTypedState) string {
 	payload := struct {
 		Decisions    []string                   `json:"decisions,omitempty"`

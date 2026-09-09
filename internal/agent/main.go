@@ -544,10 +544,11 @@ type MainAgent struct {
 	stageCompletionCandidatePromptDelivered bool
 	contextReductionStats                   ContextReductionStats
 	// retentionSignals aggregates per-request retention signals (rereads,
-	// archive reads, evidence validity) into session and compaction-window
+	// archive reads, evidence validity) into the current compaction-window
 	// totals. It survives resetContextReductionStats on compaction applies —
-	// only a session switch clears it. Guarded by loopReductionMu.
-	retentionSignals       retentionSignalAggregator
+	// an apply publishes the window (takeWindowRetentionSignals) and only a
+	// session boundary clears it. Guarded by loopReductionMu.
+	retentionSignals       retentionWindowTotals
 	lastLLMRequestModelRef string
 	llmModelRunLength      int
 

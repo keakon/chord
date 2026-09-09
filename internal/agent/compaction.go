@@ -950,7 +950,14 @@ const evidenceFileRevisionMemoMaxEntries = 1024
 var evidenceFileRevisionMemoGlobal evidenceFileRevisionMemo
 
 func (m *evidenceFileRevisionMemo) verifiedHash(path string) (hash string, exists bool, err error) {
-	info, lerr := os.Lstat(path)
+	// The stat follows symlinks like the content hash it guards (computeFileHash
+	// opens the path, and os.Open follows a symlink to its target). Keying the
+	// memo on a link's own mtime/size would pin the verdict to metadata that
+	// stays unchanged while the target is edited or removed — an externally
+	// installed symlink with the same content would keep a stale hash current
+	// forever. A dangling link stats as not-exists, which invalidates the
+	// recorded revision exactly like a deleted file.
+	info, lerr := os.Stat(path)
 	if lerr != nil {
 		m.forget(path)
 		if os.IsNotExist(lerr) {
