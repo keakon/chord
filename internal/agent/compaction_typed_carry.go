@@ -48,6 +48,10 @@ const (
 	// carried items to fit the list cap. The drop is disclosed, never silent:
 	// the full record remains recoverable from the archived history files.
 	typedStateOmittedNote = "- [older checkpoint item(s) omitted to bound the carried state; read the archive for the complete record.]"
+	// typedStateUnreadableNote is appended when a checkpoint body carries a
+	// typed block that cannot be parsed. Dropping an unreadable carry without
+	// a note would read as a complete record of nothing.
+	typedStateUnreadableNote = "- [prior checkpoint typed state was present but could not be read; consult the archived history for the complete record.]"
 )
 
 // checkpointTypedState is the machine-carryable task state a checkpoint
@@ -109,19 +113,33 @@ func typedClaimsFromArgs(args tools.CompactContextArgs) map[string]checkpointCla
 // body. It returns ok=false when the body carries no typed state (a
 // usage-driven summary, an old checkpoint, or a checkpoint that predates the
 // block). Unknown JSON fields — including the legacy "constraints" key, which
-// was declared but never populated — are ignored.
+// was declared but never populated — are ignored. A block that is present but
+// unparseable also reports ok=false; callers that must disclose that case use
+// typedStateFromBody.
 func parseCheckpointTypedState(body string) (checkpointTypedState, bool) {
-	if body == "" {
+	state, found, malformed := typedStateFromBody(body)
+	if !found || malformed {
 		return checkpointTypedState{}, false
+	}
+	return state, true
+}
+
+// typedStateFromBody extracts the typed state block of a checkpoint body,
+// distinguishing "no typed block" (found=false) from "a typed block exists but
+// does not parse" (malformed=true) so a caller can disclose an unreadable
+// carry instead of silently treating it as absent.
+func typedStateFromBody(body string) (state checkpointTypedState, found bool, malformed bool) {
+	if body == "" {
+		return checkpointTypedState{}, false, false
 	}
 	idx := strings.Index(body, typedStateSectionHeading)
 	if idx < 0 {
-		return checkpointTypedState{}, false
+		return checkpointTypedState{}, false, false
 	}
 	rest := strings.TrimSpace(body[idx+len(typedStateSectionHeading):])
 	line := strings.TrimSpace(strings.SplitN(rest, "\n", 2)[0])
 	line = strings.TrimSpace(strings.TrimPrefix(line, "-"))
-	var state struct {
+	var decoded struct {
 		Decisions    []string                   `json:"decisions"`
 		OpenIssues   []string                   `json:"open_issues"`
 		EvidenceRefs []string                   `json:"evidence_refs"`
@@ -130,18 +148,18 @@ func parseCheckpointTypedState(body string) (checkpointTypedState, bool) {
 		Kind         string                     `json:"checkpoint_kind"`
 		Claims       map[string]checkpointClaim `json:"claims"`
 	}
-	if json.Unmarshal([]byte(line), &state) != nil {
-		return checkpointTypedState{}, false
+	if json.Unmarshal([]byte(line), &decoded) != nil {
+		return checkpointTypedState{}, true, true
 	}
 	return checkpointTypedState{
-		Decisions:    state.Decisions,
-		OpenIssues:   state.OpenIssues,
-		EvidenceRefs: state.EvidenceRefs,
-		StageID:      strings.TrimSpace(state.StageID),
-		StageStatus:  strings.TrimSpace(state.StageStatus),
-		Kind:         strings.TrimSpace(state.Kind),
-		Claims:       state.Claims,
-	}, true
+		Decisions:    decoded.Decisions,
+		OpenIssues:   decoded.OpenIssues,
+		EvidenceRefs: decoded.EvidenceRefs,
+		StageID:      strings.TrimSpace(decoded.StageID),
+		StageStatus:  strings.TrimSpace(decoded.StageStatus),
+		Kind:         strings.TrimSpace(decoded.Kind),
+		Claims:       decoded.Claims,
+	}, true, false
 }
 
 // renderTypedStateJSON renders the typed state block as a single JSON line.
@@ -273,26 +291,36 @@ func mergeTypedClaims(prior, current map[string]checkpointClaim) map[string]chec
 	return out
 }
 
+// mergeTypedStateList merges a carried list with a fresh submission, newest
+// first, up to the list cap. The fresh submission's items come first; carried
+// items fill the remaining slots oldest-last, and entries that do not fit are
+// dropped with a disclosed omission count. Items with identical text are
+// deduplicated across both lists (the fresh copy wins the slot): recursive
+// checkpoints commonly restate a carried decision verbatim, and counting the
+// duplicate as a fresh slot would halve the effective capacity of the merged
+// list and force distinct carried items out of the bounded carry.
 func mergeTypedStateList(prior, current []string, cap int) ([]string, int) {
-	capacity := cap
-	if capacity <= 0 {
+	if cap <= 0 {
 		return nil, len(prior) + len(current)
 	}
-	out := make([]string, 0, min(capacity, len(current)+len(prior)))
+	out := make([]string, 0, min(cap, len(current)+len(prior)))
+	seen := make(map[string]struct{}, min(cap, len(current)+len(prior)))
 	omitted := 0
-	for _, item := range current {
-		if len(out) >= capacity {
-			omitted++
-			continue
+	addUnique := func(items []string) {
+		for _, item := range items {
+			key := strings.TrimSpace(item)
+			if _, dup := seen[key]; dup {
+				continue
+			}
+			if len(out) >= cap {
+				omitted++
+				continue
+			}
+			seen[key] = struct{}{}
+			out = append(out, item)
 		}
-		out = append(out, item)
 	}
-	for _, item := range prior {
-		if len(out) >= capacity {
-			omitted++
-			continue
-		}
-		out = append(out, item)
-	}
+	addUnique(current)
+	addUnique(prior)
 	return out, omitted
 }

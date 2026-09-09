@@ -215,13 +215,17 @@ func benchmarkTypedCheckpointList(prefix string, count int) []string {
 }
 
 // benchmarkPriorTypedCheckpointMessage renders a previous checkpoint message
-// carrying full-cap typed lists, so the next generation's builder exercises
-// the merge-and-bound path on a real prior body.
+// carrying full-cap typed lists of DISTINCT content (prefix "carried-…"), so
+// the next generation's builder genuinely merges prior-only items instead of
+// collapsing identical text that the fresh submission restated. The rendered
+// body stays above compactCheckpointCarryMaxChars with the typed JSON near the
+// end, which keeps the fixture on the full-body parse path: a display-truncated
+// read would drop the block before the merge could see it.
 func benchmarkPriorTypedCheckpointMessage() message.Message {
 	prior := checkpointTypedState{
-		Decisions:    benchmarkTypedCheckpointList("d", typedStateCarryMaxDecisions),
-		OpenIssues:   benchmarkTypedCheckpointList("o", typedStateCarryMaxOpenIssues),
-		EvidenceRefs: benchmarkTypedCheckpointList("ev", typedStateCarryMaxEvidenceRefs),
+		Decisions:    benchmarkTypedCheckpointList("carried-d", typedStateCarryMaxDecisions),
+		OpenIssues:   benchmarkTypedCheckpointList("carried-o", typedStateCarryMaxOpenIssues),
+		EvidenceRefs: benchmarkTypedCheckpointList("carried-ev", typedStateCarryMaxEvidenceRefs),
 		StageID:      "impl",
 		StageStatus:  "candidate",
 		Kind:         "provisional",
@@ -246,15 +250,25 @@ func BenchmarkModelDrivenCheckpointTypedRender(b *testing.B) {
 		b.Run(name, func(b *testing.B) {
 			a := &MainAgent{turn: &Turn{ID: 1}}
 			messages := benchmarkContextReductionMessages(30)
+			decisions := typedStateCarryMaxDecisions
+			openIssues := typedStateCarryMaxOpenIssues
+			evidenceRefs := typedStateCarryMaxEvidenceRefs
 			if mergePrior {
 				messages = append([]message.Message{benchmarkPriorTypedCheckpointMessage()}, messages...)
+				// The prior checkpoint already sits at the caps with distinct
+				// items; leave the fresh submission below them so the merge
+				// genuinely carries prior-only items rather than only dropping
+				// them at a full fresh cap.
+				decisions = typedStateCarryMaxDecisions / 2
+				openIssues = typedStateCarryMaxOpenIssues / 2
+				evidenceRefs = typedStateCarryMaxEvidenceRefs / 2
 			}
 			req := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{
 				ActiveObjective: "implement the unified context-management optimization",
 				NextStep:        "continue",
-				Decisions:       benchmarkTypedCheckpointList("d", typedStateCarryMaxDecisions),
-				OpenIssues:      benchmarkTypedCheckpointList("o", typedStateCarryMaxOpenIssues),
-				EvidenceRefs:    benchmarkTypedCheckpointList("ev", typedStateCarryMaxEvidenceRefs),
+				Decisions:       benchmarkTypedCheckpointList("d", decisions),
+				OpenIssues:      benchmarkTypedCheckpointList("o", openIssues),
+				EvidenceRefs:    benchmarkTypedCheckpointList("ev", evidenceRefs),
 				StageID:         "impl",
 				StageStatus:     "candidate",
 				CheckpointKind:  "provisional",
@@ -269,6 +283,18 @@ func BenchmarkModelDrivenCheckpointTypedRender(b *testing.B) {
 				state, ok := parseCheckpointTypedState(compactionSummaryBody(content))
 				if !ok || len(state.Decisions) == 0 {
 					b.Fatalf("typed state must survive the render round-trip ok=%v decisions=%d", ok, len(state.Decisions))
+				}
+				if mergePrior {
+					mergedCarried := false
+					for _, item := range state.Decisions {
+						if strings.HasPrefix(item, "carried-d-") {
+							mergedCarried = true
+							break
+						}
+					}
+					if !mergedCarried {
+						b.Fatalf("merge_at_cap must carry prior-only items: %v", state.Decisions)
+					}
 				}
 			}
 		})
@@ -306,6 +332,17 @@ func TestModelDrivenCheckpointTypedRenderGuard(t *testing.T) {
 			t.Fatalf("typed state must round-trip at cap ok=%v decisions=%d", ok, len(state.Decisions))
 		}
 	})
+	// The fixture must keep the guard on the real prior-merge path: the prior
+	// body is longer than compactCheckpointCarryMaxChars, so reading it through
+	// the display-truncated carry would drop the typed JSON before the parse
+	// and skip the merge entirely. Here the fresh cap is full, so every carried
+	// item is dropped and the merge's bound disclosure must appear in the
+	// rendered decisions section — the observable sign the prior state was
+	// actually parsed and merged.
+	body := compactionSummaryBody(content)
+	if !strings.Contains(body, typedStateOmittedNote) {
+		t.Fatalf("full-cap distinct prior merge must disclose the omitted carried items:\n%s", body)
+	}
 	// The merged list cannot exceed the single-submission caps, so the typed
 	// block is bounded; the guard catches a regression that carries the prior
 	// body as natural-language Markdown or re-renders per carried item.

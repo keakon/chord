@@ -42,15 +42,15 @@ const (
 	compactCheckpointCarryMaxChars = 2400
 )
 
-// latestPriorCheckpointBody returns the durable body of the most recent
-// checkpoint in messages, or "" when none exists. The body is the checkpoint's
-// content between the [Context Summary] header and the [Context compressed]
-// footer, with the [Session Anchors] block removed (anchors are carried by
-// their own mechanism), the `## Skills Invoked Earlier` section removed (also
-// carried separately, by name merge) and any previously appended
-// `## Previous Checkpoint` section removed (the carry must not compound across
-// generations).
-func latestPriorCheckpointBody(messages []message.Message) string {
+// latestPriorCheckpointStrippedBody returns the durable body of the most
+// recent checkpoint in messages, or "" when none exists. The body is the
+// checkpoint's content between the [Context Summary] header and the
+// [Context compressed] footer, with the [Session Anchors] block removed
+// (anchors are carried by their own mechanism), the `## Skills Invoked
+// Earlier` section removed (also carried separately, by name merge) and any
+// previously appended `## Previous Checkpoint` section removed (the carry must
+// not compound across generations). No display truncation is applied here.
+func latestPriorCheckpointStrippedBody(messages []message.Message) string {
 	for _, msg := range slices.Backward(messages) {
 		if msg.Role != message.RoleUser || !msg.IsCompactionSummary {
 			continue
@@ -59,13 +59,24 @@ func latestPriorCheckpointBody(messages []message.Message) string {
 		body = stripCompactionAnchorsBlock(body)
 		body = stripCheckpointSkillsSection(body)
 		body = stripPriorCheckpointCarrySection(body)
-		body = truncateCheckpointCarryLines(body, compactCheckpointCarryMaxChars)
-		if body == "" {
-			return ""
-		}
 		return body
 	}
 	return ""
+}
+
+// latestPriorCheckpointBody returns the display-truncated form of
+// latestPriorCheckpointStrippedBody, bounded to compactCheckpointCarryMaxChars
+// for the natural-language carry sections of the summary prompt and the
+// `## Previous Checkpoint` appendix. Callers that need the machine-carryable
+// typed state must read the untruncated body instead: the typed JSON line
+// sits late in a model-driven body and a long checkpoint would lose it before
+// it could be parsed.
+func latestPriorCheckpointBody(messages []message.Message) string {
+	body := latestPriorCheckpointStrippedBody(messages)
+	if body == "" {
+		return ""
+	}
+	return truncateCheckpointCarryLines(body, compactCheckpointCarryMaxChars)
 }
 
 func truncateCheckpointCarryLines(body string, maxChars int) string {

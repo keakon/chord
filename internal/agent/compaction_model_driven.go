@@ -30,6 +30,14 @@ type modelDrivenCheckpointRequest struct {
 	ToolCallID    string
 	Args          tools.CompactContextArgs
 	ClaimStatuses map[string]string
+	// Claims is the authoritative claim set when it is set: the merged carry
+	// (fresh submission claims plus carried claims it did not restate) that
+	// mergePriorTypedCheckpointState produces. Rendering and invalidation read
+	// this instead of rebuilding from Args, so a carried claim keeps its
+	// observed/assumed classification, evidence association and status. It is
+	// nil for a fresh request that carried no prior typed state, in which case
+	// the Args-derived claims are used.
+	Claims map[string]checkpointClaim
 }
 
 // requestAcceptedToolResult is the canonical compact_context success text. It
@@ -1166,12 +1174,17 @@ func (b *modelDrivenCheckpointBuilder) render(exportedArchive string) (string, m
 // the entire conversation for no gain.
 func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierSnapshot, snapshot []message.Message, headSplit int, req *modelDrivenCheckpointRequest) string {
 	// The prior checkpoint's machine-carryable state (decisions, open issues,
-	// evidence references, stage) is merged into this submission and rendered
-	// below; the whole prior body is never carried as natural-language
+	// evidence references, stage, claims) is merged into this submission and
+	// rendered below; the whole prior body is never carried as natural-language
 	// Markdown. stateCarryOmitted reports carried decisions dropped by the
 	// merge's list bound so the renderer discloses the omission.
+	// mergePriorTypedCheckpointState parses the prior checkpoint's FULL
+	// stripped body: the typed JSON line sits late in a model-driven body, and
+	// the display-truncated carry (latestPriorCheckpointBody) would drop it
+	// before the parse when a long body exceeds the carry cap.
 	var stateCarryOmitted int
-	req, stateCarryOmitted = mergePriorTypedCheckpointState(req, latestPriorCheckpointBody(snapshot[:headSplit]))
+	var typedCarryUnreadable bool
+	req, stateCarryOmitted, typedCarryUnreadable = mergePriorTypedCheckpointState(req, latestPriorCheckpointStrippedBody(snapshot[:headSplit]))
 	markTypedClaimsInvalidated(req, bundle.evidenceItems)
 	headSnapshot := snapshot[:headSplit]
 	anchor := resolveLatestUserRequestAnchor(snapshot)
@@ -1182,8 +1195,13 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 	stateFiles := renderStateFilesSection(req.Args.StateFiles)
 	plannedStateFiles := renderPlannedStateFilesSection(req.Args.PlannedStateFiles)
 	evidenceRefs := renderEvidenceRefsSection(req.Args.EvidenceRefs)
-	claimEvidence := renderClaimEvidenceSection(req.Args.ClaimEvidence)
-	claimKinds := renderClaimKindsSection(req.Args.ClaimKinds)
+	// The readable claim sections and the typed block all render the
+	// authoritative merged claim set (see effectiveCheckpointClaims), so a
+	// carried claim that the fresh submission did not restate appears
+	// consistently in both instead of vanishing from the checkpoint.
+	claimEvidenceMap, claimKindsMap := claimRenderMaps(req)
+	claimEvidence := renderClaimEvidenceSection(claimEvidenceMap)
+	claimKinds := renderClaimKindsSection(claimKindsMap)
 	stage := renderModelDrivenStageSection(req.Args.StageID, req.Args.StageStatus, req.Args.CheckpointKind)
 	typedState := renderTypedCheckpointState(req)
 	if stateCarryOmitted > 0 {
@@ -1191,6 +1209,9 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 		// note must say so: a bounded carry that silently looked complete
 		// would read as the full decision record.
 		decisions += "\n" + typedStateOmittedNote
+	}
+	if typedCarryUnreadable {
+		decisions += "\n" + typedStateUnreadableNote
 	}
 
 	sections := []fallbackSummarySection{
@@ -1239,16 +1260,55 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 	return withCompactionAnchors(summary, anchors)
 }
 
+// effectiveCheckpointClaims returns the authoritative claim set of a request:
+// the merged carry when one exists (see modelDrivenCheckpointRequest.Claims),
+// otherwise the claims derivable from the fresh submission args.
+func effectiveCheckpointClaims(req *modelDrivenCheckpointRequest) map[string]checkpointClaim {
+	if req == nil {
+		return nil
+	}
+	if len(req.Claims) > 0 {
+		return req.Claims
+	}
+	return typedClaimsFromArgs(req.Args)
+}
+
+// claimRenderMaps splits the authoritative claim set into the maps the
+// readable `## Claim Evidence` / `## Claim Classification` sections render
+// from, so those sections never contradict the typed block.
+func claimRenderMaps(req *modelDrivenCheckpointRequest) (evidence map[string][]string, kinds map[string]string) {
+	claims := effectiveCheckpointClaims(req)
+	if len(claims) == 0 {
+		return nil, nil
+	}
+	for claim, item := range claims {
+		if len(item.EvidenceRefs) > 0 {
+			if evidence == nil {
+				evidence = make(map[string][]string, len(claims))
+			}
+			evidence[claim] = item.EvidenceRefs
+		}
+		if item.Kind != "" {
+			if kinds == nil {
+				kinds = make(map[string]string, len(claims))
+			}
+			kinds[claim] = item.Kind
+		}
+	}
+	return evidence, kinds
+}
+
 func markTypedClaimsInvalidated(req *modelDrivenCheckpointRequest, evidenceItems []evidenceItem) {
-	if req == nil || len(req.Args.ClaimEvidence) == 0 || len(req.Args.ClaimKinds) == 0 {
+	claims := effectiveCheckpointClaims(req)
+	if len(claims) == 0 {
 		return
 	}
 	validity := make(map[string]evidenceValidity, len(evidenceItems))
 	for _, item := range evidenceItems {
 		validity[evidenceItemID(item)] = item.Validity
 	}
-	for claim, refs := range req.Args.ClaimEvidence {
-		for _, ref := range refs {
+	for claim, item := range claims {
+		for _, ref := range item.EvidenceRefs {
 			if validity[ref] == evidenceValidityInvalidated || validity[ref] == evidenceValidityUnavailable {
 				if req.ClaimStatuses == nil {
 					req.ClaimStatuses = map[string]string{}
@@ -1267,16 +1327,26 @@ func markTypedClaimsInvalidated(req *modelDrivenCheckpointRequest, evidenceItems
 // fresh submission wins (its items come first and its stage metadata
 // overrides); carried items fill the remaining list capacity. omittedDecisions
 // reports how many carried decisions were dropped to bound the list, so the
-// renderer can disclose it. A nil request, an empty prior body, or a prior
-// checkpoint without a typed state block (a usage-driven summary, an old
-// checkpoint) leaves the submission untouched.
-func mergePriorTypedCheckpointState(req *modelDrivenCheckpointRequest, prior string) (mergedReq *modelDrivenCheckpointRequest, omittedDecisions int) {
+// renderer can disclose it. malformed reports that the prior body carried a
+// typed block that could not be parsed, which the renderer must disclose as an
+// unreadable carry rather than silently treating it as absent. A nil request,
+// an empty prior body, or a prior checkpoint without a typed state block (a
+// usage-driven summary, an old checkpoint) leaves the submission untouched.
+//
+// prior must be the checkpoint's FULL stripped body (see
+// latestPriorCheckpointStrippedBody): the typed JSON line sits late in a
+// model-driven body, and a body truncated to the display carry cap would drop
+// it before it could be parsed.
+func mergePriorTypedCheckpointState(req *modelDrivenCheckpointRequest, prior string) (mergedReq *modelDrivenCheckpointRequest, omittedDecisions int, malformed bool) {
 	if req == nil {
-		return req, 0
+		return req, 0, false
 	}
-	priorState, ok := parseCheckpointTypedState(prior)
-	if !ok {
-		return req, 0
+	priorState, found, broken := typedStateFromBody(prior)
+	if !found {
+		return req, 0, false
+	}
+	if broken {
+		return req, 0, true
 	}
 	merged, omitted := mergeCheckpointTypedStates(priorState, typedStateFromArgs(req.Args))
 	copyReq := *req
@@ -1286,7 +1356,16 @@ func mergePriorTypedCheckpointState(req *modelDrivenCheckpointRequest, prior str
 	copyReq.Args.StageID = merged.StageID
 	copyReq.Args.StageStatus = merged.StageStatus
 	copyReq.Args.CheckpointKind = merged.Kind
-	return &copyReq, omitted
+	// The whole merged claim set travels on the request (see
+	// effectiveCheckpointClaims): the fresh submission's own claims plus the
+	// carried ones it did not restate, each keeping its observed/assumed
+	// classification, evidence association, certainty and invalidated status.
+	// Rebuilding the claims from the fresh Args alone — as the code did before
+	// carrying them here — dropped every claim the submission did not restate,
+	// and a claim invalidated by evidence that has since left the window would
+	// come back active.
+	copyReq.Claims = merged.Claims
+	return &copyReq, omitted, false
 }
 
 func renderTypedCheckpointState(req *modelDrivenCheckpointRequest) string {
@@ -1294,6 +1373,12 @@ func renderTypedCheckpointState(req *modelDrivenCheckpointRequest) string {
 		return "- (none)"
 	}
 	state := typedStateFromArgs(req.Args)
+	// The merged claim set (fresh plus carried) replaces the Args-derived
+	// claims when present, so claims the fresh submission did not restate stay
+	// in the typed block with their classification, evidence and status.
+	if len(req.Claims) > 0 {
+		state.Claims = req.Claims
+	}
 	for claim, status := range req.ClaimStatuses {
 		item := state.Claims[claim]
 		item.Status = status

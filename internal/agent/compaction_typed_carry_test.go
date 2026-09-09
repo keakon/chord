@@ -238,3 +238,250 @@ func TestTypedClaimsInvalidateOnEvidenceStatus(t *testing.T) {
 		t.Fatalf("claim status = %q, want invalidated", req.ClaimStatuses["tests pass"])
 	}
 }
+
+func TestMergeTypedStateListDeduplicatesAcrossGenerations(t *testing.T) {
+	// A recursive checkpoint chain restates carried decisions verbatim (the
+	// summarizer folded the previous block into the fresh submission). Each
+	// restated copy must not consume a fresh slot: distinct carried items stay
+	// in the bounded list instead of being squeezed out by duplicates that look
+	// new.
+	prior := benchmarkTypedCheckpointList("same", typedStateCarryMaxDecisions)
+	current := []string{benchmarkTypedCheckpointList("same", typedStateCarryMaxDecisions)[0]} // restates only the first
+	merged, omitted := mergeTypedStateList(prior, current, typedStateCarryMaxDecisions)
+	if len(merged) != typedStateCarryMaxDecisions {
+		t.Fatalf("merged length = %d, want the full cap %d with duplicates collapsed", len(merged), typedStateCarryMaxDecisions)
+	}
+	if merged[0] != prior[0] {
+		t.Fatalf("fresh-restated copy must win the first slot: %q", merged[0])
+	}
+	for _, want := range prior {
+		if !containsString(merged, want) {
+			t.Fatalf("deduplicated merge dropped a distinct carried item %q: %v", want, merged)
+		}
+	}
+	if omitted != 0 {
+		t.Fatalf("omitted = %d, want 0 when duplicates collapse within the cap", omitted)
+	}
+
+	// Without the dedupe every restated copy of one identical item claims a
+	// fresh slot; all of them collapse onto the single distinct text.
+	same := benchmarkTypedCheckpointList("same", 1)[0]
+	over := make([]string, 0, typedStateCarryMaxDecisions+1)
+	for i := 0; i <= typedStateCarryMaxDecisions; i++ {
+		over = append(over, same)
+	}
+	merged, omitted = mergeTypedStateList(nil, over, typedStateCarryMaxDecisions)
+	if len(merged) != 1 {
+		t.Fatalf("deduplicated single-item list length = %d, want 1", len(merged))
+	}
+	// Duplicates collapse without consuming a slot, so they disclose nothing:
+	// no distinct carried content was dropped by the cap.
+	if omitted != 0 {
+		t.Fatalf("omitted = %d, want 0 for duplicate-only input", omitted)
+	}
+}
+
+func TestTypedStateFromBodyDistinguishesMalformedBlock(t *testing.T) {
+	if _, found, malformed := typedStateFromBody(""); found || malformed {
+		t.Fatalf("empty body: found=%v malformed=%v, want neither", found, malformed)
+	}
+	if _, found, malformed := typedStateFromBody("## Key Decisions\n- plain body"); found || malformed {
+		t.Fatalf("body without typed block: found=%v malformed=%v, want neither", found, malformed)
+	}
+	if _, found, malformed := typedStateFromBody("## Typed Checkpoint State\n- not json"); !found || !malformed {
+		t.Fatalf("present-but-broken block: found=%v malformed=%v, want both", found, malformed)
+	}
+	if _, found, malformed := typedStateFromBody("## Typed Checkpoint State\n- {\"decisions\":[\"d1\"]}"); !found || malformed {
+		t.Fatalf("valid block: found=%v malformed=%v, want found-only", found, malformed)
+	}
+}
+
+// TestMergePriorTypedCheckpointStateReadsFullBodyBeyondDisplayTruncation pins
+// the C6 fix end to end: the typed JSON line sits near the end of a checkpoint
+// body that exceeds compactCheckpointCarryMaxChars, and the prior merge must
+// still parse it. The display-truncated body (latestPriorCheckpointBody) drops
+// the JSON before the parse and would silently skip the carry.
+func TestMergePriorTypedCheckpointStateReadsFullBodyBeyondDisplayTruncation(t *testing.T) {
+	req := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{
+		ActiveObjective: "continue",
+		NextStep:        "go",
+		Decisions:       []string{"fresh-decision"},
+	}}
+	messages := []message.Message{benchmarkPriorTypedCheckpointMessage()}
+	full := latestPriorCheckpointStrippedBody(messages)
+	if full == "" {
+		t.Fatal("prior checkpoint body must be found")
+	}
+	display := latestPriorCheckpointBody(messages)
+	if runeCount(display) > compactCheckpointCarryMaxChars {
+		t.Fatalf("display carry must respect the rune cap, got %d", runeCount(display))
+	}
+	merged, _, malformed := mergePriorTypedCheckpointState(req, full)
+	if malformed {
+		t.Fatal("full body with a valid typed block must not report malformed")
+	}
+	if merged == req {
+		t.Fatal("merge must return a distinct request when a typed block is carried")
+	}
+	hasCarriedDecision := false
+	for _, item := range merged.Args.Decisions {
+		if strings.HasPrefix(item, "carried-d-") {
+			hasCarriedDecision = true
+		}
+	}
+	if !hasCarriedDecision || merged.Args.Decisions[0] != "fresh-decision" {
+		t.Fatalf("full-body merge must carry prior-only decisions behind the fresh one: %v", merged.Args.Decisions)
+	}
+
+	// The same merge against the display-truncated body would drop the JSON:
+	// the decisions then read as fresh-only, exactly the silent loss the fix
+	// removes. Assert the observable contract: callers pass the stripped full
+	// body, never the display carry.
+	if runeCount(full) <= compactCheckpointCarryMaxChars {
+		t.Fatal("fixture prior body must exceed the display carry cap to pin the truncation bug")
+	}
+}
+
+func runeCount(s string) int {
+	n := 0
+	for range s {
+		n++
+	}
+	return n
+}
+
+// TestMergePriorTypedCheckpointStateDisclosesUnreadableCarry pins the
+// malformed path: a prior body carrying a typed block that cannot be parsed
+// must surface as malformed so the renderer can disclose it (the decision
+// section gains typedStateUnreadableNote) instead of silently reading the
+// carry as empty.
+func TestMergePriorTypedCheckpointStateDisclosesUnreadableCarry(t *testing.T) {
+	req := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{
+		ActiveObjective: "continue",
+		NextStep:        "go",
+		Decisions:       []string{"fresh-decision"},
+	}}
+	prior := "## Current User Request\n- continue\n\n## Typed Checkpoint State\n- {this is not valid json"
+	merged, _, malformed := mergePriorTypedCheckpointState(req, prior)
+	if !malformed {
+		t.Fatal("unparseable typed block must report malformed")
+	}
+	if merged != req {
+		t.Fatalf("malformed carry must leave the submission untouched, got %+v", merged.Args)
+	}
+
+	// End to end through the render chain: the note must land in the summary.
+	a := newTestMainAgent(t, t.TempDir())
+	snapshot := []message.Message{
+		{Role: message.RoleUser, Content: prior, IsCompactionSummary: true},
+		{Role: message.RoleUser, Content: "continue"},
+	}
+	summary := a.buildModelDrivenCheckpointSummary(modelDrivenBarrierSnapshot{snapshot: snapshot}, snapshot, len(snapshot), req)
+	body := compactionSummaryBody(summary)
+	if !strings.Contains(body, typedStateUnreadableNote) {
+		t.Fatalf("unreadable carry must be disclosed in the checkpoint:\n%s", body)
+	}
+}
+
+// TestCrossGenerationCarriedClaimsSurviveWithoutRestatement pins the C1 fix
+// through the real render chain: a second generation that does NOT restate the
+// first generation's claims must still carry them — classification, evidence
+// association and status — because mergePriorTypedCheckpointState keeps the
+// merged claim set on the request.
+func TestCrossGenerationCarriedClaimsSurviveWithoutRestatement(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	// Round 1: a model declares two claims with kinds + evidence.
+	round1Req := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{
+		ActiveObjective: "continue",
+		NextStep:        "go",
+		Decisions:       []string{"d1"},
+		ClaimKinds: map[string]string{
+			"tests pass":   "observed",
+			"design final": "assumed",
+		},
+		ClaimEvidence: map[string][]string{
+			"tests pass": {"ev-1", "ev-2"},
+		},
+	}}
+	one := []message.Message{
+		{Role: message.RoleUser, Content: "first request"},
+		{Role: message.RoleAssistant, Content: "first work"},
+	}
+	first := a.buildModelDrivenCheckpointSummary(modelDrivenBarrierSnapshot{snapshot: one}, one, len(one), round1Req)
+
+	// Round 2: the model does NOT restate the claims (only fresh decisions).
+	round2Req := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{
+		ActiveObjective: "continue",
+		NextStep:        "go",
+		Decisions:       []string{"d2"},
+	}}
+	two := []message.Message{
+		{Role: message.RoleUser, Content: first, IsCompactionSummary: true},
+		{Role: message.RoleUser, Content: "second request"},
+	}
+	second := a.buildModelDrivenCheckpointSummary(modelDrivenBarrierSnapshot{snapshot: two}, two, len(two), round2Req)
+
+	state, ok := parseCheckpointTypedState(compactionSummaryBody(second))
+	if !ok {
+		t.Fatalf("round-2 checkpoint must carry a typed block:\n%s", second)
+	}
+	got := state.Claims["tests pass"]
+	if got.Kind != "observed" || len(got.EvidenceRefs) != 2 || got.Status == "" {
+		t.Fatalf("carried claim lost classification/evidence/status: %#v", got)
+	}
+	if secondKind := state.Claims["design final"]; secondKind.Kind != "assumed" {
+		t.Fatalf("carried assumed claim lost its kind: %#v", secondKind)
+	}
+	// The readable Claim Evidence section renders the same carried evidence.
+	if !strings.Contains(second, "tests pass | evidence: ev-1, ev-2") {
+		t.Fatalf("round-2 checkpoint must re-render the carried claim evidence:\n%s", second)
+	}
+	if !strings.Contains(second, "design final | kind: assumed") {
+		t.Fatalf("round-2 checkpoint must re-render the carried claim kind:\n%s", second)
+	}
+}
+
+// TestCarriedInvalidatedClaimStaysInvalidatedWithoutItsEvidence pins the
+// invalidated-state half of C1 across a render chain: a claim invalidated in
+// round 1 (its evidence later left the live window) must not come back active
+// in round 2 when the model does not restate it. Status travels in the typed
+// block, not as a re-derivation from live evidence.
+func TestCarriedInvalidatedClaimStaysInvalidatedWithoutItsEvidence(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	invalidatedID := evidenceItemID(evidenceItem{Key: "ev-gone"})
+	round1Req := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{
+		ActiveObjective: "continue",
+		NextStep:        "go",
+		ClaimKinds:      map[string]string{"claims A works": "observed"},
+		ClaimEvidence:   map[string][]string{"claims A works": {invalidatedID}},
+	}}
+	// Round 1 renders with the evidence still marked invalidated.
+	markTypedClaimsInvalidated(round1Req, []evidenceItem{{Key: "ev-gone", Validity: evidenceValidityInvalidated}})
+	if round1Req.ClaimStatuses["claims A works"] != "invalidated" {
+		t.Fatal("round-1 invalidated marking missing")
+	}
+	one := []message.Message{
+		{Role: message.RoleUser, Content: "first request"},
+		{Role: message.RoleAssistant, Content: "first work"},
+	}
+	first := a.buildModelDrivenCheckpointSummary(modelDrivenBarrierSnapshot{snapshot: one}, one, len(one), round1Req)
+
+	// Round 2's live evidence window no longer contains the evidence at all;
+	// the model does not restate the claim.
+	round2Req := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{
+		ActiveObjective: "continue",
+		NextStep:        "go",
+	}}
+	two := []message.Message{
+		{Role: message.RoleUser, Content: first, IsCompactionSummary: true},
+		{Role: message.RoleUser, Content: "second request"},
+	}
+	second := a.buildModelDrivenCheckpointSummary(modelDrivenBarrierSnapshot{snapshot: two}, two, len(two), round2Req)
+	state, ok := parseCheckpointTypedState(compactionSummaryBody(second))
+	if !ok {
+		t.Fatalf("round-2 checkpoint must carry a typed block:\n%s", second)
+	}
+	if got := state.Claims["claims A works"]; got.Status != "invalidated" {
+		t.Fatalf("invalidated claim must stay invalidated across generations, got %#v", got)
+	}
+}
