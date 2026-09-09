@@ -191,6 +191,13 @@ type responsesTool struct {
 	// Format carries the constraint-decoding block for custom (freeform)
 	// tools. Custom tools must not send "parameters".
 	Format *responsesToolFormat `json:"format,omitempty"`
+	// Strict explicitly opts a JSON function tool out of server-side strict
+	// schema normalization: some Responses hosts rewrite a tool whose schema
+	// omits strict into strict mode (every property required), silently making
+	// schemas that rely on omitted optional fields inexpressible. It is a
+	// pointer so only the function conversion entry points emit strict:false;
+	// custom tools keep it nil and never serialize the field.
+	Strict *bool `json:"strict,omitempty"`
 }
 
 // reasoningConfig configures reasoning models.

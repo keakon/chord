@@ -80,6 +80,7 @@ func convertToolsToResponsesForTarget(provider *ProviderConfig, modelID string, 
 			Name:        t.Name,
 			Description: t.Description,
 			Parameters:  t.InputSchema,
+			Strict:      new(false),
 		})
 	}
 	return result

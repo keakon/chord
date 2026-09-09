@@ -533,6 +533,7 @@ func convertToolsToResponses(tools []message.ToolDefinition) []responsesTool {
 			Name:        t.Name,
 			Description: t.Description,
 			Parameters:  t.InputSchema,
+			Strict:      new(false),
 		})
 	}
 	return result

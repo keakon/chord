@@ -399,6 +399,83 @@ func TestConvertToolsToResponses(t *testing.T) {
 	}
 }
 
+// TestResponsesFunctionToolMarshalCarriesStrictFalse locks the wire shape of
+// the Responses function conversions: an explicit "strict":false so hosts do
+// not rewrite the schema into a strict (every property required) form, and a
+// parameters schema that stays exactly as declared so optional fields remain
+// omittable.
+func TestResponsesFunctionToolMarshalCarriesStrictFalse(t *testing.T) {
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"message":        map[string]any{"type": "string"},
+			"target_task_id": map[string]any{"type": "string"},
+			"message_type":   map[string]any{"type": "string", "enum": []string{"response"}},
+		},
+		"required":             []string{"message", "target_task_id"},
+		"additionalProperties": false,
+	}
+	defs := []message.ToolDefinition{{Name: "notify", Description: "Send a message", InputSchema: schema}}
+	for _, tc := range []struct {
+		name    string
+		convert func([]message.ToolDefinition) []responsesTool
+	}{
+		{name: "convertToolsToResponses", convert: convertToolsToResponses},
+		{
+			name: "convertToolsToResponsesForTarget",
+			convert: func(defs []message.ToolDefinition) []responsesTool {
+				provider := responsesProviderFor(t, config.ProviderConfig{})
+				return convertToolsToResponsesForTarget(provider, "deepseek-v4-flash", defs)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tools := tc.convert(defs)
+			if len(tools) != 1 || tools[0].Type != "function" {
+				t.Fatalf("tools = %#v, want one function tool", tools)
+			}
+			raw, err := json.Marshal(tools[0])
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			if !bytes.Contains(raw, []byte(`"strict":false`)) {
+				t.Fatalf("function tool JSON = %s, want explicit \"strict\":false", raw)
+			}
+			var decoded map[string]any
+			if err := json.Unmarshal(raw, &decoded); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			strict, ok := decoded["strict"].(bool)
+			if !ok || strict {
+				t.Fatalf("strict = %#v (ok=%v), want explicit false (pointer false must serialize)", decoded["strict"], ok)
+			}
+			params, _ := decoded["parameters"].(map[string]any)
+			required, err := json.Marshal(params["required"])
+			if err != nil {
+				t.Fatalf("marshal required: %v", err)
+			}
+			if string(required) != `["message","target_task_id"]` {
+				t.Fatalf("parameters.required = %s, want the declared subset unchanged (optional fields must stay optional)", required)
+			}
+		})
+	}
+
+	t.Run("custom_tool_keeps_no_strict_or_parameters", func(t *testing.T) {
+		provider := responsesProviderFor(t, config.ProviderConfig{})
+		tools := convertToolsToResponsesForTarget(provider, "gpt-5.5", sampleToolDefs())
+		if len(tools) != 2 || tools[0].Type != "custom" {
+			t.Fatalf("tools = %#v, want a custom apply_patch plus a function tool", tools)
+		}
+		raw, err := json.Marshal(tools[0])
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		if bytes.Contains(raw, []byte("strict")) || bytes.Contains(raw, []byte(`"parameters"`)) {
+			t.Fatalf("custom tool JSON = %s, want no strict or parameters", raw)
+		}
+	})
+}
+
 func TestApplyResponsesCompletionPayload(t *testing.T) {
 	t.Run("tool_calls_stop_reason_and_usage", func(t *testing.T) {
 		var resp message.Response

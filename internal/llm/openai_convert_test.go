@@ -838,3 +838,52 @@ func TestConvertMessagesToOpenAI_MergeKeepsImageBlock(t *testing.T) {
 		t.Fatalf("trailing block = %#v", blocks[2])
 	}
 }
+
+// TestConvertToolsToOpenAIStrictFalsePreservesOptionalSchema locks the Chat
+// Completions function wire shape: an explicit function-level "strict":false
+// so hosts do not rewrite the schema into a strict (every property required)
+// form, and a parameters schema whose required list stays exactly as declared.
+func TestConvertToolsToOpenAIStrictFalsePreservesOptionalSchema(t *testing.T) {
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"message":        map[string]any{"type": "string"},
+			"target_task_id": map[string]any{"type": "string"},
+			"message_type":   map[string]any{"type": "string", "enum": []string{"response"}},
+		},
+		"required":             []string{"message", "target_task_id"},
+		"additionalProperties": false,
+	}
+	tools := convertToolsToOpenAI([]message.ToolDefinition{{
+		Name: "notify", Description: "Send a message", InputSchema: schema,
+	}})
+	if len(tools) != 1 || tools[0].Type != "function" {
+		t.Fatalf("tools = %#v, want one function tool", tools)
+	}
+	raw, err := json.Marshal(tools[0])
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), `"strict":false`) {
+		t.Fatalf("function tool JSON = %s, want explicit \"strict\":false at the function level", raw)
+	}
+	var decoded struct {
+		Function struct {
+			Strict     *bool          `json:"strict"`
+			Parameters map[string]any `json:"parameters"`
+		} `json:"function"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if decoded.Function.Strict == nil || *decoded.Function.Strict {
+		t.Fatalf("function.strict = %v, want explicit false", decoded.Function.Strict)
+	}
+	required, err := json.Marshal(decoded.Function.Parameters["required"])
+	if err != nil {
+		t.Fatalf("marshal required: %v", err)
+	}
+	if string(required) != `["message","target_task_id"]` {
+		t.Fatalf("function.parameters.required = %s, want the declared subset unchanged (optional fields must stay optional)", required)
+	}
+}

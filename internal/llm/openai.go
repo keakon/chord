@@ -183,6 +183,12 @@ type openAIFunctionDef struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
 	Parameters  map[string]any `json:"parameters"`
+	// Strict explicitly opts the function out of server-side strict schema
+	// normalization: some Chat Completions hosts rewrite a function whose
+	// schema omits strict into strict mode (every property required), which
+	// silently makes schemas that rely on omitted optional fields
+	// inexpressible. Function conversion entry points set strict:false.
+	Strict *bool `json:"strict,omitempty"`
 }
 
 type openAIStreamChoice struct {
@@ -777,6 +783,7 @@ func convertToolsToOpenAI(tools []message.ToolDefinition) []openAITool {
 				Name:        t.Name,
 				Description: t.Description,
 				Parameters:  t.InputSchema,
+				Strict:      new(false),
 			},
 		}
 	}
