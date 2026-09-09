@@ -54,7 +54,7 @@ Response:
 {"type": "subscribe_response", "payload": {"events": ["activity", "assistant_message", "idle", "done_completion"]}}
 ```
 
-Available event types: `activity`, `assistant_message`, `idle`, `confirm_request`, `question_request`, `handoff_request`, `error`, `agent_started`, `agent_notify`, `agent_done`, `info`, `toast`, `done_completion`, `local_shell_result`, `assistant_rollback`, `todos`, `compaction_status`.
+Available event types: `activity`, `assistant_message`, `idle`, `confirm_request`, `question_request`, `handoff_request`, `role_change`, `error`, `agent_started`, `agent_notify`, `agent_done`, `info`, `toast`, `done_completion`, `local_shell_result`, `assistant_rollback`, `todos`, `compaction_status`.
 
 ### `status`
 
@@ -79,6 +79,7 @@ Response:
     "pending_handoff": null,
     "last_error": "",
     "last_outcome": "completed",
+    "current_role": "builder",
     "updated_at": "2026-05-08T12:00:00Z"
   }
 }
@@ -119,6 +120,36 @@ Response:
 ```
 
 `status` is a plain-text snapshot that mirrors `/models status`.
+
+### `role`
+
+Query or switch the active main role — the remote equivalent of TUI Shift+Tab. `list` returns the current role and the ordered main-mode role list (builder first, planner second when configured, then custom roles alphabetically); `set` switches roles and keeps the conversation history, just like TUI cycling.
+
+```json
+{"type": "role", "action": "list"}
+```
+
+```json
+{"type": "role", "action": "set", "role": "planner"}
+```
+
+Response:
+
+```json
+{
+  "type": "role_response",
+  "payload": {
+    "ok": true,
+    "role": "planner",
+    "roles": [
+      {"name": "builder", "current": false},
+      {"name": "planner", "current": true}
+    ]
+  }
+}
+```
+
+`list` puts the active role in `role` and the full list in `roles`, where the entry with `current: true` is the active one. `set` switches to the named role and returns the new state. A `set` is rejected while a `handoff_request` is pending (`resolve the pending handoff before switching role`), as are switches to the already-active role (`already the active role: <name>`), to unknown names, and to roles that exist only as SubAgent definitions. Failures carry `ok: false` with a human-readable `message`; surface the message verbatim to the user. A successful role switch is also pushed as a `role_change` event when subscribed, and the current role appears in `status_response` as `current_role`.
 
 ### `confirm`
 
@@ -195,6 +226,7 @@ You receive these on stdout. The list below covers what is emitted by default pl
 | `subscribe_response`  | Reply to a `subscribe` command                                                             | `events`                                                          |
 | `status_response`     | Reply to a `status` command                                                                | see [`status`](#status)                                           |
 | `models_response`     | Reply to a `models` command                                                                | `ok`, `message`, `status`                                         |
+| `role_response`       | Reply to a `role` command                                                                  | `ok`, `message`, `role`, `roles[]` with `{name, current}`         |
 | `error`               | Command parse / execution error                                                            | `message`, optional `code` (for example `stdin_line_too_long`)    |
 
 ### Subscribable
@@ -209,6 +241,7 @@ You receive these on stdout. The list below covers what is emitted by default pl
 | `question_request`      | The model asked the user a question                                                               | `request_id`, `tool_name`, `question`, `options`, `option_details`, `default_answer`, `multiple`, `timeout_ms` |
 | `notification`          | A user-facing reminder for an explicit wait that is not a modal request                       | `reason`, `message` |
 | `handoff_request`       | A planner saved a handoff plan and needs the client to approve or reject execution                 | `request_id`, `plan_path`, `plan_text`, `plan_error`, `agents[]` with `{name, default, model_pools, current_model_pool}`; `agents` is empty when no eligible target exists |
+| `role_change`          | The active main role switched (via TUI Shift+Tab or a `role set` command)                        | `role`                                                                                                   |
 | `local_shell_result`    | Result for a `local_shell` command                                                                | `command`, `output`, `failed`, `error` |
 | `agent_started`         | A delegated SubAgent runtime started, including an on-demand rehydration of a parked task           | `agent_id`, `previous_agent_id` (set for rehydration), `task_id`, `agent_type`, `description`, `parent_agent_id`, `parent_task_id` |
 | `agent_notify`          | An agent sent a non-blocking owner or targeted delegated-workstream update                         | `agent_id`, `task_id`, `agent_type`, `parent_agent_id`, `parent_task_id`, `target_agent_id`, `target_task_id`, `kind`, `message` |

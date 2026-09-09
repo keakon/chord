@@ -302,7 +302,10 @@ func (m *Model) handleSwitchRole() tea.Cmd {
 	if next == current {
 		return nil
 	}
-	m.agent.SwitchRole(next)
+	if err := m.agent.SwitchRole(next); err != nil {
+		// The role did not change, so the draw caches stay valid.
+		return m.enqueueToast(err.Error(), "error")
+	}
 	m.invalidateDrawCaches()
 	return m.enqueueToast(fmt.Sprintf("role: %s → %s", current, next), "info")
 }

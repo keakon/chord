@@ -125,6 +125,11 @@ type mockBackend struct {
 
 	handoffOptions    []agent.HandoffAgentOption
 	handoffOptionsSet bool
+
+	availableRoles  []string
+	currentRole     string
+	switchRoleErr   error
+	switchRoleCalls []string
 }
 
 type executePlanCall struct {
@@ -212,6 +217,35 @@ func (m *mockBackend) SetCurrentModelPool(pool string) error {
 
 func (m *mockBackend) SetAgentModelPool(agentName, pool string) error {
 	m.SendUserMessage("set-agent:" + agentName + ":" + pool)
+	return nil
+}
+
+func (m *mockBackend) AvailableRoles() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.availableRoles != nil {
+		return append([]string(nil), m.availableRoles...)
+	}
+	return []string{"builder", "planner"}
+}
+
+func (m *mockBackend) CurrentRole() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.currentRole != "" {
+		return m.currentRole
+	}
+	return "builder"
+}
+
+func (m *mockBackend) SwitchRole(role string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.switchRoleCalls = append(m.switchRoleCalls, role)
+	if m.switchRoleErr != nil {
+		return m.switchRoleErr
+	}
+	m.currentRole = role
 	return nil
 }
 
@@ -882,6 +916,290 @@ func TestHeadlessModelsCommandSetCurrentModelPool(t *testing.T) {
 	}
 	if responses != 1 {
 		t.Fatalf("models_response count = %d, want 1", responses)
+	}
+}
+
+func rolePayloadRoles(t *testing.T, env *headlessEnvelope) []map[string]any {
+	t.Helper()
+	rolesAny, ok := env.Payload.(map[string]any)["roles"]
+	if !ok {
+		t.Fatal("roles missing from role_response payload")
+	}
+	items, ok := rolesAny.([]any)
+	if !ok {
+		t.Fatalf("roles = %T, want []any", rolesAny)
+	}
+	roles := make([]map[string]any, 0, len(items))
+	for _, it := range items {
+		m, ok := it.(map[string]any)
+		if !ok {
+			t.Fatalf("role item = %T, want map[string]any", it)
+		}
+		roles = append(roles, m)
+	}
+	return roles
+}
+
+func TestHeadlessRoleListCommand(t *testing.T) {
+	state := &headlessState{}
+	to := newTestOut()
+	backend := &mockBackend{}
+
+	handleHeadlessCommand(headlessCommand{Type: "role", Action: "list"}, backend, state, to.writer(), "test-session")
+
+	env := findHeadlessEnvelopeValue(to.drain(), "role_response")
+	if env == nil {
+		t.Fatal("role_response missing")
+	}
+	payload := env.Payload.(map[string]any)
+	if payload["ok"] != true {
+		t.Fatalf("ok = %v, want true", payload["ok"])
+	}
+	if payload["role"] != "builder" {
+		t.Fatalf("role = %v, want builder", payload["role"])
+	}
+	roles := rolePayloadRoles(t, env)
+	if len(roles) != 2 {
+		t.Fatalf("roles count = %d, want 2", len(roles))
+	}
+	if roles[0]["name"] != "builder" || roles[0]["current"] != true {
+		t.Fatalf("roles[0] = %v, want builder/current", roles[0])
+	}
+	if roles[1]["name"] != "planner" || roles[1]["current"] != false {
+		t.Fatalf("roles[1] = %v, want planner/not current", roles[1])
+	}
+}
+
+func TestHeadlessRoleListCommandPreservesBackendOrder(t *testing.T) {
+	state := &headlessState{}
+	to := newTestOut()
+	backend := &mockBackend{availableRoles: []string{"zeta", "builder"}, currentRole: "zeta"}
+
+	handleHeadlessCommand(headlessCommand{Type: "role", Action: "list"}, backend, state, to.writer(), "test-session")
+
+	env := findHeadlessEnvelopeValue(to.drain(), "role_response")
+	if env == nil {
+		t.Fatal("role_response missing")
+	}
+	payload := env.Payload.(map[string]any)
+	if payload["role"] != "zeta" {
+		t.Fatalf("role = %v, want zeta", payload["role"])
+	}
+	roles := rolePayloadRoles(t, env)
+	if len(roles) != 2 {
+		t.Fatalf("roles count = %d, want 2", len(roles))
+	}
+	if roles[0]["name"] != "zeta" || roles[0]["current"] != true {
+		t.Fatalf("roles[0] = %v, want zeta/current", roles[0])
+	}
+	if roles[1]["name"] != "builder" || roles[1]["current"] != false {
+		t.Fatalf("roles[1] = %v, want builder/not current", roles[1])
+	}
+}
+
+func TestHeadlessRoleSetSwitchesRoleAndUpdatesStatus(t *testing.T) {
+	state := &headlessState{}
+	backend := &mockBackend{}
+
+	// role set switches the backend's active role.
+	to := newTestOut()
+	handleHeadlessCommand(headlessCommand{Type: "role", Action: "set", Role: "planner"}, backend, state, to.writer(), "test-session")
+
+	env := findHeadlessEnvelopeValue(to.drain(), "role_response")
+	if env == nil {
+		t.Fatal("role_response missing for role set")
+	}
+	payload := env.Payload.(map[string]any)
+	if payload["ok"] != true {
+		t.Fatalf("ok = %v, want true", payload["ok"])
+	}
+	if payload["role"] != "planner" {
+		t.Fatalf("role = %v, want planner", payload["role"])
+	}
+	roles := rolePayloadRoles(t, env)
+	if roles[0]["current"] != false || roles[1]["current"] != true {
+		t.Fatalf("roles after set = %v, want planner marked current", roles)
+	}
+	backend.mu.Lock()
+	calls := append([]string(nil), backend.switchRoleCalls...)
+	backend.mu.Unlock()
+	if len(calls) != 1 || calls[0] != "planner" {
+		t.Fatalf("switchRoleCalls = %v, want [planner]", calls)
+	}
+
+	// A later list reports the new active role.
+	to = newTestOut()
+	handleHeadlessCommand(headlessCommand{Type: "role", Action: "list"}, backend, state, to.writer(), "test-session")
+	env = findHeadlessEnvelopeValue(to.drain(), "role_response")
+	payload = env.Payload.(map[string]any)
+	if payload["role"] != "planner" {
+		t.Fatalf("list role after set = %v, want planner", payload["role"])
+	}
+
+	// status_response.current_role reflects the backend role before any
+	// RoleChangedEvent has flowed through the event filter.
+	to = newTestOut()
+	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer(), "test-session")
+	env = findHeadlessEnvelopeValue(to.drain(), "status_response")
+	payload = env.Payload.(map[string]any)
+	if payload["current_role"] != "planner" {
+		t.Fatalf("current_role = %v, want planner", payload["current_role"])
+	}
+}
+
+func TestHeadlessRoleSetFailureBranches(t *testing.T) {
+	missingRoleErr := errors.New(`unknown role "ghost"`)
+	notAvailableErr := errors.New(`role "worker" is not available`)
+	tests := []struct {
+		name        string
+		cmd         headlessCommand
+		backend     *mockBackend
+		state       *headlessState
+		wantMessage string
+		wantCalls   []string
+	}{
+		{
+			name:        "missing role",
+			cmd:         headlessCommand{Type: "role", Action: "set"},
+			backend:     &mockBackend{},
+			state:       &headlessState{},
+			wantMessage: "role set requires role",
+		},
+		{
+			name:        "already active role",
+			cmd:         headlessCommand{Type: "role", Action: "set", Role: "builder"},
+			backend:     &mockBackend{},
+			state:       &headlessState{},
+			wantMessage: "already the active role: builder",
+		},
+		{
+			name:        "pending handoff blocks set",
+			cmd:         headlessCommand{Type: "role", Action: "set", Role: "planner"},
+			backend:     &mockBackend{},
+			state:       &headlessState{pendingHandoff: &headlessHandoffPayload{RequestID: "handoff-1"}},
+			wantMessage: "resolve the pending handoff before switching role",
+		},
+		{
+			name:        "unknown role passthrough",
+			cmd:         headlessCommand{Type: "role", Action: "set", Role: "ghost"},
+			backend:     &mockBackend{switchRoleErr: missingRoleErr},
+			state:       &headlessState{},
+			wantMessage: `unknown role "ghost"`,
+			wantCalls:   []string{"ghost"},
+		},
+		{
+			name:        "non-main role not available",
+			cmd:         headlessCommand{Type: "role", Action: "set", Role: "worker"},
+			backend:     &mockBackend{switchRoleErr: notAvailableErr},
+			state:       &headlessState{},
+			wantMessage: `role "worker" is not available`,
+			wantCalls:   []string{"worker"},
+		},
+		{
+			name:        "unsupported action",
+			cmd:         headlessCommand{Type: "role", Action: "frobnicate"},
+			backend:     &mockBackend{},
+			state:       &headlessState{},
+			wantMessage: "unsupported role action: frobnicate",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			to := newTestOut()
+			handleHeadlessCommand(tc.cmd, tc.backend, tc.state, to.writer(), "test-session")
+			env := findHeadlessEnvelopeValue(to.drain(), "role_response")
+			if env == nil {
+				t.Fatal("role_response missing")
+			}
+			payload := env.Payload.(map[string]any)
+			if payload["ok"] != false {
+				t.Fatalf("ok = %v, want false", payload["ok"])
+			}
+			if payload["message"] != tc.wantMessage {
+				t.Fatalf("message = %v, want %q", payload["message"], tc.wantMessage)
+			}
+			tc.backend.mu.Lock()
+			calls := append([]string(nil), tc.backend.switchRoleCalls...)
+			tc.backend.mu.Unlock()
+			if !reflect.DeepEqual(calls, tc.wantCalls) {
+				t.Fatalf("switchRoleCalls = %v, want %v", calls, tc.wantCalls)
+			}
+		})
+	}
+}
+
+func TestHeadlessRoleChangeEventRequiresSubscription(t *testing.T) {
+	state := &headlessState{subscriptions: map[string]bool{"role_change": true}}
+	backend := &mockBackend{}
+
+	out := filterHeadlessEvent(agent.RoleChangedEvent{Role: "planner"}, state, backend)
+	if len(out) != 1 {
+		t.Fatalf("filtered events = %d, want 1", len(out))
+	}
+	if out[0].Type != "role_change" {
+		t.Fatalf("event type = %q, want role_change", out[0].Type)
+	}
+	payload := out[0].Payload.(map[string]string)
+	if payload["role"] != "planner" {
+		t.Fatalf("role_change role = %v, want planner", payload["role"])
+	}
+	state.mu.Lock()
+	role := state.role
+	state.mu.Unlock()
+	if role != "planner" {
+		t.Fatalf("state.role = %q, want planner", role)
+	}
+}
+
+func TestHeadlessRoleChangeEventFilteredWithoutSubscriptionButStateUpdated(t *testing.T) {
+	// An explicit subscribe allowlist that omits role_change.
+	state := &headlessState{subscriptions: map[string]bool{"activity": true}}
+	backend := &mockBackend{}
+
+	out := filterHeadlessEvent(agent.RoleChangedEvent{Role: "planner"}, state, backend)
+	if len(out) != 0 {
+		t.Fatalf("filtered events = %d, want 0 without subscription", len(out))
+	}
+	state.mu.Lock()
+	role := state.role
+	state.mu.Unlock()
+	if role != "planner" {
+		t.Fatalf("state.role = %q, want planner", role)
+	}
+
+	// A later status query answers current_role from the cached state.
+	to := newTestOut()
+	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer(), "test-session")
+	env := findHeadlessEnvelopeValue(to.drain(), "status_response")
+	payload := env.Payload.(map[string]any)
+	if payload["current_role"] != "planner" {
+		t.Fatalf("current_role = %v, want planner from cached state", payload["current_role"])
+	}
+}
+
+// headlessSendOnlyBackend satisfies headlessBackend without any optional
+// capability (models/role/handoff), for testing the capability error envelope.
+type headlessSendOnlyBackend struct{}
+
+func (headlessSendOnlyBackend) SendUserMessage(content string)                        {}
+func (headlessSendOnlyBackend) CancelCurrentTurn() bool                               { return false }
+func (headlessSendOnlyBackend) ResolveConfirm(string, string, string, string, string) {}
+func (headlessSendOnlyBackend) ResolveQuestion([]string, bool, string)                {}
+
+func TestHeadlessRoleCommandRejectedByNonRoleBackend(t *testing.T) {
+	state := &headlessState{}
+	to := newTestOut()
+	var backend headlessBackend = &headlessSendOnlyBackend{}
+
+	handleHeadlessCommand(headlessCommand{Type: "role", Action: "list"}, backend, state, to.writer(), "test-session")
+
+	env := findHeadlessEnvelopeValue(to.drain(), "error")
+	if env == nil {
+		t.Fatal("error envelope missing for non-role backend")
+	}
+	payload := env.Payload.(map[string]any)
+	if payload["message"] != "role command is not supported by this backend" {
+		t.Fatalf("message = %v, want role-not-supported", payload["message"])
 	}
 }
 

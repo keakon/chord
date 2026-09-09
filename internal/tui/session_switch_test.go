@@ -4085,6 +4085,7 @@ type sessionControlAgent struct {
 	availableAgents         []string
 	availableRoles          []string
 	currentRole             string
+	switchRoleErr           error
 	projectRoot             string
 	focused                 string
 	providerModelRef        string
@@ -4417,7 +4418,13 @@ func (s *sessionControlAgent) ResolveHandoff(requestID, action, agentName, denyR
 func (s *sessionControlAgent) AvailableAgents() []string {
 	return append([]string(nil), s.availableAgents...)
 }
-func (s *sessionControlAgent) SwitchRole(role string) { s.currentRole = role }
+func (s *sessionControlAgent) SwitchRole(role string) error {
+	if s.switchRoleErr != nil {
+		return s.switchRoleErr
+	}
+	s.currentRole = role
+	return nil
+}
 func (s *sessionControlAgent) AvailableRoles() []string {
 	return append([]string(nil), s.availableRoles...)
 }

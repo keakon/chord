@@ -6170,6 +6170,32 @@ func TestHandleSwitchRoleInvalidatesCachesImmediately(t *testing.T) {
 	}
 }
 
+func TestHandleSwitchRoleReportsFailedSwitchAsErrorToast(t *testing.T) {
+	backend := &sessionControlAgent{
+		events:         make(chan agent.AgentEvent, 1),
+		currentRole:    "builder",
+		availableRoles: []string{"builder", "planner"},
+		switchRoleErr:  errors.New(`role "planner" is not available`),
+	}
+	m := NewModelWithSize(backend, 100, 24)
+	m.cachedStatusKey = "cached-status"
+
+	m.handleSwitchRole()
+
+	if got := backend.currentRole; got != "builder" {
+		t.Fatalf("currentRole = %q, want builder (unchanged after a failed switch)", got)
+	}
+	if m.cachedStatusKey != "cached-status" {
+		t.Fatal("a failed switch must not invalidate draw caches")
+	}
+	if m.activeToast == nil {
+		t.Fatal("a failed switch must surface an error toast")
+	}
+	if m.activeToast.Level != "error" || !strings.Contains(m.activeToast.Message, `role "planner" is not available`) {
+		t.Fatalf("activeToast = %+v, want error toast with the backend message", m.activeToast)
+	}
+}
+
 func TestHandleSwitchAgentRefreshesInfoPanelModelWithoutEvent(t *testing.T) {
 	backend := &sessionControlAgent{
 		events:           make(chan agent.AgentEvent, 1),

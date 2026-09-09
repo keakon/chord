@@ -83,6 +83,7 @@ type headlessState struct {
 	lastError       string
 	pendingOutcome  string // "completed" / "cancelled" / "error" / ""
 	lastOutcome     string // persists across idle; set from pendingOutcome on idle
+	role            string // current main role; filled from RoleChangedEvent / status queries
 	updatedAt       time.Time
 
 	// subscriptions is the set of event types the gateway wants to receive.
@@ -170,6 +171,7 @@ type headlessCommand struct {
 	Action        string   `json:"action,omitempty"`
 	Agent         string   `json:"agent,omitempty"`
 	Pool          string   `json:"pool,omitempty"`
+	Role          string   `json:"role,omitempty"`
 	FinalArgsJSON string   `json:"final_args_json,omitempty"`
 	EditSummary   string   `json:"edit_summary,omitempty"`
 	DenyReason    string   `json:"deny_reason,omitempty"`
@@ -187,6 +189,7 @@ var headlessEventTypes = map[string]bool{
 	"idle":               true,
 	"confirm_request":    true,
 	"question_request":   true,
+	"role_change":        true,
 	"notification":       true,
 	"handoff_request":    true,
 	"error":              true,
@@ -313,6 +316,14 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 			out = append(out, &headlessEnvelope{Type: "idle", Payload: map[string]any{
 				"last_outcome":               outcome,
 				"suppress_user_notification": e.SuppressUserNotification,
+			}})
+		}
+	case agent.RoleChangedEvent:
+		state.role = e.Role
+		state.updatedAt = time.Now()
+		if state.isSubscribed("role_change") {
+			out = append(out, &headlessEnvelope{Type: "role_change", Payload: map[string]string{
+				"role": e.Role,
 			}})
 		}
 	case agent.NotificationEvent:
@@ -508,7 +519,11 @@ Examples:
 
 Model pool control commands:
   {"type":"models","action":"status"}
-  {"type":"models","action":"set_current_model_pool","pool":"thinking"}`,
+  {"type":"models","action":"set_current_model_pool","pool":"thinking"}
+
+Main role control commands:
+  {"type":"role","action":"list"}
+  {"type":"role","action":"set","role":"planner"}`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -886,6 +901,108 @@ func handleHeadlessModelsCommand(cmd headlessCommand, backend headlessModelsBack
 	}
 }
 
+// headlessRoleBackend is the capability required by the role list/set commands.
+// MainAgent satisfies it.
+type headlessRoleBackend interface {
+	AvailableRoles() []string
+	CurrentRole() string
+	SwitchRole(role string) error
+}
+
+type headlessRoleItem struct {
+	Name    string `json:"name"`
+	Current bool   `json:"current"`
+}
+
+// headlessRoleItems builds the ordered role list for a role_response, marking
+// the backend's current role.
+func headlessRoleItems(backend headlessRoleBackend) []headlessRoleItem {
+	current := backend.CurrentRole()
+	roles := backend.AvailableRoles()
+	items := make([]headlessRoleItem, 0, len(roles))
+	for _, name := range roles {
+		items = append(items, headlessRoleItem{Name: name, Current: name == current})
+	}
+	return items
+}
+
+func emitHeadlessRoleResponse(out *stdoutWriter, ok bool, message string, role string, roles []headlessRoleItem) {
+	payload := map[string]any{"ok": ok}
+	if message != "" {
+		payload["message"] = message
+	}
+	if role != "" {
+		payload["role"] = role
+	}
+	if roles != nil {
+		payload["roles"] = roles
+	}
+	out.emit(headlessEnvelope{Type: "role_response", Payload: payload})
+}
+
+// handleHeadlessRoleCommand serves the role list/set actions. A set mirrors the
+// TUI Shift+Tab no-op protection (refusing the current role) and adds the
+// headless-specific pending-handoff guard; target existence/availability is
+// validated by the backend's SwitchRole so the "unknown role" and "not
+// available (SubAgent-only)" answers live next to switchRole instead of being
+// duplicated here.
+func handleHeadlessRoleCommand(cmd headlessCommand, backend headlessRoleBackend, state *headlessState, out *stdoutWriter) {
+	switch strings.TrimSpace(cmd.Action) {
+	case "list":
+		emitHeadlessRoleResponse(out, true, "", backend.CurrentRole(), headlessRoleItems(backend))
+	case "set":
+		role := strings.TrimSpace(cmd.Role)
+		if role == "" {
+			emitHeadlessRoleResponse(out, false, "role set requires role", "", nil)
+			return
+		}
+		if role == backend.CurrentRole() {
+			emitHeadlessRoleResponse(out, false, "already the active role: "+role, "", nil)
+			return
+		}
+		state.mu.Lock()
+		pendingHandoff := state.pendingHandoff
+		state.mu.Unlock()
+		if pendingHandoff != nil {
+			emitHeadlessRoleResponse(out, false, "resolve the pending handoff before switching role", "", nil)
+			return
+		}
+		if err := backend.SwitchRole(role); err != nil {
+			emitHeadlessRoleResponse(out, false, err.Error(), "", nil)
+			return
+		}
+		emitHeadlessRoleResponse(out, true, "", role, headlessRoleItems(backend))
+	default:
+		emitHeadlessRoleResponse(out, false, "unsupported role action: "+cmd.Action, "", nil)
+	}
+}
+
+// headlessCurrentRole returns the state-cached active role, lazily filling it
+// from the backend on first query. Startup chooses the role during session
+// restore, which headlessState cannot know in advance, so the cache starts
+// empty and converges on the first RoleChangedEvent or status query.
+func headlessCurrentRole(backend headlessBackend, state *headlessState) string {
+	state.mu.Lock()
+	role := state.role
+	state.mu.Unlock()
+	if role != "" {
+		return role
+	}
+	roleBackend, ok := backend.(headlessRoleBackend)
+	if !ok {
+		return ""
+	}
+	role = roleBackend.CurrentRole()
+	if role != "" {
+		state.mu.Lock()
+		if state.role == "" {
+			state.role = role
+		}
+		state.mu.Unlock()
+	}
+	return role
+}
+
 type headlessCappedWriter struct {
 	buf      []byte
 	total    int64
@@ -961,6 +1078,7 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 		})
 
 	case "status":
+		currentRole := headlessCurrentRole(backend, state)
 		state.mu.Lock()
 		out.emit(headlessEnvelope{
 			Type: "status_response",
@@ -974,6 +1092,7 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 				"pending_handoff":  state.pendingHandoff,
 				"last_error":       state.lastError,
 				"last_outcome":     state.lastOutcome,
+				"current_role":     currentRole,
 				"updated_at":       state.updatedAt.Format(time.RFC3339),
 			},
 		})
@@ -1058,6 +1177,14 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 			return
 		}
 		handleHeadlessModelsCommand(cmd, modelsBackend, out)
+
+	case "role":
+		roleBackend, ok := backend.(headlessRoleBackend)
+		if !ok {
+			out.emit(headlessEnvelope{Type: "error", Payload: map[string]string{"message": "role command is not supported by this backend"}})
+			return
+		}
+		handleHeadlessRoleCommand(cmd, roleBackend, state, out)
 
 	case "handoff":
 		handoffBackend, ok := backend.(headlessHandoffBackend)

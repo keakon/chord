@@ -182,8 +182,10 @@ type ServiceTierReporter interface {
 // RoleController exposes role/handoff lifecycle for the active agent.
 type RoleController interface {
 	// SwitchRole requests the agent to switch its active role.
-	// The new role is broadcast as RoleChangedEvent.
-	SwitchRole(role string)
+	// The new role is broadcast as RoleChangedEvent on success; an error is
+	// returned without emitting the event when the role is unknown, exists
+	// only as a SubAgent definition, or the switch fails otherwise.
+	SwitchRole(role string) error
 	// AvailableRoles returns the ordered list of role names the user can cycle
 	// through with the Tab key in the main agent view.
 	AvailableRoles() []string

@@ -15,13 +15,22 @@ import (
 )
 
 // SwitchRole switches the MainAgent to the named role and emits RoleChangedEvent.
+// It is the single entry point shared by the TUI and the headless control plane,
+// so it enforces what switchRole cannot: the target must be a main-mode agent
+// definition. A SubAgent-only config is rejected with "role %q is not
+// available"; an unknown name fails inside switchRole with "unknown role %q".
+// RoleChangedEvent is emitted only after a successful switch.
 // Goroutine-safe (posts to eventCh).
-func (a *MainAgent) SwitchRole(role string) {
+func (a *MainAgent) SwitchRole(role string) error {
+	if cfg, ok := a.agentConfigs[role]; ok && cfg != nil && cfg.IsSubAgent() {
+		return fmt.Errorf("role %q is not available", role)
+	}
 	if err := a.switchRole(role, false); err != nil {
 		log.Warnf("SwitchRole failed role=%v error=%v", role, err)
-		return
+		return err
 	}
 	a.emitToTUI(RoleChangedEvent{Role: role})
+	return nil
 }
 
 // AvailableRoles returns the ordered list of roles the user can cycle through.

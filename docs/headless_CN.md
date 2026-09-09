@@ -54,7 +54,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 {"type": "subscribe_response", "payload": {"events": ["activity", "assistant_message", "idle", "done_completion"]}}
 ```
 
-可订阅事件类型：`activity`、`assistant_message`、`idle`、`confirm_request`、`question_request`、`handoff_request`、`error`、`agent_started`、`agent_notify`、`agent_done`、`info`、`toast`、`done_completion`、`local_shell_result`、`assistant_rollback`、`todos`、`compaction_status`。
+可订阅事件类型：`activity`、`assistant_message`、`idle`、`confirm_request`、`question_request`、`handoff_request`、`role_change`、`error`、`agent_started`、`agent_notify`、`agent_done`、`info`、`toast`、`done_completion`、`local_shell_result`、`assistant_rollback`、`todos`、`compaction_status`。
 
 ### `status`
 
@@ -79,6 +79,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
     "pending_handoff": null,
     "last_error": "",
     "last_outcome": "completed",
+    "current_role": "builder",
     "updated_at": "2026-05-08T12:00:00Z"
   }
 }
@@ -119,6 +120,36 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 ```
 
 `status` 是与 `/models status` 一致的纯文本快照。
+
+### `role`
+
+查询或切换当前主角色——TUI Shift+Tab 的远程等价。`list` 返回当前角色与有序的 main-mode 角色列表（builder 恒第一、planner 若配置则第二、自定义角色按字母序）；`set` 切换角色并保留会话上下文，与 TUI 循环一致。
+
+```json
+{"type": "role", "action": "list"}
+```
+
+```json
+{"type": "role", "action": "set", "role": "planner"}
+```
+
+响应：
+
+```json
+{
+  "type": "role_response",
+  "payload": {
+    "ok": true,
+    "role": "planner",
+    "roles": [
+      {"name": "builder", "current": false},
+      {"name": "planner", "current": true}
+    ]
+  }
+}
+```
+
+`list` 把当前角色放在 `role`，完整列表放在 `roles`，其中 `current: true` 的那一项就是当前角色。`set` 切换到指定角色并返回切换后的状态。有 `handoff_request` 待决时 `set` 会被拒绝（`resolve the pending handoff before switching role`），切到已是当前的角色（`already the active role: <name>`）、未知角色名、只作为 SubAgent 定义存在的角色同样会被拒绝。失败响应带 `ok: false` 和面向人的 `message`，原样展示给用户即可。订阅了 `role_change` 时，切换成功还会收到一条 `role_change` 推送；当前角色也会出现在 `status_response` 的 `current_role` 里。
 
 ### `confirm`
 
@@ -195,6 +226,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 | `subscribe_response` | 响应 `subscribe`                             | `events` |
 | `status_response`    | 响应 `status`                                | 见 [`status`](#status) |
 | `models_response`    | 响应 `models`                                | `ok`、`message`、`status` |
+| `role_response`      | 响应 `role`                                  | `ok`、`message`、`role`、`roles[]`（元素含 `name`、`current`） |
 | `error`              | 命令解析或执行错误                           | `message`，可选 `code`（例如 `stdin_line_too_long`） |
 
 ### 可订阅推送事件
@@ -209,6 +241,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 | `question_request`   | 模型向用户提问                               | `request_id`、`tool_name`、`question`、`options`、`option_details`、`default_answer`、`multiple`、`timeout_ms` |
 | `notification`       | agent 需要用户注意，但等待点不是标准 modal 请求 | `reason`、`message` |
 | `handoff_request`    | planner 已保存 handoff plan，需要 client 批准或拒绝执行 | `request_id`、`plan_path`、`plan_text`、`plan_error`、`agents[]`，元素包含 `{name, default, model_pools, current_model_pool}`；没有合法目标时 `agents` 为空列表 |
+| `role_change`        | 当前主角色已切换（经 TUI Shift+Tab 或 `role set` 命令） | `role` |
 | `local_shell_result` | `local_shell` 命令的执行结果                 | `command`、`output`、`failed`、`error` |
 | `agent_started`      | 某个委托的 SubAgent runtime 开始运行（包括 parked task 的按需 rehydrate） | `agent_id`、`previous_agent_id`（rehydrate 时存在）、`task_id`、`agent_type`、`description`、`parent_agent_id`、`parent_task_id` |
 | `agent_notify`       | 某个 agent 向 owner 或指定委派工作流发送非阻塞更新 | `agent_id`、`task_id`、`agent_type`、`parent_agent_id`、`parent_task_id`、`target_agent_id`、`target_task_id`、`kind`、`message` |

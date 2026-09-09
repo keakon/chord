@@ -87,7 +87,7 @@ func (loopBusyAgentStub) NewSession()                                           
 func (loopBusyAgentStub) ForkSession(int)                                           {}
 func (loopBusyAgentStub) ExecutePlan(string, string)                                {}
 func (loopBusyAgentStub) AvailableAgents() []string                                 { return nil }
-func (loopBusyAgentStub) SwitchRole(string)                                         {}
+func (loopBusyAgentStub) SwitchRole(string) error                                   { return nil }
 func (loopBusyAgentStub) AvailableRoles() []string                                  { return nil }
 func (loopBusyAgentStub) InvokedSkills() []*skill.Meta                              { return nil }
 func (loopBusyAgentStub) GetTodos() []tools.TodoItem                                { return nil }

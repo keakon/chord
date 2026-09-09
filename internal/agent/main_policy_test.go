@@ -1336,6 +1336,50 @@ func TestSwitchRoleEmitsRoleChangedEvent(t *testing.T) {
 	}
 }
 
+func TestSwitchRoleRejectsUnknownRoleWithoutEvent(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.SetAgentConfigs(map[string]*config.AgentConfig{
+		"builder":  {Name: "builder", Mode: config.AgentModeMain, Models: map[string][]string{"default": {"build/one"}}},
+		"executor": {Name: "executor", Mode: config.AgentModeMain, Models: map[string][]string{"default": {"exec/one"}}},
+	})
+
+	err := a.SwitchRole("ghost")
+	if err == nil || !strings.Contains(err.Error(), `unknown role "ghost"`) {
+		t.Fatalf("SwitchRole error = %v, want unknown role", err)
+	}
+	if got := a.CurrentRole(); got != "builder" {
+		t.Fatalf("CurrentRole = %q, want builder (unchanged)", got)
+	}
+	for _, evt := range drainAgentEvents(a.outputCh) {
+		if _, ok := evt.(RoleChangedEvent); ok {
+			t.Fatal("RoleChangedEvent emitted for a failed SwitchRole")
+		}
+	}
+}
+
+func TestSwitchRoleRejectsSubAgentOnlyRoleWithoutEvent(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.SetAgentConfigs(map[string]*config.AgentConfig{
+		"builder": {Name: "builder", Mode: config.AgentModeMain},
+		"worker":  {Name: "worker", Mode: "subagent"},
+	})
+
+	err := a.SwitchRole("worker")
+	if err == nil || !strings.Contains(err.Error(), `role "worker" is not available`) {
+		t.Fatalf("SwitchRole error = %v, want role not available", err)
+	}
+	if got := a.CurrentRole(); got != "builder" {
+		t.Fatalf("CurrentRole = %q, want builder (unchanged)", got)
+	}
+	for _, evt := range drainAgentEvents(a.outputCh) {
+		if _, ok := evt.(RoleChangedEvent); ok {
+			t.Fatal("RoleChangedEvent emitted for a failed SwitchRole")
+		}
+	}
+}
+
 func TestSwitchRoleUsesAgentVariantForMainRoleModel(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)

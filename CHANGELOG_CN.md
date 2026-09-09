@@ -27,6 +27,7 @@
 
 ### 新功能
 
+- headless 控制面现在可以查询和切换当前主角色——TUI Shift+Tab 的远程等价，gateway 想提供角色菜单时不再依赖 agent 发起 handoff。`role` 命令（`list` / `set`）用 `role_response` envelope 返回当前角色与有序的 main-mode 角色列表（builder 恒第一、planner 第二、自定义角色按字母序）；`status_response` 增加 `current_role` 字段；订阅方在每次成功切换后收到 `role_change` 事件。`set` 会拒绝未知角色、仅作为 SubAgent 定义存在的角色、已经是当前的角色，以及有待决 handoff 时的切换，拒绝原因通过 `message` 返回。
 - 定向 `notify` 现在可以恢复失败的 worker，也可以给运行中的 worker 追加它事后才发现需要的路径。失败的任务此前根本无法继续——恢复策略指向一个没有任何实现的显式恢复动作——所以唯一的补救是把同样的工作委派给一个全新的 worker，让它重新摸索上下文，哪怕失败发生在收尾调用、已完成的交付物就躺在失败 worker 自己的历史里。现在它会带着那份历史回来并开始新的 attempt；被取消的任务仍不可恢复，因为取消记录的是一个决定，消息不得静默推翻它。同一次调用上的 `grant_write_scope` 会在投递前把路径追加进目标的 `expected_write_scope`，于是发现少了一个文件不再需要搭进整个 worker。授权只增不减：收窄会追溯性地使 worker 已被允许的写入失效；`read_only` 与命令白名单保持不变，因为工具面正是据此构建的；子任务也永远不会被授予超出父任务持有的权限。
 - Agent 配置现在可以按能力而非角色名选择内置角色 prompt 块，并在其基础上追加而非整块替换。`prompt_preset: planning` 让任意名称的角色都能获得内置规划块（计划文档命名与格式、直接回答与产出计划的判断、handoff 时序、计划质量要求），该块的措辞会随角色实际可见的工具自适应；同时它会抑制与规划工作流自带调查提纲重复的 bug triage 块。`prompt_preset: none` 表示不要内置块，名为 `planner` 的角色可借此显式退出。`prompt_append` 追加在最终生效的角色 prompt 之后，使角色能在不接管整块维护责任的前提下补充项目约定 —— `prompt` / `system_prompt` 仍是整块替换。省略 `prompt_preset` 时保持原有的按名判定（名为 `planner` 的角色获得规划块，其他名称不获得），已有 agent 文件行为不变；填写未知值会直接报配置错误，而不是静默得到空 prompt。详见 [Agent 配置](./docs/configuration_CN.md#agent-配置)。
 - 折叠态的 `spawn` 卡片现在在结果摘要里直接显示进程 ID（`↳ Started · svc-64`），不再只有一个 `Started`。该 ID 是后续 `spawn_status` / `spawn_stop` 调用的句柄，现在无需展开卡片即可读到。`spawn_stop` 仍保持简洁的 `Stopped` 标签，因为它的 ID 是入参、标题栏已经显示了。
