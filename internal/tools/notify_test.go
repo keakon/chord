@@ -134,7 +134,6 @@ func TestNotifyRejectsInvalidGrantsBeforeDelivery(t *testing.T) {
 		`{"target_task_id":"task-a","message":"Continue","message_type":"response","correlation_id":"corr-1","grant_write_scope":{"files":["sample.go"]}}`,
 		`{"target_task_id":"task-a","message":"Continue","grant_write_scope":{}}`,
 		`{"target_task_id":"task-a","message":"Continue","grant_write_scope":{"files":["sample.go"],"read_only":true}}`,
-		`{"target_task_id":"task-a","message":"Continue","grant_write_scope":{"files":["sample.go"],"verification_commands":["go test ./sample"]}}`,
 	} {
 		messenger := &recordingNotifyMessenger{}
 		tool := NewNotifyTool(nil, messenger, true, true)

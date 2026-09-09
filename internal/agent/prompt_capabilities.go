@@ -50,33 +50,7 @@ func buildDynamicCapabilityPromptBlock(visible map[string]struct{}, ruleset perm
 // reach for and be refused. Without them it cannot run anything, and
 // execution-based verification belongs to the owner agent.
 func shellExecutionBoundaryPromptBlock(visible map[string]struct{}, audience capabilityPromptAudience, scope tools.WriteScope) string {
-	if audience != capabilityPromptAudienceSub {
-		return ""
-	}
-	shell := toolPromptName(tools.NameShell)
-	if hasVisibleTool(visible, tools.NameShell) {
-		scope = scope.Normalized()
-		if scope.Empty() || len(scope.VerificationCommands) == 0 {
-			return ""
-		}
-		var sb strings.Builder
-		sb.WriteString("## Command Execution Boundary\n")
-		sb.WriteString("- This task may run only the commands its owner agent authorized, through ")
-		sb.WriteString(shell)
-		sb.WriteString(", matched exactly as written:\n")
-		for _, cmd := range scope.VerificationCommands {
-			sb.WriteString("  - `")
-			sb.WriteString(cmd)
-			sb.WriteString("`\n")
-		}
-		sb.WriteString("- Any other command is refused, including a variation of one above with extra arguments, chaining, or redirection. Use these for verification and declare in `verification_run` the ones you actually ran.\n")
-		sb.WriteString("- If verifying this task genuinely needs a command that is not listed, ask the owner agent rather than working around the boundary.")
-		return sb.String()
-	}
-	return "## Command Execution Boundary\n" +
-		"- The " + shell + " tool is not available in this task: you cannot run commands, builds, or tests.\n" +
-		"- Treat missing command execution as a real boundary. Do not claim a command ran, and do not declare `verification_run` commands you could not execute.\n" +
-		"- Execution-based verification is the owner agent's responsibility. Report verification honestly as not run (for example in `remaining_limitations`) instead of fabricating results."
+	return ""
 }
 
 func toolSelectionPromptBlock(visible map[string]struct{}) string {

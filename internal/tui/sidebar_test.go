@@ -30,6 +30,14 @@ func TestSidebarAddFileEditUsesExplicitStats(t *testing.T) {
 	}
 }
 
+func TestSidebarUpdateIgnoresIncompleteSubAgent(t *testing.T) {
+	sidebar := NewSidebar(DefaultTheme())
+	sidebar.Update([]agent.SubAgentInfo{{InstanceID: "", TaskID: "task-1", TaskDesc: "pending"}, {InstanceID: "agent-1", TaskID: "task-2", TaskDesc: "complete"}}, "main", "builder")
+	if len(sidebar.agents) != 2 || sidebar.agents[1].ID != "agent-1" {
+		t.Fatalf("sidebar agents = %+v, want only main and complete SubAgent", sidebar.agents)
+	}
+}
+
 func TestSidebarAddFileDeleteMarksDeletedWithoutFakeLineCount(t *testing.T) {
 	sidebar := NewSidebar(DefaultTheme())
 	sidebar.Update(nil, "main", "builder")

@@ -62,7 +62,6 @@
 | --- | --- |
 | `done` | 携带最终 Markdown 报告申请 loop 退出。仅在 loop 运行期间挂载，因此普通会话根本看不到它，完成结果直接用 assistant 正文返回。Loop 退出仍受退出条件和本地确认门控。 |
 | `handoff` | 把计划/工作移交给另一个角色执行。 |
-| `delegate` | 启动一个委派的 SubAgent 工作流，并立即返回启动句柄（`task_id` / `agent_id`）；不会等待任务完成。调用必须带上 `expected_write_scope`：只做研究时设为 `read_only: true`，可能修改工作区时声明覆盖任务所需内容的最窄 `files`、`path_prefix` 或 `modules` 范围；空范围会被拒绝。同一份声明里的 `verification_commands` 决定该任务能跑哪些命令 —— 不声明则受限任务无法执行任何命令，因此需列出确切的构建 / lint / 测试命令（逐字匹配，含链接、重定向、替换的声明会被拒绝）。拒绝 `delegate` 会同时禁用该角色的 `cancel` 和嵌套委派。 |
 | `cancel` | 取消一个被委派的 worker；前提是 `delegate` 已启用。 |
 | `complete` | SubAgent 侧：携带摘要把当前委派任务标记为完成。 |
 | `escalate` | SubAgent 侧：请求父 agent 介入，但不结束自己的任务。 |
@@ -74,7 +73,6 @@
 - **普通定向消息：**提供 `target_task_id`、`message`，可选填 `kind`；省略 `message_type`、`subtype`、`correlation_id` 和 `payload`。纠正或追加工作使用此形式。
 - **回复待处理请求：**除 `target_task_id`、`message_type: response` 和 `message` 外，**必须**提供该请求的 `correlation_id`；可选填 `kind`。此形式不接受 `subtype`、`payload` 或 `grant_write_scope`。只能向上级汇报的角色不能发送定向回复。
 
-`grant_write_scope` 只适用于普通定向消息，用来向任务已有写域追加 `files`、`path_prefix` 或 `modules`，不能改变 `read_only` 或 `verification_commands`。只读任务会被直接拒绝而不是升级为可写——它的工具面本就没有写入工具——写入工作应当作为新任务另行委派。追加范围不能超过父任务权限，也不能与其他独立、尚未结束的写任务重叠，包括仍在准入中的任务。授权持久化失败时，原有写域保持不变；若授权已提交、随后消息投递失败，授权不会撤销。追加授权与关联请求回复需要分别调用，不是一个原子操作。
 
 ### 长文本控制工具
 
@@ -88,7 +86,6 @@
 
 agent 间消息遵守请求边界：目标 busy 时，消息只入队并随其下一次 LLM 请求一并处理，不打断当前请求；目标空闲但可恢复时，Chord 会唤醒它；纯 progress 更新不会强制本来空闲的 agent 启动。mailbox 与协调状态具备持久性：父子请求/响应记录与排队载荷都能跨 compaction 与重启存活，投递跨任务水合保持幂等。
 
-委派的写入范围既是并发声明，也是执行边界。只读工作必须设置 `read_only: true`；可能修改工作区时，至少要声明一个文件、路径前缀或模块。受限子代理不能执行任意 Shell 命令。嵌套委派的路径权限不能超过父任务，命令也必须来自父任务的 `verification_commands`，只读子任务同样受命令限制。只声明任务确实需要的路径和命令，这样互不相关的委派工作才能并行。
 
 委派状态以 runtime 为准，而不是以模型输出为准。worker 未能调用协调工具（`complete`、`escalate` 或 `notify`）时，会获得一次有界的后续请求；若仍然无法完成，或 provider/模型重试耗尽，Chord 会将其标记为 failed、记录 `risk_alert` 并唤醒 owner。Rehydrate 后的 runtime 可能获得新的 `agent_id`；后续协调应使用稳定的委派 `task_id`。
 

@@ -85,10 +85,7 @@ func TestShellConstructSetsAgreeOnCommandChaining(t *testing.T) {
 	for _, r := range shellCommandChainingCharacters {
 		command := "ls a" + string(r) + "b"
 		if !containsShellConstruct(command) {
-			t.Fatalf("containsShellConstruct(%q) = false, want the read-only gate at least as strict as ValidateVerificationCommands", command)
-		}
-		if err := ValidateVerificationCommands([]string{command}); err == nil {
-			t.Fatalf("ValidateVerificationCommands(%q) = nil, want the chaining character rejected", command)
+			t.Fatalf("containsShellConstruct(%q) = false, want the shell construct rejected", command)
 		}
 	}
 	// Argument expansion is the deliberate difference: the read-only gate
@@ -99,9 +96,6 @@ func TestShellConstructSetsAgreeOnCommandChaining(t *testing.T) {
 		command := "go test ./pkg" + string(r)
 		if !containsShellConstruct(command) {
 			t.Fatalf("containsShellConstruct(%q) = false, want expansion characters refused by the read-only gate", command)
-		}
-		if err := ValidateVerificationCommands([]string{command}); err != nil {
-			t.Fatalf("ValidateVerificationCommands(%q) = %v, want expansion tolerated in a declaration", command, err)
 		}
 	}
 }

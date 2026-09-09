@@ -62,7 +62,7 @@ These tools control agent workflows rather than local side effects, so YOLO mode
 | --- | --- |
 | `done` | Request loop exit with a final Markdown report. Mounted only while a loop is running, so ordinary sessions never see it and return their completion directly as assistant text. Loop exits remain gated by exit conditions and local confirmation. |
 | `handoff` | Transfer a plan/work to another role for execution. |
-| `delegate` | Start a delegated SubAgent workstream and return its startup handle (`task_id` / `agent_id`) immediately. It does not wait for completion. The call must include an `expected_write_scope`: use `read_only: true` for research-only work, or declare the narrowest `files`, `path_prefix`, or `modules` scope that covers the work. An empty scope is rejected. The same declaration carries `verification_commands`: a scoped task cannot run any command without it, so list the exact build/lint/test commands the worker may run (matched literally; chaining, redirection, and substitution are rejected). Denying `delegate` also disables `cancel` and nested delegation for that role. |
+| `delegate` | Start a delegated SubAgent workstream and return its startup handle (`task_id` / `agent_id`) immediately. It does not wait for completion. The call must include an `expected_write_scope`: use `read_only: true` for research-only work, or declare the narrowest `files`, `path_prefix`, or `modules` scope that covers the work. An empty scope is rejected. The worker's tools and permissions enforce this scope; verification is handled by the owner or CI. Denying `delegate` also disables `cancel` and nested delegation for that role. |
 | `cancel` | Cancel a delegated worker; requires `delegate` to be enabled. |
 | `complete` | SubAgent-side: mark the current delegated task as complete with a summary. |
 | `escalate` | SubAgent-side: request parent-agent intervention without ending the task. |
@@ -74,7 +74,6 @@ These tools control agent workflows rather than local side effects, so YOLO mode
 - **Plain targeted message:** provide `target_task_id`, `message`, and optionally `kind`. Omit `message_type`, `subtype`, `correlation_id`, and `payload`. Use this form for corrections or follow-up work.
 - **Reply to a pending request:** provide `target_task_id`, `message_type: response`, and the request's **required** `correlation_id`, together with `message` and optionally `kind`. This form does not accept `subtype`, `payload`, or `grant_write_scope`. Roles that can only notify their owner cannot send targeted replies.
 
-`grant_write_scope` is available only on a plain targeted message. It adds `files`, `path_prefix`, or `modules` to the task's existing scope; it cannot change `read_only` or `verification_commands`. A read-only task is refused outright rather than upgraded — its tool surface was built without write tools — so delegate the writing work as a new task instead. Grants must remain within the parent's authority and cannot overlap another independent non-terminal writer, including a task still being admitted. A persistence failure leaves the existing scope unchanged; a later delivery failure does not revoke an already committed grant. Scope authorization and a correlated response are separate calls, not one atomic operation.
 
 ### Long-text control tools
 
@@ -88,7 +87,6 @@ These cards are always expanded and their header is only the tool name: the repo
 
 Agent-to-agent messages respect request boundaries: if the target is busy, the message is queued and included in its next LLM request instead of interrupting the active one; if the target is idle but resumable, Chord wakes it; progress-only updates never force an otherwise idle agent to run. Mailbox and coordination state is durable: parent-child request/response records and queued payloads survive compaction and restart, and delivery stays idempotent across task rehydration.
 
-The delegated write scope is both a concurrency declaration and an execution boundary. Read-only work must set `read_only: true`; work that can modify the workspace must name at least one file, path prefix, or module. A scoped worker cannot use arbitrary Shell commands. Nested delegation cannot exceed the parent's path authority or add commands outside the parent's `verification_commands`, even for a read-only child. Declare only the paths and commands the task actually needs so unrelated delegated work can run in parallel.
 
 The runtime, not the model, is the source of truth for delegation state. A worker that fails to emit a coordination tool (`complete`, `escalate`, or `notify`) receives one bounded follow-up request; if it still cannot comply, or provider/model retries are exhausted, Chord marks it failed, records a `risk_alert`, and wakes the owner. A rehydrated runtime may receive a new `agent_id`; coordination should continue through the stable delegated `task_id`.
 

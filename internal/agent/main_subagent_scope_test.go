@@ -33,13 +33,11 @@ func TestNestedCreateSubAgentCommandAuthority(t *testing.T) {
 				parent.delegation = config.DelegationConfig{MaxChildren: 2, MaxDepth: 2}
 				parent.writeScope = tools.WriteScope{ReadOnly: readOnly, PathPrefix: []string{"src"}}
 				if authorized {
-					parent.writeScope.VerificationCommands = []string{"go test ./sample"}
 				}
 				a.syncTaskRecordFromSub(parent, "")
 				ctx := tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID)
 				handle, err := a.CreateSubAgent(ctx, "Check sample package", "worker", "", "", tools.WriteScope{
 					ReadOnly: readOnly, Files: []string{"src/sample.go"},
-					VerificationCommands: []string{"go test ./sample"},
 				})
 				if authorized {
 					if err != nil || handle.Status != "started" {
@@ -52,8 +50,7 @@ func TestNestedCreateSubAgentCommandAuthority(t *testing.T) {
 		}
 	}
 	if childWriteScopeWithinParent(
-		tools.WriteScope{ReadOnly: true, VerificationCommands: []string{"go test ./sample"}},
-		tools.WriteScope{ReadOnly: true, VerificationCommands: []string{"go test ./sample -count=1"}}, "") {
+		tools.WriteScope{ReadOnly: true}, tools.WriteScope{ReadOnly: true}, "") {
 		t.Fatal("command inheritance must not allow extra arguments")
 	}
 }

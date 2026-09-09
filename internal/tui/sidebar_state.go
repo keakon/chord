@@ -143,6 +143,9 @@ func (s *Sidebar) Update(subAgents []agent.SubAgentInfo, focusedID, mainRole str
 	})
 
 	for _, info := range sorted {
+		if strings.TrimSpace(info.InstanceID) == "" {
+			continue
+		}
 		status := strings.TrimSpace(info.State)
 		if status == "" {
 			status = "running"

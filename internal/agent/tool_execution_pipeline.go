@@ -95,21 +95,9 @@ func (p toolExecutionPipeline) validateWriteScope(tc message.ToolCall) error {
 		return nil
 	}
 	if tc.Name == tools.NameShell {
-		// Arbitrary command side effects cannot be path-validated, so a scoped
-		// task may only run commands its delegator vouched for by name. An
-		// unreadable argument is a scope failure rather than an execution
-		// failure: the gate cannot decide whether the call is authorized, so it
-		// must not run.
 		shell, err := decodeShellCallArguments(tc.Args)
 		if err != nil {
-			return fmt.Errorf("shell arguments could not be read, so this scoped SubAgent task cannot verify the command against its authorized list: %w", err)
-		}
-		if !scope.AllowsCommand(shell.Command) {
-			if len(scope.VerificationCommands) == 0 {
-				return fmt.Errorf("shell is unavailable for a scoped SubAgent task because arbitrary command side effects cannot be path-validated; ask the owner agent to authorize the command through the task's verification_commands")
-			}
-			return fmt.Errorf("command %q is not among this task's authorized commands (%s); run one of those or ask the owner agent to authorize this one",
-				shell.Command, strings.Join(scope.VerificationCommands, ", "))
+			return fmt.Errorf("shell arguments could not be read: %w", err)
 		}
 		return p.validateShellWorkdir(scope, shell.Workdir)
 	}

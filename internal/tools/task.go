@@ -17,21 +17,12 @@ type AgentInfo struct {
 	DelegationPolicy string
 }
 
-// WriteScope declares what a delegated task is allowed to do: which paths it
-// may write, whether it may write at all, and which commands it may run.
-//
-// VerificationCommands is part of this declaration rather than a separate
-// argument because it answers the same question — the scoped shell gate exists
-// because arbitrary command side effects cannot be path-validated, and the way
-// past it is the delegator vouching for specific commands. Without it a scoped
-// worker cannot run anything, which silently disables build/lint/test
-// verification for every delegated task and moves that work to the owner.
+// WriteScope declares what a delegated task is allowed to do.
 type WriteScope struct {
-	Files                []string `json:"files,omitempty"`
-	PathPrefix           []string `json:"path_prefix,omitempty"`
-	Modules              []string `json:"modules,omitempty"`
-	ReadOnly             bool     `json:"read_only,omitempty"`
-	VerificationCommands []string `json:"verification_commands,omitempty"`
+	Files      []string `json:"files,omitempty"`
+	PathPrefix []string `json:"path_prefix,omitempty"`
+	Modules    []string `json:"modules,omitempty"`
+	ReadOnly   bool     `json:"read_only,omitempty"`
 }
 
 // writeScopePathProperties returns the schema for the path lists a write scope
@@ -50,53 +41,11 @@ func writeScopePathProperties() map[string]any {
 
 func (s WriteScope) Normalized() WriteScope {
 	return WriteScope{
-		Files:                dedupeTrimmedStrings(s.Files),
-		PathPrefix:           dedupeTrimmedStrings(s.PathPrefix),
-		Modules:              dedupeTrimmedStrings(s.Modules),
-		ReadOnly:             s.ReadOnly,
-		VerificationCommands: dedupeTrimmedStrings(s.VerificationCommands),
+		Files:      dedupeTrimmedStrings(s.Files),
+		PathPrefix: dedupeTrimmedStrings(s.PathPrefix),
+		Modules:    dedupeTrimmedStrings(s.Modules),
+		ReadOnly:   s.ReadOnly,
 	}
-}
-
-// AllowsCommand reports whether cmd is one of the commands the delegator
-// authorized. The match is literal after trimming: no prefix matching, no extra
-// arguments, no substitution. A worker that needs a different command has to
-// ask its owner, which is the point — the owner is the one who can judge what
-// the command will do to the workspace.
-func (s WriteScope) AllowsCommand(cmd string) bool {
-	cmd = strings.TrimSpace(cmd)
-	if cmd == "" {
-		return false
-	}
-	for _, allowed := range s.VerificationCommands {
-		if strings.TrimSpace(allowed) == cmd {
-			return true
-		}
-	}
-	return false
-}
-
-// ValidateVerificationCommands rejects declarations that would smuggle
-// arbitrary execution past the literal match. The rejected set is
-// shellCommandChainingCharacters: exactly the constructs that turn one
-// authorized command into an arbitrary one, so the literal match in
-// AllowsCommand cannot be widened by chaining, substitution, or redirection
-// hidden inside the declaration itself. Argument-level expansion is not
-// rejected here — a glob or brace only varies the arguments of the one command
-// the delegator vouched for — which is where this differs from the stricter
-// read-only classifier in shell.go.
-func ValidateVerificationCommands(commands []string) error {
-	for _, cmd := range commands {
-		trimmed := strings.TrimSpace(cmd)
-		if trimmed == "" {
-			return fmt.Errorf("verification_commands must not contain empty entries")
-		}
-		if i := strings.IndexAny(trimmed, shellCommandChainingCharacters); i >= 0 {
-			return fmt.Errorf("verification command %q contains %q: declare each command separately, without chaining, substitution, or redirection",
-				trimmed, string(trimmed[i]))
-		}
-	}
-	return nil
 }
 
 func (s WriteScope) Empty() bool {
@@ -255,11 +204,6 @@ func (t *DelegateTool) Parameters() map[string]any {
 
 	scopeProperties := writeScopePathProperties()
 	scopeProperties["read_only"] = map[string]any{"type": "boolean"}
-	scopeProperties["verification_commands"] = map[string]any{
-		"type":        "array",
-		"description": "Commands this task may run, matched literally. A scoped task cannot otherwise execute anything, so without this it can neither build nor test its own work and you have to verify it yourself. List the exact build/lint/test commands for this task (for example \"go build ./...\", \"go test ./internal/agent\"); one command per entry, no chaining, redirection, or substitution.",
-		"items":       map[string]any{"type": "string"},
-	}
 
 	return map[string]any{
 		"type": "object",
@@ -317,9 +261,6 @@ func (t *DelegateTool) Execute(ctx context.Context, raw json.RawMessage) (string
 	expectedWriteScope := a.ExpectedWriteScope.Normalized()
 	if expectedWriteScope.Empty() {
 		return "", errDelegateWriteScopeRequired
-	}
-	if err := ValidateVerificationCommands(expectedWriteScope.VerificationCommands); err != nil {
-		return "", err
 	}
 
 	if t.creator == nil {

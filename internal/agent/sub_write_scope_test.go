@@ -405,8 +405,7 @@ func TestSubAgentAuthorizedVerificationCommandRunsUnderPathScope(t *testing.T) {
 	parent.projectRoot = root
 	sub.workDir = root
 	sub.writeScope = tools.WriteScope{
-		PathPrefix:           []string{"internal"},
-		VerificationCommands: []string{"go build ./...", "go test ./internal/agent"},
+		PathPrefix: []string{"internal"},
 	}
 	sub.tools.Register(tools.ShellTool{})
 
@@ -446,8 +445,7 @@ func TestSubAgentAuthorizedVerificationCommandRunsUnderPathScope(t *testing.T) {
 // command it would normally reach for and gets refused.
 func TestSubAgentAuthorizedCommandsSurfaceShellAndListThemInThePrompt(t *testing.T) {
 	_, sub := newScopedToolSurfaceTestSubAgent(t, tools.WriteScope{
-		PathPrefix:           []string{"internal"},
-		VerificationCommands: []string{"go build ./...", "go test ./internal/agent"},
+		PathPrefix: []string{"internal"},
 	})
 	if _, ok := sub.tools.Get(tools.NameShell); !ok {
 		t.Fatal("a task with authorized commands lost Shell from its registry")

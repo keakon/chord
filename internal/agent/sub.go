@@ -581,16 +581,6 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 			}
 			subTools.Register(t)
 		default:
-			// A scoped or read-only delegated task registers Shell only when its
-			// delegator authorized specific commands. Otherwise the
-			// execution-time gate rejects every shell call (arbitrary command
-			// side effects cannot be path-validated), and a registered Shell
-			// would only advertise — and the prompt push the worker towards —
-			// verification runs it can never perform.
-			scope := cfg.WriteScope.Normalized()
-			if tools.NormalizeName(t.Name()) == tools.NameShell && !scope.Empty() && len(scope.VerificationCommands) == 0 {
-				continue
-			}
 			// Skip MainAgent-only tools.
 			if cfg.Ruleset.IsDisabled(t.Name()) {
 				continue
