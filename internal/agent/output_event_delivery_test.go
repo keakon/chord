@@ -269,6 +269,20 @@ func TestEmitToTUIControlEventsWaitForSpaceInsteadOfDropping(t *testing.T) {
 				}
 			},
 		},
+		{
+			name:  "ContextNotice",
+			event: ContextNoticeEvent{Level: contextNoticeWarning, Message: "Context will be compacted at the next safe boundary."},
+			check: func(t *testing.T, evt AgentEvent) {
+				t.Helper()
+				got, ok := evt.(ContextNoticeEvent)
+				if !ok {
+					t.Fatalf("event type = %T, want ContextNoticeEvent", evt)
+				}
+				if got.Level != contextNoticeWarning || got.Message == "" {
+					t.Fatalf("ContextNoticeEvent = %+v, want warning level with message", got)
+				}
+			},
+		},
 	}
 
 	for _, tc := range cases {

@@ -62,6 +62,12 @@ func (m *Model) rebuildFocusedViewport(agentID, viewportFilter string) {
 	}
 	clearBlocksTiming(blocks)
 	assignFocusedViewportBlockIDs(blocks, agentID, &m.nextBlockID)
+	// A focus switch rebuilds the base from the agent's durable transcript and
+	// drops settled live cards, so live-only notify cards recorded for this
+	// view would vanish; replay the anchors that belong to this view. Base
+	// blocks take fresh consecutive sequences after the merge, so the replayed
+	// cards slot into the view's label counters.
+	blocks = m.replayNotifyAnchorsForView(blocks, msgs, agentID)
 	// Number the base rows before merging retained live blocks: the base is
 	// one agent's transcript and gets fresh consecutive sequences under that
 	// agent's counter, while live blocks kept from another agent's view are

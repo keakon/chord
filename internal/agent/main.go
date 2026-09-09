@@ -736,6 +736,16 @@ type MainAgent struct {
 	// the per-generation externalization warning claim. Cross-goroutine: the
 	// event loop queues, the main LLM goroutine confirms delivery at dispatch.
 	overlayClaims overlayClaimState
+	// pendingContextNotices carries the text of the context overlays attached
+	// to the request being assembled so the dispatch confirmation point can
+	// surface them to the user as cards (see ContextNoticeEvent). Request
+	// assembly runs on the event loop and dispatch confirmation on the main
+	// LLM goroutine, so the hand-off is mutex-guarded. The stash is reset at
+	// the start of every assembly: a request cancelled before dispatch never
+	// reaches the confirmation point, and its stashed notices must not leak
+	// into the next request.
+	pendingContextNotices   []contextNotice
+	pendingContextNoticesMu sync.Mutex
 	// compactionWindowGeneration is the in-memory monotonic compaction-window
 	// id used by the reminder-class overlay claims: every durable apply
 	// increments it, and a session switch / restore resets it to 0. It
@@ -2578,6 +2588,7 @@ func (a *MainAgent) handleAgentError(evt Event) {
 			TargetTaskID:  sub2.OwnerTaskID(),
 			Kind:          string(SubAgentMailboxKindRiskAlert),
 			Message:       failureSummary,
+			MessageID:     mailbox.MessageID,
 		})
 		a.handleSubAgentCloseRequestedEvent(Event{
 			Type:     EventSubAgentCloseRequested,

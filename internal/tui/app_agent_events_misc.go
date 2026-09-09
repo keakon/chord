@@ -21,6 +21,21 @@ const streamContinueCardTitle = "REPLY RESUMED"
 // carries no title of its own.
 const infoCardTitle = "NOTICE"
 
+// contextNoticeTitle maps a ContextNoticeEvent level to the badge the card
+// carries. The three levels mirror the request-scoped overlays the compaction
+// gate attaches to outgoing requests; surfacing them as cards lets the user
+// see the same context-pressure signal the model receives.
+func contextNoticeTitle(level string) string {
+	switch level {
+	case "imminent":
+		return "COMPACT IMMINENT"
+	case "warning":
+		return "COMPACT WARNING"
+	default:
+		return "CONTEXT PRESSURE"
+	}
+}
+
 func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEffects) {
 	var effects agentEventEffects
 	switch evt := event.(type) {
@@ -115,6 +130,16 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		}
 		m.finalizeAgentStream(evt.AgentID)
 		block := &Block{ID: m.nextBlockID, Type: BlockStatus, StatusTitle: infoCardTitle, Content: evt.Message, AgentID: evt.AgentID}
+		m.nextBlockID++
+		m.appendViewportBlock(block)
+		m.markBlockSettled(block)
+		return true, effects
+	case agent.ContextNoticeEvent:
+		// Surface the same context-pressure signal the model receives as a
+		// card. The overlay is request-scoped and never persisted, so a card
+		// is the only place the user can see it; it is emitted once per
+		// compaction window, never per-request, so it does not spam.
+		block := &Block{ID: m.nextBlockID, Type: BlockStatus, StatusTitle: contextNoticeTitle(evt.Level), Content: evt.Message, AgentID: ""}
 		m.nextBlockID++
 		m.appendViewportBlock(block)
 		m.markBlockSettled(block)

@@ -663,7 +663,7 @@ func (a *MainAgent) handleAgentNotify(evt Event) {
 	if kind == "" {
 		kind = SubAgentMailboxKindProgress
 	}
-	a.queueLoopEvent(Event{Type: EventSubAgentMailbox, SourceID: evt.SourceID, Payload: &SubAgentMailboxMessage{
+	notifyMsg := &SubAgentMailboxMessage{
 		AgentID:        evt.SourceID,
 		TaskID:         taskIDForSub(sub),
 		OwnerAgentID:   ownerAgentID,
@@ -678,7 +678,11 @@ func (a *MainAgent) handleAgentNotify(evt Event) {
 		Summary:        msg,
 		Payload:        msg,
 		RequiresAck:    false,
-	}})
+	}
+	a.queueLoopEvent(Event{Type: EventSubAgentMailbox, SourceID: evt.SourceID, Payload: notifyMsg})
+	if strings.TrimSpace(notifyMsg.MessageID) == "" {
+		notifyMsg.MessageID = a.nextSubAgentMailboxMessageID(evt.SourceID)
+	}
 	a.emitToTUI(AgentNotifyEvent{
 		AgentID:       evt.SourceID,
 		TaskID:        sub.taskID,
@@ -690,6 +694,7 @@ func (a *MainAgent) handleAgentNotify(evt Event) {
 		Kind:          string(kind),
 		Subtype:       strings.TrimSpace(payload.Subtype),
 		Message:       msg,
+		MessageID:     notifyMsg.MessageID,
 	})
 	a.emitToTUI(AgentStatusEvent{AgentID: evt.SourceID, Status: "running", Message: msg})
 	log.Debugf("SubAgent report received agent=%v message_len=%v", evt.SourceID, len(msg))

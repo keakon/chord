@@ -232,6 +232,70 @@ func (a *MainAgent) noteCompactionWarningAttached() {
 	a.overlayClaims.mu.Unlock()
 }
 
+// contextNotice is the text of one context overlay, staged so the dispatch
+// confirmation point can surface it to the user as a card.
+type contextNotice struct {
+	level string
+	text  string
+}
+
+// stashContextNotice stages the text of a context overlay that was just
+// attached to the request being assembled (buildTurnOverlayMessages).
+func (a *MainAgent) stashContextNotice(level, text string) {
+	if a == nil || strings.TrimSpace(text) == "" {
+		return
+	}
+	a.pendingContextNoticesMu.Lock()
+	a.pendingContextNotices = append(a.pendingContextNotices, contextNotice{level: level, text: text})
+	a.pendingContextNoticesMu.Unlock()
+}
+
+// resetContextNotices drops notices staged for a request that never reached
+// dispatch, so a cancelled request's overlay text cannot surface later.
+func (a *MainAgent) resetContextNotices() {
+	if a == nil {
+		return
+	}
+	a.pendingContextNoticesMu.Lock()
+	a.pendingContextNotices = nil
+	a.pendingContextNoticesMu.Unlock()
+}
+
+func (a *MainAgent) takeContextNotices() []contextNotice {
+	if a == nil {
+		return nil
+	}
+	a.pendingContextNoticesMu.Lock()
+	out := a.pendingContextNotices
+	a.pendingContextNotices = nil
+	a.pendingContextNoticesMu.Unlock()
+	return out
+}
+
+// emitStagedContextNotices turns the overlays confirmed by this dispatch into
+// user-visible cards. Repeat deliveries are suppressed: the reminder and the
+// grace notice re-attach on every request in the window, and re-showing the
+// card each time would bury the transcript in duplicates of the same warning.
+func (a *MainAgent) emitStagedContextNotices(reminderStage, imminentStage string, warningDelivered bool) {
+	for _, notice := range a.takeContextNotices() {
+		switch notice.level {
+		case contextNoticePressure:
+			if reminderStage != "delivered_first" {
+				continue
+			}
+		case contextNoticeImminent:
+			if imminentStage != "delivered_first" {
+				continue
+			}
+		case contextNoticeWarning:
+			if !warningDelivered {
+				continue
+			}
+		}
+		a.emitToTUI(ContextNoticeEvent{Level: notice.level, Message: notice.text})
+	}
+}
+
 // markOverlayClaimsDelivered confirms delivery for every overlay that was
 // attached to the request being dispatched. Called on the main LLM goroutine
 // at the dispatch confirmation point (after the hook and governor gates, right
@@ -271,6 +335,7 @@ func (a *MainAgent) markOverlayClaimsDelivered() {
 	if imminentStage != "" {
 		a.recordContextDiagnosticEvent(analytics.UsagePurposeCompactionGrace, map[string]string{"stage": imminentStage})
 	}
+	a.emitStagedContextNotices(reminderStage, imminentStage, warningDelivered)
 }
 
 // compactContextVisible reports whether the compact_context tool is present in

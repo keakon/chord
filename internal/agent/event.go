@@ -628,9 +628,46 @@ type AgentNotifyEvent struct {
 	// of showing "AGENT BLOCKED" for an episode that already ended.
 	Subtype string
 	Message string
+	// MessageID is the durable mailbox message id for the notify, when the
+	// notify corresponds to a persisted sub-agent mailbox message. The TUI
+	// records it in its notify anchor log so a restored session can skip
+	// replaying cards that the durable transcript already renders, instead of
+	// duplicating them. It is empty for notifies without a backing mailbox
+	// message (e.g. control-plane message delivery notifications).
+	MessageID string
 }
 
 func (AgentNotifyEvent) agentEvent() {}
+
+// ContextNoticeEvent surfaces a context-pressure overlay that is already
+// attached to the outgoing request as a user-visible card.
+//
+// These overlays are request-scoped on purpose: they must never enter durable
+// history, because a stale "context is nearly full" line in the transcript
+// would outlive the condition it describes and could be misread as the latest
+// request by a later compaction. That scoping used to leave them invisible in
+// the TUI, so the model was told the context was filling up while the
+// transcript showed nothing — the user only found out when compaction fired.
+// Emitting the same text as a card keeps the request surface unchanged while
+// making the signal observable.
+//
+// Level separates the three runtime states so the card can badge them apart;
+// it is one of contextNoticePressure, contextNoticeImminent or
+// contextNoticeWarning.
+type ContextNoticeEvent struct {
+	Level   string
+	Message string
+}
+
+func (ContextNoticeEvent) agentEvent() {}
+
+// Context notice levels, mirroring the three overlays queued by the
+// compaction gate. They are also the card badges the TUI renders.
+const (
+	contextNoticePressure = "pressure"
+	contextNoticeImminent = "imminent"
+	contextNoticeWarning  = "warning"
+)
 
 // AgentDoneEvent signals that a SubAgent has completed its task.
 // Emitted to control-plane consumers and TUI so they can update state.

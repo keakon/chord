@@ -547,7 +547,7 @@ func reliableOutputEventLog(evt AgentEvent) (string, []any, bool) {
 			"event_type", fmt.Sprintf("%T", evt),
 			"status", e.Status,
 		}, true
-	case ToolCallStartEvent, ToolCallDiscardEvent, ToolCallExecutionEvent, ToolResultEvent, SessionRestoredEvent, SessionTitleChangedEvent, PendingDraftConsumedEvent, ForkSessionEvent, ErrorEvent, AgentStatusEvent, AgentStartedEvent, AgentNotifyEvent, AgentDoneEvent, GlobalIdleEvent, NotificationEvent, InfoEvent, ToastEvent, AssistantMessageEvent, LoopNoticeEvent, LoopStateChangedEvent, YoloModeChangedEvent, RunningModelChangedEvent, SpawnFinishedEvent:
+	case ToolCallStartEvent, ToolCallDiscardEvent, ToolCallExecutionEvent, ToolResultEvent, SessionRestoredEvent, SessionTitleChangedEvent, PendingDraftConsumedEvent, ForkSessionEvent, ErrorEvent, AgentStatusEvent, AgentStartedEvent, AgentNotifyEvent, AgentDoneEvent, GlobalIdleEvent, NotificationEvent, InfoEvent, ToastEvent, AssistantMessageEvent, LoopNoticeEvent, LoopStateChangedEvent, YoloModeChangedEvent, RunningModelChangedEvent, SpawnFinishedEvent, ContextNoticeEvent:
 		return "TUI output channel full, waiting to deliver critical event", []any{
 			"event_type", fmt.Sprintf("%T", evt),
 		}, true
@@ -619,9 +619,9 @@ func (a *MainAgent) emitReliableToTUI(evt AgentEvent, warnMsg string, warnAttrs 
 // best-effort and may be dropped when the channel is full so streaming and
 // tool execution goroutines never block on UI throughput. A small set of
 // low-frequency correctness/control events (tool lifecycle milestones,
-// non-idle activity, model changes, session restore, draft consumption, fork reload, errors)
-// are delivered reliably with blocking semantics guarded by stoppingCh. This
-// is safe to call from any goroutine.
+// non-idle activity, model changes, session restore, context notices, draft
+// consumption, fork reload, errors) are delivered reliably with blocking
+// semantics guarded by stoppingCh. This is safe to call from any goroutine.
 func (a *MainAgent) emitToTUI(evt AgentEvent) {
 	if a.shuttingDown.Load() {
 		return

@@ -60,18 +60,15 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 	var effects agentEventEffects
 	switch evt := event.(type) {
 	case agent.AgentNotifyEvent:
-		targetAgentID := strings.TrimSpace(evt.TargetAgentID)
-		if targetAgentID == "main" {
-			targetAgentID = ""
-		}
-		if targetAgentID == "" && strings.TrimSpace(evt.ParentAgentID) != "" && strings.TrimSpace(evt.ParentAgentID) != "main" {
-			targetAgentID = strings.TrimSpace(evt.ParentAgentID)
-		}
+		targetAgentID := resolveNotifyTargetAgentID(evt.TargetAgentID, evt.ParentAgentID)
 		block := newSubAgentMailboxBlock(m.nextBlockID, evt.Kind, evt.Subtype, evt.AgentID, evt.TaskID, evt.Message, targetAgentID)
 		m.nextBlockID++
 		m.appendViewportBlock(block)
 		m.markBlockSettled(block)
 		m.recalcViewportSize()
+		// Persist the live card's positional anchor so a restored session can
+		// replay it (and the other live-only notifies) at its true position.
+		m.recordNotifyAnchor(evt)
 		return true, effects
 	case agent.AgentStartedEvent:
 		previousAgentID := strings.TrimSpace(evt.PreviousAgentID)

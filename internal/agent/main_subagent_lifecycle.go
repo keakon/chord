@@ -640,6 +640,9 @@ func (a *MainAgent) dispatchSubAgentRiskAlert(mailbox *SubAgentMailboxMessage, s
 	}
 	ownerAgentID := strings.TrimSpace(mailbox.OwnerAgentID)
 	ownerTaskID := strings.TrimSpace(mailbox.OwnerTaskID)
+	if strings.TrimSpace(mailbox.MessageID) == "" {
+		mailbox.MessageID = a.nextSubAgentMailboxMessageID(mailbox.AgentID)
+	}
 	a.queueLoopEvent(Event{Type: EventSubAgentMailbox, SourceID: strings.TrimSpace(mailbox.AgentID), Payload: mailbox})
 	a.emitToTUI(AgentNotifyEvent{
 		AgentID:       strings.TrimSpace(mailbox.AgentID),
@@ -652,6 +655,7 @@ func (a *MainAgent) dispatchSubAgentRiskAlert(mailbox *SubAgentMailboxMessage, s
 		Kind:          string(SubAgentMailboxKindRiskAlert),
 		Subtype:       strings.TrimSpace(mailbox.Subtype),
 		Message:       strings.TrimSpace(mailbox.Summary),
+		MessageID:     mailbox.MessageID,
 	})
 }
 

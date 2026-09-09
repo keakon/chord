@@ -19,6 +19,9 @@ const pendingLSPDiagnosticOverlayText = "LSP diagnostics changed after one or mo
 // and persisted because they are real owner-visible model input. Other runtime
 // hints remain request-scoped overlays.
 func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
+	// Drop notices staged by a previous request that never reached dispatch;
+	// this assembly stages a fresh set.
+	a.resetContextNotices()
 	var overlays []message.Message
 
 	// Take the pending mailbox batch up front: together with the mailbox
@@ -113,6 +116,7 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 	if reminder := strings.TrimSpace(a.pendingContextPressureReminder); reminder != "" {
 		a.pendingContextPressureReminder = ""
 		a.noteContextPressureReminderAttached()
+		a.stashContextNotice(contextNoticePressure, reminder)
 		overlays = append(overlays, message.Message{
 			Role:    "user",
 			Kind:    message.KindTurnOverlay,
@@ -122,6 +126,7 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 	if imminent := strings.TrimSpace(a.pendingCompactionImminent); imminent != "" {
 		a.pendingCompactionImminent = ""
 		a.noteCompactionImminentAttached()
+		a.stashContextNotice(contextNoticeImminent, imminent)
 		overlays = append(overlays, message.Message{
 			Role:    "user",
 			Kind:    message.KindTurnOverlay,
@@ -131,6 +136,7 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 	if warning := strings.TrimSpace(a.pendingCompactionWarning); warning != "" {
 		a.pendingCompactionWarning = ""
 		a.noteCompactionWarningAttached()
+		a.stashContextNotice(contextNoticeWarning, warning)
 		overlays = append(overlays, message.Message{
 			Role:    "user",
 			Kind:    message.KindTurnOverlay,
