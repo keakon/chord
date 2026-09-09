@@ -90,6 +90,9 @@ func TestDelegateToolRequiresUsableWriteScope(t *testing.T) {
 					t.Fatalf("Execute() error = %q, want it to mention %q", err, want)
 				}
 			}
+			if strings.Contains(err.Error(), "Available read-only agent types") {
+				t.Fatalf("Execute() error = %q, want no read-only list appended when no available agent type is read-only", err)
+			}
 			if creator.calls != 0 {
 				t.Fatalf("CreateSubAgent() calls = %d, want the delegation rejected before admission", creator.calls)
 			}
@@ -153,6 +156,8 @@ func TestDelegateToolDescriptionKeepsUsageSemantics(t *testing.T) {
 		"delivered asynchronously and flows back to you automatically",
 		"reuse it with Notify or Cancel for follow-up instead of creating a duplicate delegate",
 		"delegation workflow section governs when to continue an existing task with Notify versus creating a new delegate, and when parallel delegates are safe",
+		"Roles that can write files must declare a non-empty expected_write_scope",
+		"a read-only delegation pairs a read-only role with an empty scope object {}",
 	} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("Description() missing %q in %q", want, desc)
@@ -168,5 +173,89 @@ func TestDelegateToolDescriptionKeepsUsageSemantics(t *testing.T) {
 		if strings.Contains(desc, unwanted) {
 			t.Fatalf("Description() should not duplicate workflow-block strategy %q in %q", unwanted, desc)
 		}
+	}
+}
+
+// mixedRolesCreator reports two agents with different file-write surfaces: a
+// write-capable "builder" role and a "surveyor" role that registers no
+// file-writing tools, so the empty-scope rule can be exercised per agent type
+// instead of per creator.
+type mixedRolesCreator struct {
+	countingTaskCreator
+}
+
+func (*mixedRolesCreator) AgentRoleRegistersNoFileWriteTools(agentType string) bool {
+	return agentType == "surveyor"
+}
+
+func (*mixedRolesCreator) AvailableSubAgents() []AgentInfo {
+	return []AgentInfo{
+		{Name: "builder", Description: "General coding"},
+		{Name: "surveyor", Description: "Read-only analysis"},
+	}
+}
+
+// TestDelegateToolParametersAnnotateAgentRowsWithEmptyScopeRule verifies each
+// rendered agent_type row carries the empty-scope rule of its role:
+// empty_scope=allowed for a role that registers no file-writing tools, and
+// empty_scope=required for a role that can write files.
+func TestDelegateToolParametersAnnotateAgentRowsWithEmptyScopeRule(t *testing.T) {
+	params := NewDelegateTool(&mixedRolesCreator{}).Parameters()
+	text := fmt.Sprint(params)
+	rows := make(map[string]string, 2)
+	for _, line := range strings.Split(text, "\n") {
+		if strings.HasPrefix(line, "- builder") {
+			rows["builder"] = line
+		}
+		if strings.HasPrefix(line, "- surveyor") {
+			rows["surveyor"] = line
+		}
+	}
+	if !strings.Contains(rows["builder"], "empty_scope=required") || strings.Contains(rows["builder"], "empty_scope=allowed") {
+		t.Fatalf("builder row %q: want empty_scope=required only, text: %s", rows["builder"], text)
+	}
+	if !strings.Contains(rows["surveyor"], "empty_scope=allowed") || strings.Contains(rows["surveyor"], "empty_scope=required") {
+		t.Fatalf("surveyor row %q: want empty_scope=allowed only, text: %s", rows["surveyor"], text)
+	}
+}
+
+// TestDelegateToolAcceptsEmptyScopeForReadOnlyAgentType verifies an empty
+// expected_write_scope stays accepted when agent_type names the read-only role
+// of a creator that also exposes write-capable roles.
+func TestDelegateToolAcceptsEmptyScopeForReadOnlyAgentType(t *testing.T) {
+	creator := &mixedRolesCreator{}
+	if _, err := NewDelegateTool(creator).Execute(context.Background(), json.RawMessage(
+		`{"description":"survey the parser","agent_type":"surveyor","expected_write_scope":{}}`,
+	)); err != nil {
+		t.Fatalf("Execute() error = %v, want empty scope accepted for the read-only agent type", err)
+	}
+	if creator.calls != 1 {
+		t.Fatalf("CreateSubAgent() calls = %d, want 1", creator.calls)
+	}
+}
+
+// TestDelegateToolEmptyScopeForWriteCapableAgentTypeNamesReadOnlyAlternatives
+// verifies the repair instruction for an empty scope on a write-capable role
+// lists the read-only agent types that accept an empty scope, appended after
+// the original guidance.
+func TestDelegateToolEmptyScopeForWriteCapableAgentTypeNamesReadOnlyAlternatives(t *testing.T) {
+	creator := &mixedRolesCreator{}
+	_, err := NewDelegateTool(creator).Execute(context.Background(), json.RawMessage(
+		`{"description":"implement feature","agent_type":"builder","expected_write_scope":{}}`,
+	))
+	if err == nil {
+		t.Fatal("Execute() error = nil, want the write-capable builder role to require a non-empty scope")
+	}
+	for _, want := range []string{
+		"files/path_prefix/modules",
+		"no file-writing tools",
+		"Available read-only agent types: surveyor",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("Execute() error = %q, want it to contain %q", err, want)
+		}
+	}
+	if creator.calls != 0 {
+		t.Fatalf("CreateSubAgent() calls = %d, want the delegation rejected before admission", creator.calls)
 	}
 }

@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -153,7 +154,8 @@ func (DelegateTool) Description() string {
 		"use Delegate only for substantial sub-work that benefits from a dedicated agent (e.g. multi-file edits or independent plan items). " +
 		"Your system prompt's delegation workflow section governs when to continue an existing task with Notify versus creating a new delegate, and when parallel delegates are safe. " +
 		"IMPORTANT: The result is delivered asynchronously and flows back to you automatically — do NOT poll or retrieve SubAgent results. " +
-		"The returned task_id is the stable durable handle for that delegate; reuse it with Notify or Cancel for follow-up instead of creating a duplicate delegate."
+		"The returned task_id is the stable durable handle for that delegate; reuse it with Notify or Cancel for follow-up instead of creating a duplicate delegate. " +
+		"Roles that can write files must declare a non-empty expected_write_scope; a read-only delegation pairs a read-only role with an empty scope object {}."
 }
 
 // IsAvailable reports whether the DelegateTool should be registered.
@@ -180,7 +182,7 @@ func (t *DelegateTool) Parameters() map[string]any {
 			sb.WriteString(": ")
 			sb.WriteString(a.Description)
 		}
-		meta := make([]string, 0, 4)
+		meta := make([]string, 0, 5)
 		if len(a.Capabilities) > 0 {
 			meta = append(meta, "capabilities="+strings.Join(a.Capabilities, ","))
 		}
@@ -192,6 +194,13 @@ func (t *DelegateTool) Parameters() map[string]any {
 		}
 		if a.DelegationPolicy != "" {
 			meta = append(meta, "delegation_policy="+a.DelegationPolicy)
+		}
+		// Every row states the role's empty-scope rule so the model does not
+		// need to read the expected_write_scope prose to pick a role.
+		if delegateTargetRoleRegistersNoFileWriteTools(t.creator, a.Name) {
+			meta = append(meta, "empty_scope=allowed")
+		} else {
+			meta = append(meta, "empty_scope=required")
 		}
 		if len(meta) > 0 {
 			sb.WriteString(" [")
@@ -258,14 +267,29 @@ func delegateTargetRoleRegistersNoFileWriteTools(creator SubAgentCreator, agentT
 	return ok && surface.AgentRoleRegistersNoFileWriteTools(agentType)
 }
 
-// errDelegateWriteScopeRequired is the operator-facing repair instruction for a
-// Delegate call that declares no usable write scope for a role that can write
-// files. The schema marks the field required, but a model can still send `{}`;
-// an empty scope is valid only when the chosen agent_type's role registers no
-// file-modifying tools (see AgentFileWriteSurface).
-var errDelegateWriteScopeRequired = fmt.Errorf(
-	"expected_write_scope is required: this task must either declare at least one of files/path_prefix/modules covering what it plans to write, " +
-		"or use an agent_type whose role registers no file-writing tools and pass an empty object {}")
+// delegateWriteScopeRequiredError builds the operator-facing repair
+// instruction for a Delegate call that declares no usable write scope for a
+// role that can write files. The schema marks the field required, but a model
+// can still send `{}`; an empty scope is valid only when the chosen
+// agent_type's role registers no file-modifying tools (see
+// AgentFileWriteSurface). When the creator exposes read-only agent types, the
+// instruction names them as the alternative that accepts an empty scope.
+func delegateWriteScopeRequiredError(creator SubAgentCreator) error {
+	msg := "expected_write_scope is required: this task must either declare at least one of files/path_prefix/modules covering what it plans to write, " +
+		"or use an agent_type whose role registers no file-writing tools and pass an empty object {}"
+	var readOnlyAgentTypes []string
+	if creator != nil {
+		for _, a := range creator.AvailableSubAgents() {
+			if delegateTargetRoleRegistersNoFileWriteTools(creator, a.Name) {
+				readOnlyAgentTypes = append(readOnlyAgentTypes, a.Name)
+			}
+		}
+	}
+	if len(readOnlyAgentTypes) > 0 {
+		msg += " Available read-only agent types: " + strings.Join(readOnlyAgentTypes, ", ")
+	}
+	return errors.New(msg)
+}
 
 func (t *DelegateTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	var a delegateArgs
@@ -276,11 +300,11 @@ func (t *DelegateTool) Execute(ctx context.Context, raw json.RawMessage) (string
 		return "", fmt.Errorf("description is required")
 	}
 	if a.ExpectedWriteScope == nil {
-		return "", errDelegateWriteScopeRequired
+		return "", delegateWriteScopeRequiredError(t.creator)
 	}
 	expectedWriteScope := a.ExpectedWriteScope.Normalized()
 	if expectedWriteScope.Empty() && !delegateTargetRoleRegistersNoFileWriteTools(t.creator, a.AgentType) {
-		return "", errDelegateWriteScopeRequired
+		return "", delegateWriteScopeRequiredError(t.creator)
 	}
 
 	if t.creator == nil {
