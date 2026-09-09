@@ -368,6 +368,76 @@ func TestSwitchFocusUnknownAgentClearsStaleFocus(t *testing.T) {
 	}
 }
 
+func TestSettledTerminalTaskFocusIsReadOnly(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	const taskID = "settled-task"
+	const instanceID = "settled-worker-1"
+	a.setTaskRecords(map[string]*DurableTaskRecord{
+		taskID: {
+			TaskID:            taskID,
+			AgentDefName:      "worker",
+			LatestInstanceID:  instanceID,
+			State:             string(SubAgentStateCompleted),
+			ResumePolicy:      taskResumePolicyNotify,
+			SettlementDurable: true,
+			UpdatedAt:         time.Now(),
+		},
+	})
+	manager := a.recoveryManager()
+	if err := manager.PersistMessage(instanceID, message.Message{Role: "user", Content: "original ask"}); err != nil {
+		t.Fatalf("persist original ask: %v", err)
+	}
+	if err := manager.PersistMessage(instanceID, message.Message{
+		Role:    "user",
+		Content: "[follow_up] continue with option B",
+		Kind:    message.KindSubAgentMailbox,
+		Mailbox: &message.MailboxMetadata{AgentID: "main", Kind: "follow_up"},
+	}); err != nil {
+		t.Fatalf("persist notify row: %v", err)
+	}
+
+	a.SwitchFocus(instanceID)
+	if focused := a.focusedDurableTask(); focused == nil || focused.TaskID != taskID {
+		t.Fatalf("focused durable task = %#v, want %s", focused, taskID)
+	}
+	if got := a.FocusedAgentID(); got != instanceID {
+		t.Fatalf("FocusedAgentID() = %q, want %q (the focused conversation identifies the settled instance)", got, instanceID)
+	}
+
+	msgs := a.GetMessages()
+	if len(msgs) != 2 {
+		t.Fatalf("GetMessages() = %d rows, want the 2 persisted transcript rows", len(msgs))
+	}
+	notify := msgs[len(msgs)-1]
+	if notify.Kind != message.KindSubAgentMailbox || notify.Mailbox == nil || notify.Mailbox.AgentID != "main" || notify.Mailbox.Kind != "follow_up" || notify.Mailbox.MessageID != "" {
+		t.Fatalf("restored notify row = %#v, want the durable main follow-up row", notify)
+	}
+
+	a.SendUserMessage("please continue")
+	waitForToastEvent(t, a.Events(), "Task settled-task has finished; delegate it again to send it a follow-up")
+	if rows := a.ctxMgr.Snapshot(); len(rows) != 0 {
+		t.Fatalf("main context = %d rows after SendUserMessage, want 0", len(rows))
+	}
+	if msgs := a.GetMessages(); len(msgs) != 2 {
+		t.Fatalf("settled transcript = %d rows after SendUserMessage, want 2", len(msgs))
+	}
+
+	a.ContinueFromContext()
+	waitForToastEvent(t, a.Events(), "Task settled-task has finished; delegate it again to continue")
+	if msgs := a.GetMessages(); len(msgs) != 2 {
+		t.Fatalf("settled transcript = %d rows after ContinueFromContext, want 2", len(msgs))
+	}
+
+	a.RemoveLastMessage()
+	if msgs := a.GetMessages(); len(msgs) != 2 {
+		t.Fatalf("settled transcript = %d rows after RemoveLastMessage, want 2", len(msgs))
+	}
+	if rows := a.ctxMgr.Snapshot(); len(rows) != 0 {
+		t.Fatalf("main context = %d rows after RemoveLastMessage, want 0", len(rows))
+	}
+}
+
 func TestStaleFocusedAgentFallsBackToMainForUserInput(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-10")

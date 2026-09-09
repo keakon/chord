@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/keakon/golog/log"
@@ -108,6 +109,10 @@ func (a *MainAgent) SendUserMessageToTarget(conversation ConversationTarget, con
 		a.emitToTUI(ToastEvent{Message: "Conversation is no longer available; retry the message", Level: "warn", AgentID: conversation.AgentID})
 		return
 	}
+	if target.settled {
+		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Task %s has finished; delegate it again to send it a follow-up", target.task.TaskID), Level: "warn", AgentID: target.task.LatestInstanceID})
+		return
+	}
 	if focused := target.sub; focused != nil {
 		kind := "follow_up"
 		if focused.State() == SubAgentStateWaitingMain {
@@ -169,6 +174,10 @@ func (a *MainAgent) SendUserMessageWithParts(parts []message.ContentPart) {
 		}) {
 			a.emitToTUI(ToastEvent{Message: "Focused SubAgent is no longer available; retry the message", Level: "warn", AgentID: focused.instanceID})
 		}
+		return
+	}
+	if rec := a.focusedDurableTask(); rec != nil && !rec.RuntimeParked && isTerminalSubAgentState(SubAgentState(strings.TrimSpace(rec.State))) {
+		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Task %s has finished; delegate it again to send it a follow-up", rec.TaskID), Level: "warn", AgentID: rec.LatestInstanceID})
 		return
 	}
 	if rec := a.focusedDurableTask(); rec != nil && rec.RuntimeParked {

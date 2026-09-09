@@ -235,6 +235,37 @@ func TestMessagesToBlocksRestoresDurableSubAgentMailboxCard(t *testing.T) {
 	}
 }
 
+func TestMessagesToBlocksRestoresMainFollowUpNotifyWithoutMessageID(t *testing.T) {
+	content := "[follow_up] continue with option B"
+	msgs := []message.Message{{
+		Role:    "user",
+		Content: content,
+		Kind:    message.KindSubAgentMailbox,
+		Mailbox: &message.MailboxMetadata{
+			AgentID: "main",
+			Kind:    "follow_up",
+		},
+	}}
+	nextID := 1
+	blocks := messagesToBlocks(msgs, &nextID)
+	if len(blocks) != 1 {
+		t.Fatalf("block count = %d, want 1", len(blocks))
+	}
+	block := blocks[0]
+	if block.Type != BlockStatus || block.StatusTitle != "AGENT MESSAGE" {
+		t.Fatalf("block = %#v, want AGENT MESSAGE status card", block)
+	}
+	if block.StatusFrom != "main" || block.StatusKind != "follow_up" {
+		t.Fatalf("notify block fields = from %q kind %q, want main/follow_up", block.StatusFrom, block.StatusKind)
+	}
+	if block.Content != content {
+		t.Fatalf("block content = %q, want the persisted notify text", block.Content)
+	}
+	if block.LinkedAgentID != "main" || block.LinkedTaskID != "" {
+		t.Fatalf("block links = (%q, %q), want main with no task", block.LinkedAgentID, block.LinkedTaskID)
+	}
+}
+
 func TestAppendLocalStatusCardDefersWhileAssistantStreamIsActive(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
 	block := &Block{ID: m.nextBlockID, Type: BlockAssistant, Content: "streaming", Streaming: true}

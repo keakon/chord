@@ -1313,6 +1313,10 @@ type focusedAgentSnapshot struct {
 	sub    *SubAgent
 	task   *DurableTaskRecord
 	parked bool
+	// settled marks a terminal task whose runtime is gone without ever being
+	// parked (a crash between settlement and park): its transcript stays
+	// readable, while actions must refuse it until the task is delegated anew.
+	settled bool
 }
 
 func (a *MainAgent) focusedConversationTarget() ConversationTarget {
@@ -1361,6 +1365,9 @@ func (a *MainAgent) resolveConversationTarget(target ConversationTarget) (focuse
 	if rec.RuntimeParked {
 		return focusedAgentSnapshot{task: rec, parked: true}, true
 	}
+	if isTerminalSubAgentState(SubAgentState(strings.TrimSpace(rec.State))) {
+		return focusedAgentSnapshot{task: rec, settled: true}, true
+	}
 	return focusedAgentSnapshot{}, false
 }
 
@@ -1405,7 +1412,7 @@ func (a *MainAgent) SwitchFocus(agentID string) {
 		}
 	}
 	a.subs.mu.RUnlock()
-	if rec := a.taskRecordByInstanceID(agentID); rec != nil && rec.RuntimeParked {
+	if rec := a.taskRecordByInstanceID(agentID); rec != nil && (rec.RuntimeParked || isTerminalSubAgentState(SubAgentState(strings.TrimSpace(rec.State)))) {
 		a.focusedAgent.Store(nil)
 		a.setFocusedTaskID(rec.TaskID)
 		return

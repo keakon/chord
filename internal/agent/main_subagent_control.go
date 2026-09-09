@@ -263,14 +263,14 @@ func (a *MainAgent) sendMessageToSubAgentNow(callerAgentID, callerTaskID, taskID
 	return a.sendMessageToSubAgentWithTrigger(callerAgentID, callerTaskID, taskID, message, kind, taskResumeByTargetedNotify)
 }
 
-func (a *MainAgent) sendMessageToSubAgentWithTrigger(callerAgentID, callerTaskID, taskID, message, kind string, trigger taskResumeTrigger) (tools.TaskHandle, error) {
+func (a *MainAgent) sendMessageToSubAgentWithTrigger(callerAgentID, callerTaskID, taskID, messageText, kind string, trigger taskResumeTrigger) (tools.TaskHandle, error) {
 	taskID = strings.TrimSpace(taskID)
-	message = strings.TrimSpace(message)
+	messageText = strings.TrimSpace(messageText)
 	kind = strings.TrimSpace(kind)
 	if taskID == "" {
 		return tools.TaskHandle{}, fmt.Errorf("task_id is required")
 	}
-	if message == "" {
+	if messageText == "" {
 		return tools.TaskHandle{}, fmt.Errorf("message is required")
 	}
 	record, err := a.canCallerControlTask(callerAgentID, callerTaskID, taskID)
@@ -311,7 +311,11 @@ func (a *MainAgent) sendMessageToSubAgentWithTrigger(callerAgentID, callerTaskID
 		return tools.TaskHandle{}, err
 	}
 
-	status, statusMessage, err := a.deliverMessageToSubAgent(sub, message, kind)
+	status, statusMessage, err := a.deliverMessageToSubAgentWithMetadata(sub, messageText, kind, false, &message.MailboxMetadata{
+		AgentID: controlPlaneAgentID(callerAgentID),
+		TaskID:  callerTaskID,
+		Kind:    kind,
+	})
 	if err != nil {
 		if rehydrated {
 			a.closeSubAgent(sub.instanceID)
@@ -352,13 +356,9 @@ func (a *MainAgent) sendMessageToSubAgentWithTrigger(callerAgentID, callerTaskID
 		TargetAgentID: sub.instanceID,
 		TargetTaskID:  sub.taskID,
 		Kind:          kind,
-		Message:       message,
+		Message:       messageText,
 	})
 	return handle, nil
-}
-
-func (a *MainAgent) deliverMessageToSubAgent(sub *SubAgent, message, kind string) (string, string, error) {
-	return a.deliverMessageToSubAgentWithMode(sub, message, kind, false)
 }
 
 func (a *MainAgent) deliverManualMessageToSubAgent(sub *SubAgent, message, kind string) (string, string, error) {

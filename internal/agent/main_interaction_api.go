@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/keakon/golog/log"
@@ -186,11 +187,11 @@ func (a *MainAgent) GetMessagesForTarget(conversation ConversationTarget) []mess
 	if target.sub != nil {
 		return target.sub.GetMessages()
 	}
-	if target.parked {
+	if target.parked || target.settled {
 		manager := a.recoveryManager()
 		msgs, err := loadTaskHistoryMessages(manager, target.task, loadToolActivityStarted(manager))
 		if err != nil {
-			log.Warnf("GetMessages: failed to load parked subagent transcript task_id=%v error=%v", target.task.TaskID, err)
+			log.Warnf("GetMessages: failed to load subagent transcript task_id=%v error=%v", target.task.TaskID, err)
 			return nil
 		}
 		return msgs
@@ -209,6 +210,10 @@ func (a *MainAgent) ContinueFromContextForTarget(conversation ConversationTarget
 	target, ok := a.resolveConversationTarget(conversation)
 	if !ok {
 		a.emitToTUI(ToastEvent{Message: "Conversation is no longer available; retry the action", Level: "warn", AgentID: conversation.AgentID})
+		return
+	}
+	if target.settled {
+		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Task %s has finished; delegate it again to continue", target.task.TaskID), Level: "warn", AgentID: target.task.LatestInstanceID})
 		return
 	}
 	if sub := target.sub; sub != nil {
@@ -267,6 +272,11 @@ func (a *MainAgent) RemoveLastMessage() {
 func (a *MainAgent) RemoveLastMessageForTarget(conversation ConversationTarget) {
 	target, ok := a.resolveConversationTarget(conversation)
 	if !ok {
+		return
+	}
+	if target.settled {
+		// A settled transcript is immutable history; drop the request silently
+		// instead of letting it fall through to the main conversation.
 		return
 	}
 	if target.sub != nil {

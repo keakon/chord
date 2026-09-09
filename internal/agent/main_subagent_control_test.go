@@ -698,6 +698,50 @@ func TestSendMessageToWaitingMainWorkerResumesExecution(t *testing.T) {
 	}
 }
 
+func TestNotifySubAgentConsumedMessageCarriesMailboxMetadata(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "adhoc-notify")
+	sub.setState(SubAgentStateWaitingMain, "need approval")
+
+	handle, err := a.NotifySubAgent(context.Background(), sub.taskID, "continue with option B", "follow_up")
+	if err != nil {
+		t.Fatalf("NotifySubAgent: %v", err)
+	}
+	if handle.Status != "resumed" {
+		t.Fatalf("handle.Status = %q, want resumed", handle.Status)
+	}
+	var input pendingUserMessage
+	select {
+	case input = <-sub.inputCh:
+	default:
+		t.Fatal("expected resumed worker to receive the queued notify message")
+	}
+	if got := pendingUserMessageText(input); got != "[follow_up] continue with option B" {
+		t.Fatalf("queued message = %q, want %q", got, "[follow_up] continue with option B")
+	}
+	if input.Mailbox == nil {
+		t.Fatal("expected the queued notify message to carry mailbox metadata")
+	}
+	if input.Mailbox.AgentID != "main" || input.Mailbox.TaskID != "" || input.Mailbox.Kind != "follow_up" || input.Mailbox.MessageID != "" {
+		t.Fatalf("queued mailbox metadata = %#v, want main/follow_up without a message id", input.Mailbox)
+	}
+	sub.appendPendingUserMessage(input)
+	msgs := sub.GetMessages()
+	if len(msgs) == 0 {
+		t.Fatal("expected the consumed notify message to be appended to the worker context")
+	}
+	last := msgs[len(msgs)-1]
+	if last.Kind != message.KindSubAgentMailbox {
+		t.Fatalf("consumed row kind = %q, want %q", last.Kind, message.KindSubAgentMailbox)
+	}
+	if last.Content != "[follow_up] continue with option B" {
+		t.Fatalf("consumed row content = %q, want the notify text with its kind prefix", last.Content)
+	}
+	if last.Mailbox == nil || last.Mailbox.AgentID != "main" || last.Mailbox.TaskID != "" || last.Mailbox.Kind != "follow_up" || last.Mailbox.MessageID != "" {
+		t.Fatalf("consumed row mailbox = %#v, want main/follow_up without a message id", last.Mailbox)
+	}
+}
+
 func TestNotifySubAgentDoesNotAckMailboxWhenSlotUnavailable(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-slot")
