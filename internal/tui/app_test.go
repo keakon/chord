@@ -9515,9 +9515,9 @@ func TestAgentNotifyCreatesCardInTargetView(t *testing.T) {
 // BLOCKED". Both now share one constructor; this pins the fields that must
 // agree no matter which path produced the card.
 func TestSubAgentMailboxCardAgreesAcrossLiveAndRestore(t *testing.T) {
-	live := newSubAgentMailboxBlock(1, "risk_alert", "worker-1", "adhoc-1", "worker cannot continue", "")
+	live := newSubAgentMailboxBlock(1, "risk_alert", "", "worker-1", "adhoc-1", "worker cannot continue", "")
 	meta := &message.MailboxMetadata{AgentID: "worker-1", TaskID: "adhoc-1", Kind: "risk_alert"}
-	restored := newSubAgentMailboxBlock(1, meta.Kind, meta.AgentID, meta.TaskID, "<persisted body>", "")
+	restored := newSubAgentMailboxBlock(1, meta.Kind, "", meta.AgentID, meta.TaskID, "<persisted body>", "")
 
 	if live.StatusTitle != restored.StatusTitle {
 		t.Fatalf("title live %q vs restored %q", live.StatusTitle, restored.StatusTitle)
@@ -9534,11 +9534,14 @@ func TestSubAgentMailboxCardAgreesAcrossLiveAndRestore(t *testing.T) {
 	if live.StatusTitle != "AGENT BLOCKED" {
 		t.Fatalf("risk alert title = %q, want AGENT BLOCKED per docs/tools.md", live.StatusTitle)
 	}
-	if got := subAgentMailboxCardTitle("completed"); got != "AGENT COMPLETE" {
+	if got := subAgentMailboxCardTitle("completed", ""); got != "AGENT COMPLETE" {
 		t.Fatalf("completed title = %q, want AGENT COMPLETE", got)
 	}
-	if got := subAgentMailboxCardTitle("progress"); got != "AGENT MESSAGE" {
+	if got := subAgentMailboxCardTitle("progress", ""); got != "AGENT MESSAGE" {
 		t.Fatalf("progress title = %q, want AGENT MESSAGE", got)
+	}
+	if got := subAgentMailboxCardTitle("risk_alert", agent.SubAgentStallResolvedSubtype); got != "AGENT BLOCKED RESOLVED" {
+		t.Fatalf("stall-resolved title = %q, want AGENT BLOCKED RESOLVED", got)
 	}
 }
 

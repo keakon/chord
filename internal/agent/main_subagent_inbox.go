@@ -392,6 +392,15 @@ func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
 		}
 		return enqueueForProcessing(text, "Child task completed; resuming")
 	case SubAgentMailboxKindBlocked, SubAgentMailboxKindDecisionRequired, SubAgentMailboxKindRiskAlert, SubAgentMailboxKindDirectionChange:
+		// A decision request or risk alert that lands after its task already
+		// settled is stale: the owner cannot act on a worker that is no
+		// longer running, and delivering it would surface a false "worker
+		// needs you" after the task completed (or failed). Drop the late
+		// delivery instead of replaying it.
+		if rec := a.taskRecordByTaskID(strings.TrimSpace(msg.TaskID)); rec != nil && !isNonTerminalTaskState(rec.State) {
+			log.Infof("dropping late %s mailbox for settled task task_id=%v agent_id=%v", msg.Kind, msg.TaskID, msg.AgentID)
+			return false
+		}
 		if owner.State() == SubAgentStateWaitingDescendant {
 			return reactivateOwner(text, "Child task requires parent decision", true)
 		}

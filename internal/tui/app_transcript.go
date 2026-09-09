@@ -589,7 +589,7 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 				continue
 			}
 			if msg.Kind == message.KindSubAgentMailbox && msg.Mailbox != nil {
-				block := newSubAgentMailboxBlock(*nextID, msg.Mailbox.Kind, msg.Mailbox.AgentID, msg.Mailbox.TaskID, msg.Content, "")
+				block := newSubAgentMailboxBlock(*nextID, msg.Mailbox.Kind, msg.Mailbox.Subtype, msg.Mailbox.AgentID, msg.Mailbox.TaskID, msg.Content, "")
 				*nextID++
 				blocks = append(blocks, block)
 				continue

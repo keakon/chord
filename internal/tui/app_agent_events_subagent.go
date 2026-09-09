@@ -20,12 +20,17 @@ const (
 // read: docs/tools.md has terminal worker failures shown as AGENT BLOCKED, and
 // the stall watchdog raises them as kind "risk_alert". The restore path used
 // to badge the same event "AGENT RISK", so a resumed session disagreed with
-// the run it was replaying.
-func subAgentMailboxCardTitle(kind string) string {
+// the run it was replaying. A risk_alert whose subtype closes a stall episode
+// (stall_resolved) is badged separately: the worker recovered, so the card
+// must not keep reading like an active block.
+func subAgentMailboxCardTitle(kind, subtype string) string {
 	switch agent.SubAgentMailboxKind(kind) {
 	case agent.SubAgentMailboxKindCompleted:
 		return "AGENT COMPLETE"
 	case agent.SubAgentMailboxKindRiskAlert, agent.SubAgentMailboxKindBlocked:
+		if subtype == agent.SubAgentStallResolvedSubtype {
+			return "AGENT BLOCKED RESOLVED"
+		}
 		return "AGENT BLOCKED"
 	}
 	return "AGENT MESSAGE"
@@ -37,11 +42,11 @@ func subAgentMailboxCardTitle(kind string) string {
 // badged "AGENT BLOCKED" while running but "AGENT RISK" after a restart, and
 // only the live card carried a "[agent] kind:" prefix. One constructor means
 // both render the same badge and the same From/Kind rows.
-func newSubAgentMailboxBlock(id int, kind, agentID, taskID, content, targetAgentID string) *Block {
+func newSubAgentMailboxBlock(id int, kind, subtype, agentID, taskID, content, targetAgentID string) *Block {
 	return &Block{
 		ID:            id,
 		Type:          BlockStatus,
-		StatusTitle:   subAgentMailboxCardTitle(kind),
+		StatusTitle:   subAgentMailboxCardTitle(kind, subtype),
 		StatusFrom:    strings.TrimSpace(agentID),
 		StatusKind:    strings.TrimSpace(kind),
 		Content:       content,
@@ -62,7 +67,7 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 		if targetAgentID == "" && strings.TrimSpace(evt.ParentAgentID) != "" && strings.TrimSpace(evt.ParentAgentID) != "main" {
 			targetAgentID = strings.TrimSpace(evt.ParentAgentID)
 		}
-		block := newSubAgentMailboxBlock(m.nextBlockID, evt.Kind, evt.AgentID, evt.TaskID, evt.Message, targetAgentID)
+		block := newSubAgentMailboxBlock(m.nextBlockID, evt.Kind, evt.Subtype, evt.AgentID, evt.TaskID, evt.Message, targetAgentID)
 		m.nextBlockID++
 		m.appendViewportBlock(block)
 		m.markBlockSettled(block)

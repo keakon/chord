@@ -136,7 +136,9 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 					}
 					defer release()
 
+					stopHeartbeat := s.runActivityHeartbeat(batchCtx, subAgentToolHeartbeatInterval)
 					execResult, err := s.executeToolCallWithHook(batchCtx, tc, false)
+					stopHeartbeat()
 					completedAt := time.Now()
 					if batchCtx.Err() != nil && turn.Ctx.Err() != nil {
 						return
@@ -200,7 +202,9 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 			}
 			defer release()
 
+			stopHeartbeat := s.runActivityHeartbeat(batchCtx, subAgentToolHeartbeatInterval)
 			execResult, err := s.executeToolCall(batchCtx, tc)
+			stopHeartbeat()
 			completedAt := time.Now()
 			if batchCtx.Err() != nil && turn.Ctx.Err() != nil {
 				return
@@ -231,6 +235,36 @@ func (s *SubAgent) enqueuePromotedToolResult(result *toolResult) {
 		return
 	}
 	s.promotedToolQueue = append(s.promotedToolQueue, result)
+}
+
+// runActivityHeartbeat refreshes the worker activity heartbeat every interval
+// until stop is called or ctx ends. It brackets long-running tool executions:
+// a single tool (a slow build, a full test run) can run past the stall
+// threshold on its own, and without mid-execution refreshes the worker would
+// look stalled while the tool is genuinely progressing. The interval is a
+// parameter so the periodic refresh is testable at a short interval;
+// production callers pass subAgentToolHeartbeatInterval.
+func (s *SubAgent) runActivityHeartbeat(ctx context.Context, interval time.Duration) (stop func()) {
+	if s == nil {
+		return func() {}
+	}
+	s.markActivity()
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				s.markActivity()
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return func() { close(done) }
 }
 
 // handleToolResult processes a single tool execution result. When all pending

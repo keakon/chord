@@ -21,6 +21,16 @@ const (
 	coordinationSnapshotMaxListItems    = 3
 	coordinationSnapshotStallAfter      = 10 * time.Minute
 	coordinationSnapshotRecentTaskTurns = uint64(1)
+	// subAgentToolHeartbeatInterval is how often the activity heartbeat is
+	// refreshed while a SubAgent tool call executes. A single long-running
+	// tool (a slow build, a full test run) can exceed the stall threshold on
+	// its own; the interval stays far under coordinationSnapshotStallAfter so
+	// the watchdog never sees a stale heartbeat mid-tool.
+	subAgentToolHeartbeatInterval = coordinationSnapshotStallAfter / 6
+	// SubAgentStallResolvedSubtype marks the risk_alert that closes a stall
+	// episode whose earlier alert the owner was shown; the TUI renders it
+	// distinctly from the still-active AGENT BLOCKED alert.
+	SubAgentStallResolvedSubtype = "stall_resolved"
 )
 
 func truncateCoordinationSnapshotText(s string, maxRunes int) string {
@@ -260,9 +270,6 @@ func formatWriteScope(scope tools.WriteScope) string {
 		return ""
 	}
 	var parts []string
-	if scope.ReadOnly {
-		parts = append(parts, "read_only")
-	}
 	for _, item := range scope.Files {
 		parts = append(parts, "file:"+item)
 	}

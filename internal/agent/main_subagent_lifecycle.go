@@ -440,9 +440,30 @@ func (a *MainAgent) sweepSubAgentLifecycle() {
 		if sub == nil || sub.State() != SubAgentStateRunning {
 			continue
 		}
+		// A live Running runtime whose durable record already settled
+		// (completed/failed/cancelled) is a stale conflict survivor: raising a
+		// stall alert would tell the owner a task needs attention after it
+		// already finished. Skip it — the settle path owns terminal truth, and
+		// the late-mailbox drop in the inbox layer covers anything that was
+		// queued before the settlement landed.
+		if rec := a.taskRecordByTaskID(strings.TrimSpace(sub.taskID)); rec != nil && !isNonTerminalTaskState(rec.State) {
+			continue
+		}
 		reason := runningSubAgentStallReason(sub, now)
 		if reason == "" {
-			sub.clearStallAlert()
+			a.closeStallEpisodeIfAlerted(sub)
+			continue
+		}
+		// While the main agent waits on a user-facing dialog (confirm,
+		// question, or handoff) it dispatches no new input, so a healthy
+		// Running worker legitimately produces no activity for as long as the
+		// user takes to answer. Treat the wait as worker heartbeat: refresh
+		// the activity clock and close any earlier stall episode, so the
+		// quiet window never raises AGENT BLOCKED, and a worker that stays
+		// silent after the dialog resolves alerts again as a fresh episode.
+		if a.interaction.hasPendingUserInteraction() {
+			sub.markActivity()
+			a.closeStallEpisodeIfAlerted(sub)
 			continue
 		}
 		if sub.stallAlertRaised() {
@@ -451,6 +472,38 @@ func (a *MainAgent) sweepSubAgentLifecycle() {
 		sub.raiseStallAlert()
 		a.queueSubAgentStallAlert(sub, reason)
 	}
+}
+
+// closeStallEpisodeIfAlerted closes a stall episode that was previously
+// alerted: it clears the deduplication flag and tells the owner the worker
+// recovered. The sweep reaches it on the first pass that finds the worker
+// healthy again (fresh activity, or an open user dialog explaining the
+// silence), so an AGENT BLOCKED card is not left standing after the worker
+// resumed — the resolution closes the episode explicitly, and the worker
+// alerts again only if a genuinely new quiet window exceeds the threshold.
+func (a *MainAgent) closeStallEpisodeIfAlerted(sub *SubAgent) {
+	if sub == nil || !sub.stallAlertRaised() {
+		return
+	}
+	sub.clearStallAlert()
+	a.queueSubAgentStallResolved(sub)
+}
+
+// queueSubAgentStallResolved notifies the owner that a previously alerted
+// stall episode has ended: the worker is again showing state/progress
+// updates, so the earlier risk_alert no longer applies and no action is
+// needed. The alert card itself stays in history; the resolution is a
+// separate message so the owner can tell a recovered worker from one that is
+// still silently stalled.
+func (a *MainAgent) queueSubAgentStallResolved(sub *SubAgent) {
+	if a == nil || sub == nil {
+		return
+	}
+	mailbox := newSubAgentRiskAlertMailbox(sub, nil, SubAgentStallResolvedSubtype, "stall resolved: worker resumed activity", fmt.Sprintf(
+		"SubAgent stall episode resolved: the worker is again showing state or progress updates.\n- task_id: %s\n- agent_id: %s\n- required_action: none. The earlier AGENT BLOCKED alert for this task no longer applies; it will alert again only if the worker stalls anew.",
+		strings.TrimSpace(sub.taskID), sub.instanceID,
+	))
+	a.dispatchSubAgentRiskAlert(mailbox, sub, nil)
 }
 
 // startSubAgentLifecycleSweep runs the periodic trigger that keeps WaitingMain
@@ -593,6 +646,7 @@ func (a *MainAgent) dispatchSubAgentRiskAlert(mailbox *SubAgentMailboxMessage, s
 		TargetAgentID: controlPlaneAgentID(ownerAgentID),
 		TargetTaskID:  ownerTaskID,
 		Kind:          string(SubAgentMailboxKindRiskAlert),
+		Subtype:       strings.TrimSpace(mailbox.Subtype),
 		Message:       strings.TrimSpace(mailbox.Summary),
 	})
 }
@@ -747,7 +801,7 @@ func (a *MainAgent) queueSubAgentStallAlert(sub *SubAgent, reason string) {
 		return
 	}
 	mailbox := newSubAgentRiskAlertMailbox(sub, nil, "", reason, fmt.Sprintf(
-		"SubAgent is suspected of stalling: it is still running but has shown no state change or activity for an extended period.\n- task_id: %s\n- agent_id: %s\n- required_action: check the worker's transcript/logs for progress; re-delegate, resume, or cancel it explicitly if it is stuck.",
+		"SubAgent is suspected of stalling: it is still Running but has shown no state or progress update for an extended period — it is not executing a tool and not waiting inside a user-facing dialog.\n- task_id: %s\n- agent_id: %s\n- required_action: check the worker's transcript/logs for progress. A wait on the owner or the user must be surfaced explicitly through question, escalate, or notify instead of staying silent; if the worker is genuinely stuck, resume, re-delegate, or cancel it explicitly.",
 		strings.TrimSpace(sub.taskID), sub.instanceID,
 	))
 	a.dispatchSubAgentRiskAlert(mailbox, sub, nil)

@@ -337,6 +337,32 @@ func (b *interactionBroker) clearPending() {
 	}
 }
 
+// hasPendingUserInteraction reports whether the main agent is currently
+// waiting on a user-facing modal interaction (confirm, question, or handoff).
+// While such a dialog is open the loop dispatches no new input, so delegated
+// workers legitimately stay silent; the coordination stall sweep consults this
+// to avoid mislabelling the wait as a worker stall.
+func (b *interactionBroker) hasPendingUserInteraction() bool {
+	if b == nil {
+		return false
+	}
+	b.confirmMapMu.Lock()
+	pending := len(b.confirmStart) > 0
+	b.confirmMapMu.Unlock()
+	if pending {
+		return true
+	}
+	b.questionMapMu.Lock()
+	pending = len(b.questionStart) > 0
+	b.questionMapMu.Unlock()
+	if pending {
+		return true
+	}
+	b.handoffMapMu.Lock()
+	defer b.handoffMapMu.Unlock()
+	return len(b.handoffStart) > 0
+}
+
 func makeRequestID() string {
 	var buf [16]byte
 	if _, err := rand.Read(buf[:]); err != nil {

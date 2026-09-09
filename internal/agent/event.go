@@ -626,7 +626,12 @@ type AgentNotifyEvent struct {
 	TargetAgentID string
 	TargetTaskID  string
 	Kind          string
-	Message       string
+	// Subtype refines an alert kind for the UI: the stall watchdog raises
+	// risk_alert for a stalled worker and risk_alert + stall_resolved when
+	// that worker recovers, so the TUI can badge the two differently instead
+	// of showing "AGENT BLOCKED" for an episode that already ended.
+	Subtype string
+	Message string
 }
 
 func (AgentNotifyEvent) agentEvent() {}
