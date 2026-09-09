@@ -17,12 +17,12 @@ const (
 	capabilityPromptAudienceSub
 )
 
-func buildDynamicCapabilityPromptBlock(visible map[string]struct{}, ruleset permission.Ruleset, audience capabilityPromptAudience, scope tools.WriteScope) string {
+func buildDynamicCapabilityPromptBlock(visible map[string]struct{}, ruleset permission.Ruleset, audience capabilityPromptAudience) string {
 	blocks := make([]string, 0, 5)
 	if block := toolSelectionPromptBlock(visible); block != "" {
 		blocks = append(blocks, block)
 	}
-	if block := shellExecutionBoundaryPromptBlock(visible, audience, scope); block != "" {
+	if block := shellExecutionBoundaryPromptBlock(visible, audience); block != "" {
 		blocks = append(blocks, block)
 	}
 	if block := fileInspectionConstraintsPromptBlock(visible, ruleset, audience); block != "" {
@@ -38,21 +38,22 @@ func buildDynamicCapabilityPromptBlock(visible map[string]struct{}, ruleset perm
 }
 
 // shellExecutionBoundaryPromptBlock renders the command-execution boundary a
-// delegated task actually has. A scoped or read-only task never registers
-// Shell — its execution gate refuses every command, because arbitrary command
-// side effects cannot be validated against a path scope — and a role ruleset
-// may deny Shell outright. Without the block, the shared Guidelines'
-// incremental-verification advice ("first compile, then run the changed
-// package's tests") would push the worker toward builds and tests it can never
-// run, after which it could only fabricate a verification_run declaration
-// (which completion validation rejects) or get stuck. The block tells the
-// worker that command execution and execution-based verification belong to the
-// owner agent, and to report verification honestly as not run.
-func shellExecutionBoundaryPromptBlock(visible map[string]struct{}, audience capabilityPromptAudience, scope tools.WriteScope) string {
+// delegated task actually has. A role ruleset that denies Shell never gets the
+// tool registered, so the worker's visible surface has no command tool at all;
+// without the block, the shared Guidelines' incremental-verification advice
+// ("first compile, then run the changed package's tests") would push the
+// worker toward builds and tests it can never run, after which it could only
+// fabricate a verification_run declaration (which completion validation
+// rejects) or get stuck. The block tells the worker that command execution and
+// execution-based verification belong to the owner agent, and to report
+// verification honestly as not run. A task's write scope plays no part here:
+// scoped and read-only tasks keep Shell unless the role denies it, and the
+// write-scope gate never rejects command tools.
+func shellExecutionBoundaryPromptBlock(visible map[string]struct{}, audience capabilityPromptAudience) string {
 	if audience != capabilityPromptAudienceSub {
 		return ""
 	}
-	if scope.Normalized().Empty() && hasVisibleTool(visible, tools.NameShell) {
+	if hasVisibleTool(visible, tools.NameShell) {
 		return ""
 	}
 	return "## Command Execution Boundary\n" +

@@ -126,17 +126,17 @@ func TestSubAgentReadOnlyScopeRejectsMutatingTool(t *testing.T) {
 	}
 }
 
-func TestSubAgentReadOnlyScopeRejectsShellEvenWhenCommandLooksReadOnly(t *testing.T) {
-	parent, sub := newMixedBatchTestSubAgent(t)
-	root := t.TempDir()
-	parent.projectRoot = root
-	sub.workDir = root
+// Command tools bypass the write-scope gate in every scope: a read-only task
+// still refuses file-modifying tools, but whether the worker may run shell or
+// spawn is the role permission rules' decision, not the task's read-only flag.
+func TestSubAgentReadOnlyScopeAllowsCommandToolsAtTheGate(t *testing.T) {
+	_, sub := newMixedBatchTestSubAgent(t)
 	sub.writeScope = tools.WriteScope{ReadOnly: true}
-	sub.tools.Register(tools.ShellTool{})
-
-	args, _ := json.Marshal(map[string]string{"command": "git branch scope-bypass", "description": "attempt hidden mutation"})
-	if _, err := sub.executeToolCall(context.Background(), message.ToolCall{ID: "shell-read", Name: tools.NameShell, Args: args}); err == nil || !strings.Contains(err.Error(), "shell is unavailable") {
-		t.Fatalf("scoped Shell error = %v, want conservative rejection", err)
+	for _, name := range []string{tools.NameShell, tools.NameSpawn} {
+		args, _ := json.Marshal(map[string]string{"command": "git status", "description": "read-only status check"})
+		if err := sub.toolExecutionPipeline().validateWriteScope(message.ToolCall{ID: "cmd", Name: name, Args: args}); err != nil {
+			t.Fatalf("read-only scope gate rejected %s: %v", name, err)
+		}
 	}
 }
 
@@ -149,48 +149,38 @@ func TestSubAgentReadOnlyScopeAllowsCoordinationTools(t *testing.T) {
 	}
 }
 
-func TestSubAgentPathScopeRejectsMutatingShell(t *testing.T) {
-	parent, sub := newMixedBatchTestSubAgent(t)
-	root := t.TempDir()
-	parent.projectRoot = root
-	sub.workDir = root
-	sub.writeScope = tools.WriteScope{PathPrefix: []string{"internal"}}
-	sub.tools.Register(tools.ShellTool{})
-
-	args, _ := json.Marshal(map[string]string{"command": "touch internal/file.txt", "description": "mutate file"})
-	if _, err := sub.executeToolCall(context.Background(), message.ToolCall{ID: "shell", Name: tools.NameShell, Args: args}); err == nil || !strings.Contains(err.Error(), "shell is unavailable") {
-		t.Fatalf("mutating shell error = %v, want scope-safe rejection", err)
-	}
-}
-
-// A path-scoped task rejects every shell call — including one whose command
-// line looks read-only — because command side effects cannot be
-// path-validated against the declared paths. That is why its tool surface
-// does not advertise Shell at all.
-func TestSubAgentPathScopeRejectsReadOnlyShellCommand(t *testing.T) {
-	parent, sub := newMixedBatchTestSubAgent(t)
-	root := t.TempDir()
-	parent.projectRoot = root
-	sub.workDir = root
-	sub.writeScope = tools.WriteScope{PathPrefix: []string{"internal"}}
-	sub.tools.Register(tools.ShellTool{})
-
-	args, _ := json.Marshal(map[string]string{"command": "git status", "description": "read-only status check"})
-	if _, err := sub.executeToolCall(context.Background(), message.ToolCall{ID: "shell-readonly", Name: tools.NameShell, Args: args}); err == nil || !strings.Contains(err.Error(), "shell is unavailable") {
-		t.Fatalf("read-only shell error = %v, want scope-safe rejection", err)
+// Command tools bypass the write-scope gate for every path-based scope too: a
+// command line can mutate anywhere it reaches, so its side effects cannot be
+// path-validated; availability is decided by the role's permission rules
+// instead (see TestSubAgentCommandSurfaceFollowsRoleRulesNotScope).
+func TestSubAgentPathScopeAllowsCommandToolsAtTheGate(t *testing.T) {
+	for _, scope := range []tools.WriteScope{
+		{PathPrefix: []string{"internal"}},
+		{Files: []string{"internal/a.go"}},
+		{Modules: []string{"backend"}},
+	} {
+		_, sub := newMixedBatchTestSubAgent(t)
+		sub.writeScope = scope
+		for _, name := range []string{tools.NameShell, tools.NameSpawn} {
+			args, _ := json.Marshal(map[string]string{"command": "go test ./internal/a", "description": "verification"})
+			if err := sub.toolExecutionPipeline().validateWriteScope(message.ToolCall{ID: "cmd", Name: name, Args: args}); err != nil {
+				t.Fatalf("%s scope gate rejected %s: %v", scope.Summary(), name, err)
+			}
+		}
 	}
 }
 
 // newScopedToolSurfaceTestSubAgent builds a SubAgent whose base registry
-// contains Shell so tests can assert what the registration path keeps for a
-// given write scope.
-func newScopedToolSurfaceTestSubAgent(t *testing.T, scope tools.WriteScope) (*MainAgent, *SubAgent) {
+// contains Shell and Spawn so tests can assert what the registration path
+// keeps for a given write scope and role ruleset.
+func newScopedToolSurfaceTestSubAgent(t *testing.T, scope tools.WriteScope, ruleset permission.Ruleset) (*MainAgent, *SubAgent) {
 	t.Helper()
 	parent := newTestMainAgent(t, t.TempDir())
 	reg := tools.NewRegistry()
 	reg.Register(tools.ReadTool{})
 	reg.Register(tools.WriteTool{})
 	reg.Register(tools.NewShellTool("bash"))
+	reg.Register(tools.SpawnTool{})
 	sub := NewSubAgent(SubAgentConfig{
 		InstanceID:   "worker-scoped",
 		TaskID:       "adhoc-scoped",
@@ -204,6 +194,7 @@ func newScopedToolSurfaceTestSubAgent(t *testing.T, scope tools.WriteScope) (*Ma
 		Cancel:       func() {},
 		BaseTools:    reg,
 		WriteScope:   scope,
+		Ruleset:      ruleset,
 		WorkDir:      t.TempDir(),
 		SessionDir:   parent.sessionDir,
 		ModelName:    "test-model",
@@ -212,64 +203,67 @@ func newScopedToolSurfaceTestSubAgent(t *testing.T, scope tools.WriteScope) (*Ma
 	return parent, sub
 }
 
-// TestSubAgentScopedAndReadOnlySurfaceOmitsShell pins the delegated
-// write-scope surface: scoped (path/file/module) and read-only tasks do not
-// register Shell, so Shell disappears from the tool registry, the frozen tool
-// definitions sent to the model, and the capability prompt — and the prompt
-// explicitly says command execution and execution-based verification belong to
-// the owner agent instead of guiding the worker to run tests it can never
-// execute.
-func TestSubAgentScopedAndReadOnlySurfaceOmitsShell(t *testing.T) {
-	for _, scope := range []tools.WriteScope{
-		{PathPrefix: []string{"internal"}},
-		{Files: []string{"internal/a.go"}},
-		{Modules: []string{"backend"}},
-		{ReadOnly: true},
+// TestSubAgentCommandSurfaceFollowsRoleRulesNotScope pins the delegated
+// command-tool surface: Shell and Spawn stay registered for every write scope
+// — unscoped, path/file/module-scoped, and read-only alike — unless the role's
+// permission rules deny the tool. A wildcard-deny rule removes the tool from
+// the registry, the frozen tool definitions sent to the model, and the
+// capability prompt, which then renders the Command Execution Boundary so the
+// worker does not chase builds and tests it can never run. A write scope never
+// removes command tools: the execution-time write-scope gate checks
+// file-modifying tools only.
+func TestSubAgentCommandSurfaceFollowsRoleRulesNotScope(t *testing.T) {
+	deny := func(name string) permission.Ruleset {
+		return permission.Ruleset{{Permission: name, Pattern: "*", Action: permission.ActionDeny}}
+	}
+	for _, tc := range []struct {
+		name   string
+		scope  tools.WriteScope
+		rules  permission.Ruleset
+		denied string
+	}{
+		{name: "empty-scope-shell-kept", scope: tools.WriteScope{}},
+		{name: "path-scope-shell-kept", scope: tools.WriteScope{PathPrefix: []string{"internal"}}},
+		{name: "file-scope-shell-kept", scope: tools.WriteScope{Files: []string{"internal/a.go"}}},
+		{name: "module-scope-shell-kept", scope: tools.WriteScope{Modules: []string{"backend"}}},
+		{name: "read-only-shell-kept", scope: tools.WriteScope{ReadOnly: true}},
+		{name: "path-scope-shell-denied", scope: tools.WriteScope{PathPrefix: []string{"internal"}}, rules: deny(tools.NameShell), denied: tools.NameShell},
+		{name: "read-only-shell-denied", scope: tools.WriteScope{ReadOnly: true}, rules: deny(tools.NameShell), denied: tools.NameShell},
+		{name: "read-only-spawn-denied", scope: tools.WriteScope{ReadOnly: true}, rules: deny(tools.NameSpawn), denied: tools.NameSpawn},
 	} {
-		t.Run(scope.Summary(), func(t *testing.T) {
-			_, sub := newScopedToolSurfaceTestSubAgent(t, scope)
-			if _, ok := sub.tools.Get(tools.NameShell); ok {
-				t.Fatal("scoped SubAgent registry still contains Shell")
+		t.Run(tc.name, func(t *testing.T) {
+			_, sub := newScopedToolSurfaceTestSubAgent(t, tc.scope, tc.rules)
+			for _, kept := range []string{tools.NameShell, tools.NameSpawn} {
+				if kept == tc.denied {
+					if _, ok := sub.tools.Get(tc.denied); ok {
+						t.Fatalf("denied tool %s still registered for %s", tc.denied, tc.scope.Summary())
+					}
+					continue
+				}
+				if _, ok := sub.tools.Get(kept); !ok {
+					t.Fatalf("allowed command tool %s lost for scope %s", kept, tc.scope.Summary())
+				}
 			}
 			for _, def := range sub.frozenToolDefs {
-				if def.Name == tools.NameShell {
-					t.Fatalf("scoped SubAgent frozen tool definitions still contain Shell: %#v", def)
+				if def.Name == tc.denied {
+					t.Fatalf("frozen tool definitions still contain denied tool %s", tc.denied)
 				}
 			}
 			prompt := sub.buildSystemPrompt()
-			for _, want := range []string{
-				"## Command Execution Boundary",
-				"`shell` tool is not available in this task",
-				"Execution-based verification is the owner agent's responsibility",
-			} {
-				if !strings.Contains(prompt, want) {
-					t.Fatalf("scoped SubAgent prompt missing %q:\n%s", want, prompt)
+			if tc.denied == tools.NameShell {
+				for _, want := range []string{
+					"## Command Execution Boundary",
+					"`shell` tool is not available in this task",
+					"Execution-based verification is the owner agent's responsibility",
+				} {
+					if !strings.Contains(prompt, want) {
+						t.Fatalf("denied-shell prompt missing %q:\n%s", want, prompt)
+					}
 				}
+			} else if strings.Contains(prompt, "## Command Execution Boundary") {
+				t.Fatalf("scope %s prompt unexpectedly has a command execution boundary:\n%s", tc.scope.Summary(), prompt)
 			}
 		})
-	}
-}
-
-// TestSubAgentUnscopedSurfaceKeepsShell guards the opposite side of the
-// write-scope fix: an unscoped delegated task still advertises Shell and gets
-// no command execution boundary block.
-func TestSubAgentUnscopedSurfaceKeepsShell(t *testing.T) {
-	_, sub := newScopedToolSurfaceTestSubAgent(t, tools.WriteScope{})
-	if _, ok := sub.tools.Get(tools.NameShell); !ok {
-		t.Fatal("unscoped SubAgent registry lost Shell")
-	}
-	foundShell := false
-	for _, def := range sub.frozenToolDefs {
-		if def.Name == tools.NameShell {
-			foundShell = true
-			break
-		}
-	}
-	if !foundShell {
-		t.Fatal("unscoped SubAgent frozen tool definitions lost Shell")
-	}
-	if prompt := sub.buildSystemPrompt(); strings.Contains(prompt, "## Command Execution Boundary") {
-		t.Fatalf("unscoped SubAgent prompt unexpectedly got a command execution boundary:\n%s", prompt)
 	}
 }
 

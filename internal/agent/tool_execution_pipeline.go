@@ -101,17 +101,17 @@ func (p toolExecutionPipeline) validateWriteScope(tc message.ToolCall) error {
 	if _, ok := p.registry.Get(tc.Name); !ok {
 		return nil
 	}
-	if tc.Name == tools.NameShell {
-		// Arbitrary command side effects cannot be validated against a path
-		// scope: a read-only task must leave the workspace unchanged, and a
-		// path-scoped task could mutate anywhere a command line reaches. So a
-		// scoped or read-only delegated task cannot run commands at all; the
-		// owner agent (or CI) runs whatever build, lint, or test verification
-		// the task needs.
-		return fmt.Errorf("shell is unavailable for a scoped SubAgent task because arbitrary command side effects cannot be path-validated")
+	if tc.Name == tools.NameShell || tc.Name == tools.NameSpawn {
+		// A command line can mutate anywhere it reaches, so command side
+		// effects cannot be validated against a declared path scope. Command
+		// tools therefore never participate in write-scope checks: whether
+		// they are usable is decided solely by the role's permission rules (a
+		// wildcard-deny rule keeps the tool out of the registry entirely), not
+		// by the task's declared paths or its read-only flag.
+		return nil
 	}
 	if scope.ReadOnly {
-		if tools.IsFileMutation(tc.Name) || tc.Name == tools.NameSpawn {
+		if tools.IsFileMutation(tc.Name) {
 			return fmt.Errorf("tool %q is unavailable because this SubAgent task is read-only", tc.Name)
 		}
 		if !writeScopeKnownNonWorkspaceMutation(tc.Name) {

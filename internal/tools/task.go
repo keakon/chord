@@ -203,7 +203,10 @@ func (t *DelegateTool) Parameters() map[string]any {
 	}
 
 	scopeProperties := writeScopePathProperties()
-	scopeProperties["read_only"] = map[string]any{"type": "boolean"}
+	scopeProperties["read_only"] = map[string]any{
+		"type":        "boolean",
+		"description": "True when the task will not modify files: file-modifying tools (write, edit, delete, apply_patch) are unavailable to the worker. Command tools (shell, spawn) remain governed by the role's permission rules.",
+	}
 
 	return map[string]any{
 		"type": "object",
@@ -222,7 +225,7 @@ func (t *DelegateTool) Parameters() map[string]any {
 			},
 			"expected_write_scope": map[string]any{
 				"type":                 "object",
-				"description":          "Required declaration of what this task may do, used for concurrency guardrails. Set read_only=true for research-only tasks; otherwise declare at least one of files, path_prefix, or modules. An undeclared scope would have to run exclusively against every other writing task, so it is rejected instead: declare the narrowest scope that covers the task to keep independent delegates running in parallel.",
+				"description":          "Required declaration of the paths this task may modify, used for concurrency guardrails and enforced on file-modifying tools (write, edit, delete, apply_patch): their targets must fall inside the declared files, path_prefix, or modules. It does not restrict command tools (shell, spawn) — those follow the role's permission rules. Set read_only=true when the task will not modify files. An undeclared scope would have to run exclusively against every other writing task, so it is rejected instead: declare the narrowest scope that covers the task to keep independent delegates running in parallel.",
 				"properties":           scopeProperties,
 				"additionalProperties": false,
 			},
@@ -244,7 +247,7 @@ func (DelegateTool) IsReadOnly() bool { return false }
 // required, but a model can still send `{}`, which would silently reacquire the
 // global exclusive scope the requirement exists to prevent.
 var errDelegateWriteScopeRequired = fmt.Errorf(
-	"expected_write_scope is required: set read_only=true for a research-only task, " +
+	"expected_write_scope is required: set read_only=true when the task will not modify files, " +
 		"or declare at least one of files/path_prefix/modules covering what this task will write")
 
 func (t *DelegateTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {

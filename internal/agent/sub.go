@@ -581,15 +581,12 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 			}
 			subTools.Register(t)
 		default:
-			// A scoped or read-only delegated task never registers Shell:
-			// arbitrary command side effects cannot be validated against a path
-			// scope, so the execution-time write-scope gate refuses every shell
-			// call. A registered Shell would only advertise — and the prompt
-			// push the worker towards — commands it can never run.
-			if tools.NormalizeName(t.Name()) == tools.NameShell && !cfg.WriteScope.Normalized().Empty() {
-				continue
-			}
-			// Skip MainAgent-only tools.
+			// A task's write scope never removes command tools from the
+			// worker: shell/spawn side effects cannot be path-validated, so
+			// their availability follows the role's permission rules alone (a
+			// wildcard deny keeps them out of the registry), and the
+			// execution-time write-scope gate checks file-modifying tools
+			// only.
 			if cfg.Ruleset.IsDisabled(t.Name()) {
 				continue
 			}
@@ -1356,7 +1353,7 @@ func (s *SubAgent) buildSystemPrompt() string {
 // capabilityPromptBlock takes the caller's visibility snapshot so every block
 // in one system prompt describes the same tool surface.
 func (s *SubAgent) capabilityPromptBlock(visible map[string]struct{}) string {
-	return buildDynamicCapabilityPromptBlock(visible, s.currentRuleset(), capabilityPromptAudienceSub, s.currentWriteScope())
+	return buildDynamicCapabilityPromptBlock(visible, s.currentRuleset(), capabilityPromptAudienceSub)
 }
 
 func (s *SubAgent) delegationPromptBlock() string {

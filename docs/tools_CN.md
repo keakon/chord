@@ -62,6 +62,7 @@
 | --- | --- |
 | `done` | 携带最终 Markdown 报告申请 loop 退出。仅在 loop 运行期间挂载，因此普通会话根本看不到它，完成结果直接用 assistant 正文返回。Loop 退出仍受退出条件和本地确认门控。 |
 | `handoff` | 把计划/工作移交给另一个角色执行。 |
+| `delegate` | 启动一个委派的 SubAgent 工作流并立即返回它的启动句柄（`task_id` / `agent_id`），不等它完成。调用必须携带 `expected_write_scope`：任务不改文件时设 `read_only: true`，否则声明覆盖工作范围的最小 `files` / `path_prefix` / `modules`。scope 只约束 worker 的文件修改工具（目标落在声明路径之外会被拒绝），并驱动并行调度护栏；它不会移除 `shell` / `spawn` 这类命令工具——这些工具的可用性仍由角色的权限规则决定。空 scope 会被拒绝。拒绝 `delegate` 会同时禁用该角色的 `cancel` 与嵌套委派。 |
 | `cancel` | 取消一个被委派的 worker；前提是 `delegate` 已启用。 |
 | `complete` | SubAgent 侧：携带摘要把当前委派任务标记为完成。 |
 | `escalate` | SubAgent 侧：请求父 agent 介入，但不结束自己的任务。 |
