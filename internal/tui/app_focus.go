@@ -183,17 +183,23 @@ func isFocusedViewportLiveBlock(block *Block) bool {
 // Main-agent blocks are exempt: main streams are not focus-suppressed, so a
 // still-live main card is never a stale duplicate of a committed row.
 //
-// A stream commits at the tail of its agent's transcript, so only that agent's
-// last committed row of the same card type can be the counterpart of the live
-// card. Matching every committed row would drop a card whose stream is still
-// in flight whenever an older message shares its opening (a follow-up that
-// re-states an earlier answer): the card disappears and its stream state is
-// detached, so the already-streamed content jumps when deltas resume. The
-// content check accepts both shapes of a genuinely committed stream: the
-// committed row extending the frozen partial (append-only deltas), and the
-// frozen partial overrunning a shorter committed final (the final payload can
-// be cleaned before commit — scrubbed markers or regenerated text — so it is
-// not always a pure extension of what already streamed).
+// Whether a committed row is the live card's counterpart is decided by
+// identity, not text: a stream appends its message at (or after) the
+// transcript position the transcript had when the stream began — recorded on
+// the live block as MsgIndex when it was created — so a row committed below
+// that position is an earlier answer that can never be this stream's own
+// message. Text alone cannot tell that earlier answer from the stream's own
+// commit: a follow-up that re-states an earlier answer's opening is still in
+// flight while that answer is the last committed row, and matching it by
+// shared prefix would drop the live card and detach its stream state, so the
+// already-streamed content jumps when deltas resume. Against a row at or
+// after the boundary, the content check accepts both shapes of a genuinely
+// committed stream: the committed row extending the frozen partial
+// (append-only deltas), and the frozen partial overrunning a shorter
+// committed final (the final payload can be cleaned before commit — scrubbed
+// markers or regenerated text — so it is not always a pure extension of what
+// already streamed). A live card without a recorded boundary (a stream begun
+// while another agent was focused) is conservatively kept.
 func staleCommittedStreamLiveBlock(base []*Block, block *Block) bool {
 	if block == nil || block.AgentID == "" {
 		return false
@@ -205,10 +211,19 @@ func staleCommittedStreamLiveBlock(base []*Block, block *Block) bool {
 	if liveText == "" {
 		return false
 	}
+	start := block.MsgIndex
+	if start < 0 {
+		return false
+	}
 	for i := len(base) - 1; i >= 0; i-- {
 		row := base[i]
 		if row == nil || row == block || row.Type != block.Type || row.AgentID != block.AgentID {
 			continue
+		}
+		// The last committed row of the same type and agent predates this
+		// stream, and so does every earlier one: none can be its counterpart.
+		if row.MsgIndex < start {
+			return false
 		}
 		committed := strings.TrimSpace(row.Content)
 		if committed == "" {

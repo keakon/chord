@@ -44,7 +44,7 @@ func (b *Block) renderTaskCall(width int, spinnerFrame string) []string {
 		result = append(result, toolFieldSection(ToolResultExpandedStyle, "Worker"))
 		switch {
 		case handleOK:
-			appendTaskHandleFieldRows(&result, handle)
+			appendTaskHandleFieldRows(&result, handle, contentWidth)
 			// The runtime often appends commentary after the JSON payload
 			// (e.g. "Note: ignored unrecognized parameter(s): …"). Render it
 			// as a trailing dimmed line under the section, not concatenated
@@ -421,10 +421,10 @@ func (b *Block) renderCancelCall(width int, spinnerFrame string) []string {
 			// readable "#N" form is reserved for the context-title layer (see
 			// the header comment above).
 			result = append(result, toolFieldSection(ToolResultExpandedStyle, "Result"))
-			appendTaskHandleFieldRow(&result, "status", handle.Status)
-			appendTaskHandleFieldRow(&result, "task_id", handle.TaskID)
-			appendTaskHandleFieldRow(&result, "agent_id", handle.AgentID)
-			appendTaskHandleFieldRow(&result, "message", handle.Message)
+			appendTaskHandleFieldRow(&result, "status", handle.Status, contentWidth)
+			appendTaskHandleFieldRow(&result, "task_id", handle.TaskID, contentWidth)
+			appendTaskHandleFieldRow(&result, "agent_id", handle.AgentID, contentWidth)
+			appendTaskHandleFieldRow(&result, "message", handle.Message, contentWidth)
 		} else if !b.toolResultIsError() && !b.toolResultIsCancelled() {
 			result = append(result, toolFieldSection(ToolResultExpandedStyle, "Result"))
 			for _, line := range wrapText(sanitizeToolDisplayText(strings.TrimSpace(b.ResultContent)), contentWidth) {
@@ -491,14 +491,14 @@ func (b *Block) renderNotifyCall(width int, spinnerFrame string) []string {
 		handle, _, ok := parseTaskToolHandle(b.ResultContent)
 		if ok {
 			result = append(result, toolFieldSection(ToolResultExpandedStyle, "Result"))
-			appendTaskHandleFieldRow(&result, "status", handle.Status)
+			appendTaskHandleFieldRow(&result, "status", handle.Status, contentWidth)
 			// The Target row above already names the task in its readable
 			// short form, so echoing the handle's own task_id under Result
 			// would only repeat it. The rows that do render carry full
 			// machine-readable values, matching the other expanded handle
 			// fields.
-			appendTaskHandleFieldRow(&result, "agent_id", handle.AgentID)
-			appendTaskHandleFieldRow(&result, "message", handle.Message)
+			appendTaskHandleFieldRow(&result, "agent_id", handle.AgentID, contentWidth)
+			appendTaskHandleFieldRow(&result, "message", handle.Message, contentWidth)
 		} else if !b.toolResultIsError() && !b.toolResultIsCancelled() {
 			result = append(result, toolFieldSection(ToolResultExpandedStyle, "Result"))
 			for _, line := range wrapText(sanitizeToolDisplayText(strings.TrimSpace(b.ResultContent)), contentWidth) {
@@ -518,14 +518,35 @@ func (b *Block) renderNotifyCall(width int, spinnerFrame string) []string {
 }
 
 // appendTaskHandleFieldRow appends one machine-readable task-handle field as a
-// nested "↳ Label: value" row, skipping empty values. Every handle echo on the
-// task cards (cancel/notify Result sections and the delegate Worker section)
-// goes through this row shape so the expanded field layer renders identically.
-func appendTaskHandleFieldRow(out *[]string, label, value string) {
+// nested "↳ Label: value" row, skipping empty values. A value too long for the
+// available width wraps onto continuation lines aligned under the value's
+// first column, so the width-limited card wrapper never cuts the tail of long
+// handle fields such as expected_write_scope summaries or overlap suggestions.
+// Every handle echo on the task cards (cancel/notify Result sections and the
+// delegate Worker section) goes through this row shape so the expanded field
+// layer renders identically.
+func appendTaskHandleFieldRow(out *[]string, label, value string, width int) {
 	if value == "" {
 		return
 	}
-	*out = append(*out, toolFieldNestedInline(DimStyle, toolArgSectionLabel(label), sanitizeToolDisplayText(value)))
+	labelText := toolArgSectionLabel(label)
+	value = sanitizeToolDisplayText(value)
+	prefixWidth := tuiStringWidth(toolFieldBodyIndent + toolFieldConnector + labelText + ": ")
+	if prefixWidth+tuiStringWidth(value) <= width {
+		*out = append(*out, toolFieldNestedInline(DimStyle, labelText, value))
+		return
+	}
+	prefix := toolFieldBodyIndent + ToolFieldConnectorStyle.Render(toolFieldConnector) + toolFieldLabel(DimStyle, labelText) + " "
+	// Hang the wrapped value under its own first column. The available width
+	// keeps every row inside the card content column; 12 columns is the
+	// narrowest fragment worth producing on a very narrow card.
+	available := max(width-prefixWidth, 12)
+	wrapped := wrapText(value, available)
+	*out = append(*out, prefix+DimStyle.Render(wrapped[0]))
+	continuation := strings.Repeat(" ", prefixWidth+1)
+	for _, line := range wrapped[1:] {
+		*out = append(*out, continuation+DimStyle.Render(line))
+	}
 }
 
 // appendTaskHandleFieldRows renders a parsed delegate/task handle as a
@@ -534,30 +555,30 @@ func appendTaskHandleFieldRow(out *[]string, label, value string) {
 // (status/agent_id/task_id), resumption hints (previous_agent_id/
 // rehydrated), plan metadata, write scope, the runtime message, and
 // finally any conflict/duplicate warnings with their suggested fix.
-func appendTaskHandleFieldRows(out *[]string, h tools.TaskHandle) {
-	appendTaskHandleFieldRow(out, "status", h.Status)
-	appendTaskHandleFieldRow(out, "agent_id", h.AgentID)
+func appendTaskHandleFieldRows(out *[]string, h tools.TaskHandle, width int) {
+	appendTaskHandleFieldRow(out, "status", h.Status, width)
+	appendTaskHandleFieldRow(out, "agent_id", h.AgentID, width)
 	// Expanded field layer: the machine-readable task_id renders in full,
 	// adhoc- prefix included. The readable "#N" short form belongs to
 	// context titles and compact summaries, not to handle echo rows.
-	appendTaskHandleFieldRow(out, "task_id", h.TaskID)
-	appendTaskHandleFieldRow(out, "previous_agent_id", h.PreviousAgentID)
+	appendTaskHandleFieldRow(out, "task_id", h.TaskID, width)
+	appendTaskHandleFieldRow(out, "previous_agent_id", h.PreviousAgentID, width)
 	if h.Rehydrated {
-		appendTaskHandleFieldRow(out, "rehydrated", "true")
+		appendTaskHandleFieldRow(out, "rehydrated", "true", width)
 	}
-	appendTaskHandleFieldRow(out, "plan_task_ref", h.PlanTaskRef)
-	appendTaskHandleFieldRow(out, "semantic_task_key", h.SemanticTaskKey)
-	appendTaskHandleFieldRow(out, "expected_write_scope", formatWriteScopeSummary(h.ExpectedWriteScope))
-	appendTaskHandleFieldRow(out, "message", h.Message)
+	appendTaskHandleFieldRow(out, "plan_task_ref", h.PlanTaskRef, width)
+	appendTaskHandleFieldRow(out, "semantic_task_key", h.SemanticTaskKey, width)
+	appendTaskHandleFieldRow(out, "expected_write_scope", formatWriteScopeSummary(h.ExpectedWriteScope), width)
+	appendTaskHandleFieldRow(out, "message", h.Message, width)
 	if h.ScopeConflict {
-		appendTaskHandleFieldRow(out, "scope_conflict", "true")
+		appendTaskHandleFieldRow(out, "scope_conflict", "true", width)
 	}
 	if h.DuplicateDetected {
-		appendTaskHandleFieldRow(out, "duplicate_detected", "true")
+		appendTaskHandleFieldRow(out, "duplicate_detected", "true", width)
 	}
-	appendTaskHandleFieldRow(out, "suggested_task_id", h.SuggestedTaskID)
-	appendTaskHandleFieldRow(out, "suggested_agent_id", h.SuggestedAgentID)
-	appendTaskHandleFieldRow(out, "suggested_action", h.SuggestedAction)
+	appendTaskHandleFieldRow(out, "suggested_task_id", h.SuggestedTaskID, width)
+	appendTaskHandleFieldRow(out, "suggested_agent_id", h.SuggestedAgentID, width)
+	appendTaskHandleFieldRow(out, "suggested_action", h.SuggestedAction, width)
 }
 
 // formatWriteScopeSummary condenses a WriteScope declaration into a single

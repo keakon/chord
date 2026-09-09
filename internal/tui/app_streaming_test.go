@@ -1387,6 +1387,74 @@ func TestSharedPrefixEarlierMessageKeepsLiveSubAgentAssistantCard(t *testing.T) 
 	}
 }
 
+// TestLiveStreamRestatingLastCommittedOpeningSurvivesFocusSwitch pins the
+// identity gate of the stale guard: the last committed row can be the
+// *previous* answer while a newer answer is still streaming, and when the new
+// answer opens with the same words as the committed one the text relation is
+// exactly the shape of a committed stream (committed extends the frozen
+// partial). Matching the previous answer by that shared text would drop the
+// still-live card and detach its stream state, losing the already-streamed
+// opening when deltas resume. Only a committed row at or after the transcript
+// position where the live stream began can be its own committed message, so
+// an earlier answer is never treated as the counterpart.
+func TestLiveStreamRestatingLastCommittedOpeningSurvivesFocusSwitch(t *testing.T) {
+	backend := &sessionControlAgent{
+		messagesByFocus: map[string][]message.Message{
+			"": {
+				{Role: "user", Content: "main prompt"},
+			},
+			"agent-1": {
+				{Role: "user", Content: "worker prompt"},
+				{Role: "assistant", Content: "Checking files and running the full test suite"},
+			},
+		},
+	}
+	m := NewModelWithSize(backend, 120, 40)
+
+	// The next task's answer starts while the worker is focused and re-states
+	// the opening of the committed answer that precedes it in the transcript.
+	m.setFocusedAgent("agent-1")
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{AgentID: "agent-1", Text: "Checking"}})
+	flushPendingStreamForTest(&m)
+	live := m.streamState("agent-1").assistant
+	if live == nil || !live.Streaming {
+		t.Fatal("expected a live streaming worker assistant block")
+	}
+	liveID := live.ID
+
+	// Switch away and back while the answer is still in flight: its own
+	// committed row does not exist yet, and the previous committed answer,
+	// which extends the live opening, must not be mistaken for it.
+	m.setFocusedAgent("")
+	if m.viewport.GetFocusedBlock(liveID) != live {
+		t.Fatal("precondition failed: worker stream should survive while main is focused")
+	}
+	m.setFocusedAgent("agent-1")
+	if m.viewport.GetFocusedBlock(liveID) != live {
+		t.Fatal("focus switch back dropped the live card: the last committed row sharing its opening is a previous answer, not this stream's own commit")
+	}
+	if m.streamState("agent-1").assistant != live || !live.Streaming {
+		t.Fatal("focus switch back detached the stream state of the still-live card")
+	}
+
+	// Deltas resume on the same card, so the already-streamed opening stays
+	// attached to the rest of the answer.
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{AgentID: "agent-1", Text: " files under the workspace"}})
+	flushPendingStreamForTest(&m)
+	if got := live.Content; got != "Checking files under the workspace" {
+		t.Fatalf("live content after resumed deltas = %q, want the uninterrupted stream", got)
+	}
+	assistantCards := 0
+	for _, b := range m.viewport.visibleBlocks() {
+		if b.Type == BlockAssistant && b.AgentID == "agent-1" {
+			assistantCards++
+		}
+	}
+	if assistantCards != 2 {
+		t.Fatalf("worker assistant cards = %d, want the committed row plus the live card", assistantCards)
+	}
+}
+
 // TestStaleSubAgentThinkingStreamDroppedWhenCommittedFinalDiffers pins the
 // stale guard when the committed row is not a pure extension of the frozen
 // partial: thinking finals are reassembled/cleaned before commit (scrubbed

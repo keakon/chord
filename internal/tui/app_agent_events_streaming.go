@@ -89,8 +89,28 @@ func (m *Model) currentMainAssistantMsgIndex() int {
 	return len(m.agent.GetMessages())
 }
 
+// streamCommitIndex returns the transcript index at which the in-flight
+// assistant/thinking message of agentID will commit, or -1 when it cannot be
+// known. The agent exposes only the focused agent's transcript, and sub-agent
+// stream events reach the TUI only while that agent is focused, so the current
+// message count is exactly the commit position of the next message. A card
+// whose stream began while its agent was not the focused transcript gets -1:
+// without a reliable boundary, stale-card matching must never infer identity
+// from text the card shares with an earlier committed row.
+func (m *Model) streamCommitIndex(agentID string) int {
+	if agentID == "" || m == nil || m.agent == nil || m.focusedAgentID != agentID {
+		return -1
+	}
+	return len(m.agent.GetMessages())
+}
+
 func (m *Model) ensureStreamingThinkingBlock(agentID string, state *agentStreamState) *Block {
 	if state.thinking != nil {
+		// A card created by an out-of-focus start event has no commit boundary
+		// yet; the first delta while its agent is focused can fix it.
+		if state.thinking.MsgIndex < 0 {
+			state.thinking.MsgIndex = m.streamCommitIndex(agentID)
+		}
 		return state.thinking
 	}
 	msgIndex := -1
@@ -104,6 +124,8 @@ func (m *Model) ensureStreamingThinkingBlock(agentID string, state *agentStreamS
 			m.thinkingStreamBlockIndex = 0
 		}
 		blockIndex = m.thinkingStreamBlockIndex
+	} else {
+		msgIndex = m.streamCommitIndex(agentID)
 	}
 	state.thinking = &Block{ID: m.nextBlockID, Type: BlockThinking, Streaming: true, AgentID: agentID, MsgIndex: msgIndex, ThinkingBlockIndex: blockIndex}
 	m.nextBlockID++
@@ -123,7 +145,11 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 		}
 		if state.assistant == nil {
 			m.markRequestProgressBaseline(evt.AgentID)
-			state.assistant = &Block{ID: m.nextBlockID, Type: BlockAssistant, Streaming: true, AgentID: evt.AgentID, StartedAt: time.Now()}
+			assistant := &Block{ID: m.nextBlockID, Type: BlockAssistant, Streaming: true, AgentID: evt.AgentID, StartedAt: time.Now()}
+			if evt.AgentID != "" {
+				assistant.MsgIndex = m.streamCommitIndex(evt.AgentID)
+			}
+			state.assistant = assistant
 			m.nextBlockID++
 			state.assistantAppended = false
 		}
