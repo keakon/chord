@@ -141,7 +141,14 @@ type subAgentInbox struct {
 	spoolNormal     []string
 	spoolIndex      map[string]mailboxSpoolLocation
 	spoolIndexReady bool
-	memoryBytes     int
+	// spoolWriteGen counts every completed mailbox.jsonl mutation (persist
+	// appends and rollback truncations). It is bumped under
+	// subAgentMailboxIDsMu right after the file write, so an index rebuild
+	// that snapshots it before reading the log can detect at publish time
+	// whether a write landed while it was reading — without stat'ing the
+	// file under the lock (see indexSpooledMailbox).
+	spoolWriteGen uint64
+	memoryBytes   int
 }
 
 type mailboxSpoolLocation struct {

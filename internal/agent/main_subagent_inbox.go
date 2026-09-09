@@ -739,12 +739,16 @@ func (a *MainAgent) loadSpooledMailbox(messageID string) (*SubAgentMailboxMessag
 // indexSpooledMailbox rebuilds the spool index after a write left it stale
 // (spoolIndexReady false). The index is shared with the append path that keeps
 // it fresh under subAgentMailboxIDsMu, so the log is read outside the lock and
-// the freshly built map is published under it; a message appended while the
-// index was being built keeps the index stale so the next load rebuilds over
-// the longer log instead of publishing an index that drops the entry.
+// the freshly built map is published under it. Writes bump spoolWriteGen
+// under the same lock after they touch the log; the rebuild snapshots the
+// counter before reading and publishes only when it is unchanged, so a
+// persist or rollback that landed mid-read keeps the index stale and the next
+// load rebuilds over the current log instead of publishing an index that
+// drops the appended entry (see publishSpooledMailboxIndex).
 func (a *MainAgent) indexSpooledMailbox(path string) error {
 	a.subAgentMailboxIDsMu.Lock()
 	ready := a.subAgentInbox.spoolIndexReady
+	writeGen := a.subAgentInbox.spoolWriteGen
 	a.subAgentMailboxIDsMu.Unlock()
 	if ready {
 		return nil
@@ -773,28 +777,33 @@ func (a *MainAgent) indexSpooledMailbox(path string) error {
 		}
 		offset = dec.InputOffset()
 	}
-	readEnd, statErr := f.Stat()
 	_ = f.Close()
-	if statErr != nil {
-		return fmt.Errorf("stat spooled mailbox: %w", statErr)
-	}
+	a.publishSpooledMailboxIndex(built, writeGen)
+	return nil
+}
+
+// publishSpooledMailboxIndex publishes a freshly built spool index when no
+// other rebuild won in the meantime and the write generation still matches
+// the snapshot taken before the log was read. When either condition fails the
+// current index is left as-is and spoolIndexReady stays false, so the next
+// load rebuilds over the current log: publishing a map that missed an append
+// (or kept a rolled-back row) would let loadSpooledMailbox treat a queued id
+// as not-found and drop it from the spool forever.
+func (a *MainAgent) publishSpooledMailboxIndex(built map[string]mailboxSpoolLocation, writeGen uint64) {
 	a.subAgentMailboxIDsMu.Lock()
+	defer a.subAgentMailboxIDsMu.Unlock()
 	if a.subAgentInbox.spoolIndexReady {
 		// Another rebuild finished first; its index is at least as fresh.
-		a.subAgentMailboxIDsMu.Unlock()
-		return nil
+		return
 	}
-	if current, statErr := os.Stat(path); statErr == nil && current.Size() != readEnd.Size() {
-		// A message was appended while this index was being built; publishing
-		// it would drop that entry from the spool forever. Stay stale so the
-		// next load rebuilds over the appended log.
-		a.subAgentMailboxIDsMu.Unlock()
-		return nil
+	if a.subAgentInbox.spoolWriteGen != writeGen {
+		// A persist appended or a rollback truncated the log while this index
+		// was being built. Stay stale so the next load rebuilds over the
+		// current log.
+		return
 	}
 	a.subAgentInbox.spoolIndex = built
 	a.subAgentInbox.spoolIndexReady = true
-	a.subAgentMailboxIDsMu.Unlock()
-	return nil
 }
 
 func readSpooledMailboxAt(path string, location mailboxSpoolLocation) (SubAgentMailboxMessage, error) {
@@ -1082,6 +1091,9 @@ func (a *MainAgent) persistSubAgentMailboxMessageWithOffset(msg SubAgentMailboxM
 	if err := enc.Encode(msg); err != nil {
 		_ = f.Close()
 		a.subAgentMailboxIDsMu.Lock()
+		// The failed write may still have extended the file; treat the log as
+		// touched so an in-flight index rebuild does not publish over it.
+		a.subAgentInbox.spoolWriteGen++
 		a.subAgentInbox.spoolIndexReady = false
 		a.subAgentMailboxIDsMu.Unlock()
 		return -1, fmt.Errorf("append mailbox message: %w", err)
@@ -1092,12 +1104,18 @@ func (a *MainAgent) persistSubAgentMailboxMessageWithOffset(msg SubAgentMailboxM
 	}
 	if err := f.Close(); err != nil {
 		a.subAgentMailboxIDsMu.Lock()
+		// The buffered append may or may not have been flushed; treat the log
+		// as touched so an in-flight index rebuild does not publish over it.
+		a.subAgentInbox.spoolWriteGen++
 		a.subAgentInbox.spoolIndexReady = false
 		a.subAgentMailboxIDsMu.Unlock()
 		return -1, fmt.Errorf("close mailbox log: %w", err)
 	}
 	messageID := strings.TrimSpace(msg.MessageID)
 	a.subAgentMailboxIDsMu.Lock()
+	// The append is durable now; any index rebuild that started before it
+	// must not publish a map built from the shorter log.
+	a.subAgentInbox.spoolWriteGen++
 	if a.subAgentInbox.spoolIndexReady && startOffset >= 0 && endOffset > startOffset && messageID != "" {
 		if _, exists := a.subAgentInbox.spoolIndex[messageID]; !exists {
 			a.subAgentInbox.spoolIndex[messageID] = mailboxSpoolLocation{offset: startOffset, length: endOffset - startOffset}
@@ -1134,6 +1152,9 @@ func (a *MainAgent) rollbackSubAgentMailboxMessage(msg *SubAgentMailboxMessage, 
 		return
 	}
 	a.subAgentMailboxIDsMu.Lock()
+	// The truncation is durable now; any index rebuild that read the longer
+	// log must not publish a map that resurrects the withdrawn row.
+	a.subAgentInbox.spoolWriteGen++
 	delete(a.subAgentMailboxIDs, messageID)
 	if location, ok := a.subAgentInbox.spoolIndex[messageID]; ok && location.offset >= offset {
 		delete(a.subAgentInbox.spoolIndex, messageID)

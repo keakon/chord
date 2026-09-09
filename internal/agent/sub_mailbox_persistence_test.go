@@ -470,3 +470,121 @@ func TestConcurrentSpoolRebuildDoesNotDropQueuedMessage(t *testing.T) {
 		}
 	}
 }
+
+// TestSpoolIndexPublishGateSkipsStaleGeneration locks in the spool index
+// publish rule: a rebuild that snapshotted an older spoolWriteGen must not
+// publish once a persist advanced the generation while it was reading the
+// log, and an already-ready index is never overwritten by a later rebuild.
+// Both halves of the guard are what keep a rebuild that raced an append from
+// publishing an index that drops the appended id (which loadSpooledMailbox
+// would then treat as not-found and the dequeue path would drop forever).
+func TestSpoolIndexPublishGateSkipsStaleGeneration(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	path := filepath.Join(a.sessionDir, "subagents", "mailbox.jsonl")
+	msg := func(id string) SubAgentMailboxMessage {
+		return SubAgentMailboxMessage{MessageID: id, TaskID: "task-1", Summary: id}
+	}
+	if err := a.persistSubAgentMailboxMessage(msg("msg-1")); err != nil {
+		t.Fatalf("persist msg-1: %v", err)
+	}
+	a.subAgentMailboxIDsMu.Lock()
+	writeGen := a.subAgentInbox.spoolWriteGen
+	a.subAgentMailboxIDsMu.Unlock()
+	if writeGen == 0 {
+		t.Fatal("persist did not advance spoolWriteGen")
+	}
+	if err := a.persistSubAgentMailboxMessage(msg("msg-2")); err != nil {
+		t.Fatalf("persist msg-2: %v", err)
+	}
+
+	// Rebuild started before msg-2's persist; its map covers only msg-1.
+	stale := map[string]mailboxSpoolLocation{
+		"msg-1": {offset: 0, length: 64},
+	}
+	a.publishSpooledMailboxIndex(stale, writeGen)
+	a.subAgentMailboxIDsMu.Lock()
+	ready := a.subAgentInbox.spoolIndexReady
+	a.subAgentMailboxIDsMu.Unlock()
+	if ready {
+		t.Fatal("stale-generation index was published over a newer log")
+	}
+
+	// The next load-driven rebuild snapshots the current generation and
+	// publishes an index that covers both messages.
+	if err := a.indexSpooledMailbox(path); err != nil {
+		t.Fatalf("indexSpooledMailbox: %v", err)
+	}
+	for _, id := range []string{"msg-1", "msg-2"} {
+		loaded, found, err := a.loadSpooledMailbox(id)
+		if err != nil || !found || loaded == nil || loaded.MessageID != id {
+			t.Fatalf("load %s = (%#v, %v, %v), want found", id, loaded, found, err)
+		}
+	}
+
+	// A rebuild that loses the publish race must not overwrite the winner.
+	a.subAgentMailboxIDsMu.Lock()
+	writeGen = a.subAgentInbox.spoolWriteGen
+	a.subAgentMailboxIDsMu.Unlock()
+	loser := map[string]mailboxSpoolLocation{
+		"msg-1": {offset: 0, length: 64},
+	}
+	a.publishSpooledMailboxIndex(loser, writeGen)
+	a.subAgentMailboxIDsMu.Lock()
+	_, hasMsg2 := a.subAgentInbox.spoolIndex["msg-2"]
+	a.subAgentMailboxIDsMu.Unlock()
+	if !hasMsg2 {
+		t.Fatal("a losing rebuild overwrote the published index")
+	}
+}
+
+// TestPersistAndRollbackAdvanceSpoolWriteGeneration verifies the write-side
+// bookkeeping the publish gate snapshots: every successful persist and every
+// rollback advances spoolWriteGen exactly once under subAgentMailboxIDsMu, a
+// quiescent rebuild does not advance it, and a rollback withdraws its row from
+// both the log and the ready index so a later append self-registers at the
+// truncated tail.
+func TestPersistAndRollbackAdvanceSpoolWriteGeneration(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	path := filepath.Join(a.sessionDir, "subagents", "mailbox.jsonl")
+	if got := a.subAgentInbox.spoolWriteGen; got != 0 {
+		t.Fatalf("initial spoolWriteGen = %d, want 0", got)
+	}
+	msg := SubAgentMailboxMessage{MessageID: "msg-1", TaskID: "task-1", Summary: "first"}
+	offset, err := a.persistSubAgentMailboxMessageWithOffset(msg)
+	if err != nil {
+		t.Fatalf("persist: %v", err)
+	}
+	if offset < 0 {
+		t.Fatalf("persist offset = %d, want >= 0", offset)
+	}
+	if got := a.subAgentInbox.spoolWriteGen; got != 1 {
+		t.Fatalf("spoolWriteGen after persist = %d, want 1", got)
+	}
+	if err := a.indexSpooledMailbox(path); err != nil {
+		t.Fatalf("indexSpooledMailbox: %v", err)
+	}
+	if got := a.subAgentInbox.spoolWriteGen; got != 1 {
+		t.Fatalf("spoolWriteGen after rebuild = %d, want 1", got)
+	}
+
+	a.rollbackSubAgentMailboxMessage(&msg, offset)
+	if got := a.subAgentInbox.spoolWriteGen; got != 2 {
+		t.Fatalf("spoolWriteGen after rollback = %d, want 2", got)
+	}
+	if loaded, found, err := a.loadSpooledMailbox("msg-1"); err != nil || found || loaded != nil {
+		t.Fatalf("load rolled-back msg-1 = (%#v, %v, %v), want not found", loaded, found, err)
+	}
+
+	// The ready index survives the rollback; a fresh append self-registers at
+	// the truncated tail instead of invalidating the index.
+	second := SubAgentMailboxMessage{MessageID: "msg-2", TaskID: "task-1", Summary: "second"}
+	if err := a.persistSubAgentMailboxMessage(second); err != nil {
+		t.Fatalf("persist msg-2: %v", err)
+	}
+	if got := a.subAgentInbox.spoolWriteGen; got != 3 {
+		t.Fatalf("spoolWriteGen after second persist = %d, want 3", got)
+	}
+	if loaded, found, err := a.loadSpooledMailbox("msg-2"); err != nil || !found || loaded == nil || loaded.Summary != "second" {
+		t.Fatalf("load msg-2 = (%#v, %v, %v), want found", loaded, found, err)
+	}
+}
