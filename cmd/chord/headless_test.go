@@ -1179,7 +1179,8 @@ func TestHeadlessRoleSetFailureBranches(t *testing.T) {
 
 func TestHeadlessRoleChangeEventRequiresSubscription(t *testing.T) {
 	state := &headlessState{subscriptions: map[string]bool{"role_change": true}}
-	backend := &mockBackend{}
+	// The event reflects a switch the backend has already committed.
+	backend := &mockBackend{currentRole: "planner"}
 
 	out := filterHeadlessEvent(agent.RoleChangedEvent{Role: "planner"}, state, backend)
 	if len(out) != 1 {
@@ -1203,7 +1204,8 @@ func TestHeadlessRoleChangeEventRequiresSubscription(t *testing.T) {
 func TestHeadlessRoleChangeEventFilteredWithoutSubscriptionButStateUpdated(t *testing.T) {
 	// An explicit subscribe allowlist that omits role_change.
 	state := &headlessState{subscriptions: map[string]bool{"activity": true}}
-	backend := &mockBackend{}
+	// The event reflects a switch the backend has already committed.
+	backend := &mockBackend{currentRole: "planner"}
 
 	out := filterHeadlessEvent(agent.RoleChangedEvent{Role: "planner"}, state, backend)
 	if len(out) != 0 {
@@ -1547,6 +1549,84 @@ func TestHeadlessAssistantMessageEventFromSubAgent(t *testing.T) {
 	}
 	if payload["task_id"] != "adhoc-1" || payload["agent_type"] != "reviewer" || payload["parent_agent_id"] != "main" {
 		t.Fatalf("subagent metadata = %#v", payload)
+	}
+}
+
+// A RoleChangedEvent that drains after a newer role set (the agent event
+// stream and the role command run on different goroutines) must neither
+// regress the warm cache nor emit a stale role_change envelope.
+func TestHeadlessRoleChangeEventDoesNotRegressRoleCacheAfterRoleSet(t *testing.T) {
+	backend := &mockBackend{availableRoles: []string{"builder", "planner", "executor"}, currentRole: "builder"}
+	state := &headlessState{role: "builder", subscriptions: map[string]bool{"role_change": true}}
+
+	// Two rapid sets (executor, then planner). Each commits synchronously on the
+	// backend and refreshes the cache on the set path.
+	to := newTestOut()
+	handleHeadlessCommand(headlessCommand{Type: "role", Action: "set", Role: "executor"}, backend, state, to.writer(), "test-session")
+	if env := findHeadlessEnvelopeValue(to.drain(), "role_response"); env == nil {
+		t.Fatal("role_response missing for set executor")
+	}
+	to = newTestOut()
+	handleHeadlessCommand(headlessCommand{Type: "role", Action: "set", Role: "planner"}, backend, state, to.writer(), "test-session")
+	if env := findHeadlessEnvelopeValue(to.drain(), "role_response"); env == nil {
+		t.Fatal("role_response missing for set planner")
+	}
+
+	// The trailing RoleChangedEvent of the first set (executor) now drains after
+	// the cache already shows planner; it must not overwrite the newer role.
+	if envs := filterHeadlessEvent(agent.RoleChangedEvent{Role: "executor"}, state, backend); len(envs) != 0 {
+		t.Fatalf("stale role_change envelope emitted: %#v", envs)
+	}
+	state.mu.Lock()
+	role := state.role
+	state.mu.Unlock()
+	if role != "planner" {
+		t.Fatalf("state.role = %q, want planner (unchanged by stale event)", role)
+	}
+
+	// Status still reports the latest committed role.
+	to = newTestOut()
+	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer(), "test-session")
+	env := findHeadlessEnvelopeValue(to.drain(), "status_response")
+	payload := env.Payload.(map[string]any)
+	if payload["current_role"] != "planner" {
+		t.Fatalf("current_role = %v, want planner", payload["current_role"])
+	}
+}
+
+func TestHeadlessAgentNotifyEnvelopeCarriesSubtype(t *testing.T) {
+	state := &headlessState{}
+
+	envs := filterHeadlessEvent(agent.AgentNotifyEvent{
+		AgentID: "agent-1",
+		TaskID:  "adhoc-1",
+		Kind:    "risk_alert",
+		Subtype: "stall_resolved",
+		Message: "Worker recovered",
+	}, state)
+	if len(envs) != 1 || envs[0].Type != "agent_notify" {
+		t.Fatalf("envelopes = %#v, want one agent_notify", envs)
+	}
+	payload := envs[0].Payload.(map[string]string)
+	if payload["kind"] != "risk_alert" {
+		t.Fatalf("kind = %q, want risk_alert", payload["kind"])
+	}
+	if payload["subtype"] != "stall_resolved" {
+		t.Fatalf("subtype = %q, want stall_resolved", payload["subtype"])
+	}
+
+	// Notifies without a subtype keep the previous envelope shape.
+	envs = filterHeadlessEvent(agent.AgentNotifyEvent{
+		AgentID: "agent-1",
+		TaskID:  "adhoc-1",
+		Kind:    "progress",
+		Message: "Working",
+	}, state)
+	if len(envs) != 1 || envs[0].Type != "agent_notify" {
+		t.Fatalf("envelopes = %#v, want one agent_notify", envs)
+	}
+	if _, ok := envs[0].Payload.(map[string]string)["subtype"]; ok {
+		t.Fatalf("subtype key present without a subtype value: %#v", envs[0].Payload)
 	}
 }
 

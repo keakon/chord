@@ -287,7 +287,7 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 	case agent.AgentNotifyEvent:
 		state.updatedAt = time.Now()
 		if state.isSubscribed("agent_notify") {
-			out = append(out, &headlessEnvelope{Type: "agent_notify", Payload: map[string]string{
+			payload := map[string]string{
 				"agent_id":        e.AgentID,
 				"task_id":         e.TaskID,
 				"agent_type":      e.AgentType,
@@ -297,7 +297,14 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 				"target_task_id":  e.TargetTaskID,
 				"kind":            e.Kind,
 				"message":         e.Message,
-			}})
+			}
+			// Subtype distinguishes an alert that already resolved (e.g. stall →
+			// stall_resolved) from one still pending. The key is omitted when
+			// absent so the envelope shape stays backward compatible.
+			if e.Subtype != "" {
+				payload["subtype"] = e.Subtype
+			}
+			out = append(out, &headlessEnvelope{Type: "agent_notify", Payload: payload})
 		}
 	case agent.IdleEvent:
 		state.updatedAt = time.Now()
@@ -319,11 +326,25 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 			}})
 		}
 	case agent.RoleChangedEvent:
-		state.role = e.Role
+		// A RoleChangedEvent is emitted right after the agent commits a switch,
+		// but it travels through a separate event stream and can drain after a
+		// newer role set has already updated the cache, so trusting the event
+		// verbatim could regress state.role to an older role. Resolve the role
+		// from the backend's committed state (the event never leads the backend)
+		// and only push role_change when the role actually changed. Falls back
+		// to the event's role when the backend is not role-capable.
+		role := e.Role
+		if rb, ok := backend.(headlessRoleBackend); ok {
+			if current := rb.CurrentRole(); current != "" {
+				role = current
+			}
+		}
+		changed := state.role != role
+		state.role = role
 		state.updatedAt = time.Now()
-		if state.isSubscribed("role_change") {
+		if changed && state.isSubscribed("role_change") {
 			out = append(out, &headlessEnvelope{Type: "role_change", Payload: map[string]string{
-				"role": e.Role,
+				"role": role,
 			}})
 		}
 	case agent.NotificationEvent:
@@ -967,6 +988,9 @@ func handleHeadlessRoleCommand(cmd headlessCommand, backend headlessRoleBackend,
 			emitHeadlessRoleResponse(out, false, "resolve the pending handoff before switching role", "", nil)
 			return
 		}
+		// role set commits synchronously and takes effect immediately, even
+		// while a turn is in flight — unlike a send message, which a busy agent
+		// only processes at the next request boundary.
 		if err := backend.SwitchRole(role); err != nil {
 			emitHeadlessRoleResponse(out, false, err.Error(), "", nil)
 			return
