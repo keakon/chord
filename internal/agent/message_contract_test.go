@@ -11,13 +11,13 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-func TestNormalizeAgentMessageContractKeepsLifecycleSeparate(t *testing.T) {
+func TestNormalizeAgentMessageContractFillsDerivedRequestMetadata(t *testing.T) {
 	msg := SubAgentMailboxMessage{
 		MessageID: "msg-1", TaskID: "task-a", Attempt: 2, OwnerTaskID: "task-owner",
 		Kind: SubAgentMailboxKindDecisionRequired,
 	}
 	normalizeAgentMessageContract(&msg)
-	if msg.LifecycleKind != SubAgentMailboxKindDecisionRequired || msg.MessageType != AgentMessageTypeRequest || msg.Subtype != "" {
+	if msg.MessageType != AgentMessageTypeRequest || msg.Subtype != "" {
 		t.Fatalf("contract = %#v", msg)
 	}
 	if msg.SourceTaskID != "task-a" || msg.SourceAttempt != 2 || msg.TargetTaskID != "task-owner" || msg.CorrelationID != "msg-1" || msg.Durability != "required" {
@@ -81,7 +81,7 @@ func TestLoadLegacyMailboxAddsContractWithoutRewriting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(msgs) != 1 || msgs[0].LifecycleKind != SubAgentMailboxKindProgress || msgs[0].MessageType != AgentMessageTypeProgress || msgs[0].Durability != "best_effort" || msgs[0].Subtype != "" {
+	if len(msgs) != 1 || msgs[0].MessageType != AgentMessageTypeProgress || msgs[0].Durability != "best_effort" || msgs[0].Subtype != "" {
 		t.Fatalf("messages = %#v", msgs)
 	}
 	after, err := os.ReadFile(path)
@@ -109,7 +109,7 @@ func TestValidateAgentMessageContractPayloadAndCorrelation(t *testing.T) {
 
 func TestMailboxMetadataCarriesMessageContract(t *testing.T) {
 	msg := &SubAgentMailboxMessage{
-		MessageID: "msg-1", Kind: SubAgentMailboxKindDecisionRequired, LifecycleKind: SubAgentMailboxKindDecisionRequired,
+		MessageID: "msg-1", Kind: SubAgentMailboxKindDecisionRequired,
 		MessageType: AgentMessageTypeRequest, Subtype: "api_contract", SourceTaskID: "task-a", SourceAttempt: 1,
 		TargetTaskID: "task-b", TargetAttempt: 2, CorrelationID: "corr-1", InReplyTo: "msg-0",
 	}

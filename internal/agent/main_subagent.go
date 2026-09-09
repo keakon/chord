@@ -619,14 +619,12 @@ func (a *MainAgent) handleAgentDone(evt Event) {
 	})
 }
 
+// agentMessageSubtypeDecision is the mailbox subtype of an escalation mailbox:
+// the worker parked waiting on a decision the owner must make.
+const agentMessageSubtypeDecision = "decision"
+
 func (a *MainAgent) handleAgentNotify(evt Event) {
 	payload, ok := evt.Payload.(tools.AgentNotifyPayload)
-	if !ok {
-		if msg, legacyOK := evt.Payload.(string); legacyOK {
-			payload = tools.AgentNotifyPayload{Message: msg}
-			ok = true
-		}
-	}
 	if !ok {
 		log.Errorf("handleAgentNotify: invalid payload type payload_type=%v", fmt.Sprintf("%T", evt.Payload))
 		return
@@ -657,14 +655,14 @@ func (a *MainAgent) handleAgentNotify(evt Event) {
 	if messageType == "" {
 		messageType = AgentMessageTypeProgress
 	}
-	lifecycleKind := SubAgentMailboxKindProgress
+	kind := SubAgentMailboxKindProgress
 	a.queueLoopEvent(Event{Type: EventSubAgentMailbox, SourceID: evt.SourceID, Payload: &SubAgentMailboxMessage{
 		AgentID:        evt.SourceID,
 		TaskID:         taskIDForSub(sub),
 		OwnerAgentID:   ownerAgentID,
 		OwnerTaskID:    ownerTaskID,
 		InReplyTo:      firstReplyMessageID(sub),
-		Kind:           lifecycleKind,
+		Kind:           kind,
 		MessageType:    messageType,
 		Subtype:        strings.TrimSpace(payload.Subtype),
 		CorrelationID:  strings.TrimSpace(payload.CorrelationID),
@@ -691,12 +689,6 @@ func (a *MainAgent) handleAgentNotify(evt Event) {
 
 func (a *MainAgent) handleEscalate(evt Event) {
 	payload, ok := evt.Payload.(tools.AgentRequestPayload)
-	if !ok {
-		if reason, legacyOK := evt.Payload.(string); legacyOK {
-			payload = tools.AgentRequestPayload{Reason: reason}
-			ok = true
-		}
-	}
 	if !ok {
 		log.Errorf("handleEscalate: invalid payload type payload_type=%v", fmt.Sprintf("%T", evt.Payload))
 		return
@@ -729,7 +721,7 @@ func (a *MainAgent) handleEscalate(evt Event) {
 		MessageID:     request.RequestMessageID,
 		Kind:          SubAgentMailboxKindDecisionRequired,
 		MessageType:   AgentMessageTypeRequest,
-		Subtype:       "decision",
+		Subtype:       agentMessageSubtypeDecision,
 		CorrelationID: request.CorrelationID,
 		Priority:      SubAgentMailboxPriorityInterrupt,
 		Summary:       reason,

@@ -21,10 +21,6 @@ const (
 	SubAgentStateIdle              SubAgentState = "idle"
 )
 
-func normalizeSubAgentState(state SubAgentState) SubAgentState {
-	return state
-}
-
 func isKnownSubAgentState(state SubAgentState) bool {
 	switch state {
 	case SubAgentStateRunning, SubAgentStateWaitingMain, SubAgentStateWaitingDescendant,

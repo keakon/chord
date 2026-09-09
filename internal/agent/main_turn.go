@@ -498,7 +498,7 @@ func (a *MainAgent) setIdleAndDrainPending() {
 					msg.MessageID,
 					turnID,
 					replySummary,
-					"main_turn",
+					mailboxReplyKindMainTurn,
 				)
 				if err != nil {
 					ackFailed = true

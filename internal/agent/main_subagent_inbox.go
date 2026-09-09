@@ -117,7 +117,6 @@ func normalizeAgentMessageContract(msg *SubAgentMailboxMessage) {
 	if msg == nil {
 		return
 	}
-	msg.LifecycleKind = msg.Kind
 	msg.SourceTaskID = strings.TrimSpace(msg.SourceTaskID)
 	if msg.SourceTaskID == "" {
 		msg.SourceTaskID = strings.TrimSpace(msg.TaskID)
@@ -131,7 +130,7 @@ func normalizeAgentMessageContract(msg *SubAgentMailboxMessage) {
 	msg.CorrelationID = strings.TrimSpace(msg.CorrelationID)
 	msg.InReplyTo = strings.TrimSpace(msg.InReplyTo)
 	if msg.MessageType == "" {
-		msg.MessageType = messageTypeForLifecycleKind(msg.Kind)
+		msg.MessageType = messageTypeForMailboxKind(msg.Kind)
 	}
 	if msg.CorrelationID == "" && msg.MessageType == AgentMessageTypeRequest {
 		msg.CorrelationID = strings.TrimSpace(msg.MessageID)
@@ -145,7 +144,7 @@ func normalizeAgentMessageContract(msg *SubAgentMailboxMessage) {
 	}
 }
 
-func messageTypeForLifecycleKind(kind SubAgentMailboxKind) AgentMessageType {
+func messageTypeForMailboxKind(kind SubAgentMailboxKind) AgentMessageType {
 	switch kind {
 	case SubAgentMailboxKindProgress:
 		return AgentMessageTypeProgress
@@ -1051,24 +1050,33 @@ func (a *MainAgent) emitSubAgentMailboxUI(msg SubAgentMailboxMessage) {
 }
 
 func (a *MainAgent) persistSubAgentMailboxMessage(msg SubAgentMailboxMessage) error {
+	_, err := a.persistSubAgentMailboxMessageWithOffset(msg)
+	return err
+}
+
+// persistSubAgentMailboxMessageWithOffset appends msg to the session's
+// mailbox.jsonl and returns the byte offset the appended line starts at (-1
+// when nothing was appended or the offset could not be determined), so a
+// caller that decides the message must not survive can roll the line back
+// (see rollbackSubAgentMailboxMessage) exactly like the guarded settlement
+// journal rollback (see task_terminal.go). mailbox.jsonl is written only on
+// the event-loop goroutine (or, at startup, before the loop runs), so the
+// append and a later rollback are synchronous; a rollback must still run
+// before any other append extends the file.
+func (a *MainAgent) persistSubAgentMailboxMessageWithOffset(msg SubAgentMailboxMessage) (int64, error) {
 	sessionDir := strings.TrimSpace(a.sessionDir)
 	if sessionDir == "" {
-		return nil
+		return -1, nil
 	}
 	dir := filepath.Join(sessionDir, "subagents")
 	path := filepath.Join(dir, "mailbox.jsonl")
 	f, err := privatefs.OpenFile(sessionDir, path, os.O_CREATE|os.O_WRONLY|os.O_APPEND)
 	if err != nil {
-		return fmt.Errorf("open mailbox log: %w", err)
+		return -1, fmt.Errorf("open mailbox log: %w", err)
 	}
 	startOffset := int64(-1)
-	a.subAgentMailboxIDsMu.Lock()
-	indexReady := a.subAgentInbox.spoolIndexReady
-	a.subAgentMailboxIDsMu.Unlock()
-	if indexReady {
-		if info, statErr := f.Stat(); statErr == nil {
-			startOffset = info.Size()
-		}
+	if info, statErr := f.Stat(); statErr == nil {
+		startOffset = info.Size()
 	}
 	enc := json.NewEncoder(f)
 	if err := enc.Encode(msg); err != nil {
@@ -1076,7 +1084,7 @@ func (a *MainAgent) persistSubAgentMailboxMessage(msg SubAgentMailboxMessage) er
 		a.subAgentMailboxIDsMu.Lock()
 		a.subAgentInbox.spoolIndexReady = false
 		a.subAgentMailboxIDsMu.Unlock()
-		return fmt.Errorf("append mailbox message: %w", err)
+		return -1, fmt.Errorf("append mailbox message: %w", err)
 	}
 	endOffset := int64(-1)
 	if info, statErr := f.Stat(); statErr == nil {
@@ -1086,7 +1094,7 @@ func (a *MainAgent) persistSubAgentMailboxMessage(msg SubAgentMailboxMessage) er
 		a.subAgentMailboxIDsMu.Lock()
 		a.subAgentInbox.spoolIndexReady = false
 		a.subAgentMailboxIDsMu.Unlock()
-		return fmt.Errorf("close mailbox log: %w", err)
+		return -1, fmt.Errorf("close mailbox log: %w", err)
 	}
 	messageID := strings.TrimSpace(msg.MessageID)
 	a.subAgentMailboxIDsMu.Lock()
@@ -1098,7 +1106,59 @@ func (a *MainAgent) persistSubAgentMailboxMessage(msg SubAgentMailboxMessage) er
 		a.subAgentInbox.spoolIndexReady = false
 	}
 	a.subAgentMailboxIDsMu.Unlock()
-	return nil
+	return startOffset, nil
+}
+
+// rollbackSubAgentMailboxMessage truncates the mailbox.jsonl entry that
+// persistSubAgentMailboxMessageWithOffset appended at offset, mirroring the
+// guarded-settlement journal rollback (truncateTaskSettlementJournal in
+// task_settlement.go). It withdraws a mailbox message (a WaitingMain expiry
+// alert) whose guarded terminal settle backed off, so neither this process
+// nor a restore after a crash can deliver an expiry that never happened. Both
+// the append and the rollback run synchronously on the event-loop goroutine —
+// the sole writer of the log — so the file still ends at the appended line.
+// The message's idempotency mark is dropped with the line and its spool-index
+// entry (the append was at the tail, so nothing indexed after it can exist)
+// is removed.
+func (a *MainAgent) rollbackSubAgentMailboxMessage(msg *SubAgentMailboxMessage, offset int64) {
+	if msg == nil || offset < 0 {
+		return
+	}
+	sessionDir := strings.TrimSpace(a.sessionDir)
+	messageID := strings.TrimSpace(msg.MessageID)
+	if sessionDir == "" || messageID == "" {
+		return
+	}
+	if err := truncateSubAgentMailboxLog(sessionDir, offset); err != nil {
+		log.Errorf("failed to roll back mailbox message message_id=%v offset=%v error=%v (restore may replay it)", messageID, offset, err)
+		return
+	}
+	a.subAgentMailboxIDsMu.Lock()
+	delete(a.subAgentMailboxIDs, messageID)
+	if location, ok := a.subAgentInbox.spoolIndex[messageID]; ok && location.offset >= offset {
+		delete(a.subAgentInbox.spoolIndex, messageID)
+	}
+	a.subAgentMailboxIDsMu.Unlock()
+}
+
+func truncateSubAgentMailboxLog(sessionDir string, size int64) error {
+	if strings.TrimSpace(sessionDir) == "" || size < 0 {
+		return nil
+	}
+	path := filepath.Join(sessionDir, "subagents", "mailbox.jsonl")
+	f, err := privatefs.OpenFile(sessionDir, path, os.O_RDWR)
+	if err != nil {
+		return fmt.Errorf("open mailbox log for rollback: %w", err)
+	}
+	if err := f.Truncate(size); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("truncate mailbox log: %w", err)
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("sync mailbox log: %w", err)
+	}
+	return f.Close()
 }
 
 func (a *MainAgent) dequeueNextSubAgentMailbox() *SubAgentMailboxMessage {
@@ -1449,8 +1509,6 @@ func formatSubAgentMailboxInjectionText(msg *SubAgentMailboxMessage) string {
 	}
 	b.WriteString("\n- kind: ")
 	b.WriteString(string(msg.Kind))
-	b.WriteString("\n- lifecycle_kind: ")
-	b.WriteString(string(msg.LifecycleKind))
 	b.WriteString("\n- message_type: ")
 	b.WriteString(string(msg.MessageType))
 	if msg.Subtype != "" {
@@ -1567,7 +1625,6 @@ func mailboxMetadata(msg *SubAgentMailboxMessage) *message.MailboxMetadata {
 		OwnerAgentID:  strings.TrimSpace(msg.OwnerAgentID),
 		OwnerTaskID:   strings.TrimSpace(msg.OwnerTaskID),
 		Kind:          strings.TrimSpace(string(msg.Kind)),
-		LifecycleKind: strings.TrimSpace(string(msg.LifecycleKind)),
 		MessageType:   strings.TrimSpace(string(msg.MessageType)),
 		Subtype:       strings.TrimSpace(msg.Subtype),
 		SourceTaskID:  strings.TrimSpace(msg.SourceTaskID),

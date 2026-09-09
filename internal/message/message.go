@@ -301,7 +301,6 @@ type MailboxMetadata struct {
 	OwnerAgentID  string `json:"owner_agent_id,omitempty"`
 	OwnerTaskID   string `json:"owner_task_id,omitempty"`
 	Kind          string `json:"kind,omitempty"`
-	LifecycleKind string `json:"lifecycle_kind,omitempty"`
 	MessageType   string `json:"message_type,omitempty"`
 	Subtype       string `json:"subtype,omitempty"`
 	SourceTaskID  string `json:"source_task_id,omitempty"`

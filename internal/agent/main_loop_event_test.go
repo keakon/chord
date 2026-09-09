@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/identity"
+	"github.com/keakon/chord/internal/tools"
 )
 
 func TestEventOverflowPreservesOrderAndRemainsRunnable(t *testing.T) {
@@ -155,7 +156,7 @@ func TestHandleEscalateQueuesFollowUpWithoutBlockingOnFullExternalQueue(t *testi
 	sub := newControllableTestSubAgent(t, a, "task-escalate")
 	done := make(chan struct{})
 	go func() {
-		a.handleEscalate(Event{SourceID: sub.instanceID, Payload: "need decision"})
+		a.handleEscalate(Event{SourceID: sub.instanceID, Payload: tools.AgentRequestPayload{Reason: "need decision"}})
 		close(done)
 	}()
 	select {

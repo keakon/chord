@@ -121,7 +121,7 @@ func (b *restoredSubAgentBuilder) seedFromSnapshot(snap recovery.AgentSnapshot) 
 		b.state.SelectedModelRef = strings.TrimSpace(snap.SelectedModelRef)
 	}
 	b.state.RunningModelRef = strings.TrimSpace(snap.RunningModelRef)
-	b.state.State = normalizeSubAgentState(SubAgentState(strings.TrimSpace(snap.State)))
+	b.state.State = SubAgentState(strings.TrimSpace(snap.State))
 	b.state.LastSummary = strings.TrimSpace(snap.LastSummary)
 	b.state.OwnerAgentID = strings.TrimSpace(snap.OwnerAgentID)
 	b.state.OwnerTaskID = strings.TrimSpace(snap.OwnerTaskID)
@@ -177,7 +177,7 @@ func (b *restoredSubAgentBuilder) overlayMeta(meta *subAgentMeta) {
 		b.state.RunningModelRef = strings.TrimSpace(meta.RunningModelRef)
 	}
 	if b.state.State == "" {
-		b.state.State = normalizeSubAgentState(SubAgentState(strings.TrimSpace(meta.State)))
+		b.state.State = SubAgentState(strings.TrimSpace(meta.State))
 	}
 	if b.state.LastSummary == "" {
 		b.state.LastSummary = strings.TrimSpace(meta.LastSummary)
@@ -709,12 +709,12 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	a.resetLLMModelRun()
 	a.ctxMgr.RestoreMessages(append([]message.Message(nil), loaded.Messages...))
 	a.mailboxDeliveryPaused.Store(true)
-	a.subAgentMailboxIDsMu.Lock()
-	a.pendingSubAgentMailboxes = nil
-	a.activeSubAgentMailboxes = nil
-	a.activeSubAgentMailbox = nil
-	a.activeSubAgentMailboxAck = false
-	a.subAgentMailboxIDsMu.Unlock()
+	// Activation replaces the session: the replaced session's in-memory
+	// mailbox pipeline is dropped wholesale (see
+	// resetSubAgentMailboxRuntime); the mailbox ids and queues are rebuilt
+	// below from the loaded mailbox log before its unconsumed messages are
+	// replayed.
+	a.resetSubAgentMailboxRuntime()
 	restoredMessages := a.ctxMgr.Snapshot()
 	a.resetRuntimeEvidenceFromMessages(restoredMessages)
 	a.fileTrack = filelock.NewFileTracker()
@@ -853,7 +853,6 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 		}
 	}
 	a.subAgentMailboxIDsMu.Lock()
-	a.subAgentInbox = newSubAgentInbox()
 	a.subAgentMailboxIDs = make(map[string]struct{}, len(loaded.MailboxMessages))
 	a.subAgentMailboxConsumed = make(map[string]struct{})
 	for _, msg := range loaded.MailboxMessages {

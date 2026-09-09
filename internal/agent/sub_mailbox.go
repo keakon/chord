@@ -49,6 +49,14 @@ const (
 
 const maxAgentMessagePayloadBytes = 32 * 1024
 
+// Mailbox ack outcomes written to the durable ack log, plus the reply kind
+// the main agent records when it consumed a mailbox message in a main turn.
+const (
+	mailboxAckOutcomeConsumed  = "consumed"
+	mailboxAckOutcomeRetryable = "retryable"
+	mailboxReplyKindMainTurn   = "main_turn"
+)
+
 type ArtifactRef = tools.ArtifactRef
 
 type CompletionEnvelope struct {
@@ -91,7 +99,6 @@ type SubAgentMailboxMessage struct {
 	RequiresAck    bool                    `json:"requires_ack,omitempty"`
 	Consumed       bool                    `json:"consumed,omitempty"`
 	CreatedAt      time.Time               `json:"created_at"`
-	LifecycleKind  SubAgentMailboxKind     `json:"lifecycle_kind,omitempty"`
 	MessageType    AgentMessageType        `json:"message_type,omitempty"`
 	Subtype        string                  `json:"subtype,omitempty"`
 	SourceTaskID   string                  `json:"source_task_id,omitempty"`
@@ -103,6 +110,12 @@ type SubAgentMailboxMessage struct {
 	ArtifactRefs   []tools.ArtifactRef     `json:"artifact_refs,omitempty"`
 	Durability     AgentMessageDurability  `json:"durability,omitempty"`
 	persistPending bool                    `json:"-"`
+	// rollbackAppendOffset records where the last persist of this message
+	// appended its mailbox.jsonl line (-1 when none or unknown), so a guarded
+	// settlement that decides the message must not survive can roll the line
+	// back (see rollbackSubAgentMailboxMessage). Transient bookkeeping only:
+	// it is never serialized and never copied onto another message.
+	rollbackAppendOffset int64
 }
 
 type SubAgentMailboxAckRecord struct {
@@ -141,6 +154,33 @@ func newSubAgentInbox() subAgentInbox {
 		progress:   make(map[string]SubAgentMailboxMessage),
 		spoolIndex: make(map[string]mailboxSpoolLocation),
 	}
+}
+
+// resetSubAgentMailboxRuntime drops the entire in-memory mailbox pipeline at a
+// session boundary (a /new, a fork, a plan-execution switch, or a restore):
+// the main-inbox queues (urgent/normal/progress), the durable-spool id
+// queues, the per-owner queues, the staged/active batch, the idempotency and
+// consumed sets, and the mailbox memory budget. Without it the replaced
+// session's leftover mailbox messages would be staged into the next session's
+// first idle drain and delivered to the new session's model — and then
+// replayed again from the replaced session's own mailbox log when that
+// session is resumed, so both sessions would see the same message once each.
+// Durable mailbox rows and acks are never touched: the replaced session
+// replays its unconsumed log when it is resumed, and the new session starts
+// with its own empty log.
+func (a *MainAgent) resetSubAgentMailboxRuntime() {
+	a.subAgentMailboxIDsMu.Lock()
+	a.subAgentInbox = newSubAgentInbox()
+	a.ownedSubAgentMailboxes = nil
+	a.ownedMailboxSpool = nil
+	a.pendingSubAgentMailboxes = nil
+	a.activeSubAgentMailboxes = nil
+	a.activeSubAgentMailbox = nil
+	a.activeSubAgentMailboxAck = false
+	a.subAgentMailboxIDs = make(map[string]struct{})
+	a.subAgentMailboxConsumed = make(map[string]struct{})
+	a.subAgentMailboxIDsMu.Unlock()
+	a.refreshSubAgentInboxSummary()
 }
 
 func mailboxMessageBytes(msg SubAgentMailboxMessage) int {
@@ -262,7 +302,7 @@ func (a *MainAgent) nextSubAgentReplyMessageID(agentID string) string {
 func normalizeReplyKind(kind string) string {
 	kind = strings.TrimSpace(kind)
 	if kind == "" {
-		return "main_turn"
+		return mailboxReplyKindMainTurn
 	}
 	return kind
 }
@@ -285,7 +325,7 @@ func (a *MainAgent) prepareSubAgentMailboxReply(agentID, messageID string, turnI
 	}
 	return SubAgentMailboxAckRecord{
 		MessageID:        messageID,
-		Outcome:          "consumed",
+		Outcome:          mailboxAckOutcomeConsumed,
 		TurnID:           turnID,
 		InReplyTo:        messageID,
 		ReplyMessageID:   replyMessageID,
@@ -324,7 +364,7 @@ func (a *MainAgent) markSubAgentMailboxConsumedWithReply(agentID, messageID stri
 func (a *MainAgent) markSubAgentMailboxRetryable(messageID string, turnID uint64) error {
 	return a.appendSubAgentMailboxAck(SubAgentMailboxAckRecord{
 		MessageID: messageID,
-		Outcome:   "retryable",
+		Outcome:   mailboxAckOutcomeRetryable,
 		TurnID:    turnID,
 		AckedAt:   time.Now(),
 	})
@@ -337,7 +377,7 @@ func (a *MainAgent) markSubAgentMailboxConsumed(messageID string) error {
 	}
 	return a.appendSubAgentMailboxAck(SubAgentMailboxAckRecord{
 		MessageID: messageID,
-		Outcome:   "consumed",
+		Outcome:   mailboxAckOutcomeConsumed,
 		AckedAt:   time.Now(),
 	})
 }
@@ -366,13 +406,13 @@ func (a *MainAgent) appendSubAgentMailboxAck(record SubAgentMailboxAckRecord) er
 	if a.subAgentMailboxConsumed == nil {
 		a.subAgentMailboxConsumed = make(map[string]struct{})
 	}
-	if record.Outcome == "consumed" {
+	if record.Outcome == mailboxAckOutcomeConsumed {
 		a.subAgentMailboxConsumed[record.MessageID] = struct{}{}
 	} else {
 		delete(a.subAgentMailboxConsumed, record.MessageID)
 	}
 	a.subAgentMailboxIDsMu.Unlock()
-	if record.Outcome == "consumed" {
+	if record.Outcome == mailboxAckOutcomeConsumed {
 		a.orchestrationMetrics.recordMailboxAck(record.MessageID)
 	}
 	return nil
@@ -412,7 +452,7 @@ func applyMailboxAcks(msgs []SubAgentMailboxMessage, acks map[string]SubAgentMai
 	}
 	out := append([]SubAgentMailboxMessage(nil), msgs...)
 	for i := range out {
-		if ack, ok := acks[out[i].MessageID]; ok && ack.Outcome == "consumed" {
+		if ack, ok := acks[out[i].MessageID]; ok && ack.Outcome == mailboxAckOutcomeConsumed {
 			out[i].Consumed = true
 		}
 	}

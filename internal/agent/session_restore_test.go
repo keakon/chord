@@ -1093,12 +1093,11 @@ func TestRestoreSkipsMailboxMessageWithDurableTranscriptRow(t *testing.T) {
 			Kind:    message.KindSubAgentMailbox,
 			Content: "<system-reminder>\nSubAgent mailbox update for agent-1-1\n</system-reminder>",
 			Mailbox: &message.MailboxMetadata{
-				MessageID:     "agent-1-1",
-				AgentID:       "agent-1",
-				TaskID:        "restored",
-				Kind:          string(SubAgentMailboxKindDecisionRequired),
-				LifecycleKind: string(SubAgentMailboxKindDecisionRequired),
-				MessageType:   string(AgentMessageTypeRequest),
+				MessageID:   "agent-1-1",
+				AgentID:     "agent-1",
+				TaskID:      "restored",
+				Kind:        string(SubAgentMailboxKindDecisionRequired),
+				MessageType: string(AgentMessageTypeRequest),
 			},
 		},
 	}

@@ -358,7 +358,7 @@ func (a *MainAgent) NotifySubAgentMessage(ctx context.Context, response tools.Ag
 	}
 	metadata := &message.MailboxMetadata{
 		MessageID: request.Response.ResponseID, TaskID: request.SourceTaskID, Kind: string(SubAgentMailboxKindDecisionRequired),
-		LifecycleKind: string(SubAgentMailboxKindDecisionRequired), MessageType: string(AgentMessageTypeResponse), Subtype: "decision",
+		MessageType: string(AgentMessageTypeResponse), Subtype: agentMessageSubtypeDecision,
 		SourceTaskID: caller.TaskID, SourceAttempt: request.TargetAttempt, TargetTaskID: request.SourceTaskID, TargetAttempt: request.SourceAttempt,
 		CorrelationID: correlationID, InReplyTo: request.RequestMessageID,
 	}

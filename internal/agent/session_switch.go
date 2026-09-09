@@ -251,10 +251,11 @@ func (a *MainAgent) resetSessionRuntimeState() {
 	a.resetCacheRoutingState()
 	a.resetLLMModelRun()
 	a.mailboxDeliveryPaused.Store(false)
-	a.subAgentMailboxIDsMu.Lock()
-	a.subAgentMailboxIDs = make(map[string]struct{})
-	a.subAgentMailboxConsumed = make(map[string]struct{})
-	a.subAgentMailboxIDsMu.Unlock()
+	// A session switch is a session boundary: the replaced session's queued
+	// mailbox state (main-inbox queues, staged batch, per-owner queues,
+	// spool ids, memory budget) must not flow into the next session — see
+	// resetSubAgentMailboxRuntime.
+	a.resetSubAgentMailboxRuntime()
 	loopWasEnabled := a.loopState.Enabled
 	a.loopState.disable()
 	a.pendingLoopContinuation = nil
