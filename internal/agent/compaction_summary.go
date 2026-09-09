@@ -120,6 +120,20 @@ type compactionInput struct {
 	PriorCheckpoint string
 }
 
+// compactionPromptInputs carries the auxiliary sections the compaction prompt
+// is built from (key-file candidates, todos, sub-agent state, background
+// objects). The budget fit (fitCompactionInputToContextLimit) may degrade
+// these section by section to admit a prompt; the exact lists that satisfied
+// the admission gate must be the lists the prompt is actually assembled from,
+// otherwise a prompt admitted only after degradation would still be sent with
+// the full lists over the reserved budget.
+type compactionPromptInputs struct {
+	KeyFiles          []string
+	Todos             []tools.TodoItem
+	SubAgents         []SubAgentInfo
+	BackgroundObjects []recovery.BackgroundObjectState
+}
+
 // compactionReductionScratch returns a throwaway agent carrying the reduction
 // policy semantics of the live agent: the configured policy plus the read-only
 // classification inputs — the tool registry (read-only shell verdicts), the
@@ -225,20 +239,26 @@ func compactionPromptTokenEstimate(input *compactionInput, historyPath string, k
 	return max(1, len(prompt)/3)
 }
 
-func (a *MainAgent) fitCompactionInputToContextLimit(head []message.Message, input *compactionInput, contextLimit int, historyPath string, keyFiles []string, todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState, maxOutputTokens int) (*compactionInput, error) {
+func (a *MainAgent) fitCompactionInputToContextLimit(head []message.Message, input *compactionInput, contextLimit int, historyPath string, keyFiles []string, todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState, maxOutputTokens int) (*compactionInput, *compactionPromptInputs, error) {
 	if input == nil {
-		return nil, fmt.Errorf("compaction input is nil")
+		return nil, nil, fmt.Errorf("compaction input is nil")
 	}
 	if contextLimit <= 0 {
-		return nil, fmt.Errorf("compaction context limit is unavailable; refusing unbounded admission")
+		return nil, nil, fmt.Errorf("compaction context limit is unavailable; refusing unbounded admission")
+	}
+	fullInputs := &compactionPromptInputs{
+		KeyFiles:          keyFiles,
+		Todos:             todos,
+		SubAgents:         subAgents,
+		BackgroundObjects: backgroundObjects,
 	}
 	preflightBuffer := max(contextLimit/compactPreflightBufferRatio, compactPreflightBufferMin)
 	allowedInput := contextLimit - maxOutputTokens - preflightBuffer
 	if allowedInput <= 0 {
-		return nil, fmt.Errorf("compaction context limit too small after reserving output (%d)", contextLimit)
+		return nil, nil, fmt.Errorf("compaction context limit too small after reserving output (%d)", contextLimit)
 	}
 	if compactionPromptTokenEstimate(input, historyPath, keyFiles, todos, subAgents, backgroundObjects) <= allowedInput {
-		return input, nil
+		return input, fullInputs, nil
 	}
 	pruned := a.compactionReductionScratch().prepareMessagesForLLM(head)
 	normalized := normalizeMessagesForSummary(pruned)
@@ -253,20 +273,25 @@ func (a *MainAgent) fitCompactionInputToContextLimit(head []message.Message, inp
 		}
 		exported, err := session.Export(trimmed, nil, nil)
 		if err != nil {
-			return nil, fmt.Errorf("build compaction transcript during fit: %w", err)
+			return nil, nil, fmt.Errorf("build compaction transcript during fit: %w", err)
 		}
 		candidate := *input
 		candidate.Transcript = session.ExportToMarkdown(exported)
 		candidate.OmittedMessages = omittedMessages
 		if compactionPromptTokenEstimate(&candidate, historyPath, candidateKeyFiles, candidateTodos, candidateSubAgents, candidateBackground) <= allowedInput {
-			return &candidate, nil
+			return &candidate, &compactionPromptInputs{
+				KeyFiles:          candidateKeyFiles,
+				Todos:             candidateTodos,
+				SubAgents:         candidateSubAgents,
+				BackgroundObjects: candidateBackground,
+			}, nil
 		}
 		budget -= max(512, budget/8)
 		if budget <= contextLimit/8 {
 			break
 		}
 	}
-	return nil, fmt.Errorf("compaction prompt still exceeds reserved context budget")
+	return nil, nil, fmt.Errorf("compaction prompt still exceeds reserved context budget")
 }
 
 // compactionPromptInputsForAttempt drops only reconstructable or lower-authority

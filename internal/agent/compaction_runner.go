@@ -697,18 +697,24 @@ func (a *MainAgent) summarizeCompactionHead(ctx context.Context, head []message.
 	if err != nil {
 		return "", "", modelRef, err
 	}
-	input, err = a.fitCompactionInputToContextLimit(head, input, utilityContextLimit, historyPath, keyFiles, todos, subAgents, backgroundObjects, compactReservedOutput)
+	input, promptInputs, err := a.fitCompactionInputToContextLimit(head, input, utilityContextLimit, historyPath, keyFiles, todos, subAgents, backgroundObjects, compactReservedOutput)
 	if err != nil {
 		return "", "", modelRef, err
 	}
 
+	// The prompt is assembled from the exact inputs the budget fit admitted.
+	// fitCompactionInputToContextLimit degrades the auxiliary sections (and
+	// trims the transcript) until the assembled prompt fits the reserved
+	// budget; sending anything else — the original transcript or the full
+	// auxiliary lists — would dispatch an over-budget prompt that was never
+	// admitted.
 	prompt := buildCompactionPromptWithKeyFiles(
 		input,
 		historyPath,
-		keyFiles,
-		todos,
-		subAgents,
-		backgroundObjects,
+		promptInputs.KeyFiles,
+		promptInputs.Todos,
+		promptInputs.SubAgents,
+		promptInputs.BackgroundObjects,
 	)
 
 	backend := a.selectCompactionBackend(client)
