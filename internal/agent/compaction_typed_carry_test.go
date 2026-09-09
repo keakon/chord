@@ -485,3 +485,58 @@ func TestCarriedInvalidatedClaimStaysInvalidatedWithoutItsEvidence(t *testing.T)
 		t.Fatalf("invalidated claim must stay invalidated across generations, got %#v", got)
 	}
 }
+
+// TestRestatedInvalidatedClaimReadsFreshActive pins the restatement half of
+// the claim carry: when a later generation restates a claim that an earlier
+// checkpoint carried as invalidated, the fresh submission wins and the claim
+// reads as a fresh active claim with the new classification and evidence.
+// Invalidated is the carried claim's state, not a tombstone that blocks a
+// deliberate re-assertion.
+func TestRestatedInvalidatedClaimReadsFreshActive(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	invalidatedID := evidenceItemID(evidenceItem{Key: "ev-gone"})
+	round1Req := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{
+		ActiveObjective: "continue",
+		NextStep:        "go",
+		ClaimKinds:      map[string]string{"claims A works": "observed"},
+		ClaimEvidence:   map[string][]string{"claims A works": {invalidatedID}},
+	}}
+	markTypedClaimsInvalidated(round1Req, []evidenceItem{{Key: "ev-gone", Validity: evidenceValidityInvalidated}})
+	one := []message.Message{
+		{Role: message.RoleUser, Content: "first request"},
+		{Role: message.RoleAssistant, Content: "first work"},
+	}
+	first := a.buildModelDrivenCheckpointSummary(modelDrivenBarrierSnapshot{snapshot: one}, one, len(one), round1Req)
+	if state, ok := parseCheckpointTypedState(compactionSummaryBody(first)); !ok || state.Claims["claims A works"].Status != "invalidated" {
+		t.Fatalf("round-1 checkpoint must carry the claim as invalidated:\n%s", first)
+	}
+
+	// Round 2 restates the same claim with fresh evidence and no status, so it
+	// is a fresh submission that re-asserts the claim as active.
+	round2Req := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{
+		ActiveObjective: "continue",
+		NextStep:        "go",
+		Decisions:       []string{"d2"},
+		ClaimKinds:      map[string]string{"claims A works": "observed"},
+		ClaimEvidence:   map[string][]string{"claims A works": {"ev-new-1"}},
+	}}
+	two := []message.Message{
+		{Role: message.RoleUser, Content: first, IsCompactionSummary: true},
+		{Role: message.RoleUser, Content: "second request"},
+	}
+	second := a.buildModelDrivenCheckpointSummary(modelDrivenBarrierSnapshot{snapshot: two}, two, len(two), round2Req)
+	state, ok := parseCheckpointTypedState(compactionSummaryBody(second))
+	if !ok {
+		t.Fatalf("round-2 checkpoint must carry a typed block:\n%s", second)
+	}
+	got := state.Claims["claims A works"]
+	if got.Status != "active" {
+		t.Fatalf("restated claim must read as fresh active, got %#v", got)
+	}
+	if got.Kind != "observed" || len(got.EvidenceRefs) != 1 || got.EvidenceRefs[0] != "ev-new-1" {
+		t.Fatalf("restated claim must carry the fresh classification and evidence: %#v", got)
+	}
+	if !strings.Contains(second, "claims A works | evidence: ev-new-1") {
+		t.Fatalf("round-2 checkpoint must re-render the restated claim evidence:\n%s", second)
+	}
+}
