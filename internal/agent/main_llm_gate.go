@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/keakon/golog/log"
@@ -153,6 +154,16 @@ func (a *MainAgent) finishCompactionState() (pending *pendingMainLLMCall, discar
 // The settle path has already emitted the compact_context tool result, so the
 // turn only needs its request restarted on the unchanged context. It reports
 // whether it took over settling the turn.
+//
+// Queued user messages are deliberately NOT merged into the restarted request,
+// unlike the applied/skip/failure continuations in
+// resumePendingMainLLMAfterCompaction: every discard is a user abort of the
+// checkpoint (cancelling it, or ESC on the requesting turn), and the same
+// explicit-interruption convention that keeps queued input from auto-running
+// after a cancel holds here — fresh input waits for the next user-driven round
+// instead of riding along behind a continuation the user just stopped. This is
+// what distinguishes this path from the failure resume, so it must not be
+// "fixed" into a merge without revisiting the abort semantics.
 func (a *MainAgent) resumeModelDrivenTurnAfterDiscard(plan continuationPlan) bool {
 	if a == nil || a.turn == nil || plan.kind != compactionResumeModelDriven {
 		return false
@@ -1022,11 +1033,36 @@ func (a *MainAgent) resumePendingMainLLMAfterCompaction(pending *pendingMainLLMC
 		// the message would then be appended behind the continuation's own
 		// reply instead of leading the request, exactly like the other
 		// compaction continuations that merge queued input before resuming.
-		queuedCount := len(a.pendingUserMessages)
-		if queuedCount > 0 {
+		//
+		// mergedUserInput must mean "a genuine user message actually joined
+		// this request", which a shrinking queue does not prove:
+		// consumePendingUserMessagesForRequest also drains system-generated
+		// entries (e.g. background-task completions) that append as context
+		// without being fresh user input, and a queued local-only slash
+		// command is executed and dropped by the drain rather than appended.
+		// So only an entry the drain itself really appends counts: a FromUser
+		// message that is neither an idle-only slash command (re-queued for
+		// the idle drain) nor a local-only slash command. The two filters
+		// below mirror the drain's own, so the flag cannot drift from what
+		// actually lands in the request.
+		mergedUserInput := false
+		if len(a.pendingUserMessages) > 0 {
+			for _, p := range a.pendingUserMessages {
+				if !p.FromUser {
+					continue
+				}
+				c := strings.TrimSpace(pendingUserMessageText(p))
+				if c == "/resume" || strings.HasPrefix(c, "/resume ") || c == "/new" || c == "/mcp" || strings.HasPrefix(c, "/mcp ") || isLoopSlashCommand(c) {
+					continue // idle-only slash: deferred, never appended here.
+				}
+				if isTUILocalOnlySlashCommand(c) {
+					continue // local-only slash: executed by the drain and dropped.
+				}
+				mergedUserInput = true
+				break
+			}
 			a.processPendingUserMessagesBeforeLLMInTurn()
 		}
-		mergedUserInput := len(a.pendingUserMessages) < queuedCount
 		if a.turn == nil || a.turn.ID != pending.turnID || a.turn.Epoch != pending.turnEpoch {
 			return false
 		}
@@ -1052,11 +1088,18 @@ func (a *MainAgent) resumePendingMainLLMAfterCompaction(pending *pendingMainLLMC
 			a.beginMainLLMAfterPreparation(a.turn.Ctx, pending.turnID, pending.agentErrSourceID)
 			return true
 		}
-		// Model-driven skip/failure/cancel: stay in the same turn on the old
-		// context, surface the reason, and continue — the usage-driven safety
-		// net stays armed (the settle paths never touch it). A merged fresh
-		// user message still leads the request; the notice only explains why
-		// the requested checkpoint did not apply.
+		// Model-driven skip/failure: the requested checkpoint did not apply,
+		// but this is still an automatic continuation of the same turn on the
+		// old context, so queued input merges into it exactly as it does on
+		// the applied path — a message typed while the checkpoint was pending
+		// leads this request instead of trailing the continuation's reply.
+		// Cancelled/discarded checkpoints never reach this branch: those
+		// user-abort settles drop the pending call and restart the turn
+		// through resumeModelDrivenTurnAfterDiscard, which preserves queued
+		// input for the next explicit round instead of auto-running it. The
+		// notice below only explains why the requested checkpoint did not
+		// apply; the usage-driven safety net stays armed (the settle paths
+		// never touch it).
 		a.appendModelDrivenContinuationNotice()
 		a.beginMainLLMAfterPreparation(a.turn.Ctx, a.turn.ID, pending.agentErrSourceID)
 		return true
