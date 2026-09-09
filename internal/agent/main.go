@@ -1399,8 +1399,9 @@ func (a *MainAgent) effectiveRuleset() permission.Ruleset {
 }
 
 // subAgentBaseRuleset returns the unfiltered ruleset SubAgents should inherit
-// when they are created or refreshed. YOLO is intentionally a main-agent-only
-// relaxation; subagents continue to evaluate the user's full rule set.
+// when they are created or refreshed. SubAgents evaluate the user's full rule
+// set; the only YOLO effect they inherit is the ask→allow downgrade the
+// SubAgent execution pipeline applies while the main agent's YOLO mode is on.
 func (a *MainAgent) subAgentBaseRuleset() permission.Ruleset {
 	return a.snapshotRuleset()
 }

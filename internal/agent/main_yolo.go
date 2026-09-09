@@ -60,8 +60,10 @@ func yoloProtectedPermissionRule(rule permission.Rule) bool {
 // It is consumed by callers that present the active ruleset to the LLM or UI
 // (system prompt, tool visibility, etc.) and by the execution gate, so the
 // visible permission surface matches what bypassPermission actually skips at
-// execution time. SubAgent inheritance intentionally does NOT pass through
-// this filter; YOLO only relaxes the main agent's own permission checks.
+// execution time. SubAgent rulesets intentionally do not pass through this
+// filter: their inheritance of the main agent's YOLO mode only downgrades ask
+// decisions to allow at execution time, so their visible rules stay the
+// user's full set.
 //
 // The capability-granting control tools are seeded with an explicit deny ahead
 // of the user's own rules. Two things depend on that seed. First, wildcard

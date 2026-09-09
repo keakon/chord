@@ -54,8 +54,15 @@ func (s *SubAgent) toolExecutionPipeline() toolExecutionPipeline {
 			}
 			return s.currentRuleset()
 		},
-		isInternalTool:        isSubAgentInternalTool,
-		confirm:               confirm,
+		isInternalTool: isSubAgentInternalTool,
+		confirm:        confirm,
+		yoloDowngradeAsk: func(name string) bool {
+			// SubAgents inherit the main agent's YOLO mode at each decision:
+			// ask degrades to an implicit allow while the parent YOLO is on.
+			// Deny decisions never reach this hook and the protected control
+			// tools are excluded, so both stay enforced.
+			return s.parent.YoloEnabled() && !yoloProtectedPermissionTool(name)
+		},
 		currentTurnID:         s.currentTurnID,
 		captureWalltimeTarget: s.captureWalltimeTarget,
 		fireHook:              s.fireHook,
