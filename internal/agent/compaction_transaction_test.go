@@ -1,9 +1,12 @@
 package agent
 
 import (
+	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -40,6 +43,126 @@ func contains(text, fragment string) bool {
 		}
 	}
 	return false
+}
+
+// TestApplyCompactionDraftCommitsTransactionOnReplaceSuccess drives a real
+// durable apply with a prepared transaction and pins the C3 commit-point
+// contract: once ReplacePrefixAtomic succeeds, the transaction manifest is
+// recorded committed with the target fingerprint of the live transcript, so a
+// later crash reconciles the apply as committed and the archive stays
+// referenced.
+func TestApplyCompactionDraftCommitsTransactionOnReplaceSuccess(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.newTurn()
+	a.requestBatches.reserve(a.sessionEpoch, 0)
+	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "first request"})
+	a.ctxMgr.Append(message.Message{Role: message.RoleAssistant, Content: "first reply"})
+
+	const txnID = "1-1"
+	manifest := compactionTransactionManifest{
+		TransactionID:   txnID,
+		ProposalID:      "call-1",
+		ArchivePath:     filepath.Join(a.sessionDir, "history-1.md"),
+		ArchiveMetaPath: filepath.Join(a.sessionDir, "history-1.md.status.json"),
+		TranscriptIndex: 1,
+		Status:          compactionTransactionPrepared,
+	}
+	if err := writeCompactionTransactionManifest(a.sessionDir, manifest); err != nil {
+		t.Fatalf("write prepared manifest: %v", err)
+	}
+
+	draft := &compactionDraft{
+		NewMessages:           []message.Message{{Role: message.RoleUser, Content: "checkpoint content", IsCompactionSummary: true}},
+		HeadSplit:             1,
+		Index:                 1,
+		AbsHistoryPath:        filepath.Join(a.sessionDir, "history-1.md"),
+		AbsHistoryMetaPath:    filepath.Join(a.sessionDir, "history-1.md.status.json"),
+		SummaryMode:           compactionSummaryModeModelDriven,
+		PlanID:                1,
+		Target:                compactionTarget{sessionEpoch: a.sessionEpoch},
+		TransactionID:         txnID,
+		TransactionSessionDir: a.sessionDir,
+	}
+	if err := a.applyCompactionDraft(draft); err != nil {
+		t.Fatalf("apply draft: %v", err)
+	}
+
+	data, err := os.ReadFile(compactionTransactionManifestPath(a.sessionDir, txnID))
+	if err != nil {
+		t.Fatalf("read committed manifest: %v", err)
+	}
+	var recorded compactionTransactionManifest
+	if err := json.Unmarshal(data, &recorded); err != nil {
+		t.Fatalf("decode committed manifest: %v", err)
+	}
+	if recorded.Status != compactionTransactionCommitted {
+		t.Fatalf("transaction status = %q, want committed", recorded.Status)
+	}
+	wantFingerprint := compactionTranscriptFingerprint(a.ctxMgr.Snapshot())
+	if recorded.TargetFingerprint != wantFingerprint {
+		t.Fatalf("target fingerprint = %q, want live transcript %q", recorded.TargetFingerprint, wantFingerprint)
+	}
+}
+
+// TestFailedApplyLeavesTransactionAborted drives the failure side of the
+// commit point: when the transcript rewrite itself fails (the backup path is
+// taken by a directory), the apply reports an error and the transaction must
+// not read as committed — the abort defer records it aborted so a restore
+// reconcile and the caller both agree the compaction never landed.
+func TestFailedApplyLeavesTransactionAborted(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.newTurn()
+	a.requestBatches.reserve(a.sessionEpoch, 0)
+	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "first request"})
+	a.ctxMgr.Append(message.Message{Role: message.RoleAssistant, Content: "first reply"})
+	// The live transcript must exist on disk for rewriteSessionAfterCompaction
+	// to attempt the rename that this test blocks.
+	if err := a.recoveryManager().PersistMessage(identity.MainAgentID, a.ctxMgr.Snapshot()[0]); err != nil {
+		t.Fatalf("PersistMessage before compaction: %v", err)
+	}
+
+	// A prepared manifest exists, then the rewrite cannot proceed because the
+	// backup rename target is blocked by a directory.
+	const txnID = "2-1"
+	if err := writeCompactionTransactionManifest(a.sessionDir, compactionTransactionManifest{
+		TransactionID: txnID, TranscriptIndex: 1, Status: compactionTransactionPrepared,
+	}); err != nil {
+		t.Fatalf("write prepared manifest: %v", err)
+	}
+	backupPath := filepath.Join(a.sessionDir, "main.pre-compress-1.jsonl")
+	if err := os.MkdirAll(backupPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll(backupPath): %v", err)
+	}
+
+	draft := &compactionDraft{
+		NewMessages:           []message.Message{{Role: message.RoleUser, Content: "checkpoint content", IsCompactionSummary: true}},
+		HeadSplit:             1,
+		Index:                 1,
+		AbsHistoryPath:        filepath.Join(a.sessionDir, "history-1.md"),
+		SummaryMode:           compactionSummaryModeModelDriven,
+		PlanID:                2,
+		Target:                compactionTarget{sessionEpoch: a.sessionEpoch},
+		TransactionID:         txnID,
+		TransactionSessionDir: a.sessionDir,
+	}
+	err := a.applyCompactionDraft(draft)
+	if err == nil {
+		t.Fatal("apply must fail when the transcript rewrite cannot run")
+	}
+
+	data, readErr := os.ReadFile(compactionTransactionManifestPath(a.sessionDir, txnID))
+	if readErr != nil {
+		t.Fatalf("read manifest after failed apply: %v", readErr)
+	}
+	var recorded compactionTransactionManifest
+	if err := json.Unmarshal(data, &recorded); err != nil {
+		t.Fatalf("decode manifest: %v", err)
+	}
+	if recorded.Status == compactionTransactionCommitted {
+		t.Fatal("failed apply must not commit the transaction")
+	}
 }
 
 func TestReconcilePreparedCompactionTransaction(t *testing.T) {

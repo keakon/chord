@@ -20,7 +20,14 @@ import (
 // mutations funnel through armModelDrivenProposal and
 // transitionModelDrivenProposal, which persist the snapshot after every
 // change; no caller updates the fields directly, so the in-memory record and
-// the persisted snapshot cannot drift apart field by field.
+// the persisted snapshot cannot drift apart field by field. The one exception
+// is a session boundary — resetSessionRuntimeState on a session switch and
+// activateLoadedSession on a restore assign a fresh zero record (and
+// activateLoadedSession then re-populates it from the loaded snapshot). Both
+// run after the outgoing session's snapshot was frozen, so the reset only
+// drops in-memory intent that was already persisted; the zeroing must never
+// move ahead of that freeze, or the outgoing session's audit record would be
+// lost before it is written.
 //
 // Lifecycle:
 //

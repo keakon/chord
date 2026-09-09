@@ -500,6 +500,20 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 		newMessages = append(newMessages, tail...)
 		compactedMessages = newMessages
 
+		// The target transcript fingerprint is recorded BEFORE the session
+		// file is rewritten, inside the same replace critical section. Both
+		// writes are durable and ordered (manifest first), so a crash between
+		// them reconciles deterministically: the manifest only matches the
+		// fingerprint after the rewrite landed, and an applied compaction can
+		// never be left reading as prepared. Recording it after
+		// ReplacePrefixAtomic returned would open a crash window in which a
+		// committed rewrite still reconciles as aborted.
+		if d.TransactionID != "" {
+			if err := updateCompactionTransactionTarget(d.TransactionSessionDir, d.TransactionID, compactionTranscriptFingerprint(newMessages)); err != nil {
+				return nil, fmt.Errorf("record compaction transcript fingerprint: %w", err)
+			}
+		}
+
 		// Rewrite session file atomically
 		var rewriteErr error
 		backupPath, rewriteErr = a.rewriteSessionAfterCompaction(d.Index, newMessages, originalFirstUserHint)
@@ -511,16 +525,21 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	if err != nil {
 		return err
 	}
-	if d.TransactionID != "" {
-		if err := updateCompactionTransactionTarget(d.TransactionSessionDir, d.TransactionID, compactedMessages); err != nil {
-			return fmt.Errorf("record compaction transcript fingerprint: %w", err)
-		}
-	}
+	// ReplacePrefixAtomic succeeded: the in-memory context and main.jsonl now
+	// hold the new checkpoint. This is the point of no return — nothing below
+	// may fail the apply. A durable compaction's audit records (the txn
+	// manifest) are best-effort after this point: if they cannot be written,
+	// the apply still happened and the runtime must settle consistently with
+	// the new transcript, so a failure is logged rather than reported to the
+	// caller (which would otherwise treat the applied compaction as failed,
+	// delete its still-referenced archive and skip the runtime settlement).
+	// A manifest left in prepared state self-heals on the next restore: the
+	// reconciliation re-checks its target fingerprint against the transcript.
+	transactionCommitted = true
 	if d.TransactionID != "" {
 		if err := updateCompactionTransactionStatus(d.TransactionSessionDir, d.TransactionID, compactionTransactionCommitted); err != nil {
-			return fmt.Errorf("commit compaction transaction: %w", err)
+			log.Warnf("failed to commit compaction transaction transaction_id=%v error=%v", d.TransactionID, err)
 		}
-		transactionCommitted = true
 	}
 
 	// Durable compaction rewrites the message prefix, so any cache-friendly

@@ -43,7 +43,7 @@ func compactionTranscriptFingerprint(messages []message.Message) string {
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
-func updateCompactionTransactionTarget(sessionDir, transactionID string, messages []message.Message) error {
+func updateCompactionTransactionTarget(sessionDir, transactionID, targetFingerprint string) error {
 	path := compactionTransactionManifestPath(sessionDir, transactionID)
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -53,7 +53,7 @@ func updateCompactionTransactionTarget(sessionDir, transactionID string, message
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		return fmt.Errorf("decode compaction transaction: %w", err)
 	}
-	manifest.TargetFingerprint = compactionTranscriptFingerprint(messages)
+	manifest.TargetFingerprint = targetFingerprint
 	return writeCompactionTransactionManifest(sessionDir, manifest)
 }
 
@@ -68,33 +68,11 @@ func writeCompactionTransactionManifest(sessionDir string, manifest compactionTr
 	manifest.Version = 1
 	manifest.UpdatedAt = time.Now()
 	path := compactionTransactionManifestPath(sessionDir, manifest.TransactionID)
-	data, err := json.MarshalIndent(manifest, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal compaction transaction: %w", err)
-	}
-	tmp, err := os.CreateTemp(sessionDir, ".compaction-txn-*.tmp")
-	if err != nil {
-		return fmt.Errorf("create compaction transaction temp: %w", err)
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-	if err := tmp.Chmod(0o600); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("chmod compaction transaction: %w", err)
-	}
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("write compaction transaction: %w", err)
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("sync compaction transaction: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close compaction transaction: %w", err)
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		return fmt.Errorf("install compaction transaction: %w", err)
+	// persistJSONAtomically syncs the file contents and the parent directory,
+	// so a rename is durable before a crash can land between the transcript
+	// replace and the manifest's status update.
+	if err := persistJSONAtomically(sessionDir, path, ".compaction-txn", manifest); err != nil {
+		return fmt.Errorf("write compaction transaction manifest: %w", err)
 	}
 	return nil
 }
