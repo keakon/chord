@@ -22,6 +22,18 @@ func (b *Block) appendStreamingContent(delta string) {
 	b.streamContentBuilder.WriteString(delta)
 }
 
+// streamAccumulatedContent returns the streamed text including deltas that
+// have not been flushed into Content yet.
+func (b *Block) streamAccumulatedContent() string {
+	if b == nil {
+		return ""
+	}
+	if b.streamContentBuilder == nil {
+		return b.Content
+	}
+	return b.streamContentBuilder.String()
+}
+
 func (b *Block) syncStreamingContent() bool {
 	if b == nil || b.streamContentBuilder == nil {
 		return false

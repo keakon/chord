@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -927,5 +928,396 @@ func TestApplyPatchArgsStreamSurvivesFocusSwitch(t *testing.T) {
 	}
 	if card.Content != `{"paths":["src/demo.go"]}` {
 		t.Fatalf("content after args complete = %q, want stable path display", card.Content)
+	}
+}
+
+// TestFoldLiveToolCallIntoCommittedBaseRowPreservesRuntimeState pins the fold
+// branch of the focus-switch rebuild: a live tool card whose call row was
+// committed to the transcript while the card was still live folds into that
+// row's block (exactly one card, the base instance) instead of duplicating,
+// and carries the runtime state — streamed args, execution state and the
+// queued-by-execution badge — onto the base row so the card does not reset.
+func TestFoldLiveToolCallIntoCommittedBaseRowPreservesRuntimeState(t *testing.T) {
+	const callID = "call-fold-live-1"
+	partial := `{"patch":"*** Begin Patch\n*** Update File: src/demo.go\n@@\n-old`
+	args := `{"patch":"*** Begin Patch\n*** Update File: src/demo.go\n@@\n-old\n+new\n*** End Patch"}`
+	backend := &sessionControlAgent{
+		messagesByFocus: map[string][]message.Message{
+			"": {
+				{Role: "user", Content: "main prompt"},
+			},
+			"agent-1": {
+				{Role: "user", Content: "worker prompt"},
+			},
+		},
+	}
+	m := NewModelWithSize(backend, 120, 40)
+
+	// The call card starts live while the call row is not yet committed.
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
+		ID: callID, Name: tools.NameApplyPatch, AgentID: "agent-1", ArgsJSON: partial,
+	}})
+	liveCard, ok := m.viewport.FindBlockByToolID(callID)
+	if !ok {
+		t.Fatal("missing live apply_patch card")
+	}
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallUpdateEvent{
+		ID: callID, Name: tools.NameApplyPatch, AgentID: "agent-1", ArgsJSON: args,
+	}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallExecutionEvent{
+		ID: callID, Name: tools.NameApplyPatch, AgentID: "agent-1", ArgsJSON: args, State: agent.ToolCallExecutionStateQueued,
+	}})
+	if !liveCard.ToolQueuedByExecutionEvent {
+		t.Fatal("precondition failed: live card should carry the queued-by-execution badge")
+	}
+	if liveCard.RawArgs != args || liveCard.ResultDone {
+		t.Fatalf("precondition failed: live card should hold the accumulated args and stay running, got RawArgs=%q ResultDone=%v", liveCard.RawArgs, liveCard.ResultDone)
+	}
+	// Once the accumulated args parse as a complete patch, the streaming card
+	// re-derives its stable path display (same derivation a finished card
+	// uses); the patch preview itself is not part of Content at that point.
+	if liveCard.Content != `{"paths":["src/demo.go"]}` {
+		t.Fatalf("precondition failed: live card content = %q, want the stable path display", liveCard.Content)
+	}
+
+	// The model response commits the call row while the card is still running.
+	backend.messagesByFocus["agent-1"] = []message.Message{
+		{Role: "user", Content: "worker prompt"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: callID, Name: "apply_patch", Args: json.RawMessage(args)}}},
+	}
+	m.setFocusedAgent("agent-1")
+
+	cards := 0
+	var folded *Block
+	for _, b := range m.viewport.blocks {
+		if b.Type != BlockToolCall || b.ToolID != callID {
+			continue
+		}
+		cards++
+		folded = b
+	}
+	if cards != 1 {
+		t.Fatalf("apply_patch cards after fold = %d, want 1", cards)
+	}
+	if folded == nil || folded == liveCard {
+		t.Fatal("fold must keep the committed base row block, not the live card")
+	}
+	if got, ok := m.viewport.FindBlockByToolID(callID); !ok || got != folded {
+		t.Fatal("FindBlockByToolID should resolve to the folded base row")
+	}
+	if folded.RawArgs != args {
+		t.Fatalf("folded RawArgs = %q, want the streamed args", folded.RawArgs)
+	}
+	if folded.Content != liveCard.Content {
+		t.Fatalf("folded content = %q, want the live card content preserved (%q)", folded.Content, liveCard.Content)
+	}
+	if folded.ResultDone {
+		t.Fatal("folded card must stay running until the result event arrives")
+	}
+	if !folded.ToolQueuedByExecutionEvent {
+		t.Fatal("fold lost the queued-by-execution badge of the live card")
+	}
+	if folded.ToolExecutionState != agent.ToolCallExecutionStateQueued {
+		t.Fatalf("folded execution state = %q, want queued", folded.ToolExecutionState)
+	}
+
+	// The folded card keeps settling through later events like any tool card.
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
+		CallID: callID, Name: tools.NameApplyPatch, AgentID: "agent-1", ArgsJSON: args,
+		Result: "Applied patch", Status: agent.ToolResultStatusSuccess,
+		Diff: "--- src/demo.go\n+++ src/demo.go\n@@ -1 +1 @@\n-old\n+new\n",
+	}})
+	if got, ok := m.viewport.FindBlockByToolID(callID); !ok || !got.ResultDone || got.ResultContent != "Applied patch" {
+		t.Fatalf("folded card did not settle after the result event (ok=%v block=%#v)", ok, got)
+	}
+}
+
+// TestCompletedBaseToolRowDropsStaleLiveCard covers the fold guard: when the
+// committed call row already carries its result, the still-running live card is
+// a stale duplicate and must be dropped, never copied onto the finished row
+// (which would transiently dress the completed card in running state).
+func TestCompletedBaseToolRowDropsStaleLiveCard(t *testing.T) {
+	const callID = "call-fold-done-1"
+	args := `{"patch":"*** Begin Patch\n*** Update File: src/demo.go\n@@\n-old\n+new\n*** End Patch"}`
+	backend := &sessionControlAgent{
+		messagesByFocus: map[string][]message.Message{
+			"": {
+				{Role: "user", Content: "main prompt"},
+			},
+			"agent-1": {
+				{Role: "user", Content: "worker prompt"},
+			},
+		},
+	}
+	m := NewModelWithSize(backend, 120, 40)
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
+		ID: callID, Name: tools.NameApplyPatch, AgentID: "agent-1", ArgsJSON: args,
+	}})
+	liveCard, ok := m.viewport.FindBlockByToolID(callID)
+	if !ok {
+		t.Fatal("missing live apply_patch card")
+	}
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallExecutionEvent{
+		ID: callID, Name: tools.NameApplyPatch, AgentID: "agent-1", ArgsJSON: args, State: agent.ToolCallExecutionStateQueued,
+	}})
+
+	// The committed transcript already contains the call and its result.
+	backend.messagesByFocus["agent-1"] = []message.Message{
+		{Role: "user", Content: "worker prompt"},
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: callID, Name: "apply_patch", Args: json.RawMessage(args)}}},
+		{Role: "tool", ToolCallID: callID, ToolStatus: string(agent.ToolResultStatusSuccess), Content: "Applied patch"},
+	}
+	m.setFocusedAgent("agent-1")
+
+	cards := 0
+	var completed *Block
+	for _, b := range m.viewport.blocks {
+		if b.Type != BlockToolCall || b.ToolID != callID {
+			continue
+		}
+		cards++
+		completed = b
+	}
+	if cards != 1 {
+		t.Fatalf("apply_patch cards = %d, want the single completed row", cards)
+	}
+	if completed == nil || completed == liveCard || completed.ResultDone == false {
+		t.Fatalf("expected the completed base row to survive and the live card to be dropped (completed=%#v)", completed)
+	}
+	if completed.ResultContent != "Applied patch" {
+		t.Fatalf("completed ResultContent = %q, want result text preserved", completed.ResultContent)
+	}
+	if completed.ToolExecutionState == agent.ToolCallExecutionStateQueued || completed.ToolQueuedByExecutionEvent {
+		t.Fatal("completed row must not inherit the stale live card's running state")
+	}
+	if strings.Contains(completed.Content, "Begin Patch") {
+		t.Fatalf("completed row content must stay the stable result display, got %q", completed.Content)
+	}
+	for _, b := range m.viewport.blocks {
+		if b == liveCard {
+			t.Fatal("stale live card should be dropped, not retained")
+		}
+	}
+}
+
+// TestFocusRebuildKeepsForeignLiveBlockSequencesIsolated pins the per-agent
+// label numbering across rebuilds: a live block retained from another agent's
+// view must keep its own agent's sequence and never inflate or shift the
+// focused view's counters or visible labels.
+func TestFocusRebuildKeepsForeignLiveBlockSequencesIsolated(t *testing.T) {
+	backend := &sessionControlAgent{
+		messagesByFocus: map[string][]message.Message{
+			"": {
+				{Role: "user", Content: "main prompt"},
+			},
+			"agent-1": {
+				{Role: "user", Content: "worker prompt"},
+			},
+		},
+	}
+	m := NewModelWithSize(backend, 120, 40)
+
+	m.setFocusedAgent("agent-1")
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{AgentID: "agent-1", Text: "worker reply"}})
+	flushPendingStreamForTest(&m)
+	sub := m.streamState("agent-1").assistant
+	if sub == nil || sub.DisplaySequence != 2 {
+		t.Fatalf("worker assistant sequence = %d, want 2 after the worker prompt row", seqOrZero(sub))
+	}
+
+	// Peek at the main view: the hidden worker block keeps its own sequence.
+	m.setFocusedAgent("")
+	if sub.DisplaySequence != 2 {
+		t.Fatalf("hidden worker block sequence changed to %d on main rebuild, want 2", seqOrZero(sub))
+	}
+	mainRows := filterBlocksByAgent(m.viewport.blocks, "main")
+	if len(mainRows) != 1 || mainRows[0].DisplaySequence != 1 {
+		t.Fatalf("main view rows = %#v, want the single prompt as sequence 1", mainRows)
+	}
+
+	// A new worker live card appended while main is focused continues the
+	// worker's own counter, not the main counter.
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ThinkingStartedEvent{AgentID: "agent-1"}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingDeltaEvent{AgentID: "agent-1", Text: "hidden reasoning"}})
+	flushPendingStreamForTest(&m)
+	thinking := m.streamState("agent-1").thinking
+	if thinking == nil || thinking.DisplaySequence != 3 {
+		t.Fatalf("worker thinking sequence = %d, want 3 (own counter, hidden)", seqOrZero(thinking))
+	}
+	if got := m.lastDisplaySequence[displaySequenceAgentKey("agent-1")]; got != 3 {
+		t.Fatalf("worker sequence counter = %d, want 3", got)
+	}
+	if got := m.lastDisplaySequence[displaySequenceAgentKey("")]; got != 1 {
+		t.Fatalf("main sequence counter = %d, want 1 (not inflated by hidden worker blocks)", got)
+	}
+
+	// Back on the worker view the retained live cards renumber consecutively
+	// after the freshly rebuilt base.
+	m.setFocusedAgent("agent-1")
+	mainRows = filterBlocksByAgent(m.viewport.blocks, "main")
+	if len(mainRows) != 0 {
+		t.Fatalf("main rows leaked into the worker view: %#v", mainRows)
+	}
+	if sub.DisplaySequence != 2 || thinking.DisplaySequence != 3 {
+		t.Fatalf("worker sequences after switch back = assistant %d / thinking %d, want 2 / 3", seqOrZero(sub), seqOrZero(thinking))
+	}
+	if got := m.lastDisplaySequence[displaySequenceAgentKey("agent-1")]; got != 3 {
+		t.Fatalf("worker sequence counter after switch back = %d, want 3", got)
+	}
+}
+
+func seqOrZero(b *Block) int {
+	if b == nil {
+		return 0
+	}
+	return b.DisplaySequence
+}
+
+// TestStaleSubAgentAssistantStreamDroppedWhenCommittedRowExists covers the
+// zombie guard for subagent assistant streams: deltas and the end event are
+// suppressed at the agent while the user watches another agent, so a stream
+// that finished while away never settles in the TUI. Switching back to the
+// agent must drop that never-settling live block (its committed row is the
+// authoritative card) and detach its stream state, so the next delta starts a
+// fresh card instead of resuming the orphan next to the committed one.
+func TestStaleSubAgentAssistantStreamDroppedWhenCommittedRowExists(t *testing.T) {
+	backend := &sessionControlAgent{
+		messagesByFocus: map[string][]message.Message{
+			"": {
+				{Role: "user", Content: "main prompt"},
+			},
+			"agent-1": {
+				{Role: "user", Content: "worker prompt"},
+			},
+		},
+	}
+	m := NewModelWithSize(backend, 120, 40)
+
+	// Watch the worker stream the start of its reply.
+	m.setFocusedAgent("agent-1")
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{AgentID: "agent-1", Text: "worker partial analysis"}})
+	flushPendingStreamForTest(&m)
+	zombie := m.streamState("agent-1").assistant
+	if zombie == nil || !zombie.Streaming {
+		t.Fatal("expected a live streaming worker assistant block")
+	}
+
+	// Leave while it is still streaming.
+	m.setFocusedAgent("")
+	if m.viewport.GetFocusedBlock(zombie.ID) != zombie {
+		t.Fatal("precondition failed: worker stream should survive while main is focused")
+	}
+
+	// The response finishes while the user is away; only the committed row is
+	// left behind (end events were suppressed).
+	backend.messagesByFocus["agent-1"] = []message.Message{
+		{Role: "user", Content: "worker prompt"},
+		{Role: "assistant", Content: "worker partial analysis, runs the full suite and reports green"},
+	}
+	m.setFocusedAgent("agent-1")
+
+	committedCards := 0
+	for _, b := range m.viewport.visibleBlocks() {
+		if b.Type == BlockAssistant && b.AgentID == "agent-1" {
+			committedCards++
+		}
+	}
+	if committedCards != 1 {
+		t.Fatalf("worker assistant cards = %d, want exactly the committed row", committedCards)
+	}
+	if m.viewport.GetFocusedBlock(zombie.ID) != nil {
+		t.Fatal("stale streaming worker block should be dropped once its row is committed")
+	}
+	if m.streamState("agent-1").assistant != nil {
+		t.Fatal("stream state must be detached from the dropped stale block")
+	}
+
+	// A genuinely new delta starts a fresh card rather than resuming the orphan.
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{AgentID: "agent-1", Text: "continuing response"}})
+	flushPendingStreamForTest(&m)
+	next := m.streamState("agent-1").assistant
+	if next == nil || next == zombie {
+		t.Fatal("delta after the drop should start a new assistant card")
+	}
+	if got := next.Content; got != "continuing response" {
+		t.Fatalf("new assistant content = %q, want only the post-return delta", got)
+	}
+	assistantCards := 0
+	for _, b := range m.viewport.visibleBlocks() {
+		if b.Type == BlockAssistant && b.AgentID == "agent-1" {
+			assistantCards++
+		}
+	}
+	if assistantCards != 2 {
+		t.Fatalf("worker assistant cards = %d, want committed row + fresh streaming card", assistantCards)
+	}
+}
+
+// TestStaleSubAgentThinkingStreamDroppedWhenCommittedRowExists covers the same
+// zombie guard for subagent thinking cards, whose end event carries the full
+// text and is likewise suppressed while the agent is unfocused.
+func TestStaleSubAgentThinkingStreamDroppedWhenCommittedRowExists(t *testing.T) {
+	backend := &sessionControlAgent{
+		messagesByFocus: map[string][]message.Message{
+			"": {
+				{Role: "user", Content: "main prompt"},
+			},
+			"agent-1": {
+				{Role: "user", Content: "worker prompt"},
+			},
+		},
+	}
+	m := NewModelWithSize(backend, 120, 40)
+
+	m.setFocusedAgent("agent-1")
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ThinkingStartedEvent{AgentID: "agent-1"}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingDeltaEvent{AgentID: "agent-1", Text: "worker partial reasoning"}})
+	flushPendingStreamForTest(&m)
+	zombie := m.streamState("agent-1").thinking
+	if zombie == nil || !zombie.Streaming {
+		t.Fatal("expected a live streaming worker thinking block")
+	}
+
+	m.setFocusedAgent("")
+	if m.viewport.GetFocusedBlock(zombie.ID) != zombie {
+		t.Fatal("precondition failed: worker thinking should survive while main is focused")
+	}
+
+	backend.messagesByFocus["agent-1"] = []message.Message{
+		{Role: "user", Content: "worker prompt"},
+		{Role: "assistant", ReasoningContent: "worker partial reasoning, now checking references"},
+	}
+	m.setFocusedAgent("agent-1")
+
+	thinkingCards := 0
+	var committed *Block
+	for _, b := range m.viewport.visibleBlocks() {
+		if b.Type != BlockThinking || b.AgentID != "agent-1" {
+			continue
+		}
+		thinkingCards++
+		committed = b
+	}
+	if thinkingCards != 1 || committed == nil {
+		t.Fatalf("worker thinking cards = %d, want exactly the committed row", thinkingCards)
+	}
+	if m.viewport.GetFocusedBlock(zombie.ID) != nil {
+		t.Fatal("stale streaming thinking block should be dropped once its row is committed")
+	}
+	if m.streamState("agent-1").thinking != nil {
+		t.Fatal("stream state must be detached from the dropped stale thinking block")
+	}
+
+	// A new thinking round for the same agent starts a fresh card.
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ThinkingStartedEvent{AgentID: "agent-1"}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingDeltaEvent{AgentID: "agent-1", Text: "next round reasoning"}})
+	flushPendingStreamForTest(&m)
+	next := m.streamState("agent-1").thinking
+	if next == nil || next == zombie {
+		t.Fatal("new thinking round should start a fresh card after the drop")
+	}
+	if got := next.Content; got != "next round reasoning" {
+		t.Fatalf("new thinking content = %q, want only the post-return round", got)
 	}
 }

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 
 	tea "github.com/keakon/bubbletea/v2"
 
@@ -61,8 +62,15 @@ func (m *Model) rebuildFocusedViewport(agentID, viewportFilter string) {
 	}
 	clearBlocksTiming(blocks)
 	assignFocusedViewportBlockIDs(blocks, agentID, &m.nextBlockID)
-	blocks = mergeFocusedViewportLiveBlocks(blocks, currentBlocks)
+	// Number the base rows before merging retained live blocks: the base is
+	// one agent's transcript and gets fresh consecutive sequences under that
+	// agent's counter, while live blocks kept from another agent's view are
+	// numbered under their own agent and must never inflate this view's
+	// label counters.
 	m.setTranscriptDisplaySequences(blocks, agentID)
+	baseCount := len(blocks)
+	blocks = m.mergeFocusedViewportLiveBlocks(blocks, currentBlocks)
+	m.continueFocusedLiveDisplaySequences(blocks[baseCount:], agentID)
 	blocks = m.maybeWindowStartupTranscript("focus_switch", blocks)
 	m.viewport.SetFilter(viewportFilter)
 	m.viewport.SetWorkingDir(m.workingDir)
@@ -95,11 +103,21 @@ func assignFocusedViewportBlockIDs(blocks []*Block, agentID string, nextID *int)
 // keeps. Live cards therefore survive the rebuild in place, no matter which
 // agent they belong to: the viewport filter hides other agents' blocks, and a
 // stream that was in flight when the user switched away is still the same
-// block, still receiving its deltas, when the user switches back. A live tool
-// call whose call row is already part of the rebuilt base — the response
-// committed while the call was still running — folds its runtime state into
-// that row's block instead of duplicating the card.
-func mergeFocusedViewportLiveBlocks(base, current []*Block) []*Block {
+// block, still receiving its deltas, when the user switches back.
+//
+// Two classes of live cards are not carried over:
+//   - A live tool call whose call row is already part of the rebuilt base (the
+//     response committed while the call was still running) folds its runtime
+//     state into that row's block instead of duplicating the card; when the
+//     committed row is already complete, the stale live card is dropped so the
+//     running state is never copied onto a finished row.
+//   - A live subagent thinking/assistant block whose stream finished while the
+//     user watched another agent has its committed counterpart among the base
+//     rows (subagent deltas and end events are suppressed at the source while
+//     unfocused, so the card never settled here). Keeping it would duplicate
+//     the committed card and re-retain it on every rebuild, so it is dropped
+//     and detached from its stream state.
+func (m *Model) mergeFocusedViewportLiveBlocks(base, current []*Block) []*Block {
 	if len(current) == 0 {
 		return base
 	}
@@ -109,12 +127,16 @@ func mergeFocusedViewportLiveBlocks(base, current []*Block) []*Block {
 			baseToolBlocks[block.ToolID] = block
 		}
 	}
+	var droppedStale []*Block
 	for _, block := range current {
 		if block == nil {
 			continue
 		}
 		if block.Type == BlockToolCall && !block.ResultDone && block.ToolID != "" {
 			if existing, ok := baseToolBlocks[block.ToolID]; ok {
+				if existing.ResultDone {
+					continue
+				}
 				mergeFocusedToolBlockRuntimeState(existing, block)
 				continue
 			}
@@ -122,8 +144,13 @@ func mergeFocusedViewportLiveBlocks(base, current []*Block) []*Block {
 		if !isFocusedViewportLiveBlock(block) {
 			continue
 		}
+		if staleCommittedStreamLiveBlock(base, block) {
+			droppedStale = append(droppedStale, block)
+			continue
+		}
 		base = append(base, block)
 	}
+	m.discardStaleLiveStreamState(droppedStale)
 	return base
 }
 
@@ -140,6 +167,89 @@ func isFocusedViewportLiveBlock(block *Block) bool {
 	return block.Type == BlockUser && block.UserLocalShellPending
 }
 
+// staleCommittedStreamLiveBlock reports whether a live subagent stream block
+// already has its committed counterpart among base. Subagent thinking/assistant
+// deltas and their end events are suppressed at the agent source while the user
+// watches another agent, so a stream that finished during that time never
+// reaches its settling event in the TUI and would stay Streaming forever. Its
+// committed transcript row is the authoritative card; the live partial is
+// recognised as the same stream by being a prefix of that row's content (same
+// agent, same card type). Keeping both would duplicate the card and re-retain
+// the never-settling block on every rebuild. Main-agent blocks are exempt: main
+// streams are not focus-suppressed, so a still-live main card is never a stale
+// duplicate of a committed row.
+func staleCommittedStreamLiveBlock(base []*Block, block *Block) bool {
+	if block == nil || block.AgentID == "" {
+		return false
+	}
+	if !block.Streaming || (block.Type != BlockThinking && block.Type != BlockAssistant) {
+		return false
+	}
+	liveText := strings.TrimSpace(block.streamAccumulatedContent())
+	if liveText == "" {
+		return false
+	}
+	for _, row := range base {
+		if row == nil || row == block || row.Type != block.Type || row.AgentID != block.AgentID {
+			continue
+		}
+		if committed := strings.TrimSpace(row.Content); strings.HasPrefix(committed, liveText) {
+			return true
+		}
+	}
+	return false
+}
+
+// discardStaleLiveStreamState detaches stream state from live blocks that a
+// rebuild dropped because their committed counterpart exists, so later deltas
+// or a new thinking round start a fresh card instead of resuming the orphan.
+func (m *Model) discardStaleLiveStreamState(stale []*Block) {
+	for _, block := range stale {
+		if block == nil || block.AgentID == "" {
+			continue
+		}
+		state, ok := m.subAgentStreamStates[block.AgentID]
+		if !ok {
+			continue
+		}
+		if state.assistant == block {
+			state.assistant = nil
+			state.assistantAppended = false
+		}
+		if state.thinking == block {
+			state.thinking = nil
+			state.thinkingAppended = false
+		}
+		if state.assistant == nil && state.thinking == nil {
+			delete(m.subAgentStreamStates, block.AgentID)
+		} else {
+			m.subAgentStreamStates[block.AgentID] = state
+		}
+	}
+}
+
+// continueFocusedLiveDisplaySequences numbers the focused agent's retained live
+// blocks (merged after its freshly rebuilt base) so the visible label counters
+// continue from the base without gaps. Live blocks retained from other agents
+// keep the sequence numbers they were assigned when appended, and the other
+// agents' counters are left alone, so a hidden block never inflates or
+// renumbers the focused view.
+func (m *Model) continueFocusedLiveDisplaySequences(tail []*Block, agentID string) {
+	if len(tail) == 0 || m.lastDisplaySequence == nil {
+		return
+	}
+	focusKey := displaySequenceAgentKey(agentID)
+	sequence := m.lastDisplaySequence[focusKey]
+	for _, block := range tail {
+		if block == nil || displaySequenceAgentKey(block.AgentID) != focusKey {
+			continue
+		}
+		sequence++
+		block.DisplaySequence = sequence
+	}
+	m.lastDisplaySequence[focusKey] = sequence
+}
+
 func mergeFocusedToolBlockRuntimeState(dst, src *Block) {
 	if dst == nil || src == nil {
 		return
@@ -148,6 +258,7 @@ func mergeFocusedToolBlockRuntimeState(dst, src *Block) {
 	dst.RawArgs = src.RawArgs
 	dst.Streaming = src.Streaming
 	dst.ToolExecutionState = src.ToolExecutionState
+	dst.ToolQueuedByExecutionEvent = src.ToolQueuedByExecutionEvent
 	if src.ToolProgress != nil {
 		progress := *src.ToolProgress
 		dst.ToolProgress = &progress
