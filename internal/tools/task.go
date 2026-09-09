@@ -288,8 +288,8 @@ func (t *DelegateTool) Execute(ctx context.Context, raw json.RawMessage) (string
 // anything and never flips read_only: a scope that shrank under a running
 // worker would retroactively invalidate writes it had already been allowed to
 // make, and turning a writing task read-only mid-flight would strand it. Only
-// files, path prefixes and modules are widened — the command allowlist and the
-// read-only flag are fixed when the task's tool surface is built.
+// files, path prefixes and modules are widened — read_only is fixed when the
+// task's tool surface is built.
 func WidenWriteScope(base, grant WriteScope) WriteScope {
 	base = base.Normalized()
 	grant = grant.Normalized()
