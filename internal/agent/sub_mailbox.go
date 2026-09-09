@@ -156,6 +156,9 @@ func (a *MainAgent) mailboxMemoryLimits() (int, int) {
 	return cfg.EffectiveMailboxMemoryMessages(), cfg.EffectiveMailboxMemoryBytes()
 }
 
+// mailboxMemoryCount reads the owned owner-queue maps, so it must be called
+// with subAgentMailboxIDsMu held (its callers in the store/replace/enqueue
+// paths all do).
 func (a *MainAgent) mailboxMemoryCount() int {
 	count := len(a.subAgentInbox.urgent) + len(a.subAgentInbox.normal) + len(a.subAgentInbox.progress)
 	for _, queued := range a.ownedSubAgentMailboxes {
@@ -172,6 +175,10 @@ func (a *MainAgent) releaseMailboxMemory(msg SubAgentMailboxMessage) {
 }
 
 func (a *MainAgent) storeMailboxInMemory(msg SubAgentMailboxMessage, front bool) bool {
+	// mailboxMemoryCount reads the owner-queue maps shared with TUI-facing
+	// goroutines; see that helper's locking note.
+	a.subAgentMailboxIDsMu.Lock()
+	defer a.subAgentMailboxIDsMu.Unlock()
 	urgent := msg.Priority == SubAgentMailboxPriorityInterrupt || msg.Priority == SubAgentMailboxPriorityUrgent
 	if !front {
 		// Preserve FIFO within each priority class: while older messages sit in

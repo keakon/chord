@@ -441,6 +441,13 @@ func (a *MainAgent) enqueueOwnedSubAgentMailbox(msg SubAgentMailboxMessage) {
 	if ownerAgentID == "" {
 		return
 	}
+	// The per-owner queues are also read by the TUI-facing diagnostics entry
+	// (see OrchestrationTaskDiagnostics), which runs on a different goroutine
+	// from the delivery paths, so every mutation happens under
+	// subAgentMailboxIDsMu. Helper reads of these maps (mailboxMemoryCount and
+	// friends) are only safe when called with this lock held.
+	a.subAgentMailboxIDsMu.Lock()
+	defer a.subAgentMailboxIDsMu.Unlock()
 	if a.ownedSubAgentMailboxes == nil {
 		a.ownedSubAgentMailboxes = make(map[string][]SubAgentMailboxMessage)
 	}
@@ -466,6 +473,7 @@ func (a *MainAgent) migrateSubAgentOwnerIdentity(previousAgentID, nextAgentID st
 	if previousAgentID == "" || nextAgentID == "" || previousAgentID == nextAgentID {
 		return
 	}
+	a.subAgentMailboxIDsMu.Lock()
 	if queued := a.ownedSubAgentMailboxes[previousAgentID]; len(queued) > 0 {
 		for i := range queued {
 			queued[i].OwnerAgentID = nextAgentID
@@ -477,6 +485,7 @@ func (a *MainAgent) migrateSubAgentOwnerIdentity(previousAgentID, nextAgentID st
 		a.ownedMailboxSpool[nextAgentID] = append(a.ownedMailboxSpool[nextAgentID], queued...)
 		delete(a.ownedMailboxSpool, previousAgentID)
 	}
+	a.subAgentMailboxIDsMu.Unlock()
 	a.subs.mu.Lock()
 	for _, rec := range a.subs.taskRecords {
 		if rec != nil && strings.TrimSpace(rec.OwnerAgentID) == previousAgentID {
@@ -503,6 +512,12 @@ func (a *MainAgent) markSubAgentMailboxSeen(messageID string) bool {
 	return true
 }
 
+// drainOwnedSubAgentMailboxes routes every deliverable message queued under an
+// owner and drops the ones routing accepted. The per-owner queues are also
+// touched by TUI-facing APIs and the diagnostics goroutine, so the queue state
+// is claimed and mutated only under subAgentMailboxIDsMu; routing happens
+// outside that lock because it can re-enter delivery (for example forwarding a
+// settled owner's mailbox to the main inbox).
 func (a *MainAgent) drainOwnedSubAgentMailboxes(ownerAgentID string) bool {
 	if a.mailboxDeliveryPaused.Load() {
 		return false
@@ -511,9 +526,15 @@ func (a *MainAgent) drainOwnedSubAgentMailboxes(ownerAgentID string) bool {
 	if ownerAgentID == "" {
 		return false
 	}
-	queue := a.ownedSubAgentMailboxes[ownerAgentID]
-	remaining := queue[:0]
+	a.subAgentMailboxIDsMu.Lock()
+	queue := append([]SubAgentMailboxMessage(nil), a.ownedSubAgentMailboxes[ownerAgentID]...)
+	delete(a.ownedSubAgentMailboxes, ownerAgentID)
+	spooled := append([]string(nil), a.ownedMailboxSpool[ownerAgentID]...)
+	delete(a.ownedMailboxSpool, ownerAgentID)
+	a.subAgentMailboxIDsMu.Unlock()
+
 	progressed := false
+	remaining := queue[:0]
 	for _, msg := range queue {
 		if a.routeOwnedSubAgentMailbox(msg) {
 			a.releaseMailboxMemory(msg)
@@ -522,12 +543,6 @@ func (a *MainAgent) drainOwnedSubAgentMailboxes(ownerAgentID string) bool {
 		}
 		remaining = append(remaining, msg)
 	}
-	if len(remaining) == 0 {
-		delete(a.ownedSubAgentMailboxes, ownerAgentID)
-	} else {
-		a.ownedSubAgentMailboxes[ownerAgentID] = remaining
-	}
-	spooled := a.ownedMailboxSpool[ownerAgentID]
 	spoolRemaining := spooled[:0]
 	for i, messageID := range spooled {
 		msg, found, err := a.loadSpooledMailbox(messageID)
@@ -545,10 +560,25 @@ func (a *MainAgent) drainOwnedSubAgentMailboxes(ownerAgentID string) bool {
 		}
 		spoolRemaining = append(spoolRemaining, messageID)
 	}
-	if len(spoolRemaining) == 0 {
-		delete(a.ownedMailboxSpool, ownerAgentID)
-	} else {
-		a.ownedMailboxSpool[ownerAgentID] = spoolRemaining
+	if len(remaining) > 0 || len(spoolRemaining) > 0 {
+		a.subAgentMailboxIDsMu.Lock()
+		// Keep the un-routed remainder ahead of anything another delivery path
+		// enqueued while this drain was routing, so per-owner FIFO order holds.
+		if len(remaining) > 0 {
+			current := a.ownedSubAgentMailboxes[ownerAgentID]
+			merged := make([]SubAgentMailboxMessage, 0, len(remaining)+len(current))
+			merged = append(merged, remaining...)
+			merged = append(merged, current...)
+			a.ownedSubAgentMailboxes[ownerAgentID] = merged
+		}
+		if len(spoolRemaining) > 0 {
+			current := a.ownedMailboxSpool[ownerAgentID]
+			merged := make([]string, 0, len(spoolRemaining)+len(current))
+			merged = append(merged, spoolRemaining...)
+			merged = append(merged, current...)
+			a.ownedMailboxSpool[ownerAgentID] = merged
+		}
+		a.subAgentMailboxIDsMu.Unlock()
 	}
 	return progressed
 }
@@ -606,6 +636,10 @@ func (a *MainAgent) deliverSubAgentMailbox(msg SubAgentMailboxMessage) {
 // snapshot is kept so an overloaded inbox still reports last-known status
 // instead of dropping both the old and the new update.
 func (a *MainAgent) replaceProgressMailboxWithinBudget(msg SubAgentMailboxMessage) {
+	// mailboxMemoryCount reads the owner-queue maps shared with TUI-facing
+	// goroutines; see that helper's locking note.
+	a.subAgentMailboxIDsMu.Lock()
+	defer a.subAgentMailboxIDsMu.Unlock()
 	if a.subAgentInbox.progress == nil {
 		a.subAgentInbox.progress = make(map[string]SubAgentMailboxMessage)
 	}
@@ -879,6 +913,11 @@ func (a *MainAgent) hasQueuedMailboxMessage(messageID string) bool {
 	if a == nil || messageID == "" {
 		return false
 	}
+	// The owner-queue half of the pipeline is shared with the TUI-facing API
+	// goroutines, so the whole staged-state scan runs under the same lock that
+	// guards every mutation of those maps.
+	a.subAgentMailboxIDsMu.Lock()
+	defer a.subAgentMailboxIDsMu.Unlock()
 	for _, msg := range a.subAgentInbox.urgent {
 		if msg.MessageID == messageID {
 			return true
@@ -1025,41 +1064,98 @@ func (a *MainAgent) ensureSubAgentMailboxPersisted(msg *SubAgentMailboxMessage) 
 	return true
 }
 
+// takeMainInboxProgressSnapshots claims the main inbox's per-agent progress
+// snapshots for delivery. Progress is tracked as each agent's last-known
+// status (newer updates replace older ones on arrival), so claiming the whole
+// set is what lets one drain deliver every routable update in a single batch
+// instead of waking the main once per progress message.
+func (a *MainAgent) takeMainInboxProgressSnapshots() []SubAgentMailboxMessage {
+	if len(a.subAgentInbox.progress) == 0 {
+		return nil
+	}
+	out := make([]SubAgentMailboxMessage, 0, len(a.subAgentInbox.progress))
+	for agentID, msg := range a.subAgentInbox.progress {
+		a.releaseMailboxMemory(msg)
+		out = append(out, msg)
+		delete(a.subAgentInbox.progress, agentID)
+	}
+	return out
+}
+
 func (a *MainAgent) stageNextSubAgentMailboxBatch() bool {
 	if a.mailboxDeliveryPaused.Load() {
 		return false
 	}
+	// One drain cycle merges every current main-inbox progress snapshot into
+	// the staged batch, so a single idle wake delivers the whole routable
+	// backlog. Progress/notice must only reach the main between turns: it is
+	// claimed only while no turn is active, so an active turn's continuation
+	// staging (prepareSubAgentMailboxBatchForTurnContinuation) never drags a
+	// progress snapshot into a mid-turn request, and the next drain after the
+	// turn ends picks the snapshot up.
+	var progress []SubAgentMailboxMessage
+	if a.turn == nil {
+		progress = a.takeMainInboxProgressSnapshots()
+	}
 	msg := a.dequeueNextSubAgentMailbox()
 	if msg == nil {
-		return false
-	}
-	if !a.ensureSubAgentMailboxPersisted(msg) {
-		a.requeueSubAgentMailboxInMemory(*msg)
-		return false
-	}
-	if msg.Kind == SubAgentMailboxKindProgress {
-		return false
-	}
-	pending := []*SubAgentMailboxMessage{msg}
-	if msg.Kind == SubAgentMailboxKindCompleted {
-		for {
-			next := a.dequeueNextSubAgentMailbox()
-			if next == nil {
-				break
-			}
-			if next.Kind == SubAgentMailboxKindProgress {
-				continue
-			}
-			if !a.ensureSubAgentMailboxPersisted(next) {
-				a.requeueSubAgentMailboxInMemory(*next)
-				break
-			}
-			if next.Kind != SubAgentMailboxKindCompleted {
-				a.requeueSubAgentMailboxInMemory(*next)
-				break
-			}
-			pending = append(pending, next)
+		if len(progress) == 0 {
+			return false
 		}
+	} else if msg.Kind == SubAgentMailboxKindProgress {
+		// Progress does not ride the urgent/normal queues as an actionable
+		// head; fold it into the snapshot set staged below.
+		progress = append(progress, *msg)
+		msg = nil
+	}
+	if msg == nil && len(progress) == 0 {
+		return false
+	}
+	var pending []*SubAgentMailboxMessage
+	if msg != nil {
+		if !a.ensureSubAgentMailboxPersisted(msg) {
+			a.requeueSubAgentMailboxInMemory(*msg)
+			for i := range progress {
+				a.requeueSubAgentMailboxInMemory(progress[i])
+			}
+			return false
+		}
+		pending = append(pending, msg)
+		if msg.Kind == SubAgentMailboxKindCompleted {
+			for {
+				next := a.dequeueNextSubAgentMailbox()
+				if next == nil {
+					break
+				}
+				if next.Kind == SubAgentMailboxKindProgress {
+					progress = append(progress, *next)
+					continue
+				}
+				if !a.ensureSubAgentMailboxPersisted(next) {
+					a.requeueSubAgentMailboxInMemory(*next)
+					break
+				}
+				if next.Kind != SubAgentMailboxKindCompleted {
+					a.requeueSubAgentMailboxInMemory(*next)
+					break
+				}
+				pending = append(pending, next)
+			}
+		}
+	}
+	// Progress snapshots join after the actionable queue heads so batch order
+	// stays stable for the overlay and ack consumers.
+	for i := range progress {
+		if !a.ensureSubAgentMailboxPersisted(&progress[i]) {
+			for j := i; j < len(progress); j++ {
+				a.requeueSubAgentMailboxInMemory(progress[j])
+			}
+			for _, queued := range pending {
+				a.requeueSubAgentMailboxInMemory(*queued)
+			}
+			return false
+		}
+		pending = append(pending, &progress[i])
 	}
 	a.pendingSubAgentMailboxes = pending
 	a.activeSubAgentMailboxes = append([]*SubAgentMailboxMessage(nil), pending...)
@@ -1145,6 +1241,7 @@ func (a *MainAgent) refreshSubAgentInboxSummary() {
 	for _, msg := range a.subAgentInbox.urgent {
 		counts[msg.AgentID]++
 	}
+	a.subAgentMailboxIDsMu.Lock()
 	for ownerID, queued := range a.ownedSubAgentMailboxes {
 		for _, msg := range queued {
 			if msg.Priority != SubAgentMailboxPriorityInterrupt && msg.Priority != SubAgentMailboxPriorityUrgent {
@@ -1153,6 +1250,7 @@ func (a *MainAgent) refreshSubAgentInboxSummary() {
 			counts[ownerID]++
 		}
 	}
+	a.subAgentMailboxIDsMu.Unlock()
 	if len(a.pendingSubAgentMailboxes) > 0 {
 		for _, pending := range a.pendingSubAgentMailboxes {
 			if pending != nil && (pending.Priority == SubAgentMailboxPriorityInterrupt || pending.Priority == SubAgentMailboxPriorityUrgent) {

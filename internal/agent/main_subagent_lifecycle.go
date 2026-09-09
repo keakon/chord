@@ -290,6 +290,7 @@ func (a *MainAgent) removeSubAgentMailboxState(agentID string) {
 		}
 		a.activeSubAgentMailboxes = filtered
 	}
+	a.subAgentMailboxIDsMu.Lock()
 	if len(a.ownedSubAgentMailboxes) > 0 {
 		for _, msg := range a.ownedSubAgentMailboxes[agentID] {
 			a.releaseMailboxMemory(msg)
@@ -312,6 +313,7 @@ func (a *MainAgent) removeSubAgentMailboxState(agentID string) {
 		}
 	}
 	delete(a.ownedMailboxSpool, agentID)
+	a.subAgentMailboxIDsMu.Unlock()
 	if a.activeSubAgentMailbox != nil && strings.TrimSpace(a.activeSubAgentMailbox.AgentID) == agentID {
 		a.activeSubAgentMailbox = nil
 	}

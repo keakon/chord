@@ -422,6 +422,10 @@ func (a *MainAgent) drainRunnableMailboxWork() {
 	if a.currentTurn() == nil {
 		a.drainSubAgentInbox()
 	}
+	// The owner-queue maps are shared with TUI-facing goroutines, so the owner
+	// scan runs under subAgentMailboxIDsMu; the per-owner drains claim and
+	// mutate the queues under the same lock internally.
+	a.subAgentMailboxIDsMu.Lock()
 	ownerIDs := make([]string, 0, len(a.ownedSubAgentMailboxes))
 	seenOwners := make(map[string]struct{}, len(a.ownedSubAgentMailboxes)+len(a.ownedMailboxSpool))
 	for ownerID, queued := range a.ownedSubAgentMailboxes {
@@ -441,6 +445,7 @@ func (a *MainAgent) drainRunnableMailboxWork() {
 			ownerIDs = append(ownerIDs, ownerID)
 		}
 	}
+	a.subAgentMailboxIDsMu.Unlock()
 	for _, ownerID := range ownerIDs {
 		a.drainOwnedSubAgentMailboxes(ownerID)
 	}
@@ -469,30 +474,47 @@ func (a *MainAgent) hasRunnableMailboxWork() bool {
 		a.activeSubAgentMailbox != nil {
 		return true
 	}
+	// A main-inbox progress snapshot is a wake candidate: progress/notice is
+	// delivered to an idle main (see stageNextSubAgentMailboxBatch), so while
+	// one is pending the main must not report full idle. The check only runs
+	// between turns, and every snapshot is routable to the main and consumed
+	// by the next drain, so it cannot suppress global idle indefinitely.
+	if len(a.subAgentInbox.progress) > 0 {
+		return true
+	}
 	// Only owned messages that are routable right now count as pending mailbox
 	// work. A message spooled under a parked owner that this mailbox cannot
 	// wake (for example one not addressed by the owner's own descendant) is
 	// temporarily unroutable: routing refuses it on every drain, so counting it
 	// here would suppress global idle forever.
+	// The owner-queue maps are shared with TUI-facing goroutines, so the scan
+	// runs under subAgentMailboxIDsMu; spooled message reloads (which take the
+	// same lock through the consumed check) happen on the claimed copies below.
+	a.subAgentMailboxIDsMu.Lock()
+	queuedMsgs := make([]SubAgentMailboxMessage, 0)
 	for _, queued := range a.ownedSubAgentMailboxes {
-		for _, msg := range queued {
-			if msg.Kind != SubAgentMailboxKindProgress && a.ownedMailboxMessageRoutable(msg) {
-				return true
-			}
+		queuedMsgs = append(queuedMsgs, queued...)
+	}
+	spooledIDs := make([]string, 0)
+	for _, spooled := range a.ownedMailboxSpool {
+		spooledIDs = append(spooledIDs, spooled...)
+	}
+	a.subAgentMailboxIDsMu.Unlock()
+	for _, msg := range queuedMsgs {
+		if msg.Kind != SubAgentMailboxKindProgress && a.ownedMailboxMessageRoutable(msg) {
+			return true
 		}
 	}
-	for _, spooled := range a.ownedMailboxSpool {
-		for _, messageID := range spooled {
-			msg, found, err := a.loadSpooledMailbox(messageID)
-			if err != nil || !found || msg == nil {
-				// A message that cannot even be reloaded is not actionable work;
-				// drainOwnedSubAgentMailboxes drops or keeps it on the same
-				// verdict, so it must not suppress global idle either.
-				continue
-			}
-			if msg.Kind != SubAgentMailboxKindProgress && a.ownedMailboxMessageRoutable(*msg) {
-				return true
-			}
+	for _, messageID := range spooledIDs {
+		msg, found, err := a.loadSpooledMailbox(messageID)
+		if err != nil || !found || msg == nil {
+			// A message that cannot even be reloaded is not actionable work;
+			// drainOwnedSubAgentMailboxes drops or keeps it on the same
+			// verdict, so it must not suppress global idle either.
+			continue
+		}
+		if msg.Kind != SubAgentMailboxKindProgress && a.ownedMailboxMessageRoutable(*msg) {
+			return true
 		}
 	}
 	return false

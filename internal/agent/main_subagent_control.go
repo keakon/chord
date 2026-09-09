@@ -456,12 +456,16 @@ func (a *MainAgent) prepareSubAgentDelivery(sub *SubAgent, message, kind string,
 	}
 	state := sub.State()
 
+	a.subAgentMailboxIDsMu.Lock()
+	drainOwned := manual && (len(a.ownedSubAgentMailboxes[sub.instanceID]) > 0 || len(a.ownedMailboxSpool[sub.instanceID]) > 0)
+	a.subAgentMailboxIDsMu.Unlock()
+
 	prep := &subAgentDeliveryPrep{
 		replyKind:       normalizeReplyKind(kind),
 		needsResume:     state != SubAgentStateRunning,
 		previousState:   state,
 		previousSummary: sub.LastSummary(),
-		drainOwned:      manual && (len(a.ownedSubAgentMailboxes[sub.instanceID]) > 0 || len(a.ownedMailboxSpool[sub.instanceID]) > 0),
+		drainOwned:      drainOwned,
 		status:          "queued",
 		statusMessage:   "message delivered to running worker",
 		mailboxMetadata: metadata,

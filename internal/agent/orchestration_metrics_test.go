@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 )
@@ -120,5 +121,89 @@ func BenchmarkOrchestrationMailboxTrackingAtCapacity(b *testing.B) {
 	for b.Loop() {
 		sent++
 		metrics.recordMailboxCreated(fmt.Sprintf("msg-%d", sent), now)
+	}
+}
+
+// TestOrchestrationDiagnosticsConcurrentWithOwnedMailboxWriters is the race
+// regression for the diagnostic snapshot reading the per-owner mailbox queues
+// (ownedSubAgentMailboxes / ownedMailboxSpool) on the TUI-facing goroutine
+// while production delivery paths mutate the same maps on the event-loop
+// goroutine. Every reader and writer of those maps must share
+// subAgentMailboxIDsMu; a missing lock crashes the process with a concurrent
+// map read/write instead of failing the test, so this must also be run under
+// -race (the CI race check does that centrally).
+func TestOrchestrationDiagnosticsConcurrentWithOwnedMailboxWriters(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	ownerID := "agent-writer-1"
+	a.subs.mu.Lock()
+	a.subs.taskRecords["task-writer"] = &DurableTaskRecord{
+		TaskID:           "task-writer",
+		State:            string(SubAgentStateRunning),
+		LatestInstanceID: ownerID,
+		Attempt:          1,
+	}
+	a.subs.mu.Unlock()
+
+	stop := make(chan struct{})
+	var reader sync.WaitGroup
+	reader.Add(1)
+	go func() {
+		defer reader.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			a.OrchestrationTaskDiagnostics()
+			a.OrchestrationStats()
+		}
+	}()
+	var writer sync.WaitGroup
+	writer.Add(1)
+	go func() {
+		defer writer.Done()
+		var seq int
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			seq++
+			msg := SubAgentMailboxMessage{
+				MessageID:    fmt.Sprintf("msg-%d", seq),
+				AgentID:      "worker-child",
+				TaskID:       "task-child",
+				OwnerAgentID: ownerID,
+				OwnerTaskID:  "task-writer",
+				Kind:         SubAgentMailboxKindCompleted,
+				Priority:     SubAgentMailboxPriorityUrgent,
+				Summary:      "child update",
+			}
+			a.enqueueOwnedSubAgentMailbox(msg)
+			a.drainOwnedSubAgentMailboxes(ownerID)
+			a.refreshSubAgentInboxSummary()
+		}
+	}()
+
+	// Give both sides enough overlap to expose an unlocked map access; the
+	// duration is bounded so the test stays fast when the locks are correct.
+	time.Sleep(300 * time.Millisecond)
+	close(stop)
+	reader.Wait()
+	writer.Wait()
+
+	// Sanity: the diagnostic still returns the expected row after the churn.
+	rows := a.OrchestrationTaskDiagnostics()
+	found := false
+	for _, row := range rows {
+		if row.TaskID == "task-writer" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("task-writer row missing from diagnostics: %#v", rows)
 	}
 }
