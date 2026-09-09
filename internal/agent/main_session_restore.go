@@ -760,6 +760,11 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 			break
 		}
 	}
+	// Retention signal totals follow the usage-tracker lifecycle: the /new
+	// reset clears them with the usage tracker, and a restore must do the
+	// same so the replaced session's counts never feed the resumed session's
+	// apply windows.
+	a.resetSessionRetentionSignals()
 	if a.usageTracker != nil {
 		a.usageTracker.RestoreStats(loaded.UsageStats)
 	}

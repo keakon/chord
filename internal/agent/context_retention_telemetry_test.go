@@ -242,6 +242,27 @@ func TestSessionRetentionSignalsResetClearsBothLayers(t *testing.T) {
 	}
 }
 
+func TestActivateLoadedSessionRestartsRetentionSignals(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	// Session A accumulated signal totals across prepared requests.
+	a.setContextReductionStats(retentionStatsFixture())
+	a.rememberPreparedLLMRequest(1, nil, nil, nil, nil, 0, contextReductionPolicy{})
+	a.setContextReductionStats(retentionStatsFixture())
+	a.rememberPreparedLLMRequest(2, nil, nil, nil, nil, 0, contextReductionPolicy{})
+	if got := a.currentRetentionPolicyInput().Session.Requests; got != 2 {
+		t.Fatalf("session requests before activation = %v, want 2", got)
+	}
+
+	// Activating a loaded session is the /resume boundary: both aggregator
+	// layers restart at zero, exactly like the /new reset path.
+	a.activateLoadedSession(&loadedSessionState{SessionPath: a.sessionDir})
+
+	input := a.currentRetentionPolicyInput()
+	if input.Session.Requests != 0 || input.Window.Requests != 0 {
+		t.Fatalf("retention signals after session activation = session %v window %v requests, want 0/0", input.Session.Requests, input.Window.Requests)
+	}
+}
+
 func TestRetentionPolicyEligibilityIsConservative(t *testing.T) {
 	input := retentionPolicyInput{Session: retentionSignalSummary{Requests: 20, ReducedToolResults: 1}}
 	if !retentionPolicyEligibility(input) {
