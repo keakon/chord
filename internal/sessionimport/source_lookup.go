@@ -68,7 +68,7 @@ func findCodexRolloutByID(root string, sourceID string) (string, error) {
 		}
 		return nil
 	})
-	return chooseSingleSourceMatch("codex", sourceID, matches)
+	return chooseSingleSourceMatch("codex", sourceID, root, matches)
 }
 
 func findClaudeTranscriptByID(root string, sourceID string) (string, error) {
@@ -86,16 +86,19 @@ func findClaudeTranscriptByID(root string, sourceID string) (string, error) {
 		}
 		return nil
 	})
-	return chooseSingleSourceMatch("claude", sourceID, matches)
+	return chooseSingleSourceMatch("claude", sourceID, root, matches)
 }
 
-func chooseSingleSourceMatch(source, sourceID string, matches []string) (string, error) {
+func chooseSingleSourceMatch(source, sourceID, root string, matches []string) (string, error) {
 	if len(matches) == 0 {
-		return "", fmt.Errorf("%s import: no session found for id %q", source, sourceID)
+		if source == "codex" {
+			return "", fmt.Errorf("codex import: no session found for id %q under %q; verify the id with `codex resume %s`, or pass an explicit file path", sourceID, root, sourceID)
+		}
+		return "", fmt.Errorf("%s import: no session found for id %q under %q; verify the id or pass an explicit file path", source, sourceID, root)
 	}
 	sort.Strings(matches)
 	if len(matches) > 1 {
-		return "", fmt.Errorf("%s import: multiple files matched id %q; use an explicit file path", source, sourceID)
+		return "", fmt.Errorf("%s import: multiple files matched id %q under %q; pass an explicit file path to choose one", source, sourceID, root)
 	}
 	return matches[0], nil
 }
@@ -106,8 +109,11 @@ func chooseSingleSourceMatch(source, sourceID string, matches []string) (string,
 // suffix), which is exactly how `codex resume <id>` resolves a file. The
 // session_id field is intentionally not consulted: in forked/sub-agent
 // rollouts it points back to the parent session, so it matches multiple files
-// for one id. Only the first session_meta is examined because a forked rollout
-// replays the parent's session_meta on a later line.
+// for one id. Only the first *readable* session_meta is examined — a forked
+// rollout replays the parent's session_meta on a later line, so matching a
+// later meta would resolve the parent id to both the parent file and the
+// fork. A session_meta whose payload cannot be read says nothing about the
+// rollout's own id, so such lines are skipped instead of aborting the scan.
 func codexFileContainsSessionID(path string, sourceID string) (bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -138,15 +144,15 @@ func codexFileContainsSessionID(path string, sourceID string) (bool, error) {
 		}
 		payload := lineObj["payload"]
 		if len(payload) == 0 {
-			return false, nil
+			continue
 		}
 		var meta struct {
 			ID string `json:"id"`
 		}
-		if importJSONUnmarshal(payload, &meta) == nil && meta.ID == sourceID {
-			return true, nil
+		if err := importJSONUnmarshal(payload, &meta); err != nil || meta.ID == "" {
+			continue
 		}
-		return false, nil
+		return meta.ID == sourceID, nil
 	}
 	return false, scanner.Err()
 }
