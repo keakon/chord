@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/keakon/x/powernap/pkg/lsp/protocol"
 	powertransport "github.com/keakon/x/powernap/pkg/transport"
@@ -682,5 +684,226 @@ func TestDiscoverPythonInterpreterRejectsUnresolvablePaths(t *testing.T) {
 				t.Fatalf("got %q for unresolvable path", got)
 			}
 		})
+	}
+}
+
+func TestDiscoverPythonInterpreterStopsAtCwdWithoutProjectRoot(t *testing.T) {
+	// Without a configured project root the search must never climb above the
+	// workspace root: an environment in the workspace's parent (e.g. a
+	// home-level ~/.venv for a workspace that is not inside the home
+	// directory) would otherwise satisfy a workspace it does not contain.
+	parent := t.TempDir()
+	workspace := filepath.Join(parent, "workspace")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	parentVenv := filepath.Join(parent, ".venv", "bin", "python")
+	if err := os.MkdirAll(filepath.Dir(parentVenv), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(parentVenv, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := discoverPythonInterpreterBoundedForGOOS(workspace, "", "linux"); got != "" {
+		t.Fatalf("got %q for an environment above the workspace; empty project root must stop the walk at cwd", got)
+	}
+
+	// A venv inside the workspace still resolves with no project root.
+	innerVenv := filepath.Join(workspace, ".venv", "bin", "python")
+	if err := os.MkdirAll(filepath.Dir(innerVenv), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(innerVenv, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := discoverPythonInterpreterBoundedForGOOS(workspace, "", "linux"); got != innerVenv {
+		t.Fatalf("got %q, want in-workspace %q", got, innerVenv)
+	}
+}
+
+// TestManagerStopWaitsForInFlightStart is the regression test for Stop
+// returning while a startServer goroutine is still in flight: that goroutine
+// could finish afterwards and register a new client into a manager Stop had
+// already drained. Stop must wait until every launch it observed settles, so
+// when it returns no client can appear later.
+func TestManagerStopWaitsForInFlightStart(t *testing.T) {
+	root := t.TempDir()
+	mgr := NewManager(&config.Config{
+		LSP: config.LSPConfig{
+			"gopls": {Command: "gopls", FileTypes: []string{".go"}},
+		},
+	}, root, nil)
+	key := clientKey{name: "gopls", root: root}
+	entry := &startEntry{ctx: context.Background(), done: make(chan struct{})}
+	mgr.clientsMu.Lock()
+	mgr.starting[key] = true
+	mgr.launches[key] = entry
+	mgr.clientsMu.Unlock()
+
+	stopCtx, cancelStop := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelStop()
+	stopped := make(chan struct{})
+	go func() {
+		mgr.Stop(stopCtx)
+		close(stopped)
+	}()
+
+	// A fixed Stop blocks until the in-flight launch exits; the pre-fix Stop
+	// returned immediately here, letting the launch register afterwards.
+	select {
+	case <-stopped:
+		t.Fatal("Stop returned while an in-flight launch was still running")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	// The launch finishes after Stop began.
+	mgr.clientsMu.Lock()
+	delete(mgr.starting, key)
+	delete(mgr.launches, key)
+	mgr.clientsMu.Unlock()
+	close(entry.done)
+
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop did not return after the in-flight launch settled")
+	}
+
+	// Stop must be safe to call again once everything settled.
+	mgr.Stop(stopCtx)
+	mgr.clientsMu.RLock()
+	defer mgr.clientsMu.RUnlock()
+	if len(mgr.clients) != 0 || len(mgr.launches) != 0 {
+		t.Fatalf("manager still holds clients=%d launches=%d after Stop", len(mgr.clients), len(mgr.launches))
+	}
+}
+
+// TestManagerStopPreventsInFlightStartFromRegistering verifies the admission
+// gate: a launch whose start era was cancelled by a Stop must not register its
+// finished client (the caller closes it instead), while a launch on a live era
+// registers normally.
+func TestManagerStopPreventsInFlightStartFromRegistering(t *testing.T) {
+	root := t.TempDir()
+	mgr := NewManager(&config.Config{
+		LSP: config.LSPConfig{
+			"gopls": {Command: "gopls", FileTypes: []string{".go"}},
+		},
+	}, root, nil)
+	key := clientKey{name: "gopls", root: root}
+
+	era, cancelEra := context.WithCancel(context.Background())
+	cancelEra() // a Stop cancelled this launch's era
+	fake := &fakePowernapClient{}
+	lateClient := &Client{client: fake, cwd: root, cfg: config.LSPServerConfig{FileTypes: []string{".go"}}}
+	entry := &startEntry{ctx: era, done: make(chan struct{})}
+
+	mgr.clientsMu.Lock()
+	closeMe, _, admitted := mgr.admitStartedClientLocked(key, entry, lateClient)
+	mgr.clientsMu.Unlock()
+	if admitted {
+		t.Fatal("a launch whose era was cancelled by Stop was admitted")
+	}
+	if len(closeMe) != 0 {
+		t.Fatalf("refused admission returned eviction work: %v", closeMe)
+	}
+	if _, ok := mgr.clients[key]; ok {
+		t.Fatal("late client was registered after Stop")
+	}
+
+	// A launch on a live era still registers.
+	liveClient := &Client{client: &fakePowernapClient{}, cwd: root, cfg: config.LSPServerConfig{FileTypes: []string{".go"}}}
+	liveEntry := &startEntry{ctx: context.Background(), done: make(chan struct{})}
+	mgr.clientsMu.Lock()
+	_, _, admitted = mgr.admitStartedClientLocked(key, liveEntry, liveClient)
+	mgr.clientsMu.Unlock()
+	if !admitted {
+		t.Fatal("a launch on a live era was refused")
+	}
+	if got := mgr.clients[key]; got != liveClient {
+		t.Fatalf("clients[%v] = %p, want the live-launch client %p", key, got, liveClient)
+	}
+}
+
+// TestManagerStopConcurrentWithStartSettles drives Stop and Start against the
+// same manager from many goroutines (the idle-unload versus cold-start shape)
+// and then requires the manager to settle with no registered client and no
+// lingering launch. Run under -race this exercises the era and launches bookkeeping.
+func TestManagerStopConcurrentWithStartSettles(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "main.ts")
+	mgr := NewManager(&config.Config{
+		LSP: config.LSPConfig{
+			"typescript": {Command: "chord-no-such-typescript-server", FileTypes: []string{".ts"}},
+		},
+	}, root, nil)
+
+	var wg sync.WaitGroup
+	for range 30 {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			mgr.Start(context.Background(), path)
+		}()
+		go func() {
+			defer wg.Done()
+			stopCtx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+			defer cancel()
+			mgr.Stop(stopCtx)
+		}()
+	}
+	wg.Wait()
+
+	// All launches use a nonexistent command and fail fast; a Stop waiting on
+	// a wedged launch would surface here as a settle timeout.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		mgr.clientsMu.RLock()
+		pending := len(mgr.launches)
+		clients := len(mgr.clients)
+		mgr.clientsMu.RUnlock()
+		if pending == 0 && clients == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("manager did not settle after concurrent Start/Stop: pending=%d clients=%d", pending, clients)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestManagerStartAfterStopLaunchesAgain pins the unload semantics: Stop is
+// an idle unload, not a terminal state — the manager must accept launches
+// afterwards, or language servers would never reload after an idle unload.
+func TestManagerStartAfterStopLaunchesAgain(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "main.ts")
+	key := clientKey{name: "typescript", root: root}
+	mgr := NewManager(&config.Config{
+		LSP: config.LSPConfig{
+			"typescript": {Command: "chord-no-such-typescript-server", FileTypes: []string{".ts"}},
+		},
+	}, root, nil)
+
+	mgr.Start(context.Background(), path)
+	waitForLSPStartDone(t, mgr, key)
+
+	stopCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	mgr.Stop(stopCtx)
+	cancel()
+
+	// A later Start must launch again; the nonexistent command fails fast and
+	// records a start failure, proving the launch actually ran.
+	mgr.Start(context.Background(), path)
+	waitForLSPStartDone(t, mgr, key)
+	mgr.startFailMu.Lock()
+	_, failed := mgr.startFail[key]
+	mgr.startFailMu.Unlock()
+	if !failed {
+		t.Fatal("Start after Stop did not launch a server; the manager must stay usable after an unload")
+	}
+	mgr.clientsMu.RLock()
+	defer mgr.clientsMu.RUnlock()
+	if len(mgr.clients) != 0 || len(mgr.launches) != 0 {
+		t.Fatalf("manager holds clients=%d launches=%d after Start-after-Stop settled", len(mgr.clients), len(mgr.launches))
 	}
 }

@@ -280,15 +280,21 @@ func discoverPythonInterpreterBoundedForGOOS(cwd, projectRoot, goos string) stri
 	if err != nil {
 		return ""
 	}
-	if projectRoot != "" {
-		projectRoot, err = filepath.Abs(projectRoot)
-		if err != nil {
-			return ""
-		}
-		rel, err := filepath.Rel(projectRoot, cwd)
-		if err != nil || relPathEscapesDir(rel) {
-			return ""
-		}
+	if projectRoot == "" {
+		// Without a configured project root the workspace root itself is the
+		// search boundary: climbing on would let a home-level environment
+		// (e.g. ~/.venv) satisfy a workspace that is not inside it. This
+		// keeps discovery at or below the workspace root, the same contract
+		// that bounds the walk when a project root is configured.
+		projectRoot = cwd
+	}
+	projectRoot, err = filepath.Abs(projectRoot)
+	if err != nil {
+		return ""
+	}
+	rel, err := filepath.Rel(projectRoot, cwd)
+	if err != nil || relPathEscapesDir(rel) {
+		return ""
 	}
 	for current := filepath.Clean(cwd); ; current = filepath.Dir(current) {
 		for _, dir := range []string{".venv", "venv", "env"} {
@@ -303,7 +309,7 @@ func discoverPythonInterpreterBoundedForGOOS(cwd, projectRoot, goos string) stri
 			}
 		}
 		parent := filepath.Dir(current)
-		if parent == current || (projectRoot != "" && current == projectRoot) {
+		if parent == current || current == projectRoot {
 			break
 		}
 	}
@@ -375,7 +381,9 @@ func (c *Client) touch(now int64) {
 	c.lastUsed.Store(now)
 }
 
-// HandlesFile returns true if this client handles the given path by file type and cwd.
+// HandlesFile returns true if this client handles the given path by file type
+// and cwd. The file-type predicate is shared with Manager.matchesFileType so
+// config-level routing and per-client handling cannot drift apart.
 func (c *Client) HandlesFile(path string) bool {
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -385,20 +393,7 @@ func (c *Client) HandlesFile(path string) bool {
 	if err != nil || relPathEscapesDir(rel) {
 		return false
 	}
-	if len(c.cfg.FileTypes) == 0 {
-		return true
-	}
-	ext := strings.ToLower(filepath.Ext(path))
-	for _, ft := range c.cfg.FileTypes {
-		e := ft
-		if e != "" && e[0] != '.' {
-			e = "." + e
-		}
-		if ext == strings.ToLower(e) {
-			return true
-		}
-	}
-	return false
+	return matchesFileType(c.cfg, path)
 }
 
 // pathToURI returns file URI for the given path.

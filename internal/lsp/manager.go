@@ -84,6 +84,16 @@ type clientKey struct {
 	root string
 }
 
+// startEntry tracks one in-flight server launch. ctx is the manager's start
+// era at launch time: Stop cancels that era, so ctx.Err() != nil reports "a
+// Stop began after this launch was spawned", which forbids registering the
+// finished client into the stopped manager. done is closed when the launch
+// goroutine exits, letting Stop wait for in-flight launches to settle.
+type startEntry struct {
+	ctx  context.Context
+	done chan struct{}
+}
+
 // Manager manages multiple LSP clients and aggregates diagnostics.
 type Manager struct {
 	projectRoot string
@@ -91,7 +101,25 @@ type Manager struct {
 	broadcast   BroadcastFunc
 	clients     map[clientKey]*Client
 	clientsMu   sync.RWMutex
-	starting    map[clientKey]bool // servers currently being initialized (guarded by clientsMu)
+
+	// starting marks servers whose launch goroutine is still in flight; it is
+	// a pure presence predicate (guarded by clientsMu) used for start
+	// deduplication and the pending-start check.
+	starting map[clientKey]bool
+
+	// launches carries the per-launch state (start era context + done
+	// channel) for the goroutines tracked in starting, guarded by clientsMu.
+	// It is kept separate so the two maps stay coherent under one lock while
+	// starting keeps its boolean presence semantics.
+	launches map[clientKey]*startEntry
+
+	// startEra is the context era in-flight launches run under. Stop cancels
+	// the current era and clears it, so every launch that began before the
+	// stop aborts and is refused at registration; the next Start creates a
+	// fresh era, which is what lets an idle unload be followed by a normal
+	// cold start. Guarded by clientsMu.
+	startEra       context.Context
+	cancelStartEra context.CancelFunc
 
 	waiters   map[string][]chan diagnosticsEvent
 	waitersMu sync.Mutex
@@ -151,6 +179,7 @@ func NewManager(cfg *config.Config, projectRoot string, broadcast BroadcastFunc)
 		broadcast:             broadcast,
 		clients:               make(map[clientKey]*Client),
 		starting:              make(map[clientKey]bool),
+		launches:              make(map[clientKey]*startEntry),
 		waiters:               make(map[string][]chan diagnosticsEvent),
 		startFail:             make(map[clientKey]string),
 		diagByServer:          make(map[clientKey]map[string]diagCounts),
@@ -286,8 +315,9 @@ func (m *Manager) Start(ctx context.Context, path string) {
 	}
 	m.clientsMu.Lock()
 	var toStart []struct {
-		key clientKey
-		cfg config.LSPServerConfig
+		key   clientKey
+		cfg   config.LSPServerConfig
+		entry *startEntry
 	}
 	for name, srvCfg := range m.cfg.LSP {
 		if srvCfg.Disabled {
@@ -304,21 +334,54 @@ func (m *Manager) Start(ctx context.Context, path string) {
 		if m.starting[key] {
 			continue
 		}
+		if m.startEra == nil {
+			// A Stop cleared the era; create a fresh one so launches after
+			// the stop run on a live context (idle-unload reload).
+			m.startEra, m.cancelStartEra = context.WithCancel(context.Background())
+		}
 		m.starting[key] = true
+		entry := &startEntry{ctx: m.startEra, done: make(chan struct{})}
+		m.launches[key] = entry
 		toStart = append(toStart, struct {
-			key clientKey
-			cfg config.LSPServerConfig
-		}{key, srvCfg})
+			key   clientKey
+			cfg   config.LSPServerConfig
+			entry *startEntry
+		}{key, srvCfg, entry})
 	}
 	m.clientsMu.Unlock()
 
 	for _, s := range toStart {
-		key, srvCfg := s.key, s.cfg
-		go m.startServer(ctx, key, srvCfg)
+		key, srvCfg, entry := s.key, s.cfg, s.entry
+		go m.startServer(ctx, key, srvCfg, entry)
 	}
 }
 
-func (m *Manager) startServer(ctx context.Context, key clientKey, srvCfg config.LSPServerConfig) {
+func (m *Manager) startServer(ctx context.Context, key clientKey, srvCfg config.LSPServerConfig, entry *startEntry) {
+	// The launch goroutine must never outlive its own bookkeeping: every
+	// return path clears the starting markers and closes the entry's done
+	// channel, so a concurrent Stop waiting on the launch can finish.
+	defer func() {
+		m.clientsMu.Lock()
+		delete(m.starting, key)
+		delete(m.launches, key)
+		m.clientsMu.Unlock()
+		close(entry.done)
+	}()
+
+	// Run the handshake on a context cancelled by either the requesting turn
+	// or the manager: Stop cancels entry.ctx (the start era), so it never
+	// waits on a launch whose server is unresponsive to the caller's ctx.
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	launchCtx, cancelLaunch := context.WithCancel(entry.ctx)
+	stopCallerCancel := context.AfterFunc(ctx, cancelLaunch)
+	defer func() {
+		stopCallerCancel()
+		cancelLaunch()
+	}()
+	ctx = launchCtx
+
 	m.startFailMu.Lock()
 	if m.startFail == nil {
 		m.startFail = make(map[clientKey]string)
@@ -332,9 +395,6 @@ func (m *Manager) startServer(ctx context.Context, key clientKey, srvCfg config.
 		m.startFailMu.Lock()
 		m.startFail[key] = err.Error()
 		m.startFailMu.Unlock()
-		m.clientsMu.Lock()
-		delete(m.starting, key)
-		m.clientsMu.Unlock()
 		m.notifySidebarChanged()
 		return
 	}
@@ -345,9 +405,6 @@ func (m *Manager) startServer(ctx context.Context, key clientKey, srvCfg config.
 		m.startFailMu.Lock()
 		m.startFail[key] = err.Error()
 		m.startFailMu.Unlock()
-		m.clientsMu.Lock()
-		delete(m.starting, key)
-		m.clientsMu.Unlock()
 		m.notifySidebarChanged()
 		return
 	}
@@ -365,10 +422,18 @@ func (m *Manager) startServer(ctx context.Context, key clientKey, srvCfg config.
 	// up and restarted on the next read.
 	client.touch(time.Now().UnixNano())
 	m.clientsMu.Lock()
-	m.clients[key] = client
-	delete(m.starting, key)
-	closeMe, survivors := m.evictExcessClientsLocked()
+	closeMe, survivors, admitted := m.admitStartedClientLocked(key, entry, client)
 	m.clientsMu.Unlock()
+	if !admitted {
+		// A Stop began after this launch was spawned; the stopped manager
+		// must not grow a client, so close the finished one instead. ctx is
+		// already cancelled by the stop, so Close falls back to Kill.
+		log.Infof("lsp: discarding client whose launch outlived Stop name=%v root=%v", key.name, key.root)
+		if err := client.Close(ctx); err != nil {
+			log.Warnf("lsp: close discarded client error=%v", err)
+		}
+		return
+	}
 	for _, victim := range closeMe {
 		if err := victim.Close(ctx); err != nil {
 			log.Warnf("lsp: close evicted client error=%v", err)
@@ -380,6 +445,20 @@ func (m *Manager) startServer(ctx context.Context, key clientKey, srvCfg config.
 		}
 	}
 	m.notifySidebarChanged()
+}
+
+// admitStartedClientLocked registers the finished client under key unless a
+// Stop began after its launch, which cancels the entry's start era. On
+// refusal the caller must close the client instead of registering it.
+// Otherwise it returns the eviction work like evictExcessClientsLocked, for
+// the caller to run outside the lock. Caller holds clientsMu.
+func (m *Manager) admitStartedClientLocked(key clientKey, entry *startEntry, client *Client) (closeMe []*Client, survivors map[string][]*Client, admitted bool) {
+	if entry.ctx.Err() != nil {
+		return nil, nil, false
+	}
+	m.clients[key] = client
+	closeMe, survivors = m.evictExcessClientsLocked()
+	return closeMe, survivors, true
 }
 
 // discoverWorkspaceRoot walks from path's directory up to the project root and
@@ -1110,15 +1189,41 @@ func normalizeWaiterPath(p string) string {
 	return filepath.Clean(abs)
 }
 
-// Stop shuts down all LSP clients.
+// Stop shuts down every registered client and settles launches that were
+// already in flight. It cancels the current start era (aborting those
+// launches' handshakes), refuses their later registration, and waits for
+// them to exit — so when Stop returns no client can appear afterwards and no
+// launch goroutine predating the stop survives it. The manager stays usable:
+// a later Start creates a fresh era and registers normally, which is what
+// reloads language servers after an idle unload.
 func (m *Manager) Stop(ctx context.Context) {
 	m.clientsMu.Lock()
-	defer m.clientsMu.Unlock()
+	if m.cancelStartEra != nil {
+		m.cancelStartEra()
+		m.startEra = nil
+		m.cancelStartEra = nil
+	}
+	inflight := make([]*startEntry, 0, len(m.launches))
+	for _, entry := range m.launches {
+		inflight = append(inflight, entry)
+	}
 	for key, c := range m.clients {
 		if err := c.Close(ctx); err != nil {
 			log.Warnf("lsp: stop client name=%v root=%v error=%v", key.name, key.root, err)
 		}
 		delete(m.clients, key)
+	}
+	m.clientsMu.Unlock()
+
+	// Wait for the in-flight launches to exit (their contexts are cancelled,
+	// so they settle promptly). The caller's context still bounds the wait in
+	// case a launch is wedged in a call that ignores cancellation.
+	for _, entry := range inflight {
+		select {
+		case <-entry.done:
+		case <-ctx.Done():
+			return
+		}
 	}
 }
 
