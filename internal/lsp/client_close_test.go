@@ -156,9 +156,9 @@ func TestPrepareWorkspaceSettingsDiscoversPyrightUnixVirtualenv(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	got := discoverPythonInterpreterForGOOS(root, "linux")
+	got := discoverPythonInterpreterBoundedForGOOS(root, root, "linux")
 	if got != pythonPath {
-		t.Fatalf("discoverPythonInterpreterForGOOS() = %q, want %q", got, pythonPath)
+		t.Fatalf("discoverPythonInterpreterBoundedForGOOS() = %q, want %q", got, pythonPath)
 	}
 }
 
@@ -172,9 +172,9 @@ func TestPrepareWorkspaceSettingsDoesNotDiscoverWindowsVirtualenvOnUnix(t *testi
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	got := discoverPythonInterpreterForGOOS(root, "linux")
+	got := discoverPythonInterpreterBoundedForGOOS(root, root, "linux")
 	if got != "" {
-		t.Fatalf("discoverPythonInterpreterForGOOS() = %q, want empty", got)
+		t.Fatalf("discoverPythonInterpreterBoundedForGOOS() = %q, want empty", got)
 	}
 }
 
@@ -188,9 +188,9 @@ func TestPrepareWorkspaceSettingsDiscoversPyrightWindowsVirtualenv(t *testing.T)
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	got := discoverPythonInterpreterForGOOS(root, "windows")
+	got := discoverPythonInterpreterBoundedForGOOS(root, root, "windows")
 	if got != pythonPath {
-		t.Fatalf("discoverPythonInterpreterForGOOS() = %q, want %q", got, pythonPath)
+		t.Fatalf("discoverPythonInterpreterBoundedForGOOS() = %q, want %q", got, pythonPath)
 	}
 }
 
@@ -204,10 +204,10 @@ func TestPrepareWorkspaceSettingsUsesDiscoveredPyrightVirtualenv(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	got := prepareWorkspaceSettings("pyright", config.LSPServerConfig{Command: "pyright-langserver"}, root)
+	got := prepareWorkspaceSettingsBounded("pyright", config.LSPServerConfig{Command: "pyright-langserver"}, root, root)
 	want := map[string]any{"python": map[string]any{"pythonPath": pythonPath}}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("prepareWorkspaceSettings() = %#v, want %#v", got, want)
+		t.Fatalf("prepareWorkspaceSettingsBounded() = %#v, want %#v", got, want)
 	}
 }
 
@@ -222,29 +222,29 @@ func TestPrepareWorkspaceSettingsKeepsExplicitInterpreter(t *testing.T) {
 	}
 
 	explicit := map[string]any{"python": map[string]any{"pythonPath": "/custom/python"}}
-	got := prepareWorkspaceSettings("pyright", config.LSPServerConfig{Command: "pyright-langserver", Options: explicit}, root)
+	got := prepareWorkspaceSettingsBounded("pyright", config.LSPServerConfig{Command: "pyright-langserver", Options: explicit}, root, root)
 	if !reflect.DeepEqual(got, explicit) {
-		t.Fatalf("prepareWorkspaceSettings() = %#v, want %#v", got, explicit)
+		t.Fatalf("prepareWorkspaceSettingsBounded() = %#v, want %#v", got, explicit)
 	}
 }
 
 func TestPrepareWorkspaceSettingsMakesExplicitRelativeInterpreterAbsolute(t *testing.T) {
 	root := t.TempDir()
 	explicit := map[string]any{"python": map[string]any{"pythonPath": ".venv/bin/python"}}
-	got := prepareWorkspaceSettings("pyright", config.LSPServerConfig{Command: "pyright-langserver", Options: explicit}, root)
+	got := prepareWorkspaceSettingsBounded("pyright", config.LSPServerConfig{Command: "pyright-langserver", Options: explicit}, root, root)
 	want := map[string]any{"python": map[string]any{"pythonPath": filepath.Join(root, ".venv", "bin", "python")}}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("prepareWorkspaceSettings() = %#v, want %#v", got, want)
+		t.Fatalf("prepareWorkspaceSettingsBounded() = %#v, want %#v", got, want)
 	}
 }
 
 func TestPrepareWorkspaceSettingsMakesExplicitRelativeVenvPathAbsolute(t *testing.T) {
 	root := t.TempDir()
 	explicit := map[string]any{"python": map[string]any{"venvPath": ".venvs", "venv": "py311"}}
-	got := prepareWorkspaceSettings("pyright", config.LSPServerConfig{Command: "pyright-langserver", Options: explicit}, root)
+	got := prepareWorkspaceSettingsBounded("pyright", config.LSPServerConfig{Command: "pyright-langserver", Options: explicit}, root, root)
 	want := map[string]any{"python": map[string]any{"venvPath": filepath.Join(root, ".venvs"), "venv": "py311"}}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("prepareWorkspaceSettings() = %#v, want %#v", got, want)
+		t.Fatalf("prepareWorkspaceSettingsBounded() = %#v, want %#v", got, want)
 	}
 }
 

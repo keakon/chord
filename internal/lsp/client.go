@@ -72,11 +72,6 @@ type Client struct {
 	onDiagnostics func(uri string, serverID string, diags []protocol.Diagnostic, version int32)
 }
 
-// NewClient creates an LSP client and starts the server process. Call Initialize next.
-func NewClient(ctx context.Context, name string, cfg config.LSPServerConfig, cwd string, debug bool) (*Client, error) {
-	return newClient(ctx, name, cfg, cwd, cwd, debug)
-}
-
 func newClient(ctx context.Context, name string, cfg config.LSPServerConfig, cwd, projectRoot string, debug bool) (*Client, error) {
 	cfg.Options = prepareWorkspaceSettingsBounded(name, cfg, cwd, projectRoot)
 	c := &Client{
@@ -189,10 +184,6 @@ func settingsForSection(settings map[string]any, section string) any {
 	return current
 }
 
-func prepareWorkspaceSettings(name string, cfg config.LSPServerConfig, cwd string) map[string]any {
-	return prepareWorkspaceSettingsBounded(name, cfg, cwd, "")
-}
-
 func prepareWorkspaceSettingsBounded(name string, cfg config.LSPServerConfig, cwd, projectRoot string) map[string]any {
 	settings := cloneSettings(cfg.Options)
 	if !isPyrightServer(name, cfg) {
@@ -274,10 +265,6 @@ func normalizePathSetting(settings map[string]any, key string, cwd string) bool 
 func nonEmptyString(v any) bool {
 	s, ok := v.(string)
 	return ok && strings.TrimSpace(s) != ""
-}
-
-func discoverPythonInterpreterForGOOS(cwd, goos string) string {
-	return discoverPythonInterpreterBoundedForGOOS(cwd, "", goos)
 }
 
 func discoverPythonInterpreterBounded(cwd, projectRoot string) string {
