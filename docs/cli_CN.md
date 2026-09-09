@@ -63,7 +63,7 @@ chord [全局 flag] [命令] [命令 flag] [参数]
 | `-c`, `--continue`           | 恢复本项目最近一个非空、且未被其它进程占用的会话                                                                                                            |
 | `-r`, `--resume <id>`        | 恢复当前项目内指定 session id 的会话（要恢复其它 chord 管理 worktree 里的会话，用 `chord resume <id>`）                                                     |
 | `--fork-history[=N]`         | 先把 `--resume` 指定的会话在某次压缩边界上 fork 出来，再恢复这个 fork：省略 N 表示最近一次已应用边界，或传 `history-N` 序号（如 `=2`）。只能与 `--resume` 一起用，且该会话必须属于当前项目——fork 其它 worktree 里的会话用 `chord resume <id> --fork-history`。源会话即使正被其它进程打开也可以 fork（见下文[恢复会话](#恢复会话)） |
-| `--yolo`                     | 启动时启用 YOLO 模式：临时绕过 MainAgent 工具权限，但不影响 handoff、delegate、cancel 和 done 权限                                                       |
+| `--yolo`                     | 启动时启用 YOLO 模式：普通工具跳过权限检查、不再弹确认；handoff、delegate、cancel、done 和 compact_context 仍按各自配置的规则执行                                                       |
 | `-w`, `--worktree [name]`    | 创建或进入 chord 管理的 git worktree（不传名字时自动命名）；与 `--continue` / `--resume` 配合可作用于该 worktree 自己的会话历史                              |
 
 `--continue` 与 `--resume` 互斥；`--fork-history` 只能与 `--resume` 搭配，不能与 `--continue` 或 `--worktree` 组合。

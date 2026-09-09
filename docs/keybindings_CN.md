@@ -95,7 +95,7 @@ TUI 有两种模式：
 | ------------- | --------------------------------------------------------------------------------------------------------------- |
 | `Ctrl+P`      | 在 Insert 和 Normal 两种模式下都打开模型池选择器                                                   |
 | `Ctrl+R`      | 在当前 provider/model 支持的 tier 中循环切换后续模型请求的 service tier；`/tier` slash 补全会预测相同的下一个 tier，没有实际可切换目标时隐藏 |
-| `Ctrl+Y`      | 切换 YOLO 模式；绕过 MainAgent 权限，但不影响 handoff、delegate、cancel 和 done 权限                         |
+| `Ctrl+Y`      | 切换 YOLO 模式；普通工具跳过权限检查、不再弹确认；handoff、delegate、cancel、done 和 compact_context 仍按各自配置的规则执行                         |
 | `Ctrl+O`      | 打开 MCP server 选择器；agent 运行中修改会在下一次模型请求生效                                                |
 | `Ctrl+G`      | 导出 diagnostics 包                                                                                             |
 

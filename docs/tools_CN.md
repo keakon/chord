@@ -56,7 +56,7 @@
 
 ## 编排与控制
 
-这些工具控制的是 agent 工作流而不是本地副作用，因此 YOLO 模式**不会**绕过它们的权限——YOLO 消除的是确认文件编辑和 shell 命令的摩擦，不是角色的边界。`handoff`、`delegate`、`cancel` 会带来角色原本没有的能力。非 YOLO 模式下它们走普通权限规则，宽泛的 `"*": allow` 会像授予其它工具一样授予它们——内置 `builder` 必须显式 deny `handoff` 和 `delegate`，正是为了在默认规则下保持单 agent。只有在 YOLO 下通配符才够不着它们：默认拒绝，除非规则直接指名对应工具。`done` 和 `compact_context` 只是结束或收缩当前这段工作，挂载它们的那个运行时模式本身就是授权，纯通配规则不会影响它们。详见[权限与安全](./permissions-and-safety_CN.md)。
+这些工具控制的是 agent 工作流而不是本地副作用，YOLO 不会像对普通工具那样把它们的权限规则一起放开——它消除的是确认文件编辑和 shell 命令的摩擦，不是角色的边界。`handoff`、`delegate`、`cancel` 会给角色带来原本没有的能力，YOLO 下它们仍按配置的规则判定，只放宽一处：`ask` 不再弹确认框、直接放行。`allow` 照常可用，`deny` 照常拒绝——内置 `builder` 显式 deny `handoff` 和 `delegate` 以保持单 agent，这两条 deny 在 YOLO 下继续生效——通配默认的行为也和关闭时一致。`done` 和 `compact_context` 只是结束或收缩当前这段工作，YOLO 不改变它们的专门语义。关闭 YOLO 即恢复原权限。详见[权限与安全](./permissions-and-safety_CN.md)。
 
 | 工具 | 用途 |
 | --- | --- |
@@ -85,7 +85,7 @@
 
 ### 委派任务边界
 
-agent 间消息遵守请求边界：目标 busy 时，消息只入队并随其下一次 LLM 请求一并处理，不打断当前请求；目标空闲但可恢复时，Chord 会唤醒它；纯 progress 更新不会强制本来空闲的 agent 启动。mailbox 与协调状态具备持久性：父子请求/响应记录与排队载荷都能跨 compaction 与重启存活，投递跨任务水合保持幂等。
+agent 间消息遵守请求边界：目标 busy 时，消息只入队并随其下一次 LLM 请求一并处理，不打断当前请求；空闲但可恢复的目标会被唤醒接收。发给空闲主代理的 progress / notice 不是纯信息：每个发送方只保留最新一条快照，下一次回合之间的处理会把所有待投递快照合并成一批，为投递这批单独唤醒主代理多跑一回合（多一次 LLM 请求），之后它才可能重新静默。mailbox 与协调状态具备持久性：父子请求/响应记录与排队载荷都能跨 compaction 与重启存活，投递跨任务水合保持幂等。
 
 
 委派状态以 runtime 为准，而不是以模型输出为准。worker 未能调用协调工具（`complete`、`escalate` 或 `notify`）时，会获得一次有界的后续请求；若仍然无法完成，或 provider/模型重试耗尽，Chord 会将其标记为 failed、记录 `risk_alert` 并唤醒 owner。Rehydrate 后的 runtime 可能获得新的 `agent_id`；后续协调应使用稳定的委派 `task_id`。

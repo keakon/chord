@@ -326,17 +326,21 @@ tool dependency ordering.
 Compaction is recursive: the next automatic summary is written over a history
 that already begins with a checkpoint. The session anchors (original request,
 standing constraints) are carried forward verbatim. A usage-driven summary
-receives the previous checkpoint's structured body as a protected input
-section and appends it verbatim as a `## Previous Checkpoint` section, so that
-content never depends on the summarizer happening to restate it. A
+receives the previous checkpoint's body as a protected input section and
+appends it as a `## Previous Checkpoint` section, so that content never
+depends on the summarizer happening to restate it. The carry is bounded, not a
+full verbatim copy: natural-language content is kept only up to a fixed budget
+and truncated beyond it, while the machine-readable typed block — when the
+prior body carries one — is exempt from that budget and re-appended whole. A
 model-driven checkpoint instead carries only machine state across generations:
 verified decisions, open problems, evidence references and stage metadata
 travel as a structured typed block (`## Typed Checkpoint State`) that the next
-model-driven checkpoint merges with the model's fresh submission (the fresh
-items win and the list is bounded; anything dropped is disclosed and remains
-recoverable in the archived history files). The previous natural-language body
-is not re-appended, and each round re-states the objective, progress and
-claims it considers current.
+model-driven checkpoint merges with the model's fresh submission. Fresh items
+win; claims the fresh submission does not restate are demoted from active to
+stale, the merged claim set is capped, and anything that does not fit is
+disclosed and stays recoverable in the archived history files. The previous
+natural-language body is not re-appended, and each round re-states the
+objective, progress and claims it considers current.
 
 `evidence_refs` may reference stable IDs from the checkpoint evidence pack; Chord validates those IDs before the barrier. `claim_kinds` classifies each claim as observed, derived, assumed, or proposed. Claim keys are natural-language assertions: usually a condensed restatement of a conclusion from `completed`/`decisions`, where rewording is fine, verbatim matching is never required, and fully standalone claims are allowed. When merging with a prior checkpoint's claims, keys set identity: an earlier claim is superseded only when the fresh submission restates the same key; a reworded key leaves the old claim in place alongside the new one. Observed claims must have `claim_evidence`, and every evidence ID listed there must also appear in the request's top-level `evidence_refs`, or runtime validation rejects the request. `state_files` are references to current external state; `planned_state_files`
 is for paths that are not written yet and is not completion evidence. Chord never reads, injects, or

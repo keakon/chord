@@ -101,7 +101,7 @@ Search also covers older regions of lazily loaded large sessions. Chord loads a 
 | ------------ | --------------------------------------------------------------------------------------------------------- |
 | `Ctrl+P`     | Open the model-pool selector in both Insert and Normal modes.                                          |
 | `Ctrl+R`     | Cycle service tier for subsequent model requests, limited to tiers supported by the current provider/model; `/tier` slash completion predicts the same next tier and is hidden when there is no actual switch target |
-| `Ctrl+Y`     | Toggle YOLO mode; bypasses main-agent permissions except handoff, delegate, cancel, and done                 |
+| `Ctrl+Y`     | Toggle YOLO mode; ordinary tools skip their permission checks and confirmations; handoff, delegate, cancel, done, and compact_context keep following their configured rules                 |
 | `Ctrl+O`     | Open the MCP server selector; manual changes while running apply on the next model request                   |
 | `Ctrl+G`     | Export a diagnostics bundle                                                                               |
 

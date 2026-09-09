@@ -959,9 +959,10 @@ Notes:
   URL-only `file_url` form; check the relay before relying on Base64
   `file_data`.
 - The example default pool uses `glm-5.3-flash` — the Coding Plan workhorse
-  with native multimodal input; switch the pool entry to `bigmodel/glm-5.3`
-  when you want text-only. `glm-5.2` stays in the provider map for
-  compatibility.
+  with native multimodal input. For text-only work, point the pool at
+  `bigmodel/glm-5.3`, or keep `bigmodel/glm-5.2` when you want GLM-5.2's wider
+  effort set (`xhigh` / `medium` / `minimal` / `none`) — the provider `models`
+  map above still lists it as an available text model under the same templates.
 
 ### Compaction tuning for GLM-5.x
 
