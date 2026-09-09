@@ -741,7 +741,7 @@ func TestCoordinationSnapshotIncludesDurableCompletionAndArtifact(t *testing.T) 
 }
 
 // TestCoordinationSnapshotCapsCompletionLists pins the per-list length cap on
-// the files_changed / verification_run / remaining_limitations / known_risks
+// the files_changed / remaining_limitations / known_risks
 // lines: an unbounded list from one verbose completion could otherwise dominate
 // the overlay token budget under the 8-task ceiling. The truncated tail is
 // reported as an explicit "...N more" hint so the reader knows the list
