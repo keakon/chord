@@ -1176,18 +1176,53 @@ func subAgentStateNeedsPromptContext(state string) bool {
 	}
 }
 
-func subAgentsForCompactionPrompt(subAgents []SubAgentInfo) (visible []SubAgentInfo, omitted int) {
-	if len(subAgents) == 0 {
-		return nil, 0
+func subAgentPromptPriority(state string) int {
+	switch strings.TrimSpace(state) {
+	case string(SubAgentStateWaitingMain):
+		return 0
+	case string(SubAgentStateWaitingDescendant):
+		return 1
+	case string(SubAgentStateRunning):
+		return 2
+	case string(SubAgentStateIdle):
+		return 3
+	default:
+		return 4 // terminal / historical / unknown: never prompt-visible
 	}
-	visible = make([]SubAgentInfo, 0, min(len(subAgents), compactPromptSubAgentLimit))
-	for _, sub := range subAgents {
+}
+
+// sortSubAgentsForPrompt orders a sub-agent snapshot deterministically —
+// workers waiting on the main agent first, then running ones, then task ID —
+// so the bounded prompt keeps a stable, priority-aware subset across
+// captures. The registry is a map, so without the sort the choice of which
+// workers fit compactPromptSubAgentLimit would follow Go's random iteration
+// order and drift between two compactions of identical state.
+func sortSubAgentsForPrompt(subAgents []SubAgentInfo) {
+	slices.SortStableFunc(subAgents, func(a, b SubAgentInfo) int {
+		if pa, pb := subAgentPromptPriority(a.State), subAgentPromptPriority(b.State); pa != pb {
+			return pa - pb
+		}
+		if c := strings.Compare(a.TaskID, b.TaskID); c != 0 {
+			return c
+		}
+		return strings.Compare(a.InstanceID, b.InstanceID)
+	})
+}
+
+func subAgentsForCompactionPrompt(subAgents []SubAgentInfo) (visible []SubAgentInfo, omittedActive, omittedInactive int) {
+	if len(subAgents) == 0 {
+		return nil, 0, 0
+	}
+	sorted := append([]SubAgentInfo(nil), subAgents...)
+	sortSubAgentsForPrompt(sorted)
+	visible = make([]SubAgentInfo, 0, min(len(sorted), compactPromptSubAgentLimit))
+	for _, sub := range sorted {
 		if !subAgentStateNeedsPromptContext(sub.State) {
-			omitted++
+			omittedInactive++
 			continue
 		}
 		if len(visible) >= compactPromptSubAgentLimit {
-			omitted++
+			omittedActive++
 			continue
 		}
 		copySub := sub
@@ -1195,33 +1230,105 @@ func subAgentsForCompactionPrompt(subAgents []SubAgentInfo) (visible []SubAgentI
 		copySub.LastSummary = strings.ReplaceAll(compactTextSnippet(strings.TrimSpace(copySub.LastSummary), compactPromptSummaryMaxChars), "\n", " ")
 		visible = append(visible, copySub)
 	}
-	return visible, omitted
+	return visible, omittedActive, omittedInactive
 }
 
-func formatSubAgentsAsBullets(subAgents []SubAgentInfo) string {
-	visible, omitted := subAgentsForCompactionPrompt(subAgents)
+func formatSubAgentInfoLine(sub SubAgentInfo) string {
+	running := sub.RunningRef
+	if running == "" {
+		running = sub.SelectedRef
+	}
+	line := fmt.Sprintf("- %s | task=%s", sub.InstanceID, sub.TaskID)
+	if parent := formatSubAgentParent(sub); parent != "" {
+		line += " | parent=" + parent
+	}
+	line += fmt.Sprintf(" | state=%s | agent=%s | model=%s | desc=%s", blankToDefault(sub.State, "unknown"), sub.AgentDefName, running, sub.TaskDesc)
+	if strings.TrimSpace(sub.LastSummary) != "" {
+		line += " | summary=" + sub.LastSummary
+	}
+	return line
+}
+
+// formatSubAgentParent renders a worker's owning task as "<agent>/<task>", or
+// "" for a worker owned directly by the main agent — its parent is whoever
+// reads this checkpoint, so naming it adds nothing.
+func formatSubAgentParent(sub SubAgentInfo) string {
+	owner := strings.TrimSpace(sub.OwnerAgentID)
+	if owner == "" {
+		return ""
+	}
+	if task := strings.TrimSpace(sub.OwnerTaskID); task != "" {
+		return owner + "/" + task
+	}
+	return owner
+}
+
+// formatSubAgentPromptLines renders the active worker rows plus omission
+// footers shared by the summarizer input ("Current sub-agent state") and the
+// checkpoint's authoritative "## SubAgent State" section. Omitted workers are
+// split by why they were omitted: an active worker beyond the prompt limit is
+// still running and will report back through mailbox events, which is not the
+// same fact as a settled historical task.
+func formatSubAgentPromptLines(subAgents []SubAgentInfo) string {
+	visible, omittedActive, omittedInactive := subAgentsForCompactionPrompt(subAgents)
 	if len(visible) == 0 {
-		if omitted > 0 {
-			return fmt.Sprintf("- (none active; %d historical or completed task(s) omitted)", omitted)
+		if omittedInactive > 0 {
+			return fmt.Sprintf("- (none active; %d historical or completed task(s) omitted)", omittedInactive)
 		}
 		return "- (none active)"
 	}
-	var lines []string
+	lines := make([]string, 0, len(visible)+2)
 	for _, sub := range visible {
-		running := sub.RunningRef
-		if running == "" {
-			running = sub.SelectedRef
-		}
-		line := fmt.Sprintf("- %s | task=%s | state=%s | agent=%s | model=%s | desc=%s", sub.InstanceID, sub.TaskID, blankToDefault(sub.State, "unknown"), sub.AgentDefName, running, sub.TaskDesc)
-		if strings.TrimSpace(sub.LastSummary) != "" {
-			line += " | summary=" + sub.LastSummary
-		}
-		lines = append(lines, line)
+		lines = append(lines, formatSubAgentInfoLine(sub))
 	}
-	if omitted > 0 {
-		lines = append(lines, fmt.Sprintf("- (%d historical or completed task(s) omitted from compaction prompt)", omitted))
+	if omittedActive > 0 {
+		lines = append(lines, fmt.Sprintf("- (%d active task(s) beyond the prompt limit omitted; they keep running and report back through mailbox events)", omittedActive))
+	}
+	if omittedInactive > 0 {
+		lines = append(lines, fmt.Sprintf("- (%d historical or completed task(s) omitted from compaction prompt)", omittedInactive))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func formatSubAgentsAsBullets(subAgents []SubAgentInfo) string {
+	return formatSubAgentPromptLines(subAgents)
+}
+
+// ensureCompactionSubAgentSnapshot replaces whatever "## SubAgent State"
+// section a model-authored summary carries with the authoritative runtime
+// rendering. Unlike todos — which the model legitimately classifies by
+// relevance — the set of active workers is a runtime fact whose only
+// legitimate source is the snapshot handed to the summarizer; a restatement
+// can silently drop a delegated task (the failure the todo and skills
+// snapshots already guard against), and anything it adds beyond that snapshot
+// is at best an echo of archived history that stays recoverable from the
+// archive files. The rendering is deterministic and position-preserving, so
+// the structured-fallback and truncate-only summaries pass through unchanged
+// and the required-section ordering validation still applies afterwards.
+func ensureCompactionSubAgentSnapshot(summary string, subAgents []SubAgentInfo) string {
+	if strings.TrimSpace(summary) == "" {
+		return summary
+	}
+	pos := findMarkdownHeadingLine(summary, "## SubAgent State")
+	if pos < 0 {
+		return summary
+	}
+	_, end, ok := markdownSectionBounds(summary, "## SubAgent State")
+	if !ok {
+		return summary
+	}
+	rendered := formatSubAgentsAsBullets(subAgents)
+	prefix := strings.TrimRight(summary[:pos], "\n")
+	tail := strings.TrimLeft(summary[end:], "\n")
+	var b strings.Builder
+	b.WriteString(prefix)
+	b.WriteString("\n## SubAgent State\n")
+	b.WriteString(rendered)
+	if tail != "" {
+		b.WriteString("\n\n")
+		b.WriteString(tail)
+	}
+	return b.String()
 }
 
 func formatBackgroundObjectsForPrompt(jobs []recovery.BackgroundObjectState) string {
@@ -1298,7 +1405,7 @@ func buildCompactionPromptWithKeyFiles(input *compactionInput, historyPath strin
 	sb.WriteString("\n\nCurrent todo list from the pre-compaction agent. These todos are not automatically authoritative after compaction. Evaluate each item against the latest user request and classify it as active/relevant, completed/background, or stale/superseded in the summary:\n")
 	sb.WriteString(formatTodosForPrompt(todos))
 	sb.WriteString("\n\nCurrent sub-agent state:\n")
-	sb.WriteString(formatSubAgentsForPrompt(subAgents))
+	sb.WriteString(formatSubAgentsAsBullets(subAgents))
 	sb.WriteString("\n\nCurrent background objects:\n")
 	sb.WriteString(formatBackgroundObjectsForPrompt(backgroundObjects))
 	if input != nil && strings.TrimSpace(input.PriorCheckpoint) != "" {
@@ -1326,33 +1433,6 @@ func formatTodosForPrompt(todos []tools.TodoItem) string {
 		}
 		sb.WriteString(line)
 		sb.WriteByte('\n')
-	}
-	return strings.TrimRight(sb.String(), "\n")
-}
-
-func formatSubAgentsForPrompt(subAgents []SubAgentInfo) string {
-	visible, omitted := subAgentsForCompactionPrompt(subAgents)
-	if len(visible) == 0 {
-		if omitted > 0 {
-			return fmt.Sprintf("- (none active; %d historical or completed task(s) omitted)", omitted)
-		}
-		return "- (none active)"
-	}
-	var sb strings.Builder
-	for _, sub := range visible {
-		running := sub.RunningRef
-		if running == "" {
-			running = sub.SelectedRef
-		}
-		fmt.Fprintf(&sb, "- %s | task=%s | state=%s | agent=%s | model=%s | desc=%s",
-			sub.InstanceID, sub.TaskID, blankToDefault(sub.State, "unknown"), sub.AgentDefName, running, sub.TaskDesc)
-		if strings.TrimSpace(sub.LastSummary) != "" {
-			fmt.Fprintf(&sb, " | summary=%s", sub.LastSummary)
-		}
-		sb.WriteByte('\n')
-	}
-	if omitted > 0 {
-		fmt.Fprintf(&sb, "- (%d historical or completed task(s) omitted from compaction prompt)\n", omitted)
 	}
 	return strings.TrimRight(sb.String(), "\n")
 }

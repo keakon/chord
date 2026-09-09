@@ -305,6 +305,12 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 	// The model may classify todos by relevance, but it must not be able to
 	// erase the runtime's complete todo state from the durable checkpoint.
 	summaryText = ensureCompactionTodoSnapshot(summaryText, todos)
+	// Active workers are the same kind of runtime fact: the model may restate
+	// the snapshot it was given, but must not be able to drop a delegated task
+	// from the checkpoint. The deterministic rendering below replaces the
+	// model's section in place; it is idempotent for the fallback paths, which
+	// already render the authoritative section themselves.
+	summaryText = ensureCompactionSubAgentSnapshot(summaryText, subAgents)
 
 	if ctx.Err() != nil {
 		return nil, ctx.Err()

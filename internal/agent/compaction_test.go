@@ -4461,10 +4461,10 @@ func TestCompactionHeadSplitFallsBackToFullHeadWhenSafeTailIsTooLarge(t *testing
 	}
 }
 
-func TestFormatSubAgentsForPromptOmitsCompletedTasksAndTruncates(t *testing.T) {
+func TestFormatSubAgentsAsBulletsOmitsCompletedTasksAndTruncates(t *testing.T) {
 	longDesc := strings.Repeat("desc ", 120)
 	longSummary := strings.Repeat("summary ", 120)
-	got := formatSubAgentsForPrompt([]SubAgentInfo{
+	got := formatSubAgentsAsBullets([]SubAgentInfo{
 		{
 			InstanceID:   "coder-1",
 			TaskID:       "adhoc-1",
@@ -4510,6 +4510,172 @@ func TestFormatSubAgentsAsBulletsReportsNoActiveTasksWhenOnlyHistoricalRemain(t 
 	}})
 	if !strings.Contains(got, "none active") || !strings.Contains(got, "omitted") {
 		t.Fatalf("unexpected historical-only summary: %q", got)
+	}
+}
+
+func TestSubAgentPromptOrderingKeepsWaitingTasksFirstAndDeterministic(t *testing.T) {
+	subs := []SubAgentInfo{
+		{InstanceID: "w1", TaskID: "t-w1", State: string(SubAgentStateRunning)},
+		{InstanceID: "w2", TaskID: "t-w2", State: string(SubAgentStateWaitingMain)},
+		{InstanceID: "w3", TaskID: "t-w3", State: string(SubAgentStateIdle)},
+		{InstanceID: "w4", TaskID: "t-w4", State: string(SubAgentStateWaitingDescendant)},
+	}
+	first, _, _ := subAgentsForCompactionPrompt(subs)
+	reversed := make([]SubAgentInfo, len(subs))
+	for i, s := range subs {
+		reversed[len(subs)-1-i] = s
+	}
+	second, _, _ := subAgentsForCompactionPrompt(reversed)
+	want := []string{"t-w2", "t-w4", "t-w1", "t-w3"}
+	var firstIDs, secondIDs []string
+	for _, s := range first {
+		firstIDs = append(firstIDs, s.TaskID)
+	}
+	for _, s := range second {
+		secondIDs = append(secondIDs, s.TaskID)
+	}
+	if !slices.Equal(firstIDs, want) || !slices.Equal(secondIDs, want) {
+		t.Fatalf("prompt order is not priority-aware or not input-order-independent: first=%v second=%v want=%v", firstIDs, secondIDs, want)
+	}
+}
+
+func TestSubAgentPromptLimitCountsActiveAndInactiveOmissionsSeparately(t *testing.T) {
+	subs := make([]SubAgentInfo, 0, 10)
+	for i := 0; i < 8; i++ {
+		subs = append(subs, SubAgentInfo{InstanceID: fmt.Sprintf("w%d", i), TaskID: fmt.Sprintf("t-%d", i), State: string(SubAgentStateRunning), TaskDesc: fmt.Sprintf("task %d", i)})
+	}
+	subs = append(subs, SubAgentInfo{InstanceID: "done-1", TaskID: "t-done", State: string(SubAgentStateCompleted)})
+	visible, omittedActive, omittedInactive := subAgentsForCompactionPrompt(subs)
+	if len(visible) != compactPromptSubAgentLimit {
+		t.Fatalf("visible = %d, want %d", len(visible), compactPromptSubAgentLimit)
+	}
+	if omittedActive != 2 {
+		t.Fatalf("omittedActive = %d, want 2 (running workers beyond the limit)", omittedActive)
+	}
+	if omittedInactive != 1 {
+		t.Fatalf("omittedInactive = %d, want 1 (the completed task)", omittedInactive)
+	}
+	got := formatSubAgentsAsBullets(subs)
+	if !strings.Contains(got, "2 active task(s) beyond the prompt limit omitted") {
+		t.Fatalf("active omission footer missing:\n%s", got)
+	}
+	if !strings.Contains(got, "1 historical or completed task(s) omitted") {
+		t.Fatalf("inactive omission footer missing:\n%s", got)
+	}
+}
+
+func TestFormatSubAgentInfoLineIncludesNestedParentOnly(t *testing.T) {
+	nested := formatSubAgentInfoLine(SubAgentInfo{
+		InstanceID:   "worker-1",
+		TaskID:       "adhoc-1",
+		OwnerAgentID: "parent-1",
+		OwnerTaskID:  "parent-task",
+		State:        string(SubAgentStateRunning),
+		AgentDefName: "coder",
+		TaskDesc:     "build the widget",
+	})
+	if !strings.Contains(nested, " | parent=parent-1/parent-task") {
+		t.Fatalf("nested worker row missing its parent: %q", nested)
+	}
+	mainOwned := formatSubAgentInfoLine(SubAgentInfo{
+		InstanceID:   "worker-2",
+		TaskID:       "adhoc-2",
+		State:        string(SubAgentStateRunning),
+		AgentDefName: "coder",
+		TaskDesc:     "another task",
+	})
+	if strings.Contains(mainOwned, "parent=") {
+		t.Fatalf("main-agent-owned worker row should not name a parent: %q", mainOwned)
+	}
+}
+
+func TestEnsureCompactionSubAgentSnapshotRestoresRuntimeWorkers(t *testing.T) {
+	modelSummary := "## Current User Request\n- continue current task\n\n## Active Objective\n- continue current task\n\n## Background Goals\n- none\n\n## User Constraints\n- none\n\n## Progress\n- progress recorded\n\n## Key Decisions\n- decisions captured\n\n## Files and Evidence\n- Archived history: history-1.md\n- src/current_task.go\n\n## Todo State\n- Active/relevant to latest request: (none)\n- Completed/background: (none)\n- Stale/superseded: (none)\n\n## SubAgent State\n- none active\n\n## Open Problems\n- none\n\n## Next Step\n- Inspect src/current_task.go and continue the current task."
+	subAgents := []SubAgentInfo{{
+		InstanceID:   "worker-1",
+		TaskID:       "adhoc-1",
+		State:        string(SubAgentStateRunning),
+		AgentDefName: "coder",
+		TaskDesc:     "build the widget",
+	}}
+	got := ensureCompactionSubAgentSnapshot(modelSummary, subAgents)
+	if !strings.Contains(got, "- worker-1 | task=adhoc-1") {
+		t.Fatalf("running worker dropped from checkpoint:\n%s", got)
+	}
+	if idx := strings.Index(got, "## SubAgent State"); idx < 0 || idx > strings.Index(got, "## Open Problems") {
+		t.Fatalf("SubAgent State section displaced out of required order:\n%s", got)
+	}
+	if err := validateCompactionSummary(got); err != nil {
+		t.Fatalf("ensured summary no longer validates: %v\n%s", err, got)
+	}
+	// An already-authoritative section must pass through unchanged (fallback
+	// and truncate-only summaries render it deterministically themselves).
+	if once := ensureCompactionSubAgentSnapshot(got, subAgents); once != got {
+		t.Fatalf("ensure is not idempotent over its own output")
+	}
+}
+
+func TestEnsureCompactionSubAgentSnapshotNormalizesPhantomRestatements(t *testing.T) {
+	modelSummary := "## Current User Request\n- continue current task\n\n## Active Objective\n- continue current task\n\n## Background Goals\n- none\n\n## User Constraints\n- none\n\n## Progress\n- progress recorded\n\n## Key Decisions\n- decisions captured\n\n## Files and Evidence\n- Archived history: history-1.md\n\n## Todo State\n- none\n\n## SubAgent State\n- agent-2 | task=adhoc-2 | state=running | agent=coder | desc=older restatement\n\n## Open Problems\n- none\n\n## Next Step\n- Inspect src/current_task.go and continue the current task."
+	got := ensureCompactionSubAgentSnapshot(modelSummary, nil)
+	if !strings.Contains(got, "## SubAgent State\n- (none active)") {
+		t.Fatalf("phantom worker restatement survived the authoritative replace:\n%s", got)
+	}
+	if strings.Contains(got, "agent-2") {
+		t.Fatalf("settled worker still described as running in the checkpoint:\n%s", got)
+	}
+	if err := validateCompactionSummary(got); err != nil {
+		t.Fatalf("ensured summary no longer validates: %v\n%s", err, got)
+	}
+}
+
+func TestTaskInfosForCompactionCarriesOwnerIdentity(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	parent := &SubAgent{
+		instanceID:   "parent-1",
+		taskID:       "parent-task",
+		agentDefName: "planner",
+		cancel:       func() {},
+	}
+	worker := &SubAgent{
+		instanceID:   "worker-1",
+		taskID:       "adhoc-worker",
+		agentDefName: "coder",
+		taskDesc:     "build the thing",
+		ownerAgentID: "parent-1",
+		ownerTaskID:  "parent-task",
+		depth:        1,
+		cancel:       func() {},
+	}
+	a.subs.mu.Lock()
+	a.subs.subAgents["parent-1"] = parent
+	a.subs.subAgents["worker-1"] = worker
+	a.subs.taskRecords["done-task"] = &DurableTaskRecord{
+		TaskID:           "done-task",
+		LatestInstanceID: "worker-old",
+		AgentDefName:     "coder",
+		TaskDesc:         "finished work",
+		OwnerAgentID:     "parent-1",
+		OwnerTaskID:      "parent-task",
+		Depth:            1,
+		State:            string(SubAgentStateCompleted),
+		LastSummary:      "done",
+	}
+	a.subs.mu.Unlock()
+
+	infos := a.taskInfosForCompaction()
+	byTask := make(map[string]SubAgentInfo, len(infos))
+	for _, info := range infos {
+		byTask[info.TaskID] = info
+	}
+	for _, taskID := range []string{"adhoc-worker", "done-task"} {
+		info, ok := byTask[taskID]
+		if !ok {
+			t.Fatalf("task %s missing from compaction infos: %v", taskID, byTask)
+		}
+		if info.OwnerAgentID != "parent-1" || info.OwnerTaskID != "parent-task" || info.Depth != 1 {
+			t.Fatalf("task %s owner = (%q, %q, depth %d), want (parent-1, parent-task, 1)", taskID, info.OwnerAgentID, info.OwnerTaskID, info.Depth)
+		}
 	}
 }
 

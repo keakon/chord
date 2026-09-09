@@ -1096,12 +1096,16 @@ func (a *MainAgent) taskInfosForCompaction() []SubAgentInfo {
 			}
 			runningRef = formatModelRefForNotification(client.RunningModelRef(), selectedRef, client.ActiveVariant())
 		}
+		ownerAgentID, ownerTaskID, depth, _ := sub.ownerSnapshot()
 		state := sub.State()
 		summary := sub.LastSummary()
 		artifact := sub.LastArtifact()
 		liveInfos = append(liveInfos, SubAgentInfo{
 			InstanceID:       sub.instanceID,
 			TaskID:           sub.taskID,
+			OwnerAgentID:     ownerAgentID,
+			OwnerTaskID:      ownerTaskID,
+			Depth:            depth,
 			AgentDefName:     sub.agentDefName,
 			TaskDesc:         sub.taskDesc,
 			ModelName:        modelName,
@@ -1142,6 +1146,9 @@ func (a *MainAgent) taskInfosForCompaction() []SubAgentInfo {
 		historical = append(historical, SubAgentInfo{
 			InstanceID:   strings.TrimSpace(rec.LatestInstanceID),
 			TaskID:       taskID,
+			OwnerAgentID: strings.TrimSpace(rec.OwnerAgentID),
+			OwnerTaskID:  strings.TrimSpace(rec.OwnerTaskID),
+			Depth:        rec.Depth,
 			AgentDefName: strings.TrimSpace(rec.AgentDefName),
 			TaskDesc:     strings.TrimSpace(rec.TaskDesc),
 			Persistence:  rec.Persistence,
