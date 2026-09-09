@@ -524,8 +524,8 @@ func appendTaskHandleFieldRows(out *[]string, h tools.TaskHandle) {
 	add("status", h.Status)
 	add("agent_id", h.AgentID)
 	if h.TaskID != "" {
-		// The readable form drops the internal "adhoc-" prefix, which the UI
-		// never surfaces (see the collapsed control-tool cards).
+		// The readable form drops the internal "adhoc-" prefix and marks the
+		// number with "#" so it still reads as a task handle.
 		add("task_id", extractReadableTarget(h.TaskID))
 	}
 	add("previous_agent_id", h.PreviousAgentID)

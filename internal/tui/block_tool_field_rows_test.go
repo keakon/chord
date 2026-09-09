@@ -125,12 +125,13 @@ func TestDelegateWorkerRendersHandleFieldsAndTrailingNote(t *testing.T) {
 	plain := stripANSI(strings.Join(b.Render(120, ""), "\n"))
 
 	// Every non-empty handle field renders as a "↳ Label: value" row. The
-	// task_id drops the internal "adhoc-" prefix; the write scope is
-	// condensed to a single compact value, not re-expanded as JSON.
+	// task_id drops the internal "adhoc-" prefix and keeps a "#" marker so
+	// the number still reads as a handle; the write scope is condensed to a
+	// single compact value, not re-expanded as JSON.
 	for _, want := range []string{
 		"↳ Status: started",
 		"↳ Agent id: expert-12",
-		"↳ Task id: 7",
+		"↳ Task id: #7",
 		"↳ Plan task ref: view-switch",
 		"↳ Semantic task key: tui-view-switch-streaming-card-order",
 		"↳ Expected write scope: read_only=true",

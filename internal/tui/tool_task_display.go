@@ -150,8 +150,8 @@ func taskToolExpandedHandleLines(result string) []string {
 		lines = append(lines, "previous_agent_id: "+sanitizeToolDisplayText(handle.PreviousAgentID))
 	}
 	if handle.TaskID != "" {
-		// The readable form drops the internal "adhoc-" prefix, which the UI
-		// never surfaces (see the collapsed control-tool cards).
+		// The readable form drops the internal "adhoc-" prefix and marks the
+		// number with "#" so it still reads as a task handle.
 		lines = append(lines, "task_id: "+sanitizeToolDisplayText(extractReadableTarget(handle.TaskID)))
 	}
 	if handle.Status != "" {
@@ -198,12 +198,21 @@ func parseNotifyToolArgs(argsJSON string) notifyToolArgs {
 	return parsed
 }
 
+// extractReadableTarget renders a task handle for display. An ad-hoc handle
+// ("adhoc-8") drops the internal "adhoc-" prefix but keeps a "#" marker, so
+// the bare number still reads as a task handle instead of being taken for an
+// unrelated number such as a plan task's own "8". Any other form — a plan
+// task reference, say — is shown unchanged.
 func extractReadableTarget(taskID string) string {
 	if taskID == "" {
 		return ""
 	}
-	if after, ok := strings.CutPrefix(taskID, "adhoc-"); ok {
-		return after
+	after, ok := strings.CutPrefix(taskID, "adhoc-")
+	if !ok {
+		return taskID
 	}
-	return taskID
+	if after == "" {
+		return ""
+	}
+	return "#" + after
 }

@@ -3139,7 +3139,7 @@ func TestTaskCardAlwaysRendersItsBodyUnderABareHeader(t *testing.T) {
 	if strings.Contains(joined, "▸") || strings.Contains(joined, "▾") {
 		t.Fatalf("expected Delegate card to drop the disclosure marker; got:\n%s", joined)
 	}
-	for _, want := range []string{"↳ Description:", "review tests", "check coverage", "update docs", "↳ Worker:", "↳ Agent id: reviewer-2", "↳ Task id: 7"} {
+	for _, want := range []string{"↳ Description:", "review tests", "check coverage", "update docs", "↳ Worker:", "↳ Agent id: reviewer-2", "↳ Task id: #7"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("expected Delegate body to contain %q; got:\n%s", want, joined)
 		}
@@ -3237,7 +3237,7 @@ func TestExpandedTaskShowsDescriptionAndWorkerWithTaskID(t *testing.T) {
 	}
 	// The worker area keeps the task id in its readable form: the internal
 	// "adhoc-" prefix never reaches the UI.
-	if !strings.Contains(joined, "↳ Task id: 7") {
+	if !strings.Contains(joined, "↳ Task id: #7") {
 		t.Fatalf("expected expanded Delegate worker area to include the readable task_id; got:\n%s", joined)
 	}
 	if strings.Contains(joined, "adhoc-") {
@@ -5903,8 +5903,8 @@ func TestCancelSubAgentCollapsedDoesNotShowRawJSON(t *testing.T) {
 	if !strings.Contains(joined, "cancel") {
 		t.Fatalf("expected cancel header to show tool name; got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "7") {
-		t.Fatalf("expected cancel to show readable target (7 not adhoc-7); got:\n%s", joined)
+	if !strings.Contains(joined, "#7") {
+		t.Fatalf("expected cancel to show readable target (#7 not adhoc-7); got:\n%s", joined)
 	}
 	if strings.Contains(joined, "adhoc-7") {
 		t.Fatalf("expected cancel collapsed view to not expose adhoc- prefix; got:\n%s", joined)
@@ -5981,8 +5981,8 @@ func TestNotifySubAgentCollapsedDoesNotShowRawJSON(t *testing.T) {
 	if !strings.Contains(joined, "notify") {
 		t.Fatalf("expected notify header to show tool name; got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "5") {
-		t.Fatalf("expected notify to show readable target (5 not adhoc-5); got:\n%s", joined)
+	if !strings.Contains(joined, "#5") {
+		t.Fatalf("expected notify to show readable target (#5 not adhoc-5); got:\n%s", joined)
 	}
 	if strings.Contains(joined, "adhoc-5") {
 		t.Fatalf("expected notify collapsed view to not expose adhoc- prefix; got:\n%s", joined)
