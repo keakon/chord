@@ -486,14 +486,10 @@ func (m *Model) buildInfoPanelGitBlock(lineW int) string {
 	if !info.Present {
 		return ""
 	}
-	summary := gitStatusSummary(info)
-	if summary == "" {
-		return ""
-	}
 	expanded := !m.isInfoPanelSectionCollapsed(infoPanelSectionGit)
-	headerSummary := summary
-	if expanded {
-		headerSummary = ""
+	headerSummary := ""
+	if !expanded {
+		headerSummary = gitStatusSummaryBudgeted(info, infoPanelCollapsibleSummaryBudget(lineW, expanded, "GIT"))
 	}
 	lines := []string{renderInfoPanelCollapsibleHeader(lineW, expanded, "GIT", headerSummary)}
 	if !expanded {

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	tea "github.com/keakon/bubbletea/v2"
+	"github.com/mattn/go-runewidth"
 )
 
 const (
@@ -20,6 +21,11 @@ const (
 	gitStatusBackgroundInitialInterval = time.Minute
 	gitStatusBackgroundMaxInterval     = 5 * time.Minute
 	gitStatusCommandTimeout            = time.Second
+	// gitStatusSummaryMinRefWidth caps how many display columns are reserved for
+	// an over-long ref when status counts compete for the row: counts are dropped
+	// only while the ref could not otherwise keep at least this many columns (or
+	// its full width, when the ref itself is shorter).
+	gitStatusSummaryMinRefWidth = 6
 )
 
 type gitStatusState struct {
@@ -365,10 +371,9 @@ func linkedWorktreeName(root, gitDir string) string {
 	return ""
 }
 
-func gitStatusSummary(info gitStatusInfo) string {
-	if !info.Present {
-		return ""
-	}
+// gitStatusRef returns the displayed repository ref: the branch with a
+// linked-worktree suffix, or the short commit / "detached" when not on a branch.
+func gitStatusRef(info gitStatusInfo) string {
 	ref := info.Branch
 	if ref == "" {
 		ref = info.Commit
@@ -379,21 +384,81 @@ func gitStatusSummary(info gitStatusInfo) string {
 	if info.WorktreeName != "" {
 		ref += "@" + info.WorktreeName
 	}
-	parts := []string{ref}
+	return ref
+}
+
+// gitStatusStatusPart is one numeric status marker of the collapsed git header
+// summary. The slice keeps the canonical display order (sync, staged, changed,
+// stash); dropWeight ranks markers so the least useful one can be dropped first
+// when the counts would leave no room for a recognizable ref — the changed-file
+// count is the most actionable and survives longest, stash counts go first.
+type gitStatusStatusPart struct {
+	text       string
+	dropWeight int
+}
+
+func gitStatusStatusParts(info gitStatusInfo) []gitStatusStatusPart {
+	var parts []gitStatusStatusPart
 	if info.Ahead > 0 {
-		parts = append(parts, fmt.Sprintf("↑%d", info.Ahead))
+		parts = append(parts, gitStatusStatusPart{text: fmt.Sprintf("↑%d", info.Ahead), dropWeight: 2})
 	}
 	if info.Behind > 0 {
-		parts = append(parts, fmt.Sprintf("↓%d", info.Behind))
+		parts = append(parts, gitStatusStatusPart{text: fmt.Sprintf("↓%d", info.Behind), dropWeight: 3})
 	}
 	if info.StagedFiles > 0 {
-		parts = append(parts, fmt.Sprintf("+%d", info.StagedFiles))
+		parts = append(parts, gitStatusStatusPart{text: fmt.Sprintf("+%d", info.StagedFiles), dropWeight: 1})
 	}
 	if info.ChangedFiles > 0 {
-		parts = append(parts, fmt.Sprintf("!%d", info.ChangedFiles))
+		parts = append(parts, gitStatusStatusPart{text: fmt.Sprintf("!%d", info.ChangedFiles), dropWeight: 0})
 	}
 	if info.Stashes > 0 {
-		parts = append(parts, fmt.Sprintf("*%d", info.Stashes))
+		parts = append(parts, gitStatusStatusPart{text: fmt.Sprintf("*%d", info.Stashes), dropWeight: 4})
 	}
-	return strings.Join(parts, " ")
+	return parts
+}
+
+func gitStatusJoinStatusParts(parts []gitStatusStatusPart) string {
+	texts := make([]string, 0, len(parts))
+	for _, p := range parts {
+		texts = append(texts, p.text)
+	}
+	return strings.Join(texts, " ")
+}
+
+// gitStatusSummaryBudgeted composes the collapsed git header summary to fit
+// maxW display columns. Status counts always stay fully visible (the least
+// useful one is dropped first only when they would crowd the ref below the
+// minimum); the ref itself is truncated from the tail, so a long branch name
+// no longer hides how many files changed or are staged.
+func gitStatusSummaryBudgeted(info gitStatusInfo, maxW int) string {
+	if maxW < 1 {
+		return ""
+	}
+	ref := gitStatusRef(info)
+	parts := gitStatusStatusParts(info)
+	if len(parts) == 0 {
+		return truncateOneLine(ref, maxW)
+	}
+	joined := gitStatusJoinStatusParts(parts)
+	// Reserve room for the ref — its full width when short, otherwise at least
+	// the minimum recognizable width — before considering which counts to drop.
+	needRef := min(runewidth.StringWidth(ref), gitStatusSummaryMinRefWidth)
+	for len(parts) > 1 && maxW-1-runewidth.StringWidth(joined) < needRef {
+		drop := 0
+		for i := 1; i < len(parts); i++ {
+			if parts[i].dropWeight > parts[drop].dropWeight {
+				drop = i
+			}
+		}
+		parts = append(parts[:drop], parts[drop+1:]...)
+		joined = gitStatusJoinStatusParts(parts)
+	}
+	refW := maxW - 1 - runewidth.StringWidth(joined)
+	if refW < 1 {
+		return joined
+	}
+	if runewidth.StringWidth(ref) > refW {
+		ref = truncateOneLine(ref, refW)
+	}
+	return ref + " " + joined
 }

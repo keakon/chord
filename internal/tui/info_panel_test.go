@@ -1235,6 +1235,18 @@ func TestInfoPanelGitBlockCollapsedByDefault(t *testing.T) {
 	}
 }
 
+func TestInfoPanelGitBlockCollapsedKeepsCountsWithLongBranch(t *testing.T) {
+	m := NewModel(newInfoPanelAgent())
+	m.gitStatus.Info = gitStatusInfo{Present: true, Branch: "feature/very-long-branch-name-here", ChangedFiles: 2}
+	plain := stripANSI(m.renderInfoPanel(32, 24))
+	if !strings.Contains(plain, "... !2") {
+		t.Fatalf("long branch should be truncated without hiding the changed count, got:\n%s", plain)
+	}
+	if strings.Contains(plain, "branch-name-here") {
+		t.Fatalf("branch tail should be truncated, got:\n%s", plain)
+	}
+}
+
 func TestInfoPanelGitBlockExpanded(t *testing.T) {
 	m := NewModel(newInfoPanelAgent())
 	m.gitStatus.Info = gitStatusInfo{Present: true, Branch: "main", WorktreeName: "fix-ui", Ahead: 2, Behind: 1, ChangedFiles: 3, StagedFiles: 1, Stashes: 2}

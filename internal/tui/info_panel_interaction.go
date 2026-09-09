@@ -101,31 +101,56 @@ func (m *Model) recordInfoPanelAgentHitBox(agentID string, startY, endY int) {
 	})
 }
 
-func renderInfoPanelCollapsibleHeader(lineW int, expanded bool, title string, summary string) string {
-	marker := "▶"
+const (
+	infoPanelCollapsibleMarkerOpen   = "▼"
+	infoPanelCollapsibleMarkerClosed = "▶"
+	infoPanelCollapsibleSummarySep   = " · "
+)
+
+func renderInfoPanelCollapsibleHeaderLeft(expanded bool, title string) string {
+	marker := infoPanelCollapsibleMarkerClosed
 	if expanded {
-		marker = "▼"
+		marker = infoPanelCollapsibleMarkerOpen
 	}
-	left := InfoPanelTitle.Render(fmt.Sprintf("%s %s", marker, title))
+	return InfoPanelTitle.Render(fmt.Sprintf("%s %s", marker, title))
+}
+
+// infoPanelCollapsibleSummaryBudget returns the max display width left for a
+// section summary next to its header title and separator on one row, or 0 when
+// the row is too narrow to hold the separator plus any summary.
+func infoPanelCollapsibleSummaryBudget(lineW int, expanded bool, title string) int {
+	availSummary := lineW - lipgloss.Width(renderInfoPanelCollapsibleHeaderLeft(expanded, title))
+	sepWidth := lipgloss.Width(infoPanelCollapsibleSummarySep)
+	if availSummary <= sepWidth {
+		return 0
+	}
+	return availSummary - sepWidth
+}
+
+func renderInfoPanelCollapsibleHeader(lineW int, expanded bool, title string, summary string) string {
+	left := renderInfoPanelCollapsibleHeaderLeft(expanded, title)
 	if summary == "" {
 		return InfoPanelLineBg.Width(lineW).Render(left)
 	}
-	availSummary := lineW - lipgloss.Width(left)
-	if availSummary <= 0 {
-		return InfoPanelLineBg.Width(lineW).Render(left)
-	}
-	sepText := " · "
-	sepWidth := lipgloss.Width(sepText)
-	var right string
-	if availSummary <= sepWidth {
-		right = InfoPanelDim.Render(truncateOneLine(summary, availSummary))
-	} else {
-		right = lipgloss.JoinHorizontal(
+	budget := infoPanelCollapsibleSummaryBudget(lineW, expanded, title)
+	if budget <= 0 {
+		// Too narrow for the separator: fall back to truncating the summary
+		// against the width left after the title.
+		availSummary := lineW - lipgloss.Width(left)
+		if availSummary <= 0 {
+			return InfoPanelLineBg.Width(lineW).Render(left)
+		}
+		return InfoPanelLineBg.Width(lineW).Render(lipgloss.JoinHorizontal(
 			lipgloss.Left,
-			InfoPanelDim.Render(sepText),
-			InfoPanelDim.Render(truncateOneLine(summary, availSummary-sepWidth)),
-		)
+			left,
+			InfoPanelDim.Render(truncateOneLine(summary, availSummary)),
+		))
 	}
+	right := lipgloss.JoinHorizontal(
+		lipgloss.Left,
+		InfoPanelDim.Render(infoPanelCollapsibleSummarySep),
+		InfoPanelDim.Render(truncateOneLine(summary, budget)),
+	)
 	line := lipgloss.JoinHorizontal(lipgloss.Left, left, right)
 	return InfoPanelLineBg.Width(lineW).Render(line)
 }

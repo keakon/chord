@@ -1,8 +1,11 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/mattn/go-runewidth"
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/message"
@@ -98,10 +101,60 @@ func TestCountGitStashEntries(t *testing.T) {
 	}
 }
 
-func TestGitStatusSummary(t *testing.T) {
-	got := gitStatusSummary(gitStatusInfo{Present: true, Branch: "main", WorktreeName: "fix-ui", Ahead: 3, Behind: 1, ChangedFiles: 2, StagedFiles: 1, Stashes: 4})
+func TestGitStatusSummaryBudgetedFitsKeepsCanonicalOrder(t *testing.T) {
+	info := gitStatusInfo{Present: true, Branch: "main", WorktreeName: "fix-ui", Ahead: 3, Behind: 1, ChangedFiles: 2, StagedFiles: 1, Stashes: 4}
+	// Ample width: the composition must be byte-identical to the historical
+	// ref-first summary, so nothing regresses for branches that already fit.
+	got := gitStatusSummaryBudgeted(info, 100)
 	if got != "main@fix-ui ↑3 ↓1 +1 !2 *4" {
-		t.Fatalf("summary = %q", got)
+		t.Fatalf("summary = %q, want %q", got, "main@fix-ui ↑3 ↓1 +1 !2 *4")
+	}
+}
+
+func TestGitStatusSummaryBudgetedLongBranchKeepsCounts(t *testing.T) {
+	info := gitStatusInfo{Present: true, Branch: "feature/very-long-branch-name-here", ChangedFiles: 2}
+	got := gitStatusSummaryBudgeted(info, 22)
+	if !strings.HasSuffix(got, "!2") {
+		t.Fatalf("long branch must not hide the changed-file count, got %q", got)
+	}
+	if !strings.HasPrefix(got, "feature/") {
+		t.Fatalf("branch head should stay recognizable, got %q", got)
+	}
+	if strings.Contains(got, "branch-name-here") {
+		t.Fatalf("branch tail should be truncated, got %q", got)
+	}
+	if w := runewidth.StringWidth(got); w > 22 {
+		t.Fatalf("summary width = %d, want <= 22: %q", w, got)
+	}
+}
+
+func TestGitStatusSummaryBudgetedShortRefKeepsAllCounts(t *testing.T) {
+	info := gitStatusInfo{Present: true, Branch: "ab", Ahead: 123, Behind: 12, StagedFiles: 1, ChangedFiles: 1, Stashes: 5}
+	// A short ref already fits, so every count stays visible.
+	got := gitStatusSummaryBudgeted(info, 22)
+	if got != "ab ↑123 ↓12 +1 !1 *5" {
+		t.Fatalf("summary = %q, want %q", got, "ab ↑123 ↓12 +1 !1 *5")
+	}
+}
+
+func TestGitStatusSummaryBudgetedDropsLeastUsefulCountsForLongRef(t *testing.T) {
+	original := runewidth.DefaultCondition.EastAsianWidth
+	t.Cleanup(func() { runewidth.DefaultCondition.EastAsianWidth = original })
+	info := gitStatusInfo{Present: true, Branch: "feature/very-long-branch-name-here", Ahead: 123, Behind: 12, StagedFiles: 1, ChangedFiles: 1, Stashes: 5}
+	for _, testCase := range []struct {
+		name string
+		wide bool
+		want string
+	}{
+		{name: "narrow", want: "feat... ↑123 ↓12 +1 !1"},
+		{name: "wide", wide: true, want: "feature... ↑123 +1 !1"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			runewidth.DefaultCondition.EastAsianWidth = testCase.wide
+			if got := gitStatusSummaryBudgeted(info, 22); got != testCase.want {
+				t.Fatalf("summary = %q, want %q", got, testCase.want)
+			}
+		})
 	}
 }
 
