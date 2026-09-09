@@ -69,7 +69,7 @@ providers:
     type: chat-completions
     api_url: https://open.bigmodel.cn/api/coding/paas/v4/chat/completions
     models:
-      glm-5.2:
+      glm-5.3: &bigmodel-glm-5-3
         limit:
           context: 1000000
           output: 128000
@@ -85,7 +85,14 @@ providers:
                 clear_thinking: false
           reasoning_continuity:
             mode: openai_visible
+
+      glm-5.3-flash:
+        <<: *bigmodel-glm-5-3
+        modalities:
+          input: [text, image, pdf]
 ```
+
+`glm-5.3` 是纯文本旗舰；`glm-5.3-flash` 的文本参数与设置完全相同，另加图像 / PDF 输入，按工作负载需要的模型 ID 选用即可。
 
 ### OpenAI Responses
 

@@ -916,7 +916,7 @@ providers:
 
 model_pools:
   default:
-    - bigmodel/glm-5.2
+    - bigmodel/glm-5.3-flash
 ```
 
 Notes:
@@ -958,6 +958,10 @@ Notes:
   template already sets. Third-party relays may only implement the older
   URL-only `file_url` form; check the relay before relying on Base64
   `file_data`.
+- The example default pool uses `glm-5.3-flash` — the Coding Plan workhorse
+  with native multimodal input; switch the pool entry to `bigmodel/glm-5.3`
+  when you want text-only. `glm-5.2` stays in the provider map for
+  compatibility.
 
 ### Compaction tuning for GLM-5.x
 

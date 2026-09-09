@@ -840,7 +840,7 @@ providers:
 
 model_pools:
   default:
-    - bigmodel/glm-5.2
+    - bigmodel/glm-5.3-flash
 ```
 
 要点：
@@ -874,6 +874,9 @@ model_pools:
   Completions 模板继承，只需补 `modalities.input`。`thinking.type` 只支持
   `enabled`（无法关闭思考），chat 模板已配置好。第三方中转可能只实现了
   旧的仅 URL 形式 `file_url`，依赖 Base64 `file_data` 前先确认中转支持。
+- 示例默认池优先选 `glm-5.3-flash`——Coding Plan 主力、原生多模态输入；
+  纯文本场景把池条目换成 `bigmodel/glm-5.3` 即可。`glm-5.2` 保留在
+  provider 的 models 里，供兼容对照。
 
 ### GLM-5.x 的压缩调优
 

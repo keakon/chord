@@ -75,7 +75,7 @@ providers:
     type: chat-completions
     api_url: https://open.bigmodel.cn/api/coding/paas/v4/chat/completions
     models:
-      glm-5.2:
+      glm-5.3: &bigmodel-glm-5-3
         limit:
           context: 1000000
           output: 128000
@@ -91,7 +91,16 @@ providers:
                 clear_thinking: false
           reasoning_continuity:
             mode: openai_visible
+
+      glm-5.3-flash:
+        <<: *bigmodel-glm-5-3
+        modalities:
+          input: [text, image, pdf]
 ```
+
+`glm-5.3` is the text-only flagship; `glm-5.3-flash` takes the same text
+parameters and settings and adds image/PDF input, so pick the model ID your
+workload needs.
 
 ### OpenAI Responses
 
