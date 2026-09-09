@@ -173,22 +173,14 @@ func (v CompactContextValidator) ParseCompactContextArgs(raw json.RawMessage) (C
 		delete(args.ClaimEvidence, claim)
 		args.ClaimEvidence[strings.TrimSpace(claim)] = normalized
 	}
-	claims := make(map[string]struct{}, len(args.Completed)+len(args.Decisions))
-	for _, claim := range args.Completed {
-		claims[claim] = struct{}{}
-	}
-	for _, claim := range args.Decisions {
-		claims[claim] = struct{}{}
-	}
-	for claim := range args.ClaimEvidence {
-		if _, ok := claims[claim]; !ok {
-			return CompactContextArgs{}, fmt.Errorf("claim_evidence claim %q must match an item in completed or decisions", claim)
-		}
-	}
+	// Claim keys are natural-language assertions, not indices into
+	// completed/decisions: the model may paraphrase an entry instead of
+	// copying it verbatim, and downstream render/carry treat claim text as a
+	// standalone key. Evidence-ID validity is still enforced in the
+	// MainAgent runtime, so anchoring claim text to completed/decisions only
+	// added critical-path friction (verbatim-copy failures) without a
+	// functional payoff.
 	for claim, kind := range args.ClaimKinds {
-		if _, ok := claims[claim]; !ok {
-			return CompactContextArgs{}, fmt.Errorf("claim_kinds claim %q must match an item in completed or decisions", claim)
-		}
 		if !slices.Contains([]string{"observed", "derived", "assumed", "proposed"}, kind) {
 			return CompactContextArgs{}, fmt.Errorf("invalid claim_kinds value %q for %q", kind, claim)
 		}
@@ -467,7 +459,7 @@ func (CompactContextTool) Parameters() map[string]any {
 			"stage_id":        map[string]any{"type": "string", "description": "Stable identifier for the current work stage."},
 			"stage_status":    map[string]any{"type": "string", "enum": []string{"active", "candidate", "completed", "blocked", "superseded"}, "description": "Whether this stage is still active or is a checkpoint candidate/completed."},
 			"checkpoint_kind": map[string]any{"type": "string", "enum": []string{"provisional", "committed"}, "description": "Provisional reduces context but is not authoritative; committed requires runtime validation."},
-			"claim_evidence":  map[string]any{"type": "object", "maxProperties": 20, "additionalProperties": map[string]any{"type": "array", "maxItems": 8, "items": map[string]any{"type": "string", "minLength": 1}}, "description": "Maps each completed or decision claim to the evidence IDs supporting it."},
+			"claim_evidence":  map[string]any{"type": "object", "maxProperties": 20, "additionalProperties": map[string]any{"type": "array", "maxItems": 8, "items": map[string]any{"type": "string", "minLength": 1}}, "description": "Maps each completed or decision claim to the evidence IDs supporting it. The claim key may paraphrase the corresponding completed/decisions entry rather than copying it verbatim."},
 			"claim_kinds":     map[string]any{"type": "object", "maxProperties": 20, "additionalProperties": map[string]any{"type": "string", "enum": []string{"observed", "derived", "assumed", "proposed"}}, "description": "Classifies each completed or decision claim; observed requires runtime evidence, derived is inferred from evidence, assumed is unverified, and proposed is future work."},
 		},
 		"required":             []string{"active_objective", "next_step"},

@@ -465,10 +465,14 @@ func TestCompactContextClaimEvidenceIsTrimmed(t *testing.T) {
 	}
 }
 
-func TestCompactContextClaimEvidenceMustMatchClaim(t *testing.T) {
+func TestCompactContextClaimEvidenceAcceptsStandaloneClaim(t *testing.T) {
 	raw := `{"active_objective":"a","next_step":"b","completed":["implemented parser"],"claim_evidence":{"unrelated claim":["ev-1"]}}`
-	if _, err := testCompactValidator().ParseCompactContextArgs(json.RawMessage(raw)); err == nil {
-		t.Fatal("orphan claim evidence should be rejected")
+	args, err := testCompactValidator().ParseCompactContextArgs(json.RawMessage(raw))
+	if err != nil {
+		t.Fatalf("standalone claim evidence should be accepted: %v", err)
+	}
+	if _, ok := args.ClaimEvidence["unrelated claim"]; !ok {
+		t.Fatal("claim_evidence should preserve the standalone claim")
 	}
 }
 
