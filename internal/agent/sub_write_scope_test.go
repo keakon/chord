@@ -163,10 +163,9 @@ func TestSubAgentPathScopeRejectsMutatingShell(t *testing.T) {
 	}
 }
 
-// A path-scoped task that authorized no commands rejects every shell call —
-// including one whose command line looks read-only — because command side
-// effects cannot be path-validated and nobody vouched for this command. Such a
-// worker cannot execute any verification command, which is why its tool surface
+// A path-scoped task rejects every shell call — including one whose command
+// line looks read-only — because command side effects cannot be
+// path-validated against the declared paths. That is why its tool surface
 // does not advertise Shell at all.
 func TestSubAgentPathScopeRejectsReadOnlyShellCommand(t *testing.T) {
 	parent, sub := newMixedBatchTestSubAgent(t)
@@ -213,9 +212,9 @@ func newScopedToolSurfaceTestSubAgent(t *testing.T, scope tools.WriteScope) (*Ma
 	return parent, sub
 }
 
-// TestSubAgentScopedAndReadOnlySurfaceOmitsShell pins the write-scope fix:
-// scoped (path/file/module) and read-only delegated tasks no longer register
-// Shell, so Shell disappears from the tool registry, the frozen tool
+// TestSubAgentScopedAndReadOnlySurfaceOmitsShell pins the delegated
+// write-scope surface: scoped (path/file/module) and read-only tasks do not
+// register Shell, so Shell disappears from the tool registry, the frozen tool
 // definitions sent to the model, and the capability prompt — and the prompt
 // explicitly says command execution and execution-based verification belong to
 // the owner agent instead of guiding the worker to run tests it can never
@@ -391,88 +390,5 @@ func TestSubAgentScopeRejectsHookModifiedArgsOutsideScope(t *testing.T) {
 	}
 	if _, statErr := os.Stat(filepath.Join(root, "outside.txt")); !os.IsNotExist(statErr) {
 		t.Fatalf("outside file exists after rejected hook mutation: %v", statErr)
-	}
-}
-
-// A scoped worker with no authorized commands cannot build or test its own
-// work, which pushes every verification onto the owner and serializes the whole
-// delegation. Authorizing specific commands restores self-verification without
-// widening the path scope: the delegator vouched for exactly these command
-// lines, so exactly these run.
-func TestSubAgentAuthorizedVerificationCommandRunsUnderPathScope(t *testing.T) {
-	parent, sub := newMixedBatchTestSubAgent(t)
-	root := t.TempDir()
-	parent.projectRoot = root
-	sub.workDir = root
-	sub.writeScope = tools.WriteScope{
-		PathPrefix: []string{"internal"},
-	}
-	sub.tools.Register(tools.ShellTool{})
-
-	for _, tc := range []struct {
-		name    string
-		command string
-		wantErr string
-	}{
-		{name: "authorized", command: "go build ./..."},
-		{name: "authorized with surrounding space", command: "  go test ./internal/agent  "},
-		{name: "extra arguments", command: "go test ./internal/agent -run TestX", wantErr: "not among this task's authorized commands"},
-		{name: "different command", command: "rm -rf /", wantErr: "not among this task's authorized commands"},
-		{name: "chained onto an authorized one", command: "go build ./... && rm -rf /", wantErr: "not among this task's authorized commands"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			args, _ := json.Marshal(map[string]string{"command": tc.command, "description": "verify"})
-			_, err := sub.executeToolCall(context.Background(), message.ToolCall{ID: "shell-" + tc.name, Name: tools.NameShell, Args: args})
-			if tc.wantErr == "" {
-				// The scope gate must not be what stops it; the command itself
-				// may still fail in the sandboxed temp dir.
-				if err != nil && strings.Contains(err.Error(), "authorized commands") {
-					t.Fatalf("authorized command was rejected by the scope gate: %v", err)
-				}
-				if err != nil && strings.Contains(err.Error(), "shell is unavailable") {
-					t.Fatalf("authorized command hit the no-commands rejection: %v", err)
-				}
-				return
-			}
-			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-				t.Fatalf("error = %v, want it to contain %q", err, tc.wantErr)
-			}
-		})
-	}
-}
-
-// The worker has to be told which commands exist, or it falls back to whatever
-// command it would normally reach for and gets refused.
-func TestSubAgentAuthorizedCommandsSurfaceShellAndListThemInThePrompt(t *testing.T) {
-	_, sub := newScopedToolSurfaceTestSubAgent(t, tools.WriteScope{
-		PathPrefix: []string{"internal"},
-	})
-	if _, ok := sub.tools.Get(tools.NameShell); !ok {
-		t.Fatal("a task with authorized commands lost Shell from its registry")
-	}
-	foundShell := false
-	for _, def := range sub.frozenToolDefs {
-		if def.Name == tools.NameShell {
-			foundShell = true
-			break
-		}
-	}
-	if !foundShell {
-		t.Fatal("a task with authorized commands lost Shell from its frozen tool definitions")
-	}
-	prompt := sub.buildSystemPrompt()
-	for _, want := range []string{
-		"## Command Execution Boundary",
-		"only the commands its owner agent authorized",
-		"`go build ./...`",
-		"`go test ./internal/agent`",
-		"ask the owner agent rather than working around the boundary",
-	} {
-		if !strings.Contains(prompt, want) {
-			t.Fatalf("prompt missing %q:\n%s", want, prompt)
-		}
-	}
-	if strings.Contains(prompt, "is not available in this task") {
-		t.Fatalf("prompt still claims shell is unavailable:\n%s", prompt)
 	}
 }

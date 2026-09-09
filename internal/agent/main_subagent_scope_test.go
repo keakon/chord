@@ -13,45 +13,55 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-func TestNestedCreateSubAgentCommandAuthority(t *testing.T) {
-	for _, readOnly := range []bool{false, true} {
-		for _, authorized := range []bool{false, true} {
-			name := "writer"
-			if readOnly {
-				name = "reader"
-			}
-			if authorized {
-				name += "/authorized"
-			} else {
-				name += "/unauthorized"
-			}
-			t.Run(name, func(t *testing.T) {
-				a := newTestMainAgent(t, t.TempDir())
-				configureNestedDelegationTestRuntime(a, 2)
-				parent := newControllableTestSubAgent(t, a, "task-parent")
-				parent.depth = 1
-				parent.delegation = config.DelegationConfig{MaxChildren: 2, MaxDepth: 2}
-				parent.writeScope = tools.WriteScope{ReadOnly: readOnly, PathPrefix: []string{"src"}}
-				if authorized {
+// Nested delegation inherits the parent's write-scope boundary: a child's
+// scope must stay within the parent's declared paths, and a read-only parent
+// may only spawn read-only children. These are containment rules over the
+// scope itself — a delegated task no longer carries any command dimension a
+// delegator could authorize separately.
+func TestNestedCreateSubAgentScopeContainedInParent(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		parent  tools.WriteScope
+		child   tools.WriteScope
+		wantErr string
+	}{
+		{
+			name:   "read-only child within read-only parent",
+			parent: tools.WriteScope{ReadOnly: true, PathPrefix: []string{"src"}},
+			child:  tools.WriteScope{ReadOnly: true, Files: []string{"src/sample.go"}},
+		},
+		{
+			name:   "read-only child within writing parent",
+			parent: tools.WriteScope{PathPrefix: []string{"src"}},
+			child:  tools.WriteScope{ReadOnly: true, Files: []string{"src/sample.go"}},
+		},
+		{
+			name:    "writing child under read-only parent",
+			parent:  tools.WriteScope{ReadOnly: true, PathPrefix: []string{"src"}},
+			child:   tools.WriteScope{Files: []string{"src/sample.go"}},
+			wantErr: "must not be broader",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := newTestMainAgent(t, t.TempDir())
+			configureNestedDelegationTestRuntime(a, 2)
+			parent := newControllableTestSubAgent(t, a, "task-parent")
+			parent.depth = 1
+			parent.delegation = config.DelegationConfig{MaxChildren: 2, MaxDepth: 2}
+			parent.writeScope = tc.parent
+			a.syncTaskRecordFromSub(parent, "")
+			ctx := tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID)
+			handle, err := a.CreateSubAgent(ctx, "Check sample package", "worker", "", "", tc.child)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("CreateSubAgent error = %v, want %q", err, tc.wantErr)
 				}
-				a.syncTaskRecordFromSub(parent, "")
-				ctx := tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID)
-				handle, err := a.CreateSubAgent(ctx, "Check sample package", "worker", "", "", tools.WriteScope{
-					ReadOnly: readOnly, Files: []string{"src/sample.go"},
-				})
-				if authorized {
-					if err != nil || handle.Status != "started" {
-						t.Fatalf("authorized child = %#v, %v", handle, err)
-					}
-				} else if err == nil || !strings.Contains(err.Error(), "must not be broader") {
-					t.Fatalf("unauthorized command error = %v", err)
-				}
-			})
-		}
-	}
-	if childWriteScopeWithinParent(
-		tools.WriteScope{ReadOnly: true}, tools.WriteScope{ReadOnly: true}, "") {
-		t.Fatal("command inheritance must not allow extra arguments")
+				return
+			}
+			if err != nil || handle.Status != "started" {
+				t.Fatalf("child = %#v, %v", handle, err)
+			}
+		})
 	}
 }
 
