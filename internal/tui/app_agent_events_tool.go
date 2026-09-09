@@ -367,7 +367,7 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 			effects.addFollowup(m.requestGitStatusRefresh())
 		}
 		if evt.Name == tools.NameNotify && evt.Status != agent.ToolResultStatusError && evt.Result != "" {
-			if handle, ok := parseTaskToolHandle(evt.Result); ok && handle.TaskID != "" && handle.AgentID != "" {
+			if handle, _, ok := parseTaskToolHandle(evt.Result); ok && handle.TaskID != "" && handle.AgentID != "" {
 				if taskBlock, ok := m.findBlockByLinkedTask(handle.TaskID); ok {
 					taskBlock.LinkedAgentID = handle.AgentID
 					taskBlock.LinkedTaskID = handle.TaskID

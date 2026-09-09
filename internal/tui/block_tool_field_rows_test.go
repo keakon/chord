@@ -102,3 +102,59 @@ func TestAgentMessageCardBodyNestsUnderFieldRowLabels(t *testing.T) {
 		t.Fatalf("body left edge at col %d, field-row label at col %d, want equal (body must align with label, not connector); output:\n%s", bodyPos, fieldPos, plain)
 	}
 }
+
+// The Delegate (task) result is a JSON handle that the runtime commonly
+// appends a prose note to (e.g. "Note: ignored unrecognized parameter(s): …").
+// The previous parser used json.Unmarshal, which rejects trailing text and
+// silently fell through to dumping the whole payload — a raw-JSON blob the
+// user had to read past. The tolerant parser now decodes the first JSON
+// value, returns the rest for the caller to render as a note, and the
+// Worker section renders the handle's fields as structured rows. This pins
+// all three: structured fields (including the ones the old local struct
+// silently dropped — plan_task_ref, semantic_task_key, expected_write_scope),
+// the trailing note rendered separately, and the absence of the raw JSON.
+func TestDelegateWorkerRendersHandleFieldsAndTrailingNote(t *testing.T) {
+	b := &Block{
+		ID:            0,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameDelegate,
+		Content:       `{"description":"review the card styles","agent_type":"reviewer"}`,
+		ResultContent: `{"status":"started","task_id":"adhoc-7","agent_id":"expert-12","message":"running in background","plan_task_ref":"view-switch","semantic_task_key":"tui-view-switch-streaming-card-order","expected_write_scope":{"read_only":true}}` + "\n" + `Note: ignored unrecognized parameter(s): args.expected_write_scope.verification_commands`,
+		ResultDone:    true,
+	}
+	plain := stripANSI(strings.Join(b.Render(120, ""), "\n"))
+
+	// Every non-empty handle field renders as a "↳ Label: value" row. The
+	// task_id drops the internal "adhoc-" prefix; the write scope is
+	// condensed to a single compact value, not re-expanded as JSON.
+	for _, want := range []string{
+		"↳ Status: started",
+		"↳ Agent id: expert-12",
+		"↳ Task id: 7",
+		"↳ Plan task ref: view-switch",
+		"↳ Semantic task key: tui-view-switch-streaming-card-order",
+		"↳ Expected write scope: read_only=true",
+		"↳ Message: running in background",
+		"Note: ignored unrecognized parameter(s): args.expected_write_scope.verification_commands",
+	} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("delegate Worker section missing %q; got:\n%s", want, plain)
+		}
+	}
+	// The raw JSON must not leak back into the body. Both the top-level
+	// payload and the nested write scope object are checked so a future
+	// regression that falls through to the raw-text path is caught.
+	for _, banned := range []string{
+		`"status":"started"`,
+		`"expected_write_scope":{`,
+	} {
+		if strings.Contains(plain, banned) {
+			t.Fatalf("delegate Worker section leaks raw JSON %q; got:\n%s", banned, plain)
+		}
+	}
+	// The internal "adhoc-" prefix never reaches the UI, even though it is
+	// present in the raw handle.
+	if strings.Contains(plain, "adhoc-7") {
+		t.Fatalf("delegate Worker section leaks the internal adhoc- prefix; got:\n%s", plain)
+	}
+}

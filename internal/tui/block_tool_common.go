@@ -898,7 +898,7 @@ func formatToolResultSummaryLine(b *Block) string {
 	case tools.NameLsp:
 		return lspResultSummary(b.Content, trimmed)
 	case tools.NameCancel:
-		handle, ok := parseTaskToolHandle(trimmed)
+		handle, _, ok := parseTaskToolHandle(trimmed)
 		if ok && handle.Status != "" {
 			switch handle.Status {
 			case "stopped":
@@ -911,7 +911,7 @@ func formatToolResultSummaryLine(b *Block) string {
 		}
 		return "Stopped"
 	case tools.NameNotify:
-		handle, ok := parseTaskToolHandle(trimmed)
+		handle, _, ok := parseTaskToolHandle(trimmed)
 		if ok && handle.Status != "" {
 			switch handle.Status {
 			case "delivered":

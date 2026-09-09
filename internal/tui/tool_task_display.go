@@ -3,20 +3,13 @@ package tui
 import (
 	"encoding/json"
 	"strings"
+
+	"github.com/keakon/chord/internal/tools"
 )
 
 type taskToolArgs struct {
 	Description string `json:"description"`
 	AgentType   string `json:"agent_type"`
-}
-
-type taskToolHandle struct {
-	Status          string `json:"status"`
-	TaskID          string `json:"task_id"`
-	AgentID         string `json:"agent_id"`
-	PreviousAgentID string `json:"previous_agent_id,omitempty"`
-	Rehydrated      bool   `json:"rehydrated,omitempty"`
-	Message         string `json:"message"`
 }
 
 type cancelToolArgs struct {
@@ -45,23 +38,54 @@ func parseTaskToolArgs(argsJSON string) taskToolArgs {
 	return parsed
 }
 
-func parseTaskToolHandle(result string) (taskToolHandle, bool) {
-	if strings.TrimSpace(result) == "" {
-		return taskToolHandle{}, false
+// parseTaskToolHandle parses the delegate/task result payload into the
+// canonical tools.TaskHandle and surfaces any trailing prose the runtime
+// appends after the JSON (e.g. "Note: ignored unrecognized parameter(s): …").
+// json.Unmarshal rejects trailing text, so the previous parser silently fell
+// through to dumping the whole result back into the card body — a stale raw
+// JSON blob the user had to read past to find anything structured. This
+// tolerant form decodes the first JSON value, returns the rest for the
+// caller to render as a note, and only reports ok when at least one
+// displayable field is non-empty.
+func parseTaskToolHandle(result string) (tools.TaskHandle, string, bool) {
+	trimmed := strings.TrimSpace(result)
+	if trimmed == "" {
+		return tools.TaskHandle{}, "", false
 	}
-	var handle taskToolHandle
-	if err := json.Unmarshal([]byte(result), &handle); err != nil {
-		return taskToolHandle{}, false
+	dec := json.NewDecoder(strings.NewReader(trimmed))
+	var handle tools.TaskHandle
+	if err := dec.Decode(&handle); err != nil {
+		return tools.TaskHandle{}, trimmed, false
 	}
-	handle.Status = strings.TrimSpace(handle.Status)
-	handle.TaskID = strings.TrimSpace(handle.TaskID)
-	handle.AgentID = strings.TrimSpace(handle.AgentID)
-	handle.PreviousAgentID = strings.TrimSpace(handle.PreviousAgentID)
-	handle.Message = strings.TrimSpace(handle.Message)
-	if handle.Status == "" && handle.TaskID == "" && handle.AgentID == "" && handle.PreviousAgentID == "" && handle.Message == "" && !handle.Rehydrated {
-		return taskToolHandle{}, false
+	rest := strings.TrimSpace(trimmed[dec.InputOffset():])
+	if !taskHandleHasContent(handle) {
+		return tools.TaskHandle{}, rest, false
 	}
-	return handle, true
+	return handle, rest, true
+}
+
+func taskHandleHasContent(h tools.TaskHandle) bool {
+	return h.Status != "" ||
+		h.TaskID != "" ||
+		h.AgentID != "" ||
+		h.PreviousAgentID != "" ||
+		h.Rehydrated ||
+		h.Message != "" ||
+		h.PlanTaskRef != "" ||
+		h.SemanticTaskKey != "" ||
+		h.ScopeConflict ||
+		h.DuplicateDetected ||
+		h.SuggestedTaskID != "" ||
+		h.SuggestedAgentID != "" ||
+		h.SuggestedAction != "" ||
+		!isWriteScopeEmpty(h.ExpectedWriteScope)
+}
+
+// isWriteScopeEmpty reports whether a WriteScope has no declared content.
+// WriteScope contains slice fields, so it cannot be compared with == and
+// each field has to be checked individually.
+func isWriteScopeEmpty(s tools.WriteScope) bool {
+	return !s.ReadOnly && len(s.Files) == 0 && len(s.PathPrefix) == 0 && len(s.Modules) == 0
 }
 
 func taskToolDescriptionContent(argsJSON string) string {
@@ -83,7 +107,7 @@ func taskToolExpandedDescriptionLines(argsJSON string, width int) []string {
 }
 
 func taskToolCollapsedHandleSummary(result string) string {
-	handle, ok := parseTaskToolHandle(result)
+	handle, _, ok := parseTaskToolHandle(result)
 	if !ok {
 		return strings.TrimSpace(result)
 	}
@@ -102,8 +126,15 @@ func taskToolCollapsedHandleSummary(result string) string {
 	return strings.Join(parts, " · ")
 }
 
+// taskToolExpandedHandleLines produces the plain "key: value" lines used by
+// the non-TUI display path (skill/result text extraction in
+// tool_skill_display.go). The TUI card itself renders the same handle via
+// appendTaskHandleFieldRows and the field-row primitives; this helper
+// exists so the skill surface keeps a single-line-per-field format. Any
+// runtime note appended after the JSON is intentionally dropped here — the
+// caller's contract is the handle fields, not the surrounding commentary.
 func taskToolExpandedHandleLines(result string) []string {
-	handle, ok := parseTaskToolHandle(result)
+	handle, _, ok := parseTaskToolHandle(result)
 	if !ok {
 		trimmed := strings.TrimSpace(result)
 		if trimmed == "" {

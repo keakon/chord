@@ -553,7 +553,7 @@ func applyTaskHandleFromResult(block *Block) {
 	if block == nil || block.ToolName != tools.NameDelegate || block.ResultStatus == agent.ToolResultStatusError || strings.TrimSpace(block.ResultContent) == "" {
 		return
 	}
-	if handle, ok := parseTaskToolHandle(block.ResultContent); ok {
+	if handle, _, ok := parseTaskToolHandle(block.ResultContent); ok {
 		if handle.AgentID != "" {
 			block.LinkedAgentID = handle.AgentID
 		}

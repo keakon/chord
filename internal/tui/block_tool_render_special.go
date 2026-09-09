@@ -18,7 +18,6 @@ func (b *Block) renderTaskCall(width int, spinnerFrame string) []string {
 	contentWidth := metrics.contentWidth
 
 	args := parseTaskToolArgs(b.Content)
-	_, hasHandle := parseTaskToolHandle(b.ResultContent)
 	hasResultText := strings.TrimSpace(b.ResultContent) != ""
 	subType := strings.TrimSpace(args.AgentType)
 	isActive := b.toolExecutionIsRunning() && spinnerFrame != ""
@@ -40,11 +39,24 @@ func (b *Block) renderTaskCall(width int, spinnerFrame string) []string {
 			result = append(result, "    "+line)
 		}
 	}
-	if hasHandle || (hasResultText && !b.toolResultIsError() && !b.toolResultIsCancelled()) {
+	handle, rest, handleOK := parseTaskToolHandle(b.ResultContent)
+	if handleOK || (hasResultText && !b.toolResultIsError() && !b.toolResultIsCancelled()) {
 		result = append(result, toolFieldSection(ToolResultExpandedStyle, "Worker"))
-		for _, line := range taskToolExpandedHandleLines(b.ResultContent) {
-			for _, wrapped := range wrapText(line, contentWidth) {
-				result = append(result, DimStyle.Render("    "+wrapped))
+		switch {
+		case handleOK:
+			appendTaskHandleFieldRows(&result, handle)
+			// The runtime often appends commentary after the JSON payload
+			// (e.g. "Note: ignored unrecognized parameter(s): …"). Render it
+			// as a trailing dimmed line under the section, not concatenated
+			// back into the structured fields.
+			if rest != "" {
+				for _, line := range wrapText(sanitizeToolDisplayText(rest), contentWidth) {
+					result = append(result, toolFieldBody(DimStyle, line))
+				}
+			}
+		default:
+			for _, line := range wrapText(sanitizeToolDisplayText(strings.TrimSpace(b.ResultContent)), contentWidth) {
+				result = append(result, toolFieldBody(DimStyle, line))
 			}
 		}
 	} else {
@@ -388,7 +400,7 @@ func (b *Block) renderCancelCall(width int, spinnerFrame string) []string {
 			result = append(result, toolSummaryLine(summary))
 		}
 		if b.ResultContent != "" {
-			handle, ok := parseTaskToolHandle(b.ResultContent)
+			handle, _, ok := parseTaskToolHandle(b.ResultContent)
 			if ok {
 				result = append(result, toolFieldSection(ToolResultExpandedStyle, "Result"))
 				if handle.Status != "" {
@@ -463,7 +475,7 @@ func (b *Block) renderNotifyCall(width int, spinnerFrame string) []string {
 		result = append(result, toolSummaryLine(summary))
 	}
 	if b.ResultContent != "" {
-		handle, ok := parseTaskToolHandle(b.ResultContent)
+		handle, _, ok := parseTaskToolHandle(b.ResultContent)
 		if ok {
 			result = append(result, toolFieldSection(ToolResultExpandedStyle, "Result"))
 			if handle.Status != "" {
@@ -494,4 +506,66 @@ func (b *Block) renderNotifyCall(width int, spinnerFrame string) []string {
 	}
 	result = appendToolElapsedToHeader(result, b, cardWidth)
 	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
+}
+
+// appendTaskHandleFieldRows renders a parsed delegate/task handle as a
+// column of nested field rows under a "Worker" section header. Every
+// non-empty field gets its own row, ordered for scannability: identity
+// (status/agent_id/task_id), resumption hints (previous_agent_id/
+// rehydrated), plan metadata, write scope, the runtime message, and
+// finally any conflict/duplicate warnings with their suggested fix.
+func appendTaskHandleFieldRows(out *[]string, h tools.TaskHandle) {
+	add := func(key, value string) {
+		if value == "" {
+			return
+		}
+		*out = append(*out, toolFieldNestedInline(DimStyle, toolArgSectionLabel(key), sanitizeToolDisplayText(value)))
+	}
+	add("status", h.Status)
+	add("agent_id", h.AgentID)
+	if h.TaskID != "" {
+		// The readable form drops the internal "adhoc-" prefix, which the UI
+		// never surfaces (see the collapsed control-tool cards).
+		add("task_id", extractReadableTarget(h.TaskID))
+	}
+	add("previous_agent_id", h.PreviousAgentID)
+	if h.Rehydrated {
+		*out = append(*out, toolFieldNestedInline(DimStyle, toolArgSectionLabel("rehydrated"), "true"))
+	}
+	add("plan_task_ref", h.PlanTaskRef)
+	add("semantic_task_key", h.SemanticTaskKey)
+	if summary := formatWriteScopeSummary(h.ExpectedWriteScope); summary != "" {
+		*out = append(*out, toolFieldNestedInline(DimStyle, toolArgSectionLabel("expected_write_scope"), summary))
+	}
+	add("message", h.Message)
+	if h.ScopeConflict {
+		*out = append(*out, toolFieldNestedInline(DimStyle, toolArgSectionLabel("scope_conflict"), "true"))
+	}
+	if h.DuplicateDetected {
+		*out = append(*out, toolFieldNestedInline(DimStyle, toolArgSectionLabel("duplicate_detected"), "true"))
+	}
+	add("suggested_task_id", h.SuggestedTaskID)
+	add("suggested_agent_id", h.SuggestedAgentID)
+	add("suggested_action", h.SuggestedAction)
+}
+
+// formatWriteScopeSummary condenses a WriteScope declaration into a single
+// compact value for one field row, e.g. "read_only=true" or
+// "files=[a.go], path_prefix=[internal/agent]". An all-empty scope
+// returns "" (the caller filters that case out before calling).
+func formatWriteScopeSummary(s tools.WriteScope) string {
+	var parts []string
+	if s.ReadOnly {
+		parts = append(parts, "read_only=true")
+	}
+	if len(s.Files) > 0 {
+		parts = append(parts, "files=["+strings.Join(s.Files, ", ")+"]")
+	}
+	if len(s.PathPrefix) > 0 {
+		parts = append(parts, "path_prefix=["+strings.Join(s.PathPrefix, ", ")+"]")
+	}
+	if len(s.Modules) > 0 {
+		parts = append(parts, "modules=["+strings.Join(s.Modules, ", ")+"]")
+	}
+	return strings.Join(parts, ", ")
 }
