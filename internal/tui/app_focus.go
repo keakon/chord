@@ -172,12 +172,22 @@ func isFocusedViewportLiveBlock(block *Block) bool {
 // deltas and their end events are suppressed at the agent source while the user
 // watches another agent, so a stream that finished during that time never
 // reaches its settling event in the TUI and would stay Streaming forever. Its
-// committed transcript row is the authoritative card; the live partial is
-// recognised as the same stream by being a prefix of that row's content (same
-// agent, same card type). Keeping both would duplicate the card and re-retain
-// the never-settling block on every rebuild. Main-agent blocks are exempt: main
-// streams are not focus-suppressed, so a still-live main card is never a stale
-// duplicate of a committed row.
+// committed transcript row is the authoritative card; keeping both would
+// duplicate the card and re-retain the never-settling block on every rebuild.
+// Main-agent blocks are exempt: main streams are not focus-suppressed, so a
+// still-live main card is never a stale duplicate of a committed row.
+//
+// A stream commits at the tail of its agent's transcript, so only that agent's
+// last committed row of the same card type can be the counterpart of the live
+// card. Matching every committed row would drop a card whose stream is still
+// in flight whenever an older message shares its opening (a follow-up that
+// re-states an earlier answer): the card disappears and its stream state is
+// detached, so the already-streamed content jumps when deltas resume. The
+// content check accepts both shapes of a genuinely committed stream: the
+// committed row extending the frozen partial (append-only deltas), and the
+// frozen partial overrunning a shorter committed final (the final payload can
+// be cleaned before commit — scrubbed markers or regenerated text — so it is
+// not always a pure extension of what already streamed).
 func staleCommittedStreamLiveBlock(base []*Block, block *Block) bool {
 	if block == nil || block.AgentID == "" {
 		return false
@@ -189,13 +199,16 @@ func staleCommittedStreamLiveBlock(base []*Block, block *Block) bool {
 	if liveText == "" {
 		return false
 	}
-	for _, row := range base {
+	for i := len(base) - 1; i >= 0; i-- {
+		row := base[i]
 		if row == nil || row == block || row.Type != block.Type || row.AgentID != block.AgentID {
 			continue
 		}
-		if committed := strings.TrimSpace(row.Content); strings.HasPrefix(committed, liveText) {
-			return true
+		committed := strings.TrimSpace(row.Content)
+		if committed == "" {
+			return false
 		}
+		return strings.HasPrefix(committed, liveText) || strings.HasPrefix(liveText, committed)
 	}
 	return false
 }

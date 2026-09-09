@@ -1321,3 +1321,140 @@ func TestStaleSubAgentThinkingStreamDroppedWhenCommittedRowExists(t *testing.T) 
 		t.Fatalf("new thinking content = %q, want only the post-return round", got)
 	}
 }
+
+// TestSharedPrefixEarlierMessageKeepsLiveSubAgentAssistantCard pins the stale
+// guard against matching any committed row: two worker answers share an
+// opening, and a third answer that re-states the earlier opening is still
+// streaming when the user switches back. Matching the older committed row
+// (the earlier answer, not the stream's own counterpart) would drop the live
+// card and detach its stream state, so the already-streamed content jumps
+// when deltas resume. Only the last committed row of the same agent and card
+// type can be the counterpart of a live card, and here it opens differently.
+func TestSharedPrefixEarlierMessageKeepsLiveSubAgentAssistantCard(t *testing.T) {
+	backend := &sessionControlAgent{
+		messagesByFocus: map[string][]message.Message{
+			"": {
+				{Role: "user", Content: "main prompt"},
+			},
+			"agent-1": {
+				{Role: "user", Content: "worker prompt"},
+				{Role: "assistant", Content: "worker partial analysis of the first request, running the full suite"},
+				{Role: "assistant", Content: "worker partial analysis of the second request, done"},
+			},
+		},
+	}
+	m := NewModelWithSize(backend, 120, 40)
+
+	// A new answer starts while the worker view is focused, re-stating the
+	// opening of the first committed answer; the last committed answer has
+	// already diverged at that point.
+	m.setFocusedAgent("agent-1")
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{AgentID: "agent-1", Text: "worker partial analysis of the first request"}})
+	flushPendingStreamForTest(&m)
+	live := m.streamState("agent-1").assistant
+	if live == nil || !live.Streaming {
+		t.Fatal("expected a live streaming worker assistant block")
+	}
+
+	// Switch away and back while the answer is still in flight; its committed
+	// row does not exist yet, so the live card must survive the rebuild.
+	m.setFocusedAgent("")
+	if m.viewport.GetFocusedBlock(live.ID) != live {
+		t.Fatal("precondition failed: worker stream should survive while main is focused")
+	}
+	m.setFocusedAgent("agent-1")
+	if m.viewport.GetFocusedBlock(live.ID) != live {
+		t.Fatal("focus switch back dropped the live card: an older committed row sharing its opening is not its committed counterpart")
+	}
+	if m.streamState("agent-1").assistant != live || !live.Streaming {
+		t.Fatal("focus switch back detached the stream state of the still-live card")
+	}
+
+	// Deltas resume on the same card, so the already-streamed content stays.
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{AgentID: "agent-1", Text: ", then reports the findings"}})
+	flushPendingStreamForTest(&m)
+	if got := live.Content; got != "worker partial analysis of the first request, then reports the findings" {
+		t.Fatalf("live content after resumed deltas = %q, want the uninterrupted stream", got)
+	}
+	assistantCards := 0
+	for _, b := range m.viewport.visibleBlocks() {
+		if b.Type == BlockAssistant && b.AgentID == "agent-1" {
+			assistantCards++
+		}
+	}
+	if assistantCards != 3 {
+		t.Fatalf("worker assistant cards = %d, want the two committed rows plus the live card", assistantCards)
+	}
+}
+
+// TestStaleSubAgentThinkingStreamDroppedWhenCommittedFinalDiffers pins the
+// stale guard when the committed row is not a pure extension of the frozen
+// partial: thinking finals are reassembled/cleaned before commit (scrubbed
+// markers, regenerated text), so the accumulated deltas can overrun a shorter
+// committed final. The append-only prefix relation then never matches and the
+// never-settling Streaming card would otherwise be re-retained on every
+// rebuild; the guard recognises the partial containing the committed final
+// and drops the zombie like the append-only case.
+func TestStaleSubAgentThinkingStreamDroppedWhenCommittedFinalDiffers(t *testing.T) {
+	backend := &sessionControlAgent{
+		messagesByFocus: map[string][]message.Message{
+			"": {
+				{Role: "user", Content: "main prompt"},
+			},
+			"agent-1": {
+				{Role: "user", Content: "worker prompt"},
+			},
+		},
+	}
+	m := NewModelWithSize(backend, 120, 40)
+
+	m.setFocusedAgent("agent-1")
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ThinkingStartedEvent{AgentID: "agent-1"}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingDeltaEvent{AgentID: "agent-1", Text: "worker reasoning about the layout, checking the overflow case against the fixture"}})
+	flushPendingStreamForTest(&m)
+	zombie := m.streamState("agent-1").thinking
+	if zombie == nil || !zombie.Streaming {
+		t.Fatal("expected a live streaming worker thinking block")
+	}
+
+	m.setFocusedAgent("")
+	if m.viewport.GetFocusedBlock(zombie.ID) != zombie {
+		t.Fatal("precondition failed: worker thinking should survive while main is focused")
+	}
+
+	// The committed final is the cleaned shorter text; the accumulated deltas
+	// already overran it, so committed does not extend the frozen partial.
+	backend.messagesByFocus["agent-1"] = []message.Message{
+		{Role: "user", Content: "worker prompt"},
+		{Role: "assistant", ReasoningContent: "worker reasoning about the layout"},
+	}
+	m.setFocusedAgent("agent-1")
+
+	thinkingCards := 0
+	var committed *Block
+	for _, b := range m.viewport.visibleBlocks() {
+		if b.Type != BlockThinking || b.AgentID != "agent-1" {
+			continue
+		}
+		thinkingCards++
+		committed = b
+	}
+	if thinkingCards != 1 || committed == nil {
+		t.Fatalf("worker thinking cards = %d, want exactly the committed row", thinkingCards)
+	}
+	if m.viewport.GetFocusedBlock(zombie.ID) != nil {
+		t.Fatal("stale streaming thinking block should be dropped even when the committed final is not a pure extension of the partial")
+	}
+	if m.streamState("agent-1").thinking != nil {
+		t.Fatal("stream state must be detached from the dropped stale thinking block")
+	}
+
+	// A new thinking round for the same agent starts a fresh card.
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ThinkingStartedEvent{AgentID: "agent-1"}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingDeltaEvent{AgentID: "agent-1", Text: "next round reasoning"}})
+	flushPendingStreamForTest(&m)
+	next := m.streamState("agent-1").thinking
+	if next == nil || next == zombie {
+		t.Fatal("new thinking round should start a fresh card after the drop")
+	}
+}
