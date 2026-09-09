@@ -17,7 +17,7 @@ type checkpointSourceRef struct {
 	TranscriptGeneration string `json:"transcript_generation"`
 	SegmentKind          string `json:"segment_kind"`
 	SegmentID            string `json:"segment_id"`
-	LegacyOrdinal        int    `json:"legacy_ordinal"`
+	Ordinal              int    `json:"ordinal"`
 	CanonicalPayloadHash string `json:"canonical_payload_hash"`
 	Role                 string `json:"role"`
 	ToolCallID           string `json:"tool_call_id,omitempty"`
@@ -44,7 +44,7 @@ func buildCheckpointSourceRefs(sessionID, generation, segmentID string, messages
 			TranscriptGeneration: generation,
 			SegmentKind:          "archived_prefix",
 			SegmentID:            segmentID,
-			LegacyOrdinal:        ordinal,
+			Ordinal:              ordinal,
 			CanonicalPayloadHash: hash,
 			Role:                 string(msg.Role),
 			ToolCallID:           msg.ToolCallID,
@@ -68,23 +68,23 @@ func validateCheckpointSourceRefs(refs []checkpointSourceRef, messages []message
 	}
 	seen := make(map[int]struct{}, len(refs))
 	for _, ref := range refs {
-		if ref.LegacyOrdinal < 0 || ref.LegacyOrdinal >= len(messages) {
-			return fmt.Errorf("source ordinal %d is outside generation", ref.LegacyOrdinal)
+		if ref.Ordinal < 0 || ref.Ordinal >= len(messages) {
+			return fmt.Errorf("source ordinal %d is outside generation", ref.Ordinal)
 		}
-		if _, duplicate := seen[ref.LegacyOrdinal]; duplicate {
-			return fmt.Errorf("source ordinal %d is duplicated", ref.LegacyOrdinal)
+		if _, duplicate := seen[ref.Ordinal]; duplicate {
+			return fmt.Errorf("source ordinal %d is duplicated", ref.Ordinal)
 		}
-		seen[ref.LegacyOrdinal] = struct{}{}
-		msg := messages[ref.LegacyOrdinal]
+		seen[ref.Ordinal] = struct{}{}
+		msg := messages[ref.Ordinal]
 		if string(msg.Role) != ref.Role || msg.ToolCallID != ref.ToolCallID {
-			return fmt.Errorf("source ordinal %d identity changed", ref.LegacyOrdinal)
+			return fmt.Errorf("source ordinal %d identity changed", ref.Ordinal)
 		}
 		hash, err := canonicalMessageHash(msg)
 		if err != nil {
 			return err
 		}
 		if hash != ref.CanonicalPayloadHash {
-			return fmt.Errorf("source ordinal %d fingerprint changed", ref.LegacyOrdinal)
+			return fmt.Errorf("source ordinal %d fingerprint changed", ref.Ordinal)
 		}
 	}
 	return nil

@@ -433,6 +433,10 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 				if err := updateCompactionTransactionStatus(d.TransactionSessionDir, d.TransactionID, compactionTransactionAborted); err != nil {
 					log.Warnf("failed to abort compaction transaction transaction_id=%v error=%v", d.TransactionID, err)
 				}
+				// The failed apply is terminal: the manifest has no further
+				// reconciliation role (reconcile only ever flips prepared
+				// manifests) and must not accumulate in the session dir.
+				removeCompactionTransactionManifest(d.TransactionSessionDir, d.TransactionID)
 			}
 		}()
 	}
@@ -610,6 +614,15 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	a.saveRecoverySnapshot()
 	a.clearUsageDrivenAutoCompactRequest()
 	a.resetAutoCompactionFailureState()
+	// The committed transaction record has served its purpose: the
+	// crash-window reconciliation (restore reconcileCompactionTransactions
+	// plus the model-driven proposal fix) only ever needs it while the apply
+	// settlement did not become durable, which is exactly the case where this
+	// removal never ran. Removing it here keeps terminal manifests from
+	// accumulating in the session directory with every compaction.
+	if d.TransactionID != "" {
+		removeCompactionTransactionManifest(d.TransactionSessionDir, d.TransactionID)
+	}
 	if d.AbsHistoryMetaPath != "" {
 		meta := compactionHistoryMeta{
 			Version:           1,

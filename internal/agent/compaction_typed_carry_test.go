@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -70,7 +71,7 @@ func TestMergeTypedStateKeepsNewestAndDisclosesOmission(t *testing.T) {
 	// Decisions cap is 8, so nothing is dropped here; the fresh submission's
 	// items come first and the carried ones follow, and the fresh stage
 	// metadata wins.
-	merged, omitted := mergeCheckpointTypedStates(prior, current)
+	merged, omitted, _ := mergeCheckpointTypedStates(prior, current)
 	if omitted != 0 {
 		t.Fatalf("omitted = %d, want 0", omitted)
 	}
@@ -88,7 +89,7 @@ func TestMergeTypedStateKeepsNewestAndDisclosesOmission(t *testing.T) {
 	for i := 0; i < typedStateCarryMaxDecisions+2; i++ {
 		over.Decisions = append(over.Decisions, "old-"+string(rune('a'+i)))
 	}
-	merged, omitted = mergeCheckpointTypedStates(over, current)
+	merged, omitted, _ = mergeCheckpointTypedStates(over, current)
 	if len(merged.Decisions) != typedStateCarryMaxDecisions {
 		t.Fatalf("merged decisions = %d, want cap %d", len(merged.Decisions), typedStateCarryMaxDecisions)
 	}
@@ -108,7 +109,7 @@ func TestMergeTypedStateKeepsNewestAndDisclosesOmission(t *testing.T) {
 	for i := 0; i < typedStateCarryMaxEvidenceRefs+2; i++ {
 		tooMany.EvidenceRefs = append(tooMany.EvidenceRefs, "ev-"+string(rune('a'+i)))
 	}
-	merged, omitted = mergeCheckpointTypedStates(checkpointTypedState{}, tooMany)
+	merged, omitted, _ = mergeCheckpointTypedStates(checkpointTypedState{}, tooMany)
 	if len(merged.OpenIssues) != typedStateCarryMaxOpenIssues || len(merged.EvidenceRefs) != typedStateCarryMaxEvidenceRefs {
 		t.Fatalf("current typed lists exceeded bounds: open=%d evidence=%d", len(merged.OpenIssues), len(merged.EvidenceRefs))
 	}
@@ -120,7 +121,7 @@ func TestMergeTypedStateKeepsNewestAndDisclosesOmission(t *testing.T) {
 	// the merge, so the readable sections and the typed block can never
 	// diverge on the same decision.
 	oversizedPrior := checkpointTypedState{Decisions: []string{strings.Repeat("x", typedStateCarryMaxItemRunes+50)}}
-	merged, omitted = mergeCheckpointTypedStates(oversizedPrior, current)
+	merged, omitted, _ = mergeCheckpointTypedStates(oversizedPrior, current)
 	if omitted != 0 {
 		t.Fatalf("omitted = %d, want 0", omitted)
 	}
@@ -214,7 +215,7 @@ func TestTypedClaimsCarryIdentityAndStatus(t *testing.T) {
 		"tests pass": {Kind: "derived", EvidenceRefs: []string{"ev-new"}, Status: "superseded"},
 		"next step":  {Kind: "proposed", Status: "active"},
 	}}
-	merged, _ := mergeCheckpointTypedStates(prior, current)
+	merged, _, _ := mergeCheckpointTypedStates(prior, current)
 	if got := merged.Claims["tests pass"]; got.Status != "superseded" || got.Kind != "derived" || len(got.EvidenceRefs) != 1 || got.EvidenceRefs[0] != "ev-new" {
 		t.Fatalf("fresh claim did not replace prior identity: %#v", got)
 	}
@@ -316,7 +317,7 @@ func TestMergePriorTypedCheckpointStateReadsFullBodyBeyondDisplayTruncation(t *t
 	if runeCount(display) > compactCheckpointCarryMaxChars {
 		t.Fatalf("display carry must respect the rune cap, got %d", runeCount(display))
 	}
-	merged, _, malformed := mergePriorTypedCheckpointState(req, full)
+	merged, _, _, malformed := mergePriorTypedCheckpointState(req, full)
 	if malformed {
 		t.Fatal("full body with a valid typed block must not report malformed")
 	}
@@ -362,7 +363,7 @@ func TestMergePriorTypedCheckpointStateDisclosesUnreadableCarry(t *testing.T) {
 		Decisions:       []string{"fresh-decision"},
 	}}
 	prior := "## Current User Request\n- continue\n\n## Typed Checkpoint State\n- {this is not valid json"
-	merged, _, malformed := mergePriorTypedCheckpointState(req, prior)
+	merged, _, _, malformed := mergePriorTypedCheckpointState(req, prior)
 	if !malformed {
 		t.Fatal("unparseable typed block must report malformed")
 	}
@@ -538,5 +539,246 @@ func TestRestatedInvalidatedClaimReadsFreshActive(t *testing.T) {
 	}
 	if !strings.Contains(second, "claims A works | evidence: ev-new-1") {
 		t.Fatalf("round-2 checkpoint must re-render the restated claim evidence:\n%s", second)
+	}
+}
+
+// TestMergeTypedStatesDoesNotInheritTerminalCarriedStage pins the stage half
+// of the empty-restate fix: a fresh submission that declares no stage must
+// not re-render a carried completed/committed stage as the current stage of
+// the new checkpoint (completed is terminal acceptance semantics that only
+// the armed fresh submission can declare, because only it ran the
+// committed-evidence validation). The completed work stays carried as
+// decisions and claims history.
+func TestMergeTypedStatesDoesNotInheritTerminalCarriedStage(t *testing.T) {
+	prior := checkpointTypedState{
+		StageID:     "task-one",
+		StageStatus: "completed",
+		Kind:        "committed",
+		Decisions:   []string{"task one done"},
+	}
+	current := checkpointTypedState{}
+	merged, _, _ := mergeCheckpointTypedStates(prior, current)
+	if merged.StageID != "" || merged.StageStatus != "" || merged.Kind != "" {
+		t.Fatalf("terminal carried stage must not become the current stage on an empty restate: %+v", merged)
+	}
+	if !containsString(merged.Decisions, "task one done") {
+		t.Fatalf("completed work must stay carried as history: %v", merged.Decisions)
+	}
+}
+
+// TestMergeTypedStatesKeepsInFlightCarriedStageOnEmptyRestate pins the
+// in-flight half of the stage rule: a carried stage that is not terminal
+// (still candidate/provisional) keeps falling back on an empty restate, so a
+// checkpoint submitted without stage metadata does not lose the
+// still-current stage mid-task.
+func TestMergeTypedStatesKeepsInFlightCarriedStageOnEmptyRestate(t *testing.T) {
+	prior := checkpointTypedState{
+		StageID:     "impl",
+		StageStatus: "candidate",
+		Kind:        "provisional",
+	}
+	current := checkpointTypedState{}
+	merged, _, _ := mergeCheckpointTypedStates(prior, current)
+	if merged.StageID != "impl" || merged.StageStatus != "candidate" || merged.Kind != "provisional" {
+		t.Fatalf("in-flight carried stage must stay current on an empty restate: %+v", merged)
+	}
+}
+
+// TestMergeTypedClaimsDemotesCarriedOnlyActiveClaimToStale pins the claim
+// downgrade: a claim the fresh submission does not restate keeps its kind and
+// evidence but loses the trusted active posture (stale until a later
+// generation restates it). Restating the claim replaces it wholesale with the
+// fresh active identity, and low-trust terminal postures (invalidated) are
+// never demoted.
+func TestMergeTypedClaimsDemotesCarriedOnlyActiveClaimToStale(t *testing.T) {
+	prior := map[string]checkpointClaim{
+		"tests pass":  {Kind: "observed", EvidenceRefs: []string{"ev-old"}, Status: typedClaimStatusActive},
+		"old finding": {Kind: "observed", EvidenceRefs: []string{"ev-stale"}, Status: typedClaimStatusInvalidated},
+	}
+	current := map[string]checkpointClaim{
+		"next step": {Kind: "proposed", Status: typedClaimStatusActive},
+	}
+	merged, dropped := mergeTypedClaims(prior, current)
+	if dropped != 0 {
+		t.Fatalf("dropped = %d, want 0", dropped)
+	}
+	if got := merged["tests pass"]; got.Status != typedClaimStatusStale || got.Kind != "observed" || len(got.EvidenceRefs) != 1 || got.EvidenceRefs[0] != "ev-old" {
+		t.Fatalf("carried-only claim must be demoted to stale while keeping kind and evidence: %#v", got)
+	}
+	if got := merged["old finding"]; got.Status != typedClaimStatusInvalidated {
+		t.Fatalf("invalidated claim must keep its low-trust posture: %#v", got)
+	}
+	if got := merged["next step"]; got.Status != typedClaimStatusActive {
+		t.Fatalf("fresh claim must stay active: %#v", got)
+	}
+
+	// Restating the claim replaces the carried identity: kind/evidence are
+	// the fresh submission's and the status reads active again.
+	restated := map[string]checkpointClaim{
+		"tests pass": {Kind: "derived", EvidenceRefs: []string{"ev-new"}},
+	}
+	merged, dropped = mergeTypedClaims(prior, restated)
+	if dropped != 0 {
+		t.Fatalf("dropped = %d, want 0", dropped)
+	}
+	if got := merged["tests pass"]; got.Status != typedClaimStatusActive || got.Kind != "derived" || len(got.EvidenceRefs) != 1 || got.EvidenceRefs[0] != "ev-new" {
+		t.Fatalf("restated claim must read as fresh active: %#v", got)
+	}
+}
+
+// TestMergeTypedClaimsBoundsCarriedSetAndDisclosesOmission pins the claim-set
+// bound end to end: carried-only claims beyond typedStateCarryMaxClaims are
+// evicted deterministically, the merge reports the eviction count, and the
+// checkpoint renderer discloses it with a note under the typed JSON line
+// (which the typed parser ignores, keeping the machine block intact).
+func TestMergeTypedClaimsBoundsCarriedSetAndDisclosesOmission(t *testing.T) {
+	prior := make(map[string]checkpointClaim, 45)
+	for i := 0; i < 45; i++ {
+		prior[fmt.Sprintf("carried claim %d", i)] = checkpointClaim{Kind: "observed", EvidenceRefs: []string{"ev-1"}, Status: typedClaimStatusActive}
+	}
+	current := map[string]checkpointClaim{"fresh claim": {Kind: "proposed", Status: typedClaimStatusActive}}
+	merged, dropped := mergeTypedClaims(prior, current)
+	if len(merged) != typedStateCarryMaxClaims {
+		t.Fatalf("merged claim count = %d, want cap %d", len(merged), typedStateCarryMaxClaims)
+	}
+	if dropped != 45+1-typedStateCarryMaxClaims {
+		t.Fatalf("dropped = %d, want %d", dropped, 45+1-typedStateCarryMaxClaims)
+	}
+	if _, ok := merged["fresh claim"]; !ok {
+		t.Fatal("fresh claims must always survive the bound")
+	}
+	// The surviving carried set is deterministic under map iteration order:
+	// re-merging the same claims from a differently-built map must evict the
+	// same count.
+	reshuffled := make(map[string]checkpointClaim, len(prior))
+	for k, v := range prior {
+		reshuffled[k] = v
+	}
+	second, _ := mergeTypedClaims(reshuffled, current)
+	if len(second) != len(merged) {
+		t.Fatalf("deterministic eviction violated: %d != %d", len(second), len(merged))
+	}
+
+	// The disclosure note reaches the rendered checkpoint.
+	a := newTestMainAgent(t, t.TempDir())
+	priorBody := "## Key Decisions\n- d-old\n\n## Typed Checkpoint State\n" + renderTypedStateJSON(checkpointTypedState{Claims: prior})
+	req := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{ActiveObjective: "continue", NextStep: "go", Decisions: []string{"fresh decision"}}}
+	req, _, claimsOmitted, _ := mergePriorTypedCheckpointState(req, priorBody)
+	if claimsOmitted != len(prior)-typedStateCarryMaxClaims {
+		t.Fatalf("claimsOmitted = %d, want %d", claimsOmitted, len(prior)-typedStateCarryMaxClaims)
+	}
+	snapshot := []message.Message{
+		{Role: message.RoleUser, Content: priorBody, IsCompactionSummary: true},
+		{Role: message.RoleUser, Content: "continue"},
+	}
+	summary := a.buildModelDrivenCheckpointSummary(modelDrivenBarrierSnapshot{snapshot: snapshot}, snapshot, len(snapshot), req)
+	body := compactionSummaryBody(summary)
+	if !strings.Contains(body, typedStateClaimsOmittedNote) {
+		t.Fatalf("claim omission must be disclosed in the checkpoint:\n%s", body)
+	}
+	if _, ok := parseCheckpointTypedState(body); !ok {
+		t.Fatalf("disclosure note must not break the typed block:\n%s", body)
+	}
+}
+
+// TestTypedCarrySurvivesUsageSummaryBetweenModelDrivenCheckpoints pins the
+// W1 carry fix: a usage-driven summary sandwiched between two model-driven
+// checkpoints declares no typed block itself, so the third generation merges
+// against the nearest older checkpoint message that does carry one instead of
+// silently dropping the first generation's machine-carryable state.
+func TestTypedCarrySurvivesUsageSummaryBetweenModelDrivenCheckpoints(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	round1Req := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{
+		ActiveObjective: "continue",
+		NextStep:        "go",
+		Decisions:       []string{"d1: model-driven decision"},
+		ClaimKinds:      map[string]string{"feature works": "observed"},
+		ClaimEvidence:   map[string][]string{"feature works": {"ev-1"}},
+		StageID:         "impl", StageStatus: "candidate", CheckpointKind: "provisional",
+	}}
+	one := []message.Message{
+		{Role: message.RoleUser, Content: "first request"},
+		{Role: message.RoleAssistant, Content: "first work"},
+	}
+	first := a.buildModelDrivenCheckpointSummary(modelDrivenBarrierSnapshot{snapshot: one}, one, len(one), round1Req)
+	firstMsg := message.Message{Role: message.RoleUser, Content: first, IsCompactionSummary: true, CompactionSummaryMode: compactionSummaryModeModelDriven}
+
+	// The usage-driven summary is the newest checkpoint and carries no typed
+	// block of its own; the model-driven checkpoint it replaced still exists
+	// as an older message in this head.
+	usageBody := buildCompactionCheckpointMessage(
+		"## Current User Request\n- continue the work\n\n## Progress\n- summarized progress",
+		nil, message.CompactionSummaryModeModelSummary, nil)
+	usageMsg := message.Message{Role: message.RoleUser, Content: usageBody, IsCompactionSummary: true, CompactionSummaryMode: message.CompactionSummaryModeModelSummary}
+
+	round3Req := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{
+		ActiveObjective: "continue",
+		NextStep:        "go",
+		Decisions:       []string{"d3: fresh decision"},
+	}}
+	three := []message.Message{firstMsg, usageMsg, {Role: message.RoleUser, Content: "second request"}}
+	third := a.buildModelDrivenCheckpointSummary(modelDrivenBarrierSnapshot{snapshot: three}, three, len(three), round3Req)
+	state, ok := parseCheckpointTypedState(compactionSummaryBody(third))
+	if !ok {
+		t.Fatalf("round-3 checkpoint must carry a typed block:\n%s", third)
+	}
+	if !containsString(state.Decisions, "d1: model-driven decision") {
+		t.Fatalf("first generation's decision must survive the usage summary in between: %v", state.Decisions)
+	}
+	if state.Decisions[0] != "d3: fresh decision" {
+		t.Fatalf("fresh decision must lead: %v", state.Decisions)
+	}
+	got := state.Claims["feature works"]
+	if got.Kind != "observed" || len(got.EvidenceRefs) != 1 {
+		t.Fatalf("first generation's claim must survive with its classification and evidence: %#v", got)
+	}
+	if got.Status != typedClaimStatusStale {
+		t.Fatalf("carried-only claim must read as stale, not active: %#v", got)
+	}
+}
+
+// TestTypedCarryRecoveredFromUsageCheckpointAppendix pins the appendix half
+// of the W1 carry fix: when an intermediate usage-driven compaction archives a
+// model-driven checkpoint, the model-driven body survives inside the newer
+// summary's `## Previous Checkpoint` appendix (appendPriorCheckpointCarry runs
+// on every mode, so the appendix always lands inside the summary body, before
+// the [Context compressed] marker). The next model-driven generation must
+// parse the raw body — not just the appendix-stripped body — to recover the
+// typed line from the appendix.
+func TestTypedCarryRecoveredFromUsageCheckpointAppendix(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	appendix := "## Key Decisions\n- carried via appendix\n\n## Typed Checkpoint State\n" +
+		renderTypedStateJSON(checkpointTypedState{Decisions: []string{"d1: archived decision"}, StageID: "impl", StageStatus: "candidate", Kind: "provisional"})
+	// Mirrors the usage-driven runner: appendPriorCheckpointCarry appends the
+	// prior checkpoint body to the summary TEXT, and the checkpoint wrapper
+	// is built around that text afterwards — so the appendix sits inside the
+	// [Context Summary]..[Context compressed] body, never after the wrapper.
+	summary := "## Current User Request\n- continue\n\n## Progress\n- summarized\n\n" + priorCheckpointSectionHeading + "\n" + appendix
+	usageMsg := message.Message{
+		Role:                  message.RoleUser,
+		Content:               buildCompactionCheckpointMessage(summary, nil, message.CompactionSummaryModeModelSummary, nil),
+		IsCompactionSummary:   true,
+		CompactionSummaryMode: message.CompactionSummaryModeModelSummary,
+	}
+
+	req := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{
+		ActiveObjective: "continue",
+		NextStep:        "go",
+		Decisions:       []string{"d3: fresh decision"},
+	}}
+	snapshot := []message.Message{usageMsg, {Role: message.RoleUser, Content: "second request"}}
+	third := a.buildModelDrivenCheckpointSummary(modelDrivenBarrierSnapshot{snapshot: snapshot}, snapshot, len(snapshot), req)
+	state, ok := parseCheckpointTypedState(compactionSummaryBody(third))
+	if !ok {
+		t.Fatalf("round-3 checkpoint must carry a typed block:\n%s", third)
+	}
+	if !containsString(state.Decisions, "d1: archived decision") {
+		t.Fatalf("typed state carried inside the Previous Checkpoint appendix must be merged: %v", state.Decisions)
+	}
+	if state.Decisions[0] != "d3: fresh decision" {
+		t.Fatalf("fresh decision must lead: %v", state.Decisions)
+	}
+	if state.StageID != "impl" || state.StageStatus != "candidate" {
+		t.Fatalf("carried stage must merge from the appendix: %+v", state)
 	}
 }

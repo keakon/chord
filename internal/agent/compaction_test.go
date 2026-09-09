@@ -6741,10 +6741,13 @@ func TestLooksLikeUserCorrectionPrecision(t *testing.T) {
 	}
 }
 
-// TestFilterCompactionEvidenceForArchivalKeepsStatedConstraints guards the
-// archival profile's evidence keep-set: the archival summary is generated once
-// and never re-scans the archived content, so a declarative constraint dropped
-// from the evidence pack would be lost for the rest of the session.
+// TestFilterCompactionEvidenceForArchivalKeepsReferencableConstraints guards
+// the archival profile's evidence keep-set: the archival summary is generated
+// once and never re-scans the archived content, so a declarative constraint
+// dropped from the evidence pack would be lost for the rest of the session.
+// The keep-set also covers every kind a committed checkpoint may cite as
+// acceptance evidence (user corrections, stated constraints, tool diffs), so
+// a validated ID is always visible inside the checkpoint.
 func TestFilterCompactionEvidenceForArchivalKeepsStatedConstraints(t *testing.T) {
 	items := []evidenceItem{
 		{Kind: evidenceUserCorrection, Title: "User correction / constraint", Excerpt: "do not change the public API", Priority: 100, Sequence: 1},
@@ -6757,8 +6760,8 @@ func TestFilterCompactionEvidenceForArchivalKeepsStatedConstraints(t *testing.T)
 	for _, item := range kept {
 		kinds = append(kinds, item.Kind)
 	}
-	if len(kept) != 2 || kinds[0] != evidenceUserCorrection || kinds[1] != evidenceStatedConstraint {
-		t.Fatalf("kept kinds = %v, want the user correction and the stated constraint preserved", kinds)
+	if len(kept) != 3 || kinds[0] != evidenceUserCorrection || kinds[1] != evidenceStatedConstraint || kinds[2] != evidenceToolDiff {
+		t.Fatalf("kept kinds = %v, want the user correction, stated constraint and tool diff preserved", kinds)
 	}
 }
 

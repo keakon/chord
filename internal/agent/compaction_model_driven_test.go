@@ -520,7 +520,7 @@ func TestModelDrivenApplyFailureSurfacesRealReason(t *testing.T) {
 		NewMessages:        []message.Message{{Role: "user", Content: "[Context Summary]\ncheckpoint"}},
 		Index:              1,
 		HeadSplit:          1,
-		SourceRefs:         []checkpointSourceRef{{LegacyOrdinal: 0, Role: "tool"}},
+		SourceRefs:         []checkpointSourceRef{{Ordinal: 0, Role: "tool"}},
 		SourceFingerprint:  "forged",
 		AbsHistoryPath:     filepath.Join(projectRoot, "history-1.md"),
 		AbsHistoryMetaPath: filepath.Join(projectRoot, "history-1.md.meta"),
@@ -1862,5 +1862,54 @@ func TestModelDrivenRuntimeStateFingerprintIgnoresSubAgentOrder(t *testing.T) {
 	}
 	if got, want := modelDrivenRuntimeStateFingerprint(base), modelDrivenRuntimeStateFingerprint(changed); got == want {
 		t.Fatal("fingerprint must change when a live SubAgent state changes")
+	}
+}
+
+// TestMaybeStartModelDrivenBarrierTurnNilSettlesProposal pins the W6 fix: a
+// pending request whose turn died before the tool-batch barrier must not
+// leave the proposal record stuck in preparing/accepted — the barrier settles
+// it through the normal terminal (cancelled) path so the persisted record and
+// a later restore never report intent that can no longer be applied.
+func TestMaybeStartModelDrivenBarrierTurnNilSettlesProposal(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.modelDrivenProposal = modelDrivenProposalState{
+		requestID: "cc-1",
+		status:    modelDrivenProposalAccepted,
+		reason:    "accepted by runtime validation",
+		argsJSON:  `{"active_objective":"a","next_step":"b"}`,
+	}
+	a.pendingModelDriven = &modelDrivenCheckpointRequest{
+		ToolCallID: "cc-1",
+		Args:       tools.CompactContextArgs{ActiveObjective: "a", NextStep: "b"},
+	}
+	if a.turn != nil {
+		t.Fatal("fixture requires a turn-less agent")
+	}
+	if a.maybeStartModelDrivenBarrier() {
+		t.Fatal("barrier must not start a worker when the turn is gone")
+	}
+	if a.pendingModelDriven != nil {
+		t.Fatal("pending request must be consumed by the barrier")
+	}
+	if a.modelDrivenProposal.status != CompactionStatusCancelled {
+		t.Fatalf("proposal status = %q, want cancelled (terminal)", a.modelDrivenProposal.status)
+	}
+	if a.modelDrivenProposal.argsJSON != "" {
+		t.Fatalf("terminal settle must clear the audit args copy, got %q", a.modelDrivenProposal.argsJSON)
+	}
+}
+
+// TestValidateCommittedEvidenceRejectsEscalateEvidence pins the committed
+// evidence consistency rule: escalate is a negative outcome record (an open
+// intervention request) exactly like tool_error and done_rejected, so
+// committed checkpoints reject it uniformly instead of letting an
+// escalated-but-unfinished stage read as completed.
+func TestValidateCommittedEvidenceRejectsEscalateEvidence(t *testing.T) {
+	a := &MainAgent{}
+	a.evidence.add(evidenceItem{Kind: evidenceEscalate, Key: "esc", Excerpt: "subagent requests intervention"})
+	id := evidenceItemID(a.evidence.snapshot()[0])
+	if err := a.validateCommittedEvidence(tools.CompactContextArgs{CheckpointKind: "committed", EvidenceRefs: []string{id}}); err == nil {
+		t.Fatal("committed checkpoint should reject escalate evidence")
 	}
 }

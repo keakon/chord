@@ -550,6 +550,17 @@ func (a *MainAgent) loadSessionState(sessionPath string) (*loadedSessionState, e
 	}
 
 	snapshotDuration, subAgentRestoreDuration = a.applySessionSnapshot(loaded, sessionPath, tmpRecovery, started)
+	// Crash-window reconciliation of a model-driven apply. A crash between
+	// the durable transcript rewrite and the applied settlement leaves the
+	// recovery snapshot's proposal record reading accepted/preparing although
+	// the applied checkpoint is the live transcript head: without this step
+	// the restore would show the misleading "requested but not applied"
+	// notice and lose the apply-interval anchor. Runs after the snapshot
+	// fields are loaded (reconcileCompactionTransactions above has already
+	// flipped any prepared manifest whose target matches the transcript) and
+	// before activation consumes the loaded proposal. States that cannot be
+	// proven from durable evidence are left untouched.
+	reconcileLoadedModelDrivenCrashWindow(loaded, sessionPath)
 	if usageLedgerEventCount == 0 && legacyUsageSnapshotPresent(sessionPath) {
 		log.Warnf("session restore: legacy usage fields found but not migrated; session=%v", filepath.Base(sessionPath))
 	}
@@ -904,6 +915,34 @@ func modelDrivenProposalNeedsRecoveryNotice(status string) bool {
 	default:
 		return false
 	}
+}
+
+// reconcileLoadedModelDrivenCrashWindow corrects the loaded model-driven
+// proposal record when the durable transcript proves the checkpoint apply
+// landed before the crash (see modelDrivenCommittedApplyBatch). The proposal
+// is moved to applied, its audit args copy is cleared, and the
+// lastModelDrivenApplyBatch anchor is restored from the batch the checkpoint
+// message stamped. It only ever upgrades a pre-apply proposal record that
+// modelDrivenCommittedApplyBatch can prove against durable state; anything
+// else keeps the recorded state untouched.
+func reconcileLoadedModelDrivenCrashWindow(loaded *loadedSessionState, sessionDir string) {
+	if loaded == nil {
+		return
+	}
+	proposal := loaded.ModelDrivenProposal
+	if proposal == nil || !modelDrivenProposalNeedsRecoveryNotice(proposal.Status) {
+		return
+	}
+	batch, ok := modelDrivenCommittedApplyBatch(sessionDir, loaded.Messages, proposal.RequestID)
+	if !ok {
+		return
+	}
+	proposal.Status = modelDrivenProposalApplied
+	proposal.Reason = "checkpoint apply was reconciled as applied after a crash between the durable rewrite and its settlement"
+	proposal.UpdatedAt = time.Now()
+	proposal.ArgsJSON = ""
+	loaded.LastModelDrivenApplyBatch = batch
+	log.Infof("restore reconciled model-driven apply crash window session=%v proposal_id=%v apply_batch=%v", filepath.Base(sessionDir), proposal.RequestID, batch)
 }
 
 // enqueueRestoredMailboxMessage delivers a mailbox message that is already

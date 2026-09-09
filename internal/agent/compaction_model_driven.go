@@ -340,10 +340,7 @@ func (a *MainAgent) validateModelDrivenEvidenceRefs(refs []string) error {
 	if len(refs) == 0 {
 		return nil
 	}
-	known := make(map[string]evidenceItem)
-	for _, item := range a.evidence.snapshot() {
-		known[evidenceItemID(item)] = item
-	}
+	known := evidenceItemsByID(a.evidence.snapshot())
 	for _, ref := range refs {
 		item, ok := known[ref]
 		if !ok {
@@ -357,12 +354,9 @@ func (a *MainAgent) validateModelDrivenEvidenceRefs(refs []string) error {
 }
 
 func (a *MainAgent) validateObservedClaimEvidence(args tools.CompactContextArgs) error {
-	byID := make(map[string]evidenceItem)
-	for _, item := range a.evidence.snapshot() {
-		byID[evidenceItemID(item)] = item
-	}
+	byID := evidenceItemsByID(a.evidence.snapshot())
 	for claim, kind := range args.ClaimKinds {
-		if kind != "observed" {
+		if kind != claimKindObserved {
 			continue
 		}
 		for _, ref := range args.ClaimEvidence[claim] {
@@ -382,19 +376,22 @@ func (a *MainAgent) validateObservedClaimEvidence(args tools.CompactContextArgs)
 }
 
 func (a *MainAgent) validateCommittedEvidence(args tools.CompactContextArgs) error {
-	if args.CheckpointKind != "committed" && args.StageStatus != "completed" {
+	if args.CheckpointKind != checkpointKindCommitted && args.StageStatus != stageStatusCompleted {
 		return nil
 	}
-	byID := make(map[string]evidenceItem)
-	for _, item := range a.evidence.snapshot() {
-		byID[evidenceItemID(item)] = item
-	}
+	byID := evidenceItemsByID(a.evidence.snapshot())
 	for _, ref := range args.EvidenceRefs {
 		item, ok := byID[ref]
 		if !ok {
 			continue
 		}
-		if item.Kind == evidenceToolError || item.Kind == evidenceDoneRejected {
+		// Completed/committed semantics anchor to acceptance evidence only:
+		// user corrections, stated constraints, tool diffs and similar
+		// positive records. tool_error, done_rejected and escalate are
+		// negative outcome records (a failed action, a rejected Done, an open
+		// intervention request) and cannot support a claim of completion, so
+		// committed treats them uniformly.
+		if item.Kind == evidenceToolError || item.Kind == evidenceDoneRejected || item.Kind == evidenceEscalate {
 			return fmt.Errorf("committed checkpoint cannot use %s evidence %q", item.Kind, ref)
 		}
 	}
@@ -402,10 +399,10 @@ func (a *MainAgent) validateCommittedEvidence(args tools.CompactContextArgs) err
 }
 
 func validateModelDrivenCheckpointKind(args tools.CompactContextArgs) error {
-	if args.CheckpointKind == "committed" && args.StageStatus != "completed" {
+	if args.CheckpointKind == checkpointKindCommitted && args.StageStatus != stageStatusCompleted {
 		return fmt.Errorf("committed compact_context requires stage_status=completed; retry with checkpoint_kind=provisional when the stage is not authoritative yet")
 	}
-	if args.CheckpointKind == "committed" && len(args.EvidenceRefs) == 0 {
+	if args.CheckpointKind == checkpointKindCommitted && len(args.EvidenceRefs) == 0 {
 		return fmt.Errorf("committed compact_context requires at least one evidence_refs entry from the checkpoint evidence pack; retry with checkpoint_kind=provisional when no evidence pack is in view")
 	}
 	// A provisional completed stage does not require evidence on its own:
@@ -413,10 +410,10 @@ func validateModelDrivenCheckpointKind(args tools.CompactContextArgs) error {
 	// anchor to evidence IDs, and those IDs are not even visible to the model
 	// before the first checkpoint of a session renders its evidence pack.
 	for claim, kind := range args.ClaimKinds {
-		if kind == "observed" && len(args.ClaimEvidence[claim]) == 0 {
+		if kind == claimKindObserved && len(args.ClaimEvidence[claim]) == 0 {
 			return fmt.Errorf("claim_kinds %q is observed but has no claim_evidence", claim)
 		}
-		if kind == "observed" {
+		if kind == claimKindObserved {
 			refs := make(map[string]struct{}, len(args.EvidenceRefs))
 			for _, ref := range args.EvidenceRefs {
 				refs[ref] = struct{}{}
@@ -447,7 +444,15 @@ func (a *MainAgent) maybeStartModelDrivenBarrier() bool {
 	a.pendingModelDriven = nil
 	a.transitionModelDrivenProposal(modelDrivenProposalPreparing, "preparing durable checkpoint")
 	if a.turn == nil {
-		log.Warn("model-driven checkpoint pending but turn is gone; dropping request")
+		// The turn that armed the request ended before the barrier could hand
+		// it to a worker. The proposal already moved to preparing; settle it
+		// through the normal terminal path (cancelled) so the persisted
+		// record never keeps an orphaned pre-apply state — a later crash
+		// restore would otherwise read "requested but not applied" intent
+		// that can no longer be applied — and the terminal settle clears the
+		// args audit copy.
+		log.Warn("model-driven checkpoint pending but turn is gone; settling request as cancelled")
+		a.settleModelDrivenCancelled("the turn ended before the model-driven checkpoint could start; no reset occurred")
 		return false
 	}
 	snapshot := a.ctxMgr.Snapshot()
@@ -518,6 +523,9 @@ func (a *MainAgent) discardCompactionForModelOverride() {
 	if readyDraft := a.compactionState.readyDraft; readyDraft != nil {
 		a.compactionState.readyDraft = nil
 		cleanupOrphanCompactionFiles(readyDraft.AbsHistoryPath)
+		if readyDraft.TransactionID != "" {
+			removeCompactionTransactionManifest(readyDraft.TransactionSessionDir, readyDraft.TransactionID)
+		}
 	}
 	a.recordCompactionPolicyAnalyticsEvent("auto_compact_overridden_by_model_checkpoint")
 	if a.compactionState.cancel != nil {
@@ -1192,15 +1200,30 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 	// The prior checkpoint's machine-carryable state (decisions, open issues,
 	// evidence references, stage, claims) is merged into this submission and
 	// rendered below; the whole prior body is never carried as natural-language
-	// Markdown. stateCarryOmitted reports carried decisions dropped by the
-	// merge's list bound so the renderer discloses the omission.
-	// mergePriorTypedCheckpointState parses the prior checkpoint's FULL
-	// stripped body: the typed JSON line sits late in a model-driven body, and
-	// the display-truncated carry (latestPriorCheckpointBody) would drop it
-	// before the parse when a long body exceeds the carry cap.
+	// Markdown. stateCarryOmitted reports carried list items dropped by the
+	// merge's list bounds and claimsCarryOmitted the carried-only claims the
+	// claim-set cap evicted, so the renderer discloses both omissions;
+	// typedCarryUnreadable reports a prior typed block that could not be
+	// parsed. mergePriorTypedCheckpointState parses the body chosen by
+	// latestPriorTypedCheckpointBody — the nearest checkpoint that actually
+	// carries a parseable typed block — because a body truncated to the
+	// display carry cap (latestPriorCheckpointBody) would drop the typed JSON
+	// line before the parse.
 	var stateCarryOmitted int
+	var claimsCarryOmitted int
 	var typedCarryUnreadable bool
-	req, stateCarryOmitted, typedCarryUnreadable = mergePriorTypedCheckpointState(req, latestPriorCheckpointStrippedBody(snapshot[:headSplit]))
+	// The prior typed state comes from the nearest checkpoint that actually
+	// carries a parseable typed block: a usage-driven or truncate-only
+	// summary sandwiched between two model-driven checkpoints declares none,
+	// and merging against its stripped body alone would silently drop the
+	// older chain's machine-carryable state (see
+	// latestPriorTypedCheckpointBody).
+	priorTypedBody, typedCarryBroken := latestPriorTypedCheckpointBody(snapshot[:headSplit])
+	if typedCarryBroken {
+		typedCarryUnreadable = true
+	} else if priorTypedBody != "" {
+		req, stateCarryOmitted, claimsCarryOmitted, _ = mergePriorTypedCheckpointState(req, priorTypedBody)
+	}
 	markTypedClaimsInvalidated(req, bundle.evidenceItems)
 	headSnapshot := snapshot[:headSplit]
 	anchor := resolveLatestUserRequestAnchor(snapshot)
@@ -1220,6 +1243,13 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 	claimKinds := renderClaimKindsSection(claimKindsMap)
 	stage := renderModelDrivenStageSection(req.Args.StageID, req.Args.StageStatus, req.Args.CheckpointKind)
 	typedState := renderTypedCheckpointState(req)
+	if claimsCarryOmitted > 0 {
+		// The dropped claims exist only in the archived history files. The
+		// note sits right below the typed JSON line — the authoritative claim
+		// block — and the typed parser reads only the first line of the
+		// section, so the disclosure never breaks the machine block.
+		typedState += "\n" + typedStateClaimsOmittedNote
+	}
 	if stateCarryOmitted > 0 {
 		// The dropped entries exist only in the archived history files. The
 		// note must say so: a bounded carry that silently looked complete
@@ -1244,7 +1274,7 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 		{"## Claim Evidence", claimEvidence},
 		{"## Claim Classification", claimKinds},
 		{"## Checkpoint Stage", stage},
-		{"## Typed Checkpoint State", typedState},
+		{typedStateSectionHeading, typedState},
 		{"## Todo State", formatTodosAsRelevanceBullets(bundle.todos, anchor)},
 		{"## SubAgent State", formatSubAgentsAsBullets(bundle.subAgents)},
 		{"## Open Problems", openIssues},
@@ -1319,17 +1349,15 @@ func markTypedClaimsInvalidated(req *modelDrivenCheckpointRequest, evidenceItems
 	if len(claims) == 0 {
 		return
 	}
-	validity := make(map[string]evidenceValidity, len(evidenceItems))
-	for _, item := range evidenceItems {
-		validity[evidenceItemID(item)] = item.Validity
-	}
+	byID := evidenceItemsByID(evidenceItems)
 	for claim, item := range claims {
 		for _, ref := range item.EvidenceRefs {
-			if validity[ref] == evidenceValidityInvalidated || validity[ref] == evidenceValidityUnavailable {
+			validity := byID[ref].Validity
+			if validity == evidenceValidityInvalidated || validity == evidenceValidityUnavailable {
 				if req.ClaimStatuses == nil {
 					req.ClaimStatuses = map[string]string{}
 				}
-				req.ClaimStatuses[claim] = "invalidated"
+				req.ClaimStatuses[claim] = typedClaimStatusInvalidated
 				break
 			}
 		}
@@ -1340,31 +1368,33 @@ func markTypedClaimsInvalidated(req *modelDrivenCheckpointRequest, evidenceItems
 // recent prior checkpoint (inside the archived head) into the fresh model
 // submission, then writes the merged state back into the request arguments so
 // the rendered sections and the typed state block both reflect the carry. The
-// fresh submission wins (its items come first and its stage metadata
-// overrides); carried items fill the remaining list capacity. omittedDecisions
-// reports how many carried decisions were dropped to bound the list, so the
-// renderer can disclose it. malformed reports that the prior body carried a
-// typed block that could not be parsed, which the renderer must disclose as an
-// unreadable carry rather than silently treating it as absent. A nil request,
-// an empty prior body, or a prior checkpoint without a typed state block (a
-// usage-driven summary, an old checkpoint) leaves the submission untouched.
+// fresh submission wins (its items come first; its stage metadata overrides
+// the carried one and a carried completed/committed stage is never inherited
+// on an empty restate — see mergeCheckpointTypedStates); carried items fill
+// the remaining capacity. omitted reports how many carried list items were
+// dropped to bound the lists, claimsOmitted how many carried-only claims the
+// claim-set cap evicted, so the renderer can disclose both. malformed reports
+// that the prior body carried a typed block that could not be parsed, which
+// the renderer must disclose as an unreadable carry rather than silently
+// treating it as absent. A nil request, an empty prior body, or a prior body
+// without a typed state block leaves the submission untouched.
 //
-// prior must be the checkpoint's FULL stripped body (see
-// latestPriorCheckpointStrippedBody): the typed JSON line sits late in a
-// model-driven body, and a body truncated to the display carry cap would drop
-// it before it could be parsed.
-func mergePriorTypedCheckpointState(req *modelDrivenCheckpointRequest, prior string) (mergedReq *modelDrivenCheckpointRequest, omittedDecisions int, malformed bool) {
+// prior must be the body of a checkpoint that actually carries a parseable
+// typed block (see latestPriorTypedCheckpointBody): the caller scans the head
+// for the nearest such checkpoint instead of passing a body truncated to the
+// display carry cap, which would drop the typed JSON line before the parse.
+func mergePriorTypedCheckpointState(req *modelDrivenCheckpointRequest, prior string) (mergedReq *modelDrivenCheckpointRequest, omitted int, claimsOmitted int, malformed bool) {
 	if req == nil {
-		return req, 0, false
+		return req, 0, 0, false
 	}
 	priorState, found, broken := typedStateFromBody(prior)
 	if !found {
-		return req, 0, false
+		return req, 0, 0, false
 	}
 	if broken {
-		return req, 0, true
+		return req, 0, 0, true
 	}
-	merged, omitted := mergeCheckpointTypedStates(priorState, typedStateFromArgs(req.Args))
+	merged, omitted, claimsOmitted := mergeCheckpointTypedStates(priorState, typedStateFromArgs(req.Args))
 	copyReq := *req
 	copyReq.Args.Decisions = merged.Decisions
 	copyReq.Args.OpenIssues = merged.OpenIssues
@@ -1374,14 +1404,16 @@ func mergePriorTypedCheckpointState(req *modelDrivenCheckpointRequest, prior str
 	copyReq.Args.CheckpointKind = merged.Kind
 	// The whole merged claim set travels on the request (see
 	// effectiveCheckpointClaims): the fresh submission's own claims plus the
-	// carried ones it did not restate, each keeping its observed/assumed
-	// classification, evidence association, certainty and invalidated status.
+	// carried ones it did not restate, each keeping its classification,
+	// evidence association and status (a carried claim the fresh submission
+	// does not restate is demoted from active to stale instead of keeping the
+	// trusted current-generation posture).
 	// Rebuilding the claims from the fresh Args alone — as the code did before
 	// carrying them here — dropped every claim the submission did not restate,
 	// and a claim invalidated by evidence that has since left the window would
 	// come back active.
 	copyReq.Claims = merged.Claims
-	return &copyReq, omitted, false
+	return &copyReq, omitted, claimsOmitted, false
 }
 
 func renderTypedCheckpointState(req *modelDrivenCheckpointRequest) string {

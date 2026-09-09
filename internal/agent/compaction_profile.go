@@ -121,7 +121,13 @@ func filterCompactionEvidenceForArchival(items []evidenceItem) []evidenceItem {
 			continue
 		}
 		switch item.Kind {
-		case evidenceUserCorrection, evidenceStatedConstraint, evidenceToolError, evidenceEscalate:
+		// The pack covers every kind a committed checkpoint may cite as
+		// acceptance evidence (user corrections, stated constraints, tool
+		// diffs) plus the constraint/error records provisional stages lean
+		// on. tool_diff is in the list so an ID the completed-evidence
+		// widening admits is always visible inside the checkpoint instead of
+		// passing validation but being unreachable after the apply.
+		case evidenceUserCorrection, evidenceStatedConstraint, evidenceToolDiff, evidenceToolError, evidenceEscalate:
 			out = append(out, item)
 		}
 	}

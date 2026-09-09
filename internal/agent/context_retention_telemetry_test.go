@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"math"
 	"testing"
 
 	"github.com/keakon/chord/internal/analytics"
@@ -46,48 +45,6 @@ func TestRetentionWindowTotalsAddAccumulates(t *testing.T) {
 	}
 	if totals != want {
 		t.Fatalf("totals = %+v, want %+v", totals, want)
-	}
-}
-
-func TestRetentionWindowSummaryRates(t *testing.T) {
-	var totals retentionWindowTotals
-	totals.add(retentionStatsFixture())
-	totals.add(ContextReductionStats{
-		OverCompression: map[string]int{
-			contextReductionOverCompressionReread:                1,
-			contextReductionOverCompressionRereadChangedRevision: 1,
-		},
-		ArchiveReads: 2,
-	})
-
-	summary := summarizeRetentionWindow(totals)
-	if summary.Requests != 2 || summary.Rereads != 3 {
-		t.Fatalf("summary requests/rereads = %v/%v, want 2/3", summary.Requests, summary.Rereads)
-	}
-	if math.Abs(summary.RereadsPerRequest-1.5) > 1e-9 {
-		t.Fatalf("rereads per request = %v, want 1.5", summary.RereadsPerRequest)
-	}
-	// Request 1 carried same+changed rereads (1+1); request 2 added a changed
-	// reread only: 3 revision-tagged rereads, 2 with a changed revision.
-	if summary.RevisionKnownRereads != 3 || summary.ChangedRevisionRereads != 2 {
-		t.Fatalf("revision rereads = %v/%v, want 3/2", summary.RevisionKnownRereads, summary.ChangedRevisionRereads)
-	}
-	if math.Abs(summary.ChangedRevisionRate-2.0/3.0) > 1e-9 {
-		t.Fatalf("changed revision rate = %v, want 2/3", summary.ChangedRevisionRate)
-	}
-	if summary.ArchiveReads != 5 || summary.ArchiveReadFailures != 1 {
-		t.Fatalf("archive reads = %v/%v, want 5/1", summary.ArchiveReads, summary.ArchiveReadFailures)
-	}
-	if math.Abs(summary.ArchiveFailureRate-0.2) > 1e-9 {
-		t.Fatalf("archive failure rate = %v, want 0.2", summary.ArchiveFailureRate)
-	}
-	if math.Abs(summary.StaleEvidenceShare-0.375) > 1e-9 {
-		t.Fatalf("stale evidence share = %v, want 0.375", summary.StaleEvidenceShare)
-	}
-
-	empty := summarizeRetentionWindow(retentionWindowTotals{})
-	if empty.RereadsPerRequest != 0 || empty.ChangedRevisionRate != 0 || empty.ArchiveFailureRate != 0 || empty.StaleEvidenceShare != 0 {
-		t.Fatalf("empty summary rates must be zero: %+v", empty)
 	}
 }
 
@@ -148,22 +105,23 @@ func TestRetentionSignalsAccumulateAcrossRequestsAndApply(t *testing.T) {
 	a.setContextReductionStats(second)
 	a.rememberPreparedLLMRequest(2, nil, nil, nil, nil, 0, contextReductionPolicy{})
 
-	// Both layers accumulate across requests...
-	input := a.currentRetentionPolicyInput()
-	if input.Session.Requests != 2 || input.Window.Requests != 2 {
-		t.Fatalf("requests session/window = %v/%v, want 2/2", input.Session.Requests, input.Window.Requests)
+	// Both layers accumulate across requests. Session probes read the raw
+	// totals directly (the removed policy-summary layer used to present them).
+	session := a.retentionSignals.session
+	if session.Requests != 2 || a.retentionSignals.window.Requests != 2 {
+		t.Fatalf("requests session/window = %v/%v, want 2/2", session.Requests, a.retentionSignals.window.Requests)
 	}
-	if input.Session.Rereads != 2 || input.Session.ArchiveReads != 5 {
-		t.Fatalf("session rereads/archive = %v/%v, want 2/5", input.Session.Rereads, input.Session.ArchiveReads)
+	if session.RereadAfterReduction != 2 || session.ArchiveReads != 5 {
+		t.Fatalf("session rereads/archive = %v/%v, want 2/5", session.RereadAfterReduction, session.ArchiveReads)
 	}
-	if input.Session.RevisionKnownRereads != 3 || input.Session.ChangedRevisionRereads != 2 {
-		t.Fatalf("session revision rereads = %v/%v, want 3/2", input.Session.RevisionKnownRereads, input.Session.ChangedRevisionRereads)
+	if known := session.RereadSameRevision + session.RereadChangedRevision; known != 3 || session.RereadChangedRevision != 2 {
+		t.Fatalf("session revision rereads = %v/%v, want 3/2", known, session.RereadChangedRevision)
 	}
 
 	// ...and survive resetContextReductionStats (what a compaction apply does
 	// to the per-request stats).
 	a.resetContextReductionStats()
-	if got := a.currentRetentionPolicyInput().Session.Requests; got != 2 {
+	if got := a.retentionSignals.session.Requests; got != 2 {
 		t.Fatalf("session requests after resetContextReductionStats = %v, want 2", got)
 	}
 
@@ -172,15 +130,15 @@ func TestRetentionSignalsAccumulateAcrossRequestsAndApply(t *testing.T) {
 	if window := a.takeWindowRetentionSignals(); window.Requests != 2 || window.RereadAfterReduction != 2 {
 		t.Fatalf("taken window = %+v, want requests 2 rereads 2", window)
 	}
-	if got := a.currentRetentionPolicyInput(); got.Window.Requests != 0 || got.Session.Requests != 2 {
-		t.Fatalf("after take window/session requests = %v/%v, want 0/2", got.Window.Requests, got.Session.Requests)
+	if a.retentionSignals.window.Requests != 0 || a.retentionSignals.session.Requests != 2 {
+		t.Fatalf("after take window/session requests = %v/%v, want 0/2", a.retentionSignals.window.Requests, a.retentionSignals.session.Requests)
 	}
 
 	// A request after the apply starts a fresh window on top of the session.
 	a.setContextReductionStats(retentionStatsFixture())
 	a.rememberPreparedLLMRequest(3, nil, nil, nil, nil, 0, contextReductionPolicy{})
-	if got := a.currentRetentionPolicyInput(); got.Window.Requests != 1 || got.Session.Requests != 3 {
-		t.Fatalf("post-apply window/session requests = %v/%v, want 1/3", got.Window.Requests, got.Session.Requests)
+	if a.retentionSignals.window.Requests != 1 || a.retentionSignals.session.Requests != 3 {
+		t.Fatalf("post-apply window/session requests = %v/%v, want 1/3", a.retentionSignals.window.Requests, a.retentionSignals.session.Requests)
 	}
 }
 
@@ -236,9 +194,8 @@ func TestSessionRetentionSignalsResetClearsBothLayers(t *testing.T) {
 	a.rememberPreparedLLMRequest(1, nil, nil, nil, nil, 0, contextReductionPolicy{})
 
 	a.resetSessionRetentionSignals()
-	input := a.currentRetentionPolicyInput()
-	if input.Session.Requests != 0 || input.Window.Requests != 0 {
-		t.Fatalf("session reset left requests session/window = %v/%v, want 0/0", input.Session.Requests, input.Window.Requests)
+	if a.retentionSignals.session.Requests != 0 || a.retentionSignals.window.Requests != 0 {
+		t.Fatalf("session reset left requests session/window = %v/%v, want 0/0", a.retentionSignals.session.Requests, a.retentionSignals.window.Requests)
 	}
 }
 
@@ -249,7 +206,7 @@ func TestActivateLoadedSessionRestartsRetentionSignals(t *testing.T) {
 	a.rememberPreparedLLMRequest(1, nil, nil, nil, nil, 0, contextReductionPolicy{})
 	a.setContextReductionStats(retentionStatsFixture())
 	a.rememberPreparedLLMRequest(2, nil, nil, nil, nil, 0, contextReductionPolicy{})
-	if got := a.currentRetentionPolicyInput().Session.Requests; got != 2 {
+	if got := a.retentionSignals.session.Requests; got != 2 {
 		t.Fatalf("session requests before activation = %v, want 2", got)
 	}
 
@@ -257,24 +214,7 @@ func TestActivateLoadedSessionRestartsRetentionSignals(t *testing.T) {
 	// layers restart at zero, exactly like the /new reset path.
 	a.activateLoadedSession(&loadedSessionState{SessionPath: a.sessionDir})
 
-	input := a.currentRetentionPolicyInput()
-	if input.Session.Requests != 0 || input.Window.Requests != 0 {
-		t.Fatalf("retention signals after session activation = session %v window %v requests, want 0/0", input.Session.Requests, input.Window.Requests)
-	}
-}
-
-func TestRetentionPolicyEligibilityIsConservative(t *testing.T) {
-	input := retentionPolicyInput{Session: retentionSignalSummary{Requests: 20, ReducedToolResults: 1}}
-	if !retentionPolicyEligibility(input) {
-		t.Fatal("stable low-risk observations should be eligible for evaluation")
-	}
-	input.Session.Rereads = 1
-	if retentionPolicyEligibility(input) {
-		t.Fatal("reread evidence must block policy eligibility")
-	}
-	input.Session.Rereads = 0
-	input.Session.ArchiveFailureRate = 0.01
-	if retentionPolicyEligibility(input) {
-		t.Fatal("archive failures must block policy eligibility")
+	if a.retentionSignals.session.Requests != 0 || a.retentionSignals.window.Requests != 0 {
+		t.Fatalf("retention signals after session activation = session %v window %v requests, want 0/0", a.retentionSignals.session.Requests, a.retentionSignals.window.Requests)
 	}
 }

@@ -196,6 +196,53 @@ func cleanupStalePendingCompactions(sessionDir string, maxAge time.Duration) {
 		historyPath := filepath.Join(sessionDir, meta.HistoryFile)
 		cleanupOrphanCompactionFiles(historyPath)
 	}
+	// Transaction manifests have no terminal-file lifecycle of their own: a
+	// committed/aborted manifest is only read by the restore reconciliation
+	// and the model-driven crash-window fix (both of which run before this
+	// sweep on the restore path), and stale prepared ones are re-judged by
+	// that same reconcile. Sweep them once they are old enough. A prepared
+	// manifest whose archive still exists is left alone: its worker may
+	// still be running (a draft can legitimately outlive the sweep window),
+	// and only a manifest whose archive is gone is provably dead.
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasPrefix(name, "compaction-txn-") || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(sessionDir, name))
+		if err != nil {
+			continue
+		}
+		var manifest compactionTransactionManifest
+		if err := json.Unmarshal(data, &manifest); err != nil {
+			continue
+		}
+		if now.Sub(manifest.UpdatedAt) < maxAge {
+			continue
+		}
+		transactionID := strings.TrimSuffix(strings.TrimPrefix(name, "compaction-txn-"), ".json")
+		if manifest.Status == compactionTransactionPrepared {
+			// A prepared manifest whose archive is still present may belong to
+			// an in-flight worker (the archive is only removed once its draft
+			// is cancelled/failed or the transaction commits), so it is left
+			// alone; only a manifest whose archive is gone is provably dead.
+			// The manifest's own authoritative ArchivePath is used instead of
+			// re-deriving the history index from the transaction ID: every
+			// production writer records the absolute archive path here, and
+			// the index spelling inside the ID is not guaranteed to match the
+			// archive file name. An empty ArchivePath means the archive is
+			// gone.
+			if strings.TrimSpace(manifest.ArchivePath) != "" {
+				if _, err := os.Stat(manifest.ArchivePath); err == nil {
+					continue
+				}
+			}
+		}
+		removeCompactionTransactionManifest(sessionDir, transactionID)
+	}
 }
 
 func listHistoryReferences(sessionDir string) ([]string, error) {

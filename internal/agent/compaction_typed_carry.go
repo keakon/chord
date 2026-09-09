@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 
 	"github.com/keakon/chord/internal/tools"
@@ -52,6 +53,36 @@ const (
 	// typed block that cannot be parsed. Dropping an unreadable carry without
 	// a note would read as a complete record of nothing.
 	typedStateUnreadableNote = "- [prior checkpoint typed state was present but could not be read; consult the archived history for the complete record.]"
+	// typedStateCarryMaxClaims caps the merged claim set of one generation.
+	// Fresh submissions are already capped by the compact_context validator
+	// (maxCompactContextClaims=20 in internal/tools/compact_context.go), so
+	// the doubled cap reserves the whole fresh budget plus one carried
+	// generation's worth of claims.
+	typedStateCarryMaxClaims = 40
+	// typedStateClaimsOmittedNote discloses carried claims dropped by the
+	// claim-set cap. It is appended right below the typed JSON line, where
+	// the authoritative claim set lives; the typed parser reads only the
+	// first line of the section, so the disclosure never breaks the machine
+	// block.
+	typedStateClaimsOmittedNote = "- [older checkpoint claim(s) omitted to bound the carried claim state; read the archive for the complete record.]"
+	// typedClaimStatusActive / typedClaimStatusInvalidated /
+	// typedClaimStatusStale are the claim-status vocabulary of the carried
+	// typed claims. Active is the posture of a claim the current generation
+	// asserted; invalidated marks a claim whose evidence the runtime
+	// invalidated; stale is the downgraded posture of a carried-only claim
+	// the current generation did not restate.
+	typedClaimStatusActive      = "active"
+	typedClaimStatusInvalidated = "invalidated"
+	typedClaimStatusStale       = "stale"
+	// claimKindObserved / checkpointKindCommitted / stageStatusCompleted are
+	// the identifiers the runtime's committed/observed validation keys on.
+	// The compact_context tool schema declares the same enums in
+	// internal/tools/compact_context.go; tools cannot import the agent
+	// package, so the agent mirrors the values it enforces here instead of
+	// repeating the literals at each check site.
+	claimKindObserved       = "observed"
+	checkpointKindCommitted = "committed"
+	stageStatusCompleted    = "completed"
 )
 
 // checkpointTypedState is the machine-carryable task state a checkpoint
@@ -71,7 +102,6 @@ type checkpointTypedState struct {
 
 type checkpointClaim struct {
 	Kind         string   `json:"kind,omitempty"`
-	Certainty    string   `json:"certainty,omitempty"`
 	EvidenceRefs []string `json:"evidence_refs,omitempty"`
 	Status       string   `json:"status,omitempty"`
 }
@@ -96,13 +126,13 @@ func typedClaimsFromArgs(args tools.CompactContextArgs) map[string]checkpointCla
 	}
 	out := make(map[string]checkpointClaim, len(args.ClaimKinds)+len(args.ClaimEvidence))
 	for claim, kind := range args.ClaimKinds {
-		out[claim] = checkpointClaim{Kind: kind, EvidenceRefs: append([]string(nil), args.ClaimEvidence[claim]...), Status: "active"}
+		out[claim] = checkpointClaim{Kind: kind, EvidenceRefs: append([]string(nil), args.ClaimEvidence[claim]...), Status: typedClaimStatusActive}
 	}
 	for claim, refs := range args.ClaimEvidence {
 		item := out[claim]
 		item.EvidenceRefs = append([]string(nil), refs...)
 		if item.Status == "" {
-			item.Status = "active"
+			item.Status = typedClaimStatusActive
 		}
 		out[claim] = item
 	}
@@ -242,12 +272,14 @@ func truncateRunes(s string, n int) string {
 // mergeCheckpointTypedStates merges the carried state of the previous
 // checkpoint with a fresh submission. The fresh submission wins: its items
 // come first and fill the cap, and its stage metadata overrides the carried
-// one (the model re-declares the current stage on every submission). Carried
-// items fill the remaining list capacity oldest-last, and the entries that do
+// one (the model re-declares the current stage on every submission; a
+// carried completed/committed stage is never inherited on an empty restate —
+// see the merge body below). Carried items fill the remaining list capacity
+// oldest-last, and the entries that do
 // not fit are dropped with a disclosed omission count instead of silently
 // growing the list without bound. The returned lists are item-bounded, so the
 // readable sections and the machine typed block carry exactly the same text.
-func mergeCheckpointTypedStates(prior, current checkpointTypedState) (merged checkpointTypedState, omitted int) {
+func mergeCheckpointTypedStates(prior, current checkpointTypedState) (merged checkpointTypedState, omitted int, claimsOmitted int) {
 	var dropped int
 	merged.Decisions, dropped = mergeTypedStateList(prior.Decisions, current.Decisions, typedStateCarryMaxDecisions)
 	omitted += dropped
@@ -258,37 +290,94 @@ func mergeCheckpointTypedStates(prior, current checkpointTypedState) (merged che
 	merged.Decisions = boundTypedStateItems(merged.Decisions)
 	merged.OpenIssues = boundTypedStateItems(merged.OpenIssues)
 	merged.EvidenceRefs = boundTypedStateItems(merged.EvidenceRefs)
+	merged.Claims, claimsOmitted = mergeTypedClaims(prior.Claims, current.Claims)
+	// Stage metadata is re-declared by the model on every submission and a
+	// fresh declaration always wins. When the fresh submission declares
+	// nothing, an in-flight carried stage (anything but a completed one) is
+	// kept so an empty restate does not lose the still-current stage. A
+	// carried completed/committed stage is deliberately NOT inherited:
+	// completed carries terminal, acceptance-evidence semantics that only the
+	// armed fresh submission can declare — it alone ran the
+	// committed-evidence validation — and re-rendering a previous
+	// generation's completed stage as the current one would read an
+	// already-finished stage as freshly committed. The carried decisions and
+	// claims still record the completed work as history.
+	carryStage := prior.StageStatus != stageStatusCompleted && prior.Kind != checkpointKindCommitted
 	merged.StageID = current.StageID
-	if merged.StageID == "" {
+	if merged.StageID == "" && carryStage {
 		merged.StageID = prior.StageID
 	}
 	merged.StageStatus = current.StageStatus
-	if merged.StageStatus == "" {
+	if merged.StageStatus == "" && carryStage {
 		merged.StageStatus = prior.StageStatus
 	}
 	merged.Kind = current.Kind
-	if merged.Kind == "" {
+	if merged.Kind == "" && carryStage {
 		merged.Kind = prior.Kind
 	}
-	merged.Claims = mergeTypedClaims(prior.Claims, current.Claims)
-	return merged, omitted
+	return merged, omitted, claimsOmitted
 }
 
-func mergeTypedClaims(prior, current map[string]checkpointClaim) map[string]checkpointClaim {
+// mergeTypedClaims merges a carried claim set with a fresh submission. A
+// claim the fresh submission restates is replaced wholesale by the fresh
+// identity (fresh claims always win); a carried-only claim keeps its kind and
+// evidence association but loses the trusted current-generation posture — a
+// claim the model did not re-assert cannot keep reading as an active claim of
+// this checkpoint, so its status is demoted from active to stale until a
+// later generation restates it. Invalidated and superseded are already
+// low-trust postures and stay as they are.
+//
+// The merged set is bounded at typedStateCarryMaxClaims. Fresh submissions
+// already fit the validator cap, so the bound only ever evicts carried-only
+// claims; evictions are returned as dropped so the renderer can disclose them
+// instead of silently presenting a bounded set as complete. Key order is
+// deterministic (sorted), so the surviving set cannot depend on map iteration
+// order.
+func mergeTypedClaims(prior, current map[string]checkpointClaim) (merged map[string]checkpointClaim, dropped int) {
 	if len(prior) == 0 && len(current) == 0 {
-		return nil
+		return nil, 0
 	}
-	out := make(map[string]checkpointClaim, len(prior)+len(current))
-	for claim, item := range prior {
-		out[claim] = item
-	}
-	for claim, item := range current {
+	out := make(map[string]checkpointClaim, min(typedStateCarryMaxClaims, len(prior)+len(current)))
+	for _, claim := range sortedCheckpointClaimKeys(current) {
+		item := current[claim]
 		if item.Status == "" {
-			item.Status = "active"
+			item.Status = typedClaimStatusActive
+		}
+		if len(out) >= typedStateCarryMaxClaims {
+			dropped++
+			continue
 		}
 		out[claim] = item
 	}
-	return out
+	for _, claim := range sortedCheckpointClaimKeys(prior) {
+		if _, restated := out[claim]; restated {
+			continue
+		}
+		item := prior[claim]
+		if item.Status == typedClaimStatusActive {
+			item.Status = typedClaimStatusStale
+		}
+		if len(out) >= typedStateCarryMaxClaims {
+			dropped++
+			continue
+		}
+		out[claim] = item
+	}
+	return out, dropped
+}
+
+// sortedCheckpointClaimKeys returns the keys of a claim set sorted, giving
+// mergeTypedClaims a deterministic eviction order.
+func sortedCheckpointClaimKeys(claims map[string]checkpointClaim) []string {
+	if len(claims) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(claims))
+	for claim := range claims {
+		keys = append(keys, claim)
+	}
+	slices.Sort(keys)
+	return keys
 }
 
 // mergeTypedStateList merges a carried list with a fresh submission, newest

@@ -266,6 +266,20 @@ func evidenceItemID(item evidenceItem) string {
 	return fmt.Sprintf("ev-%x", sum[:6])
 }
 
+// evidenceItemsByID indexes evidence items by their stable evidence ID — the
+// lookup shape every checkpoint evidence check needs (validation of fresh
+// references at arm time and invalidation marking at build time).
+func evidenceItemsByID(items []evidenceItem) map[string]evidenceItem {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make(map[string]evidenceItem, len(items))
+	for _, item := range items {
+		out[evidenceItemID(item)] = item
+	}
+	return out
+}
+
 type compactionHistoryMeta struct {
 	Version           int                   `json:"version"`
 	HistoryFile       string                `json:"history_file"`

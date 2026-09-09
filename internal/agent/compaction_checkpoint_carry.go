@@ -176,3 +176,44 @@ func formatPriorCheckpointCarryForPrompt(carry string) string {
 	}
 	return carry
 }
+
+// latestPriorTypedCheckpointBody returns the body of the most recent
+// checkpoint in messages that carries a parseable typed state block — the
+// nearest generation that can actually contribute machine-carryable state —
+// or "" when no checkpoint does. Usage-driven and truncate-only summaries
+// declare no typed state of their own, yet the model-driven checkpoint they
+// replaced can still be the typed carry source: it survives as an older
+// checkpoint message while an intermediate compaction left it inside the
+// archived head, and its typed JSON line can also survive inside the newer
+// summary's `## Previous Checkpoint` appendix. The scan therefore walks
+// backward over checkpoint messages and parses each candidate's full body —
+// the stripped form first, then the raw body when the typed line only
+// survives inside a carried appendix.
+//
+// unreadable reports that some checkpoint body carried a typed block that
+// could not be parsed while no parseable block was found: callers must
+// disclose the unreadable carry (typedStateUnreadableNote) instead of reading
+// it as an empty one.
+func latestPriorTypedCheckpointBody(messages []message.Message) (body string, unreadable bool) {
+	var broken bool
+	for _, msg := range slices.Backward(messages) {
+		if msg.Role != message.RoleUser || !msg.IsCompactionSummary {
+			continue
+		}
+		raw := compactionSummaryBody(msg.Content)
+		if raw == "" {
+			continue
+		}
+		stripped := stripCompactionAnchorsBlock(stripCheckpointSkillsSection(stripPriorCheckpointCarrySection(raw)))
+		for _, candidate := range []string{stripped, raw} {
+			if _, found, malformed := typedStateFromBody(candidate); found {
+				if malformed {
+					broken = true
+					continue
+				}
+				return candidate, false
+			}
+		}
+	}
+	return "", broken
+}

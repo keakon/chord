@@ -22,7 +22,7 @@ func TestCheckpointSourceRefsValidateGenerationScopedOrdinals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(refs) != 2 || refs[0].LegacyOrdinal != 0 || refs[1].LegacyOrdinal != 1 {
+	if len(refs) != 2 || refs[0].Ordinal != 0 || refs[1].Ordinal != 1 {
 		t.Fatalf("refs = %#v", refs)
 	}
 	if refs[0].CanonicalPayloadHash != refs[1].CanonicalPayloadHash {
