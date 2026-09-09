@@ -1667,14 +1667,22 @@ func TestApplyModelDrivenDraftRejectsChangedRuntimeStateFingerprint(t *testing.T
 	}
 }
 
-func TestValidateModelDrivenCheckpointKindRequiresEvidence(t *testing.T) {
+func TestValidateModelDrivenCheckpointKindEvidenceRequirements(t *testing.T) {
+	// Committed checkpoints are authoritative and must anchor to evidence.
 	for _, args := range []tools.CompactContextArgs{
 		{CheckpointKind: "committed"},
-		{StageStatus: "completed"},
+		{CheckpointKind: "committed", StageStatus: "completed"},
 	} {
 		if err := validateModelDrivenCheckpointKind(args); err == nil {
 			t.Fatalf("expected evidence requirement for %#v", args)
 		}
+	}
+	// A provisional completed stage carries no claim-classification semantics
+	// that require evidence; only observed claims (checked in the observed
+	// validators) and committed checkpoints must anchor to evidence IDs,
+	// which the model may not even have in view before the first checkpoint.
+	if err := validateModelDrivenCheckpointKind(tools.CompactContextArgs{StageStatus: "completed"}); err != nil {
+		t.Fatalf("provisional completed stage without evidence should be accepted: %v", err)
 	}
 	if err := validateModelDrivenCheckpointKind(tools.CompactContextArgs{CheckpointKind: "committed", StageStatus: "completed", EvidenceRefs: []string{"e-1"}}); err != nil {
 		t.Fatalf("valid committed checkpoint rejected: %v", err)

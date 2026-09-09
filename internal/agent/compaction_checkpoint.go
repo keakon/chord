@@ -229,6 +229,10 @@ func renderEvidenceArtifactContent(items []evidenceItem) string {
 	sb.WriteString("Verbatim excerpts preserved for the immediate continuation.\n")
 	for i, item := range items {
 		fmt.Fprintf(&sb, "\n%d. %s\n", i+1, item.Title)
+		// Render the stable evidence ID so the main model can reference real
+		// IDs in a later compact_context evidence_refs/claim_evidence instead
+		// of inventing them (the ID is deterministic for a given evidence key).
+		fmt.Fprintf(&sb, "Evidence ID: %s\n", evidenceItemID(item))
 		if item.Source != "" {
 			fmt.Fprintf(&sb, "Source: %s\n", item.Source)
 		}

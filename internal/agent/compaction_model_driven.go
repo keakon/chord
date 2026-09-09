@@ -408,9 +408,10 @@ func validateModelDrivenCheckpointKind(args tools.CompactContextArgs) error {
 	if args.CheckpointKind == "committed" && len(args.EvidenceRefs) == 0 {
 		return fmt.Errorf("committed compact_context requires at least one evidence_refs entry")
 	}
-	if args.StageStatus == "completed" && len(args.EvidenceRefs) == 0 {
-		return fmt.Errorf("completed compact_context stage requires evidence_refs")
-	}
+	// A provisional completed stage does not require evidence on its own:
+	// only observed claims (checked below) and committed checkpoints must
+	// anchor to evidence IDs, and those IDs are not even visible to the model
+	// before the first checkpoint of a session renders its evidence pack.
 	for claim, kind := range args.ClaimKinds {
 		if kind == "observed" && len(args.ClaimEvidence[claim]) == 0 {
 			return fmt.Errorf("claim_kinds %q is observed but has no claim_evidence", claim)

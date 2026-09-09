@@ -240,7 +240,7 @@ func (v CompactContextValidator) ParseCompactContextArgs(raw json.RawMessage) (C
 			}
 			largest = fmt.Sprintf("; largest: %s", strings.Join(parts, ", "))
 		}
-		return CompactContextArgs{}, fmt.Errorf("continuation state exceeds the token budget (estimated_cost=%d, budget=%d)%s; shorten active_objective/next_step/completed/decisions/open_issues/state_files/planned_state_files/evidence_refs/claim_evidence and retry", cost, limit, largest)
+		return CompactContextArgs{}, fmt.Errorf("continuation state exceeds the token budget (estimated_cost=%d, budget=%d)%s; shorten active_objective/next_step/completed/decisions/open_issues/state_files/planned_state_files/evidence_refs/claim_evidence/claim_kinds and retry", cost, limit, largest)
 	}
 	return args, nil
 }
@@ -377,7 +377,7 @@ func (t CompactContextTool) Description() string {
 	// it has already authored the whole state.
 	budget := ""
 	if limit := t.validator.ContinuationStateMaxTokens; limit > 0 {
-		budget = fmt.Sprintf("All text fields together (active_objective, next_step, completed, decisions, open_issues, state_files, planned_state_files, evidence_refs, claim_evidence) must fit a combined budget of about %d estimated tokens; there are no per-field or per-item caps, so a long item is fine as long as the whole state stays within the budget.\n", limit)
+		budget = fmt.Sprintf("All text fields together (active_objective, next_step, completed, decisions, open_issues, state_files, planned_state_files, evidence_refs, claim_evidence, claim_kinds) must fit a combined budget of about %d estimated tokens; there are no per-field or per-item caps, so a long item is fine as long as the whole state stays within the budget.\n", limit)
 	}
 	// The todo-sync line is rendered only when todo_write is visible in the
 	// same surface, so the description never pushes a tool the model cannot
@@ -454,13 +454,13 @@ func (CompactContextTool) Parameters() map[string]any {
 			"evidence_refs": map[string]any{
 				"type": "array", "maxItems": 24,
 				"items":       map[string]any{"type": "string", "minLength": 1},
-				"description": "Stable evidence IDs from the checkpoint evidence pack that support completed work or decisions.",
+				"description": "Stable evidence IDs from the checkpoint evidence pack that support completed work or decisions. IDs render as ev-<hash> in the checkpoint's evidence pack (e.g. the Evidence ID line / [evidence:ev-...] entries); invented IDs are rejected, so leave this empty when no evidence pack is in view — only observed claims and committed checkpoints require evidence, not every completed stage.",
 			},
 			"stage_id":        map[string]any{"type": "string", "description": "Stable identifier for the current work stage."},
 			"stage_status":    map[string]any{"type": "string", "enum": []string{"active", "candidate", "completed", "blocked", "superseded"}, "description": "Whether this stage is still active or is a checkpoint candidate/completed."},
-			"checkpoint_kind": map[string]any{"type": "string", "enum": []string{"provisional", "committed"}, "description": "Provisional reduces context but is not authoritative; committed requires runtime validation."},
-			"claim_evidence":  map[string]any{"type": "object", "maxProperties": 20, "additionalProperties": map[string]any{"type": "array", "maxItems": 8, "items": map[string]any{"type": "string", "minLength": 1}}, "description": "Maps each completed or decision claim to the evidence IDs supporting it. The claim key may paraphrase the corresponding completed/decisions entry rather than copying it verbatim."},
-			"claim_kinds":     map[string]any{"type": "object", "maxProperties": 20, "additionalProperties": map[string]any{"type": "string", "enum": []string{"observed", "derived", "assumed", "proposed"}}, "description": "Classifies each completed or decision claim; observed requires runtime evidence, derived is inferred from evidence, assumed is unverified, and proposed is future work."},
+			"checkpoint_kind": map[string]any{"type": "string", "enum": []string{"provisional", "committed"}, "description": "Provisional reduces context but is not authoritative; committed requires runtime validation, and additionally requires stage_status=completed with at least one valid evidence_refs entry."},
+			"claim_evidence":  map[string]any{"type": "object", "maxProperties": 20, "additionalProperties": map[string]any{"type": "array", "maxItems": 8, "items": map[string]any{"type": "string", "minLength": 1}}, "description": "Maps each claim to the evidence IDs supporting it. Claim keys are natural language: usually a condensed conclusion from completed/decisions, where paraphrasing is fine and verbatim matching is never required; standalone claims are also allowed. Evidence IDs must be real ev-<hash> IDs from a recent checkpoint's evidence pack."},
+			"claim_kinds":     map[string]any{"type": "object", "maxProperties": 20, "additionalProperties": map[string]any{"type": "string", "enum": []string{"observed", "derived", "assumed", "proposed"}}, "description": "Classifies each claim (usually from completed/decisions); observed requires runtime evidence listed in claim_evidence/evidence_refs, derived is inferred from evidence, assumed is unverified, and proposed is future work. When no valid evidence is in view, prefer derived or assumed over observed."},
 		},
 		"required":             []string{"active_objective", "next_step"},
 		"additionalProperties": false,
