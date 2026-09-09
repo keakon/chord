@@ -1573,16 +1573,16 @@ func TestAppendDeferredModelDrivenToolResultCarriesFullMessageShape(t *testing.T
 	}
 }
 
-// TestModelDrivenResumeKeepsQueuedUserMessageForNextTurn pins the boundary
-// between a model-driven checkpoint and a real user message that arrived while
-// the checkpoint was pending: the queued message must not be merged into the
-// continuation requests of the checkpoint's own turn. The continuation runs on
-// the compacted context to finish the archived objective; the message belongs
-// to the next turn and must stay queued until that continuation reaches idle.
-// Appending it earlier would put the fresh user request directly behind the
-// context-summary message while the old objective is still being finished, and
-// the model reads it as part of the summary instead of acting on it.
-func TestModelDrivenResumeKeepsQueuedUserMessageForNextTurn(t *testing.T) {
+// TestModelDrivenResumeMergesQueuedUserMessageIntoContinuation pins the
+// boundary between a model-driven checkpoint and real user messages that
+// arrived while the checkpoint was pending: the queued messages are the
+// current request, so the continuation runs on the compacted context with
+// them merged into its single first request in arrival order (context summary
+// first, then each fresh user message). The model acts on the messages
+// immediately instead of finishing the checkpoint's archived objective first,
+// and no "continue the current task" instruction is appended on top of the
+// fresh input.
+func TestModelDrivenResumeMergesQueuedUserMessageIntoContinuation(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn()
@@ -1593,11 +1593,22 @@ func TestModelDrivenResumeKeepsQueuedUserMessageForNextTurn(t *testing.T) {
 	if pending == nil {
 		t.Fatal("startCompactionState must arm a pending model-driven call")
 	}
-	// The apply landed: the slot is free and the compacted context is live.
+	// The apply landed: the slot is free and the compacted context is live,
+	// with the checkpoint summary as its first message.
 	a.resetCompactionState()
+	a.ctxMgr.Append(message.Message{
+		Role:                  message.RoleUser,
+		Content:               "checkpoint summary",
+		IsCompactionSummary:   true,
+		CompactionSummaryMode: compactionSummaryModeModelDriven,
+	})
 
-	// A real user message arrived while the checkpoint was pending.
-	a.pendingUserMessages = []pendingUserMessage{{Content: "commit the pending changes", FromUser: true}}
+	// Two real user messages arrived while the checkpoint was pending, in
+	// arrival order.
+	a.pendingUserMessages = []pendingUserMessage{
+		{Content: "commit the pending changes", FromUser: true},
+		{Content: "then update the changelog draft", FromUser: true},
+	}
 
 	if !a.resumePendingMainLLMAfterCompaction(pending, true) {
 		t.Fatal("a successful model-driven apply must handle its own resume barrier")
@@ -1605,13 +1616,24 @@ func TestModelDrivenResumeKeepsQueuedUserMessageForNextTurn(t *testing.T) {
 	if a.turn == nil || a.turn.ID != turnID {
 		t.Fatal("the continuation must keep running in the checkpoint's own turn")
 	}
-	if len(a.pendingUserMessages) != 1 {
-		t.Fatalf("queued user message must stay queued for the next turn, got %d queued", len(a.pendingUserMessages))
+	if len(a.pendingUserMessages) != 0 {
+		t.Fatalf("queued user messages must all merge into the continuation request, got %d queued", len(a.pendingUserMessages))
 	}
-	for _, m := range a.ctxMgr.Snapshot() {
-		if m.Role == message.RoleUser && strings.Contains(m.Content, "commit the pending changes") {
-			t.Fatal("queued user message must not be appended into the checkpoint turn's continuation context")
-		}
+	if notice := a.pendingModelDrivenNotice; notice != "" {
+		t.Fatalf("merged user input leads the continuation, so no 'continue the current task' notice may be appended, got %q", notice)
+	}
+	snapshot := a.ctxMgr.Snapshot()
+	if len(snapshot) != 3 {
+		t.Fatalf("continuation context must read [summary, first, second], got %d messages", len(snapshot))
+	}
+	if !snapshot[0].IsCompactionSummary {
+		t.Fatalf("compaction summary must stay the first message of the continuation context, got %+v", snapshot[0])
+	}
+	if snapshot[1].Role != message.RoleUser || !strings.Contains(snapshot[1].Content, "commit the pending changes") {
+		t.Fatalf("first queued user message must directly follow the summary, got %+v", snapshot[1])
+	}
+	if snapshot[2].Role != message.RoleUser || !strings.Contains(snapshot[2].Content, "then update the changelog draft") {
+		t.Fatalf("second queued user message must follow the first in arrival order, got %+v", snapshot[2])
 	}
 }
 

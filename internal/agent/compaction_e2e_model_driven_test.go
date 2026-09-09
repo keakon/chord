@@ -222,13 +222,15 @@ func TestE2EModelDrivenLatestRequestOverridesCheckpointedClaim(t *testing.T) {
 	}
 }
 
-// TestE2EModelDrivenApplyWithQueuedUserInputKeepsItForNextTurn pins the
-// full-flow boundary behind TestModelDrivenResumeKeepsQueuedUserMessageForNextTurn:
-// a real user message that arrives while the checkpoint is pending must not be
-// absorbed by the durable apply — the checkpoint rewrites only the archived
-// head, the message stays queued, and nothing in the live transcript carries
-// it into the checkpoint turn's continuation.
-func TestE2EModelDrivenApplyWithQueuedUserInputKeepsItForNextTurn(t *testing.T) {
+// TestE2EModelDrivenApplyWithQueuedUserInputMergesIntoContinuation pins the
+// full-flow boundary behind TestModelDrivenResumeMergesQueuedUserMessageIntoContinuation:
+// real user messages that arrive while the checkpoint is pending are not
+// absorbed by the durable apply — the apply rewrites only the archived head
+// and leaves the queue alone — but the resume that follows merges the messages
+// into the checkpoint turn's first continuation request in arrival order, so
+// the live context reads applied checkpoint summary first, then each fresh
+// user message, and the turn resumes with a single request over that context.
+func TestE2EModelDrivenApplyWithQueuedUserInputMergesIntoContinuation(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn()
@@ -237,9 +239,14 @@ func TestE2EModelDrivenApplyWithQueuedUserInputKeepsItForNextTurn(t *testing.T) 
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "implement the parser contract"})
 	a.ctxMgr.Append(message.Message{Role: message.RoleAssistant, Content: "parser implementation in progress"})
 
-	// The user types a real follow-up while the checkpoint draft is pending.
-	const queued = "commit the pending changes"
-	a.pendingUserMessages = []pendingUserMessage{{Content: queued, FromUser: true}}
+	// The user types two real follow-ups while the checkpoint draft is
+	// pending, in arrival order.
+	const queuedFirst = "commit the pending changes"
+	const queuedSecond = "update the changelog draft"
+	a.pendingUserMessages = []pendingUserMessage{
+		{Content: queuedFirst, FromUser: true},
+		{Content: queuedSecond, FromUser: true},
+	}
 
 	// Apply the checkpoint (headSplit 1 archives the original request; the
 	// in-flight assistant reply stays live).
@@ -249,22 +256,58 @@ func TestE2EModelDrivenApplyWithQueuedUserInputKeepsItForNextTurn(t *testing.T) 
 		"impl", "candidate", "provisional",
 	))
 
-	if len(a.pendingUserMessages) != 1 || a.pendingUserMessages[0].Content != queued {
-		t.Fatalf("queued user message must stay queued after the apply, got %d", len(a.pendingUserMessages))
+	// The apply itself must not touch the queued messages: they stay queued
+	// in arrival order, are not part of the rewritten live context, and are
+	// not inside the checkpoint body (the summary was built from the
+	// transcript that predated them).
+	if len(a.pendingUserMessages) != 2 ||
+		a.pendingUserMessages[0].Content != queuedFirst ||
+		a.pendingUserMessages[1].Content != queuedSecond {
+		t.Fatalf("queued user messages must stay queued in arrival order after the apply, got %d", len(a.pendingUserMessages))
 	}
 	snapshot := a.ctxMgr.Snapshot()
 	if len(snapshot) == 0 || !snapshot[0].IsCompactionSummary {
 		t.Fatalf("checkpoint must be the transcript head after the apply, got %d messages", len(snapshot))
 	}
 	for _, m := range snapshot {
-		if m.Role == message.RoleUser && strings.Contains(m.Content, queued) {
-			t.Fatal("queued user message must not be appended into the checkpoint turn's live context")
+		if m.Role == message.RoleUser && (strings.Contains(m.Content, queuedFirst) || strings.Contains(m.Content, queuedSecond)) {
+			t.Fatal("queued user messages must not be appended by the apply itself")
 		}
 	}
-	// The queued request is also not inside the checkpoint body itself: the
-	// summary was built from the transcript that predated it.
-	if strings.Contains(compactionSummaryBody(snapshot[0].Content), queued) {
-		t.Fatal("checkpoint body must not embed a user message that arrived after the summary was built")
+	if body := compactionSummaryBody(snapshot[0].Content); strings.Contains(body, queuedFirst) || strings.Contains(body, queuedSecond) {
+		t.Fatal("checkpoint body must not embed user messages that arrived after the summary was built")
+	}
+
+	// The resume after the apply merges the queued messages into the first
+	// continuation request: the live context reads checkpoint summary first,
+	// then each fresh user message at the tail in arrival order.
+	target := compactionTarget{turnID: a.turn.ID, turnEpoch: a.turn.Epoch, sessionEpoch: a.sessionEpoch}
+	a.startCompactionState(2, target, compactionTriggerModelDriven, continuationPlan{kind: compactionResumeModelDriven, turnID: a.turn.ID, turnEpoch: a.turn.Epoch, agentErrSourceID: "main"})
+	pending := a.currentCompactionPendingCall()
+	if pending == nil {
+		t.Fatal("startCompactionState must arm a pending model-driven call")
+	}
+	a.resetCompactionState()
+	if !a.resumePendingMainLLMAfterCompaction(pending, true) {
+		t.Fatal("a successful model-driven apply must handle its own resume barrier")
+	}
+	if len(a.pendingUserMessages) != 0 {
+		t.Fatalf("queued user messages must all merge into the continuation request, got %d queued", len(a.pendingUserMessages))
+	}
+	snapshot = a.ctxMgr.Snapshot()
+	if len(snapshot) == 0 || !snapshot[0].IsCompactionSummary {
+		t.Fatalf("checkpoint must stay the transcript head after the resume merge, got %d messages", len(snapshot))
+	}
+	if len(snapshot) < 3 {
+		t.Fatalf("continuation context must hold the summary plus both queued user messages, got %d messages", len(snapshot))
+	}
+	secondLast := snapshot[len(snapshot)-2]
+	if secondLast.Role != message.RoleUser || !strings.Contains(secondLast.Content, queuedFirst) {
+		t.Fatalf("first queued user message must directly precede the second in the continuation context, got %+v", secondLast)
+	}
+	last := snapshot[len(snapshot)-1]
+	if last.Role != message.RoleUser || !strings.Contains(last.Content, queuedSecond) {
+		t.Fatalf("second queued user message must be the last message of the continuation context, got %+v", last)
 	}
 }
 
