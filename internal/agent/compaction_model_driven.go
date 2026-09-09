@@ -403,10 +403,10 @@ func (a *MainAgent) validateCommittedEvidence(args tools.CompactContextArgs) err
 
 func validateModelDrivenCheckpointKind(args tools.CompactContextArgs) error {
 	if args.CheckpointKind == "committed" && args.StageStatus != "completed" {
-		return fmt.Errorf("committed compact_context requires stage_status=completed")
+		return fmt.Errorf("committed compact_context requires stage_status=completed; retry with checkpoint_kind=provisional when the stage is not authoritative yet")
 	}
 	if args.CheckpointKind == "committed" && len(args.EvidenceRefs) == 0 {
-		return fmt.Errorf("committed compact_context requires at least one evidence_refs entry")
+		return fmt.Errorf("committed compact_context requires at least one evidence_refs entry from the checkpoint evidence pack; retry with checkpoint_kind=provisional when no evidence pack is in view")
 	}
 	// A provisional completed stage does not require evidence on its own:
 	// only observed claims (checked below) and committed checkpoints must

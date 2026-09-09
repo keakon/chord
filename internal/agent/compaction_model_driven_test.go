@@ -1673,8 +1673,14 @@ func TestValidateModelDrivenCheckpointKindEvidenceRequirements(t *testing.T) {
 		{CheckpointKind: "committed"},
 		{CheckpointKind: "committed", StageStatus: "completed"},
 	} {
-		if err := validateModelDrivenCheckpointKind(args); err == nil {
+		err := validateModelDrivenCheckpointKind(args)
+		if err == nil {
 			t.Fatalf("expected evidence requirement for %#v", args)
+		}
+		// Rejection must point at the provisional escape hatch so the model
+		// does not burn retries fabricating evidence the session never had.
+		if !strings.Contains(err.Error(), "retry with checkpoint_kind=provisional") {
+			t.Fatalf("rejection %q lacks the provisional downgrade guidance for %#v", err, args)
 		}
 	}
 	// A provisional completed stage carries no claim-classification semantics
