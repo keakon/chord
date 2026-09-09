@@ -309,7 +309,9 @@ func (o *Overlay) AddedRules() []AddedRule {
 
 // RemoveAddedRule removes a rule that was added this session.
 // For session rules, it removes from the role-specific session overlay.
-// For persistent rules, it removes from both memory and disk.
+// For persistent rules, it removes the in-memory copy only: disk removal is
+// the caller's responsibility and must happen before this call, or the rule
+// reappears when the agent file is next loaded.
 func (o *Overlay) RemoveAddedRule(index int) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
