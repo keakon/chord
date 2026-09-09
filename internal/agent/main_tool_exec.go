@@ -69,7 +69,7 @@ func (a *MainAgent) toolExecutionPipeline() toolExecutionPipeline {
 		},
 		toolBaseDir: a.projectRoot,
 		refreshRulesetAfterRuleIntent: func(toolName string, intent *ConfirmRuleIntent) permission.Ruleset {
-			a.processRuleIntent(toolName, intent)
+			a.processRuleIntent(toolName, intent, a.currentAgentName())
 			return a.effectiveRuleset()
 		},
 		isInternalTool:        isInternalControlTool,

@@ -1407,11 +1407,20 @@ func (a *MainAgent) subAgentBaseRuleset() permission.Ruleset {
 
 // buildSubAgentRuleset returns the ruleset a freshly created or restored
 // SubAgent should evaluate tool permissions against: the unfiltered main-agent
-// ruleset merged with the SubAgent's own permission config.
+// ruleset merged with the SubAgent's own session-rule bucket (so rules the
+// SubAgent triggered persist across MainAgent role switches) and the
+// SubAgent's own agent-definition permission config.
 func (a *MainAgent) buildSubAgentRuleset(agentDef *config.AgentConfig) permission.Ruleset {
 	ruleset := a.subAgentBaseRuleset()
-	if agentDef != nil && agentDef.Permission.Kind != 0 {
-		ruleset = permission.Merge(ruleset, permission.ParsePermission(&agentDef.Permission))
+	if agentDef != nil {
+		if role := strings.TrimSpace(agentDef.Name); role != "" && a.overlay != nil {
+			if session := a.overlay.SessionRulesForRole(role); len(session) > 0 {
+				ruleset = permission.Merge(ruleset, session)
+			}
+		}
+		if agentDef.Permission.Kind != 0 {
+			ruleset = permission.Merge(ruleset, permission.ParsePermission(&agentDef.Permission))
+		}
 	}
 	return ruleset
 }

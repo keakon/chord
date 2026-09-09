@@ -49,7 +49,7 @@ func (s *SubAgent) toolExecutionPipeline() toolExecutionPipeline {
 		currentRuleset:   s.currentRuleset,
 		refreshRulesetAfterRuleIntent: func(toolName string, intent *ConfirmRuleIntent) permission.Ruleset {
 			if s.parent != nil {
-				s.parent.processRuleIntent(toolName, intent)
+				s.parent.processRuleIntent(toolName, intent, s.agentDefName)
 				s.setRuleset(s.parent.buildSubAgentRuleset(s.parent.agentConfigs[s.agentDefName]))
 			}
 			return s.currentRuleset()

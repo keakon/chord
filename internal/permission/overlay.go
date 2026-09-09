@@ -391,6 +391,19 @@ func (o *Overlay) SessionRuleCountForRole(role string) int {
 	return len(o.sessionByRole[normalizeOverlayRole(role)])
 }
 
+// SessionRulesForRole returns a copy of the session overlay rules for the
+// provided role, regardless of which role is currently active. A SubAgent's
+// session rules live in its own role bucket so they survive MainAgent role
+// switches (which only reselect the bucket the MainAgent evaluates against).
+func (o *Overlay) SessionRulesForRole(role string) Ruleset {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	rs := o.sessionByRole[normalizeOverlayRole(role)]
+	out := make(Ruleset, len(rs))
+	copy(out, rs)
+	return out
+}
+
 // ProjectPath returns the project agent config path.
 func (o *Overlay) ProjectPath() string {
 	o.mu.RLock()

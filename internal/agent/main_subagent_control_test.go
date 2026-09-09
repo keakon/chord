@@ -240,6 +240,87 @@ func TestSubAgentRuleIntentRefreshPreservesSubAgentPermissions(t *testing.T) {
 	}
 }
 
+// TestSubAgentRuleIntentProjectRuleArchivedToSubAgentRole reproduces the bug
+// where a project-scoped permission rule triggered from a SubAgent confirm
+// picker was persisted to the MainAgent's role file instead of the SubAgent's
+// own role file, so it never took effect after reload.
+func TestSubAgentRuleIntentProjectRuleArchivedToSubAgentRole(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.activeConfig = &config.AgentConfig{Name: "builder"}
+	a.agentConfigs = map[string]*config.AgentConfig{
+		"worker": {
+			Name:       "worker",
+			Permission: parsePermissionNode(t, "Write: deny\n"),
+		},
+	}
+	sub := newControllableTestSubAgent(t, a, "adhoc-archive")
+	sub.setRuleset(a.buildSubAgentRuleset(a.agentConfigs[sub.agentDefName]))
+
+	pipeline := sub.toolExecutionPipeline()
+	pipeline.refreshRulesetAfterRuleIntent(tools.NameShell, &ConfirmRuleIntent{
+		Patterns: []string{"*"},
+		Scope:    int(permission.ScopeProject),
+	})
+
+	workerPath := filepath.Join(projectRoot, ".chord", "agents", "worker.yaml")
+	builderPath := filepath.Join(projectRoot, ".chord", "agents", "builder.yaml")
+	data, err := os.ReadFile(workerPath)
+	if err != nil {
+		var builderInfo string
+		if _, berr := os.Stat(builderPath); berr == nil {
+			builderInfo = "builder file WAS written instead of worker"
+		} else {
+			builderInfo = "neither worker nor builder written"
+		}
+		t.Fatalf("expected worker agent file to hold the rule: %v\n%s", err, builderInfo)
+	}
+	if !strings.Contains(string(data), tools.NameShell) || !strings.Contains(string(data), string(permission.ActionAllow)) {
+		t.Fatalf("worker agent file missing Shell allow rule:\n%s", data)
+	}
+	if bcontent, berr := os.ReadFile(builderPath); berr == nil {
+		t.Fatalf("builder agent file should not have been written, got content:\n%s", bcontent)
+	}
+}
+
+// TestSubAgentRuleIntentSessionRuleSurvivesMainRoleSwitch reproduces the bug
+// where a session-scoped permission rule triggered from a SubAgent was bucketed
+// under the MainAgent's active role; switching the MainAgent role dropped that
+// bucket from the merged ruleset and the SubAgent lost its rule.
+func TestSubAgentRuleIntentSessionRuleSurvivesMainRoleSwitch(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.activeConfig = &config.AgentConfig{Name: "builder"}
+	a.agentConfigs = map[string]*config.AgentConfig{
+		"worker":  {Name: "worker", Permission: parsePermissionNode(t, "Write: deny\n")},
+		"planner": {Name: "planner"},
+	}
+	sub := newControllableTestSubAgent(t, a, "adhoc-switch")
+	sub.setRuleset(a.buildSubAgentRuleset(a.agentConfigs[sub.agentDefName]))
+
+	pipeline := sub.toolExecutionPipeline()
+	refreshed := pipeline.refreshRulesetAfterRuleIntent(tools.NameShell, &ConfirmRuleIntent{
+		Patterns: []string{"*"},
+		Scope:    int(permission.ScopeSession),
+	})
+	if got := refreshed.Evaluate(tools.NameShell, "git status --short"); got != permission.ActionAllow {
+		t.Fatalf("subagent Shell permission = %q, want allow", got)
+	}
+	if got := refreshed.Evaluate(tools.NameWrite, "notes.txt"); got != permission.ActionDeny {
+		t.Fatalf("subagent Write permission = %q, want deny", got)
+	}
+
+	if err := a.switchRole("planner", false); err != nil {
+		t.Fatalf("switchRole: %v", err)
+	}
+
+	if got := sub.currentRuleset().Evaluate(tools.NameShell, "git status --short"); got != permission.ActionAllow {
+		t.Fatalf("subagent Shell permission after role switch = %q, want allow", got)
+	}
+	if got := sub.currentRuleset().Evaluate(tools.NameWrite, "notes.txt"); got != permission.ActionDeny {
+		t.Fatalf("subagent Write permission after role switch = %q, want deny", got)
+	}
+}
+
 func TestCreateSubAgentInheritsServiceTier(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 1)
