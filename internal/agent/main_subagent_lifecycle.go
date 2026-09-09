@@ -253,7 +253,6 @@ func (a *MainAgent) removeSubAgentMailboxState(agentID string) {
 	if agentID == "" {
 		return
 	}
-	delete(a.subAgentInbox.progress, agentID)
 	filter := func(in []SubAgentMailboxMessage) []SubAgentMailboxMessage {
 		if len(in) == 0 {
 			return nil
@@ -268,29 +267,37 @@ func (a *MainAgent) removeSubAgentMailboxState(agentID string) {
 		}
 		return out
 	}
+	filterStaged := func(in []*SubAgentMailboxMessage) []*SubAgentMailboxMessage {
+		if len(in) == 0 {
+			return nil
+		}
+		out := in[:0]
+		for _, msg := range in {
+			if msg == nil || strings.TrimSpace(msg.AgentID) == agentID {
+				continue
+			}
+			out = append(out, msg)
+		}
+		return out
+	}
+	// The mailbox queues and the staged batch are shared with the delivery
+	// paths on other goroutines (the event-loop drains and the TUI-facing
+	// manual-delivery claims), so the whole state removal — including the
+	// active-batch head repair — runs under subAgentMailboxIDsMu.
+	a.subAgentMailboxIDsMu.Lock()
+	delete(a.subAgentInbox.progress, agentID)
 	a.subAgentInbox.urgent = filter(a.subAgentInbox.urgent)
 	a.subAgentInbox.normal = filter(a.subAgentInbox.normal)
-	if len(a.pendingSubAgentMailboxes) > 0 {
-		filtered := a.pendingSubAgentMailboxes[:0]
-		for _, msg := range a.pendingSubAgentMailboxes {
-			if msg == nil || strings.TrimSpace(msg.AgentID) == agentID {
-				continue
-			}
-			filtered = append(filtered, msg)
-		}
-		a.pendingSubAgentMailboxes = filtered
+	a.pendingSubAgentMailboxes = filterStaged(a.pendingSubAgentMailboxes)
+	a.activeSubAgentMailboxes = filterStaged(a.activeSubAgentMailboxes)
+	if a.activeSubAgentMailbox != nil && strings.TrimSpace(a.activeSubAgentMailbox.AgentID) == agentID {
+		a.activeSubAgentMailbox = nil
 	}
 	if len(a.activeSubAgentMailboxes) > 0 {
-		filtered := a.activeSubAgentMailboxes[:0]
-		for _, msg := range a.activeSubAgentMailboxes {
-			if msg == nil || strings.TrimSpace(msg.AgentID) == agentID {
-				continue
-			}
-			filtered = append(filtered, msg)
-		}
-		a.activeSubAgentMailboxes = filtered
+		a.activeSubAgentMailbox = a.activeSubAgentMailboxes[0]
+	} else if a.activeSubAgentMailbox == nil {
+		a.activeSubAgentMailboxAck = false
 	}
-	a.subAgentMailboxIDsMu.Lock()
 	if len(a.ownedSubAgentMailboxes) > 0 {
 		for _, msg := range a.ownedSubAgentMailboxes[agentID] {
 			a.releaseMailboxMemory(msg)
@@ -314,14 +321,6 @@ func (a *MainAgent) removeSubAgentMailboxState(agentID string) {
 	}
 	delete(a.ownedMailboxSpool, agentID)
 	a.subAgentMailboxIDsMu.Unlock()
-	if a.activeSubAgentMailbox != nil && strings.TrimSpace(a.activeSubAgentMailbox.AgentID) == agentID {
-		a.activeSubAgentMailbox = nil
-	}
-	if len(a.activeSubAgentMailboxes) > 0 {
-		a.activeSubAgentMailbox = a.activeSubAgentMailboxes[0]
-	} else if a.activeSubAgentMailbox == nil {
-		a.activeSubAgentMailboxAck = false
-	}
 	a.refreshSubAgentInboxSummary()
 }
 

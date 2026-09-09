@@ -463,12 +463,23 @@ func (a *MainAgent) setIdleAndDrainPending() {
 	pausePendingDrain := a.pausePendingUserDrainOnce
 	a.pausePendingUserDrainOnce = false
 	skipMailboxDrain := false
-	if len(a.activeSubAgentMailboxes) > 0 || a.activeSubAgentMailbox != nil {
-		batch := a.activeSubAgentMailboxes
+	// The staged batch is shared with the TUI-facing manual-delivery path
+	// (takeOutstandingMailboxForSub), so the batch snapshot and the final
+	// clear run under subAgentMailboxIDsMu; the ack persistence and the
+	// requeue (which locks internally) run outside it.
+	a.subAgentMailboxIDsMu.Lock()
+	hasActiveBatch := len(a.activeSubAgentMailboxes) > 0 || a.activeSubAgentMailbox != nil
+	activeAck := a.activeSubAgentMailboxAck
+	var batch []*SubAgentMailboxMessage
+	if hasActiveBatch {
+		batch = append([]*SubAgentMailboxMessage(nil), a.activeSubAgentMailboxes...)
 		if len(batch) == 0 && a.activeSubAgentMailbox != nil {
-			batch = []*SubAgentMailboxMessage{a.activeSubAgentMailbox}
+			batch = append(batch, a.activeSubAgentMailbox)
 		}
-		if a.activeSubAgentMailboxAck {
+	}
+	a.subAgentMailboxIDsMu.Unlock()
+	if hasActiveBatch {
+		if activeAck {
 			replySummary := latestAssistantReplySummary(a.ctxMgr.Snapshot())
 			ackFailed := false
 			for _, msg := range batch {
@@ -488,7 +499,9 @@ func (a *MainAgent) setIdleAndDrainPending() {
 				}
 			}
 			if ackFailed {
+				a.subAgentMailboxIDsMu.Lock()
 				a.activeSubAgentMailboxAck = false
+				a.subAgentMailboxIDsMu.Unlock()
 				a.requeueActiveSubAgentMailbox()
 				skipMailboxDrain = true
 			}
@@ -504,10 +517,12 @@ func (a *MainAgent) setIdleAndDrainPending() {
 			a.requeueActiveSubAgentMailbox()
 			skipMailboxDrain = true
 		}
+		a.subAgentMailboxIDsMu.Lock()
 		a.activeSubAgentMailboxes = nil
 		a.activeSubAgentMailbox = nil
 		a.activeSubAgentMailboxAck = false
 		a.pendingSubAgentMailboxes = nil
+		a.subAgentMailboxIDsMu.Unlock()
 		a.refreshSubAgentInboxSummary()
 	}
 	// A completed stop response must not start a new automatic compaction from

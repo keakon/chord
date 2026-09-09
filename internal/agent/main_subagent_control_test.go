@@ -4445,3 +4445,123 @@ func TestTurnContinuationStagingExcludesPendingProgress(t *testing.T) {
 		t.Fatalf("progress was merged into the mid-turn continuation batch: %#v", a.pendingSubAgentMailboxes)
 	}
 }
+
+// TestStageNextCompletedBatchRequeuesQueueResidentProgress pins the P3-2
+// strictness gate: a progress message that somehow sits in the deliverable
+// queue behind a completed head (progress normally only lives in the per-agent
+// snapshot map, which staging claims only between turns) must be requeued into
+// that map instead of being folded into the staged batch. Folding it would let
+// a progress update ride a mid-turn completed batch, bypassing the
+// between-turns gate the head applies to snapshot claims.
+func TestStageNextCompletedBatchRequeuesQueueResidentProgress(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.subAgentInbox.urgent = []SubAgentMailboxMessage{{
+		MessageID: "c-1",
+		AgentID:   "worker-1",
+		TaskID:    "task-a",
+		Kind:      SubAgentMailboxKindCompleted,
+		Priority:  SubAgentMailboxPriorityUrgent,
+		Summary:   "child finished",
+	}}
+	a.subAgentInbox.normal = []SubAgentMailboxMessage{{
+		MessageID: "p-1",
+		AgentID:   "worker-2",
+		TaskID:    "task-b",
+		Kind:      SubAgentMailboxKindProgress,
+		Summary:   "still working",
+	}}
+
+	if !a.stageNextSubAgentMailboxBatch() {
+		t.Fatal("stageNextSubAgentMailboxBatch() = false, want the completed head staged")
+	}
+	if len(a.pendingSubAgentMailboxes) != 1 || a.pendingSubAgentMailboxes[0] == nil || a.pendingSubAgentMailboxes[0].MessageID != "c-1" {
+		t.Fatalf("pending batch = %#v, want only the completed head (no progress fold-in)", a.pendingSubAgentMailboxes)
+	}
+	if got := a.subAgentInbox.progress["worker-2"]; got.MessageID != "p-1" {
+		t.Fatalf("progress snapshot = %#v, want the dequeued progress requeued into the snapshot map", a.subAgentInbox.progress)
+	}
+	if len(a.subAgentInbox.urgent)+len(a.subAgentInbox.normal) != 0 {
+		t.Fatalf("queue still holds messages after staging: urgent=%d normal=%d", len(a.subAgentInbox.urgent), len(a.subAgentInbox.normal))
+	}
+}
+
+// TestConcurrentMailboxQueueDeliveryKeepsStateConsistent hammers the shared
+// main-inbox queue from the two goroutine roles that race in production — the
+// event-loop delivery/drain side and the TUI-facing manual-delivery side that
+// claims messages for a worker — and checks that the queue contents and the
+// memory-byte counter stay consistent. Run under -race this pins the
+// subAgentMailboxIDsMu discipline across store/dequeue/takeOutstanding;
+// without it the counter and slice state can tear.
+func TestConcurrentMailboxQueueDeliveryKeepsStateConsistent(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "race-task")
+
+	const messagesPerProducer = 300
+	const producerAgents = 3
+
+	var stored, removed atomic.Int64
+	var wg sync.WaitGroup
+	enqueue := func(group int) {
+		defer wg.Done()
+		agentID := fmt.Sprintf("other-%d", group)
+		if group == 0 {
+			// This producer feeds the claim side: takeOutstandingMailboxForSub
+			// matches the worker's instance ID the way a manual follow-up does.
+			agentID = sub.instanceID
+		}
+		for i := 0; i < messagesPerProducer; i++ {
+			msg := SubAgentMailboxMessage{
+				MessageID: fmt.Sprintf("%s-%d", agentID, group*messagesPerProducer+i),
+				AgentID:   agentID,
+				TaskID:    "race-task",
+				Kind:      SubAgentMailboxKindDecisionRequired,
+				Priority:  SubAgentMailboxPriorityInterrupt,
+				Summary:   "update",
+			}
+			if a.storeMailboxInMemory(msg, false) {
+				stored.Add(1)
+			}
+		}
+	}
+	for group := 0; group < producerAgents; group++ {
+		wg.Add(1)
+		go enqueue(group)
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < messagesPerProducer*producerAgents; i++ {
+			if msg := a.takeOutstandingMailboxForSub(sub); msg != nil {
+				removed.Add(1)
+			}
+		}
+	}()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < messagesPerProducer*producerAgents; i++ {
+			if msg := a.dequeueNextSubAgentMailbox(); msg != nil {
+				removed.Add(1)
+			}
+		}
+	}()
+	wg.Wait()
+
+	a.subAgentMailboxIDsMu.Lock()
+	remaining := len(a.subAgentInbox.urgent) + len(a.subAgentInbox.normal)
+	var wantBytes int
+	for _, msg := range a.subAgentInbox.urgent {
+		wantBytes += mailboxMessageBytes(msg)
+	}
+	for _, msg := range a.subAgentInbox.normal {
+		wantBytes += mailboxMessageBytes(msg)
+	}
+	gotBytes := a.subAgentInbox.memoryBytes
+	a.subAgentMailboxIDsMu.Unlock()
+	if got := stored.Load() - removed.Load(); got != int64(remaining) {
+		t.Fatalf("queue accounting drifted: stored=%d removed=%d remaining=%d, want %d", stored.Load(), removed.Load(), remaining, got)
+	}
+	if gotBytes != wantBytes {
+		t.Fatalf("mailbox memory counter = %d bytes, want %d (queue held %d messages)", gotBytes, wantBytes, remaining)
+	}
+}

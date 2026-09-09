@@ -37,6 +37,10 @@ func (a *MainAgent) hasOutstandingMailboxPressureForRecovery() bool {
 	if a == nil {
 		return false
 	}
+	// The staged batch is shared with the TUI-facing manual-delivery path, so
+	// the pressure read runs under subAgentMailboxIDsMu.
+	a.subAgentMailboxIDsMu.Lock()
+	defer a.subAgentMailboxIDsMu.Unlock()
 	return len(a.pendingSubAgentMailboxes) > 0 || a.activeSubAgentMailbox != nil || len(a.activeSubAgentMailboxes) > 0
 }
 

@@ -172,13 +172,18 @@ func (a *MainAgent) takeOutstandingMailboxForSub(sub *SubAgent) *SubAgentMailbox
 		}
 		return batch, nil
 	}
+	// The staged batch and the main-inbox queues are shared with the mailbox
+	// delivery paths running on the event loop, so the whole claim runs under
+	// subAgentMailboxIDsMu and the summary refresh happens after it.
+	var msg *SubAgentMailboxMessage
+	a.subAgentMailboxIDsMu.Lock()
 	if len(a.activeSubAgentMailboxes) > 0 || match(a.activeSubAgentMailbox) {
-		var msg *SubAgentMailboxMessage
-		a.activeSubAgentMailboxes, msg = removeFirstMatch(a.activeSubAgentMailboxes)
-		if msg == nil && match(a.activeSubAgentMailbox) {
-			msg = a.activeSubAgentMailbox
+		var taken *SubAgentMailboxMessage
+		a.activeSubAgentMailboxes, taken = removeFirstMatch(a.activeSubAgentMailboxes)
+		if taken == nil && match(a.activeSubAgentMailbox) {
+			taken = a.activeSubAgentMailbox
 		}
-		if msg != nil {
+		if taken != nil {
 			a.pendingSubAgentMailboxes, _ = removeFirstMatch(a.pendingSubAgentMailboxes)
 			if len(a.activeSubAgentMailboxes) > 0 {
 				a.activeSubAgentMailbox = a.activeSubAgentMailboxes[0]
@@ -186,39 +191,41 @@ func (a *MainAgent) takeOutstandingMailboxForSub(sub *SubAgent) *SubAgentMailbox
 				a.activeSubAgentMailbox = nil
 				a.activeSubAgentMailboxAck = false
 			}
-			a.refreshSubAgentInboxSummary()
-			return msg
+			msg = taken
 		}
 	}
-	if len(a.pendingSubAgentMailboxes) > 0 {
-		var msg *SubAgentMailboxMessage
+	if msg == nil && len(a.pendingSubAgentMailboxes) > 0 {
 		a.pendingSubAgentMailboxes, msg = removeFirstMatch(a.pendingSubAgentMailboxes)
-		if msg != nil {
-			a.refreshSubAgentInboxSummary()
-			return msg
+	}
+	if msg == nil {
+		for i := len(a.subAgentInbox.urgent) - 1; i >= 0; i-- {
+			if !match(&a.subAgentInbox.urgent[i]) {
+				continue
+			}
+			taken := a.subAgentInbox.urgent[i]
+			a.subAgentInbox.urgent = append(a.subAgentInbox.urgent[:i], a.subAgentInbox.urgent[i+1:]...)
+			a.releaseMailboxMemory(taken)
+			msg = &taken
+			break
 		}
 	}
-	for i := len(a.subAgentInbox.urgent) - 1; i >= 0; i-- {
-		if !match(&a.subAgentInbox.urgent[i]) {
-			continue
+	if msg == nil {
+		for i := len(a.subAgentInbox.normal) - 1; i >= 0; i-- {
+			if !match(&a.subAgentInbox.normal[i]) {
+				continue
+			}
+			taken := a.subAgentInbox.normal[i]
+			a.subAgentInbox.normal = append(a.subAgentInbox.normal[:i], a.subAgentInbox.normal[i+1:]...)
+			a.releaseMailboxMemory(taken)
+			msg = &taken
+			break
 		}
-		msg := a.subAgentInbox.urgent[i]
-		a.subAgentInbox.urgent = append(a.subAgentInbox.urgent[:i], a.subAgentInbox.urgent[i+1:]...)
-		a.releaseMailboxMemory(msg)
+	}
+	a.subAgentMailboxIDsMu.Unlock()
+	if msg != nil {
 		a.refreshSubAgentInboxSummary()
-		return &msg
 	}
-	for i := len(a.subAgentInbox.normal) - 1; i >= 0; i-- {
-		if !match(&a.subAgentInbox.normal[i]) {
-			continue
-		}
-		msg := a.subAgentInbox.normal[i]
-		a.subAgentInbox.normal = append(a.subAgentInbox.normal[:i], a.subAgentInbox.normal[i+1:]...)
-		a.releaseMailboxMemory(msg)
-		a.refreshSubAgentInboxSummary()
-		return &msg
-	}
-	return nil
+	return msg
 }
 
 func (a *MainAgent) canCallerControlTask(callerAgentID, callerTaskID, taskID string) (*DurableTaskRecord, error) {

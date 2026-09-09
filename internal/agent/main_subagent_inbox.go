@@ -537,7 +537,9 @@ func (a *MainAgent) drainOwnedSubAgentMailboxes(ownerAgentID string) bool {
 	remaining := queue[:0]
 	for _, msg := range queue {
 		if a.routeOwnedSubAgentMailbox(msg) {
+			a.subAgentMailboxIDsMu.Lock()
 			a.releaseMailboxMemory(msg)
+			a.subAgentMailboxIDsMu.Unlock()
 			progressed = true
 			continue
 		}
@@ -616,15 +618,14 @@ func (a *MainAgent) deliverSubAgentMailbox(msg SubAgentMailboxMessage) {
 	if msg.CreatedAt.IsZero() {
 		msg.CreatedAt = time.Now()
 	}
-	if a.subAgentInbox.progress == nil {
-		a.subAgentInbox.progress = make(map[string]SubAgentMailboxMessage)
-	}
 	switch msg.Kind {
 	case SubAgentMailboxKindProgress:
 		a.replaceProgressMailboxWithinBudget(msg)
 	default:
 		if !a.storeMailboxInMemory(msg, false) {
+			a.subAgentMailboxIDsMu.Lock()
 			a.spoolMailboxMessage(msg, false)
+			a.subAgentMailboxIDsMu.Unlock()
 			a.orchestrationMetrics.mailboxSpoolQueued.Add(1)
 		}
 	}
@@ -662,6 +663,8 @@ func (a *MainAgent) replaceProgressMailboxWithinBudget(msg SubAgentMailboxMessag
 }
 
 func (a *MainAgent) requeueSubAgentMailboxInMemory(msg SubAgentMailboxMessage) {
+	spooled := false
+	a.subAgentMailboxIDsMu.Lock()
 	if msg.Kind == SubAgentMailboxKindProgress {
 		if a.subAgentInbox.progress == nil {
 			a.subAgentInbox.progress = make(map[string]SubAgentMailboxMessage)
@@ -678,8 +681,12 @@ func (a *MainAgent) requeueSubAgentMailboxInMemory(msg SubAgentMailboxMessage) {
 			a.subAgentInbox.normal = append([]SubAgentMailboxMessage{msg}, a.subAgentInbox.normal...)
 		}
 		a.subAgentInbox.memoryBytes += mailboxMessageBytes(msg)
-	} else if !a.storeMailboxInMemory(msg, true) {
+	} else if !a.storeMailboxInMemoryLocked(msg, true) {
 		a.spoolMailboxMessage(msg, true)
+		spooled = true
+	}
+	a.subAgentMailboxIDsMu.Unlock()
+	if spooled {
 		a.orchestrationMetrics.mailboxSpoolQueued.Add(1)
 	}
 	a.refreshSubAgentInboxSummary()
@@ -694,7 +701,9 @@ func (a *MainAgent) loadSpooledMailbox(messageID string) (*SubAgentMailboxMessag
 	if err := a.indexSpooledMailbox(path); err != nil {
 		return nil, false, err
 	}
+	a.subAgentMailboxIDsMu.Lock()
 	location, ok := a.subAgentInbox.spoolIndex[messageID]
+	a.subAgentMailboxIDsMu.Unlock()
 	if !ok {
 		return nil, false, nil
 	}
@@ -706,39 +715,65 @@ func (a *MainAgent) loadSpooledMailbox(messageID string) (*SubAgentMailboxMessag
 	return &msg, true, nil
 }
 
+// indexSpooledMailbox rebuilds the spool index after a write left it stale
+// (spoolIndexReady false). The index is shared with the append path that keeps
+// it fresh under subAgentMailboxIDsMu, so the log is read outside the lock and
+// the freshly built map is published under it; a message appended while the
+// index was being built keeps the index stale so the next load rebuilds over
+// the longer log instead of publishing an index that drops the entry.
 func (a *MainAgent) indexSpooledMailbox(path string) error {
-	if a.subAgentInbox.spoolIndexReady {
+	a.subAgentMailboxIDsMu.Lock()
+	ready := a.subAgentInbox.spoolIndexReady
+	a.subAgentMailboxIDsMu.Unlock()
+	if ready {
 		return nil
 	}
 	f, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("open spooled mailbox: %w", err)
 	}
-	defer f.Close()
-	if a.subAgentInbox.spoolIndex == nil {
-		a.subAgentInbox.spoolIndex = make(map[string]mailboxSpoolLocation)
-	} else {
-		clear(a.subAgentInbox.spoolIndex)
-	}
+	built := make(map[string]mailboxSpoolLocation)
 	dec := json.NewDecoder(f)
 	var offset int64
 	for {
 		var msg SubAgentMailboxMessage
 		if err := dec.Decode(&msg); err != nil {
 			if err == io.EOF {
-				a.subAgentInbox.spoolIndexReady = true
-				return nil
+				break
 			}
+			_ = f.Close()
 			return fmt.Errorf("decode spooled mailbox: %w", err)
 		}
 		messageID := strings.TrimSpace(msg.MessageID)
 		if messageID != "" {
-			if _, exists := a.subAgentInbox.spoolIndex[messageID]; !exists {
-				a.subAgentInbox.spoolIndex[messageID] = mailboxSpoolLocation{offset: offset, length: dec.InputOffset() - offset}
+			if _, exists := built[messageID]; !exists {
+				built[messageID] = mailboxSpoolLocation{offset: offset, length: dec.InputOffset() - offset}
 			}
 		}
 		offset = dec.InputOffset()
 	}
+	readEnd, statErr := f.Stat()
+	_ = f.Close()
+	if statErr != nil {
+		return fmt.Errorf("stat spooled mailbox: %w", statErr)
+	}
+	a.subAgentMailboxIDsMu.Lock()
+	if a.subAgentInbox.spoolIndexReady {
+		// Another rebuild finished first; its index is at least as fresh.
+		a.subAgentMailboxIDsMu.Unlock()
+		return nil
+	}
+	if current, statErr := os.Stat(path); statErr == nil && current.Size() != readEnd.Size() {
+		// A message was appended while this index was being built; publishing
+		// it would drop that entry from the spool forever. Stay stale so the
+		// next load rebuilds over the appended log.
+		a.subAgentMailboxIDsMu.Unlock()
+		return nil
+	}
+	a.subAgentInbox.spoolIndex = built
+	a.subAgentInbox.spoolIndexReady = true
+	a.subAgentMailboxIDsMu.Unlock()
+	return nil
 }
 
 func readSpooledMailboxAt(path string, location mailboxSpoolLocation) (SubAgentMailboxMessage, error) {
@@ -758,28 +793,36 @@ func readSpooledMailboxAt(path string, location mailboxSpoolLocation) (SubAgentM
 }
 
 func (a *MainAgent) dequeueSpooledSubAgentMailbox() *SubAgentMailboxMessage {
-	if msg := a.dequeueSpooledMailboxQueue(&a.subAgentInbox.spoolNormal); msg != nil {
-		return msg
-	}
-	return nil
+	return a.dequeueSpooledMailboxQueue(&a.subAgentInbox.spoolNormal)
 }
 
+// dequeueSpooledMailboxQueue claims one queued spool id at a time under
+// subAgentMailboxIDsMu and reloads the message from the mailbox log outside
+// the lock. Missing records are dropped; a failed reload puts the id back at
+// the front so the next call retries it.
 func (a *MainAgent) dequeueSpooledMailboxQueue(queue *[]string) *SubAgentMailboxMessage {
-	for len(*queue) > 0 {
+	for {
+		a.subAgentMailboxIDsMu.Lock()
+		if len(*queue) == 0 {
+			a.subAgentMailboxIDsMu.Unlock()
+			return nil
+		}
 		id := strings.TrimSpace((*queue)[0])
+		*queue = (*queue)[1:]
+		a.subAgentMailboxIDsMu.Unlock()
 		msg, found, err := a.loadSpooledMailbox(id)
 		if err != nil {
 			log.Warnf("failed to reload spooled SubAgent mailbox message message_id=%v error=%v", id, err)
+			a.subAgentMailboxIDsMu.Lock()
+			*queue = append([]string{id}, (*queue)...)
+			a.subAgentMailboxIDsMu.Unlock()
 			return nil
 		}
 		if !found {
-			*queue = (*queue)[1:]
 			continue
 		}
-		*queue = (*queue)[1:]
 		return msg
 	}
-	return nil
 }
 
 func shouldPersistMailboxArtifact(msg SubAgentMailboxMessage) bool {
@@ -997,7 +1040,10 @@ func (a *MainAgent) persistSubAgentMailboxMessage(msg SubAgentMailboxMessage) er
 		return fmt.Errorf("open mailbox log: %w", err)
 	}
 	startOffset := int64(-1)
-	if a.subAgentInbox.spoolIndexReady {
+	a.subAgentMailboxIDsMu.Lock()
+	indexReady := a.subAgentInbox.spoolIndexReady
+	a.subAgentMailboxIDsMu.Unlock()
+	if indexReady {
 		if info, statErr := f.Stat(); statErr == nil {
 			startOffset = info.Size()
 		}
@@ -1005,7 +1051,9 @@ func (a *MainAgent) persistSubAgentMailboxMessage(msg SubAgentMailboxMessage) er
 	enc := json.NewEncoder(f)
 	if err := enc.Encode(msg); err != nil {
 		_ = f.Close()
+		a.subAgentMailboxIDsMu.Lock()
 		a.subAgentInbox.spoolIndexReady = false
+		a.subAgentMailboxIDsMu.Unlock()
 		return fmt.Errorf("append mailbox message: %w", err)
 	}
 	endOffset := int64(-1)
@@ -1013,10 +1061,13 @@ func (a *MainAgent) persistSubAgentMailboxMessage(msg SubAgentMailboxMessage) er
 		endOffset = info.Size()
 	}
 	if err := f.Close(); err != nil {
+		a.subAgentMailboxIDsMu.Lock()
 		a.subAgentInbox.spoolIndexReady = false
+		a.subAgentMailboxIDsMu.Unlock()
 		return fmt.Errorf("close mailbox log: %w", err)
 	}
 	messageID := strings.TrimSpace(msg.MessageID)
+	a.subAgentMailboxIDsMu.Lock()
 	if a.subAgentInbox.spoolIndexReady && startOffset >= 0 && endOffset > startOffset && messageID != "" {
 		if _, exists := a.subAgentInbox.spoolIndex[messageID]; !exists {
 			a.subAgentInbox.spoolIndex[messageID] = mailboxSpoolLocation{offset: startOffset, length: endOffset - startOffset}
@@ -1024,29 +1075,41 @@ func (a *MainAgent) persistSubAgentMailboxMessage(msg SubAgentMailboxMessage) er
 	} else {
 		a.subAgentInbox.spoolIndexReady = false
 	}
+	a.subAgentMailboxIDsMu.Unlock()
 	return nil
 }
 
 func (a *MainAgent) dequeueNextSubAgentMailbox() *SubAgentMailboxMessage {
+	// The main-inbox queues are shared with the TUI-facing manual delivery
+	// path, so in-memory claims happen under subAgentMailboxIDsMu and the
+	// spooled message reloads (which read the mailbox log) run on the claimed
+	// ids outside it.
+	a.subAgentMailboxIDsMu.Lock()
 	if len(a.subAgentInbox.urgent) > 0 {
 		msg := a.subAgentInbox.urgent[0]
 		a.subAgentInbox.urgent = a.subAgentInbox.urgent[1:]
 		a.releaseMailboxMemory(msg)
+		a.subAgentMailboxIDsMu.Unlock()
 		a.refreshSubAgentInboxSummary()
 		return &msg
 	}
-	if len(a.subAgentInbox.spoolUrgent) > 0 {
+	spoolUrgentPending := len(a.subAgentInbox.spoolUrgent) > 0
+	a.subAgentMailboxIDsMu.Unlock()
+	if spoolUrgentPending {
 		if msg := a.dequeueSpooledMailboxQueue(&a.subAgentInbox.spoolUrgent); msg != nil {
 			return msg
 		}
 	}
+	a.subAgentMailboxIDsMu.Lock()
 	if len(a.subAgentInbox.normal) > 0 {
 		msg := a.subAgentInbox.normal[0]
 		a.subAgentInbox.normal = a.subAgentInbox.normal[1:]
 		a.releaseMailboxMemory(msg)
+		a.subAgentMailboxIDsMu.Unlock()
 		a.refreshSubAgentInboxSummary()
 		return &msg
 	}
+	a.subAgentMailboxIDsMu.Unlock()
 	return a.dequeueSpooledSubAgentMailbox()
 }
 
@@ -1070,6 +1133,8 @@ func (a *MainAgent) ensureSubAgentMailboxPersisted(msg *SubAgentMailboxMessage) 
 // set is what lets one drain deliver every routable update in a single batch
 // instead of waking the main once per progress message.
 func (a *MainAgent) takeMainInboxProgressSnapshots() []SubAgentMailboxMessage {
+	a.subAgentMailboxIDsMu.Lock()
+	defer a.subAgentMailboxIDsMu.Unlock()
 	if len(a.subAgentInbox.progress) == 0 {
 		return nil
 	}
@@ -1128,7 +1193,15 @@ func (a *MainAgent) stageNextSubAgentMailboxBatch() bool {
 					break
 				}
 				if next.Kind == SubAgentMailboxKindProgress {
-					progress = append(progress, *next)
+					// Progress must not ride a completed-head batch staged
+					// mid-turn: like the head's snapshot claim, which only
+					// runs between turns, a stray queue-resident progress
+					// update goes back into the per-agent snapshot map so the
+					// next between-turns drain delivers it. Queue progress is
+					// not reachable in the normal flow (progress only enters
+					// the snapshot map), so this is a consistency guard for
+					// the dequeued-head shape rather than a live path.
+					a.requeueSubAgentMailboxInMemory(*next)
 					continue
 				}
 				if !a.ensureSubAgentMailboxPersisted(next) {
@@ -1157,10 +1230,15 @@ func (a *MainAgent) stageNextSubAgentMailboxBatch() bool {
 		}
 		pending = append(pending, &progress[i])
 	}
+	// The staged batch is shared with the TUI-facing manual delivery path
+	// (takeOutstandingMailboxForSub claims it during a manual message), so it
+	// is published under subAgentMailboxIDsMu.
+	a.subAgentMailboxIDsMu.Lock()
 	a.pendingSubAgentMailboxes = pending
 	a.activeSubAgentMailboxes = append([]*SubAgentMailboxMessage(nil), pending...)
 	a.activeSubAgentMailbox = msg
 	a.activeSubAgentMailboxAck = true
+	a.subAgentMailboxIDsMu.Unlock()
 	for _, delivered := range pending {
 		if delivered != nil {
 			a.orchestrationMetrics.recordMailboxDelivery(delivered.MessageID, delivered.CreatedAt)
@@ -1174,7 +1252,10 @@ func (a *MainAgent) prepareSubAgentMailboxBatchForTurnContinuation() bool {
 	if a.turn == nil {
 		return false
 	}
-	if len(a.pendingSubAgentMailboxes) > 0 || len(a.activeSubAgentMailboxes) > 0 || a.activeSubAgentMailbox != nil {
+	a.subAgentMailboxIDsMu.Lock()
+	hasBatch := len(a.pendingSubAgentMailboxes) > 0 || len(a.activeSubAgentMailboxes) > 0 || a.activeSubAgentMailbox != nil
+	a.subAgentMailboxIDsMu.Unlock()
+	if hasBatch {
 		return false
 	}
 	return a.stageNextSubAgentMailboxBatch()
@@ -1197,6 +1278,8 @@ func (a *MainAgent) drainSubAgentInbox() {
 }
 
 func (a *MainAgent) markActiveSubAgentMailboxAck(ack bool) {
+	a.subAgentMailboxIDsMu.Lock()
+	defer a.subAgentMailboxIDsMu.Unlock()
 	if len(a.activeSubAgentMailboxes) == 0 && a.activeSubAgentMailbox == nil {
 		return
 	}
@@ -1204,44 +1287,57 @@ func (a *MainAgent) markActiveSubAgentMailboxAck(ack bool) {
 }
 
 func (a *MainAgent) requeueActiveSubAgentMailbox() {
+	// The active batch is shared with the TUI-facing manual delivery path
+	// (takeOutstandingMailboxForSub claims it during a manual message), so the
+	// batch snapshot is taken under subAgentMailboxIDsMu and the requeue
+	// mutations run under it (per message, through the locked helpers).
+	a.subAgentMailboxIDsMu.Lock()
 	if (len(a.activeSubAgentMailboxes) == 0 && a.activeSubAgentMailbox == nil) || a.activeSubAgentMailboxAck {
+		a.subAgentMailboxIDsMu.Unlock()
 		return
 	}
-	batch := a.activeSubAgentMailboxes
+	batch := append([]*SubAgentMailboxMessage(nil), a.activeSubAgentMailboxes...)
 	if len(batch) == 0 && a.activeSubAgentMailbox != nil {
-		batch = []*SubAgentMailboxMessage{a.activeSubAgentMailbox}
+		batch = append(batch, a.activeSubAgentMailbox)
 	}
+	a.subAgentMailboxIDsMu.Unlock()
 	for _, msg := range slices.Backward(batch) {
-
 		if msg == nil {
 			continue
 		}
-		switch msg.Kind {
-		case SubAgentMailboxKindProgress:
+		if msg.Kind == SubAgentMailboxKindProgress {
+			a.subAgentMailboxIDsMu.Lock()
 			if previous, ok := a.subAgentInbox.progress[msg.AgentID]; ok {
 				a.releaseMailboxMemory(previous)
 			}
 			a.subAgentInbox.progress[msg.AgentID] = *msg
 			a.subAgentInbox.memoryBytes += mailboxMessageBytes(*msg)
-		default:
-			a.requeueSubAgentMailboxInMemory(*msg)
+			a.subAgentMailboxIDsMu.Unlock()
+			continue
 		}
+		a.requeueSubAgentMailboxInMemory(*msg)
 	}
 	a.refreshSubAgentInboxSummary()
 }
 
 func (a *MainAgent) takePendingSubAgentMailboxes() []*SubAgentMailboxMessage {
+	a.subAgentMailboxIDsMu.Lock()
 	msgs := a.pendingSubAgentMailboxes
 	a.pendingSubAgentMailboxes = nil
+	a.subAgentMailboxIDsMu.Unlock()
 	return msgs
 }
 
 func (a *MainAgent) refreshSubAgentInboxSummary() {
+	// The urgent-count snapshot is derived from the same queue state the
+	// mailbox delivery and manual-delivery goroutines mutate, so all queue
+	// reads run under subAgentMailboxIDsMu; the summary map itself is
+	// published under its own lock after the snapshot is taken.
 	counts := make(map[string]int)
+	a.subAgentMailboxIDsMu.Lock()
 	for _, msg := range a.subAgentInbox.urgent {
 		counts[msg.AgentID]++
 	}
-	a.subAgentMailboxIDsMu.Lock()
 	for ownerID, queued := range a.ownedSubAgentMailboxes {
 		for _, msg := range queued {
 			if msg.Priority != SubAgentMailboxPriorityInterrupt && msg.Priority != SubAgentMailboxPriorityUrgent {
@@ -1250,7 +1346,6 @@ func (a *MainAgent) refreshSubAgentInboxSummary() {
 			counts[ownerID]++
 		}
 	}
-	a.subAgentMailboxIDsMu.Unlock()
 	if len(a.pendingSubAgentMailboxes) > 0 {
 		for _, pending := range a.pendingSubAgentMailboxes {
 			if pending != nil && (pending.Priority == SubAgentMailboxPriorityInterrupt || pending.Priority == SubAgentMailboxPriorityUrgent) {
@@ -1269,6 +1364,7 @@ func (a *MainAgent) refreshSubAgentInboxSummary() {
 			counts[a.activeSubAgentMailbox.AgentID]++
 		}
 	}
+	a.subAgentMailboxIDsMu.Unlock()
 	a.subAgentInboxSummaryMu.Lock()
 	a.subAgentUrgentCounts = counts
 	a.subAgentInboxSummaryMu.Unlock()

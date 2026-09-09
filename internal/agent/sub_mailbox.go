@@ -167,6 +167,9 @@ func (a *MainAgent) mailboxMemoryCount() int {
 	return count
 }
 
+// releaseMailboxMemory decrements the mailbox memory accounting for a message
+// that left an in-memory queue. It mutates the same counters the queue
+// mutations guard, so it must be called with subAgentMailboxIDsMu held.
 func (a *MainAgent) releaseMailboxMemory(msg SubAgentMailboxMessage) {
 	a.subAgentInbox.memoryBytes -= mailboxMessageBytes(msg)
 	if a.subAgentInbox.memoryBytes < 0 {
@@ -179,6 +182,12 @@ func (a *MainAgent) storeMailboxInMemory(msg SubAgentMailboxMessage, front bool)
 	// goroutines; see that helper's locking note.
 	a.subAgentMailboxIDsMu.Lock()
 	defer a.subAgentMailboxIDsMu.Unlock()
+	return a.storeMailboxInMemoryLocked(msg, front)
+}
+
+// storeMailboxInMemoryLocked is the shared in-memory store body; callers must
+// hold subAgentMailboxIDsMu (storeMailboxInMemory and the requeue path do).
+func (a *MainAgent) storeMailboxInMemoryLocked(msg SubAgentMailboxMessage, front bool) bool {
 	urgent := msg.Priority == SubAgentMailboxPriorityInterrupt || msg.Priority == SubAgentMailboxPriorityUrgent
 	if !front {
 		// Preserve FIFO within each priority class: while older messages sit in
@@ -212,6 +221,9 @@ func (a *MainAgent) storeMailboxInMemory(msg SubAgentMailboxMessage, front bool)
 	return true
 }
 
+// spoolMailboxMessage queues a message id in the durable spool for its
+// priority class. It mutates the subAgentInbox spool queues shared with other
+// goroutines, so it must be called with subAgentMailboxIDsMu held.
 func (a *MainAgent) spoolMailboxMessage(msg SubAgentMailboxMessage, front bool) {
 	id := strings.TrimSpace(msg.MessageID)
 	if id == "" {

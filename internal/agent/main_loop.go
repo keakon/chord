@@ -469,28 +469,26 @@ func (a *MainAgent) hasRunnableMailboxWork() bool {
 	if a.mailboxDeliveryPaused.Load() {
 		return false
 	}
-	if len(a.subAgentInbox.urgent) > 0 || len(a.subAgentInbox.normal) > 0 ||
+	// The main-inbox queues, the staged batch, and the owner-queue maps are
+	// all shared with the TUI-facing manual-delivery path, so the whole state
+	// scan runs under subAgentMailboxIDsMu; spooled message reloads (which
+	// take the same lock through the consumed check) happen on the claimed
+	// copies below.
+	a.subAgentMailboxIDsMu.Lock()
+	pendingMainWork := len(a.subAgentInbox.urgent) > 0 || len(a.subAgentInbox.normal) > 0 ||
 		len(a.pendingSubAgentMailboxes) > 0 || len(a.activeSubAgentMailboxes) > 0 ||
-		a.activeSubAgentMailbox != nil {
-		return true
-	}
+		a.activeSubAgentMailbox != nil
 	// A main-inbox progress snapshot is a wake candidate: progress/notice is
 	// delivered to an idle main (see stageNextSubAgentMailboxBatch), so while
 	// one is pending the main must not report full idle. The check only runs
 	// between turns, and every snapshot is routable to the main and consumed
 	// by the next drain, so it cannot suppress global idle indefinitely.
-	if len(a.subAgentInbox.progress) > 0 {
-		return true
-	}
+	pendingProgress := len(a.subAgentInbox.progress) > 0
 	// Only owned messages that are routable right now count as pending mailbox
 	// work. A message spooled under a parked owner that this mailbox cannot
 	// wake (for example one not addressed by the owner's own descendant) is
 	// temporarily unroutable: routing refuses it on every drain, so counting it
 	// here would suppress global idle forever.
-	// The owner-queue maps are shared with TUI-facing goroutines, so the scan
-	// runs under subAgentMailboxIDsMu; spooled message reloads (which take the
-	// same lock through the consumed check) happen on the claimed copies below.
-	a.subAgentMailboxIDsMu.Lock()
 	queuedMsgs := make([]SubAgentMailboxMessage, 0)
 	for _, queued := range a.ownedSubAgentMailboxes {
 		queuedMsgs = append(queuedMsgs, queued...)
@@ -500,6 +498,9 @@ func (a *MainAgent) hasRunnableMailboxWork() bool {
 		spooledIDs = append(spooledIDs, spooled...)
 	}
 	a.subAgentMailboxIDsMu.Unlock()
+	if pendingMainWork || pendingProgress {
+		return true
+	}
 	for _, msg := range queuedMsgs {
 		if msg.Kind != SubAgentMailboxKindProgress && a.ownedMailboxMessageRoutable(msg) {
 			return true
