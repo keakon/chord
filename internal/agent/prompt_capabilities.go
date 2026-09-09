@@ -38,19 +38,27 @@ func buildDynamicCapabilityPromptBlock(visible map[string]struct{}, ruleset perm
 }
 
 // shellExecutionBoundaryPromptBlock renders the command-execution boundary a
-// delegated task actually has. Without it, the shared Guidelines' incremental
-// verification advice ("first compile, then run the changed package's tests")
-// pushes the worker toward runs it cannot perform, after which it can only
-// fabricate a verification_run declaration (which completion validation
-// rejects) or get stuck.
-//
-// A scoped task has two shapes of boundary. With authorized commands it may run
-// exactly those, matched literally, so the block lists them — a worker that
-// does not know the list would fall back to whatever command it would normally
-// reach for and be refused. Without them it cannot run anything, and
-// execution-based verification belongs to the owner agent.
+// delegated task actually has. A scoped or read-only task never registers
+// Shell — its execution gate refuses every command, because arbitrary command
+// side effects cannot be validated against a path scope — and a role ruleset
+// may deny Shell outright. Without the block, the shared Guidelines'
+// incremental-verification advice ("first compile, then run the changed
+// package's tests") would push the worker toward builds and tests it can never
+// run, after which it could only fabricate a verification_run declaration
+// (which completion validation rejects) or get stuck. The block tells the
+// worker that command execution and execution-based verification belong to the
+// owner agent, and to report verification honestly as not run.
 func shellExecutionBoundaryPromptBlock(visible map[string]struct{}, audience capabilityPromptAudience, scope tools.WriteScope) string {
-	return ""
+	if audience != capabilityPromptAudienceSub {
+		return ""
+	}
+	if scope.Normalized().Empty() && hasVisibleTool(visible, tools.NameShell) {
+		return ""
+	}
+	return "## Command Execution Boundary\n" +
+		"- The " + toolPromptName(tools.NameShell) + " tool is not available in this task: you cannot run commands, builds, or tests.\n" +
+		"- Treat missing command execution as a real boundary. Do not claim a command ran, and do not declare `verification_run` commands you could not execute.\n" +
+		"- Execution-based verification is the owner agent's responsibility. Report verification honestly as not run (for example in `remaining_limitations`) instead of fabricating results."
 }
 
 func toolSelectionPromptBlock(visible map[string]struct{}) string {
