@@ -197,12 +197,11 @@ const shellCommandChainingCharacters = ";|&`$><\n\r"
 
 // shellArgumentExpansionCharacters are the constructs the shell expands within
 // a single command's own arguments: escapes, grouping, globs, and brace
-// expansion. They cannot introduce a second command by themselves, which is why
-// a delegator's verification declaration (ValidateVerificationCommands) may
-// contain them — it authorizes that exact string — while
-// shellReadOnlyCommandAllowed refuses them, because for `ls`, `cat` and
+// expansion. shellReadOnlyCommandAllowed refuses them even though they cannot
+// introduce a second command by themselves, because for `ls`, `cat` and
 // friends the expanded argument list is what decides which files the command
-// actually touches.
+// actually touches: the allowlist must not depend on an expansion it does not
+// perform.
 const shellArgumentExpansionCharacters = `\()*?[]{}`
 
 // containsShellConstruct reports whether a command carries any shell syntax
