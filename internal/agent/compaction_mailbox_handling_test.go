@@ -481,3 +481,225 @@ func TestCompactionClosesRestoreSkipReplayCascade(t *testing.T) {
 		t.Fatalf("crash-2 inbox = %+v, want exactly %q (no repeat of the presented %q)", mailboxQueuedIDs(second), undeliveredID, presentedID)
 	}
 }
+
+// TestCompactionAcksCrashLeftoverRowFollowedByLaterAssistant pins the
+// cross-round presentation boundary of the compaction settle: a crash leftover
+// row (no assistant output in its own round, which is why restore skipped the
+// message) later followed by a different round's assistant output still counts
+// as presented — the settle scans the whole transcript for evidence after the
+// row, not just the row's own round. The row is therefore acked before the
+// replace destroys it and never replayed, and a later restore does not
+// re-deliver the message.
+func TestCompactionAcksCrashLeftoverRowFollowedByLaterAssistant(t *testing.T) {
+	projectRoot := t.TempDir()
+	sessionDir := testProjectSessionDir(t, projectRoot, "compaction-cross-round-mailbox")
+	const messageID = "agent-1-6"
+	persistCompactionMailboxRestoreSession(t, sessionDir,
+		[]message.Message{
+			{Role: message.RoleUser, Content: "hello"},
+			{Role: message.RoleAssistant, Content: "Working on it"},
+			mailboxRow(messageID, string(SubAgentMailboxKindDecisionRequired)),
+			{Role: message.RoleUser, Content: "follow-up request after the crash"},
+			{Role: message.RoleAssistant, Content: "Handling the follow-up request"},
+		},
+		[]SubAgentMailboxMessage{decisionMailboxMessage(messageID, "delivered at dispatch, interrupted before any model output")},
+	)
+
+	// Crash-1 restore skips the message: its durable row proves a dispatch
+	// reached the transcript, so replaying inside the at-least-once window
+	// could double-deliver.
+	first := newTestMainAgentForRestore(t, projectRoot, sessionDir)
+	if err := first.RestoreSessionAtStartup(); err != nil {
+		t.Fatalf("first RestoreSessionAtStartup: %v", err)
+	}
+	if queued := mailboxQueuedIDs(first); len(queued) != 0 {
+		t.Fatalf("first restore queued %v, want none (durable row already delivered it)", queued)
+	}
+
+	// Compaction drops the head through the leftover row. Its own round never
+	// produced model output, but the later round's assistant output follows it
+	// in the transcript, so the settle treats it as presented: acked, not
+	// replayed.
+	mustApplyCompactionDraft(t, first, compactionTestDraft(first, sessionDir, 3))
+
+	if !first.isSubAgentMailboxConsumed(messageID) {
+		t.Fatal("crash leftover followed by later assistant output was not marked consumed")
+	}
+	acks, err := loadSubAgentMailboxAcks(sessionDir)
+	if err != nil {
+		t.Fatalf("loadSubAgentMailboxAcks: %v", err)
+	}
+	if ack, ok := acks[messageID]; !ok || ack.Outcome != mailboxAckOutcomeConsumed {
+		t.Fatalf("durable acks for %q = %+v, want a consumed ack", messageID, acks[messageID])
+	}
+	if queued := mailboxQueuedIDs(first); len(queued) != 0 {
+		t.Fatalf("post-compaction inbox = %v, want none (no replay of a presented row)", queued)
+	}
+	for _, msg := range first.ctxMgr.Snapshot() {
+		if msg.Kind == message.KindSubAgentMailbox && msg.Mailbox != nil && strings.TrimSpace(msg.Mailbox.MessageID) == messageID {
+			t.Fatalf("mailbox row for %q survived compaction", messageID)
+		}
+	}
+
+	// Crash-2 restore: the message is consumed, so neither the replay path nor
+	// a later dispatch may deliver it again.
+	second := newTestMainAgentForRestore(t, projectRoot, sessionDir)
+	if err := second.RestoreSessionAtStartup(); err != nil {
+		t.Fatalf("second RestoreSessionAtStartup: %v", err)
+	}
+	if queued := mailboxQueuedIDs(second); len(queued) != 0 {
+		t.Fatalf("crash-2 restore queued %v, want none", queued)
+	}
+}
+
+// TestCompactionRequeueSkipsMailboxAlreadyStagedForDelivery pins the
+// requeue-side idempotency guard: a message already staged for delivery when
+// requeueMailboxMessagesAfterCompaction runs (a duplicate event delivered the
+// same durable record while its transcript row still existed) must not be
+// enqueued a second time, while a message absent from the delivery pipeline is
+// enqueued exactly once. Without the guard the compaction replay would
+// double-queue one durable record.
+func TestCompactionRequeueSkipsMailboxAlreadyStagedForDelivery(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	if err := os.MkdirAll(filepath.Join(a.sessionDir, "subagents"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(subagents): %v", err)
+	}
+	const (
+		stagedID = "agent-1-8"
+		freshID  = "agent-1-9"
+	)
+	for _, id := range []string{stagedID, freshID} {
+		if err := a.persistSubAgentMailboxMessage(decisionMailboxMessage(id, "unconsumed durable record")); err != nil {
+			t.Fatalf("persist %s: %v", id, err)
+		}
+	}
+	// stagedID's durable record was already delivered into the pipeline while
+	// its row still existed; freshID has not been staged.
+	a.enqueueRestoredMailboxMessage(decisionMailboxMessage(stagedID, "unconsumed durable record"))
+	if queued := mainInboxMailboxMessages(a); len(queued) != 1 || queued[0].MessageID != stagedID {
+		t.Fatalf("pre-requeue inbox = %+v, want exactly %q staged", queued, stagedID)
+	}
+
+	a.requeueMailboxMessagesAfterCompaction([]string{stagedID, freshID})
+
+	byID := make(map[string]int)
+	for _, msg := range mainInboxMailboxMessages(a) {
+		byID[msg.MessageID]++
+	}
+	if byID[stagedID] != 1 {
+		t.Fatalf("staged copies of %q in inbox = %d, want exactly 1 (no second copy from the requeue)", stagedID, byID[stagedID])
+	}
+	if byID[freshID] != 1 {
+		t.Fatalf("staged copies of %q in inbox = %d, want exactly 1 (replayed once)", freshID, byID[freshID])
+	}
+}
+
+// TestCompactionKeepsDurableAckWhenReplaceFailsAfterSettlement pins the
+// settlement order across the replace-failure window: the durable consumed
+// ack for a presented mailbox row is written before the replace commits, so a
+// replace that fails — or a crash in the manifest window, which lands in the
+// same durable state of "ack present, transcript untouched" — cannot lose or
+// double the delivery. Restore keeps skipping the message (its row is still
+// durable and it is now consumed), and a retried compaction settles the
+// already-acked row without a second ack or a replay.
+func TestCompactionKeepsDurableAckWhenReplaceFailsAfterSettlement(t *testing.T) {
+	projectRoot := t.TempDir()
+	sessionDir := testProjectSessionDir(t, projectRoot, "compaction-ack-before-replace-window")
+	const messageID = "agent-1-7"
+	persistCompactionMailboxRestoreSession(t, sessionDir,
+		[]message.Message{
+			{Role: message.RoleUser, Content: "hello"},
+			{Role: message.RoleAssistant, Content: "Working on it"},
+			mailboxRow(messageID, string(SubAgentMailboxKindDecisionRequired)),
+			{Role: message.RoleAssistant, Content: "Handling the mailbox update"},
+		},
+		[]SubAgentMailboxMessage{decisionMailboxMessage(messageID, "presented but the teardown ack never persisted")},
+	)
+
+	first := newTestMainAgentForRestore(t, projectRoot, sessionDir)
+	if err := first.RestoreSessionAtStartup(); err != nil {
+		t.Fatalf("first RestoreSessionAtStartup: %v", err)
+	}
+	if queued := mailboxQueuedIDs(first); len(queued) != 0 {
+		t.Fatalf("first restore queued %v, want none (transcript row already delivered it)", queued)
+	}
+
+	// Take the session-file rewrite rename target so the replace fails after
+	// the mailbox settlement has already run and written its ack.
+	backupPath := filepath.Join(sessionDir, "main.pre-compress-3.jsonl")
+	if err := os.MkdirAll(backupPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll(backupPath): %v", err)
+	}
+	if err := first.applyCompactionDraft(compactionTestDraft(first, sessionDir, 3)); err == nil {
+		t.Fatal("applyCompactionDraft must fail when the session-file rewrite cannot run")
+	}
+
+	// The settlement ack landed before the failed replace and is durable; the
+	// transcript is untouched (the row is still present).
+	if !first.isSubAgentMailboxConsumed(messageID) {
+		t.Fatal("presented mailbox message was not marked consumed before the failed replace")
+	}
+	acks, err := loadSubAgentMailboxAcks(sessionDir)
+	if err != nil {
+		t.Fatalf("loadSubAgentMailboxAcks: %v", err)
+	}
+	if ack, ok := acks[messageID]; !ok || ack.Outcome != mailboxAckOutcomeConsumed {
+		t.Fatalf("durable acks for %q = %+v, want a consumed ack", messageID, acks[messageID])
+	}
+	snapshot := first.ctxMgr.Snapshot()
+	if len(snapshot) != 4 || snapshot[0].Content != "hello" {
+		t.Fatalf("transcript after failed apply = %d messages starting %q, want the original 4 messages", len(snapshot), snapshot[0].Content)
+	}
+	rowFound := false
+	for _, msg := range snapshot {
+		if msg.Kind == message.KindSubAgentMailbox && msg.Mailbox != nil && strings.TrimSpace(msg.Mailbox.MessageID) == messageID {
+			rowFound = true
+		}
+	}
+	if !rowFound {
+		t.Fatal("mailbox row disappeared although the replace failed")
+	}
+
+	// Crash-2 restore from that durable state: the message is consumed and its
+	// row is still there, so neither tier delivers it again.
+	second := newTestMainAgentForRestore(t, projectRoot, sessionDir)
+	if err := second.RestoreSessionAtStartup(); err != nil {
+		t.Fatalf("second RestoreSessionAtStartup: %v", err)
+	}
+	if queued := mailboxQueuedIDs(second); len(queued) != 0 {
+		t.Fatalf("crash-2 restore queued %v, want none (acked before the interrupted replace)", queued)
+	}
+
+	// Retry the compaction once the rewrite is unblocked: settle skips the
+	// already-consumed row, the replace finally destroys it, and neither a
+	// second ack nor a replay is produced.
+	if err := os.RemoveAll(backupPath); err != nil {
+		t.Fatalf("RemoveAll(backupPath): %v", err)
+	}
+	mustApplyCompactionDraft(t, second, compactionTestDraft(second, sessionDir, 3))
+	for _, msg := range second.ctxMgr.Snapshot() {
+		if msg.Kind == message.KindSubAgentMailbox && msg.Mailbox != nil && strings.TrimSpace(msg.Mailbox.MessageID) == messageID {
+			t.Fatalf("mailbox row for %q survived the retried compaction", messageID)
+		}
+	}
+	if !second.isSubAgentMailboxConsumed(messageID) {
+		t.Fatal("retried compaction dropped the consumed ack")
+	}
+	if queued := mailboxQueuedIDs(second); len(queued) != 0 {
+		t.Fatalf("post-retry inbox = %v, want none (no replay of an acked message)", queued)
+	}
+	ackData, err := os.ReadFile(filepath.Join(sessionDir, "subagents", "mailbox-acks.jsonl"))
+	if err != nil {
+		t.Fatalf("ReadFile(mailbox-acks.jsonl): %v", err)
+	}
+	ackLines := 0
+	for _, line := range strings.Split(string(ackData), "\n") {
+		if strings.TrimSpace(line) != "" {
+			ackLines++
+		}
+	}
+	if ackLines != 1 {
+		t.Fatalf("mailbox-acks.jsonl lines = %d, want exactly 1 (no duplicate ack after the retry)", ackLines)
+	}
+}

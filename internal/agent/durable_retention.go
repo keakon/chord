@@ -151,6 +151,28 @@ func appendTaskArchive(sessionDir string, records []*DurableTaskRecord) error {
 	return nil
 }
 
+// compactSubAgentMailboxLogs rewrites the session's mailbox.jsonl with a
+// retention-trimmed record set once the log outgrows
+// mailboxCompactionThreshold. Together with rewriteMailboxLog it is the
+// fourth mutation path of mailbox.jsonl, next to the persist-append and
+// rollback-truncate pair whose spool-index invalidation lives in sub_mailbox.go
+// (each of those bumps spoolWriteGen and/or clears spoolIndexReady under
+// subAgentMailboxIDsMu right after the file write).
+//
+// This path deliberately does not bump the write generation or invalidate the
+// spool index: the rewrite replaces the file via rename, so every byte offset
+// changes and any spool index built over the old file would be stale, but the
+// function has no MainAgent receiver and is only ever invoked from
+// loadSessionState, inside the restore loading window. At that point the
+// restored session's mailbox runtime has not been built yet — no spool index
+// over this session's log exists in memory — so there is nothing to
+// invalidate. The constraint is therefore: this compaction may only run while
+// the inbox for the target session is in that empty window (a fresh restore
+// before its first index build/publish). Any future caller that rewrites the
+// mailbox log while a spool index may be live must first invalidate it under
+// subAgentMailboxIDsMu (bump spoolWriteGen and clear spoolIndexReady), the
+// same way persistSubAgentMailboxMessageWithOffset and
+// rollbackSubAgentMailboxMessage do.
 func compactSubAgentMailboxLogs(sessionDir string, msgs []SubAgentMailboxMessage) error {
 	if len(msgs) < mailboxCompactionThreshold {
 		return nil
@@ -204,6 +226,16 @@ func compactSubAgentMailboxLogs(sessionDir string, msgs []SubAgentMailboxMessage
 	return compactMailboxAckLog(sessionDir, kept)
 }
 
+// rewriteMailboxLog replaces mailbox.jsonl with the given records via a
+// temp-file rename. The rename gives every record new byte offsets, so a spool
+// index built over the previous file is stale afterwards; callers must run
+// only while the target inbox is in the restore empty window (no index built
+// or published yet — see the constraint on compactSubAgentMailboxLogs) or
+// invalidate the spool index under subAgentMailboxIDsMu first. The rewrite
+// also clears the Consumed flag on the retained records: consumed state is
+// reconstructed on load from the mailbox-acks.jsonl records kept by
+// compactMailboxAckLog, so the flags are dropped rather than silently kept in
+// the trimmed log.
 func rewriteMailboxLog(sessionDir string, msgs []SubAgentMailboxMessage) error {
 	path := filepath.Join(sessionDir, "subagents", "mailbox.jsonl")
 	tmpPath := filepath.Join(sessionDir, "subagents", fmt.Sprintf("mailbox.%d.jsonl.tmp", time.Now().UnixNano()))

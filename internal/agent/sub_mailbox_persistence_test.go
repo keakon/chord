@@ -478,6 +478,17 @@ func TestConcurrentSpoolRebuildDoesNotDropQueuedMessage(t *testing.T) {
 // Both halves of the guard are what keep a rebuild that raced an append from
 // publishing an index that drops the appended id (which loadSpooledMailbox
 // would then treat as not-found and the dequeue path would drop forever).
+//
+// The race is simulated rather than orchestrated: indexSpooledMailbox has no
+// seam between reading the log and publishing, so this test snapshots the
+// generation after the first persist, appends, and then attempts a publish
+// carrying that stale snapshot — exactly the map a rebuild that read the log
+// between the two appends would produce. The live append-during-rebuild race
+// (no queued id ever dropped) is exercised end to end by
+// TestConcurrentSpoolRebuildDoesNotDropQueuedMessage. Regression protection
+// therefore depends on keeping this test aligned with the guard: dropping the
+// generation comparison in publishSpooledMailboxIndex, or letting an append
+// touch the log without bumping spoolWriteGen, fails the assertions below.
 func TestSpoolIndexPublishGateSkipsStaleGeneration(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	path := filepath.Join(a.sessionDir, "subagents", "mailbox.jsonl")
@@ -543,6 +554,14 @@ func TestSpoolIndexPublishGateSkipsStaleGeneration(t *testing.T) {
 // quiescent rebuild does not advance it, and a rollback withdraws its row from
 // both the log and the ready index so a later append self-registers at the
 // truncated tail.
+//
+// These counts are the counter half of the publish gate above: publish only
+// rejects a map whose snapshot generation is stale, so the exact bump-per-write
+// asserted here is what staleness is measured against. A writer that touches
+// mailbox.jsonl without advancing the generation is only safe while no index
+// over that file is live — the restore-window log rewrite in
+// compactSubAgentMailboxLogs is one such path; any new mutation of the log
+// must advance spoolWriteGen exactly like the paths this test pins.
 func TestPersistAndRollbackAdvanceSpoolWriteGeneration(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	path := filepath.Join(a.sessionDir, "subagents", "mailbox.jsonl")
