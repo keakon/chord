@@ -77,25 +77,33 @@ func TestContainsShellConstructDetectsBlockedCharacters(t *testing.T) {
 	}
 }
 
-// TestShellConstructSetsAgreeOnCommandChaining pins the relationship between
-// the two definitions of "contains shell syntax" in this package: the read-only
-// classifier is the stricter one, and it must never accept a construct that a
-// verification declaration already refuses.
-func TestShellConstructSetsAgreeOnCommandChaining(t *testing.T) {
+// TestShellReadOnlyRejectsEveryShellSyntaxCharacter pins the read-only
+// classifier against shell syntax character by character, so a future change
+// to either construct set cannot silently widen what the allowlist accepts.
+// Chaining constructs introduce a second command; argument-expansion
+// constructs stay inside one command but decide which files it touches, so the
+// allowlist refuses them too rather than depend on an expansion it never
+// performs.
+func TestShellReadOnlyRejectsEveryShellSyntaxCharacter(t *testing.T) {
 	for _, r := range shellCommandChainingCharacters {
 		command := "ls a" + string(r) + "b"
-		if !containsShellConstruct(command) {
-			t.Fatalf("containsShellConstruct(%q) = false, want the shell construct rejected", command)
+		if shellReadOnlyCommandAllowed(mustJSONCommand(t, command)) {
+			t.Fatalf("shellReadOnlyCommandAllowed(%q) = true, want false", command)
 		}
 	}
-	// Argument expansion is the deliberate difference: the read-only gate
-	// refuses it because it decides which files the command reads, while a
-	// verification declaration may carry it because the delegator authorized
-	// that exact string and it introduces no second command.
 	for _, r := range shellArgumentExpansionCharacters {
-		command := "go test ./pkg" + string(r)
-		if !containsShellConstruct(command) {
-			t.Fatalf("containsShellConstruct(%q) = false, want expansion characters refused by the read-only gate", command)
+		command := "cat README.md" + string(r) + "x"
+		if shellReadOnlyCommandAllowed(mustJSONCommand(t, command)) {
+			t.Fatalf("shellReadOnlyCommandAllowed(%q) = true, want false", command)
 		}
 	}
+}
+
+func mustJSONCommand(t *testing.T, command string) []byte {
+	t.Helper()
+	args, err := json.Marshal(map[string]any{"command": command})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	return args
 }

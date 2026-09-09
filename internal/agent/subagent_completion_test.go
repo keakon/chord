@@ -950,3 +950,316 @@ func TestMainMailboxAndSnapshotDoNotDoubleBillSameCompletion(t *testing.T) {
 		}
 	}
 }
+
+// The following completion-rejection tests were migrated back from
+// subagent_completion_validation_test.go (deleted with the verification gate
+// in 289a1cd0): they cover rejectInvalidCompleteArguments and the degraded
+// typed-result delivery, which remain live code.
+
+func TestSubAgentInvalidCompleteGetsRejectedToolResultAndBoundedFollowUp(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       any
+		wantReason string
+	}{
+		{name: "json parse error", args: map[string]any{"summary": 123}, wantReason: "cannot unmarshal number"},
+		{name: "blank summary", args: map[string]any{"summary": "   "}, wantReason: "summary is required"},
+		{name: "artifact outside session", args: map[string]any{"summary": "done", "artifacts": []map[string]any{{"rel_path": "../outside.txt"}}}, wantReason: "artifact path escapes"},
+		{name: "typed result without result_type", args: map[string]any{"summary": "done", "result": map[string]any{"value": 1}}, wantReason: "result or result_ref requires result_type"},
+		{name: "result_type without result or result_ref", args: map[string]any{"summary": "done", "result_type": "type/test"}, wantReason: "result_type requires result or result_ref"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			parent, sub := newMixedBatchTestSubAgent(t)
+			providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
+				Type:   config.ProviderTypeChatCompletions,
+				Models: map[string]config.ModelConfig{"model": {Limit: config.ModelLimit{Context: 8192, Output: 1024}}},
+			}, []string{"key"})
+			// The follow-up request is sent with a forced required-tool-choice
+			// tuning, so the scripted response must return a tool call (mirroring
+			// the terminal-recovery tests) or the client cannot finalize it.
+			provider := &blockingStreamProvider{calls: []scriptedStreamCall{{resp: &message.Response{ToolCalls: convertCalls([]messageToolCall{mustJSONToolCall(t, "retry-1", "complete", map[string]any{"summary": "done"})})}}}}
+			sub.llmClient = llm.NewClient(providerCfg, provider, "model", 1024, "sys")
+
+			sub.handleLLMResponse(&llmResult{turnID: 1, resp: &message.Response{ToolCalls: convertCalls([]messageToolCall{
+				mustJSONToolCall(t, "call-1", "complete", tc.args),
+			})}})
+
+			// Must not be terminal: the worker gets one bounded follow-up request
+			// instead of failing on the spot.
+			select {
+			case evt := <-parent.eventCh:
+				t.Fatalf("invalid Complete terminated the task with %#v instead of a bounded follow-up", evt)
+			default:
+			}
+			if result := waitForSubAgentLLMResult(t, sub, time.Second); result.err != nil {
+				t.Fatalf("follow-up request failed: %v", result.err)
+			}
+			if got := sub.turn.SubAgentCompletionRecoveryCount; got != 1 {
+				t.Fatalf("completion recovery count = %d, want 1", got)
+			}
+			if got := sub.turn.SubAgentTerminalRecoveryCount; got != 0 {
+				t.Fatalf("terminal (pure-text) recovery count = %d, want 0 (rejected Complete must not consume the wrap-up nudge)", got)
+			}
+
+			// The rejected Complete call got a tool result so the transcript keeps
+			// its tool-call pairing.
+			msgs := sub.ctxMgr.Snapshot()
+			foundRejected := false
+			for _, msg := range msgs {
+				if msg.Role != "tool" || msg.ToolCallID != "call-1" {
+					continue
+				}
+				foundRejected = strings.HasPrefix(msg.Content, "Completion rejected:") && strings.Contains(msg.Content, tc.wantReason)
+				break
+			}
+			if !foundRejected {
+				t.Fatalf("missing rejected tool result containing %q in %#v", tc.wantReason, msgs)
+			}
+
+			// The follow-up request carried the fix-it nudge for the model.
+			seen, _ := provider.snapshot()
+			if len(seen) != 1 {
+				t.Fatalf("provider request count = %d, want 1 bounded follow-up", len(seen))
+			}
+			last := seen[0][len(seen[0])-1]
+			if last.Role != "user" || !strings.Contains(last.Content, "Completion was rejected:") {
+				t.Fatalf("follow-up request tail = %#v, want rejection nudge", last)
+			}
+		})
+	}
+}
+
+func TestSubAgentInvalidCompleteRetryHasOwnBudgetAfterPureTextRecovery(t *testing.T) {
+	// The pure-text wrap-up nudge and the rejected-Complete follow-up used to
+	// share one budget, so a text-only reply followed by a rejected Complete
+	// failed with a "after retry" error that was actually the first attempt.
+	// Each recovery class now gets its own single follow-up.
+	parent, sub := newMixedBatchTestSubAgent(t)
+	providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
+		Type:   config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{"model": {Limit: config.ModelLimit{Context: 8192, Output: 1024}}},
+	}, []string{"key"})
+	provider := &blockingStreamProvider{calls: []scriptedStreamCall{{resp: &message.Response{ToolCalls: convertCalls([]messageToolCall{mustJSONToolCall(t, "retry-1", "complete", map[string]any{"summary": "done"})})}}}}
+	sub.llmClient = llm.NewClient(providerCfg, provider, "model", 1024, "sys")
+	// Simulate a text-only reply that already spent the wrap-up nudge.
+	sub.turn.SubAgentTerminalRecoveryCount = 1
+
+	sub.handleLLMResponse(&llmResult{turnID: 1, resp: &message.Response{ToolCalls: convertCalls([]messageToolCall{
+		mustJSONToolCall(t, "call-1", "complete", map[string]any{"summary": "   "}),
+	})}})
+
+	select {
+	case evt := <-parent.eventCh:
+		t.Fatalf("rejected Complete terminated despite the pure-text budget already being spent: %#v", evt)
+	default:
+	}
+	if result := waitForSubAgentLLMResult(t, sub, time.Second); result.err != nil {
+		t.Fatalf("follow-up request failed: %v", result.err)
+	}
+	if got := sub.turn.SubAgentCompletionRecoveryCount; got != 1 {
+		t.Fatalf("completion recovery count = %d, want 1 (the split budget must still be available)", got)
+	}
+
+	// The corrected follow-up call completes normally: the worker kept its
+	// second chance after one pure-text reply and one rejected Complete.
+	sub.handleLLMResponse(&llmResult{turnID: 1, resp: &message.Response{ToolCalls: convertCalls([]messageToolCall{
+		mustJSONToolCall(t, "call-2", "complete", map[string]any{"summary": "done"}),
+	})}})
+	select {
+	case evt := <-parent.eventCh:
+		if evt.Type != EventAgentDone {
+			t.Fatalf("event.Type = %q, want EventAgentDone", evt.Type)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for corrected Complete")
+	}
+}
+
+func TestSubAgentCoReturnedInvalidCompleteRejectedAfterSiblingsSettle(t *testing.T) {
+	parent, sub := newMixedBatchTestSubAgent(t)
+	providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
+		Type:   config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{"model": {Limit: config.ModelLimit{Context: 8192, Output: 1024}}},
+	}, []string{"key"})
+	provider := &blockingStreamProvider{calls: []scriptedStreamCall{{resp: &message.Response{ToolCalls: convertCalls([]messageToolCall{mustJSONToolCall(t, "retry-1", "complete", map[string]any{"summary": "done"})})}}}}
+	sub.llmClient = llm.NewClient(providerCfg, provider, "model", 1024, "sys")
+
+	sub.handleLLMResponse(&llmResult{turnID: 1, resp: &message.Response{ToolCalls: convertCalls([]messageToolCall{
+		mustJSONToolCall(t, "call-1", "complete", map[string]any{"summary": "done", "result": map[string]any{"value": 1}}),
+		mustJSONToolCall(t, "call-2", "Dummy", map[string]any{"value": "x"}),
+	})}})
+	if sub.pendingComplete != nil || sub.pendingCompleteCallID != "" {
+		t.Fatalf("invalid Complete must not become a pending completion: %#v", sub.pendingComplete)
+	}
+	if sub.pendingRejectedCompleteErr == nil || sub.pendingRejectedCompleteCallID != "call-1" {
+		t.Fatalf("pending rejected completion = %q/%v, want call-1 with the typed-result error", sub.pendingRejectedCompleteCallID, sub.pendingRejectedCompleteErr)
+	}
+
+	// The sibling tool settles first; only then is the rejected Complete
+	// appended and the bounded follow-up issued.
+	sub.handleToolResult(&toolResult{CallID: "call-2", Name: "Dummy", ArgsJSON: `{"value":"x"}`, Result: "ok", TurnID: 1})
+	select {
+	case evt := <-parent.eventCh:
+		t.Fatalf("invalid Complete terminated the task with %#v instead of a bounded follow-up", evt)
+	default:
+	}
+	if result := waitForSubAgentLLMResult(t, sub, time.Second); result.err != nil {
+		t.Fatalf("follow-up request failed: %v", result.err)
+	}
+	if got := sub.turn.SubAgentCompletionRecoveryCount; got != 1 {
+		t.Fatalf("completion recovery count = %d, want 1", got)
+	}
+	if sub.pendingRejectedCompleteErr != nil || sub.pendingRejectedCompleteCallID != "" {
+		t.Fatalf("pending rejected completion not cleared after rejection: %q/%v", sub.pendingRejectedCompleteCallID, sub.pendingRejectedCompleteErr)
+	}
+	msgs := sub.ctxMgr.Snapshot()
+	foundRejected := false
+	for _, msg := range msgs {
+		if msg.Role != "tool" || msg.ToolCallID != "call-1" {
+			continue
+		}
+		foundRejected = strings.HasPrefix(msg.Content, "Completion rejected:") && strings.Contains(msg.Content, "result or result_ref requires result_type")
+		break
+	}
+	if !foundRejected {
+		t.Fatalf("missing rejected tool result in %#v", msgs)
+	}
+}
+
+func TestSubAgentRepeatedInvalidCompleteFailsAfterRecoveryBudgetSpent(t *testing.T) {
+	parent, sub := newMixedBatchTestSubAgent(t)
+	sub.turn.SubAgentCompletionRecoveryCount = 1
+	sub.handleLLMResponse(&llmResult{turnID: 1, resp: &message.Response{ToolCalls: convertCalls([]messageToolCall{
+		mustJSONToolCall(t, "call-1", "complete", map[string]any{"summary": "   "}),
+	})}})
+
+	select {
+	case evt := <-parent.eventCh:
+		if evt.Type != EventAgentError {
+			t.Fatalf("event.Type = %q, want %q", evt.Type, EventAgentError)
+		}
+		if err, ok := evt.Payload.(error); !ok || !strings.Contains(err.Error(), "summary is required") {
+			t.Fatalf("error payload = %#v, want rejected-after-retry error with the arg cause", evt.Payload)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for bounded recovery failure")
+	}
+}
+
+// TestSubAgentDeferredCompletionRetainsStructuredEnvelope pins that a
+// completion deferred for outstanding join-children keeps its structured
+// envelope (files, risks, follow-ups) intact on the pending intent until the
+// children settle and delivery resumes.
+func TestSubAgentDeferredCompletionRetainsStructuredEnvelope(t *testing.T) {
+	parent, sub := newMixedBatchTestSubAgent(t)
+	parent.subs.mu.Lock()
+	parent.subs.taskRecords["child-1"] = &DurableTaskRecord{
+		TaskID:           "child-1",
+		OwnerTaskID:      sub.taskID,
+		JoinToOwner:      true,
+		State:            string(SubAgentStateRunning),
+		LatestInstanceID: "worker-child",
+	}
+	parent.subs.mu.Unlock()
+
+	sub.handleLLMResponse(&llmResult{
+		turnID: 1,
+		resp: &message.Response{ToolCalls: convertCalls([]messageToolCall{
+			mustJSONToolCall(t, "call-1", "complete", map[string]any{
+				"summary":               "final summary",
+				"files_changed":         []string{"internal/a.go"},
+				"known_risks":           []string{"manual QA"},
+				"follow_up_recommended": []string{"review"},
+			}),
+		})},
+	})
+
+	pending := sub.PendingCompleteIntent()
+	if pending == nil || pending.Envelope == nil {
+		t.Fatalf("PendingCompleteIntent() = %#v, want structured envelope", pending)
+	}
+	if got := pending.Envelope.FilesChanged; len(got) != 1 || got[0] != "internal/a.go" {
+		t.Fatalf("pending files_changed = %#v", got)
+	}
+	if !slices.Contains(pending.Envelope.KnownRisks, "manual QA") || !slices.Contains(pending.Envelope.FollowUpRecommended, "review") {
+		t.Fatalf("pending envelope = %#v, want the declared risks and follow-ups preserved", pending.Envelope)
+	}
+}
+
+func TestCoordinationSnapshotDoesNotDeadlockOnWaitingDescendant(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "task-parent")
+	sub.instanceID = "worker-parent"
+	sub.setState(SubAgentStateWaitingDescendant, "waiting for child")
+	sub.runtimeState.stateChangedAt = time.Now().Add(-coordinationSnapshotStallAfter - time.Minute)
+	a.subs.mu.Lock()
+	delete(a.subs.subAgents, "worker-1")
+	a.subs.subAgents[sub.instanceID] = sub
+	a.subs.taskRecords[sub.taskID] = &DurableTaskRecord{
+		TaskID:           sub.taskID,
+		LatestInstanceID: sub.instanceID,
+		State:            string(SubAgentStateWaitingDescendant),
+	}
+	a.subs.mu.Unlock()
+	done := make(chan string, 1)
+	go func() {
+		done <- a.buildCoordinationSnapshotOverlay()
+	}()
+	select {
+	case out := <-done:
+		if out == "" {
+			t.Fatal("snapshot unexpectedly empty")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("buildCoordinationSnapshotOverlay appears deadlocked")
+	}
+}
+
+// The typed-result group is optional metadata. Once the model has spent its one
+// correction and still cannot pair the fields, destroying a finished task is a
+// worse outcome than delivering it without the group, so the completion settles
+// with the summary intact and the drop recorded as a limitation.
+func TestUnpairedTypedResultSettlesDegradedAfterRecoveryBudgetSpent(t *testing.T) {
+	parent, sub := newMixedBatchTestSubAgent(t)
+	sub.turn.SubAgentCompletionRecoveryCount = 1
+	sub.handleLLMResponse(&llmResult{turnID: 1, resp: &message.Response{ToolCalls: convertCalls([]messageToolCall{
+		mustJSONToolCall(t, "call-1", "complete", map[string]any{
+			"summary":               "implemented the parser fix",
+			"files_changed":         []string{"internal/parser/parse.go"},
+			"remaining_limitations": []string{"docs not updated"},
+			"result":                map[string]any{"value": 1},
+		}),
+	})}})
+
+	select {
+	case evt := <-parent.eventCh:
+		if evt.Type != EventAgentDone {
+			t.Fatalf("event.Type = %q, want %q (an unpaired typed result must not destroy the delivery)", evt.Type, EventAgentDone)
+		}
+		result, ok := evt.Payload.(*AgentResult)
+		if !ok {
+			t.Fatalf("payload = %#v, want *AgentResult", evt.Payload)
+		}
+		if result.Summary != "implemented the parser fix" {
+			t.Fatalf("summary = %q, want the model's summary preserved", result.Summary)
+		}
+		if result.Envelope == nil {
+			t.Fatal("envelope = nil, want the structured fields preserved")
+		}
+		if !slices.Contains(result.Envelope.FilesChanged, "internal/parser/parse.go") {
+			t.Fatalf("files_changed = %#v, want the declared file preserved", result.Envelope.FilesChanged)
+		}
+		if result.Envelope.ResultType != "" || len(result.Envelope.Result) != 0 || result.Envelope.ResultRef != nil {
+			t.Fatalf("typed result = (%q, %s, %#v), want it stripped", result.Envelope.ResultType, result.Envelope.Result, result.Envelope.ResultRef)
+		}
+		if !slices.Contains(result.Envelope.RemainingLimitations, "docs not updated") {
+			t.Fatalf("remaining_limitations = %#v, want the model's own limitations kept", result.Envelope.RemainingLimitations)
+		}
+		if !slices.Contains(result.Envelope.RemainingLimitations, droppedTypedResultLimitation) {
+			t.Fatalf("remaining_limitations = %#v, want the dropped-result note appended", result.Envelope.RemainingLimitations)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the degraded completion")
+	}
+}

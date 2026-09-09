@@ -1522,37 +1522,6 @@ func TestCreateSubAgentRejectsRegistrationAfterOwnerCompletes(t *testing.T) {
 	}
 }
 
-func TestNestedCreateSubAgentDeclaredScopeDoesNotConstrainChild(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		parentPath string
-		child      tools.WriteScope
-	}{
-		{name: "child broader than parent prefix", parentPath: "internal/agent", child: tools.WriteScope{PathPrefix: []string{"internal"}}},
-		{name: "child narrower than parent prefix", parentPath: "internal", child: tools.WriteScope{Files: []string{"internal/agent/main.go"}}},
-		{name: "child exact file as prefix", parentPath: "internal/agent", child: tools.WriteScope{PathPrefix: []string{"internal/agent"}}},
-		{name: "empty write-capable child under scoped parent", parentPath: "internal/agent", child: tools.WriteScope{}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			a := newTestMainAgent(t, t.TempDir())
-			configureNestedDelegationTestRuntime(a, 2)
-			parent := newControllableTestSubAgent(t, a, "adhoc-parent")
-			parent.depth = 1
-			parent.delegation = config.DelegationConfig{MaxChildren: 2, MaxDepth: 2}
-			parent.writeScope = tools.WriteScope{PathPrefix: []string{tc.parentPath}}
-			ctx := tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID)
-
-			handle, err := a.CreateSubAgent(ctx, "child work", "worker", "", "", tc.child)
-			if err != nil {
-				t.Fatalf("CreateSubAgent: %v", err)
-			}
-			if handle.Status != "started" {
-				t.Fatalf("handle.Status = %q, want started", handle.Status)
-			}
-		})
-	}
-}
-
 func TestCreateSubAgentCapsActiveChildrenAtTen(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 2)
