@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -480,5 +481,127 @@ func TestCompactContextDescriptionDoesNotTreatPlannedFilesAsExternalized(t *test
 	description := NewCompactContextTool(testCompactValidator()).Description()
 	if !strings.Contains(description, "planned_state_files") || !strings.Contains(description, "do not externalize state") {
 		t.Fatalf("description must distinguish planned files from externalized state: %q", description)
+	}
+}
+
+// Claim keys are normalized the same way in claim_evidence and claim_kinds.
+// claim_evidence keys have always been trimmed, so a padded claim_kinds key
+// used to survive untouched and drift apart from its claim_evidence twin —
+// the runtime join on exact keys then reported "observed but has no
+// claim_evidence" for a claim that did carry evidence, or split one claim
+// across two entries.
+func TestCompactContextClaimKindsKeysNormalizedLikeClaimEvidence(t *testing.T) {
+	raw := `{
+		"active_objective": "a", "next_step": "b",
+		"completed": ["tests pass"],
+		"claim_evidence": {"tests pass": ["ev-1"]},
+		"claim_kinds": {"  tests pass  ": "observed"}
+	}`
+	args, err := testCompactValidator().ParseCompactContextArgs(json.RawMessage(raw))
+	if err != nil {
+		t.Fatalf("ParseCompactContextArgs: %v", err)
+	}
+	if got := args.ClaimKinds["tests pass"]; got != "observed" {
+		t.Fatalf("claim_kinds key was not normalized: %q = %#v", "tests pass", args.ClaimKinds)
+	}
+	if _, ok := args.ClaimEvidence["tests pass"]; !ok {
+		t.Fatalf("claim_evidence = %#v, want the trimmed twin key present", args.ClaimEvidence)
+	}
+}
+
+func TestCompactContextClaimEvidenceCollapsesWhitespaceTwins(t *testing.T) {
+	raw := `{"active_objective":"a","next_step":"b","claim_evidence":{"fact":["ev-1"],"  fact  ":["ev-2"]}}`
+	args, err := testCompactValidator().ParseCompactContextArgs(json.RawMessage(raw))
+	if err != nil {
+		t.Fatalf("ParseCompactContextArgs: %v", err)
+	}
+	if len(args.ClaimEvidence) != 1 {
+		t.Fatalf("claim_evidence = %#v, want the whitespace twins collapsed to one claim", args.ClaimEvidence)
+	}
+	if _, ok := args.ClaimEvidence["fact"]; !ok {
+		t.Fatalf("claim_evidence = %#v, want key %q", args.ClaimEvidence, "fact")
+	}
+}
+
+func TestCompactContextClaimKindsRejectsEmptyKey(t *testing.T) {
+	for name, raw := range map[string]string{
+		"blank_key": `{"active_objective":"a","next_step":"b","claim_kinds":{" ": "observed"}}`,
+		"empty_key": `{"active_objective":"a","next_step":"b","claim_kinds":{"": "observed"}}`,
+		"tabs_key":  `{"active_objective":"a","next_step":"b","claim_kinds":{"\t\t": "observed"}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := testCompactValidator().ParseCompactContextArgs(json.RawMessage(raw)); err == nil {
+				t.Fatalf("expected whitespace-only claim_kinds key %s to be rejected", name)
+			}
+		})
+	}
+}
+
+func TestCompactContextClaimKindsEnforcesClaimCap(t *testing.T) {
+	kinds := make(map[string]any, 21)
+	for i := range 21 {
+		kinds[fmt.Sprintf("claim-%d", i)] = "derived"
+	}
+	raw, err := json.Marshal(map[string]any{
+		"active_objective": "a",
+		"next_step":        "b",
+		"claim_kinds":      kinds,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = testCompactValidator().ParseCompactContextArgs(raw)
+	if err == nil || !strings.Contains(err.Error(), "claim_kinds contains 21 claims, exceeding the maximum of 20") {
+		t.Fatalf("error = %v, want claim_kinds cap rejection", err)
+	}
+}
+
+// The token-budget rejection must list every field that carries cost, which
+// includes the stage metadata trio (stage_id/stage_status/checkpoint_kind). A
+// shorten list that omitted them made the model shorten only the headline
+// fields while the budget was still consumed by stage text. stage_status and
+// checkpoint_kind are short enum values (they pass enum validation, so the
+// budget branch runs), and stage_id is free text — the only stage field that
+// can dominate the budget on its own.
+func TestCompactContextTokenBudgetShortenListIncludesStageMetadata(t *testing.T) {
+	v := CompactContextValidator{ContinuationStateMaxTokens: 60}
+	longStageID := strings.Repeat("s", 300) // ~100 estimated tokens with the bytes/3 estimator
+	raw := `{
+		"active_objective": "a",
+		"next_step": "b",
+		"stage_id": "` + longStageID + `",
+		"stage_status": "active",
+		"checkpoint_kind": "provisional"
+	}`
+	_, err := v.ParseCompactContextArgs(json.RawMessage(raw))
+	if err == nil {
+		t.Fatal("expected token budget rejection")
+	}
+	msg := err.Error()
+	// Shorten list is cost-descending: stage_id (100) first, then the enum
+	// trio members checkpoint_kind≈3 and stage_status≈2, ahead of the tiny
+	// text fields at ≈0. Its prefix must carry all three stage fields.
+	for _, want := range []string{"token budget", "largest: stage_id≈100", "shorten stage_id/checkpoint_kind/stage_status"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error = %q, want substring %q", msg, want)
+		}
+	}
+}
+
+// Observed claims need their evidence IDs repeated in the top-level
+// evidence_refs, so the tool schema must say so where claim_evidence and
+// evidence_refs are documented (the runtime enforces it).
+func TestCompactContextParametersCrossReferenceEvidenceRefsForObservedClaims(t *testing.T) {
+	tool := NewCompactContextTool(testCompactValidator())
+	properties := tool.Parameters()["properties"].(map[string]any)
+	claimEvidence := properties["claim_evidence"].(map[string]any)["description"].(string)
+	evidenceRefs := properties["evidence_refs"].(map[string]any)["description"].(string)
+	for name, desc := range map[string]string{"claim_evidence": claimEvidence, "evidence_refs": evidenceRefs} {
+		if !strings.Contains(desc, "evidence_refs") || !strings.Contains(desc, "observed") {
+			t.Fatalf("%s description must cross-reference evidence_refs for observed claims: %q", name, desc)
+		}
+	}
+	if got := properties["claim_evidence"].(map[string]any)["maxProperties"]; got != maxCompactContextClaims {
+		t.Fatalf("claim_evidence maxProperties = %v, want %d", got, maxCompactContextClaims)
 	}
 }

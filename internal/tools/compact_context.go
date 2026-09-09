@@ -159,20 +159,6 @@ func (v CompactContextValidator) ParseCompactContextArgs(raw json.RawMessage) (C
 	if args.EvidenceRefs, err = validateCompactContextList(args.EvidenceRefs, 24, "evidence_refs"); err != nil {
 		return CompactContextArgs{}, err
 	}
-	if len(args.ClaimEvidence) > 20 {
-		return CompactContextArgs{}, fmt.Errorf("claim_evidence contains %d claims, exceeding the maximum of 20", len(args.ClaimEvidence))
-	}
-	for claim, refs := range args.ClaimEvidence {
-		if strings.TrimSpace(claim) == "" {
-			return CompactContextArgs{}, fmt.Errorf("claim_evidence contains an empty claim")
-		}
-		normalized, err := validateCompactContextList(refs, 8, "claim_evidence")
-		if err != nil {
-			return CompactContextArgs{}, err
-		}
-		delete(args.ClaimEvidence, claim)
-		args.ClaimEvidence[strings.TrimSpace(claim)] = normalized
-	}
 	// Claim keys are natural-language assertions, not indices into
 	// completed/decisions: the model may paraphrase an entry instead of
 	// copying it verbatim, and downstream render/carry treat claim text as a
@@ -180,7 +166,24 @@ func (v CompactContextValidator) ParseCompactContextArgs(raw json.RawMessage) (C
 	// MainAgent runtime, so anchoring claim text to completed/decisions only
 	// added critical-path friction (verbatim-copy failures) without a
 	// functional payoff.
-	for claim, kind := range args.ClaimKinds {
+	claimEvidence, err := normalizeCompactContextClaims(args.ClaimEvidence, "claim_evidence")
+	if err != nil {
+		return CompactContextArgs{}, err
+	}
+	args.ClaimEvidence = claimEvidence
+	for claim, refs := range claimEvidence {
+		normalized, err := validateCompactContextList(refs, 8, "claim_evidence")
+		if err != nil {
+			return CompactContextArgs{}, err
+		}
+		claimEvidence[claim] = normalized
+	}
+	claimKinds, err := normalizeCompactContextClaims(args.ClaimKinds, "claim_kinds")
+	if err != nil {
+		return CompactContextArgs{}, err
+	}
+	args.ClaimKinds = claimKinds
+	for claim, kind := range claimKinds {
 		if !slices.Contains([]string{"observed", "derived", "assumed", "proposed"}, kind) {
 			return CompactContextArgs{}, fmt.Errorf("invalid claim_kinds value %q for %q", kind, claim)
 		}
@@ -240,9 +243,45 @@ func (v CompactContextValidator) ParseCompactContextArgs(raw json.RawMessage) (C
 			}
 			largest = fmt.Sprintf("; largest: %s", strings.Join(parts, ", "))
 		}
-		return CompactContextArgs{}, fmt.Errorf("continuation state exceeds the token budget (estimated_cost=%d, budget=%d)%s; shorten active_objective/next_step/completed/decisions/open_issues/state_files/planned_state_files/evidence_refs/claim_evidence/claim_kinds and retry", cost, limit, largest)
+		// Name exactly the fields that carry cost (stage_id/stage_status/
+		// checkpoint_kind are budgeted like every other field), so the model
+		// shortens what the budget actually counted; empty fields are omitted
+		// because there is nothing to shorten in them.
+		shorten := make([]string, 0, len(costs))
+		for _, c := range costs {
+			shorten = append(shorten, c.name)
+		}
+		return CompactContextArgs{}, fmt.Errorf("continuation state exceeds the token budget (estimated_cost=%d, budget=%d)%s; shorten %s and retry", cost, limit, largest, strings.Join(shorten, "/"))
 	}
 	return args, nil
+}
+
+// maxCompactContextClaims caps how many claims claim_evidence and claim_kinds
+// may carry. It is the same limit the schema in Parameters() declares as
+// maxProperties for both objects.
+const maxCompactContextClaims = 20
+
+// normalizeCompactContextClaims trims every claim key, rejects empty keys,
+// caps the claim count at maxCompactContextClaims, and returns a new map.
+// claim_evidence and claim_kinds join on exact claim keys downstream (an
+// observed claim_kinds entry must line up with the claim_evidence entry that
+// carries its evidence), so both maps must go through the same
+// normalization: a whitespace-padded key surviving in one map but not the
+// other would otherwise surface as a false "observed claim has no evidence"
+// rejection, or split one claim across two entries.
+func normalizeCompactContextClaims[V any](claims map[string]V, name string) (map[string]V, error) {
+	normalized := make(map[string]V, len(claims))
+	for claim, value := range claims {
+		claim = strings.TrimSpace(claim)
+		if claim == "" {
+			return nil, fmt.Errorf("%s contains an empty claim", name)
+		}
+		normalized[claim] = value
+	}
+	if len(normalized) > maxCompactContextClaims {
+		return nil, fmt.Errorf("%s contains %d claims, exceeding the maximum of %d", name, len(normalized), maxCompactContextClaims)
+	}
+	return normalized, nil
 }
 
 // validateCompactContextList trims every item, rejects empty items and arrays
@@ -377,7 +416,7 @@ func (t CompactContextTool) Description() string {
 	// it has already authored the whole state.
 	budget := ""
 	if limit := t.validator.ContinuationStateMaxTokens; limit > 0 {
-		budget = fmt.Sprintf("All text fields together (active_objective, next_step, completed, decisions, open_issues, state_files, planned_state_files, evidence_refs, claim_evidence, claim_kinds) must fit a combined budget of about %d estimated tokens; there are no per-field or per-item caps, so a long item is fine as long as the whole state stays within the budget.\n", limit)
+		budget = fmt.Sprintf("All text fields together (active_objective, next_step, completed, decisions, open_issues, state_files, planned_state_files, evidence_refs, stage_id, stage_status, checkpoint_kind, claim_evidence, claim_kinds) must fit a combined budget of about %d estimated tokens; there are no per-field or per-item caps, so a long item is fine as long as the whole state stays within the budget.\n", limit)
 	}
 	// The todo-sync line is rendered only when todo_write is visible in the
 	// same surface, so the description never pushes a tool the model cannot
@@ -454,13 +493,13 @@ func (CompactContextTool) Parameters() map[string]any {
 			"evidence_refs": map[string]any{
 				"type": "array", "maxItems": 24,
 				"items":       map[string]any{"type": "string", "minLength": 1},
-				"description": "Stable evidence IDs from the checkpoint evidence pack that support completed work or decisions. IDs render as ev-<hash> in the checkpoint's evidence pack (e.g. the Evidence ID line / [evidence:ev-...] entries); invented IDs are rejected, so leave this empty when no evidence pack is in view — only observed claims and committed checkpoints require evidence, not every completed stage.",
+				"description": "Stable evidence IDs from the checkpoint evidence pack that support completed work or decisions. IDs render as ev-<hash> in the checkpoint's evidence pack (e.g. the Evidence ID line / [evidence:ev-...] entries); invented IDs are rejected, so leave this empty when no evidence pack is in view — only observed claims and committed checkpoints require evidence, not every completed stage. Every evidence ID an observed claim references in claim_evidence must be repeated here: when you fill claim_evidence for observed claims, also add those IDs to the top-level evidence_refs.",
 			},
 			"stage_id":        map[string]any{"type": "string", "description": "Stable identifier for the current work stage."},
 			"stage_status":    map[string]any{"type": "string", "enum": []string{"active", "candidate", "completed", "blocked", "superseded"}, "description": "Whether this stage is still active or is a checkpoint candidate/completed."},
 			"checkpoint_kind": map[string]any{"type": "string", "enum": []string{"provisional", "committed"}, "description": "Provisional reduces context but is not authoritative; committed requires runtime validation, and additionally requires stage_status=completed with at least one valid evidence_refs entry."},
-			"claim_evidence":  map[string]any{"type": "object", "maxProperties": 20, "additionalProperties": map[string]any{"type": "array", "maxItems": 8, "items": map[string]any{"type": "string", "minLength": 1}}, "description": "Maps each claim to the evidence IDs supporting it. Claim keys are natural language: usually a condensed conclusion from completed/decisions, where paraphrasing is fine and verbatim matching is never required; standalone claims are also allowed. Evidence IDs must be real ev-<hash> IDs from a recent checkpoint's evidence pack."},
-			"claim_kinds":     map[string]any{"type": "object", "maxProperties": 20, "additionalProperties": map[string]any{"type": "string", "enum": []string{"observed", "derived", "assumed", "proposed"}}, "description": "Classifies each claim (usually from completed/decisions); observed requires runtime evidence listed in claim_evidence/evidence_refs, derived is inferred from evidence, assumed is unverified, and proposed is future work. When no valid evidence is in view, prefer derived or assumed over observed."},
+			"claim_evidence":  map[string]any{"type": "object", "maxProperties": maxCompactContextClaims, "additionalProperties": map[string]any{"type": "array", "maxItems": 8, "items": map[string]any{"type": "string", "minLength": 1}}, "description": "Maps each claim to the evidence IDs supporting it. Claim keys are natural language: usually a condensed conclusion from completed/decisions, where paraphrasing is fine and verbatim matching is never required; standalone claims are also allowed. Evidence IDs must be real ev-<hash> IDs from a recent checkpoint's evidence pack. A claim classified observed in claim_kinds needs at least one evidence ID here, and every ID listed for it must also appear in the top-level evidence_refs."},
+			"claim_kinds":     map[string]any{"type": "object", "maxProperties": maxCompactContextClaims, "additionalProperties": map[string]any{"type": "string", "enum": []string{"observed", "derived", "assumed", "proposed"}}, "description": "Classifies each claim (usually from completed/decisions); observed requires runtime evidence listed in claim_evidence/evidence_refs, derived is inferred from evidence, assumed is unverified, and proposed is future work. When no valid evidence is in view, prefer derived or assumed over observed."},
 		},
 		"required":             []string{"active_objective", "next_step"},
 		"additionalProperties": false,
