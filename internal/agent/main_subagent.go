@@ -637,6 +637,16 @@ func (a *MainAgent) handleAgentNotify(evt Event) {
 		log.Debugf("dropping report from abandoned subagent agent_id=%v", evt.SourceID)
 		return
 	}
+	if isTerminalSubAgentState(sub.State()) {
+		// A settled runtime must not be resurrected by a queued or late
+		// progress notice. Durable terminal outcomes (completion, failure,
+		// user cancel) are absorbing: they are committed on this runtime, so
+		// accepting the notice would revive a cancelled/completed attempt
+		// without the explicit new-attempt machinery (resetForAttempt and the
+		// task-record attempt bump) that terminal reuse requires.
+		log.Debugf("dropping notify from settled subagent agent_id=%v state=%v", evt.SourceID, sub.State())
+		return
+	}
 	if !sub.setState(SubAgentStateRunning, msg) {
 		return
 	}
