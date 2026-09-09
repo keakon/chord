@@ -264,6 +264,12 @@ func (a *MainAgent) resetSessionRuntimeState() {
 	a.pendingAutoContinuePrompt = ""
 	a.pendingAutoContinueReplayPrompt = ""
 	a.clearPendingCompactionResume()
+	// Model-driven checkpoint intent is session-scoped: the frozen session's
+	// snapshot already persisted its proposal (freeze runs before this
+	// reset), so the next session must not inherit an armed proposal or an
+	// unconsumed one-shot notice from it.
+	a.modelDrivenProposal = modelDrivenProposalState{}
+	a.pendingModelDrivenNotice = ""
 	if loopWasEnabled {
 		a.refreshSystemPrompt()
 		a.emitLoopStateChanged()

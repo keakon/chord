@@ -87,6 +87,23 @@ func TestResetSessionRuntimeStateClearsLoopControllerState(t *testing.T) {
 	}
 }
 
+func TestResetSessionRuntimeStateClearsModelDrivenProposalAndNotice(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	// Session A armed a compact_context request and the worker settled it
+	// with a not-applied notice that the next request would surface.
+	a.armModelDrivenProposal("call-session-a", tools.CompactContextArgs{ActiveObjective: "compact session a"}, `{"active_objective":"compact session a"}`, "accepted by runtime validation")
+	a.pendingModelDrivenNotice = "Context checkpoint not applied: projected savings too small. The session continues on the previous context."
+
+	a.resetSessionRuntimeState()
+
+	if !a.modelDrivenProposal.isEmpty() {
+		t.Fatalf("model-driven proposal after session reset = %+v, want empty", a.modelDrivenProposal)
+	}
+	if a.pendingModelDrivenNotice != "" {
+		t.Fatalf("pending model-driven notice after session reset = %q, want empty", a.pendingModelDrivenNotice)
+	}
+}
+
 func TestResetSessionRuntimeStateKeepsServiceTier(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	client, _, _, _ := a.llmSnapshot()

@@ -696,6 +696,13 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 		return sessionRestoreResult{}
 	}
 
+	// Activation is a session boundary: model-driven checkpoint intent is
+	// session-scoped, so the replaced session's proposal lifecycle and any
+	// unconsumed one-shot notice must not leak into the loaded one. The
+	// proposal is re-populated below only when the loaded snapshot carries
+	// one (the frozen session already persisted its own).
+	a.modelDrivenProposal = modelDrivenProposalState{}
+	a.pendingModelDrivenNotice = ""
 	a.resetCacheRoutingState()
 	a.restoreCacheHitStats(loaded.UsageStats)
 	a.clearReductionCache(true)

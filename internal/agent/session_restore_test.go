@@ -1492,3 +1492,71 @@ func TestRecoverySnapshotPreservesModelDrivenProposal(t *testing.T) {
 		t.Fatalf("stage completion candidate = turn=%d pending=%v", snapshot.StageCompletionCandidateTurnID, snapshot.StageCompletionCandidatePending)
 	}
 }
+
+func TestActivateLoadedSessionDropsPreviousSessionModelDrivenState(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	// Session A armed a compact_context request and still owes the model a
+	// not-applied notice. Resume into B whose loaded snapshot carries no
+	// proposal: neither may leak across the boundary.
+	a.armModelDrivenProposal("call-session-a", tools.CompactContextArgs{ActiveObjective: "compact session a"}, `{"active_objective":"compact session a"}`, "accepted by runtime validation")
+	a.pendingModelDrivenNotice = "Context checkpoint not applied: projected savings too small. The session continues on the previous context."
+
+	a.activateLoadedSession(&loadedSessionState{SessionPath: a.sessionDir})
+
+	if !a.modelDrivenProposal.isEmpty() {
+		t.Fatalf("model-driven proposal after activating proposal-less session = %+v, want empty", a.modelDrivenProposal)
+	}
+	if a.pendingModelDrivenNotice != "" {
+		t.Fatalf("pending model-driven notice after activating proposal-less session = %q, want empty", a.pendingModelDrivenNotice)
+	}
+}
+
+func persistRestorableSessionWithUnappliedProposal(t *testing.T, sessionDir string) {
+	t.Helper()
+
+	rm := recovery.NewRecoveryManager(sessionDir)
+	if err := rm.PersistMessage("main", message.Message{Role: "user", Content: "hello"}); err != nil {
+		t.Fatalf("PersistMessage(user): %v", err)
+	}
+	if err := rm.PersistMessage("main", message.Message{Role: "assistant", Content: "world"}); err != nil {
+		t.Fatalf("PersistMessage(assistant): %v", err)
+	}
+	if err := rm.SaveSnapshot(&recovery.SessionSnapshot{
+		Todos: []recovery.TodoState{},
+		ModelDrivenProposal: &recovery.ModelDrivenProposalSnapshot{
+			RequestID: "call-session-b",
+			Status:    modelDrivenProposalAccepted,
+			ArgsJSON:  `{"active_objective":"preserve state"}`,
+			Reason:    "accepted by runtime validation",
+			UpdatedAt: time.Now(),
+		},
+	}); err != nil {
+		t.Fatalf("SaveSnapshot: %v", err)
+	}
+	rm.Close()
+}
+
+func TestHandleResumeCommandRestoresAcceptedProposalFromSnapshot(t *testing.T) {
+	projectRoot := t.TempDir()
+	sourceSessionDir := testProjectSessionDir(t, projectRoot, "123")
+	currentSessionDir := testProjectSessionDir(t, projectRoot, "999")
+
+	persistRestorableSessionWithUnappliedProposal(t, sourceSessionDir)
+
+	a := newTestMainAgentForRestore(t, projectRoot, currentSessionDir)
+	a.handleResumeCommand("123")
+
+	if a.modelDrivenProposal.isEmpty() {
+		t.Fatal("resumed session lost the snapshot's model-driven proposal")
+	}
+	if a.modelDrivenProposal.requestID != "call-session-b" || a.modelDrivenProposal.status != modelDrivenProposalAccepted {
+		t.Fatalf("resumed proposal metadata = request=%q status=%q, want request=call-session-b status=accepted", a.modelDrivenProposal.requestID, a.modelDrivenProposal.status)
+	}
+	if !strings.Contains(a.modelDrivenProposal.argsJSON, "preserve state") {
+		t.Fatalf("resumed proposal args = %q, want preserved audit copy", a.modelDrivenProposal.argsJSON)
+	}
+	if notice := a.pendingModelDrivenNotice; notice == "" || !strings.Contains(notice, "was not applied") {
+		t.Fatalf("pending recovery notice = %q, want a not-applied notice", notice)
+	}
+}
