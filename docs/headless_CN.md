@@ -123,7 +123,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 
 ### `role`
 
-查询或切换当前主角色——TUI Shift+Tab 的远程等价。`list` 返回当前角色与有序的 main-mode 角色列表（builder 恒第一、planner 若配置则第二、自定义角色按字母序）；`set` 切换角色并保留会话上下文，与 TUI 循环一致。
+查询或切换当前主角色——TUI Shift+Tab 的远程等价。`list` 返回当前角色与有序的主模式角色列表（builder 恒第一、planner 若配置则第二、自定义角色按字母序）；`set` 切换角色并保留会话上下文，与 TUI 循环一致。
 
 ```json
 {"type": "role", "action": "list"}

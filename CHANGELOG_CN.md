@@ -26,11 +26,13 @@
 - 角色名不再决定内置 prompt 块。此前名为 `planner.yaml` 的 agent 文件会静默获得规划块，现在只有 `prompt_preset: planning` 才会——无论角色叫什么。自定义的 `planner` 角色需要补上 `prompt_preset: planning` 才能保持原有 prompt；内置 `planner` 本身已显式声明，未改动过配置的安装不受影响。
 - `orchestration.waiting_main_min_wait_sec` 与 `waiting_main_max_wait_sec` 现在在配置加载时校验：最大值小于最小值会直接报启动错误并指出这两个值，而不是留下一对倒置的时钟、由先到者静默结束等待中的 worker。`orchestration.subagent_compact_usage` 落在 `0 < 值 <= 1` 之外时同样在加载时重置，使项目层继承合并后的全局值，而不是运行期回退到内置默认值。
 - 0.7.3 发布中的 `notify_peer`、`task_collect`、`task_group_create`、`save_result` 四个工具已删除。委派任务的结果仍由 runtime 自动送达——AGENT COMPLETE 卡片，以及按稳定 `task_id` 更新委派任务卡片的 mailbox 事件；协调继续使用未变的 `delegate`、`cancel`、`complete`、`escalate` 与 `notify` 工具，原本发给兄弟任务的通知改为经自己的 owner 中转（`notify` / `escalate`）。`save_result` 的用途并入 `save_artifact`：除 `filename` / `content` / `mode` 外，现在还可改用互斥的 `result_type` + `result` 参数对——`result` 必须是 JSON object——把载荷作为不可变、内容寻址的结果存入 `artifacts/results/`，返回的 ResultRef 可直接作为 `complete` 的 `result_ref` 传入。已有调用请按此迁移。
+- 0.7.3 随委派任务收尾引入的完成验证门已删除。`complete` 不再接受 `verification_run` 声明（此前需要声明一条命令，例如 `go test ./...`，运行时根据其记录的结果判断任务能否收尾），恢复会话也不再依据验证来源决定是否放行续跑；完成报告送达即收尾，不再附带验证步骤。验证证据仍按常规渠道传达——工具结果与完成摘要——已有的完成 prompt 和集成只需去掉这条声明。
 
 ### 新功能
 
-- headless 控制面现在可以查询和切换当前主角色——TUI Shift+Tab 的远程等价，gateway 想提供角色菜单时不再依赖 agent 发起 handoff。`role` 命令（`list` / `set`）用 `role_response` envelope 返回当前角色与有序的 main-mode 角色列表（builder 恒第一、planner 第二、自定义角色按字母序）；`status_response` 增加 `current_role` 字段；订阅方在每次成功切换后收到 `role_change` 事件。`set` 会拒绝未知角色、仅作为 SubAgent 定义存在的角色、已经是当前的角色，以及有待决 handoff 时的切换，拒绝原因通过 `message` 返回。TUI 里同一能力还多了一个 slash 入口：裸 `/role` 弹出角色选择对话框，`/role <name>` 直接切换，`/role status` 打印当前角色与可选角色；headless 的 `send` 会把裸 `/role` 映射为上述 `/role status` 文本，`/role <name>` 同样直接切换。
+- headless 控制面现在可以查询和切换当前主角色——TUI Shift+Tab 的远程等价，gateway 想提供角色菜单时不再依赖 agent 发起 handoff。`role` 命令（`list` / `set`）用 `role_response` envelope 返回当前角色与有序的主模式角色列表（builder 恒第一、planner 第二、自定义角色按字母序）；`status_response` 增加 `current_role` 字段；订阅方在每次成功切换后收到 `role_change` 事件。`set` 会拒绝未知角色、仅作为 SubAgent 定义存在的角色、已经是当前的角色，以及有待决 handoff 时的切换，拒绝原因通过 `message` 返回。TUI 里同一能力还多了一个 slash 入口：裸 `/role` 弹出角色选择对话框，`/role <name>` 直接切换，`/role status` 打印当前角色与可选角色；headless 的 `send` 会把裸 `/role` 映射为上述 `/role status` 文本，`/role <name>` 同样直接切换。
 - 定向 `notify` 现在可以恢复失败的 worker。失败的任务此前根本无法继续——恢复策略指向一个没有任何实现的显式恢复动作——所以唯一的补救是把同样的工作委派给一个全新的 worker，让它重新摸索上下文，哪怕失败发生在收尾调用、已完成的交付物就躺在失败 worker 自己的历史里。现在它会带着那份历史回来并开始新的 attempt；被取消的任务仍不可恢复——取消记录的是一个决定，消息不得静默推翻它——需要重做时请重新委派。
+- 已结束的委派任务在 worker 停止后仍可查看：聚焦该任务能看到它的 transcript 与其间的通知；任何继续、回复或改动已完成任务的动作都会被拒绝——需要继续推进时请重新委派。
 - Agent 配置现在可以按能力而非角色名选择内置角色 prompt 块，并在其基础上追加而非整块替换。`prompt_preset: planning` 让任意名称的角色都能获得内置规划块（计划文档命名与格式、直接回答与产出计划的判断、handoff 时序、计划质量要求），该块的措辞会随角色实际可见的工具自适应；同时它会抑制与规划工作流自带调查提纲重复的 bug triage 块。`prompt_preset: none` 表示不要内置块，名为 `planner` 的角色可借此显式退出。`prompt_append` 追加在最终生效的角色 prompt 之后，使角色能在不接管整块维护责任的前提下补充项目约定 —— `prompt` / `system_prompt` 仍是整块替换。省略 `prompt_preset` 时保持原有的按名判定（名为 `planner` 的角色获得规划块，其他名称不获得），已有 agent 文件行为不变；填写未知值会直接报配置错误，而不是静默得到空 prompt。详见 [Agent 配置](./docs/configuration_CN.md#agent-配置)。
 - 折叠态的 `spawn` 卡片现在在结果摘要里直接显示进程 ID（`↳ Started · svc-64`），不再只有一个 `Started`。该 ID 是后续 `spawn_status` / `spawn_stop` 调用的句柄，现在无需展开卡片即可读到。`spawn_stop` 仍保持简洁的 `Stopped` 标签，因为它的 ID 是入参、标题栏已经显示了。
 - 压缩阈值现在可以按模型调，压力提醒线可配置。模型定义或 `model_templates` 条目可带 `compaction` 块（`threshold` 与/或 `reminder`）；未设字段继承全局 `context.compaction`（该模型 `threshold: 0` 只对模型禁用自动压缩；`context.compaction.reminder` 设全局提醒线，`0` 表示按 `min(0.60, threshold×0.90)` 派生；`reminder: -1` 只关闭压力提醒、自动压缩保持开启）。低于 threshold 的 reminder 在 usage 到达 `min(reminder, threshold)`（任一先到）时触发；reminder 等于或高于 threshold 时不单独触发——usage 只会在已经越线的请求上到达这条线，那些请求本来会带宽限提示或外化提示。threshold 越线即启动自动压缩——它在后台异步运行、在下一个安全 continuation boundary 应用。启用 `model_driven` 时，窗口内首次越线改为把启动推迟两个主模型请求：推迟期间的每个请求都附带 "compaction imminent" 提示并写真实剩余轮数（越线请求写还有 2 个请求、最后一轮写 1 个）；压力提醒在 usage 高于提醒线期间也会随每个请求重新附着——每窗口完整文案一次，之后只带一行指回原文的短文案——模型在本窗口调用过 `compact_context`（无论收口结果）、usage 回落线下，或发生 durable apply / 会话切换 / 恢复 / 模型切换开启新窗口后停止。真正启动压缩的那次请求才携带一次性外化提示（仅 `model_driven` 启用时注入；宽限期在 usage 达到可用预算的 95% 时跳过，model-driven checkpoint 请求收口但未应用时提前结束）。自动压缩运行中或等待应用时，模型仍可提交 `compact_context`——模型 checkpoint 优先，runtime 会丢弃自动 draft。切换模型会套用该模型的覆盖并开启新的提醒窗口。TUI 的上下文用量显示（侧边栏 Context 数值与进度条、状态栏百分比 pill）用同两条线取色：reminder 以下绿色，reminder 到 threshold 之间橙/黄，达到 threshold 红色；模型切换使阈值变化时颜色随即更新，不用等下一次请求。详见[上下文压缩](./docs/context-management_CN.md#上下文压缩compaction)。
@@ -123,7 +125,7 @@
 
 - 恢复会话时保留委派任务最近一次续跑的状态和已保存结果，不再让较早的子代理快照把任务退回先前的执行轮次。
 - `notify` 只向当前角色展示可用字段，并拒绝仅能向上级汇报的角色发送定向回复。请求回复必须带 `correlation_id`，不接受 `subtype` 或 `payload`，工具参数说明不再引导模型发出无法投递的调用。
-- 收尾调用误用了可选结果字段的委派任务不再被销毁。`complete` 的 `result_type` 需要与 `result` 或 `result_ref` 成对出现，此前只提供其中一侧会在一次纠正机会用尽后直接结束任务——为了一小块可选元数据，丢掉摘要、修改文件清单以及其他所有已校验字段。纠正预算用尽后，现在只丢弃这一组字段，完成信息带着其余交付内容正常收口，并把这次丢弃记为一条遗留限制。其他各类拒绝仍然会让任务失败，验证声明也绝不降级：没有实际支撑的 `verification_run` 依然失败，并会把验证缺口报告为原因。拒绝消息还会指明这些字段所在的位置——worker 曾把 `result_type` 嵌进 `result` 里来回应「result_type is required」，于是同一处校验连续失败两次——并说明不携带机器可读结果的完成该如何显式声明。
+- 收尾调用误用了可选结果字段的委派任务不再被销毁。`complete` 的 `result_type` 需要与 `result` 或 `result_ref` 成对出现，此前只提供其中一侧会在一次纠正机会用尽后直接结束任务——为了一小块可选元数据，丢掉摘要、修改文件清单以及其他所有已校验字段。纠正预算用尽后，现在只丢弃这一组字段，完成信息带着其余交付内容正常收口，并把这次丢弃记为一条遗留限制。其他各类拒绝仍然会让任务失败。拒绝消息还会指明这些字段所在的位置——worker 曾把 `result_type` 嵌进 `result` 里来回应「result_type is required」，于是同一处校验连续失败两次——并说明不携带机器可读结果的完成该如何显式声明。
 - 状态栏中聚焦 worker 的 token 与费用读数不再在它 park 时跳变。运行中的 worker 按 runtime 实例计费，park 后的却按任务的实例历史求和，于是一个进入第二次 attempt 的任务会隐藏它此前的 attempt，直到它停止运行的那一刻；现在两侧都按任务求和。token 总数此前还来自两个对「输入侧是否包含缓存前缀」看法不一致的累加器（provider 上报原始 input 字段的口径各不相同，只有用量账本会归一化），因此状态栏现在对所有 agent 都读账本——与它旁边的费用胶囊和用量面板同一口径。
 - SubAgent 现在被明确告知只有 `complete` 调用会到达它的 owner。缺少这条说明时，worker 会把交付内容写两遍——一遍是 assistant 正文，一遍是调用参数——而被读取的始终只有那个调用。
 - 侧边栏的 `AGENTS` 区块不再把长列表折叠成一行 `+N more`：info panel 本身支持滚动，所以侧边栏跟踪到的每个 agent 都会渲染出来、滚动即可查看。此前 agent 超过 10 个时尾部会被整个丢弃，一旦排在前面的已完成条目足够多，仍在运行的 worker 就可能被隐藏起来。agent 数量在上游由 `delegation.max_children` 约束，因此展开后的列表仍在面板滚动可覆盖的范围内。
@@ -171,7 +173,7 @@
 - 环境信息与 AGENTS.md 会话指引现在会出现在 MainAgent 和 SubAgent 的每次请求中；压缩或恢复会话后仍然保留，同时不会反复让 prompt cache 失效。
 - 普通代码审查请求不再触发面向故障排查的 bug 分析工作流。
 - planner 不再把每个请求都变成一轮规划。只读审查与直接提问会被直接回答，不再强制产出 plan 文件与 Handoff 调用；被拒绝的 Handoff 改为修订既有的 plan 文件，而不是新建一个 plan 编号。
-- SubAgent 的自动恢复请求不再被排队的用户输入静默取消。当模型只返回纯文本、流被瞬时传输错误截断、或完成被验证拒绝时，Chord 会发出一次有上限的恢复请求；但此前该请求发出时"请求进行中"的闸门已被清空，事件循环因此把该 SubAgent 视为空闲：它可能取走排队中的用户消息并开启新回合（新回合会取消这次恢复请求），或者直接把该 SubAgent 挂起。现在这些恢复路径会在发出请求前重新置位该闸门，与既有的上下文超长恢复路径保持一致；同时也避免了模型池切换因漏判而在请求中途替换 LLM 客户端。
+- SubAgent 的自动恢复请求不再被排队的用户输入静默取消。当模型只返回纯文本、流被瞬时传输错误截断、或完成因参数无效被拒绝时，Chord 会发出一次有上限的恢复请求；但此前该请求发出时"请求进行中"的闸门已被清空，事件循环因此把该 SubAgent 视为空闲：它可能取走排队中的用户消息并开启新回合（新回合会取消这次恢复请求），或者直接把该 SubAgent 挂起。现在这些恢复路径会在发出请求前重新置位该闸门，与既有的上下文超长恢复路径保持一致；同时也避免了模型池切换因漏判而在请求中途替换 LLM 客户端。
 - TUI 里的工具调用头部在窄终端下被截断时，不再丢掉工具名的颜色。原先的兜底截断会一并抹掉所有 ANSI 转义（包括工具名的蓝紫色加粗样式），于是头部超出卡片宽度的工具——最常见的是 MCP 工具（`mcp_*`），名字本身长、再加上参数摘要后几乎必然超出——会退化成终端默认色，而名字较短的内置工具颜色正常，看起来就像两类工具名颜色不一致。现在头部截断改用 ANSI-aware 截断，保留工具名的颜色和加粗，任意宽度下每个工具名（无论 MCP 还是内置）都是蓝紫色加粗。
 - 当输出上限在模型产出任何内容之前就被触及时，回合不再静默结束。推理可能耗尽整个输出预算，使响应既没有工具调用也没有可见文本；而既有的截断恢复机制只在存在畸形工具调用时才会介入，因此这种形态会落到普通的"无工具调用，转入空闲"路径——没有警告、没有错误、界面上也没有任何内容，整段记录在一张 thinking 卡片之后就停住了。现在 Chord 会用一条引导模型立即行动（而非继续推理）的恢复提示重试这种响应，重试次数受既有的两次上限约束；若反复触及上限则报告明确的错误。这种形态不会尝试自动压缩，因为原因是输出预算而非输入过大。若被截断的响应确实带有文本，则保留这段部分回复，并提示它并不完整。
 - 空闲终端通知不再播报用户已经读过的内容。此前通知文案会向前查找最近的 assistant 或 error 卡片，因此当某个回合的回复始终没有出现时（例如上述输出上限截断），播报的是同一回合中更早的过程叙述——往往是一句以冒号结尾的话，读起来像"仍在进行"，而不是"已停下，等你"。现在查找会在工具卡片和用户卡片处停止，当回合没有产生属于自己的回复时退回到中性的就绪文案。
@@ -180,7 +182,6 @@
 - 上下文剪裁生成的搜索摘要不再静默丢失省略元数据。此前当所有文件分组都放进了渲染列表、但末尾的"其余行已省略"标记超出字节预算时，该标记会直接消失，摘要看起来像是完整的；现在会回收已渲染的分组为标记腾出空间，摘要始终报告省略了多少文件、匹配和其余行。
 - 上下文剪裁的重复调用匹配现在只信任明确成功的结果：失败的尝试不再掩盖同一调用此前的成功运行，大整数参数在归一化过程中保持精确身份。
 - 每一种任务终态转移现在都经由同一 journal 路径结算：取消、过期与停止的任务都会留下一致的持久化 settlement，而不是仅翻转记录状态。
-- 验证声明不再因 epoch 间隙被拒绝：最新声明的命令必须覆盖当前 workspace epoch，较早声明的命令则可以来自更早的 epoch。这样既继续阻止过期验证，又不会误拒绝 lint 加 test 这类真实的多命令声明。
 - 流事件的回放拒绝现在以事件实际携带的 status 为准：没有显式 HTTP status 的 SSE 事件保持可重试而不被猜测为终态，携带真实 status 的 WebSocket 帧按其分类。
 - 不带工具标记的请求不再发送只对带工具请求有意义的字段。Chat-completions 请求在未声明工具时省略 `parallel_tool_calls` 与 `tool_choice`，Anthropic messages、Gemini generateContent 与普通 Responses 生成请求也相应省略 `tool_choice` / `toolConfig` / `parallel_tool_calls`；原生 Codex 压缩请求继续遵循专用 wire contract。OpenAI 兼容端点在未提供 `tools` 时收到 `parallel_tool_calls` 会返回 HTTP 400，导致 `chord doctor models --model ...` 这类无工具的探测请求失败。
 - 协调用 JSON（agent 请求、任务组、settlement）在 rename 前会 fsync；恢复时遇到损坏文件会隔离并重建，而不是中止恢复或向坏文件续写。
@@ -231,12 +232,12 @@
 - 首次运行的配置向导现在写入当前的 Codex 模型额度。GPT-6 Astra、GPT-5.4 与 GPT-5.6 Sol / Terra / Luna 改为 `1050000 / 922000 / 128000`，不再是较老的 `400000 / 272000` 档（以及 GPT-5.4 那个已过时的 `950000` 输入上限），与[模型配置示例](./docs/model-configs_CN.md#codex-oauth-preset)一致。GPT-5.5、GPT-5.2 与 GPT-5.3-codex 保持 `400000 / 272000 / 128000`。
 
 - `chord import codex --id <id>` 现在能解析 `codex resume` 退出时打印的那个 id。Codex 会话如果派生过 fork 或 sub-agent thread，会留下另一个 rollout 文件，里面的记录仍写着父 session 的 id，导入这个 id 时就会匹配到两个文件并报 "multiple files matched"。现在按 Codex 自己解析 `codex resume <id>` 所用的 thread id 来识别 rollout，派生过子线程的会话可以直接用 id 导入，不必再手动指定文件路径。
-- SubAgent 的 mailbox 队列状态现在在所有内存路径上都由同一把锁串行保护，此前绕过锁的访问也已收口。两个事件同时操作同一个 mailbox 时——投递与并发重建竞速，或结算 claim 落在另一事件正在改写同一队列之际——不再可能交错执行未同步的写入，也就不会丢消息、重复或乱序；队列状态现在按单一顺序推进。
+- 两个事件同时操作同一个 SubAgent mailbox 时——投递与并发重建竞速，或结算 claim 落在另一事件正在改写同一队列之际——此前可能丢消息、重复或乱序。现在队列状态在所有内存路径上都由同一把锁串行推进，绕过该锁的访问已经收口，交错执行未同步写入的情况不再可能发生。
 - 通知送达时，如果目标 SubAgent 的任务已经结算（完成、失败或取消），该通知会被丢弃，不再把已结算的任务翻回运行态。持久化的终态会先结算运行时，排队或迟到的通知在之后才派发，复活任务就会绕过复用终态任务所必需的显式新尝试机制；parked 或空闲的 worker 仍照常被通知唤醒。
 - 恢复会话时不再重复投递已经进过主 transcript 的 mailbox 消息。报告在回合派发时就被追加进主对话，但消费确认要到回合结束才写入，因此崩溃落在这个窗口内时，恢复后会把同一份报告再投一遍，主 agent 会对已经看过并处理过的结果再处理一次。现在恢复把「未确认但已入 transcript」的消息视为已投递，至少一次投递的窗口以持久 transcript 为终点。
-- SubAgent 的 mailbox 投递与并发进行的 mailbox 日志压缩或恢复竞速时，不再让消息一直不可见直到下次重启。把持久化 mailbox 消息导回 inbox 的 spool 索引现在按写代次发布，读日志期间才追加的写入不会再让旧快照被当成最新状态——快照之后落盘的写入会自行注册兜底。
-- 上下文压缩归档承载消息的 transcript 行时，不再静默丢弃未投递的 SubAgent mailbox 通知。主 agent 已经看过的通知会在行被销毁前结算（补写消费确认）；从未呈现给模型的通知会在 checkpoint 提交后重新入队投递——于是 worker 的更新不会因为压缩恰好落在「投递完成、确认未写」之间而随它唯一的投递证据一起丢失。
-- 你发给委派 worker 的定向 `notify` 现在会带着路由元数据持久化，重启或切换会话后还原成同样的状态卡片，与 worker 回报 owner 的消息原有还原方式对齐。已结束的任务在运行时消失后也可只读访问：聚焦它能看到 transcript 与其间的通知，任何继续、回复或改动该任务的动作都会被拒绝。
+- SubAgent 的 mailbox 消息若在日志压缩或恢复重建期间落盘，此前会一直不可见，直到下次重启才被投递。把持久化消息导回 inbox 的索引现在按写代次发布，重建期间才追加的写入不会再被当作不存在——旧快照会被丢弃重做，快照之后落盘的写入会自行注册兜底。
+- 未投递的 SubAgent mailbox 通知不再因为上下文压缩归档了承载它的 transcript 行而消失。主 agent 已经看过的通知会在行被销毁前结算（补写消费确认）；从未呈现给模型的通知会在 checkpoint 提交后重新入队投递——worker 的更新因此不会在「投递完成、确认未写」之际被压缩恰好击中，随它唯一的投递证据一起丢失。
+- 你发给委派 worker 的定向 `notify` 现在会带着路由元数据持久化，重启或切换会话后还原成同样的状态卡片，与 worker 回报 owner 的消息原有还原方式对齐。
 
 ## 0.7.3 - 2026-08-08
 
