@@ -1437,6 +1437,20 @@ func (a *MainAgent) switchRole(roleName string, clearHistory bool) error {
 		return fmt.Errorf("unknown role %q", roleName)
 	}
 
+	// Resolve and validate the role's model before committing any role state,
+	// so a model failure leaves the agent fully unchanged (role, history, and
+	// model policy) instead of half-switched with an error. The prepared model
+	// is installed only after the role state is committed below; installing
+	// cannot fail, so the role and its model always change together.
+	var prepared *preparedMainModel
+	if nextRef := a.defaultRoleModelRef(cfg); nextRef != "" {
+		var err error
+		prepared, err = a.prepareMainModel(nextRef)
+		if err != nil {
+			return fmt.Errorf("apply role %q model %q: %w", roleName, nextRef, err)
+		}
+	}
+
 	a.stateMu.Lock()
 	a.activeConfig = cfg
 	a.stateMu.Unlock()
@@ -1456,16 +1470,12 @@ func (a *MainAgent) switchRole(roleName string, clearHistory bool) error {
 		a.clearEvidenceCandidates()
 	}
 
-	appliedModel := false
-	if nextRef := a.defaultRoleModelRef(cfg); nextRef != "" {
-		if err := a.applyRoleModelRef(nextRef); err != nil {
-			return fmt.Errorf("apply role %q model %q: %w", roleName, nextRef, err)
-		}
-		appliedModel = true
+	if prepared != nil {
+		a.installPreparedMainModel(prepared)
 	}
 
 	// Keep a lazy rebuild fallback when the role has no explicit model list.
-	a.mainModelPolicyDirty.Store(!appliedModel)
+	a.mainModelPolicyDirty.Store(prepared == nil)
 
 	log.Infof("switched MainAgent role role=%v clear_history=%v model_ref=%v", roleName, clearHistory, a.ProviderModelRef())
 	// Persist the active role immediately so a later resume/startup restore does
@@ -1506,19 +1516,6 @@ func (a *MainAgent) defaultRoleModelRef(cfg *config.AgentConfig) string {
 		return ref + "@" + variant
 	}
 	return ref
-}
-
-func (a *MainAgent) applyRoleModelRef(providerModel string) error {
-	providerModel = strings.TrimSpace(providerModel)
-	if providerModel == "" {
-		return nil
-	}
-	// Role switches should refresh the active/running model for the UI, but they
-	// should not surface the generic manual-model-switch toast.
-	if err := a.switchModel(providerModel, false); err != nil {
-		return err
-	}
-	return nil
 }
 
 // ProxyInUseForRef reports whether the given provider/model ref uses a proxy.

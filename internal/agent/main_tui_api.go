@@ -350,8 +350,10 @@ func (a *MainAgent) SetAgentConfigs(configs map[string]*config.AgentConfig) {
 		log.Debugf("agent configs installed count=%v names=%v", len(configs), names)
 	}
 
-	// Cache the available subagents using the initial role selection.
-	// agentConfigs is immutable after this point; subsequent role changes call rebuildCachedSubAgents.
+	// The cached sub-agent list derives only from agentConfigs, which is
+	// replaced exclusively here. Per-role filtering (delegate permissions and
+	// the active-role exclusion) happens lazily at read time against this
+	// cache, so later role switches do not need to rebuild it.
 	a.rebuildCachedSubAgents()
 
 	// Rebuild active-role state after configs install or refresh.

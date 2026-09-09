@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -1332,6 +1333,45 @@ func TestSwitchRoleEmitsRoleChangedEvent(t *testing.T) {
 				t.Fatalf("CurrentRole = %q, want executor", got)
 			}
 			return
+		}
+	}
+}
+
+func TestSwitchRoleModelApplyFailureLeavesRoleUntouched(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.SetAgentConfigs(map[string]*config.AgentConfig{
+		"builder":  {Name: "builder", Mode: config.AgentModeMain, Models: map[string][]string{"default": {"build/one"}}},
+		"executor": {Name: "executor", Mode: config.AgentModeMain, Models: map[string][]string{"default": {"exec/one"}}},
+	})
+	a.SetProviderModelRef("build/one")
+	a.llmMu.Lock()
+	a.runningModelRef = "build/one"
+	a.llmMu.Unlock()
+
+	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+		return nil, "", 0, fmt.Errorf("model %q unavailable", providerModel)
+	})
+
+	err := a.SwitchRole("executor")
+	if err == nil || !strings.Contains(err.Error(), `apply role "executor" model "exec/one"`) {
+		t.Fatalf("SwitchRole error = %v, want apply role executor model exec/one failure", err)
+	}
+	if got := a.CurrentRole(); got != "builder" {
+		t.Fatalf("CurrentRole = %q, want builder (unchanged after failed role model apply)", got)
+	}
+	if got := a.ProviderModelRef(); got != "build/one" {
+		t.Fatalf("ProviderModelRef = %q, want build/one", got)
+	}
+	if got := a.RunningModelRef(); got != "build/one" {
+		t.Fatalf("RunningModelRef = %q, want build/one", got)
+	}
+	for _, evt := range drainAgentEvents(a.outputCh) {
+		switch evt.(type) {
+		case RoleChangedEvent:
+			t.Fatal("RoleChangedEvent emitted for a failed role model apply")
+		case RunningModelChangedEvent:
+			t.Fatal("RunningModelChangedEvent emitted for a failed role model apply")
 		}
 	}
 }
