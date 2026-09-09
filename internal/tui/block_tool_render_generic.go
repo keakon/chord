@@ -38,11 +38,11 @@ func renderCommandBlock(title string, lines []string, contentWidth int) []string
 	}
 	out := make([]string, 0, len(lines)+1)
 	// Section headers carry the "↳" marker everywhere else in the card set.
-	out = append(out, DimStyle.Render("  ↳ "+title+":"))
+	out = append(out, toolFieldSection(DimStyle, title))
 	for _, line := range lines {
 		line = sanitizeToolDisplayText(line)
 		for _, w := range wrapIndentedText(line, contentWidth) {
-			out = append(out, DimStyle.Render("    "+w))
+			out = append(out, toolFieldBody(DimStyle, w))
 		}
 	}
 	return out
@@ -140,7 +140,7 @@ func appendBashExpandedResult(result *[]string, b *Block, contentWidth int) {
 	exitLabel := bashExpandedExitLine(b)
 	if exitLabel != "" {
 		for _, wrapped := range wrapIndentedText(exitLabel, contentWidth) {
-			*result = append(*result, DimStyle.Render("  ↳ "+wrapped))
+			*result = append(*result, toolFieldMarker(DimStyle, wrapped))
 		}
 	}
 	// The runtime hands the card one merged stream, so the body is labelled
@@ -148,11 +148,11 @@ func appendBashExpandedResult(result *[]string, b *Block, contentWidth int) {
 	// failing command that writes its diagnostics to stdout (go test, most
 	// build tools) was previously mislabelled as stderr.
 	if failed != "" {
-		*result = append(*result, ErrorStyle.Render("  ↳ Output:"))
+		*result = append(*result, toolFieldSection(ErrorStyle, "Output"))
 		appendStyledWrappedBody(result, ErrorStyle, "    ", failed, contentWidth)
 	}
 	if output != "" {
-		*result = append(*result, ToolResultExpandedStyle.Render("  ↳ Output:"))
+		*result = append(*result, toolFieldSection(ToolResultExpandedStyle, "Output"))
 		appendStyledWrappedBody(result, ToolResultExpandedStyle, "    ", output, contentWidth)
 	}
 }
@@ -235,13 +235,13 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 
 		if b.DoneSummary != "" {
 			summary := truncateOneLine(sanitizeToolDisplayText(b.DoneSummary), cardWidth-26)
-			result = append(result, ToolResultStyle.Render(fmt.Sprintf("  ↳ ✓ %s", summary)))
+			result = append(result, toolFieldMarker(ToolResultStyle, "✓ "+summary))
 		} else if kind := toolOutcomeKindOf(b); kind != toolOutcomeNone {
 			appendToolOutcomeBody(&result, kind, toolDisplayResultContent(b), contentWidth, false)
 		} else if b.ResultContent != "" {
 			displayResult := sanitizeToolDisplayText(toolCollapsedResultContent(b.ToolName, toolDisplayResultContent(b)))
 			summary := truncateOneLine(displayResult, cardWidth-26)
-			result = append(result, ToolResultStyle.Render(fmt.Sprintf("  ↳ %s", summary)))
+			result = append(result, toolFieldMarker(ToolResultStyle, summary))
 		}
 	} else {
 		prefix := b.renderToolPrefix(spinnerFrame)
@@ -278,7 +278,7 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 			}
 		}
 		if b.DoneSummary != "" {
-			result = append(result, ToolResultExpandedStyle.Render("  ↳ Completed:"))
+			result = append(result, toolFieldSection(ToolResultExpandedStyle, "Completed"))
 			for _, line := range wrapText(sanitizeToolDisplayText(b.DoneSummary), contentWidth) {
 				result = append(result, DimStyle.Render("    "+line))
 			}
@@ -328,7 +328,7 @@ func (b *Block) renderDoneCall(width int, spinnerFrame string) []string {
 			// A rejection is not a schema error: keep its own label, but on
 			// the shared "↳ Label:" shape.
 			separate()
-			result = append(result, ErrorStyle.Render("  ↳ Rejected:"))
+			result = append(result, toolFieldSection(ErrorStyle, "Rejected"))
 			for _, line := range wrapText(sanitizeToolDisplayText(doneRejectedReason(statusText)), contentWidth) {
 				result = append(result, ErrorStyle.Render("    "+line))
 			}
@@ -339,7 +339,7 @@ func (b *Block) renderDoneCall(width int, spinnerFrame string) []string {
 			appendToolOutcome(&result, b, contentWidth, true)
 		default:
 			separate()
-			result = append(result, ToolResultExpandedStyle.Render("  ↳ Status:"))
+			result = append(result, toolFieldSection(ToolResultExpandedStyle, "Status"))
 			for _, line := range wrapText(sanitizeToolDisplayText(statusText), contentWidth) {
 				result = append(result, DimStyle.Render("    "+line))
 			}
@@ -428,7 +428,7 @@ func (b *Block) renderProseControlCall(width int, spinnerFrame string) []string 
 			if len(values) == 0 {
 				return
 			}
-			result = append(result, "", ToolResultExpandedStyle.Render("  ↳ "+label+":"))
+			result = append(result, "", toolFieldSection(ToolResultExpandedStyle, label))
 			for _, value := range values {
 				for i, line := range wrapText(sanitizeToolDisplayText(value), contentWidth-2) {
 					bullet := "  "
@@ -568,7 +568,7 @@ func (b *Block) renderCompactContextCall(width int, spinnerFrame string) []strin
 		if display == "" {
 			break
 		}
-		result = append(result, "", ToolResultExpandedStyle.Render("  ↳ Result:"))
+		result = append(result, "", toolFieldSection(ToolResultExpandedStyle, "Result"))
 		for _, line := range wrapText(sanitizeToolDisplayText(display), contentWidth) {
 			result = append(result, DimStyle.Render("    "+line))
 		}
@@ -591,7 +591,7 @@ func appendGenericToolArgSections(result *[]string, keys []string, vals map[stri
 		if label == "" {
 			continue
 		}
-		*result = append(*result, ToolResultExpandedStyle.Render("  ↳ "+label+":"))
+		*result = append(*result, toolFieldSection(ToolResultExpandedStyle, label))
 		if items, isList := genericToolArgList(value); isList {
 			for _, item := range items {
 				for i, line := range wrapText(sanitizeToolDisplayText(item), contentWidth-2) {
@@ -626,10 +626,10 @@ func appendCompactContextSections(result *[]string, sections []compactContextDis
 		if wrote {
 			*result = append(*result, "")
 		}
-		*result = append(*result, ToolResultExpandedStyle.Render("  ↳ "+sec.label+":"))
+		*result = append(*result, toolFieldSection(ToolResultExpandedStyle, sec.label))
 		if prose != "" {
 			for _, line := range wrapText(sanitizeToolDisplayText(prose), contentWidth) {
-				*result = append(*result, DimStyle.Render("    "+line))
+				*result = append(*result, toolFieldBody(DimStyle, line))
 			}
 		} else {
 			for _, value := range values {
@@ -682,7 +682,7 @@ func appendCompactContextRawArgs(result *[]string, argsJSON string, contentWidth
 		hidden = len(lines) - compactContextRawArgMaxLines
 		lines = lines[:compactContextRawArgMaxLines]
 	}
-	*result = append(*result, ToolResultExpandedStyle.Render("  ↳ Arguments:"))
+	*result = append(*result, toolFieldSection(ToolResultExpandedStyle, "Arguments"))
 	for _, line := range lines {
 		*result = append(*result, DimStyle.Render("    "+line))
 	}
@@ -951,7 +951,7 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 			// argument sections above it, it needs its own header or it reads
 			// as part of the last section.
 			if strings.TrimSpace(toolDisplayResultContent(b)) != "" && toolOutcomeKindOf(b) == toolOutcomeNone {
-				result = append(result, ToolResultExpandedStyle.Render("  ↳ Result:"))
+				result = append(result, toolFieldSection(ToolResultExpandedStyle, "Result"))
 			}
 		}
 	} else if mainPart == "" && paramSummary == "" && len(keys) > 0 {
@@ -981,7 +981,7 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 		}
 		if strings.TrimSpace(b.DoneSummary) != "" {
 			if expanded {
-				result = append(result, ToolResultExpandedStyle.Render("  ↳ Completed:"))
+				result = append(result, toolFieldSection(ToolResultExpandedStyle, "Completed"))
 				for _, line := range toolExpandedTextLines(sanitizeToolDisplayText(b.DoneSummary), contentWidth) {
 					result = append(result, "    "+line)
 				}
@@ -1340,23 +1340,26 @@ func (b *Block) renderToolResult(width int) []string {
 		b.appendImagePreviewLines(&body, contentWidth, toolCardBg, style.GetPaddingTop(), len(body) > 0)
 		return b.renderToolCardWithIgnoredArgs(style, cardWidth, toolCardTitle("TOOL RESULT", b.displayLabelID()), body, toolCardBg, railANSISeq("tool", b.Focused))
 	}
-	renderHeader := func(s string) string { return ToolResultExpandedStyle.Render(s) }
+	headerStyle := ToolResultExpandedStyle
 	renderBody := func(s string) string { return s }
 	if b.IsError || b.toolResultIsError() {
-		renderHeader = func(s string) string { return ErrorStyle.Render(s) }
+		headerStyle = ErrorStyle
 		renderBody = func(s string) string { return ErrorStyle.Render(s) }
 	}
 	if b.RecoveryState == message.ToolRecoveryStateOutcomeUnknown {
-		renderHeader = func(s string) string { return LSPWarnStyle.Render(s) }
+		headerStyle = LSPWarnStyle
 	}
-	headerPrefix := "  ↳ Result from"
+	// The recovery card names the tool it is reporting on, so the label is the
+	// whole row and the tool name stays part of it rather than trailing after a
+	// hand-built "↳ " prefix.
+	headerLabel := "Result from " + b.ToolName
 	if b.toolResultIsCancelled() {
-		headerPrefix = "  ↳ Cancelled"
+		headerLabel = "Cancelled " + b.ToolName
 	}
 	if b.RecoveryState == message.ToolRecoveryStateOutcomeUnknown {
-		headerPrefix = "  ↳ Result unknown"
+		headerLabel = "Result unknown " + b.ToolName
 	}
-	header := renderHeader(fmt.Sprintf("%s %s:", headerPrefix, b.ToolName))
+	header := toolFieldSection(headerStyle, headerLabel)
 	result := []string{header}
 	for _, line := range wrapText(sanitizeToolDisplayText(b.Content), contentWidth) {
 		result = append(result, "    "+renderBody(line))

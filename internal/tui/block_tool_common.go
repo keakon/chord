@@ -199,7 +199,7 @@ func appendCollapsedSummaryLines(result *[]string, summary string, width int, st
 	if oneLine == "" {
 		return
 	}
-	*result = append(*result, style.Render("  ↳ "+oneLine))
+	*result = append(*result, toolFieldMarker(style, oneLine))
 }
 
 // toolHeaderProseSummary folds a prose argument into the one line a header can
@@ -262,11 +262,91 @@ func toolExpandedResultLines(displayResult string, width int, expanded bool) ([]
 	return out, 0
 }
 
+// Field rows are the one shape every tool card shares, so the ~15 renderers
+// stop drifting apart — the same treatment appendToolOutcomeBody gives the
+// failure surface. A row carries three visual levels:
+//
+//	↳        connector — quiet; says "this row is a child of the header"
+//	Label:   label     — bold; says what the row is
+//	value    value     — plain; the content itself
+//
+// Hand-rolled as literals these three levels drifted: some rows lost the
+// connector, some lost the colon, and the label never gained emphasis over
+// its own value, which is why a card read as one flat block of grey.
+const (
+	toolFieldConnector  = "↳ "
+	toolFieldLead       = "  "
+	toolFieldBodyIndent = toolResultIndent
+)
+
+// toolFieldLabel renders the emphasised "Label:" half of a field row. It keeps
+// the caller's foreground — an error row stays red — and adds the weight that
+// separates it from the value it introduces.
+func toolFieldLabel(style lipgloss.Style, label string) string {
+	return style.Bold(true).Render(label + ":")
+}
+
+// toolFieldSection renders a labelled row whose content follows on later
+// lines: "  ↳ Message:".
+func toolFieldSection(style lipgloss.Style, label string) string {
+	return toolFieldLead + ToolFieldConnectorStyle.Render(toolFieldConnector) + toolFieldLabel(style, label)
+}
+
+// toolFieldInline renders a labelled row whose value shares the line:
+// "  ↳ Kind: progress". An empty value degrades to a section row instead of
+// printing a dangling colon. Callers sanitize value themselves.
+func toolFieldInline(style lipgloss.Style, label, value string) string {
+	if value == "" {
+		return toolFieldSection(style, label)
+	}
+	return toolFieldLead + ToolFieldConnectorStyle.Render(toolFieldConnector) +
+		toolFieldLabel(style, label) + " " + style.Render(value)
+}
+
+// toolFieldNestedInline renders a field row one level in, under a section:
+// "    ↳ status: delivered". The indent alone cannot carry the distinction —
+// a section's own body lines sit at the same indent — so the connector comes
+// along and marks the row as a field rather than as content.
+func toolFieldNestedInline(style lipgloss.Style, label, value string) string {
+	if value == "" {
+		return toolFieldBodyIndent + ToolFieldConnectorStyle.Render(toolFieldConnector) + toolFieldLabel(style, label)
+	}
+	return toolFieldBodyIndent + ToolFieldConnectorStyle.Render(toolFieldConnector) +
+		toolFieldLabel(style, label) + " " + style.Render(value)
+}
+
+// toolFieldMarker renders a row that opens with a mark rather than a label —
+// an exit line, a headline, a "✓". It exists so every connector in the card
+// set comes from one place: a marker is not a field, but it still hangs off
+// the header and must not invent a colon to say so.
+func toolFieldMarker(style lipgloss.Style, text string) string {
+	return toolFieldLead + ToolFieldConnectorStyle.Render(toolFieldConnector) + style.Render(text)
+}
+
+// toolFieldStandalone renders a row that is its own content and takes no
+// value: "  ↳ Cancelled". Outcomes ("Cancelled", "No changes") and the status
+// of a finished call stand alone, so a colon would promise a value that never
+// arrives — see the rule recorded on appendToolOutcomeBody.
+func toolFieldStandalone(style lipgloss.Style, text string) string {
+	return toolFieldLead + ToolFieldConnectorStyle.Render(toolFieldConnector) + style.Bold(true).Render(text)
+}
+
+// toolFieldBody renders one wrapped line of a field row's content, indented
+// under its label.
+func toolFieldBody(style lipgloss.Style, line string) string {
+	return toolFieldBodyIndent + style.Render(line)
+}
+
+// toolSummaryLine renders the one-word status a finished call reports
+// ("Sent", "Delivered", "Queued", "Running", "Done", ...). It is a value, not
+// a section, so it carries the "Status" label: every "↳" row then reads as
+// "Label: value", and the bare "↳ Sent" that looked like a section missing its
+// body is gone.
 func toolSummaryLine(line string) string {
 	if line == "" {
 		return ""
 	}
-	return ToolResultExpandedStyle.Render("  ↳ " + line)
+	return toolFieldInline(ToolResultExpandedStyle, "Status", line)
 }
 
 func toolCancelledDetailText(result string) string {
@@ -337,7 +417,7 @@ func appendToolOutcomeBody(result *[]string, kind toolOutcomeKind, content strin
 	}
 	if body == "" {
 		if kind == toolOutcomeCancelled {
-			*result = append(*result, style.Render("  ↳ "+label))
+			*result = append(*result, toolFieldStandalone(style, label))
 		}
 		return
 	}
@@ -352,14 +432,14 @@ func appendToolOutcomeBody(result *[]string, kind toolOutcomeKind, content strin
 		// own (short) length, so collapsed cards no longer force a toggle just
 		// to read why a call failed.
 		if toolOutcomeNonEmptyLineCount(body) < 2 {
-			width := max(contentWidth-len("↳ "+label+": "), 12)
+			width := max(contentWidth-len(toolFieldConnector+label+": "), 12)
 			if oneLine := truncateOneLine(toolCollapsedSummaryText(body), width); oneLine != "" {
-				*result = append(*result, style.Render("  ↳ "+label+": "+oneLine))
+				*result = append(*result, toolFieldInline(style, label, oneLine))
 			}
 			return
 		}
 	}
-	*result = append(*result, style.Render("  ↳ "+label+":"))
+	*result = append(*result, toolFieldSection(style, label))
 	lines := wrapText(body, contentWidth)
 	if !expanded {
 		appendBoundedOutcomeLines(result, style, lines, contentWidth)

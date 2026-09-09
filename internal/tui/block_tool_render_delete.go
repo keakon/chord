@@ -79,7 +79,7 @@ func (b *Block) renderDeleteCall(width int, spinnerFrame string) []string {
 			style = ErrorStyle
 		}
 		for _, line := range wrapText(sanitizeToolDisplayText(headline), contentWidth) {
-			result = append(result, style.Render("  ↳ "+line))
+			result = append(result, toolFieldMarker(style, line))
 		}
 	}
 	result = appendToolElapsedToHeader(result, b, cardWidth)
@@ -155,15 +155,15 @@ func appendDeleteDisplaySection(result []string, b *Block, section deleteDisplay
 	if len(section.items) == 1 {
 		text := section.label + " " + b.deleteDisplayItem(section.items[0])
 		for i, line := range wrapText(sanitizeToolDisplayText(text), width) {
-			prefix := "    "
 			if i == 0 {
-				prefix = "  ↳ "
+				result = append(result, toolFieldLead+ToolFieldConnectorStyle.Render(toolFieldConnector)+style.Render(line))
+				continue
 			}
-			result = append(result, style.Render(prefix+line))
+			result = append(result, toolFieldBody(style, line))
 		}
 		return result
 	}
-	result = append(result, style.Render(fmt.Sprintf("  ↳ %s (%d):", section.label, len(section.items))))
+	result = append(result, toolFieldSection(style, fmt.Sprintf("%s (%d)", section.label, len(section.items))))
 	for _, item := range section.items {
 		for i, line := range wrapText(sanitizeToolDisplayText(b.deleteDisplayItem(item)), width-2) {
 			prefix := "      "

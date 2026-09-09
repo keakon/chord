@@ -15,6 +15,42 @@ const (
 	subAgentStatusError = "error"
 )
 
+// subAgentMailboxCardTitle maps a mailbox kind to the badge the card carries.
+// A risk alert is "AGENT BLOCKED" because that is what the user is meant to
+// read: docs/tools.md has terminal worker failures shown as AGENT BLOCKED, and
+// the stall watchdog raises them as kind "risk_alert". The restore path used
+// to badge the same event "AGENT RISK", so a resumed session disagreed with
+// the run it was replaying.
+func subAgentMailboxCardTitle(kind string) string {
+	switch agent.SubAgentMailboxKind(kind) {
+	case agent.SubAgentMailboxKindCompleted:
+		return "AGENT COMPLETE"
+	case agent.SubAgentMailboxKindRiskAlert, agent.SubAgentMailboxKindBlocked:
+		return "AGENT BLOCKED"
+	}
+	return "AGENT MESSAGE"
+}
+
+// newSubAgentMailboxBlock builds the status card for one sub-agent mailbox
+// entry. The live event path and the session-restore path both go through it:
+// they used to build the card by hand and drifted, so the same message was
+// badged "AGENT BLOCKED" while running but "AGENT RISK" after a restart, and
+// only the live card carried a "[agent] kind:" prefix. One constructor means
+// both render the same badge and the same From/Kind rows.
+func newSubAgentMailboxBlock(id int, kind, agentID, taskID, content, targetAgentID string) *Block {
+	return &Block{
+		ID:            id,
+		Type:          BlockStatus,
+		StatusTitle:   subAgentMailboxCardTitle(kind),
+		StatusFrom:    strings.TrimSpace(agentID),
+		StatusKind:    strings.TrimSpace(kind),
+		Content:       content,
+		AgentID:       targetAgentID,
+		LinkedAgentID: strings.TrimSpace(agentID),
+		LinkedTaskID:  strings.TrimSpace(taskID),
+	}
+}
+
 func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEffects) {
 	var effects agentEventEffects
 	switch evt := event.(type) {
@@ -26,19 +62,7 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 		if targetAgentID == "" && strings.TrimSpace(evt.ParentAgentID) != "" && strings.TrimSpace(evt.ParentAgentID) != "main" {
 			targetAgentID = strings.TrimSpace(evt.ParentAgentID)
 		}
-		title := "AGENT MESSAGE"
-		if evt.Kind == string(agent.SubAgentMailboxKindRiskAlert) {
-			title = "AGENT BLOCKED"
-		}
-		block := &Block{
-			ID:            m.nextBlockID,
-			Type:          BlockStatus,
-			StatusTitle:   title,
-			Content:       fmt.Sprintf("[%s] %s: %s", evt.AgentID, evt.Kind, evt.Message),
-			AgentID:       targetAgentID,
-			LinkedAgentID: evt.AgentID,
-			LinkedTaskID:  evt.TaskID,
-		}
+		block := newSubAgentMailboxBlock(m.nextBlockID, evt.Kind, evt.AgentID, evt.TaskID, evt.Message, targetAgentID)
 		m.nextBlockID++
 		m.appendViewportBlock(block)
 		m.markBlockSettled(block)

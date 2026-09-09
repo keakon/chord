@@ -591,21 +591,7 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 				continue
 			}
 			if msg.Kind == message.KindSubAgentMailbox && msg.Mailbox != nil {
-				title := "AGENT MESSAGE"
-				switch agent.SubAgentMailboxKind(msg.Mailbox.Kind) {
-				case agent.SubAgentMailboxKindCompleted:
-					title = "AGENT COMPLETE"
-				case agent.SubAgentMailboxKindRiskAlert:
-					title = "AGENT RISK"
-				}
-				block := &Block{
-					ID:            *nextID,
-					Type:          BlockStatus,
-					StatusTitle:   title,
-					Content:       msg.Content,
-					LinkedAgentID: msg.Mailbox.AgentID,
-					LinkedTaskID:  msg.Mailbox.TaskID,
-				}
+				block := newSubAgentMailboxBlock(*nextID, msg.Mailbox.Kind, msg.Mailbox.AgentID, msg.Mailbox.TaskID, msg.Content, "")
 				*nextID++
 				blocks = append(blocks, block)
 				continue

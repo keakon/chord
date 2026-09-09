@@ -226,6 +226,13 @@ type Block struct {
 	// StatusTitle is the badge label for BlockStatus cards (e.g. "LOOP", "LOOP CONTINUE").
 	StatusTitle string
 
+	// StatusFrom / StatusKind carry the structured sender and kind of a
+	// sub-agent mailbox card, so the card can render them as field rows
+	// instead of flattening them into the body's prose. Both are empty for
+	// every other status card.
+	StatusFrom string
+	StatusKind string
+
 	// LoopAnchor marks the user block whose prompt text started or resumed loop mode.
 	// It is UI-only metadata and must not be treated as transcript content.
 	LoopAnchor bool

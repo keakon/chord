@@ -185,10 +185,10 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 			result = appendApplyPatchPreview(result, b, filePath, cardWidth-4)
 		}
 		if applyPatchNoChanges {
-			result = append(result, DimStyle.Render("  ↳ No changes"))
+			result = append(result, toolFieldStandalone(DimStyle, "No changes"))
 		}
 		if strings.TrimSpace(displayDiff) != "" && b.toolResultIsError() {
-			result = append(result, ToolResultExpandedStyle.Render("  ↳ Applied changes:"))
+			result = append(result, toolFieldSection(ToolResultExpandedStyle, "Applied changes"))
 		}
 	}
 	const diffLineNumWidth = 5
@@ -341,7 +341,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 		}
 	}
 	if (b.ToolName == tools.NameEdit || b.ToolName == tools.NameApplyPatch) && strings.TrimSpace(b.ResultContent) != "" && !b.toolResultIsError() && !b.toolResultIsCancelled() && !toolShouldHideSuccessfulFileOpResult(b) {
-		result = append(result, ToolResultExpandedStyle.Render("  ↳ Diagnostics:"))
+		result = append(result, toolFieldSection(ToolResultExpandedStyle, "Diagnostics"))
 		result = append(result, renderLSPDiagnosticsLines(editSuccessDiagnosticsContent(b.ResultContent), "    ", textWrap)...)
 	}
 	if b.toolResultIsError() && b.ResultContent != "" {
@@ -351,14 +351,14 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 			if strings.TrimSpace(displayDiff) == "" {
 				result = appendApplyPatchPreview(result, b, filePath, cardWidth-4)
 				if sections.applied != "" && !hasOperationSummaries {
-					result = append(result, ToolResultExpandedStyle.Render("  ↳ Applied changes:"))
+					result = append(result, toolFieldSection(ToolResultExpandedStyle, "Applied changes"))
 					result = appendApplyPatchErrorTextLines(result, sections.applied, textWrap)
 				}
 			}
-			result = append(result, ErrorStyle.Render("  ↳ Error:"))
+			result = append(result, toolFieldSection(ErrorStyle, "Error"))
 			result = appendApplyPatchErrorTextLines(result, sections.failure, textWrap)
 			if sections.diagnostics != "" {
-				result = append(result, ToolResultExpandedStyle.Render("  ↳ Diagnostics:"))
+				result = append(result, toolFieldSection(ToolResultExpandedStyle, "Diagnostics"))
 				result = append(result, renderLSPDiagnosticsLines(sections.diagnostics, "    ", textWrap)...)
 			}
 		case tools.NameEdit:
@@ -369,7 +369,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 					result = appendEditPatchPreview(result, b.editPatchArgsJSON(), cardWidth-4)
 				}
 			}
-			result = append(result, ErrorStyle.Render("  ↳ Error:"))
+			result = append(result, toolFieldSection(ErrorStyle, "Error"))
 			result = append(result, renderLSPDiagnosticsLines(toolErrorDisplayContent(b.ResultContent), "    ", textWrap)...)
 		}
 	} else if b.toolResultIsCancelled() {
@@ -551,7 +551,7 @@ func appendEditPatchPreview(result []string, argsJSON string, width int) []strin
 	if patch == "" {
 		return result
 	}
-	result = append(result, ToolResultExpandedStyle.Render("  ↳ Patch:"))
+	result = append(result, toolFieldSection(ToolResultExpandedStyle, "Patch"))
 	// Truncate (not wrap) each patch line, matching the apply_patch preview and
 	// the diff body. Diffs/file content are column-aligned; wrapping breaks the
 	// +/- gutter alignment and is harder to read than a clipped line.
@@ -641,7 +641,7 @@ func appendApplyPatchPreview(result []string, b *Block, filePath string, width i
 		return result
 	}
 	hl := b.applyPatchPreviewHighlighter(filePath, patch)
-	result = append(result, ToolResultExpandedStyle.Render("  ↳ Requested patch:"))
+	result = append(result, toolFieldSection(ToolResultExpandedStyle, "Requested patch"))
 	result = append(result, b.appendApplyPatchPreviewLines(patch, width, hl)...)
 	return result
 }
@@ -742,7 +742,7 @@ func appendApplyPatchTargetLines(result []string, targets []tools.ApplyPatchDisp
 	if len(targets) <= 1 {
 		return result
 	}
-	result = append(result, ToolResultExpandedStyle.Render("  ↳ Targets:"))
+	result = append(result, toolFieldSection(ToolResultExpandedStyle, "Targets"))
 	for _, target := range targets {
 		marker, path := applyPatchTargetDisplay(target)
 		result = append(result, "    "+DimStyle.Render(truncateApplyPatchDisplayLine(marker+" "+path, width)))
@@ -760,7 +760,7 @@ func appendApplyPatchOperationSummaries(result []string, targets []tools.ApplyPa
 			continue
 		}
 		line := truncateApplyPatchDisplayLine(marker+" "+path, width)
-		result = append(result, ToolResultExpandedStyle.Render("  ↳ "+marker+" ")+DimStyle.Render(strings.TrimPrefix(line, marker+" ")))
+		result = append(result, toolFieldMarker(ToolResultExpandedStyle, marker+" ")+DimStyle.Render(strings.TrimPrefix(line, marker+" ")))
 	}
 	return result
 }

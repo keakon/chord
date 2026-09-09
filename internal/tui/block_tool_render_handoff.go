@@ -52,7 +52,7 @@ func (b *Block) renderHandoffCall(width int, spinnerFrame string) []string {
 		if statusText := handoffRejectedReason(b.ResultContent); statusText != "" {
 			// A rejection is not a schema error, so it keeps its own label -
 			// on the shared "↳ Label:" shape the done card also uses.
-			result = append(result, ErrorStyle.Render("  ↳ Rejected:"))
+			result = append(result, toolFieldSection(ErrorStyle, "Rejected"))
 			for _, line := range wrapText(sanitizeToolDisplayText(statusText), contentWidth) {
 				result = append(result, ErrorStyle.Render("    "+line))
 			}

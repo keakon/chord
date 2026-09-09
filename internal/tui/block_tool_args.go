@@ -1017,7 +1017,7 @@ func appendTodoCallItemLines(result *[]string, item todoCallArgItem, contentWidt
 		af = strings.ReplaceAll(strings.ReplaceAll(af, "\r\n", " "), "\n", " ")
 		afPad := strings.Repeat(" ", prefixCols-runewidth.StringWidth(indent))
 		for _, wl := range wrapText(af, wrapW) {
-			*result = append(*result, indent+afPad+DimStyle.Render("↳ "+wl))
+			*result = append(*result, indent+afPad+ToolFieldConnectorStyle.Render(toolFieldConnector)+DimStyle.Render(wl))
 		}
 	}
 }

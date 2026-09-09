@@ -106,6 +106,12 @@ func applyBlockStyles(t Theme) {
 	ToolResultExpandedStyle = lipgloss.NewStyle().
 		Foreground(lipgloss.Color(t.ToolResultExpandedFg))
 
+	// ToolFieldConnectorStyle renders the "↳" that opens a field row. It is
+	// never bold and sits a few steps below the label's foreground, so a row
+	// reads as connector -> label -> value instead of one flat grey run.
+	ToolFieldConnectorStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color(t.ToolFieldConnectorFg))
+
 	// Emphasises the option the user picked inside a Question tool card. Reuses
 	// the theme's "selected" foreground but deliberately not SelectedStyle:
 	// that carries a background fill, and a card row must not gain a surface of

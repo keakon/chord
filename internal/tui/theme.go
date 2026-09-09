@@ -79,6 +79,11 @@ type Theme struct {
 	ToolResultFg         string
 	ToolResultBg         string
 	ToolResultExpandedFg string
+	// ToolFieldConnectorFg colours the "↳" that opens a field row. It is
+	// deliberately quieter than the label and its value: the connector only
+	// says "this row is a child of the header", so it must not compete with
+	// the label for attention.
+	ToolFieldConnectorFg string
 	ParamKeyFg           string
 	ParamValFg           string
 	DiffAddFg            string
@@ -263,6 +268,7 @@ func DefaultTheme() Theme {
 		ToolResultFg:            "250", // lighter so tool result text is readable
 		ToolResultBg:            "",
 		ToolResultExpandedFg:    "252",
+		ToolFieldConnectorFg:    "244",
 		ParamKeyFg:              "246",
 		ParamValFg:              "252",
 		DiffAddFg:               "78",

@@ -9440,6 +9440,49 @@ func TestAgentNotifyCreatesCardInTargetView(t *testing.T) {
 	if block.StatusTitle != "AGENT BLOCKED" || block.AgentID != "" || block.LinkedTaskID != "adhoc-1" || !strings.Contains(block.Content, "worker cannot continue") {
 		t.Fatalf("notify block = %#v", block)
 	}
+	// Sender and kind travel as structured fields, not as a "[agent] kind:"
+	// prefix inside the body: the restore path builds the same card from the
+	// same constructor, so both must see the same rows.
+	if block.StatusFrom != "worker-1" || block.StatusKind != "risk_alert" {
+		t.Fatalf("notify block fields = from %q kind %q, want worker-1/risk_alert", block.StatusFrom, block.StatusKind)
+	}
+	if strings.Contains(block.Content, "[worker-1]") {
+		t.Fatalf("notify body must not repeat the sender it renders as a field row: %q", block.Content)
+	}
+}
+
+// The live event path and the session-restore path build the same card from
+// different data shapes — an AgentNotifyEvent versus a persisted
+// MailboxMetadata. They used to hand-roll the Block and drifted, so a resumed
+// session badged a risk alert "AGENT RISK" where the run had shown "AGENT
+// BLOCKED". Both now share one constructor; this pins the fields that must
+// agree no matter which path produced the card.
+func TestSubAgentMailboxCardAgreesAcrossLiveAndRestore(t *testing.T) {
+	live := newSubAgentMailboxBlock(1, "risk_alert", "worker-1", "adhoc-1", "worker cannot continue", "")
+	meta := &message.MailboxMetadata{AgentID: "worker-1", TaskID: "adhoc-1", Kind: "risk_alert"}
+	restored := newSubAgentMailboxBlock(1, meta.Kind, meta.AgentID, meta.TaskID, "<persisted body>", "")
+
+	if live.StatusTitle != restored.StatusTitle {
+		t.Fatalf("title live %q vs restored %q", live.StatusTitle, restored.StatusTitle)
+	}
+	if live.StatusFrom != restored.StatusFrom {
+		t.Fatalf("from live %q vs restored %q", live.StatusFrom, restored.StatusFrom)
+	}
+	if live.StatusKind != restored.StatusKind {
+		t.Fatalf("kind live %q vs restored %q", live.StatusKind, restored.StatusKind)
+	}
+	if live.LinkedTaskID != restored.LinkedTaskID {
+		t.Fatalf("task live %q vs restored %q", live.LinkedTaskID, restored.LinkedTaskID)
+	}
+	if live.StatusTitle != "AGENT BLOCKED" {
+		t.Fatalf("risk alert title = %q, want AGENT BLOCKED per docs/tools.md", live.StatusTitle)
+	}
+	if got := subAgentMailboxCardTitle("completed"); got != "AGENT COMPLETE" {
+		t.Fatalf("completed title = %q, want AGENT COMPLETE", got)
+	}
+	if got := subAgentMailboxCardTitle("progress"); got != "AGENT MESSAGE" {
+		t.Fatalf("progress title = %q, want AGENT MESSAGE", got)
+	}
 }
 
 func TestThinkingStreamEndsOnStreamThinkingEvent(t *testing.T) {

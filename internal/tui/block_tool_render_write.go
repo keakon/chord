@@ -72,7 +72,7 @@ func appendWriteDiagnostics(result []string, diagnostics string, width int) []st
 	if strings.TrimSpace(diagnostics) == "" {
 		return result
 	}
-	result = append(result, ToolResultExpandedStyle.Render("  ↳ Diagnostics:"))
+	result = append(result, toolFieldSection(ToolResultExpandedStyle, "Diagnostics"))
 	return append(result, renderLSPDiagnosticsLines(diagnostics, "    ", width)...)
 }
 
@@ -205,7 +205,7 @@ func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
 	if b.toolResultIsError() && b.ResultContent != "" {
 		// The diagnostics renderer keeps LSP paths aligned, so this card
 		// formats its own body under the shared "↳ Error:" header.
-		result = append(result, ErrorStyle.Render("  ↳ Error:"))
+		result = append(result, toolFieldSection(ErrorStyle, "Error"))
 		result = append(result, renderLSPDiagnosticsLines(toolErrorDisplayContent(b.ResultContent), "    ", cardWidth-4)...)
 	} else if b.toolResultIsCancelled() {
 		appendToolOutcomeBody(&result, toolOutcomeCancelled, toolDisplayResultContent(b), cardWidth-4, true)

@@ -266,7 +266,7 @@ func (b *Block) renderBackgroundResult(width int) []string {
 			if len(body) > 0 && body[len(body)-1] != "" {
 				body = append(body, "")
 			}
-			body = append(body, ToolResultExpandedStyle.Render("  ↳ Relevant output:"))
+			body = append(body, toolFieldSection(ToolResultExpandedStyle, "Relevant output"))
 			output := strings.Join(contentLines[i+1:], "\n")
 			if backgroundResultHasCodeFence(output) {
 				codeLines, _, _ := renderAssistantMarkdownContent(output, output, metrics.contentWidth, 0, &b.codeHL)
@@ -293,16 +293,15 @@ func (b *Block) renderBackgroundResult(width int) []string {
 			break
 		}
 		style := ToolResultExpandedStyle
-		prefix := "  ↳ "
 		if strings.HasPrefix(strings.ToLower(trimmed), "error:") {
 			style = ErrorStyle
 		}
 		for i, part := range wrapText(trimmed, metrics.contentWidth) {
-			indent := prefix
 			if i > 0 {
-				indent = "    "
+				body = append(body, toolFieldBody(style, part))
+				continue
 			}
-			body = append(body, style.Render(indent+part))
+			body = append(body, toolFieldMarker(style, part))
 		}
 	}
 	return renderPrewrappedToolCard(metrics.blockStyle, metrics.cardWidth, toolCardTitle(backgroundResultCardTitle, b.displayLabelID()), body, metrics.toolCardBg, railANSISeq("tool", b.Focused))

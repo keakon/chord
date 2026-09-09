@@ -59,14 +59,41 @@ func (b *Block) renderStatus(width int) []string {
 	}
 	label := ThinkingLabelStyle.Render(blockLabelWithID(title, b.displayLabelID()))
 
-	bodyLines := renderRichMarkdownContent(strings.TrimSpace(b.Content), contentWidth, &b.richMarkdownHL)
+	// A sub-agent mailbox card names its sender and kind as field rows rather
+	// than flattening them into "[agent] kind: …" inside the prose: the rows
+	// then read with the same grammar as a tool card's, and the body is left
+	// as the message itself. Every other status card leaves both empty.
+	metaLines := make([]string, 0, 2)
+	if b.StatusFrom != "" {
+		metaLines = append(metaLines, toolFieldInline(ToolResultExpandedStyle, "From", sanitizeDisplayText(b.StatusFrom)))
+	}
+	if b.StatusKind != "" {
+		// The kind is a value, not a key, so it keeps its raw spelling: labels
+		// get humanized, enum values stay greppable.
+		metaLines = append(metaLines, toolFieldInline(ToolResultExpandedStyle, "Kind", sanitizeDisplayText(b.StatusKind)))
+	}
+
+	// The From/Kind field rows above the body use a 2-space lead plus a "↳ "
+	// connector, which puts their labels at visual column 4. The body must
+	// nest under that header rather than sit at the lead/connector column,
+	// so when the field rows are present it is indented 2 more and rendered
+	// 2 columns narrower. Without the field rows (the info card), the body
+	// keeps the original 2-space indent.
+	bodyIndent := "  "
+	bodyWidth := contentWidth
+	if len(metaLines) > 0 {
+		bodyIndent = "    "
+		bodyWidth = max(contentWidth-2, 10)
+	}
+	bodyLines := renderRichMarkdownContent(strings.TrimSpace(b.Content), bodyWidth, &b.richMarkdownHL)
 	if len(bodyLines) == 0 {
 		bodyLines = []string{""}
 	}
-	lines := make([]string, 0, len(bodyLines)+2)
+	lines := make([]string, 0, len(metaLines)+len(bodyLines)+2)
 	lines = append(lines, label, "")
+	lines = append(lines, metaLines...)
 	for _, line := range bodyLines {
-		lines = append(lines, "  "+line)
+		lines = append(lines, bodyIndent+line)
 	}
 
 	cardBg := currentTheme.CompactionSummaryBg

@@ -28,6 +28,7 @@ var (
 	ToolResultBoxStyle           lipgloss.Style
 	ToolResultStyle              lipgloss.Style
 	ToolResultExpandedStyle      lipgloss.Style
+	ToolFieldConnectorStyle      lipgloss.Style
 	ToolStatusSuccessStyle       lipgloss.Style
 	ToolStatusErrorStyle         lipgloss.Style
 	ToolStatusNeutralStyle       lipgloss.Style
