@@ -338,7 +338,7 @@ recoverable in the archived history files). The previous natural-language body
 is not re-appended, and each round re-states the objective, progress and
 claims it considers current.
 
-`evidence_refs` may reference stable IDs `claim_kinds` classifies completed/decision claims as observed, derived, assumed, or proposed; observed claims require claim_evidence. from the checkpoint evidence pack; Chord validates those IDs before the barrier. `state_files` are references to current external state; `planned_state_files`
+`evidence_refs` may reference stable IDs from the checkpoint evidence pack; Chord validates those IDs before the barrier. `claim_kinds` classifies completed/decision claims as observed, derived, assumed, or proposed; observed claims require `claim_evidence`. `state_files` are references to current external state; `planned_state_files`
 is for paths that are not written yet and is not completion evidence. Chord never reads, injects, or
 existence-checks them, so the tool cannot bypass read permissions and cannot
 be used as an existence probe. Entries are normally workspace-relative paths
