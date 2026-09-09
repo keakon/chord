@@ -4171,3 +4171,196 @@ func TestNotifyScopeGrantRejectsNoOpAndReadOnlyTargets(t *testing.T) {
 		t.Fatalf("read-only grant error = %v, want it refused with a re-delegation hint", err)
 	}
 }
+
+// TestHandleAgentNotifyIgnoresLateNotifyForTerminalRuntime pins the terminal
+// barrier for queued/late progress notices: once a durable terminal outcome is
+// committed, the runtime mirrors it (commitTerminalTask flips the live runtime
+// before updating the record), so a notify event dispatched afterwards must not
+// resurrect the cancelled/completed attempt. Legal terminal reuse opens a new
+// attempt through resetForAttempt/rehydration instead of a plain Running
+// transition, so dropping here cannot block legitimate follow-up work.
+func TestHandleAgentNotifyIgnoresLateNotifyForTerminalRuntime(t *testing.T) {
+	for _, terminal := range []SubAgentState{SubAgentStateCancelled, SubAgentStateCompleted, SubAgentStateFailed} {
+		t.Run(string(terminal), func(t *testing.T) {
+			a := newTestMainAgent(t, t.TempDir())
+			sub := newControllableTestSubAgent(t, a, "adhoc-terminal-notify")
+			sub.setState(terminal, "settled")
+			a.syncTaskRecordFromSub(sub, "settled")
+			if !isTerminalSubAgentState(sub.State()) {
+				t.Fatalf("runtime state = %q, want terminal %q", sub.State(), terminal)
+			}
+
+			a.handleAgentNotify(Event{SourceID: sub.instanceID, Payload: tools.AgentNotifyPayload{Message: "late progress update"}})
+
+			if got := sub.State(); got != terminal {
+				t.Fatalf("runtime state after late notify = %q, want unchanged terminal %q", got, terminal)
+			}
+			select {
+			case evt := <-a.eventCh:
+				t.Fatalf("late notify queued a mailbox event for the settled runtime: %v", evt.Type)
+			default:
+			}
+			if rec := a.taskRecordByTaskID(sub.taskID); rec == nil || SubAgentState(rec.State) != terminal {
+				t.Fatalf("task record = %#v, want terminal %q", rec, terminal)
+			}
+		})
+	}
+}
+
+// TestHandleAgentNotifyResumesWaitingForMainRuntime pins the legal side of the
+// terminal barrier: a worker parked in waiting_main (or quiescent in idle)
+// that reports continued progress must still resume to Running and queue its
+// progress mailbox for the main inbox.
+func TestHandleAgentNotifyResumesWaitingForMainRuntime(t *testing.T) {
+	for _, resumed := range []SubAgentState{SubAgentStateWaitingMain, SubAgentStateIdle} {
+		t.Run(string(resumed), func(t *testing.T) {
+			a := newTestMainAgent(t, t.TempDir())
+			sub := newControllableTestSubAgent(t, a, "adhoc-resume-notify")
+			sub.setState(resumed, "waiting on an owner decision")
+			a.syncTaskRecordFromSub(sub, "")
+
+			a.handleAgentNotify(Event{SourceID: sub.instanceID, Payload: tools.AgentNotifyPayload{Message: "owner approved; continuing"}})
+
+			if got := sub.State(); got != SubAgentStateRunning {
+				t.Fatalf("runtime state after notify = %q, want running", got)
+			}
+			deadline := time.After(time.Second)
+			for {
+				select {
+				case evt := <-a.eventCh:
+					mailbox, ok := evt.Payload.(*SubAgentMailboxMessage)
+					if !ok || evt.Type != EventSubAgentMailbox {
+						continue
+					}
+					if mailbox.Kind != SubAgentMailboxKindProgress || mailbox.Summary != "owner approved; continuing" {
+						t.Fatalf("mailbox = %#v, want a progress update carrying the notify", mailbox)
+					}
+					return
+				case <-deadline:
+					t.Fatal("timed out waiting for the queued progress mailbox")
+				}
+			}
+		})
+	}
+}
+
+// TestMainInboxProgressIsRunnableAndStagesAsOneBatch pins the progress-wake
+// gate: while an idle main holds per-agent progress snapshots, they count as
+// runnable mailbox work, and a single drain stages every snapshot into one
+// batch instead of waking the main once per update.
+func TestMainInboxProgressIsRunnableAndStagesAsOneBatch(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.subAgentInbox.progress["worker-1"] = SubAgentMailboxMessage{MessageID: "p-1", AgentID: "worker-1", TaskID: "task-a", Kind: SubAgentMailboxKindProgress, Summary: "still working"}
+	a.subAgentInbox.progress["worker-2"] = SubAgentMailboxMessage{MessageID: "p-2", AgentID: "worker-2", TaskID: "task-b", Kind: SubAgentMailboxKindProgress, Summary: "almost done"}
+
+	if !a.hasRunnableMailboxWork() {
+		t.Fatal("hasRunnableMailboxWork() = false while progress snapshots are pending for an idle main")
+	}
+	if !a.stageNextSubAgentMailboxBatch() {
+		t.Fatal("stageNextSubAgentMailboxBatch() = false, want progress staged")
+	}
+	if len(a.pendingSubAgentMailboxes) != 2 {
+		t.Fatalf("pending batch = %d messages, want both snapshots merged into one batch", len(a.pendingSubAgentMailboxes))
+	}
+	if len(a.subAgentInbox.progress) != 0 {
+		t.Fatalf("progress snapshot map = %#v, want it consumed by staging", a.subAgentInbox.progress)
+	}
+	if a.stageNextSubAgentMailboxBatch() {
+		t.Fatal("stageNextSubAgentMailboxBatch() = true with nothing left to stage")
+	}
+	// Once the staged batch is taken by the request (the turn-overlay consumer)
+	// and no new snapshots arrived, the work is gone and the main may go idle.
+	a.pendingSubAgentMailboxes = nil
+	a.activeSubAgentMailboxes = nil
+	a.activeSubAgentMailbox = nil
+	if a.hasRunnableMailboxWork() {
+		t.Fatal("hasRunnableMailboxWork() = true after the staged batch was consumed")
+	}
+}
+
+// TestProgressArrivalMergesIntoQueuedMailboxBatch pins the one-cycle merge for
+// a real arrival: a progress snapshot and a queued urgent mailbox that drain
+// together land in the same staged batch, so the wake handles all routable
+// main-inbox messages at once.
+func TestProgressArrivalMergesIntoQueuedMailboxBatch(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.subAgentInbox.progress["worker-1"] = SubAgentMailboxMessage{MessageID: "p-1", AgentID: "worker-1", TaskID: "task-a", Kind: SubAgentMailboxKindProgress, Summary: "still working"}
+	a.subAgentInbox.urgent = []SubAgentMailboxMessage{{
+		MessageID: "u-1",
+		AgentID:   "worker-2",
+		TaskID:    "task-b",
+		Kind:      SubAgentMailboxKindDecisionRequired,
+		Priority:  SubAgentMailboxPriorityInterrupt,
+		Summary:   "needs a decision",
+	}}
+
+	if !a.stageNextSubAgentMailboxBatch() {
+		t.Fatal("stageNextSubAgentMailboxBatch() = false")
+	}
+	if len(a.pendingSubAgentMailboxes) != 2 {
+		t.Fatalf("pending batch = %d messages, want the urgent mailbox and the progress snapshot merged", len(a.pendingSubAgentMailboxes))
+	}
+	first := a.pendingSubAgentMailboxes[0]
+	if first == nil || first.MessageID != "u-1" {
+		t.Fatalf("first pending mailbox = %#v, want the urgent mailbox staged first", first)
+	}
+}
+
+// TestMainInboxProgressDoesNotInterruptActiveTurn pins the anti-interruption
+// constraint: progress snapshots are only staged by a drain that starts while
+// the main is idle; an active turn leaves both the snapshot and the staging
+// pipeline untouched.
+func TestMainInboxProgressDoesNotInterruptActiveTurn(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.subAgentInbox.progress["worker-1"] = SubAgentMailboxMessage{MessageID: "p-1", AgentID: "worker-1", TaskID: "task-a", Kind: SubAgentMailboxKindProgress, Summary: "update"}
+	a.newTurn()
+	if a.currentTurn() == nil {
+		t.Fatal("active turn was not created")
+	}
+
+	a.drainSubAgentInbox()
+
+	if len(a.pendingSubAgentMailboxes) != 0 || len(a.activeSubAgentMailboxes) != 0 {
+		t.Fatalf("progress staged while a turn was running: pending=%v active=%v", a.pendingSubAgentMailboxes, a.activeSubAgentMailboxes)
+	}
+	if got := a.subAgentInbox.progress["worker-1"]; got.MessageID != "p-1" {
+		t.Fatalf("progress snapshot = %#v, want it untouched by an active-turn drain", got)
+	}
+	if a.currentTurn() == nil {
+		t.Fatal("active turn was replaced by the drain")
+	}
+}
+
+// TestTurnContinuationStagingExcludesPendingProgress pins the same boundary on
+// the mid-turn continuation path: an active turn's next-request staging must
+// still deliver actionable mailbox heads, but must leave pending progress
+// snapshots queued until the turn ends and the main goes idle again.
+func TestTurnContinuationStagingExcludesPendingProgress(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.subAgentInbox.progress["worker-1"] = SubAgentMailboxMessage{MessageID: "p-1", AgentID: "worker-1", TaskID: "task-a", Kind: SubAgentMailboxKindProgress, Summary: "still working"}
+	a.subAgentInbox.urgent = []SubAgentMailboxMessage{{
+		MessageID: "u-1",
+		AgentID:   "worker-2",
+		TaskID:    "task-b",
+		Kind:      SubAgentMailboxKindDecisionRequired,
+		Priority:  SubAgentMailboxPriorityInterrupt,
+		Summary:   "needs a decision",
+	}}
+	a.newTurn()
+	if a.currentTurn() == nil {
+		t.Fatal("active turn was not created")
+	}
+
+	if !a.prepareSubAgentMailboxBatchForTurnContinuation() {
+		t.Fatal("turn-continuation staging returned false with an actionable mailbox queued")
+	}
+	if len(a.pendingSubAgentMailboxes) != 1 || a.pendingSubAgentMailboxes[0] == nil || a.pendingSubAgentMailboxes[0].MessageID != "u-1" {
+		t.Fatalf("pending batch = %#v, want only the actionable mailbox staged mid-turn", a.pendingSubAgentMailboxes)
+	}
+	if got := a.subAgentInbox.progress["worker-1"]; got.MessageID != "p-1" {
+		t.Fatalf("progress snapshot = %#v, want it still queued while the turn runs", got)
+	}
+	if len(a.pendingSubAgentMailboxes) != 1 {
+		t.Fatalf("progress was merged into the mid-turn continuation batch: %#v", a.pendingSubAgentMailboxes)
+	}
+}

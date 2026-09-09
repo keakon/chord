@@ -436,16 +436,32 @@ func TestGlobalIdleDrainsActionableOwnerMailboxBeforeNotifying(t *testing.T) {
 	}
 }
 
-func TestProgressOnlyMailboxDoesNotPreventGlobalIdle(t *testing.T) {
+// TestProgressSnapshotWakesIdleMainTurnBeforeGlobalIdle pins the idle-wake
+// semantics for progress/notice: a main-inbox progress snapshot pending while
+// the main is idle is delivered (progress is runnable mailbox work), so global
+// idle must stay suppressed until the drain has staged it into a main turn
+// instead of reporting full idle past it.
+func TestProgressSnapshotWakesIdleMainTurnBeforeGlobalIdle(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.subAgentInbox.progress["worker-1"] = SubAgentMailboxMessage{
-		AgentID: "worker-1",
-		Kind:    SubAgentMailboxKindProgress,
-		Summary: "still working",
+		MessageID: "worker-1-p1",
+		AgentID:   "worker-1",
+		TaskID:    "task-1",
+		Kind:      SubAgentMailboxKindProgress,
+		Summary:   "still working",
+	}
+	if a.currentTurn() != nil {
+		t.Fatal("baseline main turn is not idle")
 	}
 
-	if !a.emitGlobalIdleIfReady() {
-		t.Fatal("progress-only mailbox should not require an LLM continuation")
+	if a.emitGlobalIdleIfReady() {
+		t.Fatal("global idle emitted while a progress snapshot was pending for the idle main")
+	}
+	if a.currentTurn() == nil {
+		t.Fatal("pending progress did not wake the idle main into a delivery turn")
+	}
+	if len(a.pendingSubAgentMailboxes) != 1 || a.pendingSubAgentMailboxes[0] == nil || a.pendingSubAgentMailboxes[0].MessageID != "worker-1-p1" {
+		t.Fatalf("pending batch = %#v, want the staged progress snapshot", a.pendingSubAgentMailboxes)
 	}
 }
 
