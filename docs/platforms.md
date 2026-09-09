@@ -27,7 +27,7 @@ Chord is developed and tested primarily on macOS. Other platforms work to varyin
 [^clip]: `Ctrl+V` / `Alt+V` reads the system clipboard through a native backend. Availability still depends on the local display/clipboard environment; remote SSH sessions usually expose the remote host clipboard, not the terminal client's clipboard. Windows Terminal reserves `Ctrl+V`, so use `Alt+V` there and in WSL sessions hosted by it.
 [^img]: Image rendering currently auto-detects Kitty graphics and iTerm2 inline images (Ghostty uses Kitty; WezTerm uses iTerm2). When the terminal does not support those, image attachments are still sent to the model but are not previewed in the TUI. `tmux` / `zellij` are disabled by default for safety.
 [^lsp]: Requires the relevant language server installed locally (e.g. `gopls`, `typescript-language-server`, `rust-analyzer`). Chord does not bundle them.
-[^py-unix]: On Unix-like systems Chord probes `.venv/bin/python`, `venv/bin/python`, `env/bin/python` under the LSP root.
+[^py-unix]: On Unix-like systems Chord searches upward from the LSP root for the nearest `.venv/bin/python`, `venv/bin/python`, or `env/bin/python`.
 [^py-win]: On Windows Chord probes `.venv\Scripts\python.exe`, `venv\Scripts\python.exe`, `env\Scripts\python.exe`.
 
 Legend: ✅ supported · ⚠️ supported with caveats · ❌ not supported / no-op.
