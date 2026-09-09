@@ -50,6 +50,39 @@ func TestHandleAgentNotifyBuildsStructuredNotice(t *testing.T) {
 	}
 }
 
+// TestHandleAgentNotifyCarriesExplicitKindToDurableRow pins the W2 contract
+// that an agent notify with an explicit kind stays non-progress on the durable
+// mailbox row (not just on the live AgentNotifyEvent). The durable row feeds
+// retention (compactSubAgentMailboxLogs keeps unconsumed non-progress rows)
+// and restore-time card classification, so a kind that vanished on the way to
+// disk would silently reclassify a blocked/risk notice as a progress snapshot.
+func TestHandleAgentNotifyCarriesExplicitKindToDurableRow(t *testing.T) {
+	a, sub := newMixedBatchTestSubAgent(t)
+	a.subs.add(sub)
+	a.handleAgentNotify(Event{SourceID: sub.instanceID, Payload: tools.AgentNotifyPayload{
+		Message: "agent blocked on review", Kind: "blocked", Subtype: "stall_resolved",
+	}})
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case evt := <-a.eventCh:
+			if evt.Type != EventSubAgentMailbox {
+				continue
+			}
+			mailbox, _ := evt.Payload.(*SubAgentMailboxMessage)
+			if mailbox == nil {
+				continue
+			}
+			if mailbox.Kind != SubAgentMailboxKindBlocked || mailbox.Subtype != "stall_resolved" {
+				t.Fatalf("mailbox = %#v, want kind blocked with stall_resolved subtype on the durable row", mailbox)
+			}
+			return
+		case <-deadline:
+			t.Fatal("timed out waiting for mailbox event")
+		}
+	}
+}
+
 func TestStructuredMessagePayloadArtifactsAboveInlineThreshold(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	msg := &SubAgentMailboxMessage{
