@@ -329,11 +329,6 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 				return m.openRules()
 			}
 		}
-		if m.agent != nil && m.focusedAgentID != "" && len(m.attachments) == 0 && !hasInlinePastes && (trimmed == "/models" || strings.HasPrefix(trimmed, "/models ") || trimmed == "/role" || strings.HasPrefix(trimmed, "/role ")) {
-			m.recordTUIDiagnostic("agent-command", "%s", trimmed)
-			m.agent.SendUserMessage(value)
-			return nil
-		}
 		fileRefTexts := append([]string{value}, inlinePasteTexts...)
 		fileRefs := displayAtMentionFileRefs(dedupeAtMentionFileRefs(atMentionStructuredFileRefs(fileRefTexts, m.workingDir), m.workingDir))
 		if m.agent != nil && m.focusedAgentID != "" && len(m.attachments) == 0 && !hasInlinePastes && len(fileRefs) == 0 {

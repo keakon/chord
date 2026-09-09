@@ -1062,6 +1062,40 @@ func TestHeadlessRoleSetSwitchesRoleAndUpdatesStatus(t *testing.T) {
 	}
 }
 
+func TestHeadlessRoleSetRefreshesWarmRoleCache(t *testing.T) {
+	backend := &mockBackend{availableRoles: []string{"builder", "planner"}, currentRole: "builder"}
+	// Warm cache: state.role is already populated (by an earlier RoleChangedEvent
+	// or a status backfill), so headlessCurrentRole would serve it as-is instead
+	// of asking the backend again.
+	state := &headlessState{role: "builder"}
+
+	to := newTestOut()
+	handleHeadlessCommand(headlessCommand{Type: "role", Action: "set", Role: "planner"}, backend, state, to.writer(), "test-session")
+
+	env := findHeadlessEnvelopeValue(to.drain(), "role_response")
+	if env == nil {
+		t.Fatal("role_response missing for role set")
+	}
+	payload := env.Payload.(map[string]any)
+	if payload["ok"] != true || payload["role"] != "planner" {
+		t.Fatalf("role_response payload = %v, want ok with role planner", payload)
+	}
+
+	// No RoleChangedEvent has been pumped through the event filter; the cache
+	// write on the set path must make an immediate status report the new role
+	// instead of the stale cached one.
+	to = newTestOut()
+	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer(), "test-session")
+	env = findHeadlessEnvelopeValue(to.drain(), "status_response")
+	if env == nil {
+		t.Fatal("status_response missing")
+	}
+	statusPayload := env.Payload.(map[string]any)
+	if statusPayload["current_role"] != "planner" {
+		t.Fatalf("current_role = %v, want planner", statusPayload["current_role"])
+	}
+}
+
 func TestHeadlessRoleSetFailureBranches(t *testing.T) {
 	missingRoleErr := errors.New(`unknown role "ghost"`)
 	notAvailableErr := errors.New(`role "worker" is not available`)

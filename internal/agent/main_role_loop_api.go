@@ -20,7 +20,9 @@ import (
 // definition. A SubAgent-only config is rejected with "role %q is not
 // available"; an unknown name fails inside switchRole with "unknown role %q".
 // RoleChangedEvent is emitted only after a successful switch.
-// Goroutine-safe (posts to eventCh).
+// SwitchRole is goroutine-safe: the switch runs synchronously on the caller's
+// goroutine, then RoleChangedEvent is posted to the TUI output channel and
+// consumed asynchronously by the TUI/headless event loop.
 func (a *MainAgent) SwitchRole(role string) error {
 	if cfg, ok := a.agentConfigs[role]; ok && cfg != nil && cfg.IsSubAgent() {
 		return fmt.Errorf("role %q is not available", role)

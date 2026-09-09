@@ -111,6 +111,50 @@ func TestRoleSelectEscCancelsAndRestoresInsert(t *testing.T) {
 	}
 }
 
+func TestRoleSelectEnterOnCurrentRoleIsNoOp(t *testing.T) {
+	backend := &sessionControlAgent{
+		currentRole:    "builder",
+		availableRoles: []string{"builder", "planner"},
+	}
+	m := NewModelWithSize(backend, 100, 24)
+	m.mode = ModeInsert
+	m.openRoleSelect()
+	if m.mode != ModeRoleSelect {
+		t.Fatalf("mode after open = %v, want ModeRoleSelect", m.mode)
+	}
+	// The cursor preselects the current role, so a bare Enter confirms the
+	// already-active role.
+	if m.roleSelect.cursor != 0 {
+		t.Fatalf("cursor = %d, want 0 for current role builder", m.roleSelect.cursor)
+	}
+	m.cachedStatusKey = "cached-status"
+
+	cmd := m.handleRoleSelectKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	if cmd == nil {
+		t.Fatal("enter returned no command")
+	}
+	msgs := runCmdTree(cmd)
+
+	if result, ok := findRoleSwitchResult(msgs); ok {
+		t.Fatalf("same-role confirm produced roleSwitchResultMsg %+v, want no SwitchRole call", result)
+	}
+	if backend.currentRole != "builder" {
+		t.Fatalf("backend.currentRole = %q, want unchanged builder", backend.currentRole)
+	}
+	if m.mode != ModeInsert {
+		t.Fatalf("mode after no-op confirm = %v, want ModeInsert restored", m.mode)
+	}
+	if m.activeToast == nil {
+		t.Fatal("same-role confirm must surface an info toast")
+	}
+	if m.activeToast.Level != "info" || m.activeToast.Message != "already the active role: builder" {
+		t.Fatalf("toast = %+v, want info \"already the active role: builder\"", m.activeToast)
+	}
+	if m.cachedStatusKey != "cached-status" {
+		t.Fatal("a same-role no-op must not invalidate draw caches")
+	}
+}
+
 func TestHandleRoleSwitchResultToastsErrorWithoutCacheInvalidation(t *testing.T) {
 	backend := &sessionControlAgent{
 		currentRole:    "builder",

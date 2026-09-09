@@ -971,6 +971,13 @@ func handleHeadlessRoleCommand(cmd headlessCommand, backend headlessRoleBackend,
 			emitHeadlessRoleResponse(out, false, err.Error(), "", nil)
 			return
 		}
+		// Keep the state cache in sync with the backend immediately: the
+		// RoleChangedEvent travels through the agent event loop and can trail
+		// this response, which would leave status queries reading the previous
+		// role from the warm cache.
+		state.mu.Lock()
+		state.role = role
+		state.mu.Unlock()
 		emitHeadlessRoleResponse(out, true, "", role, headlessRoleItems(backend))
 	default:
 		emitHeadlessRoleResponse(out, false, "unsupported role action: "+cmd.Action, "", nil)

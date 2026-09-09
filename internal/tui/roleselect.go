@@ -127,8 +127,14 @@ func (m *Model) selectRoleAtCursor() tea.Cmd {
 		return cmd
 	}
 	role := m.roleSelect.roles[m.roleSelect.cursor]
+	// Confirming the already-active role is a no-op: SwitchRole would rebuild
+	// the permission ruleset, write a recovery snapshot and emit a
+	// RoleChangedEvent for a role that did not change. Skip it (mirroring
+	// switchRoleByName and the Shift+Tab single-role cycle) and keep the draw
+	// caches valid.
+	sameRole := m.agent != nil && role == m.agent.CurrentRole()
 	var switchCmd tea.Cmd
-	if m.agent != nil {
+	if m.agent != nil && !sameRole {
 		switchCmd = func() tea.Msg {
 			return roleSwitchResultMsg{from: m.agent.CurrentRole(), to: role, err: m.agent.SwitchRole(role)}
 		}
@@ -136,16 +142,16 @@ func (m *Model) selectRoleAtCursor() tea.Cmd {
 	prevMode := m.roleSelect.prevMode
 	cmd := m.restoreModeWithIME(prevMode)
 	m.recalcViewportSize()
+	cmds := []tea.Cmd{cmd}
 	if prevMode == ModeInsert {
-		if switchCmd != nil {
-			return tea.Batch(cmd, m.input.Focus(), switchCmd)
-		}
-		return tea.Batch(cmd, m.input.Focus())
+		cmds = append(cmds, m.input.Focus())
 	}
 	if switchCmd != nil {
-		return tea.Batch(cmd, switchCmd)
+		cmds = append(cmds, switchCmd)
+	} else if sameRole {
+		cmds = append(cmds, m.enqueueToast("already the active role: "+role, "info"))
 	}
-	return cmd
+	return tea.Batch(cmds...)
 }
 
 // handleRoleSwitchResult toasts the outcome of a role switch requested from

@@ -149,7 +149,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 }
 ```
 
-`list` 把当前角色放在 `role`，完整列表放在 `roles`，其中 `current: true` 的那一项就是当前角色。`set` 切换到指定角色并返回切换后的状态。有 `handoff_request` 待决时 `set` 会被拒绝（`resolve the pending handoff before switching role`），切到已是当前的角色（`already the active role: <name>`）、未知角色名、只作为 SubAgent 定义存在的角色同样会被拒绝。失败响应带 `ok: false` 和面向人的 `message`，原样展示给用户即可。订阅了 `role_change` 时，切换成功还会收到一条 `role_change` 推送；当前角色也会出现在 `status_response` 的 `current_role` 里。
+`list` 把当前角色放在 `role`，完整列表放在 `roles`，其中 `current: true` 的那一项就是当前角色。`set` 切换到指定角色并返回切换后的状态。有 `handoff_request` 待决时 `set` 会被拒绝（`resolve the pending handoff before switching role`），切到已是当前的角色（`already the active role: <name>`）、未知角色名、只作为 SubAgent 定义存在的角色同样会被拒绝。失败响应带 `ok: false` 和面向人的 `message`，原样展示给用户即可。订阅了 `role_change` 时，切换成功还会收到一条 `role_change` 推送；当前角色也会出现在 `status_response` 的 `current_role` 里。注意：`role_change` 事件与 `role_response` 由不同路径写出、先后顺序不定，客户端应以 `role_response` 为准。
 
 ### `confirm`
 

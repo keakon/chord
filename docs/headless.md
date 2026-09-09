@@ -149,7 +149,7 @@ Response:
 }
 ```
 
-`list` puts the active role in `role` and the full list in `roles`, where the entry with `current: true` is the active one. `set` switches to the named role and returns the new state. A `set` is rejected while a `handoff_request` is pending (`resolve the pending handoff before switching role`), as are switches to the already-active role (`already the active role: <name>`), to unknown names, and to roles that exist only as SubAgent definitions. Failures carry `ok: false` with a human-readable `message`; surface the message verbatim to the user. A successful role switch is also pushed as a `role_change` event when subscribed, and the current role appears in `status_response` as `current_role`.
+`list` puts the active role in `role` and the full list in `roles`, where the entry with `current: true` is the active one. `set` switches to the named role and returns the new state. A `set` is rejected while a `handoff_request` is pending (`resolve the pending handoff before switching role`), as are switches to the already-active role (`already the active role: <name>`), to unknown names, and to roles that exist only as SubAgent definitions. Failures carry `ok: false` with a human-readable `message`; surface the message verbatim to the user. A successful role switch is also pushed as a `role_change` event when subscribed, and the current role appears in `status_response` as `current_role`. Note that `role_change` and `role_response` are written by different paths, so their arrival order is not guaranteed — treat `role_response` as authoritative.
 
 ### `confirm`
 
