@@ -43,9 +43,10 @@ func (a *MainAgent) subAgentWorkDir() string {
 	return workDir
 }
 
-// writeScopeBaseDir is the worker execution root. Delegation containment,
-// overlap detection, and runtime tool checks all resolve relative declarations
-// against this same directory.
+// writeScopeBaseDir is the directory that relative declared scopes resolve
+// against. Declared scopes are advisory coordination declarations: they feed
+// duplicate/overlap hints between sibling tasks and the worker's own context,
+// and are never enforced at tool execution time.
 func (a *MainAgent) writeScopeBaseDir() string {
 	return a.subAgentWorkDir()
 }
@@ -653,7 +654,15 @@ func (a *MainAgent) handleAgentNotify(evt Event) {
 	if messageType == "" {
 		messageType = AgentMessageTypeProgress
 	}
-	kind := SubAgentMailboxKindProgress
+	// The durable mailbox row and the AgentNotifyEvent share one (kind,
+	// subtype) source so a restored session badges the notice exactly as the
+	// live card did (see the TUI's subAgentMailboxCardTitle). Progress stays
+	// the default: kind is an optional hint, and without a value the row must
+	// keep its progress snapshot routing.
+	kind := SubAgentMailboxKind(strings.TrimSpace(payload.Kind))
+	if kind == "" {
+		kind = SubAgentMailboxKindProgress
+	}
 	a.queueLoopEvent(Event{Type: EventSubAgentMailbox, SourceID: evt.SourceID, Payload: &SubAgentMailboxMessage{
 		AgentID:        evt.SourceID,
 		TaskID:         taskIDForSub(sub),
@@ -678,7 +687,8 @@ func (a *MainAgent) handleAgentNotify(evt Event) {
 		ParentTaskID:  ownerTaskID,
 		TargetAgentID: controlPlaneAgentID(ownerAgentID),
 		TargetTaskID:  ownerTaskID,
-		Kind:          strings.TrimSpace(payload.Kind),
+		Kind:          string(kind),
+		Subtype:       strings.TrimSpace(payload.Subtype),
 		Message:       msg,
 	})
 	a.emitToTUI(AgentStatusEvent{AgentID: evt.SourceID, Status: "running", Message: msg})
