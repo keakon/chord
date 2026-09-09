@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/keakon/chord/internal/message"
@@ -27,9 +28,15 @@ func TestYoloRulesetKeepsProtectedRulesAndDropsOthers(t *testing.T) {
 		}
 	}
 
-	// Default deny: Shell allow rule was filtered out, so Shell evaluates to deny.
-	if got := evaluateToolPermission(filtered, tools.NameShell, json.RawMessage(`{"command":"rm -rf /"}`)); got.Action != permission.ActionDeny {
-		t.Fatalf("Shell action under YOLO = %v, want deny (allow rule should be filtered)", got.Action)
+	// The Shell allow rule is filtered out of the YOLO decision surface
+	// entirely: ordinary tools never evaluate against it (the execution gate
+	// bypasses them under YOLO), so an unfiltered leftover here would deny
+	// nothing but would contradict the visible bypass. At this unit level the
+	// filtered ruleset therefore has no Shell rule at all.
+	for _, rule := range filtered {
+		if rule.Permission == tools.NameShell {
+			t.Fatalf("Shell rule %+v must be filtered from the YOLO ruleset", rule)
+		}
 	}
 	// Protected rules survive with their original action (Handoff allow, Delegate ask, Cancel deny, Done allow).
 	if got := evaluateToolPermission(filtered, tools.NameHandoff, json.RawMessage(`{"agent":"planner"}`)); got.Action != permission.ActionAllow {
@@ -78,6 +85,69 @@ func TestYoloRulesetEmptyInputReturnsNil(t *testing.T) {
 	}
 	if got := yoloRuleset(permission.Ruleset{}); got != nil {
 		t.Fatalf("yoloRuleset(empty) = %v, want nil", got)
+	}
+}
+
+// TestYoloRulesetMechanismDefaultsMatchFullRuleset pins the core invariant:
+// the YOLO ruleset must decide delegate/handoff/cancel exactly as the user's
+// full ruleset does, because YOLO may only widen permissions, never narrow
+// them. Wildcard defaults are mirrored onto the control tools, and a ruleset
+// with no wildcard gets the engine's no-match default (deny) mirrored for
+// tools the user did not mention.
+func TestYoloRulesetMechanismDefaultsMatchFullRuleset(t *testing.T) {
+	configs := []string{
+		`"*": allow`,
+		`"*": deny`,
+		`read: allow`,
+		`"*": deny
+delegate: allow`,
+		`delegate: deny`,
+		`"*": allow
+delegate: deny`,
+		`"*": deny
+handoff: ask`,
+		`"*": deny
+delegate:
+  reviewer: allow
+  tester: ask`,
+	}
+	// Cancel and handoff calls always evaluate with a "*" argument; delegate
+	// matches on agent_type, so sample a few types.
+	for _, src := range configs {
+		full := permissionRuleset(t, src)
+		filtered := yoloRuleset(full)
+		for _, toolName := range []string{tools.NameDelegate, tools.NameHandoff, tools.NameCancel} {
+			args := []string{"*"}
+			if toolName == tools.NameDelegate {
+				args = []string{"builder", "reviewer", "tester"}
+			}
+			for _, arg := range args {
+				got := filtered.Evaluate(toolName, arg)
+				want := full.Evaluate(toolName, arg)
+				if got != want {
+					t.Fatalf("ruleset %q: %s(%q) under YOLO = %v, full ruleset = %v", src, toolName, arg, got, want)
+				}
+			}
+		}
+	}
+}
+
+// TestYoloAskDowngradeScope pins which tools' ask decisions YOLO relaxes:
+// ordinary tools and the delegate/handoff/cancel mechanism tools relax, while
+// done and compact_context keep their dedicated action semantics.
+func TestYoloAskDowngradeScope(t *testing.T) {
+	for name, want := range map[string]bool{
+		tools.NameDelegate:       true,
+		tools.NameHandoff:        true,
+		tools.NameCancel:         true,
+		tools.NameShell:          true,
+		tools.NameRead:           true,
+		tools.NameDone:           false,
+		tools.NameCompactContext: false,
+	} {
+		if got := yoloAskDowngradeTool(name); got != want {
+			t.Fatalf("yoloAskDowngradeTool(%q) = %v, want %v", name, got, want)
+		}
 	}
 }
 
@@ -210,8 +280,12 @@ func TestYoloToggleReturningToSameStateKeepsFrozenContext(t *testing.T) {
 // TestYoloRulesetKeepsNarrowGlobRules pins that YOLO's protected-rule filter
 // matches tool names the way the permission engine does — normalization plus
 // globs — instead of comparing exact strings. A narrow glob such as
-// `compact_*` is a rule about a protected tool and must survive YOLO; a
-// wildcard-only rule must not.
+// `compact_*` is a rule about a protected tool and must survive YOLO. The
+// wildcard `*` rule does not survive verbatim (it would deny every bypassed
+// ordinary tool on the visible surface); it is mirrored onto the
+// capability-granting control tools so their default keeps matching the user's
+// configuration, and a glob that only reaches unprotected tools (`sh*`) is
+// dropped.
 func TestYoloRulesetKeepsNarrowGlobRules(t *testing.T) {
 	ruleset := permission.Ruleset{
 		{Permission: "*", Pattern: "*", Action: permission.ActionDeny},
@@ -220,10 +294,10 @@ func TestYoloRulesetKeepsNarrowGlobRules(t *testing.T) {
 		{Permission: "sh*", Pattern: "*", Action: permission.ActionAllow},
 	}
 	filtered := yoloRuleset(ruleset)
-	// The seeded denies for the capability-granting tools come first, then the
-	// two surviving user rules; the wildcard and `sh*` rules are dropped.
-	if len(filtered) != len(yoloDeniedByDefaultTools)+2 {
-		t.Fatalf("YOLO ruleset = %+v, want the seeded denies plus the compact_* and handoff* rules only", filtered)
+	// The wildcard deny mirrors onto delegate/handoff/cancel, then the two
+	// surviving user rules; the `sh*` rule is dropped.
+	if len(filtered) != len(yoloCapabilityControlTools)+2 {
+		t.Fatalf("YOLO ruleset = %+v, want the wildcard mirrors plus the compact_* and handoff* rules only", filtered)
 	}
 	if got := compactContextPermissionAction(filtered); got != permission.ActionDeny {
 		t.Fatalf("compact_* deny must survive YOLO, got %v", got)
@@ -231,10 +305,22 @@ func TestYoloRulesetKeepsNarrowGlobRules(t *testing.T) {
 	if got := evaluateToolPermission(filtered, tools.NameHandoff, json.RawMessage(`{"agent":"planner"}`)); got.Action != permission.ActionAsk {
 		t.Fatalf("handoff* ask must survive YOLO, got %v", got.Action)
 	}
-	// A glob that only reaches unprotected tools is still dropped: YOLO
-	// relaxes everything but the control tools.
-	if got := evaluateToolPermission(filtered, tools.NameShell, json.RawMessage(`{"command":"ls"}`)); got.Action != permission.ActionDeny {
-		t.Fatalf("Shell rule must be dropped under YOLO, got %v", got.Action)
+	// The wildcard deny mirror keeps an allowlist role's default: delegate and
+	// cancel stay denied even though the wildcard rule itself is gone.
+	if got := evaluateToolPermission(filtered, tools.NameDelegate, json.RawMessage(`{"agent_type":"builder"}`)); got.Action != permission.ActionDeny {
+		t.Fatalf("delegate must keep the wildcard deny default under YOLO, got %v", got.Action)
+	}
+	if got := evaluateToolPermission(filtered, tools.NameCancel, json.RawMessage(`{}`)); got.Action != permission.ActionDeny {
+		t.Fatalf("cancel must keep the wildcard deny default under YOLO, got %v", got.Action)
+	}
+	// A glob that only reaches unprotected tools is still dropped.
+	for _, rule := range filtered {
+		if yoloProtectedPermissionRule(rule) {
+			continue
+		}
+		if rule.Permission == "sh*" || strings.HasPrefix(rule.Permission, "sh") {
+			t.Fatalf("Shell rule %+v must be dropped from the YOLO ruleset", rule)
+		}
 	}
 }
 
@@ -248,5 +334,40 @@ func TestYoloProtectedPermissionToolNormalizesNames(t *testing.T) {
 	}
 	if yoloProtectedPermissionTool(tools.NameShell) {
 		t.Fatal("shell must not be protected under YOLO")
+	}
+}
+
+// Regression (new adjudication), through the real MainAgent wiring: a
+// mechanism ask relaxes to an implicit allow while YOLO is on (no shared
+// confirmation dialog) and the dialog returns the moment YOLO switches off.
+func TestYoloMainGateMechanismAskRelaxesAndRestores(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.ruleset = permissionRuleset(t, "delegate: ask")
+	a.newTurn()
+	var confirmCalls atomic.Int32
+	a.confirmFn = subYoloConfirmStub(&confirmCalls)
+
+	call := message.ToolCall{Name: tools.NameDelegate, Args: json.RawMessage(`{"agent_type":"worker"}`)}
+	if err := a.toolExecutionPipeline().applyPermission(context.Background(), &call, &ToolExecutionResult{}); err == nil {
+		t.Fatal("mechanism ask must confirm while YOLO is off")
+	}
+	if got := confirmCalls.Load(); got != 1 {
+		t.Fatalf("confirm calls with YOLO off = %d, want 1", got)
+	}
+
+	a.yoloEnabled.Store(true)
+	if err := a.toolExecutionPipeline().applyPermission(context.Background(), &call, &ToolExecutionResult{}); err != nil {
+		t.Fatalf("YOLO must relax the mechanism ask to allow, got %v", err)
+	}
+	if got := confirmCalls.Load(); got != 1 {
+		t.Fatalf("confirm calls under YOLO = %d, want still 1", got)
+	}
+
+	a.yoloEnabled.Store(false)
+	if err := a.toolExecutionPipeline().applyPermission(context.Background(), &call, &ToolExecutionResult{}); err == nil {
+		t.Fatal("mechanism ask must confirm again after YOLO is switched off")
+	}
+	if got := confirmCalls.Load(); got != 2 {
+		t.Fatalf("confirm calls after YOLO off = %d, want 2", got)
 	}
 }

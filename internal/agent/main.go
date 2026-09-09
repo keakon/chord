@@ -431,7 +431,11 @@ type MainAgent struct {
 	projectConfig *config.Config
 	ruleset       permission.Ruleset  // merged ruleset (base + overlays)
 	overlay       *permission.Overlay // layered permission rules
-	yoloEnabled   atomic.Bool         // temporary main-agent permission bypass; Handoff/Delegate remain governed by rules
+	// YOLO bypasses ordinary tools' permission checks entirely. The
+	// mechanism control tools delegate/handoff/cancel stay rule-governed
+	// (their deny rules still reject, and their ask relaxes to allow); done
+	// and compact_context keep their dedicated actions.
+	yoloEnabled atomic.Bool
 
 	// confirmFn is called when permission evaluates to "ask". It must be set
 	// before Run whenever the active ruleset can yield ActionAsk.
@@ -1412,9 +1416,11 @@ func (a *MainAgent) snapshotRuleset() permission.Ruleset {
 
 // effectiveRuleset returns the ruleset that should drive the main agent's own
 // LLM-facing surface (system prompt, tool visibility) and rule evaluation.
-// Under YOLO it returns only the protected-tool rules so the visible surface
-// matches what bypassPermission actually enforces. SubAgents must use
-// subAgentBaseRuleset instead.
+// Under YOLO it returns the yoloRuleset view of the user's rules: unprotected
+// rules drop out (those tools bypass), while delegate/handoff/cancel/done/
+// compact_context rules survive together with the mechanism tools' mirrored
+// defaults, so the visible surface matches what the execution gate still
+// decides. SubAgents must use subAgentBaseRuleset instead.
 func (a *MainAgent) effectiveRuleset() permission.Ruleset {
 	ruleset := a.snapshotRuleset()
 	if a.yoloEnabled.Load() {

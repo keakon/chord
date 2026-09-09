@@ -56,12 +56,11 @@ type toolExecutionPipeline struct {
 	updatePending                 func(PendingToolCall)
 	reservedToolError             func(string) error
 	bypassPermission              func(string) bool
-	// yoloDowngradeAsk reports whether an ask decision may degrade to an
-	// implicit allow because the caller inherits the parent agent's YOLO mode.
-	// Deny never reaches the ask branch and the protected control tools report
-	// false here, so both stay enforced. nil keeps every ask confirming; the
-	// MainAgent never sets it because its own YOLO bypass already skips
-	// permission evaluation for unprotected tools.
+	// yoloDowngradeAsk reports whether an ask decision relaxes to an implicit
+	// allow because YOLO mode is on (for the main agent) or inherited from the
+	// parent (for SubAgents). Deny never reaches the ask branch; done returns
+	// before it and compact_context reports false so its explicit ask rules
+	// still confirm. nil keeps every ask confirming.
 	yoloDowngradeAsk func(string) bool
 	// loopExitAuthorized reports whether loop mode is active, which authorizes
 	// done against wildcard-only rules. nil means "not a loop-capable agent"
@@ -914,9 +913,12 @@ func (p toolExecutionPipeline) applyPermission(ctx context.Context, tc *message.
 			return nil
 		}
 		if p.yoloDowngradeAsk != nil && p.yoloDowngradeAsk(tc.Name) {
-			// Inherited parent YOLO relaxes ask to allow so ordinary work does
-			// not prompt; deny decisions never reach this branch and protected
-			// control tools report false above, so both stay enforced.
+			// YOLO relaxes ask to an implicit allow so the user is not
+			// prompted: mechanism tool asks stop confirming on the main agent,
+			// and a SubAgent's ordinary asks stop confirming while the parent
+			// YOLO is on. Deny decisions never reach this branch; done returns
+			// before it and an explicit compact_context ask reports false, so
+			// those stay as they are.
 			return nil
 		}
 		if p.confirm == nil {

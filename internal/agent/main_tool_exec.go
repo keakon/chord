@@ -91,6 +91,14 @@ func (a *MainAgent) toolExecutionPipeline() toolExecutionPipeline {
 		bypassPermission: func(name string) bool {
 			return a.YoloEnabled() && !yoloProtectedPermissionTool(name)
 		},
+		yoloDowngradeAsk: func(name string) bool {
+			// Under YOLO the mechanism control tools' ask rules stop raising
+			// the shared confirmation dialog while their deny rules still
+			// reject; ordinary tools are already skipped by bypassPermission
+			// above, and done/compact_context report false through
+			// yoloAskDowngradeTool.
+			return a.YoloEnabled() && yoloAskDowngradeTool(name)
+		},
 		loopExitAuthorized: a.loopExitAuthorized,
 		visibleToolNames:   a.mainVisibleLLMToolNames,
 		appendToolActivity: func(rec recovery.ToolActivityRecord) error {

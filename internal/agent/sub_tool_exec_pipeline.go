@@ -56,10 +56,12 @@ func (s *SubAgent) toolExecutionPipeline() toolExecutionPipeline {
 		confirm:        confirm,
 		yoloDowngradeAsk: func(name string) bool {
 			// SubAgents inherit the main agent's YOLO mode at each decision:
-			// ask degrades to an implicit allow while the parent YOLO is on.
-			// Deny decisions never reach this hook and the protected control
-			// tools are excluded, so both stay enforced.
-			return s.parent.YoloEnabled() && !yoloProtectedPermissionTool(name)
+			// ask relaxes to an implicit allow while the parent YOLO is on.
+			// Deny decisions never reach this hook; done and compact_context
+			// keep their dedicated action semantics and report false here.
+			// delegate and cancel relax exactly as they do on the main agent,
+			// so the mechanism tools behave the same at every delegation depth.
+			return s.parent.YoloEnabled() && yoloAskDowngradeTool(name)
 		},
 		currentTurnID:         s.currentTurnID,
 		captureWalltimeTarget: s.captureWalltimeTarget,

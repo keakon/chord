@@ -100,19 +100,35 @@ func TestSubAgentYoloInheritanceKeepsDenyGuardrail(t *testing.T) {
 	}
 }
 
-// TestSubAgentYoloInheritanceKeepsProtectedToolsAsking locks in that the
-// capability-granting control tools stay protected from YOLO: a delegate ask
-// still reaches the shared confirmation flow under the parent YOLO.
-func TestSubAgentYoloInheritanceKeepsProtectedToolsAsking(t *testing.T) {
+// TestSubAgentYoloInheritanceRelaxesMechanismAsk locks in that the mechanism
+// control tools relax under inherited YOLO exactly as they do on the main
+// agent: a delegate ask stops prompting while the parent YOLO is on and goes
+// back to prompting the moment the parent switches it off.
+func TestSubAgentYoloInheritanceRelaxesMechanismAsk(t *testing.T) {
 	a, sub := newSubAgentWithRoleRules(t, "delegate: ask\n")
 	var confirmCalls atomic.Int32
 	a.confirmFn = subYoloConfirmStub(&confirmCalls)
-	a.yoloEnabled.Store(true)
 
 	if err := subYoloApplyPermission(t, sub, tools.NameDelegate); err == nil {
-		t.Fatal("inherited YOLO must not downgrade a protected delegate ask")
+		t.Fatal("mechanism ask must confirm while the parent YOLO mode is off")
 	}
 	if got := confirmCalls.Load(); got != 1 {
-		t.Fatalf("confirm calls = %d, want 1 for a protected tool", got)
+		t.Fatalf("confirm calls with YOLO off = %d, want 1", got)
+	}
+
+	a.yoloEnabled.Store(true)
+	if err := subYoloApplyPermission(t, sub, tools.NameDelegate); err != nil {
+		t.Fatalf("inherited YOLO must relax a mechanism ask, got %v", err)
+	}
+	if got := confirmCalls.Load(); got != 1 {
+		t.Fatalf("confirm calls under inherited YOLO = %d, want still 1", got)
+	}
+
+	a.yoloEnabled.Store(false)
+	if err := subYoloApplyPermission(t, sub, tools.NameDelegate); err == nil {
+		t.Fatal("mechanism ask must confirm again after the parent switches YOLO off")
+	}
+	if got := confirmCalls.Load(); got != 2 {
+		t.Fatalf("confirm calls after YOLO off = %d, want 2", got)
 	}
 }
