@@ -128,7 +128,7 @@ func (t *NotifyTool) Parameters() map[string]any {
 		}
 		properties["grant_write_scope"] = map[string]any{
 			"type":                 "object",
-			"description":          "Add paths to the target worker's expected_write_scope before delivering a plain targeted message. Requires target_task_id and cannot be combined with message_type=response. Paths are only added; read_only cannot change. Use this instead of cancelling and re-delegating work for a missing path.",
+			"description":          "Add paths to the target worker's expected_write_scope before delivering a plain targeted message. Requires target_task_id and cannot be combined with message_type=response. Paths are only added; the grant never narrows a scope. Use this instead of cancelling and re-delegating work for a missing path.",
 			"properties":           writeScopePathProperties(),
 			"additionalProperties": false,
 		}
@@ -220,9 +220,6 @@ func (t *NotifyTool) Execute(ctx context.Context, raw json.RawMessage) (string, 
 			return "", fmt.Errorf("grant_write_scope cannot be combined with message_type=response; grant paths with a separate plain targeted notify")
 		}
 		a.GrantScope = new(a.GrantScope.Normalized())
-		if a.GrantScope.ReadOnly {
-			return "", fmt.Errorf("grant_write_scope adds paths only; read_only is fixed when the task is delegated")
-		}
 		if a.GrantScope.Empty() {
 			return "", fmt.Errorf("grant_write_scope must add at least one file, path_prefix, or module")
 		}

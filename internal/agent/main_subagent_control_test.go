@@ -1304,9 +1304,9 @@ func TestRehydratePersistenceFailureDoesNotRegisterRuntime(t *testing.T) {
 		RuntimeParked:    true,
 		ResumePolicy:     taskResumePolicyNotify,
 		LatestInstanceID: "worker-old",
-		// A rehydratable record must carry the write boundary it was admitted
-		// under (rehydrateTask refuses scope-less records outright), even
-		// though this test only exercises the persistence-failure path.
+		// The fixture carries a realistic write boundary, matching records a
+		// delegated task would have been admitted under; this test only
+		// exercises the persistence-failure path.
 		ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{"internal/agent"}},
 	}
 	a.setTaskRecords(map[string]*DurableTaskRecord{record.TaskID: record})
@@ -2504,6 +2504,55 @@ func TestRehydratePreservesConfiguredOrchestrationAndWorkDir(t *testing.T) {
 	}
 }
 
+// A task admitted under a role that registers no file-modifying tools carries
+// an empty write scope ("nothing to declare"); revival must accept that record
+// because the role's tool surface is the boundary, not a declared path list.
+func TestRehydrateAcceptsEmptyScopeForNoFileWriteToolRole(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.cachedWorkDir = a.projectRoot
+	a.SetAgentConfigs(map[string]*config.AgentConfig{
+		"reviewer": {
+			Name:   "reviewer",
+			Mode:   config.AgentModeSubAgent,
+			Models: map[string][]string{"default": {"test/test-model"}},
+			Permission: parsePermissionNode(t,
+				"write: deny\nedit: deny\ndelete: deny\napply_patch: deny\nread: allow\nshell: deny\n"),
+		},
+	})
+	a.SetLLMFactory(func(string, []string, string) *llm.Client { return newTestLLMClient() })
+	a.tools.Register(tools.ReadTool{})
+	a.tools.Register(tools.WriteTool{})
+	a.tools.Register(tools.NewShellTool("bash"))
+	record := &DurableTaskRecord{
+		TaskID:             "adhoc-rehydrate-empty",
+		AgentDefName:       "reviewer",
+		TaskDesc:           "resume read-only survey",
+		State:              string(SubAgentStateCompleted),
+		ResumePolicy:       taskResumePolicyNotify,
+		LatestInstanceID:   "reviewer-old",
+		InstanceHistory:    []string{"reviewer-old"},
+		RuntimeParked:      true,
+		ExpectedWriteScope: tools.WriteScope{},
+	}
+	a.setTaskRecords(map[string]*DurableTaskRecord{record.TaskID: record})
+
+	sub, _, err := a.rehydrateTask(record)
+	if err != nil {
+		t.Fatalf("rehydrateTask: %v", err)
+	}
+	if !sub.currentWriteScope().Empty() {
+		t.Fatalf("rehydrated scope = %#v, want empty preserved", sub.currentWriteScope())
+	}
+	for _, name := range []string{tools.NameWrite, tools.NameEdit, tools.NameDelete, tools.NameApplyPatch} {
+		if _, ok := sub.tools.Get(name); ok {
+			t.Fatalf("file-modifying tool %s registered for a denied role after rehydrate", name)
+		}
+	}
+	if _, ok := sub.tools.Get(tools.NameRead); !ok {
+		t.Fatal("read tool lost for a role that allows it")
+	}
+}
+
 func TestCreateSubAgentUsesCachedWorkDir(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 1)
@@ -2551,8 +2600,7 @@ func TestConcurrentTaskRehydratePublishesOneRuntime(t *testing.T) {
 		LatestInstanceID: "restorer-40",
 		InstanceHistory:  []string{"restorer-40"},
 		RuntimeParked:    true,
-		// Scope-less records are refused outright by rehydrateTask, so the
-		// concurrent-activation fixture must carry the boundary a real
+		// The concurrent-activation fixture carries the boundary a real
 		// delegated task would have been admitted under.
 		ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{"internal/agent"}},
 	}
@@ -2630,9 +2678,9 @@ func newRevivalRaceTestMainAgent(t *testing.T) (*MainAgent, *DurableTaskRecord) 
 		LatestInstanceID: "restorer-9",
 		InstanceHistory:  []string{"restorer-9"},
 		RuntimeParked:    true,
-		// Rehydration refuses scope-less records, and both revival-race tests
-		// pin the attempt/settlement handling around rehydration — not the
-		// write boundary itself — so the fixture carries a plausible one.
+		// Both revival-race tests pin the attempt/settlement handling around
+		// rehydration — not the write boundary itself — so the fixture carries a
+		// plausible one.
 		ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{"internal/agent"}},
 	}
 	a.setTaskRecords(map[string]*DurableTaskRecord{record.TaskID: cloneDurableTaskRecord(record)})
@@ -2934,8 +2982,8 @@ func TestParkedCancelledTaskAllowsExplicitUserResume(t *testing.T) {
 	a.SetLLMFactory(func(string, []string, string) *llm.Client { return newTestLLMClient() })
 	sub := newControllableTestSubAgent(t, a, "adhoc-cancelled-user")
 	sub.agentDefName = "restorer"
-	// The explicit user resume revives the parked record through rehydration,
-	// which refuses scope-less records; carry the boundary a real task had.
+	// The explicit user resume revives the parked record through rehydration;
+	// carry the boundary a real task would have had.
 	sub.writeScope = tools.WriteScope{PathPrefix: []string{"internal/agent"}}
 	sub.setState(SubAgentStateCancelled, "stopped by user")
 	a.syncTaskRecordFromSub(sub, "stopped by user")
@@ -4274,16 +4322,23 @@ func TestNotifyWithScopeGrantWidensALiveWorkersScope(t *testing.T) {
 	}
 }
 
-func TestNotifyScopeGrantRejectsNoOpAndReadOnlyTargets(t *testing.T) {
+func TestNotifyScopeGrantRejectsNoOpAndNoFileWriteToolTargets(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
+	a.agentConfigs = map[string]*config.AgentConfig{
+		"reader": {
+			Name:       "reader",
+			Mode:       "subagent",
+			Permission: parsePermissionNode(t, "write: deny\nedit: deny\ndelete: deny\napply_patch: deny\n"),
+		},
+	}
 	a.setTaskRecords(map[string]*DurableTaskRecord{
 		"adhoc-writer": {
-			TaskID: "adhoc-writer", AgentDefName: "worker", State: string(SubAgentStateIdle),
+			TaskID: "adhoc-writer", AgentDefName: "writer", State: string(SubAgentStateIdle),
 			ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{"internal/agent"}},
 		},
 		"adhoc-reader": {
-			TaskID: "adhoc-reader", AgentDefName: "worker", State: string(SubAgentStateIdle),
-			ExpectedWriteScope: tools.WriteScope{ReadOnly: true},
+			TaskID: "adhoc-reader", AgentDefName: "reader", State: string(SubAgentStateIdle),
+			ExpectedWriteScope: tools.WriteScope{},
 		},
 	})
 
@@ -4292,8 +4347,8 @@ func TestNotifyScopeGrantRejectsNoOpAndReadOnlyTargets(t *testing.T) {
 		t.Fatalf("no-op grant error = %v, want the caller told it changes nothing", err)
 	}
 	_, err = a.NotifySubAgentWithScopeGrant(context.Background(), "adhoc-reader", "msg", "", tools.WriteScope{PathPrefix: []string{"internal/agent"}})
-	if err == nil || !strings.Contains(err.Error(), "read-only") {
-		t.Fatalf("read-only grant error = %v, want it refused with a re-delegation hint", err)
+	if err == nil || !strings.Contains(err.Error(), "registers no file-modifying tools") {
+		t.Fatalf("no-file-write-tool grant error = %v, want it refused with a re-delegation hint", err)
 	}
 }
 

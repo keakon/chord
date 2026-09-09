@@ -93,6 +93,16 @@ func (c subAgentDelegateCreator) CreateSubAgent(ctx context.Context, description
 	return c.parent.CreateSubAgent(ctx, description, agentType, planTaskRef, semanticTaskKey, expectedWriteScope)
 }
 
+// AgentRoleRegistersNoFileWriteTools implements tools.AgentFileWriteSurface for
+// nested delegation; the classification depends only on the target agent
+// definition's role, never on the delegating worker.
+func (c subAgentDelegateCreator) AgentRoleRegistersNoFileWriteTools(agentType string) bool {
+	if c.parent == nil {
+		return false
+	}
+	return c.parent.agentRoleRegistersNoFileWriteTools(agentType)
+}
+
 func (c subAgentDelegateCreator) AvailableSubAgents() []tools.AgentInfo {
 	if c.parent == nil {
 		return nil
@@ -157,17 +167,23 @@ func effectiveDirectActiveChildLimit(cfg config.DelegationConfig) int {
 	return cfg.EffectiveMaxChildren()
 }
 
-func childWriteScopeWithinParent(parent, child tools.WriteScope, baseDir string) bool {
+// childWriteScopeWithinParent reports whether a child delegation's write scope
+// stays inside the parent task's boundary. A child whose role registers no
+// file-modifying tools cannot modify files at all, so its scope — empty or
+// declared — is always within the parent. A write-capable child must declare
+// paths and keep every one inside the parent's declared scope; an empty scope
+// from such a role would be broader than any scoped parent and is rejected.
+func childWriteScopeWithinParent(parent, child tools.WriteScope, childRoleRegistersNoFileWriteTools bool, baseDir string) bool {
 	parent = parent.Normalized()
 	child = child.Normalized()
 	if parent.Empty() {
 		return true
 	}
-	if parent.ReadOnly {
-		return child.ReadOnly
+	if childRoleRegistersNoFileWriteTools {
+		return true
 	}
-	if child.Empty() || child.ReadOnly {
-		return child.ReadOnly
+	if child.Empty() {
+		return false
 	}
 	for _, file := range child.Files {
 		if !writeScopeAllowsPath(parent, normalizedScopeAbsPath(file, baseDir), baseDir) {
@@ -326,7 +342,7 @@ func (a *MainAgent) findPendingDuplicateOrConflictingTaskLocked(ownerAgentID, ow
 			OwnerTaskID:        pending.ownerTaskID,
 			State:              string(SubAgentStateRunning),
 		}
-		disposition, conflict := duplicateOrConflictingTaskRecord(rec, ownerAgentID, ownerTaskID, agentType, planTaskRef, semanticTaskKey, semanticKeyExplicit, expectedWriteScope, a.writeScopeBaseDir())
+		disposition, conflict := a.duplicateOrConflictingTaskRecord(rec, ownerAgentID, ownerTaskID, agentType, planTaskRef, semanticTaskKey, semanticKeyExplicit, expectedWriteScope, a.writeScopeBaseDir())
 		if conflict || disposition == taskDuplicateExplicitKey {
 			return rec, disposition, conflict, pending
 		}
@@ -878,12 +894,12 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 	semanticKeyExplicit := strings.TrimSpace(semanticTaskKey) != ""
 	semanticTaskKey = resolveSemanticTaskKey(semanticTaskKey, description)
 	expectedWriteScope = expectedWriteScope.Normalized()
-	if !caller.IsMain && !childWriteScopeWithinParent(caller.WriteScope, expectedWriteScope, caller.WorkDir) {
-		return tools.TaskHandle{}, fmt.Errorf("child expected_write_scope must not be broader than the parent SubAgent task scope")
-	}
 	agentDef, err := a.resolveAgentDef(agentType)
 	if err != nil {
 		return tools.TaskHandle{}, err
+	}
+	if !caller.IsMain && !childWriteScopeWithinParent(caller.WriteScope, expectedWriteScope, a.agentRoleRegistersNoFileWriteTools(agentDef.Name), caller.WorkDir) {
+		return tools.TaskHandle{}, fmt.Errorf("child expected_write_scope must not be broader than the parent SubAgent task scope")
 	}
 	admission := &subAgentAdmission{
 		taskID:             taskID,
@@ -1160,6 +1176,68 @@ func taskIDForSub(sub *SubAgent) string {
 		return ""
 	}
 	return sub.taskID
+}
+
+// agentDefConfigForRole mirrors resolveAgentDef's lookup (registered config
+// first, built-in fallback) without its validation errors, and takes a state
+// snapshot so callers inside registry locks can classify a role from a record's
+// AgentDefName without racing config replacement. Returns nil when the role has
+// no config document.
+func (a *MainAgent) agentDefConfigForRole(agentType string) *config.AgentConfig {
+	if a == nil || strings.TrimSpace(agentType) == "" {
+		return nil
+	}
+	if cfg := a.snapshotAgentConfigByName(agentType); cfg != nil {
+		return cfg
+	}
+	return config.BuiltinAgentConfigs()[agentType]
+}
+
+// rulesetRegistersNoFileWriteTools reports whether the effective permission
+// ruleset keeps every canonical file-modifying tool (write, edit, delete,
+// apply_patch) out of the worker's registry. A role that denies all four
+// cannot modify files through file tools, which is what makes an empty write
+// scope safe for its delegates and what keeps its tasks from conflicting with
+// any other task over file paths.
+func rulesetRegistersNoFileWriteTools(ruleset permission.Ruleset) bool {
+	for _, name := range []string{tools.NameWrite, tools.NameEdit, tools.NameApplyPatch, tools.NameDelete} {
+		if !ruleset.IsDisabled(name) {
+			return false
+		}
+	}
+	return true
+}
+
+// agentRoleRegistersNoFileWriteTools reports whether the agent definition's
+// role registers no file-modifying tool under the current effective ruleset.
+// Unknown or unresolvable roles default to false (write-capable) so the
+// conservative path-scope and overlap semantics apply.
+func (a *MainAgent) agentRoleRegistersNoFileWriteTools(agentType string) bool {
+	cfg := a.agentDefConfigForRole(agentType)
+	if cfg == nil {
+		return false
+	}
+	return rulesetRegistersNoFileWriteTools(a.buildSubAgentRuleset(cfg))
+}
+
+// AgentRoleRegistersNoFileWriteTools implements tools.AgentFileWriteSurface so
+// the Delegate tool can accept an empty expected_write_scope when the chosen
+// agent_type's role registers no file-modifying tools.
+func (a *MainAgent) AgentRoleRegistersNoFileWriteTools(agentType string) bool {
+	return a.agentRoleRegistersNoFileWriteTools(agentType)
+}
+
+// taskScopesConflict reports whether two delegated tasks would run as
+// concurrent writers over an overlapping boundary. A task whose role registers
+// no file-modifying tools never writes files, so it conflicts with nothing; a
+// write-capable task conflicts with another write-capable task exactly when
+// their boundaries overlap, where an empty scope is the conservative
+// whole-workspace boundary.
+func (a *MainAgent) taskScopesConflict(agentTypeA string, scopeA tools.WriteScope, agentTypeB string, scopeB tools.WriteScope, baseDir string) bool {
+	if a.agentRoleRegistersNoFileWriteTools(agentTypeA) || a.agentRoleRegistersNoFileWriteTools(agentTypeB) {
+		return false
+	}
+	return writeScopesOverlap(scopeA, scopeB, baseDir)
 }
 
 func (a *MainAgent) resolveAgentDef(agentType string) (*config.AgentConfig, error) {

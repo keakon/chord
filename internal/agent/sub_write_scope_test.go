@@ -112,47 +112,70 @@ func TestSubAgentWriteScopeRejectsApplyPatchMoveTargetOutsideScope(t *testing.T)
 	}
 }
 
-func TestSubAgentReadOnlyScopeRejectsMutatingTool(t *testing.T) {
-	parent, sub := newMixedBatchTestSubAgent(t)
-	root := t.TempDir()
-	parent.projectRoot = root
-	sub.workDir = root
-	sub.writeScope = tools.WriteScope{ReadOnly: true}
-	sub.tools.Register(tools.WriteTool{BaseDir: root})
-
-	args, _ := json.Marshal(map[string]string{"path": "blocked.txt", "content": "no"})
-	if _, err := sub.executeToolCall(context.Background(), message.ToolCall{ID: "blocked", Name: tools.NameWrite, Args: args}); err == nil || !strings.Contains(err.Error(), "read-only") {
-		t.Fatalf("read-only write error = %v, want rejection", err)
+// Whether a worker may modify files is decided by its role's permission
+// ruleset: a role that denies every file-modifying tool never gets write, edit,
+// delete, or apply_patch registered. The write-scope gate therefore only ever
+// sees file tools that a role actually allows; an empty expected_write_scope is
+// safe exactly because such a role registers none of them.
+func TestSubAgentNoFileWriteToolRoleRegistersNoFileMutationTools(t *testing.T) {
+	ruleset := permission.Ruleset{
+		{Permission: tools.NameRead, Pattern: "*", Action: permission.ActionAllow},
+		{Permission: tools.NameWrite, Pattern: "*", Action: permission.ActionDeny},
+		{Permission: tools.NameEdit, Pattern: "*", Action: permission.ActionDeny},
+		{Permission: tools.NameDelete, Pattern: "*", Action: permission.ActionDeny},
+		{Permission: tools.NameApplyPatch, Pattern: "*", Action: permission.ActionDeny},
 	}
-}
-
-// Command tools bypass the write-scope gate in every scope: a read-only task
-// still refuses file-modifying tools, but whether the worker may run shell or
-// spawn is the role permission rules' decision, not the task's read-only flag.
-func TestSubAgentReadOnlyScopeAllowsCommandToolsAtTheGate(t *testing.T) {
-	_, sub := newMixedBatchTestSubAgent(t)
-	sub.writeScope = tools.WriteScope{ReadOnly: true}
-	for _, name := range []string{tools.NameShell, tools.NameSpawn} {
-		args, _ := json.Marshal(map[string]string{"command": "git status", "description": "read-only status check"})
-		if err := sub.toolExecutionPipeline().validateWriteScope(message.ToolCall{ID: "cmd", Name: name, Args: args}); err != nil {
-			t.Fatalf("read-only scope gate rejected %s: %v", name, err)
+	_, sub := newScopedToolSurfaceTestSubAgent(t, tools.WriteScope{}, ruleset)
+	for _, name := range []string{tools.NameWrite, tools.NameEdit, tools.NameDelete, tools.NameApplyPatch} {
+		if _, ok := sub.tools.Get(name); ok {
+			t.Fatalf("file-modifying tool %s registered for a role that denies it", name)
+		}
+	}
+	for _, name := range []string{tools.NameRead, tools.NameShell, tools.NameSpawn} {
+		if _, ok := sub.tools.Get(name); !ok {
+			t.Fatalf("non-file tool %s lost for a role that only denies file writes", name)
 		}
 	}
 }
 
-func TestSubAgentReadOnlyScopeAllowsCoordinationTools(t *testing.T) {
+// Command tools bypass the write-scope gate for every scope: whether the
+// worker may run shell or spawn is the role permission rules' decision, not
+// the task's declared paths — even for a role whose ruleset denies every
+// file-modifying tool. The shell tool is registered here (the role keeps it),
+// so the gate reaches its shell exemption branch instead of short-circuiting
+// on an unknown tool name.
+func TestSubAgentNoFileWriteToolRoleAllowsCommandToolsAtTheGate(t *testing.T) {
+	ruleset := permission.Ruleset{
+		{Permission: tools.NameRead, Pattern: "*", Action: permission.ActionAllow},
+		{Permission: tools.NameWrite, Pattern: "*", Action: permission.ActionDeny},
+		{Permission: tools.NameEdit, Pattern: "*", Action: permission.ActionDeny},
+		{Permission: tools.NameDelete, Pattern: "*", Action: permission.ActionDeny},
+		{Permission: tools.NameApplyPatch, Pattern: "*", Action: permission.ActionDeny},
+	}
+	_, sub := newScopedToolSurfaceTestSubAgent(t, tools.WriteScope{PathPrefix: []string{"internal"}}, ruleset)
+	for _, name := range []string{tools.NameShell, tools.NameSpawn} {
+		args, _ := json.Marshal(map[string]string{"command": "git status", "description": "read-only status check"})
+		if err := sub.toolExecutionPipeline().validateWriteScope(message.ToolCall{ID: "cmd", Name: name, Args: args}); err != nil {
+			t.Fatalf("no-file-write-tool scope gate rejected %s: %v", name, err)
+		}
+	}
+}
+
+func TestSubAgentCoordinationToolsAllowedAtTheGate(t *testing.T) {
 	_, sub := newMixedBatchTestSubAgent(t)
-	sub.writeScope = tools.WriteScope{ReadOnly: true}
+	sub.writeScope = tools.WriteScope{PathPrefix: []string{"internal"}}
 	args, _ := json.Marshal(map[string]string{"summary": "review complete"})
 	if err := sub.toolExecutionPipeline().validateWriteScope(message.ToolCall{ID: "complete", Name: tools.NameComplete, Args: args}); err != nil {
-		t.Fatalf("read-only Complete rejected: %v", err)
+		t.Fatalf("path-scoped Complete rejected: %v", err)
 	}
 }
 
 // Command tools bypass the write-scope gate for every path-based scope too: a
 // command line can mutate anywhere it reaches, so its side effects cannot be
 // path-validated; availability is decided by the role's permission rules
-// instead (see TestSubAgentCommandSurfaceFollowsRoleRulesNotScope).
+// instead (see TestSubAgentCommandSurfaceFollowsRoleRulesNotScope). The tools
+// are registered so the gate actually reaches its shell/spawn exemption
+// branch instead of short-circuiting on an unknown tool name.
 func TestSubAgentPathScopeAllowsCommandToolsAtTheGate(t *testing.T) {
 	for _, scope := range []tools.WriteScope{
 		{PathPrefix: []string{"internal"}},
@@ -160,6 +183,8 @@ func TestSubAgentPathScopeAllowsCommandToolsAtTheGate(t *testing.T) {
 		{Modules: []string{"backend"}},
 	} {
 		_, sub := newMixedBatchTestSubAgent(t)
+		sub.tools.Register(tools.NewShellTool("bash"))
+		sub.tools.Register(tools.SpawnTool{})
 		sub.writeScope = scope
 		for _, name := range []string{tools.NameShell, tools.NameSpawn} {
 			args, _ := json.Marshal(map[string]string{"command": "go test ./internal/a", "description": "verification"})
@@ -205,13 +230,14 @@ func newScopedToolSurfaceTestSubAgent(t *testing.T, scope tools.WriteScope, rule
 
 // TestSubAgentCommandSurfaceFollowsRoleRulesNotScope pins the delegated
 // command-tool surface: Shell and Spawn stay registered for every write scope
-// — unscoped, path/file/module-scoped, and read-only alike — unless the role's
-// permission rules deny the tool. A wildcard-deny rule removes the tool from
-// the registry, the frozen tool definitions sent to the model, and the
-// capability prompt, which then renders the Command Execution Boundary so the
-// worker does not chase builds and tests it can never run. A write scope never
-// removes command tools: the execution-time write-scope gate checks
-// file-modifying tools only.
+// — empty, path/file/module-scoped, and no-file-write-tool-role tasks alike —
+// unless the role's permission rules deny the tool. A wildcard-deny rule
+// removes the tool from the registry, the frozen tool definitions sent to the
+// model, and the capability prompt, which then renders the Command Execution
+// Boundary so the worker does not chase builds and tests it can never run. A
+// write scope never removes command tools: the execution-time write-scope gate
+// checks file-modifying tools only, and a role that denies file writes
+// expresses that through the file tools it keeps out of the registry.
 func TestSubAgentCommandSurfaceFollowsRoleRulesNotScope(t *testing.T) {
 	deny := func(name string) permission.Ruleset {
 		return permission.Ruleset{{Permission: name, Pattern: "*", Action: permission.ActionDeny}}
@@ -226,10 +252,9 @@ func TestSubAgentCommandSurfaceFollowsRoleRulesNotScope(t *testing.T) {
 		{name: "path-scope-shell-kept", scope: tools.WriteScope{PathPrefix: []string{"internal"}}},
 		{name: "file-scope-shell-kept", scope: tools.WriteScope{Files: []string{"internal/a.go"}}},
 		{name: "module-scope-shell-kept", scope: tools.WriteScope{Modules: []string{"backend"}}},
-		{name: "read-only-shell-kept", scope: tools.WriteScope{ReadOnly: true}},
+		{name: "empty-scope-shell-denied", scope: tools.WriteScope{}, rules: deny(tools.NameShell), denied: tools.NameShell},
 		{name: "path-scope-shell-denied", scope: tools.WriteScope{PathPrefix: []string{"internal"}}, rules: deny(tools.NameShell), denied: tools.NameShell},
-		{name: "read-only-shell-denied", scope: tools.WriteScope{ReadOnly: true}, rules: deny(tools.NameShell), denied: tools.NameShell},
-		{name: "read-only-spawn-denied", scope: tools.WriteScope{ReadOnly: true}, rules: deny(tools.NameSpawn), denied: tools.NameSpawn},
+		{name: "empty-scope-spawn-denied", scope: tools.WriteScope{}, rules: deny(tools.NameSpawn), denied: tools.NameSpawn},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, sub := newScopedToolSurfaceTestSubAgent(t, tc.scope, tc.rules)

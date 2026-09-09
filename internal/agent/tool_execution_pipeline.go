@@ -76,8 +76,8 @@ type toolExecutionPipeline struct {
 
 // shellCallArguments describes a Shell call the way every caller in this
 // package needs to reason about it: what it runs and where. Decoding happens
-// here alone so the permission/tool-card argument summary and the
-// verification ledger cannot disagree about what a given Shell call is.
+// here alone so the permission/tool-card argument summary and the rest of the
+// agent agree about what a given Shell call is.
 type shellCallArguments struct {
 	Command string `json:"command"`
 	Workdir string `json:"workdir,omitempty"`
@@ -106,20 +106,7 @@ func (p toolExecutionPipeline) validateWriteScope(tc message.ToolCall) error {
 		// effects cannot be validated against a declared path scope. Command
 		// tools therefore never participate in write-scope checks: whether
 		// they are usable is decided solely by the role's permission rules (a
-		// wildcard-deny rule keeps the tool out of the registry entirely), not
-		// by the task's declared paths or its read-only flag.
-		return nil
-	}
-	if scope.ReadOnly {
-		if tools.IsFileMutation(tc.Name) {
-			return fmt.Errorf("tool %q is unavailable because this SubAgent task is read-only", tc.Name)
-		}
-		if !writeScopeKnownNonWorkspaceMutation(tc.Name) {
-			tool, _ := p.registry.Get(tc.Name)
-			if tool != nil && !tool.IsReadOnly() {
-				return fmt.Errorf("tool %q is unavailable because this SubAgent task is read-only and the runtime cannot prove it leaves the workspace unchanged", tc.Name)
-			}
-		}
+		// wildcard-deny rule keeps the tool out of the registry entirely).
 		return nil
 	}
 	if writeScopeKnownNonWorkspaceMutation(tc.Name) {

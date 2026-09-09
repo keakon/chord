@@ -119,7 +119,7 @@ func TestDelegateWorkerRendersHandleFieldsAndTrailingNote(t *testing.T) {
 		Type:          BlockToolCall,
 		ToolName:      tools.NameDelegate,
 		Content:       `{"description":"review the card styles","agent_type":"reviewer"}`,
-		ResultContent: `{"status":"started","task_id":"adhoc-7","agent_id":"expert-12","message":"running in background","plan_task_ref":"view-switch","semantic_task_key":"tui-view-switch-streaming-card-order","expected_write_scope":{"read_only":true}}` + "\n" + `Note: ignored unrecognized parameter(s): args.expected_write_scope.verification_commands`,
+		ResultContent: `{"status":"started","task_id":"adhoc-7","agent_id":"expert-12","message":"running in background","plan_task_ref":"view-switch","semantic_task_key":"tui-view-switch-streaming-card-order","expected_write_scope":{"path_prefix":["internal/tui"]}}` + "\n" + `Note: ignored unrecognized parameter(s): args.expected_write_scope.verification_commands`,
 		ResultDone:    true,
 	}
 	plain := stripANSI(strings.Join(b.Render(120, ""), "\n"))
@@ -134,7 +134,7 @@ func TestDelegateWorkerRendersHandleFieldsAndTrailingNote(t *testing.T) {
 		"↳ Task id: adhoc-7",
 		"↳ Plan task ref: view-switch",
 		"↳ Semantic task key: tui-view-switch-streaming-card-order",
-		"↳ Expected write scope: read_only=true",
+		"↳ Expected write scope: path_prefix=[internal/tui]",
 		"↳ Message: running in background",
 		"Note: ignored unrecognized parameter(s): args.expected_write_scope.verification_commands",
 	} {

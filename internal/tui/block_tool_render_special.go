@@ -574,14 +574,11 @@ func appendTaskHandleFieldRows(out *[]string, h tools.TaskHandle) {
 }
 
 // formatWriteScopeSummary condenses a WriteScope declaration into a single
-// compact value for one field row, e.g. "read_only=true" or
-// "files=[a.go], path_prefix=[internal/agent]". An all-empty scope
-// returns "" (the caller filters that case out before calling).
+// compact value for one field row, e.g.
+// "files=[a.go], path_prefix=[internal/agent]". An all-empty scope returns ""
+// (the caller filters that case out before calling).
 func formatWriteScopeSummary(s tools.WriteScope) string {
 	var parts []string
-	if s.ReadOnly {
-		parts = append(parts, "read_only=true")
-	}
 	if len(s.Files) > 0 {
 		parts = append(parts, "files=["+strings.Join(s.Files, ", ")+"]")
 	}

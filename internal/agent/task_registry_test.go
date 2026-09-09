@@ -7,8 +7,24 @@ import (
 	"testing"
 	"time"
 
+	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/tools"
 )
+
+// configureNoFileWriteWorkerRole registers a "worker" agent definition whose
+// ruleset denies every file-modifying tool, so its tasks carry empty write
+// scopes and never conflict with other tasks over file paths: the read-only
+// property of a task is expressed through the role's tool surface.
+func configureNoFileWriteWorkerRole(t *testing.T, a *MainAgent) {
+	t.Helper()
+	a.agentConfigs = map[string]*config.AgentConfig{
+		"worker": {
+			Name:       "worker",
+			Mode:       "subagent",
+			Permission: parsePermissionNode(t, "write: deny\nedit: deny\ndelete: deny\napply_patch: deny\n"),
+		},
+	}
+}
 
 // findDuplicateOrConflictingTask is a test-only locking wrapper; production
 // callers hold subs.mu and use findDuplicateOrConflictingTaskLocked directly.
@@ -56,12 +72,6 @@ func TestWriteScopesOverlapMatchesExactAndNestedPathsOnly(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "readonly never overlaps",
-			a:    tools.WriteScope{ReadOnly: true, PathPrefix: []string{"internal/foo"}},
-			b:    tools.WriteScope{PathPrefix: []string{"internal/foo"}},
-			want: false,
-		},
-		{
 			name: "unspecified write scope is exclusive",
 			a:    tools.WriteScope{},
 			b:    tools.WriteScope{Files: []string{"internal/foo/a.go"}},
@@ -73,12 +83,6 @@ func TestWriteScopesOverlapMatchesExactAndNestedPathsOnly(t *testing.T) {
 			b:    tools.WriteScope{},
 			want: true,
 		},
-		{
-			name: "readonly and unspecified write scope do not overlap",
-			a:    tools.WriteScope{ReadOnly: true},
-			b:    tools.WriteScope{},
-			want: false,
-		},
 	}
 
 	for _, tc := range tests {
@@ -86,6 +90,45 @@ func TestWriteScopesOverlapMatchesExactAndNestedPathsOnly(t *testing.T) {
 			got := writeScopesOverlap(tc.a, tc.b, "/repo")
 			if got != tc.want {
 				t.Fatalf("writeScopesOverlap(%+v, %+v) = %v, want %v", tc.a, tc.b, got, tc.want)
+			}
+		})
+	}
+}
+
+// writeScopesOverlap is a pure path-overlap predicate over two declared
+// boundaries; it has no role knowledge. Whether a task can write at all is a
+// property of its role's ruleset, and the callers gate the predicate with that
+// classification (see taskScopesConflict). These tests pin the role-aware gate.
+func TestTaskScopesConflictGatesOnRoleFileWriteSurface(t *testing.T) {
+	newRuntime := func(t *testing.T) *MainAgent {
+		a := newTestMainAgent(t, t.TempDir())
+		a.agentConfigs = map[string]*config.AgentConfig{
+			"worker": {
+				Name:       "worker",
+				Mode:       "subagent",
+				Permission: parsePermissionNode(t, "write: deny\nedit: deny\ndelete: deny\napply_patch: deny\n"),
+			},
+		}
+		return a
+	}
+	for _, tc := range []struct {
+		name   string
+		aRole  string
+		aScope tools.WriteScope
+		bRole  string
+		bScope tools.WriteScope
+		want   bool
+	}{
+		{name: "no-write-role task never conflicts", aRole: "worker", bRole: "builder", bScope: tools.WriteScope{PathPrefix: []string{"internal"}}},
+		{name: "no-write-role tasks do not conflict with each other", aRole: "worker", bRole: "worker"},
+		{name: "write-capable empty scope is exclusive", aRole: "builder", bRole: "builder", aScope: tools.WriteScope{PathPrefix: []string{"internal"}}, want: true},
+		{name: "declared write scopes overlap by path", aRole: "builder", aScope: tools.WriteScope{PathPrefix: []string{"internal/foo"}}, bRole: "builder", bScope: tools.WriteScope{Files: []string{"internal/foo/a.go"}}, want: true},
+		{name: "disjoint write scopes do not conflict", aRole: "builder", aScope: tools.WriteScope{PathPrefix: []string{"internal/foo"}}, bRole: "builder", bScope: tools.WriteScope{Files: []string{"lib/a.go"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := newRuntime(t)
+			if got := a.taskScopesConflict(tc.aRole, tc.aScope, tc.bRole, tc.bScope, a.writeScopeBaseDir()); got != tc.want {
+				t.Fatalf("taskScopesConflict(%q, %#v, %q, %#v) = %v, want %v", tc.aRole, tc.aScope, tc.bRole, tc.bScope, got, tc.want)
 			}
 		})
 	}
@@ -157,6 +200,7 @@ func TestResolveSemanticTaskKeyDerivesFromDescription(t *testing.T) {
 // signal instead.
 func TestFindDuplicateOrConflictingTaskDerivedDescriptionCollisionIsProbableDuplicate(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
+	configureNoFileWriteWorkerRole(t, a)
 	description := "Add regression coverage for the parser fallback path so the duplicate guard has a stable key"
 	rewordedTail := "Add regression coverage for the parser fallback path so the duplicate guard is exercised end to end"
 	a.setTaskRecords(map[string]*DurableTaskRecord{
@@ -166,7 +210,7 @@ func TestFindDuplicateOrConflictingTaskDerivedDescriptionCollisionIsProbableDupl
 			OwnerTaskID:        "",
 			AgentDefName:       "worker",
 			SemanticTaskKey:    resolveSemanticTaskKey("", description),
-			ExpectedWriteScope: tools.WriteScope{ReadOnly: true},
+			ExpectedWriteScope: tools.WriteScope{},
 			State:              string(SubAgentStateRunning),
 		},
 	})
@@ -174,7 +218,8 @@ func TestFindDuplicateOrConflictingTaskDerivedDescriptionCollisionIsProbableDupl
 	// A re-delegation described with the same opening clause and no explicit
 	// semantic key matches the earlier task as a probable duplicate only: the
 	// finder still reports the record (the caller needs it for the hint), but
-	// it is not a confirmed duplicate and not a scope conflict.
+	// it is not a confirmed duplicate. A role that registers no file-modifying
+	// tools never writes, so the live collision is not a scope conflict either.
 	existing, disposition, conflict := a.findDuplicateOrConflictingTask(
 		"",
 		"",
@@ -182,7 +227,7 @@ func TestFindDuplicateOrConflictingTaskDerivedDescriptionCollisionIsProbableDupl
 		"",
 		resolveSemanticTaskKey("", rewordedTail),
 		false,
-		tools.WriteScope{ReadOnly: true},
+		tools.WriteScope{},
 	)
 	if existing == nil || existing.TaskID != "adhoc-1" {
 		t.Fatalf("findDuplicateOrConflictingTask() = (%#v, %v, %v), want the earlier task", existing, disposition, conflict)
@@ -191,7 +236,7 @@ func TestFindDuplicateOrConflictingTaskDerivedDescriptionCollisionIsProbableDupl
 		t.Fatalf("disposition = %v, want taskDuplicateProbable for a description-derived collision", disposition)
 	}
 	if conflict {
-		t.Fatal("read-only scopes reported a scope conflict on a description-derived collision")
+		t.Fatal("no-file-write-tool scopes reported a scope conflict on a description-derived collision")
 	}
 }
 
@@ -247,7 +292,7 @@ func TestFindDuplicateOrConflictingTaskExplicitSemanticKeyIsHardDuplicate(t *tes
 		},
 	})
 
-	existing, disposition, conflict := a.findDuplicateOrConflictingTask("owner", "parent", "worker", "", "audit-report", true, tools.WriteScope{ReadOnly: true})
+	existing, disposition, conflict := a.findDuplicateOrConflictingTask("owner", "parent", "worker", "", "audit-report", true, tools.WriteScope{})
 	if existing == nil || existing.TaskID != "adhoc-1" {
 		t.Fatalf("findDuplicateOrConflictingTask() = (%#v, %v, %v), want the existing task", existing, disposition, conflict)
 	}
@@ -255,15 +300,18 @@ func TestFindDuplicateOrConflictingTaskExplicitSemanticKeyIsHardDuplicate(t *tes
 		t.Fatalf("disposition = %v, want taskDuplicateExplicitKey for an explicit key match", disposition)
 	}
 	if conflict {
-		t.Fatal("an explicit-key duplicate on read-only scopes must not be reported as a scope conflict")
+		t.Fatal("an identical explicit key must never be reported as a scope conflict")
 	}
 }
 
 // Reusing a plan_task_ref without sharing an explicit semantic_task_key is as
 // heuristic as a derived-key collision (the same plan item can cover several
-// distinct delegates), so it too is only a probable duplicate.
+// distinct delegates), so it too is only a probable duplicate. The live copy
+// runs under a role that registers no file-modifying tools, so the collision is
+// not a scope conflict either.
 func TestFindDuplicateOrConflictingTaskPlanTaskRefCollisionIsProbableDuplicate(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
+	configureNoFileWriteWorkerRole(t, a)
 	a.setTaskRecords(map[string]*DurableTaskRecord{
 		"adhoc-1": {
 			TaskID:          "adhoc-1",
@@ -278,7 +326,7 @@ func TestFindDuplicateOrConflictingTaskPlanTaskRefCollisionIsProbableDuplicate(t
 
 	// Distinct explicit key but the same plan_task_ref: only the plan reference
 	// collides, so the match is probable, not a confirmed duplicate.
-	existing, disposition, conflict := a.findDuplicateOrConflictingTask("owner", "parent", "worker", "plan-item-7", "second-deliverable", true, tools.WriteScope{ReadOnly: true})
+	existing, disposition, conflict := a.findDuplicateOrConflictingTask("owner", "parent", "worker", "plan-item-7", "second-deliverable", true, tools.WriteScope{})
 	if existing == nil || existing.TaskID != "adhoc-1" {
 		t.Fatalf("findDuplicateOrConflictingTask() = (%#v, %v, %v), want the earlier task", existing, disposition, conflict)
 	}
@@ -286,7 +334,7 @@ func TestFindDuplicateOrConflictingTaskPlanTaskRefCollisionIsProbableDuplicate(t
 		t.Fatalf("disposition = %v, want taskDuplicateProbable for a plan_task_ref-only match", disposition)
 	}
 	if conflict {
-		t.Fatal("plan_task_ref-only match on read-only scopes must not be a scope conflict")
+		t.Fatal("plan_task_ref-only match on no-file-write-tool scopes must not be a scope conflict")
 	}
 }
 
@@ -306,9 +354,9 @@ func TestFindPendingDuplicateClassifiesExplicitKeyAsHard(t *testing.T) {
 		ownerTaskID:        "",
 		agentType:          "worker",
 		semanticTaskKey:    "audit-report",
-		expectedWriteScope: tools.WriteScope{ReadOnly: true},
+		expectedWriteScope: tools.WriteScope{},
 	})
-	existing, disposition, conflict, pending := a.findPendingDuplicateOrConflictingTaskLocked("", "", "worker", "", "audit-report", true, tools.WriteScope{ReadOnly: true})
+	existing, disposition, conflict, pending := a.findPendingDuplicateOrConflictingTaskLocked("", "", "worker", "", "audit-report", true, tools.WriteScope{})
 	a.subs.mu.Unlock()
 	if existing == nil || pending == nil || pending.taskID != "adhoc-9" {
 		t.Fatalf("findPendingDuplicateOrConflictingTaskLocked() = (%#v, %v, %v, %#v), want the pending admission", existing, disposition, conflict, pending)
@@ -320,6 +368,7 @@ func TestFindPendingDuplicateClassifiesExplicitKeyAsHard(t *testing.T) {
 
 func TestFindPendingDuplicateClassifiesDerivedKeyAsProbable(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
+	configureNoFileWriteWorkerRole(t, a)
 	description := "Audit the report generator output for broken markdown links"
 	a.subs.mu.Lock()
 	a.subs.addAdmissionLocked(&subAgentAdmission{
@@ -328,9 +377,9 @@ func TestFindPendingDuplicateClassifiesDerivedKeyAsProbable(t *testing.T) {
 		ownerTaskID:        "",
 		agentType:          "worker",
 		semanticTaskKey:    resolveSemanticTaskKey("", description),
-		expectedWriteScope: tools.WriteScope{ReadOnly: true},
+		expectedWriteScope: tools.WriteScope{},
 	})
-	existing, disposition, conflict, pending := a.findPendingDuplicateOrConflictingTaskLocked("", "", "worker", "", resolveSemanticTaskKey("", description), false, tools.WriteScope{ReadOnly: true})
+	existing, disposition, conflict, pending := a.findPendingDuplicateOrConflictingTaskLocked("", "", "worker", "", resolveSemanticTaskKey("", description), false, tools.WriteScope{})
 	a.subs.mu.Unlock()
 	if existing == nil || pending == nil || pending.taskID != "adhoc-9" {
 		t.Fatalf("findPendingDuplicateOrConflictingTaskLocked() = (%#v, %v, %v, %#v), want the pending admission", existing, disposition, conflict, pending)
@@ -510,7 +559,7 @@ func TestFindDuplicateOrConflictingTaskDerivedCollisionOnCompletedIsProbableDupl
 		},
 	})
 
-	existing, disposition, conflict := a.findDuplicateOrConflictingTask("owner", "parent", "worker", "", resolveSemanticTaskKey("", description), false, tools.WriteScope{ReadOnly: true})
+	existing, disposition, conflict := a.findDuplicateOrConflictingTask("owner", "parent", "worker", "", resolveSemanticTaskKey("", description), false, tools.WriteScope{})
 	if existing == nil || existing.TaskID != "completed-task" {
 		t.Fatalf("findDuplicateOrConflictingTask() = (%#v, %v, %v), want the completed task", existing, disposition, conflict)
 	}
@@ -622,8 +671,16 @@ func TestFindDuplicateOrConflictingTaskExcludesFullOwnerLineage(t *testing.T) {
 	}
 }
 
-func TestFindDuplicateOrConflictingTaskAllowsReadOnlyAlongsideUnspecifiedScope(t *testing.T) {
+func TestFindDuplicateOrConflictingTaskAllowsNoFileWriteToolRoleAlongsideUnspecifiedScope(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
+	a.agentConfigs = map[string]*config.AgentConfig{
+		"worker": {Name: "worker", Mode: "subagent"},
+		"auditor": {
+			Name:       "auditor",
+			Mode:       "subagent",
+			Permission: parsePermissionNode(t, "write: deny\nedit: deny\ndelete: deny\napply_patch: deny\n"),
+		},
+	}
 	a.setTaskRecords(map[string]*DurableTaskRecord{
 		"running-task": {
 			TaskID:             "running-task",
@@ -634,9 +691,12 @@ func TestFindDuplicateOrConflictingTaskAllowsReadOnlyAlongsideUnspecifiedScope(t
 		},
 	})
 
-	existing, disposition, conflict := a.findDuplicateOrConflictingTask("owner", "parent", "worker", "", "read-only-work", true, tools.WriteScope{ReadOnly: true})
+	// The incoming delegation runs under a role without file-modifying tools,
+	// so even though the running writer holds an empty (exclusive) scope, the
+	// two never conflict: the auditor cannot write files.
+	existing, disposition, conflict := a.findDuplicateOrConflictingTask("owner", "parent", "auditor", "", "read-only-work", true, tools.WriteScope{})
 	if existing != nil || conflict || disposition != taskDuplicateNone {
-		t.Fatalf("findDuplicateOrConflictingTask() = (%#v, %v, %v), want no read-only conflict", existing, disposition, conflict)
+		t.Fatalf("findDuplicateOrConflictingTask() = (%#v, %v, %v), want no conflict with a running writer", existing, disposition, conflict)
 	}
 }
 

@@ -85,7 +85,7 @@ func taskHandleHasContent(h tools.TaskHandle) bool {
 // WriteScope contains slice fields, so it cannot be compared with == and
 // each field has to be checked individually.
 func isWriteScopeEmpty(s tools.WriteScope) bool {
-	return !s.ReadOnly && len(s.Files) == 0 && len(s.PathPrefix) == 0 && len(s.Modules) == 0
+	return len(s.Files) == 0 && len(s.PathPrefix) == 0 && len(s.Modules) == 0
 }
 
 func taskToolDescriptionContent(argsJSON string) string {

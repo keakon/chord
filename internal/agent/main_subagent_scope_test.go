@@ -13,88 +13,113 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-// Nested delegation inherits the parent's write-scope boundary: a child's
-// scope must stay within the parent's declared paths, and a read-only parent
-// may only spawn read-only children. These are containment rules over the
-// scope itself — a delegated task no longer carries any command dimension a
-// delegator could authorize separately.
+// Nested delegation inherits the parent's write-scope boundary as a path
+// containment rule: a write-capable child's scope must stay within the
+// parent's declared paths. A child whose role registers no file-modifying
+// tools cannot modify files at all, so its (typically empty) scope is always
+// within the parent; whether a task may write files is decided by its role's
+// ruleset, never propagated from the parent task.
 func TestNestedCreateSubAgentScopeContainedInParent(t *testing.T) {
-	for _, tc := range []struct {
-		name    string
-		parent  tools.WriteScope
-		child   tools.WriteScope
-		wantErr string
-	}{
-		{
-			name:   "read-only child within read-only parent",
-			parent: tools.WriteScope{ReadOnly: true, PathPrefix: []string{"src"}},
-			child:  tools.WriteScope{ReadOnly: true, Files: []string{"src/sample.go"}},
-		},
-		{
-			name:   "read-only child within writing parent",
-			parent: tools.WriteScope{PathPrefix: []string{"src"}},
-			child:  tools.WriteScope{ReadOnly: true, Files: []string{"src/sample.go"}},
-		},
-		{
-			name:    "writing child under read-only parent",
-			parent:  tools.WriteScope{ReadOnly: true, PathPrefix: []string{"src"}},
-			child:   tools.WriteScope{Files: []string{"src/sample.go"}},
-			wantErr: "must not be broader",
-		},
-		{
-			name:    "writing child file outside parent prefix",
-			parent:  tools.WriteScope{PathPrefix: []string{"src"}},
-			child:   tools.WriteScope{Files: []string{"lib/sample.go"}},
-			wantErr: "must not be broader",
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			a := newTestMainAgent(t, t.TempDir())
-			configureNestedDelegationTestRuntime(a, 2)
-			parent := newControllableTestSubAgent(t, a, "task-parent")
-			parent.depth = 1
-			parent.delegation = config.DelegationConfig{MaxChildren: 2, MaxDepth: 2}
-			parent.writeScope = tc.parent
-			a.syncTaskRecordFromSub(parent, "")
-			ctx := tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID)
-			handle, err := a.CreateSubAgent(ctx, "Check sample package", "worker", "", "", tc.child)
-			if tc.wantErr != "" {
-				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-					t.Fatalf("CreateSubAgent error = %v, want %q", err, tc.wantErr)
-				}
-				return
-			}
-			if err != nil || handle.Status != "started" {
-				t.Fatalf("child = %#v, %v", handle, err)
-			}
-		})
+	newRuntime := func(t *testing.T, workerPermissionSrc string) *MainAgent {
+		a := newTestMainAgent(t, t.TempDir())
+		configureNestedDelegationTestRuntime(a, 2)
+		if workerPermissionSrc != "" {
+			a.agentConfigs["worker"].Permission = parsePermissionNode(t, workerPermissionSrc)
+		}
+		return a
 	}
+	writeRuntime := func(t *testing.T) *MainAgent { return newRuntime(t, "") }
+	noWriteWorker := "write: deny\nedit: deny\ndelete: deny\napply_patch: deny\n"
+	t.Run("writing child outside parent prefix", func(t *testing.T) {
+		a := writeRuntime(t)
+		parent := newControllableTestSubAgent(t, a, "task-parent")
+		parent.depth = 1
+		parent.delegation = config.DelegationConfig{MaxChildren: 2, MaxDepth: 2}
+		parent.writeScope = tools.WriteScope{PathPrefix: []string{"src"}}
+		a.syncTaskRecordFromSub(parent, "")
+		ctx := tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID)
+		_, err := a.CreateSubAgent(ctx, "Fix lib", "worker", "", "", tools.WriteScope{Files: []string{"lib/sample.go"}})
+		if err == nil || !strings.Contains(err.Error(), "must not be broader") {
+			t.Fatalf("CreateSubAgent error = %v, want containment rejection", err)
+		}
+	})
+	t.Run("writing child within parent prefix", func(t *testing.T) {
+		a := writeRuntime(t)
+		parent := newControllableTestSubAgent(t, a, "task-parent")
+		parent.depth = 1
+		parent.delegation = config.DelegationConfig{MaxChildren: 2, MaxDepth: 2}
+		parent.writeScope = tools.WriteScope{PathPrefix: []string{"internal"}}
+		a.syncTaskRecordFromSub(parent, "")
+		ctx := tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID)
+		handle, err := a.CreateSubAgent(ctx, "Check sample package", "worker", "", "", tools.WriteScope{Files: []string{"internal/agent/main.go"}})
+		if err != nil || handle.Status != "started" {
+			t.Fatalf("child = %#v, %v", handle, err)
+		}
+	})
+	t.Run("empty scope child of write-capable role under scoped parent", func(t *testing.T) {
+		a := writeRuntime(t)
+		parent := newControllableTestSubAgent(t, a, "task-parent")
+		parent.depth = 1
+		parent.delegation = config.DelegationConfig{MaxChildren: 2, MaxDepth: 2}
+		parent.writeScope = tools.WriteScope{PathPrefix: []string{"src"}}
+		a.syncTaskRecordFromSub(parent, "")
+		ctx := tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID)
+		_, err := a.CreateSubAgent(ctx, "Unscoped work", "worker", "", "", tools.WriteScope{})
+		if err == nil || !strings.Contains(err.Error(), "must not be broader") {
+			t.Fatalf("CreateSubAgent error = %v, want empty write-capable scope rejected", err)
+		}
+	})
+	t.Run("empty scope child of no-file-write-tool role under scoped parent", func(t *testing.T) {
+		a := newRuntime(t, noWriteWorker)
+		parent := newControllableTestSubAgent(t, a, "task-parent")
+		parent.depth = 1
+		parent.delegation = config.DelegationConfig{MaxChildren: 2, MaxDepth: 2}
+		parent.writeScope = tools.WriteScope{PathPrefix: []string{"src"}}
+		a.syncTaskRecordFromSub(parent, "")
+		ctx := tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID)
+		handle, err := a.CreateSubAgent(ctx, "Survey parser", "worker", "", "", tools.WriteScope{})
+		if err != nil || handle.Status != "started" {
+			t.Fatalf("child = %#v, %v; want empty scope accepted for a role without file tools", handle, err)
+		}
+	})
 }
 
 func TestScopeGrantChecksActiveAndPendingWriters(t *testing.T) {
+	noWriteWorkerSrc := "write: deny\nedit: deny\ndelete: deny\napply_patch: deny\n"
 	for _, tc := range []struct {
-		name       string
-		state      SubAgentState
-		pending    bool
-		readOnly   bool
-		owner      string
-		wantReject bool
+		name        string
+		state       SubAgentState
+		pending     bool
+		siblingRole string
+		owner       string
+		wantReject  bool
 	}{
 		{name: "live sibling", state: SubAgentStateRunning, wantReject: true},
 		{name: "parked sibling", state: SubAgentStateWaitingMain, wantReject: true},
 		{name: "pending sibling", pending: true, wantReject: true},
 		{name: "completed sibling", state: SubAgentStateCompleted},
-		{name: "read-only sibling", state: SubAgentStateRunning, readOnly: true},
+		// A sibling whose role registers no file-modifying tools never writes,
+		// so a widened scope cannot conflict with it.
+		{name: "sibling role without file tools", state: SubAgentStateRunning, siblingRole: "worker"},
 		{name: "descendant", state: SubAgentStateRunning, owner: "task-target"},
 		{name: "pending descendant", pending: true, owner: "task-target"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a := newTestMainAgent(t, t.TempDir())
+			if tc.siblingRole != "" {
+				a.agentConfigs = map[string]*config.AgentConfig{
+					"worker": {
+						Name:       "worker",
+						Mode:       "subagent",
+						Permission: parsePermissionNode(t, noWriteWorkerSrc),
+					},
+				}
+			}
 			target := &DurableTaskRecord{
 				TaskID: "task-target", State: string(SubAgentStateIdle),
 				ExpectedWriteScope: tools.WriteScope{Files: []string{"src/sample.go"}},
 			}
-			scope := tools.WriteScope{Files: []string{"lib/sample.go"}, ReadOnly: tc.readOnly}
+			scope := tools.WriteScope{Files: []string{"lib/sample.go"}}
 			if tc.owner != "" {
 				scope.Files = []string{"src/sample.go"}
 			}
@@ -102,11 +127,12 @@ func TestScopeGrantChecksActiveAndPendingWriters(t *testing.T) {
 			a.subs.mu.Lock()
 			if tc.pending {
 				a.subs.admissions = map[string]*subAgentAdmission{
-					"task-other": {taskID: "task-other", ownerTaskID: tc.owner, expectedWriteScope: scope},
+					"task-other": {taskID: "task-other", ownerTaskID: tc.owner, agentType: "worker", expectedWriteScope: scope},
 				}
 			} else {
 				a.subs.taskRecords["task-other"] = &DurableTaskRecord{
 					TaskID: "task-other", State: string(tc.state), OwnerTaskID: tc.owner,
+					AgentDefName:       "worker",
 					ExpectedWriteScope: scope, RuntimeParked: tc.state == SubAgentStateWaitingMain,
 				}
 			}
@@ -124,6 +150,30 @@ func TestScopeGrantChecksActiveAndPendingWriters(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestScopeGrantRejectsNoFileWriteToolTarget(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.agentConfigs = map[string]*config.AgentConfig{
+		"worker": {
+			Name:       "worker",
+			Mode:       "subagent",
+			Permission: parsePermissionNode(t, "write: deny\nedit: deny\ndelete: deny\napply_patch: deny\n"),
+		},
+	}
+	a.setTaskRecords(map[string]*DurableTaskRecord{
+		"task-reader": {
+			TaskID: "task-reader", AgentDefName: "worker", State: string(SubAgentStateIdle),
+			ExpectedWriteScope: tools.WriteScope{},
+		},
+	})
+	err := a.grantSubAgentWriteScope("", "", "task-reader", tools.WriteScope{Files: []string{"src/sample.go"}})
+	if err == nil || !strings.Contains(err.Error(), "registers no file-modifying tools") {
+		t.Fatalf("grant error = %v, want it refused because the role cannot write files", err)
+	}
+	if got := a.taskRecordByTaskID("task-reader").ExpectedWriteScope; !got.Empty() {
+		t.Fatalf("rejected grant changed scope: %#v", got)
 	}
 }
 

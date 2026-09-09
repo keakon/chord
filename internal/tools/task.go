@@ -17,12 +17,15 @@ type AgentInfo struct {
 	DelegationPolicy string
 }
 
-// WriteScope declares what a delegated task is allowed to do.
+// WriteScope declares the paths a delegated task may modify. Whether the
+// worker may modify files at all is decided by its role's permission ruleset
+// (a role that denies write/edit/delete/apply_patch registers none of those
+// tools); the scope only bounds the targets of the file-modifying tools the
+// role does register.
 type WriteScope struct {
 	Files      []string `json:"files,omitempty"`
 	PathPrefix []string `json:"path_prefix,omitempty"`
 	Modules    []string `json:"modules,omitempty"`
-	ReadOnly   bool     `json:"read_only,omitempty"`
 }
 
 // writeScopePathProperties returns the schema for the path lists a write scope
@@ -44,21 +47,17 @@ func (s WriteScope) Normalized() WriteScope {
 		Files:      dedupeTrimmedStrings(s.Files),
 		PathPrefix: dedupeTrimmedStrings(s.PathPrefix),
 		Modules:    dedupeTrimmedStrings(s.Modules),
-		ReadOnly:   s.ReadOnly,
 	}
 }
 
 func (s WriteScope) Empty() bool {
 	s = s.Normalized()
-	return !s.ReadOnly && len(s.Files) == 0 && len(s.PathPrefix) == 0 && len(s.Modules) == 0
+	return len(s.Files) == 0 && len(s.PathPrefix) == 0 && len(s.Modules) == 0
 }
 
 func (s WriteScope) Summary() string {
 	s = s.Normalized()
-	parts := make([]string, 0, 4)
-	if s.ReadOnly {
-		parts = append(parts, "read-only")
-	}
+	parts := make([]string, 0, 3)
 	if len(s.Files) > 0 {
 		parts = append(parts, "files="+strings.Join(s.Files, ","))
 	}
@@ -141,7 +140,9 @@ type delegateArgs struct {
 	PlanTaskRef     string `json:"plan_task_ref,omitempty"`
 	SemanticTaskKey string `json:"semantic_task_key,omitempty"`
 	// Pointer so an omitted scope is distinguishable from an explicitly empty
-	// one: both are rejected, but only the first is a missing-argument error.
+	// one: the field is required, so omission is a missing-argument error,
+	// while an empty object is valid only for roles whose surface registers no
+	// file-modifying tools.
 	ExpectedWriteScope *WriteScope `json:"expected_write_scope"`
 }
 
@@ -203,10 +204,6 @@ func (t *DelegateTool) Parameters() map[string]any {
 	}
 
 	scopeProperties := writeScopePathProperties()
-	scopeProperties["read_only"] = map[string]any{
-		"type":        "boolean",
-		"description": "True when the task will not modify files: file-modifying tools (write, edit, delete, apply_patch) are unavailable to the worker. Command tools (shell, spawn) remain governed by the role's permission rules.",
-	}
 
 	return map[string]any{
 		"type": "object",
@@ -225,7 +222,7 @@ func (t *DelegateTool) Parameters() map[string]any {
 			},
 			"expected_write_scope": map[string]any{
 				"type":                 "object",
-				"description":          "Required declaration of the paths this task may modify, used for concurrency guardrails and enforced on file-modifying tools (write, edit, delete, apply_patch): their targets must fall inside the declared files, path_prefix, or modules. It does not restrict command tools (shell, spawn) — those follow the role's permission rules. Set read_only=true when the task will not modify files. An undeclared scope would have to run exclusively against every other writing task, so it is rejected instead: declare the narrowest scope that covers the task to keep independent delegates running in parallel.",
+				"description":          "Required declaration of the paths this task may modify, used for concurrency guardrails and enforced on the file-modifying tools the worker's role registers (write, edit, delete, apply_patch): their targets must fall inside the declared files, path_prefix, or modules. It does not restrict command tools (shell, spawn) — those follow the role's permission rules. A task that will not modify files should pick an agent_type whose role registers no file-writing tools (its permission rules deny write, edit, delete, and apply_patch) and pass an empty object {}: the empty scope is accepted only for such roles, because a role that can write files needs a declared boundary or it would have to run exclusively against every other writing task. For every other role declare the narrowest scope that covers the task so independent delegates keep running in parallel.",
 				"properties":           scopeProperties,
 				"additionalProperties": false,
 			},
@@ -242,13 +239,36 @@ func (t *DelegateTool) Parameters() map[string]any {
 
 func (DelegateTool) IsReadOnly() bool { return false }
 
+// AgentFileWriteSurface is implemented by SubAgentCreators that can report
+// whether a target agent definition's role registers any file-modifying tool.
+// Delegate uses it to accept an empty expected_write_scope: a task whose role
+// registers no file-modifying tools cannot write files, so it needs no declared
+// path boundary, while a role that can write files must declare one (or the
+// task would run as an unrestricted writer against every other task). Creators
+// without this capability are treated conservatively as write-capable.
+type AgentFileWriteSurface interface {
+	// AgentRoleRegistersNoFileWriteTools reports whether the role behind the
+	// given agent_type registers none of write, edit, delete, or apply_patch.
+	AgentRoleRegistersNoFileWriteTools(agentType string) bool
+}
+
+func delegateTargetRoleRegistersNoFileWriteTools(creator SubAgentCreator, agentType string) bool {
+	if creator == nil || strings.TrimSpace(agentType) == "" {
+		return false
+	}
+	surface, ok := creator.(AgentFileWriteSurface)
+	return ok && surface.AgentRoleRegistersNoFileWriteTools(agentType)
+}
+
 // errDelegateWriteScopeRequired is the operator-facing repair instruction for a
-// Delegate call that declares no usable write scope. The schema marks the field
-// required, but a model can still send `{}`, which would silently reacquire the
-// global exclusive scope the requirement exists to prevent.
+// Delegate call that declares no usable write scope for a role that can write
+// files. The schema marks the field required, but a model can still send `{}`,
+// which would silently reacquire the global exclusive scope the requirement
+// exists to prevent; an empty scope is valid only when the chosen agent_type's
+// role registers no file-modifying tools (see AgentFileWriteSurface).
 var errDelegateWriteScopeRequired = fmt.Errorf(
-	"expected_write_scope is required: set read_only=true when the task will not modify files, " +
-		"or declare at least one of files/path_prefix/modules covering what this task will write")
+	"expected_write_scope is required: this task must either declare at least one of files/path_prefix/modules covering what it will write, " +
+		"or use an agent_type whose role registers no file-writing tools and pass an empty object {}")
 
 func (t *DelegateTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	var a delegateArgs
@@ -262,7 +282,7 @@ func (t *DelegateTool) Execute(ctx context.Context, raw json.RawMessage) (string
 		return "", errDelegateWriteScopeRequired
 	}
 	expectedWriteScope := a.ExpectedWriteScope.Normalized()
-	if expectedWriteScope.Empty() {
+	if expectedWriteScope.Empty() && !delegateTargetRoleRegistersNoFileWriteTools(t.creator, a.AgentType) {
 		return "", errDelegateWriteScopeRequired
 	}
 
@@ -288,11 +308,10 @@ func (t *DelegateTool) Execute(ctx context.Context, raw json.RawMessage) (string
 }
 
 // WidenWriteScope returns base extended with grant's paths. It never removes
-// anything and never flips read_only: a scope that shrank under a running
-// worker would retroactively invalidate writes it had already been allowed to
-// make, and turning a writing task read-only mid-flight would strand it. Only
-// files, path prefixes and modules are widened — read_only is fixed when the
-// task's tool surface is built.
+// anything: a scope that shrank under a running worker would retroactively
+// invalidate writes it had already been allowed to make, and changing whether
+// a task can write at all is the role configuration's decision, not a grant's.
+// Only files, path prefixes and modules are widened.
 func WidenWriteScope(base, grant WriteScope) WriteScope {
 	base = base.Normalized()
 	grant = grant.Normalized()

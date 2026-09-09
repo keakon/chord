@@ -67,14 +67,12 @@ func TestWriteScopePathPropertiesShared(t *testing.T) {
 			t.Fatalf("expected_write_scope[%q] = %#v, grant_write_scope[%q] = %#v", name, got, name, want)
 		}
 	}
-	// The delegation-time declaration additionally carries the fields that only
-	// make sense before the task starts.
-	for _, name := range []string{"read_only"} {
-		if _, ok := scope[name]; !ok {
-			t.Fatalf("expected_write_scope is missing %q: %#v", name, scope)
-		}
-		if _, ok := grant[name]; ok {
-			t.Fatalf("grant_write_scope must not offer %q: %#v", name, grant)
+	// Both declarations carry exactly the same three path lists: whether a task
+	// may write files at all is decided by its role's ruleset, so no other
+	// field exists on either side of the scope declaration.
+	for name := range scope {
+		if _, ok := grant[name]; !ok {
+			t.Fatalf("expected_write_scope carries %q, grant_write_scope does not", name)
 		}
 	}
 }
@@ -116,7 +114,7 @@ func TestDelegateToolRequiresUsableWriteScope(t *testing.T) {
 			if err == nil {
 				t.Fatal("Execute() error = nil, want a write-scope repair instruction")
 			}
-			for _, want := range []string{"read_only=true", "files/path_prefix/modules"} {
+			for _, want := range []string{"files/path_prefix/modules", "no file-writing tools"} {
 				if !strings.Contains(err.Error(), want) {
 					t.Fatalf("Execute() error = %q, want it to mention %q", err, want)
 				}
@@ -128,15 +126,42 @@ func TestDelegateToolRequiresUsableWriteScope(t *testing.T) {
 	}
 }
 
-func TestDelegateToolAcceptsReadOnlyScope(t *testing.T) {
-	creator := &countingTaskCreator{}
-	if _, err := NewDelegateTool(creator).Execute(context.Background(), json.RawMessage(
-		`{"description":"survey the parser","agent_type":"builder","expected_write_scope":{"read_only":true}}`,
-	)); err != nil {
-		t.Fatalf("Execute() error = %v, want read-only scope accepted", err)
+// noFileWriteToolsCreator is a SubAgentCreator whose target role registers no
+// file-modifying tools (write/edit/delete/apply_patch denied).
+type noFileWriteToolsCreator struct {
+	countingTaskCreator
+}
+
+func (*noFileWriteToolsCreator) AgentRoleRegistersNoFileWriteTools(agentType string) bool {
+	return true
+}
+
+// A role whose ruleset registers no file-modifying tools cannot write files,
+// so an empty expected_write_scope is a valid "nothing to declare" instead of
+// an undeclared writing task. Roles that can write files (the default for
+// creators without AgentFileWriteSurface) must still declare paths.
+func TestDelegateToolAcceptsEmptyScopeForNoFileWriteToolRole(t *testing.T) {
+	for _, scope := range []string{`{}`, `{"files":[]}`} {
+		creator := &noFileWriteToolsCreator{}
+		args := `{"description":"survey the parser","agent_type":"builder","expected_write_scope":` + scope + `}`
+		if _, err := NewDelegateTool(creator).Execute(context.Background(), json.RawMessage(args)); err != nil {
+			t.Fatalf("Execute() error = %v, want empty scope accepted for a no-file-write-tool role", err)
+		}
+		if creator.calls != 1 {
+			t.Fatalf("CreateSubAgent() calls = %d, want 1", creator.calls)
+		}
 	}
-	if creator.calls != 1 {
-		t.Fatalf("CreateSubAgent() calls = %d, want 1", creator.calls)
+}
+
+func TestDelegateToolEmptyScopeNeverBypassesRequiredField(t *testing.T) {
+	creator := &noFileWriteToolsCreator{}
+	if _, err := NewDelegateTool(creator).Execute(context.Background(), json.RawMessage(
+		`{"description":"survey the parser","agent_type":"builder"}`,
+	)); err == nil {
+		t.Fatal("Execute() error = nil, want the omitted expected_write_scope field rejected even for a no-file-write-tool role")
+	}
+	if creator.calls != 0 {
+		t.Fatalf("CreateSubAgent() calls = %d, want 0", creator.calls)
 	}
 }
 

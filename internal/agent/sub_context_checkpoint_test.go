@@ -18,7 +18,7 @@ func TestSubAgentStructuredCheckpointExtractsAuthoritativeState(t *testing.T) {
 	sub.taskDesc = "Refactor the parser and keep the CLI output format unchanged"
 	sub.ownerAgentID = "main"
 	sub.ownerTaskID = "task-7"
-	sub.writeScope = tools.WriteScope{Files: []string{"internal/parser/parser.go"}, ReadOnly: false}
+	sub.writeScope = tools.WriteScope{Files: []string{"internal/parser/parser.go"}}
 	sub.taskChangesMu.Lock()
 	sub.actualChangedFiles = map[string]struct{}{"internal/parser/parser.go": {}, "internal/parser/lexer.go": {}}
 	sub.taskChangesMu.Unlock()

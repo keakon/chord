@@ -32,16 +32,19 @@ func (a *MainAgent) grantSubAgentWriteScope(callerAgentID, callerTaskID, taskID 
 		return err
 	}
 	taskID = record.TaskID
-	if record.ExpectedWriteScope.ReadOnly {
-		return fmt.Errorf("task %s was delegated read-only; its tool surface has no write tools, so delegate the writing work as a new task", taskID)
+	if a.agentRoleRegistersNoFileWriteTools(record.AgentDefName) {
+		return fmt.Errorf("task %s runs under a role that registers no file-modifying tools, so it cannot write files even with a grant; delegate the writing work as a new task under a role that can write files", taskID)
 	}
 	if grant.AddsNothingTo(record.ExpectedWriteScope) {
 		return fmt.Errorf("task %s already covers every path in the grant", taskID)
 	}
 	widened := tools.WidenWriteScope(record.ExpectedWriteScope, grant)
 	if ownerTaskID := record.OwnerTaskID; ownerTaskID != "" {
+		// The target is write-capable here (the no-write-role case was rejected
+		// above) and widened is never empty, so the containment check only
+		// exercises the declared-path branch.
 		if owner := a.taskRecordByTaskID(ownerTaskID); owner != nil &&
-			!childWriteScopeWithinParent(owner.ExpectedWriteScope, widened, a.writeScopeBaseDir()) {
+			!childWriteScopeWithinParent(owner.ExpectedWriteScope, widened, false, a.writeScopeBaseDir()) {
 			return fmt.Errorf("the widened scope for task %s would be broader than its parent task %s", taskID, ownerTaskID)
 		}
 	}
@@ -88,22 +91,22 @@ func (a *MainAgent) grantSubAgentWriteScope(callerAgentID, callerTaskID, taskID 
 
 func (a *MainAgent) findWriteScopeGrantConflictLocked(target *DurableTaskRecord, widened tools.WriteScope) string {
 	lineage := a.taskOwnerLineageLocked(target.TaskID)
-	conflicts := func(taskID, ownerTaskID string, scope tools.WriteScope) bool {
+	conflicts := func(taskID, ownerTaskID, siblingAgentType string, scope tools.WriteScope) bool {
 		if _, ancestor := lineage[strings.TrimSpace(taskID)]; ancestor {
 			return false
 		}
 		if _, descendant := a.taskOwnerLineageLocked(ownerTaskID)[target.TaskID]; descendant {
 			return false
 		}
-		return writeScopesOverlap(widened, scope, a.writeScopeBaseDir())
+		return a.taskScopesConflict(target.AgentDefName, widened, siblingAgentType, scope, a.writeScopeBaseDir())
 	}
 	for taskID, rec := range a.subs.taskRecords {
-		if rec != nil && isNonTerminalTaskState(rec.State) && conflicts(taskID, rec.OwnerTaskID, rec.ExpectedWriteScope) {
+		if rec != nil && isNonTerminalTaskState(rec.State) && conflicts(taskID, rec.OwnerTaskID, rec.AgentDefName, rec.ExpectedWriteScope) {
 			return taskID
 		}
 	}
 	for taskID, pending := range a.subs.admissions {
-		if pending != nil && conflicts(taskID, pending.ownerTaskID, pending.expectedWriteScope) {
+		if pending != nil && conflicts(taskID, pending.ownerTaskID, pending.agentType, pending.expectedWriteScope) {
 			return taskID
 		}
 	}
