@@ -474,6 +474,14 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	} else {
 		a.recordCompactionProvenanceEvent("legacy_unvalidated", map[string]string{"head_split": strconv.Itoa(headSplit)})
 	}
+	// Mailbox delivery rows inside the dropped head are destroyed by the
+	// replace below; settle them durably before that (see
+	// settleCompactionDroppedMailboxRows). The replay IDs must be re-enqueued
+	// after the replace commits.
+	mailboxReplayIDs, mailboxSettleErr := a.settleCompactionDroppedMailboxRows(a.ctxMgr.Snapshot(), headSplit)
+	if mailboxSettleErr != nil {
+		return mailboxSettleErr
+	}
 	d.NewMessages = a.refreshCompactionFileRevisions(d.NewMessages)
 	// Stamp the checkpoint message with the request batch of this apply — the
 	// same value lastModelDrivenApplyBatch records below. RequestBatch is
@@ -550,6 +558,12 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 		if err := updateCompactionTransactionStatus(d.TransactionSessionDir, d.TransactionID, compactionTransactionCommitted); err != nil {
 			log.Warnf("failed to commit compaction transaction transaction_id=%v error=%v", d.TransactionID, err)
 		}
+	}
+	// The dropped rows are gone for good now: re-enqueue the unconsumed
+	// mailbox messages that were never presented to the model so they are
+	// delivered on a later dispatch (see requeueMailboxMessagesAfterCompaction).
+	if len(mailboxReplayIDs) > 0 {
+		a.requeueMailboxMessagesAfterCompaction(mailboxReplayIDs)
 	}
 
 	// Durable compaction rewrites the message prefix, so any cache-friendly
