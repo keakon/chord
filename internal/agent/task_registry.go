@@ -441,6 +441,8 @@ func (a *MainAgent) findDuplicateOrConflictingTaskLocked(ownerAgentID, ownerTask
 	expectedWriteScope = expectedWriteScope.Normalized()
 	ownerLineage := a.taskOwnerLineageLocked(ownerTaskID)
 	var probable *DurableTaskRecord
+	var conflictRecord *DurableTaskRecord
+	var conflictDisposition taskDuplicateDisposition
 	for _, rec := range a.subs.taskRecords {
 		if rec != nil {
 			if _, ancestor := ownerLineage[strings.TrimSpace(rec.TaskID)]; ancestor {
@@ -448,16 +450,26 @@ func (a *MainAgent) findDuplicateOrConflictingTaskLocked(ownerAgentID, ownerTask
 			}
 		}
 		disposition, conflict := a.duplicateOrConflictingTaskRecord(rec, ownerAgentID, ownerTaskID, agentType, planTaskRef, semanticTaskKey, semanticKeyExplicit, expectedWriteScope, a.writeScopeBaseDir())
-		if conflict || disposition == taskDuplicateExplicitKey {
-			// A rejection (scope conflict or confirmed duplicate) always stops
-			// the scan. A probable match is remembered instead and only used if
-			// no rejecting record exists: a fallback-key collision must never
-			// hide a real scope conflict or explicit-key duplicate.
-			return cloneDurableTaskRecord(rec), disposition, conflict
+		if disposition == taskDuplicateExplicitKey {
+			// The confirmed duplicate is the only hard rejection and outranks
+			// every advisory annotation, so the scan stops at the first one
+			// even when an earlier record only conflicted or matched probably
+			// (taskRecords is a map, so iteration order is arbitrary).
+			return cloneDurableTaskRecord(rec), disposition, false
 		}
-		if disposition == taskDuplicateProbable && probable == nil {
+		if conflict && conflictRecord == nil {
+			conflictRecord = cloneDurableTaskRecord(rec)
+			conflictDisposition = disposition
+		} else if disposition == taskDuplicateProbable && probable == nil {
 			probable = cloneDurableTaskRecord(rec)
 		}
+	}
+	// A scope conflict only annotates a started handle, so it must not
+	// short-circuit the scan and hide a confirmed duplicate behind it; it is
+	// reported when it is the strongest match, and a probable match is only
+	// used when no conflict exists.
+	if conflictRecord != nil {
+		return conflictRecord, conflictDisposition, true
 	}
 	if probable != nil {
 		return probable, taskDuplicateProbable, false
@@ -505,12 +517,12 @@ func (a *MainAgent) duplicateOrConflictingTaskRecord(rec *DurableTaskRecord, own
 			if keyMatched && semanticKeyExplicit {
 				return taskDuplicateExplicitKey, false
 			}
-			// A probable duplicate on a live record with an overlapping write
-			// boundary is still a scope conflict: the heuristic may be wrong
-			// about the deliverable, but it never justifies running two
-			// concurrent writers over the same scope. A task whose role
-			// registers no file-modifying tools never writes, so it conflicts
-			// with nothing.
+			// A probable duplicate on a live record with an overlapping
+			// declared boundary is still annotated as a scope conflict: the
+			// heuristic may be wrong about the deliverable, but both tasks may
+			// still edit the same files, so the started handle should carry
+			// both hints. A task whose role registers no file-modifying tools
+			// never writes, so it conflicts with nothing.
 			return taskDuplicateProbable, isNonTerminalTaskState(rec.State) && a.taskScopesConflict(agentType, expectedWriteScope, rec.AgentDefName, rec.ExpectedWriteScope, baseDir)
 		}
 	}

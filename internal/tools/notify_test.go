@@ -92,21 +92,13 @@ func TestNotifyParametersMatchRoleCapabilities(t *testing.T) {
 					t.Fatalf("%s exposed = %t, want %t", field, exposed, tc.owner)
 				}
 			}
-			for _, field := range []string{"target_task_id", "grant_write_scope"} {
+			for _, field := range []string{"target_task_id"} {
 				if _, exposed := properties[field]; exposed != tc.target {
 					t.Fatalf("%s exposed = %t, want %t", field, exposed, tc.target)
 				}
 			}
 			if got := properties["message_type"].(map[string]any)["enum"].([]string); !slices.Equal(got, tc.messageType) {
 				t.Fatalf("message types = %v, want %v", got, tc.messageType)
-			}
-			// The clause forbidding a scope grant on a structured reply is
-			// only carried by roles that can actually grant scope. Emitting it
-			// for an owner-only role would ship a keyword some providers
-			// cannot represent in exchange for a constraint that names a
-			// property the role's schema does not even declare.
-			if _, restricted := params["not"]; restricted != tc.target {
-				t.Fatalf("grant/response exclusion present = %t, want %t", restricted, tc.target)
 			}
 		})
 	}
@@ -115,7 +107,6 @@ func TestNotifyParametersMatchRoleCapabilities(t *testing.T) {
 type recordingNotifyMessenger struct {
 	notifyMessengerStub
 	responses int
-	grants    int
 }
 
 func (m *recordingNotifyMessenger) NotifySubAgentMessage(context.Context, AgentResponseRequest) (TaskHandle, error) {
@@ -123,30 +114,7 @@ func (m *recordingNotifyMessenger) NotifySubAgentMessage(context.Context, AgentR
 	return TaskHandle{Status: "delivered"}, nil
 }
 
-func (m *recordingNotifyMessenger) NotifySubAgentWithScopeGrant(context.Context, string, string, string, WriteScope) (TaskHandle, error) {
-	m.grants++
-	return TaskHandle{Status: "delivered"}, nil
-}
-
-func TestNotifyRejectsInvalidGrantsBeforeDelivery(t *testing.T) {
-	for _, raw := range []string{
-		`{"message":"Continue","grant_write_scope":{"files":["sample.go"]}}`,
-		`{"target_task_id":"task-a","message":"Continue","message_type":"response","correlation_id":"corr-1","grant_write_scope":{"files":["sample.go"]}}`,
-		`{"target_task_id":"task-a","message":"Continue","grant_write_scope":{}}`,
-		`{"target_task_id":"task-a","message":"Continue","grant_write_scope":{"read_only":true}}`,
-	} {
-		messenger := &recordingNotifyMessenger{}
-		tool := NewNotifyTool(nil, messenger, true, true)
-		if _, err := tool.Execute(context.Background(), json.RawMessage(raw)); err == nil {
-			t.Fatalf("invalid grant accepted: %s", raw)
-		}
-		if messenger.responses != 0 || messenger.grants != 0 {
-			t.Fatalf("rejected call had side effects: %#v", messenger)
-		}
-	}
-}
-
-func TestNotifyScopeGrantAndResponseCapabilities(t *testing.T) {
+func TestNotifyOwnerOnlyRoleRejectsTargetedResponse(t *testing.T) {
 	messenger := &recordingNotifyMessenger{}
 	tool := NewNotifyTool(nil, messenger, true, false)
 	response := json.RawMessage(`{"target_task_id":"task-a","message":"Continue","message_type":"response","correlation_id":"corr-1"}`)
@@ -155,12 +123,5 @@ func TestNotifyScopeGrantAndResponseCapabilities(t *testing.T) {
 	}
 	if messenger.responses != 0 {
 		t.Fatal("targeted response was delivered without role capability")
-	}
-	tool = NewNotifyTool(nil, messenger, false, true)
-	if _, err := tool.Execute(context.Background(), json.RawMessage(`{"target_task_id":"task-a","message":"Update the sample","grant_write_scope":{"files":["sample.go"]}}`)); err != nil {
-		t.Fatal(err)
-	}
-	if messenger.grants != 1 {
-		t.Fatal("plain targeted grant was not delivered")
 	}
 }

@@ -45,8 +45,6 @@ type toolExecutionPipeline struct {
 	logPrefix        string
 	projectRoot      string
 	toolBaseDir      string
-	writeScope       tools.WriteScope
-	writeScopeDir    string
 	applyPatchRetry  *applyPatchRetryGuard
 
 	currentRuleset                func() permission.Ruleset
@@ -93,58 +91,6 @@ func decodeShellCallArguments(args json.RawMessage) (shellCallArguments, error) 
 	return parsed, nil
 }
 
-func (p toolExecutionPipeline) validateWriteScope(tc message.ToolCall) error {
-	scope := p.writeScope.Normalized()
-	if scope.Empty() {
-		return nil
-	}
-	if _, ok := p.registry.Get(tc.Name); !ok {
-		return nil
-	}
-	if tc.Name == tools.NameShell || tc.Name == tools.NameSpawn {
-		// A command line can mutate anywhere it reaches, so command side
-		// effects cannot be validated against a declared path scope. Command
-		// tools therefore never participate in write-scope checks: whether
-		// they are usable is decided solely by the role's permission rules (a
-		// wildcard-deny rule keeps the tool out of the registry entirely).
-		return nil
-	}
-	if writeScopeKnownNonWorkspaceMutation(tc.Name) {
-		return nil
-	}
-	if !tools.IsFileMutation(tc.Name) {
-		if tool, _ := p.registry.Get(tc.Name); tool != nil && !tool.IsReadOnly() {
-			return fmt.Errorf("tool %q is unavailable for a path-scoped SubAgent task because the runtime cannot validate its workspace mutations", tc.Name)
-		}
-		return nil
-	}
-	if len(scope.Files) == 0 && len(scope.PathPrefix) == 0 {
-		return fmt.Errorf("tool %q cannot be path-validated because expected_write_scope declares only logical modules", tc.Name)
-	}
-	baseDir := p.writeScopeBaseDir()
-	paths, err := writeScopeToolPaths(tc, baseDir)
-	if err != nil {
-		return fmt.Errorf("validate expected_write_scope for %s: %w", tc.Name, err)
-	}
-	for _, path := range paths {
-		if !writeScopeAllowsPath(scope, path, baseDir) {
-			return fmt.Errorf("tool %q target %q is outside this SubAgent task's expected_write_scope", tc.Name, path)
-		}
-	}
-	return nil
-}
-
-// writeScopeBaseDir is the directory every scope comparison resolves relative
-// declarations against. It is the worker's own working directory, which is
-// also what its tools resolve relative paths against, so a declaration reads
-// the same way to the model, to the tool and to this gate.
-func (p toolExecutionPipeline) writeScopeBaseDir() string {
-	if strings.TrimSpace(p.writeScopeDir) != "" {
-		return p.writeScopeDir
-	}
-	return p.projectRoot
-}
-
 func (p toolExecutionPipeline) effectiveToolBaseDir() string {
 	if strings.TrimSpace(p.toolBaseDir) != "" {
 		return p.toolBaseDir
@@ -187,68 +133,6 @@ func (p toolExecutionPipeline) recordToolActivityStarted(tc message.ToolCall) er
 		return fmt.Errorf("tool %q not executed: failed to record started state before execution: %w", tc.Name, err)
 	}
 	return nil
-}
-
-func writeScopeKnownNonWorkspaceMutation(name string) bool {
-	switch name {
-	case tools.NameComplete, tools.NameNotify, tools.NameEscalate, tools.NameCancel, tools.NameDelegate, tools.NameHandoff, tools.NameSaveArtifact, tools.NameReadArtifact, tools.NameSpawnStatus, tools.NameSpawnStop, tools.NameTodoWrite:
-		return true
-	default:
-		return false
-	}
-}
-
-func writeScopeToolPaths(tc message.ToolCall, baseDir string) ([]string, error) {
-	switch tc.Name {
-	case tools.NameApplyPatch:
-		targets, err := tools.ApplyPatchTargets(llm.UnwrapToolArgs(tc.Args), baseDir)
-		if err != nil {
-			return nil, err
-		}
-		paths := tools.MutationTargetPaths(targets)
-		if len(paths) == 0 {
-			return nil, fmt.Errorf("missing or invalid path")
-		}
-		return paths, nil
-	case tools.NameWrite, tools.NameEdit:
-		path := ""
-		if tc.Name == tools.NameEdit {
-			path = trackedEditPathFromArgs(tc.Args, baseDir)
-		} else {
-			var args struct {
-				Path string `json:"path"`
-			}
-			_ = json.Unmarshal(llm.UnwrapToolArgs(tc.Args), &args)
-			path, _ = tools.ResolveToolPathInDir(args.Path, baseDir)
-		}
-		if strings.TrimSpace(path) == "" {
-			return nil, fmt.Errorf("missing or invalid path")
-		}
-		return []string{path}, nil
-	case tools.NameDelete:
-		req, err := tools.DecodeDeleteRequestInDir(llm.UnwrapToolArgs(tc.Args), baseDir)
-		if err != nil {
-			return nil, err
-		}
-		return req.Paths, nil
-	default:
-		return nil, nil
-	}
-}
-
-func writeScopeAllowsPath(scope tools.WriteScope, target, baseDir string) bool {
-	target = normalizedScopeAbsPath(target, baseDir)
-	for _, file := range scope.Files {
-		if target == normalizedScopeAbsPath(file, baseDir) {
-			return true
-		}
-	}
-	for _, prefix := range scope.PathPrefix {
-		if pathWithinScope(normalizedScopeAbsPath(prefix, baseDir), target) {
-			return true
-		}
-	}
-	return false
 }
 
 func normalizedScopeAbsPath(path, baseDir string) string {
@@ -454,9 +338,6 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 	if err := normalizeCompatibleToolCallArgs(&tc, &execResult); err != nil {
 		return execResult, err
 	}
-	if err := p.validateWriteScope(tc); err != nil {
-		return execResult, err
-	}
 	if p.reservedToolError != nil {
 		if err := p.reservedToolError(tc.Name); err != nil {
 			return execResult, err
@@ -491,9 +372,6 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 	}
 	ignored, _, err := p.validateToolCallArgs(&tc, &execResult)
 	if err != nil {
-		return execResult, err
-	}
-	if err := p.validateWriteScope(tc); err != nil {
 		return execResult, err
 	}
 	if err := p.applyPatchRetry.reject(tc.Name, tc.Args, p.effectiveToolBaseDir()); err != nil {
@@ -686,9 +564,6 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 	tc.Name = tools.NormalizeName(tc.Name)
 	execResult := ToolExecutionResult{EffectiveArgsJSON: string(tc.Args)}
 	if err := normalizeCompatibleToolCallArgs(&tc, &execResult); err != nil {
-		return execResult, err
-	}
-	if err := p.validateWriteScope(tc); err != nil {
 		return execResult, err
 	}
 	if p.visibleToolNames != nil {

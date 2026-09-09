@@ -304,6 +304,51 @@ func TestFindDuplicateOrConflictingTaskExplicitSemanticKeyIsHardDuplicate(t *tes
 	}
 }
 
+// Scope conflicts only annotate started handles, so a conflicting record must
+// never hide a confirmed duplicate that also exists in the registry: an
+// explicit semantic_task_key collision is the only hard rejection and must win
+// regardless of which record the scan visits first (taskRecords is a map, so
+// iteration order is arbitrary). The finder is therefore exercised repeatedly.
+func TestFindDuplicateOrConflictingTaskExplicitKeyOutranksScopeConflict(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.setTaskRecords(map[string]*DurableTaskRecord{
+		"adhoc-1": {
+			TaskID:             "adhoc-1",
+			OwnerAgentID:       "owner",
+			OwnerTaskID:        "parent",
+			AgentDefName:       "worker",
+			SemanticTaskKey:    "other-deliverable",
+			ExpectedWriteScope: tools.WriteScope{Files: []string{"internal/parser/parser_test.go"}},
+			State:              string(SubAgentStateRunning),
+		},
+		"adhoc-2": {
+			TaskID:             "adhoc-2",
+			OwnerAgentID:       "owner",
+			OwnerTaskID:        "parent",
+			AgentDefName:       "worker",
+			SemanticTaskKey:    "audit-report",
+			ExpectedWriteScope: tools.WriteScope{Files: []string{"internal/parser/parser_test.go"}},
+			State:              string(SubAgentStateRunning),
+		},
+	})
+
+	// adhoc-1 overlaps the new scope without matching its deliverable;
+	// adhoc-2 is a confirmed duplicate of it. Every call must resolve to the
+	// explicit-key rejection, no matter the iteration order.
+	for i := 0; i < 20; i++ {
+		existing, disposition, conflict := a.findDuplicateOrConflictingTask(
+			"owner", "parent", "worker", "", "audit-report", true,
+			tools.WriteScope{Files: []string{"internal/parser/parser_test.go"}},
+		)
+		if existing == nil || existing.TaskID != "adhoc-2" {
+			t.Fatalf("iteration %d: findDuplicateOrConflictingTask() = (%#v, %v, %v), want the explicit-key task adhoc-2", i, existing, disposition, conflict)
+		}
+		if disposition != taskDuplicateExplicitKey || conflict {
+			t.Fatalf("iteration %d: disposition/conflict = (%v, %v), want taskDuplicateExplicitKey without a scope conflict", i, disposition, conflict)
+		}
+	}
+}
+
 // Reusing a plan_task_ref without sharing an explicit semantic_task_key is as
 // heuristic as a derived-key collision (the same plan item can cover several
 // distinct delegates), so it too is only a probable duplicate. The live copy
@@ -389,6 +434,45 @@ func TestFindPendingDuplicateClassifiesDerivedKeyAsProbable(t *testing.T) {
 	}
 }
 
+// A pending explicit-key admission outranks a pending scope conflict for the
+// same reason the registry scan prefers confirmed duplicates: only the
+// identical explicit semantic_task_key may be waited on, and a conflict must
+// not hide it regardless of admission iteration order.
+func TestFindPendingDuplicateExplicitKeyOutranksPendingScopeConflict(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.subs.mu.Lock()
+	defer a.subs.mu.Unlock()
+	a.subs.addAdmissionLocked(&subAgentAdmission{
+		taskID:             "adhoc-9",
+		ownerAgentID:       "owner",
+		ownerTaskID:        "parent",
+		agentType:          "worker",
+		semanticTaskKey:    "other-deliverable",
+		expectedWriteScope: tools.WriteScope{Files: []string{"internal/parser/parser_test.go"}},
+	})
+	a.subs.addAdmissionLocked(&subAgentAdmission{
+		taskID:             "adhoc-10",
+		ownerAgentID:       "owner",
+		ownerTaskID:        "parent",
+		agentType:          "worker",
+		semanticTaskKey:    "audit-report",
+		expectedWriteScope: tools.WriteScope{Files: []string{"internal/parser/parser_test.go"}},
+	})
+
+	for i := 0; i < 20; i++ {
+		existing, disposition, conflict, pending := a.findPendingDuplicateOrConflictingTaskLocked(
+			"owner", "parent", "worker", "", "audit-report", true,
+			tools.WriteScope{Files: []string{"internal/parser/parser_test.go"}},
+		)
+		if existing == nil || pending == nil || pending.taskID != "adhoc-10" {
+			t.Fatalf("iteration %d: findPendingDuplicateOrConflictingTaskLocked() = (%#v, %v, %v, %#v), want the explicit-key admission adhoc-10", i, existing, disposition, conflict, pending)
+		}
+		if disposition != taskDuplicateExplicitKey || conflict {
+			t.Fatalf("iteration %d: disposition/conflict = (%v, %v), want taskDuplicateExplicitKey without a scope conflict", i, disposition, conflict)
+		}
+	}
+}
+
 // duplicateHintedTaskHandle must keep the started status and its own task ids
 // while attaching the duplicate_detected hint that points the model at the
 // probable-duplicate task.
@@ -431,17 +515,17 @@ func TestDuplicateHintedTaskHandleReferencesPendingAdmission(t *testing.T) {
 	}
 }
 
-// duplicateTaskHandle wires the hard already_exists handle for a confirmed
+// duplicateTaskHandle builds the hard already_exists handle for a confirmed
 // duplicate (identical explicit semantic_task_key): it must reference the
 // existing task and suggest continuing it with notify, never report a scope
-// conflict.
+// conflict (overlap is advisory now and only annotates started handles).
 func TestDuplicateTaskHandleBuildsExplicitKeyRejection(t *testing.T) {
 	existing := &DurableTaskRecord{
 		TaskID:           "adhoc-1",
 		LatestInstanceID: "worker-1",
 		SemanticTaskKey:  "audit-report",
 	}
-	got := duplicateTaskHandle(existing, false)
+	got := duplicateTaskHandle(existing)
 
 	if got.Status != "already_exists" || got.ScopeConflict {
 		t.Fatalf("duplicate handle = %#v, want already_exists without a scope conflict", got)

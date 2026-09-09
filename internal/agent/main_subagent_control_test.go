@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -1523,54 +1522,34 @@ func TestCreateSubAgentRejectsRegistrationAfterOwnerCompletes(t *testing.T) {
 	}
 }
 
-func TestNestedCreateSubAgentRejectsBroaderWriteScope(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	configureNestedDelegationTestRuntime(a, 2)
-	parent := newControllableTestSubAgent(t, a, "adhoc-parent")
-	parent.depth = 1
-	parent.delegation = config.DelegationConfig{MaxChildren: 2, MaxDepth: 2}
-	parent.writeScope = tools.WriteScope{PathPrefix: []string{"internal/agent"}}
-	ctx := tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID)
+func TestNestedCreateSubAgentDeclaredScopeDoesNotConstrainChild(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		parentPath string
+		child      tools.WriteScope
+	}{
+		{name: "child broader than parent prefix", parentPath: "internal/agent", child: tools.WriteScope{PathPrefix: []string{"internal"}}},
+		{name: "child narrower than parent prefix", parentPath: "internal", child: tools.WriteScope{Files: []string{"internal/agent/main.go"}}},
+		{name: "child exact file as prefix", parentPath: "internal/agent", child: tools.WriteScope{PathPrefix: []string{"internal/agent"}}},
+		{name: "empty write-capable child under scoped parent", parentPath: "internal/agent", child: tools.WriteScope{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := newTestMainAgent(t, t.TempDir())
+			configureNestedDelegationTestRuntime(a, 2)
+			parent := newControllableTestSubAgent(t, a, "adhoc-parent")
+			parent.depth = 1
+			parent.delegation = config.DelegationConfig{MaxChildren: 2, MaxDepth: 2}
+			parent.writeScope = tools.WriteScope{PathPrefix: []string{tc.parentPath}}
+			ctx := tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID)
 
-	_, err := a.CreateSubAgent(ctx, "child work", "worker", "", "", tools.WriteScope{PathPrefix: []string{"internal"}})
-	if err == nil || !strings.Contains(err.Error(), "must not be broader") {
-		t.Fatalf("CreateSubAgent error = %v, want scope inheritance rejection", err)
-	}
-	if got := len(a.subs.snapshotSubAgents()); got != 1 {
-		t.Fatalf("live SubAgents = %d, want only parent", got)
-	}
-}
-
-func TestNestedCreateSubAgentAllowsNarrowerWriteScope(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	configureNestedDelegationTestRuntime(a, 2)
-	parent := newControllableTestSubAgent(t, a, "adhoc-parent")
-	parent.depth = 1
-	parent.delegation = config.DelegationConfig{MaxChildren: 2, MaxDepth: 2}
-	parent.writeScope = tools.WriteScope{PathPrefix: []string{"internal"}}
-	ctx := tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID)
-
-	handle, err := a.CreateSubAgent(ctx, "child work", "worker", "", "", tools.WriteScope{Files: []string{"internal/agent/main.go"}})
-	if err != nil {
-		t.Fatalf("CreateSubAgent: %v", err)
-	}
-	if handle.Status != "started" {
-		t.Fatalf("handle.Status = %q, want started", handle.Status)
-	}
-}
-
-func TestNestedCreateSubAgentDoesNotExpandExactFileIntoPrefix(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	configureNestedDelegationTestRuntime(a, 2)
-	parent := newControllableTestSubAgent(t, a, "adhoc-parent")
-	parent.depth = 1
-	parent.delegation = config.DelegationConfig{MaxChildren: 2, MaxDepth: 2}
-	parent.writeScope = tools.WriteScope{Files: []string{"internal/agent/main.go"}}
-	ctx := tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID)
-
-	_, err := a.CreateSubAgent(ctx, "child work", "worker", "", "", tools.WriteScope{PathPrefix: []string{"internal/agent/main.go"}})
-	if err == nil || !strings.Contains(err.Error(), "must not be broader") {
-		t.Fatalf("CreateSubAgent error = %v, want exact-file expansion rejection", err)
+			handle, err := a.CreateSubAgent(ctx, "child work", "worker", "", "", tc.child)
+			if err != nil {
+				t.Fatalf("CreateSubAgent: %v", err)
+			}
+			if handle.Status != "started" {
+				t.Fatalf("handle.Status = %q, want started", handle.Status)
+			}
+		})
 	}
 }
 
@@ -4276,79 +4255,6 @@ func TestFocusedTokenUsageCoversEveryAttemptWhileLive(t *testing.T) {
 	}
 	if parked := a.GetTokenUsage(); parked != live {
 		t.Fatalf("parked focused usage = %#v, want the live reading %#v unchanged by parking", parked, live)
-	}
-}
-
-// Discovering a missing path used to cost the whole worker: a running task's
-// scope is fixed at delegation time, so the owner had to cancel and re-delegate
-// with a corrected scope, throwing away everything the worker had done.
-func TestNotifyWithScopeGrantWidensALiveWorkersScope(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	root := t.TempDir()
-	a.projectRoot = root
-	a.SetAgentConfigs(map[string]*config.AgentConfig{
-		"worker": {Name: "worker", Mode: config.AgentModeSubAgent, Models: map[string][]string{"default": {"test/test-model"}}},
-	})
-	a.SetLLMFactory(func(string, []string, string) *llm.Client { return newTestLLMClient() })
-	sub := newControllableTestSubAgent(t, a, "adhoc-scope-grant")
-	sub.agentDefName = "worker"
-	sub.workDir = root
-	sub.writeScope = tools.WriteScope{PathPrefix: []string{"internal/agent"}}
-	sub.tools.Register(tools.WriteTool{BaseDir: root})
-	sub.setState(SubAgentStateIdle, "idle")
-	a.syncTaskRecordFromSub(sub, "")
-
-	blocked, _ := json.Marshal(map[string]string{"path": "internal/tools/task.go", "content": "x"})
-	if _, err := sub.executeToolCall(context.Background(), message.ToolCall{ID: "before", Name: tools.NameWrite, Args: blocked}); err == nil || !strings.Contains(err.Error(), "outside") {
-		t.Fatalf("pre-grant write error = %v, want a scope rejection", err)
-	}
-
-	if _, err := a.NotifySubAgentWithScopeGrant(context.Background(), "adhoc-scope-grant", "you also need internal/tools", "constraint_update",
-		tools.WriteScope{PathPrefix: []string{"internal/tools"}}); err != nil {
-		t.Fatalf("NotifySubAgentWithScopeGrant: %v", err)
-	}
-
-	if _, err := sub.executeToolCall(context.Background(), message.ToolCall{ID: "after", Name: tools.NameWrite, Args: blocked}); err != nil {
-		t.Fatalf("post-grant write error = %v, want the granted path allowed", err)
-	}
-	// The original path stays writable: a grant adds, it does not replace.
-	original, _ := json.Marshal(map[string]string{"path": "internal/agent/sub.go", "content": "y"})
-	if _, err := sub.executeToolCall(context.Background(), message.ToolCall{ID: "original", Name: tools.NameWrite, Args: original}); err != nil {
-		t.Fatalf("originally-scoped write error = %v, want it still allowed", err)
-	}
-	record := a.taskRecordByTaskID("adhoc-scope-grant")
-	if len(record.ExpectedWriteScope.PathPrefix) != 2 {
-		t.Fatalf("record scope = %#v, want both path prefixes so a rehydrate keeps the grant", record.ExpectedWriteScope)
-	}
-}
-
-func TestNotifyScopeGrantRejectsNoOpAndNoFileWriteToolTargets(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	a.agentConfigs = map[string]*config.AgentConfig{
-		"reader": {
-			Name:       "reader",
-			Mode:       "subagent",
-			Permission: parsePermissionNode(t, "write: deny\nedit: deny\ndelete: deny\napply_patch: deny\n"),
-		},
-	}
-	a.setTaskRecords(map[string]*DurableTaskRecord{
-		"adhoc-writer": {
-			TaskID: "adhoc-writer", AgentDefName: "writer", State: string(SubAgentStateIdle),
-			ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{"internal/agent"}},
-		},
-		"adhoc-reader": {
-			TaskID: "adhoc-reader", AgentDefName: "reader", State: string(SubAgentStateIdle),
-			ExpectedWriteScope: tools.WriteScope{},
-		},
-	})
-
-	_, err := a.NotifySubAgentWithScopeGrant(context.Background(), "adhoc-writer", "msg", "", tools.WriteScope{PathPrefix: []string{"internal/agent"}})
-	if err == nil || !strings.Contains(err.Error(), "already covers every path") {
-		t.Fatalf("no-op grant error = %v, want the caller told it changes nothing", err)
-	}
-	_, err = a.NotifySubAgentWithScopeGrant(context.Background(), "adhoc-reader", "msg", "", tools.WriteScope{PathPrefix: []string{"internal/agent"}})
-	if err == nil || !strings.Contains(err.Error(), "registers no file-modifying tools") {
-		t.Fatalf("no-file-write-tool grant error = %v, want it refused with a re-delegation hint", err)
 	}
 }
 

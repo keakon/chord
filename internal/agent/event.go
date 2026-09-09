@@ -192,11 +192,7 @@ type SubAgentSendMessagePayload struct {
 	TaskID        string
 	Message       string
 	Kind          string
-	// GrantWriteScope widens the target task's write scope before the message is
-	// delivered, so a worker woken by the message already sees the paths the
-	// message is about. Empty for a plain notify.
-	GrantWriteScope tools.WriteScope
-	Reply           chan subAgentControlResult
+	Reply         chan subAgentControlResult
 }
 
 type SubAgentStopPayload struct {

@@ -17,23 +17,21 @@ type AgentInfo struct {
 	DelegationPolicy string
 }
 
-// WriteScope declares the paths a delegated task may modify. Whether the
-// worker may modify files at all is decided by its role's permission ruleset
-// (a role that denies write/edit/delete/apply_patch registers none of those
-// tools); the scope only bounds the targets of the file-modifying tools the
-// role does register.
+// WriteScope declares the paths a delegated task expects to modify. Whether
+// the worker may modify files at all is decided by its role's permission
+// ruleset (a role that denies write/edit/delete/apply_patch registers none of
+// those tools). The declaration is advisory: it gates no tool execution, and
+// only feeds sibling-overlap hints and coordination, so a worker may still
+// write any file its permission rules allow.
 type WriteScope struct {
 	Files      []string `json:"files,omitempty"`
 	PathPrefix []string `json:"path_prefix,omitempty"`
 	Modules    []string `json:"modules,omitempty"`
 }
 
-// writeScopePathProperties returns the schema for the path lists a write scope
-// declares. Delegation states them up front as expected_write_scope and notify
-// adds to them later as grant_write_scope; both name the same three lists, so
-// they are built here rather than spelled out twice — a model told one shape
-// and then the other would have to guess which spelling the runtime honors.
-// The map is freshly allocated because callers extend their own copy.
+// writeScopePathProperties returns the schema for the path lists an
+// expected_write_scope declares. The map is freshly allocated because callers
+// extend their own copy.
 func writeScopePathProperties() map[string]any {
 	return map[string]any{
 		"files":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
@@ -222,7 +220,7 @@ func (t *DelegateTool) Parameters() map[string]any {
 			},
 			"expected_write_scope": map[string]any{
 				"type":                 "object",
-				"description":          "Required declaration of the paths this task may modify, used for concurrency guardrails and enforced on the file-modifying tools the worker's role registers (write, edit, delete, apply_patch): their targets must fall inside the declared files, path_prefix, or modules. It does not restrict command tools (shell, spawn) — those follow the role's permission rules. A task that will not modify files should pick an agent_type whose role registers no file-writing tools (its permission rules deny write, edit, delete, and apply_patch) and pass an empty object {}: the empty scope is accepted only for such roles, because a role that can write files needs a declared boundary or it would have to run exclusively against every other writing task. For every other role declare the narrowest scope that covers the task so independent delegates keep running in parallel.",
+				"description":          "Required declaration of the paths this task expects to modify. It is a coordination declaration, not an enforced boundary: the runtime does not block the worker's file tools outside it, and which tools the worker may actually use is decided by the role's permission rules. The declaration feeds sibling-overlap hints (a started handle may carry scope_conflict with suggested_task_id) and your own planning, so declare the narrowest files/path_prefix/modules that honestly cover the work. A task that will not modify files should pick an agent_type whose role registers no file-writing tools (its permission rules deny write, edit, delete, and apply_patch) and pass an empty object {}: the empty scope is accepted only for such roles, because a role that can write files must still declare what it plans to touch.",
 				"properties":           scopeProperties,
 				"additionalProperties": false,
 			},
@@ -242,10 +240,10 @@ func (DelegateTool) IsReadOnly() bool { return false }
 // AgentFileWriteSurface is implemented by SubAgentCreators that can report
 // whether a target agent definition's role registers any file-modifying tool.
 // Delegate uses it to accept an empty expected_write_scope: a task whose role
-// registers no file-modifying tools cannot write files, so it needs no declared
-// path boundary, while a role that can write files must declare one (or the
-// task would run as an unrestricted writer against every other task). Creators
-// without this capability are treated conservatively as write-capable.
+// registers no file-modifying tools cannot write files, so it has nothing to
+// declare, while a role that can write files must still declare what the task
+// plans to touch so sibling-overlap hints stay meaningful. Creators without
+// this capability are treated conservatively as write-capable.
 type AgentFileWriteSurface interface {
 	// AgentRoleRegistersNoFileWriteTools reports whether the role behind the
 	// given agent_type registers none of write, edit, delete, or apply_patch.
@@ -262,12 +260,11 @@ func delegateTargetRoleRegistersNoFileWriteTools(creator SubAgentCreator, agentT
 
 // errDelegateWriteScopeRequired is the operator-facing repair instruction for a
 // Delegate call that declares no usable write scope for a role that can write
-// files. The schema marks the field required, but a model can still send `{}`,
-// which would silently reacquire the global exclusive scope the requirement
-// exists to prevent; an empty scope is valid only when the chosen agent_type's
-// role registers no file-modifying tools (see AgentFileWriteSurface).
+// files. The schema marks the field required, but a model can still send `{}`;
+// an empty scope is valid only when the chosen agent_type's role registers no
+// file-modifying tools (see AgentFileWriteSurface).
 var errDelegateWriteScopeRequired = fmt.Errorf(
-	"expected_write_scope is required: this task must either declare at least one of files/path_prefix/modules covering what it will write, " +
+	"expected_write_scope is required: this task must either declare at least one of files/path_prefix/modules covering what it plans to write, " +
 		"or use an agent_type whose role registers no file-writing tools and pass an empty object {}")
 
 func (t *DelegateTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
@@ -305,30 +302,4 @@ func (t *DelegateTool) Execute(ctx context.Context, raw json.RawMessage) (string
 		return "", fmt.Errorf("marshal task handle: %w", err)
 	}
 	return string(out), nil
-}
-
-// WidenWriteScope returns base extended with grant's paths. It never removes
-// anything: a scope that shrank under a running worker would retroactively
-// invalidate writes it had already been allowed to make, and changing whether
-// a task can write at all is the role configuration's decision, not a grant's.
-// Only files, path prefixes and modules are widened.
-func WidenWriteScope(base, grant WriteScope) WriteScope {
-	base = base.Normalized()
-	grant = grant.Normalized()
-	out := base
-	out.Files = dedupeTrimmedStrings(append(append([]string(nil), base.Files...), grant.Files...))
-	out.PathPrefix = dedupeTrimmedStrings(append(append([]string(nil), base.PathPrefix...), grant.PathPrefix...))
-	out.Modules = dedupeTrimmedStrings(append(append([]string(nil), base.Modules...), grant.Modules...))
-	return out
-}
-
-// AddsNothingTo reports whether every path in this scope is already covered by
-// base, which makes a grant a no-op the caller should be told about rather than
-// silently accept.
-func (s WriteScope) AddsNothingTo(base WriteScope) bool {
-	widened := WidenWriteScope(base, s)
-	base = base.Normalized()
-	return len(widened.Files) == len(base.Files) &&
-		len(widened.PathPrefix) == len(base.PathPrefix) &&
-		len(widened.Modules) == len(base.Modules)
 }

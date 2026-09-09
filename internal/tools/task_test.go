@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -45,34 +44,6 @@ func TestDelegateToolParametersExposeIdentityScopeAndAgentMetadata(t *testing.T)
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("Parameters() missing %q in %s", want, text)
-		}
-	}
-}
-
-// TestWriteScopePathPropertiesShared pins that a delegation's
-// expected_write_scope and a notify grant_write_scope describe the same path
-// lists. They are one declaration seen at two moments, so a model that learned
-// the shape when delegating must find it unchanged when widening the scope.
-func TestWriteScopePathPropertiesShared(t *testing.T) {
-	delegate := NewDelegateTool(taskTestCreator{}).Parameters()
-	scope := delegate["properties"].(map[string]any)["expected_write_scope"].(map[string]any)["properties"].(map[string]any)
-	grant := NewNotifyTool(nil, notifyMessengerStub{}, false, true).
-		Parameters()["properties"].(map[string]any)["grant_write_scope"].(map[string]any)["properties"].(map[string]any)
-
-	if len(grant) != len(writeScopePathProperties()) {
-		t.Fatalf("grant_write_scope properties = %#v, want only the shared path lists", grant)
-	}
-	for name, want := range grant {
-		if got := scope[name]; !reflect.DeepEqual(got, want) {
-			t.Fatalf("expected_write_scope[%q] = %#v, grant_write_scope[%q] = %#v", name, got, name, want)
-		}
-	}
-	// Both declarations carry exactly the same three path lists: whether a task
-	// may write files at all is decided by its role's ruleset, so no other
-	// field exists on either side of the scope declaration.
-	for name := range scope {
-		if _, ok := grant[name]; !ok {
-			t.Fatalf("expected_write_scope carries %q, grant_write_scope does not", name)
 		}
 	}
 }

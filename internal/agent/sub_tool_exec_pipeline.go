@@ -44,8 +44,6 @@ func (s *SubAgent) toolExecutionPipeline() toolExecutionPipeline {
 		applyPatchRetry:  &s.applyPatchRetry,
 		projectRoot:      s.parent.projectRoot,
 		toolBaseDir:      s.workDir,
-		writeScope:       s.currentWriteScope(),
-		writeScopeDir:    s.workDir,
 		currentRuleset:   s.currentRuleset,
 		refreshRulesetAfterRuleIntent: func(toolName string, intent *ConfirmRuleIntent) permission.Ruleset {
 			if s.parent != nil {
