@@ -190,6 +190,7 @@ var slashCommands = []slashCommand{
 	{Cmd: "/models", Desc: "switch current view pool"},
 	{Cmd: "/new", Desc: "start a fresh session"},
 	{Cmd: "/resume", Desc: "resume previous session"},
+	{Cmd: "/role", Desc: "switch main agent role"},
 	{Cmd: "/rules", Desc: "manage permission rules"},
 	{Cmd: "/stats", Desc: "usage statistics"},
 	{Cmd: "/rename", Desc: "set or clear session title"},

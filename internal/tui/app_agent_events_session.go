@@ -30,6 +30,10 @@ func (m *Model) handleSessionAgentEvent(event agent.AgentEvent) (bool, agentEven
 		m.inflightDraft = nil
 		m.openModelSelectFor(evt.Target)
 		return true, effects
+	case agent.RoleSelectEvent:
+		m.inflightDraft = nil
+		m.openRoleSelect()
+		return true, effects
 	case agent.MCPSelectEvent:
 		m.inflightDraft = nil
 		m.openMCPSelect()

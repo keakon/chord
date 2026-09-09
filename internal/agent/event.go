@@ -709,6 +709,13 @@ type RoleChangedEvent struct {
 
 func (RoleChangedEvent) agentEvent() {}
 
+// RoleSelectEvent signals the TUI to open the main-role selector overlay.
+// Emitted in response to /role with no arguments so the user can pick the
+// active main-mode role from a dialog instead of cycling with Shift+Tab.
+type RoleSelectEvent struct{}
+
+func (RoleSelectEvent) agentEvent() {}
+
 // SessionSelectEvent signals the TUI to open the session picker overlay.
 // Emitted when the user runs /resume with no arguments; the user then
 // chooses a session from the list to restore.

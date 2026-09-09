@@ -294,6 +294,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 		trimmed := strings.TrimSpace(value)
 		if m.agent != nil && len(m.attachments) == 0 && !hasInlinePastes {
 			if trimmed == "/models" || strings.HasPrefix(trimmed, "/models ") ||
+				trimmed == "/role" || strings.HasPrefix(trimmed, "/role ") ||
 				trimmed == "/export" || strings.HasPrefix(trimmed, "/export ") ||
 				trimmed == "/rename" || strings.HasPrefix(trimmed, "/rename ") ||
 				trimmed == "/tier" || strings.HasPrefix(trimmed, "/tier ") ||
@@ -328,7 +329,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 				return m.openRules()
 			}
 		}
-		if m.agent != nil && m.focusedAgentID != "" && len(m.attachments) == 0 && !hasInlinePastes && (trimmed == "/models" || strings.HasPrefix(trimmed, "/models ")) {
+		if m.agent != nil && m.focusedAgentID != "" && len(m.attachments) == 0 && !hasInlinePastes && (trimmed == "/models" || strings.HasPrefix(trimmed, "/models ") || trimmed == "/role" || strings.HasPrefix(trimmed, "/role ")) {
 			m.recordTUIDiagnostic("agent-command", "%s", trimmed)
 			m.agent.SendUserMessage(value)
 			return nil

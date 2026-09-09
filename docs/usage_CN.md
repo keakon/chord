@@ -179,6 +179,7 @@ Worktree 路径位于 `<state-dir>/worktrees/<repo-id>/<slug>`（仓库目录之
 - `/rename <标题>`：设置当前会话的显示标题；单独执行 `/rename` 会清空标题，但不会改变 session ID
 - `/models`：查看模型池状态或切换当前视图对象的模型池（main 视图 = 当前主角色；SubAgent 视图 = 该 agent）
 - `/models --agent <name> <pool>`：直接设置指定 agent 的模型池
+- `/role`：弹出角色对话框并切换当前主角色（builder、planner 与自定义 main-mode 角色）——等价 `Shift+Tab` 的对话框形式；`/role <name>` 直接切换不弹对话框；`/role status` 打印当前角色与可选角色列表
 - `/mcp`：打开 MCP server 选择器；`/mcp status` 输出状态；`/mcp enable|disable <server>` 可切换手动 server。运行时切换会在下一次 LLM 请求生效，不影响当前正在进行的请求。
 - `/compact`：手动触发上下文压缩，将当前对话摘要为结构化归档，详见 [上下文管理 — 上下文压缩](./context-management_CN.md#上下文压缩compaction)
 - `/tier standard|fast|slow`：设置后续模型请求的 service tier（包括尚未开始的后续 retry round）。空的 `/tier` 不是状态查询命令；当前有效 tier 请看侧边栏/状态显示。如果手动输入当前 provider/model 不支持的 tier，Chord 会保持当前 tier 不变并显示错误提示。

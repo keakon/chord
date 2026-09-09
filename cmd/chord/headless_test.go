@@ -864,6 +864,21 @@ func TestHeadlessBareModelsSendMapsToStatus(t *testing.T) {
 	}
 }
 
+func TestHeadlessBareRoleSendMapsToStatus(t *testing.T) {
+	state := &headlessState{}
+	to := newTestOut()
+	backend := &mockBackend{}
+
+	handleHeadlessCommand(headlessCommand{Type: "send", Content: "/role"}, backend, state, to.writer(), "test-session")
+
+	backend.mu.Lock()
+	msgs := append([]string(nil), backend.sentMessages...)
+	backend.mu.Unlock()
+	if len(msgs) != 1 || msgs[0] != "/role status" {
+		t.Fatalf("sent messages = %v, want [/role status]", msgs)
+	}
+}
+
 func TestHeadlessModelsCommandStatus(t *testing.T) {
 	state := &headlessState{}
 	to := newTestOut()

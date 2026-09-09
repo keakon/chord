@@ -266,9 +266,10 @@ Quiescent SubAgents may release their live runtime while their task and transcri
 For convenience, headless also accepts these via `send` so you can drive Chord from a chat surface that only has a single text input:
 
 - `/models status`, `/models <pool>`, `/models --agent <name> <pool>`
+- `/role status`, `/role <name>`: query or switch the active main role (same operation as the `role` protocol command)
 - `/help`, `/stats`, `/compact`, `/loop on`, `/loop off` (only when the active MainAgent role can use the `done` tool)
 
-Bare `/models` is treated as `/models status`. Some slash commands are TUI-only (e.g. `/new`, `/resume` — they require an interactive picker); attempting them in headless mode returns an `error` envelope explaining "X is only available in local TUI mode".
+Bare `/models` is treated as `/models status`, and bare `/role` as `/role status`. Some slash commands are TUI-only (e.g. `/new`, `/resume` — they require an interactive picker); attempting them in headless mode returns an `error` envelope explaining "X is only available in local TUI mode".
 
 ## Minimal Python client
 

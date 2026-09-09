@@ -142,6 +142,64 @@ func (a *MainAgent) CurrentRole() string {
 	return "builder"
 }
 
+// handleRoleCommand processes the /role slash command. It is the keyboard
+// counterpart of the headless role list/set commands and runs on the main
+// agent's event loop (see isTUILocalOnlySlashCommand).
+//   - "/role": emits RoleSelectEvent so the TUI opens the role selector overlay.
+//   - "/role status": prints the current role and the ordered available roles.
+//   - "/role <name>": switches to the named main-mode role.
+//
+// busy reports whether an active turn is in flight; when true the handler skips
+// setIdleAndDrainPending, matching the other local-only handlers.
+func (a *MainAgent) handleRoleCommand(content string, busy bool) {
+	arg := strings.TrimSpace(strings.TrimPrefix(content, "/role"))
+	switch {
+	case arg == "":
+		a.emitToTUI(RoleSelectEvent{})
+	case arg == "status":
+		a.emitToTUI(InfoEvent{Message: a.RoleStatusText()})
+	default:
+		a.switchRoleByName(arg)
+	}
+	if !busy {
+		a.setIdleAndDrainPending()
+	}
+}
+
+// RoleStatusText formats the current role and the ordered available roles as
+// human-readable text for /role status.
+func (a *MainAgent) RoleStatusText() string {
+	current := a.CurrentRole()
+	var b strings.Builder
+	fmt.Fprintf(&b, "Current role: %s\n", current)
+	b.WriteString("Available roles:\n")
+	for _, name := range a.AvailableRoles() {
+		if name == current {
+			fmt.Fprintf(&b, "  %s (current)\n", name)
+		} else {
+			fmt.Fprintf(&b, "  %s\n", name)
+		}
+	}
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
+// switchRoleByName switches to the named role with user-facing feedback.
+// Switching to the already-active role is a no-op with an info toast; failures
+// (unknown name, SubAgent-only config) surface as an error toast. This mirrors
+// the TUI Shift+Tab handler while remaining callable from headless send.
+func (a *MainAgent) switchRoleByName(name string) {
+	from := a.CurrentRole()
+	if name == from {
+		a.emitToTUI(ToastEvent{Message: "already the active role: " + name, Level: "info"})
+		return
+	}
+	if err := a.SwitchRole(name); err != nil {
+		a.emitToTUI(ToastEvent{Message: err.Error(), Level: "error"})
+		return
+	}
+	a.emitToTUI(ToastEvent{Message: fmt.Sprintf("role: %s → %s", from, name), Level: "info"})
+}
+
 func (a *MainAgent) ProjectRoot() string {
 	return strings.TrimSpace(a.projectRoot)
 }

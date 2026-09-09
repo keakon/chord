@@ -84,6 +84,34 @@ func (m *Model) handleModalMouseMsg(msg tea.MouseMsg) (tea.Cmd, bool) {
 		return nil, true
 	}
 
+	if m.mode == ModeRoleSelect {
+		m.clearChordState()
+		switch mouse.Button {
+		case tea.MouseWheelUp:
+			if m.roleSelect.selector.list != nil {
+				m.roleSelect.selector.list.HandleWheel(-mouseWheelScrollStep)
+				m.roleSelect.cursor = m.roleSelect.selector.list.CursorAt()
+			}
+			return nil, true
+		case tea.MouseWheelDown:
+			if m.roleSelect.selector.list != nil {
+				m.roleSelect.selector.list.HandleWheel(mouseWheelScrollStep)
+				m.roleSelect.cursor = m.roleSelect.selector.list.CursorAt()
+			}
+			return nil, true
+		}
+		if _, isClick := msg.(tea.MouseClickMsg); isClick && mouse.Button == tea.MouseLeft {
+			if idx, ok := m.roleSelectIndexAt(mouse.X, mouse.Y); ok {
+				if m.roleSelect.selector.list != nil {
+					m.roleSelect.selector.list.SetCursor(idx)
+					m.roleSelect.cursor = m.roleSelect.selector.list.CursorAt()
+				}
+				return m.selectRoleAtCursor(), true
+			}
+		}
+		return nil, true
+	}
+
 	if m.mode == ModeMCPSelect {
 		m.clearChordState()
 		switch mouse.Button {

@@ -32,6 +32,7 @@ const (
 	ModeQuestion                         // Question tool multi-choice dialog
 	ModeSearch                           // search input active
 	ModeModelSelect                      // model pool selector overlay
+	ModeRoleSelect                       // main role selector overlay (/role)
 	ModeMCPSelect                        // MCP server selector overlay (/mcp)
 	ModeSessionSelect                    // session picker overlay (/resume)
 	ModeSessionDeleteConfirm             // delete-session confirmation overlay from session picker
@@ -224,6 +225,9 @@ type Model struct {
 	// Model selector state
 	modelSelect       modelSelectState
 	pendingPoolSwitch pendingPoolSwitchState
+
+	// Main-role selector state (/role)
+	roleSelect roleSelectState
 
 	// MCP server selector state (/mcp)
 	mcpSelect mcpSelectState
@@ -1036,6 +1040,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case modelSwitchResultMsg:
 		return m, m.handleModelSwitchResult(msg)
+
+	case roleSwitchResultMsg:
+		return m, m.handleRoleSwitchResult(msg)
 
 	// -- question timeout tick ------------------------------------------
 	case questionTimeoutTickMsg:

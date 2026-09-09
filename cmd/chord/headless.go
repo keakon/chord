@@ -1115,6 +1115,9 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 		if strings.TrimSpace(content) == "/models" {
 			content = "/models status"
 		}
+		if strings.TrimSpace(content) == "/role" {
+			content = "/role status"
+		}
 		if isUnsupportedHeadlessCommand(content) {
 			fields := strings.Fields(content)
 			out.emit(headlessEnvelope{

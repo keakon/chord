@@ -1205,8 +1205,8 @@ func TestSlashCompletionEnterCompletesSelectedCommandAndSubmitsIt(t *testing.T) 
 	m.input.SetValue("/r")
 
 	matches := m.getSlashCompletions(m.input.Value())
-	if len(matches) < 2 || matches[0].Cmd != "/resume" || matches[1].Cmd != "/rules" {
-		t.Fatalf("matches = %#v, want /resume then /rules", matches)
+	if len(matches) < 3 || matches[0].Cmd != "/resume" || matches[1].Cmd != "/role" || matches[2].Cmd != "/rules" {
+		t.Fatalf("matches = %#v, want /resume then /role then /rules", matches)
 	}
 
 	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))

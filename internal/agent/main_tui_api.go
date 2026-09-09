@@ -10,7 +10,7 @@ import (
 )
 
 // isTUILocalOnlySlashCommand reports whether content is a local-only slash
-// command (/export, /models, /tier, /rename, /compact) that must run on the main agent's event
+// command (/export, /models, /tier, /rename, /role, /compact) that must run on the main agent's event
 // loop and must never be routed to a focused SubAgent. Predicate only —
 // execution lives in executeLocalOnlySlashCommand, which the event-loop
 // goroutine calls.
@@ -20,6 +20,8 @@ func isTUILocalOnlySlashCommand(content string) bool {
 	case c == "/export" || strings.HasPrefix(c, "/export "):
 		return true
 	case c == "/models" || strings.HasPrefix(c, "/models "):
+		return true
+	case c == "/role" || strings.HasPrefix(c, "/role "):
 		return true
 	case c == "/tier" || strings.HasPrefix(c, "/tier "):
 		return true
@@ -59,6 +61,9 @@ func (a *MainAgent) executeLocalOnlySlashCommand(content string, _ []message.Con
 		return true
 	case c == "/models" || strings.HasPrefix(c, "/models "):
 		a.handleModelsCommand(c, busy)
+		return true
+	case c == "/role" || strings.HasPrefix(c, "/role "):
+		a.handleRoleCommand(c, busy)
 		return true
 	case c == "/tier" || strings.HasPrefix(c, "/tier "):
 		a.handleTierCommand(c, busy)
