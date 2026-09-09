@@ -43,12 +43,11 @@ func buildDynamicCapabilityPromptBlock(visible map[string]struct{}, ruleset perm
 // without the block, the shared Guidelines' incremental-verification advice
 // ("first compile, then run the changed package's tests") would push the
 // worker toward builds and tests it can never run, after which it could only
-// fabricate a verification_run declaration (which completion validation
-// rejects) or get stuck. The block tells the worker that command execution and
-// execution-based verification belong to the owner agent, and to report
-// verification honestly as not run. A task's write scope plays no part here:
-// scoped and read-only tasks keep Shell unless the role denies it, and the
-// write-scope gate never rejects command tools.
+// fabricate results or get stuck. The block tells the worker that command
+// execution and execution-based verification belong to the owner agent, and to
+// report verification honestly as not run. A task's write scope plays no part
+// here: roles that deny every file-modifying tool keep Shell unless the role
+// denies it too, and the write-scope gate never rejects command tools.
 func shellExecutionBoundaryPromptBlock(visible map[string]struct{}, audience capabilityPromptAudience) string {
 	if audience != capabilityPromptAudienceSub {
 		return ""
@@ -58,7 +57,7 @@ func shellExecutionBoundaryPromptBlock(visible map[string]struct{}, audience cap
 	}
 	return "## Command Execution Boundary\n" +
 		"- The " + toolPromptName(tools.NameShell) + " tool is not available in this task: you cannot run commands, builds, or tests.\n" +
-		"- Treat missing command execution as a real boundary. Do not claim a command ran, and do not declare `verification_run` commands you could not execute.\n" +
+		"- Treat missing command execution as a real boundary. Do not claim a command ran that you could not execute.\n" +
 		"- Execution-based verification is the owner agent's responsibility. Report verification honestly as not run (for example in `remaining_limitations`) instead of fabricating results."
 }
 

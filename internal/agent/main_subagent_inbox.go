@@ -366,12 +366,6 @@ func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
 					if len(env.FilesChanged) > 0 {
 						pendingText += "\n- files_changed: " + strings.Join(env.FilesChanged, ", ")
 					}
-					if len(env.VerificationRun) > 0 {
-						pendingText += "\n- verification_run: " + strings.Join(env.VerificationRun, ", ")
-					}
-					if len(env.VerificationRecords) > 0 {
-						pendingText += "\n- verification: " + formatCompletionVerificationRecords(env.VerificationRecords)
-					}
 					if len(env.Artifacts) > 0 {
 						refs := make([]string, 0, len(env.Artifacts))
 						for _, ref := range env.Artifacts {
@@ -1596,10 +1590,6 @@ func formatSubAgentMailboxInjectionText(msg *SubAgentMailboxMessage) string {
 		if len(msg.Completion.FilesChanged) > 0 {
 			b.WriteString("\n- files_changed: ")
 			b.WriteString(strings.Join(msg.Completion.FilesChanged, ", "))
-		}
-		if len(msg.Completion.VerificationRun) > 0 {
-			b.WriteString("\n- verification_run: ")
-			b.WriteString(strings.Join(msg.Completion.VerificationRun, ", "))
 		}
 		if len(msg.Completion.RemainingLimitations) > 0 {
 			b.WriteString("\n- remaining_limitations: ")

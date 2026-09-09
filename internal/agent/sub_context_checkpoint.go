@@ -13,8 +13,8 @@ import (
 // buildSubAgentStructuredCheckpoint renders the deterministic structured
 // checkpoint that replaces the removed history prefix inside a SubAgent
 // context compression. Every field is sourced from existing authoritative
-// state (task description, owner metadata, write scope, the message tail, the
-// verification ledger, changed-file tracking, runtime state); a field with no
+// state (task description, owner metadata, write scope, the message tail,
+// changed-file tracking, runtime state); a field with no
 // derivable source is marked "unknown" rather than guessed. The checkpoint
 // intentionally does not call any live MainAgent state — it reads only the
 // SubAgent's own immutable fields, locked snapshots, and the message list
@@ -52,9 +52,6 @@ func buildSubAgentStructuredCheckpoint(s *SubAgent, messages []message.Message, 
 	b.WriteByte('\n')
 	b.WriteString("- Skills loaded earlier: ")
 	b.WriteString(subAgentCheckpointSkills(s))
-	b.WriteByte('\n')
-	b.WriteString("- Verification results: ")
-	b.WriteString(subAgentCheckpointVerification(s))
 	b.WriteByte('\n')
 	b.WriteString("- Known failures: ")
 	b.WriteString(subAgentCheckpointFailures(messages, toolMeta))
@@ -200,23 +197,6 @@ func subAgentCheckpointActions(messages []message.Message, meta map[string]toolC
 	}
 	if len(lines) == 0 {
 		return "unknown"
-	}
-	return strings.Join(lines, " | ")
-}
-
-// subAgentCheckpointVerification summarizes the verification ledger
-// (newest first): each "command: status" pair is the authoritative record of
-// what was verified, so the model can trust earlier checks instead of redoing
-// them after compression.
-func subAgentCheckpointVerification(s *SubAgent) string {
-	ledger := s.verificationLedger
-	if len(ledger) == 0 {
-		return "unknown"
-	}
-	var lines []string
-	for i := len(ledger) - 1; i >= 0 && len(lines) < 3; i-- {
-		entry := ledger[i]
-		lines = append(lines, llm.TruncateStringRunes(entry.Command+" ("+entry.Status+")", 120, "…"))
 	}
 	return strings.Join(lines, " | ")
 }

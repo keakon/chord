@@ -1,8 +1,8 @@
 package agent
 
 // finishCompletion is shared by regular and degraded Complete calls, after any
-// sibling tools settle. New input invalidates either delivery before checking
-// child joins or verification; dropping optional metadata must not bypass it.
+// sibling tools settle. New input invalidates delivery before checking child
+// joins; dropping optional metadata must not bypass it.
 func (s *SubAgent) finishCompletion(callID string, result *AgentResult) error {
 	if pending := s.takePendingUserMessagesForContinuation(); len(pending) > 0 {
 		s.appendCompleteToolResult(callID, "Completion deferred: received new user input before completion.")
@@ -18,12 +18,9 @@ func (s *SubAgent) finishCompletion(callID string, result *AgentResult) error {
 		s.enterWaitingDescendant(deferredCompleteResult(len(outstanding)))
 		return nil
 	}
-	if err := s.validateCompletionVerification(result.Envelope); err != nil {
-		return err
-	}
 	s.clearPendingCompleteIntent()
 	result = s.enrichCompletionResult(result)
-	s.appendCompleteToolResult(callID, result.Summary, result.Envelope.VerificationRecords)
+	s.appendCompleteToolResult(callID, result.Summary)
 	s.sendEvent(Event{Type: EventAgentDone, Payload: result})
 	return nil
 }

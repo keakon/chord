@@ -351,7 +351,6 @@ type proseControlArgs struct {
 	Summary              string              `json:"summary"`
 	Reason               string              `json:"reason"`
 	FilesChanged         []string            `json:"files_changed"`
-	VerificationRun      []string            `json:"verification_run"`
 	RemainingLimitations []string            `json:"remaining_limitations"`
 	KnownRisks           []string            `json:"known_risks"`
 	FollowUpRecommended  []string            `json:"follow_up_recommended"`
@@ -367,7 +366,6 @@ func decodeProseControlArgsTolerant(argsJSON string) proseControlArgs {
 		Summary:              vals["summary"],
 		Reason:               vals["reason"],
 		FilesChanged:         paramStringList(vals["files_changed"]),
-		VerificationRun:      paramStringList(vals["verification_run"]),
 		RemainingLimitations: paramStringList(vals["remaining_limitations"]),
 		KnownRisks:           paramStringList(vals["known_risks"]),
 		FollowUpRecommended:  paramStringList(vals["follow_up_recommended"]),
@@ -439,19 +437,6 @@ func (b *Block) renderProseControlCall(width int, spinnerFrame string) []string 
 			}
 		}
 		appendList("Files changed", args.FilesChanged)
-		if len(b.VerificationRecords) > 0 {
-			values := make([]string, 0, len(b.VerificationRecords))
-			for _, record := range b.VerificationRecords {
-				value := record.Command + " [" + record.Status + "]"
-				if record.Summary != "" {
-					value += ": " + record.Summary
-				}
-				values = append(values, value)
-			}
-			appendList("Verification", values)
-		} else {
-			appendList("Verification", args.VerificationRun)
-		}
 		appendList("Remaining limitations", args.RemainingLimitations)
 		appendList("Known risks", args.KnownRisks)
 		appendList("Follow-up recommended", args.FollowUpRecommended)

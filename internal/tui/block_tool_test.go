@@ -2288,7 +2288,7 @@ func TestExpandedCompleteRendersSummaryMarkdownAndStructuredDetails(t *testing.T
 	ApplyTheme(DefaultTheme())
 	resetMarkdownRenderer()
 
-	args := `{"summary":"## Result\n\nImplemented **streaming** support.\n\n` + "```go\\nfmt.Println(1)\\n```" + `","files_changed":["internal/tui/block_tool_render_generic.go"],"verification_run":["go test ./internal/tui"]}`
+	args := `{"summary":"## Result\n\nImplemented **streaming** support.\n\n` + "```go\\nfmt.Println(1)\\n```" + `","files_changed":["internal/tui/block_tool_render_generic.go"]}`
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
@@ -2302,29 +2302,13 @@ func TestExpandedCompleteRendersSummaryMarkdownAndStructuredDetails(t *testing.T
 	}
 
 	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
-	for _, want := range []string{"Result", "Implemented streaming support.", "fmt.Println(1)", "Files changed:", "internal/tui/block_tool_render_generic.go", "Verification:", "go test ./internal/tui"} {
+	for _, want := range []string{"Result", "Implemented streaming support.", "fmt.Println(1)", "Files changed:", "internal/tui/block_tool_render_generic.go"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("expected expanded Complete card to contain %q, got:\n%s", want, joined)
 		}
 	}
 	if strings.Count(joined, "Implemented streaming support.") != 1 {
 		t.Fatalf("expected Complete summary to render once instead of repeating the result, got:\n%s", joined)
-	}
-}
-
-func TestExpandedCompleteRendersRuntimeVerificationRecord(t *testing.T) {
-	ApplyTheme(DefaultTheme())
-	block := &Block{
-		ID: 1, Type: BlockToolCall, ToolName: tools.NameComplete,
-		RawArgs:       `{"summary":"done","verification_run":["legacy command"]}`,
-		Content:       `{"summary":"done","verification_run":["legacy command"]}`,
-		ResultContent: "done", ResultDone: true, ResultStatus: agent.ToolResultStatusSuccess,
-		ToolCallDetailExpanded: true,
-		VerificationRecords:    []agent.VerificationRecord{{Command: "go test ./...", Status: "failed", Summary: "exit 1"}},
-	}
-	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
-	if !strings.Contains(joined, "go test ./... [failed]: exit 1") || strings.Contains(joined, "legacy command") {
-		t.Fatalf("runtime verification rendering = %s", joined)
 	}
 }
 

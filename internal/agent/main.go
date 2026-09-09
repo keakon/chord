@@ -114,7 +114,7 @@ type Turn struct {
 	// spin forever.
 	SubAgentTerminalRecoveryCount int
 	// SubAgentCompletionRecoveryCount bounds the follow-up for a rejected
-	// Complete call (invalid arguments or failed verification) to one request.
+	// Complete call (invalid arguments) to one request.
 	// It is separate from SubAgentTerminalRecoveryCount so a text-only reply
 	// that already spent the wrap-up nudge does not consume the model's one
 	// chance to repair a malformed Complete, and a rejected Complete does not

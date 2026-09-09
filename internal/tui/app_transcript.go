@@ -446,18 +446,17 @@ type transcriptToolResult struct {
 	// payload is the tool's own output before notes; notes are the diagnostic
 	// lines the runtime appended. Both are empty in transcripts written before
 	// the split, where result holds the combination.
-	payload             string
-	notes               []string
-	status              agent.ToolResultStatus
-	audit               *message.ToolArgsAudit
-	diff                string
-	duration            time.Duration
-	doneReport          string
-	displayArgs         func(toolName, argsJSON, result string) string
-	imageParts          []BlockImagePart
-	resetExecution      bool
-	verificationRecords []agent.VerificationRecord
-	recoveryState       string
+	payload        string
+	notes          []string
+	status         agent.ToolResultStatus
+	audit          *message.ToolArgsAudit
+	diff           string
+	duration       time.Duration
+	doneReport     string
+	displayArgs    func(toolName, argsJSON, result string) string
+	imageParts     []BlockImagePart
+	resetExecution bool
+	recoveryState  string
 }
 
 func newTranscriptToolCallBlock(nextID int, tc message.ToolCall) *Block {
@@ -530,7 +529,6 @@ func applyStableToolResultToBlock(block *Block, result transcriptToolResult) {
 	}
 	block.ResultStatus = result.status
 	block.RecoveryState = result.recoveryState
-	block.VerificationRecords = append([]agent.VerificationRecord(nil), result.verificationRecords...)
 	block.ResultDone = true
 	if result.resetExecution {
 		block.ToolExecutionState = ""

@@ -150,7 +150,7 @@ func (s *SubAgent) enterWaitingDescendant(reason string) {
 	s.parent.parkSubAgent(s.instanceID)
 }
 
-func (s *SubAgent) appendCompleteToolResult(callID, resultContent string, verification ...[]VerificationRecord) {
+func (s *SubAgent) appendCompleteToolResult(callID, resultContent string) {
 	if strings.TrimSpace(callID) == "" {
 		return
 	}
@@ -164,12 +164,10 @@ func (s *SubAgent) appendCompleteToolResult(callID, resultContent string, verifi
 	s.turn.removeStreamingToolCall(callID)
 	event := ToolResultEvent{
 		CallID:  callID,
+		Name:    tools.NameComplete,
 		Result:  resultContent,
 		Status:  ToolResultStatusSuccess,
 		AgentID: s.instanceID,
-	}
-	if len(verification) > 0 {
-		event.VerificationRecords = append([]VerificationRecord(nil), verification[0]...)
 	}
 	s.parent.emitToTUI(event)
 }

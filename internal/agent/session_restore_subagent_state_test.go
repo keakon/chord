@@ -399,12 +399,6 @@ func TestRestoreLoadedSubAgentsRestoresOwnerDepthAndPendingComplete(t *testing.T
 		PendingCompleteSummary: "final summary",
 		PendingCompleteEnvelope: mustMarshalCompletionEnvelopeForTest(t, &CompletionEnvelope{
 			Summary: "final summary",
-			VerificationRecords: []VerificationRecord{{
-				ToolCallID: "verify-restore",
-				Command:    "go test ./internal/agent",
-				Status:     "failed",
-				Summary:    "exit 1",
-			}},
 		}),
 		JoinToOwner: true,
 	}})
@@ -426,10 +420,6 @@ func TestRestoreLoadedSubAgentsRestoresOwnerDepthAndPendingComplete(t *testing.T
 	}
 	if restored.PendingCompletion == nil || restored.PendingCompletion.Summary != "final summary" {
 		t.Fatalf("PendingCompletion = %#v, want summary %q", restored.PendingCompletion, "final summary")
-	}
-	records := restored.PendingCompletion.VerificationRecords
-	if len(records) != 1 || records[0].ToolCallID != "verify-restore" || records[0].Command != "go test ./internal/agent" || records[0].Status != "failed" || records[0].Summary != "exit 1" {
-		t.Fatalf("restored verification records = %#v", records)
 	}
 }
 

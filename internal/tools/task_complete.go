@@ -16,7 +16,6 @@ type CompleteTool struct{}
 type completeArgs struct {
 	Summary              string          `json:"summary"`
 	FilesChanged         []string        `json:"files_changed,omitempty"`
-	VerificationRun      []string        `json:"verification_run,omitempty"`
 	RemainingLimitations []string        `json:"remaining_limitations,omitempty"`
 	KnownRisks           []string        `json:"known_risks,omitempty"`
 	FollowUpRecommended  []string        `json:"follow_up_recommended,omitempty"`
@@ -59,11 +58,6 @@ func (CompleteTool) Parameters() map[string]any {
 			"files_changed": map[string]any{
 				"type":        "array",
 				"description": "Actual files changed by this task. Do not list expected scope unless it was actually changed.",
-				"items":       map[string]any{"type": "string"},
-			},
-			"verification_run": map[string]any{
-				"type":        "array",
-				"description": "Shell commands you actually ran and finalized in this task. Only commands executed through the shell tool can be validated; when this task cannot execute shell commands, leave this empty and explain in remaining_limitations that verification was not run.",
 				"items":       map[string]any{"type": "string"},
 			},
 			"remaining_limitations": map[string]any{

@@ -321,18 +321,17 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 			displayArgsJSON = evt.Audit.OriginalArgsJSON
 		}
 		applyStableToolResultToBlock(block, transcriptToolResult{
-			argsJSON:            displayArgsJSON,
-			result:              evt.Result,
-			status:              evt.Status,
-			audit:               evt.Audit,
-			diff:                evt.Diff,
-			duration:            evt.Duration,
-			doneReport:          evt.DoneReport,
-			displayArgs:         stableToolDisplayArgs,
-			imageParts:          imagePartsFromContentParts(evt.Parts),
-			resetExecution:      true,
-			verificationRecords: append([]agent.VerificationRecord(nil), evt.VerificationRecords...),
-			recoveryState:       evt.RecoveryState,
+			argsJSON:       displayArgsJSON,
+			result:         evt.Result,
+			status:         evt.Status,
+			audit:          evt.Audit,
+			diff:           evt.Diff,
+			duration:       evt.Duration,
+			doneReport:     evt.DoneReport,
+			displayArgs:    stableToolDisplayArgs,
+			imageParts:     imagePartsFromContentParts(evt.Parts),
+			resetExecution: true,
+			recoveryState:  evt.RecoveryState,
 		})
 		if toolNameKey(evt.Name) == tools.NameDone {
 			if evt.Status == agent.ToolResultStatusSuccess && !doneResultIsRejected(evt.Result) {

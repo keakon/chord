@@ -403,19 +403,18 @@ type ToolResultEvent struct {
 	// Payload is Result before diagnostic notes were appended, Notes are those
 	// notes. They travel separately so the card can parse the tool's own output
 	// instead of a string the runtime decorated for the model.
-	Payload             string
-	Notes               []string
-	DoneReport          string
-	Status              ToolResultStatus
-	AgentID             string // originating agent ("" = main agent)
-	Parts               []message.ContentPart
-	Diff                string                 // unified diff for Write/Edit tools (not sent to LLM)
-	DiffAdded           int                    // full added-line count before any diff truncation
-	DiffRemoved         int                    // full removed-line count before any diff truncation
-	FileCreated         bool                   // true when Write created a file that did not previously exist
-	FileState           *message.ToolFileState // committed file states, including successful subsets of error results
-	Duration            time.Duration          // wall-clock execution time for the completed tool
-	VerificationRecords []VerificationRecord
+	Payload     string
+	Notes       []string
+	DoneReport  string
+	Status      ToolResultStatus
+	AgentID     string // originating agent ("" = main agent)
+	Parts       []message.ContentPart
+	Diff        string                 // unified diff for Write/Edit tools (not sent to LLM)
+	DiffAdded   int                    // full added-line count before any diff truncation
+	DiffRemoved int                    // full removed-line count before any diff truncation
+	FileCreated bool                   // true when Write created a file that did not previously exist
+	FileState   *message.ToolFileState // committed file states, including successful subsets of error results
+	Duration    time.Duration          // wall-clock execution time for the completed tool
 	// RecoveryState mirrors message.ToolRecoveryState for synthetic restore /
 	// barrier-failure results; ordinary results leave it empty.
 	RecoveryState string

@@ -192,24 +192,6 @@ func (a *MainAgent) buildCoordinationSnapshotOverlayForRequest(injectedMailboxID
 				b.WriteString("\n  files_changed: ")
 				b.WriteString(joinCoordinationSnapshotItems(rec.LastCompletion.FilesChanged))
 			}
-			if len(rec.LastCompletion.VerificationRun) > 0 {
-				b.WriteString("\n  verification_run: ")
-				b.WriteString(joinCoordinationSnapshotItems(rec.LastCompletion.VerificationRun))
-			}
-			if len(rec.LastCompletion.VerificationRecords) > 0 {
-				b.WriteString("\n  verification:")
-				for _, record := range rec.LastCompletion.VerificationRecords {
-					b.WriteString("\n    - ")
-					b.WriteString(truncateCoordinationSnapshotText(record.Command, coordinationSnapshotSummaryMaxRunes))
-					b.WriteString(" [")
-					b.WriteString(record.Status)
-					b.WriteString("]")
-					if record.Summary != "" {
-						b.WriteString(": ")
-						b.WriteString(truncateCoordinationSnapshotText(record.Summary, coordinationSnapshotSummaryMaxRunes))
-					}
-				}
-			}
 			if len(rec.LastCompletion.RemainingLimitations) > 0 {
 				b.WriteString("\n  remaining_limitations: ")
 				b.WriteString(joinCoordinationSnapshotItems(rec.LastCompletion.RemainingLimitations))

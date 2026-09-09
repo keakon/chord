@@ -163,7 +163,7 @@ func TestMigrateLegacyTaskSettlement(t *testing.T) {
 
 func TestRepairTaskRecordsUsesJournalContentAtSameRevision(t *testing.T) {
 	journal := testSettlement("task-a", 1, 2)
-	journal.Completion = &CompletionEnvelope{Summary: "journal", VerificationRun: []string{"go test ./internal/agent"}}
+	journal.Completion = &CompletionEnvelope{Summary: "journal"}
 	records := map[string]*DurableTaskRecord{
 		"task-a": {
 			TaskID:            "task-a",
@@ -190,7 +190,7 @@ func TestRepairTaskRecordsUsesJournalContentAtSameRevision(t *testing.T) {
 func TestCommitTerminalTaskPublishesDurableSettlement(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "task-terminal")
-	completion := &CompletionEnvelope{Summary: "done", VerificationRun: []string{"go test ./..."}}
+	completion := &CompletionEnvelope{Summary: "done"}
 	settlement, durable, err := a.commitTerminalTask(sub, SubAgentStateCompleted, "done", "task completed", completion)
 	if err != nil {
 		t.Fatalf("commitTerminalTask: %v", err)
@@ -199,7 +199,7 @@ func TestCommitTerminalTaskPublishesDurableSettlement(t *testing.T) {
 		t.Fatalf("settlement = %#v durable=%v", settlement, durable)
 	}
 	rec := a.taskRecordByTaskID("task-terminal")
-	if rec == nil || !rec.SettlementDurable || rec.LatestSettlement == nil || rec.LastCompletion == nil || rec.LastCompletion.VerificationRun[0] != "go test ./..." {
+	if rec == nil || !rec.SettlementDurable || rec.LatestSettlement == nil || rec.LastCompletion == nil {
 		t.Fatalf("task record = %#v", rec)
 	}
 	loaded, err := loadTaskSettlements(a.sessionDir)
@@ -291,14 +291,14 @@ func TestCommitTerminalTaskRejectsConflictingCompletion(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "task-terminal")
 	if _, _, err := a.commitTerminalTask(sub, SubAgentStateCompleted, "done", "task completed", &CompletionEnvelope{
-		Summary:         "done",
-		VerificationRun: []string{"go test ./internal/agent"},
+		Summary:      "done",
+		FilesChanged: []string{"internal/a.go"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := a.commitTerminalTask(sub, SubAgentStateCompleted, "done", "task completed", &CompletionEnvelope{
-		Summary:         "done",
-		VerificationRun: []string{"go test ./internal/tools"},
+		Summary:      "done",
+		FilesChanged: []string{"internal/b.go"},
 	}); err == nil || !strings.Contains(err.Error(), "conflicting terminal settlement") {
 		t.Fatalf("conflicting completion error = %v", err)
 	}

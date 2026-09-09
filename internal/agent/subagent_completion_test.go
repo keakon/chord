@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -65,19 +64,12 @@ func TestStructuredCompleteEnvelopeParsedFromCompleteTool(t *testing.T) {
 	if err := os.WriteFile(artifactPath, []byte("report"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	sub.verificationLedger = []verificationLedgerEntry{{
-		ToolCallID: "verify-1",
-		Command:    "go test ./internal/a",
-		Status:     "passed",
-		Summary:    "ok",
-	}}
 	sub.handleLLMResponse(&llmResult{
 		turnID: 1,
 		resp: &message.Response{ToolCalls: convertCalls([]messageToolCall{
 			mustJSONToolCall(t, "call-1", "complete", map[string]any{
 				"summary":               "done",
 				"files_changed":         []string{"internal/a.go"},
-				"verification_run":      []string{"go test ./internal/a"},
 				"remaining_limitations": []string{"e2e not run"},
 				"known_risks":           []string{"manual QA still useful"},
 				"follow_up_recommended": []string{"review"},
@@ -106,9 +98,6 @@ func TestStructuredCompleteEnvelopeParsedFromCompleteTool(t *testing.T) {
 	}
 	if len(env.ActualFilesChanged) != 0 || env.FileAttributionIncomplete {
 		t.Fatalf("runtime attribution = files %#v incomplete=%v, want empty and complete", env.ActualFilesChanged, env.FileAttributionIncomplete)
-	}
-	if got := strings.Join(env.VerificationRun, ","); got != "go test ./internal/a" {
-		t.Fatalf("verification_run = %q", got)
 	}
 	if got := strings.Join(env.RemainingLimitations, ","); got != "e2e not run" {
 		t.Fatalf("remaining_limitations = %q", got)
@@ -457,9 +446,9 @@ func TestSubAgentInterruptedStreamGetsSingleTerminalRecoveryRequest(t *testing.T
 	}
 }
 
-// Terminal recovery and completion-verification retry both issue an LLM request
-// from inside handleLLMResponse, after runLoop's finishLLMRequest already cleared
-// the in-flight gate. They must re-arm it: otherwise runLoop sees an idle
+// Terminal recovery issues an LLM request from inside handleLLMResponse,
+// after runLoop's finishLLMRequest already cleared the in-flight gate. It must
+// re-arm it: otherwise runLoop sees an idle
 // sub-agent and can consume queued input — newTurn then cancels the recovery
 // request's context and its result is silently dropped — or park the sub-agent
 // mid-request.
@@ -478,12 +467,6 @@ func TestSubAgentRecoveryRequestsKeepInFlightGateClosed(t *testing.T) {
 			name: "terminal recovery after interrupted stream",
 			trigger: func(t *testing.T, sub *SubAgent) {
 				sub.handleLLMResponse(&llmResult{turnID: 1, err: io.ErrUnexpectedEOF})
-			},
-		},
-		{
-			name: "completion verification retry",
-			trigger: func(t *testing.T, sub *SubAgent) {
-				sub.retryCompletionVerification(errors.New("verification commands did not run"))
 			},
 		},
 	}
@@ -746,11 +729,11 @@ func TestCoordinationSnapshotIncludesDurableCompletionAndArtifact(t *testing.T) 
 		LastSummary:        "research complete",
 		LastUpdatedTurn:    5,
 		LastArtifactRefs:   []tools.ArtifactRef{{ID: "art-1", Type: "research_report", RelPath: "artifacts/subagents/worker-1/report.md"}},
-		LastCompletion:     &CompletionEnvelope{Summary: "research complete", FilesChanged: []string{"internal/a.go"}, VerificationRun: []string{"go test ./internal/a"}, VerificationRecords: []VerificationRecord{{ToolCallID: "verify-1", Command: "go test ./internal/a", Status: "passed", Summary: "ok"}}},
+		LastCompletion:     &CompletionEnvelope{Summary: "research complete", FilesChanged: []string{"internal/a.go"}},
 		ExpectedWriteScope: tools.WriteScope{Files: []string{"internal/a.go"}},
 	}
 	block := a.buildCoordinationSnapshotOverlay()
-	for _, want := range []string{"SubAgent coordination snapshot", "task_id: task-1", "agent_type: explorer", "artifact_refs: artifacts/subagents/worker-1/report.md(research_report)", "files_changed: internal/a.go", "verification_run: go test ./internal/a", "verification:", "go test ./internal/a [passed]: ok", "write_scope: file:internal/a.go"} {
+	for _, want := range []string{"SubAgent coordination snapshot", "task_id: task-1", "agent_type: explorer", "artifact_refs: artifacts/subagents/worker-1/report.md(research_report)", "files_changed: internal/a.go", "write_scope: file:internal/a.go"} {
 		if !strings.Contains(block, want) {
 			t.Fatalf("snapshot missing %q:\n%s", want, block)
 		}
@@ -774,7 +757,6 @@ func TestCoordinationSnapshotCapsCompletionLists(t *testing.T) {
 		LastUpdatedTurn: 7,
 		LastCompletion: &CompletionEnvelope{
 			FilesChanged:         []string{"f-1", "f-2", "f-3", "f-4", "f-5"},
-			VerificationRun:      []string{"v-1", "v-2", "v-3", "v-4"},
 			RemainingLimitations: []string{"l-1", "l-2", "l-3", "l-4", "l-5", "l-6"},
 			KnownRisks:           []string{"r-1", "r-2", "r-3", "r-4"},
 		},
@@ -782,7 +764,6 @@ func TestCoordinationSnapshotCapsCompletionLists(t *testing.T) {
 	block := a.buildCoordinationSnapshotOverlay()
 	for _, want := range []string{
 		"files_changed: f-1, f-2, f-3, ...2 more",
-		"verification_run: v-1, v-2, v-3, ...1 more",
 		"remaining_limitations: l-1, l-2, l-3, ...3 more",
 		"known_risks: r-1, r-2, r-3, ...1 more",
 	} {
@@ -790,7 +771,7 @@ func TestCoordinationSnapshotCapsCompletionLists(t *testing.T) {
 			t.Fatalf("snapshot missing capped list %q:\n%s", want, block)
 		}
 	}
-	for _, leaked := range []string{"f-4", "v-4", "l-4", "r-4"} {
+	for _, leaked := range []string{"f-4", "l-4", "r-4"} {
 		if strings.Contains(block, leaked) {
 			t.Fatalf("snapshot leaked list item past the cap (%q):\n%s", leaked, block)
 		}

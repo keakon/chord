@@ -22,10 +22,6 @@ func TestSubAgentStructuredCheckpointExtractsAuthoritativeState(t *testing.T) {
 	sub.taskChangesMu.Lock()
 	sub.actualChangedFiles = map[string]struct{}{"internal/parser/parser.go": {}, "internal/parser/lexer.go": {}}
 	sub.taskChangesMu.Unlock()
-	sub.verificationLedger = []verificationLedgerEntry{
-		{ToolCallID: "v1", Command: "go test ./internal/parser", Status: "passed"},
-		{ToolCallID: "v2", Command: "go vet ./internal/parser", Status: "passed"},
-	}
 	sub.runtimeState.set(SubAgentStateRunning, "")
 
 	messages := []message.Message{
@@ -46,7 +42,6 @@ func TestSubAgentStructuredCheckpointExtractsAuthoritativeState(t *testing.T) {
 		"Latest owner/user instruction: 输出格式保持不变，只调整内部实现 (constraint)",
 		"Files read or changed: internal/parser/lexer.go, internal/parser/parser.go",
 		"Completed actions: edit: edited 3 lines",
-		"Verification results: go vet ./internal/parser (passed) | go test ./internal/parser (passed)",
 		"Known failures: shell: command failed",
 		"Full pre-checkpoint history: archives/sub-1.md.",
 	} {
@@ -63,7 +58,7 @@ func TestSubAgentStructuredCheckpointMarksUnknownFields(t *testing.T) {
 	sub.taskDesc = ""
 	sub.runtimeState.set(SubAgentStateRunning, "")
 	checkpoint := buildSubAgentStructuredCheckpoint(sub, nil, 5, "proactive", "archives/sub-2.md")
-	for _, field := range []string{"Task", "Owner", "Write scope", "Latest owner/user instruction", "Files read or changed", "Completed actions", "Verification results", "Known failures", "Open blocker"} {
+	for _, field := range []string{"Task", "Owner", "Write scope", "Latest owner/user instruction", "Files read or changed", "Completed actions", "Known failures", "Open blocker"} {
 		if !strings.Contains(checkpoint, "- "+field+": unknown") {
 			t.Errorf("field %q should be 'unknown' when no source exists:\n%s", field, checkpoint)
 		}
@@ -76,15 +71,11 @@ func TestSubAgentStructuredCheckpointMarksUnknownFields(t *testing.T) {
 func TestSubAgentStructuredCheckpointDoesNotRepeatFailedApproach(t *testing.T) {
 	_, sub := newMixedBatchTestSubAgent(t)
 	sub.taskDesc = "Add pagination"
-	sub.verificationLedger = []verificationLedgerEntry{{ToolCallID: "v1", Command: "go test .", Status: "failed: 2 errors"}}
 	messages := []message.Message{
 		{Role: message.RoleTool, ToolCallID: "call-f", Content: "undefined: x\n\nError: exit code 2", ToolStatus: string(ToolResultStatusError)},
 		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-f", Name: tools.NameShell}}},
 	}
 	checkpoint := buildSubAgentStructuredCheckpoint(sub, messages, 3, "proactive", "archives/sub-3.md")
-	if !strings.Contains(checkpoint, "Verification results: go test . (failed: 2 errors)") {
-		t.Errorf("verification failure lost: %s", checkpoint)
-	}
 	if !strings.Contains(checkpoint, "Known failures: shell: undefined: x") {
 		t.Errorf("known failure lost: %s", checkpoint)
 	}

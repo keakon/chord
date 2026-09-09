@@ -272,7 +272,6 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 			var args struct {
 				Summary              string              `json:"summary"`
 				FilesChanged         []string            `json:"files_changed,omitempty"`
-				VerificationRun      []string            `json:"verification_run,omitempty"`
 				RemainingLimitations []string            `json:"remaining_limitations,omitempty"`
 				KnownRisks           []string            `json:"known_risks,omitempty"`
 				FollowUpRecommended  []string            `json:"follow_up_recommended,omitempty"`
@@ -311,7 +310,6 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 						Envelope: normalizeCompletionEnvelope(&CompletionEnvelope{
 							Summary:              args.Summary,
 							FilesChanged:         args.FilesChanged,
-							VerificationRun:      args.VerificationRun,
 							RemainingLimitations: append(append([]string(nil), args.RemainingLimitations...), droppedTypedResultLimitation),
 							KnownRisks:           args.KnownRisks,
 							FollowUpRecommended:  args.FollowUpRecommended,
@@ -327,7 +325,6 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 				Envelope: normalizeCompletionEnvelope(&CompletionEnvelope{
 					Summary:              args.Summary,
 					FilesChanged:         args.FilesChanged,
-					VerificationRun:      args.VerificationRun,
 					RemainingLimitations: args.RemainingLimitations,
 					KnownRisks:           args.KnownRisks,
 					FollowUpRecommended:  args.FollowUpRecommended,
@@ -431,7 +428,6 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 		}
 		if err := s.finishCompletion(taskCompleteCallID, taskComplete); err != nil {
 			s.appendCompleteToolResult(taskCompleteCallID, "Completion rejected: "+err.Error())
-			s.retryCompletionVerification(err)
 		}
 		return
 	}
