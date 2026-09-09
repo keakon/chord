@@ -8,6 +8,7 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -671,4 +672,260 @@ func streamingToolArgs(count int) []string {
 		out[i] = `{"command":"` + payload.String() + `"}`
 	}
 	return out
+}
+
+// newFocusSwitchBackend returns a session backend whose GetMessages follows
+// SwitchFocus, so setFocusedAgent rebuilds each view from that agent's own
+// transcript the way the real agent does.
+func newFocusSwitchBackend() *sessionControlAgent {
+	return &sessionControlAgent{
+		messagesByFocus: map[string][]message.Message{
+			"": {
+				{Role: "user", Content: "main prompt"},
+			},
+			"agent-1": {
+				{Role: "user", Content: "worker prompt"},
+			},
+		},
+	}
+}
+
+func flushPendingStreamForTest(m *Model) {
+	m.handleStreamFlushTick(streamFlushTickMsg{generation: m.streamFlushGeneration})
+}
+
+// TestSubAgentAssistantStreamSurvivesFocusSwitch pins the focus-switch rebuild
+// carrying a live subagent assistant stream across views. The stream state
+// points at its block directly, so the rebuild must keep the same instance:
+// dropping it would leave deltas writing into an orphan, and cloning it under
+// a fresh ID would freeze the visible copy while the stream state keeps
+// updating the original.
+func TestSubAgentAssistantStreamSurvivesFocusSwitch(t *testing.T) {
+	m := NewModelWithSize(newFocusSwitchBackend(), 120, 40)
+
+	// Watch the worker while its response streams.
+	m.setFocusedAgent("agent-1")
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{AgentID: "agent-1", Text: "analyzing files"}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{AgentID: "agent-1", Text: " and reading"}})
+	flushPendingStreamForTest(&m)
+	live := m.streamState("agent-1").assistant
+	if live == nil || !live.Streaming {
+		t.Fatal("expected agent-1 to have a live streaming assistant block")
+	}
+	if got := live.Content; got != "analyzing files and reading" {
+		t.Fatalf("assistant content = %q, want streamed text", got)
+	}
+	liveID := live.ID
+
+	// Switch to the main view mid-stream.
+	m.setFocusedAgent("")
+	if got := m.viewport.GetFocusedBlock(liveID); got == nil {
+		t.Fatal("focus switch dropped the streaming assistant block")
+	} else if got != live {
+		t.Fatal("focus switch replaced the streaming assistant block with a clone")
+	}
+	if m.streamState("agent-1").assistant != live {
+		t.Fatal("stream state lost its reference to the live assistant block")
+	}
+	for _, b := range m.viewport.visibleBlocks() {
+		if b.Type == BlockAssistant {
+			t.Fatalf("worker streaming content leaked into the main view: %#v", b)
+		}
+	}
+
+	// Deltas that arrive while the worker is unfocused update the one retained
+	// block in place; nothing recreates it.
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{AgentID: "agent-1", Text: " plus more"}})
+	flushPendingStreamForTest(&m)
+	if m.streamState("agent-1").assistant != live {
+		t.Fatal("delta while unfocused replaced the live assistant block")
+	}
+	if got := live.Content; got != "analyzing files and reading plus more" {
+		t.Fatalf("assistant content = %q, want accumulated away-delta", got)
+	}
+
+	// Switch back mid-stream: the same card is still present and the next
+	// delta continues it instead of restarting from a snapshot.
+	m.setFocusedAgent("agent-1")
+	if got := m.viewport.GetFocusedBlock(liveID); got != live {
+		t.Fatal("focus switch back did not restore the original streaming block")
+	}
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{AgentID: "agent-1", Text: " done"}})
+	flushPendingStreamForTest(&m)
+	if got := live.Content; got != "analyzing files and reading plus more done" {
+		t.Fatalf("assistant content = %q, want uninterrupted stream across the switch", got)
+	}
+	assistantCards := 0
+	for _, b := range m.viewport.visibleBlocks() {
+		if b.Type == BlockAssistant && b.AgentID == "agent-1" {
+			assistantCards++
+		}
+	}
+	if assistantCards != 1 {
+		t.Fatalf("agent-1 assistant cards = %d, want 1", assistantCards)
+	}
+}
+
+// TestSubAgentThinkingStreamSurvivesFocusSwitch covers the same rebuild
+// carry-over for a live subagent thinking card.
+func TestSubAgentThinkingStreamSurvivesFocusSwitch(t *testing.T) {
+	m := NewModelWithSize(newFocusSwitchBackend(), 120, 40)
+
+	m.setFocusedAgent("agent-1")
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ThinkingStartedEvent{AgentID: "agent-1"}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingDeltaEvent{AgentID: "agent-1", Text: "checking imports"}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingDeltaEvent{AgentID: "agent-1", Text: " and formats"}})
+	flushPendingStreamForTest(&m)
+	live := m.streamState("agent-1").thinking
+	if live == nil || !live.Streaming {
+		t.Fatal("expected agent-1 to have a live streaming thinking block")
+	}
+	liveID := live.ID
+
+	m.setFocusedAgent("")
+	if got := m.viewport.GetFocusedBlock(liveID); got == nil || got != live {
+		t.Fatal("focus switch dropped or cloned the streaming thinking block")
+	}
+	if m.streamState("agent-1").thinking != live {
+		t.Fatal("stream state lost its reference to the live thinking block")
+	}
+
+	m.setFocusedAgent("agent-1")
+	if got := m.viewport.GetFocusedBlock(liveID); got != live {
+		t.Fatal("focus switch back did not restore the original thinking block")
+	}
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingDeltaEvent{AgentID: "agent-1", Text: " more"}})
+	flushPendingStreamForTest(&m)
+	if got := live.Content; got != "checking imports and formats more" {
+		t.Fatalf("thinking content = %q, want uninterrupted stream across the switch", got)
+	}
+}
+
+// TestMainAssistantStreamSurvivesSubAgentFocus pins the same carry-over for a
+// main-agent stream while the user peeks at a subagent view. Main deltas are
+// not focus-gated, so without retention they would keep writing into an
+// orphaned block and the text would only resurface at the next rebuild.
+func TestMainAssistantStreamSurvivesSubAgentFocus(t *testing.T) {
+	m := NewModelWithSize(newFocusSwitchBackend(), 120, 40)
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: "main response"}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: " continues"}})
+	flushPendingStreamForTest(&m)
+	mainBlock := m.currentAssistantBlock
+	if mainBlock == nil {
+		t.Fatal("expected a live main assistant block")
+	}
+	mainID := mainBlock.ID
+
+	// Peek at the worker view while the main response is still streaming.
+	m.setFocusedAgent("agent-1")
+	if got := m.viewport.GetFocusedBlock(mainID); got != mainBlock {
+		t.Fatal("subagent focus switch dropped or cloned the main streaming block")
+	}
+	for _, b := range m.viewport.visibleBlocks() {
+		if b.Type == BlockAssistant {
+			t.Fatalf("main streaming content leaked into the worker view: %#v", b)
+		}
+	}
+
+	// Main deltas keep flowing into the retained block while the worker view
+	// is up.
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: " still"}})
+	flushPendingStreamForTest(&m)
+	if got := mainBlock.Content; got != "main response continues still" {
+		t.Fatalf("main content = %q, want hidden deltas accumulated on the same block", got)
+	}
+
+	// Back on main the same card shows the accumulated text and keeps going.
+	m.setFocusedAgent("")
+	if got := m.viewport.GetFocusedBlock(mainID); got != mainBlock {
+		t.Fatal("returning to main did not restore the original assistant block")
+	}
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: " end"}})
+	flushPendingStreamForTest(&m)
+	if got := mainBlock.Content; got != "main response continues still end" {
+		t.Fatalf("main content = %q, want uninterrupted stream across the switch", got)
+	}
+	mainCards := 0
+	for _, b := range m.viewport.visibleBlocks() {
+		if b.Type == BlockAssistant && b.AgentID == "" {
+			mainCards++
+		}
+	}
+	if mainCards != 1 {
+		t.Fatalf("main assistant cards = %d, want 1", mainCards)
+	}
+}
+
+// TestApplyPatchArgsStreamSurvivesFocusSwitch pins the same carry-over for a
+// subagent apply_patch card whose arguments are still streaming. Dropping the
+// card at a focus switch would make the next args delta rebuild it from the
+// full accumulated ArgsJSON — the visible jump to already-streamed content.
+func TestApplyPatchArgsStreamSurvivesFocusSwitch(t *testing.T) {
+	m := NewModelWithSize(newFocusSwitchBackend(), 120, 40)
+	m.setFocusedAgent("agent-1")
+
+	const callID = "call-patch-focus-1"
+	partial := `{"patch":"*** Begin Patch\n*** Update File: src/demo.go\n@@\n-old`
+	complete := `{"patch":"*** Begin Patch\n*** Update File: src/demo.go\n@@\n-old\n+new\n*** End Patch"}`
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
+		ID: callID, Name: tools.NameApplyPatch, AgentID: "agent-1", ArgsJSON: partial,
+	}})
+	card, ok := m.viewport.FindBlockByToolID(callID)
+	if !ok {
+		t.Fatal("missing streaming apply_patch card")
+	}
+	cardID := card.ID
+	if !strings.Contains(card.Content, "Begin Patch") {
+		t.Fatalf("apply_patch preview = %q, want streamed patch text", card.Content)
+	}
+
+	// Switch to the main view while the patch is still streaming.
+	m.setFocusedAgent("")
+	if got, ok := m.viewport.FindBlockByToolID(callID); !ok || got.ID != cardID {
+		t.Fatal("focus switch dropped the live apply_patch card")
+	}
+	for _, b := range m.viewport.visibleBlocks() {
+		if b.Type == BlockToolCall && b.ToolID == callID {
+			t.Fatal("worker apply_patch card leaked into the main view")
+		}
+	}
+
+	// Deltas that arrive while the worker is unfocused keep flowing into the
+	// one retained card; nothing recreates it from the accumulated args.
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallUpdateEvent{
+		ID: callID, Name: tools.NameApplyPatch, AgentID: "agent-1", ArgsJSON: complete,
+	}})
+	patchCards := 0
+	for _, b := range m.viewport.blocks {
+		if b.Type != BlockToolCall || b.ToolID != callID {
+			continue
+		}
+		patchCards++
+		if b.ID != cardID {
+			t.Fatalf("delta while unfocused recreated the card under id %d, want %d", b.ID, cardID)
+		}
+	}
+	if patchCards != 1 {
+		t.Fatalf("apply_patch cards = %d, want 1", patchCards)
+	}
+	if card.RawArgs != complete {
+		t.Fatalf("apply_patch RawArgs = %q, want the accumulated args on the retained card", card.RawArgs)
+	}
+
+	// Switch back mid-stream: same card, and the stream end settles it in
+	// place instead of rebuilding a fresh card from the final ArgsJSON.
+	m.setFocusedAgent("agent-1")
+	if got, ok := m.viewport.FindBlockByToolID(callID); !ok || got.ID != cardID {
+		t.Fatal("focus switch back did not restore the original apply_patch card")
+	}
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallUpdateEvent{
+		ID: callID, Name: tools.NameApplyPatch, AgentID: "agent-1", ArgsJSON: complete, ArgsStreamingDone: true,
+	}})
+	if got, ok := m.viewport.FindBlockByToolID(callID); !ok || got.ID != cardID {
+		t.Fatal("args end after switch back did not settle the retained card")
+	}
+	if card.Content != `{"paths":["src/demo.go"]}` {
+		t.Fatalf("content after args complete = %q, want stable path display", card.Content)
+	}
 }

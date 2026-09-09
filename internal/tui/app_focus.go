@@ -61,7 +61,7 @@ func (m *Model) rebuildFocusedViewport(agentID, viewportFilter string) {
 	}
 	clearBlocksTiming(blocks)
 	assignFocusedViewportBlockIDs(blocks, agentID, &m.nextBlockID)
-	blocks = mergeFocusedViewportLiveBlocks(blocks, currentBlocks, agentID, &m.nextBlockID)
+	blocks = mergeFocusedViewportLiveBlocks(blocks, currentBlocks)
 	m.setTranscriptDisplaySequences(blocks, agentID)
 	blocks = m.maybeWindowStartupTranscript("focus_switch", blocks)
 	m.viewport.SetFilter(viewportFilter)
@@ -86,7 +86,20 @@ func assignFocusedViewportBlockIDs(blocks []*Block, agentID string, nextID *int)
 	}
 }
 
-func mergeFocusedViewportLiveBlocks(base, current []*Block, agentID string, nextID *int) []*Block {
+// mergeFocusedViewportLiveBlocks carries live blocks across a focus-switch
+// rebuild. Settled transcript cards are re-derived from the focused agent's
+// messages; live cards exist only in the viewport and are referenced directly
+// — assistant/thinking stream state holds their block pointers and tool
+// updates look cards up by tool ID — so dropping them, or cloning them under
+// fresh IDs, would orphan those references and freeze whatever copy the view
+// keeps. Live cards therefore survive the rebuild in place, no matter which
+// agent they belong to: the viewport filter hides other agents' blocks, and a
+// stream that was in flight when the user switched away is still the same
+// block, still receiving its deltas, when the user switches back. A live tool
+// call whose call row is already part of the rebuilt base — the response
+// committed while the call was still running — folds its runtime state into
+// that row's block instead of duplicating the card.
+func mergeFocusedViewportLiveBlocks(base, current []*Block) []*Block {
 	if len(current) == 0 {
 		return base
 	}
@@ -97,11 +110,11 @@ func mergeFocusedViewportLiveBlocks(base, current []*Block, agentID string, next
 		}
 	}
 	for _, block := range current {
-		if !blockBelongsToFocusedAgent(block, agentID) {
+		if block == nil {
 			continue
 		}
-		if block.Type == BlockToolCall && !block.ResultDone {
-			if existing, ok := baseToolBlocks[block.ToolID]; ok && block.ToolID != "" {
+		if block.Type == BlockToolCall && !block.ResultDone && block.ToolID != "" {
+			if existing, ok := baseToolBlocks[block.ToolID]; ok {
 				mergeFocusedToolBlockRuntimeState(existing, block)
 				continue
 			}
@@ -109,23 +122,9 @@ func mergeFocusedViewportLiveBlocks(base, current []*Block, agentID string, next
 		if !isFocusedViewportLiveBlock(block) {
 			continue
 		}
-		clone := cloneBlockForDeferredSource(block)
-		clone.AgentID = agentID
-		clone.ID = *nextID
-		*nextID++
-		base = append(base, clone)
+		base = append(base, block)
 	}
 	return base
-}
-
-func blockBelongsToFocusedAgent(block *Block, agentID string) bool {
-	if block == nil {
-		return false
-	}
-	if agentID == "" {
-		return block.AgentID == ""
-	}
-	return block.AgentID == agentID
 }
 
 func isFocusedViewportLiveBlock(block *Block) bool {
