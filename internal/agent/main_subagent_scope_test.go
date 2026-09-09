@@ -41,6 +41,12 @@ func TestNestedCreateSubAgentScopeContainedInParent(t *testing.T) {
 			child:   tools.WriteScope{Files: []string{"src/sample.go"}},
 			wantErr: "must not be broader",
 		},
+		{
+			name:    "writing child file outside parent prefix",
+			parent:  tools.WriteScope{PathPrefix: []string{"src"}},
+			child:   tools.WriteScope{Files: []string{"lib/sample.go"}},
+			wantErr: "must not be broader",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a := newTestMainAgent(t, t.TempDir())
