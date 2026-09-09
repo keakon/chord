@@ -11,6 +11,7 @@ import (
 
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -1744,5 +1745,108 @@ func TestModelDrivenProposalTransitionUpdatesMetadata(t *testing.T) {
 	a.transitionModelDrivenProposal(CompactionStatusFailed, " failed ")
 	if a.modelDrivenProposal.status != CompactionStatusFailed || a.modelDrivenProposal.reason != "failed" {
 		t.Fatalf("terminal metadata = status %q reason %q", a.modelDrivenProposal.status, a.modelDrivenProposal.reason)
+	}
+}
+
+// assertNoFakeTopLevelSection fails when rendered contains a line that opens a
+// top-level checkpoint section at column zero ("## ".."###### "), the exact
+// structure the next generation's typed/heading parsers key on.
+func assertNoFakeTopLevelSection(t *testing.T, label, rendered string) {
+	t.Helper()
+	for _, line := range strings.Split(rendered, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "## ") || strings.HasPrefix(trimmed, "### ") ||
+			strings.HasPrefix(trimmed, "#### ") || strings.HasPrefix(trimmed, "##### ") ||
+			strings.HasPrefix(trimmed, "###### ") {
+			t.Fatalf("%s leaked a top-level heading: %q\nrendered:\n%s", label, line, rendered)
+		}
+	}
+}
+
+func TestCheckpointInlineValueFlattensMultilineHeadingValues(t *testing.T) {
+	if got := checkpointInlineValue("plain text"); got != "plain text" {
+		t.Fatalf("plain value changed: %q", got)
+	}
+	if got := checkpointInlineValue("#tag"); got != "#tag" {
+		t.Fatalf("hash without trailing space must survive: %q", got)
+	}
+	if got := checkpointInlineValue("## heading stripped"); got != "heading stripped" {
+		t.Fatalf("single-line heading marker must be stripped: %q", got)
+	}
+	multi := "## Injected Section\nstill a line"
+	got := checkpointInlineValue(multi)
+	if strings.Contains(got, "\n") || strings.HasPrefix(got, "## ") {
+		t.Fatalf("multiline value must flatten and strip headings: %q", got)
+	}
+	assertNoFakeTopLevelSection(t, "checkpointInlineValue", got)
+}
+
+func TestModelDrivenClaimAndStageRenderersEscapeMultilineHeadingValues(t *testing.T) {
+	// Model-authored claim names, kinds, stage metadata and planned file paths
+	// may embed newlines plus "## " at column zero. The renderers must strip
+	// the heading markers and flatten the value, so no value can open a fake
+	// top-level section that the next generation's parsers would read as a
+	// real heading.
+	evidence := renderClaimEvidenceSection(map[string][]string{
+		"## Claim One": {"ev-1", "## Fake Evidence"},
+		"plain":        {"ev-2"},
+	})
+	assertNoFakeTopLevelSection(t, "claim evidence", evidence)
+	if !strings.Contains(evidence, "Claim One") {
+		t.Fatalf("flattened claim name must still read:\n%s", evidence)
+	}
+
+	kinds := renderClaimKindsSection(map[string]string{
+		"## Fake Claim": "## observed",
+	})
+	assertNoFakeTopLevelSection(t, "claim kinds", kinds)
+	if !strings.Contains(kinds, "Fake Claim | kind: observed") {
+		t.Fatalf("flattened kind line = %q", kinds)
+	}
+
+	stage := renderModelDrivenStageSection("## stage-id", "## completed\nstill there", "committed")
+	assertNoFakeTopLevelSection(t, "stage", stage)
+	if !strings.Contains(stage, "Stage ID: stage-id") || !strings.Contains(stage, "Stage status: completed still there") {
+		t.Fatalf("flattened stage line = %q", stage)
+	}
+
+	planned := renderPlannedStateFilesSection([]string{"docs/plan.md", "## Fake Path\nsecond line"})
+	assertNoFakeTopLevelSection(t, "planned state files", planned)
+	if !strings.Contains(planned, "Fake Path second line") {
+		t.Fatalf("flattened planned path = %q", planned)
+	}
+
+	stateFiles := renderStateFilesSection([]string{"src/main.go", "## Fake\nsrc/other.go"})
+	assertNoFakeTopLevelSection(t, "state files", stateFiles)
+}
+
+func TestModelDrivenRuntimeStateFingerprintIgnoresSubAgentOrder(t *testing.T) {
+	base := modelDrivenBarrierSnapshot{
+		todos: []tools.TodoItem{{ID: "t1", Content: "first"}},
+		subAgents: []SubAgentInfo{
+			{InstanceID: "inst-b", TaskID: "task-b", State: "running"},
+			{InstanceID: "inst-a", TaskID: "task-a", State: "running"},
+		},
+		backgroundObjects:  []recovery.BackgroundObjectState{{ID: "bg-1"}},
+		queuedUserMessages: []message.Message{{Role: message.RoleUser, Content: "queued"}},
+		evidenceItems:      []evidenceItem{{Kind: evidenceToolDiff, Key: "ev", Excerpt: "diff"}},
+	}
+	shuffled := base
+	shuffled.subAgents = []SubAgentInfo{
+		{InstanceID: "inst-a", TaskID: "task-a", State: "running"},
+		{InstanceID: "inst-b", TaskID: "task-b", State: "running"},
+	}
+	if got, want := modelDrivenRuntimeStateFingerprint(base), modelDrivenRuntimeStateFingerprint(shuffled); got != want {
+		t.Fatalf("fingerprint changed with unchanged live SubAgent order: %s != %s", got, want)
+	}
+
+	// A genuine state change must still be detected.
+	changed := base
+	changed.subAgents = []SubAgentInfo{
+		{InstanceID: "inst-a", TaskID: "task-a", State: "completed"},
+		{InstanceID: "inst-b", TaskID: "task-b", State: "running"},
+	}
+	if got, want := modelDrivenRuntimeStateFingerprint(base), modelDrivenRuntimeStateFingerprint(changed); got == want {
+		t.Fatal("fingerprint must change when a live SubAgent state changes")
 	}
 }

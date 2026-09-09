@@ -561,13 +561,28 @@ func (a *MainAgent) captureModelDrivenBarrierSnapshot(snapshot []message.Message
 }
 
 func modelDrivenRuntimeStateFingerprint(bundle modelDrivenBarrierSnapshot) string {
+	// The live SubAgent slice is built from an unsorted map
+	// (taskInfosForCompaction iterates a.subs.subAgents), so two captures of
+	// unchanged state can order the entries differently. The fingerprint must
+	// not read that noise as a state change (an apply would then reject a
+	// perfectly current draft as stale), so both the barrier capture and the
+	// apply-time re-capture are sorted canonically before hashing — they go
+	// through this one function, which makes the ordering identical on both
+	// sides.
+	subAgents := append([]SubAgentInfo(nil), bundle.subAgents...)
+	slices.SortFunc(subAgents, func(a, b SubAgentInfo) int {
+		if c := strings.Compare(a.InstanceID, b.InstanceID); c != 0 {
+			return c
+		}
+		return strings.Compare(a.TaskID, b.TaskID)
+	})
 	payload, _ := json.Marshal(struct {
 		Todos      []tools.TodoItem
 		SubAgents  []SubAgentInfo
 		Background []recovery.BackgroundObjectState
 		Queued     []message.Message
 		Evidence   []evidenceItem
-	}{bundle.todos, bundle.subAgents, bundle.backgroundObjects, bundle.queuedUserMessages, bundle.evidenceItems})
+	}{bundle.todos, subAgents, bundle.backgroundObjects, bundle.queuedUserMessages, bundle.evidenceItems})
 	sum := sha256.Sum256(payload)
 	return fmt.Sprintf("%x", sum[:])
 }
@@ -1510,6 +1525,26 @@ func renderStateFilesSection(paths []string) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
+// checkpointInlineValue flattens a model-authored value for embedding inside a
+// single "- " bullet. Every line's column-zero ATX heading markers are
+// stripped (reusing stripLeadingHeadingMarkers, the same escape the prose
+// sections apply) and embedded newlines become spaces, so a multiline "## "
+// value can neither open a fake top-level checkpoint section nor leak a raw
+// continuation line at column zero. Structured reference fields (claims, stage
+// metadata, planned file paths) are single-line by nature, so flattening loses
+// nothing readable while closing the injection.
+func checkpointInlineValue(value string) string {
+	if !strings.Contains(value, "\n") {
+		return stripLeadingHeadingMarkers(value)
+	}
+	lines := strings.Split(value, "\n")
+	out := make([]string, len(lines))
+	for i, line := range lines {
+		out[i] = stripLeadingHeadingMarkers(line)
+	}
+	return strings.Join(out, " ")
+}
+
 func renderPlannedStateFilesSection(paths []string) string {
 	if len(paths) == 0 {
 		return "- (none reported by the model)"
@@ -1518,7 +1553,7 @@ func renderPlannedStateFilesSection(paths []string) string {
 	sb.WriteString("- Planned references only; they are not completion evidence and are not verified:\n")
 	for _, path := range paths {
 		sb.WriteString("- ")
-		sb.WriteString(path)
+		sb.WriteString(checkpointInlineValue(path))
 		sb.WriteByte('\n')
 	}
 	return strings.TrimRight(sb.String(), "\n")
@@ -1542,7 +1577,7 @@ func renderClaimEvidenceSection(claims map[string][]string) string {
 	slices.Sort(keys)
 	var b strings.Builder
 	for _, key := range keys {
-		fmt.Fprintf(&b, "- %s | evidence: %s\n", key, strings.Join(claims[key], ", "))
+		fmt.Fprintf(&b, "- %s | evidence: %s\n", checkpointInlineValue(key), checkpointInlineValue(strings.Join(claims[key], ", ")))
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
@@ -1558,7 +1593,7 @@ func renderClaimKindsSection(kinds map[string]string) string {
 	slices.Sort(keys)
 	var b strings.Builder
 	for _, key := range keys {
-		fmt.Fprintf(&b, "- %s | kind: %s\n", key, kinds[key])
+		fmt.Fprintf(&b, "- %s | kind: %s\n", checkpointInlineValue(key), checkpointInlineValue(kinds[key]))
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
@@ -1567,7 +1602,7 @@ func renderModelDrivenStageSection(id, status, kind string) string {
 	if id == "" && status == "" && kind == "" {
 		return "- No stage metadata reported by the model."
 	}
-	return fmt.Sprintf("- Stage ID: %s\n- Stage status: %s\n- Checkpoint kind: %s\n- Stage metadata is model-declared; runtime facts and acceptance evidence remain authoritative.", id, status, kind)
+	return fmt.Sprintf("- Stage ID: %s\n- Stage status: %s\n- Checkpoint kind: %s\n- Stage metadata is model-declared; runtime facts and acceptance evidence remain authoritative.", checkpointInlineValue(id), checkpointInlineValue(status), checkpointInlineValue(kind))
 }
 
 // settleModelDrivenOutcome is the single settlement point for model-driven
