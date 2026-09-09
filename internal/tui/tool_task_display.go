@@ -130,9 +130,11 @@ func taskToolCollapsedHandleSummary(result string) string {
 // the non-TUI display path (skill/result text extraction in
 // tool_skill_display.go). The TUI card itself renders the same handle via
 // appendTaskHandleFieldRows and the field-row primitives; this helper
-// exists so the skill surface keeps a single-line-per-field format. Any
-// runtime note appended after the JSON is intentionally dropped here — the
-// caller's contract is the handle fields, not the surrounding commentary.
+// exists so the skill surface keeps a single-line-per-field format. Values
+// are the full machine-readable handle fields (task_id keeps its "adhoc-"
+// prefix), matching the TUI's expanded field layer. Any runtime note
+// appended after the JSON is intentionally dropped here — the caller's
+// contract is the handle fields, not the surrounding commentary.
 func taskToolExpandedHandleLines(result string) []string {
 	handle, _, ok := parseTaskToolHandle(result)
 	if !ok {
@@ -150,9 +152,9 @@ func taskToolExpandedHandleLines(result string) []string {
 		lines = append(lines, "previous_agent_id: "+sanitizeToolDisplayText(handle.PreviousAgentID))
 	}
 	if handle.TaskID != "" {
-		// The readable form drops the internal "adhoc-" prefix and marks the
-		// number with "#" so it still reads as a task handle.
-		lines = append(lines, "task_id: "+sanitizeToolDisplayText(extractReadableTarget(handle.TaskID)))
+		// Machine-readable echo: the full task id, adhoc- prefix included,
+		// exactly as the TUI's expanded handle rows render it.
+		lines = append(lines, "task_id: "+sanitizeToolDisplayText(handle.TaskID))
 	}
 	if handle.Status != "" {
 		lines = append(lines, "status: "+sanitizeToolDisplayText(handle.Status))
@@ -198,11 +200,18 @@ func parseNotifyToolArgs(argsJSON string) notifyToolArgs {
 	return parsed
 }
 
-// extractReadableTarget renders a task handle for display. An ad-hoc handle
-// ("adhoc-8") drops the internal "adhoc-" prefix but keeps a "#" marker, so
-// the bare number still reads as a task handle instead of being taken for an
-// unrelated number such as a plan task's own "8". Any other form — a plan
-// task reference, say — is shown unchanged.
+// extractReadableTarget renders a task handle for the compact/context-title
+// layer only: card headers and cross-reference rows that name a task without
+// claiming to be the exact machine value. An ad-hoc handle ("adhoc-8") drops
+// the internal "adhoc-" prefix but keeps a "#" marker, so the bare number
+// still reads as a task handle instead of being taken for an unrelated number
+// such as a plan task's own "8". Any other form — a plan task reference, say —
+// is shown unchanged.
+//
+// Expanded field rows that echo the handle itself must not use this helper:
+// they render the full machine-readable values (see appendTaskHandleFieldRows
+// and the cancel/notify expanded Result sections), where an ad-hoc task id
+// legitimately keeps its "adhoc-" prefix.
 func extractReadableTarget(taskID string) string {
 	if taskID == "" {
 		return ""

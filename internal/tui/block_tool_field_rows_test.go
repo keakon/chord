@@ -124,14 +124,14 @@ func TestDelegateWorkerRendersHandleFieldsAndTrailingNote(t *testing.T) {
 	}
 	plain := stripANSI(strings.Join(b.Render(120, ""), "\n"))
 
-	// Every non-empty handle field renders as a "↳ Label: value" row. The
-	// task_id drops the internal "adhoc-" prefix and keeps a "#" marker so
-	// the number still reads as a handle; the write scope is condensed to a
+	// Every non-empty handle field renders as a "↳ Label: value" row in the
+	// expanded field layer, so the task_id carries the full machine-readable
+	// handle, adhoc- prefix included. The write scope is condensed to a
 	// single compact value, not re-expanded as JSON.
 	for _, want := range []string{
 		"↳ Status: started",
 		"↳ Agent id: expert-12",
-		"↳ Task id: #7",
+		"↳ Task id: adhoc-7",
 		"↳ Plan task ref: view-switch",
 		"↳ Semantic task key: tui-view-switch-streaming-card-order",
 		"↳ Expected write scope: read_only=true",
@@ -153,9 +153,10 @@ func TestDelegateWorkerRendersHandleFieldsAndTrailingNote(t *testing.T) {
 			t.Fatalf("delegate Worker section leaks raw JSON %q; got:\n%s", banned, plain)
 		}
 	}
-	// The internal "adhoc-" prefix never reaches the UI, even though it is
-	// present in the raw handle.
-	if strings.Contains(plain, "adhoc-7") {
-		t.Fatalf("delegate Worker section leaks the internal adhoc- prefix; got:\n%s", plain)
+	// The full machine-readable task id appears exactly once, in its field
+	// row: compact/title surfaces shorten an ad-hoc handle to "#N", but the
+	// expanded Worker rows echo the real handle.
+	if got := strings.Count(plain, "adhoc-7"); got != 1 {
+		t.Fatalf("delegate Worker section should show the full task id exactly once; got %d:\n%s", got, plain)
 	}
 }

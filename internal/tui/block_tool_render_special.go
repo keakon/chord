@@ -355,8 +355,9 @@ func splitQuestionSelections(question tools.QuestionItem, answer tools.QuestionA
 }
 
 // renderCancelCall renders a Cancel tool call with semantic display.
-// Collapsed view shows: target (readable), reason (if any), result status.
-// Expanded view shows more structured details but avoids raw JSON.
+// Collapsed view shows the target in its readable short form, the reason (if
+// any) and the result status; expanded view renders structured detail rows
+// that avoid raw JSON but echo the handle's machine-readable values in full.
 func (b *Block) renderCancelCall(width int, spinnerFrame string) []string {
 	metrics := newToolCardMetrics(width)
 	blockStyle := metrics.blockStyle
@@ -367,10 +368,14 @@ func (b *Block) renderCancelCall(width int, spinnerFrame string) []string {
 	args := parseCancelToolArgs(b.Content)
 	prefix := b.renderToolPrefix(spinnerFrame)
 
-	// The header is the card's index line: the cancelled task id (readable
-	// form, so the internal "adhoc-" prefix stays out of the UI) plus the
-	// reason's first sentence in the option group, the same shape delete
-	// uses for its own reason.
+	// Two-layer task-handle contract shared by the task cards. Context titles
+	// and collapsed summaries name a task in its readable short form
+	// (extractReadableTarget semantics: "adhoc-7" renders as "#7"; a bare
+	// plan-task reference stays a bare number) so a compact line never
+	// exposes the internal handle. Expanded field rows echo the
+	// machine-readable values in full, task_id included. The header is this
+	// card's context title — the cancelled task in that short form plus the
+	// reason's first sentence, the same shape delete uses for its own reason.
 	target := extractReadableTarget(args.TargetTaskID)
 	if target == "" {
 		target = "unknown"
@@ -396,30 +401,42 @@ func (b *Block) renderCancelCall(width int, spinnerFrame string) []string {
 				result = append(result, DimStyle.Render("    "+line))
 			}
 		}
-		if summary := formatToolResultSummaryLine(b); summary != "" {
-			result = append(result, toolSummaryLine(summary))
-		}
+		var handle tools.TaskHandle
+		handleOK := false
 		if b.ResultContent != "" {
-			handle, _, ok := parseTaskToolHandle(b.ResultContent)
-			if ok {
-				result = append(result, toolFieldSection(ToolResultExpandedStyle, "Result"))
-				if handle.Status != "" {
-					result = append(result, DimStyle.Render("    status: "+sanitizeToolDisplayText(handle.Status)))
-				}
-				if handle.TaskID != "" && !b.Collapsed {
-					result = append(result, DimStyle.Render("    task_id: "+sanitizeToolDisplayText(handle.TaskID)))
-				}
-				if handle.AgentID != "" {
-					result = append(result, DimStyle.Render("    agent_id: "+sanitizeToolDisplayText(handle.AgentID)))
-				}
-				if handle.Message != "" {
-					result = append(result, DimStyle.Render("    message: "+sanitizeToolDisplayText(handle.Message)))
-				}
-			} else if !b.toolResultIsError() && !b.toolResultIsCancelled() {
-				result = append(result, toolFieldSection(ToolResultExpandedStyle, "Result"))
-				for _, line := range wrapText(sanitizeToolDisplayText(strings.TrimSpace(b.ResultContent)), contentWidth) {
-					result = append(result, DimStyle.Render("    "+line))
-				}
+			handle, _, handleOK = parseTaskToolHandle(b.ResultContent)
+		}
+		// The top-level "↳ Status:" summary is the compact status; when the
+		// Result section below already renders the handle's own status field,
+		// showing both would print the state twice. Only an expanded card
+		// without a structured handle keeps the summary row.
+		if !handleOK || handle.Status == "" {
+			if summary := formatToolResultSummaryLine(b); summary != "" {
+				result = append(result, toolSummaryLine(summary))
+			}
+		}
+		if handleOK {
+			// Expanded field layer: echo the machine-readable handle values in
+			// full. The task_id row keeps its internal "adhoc-" prefix — the
+			// readable "#N" form is reserved for the context-title layer (see
+			// the header comment above).
+			result = append(result, toolFieldSection(ToolResultExpandedStyle, "Result"))
+			if handle.Status != "" {
+				result = append(result, toolFieldNestedInline(DimStyle, toolArgSectionLabel("status"), sanitizeToolDisplayText(handle.Status)))
+			}
+			if handle.TaskID != "" {
+				result = append(result, toolFieldNestedInline(DimStyle, toolArgSectionLabel("task_id"), sanitizeToolDisplayText(handle.TaskID)))
+			}
+			if handle.AgentID != "" {
+				result = append(result, toolFieldNestedInline(DimStyle, toolArgSectionLabel("agent_id"), sanitizeToolDisplayText(handle.AgentID)))
+			}
+			if handle.Message != "" {
+				result = append(result, toolFieldNestedInline(DimStyle, toolArgSectionLabel("message"), sanitizeToolDisplayText(handle.Message)))
+			}
+		} else if !b.toolResultIsError() && !b.toolResultIsCancelled() {
+			result = append(result, toolFieldSection(ToolResultExpandedStyle, "Result"))
+			for _, line := range wrapText(sanitizeToolDisplayText(strings.TrimSpace(b.ResultContent)), contentWidth) {
+				result = append(result, DimStyle.Render("    "+line))
 			}
 		}
 		appendToolOutcome(&result, b, contentWidth, true)
@@ -459,6 +476,10 @@ func (b *Block) renderNotifyCall(width int, spinnerFrame string) []string {
 	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent, isActive)
 	result = append(result, headerLine)
 
+	// Target names the referenced task in its readable short form
+	// (extractReadableTarget) — the context-title layer of the two-layer
+	// contract, the same role a Cancel header plays. Raw handle fields
+	// rendered below carry their full machine-readable values.
 	if target != "" {
 		result = append(result, toolFieldInline(ToolResultExpandedStyle, "Target", sanitizeToolDisplayText(target)))
 	}
@@ -481,9 +502,11 @@ func (b *Block) renderNotifyCall(width int, spinnerFrame string) []string {
 			if handle.Status != "" {
 				result = append(result, toolFieldNestedInline(DimStyle, toolArgSectionLabel("status"), sanitizeToolDisplayText(handle.Status)))
 			}
-			// The target row above already names the task, and the raw
-			// handle id carries the internal "adhoc-" prefix the UI keeps
-			// out of sight.
+			// The Target row above already names the task in its readable
+			// short form, so echoing the handle's own task_id under Result
+			// would only repeat it. The rows that do render carry full
+			// machine-readable values, matching the other expanded handle
+			// fields.
 			if handle.AgentID != "" {
 				result = append(result, toolFieldNestedInline(DimStyle, toolArgSectionLabel("agent_id"), sanitizeToolDisplayText(handle.AgentID)))
 			}
@@ -524,9 +547,10 @@ func appendTaskHandleFieldRows(out *[]string, h tools.TaskHandle) {
 	add("status", h.Status)
 	add("agent_id", h.AgentID)
 	if h.TaskID != "" {
-		// The readable form drops the internal "adhoc-" prefix and marks the
-		// number with "#" so it still reads as a task handle.
-		add("task_id", extractReadableTarget(h.TaskID))
+		// Expanded field layer: the machine-readable task_id renders in full,
+		// adhoc- prefix included. The readable "#N" short form belongs to
+		// context titles and compact summaries, not to handle echo rows.
+		add("task_id", h.TaskID)
 	}
 	add("previous_agent_id", h.PreviousAgentID)
 	if h.Rehydrated {

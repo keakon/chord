@@ -107,8 +107,15 @@ func newDoneToolCardMetrics(width int) toolCardMetrics {
 const pendingToolGlyph = "⧗"
 
 func toolUsesCompactDetailToggle(toolName string) bool {
+	// Listed tools have no compact-detail layer: space folds the whole card
+	// through b.Collapsed (Write/Read/Edit/ApplyPatch and the generic branch),
+	// or is a no-op for the always-expanded cards (Delete/TodoWrite/Question/
+	// Delegate). Cancel renders its collapsed and expanded bodies from
+	// b.Collapsed (renderCancelCall), so it must fold the whole card too;
+	// toggling ToolCallDetailExpanded would flip only the header marker while
+	// the card body stayed put.
 	switch toolName {
-	case tools.NameWrite, tools.NameEdit, tools.NameApplyPatch, tools.NameDelete, tools.NameRead, tools.NameTodoWrite, tools.NameQuestion, tools.NameDelegate:
+	case tools.NameWrite, tools.NameEdit, tools.NameApplyPatch, tools.NameDelete, tools.NameRead, tools.NameTodoWrite, tools.NameQuestion, tools.NameDelegate, tools.NameCancel:
 		return false
 	}
 	return true

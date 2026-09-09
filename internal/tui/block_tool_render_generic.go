@@ -212,7 +212,7 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 	}
 
 	keys, vals := b.toolArgsParsed()
-	paramSummary, mainPart, grayPart, _, _, _, _ := b.toolHeaderMeta()
+	paramSummary, mainPart, grayPart, _, _, _, paramLines := b.toolHeaderMeta()
 	if mainPart != "" || grayPart != "" {
 		metrics = newWideHeaderToolCardMetrics(width)
 		blockStyle = metrics.blockStyle
@@ -245,7 +245,7 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 		}
 	} else {
 		prefix := b.renderToolPrefix(spinnerFrame)
-		showParamSummary := (mainPart != "" || grayPart != "" || paramSummary != "") && (paramSummary != "" || mainPart != "" || grayPart != "")
+		showParamSummary := mainPart != "" || grayPart != "" || paramSummary != ""
 		headerLine := renderToolHeaderLine(prefix, b.ToolName)
 		if showParamSummary {
 			headerLine = appendToolHeaderSummary(headerLine, mainPart, grayPart, paramSummary, cardWidth-4)
@@ -256,7 +256,6 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 		}
 		result = append(result, headerLine)
 		if paramSummary == "" || b.ToolName == tools.NameShell {
-			_, _, _, _, _, _, paramLines := b.toolHeaderMeta()
 			for _, line := range paramLines {
 				for _, wrapped := range wrapText(sanitizeToolDisplayText(line), contentWidth) {
 					result = append(result, DimStyle.Render("    "+wrapped))

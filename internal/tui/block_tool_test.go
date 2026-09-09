@@ -3139,13 +3139,15 @@ func TestTaskCardAlwaysRendersItsBodyUnderABareHeader(t *testing.T) {
 	if strings.Contains(joined, "▸") || strings.Contains(joined, "▾") {
 		t.Fatalf("expected Delegate card to drop the disclosure marker; got:\n%s", joined)
 	}
-	for _, want := range []string{"↳ Description:", "review tests", "check coverage", "update docs", "↳ Worker:", "↳ Agent id: reviewer-2", "↳ Task id: #7"} {
+	for _, want := range []string{"↳ Description:", "review tests", "check coverage", "update docs", "↳ Worker:", "↳ Agent id: reviewer-2", "↳ Task id: adhoc-7"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("expected Delegate body to contain %q; got:\n%s", want, joined)
 		}
 	}
-	if strings.Contains(joined, "adhoc-") {
-		t.Fatalf("expected Delegate body to not include the internal adhoc- prefix; got:\n%s", joined)
+	// The full machine-readable task id is shown once, in its Worker field
+	// row; the readable "#N" short form is reserved for compact titles.
+	if got := strings.Count(joined, "adhoc-7"); got != 1 {
+		t.Fatalf("expected Delegate body to show the full task id exactly once; got %d:\n%s", got, joined)
 	}
 	// The collapsed flag no longer hides anything: the card renders the same
 	// body either way.
@@ -3235,13 +3237,10 @@ func TestExpandedTaskShowsDescriptionAndWorkerWithTaskID(t *testing.T) {
 	if !strings.Contains(joined, "Worker:") {
 		t.Fatalf("expected expanded Delegate to show Worker section; got:\n%s", joined)
 	}
-	// The worker area keeps the task id in its readable form: the internal
-	// "adhoc-" prefix never reaches the UI.
-	if !strings.Contains(joined, "↳ Task id: #7") {
-		t.Fatalf("expected expanded Delegate worker area to include the readable task_id; got:\n%s", joined)
-	}
-	if strings.Contains(joined, "adhoc-") {
-		t.Fatalf("expected the internal adhoc- prefix to stay hidden; got:\n%s", joined)
+	// The worker area echoes the machine-readable task id in full, adhoc-
+	// prefix included; the readable "#N" form is reserved for compact titles.
+	if !strings.Contains(joined, "↳ Task id: adhoc-7") {
+		t.Fatalf("expected expanded Delegate worker area to include the full task_id; got:\n%s", joined)
 	}
 }
 
@@ -5937,8 +5936,55 @@ func TestCancelSubAgentExpandedShowsStructuredDetails(t *testing.T) {
 	if !strings.Contains(joined, "↳ Reason:") || !strings.Contains(joined, "task superseded") {
 		t.Fatalf("expected cancel expanded to show reason; got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "Stopped") {
-		t.Fatalf("expected cancel to show stopped semantic; got:\n%s", joined)
+	// The two-layer contract holds inside one card: the header keeps the
+	// readable "#7" short form while the expanded Result section echoes the
+	// machine-readable handle values in full ("adhoc-7").
+	if !strings.Contains(joined, "#7") {
+		t.Fatalf("expected cancel header to keep the readable target (#7); got:\n%s", joined)
+	}
+	if !strings.Contains(joined, "↳ Result:") {
+		t.Fatalf("expected cancel expanded to show a Result section; got:\n%s", joined)
+	}
+	for _, want := range []string{"↳ Status: stopped", "↳ Task id: adhoc-7", "↳ Agent id: reviewer-2"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected cancel expanded Result to contain %q; got:\n%s", want, joined)
+		}
+	}
+}
+
+// TestCancelExpandedHandleRendersFullTaskIDOnceWithoutDuplicateStatus pins
+// the expanded Cancel contract end to end: the Result section echoes the
+// handle's machine-readable values (full task id, "adhoc-" prefix included),
+// and the status is reported exactly once — the top-level "↳ Status:"
+// summary is dropped because the nested status field row already carries it.
+func TestCancelExpandedHandleRendersFullTaskIDOnceWithoutDuplicateStatus(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{
+		ID:                     1,
+		Type:                   BlockToolCall,
+		ToolName:               "cancel",
+		Collapsed:              false,
+		Content:                `{"target_task_id":"adhoc-9","reason":"workflow changed"}`,
+		ResultContent:          `{"status":"stopped","task_id":"adhoc-9","agent_id":"reviewer-2"}`,
+		ResultDone:             true,
+		ToolCallDetailExpanded: false,
+	}
+
+	joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
+	if got := strings.Count(joined, "adhoc-9"); got != 1 {
+		t.Fatalf("expected the full task id to appear exactly once (field row), got %d:\n%s", got, joined)
+	}
+	if !strings.Contains(joined, "↳ Task id: adhoc-9") {
+		t.Fatalf("expected expanded Result to carry the full task_id row; got:\n%s", joined)
+	}
+	if got := strings.Count(strings.ToLower(joined), "stopped"); got != 1 {
+		t.Fatalf("expected the status to appear exactly once, got %d:\n%s", got, joined)
+	}
+	if strings.Contains(joined, "↳ Status: Stopped") {
+		t.Fatalf("expanded card must not repeat the status in a top-level summary; got:\n%s", joined)
+	}
+	if strings.Contains(joined, `"status"`) {
+		t.Fatalf("expanded card must not leak raw JSON; got:\n%s", joined)
 	}
 }
 
