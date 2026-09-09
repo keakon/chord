@@ -266,7 +266,8 @@ func (a *MainAgent) buildMainModelPolicy() error {
 		return nil
 	}
 
-	client, modelName, ctxLimit, err := a.modelSwitchFactory(selectedRef)
+	poolRefs, poolVariant := a.roleModelPoolSource(a.currentActiveConfig())
+	client, modelName, ctxLimit, err := a.modelSwitchFactory(selectedRef, poolRefs, poolVariant)
 	if err != nil {
 		return fmt.Errorf("prepare main-agent model policy for %q: %w", selectedRef, err)
 	}

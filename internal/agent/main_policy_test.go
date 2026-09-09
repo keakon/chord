@@ -114,7 +114,7 @@ func TestStartPlanExecutionKeepsExecutionPromptAcrossRefresh(t *testing.T) {
 	a.markAgentsMDReady()
 	a.MarkSkillsReady()
 	a.markMCPReady()
-	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+	a.SetModelSwitchFactory(func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
 		providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
 			Type: config.ProviderTypeMessages,
 			Models: map[string]config.ModelConfig{
@@ -214,7 +214,7 @@ func TestStartPlanExecutionPromptUsesGenericPlanExecutionModeWithDelegateAvailab
 	a.markAgentsMDReady()
 	a.MarkSkillsReady()
 	a.markMCPReady()
-	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+	a.SetModelSwitchFactory(func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
 		providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
 			Type: config.ProviderTypeMessages,
 			Models: map[string]config.ModelConfig{
@@ -269,7 +269,7 @@ func TestStartPlanExecutionPromptUsesGenericPlanExecutionModeWhenDelegateUnavail
 	a.markAgentsMDReady()
 	a.MarkSkillsReady()
 	a.markMCPReady()
-	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+	a.SetModelSwitchFactory(func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
 		providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
 			Type: config.ProviderTypeMessages,
 			Models: map[string]config.ModelConfig{
@@ -355,7 +355,7 @@ func TestEnsureMainModelPolicyWaitsForConcurrentBuild(t *testing.T) {
 	prewarmDone := make(chan error, 1)
 	var builds atomic.Int32
 
-	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+	a.SetModelSwitchFactory(func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
 		if providerModel != "test/test-model" {
 			t.Fatalf("providerModel = %q, want test/test-model", providerModel)
 		}
@@ -509,7 +509,7 @@ func TestSwitchModelKeepsStoredRateLimitSnapshotsAcrossProviders(t *testing.T) {
 	a.SetProviderModelRef("sample/model-a")
 
 	replacement := newTestLLMClient()
-	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+	a.SetModelSwitchFactory(func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
 		if providerModel != "wsocket/gpt-5.5" {
 			t.Fatalf("providerModel = %q, want wsocket/gpt-5.5", providerModel)
 		}
@@ -560,7 +560,7 @@ func TestEnsureMainModelPolicyKeepsRateLimitSnapshotWithinSameProvider(t *testin
 	a.rateLimitSnaps = map[string]*ratelimit.KeyRateLimitSnapshot{"oauth": snap}
 
 	replacement := newTestLLMClient()
-	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+	a.SetModelSwitchFactory(func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
 		if providerModel != "oauth/model-b" {
 			t.Fatalf("providerModel = %q, want oauth/model-b", providerModel)
 		}
@@ -697,7 +697,7 @@ func TestSwitchModelAcceptsInlineVariant(t *testing.T) {
 	}, []string{"test-key"})
 	client := llm.NewClient(providerCfg, stubProvider{}, "model-b", 2048, "")
 
-	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+	a.SetModelSwitchFactory(func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
 		if providerModel != "sample/model-b@high" {
 			t.Fatalf("providerModel = %q, want sample/model-b@high", providerModel)
 		}
@@ -734,7 +734,7 @@ func TestSwitchModelIgnoresUndefinedInlineVariant(t *testing.T) {
 	}, []string{"test-key"})
 	client := llm.NewClient(providerCfg, stubProvider{}, "model-b", 2048, "")
 
-	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+	a.SetModelSwitchFactory(func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
 		if providerModel != "sample/model-b@missing" {
 			t.Fatalf("providerModel = %q, want sample/model-b@missing", providerModel)
 		}
@@ -772,7 +772,7 @@ func TestSwitchModelPropagatesCurrentSessionIDToNewClient(t *testing.T) {
 	providerImpl := &stubProvider{}
 	client := llm.NewClient(providerCfg, providerImpl, "model-b", 2048, "")
 
-	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+	a.SetModelSwitchFactory(func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
 		if providerModel != "sample/model-b" {
 			t.Fatalf("providerModel = %q, want sample/model-b", providerModel)
 		}
@@ -845,7 +845,7 @@ func TestSwitchModelRefreshesMainEditApplyPatchToolDefinitions(t *testing.T) {
 
 			providerCfg := llm.NewProviderConfig("sample", config.ProviderConfig{Type: config.ProviderTypeChatCompletions}, []string{"test-key"})
 			client := llm.NewClient(providerCfg, stubProvider{}, tt.targetModel, 2048, "")
-			a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+			a.SetModelSwitchFactory(func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
 				if providerModel != tt.targetRef {
 					t.Fatalf("providerModel = %q, want %s", providerModel, tt.targetRef)
 				}
@@ -902,7 +902,7 @@ func TestLazyMainModelPolicyRefreshesEditApplyPatchToolsBeforeRequest(t *testing
 	providerCfg := llm.NewProviderConfig("sample", config.ProviderConfig{Type: config.ProviderTypeChatCompletions}, []string{"test-key"})
 	client := llm.NewClient(providerCfg, provider, "claude-sonnet-4", 2048, "")
 	a.SetProviderModelRef("sample/claude-sonnet-4")
-	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+	a.SetModelSwitchFactory(func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
 		if providerModel != "sample/claude-sonnet-4" {
 			t.Fatalf("providerModel = %q, want sample/claude-sonnet-4", providerModel)
 		}
@@ -958,7 +958,7 @@ func TestSwitchRoleAppliesMainRoleModelImmediately(t *testing.T) {
 	buildClient := newRoleSwitchClient(t, "build", "one", 8192, "build-key")
 	execClient := newRoleSwitchClient(t, "exec", "one", 16384, "exec-key")
 	var seen []string
-	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+	a.SetModelSwitchFactory(func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
 		seen = append(seen, providerModel)
 		switch providerModel {
 		case "exec/one":
@@ -1043,7 +1043,7 @@ func TestSetCurrentModelPoolRebuildsClientWhenSelectedVariantNotInNewPool(t *tes
 	}, []string{"key-x"})
 	client := llm.NewClient(providerCfg, stubProvider{}, "model-x", 1024, "")
 	var factoryCalls []string
-	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+	a.SetModelSwitchFactory(func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
 		factoryCalls = append(factoryCalls, providerModel)
 		if providerModel != "provider-x/model-x@balanced" {
 			t.Fatalf("providerModel = %q, want provider-x/model-x@balanced", providerModel)
@@ -1110,7 +1110,7 @@ func TestSetCurrentModelPoolRebuildsClientWhenSelectedModelExistsInNewPool(t *te
 	}
 
 	var factoryCalls []string
-	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+	a.SetModelSwitchFactory(func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
 		factoryCalls = append(factoryCalls, providerModel)
 		roleModels := a.CurrentRoleModelRefs()
 		pool := make([]llm.FallbackModel, 0, len(roleModels))
@@ -1231,7 +1231,7 @@ func TestSwitchRoleAppliesRoleModelWithoutToast(t *testing.T) {
 	a.SetProviderModelRef("build/one")
 
 	execClient := newRoleSwitchClient(t, "exec", "one", 16384, "exec-key")
-	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+	a.SetModelSwitchFactory(func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
 		if providerModel != "exec/one" {
 			t.Fatalf("providerModel = %q, want exec/one", providerModel)
 		}
@@ -1306,7 +1306,7 @@ func TestSwitchRoleEmitsRoleChangedEvent(t *testing.T) {
 	a.SetProviderModelRef("build/one")
 
 	execClient := newRoleSwitchClient(t, "exec", "one", 16384, "exec-key")
-	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+	a.SetModelSwitchFactory(func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
 		if providerModel != "exec/one" {
 			t.Fatalf("providerModel = %q, want exec/one", providerModel)
 		}
@@ -1349,7 +1349,7 @@ func TestSwitchRoleModelApplyFailureLeavesRoleUntouched(t *testing.T) {
 	a.runningModelRef = "build/one"
 	a.llmMu.Unlock()
 
-	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+	a.SetModelSwitchFactory(func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
 		return nil, "", 0, fmt.Errorf("model %q unavailable", providerModel)
 	})
 
@@ -1434,7 +1434,7 @@ func TestSwitchRoleUsesAgentVariantForMainRoleModel(t *testing.T) {
 	})
 
 	execClient := newRoleSwitchClient(t, "exec", "one", 16384, "exec-key")
-	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+	a.SetModelSwitchFactory(func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
 		if providerModel != "exec/one@high" {
 			t.Fatalf("providerModel = %q, want exec/one@high", providerModel)
 		}
@@ -1466,7 +1466,7 @@ func TestSwitchRoleWithNoModelsLeavesSelectedModelUntouchedAndDefersPolicy(t *te
 	a.llmMu.Unlock()
 
 	called := false
-	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+	a.SetModelSwitchFactory(func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
 		called = true
 		return newRoleSwitchClient(t, "build", "one", 8192, "build-key"), "one", 8192, nil
 	})
@@ -1611,7 +1611,7 @@ func TestStartPlanExecutionPromptIncludesOrchestrationRulesWithDelegate(t *testi
 	a.markAgentsMDReady()
 	a.MarkSkillsReady()
 	a.markMCPReady()
-	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+	a.SetModelSwitchFactory(func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
 		providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
 			Type: config.ProviderTypeMessages,
 			Models: map[string]config.ModelConfig{
@@ -1660,7 +1660,7 @@ func TestStartPlanExecutionPromptIncludesOrchestrationRulesWithoutTodoWrite(t *t
 	a.markAgentsMDReady()
 	a.MarkSkillsReady()
 	a.markMCPReady()
-	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+	a.SetModelSwitchFactory(func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
 		providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
 			Type: config.ProviderTypeMessages,
 			Models: map[string]config.ModelConfig{
@@ -1704,7 +1704,7 @@ func TestStartPlanExecutionLoopAssessmentWaitsForActiveSubAgentSignals(t *testin
 	a.markAgentsMDReady()
 	a.MarkSkillsReady()
 	a.markMCPReady()
-	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+	a.SetModelSwitchFactory(func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
 		providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
 			Type: config.ProviderTypeMessages,
 			Models: map[string]config.ModelConfig{

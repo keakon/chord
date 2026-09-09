@@ -292,6 +292,13 @@ func (a *MainAgent) AppendContextMessage(msg message.Message) {
 		}
 		return
 	}
+	if rec := a.focusedDurableTask(); rec != nil && !rec.RuntimeParked && isTerminalSubAgentState(SubAgentState(strings.TrimSpace(rec.State))) {
+		// A settled task has no runtime and cannot be rehydrated; appending to
+		// the main session would leak a worker-scoped message into the main
+		// context, so the settled transcript stays strictly read-only.
+		log.Warnf("subagent context append rejected: task %v has settled and is read-only", rec.TaskID)
+		return
+	}
 	a.sendEvent(Event{Type: EventAppendContext, Payload: msg})
 }
 

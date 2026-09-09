@@ -273,9 +273,12 @@ func TestBuildMainClientFactoryWithModelPool(t *testing.T) {
 
 	ac := newTestAppContextWithBuilder(t, cfg, auth, agentConfigs)
 	factory := buildMainClientFactory(ac, cfg, auth)
+	poolRefs := []string{"sample/model-alpha", "sample/model-beta", "sample/model-gamma"}
 
-	// Request client for first model - should include all models in pool
-	client, modelID, ctxLimit, err := factory("sample/model-alpha@balanced")
+	// The caller resolves the pool snapshot for the role the client will run
+	// under; the factory must attach exactly that chain. Here the snapshot is
+	// builder's (the factory no longer reads the agent's current role).
+	client, modelID, ctxLimit, err := factory("sample/model-alpha@balanced", poolRefs, "balanced")
 	if err != nil {
 		t.Fatalf("factory failed: %v", err)
 	}
@@ -339,9 +342,10 @@ func TestBuildMainClientFactorySelectsCorrectPoolEntry(t *testing.T) {
 
 	ac := newTestAppContextWithBuilder(t, cfg, auth, agentConfigs)
 	factory := buildMainClientFactory(ac, cfg, auth)
+	poolRefs := []string{"sample/model-alpha", "sample/model-beta", "sample/model-gamma"}
 
 	// Request client for second model - pool should start from here
-	client, modelID, _, err := factory("sample/model-beta")
+	client, modelID, _, err := factory("sample/model-beta", poolRefs, "balanced")
 	if err != nil {
 		t.Fatalf("factory failed: %v", err)
 	}
@@ -730,7 +734,7 @@ func TestBuildMainClientFactorySingleModelPool(t *testing.T) {
 	ac := newTestAppContextWithBuilder(t, cfg, auth, agentConfigs)
 	factory := buildMainClientFactory(ac, cfg, auth)
 
-	client, _, _, err := factory("sample/model-alpha")
+	client, _, _, err := factory("sample/model-alpha", []string{"sample/model-alpha"}, "balanced")
 	if err != nil {
 		t.Fatalf("factory failed: %v", err)
 	}
@@ -779,9 +783,10 @@ func TestBuildMainClientFactoryWrapAround(t *testing.T) {
 
 	ac := newTestAppContextWithBuilder(t, cfg, auth, agentConfigs)
 	factory := buildMainClientFactory(ac, cfg, auth)
+	poolRefs := []string{"sample/model-alpha", "sample/model-beta", "sample/model-gamma"}
 
 	// Request client for third model - pool should wrap around
-	client, modelID, _, err := factory("sample/model-gamma")
+	client, modelID, _, err := factory("sample/model-gamma", poolRefs, "balanced")
 	if err != nil {
 		t.Fatalf("factory failed: %v", err)
 	}
@@ -796,6 +801,62 @@ func TestBuildMainClientFactoryWrapAround(t *testing.T) {
 	}
 
 	t.Logf("Pool wrap-around handled correctly: %s", primary)
+}
+
+// TestBuildMainClientFactoryUsesCallerPoolSnapshotNotActiveRole locks the role
+// switch regression at the production factory: the fallback pool must come from
+// the pool snapshot the caller passes for the target role, never from the role
+// that happens to be active on the agent at call time. Here the snapshot is a
+// deliberately different chain than the active builder role's models.
+func TestBuildMainClientFactoryUsesCallerPoolSnapshotNotActiveRole(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		MaxOutputTokens: 4096,
+		Providers: map[string]config.ProviderConfig{
+			"sample": {
+				Type: config.ProviderTypeChatCompletions,
+				Models: map[string]config.ModelConfig{
+					"model-alpha": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+					"model-beta":  {Limit: config.ModelLimit{Context: 200000, Output: 4096}},
+					"model-gamma": {Limit: config.ModelLimit{Context: 200000, Output: 100000}},
+				},
+			},
+		},
+	}
+	auth := config.AuthConfig{
+		"sample": []config.ProviderCredential{{APIKey: "test-key"}},
+	}
+	// The active role's pool is alpha -> beta -> gamma.
+	agentConfigs := map[string]*config.AgentConfig{
+		"builder": {
+			Name:    "builder",
+			Variant: "balanced",
+			Models: map[string][]string{
+				"standard": {"sample/model-alpha", "sample/model-beta", "sample/model-gamma"},
+			},
+		},
+	}
+
+	ac := newTestAppContextWithBuilder(t, cfg, auth, agentConfigs)
+	factory := buildMainClientFactory(ac, cfg, auth)
+
+	// The caller (a role switch) hands over the target role's snapshot, which is
+	// not the active role's chain and selects a non-head entry.
+	client, _, _, err := factory("sample/model-beta", []string{"sample/model-gamma", "sample/model-beta"}, "")
+	if err != nil {
+		t.Fatalf("factory failed: %v", err)
+	}
+	// The client keeps its pool cursor-head-first: beta (the selected entry)
+	// leads, followed by the supplied gamma. Reading the active role's chain
+	// instead would have produced alpha -> beta -> gamma.
+	pool, selectedIdx := client.ModelPoolSnapshot()
+	if len(pool) != 2 || pool[0].ModelID != "model-beta" || pool[1].ModelID != "model-gamma" {
+		t.Fatalf("pool = %#v, want the caller-supplied beta -> gamma chain (2 entries, no alpha)", pool)
+	}
+	if selectedIdx != 0 {
+		t.Fatalf("selectedIdx = %d, want 0 (cursor head beta within the supplied chain)", selectedIdx)
+	}
 }
 
 func TestInitialClientUsesBuilderModelPoolForFirstRequest(t *testing.T) {

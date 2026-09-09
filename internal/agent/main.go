@@ -972,11 +972,15 @@ type MainAgent struct {
 	// global default model.
 	llmFactory func(systemPrompt string, agentModels []string, variant string) *llm.Client
 
-	// modelSwitchFactory creates a new LLM client from a selected model
-	// reference string ("provider/model" or "provider/model@variant"). Used by
-	// SwitchModel to hot-swap the MainAgent's LLM at runtime. Set via
-	// SetModelSwitchFactory after construction.
-	modelSwitchFactory func(providerModel string) (*llm.Client, string, int, error)
+	// modelSwitchFactory creates a new LLM client for a selected model
+	// reference string ("provider/model" or "provider/model@variant"). Callers
+	// supply poolRefs/poolVariant — the model chain and default variant of the
+	// role the client will run under — so the factory attaches the right
+	// fallback pool without reading the agent's current (possibly still old)
+	// active role. Used by SwitchModel, role switches, SubAgent pool rebuilds,
+	// and deferred main-model policy rebuilds. Set via SetModelSwitchFactory
+	// after construction.
+	modelSwitchFactory func(providerModel string, poolRefs []string, poolVariant string) (*llm.Client, string, int, error)
 	// mainModelPolicyDirty marks the current main-agent client as needing a
 	// rebuild from modelSwitchFactory before the next LLM call. This is mainly a
 	// startup/deferred-policy flag; role switches try to refresh the active
@@ -1465,7 +1469,7 @@ func (a *MainAgent) switchRole(roleName string, clearHistory bool) error {
 	var prepared *preparedMainModel
 	if nextRef := a.defaultRoleModelRef(cfg); nextRef != "" {
 		var err error
-		prepared, err = a.prepareMainModel(nextRef)
+		prepared, err = a.prepareMainModelForRole(nextRef, cfg)
 		if err != nil {
 			return fmt.Errorf("apply role %q model %q: %w", roleName, nextRef, err)
 		}
@@ -2680,7 +2684,7 @@ func (a *MainAgent) beginPlanExecution(planPath, agentName string) (*planExecuti
 	var targetModel *preparedMainModel
 	if nextRef := a.defaultRoleModelRef(cfg); nextRef != "" {
 		var err error
-		targetModel, err = a.prepareMainModel(nextRef)
+		targetModel, err = a.prepareMainModelForRole(nextRef, cfg)
 		if err != nil {
 			return nil, fmt.Errorf("prepare %s role model: %w", agentName, err)
 		}

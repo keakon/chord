@@ -75,7 +75,7 @@ func (a *MainAgent) FocusedModelState() FocusedModelState {
 		pool, pools := a.focusedModelPools(target)
 		return FocusedModelState{SelectedRef: selected, RunningRef: running, Variant: variant, PoolName: pool, PoolNames: pools}
 	}
-	if target.parked && target.task != nil {
+	if (target.parked || target.settled) && target.task != nil {
 		selected := a.restoredSubAgentModelRef(target.task)
 		running := restoredRunningModelRef(target.task, selected)
 		_, variant := config.ParseModelRef(selected)
@@ -106,7 +106,7 @@ func (a *MainAgent) focusedModelPools(target focusedAgentSnapshot) (string, []st
 		a.stateMu.RLock()
 		cfg = a.agentConfigs[target.sub.agentDefName]
 		a.stateMu.RUnlock()
-	} else if target.parked && target.task != nil {
+	} else if (target.parked || target.settled) && target.task != nil {
 		a.stateMu.RLock()
 		cfg = a.agentConfigs[target.task.AgentDefName]
 		a.stateMu.RUnlock()
@@ -186,10 +186,14 @@ func (a *MainAgent) SetProviderModelRef(ref string) {
 	a.runningModelRef = ref
 }
 
-// SetModelSwitchFactory sets the factory used by SwitchModel to create a new
-// LLM client from a "provider/model" reference string. Must be called before
-// Run. The factory returns (client, displayModelName, contextLimit, error).
-func (a *MainAgent) SetModelSwitchFactory(fn func(providerModel string) (*llm.Client, string, int, error)) {
+// SetModelSwitchFactory sets the factory used to create MainAgent LLM clients
+// for model switches, role switches, SubAgent pool rebuilds, and deferred
+// main-model policy rebuilds. Must be called before Run. Each call supplies
+// the model chain and default variant of the role the new client will run
+// under, and the factory must build its fallback pool from those rather than
+// from whichever role happens to be active at call time. The factory returns
+// (client, displayModelName, contextLimit, error).
+func (a *MainAgent) SetModelSwitchFactory(fn func(providerModel string, poolRefs []string, poolVariant string) (*llm.Client, string, int, error)) {
 	a.modelSwitchFactory = fn
 	a.mainModelPolicyDirty.Store(true)
 }
@@ -320,12 +324,28 @@ type preparedMainModel struct {
 	runningRef   string
 }
 
+// prepareMainModel prepares a client for the active role: the fallback pool is
+// resolved from the role currently installed, which is what model switches and
+// startup restores run under.
 func (a *MainAgent) prepareMainModel(providerModel string) (*preparedMainModel, error) {
+	return a.prepareMainModelForRole(providerModel, a.currentActiveConfig())
+}
+
+// prepareMainModelForRole prepares a client that will run under cfg while cfg
+// may not be the active role yet (role switches, plan-execution staging). The
+// fallback pool chain comes from cfg itself, never from the role still active
+// when the prepare runs.
+func (a *MainAgent) prepareMainModelForRole(providerModel string, cfg *config.AgentConfig) (*preparedMainModel, error) {
+	poolRefs, poolVariant := a.roleModelPoolSource(cfg)
+	return a.prepareMainModelWithPool(providerModel, poolRefs, poolVariant)
+}
+
+func (a *MainAgent) prepareMainModelWithPool(providerModel string, poolRefs []string, poolVariant string) (*preparedMainModel, error) {
 	if a.modelSwitchFactory == nil {
 		return nil, fmt.Errorf("model switch not configured")
 	}
 
-	client, modelName, ctxLimit, err := a.modelSwitchFactory(providerModel)
+	client, modelName, ctxLimit, err := a.modelSwitchFactory(providerModel, poolRefs, poolVariant)
 	if err != nil {
 		return nil, fmt.Errorf("create LLM client for %q: %w", providerModel, err)
 	}
@@ -672,7 +692,7 @@ func (a *MainAgent) switchActiveSubAgentsForPoolIfNeeded(agentName string, cfg *
 		if ref == "" {
 			continue
 		}
-		client, modelName, ctxLimit, err := a.modelSwitchFactory(ref)
+		client, modelName, ctxLimit, err := a.modelSwitchFactory(ref, refs, strings.TrimSpace(cfg.Variant))
 		if err != nil {
 			return fmt.Errorf("create LLM client for %q: %w", ref, err)
 		}

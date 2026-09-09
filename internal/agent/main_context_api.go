@@ -15,9 +15,9 @@ import (
 )
 
 // GetSidebarWalltimeStats returns wall-clock time stats for the TUI-focused
-// agent only (main, live SubAgent, or parked task), mirroring
-// GetSidebarUsageStats routing. All buckets are zero when no walltime has been
-// recorded for the focused agent.
+// agent only (main, live SubAgent, or a parked/settled task viewed through its
+// durable record), mirroring GetSidebarUsageStats routing. All buckets are zero
+// when no walltime has been recorded for the focused agent.
 func (a *MainAgent) GetSidebarWalltimeStats() analytics.WalltimeStats {
 	if a.walltime == nil {
 		return analytics.WalltimeStats{}
@@ -26,7 +26,7 @@ func (a *MainAgent) GetSidebarWalltimeStats() analytics.WalltimeStats {
 	if target.sub != nil {
 		return a.walltime.statsForAgent(target.sub.instanceID)
 	}
-	if target.parked {
+	if target.parked || target.settled {
 		return a.walltime.statsForTask(target.task)
 	}
 	return a.walltime.statsForAgent(identity.MainAgentID)
@@ -115,13 +115,14 @@ func (a *MainAgent) usageStatsForTask(rec *DurableTaskRecord, liveInstanceID str
 // it since that provider sample — so the sidebar Context value/gauge and the
 // auto-compaction trigger always observe one value. limit is the usable input
 // budget (the input limit minus reserved headroom). Focused SubAgents report
-// the same frame from their own context manager; parked targets report zero.
+// the same frame from their own context manager; parked and settled targets
+// have no live context manager and report zero.
 func (a *MainAgent) GetContextStats() (current, limit int) {
 	target := a.focusedAgentSnapshot()
 	if target.sub != nil {
 		return target.sub.GetContextStats()
 	}
-	if target.parked {
+	if target.parked || target.settled {
 		return 0, 0
 	}
 	return a.ctxMgr.EffectiveContextTokens(), a.ctxMgr.GetUsableInputBudget()
@@ -157,7 +158,7 @@ func (a *MainAgent) GetContextMessageCount() int {
 	if target.sub != nil {
 		return target.sub.GetContextMessageCount()
 	}
-	if target.parked {
+	if target.parked || target.settled {
 		manager := a.recoveryManager()
 		msgs, err := loadTaskHistoryMessages(manager, target.task, loadToolActivityStarted(manager))
 		if err != nil {
@@ -173,7 +174,7 @@ func (a *MainAgent) GetContextBytes() int {
 	if target.sub != nil {
 		return target.sub.GetContextBytes()
 	}
-	if target.parked {
+	if target.parked || target.settled {
 		manager := a.recoveryManager()
 		msgs, err := loadTaskHistoryMessages(manager, target.task, loadToolActivityStarted(manager))
 		if err != nil {

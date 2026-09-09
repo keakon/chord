@@ -224,7 +224,7 @@ func (a *MainAgent) focusedAgentConfig() *config.AgentConfig {
 	agentDefName := ""
 	if target.sub != nil {
 		agentDefName = target.sub.agentDefName
-	} else if target.parked && target.task != nil {
+	} else if (target.parked || target.settled) && target.task != nil {
 		agentDefName = target.task.AgentDefName
 	}
 	if agentDefName != "" {
@@ -284,6 +284,12 @@ func (a *MainAgent) SetCurrentModelPool(pool string) error {
 	target := a.focusedAgentSnapshot()
 	if target.parked && target.task != nil {
 		return a.SetAgentModelPool(target.task.AgentDefName, pool)
+	}
+	if target.settled && target.task != nil {
+		// A settled task cannot be rehydrated or resumed, so a pool switch has
+		// nowhere to apply. Refusing keeps the main role's pool untouched
+		// instead of silently retargeting the write to the main session.
+		return fmt.Errorf("task %s has settled and its model pool is read-only", target.task.TaskID)
 	}
 	a.sendEvent(Event{Type: EventModelPoolSwitch, Payload: modelPoolSwitchRequest{Pool: pool}})
 	return nil

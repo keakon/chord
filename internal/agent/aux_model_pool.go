@@ -60,7 +60,7 @@ func (a *MainAgent) newAuxModelPoolClient(refs []string, timeout time.Duration, 
 		if selectedRef == "" {
 			continue
 		}
-		client, _, _, err := a.modelSwitchFactory(selectedRef)
+		client, _, _, err := a.modelSwitchFactory(selectedRef, nil, "")
 		if err != nil {
 			log.Warnf("failed to resolve aux model pool entry, skipping model_ref=%v error=%v", selectedRef, err)
 			constructionErrs = append(constructionErrs, fmt.Errorf("%s: %w", selectedRef, err))

@@ -65,7 +65,7 @@ func installPoolPolicyForTest(t *testing.T, a *MainAgent) {
 	policy := NewRuntimeModelPoolPolicy()
 	policy.SetCurrentModelPool("base")
 	a.SetModelPoolPolicy(policy, "")
-	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+	a.SetModelSwitchFactory(func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
 		providerCfg := llm.NewProviderConfig("provider", config.ProviderConfig{
 			Type: config.ProviderTypeChatCompletions,
 			Models: map[string]config.ModelConfig{
@@ -249,7 +249,7 @@ func TestInFlightModelPoolSwitchRollsBackWhenDeferredClientSwapFails(t *testing.
 	}
 	drainAgentEvents(a.Events())
 
-	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+	a.SetModelSwitchFactory(func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
 		return nil, "", 0, errors.New("factory unavailable for " + providerModel)
 	})
 
@@ -321,7 +321,7 @@ func TestInFlightModelPoolSwitchRestoresOnlyFailedDeferredSelections(t *testing.
 	}
 	a.subs.subAgents[sub.instanceID] = sub
 
-	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+	a.SetModelSwitchFactory(func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
 		if providerModel == "provider/model-c" {
 			return nil, "", 0, errors.New("factory unavailable for " + providerModel)
 		}

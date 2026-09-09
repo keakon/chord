@@ -631,7 +631,7 @@ func TestRestoreSessionAtStartupRestoresActiveRoleModelFromSnapshot(t *testing.T
 		},
 	})
 	a.SetProviderModelRef("build/one")
-	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+	a.SetModelSwitchFactory(func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
 		if providerModel != "exec/one" {
 			t.Fatalf("providerModel = %q, want exec/one", providerModel)
 		}
@@ -686,7 +686,7 @@ func TestRestoreSessionAtStartupRestoresModelPoolFromSnapshot(t *testing.T) {
 		},
 	})
 	a.SetProviderModelRef("build/fast")
-	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+	a.SetModelSwitchFactory(func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
 		if providerModel != "exec/strong" {
 			t.Fatalf("providerModel = %q, want exec/strong", providerModel)
 		}
@@ -775,7 +775,7 @@ func TestRestoreSessionAtStartupRestoresModelPoolFromSnapshotWithoutLeakingLastP
 		},
 	})
 	a.SetProviderModelRef("build/fast")
-	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+	a.SetModelSwitchFactory(func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
 		if providerModel != "exec/strong-a" {
 			t.Fatalf("providerModel = %q, want exec/strong-a", providerModel)
 		}
@@ -826,7 +826,7 @@ func TestRestoreSessionAtStartupFallsBackToProjectModelPoolForHistoricalSnapshot
 		},
 	})
 	a.SetProviderModelRef("build/fast")
-	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+	a.SetModelSwitchFactory(func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
 		if providerModel != "exec/fast" {
 			t.Fatalf("providerModel = %q, want exec/fast", providerModel)
 		}

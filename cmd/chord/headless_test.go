@@ -1594,6 +1594,69 @@ func TestHeadlessRoleChangeEventDoesNotRegressRoleCacheAfterRoleSet(t *testing.T
 	}
 }
 
+// A successful role set announces the switch itself: the role_response is a
+// command reply, so if the set only refreshed the cache the trailing
+// RoleChangedEvent would dedupe against that cache and the only role_change for
+// the switch would never be pushed. Subscribers must see exactly one
+// role_change per successful switch, whether the event drains before or after
+// the set response.
+func TestHeadlessRoleSetAnnouncesRoleChangeOnceDespiteDelayedEvent(t *testing.T) {
+	backend := &mockBackend{availableRoles: []string{"builder", "planner"}, currentRole: "builder"}
+	state := &headlessState{role: "builder", subscriptions: map[string]bool{"role_change": true}}
+
+	to := newTestOut()
+	handleHeadlessCommand(headlessCommand{Type: "role", Action: "set", Role: "planner"}, backend, state, to.writer(), "test-session")
+	envs := to.drain()
+	if findHeadlessEnvelopeValue(envs, "role_response") == nil {
+		t.Fatal("role_response missing for role set")
+	}
+	announcements := 0
+	for _, env := range envs {
+		if env.Type == "role_change" {
+			announcements++
+		}
+	}
+	if announcements != 1 {
+		t.Fatalf("role_change announcements at set = %d, want exactly 1", announcements)
+	}
+
+	// The RoleChangedEvent that trails the set is resolved against the backend's
+	// committed role and dedupes against the announced role, never emitting a
+	// duplicate envelope.
+	if envs := filterHeadlessEvent(agent.RoleChangedEvent{Role: "planner"}, state, backend); len(envs) != 0 {
+		t.Fatalf("trailing RoleChangedEvent duplicated the announcement: %#v", envs)
+	}
+	state.mu.Lock()
+	role := state.role
+	state.mu.Unlock()
+	if role != "planner" {
+		t.Fatalf("state.role = %q, want planner", role)
+	}
+}
+
+// A warm state.role that was filled by a status backfill (which is not an
+// announcement) must not swallow the RoleChangedEvent for the switch it
+// describes: the event is compared against the last announced role, not the
+// current cache.
+func TestHeadlessRoleChangeEventNotSwallowedByStatusBackfilledCache(t *testing.T) {
+	backend := &mockBackend{currentRole: "planner"}
+	// state.role was warmed by a status query before any role_change was ever
+	// announced.
+	state := &headlessState{role: "planner", subscriptions: map[string]bool{"role_change": true}}
+
+	envs := filterHeadlessEvent(agent.RoleChangedEvent{Role: "planner"}, state, backend)
+	if len(envs) != 1 || envs[0].Type != "role_change" {
+		t.Fatalf("envelopes = %#v, want exactly one role_change", envs)
+	}
+	if payload := envs[0].Payload.(map[string]string); payload["role"] != "planner" {
+		t.Fatalf("role_change role = %v, want planner", payload["role"])
+	}
+	// A repeated delivery of the same event stays quiet.
+	if envs := filterHeadlessEvent(agent.RoleChangedEvent{Role: "planner"}, state, backend); len(envs) != 0 {
+		t.Fatalf("repeated RoleChangedEvent duplicated the announcement: %#v", envs)
+	}
+}
+
 func TestHeadlessAgentNotifyEnvelopeCarriesSubtype(t *testing.T) {
 	state := &headlessState{}
 

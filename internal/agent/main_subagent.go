@@ -1476,8 +1476,17 @@ func (a *MainAgent) focusedAgentSnapshot() focusedAgentSnapshot {
 	if sub := a.validFocusedSubAgent(); sub != nil {
 		return focusedAgentSnapshot{sub: sub, task: a.taskRecordByTaskID(sub.taskID)}
 	}
-	if rec := a.focusedDurableTask(); rec != nil && rec.RuntimeParked {
-		return focusedAgentSnapshot{task: rec, parked: true}
+	if rec := a.focusedDurableTask(); rec != nil {
+		if rec.RuntimeParked {
+			return focusedAgentSnapshot{task: rec, parked: true}
+		}
+		if isTerminalSubAgentState(SubAgentState(strings.TrimSpace(rec.State))) {
+			// A settled terminal task (runtime gone without ever being parked)
+			// keeps its transcript readable. Facades must surface it explicitly —
+			// falling back to the main agent here would show the main role's
+			// model/context/usage data while the user views the settled worker.
+			return focusedAgentSnapshot{task: rec, settled: true}
+		}
 	}
 	return focusedAgentSnapshot{}
 }

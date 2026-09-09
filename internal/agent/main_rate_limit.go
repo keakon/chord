@@ -64,7 +64,7 @@ func (a *MainAgent) tuiFocusedLLMAndRef() (client *llm.Client, ref string) {
 		}
 		return client, ref
 	}
-	if target.parked {
+	if target.parked || target.settled {
 		return nil, ""
 	}
 	a.llmMu.RLock()

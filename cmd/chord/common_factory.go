@@ -201,14 +201,17 @@ func buildSubAgentLLMFactory(
 }
 
 // buildMainClientFactory returns the model-switch factory for MainAgent used
-// when the user switches the current cursor-head model at runtime. Resolves a
-// role-model pool to build the fallback chain.
+// when a client is rebuilt for a model ref at runtime (model command, role
+// switch, SubAgent pool rebuild, deferred policy rebuild). The role pool whose
+// fallback chain the new client should carry arrives with each call as
+// poolRefs/poolVariant, resolved by the agent from the role the client will
+// run under — never from whatever role happens to be active at call time.
 func buildMainClientFactory(
 	ac *AppContext,
 	cfg *config.Config,
 	auth config.AuthConfig,
-) func(providerModel string) (*llm.Client, string, int, error) {
-	return func(providerModel string) (*llm.Client, string, int, error) {
+) func(providerModel string, poolRefs []string, poolVariant string) (*llm.Client, string, int, error) {
+	return func(providerModel string, poolRefs []string, poolVariant string) (*llm.Client, string, int, error) {
 		parentCtx := ac.Ctx
 		if parentCtx == nil {
 			parentCtx = context.Background()
@@ -227,16 +230,10 @@ func buildMainClientFactory(
 		client.SetStreamRetryRounds(cfg.StreamRetryRounds)
 		client.SetVariant(selectedVariant)
 
-		roleModels := ac.MainAgent.CurrentRoleModelRefs()
-		roleDefaultVariant := ""
-		if roleCfg := ac.MainAgent.CurrentRoleConfig(); roleCfg != nil {
-			roleDefaultVariant = strings.TrimSpace(roleCfg.Variant)
-		}
-
 		pool, selectedIdx := buildModelPool(
 			parentCtx,
-			roleModels,
-			roleDefaultVariant,
+			poolRefs,
+			poolVariant,
 			providerModel,
 			cfg.Providers,
 			auth,

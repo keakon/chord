@@ -116,7 +116,7 @@ func TestThinkingTranslationServiceUsesProjectConfigOverride(t *testing.T) {
 		ThinkingTranslation: &config.ThinkingTranslationConfig{TargetLanguage: "zh-Hans", ModelPool: "project-pool"},
 		ModelPools:          map[string][]string{"project-pool": {"openai/project"}},
 	}
-	a.modelSwitchFactory = func(providerModel string) (*llm.Client, string, int, error) {
+	a.modelSwitchFactory = func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
 		return newAuxModelPoolTestClient("openai", strings.TrimPrefix(providerModel, "openai/")), providerModel, 8192, nil
 	}
 
@@ -142,7 +142,7 @@ func TestThinkingTranslationServiceUsesProjectConfigOverride(t *testing.T) {
 func TestNewAuxModelPoolClientFallsBackAcrossRefs(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	calls := make([]string, 0, 2)
-	a.modelSwitchFactory = func(providerModel string) (*llm.Client, string, int, error) {
+	a.modelSwitchFactory = func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
 		calls = append(calls, providerModel)
 		switch providerModel {
 		case "bad/ref":
@@ -171,7 +171,7 @@ func TestNewAuxModelPoolClientFallsBackAcrossRefs(t *testing.T) {
 
 func TestNewAuxModelPoolClientReportsAllErrorsWhenAllRefsFail(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.modelSwitchFactory = func(providerModel string) (*llm.Client, string, int, error) {
+	a.modelSwitchFactory = func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
 		return nil, "", 0, fmt.Errorf("failed %s", providerModel)
 	}
 

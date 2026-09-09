@@ -303,7 +303,7 @@ func TestHandoffApproveModelPreparationFailurePreservesPlannerSession(t *testing
 	a := newTestMainAgent(t, projectRoot)
 	prepareExecutableHandoffAgent(t, a)
 	a.agentConfigs["builder"].Models = map[string][]string{"default": {"sample/test-model"}}
-	a.SetModelSwitchFactory(func(string) (*llm.Client, string, int, error) {
+	a.SetModelSwitchFactory(func(string, []string, string) (*llm.Client, string, int, error) {
 		return nil, "", 0, errors.New("model unavailable")
 	})
 	setupHandoffTurn(t, a, planPath)

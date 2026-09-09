@@ -3183,6 +3183,99 @@ func TestParkedSubAgentFocusedStatsAndPoolDoNotFallBackToMain(t *testing.T) {
 	}
 }
 
+// A settled terminal task focus (runtime gone without ever parking) must show
+// the task's own ledger/transcript/model data in the sidebar facades and refuse
+// every write path instead of silently falling back to the main role — the same
+// guarantee TestParkedSubAgentFocusedStatsAndPoolDoNotFallBackToMain gives
+// parked tasks.
+func TestSettledTaskFocusedStatsAndPoolDoNotFallBackToMain(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.modelPoolPolicy = NewRuntimeModelPoolPolicy()
+	a.SetAgentConfigs(map[string]*config.AgentConfig{
+		"builder": {Name: "builder", Mode: config.AgentModeMain, Models: map[string][]string{"main": {"test/main"}}},
+		"worker":  {Name: "worker", Mode: config.AgentModeSubAgent, Models: map[string][]string{"base": {"test/worker"}, "fast": {"test/worker-fast"}}},
+	})
+	a.activeConfig = a.agentConfigs["builder"]
+	a.usageTracker.RecordForAgent(identity.MainAgentID, "test/main", nil, message.TokenUsage{InputTokens: 100})
+	a.ctxMgr.Append(message.Message{Role: "user", Content: "main-msg"})
+
+	const taskID = "settled-facade-task"
+	const instanceID = "settled-facade-worker-1"
+	a.setTaskRecords(map[string]*DurableTaskRecord{
+		taskID: {
+			TaskID:            taskID,
+			AgentDefName:      "worker",
+			LatestInstanceID:  instanceID,
+			InstanceHistory:   []string{instanceID},
+			State:             string(SubAgentStateCompleted),
+			ResumePolicy:      taskResumePolicyNotify,
+			SettlementDurable: true,
+			SelectedModelRef:  "test/worker",
+			UpdatedAt:         time.Now(),
+		},
+	})
+	a.usageTracker.RecordForAgent(instanceID, "test/worker", nil, message.TokenUsage{InputTokens: 7, OutputTokens: 3})
+	manager := a.recoveryManager()
+	for _, content := range []string{"settled ask", "settled reply"} {
+		if err := manager.PersistMessage(instanceID, message.Message{Role: "user", Content: content}); err != nil {
+			t.Fatalf("persist settled row: %v", err)
+		}
+	}
+	a.SwitchFocus(instanceID)
+
+	// Usage/cost reads come from the settled task's own ledger sums.
+	stats := a.GetSidebarUsageStats()
+	if stats.InputTokens != 7 || stats.OutputTokens != 3 {
+		t.Fatalf("settled usage = %#v, want the settled task's 7/3 tokens, not the main role's numbers", stats)
+	}
+
+	// Context frame: no live context manager, so unavailable zeros.
+	if current, limit := a.GetContextStats(); current != 0 || limit != 0 {
+		t.Fatalf("settled context stats = (%d, %d), want unavailable zeros", current, limit)
+	}
+
+	// Message count/bytes come from the settled transcript rows, not the main
+	// session's one message.
+	if got := a.GetContextMessageCount(); got != 2 {
+		t.Fatalf("settled context message count = %d, want the 2 transcript rows", got)
+	}
+	if got := a.GetContextBytes(); got <= 0 {
+		t.Fatalf("settled context bytes = %d, want > 0", got)
+	}
+
+	// Model reads resolve the settled task's own agent definition and record.
+	state := a.FocusedModelState()
+	if state.SelectedRef != "test/worker" {
+		t.Fatalf("FocusedModelState.SelectedRef = %q, want the settled task's test/worker", state.SelectedRef)
+	}
+	if got := a.CurrentPoolName(); got != "base" {
+		t.Fatalf("CurrentPoolName() = %q, want worker base pool", got)
+	}
+	if confirmed, total := a.KeyStats(); confirmed != 0 || total != 0 {
+		t.Fatalf("KeyStats = %d/%d, want 0/0 (no runtime client, never the main role's keys)", confirmed, total)
+	}
+
+	// Pool switching refuses on a settled view and leaves the main pool alone.
+	if err := a.SetCurrentModelPool("fast"); err == nil {
+		t.Fatal("SetCurrentModelPool(fast) on a settled view: error = nil, want read-only refusal")
+	}
+	if got, ok := a.AgentOverridePoolName("worker"); ok {
+		t.Fatalf("worker pool override = %q after refused switch, want none", got)
+	}
+	if got := a.modelPoolPolicy.CurrentModelPool(); got != "" {
+		t.Fatalf("main current pool = %q after refused switch, want unchanged", got)
+	}
+
+	// Context append refuses instead of writing into the main session.
+	a.AppendContextMessage(message.Message{Role: "user", Content: "shell output while settled"})
+	if rows := a.ctxMgr.Snapshot(); len(rows) != 1 || rows[0].Content != "main-msg" {
+		t.Fatalf("main context = %#v after settled append, want the unchanged main-msg only", rows)
+	}
+	if msgs := a.GetMessages(); len(msgs) != 2 {
+		t.Fatalf("settled transcript = %d rows after settled append, want 2", len(msgs))
+	}
+}
+
 func TestParkBarrierConcurrentFocusedInputPreventsParkingAndPreservesMessage(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.SetAgentConfigs(map[string]*config.AgentConfig{

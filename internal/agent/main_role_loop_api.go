@@ -419,15 +419,18 @@ func (a *MainAgent) CurrentRoleConfig() *config.AgentConfig {
 	return a.currentActiveConfig()
 }
 
-// CurrentRoleModelRefs returns the configured model chain for the active role.
-// Entries preserve the original AgentConfig.Models strings, including any
-// inline @variant suffixes.
-// A nil/empty slice means "use global default model only".
 // CurrentRoleModelRefs returns the effective model chain for the active role,
-// resolved through the model pool policy. A nil/empty slice means "use global
-// default model only" (auto mode).
+// resolved through the model pool policy. Entries preserve the original
+// AgentConfig.Models strings, including any inline @variant suffixes. A
+// nil/empty slice means "use global default model only" (auto mode).
 func (a *MainAgent) CurrentRoleModelRefs() []string {
-	cfg := a.currentActiveConfig()
+	return a.modelRefsForRole(a.currentActiveConfig())
+}
+
+// modelRefsForRole returns the effective model chain cfg defines, resolved
+// through the model pool policy exactly like CurrentRoleModelRefs but for an
+// arbitrary (not necessarily active) role config.
+func (a *MainAgent) modelRefsForRole(cfg *config.AgentConfig) []string {
 	if cfg == nil || len(cfg.Models) == 0 {
 		return nil
 	}
@@ -439,4 +442,15 @@ func (a *MainAgent) CurrentRoleModelRefs() []string {
 		return refs
 	}
 	return nil
+}
+
+// roleModelPoolSource returns the model chain and default variant a client
+// being prepared for cfg should carry as its fallback pool. It is resolved
+// from cfg itself so a role switch prepares the target role's pool before that
+// role becomes active. nil cfg yields an empty snapshot (no pool to attach).
+func (a *MainAgent) roleModelPoolSource(cfg *config.AgentConfig) (refs []string, variant string) {
+	if cfg == nil {
+		return nil, ""
+	}
+	return a.modelRefsForRole(cfg), strings.TrimSpace(cfg.Variant)
 }

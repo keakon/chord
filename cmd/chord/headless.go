@@ -86,7 +86,15 @@ type headlessState struct {
 	pendingOutcome  string // "completed" / "cancelled" / "error" / ""
 	lastOutcome     string // persists across idle; set from pendingOutcome on idle
 	role            string // current main role; filled from RoleChangedEvent / status queries
-	updatedAt       time.Time
+	// lastBroadcastRole is the role of the most recent role_change announcement
+	// or committed role set, or "" before the first switch. state.role alone is
+	// not enough to dedupe RoleChangedEvent: role set responses update the
+	// cache, and comparing the trailing event against that cache would swallow
+	// the only announcement of a successful switch (the response is a command
+	// reply, not a pushed event). Announcements are therefore compared against
+	// this separate already-announced marker.
+	lastBroadcastRole string
+	updatedAt         time.Time
 
 	// subscriptions is the set of event types the gateway wants to receive.
 	// If nil, no subscribe command has been received and all event types are
@@ -333,16 +341,22 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 		// newer role set has already updated the cache, so trusting the event
 		// verbatim could regress state.role to an older role. Resolve the role
 		// from the backend's committed state (the event never leads the backend)
-		// and only push role_change when the role actually changed. Falls back
-		// to the event's role when the backend is not role-capable.
+		// and push role_change when this successful switch has not been
+		// announced yet. The dedup key is lastBroadcastRole — the last role
+		// actually announced — not state.role, whose cache can be refreshed by a
+		// role set response before any role_change envelope was emitted. Falls
+		// back to the event's role when the backend is not role-capable.
 		role := e.Role
 		if rb, ok := backend.(headlessRoleBackend); ok {
 			if current := rb.CurrentRole(); current != "" {
 				role = current
 			}
 		}
-		changed := state.role != role
+		changed := state.lastBroadcastRole != role
 		state.role = role
+		if changed {
+			state.lastBroadcastRole = role
+		}
 		state.updatedAt = time.Now()
 		if changed && state.isSubscribed("role_change") {
 			out = append(out, &headlessEnvelope{Type: "role_change", Payload: map[string]string{
@@ -1002,11 +1016,24 @@ func handleHeadlessRoleCommand(cmd headlessCommand, backend headlessRoleBackend,
 		// Keep the state cache in sync with the backend immediately: the
 		// RoleChangedEvent travels through the agent event loop and can trail
 		// this response, which would leave status queries reading the previous
-		// role from the warm cache.
+		// role from the warm cache. The committed switch is also announced here
+		// (the response is a command reply, so the trailing event would
+		// otherwise dedupe against the cache and the only role_change for the
+		// switch would never be pushed); the marker update makes the trailing
+		// event a no-op.
 		state.mu.Lock()
 		state.role = role
+		announce := state.lastBroadcastRole != role
+		if announce {
+			state.lastBroadcastRole = role
+		}
 		state.mu.Unlock()
 		emitHeadlessRoleResponse(out, true, "", role, headlessRoleItems(backend))
+		if announce && state.isSubscribed("role_change") {
+			out.emit(&headlessEnvelope{Type: "role_change", Payload: map[string]string{
+				"role": role,
+			}})
+		}
 	default:
 		emitHeadlessRoleResponse(out, false, "unsupported role action: "+cmd.Action, "", nil)
 	}

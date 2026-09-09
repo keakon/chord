@@ -85,7 +85,7 @@ func TestNewThinkingTranslatorReusesAuxClientCursor(t *testing.T) {
 	}
 	calls := 0
 	client := newAuxModelPoolTestClient("first", "ref")
-	a.modelSwitchFactory = func(providerModel string) (*llm.Client, string, int, error) {
+	a.modelSwitchFactory = func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
 		calls++
 		if providerModel != "first/ref" {
 			return nil, "", 0, fmt.Errorf("unexpected ref %q", providerModel)
@@ -172,7 +172,7 @@ func TestNewCompactionClientFailsWhenConfiguredPoolRefFails(t *testing.T) {
 	}
 	a.SetProviderModelRef("main/ref")
 	calls := make([]string, 0, 1)
-	a.modelSwitchFactory = func(providerModel string) (*llm.Client, string, int, error) {
+	a.modelSwitchFactory = func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
 		calls = append(calls, providerModel)
 		return nil, "", 0, fmt.Errorf("configured compaction model failed")
 	}
@@ -190,7 +190,7 @@ func TestNewAuxModelPoolClientSkipsInvalidRefAndUsesRemainingPool(t *testing.T) 
 	a := &MainAgent{}
 	valid := newAuxModelPoolTestClient("valid", "model")
 	var calls []string
-	a.modelSwitchFactory = func(ref string) (*llm.Client, string, int, error) {
+	a.modelSwitchFactory = func(ref string, _ []string, _ string) (*llm.Client, string, int, error) {
 		calls = append(calls, ref)
 		if ref == "invalid/model" {
 			return nil, "", 0, fmt.Errorf("provider is unavailable")
@@ -212,7 +212,7 @@ func TestNewAuxModelPoolClientSkipsInvalidRefAndUsesRemainingPool(t *testing.T) 
 
 func TestNewAuxModelPoolClientReportsAllConstructionErrors(t *testing.T) {
 	a := &MainAgent{}
-	a.modelSwitchFactory = func(ref string) (*llm.Client, string, int, error) {
+	a.modelSwitchFactory = func(ref string, _ []string, _ string) (*llm.Client, string, int, error) {
 		return nil, "", 0, fmt.Errorf("failed %s", ref)
 	}
 	_, err := a.newAuxModelPoolClient([]string{"first/ref", "second/ref"}, 0, 0)
@@ -242,7 +242,7 @@ func TestNewAuxModelPoolClientAppliesServiceTierToPoolClient(t *testing.T) {
 			"model": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
 		},
 	}, []string{"key"}), auxModelPoolStubProvider{}, "model", 1024, "")
-	a.modelSwitchFactory = func(providerModel string) (*llm.Client, string, int, error) {
+	a.modelSwitchFactory = func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
 		if providerModel != "aux/model" {
 			t.Fatalf("providerModel = %q, want aux/model", providerModel)
 		}

@@ -4282,7 +4282,7 @@ func TestProduceCompactionDraftArchivalProfileOmitsRecentTail(t *testing.T) {
 		response: &message.Response{Content: validCompactionSummaryForTest("history-1.md")},
 	}
 	client := llm.NewClient(providerCfg, provider, "compact-model", 2048, "")
-	a.SetModelSwitchFactory(func(providerModel string) (*llm.Client, string, int, error) {
+	a.SetModelSwitchFactory(func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
 		return client, "compact-model", 16384, nil
 	})
 
@@ -4335,7 +4335,7 @@ func TestProduceCompactionDraftCapturesSummaryKeyFileRevision(t *testing.T) {
 	}, []string{"test-key"})
 	provider := &countingCompactionProvider{response: &message.Response{Content: validCompactionSummaryForTest("history-1.md")}}
 	client := llm.NewClient(providerCfg, provider, "compact-model", 2048, "")
-	a.SetModelSwitchFactory(func(string) (*llm.Client, string, int, error) {
+	a.SetModelSwitchFactory(func(string, []string, string) (*llm.Client, string, int, error) {
 		return client, "compact-model", 16384, nil
 	})
 	snapshot := []message.Message{

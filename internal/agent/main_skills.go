@@ -60,7 +60,7 @@ func (a *MainAgent) FocusedSkills() []*skill.Meta {
 	if target.sub != nil {
 		return target.sub.ListSkills()
 	}
-	if target.parked && target.task != nil {
+	if (target.parked || target.settled) && target.task != nil {
 		return a.parkedTaskVisibleSkills(target.task)
 	}
 	return a.ListSkills()
@@ -133,7 +133,7 @@ func (a *MainAgent) InvokedSkills() []*skill.Meta {
 	if target.sub != nil {
 		return target.sub.InvokedSkills()
 	}
-	if target.parked && target.task != nil {
+	if (target.parked || target.settled) && target.task != nil {
 		visible := make(map[string]*skill.Meta)
 		for _, meta := range a.parkedTaskVisibleSkills(target.task) {
 			if meta != nil {
