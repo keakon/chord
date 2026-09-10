@@ -337,12 +337,17 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 	// they are only applied together ("batched") when a flush is justified;
 	// proposals in the new tail were never sent and are always free to apply.
 	type reductionProposal struct {
-		index      int
-		class      requestReductionClass
-		toolName   string
-		rule       string
-		reduced    string
-		decision   retentionDecision
+		index    int
+		class    requestReductionClass
+		toolName string
+		rule     string
+		reduced  string
+		decision retentionDecision
+		// force applies a frozen-boundary proposal even when the cache
+		// amortization gate would defer it. Only a read marker that lacks the
+		// stale/superseded guidance uses it: leaving such a read unmarked makes
+		// stableReductionSurfaceNeedsReview re-scan on every request, so it is
+		// re-rendered once instead of waiting for a flush.
 		force      bool
 		recallable bool
 		// repeated marks outputs whose content survives in an identical later
@@ -387,6 +392,13 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		validity := readValidityByIndex[i]
 		if incrementalEnabled && frozenReducedIndices != nil && i < len(frozenReducedIndices) && frozenReducedIndices[i] {
 			if toolName != tools.NameRead || (!validity.Invalidated && !validity.Superseded) {
+				noteSkip(contextReductionSkipFrozenReduced)
+				continue
+			}
+			// The frozen marker already carries the stale/superseded guidance,
+			// so re-rendering it would rewrite cached bytes without changing
+			// what the model can act on.
+			if readMarkerCarriesValidityGuidance(prepared[i].Content) {
 				noteSkip(contextReductionSkipFrozenReduced)
 				continue
 			}
@@ -446,7 +458,6 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 					rule:       rule,
 					reduced:    reduced,
 					decision:   decisionFor(ctx, reducedVerdict(requestReductionReadLike), rule, reduced),
-					force:      true,
 					recallable: true,
 					repeated:   repeated[i],
 				})
@@ -998,13 +1009,22 @@ func stableReductionSurfaceNeedsReview(surface stableReductionSurface, scan *red
 		// still-full covering read carries the stale warning. Requiring the
 		// exact class here would re-run the full scan on every request for
 		// the rest of the session without changing any output.
-		reducedMarked := strings.Contains(marker, "truncated="+tools.ReadTruncatedStale) ||
-			strings.Contains(marker, "truncated="+tools.ReadTruncatedSuperseded)
+		reducedMarked := readMarkerCarriesValidityGuidance(marker)
 		if (state.Invalidated || state.Superseded) && !reducedMarked {
 			return true
 		}
 	}
 	return false
+}
+
+// readMarkerCarriesValidityGuidance reports whether a reduced read marker
+// already tells the model the content is stale or superseded. Re-rendering
+// such a marker rewrites bytes the provider cached without changing what the
+// model can act on, and it is the shape stableReductionSurfaceNeedsReview
+// treats as settled.
+func readMarkerCarriesValidityGuidance(content string) bool {
+	return strings.Contains(content, "truncated="+tools.ReadTruncatedStale) ||
+		strings.Contains(content, "truncated="+tools.ReadTruncatedSuperseded)
 }
 
 type llmModelContinuitySnapshot struct {

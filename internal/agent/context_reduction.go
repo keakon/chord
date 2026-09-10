@@ -436,16 +436,15 @@ func classifyRequestReductionToolOutput(ctx requestReductionContext) requestRedu
 }
 
 func classifyRequestReduction(ctx requestReductionContext) requestReductionVerdict {
-	// An invalidated or superseded read must render its validity marker as
-	// soon as the state is known — stale file content is misleading at any age
+	// An invalidated or superseded read must render its validity marker rather
+	// than stay as full content — stale file content is misleading at any age
 	// and at any size, and a superseded range is carried verbatim by the newer
-	// read. It bypasses first-sight retention, the size gate and the
-	// protection branches below (high-risk, diff), matching the frozen
-	// incremental path, which force-refreshes such reads to the marker shape
-	// unconditionally; gating it here on size would make the two paths
-	// alternate renderings of the same message and rewrite the cached prefix.
-	// It also takes precedence over the repeated marker, whose "identical call
-	// appears later" wording is weaker guidance than the validity note.
+	// read. It bypasses first-sight retention, the size gate and the protection
+	// branches below (high-risk, diff); gating it here on size would make the
+	// flat scan and the frozen incremental path render the same message
+	// differently and alternately rewrite the cached prefix. It also takes
+	// precedence over the repeated marker, whose "identical call appears later"
+	// wording is weaker guidance than the validity note.
 	if ctx.ToolName == tools.NameRead && (ctx.ReadInvalidated || ctx.ReadSuperseded) {
 		return reducedVerdict(requestReductionReadLike)
 	}
