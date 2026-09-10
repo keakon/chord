@@ -16,7 +16,6 @@ func TestUsageDrivenAutoCompactFailureBreakerSuppressesAfterThreshold(t *testing
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.ctxMgr = ctxmgr.NewManager(10000, 0.9)
-	a.gitStatusInjected.Store(true)
 	a.autoCompactRequested.Store(true)
 
 	for planID := uint64(1); planID <= usageDrivenCompactionFailureThreshold; planID++ {

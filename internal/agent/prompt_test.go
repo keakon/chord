@@ -1727,9 +1727,6 @@ func TestInjectGitStatusIntoFirstUserMessage_TextMessage(t *testing.T) {
 	if !strings.HasPrefix(msgs[0].Content, "Git branch: main\n\nhello") {
 		t.Fatalf("expected git status prefix, got %q", msgs[0].Content)
 	}
-	if !a.gitStatusInjected.Load() {
-		t.Fatal("expected gitStatusInjected to be true after injection")
-	}
 }
 
 func TestInjectGitStatusIntoFirstUserMessage_MultipartMessage(t *testing.T) {
@@ -1758,12 +1755,9 @@ func TestInjectGitStatusIntoFirstUserMessage_MultipartMessage(t *testing.T) {
 	if got := msgs[0].Parts[2]; got.Type != "image" || got.MimeType != "image/png" || len(got.Data) != 3 {
 		t.Fatalf("unexpected original image part after injection: %#v", got)
 	}
-	if !a.gitStatusInjected.Load() {
-		t.Fatal("expected gitStatusInjected to be true after multipart injection")
-	}
 }
 
-func TestInjectGitStatusIntoFirstUserMessage_InjectsOnlyOnce(t *testing.T) {
+func TestInjectGitStatusIntoFirstUserMessage_EveryRequest(t *testing.T) {
 	a := &MainAgent{}
 	a.cachedGitStatus = "Git branch: main"
 
@@ -1773,23 +1767,21 @@ func TestInjectGitStatusIntoFirstUserMessage_InjectsOnlyOnce(t *testing.T) {
 	if injected := a.injectGitStatusIntoFirstUserMessage(msg1); !injected {
 		t.Fatal("expected first injection to succeed")
 	}
+	// A later request carries the status again: the prompt prefix must keep one
+	// stable shape instead of losing the status after the first call.
+	if injected := a.injectGitStatusIntoFirstUserMessage(msg2); !injected {
+		t.Fatal("expected second request injection to succeed")
+	}
+	if !strings.HasPrefix(msg2[0].Content, "Git branch: main\n\nworld") {
+		t.Fatalf("second request should carry the git status prefix, got %q", msg2[0].Content)
+	}
+	// Re-injecting into an already-prefixed message is a no-op so a request
+	// that reuses the previous prefix is not double-prefixed.
 	if injected := a.injectGitStatusIntoFirstUserMessage(msg2); injected {
-		t.Fatal("expected second injection to be skipped")
+		t.Fatal("expected re-injection into an already-prefixed message to be a no-op")
 	}
-	if strings.Contains(msg2[0].Content, "Git branch") {
-		t.Fatalf("second call should not inject git status, got %q", msg2[0].Content)
-	}
-}
-
-func TestGitStatusInjectedReset(t *testing.T) {
-	a := &MainAgent{}
-	a.gitStatusInjected.Store(true)
-
-	// Simulate session reset
-	a.gitStatusInjected.Store(false)
-
-	if a.gitStatusInjected.Load() {
-		t.Fatal("expected gitStatusInjected to be false after reset")
+	if got := strings.Count(msg2[0].Content, "Git branch"); got != 1 {
+		t.Fatalf("expected exactly one git status prefix, got %d: %q", got, msg2[0].Content)
 	}
 }
 

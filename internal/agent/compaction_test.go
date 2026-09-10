@@ -3473,7 +3473,6 @@ func TestHandleCompactionReadyRechecksGateAfterQueuedInput(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.ctxMgr.SetMaxTokens(1024)
-	a.gitStatusInjected.Store(true)
 	a.newTurn()
 	if a.turn == nil {
 		t.Fatal("expected active turn")
@@ -3884,7 +3883,6 @@ func TestAutoCompactionDrainsPendingUserMessages(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.ctxMgr.SetMaxTokens(1024)
-	a.gitStatusInjected.Store(true)
 
 	// Add pending user message before auto compaction
 	a.pendingUserMessages = []pendingUserMessage{{Content: "continue the task"}}
@@ -5313,7 +5311,6 @@ func TestEnsureOversizeDrivenCompactionStopsAfterRetryLimit(t *testing.T) {
 func TestCompactionFailureDoesNotRetrySameGate(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.gitStatusInjected.Store(true)
 	a.ctxMgr.SetMaxTokens(1000)
 	a.newTurn()
 	if a.turn == nil {

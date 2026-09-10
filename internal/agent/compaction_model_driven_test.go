@@ -468,7 +468,6 @@ func TestModelDrivenSettleRecordsLifecycleAndTerminalTrigger(t *testing.T) {
 func TestModelDrivenSkipKeepsUsageDrivenSafetyNetArmed(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.gitStatusInjected.Store(true)
 	a.ctxMgr.SetMaxTokens(1024)
 	a.newTurn()
 	turnID := a.turn.ID
@@ -505,7 +504,6 @@ func TestModelDrivenSkipKeepsUsageDrivenSafetyNetArmed(t *testing.T) {
 func TestModelDrivenApplyFailureSurfacesRealReason(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.gitStatusInjected.Store(true)
 	a.ctxMgr.SetMaxTokens(1024)
 	a.ctxMgr.Append(message.Message{Role: "user", Content: "head message being compacted"})
 	a.newTurn()

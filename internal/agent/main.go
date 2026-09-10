@@ -1035,13 +1035,12 @@ type MainAgent struct {
 	persist *persistencePump
 
 	// Cached startup values reused in buildSystemPrompt to avoid repeated syscalls/subprocesses.
-	cachedWorkDir     string
-	cachedGitStatus   string // populated lazily via gitStatusReady
-	cachedVenvPath    string // absolute path to detected Python virtual environment, or ""
-	cachedAgentsMD    string
-	gitStatusReady    chan struct{} // closed when cachedGitStatus is set
-	gitStatusInjected atomic.Bool   // true after git status has been prepended to the first user turn
-	cachedSubMu       sync.RWMutex
+	cachedWorkDir   string
+	cachedGitStatus string // populated lazily via gitStatusReady
+	cachedVenvPath  string // absolute path to detected Python virtual environment, or ""
+	cachedAgentsMD  string
+	gitStatusReady  chan struct{} // closed when cachedGitStatus is set
+	cachedSubMu     sync.RWMutex
 	// cachedSubAgents is the sorted list of subagent-mode agents available for
 	// the Delegate tool, excluding the currently active role. Rebuilt when role filters change.
 	cachedSubAgents []*config.AgentConfig
@@ -1225,8 +1224,9 @@ func NewMainAgent(
 	a.startPersistLoop()
 	a.refreshSessionSummary()
 
-	// Fetch git status asynchronously; callLLM will wait for it before the
-	// first LLM request so the system prompt always has accurate info.
+	// Fetch git status asynchronously; callLLM waits for it before the first
+	// LLM request of this process so every injected prefix carries the real
+	// value from the start.
 	go func() {
 		a.setCachedGitStatus(getGitStatus(workDir))
 		close(gitStatusReady)
@@ -1242,8 +1242,8 @@ func NewMainAgent(
 		a.initMemory(projectRoot)
 	}
 
-	// Build and install the system prompt (git status may still be in flight;
-	// it will be refreshed once ready via waitGitStatus before the first call).
+	// Build and install the system prompt (git status is injected into the
+	// first user message per request, not part of this prompt).
 	a.refreshSystemPrompt()
 
 	return a

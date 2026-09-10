@@ -299,7 +299,6 @@ func (a *MainAgent) resetSessionRuntimeState() {
 	a.setTaskRecords(nil)
 	a.resetTaskCoordination(a.sessionEpoch, nil)
 	a.resetAgentRequests(nil)
-	a.gitStatusInjected.Store(false)
 	a.explicitUserTurnCount.Store(0)
 	a.subs.resetStateEnteredTurns()
 }

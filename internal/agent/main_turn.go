@@ -152,29 +152,44 @@ func (a *MainAgent) pendingUserMessageToConversationMessage(p pendingUserMessage
 	return message.Message{Role: message.RoleUser, Content: outC, Parts: outP, Kind: p.Kind}, true
 }
 
+// injectGitStatusIntoFirstUserMessage prepends the cached git status (if any)
+// to the first user message in messages.
+//
+// The status is meta: it is not stored in ctxMgr or persisted. It is injected
+// into every request so the prompt prefix keeps one stable shape. It was
+// previously injected once per process via gitStatusInjected, but the status
+// never persists, so the very next request dropped it again and every process
+// start (or resume) re-armed one more insert/remove pair — each flip rewrote
+// the provider cache from position zero. Re-injection is idempotent (a message
+// already carrying the prefix is left untouched), so stable-reduction paths
+// that carry the previous request's prefix forward are not double-prefixed.
 func (a *MainAgent) injectGitStatusIntoFirstUserMessage(messages []message.Message) bool {
-	if len(messages) == 0 || a.gitStatusInjected.Load() {
+	if len(messages) == 0 {
 		return false
 	}
 	_, gitStatus, _, _ := a.promptMetaSnapshot()
 	if strings.TrimSpace(gitStatus) == "" {
 		return false
 	}
+	prefix := gitStatus + "\n\n"
 	for i := range messages {
 		if messages[i].Role != message.RoleUser {
 			continue
 		}
-		if !a.gitStatusInjected.CompareAndSwap(false, true) {
-			return false
-		}
 		if len(messages[i].Parts) > 0 {
+			if messages[i].Parts[0].Type == message.ContentPartText && strings.HasPrefix(messages[i].Parts[0].Text, prefix) {
+				return false
+			}
 			parts := make([]message.ContentPart, 0, len(messages[i].Parts)+1)
-			parts = append(parts, message.ContentPart{Type: message.ContentPartText, Text: gitStatus + "\n\n"})
+			parts = append(parts, message.ContentPart{Type: message.ContentPartText, Text: prefix})
 			parts = append(parts, cloneContentParts(messages[i].Parts)...)
 			messages[i].Parts = parts
 			return true
 		}
-		messages[i].Content = gitStatus + "\n\n" + messages[i].Content
+		if strings.HasPrefix(messages[i].Content, prefix) {
+			return false
+		}
+		messages[i].Content = prefix + messages[i].Content
 		return true
 	}
 	return false

@@ -66,9 +66,9 @@ func modelNameFromRef(providerModelRef string) string {
 }
 
 // waitGitStatus blocks until the async git status fetch is done. The result
-// is injected into the first user message by injectGitStatusIntoFirstUserMessage
-// and is not part of the stable system prompt, so no system-prompt refresh is
-// needed.
+// is prepended to the first user message of every request by
+// injectGitStatusIntoFirstUserMessage and is not part of the stable system
+// prompt, so no system-prompt refresh is needed.
 func (a *MainAgent) waitGitStatus(ctx context.Context) {
 	if a.gitStatusReady == nil {
 		return
@@ -542,8 +542,9 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 		messages = filtered
 	}
 
-	// On the first LLM call, prepend git status to the first user message so
-	// the model has repository context without polluting the stable system prompt.
+	// Prepend git status to the first user message so the model has repository
+	// context without polluting the stable system prompt. Injected on every
+	// request (idempotently) so the prompt prefix keeps one stable shape.
 	a.injectGitStatusIntoFirstUserMessage(messages)
 	a.updatePreparedLLMRequestSurface(a.currentTurnID(), messages)
 
