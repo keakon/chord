@@ -1845,6 +1845,67 @@ func TestOwnerRoutedMailboxIsAckedConsumed(t *testing.T) {
 	}
 }
 
+// TestOwnerRoutedMailboxEmitsTranscriptAppendedEvent pins the TUI-visible half
+// of an owner-routed context append. The append is written straight into the
+// owner's ctxmgr, so without a MailboxTranscriptAppendedEvent the queued
+// mailbox line stays in the TUI until a session switch clears it — the consumed
+// ack only retires the durable row. The event must carry the transcript index
+// the row landed on, taken before the append.
+func TestOwnerRoutedMailboxEmitsTranscriptAppendedEvent(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	parent := newControllableTestSubAgent(t, a, "adhoc-parent-event")
+	parent.instanceID = "worker-parent-event"
+	a.subs.mu.Lock()
+	delete(a.subs.subAgents, "worker-1")
+	a.subs.subAgents[parent.instanceID] = parent
+	a.subs.mu.Unlock()
+	a.syncTaskRecordFromSub(parent, "")
+
+	childMsg := SubAgentMailboxMessage{
+		MessageID:    "worker-child-event-1",
+		AgentID:      "worker-child",
+		TaskID:       "adhoc-child",
+		OwnerAgentID: parent.instanceID,
+		OwnerTaskID:  parent.taskID,
+		Kind:         SubAgentMailboxKindProgress,
+		Priority:     SubAgentMailboxPriorityNotify,
+		Summary:      "child progress",
+	}
+	a.enqueueSubAgentMailbox(childMsg)
+
+	select {
+	case msg := <-parent.ctxAppendCh:
+		parent.appendContextOnly(msg)
+	default:
+		t.Fatal("expected owner-routed mailbox to enqueue a context append for the direct parent")
+	}
+
+	timeout := time.After(2 * time.Second)
+	for {
+		select {
+		case evt := <-a.outputCh:
+			appended, ok := evt.(MailboxTranscriptAppendedEvent)
+			if !ok || appended.Message.Mailbox == nil ||
+				strings.TrimSpace(appended.Message.Mailbox.MessageID) != childMsg.MessageID {
+				continue
+			}
+			if appended.TargetAgentID != parent.instanceID {
+				t.Fatalf("appended event target = %q, want %q", appended.TargetAgentID, parent.instanceID)
+			}
+			msgs := parent.ctxMgr.Snapshot()
+			if appended.MessageIndex < 0 || appended.MessageIndex >= len(msgs) ||
+				msgs[appended.MessageIndex].Mailbox == nil ||
+				strings.TrimSpace(msgs[appended.MessageIndex].Mailbox.MessageID) != childMsg.MessageID {
+				t.Fatalf("MessageIndex %d does not point at the appended mailbox row: %s",
+					appended.MessageIndex, summarizeMessages(msgs))
+			}
+			return
+		case <-timeout:
+			t.Fatal("MailboxTranscriptAppendedEvent never emitted for the context-only append")
+		}
+	}
+}
+
 func TestBusyOwnerMailboxQueuesForNextRequest(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	owner := newControllableTestSubAgent(t, a, "adhoc-parent-busy")
@@ -4398,8 +4459,8 @@ func TestHandleAgentNotifyResumesWaitingForMainRuntime(t *testing.T) {
 // batch instead of waking the main once per update.
 func TestMainInboxProgressIsRunnableAndStagesAsOneBatch(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.subAgentInbox.progress["worker-1"] = SubAgentMailboxMessage{MessageID: "p-1", AgentID: "worker-1", TaskID: "task-a", Kind: SubAgentMailboxKindProgress, Summary: "still working"}
-	a.subAgentInbox.progress["worker-2"] = SubAgentMailboxMessage{MessageID: "p-2", AgentID: "worker-2", TaskID: "task-b", Kind: SubAgentMailboxKindProgress, Summary: "almost done"}
+	a.replaceProgressMailboxWithinBudget(SubAgentMailboxMessage{MessageID: "p-1", AgentID: "worker-1", TaskID: "task-a", Kind: SubAgentMailboxKindProgress, Summary: "still working"})
+	a.replaceProgressMailboxWithinBudget(SubAgentMailboxMessage{MessageID: "p-2", AgentID: "worker-2", TaskID: "task-b", Kind: SubAgentMailboxKindProgress, Summary: "almost done"})
 
 	if !a.hasRunnableMailboxWork() {
 		t.Fatal("hasRunnableMailboxWork() = false while progress snapshots are pending for an idle main")
@@ -4432,7 +4493,7 @@ func TestMainInboxProgressIsRunnableAndStagesAsOneBatch(t *testing.T) {
 // main-inbox messages at once.
 func TestProgressArrivalMergesIntoQueuedMailboxBatch(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.subAgentInbox.progress["worker-1"] = SubAgentMailboxMessage{MessageID: "p-1", AgentID: "worker-1", TaskID: "task-a", Kind: SubAgentMailboxKindProgress, Summary: "still working"}
+	a.replaceProgressMailboxWithinBudget(SubAgentMailboxMessage{MessageID: "p-1", AgentID: "worker-1", TaskID: "task-a", Kind: SubAgentMailboxKindProgress, Summary: "still working"})
 	a.subAgentInbox.urgent = []SubAgentMailboxMessage{{
 		MessageID: "u-1",
 		AgentID:   "worker-2",

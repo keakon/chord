@@ -192,6 +192,7 @@ func (s *SubAgent) appendContextOnly(msg message.Message) {
 	}
 	ackID := strings.TrimSpace(msg.MailboxAckID)
 	msg.Role = "user"
+	messageIndex := s.ctxMgr.MessageCount()
 	s.ctxMgr.Append(msg)
 	persistMsg := msg
 	if strings.TrimSpace(persistMsg.Content) == "" {
@@ -202,6 +203,9 @@ func (s *SubAgent) appendContextOnly(msg message.Message) {
 			if err := s.parent.markSubAgentMailboxConsumed(ackID); err != nil {
 				log.Warnf("SubAgent failed to persist context mailbox consumption agent=%v message_id=%v error=%v", s.instanceID, ackID, err)
 			}
+		}
+		if msg.Mailbox != nil && strings.TrimSpace(msg.Mailbox.MessageID) != "" && s.parent != nil {
+			s.parent.emitToTUI(MailboxTranscriptAppendedEvent{Message: msg, TargetAgentID: s.instanceID, MessageIndex: messageIndex})
 		}
 	})
 }

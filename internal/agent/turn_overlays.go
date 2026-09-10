@@ -70,6 +70,7 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 				a.ctxMgr.Append(msg)
 				a.persistAsyncAfter("main", msg, func(err error) {
 					if err != nil {
+						a.notePersistenceFailure(err)
 						return
 					}
 					a.emitToTUI(MailboxTranscriptAppendedEvent{Message: msg, TargetAgentID: "main", MessageIndex: messageIndex})

@@ -338,6 +338,51 @@ func TestProgressMailboxRetainsEveryDurableUpdateWhenBudgetExhausted(t *testing.
 	}
 }
 
+// TestTakeMainInboxProgressSnapshotsDeliversSpilledUpdateOnce pins the claim
+// path when the memory budget is exhausted. The per-agent progress map is a
+// latest-status view, not an owner of an undelivered update: a row that spilled
+// to the durable fallback is still reachable through progressPending, so
+// treating the map as a second delivery source re-emitted the same update the
+// reload below already returned — twice in one batch. The same map row was
+// never charged to the memory budget, so releasing it on the way out subtracted
+// bytes that were never added and widened the budget for what was still queued.
+func TestTakeMainInboxProgressSnapshotsDeliversSpilledUpdateOnce(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.mailboxDeliveryPaused.Store(true)
+	// One in-memory slot: the urgent row takes it, so the progress row below
+	// spills to the durable fallback and progressQueue stays empty.
+	a.globalConfig.Orchestration.MailboxMemoryMessages = 1
+	a.globalConfig.Orchestration.MailboxMemoryBytes = 1 << 20
+
+	queued := SubAgentMailboxMessage{MessageID: "notice-1", AgentID: "worker-0", TaskID: "task-0", Kind: SubAgentMailboxKindCompleted, Priority: SubAgentMailboxPriorityUrgent, Summary: "queued notice"}
+	a.enqueueSubAgentMailbox(queued)
+	progress := SubAgentMailboxMessage{MessageID: "progress-1", AgentID: "worker-1", TaskID: "task-1", Kind: SubAgentMailboxKindProgress, Summary: "step 1"}
+	a.enqueueSubAgentMailbox(progress)
+
+	if got := a.subAgentInbox.progressPending; len(got) != 1 || got[0] != progress.MessageID {
+		t.Fatalf("progressPending = %#v, want the spilled %q row", got, progress.MessageID)
+	}
+	if len(a.subAgentInbox.progressQueue) != 0 {
+		t.Fatalf("progressQueue = %#v, want the progress row spilled to the durable fallback", a.subAgentInbox.progressQueue)
+	}
+
+	got := a.takeMainInboxProgressSnapshots()
+	if len(got) != 1 || got[0].MessageID != progress.MessageID {
+		t.Fatalf("progress snapshots = %#v, want exactly one %q row", got, progress.MessageID)
+	}
+	// The urgent row is the only charged message, so claiming the uncharged
+	// spilled progress row must leave its charge intact.
+	if len(a.subAgentInbox.urgent) != 1 {
+		t.Fatalf("urgent queue = %#v, want the queued notice left in memory", a.subAgentInbox.urgent)
+	}
+	if want := mailboxMessageBytes(a.subAgentInbox.urgent[0]); a.subAgentInbox.memoryBytes != want {
+		t.Fatalf("mailbox memory = %d bytes, want %d (the spilled progress row was never charged)", a.subAgentInbox.memoryBytes, want)
+	}
+	if len(a.subAgentInbox.progress) != 0 || len(a.subAgentInbox.progressPending) != 0 {
+		t.Fatalf("progress map = %#v pending = %#v, want the claimed snapshot consumed", a.subAgentInbox.progress, a.subAgentInbox.progressPending)
+	}
+}
+
 // TestConcurrentSpoolRebuildDoesNotDropQueuedMessage hammers the spool reload
 // path from the two roles that race in production: producers append durable
 // mailbox rows and queue their ids in the spool, a consumer dequeues and

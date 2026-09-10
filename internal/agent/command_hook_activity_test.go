@@ -443,13 +443,13 @@ func TestGlobalIdleDrainsActionableOwnerMailboxBeforeNotifying(t *testing.T) {
 // instead of reporting full idle past it.
 func TestProgressSnapshotWakesIdleMainTurnBeforeGlobalIdle(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.subAgentInbox.progress["worker-1"] = SubAgentMailboxMessage{
+	a.replaceProgressMailboxWithinBudget(SubAgentMailboxMessage{
 		MessageID: "worker-1-p1",
 		AgentID:   "worker-1",
 		TaskID:    "task-1",
 		Kind:      SubAgentMailboxKindProgress,
 		Summary:   "still working",
-	}
+	})
 	if a.currentTurn() != nil {
 		t.Fatal("baseline main turn is not idle")
 	}

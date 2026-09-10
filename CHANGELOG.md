@@ -243,6 +243,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - A targeted `notify` you sent a delegated worker now persists with its routing metadata and is restored as the same status card after a restart or session switch, matching how worker-to-owner reports were already restored.
 - Context-summary cards no longer end with the line `Press toggle-collapse to expand and inspect the full preserved context message.` Compaction summary cards are always fully expanded — the `Space`/`Enter` toggle does not apply to them — so the instruction pointed at an action that does nothing. New checkpoints drop the tail, and the card hides it in checkpoints written by older versions.
 
+- Undelivered progress updates from a worker are no longer dropped. A newer update for the same worker used to replace an earlier one that had not been delivered yet, and the mailbox log's periodic cleanup kept only the latest progress row per task, so you could miss everything that happened between two reports and see only the final status. Every undelivered update is now kept — in memory and in the durable log — and delivered in the order the worker produced it.
+
 ## 0.7.3 - 2026-08-08
 
 ### Breaking Changes

@@ -315,6 +315,32 @@ func TestAssistantPersistenceFailureWithoutToolsDegradesMainAgent(t *testing.T) 
 	}
 }
 
+// TestMainMailboxOverlayPersistenceFailureDegradesMainAgent pins that the
+// turn-overlay append reports a main-transcript write failure into the same
+// health state machine persistAsync uses. The callback used to return on error
+// while skipping only the TUI event, so a failed mailbox-overlay write left the
+// session healthy and tool dispatch ungated.
+func TestMainMailboxOverlayPersistenceFailureDegradesMainAgent(t *testing.T) {
+	a := newReadyTestMainAgent(t)
+	a.installRecoveryManager(newBrokenPathRecoveryManager(t))
+	a.pendingSubAgentMailboxes = []*SubAgentMailboxMessage{{
+		MessageID: "worker-1-1",
+		AgentID:   "worker-1",
+		TaskID:    "task-1",
+		Kind:      SubAgentMailboxKindCompleted,
+		Summary:   "finished review",
+	}}
+
+	if overlays := a.buildTurnOverlayMessages(); len(overlays) == 0 {
+		t.Fatal("buildTurnOverlayMessages() staged no mailbox overlay")
+	}
+	a.flushPersist()
+
+	if !a.persistenceDegraded() {
+		t.Fatal("main persistence remained healthy after the mailbox overlay write failed")
+	}
+}
+
 func TestLoadTaskHistoryMessagesScopesRecoveryByInstance(t *testing.T) {
 	rm := recovery.NewRecoveryManager(t.TempDir())
 	defer rm.Close()

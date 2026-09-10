@@ -1264,6 +1264,14 @@ func (a *MainAgent) ensureSubAgentMailboxPersisted(msg *SubAgentMailboxMessage) 
 // takeMainInboxProgressSnapshots claims the main inbox's progress FIFO for
 // delivery. Complete in-memory messages are claimed without disk access;
 // only records that spilled to the durable fallback need to be reloaded.
+//
+// The per-agent progress map is only a latest-status view, never an owner of an
+// undelivered update: replaceProgressMailboxWithinBudget and the requeue path
+// publish the map entry in the same critical section that files the row in
+// progressQueue or progressPending, so every map entry is also resident in one
+// of those two. Claiming them here is what drains the FIFO, and the map is only
+// cleaned up alongside. Reading it as a second source would re-emit an update
+// that the pending reload below already delivers.
 func (a *MainAgent) takeMainInboxProgressSnapshots() []SubAgentMailboxMessage {
 	a.subAgentMailboxIDsMu.Lock()
 	out := append([]SubAgentMailboxMessage(nil), a.subAgentInbox.progressQueue...)
@@ -1274,14 +1282,6 @@ func (a *MainAgent) takeMainInboxProgressSnapshots() []SubAgentMailboxMessage {
 			delete(a.subAgentInbox.progress, msg.AgentID)
 		}
 		a.releaseMailboxMemory(msg)
-	}
-	if len(out) == 0 && len(a.subAgentInbox.progress) > 0 {
-		out = make([]SubAgentMailboxMessage, 0, len(a.subAgentInbox.progress))
-		for agentID, msg := range a.subAgentInbox.progress {
-			out = append(out, msg)
-			delete(a.subAgentInbox.progress, agentID)
-			a.releaseMailboxMemory(msg)
-		}
 	}
 	ids := append([]string(nil), a.subAgentInbox.progressPending...)
 	a.subAgentInbox.progressPending = nil
