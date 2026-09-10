@@ -36,6 +36,31 @@ func contextNoticeTitle(level string) string {
 	}
 }
 
+// removeContextNoticeBlocks drops every live context-pressure card after the
+// agent removed their backing KindContextNotice messages (a model switch
+// changed the compaction threshold). Cards are matched by NoticeLevel, the
+// marker only this path sets. Removing the messages shifted every later
+// transcript index, so main user block fork anchors are re-synced.
+func (m *Model) removeContextNoticeBlocks() {
+	if m == nil || m.viewport == nil {
+		return
+	}
+	var ids []int
+	for _, block := range m.viewport.blocks {
+		if block != nil && block.NoticeLevel != "" {
+			ids = append(ids, block.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	for _, id := range ids {
+		m.removeViewportBlockByID(id)
+	}
+	m.recalcViewportSize()
+	m.syncVisibleMainUserBlockMsgIndexes()
+}
+
 func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEffects) {
 	var effects agentEventEffects
 	switch evt := event.(type) {
@@ -136,13 +161,18 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		return true, effects
 	case agent.ContextNoticeEvent:
 		// Surface the same context-pressure signal the model receives as a
-		// card. The overlay is request-scoped and never persisted, so a card
-		// is the only place the user can see it; it is emitted once per
-		// compaction window, never per-request, so it does not spam.
-		block := &Block{ID: m.nextBlockID, Type: BlockStatus, StatusTitle: contextNoticeTitle(evt.Level), Content: evt.Message, AgentID: ""}
+		// card. The agent persisted the notice as a KindContextNotice message
+		// before emitting this event, so the card is backed by a real
+		// transcript slot (MsgIndex) that a restored session rebuilds from.
+		// Emitted once per compaction window, never per-request, so it does
+		// not spam.
+		block := &Block{ID: m.nextBlockID, Type: BlockStatus, StatusTitle: contextNoticeTitle(evt.Level), Content: evt.Message, AgentID: "", MsgIndex: evt.MessageIndex, NoticeLevel: evt.Level}
 		m.nextBlockID++
 		m.appendViewportBlock(block)
 		m.markBlockSettled(block)
+		return true, effects
+	case agent.ContextNoticeClearedEvent:
+		m.removeContextNoticeBlocks()
 		return true, effects
 	case agent.SpawnFinishedEvent:
 		// The runtime reports the main agent as "main"; main-view blocks are

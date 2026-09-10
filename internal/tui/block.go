@@ -234,6 +234,13 @@ type Block struct {
 	// StatusTitle is the badge label for BlockStatus cards (e.g. "LOOP", "LOOP CONTINUE").
 	StatusTitle string
 
+	// NoticeLevel is set on status cards built from a durable
+	// message.KindContextNotice message and holds the context-pressure level
+	// the card badged. It also marks the card for the context-notice cleanup
+	// path, which drops these cards after a model switch removed their backing
+	// messages; no other status card sets it.
+	NoticeLevel string
+
 	// StatusFrom / StatusKind carry the structured sender and kind of a
 	// sub-agent mailbox card, so the card can render them as field rows
 	// instead of flattening them into the body's prose. Both are empty for

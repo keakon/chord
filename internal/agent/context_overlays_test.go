@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/keakon/chord/internal/ctxmgr"
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
@@ -483,4 +485,183 @@ func TestCompactContextPermissionActionHonoursArgumentRules(t *testing.T) {
 			}
 		})
 	}
+}
+
+func waitForContextNoticeEvent(t *testing.T, a *MainAgent) ContextNoticeEvent {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case evt := <-a.outputCh:
+			if notice, ok := evt.(ContextNoticeEvent); ok {
+				return notice
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for ContextNoticeEvent")
+		}
+	}
+}
+
+func waitForContextNoticeCleared(t *testing.T, a *MainAgent) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case evt := <-a.outputCh:
+			if _, ok := evt.(ContextNoticeClearedEvent); ok {
+				return
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for ContextNoticeClearedEvent")
+		}
+	}
+}
+
+func TestContextNoticeFirstDeliveryPersistsDurableMessage(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	before := a.ctxMgr.MessageCount()
+	text := "Context is nearing the automatic-compaction threshold."
+	a.stashContextNotice(contextNoticePressure, text)
+	a.noteContextPressureReminderAttached()
+	a.markOverlayClaimsDelivered()
+
+	messages := a.ctxMgr.Snapshot()
+	if len(messages) != before+1 {
+		t.Fatalf("message count = %d, want %d", len(messages), before+1)
+	}
+	last := messages[len(messages)-1]
+	if last.Role != message.RoleUser || last.Kind != message.KindContextNotice || last.NoticeLevel != contextNoticePressure || last.Content != text {
+		t.Fatalf("persisted notice = %+v, want a user-role KindContextNotice at level %s", last, contextNoticePressure)
+	}
+	if message.IsUserAuthored(last) {
+		t.Fatal("a context notice must not count as user-authored")
+	}
+	a.flushPersist()
+	evt := waitForContextNoticeEvent(t, a)
+	if evt.MessageIndex != before || evt.Level != contextNoticePressure || evt.Message != text {
+		t.Fatalf("event = %+v, want index %d level %s", evt, before, contextNoticePressure)
+	}
+}
+
+func TestContextNoticeRepeatDeliveryDoesNotPersistAgain(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.stashContextNotice(contextNoticePressure, "first full reminder")
+	a.noteContextPressureReminderAttached()
+	a.markOverlayClaimsDelivered()
+	after := a.ctxMgr.MessageCount()
+
+	// A repeat delivery re-attaches the sticky short text in the same window;
+	// it must neither persist a second message nor rebuild the card.
+	a.stashContextNotice(contextNoticePressure, contextPressureReminderShortText)
+	a.noteContextPressureReminderAttached()
+	a.markOverlayClaimsDelivered()
+	if got := a.ctxMgr.MessageCount(); got != after {
+		t.Fatalf("repeat delivery appended %d messages, want no new message", got-after)
+	}
+	notices := 0
+	for _, msg := range a.ctxMgr.Snapshot() {
+		if msg.Kind == message.KindContextNotice {
+			notices++
+		}
+	}
+	if notices != 1 {
+		t.Fatalf("durable notices = %d, want exactly 1 for the window", notices)
+	}
+}
+
+func TestMaybeClearStaleContextNoticesRemovesHistoryAndRewritesLog(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.installSessionTarget(t.TempDir())
+	manager := a.recoveryManager()
+	if manager == nil {
+		t.Fatal("test requires an installed recovery manager")
+	}
+
+	notice := message.Message{Role: message.RoleUser, Kind: message.KindContextNotice, Content: "stale pressure", NoticeLevel: contextNoticePressure}
+	kept := message.Message{Role: message.RoleUser, Content: "hello"}
+	a.ctxMgr.Append(notice)
+	a.ctxMgr.Append(kept)
+	a.persistAsync(identity.MainAgentID, notice)
+	a.persistAsync(identity.MainAgentID, kept)
+	a.flushPersist()
+
+	a.pendingContextPressureReminder = "stale reminder"
+	a.pendingCompactionWarning = "stale warning"
+	a.pendingCompactionImminent = "stale imminent"
+	a.contextNoticesStale.Store(true)
+	a.maybeClearStaleContextNotices()
+
+	for _, msg := range a.ctxMgr.Snapshot() {
+		if msg.Kind == message.KindContextNotice {
+			t.Fatalf("context notice survived cleanup in memory: %+v", msg)
+		}
+	}
+	persisted, err := manager.LoadMessages(identity.MainAgentID)
+	if err != nil {
+		t.Fatalf("LoadMessages: %v", err)
+	}
+	if len(persisted) != 1 || persisted[0].Content != "hello" {
+		t.Fatalf("persisted messages = %+v, want only the kept user message", persisted)
+	}
+	if a.pendingContextPressureReminder != "" || a.pendingCompactionWarning != "" || a.pendingCompactionImminent != "" {
+		t.Fatal("pending context notices must be cleared with the history")
+	}
+	if a.contextNoticesStale.Load() {
+		t.Fatal("the stale marker must be consumed exactly once")
+	}
+	waitForContextNoticeCleared(t, a)
+}
+
+func TestMaybeClearStaleContextNoticesWaitsForIdle(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Kind: message.KindContextNotice, Content: "stale pressure", NoticeLevel: contextNoticeWarning})
+	a.contextNoticesStale.Store(true)
+
+	a.newTurn()
+	a.maybeClearStaleContextNotices()
+	if !a.contextNoticesStale.Load() {
+		t.Fatal("cleanup must keep the stale marker while a turn is active")
+	}
+	if !hasContextNotice(a.ctxMgr.Snapshot()) {
+		t.Fatal("a busy agent must not lose the context notice")
+	}
+
+	a.turn = nil
+	a.maybeClearStaleContextNotices()
+	if hasContextNotice(a.ctxMgr.Snapshot()) {
+		t.Fatal("idle cleanup must remove the context notice")
+	}
+}
+
+func TestMaybeClearStaleContextNoticesNoNoticeKeepsHistory(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "hello"})
+	a.contextNoticesStale.Store(true)
+	a.maybeClearStaleContextNotices()
+	if hasContextNotice(a.ctxMgr.Snapshot()) {
+		t.Fatal("cleanup must not invent a notice")
+	}
+	messages := a.ctxMgr.Snapshot()
+	if len(messages) != 1 || messages[0].Content != "hello" {
+		t.Fatalf("cleanup with no notice must keep history, got %+v", messages)
+	}
+	if a.contextNoticesStale.Load() {
+		t.Fatal("the stale marker must be consumed even when nothing matched")
+	}
+	select {
+	case evt := <-a.outputCh:
+		if _, ok := evt.(ContextNoticeClearedEvent); ok {
+			t.Fatal("no match must not emit a cleared event")
+		}
+	default:
+	}
+}
+
+func hasContextNotice(messages []message.Message) bool {
+	for _, msg := range messages {
+		if msg.Kind == message.KindContextNotice {
+			return true
+		}
+	}
+	return false
 }

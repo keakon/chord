@@ -206,6 +206,46 @@ func TestApplyModelCompactionConfigSameModelKeepsThreshold(t *testing.T) {
 	}
 }
 
+func TestApplyModelCompactionConfigModelChangeMarksNoticesStale(t *testing.T) {
+	perModel := 0.3
+	a := modelCompTestAgent(
+		config.CompactionConfig{Threshold: 0.65},
+		map[string]*config.ModelCompactionConfig{"openai/gpt-5.6-luna": {Threshold: &perModel}},
+		"openai/gpt-5.6-luna",
+	)
+	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(1000000, 1000000, 0, 0.65)
+	a.appliedCompactionModelRef = "openai/gpt-5.6-sol"
+	a.applyModelCompactionConfig()
+	if !a.contextNoticesStale.Load() {
+		t.Fatal("a model change that moves the threshold must mark the context notices stale")
+	}
+}
+
+func TestApplyModelCompactionConfigModelChangeSameThresholdKeepsNoticesFresh(t *testing.T) {
+	perModel := 0.65
+	a := modelCompTestAgent(
+		config.CompactionConfig{Threshold: 0.65},
+		map[string]*config.ModelCompactionConfig{"openai/gpt-5.6-luna": {Threshold: &perModel}},
+		"openai/gpt-5.6-luna",
+	)
+	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(1000000, 1000000, 0, 0.65)
+	a.appliedCompactionModelRef = "openai/gpt-5.6-sol"
+	a.applyModelCompactionConfig()
+	if a.contextNoticesStale.Load() {
+		t.Fatal("a model change that keeps the same line must keep the context notices fresh")
+	}
+}
+
+func TestApplyModelCompactionConfigSameModelKeepsNoticesFresh(t *testing.T) {
+	a := modelCompTestAgent(config.CompactionConfig{Threshold: 0.65}, nil, "p/m")
+	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(1000000, 1000000, 0, 0.65)
+	a.appliedCompactionModelRef = "p/m"
+	a.applyModelCompactionConfig()
+	if a.contextNoticesStale.Load() {
+		t.Fatal("a same-model re-apply must not mark the context notices stale")
+	}
+}
+
 func TestApplyModelCompactionConfigModelChangeKeepsArmedWhenStillOverNewThreshold(t *testing.T) {
 	// An armed usage-driven request that still crosses the new model's lower
 	// threshold survives the switch: it opens a fresh grace period through the

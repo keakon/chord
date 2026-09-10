@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
@@ -155,26 +154,13 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 			m.updateViewportBlock(taskBlock)
 			m.markBlockSettled(taskBlock)
 		}
-		ownerAgentID := strings.TrimSpace(evt.ParentAgentID)
-		if ownerAgentID == "main" {
-			ownerAgentID = ""
-		}
-		content := strings.TrimSpace(evt.Message)
-		if content == "" {
-			content = fmt.Sprintf("[%s] completed: %s", evt.AgentID, evt.Summary)
-		}
-		block := &Block{
-			ID:            m.nextBlockID,
-			Type:          BlockStatus,
-			StatusTitle:   "AGENT COMPLETE",
-			Content:       content,
-			AgentID:       ownerAgentID,
-			LinkedAgentID: evt.AgentID,
-			LinkedTaskID:  evt.TaskID,
-		}
-		m.nextBlockID++
-		m.appendViewportBlock(block)
-		m.markBlockSettled(block)
+		// The durable completion mailbox row is the single card source: the
+		// delivery path emits MailboxTranscriptAppendedEvent once the
+		// completion is appended to the owner transcript, and restore rebuilds
+		// the same card from that persisted message. Building a second card
+		// here would show the completion twice live while a restored session
+		// shows it once — exactly the live/restore drift AgentNotifyEvent
+		// already avoids.
 		m.stopActiveAnimationIfIdle()
 		if prevType != "" && prevType != agent.ActivityIdle {
 			effects.addFollowup(m.scheduleBackgroundHousekeeping())

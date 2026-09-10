@@ -6,6 +6,8 @@ import (
 
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/ctxmgr"
+	"github.com/keakon/chord/internal/identity"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -273,10 +275,18 @@ func (a *MainAgent) takeContextNotices() []contextNotice {
 }
 
 // emitStagedContextNotices turns the overlays confirmed by this dispatch into
-// user-visible cards. Repeat deliveries are suppressed: the reminder and the
-// grace notice re-attach on every request in the window, and re-showing the
-// card each time would bury the transcript in duplicates of the same warning.
+// durable transcript messages and the cards that mirror them. The message is
+// the only source of the card: it is appended to ctxmgr and persisted before
+// the event goes out, and ContextNoticeEvent carries its transcript index so a
+// restored session rebuilds the same card from message.KindContextNotice
+// instead of losing a live-only notice. Repeat deliveries are suppressed: the
+// reminder and the grace notice re-attach on every request in the window, and
+// re-showing the card each time would bury the transcript in duplicates of the
+// same warning.
 func (a *MainAgent) emitStagedContextNotices(reminderStage, imminentStage string, warningDelivered bool) {
+	if a == nil || a.ctxMgr == nil {
+		return
+	}
 	for _, notice := range a.takeContextNotices() {
 		switch notice.level {
 		case contextNoticePressure:
@@ -292,8 +302,66 @@ func (a *MainAgent) emitStagedContextNotices(reminderStage, imminentStage string
 				continue
 			}
 		}
-		a.emitToTUI(ContextNoticeEvent{Level: notice.level, Message: notice.text})
+		msg := message.Message{
+			Role:        message.RoleUser,
+			Kind:        message.KindContextNotice,
+			Content:     notice.text,
+			NoticeLevel: notice.level,
+		}
+		messageIndex := a.ctxMgr.MessageCount()
+		a.ctxMgr.Append(msg)
+		a.persistAsyncAfter(identity.MainAgentID, msg, func(err error) {
+			if err != nil {
+				a.notePersistenceFailure(err)
+				return
+			}
+			a.emitToTUI(ContextNoticeEvent{Level: msg.NoticeLevel, Message: msg.Content, MessageIndex: messageIndex})
+		})
 	}
+}
+
+// maybeClearStaleContextNotices drops durable context-pressure notices after a
+// model switch changed the effective compaction threshold. A notice computed
+// against the previous model's line can claim pressure the new model is
+// nowhere near, and since the card is backed by the message both must go
+// together. Runs on the event loop after dispatch, and only at an idle
+// boundary (no active turn, no in-flight request) so the rewrite can never
+// race request assembly or a provider call that still holds the old transcript.
+func (a *MainAgent) maybeClearStaleContextNotices() {
+	if a == nil || a.ctxMgr == nil || !a.contextNoticesStale.Load() {
+		return
+	}
+	if a.turn != nil || a.mainLLMRequestInFlight.Load() {
+		return
+	}
+	a.contextNoticesStale.Store(false)
+	// Any notice queued for the next request was measured against the old
+	// threshold; drop it so the request re-queues against the new model.
+	a.pendingContextPressureReminder = ""
+	a.pendingCompactionWarning = ""
+	a.pendingCompactionImminent = ""
+	a.resetContextNotices()
+	a.flushPersist()
+	messages := a.ctxMgr.Snapshot()
+	kept := make([]message.Message, 0, len(messages))
+	removed := false
+	for _, msg := range messages {
+		if msg.Kind == message.KindContextNotice {
+			removed = true
+			continue
+		}
+		kept = append(kept, msg)
+	}
+	if !removed {
+		return
+	}
+	a.ctxMgr.RestoreMessages(kept)
+	if manager := a.recoveryManager(); manager != nil {
+		if err := manager.RewriteLog(identity.MainAgentID, kept); err != nil {
+			a.notePersistenceFailure(err)
+		}
+	}
+	a.emitToTUI(ContextNoticeClearedEvent{})
 }
 
 // markOverlayClaimsDelivered confirms delivery for every overlay that was

@@ -269,18 +269,6 @@ func enqueuePendingUserMessage(queue []pendingUserMessage, pending pendingUserMe
 	if pending.DraftID != "" {
 		return upsertPendingDraft(queue, pending)
 	}
-	if pending.CoalesceKey != "" && len(pending.Parts) == 0 && len(queue) > 0 {
-		last := &queue[len(queue)-1]
-		if last.CoalesceKey == pending.CoalesceKey && len(last.Parts) == 0 {
-			switch {
-			case strings.TrimSpace(last.Content) == "":
-				last.Content = pending.Content
-			case strings.TrimSpace(pending.Content) != "":
-				last.Content += "\n\n" + pending.Content
-			}
-			return queue
-		}
-	}
 	return append(queue, pending)
 }
 

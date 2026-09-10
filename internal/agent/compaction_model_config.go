@@ -135,7 +135,14 @@ func (a *MainAgent) applyModelCompactionConfig() bool {
 		}
 		a.appliedCompactionModelRef = modelRef
 	}
+	previousThreshold := a.ctxMgr.Threshold()
 	a.ctxMgr.SetThreshold(a.effectiveCompactionThreshold(modelRef))
+	// A model switch that moves the line invalidates every context-pressure
+	// notice measured against the previous line. Arms a cleanup for the next
+	// idle boundary instead of rewriting history mid-request.
+	if modelChanged && a.ctxMgr.Threshold() != previousThreshold {
+		a.contextNoticesStale.Store(true)
+	}
 	// A usage-driven request armed under the previous model's threshold may
 	// not be justified by the new model's line (for example a fallback from a
 	// small-window model with a low threshold to a large-window one with a

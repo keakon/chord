@@ -320,8 +320,16 @@ convention every harness injection uses — so the model can tell them apart
 from user-written messages (research on memory-pressure signals, e.g. MemGPT,
 injects these as system messages for exactly this reason). They are injected
 only while `model_driven` is enabled — without it the model has no
-externalization contract, so they would be unactionable noise. They are
-transient: they never become part of the conversation history.
+externalization contract, so they would be unactionable noise. The first
+delivery of each notice in a compaction window is additionally recorded as a
+durable context-notice message in the transcript (the same text, as a
+synthetic user-role entry that never counts as user input), so the signal
+survives the request that carried it and a restored session shows the notice
+card again; later requests in the window carry only the transient short
+`<system-reminder>` line. A model switch that changes the effective threshold
+drops those durable notices, because they describe the previous model's line.
+The repeat pointers and the `<system-reminder>` wrapper itself remain transient
+and never enter the conversation history.
 
 While model-driven compaction is enabled, the main agent's system prompt also
 carries a short passive `Long-session context management` section: it states

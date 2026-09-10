@@ -219,6 +219,16 @@ const KindHookFeedback = "hook_feedback"
 // input statistics), like the other synthetic control kinds.
 const KindStreamContinue = "stream_continue"
 
+// KindContextNotice identifies a durable synthetic user-role message that
+// mirrors a context-pressure notice sent to the model. The notice rides the
+// request that crosses the threshold as a turn-tail overlay, and the same text
+// is appended to the transcript on that first delivery: keeping it only in the
+// request would drop the signal once that request is gone, and a TUI-only card
+// would make the visible transcript disagree with history. The IsUserAuthored
+// exclusion keeps the synthetic notice away from user-authored surfaces
+// (latest-request anchor, terminal title, input statistics).
+const KindContextNotice = "context_notice"
+
 // KindReplayEvidence and KindReplayContinuation mark the pair of messages that
 // modelcompat synthesizes when a target cannot replay a native tool trajectory.
 // They exist only on the request face built for one provider call and are never
@@ -279,8 +289,12 @@ type Message struct {
 	Provenance                *MessageProvenance `json:"provenance,omitempty"`                  // optional producer/source metadata for model-compat replay decisions
 	// Usage carries provider usage on imported messages; runtime session totals
 	// are restored from the usage ledger, not by re-aggregating this field.
-	Usage        *TokenUsage      `json:"usage,omitempty"`
-	Kind         string           `json:"kind,omitempty"`    // control/display subtype, e.g. "loop_notice"
+	Usage *TokenUsage `json:"usage,omitempty"`
+	Kind  string      `json:"kind,omitempty"` // control/display subtype, e.g. "loop_notice"
+	// NoticeLevel carries the context-pressure level of a KindContextNotice
+	// message (pressure|imminent|warning). It is TUI metadata for the card
+	// badge; the model only ever sees Content.
+	NoticeLevel  string           `json:"notice_level,omitempty"`
 	Mailbox      *MailboxMetadata `json:"mailbox,omitempty"` // durable metadata for a mailbox message actually sent to an agent
 	MailboxAckID string           `json:"-"`                 // transient runtime-only mailbox ack marker; never persisted
 	// MCPTools carries a request-only provider mount. It never enters ctxmgr or
@@ -318,7 +332,7 @@ func IsUserAuthored(msg Message) bool {
 		return false
 	}
 	switch msg.Kind {
-	case KindSubAgentMailbox, KindLoopNotice, KindBackgroundResult, KindHookFeedback, KindStreamContinue:
+	case KindSubAgentMailbox, KindLoopNotice, KindBackgroundResult, KindHookFeedback, KindStreamContinue, KindContextNotice:
 		return false
 	default:
 		return true

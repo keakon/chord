@@ -524,6 +524,12 @@ type HandoffEvent struct {
 	// RequestID correlates the TUI/headless decision callback back to this
 	// handoff wait (used for user-wait settlement and stale-decision guarding).
 	RequestID string
+	// AgentID is the instance id of the agent whose handoff tool call triggered
+	// the request, normalized so "main" identifies the main agent. Only the
+	// main agent can call handoff, so this is currently always "main"; it is
+	// carried so the TUI switches focus to the request's origin like it does
+	// for confirm and question dialogs.
+	AgentID string
 }
 
 func (HandoffEvent) agentEvent() {}
@@ -658,27 +664,32 @@ type MailboxTranscriptAppendedEvent struct {
 
 func (MailboxTranscriptAppendedEvent) agentEvent() {}
 
-// ContextNoticeEvent surfaces a context-pressure overlay that is already
-// attached to the outgoing request as a user-visible card.
-//
-// These overlays are request-scoped on purpose: they must never enter durable
-// history, because a stale "context is nearly full" line in the transcript
-// would outlive the condition it describes and could be misread as the latest
-// request by a later compaction. That scoping used to leave them invisible in
-// the TUI, so the model was told the context was filling up while the
-// transcript showed nothing — the user only found out when compaction fired.
-// Emitting the same text as a card keeps the request surface unchanged while
-// making the signal observable.
+// ContextNoticeEvent tells the TUI that a context-pressure notice became
+// durable: the dispatch confirmation point appends the notice text to the main
+// transcript before emitting this event, so the card is backed by a real
+// message and a restored session rebuilds the same card from
+// message.KindContextNotice instead of losing a live-only notice. MessageIndex
+// is the transcript index of that persisted message.
 //
 // Level separates the three runtime states so the card can badge them apart;
 // it is one of contextNoticePressure, contextNoticeImminent or
 // contextNoticeWarning.
 type ContextNoticeEvent struct {
-	Level   string
-	Message string
+	Level        string
+	Message      string
+	MessageIndex int
 }
 
 func (ContextNoticeEvent) agentEvent() {}
+
+// ContextNoticeClearedEvent tells the TUI to drop every context-pressure card
+// whose backing messages were removed from the transcript. A model switch can
+// change the effective compaction threshold, and a notice computed against the
+// previous threshold would otherwise keep claiming pressure the new model is
+// not under.
+type ContextNoticeClearedEvent struct{}
+
+func (ContextNoticeClearedEvent) agentEvent() {}
 
 // Context notice levels, mirroring the three overlays queued by the
 // compaction gate. They are also the card badges the TUI renders.

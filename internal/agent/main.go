@@ -338,7 +338,6 @@ type pendingUserMessage struct {
 	FromUser            bool
 	MailboxAckID        string
 	Mailbox             *message.MailboxMetadata
-	CoalesceKey         string
 	DrainContextAppends bool
 }
 
@@ -798,6 +797,12 @@ type MainAgent struct {
 	// the threshold; not persisted, so after a restore the threshold is
 	// re-applied at the first request boundary.
 	appliedCompactionModelRef string
+	// contextNoticesStale marks durable context-pressure notices as measured
+	// against a previous compaction threshold after a model switch changed the
+	// line. The event loop drops them at the next idle boundary (see
+	// maybeClearStaleContextNotices); a notice computed for the old line would
+	// otherwise keep claiming pressure the new model is not under.
+	contextNoticesStale atomic.Bool
 	// lastCompactionMessageCount is the compacted message count at the previous
 	// compaction apply, used to report the interval (in messages) since the
 	// last compaction in lifecycle analytics.

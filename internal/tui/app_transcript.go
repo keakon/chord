@@ -627,6 +627,21 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 				*nextID++
 				continue
 			}
+			// A durable context-pressure notice rebuilds the same card the
+			// live ContextNoticeEvent appended, so a restored session shows
+			// the notice exactly as it appeared when it dispatched.
+			if msg.Kind == message.KindContextNotice {
+				blocks = append(blocks, &Block{
+					ID:          *nextID,
+					Type:        BlockStatus,
+					StatusTitle: contextNoticeTitle(msg.NoticeLevel),
+					Content:     contentOrPartsText(msg),
+					MsgIndex:    msgIdx,
+					NoticeLevel: msg.NoticeLevel,
+				})
+				*nextID++
+				continue
+			}
 			var userBlock *Block
 			imgCount := 0
 			for _, p := range msg.Parts {

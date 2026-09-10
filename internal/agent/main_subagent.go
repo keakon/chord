@@ -762,27 +762,33 @@ func (a *MainAgent) handleSpawnFinished(evt Event) {
 		log.Errorf("handleSpawnFinished: invalid payload type payload_type=%v", fmt.Sprintf("%T", evt.Payload))
 		return
 	}
-	msg := strings.TrimSpace(payload.Message)
 	backgroundID := payload.EffectiveID()
-	if msg == "" {
-		kind := strings.TrimSpace(payload.Kind)
-		if kind == "" {
-			kind = "job"
-		}
-		msg = fmt.Sprintf("Background %s %s finished (%s).", kind, backgroundID, payload.Status)
+
+	// Resolve the owner: "" and the main agent's own instanceID belong to the
+	// main transcript, a live sub-agent owns its own AgentID, and an owner that
+	// already terminated falls back to the main transcript below.
+	var sub *SubAgent
+	if payload.AgentID != "" && payload.AgentID != a.instanceID {
+		a.subs.mu.RLock()
+		sub = a.subs.subAgents[payload.AgentID]
+		a.subs.mu.RUnlock()
 	}
-	if payload.AgentID == "" || payload.AgentID == a.instanceID {
+	if sub == nil {
+		if payload.AgentID != "" && payload.AgentID != a.instanceID {
+			log.Warnf("handleSpawnFinished: owner subagent not found, attributing to main agent_id=%v background_id=%v", payload.AgentID, backgroundID)
+		}
+		// Each job result is one durable KindBackgroundResult message, so its
+		// JOB RESULT card always has exactly one backing transcript slot. While
+		// a main turn is active the message is queued and appended at the next
+		// request boundary; otherwise it is appended now. The card carries the
+		// same content the message persists, so live and restored cards render
+		// identically.
 		content := a.mainBackgroundResultContent(payload)
-		// The main agent's instanceID is "main-1", not "main"; the TUI only
-		// attributes ""/"main" to the main transcript, so send "" here like the
-		// orphan branch below or the card gets filtered out of the main view.
-		a.emitToTUI(SpawnFinishedEvent{BackgroundID: backgroundID, AgentID: "", Kind: payload.Kind, Status: payload.Status, Command: payload.Command, Description: payload.Description, MaxRuntimeSec: payload.MaxRuntimeSec, Message: msg})
-		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Background %s %s finished", payload.Kind, backgroundID), Level: backgroundCompletionToastLevel(payload.Status), AgentID: payload.AgentID})
+		a.emitBackgroundResultCard("", payload, content)
 		if a.turn != nil {
 			a.pendingUserMessages = enqueuePendingUserMessage(a.pendingUserMessages, pendingUserMessage{
-				Content:     content,
-				Kind:        message.KindBackgroundResult,
-				CoalesceKey: "main_background_completion",
+				Content: content,
+				Kind:    message.KindBackgroundResult,
 			})
 			return
 		}
@@ -793,17 +799,7 @@ func (a *MainAgent) handleSpawnFinished(evt Event) {
 		a.beginMainLLMAfterPreparation(turnCtx, turnID, "main")
 		return
 	}
-	a.subs.mu.RLock()
-	sub := a.subs.subAgents[payload.AgentID]
-	a.subs.mu.RUnlock()
-	if sub == nil {
-		log.Warnf("handleSpawnFinished: owner subagent not found agent_id=%v background_id=%v", payload.AgentID, backgroundID)
-		// The owner is gone, so attribute the card to the main transcript where
-		// it stays visible; subagent-scoped blocks would have no view to render in.
-		a.emitToTUI(SpawnFinishedEvent{BackgroundID: backgroundID, AgentID: "", Kind: payload.Kind, Status: payload.Status, Command: payload.Command, Description: payload.Description, MaxRuntimeSec: payload.MaxRuntimeSec, Message: msg})
-		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Background %s %s finished", payload.Kind, backgroundID), Level: backgroundCompletionToastLevel(payload.Status), AgentID: payload.AgentID})
-		return
-	}
+
 	content := strings.TrimSpace(payload.Message)
 	if content == "" {
 		content = fmt.Sprintf("[Background %s %s completed]\n\nDescription: %s\nStatus: %s", payload.Kind, backgroundID, payload.Description, payload.Status)
@@ -813,7 +809,16 @@ func (a *MainAgent) handleSpawnFinished(evt Event) {
 	} else {
 		sub.ContinueFromContext()
 	}
-	a.emitToTUI(SpawnFinishedEvent{BackgroundID: backgroundID, AgentID: payload.AgentID, Kind: payload.Kind, Status: payload.Status, Command: payload.Command, Description: payload.Description, MaxRuntimeSec: payload.MaxRuntimeSec, Message: msg})
+	a.emitBackgroundResultCard(payload.AgentID, payload, content)
+}
+
+// emitBackgroundResultCard emits the JOB RESULT card and its completion toast
+// for one background object. content is the exact text persisted as the
+// backing KindBackgroundResult message, so the live card and the restored card
+// derive from the same raw text.
+func (a *MainAgent) emitBackgroundResultCard(cardAgentID string, payload *tools.SpawnFinishedPayload, content string) {
+	backgroundID := payload.EffectiveID()
+	a.emitToTUI(SpawnFinishedEvent{BackgroundID: backgroundID, AgentID: cardAgentID, Kind: payload.Kind, Status: payload.Status, Command: payload.Command, Description: payload.Description, MaxRuntimeSec: payload.MaxRuntimeSec, Message: content})
 	a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Background %s %s finished", payload.Kind, backgroundID), Level: backgroundCompletionToastLevel(payload.Status), AgentID: payload.AgentID})
 }
 

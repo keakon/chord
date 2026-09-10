@@ -9438,14 +9438,12 @@ func TestFocusedAgentDoneEventSwitchesToMainAndUpdatesDelegate(t *testing.T) {
 	if task.DoneSummary != "done" {
 		t.Fatalf("DoneSummary = %q, want done", task.DoneSummary)
 	}
-	foundNotice := false
+	// The completion card must come from the durable mailbox append, not from
+	// this live-only event; see the mailbox card contract on AgentNotifyEvent.
 	for _, block := range m.viewport.visibleBlocks() {
-		if block.Type == BlockStatus && block.StatusTitle == "AGENT COMPLETE" && strings.Contains(block.Content, "[agent-1] completed:") {
-			foundNotice = true
+		if block.Type == BlockStatus && block.StatusTitle == "AGENT COMPLETE" {
+			t.Fatalf("AgentDoneEvent must not create a live-only completion card: %#v", block)
 		}
-	}
-	if !foundNotice {
-		t.Fatal("expected owner-visible completion notification card")
 	}
 }
 
@@ -9462,20 +9460,41 @@ func TestRepeatedAgentDoneUpdatesSingleDelegateCard(t *testing.T) {
 		t.Fatalf("DoneSummary = %q, want latest completion", task.DoneSummary)
 	}
 	delegateCards := 0
-	completionCards := 0
+	liveOnlyCompletionCards := 0
 	for _, block := range m.viewport.blocks {
 		if block.Type == BlockToolCall && block.ToolName == tools.NameDelegate && block.LinkedTaskID == "adhoc-7" {
 			delegateCards++
 		}
-		if block.Type == BlockStatus && block.StatusTitle == "AGENT COMPLETE" && strings.Contains(block.Content, "completed:") {
-			completionCards++
+		if block.Type == BlockStatus && block.StatusTitle == "AGENT COMPLETE" {
+			liveOnlyCompletionCards++
 		}
 	}
 	if delegateCards != 1 {
 		t.Fatalf("delegate card count = %d, want 1", delegateCards)
 	}
+	if liveOnlyCompletionCards != 0 {
+		t.Fatalf("live-only completion cards = %d, want 0 (the durable mailbox append owns the card)", liveOnlyCompletionCards)
+	}
+
+	// Each completion's durable mailbox append produces exactly one card, so
+	// two reports still yield two cards (the count the old live-only event
+	// used to provide), and the card keeps the persisted message identity.
+	for i, summary := range []string{"first completion", "revised completion"} {
+		meta := &message.MailboxMetadata{MessageID: fmt.Sprintf("agent-1-%d", i+1), AgentID: "agent-1", TaskID: "adhoc-7", Kind: "completed"}
+		_ = m.handleAgentEvent(agentEventMsg{event: agent.MailboxTranscriptAppendedEvent{
+			Message:       message.Message{Role: "user", Content: summary, Mailbox: meta},
+			TargetAgentID: "main",
+			MessageIndex:  i + 1,
+		}})
+	}
+	completionCards := 0
+	for _, block := range m.viewport.blocks {
+		if block.Type == BlockStatus && block.StatusTitle == "AGENT COMPLETE" {
+			completionCards++
+		}
+	}
 	if completionCards != 2 {
-		t.Fatalf("completion card count = %d, want one owner notification per completion report", completionCards)
+		t.Fatalf("completion card count = %d, want one card per durable completion report", completionCards)
 	}
 }
 

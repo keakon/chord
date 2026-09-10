@@ -140,7 +140,7 @@ func TestHandleBackgroundObjectFinishedForMainQueuesWhileBusy(t *testing.T) {
 	}
 }
 
-func TestHandleBackgroundObjectFinishedForMainCoalescesContiguousBusyResults(t *testing.T) {
+func TestHandleBackgroundObjectFinishedForMainKeepsContiguousBusyResultsDistinct(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn()
@@ -165,15 +165,20 @@ func TestHandleBackgroundObjectFinishedForMainCoalescesContiguousBusyResults(t *
 	a.handleSpawnFinished(Event{Type: EventSpawnFinished, SourceID: a.instanceID, Payload: payload1})
 	a.handleSpawnFinished(Event{Type: EventSpawnFinished, SourceID: a.instanceID, Payload: payload2})
 
-	if got := len(a.pendingUserMessages); got != 1 {
-		t.Fatalf("len(pendingUserMessages) = %d, want 1 coalesced entry", got)
+	// One queued message per finished job: a JOB RESULT card without its own
+	// backing transcript slot would make the live view disagree with a restored
+	// session about how many results exist.
+	if got := len(a.pendingUserMessages); got != 2 {
+		t.Fatalf("len(pendingUserMessages) = %d, want 2 distinct entries", got)
 	}
-	got := a.pendingUserMessages[0]
-	if !strings.Contains(got.Content, "Run production build") || !strings.Contains(got.Content, "Upload release bundle") {
-		t.Fatalf("coalesced content = %q, want both background descriptions", got.Content)
+	if !strings.Contains(a.pendingUserMessages[0].Content, "Run production build") {
+		t.Fatalf("first pending content = %q, want job-1", a.pendingUserMessages[0].Content)
 	}
-	if strings.Index(got.Content, "Run production build") > strings.Index(got.Content, "Upload release bundle") {
-		t.Fatalf("coalesced content order = %q, want job-1 before job-2", got.Content)
+	if !strings.Contains(a.pendingUserMessages[1].Content, "Upload release bundle") {
+		t.Fatalf("second pending content = %q, want job-2", a.pendingUserMessages[1].Content)
+	}
+	if k := a.pendingUserMessages[0].Kind; k != message.KindBackgroundResult {
+		t.Fatalf("first pending kind = %q, want %q", k, message.KindBackgroundResult)
 	}
 }
 
@@ -317,6 +322,32 @@ func TestHandleBackgroundObjectFinishedRoutesToOwnerSubAgentOnly(t *testing.T) {
 		if strings.Contains(msg.Content, "Run production build") {
 			t.Fatalf("main context should not receive subagent background result: %q", msg.Content)
 		}
+	}
+}
+
+func TestHandleBackgroundObjectFinishedOrphanOwnerFallsBackToMain(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.newTurn()
+
+	payload := &tools.SpawnFinishedPayload{
+		BackgroundID: "job-9",
+		AgentID:      "builder-gone",
+		Kind:         "job",
+		Description:  "Run production build",
+		Status:       "finished (exit 0)",
+		Message:      "[Background object job-9 completed]\n\nDescription: Run production build\nStatus: finished (exit 0)",
+	}
+	a.handleSpawnFinished(Event{Type: EventSpawnFinished, SourceID: payload.AgentID, Payload: payload})
+
+	// A terminated owner must not leave a card with no backing transcript slot:
+	// the result falls back to the main transcript like a main-owned result.
+	if got := len(a.pendingUserMessages); got != 1 {
+		t.Fatalf("len(pendingUserMessages) = %d, want 1 main fallback", got)
+	}
+	pending := a.pendingUserMessages[0]
+	if pending.Kind != message.KindBackgroundResult || !strings.Contains(pending.Content, "Run production build") {
+		t.Fatalf("pending = %#v, want durable main background result", pending)
 	}
 }
 
