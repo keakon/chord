@@ -32,6 +32,7 @@ func (s *SubAgent) appendPendingUserMessage(input pendingUserMessage) {
 	}
 	msg.Content, msg.Parts = s.filterUnsupportedParts(msg.Content, msg.Parts)
 
+	messageIndex := s.ctxMgr.MessageCount()
 	s.ctxMgr.Append(msg)
 	if input.DraftID != "" {
 		s.parent.emitToTUI(PendingDraftConsumedEvent{
@@ -46,6 +47,9 @@ func (s *SubAgent) appendPendingUserMessage(input pendingUserMessage) {
 			if err := s.parent.markSubAgentMailboxConsumed(ackID); err != nil {
 				log.Warnf("SubAgent failed to persist mailbox consumption agent=%v message_id=%v error=%v", s.instanceID, ackID, err)
 			}
+		}
+		if input.Mailbox != nil && strings.TrimSpace(input.Mailbox.MessageID) != "" && s.parent != nil {
+			s.parent.emitToTUI(MailboxTranscriptAppendedEvent{Message: msg, TargetAgentID: s.instanceID, MessageIndex: messageIndex})
 		}
 	})
 }

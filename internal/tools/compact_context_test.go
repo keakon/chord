@@ -484,6 +484,21 @@ func TestCompactContextDescriptionDoesNotTreatPlannedFilesAsExternalized(t *test
 	}
 }
 
+func TestCompactContextDescriptionExplainsPressureAwareSafeStops(t *testing.T) {
+	description := NewCompactContextTool(testCompactValidator()).Description()
+	for _, want := range []string{
+		"costed state transition",
+		"safe stop",
+		"provisional checkpoint",
+		"stage remains active or candidate",
+		"task is complete and only the final response remains",
+	} {
+		if !strings.Contains(description, want) {
+			t.Fatalf("description must mention %q, got:\n%s", want, description)
+		}
+	}
+}
+
 // Claim keys are normalized the same way in claim_evidence and claim_kinds.
 // claim_evidence keys have always been trimmed, so a padded claim_kinds key
 // used to survive untouched and drift apart from its claim_evidence twin —

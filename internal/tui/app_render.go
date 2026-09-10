@@ -301,7 +301,7 @@ func (m *Model) drawBaseLayers(scr uv.Screen, layout tuiLayout) {
 
 	// Queued drafts bar (above attachments/input)
 	if layout.queue.Dy() > 0 {
-		queuePresent := len(m.visibleQueuedDrafts()) > 0 && layout.queue.Dx() > 0 && layout.queue.Dy() > 0
+		queuePresent := m.queuedMailboxLineCount() > 0 && layout.queue.Dx() > 0 && layout.queue.Dy() > 0
 		if queuePresent {
 			queueKey := m.queuedDraftsFingerprint(layout.queue.Dx(), layout.queue.Dy())
 			if m.cachedQueueKey != queueKey || !m.cachedQueuePresent || m.cachedQueueWidth != layout.queue.Dx() || m.cachedQueueHeight != layout.queue.Dy() {

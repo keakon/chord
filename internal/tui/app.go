@@ -192,7 +192,6 @@ type Model struct {
 	thinkingStreamMsgIndex   int
 	thinkingStreamBlockIndex int
 	nextBlockID              int
-	nextNotifyAnchorSeq      int // monotonic seq for tui_notify_anchors.jsonl entries
 	lastDisplaySequence      map[string]int
 	streamFlushGeneration    uint64
 	streamFlushScheduled     bool

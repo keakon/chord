@@ -1011,6 +1011,24 @@ func loadTaskHistoryMessages(rm *recovery.RecoveryManager, rec *DurableTaskRecor
 	return out, nil
 }
 
+func countTaskHistoryMessages(rm *recovery.RecoveryManager, rec *DurableTaskRecord) (int, error) {
+	if rm == nil || rec == nil {
+		return 0, nil
+	}
+	total := 0
+	for _, id := range taskInstanceHistoryIDs(rec) {
+		count, err := rm.CountMessages(id)
+		if err != nil {
+			return 0, err
+		}
+		total += count
+	}
+	if total == 0 && strings.TrimSpace(rec.TaskDesc) != "" {
+		return 1, nil
+	}
+	return total, nil
+}
+
 // loadTaskHistoryMessagesRaw loads the raw concatenated task history without
 // synthesizing recovery results. Used only by write paths that rewrite the
 // per-instance JSONL files (RemoveLastMessage): synthetic recovery results

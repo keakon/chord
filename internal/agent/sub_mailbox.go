@@ -133,13 +133,19 @@ type SubAgentMailboxAckRecord struct {
 }
 
 type subAgentInbox struct {
-	urgent          []SubAgentMailboxMessage
-	normal          []SubAgentMailboxMessage
-	progress        map[string]SubAgentMailboxMessage
-	spoolUrgent     []string
-	spoolNormal     []string
-	spoolIndex      map[string]mailboxSpoolLocation
-	spoolIndexReady bool
+	urgent   []SubAgentMailboxMessage
+	normal   []SubAgentMailboxMessage
+	progress map[string]SubAgentMailboxMessage
+	// progressQueue is the in-memory FIFO for progress messages waiting for the
+	// next main-agent request. progressPending is the durable-log fallback for
+	// records that do not fit the memory budget.
+	progressQueue        []SubAgentMailboxMessage
+	progressPending      []string
+	progressPendingAgent map[string]string
+	spoolUrgent          []string
+	spoolNormal          []string
+	spoolIndex           map[string]mailboxSpoolLocation
+	spoolIndexReady      bool
 	// spoolWriteGen counts every completed mailbox.jsonl mutation (persist
 	// appends and rollback truncations). It is bumped under
 	// subAgentMailboxIDsMu right after the file write, so an index rebuild
@@ -157,8 +163,9 @@ type mailboxSpoolLocation struct {
 
 func newSubAgentInbox() subAgentInbox {
 	return subAgentInbox{
-		progress:   make(map[string]SubAgentMailboxMessage),
-		spoolIndex: make(map[string]mailboxSpoolLocation),
+		progress:             make(map[string]SubAgentMailboxMessage),
+		progressPendingAgent: make(map[string]string),
+		spoolIndex:           make(map[string]mailboxSpoolLocation),
 	}
 }
 
@@ -206,7 +213,7 @@ func (a *MainAgent) mailboxMemoryLimits() (int, int) {
 // with subAgentMailboxIDsMu held (its callers in the store/replace/enqueue
 // paths all do).
 func (a *MainAgent) mailboxMemoryCount() int {
-	count := len(a.subAgentInbox.urgent) + len(a.subAgentInbox.normal) + len(a.subAgentInbox.progress)
+	count := len(a.subAgentInbox.urgent) + len(a.subAgentInbox.normal) + len(a.subAgentInbox.progressQueue)
 	for _, queued := range a.ownedSubAgentMailboxes {
 		count += len(queued)
 	}

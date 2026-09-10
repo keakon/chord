@@ -58,7 +58,7 @@ func (m *Model) recalcViewportSize() {
 	vpHeight -= 1
 	attachLines := min(len(m.attachments), 5)
 	vpHeight -= attachLines
-	queueLines := min(len(m.visibleQueuedDrafts()), 3)
+	queueLines := min(m.queuedMailboxLineCount(), 3)
 	vpHeight -= queueLines
 	if m.activeToast != nil {
 		vpHeight--
@@ -102,7 +102,7 @@ func (m *Model) generateLayout(w, h int) tuiLayout {
 	}
 
 	// Queue bar: 1 row per queued draft (max 3), shown above attachments/input
-	queueHeight := min(len(m.visibleQueuedDrafts()), 3)
+	queueHeight := min(m.queuedMailboxLineCount(), 3)
 	if queueHeight > 0 {
 		contentEnd -= queueHeight
 		lay.queue = image.Rect(0, contentEnd, w, contentEnd+queueHeight)

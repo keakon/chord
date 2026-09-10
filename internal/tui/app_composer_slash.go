@@ -38,6 +38,7 @@ type agentComposerState struct {
 
 type composerRuntimeState struct {
 	queuedDrafts                []queuedDraft
+	mailboxQueue                []queuedMailbox
 	agentComposerStates         map[string]agentComposerState
 	editingQueuedDraftID        string
 	inflightDraft               *queuedDraft

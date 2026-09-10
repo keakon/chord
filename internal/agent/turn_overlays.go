@@ -66,8 +66,14 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 			}
 			msg := subAgentMailboxConversationMessage(mailbox, "<system-reminder>\n"+content+"\n</system-reminder>")
 			if id := strings.TrimSpace(mailbox.MessageID); id == "" || !mapContains(durableMailboxIDs, id) {
+				messageIndex := a.ctxMgr.MessageCount()
 				a.ctxMgr.Append(msg)
-				a.persistAsync("main", msg)
+				a.persistAsyncAfter("main", msg, func(err error) {
+					if err != nil {
+						return
+					}
+					a.emitToTUI(MailboxTranscriptAppendedEvent{Message: msg, TargetAgentID: "main", MessageIndex: messageIndex})
+				})
 				if id != "" {
 					durableMailboxIDs[id] = struct{}{}
 				}

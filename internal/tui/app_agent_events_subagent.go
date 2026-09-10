@@ -8,6 +8,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/message"
 )
 
 const (
@@ -59,16 +60,32 @@ func newSubAgentMailboxBlock(id int, kind, subtype, agentID, taskID, content, ta
 func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEffects) {
 	var effects agentEventEffects
 	switch evt := event.(type) {
+	case agent.MailboxQueuedEvent:
+		m.upsertQueuedMailbox(evt.Message)
+		return true, effects
+	case agent.MailboxTranscriptAppendedEvent:
+		if evt.Message.Mailbox == nil || strings.TrimSpace(evt.Message.Mailbox.MessageID) == "" {
+			return true, effects
+		}
+		m.removeQueuedMailbox(evt.Message.Mailbox.MessageID)
+		targetAgentID := evt.TargetAgentID
+		if targetAgentID == "main" {
+			targetAgentID = ""
+		}
+		if block := m.findBlockByMailboxMessageID(evt.Message.Mailbox); block == nil {
+			block := newSubAgentMailboxBlock(m.nextBlockID, evt.Message.Mailbox.Kind, evt.Message.Mailbox.Subtype, evt.Message.Mailbox.AgentID, evt.Message.Mailbox.TaskID, evt.Message.Content, targetAgentID)
+			block.MailboxMessageID = evt.Message.Mailbox.MessageID
+			block.MsgIndex = evt.MessageIndex
+			m.nextBlockID++
+			m.appendViewportBlock(block)
+			m.markBlockSettled(block)
+			m.recalcViewportSize()
+		}
+		return true, effects
 	case agent.AgentNotifyEvent:
-		targetAgentID := resolveNotifyTargetAgentID(evt.TargetAgentID, evt.ParentAgentID)
-		block := newSubAgentMailboxBlock(m.nextBlockID, evt.Kind, evt.Subtype, evt.AgentID, evt.TaskID, evt.Message, targetAgentID)
-		m.nextBlockID++
-		m.appendViewportBlock(block)
-		m.markBlockSettled(block)
-		m.recalcViewportSize()
-		// Persist the live card's positional anchor so a restored session can
-		// replay it (and the other live-only notifies) at its true position.
-		m.recordNotifyAnchor(evt)
+		// AgentNotifyEvent is a control-plane wake/status signal. The durable
+		// mailbox or target transcript emits the visible card after persistence,
+		// so this event must never create a live-only block.
 		return true, effects
 	case agent.AgentStartedEvent:
 		previousAgentID := strings.TrimSpace(evt.PreviousAgentID)
@@ -382,6 +399,21 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 	default:
 		return false, effects
 	}
+}
+
+func (m *Model) findBlockByMailboxMessageID(meta *message.MailboxMetadata) *Block {
+	if meta == nil {
+		return nil
+	}
+	for _, block := range m.viewport.blocks {
+		if block == nil || block.Type != BlockStatus {
+			continue
+		}
+		if block.MailboxMessageID == meta.MessageID {
+			return block
+		}
+	}
+	return nil
 }
 
 func subAgentStatusSuspendsActivity(status string) bool {

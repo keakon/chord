@@ -452,19 +452,21 @@ func (t CompactContextTool) Description() string {
 	if t.validator.TodoWriteVisible {
 		todoSync = "- your todo list reflects actual progress (the checkpoint snapshots runtime todos verbatim; sync drifted entries with todo_write before requesting);\n"
 	}
-	return "Request a durable context checkpoint once your current working state is fully externalized (written into state_files, or fully expressible in structured arguments). Use planned_state_files only to record paths for future work; they do not externalize state.\n" +
+	return "Request a durable context checkpoint when replacing the current history will make the remaining work cheaper and the state needed to resume is fully externalized (written into state_files, or fully expressible in structured arguments). This is a costed state transition, not a routine progress save. Use planned_state_files only to record paths for future work; they do not externalize state.\n" +
 		"Runtime pauses the next main-model request, applies the checkpoint atomically, and continues the same turn on the compacted context. This involves a session history rewrite; it is NOT read-only.\n" +
-		"Call it alone (no sibling tool calls in the same response) and only when:\n" +
-		"- the current phase is wrapped up (" +
-		"all investigation, sibling tools, user decisions, and pending verification are done" +
-		");\n" +
+		"Call it alone (no sibling tool calls in the same response) and choose the stopping point by context pressure:\n" +
+		"- when context is comfortable, use it only when the expected reduction in future context cost is worth the checkpoint and re-read cost; a completed phase is a useful boundary, not a requirement;\n" +
+		"- when a context-pressure reminder is present, finish the current atomic operation, externalize the minimum recovery state, and request a provisional checkpoint even if the stage remains active or candidate; do not describe unfinished work as completed;\n" +
+		"- when a compaction-imminent or threshold warning says the context is ending soon, stop optional exploration, record the active objective, completed work, next step, and open issues, and request a provisional checkpoint at the next safe stop;\n" +
+		"- never interrupt an in-flight tool, file write, sibling task, or other operation; a safe stop means the current operation has ended and the next action can be stated concretely;\n" +
 		"- every fact needed later is captured in state_files or in the structured arguments;\n" +
 		todoSync +
 		"- no key fact exists only in the current context that cannot be re-read or re-derived.\n" +
-		"Do not call it when still investigating, waiting on siblings, or wanting a smaller context for its own sake;\n" +
+		"Do not call it when the task is complete and only the final response remains, or merely to make the context look smaller;\n" +
 		"do not call it when the context is already small (the runtime rejects low-gain resets).\n" +
 		"The runtime may also skip the checkpoint when the minimum apply interval has not elapsed or projected savings are too small; that is a normal policy result, not an error, and retrying the same request repeatedly will not change the outcome.\n" +
-		"Prefer Delegate (SubAgent) for separable sub-tasks whose results the main thread can consume; use compact_context only when the main thread itself must keep reasoning across the phase boundary.\n" +
+		"Use checkpoint_kind=provisional with stage_status=active or candidate when preserving unfinished work under pressure; checkpoint_kind=committed remains for an authoritative completed stage with acceptance evidence.\n" +
+		"Prefer Delegate (SubAgent) for separable sub-tasks whose results the main thread can consume; use compact_context when the main thread itself must keep reasoning and carrying the current context is more expensive than restoring the externalized state.\n" +
 		"A success result only means the request was accepted; a later model-driven [Context Summary] checkpoint confirms the reset was applied.\n" +
 		"state_files entries must resolve inside the project root: workspace-relative paths (e.g. \"docs/usage.md\") are expected, and absolute, \"~\"-, \"./\"- or \"../\"-prefixed spellings of in-project files are accepted too and stored normalized as workspace-relative paths; spellings that resolve outside the project root are rejected.\n" +
 		"Entries are pure references: never read, injected, or existence-verified, so only list project files you intend to re-read with the read tool.\n" +

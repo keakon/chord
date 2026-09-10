@@ -298,11 +298,12 @@ func (cache *cachedRenderable) renderScratchBuffer(width int) uv.ScreenBuffer {
 
 func (m *Model) queuedDraftsFingerprint(width, maxLines int) string {
 	drafts := m.visibleQueuedDrafts()
-	if len(drafts) == 0 || width <= 0 || maxLines <= 0 {
+	mailboxes := m.visibleQueuedMailboxes()
+	if len(drafts) == 0 && len(mailboxes) == 0 || width <= 0 || maxLines <= 0 {
 		return ""
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "%d|%d|%d", width, maxLines, len(drafts))
+	fmt.Fprintf(&b, "%d|%d|%d|%d", width, maxLines, len(drafts), len(mailboxes))
 	for _, draft := range drafts {
 		b.WriteByte('|')
 		b.WriteString(draft.ID)
@@ -316,6 +317,14 @@ func (m *Model) queuedDraftsFingerprint(width, maxLines int) string {
 			b.WriteByte('=')
 			b.WriteString(part.DisplayText)
 		}
+	}
+	for _, item := range mailboxes {
+		b.WriteByte('|')
+		b.WriteString(item.MessageID)
+		b.WriteByte(':')
+		b.WriteString(item.Summary)
+		b.WriteByte(':')
+		b.WriteString(item.TargetAgentID)
 	}
 	return b.String()
 }

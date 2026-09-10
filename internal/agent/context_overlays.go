@@ -467,19 +467,20 @@ func (a *MainAgent) queueCompactionWarning() {
 // point back at. The short form therefore restates the action instead of
 // referencing the earlier notice.
 const contextPressureReminderShortText = "Context pressure is still active and the context may be compacted soon.\n" +
-	"If the current phase is wrapped up and its working state is externalized, call compact_context alone; otherwise keep writing key findings and decisions to a project file your role may write as they settle."
+	"If the current atomic operation has ended and the state needed to resume is externalized, call compact_context alone with a provisional checkpoint if work remains; otherwise keep writing the active objective, completed work, next step, and open issues to a project file your role may write."
 
 // buildContextPressureReminderText renders the full reminder text. It does not
 // quote the current usage ratio or the remaining budget: the model cannot act
 // on that number (compaction is already scheduled), and stating how much space
 // is left would invite it to reason about deferring instead of preparing. It
 // only ever runs while compact_context is visible, so it names the tool
-// directly and splits the instruction by phase state. The text is bare
-// content; the turn-overlay injector wraps it in a <system-reminder> block.
+// directly and distinguishes a safe stop from a completed phase. The text is
+// bare content; the turn-overlay injector wraps it in a <system-reminder>
+// block.
 func buildContextPressureReminderText() string {
 	return "The context is approaching the configured automatic-compaction threshold.\n" +
-		"If the current phase is wrapped up and its working state is fully externalized, request a durable context checkpoint now by calling compact_context alone.\n" +
-		"If the phase is still open, keep writing important findings and decisions to project files your role may write (for example a task-notes file under .chord/notes/, named with a YYYYMMDD date prefix, or a plan document under .chord/plans/) as they settle, so they survive the upcoming compaction and can be re-read afterwards."
+		"Finish the current atomic operation, then choose based on cost: if replacing the current history is cheaper than carrying it forward and the state needed to resume is fully externalized, request a durable context checkpoint by calling compact_context alone. Use a provisional checkpoint when the work remains active; a completed phase is not required.\n" +
+		"If the operation is still in flight, or the state is not yet externalized, stop optional exploration and write the active objective, completed work, concrete next step, and open issues to project files your role may write (for example a task-notes file under .chord/notes/, named with a YYYYMMDD date prefix, or a plan document under .chord/plans/) as they settle. Do not interrupt the operation or describe unfinished work as completed."
 }
 
 // appendContextPressureVerificationGuidance appends the post-apply guidance:

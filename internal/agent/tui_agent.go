@@ -59,6 +59,13 @@ type TargetedConversationController interface {
 	RemoveLastMessageForTarget(target ConversationTarget)
 }
 
+// TargetedConversationMessageCounter returns a target history length without
+// copying or decoding the conversation. It is optional so remote and test
+// controllers can keep implementing the smaller conversation interface.
+type TargetedConversationMessageCounter interface {
+	GetMessageCountForTarget(target ConversationTarget) int
+}
+
 // PromptResolver delivers user responses for confirm/question dialogs back to
 // the agent's pending interaction flow.
 type PromptResolver interface {

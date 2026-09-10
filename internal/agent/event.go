@@ -639,6 +639,25 @@ type AgentNotifyEvent struct {
 
 func (AgentNotifyEvent) agentEvent() {}
 
+// MailboxQueuedEvent tells the TUI that a mailbox row has been durably
+// accepted and is waiting for delivery. The row remains visible until the
+// corresponding transcript append is durable.
+type MailboxQueuedEvent struct {
+	Message SubAgentMailboxMessage
+}
+
+func (MailboxQueuedEvent) agentEvent() {}
+
+// MailboxTranscriptAppendedEvent tells the TUI that a mailbox message was
+// appended to the target conversation and its transcript write completed.
+type MailboxTranscriptAppendedEvent struct {
+	Message       message.Message
+	TargetAgentID string
+	MessageIndex  int
+}
+
+func (MailboxTranscriptAppendedEvent) agentEvent() {}
+
 // ContextNoticeEvent surfaces a context-pressure overlay that is already
 // attached to the outgoing request as a user-visible card.
 //

@@ -305,7 +305,7 @@ func TestMailboxSpoolPreservesFIFOAcrossMemoryRecovery(t *testing.T) {
 	}
 }
 
-func TestProgressMailboxKeepsLastKnownStatusWhenBudgetExhausted(t *testing.T) {
+func TestProgressMailboxRetainsEveryDurableUpdateWhenBudgetExhausted(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.globalConfig.Orchestration.MailboxMemoryMessages = 1
 	a.globalConfig.Orchestration.MailboxMemoryBytes = 1 << 20
@@ -317,20 +317,24 @@ func TestProgressMailboxKeepsLastKnownStatusWhenBudgetExhausted(t *testing.T) {
 		t.Fatalf("initial progress = %#v", got)
 	}
 
-	// Replacing the only tracked snapshot stays within the message budget.
+	// Every durable progress update remains queued even when the latest-status
+	// map is still used by status rendering.
 	update := SubAgentMailboxMessage{MessageID: "p-2", AgentID: "worker-1", TaskID: "task-1", Kind: SubAgentMailboxKindProgress, Summary: "step 2"}
 	a.enqueueSubAgentMailbox(update)
 	if got := a.subAgentInbox.progress["worker-1"]; got.MessageID != "p-2" {
 		t.Fatalf("replaced progress = %#v, want p-2", got)
 	}
 
-	// An update that no longer fits must keep the previous snapshot instead of
-	// dropping both the old and the new status.
+	// An update that no longer fits is kept in the durable-log fallback rather
+	// than dropping it or replacing an earlier message.
 	a.globalConfig.Orchestration.MailboxMemoryBytes = 1
 	oversized := SubAgentMailboxMessage{MessageID: "p-3", AgentID: "worker-1", TaskID: "task-1", Kind: SubAgentMailboxKindProgress, Summary: strings.Repeat("x", 256)}
 	a.enqueueSubAgentMailbox(oversized)
-	if got := a.subAgentInbox.progress["worker-1"]; got.MessageID != "p-2" {
-		t.Fatalf("progress after oversized update = %#v, want retained p-2", got)
+	if got := a.subAgentInbox.progress["worker-1"]; got.MessageID != "p-3" {
+		t.Fatalf("latest progress = %#v, want p-3", got)
+	}
+	if got := a.subAgentInbox.progressPending; len(got) != 2 || got[0] != "p-2" || got[1] != "p-3" {
+		t.Fatalf("pending progress = %#v, want p-2,p-3", got)
 	}
 }
 

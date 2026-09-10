@@ -182,9 +182,6 @@ func TestCompactSubAgentMailboxLogsPreservesUnconsumedAndLatestProgress(t *testi
 		switch msg.Kind {
 		case SubAgentMailboxKindProgress:
 			progressCount++
-			if msg.Summary != "progress 139" {
-				t.Fatalf("kept progress summary = %q, want latest", msg.Summary)
-			}
 		case SubAgentMailboxKindRiskAlert:
 			urgentCount++
 		}
@@ -192,8 +189,8 @@ func TestCompactSubAgentMailboxLogsPreservesUnconsumedAndLatestProgress(t *testi
 			consumedCount++
 		}
 	}
-	if progressCount != 1 || urgentCount != 10 || consumedCount != 10 {
-		t.Fatalf("compacted counts progress=%d urgent=%d consumed=%d, want 1/10/10", progressCount, urgentCount, consumedCount)
+	if progressCount != 140 || urgentCount != 10 || consumedCount != 10 {
+		t.Fatalf("compacted counts progress=%d urgent=%d consumed=%d, want 140/10/10", progressCount, urgentCount, consumedCount)
 	}
 }
 

@@ -9479,7 +9479,7 @@ func TestRepeatedAgentDoneUpdatesSingleDelegateCard(t *testing.T) {
 	}
 }
 
-func TestAgentNotifyCreatesCardInTargetView(t *testing.T) {
+func TestAgentNotifyDoesNotCreateUnpersistedCard(t *testing.T) {
 	m := NewModelWithSize(nil, 140, 24)
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentNotifyEvent{
 		AgentID:       "worker-1",
@@ -9490,21 +9490,8 @@ func TestAgentNotifyCreatesCardInTargetView(t *testing.T) {
 	}})
 
 	blocks := filterBlocksByAgent(m.viewport.blocks, "main")
-	if len(blocks) != 1 {
-		t.Fatalf("main block count = %d, want 1", len(blocks))
-	}
-	block := blocks[0]
-	if block.StatusTitle != "AGENT BLOCKED" || block.AgentID != "" || block.LinkedTaskID != "adhoc-1" || !strings.Contains(block.Content, "worker cannot continue") {
-		t.Fatalf("notify block = %#v", block)
-	}
-	// Sender and kind travel as structured fields, not as a "[agent] kind:"
-	// prefix inside the body: the restore path builds the same card from the
-	// same constructor, so both must see the same rows.
-	if block.StatusFrom != "worker-1" || block.StatusKind != "risk_alert" {
-		t.Fatalf("notify block fields = from %q kind %q, want worker-1/risk_alert", block.StatusFrom, block.StatusKind)
-	}
-	if strings.Contains(block.Content, "[worker-1]") {
-		t.Fatalf("notify body must not repeat the sender it renders as a field row: %q", block.Content)
+	if len(blocks) != 0 {
+		t.Fatalf("main block count = %d, want no unpersisted card", len(blocks))
 	}
 }
 

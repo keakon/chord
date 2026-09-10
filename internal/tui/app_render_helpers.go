@@ -153,12 +153,12 @@ func (m *Model) enqueueToastWithCategory(msg, level, category string) tea.Cmd {
 
 func (m Model) renderQueuedDrafts(width, maxLines int) string {
 	drafts := m.visibleQueuedDrafts()
-	if len(drafts) == 0 || width <= 0 || maxLines <= 0 {
+	mailboxes := m.visibleQueuedMailboxes()
+	if len(drafts) == 0 && len(mailboxes) == 0 || width <= 0 || maxLines <= 0 {
 		return ""
 	}
-	var lines []string
-	visible := min(len(drafts), maxLines)
-	for i := range visible {
+	lines := make([]string, 0, min(len(drafts)+len(mailboxes), maxLines))
+	for i := 0; i < len(drafts) && len(lines) < maxLines; i++ {
 		d := drafts[i]
 		text, imageCount := queuedDraftTextAndImageCount(d)
 		if text == "" && imageCount > 0 {
@@ -170,6 +170,13 @@ func (m Model) renderQueuedDrafts(width, maxLines int) string {
 		line := prefix + truncateOneLine(text, maxTextWidth)
 		padding := max(width-runewidth.StringWidth(line)-deleteWidth-queuedDraftDeleteRightMargin, 1)
 		lines = append(lines, DimStyle.Render(line+strings.Repeat(" ", padding)+queuedDraftDeleteToken+strings.Repeat(" ", queuedDraftDeleteRightMargin)))
+	}
+	for i := 0; i < len(mailboxes) && len(lines) < maxLines; i++ {
+		item := mailboxes[i]
+		prefix := fmt.Sprintf("  [mailbox %d] ", i+1)
+		suffix := " [waiting]"
+		maxTextWidth := max(width-runewidth.StringWidth(prefix)-runewidth.StringWidth(suffix)-1, 8)
+		lines = append(lines, DimStyle.Render(prefix+truncateOneLine(item.Summary, maxTextWidth)+suffix))
 	}
 	return strings.Join(lines, "\n")
 }

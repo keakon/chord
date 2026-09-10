@@ -149,22 +149,6 @@ func (m *Model) rebuildViewportFromMessagesPreservingActivity(reason string, pre
 		m.logTranscriptRebuildTiming(reason, len(msgs), 0, messagesDuration, blockBuildDuration, 0, 0, 0, sidebarDuration, time.Since(rebuildStarted))
 		return
 	}
-	// Replay live-only notify cards (progress that never reached the durable
-	// transcript, etc.) at their true positions so a restored session shows
-	// the same cards in the same order as the live run. Live rebuilds keep the
-	// viewport's own copy and must not replay. The compacted-transcript
-	// restore is not a replay target: the apply rewrote the main transcript
-	// prefix, so recorded main anchors line up with nothing — drop them
-	// instead, so a later real restore cannot replay them against blocks they
-	// were never positioned for.
-	if reason == "session_restored" || reason == "startup_restored" {
-		if preserveRequestActivity {
-			m.clearCompactedNotifyAnchors()
-		} else {
-			// A restore always rebuilds the main transcript view.
-			blocks = m.replayNotifyAnchorsForView(blocks, msgs, "")
-		}
-	}
 	clearSettledStarted := time.Now()
 	clearBlocksTiming(blocks)
 	m.setTranscriptDisplaySequences(blocks, m.focusedAgentID)
@@ -606,6 +590,7 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 			}
 			if msg.Kind == message.KindSubAgentMailbox && msg.Mailbox != nil {
 				block := newSubAgentMailboxBlock(*nextID, msg.Mailbox.Kind, msg.Mailbox.Subtype, msg.Mailbox.AgentID, msg.Mailbox.TaskID, msg.Content, "")
+				block.MailboxMessageID = msg.Mailbox.MessageID
 				block.MsgIndex = msgIdx
 				*nextID++
 				blocks = append(blocks, block)

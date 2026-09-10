@@ -249,11 +249,12 @@ non-global tool rule whose pattern matches `compact_context` still applies
 behind confirmation, and `allow` matches the default). Narrow patterns such as
 `compact_*` count as matching rules. A role whose allowlist grants no file-writing
 tools can still checkpoint its state in the structured arguments. The model calls it alone (no sibling tool calls in the
-same response) once its working state is fully externalized — the facts it
-needs later are written into files named in `state_files`, or fully expressed
-in the structured `active_objective` / `completed` / `decisions` /
-`open_issues` / `next_step` arguments. The runtime validates the request,
-waits for the tool batch to close, then:
+same response) when replacing the current history is cheaper than carrying it
+forward and the facts needed later are fully externalized — written into files
+named in `state_files`, or fully expressed in the structured
+`active_objective` / `completed` / `decisions` / `open_issues` / `next_step`
+arguments. This is a costed state transition, not a routine progress save. The
+runtime validates the request, waits for the tool batch to close, then:
 
 1. snapshots the conversation and archives the head (no summarization model
    call — the checkpoint is deterministic),
@@ -263,6 +264,21 @@ waits for the tool batch to close, then:
 3. applies the checkpoint atomically, preserves anything appended after the
    snapshot as a live tail, and continues the same turn on the compacted
    context.
+
+The stopping point is pressure-aware rather than tied to a completed phase:
+
+- With comfortable context, request a checkpoint only when the expected
+  reduction in future context cost exceeds the checkpoint and re-read costs. A
+  completed phase is a useful boundary, not a requirement.
+- With a context-pressure reminder, finish the current atomic operation,
+  externalize the minimum recovery state, and use a provisional checkpoint even
+  if the stage remains active or candidate. Do not describe unfinished work as
+  completed.
+- When a compaction-imminent or threshold notice says the context is ending
+  soon, stop optional exploration, record the active objective, completed work,
+  concrete next step, and open issues, and checkpoint at the next safe stop.
+  Never interrupt an in-flight tool, file write, sibling task, or other
+  operation.
 
 An automatic compaction never locks the model out of its checkpoint. When a
 usage-driven compaction is already running (a threshold crossing started its
@@ -284,9 +300,10 @@ context-pressure reminder: the full text once per compaction window, then a shor
 self-contained line restating the action — the reminder is a transient overlay
 rebuilt on every request, so a repeat cannot assume the full text is still in
 context — and telling the model to prepare for the compaction
-(call `compact_context` alone if the current phase is wrapped up, otherwise
-keep externalizing findings to project files as phases settle) instead of
-quoting how much context is left. Re-attachment stops once the model calls
+(finish the current atomic operation, then call `compact_context` alone with a
+provisional checkpoint if the work remains active; otherwise keep
+externalizing findings to project files as they settle) instead of quoting how
+much context is left. Re-attachment stops once the model calls
 `compact_context` in the window (whatever that attempt settles to), usage
 drops back below the line, or a durable apply, session switch, restore, or
 model change starts a fresh window. The reminder and
@@ -315,7 +332,9 @@ ordinary data — and asks the model to write key
 findings and decisions to project files the role may write — for example a
 task-notes file under `.chord/notes/` or a plan document under `.chord/plans/`
 — as phases settle (so they survive a later checkpoint), call
-`compact_context` alone only at a real phase boundary,
+`compact_context` alone when carrying the current history costs more than
+restoring externalized state; under pressure, a safe stop is enough and the
+stage need not be complete,
 and read the archived history files for exact past facts after a checkpoint
 applies. SubAgents never receive this section or the tool. The guidance is
 advisory, not a mandatory workflow: under context pressure it outranks

@@ -209,7 +209,12 @@ func TestRemoveSubAgentMailboxStateReleasesProgressMemory(t *testing.T) {
 	if a.subAgentInbox.progress == nil {
 		a.subAgentInbox.progress = make(map[string]SubAgentMailboxMessage)
 	}
+	if a.subAgentInbox.progressPendingAgent == nil {
+		a.subAgentInbox.progressPendingAgent = make(map[string]string)
+	}
 	a.subAgentInbox.progress[agentID] = progress
+	a.subAgentInbox.progressPending = []string{"mail-pending"}
+	a.subAgentInbox.progressPendingAgent["mail-pending"] = agentID
 	a.subAgentInbox.urgent = append(a.subAgentInbox.urgent, urgent)
 	a.subAgentInbox.memoryBytes += mailboxMessageBytes(progress) + mailboxMessageBytes(urgent)
 	a.subAgentMailboxIDsMu.Unlock()
@@ -220,8 +225,10 @@ func TestRemoveSubAgentMailboxStateReleasesProgressMemory(t *testing.T) {
 
 	a.subAgentMailboxIDsMu.Lock()
 	defer a.subAgentMailboxIDsMu.Unlock()
-	if len(a.subAgentInbox.progress) != 0 || len(a.subAgentInbox.urgent) != 0 {
-		t.Fatalf("queue residue after close: progress=%#v urgent=%#v", a.subAgentInbox.progress, a.subAgentInbox.urgent)
+	if len(a.subAgentInbox.progress) != 0 || len(a.subAgentInbox.progressPending) != 0 ||
+		len(a.subAgentInbox.progressPendingAgent) != 0 || len(a.subAgentInbox.urgent) != 0 {
+		t.Fatalf("queue residue after close: progress=%#v pending=%#v pending_agents=%#v urgent=%#v",
+			a.subAgentInbox.progress, a.subAgentInbox.progressPending, a.subAgentInbox.progressPendingAgent, a.subAgentInbox.urgent)
 	}
 	if a.subAgentInbox.memoryBytes != 0 {
 		t.Fatalf("memoryBytes after close = %d, want 0 (progress snapshot must release its bytes)", a.subAgentInbox.memoryBytes)

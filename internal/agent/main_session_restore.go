@@ -976,6 +976,11 @@ func (a *MainAgent) enqueueRestoredMailboxMessage(msg SubAgentMailboxMessage) {
 		}
 	}
 	a.orchestrationMetrics.recordMailboxCreated(msg.MessageID, msg.CreatedAt)
+	// The durable row is the source of truth for the TUI queue. Emit this
+	// before routing so restore rebuilds the same waiting view as a live
+	// persisted enqueue; delivery will later replace it with the transcript
+	// card after the target history append succeeds.
+	a.emitToTUI(MailboxQueuedEvent{Message: msg})
 	a.deliverSubAgentMailbox(msg)
 }
 

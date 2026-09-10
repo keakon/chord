@@ -44,7 +44,7 @@ func TestCompactionGraceDefersTwoBatchesThenExpires(t *testing.T) {
 	// states them too, but the model only reads that after the switch, so
 	// dropping them here leaves it deciding whether to checkpoint while it
 	// still reads compaction as a reset.
-	if !strings.Contains(notice, "archived history files") {
+	if !strings.Contains(notice, "archived history files") || !strings.Contains(notice, "provisional checkpoint") {
 		t.Fatalf("imminent notice = %q, want the post-compaction retention semantics", notice)
 	}
 	a.pendingCompactionImminent = ""

@@ -487,6 +487,28 @@ func (r *RecoveryManager) LoadMessages(agentID string) ([]message.Message, error
 	return messages, nil
 }
 
+// CountMessages returns the number of complete JSONL records in an agent's
+// message log without decoding the records. It uses the same size/mtime cache
+// as session-list counts, so callers that only need a history length do not
+// allocate a copy of the conversation or restore attachment payloads.
+func (r *RecoveryManager) CountMessages(agentID string) (int, error) {
+	if r == nil {
+		return 0, nil
+	}
+	path := r.messageLogPath(agentID)
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	if info.Size() == 0 {
+		return 0, nil
+	}
+	return countMessages(path, info), nil
+}
+
 // SaveSnapshot atomically writes a session snapshot to snapshot.json.
 // It first writes to a temporary file, then renames it to the final path,
 // ensuring the snapshot file is never in a partially-written state.

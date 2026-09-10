@@ -46,8 +46,8 @@ func compactionImminentText(requests int) string {
 		countdown = "the next request"
 	}
 	return fmt.Sprintf("The context has crossed the automatic-compaction threshold. Automatic compaction will start after %s unless a context checkpoint is applied first.\n", countdown) +
-		"If the current phase is wrapped up and its working state is externalized, call compact_context alone on this turn to checkpoint it now.\n" +
-		"Otherwise write important findings, decisions, and working state to a project file your role may write (for example a task-notes file under .chord/notes/, named with a YYYYMMDD date prefix) so they survive the compaction.\n" +
+		"If the current atomic operation has ended and the state needed to resume is externalized, call compact_context alone on this turn to checkpoint it now, using a provisional checkpoint if the work is still active.\n" +
+		"Otherwise write the active objective, completed work, concrete next step, and open issues to a project file your role may write (for example a task-notes file under .chord/notes/, named with a YYYYMMDD date prefix) so they survive the compaction; do not wait for a full phase boundary.\n" +
 		"Compaction is recoverable rather than a reset: earlier messages are exported to archived history files whose paths are listed in the new context and can be read back with the read tool, and the newest messages are kept verbatim. Reading an archive back still costs a tool call, so externalizing the state that matters remains the cheaper path."
 }
 

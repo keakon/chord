@@ -285,12 +285,51 @@ func (a *MainAgent) removeSubAgentMailboxState(agentID string) {
 	// manual-delivery claims), so the whole state removal — including the
 	// active-batch head repair — runs under subAgentMailboxIDsMu.
 	a.subAgentMailboxIDsMu.Lock()
-	if progress, ok := a.subAgentInbox.progress[agentID]; ok {
-		// The per-agent progress snapshot is memory-accounted like the urgent/
-		// normal entries filtered below; dropping it must release its bytes.
-		a.releaseMailboxMemory(progress)
+	progress, hasProgress := a.subAgentInbox.progress[agentID]
+	if hasProgress {
 		delete(a.subAgentInbox.progress, agentID)
 	}
+	progressInQueue := false
+	for _, msg := range a.subAgentInbox.progressQueue {
+		if msg.MessageID == progress.MessageID {
+			progressInQueue = true
+			break
+		}
+	}
+	progressPending := false
+	for _, messageID := range a.subAgentInbox.progressPending {
+		if messageID == progress.MessageID {
+			progressPending = true
+			break
+		}
+	}
+	if hasProgress && !progressInQueue && !progressPending {
+		a.releaseMailboxMemory(progress)
+	}
+	filterPending := a.subAgentInbox.progressPending[:0]
+	for _, messageID := range a.subAgentInbox.progressPending {
+		if a.subAgentInbox.progressPendingAgent[messageID] == agentID {
+			delete(a.subAgentInbox.progressPendingAgent, messageID)
+			continue
+		}
+		filterPending = append(filterPending, messageID)
+	}
+	a.subAgentInbox.progressPending = filterPending
+	filterProgress := func(in []SubAgentMailboxMessage) []SubAgentMailboxMessage {
+		if len(in) == 0 {
+			return nil
+		}
+		out := in[:0]
+		for _, msg := range in {
+			if strings.TrimSpace(msg.AgentID) == agentID {
+				a.releaseMailboxMemory(msg)
+				continue
+			}
+			out = append(out, msg)
+		}
+		return out
+	}
+	a.subAgentInbox.progressQueue = filterProgress(a.subAgentInbox.progressQueue)
 	a.subAgentInbox.urgent = filter(a.subAgentInbox.urgent)
 	a.subAgentInbox.normal = filter(a.subAgentInbox.normal)
 	a.pendingSubAgentMailboxes = filterStaged(a.pendingSubAgentMailboxes)

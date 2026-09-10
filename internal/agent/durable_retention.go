@@ -181,31 +181,14 @@ func compactSubAgentMailboxLogs(sessionDir string, msgs []SubAgentMailboxMessage
 	if err != nil {
 		return fmt.Errorf("load task records for mailbox retention: %w", err)
 	}
-	latestProgress := make(map[string]int)
-	for i, msg := range msgs {
-		if msg.Kind == SubAgentMailboxKindProgress {
-			key := strings.TrimSpace(msg.TaskID)
-			if key == "" {
-				key = strings.TrimSpace(msg.AgentID)
-			}
-			latestProgress[key] = i
-		}
-	}
 	keepConsumedFrom := max(len(msgs)-mailboxConsumedHistoryKeep, 0)
 	kept := make([]SubAgentMailboxMessage, 0, len(msgs))
 	for i, msg := range msgs {
 		if !msg.Consumed {
-			if msg.Kind != SubAgentMailboxKindProgress {
-				kept = append(kept, msg)
-				continue
-			}
-			key := strings.TrimSpace(msg.TaskID)
-			if key == "" {
-				key = strings.TrimSpace(msg.AgentID)
-			}
-			if latestProgress[key] == i {
-				kept = append(kept, msg)
-			}
+			// Every unconsumed row is part of the delivery queue. Progress
+			// may have a latest-status view in memory, but that view must not
+			// replace durable rows or make an earlier update disappear.
+			kept = append(kept, msg)
 			continue
 		}
 		if i >= keepConsumedFrom {

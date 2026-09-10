@@ -43,6 +43,7 @@ func (m *Model) handleSessionAgentEvent(event agent.AgentEvent) (bool, agentEven
 		return true, effects
 	case agent.SessionSwitchStartedEvent:
 		m.beginSessionSwitch(evt.Kind, evt.SessionID)
+		m.mailboxQueue = nil
 		return true, effects
 	case agent.SessionRestoredEvent:
 		m.thinkingStreamMsgIndex = -1

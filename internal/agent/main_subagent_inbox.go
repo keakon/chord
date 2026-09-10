@@ -47,6 +47,7 @@ func (a *MainAgent) applyPersistedSubAgentMailboxMessage(msg *SubAgentMailboxMes
 	}
 	a.syncTaskRecordFromMailbox(*msg)
 	a.emitSubAgentMailboxUI(*msg)
+	a.emitToTUI(MailboxQueuedEvent{Message: *msg})
 }
 
 func (a *MainAgent) normalizeSubAgentMailboxMessage(msg *SubAgentMailboxMessage) {
@@ -591,11 +592,9 @@ func (a *MainAgent) enqueueSubAgentMailbox(msg SubAgentMailboxMessage) {
 	if err := a.prepareSubAgentMailboxMessage(&msg); err != nil {
 		log.Warnf("failed to persist SubAgent mailbox message message_id=%v task_id=%v kind=%v error=%v", msg.MessageID, msg.TaskID, msg.Kind, err)
 		a.emitToTUI(ErrorEvent{Err: fmt.Errorf("SubAgent mailbox durability degraded: %w", err)})
-		if msg.Kind != SubAgentMailboxKindProgress {
-			msg.persistPending = true
-			a.requeueSubAgentMailboxInMemory(msg)
-			return
-		}
+		msg.persistPending = true
+		a.requeueSubAgentMailboxInMemory(msg)
+		return
 	}
 	a.deliverSubAgentMailbox(msg)
 }
@@ -634,34 +633,44 @@ func (a *MainAgent) deliverSubAgentMailbox(msg SubAgentMailboxMessage) {
 	a.refreshSubAgentInboxSummary()
 }
 
-// replaceProgressMailboxWithinBudget swaps the per-agent progress snapshot only
-// when the replacement fits the memory budget. When it does not, the previous
-// snapshot is kept so an overloaded inbox still reports last-known status
-// instead of dropping both the old and the new update.
+// replaceProgressMailboxWithinBudget retains the historical name for the
+// progress enqueue path. The map is only a latest-status view; every durable
+// progress message enters the FIFO or its durable-log fallback.
 func (a *MainAgent) replaceProgressMailboxWithinBudget(msg SubAgentMailboxMessage) {
-	// mailboxMemoryCount reads the owner-queue maps shared with TUI-facing
-	// goroutines; see that helper's locking note.
 	a.subAgentMailboxIDsMu.Lock()
 	defer a.subAgentMailboxIDsMu.Unlock()
+	messageID := strings.TrimSpace(msg.MessageID)
+	if messageID == "" {
+		return
+	}
 	if a.subAgentInbox.progress == nil {
 		a.subAgentInbox.progress = make(map[string]SubAgentMailboxMessage)
 	}
-	previous, hadPrevious := a.subAgentInbox.progress[msg.AgentID]
-	freedBytes, freedCount := 0, 0
-	if hadPrevious {
-		freedBytes = mailboxMessageBytes(previous)
-		freedCount = 1
+	a.subAgentInbox.progress[msg.AgentID] = msg
+	if a.subAgentInbox.progressPendingAgent == nil {
+		a.subAgentInbox.progressPendingAgent = make(map[string]string)
+	}
+	if slices.Contains(a.subAgentInbox.progressPending, messageID) {
+		return
+	}
+	for _, queued := range a.subAgentInbox.progressQueue {
+		if queued.MessageID == messageID {
+			return
+		}
 	}
 	messageLimit, byteLimit := a.mailboxMemoryLimits()
 	size := mailboxMessageBytes(msg)
-	if a.mailboxMemoryCount()-freedCount >= messageLimit || a.subAgentInbox.memoryBytes-freedBytes+size > byteLimit {
+	// Once an older progress row has spilled, later rows must follow it in the
+	// durable fallback rather than jumping ahead through memory.
+	if len(a.subAgentInbox.progressPending) > 0 ||
+		a.mailboxMemoryCount() >= messageLimit ||
+		a.subAgentInbox.memoryBytes+size > byteLimit {
+		a.subAgentInbox.progressPending = append(a.subAgentInbox.progressPending, messageID)
+		a.subAgentInbox.progressPendingAgent[messageID] = msg.AgentID
 		return
 	}
-	a.subAgentInbox.progress[msg.AgentID] = msg
-	a.subAgentInbox.memoryBytes += size - freedBytes
-	if a.subAgentInbox.memoryBytes < 0 {
-		a.subAgentInbox.memoryBytes = 0
-	}
+	a.subAgentInbox.progressQueue = append(a.subAgentInbox.progressQueue, msg)
+	a.subAgentInbox.memoryBytes += size
 }
 
 func (a *MainAgent) requeueSubAgentMailboxInMemory(msg SubAgentMailboxMessage) {
@@ -681,13 +690,24 @@ func (a *MainAgent) requeueSubAgentMailboxInMemory(msg SubAgentMailboxMessage) {
 // the message landed in the durable spool.
 func (a *MainAgent) requeueSubAgentMailboxInMemoryLocked(msg SubAgentMailboxMessage) bool {
 	if msg.Kind == SubAgentMailboxKindProgress {
+		if msg.MessageID == "" {
+			return false
+		}
+		remaining := a.subAgentInbox.progressPending[:0]
+		for _, messageID := range a.subAgentInbox.progressPending {
+			if messageID != msg.MessageID {
+				remaining = append(remaining, messageID)
+			}
+		}
+		a.subAgentInbox.progressPending = remaining
+		if a.subAgentInbox.progressPendingAgent != nil {
+			delete(a.subAgentInbox.progressPendingAgent, msg.MessageID)
+		}
 		if a.subAgentInbox.progress == nil {
 			a.subAgentInbox.progress = make(map[string]SubAgentMailboxMessage)
 		}
-		if previous, ok := a.subAgentInbox.progress[msg.AgentID]; ok {
-			a.subAgentInbox.memoryBytes -= mailboxMessageBytes(previous)
-		}
 		a.subAgentInbox.progress[msg.AgentID] = msg
+		a.subAgentInbox.progressQueue = append([]SubAgentMailboxMessage{msg}, a.subAgentInbox.progressQueue...)
 		a.subAgentInbox.memoryBytes += mailboxMessageBytes(msg)
 		return false
 	}
@@ -1009,10 +1029,18 @@ func (a *MainAgent) hasQueuedMailboxMessage(messageID string) bool {
 			return true
 		}
 	}
+	for _, msg := range a.subAgentInbox.progressQueue {
+		if msg.MessageID == messageID {
+			return true
+		}
+	}
 	if slices.Contains(a.subAgentInbox.spoolUrgent, messageID) {
 		return true
 	}
 	if slices.Contains(a.subAgentInbox.spoolNormal, messageID) {
+		return true
+	}
+	if slices.Contains(a.subAgentInbox.progressPending, messageID) {
 		return true
 	}
 	for _, queued := range a.ownedSubAgentMailboxes {
@@ -1233,24 +1261,103 @@ func (a *MainAgent) ensureSubAgentMailboxPersisted(msg *SubAgentMailboxMessage) 
 	return true
 }
 
-// takeMainInboxProgressSnapshots claims the main inbox's per-agent progress
-// snapshots for delivery. Progress is tracked as each agent's last-known
-// status (newer updates replace older ones on arrival), so claiming the whole
-// set is what lets one drain deliver every routable update in a single batch
-// instead of waking the main once per progress message.
+// takeMainInboxProgressSnapshots claims the main inbox's progress FIFO for
+// delivery. Complete in-memory messages are claimed without disk access;
+// only records that spilled to the durable fallback need to be reloaded.
 func (a *MainAgent) takeMainInboxProgressSnapshots() []SubAgentMailboxMessage {
 	a.subAgentMailboxIDsMu.Lock()
-	defer a.subAgentMailboxIDsMu.Unlock()
-	if len(a.subAgentInbox.progress) == 0 {
-		return nil
-	}
-	out := make([]SubAgentMailboxMessage, 0, len(a.subAgentInbox.progress))
-	for agentID, msg := range a.subAgentInbox.progress {
+	out := append([]SubAgentMailboxMessage(nil), a.subAgentInbox.progressQueue...)
+	a.subAgentInbox.progressQueue = nil
+	for _, msg := range out {
+		if current, ok := a.subAgentInbox.progress[msg.AgentID]; ok &&
+			current.MessageID == msg.MessageID {
+			delete(a.subAgentInbox.progress, msg.AgentID)
+		}
 		a.releaseMailboxMemory(msg)
-		out = append(out, msg)
-		delete(a.subAgentInbox.progress, agentID)
+	}
+	if len(out) == 0 && len(a.subAgentInbox.progress) > 0 {
+		out = make([]SubAgentMailboxMessage, 0, len(a.subAgentInbox.progress))
+		for agentID, msg := range a.subAgentInbox.progress {
+			out = append(out, msg)
+			delete(a.subAgentInbox.progress, agentID)
+			a.releaseMailboxMemory(msg)
+		}
+	}
+	ids := append([]string(nil), a.subAgentInbox.progressPending...)
+	a.subAgentInbox.progressPending = nil
+	pendingAgents := make(map[string]string, len(ids))
+	for _, messageID := range ids {
+		pendingAgents[messageID] = a.subAgentInbox.progressPendingAgent[messageID]
+		delete(a.subAgentInbox.progressPendingAgent, messageID)
+		for agentID, msg := range a.subAgentInbox.progress {
+			if msg.MessageID == messageID {
+				delete(a.subAgentInbox.progress, agentID)
+			}
+		}
+	}
+	a.subAgentMailboxIDsMu.Unlock()
+	if len(ids) == 0 {
+		return out
+	}
+	if out == nil {
+		out = make([]SubAgentMailboxMessage, 0, len(ids))
+	}
+	for i, messageID := range ids {
+		msg, found, err := a.loadDurableMailboxMessage(messageID)
+		if err != nil {
+			a.subAgentMailboxIDsMu.Lock()
+			a.subAgentInbox.progressPending = append(ids[i:], a.subAgentInbox.progressPending...)
+			for _, pendingID := range ids[i:] {
+				a.subAgentInbox.progressPendingAgent[pendingID] = pendingAgents[pendingID]
+			}
+			a.subAgentMailboxIDsMu.Unlock()
+			break
+		}
+		if found {
+			out = append(out, *msg)
+			continue
+		}
+		if a.isSubAgentMailboxConsumed(messageID) {
+			continue
+		}
+		// A row that is not yet visible in the durable log can only be a
+		// retryable persistence race. Keep its ID rather than silently
+		// dropping the progress update.
+		a.subAgentMailboxIDsMu.Lock()
+		a.subAgentInbox.progressPending = append(a.subAgentInbox.progressPending, messageID)
+		a.subAgentInbox.progressPendingAgent[messageID] = pendingAgents[messageID]
+		a.subAgentMailboxIDsMu.Unlock()
 	}
 	return out
+}
+
+func (a *MainAgent) loadDurableMailboxMessage(messageID string) (*SubAgentMailboxMessage, bool, error) {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" || a.isSubAgentMailboxConsumed(messageID) {
+		return nil, false, nil
+	}
+	path := filepath.Join(a.sessionDir, "subagents", "mailbox.jsonl")
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("open mailbox log: %w", err)
+	}
+	defer f.Close()
+	dec := json.NewDecoder(f)
+	for {
+		var msg SubAgentMailboxMessage
+		if err := dec.Decode(&msg); err != nil {
+			if err == io.EOF {
+				return nil, false, nil
+			}
+			return nil, false, fmt.Errorf("decode mailbox log: %w", err)
+		}
+		if strings.TrimSpace(msg.MessageID) == messageID {
+			return &msg, true, nil
+		}
+	}
 }
 
 func (a *MainAgent) stageNextSubAgentMailboxBatch() bool {

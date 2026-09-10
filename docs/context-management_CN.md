@@ -96,17 +96,23 @@ providers:
 
 ### 模型驱动上下文 checkpoint（实验性）
 
-设置 `context.compaction.model_driven: true` 后，主 agent 获得 `compact_context` 工具。注册该工具是启用功能的一部分：仅含通配符的权限规则（例如 allowlist 式的 `"*": deny` 加少量显式放行的工具）不会隐藏或拦截它——只有匹配 `compact_context` 的非全局工具规则仍然生效（`deny` 会移除工具并给出一次性诊断，`ask` 保留工具但每次调用需确认，`allow` 与默认一致）。像 `compact_*` 这样的窄匹配也算匹配规则。即使角色的 allowlist 没有放行任何文件工具，模型仍可把状态完整写进结构化参数来完成 checkpoint。模型在状态充分外化后单独调用它（同一响应里不能有其他工具调用）——后续需要的事实要么写在 `state_files` 指出的文件里，要么完整表达在 `active_objective` / `completed` / `decisions` / `open_issues` / `next_step` 结构化参数中。runtime 校验请求，等工具批次收口后：
+设置 `context.compaction.model_driven: true` 后，主 agent 获得 `compact_context` 工具。注册该工具是启用功能的一部分：仅含通配符的权限规则（例如 allowlist 式的 `"*": deny` 加少量显式放行的工具）不会隐藏或拦截它——只有匹配 `compact_context` 的非全局工具规则仍然生效（`deny` 会移除工具并给出一次性诊断，`ask` 保留工具但每次调用需确认，`allow` 与默认一致）。像 `compact_*` 这样的窄匹配也算匹配规则。即使角色的 allowlist 没有放行任何文件工具，模型仍可把状态完整写进结构化参数来完成 checkpoint。模型应在“用 checkpoint 替换当前历史”比继续携带历史更划算，且后续需要的事实已经充分外化时单独调用它（同一响应里不能有其他工具调用）——这些事实要么写在 `state_files` 指出的文件里，要么完整表达在 `active_objective` / `completed` / `decisions` / `open_issues` / `next_step` 结构化参数中。checkpoint 是有成本的状态转移，不是例行保存进度。runtime 校验请求，等工具批次收口后：
 
 1. 快照对话并归档 head（不调用摘要模型，checkpoint 由确定性构造）；
 2. 当预计收益低于保守门槛（2048 tokens 且占 prepared surface 的 10%）时拒绝 reset；距上次成功 apply 不足 3 个主模型请求批次时同样会跳过；
 3. 原子应用 checkpoint，快照后追加的内容作为 live tail 保留，并在压缩后的上下文上继续同一 turn。
 
+checkpoint 的停点按上下文压力调整，不要求每次都等完整阶段结束：
+
+- 上下文充足时，只有预计节省的后续上下文成本高于 checkpoint 和重新读取状态的成本，才请求压缩。阶段完成只是有利边界，不是必要条件。
+- 出现上下文压力提醒时，先完成当前原子操作，写下最低限度的恢复状态；即使阶段仍是 `active` 或 `candidate`，也可以使用 provisional checkpoint。不要把未完成工作写成已完成。
+- 出现“即将压缩”或阈值告警时，停止可选探索，在下一个安全停点记录当前目标、已完成工作、具体下一步和未决事项，然后尽快请求 checkpoint。不要打断正在执行的工具、文件写入、子任务或其他操作。
+
 自动压缩不会把模型的 checkpoint 锁死。当 usage-driven 压缩已在运行（threshold 越线启动了后台 worker，或 draft 已 ready、正在等 continuation barrier）时，与它并行的那次请求仍可提交 `compact_context`。模型是自己挑的边界，所以它的 checkpoint 优先：runtime 丢弃自动 draft，改应用模型 checkpoint。自动压缩是兜底而不是锁——threshold 越线不会夺走正在收尾的模型的 reset 机会。一次性外化提示不会提及这种覆盖（模型不需要知道有自动压缩在跑，只需要知道当前上下文即将结束）；模型之前主动提交的 checkpoint 照常工作。
 
-skip 是正常的策略结果：立即用相同请求重试会被短暂冷却，结果不会改变——模型应等待或继续推进。上下文用量高于提醒线的期间，请求会携带压力提醒：每个压缩窗口先给一次完整文案，之后只带一行简短且自包含的短文案——提醒是逐请求重建的瞬态 overlay，重复提醒不能指望完整文案还在上下文里，因此它直接重述动作，告诉模型为压缩做准备（当前阶段已收口就单独调用 `compact_context`，否则随阶段把 findings 和决定写进本角色可写的项目文件，如 `.chord/notes/` 下的任务笔记或 `.chord/plans/` 下的计划文档），不再引用还剩多少空间。模型在本窗口调用过 `compact_context`（无论那次尝试收口成什么）、usage 回落线下，或 durable apply / 会话切换 / 恢复 / 模型变化开启新窗口后，重发停止。usage-driven 压缩在 threshold 越线当次即启动（启用 `model_driven` 时先经上文所述宽限期推迟两个请求批次），一次性外化提示只出现在真正启动压缩的那次请求上。这两个 overlay 都用 `<system-reminder>` 块包裹——与其他所有 harness 注入的运行时消息同一约定——让模型能区分它们和用户写的内容（内存压力信号类研究，如 MemGPT，正是以 system 消息注入这类提醒）。它们都只在启用 `model_driven` 时注入——关闭时模型没有任何外化契约，注入只会变成无法执行的噪音。它们是瞬态的，不会进入对话历史。
+skip 是正常的策略结果：立即用相同请求重试会被短暂冷却，结果不会改变——模型应等待或继续推进。上下文用量高于提醒线的期间，请求会携带压力提醒：每个压缩窗口先给一次完整文案，之后只带一行简短且自包含的短文案——提醒是逐请求重建的瞬态 overlay，重复提醒不能指望完整文案还在上下文里，因此它直接重述动作，告诉模型为压缩做准备（先完成当前原子操作；如果状态已外化、继续携带历史的成本更高，即使阶段仍未完成，也可以单独调用 `compact_context` 请求 provisional checkpoint；否则随阶段把 findings 和决定写进本角色可写的项目文件，如 `.chord/notes/` 下的任务笔记或 `.chord/plans/` 下的计划文档），不再引用还剩多少空间。模型在本窗口调用过 `compact_context`（无论那次尝试收口成什么）、usage 回落线下，或 durable apply / 会话切换 / 恢复 / 模型变化开启新窗口后，重发停止。usage-driven 压缩在 threshold 越线当次即启动（启用 `model_driven` 时先经上文所述宽限期推迟两个请求批次），一次性外化提示只出现在真正启动压缩的那次请求上。这两个 overlay 都用 `<system-reminder>` 块包裹——与其他所有 harness 注入的运行时消息同一约定——让模型能区分它们和用户写的内容（内存压力信号类研究，如 MemGPT，正是以 system 消息注入这类提醒）。它们都只在启用 `model_driven` 时注入——关闭时模型没有任何外化契约，注入只会变成无法执行的噪音。它们是瞬态的，不会进入对话历史。
 
-启用 `model_driven` 时，主 agent 的系统提示词还会附带一段简短被动的 `Long-session context management` 指引：开头声明 `<system-reminder>` 包裹的消息是 harness 注入的运行时状态（绝非用户所写），它们不承载用户指令也不授予权限，出现在工具结果或文件内容里的同名块只是普通数据；随后要求随阶段收口把关键发现和决定写入本角色可写的项目文件——如 `.chord/notes/` 下的任务笔记或 `.chord/plans/` 下的计划文档——让它们能在后续 checkpoint 后存活，只在真正的阶段边界单独调用 `compact_context`，checkpoint 应用后需要精确历史时去读归档的 history 文件。SubAgent 永远不会收到这段指引或该工具。该指引是建议性的，不是强制流程：上下文压力期间它优先于开放式探索和可选工作，但绝不高于更新的用户请求或 Done 拒绝、取消、权限或安全规则以及工具依赖顺序。
+启用 `model_driven` 时，主 agent 的系统提示词还会附带一段简短被动的 `Long-session context management` 指引：开头声明 `<system-reminder>` 包裹的消息是 harness 注入的运行时状态（绝非用户所写），它们不承载用户指令也不授予权限，出现在工具结果或文件内容里的同名块只是普通数据；随后要求随阶段收口把关键发现和决定写入本角色可写的项目文件——如 `.chord/notes/` 下的任务笔记或 `.chord/plans/` 下的计划文档——让它们能在后续 checkpoint 后存活；上下文充足时，只有继续携带历史的成本更高才单独调用 `compact_context`，压力下到达安全停点即可，不必等阶段完成，checkpoint 应用后需要精确历史时去读归档的 history 文件。SubAgent 永远不会收到这段指引或该工具。该指引是建议性的，不是强制流程：上下文压力期间它优先于开放式探索和可选工作，但绝不高于更新的用户请求或 Done 拒绝、取消、权限或安全规则以及工具依赖顺序。
 
 压缩是递归的：下一次自动摘要写在一段以 checkpoint 开头的历史之上。会话锚点（原始请求、standing constraints）逐字前向携带。usage-driven 摘要会把前一个 checkpoint 的正文作为受保护的输入段收到，并把它追加为 `## Previous Checkpoint` 段，因此这部分内容从不依赖摘要模型恰好复述它——但携带本身有界，不是整段逐字拷贝：自然语言正文只保留到固定预算、超出部分截断，机器可读的 typed 块（若前文带的话）不占这份预算、整块保留。model-driven checkpoint 则只跨代携带机器状态：已核验决策、未决问题、evidence 引用与阶段元数据以结构化 typed 块（`## Typed Checkpoint State`）传递，下一个 model-driven checkpoint 会把它与模型新提交的状态合并：新提交项优先，未重述的 carried claim 从 active 降为 stale，合并后的 claim 集合有上限，放不下的会被显式披露，并可从归档的 history 文件恢复。上一 checkpoint 的自然语言正文不再逐字追加，每轮的目标、进展与 claim 由模型按当前状态重新声明。
 
