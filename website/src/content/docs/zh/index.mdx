@@ -1,12 +1,12 @@
 ---
 title: Chord
-description: 让 AI 编码体验从容下来——一个轻量、本地优先的终端 Coding Agent，稳定长期运行、模型组合可热切换、脱离电脑时还能远程操控。
+description: 花更少的 token，干更难的活。一个轻量的终端 Coding Agent：告别上下文腐烂，模型不可用时自动切换。
 template: splash
 head:
   - tag: title
-    content: Chord — 让 AI 编码体验从容下来
+    content: Chord — 花更少的 token，干更难的活
 hero:
-  tagline: 让 AI 编码体验从容下来——稳定长期运行、模型组合可热切换、脱离电脑时还能远程操控。
+  tagline: 花更少的 token，干更难的活：告别上下文腐烂，模型不可用时自动切换。
   actions:
     - text: 快速开始
       link: /chord/zh/quickstart/
@@ -60,42 +60,18 @@ import screenshot from '../../../../../docs/assets/screenshot.png';
 ## 为什么选 Chord
 
 <CardGrid>
-  <Card title="长会话更省上下文" icon="database">
-    请求时剪裁陈旧工具输出，并用类型化摘要保留大块结果的关键信息；接近上限前再压缩早期内容。
-  </Card>
-  <Card title="轻量常驻" icon="approve-check-circle">
-    近乎瞬间加载上千条消息的历史会话，退出无需等待；内存占用低，空闲数分钟后卸载 LSP/MCP 资源。
-  </Card>
-  <Card title="网络状态全程可见" icon="analytics">
-    模型调用过程中精确显示请求状态与已等待时间，再也不用猜「是不是卡住了」。
-  </Card>
-  <Card title="模型组合热切换" icon="random">
-    将模型分到可复用的池（`fast`、`thinking`、`cheap`），运行时用 `/models` 或 `Ctrl+P` 切换。运行时按池内顺序自动 fallback。
-  </Card>
-</CardGrid>
-
-## 更多能力
-
-<CardGrid>
-  <Card title="键盘优先、Vim 风格" icon="vim">
-    面向习惯全键盘操作的用户：Insert / Normal 模式、Vim 风格导航、消息搜索，模式切换时自动切输入法。
-  </Card>
-  <Card title="项目上下文" icon="magnifier">
-    LSP 诊断、definition/reference/implementation 查询、Git 状态，以及
-    `@` 文件补全。
-  </Card>
-  <Card title="图片和 PDF 输入" icon="document">
-    粘贴图片，按模型能力附加图片或 PDF；支持的终端可预览图片，模型也可用 `view_image` 查看本地 PNG/JPEG。
-  </Card>
-  <Card title="多 Agent 协作" icon="comment">
-    主 Agent 搭配职责聚焦的 SubAgent，各自独立上下文，用 `Shift+Tab` 切换。
-  </Card>
-  <Card title="worktree 并行开发" icon="code-branch">
-    `chord --worktree feat-auth` 会创建隔离的工作副本，同一仓库上的多个任务互不干扰。
-  </Card>
-  <Card title="导入外部会话" icon="cloud-download">
-    可把 Claude Code、Codex、OpenCode 会话迁移成可恢复的 Chord 会话。
-  </Card>
+  <Card title="长会话更省 token" icon="database" />
+  <Card title="启动快、内存占用低" icon="approve-check-circle" />
+  <Card title="尽可能展示所有细节" icon="analytics" />
+  <Card title="键盘优先、Vim 风格" icon="vim" />
+  <Card title="需要你处理时才通知" icon="email" />
+  <Card title="模型池热切换" icon="random" />
+  <Card title="支持导入 Claude Code、Codex、OpenCode 的会话" icon="cloud-download" />
+  <Card title="LSP 集成" icon="magnifier" />
+  <Card title="支持预览图片" icon="document" />
+  <Card title="显示 Codex 订阅额度与重置时间" icon="clock" />
+  <Card title="健壮且可自定义的 Agent 团队" icon="puzzle" />
+  <Card title="基于 git worktree 的并行任务" icon="code-branch" />
 </CardGrid>
 
 ## 性能实测

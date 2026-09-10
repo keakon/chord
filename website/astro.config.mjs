@@ -13,7 +13,7 @@ export default defineConfig({
   integrations: [
     starlight({
       title: 'Chord',
-      description: 'Calm AI coding in your terminal — a lightweight, local-first coding agent.',
+      description: 'Spend fewer tokens, take on harder work — a lightweight terminal coding agent.',
       social: [{ icon: 'github', label: 'GitHub', href: repo }],
       // assets/logo/chord-wordmark*.svg are the brand sources; scripts/sync-docs.mjs
       // regenerates the root-served images into website/public/ before every
