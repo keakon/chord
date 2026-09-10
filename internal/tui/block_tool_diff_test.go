@@ -322,6 +322,10 @@ func TestApplyPatchErrorCardKeepsHighlightedPatchPreview(t *testing.T) {
 	if !strings.Contains(plain, "apply_patch src/demo.go") || !strings.Contains(plain, "↳ Requested patch:") || !strings.Contains(plain, "+func main() {}") || !strings.Contains(plain, "hunk not found") {
 		t.Fatalf("expected error card to preserve path, patch, and error, got:\n%s", plain)
 	}
+	hunkHeader := renderedLineContaining(t, lines, "@@")
+	if !strings.Contains(stripANSI(hunkHeader), "─") {
+		t.Fatalf("expected failed patch preview hunk header to include an inline separator, got %q", stripANSI(hunkHeader))
+	}
 	added := renderedLineContaining(t, lines, "func main")
 	assertRenderedTextForeground(t, added, "func", colorOfTheme(toolCodeChromaStyle().Get(chroma.Keyword).Colour.String()))
 	assertRenderedTextBackground(t, added, "func", colorOfTheme(currentTheme.DiffAddLineBg))
@@ -1582,6 +1586,10 @@ func TestApplyPatchStreamingPreviewRendersHighlightedWithoutFullParse(t *testing
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected streaming preview to contain %q, got:\n%s", want, plain)
 		}
+	}
+	hunkHeader := renderedLineContaining(t, lines, "@@")
+	if !strings.Contains(stripANSI(hunkHeader), "─") {
+		t.Fatalf("expected streaming patch preview hunk header to include an inline separator, got %q", stripANSI(hunkHeader))
 	}
 	added := renderedLineContaining(t, lines, "func main")
 	assertRenderedTextBackground(t, added, "func", colorOfTheme(currentTheme.DiffAddLineBg))

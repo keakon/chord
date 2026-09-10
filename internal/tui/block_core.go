@@ -205,6 +205,17 @@ func blockRenderPanicFallback(b *Block, width int, recovered any) []string {
 // LineCount returns how many terminal lines this block occupies.
 func (b *Block) LineCount(width int) int {
 	_ = b.ensureMaterialized()
+	if b.streamingApplyPatchRangeEligible() {
+		if width <= 0 {
+			width = 80
+		}
+		count := b.streamingApplyPatchLineCount(width)
+		b.lineCache = nil
+		b.lineCacheWidth = width
+		b.lineCountCache = count
+		b.hotBytesMemoValid = false
+		return count
+	}
 	if b.lineCache == nil || b.lineCacheWidth != width {
 		b.lineCache = b.Render(width, "")
 		b.lineCacheWidth = width
@@ -217,6 +228,12 @@ func (b *Block) LineCount(width int) int {
 // RenderRange returns the rendered block lines in [start,end). It prefers
 // cached full-render results and slices them when available.
 func (b *Block) RenderRange(width int, spinnerFrame string, start, end int) []string {
+	if b.streamingApplyPatchRangeEligible() {
+		if width <= 0 {
+			width = 80
+		}
+		return b.renderStreamingApplyPatchRange(width, spinnerFrame, start, end)
+	}
 	if start < 0 {
 		start = 0
 	}

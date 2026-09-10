@@ -611,6 +611,7 @@ func (b *Block) clearApplyPatchPreviewMemo() {
 	b.previewRenderedHL = nil
 	b.previewRenderedHLPath = ""
 	b.previewRenderedLines = nil
+	b.clearStreamingApplyPatchRangeMemo()
 }
 
 // patchPreviewCoalesceWindow returns how much the accumulated args must grow
@@ -708,12 +709,27 @@ func renderApplyPatchPreviewLine(line string, width int, hl *codeHighlighter) st
 	case strings.HasPrefix(line, " "):
 		return "    " + " " + renderHighlightedSnippetLine(line[1:], nil, max(width-1, 1), hl, "")
 	case strings.HasPrefix(line, "@@"):
-		return "    " + ToolResultExpandedStyle.Render(truncateApplyPatchDisplayLine(line, width))
+		return renderApplyPatchPreviewHunkHeader(line, width)
 	case strings.HasPrefix(line, "***"):
 		return "    " + ToolResultStyle.Render(truncateApplyPatchDisplayLine(line, width))
 	default:
 		return "    " + DimStyle.Render(truncateApplyPatchDisplayLine(line, width))
 	}
+}
+
+func renderApplyPatchPreviewHunkHeader(line string, width int) string {
+	header := truncateApplyPatchDisplayLine(line, width)
+	headerWidth := tuiStringWidth(header)
+	if headerWidth >= width {
+		return "    " + ToolResultExpandedStyle.Render(header)
+	}
+
+	// Keep the hunk separator on the header row so the line-level render memo
+	// stays one-to-one with the patch input. The body remains independently
+	// highlighted; this is only a visual boundary, not a new syntax block.
+	ruleWidth := width - headerWidth
+	rule := strings.Repeat("─", ruleWidth)
+	return "    " + ToolResultExpandedStyle.Render(header) + DimStyle.Render(rule)
 }
 
 func truncateApplyPatchDisplayLine(line string, width int) string {

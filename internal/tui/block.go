@@ -164,6 +164,14 @@ type Block struct {
 	previewRenderedHLPath string
 	previewRenderedLines  []string
 
+	// streamingPatchMemo caches the normalized patch and byte offsets for the
+	// live apply_patch range renderer. It avoids splitting the complete patch
+	// again when LineCount and RenderRange serve the same frame.
+	streamingPatchArgsLen    int
+	streamingPatchMemoValid  bool
+	streamingPatchText       string
+	streamingPatchLineStarts []int
+
 	// toolArgsCache memoizes parsed JSON arguments for tool-call rendering.
 	// It must be invalidated whenever ToolName or Content changes.
 	toolArgsCacheToolName string
