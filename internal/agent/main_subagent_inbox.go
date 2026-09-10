@@ -728,6 +728,9 @@ func (a *MainAgent) requeueSubAgentMailboxInMemoryLocked(msg SubAgentMailboxMess
 		if a.subAgentInbox.progressPendingAgent != nil {
 			delete(a.subAgentInbox.progressPendingAgent, msg.MessageID)
 		}
+		if a.subAgentInbox.progressPendingAttempts != nil {
+			delete(a.subAgentInbox.progressPendingAttempts, msg.MessageID)
+		}
 		if a.subAgentInbox.progress == nil {
 			a.subAgentInbox.progress = make(map[string]SubAgentMailboxMessage)
 		}
@@ -1317,9 +1320,12 @@ func (a *MainAgent) takeMainInboxProgressSnapshots() []SubAgentMailboxMessage {
 	ids := append([]string(nil), a.subAgentInbox.progressPending...)
 	a.subAgentInbox.progressPending = nil
 	pendingAgents := make(map[string]string, len(ids))
+	pendingAttempts := make(map[string]int, len(ids))
 	for _, messageID := range ids {
 		pendingAgents[messageID] = a.subAgentInbox.progressPendingAgent[messageID]
 		delete(a.subAgentInbox.progressPendingAgent, messageID)
+		pendingAttempts[messageID] = a.subAgentInbox.progressPendingAttempts[messageID]
+		delete(a.subAgentInbox.progressPendingAttempts, messageID)
 		for agentID, msg := range a.subAgentInbox.progress {
 			if msg.MessageID == messageID {
 				delete(a.subAgentInbox.progress, agentID)
@@ -1336,12 +1342,7 @@ func (a *MainAgent) takeMainInboxProgressSnapshots() []SubAgentMailboxMessage {
 	for i, messageID := range ids {
 		msg, found, err := a.loadDurableMailboxMessage(messageID)
 		if err != nil {
-			a.subAgentMailboxIDsMu.Lock()
-			a.subAgentInbox.progressPending = append(ids[i:], a.subAgentInbox.progressPending...)
-			for _, pendingID := range ids[i:] {
-				a.subAgentInbox.progressPendingAgent[pendingID] = pendingAgents[pendingID]
-			}
-			a.subAgentMailboxIDsMu.Unlock()
+			a.retryProgressPending(ids[i:], pendingAgents, pendingAttempts, err)
 			break
 		}
 		if found {
@@ -1353,13 +1354,44 @@ func (a *MainAgent) takeMainInboxProgressSnapshots() []SubAgentMailboxMessage {
 		}
 		// A row that is not yet visible in the durable log can only be a
 		// retryable persistence race. Keep its ID rather than silently
-		// dropping the progress update.
-		a.subAgentMailboxIDsMu.Lock()
-		a.subAgentInbox.progressPending = append(a.subAgentInbox.progressPending, messageID)
-		a.subAgentInbox.progressPendingAgent[messageID] = pendingAgents[messageID]
-		a.subAgentMailboxIDsMu.Unlock()
+		// dropping the progress update, but only for a bounded number of
+		// attempts: see retryProgressPending.
+		a.retryProgressPending([]string{messageID}, pendingAgents, pendingAttempts, nil)
 	}
 	return out
+}
+
+// mainInboxProgressReloadMaxAttempts bounds how many failed reload attempts a
+// progress snapshot id is kept for. A durable row that is not visible yet is
+// normally a short-lived persistence race the next dispatch resolves, so a
+// couple of retries preserve that delivery guarantee; a row that never appears
+// must be dropped so hasRunnableMailboxWork stops reporting pending progress
+// and the main can reach global idle instead of rescanning the mailbox log on
+// every dispatch forever.
+const mainInboxProgressReloadMaxAttempts = 3
+
+// retryProgressPending re-appends progress ids whose durable row could not be
+// reloaded this dispatch, keeping FIFO order behind anything already re-queued.
+// It drops an id once it has reached mainInboxProgressReloadMaxAttempts failed
+// attempts, logging the id and agent so the permanently missing row is
+// observable. Called without subAgentMailboxIDsMu held.
+func (a *MainAgent) retryProgressPending(ids []string, agents map[string]string, attempts map[string]int, loadErr error) {
+	a.subAgentMailboxIDsMu.Lock()
+	defer a.subAgentMailboxIDsMu.Unlock()
+	for _, messageID := range ids {
+		tries := attempts[messageID] + 1
+		if tries >= mainInboxProgressReloadMaxAttempts {
+			if loadErr != nil {
+				log.Warnf("dropping progress mailbox snapshot after %d reload attempts message_id=%v agent_id=%v error=%v", tries, messageID, agents[messageID], loadErr)
+			} else {
+				log.Warnf("dropping progress mailbox snapshot after %d reload attempts message_id=%v agent_id=%v", tries, messageID, agents[messageID])
+			}
+			continue
+		}
+		a.subAgentInbox.progressPending = append(a.subAgentInbox.progressPending, messageID)
+		a.subAgentInbox.progressPendingAgent[messageID] = agents[messageID]
+		a.subAgentInbox.progressPendingAttempts[messageID] = tries
+	}
 }
 
 func (a *MainAgent) loadDurableMailboxMessage(messageID string) (*SubAgentMailboxMessage, bool, error) {
@@ -1431,7 +1463,9 @@ func (a *MainAgent) stageNextSubAgentMailboxBatch() bool {
 	if msg != nil {
 		if !a.ensureSubAgentMailboxPersisted(msg) {
 			a.requeueSubAgentMailboxInMemory(*msg)
-			for i := range progress {
+			// requeueSubAgentMailboxInMemory prepends, so roll back in reverse
+			// to keep the claimed order.
+			for i := len(progress) - 1; i >= 0; i-- {
 				a.requeueSubAgentMailboxInMemory(progress[i])
 			}
 			return false
@@ -1471,11 +1505,15 @@ func (a *MainAgent) stageNextSubAgentMailboxBatch() bool {
 	// stays stable for the overlay and ack consumers.
 	for i := range progress {
 		if !a.ensureSubAgentMailboxPersisted(&progress[i]) {
-			for j := i; j < len(progress); j++ {
+			// requeueSubAgentMailboxInMemory prepends to its queue, so the
+			// rollback walks the claimed batch in reverse: the last-claimed
+			// message must go back first for the queue order to match the
+			// order this batch was taken in.
+			for j := len(progress) - 1; j >= i; j-- {
 				a.requeueSubAgentMailboxInMemory(progress[j])
 			}
-			for _, queued := range pending {
-				a.requeueSubAgentMailboxInMemory(*queued)
+			for j := len(pending) - 1; j >= 0; j-- {
+				a.requeueSubAgentMailboxInMemory(*pending[j])
 			}
 			return false
 		}

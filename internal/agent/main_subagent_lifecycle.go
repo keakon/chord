@@ -310,6 +310,7 @@ func (a *MainAgent) removeSubAgentMailboxState(agentID string) {
 	for _, messageID := range a.subAgentInbox.progressPending {
 		if a.subAgentInbox.progressPendingAgent[messageID] == agentID {
 			delete(a.subAgentInbox.progressPendingAgent, messageID)
+			delete(a.subAgentInbox.progressPendingAttempts, messageID)
 			continue
 		}
 		filterPending = append(filterPending, messageID)

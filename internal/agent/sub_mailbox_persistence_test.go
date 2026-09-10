@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -9,6 +10,11 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/keakon/golog"
+	"github.com/keakon/golog/log"
+
+	"github.com/keakon/chord/internal/logtest"
 )
 
 func TestPersistSubAgentMailboxMessageReportsOpenFailure(t *testing.T) {
@@ -654,5 +660,95 @@ func TestPersistAndRollbackAdvanceSpoolWriteGeneration(t *testing.T) {
 	}
 	if loaded, found, err := a.loadSpooledMailbox("msg-2"); err != nil || !found || loaded == nil || loaded.Summary != "second" {
 		t.Fatalf("load msg-2 = (%#v, %v, %v), want found", loaded, found, err)
+	}
+}
+
+// TestMainInboxProgressRetryDropsPermanentlyMissingRow pins the retry cap on
+// the durable progress fallback. A progress id whose row never appears in the
+// mailbox log used to be requeued on every dispatch, so hasRunnableMailboxWork
+// kept reporting pending progress (the main could never reach global idle) and
+// each dispatch rescanned the whole log. After a bounded number of failed
+// reloads the id must be dropped with a warning.
+func TestMainInboxProgressRetryDropsPermanentlyMissingRow(t *testing.T) {
+	var buf bytes.Buffer
+	log.SetDefaultLogger(logtest.NewLogger(&buf, golog.DebugLevel))
+	defer log.SetDefaultLogger(logtest.NewLogger(nil, golog.InfoLevel))
+
+	a := newTestMainAgent(t, t.TempDir())
+	const messageID = "progress-missing-1"
+	a.subAgentInbox.progressPending = []string{messageID}
+	a.subAgentInbox.progressPendingAgent[messageID] = "worker-missing"
+
+	// The id must survive at least one retry (a real persistence race resolves
+	// on the next dispatch) but must be dropped within a small bounded number
+	// of dispatches instead of being requeued forever.
+	droppedAfter := 0
+	for take := 1; take <= 10; take++ {
+		if got := a.takeMainInboxProgressSnapshots(); len(got) != 0 {
+			t.Fatalf("take %d = %#v, want no snapshots while the durable row is missing", take, got)
+		}
+		if len(a.subAgentInbox.progressPending) == 0 {
+			droppedAfter = take
+			break
+		}
+		if got := a.subAgentInbox.progressPending; len(got) != 1 || got[0] != messageID {
+			t.Fatalf("progressPending after take %d = %#v, want the missing id retried", take, got)
+		}
+	}
+	if droppedAfter == 0 {
+		t.Fatal("progressPending never dropped the permanently missing id: it is requeued on every dispatch")
+	}
+	if droppedAfter < 2 {
+		t.Fatalf("missing id dropped after %d take(s), want at least one retry before the cap", droppedAfter)
+	}
+	if _, ok := a.subAgentInbox.progressPendingAgent[messageID]; ok {
+		t.Fatal("progressPendingAgent still holds the dropped id")
+	}
+	if a.hasRunnableMailboxWork() {
+		t.Fatal("hasRunnableMailboxWork() = true after the permanently missing progress id was dropped")
+	}
+	if !strings.Contains(buf.String(), messageID) {
+		t.Fatalf("log = %q, want a warning naming the dropped id %q", buf.String(), messageID)
+	}
+}
+
+// TestStageMailboxBatchRollbackRestoresProgressOrder pins the rollback order of
+// a staged batch. requeueSubAgentMailboxInMemory pushes each message to the
+// front of its queue, so a claimed batch must be requeued in reverse for the
+// queue order to match the order the batch was taken in; requeueing forward
+// handed the main the whole progress backlog reversed on every persistence
+// retry.
+func TestStageMailboxBatchRollbackRestoresProgressOrder(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	claimed := []SubAgentMailboxMessage{
+		{MessageID: "p-1", AgentID: "worker-1", TaskID: "task-1", Kind: SubAgentMailboxKindProgress, Summary: "one"},
+		{MessageID: "p-2", AgentID: "worker-2", TaskID: "task-2", Kind: SubAgentMailboxKindProgress, Summary: "two"},
+		{MessageID: "p-3", AgentID: "worker-3", TaskID: "task-3", Kind: SubAgentMailboxKindProgress, Summary: "three"},
+	}
+	for _, msg := range claimed {
+		msg.persistPending = true
+		a.subAgentInbox.progressQueue = append(a.subAgentInbox.progressQueue, msg)
+		a.subAgentInbox.progressPendingAgent[msg.MessageID] = msg.AgentID
+	}
+
+	// A non-directory persist target makes the first progress snapshot fail its
+	// durability check, forcing the whole claimed batch to roll back.
+	blockedRoot := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(blockedRoot, []byte("x"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	a.sessionDir = blockedRoot
+
+	if a.stageNextSubAgentMailboxBatch() {
+		t.Fatal("stageNextSubAgentMailboxBatch() = true, want the failed persistence to roll the batch back")
+	}
+	got := a.subAgentInbox.progressQueue
+	if len(got) != len(claimed) {
+		t.Fatalf("progressQueue = %#v, want all %d claimed snapshots requeued", got, len(claimed))
+	}
+	for i, want := range claimed {
+		if got[i].MessageID != want.MessageID {
+			t.Fatalf("progressQueue[%d] = %q, want %q (claim order must survive the rollback)", i, got[i].MessageID, want.MessageID)
+		}
 	}
 }

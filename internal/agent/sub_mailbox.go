@@ -149,10 +149,15 @@ type subAgentInbox struct {
 	progressQueue        []SubAgentMailboxMessage
 	progressPending      []string
 	progressPendingAgent map[string]string
-	spoolUrgent          []string
-	spoolNormal          []string
-	spoolIndex           map[string]mailboxSpoolLocation
-	spoolIndexReady      bool
+	// progressPendingAttempts counts the failed reload attempts per pending
+	// progress id, so a row that never appears in the durable log is dropped
+	// after a bounded number of dispatches instead of suppressing global idle
+	// indefinitely (see takeMainInboxProgressSnapshots).
+	progressPendingAttempts map[string]int
+	spoolUrgent             []string
+	spoolNormal             []string
+	spoolIndex              map[string]mailboxSpoolLocation
+	spoolIndexReady         bool
 	// spoolWriteGen counts every completed mailbox.jsonl mutation (persist
 	// appends and rollback truncations). It is bumped under
 	// subAgentMailboxIDsMu right after the file write, so an index rebuild
@@ -170,9 +175,10 @@ type mailboxSpoolLocation struct {
 
 func newSubAgentInbox() subAgentInbox {
 	return subAgentInbox{
-		progress:             make(map[string]SubAgentMailboxMessage),
-		progressPendingAgent: make(map[string]string),
-		spoolIndex:           make(map[string]mailboxSpoolLocation),
+		progress:                make(map[string]SubAgentMailboxMessage),
+		progressPendingAgent:    make(map[string]string),
+		progressPendingAttempts: make(map[string]int),
+		spoolIndex:              make(map[string]mailboxSpoolLocation),
 	}
 }
 
