@@ -62,6 +62,12 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 	case agent.MailboxQueuedEvent:
 		m.upsertQueuedMailbox(evt.Message)
 		return true, effects
+	case agent.MailboxDeliveryDroppedEvent:
+		// The session can no longer deliver this message, so its waiting row
+		// must go: the agent-side exit already emitted a warn toast with the
+		// reason, and the durable row is left for a later restore to replay.
+		m.removeQueuedMailbox(evt.MessageID)
+		return true, effects
 	case agent.MailboxTranscriptAppendedEvent:
 		if evt.Message.Mailbox == nil || strings.TrimSpace(evt.Message.Mailbox.MessageID) == "" {
 			return true, effects

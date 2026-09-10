@@ -126,3 +126,30 @@ func TestVisibleQueuedMailboxesFiltersByFocusedAgent(t *testing.T) {
 		t.Fatalf("visible rows for main = %#v, want only m3", visible)
 	}
 }
+
+func mailboxDeliveryDroppedEvent(messageID string) agent.MailboxDeliveryDroppedEvent {
+	return agent.MailboxDeliveryDroppedEvent{MessageID: messageID}
+}
+
+func TestMailboxDeliveryDroppedEventRemovesQueueRow(t *testing.T) {
+	m := NewModelWithSize(nil, 140, 24)
+	_ = m.handleAgentEvent(agentEventMsg{event: mailboxQueuedEvent("m1", "agent-1", "agent-1", "working")})
+	_ = m.handleAgentEvent(agentEventMsg{event: mailboxQueuedEvent("m2", "agent-2", "agent-2", "other")})
+
+	_ = m.handleAgentEvent(agentEventMsg{event: mailboxDeliveryDroppedEvent("m1")})
+
+	if len(m.mailboxQueue) != 1 || m.mailboxQueue[0].MessageID != "m2" {
+		t.Fatalf("mailboxQueue = %#v, want only m2 left after m1 was dropped", m.mailboxQueue)
+	}
+}
+
+func TestMailboxDeliveryDroppedEventUnknownIDIsNoop(t *testing.T) {
+	m := NewModelWithSize(nil, 140, 24)
+	_ = m.handleAgentEvent(agentEventMsg{event: mailboxQueuedEvent("m1", "agent-1", "agent-1", "working")})
+
+	_ = m.handleAgentEvent(agentEventMsg{event: mailboxDeliveryDroppedEvent("missing")})
+
+	if len(m.mailboxQueue) != 1 || m.mailboxQueue[0].MessageID != "m1" {
+		t.Fatalf("mailboxQueue = %#v, want m1 untouched for an unknown drop id", m.mailboxQueue)
+	}
+}
