@@ -2614,7 +2614,6 @@ func (a *MainAgent) handleAgentError(evt Event) {
 			TargetTaskID:  sub2.OwnerTaskID(),
 			Kind:          string(SubAgentMailboxKindRiskAlert),
 			Message:       failureSummary,
-			MessageID:     mailbox.MessageID,
 		})
 		a.handleSubAgentCloseRequestedEvent(Event{
 			Type:     EventSubAgentCloseRequested,

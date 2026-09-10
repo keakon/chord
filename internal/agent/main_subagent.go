@@ -699,7 +699,6 @@ func (a *MainAgent) handleAgentNotify(evt Event) {
 		Kind:          string(kind),
 		Subtype:       strings.TrimSpace(payload.Subtype),
 		Message:       msg,
-		MessageID:     notifyMsg.MessageID,
 	})
 	a.emitToTUI(AgentStatusEvent{AgentID: evt.SourceID, Status: "running", Message: msg})
 	log.Debugf("SubAgent report received agent=%v message_len=%v", evt.SourceID, len(msg))

@@ -634,13 +634,6 @@ type AgentNotifyEvent struct {
 	// of showing "AGENT BLOCKED" for an episode that already ended.
 	Subtype string
 	Message string
-	// MessageID is the durable mailbox message id for the notify, when the
-	// notify corresponds to a persisted sub-agent mailbox message. The TUI
-	// records it in its notify anchor log so a restored session can skip
-	// replaying cards that the durable transcript already renders, instead of
-	// duplicating them. It is empty for notifies without a backing mailbox
-	// message (e.g. control-plane message delivery notifications).
-	MessageID string
 }
 
 func (AgentNotifyEvent) agentEvent() {}

@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -84,12 +85,12 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 				}
 				messageIndex := a.ctxMgr.MessageCount()
 				a.ctxMgr.Append(msg)
-				a.persistAsyncAfter("main", msg, func(err error) {
+				a.persistAsyncAfter(identity.MainAgentID, msg, func(err error) {
 					if err != nil {
 						a.notePersistenceFailure(err)
 						return
 					}
-					a.emitToTUI(BackgroundResultAppendedEvent{Message: msg, TargetAgentID: "main", MessageIndex: messageIndex})
+					a.emitToTUI(BackgroundResultAppendedEvent{Message: msg, TargetAgentID: identity.MainAgentID, MessageIndex: messageIndex})
 				})
 				if id != "" {
 					durableMailboxIDs[id] = struct{}{}
@@ -105,12 +106,12 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 			if id := strings.TrimSpace(mailbox.MessageID); id == "" || !mapContains(durableMailboxIDs, id) {
 				messageIndex := a.ctxMgr.MessageCount()
 				a.ctxMgr.Append(msg)
-				a.persistAsyncAfter("main", msg, func(err error) {
+				a.persistAsyncAfter(identity.MainAgentID, msg, func(err error) {
 					if err != nil {
 						a.notePersistenceFailure(err)
 						return
 					}
-					a.emitToTUI(MailboxTranscriptAppendedEvent{Message: msg, TargetAgentID: "main", MessageIndex: messageIndex})
+					a.emitToTUI(MailboxTranscriptAppendedEvent{Message: msg, TargetAgentID: identity.MainAgentID, MessageIndex: messageIndex})
 				})
 				if id != "" {
 					durableMailboxIDs[id] = struct{}{}

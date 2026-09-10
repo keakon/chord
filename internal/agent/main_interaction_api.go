@@ -199,28 +199,6 @@ func (a *MainAgent) GetMessagesForTarget(conversation ConversationTarget) []mess
 	return a.ctxMgr.Snapshot()
 }
 
-// GetMessageCountForTarget returns a target history length without copying the
-// message slice. Parked histories use the recovery log's newline-count cache
-// instead of loading every message and attachment.
-func (a *MainAgent) GetMessageCountForTarget(conversation ConversationTarget) int {
-	target, ok := a.resolveConversationTarget(conversation)
-	if !ok {
-		return -1
-	}
-	if target.sub != nil {
-		return target.sub.GetContextMessageCount()
-	}
-	if target.parked || target.settled {
-		count, err := countTaskHistoryMessages(a.recoveryManager(), target.task)
-		if err != nil {
-			log.Warnf("GetMessageCountForTarget: failed to count subagent transcript task_id=%v error=%v", target.task.TaskID, err)
-			return -1
-		}
-		return count
-	}
-	return a.ctxMgr.MessageCount()
-}
-
 // ContinueFromContext re-runs the LLM with the existing context without
 // appending a new user message. Routes to the focused SubAgent if active.
 func (a *MainAgent) ContinueFromContext() {

@@ -695,7 +695,6 @@ func (a *MainAgent) dispatchSubAgentRiskAlert(mailbox *SubAgentMailboxMessage, s
 		Kind:          string(SubAgentMailboxKindRiskAlert),
 		Subtype:       strings.TrimSpace(mailbox.Subtype),
 		Message:       strings.TrimSpace(mailbox.Summary),
-		MessageID:     mailbox.MessageID,
 	})
 }
 
