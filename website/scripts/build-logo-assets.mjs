@@ -20,10 +20,11 @@ const WORDMARK_PATH = path.join(REPO_ROOT, 'assets', 'logo', 'chord-wordmark.svg
 const DEFAULT_OUT_DIR = path.join(REPO_ROOT, 'website', 'public');
 
 // The wordmark's letters use currentColor, which resolves to black inside a
-// standalone image, so the generated icons set the ink for their dark surfaces.
-const INK = '#f6f4ef';
+// standalone image, so the generated images set their own ink.
 const SURFACE = '#1b1b1f';
-const ICON_PADDING = 0.08; // share of a square icon left around the wordmark
+const INK_ON_DARK = '#f6f4ef'; // wordmark ink drawn over SURFACE
+const ICON_PADDING = 0.08; // share of a square tile left around the wordmark
+const FAVICON_PADDING = 0.04; // a transparent favicon carries the mark larger
 const TILE_RADIUS = 0.22; // tile corner radius, as a share of the icon size
 const ICO_SIZES = [16, 32, 48];
 const OG_WIDTH = 1200;
@@ -92,8 +93,9 @@ function centre(bounds, scale, cx, cy) {
   return `translate(${fmt(tx)} ${fmt(ty)}) scale(${fmt(scale)})`;
 }
 
-function mark(parts) {
-  return `<g fill="${INK}">${parts.letters}</g><g fill="${parts.accentFill}">${parts.accent}</g>`;
+function mark(parts, ink, inkClass = '') {
+  const cls = inkClass ? ` class="${inkClass}"` : '';
+  return `<g${cls} fill="${ink}">${parts.letters}</g><g fill="${parts.accentFill}">${parts.accent}</g>`;
 }
 
 function iconSvg(size, parts, bounds) {
@@ -101,7 +103,20 @@ function iconSvg(size, parts, bounds) {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
   <title>chord</title>
   <rect width="${size}" height="${size}" rx="${fmt(size * TILE_RADIUS)}" fill="${SURFACE}"/>
-  <g transform="${centre(bounds, scale, size / 2, size / 2)}">${mark(parts)}</g>
+  <g transform="${centre(bounds, scale, size / 2, size / 2)}">${mark(parts, INK_ON_DARK)}</g>
+</svg>
+`;
+}
+
+// A favicon has no surface of its own, so the ink carries the contrast: brand
+// dark for light tab bars, flipped to brand light where the browser honours the
+// media query under a dark colour scheme.
+function faviconSvg(size, parts, bounds) {
+  const scale = (size * (1 - 2 * FAVICON_PADDING)) / bounds.width;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+  <title>chord</title>
+  <style>@media (prefers-color-scheme: dark) { .ink { fill: ${INK_ON_DARK} } }</style>
+  <g transform="${centre(bounds, scale, size / 2, size / 2)}">${mark(parts, SURFACE, 'ink')}</g>
 </svg>
 `;
 }
@@ -144,12 +159,12 @@ export async function buildLogoAssets(outDir = DEFAULT_OUT_DIR) {
   const bounds = await contentBounds(parseViewBox(svg));
   const render = (source) => sharp(Buffer.from(source)).png().toBuffer();
 
-  const icons = await Promise.all(
-    ICO_SIZES.map(async (size) => ({ size, data: await render(iconSvg(size, parts, bounds)) })),
+  const favicons = await Promise.all(
+    ICO_SIZES.map(async (size) => ({ size, data: await render(faviconSvg(size, parts, bounds)) })),
   );
   const outputs = {
-    'favicon.svg': Buffer.from(iconSvg(64, parts, bounds)),
-    'favicon.ico': icoContainer(icons),
+    'favicon.svg': Buffer.from(faviconSvg(64, parts, bounds)),
+    'favicon.ico': icoContainer(favicons),
     'apple-touch-icon.png': await render(iconSvg(180, parts, bounds)),
     'icon-512.png': await render(iconSvg(512, parts, bounds)),
     'og.png': await render(socialCardSvg(parts, bounds)),
