@@ -74,7 +74,6 @@
 - **普通定向消息：**提供 `target_task_id`、`message`，可选填 `kind`；省略 `message_type`、`subtype`、`correlation_id` 和 `payload`。纠正或追加工作使用此形式。
 - **回复待处理请求：**除 `target_task_id`、`message_type: response` 和 `message` 外，**必须**提供该请求的 `correlation_id`；可选填 `kind`。此形式不接受 `subtype` 与 `payload`。只能向上级汇报的角色不能发送定向回复。
 
-
 ### 长文本控制工具
 
 `done`、`complete` 和 `escalate` 可能携带较长的 Markdown 报告、总结或升级原因。参数仍在流式接收时，TUI 会临时显示 `N chars received`；接收完成后，正文按 Markdown 直接渲染在卡片里。`complete` 还会保留结构化完成信息——修改文件、遗留限制、已知风险、后续建议和 artifact 引用。
@@ -86,7 +85,6 @@
 ### 委派任务边界
 
 agent 间消息遵守请求边界：目标 busy 时，消息只入队并随其下一次 LLM 请求一并处理，不打断当前请求；空闲但可恢复的目标会被唤醒接收。发给空闲主代理的 progress / notice 不是纯信息：每一条未投递的更新都会保留，并按产出顺序投递；下一次回合之间的处理会把这些待投递更新合并成一批，为投递这批单独唤醒主代理多跑一回合（多一次 LLM 请求），之后它才可能重新静默。mailbox 与协调状态具备持久性：父子请求/响应记录与排队载荷都能跨 compaction 与重启存活，投递跨任务水合保持幂等。
-
 
 委派状态以 runtime 为准，而不是以模型输出为准。worker 未能调用协调工具（`complete`、`escalate` 或 `notify`）时，会获得一次有界的后续请求；若仍然无法完成，或 provider/模型重试耗尽，Chord 会将其标记为 failed、记录 `risk_alert` 并唤醒 owner。Rehydrate 后的 runtime 可能获得新的 `agent_id`；后续协调应使用稳定的委派 `task_id`。
 

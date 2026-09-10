@@ -74,7 +74,6 @@ These tools control agent workflows rather than local side effects, so YOLO does
 - **Plain targeted message:** provide `target_task_id`, `message`, and optionally `kind`. Omit `message_type`, `subtype`, `correlation_id`, and `payload`. Use this form for corrections or follow-up work.
 - **Reply to a pending request:** provide `target_task_id`, `message_type: response`, and the request's **required** `correlation_id`, together with `message` and optionally `kind`. This form does not accept `subtype` or `payload`. Roles that can only notify their owner cannot send targeted replies.
 
-
 ### Long-text control tools
 
 `done`, `complete`, and `escalate` may carry a long Markdown report, summary, or escalation reason. While the arguments are still streaming, the TUI shows a temporary `N chars received` indicator; once they are complete, the prose is rendered as Markdown in the card body. `complete` also keeps structured completion details — changed files, remaining limitations, known risks, follow-up recommendations, and artifact references.
@@ -86,7 +85,6 @@ These cards are always expanded and their header is only the tool name: the repo
 ### Delegated task boundaries
 
 Agent-to-agent messages respect request boundaries: if the target is busy, the message is queued and included in its next LLM request instead of interrupting the active one; a resumable idle target is woken to receive it. Progress and notice updates sent to an idle main agent are not purely informational: every undelivered update is kept and delivered in the order it was produced, and at the next between-turn boundary Chord merges the pending updates into a single delivery batch that wakes the main for one extra turn (one extra LLM request) before it can go quiet again. Mailbox and coordination state is durable: parent-child request/response records and queued payloads survive compaction and restart, and delivery stays idempotent across task rehydration.
-
 
 The runtime, not the model, is the source of truth for delegation state. A worker that fails to emit a coordination tool (`complete`, `escalate`, or `notify`) receives one bounded follow-up request; if it still cannot comply, or provider/model retries are exhausted, Chord marks it failed, records a `risk_alert`, and wakes the owner. A rehydrated runtime may receive a new `agent_id`; coordination should continue through the stable delegated `task_id`.
 
