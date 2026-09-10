@@ -613,3 +613,65 @@ func TestNormalizeForTarget_UnsignedModeNeverReplaysForeignSignedThinking(t *tes
 		t.Fatalf("tool round lost: %+v", out[0])
 	}
 }
+
+// TestNormalizeForTargetStrictDropsAnthropicThinkingForReplayCompat pins the
+// documented client-side fallback for an Anthropic prefix-binding rejection:
+// the strict level drops every thinking block while keeping each turn's text
+// and tool_use structured, so the replay ladder gains a probe shape distinct
+// from the native/synthesized requests that replay the bound block unchanged.
+func TestNormalizeForTargetStrictDropsAnthropicThinkingForReplayCompat(t *testing.T) {
+	msgs := []message.Message{
+		{Role: message.RoleUser, Content: "q1"},
+		{
+			Role:    message.RoleAssistant,
+			Content: "calling tool",
+			ThinkingBlocks: []message.ThinkingBlock{
+				{Thinking: "plan", Signature: "sig-1"},
+				{Data: "enc-redacted"},
+			},
+			ToolCalls:  []message.ToolCall{{ID: "call-1", Name: "read", Args: json.RawMessage(`{}`)}},
+			Provenance: &message.MessageProvenance{ProviderID: "anthropic", ModelID: "claude-x", WireFamily: WireFamilyAnthropic},
+		},
+		{Role: message.RoleTool, ToolCallID: "call-1", Content: "result"},
+		{Role: message.RoleUser, Content: "q2"},
+	}
+	target := TargetModel{
+		ProviderID:              "anthropic",
+		ModelID:                 "claude-x",
+		WireFamily:              WireFamilyAnthropic,
+		ReasoningContinuityMode: ReasoningContinuityAnthropicBlocks,
+		ToolResultEncoding:      ToolResultEncodingAnthropicUserBlock,
+		SupportsStructuredTools: true,
+	}
+
+	native, _ := NormalizeForTarget(msgs, target, NormalizeOptions{StructuredTools: true, ReplayCompat: ReplayCompatNative})
+	if len(native) != 4 || len(native[1].ThinkingBlocks) != 2 || len(native[1].ToolCalls) != 1 {
+		t.Fatalf("native shape must keep signed thinking and the structured tool call: %+v", native)
+	}
+
+	strict, report := NormalizeForTarget(msgs, target, NormalizeOptions{StructuredTools: true, ReplayCompat: ReplayCompatStrict})
+	if report.DroppedThinkingBlocks != 2 {
+		t.Fatalf("DroppedThinkingBlocks=%d, want 2", report.DroppedThinkingBlocks)
+	}
+	sawEvidence := false
+	for _, m := range strict {
+		if len(m.ThinkingBlocks) != 0 {
+			t.Fatalf("strict must drop Anthropic thinking blocks, got %+v", m.ThinkingBlocks)
+		}
+		if m.Role == message.RoleTool || len(m.ToolCalls) > 0 {
+			t.Fatalf("strict must textify the rejected Anthropic tool round: %+v", strict)
+		}
+		if strings.Contains(m.Content, "[Historical tool call: read]") && strings.Contains(m.Content, "[Historical tool result for call-1]") {
+			sawEvidence = true
+		}
+	}
+	if !sawEvidence {
+		t.Fatalf("strict must keep the completed tool round as historical evidence: %+v", strict)
+	}
+	if len(native[1].ThinkingBlocks) == 0 {
+		t.Fatal("strict shape must differ from native so the replay ladder has a distinct probe")
+	}
+	if len(msgs[1].ThinkingBlocks) != 2 {
+		t.Fatalf("input transcript mutated: %+v", msgs[1])
+	}
+}

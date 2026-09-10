@@ -976,6 +976,54 @@ func TestCompleteStreamSkipsEquivalentReplayLevelBeforeStrict(t *testing.T) {
 	}
 }
 
+// TestCompleteStreamRecoversAnthropicPrefixBindingRejection pins the Anthropic
+// self-heal: a signed thinking block that the API rejects for prefix binding
+// must escalate the ladder to the strict shape, which drops the bound block
+// instead of resending it unchanged.
+func TestCompleteStreamRecoversAnthropicPrefixBindingRejection(t *testing.T) {
+	cfg := NewProviderConfig("messages", config.ProviderConfig{Type: config.ProviderTypeMessages}, []string{"key"})
+	impl := &replayRejectingProvider{
+		rejectCount:      1,
+		rejectionMessage: "messages.1.content.0: Invalid `signature` in `thinking` block. The block is bound to a different conversation. Remove the block, or set `thinking.block_binding.prefix_mismatch_behavior` to \"drop_block\".",
+	}
+	client := NewClient(cfg, impl, "claude-x", 4096, "sys")
+	messages := []message.Message{
+		{
+			Role:           message.RoleAssistant,
+			ThinkingBlocks: []message.ThinkingBlock{{Thinking: "signed reasoning", Signature: "sig-1"}},
+			ToolCalls:      []message.ToolCall{{ID: "call-1", Name: "read", Args: []byte(`{}`)}},
+			Provenance:     &message.MessageProvenance{ProviderID: "messages", ModelID: "claude-x", WireFamily: modelcompat.WireFamilyAnthropic},
+		},
+		{Role: message.RoleTool, ToolCallID: "call-1", Content: "ok"},
+	}
+	result, _, err := client.completeStreamTarget(
+		context.Background(), streamRetryTarget{provider: cfg, impl: impl, modelID: "claude-x", maxTokens: 4096, contextLimit: 128000, inputLimit: 128000, tuning: RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "adaptive"}}},
+		0, messages, nil, nil, false, nil, 0, false, &CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "",
+	)
+	if err != nil || result.resp == nil {
+		t.Fatalf("completeStreamTarget = (%+v, %v)", result, err)
+	}
+	impl.mu.Lock()
+	attempts := append([][]message.Message(nil), impl.attempts...)
+	impl.mu.Unlock()
+	if len(attempts) != 2 {
+		t.Fatalf("attempts = %d, want native then strict without an unchanged retry", len(attempts))
+	}
+	sawSigned := false
+	for _, m := range attempts[0] {
+		if len(m.ThinkingBlocks) > 0 {
+			sawSigned = true
+		}
+	}
+	if !sawSigned {
+		t.Fatalf("native attempt must replay the signed block: %+v", attempts[0])
+	}
+	requireStrictReplayEvidence(t, attempts[1], "read", "call-1")
+	if got := client.replayCompatLevelFor(cfg.Name(), "claude-x", "", lastUserMessageIndex(messages)); got != modelcompat.ReplayCompatStrict {
+		t.Fatalf("replay level = %d, want strict", got)
+	}
+}
+
 func TestCompleteStreamDegradesConvertedUnsignedThinkingWithoutTextLeak(t *testing.T) {
 	cfg := NewProviderConfig("messages", config.ProviderConfig{
 		Type: config.ProviderTypeMessages,
@@ -1272,6 +1320,10 @@ func TestIsReasoningReplayRejection(t *testing.T) {
 		{"encrypted 400", &APIError{StatusCode: 400, Message: "could not decrypt encrypted_content"}, true},
 		{"openai visible reasoning 400", &APIError{StatusCode: 400, Message: "The `reasoning_content` in the thinking mode must be passed back to the API."}, true},
 		{"anthropic thinking 400", &APIError{StatusCode: 400, Message: "The `content[].thinking` in the thinking mode must be passed back to the API."}, true},
+		{"anthropic prefix binding 400", &APIError{StatusCode: 400, Message: "messages.1.content.0: Invalid `signature` in `thinking` block. The block is bound to a different conversation. Remove the block, or set `thinking.block_binding.prefix_mismatch_behavior` to \"drop_block\"."}, true},
+		{"anthropic thinking block modified 400", &APIError{StatusCode: 400, Message: "messages.2.content.0: Thinking block cannot be modified."}, true},
+		{"unrelated signature 400", &APIError{StatusCode: 400, Message: "invalid image signature"}, false},
+		{"thinking without signature 400", &APIError{StatusCode: 400, Message: "thinking budget exceeds max_tokens"}, false},
 		{"gemini signature 400", &APIError{StatusCode: 400, Code: "INVALID_ARGUMENT", Message: "Function call is missing a valid thought signature"}, true},
 		{"gemini signature structured 400", &APIError{StatusCode: 400, Code: "INVALID_ARGUMENT", Message: "thought signature validation failed"}, true},
 		{"responses stream replay rejection", &APIError{Origin: APIErrorOriginSSEEvent, Code: "invalid_encrypted_content", Message: "could not decrypt encrypted_content"}, true},

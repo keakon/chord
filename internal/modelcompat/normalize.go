@@ -163,6 +163,17 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 
 	allowThinking := reasoningContinuityAllowsAnthropicBlocks(target)
 	allowUnsignedThinking := reasoningContinuityAllowsUnsignedAnthropicBlocks(target)
+	// A provider-bound Anthropic thinking block records the conversation prefix
+	// that produced it, so a history rewrite (context compaction, restore
+	// normalization) breaks that chain even though the block is intact, and the
+	// API rejects the replay with an invalid-signature error that native and
+	// synthesized shapes cannot clear. The strict level is the only shape that
+	// drops those blocks, so it gives the replay ladder a distinct probe;
+	// dropping them there then routes the completed tool round through the
+	// existing strict textification rather than replaying blocks the backend
+	// has already rejected.
+	stripAnthropicThinkingForReplayCompat := opts.ReplayCompat >= ReplayCompatStrict &&
+		strings.TrimSpace(target.WireFamily) == WireFamilyAnthropic
 	allowStructuredTools := opts.StructuredTools && target.SupportsStructuredTools && strings.TrimSpace(target.ToolResultEncoding) != "" && strings.TrimSpace(target.ToolResultEncoding) != ToolResultEncodingNone
 	toolResultsByID := collectToolResults(out)
 	toolResultMessagesByID := collectToolResultMessages(out)
@@ -229,7 +240,10 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 		portableReasoningForChat := make([]string, 0, 1)
 		portableReasoningForUnsignedThinking := make([]string, 0, 1)
 
-		if len(msg.ThinkingBlocks) > 0 {
+		if len(msg.ThinkingBlocks) > 0 && stripAnthropicThinkingForReplayCompat {
+			report.DroppedThinkingBlocks += len(msg.ThinkingBlocks)
+			msg.ThinkingBlocks = nil
+		} else if len(msg.ThinkingBlocks) > 0 {
 			strictProvenance := messageAllowsAnthropicThinkingReplay(*msg, target)
 			// anthropic_unsigned targets declare a backend that returns and
 			// consumes visible unsigned thinking only: it cannot verify

@@ -383,6 +383,19 @@ func isReasoningReplayRejection(err error) bool {
 		apiErrMessageContainsAny(apiErr, "must be passed back", "missing", "required", "invalid") {
 		return true
 	}
+	// Anthropic binds a replayed thinking block to the conversation prefix that
+	// produced it, so a history rewrite (context compaction, restore
+	// normalization) rejects an intact block as an invalid signature "bound to
+	// a different conversation". The message names the thinking block, not
+	// reasoning_content, and the strict replay level answers it by dropping the
+	// thinking blocks and textifying the completed tool round.
+	if apiErrMessageContains(apiErr, "thinking", "signature") &&
+		apiErrMessageContainsAny(apiErr, "invalid", "must be passed back", "bound to a different conversation", "cannot be modified", "prefix_mismatch") {
+		return true
+	}
+	if apiErrMessageContainsAny(apiErr, "thinking block cannot be modified", "thinking blocks cannot be modified", "block_binding") {
+		return true
+	}
 	// Gemini commonly reports the signature problem as a structured
 	// INVALID_ARGUMENT/failed-precondition signal with provider-specific text.
 	// Require both a thought-signature marker and rejection semantics so generic
