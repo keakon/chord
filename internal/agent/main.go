@@ -866,6 +866,7 @@ type MainAgent struct {
 	ownedSubAgentMailboxes   map[string][]SubAgentMailboxMessage // owner agentID -> descendant mailbox waiting for owner-local delivery
 	ownedMailboxSpool        map[string][]string                 // owner agentID -> durable mailbox IDs outside the memory budget
 	subAgentMailboxIDsMu     sync.Mutex
+	spoolAppendMu            sync.Mutex          // serializes mailbox.jsonl append/rollback so a recorded spool-index byte span bounds one record
 	subAgentMailboxIDs       map[string]struct{} // session-scoped idempotency keys for persisted and live mailbox events
 	subAgentMailboxConsumed  map[string]struct{} // consumed mailbox IDs loaded once and updated with ack writes
 	mailboxDeliveryPaused    atomic.Bool         // restored sessions wait for explicit user continuation before mailbox delivery

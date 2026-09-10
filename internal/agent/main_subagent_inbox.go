@@ -789,19 +789,31 @@ func (a *MainAgent) loadSpooledMailbox(messageID string) (*SubAgentMailboxMessag
 	if err := a.indexSpooledMailbox(path); err != nil {
 		return nil, false, err
 	}
+	return a.reloadSpooledMailbox(path, messageID)
+}
+
+// reloadSpooledMailbox resolves messageID against the current spool index and,
+// on a trusted hit, decodes the indexed byte span. Callers must refresh the
+// index with indexSpooledMailbox first. The lookup and its ready/hit/miss
+// decision are split out of loadSpooledMailbox so the stale-hit case — a
+// rebuild that a concurrent append or rollback invalidated while it read the
+// log, leaving an entry that can point at a span covering another record — is
+// testable without reproducing the timing window.
+func (a *MainAgent) reloadSpooledMailbox(path, messageID string) (*SubAgentMailboxMessage, bool, error) {
 	a.subAgentMailboxIDsMu.Lock()
 	location, ok := a.subAgentInbox.spoolIndex[messageID]
 	ready := a.subAgentInbox.spoolIndexReady
 	a.subAgentMailboxIDsMu.Unlock()
+	if !ready {
+		// The rebuild above could not republish — a persist or rollback landed
+		// while it read the log — so the index may be missing this id or still
+		// hold an entry that points at another row. Report the reload as failed
+		// so the queueing callers keep the id queued for a retry; the next load
+		// rebuilds over the current log. A stale index is never authoritative,
+		// even when the id already appears in it.
+		return nil, false, fmt.Errorf("spool mailbox index stale for message_id=%v: a concurrent append invalidated the rebuild", messageID)
+	}
 	if !ok {
-		if !ready {
-			// The rebuild above was invalidated by a message appended while it
-			// read the log, so this id — enqueued inside that window — cannot
-			// be trusted absent from the index. Report the reload as failed so
-			// the queueing callers keep the id queued for a retry instead of
-			// treating it as a stale entry and dropping it forever.
-			return nil, false, fmt.Errorf("spool mailbox index stale for message_id=%v: a concurrent append invalidated the rebuild", messageID)
-		}
 		return nil, false, nil
 	}
 	msg, err := readSpooledMailboxAt(path, location)
@@ -1179,39 +1191,16 @@ func (a *MainAgent) persistSubAgentMailboxMessageWithOffset(msg SubAgentMailboxM
 	if sessionDir == "" {
 		return -1, nil
 	}
-	dir := filepath.Join(sessionDir, "subagents")
-	path := filepath.Join(dir, "mailbox.jsonl")
-	f, err := privatefs.OpenFile(sessionDir, path, os.O_CREATE|os.O_WRONLY|os.O_APPEND)
+	path := filepath.Join(sessionDir, "subagents", "mailbox.jsonl")
+	startOffset, endOffset, err := a.appendSubAgentMailboxLog(sessionDir, path, msg)
 	if err != nil {
-		return -1, fmt.Errorf("open mailbox log: %w", err)
-	}
-	startOffset := int64(-1)
-	if info, statErr := f.Stat(); statErr == nil {
-		startOffset = info.Size()
-	}
-	enc := json.NewEncoder(f)
-	if err := enc.Encode(msg); err != nil {
-		_ = f.Close()
 		a.subAgentMailboxIDsMu.Lock()
 		// The failed write may still have extended the file; treat the log as
 		// touched so an in-flight index rebuild does not publish over it.
 		a.subAgentInbox.spoolWriteGen++
 		a.subAgentInbox.spoolIndexReady = false
 		a.subAgentMailboxIDsMu.Unlock()
-		return -1, fmt.Errorf("append mailbox message: %w", err)
-	}
-	endOffset := int64(-1)
-	if info, statErr := f.Stat(); statErr == nil {
-		endOffset = info.Size()
-	}
-	if err := f.Close(); err != nil {
-		a.subAgentMailboxIDsMu.Lock()
-		// The buffered append may or may not have been flushed; treat the log
-		// as touched so an in-flight index rebuild does not publish over it.
-		a.subAgentInbox.spoolWriteGen++
-		a.subAgentInbox.spoolIndexReady = false
-		a.subAgentMailboxIDsMu.Unlock()
-		return -1, fmt.Errorf("close mailbox log: %w", err)
+		return -1, err
 	}
 	messageID := strings.TrimSpace(msg.MessageID)
 	a.subAgentMailboxIDsMu.Lock()
@@ -1227,6 +1216,37 @@ func (a *MainAgent) persistSubAgentMailboxMessageWithOffset(msg SubAgentMailboxM
 	}
 	a.subAgentMailboxIDsMu.Unlock()
 	return startOffset, nil
+}
+
+// appendSubAgentMailboxLog appends msg to the session mailbox log and returns
+// the byte span the appended record occupies. The write runs under
+// spoolAppendMu so the log size before and after it bounds exactly this record
+// even when another goroutine appends concurrently; otherwise the recorded
+// start would be a stale size and the recorded length would cover the
+// interleaved rows, and a reload of this id would decode a different message.
+func (a *MainAgent) appendSubAgentMailboxLog(sessionDir, path string, msg SubAgentMailboxMessage) (int64, int64, error) {
+	a.spoolAppendMu.Lock()
+	defer a.spoolAppendMu.Unlock()
+	f, err := privatefs.OpenFile(sessionDir, path, os.O_CREATE|os.O_WRONLY|os.O_APPEND)
+	if err != nil {
+		return -1, -1, fmt.Errorf("open mailbox log: %w", err)
+	}
+	startOffset := int64(-1)
+	if info, statErr := f.Stat(); statErr == nil {
+		startOffset = info.Size()
+	}
+	if err := json.NewEncoder(f).Encode(msg); err != nil {
+		_ = f.Close()
+		return startOffset, -1, fmt.Errorf("append mailbox message: %w", err)
+	}
+	endOffset := int64(-1)
+	if info, statErr := f.Stat(); statErr == nil {
+		endOffset = info.Size()
+	}
+	if err := f.Close(); err != nil {
+		return startOffset, endOffset, fmt.Errorf("close mailbox log: %w", err)
+	}
+	return startOffset, endOffset, nil
 }
 
 // rollbackSubAgentMailboxMessage truncates the mailbox.jsonl entry that
@@ -1249,7 +1269,10 @@ func (a *MainAgent) rollbackSubAgentMailboxMessage(msg *SubAgentMailboxMessage, 
 	if sessionDir == "" || messageID == "" {
 		return
 	}
-	if err := truncateSubAgentMailboxLog(sessionDir, offset); err != nil {
+	a.spoolAppendMu.Lock()
+	err := truncateSubAgentMailboxLog(sessionDir, offset)
+	a.spoolAppendMu.Unlock()
+	if err != nil {
 		log.Errorf("failed to roll back mailbox message message_id=%v offset=%v error=%v (restore may replay it)", messageID, offset, err)
 		return
 	}
