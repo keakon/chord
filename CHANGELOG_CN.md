@@ -2,7 +2,14 @@
 
 本项目采用语义化版本风格发布。1.0 之前的版本可能包含不兼容变更。
 
-## 未发布
+## 0.8.0 - 2026-09-11
+
+### 亮点
+
+- 项目记忆（Memory）来了：项目根的 `MEMORY.md` 加 `.chord/memory/records/` 跨会话沉淀可复用的偏好、项目事实、工作流与教训，以有界索引注入；用 `memory.enabled: true` 开启后会自动整理索引。
+- 长会话的上下文管理有了新手段：可选的 `compact_context` 工具让模型能在安全停点归档状态、在压缩后的上下文上继续，压缩阈值与压力提醒线也可按模型配置——checkpoint 会原样保留最近的真实用户消息。
+- 流式输出中断时已产出的正文不再被丢弃重生成：它会留在屏幕上并作为被中断的回复存盘，同一回合沿 key / 兜底模型轮转续写，界面上出现 `REPLY RESUMED` 卡片。
+- 升级会触及既有配置与习惯：切换 role 改为 Insert 模式的 `Shift+Tab`，`{` / `}` 改为在用户消息卡之间跳转，文件类工具的权限 pattern 以会话工作目录为作用域——迁移步骤见「不兼容变更」。
 
 ### 不兼容变更
 
@@ -20,7 +27,6 @@
 - YOLO 下，`handoff`、`delegate`、`cancel` 现在除非有规则直接指名，否则一律拒绝。此前 YOLO 的规则过滤会丢弃所有未指名受保护工具的规则，而一个都没指名的角色——任何 allowlist 角色，以及只写了 `"*": allow` 的角色——会被过滤成空规则集，执行门把空规则集读作「未配置任何权限」从而全部放行。于是打开 YOLO 反而把这些角色明确拒绝过的控制工具授予了它们，与文档承诺的「宽泛 `"*": allow` 不会授予它们」正好相反。YOLO 下需要用到这些工具的角色，现在必须显式配置。
 - `providers.<name>.compress` 从布尔值改为编码字符串（`gzip` 或 `zstd`）。残留的 `compress: true` 不再启用 gzip：会被忽略、请求压缩保持关闭，`chord doctor config` 会报告并给出迁移提示——想恢复旧行为就写 `compress: gzip`。`compress: zstd` 发送 zstd 压缩的请求体，即 Codex 客户端发给 codex-backend 请求所用的编码。详见[Provider 请求压缩](./docs/configuration_CN.md#provider-请求压缩)。
 - `delegate` 现在必须携带 `expected_write_scope`，只读委派改为选择角色来表达——已移除的 `read_only` 标志不再生效（传入会被静默忽略）。只做研究的任务请选择 permission 配置中 deny 掉文件修改工具（`write` / `edit` / `delete` / `apply_patch`）的角色，并传空对象 `{}`——空范围只对这种角色放行；其余任务至少声明 `files`、`path_prefix` 或 `modules` 其中一项。省略该字段，或能写文件的角色传空范围，都会被拒绝，不再静默取得全局独占范围；已有委派 prompt 和集成需要补上任务适用的最窄范围。
-
 - `expected_write_scope` 不再是强制的运行时边界：runtime 不再拒绝声明路径之外的文件工具目标，不再因只读或 scoped 委派而限制 Shell 执行，也不再拒绝声明范围宽于父任务的嵌套委派。worker 现在可以修改其角色权限规则允许的任何文件、运行任何命令，声明只用于协调记录。活跃任务之间声明范围重叠也不再拒绝委派：任务照常启动，句柄携带 `scope_conflict` 参考提示（`suggested_task_id` / `suggested_action: serialize_or_worktree`），告诉 owner 把两个任务串行执行、用 `notify` 协调共享文件的编辑，或给新 worker 独立的 git worktree——多个 worker 会改同一批文件时请改用这些方式。同一文件的并发写入仍按次串行化以保护完整性，复用某活跃任务显式 `semantic_task_key` 的委派仍以 `already_exists` 拒绝。
 - Agent 委派限制现在有全局上限：`delegation.max_children` 默认值为 `10`，不能超过 `64`；`delegation.max_depth` 默认值为 `1`，不能超过 `8`。负数和超过上限的值会报配置错误，不再静默接受。
 - 角色名不再决定内置 prompt 块。此前名为 `planner.yaml` 的 agent 文件会静默获得规划块，现在只有 `prompt_preset: planning` 才会——无论角色叫什么。自定义的 `planner` 角色需要补上 `prompt_preset: planning` 才能保持原有 prompt；内置 `planner` 本身已显式声明，未改动过配置的安装不受影响。
@@ -124,6 +130,7 @@
 - 可选工具参数上的显式 `null` 现在等同于未提供该参数，不再判为类型错误。模型往往会把声明过的属性逐个填满，表示「没有提供」的 `null` 不该再换来一次往返；工具结果会说明哪些参数被忽略。必填参数不受影响：那里的 `null` 仍会以指明字段名的类型错误失败。
 - `chord cleanup` 现在会在逐行结果之后输出一行汇总：以 `sessions` 为例，会话目录与空壳项目目录分开计数——空壳目录里只剩一个 `project.json`——并给出本次释放的总字节数。其他类别显示条目数与总大小；dry-run 时措辞为 `would remove`，真实删除时为 `removed`。
 - SubAgent 现在会在主 agent 开启 YOLO 期间继承该模式：原本需要 `ask` 确认的普通工具（文件编辑、shell 命令）直接放行，不再弹出共享确认框，与主 agent 自身的绕过行为一致。继承的 YOLO 不会放松任何 `deny`（只读 worker 的 `write: deny` 仍然生效），`handoff`、`delegate`、`cancel` 等受保护控制工具也仍按各自规则与确认流程处理。继承是即时的：关闭 YOLO 后，SubAgent 的后续调用立即恢复确认。
+- 新增一批网关兼容设置：`reasoning.effort_map` 把规范 reasoning effort 映射成 provider 实际接受的 wire 值；`compat.chat_completions.infer_finish_reason` 对结束流时不发 `finish_reason` 的网关推断为正常的 `stop` / `tool_calls` 完成，而不是当成中断；`compat.chat_completions.requires_tool_result_name` 与 `requires_assistant_after_tool_result` 适配这些网关对 tool result 形态的要求。
 
 ### 修复
 
