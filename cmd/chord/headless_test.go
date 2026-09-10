@@ -394,6 +394,138 @@ func TestHeadlessHandoffRequestEmptyAgentsNotFabricated(t *testing.T) {
 	}
 }
 
+func TestHeadlessHandoffCancelledMatchingClearsAndForwards(t *testing.T) {
+	state := &headlessState{
+		subscriptions:  map[string]bool{"handoff_cancelled": true},
+		pendingHandoff: &headlessHandoffPayload{RequestID: "handoff-1", PlanPath: "/tmp/plan.md"},
+	}
+
+	envs := filterHeadlessEvent(agent.HandoffCancelledEvent{RequestID: "handoff-1", Reason: "superseded"}, state)
+
+	env := findHeadlessEnvelope(envs, "handoff_cancelled")
+	if env == nil {
+		t.Fatalf("handoff_cancelled envelope not emitted: %v", envs)
+	}
+	payload, ok := env.Payload.(map[string]string)
+	if !ok {
+		t.Fatalf("payload type = %T", env.Payload)
+	}
+	if payload["request_id"] != "handoff-1" || payload["reason"] != "superseded" {
+		t.Fatalf("payload = %#v, want request_id handoff-1 / reason superseded", payload)
+	}
+
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.pendingHandoff != nil {
+		t.Fatalf("pendingHandoff = %+v, want nil after a matching cancellation", state.pendingHandoff)
+	}
+	if state.updatedAt.IsZero() {
+		t.Fatal("updatedAt should be refreshed by the cancellation")
+	}
+}
+
+func TestHeadlessHandoffCancelledWithoutSubscriptionStillClears(t *testing.T) {
+	state := &headlessState{
+		subscriptions:  map[string]bool{"idle": true},
+		pendingHandoff: &headlessHandoffPayload{RequestID: "handoff-1"},
+	}
+
+	envs := filterHeadlessEvent(agent.HandoffCancelledEvent{RequestID: "handoff-1", Reason: "superseded"}, state)
+	if env := findHeadlessEnvelope(envs, "handoff_cancelled"); env != nil {
+		t.Fatalf("handoff_cancelled should not be forwarded without a subscription: %v", env)
+	}
+
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.pendingHandoff != nil {
+		t.Fatalf("pendingHandoff = %+v, want nil even without a subscription", state.pendingHandoff)
+	}
+}
+
+func TestHeadlessHandoffCancelledMismatchKeepsPendingButForwards(t *testing.T) {
+	state := &headlessState{
+		subscriptions:  map[string]bool{"handoff_cancelled": true},
+		pendingHandoff: &headlessHandoffPayload{RequestID: "handoff-2", PlanPath: "/tmp/newer.md"},
+	}
+
+	envs := filterHeadlessEvent(agent.HandoffCancelledEvent{RequestID: "handoff-1", Reason: "superseded"}, state)
+
+	env := findHeadlessEnvelope(envs, "handoff_cancelled")
+	if env == nil {
+		t.Fatalf("a stale cancellation must still be forwarded: %v", envs)
+	}
+	if payload, ok := env.Payload.(map[string]string); !ok || payload["request_id"] != "handoff-1" {
+		t.Fatalf("payload = %#v, want request_id handoff-1", env.Payload)
+	}
+
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.pendingHandoff == nil || state.pendingHandoff.RequestID != "handoff-2" {
+		t.Fatalf("a newer pendingHandoff must survive a stale cancellation, got %+v", state.pendingHandoff)
+	}
+}
+
+func TestHeadlessHandoffCancelledEmptyRequestIDClears(t *testing.T) {
+	state := &headlessState{
+		subscriptions:  map[string]bool{"handoff_cancelled": true},
+		pendingHandoff: &headlessHandoffPayload{RequestID: "handoff-1"},
+	}
+
+	envs := filterHeadlessEvent(agent.HandoffCancelledEvent{RequestID: "", Reason: "superseded"}, state)
+	if env := findHeadlessEnvelope(envs, "handoff_cancelled"); env == nil {
+		t.Fatalf("handoff_cancelled envelope not emitted: %v", envs)
+	}
+
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.pendingHandoff != nil {
+		t.Fatalf("an empty RequestID should cancel whatever is pending, got %+v", state.pendingHandoff)
+	}
+}
+
+func TestHeadlessHandoffCancelledWithoutPendingDoesNotPanic(t *testing.T) {
+	state := &headlessState{subscriptions: map[string]bool{"handoff_cancelled": true}}
+
+	envs := filterHeadlessEvent(agent.HandoffCancelledEvent{RequestID: "handoff-1", Reason: "superseded"}, state)
+	if env := findHeadlessEnvelope(envs, "handoff_cancelled"); env == nil {
+		t.Fatalf("handoff_cancelled envelope not emitted: %v", envs)
+	}
+
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.pendingHandoff != nil {
+		t.Fatalf("pendingHandoff = %+v, want nil", state.pendingHandoff)
+	}
+}
+
+func TestHeadlessHandoffCancelledClearsStatusPendingHandoff(t *testing.T) {
+	// Mirrors a session switch: the agent discards the pending handoff before the
+	// client decides, and the next status_response must report null.
+	state := &headlessState{subscriptions: map[string]bool{"handoff_cancelled": true}}
+	backend := &mockBackend{}
+	filterHeadlessEvent(agent.HandoffEvent{PlanPath: "/tmp/plan.md", RequestID: "handoff-1"}, state, backend)
+	filterHeadlessEvent(agent.HandoffCancelledEvent{RequestID: "handoff-1", Reason: "superseded"}, state)
+
+	to := newTestOut()
+	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer(), "test-session")
+
+	env := findHeadlessEnvelopeValue(to.drain(), "status_response")
+	if env == nil {
+		t.Fatal("status_response not emitted")
+	}
+	data, err := json.Marshal(env.Payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if payload["pending_handoff"] != nil {
+		t.Fatalf("pending_handoff = %#v, want null after the handoff was cancelled", payload["pending_handoff"])
+	}
+}
+
 func TestHeadlessHandoffDenyContinuesFromContext(t *testing.T) {
 	state := &headlessState{pendingHandoff: &headlessHandoffPayload{RequestID: "handoff-1", PlanPath: "/tmp/plan.md"}}
 	backend := &mockBackend{}
@@ -627,6 +759,132 @@ func TestHeadlessAutoCancelHandoffOnUserMessage(t *testing.T) {
 		t.Errorf("sent messages = %v, want [revise the plan instead]", backend.sentMessages)
 	}
 }
+
+// A send that auto-cancels a pending handoff must push handoff_cancelled to
+// subscribers, exactly like the runtime-initiated supersede path, so a
+// integration drops its stale approval prompt instead of routing the next
+// /handoff to a discarded request.
+func TestHeadlessAutoCancelHandoffOnUserMessageEmitsCancelled(t *testing.T) {
+	state := &headlessState{
+		subscriptions: map[string]bool{"handoff_cancelled": true},
+		pendingHandoff: &headlessHandoffPayload{
+			RequestID: "handoff-1",
+			PlanPath:  "/tmp/plan.md",
+		},
+	}
+	to := newTestOut()
+	backend := &mockBackend{}
+
+	handleHeadlessCommand(headlessCommand{Type: "send", Content: "revise the plan instead"}, backend, state, to.writer(), "test-session")
+
+	state.mu.Lock()
+	pending := state.pendingHandoff
+	state.mu.Unlock()
+	if pending != nil {
+		t.Fatalf("pendingHandoff = %+v, want nil after auto-cancel", pending)
+	}
+
+	env := findHeadlessEnvelopeValue(to.drain(), "handoff_cancelled")
+	if env == nil {
+		t.Fatal("handoff_cancelled envelope not emitted")
+	}
+	payload, ok := env.Payload.(map[string]any)
+	if !ok {
+		t.Fatalf("payload type = %T", env.Payload)
+	}
+	if payload["request_id"] != "handoff-1" {
+		t.Errorf("request_id = %v, want handoff-1", payload["request_id"])
+	}
+	if payload["reason"] != headlessHandoffCancelledReasonSuperseded {
+		t.Errorf("reason = %v, want %q", payload["reason"], headlessHandoffCancelledReasonSuperseded)
+	}
+
+	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer(), "test-session")
+	statusEnv := findHeadlessEnvelopeValue(to.drain(), "status_response")
+	if statusEnv == nil {
+		t.Fatal("status_response not emitted")
+	}
+	data, err := json.Marshal(statusEnv.Payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	var status map[string]any
+	if err := json.Unmarshal(data, &status); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if status["pending_handoff"] != nil {
+		t.Fatalf("pending_handoff = %#v, want null after auto-cancel", status["pending_handoff"])
+	}
+}
+
+func TestHeadlessAutoCancelHandoffWithoutSubscriptionDoesNotEmit(t *testing.T) {
+	state := &headlessState{
+		subscriptions: map[string]bool{"idle": true},
+		pendingHandoff: &headlessHandoffPayload{
+			RequestID: "handoff-1",
+			PlanPath:  "/tmp/plan.md",
+		},
+	}
+	to := newTestOut()
+	backend := &mockBackend{}
+
+	handleHeadlessCommand(headlessCommand{Type: "send", Content: "next"}, backend, state, to.writer(), "test-session")
+
+	if env := findHeadlessEnvelopeValue(to.drain(), "handoff_cancelled"); env != nil {
+		t.Fatalf("handoff_cancelled should not be forwarded without a subscription: %#v", env)
+	}
+
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.pendingHandoff != nil {
+		t.Fatalf("pendingHandoff = %+v, want nil even without a subscription", state.pendingHandoff)
+	}
+}
+
+func TestHeadlessAutoCancelHandoffWithoutPendingDoesNotEmit(t *testing.T) {
+	state := &headlessState{subscriptions: map[string]bool{"handoff_cancelled": true}}
+	to := newTestOut()
+	backend := &mockBackend{}
+
+	handleHeadlessCommand(headlessCommand{Type: "send", Content: "hello"}, backend, state, to.writer(), "test-session")
+
+	if env := findHeadlessEnvelopeValue(to.drain(), "handoff_cancelled"); env != nil {
+		t.Fatalf("handoff_cancelled should not be emitted with no pending handoff: %#v", env)
+	}
+
+	backend.mu.Lock()
+	defer backend.mu.Unlock()
+	if len(backend.handoffCalls) != 0 {
+		t.Fatalf("handoff calls = %+v, want none", backend.handoffCalls)
+	}
+}
+
+// An explicit handoff command is the client deciding for itself, so it must not
+// manufacture a cancellation event for the client that sent it.
+func TestHeadlessExplicitHandoffCancelDoesNotEmitCancelled(t *testing.T) {
+	state := &headlessState{
+		subscriptions: map[string]bool{"handoff_cancelled": true},
+		pendingHandoff: &headlessHandoffPayload{
+			RequestID: "handoff-1",
+			PlanPath:  "/tmp/plan.md",
+		},
+	}
+	to := newTestOut()
+	backend := &mockBackend{}
+
+	handleHeadlessCommand(headlessCommand{Type: "handoff", RequestID: "handoff-1", Action: "cancel"}, backend, state, to.writer(), "test-session")
+
+	if env := findHeadlessEnvelopeValue(to.drain(), "handoff_cancelled"); env != nil {
+		t.Fatalf("explicit handoff cancel must not emit handoff_cancelled: %#v", env)
+	}
+
+	backend.mu.Lock()
+	defer backend.mu.Unlock()
+	if len(backend.handoffCalls) != 1 || backend.handoffCalls[0].action != "cancel" {
+		t.Fatalf("handoff calls = %+v, want [cancel]", backend.handoffCalls)
+	}
+}
+
 func TestHeadlessAutoDenyBothConfirmAndQuestionOnUserMessage(t *testing.T) {
 	state := &headlessState{
 		pendingConfirm: &headlessConfirmPayload{

@@ -73,6 +73,12 @@ type headlessQuestionPayload struct {
 	AgentID       string   `json:"agent_id,omitempty"`
 }
 
+// headlessHandoffCancelledReasonSuperseded is the reason carried by a
+// handoff_cancelled event when a pending handoff is discarded without a client
+// decision, mirroring the runtime's own "superseded" reason. Clients use it to
+// tell an overridden handoff apart from a client-driven cancel.
+const headlessHandoffCancelledReasonSuperseded = "superseded"
+
 // headlessState holds mutex-protected state for the headless protocol.
 type headlessState struct {
 	mu              sync.Mutex
@@ -202,6 +208,7 @@ var headlessEventTypes = map[string]bool{
 	"role_change":        true,
 	"notification":       true,
 	"handoff_request":    true,
+	"handoff_cancelled":  true,
 	"error":              true,
 	"agent_started":      true,
 	"agent_notify":       true,
@@ -448,6 +455,23 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 		state.updatedAt = time.Now()
 		if state.isSubscribed("handoff_request") {
 			out = append(out, &headlessEnvelope{Type: "handoff_request", Payload: payload})
+		}
+	case agent.HandoffCancelledEvent:
+		state.updatedAt = time.Now()
+		// A new turn or session switch discarded the pending handoff before the
+		// client decided. Only clear the cached request when this cancellation
+		// targets it (an empty RequestID cancels whatever is pending); a stale
+		// cancellation for an older request must not drop a newer pending one.
+		if state.pendingHandoff != nil && (e.RequestID == "" || state.pendingHandoff.RequestID == e.RequestID) {
+			state.pendingHandoff = nil
+		}
+		// Forward even when it did not match the cached request: that request is
+		// truly gone, and the client must stop waiting on it.
+		if state.isSubscribed("handoff_cancelled") {
+			out = append(out, &headlessEnvelope{Type: "handoff_cancelled", Payload: map[string]string{
+				"request_id": e.RequestID,
+				"reason":     e.Reason,
+			}})
 		}
 	case agent.AgentDoneEvent:
 		state.updatedAt = time.Now()
@@ -1231,7 +1255,17 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 				state.pendingHandoff = nil
 			}
 			state.updatedAt = time.Now()
+			subscribed := state.isSubscribed("handoff_cancelled")
 			state.mu.Unlock()
+			// The client still holds this request as pending; tell subscribers it
+			// is gone before the new message starts a fresh turn. The emit happens
+			// outside the lock so stdout backpressure never stalls state.mu.
+			if subscribed {
+				out.emit(headlessEnvelope{Type: "handoff_cancelled", Payload: map[string]string{
+					"request_id": pendingHandoff.RequestID,
+					"reason":     headlessHandoffCancelledReasonSuperseded,
+				}})
+			}
 		}
 		backend.SendUserMessage(content)
 

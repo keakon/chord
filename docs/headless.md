@@ -54,7 +54,7 @@ Response:
 {"type": "subscribe_response", "payload": {"events": ["activity", "assistant_message", "idle", "done_completion"]}}
 ```
 
-Available event types: `activity`, `assistant_message`, `idle`, `confirm_request`, `question_request`, `handoff_request`, `role_change`, `error`, `agent_started`, `agent_notify`, `agent_done`, `info`, `toast`, `done_completion`, `local_shell_result`, `assistant_rollback`, `todos`, `compaction_status`.
+Available event types: `activity`, `assistant_message`, `idle`, `confirm_request`, `question_request`, `handoff_request`, `handoff_cancelled`, `role_change`, `error`, `agent_started`, `agent_notify`, `agent_done`, `info`, `toast`, `done_completion`, `local_shell_result`, `assistant_rollback`, `todos`, `compaction_status`.
 
 ### `status`
 
@@ -93,7 +93,7 @@ Send a user message to the agent. Slash commands work the same as in the TUI; ba
 {"type": "send", "content": "Please summarize the project structure."}
 ```
 
-If a `confirm_request`, `question_request`, or `handoff_request` is pending and the user sends a regular message (not via `confirm`, `question`, or `handoff` below), Chord auto-dismisses the pending interaction so the new message is consumed.
+If a `confirm_request`, `question_request`, or `handoff_request` is pending and the user sends a regular message (not via `confirm`, `question`, or `handoff` below), Chord auto-dismisses the pending interaction so the new message is consumed. The dismissed interaction stops appearing as pending in the next `status_response`. When the dismissed interaction is a `handoff_request`, Chord also pushes a `handoff_cancelled` event to subscribed clients, just like the runtime-initiated cancellation in the [`handoff`](#handoff) section.
 
 ### `models`
 
@@ -194,6 +194,8 @@ Resolve a pending `handoff_request`. Approving starts executing the saved plan w
 
 `action` accepts `accept` / `allow` (or an empty action) to approve and `deny` / `reject` to reject with a reason. `cancel` closes the pending handoff without executing the plan and without appending a rejection message. `agent` defaults to the request's default agent, and optional `pool` switches that agent's model pool before execution.
 
+A pending handoff belongs to the turn and session that raised it. Whenever Chord discards it without a client decision — on a session switch, when a superseding turn starts, or when a `send` auto-dismisses it (see [`send`](#send)) — Chord pushes a `handoff_cancelled` event to subscribed clients, and the following `status_response` reports `pending_handoff: null`, so an integration stops waiting instead of showing an approval prompt the agent has already abandoned.
+
 ### `local_shell`
 
 Execute a local shell command from the headless client side and receive a `local_shell_result` event. This is intended for gateway features that expose `!`-style local commands.
@@ -241,6 +243,7 @@ You receive these on stdout. The list below covers what is emitted by default pl
 | `question_request`      | The model asked the user a question                                                               | `request_id`, `agent_id`, `tool_name`, `question`, `options`, `option_details`, `default_answer`, `multiple`, `timeout_ms` |
 | `notification`          | A user-facing reminder for an explicit wait that is not a modal request                       | `reason`, `message` |
 | `handoff_request`       | A planner saved a handoff plan and needs the client to approve or reject execution                 | `request_id`, `plan_path`, `plan_text`, `plan_error`, `agents[]` with `{name, default, model_pools, current_model_pool}`; `agents` is empty when no eligible target exists |
+| `handoff_cancelled`     | A pending handoff was discarded before the client decided — a newer turn, a session switch, or an auto-dismissing `send` superseded it | `request_id`, `reason` (`superseded`)                                                                        |
 | `role_change`          | The active main role switched (via TUI Shift+Tab or a `role set` command)                        | `role`                                                                                                   |
 | `local_shell_result`    | Result for a `local_shell` command                                                                | `command`, `output`, `failed`, `error` |
 | `agent_started`         | A delegated SubAgent runtime started, including an on-demand rehydration of a parked task           | `agent_id`, `previous_agent_id` (set for rehydration), `task_id`, `agent_type`, `description`, `parent_agent_id`, `parent_task_id` |

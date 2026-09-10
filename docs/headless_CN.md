@@ -54,7 +54,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 {"type": "subscribe_response", "payload": {"events": ["activity", "assistant_message", "idle", "done_completion"]}}
 ```
 
-可订阅事件类型：`activity`、`assistant_message`、`idle`、`confirm_request`、`question_request`、`handoff_request`、`role_change`、`error`、`agent_started`、`agent_notify`、`agent_done`、`info`、`toast`、`done_completion`、`local_shell_result`、`assistant_rollback`、`todos`、`compaction_status`。
+可订阅事件类型：`activity`、`assistant_message`、`idle`、`confirm_request`、`question_request`、`handoff_request`、`handoff_cancelled`、`role_change`、`error`、`agent_started`、`agent_notify`、`agent_done`、`info`、`toast`、`done_completion`、`local_shell_result`、`assistant_rollback`、`todos`、`compaction_status`。
 
 ### `status`
 
@@ -93,7 +93,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 {"type": "send", "content": "请总结一下项目结构。"}
 ```
 
-如果当前有待处理的 `confirm_request`、`question_request` 或 `handoff_request`，而用户发送了普通消息（不是下面的 `confirm`、`question` 或 `handoff`），Chord 会先自动关闭该待处理交互，再消费这条新消息。
+如果当前有待处理的 `confirm_request`、`question_request` 或 `handoff_request`，而用户发送了普通消息（不是下面的 `confirm`、`question` 或 `handoff`），Chord 会先自动关闭该待处理交互，再消费这条新消息。被关闭的交互不会在下一次 `status_response` 中继续显示为待决；如果被关闭的是 `handoff_request`，Chord 还会向订阅了 `handoff_cancelled` 的客户端推送该事件，和 [`handoff`](#handoff) 一节里 runtime 主动取消的路径一致。
 
 ### `models`
 
@@ -194,6 +194,8 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 
 `action` 可用 `accept` / `allow`（或空 action）表示批准，`deny` / `reject` 表示带原因拒绝；`cancel` 关闭待决 handoff，不执行 plan，也不追加拒绝消息。`agent` 默认使用请求里的默认 agent；可选的 `pool` 会在执行前切换该 agent 的模型池。
 
+待决 handoff 依附于发起它的回合与会话。只要 Chord 在没有 client 决策的情况下丢弃它——会话切换、更新的回合开始，或 `send` 新消息时自动关闭（见 [`send`](#send)）——都会向订阅了 `handoff_cancelled` 的客户端推送该事件；随后 `status_response.pending_handoff` 为 `null`，集成方据此停止等待，而不是继续展示一个 agent 早已放弃的审批提示。
+
 ### `local_shell`
 
 从 headless client 侧执行本地 shell 命令，并收到一个 `local_shell_result` 事件。该命令主要用于 gateway 暴露 `!` 风格本地命令的场景。
@@ -241,6 +243,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 | `question_request`   | 模型向用户提问                               | `request_id`、`agent_id`、`tool_name`、`question`、`options`、`option_details`、`default_answer`、`multiple`、`timeout_ms` |
 | `notification`       | agent 需要用户注意，但等待点不是标准 modal 请求 | `reason`、`message` |
 | `handoff_request`    | planner 已保存 handoff plan，需要 client 批准或拒绝执行 | `request_id`、`plan_path`、`plan_text`、`plan_error`、`agents[]`，元素包含 `{name, default, model_pools, current_model_pool}`；没有合法目标时 `agents` 为空列表 |
+| `handoff_cancelled`  | 待决 handoff 在 client 决策前被丢弃——更新的回合、会话切换或 `send` 自动关闭接管了它 | `request_id`、`reason`（`superseded`） |
 | `role_change`        | 当前主角色已切换（经 TUI Shift+Tab 或 `role set` 命令） | `role` |
 | `local_shell_result` | `local_shell` 命令的执行结果                 | `command`、`output`、`failed`、`error` |
 | `agent_started`      | 某个委托的 SubAgent runtime 开始运行（包括 parked task 的按需 rehydrate） | `agent_id`、`previous_agent_id`（rehydrate 时存在）、`task_id`、`agent_type`、`description`、`parent_agent_id`、`parent_task_id` |
