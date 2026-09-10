@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/keakon/golog"
 	"github.com/keakon/golog/log"
@@ -663,49 +664,88 @@ func TestPersistAndRollbackAdvanceSpoolWriteGeneration(t *testing.T) {
 	}
 }
 
-// TestMainInboxProgressRetryDropsPermanentlyMissingRow pins the retry cap on
-// the durable progress fallback. A progress id whose row never appears in the
-// mailbox log used to be requeued on every dispatch, so hasRunnableMailboxWork
-// kept reporting pending progress (the main could never reach global idle) and
-// each dispatch rescanned the whole log. After a bounded number of failed
-// reloads the id must be dropped with a warning.
-func TestMainInboxProgressRetryDropsPermanentlyMissingRow(t *testing.T) {
+// TestMainInboxProgressRetryDefersPermanentlyMissingRow pins the two-stage
+// retry on the durable progress fallback. A progress id whose row never appears
+// in the mailbox log used to be requeued on every dispatch, so
+// hasRunnableMailboxWork kept reporting pending progress (the main could never
+// reach global idle) and each dispatch rescanned the whole log. After a bounded
+// number of immediate reloads the id must move into the deferred retry set
+// instead of being dropped silently, and only a later confirmed-missing reload
+// reports the drop with a warning.
+func TestMainInboxProgressRetryDefersPermanentlyMissingRow(t *testing.T) {
 	var buf bytes.Buffer
 	log.SetDefaultLogger(logtest.NewLogger(&buf, golog.DebugLevel))
 	defer log.SetDefaultLogger(logtest.NewLogger(nil, golog.InfoLevel))
 
 	a := newTestMainAgent(t, t.TempDir())
 	const messageID = "progress-missing-1"
+	const taskID = "task-missing-1"
 	a.subAgentInbox.progressPending = []string{messageID}
 	a.subAgentInbox.progressPendingAgent[messageID] = "worker-missing"
+	a.subAgentInbox.progressPendingTask[messageID] = taskID
 
-	// The id must survive at least one retry (a real persistence race resolves
-	// on the next dispatch) but must be dropped within a small bounded number
-	// of dispatches instead of being requeued forever.
-	droppedAfter := 0
+	// Stage 1: the id must survive exactly mainInboxProgressReloadMaxAttempts-1
+	// immediate retries (a persistence race resolves on the next dispatch) and
+	// then hand off to the deferred set instead of being requeued forever.
+	deferredAfter := 0
 	for take := 1; take <= 10; take++ {
 		if got := a.takeMainInboxProgressSnapshots(); len(got) != 0 {
 			t.Fatalf("take %d = %#v, want no snapshots while the durable row is missing", take, got)
 		}
-		if len(a.subAgentInbox.progressPending) == 0 {
-			droppedAfter = take
+		if len(a.subAgentInbox.deferredProgress) > 0 {
+			deferredAfter = take
 			break
 		}
 		if got := a.subAgentInbox.progressPending; len(got) != 1 || got[0] != messageID {
 			t.Fatalf("progressPending after take %d = %#v, want the missing id retried", take, got)
 		}
 	}
-	if droppedAfter == 0 {
-		t.Fatal("progressPending never dropped the permanently missing id: it is requeued on every dispatch")
+	if deferredAfter != mainInboxProgressReloadMaxAttempts {
+		t.Fatalf("missing id deferred after %d take(s), want exactly mainInboxProgressReloadMaxAttempts=%d", deferredAfter, mainInboxProgressReloadMaxAttempts)
 	}
-	if droppedAfter < 2 {
-		t.Fatalf("missing id dropped after %d take(s), want at least one retry before the cap", droppedAfter)
+	if len(a.subAgentInbox.progressPending) != 0 {
+		t.Fatalf("progressPending = %#v, want the deferred id out of the immediate retry set", a.subAgentInbox.progressPending)
 	}
 	if _, ok := a.subAgentInbox.progressPendingAgent[messageID]; ok {
-		t.Fatal("progressPendingAgent still holds the dropped id")
+		t.Fatal("progressPendingAgent still holds the deferred id")
+	}
+	entry := a.subAgentInbox.deferredProgress[0]
+	if entry.MessageID != messageID || entry.AgentID != "worker-missing" || entry.TaskID != taskID {
+		t.Fatalf("deferred entry = %#v, want the message/agent/task identity preserved", entry)
 	}
 	if a.hasRunnableMailboxWork() {
-		t.Fatal("hasRunnableMailboxWork() = true after the permanently missing progress id was dropped")
+		t.Fatal("hasRunnableMailboxWork() = true while the row is only deferred; the main must still reach global idle")
+	}
+	if !a.hasQueuedMailboxMessage(messageID) {
+		t.Fatal("hasQueuedMailboxMessage() = false for a deferred id; a repeated event would double-queue it")
+	}
+	if !a.hasDeferredMailboxDeliveries() {
+		t.Fatal("hasDeferredMailboxDeliveries() = false, want the sweep wake gate held open")
+	}
+
+	// Stage 2: the deferred attempt confirms the row is permanently missing
+	// and reports the drop instead of retrying silently forever.
+	drainAgentEvents(a.outputCh)
+	a.subAgentInbox.deferredProgress[0].NextAttemptAt = time.Now().Add(-time.Second)
+	a.retryDeferredMailboxDeliveries()
+	if len(a.subAgentInbox.deferredProgress) != 0 {
+		t.Fatalf("deferredProgress = %#v, want the confirmed-missing id removed", a.subAgentInbox.deferredProgress)
+	}
+	var dropped bool
+	var toast bool
+	for _, evt := range drainAgentEvents(a.outputCh) {
+		switch e := evt.(type) {
+		case MailboxDeliveryDroppedEvent:
+			dropped = e.MessageID == messageID
+		case ToastEvent:
+			toast = e.Level == "warn" && e.Category == mailboxDeliveryDroppedToastCategory
+		}
+	}
+	if !dropped {
+		t.Fatal("no MailboxDeliveryDroppedEvent for the confirmed-missing progress row")
+	}
+	if !toast {
+		t.Fatal("no warn toast for the confirmed-missing progress row")
 	}
 	if !strings.Contains(buf.String(), messageID) {
 		t.Fatalf("log = %q, want a warning naming the dropped id %q", buf.String(), messageID)

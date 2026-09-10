@@ -647,6 +647,20 @@ type MailboxQueuedEvent struct {
 
 func (MailboxQueuedEvent) agentEvent() {}
 
+// MailboxDeliveryDroppedEvent tells the TUI that a mailbox row this process
+// was holding can no longer be delivered, so its waiting row must be removed.
+// It is emitted when the in-memory delivery reference is abandoned — not when
+// delivery succeeds — and the durable row is deliberately left untouched: an
+// unconsumed message is still replayed by a later restore, and the event only
+// stops the session from showing a row that will never settle in this session.
+// The operator-facing detail rides on the accompanying ToastEvent, so the
+// event itself carries only the id the TUI keys its queued row by.
+type MailboxDeliveryDroppedEvent struct {
+	MessageID string
+}
+
+func (MailboxDeliveryDroppedEvent) agentEvent() {}
+
 // MailboxTranscriptAppendedEvent tells the TUI that a mailbox message was
 // appended to the target conversation and its transcript write completed.
 type MailboxTranscriptAppendedEvent struct {

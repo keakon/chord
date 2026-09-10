@@ -149,15 +149,27 @@ type subAgentInbox struct {
 	progressQueue        []SubAgentMailboxMessage
 	progressPending      []string
 	progressPendingAgent map[string]string
+	progressPendingTask  map[string]string
 	// progressPendingAttempts counts the failed reload attempts per pending
-	// progress id, so a row that never appears in the durable log is dropped
-	// after a bounded number of dispatches instead of suppressing global idle
-	// indefinitely (see takeMainInboxProgressSnapshots).
+	// progress id. A row that is not visible yet is a short-lived persistence
+	// race a bounded number of immediate retries resolves; once those are
+	// exhausted the id moves into deferredProgress instead of being dropped
+	// (see retryProgressPending), so it neither suppresses global idle forever
+	// nor loses its delivery silently.
 	progressPendingAttempts map[string]int
-	spoolUrgent             []string
-	spoolNormal             []string
-	spoolIndex              map[string]mailboxSpoolLocation
-	spoolIndexReady         bool
+	// deferredProgress holds progress snapshots whose immediate reload attempts
+	// were exhausted. Each entry is retried on a cooldown by
+	// retryDeferredMailboxDeliveries until its durable row becomes visible, the
+	// delivery is confirmed permanently missing, or the retry window expires.
+	// The set deliberately does not count as runnable mailbox work (see
+	// hasRunnableMailboxWork): the main must still be able to reach global idle,
+	// and the periodic lifecycle sweep keeps the retry cadence alive once no
+	// other event arrives.
+	deferredProgress []deferredMailboxRetry
+	spoolUrgent      []string
+	spoolNormal      []string
+	spoolIndex       map[string]mailboxSpoolLocation
+	spoolIndexReady  bool
 	// spoolWriteGen counts every completed mailbox.jsonl mutation (persist
 	// appends and rollback truncations). It is bumped under
 	// subAgentMailboxIDsMu right after the file write, so an index rebuild
@@ -173,10 +185,25 @@ type mailboxSpoolLocation struct {
 	length int64
 }
 
+// deferredMailboxRetry is one mailbox message whose in-memory delivery
+// reference was abandoned after the immediate reload attempts were exhausted.
+// It carries just enough state to retry the durable reload on a later dispatch
+// (see retryDeferredMailboxDeliveries) and to report the drop with its
+// agent/task identity if the row never becomes deliverable.
+type deferredMailboxRetry struct {
+	MessageID     string
+	AgentID       string
+	TaskID        string
+	Attempts      int
+	FirstFailedAt time.Time
+	NextAttemptAt time.Time
+}
+
 func newSubAgentInbox() subAgentInbox {
 	return subAgentInbox{
 		progress:                make(map[string]SubAgentMailboxMessage),
 		progressPendingAgent:    make(map[string]string),
+		progressPendingTask:     make(map[string]string),
 		progressPendingAttempts: make(map[string]int),
 		spoolIndex:              make(map[string]mailboxSpoolLocation),
 	}
@@ -184,12 +211,12 @@ func newSubAgentInbox() subAgentInbox {
 
 // resetSubAgentMailboxRuntime drops the entire in-memory mailbox pipeline at a
 // session boundary (a /new, a fork, a plan-execution switch, or a restore):
-// the main-inbox queues (urgent/normal/progress), the durable-spool id
-// queues, the per-owner queues, the staged/active batch, the idempotency and
-// consumed sets, and the mailbox memory budget. Without it the replaced
-// session's leftover mailbox messages would be staged into the next session's
-// first idle drain and delivered to the new session's model — and then
-// replayed again from the replaced session's own mailbox log when that
+// the main-inbox queues (urgent/normal/progress), the deferred retry set, the
+// durable-spool id queues, the per-owner queues, the staged/active batch, the
+// idempotency and consumed sets, and the mailbox memory budget. Without it the
+// replaced session's leftover mailbox messages would be staged into the next
+// session's first idle drain and delivered to the new session's model — and
+// then replayed again from the replaced session's own mailbox log when that
 // session is resumed, so both sessions would see the same message once each.
 // Durable mailbox rows and acks are never touched: the replaced session
 // replays its unconsumed log when it is resumed, and the new session starts

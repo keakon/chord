@@ -484,6 +484,10 @@ func (a *MainAgent) hasRunnableMailboxWork() bool {
 	// one is pending the main must not report full idle. The check only runs
 	// between turns, and every snapshot is routable to the main and consumed
 	// by the next drain, so it cannot suppress global idle indefinitely.
+	// deferredProgress is deliberately not counted: a delivery there waits on a
+	// cooldown-gated retry, and counting it would keep the main from ever
+	// reaching global idle. The periodic lifecycle sweep is what keeps that
+	// retry alive (see hasSubAgentLifecycleSweepCandidates).
 	pendingProgress := len(a.subAgentInbox.progress) > 0 || len(a.subAgentInbox.progressQueue) > 0 || len(a.subAgentInbox.progressPending) > 0
 	// Only owned messages that are routable right now count as pending mailbox
 	// work. A message spooled under a parked owner that this mailbox cannot
@@ -548,7 +552,7 @@ func reliableOutputEventLog(evt AgentEvent) (string, []any, bool) {
 			"event_type", fmt.Sprintf("%T", evt),
 			"status", e.Status,
 		}, true
-	case ToolCallStartEvent, ToolCallDiscardEvent, ToolCallExecutionEvent, ToolResultEvent, SessionRestoredEvent, SessionTitleChangedEvent, PendingDraftConsumedEvent, ForkSessionEvent, ErrorEvent, AgentStatusEvent, AgentStartedEvent, AgentNotifyEvent, MailboxQueuedEvent, MailboxTranscriptAppendedEvent, BackgroundResultAppendedEvent, AgentDoneEvent, GlobalIdleEvent, NotificationEvent, InfoEvent, ToastEvent, AssistantMessageEvent, LoopNoticeEvent, LoopStateChangedEvent, YoloModeChangedEvent, RunningModelChangedEvent, SpawnFinishedEvent, ContextNoticeEvent, ContextNoticeClearedEvent:
+	case ToolCallStartEvent, ToolCallDiscardEvent, ToolCallExecutionEvent, ToolResultEvent, SessionRestoredEvent, SessionTitleChangedEvent, PendingDraftConsumedEvent, ForkSessionEvent, ErrorEvent, AgentStatusEvent, AgentStartedEvent, AgentNotifyEvent, MailboxQueuedEvent, MailboxDeliveryDroppedEvent, MailboxTranscriptAppendedEvent, BackgroundResultAppendedEvent, AgentDoneEvent, GlobalIdleEvent, NotificationEvent, InfoEvent, ToastEvent, AssistantMessageEvent, LoopNoticeEvent, LoopStateChangedEvent, YoloModeChangedEvent, RunningModelChangedEvent, SpawnFinishedEvent, ContextNoticeEvent, ContextNoticeClearedEvent:
 		return "TUI output channel full, waiting to deliver critical event", []any{
 			"event_type", fmt.Sprintf("%T", evt),
 		}, true
@@ -618,11 +622,15 @@ func (a *MainAgent) emitReliableToTUI(evt AgentEvent, warnMsg string, warnAttrs 
 
 // emitToTUI sends an AgentEvent to the output channel. Most events are
 // best-effort and may be dropped when the channel is full so streaming and
-// tool execution goroutines never block on UI throughput. A small set of
-// low-frequency correctness/control events (tool lifecycle milestones,
-// non-idle activity, model changes, session restore, context notices, draft
-// consumption, fork reload, errors) are delivered reliably with blocking
-// semantics guarded by stoppingCh. This is safe to call from any goroutine.
+// tool execution goroutines never block on UI throughput. The events whose
+// reliableOutputEventLog branch matches are instead delivered with blocking
+// semantics guarded by stoppingCh: tool lifecycle milestones and results,
+// agent status/start/done and notify events, mailbox queue/transcript/drop
+// updates, non-idle activity, session restore and control notices, model and
+// mode changes, context notices and clears, assistant messages, toasts, info
+// and loop notices, spawn completion, and errors. reliableOutputEventLog is
+// the single source of truth for that set. This is safe to call from any
+// goroutine.
 func (a *MainAgent) emitToTUI(evt AgentEvent) {
 	if a.shuttingDown.Load() {
 		return

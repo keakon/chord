@@ -582,6 +582,16 @@ func (a *MainAgent) drainOwnedSubAgentMailboxes(ownerAgentID string) bool {
 			break
 		}
 		if !found {
+			// A missing spool row is benign only when the message was already
+			// consumed (the delivery path removed its waiting row). Otherwise
+			// the index is ready and the row really is gone: this process can
+			// no longer deliver it, so the drop is reported instead of the
+			// silent skip that left the waiting row stuck forever.
+			if a.isSubAgentMailboxConsumed(messageID) {
+				log.Debugf("skipping consumed owned spooled SubAgent mailbox message owner_agent_id=%v message_id=%v", ownerAgentID, messageID)
+				continue
+			}
+			a.reportSubAgentMailboxDropped(messageID, ownerAgentID, "", "spooled owned mailbox row is missing and not consumed")
 			continue
 		}
 		if a.routeOwnedSubAgentMailbox(*msg) {
@@ -692,6 +702,7 @@ func (a *MainAgent) replaceProgressMailboxWithinBudget(msg SubAgentMailboxMessag
 		a.subAgentInbox.memoryBytes+size > byteLimit {
 		a.subAgentInbox.progressPending = append(a.subAgentInbox.progressPending, messageID)
 		a.subAgentInbox.progressPendingAgent[messageID] = msg.AgentID
+		a.subAgentInbox.progressPendingTask[messageID] = msg.TaskID
 		return
 	}
 	a.subAgentInbox.progressQueue = append(a.subAgentInbox.progressQueue, msg)
@@ -728,6 +739,7 @@ func (a *MainAgent) requeueSubAgentMailboxInMemoryLocked(msg SubAgentMailboxMess
 		if a.subAgentInbox.progressPendingAgent != nil {
 			delete(a.subAgentInbox.progressPendingAgent, msg.MessageID)
 		}
+		delete(a.subAgentInbox.progressPendingTask, msg.MessageID)
 		if a.subAgentInbox.progressPendingAttempts != nil {
 			delete(a.subAgentInbox.progressPendingAttempts, msg.MessageID)
 		}
@@ -879,8 +891,10 @@ func (a *MainAgent) dequeueSpooledSubAgentMailbox() *SubAgentMailboxMessage {
 
 // dequeueSpooledMailboxQueue claims one queued spool id at a time under
 // subAgentMailboxIDsMu and reloads the message from the mailbox log outside
-// the lock. Missing records are dropped; a failed reload puts the id back at
-// the front so the next call retries it.
+// the lock. A missing record that was already consumed is skipped; one whose
+// index is ready but whose row really is gone is reported as a dropped
+// delivery instead of being skipped silently. A failed reload puts the id back
+// at the front so the next call retries it.
 func (a *MainAgent) dequeueSpooledMailboxQueue(queue *[]string) *SubAgentMailboxMessage {
 	for {
 		a.subAgentMailboxIDsMu.Lock()
@@ -900,6 +914,11 @@ func (a *MainAgent) dequeueSpooledMailboxQueue(queue *[]string) *SubAgentMailbox
 			return nil
 		}
 		if !found {
+			if a.isSubAgentMailboxConsumed(id) {
+				log.Debugf("skipping consumed spooled SubAgent mailbox message message_id=%v", id)
+				continue
+			}
+			a.reportSubAgentMailboxDropped(id, "", "", "spooled main-inbox mailbox row is missing and not consumed")
 			continue
 		}
 		return msg
@@ -1033,11 +1052,11 @@ func (a *MainAgent) handleSubAgentMailboxEvent(evt Event) {
 // hasQueuedMailboxMessage reports whether a message with the given ID is
 // already staged in this agent's mailbox delivery pipeline: queued for the
 // main inbox (in memory or in the durable spool), waiting in the pending
-// batch, active in the current turn, or parked in an owner's queue. A message
-// found here has already been delivered to its destination in this session
-// (restored from the durable log, or produced by an earlier dispatch of the
-// same event), so handling its mailbox event again would double-queue the
-// owner.
+// batch, deferred for a delayed retry, or parked in an owner's queue. A
+// message found here has already been delivered to its destination in this
+// session (restored from the durable log, or produced by an earlier dispatch
+// of the same event), so handling its mailbox event again would double-queue
+// the owner.
 func (a *MainAgent) hasQueuedMailboxMessage(messageID string) bool {
 	messageID = strings.TrimSpace(messageID)
 	if a == nil || messageID == "" {
@@ -1076,6 +1095,11 @@ func (a *MainAgent) hasQueuedMailboxMessage(messageID string) bool {
 	}
 	if slices.Contains(a.subAgentInbox.progressPending, messageID) {
 		return true
+	}
+	for _, deferred := range a.subAgentInbox.deferredProgress {
+		if deferred.MessageID == messageID {
+			return true
+		}
 	}
 	for _, queued := range a.ownedSubAgentMailboxes {
 		for _, msg := range queued {
@@ -1320,10 +1344,13 @@ func (a *MainAgent) takeMainInboxProgressSnapshots() []SubAgentMailboxMessage {
 	ids := append([]string(nil), a.subAgentInbox.progressPending...)
 	a.subAgentInbox.progressPending = nil
 	pendingAgents := make(map[string]string, len(ids))
+	pendingTasks := make(map[string]string, len(ids))
 	pendingAttempts := make(map[string]int, len(ids))
 	for _, messageID := range ids {
 		pendingAgents[messageID] = a.subAgentInbox.progressPendingAgent[messageID]
 		delete(a.subAgentInbox.progressPendingAgent, messageID)
+		pendingTasks[messageID] = a.subAgentInbox.progressPendingTask[messageID]
+		delete(a.subAgentInbox.progressPendingTask, messageID)
 		pendingAttempts[messageID] = a.subAgentInbox.progressPendingAttempts[messageID]
 		delete(a.subAgentInbox.progressPendingAttempts, messageID)
 		for agentID, msg := range a.subAgentInbox.progress {
@@ -1342,7 +1369,7 @@ func (a *MainAgent) takeMainInboxProgressSnapshots() []SubAgentMailboxMessage {
 	for i, messageID := range ids {
 		msg, found, err := a.loadDurableMailboxMessage(messageID)
 		if err != nil {
-			a.retryProgressPending(ids[i:], pendingAgents, pendingAttempts, err)
+			a.retryProgressPending(ids[i:], pendingAgents, pendingTasks, pendingAttempts, err)
 			break
 		}
 		if found {
@@ -1352,46 +1379,184 @@ func (a *MainAgent) takeMainInboxProgressSnapshots() []SubAgentMailboxMessage {
 		if a.isSubAgentMailboxConsumed(messageID) {
 			continue
 		}
-		// A row that is not yet visible in the durable log can only be a
-		// retryable persistence race. Keep its ID rather than silently
-		// dropping the progress update, but only for a bounded number of
-		// attempts: see retryProgressPending.
-		a.retryProgressPending([]string{messageID}, pendingAgents, pendingAttempts, nil)
+		// A row that is not yet visible in the durable log is still treated as
+		// a persistence race during the immediate retry stage: keep its id
+		// rather than dropping the progress update. The delayed retry stage is
+		// what decides that the row is permanently missing (see
+		// retryDeferredMailboxDeliveries).
+		a.retryProgressPending([]string{messageID}, pendingAgents, pendingTasks, pendingAttempts, nil)
 	}
 	return out
 }
 
-// mainInboxProgressReloadMaxAttempts bounds how many failed reload attempts a
-// progress snapshot id is kept for. A durable row that is not visible yet is
+// mainInboxProgressReloadMaxAttempts bounds how many immediate reload attempts
+// a progress snapshot id is kept for. A durable row that is not visible yet is
 // normally a short-lived persistence race the next dispatch resolves, so a
-// couple of retries preserve that delivery guarantee; a row that never appears
-// must be dropped so hasRunnableMailboxWork stops reporting pending progress
-// and the main can reach global idle instead of rescanning the mailbox log on
-// every dispatch forever.
+// couple of retries preserve that delivery guarantee; once they are exhausted
+// the id moves into the deferred retry set, which is cooldown-gated so
+// hasRunnableMailboxWork does not keep reporting pending progress and the main
+// can reach global idle without rescanning the mailbox log on every dispatch.
 const mainInboxProgressReloadMaxAttempts = 3
+
+// mainInboxDeferredRetryCooldown spaces out the deferred reload attempts for a
+// mailbox message whose immediate retries were exhausted, so a burst of idle
+// dispatches cannot rescan the mailbox log over and over.
+const mainInboxDeferredRetryCooldown = 10 * time.Second
+
+// mainInboxDeferredRetryWindow bounds how long one deferred message is retried
+// from its first failed reload before the delivery is abandoned and reported.
+// It is long enough to cover a slow persistence flush or a transient disk
+// stall, and short enough that a permanently missing row stops absorbing the
+// retry cadence.
+const mainInboxDeferredRetryWindow = 5 * time.Minute
 
 // retryProgressPending re-appends progress ids whose durable row could not be
 // reloaded this dispatch, keeping FIFO order behind anything already re-queued.
-// It drops an id once it has reached mainInboxProgressReloadMaxAttempts failed
-// attempts, logging the id and agent so the permanently missing row is
-// observable. Called without subAgentMailboxIDsMu held.
-func (a *MainAgent) retryProgressPending(ids []string, agents map[string]string, attempts map[string]int, loadErr error) {
+// An id that reaches mainInboxProgressReloadMaxAttempts failed attempts moves
+// into the deferred retry set instead of being dropped silently: the delivery
+// is retried on a cooldown and reported dropped only once it is confirmed
+// permanently missing or the retry window expires (see
+// retryDeferredMailboxDeliveries). Called without subAgentMailboxIDsMu held.
+func (a *MainAgent) retryProgressPending(ids []string, agents, tasks map[string]string, attempts map[string]int, loadErr error) {
 	a.subAgentMailboxIDsMu.Lock()
 	defer a.subAgentMailboxIDsMu.Unlock()
 	for _, messageID := range ids {
 		tries := attempts[messageID] + 1
 		if tries >= mainInboxProgressReloadMaxAttempts {
-			if loadErr != nil {
-				log.Warnf("dropping progress mailbox snapshot after %d reload attempts message_id=%v agent_id=%v error=%v", tries, messageID, agents[messageID], loadErr)
-			} else {
-				log.Warnf("dropping progress mailbox snapshot after %d reload attempts message_id=%v agent_id=%v", tries, messageID, agents[messageID])
-			}
+			a.deferProgressRetryLocked(messageID, agents[messageID], tasks[messageID])
 			continue
 		}
 		a.subAgentInbox.progressPending = append(a.subAgentInbox.progressPending, messageID)
 		a.subAgentInbox.progressPendingAgent[messageID] = agents[messageID]
+		a.subAgentInbox.progressPendingTask[messageID] = tasks[messageID]
 		a.subAgentInbox.progressPendingAttempts[messageID] = tries
 	}
+}
+
+// deferProgressRetryLocked moves one progress snapshot id into the deferred
+// retry set under subAgentMailboxIDsMu, extending an existing entry's cooldown
+// instead of adding a duplicate id. Called with the lock held.
+func (a *MainAgent) deferProgressRetryLocked(messageID, agentID, taskID string) {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return
+	}
+	now := time.Now()
+	for i := range a.subAgentInbox.deferredProgress {
+		if a.subAgentInbox.deferredProgress[i].MessageID != messageID {
+			continue
+		}
+		a.subAgentInbox.deferredProgress[i].Attempts++
+		a.subAgentInbox.deferredProgress[i].NextAttemptAt = now.Add(mainInboxDeferredRetryCooldown)
+		return
+	}
+	a.subAgentInbox.deferredProgress = append(a.subAgentInbox.deferredProgress, deferredMailboxRetry{
+		MessageID:     messageID,
+		AgentID:       strings.TrimSpace(agentID),
+		TaskID:        strings.TrimSpace(taskID),
+		FirstFailedAt: now,
+		NextAttemptAt: now.Add(mainInboxDeferredRetryCooldown),
+	})
+}
+
+// retryDeferredMailboxDeliveries runs the delayed second-stage retries for
+// mailbox messages whose immediate reload attempts were exhausted. It only
+// runs between turns and while delivery is not paused: a mid-turn request must
+// never pick up a progress snapshot, and a queue-resident progress message must
+// not ping-pong in and out of a turn. Each message is retried at most once per
+// cooldown, so a burst of dispatches does not rescan the mailbox log, and the
+// retry window bounds how long a row that never becomes deliverable keeps the
+// set alive. A message that becomes visible returns to the normal delivery
+// pipeline; one that is confirmed permanently missing, or whose reload keeps
+// failing past the window, is reported dropped (see reportSubAgentMailboxDropped).
+func (a *MainAgent) retryDeferredMailboxDeliveries() {
+	if a == nil || a.mailboxDeliveryPaused.Load() || a.turn != nil {
+		return
+	}
+	a.subAgentMailboxIDsMu.Lock()
+	if len(a.subAgentInbox.deferredProgress) == 0 {
+		a.subAgentMailboxIDsMu.Unlock()
+		return
+	}
+	now := time.Now()
+	due := make([]deferredMailboxRetry, 0, len(a.subAgentInbox.deferredProgress))
+	remaining := a.subAgentInbox.deferredProgress[:0]
+	for _, entry := range a.subAgentInbox.deferredProgress {
+		if now.Before(entry.NextAttemptAt) {
+			remaining = append(remaining, entry)
+			continue
+		}
+		due = append(due, entry)
+	}
+	a.subAgentInbox.deferredProgress = remaining
+	a.subAgentMailboxIDsMu.Unlock()
+	// Requeueing prepends to the progress FIFO, so the due entries are consumed
+	// from the newest to the oldest: the oldest deferred message must end up in
+	// front of the newer ones it was deferred behind.
+	for i := len(due) - 1; i >= 0; i-- {
+		entry := due[i]
+		msg, found, err := a.loadDurableMailboxMessage(entry.MessageID)
+		switch {
+		case err != nil:
+			if now.Sub(entry.FirstFailedAt) >= mainInboxDeferredRetryWindow {
+				a.reportSubAgentMailboxDropped(entry.MessageID, entry.AgentID, entry.TaskID, fmt.Sprintf("durable row could not be reloaded within %s: %v", mainInboxDeferredRetryWindow, err))
+				continue
+			}
+			a.redeferMailboxDelivery(entry, err)
+		case found:
+			a.requeueSubAgentMailboxInMemory(*msg)
+		case a.isSubAgentMailboxConsumed(entry.MessageID):
+			// Benign: the delivery path already removed the waiting row.
+			log.Debugf("deferred mailbox message already consumed message_id=%v", entry.MessageID)
+		default:
+			a.reportSubAgentMailboxDropped(entry.MessageID, entry.AgentID, entry.TaskID, "durable row is permanently missing after the immediate reload attempts")
+		}
+	}
+}
+
+// redeferMailboxDelivery puts one deferred entry back into the set after a
+// failed reload, bumping its attempt count and cooling it down. Called without
+// subAgentMailboxIDsMu held; the retry runs on the event-loop goroutine, which
+// is the only writer of the deferred set.
+func (a *MainAgent) redeferMailboxDelivery(entry deferredMailboxRetry, loadErr error) {
+	entry.Attempts++
+	entry.NextAttemptAt = time.Now().Add(mainInboxDeferredRetryCooldown)
+	a.subAgentMailboxIDsMu.Lock()
+	a.subAgentInbox.deferredProgress = append(a.subAgentInbox.deferredProgress, entry)
+	a.subAgentMailboxIDsMu.Unlock()
+	log.Warnf("mailbox message still not reloadable message_id=%v agent_id=%v attempts=%v error=%v", entry.MessageID, entry.AgentID, entry.Attempts, loadErr)
+}
+
+// mailboxDeliveryDroppedToastCategory groups the drop toasts so a burst of
+// abandoned deliveries collapses into one queued toast.
+const mailboxDeliveryDroppedToastCategory = "mailbox_delivery_dropped"
+
+// mailboxDeliveryDroppedToastSuffix is the honest user-facing explanation that
+// closes every delivery drop. It never promises a replay: when the durable row
+// is confirmed missing, this session has no copy left, and only a later
+// restore or a fresh delegation can make the work happen again.
+const mailboxDeliveryDroppedToastSuffix = "could not be delivered in this session; delegate the work again if it still matters"
+
+// reportSubAgentMailboxDropped is the single exit for a mailbox message this
+// process can no longer deliver: the in-memory reference was abandoned, so the
+// UI waiting row must be removed and the operator told. It never deletes or
+// acks the durable row — an unconsumed message is still replayed by a later
+// restore, and only a missing or expired row is reported. The task id appears
+// in the toast only when it is known.
+func (a *MainAgent) reportSubAgentMailboxDropped(messageID, agentID, taskID, reason string) {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return
+	}
+	agentID = strings.TrimSpace(agentID)
+	taskID = strings.TrimSpace(taskID)
+	a.emitToTUI(MailboxDeliveryDroppedEvent{MessageID: messageID})
+	text := "An agent message " + mailboxDeliveryDroppedToastSuffix
+	if taskID != "" {
+		text = fmt.Sprintf("Message for task %s %s", taskID, mailboxDeliveryDroppedToastSuffix)
+	}
+	a.emitToTUI(ToastEvent{Message: text, Level: "warn", Category: mailboxDeliveryDroppedToastCategory, AgentID: agentID})
+	log.Warnf("dropping mailbox message delivery message_id=%v agent_id=%v task_id=%v reason=%v", messageID, agentID, taskID, reason)
 }
 
 func (a *MainAgent) loadDurableMailboxMessage(messageID string) (*SubAgentMailboxMessage, bool, error) {
@@ -1436,6 +1601,10 @@ func (a *MainAgent) stageNextSubAgentMailboxBatch() bool {
 	// turn ends picks the snapshot up.
 	var progress []SubAgentMailboxMessage
 	if a.turn == nil {
+		// A deferred delivery that became reloadable rejoins the normal
+		// pipeline here, before this batch claims its progress FIFO, so the
+		// same drain delivers it.
+		a.retryDeferredMailboxDeliveries()
 		progress = a.takeMainInboxProgressSnapshots()
 	}
 	msg := a.dequeueNextSubAgentMailbox()

@@ -310,12 +310,26 @@ func (a *MainAgent) removeSubAgentMailboxState(agentID string) {
 	for _, messageID := range a.subAgentInbox.progressPending {
 		if a.subAgentInbox.progressPendingAgent[messageID] == agentID {
 			delete(a.subAgentInbox.progressPendingAgent, messageID)
+			delete(a.subAgentInbox.progressPendingTask, messageID)
 			delete(a.subAgentInbox.progressPendingAttempts, messageID)
 			continue
 		}
 		filterPending = append(filterPending, messageID)
 	}
 	a.subAgentInbox.progressPending = filterPending
+	// A deferred retry belongs to the agent that produced the snapshot: once
+	// that worker's mailbox state is removed the retry can no longer be
+	// delivered anywhere, and keeping it would re-inject a closing worker's
+	// progress into the main context on a later sweep (and report a
+	// misleading drop).
+	filterDeferred := a.subAgentInbox.deferredProgress[:0]
+	for _, entry := range a.subAgentInbox.deferredProgress {
+		if strings.TrimSpace(entry.AgentID) == agentID {
+			continue
+		}
+		filterDeferred = append(filterDeferred, entry)
+	}
+	a.subAgentInbox.deferredProgress = filterDeferred
 	filterProgress := func(in []SubAgentMailboxMessage) []SubAgentMailboxMessage {
 		if len(in) == 0 {
 			return nil
@@ -581,16 +595,17 @@ func (a *MainAgent) startSubAgentLifecycleSweep(ctx context.Context) {
 
 // hasSubAgentLifecycleSweepCandidates reports whether the periodic sweep could
 // find something to act on: a waiting_main expiry candidate, a live Running
-// worker whose stall/health the sweep must keep watching, or a loop that is
-// not globally idle. The last term keeps the cadence alive after every worker
-// has gone terminal: a stranded owned mailbox (for example a child completion
-// queued under an owner that already finished) is queued mailbox work, so it
-// suppresses global idle, and no worker remains to ever fire another event —
-// the periodic sweep is the only retry that can drain it into a main turn. The
-// gate reads the global-idle flag rather than the mailbox queues because it
-// runs on the trigger goroutine while the queues belong to the event loop. The
-// trigger stays silent for sessions that never delegate and have no pending
-// mailbox work, so a truly idle main is not woken.
+// worker whose stall/health the sweep must keep watching, a deferred mailbox
+// delivery waiting on its retry, or a loop that is not globally idle. The last
+// two terms keep the cadence alive after every worker has gone terminal: a
+// stranded owned mailbox (for example a child completion queued under an owner
+// that already finished) is queued mailbox work, so it suppresses global idle,
+// while a deferred delivery deliberately does not — the sweep wake is the only
+// trigger that keeps retrying it, and none of these cases has a worker left to
+// fire another event. The gate reads the global-idle flag rather than the
+// mailbox queues because it runs on the trigger goroutine while the queues
+// belong to the event loop. The trigger stays silent for sessions that never
+// delegate and have no pending mailbox work, so a truly idle main is not woken.
 func (a *MainAgent) hasSubAgentLifecycleSweepCandidates() bool {
 	subs := a.subs.snapshotSubAgents()
 	for _, sub := range subs {
@@ -601,7 +616,19 @@ func (a *MainAgent) hasSubAgentLifecycleSweepCandidates() bool {
 	if a.waitingMainExpiryCandidatesAmong(subs) {
 		return true
 	}
+	if a.hasDeferredMailboxDeliveries() {
+		return true
+	}
 	return !a.globalIdle.Load()
+}
+
+// hasDeferredMailboxDeliveries reports whether any mailbox message is waiting
+// on its delayed retry. It runs on the sweep trigger goroutine, so it reads the
+// deferred set under the lock that guards every mailbox-queue mutation.
+func (a *MainAgent) hasDeferredMailboxDeliveries() bool {
+	a.subAgentMailboxIDsMu.Lock()
+	defer a.subAgentMailboxIDsMu.Unlock()
+	return len(a.subAgentInbox.deferredProgress) > 0
 }
 
 // hasWaitingMainExpiryCandidates reports whether a live worker or a parked task
