@@ -9,82 +9,75 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-func TestHandleBackgroundObjectFinishedForMainAppendsContextAndStartsTurn(t *testing.T) {
-	projectRoot := t.TempDir()
-	a := newTestMainAgent(t, projectRoot)
-	payload := &tools.SpawnFinishedPayload{
-		BackgroundID: "job-1",
-		AgentID:      a.instanceID,
+func backgroundResultPayload(agentID, backgroundID, description string) *tools.SpawnFinishedPayload {
+	return &tools.SpawnFinishedPayload{
+		BackgroundID: backgroundID,
+		AgentID:      agentID,
 		Kind:         "job",
-		Description:  "Run production build",
+		Description:  description,
 		Status:       "finished (exit 0)",
-		Message:      "[Background object job-1 completed]\n\nDescription: Run production build\nStatus: finished (exit 0)",
+		Message:      "[Background object " + backgroundID + " completed]\n\nDescription: " + description + "\nStatus: finished (exit 0)",
 	}
+}
 
-	a.handleSpawnFinished(Event{Type: EventSpawnFinished, SourceID: a.instanceID, Payload: payload})
+func mainInboxBackgroundResults(a *MainAgent) []SubAgentMailboxMessage {
+	var out []SubAgentMailboxMessage
+	for _, msg := range a.subAgentInbox.normal {
+		if msg.Kind == SubAgentMailboxKindBackgroundResult {
+			out = append(out, msg)
+		}
+	}
+	return out
+}
 
-	msgs := a.ctxMgr.Snapshot()
-	if len(msgs) == 0 {
-		t.Fatal("expected context message appended for main background result")
-	}
-	last := msgs[len(msgs)-1]
-	if last.Role != "user" {
-		t.Fatalf("last role = %q, want user", last.Role)
-	}
-	if last.Kind != message.KindBackgroundResult {
-		t.Fatalf("last kind = %q, want %q", last.Kind, message.KindBackgroundResult)
-	}
-	if !strings.Contains(last.Content, "Run production build") {
-		t.Fatalf("last content = %q, want build description", last.Content)
-	}
+func TestHandleBackgroundObjectFinishedForMainIdleStartsTurnAndDelivers(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.handleSpawnFinished(Event{Type: EventSpawnFinished, SourceID: a.instanceID, Payload: backgroundResultPayload(a.instanceID, "job-1", "Run production build")})
+
 	if a.turn == nil {
 		t.Fatal("expected new turn to start after main background result")
 	}
-}
-
-func TestHandleBackgroundObjectFinishedForMainEmitsCardAndToastWhenIdle(t *testing.T) {
-	projectRoot := t.TempDir()
-	a := newTestMainAgent(t, projectRoot)
-	payload := &tools.SpawnFinishedPayload{
-		BackgroundID: "job-1",
-		AgentID:      a.instanceID,
-		Kind:         "job",
-		Description:  "Run production build",
-		Status:       "finished (exit 0)",
-		Message:      "[Background object job-1 completed]\n\nDescription: Run production build\nStatus: finished (exit 0)",
+	if got := len(a.pendingUserMessages); got != 0 {
+		t.Fatalf("len(pendingUserMessages) = %d, want 0: a background result is queued durably, not in memory", got)
+	}
+	if got := len(a.pendingSubAgentMailboxes); got != 1 {
+		t.Fatalf("len(pendingSubAgentMailboxes) = %d, want the durable result staged for the boundary", got)
 	}
 
-	a.handleSpawnFinished(Event{Type: EventSpawnFinished, SourceID: a.instanceID, Payload: payload})
-
-	var sawCard, sawToast bool
-	for _, evt := range drainAgentEvents(a.Events()) {
-		switch e := evt.(type) {
-		case SpawnFinishedEvent:
-			sawCard = true
-			if e.BackgroundID != "job-1" {
-				t.Fatalf("SpawnFinishedEvent.BackgroundID = %q, want job-1", e.BackgroundID)
-			}
-			if e.AgentID != "" {
-				t.Fatalf("SpawnFinishedEvent.AgentID = %q, want empty main attribution", e.AgentID)
-			}
-		case ToastEvent:
-			if strings.Contains(e.Message, "job-1") {
-				sawToast = true
-				if e.Level != "info" {
-					t.Fatalf("success toast level = %q, want info", e.Level)
-				}
-			}
-		}
+	overlays := a.buildTurnOverlayMessages()
+	if len(overlays) != 1 {
+		t.Fatalf("overlay count = %d, want 1", len(overlays))
 	}
-	if !sawCard {
-		t.Fatal("expected SpawnFinishedEvent emitted for idle main background result")
+	delivered := overlays[0]
+	if delivered.Role != message.RoleUser || delivered.Kind != message.KindBackgroundResult {
+		t.Fatalf("overlay = %#v, want a user KindBackgroundResult message", delivered)
 	}
-	if !sawToast {
-		t.Fatal("expected ToastEvent emitted for idle main background result")
+	if delivered.Mailbox == nil || delivered.Mailbox.Kind != string(SubAgentMailboxKindBackgroundResult) {
+		t.Fatalf("overlay mailbox metadata = %#v", delivered.Mailbox)
+	}
+	if !strings.Contains(delivered.Content, "Run production build") {
+		t.Fatalf("overlay content = %q, want build description", delivered.Content)
+	}
+	ctx := a.ctxMgr.Snapshot()
+	if len(ctx) != 1 || ctx[0].Kind != message.KindBackgroundResult {
+		t.Fatalf("context = %#v, want the durable background result", ctx)
+	}
+	// The durable row is recognized as delivered, so a restore does not replay
+	// a result the model already saw.
+	if _, ok := conversationMailboxIDs(ctx)[delivered.Mailbox.MessageID]; !ok {
+		t.Fatalf("conversationMailboxIDs = %v, want the delivered background result", conversationMailboxIDs(ctx))
+	}
+	a.flushPersist()
+	persisted, err := a.recoveryManager().LoadMessages("main")
+	if err != nil {
+		t.Fatalf("LoadMessages(main): %v", err)
+	}
+	if len(persisted) != 1 || persisted[0].Kind != message.KindBackgroundResult {
+		t.Fatalf("persisted = %#v, want a durable background result", persisted)
 	}
 }
 
-func TestHandleBackgroundObjectFinishedForMainQueuesWhileBusy(t *testing.T) {
+func TestHandleBackgroundObjectFinishedForMainQueuesDurablyWhileBusy(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn()
@@ -105,26 +98,20 @@ func TestHandleBackgroundObjectFinishedForMainQueuesWhileBusy(t *testing.T) {
 	a.turn.TotalToolCalls.Store(1)
 	a.turn.recordPendingToolCall(PendingToolCall{CallID: "grep-1", Name: "grep", ArgsJSON: `{"pattern":"TODO","paths":["internal"],"includes":["**/*.go"]}`})
 
-	payload := &tools.SpawnFinishedPayload{
-		BackgroundID: "job-1",
-		AgentID:      a.instanceID,
-		Kind:         "job",
-		Description:  "Run production build",
-		Status:       "finished (exit 0)",
-		Message:      "[Background object job-1 completed]\n\nDescription: Run production build\nStatus: finished (exit 0)",
-	}
-
-	a.handleSpawnFinished(Event{Type: EventSpawnFinished, SourceID: a.instanceID, Payload: payload})
+	a.handleSpawnFinished(Event{Type: EventSpawnFinished, SourceID: a.instanceID, Payload: backgroundResultPayload(a.instanceID, "job-1", "Run production build")})
 	a.flushPersist()
 
 	if a.turn == nil || a.turn.ID != turnID {
 		t.Fatalf("turn = %+v, want original active turn %d", a.turn, turnID)
 	}
-	if got := len(a.pendingUserMessages); got != 1 {
-		t.Fatalf("len(pendingUserMessages) = %d, want 1", got)
+	if got := len(a.pendingUserMessages); got != 0 {
+		t.Fatalf("len(pendingUserMessages) = %d, want 0", got)
 	}
-	if got := a.pendingUserMessages[0].Content; !strings.Contains(got, "Run production build") {
-		t.Fatalf("pending background completion = %q, want build description", got)
+	if got := len(a.pendingSubAgentMailboxes); got != 0 {
+		t.Fatalf("len(pendingSubAgentMailboxes) = %d, want nothing staged mid-batch", got)
+	}
+	if got := len(mainInboxBackgroundResults(a)); got != 1 {
+		t.Fatalf("main inbox background results = %d, want 1", got)
 	}
 	msgs := a.ctxMgr.Snapshot()
 	if len(msgs) != 1 {
@@ -133,98 +120,80 @@ func TestHandleBackgroundObjectFinishedForMainQueuesWhileBusy(t *testing.T) {
 	if got := a.turn.PendingToolCalls.Load(); got != 1 {
 		t.Fatalf("PendingToolCalls = %d, want 1", got)
 	}
-	if restored, err := a.recoveryManager().LoadMessages("main"); err != nil {
+	restored, err := a.recoveryManager().LoadMessages("main")
+	if err != nil {
 		t.Fatalf("LoadMessages(main): %v", err)
-	} else if len(restored) != 1 {
+	}
+	if len(restored) != 1 {
 		t.Fatalf("len(restored) = %d, want 1 assistant tool-call message only", len(restored))
+	}
+	// The result is durable in the mailbox log before it is shown, so a restart
+	// or a session switch replays it instead of dropping it.
+	rows, err := loadSubAgentMailboxMessages(a.sessionDir)
+	if err != nil {
+		t.Fatalf("loadSubAgentMailboxMessages: %v", err)
+	}
+	backgroundRows := 0
+	for _, row := range rows {
+		if row.Kind == SubAgentMailboxKindBackgroundResult {
+			backgroundRows++
+			if !strings.Contains(row.Summary, "Run production build") {
+				t.Fatalf("durable row summary = %q, want build description", row.Summary)
+			}
+		}
+	}
+	if backgroundRows != 1 {
+		t.Fatalf("durable background_result rows = %d, want 1", backgroundRows)
 	}
 }
 
-func TestHandleBackgroundObjectFinishedForMainKeepsContiguousBusyResultsDistinct(t *testing.T) {
-	projectRoot := t.TempDir()
-	a := newTestMainAgent(t, projectRoot)
+func TestHandleBackgroundObjectFinishedForMainKeepsDistinctDurableRows(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn()
 
-	payload1 := &tools.SpawnFinishedPayload{
-		BackgroundID: "job-1",
-		AgentID:      a.instanceID,
-		Kind:         "job",
-		Description:  "Run production build",
-		Status:       "finished (exit 0)",
-		Message:      "[Background object job-1 completed]\n\nDescription: Run production build\nStatus: finished (exit 0)",
-	}
-	payload2 := &tools.SpawnFinishedPayload{
-		BackgroundID: "job-2",
-		AgentID:      a.instanceID,
-		Kind:         "job",
-		Description:  "Upload release bundle",
-		Status:       "finished (exit 0)",
-		Message:      "[Background object job-2 completed]\n\nDescription: Upload release bundle\nStatus: finished (exit 0)",
-	}
+	a.handleSpawnFinished(Event{Type: EventSpawnFinished, SourceID: a.instanceID, Payload: backgroundResultPayload(a.instanceID, "job-1", "Run production build")})
+	a.handleSpawnFinished(Event{Type: EventSpawnFinished, SourceID: a.instanceID, Payload: backgroundResultPayload(a.instanceID, "job-2", "Upload release bundle")})
 
-	a.handleSpawnFinished(Event{Type: EventSpawnFinished, SourceID: a.instanceID, Payload: payload1})
-	a.handleSpawnFinished(Event{Type: EventSpawnFinished, SourceID: a.instanceID, Payload: payload2})
-
-	// One queued message per finished job: a JOB RESULT card without its own
+	// One durable row per finished job: a JOB RESULT card without its own
 	// backing transcript slot would make the live view disagree with a restored
 	// session about how many results exist.
-	if got := len(a.pendingUserMessages); got != 2 {
-		t.Fatalf("len(pendingUserMessages) = %d, want 2 distinct entries", got)
+	rows := mainInboxBackgroundResults(a)
+	if len(rows) != 2 {
+		t.Fatalf("main inbox background results = %d, want 2 distinct entries", len(rows))
 	}
-	if !strings.Contains(a.pendingUserMessages[0].Content, "Run production build") {
-		t.Fatalf("first pending content = %q, want job-1", a.pendingUserMessages[0].Content)
+	if !strings.Contains(rows[0].Summary, "Run production build") {
+		t.Fatalf("first row = %q, want job-1", rows[0].Summary)
 	}
-	if !strings.Contains(a.pendingUserMessages[1].Content, "Upload release bundle") {
-		t.Fatalf("second pending content = %q, want job-2", a.pendingUserMessages[1].Content)
+	if !strings.Contains(rows[1].Summary, "Upload release bundle") {
+		t.Fatalf("second row = %q, want job-2", rows[1].Summary)
 	}
-	if k := a.pendingUserMessages[0].Kind; k != message.KindBackgroundResult {
-		t.Fatalf("first pending kind = %q, want %q", k, message.KindBackgroundResult)
+	if rows[0].MessageID == "" || rows[0].MessageID == rows[1].MessageID {
+		t.Fatalf("message ids = (%q, %q), want two distinct durable ids", rows[0].MessageID, rows[1].MessageID)
 	}
 }
 
 func TestHandleBackgroundObjectFinishedForMainDoesNotCoalesceAcrossUserInput(t *testing.T) {
-	projectRoot := t.TempDir()
-	a := newTestMainAgent(t, projectRoot)
+	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn()
 
-	payload1 := &tools.SpawnFinishedPayload{
-		BackgroundID: "job-1",
-		AgentID:      a.instanceID,
-		Kind:         "job",
-		Description:  "Run production build",
-		Status:       "finished (exit 0)",
-		Message:      "[Background object job-1 completed]\n\nDescription: Run production build\nStatus: finished (exit 0)",
-	}
-	payload2 := &tools.SpawnFinishedPayload{
-		BackgroundID: "job-2",
-		AgentID:      a.instanceID,
-		Kind:         "job",
-		Description:  "Upload release bundle",
-		Status:       "finished (exit 0)",
-		Message:      "[Background object job-2 completed]\n\nDescription: Upload release bundle\nStatus: finished (exit 0)",
-	}
-
-	a.handleSpawnFinished(Event{Type: EventSpawnFinished, SourceID: a.instanceID, Payload: payload1})
+	a.handleSpawnFinished(Event{Type: EventSpawnFinished, SourceID: a.instanceID, Payload: backgroundResultPayload(a.instanceID, "job-1", "Run production build")})
 	a.handleUserMessage(Event{Payload: "queued user follow-up"})
-	a.handleSpawnFinished(Event{Type: EventSpawnFinished, SourceID: a.instanceID, Payload: payload2})
+	a.handleSpawnFinished(Event{Type: EventSpawnFinished, SourceID: a.instanceID, Payload: backgroundResultPayload(a.instanceID, "job-2", "Upload release bundle")})
 
-	if got := len(a.pendingUserMessages); got != 3 {
-		t.Fatalf("len(pendingUserMessages) = %d, want 3 distinct ordered entries", got)
+	if got := len(a.pendingUserMessages); got != 1 || a.pendingUserMessages[0].Content != "queued user follow-up" {
+		t.Fatalf("pendingUserMessages = %#v, want only the queued user follow-up", a.pendingUserMessages)
 	}
-	if !strings.Contains(a.pendingUserMessages[0].Content, "Run production build") {
-		t.Fatalf("first pending content = %q, want first background completion", a.pendingUserMessages[0].Content)
+	rows := mainInboxBackgroundResults(a)
+	if len(rows) != 2 {
+		t.Fatalf("main inbox background results = %d, want 2 distinct entries", len(rows))
 	}
-	if a.pendingUserMessages[1].Content != "queued user follow-up" {
-		t.Fatalf("second pending content = %q, want queued user follow-up", a.pendingUserMessages[1].Content)
-	}
-	if !strings.Contains(a.pendingUserMessages[2].Content, "Upload release bundle") {
-		t.Fatalf("third pending content = %q, want second background completion", a.pendingUserMessages[2].Content)
+	if !strings.Contains(rows[0].Summary, "Run production build") || !strings.Contains(rows[1].Summary, "Upload release bundle") {
+		t.Fatalf("rows = (%q, %q), want job-1 then job-2", rows[0].Summary, rows[1].Summary)
 	}
 }
 
-func TestHandleBackgroundObjectFinishedForMainMergesAfterToolBatch(t *testing.T) {
-	projectRoot := t.TempDir()
-	a := newTestMainAgent(t, projectRoot)
+func TestHandleBackgroundObjectFinishedForMainDeliversAfterToolBatch(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn()
 	assistant := message.Message{
 		Role: "assistant",
@@ -237,15 +206,13 @@ func TestHandleBackgroundObjectFinishedForMainMergesAfterToolBatch(t *testing.T)
 	a.turn.TotalToolCalls.Store(1)
 	a.turn.recordPendingToolCall(PendingToolCall{CallID: "grep-1", Name: "grep", ArgsJSON: `{"pattern":"TODO","paths":["internal"],"includes":["**/*.go"]}`})
 
-	payload := &tools.SpawnFinishedPayload{
-		BackgroundID: "job-1",
-		AgentID:      a.instanceID,
-		Kind:         "job",
-		Description:  "Run production build",
-		Status:       "finished (exit 0)",
-		Message:      "[Background object job-1 completed]\n\nDescription: Run production build\nStatus: finished (exit 0)",
+	a.handleSpawnFinished(Event{Type: EventSpawnFinished, SourceID: a.instanceID, Payload: backgroundResultPayload(a.instanceID, "job-1", "Run production build")})
+
+	// A result that arrives while a tool batch is open must never land between
+	// the assistant tool_calls message and the tool result that closes it.
+	if msgs := a.ctxMgr.Snapshot(); len(msgs) != 1 {
+		t.Fatalf("len(ctx snapshot) = %d, want only the assistant tool-call message", len(msgs))
 	}
-	a.handleSpawnFinished(Event{Type: EventSpawnFinished, SourceID: a.instanceID, Payload: payload})
 
 	a.handleToolResult(Event{Type: EventToolResult, TurnID: a.turn.ID, Payload: &ToolResultPayload{
 		CallID:   "grep-1",
@@ -254,6 +221,8 @@ func TestHandleBackgroundObjectFinishedForMainMergesAfterToolBatch(t *testing.T)
 		Result:   "No matches found.",
 		TurnID:   a.turn.ID,
 	}})
+	a.prepareSubAgentMailboxBatchForTurnContinuation()
+	a.buildTurnOverlayMessages()
 
 	msgs := a.ctxMgr.Snapshot()
 	if len(msgs) != 3 {
@@ -262,14 +231,14 @@ func TestHandleBackgroundObjectFinishedForMainMergesAfterToolBatch(t *testing.T)
 	if msgs[1].Role != "tool" || msgs[1].ToolCallID != "grep-1" {
 		t.Fatalf("tool result message = %#v, want grep-1 tool result", msgs[1])
 	}
-	if msgs[2].Role != "user" || !strings.Contains(msgs[2].Content, "Run production build") {
-		t.Fatalf("merged background completion message = %#v, want user background completion", msgs[2])
+	if msgs[2].Role != "user" || msgs[2].Kind != message.KindBackgroundResult {
+		t.Fatalf("delivered background completion = %#v, want user KindBackgroundResult", msgs[2])
 	}
-	if msgs[2].Kind != message.KindBackgroundResult {
-		t.Fatalf("merged background completion kind = %q, want %q", msgs[2].Kind, message.KindBackgroundResult)
+	if !strings.Contains(msgs[2].Content, "Run production build") {
+		t.Fatalf("delivered content = %q, want build description", msgs[2].Content)
 	}
 	if got := len(a.pendingUserMessages); got != 0 {
-		t.Fatalf("len(pendingUserMessages) = %d, want 0 after merge", got)
+		t.Fatalf("len(pendingUserMessages) = %d, want 0", got)
 	}
 }
 
@@ -290,14 +259,7 @@ func TestHandleBackgroundObjectFinishedRoutesToOwnerSubAgentOnly(t *testing.T) {
 	a.subs.subAgents[sub.instanceID] = sub
 	a.subs.mu.Unlock()
 
-	payload := &tools.SpawnFinishedPayload{
-		BackgroundID: "job-7",
-		AgentID:      sub.instanceID,
-		Kind:         "job",
-		Description:  "Run production build",
-		Status:       "finished (exit 0)",
-		Message:      "[Background object job-7 completed]\n\nDescription: Run production build\nStatus: finished (exit 0)",
-	}
+	payload := backgroundResultPayload(sub.instanceID, "job-7", "Run production build")
 
 	a.handleSpawnFinished(Event{Type: EventSpawnFinished, SourceID: sub.instanceID, Payload: payload})
 
@@ -326,28 +288,70 @@ func TestHandleBackgroundObjectFinishedRoutesToOwnerSubAgentOnly(t *testing.T) {
 }
 
 func TestHandleBackgroundObjectFinishedOrphanOwnerFallsBackToMain(t *testing.T) {
-	projectRoot := t.TempDir()
-	a := newTestMainAgent(t, projectRoot)
+	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn()
 
-	payload := &tools.SpawnFinishedPayload{
-		BackgroundID: "job-9",
-		AgentID:      "builder-gone",
-		Kind:         "job",
-		Description:  "Run production build",
-		Status:       "finished (exit 0)",
-		Message:      "[Background object job-9 completed]\n\nDescription: Run production build\nStatus: finished (exit 0)",
-	}
+	payload := backgroundResultPayload("builder-gone", "job-9", "Run production build")
 	a.handleSpawnFinished(Event{Type: EventSpawnFinished, SourceID: payload.AgentID, Payload: payload})
 
 	// A terminated owner must not leave a card with no backing transcript slot:
 	// the result falls back to the main transcript like a main-owned result.
-	if got := len(a.pendingUserMessages); got != 1 {
-		t.Fatalf("len(pendingUserMessages) = %d, want 1 main fallback", got)
+	if got := len(a.pendingUserMessages); got != 0 {
+		t.Fatalf("len(pendingUserMessages) = %d, want 0", got)
 	}
-	pending := a.pendingUserMessages[0]
-	if pending.Kind != message.KindBackgroundResult || !strings.Contains(pending.Content, "Run production build") {
-		t.Fatalf("pending = %#v, want durable main background result", pending)
+	rows := mainInboxBackgroundResults(a)
+	if len(rows) != 1 || !strings.Contains(rows[0].Summary, "Run production build") {
+		t.Fatalf("main inbox background results = %#v, want one main fallback row", rows)
+	}
+}
+
+func TestHandleBackgroundObjectFinishedSubOwnerQueueFullSpoolsDurably(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sub := &SubAgent{
+		instanceID:        "builder-2",
+		parent:            a,
+		parentCtx:         ctx,
+		cancel:            cancel,
+		ctxAppendCh:       make(chan message.Message, 1),
+		continueCh:        make(chan continueMsg, 1),
+		queueMessageLimit: 1,
+	}
+	// Fill the one-message queue so routing the result to the owner is rejected.
+	if !sub.TryEnqueueContextAppend(message.Message{Role: message.RoleUser, Content: "already queued", Kind: message.KindBackgroundResult}) {
+		t.Fatal("precondition enqueue rejected")
+	}
+	a.subs.mu.Lock()
+	a.subs.subAgents[sub.instanceID] = sub
+	a.subs.mu.Unlock()
+
+	a.handleSpawnFinished(Event{Type: EventSpawnFinished, SourceID: sub.instanceID, Payload: backgroundResultPayload(sub.instanceID, "job-8", "Run production build")})
+	a.flushPersist()
+
+	// A full owner queue must not drop the result: it stays a durable mailbox
+	// row and is spooled under the owner for a later drain.
+	rows, err := loadSubAgentMailboxMessages(a.sessionDir)
+	if err != nil {
+		t.Fatalf("loadSubAgentMailboxMessages: %v", err)
+	}
+	durable := 0
+	for _, row := range rows {
+		if row.Kind == SubAgentMailboxKindBackgroundResult && strings.Contains(row.Summary, "Run production build") {
+			durable++
+		}
+	}
+	if durable != 1 {
+		t.Fatalf("durable background_result rows = %d, want 1", durable)
+	}
+	a.subAgentMailboxIDsMu.Lock()
+	owned := len(a.ownedSubAgentMailboxes[sub.instanceID]) + len(a.ownedMailboxSpool[sub.instanceID])
+	a.subAgentMailboxIDsMu.Unlock()
+	if owned != 1 {
+		t.Fatalf("owned queue depth = %d, want the rejected result queued durably under the owner", owned)
+	}
+	if got := len(sub.ctxAppendCh) + len(sub.ctxAppendOverflow); got != 1 {
+		t.Fatalf("owner context append depth = %d, want only the precondition message (no silent drop, no double delivery)", got)
 	}
 }
 

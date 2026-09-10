@@ -856,6 +856,20 @@ func (e SpawnFinishedEvent) EffectiveID() string {
 
 func (SpawnFinishedEvent) agentEvent() {}
 
+// BackgroundResultAppendedEvent reports that a finished background job's
+// result was durably appended to TargetAgentID's transcript at MessageIndex.
+// It is the only live source of a JOB RESULT card: the card is built after the
+// backing message is persisted, so a restored session rebuilds the same card
+// from the transcript (see messagesToBlocksWithThinkingTranslations) and a
+// queued-but-undelivered result never shows a card without a message.
+type BackgroundResultAppendedEvent struct {
+	Message       message.Message
+	TargetAgentID string
+	MessageIndex  int
+}
+
+func (BackgroundResultAppendedEvent) agentEvent() {}
+
 // RateLimitUpdatedEvent is emitted when a new rate-limit snapshot is available
 // for the current API key. The TUI should re-read CurrentRateLimitSnapshot.
 type RateLimitUpdatedEvent struct {

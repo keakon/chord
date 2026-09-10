@@ -60,6 +60,43 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 			if mailbox == nil {
 				continue
 			}
+			// A background result is delivered as the raw KindBackgroundResult
+			// message the transcript and the restore path already understand,
+			// not as a system-reminder mailbox notice. Its card is emitted only
+			// after this append is durable, so a queued-but-undelivered result
+			// never shows a card without a backing message.
+			if mailbox.Kind == SubAgentMailboxKindBackgroundResult {
+				content := strings.TrimSpace(mailbox.Summary)
+				if content == "" {
+					continue
+				}
+				msg := message.Message{
+					Role:    message.RoleUser,
+					Kind:    message.KindBackgroundResult,
+					Content: content,
+					Mailbox: mailboxMetadata(mailbox),
+				}
+				id := strings.TrimSpace(mailbox.MessageID)
+				if id != "" && mapContains(durableMailboxIDs, id) {
+					// The backing row is already in the durable conversation;
+					// adding it again as a transient overlay would duplicate it.
+					continue
+				}
+				messageIndex := a.ctxMgr.MessageCount()
+				a.ctxMgr.Append(msg)
+				a.persistAsyncAfter("main", msg, func(err error) {
+					if err != nil {
+						a.notePersistenceFailure(err)
+						return
+					}
+					a.emitToTUI(BackgroundResultAppendedEvent{Message: msg, TargetAgentID: "main", MessageIndex: messageIndex})
+				})
+				if id != "" {
+					durableMailboxIDs[id] = struct{}{}
+				}
+				overlays = append(overlays, msg)
+				continue
+			}
 			content := strings.TrimSpace(formatSubAgentMailboxInjectionText(mailbox))
 			if content == "" {
 				continue
@@ -378,13 +415,16 @@ func (a *MainAgent) hasCoordinationTaskRecords() bool {
 }
 
 // conversationMailboxIDs collects the message IDs of the SubAgent mailbox
-// messages already durable in the conversation (delivered on earlier requests).
-// The set answers "was this mailbox already appended" in one pass instead of
-// one scan of the conversation per pending mailbox.
+// conversationMailboxIDs collects the message IDs of mailbox rows already
+// durable in the conversation (delivered on earlier requests). It also counts
+// a durable background result, which is stored as a KindBackgroundResult
+// message carrying the same mailbox metadata. The set answers "was this
+// mailbox already appended" in one pass instead of one scan of the conversation
+// per pending mailbox.
 func conversationMailboxIDs(conversation []message.Message) map[string]struct{} {
 	ids := make(map[string]struct{})
 	for _, msg := range conversation {
-		if msg.Kind != message.KindSubAgentMailbox || msg.Mailbox == nil {
+		if msg.Mailbox == nil || (msg.Kind != message.KindSubAgentMailbox && msg.Kind != message.KindBackgroundResult) {
 			continue
 		}
 		if id := strings.TrimSpace(msg.Mailbox.MessageID); id != "" {

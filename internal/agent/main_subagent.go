@@ -15,7 +15,6 @@ import (
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/mcp"
-	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -773,53 +772,48 @@ func (a *MainAgent) handleSpawnFinished(evt Event) {
 		sub = a.subs.subAgents[payload.AgentID]
 		a.subs.mu.RUnlock()
 	}
-	if sub == nil {
-		if payload.AgentID != "" && payload.AgentID != a.instanceID {
-			log.Warnf("handleSpawnFinished: owner subagent not found, attributing to main agent_id=%v background_id=%v", payload.AgentID, backgroundID)
-		}
-		// Each job result is one durable KindBackgroundResult message, so its
-		// JOB RESULT card always has exactly one backing transcript slot. While
-		// a main turn is active the message is queued and appended at the next
-		// request boundary; otherwise it is appended now. The card carries the
-		// same content the message persists, so live and restored cards render
-		// identically.
-		content := a.mainBackgroundResultContent(payload)
-		a.emitBackgroundResultCard("", payload, content)
-		if a.turn != nil {
-			a.pendingUserMessages = enqueuePendingUserMessage(a.pendingUserMessages, pendingUserMessage{
-				Content: content,
-				Kind:    message.KindBackgroundResult,
-			})
-			return
-		}
-		a.newTurn()
-		turnID := a.turn.ID
-		turnCtx := a.turn.Ctx
-		a.handleSpawnResultForMain(payload)
-		a.beginMainLLMAfterPreparation(turnCtx, turnID, "main")
-		return
+	if sub == nil && payload.AgentID != "" && payload.AgentID != a.instanceID {
+		log.Warnf("handleSpawnFinished: owner subagent not found, attributing to main agent_id=%v background_id=%v", payload.AgentID, backgroundID)
 	}
 
-	content := strings.TrimSpace(payload.Message)
-	if content == "" {
-		content = fmt.Sprintf("[Background %s %s completed]\n\nDescription: %s\nStatus: %s", payload.Kind, backgroundID, payload.Description, payload.Status)
+	// Every finished job becomes one durable background_result mailbox row,
+	// persisted before it is shown. The owner's transcript receives it at the
+	// next request boundary (immediately when the owner is idle), so a result
+	// queued behind a busy turn survives a restart or a session switch and is
+	// replayed by restore. The JOB RESULT card is emitted only once that
+	// transcript append is durable, so a queued-but-undelivered result shows up
+	// in the pending area instead of as a card with no backing message.
+	mailbox := SubAgentMailboxMessage{
+		Kind:        SubAgentMailboxKindBackgroundResult,
+		Priority:    SubAgentMailboxPriorityNotify,
+		MessageType: AgentMessageTypeNotice,
+		Summary:     a.backgroundResultContent(sub, payload),
 	}
-	if !sub.TryEnqueueContextAppend(message.Message{Role: message.RoleUser, Content: content, Kind: message.KindBackgroundResult}) {
-		log.Warnf("handleSpawnFinished: subagent context append rejected agent_id=%v background_id=%v state=%v", payload.AgentID, backgroundID, sub.State())
-	} else {
-		sub.ContinueFromContext()
+	if sub != nil {
+		mailbox.OwnerAgentID = sub.instanceID
+		mailbox.OwnerTaskID = taskIDForSub(sub)
 	}
-	a.emitBackgroundResultCard(payload.AgentID, payload, content)
+	a.emitToTUI(SpawnFinishedEvent{BackgroundID: backgroundID, AgentID: payload.AgentID, Kind: payload.Kind, Status: payload.Status, Command: payload.Command, Description: payload.Description, MaxRuntimeSec: payload.MaxRuntimeSec, Message: mailbox.Summary})
+	a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Background %s %s finished", payload.Kind, backgroundID), Level: backgroundCompletionToastLevel(payload.Status), AgentID: payload.AgentID})
+	a.enqueueSubAgentMailbox(mailbox)
+	if sub == nil && a.turn == nil && !a.mailboxDeliveryPaused.Load() {
+		a.drainSubAgentInbox()
+	}
 }
 
-// emitBackgroundResultCard emits the JOB RESULT card and its completion toast
-// for one background object. content is the exact text persisted as the
-// backing KindBackgroundResult message, so the live card and the restored card
-// derive from the same raw text.
-func (a *MainAgent) emitBackgroundResultCard(cardAgentID string, payload *tools.SpawnFinishedPayload, content string) {
-	backgroundID := payload.EffectiveID()
-	a.emitToTUI(SpawnFinishedEvent{BackgroundID: backgroundID, AgentID: cardAgentID, Kind: payload.Kind, Status: payload.Status, Command: payload.Command, Description: payload.Description, MaxRuntimeSec: payload.MaxRuntimeSec, Message: content})
-	a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Background %s %s finished", payload.Kind, backgroundID), Level: backgroundCompletionToastLevel(payload.Status), AgentID: payload.AgentID})
+// backgroundResultContent is the exact text stored on the durable
+// background_result row and later appended to the owner's transcript, so the
+// live card and the restored card derive from the same raw text. The main
+// owner also gets the shared transcript formatting; a sub-agent owner receives
+// its own report unchanged.
+func (a *MainAgent) backgroundResultContent(sub *SubAgent, payload *tools.SpawnFinishedPayload) string {
+	if sub == nil {
+		return a.mainBackgroundResultContent(payload)
+	}
+	if content := strings.TrimSpace(payload.Message); content != "" {
+		return content
+	}
+	return fmt.Sprintf("[Background %s %s completed]\n\nDescription: %s\nStatus: %s", payload.Kind, payload.EffectiveID(), payload.Description, payload.Status)
 }
 
 func backgroundCompletionToastLevel(status string) string {

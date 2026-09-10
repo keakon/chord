@@ -3,8 +3,6 @@ package tui
 import (
 	"strings"
 	"testing"
-
-	"github.com/keakon/chord/internal/agent"
 )
 
 func viewportRealTotal(v *Viewport) int {
@@ -18,7 +16,7 @@ func viewportRealTotal(v *Viewport) int {
 	return total
 }
 
-func TestSpawnFinishedEventUpdatesExistingSpilledStatusBlockAndRecomputesTotalLines(t *testing.T) {
+func TestBackgroundResultAppendedEventUpdatesExistingSpilledStatusBlockAndRecomputesTotalLines(t *testing.T) {
 	m := NewModelWithSize(nil, 60, 8)
 	m.viewport.maxHotBytes = 1024
 
@@ -37,14 +35,7 @@ func TestSpawnFinishedEventUpdatesExistingSpilledStatusBlockAndRecomputesTotalLi
 		"[Job job-7 finished]\n\nDescription: Run backend tests with a much longer summary that wraps across multiple lines and then appends extra details for diagnostics\nStatus: finished (exit 0)",
 	}
 	for _, msg := range messages {
-		_ = m.handleAgentEvent(agentEventMsg{event: agent.SpawnFinishedEvent{
-			BackgroundID: "job-7",
-			AgentID:      "builder-2",
-			Kind:         "job",
-			Description:  "Run backend tests with a much longer summary that wraps across multiple lines",
-			Status:       "finished (exit 0)",
-			Message:      msg,
-		}})
+		_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("builder-2", "subagent-8", msg)})
 	}
 
 	block, ok := m.viewport.FindStatusBlockByBackgroundObject("job-7")

@@ -333,6 +333,29 @@ func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
 			return true
 		})
 	}
+	// A background result reaches its owner as the raw KindBackgroundResult
+	// message the main transcript uses, not as a system-reminder mailbox
+	// notice, and it continues the owner's context without a user turn.
+	enqueueBackgroundContext := func() bool {
+		return a.withRegisteredSubAgent(owner, func(live *SubAgent) bool {
+			contextMessage := message.Message{
+				Role:         message.RoleUser,
+				Kind:         message.KindBackgroundResult,
+				Content:      strings.TrimSpace(msg.Summary),
+				MailboxAckID: strings.TrimSpace(msg.MessageID),
+				Mailbox:      mailboxMetadata(&msg),
+			}
+			if contextMessage.Content == "" {
+				return false
+			}
+			if !live.TryEnqueueContextAppend(contextMessage) {
+				return false
+			}
+			a.orchestrationMetrics.recordMailboxDelivery(msg.MessageID, msg.CreatedAt)
+			live.ContinueFromContext()
+			return true
+		})
+	}
 	enqueueForProcessing := func(messageText, statusMsg string) bool {
 		return a.withRegisteredSubAgent(owner, func(live *SubAgent) bool {
 			if live.State() != SubAgentStateRunning {
@@ -347,6 +370,8 @@ func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
 		})
 	}
 	switch msg.Kind {
+	case SubAgentMailboxKindBackgroundResult:
+		return enqueueBackgroundContext()
 	case SubAgentMailboxKindProgress:
 		return enqueueContext(text)
 	case SubAgentMailboxKindCompleted:
@@ -880,6 +905,12 @@ func (a *MainAgent) dequeueSpooledMailboxQueue(queue *[]string) *SubAgentMailbox
 
 func shouldPersistMailboxArtifact(msg SubAgentMailboxMessage) bool {
 	if msg.Completion != nil && len(msg.Completion.Artifacts) > 0 {
+		return false
+	}
+	// A background result's body is the exact text the owner must read, not a
+	// handoff summary an artifact can stand in for, so it never moves its body
+	// out of the row.
+	if msg.Kind == SubAgentMailboxKindBackgroundResult {
 		return false
 	}
 	payload := strings.TrimSpace(msg.Payload)

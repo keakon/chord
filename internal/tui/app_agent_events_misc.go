@@ -179,8 +179,10 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		m.removeContextNoticeBlocks()
 		return true, effects
 	case agent.SpawnFinishedEvent:
-		// The runtime reports the main agent as "main"; main-view blocks are
-		// attributed with an empty AgentID (see filterBlocksByAgent).
+		// A finished background object no longer builds a card here: the card
+		// comes from BackgroundResultAppendedEvent once the result is durably
+		// in the owner's transcript, so a queued-but-undelivered result shows
+		// in the pending area instead of as a card with no backing message.
 		//
 		// Note: two opposite normalization conventions coexist in the TUI. Block
 		// attribution normalizes "main" -> "" (here), while the activity/animation
@@ -192,18 +194,30 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			agentID = ""
 		}
 		m.finalizeAgentStream(agentID)
-		backgroundID := evt.EffectiveID()
-		content, _ := formatBackgroundResultCardContent(evt.Message, backgroundID, evt.Status, evt.Command, evt.Description)
+		return true, effects
+	case agent.BackgroundResultAppendedEvent:
+		// The result is durable now: drop its pending-area entry and build the
+		// JOB RESULT card from the exact persisted text, using the same parser
+		// the restore path uses so live and restored cards render identically.
+		if evt.Message.Mailbox != nil {
+			m.removeQueuedMailbox(evt.Message.Mailbox.MessageID)
+		}
+		agentID := evt.TargetAgentID
+		if agentID == "main" {
+			agentID = ""
+		}
+		content, backgroundID := formatBackgroundResultCardContent(evt.Message.Content, "", "", "", "")
 		if block, ok := m.findStatusBlockByBackgroundObject(backgroundID); ok {
 			block.Content = content
-			block.BackgroundCopyContent = evt.Message
+			block.BackgroundCopyContent = evt.Message.Content
 			block.StatusTitle = backgroundResultCardTitle
 			block.AgentID = agentID
+			block.MsgIndex = evt.MessageIndex
 			block.InvalidateCache()
 			m.updateViewportBlock(block)
 			m.markBlockSettled(block)
 		} else {
-			block := &Block{ID: m.nextBlockID, Type: BlockStatus, StatusTitle: backgroundResultCardTitle, Content: content, BackgroundCopyContent: evt.Message, AgentID: agentID, BackgroundObjectID: backgroundID}
+			block := &Block{ID: m.nextBlockID, Type: BlockStatus, StatusTitle: backgroundResultCardTitle, Content: content, BackgroundCopyContent: evt.Message.Content, AgentID: agentID, BackgroundObjectID: backgroundID, MsgIndex: evt.MessageIndex}
 			m.nextBlockID++
 			m.appendViewportBlock(block)
 			m.markBlockSettled(block)

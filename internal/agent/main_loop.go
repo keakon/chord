@@ -548,7 +548,7 @@ func reliableOutputEventLog(evt AgentEvent) (string, []any, bool) {
 			"event_type", fmt.Sprintf("%T", evt),
 			"status", e.Status,
 		}, true
-	case ToolCallStartEvent, ToolCallDiscardEvent, ToolCallExecutionEvent, ToolResultEvent, SessionRestoredEvent, SessionTitleChangedEvent, PendingDraftConsumedEvent, ForkSessionEvent, ErrorEvent, AgentStatusEvent, AgentStartedEvent, AgentNotifyEvent, MailboxQueuedEvent, MailboxTranscriptAppendedEvent, AgentDoneEvent, GlobalIdleEvent, NotificationEvent, InfoEvent, ToastEvent, AssistantMessageEvent, LoopNoticeEvent, LoopStateChangedEvent, YoloModeChangedEvent, RunningModelChangedEvent, SpawnFinishedEvent, ContextNoticeEvent, ContextNoticeClearedEvent:
+	case ToolCallStartEvent, ToolCallDiscardEvent, ToolCallExecutionEvent, ToolResultEvent, SessionRestoredEvent, SessionTitleChangedEvent, PendingDraftConsumedEvent, ForkSessionEvent, ErrorEvent, AgentStatusEvent, AgentStartedEvent, AgentNotifyEvent, MailboxQueuedEvent, MailboxTranscriptAppendedEvent, BackgroundResultAppendedEvent, AgentDoneEvent, GlobalIdleEvent, NotificationEvent, InfoEvent, ToastEvent, AssistantMessageEvent, LoopNoticeEvent, LoopStateChangedEvent, YoloModeChangedEvent, RunningModelChangedEvent, SpawnFinishedEvent, ContextNoticeEvent, ContextNoticeClearedEvent:
 		return "TUI output channel full, waiting to deliver critical event", []any{
 			"event_type", fmt.Sprintf("%T", evt),
 		}, true

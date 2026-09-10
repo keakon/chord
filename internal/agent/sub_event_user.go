@@ -204,7 +204,17 @@ func (s *SubAgent) appendContextOnly(msg message.Message) {
 				log.Warnf("SubAgent failed to persist context mailbox consumption agent=%v message_id=%v error=%v", s.instanceID, ackID, err)
 			}
 		}
-		if msg.Mailbox != nil && strings.TrimSpace(msg.Mailbox.MessageID) != "" && s.parent != nil {
+		if s.parent == nil {
+			return
+		}
+		// A background result is rendered as a JOB RESULT card, not as a
+		// SubAgent mailbox card, so its durable append reports itself through
+		// the background-result event even though it carries mailbox metadata.
+		if msg.Kind == message.KindBackgroundResult {
+			s.parent.emitToTUI(BackgroundResultAppendedEvent{Message: msg, TargetAgentID: s.instanceID, MessageIndex: messageIndex})
+			return
+		}
+		if msg.Mailbox != nil && strings.TrimSpace(msg.Mailbox.MessageID) != "" {
 			s.parent.emitToTUI(MailboxTranscriptAppendedEvent{Message: msg, TargetAgentID: s.instanceID, MessageIndex: messageIndex})
 		}
 	})

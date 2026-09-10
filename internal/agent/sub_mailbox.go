@@ -21,6 +21,13 @@ const (
 	SubAgentMailboxKindDecisionRequired SubAgentMailboxKind = "decision_required"
 	SubAgentMailboxKindRiskAlert        SubAgentMailboxKind = "risk_alert"
 	SubAgentMailboxKindDirectionChange  SubAgentMailboxKind = "direction_change_request"
+	// SubAgentMailboxKindBackgroundResult carries a finished background job's
+	// result to its owner's transcript. It is not a SubAgent lifecycle
+	// message: it has no sender agent or task (AgentID and TaskID stay empty),
+	// so it moves no task record; its row exists purely so the result is
+	// durable and delivered at a request boundary like any other mailbox
+	// message, instead of living only in memory until then.
+	SubAgentMailboxKindBackgroundResult SubAgentMailboxKind = "background_result"
 )
 
 type SubAgentMailboxPriority string
