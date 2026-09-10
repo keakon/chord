@@ -523,6 +523,13 @@ func appendToolElapsedToHeader(result []string, b *Block, cardWidth int) []strin
 	if b == nil || !b.ResultDone {
 		return result
 	}
+	// A Question card's clock starts when the prompt opens and stops when the
+	// user answers, so the number is how long the user took to reply, not work
+	// the agent did. Rendering it charges the tool for the user's own thinking
+	// time, which reads as a cost the call incurred.
+	if toolElapsedIsUserWaitTime(b.ToolName) {
+		return result
+	}
 	elapsed := b.toolElapsedLabel()
 	if elapsed == "" && tools.NormalizeName(b.ToolName) == tools.NameShell {
 		elapsed = shellDurationNoteLabel(b.ResultContent)
@@ -531,6 +538,14 @@ func appendToolElapsedToHeader(result []string, b *Block, cardWidth int) []strin
 		result[0] = appendToolElapsedSuffix(result[0], elapsed, cardWidth-4)
 	}
 	return result
+}
+
+// toolElapsedIsUserWaitTime reports tools whose elapsed is measured while the
+// user is the one holding the clock: the call does not run to completion on its
+// own, it parks until an answer arrives. Their elapsed carries no information
+// about the work performed, so the card must not show it.
+func toolElapsedIsUserWaitTime(toolName string) bool {
+	return tools.NormalizeName(toolName) == tools.NameQuestion
 }
 
 // appendToolElapsedSuffix appends " · ⏱ <elapsed>" to a header line, truncating

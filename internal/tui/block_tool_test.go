@@ -4978,6 +4978,29 @@ func TestQuestionCallErrorKeepsValidEntriesVisible(t *testing.T) {
 	}
 }
 
+func TestQuestionCardOmitsElapsedWaitTime(t *testing.T) {
+	// The Question card's elapsed is the time the user spent answering, so it
+	// must not be presented as the tool's own cost.
+	block := &Block{
+		ID:                1,
+		Type:              BlockToolCall,
+		ToolName:          tools.NameQuestion,
+		Content:           `{"questions":[{"header":"Scope","question":"Which package should own the helper?","options":[{"label":"internal/tools"}]}]}`,
+		ResultPayload:     `[{"selected":["internal/tools"]}]`,
+		ResultDone:        true,
+		ResultStatus:      agent.ToolResultStatusSuccess,
+		PersistedDuration: 42 * time.Second,
+	}
+
+	plain := stripANSI(strings.Join(block.renderQuestionCall(120, ""), "\n"))
+	if strings.Contains(plain, "⏱") || strings.Contains(plain, "42s") {
+		t.Fatalf("expected question card to omit the elapsed suffix, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "Which package should own the helper?") {
+		t.Fatalf("expected the question body to stay intact, got:\n%s", plain)
+	}
+}
+
 func TestEscalateCallKeepsInvalidArgsVisible(t *testing.T) {
 	block := &Block{
 		ID:            1,
