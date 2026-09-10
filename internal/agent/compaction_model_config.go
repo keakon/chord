@@ -122,6 +122,7 @@ func (a *MainAgent) applyModelCompactionConfig() bool {
 	if modelRef == "" {
 		modelRef = a.providerModelRef
 	}
+	previousModelRef := a.appliedCompactionModelRef
 	modelChanged := false
 	if modelRef != a.appliedCompactionModelRef {
 		// A real model change (not the first application after construction,
@@ -136,12 +137,21 @@ func (a *MainAgent) applyModelCompactionConfig() bool {
 		a.appliedCompactionModelRef = modelRef
 	}
 	previousThreshold := a.ctxMgr.Threshold()
-	a.ctxMgr.SetThreshold(a.effectiveCompactionThreshold(modelRef))
-	// A model switch that moves the line invalidates every context-pressure
-	// notice measured against the previous line. Arms a cleanup for the next
-	// idle boundary instead of rewriting history mid-request.
-	if modelChanged && a.ctxMgr.Threshold() != previousThreshold {
-		a.contextNoticesStale.Store(true)
+	newThreshold := a.effectiveCompactionThreshold(modelRef)
+	a.ctxMgr.SetThreshold(newThreshold)
+	// A model switch that moves the compaction line or the effective reminder
+	// line invalidates every context-pressure notice measured against the
+	// previous lines. Arms a cleanup for the next idle boundary instead of
+	// rewriting history mid-request. The reminder line is resolved per model
+	// (per-model reminder, then global, then the derived default) with the same
+	// 0/-1 semantics the queue path uses, so its change is compared as the
+	// resolved value rather than the raw config.
+	if modelChanged {
+		previousReminder := a.effectiveReminderPctForModelRef(previousModelRef, previousThreshold)
+		newReminder := a.effectiveReminderPctForModelRef(modelRef, newThreshold)
+		if newThreshold != previousThreshold || newReminder != previousReminder {
+			a.contextNoticesStale.Store(true)
+		}
 	}
 	// A usage-driven request armed under the previous model's threshold may
 	// not be justified by the new model's line (for example a fallback from a

@@ -233,6 +233,9 @@ func (a *MainAgent) resetSubAgentMailboxRuntime() {
 	a.subAgentMailboxIDs = make(map[string]struct{})
 	a.subAgentMailboxConsumed = make(map[string]struct{})
 	a.subAgentMailboxIDsMu.Unlock()
+	// Deferred overlay cards belong to the replaced session's transcript, so
+	// they must not be replayed into the new session's viewport.
+	a.clearPendingOverlayAppends()
 	a.refreshSubAgentInboxSummary()
 }
 

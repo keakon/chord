@@ -2,8 +2,10 @@
 package agent
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -168,6 +170,62 @@ func TestLifecycleSweepLeavesUnroutableOwnedMailboxUntouched(t *testing.T) {
 // finished before its child did, and the child that completed after its owner
 // was already terminal. The child's completion is the mailbox that would be
 // stranded under the terminal owner's queue.
+// TestForwardToMainSettledOwnerPersistsSingleMailboxRow pins that forwarding a
+// settled owner's mailbox to the main inbox does not write the durable record
+// again: the record was persisted before it entered the owned queue, so routing
+// it with deliverSubAgentMailbox (which never writes) must leave exactly one
+// mailbox.jsonl row for its MessageID while still delivering it exactly once.
+func TestForwardToMainSettledOwnerPersistsSingleMailboxRow(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	ownerInstanceID, ownerTaskID := "owner-forward-1", "owner-forward-task-1"
+	childInstanceID, childTaskID := "child-forward-1", "child-forward-task-1"
+	seedTerminalOwnerAndLateChild(a, ownerInstanceID, ownerTaskID, childInstanceID, childTaskID)
+	const messageID = "mailbox-forward-1"
+	a.enqueueSubAgentMailbox(lateChildCompletion(ownerInstanceID, ownerTaskID, childInstanceID, childTaskID, messageID))
+
+	if rows := countMailboxLogRows(t, a.sessionDir, messageID); rows != 1 {
+		t.Fatalf("mailbox.jsonl rows for %q = %d, want exactly 1 (no duplicate row from the forward)", messageID, rows)
+	}
+	delivered := 0
+	for _, msg := range mainInboxMailboxMessages(a) {
+		if msg.MessageID == messageID {
+			delivered++
+		}
+	}
+	if delivered != 1 {
+		t.Fatalf("main inbox copies of %q = %d, want exactly 1", messageID, delivered)
+	}
+	forwarded := mainInboxMailbox(a, messageID)
+	if forwarded == nil {
+		t.Fatal("forwarded completion is missing from the main inbox")
+	}
+	if forwarded.OwnerAgentID != "" || forwarded.OwnerTaskID != "" {
+		t.Fatalf("forwarded completion owner = (%q,%q), want main-owned empty owner", forwarded.OwnerAgentID, forwarded.OwnerTaskID)
+	}
+}
+
+func countMailboxLogRows(t *testing.T, sessionDir, messageID string) int {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(sessionDir, "subagents", "mailbox.jsonl"))
+	if err != nil {
+		t.Fatalf("ReadFile(mailbox.jsonl): %v", err)
+	}
+	rows := 0
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var msg SubAgentMailboxMessage
+		if err := json.Unmarshal([]byte(line), &msg); err != nil {
+			t.Fatalf("decode mailbox row: %v", err)
+		}
+		if strings.TrimSpace(msg.MessageID) == messageID {
+			rows++
+		}
+	}
+	return rows
+}
+
 func seedTerminalOwnerAndLateChild(a *MainAgent, ownerInstanceID, ownerTaskID, childInstanceID, childTaskID string) {
 	a.subs.mu.Lock()
 	a.subs.taskRecords[ownerTaskID] = &DurableTaskRecord{

@@ -180,7 +180,7 @@ func (a *MainAgent) dispatch(evt Event) {
 	case EventSpawnFinished:
 		a.handleSpawnFinished(evt)
 	case EventContinue:
-		a.handleContinueFromContext(evt)
+		a.handleContinueFromContext()
 	case EventHandoffResolve:
 		a.handleHandoffResolveEvent(evt)
 	case EventLoopAssessment:
@@ -430,13 +430,15 @@ func (a *MainAgent) drainRunnableMailboxWork() {
 	ownerIDs := make([]string, 0, len(a.ownedSubAgentMailboxes))
 	seenOwners := make(map[string]struct{}, len(a.ownedSubAgentMailboxes)+len(a.ownedMailboxSpool))
 	for ownerID, queued := range a.ownedSubAgentMailboxes {
-		for _, msg := range queued {
-			if msg.Kind != SubAgentMailboxKindProgress {
-				ownerIDs = append(ownerIDs, ownerID)
-				seenOwners[ownerID] = struct{}{}
-				break
-			}
+		if len(queued) == 0 {
+			continue
 		}
+		// Any non-empty owner queue is a drain candidate, progress-only
+		// included: routing decides what is deliverable now (a parked owner's
+		// progress stays queued), so the scan must not pre-filter by kind or a
+		// later transition (owner rehydrated or settled) would have no trigger.
+		ownerIDs = append(ownerIDs, ownerID)
+		seenOwners[ownerID] = struct{}{}
 	}
 	for ownerID, queued := range a.ownedMailboxSpool {
 		if len(queued) == 0 {
@@ -455,7 +457,7 @@ func (a *MainAgent) drainRunnableMailboxWork() {
 func (a *MainAgent) hasQueuedAutomaticWork() bool {
 	return len(a.eventCh) > 0 ||
 		a.hasDeferredEvents() ||
-		len(a.pendingUserMessages) > 0 ||
+		(!a.pendingUserDrainSuspended && len(a.pendingUserMessages) > 0) ||
 		a.hasRunnableMailboxWork() ||
 		strings.TrimSpace(a.pendingRecoveryPrompt) != "" ||
 		strings.TrimSpace(a.pendingAutoContinuePrompt) != "" ||
@@ -624,13 +626,9 @@ func (a *MainAgent) emitReliableToTUI(evt AgentEvent, warnMsg string, warnAttrs 
 // best-effort and may be dropped when the channel is full so streaming and
 // tool execution goroutines never block on UI throughput. The events whose
 // reliableOutputEventLog branch matches are instead delivered with blocking
-// semantics guarded by stoppingCh: tool lifecycle milestones and results,
-// agent status/start/done and notify events, mailbox queue/transcript/drop
-// updates, non-idle activity, session restore and control notices, model and
-// mode changes, context notices and clears, assistant messages, toasts, info
-// and loop notices, spawn completion, and errors. reliableOutputEventLog is
-// the single source of truth for that set. This is safe to call from any
-// goroutine.
+// semantics guarded by stoppingCh; reliableOutputEventLog is the single source
+// of truth for that set, so this comment does not enumerate it. This is safe to
+// call from any goroutine.
 func (a *MainAgent) emitToTUI(evt AgentEvent) {
 	if a.shuttingDown.Load() {
 		return

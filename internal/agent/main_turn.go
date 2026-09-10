@@ -236,6 +236,33 @@ func (a *MainAgent) commitPendingUserMessagesWithoutTurn() {
 	}
 }
 
+// suspendPendingUserDrain parks the pendingUserMessages queue so its entries
+// wait for the next request that actually dispatches instead of auto-draining
+// on idle. It is the single entry point for the parked state, replacing the
+// former one-shot pause flag.
+func (a *MainAgent) suspendPendingUserDrain() {
+	a.pendingUserDrainSuspended = true
+}
+
+// resumePendingUserDrain clears the parked state so normal drain semantics
+// apply again. Called by explicit user actions (new input, Handoff decision,
+// continue) and once the parked queue was injected into a dispatching request.
+func (a *MainAgent) resumePendingUserDrain() {
+	a.pendingUserDrainSuspended = false
+}
+
+// flushParkedPendingUserMessages injects a parked queue into the request being
+// assembled for the just-dispatched turn and ends the parked state, so a turn
+// started for another reason (for example mailbox delivery) still carries the
+// waiting user input. It is a no-op when nothing is parked.
+func (a *MainAgent) flushParkedPendingUserMessages() {
+	if !a.pendingUserDrainSuspended {
+		return
+	}
+	a.resumePendingUserDrain()
+	a.processPendingUserMessagesBeforeLLMInTurn()
+}
+
 func (a *MainAgent) latestRecoverableUserIntent() string {
 	if a == nil || a.ctxMgr == nil {
 		return ""
@@ -448,8 +475,6 @@ func (a *MainAgent) setIdleAndDrainPending() {
 	a.clearReductionCache(false)
 	a.clearStageCompletionCandidate()
 	a.setBugTriagePromptActive(false)
-	pausePendingDrain := a.pausePendingUserDrainOnce
-	a.pausePendingUserDrainOnce = false
 	skipMailboxDrain := false
 	// The staged batch is shared with the TUI-facing manual-delivery path
 	// (takeOutstandingMailboxForSub), so the batch snapshot and the final
@@ -559,11 +584,18 @@ func (a *MainAgent) setIdleAndDrainPending() {
 		a.emitInteractiveToTUI(a.parentCtx, IdleEvent{})
 	}
 	startedPendingUserTurn := false
-	if !pausePendingDrain && !handledIdleBarrier {
+	if !handledIdleBarrier {
+		// drainPendingUserMessages self-guards on the parked state; a parked
+		// queue must not auto-start a turn here.
 		a.drainPendingUserMessages()
 		startedPendingUserTurn = a.turn != nil
 	}
-	if !pausePendingDrain && !startedPendingUserTurn && a.turn == nil && !skipMailboxDrain {
+	// The parked flag only skips this handler's own mailbox drain; it does not
+	// suppress mailbox delivery. That still runs on the dispatch idle path
+	// (emitGlobalIdleIfReady -> drainRunnableMailboxWork -> drainSubAgentInbox)
+	// and on every mailbox event. The skip here only avoids starting a mailbox
+	// turn from this idle transition while the user queue is parked.
+	if !a.pendingUserDrainSuspended && !startedPendingUserTurn && a.turn == nil && !skipMailboxDrain {
 		a.drainSubAgentInbox()
 	}
 	// Foreground is idle again: wake the memory worker so extraction jobs that
@@ -611,6 +643,11 @@ func latestAssistantReplySummary(msgs []message.Message) string {
 // runs slash-command handlers for any that are commands, and sends the rest
 // to the model in one batch (newTurn + append all + single LLM call).
 func (a *MainAgent) drainPendingUserMessages() {
+	// A parked queue waits for the next real request / explicit user action, so
+	// the idle drain must not auto-start a turn from it.
+	if a.pendingUserDrainSuspended {
+		return
+	}
 	if len(a.pendingUserMessages) == 0 {
 		return
 	}

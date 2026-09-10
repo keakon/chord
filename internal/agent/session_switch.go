@@ -146,6 +146,7 @@ func (a *MainAgent) prepareSessionSwitch() (*recovery.RecoveryManager, context.C
 	a.markControlAction()
 	turnCtx := a.turn.Ctx
 	a.pendingUserMessages = nil
+	a.resumePendingUserDrain()
 	a.abandonPendingHandoff()
 	a.clearUsageDrivenAutoCompactRequest()
 	a.resetAutoCompactionFailureState()

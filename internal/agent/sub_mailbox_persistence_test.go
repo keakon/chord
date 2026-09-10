@@ -792,3 +792,39 @@ func TestStageMailboxBatchRollbackRestoresProgressOrder(t *testing.T) {
 		}
 	}
 }
+
+// TestLoadDurableMailboxMessageReusesSpoolIndex pins that the durable mailbox
+// reload builds and keeps the shared spool index instead of scanning
+// mailbox.jsonl from the start on every call: after an index invalidation the
+// load must leave a ready index holding the reloaded row.
+func TestLoadDurableMailboxMessageReusesSpoolIndex(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	msg := SubAgentMailboxMessage{MessageID: "progress-1", AgentID: "worker-1", TaskID: "task-1", Kind: SubAgentMailboxKindProgress, Summary: "step 1"}
+	if err := a.persistSubAgentMailboxMessage(msg); err != nil {
+		t.Fatalf("persist progress row: %v", err)
+	}
+	// Invalidate the index the persist self-registered, so the reload must
+	// rebuild it from the log.
+	a.subAgentMailboxIDsMu.Lock()
+	a.subAgentInbox.spoolIndexReady = false
+	a.subAgentMailboxIDsMu.Unlock()
+
+	loaded, found, err := a.loadDurableMailboxMessage("progress-1")
+	if err != nil || !found || loaded == nil || loaded.Summary != "step 1" {
+		t.Fatalf("loadDurableMailboxMessage = (%#v, %v, %v), want the persisted row", loaded, found, err)
+	}
+	a.subAgentMailboxIDsMu.Lock()
+	ready := a.subAgentInbox.spoolIndexReady
+	_, indexed := a.subAgentInbox.spoolIndex["progress-1"]
+	a.subAgentMailboxIDsMu.Unlock()
+	if !ready {
+		t.Fatal("loadDurableMailboxMessage left the spool index stale; it must reuse the indexed loader")
+	}
+	if !indexed {
+		t.Fatal("loadDurableMailboxMessage did not index the reloaded row")
+	}
+	// A missing row still reports not-found against the ready index.
+	if _, found, err := a.loadDurableMailboxMessage("absent-1"); err != nil || found {
+		t.Fatalf("missing row load = (found=%v, err=%v), want not found", found, err)
+	}
+}

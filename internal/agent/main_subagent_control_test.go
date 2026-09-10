@@ -404,7 +404,7 @@ func TestManualMainContinueBatchesCompletedMailboxesIntoSingleTurn(t *testing.T)
 		{MessageID: "b-1", AgentID: "worker-b", TaskID: "task-b", Kind: SubAgentMailboxKindCompleted, Priority: SubAgentMailboxPriorityUrgent, Summary: "done b"},
 	}
 
-	a.handleContinueFromContext(Event{Type: EventContinue, Payload: manualContinueEvent{}})
+	a.handleContinueFromContext()
 	if a.turn == nil {
 		t.Fatal("expected manual continue to start a main turn")
 	}
@@ -4515,13 +4515,14 @@ func TestProgressArrivalMergesIntoQueuedMailboxBatch(t *testing.T) {
 	}
 }
 
-// TestMainInboxProgressDoesNotInterruptActiveTurn pins the anti-interruption
-// constraint: progress snapshots are only staged by a drain that starts while
-// the main is idle; an active turn leaves both the snapshot and the staging
-// pipeline untouched.
-func TestMainInboxProgressDoesNotInterruptActiveTurn(t *testing.T) {
+// TestIdleMailboxDrainLeavesActiveTurnAndProgressUntouched pins the idle-wake
+// gate: the between-turns drain (drainSubAgentInbox) never fires while a turn is
+// in flight. A progress snapshot that arrives mid-turn is delivered by the next
+// request boundary instead (TestTurnContinuationStagingIncludesPendingProgress),
+// so the idle drain must leave both the snapshot and the running turn alone.
+func TestIdleMailboxDrainLeavesActiveTurnAndProgressUntouched(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.subAgentInbox.progress["worker-1"] = SubAgentMailboxMessage{MessageID: "p-1", AgentID: "worker-1", TaskID: "task-a", Kind: SubAgentMailboxKindProgress, Summary: "update"}
+	a.replaceProgressMailboxWithinBudget(SubAgentMailboxMessage{MessageID: "p-1", AgentID: "worker-1", TaskID: "task-a", Kind: SubAgentMailboxKindProgress, Summary: "update"})
 	a.newTurn()
 	if a.currentTurn() == nil {
 		t.Fatal("active turn was not created")
@@ -4530,23 +4531,24 @@ func TestMainInboxProgressDoesNotInterruptActiveTurn(t *testing.T) {
 	a.drainSubAgentInbox()
 
 	if len(a.pendingSubAgentMailboxes) != 0 || len(a.activeSubAgentMailboxes) != 0 {
-		t.Fatalf("progress staged while a turn was running: pending=%v active=%v", a.pendingSubAgentMailboxes, a.activeSubAgentMailboxes)
+		t.Fatalf("idle drain staged mailbox work with an active turn: pending=%v active=%v", a.pendingSubAgentMailboxes, a.activeSubAgentMailboxes)
 	}
-	if got := a.subAgentInbox.progress["worker-1"]; got.MessageID != "p-1" {
-		t.Fatalf("progress snapshot = %#v, want it untouched by an active-turn drain", got)
+	if got := a.subAgentInbox.progressQueue; len(got) != 1 || got[0].MessageID != "p-1" {
+		t.Fatalf("progressQueue = %#v, want the snapshot left queued by an active-turn drain", got)
 	}
 	if a.currentTurn() == nil {
 		t.Fatal("active turn was replaced by the drain")
 	}
 }
 
-// TestTurnContinuationStagingExcludesPendingProgress pins the same boundary on
-// the mid-turn continuation path: an active turn's next-request staging must
-// still deliver actionable mailbox heads, but must leave pending progress
-// snapshots queued until the turn ends and the main goes idle again.
-func TestTurnContinuationStagingExcludesPendingProgress(t *testing.T) {
+// TestTurnContinuationStagingIncludesPendingProgress pins the mid-turn
+// delivery rule: an active turn's next-request staging claims both the
+// actionable mailbox head and the pending progress snapshot into one batch,
+// with the actionable head staged first, so progress/notice rides the next
+// request instead of waiting for the turn to end.
+func TestTurnContinuationStagingIncludesPendingProgress(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.subAgentInbox.progress["worker-1"] = SubAgentMailboxMessage{MessageID: "p-1", AgentID: "worker-1", TaskID: "task-a", Kind: SubAgentMailboxKindProgress, Summary: "still working"}
+	a.replaceProgressMailboxWithinBudget(SubAgentMailboxMessage{MessageID: "p-1", AgentID: "worker-1", TaskID: "task-a", Kind: SubAgentMailboxKindProgress, Summary: "still working"})
 	a.subAgentInbox.urgent = []SubAgentMailboxMessage{{
 		MessageID: "u-1",
 		AgentID:   "worker-2",
@@ -4561,27 +4563,28 @@ func TestTurnContinuationStagingExcludesPendingProgress(t *testing.T) {
 	}
 
 	if !a.prepareSubAgentMailboxBatchForTurnContinuation() {
-		t.Fatal("turn-continuation staging returned false with an actionable mailbox queued")
+		t.Fatal("turn-continuation staging returned false with pending mailbox work")
 	}
-	if len(a.pendingSubAgentMailboxes) != 1 || a.pendingSubAgentMailboxes[0] == nil || a.pendingSubAgentMailboxes[0].MessageID != "u-1" {
-		t.Fatalf("pending batch = %#v, want only the actionable mailbox staged mid-turn", a.pendingSubAgentMailboxes)
+	if len(a.pendingSubAgentMailboxes) != 2 {
+		t.Fatalf("pending batch = %#v, want the actionable head and the progress snapshot", a.pendingSubAgentMailboxes)
 	}
-	if got := a.subAgentInbox.progress["worker-1"]; got.MessageID != "p-1" {
-		t.Fatalf("progress snapshot = %#v, want it still queued while the turn runs", got)
+	if first := a.pendingSubAgentMailboxes[0]; first == nil || first.MessageID != "u-1" {
+		t.Fatalf("first pending mailbox = %#v, want the actionable head staged first", first)
 	}
-	if len(a.pendingSubAgentMailboxes) != 1 {
-		t.Fatalf("progress was merged into the mid-turn continuation batch: %#v", a.pendingSubAgentMailboxes)
+	if second := a.pendingSubAgentMailboxes[1]; second == nil || second.MessageID != "p-1" {
+		t.Fatalf("second pending mailbox = %#v, want the progress snapshot staged mid-turn", second)
+	}
+	if len(a.subAgentInbox.progressQueue) != 0 || len(a.subAgentInbox.progressPending) != 0 {
+		t.Fatalf("progress snapshot still queued after staging: queue=%#v pending=%#v", a.subAgentInbox.progressQueue, a.subAgentInbox.progressPending)
 	}
 }
 
-// TestStageNextCompletedBatchRequeuesQueueResidentProgress pins the P3-2
-// strictness gate: a progress message that somehow sits in the deliverable
-// queue behind a completed head (progress normally only lives in the per-agent
-// snapshot map, which staging claims only between turns) must be requeued into
-// that map instead of being folded into the staged batch. Folding it would let
-// a progress update ride a mid-turn completed batch, bypassing the
-// between-turns gate the head applies to snapshot claims.
-func TestStageNextCompletedBatchRequeuesQueueResidentProgress(t *testing.T) {
+// TestStageNextCompletedBatchFoldsQueueResidentProgress pins the completed-head
+// shape under the mid-turn delivery rule: a stray queue-resident progress
+// update (progress normally lives in the per-agent snapshot map, not the
+// actionable queues) folds into the same staged batch as the completed head
+// instead of being requeued, so it rides the next request too.
+func TestStageNextCompletedBatchFoldsQueueResidentProgress(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.subAgentInbox.urgent = []SubAgentMailboxMessage{{
 		MessageID: "c-1",
@@ -4602,11 +4605,14 @@ func TestStageNextCompletedBatchRequeuesQueueResidentProgress(t *testing.T) {
 	if !a.stageNextSubAgentMailboxBatch() {
 		t.Fatal("stageNextSubAgentMailboxBatch() = false, want the completed head staged")
 	}
-	if len(a.pendingSubAgentMailboxes) != 1 || a.pendingSubAgentMailboxes[0] == nil || a.pendingSubAgentMailboxes[0].MessageID != "c-1" {
-		t.Fatalf("pending batch = %#v, want only the completed head (no progress fold-in)", a.pendingSubAgentMailboxes)
+	if len(a.pendingSubAgentMailboxes) != 2 {
+		t.Fatalf("pending batch = %#v, want the completed head and the folded progress update", a.pendingSubAgentMailboxes)
 	}
-	if got := a.subAgentInbox.progress["worker-2"]; got.MessageID != "p-1" {
-		t.Fatalf("progress snapshot = %#v, want the dequeued progress requeued into the snapshot map", a.subAgentInbox.progress)
+	if a.pendingSubAgentMailboxes[0] == nil || a.pendingSubAgentMailboxes[0].MessageID != "c-1" {
+		t.Fatalf("first pending mailbox = %#v, want the completed head staged first", a.pendingSubAgentMailboxes[0])
+	}
+	if a.pendingSubAgentMailboxes[1] == nil || a.pendingSubAgentMailboxes[1].MessageID != "p-1" {
+		t.Fatalf("second pending mailbox = %#v, want the queue-resident progress folded in", a.pendingSubAgentMailboxes[1])
 	}
 	if len(a.subAgentInbox.urgent)+len(a.subAgentInbox.normal) != 0 {
 		t.Fatalf("queue still holds messages after staging: urgent=%d normal=%d", len(a.subAgentInbox.urgent), len(a.subAgentInbox.normal))
@@ -4731,12 +4737,11 @@ func TestRequeueActiveSubAgentMailboxSkipsClaimedMessages(t *testing.T) {
 	}
 }
 
-// TestTurnContinuationStagingRequeuesQueueResidentProgressHead pins the P3-2
-// gate on the queue-head shape: a progress message dequeued as the batch head
-// mid-turn must return to the per-agent snapshot map instead of being
-// delivered, matching the turn==nil gate applied to the snapshot claims and to
-// the completed-batch inner loop.
-func TestTurnContinuationStagingRequeuesQueueResidentProgressHead(t *testing.T) {
+// TestTurnContinuationStagesQueueResidentProgressHead pins that a progress
+// queue head is delivered mid-turn: the turn-continuation staging claims it into
+// the batch so it rides the next request, instead of returning it to the
+// per-agent snapshot map.
+func TestTurnContinuationStagesQueueResidentProgressHead(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.subAgentInbox.urgent = []SubAgentMailboxMessage{{
 		MessageID: "p-1",
@@ -4750,16 +4755,140 @@ func TestTurnContinuationStagingRequeuesQueueResidentProgressHead(t *testing.T) 
 		t.Fatal("active turn was not created")
 	}
 
-	if a.prepareSubAgentMailboxBatchForTurnContinuation() {
-		t.Fatal("mid-turn staging delivered a progress queue head")
+	if !a.prepareSubAgentMailboxBatchForTurnContinuation() {
+		t.Fatal("mid-turn staging did not deliver a progress queue head")
 	}
-	if len(a.pendingSubAgentMailboxes) != 0 || len(a.activeSubAgentMailboxes) != 0 {
-		t.Fatalf("batch staged mid-turn: pending=%v active=%v", a.pendingSubAgentMailboxes, a.activeSubAgentMailboxes)
+	if len(a.pendingSubAgentMailboxes) != 1 || a.pendingSubAgentMailboxes[0] == nil || a.pendingSubAgentMailboxes[0].MessageID != "p-1" {
+		t.Fatalf("pending batch = %#v, want the progress queue head staged", a.pendingSubAgentMailboxes)
 	}
-	if got := a.subAgentInbox.progress["worker-1"]; got.MessageID != "p-1" {
-		t.Fatalf("progress snapshot = %#v, want the queue head requeued into the snapshot map", got)
+	if len(a.activeSubAgentMailboxes) != 1 || a.activeSubAgentMailboxes[0] == nil || a.activeSubAgentMailboxes[0].MessageID != "p-1" {
+		t.Fatalf("active batch = %#v, want the progress head recorded for closeout", a.activeSubAgentMailboxes)
+	}
+	if a.activeSubAgentMailbox != nil {
+		t.Fatalf("activeSubAgentMailbox = %#v, want nil for a progress-only batch", a.activeSubAgentMailbox)
 	}
 	if len(a.subAgentInbox.urgent) != 0 {
 		t.Fatalf("progress queue head not consumed from the queue: %#v", a.subAgentInbox.urgent)
+	}
+}
+
+// TestTurnContinuationStagesLaterBatchAfterFirstConsumed pins that a turn
+// delivers several mailbox batches: once the request consumed the first staged
+// batch, a mailbox that arrives later is staged again and assembled into the
+// next request's messages and ctxmgr, instead of being blocked by the active
+// batch bookkeeping from the earlier delivery.
+func TestTurnContinuationStagesLaterBatchAfterFirstConsumed(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.newTurn()
+
+	a.subAgentInbox.urgent = []SubAgentMailboxMessage{{
+		MessageID: "c-1",
+		AgentID:   "worker-1",
+		TaskID:    "task-a",
+		Kind:      SubAgentMailboxKindCompleted,
+		Priority:  SubAgentMailboxPriorityUrgent,
+		Summary:   "first child finished",
+	}}
+	if !a.prepareSubAgentMailboxBatchForTurnContinuation() {
+		t.Fatal("first batch was not staged")
+	}
+	first := a.buildTurnOverlayMessages()
+	if got := countSubAgentMailboxMessages(first, "c-1"); got != 1 {
+		t.Fatalf("first request overlays = %#v, want exactly the c-1 mailbox", first)
+	}
+
+	// The request took the pending batch, so the active bookkeeping is all that
+	// remains of it; a later arrival must still be staged for the next request.
+	a.subAgentInbox.urgent = []SubAgentMailboxMessage{{
+		MessageID: "c-2",
+		AgentID:   "worker-2",
+		TaskID:    "task-b",
+		Kind:      SubAgentMailboxKindCompleted,
+		Priority:  SubAgentMailboxPriorityUrgent,
+		Summary:   "second child finished",
+	}}
+	if !a.prepareSubAgentMailboxBatchForTurnContinuation() {
+		t.Fatal("a later mailbox was blocked by the active batch from an earlier request")
+	}
+	second := a.buildTurnOverlayMessages()
+	if got := countSubAgentMailboxMessages(second, "c-2"); got != 1 {
+		t.Fatalf("second request overlays = %#v, want exactly the c-2 mailbox", second)
+	}
+
+	ctx := a.ctxMgr.Snapshot()
+	if got := countSubAgentMailboxMessages(ctx, "c-1"); got != 1 {
+		t.Fatalf("ctxmgr c-1 copies = %d, want 1", got)
+	}
+	if got := countSubAgentMailboxMessages(ctx, "c-2"); got != 1 {
+		t.Fatalf("ctxmgr c-2 copies = %d, want 1", got)
+	}
+	if len(a.activeSubAgentMailboxes) != 2 {
+		t.Fatalf("active batch = %#v, want both delivered batches retained until closeout", a.activeSubAgentMailboxes)
+	}
+}
+
+// TestTurnContinuationStagesProgressSnapshotForNextRequest pins that a progress
+// snapshot arriving mid-turn is assembled into the next request's messages and
+// ctxmgr, without interrupting the in-flight request or starting a new turn.
+func TestTurnContinuationStagesProgressSnapshotForNextRequest(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.newTurn()
+	turnID := a.currentTurn().ID
+
+	a.replaceProgressMailboxWithinBudget(SubAgentMailboxMessage{MessageID: "p-1", AgentID: "worker-1", TaskID: "task-a", Kind: SubAgentMailboxKindProgress, Summary: "still working"})
+	if !a.prepareSubAgentMailboxBatchForTurnContinuation() {
+		t.Fatal("mid-turn staging did not claim the progress snapshot")
+	}
+	overlays := a.buildTurnOverlayMessages()
+	if got := countSubAgentMailboxMessages(overlays, "p-1"); got != 1 {
+		t.Fatalf("request overlays = %#v, want the progress snapshot p-1", overlays)
+	}
+	if got := countSubAgentMailboxMessages(a.ctxMgr.Snapshot(), "p-1"); got != 1 {
+		t.Fatalf("ctxmgr p-1 copies = %d, want 1", got)
+	}
+	if turn := a.currentTurn(); turn == nil || turn.ID != turnID {
+		t.Fatalf("turn = %#v, want the same in-flight turn %d (no interrupt, no new turn)", turn, turnID)
+	}
+}
+
+// TestTurnCloseoutAcksEveryBatchStagedInTurn pins the teardown side of
+// multi-batch delivery: when a turn delivered two batches on two requests, the
+// closeout acks both with the turn's reply, leaving neither unconsumed (lost)
+// nor acked twice.
+func TestTurnCloseoutAcksEveryBatchStagedInTurn(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.newTurn()
+
+	stage := func(id string) {
+		a.subAgentInbox.urgent = []SubAgentMailboxMessage{{
+			MessageID: id,
+			AgentID:   "worker-" + id,
+			TaskID:    "task-" + id,
+			Kind:      SubAgentMailboxKindCompleted,
+			Priority:  SubAgentMailboxPriorityUrgent,
+			Summary:   id,
+		}}
+		if !a.prepareSubAgentMailboxBatchForTurnContinuation() {
+			t.Fatalf("batch %s was not staged", id)
+		}
+		if msgs := a.takePendingSubAgentMailboxes(); len(msgs) != 1 || msgs[0].MessageID != id {
+			t.Fatalf("pending batch for %s = %#v, want exactly %s", id, msgs, id)
+		}
+	}
+	stage("c-1")
+	stage("c-2")
+	if len(a.activeSubAgentMailboxes) != 2 {
+		t.Fatalf("active batch = %#v, want both staged batches retained", a.activeSubAgentMailboxes)
+	}
+
+	a.setIdleAndDrainPending()
+
+	for _, id := range []string{"c-1", "c-2"} {
+		if !a.isSubAgentMailboxConsumed(id) {
+			t.Fatalf("%s was not acked at turn closeout", id)
+		}
+	}
+	if len(a.activeSubAgentMailboxes) != 0 || a.activeSubAgentMailbox != nil || len(a.pendingSubAgentMailboxes) != 0 {
+		t.Fatalf("staged batch survived closeout: pending=%v active=%v", a.pendingSubAgentMailboxes, a.activeSubAgentMailboxes)
 	}
 }

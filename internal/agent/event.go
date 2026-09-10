@@ -4,7 +4,6 @@ package agent
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	"github.com/keakon/chord/internal/message"
@@ -62,8 +61,6 @@ type Event struct {
 	Seq      uint64
 	SourceID string // identifies which agent sent the event (e.g. "main", "agent-1")
 }
-
-type manualContinueEvent struct{}
 
 // LLMResponsePayload wraps an LLM response for the internal event bus.
 type LLMResponsePayload struct {
@@ -845,20 +842,14 @@ type EnvStatusUpdateEvent struct{}
 func (EnvStatusUpdateEvent) agentEvent() {}
 
 // SpawnFinishedEvent is emitted when a background process started by Spawn completes.
-// It is a lightweight runtime notification; stdout/stderr remain in the returned log_file.
+// It is a lightweight runtime notification that only identifies the originating
+// agent so the TUI can finalize that agent's stream; stdout/stderr remain in the
+// returned log_file, and the JOB RESULT card comes from BackgroundResultAppendedEvent
+// once the result is durable.
 type SpawnFinishedEvent struct {
-	BackgroundID  string
-	AgentID       string // originating agent ("" = main agent)
-	Kind          string
-	Status        string
-	Command       string
-	Description   string
-	MaxRuntimeSec int
-	Message       string
-}
-
-func (e SpawnFinishedEvent) EffectiveID() string {
-	return strings.TrimSpace(e.BackgroundID)
+	// AgentID is the instance id of the agent that spawned the job, normalized
+	// to identity.MainAgentID for the main agent (the TUI then maps "main" to "").
+	AgentID string
 }
 
 func (SpawnFinishedEvent) agentEvent() {}

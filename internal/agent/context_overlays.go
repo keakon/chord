@@ -302,11 +302,17 @@ func (a *MainAgent) emitStagedContextNotices(reminderStage, imminentStage string
 				continue
 			}
 		}
+		level := notice.level
+		text := notice.text
 		msg := message.Message{
-			Role:        message.RoleUser,
-			Kind:        message.KindContextNotice,
-			Content:     notice.text,
-			NoticeLevel: notice.level,
+			Role: message.RoleUser,
+			Kind: message.KindContextNotice,
+			// The durable row carries the same <system-reminder> wrapper every
+			// other harness injection uses, so the model can tell it apart from
+			// a user-written message when a later request replays the notice.
+			// The live card is built from the bare event text below.
+			Content:     "<system-reminder>\n" + text + "\n</system-reminder>",
+			NoticeLevel: level,
 		}
 		messageIndex := a.ctxMgr.MessageCount()
 		a.ctxMgr.Append(msg)
@@ -315,23 +321,25 @@ func (a *MainAgent) emitStagedContextNotices(reminderStage, imminentStage string
 				a.notePersistenceFailure(err)
 				return
 			}
-			a.emitToTUI(ContextNoticeEvent{Level: msg.NoticeLevel, Message: msg.Content, MessageIndex: messageIndex})
+			a.emitToTUI(ContextNoticeEvent{Level: level, Message: text, MessageIndex: messageIndex})
 		})
 	}
 }
 
 // maybeClearStaleContextNotices drops durable context-pressure notices after a
-// model switch changed the effective compaction threshold. A notice computed
-// against the previous model's line can claim pressure the new model is
-// nowhere near, and since the card is backed by the message both must go
-// together. Runs on the event loop after dispatch, and only at an idle
-// boundary (no active turn, no in-flight request) so the rewrite can never
-// race request assembly or a provider call that still holds the old transcript.
+// model switch changed the effective compaction threshold or reminder line. A
+// notice computed against the previous model's line can claim pressure the new
+// model is nowhere near, and since the card is backed by the message both must
+// go together. Runs on the event loop after dispatch, and only at an idle
+// boundary (no active turn, no in-flight request, no running compaction) so the
+// rewrite can never race request assembly, a compaction draft whose headSplit
+// was measured against the current transcript, or a provider call that still
+// holds the old transcript.
 func (a *MainAgent) maybeClearStaleContextNotices() {
 	if a == nil || a.ctxMgr == nil || !a.contextNoticesStale.Load() {
 		return
 	}
-	if a.turn != nil || a.mainLLMRequestInFlight.Load() {
+	if a.turn != nil || a.mainLLMRequestInFlight.Load() || a.IsCompactionRunning() {
 		return
 	}
 	a.contextNoticesStale.Store(false)

@@ -164,6 +164,12 @@ func (a *MainAgent) finishCompactionState() (pending *pendingMainLLMCall, discar
 // instead of riding along behind a continuation the user just stopped. This is
 // what distinguishes this path from the failure resume, so it must not be
 // "fixed" into a merge without revisiting the abort semantics.
+//
+// The same abort convention covers SubAgent mailbox delivery: this path does not
+// call prepareSubAgentMailboxBatchForTurnContinuation, so a pending mailbox
+// batch is not staged onto the restarted request and waits for the next request
+// boundary (a later continuation, or the idle drain) instead. That is deliberate
+// and symmetric with the queued-input rule above, not a gap.
 func (a *MainAgent) resumeModelDrivenTurnAfterDiscard(plan continuationPlan) bool {
 	if a == nil || a.turn == nil || plan.kind != compactionResumeModelDriven {
 		return false
@@ -1172,6 +1178,10 @@ func (a *MainAgent) resumePendingMainLLMAfterCompaction(pending *pendingMainLLMC
 		if a.turn == nil {
 			return true
 		}
+		// The fresh resume turn must also carry any mailbox that arrived while
+		// compaction was pending: with only mailbox queued (no FromUser message)
+		// the drain above stages nothing on its own.
+		a.prepareSubAgentMailboxBatchForTurnContinuation()
 		turnID := a.turn.ID
 		turnCtx := a.turn.Ctx
 		a.beginMainLLMAfterPreparation(turnCtx, turnID, "")

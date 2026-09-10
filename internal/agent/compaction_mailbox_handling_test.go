@@ -703,3 +703,135 @@ func TestCompactionKeepsDurableAckWhenReplaceFailsAfterSettlement(t *testing.T) 
 		t.Fatalf("mailbox-acks.jsonl lines = %d, want exactly 1 (no duplicate ack after the retry)", ackLines)
 	}
 }
+
+// backgroundResultRow builds the durable KindBackgroundResult transcript row
+// turn_overlays.go appends for a finished background job: the raw result text
+// carrying the same mailbox metadata a KindSubAgentMailbox row would.
+func backgroundResultRow(messageID, content string) message.Message {
+	return message.Message{
+		Role:    message.RoleUser,
+		Kind:    message.KindBackgroundResult,
+		Content: content,
+		Mailbox: &message.MailboxMetadata{
+			MessageID: messageID,
+			AgentID:   "agent-1",
+			TaskID:    "restored",
+			Kind:      string(SubAgentMailboxKindBackgroundResult),
+		},
+	}
+}
+
+func backgroundResultMailboxMessage(messageID, summary string) SubAgentMailboxMessage {
+	return SubAgentMailboxMessage{
+		MessageID:   messageID,
+		AgentID:     "agent-1",
+		TaskID:      "restored",
+		Kind:        SubAgentMailboxKindBackgroundResult,
+		Priority:    SubAgentMailboxPriorityNotify,
+		MessageType: AgentMessageTypeNotice,
+		Summary:     summary,
+		CreatedAt:   time.Now(),
+	}
+}
+
+// TestCompactionAcksPresentedBackgroundResultBeforeDroppingIt pins that the
+// compaction settle treats a KindBackgroundResult row exactly like a
+// KindSubAgentMailbox row: when assistant output follows it, the message was
+// presented, so it is durably acked before the replace destroys the row and a
+// later restore neither replays nor re-synthesizes it.
+func TestCompactionAcksPresentedBackgroundResultBeforeDroppingIt(t *testing.T) {
+	projectRoot := t.TempDir()
+	sessionDir := testProjectSessionDir(t, projectRoot, "compaction-presented-background-result")
+	const messageID = "background-1-1"
+	persistCompactionMailboxRestoreSession(t, sessionDir,
+		[]message.Message{
+			{Role: message.RoleUser, Content: "hello"},
+			{Role: message.RoleAssistant, Content: "Working on it"},
+			backgroundResultRow(messageID, "build finished"),
+			{Role: message.RoleAssistant, Content: "Noted the build result"},
+		},
+		[]SubAgentMailboxMessage{backgroundResultMailboxMessage(messageID, "build finished")},
+	)
+
+	first := newTestMainAgentForRestore(t, projectRoot, sessionDir)
+	if err := first.RestoreSessionAtStartup(); err != nil {
+		t.Fatalf("RestoreSessionAtStartup: %v", err)
+	}
+	// The durable KindBackgroundResult row already delivered the result, so
+	// restore does not replay it.
+	if queued := mailboxQueuedIDs(first); len(queued) != 0 {
+		t.Fatalf("first restore queued %v, want none (transcript row already delivered it)", queued)
+	}
+
+	mustApplyCompactionDraft(t, first, compactionTestDraft(first, sessionDir, 3))
+
+	for _, msg := range first.ctxMgr.Snapshot() {
+		if msg.Kind == message.KindBackgroundResult && msg.Mailbox != nil && strings.TrimSpace(msg.Mailbox.MessageID) == messageID {
+			t.Fatalf("background result row for %q survived compaction", messageID)
+		}
+	}
+	if !first.isSubAgentMailboxConsumed(messageID) {
+		t.Fatal("presented background result was not marked consumed")
+	}
+	acks, err := loadSubAgentMailboxAcks(sessionDir)
+	if err != nil {
+		t.Fatalf("loadSubAgentMailboxAcks: %v", err)
+	}
+	if ack, ok := acks[messageID]; !ok || ack.Outcome != mailboxAckOutcomeConsumed {
+		t.Fatalf("durable acks for %q = %+v, want a consumed ack", messageID, acks[messageID])
+	}
+
+	second := newTestMainAgentForRestore(t, projectRoot, sessionDir)
+	if err := second.RestoreSessionAtStartup(); err != nil {
+		t.Fatalf("second RestoreSessionAtStartup: %v", err)
+	}
+	if queued := mailboxQueuedIDs(second); len(queued) != 0 {
+		t.Fatalf("crash-2 restore queued %v, want none (result was acked before its row was dropped)", queued)
+	}
+}
+
+// TestCompactionRequeuesUndeliveredBackgroundResultAfterDroppingItsRow pins the
+// unpresented half of the background-result settle: a row with no assistant
+// output after it must not be acked, and after the replace destroys it the
+// result is re-enqueued from the mailbox log so a later dispatch delivers it.
+func TestCompactionRequeuesUndeliveredBackgroundResultAfterDroppingItsRow(t *testing.T) {
+	projectRoot := t.TempDir()
+	sessionDir := testProjectSessionDir(t, projectRoot, "compaction-undelivered-background-result")
+	const messageID = "background-1-2"
+	persistCompactionMailboxRestoreSession(t, sessionDir,
+		[]message.Message{
+			{Role: message.RoleUser, Content: "hello"},
+			{Role: message.RoleAssistant, Content: "Working on it"},
+			backgroundResultRow(messageID, "build finished"),
+		},
+		[]SubAgentMailboxMessage{backgroundResultMailboxMessage(messageID, "build finished")},
+	)
+
+	first := newTestMainAgentForRestore(t, projectRoot, sessionDir)
+	if err := first.RestoreSessionAtStartup(); err != nil {
+		t.Fatalf("RestoreSessionAtStartup: %v", err)
+	}
+	if queued := mailboxQueuedIDs(first); len(queued) != 0 {
+		t.Fatalf("first restore queued %v, want none (transcript row already delivered it)", queued)
+	}
+
+	mustApplyCompactionDraft(t, first, compactionTestDraft(first, sessionDir, 3))
+
+	if first.isSubAgentMailboxConsumed(messageID) {
+		t.Fatal("undelivered background result must not be marked consumed")
+	}
+	acks, err := loadSubAgentMailboxAcks(sessionDir)
+	if err != nil {
+		t.Fatalf("loadSubAgentMailboxAcks: %v", err)
+	}
+	if _, ok := acks[messageID]; ok {
+		t.Fatalf("undelivered background result %q was acked: %+v", messageID, acks[messageID])
+	}
+	queued := mainInboxMailboxMessages(first)
+	if len(queued) != 1 || queued[0].MessageID != messageID {
+		t.Fatalf("post-compaction inbox = %+v, want exactly %q re-enqueued", mailboxQueuedIDs(first), messageID)
+	}
+	if queued[0].Kind != SubAgentMailboxKindBackgroundResult {
+		t.Fatalf("re-enqueued message kind = %q, want %q", queued[0].Kind, SubAgentMailboxKindBackgroundResult)
+	}
+}

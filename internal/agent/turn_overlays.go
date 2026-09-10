@@ -87,6 +87,7 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 				a.ctxMgr.Append(msg)
 				a.persistAsyncAfter(identity.MainAgentID, msg, func(err error) {
 					if err != nil {
+						a.noteOverlayAppendPersistFailure(msg, identity.MainAgentID, messageIndex, true)
 						a.notePersistenceFailure(err)
 						return
 					}
@@ -108,6 +109,7 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 				a.ctxMgr.Append(msg)
 				a.persistAsyncAfter(identity.MainAgentID, msg, func(err error) {
 					if err != nil {
+						a.noteOverlayAppendPersistFailure(msg, identity.MainAgentID, messageIndex, false)
 						a.notePersistenceFailure(err)
 						return
 					}
@@ -460,4 +462,96 @@ func requestInjectedMailboxIDs(durableMailboxIDs map[string]struct{}, pendingMai
 		}
 	}
 	return injected
+}
+
+// maxPendingOverlayAppends bounds the deferred card-event backlog. The list is
+// only populated by transcript writes that failed, and a persistence recovery
+// drains it; overflow switches recovery to the authoritative transcript rather
+// than retaining an unbounded duplicate of its messages.
+const maxPendingOverlayAppends = 128
+
+// pendingOverlayAppend is one durable-mailbox or background-result card event
+// whose backing transcript write failed. msg is the exact value appended to
+// ctxmgr, so a flush re-emits the same card the successful write would have.
+type pendingOverlayAppend struct {
+	msg          message.Message
+	targetAgent  string
+	messageIndex int
+	background   bool
+}
+
+// noteOverlayAppendPersistFailure remembers a card event whose transcript write
+// failed so a later persistence recovery can re-emit it. The backing message is
+// already in ctxmgr and future requests dedupe on the in-memory row, so without
+// the deferred event the TUI would keep the message's waiting row until the
+// session switches.
+func (a *MainAgent) noteOverlayAppendPersistFailure(msg message.Message, targetAgentID string, messageIndex int, background bool) {
+	if a == nil {
+		return
+	}
+	a.pendingOverlayAppendsMu.Lock()
+	defer a.pendingOverlayAppendsMu.Unlock()
+	if a.pendingOverlayReconcile {
+		return
+	}
+	if len(a.pendingOverlayAppends) >= maxPendingOverlayAppends {
+		a.pendingOverlayAppends = nil
+		a.pendingOverlayReconcile = true
+		return
+	}
+	a.pendingOverlayAppends = append(a.pendingOverlayAppends, pendingOverlayAppend{
+		msg:          msg,
+		targetAgent:  targetAgentID,
+		messageIndex: messageIndex,
+		background:   background,
+	})
+}
+
+// flushPendingOverlayAppends re-emits the deferred card events in order, once a
+// persistence recovery has made their messages durable again (the
+// assistant-message intent barrier, or a full transcript checkpoint rewrite).
+func (a *MainAgent) flushPendingOverlayAppends() {
+	if a == nil {
+		return
+	}
+	a.pendingOverlayAppendsMu.Lock()
+	pending := a.pendingOverlayAppends
+	reconcile := a.pendingOverlayReconcile
+	a.pendingOverlayAppends = nil
+	a.pendingOverlayReconcile = false
+	a.pendingOverlayAppendsMu.Unlock()
+	if reconcile {
+		for index, msg := range a.ctxMgr.Snapshot() {
+			if msg.Mailbox == nil {
+				continue
+			}
+			switch msg.Kind {
+			case message.KindBackgroundResult:
+				a.emitToTUI(BackgroundResultAppendedEvent{Message: msg, TargetAgentID: identity.MainAgentID, MessageIndex: index})
+			case message.KindSubAgentMailbox:
+				a.emitToTUI(MailboxTranscriptAppendedEvent{Message: msg, TargetAgentID: identity.MainAgentID, MessageIndex: index})
+			}
+		}
+		return
+	}
+	for _, p := range pending {
+		if p.background {
+			a.emitToTUI(BackgroundResultAppendedEvent{Message: p.msg, TargetAgentID: p.targetAgent, MessageIndex: p.messageIndex})
+			continue
+		}
+		a.emitToTUI(MailboxTranscriptAppendedEvent{Message: p.msg, TargetAgentID: p.targetAgent, MessageIndex: p.messageIndex})
+	}
+}
+
+// clearPendingOverlayAppends drops the deferred card events at a session
+// boundary: the replaced session's messages are gone, so re-emitting their
+// cards into the new session's viewport would be wrong.
+func (a *MainAgent) clearPendingOverlayAppends() {
+	if a == nil {
+		return
+	}
+	a.pendingOverlayAppendsMu.Lock()
+	a.pendingOverlayAppends = nil
+	a.pendingOverlayReconcile = false
+	a.pendingOverlayAppendsMu.Unlock()
 }

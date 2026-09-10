@@ -460,10 +460,15 @@ type MainAgent struct {
 	// dropped; some system-generated entries may be tail-coalesced when that
 	// preserves arrival order. Only the event-loop goroutine reads/writes.
 	pendingUserMessages []pendingUserMessage
-	// pausePendingUserDrainOnce suppresses the next idle-time drain of
-	// pendingUserMessages. Used for explicit user interruption so queued work
-	// does not auto-run immediately after cancel.
-	pausePendingUserDrainOnce bool
+	// pendingUserDrainSuspended parks the pendingUserMessages queue: its entries
+	// wait for the next request that actually dispatches instead of auto-starting
+	// a turn. Set while the agent waits on a user decision (Handoff) or when the
+	// user interrupted a turn and asked for the queued work to stay put. While
+	// set, the idle drain is suppressed and hasQueuedAutomaticWork ignores the
+	// queue (so global idle is still reportable); the next dispatching request
+	// injects the whole queue in FIFO order and clears the flag. Only the
+	// event-loop goroutine reads/writes.
+	pendingUserDrainSuspended bool
 
 	// Output channel consumed by the TUI or any external observer.
 	outputCh                      chan AgentEvent
@@ -803,6 +808,16 @@ type MainAgent struct {
 	// maybeClearStaleContextNotices); a notice computed for the old line would
 	// otherwise keep claiming pressure the new model is not under.
 	contextNoticesStale atomic.Bool
+	// pendingOverlayAppends holds the mailbox-transcript / background-result
+	// card events whose backing transcript write failed, so a persistence
+	// recovery can re-emit them once the write path is healthy. The message is
+	// already in ctxmgr, and future requests dedupe on the in-memory row, so
+	// without the deferred event the TUI would keep the message's waiting row
+	// until the session switches. Guarded by pendingOverlayAppendsMu; bounded
+	// (see maxPendingOverlayAppends) and cleared at a session boundary.
+	pendingOverlayAppendsMu sync.Mutex
+	pendingOverlayAppends   []pendingOverlayAppend
+	pendingOverlayReconcile bool
 	// lastCompactionMessageCount is the compacted message count at the previous
 	// compaction apply, used to report the interval (in messages) since the
 	// last compaction in lifecycle analytics.
@@ -2074,6 +2089,10 @@ func (a *MainAgent) consumePendingUserMessagesForRequest(messages []message.Mess
 	if len(a.pendingUserMessages) == 0 {
 		return messages
 	}
+	// This request injects the queue, so a parked state ends here: the injected
+	// entries (and any idle-only slash command re-queued below) return to normal
+	// drain semantics.
+	a.resumePendingUserDrain()
 	pending := a.pendingUserMessages
 	a.pendingUserMessages = nil
 	var deferred []pendingUserMessage
@@ -2103,6 +2122,9 @@ func (a *MainAgent) consumePendingUserMessagesForRequest(messages []message.Mess
 		return messages
 	}
 	if manualInputConsumed {
+		// Merge any mailbox that arrived since the continuation staging ran;
+		// staging appends to (never overwrites) the pending batch, so a batch
+		// already prepared for this request is preserved.
 		a.stageNextSubAgentMailboxBatch()
 	}
 	log.Debugf("injecting pending user messages with tool results count=%v", len(consumed))
@@ -2192,6 +2214,20 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 		return
 	}
 
+	// A parked queue waits for this action: enqueue the new message behind it and
+	// dispatch the whole batch in arrival order instead of starting a turn with
+	// only the new message.
+	if a.pendingUserDrainSuspended {
+		a.pendingUserMessages = enqueuePendingUserMessage(a.pendingUserMessages, pendingUserMessage{
+			Content:  content,
+			Parts:    parts,
+			FromUser: true,
+		})
+		a.resumePendingUserDrain()
+		a.drainPendingUserMessages()
+		return
+	}
+
 	// Start a new turn and call LLM.
 	a.tryRecoverPersistenceBeforeTurn()
 	a.stageNextSubAgentMailboxBatch()
@@ -2244,6 +2280,15 @@ func (a *MainAgent) handlePendingDraftUpsert(evt Event) {
 	}
 	userMsg, ok := a.pendingUserMessageToConversationMessage(pending)
 	if !ok {
+		return
+	}
+
+	// A parked queue waits for this action: enqueue the submitted draft behind it
+	// and dispatch the whole batch in arrival order.
+	if a.pendingUserDrainSuspended {
+		a.pendingUserMessages = enqueuePendingUserMessage(a.pendingUserMessages, pending)
+		a.resumePendingUserDrain()
+		a.drainPendingUserMessages()
 		return
 	}
 
@@ -2324,7 +2369,7 @@ func (a *MainAgent) handleTurnCancelled(evt Event) {
 	a.mainLLMRequestInFlight.Store(false)
 	a.savePartialAssistantMsg()
 	if payload.KeepPendingUserMessagesQueued {
-		a.pausePendingUserDrainOnce = true
+		a.suspendPendingUserDrain()
 	}
 
 	// A model-driven checkpoint armed by this turn must not outlive it: the
@@ -2379,6 +2424,10 @@ func (a *MainAgent) resumeTurnAfterRoutingInvalidation(turnID uint64) bool {
 		return false
 	}
 	a.processPendingUserMessagesBeforeLLMInTurn()
+	// The routing-invalidation resume is a dispatch boundary too: stage any
+	// mailbox that arrived while the turn was paused so its next request carries
+	// it alongside the queued user input.
+	a.prepareSubAgentMailboxBatchForTurnContinuation()
 	a.syncBugTriagePromptFromSnapshot()
 	turnCtx := a.turn.Ctx
 	a.beginMainLLMAfterPreparation(turnCtx, turnID, "")

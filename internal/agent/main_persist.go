@@ -320,6 +320,9 @@ func (a *MainAgent) markPersistenceRecoveredAfterBarrier() {
 	a.persistenceHealth.markRecovered()
 	log.Infof("main persistence recovered after intent barrier")
 	a.emitPersistenceRecovered()
+	// A successful write proves the path is healthy again, so the cards whose
+	// backing appends failed can be surfaced.
+	a.flushPendingOverlayAppends()
 }
 
 // emitPersistenceRecovered clears the persistent degraded indicator and posts
@@ -367,4 +370,7 @@ func (a *MainAgent) tryRecoverPersistenceBeforeTurn() {
 	a.persistenceHealth.markRecovered()
 	log.Infof("main persistence recovered after transcript checkpoint")
 	a.emitPersistenceRecovered()
+	// The checkpoint rewrote the transcript from ctxmgr, so every deferred
+	// card's message is durable again and its card can be surfaced.
+	a.flushPendingOverlayAppends()
 }

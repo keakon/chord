@@ -59,6 +59,9 @@ func (a *MainAgent) handleHandoffResolveEvent(evt Event) {
 
 	switch p.Action {
 	case handoffResolveApprove:
+		// The user decided; the parked queue resumes normal semantics so the
+		// pending input is consumed by the follow-up instead of waiting further.
+		a.resumePendingUserDrain()
 		target := strings.TrimSpace(p.AgentName)
 		if target == "" {
 			target = "builder"
@@ -96,6 +99,8 @@ func (a *MainAgent) handleHandoffResolveEvent(evt Event) {
 			return
 		}
 	case handoffResolveDeny:
+		// The user decided; the parked queue resumes and rides the continuation.
+		a.resumePendingUserDrain()
 		reason := strings.TrimSpace(p.DenyReason)
 		if reason == "" {
 			reason = "User rejected the plan."
@@ -113,7 +118,7 @@ func (a *MainAgent) handleHandoffResolveEvent(evt Event) {
 		if a.recoveryManager() != nil {
 			a.persistAsync(identity.MainAgentID, msg)
 		}
-		a.handleContinueFromContext(Event{Type: EventContinue})
+		a.handleContinueFromContext()
 	case handoffResolveCancel:
 		a.emitDeferredHandoffToolResult(pc, "Cancelled", ToolResultStatusCancelled)
 	default:

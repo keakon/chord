@@ -67,6 +67,11 @@ func (a *MainAgent) beginLengthRecoveryRetry(recoveryPrompt string, turnID uint6
 	a.pendingRecoveryPrompt = recoveryPrompt
 	a.armLengthRecoveryResume(recoveryPrompt)
 	a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn, "length_recovery")
+	// The recovery request is a dispatch boundary: carry queued user input and
+	// the pending mailbox batch exactly like the tool-batch closeout. Consuming
+	// an empty queue is a no-op, so the compaction-resume caller that already
+	// merged queued input before entering here is unaffected.
+	a.processPendingUserMessagesBeforeLLMInTurn()
 	a.prepareSubAgentMailboxBatchForTurnContinuation()
 	a.beginMainLLMAfterPreparation(turnCtx, turnID, "")
 }

@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -264,10 +265,16 @@ func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
 	case ownedMailboxRouteForwardToMain:
 		// Forward to main as a main-owned message: clear both owner fields so
 		// the mailbox metadata, injection text, and durable task-record sync
-		// cannot re-associate it with the finished owner.
+		// cannot re-associate it with the finished owner. The record is already
+		// durable — it was persisted before it entered the owned queue — so it
+		// is routed into the main inbox without being written again: routing it
+		// back through enqueueSubAgentMailbox would append a second mailbox.jsonl
+		// row for the same MessageID. Clearing the owner makes the re-resolve
+		// inside deliverSubAgentMailbox return a non-owned route, so this cannot
+		// recurse.
 		msg.OwnerAgentID = ""
 		msg.OwnerTaskID = ""
-		a.enqueueSubAgentMailbox(msg)
+		a.deliverSubAgentMailbox(msg)
 		return true
 	default:
 		return false
@@ -1369,7 +1376,10 @@ func (a *MainAgent) takeMainInboxProgressSnapshots() []SubAgentMailboxMessage {
 	for i, messageID := range ids {
 		msg, found, err := a.loadDurableMailboxMessage(messageID)
 		if err != nil {
-			a.retryProgressPending(ids[i:], pendingAgents, pendingTasks, pendingAttempts, err)
+			// The failure stopped the loop at ids[i]: only that id was actually
+			// attempted, so only it may consume a retry attempt. The untouched
+			// remainder is requeued with its previous count.
+			a.retryProgressPending(ids[i:], 1, pendingAgents, pendingTasks, pendingAttempts)
 			break
 		}
 		if found {
@@ -1384,7 +1394,7 @@ func (a *MainAgent) takeMainInboxProgressSnapshots() []SubAgentMailboxMessage {
 		// rather than dropping the progress update. The delayed retry stage is
 		// what decides that the row is permanently missing (see
 		// retryDeferredMailboxDeliveries).
-		a.retryProgressPending([]string{messageID}, pendingAgents, pendingTasks, pendingAttempts, nil)
+		a.retryProgressPending([]string{messageID}, 1, pendingAgents, pendingTasks, pendingAttempts)
 	}
 	return out
 }
@@ -1412,15 +1422,26 @@ const mainInboxDeferredRetryWindow = 5 * time.Minute
 
 // retryProgressPending re-appends progress ids whose durable row could not be
 // reloaded this dispatch, keeping FIFO order behind anything already re-queued.
-// An id that reaches mainInboxProgressReloadMaxAttempts failed attempts moves
-// into the deferred retry set instead of being dropped silently: the delivery
-// is retried on a cooldown and reported dropped only once it is confirmed
-// permanently missing or the retry window expires (see
-// retryDeferredMailboxDeliveries). Called without subAgentMailboxIDsMu held.
-func (a *MainAgent) retryProgressPending(ids []string, agents, tasks map[string]string, attempts map[string]int, loadErr error) {
+// Only the first `attempted` ids were actually tried before the failure, so
+// only they consume a retry attempt; the untouched remainder is requeued with
+// its previous count instead of being advanced toward the deferred set it was
+// never given a chance to earn. An id that reaches
+// mainInboxProgressReloadMaxAttempts failed attempts moves into the deferred
+// retry set instead of being dropped silently: the delivery is retried on a
+// cooldown and reported dropped only once it is confirmed permanently missing
+// or the retry window expires (see retryDeferredMailboxDeliveries). Called
+// without subAgentMailboxIDsMu held.
+func (a *MainAgent) retryProgressPending(ids []string, attempted int, agents, tasks map[string]string, attempts map[string]int) {
 	a.subAgentMailboxIDsMu.Lock()
 	defer a.subAgentMailboxIDsMu.Unlock()
-	for _, messageID := range ids {
+	for i, messageID := range ids {
+		if i >= attempted {
+			a.subAgentInbox.progressPending = append(a.subAgentInbox.progressPending, messageID)
+			a.subAgentInbox.progressPendingAgent[messageID] = agents[messageID]
+			a.subAgentInbox.progressPendingTask[messageID] = tasks[messageID]
+			a.subAgentInbox.progressPendingAttempts[messageID] = attempts[messageID]
+			continue
+		}
 		tries := attempts[messageID] + 1
 		if tries >= mainInboxProgressReloadMaxAttempts {
 			a.deferProgressRetryLocked(messageID, agents[messageID], tasks[messageID])
@@ -1560,53 +1581,37 @@ func (a *MainAgent) reportSubAgentMailboxDropped(messageID, agentID, taskID, rea
 }
 
 func (a *MainAgent) loadDurableMailboxMessage(messageID string) (*SubAgentMailboxMessage, bool, error) {
-	messageID = strings.TrimSpace(messageID)
-	if messageID == "" || a.isSubAgentMailboxConsumed(messageID) {
+	// Reuse the shared spool index instead of rescanning mailbox.jsonl from the
+	// start on every call: loadSpooledMailbox skips consumed records, rebuilds
+	// the index only when a write left it stale, and reads exactly the record's
+	// own line. A missing mailbox log keeps the historical not-found result (it
+	// holds no row to deliver), while a genuine read failure stays an error the
+	// delivery retry keeps honoring.
+	msg, found, err := a.loadSpooledMailbox(messageID)
+	if err != nil && errors.Is(err, os.ErrNotExist) {
 		return nil, false, nil
 	}
-	path := filepath.Join(a.sessionDir, "subagents", "mailbox.jsonl")
-	f, err := os.Open(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, false, nil
-		}
-		return nil, false, fmt.Errorf("open mailbox log: %w", err)
-	}
-	defer f.Close()
-	dec := json.NewDecoder(f)
-	for {
-		var msg SubAgentMailboxMessage
-		if err := dec.Decode(&msg); err != nil {
-			if err == io.EOF {
-				return nil, false, nil
-			}
-			return nil, false, fmt.Errorf("decode mailbox log: %w", err)
-		}
-		if strings.TrimSpace(msg.MessageID) == messageID {
-			return &msg, true, nil
-		}
-	}
+	return msg, found, err
 }
 
 func (a *MainAgent) stageNextSubAgentMailboxBatch() bool {
 	if a.mailboxDeliveryPaused.Load() {
 		return false
 	}
-	// One drain cycle merges every current main-inbox progress snapshot into
-	// the staged batch, so a single idle wake delivers the whole routable
-	// backlog. Progress/notice must only reach the main between turns: it is
-	// claimed only while no turn is active, so an active turn's continuation
-	// staging (prepareSubAgentMailboxBatchForTurnContinuation) never drags a
-	// progress snapshot into a mid-turn request, and the next drain after the
-	// turn ends picks the snapshot up.
+	// One staging cycle merges every current main-inbox progress snapshot into
+	// the staged batch, so the next request carries the whole routable backlog
+	// in one batch. Progress/notice is claimed at every request boundary, mid-
+	// turn included: like a queued user message it rides the next LLM request
+	// without interrupting the one in flight or starting a request of its own.
 	var progress []SubAgentMailboxMessage
+	// A deferred delivery retry only runs between turns: each due entry
+	// reloads the mailbox log and requeues, so re-running it on every mid-turn
+	// continuation would churn the queues the active turn never drains. The
+	// next between-turns drain keeps the retry alive.
 	if a.turn == nil {
-		// A deferred delivery that became reloadable rejoins the normal
-		// pipeline here, before this batch claims its progress FIFO, so the
-		// same drain delivers it.
 		a.retryDeferredMailboxDeliveries()
-		progress = a.takeMainInboxProgressSnapshots()
 	}
+	progress = a.takeMainInboxProgressSnapshots()
 	msg := a.dequeueNextSubAgentMailbox()
 	if msg == nil {
 		if len(progress) == 0 {
@@ -1614,15 +1619,9 @@ func (a *MainAgent) stageNextSubAgentMailboxBatch() bool {
 		}
 	} else if msg.Kind == SubAgentMailboxKindProgress {
 		// Progress does not ride the urgent/normal queues as an actionable
-		// head. Between turns it folds into the snapshot set staged below; a
-		// mid-turn continuation must not deliver it either (the same gate the
-		// snapshot claim above applies), so it goes back into the per-agent
-		// snapshot map for the next between-turns drain.
-		if a.turn == nil {
-			progress = append(progress, *msg)
-		} else {
-			a.requeueSubAgentMailboxInMemory(*msg)
-		}
+		// head; whether the main is busy or idle it folds into the snapshot set
+		// staged below and is delivered with the same next request.
+		progress = append(progress, *msg)
 		msg = nil
 	}
 	if msg == nil && len(progress) == 0 {
@@ -1647,15 +1646,12 @@ func (a *MainAgent) stageNextSubAgentMailboxBatch() bool {
 					break
 				}
 				if next.Kind == SubAgentMailboxKindProgress {
-					// Progress must not ride a completed-head batch staged
-					// mid-turn: like the head's snapshot claim, which only
-					// runs between turns, a stray queue-resident progress
-					// update goes back into the per-agent snapshot map so the
-					// next between-turns drain delivers it. Queue progress is
-					// not reachable in the normal flow (progress only enters
-					// the snapshot map), so this is a consistency guard for
-					// the dequeued-head shape rather than a live path.
-					a.requeueSubAgentMailboxInMemory(*next)
+					// A stray queue-resident progress update (progress normally
+					// lives in the per-agent snapshot map, not the actionable
+					// queues) folds into the same snapshot set as the head so it
+					// is delivered with the same request instead of blocking the
+					// completed-head batch.
+					progress = append(progress, *next)
 					continue
 				}
 				if !a.ensureSubAgentMailboxPersisted(next) {
@@ -1690,11 +1686,18 @@ func (a *MainAgent) stageNextSubAgentMailboxBatch() bool {
 	}
 	// The staged batch is shared with the TUI-facing manual delivery path
 	// (takeOutstandingMailboxForSub claims it during a manual message), so it
-	// is published under subAgentMailboxIDsMu.
+	// is published under subAgentMailboxIDsMu. A turn can deliver several
+	// batches — each carried by the next request — so the new messages append
+	// after what is already staged (preserving time order) and the active set
+	// accumulates every batch until the turn closeout acks or requeues it. The
+	// active head pointer is only filled when it was empty: it marks the first
+	// not-yet-acked message, not the newest arrival.
 	a.subAgentMailboxIDsMu.Lock()
-	a.pendingSubAgentMailboxes = pending
-	a.activeSubAgentMailboxes = append([]*SubAgentMailboxMessage(nil), pending...)
-	a.activeSubAgentMailbox = msg
+	a.pendingSubAgentMailboxes = append(a.pendingSubAgentMailboxes, pending...)
+	a.activeSubAgentMailboxes = append(a.activeSubAgentMailboxes, pending...)
+	if a.activeSubAgentMailbox == nil {
+		a.activeSubAgentMailbox = msg
+	}
 	a.activeSubAgentMailboxAck = true
 	a.subAgentMailboxIDsMu.Unlock()
 	for _, delivered := range pending {
@@ -1710,10 +1713,15 @@ func (a *MainAgent) prepareSubAgentMailboxBatchForTurnContinuation() bool {
 	if a.turn == nil {
 		return false
 	}
+	// Only an unconsumed pending batch blocks a new stage: it is exactly what
+	// the next request will take, and staging again on top of it would just
+	// re-take the same queues. The active set is the already-delivered
+	// bookkeeping that waits for the turn closeout to ack or requeue it, so it
+	// must not stop later arrivals from being staged for a subsequent request.
 	a.subAgentMailboxIDsMu.Lock()
-	hasBatch := len(a.pendingSubAgentMailboxes) > 0 || len(a.activeSubAgentMailboxes) > 0 || a.activeSubAgentMailbox != nil
+	hasPending := len(a.pendingSubAgentMailboxes) > 0
 	a.subAgentMailboxIDsMu.Unlock()
-	if hasBatch {
+	if hasPending {
 		return false
 	}
 	return a.stageNextSubAgentMailboxBatch()
@@ -1730,6 +1738,8 @@ func (a *MainAgent) drainSubAgentInbox() {
 		return
 	}
 	a.newTurn()
+	// A dispatching request: any parked user queue rides it too, in FIFO order.
+	a.flushParkedPendingUserMessages()
 	turnID := a.turn.ID
 	turnCtx := a.turn.Ctx
 	a.beginMainLLMAfterPreparation(turnCtx, turnID, "main")

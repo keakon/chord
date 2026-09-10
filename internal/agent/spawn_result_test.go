@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -370,4 +371,37 @@ func TestBackgroundCompletionToastLevelFollowsTerminalStatus(t *testing.T) {
 			t.Errorf("backgroundCompletionToastLevel(%q) = %q, want %q", tt.status, got, tt.want)
 		}
 	}
+}
+
+// TestSpawnFinishedEventNormalizesMainOwnerAgentID pins that the lightweight
+// spawn-finished notification names the main agent with the shared identity
+// instead of its internal instance id, so the TUI's "main" -> "" normalization
+// applies uniformly; every other owner keeps its instance id.
+func TestSpawnFinishedEventNormalizesMainOwnerAgentID(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.handleSpawnFinished(Event{Type: EventSpawnFinished, SourceID: identity.MainAgentID, Payload: backgroundResultPayload(a.instanceID, "job-main", "run tests")})
+	if got := lastSpawnFinishedEvent(t, a); got.AgentID != identity.MainAgentID {
+		t.Fatalf("SpawnFinishedEvent.AgentID = %q, want %q (main owner normalized)", got.AgentID, identity.MainAgentID)
+	}
+
+	a.handleSpawnFinished(Event{Type: EventSpawnFinished, SourceID: identity.MainAgentID, Payload: backgroundResultPayload("worker-owner-1", "job-sub", "run tests")})
+	if got := lastSpawnFinishedEvent(t, a); got.AgentID != "worker-owner-1" {
+		t.Fatalf("SpawnFinishedEvent.AgentID = %q, want the sub-agent owner %q", got.AgentID, "worker-owner-1")
+	}
+}
+
+func lastSpawnFinishedEvent(t *testing.T, a *MainAgent) SpawnFinishedEvent {
+	t.Helper()
+	var found SpawnFinishedEvent
+	ok := false
+	for _, evt := range drainAgentEvents(a.outputCh) {
+		if e, isSpawn := evt.(SpawnFinishedEvent); isSpawn {
+			found = e
+			ok = true
+		}
+	}
+	if !ok {
+		t.Fatal("handleSpawnFinished emitted no SpawnFinishedEvent")
+	}
+	return found
 }

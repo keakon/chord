@@ -530,8 +530,9 @@ func TestContextNoticeFirstDeliveryPersistsDurableMessage(t *testing.T) {
 		t.Fatalf("message count = %d, want %d", len(messages), before+1)
 	}
 	last := messages[len(messages)-1]
-	if last.Role != message.RoleUser || last.Kind != message.KindContextNotice || last.NoticeLevel != contextNoticePressure || last.Content != text {
-		t.Fatalf("persisted notice = %+v, want a user-role KindContextNotice at level %s", last, contextNoticePressure)
+	wrapped := "<system-reminder>\n" + text + "\n</system-reminder>"
+	if last.Role != message.RoleUser || last.Kind != message.KindContextNotice || last.NoticeLevel != contextNoticePressure || last.Content != wrapped {
+		t.Fatalf("persisted notice = %+v, want a user-role KindContextNotice at level %s carrying the wrapped text", last, contextNoticePressure)
 	}
 	if message.IsUserAuthored(last) {
 		t.Fatal("a context notice must not count as user-authored")
@@ -539,7 +540,7 @@ func TestContextNoticeFirstDeliveryPersistsDurableMessage(t *testing.T) {
 	a.flushPersist()
 	evt := waitForContextNoticeEvent(t, a)
 	if evt.MessageIndex != before || evt.Level != contextNoticePressure || evt.Message != text {
-		t.Fatalf("event = %+v, want index %d level %s", evt, before, contextNoticePressure)
+		t.Fatalf("event = %+v, want index %d level %s and the bare text %q", evt, before, contextNoticePressure, text)
 	}
 }
 
@@ -630,6 +631,30 @@ func TestMaybeClearStaleContextNoticesWaitsForIdle(t *testing.T) {
 	a.maybeClearStaleContextNotices()
 	if hasContextNotice(a.ctxMgr.Snapshot()) {
 		t.Fatal("idle cleanup must remove the context notice")
+	}
+}
+
+func TestMaybeClearStaleContextNoticesWaitsForCompaction(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Kind: message.KindContextNotice, Content: "stale pressure", NoticeLevel: contextNoticeWarning})
+	a.contextNoticesStale.Store(true)
+
+	// A compaction draft's headSplit is measured against the current
+	// transcript; removing a notice now would shift the ordinals and abort the
+	// apply at the provenance check.
+	a.compactionSlotActive.Store(true)
+	a.maybeClearStaleContextNotices()
+	if !a.contextNoticesStale.Load() {
+		t.Fatal("cleanup must keep the stale marker while a compaction is running")
+	}
+	if !hasContextNotice(a.ctxMgr.Snapshot()) {
+		t.Fatal("a running compaction must not lose the context notice")
+	}
+
+	a.compactionSlotActive.Store(false)
+	a.maybeClearStaleContextNotices()
+	if hasContextNotice(a.ctxMgr.Snapshot()) {
+		t.Fatal("cleanup after the compaction must remove the context notice")
 	}
 }
 

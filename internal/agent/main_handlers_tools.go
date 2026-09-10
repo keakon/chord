@@ -656,7 +656,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 			a.emitToTUI(NotificationEvent{Reason: NotificationReasonUserInputRequired, Message: "Chord: Handoff requires your decision"})
 			a.markControlAction()
 			a.emitActivity("main", ActivityIdle, "")
-			a.pausePendingUserDrainOnce = true
+			a.suspendPendingUserDrain()
 			a.setIdleAndDrainPending()
 			return
 		}

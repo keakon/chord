@@ -52,7 +52,14 @@ func (a *MainAgent) settleCompactionDroppedMailboxRows(current []message.Message
 			assistantAfter = true
 			continue
 		}
-		if i >= headSplit || msg.Kind != message.KindSubAgentMailbox || msg.Mailbox == nil {
+		// A mailbox delivery row is either the system-reminder notice
+		// (KindSubAgentMailbox) or the raw background result transcribed with
+		// the same mailbox metadata (KindBackgroundResult); both are the
+		// durable delivery evidence restore's conversationMailboxIDs dedupes
+		// on, so both must be settled identically before the replace destroys
+		// them.
+		if i >= headSplit || msg.Mailbox == nil ||
+			(msg.Kind != message.KindSubAgentMailbox && msg.Kind != message.KindBackgroundResult) {
 			continue
 		}
 		messageID := strings.TrimSpace(msg.Mailbox.MessageID)

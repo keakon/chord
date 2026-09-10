@@ -341,7 +341,10 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 
 		}
 		a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn, "args_invalid")
+		// Align with the tool-batch closeout: the retry request must carry both
+		// the pending mailbox batch and any queued user input.
 		a.prepareSubAgentMailboxBatchForTurnContinuation()
+		a.processPendingUserMessagesBeforeLLMInTurn()
 		// Retry LLM call without storing the malformed response.
 		turnID := a.turn.ID
 		turnCtx := a.turn.Ctx

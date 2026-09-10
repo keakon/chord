@@ -48,6 +48,37 @@ func firstMailboxDrop(events []AgentEvent) (MailboxDeliveryDroppedEvent, bool) {
 	return MailboxDeliveryDroppedEvent{}, false
 }
 
+// TestMainInboxProgressRetryCountsOnlyAttemptedIDs pins that a load failure
+// while claiming the progress FIFO does not consume a retry attempt for the
+// ids the claim never reached: only the failed id advances toward the deferred
+// set, and the untouched tail is requeued with its previous count in order.
+func TestMainInboxProgressRetryCountsOnlyAttemptedIDs(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	writeMalformedMailboxLog(t, a)
+	ids := []string{"progress-1", "progress-2", "progress-3"}
+	a.subAgentInbox.progressPending = append([]string(nil), ids...)
+	for _, id := range ids {
+		a.subAgentInbox.progressPendingAgent[id] = "worker-" + id
+		a.subAgentInbox.progressPendingTask[id] = "task-" + id
+	}
+
+	if got := a.takeMainInboxProgressSnapshots(); len(got) != 0 {
+		t.Fatalf("takeMainInboxProgressSnapshots() = %#v, want none while every row fails to load", got)
+	}
+
+	if got := a.subAgentInbox.progressPendingAttempts["progress-1"]; got != 1 {
+		t.Fatalf("progress-1 attempts = %d, want 1 (the id actually attempted)", got)
+	}
+	for _, id := range ids[1:] {
+		if got := a.subAgentInbox.progressPendingAttempts[id]; got != 0 {
+			t.Fatalf("%s attempts = %d, want 0 (the claim never reached it)", id, got)
+		}
+	}
+	if got := a.subAgentInbox.progressPending; len(got) != 3 || got[0] != ids[0] || got[1] != ids[1] || got[2] != ids[2] {
+		t.Fatalf("progressPending = %#v, want the original FIFO order preserved", got)
+	}
+}
+
 func firstWarnToast(events []AgentEvent) (ToastEvent, bool) {
 	for _, evt := range events {
 		if toast, ok := evt.(ToastEvent); ok && toast.Level == "warn" {
@@ -234,8 +265,9 @@ func TestDeferredMailboxDeliveryWaitsForIdleMain(t *testing.T) {
 	drainAgentEvents(a.outputCh)
 
 	restore := withActiveTurn(t, a)
-	// The between-turns drain also routes through the gate, so neither entry
-	// point may retry while a turn is in flight.
+	// Staging also runs at the mid-turn request boundary (the turn-continuation
+	// staging), so neither entry point may retry a deferred delivery while a
+	// turn is in flight: the retry only runs between turns.
 	a.stageNextSubAgentMailboxBatch()
 	a.retryDeferredMailboxDeliveries()
 	if len(a.subAgentInbox.deferredProgress) != 1 {

@@ -35,7 +35,7 @@ func (a *MainAgent) handleLoopAssessment(evt Event) {
 			}
 		}
 		a.emitActivity("main", ActivityExecuting, "loop")
-		a.handleContinueFromContext(Event{Type: EventContinue})
+		a.handleContinueFromContext()
 	case LoopAssessmentActionCompleted:
 		a.loopState.State = LoopStateCompleted
 		a.emitLoopStateChanged()

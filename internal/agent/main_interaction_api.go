@@ -258,7 +258,7 @@ func (a *MainAgent) ContinueFromContextForTarget(conversation ConversationTarget
 		return
 	}
 	a.mailboxDeliveryPaused.Store(false)
-	a.sendEvent(Event{Type: EventContinue, Payload: manualContinueEvent{}})
+	a.sendEvent(Event{Type: EventContinue})
 }
 
 // RemoveLastMessage removes the last message from context and rewrites the
@@ -315,14 +315,19 @@ func (a *MainAgent) RemoveLastMessageForTarget(conversation ConversationTarget) 
 
 // handleContinueFromContext starts a new turn and calls LLM without appending
 // any new user message.
-func (a *MainAgent) handleContinueFromContext(evt Event) {
+func (a *MainAgent) handleContinueFromContext() {
 	if a.turn != nil {
 		log.Debug("handleContinueFromContext: ignored, turn already active")
 		return
 	}
-	if _, manual := evt.Payload.(manualContinueEvent); manual {
-		a.stageNextSubAgentMailboxBatch()
-	}
+	// Every continue dispatches a request, so the pending mailbox batch must be
+	// staged for it — the manual marker used to be the only path that did, which
+	// left a mailbox-only queue (no FromUser message) undelivered until idle.
+	// Staging here is idempotent-safe: the consume below merges rather than
+	// replaces, and the request takes the pending batch at most once.
+	a.stageNextSubAgentMailboxBatch()
+	// Continue is a user action: a parked queue resumes and rides this turn.
+	a.resumePendingUserDrain()
 	a.applyPendingCompactionResumeOverlaysForContinue()
 	if a.loopState.Enabled {
 		a.loopState.State = LoopStateExecuting

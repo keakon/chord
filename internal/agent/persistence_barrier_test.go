@@ -341,6 +341,59 @@ func TestMainMailboxOverlayPersistenceFailureDegradesMainAgent(t *testing.T) {
 	}
 }
 
+// TestRecoveredPersistenceResendsDeferredMailboxAppendEvent pins that a failed
+// mailbox-overlay transcript write remembers its append card and re-emits it
+// once a persistence recovery has made the transcript durable again, so the
+// TUI's waiting row does not linger until the session switches.
+func TestRecoveredPersistenceResendsDeferredMailboxAppendEvent(t *testing.T) {
+	a := newReadyTestMainAgent(t)
+	a.installRecoveryManager(newBrokenPathRecoveryManager(t))
+	a.pendingSubAgentMailboxes = []*SubAgentMailboxMessage{{
+		MessageID: "worker-1-1",
+		AgentID:   "worker-1",
+		TaskID:    "task-1",
+		Kind:      SubAgentMailboxKindCompleted,
+		Summary:   "finished review",
+	}}
+
+	if overlays := a.buildTurnOverlayMessages(); len(overlays) == 0 {
+		t.Fatal("buildTurnOverlayMessages() staged no mailbox overlay")
+	}
+	a.flushPersist()
+	if !a.persistenceDegraded() {
+		t.Fatal("main persistence remained healthy after the mailbox overlay write failed")
+	}
+	for _, evt := range drainAgentEvents(a.outputCh) {
+		if _, ok := evt.(MailboxTranscriptAppendedEvent); ok {
+			t.Fatal("append card emitted although the backing transcript write failed")
+		}
+	}
+
+	// A recovery checkpoint rewrites the transcript from ctxmgr (which already
+	// holds the mailbox row), so the deferred card can be surfaced.
+	a.sessionDir = filepath.Join(t.TempDir(), "session")
+	a.installRecoveryManager(recovery.NewRecoveryManager(a.sessionDir))
+	a.tryRecoverPersistenceBeforeTurn()
+	if a.persistenceDegraded() {
+		t.Fatal("persistence should recover after a successful checkpoint")
+	}
+
+	var appended *MailboxTranscriptAppendedEvent
+	for _, evt := range drainAgentEvents(a.outputCh) {
+		if e, ok := evt.(MailboxTranscriptAppendedEvent); ok {
+			copied := e
+			appended = &copied
+		}
+	}
+	if appended == nil {
+		t.Fatal("recovered persistence did not resend the deferred mailbox append event")
+	}
+	if appended.TargetAgentID != identity.MainAgentID || appended.Message.Mailbox == nil ||
+		appended.Message.Mailbox.MessageID != "worker-1-1" {
+		t.Fatalf("resend event = %+v, want the main-agent card for worker-1-1", appended)
+	}
+}
+
 func TestLoadTaskHistoryMessagesScopesRecoveryByInstance(t *testing.T) {
 	rm := recovery.NewRecoveryManager(t.TempDir())
 	defer rm.Close()
