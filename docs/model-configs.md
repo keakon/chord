@@ -323,7 +323,7 @@ and below Luna's 256K+ collapse zone):
 
 ```yaml
 model_templates:
-  gpt-5.6-cost-first: &gpt-5.6-cost-first
+  gpt-5.6-cost-first: &gpt-5-6-cost-first
     <<: *gpt-5-6-base
     compaction:
       threshold: 0.25       # 0.25 × 922K ≈ 231K, under the 272K pricing tier
@@ -334,7 +334,7 @@ Quality-first (Sol/Terra; Luna has no strong long-context band to aim for):
 
 ```yaml
 model_templates:
-  gpt-5.6-quality-first: &gpt-5.6-quality-first
+  gpt-5.6-quality-first: &gpt-5-6-quality-first
     <<: *gpt-5-6-base
     compaction:
       threshold: 0.55       # ≈ 507K; 0.5–0.65 are reasonable
@@ -986,7 +986,7 @@ GLM-5.2 is served by several providers in the recipes above (`bigmodel` chat,
 template gets the same `compaction`. If your workloads stay short, omit the
 `compaction` block and let the model use the global default.
 
-## DeepSeek V4 (Flash / Pro)
+## DeepSeek V4.1 Flash
 
 Pair with `~/.config/chord/auth.yaml`:
 
@@ -995,16 +995,20 @@ deepseek:
   - "$DEEPSEEK_API_KEY"
 ```
 
-`deepseek-v4-pro` and `deepseek-v4-flash` share the same API surface, so the
-protocol-level config is identical; they reuse the wire-family templates
-below. Both models support the Responses API.
+`deepseek-flash` is DeepSeek-V4.1-Flash: 1M context, thinking enabled by
+default, and native image input on all three wire families. On the official
+API, the legacy IDs `deepseek-v4-flash` and `deepseek-v4-flash-vision-exp`
+are still accepted and route here at Flash prices, and `deepseek-v4-pro`
+requests will follow from 2026-09-14 04:00 UTC until V4.1-Pro ships.
 
 ```yaml
 model_templates:
-  deepseek-v4-chat: &deepseek-v4-chat
+  deepseek-v4.1-chat: &deepseek-v4-1-chat
     limit:
       context: 1000000
       output: 64000
+    modalities:
+      input: [text, image]
     reasoning:
       effort: high
     variants:
@@ -1029,10 +1033,12 @@ model_templates:
       forced_tool_choice:
         suppress_in_thinking: true
 
-  deepseek-v4-messages: &deepseek-v4-messages
+  deepseek-v4.1-messages: &deepseek-v4-1-messages
     limit:
       context: 1000000
       output: 64000
+    modalities:
+      input: [text, image]
     thinking:
       type: adaptive
       effort: high
@@ -1053,10 +1059,12 @@ model_templates:
       reasoning_continuity:
         mode: anthropic_unsigned
 
-  deepseek-v4-responses: &deepseek-v4-responses
+  deepseek-v4.1-responses: &deepseek-v4-1-responses
     limit:
       context: 1000000
       output: 64000
+    modalities:
+      input: [text, image]
     reasoning:
       effort: high
     variants:
@@ -1081,26 +1089,23 @@ providers:
     type: chat-completions
     api_url: https://api.deepseek.com/v1/chat/completions
     models:
-      deepseek-v4-pro: *deepseek-v4-chat
-      deepseek-v4-flash: *deepseek-v4-chat
+      deepseek-flash: *deepseek-v4-1-chat
 
   deepseek-messages:
     type: messages
     api_url: https://api.deepseek.com/anthropic/v1/messages
     models:
-      deepseek-v4-pro: *deepseek-v4-messages
-      deepseek-v4-flash: *deepseek-v4-messages
+      deepseek-flash: *deepseek-v4-1-messages
 
   deepseek-responses:
     type: responses
     api_url: https://api.deepseek.com/v1/responses
     models:
-      deepseek-v4-pro: *deepseek-v4-responses
-      deepseek-v4-flash: *deepseek-v4-responses
+      deepseek-flash: *deepseek-v4-1-responses
 
 model_pools:
   default:
-    - deepseek/deepseek-v4-flash@high
+    - deepseek/deepseek-flash@high
 ```
 
 Notes:
@@ -1108,22 +1113,45 @@ Notes:
 - DeepSeek Chat thinking uses `thinking.type`, top-level `reasoning_effort`, and
   `max_tokens`. `request_overrides` supplies the request-shape differences;
   during thinking + tool-call loops, `openai_visible` returns the assistant's
-  `reasoning_content` unchanged. DeepSeek rejects forced tool choice while
+  `reasoning_content` unchanged. When a request carries tools, DeepSeek expects
+  the full `reasoning_content` back and returns a `400` otherwise; without
+  tools the field is ignored. DeepSeek also rejects forced tool choice while
   thinking is active, so the template downgrades loop-forced `tool_choice:
   required` to the backend default for those requests.
 - DeepSeek Responses supports `tool_choice: required`, so its template keeps
   loop-forced tool choice. Plaintext `reasoning_text` makes the encrypted
   reasoning include unnecessary, while `max_output_tokens` remains enabled
-  because the endpoint supports it. Other unsupported fields are silently
-  ignored by DeepSeek.
+  because the endpoint supports it. Fields the endpoint does not support
+  (`store`, `background`, `previous_response_id`, …) are silently ignored, and
+  the stream ends with a `response.completed` / `incomplete` / `failed` event
+  instead of `data: [DONE]`.
 - DeepSeek Messages supports `output_config.effort`; Chord derives it from
-  `thinking.effort`. Disable Anthropic beta headers for the compatible endpoint.
-  DeepSeek's Anthropic-compatible endpoint may return unsigned `thinking`
-  blocks rather than Claude-style signed blocks. `anthropic_unsigned` replays
-  same-provider/model unsigned thinking natively and can also accept portable
-  visible reasoning from other wire families as unsigned `thinking` blocks;
-  if the target still rejects that shape, strict compatibility drops the
-  reasoning carrier while preserving the tool round.
+  `thinking.effort`. Disable Anthropic beta headers for the compatible
+  endpoint — it ignores them outside the Files API. `thinking.budget_tokens` is
+  accepted but ignored: thinking depth comes from the effort value, not from a
+  token budget. DeepSeek's Anthropic-compatible endpoint may return unsigned
+  `thinking` blocks rather than Claude-style signed blocks.
+  `anthropic_unsigned` replays same-provider/model unsigned thinking natively
+  and can also accept portable visible reasoning from other wire families as
+  unsigned `thinking` blocks; if the target still rejects that shape, strict
+  compatibility drops the reasoning carrier while preserving the tool round.
+- All three wire families accept images, billed as input tokens (the official
+  cap is 1024 tokens per image). The endpoint takes inline base64, external
+  URLs, or Files API `file_id`s, detects the format by content
+  (JPEG / PNG / GIF / WebP), and accepts images only in user messages — an
+  image in a system or assistant message returns a `400`. Request limits are
+  ≤48 MiB per body, ≤600 images per request, ≤64 MiB of images per request
+  (≤200 MiB when `file_id`s are used), and ≤8192 px per side (4096 px once a
+  request carries 15 images or more). Chord always sends inline base64, so
+  external URLs and `file_id`s are not reachable from inside Chord.
+  - `detail` on `image_url` (Chat) or `input_image` (Responses) accepts `low`,
+    `high`, `original` (the same as `high`), or `auto`; Chord sends `auto` on
+    the Responses provider, omits it on Chat, and exposes no per-request
+    configuration.
+  - The [`view_image`](./tools.md) tool can load local images into context, but
+    only when this model heads the active pool on the `messages` or `responses`
+    provider: the `chat-completions` (`deepseek`) provider accepts images in
+    user messages yet cannot carry them back in tool results.
 - Treat third-party `/responses` endpoints as gateway-specific; use
   `reasoning.effort` and `openai_visible` only when the gateway documents its
   mapping.
@@ -1133,120 +1161,68 @@ Notes:
 Additional notes:
 
 - The official pricing page lists a maximum output of 384K; `limit.output:
-  64000` here is a conservative local allocation shared with pro. Raise it as
-  needed for longer outputs.
-- Flash and pro support the Responses API (`api.deepseek.com/v1/responses`).
-  The `output_tokens_details.reasoning_tokens` field in responses is handled
-  by Chord's standard reasoning replay without extra configuration.
-- `reasoning_effort` officially supports `low` / `high` / `max` (default
-  `high`). `xhigh` is mapped to `high` and `medium` to `high`, so the
-  templates define only the `low` / `high` / `max` variants.
-- To override per-model differences (e.g. a different default thinking
-  effort), inherit the shared template with YAML anchors and override the
-  diff only:
-
-```yaml
-  deepseek-v4-pro-chat: &deepseek-v4-pro-chat
-    <<: *deepseek-v4-chat
-    reasoning:
-      effort: max
-```
-
-  That gives pro a `max` default thinking effort while flash keeps `high`,
-  and reuses everything else (limit, compat, variants).
-
-- Flash pricing is roughly 1/3 of pro (off-peak, no cache hit: input $0.22 /
-  output $0.66 per 1M tokens; peak nearly doubles those, and cache-hit input
-  starts at $0.007), suitable for high-volume / low-cost scenarios. See
+  64000` here is a conservative local allocation. Raise it as needed for
+  longer outputs.
+- `reasoning_effort` (Chat) and `output_config.effort` (Messages) accept `low`
+  / `high` / `max`, and Responses `reasoning.effort` also accepts `none` to
+  turn thinking off; the default is `high`. Other values are aliases: `minimal`
+  maps to `low`, `medium` and `xhigh` to `high`, and `ultra` to `max` — which
+  is why the templates only define the `low` / `high` / `max` variants.
+- The Responses API lives at `api.deepseek.com/v1/responses`, and its
+  `output_tokens_details.reasoning_tokens` field is handled by Chord's standard
+  reasoning replay without extra configuration.
+- Flash pricing per 1M tokens (off-peak | peak): cache hit $0.003 | $0.006,
+  cache miss $0.15 | $0.30, output $0.60 | $1.20. Peak hours are 01:00–04:00
+  and 06:00–10:00 UTC on weekdays. See
   [DeepSeek official pricing](https://api-docs.deepseek.com/quick_start/pricing/).
 
-### DeepSeek V4 Flash Vision (experimental)
+### Gateways still serving the V4 generation
 
-`deepseek-v4-flash-vision-exp` is the vision variant of Flash: identical text
-capabilities and thinking behavior, plus image input (JPEG / PNG / GIF / WebP,
-inline, URL, or the Files API). It is the only V4 model that accepts images —
-Flash and Pro reject them with a `400` ("This model does not support image"). The
-model is officially labeled experimental and priced identically to Flash: images
-count as input tokens, capped at 384 tokens per image (see the pricing table and
-[the official Vision guide](https://api-docs.deepseek.com/guides/vision/)). Images
-are accepted on all three wire families (Chat Completions `image_url`, Responses
-`input_image`, and the Anthropic-compatible endpoint), so each family reuses its
-shared V4 template, adding only `modalities`:
+Some providers keep serving the V4-generation weights under the
+`deepseek-v4-flash` / `deepseek-v4-pro` IDs. Those models are text-only:
+Flash and Pro reject images with a `400` (only the experimental
+`deepseek-v4-flash-vision-exp` accepted them), so their entries must not
+declare the `image` modality. Reusing `*deepseek-v4-1-chat` directly would
+inherit it; override `modalities` or build their templates text-only:
 
 ```yaml
-model_templates:
-  deepseek-v4-vision-chat: &deepseek-v4-vision-chat
-    <<: *deepseek-v4-chat
-    modalities:
-      input: [text, image]
-
-  deepseek-v4-vision-messages: &deepseek-v4-vision-messages
-    <<: *deepseek-v4-messages
-    modalities:
-      input: [text, image]
-
-  deepseek-v4-vision-responses: &deepseek-v4-vision-responses
-    <<: *deepseek-v4-responses
-    modalities:
-      input: [text, image]
-
-providers:
-  deepseek:
-    type: chat-completions
-    api_url: https://api.deepseek.com/v1/chat/completions
-    models:
-      deepseek-v4-pro: *deepseek-v4-chat
-      deepseek-v4-flash: *deepseek-v4-chat
-      deepseek-v4-flash-vision-exp: *deepseek-v4-vision-chat
-
-  deepseek-messages:
-    type: messages
-    api_url: https://api.deepseek.com/anthropic/v1/messages
-    models:
-      deepseek-v4-pro: *deepseek-v4-messages
-      deepseek-v4-flash: *deepseek-v4-messages
-      deepseek-v4-flash-vision-exp: *deepseek-v4-vision-messages
-
-  deepseek-responses:
-    type: responses
-    api_url: https://api.deepseek.com/v1/responses
-    models:
-      deepseek-v4-pro: *deepseek-v4-responses
-      deepseek-v4-flash: *deepseek-v4-responses
-      deepseek-v4-flash-vision-exp: *deepseek-v4-vision-responses
-```
-
-The per-request `detail` field on `image_url` (or `input_image`) accepts `low`,
-`high`, `original`, or `auto` — `high` and `original` are equivalent — and tunes
-how images are processed, which changes the token cost. Chord currently sends
-`auto` for every image and does not expose per-request `detail` configuration;
-images are delivered as inline base64, so external URLs and Files API `file_id`
-inputs are not supported from within Chord. The
-[`view_image`](./tools.md) tool can load local images into context, but only
-when this model heads the active pool on the `messages` or `responses` provider:
-the `chat-completions` (`deepseek`) provider accepts images in user messages yet
-cannot carry them back in tool results.
-
-#### Compaction tuning for DeepSeek V4
-
-DeepSeek V4 Pro/Flash advertise a 1M window, but the MLA architecture degrades
-noticeably at long range: independent multi-needle evals put V4 Pro around
-~41% at 1M (8-needle) versus ~78% single-needle, a sharp drop that mirrors the
-Gemini 3.1 Pro cliff. The reliable working window is roughly 200K on the 1M window.
-V4 is the cheapest family by a wide margin even on cache misses, so frequent
-compaction is far cheaper than on premium models — compact early and often:
-
-```yaml
-# deepseek-v4-chat / deepseek-v4-messages / deepseek-v4-responses already
-# share a base in the recipes above; add compaction to the shared template so
-# every deepseek-v4-pro / deepseek-v4-flash entry inherits it.
+# Gateways still serving the V4-generation models: same templates, text only.
 model_templates:
   deepseek-v4-chat: &deepseek-v4-chat
+    <<: *deepseek-v4-1-chat
+    modalities:
+      input: [text]
+
+providers:
+  deepseek-gateway:
+    type: chat-completions
+    api_url: https://example.com/v1/chat/completions
+    models:
+      deepseek-v4-flash: *deepseek-v4-chat
+```
+
+### Compaction tuning for DeepSeek V4.1 Flash
+
+DeepSeek V4.1 Flash advertises a 1M window, but long-range reliability is the
+family's weak spot: independent multi-needle evals of the previous V4
+generation put V4 Pro around ~41% at 1M (8-needle) versus ~78% single-needle, a
+sharp drop that mirrors the Gemini 3.1 Pro cliff. V4.1 has no public
+long-context evaluation yet, so until one appears the practical guidance stays
+the same: treat the reliable working window as roughly 200K and compact early.
+The Flash family is the cheapest by a wide margin even on cache misses, so
+frequent compaction is far cheaper than on premium models — compact early and
+often:
+
+```yaml
+# Add compaction to the deepseek-v4.1-chat / -messages / -responses templates
+# in the recipes above; every model entry that references them inherits it.
+model_templates:
+  deepseek-v4.1-chat: &deepseek-v4-1-chat
     limit: {context: 1000000, output: 128000}
     compaction: {threshold: 0.25, reminder: 0.2}
 ```
 
-DeepSeek's cache-hit rate is the best in the industry ($0.0036/M), so a
+DeepSeek's cache-hit rate is the best in the industry ($0.003/M), so a
 compaction that preserves the cacheable prefix is nearly free on repeated
 reads. Keep short interactive sessions on the global default and only tune the
 model entry when you run genuinely long agentic runs.

@@ -302,7 +302,7 @@ chord doctor models --model openai/gpt-5.6@max
 
 ```yaml
 model_templates:
-  gpt-5.6-cost-first: &gpt-5.6-cost-first
+  gpt-5.6-cost-first: &gpt-5-6-cost-first
     <<: *gpt-5-6-base
     compaction:
       threshold: 0.25       # 0.25 × 922K ≈ 231K，低于 272K 计价线
@@ -313,7 +313,7 @@ model_templates:
 
 ```yaml
 model_templates:
-  gpt-5.6-quality-first: &gpt-5.6-quality-first
+  gpt-5.6-quality-first: &gpt-5-6-quality-first
     <<: *gpt-5-6-base
     compaction:
       threshold: 0.55       # ≈ 507K；0.5–0.65 都合理
@@ -900,7 +900,7 @@ model_templates:
 `compaction`。如果你的工作负载本来就短，省略 `compaction` 块、让模型用全局
 默认即可。
 
-## DeepSeek V4（Flash / Pro）
+## DeepSeek V4.1 Flash
 
 在 `~/.config/chord/auth.yaml` 中配置：
 
@@ -909,15 +909,20 @@ deepseek:
   - "$DEEPSEEK_API_KEY"
 ```
 
-`deepseek-v4-pro` 与 `deepseek-v4-flash` 走同一套 API，协议层完全一致，
-共用下面按 wire family 命名的模板；两个模型都支持 Responses API。
+`deepseek-flash` 就是 DeepSeek-V4.1-Flash：1M 上下文、默认开启思考，三条
+wire family 都原生支持图像输入。官方 API 上，旧的 `deepseek-v4-flash` 与
+`deepseek-v4-flash-vision-exp` 仍被接受，会路由到这里并按 Flash 价格计费；
+`deepseek-v4-pro` 的请求也会在 2026-09-14 12:00（北京时间）之后路由过来，
+直到 V4.1-Pro 发布。
 
 ```yaml
 model_templates:
-  deepseek-v4-chat: &deepseek-v4-chat
+  deepseek-v4.1-chat: &deepseek-v4-1-chat
     limit:
       context: 1000000
       output: 64000
+    modalities:
+      input: [text, image]
     reasoning:
       effort: high
     variants:
@@ -942,10 +947,12 @@ model_templates:
       forced_tool_choice:
         suppress_in_thinking: true
 
-  deepseek-v4-messages: &deepseek-v4-messages
+  deepseek-v4.1-messages: &deepseek-v4-1-messages
     limit:
       context: 1000000
       output: 64000
+    modalities:
+      input: [text, image]
     thinking:
       type: adaptive
       effort: high
@@ -966,10 +973,12 @@ model_templates:
       reasoning_continuity:
         mode: anthropic_unsigned
 
-  deepseek-v4-responses: &deepseek-v4-responses
+  deepseek-v4.1-responses: &deepseek-v4-1-responses
     limit:
       context: 1000000
       output: 64000
+    modalities:
+      input: [text, image]
     reasoning:
       effort: high
     variants:
@@ -994,26 +1003,23 @@ providers:
     type: chat-completions
     api_url: https://api.deepseek.com/v1/chat/completions
     models:
-      deepseek-v4-pro: *deepseek-v4-chat
-      deepseek-v4-flash: *deepseek-v4-chat
+      deepseek-flash: *deepseek-v4-1-chat
 
   deepseek-messages:
     type: messages
     api_url: https://api.deepseek.com/anthropic/v1/messages
     models:
-      deepseek-v4-pro: *deepseek-v4-messages
-      deepseek-v4-flash: *deepseek-v4-messages
+      deepseek-flash: *deepseek-v4-1-messages
 
   deepseek-responses:
     type: responses
     api_url: https://api.deepseek.com/v1/responses
     models:
-      deepseek-v4-pro: *deepseek-v4-responses
-      deepseek-v4-flash: *deepseek-v4-responses
+      deepseek-flash: *deepseek-v4-1-responses
 
 model_pools:
   default:
-    - deepseek/deepseek-v4-flash@high
+    - deepseek/deepseek-flash@high
 ```
 
 要点：
@@ -1021,19 +1027,38 @@ model_pools:
 - DeepSeek Chat thinking 使用 `thinking.type`、顶层 `reasoning_effort` 和
   `max_tokens`。`request_overrides` 提供请求形状差异；thinking + 工具调用
   循环中，`openai_visible` 会原样返回 assistant 的 `reasoning_content`。
-  DeepSeek 在启用 thinking 时会拒绝 forced tool choice，所以模板会把 loop
-  强制的 `tool_choice: required` 降级为后端默认选择。
+  请求带 tools 时必须完整回传 `reasoning_content`，否则返回 `400`；不带
+  tools 时该字段会被忽略。DeepSeek 在启用 thinking 时会拒绝 forced tool
+  choice，所以模板会把 loop 强制的 `tool_choice: required` 降级为后端默认
+  选择。
 - DeepSeek Responses 支持 `tool_choice: required`，因此模板保留 loop 的强制
   工具选择。该接口直接返回明文 `reasoning_text`，因此无需请求加密 reasoning；
-  它支持 `max_output_tokens`，模板会继续显式发送上限。其他不支持的字段会被
-  DeepSeek 静默忽略。
-- DeepSeek Messages 支持 `output_config.effort`；Chord 从
-  `thinking.effort` 生成该字段。兼容接口应关闭 Anthropic beta header。
-  DeepSeek 的 Anthropic 兼容接口可能返回无签名 `thinking`，而不是 Claude
-  风格的签名块。`anthropic_unsigned` 会原生回放同 provider/model 的无签名
-  thinking，也能把其他 wire family 的可移植可见 reasoning 转为无签名
-  `thinking` block；如果 target 仍拒绝该形状，严格兼容级别会丢弃 reasoning
-  carrier，但保留工具轮次。
+  它支持 `max_output_tokens`，模板会继续显式发送上限。接口不支持的字段
+  （`store`、`background`、`previous_response_id` 等）会被静默忽略；流以
+  `response.completed` / `incomplete` / `failed` 事件结束，没有
+  `data: [DONE]`。
+- DeepSeek Messages 支持 `output_config.effort`；Chord 从 `thinking.effort`
+  生成该字段。兼容接口应关闭 Anthropic beta header——它只对 Files API 生效。
+  `thinking.budget_tokens` 会被接受但忽略：思考深度由 effort 值决定，不是
+  token 预算。DeepSeek 的 Anthropic 兼容接口可能返回无签名 `thinking`，
+  而不是 Claude 风格的签名块。`anthropic_unsigned` 会原生回放同
+  provider/model 的无签名 thinking，也能把其他 wire family 的可移植可见
+  reasoning 转为无签名 `thinking` block；如果 target 仍拒绝该形状，严格兼容
+  级别会丢弃 reasoning carrier，但保留工具轮次。
+- 三个 wire family 都能收图，图片按输入 token 计费（官方上限为单图 1024
+  token）。接口支持 inline base64、外部 URL 与 Files API `file_id`，按文件
+  内容识别格式（JPEG / PNG / GIF / WebP），且图片只能出现在 user 消息中：
+  system 或 assistant 消息带图会返回 `400`。请求限制：请求体不超过
+  48 MiB、单请求最多 600 张图、图片总量不超过 64 MiB（用 `file_id` 时
+  200 MiB）、单边不超过 8192 px（单请求图片达到 15 张时降到 4096 px）。
+  Chord 固定用 inline base64，所以在 Chord 内部用不了外部 URL 或 `file_id`。
+  - `image_url`（Chat）或 `input_image`（Responses）上的 `detail` 接受
+    `low` / `high` / `original`（与 `high` 等价）/ `auto`；Chord 在
+    Responses 上发送 `auto`，在 Chat 上不带该字段，也不提供按请求配置。
+  - [`view_image`](./tools_CN.md) 工具能把本地图片加载进上下文，但只有把
+    这个模型放在 `messages` 或 `responses` provider 的池首才行：
+    `chat-completions`（`deepseek`）provider 能在用户消息里收图，却无法在
+    tool result 里返回图片。
 - 第三方 `/responses` 端点由网关自行实现；只有网关明确说明映射方式时，
   才使用 `reasoning.effort` 和 `openai_visible`。
 - 对兼容网关，请使用该网关 / 账号实际公开的模型 ID 和限制。见
@@ -1042,113 +1067,65 @@ model_pools:
 补充：
 
 - 官方定价页标注的最大输出为 384K；这里 `limit.output: 64000` 是保守的
-  本地分配，与 pro 保持一致。需要更长输出时按需调大。
-- flash 与 pro 都支持 Responses API（`api.deepseek.com/v1/responses`）。
-  响应中的 `output_tokens_details.reasoning_tokens` 由 Chord 按标准 reasoning
-  回显处理，无需额外配置。
-- `reasoning_effort` 官方支持 `low` / `high` / `max`（默认 `high`）。
-  `xhigh` 会被映射到 `high`，`medium` 映射到 `high`，所以模板只定义
-  `low` / `high` / `max` 三个 variant。
-- 模型间有差异时（例如某个型号默认思考强度不同），用 YAML 锚点继承
-  并覆盖差异部分即可，例如：
+  本地分配，需要更长输出时按需调大。
+- `reasoning_effort`（Chat）与 `output_config.effort`（Messages）接受
+  `low` / `high` / `max`，Responses 的 `reasoning.effort` 还接受 `none`
+  （关闭思考）；默认值是 `high`。其余取值都是别名：`minimal` 映射到
+  `low`，`medium` 和 `xhigh` 映射到 `high`，`ultra` 映射到 `max`——所以
+  模板只定义 `low` / `high` / `max` 三个 variant。
+- Responses API 位于 `api.deepseek.com/v1/responses`；响应中的
+  `output_tokens_details.reasoning_tokens` 由 Chord 按标准 reasoning 回显
+  处理，无需额外配置。
+- Flash 价格（每百万 token，off-peak | peak）：缓存命中 $0.003 | $0.006，
+  缓存未命中 $0.15 | $0.30，输出 $0.60 | $1.20。peak 时段为 UTC 周一至
+  周五 01:00–04:00 与 06:00–10:00。见
+  [DeepSeek 官方定价](https://api-docs.deepseek.com/quick_start/pricing/)。
+
+### 仍在提供 V4 一代模型的网关
+
+有些 provider 仍在提供 V4 一代的权重，模型 ID 是 `deepseek-v4-flash` 或
+`deepseek-v4-pro`。这一代只收文本：flash 和 pro 传图会返回 `400`（一代里
+只有实验性的 `deepseek-v4-flash-vision-exp` 收图），所以这类条目不能声明
+`image` 输入。直接复用 `*deepseek-v4-1-chat` 会把 `image` 一起继承过来，
+用 `modalities` 覆盖，或者干脆按纯文本另建模板：
 
 ```yaml
-  deepseek-v4-pro-chat: &deepseek-v4-pro-chat
-    <<: *deepseek-v4-chat
-    reasoning:
-      effort: max
-```
-
-  这样 pro 的默认思考强度为 `max`，flash 保持 `high`，其余字段（limit、
-  compat、variants）全部复用。
-
-- flash 定价约为 pro 的 1/3（off-peak、无缓存命中时：输入 $0.22 /
-  输出 $0.66 每百万 token；peak 价约翻倍，缓存命中时输入低至 $0.007），
-  适合高频 / 低成本场景。见 [DeepSeek 官方定价](https://api-docs.deepseek.com/quick_start/pricing/)。
-
-### DeepSeek V4 Flash Vision（实验版）
-
-`deepseek-v4-flash-vision-exp` 是 Flash 的视觉变体：文本能力与思考行为
-和 Flash 一致，额外支持图像输入（JPEG / PNG / GIF / WebP；内嵌、URL
-或 Files API 均可）。全站只有这个模型收图—— flash 和 pro 传图会返回
-`400`（"This model does not support image"）。官方标注为 experimental，价格
-与 flash 相同：图片按输入 token 计费，单张最多计 384 token（详见定价页与
-[官方 Vision 指南](https://api-docs.deepseek.com/guides/vision/)）。Chat Completions、
-Responses 和 Anthropic 兼容接口都支持图像输入，三条 wire
-family 各自继承对应的 V4 模板，只加 `modalities`：
-
-```yaml
-model_templates:
-  deepseek-v4-vision-chat: &deepseek-v4-vision-chat
-    <<: *deepseek-v4-chat
-    modalities:
-      input: [text, image]
-
-  deepseek-v4-vision-messages: &deepseek-v4-vision-messages
-    <<: *deepseek-v4-messages
-    modalities:
-      input: [text, image]
-
-  deepseek-v4-vision-responses: &deepseek-v4-vision-responses
-    <<: *deepseek-v4-responses
-    modalities:
-      input: [text, image]
-
-providers:
-  deepseek:
-    type: chat-completions
-    api_url: https://api.deepseek.com/v1/chat/completions
-    models:
-      deepseek-v4-pro: *deepseek-v4-chat
-      deepseek-v4-flash: *deepseek-v4-chat
-      deepseek-v4-flash-vision-exp: *deepseek-v4-vision-chat
-
-  deepseek-messages:
-    type: messages
-    api_url: https://api.deepseek.com/anthropic/v1/messages
-    models:
-      deepseek-v4-pro: *deepseek-v4-messages
-      deepseek-v4-flash: *deepseek-v4-messages
-      deepseek-v4-flash-vision-exp: *deepseek-v4-vision-messages
-
-  deepseek-responses:
-    type: responses
-    api_url: https://api.deepseek.com/v1/responses
-    models:
-      deepseek-v4-pro: *deepseek-v4-responses
-      deepseek-v4-flash: *deepseek-v4-responses
-      deepseek-v4-flash-vision-exp: *deepseek-v4-vision-responses
-```
-
-给 `image_url`（Chat）或 `input_image`（Responses）设 `detail`
-（`low` / `high` / `original` / `auto`，`high` 与 `original` 等价）可以按请求控制
-图像处理方式与 token 消耗。Chord 目前对每张图片都发送 `auto`，暂不暴露按请求
-调整 `detail` 的能力；图片以 inline base64 传入，不支持外部 URL 或 Files API
-`file_id`。[`view_image`](./tools_CN.md) 工具能把本地图片加载进上下文，但只有
-把这个模型放在 `messages` 或 `responses` provider 的池首才行：
-`chat-completions`（`deepseek`）provider 能在用户消息里收图，却无法在 tool result 里返回图片。
-
-#### DeepSeek V4 的压缩调优
-
-DeepSeek V4 Pro/Flash 标称 1M 窗口，但 MLA 架构在长距离上退化明显：独立的
-multi-needle 评测中 V4 Pro 在 1M 处只有约 41%（8-needle），而单 needle 约
-78%——这种陡降和 Gemini 3.1 Pro 的悬崖如出一辙。在 1M 窗口上，可靠工作窗口大约
-200K。V4 即使全部缓存未命中也远比同级模型便宜，因此频繁压缩的代价比在高端
-模型上低得多——尽早压、多压几次：
-
-```yaml
-# 上面的配方里 deepseek-v4-chat / deepseek-v4-messages /
-# deepseek-v4-responses 已经共用同一个基模板；把 compaction 加在共享模板上，
-# 每个 deepseek-v4-pro / deepseek-v4-flash 条目都会继承。
+# 网关仍在提供 V4 一代模型时：模板照抄，只保留文本。
 model_templates:
   deepseek-v4-chat: &deepseek-v4-chat
+    <<: *deepseek-v4-1-chat
+    modalities:
+      input: [text]
+
+providers:
+  deepseek-gateway:
+    type: chat-completions
+    api_url: https://example.com/v1/chat/completions
+    models:
+      deepseek-v4-flash: *deepseek-v4-chat
+```
+
+### DeepSeek V4.1 Flash 的压缩调优
+
+DeepSeek V4.1 Flash 标称 1M 窗口，但长距离可靠性是这个家族的短板：上一代
+V4 的独立 multi-needle 评测中，V4 Pro 在 1M 处只有约 41%（8-needle），
+单 needle 约 78%——这种陡降和 Gemini 3.1 Pro 的悬崖如出一辙。V4.1 目前
+没有公开的长上下文评测，在此之前仍按同样的口径处理：把可靠工作窗口按
+约 200K 对待，尽早压缩。Flash 家族即使全部缓存未命中，也远比同级模型便宜
+得多，所以频繁压缩的代价比在高端模型上低——尽早压、多压几次：
+
+```yaml
+# 给上面配方里的 deepseek-v4.1-chat / -messages / -responses 模板加上
+# compaction；引用这些模板的模型条目会全部继承。
+model_templates:
+  deepseek-v4.1-chat: &deepseek-v4-1-chat
     limit: {context: 1000000, output: 128000}
     compaction: {threshold: 0.25, reminder: 0.2}
 ```
 
-DeepSeek 的缓存命中价是业界最低的（$0.0036/M），因此一次能保住可缓存前缀的
-压缩，在重复读取场景下几乎是免费的。短的交互式会话保持全局默认即可，只有真正
-跑长时间 agentic 任务时才需要单独给模型条目调参。
+DeepSeek 的缓存命中价是业界最低的（$0.003/M），因此一次能保住可缓存前缀的
+压缩，在重复读取场景下几乎是免费的。短的交互式会话保持全局默认即可，只有
+真正跑长时间 agentic 任务时才需要单独给模型条目调参。
 
 ## Qwen 保留历史思考
 
