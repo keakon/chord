@@ -536,11 +536,11 @@ func (m *Model) resolveConfirm(result ConfirmResult) tea.Cmd {
 	prevMode := m.confirm.prevMode
 	m.confirm = confirmState{}
 	m.terminalTitleRequestSeen = false
-	cmd := m.restoreModeWithIME(prevMode)
 	m.recalcViewportSize()
 	titleCmd := m.syncTerminalTitleState()
 
-	// Re-subscribe to the confirmation channel and restore focus.
+	// Re-subscribe to the confirmation channel, then either present the next
+	// queued dialog or restore the pre-dialog mode.
 	cmds := []tea.Cmd{waitForConfirmRequest(m.confirmCh), titleCmd}
 	if pendingToast != "" {
 		cmds = append(cmds, m.enqueueToast(pendingToast, "warn"))
@@ -548,11 +548,5 @@ func (m *Model) resolveConfirm(result ConfirmResult) tea.Cmd {
 	if m.displayState == stateBackground {
 		cmds = append(cmds, m.updateBackgroundIdleSweepState())
 	}
-	if cmd != nil {
-		cmds = append(cmds, cmd)
-	}
-	if prevMode == ModeInsert {
-		cmds = append(cmds, m.input.Focus())
-	}
-	return tea.Batch(cmds...)
+	return m.finishDialog(prevMode, cmds...)
 }

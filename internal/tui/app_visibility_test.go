@@ -619,7 +619,7 @@ func TestBackgroundFreezeSkipsBatchTailStreamFlush(t *testing.T) {
 	}
 }
 
-func TestBackgroundIdleSweepRecognizesPendingConfirmQuestionAsBusy(t *testing.T) {
+func TestBackgroundIdleSweepRecognizesPendingDialogAsBusy(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
 	m.displayState = stateBackground
 	m.confirm.request = &ConfirmRequest{RequestID: "req-1"}
@@ -643,5 +643,17 @@ func TestBackgroundIdleSweepRecognizesPendingConfirmQuestionAsBusy(t *testing.T)
 	}
 	if m.idleSweepScheduled {
 		t.Fatal("idle sweep should not schedule while question is pending")
+	}
+
+	m.question.request = nil
+	m.handoffSelect.selector.list = NewOverlayList(handoffItems([]handoffOption{{Name: "reviewer"}}), m.handoffSelectMaxVisible())
+	if cmd := m.updateBackgroundIdleSweepState(); cmd != nil {
+		t.Fatal("pending handoff should keep background from becoming idle")
+	}
+	if !m.backgroundIdleSince.IsZero() {
+		t.Fatal("backgroundIdleSince should stay zero while handoff is pending")
+	}
+	if m.idleSweepScheduled {
+		t.Fatal("idle sweep should not schedule while handoff is pending")
 	}
 }

@@ -141,8 +141,12 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		m.finalizeTurn()
 		// The handoff tool card itself shows the plan path and stays
 		// non-terminal until the user confirms, rejects, or cancels, so no
-		// separate "Plan saved to:" assistant block is inserted here.
-		m.openHandoffSelect(evt.PlanPath, evt.RequestID)
+		// separate "Plan saved to:" assistant block is inserted here. The
+		// selector opens as a follow-up so it queues behind any dialog already
+		// on screen instead of racing it.
+		effects.addFollowup(func() tea.Msg {
+			return handoffSelectRequestMsg{planPath: evt.PlanPath, requestID: evt.RequestID, agentID: evt.AgentID}
+		})
 		return true, effects
 	case agent.InfoEvent:
 		if isLoopInfoMessage(evt.Message) {

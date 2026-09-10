@@ -246,22 +246,16 @@ func (m *Model) resolveQuestion(result QuestionResult) tea.Cmd {
 	prevMode := m.question.prevMode
 	m.question = questionState{}
 	m.terminalTitleRequestSeen = false
-	cmd := m.restoreModeWithIME(prevMode)
 	m.recalcViewportSize()
 	titleCmd := m.syncTerminalTitleState()
 
-	// Re-subscribe to question channel and restore focus.
+	// Re-subscribe to the question channel, then either present the next queued
+	// dialog or restore the pre-dialog mode.
 	cmds := []tea.Cmd{waitForQuestionRequest(m.questionCh), titleCmd}
 	if m.displayState == stateBackground {
 		cmds = append(cmds, m.updateBackgroundIdleSweepState())
 	}
-	if cmd != nil {
-		cmds = append(cmds, cmd)
-	}
-	if prevMode == ModeInsert {
-		cmds = append(cmds, m.input.Focus())
-	}
-	return tea.Batch(cmds...)
+	return m.finishDialog(prevMode, cmds...)
 }
 
 func textareaBlinkCmd() tea.Cmd {

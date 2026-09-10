@@ -53,7 +53,7 @@ func (m *Model) tryEnterRenderFreeze(reason string) bool {
 	if m.focusedAgentBusyForIdleSweep() {
 		return false
 	}
-	if m.confirm.request != nil || m.question.request != nil {
+	if m.dialogActive() {
 		return false
 	}
 	if m.activeToast != nil && shouldBreakFreezeForToastLevel(m.activeToast.Level) {
@@ -103,7 +103,7 @@ func (m *Model) shouldDeferStreamRender() bool {
 	if m.mode != ModeInsert && m.mode != ModeNormal {
 		return false
 	}
-	if m.activeToast != nil || m.confirm.request != nil || m.question.request != nil {
+	if m.activeToast != nil || m.dialogActive() {
 		return false
 	}
 	if m.search.State.Active || m.mode == ModeSearch || m.mode == ModeDirectory || m.mode == ModeHelp || m.mode == ModeContentViewer || m.mode == ModeModelSelect || m.mode == ModeRoleSelect || m.mode == ModeMCPSelect || m.mode == ModeSessionSelect || m.mode == ModeSessionDeleteConfirm || m.mode == ModeHandoffSelect || m.mode == ModeUsageStats || m.mode == ModeErrorPanel || m.mode == ModeImageViewer {

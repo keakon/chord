@@ -652,7 +652,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 			pc.RequestID = makeRequestID()
 			a.interaction.openHandoff(pc.RequestID, a.walltime.captureAt(identity.MainAgentID, a.agentNameForInteraction(identity.MainAgentID), a.currentTurnID()))
 			log.Infof("all sibling tools complete; finalizing Handoff plan_path=%v request_id=%v", pc.PlanPath, pc.RequestID)
-			a.emitToTUI(HandoffEvent{PlanPath: pc.PlanPath, CallID: pc.CallID, ArgsJSON: pc.ArgsJSON, RequestID: pc.RequestID})
+			a.emitToTUI(HandoffEvent{PlanPath: pc.PlanPath, CallID: pc.CallID, ArgsJSON: pc.ArgsJSON, RequestID: pc.RequestID, AgentID: identity.MainAgentID})
 			a.emitToTUI(NotificationEvent{Reason: NotificationReasonUserInputRequired, Message: "Chord: Handoff requires your decision"})
 			a.markControlAction()
 			a.emitActivity("main", ActivityIdle, "")

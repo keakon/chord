@@ -5,6 +5,7 @@ import (
 	"image"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/keakon/bubbles/v2/textarea"
@@ -52,16 +53,51 @@ type handoffSelectState struct {
 	error             string
 }
 
+// active reports whether the selector is on screen waiting for a decision. It
+// stays true while the plan content viewer is open on top of the selector,
+// because the decision is still pending there.
+func (s handoffSelectState) active() bool {
+	return s.selector.list != nil
+}
+
+// handoffSelectRequestMsg carries a Handoff plan decision prompt to the TUI's
+// message loop. It is delivered as a follow-up like confirmRequestMsg and
+// questionRequestMsg, so a batch of agent events presents dialogs in arrival
+// order instead of racing them past each other.
+type handoffSelectRequestMsg struct {
+	planPath  string
+	requestID string
+	agentID   string
+}
+
+// handleHandoffSelectRequest presents the Handoff selector, or queues it behind
+// the dialog that is already on screen.
+func (m *Model) handleHandoffSelectRequest(msg handoffSelectRequestMsg) tea.Cmd {
+	if m.dialogActive() {
+		m.pendingDialogs = append(m.pendingDialogs, pendingDialog{handoff: &msg, arrivedAt: time.Now()})
+		return nil
+	}
+	return m.openHandoffSelect(msg.planPath, msg.requestID, msg.agentID, m.mode)
+}
+
+// clearHandoffSelect drops the selector state once the decision is delivered so
+// dialogActive stops reporting the handoff as pending.
+func (m *Model) clearHandoffSelect() {
+	m.handoffSelect = handoffSelectState{}
+}
+
 // ---------------------------------------------------------------------------
 // Opening the selector
 // ---------------------------------------------------------------------------
 
-// openHandoffSelect opens the Handoff agent selection dialog. requestID
-// correlates the user's decision back to the pending handoff wait, allowing
-// the runtime to settle the user-wait and emit the deferred tool result.
-func (m *Model) openHandoffSelect(planPath, requestID string) {
+// openHandoffSelect presents the Handoff agent selection dialog as the active
+// modal. requestID correlates the user's decision back to the pending handoff
+// wait, allowing the runtime to settle the user-wait and emit the deferred tool
+// result. agentID is the asking agent (only the main agent can call handoff),
+// used to orient the viewport; prevMode is restored once the decision lands.
+func (m *Model) openHandoffSelect(planPath, requestID, agentID string, prevMode Mode) tea.Cmd {
 	if m.agent == nil {
-		return
+		return nil
 	}
 
 	// Build options from available agent configs. The runtime already excludes
@@ -75,7 +111,7 @@ func (m *Model) openHandoffSelect(planPath, requestID string) {
 				hr.ResolveHandoff(requestID, "cancel", "", "")
 			}
 		}
-		return
+		return nil
 	}
 	options := make([]handoffOption, 0, len(agentNames)+1)
 	cursorIdx := 0
@@ -91,13 +127,15 @@ func (m *Model) openHandoffSelect(planPath, requestID string) {
 		}
 	}
 
+	m.exitRenderFreeze()
+	m.focusAgentForRequest(agentID)
 	m.clearChordState()
 	m.clearActiveSearch()
 	m.handoffSelect = handoffSelectState{
 		options:   options,
 		planPath:  planPath,
 		requestID: requestID,
-		prevMode:  m.mode,
+		prevMode:  prevMode,
 	}
 	if content, err := os.ReadFile(planPath); err == nil {
 		m.handoffSelect.planText = string(content)
@@ -108,11 +146,13 @@ func (m *Model) openHandoffSelect(planPath, requestID string) {
 	if m.handoffSelect.selector.list != nil {
 		m.handoffSelect.selector.list.SetCursor(cursorIdx)
 	}
-	if m.mode == ModeInsert {
+	m.terminalTitleRequestSeen = m.displayState == stateForeground
+	if prevMode == ModeInsert {
 		m.input.Blur()
 	}
 	m.mode = ModeHandoffSelect
 	m.recalcViewportSize()
+	return m.syncTerminalTitleState()
 }
 
 // ---------------------------------------------------------------------------
@@ -192,36 +232,32 @@ func (m *Model) handleHandoffDenyReasonKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 func (m *Model) closeHandoffSelect() tea.Cmd {
+	requestID := strings.TrimSpace(m.handoffSelect.requestID)
 	prevMode := m.handoffSelect.prevMode
+	m.clearHandoffSelect()
 	// Esc cancels the handoff without executing the plan. The pending
 	// interaction is settled so the card gets a cancelled terminal result and
 	// the user-wait is recorded.
-	if requestID := strings.TrimSpace(m.handoffSelect.requestID); requestID != "" && m.agent != nil {
+	if requestID != "" && m.agent != nil {
 		if hr, ok := m.agent.(agent.HandoffResolver); ok {
 			hr.ResolveHandoff(requestID, "cancel", "", "")
 		}
 	}
-	cmd := m.restoreModeWithIME(prevMode)
 	m.recalcViewportSize()
-	if prevMode == ModeInsert {
-		return tea.Batch(cmd, m.input.Focus())
-	}
-	return cmd
+	return m.finishDialog(prevMode, m.syncTerminalTitleState())
 }
 
 func (m *Model) denyHandoffWithReason(reason string) tea.Cmd {
+	requestID := strings.TrimSpace(m.handoffSelect.requestID)
 	prevMode := m.handoffSelect.prevMode
-	cmd := m.restoreModeWithIME(prevMode)
-	m.recalcViewportSize()
-	if requestID := strings.TrimSpace(m.handoffSelect.requestID); requestID != "" && m.agent != nil {
+	m.clearHandoffSelect()
+	if requestID != "" && m.agent != nil {
 		if hr, ok := m.agent.(agent.HandoffResolver); ok {
 			hr.ResolveHandoff(requestID, "deny", "", reason)
 		}
 	}
-	if prevMode == ModeInsert {
-		return tea.Batch(cmd, m.input.Focus())
-	}
-	return cmd
+	m.recalcViewportSize()
+	return m.finishDialog(prevMode, m.syncTerminalTitleState())
 }
 
 func (m *Model) confirmHandoff() tea.Cmd {
@@ -238,28 +274,23 @@ func (m *Model) confirmHandoff() tea.Cmd {
 	selected := m.handoffSelect.options[cursor]
 	planPath := m.handoffSelect.planPath
 	requestID := strings.TrimSpace(m.handoffSelect.requestID)
-
-	// Restore mode before triggering execution. The decision is handled by the
-	// runtime (settles the user-wait and emits the deferred handoff tool result),
-	// then starts plan execution on the selected agent role.
 	prevMode := m.handoffSelect.prevMode
-	cmd := m.restoreModeWithIME(prevMode)
+	m.clearHandoffSelect()
 	m.recalcViewportSize()
 
-	if requestID != "" && m.agent != nil {
+	// The decision is handled by the runtime (settles the user-wait and emits
+	// the deferred handoff tool result), then starts plan execution on the
+	// selected agent role; ExecutePlan is the local fallback when there is no
+	// request to correlate.
+	titleCmd := m.syncTerminalTitleState()
+	if requestID != "" {
 		if hr, ok := m.agent.(agent.HandoffResolver); ok {
 			hr.ResolveHandoff(requestID, "approve", selected.Name, "")
-			if prevMode == ModeInsert {
-				return tea.Batch(cmd, m.input.Focus())
-			}
-			return cmd
+			return m.finishDialog(prevMode, titleCmd)
 		}
 	}
 	m.agent.ExecutePlan(planPath, selected.Name)
-	if prevMode == ModeInsert {
-		return tea.Batch(cmd, m.input.Focus())
-	}
-	return cmd
+	return m.finishDialog(prevMode, titleCmd)
 }
 
 // ---------------------------------------------------------------------------

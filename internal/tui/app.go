@@ -219,6 +219,12 @@ type Model struct {
 	questionCh chan QuestionRequest
 	question   questionState
 
+	// pendingDialogs holds model-initiated dialogs (permission confirm, Done
+	// approval, question) that arrived while another dialog was on screen. The
+	// TUI renders a single modal at a time, so they are presented in arrival
+	// order as each dialog closes.
+	pendingDialogs []pendingDialog
+
 	// Search state
 	search SearchModel
 
@@ -1037,6 +1043,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// -- question request from Question tool ----------------------------
 	case questionRequestMsg:
 		return m, m.handleQuestionRequest(msg)
+
+	case handoffSelectRequestMsg:
+		return m, m.handleHandoffSelectRequest(msg)
 
 	case modelSwitchResultMsg:
 		return m, m.handleModelSwitchResult(msg)

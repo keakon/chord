@@ -67,7 +67,7 @@ func (m *Model) updateBackgroundIdleSweepState() tea.Cmd {
 		m.clearIdleSweepSchedule()
 		return nil
 	}
-	if m.isAgentBusy() || m.confirm.request != nil || m.question.request != nil {
+	if m.isAgentBusy() || m.dialogActive() {
 		m.backgroundIdleSince = time.Time{}
 		m.clearIdleSweepSchedule()
 		return nil
@@ -98,7 +98,7 @@ func (m *Model) handleIdleSweepTick(msg idleSweepTickMsg) tea.Cmd {
 		m.backgroundIdleSince = time.Time{}
 		return nil
 	}
-	if m.isAgentBusy() || m.confirm.request != nil || m.question.request != nil {
+	if m.isAgentBusy() || m.dialogActive() {
 		m.backgroundIdleSince = time.Time{}
 		return nil
 	}

@@ -9,48 +9,63 @@ import (
 )
 
 // focusAgentForRequest orients the viewport to the agent whose confirm or
-// question request is about to open. Only a SubAgent asking arrives here:
-// "main" (and empty, the unset field) keeps the current view, because the main
-// agent is not a separate switchable pane and yanking focus back to it would
-// override the user's own navigation. When the asking agent is already
-// focused, nothing changes.
+// question request is about to open. Every model-initiated dialog — permission
+// confirm, Done approval, and the Question tool — must be shown against the
+// transcript that produced it, so the view switches to the asking agent,
+// including the main agent (whose view is the empty focus id). Nothing changes
+// when that agent is already focused.
 func (m *Model) focusAgentForRequest(agentID string) {
-	if agentID == "" || agentID == identity.MainAgentID {
+	target := agentID
+	if target == identity.MainAgentID {
+		target = ""
+	}
+	if target == m.focusedAgentID {
 		return
 	}
-	if agentID == m.focusedAgentIDOrMain() {
-		return
-	}
-	m.setFocusedAgent(agentID)
+	m.setFocusedAgent(target)
+}
+
+// dialogActive reports whether a model-initiated modal dialog is on screen.
+// The TUI renders a single modal at a time, so a request that arrives while one
+// is open waits in pendingDialogs instead of replacing the visible dialog.
+// Handoff counts as active while its plan-content viewer is open on top of it:
+// the decision is still pending.
+func (m *Model) dialogActive() bool {
+	return m.confirm.request != nil || m.question.request != nil || m.handoffSelect.active()
 }
 
 func (m *Model) handleConfirmRequest(msg confirmRequestMsg) tea.Cmd {
+	if m.dialogActive() {
+		m.pendingDialogs = append(m.pendingDialogs, pendingDialog{confirm: &msg, arrivedAt: time.Now()})
+		return nil
+	}
+	return m.presentConfirmRequest(msg, m.mode)
+}
+
+// presentConfirmRequest installs a confirmation dialog (permission ask, Done
+// approval) as the active modal. prevMode is restored once the dialog closes;
+// it is passed in rather than read from m.mode so a queued dialog restores the
+// mode that was active before the queue started.
+func (m *Model) presentConfirmRequest(msg confirmRequestMsg, prevMode Mode) tea.Cmd {
 	m.exitRenderFreeze()
 	m.focusAgentForRequest(msg.request.AgentID)
 	m.confirm = confirmState{
 		request:   &msg.request,
 		requestID: msg.request.RequestID,
-		prevMode:  m.mode,
+		prevMode:  prevMode,
 	}
 	m.terminalTitleRequestSeen = m.displayState == stateForeground
+	var timeoutCmd tea.Cmd
 	if msg.request.Timeout > 0 {
 		m.confirm.deadline = time.Now().Add(msg.request.Timeout)
+		timeoutCmd = confirmTimeoutTick()
 	}
 	cmd := m.switchModeWithIME(ModeConfirm)
 	m.recalcViewportSize()
 	idleCmd := m.updateBackgroundIdleSweepState()
 	flushCmd := m.requestStreamBoundaryFlush()
 	titleCmd := m.syncTerminalTitleState()
-	if !m.confirm.deadline.IsZero() {
-		if cmd != nil || idleCmd != nil || flushCmd != nil || titleCmd != nil {
-			return tea.Batch(cmd, idleCmd, flushCmd, titleCmd, confirmTimeoutTick())
-		}
-		return confirmTimeoutTick()
-	}
-	if cmd != nil || idleCmd != nil || flushCmd != nil || titleCmd != nil {
-		return tea.Batch(cmd, idleCmd, flushCmd, titleCmd)
-	}
-	return nil
+	return tea.Batch(cmd, idleCmd, flushCmd, titleCmd, timeoutCmd)
 }
 
 func (m *Model) handleConfirmTimeoutTick() tea.Cmd {
@@ -65,6 +80,16 @@ func (m *Model) handleConfirmTimeoutTick() tea.Cmd {
 }
 
 func (m *Model) handleQuestionRequest(msg questionRequestMsg) tea.Cmd {
+	if m.dialogActive() {
+		m.pendingDialogs = append(m.pendingDialogs, pendingDialog{question: &msg, arrivedAt: time.Now()})
+		return nil
+	}
+	return m.presentQuestionRequest(msg, m.mode)
+}
+
+// presentQuestionRequest installs a Question dialog as the active modal.
+// prevMode handling matches presentConfirmRequest.
+func (m *Model) presentQuestionRequest(msg questionRequestMsg, prevMode Mode) tea.Cmd {
 	m.exitRenderFreeze()
 	m.focusAgentForRequest(msg.request.AgentID)
 	ei := newQuestionTextarea(m.width)
@@ -73,12 +98,14 @@ func (m *Model) handleQuestionRequest(msg questionRequestMsg) tea.Cmd {
 		requestID:  msg.requestID,
 		responseCh: msg.request.ResponseCh,
 		selected:   make(map[int]bool),
-		prevMode:   m.mode,
+		prevMode:   prevMode,
 		input:      ei,
 	}
 	m.terminalTitleRequestSeen = m.displayState == stateForeground
+	var timeoutCmd tea.Cmd
 	if msg.request.Timeout > 0 {
 		m.question.deadline = time.Now().Add(msg.request.Timeout)
+		timeoutCmd = questionTimeoutTick()
 	}
 	var focusCmd tea.Cmd
 	if len(msg.request.Questions) > 0 && len(msg.request.Questions[0].Options) == 0 {
@@ -89,13 +116,7 @@ func (m *Model) handleQuestionRequest(msg questionRequestMsg) tea.Cmd {
 	idleCmd := m.updateBackgroundIdleSweepState()
 	flushCmd := m.requestStreamBoundaryFlush()
 	titleCmd := m.syncTerminalTitleState()
-	if !m.question.deadline.IsZero() {
-		return tea.Batch(cmd, focusCmd, idleCmd, flushCmd, titleCmd, questionTimeoutTick())
-	}
-	if cmd != nil || focusCmd != nil || idleCmd != nil || flushCmd != nil || titleCmd != nil {
-		return tea.Batch(cmd, focusCmd, idleCmd, flushCmd, titleCmd)
-	}
-	return nil
+	return tea.Batch(cmd, focusCmd, idleCmd, flushCmd, titleCmd, timeoutCmd)
 }
 
 func (m *Model) handleQuestionTimeoutTick() tea.Cmd {

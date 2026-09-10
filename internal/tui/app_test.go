@@ -23,6 +23,7 @@ import (
 	"github.com/keakon/chord/internal/buildinfo"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/convformat"
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
@@ -7898,7 +7899,7 @@ func TestOpenHandoffSelectClearsActiveSearchSession(t *testing.T) {
 	m.search.State.Matches = []MatchPosition{{BlockIndex: 0}}
 	m.search.State.Current = 0
 
-	m.openHandoffSelect("plan.md", "req-1")
+	m.openHandoffSelect("plan.md", "req-1", identity.MainAgentID, m.mode)
 
 	if m.mode != ModeHandoffSelect {
 		t.Fatalf("mode = %v, want ModeHandoffSelect", m.mode)
