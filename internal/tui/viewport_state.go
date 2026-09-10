@@ -154,9 +154,13 @@ func (v *Viewport) measureSpanLines(block *Block) int {
 		return lc
 	}
 	// Use the cache-populating LineCount here: this path is the streaming tail
-	// block, which Viewport.Render renders right after measuring. Populating
-	// lineCache lets RenderRange reuse the freshly rendered lines instead of
-	// running the full card assembly a second time in the same frame.
+	// block, which Viewport.Render renders right after measuring. For the
+	// ordinary path LineCount fills lineCache, so RenderRange slices those
+	// lines instead of running the full card assembly a second time in the same
+	// frame. The eligible streaming apply_patch branch deliberately leaves
+	// lineCache empty and caches only the line count: its whole point is to
+	// avoid assembling the full card, so RenderRange renders just the requested
+	// rows (see Block.LineCount).
 	return block.LineCount(v.width)
 }
 

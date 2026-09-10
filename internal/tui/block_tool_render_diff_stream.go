@@ -119,6 +119,13 @@ func (b *Block) streamingApplyPatchCardLayout(width int, spinnerFrame string) st
 	}
 	bodyLines = appendApplyPatchTargetLines(bodyLines, targets, cardWidth-4)
 	patch, lineStarts := b.streamingApplyPatchPreviewData()
+	// Mirror the cold render (renderFileDiffCall): a patch whose targets only
+	// delete or move/rename files has no line change to preview, so the
+	// "Requested patch" section is suppressed there too. Args that are not yet
+	// parseable leave targets empty and keep the transient preview.
+	if applyPatchOnlyMoveOrDeleteTargets(targets) {
+		patch, lineStarts = "", nil
+	}
 	if patch != "" {
 		bodyLines = append(bodyLines, toolFieldSection(ToolResultExpandedStyle, "Requested patch"))
 	}

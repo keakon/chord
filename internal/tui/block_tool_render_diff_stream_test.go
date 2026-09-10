@@ -26,6 +26,35 @@ func streamingApplyPatchTestBlock(lineCount int) *Block {
 	}
 }
 
+// applyPatchStreamingTestBlock builds a receiving apply_patch block whose args
+// carry patch verbatim, the shape the live streaming path sees.
+func applyPatchStreamingTestBlock(patch string) *Block {
+	return &Block{
+		ID:                 1,
+		Type:               BlockToolCall,
+		ToolName:           tools.NameApplyPatch,
+		RawArgs:            `{"patch":"` + strings.ReplaceAll(patch, "\n", `\n`) + `"}`,
+		Collapsed:          false,
+		ToolExecutionState: agent.ToolCallExecutionStateReceiving,
+	}
+}
+
+// assertBlockRangeMatchesFullRender pins RenderRange to the cold Render output
+// slice for the same block state: whichever path RenderRange takes must be
+// indistinguishable from slicing a full render.
+func assertBlockRangeMatchesFullRender(t *testing.T, width int, newBlock func() *Block) {
+	t.Helper()
+	full := newBlock().Render(width, "")
+	block := newBlock()
+	if got := block.LineCount(width); got != len(full) {
+		t.Fatalf("line count = %d, full render = %d", got, len(full))
+	}
+	got := block.RenderRange(width, "", 0, len(full))
+	if strings.Join(got, "\n") != strings.Join(full, "\n") {
+		t.Fatalf("range differs from full render:\n got:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(full, "\n"))
+	}
+}
+
 func TestStreamingApplyPatchRangeMatchesFullRender(t *testing.T) {
 	fullBlock := streamingApplyPatchTestBlock(1800)
 	full := fullBlock.Render(100, "")
@@ -63,23 +92,110 @@ func TestStreamingApplyPatchRangeMatchesFullRender(t *testing.T) {
 	}
 }
 
+// TestStreamingApplyPatchRangeSuppressesMoveAndDeletePreview covers the cold
+// render rule that a patch with only delete or move/rename targets shows no
+// "Requested patch" preview. The streaming range path must apply the same
+// guard, otherwise the live card gains a section the finished card never had.
+func TestStreamingApplyPatchRangeSuppressesMoveAndDeletePreview(t *testing.T) {
+	cases := []struct {
+		name  string
+		patch string
+	}{
+		{
+			name:  "delete-only",
+			patch: "*** Begin Patch\n*** Delete File: src/removed.go\n*** End Patch",
+		},
+		{
+			name:  "move-only",
+			patch: "*** Begin Patch\n*** Update File: src/demo.go\n*** Move to: src/renamed.go\n*** End Patch",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			newBlock := func() *Block { return applyPatchStreamingTestBlock(tc.patch) }
+			block := newBlock()
+			if !block.streamingApplyPatchRangeEligible() {
+				t.Fatal("expected the block to take the streaming apply_patch range path")
+			}
+			full := newBlock().Render(100, "")
+			if strings.Contains(stripANSI(strings.Join(full, "\n")), "Requested patch") {
+				t.Fatal("cold render should suppress the Requested patch preview for move/delete-only targets")
+			}
+			assertBlockRangeMatchesFullRender(t, 100, newBlock)
+		})
+	}
+}
+
+// TestStreamingApplyPatchRangeExcludedStatesMatchFullRender pins the fallback
+// contract: any state that is not eligible for the streaming range path must
+// still return exactly the full-render slice.
+func TestStreamingApplyPatchRangeExcludedStatesMatchFullRender(t *testing.T) {
+	base := func() *Block {
+		return &Block{
+			ID:                 1,
+			Type:               BlockToolCall,
+			ToolName:           tools.NameApplyPatch,
+			RawArgs:            `{"patch":"*** Begin Patch\n*** Update File: src/demo.go\n@@\n-old\n+new line\n*** End Patch"}`,
+			ToolExecutionState: agent.ToolCallExecutionStateReceiving,
+		}
+	}
+	cases := []struct {
+		name   string
+		mutate func(*Block)
+	}{
+		{"result-done", func(b *Block) { b.ResultDone = true; b.ResultContent = "Done!" }},
+		{"error", func(b *Block) { b.ResultStatus = agent.ToolResultStatusError }},
+		{"cancelled", func(b *Block) { b.ResultStatus = agent.ToolResultStatusCancelled }},
+		{"collapsed", func(b *Block) { b.Collapsed = true }},
+		{"other-tool", func(b *Block) { b.ToolName = tools.NameRead; b.RawArgs = ""; b.Content = "file contents" }},
+		{"diff-already-available", func(b *Block) { b.Diff = "--- a/src/demo.go\n+++ b/src/demo.go\n" }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			newBlock := func() *Block {
+				b := base()
+				tc.mutate(b)
+				return b
+			}
+			if newBlock().streamingApplyPatchRangeEligible() {
+				t.Fatal("expected the block to fall back from the streaming range path")
+			}
+			assertBlockRangeMatchesFullRender(t, 100, newBlock)
+		})
+	}
+
+	// A non-positive width is normalized to 80 by both Render and the streaming
+	// range path, so the two must stay equivalent there as well.
+	t.Run("zero-width", func(t *testing.T) {
+		block := base()
+		if !block.streamingApplyPatchRangeEligible() {
+			t.Fatal("expected the block to take the streaming apply_patch range path")
+		}
+		assertBlockRangeMatchesFullRender(t, 0, base)
+	})
+}
+
 func TestStreamingApplyPatchRangeKeepsLongLinesEquivalent(t *testing.T) {
 	line := "+" + strings.Repeat("x", 240)
 	args := `{"patch":"*** Begin Patch\n*** Update File: src/demo.go\n@@\n` + line + `\n*** End Patch`
-	fullBlock := &Block{
-		ID:        1,
-		Type:      BlockToolCall,
-		ToolName:  tools.NameApplyPatch,
-		RawArgs:   args,
-		Collapsed: false,
+	newBlock := func() *Block {
+		return &Block{
+			ID:                 1,
+			Type:               BlockToolCall,
+			ToolName:           tools.NameApplyPatch,
+			RawArgs:            args,
+			Collapsed:          false,
+			ToolExecutionState: agent.ToolCallExecutionStateReceiving,
+		}
+	}
+	fullBlock := newBlock()
+	if !fullBlock.streamingApplyPatchRangeEligible() {
+		t.Fatal("block must take the streaming apply_patch range path")
 	}
 	full := fullBlock.Render(60, "")
-	block := &Block{
-		ID:        1,
-		Type:      BlockToolCall,
-		ToolName:  tools.NameApplyPatch,
-		RawArgs:   args,
-		Collapsed: false,
+	block := newBlock()
+	if !block.streamingApplyPatchRangeEligible() {
+		t.Fatal("block must take the streaming apply_patch range path")
 	}
 	if got := block.RenderRange(60, "", 4, 5); strings.Join(got, "\n") != full[4] {
 		t.Fatalf("long-line range differs from full render:\n got: %s\nwant: %s", strings.Join(got, "\n"), full[4])
