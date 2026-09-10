@@ -322,14 +322,17 @@ injects these as system messages for exactly this reason). They are injected
 only while `model_driven` is enabled — without it the model has no
 externalization contract, so they would be unactionable noise. The first
 delivery of each notice in a compaction window is additionally recorded as a
-durable context-notice message in the transcript (the same text, as a
-synthetic user-role entry that never counts as user input), so the signal
-survives the request that carried it and a restored session shows the notice
-card again; later requests in the window carry only the transient short
-`<system-reminder>` line. A model switch that changes the effective threshold
-drops those durable notices, because they describe the previous model's line.
-The repeat pointers and the `<system-reminder>` wrapper itself remain transient
-and never enter the conversation history.
+durable context-notice message in the transcript. Like every other harness
+injection, that durable row is wrapped in a `<system-reminder>` block (a
+synthetic user-role entry that never counts as user input), so the model sees
+the same shape on later requests and the signal survives the request that
+carried it; a restored session rebuilds the notice card from the stripped body,
+so the visible card matches the live one. Later requests in the window carry
+only the transient short `<system-reminder>` line. A model switch that changes
+the effective threshold or the effective reminder line drops those durable
+notices, because they describe the previous model's lines. The repeat pointers
+and the request-level injections stay transient; the wrapped first delivery is
+the one part of the notice that enters the conversation history.
 
 While model-driven compaction is enabled, the main agent's system prompt also
 carries a short passive `Long-session context management` section: it states
