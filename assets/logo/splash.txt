@@ -1,5 +1,0 @@
-chor♩
-╰───╯
-
-# single line:  chor♩
-# with cursor:  chor♩▎

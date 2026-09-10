@@ -15,8 +15,9 @@ export default defineConfig({
       title: 'Chord',
       description: 'Calm AI coding in your terminal — a lightweight, local-first coding agent.',
       social: [{ icon: 'github', label: 'GitHub', href: repo }],
-      // assets/logo/ is the source of truth; scripts/sync-docs.mjs copies the
-      // root-served files into website/public/ before every dev/build run.
+      // assets/logo/chord-wordmark*.svg are the brand sources; scripts/sync-docs.mjs
+      // regenerates the root-served images into website/public/ before every
+      // dev/build run.
       logo: {
         light: '../assets/logo/chord-wordmark-light.svg',
         dark: '../assets/logo/chord-wordmark-dark.svg',

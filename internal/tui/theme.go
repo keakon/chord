@@ -54,7 +54,7 @@ type Theme struct {
 	HeaderBg string
 	HeaderFg string
 
-	// Startup splash wordmark (see assets/logo/splash.txt). SplashFg inks the
+	// Startup splash wordmark (see assets/logo/chord-wordmark.svg). SplashFg inks the
 	// letters, SplashAccentFg the quarter note and the swash beneath — the same
 	// two-colour split the SVG wordmark uses.
 	SplashFg       string

@@ -13,7 +13,7 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 )
 
-// Compact wordmark, mirroring assets/logo/splash.txt and the SVG wordmark:
+// Compact wordmark, mirroring the SVG wordmark (assets/logo/chord-wordmark.svg):
 // "chor" in ink, a quarter note standing in for the "d", and a swash beneath
 // the whole word. Used when the viewport cannot hold the large art.
 const (

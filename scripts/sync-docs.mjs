@@ -10,12 +10,16 @@
 //      Starlight :::note / :::caution / :::danger admonitions.
 //   6. Syncs docs/examples/*.md as ordinary markdown pages. Example YAML files
 //      remain source assets and can still be linked from the docs or repository.
+//   7. Regenerates the site's root-served brand images (favicon, touch icons,
+//      social card) from assets/logo/chord-wordmark.svg into website/public/.
 //
 // Source of truth stays in docs/. The sync target markdown files are gitignored — never edit them by hand.
 
-import { copyFile, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { buildLogoAssets } from '../website/scripts/build-logo-assets.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -25,18 +29,7 @@ const docsDir = path.join(repoRoot, 'docs');
 const websiteContentDir = path.join(repoRoot, 'website', 'src', 'content', 'docs');
 const enDir = websiteContentDir;
 const zhDir = path.join(websiteContentDir, 'zh');
-const logoDir = path.join(repoRoot, 'assets', 'logo');
 const websitePublicDir = path.join(repoRoot, 'website', 'public');
-
-// Brand files served verbatim from the site root. assets/logo/ stays the single
-// source; website/public/ is generated and gitignored like the synced markdown.
-const PUBLIC_ASSETS = [
-  'favicon.svg',
-  'favicon.ico',
-  'apple-touch-icon.png',
-  'icon-512.png',
-  'og.png',
-];
 
 // Pages we manage as hand-written Starlight (skip from sync to avoid clobbering).
 const SKIP_FILES = new Set(['index.md', 'index_CN.md']);
@@ -191,17 +184,16 @@ async function clean() {
   }
 }
 
+// website/public/ is generated and gitignored: the site's brand images are
+// rebuilt from assets/logo/chord-wordmark.svg instead of being checked in.
 async function syncPublicAssets() {
   await rm(websitePublicDir, { recursive: true, force: true });
-  await mkdir(websitePublicDir, { recursive: true });
-  for (const name of PUBLIC_ASSETS) {
-    await copyFile(path.join(logoDir, name), path.join(websitePublicDir, name));
-  }
+  return buildLogoAssets(websitePublicDir);
 }
 
 async function main() {
   await clean();
-  await syncPublicAssets();
+  const brandAssets = await syncPublicAssets();
 
   const entries = await readdir(docsDir, { withFileTypes: true });
   for (const entry of entries) {
@@ -227,7 +219,7 @@ async function main() {
   }
 
   console.log('Synced docs/ → website/src/content/docs/*.md and website/src/content/docs/zh/*.md.');
-  console.log(`Copied ${PUBLIC_ASSETS.length} brand assets from assets/logo/ → website/public/.`);
+  console.log(`Generated ${brandAssets.join(', ')} in website/public/ from assets/logo/chord-wordmark.svg.`);
 }
 
 main().catch((err) => {
