@@ -93,9 +93,8 @@ function centre(bounds, scale, cx, cy) {
   return `translate(${fmt(tx)} ${fmt(ty)}) scale(${fmt(scale)})`;
 }
 
-function mark(parts, ink, inkClass = '') {
-  const cls = inkClass ? ` class="${inkClass}"` : '';
-  return `<g${cls} fill="${ink}">${parts.letters}</g><g fill="${parts.accentFill}">${parts.accent}</g>`;
+function mark(parts, ink, accent = parts.accentFill) {
+  return `<g fill="${ink}">${parts.letters}</g><g fill="${accent}">${parts.accent}</g>`;
 }
 
 function iconSvg(size, parts, bounds) {
@@ -108,15 +107,14 @@ function iconSvg(size, parts, bounds) {
 `;
 }
 
-// A favicon has no surface of its own, so the ink carries the contrast: brand
-// dark for light tab bars, flipped to brand light where the browser honours the
-// media query under a dark colour scheme.
+// A favicon has no surface of its own and browsers do not honour
+// prefers-color-scheme inside an SVG favicon, so a single ink has to read on
+// light and dark tab bars alike: the brand amber, as the pre-wordmark icon was.
 function faviconSvg(size, parts, bounds) {
   const scale = (size * (1 - 2 * FAVICON_PADDING)) / bounds.width;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
   <title>chord</title>
-  <style>@media (prefers-color-scheme: dark) { .ink { fill: ${INK_ON_DARK} } }</style>
-  <g transform="${centre(bounds, scale, size / 2, size / 2)}">${mark(parts, SURFACE, 'ink')}</g>
+  <g transform="${centre(bounds, scale, size / 2, size / 2)}">${mark(parts, parts.accentFill)}</g>
 </svg>
 `;
 }

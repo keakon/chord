@@ -25,7 +25,9 @@ export default defineConfig({
       },
       favicon: '/favicon.svg',
       head: [
-        // Raster fallbacks for browsers that ignore the SVG favicon.
+        // Chrome selects this .ico over the SVG even though it renders SVG
+        // favicons, so the tab icon comes from here and must read on both
+        // light and dark bars; Safari has no SVG favicons either.
         { tag: 'link', attrs: { rel: 'icon', href: `${base}/favicon.ico`, sizes: '16x16 32x32 48x48' } },
         { tag: 'link', attrs: { rel: 'apple-touch-icon', href: `${base}/apple-touch-icon.png`, sizes: '180x180' } },
         // Starlight already emits twitter:card=summary_large_image, which
