@@ -136,11 +136,11 @@ func TestSubAgentStateMachineRandomWalkInvariants(t *testing.T) {
 		SubAgentStateCompleted, SubAgentStateFailed, SubAgentStateCancelled, SubAgentStateIdle,
 		SubAgentState("unknown-state"),
 	}
-	for seed := int64(0); seed < 50; seed++ {
+	for seed := range int64(50) {
 		rng := rand.New(rand.NewSource(seed))
 		var state subAgentRuntimeState
 		state.set(SubAgentStateRunning, "init")
-		for step := 0; step < 500; step++ {
+		for step := range 500 {
 			from, previousSummary := state.snapshot()
 			to := states[rng.Intn(len(states))]
 			beforeChangedAt := state.stateChangedAt

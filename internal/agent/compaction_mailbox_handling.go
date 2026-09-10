@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/keakon/golog/log"
@@ -46,8 +47,7 @@ func (a *MainAgent) settleCompactionDroppedMailboxRows(current []message.Message
 		return nil, nil
 	}
 	assistantAfter := false
-	for i := len(current) - 1; i >= 0; i-- {
-		msg := current[i]
+	for i, msg := range slices.Backward(current) {
 		if msg.Role == message.RoleAssistant {
 			assistantAfter = true
 			continue

@@ -215,7 +215,7 @@ func TestDelegateToolParametersAnnotateAgentRowsWithEmptyScopeRule(t *testing.T)
 	params := NewDelegateTool(&mixedRolesCreator{}).Parameters()
 	text := fmt.Sprint(params)
 	rows := make(map[string]string, 2)
-	for _, line := range strings.Split(text, "\n") {
+	for line := range strings.SplitSeq(text, "\n") {
 		if strings.HasPrefix(line, "- builder") {
 			rows["builder"] = line
 		}

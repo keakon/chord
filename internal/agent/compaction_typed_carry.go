@@ -184,7 +184,7 @@ func typedStateSectionRanges(body string) []typedSectionRange {
 // future version adds) are ignored by the caller's decoder; the section only
 // has to be a JSON document to be treated as machine state.
 func typedStateJSONLine(section string) string {
-	for _, candidate := range strings.Split(section, "\n") {
+	for candidate := range strings.SplitSeq(section, "\n") {
 		line := strings.TrimSpace(candidate)
 		if line == "" {
 			continue

@@ -438,11 +438,11 @@ func TestConcurrentSpoolRebuildDoesNotDropQueuedMessage(t *testing.T) {
 	delivered := make(map[string]struct{})
 	var persistErr error
 	var producersWG sync.WaitGroup
-	for g := 0; g < producers; g++ {
+	for g := range producers {
 		producersWG.Add(1)
 		go func(group int) {
 			defer producersWG.Done()
-			for i := 0; i < perProducer; i++ {
+			for i := range perProducer {
 				id := fmt.Sprintf("spool-%d-%d", group, i)
 				msg := SubAgentMailboxMessage{
 					MessageID: id,
@@ -470,9 +470,7 @@ func TestConcurrentSpoolRebuildDoesNotDropQueuedMessage(t *testing.T) {
 	}
 	done := make(chan struct{})
 	var consumerWG sync.WaitGroup
-	consumerWG.Add(1)
-	go func() {
-		defer consumerWG.Done()
+	consumerWG.Go(func() {
 		for {
 			if msg := a.dequeueSpooledSubAgentMailbox(); msg != nil {
 				mu.Lock()
@@ -495,7 +493,7 @@ func TestConcurrentSpoolRebuildDoesNotDropQueuedMessage(t *testing.T) {
 				runtime.Gosched()
 			}
 		}
-	}()
+	})
 	producersWG.Wait()
 	close(done)
 	consumerWG.Wait()

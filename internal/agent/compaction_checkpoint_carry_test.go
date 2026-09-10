@@ -124,12 +124,12 @@ func TestLatestPriorCheckpointBodyRetainsTypedStateBeyondRuneCap(t *testing.T) {
 	// respects the rune budget; only the machine block is exempt. In this
 	// fixture the prelude is short enough to survive the truncation verbatim,
 	// so no disclosure note is expected.
-	idx := strings.Index(got, typedStateSectionHeading)
-	if idx < 0 {
+	before, _, ok := strings.Cut(got, typedStateSectionHeading)
+	if !ok {
 		t.Fatalf("typed section missing from the retained carry:\n%s", got)
 	}
-	if runeCount(got[:idx]) > compactCheckpointCarryMaxChars {
-		t.Fatalf("natural-language carry exceeded the rune cap: %d", runeCount(got[:idx]))
+	if runeCount(before) > compactCheckpointCarryMaxChars {
+		t.Fatalf("natural-language carry exceeded the rune cap: %d", runeCount(before))
 	}
 }
 

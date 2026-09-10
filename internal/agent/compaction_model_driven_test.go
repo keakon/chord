@@ -2045,7 +2045,7 @@ func TestModelDrivenProposalTransitionUpdatesMetadata(t *testing.T) {
 // structure the next generation's typed/heading parsers key on.
 func assertNoFakeTopLevelSection(t *testing.T, label, rendered string) {
 	t.Helper()
-	for _, line := range strings.Split(rendered, "\n") {
+	for line := range strings.SplitSeq(rendered, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "## ") || strings.HasPrefix(trimmed, "### ") ||
 			strings.HasPrefix(trimmed, "#### ") || strings.HasPrefix(trimmed, "##### ") ||
@@ -2249,7 +2249,7 @@ func TestValidateCommittedEvidenceJudgesArchivedPackEvidenceByRenderedKind(t *te
 	// allowed for observed claims the pack's full record can back.
 	_, diffCheckpoint := newAgentWithCheckpoint(diff, "")
 	var legacyLines []string
-	for _, line := range strings.Split(diffCheckpoint, "\n") {
+	for line := range strings.SplitSeq(diffCheckpoint, "\n") {
 		if !strings.HasPrefix(line, "Evidence Kind: ") {
 			legacyLines = append(legacyLines, line)
 		}

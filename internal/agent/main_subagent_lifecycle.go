@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -296,13 +297,7 @@ func (a *MainAgent) removeSubAgentMailboxState(agentID string) {
 			break
 		}
 	}
-	progressPending := false
-	for _, messageID := range a.subAgentInbox.progressPending {
-		if messageID == progress.MessageID {
-			progressPending = true
-			break
-		}
-	}
+	progressPending := slices.Contains(a.subAgentInbox.progressPending, progress.MessageID)
 	if hasProgress && !progressInQueue && !progressPending {
 		a.releaseMailboxMemory(progress)
 	}

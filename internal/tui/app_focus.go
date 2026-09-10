@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	tea "github.com/keakon/bubbletea/v2"
@@ -209,8 +210,7 @@ func staleCommittedStreamLiveBlock(base []*Block, block *Block) bool {
 	if start < 0 {
 		return false
 	}
-	for i := len(base) - 1; i >= 0; i-- {
-		row := base[i]
+	for _, row := range slices.Backward(base) {
 		if row == nil || row == block || row.Type != block.Type || row.AgentID != block.AgentID {
 			continue
 		}

@@ -335,7 +335,7 @@ func TestFindDuplicateOrConflictingTaskExplicitKeyOutranksScopeConflict(t *testi
 	// adhoc-1 overlaps the new scope without matching its deliverable;
 	// adhoc-2 is a confirmed duplicate of it. Every call must resolve to the
 	// explicit-key rejection, no matter the iteration order.
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		existing, disposition, conflict := a.findDuplicateOrConflictingTask(
 			"owner", "parent", "worker", "", "audit-report", true,
 			tools.WriteScope{Files: []string{"internal/parser/parser_test.go"}},
@@ -459,7 +459,7 @@ func TestFindPendingDuplicateExplicitKeyOutranksPendingScopeConflict(t *testing.
 		expectedWriteScope: tools.WriteScope{Files: []string{"internal/parser/parser_test.go"}},
 	})
 
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		existing, disposition, conflict, pending := a.findPendingDuplicateOrConflictingTaskLocked(
 			"owner", "parent", "worker", "", "audit-report", true,
 			tools.WriteScope{Files: []string{"internal/parser/parser_test.go"}},

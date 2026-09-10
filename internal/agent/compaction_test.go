@@ -4539,7 +4539,7 @@ func TestSubAgentPromptOrderingKeepsWaitingTasksFirstAndDeterministic(t *testing
 
 func TestSubAgentPromptLimitCountsActiveAndInactiveOmissionsSeparately(t *testing.T) {
 	subs := make([]SubAgentInfo, 0, 10)
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		subs = append(subs, SubAgentInfo{InstanceID: fmt.Sprintf("w%d", i), TaskID: fmt.Sprintf("t-%d", i), State: string(SubAgentStateRunning), TaskDesc: fmt.Sprintf("task %d", i)})
 	}
 	subs = append(subs, SubAgentInfo{InstanceID: "done-1", TaskID: "t-done", State: string(SubAgentStateCompleted)})
@@ -7187,7 +7187,7 @@ func TestSummarizeCompactionHeadSendsExactlyTheBudgetedInputs(t *testing.T) {
 	// budget. Every message carries a big payload so the token estimator keeps
 	// the transcript near the input budget.
 	head := make([]message.Message, 0, 90)
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		callID := fmt.Sprintf("capture-read-%d", i)
 		head = append(head,
 			message.Message{Role: message.RoleUser, Content: fmt.Sprintf("inspect area %d", i)},

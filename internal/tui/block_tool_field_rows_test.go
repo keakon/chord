@@ -88,7 +88,7 @@ func TestAgentMessageCardBodyNestsUnderFieldRowLabels(t *testing.T) {
 	// when they line up in the terminal. Rune counts give the true terminal
 	// column.
 	fieldPos, bodyPos := -1, -1
-	for _, line := range strings.Split(plain, "\n") {
+	for line := range strings.SplitSeq(plain, "\n") {
 		switch {
 		case fieldPos < 0 && strings.Contains(line, "From: reviewer-4"):
 			fieldPos = utf8.RuneCountInString(line[:strings.Index(line, "From: reviewer-4")])

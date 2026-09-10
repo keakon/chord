@@ -112,7 +112,7 @@ func (m *settlementFaultModel) journalLines() []string {
 		m.t.Fatalf("read journal: %v", err)
 	}
 	var lines []string
-	for _, line := range bytes.Split(data, []byte{'\n'}) {
+	for line := range bytes.SplitSeq(data, []byte{'\n'}) {
 		if len(bytes.TrimSpace(line)) > 0 {
 			lines = append(lines, string(bytes.TrimSpace(line)))
 		}
@@ -307,12 +307,12 @@ func (m *settlementFaultModel) injectCorruptLine() {
 }
 
 func TestTaskSettlementFaultInjectionModel(t *testing.T) {
-	for seed := int64(0); seed < 6; seed++ {
+	for seed := range int64(6) {
 		t.Run(fmt.Sprintf("seed-%d", seed), func(t *testing.T) {
 			model := newSettlementFaultModel(t, seed)
 			bumped := false
 			corrupted := false
-			for round := 0; round < 50; round++ {
+			for round := range 50 {
 				roll := model.rng.Intn(100)
 				var opErr error
 				switch {

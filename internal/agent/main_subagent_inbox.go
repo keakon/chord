@@ -1543,8 +1543,7 @@ func (a *MainAgent) retryDeferredMailboxDeliveries() {
 	// Requeueing prepends to the progress FIFO, so the due entries are consumed
 	// from the newest to the oldest: the oldest deferred message must end up in
 	// front of the newer ones it was deferred behind.
-	for i := len(due) - 1; i >= 0; i-- {
-		entry := due[i]
+	for _, entry := range slices.Backward(due) {
 		msg, found, err := a.loadDurableMailboxMessage(entry.MessageID)
 		switch {
 		case err != nil:
@@ -1662,8 +1661,8 @@ func (a *MainAgent) stageNextSubAgentMailboxBatch() bool {
 			a.requeueSubAgentMailboxInMemory(*msg)
 			// requeueSubAgentMailboxInMemory prepends, so roll back in reverse
 			// to keep the claimed order.
-			for i := len(progress) - 1; i >= 0; i-- {
-				a.requeueSubAgentMailboxInMemory(progress[i])
+			for _, p := range slices.Backward(progress) {
+				a.requeueSubAgentMailboxInMemory(p)
 			}
 			return false
 		}
@@ -1706,8 +1705,8 @@ func (a *MainAgent) stageNextSubAgentMailboxBatch() bool {
 			for j := len(progress) - 1; j >= i; j-- {
 				a.requeueSubAgentMailboxInMemory(progress[j])
 			}
-			for j := len(pending) - 1; j >= 0; j-- {
-				a.requeueSubAgentMailboxInMemory(*pending[j])
+			for _, p := range slices.Backward(pending) {
+				a.requeueSubAgentMailboxInMemory(*p)
 			}
 			return false
 		}
@@ -1805,12 +1804,7 @@ func (a *MainAgent) stagedActiveMailbox(msg *SubAgentMailboxMessage) bool {
 	if a.activeSubAgentMailbox == msg {
 		return true
 	}
-	for _, staged := range a.activeSubAgentMailboxes {
-		if staged == msg {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(a.activeSubAgentMailboxes, msg)
 }
 
 func (a *MainAgent) requeueActiveSubAgentMailbox() {
@@ -1831,8 +1825,8 @@ func (a *MainAgent) requeueActiveSubAgentMailbox() {
 	spooled := false
 	// Backwards iteration keeps the original batch order when requeueing
 	// pushes messages to the front of the in-memory queues.
-	for i := len(a.activeSubAgentMailboxes) - 1; i >= 0; i-- {
-		if msg := a.activeSubAgentMailboxes[i]; msg != nil && a.requeueSubAgentMailboxInMemoryLocked(*msg) {
+	for _, msg := range slices.Backward(a.activeSubAgentMailboxes) {
+		if msg != nil && a.requeueSubAgentMailboxInMemoryLocked(*msg) {
 			spooled = true
 		}
 	}

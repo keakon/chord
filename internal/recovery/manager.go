@@ -100,7 +100,7 @@ type ModelDrivenProposalSnapshot struct {
 	Status    string    `json:"status,omitempty"`
 	ArgsJSON  string    `json:"args_json,omitempty"`
 	Reason    string    `json:"reason,omitempty"`
-	UpdatedAt time.Time `json:"updated_at,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // BackgroundObjectState captures the durable summary of an active background object.

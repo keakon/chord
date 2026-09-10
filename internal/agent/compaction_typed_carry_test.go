@@ -2,6 +2,8 @@ package agent
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -87,7 +89,7 @@ func TestMergeTypedStateKeepsNewestAndDisclosesOmission(t *testing.T) {
 	// submission always fits) and reports the omission count: 10 carried
 	// entries compete for 6 remaining slots after the fresh 2, so 4 drop.
 	over := checkpointTypedState{}
-	for i := 0; i < typedStateCarryMaxDecisions+2; i++ {
+	for i := range typedStateCarryMaxDecisions + 2 {
 		over.Decisions = append(over.Decisions, "old-"+string(rune('a'+i)))
 	}
 	merged, omitted, _ = mergeCheckpointTypedStates(over, current)
@@ -104,10 +106,10 @@ func TestMergeTypedStateKeepsNewestAndDisclosesOmission(t *testing.T) {
 	// Every bounded list contributes to the disclosure count, not only
 	// decisions. Current entries beyond a cap are bounded as well.
 	tooMany := checkpointTypedState{}
-	for i := 0; i < typedStateCarryMaxOpenIssues+2; i++ {
+	for i := range typedStateCarryMaxOpenIssues + 2 {
 		tooMany.OpenIssues = append(tooMany.OpenIssues, "issue-"+string(rune('a'+i)))
 	}
-	for i := 0; i < typedStateCarryMaxEvidenceRefs+2; i++ {
+	for i := range typedStateCarryMaxEvidenceRefs + 2 {
 		tooMany.EvidenceRefs = append(tooMany.EvidenceRefs, "ev-"+string(rune('a'+i)))
 	}
 	merged, omitted, _ = mergeCheckpointTypedStates(checkpointTypedState{}, tooMany)
@@ -200,12 +202,7 @@ func TestCheckpointBodyTypedStateSurvivesGenerationChain(t *testing.T) {
 }
 
 func containsString(items []string, want string) bool {
-	for _, item := range items {
-		if item == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(items, want)
 }
 
 // typedStateForTest is the two-value convenience form of typedStateFromBody
@@ -335,8 +332,8 @@ func TestMergePriorTypedCheckpointStateReadsFullBodyBeyondDisplayTruncation(t *t
 		t.Fatalf("display carry must keep a parseable typed block found=%v malformed=%v:\n%s", found, malformed, display)
 	}
 	prelude := display
-	if idx := strings.Index(display, typedStateSectionHeading); idx >= 0 {
-		prelude = display[:idx]
+	if before, _, ok := strings.Cut(display, typedStateSectionHeading); ok {
+		prelude = before
 	}
 	if runeCount(prelude) > compactCheckpointCarryMaxChars {
 		t.Fatalf("natural-language display carry exceeded the rune cap: %d", runeCount(prelude))
@@ -654,7 +651,7 @@ func TestMergeTypedClaimsDemotesCarriedOnlyActiveClaimToStale(t *testing.T) {
 // (which the typed parser ignores, keeping the machine block intact).
 func TestMergeTypedClaimsBoundsCarriedSetAndDisclosesOmission(t *testing.T) {
 	prior := make(map[string]checkpointClaim, 45)
-	for i := 0; i < 45; i++ {
+	for i := range 45 {
 		prior[fmt.Sprintf("carried claim %d", i)] = checkpointClaim{Kind: "observed", EvidenceRefs: []string{"ev-1"}, Status: typedClaimStatusActive}
 	}
 	current := map[string]checkpointClaim{"fresh claim": {Kind: "proposed", Status: typedClaimStatusActive}}
@@ -672,9 +669,7 @@ func TestMergeTypedClaimsBoundsCarriedSetAndDisclosesOmission(t *testing.T) {
 	// re-merging the same claims from a differently-built map must evict the
 	// same count.
 	reshuffled := make(map[string]checkpointClaim, len(prior))
-	for k, v := range prior {
-		reshuffled[k] = v
-	}
+	maps.Copy(reshuffled, prior)
 	second, _ := mergeTypedClaims(reshuffled, current)
 	if len(second) != len(merged) {
 		t.Fatalf("deterministic eviction violated: %d != %d", len(second), len(merged))
@@ -839,7 +834,7 @@ func TestTypedStateSurvivesTwoRealGenericAppliesIntoModelDriven(t *testing.T) {
 		IsCompactionSummary:   true,
 		CompactionSummaryMode: compactionSummaryModeModelDriven,
 	}
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: fmt.Sprintf("base message %d", i)})
 	}
 	a.ctxMgr.Append(mdMsg)
@@ -878,7 +873,7 @@ func TestTypedStateSurvivesTwoRealGenericAppliesIntoModelDriven(t *testing.T) {
 	// generic carry strips the previous `## Previous Checkpoint` appendix
 	// before re-carrying; the typed state it contained must be extracted and
 	// re-appended as its own machine block instead of being stripped away.
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: fmt.Sprintf("continuation message %d", i)})
 	}
 	cp2 := genericApply(2)

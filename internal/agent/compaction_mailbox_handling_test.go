@@ -694,7 +694,7 @@ func TestCompactionKeepsDurableAckWhenReplaceFailsAfterSettlement(t *testing.T) 
 		t.Fatalf("ReadFile(mailbox-acks.jsonl): %v", err)
 	}
 	ackLines := 0
-	for _, line := range strings.Split(string(ackData), "\n") {
+	for line := range strings.SplitSeq(string(ackData), "\n") {
 		if strings.TrimSpace(line) != "" {
 			ackLines++
 		}

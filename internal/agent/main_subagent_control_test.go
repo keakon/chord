@@ -4643,7 +4643,7 @@ func TestConcurrentMailboxQueueDeliveryKeepsStateConsistent(t *testing.T) {
 			// matches the worker's instance ID the way a manual follow-up does.
 			agentID = sub.instanceID
 		}
-		for i := 0; i < messagesPerProducer; i++ {
+		for i := range messagesPerProducer {
 			msg := SubAgentMailboxMessage{
 				MessageID: fmt.Sprintf("%s-%d", agentID, group*messagesPerProducer+i),
 				AgentID:   agentID,
@@ -4657,28 +4657,24 @@ func TestConcurrentMailboxQueueDeliveryKeepsStateConsistent(t *testing.T) {
 			}
 		}
 	}
-	for group := 0; group < producerAgents; group++ {
+	for group := range producerAgents {
 		wg.Add(1)
 		go enqueue(group)
 	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < messagesPerProducer*producerAgents; i++ {
+	wg.Go(func() {
+		for range messagesPerProducer * producerAgents {
 			if msg := a.takeOutstandingMailboxForSub(sub); msg != nil {
 				removed.Add(1)
 			}
 		}
-	}()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < messagesPerProducer*producerAgents; i++ {
+	})
+	wg.Go(func() {
+		for range messagesPerProducer * producerAgents {
 			if msg := a.dequeueNextSubAgentMailbox(); msg != nil {
 				removed.Add(1)
 			}
 		}
-	}()
+	})
 	wg.Wait()
 
 	a.subAgentMailboxIDsMu.Lock()

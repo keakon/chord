@@ -146,9 +146,7 @@ func TestOrchestrationDiagnosticsConcurrentWithOwnedMailboxWriters(t *testing.T)
 
 	stop := make(chan struct{})
 	var reader sync.WaitGroup
-	reader.Add(1)
-	go func() {
-		defer reader.Done()
+	reader.Go(func() {
 		for {
 			select {
 			case <-stop:
@@ -158,11 +156,9 @@ func TestOrchestrationDiagnosticsConcurrentWithOwnedMailboxWriters(t *testing.T)
 			a.OrchestrationTaskDiagnostics()
 			a.OrchestrationStats()
 		}
-	}()
+	})
 	var writer sync.WaitGroup
-	writer.Add(1)
-	go func() {
-		defer writer.Done()
+	writer.Go(func() {
 		var seq int
 		for {
 			select {
@@ -185,7 +181,7 @@ func TestOrchestrationDiagnosticsConcurrentWithOwnedMailboxWriters(t *testing.T)
 			a.drainOwnedSubAgentMailboxes(ownerID)
 			a.refreshSubAgentInboxSummary()
 		}
-	}()
+	})
 
 	// Give both sides enough overlap to expose an unlocked map access; the
 	// duration is bounded so the test stays fast when the locks are correct.

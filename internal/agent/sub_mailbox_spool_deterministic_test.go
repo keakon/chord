@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -264,9 +265,7 @@ func TestSpooledMailboxIndexSpansDecodeEachRecordExactly(t *testing.T) {
 
 	a.subAgentMailboxIDsMu.Lock()
 	index := make(map[string]mailboxSpoolLocation, len(a.subAgentInbox.spoolIndex))
-	for id, loc := range a.subAgentInbox.spoolIndex {
-		index[id] = loc
-	}
+	maps.Copy(index, a.subAgentInbox.spoolIndex)
 	ready := a.subAgentInbox.spoolIndexReady
 	a.subAgentMailboxIDsMu.Unlock()
 	if !ready {
@@ -341,11 +340,11 @@ func TestConcurrentSpoolAppendsRecordExactSpans(t *testing.T) {
 		fail  error
 	)
 	var wg sync.WaitGroup
-	for w := 0; w < writers; w++ {
+	for w := range writers {
 		wg.Add(1)
 		go func(w int) {
 			defer wg.Done()
-			for i := 0; i < perWriter; i++ {
+			for i := range perWriter {
 				msg := SubAgentMailboxMessage{
 					MessageID: fmt.Sprintf("w-%d-%d", w, i),
 					AgentID:   fmt.Sprintf("worker-%d", w),

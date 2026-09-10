@@ -24,10 +24,8 @@ func mainTranscript(n int, prefix string) []message.Message {
 func newFocusAwareModel(t *testing.T, mainMsgs, subMsgs []message.Message) *Model {
 	t.Helper()
 	backend := &targetedConversationAgent{
-		sessionControlAgent: sessionControlAgent{
-			messagesByFocus: map[string][]message.Message{"": mainMsgs, "agent-1": subMsgs},
-		},
-		messagesByTask: map[string][]message.Message{"": mainMsgs},
+		messagesByFocus: map[string][]message.Message{"": mainMsgs, "agent-1": subMsgs},
+		messagesByTask:  map[string][]message.Message{"": mainMsgs},
 	}
 	m := NewModelWithSize(backend, 120, 24)
 	m.setFocusedAgent("agent-1")

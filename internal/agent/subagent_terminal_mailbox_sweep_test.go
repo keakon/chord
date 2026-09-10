@@ -211,7 +211,7 @@ func countMailboxLogRows(t *testing.T, sessionDir, messageID string) int {
 		t.Fatalf("ReadFile(mailbox.jsonl): %v", err)
 	}
 	rows := 0
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
