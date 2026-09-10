@@ -120,12 +120,20 @@ the task into smaller requests.
 For GLM Preserved Thinking, that body override must include
 `thinking.type: enabled` and `thinking.clear_thinking: false`, plus
 `reasoning_continuity.preserve_history: true` so Chord keeps completed-turn
-reasoning in the replayed history. For DeepSeek it only needs
-`thinking.type: enabled`; DeepSeek drops earlier-turn reasoning server-side,
-so leave `preserve_history` unset there. In both cases, replayed
-`reasoning_content` must remain complete, unchanged, and in order — for the
-current turn on DeepSeek, and for the whole history on preserved-thinking
-models.
+reasoning in the replayed history. DeepSeek needs `thinking.type: enabled` and
+`reasoning_continuity.preserve_history: true`: when a request carries tools,
+DeepSeek requires the full `reasoning_content` from every earlier turn back and
+returns a `400` otherwise. In both cases, replayed `reasoning_content` must
+remain complete, unchanged, and in order.
+
+Anthropic also binds each thinking block to the conversation prefix that
+produced it, so a history rewrite (context compaction, session restore) can
+make the API reject an otherwise intact block with `Invalid \`signature\` in
+\`thinking\` block. The block is bound to a different conversation.` Chord
+recognizes that rejection and retries once with the thinking blocks dropped, so
+the turn normally continues without manual intervention; the retry keeps the
+text and completed tool facts. If the error keeps repeating, export a
+diagnostics bundle and include the session ID in your report.
 
 ### Codex WebSocket 400 "No tool call found for function call output"
 

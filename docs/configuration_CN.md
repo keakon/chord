@@ -696,12 +696,15 @@ providers:
 - `compat.reasoning_continuity.preserve_history`：默认情况下 Chord 会剥离
   已完成轮次（最后一条 user 消息之前）的明文 reasoning（`reasoning_content`
   和无签名 `thinking` block）——多数 thinking 后端会在服务端丢弃更早轮次的
-  reasoning，但回放它仍按输入计费。对于文档明确要求回传完整 assistant
-  历史的 preserved-thinking 模型（Kimi K3 及 `keep: all` 系列、Qwen
-  `preserve_thinking`、GLM `clear_thinking: false`），设置
-  `preserve_history: true`，历史 reasoning 会原样回放并在每次请求中计费。
+  reasoning，但回放它仍按输入计费。当目标契约要求回传完整 assistant
+  历史时设置 `preserve_history: true`（DeepSeek 在请求带 tools 时、Kimi K3
+  及 `keep: all` 系列、Qwen `preserve_thinking`、GLM
+  `clear_thinking: false`），历史 reasoning 会原样回放并在每次请求中计费。
   当前轮的 reasoning 始终遵循上述 mode；签名/加密载荷（Claude 签名
   thinking、Responses items、Gemini thought 签名）不受此开关影响。
+  Anthropic 还会把每个 thinking block 绑定到生成它的对话前缀：当历史改写
+  使该绑定失效、API 以 invalid-signature 拒绝回放时，Chord 会丢弃 thinking
+  block 重试一次，并保留该轮正文和已完成的工具事实。
   请求级 turn overlay（每轮注入的 `<system-reminder>` 提示）不算作用户
   消息边界，因此追加在对话尾部的 overlay 不会把"已完成轮次"的边界推到
   当前轮之后，也就不会剥离当前工具链中后端真正消费的 reasoning。
@@ -1278,7 +1281,7 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `text.verbosity`  | string | 可选的 OpenAI 文本详细程度提示，支持的模型生效；除非明确要覆盖为 `low` / `medium` / `high`，否则建议留空使用 provider/model 默认值。 |
 | `thinking`        | object | Anthropic 扩展思考选项。`type: adaptive` 让 Chord 按 `effort` 推算预算；`thinking.effort` 在 Messages 请求中会生成 `output_config.effort`；`display: summarized` 启用 summarized thinking block（仅 `type: enabled` 或 `adaptive` 有效）。 |
 | `compat.reasoning_continuity.mode` | string | 可选的连续性覆盖项。Chat Completions 模型需要原样回放 assistant `reasoning_content`，并接收其他 wire 的可移植可见 reasoning 时使用 `openai_visible`；Responses 目标采用同类连续性契约时，这个模式也会启用缺失 `reasoning_text` 的兜底。只有已验证的 Messages 兼容模型需要回放或接收可见无签名 `thinking` 时才使用 `anthropic_unsigned`；模型级 `none` 可关闭 provider 级默认值。 |
-| `compat.reasoning_continuity.preserve_history` | bool | 在回放会话中保留已完成轮次的明文 reasoning，用于 preserved-thinking 模型（Kimi K3 / `keep: all`、Qwen `preserve_thinking`、GLM `clear_thinking: false`）。默认 `false`：已完成轮次的 `reasoning_content` 和无签名 `thinking` 会被剥离——多数 thinking 后端在服务端丢弃它们，但回放仍按输入计费。 |
+| `compat.reasoning_continuity.preserve_history` | bool | 在回放会话中保留已完成轮次的明文 reasoning，用于契约要求完整 assistant 历史的后端（DeepSeek 在请求带 tools 时、Kimi K3 / `keep: all`、Qwen `preserve_thinking`、GLM `clear_thinking: false`）。默认 `false`：已完成轮次的 `reasoning_content` 和无签名 `thinking` 会被剥离——多数 thinking 后端在服务端丢弃它们，但回放仍按输入计费。 |
 | `compat.forced_tool_choice.suppress_in_thinking` | bool | reasoning/thinking 启用时，把 loop 强制的 `tool_choice: required` 降级为后端默认选择。适用于拒绝 thinking 模式下 forced tool choice 的 OpenAI 兼容端点。 |
 | `compat.request_overrides.body` | object | Chord 构造完协议请求后应用的递归 JSON patch。`null` 删除字段。 |
 | `compat.request_overrides.rename_body_fields` | map | 重命名最终 JSON 字段，同时保留 Chord 动态计算的值。目标值为 `null` 时删除源字段。 |

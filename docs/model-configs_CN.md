@@ -944,6 +944,7 @@ model_templates:
             type: enabled
       reasoning_continuity:
         mode: openai_visible
+        preserve_history: true
       forced_tool_choice:
         suppress_in_thinking: true
 
@@ -972,6 +973,7 @@ model_templates:
           anthropic-beta: null
       reasoning_continuity:
         mode: anthropic_unsigned
+        preserve_history: true
 
   deepseek-v4.1-responses: &deepseek-v4-1-responses
     limit:
@@ -997,6 +999,7 @@ model_templates:
         send_max_output_tokens: true
       reasoning_continuity:
         mode: openai_visible
+        preserve_history: true
 
 providers:
   deepseek:
@@ -1027,8 +1030,10 @@ model_pools:
 - DeepSeek Chat thinking 使用 `thinking.type`、顶层 `reasoning_effort` 和
   `max_tokens`。`request_overrides` 提供请求形状差异；thinking + 工具调用
   循环中，`openai_visible` 会原样返回 assistant 的 `reasoning_content`。
-  请求带 tools 时必须完整回传 `reasoning_content`，否则返回 `400`；不带
-  tools 时该字段会被忽略。DeepSeek 在启用 thinking 时会拒绝 forced tool
+  请求带 tools 时，DeepSeek 要求后续每一轮都完整回传历史
+  `reasoning_content`，否则返回 `400`，所以模板设置 `preserve_history: true`
+  让 Chord 在本地保留已完成轮次的思考；不带 tools 时该字段会被忽略。
+  DeepSeek 在启用 thinking 时会拒绝 forced tool
   choice，所以模板会把 loop 强制的 `tool_choice: required` 降级为后端默认
   选择。
 - DeepSeek Responses 支持 `tool_choice: required`，因此模板保留 loop 的强制
@@ -1237,11 +1242,10 @@ K2.7 Code 是 256K 上下文、面向编码的纯思考型号；它的 thinking 
 对于所有使用 `openai_visible` 的模板（DeepSeek、GLM、受支持的 Qwen 和
 Kimi），Chord 首次会把原生 reasoning 乐观回放给任何 Chat Completions
 目标，因此 Kimi K2.6/K2.7→K3 这类官方允许的同 provider 升级和同模型跨
-provider fallback 都能保留连续性。服务端会丢弃更早轮次 reasoning 的
-后端（DeepSeek）不设 `preserve_history`，Chord 会在回放前剥离已完成
-轮次的 reasoning，避免为其付费；preserved-thinking 模板（GLM
-`clear_thinking: false`、Qwen `preserve_thinking`、Kimi K3 / `keep: all`）
-设置 `preserve_history: true`，完整 assistant 历史会原样回放。若目标拒绝原生 reasoning，Chord 只会
+provider fallback 都能保留连续性。工具模式契约要求完整 reasoning 历史的
+后端（DeepSeek）和 preserved-thinking 模板（GLM `clear_thinking: false`、
+Qwen `preserve_thinking`、Kimi K3 / `keep: all`）都设置
+`preserve_history: true`，完整 assistant 历史会原样回放。若目标拒绝原生 reasoning，Chord 只会
 删除或转换不兼容的 reasoning 负载；已完成且成对的工具调用和结果仍会保留。
 当目标连结构化形状也不接受时，严格降级会把已完成的动作历史文本化，而
 不会把外部工具事实静默删除。

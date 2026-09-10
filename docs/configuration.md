@@ -746,13 +746,18 @@ Compatibility fields:
   plaintext reasoning (`reasoning_content` and unsigned `thinking` blocks)
   from completed turns — everything before the last user message — because
   most thinking backends drop earlier-turn reasoning server-side while still
-  billing it as input. Set `preserve_history: true` for preserved-thinking
-  models whose documentation requires the complete assistant history (Kimi K3
-  and `keep: all` models, Qwen `preserve_thinking`, GLM
+  billing it as input. Set `preserve_history: true` when the target's contract
+  requires the complete assistant history (DeepSeek when a request carries
+  tools, Kimi K3 and `keep: all` models, Qwen `preserve_thinking`, GLM
   `clear_thinking: false`); historical reasoning is then replayed unchanged
   and billed on every request. Current-turn reasoning always follows the mode
   above, and signed or encrypted payloads (Claude signed thinking, Responses
-  items, Gemini thought signatures) are unaffected by this switch.
+  items, Gemini thought signatures) are unaffected by this switch. Anthropic
+  additionally binds each thinking block to the conversation prefix that
+  produced it: when a history rewrite invalidates that binding and the API
+  rejects the replay with an invalid-signature error, Chord retries once with
+  the thinking blocks dropped and keeps the turn's text and completed tool
+  facts.
   Request-scoped turn overlays (per-turn `<system-reminder>` hints) are not
   counted as user turns, so an overlay appended at the tail cannot shift the
   completed-turn boundary past the current turn and strip the reasoning the
@@ -1457,7 +1462,7 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | `text.verbosity`  | string | Optional OpenAI text verbosity hint where supported; leave unset to use the provider/model default unless you intentionally want `low` / `medium` / `high`. |
 | `thinking`        | object | Anthropic extended-thinking options. `type: adaptive` lets Chord derive a budget from `effort`; `thinking.effort` is sent as `output_config.effort` for Messages requests; `display: summarized` enables summarized thinking blocks (valid only with `type: enabled` or `adaptive`). |
 | `compat.reasoning_continuity.mode` | string | Optional continuity override. Use `openai_visible` for Chat Completions models that require unchanged assistant `reasoning_content` and can accept portable visible reasoning from other wires; it also enables the missing-`reasoning_text` fallback for Responses targets with that continuity contract. Use `anthropic_unsigned` only for verified Messages-compatible models that replay or accept visible unsigned `thinking`; use `none` to opt out of a provider-level default. |
-| `compat.reasoning_continuity.preserve_history` | bool | Keep plaintext reasoning from completed turns in the replayed conversation, for preserved-thinking models (Kimi K3 / `keep: all`, Qwen `preserve_thinking`, GLM `clear_thinking: false`). Default `false`: completed-turn `reasoning_content` and unsigned `thinking` are stripped because most thinking backends drop them server-side while billing them as input. |
+| `compat.reasoning_continuity.preserve_history` | bool | Keep plaintext reasoning from completed turns in the replayed conversation, for backends whose contract requires the full assistant history (DeepSeek when a request carries tools, Kimi K3 / `keep: all`, Qwen `preserve_thinking`, GLM `clear_thinking: false`). Default `false`: completed-turn `reasoning_content` and unsigned `thinking` are stripped because most thinking backends drop them server-side while billing them as input. |
 | `compat.forced_tool_choice.suppress_in_thinking` | bool | Downgrade loop-forced `tool_choice: required` to the backend default while reasoning/thinking is active, for OpenAI-compatible endpoints that reject forced tool choice in thinking mode. |
 | `compat.request_overrides.body` | object | Recursive JSON patch applied after Chord constructs the protocol request. `null` deletes a field. |
 | `compat.request_overrides.rename_body_fields` | map | Renames final JSON fields while preserving Chord's computed values. A `null` target deletes the source field. |

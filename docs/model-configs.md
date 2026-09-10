@@ -1030,6 +1030,7 @@ model_templates:
             type: enabled
       reasoning_continuity:
         mode: openai_visible
+        preserve_history: true
       forced_tool_choice:
         suppress_in_thinking: true
 
@@ -1058,6 +1059,7 @@ model_templates:
           anthropic-beta: null
       reasoning_continuity:
         mode: anthropic_unsigned
+        preserve_history: true
 
   deepseek-v4.1-responses: &deepseek-v4-1-responses
     limit:
@@ -1083,6 +1085,7 @@ model_templates:
         send_max_output_tokens: true
       reasoning_continuity:
         mode: openai_visible
+        preserve_history: true
 
 providers:
   deepseek:
@@ -1113,11 +1116,13 @@ Notes:
 - DeepSeek Chat thinking uses `thinking.type`, top-level `reasoning_effort`, and
   `max_tokens`. `request_overrides` supplies the request-shape differences;
   during thinking + tool-call loops, `openai_visible` returns the assistant's
-  `reasoning_content` unchanged. When a request carries tools, DeepSeek expects
-  the full `reasoning_content` back and returns a `400` otherwise; without
-  tools the field is ignored. DeepSeek also rejects forced tool choice while
-  thinking is active, so the template downgrades loop-forced `tool_choice:
-  required` to the backend default for those requests.
+  `reasoning_content` unchanged. When a request carries tools, DeepSeek requires
+  the full `reasoning_content` back in every later turn and returns a `400`
+  otherwise, so the templates set `preserve_history: true` to keep completed-turn
+  reasoning client-side; without tools the field is ignored. DeepSeek also
+  rejects forced tool choice while thinking is active, so the template
+  downgrades loop-forced `tool_choice: required` to the backend default for
+  those requests.
 - DeepSeek Responses supports `tool_choice: required`, so its template keeps
   loop-forced tool choice. Plaintext `reasoning_text` makes the encrypted
   reasoning include unnecessary, while `max_output_tokens` remains enabled
@@ -1341,10 +1346,9 @@ being retired for new users; prefer K3 for new configurations.
 For all `openai_visible` recipes (DeepSeek, GLM, supported Qwen, and Kimi),
 Chord first replays native reasoning optimistically to any Chat Completions
 target, so documented in-provider upgrades such as Kimi K2.6/K2.7 to K3 and
-same-model provider fallback can keep continuity. Recipes for backends that
-drop earlier-turn reasoning server-side (DeepSeek) omit `preserve_history`,
-so Chord strips completed-turn reasoning before replay instead of paying to
-resend it; preserved-thinking recipes (GLM `clear_thinking: false`, Qwen
+same-model provider fallback can keep continuity. Recipes for backends whose
+tool-mode contract requires the full reasoning history (DeepSeek) and
+preserved-thinking recipes (GLM `clear_thinking: false`, Qwen
 `preserve_thinking`, Kimi K3 / `keep: all`) set `preserve_history: true` so
 the complete assistant history is replayed unchanged. If a target rejects native
 reasoning, Chord removes or converts only the incompatible reasoning payload.

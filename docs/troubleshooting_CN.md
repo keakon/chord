@@ -109,10 +109,17 @@ Completion。若模型在输出可见正文前耗尽预算，且已启用
 GLM Preserved Thinking 的 body override 需要包含 `thinking.type: enabled` 和
 `thinking.clear_thinking: false`，并设置
 `reasoning_continuity.preserve_history: true`，让 Chord 在回放历史中保留
-已完成轮次的 reasoning；DeepSeek 只需要 `thinking.type: enabled`——它在
-服务端丢弃更早轮次的 reasoning，因此不要设置 `preserve_history`。两种
-情况下，回放的 `reasoning_content` 都必须保持完整、未修改且顺序不变：
-DeepSeek 覆盖当前轮，preserved-thinking 模型覆盖全部历史。
+已完成轮次的 reasoning。DeepSeek 需要 `thinking.type: enabled` 和
+`reasoning_continuity.preserve_history: true`：请求带 tools 时，DeepSeek
+要求后续每一轮都完整回传历史 `reasoning_content`，否则返回 `400`。两种
+情况下，回放的 `reasoning_content` 都必须保持完整、未修改且顺序不变。
+
+Anthropic 还会把每个 thinking 块绑定到生成它的对话前缀，所以压缩或恢复
+会话等历史改写可能让原本完好的块被拒，报
+`Invalid \`signature\` in \`thinking\` block. The block is bound to a
+different conversation.`。Chord 能识别这类拒绝，并自动丢弃 thinking 块重试
+一次，通常无需手动处理；重试会保留正文和已完成的工具事实。如果错误反复
+出现，请导出诊断包，并在反馈中附上会话 ID。
 
 ### Codex WebSocket 400 "No tool call found for function call output"
 
