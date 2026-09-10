@@ -452,6 +452,13 @@ func (a *MainAgent) drainRunnableMailboxWork() {
 	for _, ownerID := range ownerIDs {
 		a.drainOwnedSubAgentMailboxes(ownerID)
 	}
+	if a.currentTurn() == nil {
+		// Forwarding a settled owner's mailbox into the main inbox does not
+		// start delivery on its own: without this second drain the forwarded
+		// message would wait for the next lifecycle sweep instead of riding
+		// the same dispatch that carried the releasing decision.
+		a.drainSubAgentInbox()
+	}
 }
 
 func (a *MainAgent) hasQueuedAutomaticWork() bool {
@@ -470,6 +477,12 @@ func (a *MainAgent) hasQueuedAutomaticWork() bool {
 
 func (a *MainAgent) hasRunnableMailboxWork() bool {
 	if a.mailboxDeliveryPaused.Load() {
+		return false
+	}
+	if a.handoffDeliveryHeld() {
+		// Held messages are queued but not runnable until the handoff decision
+		// releases the hold. pendingHandoff already suppresses global idle, so
+		// this only keeps the predicate honest.
 		return false
 	}
 	// The main-inbox queues, the staged batch, and the owner-queue maps are
@@ -554,7 +567,7 @@ func reliableOutputEventLog(evt AgentEvent) (string, []any, bool) {
 			"event_type", fmt.Sprintf("%T", evt),
 			"status", e.Status,
 		}, true
-	case ToolCallStartEvent, ToolCallDiscardEvent, ToolCallExecutionEvent, ToolResultEvent, SessionRestoredEvent, SessionTitleChangedEvent, PendingDraftConsumedEvent, ForkSessionEvent, ErrorEvent, AgentStatusEvent, AgentStartedEvent, AgentNotifyEvent, MailboxQueuedEvent, MailboxDeliveryDroppedEvent, MailboxTranscriptAppendedEvent, BackgroundResultAppendedEvent, AgentDoneEvent, GlobalIdleEvent, NotificationEvent, InfoEvent, ToastEvent, AssistantMessageEvent, LoopNoticeEvent, LoopStateChangedEvent, YoloModeChangedEvent, RunningModelChangedEvent, SpawnFinishedEvent, ContextNoticeEvent, ContextNoticeClearedEvent:
+	case ToolCallStartEvent, ToolCallDiscardEvent, ToolCallExecutionEvent, ToolResultEvent, SessionRestoredEvent, SessionTitleChangedEvent, PendingDraftConsumedEvent, ForkSessionEvent, ErrorEvent, AgentStatusEvent, AgentStartedEvent, AgentNotifyEvent, MailboxQueuedEvent, MailboxDeliveryDroppedEvent, MailboxTranscriptAppendedEvent, BackgroundResultAppendedEvent, AgentDoneEvent, GlobalIdleEvent, NotificationEvent, InfoEvent, ToastEvent, AssistantMessageEvent, LoopNoticeEvent, LoopStateChangedEvent, YoloModeChangedEvent, RunningModelChangedEvent, SpawnFinishedEvent, ContextNoticeEvent, ContextNoticeClearedEvent, HandoffEvent, HandoffCancelledEvent:
 		return "TUI output channel full, waiting to deliver critical event", []any{
 			"event_type", fmt.Sprintf("%T", evt),
 		}, true

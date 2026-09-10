@@ -531,6 +531,24 @@ type HandoffEvent struct {
 
 func (HandoffEvent) agentEvent() {}
 
+// handoffCancelledReasonSuperseded marks a handoff wait discarded because a new
+// turn or session switch replaced it before the user decided.
+const handoffCancelledReasonSuperseded = "superseded"
+
+// HandoffCancelledEvent tells the TUI that a pending handoff was discarded
+// before the user decided, so the selector matching RequestID must be closed.
+// It is only emitted for a wait that was actually shown (a request id exists);
+// dropping a not-yet-promoted handoff has no modal to close. Reason names the
+// cause (currently always handoffCancelledReasonSuperseded). The deferred
+// handoff tool result is settled as cancelled independently. Never emitted at
+// shutdown: the process is exiting and no UI is left to update.
+type HandoffCancelledEvent struct {
+	RequestID string
+	Reason    string
+}
+
+func (HandoffCancelledEvent) agentEvent() {}
+
 // InfoEvent carries an informational message for display in the TUI.
 // Used for non-error status messages (e.g. export/resume success).
 type InfoEvent struct {
@@ -801,13 +819,20 @@ func (SessionSelectEvent) agentEvent() {}
 // SessionSwitchStartedEvent signals that a local session-control operation has
 // started and the TUI should show transient loading feedback until the switch
 // either completes (SessionRestoredEvent) or fails (ErrorEvent/IdleEvent).
-// Kind is one of: "resume", "new", "fork".
+// Kind is one of: "resume", "new", "fork", sessionSwitchKindPlanExecution.
 type SessionSwitchStartedEvent struct {
 	Kind      string
 	SessionID string // optional target session ID (for /resume)
 }
 
 func (SessionSwitchStartedEvent) agentEvent() {}
+
+// sessionSwitchKindPlanExecution marks the automatic switch that starts plan
+// execution in a fresh session (the approve branch of a pending handoff). It is
+// not user navigation, but it replaces the planner session just like one, so
+// the TUI must drop the replaced session's scoped state (queued mailbox waiting
+// rows, dead dialogs) instead of keeping it in the execution session.
+const sessionSwitchKindPlanExecution = "plan"
 
 // SessionRestoredEvent signals that the conversation was restored from
 // a persisted session (e.g. after /resume <id>). The TUI should rebuild

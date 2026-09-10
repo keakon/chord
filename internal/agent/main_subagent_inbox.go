@@ -237,6 +237,12 @@ func (a *MainAgent) resolveOwnedMailboxRoute(msg SubAgentMailboxMessage) (ownedM
 		return ownedMailboxRouteWakeParkedOwner, nil, rec
 	}
 	if !isNonTerminalTaskState(rec.State) {
+		if a.handoffDeliveryHeld() {
+			// Forwarding to the main inbox is automatic main delivery, so it is
+			// held while a handoff wait is open: the message stays queued under
+			// the terminal owner and the post-decision drain re-routes it.
+			return ownedMailboxRouteNone, nil, rec
+		}
 		return ownedMailboxRouteForwardToMain, nil, rec
 	}
 	return ownedMailboxRouteNone, nil, rec
@@ -1729,6 +1735,13 @@ func (a *MainAgent) prepareSubAgentMailboxBatchForTurnContinuation() bool {
 
 func (a *MainAgent) drainSubAgentInbox() {
 	if a.mailboxDeliveryPaused.Load() {
+		return
+	}
+	if a.handoffDeliveryHeld() {
+		// A handoff user wait owns the foreground: starting a mailbox turn here
+		// would abandon the wait (newTurn -> abandonPendingHandoff) and settle
+		// its deferred result as a user cancellation. Every queue stays intact;
+		// the post-decision drain delivers the backlog.
 		return
 	}
 	if a.turn != nil {

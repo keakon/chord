@@ -148,6 +148,47 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			return handoffSelectRequestMsg{planPath: evt.PlanPath, requestID: evt.RequestID, agentID: evt.AgentID}
 		})
 		return true, effects
+	case agent.HandoffCancelledEvent:
+		// The runtime discarded a handoff wait before the user decided (a new
+		// user message or a released mailbox delivery superseded it). Drop the
+		// matching selector from the queue and close it if it is on screen, so
+		// a stale modal cannot linger or steal the user's next reply. Never
+		// ResolveHandoff here: the runtime already cancelled the wait.
+		reqID := strings.TrimSpace(evt.RequestID)
+		if reqID == "" {
+			return true, effects
+		}
+		hit := false
+		kept := m.pendingDialogs[:0]
+		for _, d := range m.pendingDialogs {
+			if d.handoff != nil && strings.TrimSpace(d.handoff.requestID) == reqID {
+				hit = true
+				continue
+			}
+			kept = append(kept, d)
+		}
+		m.pendingDialogs = kept
+		selectorMatches := m.handoffSelect.active() && strings.TrimSpace(m.handoffSelect.requestID) == reqID
+		if selectorMatches && m.mode == ModeContentViewer && m.contentViewer.prevMode == ModeHandoffSelect {
+			// The plan viewer sits on top of the selector; close both layers so
+			// the view cannot fall back to the cancelled ModeHandoffSelect.
+			effects.addFollowup(m.closeContentViewer())
+		}
+		if selectorMatches {
+			prevMode := m.handoffSelect.prevMode
+			m.clearHandoffSelect()
+			m.recalcViewportSize()
+			effects.addFollowup(m.finishDialog(prevMode, m.syncTerminalTitleState()))
+			hit = true
+		}
+		if hit {
+			text := "Handoff request cancelled"
+			if reason := strings.TrimSpace(evt.Reason); reason != "" {
+				text = "Handoff request cancelled: " + reason
+			}
+			effects.addFollowup(m.enqueueToast(text, "warn"))
+		}
+		return true, effects
 	case agent.InfoEvent:
 		if isLoopInfoMessage(evt.Message) {
 			effects.addFollowup(m.enqueueToast(evt.Message, "info"))

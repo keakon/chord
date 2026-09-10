@@ -477,13 +477,13 @@ func (a *MainAgent) handleToolResult(evt Event) {
 			log.Errorf("handleToolResult: failed to parse Handoff result error=%v", err)
 		} else {
 			log.Infof("Handoff result received; deferring until sibling tools complete plan_path=%v pending=%v", pcData.PlanPath, a.turn.PendingToolCalls.Load()-1)
-			a.pendingHandoff = &HandoffResult{
+			a.setPendingHandoff(&HandoffResult{
 				PlanPath: pcData.PlanPath,
 				ArgsJSON: payload.ArgsJSON,
 				CallID:   payload.CallID,
 				Result:   contextResult,
 				Duration: payload.Duration,
-			}
+			})
 		}
 	}
 	if payload.Name == tools.NameDone && payload.Error == nil {

@@ -669,6 +669,13 @@ type MainAgent struct {
 	pathLocator    *config.PathLocator // resolved startup paths; nil falls back to DefaultPathLocator
 	lastPlanPath   string
 	pendingHandoff *HandoffResult // deferred Handoff action; processed after all sibling tools finish
+	// handoffWaitActive mirrors "pendingHandoff != nil" for mailbox delivery
+	// paths that also run off the event loop (manual delivery, restore). While a
+	// handoff user wait is open, automatic mailbox delivery is held instead of
+	// starting a main turn that would abandon the wait and settle its deferred
+	// result as cancelled. Only the event loop writes it; see setPendingHandoff
+	// and takePendingHandoff.
+	handoffWaitActive atomic.Bool
 	// pendingModelDriven is the armed-but-not-yet-barriered compact_context
 	// checkpoint request (the payload form of the accepted proposal). Armed by
 	// handleToolResult after control-plane validation and consumed at the
@@ -2808,6 +2815,11 @@ func (a *MainAgent) commitPlanExecution(staging *planExecutionStaging) error {
 	defer a.finishSessionSwitch()
 	oldSessionDir := a.SessionDir()
 	oldRecovery, turnCtx := a.prepareSessionSwitch()
+	// The execution switch replaces the planner session exactly like a user
+	// session switch does, so signal it: the TUI must drop the replaced
+	// session's scoped state (a held mailbox message's queued waiting row for
+	// example) instead of leaving it in the execution session's pending area.
+	a.emitToTUI(SessionSwitchStartedEvent{Kind: sessionSwitchKindPlanExecution})
 	turnID := a.turn.ID
 	oldLock := a.sessionLock
 	a.freezeCurrentSession(oldRecovery)

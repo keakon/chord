@@ -11,6 +11,31 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
+// setPendingHandoff records the deferred handoff result and marks the handoff
+// wait active. The atomic mirror is what mailbox delivery paths that may run
+// off the event loop read (handoffDeliveryHeld); keeping both updates in one
+// place prevents the flag from drifting away from pendingHandoff.
+func (a *MainAgent) setPendingHandoff(pc *HandoffResult) {
+	a.pendingHandoff = pc
+	a.handoffWaitActive.Store(pc != nil)
+}
+
+// takePendingHandoff clears the deferred handoff and releases the mailbox hold,
+// returning the result the caller must settle.
+func (a *MainAgent) takePendingHandoff() *HandoffResult {
+	pc := a.pendingHandoff
+	a.pendingHandoff = nil
+	a.handoffWaitActive.Store(false)
+	return pc
+}
+
+// handoffDeliveryHeld reports whether an open handoff user wait holds automatic
+// mailbox delivery. Held messages stay in their queue (no ack, no drop, no
+// cancelled handoff result) until the decision releases the hold.
+func (a *MainAgent) handoffDeliveryHeld() bool {
+	return a != nil && a.handoffWaitActive.Load()
+}
+
 // handoffResolvePayload carries the user's decision for a pending handoff.
 type handoffResolvePayload struct {
 	RequestID  string
@@ -53,8 +78,7 @@ func (a *MainAgent) handleHandoffResolveEvent(evt Event) {
 		log.Warnf("handleHandoffResolveEvent: no matching pending handoff request_id=%v action=%v", p.RequestID, p.Action)
 		return
 	}
-	pc := a.pendingHandoff
-	a.pendingHandoff = nil
+	pc := a.takePendingHandoff()
 	a.interaction.settleHandoff(pc.RequestID)
 
 	switch p.Action {
@@ -127,18 +151,22 @@ func (a *MainAgent) handleHandoffResolveEvent(evt Event) {
 }
 
 // abandonPendingHandoff drops a pending handoff without a user decision,
-// settling its open user-wait and emitting a cancelled terminal result so the
-// transcript never keeps an unresolved handoff tool call (strict providers
-// require tool_use/tool_result pairing). Used when a new turn or session
-// switch invalidates the pending handoff before the user resolves it.
+// settling its open user-wait, telling the TUI to close the matching selector,
+// and emitting a cancelled terminal result so the transcript never keeps an
+// unresolved handoff tool call (strict providers require tool_use/tool_result
+// pairing). Used when a new turn or session switch invalidates the pending
+// handoff before the user resolves it.
 func (a *MainAgent) abandonPendingHandoff() {
 	if a == nil || a.pendingHandoff == nil {
 		return
 	}
-	pc := a.pendingHandoff
-	a.pendingHandoff = nil
+	pc := a.takePendingHandoff()
 	if reqID := pc.RequestID; reqID != "" {
 		a.interaction.settleHandoff(reqID)
+		// The wait was open (it had a request id), so tell the TUI to close the
+		// selector that is still showing for it instead of leaving a stale
+		// decision modal behind the superseding action.
+		a.emitToTUI(HandoffCancelledEvent{RequestID: reqID, Reason: handoffCancelledReasonSuperseded})
 	}
 	a.emitDeferredHandoffToolResult(pc, "Cancelled", ToolResultStatusCancelled)
 }
@@ -154,8 +182,7 @@ func (a *MainAgent) settlePendingHandoffAtShutdown() {
 	if a == nil || a.pendingHandoff == nil {
 		return
 	}
-	pc := a.pendingHandoff
-	a.pendingHandoff = nil
+	pc := a.takePendingHandoff()
 	if reqID := pc.RequestID; reqID != "" {
 		a.interaction.settleHandoff(reqID)
 	}
