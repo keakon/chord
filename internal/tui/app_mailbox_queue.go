@@ -2,34 +2,28 @@ package tui
 
 import (
 	"strings"
-	"time"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/identity"
 )
 
 type queuedMailbox struct {
 	MessageID     string
 	AgentID       string
-	TaskID        string
 	TargetAgentID string
-	Kind          string
 	Summary       string
-	QueuedAt      time.Time
 }
 
 func queuedMailboxFromMessage(msg agent.SubAgentMailboxMessage) queuedMailbox {
 	target := strings.TrimSpace(msg.OwnerAgentID)
-	if target == "main" {
+	if target == identity.MainAgentID {
 		target = ""
 	}
 	return queuedMailbox{
 		MessageID:     strings.TrimSpace(msg.MessageID),
 		AgentID:       strings.TrimSpace(msg.AgentID),
-		TaskID:        strings.TrimSpace(msg.TaskID),
 		TargetAgentID: target,
-		Kind:          strings.TrimSpace(string(msg.Kind)),
 		Summary:       strings.TrimSpace(msg.Summary),
-		QueuedAt:      msg.CreatedAt,
 	}
 }
 
@@ -44,8 +38,33 @@ func (m Model) visibleQueuedMailboxes() []queuedMailbox {
 	return visible
 }
 
+// visibleQueuedDraftCount and visibleQueuedMailboxCount count what
+// queuedMailboxLineCount needs without materializing a slice each call, since
+// the layout pass asks for the line count several times per frame.
+func (m Model) visibleQueuedDraftCount() int {
+	agentID := normalizeDraftAgentID(m.focusedAgentID)
+	count := 0
+	for _, draft := range m.queuedDrafts {
+		if normalizeDraftAgentID(draft.AgentID) == agentID {
+			count++
+		}
+	}
+	return count
+}
+
+func (m Model) visibleQueuedMailboxCount() int {
+	agentID := normalizeDraftAgentID(m.focusedAgentID)
+	count := 0
+	for _, item := range m.mailboxQueue {
+		if normalizeDraftAgentID(item.TargetAgentID) == agentID {
+			count++
+		}
+	}
+	return count
+}
+
 func (m Model) queuedMailboxLineCount() int {
-	return len(m.visibleQueuedDrafts()) + len(m.visibleQueuedMailboxes())
+	return m.visibleQueuedDraftCount() + m.visibleQueuedMailboxCount()
 }
 
 func (m *Model) upsertQueuedMailbox(msg agent.SubAgentMailboxMessage) {

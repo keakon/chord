@@ -89,3 +89,38 @@ func TestMessagesToBlocksRestoresContextNoticeCard(t *testing.T) {
 		t.Fatalf("restored card content = %q", card.Content)
 	}
 }
+
+func TestMessagesToBlocksStripsContextNoticeReminderWrapper(t *testing.T) {
+	nextID := 0
+	const bare = "Compaction is imminent."
+	blocks := messagesToBlocks([]message.Message{
+		{Role: message.RoleUser, Kind: message.KindContextNotice, Content: "<system-reminder>\n" + bare + "\n</system-reminder>", NoticeLevel: "imminent"},
+	}, &nextID)
+
+	if len(blocks) != 1 {
+		t.Fatalf("len(blocks) = %d, want 1", len(blocks))
+	}
+	card := blocks[0]
+	if card.Type != BlockStatus || card.StatusTitle != "COMPACT IMMINENT" {
+		t.Fatalf("restored card = %+v, want COMPACT IMMINENT status", card)
+	}
+	if card.Content != bare {
+		t.Fatalf("restored card content = %q, want the bare notice text %q", card.Content, bare)
+	}
+
+	// The live card carries the bare text; restore must match it exactly.
+	m := NewModelWithSize(nil, 120, 30)
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ContextNoticeEvent{Level: "imminent", Message: bare, MessageIndex: 1}})
+	var live *Block
+	for _, block := range m.viewport.blocks {
+		if block != nil && block.NoticeLevel != "" {
+			live = block
+		}
+	}
+	if live == nil {
+		t.Fatal("expected a live context notice card")
+	}
+	if live.Content != card.Content {
+		t.Fatalf("live card content = %q, restored card content = %q, want them equal", live.Content, card.Content)
+	}
+}

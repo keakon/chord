@@ -214,3 +214,40 @@ func TestFilterBlocksByAgentMainIncludesMainAttributedBlocks(t *testing.T) {
 		t.Fatalf("filtered IDs = [%d %d], want [1 2]", filtered[0].ID, filtered[1].ID)
 	}
 }
+
+func jobResultCardCount(m Model) int {
+	count := 0
+	for _, block := range m.viewport.blocks {
+		if block != nil && block.Type == BlockStatus && block.StatusTitle == backgroundResultCardTitle {
+			count++
+		}
+	}
+	return count
+}
+
+func TestBackgroundResultAppendedEventUsesMessageIDWhenHeadlineCarriesNoJobID(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 30)
+	// No "[Job ...]" header, so the parser cannot derive a background object id.
+	raw := "Background job finished\n\nDescription: Run production build\nStatus: finished (exit 0)"
+
+	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("builder-2", "subagent-a", raw)})
+	block, ok := m.viewport.FindStatusBlockByBackgroundObject("subagent-a")
+	if !ok {
+		t.Fatal("a result with no job id in its headline must fall back to the mailbox message id as the card identity")
+	}
+	if block.BackgroundObjectID != "subagent-a" {
+		t.Fatalf("BackgroundObjectID = %q, want the mailbox message id", block.BackgroundObjectID)
+	}
+
+	// Re-delivering the same result updates that card instead of adding one.
+	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("builder-2", "subagent-a", raw)})
+	if cards := jobResultCardCount(m); cards != 1 {
+		t.Fatalf("JOB RESULT cards after re-delivery = %d, want 1 (same result must merge)", cards)
+	}
+
+	// A different job with the same description is its own card.
+	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("builder-2", "subagent-b", raw)})
+	if cards := jobResultCardCount(m); cards != 2 {
+		t.Fatalf("JOB RESULT cards = %d, want 2 (distinct jobs must not merge)", cards)
+	}
+}

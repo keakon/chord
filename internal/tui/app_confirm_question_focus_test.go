@@ -352,3 +352,183 @@ func TestExpiredQueuedDialogIsDropped(t *testing.T) {
 		t.Fatalf("pendingDialogs = %d, want 0", len(m.pendingDialogs))
 	}
 }
+
+// flattenCmdMsgs recursively flattens a command's batch messages so a nested
+// tea.Batch (for example a toast tick batched inside finishDialog) stays
+// visible to the assertion.
+func flattenCmdMsgs(cmd tea.Cmd) []tea.Msg {
+	if cmd == nil {
+		return nil
+	}
+	msg := cmd()
+	if msg == nil {
+		return nil
+	}
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		var msgs []tea.Msg
+		for _, sub := range batch {
+			msgs = append(msgs, flattenCmdMsgs(sub)...)
+		}
+		return msgs
+	}
+	return []tea.Msg{msg}
+}
+
+func countToastTickMsgs(msgs []tea.Msg) int {
+	count := 0
+	for _, msg := range msgs {
+		if _, ok := msg.(toastTickMsg); ok {
+			count++
+		}
+	}
+	return count
+}
+
+func TestQueuedDialogDeadlineAnchorsToArrival(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.mode = ModeNormal
+
+	m.handleConfirmRequest(confirmRequestMsg{request: ConfirmRequest{ToolName: tools.NameEdit}})
+	arrivedAt := time.Now().Add(-2 * time.Second)
+	m.handleQuestionRequest(questionRequestMsg{
+		request: QuestionRequest{
+			Questions: []tools.QuestionItem{{Header: "pick", Question: "which?"}},
+			Timeout:   5 * time.Second,
+			AgentID:   "agent-2",
+		},
+	})
+	m.pendingDialogs[0].arrivedAt = arrivedAt
+
+	_ = m.resolveConfirm(ConfirmResult{Action: ConfirmAllow})
+
+	if m.question.request == nil {
+		t.Fatal("a queued dialog whose own timeout has not elapsed must still be presented")
+	}
+	want := arrivedAt.Add(5 * time.Second)
+	if !m.question.deadline.Equal(want) {
+		t.Fatalf("deadline = %v, want %v (anchored to arrival + timeout, not reset to now + timeout)", m.question.deadline, want)
+	}
+	if now := time.Now(); !m.question.deadline.Before(now.Add(5 * time.Second)) {
+		t.Fatalf("deadline = %v must leave less than a full timeout from now (%v)", m.question.deadline, now)
+	}
+}
+
+func TestQueuedDialogAnsweredAfterOwnTimeoutIsNotPresented(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.mode = ModeNormal
+
+	m.handleConfirmRequest(confirmRequestMsg{request: ConfirmRequest{ToolName: tools.NameEdit}})
+	m.handleQuestionRequest(questionRequestMsg{
+		request: QuestionRequest{
+			Questions: []tools.QuestionItem{{Header: "pick", Question: "which?"}},
+			Timeout:   2 * time.Second,
+			AgentID:   "agent-2",
+		},
+	})
+	// Answer the open confirm only after the queued question's own
+	// arrivedAt+timeout window has already closed.
+	m.pendingDialogs[0].arrivedAt = time.Now().Add(-3 * time.Second)
+
+	_ = m.resolveConfirm(ConfirmResult{Action: ConfirmAllow})
+
+	if m.dialogActive() {
+		t.Fatal("a queued dialog whose own timeout already elapsed must not be shown")
+	}
+	if m.question.request != nil {
+		t.Fatal("the expired queued question must not be answerable")
+	}
+	if m.mode != ModeNormal {
+		t.Fatalf("mode = %v, want the base mode restored", m.mode)
+	}
+	if len(m.pendingDialogs) != 0 {
+		t.Fatalf("pendingDialogs = %d, want 0", len(m.pendingDialogs))
+	}
+}
+
+func TestSessionSwitchStartedClearsActiveAndQueuedDialogs(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.mode = ModeNormal
+
+	m.handleConfirmRequest(confirmRequestMsg{request: ConfirmRequest{ToolName: tools.NameEdit}})
+	m.handleQuestionRequest(questionRequestMsg{request: QuestionRequest{
+		Questions: []tools.QuestionItem{{Header: "pick", Question: "which?"}},
+		AgentID:   "agent-2",
+	}})
+	if !m.dialogActive() || len(m.pendingDialogs) != 1 {
+		t.Fatalf("setup: active=%v queued=%d, want an active confirm and one queued question", m.dialogActive(), len(m.pendingDialogs))
+	}
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.SessionSwitchStartedEvent{Kind: "resume", SessionID: "session-2"}})
+
+	if m.dialogActive() {
+		t.Fatal("the outgoing session's active dialog must be dropped on switch")
+	}
+	if len(m.pendingDialogs) != 0 {
+		t.Fatalf("pendingDialogs = %d, want cleared on session switch", len(m.pendingDialogs))
+	}
+	if m.mode != ModeNormal {
+		t.Fatalf("mode = %v, want the pre-dialog mode restored", m.mode)
+	}
+}
+
+func TestSessionSwitchStartedClearsActiveHandoff(t *testing.T) {
+	backend := &sessionControlAgent{availableAgents: []string{"builder", "reviewer"}}
+	m := NewModelWithSize(backend, 120, 24)
+	m.mode = ModeNormal
+
+	m.handleHandoffSelectRequest(handoffSelectRequestMsg{planPath: "docs/plans/example.md", requestID: "h-1", agentID: identity.MainAgentID})
+	if !m.handoffSelect.active() {
+		t.Fatal("setup: handoff modal should be active")
+	}
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.SessionSwitchStartedEvent{Kind: "resume", SessionID: "session-2"}})
+
+	if m.dialogActive() {
+		t.Fatal("a handoff modal from the outgoing session must not survive the switch")
+	}
+	if m.mode != ModeNormal {
+		t.Fatalf("mode = %v, want ModeNormal", m.mode)
+	}
+}
+
+func TestHandoffWithoutTargetsReturnsToastCommand(t *testing.T) {
+	backend := &sessionControlAgent{}
+	m := NewModelWithSize(backend, 120, 24)
+	m.mode = ModeNormal
+
+	cmd := m.handleHandoffSelectRequest(handoffSelectRequestMsg{planPath: "docs/plans/example.md", requestID: "h-1", agentID: identity.MainAgentID})
+
+	if cmd == nil {
+		t.Fatal("a targetless handoff must return its toast command instead of dropping it")
+	}
+	if m.activeToast == nil {
+		t.Fatal("expected the no-target warning toast to be active")
+	}
+	if got := countToastTickMsgs(flattenCmdMsgs(cmd)); got != 1 {
+		t.Fatalf("toast tick commands = %d, want the tick that auto-dismisses the toast", got)
+	}
+}
+
+func TestFinishDialogKeepsSkippedHandoffToastCommand(t *testing.T) {
+	backend := &sessionControlAgent{} // no eligible handoff target: the dialog skips itself
+	m := NewModelWithSize(backend, 120, 24)
+	m.mode = ModeConfirm
+	m.pendingDialogs = append(m.pendingDialogs, pendingDialog{
+		handoff:   &handoffSelectRequestMsg{planPath: "docs/plans/example.md", requestID: "h-1"},
+		arrivedAt: time.Now(),
+	})
+
+	// finishDialog is called directly (not through resolveConfirm) so its
+	// returned batch holds no blocking channel re-subscription.
+	cmd := m.finishDialog(ModeNormal)
+
+	if m.dialogActive() {
+		t.Fatal("the skipped handoff must not leave a modal on screen")
+	}
+	if m.activeToast == nil {
+		t.Fatal("expected the no-target warning toast to be active")
+	}
+	if got := countToastTickMsgs(flattenCmdMsgs(cmd)); got != 1 {
+		t.Fatalf("toast tick commands = %d, want finishDialog to keep the skipped handoff's toast tick", got)
+	}
+}

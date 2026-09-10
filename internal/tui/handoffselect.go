@@ -105,13 +105,13 @@ func (m *Model) openHandoffSelect(planPath, requestID, agentID string, prevMode 
 	// handoff is cancelled instead of offering an ineligible fallback.
 	agentNames := m.agent.AvailableAgents()
 	if len(agentNames) == 0 {
-		m.enqueueToast("No eligible Handoff target: the current role cannot hand off to itself", "warn")
+		toastCmd := m.enqueueToast("No eligible Handoff target: the current role cannot hand off to itself", "warn")
 		if requestID = strings.TrimSpace(requestID); requestID != "" {
 			if hr, ok := m.agent.(agent.HandoffResolver); ok {
 				hr.ResolveHandoff(requestID, "cancel", "", "")
 			}
 		}
-		return nil
+		return toastCmd
 	}
 	options := make([]handoffOption, 0, len(agentNames)+1)
 	cursorIdx := 0

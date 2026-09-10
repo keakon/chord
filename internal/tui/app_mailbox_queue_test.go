@@ -153,3 +153,17 @@ func TestMailboxDeliveryDroppedEventUnknownIDIsNoop(t *testing.T) {
 		t.Fatalf("mailboxQueue = %#v, want m1 untouched for an unknown drop id", m.mailboxQueue)
 	}
 }
+
+func TestQueuedMailboxLineCountMatchesVisibleRows(t *testing.T) {
+	m := NewModelWithSize(nil, 140, 24)
+	_ = m.handleAgentEvent(agentEventMsg{event: mailboxQueuedEvent("m1", "agent-1", "agent-1", "first")})
+	_ = m.handleAgentEvent(agentEventMsg{event: mailboxQueuedEvent("m2", "agent-2", "agent-2", "second")})
+
+	for _, focus := range []string{"", "agent-1", "agent-2"} {
+		m.focusedAgentID = focus
+		want := len(m.visibleQueuedDrafts()) + len(m.visibleQueuedMailboxes())
+		if got := m.queuedMailboxLineCount(); got != want {
+			t.Fatalf("focus=%q queuedMailboxLineCount() = %d, want the materialized visible-row count %d", focus, got, want)
+		}
+	}
+}

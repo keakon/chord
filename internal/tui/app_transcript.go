@@ -430,6 +430,23 @@ func contentOrPartsText(msg message.Message) string {
 	return msg.Content
 }
 
+// A durable context notice is persisted wrapped so the model reads it as a
+// system reminder, while the live ContextNoticeEvent carries the bare text.
+// Restore strips the wrapper so the rebuilt card matches what was shown live.
+const (
+	contextNoticeReminderOpen  = "<system-reminder>"
+	contextNoticeReminderClose = "</system-reminder>"
+)
+
+func stripContextNoticeReminder(text string) string {
+	trimmed := strings.TrimSpace(text)
+	if !strings.HasPrefix(trimmed, contextNoticeReminderOpen) || !strings.HasSuffix(trimmed, contextNoticeReminderClose) {
+		return text
+	}
+	inner := strings.TrimSuffix(strings.TrimPrefix(trimmed, contextNoticeReminderOpen), contextNoticeReminderClose)
+	return strings.TrimSpace(inner)
+}
+
 func assistantThinkingBlocksForTranscript(msg message.Message) []message.ThinkingBlock {
 	if len(msg.ThinkingBlocks) > 0 {
 		return msg.ThinkingBlocks
@@ -635,7 +652,7 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 					ID:          *nextID,
 					Type:        BlockStatus,
 					StatusTitle: contextNoticeTitle(msg.NoticeLevel),
-					Content:     contentOrPartsText(msg),
+					Content:     stripContextNoticeReminder(contentOrPartsText(msg)),
 					MsgIndex:    msgIdx,
 					NoticeLevel: msg.NoticeLevel,
 				})

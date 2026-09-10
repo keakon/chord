@@ -56,13 +56,50 @@ func (d pendingDialog) timeout() time.Duration {
 func (m *Model) presentPendingDialog(d pendingDialog, prevMode Mode) tea.Cmd {
 	switch {
 	case d.confirm != nil:
-		return m.presentConfirmRequest(*d.confirm, prevMode)
+		return m.presentConfirmRequest(*d.confirm, prevMode, d.arrivedAt)
 	case d.question != nil:
-		return m.presentQuestionRequest(*d.question, prevMode)
+		return m.presentQuestionRequest(*d.question, prevMode, d.arrivedAt)
 	case d.handoff != nil:
 		return m.openHandoffSelect(d.handoff.planPath, d.handoff.requestID, d.handoff.agentID, prevMode)
 	}
 	return nil
+}
+
+// resetDialogsOnSessionSwitch drops every dialog tied to the outgoing session:
+// queued requests plus the active confirm/question/handoff modal. The agent
+// cancels the turn on switch, so those request IDs are already dead; keeping
+// them on screen would answer a gone request and leave dialogActive() true,
+// which suppresses the idle sweep. The mode active before the dropped dialog
+// is restored (insert mode re-focuses the composer).
+func (m *Model) resetDialogsOnSessionSwitch() tea.Cmd {
+	m.pendingDialogs = nil
+	prevMode := ModeNormal
+	hadDialog := false
+	if m.confirm.request != nil {
+		prevMode = m.confirm.prevMode
+		m.confirm = confirmState{}
+		hadDialog = true
+	}
+	if m.question.request != nil {
+		prevMode = m.question.prevMode
+		m.question = questionState{}
+		hadDialog = true
+	}
+	if m.handoffSelect.active() {
+		prevMode = m.handoffSelect.prevMode
+		m.clearHandoffSelect()
+		hadDialog = true
+	}
+	if !hadDialog {
+		return nil
+	}
+	m.terminalTitleRequestSeen = false
+	m.recalcViewportSize()
+	cmds := []tea.Cmd{m.syncTerminalTitleState(), m.restoreModeWithIME(prevMode)}
+	if prevMode == ModeInsert {
+		cmds = append(cmds, m.input.Focus())
+	}
+	return tea.Batch(cmds...)
 }
 
 // finishDialog closes the active dialog: it presents the next queued dialog on
@@ -71,7 +108,8 @@ func (m *Model) presentPendingDialog(d pendingDialog, prevMode Mode) tea.Cmd {
 // re-subscription, toasts, and idle-sweep work, and run alongside either
 // branch. A queued request that declines to open (a Handoff with no eligible
 // target cancels itself) is skipped and the next one is tried; prevMode is only
-// restored when nothing is on screen.
+// restored when nothing is on screen. Commands a skipped dialog returned (its
+// toast tick) are kept instead of dropped.
 func (m *Model) finishDialog(prevMode Mode, extraCmds ...tea.Cmd) tea.Cmd {
 	for {
 		next, ok := m.popPendingDialog()
@@ -81,6 +119,9 @@ func (m *Model) finishDialog(prevMode Mode, extraCmds ...tea.Cmd) tea.Cmd {
 		cmd := m.presentPendingDialog(next, prevMode)
 		if m.dialogActive() {
 			return tea.Batch(append(extraCmds, cmd)...)
+		}
+		if cmd != nil {
+			extraCmds = append(extraCmds, cmd)
 		}
 	}
 	extraCmds = append(extraCmds, m.restoreModeWithIME(prevMode))

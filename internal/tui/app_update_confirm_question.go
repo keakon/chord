@@ -39,14 +39,17 @@ func (m *Model) handleConfirmRequest(msg confirmRequestMsg) tea.Cmd {
 		m.pendingDialogs = append(m.pendingDialogs, pendingDialog{confirm: &msg, arrivedAt: time.Now()})
 		return nil
 	}
-	return m.presentConfirmRequest(msg, m.mode)
+	return m.presentConfirmRequest(msg, m.mode, time.Now())
 }
 
 // presentConfirmRequest installs a confirmation dialog (permission ask, Done
 // approval) as the active modal. prevMode is restored once the dialog closes;
 // it is passed in rather than read from m.mode so a queued dialog restores the
-// mode that was active before the queue started.
-func (m *Model) presentConfirmRequest(msg confirmRequestMsg, prevMode Mode) tea.Cmd {
+// mode that was active before the queue started. arrivedAt is when the request
+// reached the TUI: the agent counts its timeout from request creation, so the
+// displayed deadline anchors there rather than resetting to show a full timeout
+// the agent may already have auto-resolved.
+func (m *Model) presentConfirmRequest(msg confirmRequestMsg, prevMode Mode, arrivedAt time.Time) tea.Cmd {
 	m.exitRenderFreeze()
 	m.focusAgentForRequest(msg.request.AgentID)
 	m.confirm = confirmState{
@@ -57,7 +60,7 @@ func (m *Model) presentConfirmRequest(msg confirmRequestMsg, prevMode Mode) tea.
 	m.terminalTitleRequestSeen = m.displayState == stateForeground
 	var timeoutCmd tea.Cmd
 	if msg.request.Timeout > 0 {
-		m.confirm.deadline = time.Now().Add(msg.request.Timeout)
+		m.confirm.deadline = arrivedAt.Add(msg.request.Timeout)
 		timeoutCmd = confirmTimeoutTick()
 	}
 	cmd := m.switchModeWithIME(ModeConfirm)
@@ -84,12 +87,12 @@ func (m *Model) handleQuestionRequest(msg questionRequestMsg) tea.Cmd {
 		m.pendingDialogs = append(m.pendingDialogs, pendingDialog{question: &msg, arrivedAt: time.Now()})
 		return nil
 	}
-	return m.presentQuestionRequest(msg, m.mode)
+	return m.presentQuestionRequest(msg, m.mode, time.Now())
 }
 
 // presentQuestionRequest installs a Question dialog as the active modal.
-// prevMode handling matches presentConfirmRequest.
-func (m *Model) presentQuestionRequest(msg questionRequestMsg, prevMode Mode) tea.Cmd {
+// prevMode and arrivedAt handling match presentConfirmRequest.
+func (m *Model) presentQuestionRequest(msg questionRequestMsg, prevMode Mode, arrivedAt time.Time) tea.Cmd {
 	m.exitRenderFreeze()
 	m.focusAgentForRequest(msg.request.AgentID)
 	ei := newQuestionTextarea(m.width)
@@ -104,7 +107,7 @@ func (m *Model) presentQuestionRequest(msg questionRequestMsg, prevMode Mode) te
 	m.terminalTitleRequestSeen = m.displayState == stateForeground
 	var timeoutCmd tea.Cmd
 	if msg.request.Timeout > 0 {
-		m.question.deadline = time.Now().Add(msg.request.Timeout)
+		m.question.deadline = arrivedAt.Add(msg.request.Timeout)
 		timeoutCmd = questionTimeoutTick()
 	}
 	var focusCmd tea.Cmd

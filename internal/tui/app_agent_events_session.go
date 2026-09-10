@@ -44,6 +44,9 @@ func (m *Model) handleSessionAgentEvent(event agent.AgentEvent) (bool, agentEven
 	case agent.SessionSwitchStartedEvent:
 		m.beginSessionSwitch(evt.Kind, evt.SessionID)
 		m.mailboxQueue = nil
+		// Queued and on-screen dialogs belong to the session being replaced;
+		// its requests are already dead by the time the switch starts.
+		effects.addFollowup(m.resetDialogsOnSessionSwitch())
 		return true, effects
 	case agent.SessionRestoredEvent:
 		m.thinkingStreamMsgIndex = -1

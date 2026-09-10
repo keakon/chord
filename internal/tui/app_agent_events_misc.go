@@ -183,12 +183,6 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		// comes from BackgroundResultAppendedEvent once the result is durably
 		// in the owner's transcript, so a queued-but-undelivered result shows
 		// in the pending area instead of as a card with no backing message.
-		//
-		// Note: two opposite normalization conventions coexist in the TUI. Block
-		// attribution normalizes "main" -> "" (here), while the activity/animation
-		// state normalizes "" -> "main" (see turnBusyKey in
-		// app_activity_animation.go). Keep both in mind before adding
-		// a third spelling.
 		agentID := evt.AgentID
 		if agentID == "main" {
 			agentID = ""
@@ -207,6 +201,13 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			agentID = ""
 		}
 		content, backgroundID := formatBackgroundResultCardContent(evt.Message.Content, "", "", "", "")
+		if backgroundID == "" && evt.Message.Mailbox != nil {
+			// The result carries no job id in its headline. Fall back to the
+			// durable message identity so two different results with the same
+			// description are not merged into one card, while re-delivery of
+			// the same result still updates the existing card.
+			backgroundID = strings.TrimSpace(evt.Message.Mailbox.MessageID)
+		}
 		if block, ok := m.findStatusBlockByBackgroundObject(backgroundID); ok {
 			block.Content = content
 			block.BackgroundCopyContent = evt.Message.Content
