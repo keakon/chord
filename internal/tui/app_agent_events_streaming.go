@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/recovery"
 )
 
@@ -82,11 +83,31 @@ func (m *Model) flushStreamingBlock(block *Block, updateViewport bool) bool {
 	return true
 }
 
+// currentMainAssistantMsgIndex returns the main agent's transcript length, the
+// index at which the main agent's next streamed message will commit. The main
+// transcript must be read through the targeted controller: GetMessages() returns
+// only the focused agent's transcript, so while the user views a SubAgent it
+// would report the SubAgent's length. Main thinking/rollback cards would then
+// carry a SubAgent-derived index, breaking rollback matching and translation
+// lookups that key on the real main message index. Only low-frequency boundary
+// points (request cycle start, card creation, rollback) may call this.
 func (m *Model) currentMainAssistantMsgIndex() int {
 	if m == nil || m.agent == nil {
 		return -1
 	}
-	return len(m.agent.GetMessages())
+	if targeted, ok := m.agent.(agent.TargetedConversationController); ok {
+		msgs := targeted.GetMessagesForTarget(agent.ConversationTarget{AgentID: identity.MainAgentID})
+		return len(msgs)
+	}
+	// Fallback for a backend without the targeted controller: its GetMessages
+	// can only be trusted while the main agent is the focused transcript. Under
+	// any other focus the main boundary is unknown, so report -1 — an unknown
+	// index keeps rollback conservative (it clears every settled main thinking
+	// card) instead of mis-attributing the focused transcript's length.
+	if m.focusedAgentID == "" {
+		return len(m.agent.GetMessages())
+	}
+	return -1
 }
 
 // streamCommitIndex returns the transcript index at which the in-flight
