@@ -181,9 +181,61 @@ func TestParseJobResultIDTruncatesOversizedID(t *testing.T) {
 	}
 }
 
+// TestJobListSummaryLine pins the count parser: one row per job, two-space
+// separators, and the "no background jobs" sentinel job_list emits.
+func TestJobListSummaryLine(t *testing.T) {
+	tests := []struct{ name, result, want string }{
+		{"empty", "", "No jobs"},
+		{"sentinel", "no background jobs", "No jobs"},
+		{"single", "job-1  running  5s  build", "1 job"},
+		{"three", "a\nb\nc", "3 jobs"},
+		{"blank separators ignored", "a\n\nb\n", "2 jobs"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := jobListSummaryLine(tt.result); got != tt.want {
+				t.Fatalf("jobListSummaryLine(%q) = %q, want %q", tt.result, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestCollapsedJobListCardCountsItsJobs covers the folded card: job_list hides
+// its rows behind the toggle, so the header carries the count instead of leaving
+// the reader with a bare tool name.
+func TestCollapsedJobListCardCountsItsJobs(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	const three = "job-1  running  5s  build\njob-2  completed  3s  test\njob-3  completed  1s  lint"
+	tests := []struct {
+		name     string
+		result   string
+		expanded bool
+		want     string
+	}{
+		{name: "three jobs collapsed", result: three, want: "✓ ▸ job_list · 3 jobs"},
+		{name: "one job collapsed", result: "job-1  running  5s  build", want: "✓ ▸ job_list · 1 job"},
+		{name: "no jobs collapsed", result: "no background jobs", want: "✓ ▸ job_list · No jobs"},
+		{name: "three jobs expanded", result: three, expanded: true, want: "✓ ▾ job_list · 3 jobs"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			block := &Block{
+				ID: 1, Type: BlockToolCall, ToolName: tools.NameJobList,
+				Content: `{}`, ResultContent: tt.result, ResultDone: true,
+				ResultStatus: agent.ToolResultStatusSuccess, ToolCallDetailExpanded: tt.expanded,
+			}
+			plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+			if !strings.Contains(plain, tt.want) {
+				t.Fatalf("job_list card missing %q:\n%s", tt.want, plain)
+			}
+		})
+	}
+}
+
 // TestCollapsedShellCardNamesItsJobID covers the reason the collapsed shell
-// body carries the ID at all: the job handle must be readable without expanding,
-// because it is the argument every later job_output / job_kill call needs.
+// header carries the ID at all: the job handle must be readable without
+// expanding, because it is the argument every later job_output / job_kill call
+// needs.
 func TestCollapsedShellCardNamesItsJobID(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	block := &Block{
@@ -198,13 +250,13 @@ func TestCollapsedShellCardNamesItsJobID(t *testing.T) {
 		ToolCallDetailExpanded: false,
 	}
 	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
-	if !strings.Contains(plain, "↳ job-64") {
-		t.Fatalf("collapsed shell card should name its job id; got:\n%s", plain)
+	if !strings.Contains(plain, "batch run · job-64") {
+		t.Fatalf("collapsed shell card should name its job id on the header; got:\n%s", plain)
 	}
-	// The header already marks the run as background, so the handle row must
-	// not re-label itself as a status.
-	if strings.Contains(plain, "Status") || strings.Contains(plain, "Background job") {
-		t.Fatalf("collapsed shell card should show the bare job handle; got:\n%s", plain)
+	// The handle is an argument-level fact on the header line, not a body row
+	// that re-labels itself as a status.
+	if strings.Contains(plain, "Status") || strings.Contains(plain, "↳ job-64") {
+		t.Fatalf("collapsed shell card should keep the bare job handle on its header; got:\n%s", plain)
 	}
 	// The rest of the result body stays behind the disclosure toggle.
 	if strings.Contains(plain, "promoted after the foreground budget") {

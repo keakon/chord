@@ -317,7 +317,10 @@ func (b *Block) ToggleAtWidth(width int) bool {
 			if (b.ToolName == tools.NameGrep || b.ToolName == tools.NameGlob) && !b.searchResultCanExpand() {
 				return false
 			}
-			if b.ToolCallDetailExpanded && width > 0 && b.compactToolResultForceExpandedForRenderWidth(width) {
+			// A force-expanded card renders the same body either way, so the
+			// toggle would flip state with no visible change and no marker —
+			// refuse it in both directions, not only while it is expanded.
+			if width > 0 && b.compactToolResultForceExpandedForRenderWidth(width) {
 				return false
 			}
 			b.ToolCallDetailExpanded = !b.ToolCallDetailExpanded

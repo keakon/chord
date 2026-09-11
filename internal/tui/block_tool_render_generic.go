@@ -75,14 +75,10 @@ func appendBashCollapsedSummary(result *[]string, b *Block, vals map[string]stri
 		return
 	}
 	if !b.toolResultIsError() && !b.toolResultIsCancelled() {
-		// A successful background start must still surface its job id: it is
-		// the handle every later job_output / job_kill call needs, and the
-		// collapsed card hides the result body that carries it. The header
-		// already carries the command and its background option, so the row
-		// names the handle alone instead of restating it as a status.
-		if id := parseJobResultID(b.ResultContent); id != "" {
-			*result = append(*result, toolFieldMarker(ToolResultExpandedStyle, id))
-		}
+		// A successful background start names its job id on the header line
+		// (see renderCompactExpandableToolCall): it is the handle every later
+		// job_output / job_kill call needs, and the collapsed card hides the
+		// result body that carries it. There is no other body to add here.
 		return
 	}
 	// The description belongs to the call, not to the outcome, so it stays on
@@ -874,7 +870,17 @@ func (b *Block) compactToolResultForceExpanded(contentWidth int) bool {
 	keys, vals := b.toolArgsParsed()
 	_, mainPart, _, _, _, _, _ := b.toolHeaderMeta()
 	hidden := compactToolHiddenDetailLines(b, keys, vals, mainPart, contentWidth, false)
-	return hidden == 1
+	if hidden == 1 {
+		return true
+	}
+	// An error/cancelled card renders its outcome in the collapsed body too, so
+	// when no other line is hidden and the envelope has nothing left to reveal
+	// the toggle would only restructure the same text. Keep the compact row and
+	// deny the marker.
+	if toolOutcomeKindOf(b) != toolOutcomeNone {
+		return hidden == 0 && !toolOutcomeFoldable(b, contentWidth)
+	}
+	return false
 }
 
 func compactToolContentWidthForRenderWidth(width int) int {
@@ -896,6 +902,20 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 	contentWidth := compactToolContentWidthForRenderWidth(width)
 
 	expanded := b.ToolCallDetailExpanded || b.compactToolResultForceExpanded(contentWidth)
+	// Argument-level facts that would otherwise cost a body row: the handle a
+	// later job_output / job_kill call needs (a just-promoted background shell
+	// job) and the count job_list leaves behind its fold.
+	headerSuffix := ""
+	switch {
+	case b.ToolName == tools.NameShell:
+		if !expanded && !b.toolResultIsError() && !b.toolResultIsCancelled() {
+			headerSuffix = parseJobResultID(b.ResultContent)
+		}
+	case b.ToolName == tools.NameJobList:
+		if b.ResultDone && !b.toolResultIsError() && !b.toolResultIsCancelled() {
+			headerSuffix = jobListSummaryLine(b.ResultContent)
+		}
+	}
 	keys, vals := b.toolArgsParsed()
 	paramSummary, mainPart, grayPart, collapsedMain, collapsedGray, collapsedOK, _ := b.toolHeaderMeta()
 	isActive := b.toolExecutionIsRunning() && spinnerFrame != ""
@@ -995,6 +1015,11 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 	}
 
 	result = appendToolElapsedToHeader(result, b, cardWidth)
+	// The handle/count is appended after the elapsed suffix so a tight card
+	// drops the timestamp rather than the identifier a follow-up call needs.
+	if headerSuffix != "" && len(result) > 0 {
+		result[0] = appendToolHeaderSuffix(result[0], DimStyle.Render(" · "+headerSuffix), cardWidth-4)
+	}
 	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 }
 

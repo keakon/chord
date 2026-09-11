@@ -20,8 +20,8 @@
 
 ### 改进
 
-- 工具卡片不再共用同一套折叠规则。`write`、`edit`、`apply_patch`、`todo_write`、`handoff` 现在和 `delete`、各类报告卡一样恒展开：正文本身——diff、todo 列表、计划路径——是模型产出的内容，因此不再显示 `▸` / `▾` 标记，`Space`、`Enter`、`o` 对它们不生效。`read`、`grep`、`glob`、`shell`、`cancel` 和通用工具调用默认收起，保留折叠开关。
-- 结束的后台 `shell` 任务改用折叠的 `JOB RESULT` 卡片：默认保留每个 job 的标题行与一行状态，展开后显示完整的命令、状态与输出。
+- 工具卡片不再共用同一套折叠规则。`write`、`edit`、`apply_patch`、`todo_write`、`handoff` 现在和 `delete`、各类报告卡一样恒展开：正文本身——diff、todo 列表、计划路径——是模型产出的内容，因此不再显示 `▸` / `▾` 标记，`Space`、`Enter`、`o` 对它们不生效。`read`、`grep`、`glob`、`shell`、`cancel` 和通用工具调用默认收起，保留折叠开关。折叠后已经完整显示失败原因的卡片——例如只有一行的错误——同样不带标记、不能折叠；折叠的 `shell` 与 `job_list` 卡片把后台 job 句柄与任务数量标在标题行（`shell … · job-8`、`job_list · 3 jobs`）。
+- 结束的后台 `shell` 任务改用折叠的 `JOB RESULT` 卡片：默认每个 job 只保留标题行，只有失败、取消或耗时等标题行表达不了的状态才会再占一行；展开后显示完整的命令、状态与输出。
 - 运行期通知卡可折叠成徽标行：`LOOP NOTICE` / `LOOP CONTINUE`、`REPLY RESUMED` 和上下文压力卡片（`CONTEXT PRESSURE`、`COMPACT WARNING`、`COMPACT IMMINENT`）默认收起，只显示 `LOOP CONTINUE #2 ▸` 这样的徽标行，按 `Space`、`Enter` 或 `o` 展开全文。通用 `NOTICE` 默认展开，因为它承载命令回复（`/role status`、`/models status`、`/mcp status`）和运行期诊断，需要时可折叠成同样的徽标行。正文本身只有一行时不再显示标记，也不能折叠；子代理回报卡继续完整显示消息原文。
 
 ### 修复

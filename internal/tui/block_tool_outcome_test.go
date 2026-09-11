@@ -221,23 +221,55 @@ func TestCollapsedReadCardBoundsALongError(t *testing.T) {
 	}
 }
 
-// TestCollapsedToggleableCardShowsDisclosureMarker pins the marker rule: the
-// marker states what the toggle can do, so a collapsed card that opens into a
-// fuller body carries ▸ even when the collapsed body already fits.
-func TestCollapsedToggleableCardShowsDisclosureMarker(t *testing.T) {
+// TestCollapsedOutcomeCardMarkerRule pins the marker rule for outcome-only
+// cards: a single-line failure already reads fully in its collapsed row, so it
+// carries no ▸ and cannot toggle. Only a shell card keeps folding here, because
+// expanding it reveals the command block and the captured output.
+func TestCollapsedOutcomeCardMarkerRule(t *testing.T) {
 	ApplyTheme(DefaultTheme())
-	for _, name := range []string{tools.NameWebFetch, tools.NameSkill, tools.NameJobOutput, tools.NameShell} {
+	for _, name := range []string{tools.NameWebFetch, tools.NameSkill, tools.NameJobOutput} {
 		block := outcomeCardFixture(name, outcomeCardArgs[name], "Error: 404 Not Found", agent.ToolResultStatusError)
 		collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-		if !strings.Contains(collapsed, "✗ ▸ "+name) {
-			t.Errorf("%s collapsed card is missing the ▸ disclosure marker:\n%s", name, collapsed)
+		if !strings.Contains(collapsed, "✗ "+name) {
+			t.Errorf("%s collapsed card header changed shape:\n%s", name, collapsed)
 		}
-		block.ToolCallDetailExpanded = true
-		block.InvalidateCache()
-		expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-		if !strings.Contains(expanded, "✗ ▾ "+name) {
-			t.Errorf("%s expanded card is missing the ▾ disclosure marker:\n%s", name, expanded)
+		if strings.Contains(collapsed, toolDisclosureCollapsed) || strings.Contains(collapsed, toolDisclosureExpanded) {
+			t.Errorf("%s single-line failure should not carry a disclosure marker:\n%s", name, collapsed)
 		}
+		if block.ToggleAtWidth(120) {
+			t.Errorf("%s single-line failure should not toggle", name)
+		}
+	}
+}
+
+// TestCollapsedShellCardKeepsDisclosureMarker covers the other side: the shell
+// card still folds because expanding it reveals the command block and the
+// captured output, so the collapsed card keeps its ▸.
+func TestCollapsedShellCardKeepsDisclosureMarker(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := outcomeCardFixture(tools.NameShell, outcomeCardArgs[tools.NameShell], "Error: 404 Not Found", agent.ToolResultStatusError)
+	collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(collapsed, "✗ ▸ "+tools.NameShell) {
+		t.Errorf("shell collapsed card lost its ▸ marker:\n%s", collapsed)
+	}
+	block.ToolCallDetailExpanded = true
+	block.InvalidateCache()
+	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(expanded, "✗ ▾ "+tools.NameShell) {
+		t.Errorf("shell expanded card lost its ▾ marker:\n%s", expanded)
+	}
+}
+
+// TestCollapsedOutcomeCardKeepsMarkerForTruncatedBody covers the other half of
+// the outcome fold rule: a single-line failure the collapsed row cannot fit is
+// worth expanding, so it keeps its marker.
+func TestCollapsedOutcomeCardKeepsMarkerForTruncatedBody(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := outcomeCardFixture(tools.NameJobOutput, outcomeCardArgs[tools.NameJobOutput],
+		"Error: "+strings.Repeat("job job-46 not found ", 12), agent.ToolResultStatusError)
+	collapsed := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	if !strings.Contains(collapsed, "✗ ▸ "+tools.NameJobOutput) {
+		t.Fatalf("a truncated single-line failure should keep its marker:\n%s", collapsed)
 	}
 }
 

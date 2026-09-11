@@ -5,9 +5,6 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/charmbracelet/x/ansi"
-	"github.com/mattn/go-runewidth"
-
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -46,26 +43,7 @@ func appendToolProgressSuffix(headerLine string, progress *agent.ToolProgressSna
 	if progressText == "" {
 		return headerLine
 	}
-	suffix := DimStyle.Render("  " + progressText)
-	if maxWidth <= 0 {
-		return headerLine + suffix
-	}
-	if runewidth.StringWidth(stripANSI(headerLine+suffix)) <= maxWidth {
-		return headerLine + suffix
-	}
-	suffixWidth := runewidth.StringWidth(stripANSI(suffix))
-	if suffixWidth >= maxWidth {
-		return headerLine
-	}
-	headerBudget := maxWidth - suffixWidth
-	if headerBudget < 1 {
-		return headerLine
-	}
-	truncatedHeader := ansi.Truncate(headerLine, headerBudget, "…")
-	if runewidth.StringWidth(stripANSI(truncatedHeader+suffix)) <= maxWidth {
-		return truncatedHeader + suffix
-	}
-	return truncateToolHeaderForSuffix(headerLine, suffix, maxWidth, headerBudget)
+	return appendToolHeaderSuffix(headerLine, DimStyle.Render("  "+progressText), maxWidth)
 }
 
 func buildToolHeaderLine(headerLine string, progress *agent.ToolProgressSnapshot, cardWidth int, queuedByExecutionEvent bool, isRunning bool) string {

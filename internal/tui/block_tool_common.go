@@ -394,11 +394,61 @@ func toolOutcomeKindOf(b *Block) toolOutcomeKind {
 	return toolOutcomeNone
 }
 
+// toolOutcomeBodyText resolves the body appendToolOutcomeBody renders: the
+// tool result with the envelope's "Error: " prefix stripped, or the
+// cancellation detail. Keeping it in one place lets the fold gate measure the
+// exact text the envelope will show.
+func toolOutcomeBodyText(kind toolOutcomeKind, content string) string {
+	if kind == toolOutcomeCancelled {
+		return strings.TrimSpace(sanitizeToolDisplayText(toolCancelledDetailText(content)))
+	}
+	return strings.TrimSpace(sanitizeToolDisplayText(toolErrorDisplayContent(content)))
+}
+
+// toolOutcomeLabel names the envelope's row label.
+func toolOutcomeLabel(kind toolOutcomeKind) string {
+	if kind == toolOutcomeCancelled {
+		return "Cancelled"
+	}
+	return "Error"
+}
+
+// toolOutcomeFoldable reports whether expanding a finished error/cancelled card
+// changes what the outcome envelope shows. The collapsed card already renders
+// the envelope, so the toggle earns a marker only when it reveals text:
+//
+//   - a single logical line is inlined on the collapsed row; expanding gains
+//     nothing while that row fits the body, and only a body it would truncate
+//     has more to read
+//   - a multi-line body is shown whole while it fits collapsedToolOutcomeMaxLines
+//     and bounded (with a "... N more lines" hint) once it does not
+func toolOutcomeFoldable(b *Block, contentWidth int) bool {
+	if b == nil || !b.ResultDone {
+		return false
+	}
+	kind := toolOutcomeKindOf(b)
+	if kind == toolOutcomeNone {
+		return false
+	}
+	body := toolOutcomeBodyText(kind, toolDisplayResultContent(b))
+	if body == "" {
+		return false
+	}
+	if toolOutcomeNonEmptyLineCount(body) < 2 {
+		inlineWidth := max(contentWidth-len(toolFieldConnector+toolOutcomeLabel(kind)+": "), 12)
+		return len(wrapText(body, inlineWidth)) > 1
+	}
+	return len(wrapText(body, max(contentWidth, 1))) > collapsedToolOutcomeMaxLines
+}
+
 // appendToolOutcomeBody renders the one failure/cancellation surface every
 // tool card shares, so the 15 renderers stop drifting apart:
 //
-//   - collapsed: a single "↳ Error: <summary>" / "↳ Cancelled[: <detail>]" row
-//   - expanded:  "↳ Error:" / "↳ Cancelled:" followed by the wrapped body
+//   - a single logical line keeps one "↳ Error: <summary>" row whether the card
+//     is collapsed or expanded; splitting it into a label row plus an indented
+//     body only moves the same text
+//   - a multi-line body renders whole while it fits the collapsed budget, and
+//     "↳ Error:" plus the full wrapped body when expanded
 //   - the "Error: " prefix the tool-result envelope adds is stripped, so the
 //     label is never printed twice
 //   - a cancellation whose whole text is "Cancelled" renders the label alone
@@ -412,30 +462,31 @@ func appendToolOutcomeBody(result *[]string, kind toolOutcomeKind, content strin
 		return
 	}
 	style := ErrorStyle
-	label := "Error"
-	body := strings.TrimSpace(sanitizeToolDisplayText(toolErrorDisplayContent(content)))
+	label := toolOutcomeLabel(kind)
 	if kind == toolOutcomeCancelled {
-		style, label = DimStyle, "Cancelled"
-		body = strings.TrimSpace(sanitizeToolDisplayText(toolCancelledDetailText(content)))
+		style = DimStyle
 	}
+	body := toolOutcomeBodyText(kind, content)
 	if body == "" {
 		if kind == toolOutcomeCancelled {
 			*result = append(*result, toolFieldStandalone(style, label))
 		}
 		return
 	}
-	if !expanded {
-		// A single logical line (a rejection reason, "exit code 1", a short
-		// permission denial) folds to one compact summary row. A multi-line
-		// outcome — most often a "file not found" error followed by a
-		// "Did you mean:" suggestion list — must keep its whole body when
-		// collapsed: toolCollapsedSummaryText joins the prompt header with the
-		// cause into one row and truncates the rest, hiding exactly the
-		// suggestion the user needs to act on. Expanding costs only the error's
-		// own (short) length, so collapsed cards no longer force a toggle just
-		// to read why a call failed.
-		if toolOutcomeNonEmptyLineCount(body) < 2 {
-			width := max(contentWidth-len(toolFieldConnector+label+": "), 12)
+	// A single logical line (a rejection reason, "exit code 1", a short
+	// permission denial) folds to one compact summary row. A multi-line
+	// outcome — most often a "file not found" error followed by a
+	// "Did you mean:" suggestion list — must keep its whole body when
+	// collapsed: toolCollapsedSummaryText joins the prompt header with the
+	// cause into one row and truncates the rest, hiding exactly the
+	// suggestion the user needs to act on.
+	if toolOutcomeNonEmptyLineCount(body) < 2 {
+		width := max(contentWidth-len(toolFieldConnector+label+": "), 12)
+		// The inline row is the whole answer while it fits the body. An
+		// expanded card keeps it too — unless inlining would truncate text the
+		// expansion exists to reveal, in which case the body falls through to
+		// the wrapped section below.
+		if !expanded || len(wrapText(body, width)) <= 1 {
 			if oneLine := truncateOneLine(toolCollapsedSummaryText(body), width); oneLine != "" {
 				*result = append(*result, toolFieldInline(style, label, oneLine))
 			}
@@ -544,11 +595,12 @@ func toolElapsedIsUserWaitTime(toolName string) bool {
 	return tools.NormalizeName(toolName) == tools.NameQuestion
 }
 
-// appendToolElapsedSuffix appends " · ⏱ <elapsed>" to a header line, truncating
-// the header with "…" when needed so the elapsed stays visible within maxWidth.
-// Mirrors appendToolProgressSuffix so the header never overflows the card.
-func appendToolElapsedSuffix(headerLine, elapsed string, maxWidth int) string {
-	suffix := DimStyle.Render(" · ⏱ " + elapsed)
+// appendToolHeaderSuffix appends an already-styled suffix to a header line,
+// truncating the header with "…" when needed so the suffix stays visible within
+// maxWidth. It is the shared tail every header suffix (progress, elapsed, the
+// background job handle) uses, so none of them overflows the card or drops on
+// its own.
+func appendToolHeaderSuffix(headerLine, suffix string, maxWidth int) string {
 	if maxWidth <= 0 {
 		return headerLine + suffix
 	}
@@ -568,6 +620,12 @@ func appendToolElapsedSuffix(headerLine, elapsed string, maxWidth int) string {
 		return truncatedHeader + suffix
 	}
 	return truncateToolHeaderForSuffix(headerLine, suffix, maxWidth, headerBudget)
+}
+
+// appendToolElapsedSuffix appends " · ⏱ <elapsed>" to a header line, truncating
+// the header with "…" when needed so the elapsed stays visible within maxWidth.
+func appendToolElapsedSuffix(headerLine, elapsed string, maxWidth int) string {
+	return appendToolHeaderSuffix(headerLine, DimStyle.Render(" · ⏱ "+elapsed), maxWidth)
 }
 
 // truncateToolHeaderForSuffix shrinks a styled tool header line until
@@ -833,6 +891,25 @@ func parseJobResultID(result string) string {
 	return ""
 }
 
+// jobListSummaryLine counts the jobs in a job_list result for the collapsed
+// card's header. job_list never renders the list when collapsed, so without a
+// count the folded card would only say "job_list" and hide whether anything is
+// running. The result is either "no background jobs" or one line per job with
+// two-space separators.
+func jobListSummaryLine(result string) string {
+	trimmed := strings.TrimSpace(result)
+	count := 0
+	for line := range strings.SplitSeq(trimmed, "\n") {
+		if strings.TrimSpace(line) != "" {
+			count++
+		}
+	}
+	if count == 0 || strings.EqualFold(trimmed, "no background jobs") {
+		return "No jobs"
+	}
+	return fmt.Sprintf("%d %s", count, pluralizeToolCount("job", count))
+}
+
 // formatToolResultSummaryLine returns the one-line state summary under the
 // tool header. Error and cancelled results render their detail in the shared
 // ↳ Error / ↳ Cancelled envelope, so they return "" instead of a redundant
@@ -859,7 +936,8 @@ func formatToolResultSummaryLine(b *Block) string {
 		// Shell expands with explicit exit-code detail, so avoid a redundant summary like "Passed".
 		return ""
 	case tools.NameJobOutput, tools.NameJobList:
-		// The body already carries the incremental output and the status line.
+		// The body already carries the incremental output and the status line;
+		// job_list's count sits on the header instead (jobListSummaryLine).
 		return ""
 	case tools.NameJobKill:
 		return "Stop requested"

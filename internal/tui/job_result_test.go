@@ -66,10 +66,13 @@ func TestBackgroundResultAppendedEventAppendsDurableStatusBlock(t *testing.T) {
 		t.Fatal("background result card must start collapsed")
 	}
 	rendered := stripANSI(strings.Join(block.Render(100, ""), "\n"))
-	for _, want := range []string{"JOB RESULT #1", "✓ ▸ job-1 · Run production build", "Completed successfully"} {
+	for _, want := range []string{"JOB RESULT #1", "✓ ▸ job-1 · Run production build"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("rendered background result missing %q:\n%s", want, rendered)
 		}
+	}
+	if strings.Contains(rendered, "Completed successfully") {
+		t.Fatalf("folded card repeats the success summary its ✓ glyph already shows:\n%s", rendered)
 	}
 	if strings.Contains(rendered, "[Job job-1 finished]") {
 		t.Fatalf("rendered background result repeated raw header:\n%s", rendered)
@@ -134,6 +137,9 @@ func TestBackgroundResultAppendedEventShowsCompactDurationButCopiesOriginalNote(
 	rendered := stripANSI(strings.Join(block.Render(110, ""), "\n"))
 	if !strings.Contains(rendered, "⏱ 17s") {
 		t.Fatalf("card missing compact duration:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "Completed successfully") {
+		t.Fatalf("folded card repeats the success summary:\n%s", rendered)
 	}
 	if strings.Contains(rendered, "command took 17.1s") {
 		t.Fatalf("card exposed model duration note:\n%s", rendered)
@@ -339,10 +345,11 @@ func TestBackgroundResultCardFoldsOutputAndExpandsOnToggle(t *testing.T) {
 		t.Fatal("background result card must start collapsed")
 	}
 	collapsed := stripANSI(strings.Join(block.Render(110, ""), "\n"))
-	for _, want := range []string{"✓ ▸ job-fold · Run folded tests", "Completed successfully"} {
-		if !strings.Contains(collapsed, want) {
-			t.Fatalf("collapsed card missing %q:\n%s", want, collapsed)
-		}
+	if !strings.Contains(collapsed, "✓ ▸ job-fold · Run folded tests") {
+		t.Fatalf("collapsed card missing the job headline:\n%s", collapsed)
+	}
+	if strings.Contains(collapsed, "Completed successfully") {
+		t.Fatalf("folded card repeats the success summary its ✓ glyph already shows:\n%s", collapsed)
 	}
 	for _, hidden := range []string{"Relevant output:", "line one", "line two"} {
 		if strings.Contains(collapsed, hidden) {
@@ -354,7 +361,7 @@ func TestBackgroundResultCardFoldsOutputAndExpandsOnToggle(t *testing.T) {
 		t.Fatal("toggling must expand the card")
 	}
 	expanded := stripANSI(strings.Join(block.Render(110, ""), "\n"))
-	for _, want := range []string{"✓ ▾ job-fold · Run folded tests", "Relevant output:", "line one", "line two"} {
+	for _, want := range []string{"✓ ▾ job-fold · Run folded tests", "Completed successfully", "Relevant output:", "line one", "line two"} {
 		if !strings.Contains(expanded, want) {
 			t.Fatalf("expanded card missing %q:\n%s", want, expanded)
 		}

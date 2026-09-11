@@ -7,6 +7,11 @@ import (
 
 const backgroundResultCardTitle = "JOB RESULT"
 
+// backgroundResultSuccessStatus is the status line a successfully completed job
+// renders. The ✓ headline already states it, so folded cards drop the line and
+// keep only any extra detail it carries.
+const backgroundResultSuccessStatus = "Completed successfully"
+
 type parsedBackgroundResult struct {
 	id          string
 	description string
@@ -219,7 +224,7 @@ func backgroundResultStatusLine(status string) (string, string) {
 		return "•", "Cancelled"
 	}
 	if code, ok := backgroundResultExitCode(lower); ok && code == 0 {
-		return "✓", "Completed successfully"
+		return "✓", backgroundResultSuccessStatus
 	}
 	if strings.Contains(lower, "error") || strings.Contains(lower, "failed") || strings.Contains(lower, "timed out") || strings.Contains(lower, "exit status") || strings.Contains(lower, "exit code") {
 		detail := backgroundResultErrorDetail(status)
@@ -229,7 +234,7 @@ func backgroundResultStatusLine(status string) (string, string) {
 		return "✗", "Error: " + detail
 	}
 	if strings.Contains(lower, "exit 0") || strings.Contains(lower, "success") || strings.Contains(lower, "completed") || lower == "finished" {
-		return "✓", "Completed successfully"
+		return "✓", backgroundResultSuccessStatus
 	}
 	if status == "" {
 		return "•", "Finished"
@@ -371,6 +376,12 @@ func (b *Block) renderBackgroundResult(width int) []string {
 			}
 			break
 		}
+		if collapsed && expectStatus {
+			if trimmed = foldedBackgroundResultStatusLine(trimmed); trimmed == "" {
+				expectStatus = false
+				continue
+			}
+		}
 		if collapsed && !expectStatus {
 			continue
 		}
@@ -388,6 +399,22 @@ func (b *Block) renderBackgroundResult(width int) []string {
 		}
 	}
 	return renderPrewrappedToolCard(metrics.blockStyle, metrics.cardWidth, toolCardTitle(backgroundResultCardTitle, b.displayLabelID()), body, metrics.toolCardBg, railANSISeq("tool", b.Focused))
+}
+
+// foldedBackgroundResultStatusLine returns the status line a folded JOB RESULT
+// card shows for one job. A successful job's summary is already in the ✓
+// headline, so it is dropped; a duration it carried stays, and failure,
+// cancellation, or unknown statuses read as-is because the glyph alone does not
+// name them.
+func foldedBackgroundResultStatusLine(line string) string {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == backgroundResultSuccessStatus {
+		return ""
+	}
+	if rest, ok := strings.CutPrefix(trimmed, backgroundResultSuccessStatus+" · "); ok {
+		return rest
+	}
+	return line
 }
 
 func backgroundResultHasCodeFence(content string) bool {

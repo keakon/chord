@@ -8467,10 +8467,15 @@ func TestToolErrorCardDisplaysAndCopiesErrorResult(t *testing.T) {
 	}
 
 	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	for _, want := range []string{"✗ ▸ web_fetch", "Error:", "HTTP 404: 404 Not Found"} {
+	// A short single-line failure already reads fully in its collapsed row, so
+	// the card carries no disclosure marker.
+	for _, want := range []string{"✗ web_fetch", "Error:", "HTTP 404: 404 Not Found"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("rendered error tool card missing %q; got:\n%s", want, plain)
 		}
+	}
+	if strings.Contains(plain, toolDisclosureCollapsed) {
+		t.Fatalf("single-line failure should not carry a disclosure marker; got:\n%s", plain)
 	}
 
 	got := blockCopyContent(block)

@@ -171,25 +171,15 @@ func (b *Block) readResultOffset() int {
 // it renders, so the marker and ToggleAtWidth stay on one predicate: a card with
 // no expandable body shows no disclosure and cannot toggle, and every card whose
 // body the toggle reveals carries one. Failures and cancellations share the
-// bounded outcome envelope, where a multi-line body short enough to fit the
-// collapsed budget renders identically either way and so is not expandable.
+// bounded outcome envelope, where a body short enough to fit the collapsed row
+// or budget renders identically either way and so is not expandable — see
+// toolOutcomeFoldable.
 func (b *Block) readCardHasDisclosure(contentWidth int) bool {
 	if b == nil || !b.ResultDone {
 		return false
 	}
-	if kind := toolOutcomeKindOf(b); kind != toolOutcomeNone {
-		content := toolDisplayResultContent(b)
-		body := strings.TrimSpace(sanitizeToolDisplayText(toolErrorDisplayContent(content)))
-		if kind == toolOutcomeCancelled {
-			body = strings.TrimSpace(sanitizeToolDisplayText(toolCancelledDetailText(content)))
-		}
-		if body == "" {
-			return false
-		}
-		if toolOutcomeNonEmptyLineCount(body) < 2 {
-			return true
-		}
-		return len(wrapText(body, max(contentWidth, 1))) > collapsedToolOutcomeMaxLines
+	if toolOutcomeKindOf(b) != toolOutcomeNone {
+		return toolOutcomeFoldable(b, contentWidth)
 	}
 	if b.ResultContent == "" {
 		return false

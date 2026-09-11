@@ -4839,7 +4839,7 @@ func TestReadCallDisclosureMatchesToggleableBody(t *testing.T) {
 				Content: `{"path":"a.go"}`, ResultDone: true, Collapsed: true,
 				ResultStatus: agent.ToolResultStatusError, ResultContent: "Error: denied",
 			},
-			wantMarker: true, wantToggleable: true,
+			wantMarker: false, wantToggleable: false,
 		},
 		{
 			name: "multi-line error already fully shown",
