@@ -1233,10 +1233,17 @@ func TestHandleAgentEventLoopNoticeCreatesStatusCard(t *testing.T) {
 	if blocks[0].StatusTitle != "LOOP" {
 		t.Fatalf("StatusTitle = %q, want %q", blocks[0].StatusTitle, "LOOP")
 	}
-	plain := stripANSI(strings.Join(blocks[0].Render(80, ""), "\n"))
-	if !strings.Contains(plain, "LOOP") || !strings.Contains(plain, "Target:") {
-		t.Fatalf("rendered card = %q, want LOOP status card", plain)
+	if !blocks[0].Collapsed {
+		t.Fatal("loop notices must start collapsed")
 	}
+	collapsed := stripANSI(strings.Join(blocks[0].Render(80, ""), "\n"))
+	if !strings.Contains(collapsed, "LOOP") || !strings.Contains(collapsed, "▸") || strings.Contains(collapsed, "Target:") {
+		t.Fatalf("rendered card = %q, want a collapsed LOOP badge with the body hidden", collapsed)
+	}
+	if !blocks[0].ToggleAtWidth(80) || blocks[0].Collapsed {
+		t.Fatal("toggling must expand the notice")
+	}
+	plain := stripANSI(strings.Join(blocks[0].Render(80, ""), "\n"))
 	if !strings.Contains(plain, "  Target:") || !strings.Contains(plain, "  • Continue and finish all remaining tasks in the current session.") {
 		t.Fatalf("rendered card = %q, want indented LOOP body", plain)
 	}
@@ -1281,18 +1288,19 @@ func TestHandleAgentEventLoopContinueStatusCardBodyIsIndented(t *testing.T) {
 	}
 	card := blocks[0]
 	if !card.Collapsed {
-		t.Fatal("runtime loop notices must start folded")
-	}
-	folded := stripANSI(strings.Join(card.Render(80, ""), "\n"))
-	if !strings.Contains(folded, "  Unresolved work:") || !strings.Contains(folded, "  • pending verification") || !strings.Contains(folded, "more lines hidden.") {
-		t.Fatalf("folded card = %q, want the indented summary and a hidden-line hint", folded)
+		t.Fatal("runtime loop notices must start collapsed")
 	}
 	if !card.ToggleAtWidth(80) || card.Collapsed {
-		t.Fatal("expected the loop notice to expand")
+		t.Fatal("toggling must expand the runtime loop notice")
 	}
 	plain := stripANSI(strings.Join(card.Render(80, ""), "\n"))
-	if !strings.Contains(plain, "  Unresolved work:") || !strings.Contains(plain, "  • pending verification") || !strings.Contains(plain, "  • remaining subagent") {
-		t.Fatalf("rendered card = %q, want indented LOOP CONTINUE body", plain)
+	for _, want := range []string{"  Unresolved work:", "  • pending verification", "  • remaining subagent"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("rendered card = %q, want %q in the full indented body", plain, want)
+		}
+	}
+	if strings.Contains(plain, "more lines hidden.") {
+		t.Fatalf("rendered card = %q, want no hidden-line hint", plain)
 	}
 }
 
@@ -3833,7 +3841,7 @@ func TestRebuildViewportFromMessagesClearsBlocksForEmptySession(t *testing.T) {
 	}
 }
 
-func TestRebuildViewportFromMessagesRestoresExpandedReadCard(t *testing.T) {
+func TestRebuildViewportFromMessagesRestoresReadCollapsedSummary(t *testing.T) {
 	backend := &sessionControlAgent{messages: []message.Message{
 		{
 			Role: "assistant",
@@ -3858,15 +3866,15 @@ func TestRebuildViewportFromMessagesRestoresExpandedReadCard(t *testing.T) {
 	if !block.SettledAt.IsZero() {
 		t.Fatalf("restored block SettledAt = %v, want zero", block.SettledAt)
 	}
-	if block.Collapsed {
-		t.Fatalf("restored Read block should be expanded, got %#v", block)
+	if !block.Collapsed {
+		t.Fatalf("restored Read block should stay collapsed (summary state), got %#v", block)
 	}
 	plain := stripANSI(strings.Join(block.Render(80, ""), "\n"))
 	if !strings.Contains(plain, "read internal/tui/input.go") {
 		t.Fatalf("expected restored Read header, got:\n%s", plain)
 	}
-	if !strings.Contains(plain, "359") {
-		t.Fatalf("restored Read card should render the returned body line, got:\n%s", plain)
+	if strings.Contains(plain, "359") {
+		t.Fatalf("collapsed restored Read should not render body lines, got:\n%s", plain)
 	}
 }
 
@@ -4626,6 +4634,54 @@ func TestForkSessionRebuildPreservesRestoredImageAttachments(t *testing.T) {
 	}
 	if images[1].FileName != "image2.jpg" || string(images[1].Data) != "b" {
 		t.Fatalf("second image = %+v, want new image2.jpg/b", images[1])
+	}
+}
+
+// A durable compaction rewrites the history of the session the user is still
+// in. The rebuild it triggers must keep the composer the user is holding: a
+// pasted image is gone for good once the attachment is dropped, even though
+// its placeholder stays in the input text.
+func TestCompactionRebuildKeepsComposerState(t *testing.T) {
+	backend := &sessionControlAgent{}
+	m := NewModel(backend)
+	m.attachments = []Attachment{{FileName: "screenshot.png", MimeType: "image/png", Data: []byte{0x89, 'P', 'N', 'G'}, InlineImagePlaceholder: true}}
+	m.queuedDrafts = []queuedDraft{{ID: "draft-1", Content: "queued follow-up"}}
+	m.agentComposerStates = map[string]agentComposerState{"worker-1": {attachments: cloneAttachments(m.attachments)}}
+	m.editingQueuedDraftID = "draft-2"
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.SessionRestoredEvent{PreserveRequestActivity: true, PreserveComposerState: true}})
+	applyTestCmd(t, &m, cmd)
+
+	if len(m.attachments) != 1 || m.attachments[0].FileName != "screenshot.png" {
+		t.Fatalf("attachments after compaction rebuild = %+v, want the pasted image kept", m.attachments)
+	}
+	if len(m.queuedDrafts) != 1 || m.queuedDrafts[0].ID != "draft-1" {
+		t.Fatalf("queued drafts after compaction rebuild = %+v, want the queued draft kept", m.queuedDrafts)
+	}
+	if state, ok := m.agentComposerStates["worker-1"]; !ok || len(state.attachments) != 1 {
+		t.Fatalf("per-agent composer state after compaction rebuild = %+v, want it kept", m.agentComposerStates)
+	}
+	if m.editingQueuedDraftID != "draft-2" {
+		t.Fatalf("editingQueuedDraftID = %q, want draft-2 kept", m.editingQueuedDraftID)
+	}
+}
+
+// A restore or switch replaces the session, so the outgoing composer must not
+// leak into the new one.
+func TestSessionRestoreRebuildDropsComposerState(t *testing.T) {
+	backend := &sessionControlAgent{}
+	m := NewModel(backend)
+	m.attachments = []Attachment{{FileName: "screenshot.png", MimeType: "image/png", Data: []byte{0x89, 'P', 'N', 'G'}}}
+	m.queuedDrafts = []queuedDraft{{ID: "draft-1", Content: "queued follow-up"}}
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.SessionRestoredEvent{}})
+	applyTestCmd(t, &m, cmd)
+
+	if len(m.attachments) != 0 {
+		t.Fatalf("attachments after session restore rebuild = %+v, want them dropped", m.attachments)
+	}
+	if len(m.queuedDrafts) != 0 {
+		t.Fatalf("queued drafts after session restore rebuild = %+v, want them dropped", m.queuedDrafts)
 	}
 }
 

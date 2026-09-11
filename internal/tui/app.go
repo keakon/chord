@@ -268,6 +268,10 @@ type Model struct {
 	// not wipe those restored attachments.
 	preserveAttachmentsOnNextRebuild bool
 	pendingSessionRestoreRebuild     bool
+	// In-place history rewrites (durable compaction) keep the same session, so
+	// the deferred rebuild must keep the whole composer: pending attachments,
+	// queued input, and per-agent drafts.
+	preserveComposerStateOnNextRebuild bool
 
 	completionState
 	activityRuntimeState

@@ -197,10 +197,17 @@ func TestMessagesToBlocksRendersLoopNoticeAsStatusCard(t *testing.T) {
 	if blocks[0].StatusTitle != "LOOP" {
 		t.Fatalf("StatusTitle = %q, want %q", blocks[0].StatusTitle, "LOOP")
 	}
-	plain := stripANSI(strings.Join(blocks[0].Render(80, ""), "\n"))
-	if !strings.Contains(plain, "LOOP") || !strings.Contains(plain, "finish current task") {
-		t.Fatalf("rendered status card = %q, want persisted loop card content", plain)
+	if !blocks[0].Collapsed {
+		t.Fatal("restored loop notices must start collapsed")
 	}
+	collapsed := stripANSI(strings.Join(blocks[0].Render(80, ""), "\n"))
+	if !strings.Contains(collapsed, "LOOP") || !strings.Contains(collapsed, "▸") || strings.Contains(collapsed, "Target:") {
+		t.Fatalf("rendered status card = %q, want a collapsed LOOP badge with the body hidden", collapsed)
+	}
+	if !blocks[0].ToggleAtWidth(80) || blocks[0].Collapsed {
+		t.Fatal("toggling must expand the restored notice")
+	}
+	plain := stripANSI(strings.Join(blocks[0].Render(80, ""), "\n"))
 	if !strings.Contains(plain, "  Target:") || !strings.Contains(plain, "  • finish current task") {
 		t.Fatalf("rendered status card = %q, want indented loop body", plain)
 	}

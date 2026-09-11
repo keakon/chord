@@ -1,49 +1,10 @@
 package tui
 
 import (
-	"strconv"
 	"strings"
 
 	"github.com/keakon/chord/internal/message"
 )
-
-// maxCollapsedStatusBodyLines caps the body a folded runtime status or error
-// card shows. The opening lines are the summary; the tail hides behind the same
-// disclosure marker a tool card uses.
-const maxCollapsedStatusBodyLines = 3
-
-// statusCardIsFoldable reports whether a BlockStatus card may fold. Sub-agent
-// mailbox cards are excluded because their body is the worker model's own
-// message — model output that must stay fully visible. Every other status card
-// carries harness/runtime text (loop notices, context-pressure notices, info
-// notices, export/diagnostics, JOB RESULT).
-func (b *Block) statusCardIsFoldable() bool {
-	return b != nil && b.Type == BlockStatus && b.StatusFrom == "" && b.StatusKind == ""
-}
-
-// statusDisclosureMarker returns the disclosure glyph for a folded or expanded
-// card, matching the tool card markers.
-func statusDisclosureMarker(collapsed bool) string {
-	if collapsed {
-		return toolDisclosureCollapsed
-	}
-	return toolDisclosureExpanded
-}
-
-// foldStatusBodyLines keeps the first maxCollapsedStatusBodyLines rendered lines
-// and reports how many lines are hidden. A body that already fits the summary is
-// returned unchanged with hidden == 0, so the caller adds no disclosure marker
-// to a card with nothing behind it.
-func foldStatusBodyLines(lines []string) (kept []string, hidden int) {
-	if len(lines) <= maxCollapsedStatusBodyLines {
-		return lines, 0
-	}
-	kept = append([]string(nil), lines[:maxCollapsedStatusBodyLines]...)
-	for len(kept) > 0 && strings.TrimSpace(stripANSI(kept[len(kept)-1])) == "" {
-		kept = kept[:len(kept)-1]
-	}
-	return kept, len(lines) - len(kept)
-}
 
 func (b *Block) renderError(width int) []string {
 	style := ErrorCardStyle
@@ -85,11 +46,7 @@ func (b *Block) renderStatus(width int) []string {
 		return b.renderBackgroundResult(width)
 	}
 	style := CompactionSummaryCardStyle
-	// Reserve a column for the conversation rail (foreground-only "│" prepended
-	// outside the card width); otherwise a full-width card overflows the terminal.
-	boxWidth := max((width-railWidthToReserve(style))-style.GetHorizontalMargins(), 10)
-	innerWidth := max(boxWidth-style.GetHorizontalPadding()-style.GetHorizontalBorderSize(), 10)
-	contentWidth := min(innerWidth-2, maxProseWidth)
+	innerWidth, _ := statusCardMetrics(width)
 
 	title := strings.TrimSpace(sanitizeDisplayText(b.StatusTitle))
 	if title == "" {
@@ -120,28 +77,30 @@ func (b *Block) renderStatus(width int) []string {
 	// so when the field rows are present it is indented 2 more and rendered
 	// 2 columns narrower. Without the field rows (the info card), the body
 	// keeps the original 2-space indent.
+	cardBg := currentTheme.CompactionSummaryBg
 	bodyIndent := "  "
-	bodyWidth := contentWidth
 	if len(metaLines) > 0 {
 		bodyIndent = "    "
-		bodyWidth = max(contentWidth-2, 10)
 	}
-	bodyLines := renderRichMarkdownContent(strings.TrimSpace(b.Content), bodyWidth, &b.richMarkdownHL)
-	if len(bodyLines) == 0 {
-		bodyLines = []string{""}
+	bodyLines := b.statusCardBodyLines(width)
+	foldable := b.statusCardBodyFoldable(bodyLines)
+	if foldable && b.Collapsed {
+		// The collapsed card is the badge alone with the disclosure marker, the
+		// same rule the tool cards and the JOB RESULT headlines follow: the
+		// marker sits on the line that survives the toggle. A self-describing
+		// notice (CONTEXT PRESSURE, LOOP CONTINUE #3, REPLY RESUMED) says what it
+		// is at a glance, and the body stays one keystroke away.
+		line := label + DimStyle.Render(" "+toolDisclosureCollapsed)
+		lines := preserveCardBg([]string{line}, cardBg)
+		return renderPrewrappedCard(style, innerWidth, lines, cardBg, railANSISeq("thinking", b.Focused))
 	}
-	// Runtime status cards carry harness text, not model output, so they start
-	// folded to their opening lines. A sub-agent mailbox card carries a worker
-	// model's message and stays fully visible; a card whose body already fits
-	// the summary grows no disclosure marker.
-	if b.statusCardIsFoldable() {
-		if folded, hidden := foldStatusBodyLines(bodyLines); hidden > 0 {
-			label += " " + statusDisclosureMarker(b.Collapsed)
-			if b.Collapsed {
-				bodyLines = append(folded, DimStyle.Render("  ... "+strconv.Itoa(hidden)+" more lines hidden."))
-			}
-		}
+	if foldable {
+		// The expanded card marks what Space does next.
+		label += DimStyle.Render(" " + toolDisclosureExpanded)
 	}
+	// Cards that hide nothing keep the badge/body shape and carry no marker:
+	// mailbox cards carry the worker model's own message, and a body that
+	// renders to a single line is already its own summary.
 	lines := make([]string, 0, len(metaLines)+len(bodyLines)+2)
 	lines = append(lines, label, "")
 	lines = append(lines, metaLines...)
@@ -149,9 +108,47 @@ func (b *Block) renderStatus(width int) []string {
 		lines = append(lines, bodyIndent+line)
 	}
 
-	cardBg := currentTheme.CompactionSummaryBg
 	lines = preserveCardBg(lines, cardBg)
 	return renderPrewrappedCard(style, innerWidth, lines, cardBg, railANSISeq("thinking", b.Focused))
+}
+
+// statusCardMetrics returns the card's inner width and the body width a status
+// card renders at, so renderStatus and the fold gate lay the body out
+// identically.
+func statusCardMetrics(width int) (innerWidth, contentWidth int) {
+	style := CompactionSummaryCardStyle
+	// Reserve a column for the conversation rail (foreground-only "│" prepended
+	// outside the card width); otherwise a full-width card overflows the terminal.
+	boxWidth := max((width-railWidthToReserve(style))-style.GetHorizontalMargins(), 10)
+	innerWidth = max(boxWidth-style.GetHorizontalPadding()-style.GetHorizontalBorderSize(), 10)
+	contentWidth = min(innerWidth-2, maxProseWidth)
+	return innerWidth, contentWidth
+}
+
+// statusCardBodyLines renders a status card's body exactly as renderStatus
+// will, so the fold gate can tell how many lines the collapsed form would hide.
+func (b *Block) statusCardBodyLines(width int) []string {
+	_, contentWidth := statusCardMetrics(width)
+	bodyWidth := contentWidth
+	if b.StatusFrom != "" || b.StatusKind != "" {
+		bodyWidth = max(contentWidth-2, 10)
+	}
+	bodyLines := renderRichMarkdownContent(strings.TrimSpace(b.Content), bodyWidth, &b.richMarkdownHL)
+	if len(bodyLines) == 0 {
+		return []string{""}
+	}
+	return bodyLines
+}
+
+// statusCardBodyFoldable reports whether a status card's collapsed form hides
+// anything: a mailbox card carries the worker model's own message and stays
+// fully visible, and a body that renders to a single line is already its own
+// summary.
+func (b *Block) statusCardBodyFoldable(bodyLines []string) bool {
+	if b.StatusFrom != "" || b.StatusKind != "" {
+		return false
+	}
+	return len(bodyLines) > 1
 }
 
 func (b *Block) renderBoundaryMarker(width int) []string {

@@ -199,7 +199,11 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			return true, effects
 		}
 		m.finalizeAgentStream(evt.AgentID)
-		block := &Block{ID: m.nextBlockID, Type: BlockStatus, StatusTitle: infoCardTitle, Content: evt.Message, AgentID: evt.AgentID, Collapsed: true}
+		// The generic NOTICE carries command replies (/role status, /models
+		// status, /mcp status) and runtime diagnostics, so it starts expanded:
+		// the reader asked for the output, and a bare NOTICE badge would hide
+		// it. A notice still folds once the reader presses Space.
+		block := &Block{ID: m.nextBlockID, Type: BlockStatus, StatusTitle: infoCardTitle, Content: evt.Message, AgentID: evt.AgentID}
 		m.nextBlockID++
 		m.appendViewportBlock(block)
 		m.markBlockSettled(block)

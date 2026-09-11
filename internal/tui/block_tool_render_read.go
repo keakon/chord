@@ -19,16 +19,7 @@ func (b *Block) renderReadCall(width int, spinnerFrame string) []string {
 	cardWidth := metrics.cardWidth
 	contentWidth := metrics.contentWidth
 
-	var resultOffset int
-	var parsed struct {
-		Path   string `json:"path"`
-		Limit  int    `json:"limit"`
-		Offset int    `json:"offset"`
-	}
-	if json.Unmarshal([]byte(b.Content), &parsed) == nil {
-		resultOffset = parsed.Offset
-	}
-
+	resultOffset := b.readResultOffset()
 	// Schema-invalid args (e.g. "offset":"1.0") must still surface every
 	// argument the caller actually passed, so derive the header tolerantly.
 	keys, vals := parseToolArgs(b.Content)
@@ -66,15 +57,14 @@ func (b *Block) renderReadCall(width int, spinnerFrame string) []string {
 	opts = append(opts, b.diagnosticHeaderOptions()...)
 
 	readSummary := ""
-	hasDisclosure := false
 	if !b.toolResultIsError() && !b.toolResultIsCancelled() {
 		if meta, ok := parseReadResultMeta(b.ResultContent); ok {
 			readSummary = readResultSummary(meta, !b.Collapsed)
-			hasDisclosure = meta.StartLine > 0 && meta.EndLine >= meta.StartLine
 		}
 	}
+	hasDisclosure := b.readCardHasDisclosure(contentWidth)
 	prefix := b.renderToolPrefix(spinnerFrame)
-	if b.ResultDone && hasDisclosure {
+	if hasDisclosure {
 		prefix = renderToolDisclosurePrefix(prefix, !b.Collapsed)
 	}
 	var result []string
@@ -162,4 +152,48 @@ func renderReadHeaderLine(prefix, toolName, filePath, optText, resultSummary str
 	}
 	pathBudget := budget - optWidth - 1
 	return headerLine + " " + truncateToolHeaderMiddle(filePath, pathBudget) + " " + DimStyle.Render(suffix)
+}
+
+// readResultOffset extracts the model-facing start line from the call args so a
+// legacy result with no READ_RESULT header still numbers from the offset the
+// caller asked for.
+func (b *Block) readResultOffset() int {
+	var parsed struct {
+		Offset int `json:"offset"`
+	}
+	if json.Unmarshal([]byte(b.Content), &parsed) == nil {
+		return parsed.Offset
+	}
+	return 0
+}
+
+// readCardHasDisclosure reports whether toggling the read card changes the body
+// it renders, so the marker and ToggleAtWidth stay on one predicate: a card with
+// no expandable body shows no disclosure and cannot toggle, and every card whose
+// body the toggle reveals carries one. Failures and cancellations share the
+// bounded outcome envelope, where a multi-line body short enough to fit the
+// collapsed budget renders identically either way and so is not expandable.
+func (b *Block) readCardHasDisclosure(contentWidth int) bool {
+	if b == nil || !b.ResultDone {
+		return false
+	}
+	if kind := toolOutcomeKindOf(b); kind != toolOutcomeNone {
+		content := toolDisplayResultContent(b)
+		body := strings.TrimSpace(sanitizeToolDisplayText(toolErrorDisplayContent(content)))
+		if kind == toolOutcomeCancelled {
+			body = strings.TrimSpace(sanitizeToolDisplayText(toolCancelledDetailText(content)))
+		}
+		if body == "" {
+			return false
+		}
+		if toolOutcomeNonEmptyLineCount(body) < 2 {
+			return true
+		}
+		return len(wrapText(body, max(contentWidth, 1))) > collapsedToolOutcomeMaxLines
+	}
+	if b.ResultContent == "" {
+		return false
+	}
+	rows, _ := parseReadDisplayLines(b.ResultContent, b.readResultOffset())
+	return len(rows) > 0
 }

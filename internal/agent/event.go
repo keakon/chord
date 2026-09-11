@@ -839,6 +839,12 @@ const sessionSwitchKindPlanExecution = "plan"
 // the viewport from the current messages so the restored history is visible.
 type SessionRestoredEvent struct {
 	PreserveRequestActivity bool
+	// PreserveComposerState marks a rebuild that rewrites only the current
+	// session's history (a durable compaction) instead of replacing the
+	// session. The TUI rebuilds the transcript but must keep the composer state
+	// the user is still holding on to: pending attachments, queued input, and
+	// per-agent drafts stay valid because the session did not change.
+	PreserveComposerState bool
 }
 
 func (SessionRestoredEvent) agentEvent() {}

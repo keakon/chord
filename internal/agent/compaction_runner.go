@@ -724,7 +724,7 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	a.emitToTUI(ToastEvent{Message: info, Level: "info"})
 	a.emitToTUI(a.compactionStatusEvent(CompactionStatusSucceeded, ""))
 	a.emitModelDownshiftAppliedNotice()
-	a.emitToTUI(SessionRestoredEvent{PreserveRequestActivity: true})
+	a.emitToTUI(SessionRestoredEvent{PreserveRequestActivity: true, PreserveComposerState: true})
 
 	tokensAfterApply := estimateMessagesTokens(a.ctxMgr, compactedMessages)
 	log.Infof("context compacted (async) mode=%v summary_mode=%v backend=%v profile=%v model=%v history_path=%v backup_path=%v archived_messages=%v evidence_artifacts=%v head_split=%v tokens_before=%v tokens_after=%v tokens_reclaimed=%v", modeLabel, d.SummaryMode, d.Backend, d.Profile, d.ModelRef, d.AbsHistoryPath, backupPath, d.ArchivedCount, d.EvidenceArtifacts, headSplit, tokensBeforeApply, tokensAfterApply, max(tokensBeforeApply-tokensAfterApply, 0))

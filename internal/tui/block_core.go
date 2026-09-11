@@ -304,6 +304,15 @@ func (b *Block) ToggleAtWidth(width int) bool {
 		if toolCardAlwaysExpanded(b.ToolName) {
 			return false
 		}
+		// The read call card's disclosure depends on the body it will render;
+		// refuse the toggle when there is nothing to expand so the card never
+		// flips state with no visible change and no marker. BlockToolResult
+		// renders through the generic card, whose marker rule already matches
+		// its own body. width <= 0 is a programmatic toggle (no layout width);
+		// keep it permissive.
+		if b.Type == BlockToolCall && b.ToolName == tools.NameRead && width > 0 && !b.readCardHasDisclosure(newWideHeaderToolCardMetrics(width).contentWidth) {
+			return false
+		}
 		if b.Type == BlockToolCall && toolUsesCompactDetailToggle(b.ToolName) {
 			if (b.ToolName == tools.NameGrep || b.ToolName == tools.NameGlob) && !b.searchResultCanExpand() {
 				return false
@@ -325,10 +334,17 @@ func (b *Block) ToggleAtWidth(width int) bool {
 			return true
 		}
 	case BlockStatus:
-		// Only runtime status cards fold. Sub-agent mailbox cards carry a
-		// worker model's message and have no disclosure marker, so space stays
-		// a no-op on them.
-		if !b.statusCardIsFoldable() {
+		// JOB RESULT cards fold to each job's headline. Every other status card
+		// folds to its badge alone only when the collapsed form hides something:
+		// a mailbox card carries the worker model's own message and stays fully
+		// visible, and a body that renders to a single line is already its own
+		// summary.
+		if b.isBackgroundResultCard() {
+			b.Collapsed = !b.Collapsed
+			b.InvalidateCache()
+			return true
+		}
+		if !b.statusCardBodyFoldable(b.statusCardBodyLines(width)) {
 			return false
 		}
 		b.Collapsed = !b.Collapsed

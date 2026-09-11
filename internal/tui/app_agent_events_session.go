@@ -52,6 +52,7 @@ func (m *Model) handleSessionAgentEvent(event agent.AgentEvent) (bool, agentEven
 		m.thinkingStreamMsgIndex = -1
 		m.thinkingStreamBlockIndex = 0
 		m.pendingSessionRestoreRebuild = true
+		m.preserveComposerStateOnNextRebuild = evt.PreserveComposerState
 		reason := "session_restored"
 		if m.startupRestorePending {
 			reason = "startup_restored"

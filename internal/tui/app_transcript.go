@@ -110,15 +110,19 @@ func (m *Model) rebuildViewportFromMessagesPreservingActivity(reason string, pre
 	m.cancelClipboardAttachmentPaste()
 	m.finalizeTurn()
 	preserveAttachments := m.preserveAttachmentsOnNextRebuild
+	preserveComposer := m.preserveComposerStateOnNextRebuild
 	m.pendingSessionRestoreRebuild = false
 	m.preserveAttachmentsOnNextRebuild = false
-	if !preserveAttachments {
+	m.preserveComposerStateOnNextRebuild = false
+	if !preserveComposer {
+		m.queuedDrafts = nil
+		m.agentComposerStates = nil
+		m.editingQueuedDraftID = ""
+		m.inflightDraft = nil
+	}
+	if !preserveAttachments && !preserveComposer {
 		m.attachments = nil
 	}
-	m.queuedDrafts = nil
-	m.agentComposerStates = nil
-	m.editingQueuedDraftID = ""
-	m.inflightDraft = nil
 	m.currentAssistantBlock = nil
 	m.assistantBlockAppended = false
 	m.currentThinkingBlock = nil

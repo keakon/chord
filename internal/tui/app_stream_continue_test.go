@@ -34,6 +34,16 @@ func TestHandleStreamContinueEventRendersStatusNotice(t *testing.T) {
 	if blocks[0].Type != BlockStatus {
 		t.Fatalf("block type = %v, want BlockStatus (not a user card)", blocks[0].Type)
 	}
+	if !blocks[0].Collapsed {
+		t.Fatalf("%q must start collapsed", streamContinueCardTitle)
+	}
+	collapsed := stripANSI(strings.Join(blocks[0].Render(80, ""), "\n"))
+	if !strings.Contains(collapsed, streamContinueCardTitle) || !strings.Contains(collapsed, "▸") {
+		t.Fatalf("rendered card = %q, want a collapsed %q notice", collapsed, streamContinueCardTitle)
+	}
+	if !blocks[0].ToggleAtWidth(80) || blocks[0].Collapsed {
+		t.Fatalf("toggling must expand the %q notice", streamContinueCardTitle)
+	}
 	plain := stripANSI(strings.Join(blocks[0].Render(80, ""), "\n"))
 	if !strings.Contains(plain, "continue directly from the interruption point") {
 		t.Fatalf("rendered card = %q, want the continuation message text", plain)

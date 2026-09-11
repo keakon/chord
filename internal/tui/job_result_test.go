@@ -361,20 +361,28 @@ func TestBackgroundResultCardFoldsOutputAndExpandsOnToggle(t *testing.T) {
 	}
 }
 
-func TestRuntimeStatusCardFoldsButMailboxCardDoesNot(t *testing.T) {
-	runtime := &Block{Type: BlockStatus, StatusTitle: "LOOP", Content: "Loop mode"}
-	if !runtime.ToggleAtWidth(100) || !runtime.Collapsed {
-		t.Fatal("runtime status cards must fold")
+func TestOnlyBackgroundResultStatusCardsFold(t *testing.T) {
+	// A runtime notice folds to a one-line summary when its body hides more
+	// than the first line.
+	notice := &Block{Type: BlockStatus, StatusTitle: "LOOP", Content: "Target:\n- finish current task"}
+	if !notice.ToggleAtWidth(100) || !notice.Collapsed {
+		t.Fatal("multi-line runtime notices must fold")
 	}
 
 	// A sub-agent mailbox card carries the worker model's own message, so it
 	// stays expanded and space is a no-op on it.
-	mailbox := &Block{Type: BlockStatus, StatusTitle: "AGENT MESSAGE", StatusKind: "progress", Content: "worker report"}
+	mailbox := &Block{Type: BlockStatus, StatusTitle: "AGENT MESSAGE", StatusKind: "progress", Content: "worker report\nmore detail"}
 	if mailbox.ToggleAtWidth(100) {
 		t.Fatal("mailbox status cards must not fold")
 	}
 	if mailbox.Collapsed {
 		t.Fatal("mailbox status cards must stay expanded")
+	}
+
+	// A JOB RESULT card keeps folding to each job's headline.
+	job := &Block{Type: BlockStatus, StatusTitle: backgroundResultCardTitle, Content: "✓ job-1 · task\nfinished"}
+	if !job.ToggleAtWidth(100) || !job.Collapsed {
+		t.Fatal("JOB RESULT cards must fold")
 	}
 }
 

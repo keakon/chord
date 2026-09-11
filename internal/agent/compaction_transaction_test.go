@@ -629,3 +629,34 @@ func TestReconcileLoadedModelDrivenCrashWindowHealsAppliedAnchorLoss(t *testing.
 		t.Fatalf("newer-than-transcript anchor must be preserved: %d", newer.LastModelDrivenApplyBatch)
 	}
 }
+
+// TestCompactionApplyEmitsComposerPreservation pins the producer side of the
+// composer-preservation contract. The TUI tests inject SessionRestoredEvent with
+// PreserveComposerState directly, so without this assertion removing the flag
+// from the compaction apply would keep them green while a durable compaction
+// stopped preserving the user's in-progress input.
+func TestCompactionApplyEmitsComposerPreservation(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	if err := a.applyCompactionDraft(&compactionDraft{
+		NewMessages:    []message.Message{{Role: message.RoleUser, Content: "[Context Summary]\nsummary"}},
+		Index:          1,
+		AbsHistoryPath: filepath.Join(a.sessionDir, "history-1.md"),
+		SummaryMode:    "truncate_only",
+		ModelRef:       "fallback",
+		ArchivedCount:  4,
+	}); err != nil {
+		t.Fatalf("applyCompactionDraft: %v", err)
+	}
+	var restored *SessionRestoredEvent
+	for _, event := range drainAgentEvents(a.outputCh) {
+		if evt, ok := event.(SessionRestoredEvent); ok {
+			restored = &evt
+		}
+	}
+	if restored == nil {
+		t.Fatal("a successful compaction apply must emit SessionRestoredEvent")
+	}
+	if !restored.PreserveRequestActivity || !restored.PreserveComposerState {
+		t.Fatalf("SessionRestoredEvent = %+v, want both preservation flags set", *restored)
+	}
+}

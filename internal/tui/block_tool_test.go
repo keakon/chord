@@ -2786,8 +2786,14 @@ func TestToolStatusPrefixesUseSemanticColors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			joinedANSI := strings.Join(tt.block.Render(80, ""), "\n")
 			joinedPlain := stripANSI(joinedANSI)
-			if !strings.Contains(joinedPlain, tt.marker+" "+tt.block.ToolName) {
-				t.Fatalf("expected plain prefix %q; got:\n%s", tt.marker+" "+tt.block.ToolName, joinedPlain)
+			// A card whose body can be folded carries a disclosure marker
+			// between the status glyph and the tool name; the color assertion
+			// below still pins the status glyph itself.
+			prefix := tt.marker + " " + tt.block.ToolName
+			if !strings.Contains(joinedPlain, prefix) &&
+				!strings.Contains(joinedPlain, tt.marker+" "+toolDisclosureCollapsed+" "+tt.block.ToolName) &&
+				!strings.Contains(joinedPlain, tt.marker+" "+toolDisclosureExpanded+" "+tt.block.ToolName) {
+				t.Fatalf("expected plain prefix %q (optionally behind a disclosure marker); got:\n%s", prefix, joinedPlain)
 			}
 			if !strings.Contains(joinedANSI, tt.ansi) {
 				t.Fatalf("expected semantic color sequence %q; got:\n%q", tt.ansi, joinedANSI)
@@ -4796,6 +4802,66 @@ func TestReadCallRendersSingleBlankLineWithoutPanic(t *testing.T) {
 	}
 	if strings.Contains(plain, "panic") {
 		t.Fatalf("unexpected panic text in rendered output: %s", plain)
+	}
+}
+
+// TestReadCallDisclosureMatchesToggleableBody pins that the read card's ▸/▾
+// marker and its toggle agree: a card with a body the toggle reveals shows a
+// marker, and a card with nothing to reveal neither shows one nor flips state.
+func TestReadCallDisclosureMatchesToggleableBody(t *testing.T) {
+	tests := []struct {
+		name           string
+		block          *Block
+		wantMarker     bool
+		wantToggleable bool
+	}{
+		{
+			name: "legacy success with body",
+			block: &Block{
+				ID: 1, Type: BlockToolCall, ToolName: tools.NameRead,
+				Content: `{"path":"a.go"}`, ResultDone: true, Collapsed: true,
+				ResultContent: "package main\n",
+			},
+			wantMarker: true, wantToggleable: true,
+		},
+		{
+			name: "success without body",
+			block: &Block{
+				ID: 2, Type: BlockToolCall, ToolName: tools.NameRead,
+				Content: `{"path":"a.go"}`, ResultDone: true, Collapsed: true,
+			},
+			wantMarker: false, wantToggleable: false,
+		},
+		{
+			name: "single-line error",
+			block: &Block{
+				ID: 3, Type: BlockToolCall, ToolName: tools.NameRead,
+				Content: `{"path":"a.go"}`, ResultDone: true, Collapsed: true,
+				ResultStatus: agent.ToolResultStatusError, ResultContent: "Error: denied",
+			},
+			wantMarker: true, wantToggleable: true,
+		},
+		{
+			name: "multi-line error already fully shown",
+			block: &Block{
+				ID: 4, Type: BlockToolCall, ToolName: tools.NameRead,
+				Content: `{"path":"a.go"}`, ResultDone: true, Collapsed: true,
+				ResultStatus: agent.ToolResultStatusError, ResultContent: "Error: first\nsecond",
+			},
+			wantMarker: false, wantToggleable: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plain := stripANSI(strings.Join(tt.block.Render(80, ""), "\n"))
+			hasMarker := strings.Contains(plain, toolDisclosureCollapsed) || strings.Contains(plain, toolDisclosureExpanded)
+			if hasMarker != tt.wantMarker {
+				t.Fatalf("marker present = %v, want %v; render:\n%s", hasMarker, tt.wantMarker, plain)
+			}
+			if got := tt.block.ToggleAtWidth(80); got != tt.wantToggleable {
+				t.Fatalf("ToggleAtWidth = %v, want %v", got, tt.wantToggleable)
+			}
+		})
 	}
 }
 
