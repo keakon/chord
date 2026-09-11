@@ -299,16 +299,10 @@ func (b *Block) ToggleAtWidth(width int) bool {
 			return true
 		}
 	case BlockToolCall, BlockToolResult:
-		// Delete and the always-expanded report cards keep their full content
-		// visible; the disclosure hint only means the card can be expanded or
-		// collapsed.
-		if b.Type == BlockToolCall && (b.ToolName == tools.NameDelete || toolCardAlwaysExpanded(b.ToolName)) {
+		// The always-expanded cards keep their full content visible; a
+		// disclosure hint would only offer a state they cannot have.
+		if toolCardAlwaysExpanded(b.ToolName) {
 			return false
-		}
-		if b.Type == BlockToolCall && (b.ToolName == tools.NameWrite || b.ToolName == tools.NameRead) {
-			b.Collapsed = !b.Collapsed
-			b.InvalidateCache()
-			return true
 		}
 		if b.Type == BlockToolCall && toolUsesCompactDetailToggle(b.ToolName) {
 			if (b.ToolName == tools.NameGrep || b.ToolName == tools.NameGlob) && !b.searchResultCanExpand() {
@@ -330,6 +324,16 @@ func (b *Block) ToggleAtWidth(width int) bool {
 			b.InvalidateCache()
 			return true
 		}
+	case BlockStatus:
+		// Only runtime status cards fold. Sub-agent mailbox cards carry a
+		// worker model's message and have no disclosure marker, so space stays
+		// a no-op on them.
+		if !b.statusCardIsFoldable() {
+			return false
+		}
+		b.Collapsed = !b.Collapsed
+		b.InvalidateCache()
+		return true
 	case BlockCompactionSummary:
 		// Compaction summary cards are always fully expanded: the archived
 		// context (and any storage facts) must stay visible, matching the

@@ -100,12 +100,7 @@ func (m *Model) ensureToolCallBlock(id, name, argsJSON, agentID string, state ag
 	if includeArgProgress {
 		displayArgs = streamingToolDisplayArgs(name, argsJSON, "")
 	}
-	collapsed := !toolDefaultsExpanded(name)
-	if includeArgProgress && name == tools.NameApplyPatch {
-		// The streaming patch preview is the card's primary content while the
-		// arguments are still arriving, so keep the body visible from the start.
-		collapsed = false
-	}
+	collapsed := !toolCardAlwaysExpanded(name)
 	block := &Block{
 		ID:                 m.nextBlockID,
 		Type:               BlockToolCall,
@@ -118,7 +113,7 @@ func (m *Model) ensureToolCallBlock(id, name, argsJSON, agentID string, state ag
 		ToolExecutionState: state,
 		StartedAt:          time.Now(),
 	}
-	if toolDefaultsExpanded(name) && name != tools.NameDelegate {
+	if toolCardAlwaysExpanded(name) && name != tools.NameDelegate {
 		block.ToolCallDetailExpanded = true
 	}
 	if includeArgProgress {
@@ -379,7 +374,7 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 		m.updateViewportBlock(block)
 		m.markBlockSettled(block)
 	} else {
-		block := &Block{ID: m.nextBlockID, Type: BlockToolResult, Content: toolExpandedResultContent(evt.Name, evt.Result), RawArgs: evt.ArgsJSON, ToolName: evt.Name, ToolID: evt.CallID, ResultContent: evt.Result, ResultPayload: evt.Payload, ResultNotes: append([]string(nil), evt.Notes...), ResultStatus: evt.Status, ResultDone: true, Collapsed: true, AgentID: evt.AgentID, Audit: evt.Audit.Clone(), ImageParts: imagePartsFromContentParts(evt.Parts), RecoveryState: evt.RecoveryState}
+		block := &Block{ID: m.nextBlockID, Type: BlockToolResult, Content: toolExpandedResultContent(evt.Name, evt.Result), RawArgs: evt.ArgsJSON, ToolName: evt.Name, ToolID: evt.CallID, ResultContent: evt.Result, ResultPayload: evt.Payload, ResultNotes: append([]string(nil), evt.Notes...), ResultStatus: evt.Status, ResultDone: true, Collapsed: !toolCardAlwaysExpanded(evt.Name), AgentID: evt.AgentID, Audit: evt.Audit.Clone(), ImageParts: imagePartsFromContentParts(evt.Parts), RecoveryState: evt.RecoveryState}
 		m.nextBlockID++
 		m.appendViewportBlock(block)
 		m.markBlockSettled(block)
@@ -628,7 +623,7 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			block.ToolProgress = nil
 			updated = true
 		}
-		if evt.State == agent.ToolCallExecutionStateQueued && !toolDefaultsExpanded(block.ToolName) && block.ToolName != tools.NameApplyPatch {
+		if evt.State == agent.ToolCallExecutionStateQueued && !toolCardAlwaysExpanded(block.ToolName) {
 			block.Collapsed = true
 		}
 		if updated {

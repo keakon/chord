@@ -62,8 +62,11 @@ func TestBackgroundResultAppendedEventAppendsDurableStatusBlock(t *testing.T) {
 	if block.StatusTitle != "JOB RESULT" {
 		t.Fatalf("block.StatusTitle = %q, want JOB RESULT", block.StatusTitle)
 	}
+	if !block.Collapsed {
+		t.Fatal("background result card must start collapsed")
+	}
 	rendered := stripANSI(strings.Join(block.Render(100, ""), "\n"))
-	for _, want := range []string{"JOB RESULT #1", "✓ job-1 · Run production build", "Completed successfully"} {
+	for _, want := range []string{"JOB RESULT #1", "✓ ▸ job-1 · Run production build", "Completed successfully"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("rendered background result missing %q:\n%s", want, rendered)
 		}
@@ -82,10 +85,30 @@ func TestBackgroundResultAppendedEventRendersFailureInBodyUnderStableLabel(t *te
 	if !ok {
 		t.Fatal("expected background result block")
 	}
+	if !block.Collapsed {
+		t.Fatal("background result card must start collapsed")
+	}
+	collapsed := stripANSI(strings.Join(block.Render(110, ""), "\n"))
+	for _, want := range []string{
+		"JOB RESULT #1",
+		"✗ ▸ job-1 · Start integration service",
+		"Error: timed out after 120s",
+	} {
+		if !strings.Contains(collapsed, want) {
+			t.Fatalf("collapsed failure missing %q:\n%s", want, collapsed)
+		}
+	}
+	if strings.Contains(collapsed, "Relevant output:") || strings.Contains(collapsed, "INFO: Application startup complete.") {
+		t.Fatalf("collapsed failure leaked its output body:\n%s", collapsed)
+	}
+
+	if !block.ToggleAtWidth(110) || block.Collapsed {
+		t.Fatal("toggling the failure card must expand it")
+	}
 	rendered := stripANSI(strings.Join(block.Render(110, ""), "\n"))
 	for _, want := range []string{
 		"JOB RESULT #1",
-		"✗ job-1 · Start integration service",
+		"✗ ▾ job-1 · Start integration service",
 		"Error: timed out after 120s",
 		"Relevant output:",
 		"INFO: Application startup complete.",
@@ -129,6 +152,9 @@ func TestBackgroundResultAppendedEventHighlightsMarkdownOutputFence(t *testing.T
 	if !ok {
 		t.Fatal("expected background result block")
 	}
+	if !block.ToggleAtWidth(110) || block.Collapsed {
+		t.Fatal("expected the background result card to expand")
+	}
 	rendered := strings.Join(block.Render(110, ""), "\n")
 	if !strings.Contains(stripANSI(rendered), "DIFF") {
 		t.Fatalf("rendered fenced output missing language label:\n%s", stripANSI(rendered))
@@ -153,8 +179,11 @@ func TestMessagesToBlocksRestoresBackgroundResultCard(t *testing.T) {
 	if block.Type != BlockStatus || block.StatusTitle != "JOB RESULT" || block.BackgroundObjectID != "job-9" {
 		t.Fatalf("restored block = %#v, want JOB RESULT status for job-9", block)
 	}
+	if !block.Collapsed {
+		t.Fatal("restored background result card must start collapsed")
+	}
 	rendered := stripANSI(strings.Join(block.Render(100, ""), "\n"))
-	if !strings.Contains(rendered, "✓ job-9 · Run production build") || strings.Contains(rendered, "[Job job-9 result]") {
+	if !strings.Contains(rendered, "✓ ▸ job-9 · Run production build") || strings.Contains(rendered, "[Job job-9 result]") {
 		t.Fatalf("restored background result rendered incorrectly:\n%s", rendered)
 	}
 }
@@ -294,5 +323,110 @@ func TestBackgroundResultCardParsesPurposeAndCommand(t *testing.T) {
 	}
 	if !strings.Contains(block.Content, "Relevant output:") || !strings.Contains(block.Content, "ok") {
 		t.Fatalf("card content = %q, want the relevant output section preserved", block.Content)
+	}
+}
+
+func TestBackgroundResultCardFoldsOutputAndExpandsOnToggle(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 30)
+	raw := "[Job job-fold finished]\n\nDescription: Run folded tests\nStatus: completed (exit code 0)\n\nRelevant output:\nline one\nline two"
+
+	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("", "subagent-fold", raw)})
+	block, ok := m.viewport.FindStatusBlockByBackgroundObject("job-fold")
+	if !ok {
+		t.Fatal("expected background result block")
+	}
+	if !block.Collapsed {
+		t.Fatal("background result card must start collapsed")
+	}
+	collapsed := stripANSI(strings.Join(block.Render(110, ""), "\n"))
+	for _, want := range []string{"✓ ▸ job-fold · Run folded tests", "Completed successfully"} {
+		if !strings.Contains(collapsed, want) {
+			t.Fatalf("collapsed card missing %q:\n%s", want, collapsed)
+		}
+	}
+	for _, hidden := range []string{"Relevant output:", "line one", "line two"} {
+		if strings.Contains(collapsed, hidden) {
+			t.Fatalf("collapsed card leaked %q:\n%s", hidden, collapsed)
+		}
+	}
+
+	if !block.ToggleAtWidth(110) || block.Collapsed {
+		t.Fatal("toggling must expand the card")
+	}
+	expanded := stripANSI(strings.Join(block.Render(110, ""), "\n"))
+	for _, want := range []string{"✓ ▾ job-fold · Run folded tests", "Relevant output:", "line one", "line two"} {
+		if !strings.Contains(expanded, want) {
+			t.Fatalf("expanded card missing %q:\n%s", want, expanded)
+		}
+	}
+}
+
+func TestRuntimeStatusCardFoldsButMailboxCardDoesNot(t *testing.T) {
+	runtime := &Block{Type: BlockStatus, StatusTitle: "LOOP", Content: "Loop mode"}
+	if !runtime.ToggleAtWidth(100) || !runtime.Collapsed {
+		t.Fatal("runtime status cards must fold")
+	}
+
+	// A sub-agent mailbox card carries the worker model's own message, so it
+	// stays expanded and space is a no-op on it.
+	mailbox := &Block{Type: BlockStatus, StatusTitle: "AGENT MESSAGE", StatusKind: "progress", Content: "worker report"}
+	if mailbox.ToggleAtWidth(100) {
+		t.Fatal("mailbox status cards must not fold")
+	}
+	if mailbox.Collapsed {
+		t.Fatal("mailbox status cards must stay expanded")
+	}
+}
+
+// CHANGELOG.md's Breaking Changes promise what an already-persisted spawn result
+// renders as after the upgrade, and the filter that used to hide the retired
+// "Review this result before continuing." line was deliberately deleted rather
+// than kept as a compatibility shim. Pin both halves of that promise so the
+// documented behaviour cannot rot silently.
+func TestMessagesToBlocksRendersLegacySpawnResult(t *testing.T) {
+	legacyJob := "[Background job job-1 completed]\n\nDescription: Start integration service\n" +
+		"Status: finished (error: command timed out after 120s: exit status 143)\n" +
+		"Review this result before continuing.\n\nRelevant output:\nINFO: Application startup complete."
+	legacyService := "[Background svc-3 completed]\n\nDescription: Start dev server\n" +
+		"Status: finished\nReview this result before continuing."
+
+	nextID := 0
+	blocks := messagesToBlocks([]message.Message{
+		{Role: message.RoleUser, Kind: message.KindBackgroundResult, Content: legacyJob},
+		{Role: message.RoleUser, Kind: message.KindBackgroundResult, Content: legacyService},
+	}, &nextID)
+
+	if len(blocks) != 2 {
+		t.Fatalf("len(blocks) = %d, want 2", len(blocks))
+	}
+	jobBlock, serviceBlock := blocks[0], blocks[1]
+	if jobBlock.BackgroundObjectID != "job-1" {
+		t.Fatalf("legacy job id = %q, want job-1 kept", jobBlock.BackgroundObjectID)
+	}
+	if serviceBlock.BackgroundObjectID != "" {
+		t.Fatalf("legacy service id = %q, want the retired svc- prefix dropped", serviceBlock.BackgroundObjectID)
+	}
+	if serviceBlock.StatusTitle != backgroundResultCardTitle {
+		t.Fatalf("legacy service result must still render as a JOB RESULT card, got %q", serviceBlock.StatusTitle)
+	}
+
+	folded := stripANSI(strings.Join(jobBlock.Render(120, ""), "\n"))
+	for _, want := range []string{"job-1", "Start integration service", "Error: command timed out"} {
+		if !strings.Contains(folded, want) {
+			t.Fatalf("folded legacy card missing %q:\n%s", want, folded)
+		}
+	}
+	if strings.Contains(folded, "Review this result before continuing.") {
+		t.Fatalf("a folded card hides its body lines:\n%s", folded)
+	}
+
+	if !jobBlock.ToggleAtWidth(120) || jobBlock.Collapsed {
+		t.Fatal("toggling must expand the legacy card")
+	}
+	expanded := stripANSI(strings.Join(jobBlock.Render(120, ""), "\n"))
+	for _, want := range []string{"Review this result before continuing.", "INFO: Application startup complete."} {
+		if !strings.Contains(expanded, want) {
+			t.Fatalf("expanded legacy card missing %q:\n%s", want, expanded)
+		}
 	}
 }

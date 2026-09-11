@@ -130,10 +130,8 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	// content (diffs, previews, target summaries) deliberately uses the full
 	// cardWidth-4 instead, clipping per line so more file content shows.
 	textWrap := max(min(cardWidth-4, maxProseWidth), 10)
-	hasDisclosure := !b.toolResultIsCancelled() && (strings.TrimSpace(displayDiff) != "" || hasOperationSummaries || len(applyPatchTargets) > 0)
-	if b.ResultDone && hasDisclosure {
-		prefix = renderToolDisclosurePrefix(prefix, !b.Collapsed)
-	}
+	// Edit and apply_patch cards are always expanded, so the header carries the
+	// +/- summary and no disclosure marker is needed.
 	var result []string
 	replaceArgs, hasReplaceArgs := replaceEditArgs{}, false
 	var headerOpts []string
@@ -165,12 +163,6 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	headerLine := appendSearchHeaderSummary(renderToolHeaderLine(prefix, b.ToolName), filePath, mergeHeaderOptions("", headerOpts), headerSummary, cardWidth-4)
 	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, false, b.toolExecutionIsRunning())
 	result = append(result, headerLine)
-	if b.Collapsed {
-		if kind := toolOutcomeKindOf(b); kind != toolOutcomeNone {
-			appendToolOutcomeBody(&result, kind, toolDisplayResultContent(b), max(textWrap-4, 10), false)
-		}
-		return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
-	}
 	diffLines := strings.Split(displayDiff, "\n")
 	diffFileCount := unifiedDiffFileCount(diffLines)
 	groupedApplyPatchDiff := b.ToolName == tools.NameApplyPatch && (diffFileCount > 1 || hasOperationSummaries && diffFileCount > 0)

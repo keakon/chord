@@ -198,8 +198,13 @@ func TestCollapsedShellCardNamesItsJobID(t *testing.T) {
 		ToolCallDetailExpanded: false,
 	}
 	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
-	if !strings.Contains(plain, "Background job job-64") {
+	if !strings.Contains(plain, "↳ job-64") {
 		t.Fatalf("collapsed shell card should name its job id; got:\n%s", plain)
+	}
+	// The header already marks the run as background, so the handle row must
+	// not re-label itself as a status.
+	if strings.Contains(plain, "Status") || strings.Contains(plain, "Background job") {
+		t.Fatalf("collapsed shell card should show the bare job handle; got:\n%s", plain)
 	}
 	// The rest of the result body stays behind the disclosure toggle.
 	if strings.Contains(plain, "promoted after the foreground budget") {

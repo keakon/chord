@@ -77,9 +77,11 @@ func appendBashCollapsedSummary(result *[]string, b *Block, vals map[string]stri
 	if !b.toolResultIsError() && !b.toolResultIsCancelled() {
 		// A successful background start must still surface its job id: it is
 		// the handle every later job_output / job_kill call needs, and the
-		// collapsed card hides the result body that carries it.
+		// collapsed card hides the result body that carries it. The header
+		// already carries the command and its background option, so the row
+		// names the handle alone instead of restating it as a status.
 		if id := parseJobResultID(b.ResultContent); id != "" {
-			*result = append(*result, toolSummaryLine("Background job "+id))
+			*result = append(*result, toolFieldMarker(ToolResultExpandedStyle, id))
 		}
 		return
 	}
@@ -1064,6 +1066,21 @@ func (b *Block) renderToolPrefixForExpanded(spinnerFrame string, compactExpanded
 		// simply pending.
 		return pendingToolGlyph
 	}
+	if b.ToolName == tools.NameHandoff {
+		// The handoff card is always expanded and has no detail toggle, so it
+		// must never show a disclosure marker: pending until the user decides,
+		// then the terminal state.
+		if b.ResultDone || strings.TrimSpace(b.ResultContent) != "" {
+			if b.toolResultIsError() || handoffRejectedReason(b.ResultContent) != "" {
+				return "✗"
+			}
+			if b.toolResultIsCancelled() {
+				return "◌"
+			}
+			return "✓"
+		}
+		return pendingToolGlyph
+	}
 	if toolUsesCompactDetailToggle(b.ToolName) {
 		if !b.ResultDone {
 			if compactExpanded {
@@ -1075,9 +1092,6 @@ func (b *Block) renderToolPrefixForExpanded(spinnerFrame string, compactExpanded
 			return "✗"
 		}
 		if b.ToolName == tools.NameDone && doneResultIsRejected(b.ResultContent) {
-			return "✗"
-		}
-		if b.ToolName == tools.NameHandoff && handoffRejectedReason(b.ResultContent) != "" {
 			return "✗"
 		}
 		if b.toolResultIsCancelled() {
@@ -1096,6 +1110,10 @@ func (b *Block) renderToolPrefixForExpanded(spinnerFrame string, compactExpanded
 			return "◌"
 		}
 		return "✓"
+	}
+	if toolCardAlwaysExpanded(b.ToolName) {
+		// Always-expanded cards have no fold state to advertise.
+		return pendingToolGlyph
 	}
 	if b.Collapsed {
 		return toolDisclosureCollapsed

@@ -1161,7 +1161,7 @@ func TestRenderFileDiffCallExpandedShowsAllLinesPastFormerLimit(t *testing.T) {
 	}
 
 	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	for _, want := range []string{"old value", "new value", "▾ edit example.go"} {
+	for _, want := range []string{"old value", "new value", "edit example.go"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected expanded diff to contain %q, got:\n%s", want, plain)
 		}
@@ -1332,14 +1332,13 @@ func TestRelToProcessWorkingDir(t *testing.T) {
 // read/grep/glob/write: path, parameters and the +/- line count summary merge
 // into the header instead of a second "↳" body line.
 
-func TestEditCollapsedSingleHeaderLineMergesDiffSummary(t *testing.T) {
+func TestEditCardShowsDiffSummaryAndBodyWithoutFolding(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
 		ToolName:      tools.NameEdit,
 		Content:       `{"path":"src/demo.go","patch":"@@\n-old\n+new\n"}`,
-		Collapsed:     true,
 		ResultDone:    true,
 		ResultStatus:  agent.ToolResultStatusSuccess,
 		ResultContent: "Applied patch to src/demo.go (+1 -1)",
@@ -1347,21 +1346,21 @@ func TestEditCollapsedSingleHeaderLineMergesDiffSummary(t *testing.T) {
 	}
 
 	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if !strings.Contains(plain, "✓ ▸ edit src/demo.go · +1 -1 lines") {
-		t.Fatalf("collapsed edit must be a single header line with the diff summary; got:\n%s", plain)
+	if !strings.Contains(plain, "✓ edit src/demo.go · +1 -1 lines") {
+		t.Fatalf("edit header must carry the diff summary; got:\n%s", plain)
 	}
-	if strings.Contains(plain, "↳") || strings.Contains(plain, "Applied patch") {
-		t.Fatalf("collapsed edit must not keep a second body line or the verbatim result; got:\n%s", plain)
+	if !strings.Contains(plain, "-old") || !strings.Contains(plain, "+new") {
+		t.Fatalf("edit card must show the diff body; got:\n%s", plain)
 	}
-
-	block.ToggleAtWidth(120)
-	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if !strings.Contains(expanded, "✓ ▾ edit src/demo.go · +1 -1 lines") || !strings.Contains(expanded, "-old") || !strings.Contains(expanded, "+new") {
-		t.Fatalf("expanded edit should show the expanded disclosure and the diff; got:\n%s", expanded)
+	if strings.Contains(plain, "▸") || strings.Contains(plain, "▾") {
+		t.Fatalf("edit card must not show a disclosure marker; got:\n%s", plain)
+	}
+	if block.ToggleAtWidth(120) {
+		t.Fatal("space must be a no-op on the always-expanded edit card")
 	}
 }
 
-func TestApplyPatchCollapsedSingleHeaderLineMergesFileAndDiffSummary(t *testing.T) {
+func TestApplyPatchCardShowsFileAndDiffSummaryWithoutFolding(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	args := `{"patch":"*** Begin Patch\n*** Update File: src/demo.go\n@@\n-old\n+new\n*** End Patch"}`
 	block := &Block{
@@ -1370,7 +1369,6 @@ func TestApplyPatchCollapsedSingleHeaderLineMergesFileAndDiffSummary(t *testing.
 		ToolName:      tools.NameApplyPatch,
 		Content:       applyPatchToolDisplayArgs(args),
 		RawArgs:       args,
-		Collapsed:     true,
 		ResultDone:    true,
 		ResultStatus:  agent.ToolResultStatusSuccess,
 		ResultContent: "Applied patch to src/demo.go (+1 -1)",
@@ -1378,17 +1376,17 @@ func TestApplyPatchCollapsedSingleHeaderLineMergesFileAndDiffSummary(t *testing.
 	}
 
 	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if !strings.Contains(plain, "✓ ▸ apply_patch src/demo.go · 1 file · +1 -1 lines") {
-		t.Fatalf("collapsed apply_patch must merge file/diff counts into the header; got:\n%s", plain)
+	if !strings.Contains(plain, "✓ apply_patch src/demo.go · 1 file · +1 -1 lines") {
+		t.Fatalf("apply_patch header must merge file/diff counts; got:\n%s", plain)
 	}
-	if strings.Contains(plain, "↳") || strings.Contains(plain, "Applied patch") {
-		t.Fatalf("collapsed apply_patch must not keep a second body line or the verbatim result; got:\n%s", plain)
+	if !strings.Contains(plain, "-old") || !strings.Contains(plain, "+new") {
+		t.Fatalf("apply_patch card must show the diff body; got:\n%s", plain)
 	}
-
-	block.ToggleAtWidth(120)
-	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if !strings.Contains(expanded, "✓ ▾ apply_patch src/demo.go · 1 file · +1 -1 lines") || !strings.Contains(expanded, "-old") || !strings.Contains(expanded, "+new") {
-		t.Fatalf("expanded apply_patch should keep the diff summary inline and show the diff; got:\n%s", expanded)
+	if strings.Contains(plain, "▸") || strings.Contains(plain, "▾") {
+		t.Fatalf("apply_patch card must not show a disclosure marker; got:\n%s", plain)
+	}
+	if block.ToggleAtWidth(120) {
+		t.Fatal("space must be a no-op on the always-expanded apply_patch card")
 	}
 }
 
@@ -1402,17 +1400,17 @@ func TestEditDiffSummaryOmitsZeroDirection(t *testing.T) {
 		{
 			name: "pure additions",
 			diff: "--- src/demo.go\n+++ src/demo.go\n@@ -1,1 +1,3 @@\n old\n+new\n+more\n",
-			want: "✓ ▸ edit src/demo.go · +2 lines",
+			want: "✓ edit src/demo.go · +2 lines",
 		},
 		{
 			name: "pure deletions",
 			diff: "--- src/demo.go\n+++ src/demo.go\n@@ -1,3 +1,1 @@\n-old\n-gone\n new\n",
-			want: "✓ ▸ edit src/demo.go · -2 lines",
+			want: "✓ edit src/demo.go · -2 lines",
 		},
 		{
 			name: "single addition",
 			diff: "--- src/demo.go\n+++ src/demo.go\n@@ -1,1 +1,2 @@\n old\n+new\n",
-			want: "✓ ▸ edit src/demo.go · +1 line",
+			want: "✓ edit src/demo.go · +1 line",
 		},
 	}
 	for _, tc := range cases {
@@ -1422,7 +1420,6 @@ func TestEditDiffSummaryOmitsZeroDirection(t *testing.T) {
 				Type:          BlockToolCall,
 				ToolName:      tools.NameEdit,
 				Content:       `{"path":"src/demo.go","patch":"@@\n-old\n+new\n"}`,
-				Collapsed:     true,
 				ResultDone:    true,
 				ResultStatus:  agent.ToolResultStatusSuccess,
 				ResultContent: "Applied patch to src/demo.go",

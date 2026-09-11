@@ -107,43 +107,39 @@ func newDoneToolCardMetrics(width int) toolCardMetrics {
 const pendingToolGlyph = "⧗"
 
 func toolUsesCompactDetailToggle(toolName string) bool {
-	// Listed tools have no compact-detail layer: space folds the whole card
-	// through b.Collapsed (Write/Read/Edit/ApplyPatch and the generic branch),
-	// or is a no-op for the always-expanded cards (Delete/TodoWrite/Question/
-	// Delegate). Cancel renders its collapsed and expanded bodies from
-	// b.Collapsed (renderCancelCall), so it must fold the whole card too;
-	// toggling ToolCallDetailExpanded would flip only the header marker while
-	// the card body stayed put.
+	// Listed tools have no compact-detail layer: their dedicated renderers own
+	// the whole card (Write/Read/Edit/ApplyPatch/TodoWrite/Handoff/Delete/
+	// Question/Delegate), while Cancel renders its folded and expanded bodies
+	// straight from b.Collapsed. Toggling ToolCallDetailExpanded would flip
+	// only the header marker while the card body stayed put.
 	switch toolName {
-	case tools.NameWrite, tools.NameEdit, tools.NameApplyPatch, tools.NameDelete, tools.NameRead, tools.NameTodoWrite, tools.NameQuestion, tools.NameDelegate, tools.NameCancel:
+	case tools.NameWrite, tools.NameEdit, tools.NameApplyPatch, tools.NameDelete, tools.NameRead, tools.NameTodoWrite, tools.NameHandoff, tools.NameQuestion, tools.NameDelegate, tools.NameCancel:
 		return false
 	}
 	return true
 }
 
-// toolCardAlwaysExpanded names the cards that render their whole body under a
-// bare tool-name header: report-style cards (done / complete / escalate /
-// compact_context), the delegation card (delegate), the interactive card
-// (question) and the notification card (notify). Their subject is prose the
-// body already renders in full, so a disclosure marker would only offer to
-// hide content the header no longer summarizes: pressing space on them is a
-// no-op, exactly like Delete cards.
+// toolCardAlwaysExpanded names the cards that must keep their whole body
+// visible: report-style cards (done / complete / escalate / compact_context),
+// the delegation card (delegate), the interactive card (question), the
+// notification card (notify), and the cards whose body is content the model
+// authored (write / edit / apply_patch / todo_write / handoff / delete). Cards
+// that render tool output the reader consults on demand — read, grep, glob,
+// shell, cancel and generic calls — fold instead, and start folded.
+// A disclosure marker would only offer to hide content the header cannot
+// summarize, so pressing space on them is a no-op.
+//
+// This is the single source of truth for the fold decision: it drives both the
+// state a card is built with and whether ToggleAtWidth may change it. Keep them
+// on one predicate — a card that starts expanded but can still be folded (or the
+// reverse) has no coherent rendering.
 func toolCardAlwaysExpanded(toolName string) bool {
 	switch toolName {
 	case tools.NameDone, tools.NameComplete, tools.NameEscalate,
 		tools.NameCompactContext, tools.NameDelegate, tools.NameQuestion,
-		tools.NameNotify:
-		return true
-	}
-	return false
-}
-
-func toolDefaultsExpanded(toolName string) bool {
-	// Completion reports (complete/escalate) and delegated task cards render
-	// their full content by default; the user collapses them explicitly with
-	// space. Every other card starts collapsed.
-	switch toolName {
-	case tools.NameComplete, tools.NameEscalate, tools.NameDelegate:
+		tools.NameNotify, tools.NameWrite, tools.NameEdit,
+		tools.NameApplyPatch, tools.NameTodoWrite, tools.NameHandoff,
+		tools.NameDelete:
 		return true
 	}
 	return false

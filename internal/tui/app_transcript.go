@@ -580,9 +580,9 @@ func newTranscriptToolCallBlock(nextID int, tc message.ToolCall) *Block {
 		RawArgs:   argsStr,
 		ToolName:  toolName,
 		ToolID:    tc.ID,
-		Collapsed: !toolDefaultsExpanded(toolName),
+		Collapsed: !toolCardAlwaysExpanded(toolName),
 	}
-	if toolDefaultsExpanded(toolName) && toolName != tools.NameDelegate {
+	if toolCardAlwaysExpanded(toolName) && toolName != tools.NameDelegate {
 		b.ToolCallDetailExpanded = true
 	}
 	applyDoneReportFromArgs(b, argsStr, "")
@@ -649,9 +649,6 @@ func applyStableToolResultToBlock(block *Block, result transcriptToolResult) {
 	if result.diff != "" {
 		block.Diff = result.diff
 	}
-	if shouldExpandToolResult(block.ToolName) {
-		block.Collapsed = false
-	}
 	applyTaskHandleFromResult(block)
 }
 
@@ -692,6 +689,7 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 					BackgroundCopyContent: msg.Content,
 					BackgroundObjectID:    backgroundID,
 					MsgIndex:              msgIdx,
+					Collapsed:             true,
 				})
 				*nextID++
 				continue
@@ -717,6 +715,7 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 					StatusTitle: title,
 					Content:     body,
 					MsgIndex:    msgIdx,
+					Collapsed:   true,
 				})
 				*nextID++
 				continue
@@ -731,6 +730,7 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 					StatusTitle: streamContinueCardTitle,
 					Content:     msg.Content,
 					MsgIndex:    msgIdx,
+					Collapsed:   true,
 				})
 				*nextID++
 				continue
@@ -746,6 +746,7 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 					Content:     stripContextNoticeReminder(contentOrPartsText(msg)),
 					MsgIndex:    msgIdx,
 					NoticeLevel: msg.NoticeLevel,
+					Collapsed:   true,
 				})
 				*nextID++
 				continue

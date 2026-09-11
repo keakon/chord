@@ -1279,7 +1279,18 @@ func TestHandleAgentEventLoopContinueStatusCardBodyIsIndented(t *testing.T) {
 	if blocks[0].StatusTitle != "LOOP CONTINUE" {
 		t.Fatalf("StatusTitle = %q, want %q", blocks[0].StatusTitle, "LOOP CONTINUE")
 	}
-	plain := stripANSI(strings.Join(blocks[0].Render(80, ""), "\n"))
+	card := blocks[0]
+	if !card.Collapsed {
+		t.Fatal("runtime loop notices must start folded")
+	}
+	folded := stripANSI(strings.Join(card.Render(80, ""), "\n"))
+	if !strings.Contains(folded, "  Unresolved work:") || !strings.Contains(folded, "  • pending verification") || !strings.Contains(folded, "more lines hidden.") {
+		t.Fatalf("folded card = %q, want the indented summary and a hidden-line hint", folded)
+	}
+	if !card.ToggleAtWidth(80) || card.Collapsed {
+		t.Fatal("expected the loop notice to expand")
+	}
+	plain := stripANSI(strings.Join(card.Render(80, ""), "\n"))
 	if !strings.Contains(plain, "  Unresolved work:") || !strings.Contains(plain, "  • pending verification") || !strings.Contains(plain, "  • remaining subagent") {
 		t.Fatalf("rendered card = %q, want indented LOOP CONTINUE body", plain)
 	}
@@ -3822,7 +3833,7 @@ func TestRebuildViewportFromMessagesClearsBlocksForEmptySession(t *testing.T) {
 	}
 }
 
-func TestRebuildViewportFromMessagesRestoresReadCollapsedSummary(t *testing.T) {
+func TestRebuildViewportFromMessagesRestoresExpandedReadCard(t *testing.T) {
 	backend := &sessionControlAgent{messages: []message.Message{
 		{
 			Role: "assistant",
@@ -3847,15 +3858,15 @@ func TestRebuildViewportFromMessagesRestoresReadCollapsedSummary(t *testing.T) {
 	if !block.SettledAt.IsZero() {
 		t.Fatalf("restored block SettledAt = %v, want zero", block.SettledAt)
 	}
-	if !block.Collapsed {
-		t.Fatalf("restored Read block should stay collapsed (summary state), got %#v", block)
+	if block.Collapsed {
+		t.Fatalf("restored Read block should be expanded, got %#v", block)
 	}
 	plain := stripANSI(strings.Join(block.Render(80, ""), "\n"))
 	if !strings.Contains(plain, "read internal/tui/input.go") {
 		t.Fatalf("expected restored Read header, got:\n%s", plain)
 	}
-	if strings.Contains(plain, "359") {
-		t.Fatalf("collapsed restored Read should not render body lines, got:\n%s", plain)
+	if !strings.Contains(plain, "359") {
+		t.Fatalf("restored Read card should render the returned body line, got:\n%s", plain)
 	}
 }
 

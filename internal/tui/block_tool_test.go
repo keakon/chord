@@ -1302,7 +1302,7 @@ func TestWriteCardMultilineResultDoesNotBypassCardWrapper(t *testing.T) {
 	}
 }
 
-func TestWriteCardDiagnosticsSplitBetweenSummaryAndColoredDetails(t *testing.T) {
+func TestWriteCardDiagnosticsSplitBetweenSummaryAndDiagnosticsDetail(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	result := strings.Join([]string{
 		"Successfully wrote 71 lines, 2113 bytes",
@@ -1318,76 +1318,62 @@ func TestWriteCardDiagnosticsSplitBetweenSummaryAndColoredDetails(t *testing.T) 
 		Type:          BlockToolCall,
 		ToolName:      tools.NameWrite,
 		Content:       `{"path":"internal/tui/sample_write_target.go","content":"package tui\n"}`,
-		Collapsed:     true,
 		ResultDone:    true,
 		ResultContent: result,
 	}
 
-	collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if got := strings.Count(collapsed, "71 lines · 2113 bytes"); got != 1 {
-		t.Fatalf("collapsed Write count summary = %d, want 1; got:\n%s", got, collapsed)
+	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if got := strings.Count(plain, "71 lines · 2113 bytes"); got != 1 {
+		t.Fatalf("Write count summary = %d, want 1; got:\n%s", got, plain)
 	}
-	if got := strings.Count(collapsed, "2 diagnostics"); got != 1 {
-		t.Fatalf("collapsed diagnostics summary count = %d, want 1; got:\n%s", got, collapsed)
+	if strings.Contains(plain, "Successfully wrote 71 lines, 2113 bytes") {
+		t.Fatalf("Write should render the count summary instead of the verbatim success text; got:\n%s", plain)
 	}
-	if strings.Contains(collapsed, "Successfully wrote") || strings.Contains(collapsed, "Diagnostics:") || strings.Contains(collapsed, "[E] 9:2 [UnusedImport]") {
-		t.Fatalf("collapsed Write should merge counts into the single-line header and hide detail text; got:\n%s", collapsed)
+	if got := strings.Count(plain, "Diagnostics:"); got != 1 {
+		t.Fatalf("diagnostics heading count = %d, want 1; got:\n%s", got, plain)
 	}
-
-	block.ToggleAtWidth(120)
-	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if !strings.Contains(expanded, "✓ ▾ write internal/tui/sample_write_target.go · 71 lines · 2113 bytes") {
-		t.Fatalf("expanded Write header should inline the counts without repeating the path; got:\n%s", expanded)
+	if !strings.Contains(plain, "[E] 9:2 [UnusedImport]") {
+		t.Fatalf("Write card should show LSP diagnostic details; got:\n%s", plain)
 	}
-	if got := strings.Count(expanded, "internal/tui/sample_write_target.go"); got != 1 {
-		t.Fatalf("expanded Write path count = %d, want 1; got:\n%s", got, expanded)
+	if strings.Contains(plain, "↳ Result:") {
+		t.Fatalf("Write card should not render a duplicate generic result section; got:\n%s", plain)
 	}
-	if got := strings.Count(expanded, "71 lines · 2113 bytes"); got != 1 {
-		t.Fatalf("expanded Write summary count = %d, want 1; got:\n%s", got, expanded)
+	if strings.Contains(plain, "▸") || strings.Contains(plain, "▾") {
+		t.Fatalf("Write card must not show a disclosure marker; got:\n%s", plain)
 	}
-	if strings.Contains(expanded, "Successfully wrote 71 lines, 2113 bytes") {
-		t.Fatalf("expanded Write should render the count summary instead of the verbatim success text; got:\n%s", expanded)
-	}
-	if got := strings.Count(expanded, "Diagnostics:"); got != 1 {
-		t.Fatalf("expanded diagnostics heading count = %d, want 1; got:\n%s", got, expanded)
-	}
-	if !strings.Contains(expanded, "[E] 9:2 [UnusedImport]") {
-		t.Fatalf("expanded Write should show LSP diagnostic details; got:\n%s", expanded)
-	}
-	if strings.Contains(expanded, "↳ Result:") {
-		t.Fatalf("expanded Write should not render a duplicate generic result section; got:\n%s", expanded)
+	if block.ToggleAtWidth(120) {
+		t.Fatal("space must be a no-op on the always-expanded Write card")
 	}
 }
 
-func TestWriteCardCollapsedIsSingleHeaderLineLikeReadAndGrep(t *testing.T) {
+func TestWriteCardIsAlwaysExpanded(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	block := &Block{
 		ID:         1,
 		Type:       BlockToolCall,
 		ToolName:   tools.NameWrite,
 		Content:    `{"path":"internal/tui/sample_write_target.go","content":"package tui\n"}`,
-		Collapsed:  true,
 		ResultDone: true,
 		// Trailing newline: the canonical message must still be recognized.
 		ResultContent: "Successfully wrote 71 lines, 2113 bytes\n",
 	}
 
 	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	want := "✓ ▸ write internal/tui/sample_write_target.go · 71 lines · 2113 bytes"
+	want := "✓ write internal/tui/sample_write_target.go · 71 lines · 2113 bytes"
 	if !strings.Contains(plain, want) {
-		t.Fatalf("collapsed Write must be a single header line with counts, got:\n%s", plain)
+		t.Fatalf("Write header must carry the counts, got:\n%s", plain)
 	}
-	if strings.Contains(plain, "↳") || strings.Contains(plain, "Successfully wrote") {
-		t.Fatalf("collapsed Write must not keep a second body line or the verbatim message; got:\n%s", plain)
+	if !strings.Contains(plain, "1  package tui") {
+		t.Fatalf("Write card must render the content preview, got:\n%s", plain)
 	}
-
-	block.ToggleAtWidth(120)
-	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if !strings.Contains(expanded, "✓ ▾ write internal/tui/sample_write_target.go") {
-		t.Fatalf("expanded Write should show the expanded disclosure glyph; got:\n%s", expanded)
+	if strings.Contains(plain, "Successfully wrote") {
+		t.Fatalf("Write header must replace the verbatim message, got:\n%s", plain)
 	}
-	if !strings.Contains(expanded, "1  package tui") {
-		t.Fatalf("expanded Write should render the content preview; got:\n%s", expanded)
+	if strings.Contains(plain, "▸") || strings.Contains(plain, "▾") {
+		t.Fatalf("Write card must not show a disclosure marker, got:\n%s", plain)
+	}
+	if block.ToggleAtWidth(120) {
+		t.Fatal("space must be a no-op on the always-expanded Write card")
 	}
 }
 
@@ -1442,7 +1428,7 @@ func TestEditSuccessWithLSPDiagnosticsRendersDiagnostics(t *testing.T) {
 	}
 }
 
-func TestWriteCallRendersContentPreviewWithReadStyleExpansion(t *testing.T) {
+func TestWriteCallRendersContentPreviewByDefault(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	content := strings.Join([]string{
 		"package main",
@@ -1470,43 +1456,26 @@ func TestWriteCallRendersContentPreviewWithReadStyleExpansion(t *testing.T) {
 		Type:          BlockToolCall,
 		ToolName:      "write",
 		Content:       string(args),
-		Collapsed:     true,
 		ResultDone:    true,
 		ResultContent: "Successfully wrote 260 lines, 157 bytes",
 	}
 
 	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	for _, want := range []string{"✓ ▸ write cmd/demo/main.go", "260 lines · 157 bytes"} {
+	for _, want := range []string{"✓ write cmd/demo/main.go", "260 lines · 157 bytes", "1  package main", "12  }"} {
 		if !strings.Contains(plain, want) {
-			t.Fatalf("expected collapsed Write preview to contain %q; got:\n%s", want, plain)
-		}
-	}
-	for _, hidden := range []string{"1  package main", "10  \\tfmt.Println", "2 more lines"} {
-		if strings.Contains(plain, hidden) {
-			t.Fatalf("expected collapsed Write preview to hide %q; got:\n%s", hidden, plain)
+			t.Fatalf("expected Write preview to contain %q; got:\n%s", want, plain)
 		}
 	}
 	// The verbatim "Successfully wrote X lines, Y bytes" message stays hidden:
-	// the collapsed card carries the counts in the single-line header instead.
+	// the header carries the counts instead.
 	if strings.Contains(plain, "Successfully wrote") {
-		t.Fatalf("expected collapsed Write preview to hide the 'Successfully wrote' message; got:\n%s", plain)
+		t.Fatalf("expected Write preview to hide the 'Successfully wrote' message; got:\n%s", plain)
 	}
-	if strings.Contains(plain, "11  \\tfmt.Println") || strings.Contains(plain, "12  }") {
-		t.Fatalf("expected collapsed Write preview to hide lines after 10; got:\n%s", plain)
+	if strings.Contains(plain, "▸") || strings.Contains(plain, "▾") {
+		t.Fatalf("Write card must not show a disclosure marker; got:\n%s", plain)
 	}
-
-	block.ToggleAtWidth(120)
-	if block.Collapsed {
-		t.Fatal("expected space toggle to expand Write preview")
-	}
-	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	for _, want := range []string{"11  \\tfmt.Println", "12  }"} {
-		if !strings.Contains(expanded, want) {
-			t.Fatalf("expected expanded Write preview to contain %q; got:\n%s", want, expanded)
-		}
-	}
-	if !strings.Contains(expanded, "✓ ▾ write cmd/demo/main.go") {
-		t.Fatalf("expanded Write preview should show the expanded disclosure glyph; got:\n%s", expanded)
+	if block.ToggleAtWidth(120) {
+		t.Fatal("space must be a no-op on the always-expanded Write card")
 	}
 }
 
@@ -3653,36 +3622,36 @@ func TestGrepGlobForceExpandedHeuristicDoesNotBlockCollapse(t *testing.T) {
 	}
 }
 
-func TestCollapsedEditAndApplyPatchSummaryShowsDiagnosticsCount(t *testing.T) {
+func TestEditAndApplyPatchShowDiagnosticsDetail(t *testing.T) {
 	tests := []struct {
 		name          string
 		toolName      string
 		resultContent string
-		wantSummary   string
+		wantDetail    string
 	}{
 		{
 			name:          "edit with LSP diagnostics",
 			toolName:      "edit",
 			resultContent: "Successfully edited internal/tui/example.go\n\nDiagnostics:\n[E] 3:4 [E1] undefined name\n[W] 5:1 [W1] unused variable",
-			wantSummary:   "2 diagnostics",
+			wantDetail:    "undefined name",
 		},
 		{
 			name:          "edit diagnostics block without severity lines",
 			toolName:      "edit",
 			resultContent: "Successfully edited internal/tui/example.go\n\nDiagnostics:\nPython diagnostics skipped: no configured checker available.",
-			wantSummary:   "diagnostics",
+			wantDetail:    "Python diagnostics skipped",
 		},
 		{
 			name:          "apply_patch with LSP diagnostics",
 			toolName:      "apply_patch",
 			resultContent: "Applied patch:\ninternal/tui/example.go: +2 -1 lines\n\nDiagnostics:\n[E] 3:4 [E1] undefined name",
-			wantSummary:   "1 diagnostics",
+			wantDetail:    "undefined name",
 		},
 		{
 			name:          "edit without diagnostics",
 			toolName:      "edit",
 			resultContent: "Successfully edited internal/tui/example.go",
-			wantSummary:   "",
+			wantDetail:    "",
 		},
 	}
 
@@ -3696,21 +3665,20 @@ func TestCollapsedEditAndApplyPatchSummaryShowsDiagnosticsCount(t *testing.T) {
 				Diff:          "--- internal/tui/example.go\n+++ internal/tui/example.go\n@@ -1,2 +1,2 @@\n-a\n+b",
 				ResultContent: tt.resultContent,
 				ResultDone:    true,
-				Collapsed:     true,
 			}
 
 			joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-			if tt.wantSummary != "" {
-				if !strings.Contains(joined, tt.wantSummary) {
-					t.Fatalf("expected collapsed %s summary to show %q, got:\n%s", tt.toolName, tt.wantSummary, joined)
+			if tt.wantDetail == "" {
+				if strings.Contains(strings.ToLower(joined), "diagnostics") {
+					t.Fatalf("expected no diagnostics section for %s, got:\n%s", tt.toolName, joined)
 				}
-				// The summary is a single line; diagnostics must not leak the
-				// raw diagnostic text into the collapsed card.
-				if strings.Contains(joined, "[E]") || strings.Contains(joined, "undefined name") {
-					t.Fatalf("expected collapsed %s card to hide diagnostic detail, got:\n%s", tt.toolName, joined)
-				}
-			} else if strings.Contains(joined, "diagnostics") {
-				t.Fatalf("expected collapsed %s summary without diagnostics, got:\n%s", tt.toolName, joined)
+				return
+			}
+			if !strings.Contains(joined, "↳ Diagnostics:") {
+				t.Fatalf("expected a diagnostics section for %s, got:\n%s", tt.toolName, joined)
+			}
+			if !strings.Contains(joined, tt.wantDetail) {
+				t.Fatalf("expected diagnostics detail %q for %s, got:\n%s", tt.wantDetail, tt.toolName, joined)
 			}
 		})
 	}

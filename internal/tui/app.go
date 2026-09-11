@@ -98,10 +98,6 @@ type scrollFlushTickMsg struct{ generation uint64 }
 
 // Clipboard, local shell, and cached render helpers are in split files.
 
-func shouldExpandToolResult(toolName string) bool {
-	return tools.ShouldExpandResult(toolName)
-}
-
 func shouldTrackSidebarFileEdit(toolName string) bool {
 	return tools.IsFileMutation(toolName)
 }

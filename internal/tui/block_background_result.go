@@ -284,20 +284,39 @@ func backgroundResultErrorDetail(status string) string {
 	return detail
 }
 
+// isBackgroundResultCard reports whether this BlockStatus is a JOB RESULT card.
+// These cards carry a durable background object id or the JOB RESULT badge, are
+// collapsible, and route to renderBackgroundResult. Every other status card
+// (loop notices, info cards, context-pressure notices, mailbox cards) keeps the
+// generic rendering and is not collapsible.
+func (b *Block) isBackgroundResultCard() bool {
+	if b == nil || b.Type != BlockStatus {
+		return false
+	}
+	return b.BackgroundObjectID != "" || b.StatusTitle == backgroundResultCardTitle
+}
+
 func (b *Block) renderBackgroundResult(width int) []string {
 	metrics := newToolCardMetrics(width)
 	body := make([]string, 0, 8)
+	// A folded JOB RESULT card keeps each job's headline and its status line —
+	// the one-line state summary a collapsed tool card also shows — and drops
+	// the residual lines and relevant-output block that made the card tall.
+	collapsed := b.Collapsed
+	expectStatus := false
+	skippingOutput := false
 	contentLines := strings.Split(strings.TrimSpace(sanitizeDisplayText(b.Content)), "\n")
 	for i := range len(contentLines) {
 		line := contentLines[i]
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
-			if len(body) > 0 && body[len(body)-1] != "" {
+			if !skippingOutput && len(body) > 0 && body[len(body)-1] != "" {
 				body = append(body, "")
 			}
 			continue
 		}
 		if isBackgroundResultHeadline(trimmed) {
+			skippingOutput = false
 			if len(body) > 0 && body[len(body)-1] != "" {
 				body = append(body, "")
 			}
@@ -306,13 +325,23 @@ func (b *Block) renderBackgroundResult(width int) []string {
 				prefix := "    "
 				if i == 0 {
 					prefix = "  "
-					part = styleBackgroundResultHeadline(part)
+					part = styleBackgroundResultHeadline(part, collapsed)
 				}
 				body = append(body, prefix+part)
 			}
+			expectStatus = true
+			continue
+		}
+		if skippingOutput {
 			continue
 		}
 		if strings.EqualFold(trimmed, "Relevant output:") {
+			if collapsed {
+				// Output is the tail of its section; skip it but keep scanning
+				// so a multi-job card still lists every job's headline.
+				skippingOutput = true
+				continue
+			}
 			if len(body) > 0 && body[len(body)-1] != "" {
 				body = append(body, "")
 			}
@@ -342,6 +371,10 @@ func (b *Block) renderBackgroundResult(width int) []string {
 			}
 			break
 		}
+		if collapsed && !expectStatus {
+			continue
+		}
+		expectStatus = false
 		style := ToolResultExpandedStyle
 		if strings.HasPrefix(strings.ToLower(trimmed), "error:") {
 			style = ErrorStyle
@@ -371,14 +404,22 @@ func isBackgroundResultHeadline(line string) bool {
 	return strings.HasPrefix(line, "✓") || strings.HasPrefix(line, "✗") || strings.HasPrefix(line, "•")
 }
 
-func styleBackgroundResultHeadline(line string) string {
+// styleBackgroundResultHeadline styles the ✓/✗/• headline and appends the
+// disclosure marker a collapsible card carries, so the folded state is visible
+// at a glance and the space/enter toggle reads as the same affordance across
+// card families.
+func styleBackgroundResultHeadline(line string, collapsed bool) string {
+	marker := toolDisclosureExpanded
+	if collapsed {
+		marker = toolDisclosureCollapsed
+	}
 	switch {
 	case strings.HasPrefix(line, "✓"):
-		return ToolStatusSuccessStyle.Render("✓") + line[len("✓"):]
+		return ToolStatusSuccessStyle.Render("✓") + " " + marker + line[len("✓"):]
 	case strings.HasPrefix(line, "✗"):
-		return ToolStatusErrorStyle.Render("✗") + line[len("✗"):]
+		return ToolStatusErrorStyle.Render("✗") + " " + marker + line[len("✗"):]
 	case strings.HasPrefix(line, "•"):
-		return ToolStatusNeutralStyle.Render("•") + line[len("•"):]
+		return ToolStatusNeutralStyle.Render("•") + " " + marker + line[len("•"):]
 	default:
 		return line
 	}

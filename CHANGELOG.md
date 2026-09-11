@@ -18,6 +18,11 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - New `job_output`, `job_list`, and `job_kill` tools manage background jobs. `job_output` reads only the output produced since the previous read, with a `wait` mode (`none`, `output`, or `exit`) bounded by the runtime so a slow job never blocks the turn and an expired wait never kills it. Repeated reads that find no new output are treated as polling — a notice first, then a rejection — and terminal escape codes are stripped from the output the model reads. `job_list` shows what is still running and `job_kill` stops a job without a completion notification.
 - Consecutive completion wakes with no user input in between are capped at 3; after that, later completions wait for the next user message.
 
+### Improvements
+
+- Tool cards no longer share one folding rule. `read`, `write`, `edit`, `apply_patch`, `todo_write`, and `handoff` now stay fully expanded, like `delete` and the report cards: their body — file content, diff, todo list, plan path — is the card's content, so they carry no `▸` / `▾` marker and `Space`, `Enter`, or `o` does nothing on them. `grep`, `glob`, `shell`, `cancel`, and generic tool calls still fold.
+- Finished background `shell` work now renders as a collapsed `JOB RESULT` card that keeps each job's headline and one-line status and expands to the full command, status, and output. Runtime status cards (loop notices, info cards, context-pressure notices, `REPLY RESUMED`) also start as their first three lines with a `▸` marker instead of the full text.
+
 ### Fixes
 
 - Tool cards no longer change their expanded/collapsed state after a context compaction or a transcript rebuild. The rebuild used to match each new card against the old card at the same position, but the summary card that replaces the archived head shifts every surviving row, so a card could inherit an unrelated card's fold state — for example, an expanded Edit result came back collapsed. Cards are now matched by their own identity, and rewritten transcripts no longer borrow state from the transcript they replaced.

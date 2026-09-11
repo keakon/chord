@@ -74,7 +74,7 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		}
 		m.exitRenderFreeze()
 		wasNearBottom := m.viewport != nil && (m.viewport.sticky || m.viewport.TotalLines()-m.viewport.height-m.viewport.offset <= 1)
-		block := &Block{ID: m.nextBlockID, Type: BlockStatus, StatusTitle: evt.Title, Content: content}
+		block := &Block{ID: m.nextBlockID, Type: BlockStatus, StatusTitle: evt.Title, Content: content, Collapsed: true}
 		m.nextBlockID++
 		m.appendViewportBlock(block)
 		m.markBlockSettled(block)
@@ -99,7 +99,7 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		}
 		m.exitRenderFreeze()
 		wasNearBottom := m.viewport != nil && (m.viewport.sticky || m.viewport.TotalLines()-m.viewport.height-m.viewport.offset <= 1)
-		block := &Block{ID: m.nextBlockID, Type: BlockStatus, StatusTitle: streamContinueCardTitle, Content: content, AgentID: evt.AgentID}
+		block := &Block{ID: m.nextBlockID, Type: BlockStatus, StatusTitle: streamContinueCardTitle, Content: content, AgentID: evt.AgentID, Collapsed: true}
 		m.nextBlockID++
 		m.appendViewportBlock(block)
 		m.markBlockSettled(block)
@@ -199,7 +199,7 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			return true, effects
 		}
 		m.finalizeAgentStream(evt.AgentID)
-		block := &Block{ID: m.nextBlockID, Type: BlockStatus, StatusTitle: infoCardTitle, Content: evt.Message, AgentID: evt.AgentID}
+		block := &Block{ID: m.nextBlockID, Type: BlockStatus, StatusTitle: infoCardTitle, Content: evt.Message, AgentID: evt.AgentID, Collapsed: true}
 		m.nextBlockID++
 		m.appendViewportBlock(block)
 		m.markBlockSettled(block)
@@ -211,7 +211,7 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		// transcript slot (MsgIndex) that a restored session rebuilds from.
 		// Emitted once per compaction window, never per-request, so it does
 		// not spam.
-		block := &Block{ID: m.nextBlockID, Type: BlockStatus, StatusTitle: contextNoticeTitle(evt.Level), Content: evt.Message, AgentID: "", MsgIndex: evt.MessageIndex, NoticeLevel: evt.Level}
+		block := &Block{ID: m.nextBlockID, Type: BlockStatus, StatusTitle: contextNoticeTitle(evt.Level), Content: evt.Message, AgentID: "", MsgIndex: evt.MessageIndex, NoticeLevel: evt.Level, Collapsed: true}
 		m.nextBlockID++
 		m.appendViewportBlock(block)
 		m.markBlockSettled(block)
@@ -259,7 +259,7 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			m.updateViewportBlock(block)
 			m.markBlockSettled(block)
 		} else {
-			block := &Block{ID: m.nextBlockID, Type: BlockStatus, StatusTitle: backgroundResultCardTitle, Content: content, BackgroundCopyContent: evt.Message.Content, AgentID: agentID, BackgroundObjectID: backgroundID, MsgIndex: evt.MessageIndex}
+			block := &Block{ID: m.nextBlockID, Type: BlockStatus, StatusTitle: backgroundResultCardTitle, Content: content, BackgroundCopyContent: evt.Message.Content, AgentID: agentID, BackgroundObjectID: backgroundID, MsgIndex: evt.MessageIndex, Collapsed: true}
 			m.nextBlockID++
 			m.appendViewportBlock(block)
 			m.markBlockSettled(block)

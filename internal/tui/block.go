@@ -56,7 +56,7 @@ type Block struct {
 	Type             BlockType
 	Content          string // raw content (args JSON for tool calls, result text for tool results)
 	RawArgs          string // full args JSON for tool calls when Content is display-trimmed
-	Collapsed        bool   // for tool blocks, default true
+	Collapsed        bool   // card detail folded; default true for tool and JOB RESULT cards
 	ToolName         string // for tool blocks
 	ToolID           string // tool call ID
 	IsError          bool   // for tool results
