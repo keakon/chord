@@ -10,12 +10,13 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
-// isTUILocalOnlySlashCommand reports whether content is a local-only slash
-// command (/export, /models, /tier, /rename, /role, /compact) that must run on the main agent's event
+// IsTUILocalOnlySlashCommand reports whether content is a local-only slash
+// command (/export, /models, /tier, /rename, /role, /compact, /yolo, /mcp) that must run on the main agent's event
 // loop and must never be routed to a focused SubAgent. Predicate only —
 // execution lives in executeLocalOnlySlashCommand, which the event-loop
-// goroutine calls.
-func isTUILocalOnlySlashCommand(content string) bool {
+// goroutine calls. The TUI also consults it to route the command without
+// echoing a USER card.
+func IsTUILocalOnlySlashCommand(content string) bool {
 	c := strings.TrimSpace(content)
 	switch {
 	case c == "/export" || strings.HasPrefix(c, "/export "):
@@ -100,7 +101,7 @@ func (a *MainAgent) SendUserMessage(content string) {
 // SendUserMessageToTarget delivers a message to a previously captured
 // conversation rather than consulting the current TUI focus.
 func (a *MainAgent) SendUserMessageToTarget(conversation ConversationTarget, content string) {
-	if isTUILocalOnlySlashCommand(content) {
+	if IsTUILocalOnlySlashCommand(content) {
 		a.sendEvent(Event{Type: EventUserMessage, Payload: content})
 		return
 	}
@@ -173,7 +174,7 @@ func (a *MainAgent) SendUserMessageWithParts(parts []message.ContentPart) {
 			content.WriteString(part.Text)
 		}
 	}
-	if isTUILocalOnlySlashCommand(content.String()) {
+	if IsTUILocalOnlySlashCommand(content.String()) {
 		a.sendEvent(Event{Type: EventUserMessage, Payload: parts})
 		return
 	}

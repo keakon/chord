@@ -31,6 +31,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Pressing `Up` in an empty composer recalls user messages only: after a context compaction it no longer fills the box with the summary text, and forking a user card can no longer load the summary either.
 - Editing the tail user message of a compacted session no longer records the compaction checkpoint as the session's first message. The checkpoint stays marked as a summary, so session lists and previews keep showing the original prompt instead of the summary text.
 - The `/role status` and `/models status` reports render one entry per line; the card's Markdown renderer used to reflow the indented lines into a single paragraph.
+- Running `/mcp`, `/mcp status`, or `/mcp enable` / `/mcp disable` no longer leaves an echoed `USER` card in the transcript; these commands now route like the other local slash commands and report without starting a turn.
 
 ## 0.8.0 - 2026-09-11
 

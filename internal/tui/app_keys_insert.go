@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/keakon/bubbletea/v2"
 
+	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -293,13 +294,11 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 		m.input.Reset()
 		trimmed := strings.TrimSpace(value)
 		if m.agent != nil && len(m.attachments) == 0 && !hasInlinePastes {
-			if trimmed == "/models" || strings.HasPrefix(trimmed, "/models ") ||
-				trimmed == "/role" || strings.HasPrefix(trimmed, "/role ") ||
-				trimmed == "/export" || strings.HasPrefix(trimmed, "/export ") ||
-				trimmed == "/rename" || strings.HasPrefix(trimmed, "/rename ") ||
-				trimmed == "/tier" || strings.HasPrefix(trimmed, "/tier ") ||
-				trimmed == "/yolo" || strings.HasPrefix(trimmed, "/yolo ") ||
-				trimmed == "/compact" || trimmed == "/loop" || trimmed == "/loop on" || strings.HasPrefix(trimmed, "/loop on ") || trimmed == "/loop off" {
+			// Local-only commands run on the agent's event loop without a turn.
+			// They must be recognized by the same predicate the agent uses to
+			// route them, or the TUI starts echoing a USER card for one the
+			// agent handles locally (or vice versa).
+			if agent.IsTUILocalOnlySlashCommand(trimmed) || agent.IsLoopSlashCommand(trimmed) {
 				m.recordTUIDiagnostic("agent-command", "%s", trimmed)
 				m.agent.SendUserMessage(value)
 				return nil

@@ -466,6 +466,28 @@ func TestHandleInsertKeyBusyMainAgentCompactBypassesLocalQueue(t *testing.T) {
 	}
 }
 
+// Every command the agent handles without a turn must be recognized by the same
+// routing predicate in the TUI, so none of them echoes a USER card: /mcp status
+// used to fall through the TUI's own copy of the list and leave a USER block
+// behind, while /role status and /models status did not.
+func TestLocalSlashCommandsDoNotEchoUserBlock(t *testing.T) {
+	for _, cmd := range []string{"/role status", "/models status", "/mcp status", "/loop off"} {
+		backend := &sessionControlAgent{}
+		m := NewModel(backend)
+		m.mode = ModeInsert
+		m.input.SetValue(cmd)
+
+		_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+
+		if got := len(backend.sentMessages); got != 1 || backend.sentMessages[0] != cmd {
+			t.Fatalf("%s: sentMessages = %v, want [%s]", cmd, backend.sentMessages, cmd)
+		}
+		if got := len(m.viewport.visibleBlocks()); got != 0 {
+			t.Fatalf("%s: viewport block count = %d, want 0 (a local command must not echo a USER card)", cmd, got)
+		}
+	}
+}
+
 func TestHandleInsertKeyStatsOpensLocalPanelWhenBusy(t *testing.T) {
 	backend := &sessionControlAgent{}
 	m := NewModel(backend)

@@ -146,7 +146,7 @@ func (a *MainAgent) CurrentRole() string {
 
 // handleRoleCommand processes the /role slash command. It is the keyboard
 // counterpart of the headless role list/set commands and runs on the main
-// agent's event loop (see isTUILocalOnlySlashCommand).
+// agent's event loop (see IsTUILocalOnlySlashCommand).
 //   - "/role": emits RoleSelectEvent so the TUI opens the role selector overlay.
 //   - "/role status": prints the current role and the ordered available roles.
 //   - "/role <name>": switches to the named main-mode role.

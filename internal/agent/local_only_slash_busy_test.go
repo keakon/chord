@@ -773,8 +773,8 @@ func TestIsTUILocalOnlySlashCommand(t *testing.T) {
 		{"", false},
 	}
 	for _, tc := range cases {
-		if got := isTUILocalOnlySlashCommand(tc.content); got != tc.want {
-			t.Errorf("isTUILocalOnlySlashCommand(%q) = %v, want %v", tc.content, got, tc.want)
+		if got := IsTUILocalOnlySlashCommand(tc.content); got != tc.want {
+			t.Errorf("IsTUILocalOnlySlashCommand(%q) = %v, want %v", tc.content, got, tc.want)
 		}
 	}
 }

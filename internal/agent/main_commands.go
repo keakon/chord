@@ -85,7 +85,10 @@ func (a *MainAgent) canUseLoopMode() bool {
 	return a.doneToolPermitted()
 }
 
-func isLoopSlashCommand(content string) bool {
+// IsLoopSlashCommand reports whether content is a loop-mode slash command.
+// Like the other local-only commands, the TUI routes it without echoing a USER
+// card.
+func IsLoopSlashCommand(content string) bool {
 	c := strings.TrimSpace(content)
 	switch {
 	case c == "/loop":
