@@ -460,7 +460,10 @@ func (a *MainAgent) ModelsStatusText() string {
 	fmt.Fprintf(sb, "Model pool: %s%s\n", currentModelPool, currentModelPoolStatus)
 	overrides := a.modelPoolPolicy.Overrides()
 	if len(overrides) > 0 {
-		sb.WriteString("Fixed agent pools:\n")
+		// The TUI renders this report as Markdown inside a NOTICE card, so each
+		// pool is a list item: indented plain text would reflow into one
+		// paragraph.
+		sb.WriteString("\nFixed agent pools:\n")
 		agentNames := make([]string, 0, len(overrides))
 		for name := range overrides {
 			agentNames = append(agentNames, name)
@@ -473,7 +476,7 @@ func (a *MainAgent) ModelsStatusText() string {
 			if cfg != nil && !cfg.HasPool(pool) {
 				status = " (missing)"
 			}
-			fmt.Fprintf(sb, "  %s: %s%s\n", name, pool, status)
+			fmt.Fprintf(sb, "- %s: %s%s\n", name, pool, status)
 		}
 	}
 	sb.WriteString("\nAgent effective pools:\n")
@@ -487,9 +490,9 @@ func (a *MainAgent) ModelsStatusText() string {
 		pool := a.modelPoolPolicy.EffectivePool(name, cfg)
 		models := a.modelPoolPolicy.EffectiveModels(name, cfg)
 		if pool == "" {
-			fmt.Fprintf(sb, "  %s: (no pool)\n", name)
+			fmt.Fprintf(sb, "- %s: (no pool)\n", name)
 		} else {
-			fmt.Fprintf(sb, "  %s: %s (%d model(s))\n", name, pool, len(models))
+			fmt.Fprintf(sb, "- %s: %s (%d model(s))\n", name, pool, len(models))
 		}
 	}
 	return sb.String()

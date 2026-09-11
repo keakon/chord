@@ -30,6 +30,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Tool cards no longer change their expanded/collapsed state after a context compaction or a transcript rebuild. The rebuild used to match each new card against the old card at the same position, but the summary card that replaces the archived head shifts every surviving row, so a card could inherit an unrelated card's fold state — for example, an expanded Edit result came back collapsed. Cards are now matched by their own identity, and rewritten transcripts no longer borrow state from the transcript they replaced.
 - Pressing `Up` in an empty composer recalls user messages only: after a context compaction it no longer fills the box with the summary text, and forking a user card can no longer load the summary either.
 - Editing the tail user message of a compacted session no longer records the compaction checkpoint as the session's first message. The checkpoint stays marked as a summary, so session lists and previews keep showing the original prompt instead of the summary text.
+- The `/role status` and `/models status` reports render one entry per line; the card's Markdown renderer used to reflow the indented lines into a single paragraph.
 
 ## 0.8.0 - 2026-09-11
 

@@ -168,18 +168,19 @@ func (a *MainAgent) handleRoleCommand(content string, busy bool) {
 	}
 }
 
-// RoleStatusText formats the current role and the ordered available roles as
-// human-readable text for /role status.
+// RoleStatusText formats the current role and the ordered available roles for
+// the TUI's NOTICE card. The card renders Markdown, so each role is a list item:
+// indented plain text would reflow into a single paragraph.
 func (a *MainAgent) RoleStatusText() string {
 	current := a.CurrentRole()
 	var b strings.Builder
 	fmt.Fprintf(&b, "Current role: %s\n", current)
-	b.WriteString("Available roles:\n")
+	b.WriteString("\nAvailable roles:\n")
 	for _, name := range a.AvailableRoles() {
 		if name == current {
-			fmt.Fprintf(&b, "  %s (current)\n", name)
+			fmt.Fprintf(&b, "- %s (current)\n", name)
 		} else {
-			fmt.Fprintf(&b, "  %s\n", name)
+			fmt.Fprintf(&b, "- %s\n", name)
 		}
 	}
 	return strings.TrimSuffix(b.String(), "\n")

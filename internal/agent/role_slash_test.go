@@ -70,6 +70,13 @@ func TestRoleSlashStatusListsCurrentAndAvailableRoles(t *testing.T) {
 	if !strings.Contains(msg, "builder (current)") || !strings.Contains(msg, "planner") {
 		t.Fatalf("status text = %q, want ordered available roles with current marker", msg)
 	}
+	// The TUI renders this text as Markdown, so each role must be its own list
+	// item; indented plain text would reflow into one paragraph.
+	for _, item := range []string{"\n- builder (current)\n", "\n- planner"} {
+		if !strings.Contains(msg, item) {
+			t.Fatalf("status text = %q, want list item %q", msg, item)
+		}
+	}
 }
 
 func TestRoleSlashSwitchByNameSwitchesAndReports(t *testing.T) {
