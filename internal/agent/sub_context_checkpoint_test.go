@@ -92,3 +92,22 @@ func TestSubAgentStructuredCheckpointPreservesOpenBlocker(t *testing.T) {
 	}
 	sub.cancel()
 }
+
+// Synthetic user-role messages other than mailbox deliveries carry no owner
+// instruction, so the checkpoint must keep scanning past them.
+func TestSubAgentStructuredCheckpointSkipsSyntheticUserMessages(t *testing.T) {
+	_, sub := newMixedBatchTestSubAgent(t)
+	sub.taskDesc = "Add pagination"
+	messages := []message.Message{
+		{Role: message.RoleUser, Content: "keep the public API unchanged"},
+		{Role: message.RoleUser, Content: "Compaction is imminent.", Kind: message.KindContextNotice},
+		{Role: message.RoleUser, Content: "loop iteration 3 failed", Kind: message.KindLoopNotice},
+		{Role: message.RoleUser, Content: "owner: use cursor pagination", Kind: message.KindSubAgentMailbox, Mailbox: &message.MailboxMetadata{MessageID: "m1"}},
+		{Role: message.RoleUser, Content: "job finished", Kind: message.KindBackgroundResult},
+	}
+	checkpoint := buildSubAgentStructuredCheckpoint(sub, messages, 12, "proactive", "archives/sub-5.md")
+	if !strings.Contains(checkpoint, "Latest owner/user instruction: owner: use cursor pagination") {
+		t.Errorf("mailbox owner instruction lost:\n%s", checkpoint)
+	}
+	sub.cancel()
+}

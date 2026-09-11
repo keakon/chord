@@ -6643,6 +6643,28 @@ func TestSelectRecentTailDegradesInsteadOfDroppingTail(t *testing.T) {
 	}
 }
 
+// TestSelectRecentTailIgnoresSyntheticUserRoleMessages pins that the recent-tail
+// user-turn count follows authored turns, not RoleUser: a trailing
+// context_notice or background_result must not consume one of the two slots and
+// push a real user turn out of the verbatim tail.
+func TestSelectRecentTailIgnoresSyntheticUserRoleMessages(t *testing.T) {
+	messages := []message.Message{
+		{Role: message.RoleAssistant, Content: "warmup"},
+		{Role: message.RoleUser, Content: "real-1"},
+		{Role: message.RoleAssistant, Content: "reply-1"},
+		{Role: message.RoleUser, Content: "real-2"},
+		{Role: message.RoleAssistant, Content: "reply-2"},
+		{Role: message.RoleUser, Content: "context pressure", Kind: message.KindContextNotice},
+	}
+	tail := selectRecentTailMessages(nil, messages, 2, recentTailTokenBudget(200000))
+	if len(tail) == 0 {
+		t.Fatal("expected a recent tail")
+	}
+	if tail[0].Content != "real-1" {
+		t.Fatalf("tail starts at %q, want the first of the two authored turns", tail[0].Content)
+	}
+}
+
 func TestCompactionHeadSplitPreservesTailForLargeAgenticTurn(t *testing.T) {
 	const contextLimit = 200000
 	messages := agenticTailHistory(12, 5, 12000)

@@ -391,18 +391,45 @@ func (a *MainAgent) editTailUserMessageInPlace(prefix []message.Message, forkMsg
 		a.lspSessionLoadFn(prefix)
 	}
 
+	// The rewritten prefix can start with a compaction checkpoint instead of a
+	// real prompt. Record the first user-authored message; only when the prefix
+	// has none fall back to the checkpoint text and flag it as synthetic so
+	// session lists and previews do not present it as the user's prompt.
 	firstUser := ""
+	firstUserIsCompactionSummary := false
 	for _, msg := range prefix {
-		if msg.Role != "user" {
+		if !message.IsUserAuthored(msg) {
 			continue
 		}
-		firstUser = message.UserPromptPlainText(msg)
-		if strings.TrimSpace(firstUser) != "" {
+		if text := message.UserPromptPlainText(msg); strings.TrimSpace(text) != "" {
+			firstUser = text
 			break
 		}
 	}
+	if strings.TrimSpace(firstUser) == "" {
+		for _, msg := range prefix {
+			if msg.Role != message.RoleUser || !msg.IsCompactionSummary {
+				continue
+			}
+			if text := message.UserPromptPlainText(msg); strings.TrimSpace(text) != "" {
+				firstUser = text
+				firstUserIsCompactionSummary = true
+				break
+			}
+		}
+	}
 	if a.usageLedger != nil {
-		if err := a.usageLedger.RewriteFirstUserMessage(firstUser); err != nil {
+		var err error
+		if firstUserIsCompactionSummary {
+			originalHint := ""
+			if summary := a.GetSessionSummary(); summary != nil {
+				originalHint = summary.OriginalFirstUserMessage
+			}
+			err = a.usageLedger.RewriteFirstUserMessageWithOriginalForCompaction(firstUser, originalHint)
+		} else {
+			err = a.usageLedger.RewriteFirstUserMessage(firstUser)
+		}
+		if err != nil {
 			return fmt.Errorf("rewrite usage summary first user message: %w", err)
 		}
 	}
@@ -411,12 +438,13 @@ func (a *MainAgent) editTailUserMessageInPlace(prefix []message.Message, forkMsg
 			return
 		}
 		summary.FirstUserMessage = strings.TrimSpace(firstUser)
-		summary.FirstUserMessageIsCompactionSummary = false
+		summary.FirstUserMessageIsCompactionSummary = firstUserIsCompactionSummary
 		if strings.TrimSpace(firstUser) == "" {
 			summary.OriginalFirstUserMessage = ""
 			return
 		}
-		if summary.OriginalFirstUserMessage == "" || summary.OriginalFirstUserMessage == summary.FirstUserMessage {
+		if !firstUserIsCompactionSummary &&
+			(summary.OriginalFirstUserMessage == "" || summary.OriginalFirstUserMessage == summary.FirstUserMessage) {
 			summary.OriginalFirstUserMessage = strings.TrimSpace(firstUser)
 		}
 	})
@@ -454,8 +482,8 @@ func (a *MainAgent) handleForkSessionCommand(msgIndex int) {
 	prefix := append([]message.Message(nil), msgs[:msgIndex]...)
 	forkMsg := msgs[msgIndex]
 	forkedFrom := filepath.Base(a.sessionDir)
-	if forkMsg.Role != "user" {
-		log.Warnf("handleForkSessionCommand: msgIndex does not point to a user message msgIndex=%v role=%v", msgIndex, forkMsg.Role)
+	if !message.IsUserAuthored(forkMsg) {
+		log.Warnf("handleForkSessionCommand: msgIndex does not point to a user-authored message msgIndex=%v role=%v kind=%v", msgIndex, forkMsg.Role, forkMsg.Kind)
 		a.setIdleAndDrainPending()
 		return
 	}

@@ -677,7 +677,7 @@ func selectRecentTailMessages(mgr *ctxmgr.Manager, messages []message.Message, u
 		start := len(messages)
 		for i, message0 := range slices.Backward(messages) {
 			start = i
-			if message0.Role == message.RoleUser {
+			if message.IsUserAuthored(message0) {
 				usersSeen++
 				if usersSeen >= turns {
 					break

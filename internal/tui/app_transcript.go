@@ -68,7 +68,7 @@ func mainUserBlockMsgIndexMatches(block *Block, msgs []message.Message) bool {
 		return false
 	}
 	msg := msgs[block.MsgIndex]
-	if msg.Role != "user" || msg.IsCompactionSummary {
+	if !message.IsUserAuthored(msg) {
 		return false
 	}
 	return strings.TrimSpace(message.UserPromptPlainText(msg)) == strings.TrimSpace(block.Content)
@@ -87,7 +87,7 @@ func findMatchingMainUserMsgIndex(msgs []message.Message, block *Block, used map
 			continue
 		}
 
-		if msg.Role != "user" || msg.IsCompactionSummary {
+		if !message.IsUserAuthored(msg) {
 			continue
 		}
 		if strings.TrimSpace(message.UserPromptPlainText(msg)) != target {

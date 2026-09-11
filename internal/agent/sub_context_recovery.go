@@ -82,6 +82,11 @@ func (s *SubAgent) compactContextForTarget(messages []message.Message, target in
 	}
 	checkpoint := message.Message{
 		Role: message.RoleUser,
+		// The checkpoint is harness text, not user input: without the flag the
+		// shared IsUserAuthored predicate reports it as user-authored, and the
+		// restore path would take it for the task description. The main agent's
+		// checkpoint carries the same marker.
+		IsCompactionSummary: true,
 		Content: buildSubAgentStructuredCheckpoint(
 			s,
 			messages,

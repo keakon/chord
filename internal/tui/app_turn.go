@@ -488,7 +488,11 @@ func (m *Model) loadLastUserMessageToComposer() tea.Cmd {
 	msgs := m.agent.GetMessages()
 	var last *message.Message
 	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == message.RoleUser {
+		// Only input the user actually typed is recallable. Synthetic
+		// user-role messages (compaction summaries, mailbox deliveries,
+		// notices, job results) render as their own cards and never entered
+		// the composer.
+		if message.IsUserAuthored(msgs[i]) {
 			last = &msgs[i]
 			break
 		}

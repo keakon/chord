@@ -1164,6 +1164,66 @@ func TestHandleForkSessionCommandTailUserEditsInPlaceWithoutFork(t *testing.T) {
 	}
 }
 
+// A compacted session's prefix begins with the checkpoint summary. Editing the
+// tail user message in place must keep that summary flagged as synthetic (and
+// keep the preserved original), so the session list never presents the
+// checkpoint as the user's prompt.
+func TestHandleForkSessionCommandTailEditKeepsCompactionFirstUserFlag(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.markAgentsMDReady()
+	a.MarkSkillsReady()
+	a.markMCPReady()
+
+	msgs := []message.Message{
+		{Role: "user", Content: "[Context Summary]\n## Goal\n- ship it", IsCompactionSummary: true},
+		{Role: "assistant", Content: "carrying on"},
+		{Role: "user", Content: "edit me"},
+	}
+	a.ctxMgr.RestoreMessages(msgs)
+	a.fileTrack = filelock.NewFileTracker()
+	a.restoreMainTrackedFileState(msgs)
+	if err := a.recoveryManager().RewriteLog("main", msgs); err != nil {
+		t.Fatalf("RewriteLog(main): %v", err)
+	}
+	a.refreshSessionSummary()
+	a.updateSessionSummary(func(summary *SessionSummary) {
+		if summary != nil {
+			summary.OriginalFirstUserMessage = "original request"
+		}
+	})
+	oldSessionDir := a.sessionDir
+
+	a.handleForkSessionCommand(2)
+
+	if a.sessionDir != oldSessionDir {
+		t.Fatalf("sessionDir = %q, want unchanged %q", a.sessionDir, oldSessionDir)
+	}
+	summary := a.GetSessionSummary()
+	if summary == nil {
+		t.Fatal("GetSessionSummary() = nil")
+	}
+	if !summary.FirstUserMessageIsCompactionSummary {
+		t.Fatal("FirstUserMessageIsCompactionSummary = false, want true for a compacted prefix")
+	}
+	if !strings.Contains(summary.FirstUserMessage, "Context Summary") {
+		t.Fatalf("FirstUserMessage = %q, want the checkpoint preview", summary.FirstUserMessage)
+	}
+	if summary.OriginalFirstUserMessage != "original request" {
+		t.Fatalf("OriginalFirstUserMessage = %q, want the preserved original", summary.OriginalFirstUserMessage)
+	}
+	for {
+		select {
+		case evt := <-a.Events():
+			if _, ok := evt.(SessionSwitchStartedEvent); ok {
+				t.Fatalf("unexpected SessionSwitchStartedEvent after in-place tail edit: %+v", evt)
+			}
+		default:
+			return
+		}
+	}
+}
+
 func TestHandleForkSessionCommandTailEditDoesNotDrainSubAgentInbox(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)

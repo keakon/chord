@@ -108,14 +108,21 @@ func firstLineOrUnknown(value string, max int) string {
 	return llm.TruncateStringRunes(value, max, "…")
 }
 
-// latestOwnerInstructionForCheckpoint finds the newest user message (the
-// owner's instruction for a SubAgent; mailbox and Notify inputs both land as
+// latestOwnerInstructionForCheckpoint finds the newest message the owner
+// actually authored (for a SubAgent, mailbox and Notify inputs both land as
 // user messages) and summarizes it, flagging imperative corrections and
 // declarative constraints so they survive with their semantics intact.
+// Synthetic user-role messages other than mailbox deliveries (compaction
+// summaries, pressure notices, loop notices, job results) carry no owner
+// instruction and are skipped; the [system] prefix excludes the context
+// checkpoints this function renders.
 func latestOwnerInstructionForCheckpoint(messages []message.Message) string {
 	for i := len(messages) - 1; i >= 0; i-- {
 		msg := &messages[i]
 		if msg.Role != message.RoleUser || strings.HasPrefix(strings.TrimSpace(msg.Content), "[system]") {
+			continue
+		}
+		if !message.IsUserAuthored(*msg) && msg.Kind != message.KindSubAgentMailbox {
 			continue
 		}
 		text := strings.TrimSpace(msg.Content)

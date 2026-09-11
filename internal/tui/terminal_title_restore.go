@@ -47,10 +47,16 @@ func (m *Model) updateTerminalTitleFromRestoredSession() {
 		return
 	}
 
-	// Last fallback: use the very first non-mailbox user-role message. This may
-	// be a compaction summary when no original user prompt remains available.
+	// Last fallback: use the very first user-role message that is either
+	// user-authored or the compaction summary this path deliberately tolerates
+	// when no original prompt survives. Synthetic kinds are excluded through the
+	// shared predicate rather than a hand-kept list, so a hook feedback or
+	// context notice cannot become the window title.
 	for _, msg := range msgs {
-		if msg.Role != message.RoleUser || msg.Kind == message.KindSubAgentMailbox || msg.Kind == message.KindLoopNotice || msg.Kind == message.KindBackgroundResult {
+		if msg.Role != message.RoleUser {
+			continue
+		}
+		if !message.IsUserAuthored(msg) && !msg.IsCompactionSummary {
 			continue
 		}
 		content := message.UserPromptPlainText(msg)

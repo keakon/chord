@@ -1377,6 +1377,42 @@ func TestHandleInsertHistoryUpLoadsLastUserMessageIntoComposer(t *testing.T) {
 	}
 }
 
+func TestHandleInsertHistoryUpSkipsSyntheticUserMessages(t *testing.T) {
+	backend := &sessionControlAgent{messages: []message.Message{
+		{Role: message.RoleUser, Content: "real prompt"},
+		{Role: message.RoleUser, Content: "[Context Summary]\narchived history", IsCompactionSummary: true},
+		{Role: message.RoleUser, Content: "job finished", Kind: message.KindBackgroundResult},
+		{Role: message.RoleUser, Content: "mailbox delivery", Kind: message.KindSubAgentMailbox},
+		{Role: message.RoleUser, Content: "loop notice", Kind: message.KindLoopNotice},
+		{Role: message.RoleUser, Content: "context notice", Kind: message.KindContextNotice},
+		{Role: message.RoleUser, Content: "stream continue", Kind: message.KindStreamContinue},
+		{Role: message.RoleUser, Content: "hook feedback", Kind: message.KindHookFeedback},
+	}}
+	m := NewModel(backend)
+	m.mode = ModeInsert
+
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyUp}))
+
+	if got := m.input.Value(); got != "real prompt" {
+		t.Fatalf("input value = %q, want last user-authored prompt", got)
+	}
+}
+
+func TestHandleInsertHistoryUpWithoutUserAuthoredMessagesUsesTypedHistory(t *testing.T) {
+	backend := &sessionControlAgent{messages: []message.Message{
+		{Role: message.RoleUser, Content: "[Context Summary]\narchived history", IsCompactionSummary: true},
+	}}
+	m := NewModel(backend)
+	m.mode = ModeInsert
+	m.input.AddHistory("typed earlier")
+
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyUp}))
+
+	if got := m.input.Value(); got != "typed earlier" {
+		t.Fatalf("input value = %q, want typed input history entry", got)
+	}
+}
+
 func TestRenderStatusBarShowsSessionSwitchProgress(t *testing.T) {
 	backend := &sessionControlAgent{providerModelRef: "openai/gpt-5.5"}
 	m := NewModelWithSize(backend, 120, 24)
@@ -1971,6 +2007,47 @@ func TestSyncVisibleMainUserBlockMsgIndexesRepairsOnlyMismatchedBlocks(t *testin
 	}
 }
 
+func TestSyncVisibleMainUserBlockMsgIndexesSkipsSyntheticUserMessages(t *testing.T) {
+	backend := &sessionControlAgent{messages: []message.Message{
+		{Role: "user", Content: "continue from where you stopped"},
+		{Role: "assistant", Content: "reply"},
+		{Role: "user", Content: "continue from where you stopped", Kind: message.KindStreamContinue},
+	}}
+	m := NewModel(backend)
+	m.viewport.ReplaceBlocks(nil)
+	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockUser, Content: "continue from where you stopped", MsgIndex: -1})
+
+	m.syncVisibleMainUserBlockMsgIndexes()
+
+	blocks := m.viewport.visibleBlocks()
+	if len(blocks) != 1 {
+		t.Fatalf("len(visibleBlocks()) = %d, want 1", len(blocks))
+	}
+	if got := blocks[0].MsgIndex; got != 0 {
+		t.Fatalf("MsgIndex = %d, want 0 for the user-authored match instead of the newer synthetic duplicate", got)
+	}
+}
+
+func TestSyncVisibleMainUserBlockMsgIndexesLeavesSyntheticOnlyContentUnmatched(t *testing.T) {
+	backend := &sessionControlAgent{messages: []message.Message{
+		{Role: "assistant", Content: "reply"},
+		{Role: "user", Content: "job finished", Kind: message.KindBackgroundResult},
+	}}
+	m := NewModel(backend)
+	m.viewport.ReplaceBlocks(nil)
+	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockUser, Content: "job finished", MsgIndex: -1})
+
+	m.syncVisibleMainUserBlockMsgIndexes()
+
+	blocks := m.viewport.visibleBlocks()
+	if len(blocks) != 1 {
+		t.Fatalf("len(visibleBlocks()) = %d, want 1", len(blocks))
+	}
+	if got := blocks[0].MsgIndex; got != -1 {
+		t.Fatalf("MsgIndex = %d, want -1 when only a synthetic message matches", got)
+	}
+}
+
 func TestPendingDraftConsumedEventAssignsMsgIndexForMainUserBlock(t *testing.T) {
 	backend := &sessionControlAgent{messages: []message.Message{
 		{Role: "assistant", Content: "prior"},
@@ -1993,6 +2070,31 @@ func TestPendingDraftConsumedEventAssignsMsgIndexForMainUserBlock(t *testing.T) 
 	}
 	if got := last.MsgIndex; got != 1 {
 		t.Fatalf("MsgIndex = %d, want committed user message index 1", got)
+	}
+}
+
+func TestPendingDraftConsumedEventSkipsSyntheticUserMessages(t *testing.T) {
+	backend := &sessionControlAgent{messages: []message.Message{
+		{Role: "user", Content: "queued"},
+		{Role: "user", Content: "queued", Kind: message.KindStreamContinue},
+	}}
+	m := NewModel(backend)
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.PendingDraftConsumedEvent{
+		DraftID: "draft-1",
+		Parts:   []message.ContentPart{{Type: "text", Text: "queued"}},
+	}})
+
+	blocks := m.viewport.visibleBlocks()
+	if len(blocks) == 0 {
+		t.Fatal("expected visible blocks after PendingDraftConsumedEvent")
+	}
+	last := blocks[len(blocks)-1]
+	if last.Type != BlockUser || last.Content != "queued" {
+		t.Fatalf("last block = %#v, want consumed user block 'queued'", last)
+	}
+	if got := last.MsgIndex; got != 0 {
+		t.Fatalf("MsgIndex = %d, want 0 for the user-authored message", got)
 	}
 }
 

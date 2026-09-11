@@ -66,6 +66,8 @@ func TestIsUserAuthoredExcludesSyntheticUserRoleMessages(t *testing.T) {
 		{name: "loop notice", msg: Message{Role: RoleUser, Content: "loop", Kind: KindLoopNotice}},
 		{name: "background result", msg: Message{Role: RoleUser, Content: "job finished", Kind: KindBackgroundResult}},
 		{name: "hook feedback", msg: Message{Role: RoleUser, Content: "hook", Kind: KindHookFeedback}},
+		{name: "stream continue", msg: Message{Role: RoleUser, Content: "continue", Kind: KindStreamContinue}},
+		{name: "context notice", msg: Message{Role: RoleUser, Content: "pressure", Kind: KindContextNotice}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

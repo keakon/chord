@@ -75,7 +75,7 @@ func (m *Model) handleTurnAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			msgs := m.agent.GetMessages()
 			for i, msg := range slices.Backward(msgs) {
 
-				if msg.Role != "user" || msg.IsCompactionSummary {
+				if !message.IsUserAuthored(msg) {
 					continue
 				}
 				if message.UserPromptPlainText(msg) == content {

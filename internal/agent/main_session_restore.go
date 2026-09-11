@@ -247,8 +247,11 @@ func (b *restoredSubAgentBuilder) attachTranscript(msgs []message.Message) {
 	b.state.Messages = append([]message.Message(nil), msgs...)
 	if b.state.TaskDesc == "" {
 		for _, m := range msgs {
-			if m.Role == "user" {
-				b.state.TaskDesc = m.Content
+			if !message.IsUserAuthored(m) {
+				continue
+			}
+			if text := strings.TrimSpace(m.Content); text != "" {
+				b.state.TaskDesc = text
 				break
 			}
 		}
