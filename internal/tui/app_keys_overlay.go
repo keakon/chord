@@ -71,7 +71,7 @@ func (m *Model) hasBackgroundAgentActivity() bool {
 // clearPendingQuitTick schedules a 2s timer that auto-clears the pending quit
 // hint. The generation parameter prevents stale timers from clearing newer state.
 func clearPendingQuitTick(gen uint64) tea.Cmd {
-	return tea.Tick(pendingQuitWindow, func(time.Time) tea.Msg {
+	return tickCmd(pendingQuitWindow, func(time.Time) tea.Msg {
 		return clearPendingQuitMsg{generation: gen}
 	})
 }

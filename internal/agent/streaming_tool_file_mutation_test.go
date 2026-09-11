@@ -676,7 +676,9 @@ func waitForFileContent(t *testing.T, path, want string) {
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		data, err := os.ReadFile(path)
-		if err == nil && string(data) == want {
+		// Match the final assertion's whitespace tolerance: a tool write and a
+		// rollback restore can differ in trailing newlines.
+		if err == nil && strings.TrimSpace(string(data)) == strings.TrimSpace(want) {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)

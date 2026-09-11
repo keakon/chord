@@ -112,6 +112,8 @@ func TestRoleSelectEscCancelsAndRestoresInsert(t *testing.T) {
 }
 
 func TestRoleSelectEnterOnCurrentRoleIsNoOp(t *testing.T) {
+	stubTUITicks(t)
+
 	backend := &sessionControlAgent{
 		currentRole:    "builder",
 		availableRoles: []string{"builder", "planner"},

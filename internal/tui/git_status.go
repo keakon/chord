@@ -149,7 +149,7 @@ func (m *Model) scheduleGitStatusTick() tea.Cmd {
 		m.gitStatus.NextDelay = delay
 	}
 	generation := m.gitStatus.Generation
-	return tea.Tick(delay, func(time.Time) tea.Msg {
+	return tickCmd(delay, func(time.Time) tea.Msg {
 		return gitStatusTickMsg{generation: generation}
 	})
 }

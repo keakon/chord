@@ -27,7 +27,7 @@ func statusBarTickCmd(generation uint64, delay time.Duration) tea.Cmd {
 	if delay <= 0 {
 		delay = time.Second
 	}
-	return tea.Tick(delay, func(time.Time) tea.Msg {
+	return tickCmd(delay, func(time.Time) tea.Msg {
 		return statusBarTickMsg{generation: generation}
 	})
 }

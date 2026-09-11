@@ -96,6 +96,7 @@ func replayTestClient(rejectCount int) (*Client, *ProviderConfig, *replayRejecti
 		Type:   config.ProviderTypeResponses,
 		Models: map[string]config.ModelConfig{"gpt-5.6-sol": {}},
 	}, []string{"key"})
+	disableRetryDelayForTest(cfg)
 	impl := &replayRejectingProvider{rejectCount: rejectCount}
 	return NewClient(cfg, impl, "gpt-5.6-sol", 1024, ""), cfg, impl
 }

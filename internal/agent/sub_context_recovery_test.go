@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -166,6 +167,9 @@ func TestSubAgentContextLengthRecoveryIsBounded(t *testing.T) {
 
 func TestSubAgentContextLengthRecoveryPreservesToolPairs(t *testing.T) {
 	_, sub := newMixedBatchTestSubAgent(t)
+	ctx, cancel := context.WithCancel(sub.parentCtx)
+	defer cancel()
+	sub.turn.Ctx = ctx
 	sub.ctxMgr.SetTokenBudgets(12000, 10000, 0)
 	messages := []message.Message{{Role: message.RoleUser, Content: "task"}}
 	for i := range 10 {
@@ -182,7 +186,12 @@ func TestSubAgentContextLengthRecoveryPreservesToolPairs(t *testing.T) {
 	if _, dropped := message.RepairOrphanToolResults(sub.ctxMgr.Snapshot()); dropped != 0 {
 		t.Fatalf("context recovery left %d orphan tool results", dropped)
 	}
-	sub.cancel()
+	// recoverFromContextLength issues the retry asynchronously and the stub
+	// provider leaves it in retry backoff. Cancel the turn context and join the
+	// goroutine so it cannot outlive the test and race the next test's global
+	// logger swap.
+	cancel()
+	sub.llmWG.Wait()
 }
 
 func TestSubAgentRejectsExcessiveToolCalls(t *testing.T) {

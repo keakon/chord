@@ -734,7 +734,18 @@ func TestHTTPTransport_ServerError(t *testing.T) {
 	}
 }
 
+// shortenConnectRetryBackoff shrinks the production connect retry pacing so
+// tests that walk every attempt do not wait the 500ms/1500ms backoff.
+func shortenConnectRetryBackoff(t *testing.T) {
+	t.Helper()
+	orig := connectRetryBackoff
+	connectRetryBackoff = []time.Duration{time.Millisecond, 2 * time.Millisecond}
+	t.Cleanup(func() { connectRetryBackoff = orig })
+}
+
 func TestManagerConnectAll_RetriesTransientInitializeErrorAndRecovers(t *testing.T) {
+	shortenConnectRetryBackoff(t)
+
 	cfg := ServerConfig{Name: "remote", URL: "https://mcp.test/mcp"}
 	mgr := NewPendingManagerWithClientInfo([]ServerConfig{cfg}, testClientInfo)
 
@@ -803,6 +814,8 @@ func TestManagerConnectAll_CanceledInitializeStaysPending(t *testing.T) {
 }
 
 func TestManagerConnectAll_FinalFailureStopsRetryingAndSetsError(t *testing.T) {
+	shortenConnectRetryBackoff(t)
+
 	cfg := ServerConfig{Name: "remote", URL: "https://mcp.test/mcp"}
 	mgr := NewPendingManagerWithClientInfo([]ServerConfig{cfg}, testClientInfo)
 

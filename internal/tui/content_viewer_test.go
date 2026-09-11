@@ -147,6 +147,8 @@ func TestContentViewerSuperCopyWithoutSelectionCopiesRawContent(t *testing.T) {
 }
 
 func TestContentViewerCopySelectionThenFullWithYY(t *testing.T) {
+	stubTUITicks(t)
+
 	origWrite := clipboardWriteAll
 	var copied []string
 	clipboardWriteAll = func(text string) error {

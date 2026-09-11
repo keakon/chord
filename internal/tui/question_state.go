@@ -82,7 +82,7 @@ func waitForQuestionRequest(ch <-chan QuestionRequest) tea.Cmd {
 // questionTimeoutTick returns a tea.Cmd that sleeps for 1 second then
 // delivers a questionTimeoutTickMsg (for countdown display).
 func questionTimeoutTick() tea.Cmd {
-	return tea.Tick(time.Second, func(_ time.Time) tea.Msg {
+	return tickCmd(time.Second, func(_ time.Time) tea.Msg {
 		return questionTimeoutTickMsg{}
 	})
 }

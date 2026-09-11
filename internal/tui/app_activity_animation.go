@@ -109,7 +109,7 @@ func animTickCmd(generation uint64, source animTickSource, delay time.Duration) 
 			delay = visualSpinnerCadence
 		}
 	}
-	return tea.Tick(delay, func(time.Time) tea.Msg {
+	return tickCmd(delay, func(time.Time) tea.Msg {
 		return animTickMsg{generation: generation, source: source}
 	})
 }

@@ -65,7 +65,7 @@ func (m *Model) handleWindowSizeUpdate(msg tea.WindowSizeMsg) tea.Cmd {
 			version := m.resizeVersion
 			return tea.Batch(
 				m.imageProtocolCmd(),
-				tea.Tick(40*time.Millisecond, func(time.Time) tea.Msg {
+				tickCmd(40*time.Millisecond, func(time.Time) tea.Msg {
 					return applyResizeMsg{version: version}
 				}),
 			)
@@ -74,7 +74,7 @@ func (m *Model) handleWindowSizeUpdate(msg tea.WindowSizeMsg) tea.Cmd {
 	}
 	m.resizeVersion++
 	version := m.resizeVersion
-	return tea.Tick(40*time.Millisecond, func(time.Time) tea.Msg {
+	return tickCmd(40*time.Millisecond, func(time.Time) tea.Msg {
 		return applyResizeMsg{version: version}
 	})
 }

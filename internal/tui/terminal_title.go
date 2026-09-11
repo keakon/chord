@@ -104,7 +104,7 @@ func terminalTitleTickCmd(generation uint64, delay time.Duration) tea.Cmd {
 	if delay <= 0 {
 		return nil
 	}
-	return tea.Tick(delay, func(time.Time) tea.Msg {
+	return tickCmd(delay, func(time.Time) tea.Msg {
 		return terminalTitleTickMsg{generation: generation}
 	})
 }

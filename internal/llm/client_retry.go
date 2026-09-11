@@ -183,7 +183,9 @@ const upstreamStreamFailureRetryRounds = 2
 // restarts, but it sits on a ProviderConfig shared with compaction, sub-agents
 // and title generation; letting it reach a minute would starve exactly the
 // compaction that a long continuation loop needs.
-const (
+// These are vars so tests can shrink the seeded cooldown instead of waiting it
+// out; production keeps the values described above.
+var (
 	preservedInterruptionCooldownBase = time.Second
 	preservedInterruptionCooldownMax  = 8 * time.Second
 )

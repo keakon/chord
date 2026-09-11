@@ -180,7 +180,7 @@ func splashStepDelay(step int) time.Duration {
 }
 
 func splashTickCmd(step int) tea.Cmd {
-	return tea.Tick(splashStepDelay(step), func(time.Time) tea.Msg {
+	return tickCmd(splashStepDelay(step), func(time.Time) tea.Msg {
 		return splashTickMsg{}
 	})
 }

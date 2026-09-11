@@ -101,6 +101,7 @@ func TestCompleteStreamReturnsTruncatedReasoningToCaller(t *testing.T) {
 
 func TestCompleteStreamZeroWidthInterruptedRetriesNextKey(t *testing.T) {
 	primaryCfg := testProviderConfigWithKeys("primary-prov", "primary-model", []string{"k1", "k2"})
+	disableRetryDelayForTest(primaryCfg)
 	primaryImpl := &recordingProvider{}
 	primaryImpl.calls = []scriptedCall{
 		// First key returns an empty interrupted response whose only "content"
@@ -1281,6 +1282,12 @@ func TestClient_VisibleInterruptedStreamCoolsKeyForEscalation(t *testing.T) {
 // of interruption are covered because they settle through different branches
 // and only one of them used to keep the failure count.
 func TestClient_RepeatedInterruptionsGrowTheTransportCooldown(t *testing.T) {
+	origBase, origMax := preservedInterruptionCooldownBase, preservedInterruptionCooldownMax
+	preservedInterruptionCooldownBase, preservedInterruptionCooldownMax = 50*time.Millisecond, 400*time.Millisecond
+	t.Cleanup(func() {
+		preservedInterruptionCooldownBase, preservedInterruptionCooldownMax = origBase, origMax
+	})
+
 	run := func(t *testing.T, call scriptedCall) time.Duration {
 		t.Helper()
 		cfg := testProviderConfigWithKeys("sample", "gpt-5.4", []string{"key-a"})
@@ -1464,6 +1471,7 @@ func TestClient_VisibleInterruptionEscalatesWithoutRollback(t *testing.T) {
 // recovering it, which is the opposite of what the preservation is for.
 func TestClient_ThinkingOnlyInterruptionKeepsSilentRetry(t *testing.T) {
 	primaryCfg := testProviderConfigWithKeys("primary-prov", "gpt-test", []string{"k1"})
+	disableRetryDelayForTest(primaryCfg)
 	impl := &scriptedProvider{calls: []scriptedCall{
 		{streams: []message.StreamDelta{{Type: message.StreamDeltaThinking, Text: "let me work through this"}}, err: io.ErrUnexpectedEOF},
 		{streams: []message.StreamDelta{{Type: message.StreamDeltaText, Text: "the answer"}}, resp: &message.Response{Content: "the answer", StopReason: "stop"}},
@@ -3296,6 +3304,7 @@ func TestCompleteStreamWithRetryHonorsExplicitMaxAttempts(t *testing.T) {
 
 func TestClientCompleteStreamDefaultRetriesOrdinaryErrorsUntilRecovery(t *testing.T) {
 	cfg := testProviderConfigWithKeys("primary-prov", "primary-model", []string{"k1"})
+	disableRetryDelayForTest(cfg)
 	impl := &recordingProvider{}
 	impl.calls = []scriptedCall{
 		{err: &APIError{StatusCode: 500, Message: "upstream overloaded"}},
@@ -3366,6 +3375,7 @@ func TestClientCompleteStreamConfiguredRetryRoundsHardCapsAllKeysCooling(t *test
 
 func TestClientCompleteStreamConnectionEstablishmentTimeoutRetriesProviderNextRound(t *testing.T) {
 	cfg := testProviderConfigWithKeys("primary-prov", "primary-model", []string{"k1"})
+	disableRetryDelayForTest(cfg)
 	impl := &recordingProvider{}
 	impl.calls = []scriptedCall{
 		{err: tlsHandshakeTimeoutErr{}},
@@ -3389,6 +3399,7 @@ func TestClientCompleteStreamConnectionEstablishmentTimeoutRetriesProviderNextRo
 
 func TestClientCompleteConnectionEstablishmentTimeoutRetriesProviderNextRound(t *testing.T) {
 	cfg := testProviderConfigWithKeys("primary-prov", "primary-model", []string{"k1"})
+	disableRetryDelayForTest(cfg)
 	impl := &recordingProvider{}
 	impl.calls = []scriptedCall{
 		{err: tlsHandshakeTimeoutErr{}},
@@ -3898,7 +3909,7 @@ func TestCompleteStreamWithRetryPrefersShortestRoundWaitAcrossModels(t *testing.
 	primaryCfg := testProviderConfigWithKeys("primary-prov", "gpt-primary", []string{"k1"})
 	fallbackCfg := testProviderConfigWithKeys("fallback-prov", "gpt-fallback", []string{"k2"})
 	primaryCfg.MarkCooldown("k1", time.Minute)
-	fallbackCfg.MarkCooldown("k2", time.Second)
+	fallbackCfg.MarkCooldown("k2", 50*time.Millisecond)
 	implPrimary := &recordingProvider{}
 	implFallback := &recordingProvider{}
 	implFallback.calls = []scriptedCall{{resp: &message.Response{Content: "ok after short wait"}}}

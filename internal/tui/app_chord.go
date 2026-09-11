@@ -31,7 +31,7 @@ type chordTimeoutMsg struct {
 }
 
 func chordTimeoutTick(generation uint64) tea.Cmd {
-	return tea.Tick(normalChordTimeout, func(time.Time) tea.Msg {
+	return tickCmd(normalChordTimeout, func(time.Time) tea.Msg {
 		return chordTimeoutMsg{generation: generation}
 	})
 }

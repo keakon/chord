@@ -126,6 +126,8 @@ func TestRequestProgressDoesNotAdvanceTitleFrameBetweenTicks(t *testing.T) {
 }
 
 func TestHandleBlurMsgKeepsBackgroundActiveTitleTickerForBusyAgent(t *testing.T) {
+	stubTUITicks(t)
+
 	m := NewModelWithSize(nil, 80, 24)
 	m.displayState = stateForeground
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
@@ -207,6 +209,8 @@ func TestQuestionRequestStartsBlinkingBackgroundRequestTitle(t *testing.T) {
 }
 
 func TestHandleBlurMsgStartsBlinkingRequestTitleForPendingConfirm(t *testing.T) {
+	stubTUITicks(t)
+
 	m := NewModelWithSize(nil, 80, 24)
 	m.displayState = stateForeground
 	m.terminalTitleBase = "await approval"

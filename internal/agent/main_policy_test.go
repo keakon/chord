@@ -131,13 +131,6 @@ func TestStartPlanExecutionKeepsExecutionPromptAcrossRefresh(t *testing.T) {
 
 	a.refreshSystemPrompt()
 	assertExecutionPromptContains(t, a.ctxMgr.SystemPrompt().Content, planPath)
-
-	select {
-	case <-a.eventCh:
-	case <-time.After(2 * time.Second):
-		// The execute path may continue retrying after the first spawned LLM goroutine
-		// under some test/provider combinations; prompt persistence is the behavior under test.
-	}
 }
 
 func TestStartPlanExecutionPropagatesNewSessionIDToProvider(t *testing.T) {
@@ -632,6 +625,11 @@ func newTestMainAgent(t *testing.T, projectRoot string) *MainAgent {
 		a.signalStopping()
 		a.cancel()
 		a.outputWg.Wait()
+		// Tests set a.started directly to emulate a live event loop; when Run was
+		// never invoked, a.done never closes and Shutdown would burn its whole
+		// budget selecting on it. Run-owning tests join Run before cleanup, so
+		// clearing the flag only skips a signal that already fired.
+		a.started.Store(false)
 		_ = a.Shutdown(2 * time.Second)
 		if a.recoveryManager() != nil {
 			a.recoveryManager().Close()

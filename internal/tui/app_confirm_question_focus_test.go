@@ -492,6 +492,8 @@ func TestSessionSwitchStartedClearsActiveHandoff(t *testing.T) {
 }
 
 func TestHandoffWithoutTargetsReturnsToastCommand(t *testing.T) {
+	stubTUITicks(t)
+
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 120, 24)
 	m.mode = ModeNormal
@@ -510,6 +512,8 @@ func TestHandoffWithoutTargetsReturnsToastCommand(t *testing.T) {
 }
 
 func TestFinishDialogKeepsSkippedHandoffToastCommand(t *testing.T) {
+	stubTUITicks(t)
+
 	backend := &sessionControlAgent{} // no eligible handoff target: the dialog skips itself
 	m := NewModelWithSize(backend, 120, 24)
 	m.mode = ModeConfirm

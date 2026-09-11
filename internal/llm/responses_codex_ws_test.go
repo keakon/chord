@@ -131,13 +131,15 @@ func TestCodexWSReadMessageUsesProviderIdleTimeout(t *testing.T) {
 	defer wsConn.Close()
 
 	provider := NewProviderConfig("test", config.ProviderConfig{
-		Type:              config.ProviderTypeResponses,
-		StreamIdleTimeout: 1,
+		Type: config.ProviderTypeResponses,
 	}, nil)
+	// The public setting is whole seconds; set the resolved deadline directly so
+	// the test exercises the read path without waiting a full second.
+	provider.streamIdleTimeout = 100 * time.Millisecond
 	r := &ResponsesProvider{provider: provider, codexWSConn: wsConn}
 	_, err = r.codexWSReadMessageWithIdleTimeoutLocked(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "no data from model for 1s") {
-		t.Fatalf("codexWSReadMessageWithIdleTimeoutLocked err = %v, want 1s idle timeout", err)
+	if err == nil || !strings.Contains(err.Error(), "no data from model for 100ms") {
+		t.Fatalf("codexWSReadMessageWithIdleTimeoutLocked err = %v, want 100ms idle timeout", err)
 	}
 }
 

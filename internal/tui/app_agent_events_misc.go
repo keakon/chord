@@ -360,7 +360,7 @@ func (m *Model) scheduleKeyPoolTick() tea.Cmd {
 		d = minWait
 	}
 	gen := m.keyPoolTickGen
-	return tea.Tick(d, func(time.Time) tea.Msg {
+	return tickCmd(d, func(time.Time) tea.Msg {
 		return keyPoolTickMsg{gen: gen}
 	})
 }

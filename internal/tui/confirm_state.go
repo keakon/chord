@@ -126,7 +126,7 @@ func waitForConfirmRequest(ch <-chan ConfirmRequest) tea.Cmd {
 }
 
 func confirmTimeoutTick() tea.Cmd {
-	return tea.Tick(time.Second, func(_ time.Time) tea.Msg {
+	return tickCmd(time.Second, func(_ time.Time) tea.Msg {
 		return confirmTimeoutTickMsg{}
 	})
 }

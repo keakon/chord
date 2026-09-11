@@ -329,6 +329,8 @@ func TestScheduleStreamFlushUsesCadenceDelay(t *testing.T) {
 }
 
 func TestBackgroundIdleSweepStartsOnBlurWhileBusyAndStopsOnIdle(t *testing.T) {
+	stubTUITicks(t)
+
 	m := NewModelWithSize(nil, 80, 24)
 	m.displayState = stateForeground
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
@@ -499,6 +501,8 @@ func TestBackgroundIdleTransitionSchedulesFreshHousekeepingAfterStoppingAnimatio
 }
 
 func TestBackgroundActiveStartAnimationSchedulesHousekeepingNotVisualTick(t *testing.T) {
+	stubTUITicks(t)
+
 	oldCadence := backgroundActiveCadence
 	backgroundActiveCadence.housekeepingDelay = time.Nanosecond
 	t.Cleanup(func() { backgroundActiveCadence = oldCadence })

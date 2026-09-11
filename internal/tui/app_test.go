@@ -5799,6 +5799,8 @@ func TestSessionRestoredEventClearsStartupRestorePlaceholder(t *testing.T) {
 }
 
 func TestCompactionRebuildPreservesActiveMainRequest(t *testing.T) {
+	stubTUITicks(t)
+
 	backend := &sessionControlAgent{messages: []message.Message{{
 		Role:                message.RoleUser,
 		IsCompactionSummary: true,

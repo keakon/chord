@@ -55,7 +55,7 @@ func toastLevelPriority(level string) int {
 
 func toastTickCmdForLevel(level string, generation uint64) tea.Cmd {
 	d := toastDurationForLevel(level)
-	return tea.Tick(d, func(time.Time) tea.Msg {
+	return tickCmd(d, func(time.Time) tea.Msg {
 		return toastTickMsg{generation: generation}
 	})
 }
