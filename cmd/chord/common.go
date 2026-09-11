@@ -587,11 +587,9 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	shellTool.BaseDir = ac.ProjectRoot
 	ac.Registry.Register(shellTool)
 
-	spawnTool := tools.NewSpawnTool(detectedShell.String())
-	spawnTool.BaseDir = ac.ProjectRoot
-	ac.Registry.Register(spawnTool)
-	ac.Registry.Register(tools.SpawnStatusTool{})
-	ac.Registry.Register(tools.SpawnStopTool{})
+	ac.Registry.Register(tools.JobOutputTool{})
+	ac.Registry.Register(tools.JobListTool{})
+	ac.Registry.Register(tools.JobKillTool{})
 	ac.Registry.Register(tools.GrepTool{BaseDir: ac.ProjectRoot})
 	ac.Registry.Register(tools.GlobTool{BaseDir: ac.ProjectRoot})
 	ac.Registry.Register(tools.HandoffTool{BaseDir: ac.ProjectRoot})

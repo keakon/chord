@@ -2,6 +2,22 @@
 
 This project follows Semantic Versioning-style releases. Before 1.0, releases may include breaking changes.
 
+## Unreleased
+
+### Breaking Changes
+
+- The `spawn`, `spawn_status`, and `spawn_stop` tools are removed; background processes now run through `shell`. Migrate `permission:` rules, hook `tools:` filters, and skill `allowed_tools` lists that name `spawn*`: start background work with `shell` and `run_in_background: true`, then manage it with the new `job_output`, `job_list`, and `job_kill` tools. A `spawn` permission rule no longer matches anything.
+
+- The timeout defaults also change: a foreground `shell` now yields after 90 seconds and applies a 10-minute `timeout_ms` by default, while an explicitly detached job (`run_in_background: true`) with no `timeout_ms` has no hard deadline — the same default the old `spawn` had — and passes `timeout_ms: 0` to say the same thing out loud. The argument is also renamed and reunitized: `timeout` took seconds (max 600, default 30) and `timeout_ms` takes milliseconds (max 600000 foreground, or 21600000 with `run_in_background: true`; default 600000 foreground). Unknown arguments are ignored rather than rejected, so a call still passing `timeout: 60` does not fail — it falls back to the default instead of the 60 seconds it used to mean. Migrate every `timeout: N` to `timeout_ms: N * 1000`. The job handle and the completion notice name the deadline only when one applies.
+
+- Background results already written to `main.jsonl` by `spawn` still render after the upgrade: a legacy `job-N` id remains on the card, a legacy `svc-N` id does not, and the retired `Review this result before continuing.` line is shown as an ordinary body line.
+
+### Features
+
+- `shell` now covers background work instead of forcing a long command to block the turn. A foreground command that runs past its budget (`yield_ms`, default 90s) is promoted to a background job: its output is kept, and a completion notification wakes the agent when it finishes so it can do independent work or end the turn and be resumed by the completion. `run_in_background: true` starts a job immediately without waiting, and `timeout_ms: 0` starts a service with no hard deadline. Foreground commands stay capped at 10 minutes, while `run_in_background: true` allows `timeout_ms` up to 6 hours.
+- New `job_output`, `job_list`, and `job_kill` tools manage background jobs. `job_output` reads only the output produced since the previous read, with a `wait` mode (`none`, `output`, or `exit`) bounded by the runtime so a slow job never blocks the turn and an expired wait never kills it. Repeated reads that find no new output are treated as polling — a notice first, then a rejection — and terminal escape codes are stripped from the output the model reads. `job_list` shows what is still running and `job_kill` stops a job without a completion notification.
+- Consecutive completion wakes with no user input in between are capped at 3; after that, later completions wait for the next user message.
+
 ## 0.8.0 - 2026-09-11
 
 ### Highlights

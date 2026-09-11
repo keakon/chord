@@ -26,15 +26,14 @@ func outcomeCardFixture(name, args, result string, status agent.ToolResultStatus
 }
 
 var outcomeCardArgs = map[string]string{
-	tools.NameShell:          `{"command":"git commit --amend","description":"Recommit"}`,
-	tools.NameRead:           `{"path":"internal/tui/a.go"}`,
-	tools.NameWrite:          `{"path":"internal/tui/a.go","content":"package tui\n"}`,
-	tools.NameEdit:           `{"path":"internal/tui/a.go","old_string":"foo","new_string":"bar"}`,
-	tools.NameGrep:           `{"pattern":"foo","path":"internal"}`,
-	tools.NameWebFetch:       `{"url":"https://example.com"}`,
-	tools.NameSkill:          `{"skill":"code-review"}`,
-	tools.NameSpawn:          `{"command":"npm run dev"}`,
-	tools.NameTodoWrite:      `{"todos":[{"content":"a","status":"pending"}]}`,
+	tools.NameShell:     `{"command":"git commit --amend","description":"Recommit"}`,
+	tools.NameRead:      `{"path":"internal/tui/a.go"}`,
+	tools.NameWrite:     `{"path":"internal/tui/a.go","content":"package tui\n"}`,
+	tools.NameEdit:      `{"path":"internal/tui/a.go","old_string":"foo","new_string":"bar"}`,
+	tools.NameGrep:      `{"pattern":"foo","path":"internal"}`,
+	tools.NameWebFetch:  `{"url":"https://example.com"}`,
+	tools.NameSkill:     `{"skill":"code-review"}`,
+	tools.NameJobOutput: `{"job_id":"job-1"}`, tools.NameTodoWrite: `{"todos":[{"content":"a","status":"pending"}]}`,
 	tools.NameQuestion:       `{"question":"Which?","options":[{"label":"main"}]}`,
 	tools.NameComplete:       `{"summary":"Landed it."}`,
 	tools.NameEscalate:       `{"reason":"Need approval."}`,
@@ -85,7 +84,7 @@ func TestToolCardsReportCancellationOnce(t *testing.T) {
 // indented body.
 func TestCollapsedToolCardsKeepTheOutcomeOnOneLine(t *testing.T) {
 	ApplyTheme(DefaultTheme())
-	for _, name := range []string{tools.NameShell, tools.NameWebFetch, tools.NameSkill, tools.NameSpawn} {
+	for _, name := range []string{tools.NameShell, tools.NameWebFetch, tools.NameSkill, tools.NameJobOutput} {
 		block := outcomeCardFixture(name, outcomeCardArgs[name], "Error: exit code 1", agent.ToolResultStatusError)
 		plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
 		if !strings.Contains(plain, "↳ Error: exit code 1") {
@@ -227,7 +226,7 @@ func TestCollapsedReadCardBoundsALongError(t *testing.T) {
 // fuller body carries ▸ even when the collapsed body already fits.
 func TestCollapsedToggleableCardShowsDisclosureMarker(t *testing.T) {
 	ApplyTheme(DefaultTheme())
-	for _, name := range []string{tools.NameWebFetch, tools.NameSkill, tools.NameSpawn, tools.NameShell} {
+	for _, name := range []string{tools.NameWebFetch, tools.NameSkill, tools.NameJobOutput, tools.NameShell} {
 		block := outcomeCardFixture(name, outcomeCardArgs[name], "Error: 404 Not Found", agent.ToolResultStatusError)
 		collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
 		if !strings.Contains(collapsed, "✗ ▸ "+name) {
@@ -391,19 +390,19 @@ func TestAlwaysExpandedCardsKeepProseOffTheHeader(t *testing.T) {
 func TestShellCardKeepsArgumentsOffTheBody(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	block := outcomeCardFixture(tools.NameShell,
-		`{"command":"go test ./internal/tui/","description":"Run the TUI suite","timeout":"120","workdir":"/tmp/project"}`,
+		`{"command":"go test ./internal/tui/","description":"Run the TUI suite","timeout_ms":120000,"workdir":"/tmp/project"}`,
 		"ok", "")
 	block.ToolCallDetailExpanded = true
 
 	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
 
-	if !strings.Contains(plain, "shell Run the TUI suite (timeout=120)") {
+	if !strings.Contains(plain, "shell Run the TUI suite (timeout=2m)") {
 		t.Fatalf("expected the description and timeout on the header, got:\n%s", plain)
 	}
 	if strings.Count(plain, "Run the TUI suite") != 1 {
 		t.Fatalf("expected the description only on the header, got:\n%s", plain)
 	}
-	if strings.Contains(plain, "timeout: 120s") {
+	if strings.Contains(plain, "timeout:") {
 		t.Fatalf("expected the timeout only on the header, got:\n%s", plain)
 	}
 	// The working directory qualifies the command block it sits under.

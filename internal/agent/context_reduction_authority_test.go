@@ -54,7 +54,7 @@ func authorityMatrixCases(t *testing.T, sessionDir string) []authorityCase {
 	labelMention := "Patch applied to internal/lsp/tool_output.go.\n" +
 		strings.Repeat(`const DiagnosticsSectionMarker = "\n\n`+diagnosticsSectionLabel+`\n"`+"\n", 80)
 	genericOutput := strings.Repeat("record without recognizable shape\n", 100)
-	spawnOutput := strings.Repeat("subagent transcript line\n", 100)
+	jobOutput := strings.Repeat("subagent transcript line\n", 100)
 	errorOutput := strings.Repeat("build failed: cannot find package\n", 100)
 
 	return []authorityCase{
@@ -279,11 +279,11 @@ func authorityMatrixCases(t *testing.T, sessionDir string) []authorityCase {
 			worstCase:    "an unrecognized payload is replaced by a marker with neither content nor address",
 		},
 		{
-			name:      "spawn output is archived because it cannot be replayed",
+			name:      "job output is archived because it cannot be replayed",
 			authority: "durable transcript (one-shot)",
 			ctx: requestReductionContext{
-				ToolName: tools.NameSpawn, Meta: toolCallMeta{Name: tools.NameSpawn},
-				Content: spawnOutput, Age: policy.StaleAgeTurns, Policy: policy,
+				ToolName: tools.NameJobOutput, Meta: toolCallMeta{Name: tools.NameJobOutput},
+				Content: jobOutput, Age: policy.StaleAgeTurns, Policy: policy,
 				ToolResults: policy.MinToolResultsPrune, ArchiveDir: sessionDir,
 			},
 			wantClass: requestReductionGeneric, wantLevel: retentionArchived,

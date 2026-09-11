@@ -39,7 +39,7 @@ func TestWrapConfirmLiteralTextPrefersTokenAndPathBoundaries(t *testing.T) {
 func TestRenderConfirmSummarySoftWrapsLongShellCommandWithoutBreakingPathToken(t *testing.T) {
 	m := NewModel(nil)
 	m.width = 100
-	m.confirm.request = &ConfirmRequest{ToolName: "shell", ArgsJSON: `{"command":"mv docs/plans/example-plan.md docs/plans/archive/example-plan.md","workdir":"/tmp/project","timeout":30}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "shell", ArgsJSON: `{"command":"mv docs/plans/example-plan.md docs/plans/archive/example-plan.md","workdir":"/tmp/project","timeout_ms":30000}`}
 
 	plain := stripANSI(m.renderConfirmDialog())
 	if !strings.Contains(plain, "Command:") {
@@ -56,7 +56,7 @@ func TestRenderConfirmSummarySoftWrapsLongShellCommandWithoutBreakingPathToken(t
 func TestRenderConfirmSummaryShowsStructuredShellFields(t *testing.T) {
 	m := NewModel(nil)
 	m.width = 100
-	m.confirm.request = &ConfirmRequest{ToolName: "shell", ArgsJSON: `{"command":"rm internal/tui/example_obsolete.go","description":"Remove obsolete file","workdir":"/tmp/project","timeout":45}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "shell", ArgsJSON: `{"command":"rm internal/tui/example_obsolete.go","description":"Remove obsolete file","workdir":"/tmp/project","timeout_ms":45000}`}
 
 	plain := stripANSI(m.renderConfirmDialog())
 	if !strings.Contains(plain, "Tool: shell") {
@@ -88,13 +88,13 @@ func TestRenderConfirmSummaryShowsStructuredShellFields(t *testing.T) {
 func TestRenderConfirmSummaryShowsEffectiveForegroundTimeoutWhenCapped(t *testing.T) {
 	m := NewModel(nil)
 	m.width = 100
-	m.confirm.request = &ConfirmRequest{ToolName: "shell", ArgsJSON: `{"command":"sleep 1","timeout":2400}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "shell", ArgsJSON: `{"command":"sleep 1","timeout_ms":2400000}`}
 
 	plain := stripANSI(m.renderConfirmDialog())
-	if !strings.Contains(plain, "Timeout: 600s") {
+	if !strings.Contains(plain, "Timeout: 10m") {
 		t.Fatalf("expected confirm summary to show effective capped foreground timeout, got:\n%s", plain)
 	}
-	if !strings.Contains(plain, "Requested timeout 2400s capped to 600s") {
+	if !strings.Contains(plain, "Requested timeout 40m capped to 10m") {
 		t.Fatalf("expected confirm warning about capped timeout, got:\n%s", plain)
 	}
 }
@@ -102,11 +102,39 @@ func TestRenderConfirmSummaryShowsEffectiveForegroundTimeoutWhenCapped(t *testin
 func TestRenderConfirmSummaryDoesNotTreatShellAsBackground(t *testing.T) {
 	m := NewModel(nil)
 	m.width = 100
-	m.confirm.request = &ConfirmRequest{ToolName: "shell", ArgsJSON: `{"command":"npm run dev","description":"Frontend dev server","timeout":45}`}
+	m.confirm.request = &ConfirmRequest{ToolName: "shell", ArgsJSON: `{"command":"npm run dev","description":"Frontend dev server","timeout_ms":45000}`}
 
 	plain := stripANSI(m.renderConfirmDialog())
 	if strings.Contains(plain, "Background:") || strings.Contains(plain, "Max runtime:") || strings.Contains(plain, "Mode:") {
 		t.Fatalf("shell confirm summary should not include background fields, got:\n%s", plain)
+	}
+}
+
+func TestRenderConfirmSummaryUsesBackgroundTimeoutCap(t *testing.T) {
+	m := NewModel(nil)
+	m.width = 100
+	m.confirm.request = &ConfirmRequest{ToolName: "shell", ArgsJSON: `{"command":"npm run dev","run_in_background":true,"timeout_ms":7200000}`}
+
+	plain := stripANSI(m.renderConfirmDialog())
+	if !strings.Contains(plain, "Timeout: 2h") {
+		t.Fatalf("expected background timeout to keep the requested hour-scale value, got:\n%s", plain)
+	}
+	if strings.Contains(plain, "capped to") {
+		t.Fatalf("a background timeout within the larger cap must not warn about capping, got:\n%s", plain)
+	}
+}
+
+func TestRenderConfirmSummaryCapsBackgroundTimeoutBeyondSixHours(t *testing.T) {
+	m := NewModel(nil)
+	m.width = 100
+	m.confirm.request = &ConfirmRequest{ToolName: "shell", ArgsJSON: `{"command":"npm run dev","run_in_background":true,"timeout_ms":28800000}`}
+
+	plain := stripANSI(m.renderConfirmDialog())
+	if !strings.Contains(plain, "Timeout: 6h") {
+		t.Fatalf("expected confirm summary to show the effective capped background timeout, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "Requested timeout 8h capped to 6h") {
+		t.Fatalf("expected confirm warning about the capped background timeout, got:\n%s", plain)
 	}
 }
 

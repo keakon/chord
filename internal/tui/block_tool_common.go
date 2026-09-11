@@ -793,45 +793,44 @@ func bashFirstNonEmptyLine(content string) string {
 // detail.
 func toolSummarySuppressesErrors(name string) bool {
 	switch name {
-	case tools.NameSpawn, tools.NameSpawnStop, tools.NameDelegate, tools.NameGrep,
+	case tools.NameJobList, tools.NameJobKill, tools.NameDelegate, tools.NameGrep,
 		tools.NameGlob, tools.NameLsp, tools.NameCancel, tools.NameNotify:
 		return true
 	}
 	return false
 }
 
-// spawnResultIDMaxWidth caps the ID shown in the collapsed summary so a
+// jobResultIDMaxWidth caps the ID shown in the collapsed summary so a
 // malformed result cannot push the one-line summary past the card width. Real
-// IDs are short opaque tokens (e.g. "svc-64"). It bounds display columns, not
+// IDs are short opaque tokens (e.g. "job-64"). It bounds display columns, not
 // rune count, so a wide-glyph ID is capped by what it actually occupies.
-const spawnResultIDMaxWidth = 24
+const jobResultIDMaxWidth = 24
 
-// parseSpawnResultID extracts the background process ID from a spawn result,
-// e.g. "id: svc-64\nstatus: running\n...". spawn reports the ID on its first
-// line and it is the handle for every later spawn_status / spawn_stop call, so
-// the collapsed card can name the process without being expanded. Returns ""
-// when the result is not in that shape, which lets callers fall back to the
-// bare state label.
-func parseSpawnResultID(result string) string {
+// parseJobResultID extracts the background job ID from a shell result, e.g.
+// "[background job job-64] ...". The job id is the handle for every later
+// job_output / job_kill call, so the collapsed card can name it without being
+// expanded. Returns "" when the result is not in that shape.
+func parseJobResultID(result string) string {
 	for line := range strings.SplitSeq(result, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-		// spawn always emits "id:" first. Any other leading line means this is
-		// a different result shape (an error message, say), so stop rather than
-		// scanning for an "id:" later in the body.
-		value, ok := strings.CutPrefix(line, "id:")
+		rest, ok := strings.CutPrefix(line, "[background job ")
 		if !ok {
 			return ""
 		}
-		id := strings.TrimSpace(value)
+		id, _, ok := strings.Cut(rest, "]")
+		if !ok {
+			return ""
+		}
+		id = strings.TrimSpace(id)
 		if id == "" || strings.ContainsFunc(id, unicode.IsSpace) {
 			return ""
 		}
 		id = sanitizeToolDisplayText(id)
-		if runewidth.StringWidth(id) > spawnResultIDMaxWidth {
-			id = runewidth.Truncate(id, spawnResultIDMaxWidth, "…")
+		if runewidth.StringWidth(id) > jobResultIDMaxWidth {
+			id = runewidth.Truncate(id, jobResultIDMaxWidth, "…")
 		}
 		return id
 	}
@@ -863,17 +862,11 @@ func formatToolResultSummaryLine(b *Block) string {
 	case tools.NameShell:
 		// Shell expands with explicit exit-code detail, so avoid a redundant summary like "Passed".
 		return ""
-	case tools.NameSpawn:
-		// The ID is the handle for every later spawn_status / spawn_stop call,
-		// so surface it collapsed; expanding only repeats the same fields.
-		// spawn_stop is deliberately left as a bare label: its ID is an argument,
-		// so the header already names it and echoing it here would just repeat.
-		if id := parseSpawnResultID(trimmed); id != "" {
-			return fmt.Sprintf("Started · %s", id)
-		}
-		return "Started"
-	case tools.NameSpawnStop:
-		return "Stopped"
+	case tools.NameJobOutput, tools.NameJobList:
+		// The body already carries the incremental output and the status line.
+		return ""
+	case tools.NameJobKill:
+		return "Stop requested"
 	case tools.NameDelegate:
 		if b.DoneSummary != "" {
 			return "Done"

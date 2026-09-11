@@ -514,7 +514,8 @@ func (b *Block) diagnosticArgOccupiesHeader(diagnostic toolArgDiagnostic) bool {
 		// below, where the note or error section explains them.
 		return true
 	case tools.NameDelete, tools.NameRead, tools.NameWrite, tools.NameEdit, tools.NameApplyPatch,
-		tools.NameTodoWrite, tools.NameShell, tools.NameSpawn, tools.NameWebFetch, tools.NameSkill:
+		tools.NameTodoWrite, tools.NameShell, tools.NameJobOutput, tools.NameJobKill, tools.NameJobList,
+		tools.NameWebFetch, tools.NameSkill:
 		return true
 	default:
 		return false

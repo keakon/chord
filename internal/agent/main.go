@@ -878,6 +878,9 @@ type MainAgent struct {
 	subAgentInboxSummaryMu   sync.RWMutex
 	subAgentUrgentCounts     map[string]int
 	explicitUserTurnCount    atomic.Uint64
+	// consecutiveIdleWakes counts back-to-back idle turns opened by mailbox
+	// delivery with no user input between them; see maxConsecutiveIdleWakes.
+	consecutiveIdleWakes atomic.Int32
 
 	// mcpServerCache maps scoped server keys to connections. Main-agent servers
 	// are registered as sentinels (Mgr==nil); SubAgent-exclusive servers are
@@ -1817,8 +1820,7 @@ func (a *MainAgent) checkpointDegradedSubAgents() []string {
 }
 
 // cancelActiveWork aborts the active turn (if any), cancels every live
-// SubAgent, and stops orphaned background objects (Shell spawns, etc.). It is
-// the first phase of [MainAgent.Shutdown] and runs synchronously so tool
+// SubAgent, and stops orphaned background shell jobs. It is the first phase of [MainAgent.Shutdown] and runs synchronously so tool
 // executions and LLM calls observe cancellation before snapshot/persist work
 // begins.
 func (a *MainAgent) cancelActiveWork() {
@@ -1836,13 +1838,13 @@ func (a *MainAgent) cancelActiveWork() {
 
 	a.subs.mu.RLock()
 	for _, sub := range a.subs.subAgents {
-		tools.StopAllSpawnedForAgent(sub.instanceID, "terminated on client exit")
+		tools.StopAllJobsForAgent(sub.instanceID, "terminated on client exit")
 		sub.cancel()
 		sub.closeLLMClient()
 	}
 	a.subs.mu.RUnlock()
 
-	if stoppedBackground := tools.StopAllSpawnedForShutdown(); stoppedBackground > 0 {
+	if stoppedBackground := tools.StopAllJobsForShutdown(); stoppedBackground > 0 {
 		log.Infof("terminated background objects for shutdown count=%v instance=%v", stoppedBackground, a.instanceID)
 	}
 }

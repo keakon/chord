@@ -40,3 +40,77 @@ func TestMainToolVisibleFalseWhenToolDenied(t *testing.T) {
 		t.Fatal("a permission-deny ruleset must hide todo_write from the visible surface")
 	}
 }
+
+func TestVisibleLLMToolsHidesJobToolsWhenShellDisabled(t *testing.T) {
+	// The job tools read and stop jobs that only shell can start, so disabling
+	// shell hides the whole family — unless a non-wildcard rule names a tool,
+	// which is the ruleset author asking for that tool on its own.
+	newRegistry := func() *tools.Registry {
+		reg := tools.NewRegistry()
+		reg.Register(tools.JobOutputTool{})
+		reg.Register(tools.JobListTool{})
+		reg.Register(tools.JobKillTool{})
+		reg.Register(tools.NewTodoWriteTool(nil))
+		return reg
+	}
+	cases := []struct {
+		name       string
+		rules      string
+		wantJob    []string
+		wantHidden []string
+	}{
+		{
+			name: "shell denied hides the whole job family",
+			rules: `
+"*": allow
+shell: deny
+`,
+			wantHidden: []string{tools.NameJobOutput, tools.NameJobList, tools.NameJobKill},
+		},
+		{
+			name: "a rule naming one job tool keeps it",
+			rules: `
+"*": allow
+shell: deny
+job_output: allow
+`,
+			wantJob:    []string{tools.NameJobOutput},
+			wantHidden: []string{tools.NameJobList, tools.NameJobKill},
+		},
+		{
+			name: "an ask rule also counts as an explicit grant",
+			rules: `
+"*": allow
+shell: deny
+job_list: ask
+`,
+			wantJob:    []string{tools.NameJobList},
+			wantHidden: []string{tools.NameJobOutput, tools.NameJobKill},
+		},
+		{
+			name: "shell allowed keeps the whole job family",
+			rules: `
+"*": allow
+`,
+			wantJob: []string{tools.NameJobOutput, tools.NameJobList, tools.NameJobKill},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			visible := visibleLLMTools(newRegistry(), permissionRuleset(t, tc.rules), func(string) bool { return false }, toolPermissionContext{})
+			for _, name := range tc.wantJob {
+				if !containsToolNamed(visible, name) {
+					t.Errorf("%s must stay visible", name)
+				}
+			}
+			for _, name := range tc.wantHidden {
+				if containsToolNamed(visible, name) {
+					t.Errorf("%s must be hidden while shell is disabled", name)
+				}
+			}
+			if !containsToolNamed(visible, tools.NameTodoWrite) {
+				t.Error("an unrelated tool must not be affected by the shell coupling")
+			}
+		})
+	}
+}

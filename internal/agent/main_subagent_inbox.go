@@ -1769,10 +1769,32 @@ func (a *MainAgent) drainSubAgentInbox() {
 	if a.turn != nil {
 		return
 	}
+	urgentHead, actionableHead := a.mailboxHeadState()
+	if !idleMailboxWakeAllowed(urgentHead, actionableHead, a.consecutiveIdleWakes.Load()) {
+		return
+	}
+	// The head state was captured before staging drains the queues: a
+	// progress-only batch is informational and must not consume the
+	// consecutive-wake budget.
+	actionableWake := actionableHead
 	if !a.stageNextSubAgentMailboxBatch() {
 		return
 	}
+	// A mailbox turn carrying parked user input is a user turn, not a wake; a
+	// turn with none is one link in the consecutive-wake chain. Either way the
+	// parked queue is consumed immediately below.
+	parkedUserTurn := a.pendingUserDrainSuspended
 	a.newTurn()
+	switch {
+	case parkedUserTurn:
+		a.consecutiveIdleWakes.Store(0)
+	case actionableWake && !urgentHead:
+		// An urgent/interrupt head always bypasses the bound so a parked worker
+		// can never deadlock waiting on its owner; counting it here would spend
+		// the budget a later normal completion wake needs, so only the ordinary
+		// completion path advances the consecutive-wake counter.
+		a.consecutiveIdleWakes.Add(1)
+	}
 	// A dispatching request: any parked user queue rides it too, in FIFO order.
 	a.flushParkedPendingUserMessages()
 	turnID := a.turn.ID

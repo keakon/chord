@@ -7,7 +7,7 @@ import (
 
 const (
 	sessionToolOutputsDirName = "tool-outputs"
-	sessionSpawnLogsDirName   = "spawn-logs"
+	sessionJobLogsDirName     = "job-logs"
 )
 
 func sessionManagedDir(sessionDir, name string) string {
@@ -22,6 +22,6 @@ func sessionToolOutputsDir(sessionDir string) string {
 	return sessionManagedDir(sessionDir, sessionToolOutputsDirName)
 }
 
-func sessionSpawnLogsDir(sessionDir string) string {
-	return sessionManagedDir(sessionDir, sessionSpawnLogsDirName)
+func sessionJobLogsDir(sessionDir string) string {
+	return sessionManagedDir(sessionDir, sessionJobLogsDirName)
 }

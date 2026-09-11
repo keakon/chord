@@ -19,6 +19,8 @@ Chord 是一个可读取文件、修改文件、执行命令并调用外部工�
 
 规则按工具名匹配；内置工具名的完整清单见[内置工具](./tools_CN.md)。
 
+如果规则指名了一个已不存在的工具，它将匹配不到任何东西。例如 `spawn`、`spawn_status`、`spawn_stop` 工具已被移除，改为用后台 `shell` job 加 `job_output`、`job_list`、`job_kill` 工具——因此 `spawn*` 权限规则现在匹配不到任何已注册工具。复用旧的 `spawn*` 规则前，请先查看 CHANGELOG 中的完整迁移说明。
+
 在 TUI 确认框中，`M` 用于打开当前工具调用的“添加规则”选择界面；进入该界面后，再按 `Enter` 才会保存所选规则并允许这次调用。对于 `delete`，选择器不会提供复用价值很低的单文件规则，而是按覆盖本次待审批目标的数量优先列出父目录规则。全局 `*`（任意删除路径）始终保留；当本次请求的所有目标都位于当前工作目录内时，还会提供 `**`（当前目录下任意路径）。这两个宽规则都不会默认选中。
 
 权限可在 Agent 配置中定义。推荐从下面这套个人开发模板开始，再按项目风险收紧或放宽：
@@ -119,18 +121,18 @@ web_fetch:
 
 ## Shell 与 shell 风险
 
-`shell` 能执行系统命令，应格外谨慎。`shell` 和 `spawn` 都是刻意设计的非交互工具：Chord 不会把模型可控的 stdin 接入子进程；Unix 子进程会在没有 controlling TTY 的环境中运行；高置信的交互式命令会在执行前被拒绝。普通 stdin 读取（如 shell `read`/`select`）会看到 EOF，而不是等待模型输入；如果命令需要输入，请通过 pipe、here-doc、文件或参数显式提供。登录向导、终端编辑器、pager / 全屏 TUI、密码提示、以及需要 `/dev/tty` 的命令，应在真实终端中手动执行，或改写为显式提供输入/参数的非交互命令。
+`shell` 能执行系统命令，应格外谨慎。无论是前台运行还是作为后台 job，`shell` 都是刻意设计的非交互工具：Chord 不会把模型可控的 stdin 接入子进程；Unix 子进程会在没有 controlling TTY 的环境中运行；高置信的交互式命令会在执行前被拒绝。普通 stdin 读取（如 shell `read`/`select`）会看到 EOF，而不是等待模型输入；如果命令需要输入，请通过 pipe、here-doc、文件或参数显式提供。登录向导、终端编辑器、pager / 全屏 TUI、密码提示、以及需要 `/dev/tty` 的命令，应在真实终端中手动执行，或改写为显式提供输入/参数的非交互命令。
 
-`shell` / `spawn` 的平台说明：
+`shell`（前台或后台 job）的平台说明：
 
 - 在 Unix 上，Chord 会把子进程放到新的 session 中，并在超时/取消时按进程组清理。
-- 在 Windows 上，Chord 仍然保持 `shell` / `spawn` 非交互，但这里没有与 Unix `setsid` / 进程组控制完全等价的路径；超时/取消时会退回到直接终止进程，对后代进程的清理可能不如 Unix 完整。
+- 在 Windows 上，Chord 仍然保持 `shell`（前台命令与后台 job）非交互，但这里没有与 Unix `setsid` / 进程组控制完全等价的路径；超时/取消时会退回到直接终止进程，对后代进程的清理可能不如 Unix 完整。
 
 常见改写方式：
 
 - 用 `git commit -m "message"` 或 `git commit -F file` 代替会打开编辑器的 `git commit`
 - amend 时如果要保留现有提交信息，使用明确不会打开编辑器的形式，如 `git commit --amend --no-edit` 或 `git commit --amend -C HEAD`
-- 避免在 `shell` / `spawn` 中运行交互式 Git patch 流程（`git add -p`、`git commit -p`、`git stash -p`）；改为显式指定 pathspec，或在真实终端中手动执行
+- 避免在 `shell` 中运行交互式 Git patch 流程（`git add -p`、`git commit -p`、`git stash -p`）；改为显式指定 pathspec，或在真实终端中手动执行
 - 容器命令不要分配 TTY（如 `docker exec -it`、`docker run -t`、`podman run -t`、`kubectl exec -it`），除非你是在真实终端中手动运行
 - 用 `npm init -y` / `--yes`，或显式提供所有必要选项
 - 需要 sudo 非交互失败时用 `sudo -n`，避免等待密码提示

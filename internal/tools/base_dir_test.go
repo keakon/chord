@@ -16,7 +16,6 @@ func TestBaseDirToolImplementationsCoverSessionPathTools(t *testing.T) {
 		{name: "glob", tool: GlobTool{}},
 		{name: "handoff", tool: HandoffTool{}},
 		{name: "shell", tool: NewShellTool("")},
-		{name: "spawn", tool: NewSpawnTool("")},
 		{name: "lsp", tool: LspTool{}},
 		{name: "view_image", tool: NewViewImageTool(nil)},
 	}

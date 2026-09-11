@@ -177,8 +177,8 @@ func (a *MainAgent) dispatch(evt Event) {
 		a.handleAgentLog(evt)
 	case EventSubAgentRequestBoundary:
 		a.handleSubAgentRequestBoundary(evt)
-	case EventSpawnFinished:
-		a.handleSpawnFinished(evt)
+	case EventJobFinished:
+		a.handleJobFinished(evt)
 	case EventContinue:
 		a.handleContinueFromContext()
 	case EventHandoffResolve:
@@ -485,13 +485,22 @@ func (a *MainAgent) hasRunnableMailboxWork() bool {
 		// this only keeps the predicate honest.
 		return false
 	}
+	// The consecutive-wake budget can hold the main inbox back until the next
+	// user turn. A message held that way is not runnable work — nothing in this
+	// process can deliver it, the periodic sweep included — so counting it would
+	// keep the main from ever reporting global idle. mailboxHeadState takes
+	// subAgentMailboxIDsMu, so this is resolved before the scan below locks it.
+	inboxRunnable := !a.idleMainInboxWakeBlocked()
 	// The main-inbox queues, the staged batch, and the owner-queue maps are
 	// all shared with the TUI-facing manual-delivery path, so the whole state
 	// scan runs under subAgentMailboxIDsMu; spooled message reloads (which
 	// take the same lock through the consumed check) happen on the claimed
 	// copies below.
 	a.subAgentMailboxIDsMu.Lock()
-	pendingMainWork := len(a.subAgentInbox.urgent) > 0 || len(a.subAgentInbox.normal) > 0 ||
+	// Only the main-inbox queues are subject to the wake budget; the owner
+	// forwarding state below is drained on a path the budget does not gate.
+	pendingMainWork := len(a.subAgentInbox.urgent) > 0 ||
+		(inboxRunnable && len(a.subAgentInbox.normal) > 0) ||
 		len(a.pendingSubAgentMailboxes) > 0 || len(a.activeSubAgentMailboxes) > 0 ||
 		a.activeSubAgentMailbox != nil
 	// A main-inbox progress snapshot is a wake candidate: progress/notice is
@@ -503,7 +512,9 @@ func (a *MainAgent) hasRunnableMailboxWork() bool {
 	// cooldown-gated retry, and counting it would keep the main from ever
 	// reaching global idle. The periodic lifecycle sweep is what keeps that
 	// retry alive (see hasSubAgentLifecycleSweepCandidates).
-	pendingProgress := len(a.subAgentInbox.progress) > 0 || len(a.subAgentInbox.progressQueue) > 0 || len(a.subAgentInbox.progressPending) > 0
+	// A blocked drain stalls the whole main inbox, progress included, so the
+	// snapshot only counts while the drain may actually open a turn.
+	pendingProgress := inboxRunnable && (len(a.subAgentInbox.progress) > 0 || len(a.subAgentInbox.progressQueue) > 0 || len(a.subAgentInbox.progressPending) > 0)
 	// Only owned messages that are routable right now count as pending mailbox
 	// work. A message spooled under a parked owner that this mailbox cannot
 	// wake (for example one not addressed by the owner's own descendant) is
@@ -567,7 +578,7 @@ func reliableOutputEventLog(evt AgentEvent) (string, []any, bool) {
 			"event_type", fmt.Sprintf("%T", evt),
 			"status", e.Status,
 		}, true
-	case ToolCallStartEvent, ToolCallDiscardEvent, ToolCallExecutionEvent, ToolResultEvent, SessionRestoredEvent, SessionTitleChangedEvent, PendingDraftConsumedEvent, ForkSessionEvent, ErrorEvent, AgentStatusEvent, AgentStartedEvent, AgentNotifyEvent, MailboxQueuedEvent, MailboxDeliveryDroppedEvent, MailboxTranscriptAppendedEvent, BackgroundResultAppendedEvent, AgentDoneEvent, GlobalIdleEvent, NotificationEvent, InfoEvent, ToastEvent, AssistantMessageEvent, LoopNoticeEvent, LoopStateChangedEvent, YoloModeChangedEvent, RunningModelChangedEvent, SpawnFinishedEvent, ContextNoticeEvent, ContextNoticeClearedEvent, HandoffEvent, HandoffCancelledEvent:
+	case ToolCallStartEvent, ToolCallDiscardEvent, ToolCallExecutionEvent, ToolResultEvent, SessionRestoredEvent, SessionTitleChangedEvent, PendingDraftConsumedEvent, ForkSessionEvent, ErrorEvent, AgentStatusEvent, AgentStartedEvent, AgentNotifyEvent, MailboxQueuedEvent, MailboxDeliveryDroppedEvent, MailboxTranscriptAppendedEvent, BackgroundResultAppendedEvent, AgentDoneEvent, GlobalIdleEvent, NotificationEvent, InfoEvent, ToastEvent, AssistantMessageEvent, LoopNoticeEvent, LoopStateChangedEvent, YoloModeChangedEvent, RunningModelChangedEvent, JobFinishedEvent, ContextNoticeEvent, ContextNoticeClearedEvent, HandoffEvent, HandoffCancelledEvent:
 		return "TUI output channel full, waiting to deliver critical event", []any{
 			"event_type", fmt.Sprintf("%T", evt),
 		}, true

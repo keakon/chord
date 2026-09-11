@@ -2,6 +2,22 @@
 
 本项目采用语义化版本风格发布。1.0 之前的版本可能包含不兼容变更。
 
+## 未发布
+
+### 不兼容变更
+
+- `spawn` / `spawn_status` / `spawn_stop` 三个工具已移除，后台进程改由 `shell` 统一承担。把引用 `spawn*` 的 `permission:` 规则、hook `tools:` 过滤和 skill `allowed_tools` 列表迁移到新工具名：用 `shell` 加 `run_in_background: true` 启动后台任务，再用新增的 `job_output`、`job_list`、`job_kill` 管理。原来的 `spawn` 权限规则不再匹配任何工具。
+
+- 超时默认值也有变化：前台 `shell` 现在默认 90 秒后转入后台、`timeout_ms` 默认 10 分钟；而显式 `run_in_background: true` 且不传 `timeout_ms` 的 job 没有硬截止——与旧 `spawn` 的默认一致——传 `timeout_ms: 0` 只是把这一点写得更明确。这个参数同时改了名字和单位：`timeout` 以秒计（最大 600，默认 30），`timeout_ms` 以毫秒计（前台最大 600000，`run_in_background: true` 时最大 21600000；前台默认 600000）。未知参数会被忽略而不是报错，所以仍然传 `timeout: 60` 的调用不会失败——它会退回默认值，而不是原本想要的那 60 秒。请把所有 `timeout: N` 迁移为 `timeout_ms: N * 1000`。job 句柄和完成通知只在实际存在截止时才写出它。
+
+- `spawn` 已写入 `main.jsonl` 的后台结果在升级后仍能正常渲染：旧的 `job-N` ID 会保留在卡片上，旧的 `svc-N` ID 不会保留，已废弃的 `Review this result before continuing.` 一行会作为普通正文行显示。
+
+### 新功能
+
+- `shell` 现在也能承担后台任务，长命令不必再阻塞当前回合。前台命令超过预算（`yield_ms`，默认 90 秒）会自动转成后台 job：输出会保留，job 结束时发通知唤醒 agent，它可以先做别的事，或结束回合并由完成通知叫醒。`run_in_background: true` 立即启动后台任务而不等待，`timeout_ms: 0` 启动无硬截止的服务型命令。前台命令的 `timeout_ms` 仍最多 10 分钟，`run_in_background: true` 时最多可设 6 小时。
+- 新增 `job_output`、`job_list`、`job_kill` 三个工具管理后台任务。`job_output` 只返回自上次读取以来的新增输出，可用 `wait` 选择是否阻塞（`none` / `output` / `exit`），每次等待由 runtime 限制，慢任务不会占住回合，等待超时也不会杀掉 job；连续多次读取都没有新输出会被视为轮询——先提示、后拒绝，返回给模型的输出也会去掉终端转义序列。`job_list` 查看仍在运行的任务，`job_kill` 停止任务且不产生完成通知。
+- 连续的后台完成唤醒之间没有用户输入时最多 3 次，超过后新的完成结果要等下一条用户消息才会投递。
+
 ## 0.8.0 - 2026-09-11
 
 ### 亮点

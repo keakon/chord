@@ -727,7 +727,7 @@ func (a *MainAgent) captureModelDrivenBarrierSnapshot(snapshot []message.Message
 		evidenceItems:               a.evidenceItemsForCompaction(a.ctxMgr.GetMaxTokens()),
 		todos:                       a.GetTodos(),
 		subAgents:                   a.taskInfosForCompaction(),
-		backgroundObjects:           spawnStatesForSnapshot(),
+		backgroundObjects:           jobStatesForSnapshot(),
 		maxTokens:                   a.ctxMgr.GetMaxTokens(),
 		sessionDir:                  a.sessionDir,
 		originalRequest:             a.captureOriginalFirstUserHint(),
@@ -774,7 +774,7 @@ func (a *MainAgent) captureModelDrivenRuntimeInput() modelDrivenRuntimeInput {
 	return modelDrivenRuntimeInput{
 		todos:             a.GetTodos(),
 		subAgents:         a.taskInfosForCompaction(),
-		backgroundObjects: spawnStatesForSnapshot(),
+		backgroundObjects: jobStatesForSnapshot(),
 		evidenceItems:     a.evidenceItemsForCompaction(a.ctxMgr.GetMaxTokens()),
 	}
 }

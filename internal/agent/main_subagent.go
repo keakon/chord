@@ -754,13 +754,30 @@ func (a *MainAgent) handleAgentLog(evt Event) {
 	a.emitToTUI(InfoEvent{Message: msg, AgentID: evt.SourceID})
 }
 
-func (a *MainAgent) handleSpawnFinished(evt Event) {
-	payload, ok := evt.Payload.(*tools.SpawnFinishedPayload)
+func (a *MainAgent) handleJobFinished(evt Event) {
+	payload, ok := evt.Payload.(*tools.JobFinishedPayload)
 	if !ok || payload == nil {
-		log.Errorf("handleSpawnFinished: invalid payload type payload_type=%v", fmt.Sprintf("%T", evt.Payload))
+		log.Errorf("handleJobFinished: invalid payload type payload_type=%v", fmt.Sprintf("%T", evt.Payload))
 		return
 	}
 	backgroundID := payload.EffectiveID()
+
+	// A job that finished after a session switch must not be written into the
+	// new session's transcript. The completion event carries the session the
+	// job was started in; an empty value means the sender could not determine
+	// it, in which case delivery proceeds rather than dropping the result.
+	if payload.SessionDir != "" && payload.SessionDir != a.SessionDir() {
+		log.Debugf("handleJobFinished: dropping cross-session completion background_id=%v job_session=%v active_session=%v", backgroundID, payload.SessionDir, a.SessionDir())
+		return
+	}
+
+	// A terminal result already surfaced to the model (a foreground result or a
+	// terminal job_output read) must not be delivered again as a background
+	// completion. An unknown id still claims successfully so a replayed or
+	// evicted notification is never silently dropped.
+	if !tools.ClaimJobReported(backgroundID) {
+		return
+	}
 
 	// Resolve the owner: "" and the main agent's own instanceID belong to the
 	// main transcript, a live sub-agent owns its own AgentID, and an owner that
@@ -772,7 +789,7 @@ func (a *MainAgent) handleSpawnFinished(evt Event) {
 		a.subs.mu.RUnlock()
 	}
 	if sub == nil && payload.AgentID != "" && payload.AgentID != a.instanceID {
-		log.Warnf("handleSpawnFinished: owner subagent not found, attributing to main agent_id=%v background_id=%v", payload.AgentID, backgroundID)
+		log.Warnf("handleJobFinished: owner subagent not found, attributing to main agent_id=%v background_id=%v", payload.AgentID, backgroundID)
 	}
 
 	// Every finished job becomes one durable background_result mailbox row,
@@ -800,8 +817,8 @@ func (a *MainAgent) handleSpawnFinished(evt Event) {
 	if ownerAgentID == a.instanceID {
 		ownerAgentID = identity.MainAgentID
 	}
-	a.emitToTUI(SpawnFinishedEvent{AgentID: ownerAgentID})
-	a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Background %s %s finished", payload.Kind, backgroundID), Level: backgroundCompletionToastLevel(payload.Status), AgentID: payload.AgentID})
+	a.emitToTUI(JobFinishedEvent{AgentID: ownerAgentID})
+	a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Background job %s finished", backgroundID), Level: backgroundCompletionToastLevel(payload.Status), AgentID: payload.AgentID})
 	a.enqueueSubAgentMailbox(mailbox)
 	if sub == nil && a.turn == nil && !a.mailboxDeliveryPaused.Load() {
 		a.drainSubAgentInbox()
@@ -813,14 +830,14 @@ func (a *MainAgent) handleSpawnFinished(evt Event) {
 // live card and the restored card derive from the same raw text. The main
 // owner also gets the shared transcript formatting; a sub-agent owner receives
 // its own report unchanged.
-func (a *MainAgent) backgroundResultContent(sub *SubAgent, payload *tools.SpawnFinishedPayload) string {
+func (a *MainAgent) backgroundResultContent(sub *SubAgent, payload *tools.JobFinishedPayload) string {
 	if sub == nil {
 		return a.mainBackgroundResultContent(payload)
 	}
 	if content := strings.TrimSpace(payload.Message); content != "" {
 		return content
 	}
-	return fmt.Sprintf("[Background %s %s completed]\n\nDescription: %s\nStatus: %s", payload.Kind, payload.EffectiveID(), payload.Description, payload.Status)
+	return fmt.Sprintf("[Background job %s completed]\n\nDescription: %s\nStatus: %s", payload.EffectiveID(), payload.Description, payload.Status)
 }
 
 func backgroundCompletionToastLevel(status string) string {

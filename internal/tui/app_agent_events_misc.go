@@ -219,7 +219,7 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 	case agent.ContextNoticeClearedEvent:
 		m.removeContextNoticeBlocks()
 		return true, effects
-	case agent.SpawnFinishedEvent:
+	case agent.JobFinishedEvent:
 		// A finished background object no longer builds a card here: the card
 		// comes from BackgroundResultAppendedEvent once the result is durably
 		// in the owner's transcript, so a queued-but-undelivered result shows

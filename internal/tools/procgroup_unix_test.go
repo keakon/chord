@@ -65,11 +65,15 @@ func TestBashTTYAccessFailsFastWithoutControllingTTY(t *testing.T) {
 }
 
 func TestBashTimeoutForceKillsProcessGroupThatIgnoresSIGTERM(t *testing.T) {
+	origGrace := killGracePeriod
+	killGracePeriod = 100 * time.Millisecond
+	t.Cleanup(func() { killGracePeriod = origGrace })
+
 	pidFile := t.TempDir() + "/sleep.pid"
 	start := time.Now()
 	out, err := ShellTool{}.Execute(context.Background(), mustMarshal(t, map[string]any{
-		"command": "sh -c 'trap \"\" TERM; (trap \"\" TERM; sleep 60) & echo $! >" + strconv.Quote(pidFile) + "; wait'",
-		"timeout": 1,
+		"command":    "sh -c 'trap \"\" TERM; (trap \"\" TERM; sleep 60) & echo $! >" + strconv.Quote(pidFile) + "; wait'",
+		"timeout_ms": 1000,
 	}))
 	if err == nil {
 		t.Fatal("expected timeout")
@@ -104,8 +108,8 @@ func TestBashTimeoutForceKillsProcessGroupThatIgnoresSIGTERM(t *testing.T) {
 func TestBashTimeoutTerminatesBackgroundChild(t *testing.T) {
 	pidFile := t.TempDir() + "/sleep.pid"
 	out, err := ShellTool{}.Execute(context.Background(), mustMarshal(t, map[string]any{
-		"command": "sleep 60 & echo $! >" + strconv.Quote(pidFile) + "; wait",
-		"timeout": 1,
+		"command":    "sleep 60 & echo $! >" + strconv.Quote(pidFile) + "; wait",
+		"timeout_ms": 1000,
 	}))
 	if err == nil {
 		t.Fatal("expected timeout")

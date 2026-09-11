@@ -52,11 +52,6 @@ func (t ShellTool) WithBaseDir(baseDir string) Tool {
 	return t
 }
 
-func (t SpawnTool) WithBaseDir(baseDir string) Tool {
-	t.BaseDir = baseDir
-	return t
-}
-
 func (t LspTool) WithBaseDir(baseDir string) Tool {
 	t.BaseDir = baseDir
 	return t

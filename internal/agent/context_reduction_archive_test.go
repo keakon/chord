@@ -26,29 +26,29 @@ func reductionContextForArchive(t *testing.T, toolName, content, archiveDir stri
 	}
 }
 
-// A one-shot tool output (spawn) cannot be rebuilt or re-fetched, so the
-// generic reduction must archive the full payload with a stable address the
-// model can read back, not a marker that loses the content.
-func TestArchiveIrreducibleToolOutputSpawnPreservesFullPayload(t *testing.T) {
+// A one-shot tool output (a background job result) cannot be rebuilt or
+// re-fetched, so the generic reduction must archive the full payload with a
+// stable address the model can read back, not a marker that loses the content.
+func TestArchiveIrreducibleToolOutputJobOutputPreservesFullPayload(t *testing.T) {
 	archiveDir := t.TempDir()
 	content := strings.Repeat("background job log line\n", 120)
-	ctx := reductionContextForArchive(t, tools.NameSpawn, content, archiveDir)
+	ctx := reductionContextForArchive(t, tools.NameJobOutput, content, archiveDir)
 	reduced, rule, ok := reduceRequestToolOutput(requestReductionGeneric, ctx)
 	if !ok || rule != "archived" {
 		t.Fatalf("reduction = (%q, %q, %v), want archived", reduced, rule, ok)
 	}
-	if !strings.Contains(reduced, "[Older spawn output archived at ") || !strings.Contains(reduced, "read it back") {
+	if !strings.Contains(reduced, "[Older job_output output archived at ") || !strings.Contains(reduced, "read it back") {
 		t.Fatalf("archived marker missing stable address: %q", reduced)
 	}
 	// The marker embeds the absolute archive path.
-	if !strings.HasPrefix(reduced, "[Older spawn output archived at "+archiveDir) {
+	if !strings.HasPrefix(reduced, "[Older job_output output archived at "+archiveDir) {
 		t.Fatalf("archived marker must embed the archive path under %q: %q", archiveDir, reduced)
 	}
 	before, _, ok := strings.Cut(reduced, "; read it back")
 	if !ok {
 		t.Fatalf("archived marker missing the read-back hint: %q", reduced)
 	}
-	path := strings.TrimPrefix(before, "[Older spawn output archived at ")
+	path := strings.TrimPrefix(before, "[Older job_output output archived at ")
 	rel := strings.TrimPrefix(path, archiveDir+string(filepath.Separator))
 	if !strings.HasPrefix(rel, "reduced-artifacts"+string(filepath.Separator)) {
 		t.Fatalf("archive path not under reduced-artifacts: %q", rel)
@@ -79,10 +79,10 @@ func TestArchiveIrreducibleToolOutputRebuildableStaysSummarized(t *testing.T) {
 // Without an archive dir (e.g. scratch agent without sessionDir) the archive
 // path is skipped and the ordinary summary is returned.
 func TestArchiveIrreducibleToolOutputNoArchiveDirFallsBack(t *testing.T) {
-	ctx := reductionContextForArchive(t, tools.NameSpawn, strings.Repeat("x\n", 80), "")
+	ctx := reductionContextForArchive(t, tools.NameJobOutput, strings.Repeat("x\n", 80), "")
 	reduced, rule, ok := reduceRequestToolOutput(requestReductionGeneric, ctx)
 	if !ok || rule == "archived" {
-		t.Fatalf("no-archive-dir spawn reduction = (%q, %q, %v), want non-archived fallback", reduced, rule, ok)
+		t.Fatalf("no-archive-dir job_output reduction = (%q, %q, %v), want non-archived fallback", reduced, rule, ok)
 	}
 	if strings.Contains(reduced, "archived at") {
 		t.Fatalf("no-archive-dir marker must not claim an archive: %q", reduced)
@@ -120,7 +120,7 @@ func TestWebFetchSummaryKeepsContentHash(t *testing.T) {
 func TestArchiveIrreducibleToolOutputStableFileName(t *testing.T) {
 	archiveDir := t.TempDir()
 	content := strings.Repeat("job output line\n", 90)
-	ctx := reductionContextForArchive(t, tools.NameSpawn, content, archiveDir)
+	ctx := reductionContextForArchive(t, tools.NameJobOutput, content, archiveDir)
 	first, _, ok := reduceRequestToolOutput(requestReductionGeneric, ctx)
 	if !ok {
 		t.Fatal("first reduction failed")
@@ -136,7 +136,7 @@ func TestArchiveIrreducibleToolOutputStableFileName(t *testing.T) {
 
 // The full pipeline: a one-shot output routed through prepareMessagesForLLM
 // with an archive dir becomes an archived marker with a readable file.
-func TestPrepareMessagesForLLM_ArchivesIrreducibleSpawnOutput(t *testing.T) {
+func TestPrepareMessagesForLLM_ArchivesIrreducibleJobOutput(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.projectConfig = &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
@@ -145,10 +145,10 @@ func TestPrepareMessagesForLLM_ArchivesIrreducibleSpawnOutput(t *testing.T) {
 		StaleOutputBytes:    40,
 	}}}
 	a.newTurn()
-	content := strings.Repeat("spawn job log\n", 60)
+	content := strings.Repeat("job output log\n", 60)
 	msgs := []message.Message{
 		{Role: message.RoleUser, Content: "u1"},
-		{Role: message.RoleAssistant, RequestBatch: 1, ToolCalls: []message.ToolCall{{ID: "sp1", Name: tools.NameSpawn, Args: json.RawMessage(`{"command":"go test ./..."}`)}}},
+		{Role: message.RoleAssistant, RequestBatch: 1, ToolCalls: []message.ToolCall{{ID: "sp1", Name: tools.NameJobOutput, Args: json.RawMessage(`{"job_id":"job-1"}`)}}},
 		{Role: message.RoleTool, ToolCallID: "sp1", ToolStatus: "success", Content: content},
 		{Role: message.RoleUser, Content: "u2"},
 		{Role: message.RoleUser, Content: "u3"},
@@ -156,6 +156,6 @@ func TestPrepareMessagesForLLM_ArchivesIrreducibleSpawnOutput(t *testing.T) {
 	setTestRequestBatch(a, msgs, 2)
 	prepared := a.prepareMessagesForLLM(msgs)
 	if !strings.Contains(prepared[2].Content, "archived at ") {
-		t.Fatalf("spawn output not archived through the pipeline: %q", prepared[2].Content)
+		t.Fatalf("job output not archived through the pipeline: %q", prepared[2].Content)
 	}
 }

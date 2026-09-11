@@ -16,7 +16,7 @@ func nonInteractiveRuntimeAdvice() string {
 }
 
 func nonInteractiveRuntimeAdviceForGOOS(goos string) string {
-	advice := "Shell and Spawn are non-interactive: stdin is closed and no controlling TTY is available. Use non-interactive flags, provide input through files/arguments/pipes, choose a non-interactive command, or ask the user to run it in a real terminal."
+	advice := "The shell is non-interactive: stdin is closed and no controlling TTY is available. Use non-interactive flags, provide input through files/arguments/pipes, choose a non-interactive command, or ask the user to run it in a real terminal."
 	if goos == "windows" {
 		advice += " On Windows, timeout/cancellation cleanup uses process termination rather than Unix-style session/process-group control, so child-process cleanup may be less complete than on Unix."
 	}

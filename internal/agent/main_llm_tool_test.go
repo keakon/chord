@@ -221,7 +221,30 @@ func TestHandleLLMResponseDoesNotPromoteReadOnlyShellBehindAskGatedCommit(t *tes
 			t.Fatalf("unexpected status promotion while commit approval pending: %+v", evt)
 		}
 	}
+	// The approved commit is executed by the real shell tool, which creates a
+	// job log under the session directory. Wait for that new job to reach a
+	// terminal state before returning so t.TempDir cleanup cannot race the
+	// still-open log write and fail with "directory not empty". Jobs left over
+	// from earlier -count iterations share the global registry, so only wait on
+	// ids that appear after this point.
+	preExisting := map[string]struct{}{}
+	for _, j := range tools.SnapshotJobs() {
+		preExisting[j.ID] = struct{}{}
+	}
 	close(releaseConfirm)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, j := range tools.SnapshotJobs() {
+			if _, seen := preExisting[j.ID]; seen {
+				continue
+			}
+			if j.Command == "git commit -m fix" && !j.FinishedAt.IsZero() {
+				return
+			}
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for the approved commit job to finish")
 }
 
 func TestMainLLMResponseRejectsExcessiveToolCalls(t *testing.T) {

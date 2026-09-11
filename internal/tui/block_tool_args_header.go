@@ -63,13 +63,37 @@ func formatCollapsedBashHeaderPartsWithParsed(keys []string, vals map[string]str
 }
 
 func bashHeaderGrayPart(vals map[string]string) string {
-	timeoutInfo := tools.ResolveShellTimeoutValue(parseBashTimeoutValue(vals["timeout"]), vals["timeout"] != "")
 	var opts []string
-	if timeoutInfo.HasLimit && !timeoutInfo.UsesDefault {
-		if timeoutInfo.Clamped {
-			opts = append(opts, fmt.Sprintf("timeout=%d→%d", timeoutInfo.RequestedSec, timeoutInfo.EffectiveSec))
-		} else {
-			opts = append(opts, fmt.Sprintf("timeout=%d", timeoutInfo.EffectiveSec))
+	background := vals["run_in_background"] == "true"
+	maxMs := tools.ShellMaxTimeoutMs
+	if background {
+		opts = append(opts, "background")
+		maxMs = tools.ShellMaxBackgroundTimeoutMs
+	}
+	if raw := strings.TrimSpace(vals["timeout_ms"]); raw != "" {
+		if ms, err := strconv.Atoi(raw); err == nil {
+			switch {
+			case ms <= 0:
+				opts = append(opts, "no deadline")
+			case ms > maxMs:
+				// The runtime caps the deadline, so the header must not claim
+				// the requested value as the effective one.
+				opts = append(opts, "timeout="+formatShellMs(ms)+"→"+formatShellMs(maxMs))
+			case background || ms != tools.ShellDefaultTimeoutMs:
+				// A detached job has no default deadline, so an explicit value
+				// — even the foreground default — is a deliberate deadline.
+				opts = append(opts, "timeout="+formatShellMs(ms))
+			}
+		}
+	}
+	if raw := strings.TrimSpace(vals["yield_ms"]); raw != "" {
+		if ms, err := strconv.Atoi(raw); err == nil {
+			switch {
+			case ms <= 0:
+				opts = append(opts, "no promotion")
+			case ms != tools.ShellDefaultYieldMs:
+				opts = append(opts, "yield="+formatShellMs(ms))
+			}
 		}
 	}
 	if len(opts) == 0 {
@@ -78,15 +102,17 @@ func bashHeaderGrayPart(vals map[string]string) string {
 	return "(" + strings.Join(opts, ", ") + ")"
 }
 
-func parseBashTimeoutValue(raw string) int {
-	if raw == "" {
-		return 0
+func formatShellMs(ms int) string {
+	if ms%3600000 == 0 {
+		return fmt.Sprintf("%dh", ms/3600000)
 	}
-	v, err := strconv.Atoi(raw)
-	if err != nil {
-		return 0
+	if ms%60000 == 0 {
+		return fmt.Sprintf("%dm", ms/60000)
 	}
-	return v
+	if ms%1000 == 0 {
+		return fmt.Sprintf("%ds", ms/1000)
+	}
+	return fmt.Sprintf("%dms", ms)
 }
 
 func parseDeleteHeaderPaths(vals map[string]string) []string {

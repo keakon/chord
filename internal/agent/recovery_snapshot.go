@@ -83,7 +83,7 @@ func (a *MainAgent) buildRecoverySnapshot() *recovery.SessionSnapshot {
 		CompactionGeneration:            a.nextCompactionPlanID,
 		LastHistoryIndex:                nextHistoryIndexMinusOne(a.sessionDir),
 		SessionEpoch:                    a.sessionEpoch,
-		ActiveBackgroundObjects:         spawnStatesForSnapshot(),
+		ActiveBackgroundObjects:         jobStatesForSnapshot(),
 		PendingCompactionResume:         a.snapshotPendingCompactionResume(),
 		LastModelDrivenApplyBatch:       a.lastModelDrivenApplyBatch,
 		AutoCompactRequestGeneration:    a.autoCompactRequestGeneration.Load(),

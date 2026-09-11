@@ -18,6 +18,7 @@ func (s *SubAgent) toolExecutionPipeline() toolExecutionPipeline {
 		confirm     ConfirmFunc
 	)
 	runtimeStartedAt := time.Time{}
+	mainAgentID := ""
 	if s.parent != nil {
 		fileTrack = s.parent.fileTrack
 		fileBackups = s.parent.fileBackups
@@ -25,6 +26,7 @@ func (s *SubAgent) toolExecutionPipeline() toolExecutionPipeline {
 		emit = s.parent.emitToTUI
 		confirm = s.parent.confirmFn
 		runtimeStartedAt = s.parent.runtimeStartedAt
+		mainAgentID = s.parent.instanceID
 	}
 	return toolExecutionPipeline{
 		agentID:          s.instanceID,
@@ -39,12 +41,15 @@ func (s *SubAgent) toolExecutionPipeline() toolExecutionPipeline {
 		runtimeStartedAt: runtimeStartedAt,
 		eventSender:      eventSender,
 		emit:             emit,
-		guidance:         subToolOutputGuidance,
-		logPrefix:        "SubAgent:",
-		applyPatchRetry:  &s.applyPatchRetry,
-		projectRoot:      s.parent.projectRoot,
-		toolBaseDir:      s.workDir,
-		currentRuleset:   s.currentRuleset,
+		// A SubAgent may reach its own jobs, the main agent's jobs, and jobs
+		// started by its direct owner (the worker-reads-owner's-job case).
+		jobAccess:       tools.JobAccess{OwnerAgentID: s.OwnerAgentID(), MainAgentID: mainAgentID},
+		guidance:        subToolOutputGuidance,
+		logPrefix:       "SubAgent:",
+		applyPatchRetry: &s.applyPatchRetry,
+		projectRoot:     s.parent.projectRoot,
+		toolBaseDir:     s.workDir,
+		currentRuleset:  s.currentRuleset,
 		refreshRulesetAfterRuleIntent: func(toolName string, intent *ConfirmRuleIntent) permission.Ruleset {
 			if s.parent != nil {
 				s.parent.processRuleIntent(toolName, intent, s.agentDefName)

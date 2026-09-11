@@ -40,12 +40,14 @@ func buildToolExecContext(
 	taskID string,
 	sessionDir string,
 	eventSender tools.EventSender,
+	jobAccess tools.JobAccess,
 	emit emitToolProgressFn,
 ) context.Context {
 	agentCtx := tools.WithAgentID(ctx, agentID)
 	agentCtx = tools.WithTaskID(agentCtx, taskID)
 	agentCtx = tools.WithEventSender(agentCtx, eventSender)
 	agentCtx = tools.WithSessionDir(agentCtx, sessionDir)
+	agentCtx = tools.WithJobAccess(agentCtx, jobAccess)
 	agentCtx = tools.WithToolProgressReporter(agentCtx, toolProgressReporter{
 		callID:  tc.ID,
 		name:    tc.Name,

@@ -33,7 +33,7 @@ func TestSubAgentNoFileWriteToolRoleRegistersNoFileMutationTools(t *testing.T) {
 			t.Fatalf("file-modifying tool %s registered for a role that denies it", name)
 		}
 	}
-	for _, name := range []string{tools.NameRead, tools.NameShell, tools.NameSpawn} {
+	for _, name := range []string{tools.NameRead, tools.NameShell, tools.NameJobOutput} {
 		if _, ok := sub.tools.Get(name); !ok {
 			t.Fatalf("non-file tool %s lost for a role that only denies file writes", name)
 		}
@@ -41,8 +41,8 @@ func TestSubAgentNoFileWriteToolRoleRegistersNoFileMutationTools(t *testing.T) {
 }
 
 // newScopedToolSurfaceTestSubAgent builds a SubAgent whose base registry
-// contains Shell and Spawn so tests can assert what the registration path
-// keeps for a given write scope and role ruleset.
+// contains Shell and the job control tools so tests can assert what the
+// registration path keeps for a given write scope and role ruleset.
 func newScopedToolSurfaceTestSubAgent(t *testing.T, scope tools.WriteScope, ruleset permission.Ruleset) (*MainAgent, *SubAgent) {
 	t.Helper()
 	parent := newTestMainAgent(t, t.TempDir())
@@ -50,7 +50,7 @@ func newScopedToolSurfaceTestSubAgent(t *testing.T, scope tools.WriteScope, rule
 	reg.Register(tools.ReadTool{})
 	reg.Register(tools.WriteTool{})
 	reg.Register(tools.NewShellTool("bash"))
-	reg.Register(tools.SpawnTool{})
+	reg.Register(tools.JobOutputTool{})
 	sub := NewSubAgent(SubAgentConfig{
 		InstanceID:   "worker-scoped",
 		TaskID:       "adhoc-scoped",
@@ -74,15 +74,16 @@ func newScopedToolSurfaceTestSubAgent(t *testing.T, scope tools.WriteScope, rule
 }
 
 // TestSubAgentCommandSurfaceFollowsRoleRulesNotScope pins the delegated
-// command-tool surface: Shell and Spawn stay registered for every write scope
-// — empty, path/file/module-scoped, and no-file-write-tool-role tasks alike —
-// unless the role's permission rules deny the tool. A wildcard-deny rule
-// removes the tool from the registry, the frozen tool definitions sent to the
-// model, and the capability prompt, which then renders the Command Execution
-// Boundary so the worker does not chase builds and tests it can never run. A
-// write scope never removes command tools: which tools a role may use is
-// decided by its permission rules — the file-modifying tools the rules keep
-// registered, and whether shell/spawn survive wildcard-deny rules.
+// command-tool surface: Shell and the job control tools stay registered for
+// every write scope — empty, path/file/module-scoped, and no-file-write-tool-role
+// tasks alike — unless the role's permission rules deny the tool. A
+// wildcard-deny rule removes the tool from the registry, the frozen tool
+// definitions sent to the model, and the capability prompt, which then renders
+// the Command Execution Boundary so the worker does not chase builds and tests
+// it can never run. A write scope never removes command tools: which tools a
+// role may use is decided by its permission rules — the file-modifying tools
+// the rules keep registered, and whether shell/job_output survive wildcard-deny
+// rules.
 func TestSubAgentCommandSurfaceFollowsRoleRulesNotScope(t *testing.T) {
 	deny := func(name string) permission.Ruleset {
 		return permission.Ruleset{{Permission: name, Pattern: "*", Action: permission.ActionDeny}}
@@ -99,11 +100,11 @@ func TestSubAgentCommandSurfaceFollowsRoleRulesNotScope(t *testing.T) {
 		{name: "module-scope-shell-kept", scope: tools.WriteScope{Modules: []string{"backend"}}},
 		{name: "empty-scope-shell-denied", scope: tools.WriteScope{}, rules: deny(tools.NameShell), denied: tools.NameShell},
 		{name: "path-scope-shell-denied", scope: tools.WriteScope{PathPrefix: []string{"internal"}}, rules: deny(tools.NameShell), denied: tools.NameShell},
-		{name: "empty-scope-spawn-denied", scope: tools.WriteScope{}, rules: deny(tools.NameSpawn), denied: tools.NameSpawn},
+		{name: "empty-scope-joboutput-denied", scope: tools.WriteScope{}, rules: deny(tools.NameJobOutput), denied: tools.NameJobOutput},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, sub := newScopedToolSurfaceTestSubAgent(t, tc.scope, tc.rules)
-			for _, kept := range []string{tools.NameShell, tools.NameSpawn} {
+			for _, kept := range []string{tools.NameShell, tools.NameJobOutput} {
 				if kept == tc.denied {
 					if _, ok := sub.tools.Get(tc.denied); ok {
 						t.Fatalf("denied tool %s still registered for %s", tc.denied, tc.scope.Summary())

@@ -151,7 +151,7 @@ func (a *MainAgent) prepareSessionSwitch() (*recovery.RecoveryManager, context.C
 	a.clearUsageDrivenAutoCompactRequest()
 	a.resetAutoCompactionFailureState()
 
-	stoppedBackground := tools.StopAllSpawnedForSessionSwitch()
+	stoppedBackground := tools.StopAllJobsForSessionSwitch()
 	if stoppedBackground > 0 {
 		log.Infof("terminated background objects for session switch count=%v instance=%v", stoppedBackground, a.instanceID)
 	}
@@ -204,7 +204,7 @@ func (a *MainAgent) abandonSubAgentsForSessionSwitch() int {
 		a.fileTrack.ReleaseAll(id)
 		a.releaseSubAgentSlot(subs[i])
 		if subs[i] != nil {
-			tools.StopAllSpawnedForAgent(id, "terminated on session switch")
+			tools.StopAllJobsForAgent(id, "terminated on session switch")
 			subs[i].cancel()
 			subs[i].closeLLMClient()
 		}
@@ -300,6 +300,7 @@ func (a *MainAgent) resetSessionRuntimeState() {
 	a.resetTaskCoordination(a.sessionEpoch, nil)
 	a.resetAgentRequests(nil)
 	a.explicitUserTurnCount.Store(0)
+	a.consecutiveIdleWakes.Store(0)
 	a.subs.resetStateEnteredTurns()
 }
 

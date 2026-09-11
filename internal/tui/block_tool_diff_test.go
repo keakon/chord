@@ -799,8 +799,8 @@ func TestEditToolCardKeepsFinalInlineDiffBackgrounds(t *testing.T) {
 }
 
 func TestRenderInlineDiffLineKeepsTabIndentedDeletionAligned(t *testing.T) {
-	oldLine := "\tcase tools.NameGrep, tools.NameGlob, tools.NameShell, tools.NameSpawn, tools.NameLsp:"
-	newLine := "\tcase tools.NameGrep, tools.NameGlob, tools.NameShell, tools.NameSpawn:"
+	oldLine := "\tcase tools.NameGrep, tools.NameGlob, tools.NameShell, tools.NameJobOutput, tools.NameLsp:"
+	newLine := "\tcase tools.NameGrep, tools.NameGlob, tools.NameShell, tools.NameJobOutput:"
 	hl := newCodeHighlighter("example.go", "package tui\n\nfunc example() {\n"+oldLine+"\n}\n")
 
 	lines := renderInlineDiffLine(oldLine, newLine, 120, hl)

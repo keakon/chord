@@ -406,33 +406,35 @@ func TestShellToolSupportsTildeWorkdir(t *testing.T) {
 	}
 }
 
-func TestSpawnToolSupportsTildeWorkdir(t *testing.T) {
-	resetSpawnRegistryOnlyForTest(t)
+func TestShellToolSupportsTildeWorkdirWithRunInBackground(t *testing.T) {
+	resetJobRegistryOnlyForTest(t)
+	t.Cleanup(func() { StopAllJobsForShutdown() })
 	home := t.TempDir()
 	setHomeEnvForTest(t, home)
-	ctx := WithSessionDir(context.Background(), t.TempDir())
-	marker := filepath.Join(home, "spawn-marker.txt")
+	ctx := WithAgentID(WithSessionDir(context.Background(), t.TempDir()), "path-res-agent")
+	marker := filepath.Join(home, "background-marker.txt")
 
-	out, err := NewSpawnTool("posix").Execute(ctx, mustMarshal(t, map[string]any{
-		"command":     fmt.Sprintf("printf spawned > %q && sleep 1", filepath.Base(marker)),
-		"description": "spawn in tilde workdir",
-		"workdir":     "~",
-		"timeout":     5,
+	out, err := NewShellTool("posix").Execute(ctx, mustMarshal(t, map[string]any{
+		"command":           fmt.Sprintf("printf backgrounded > %q && sleep 1", filepath.Base(marker)),
+		"description":       "background job in tilde workdir",
+		"workdir":           "~",
+		"run_in_background": true,
+		"timeout_ms":        5000,
 	}))
 	if err != nil {
-		t.Fatalf("SpawnTool.Execute: %v", err)
+		t.Fatalf("ShellTool.Execute: %v", err)
 	}
-	id := extractBackgroundID(t, out)
+	id := parseBackgroundJobID(t, out)
 	defer func() {
-		_, _ = (SpawnStopTool{}).Execute(context.Background(), mustMarshal(t, map[string]any{"id": id}))
+		_, _ = (JobKillTool{}).Execute(ctx, mustMarshal(t, map[string]any{"job_id": id}))
 	}()
 	waitForFile(t, marker)
 	data, err := os.ReadFile(marker)
 	if err != nil {
 		t.Fatalf("ReadFile marker: %v", err)
 	}
-	if string(data) != "spawned" {
-		t.Fatalf("marker content = %q, want spawned", string(data))
+	if string(data) != "backgrounded" {
+		t.Fatalf("marker content = %q, want backgrounded", string(data))
 	}
 }
 

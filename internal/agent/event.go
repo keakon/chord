@@ -39,7 +39,7 @@ const (
 	EventSubAgentStop            = "subagent_stop"
 	EventAgentLog                = "agent_log"                  // Informational log from SubAgent (e.g. buffer overflow warning)
 	EventSubAgentRequestBoundary = "subagent_request_boundary"  // SubAgent LLM request finished; apply deferred routing changes
-	EventSpawnFinished           = "background_object_finished" // Spawned background process finished; runtime-only notification
+	EventJobFinished             = "background_object_finished" // Background job finished; runtime-only notification
 	EventContinue                = "continue"                   // re-run LLM with existing context (no new user message)
 	EventHandoffResolve          = "handoff_resolve"            // user decision for a pending handoff (payload: *handoffResolvePayload)
 	EventLoopAssessment          = "loop_assessment"            // internal loop-controller decision point after a completed assistant round
@@ -866,18 +866,18 @@ type EnvStatusUpdateEvent struct{}
 
 func (EnvStatusUpdateEvent) agentEvent() {}
 
-// SpawnFinishedEvent is emitted when a background process started by Spawn completes.
+// JobFinishedEvent is emitted when a background job started by shell completes.
 // It is a lightweight runtime notification that only identifies the originating
 // agent so the TUI can finalize that agent's stream; stdout/stderr remain in the
 // returned log_file, and the JOB RESULT card comes from BackgroundResultAppendedEvent
 // once the result is durable.
-type SpawnFinishedEvent struct {
-	// AgentID is the instance id of the agent that spawned the job, normalized
+type JobFinishedEvent struct {
+	// AgentID is the instance id of the agent that started the job, normalized
 	// to identity.MainAgentID for the main agent (the TUI then maps "main" to "").
 	AgentID string
 }
 
-func (SpawnFinishedEvent) agentEvent() {}
+func (JobFinishedEvent) agentEvent() {}
 
 // BackgroundResultAppendedEvent reports that a finished background job's
 // result was durably appended to TargetAgentID's transcript at MessageIndex.

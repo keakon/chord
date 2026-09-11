@@ -107,7 +107,6 @@ type ModelDrivenProposalSnapshot struct {
 type BackgroundObjectState struct {
 	ID            string    `json:"id"`
 	AgentID       string    `json:"agent_id,omitempty"`
-	Kind          string    `json:"kind,omitempty"`
 	Description   string    `json:"description,omitempty"`
 	Command       string    `json:"command"`
 	StartedAt     time.Time `json:"started_at"`

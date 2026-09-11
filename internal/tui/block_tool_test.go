@@ -423,17 +423,17 @@ func TestReadHeaderShowsRelativePathInsideWorkingDir(t *testing.T) {
 	}
 }
 
-func TestSpawnCardMovesIgnoredArgumentIntoOptionGroup(t *testing.T) {
+func TestJobCardMovesIgnoredArgumentIntoOptionGroup(t *testing.T) {
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
-		ToolName:      tools.NameSpawn,
-		Content:       `{"prompt":"do things"}`,
+		ToolName:      tools.NameJobOutput,
+		Content:       `{"job_id":"job-1"}`,
 		ResultDone:    true,
 		ResultContent: "ok",
 		Audit: &message.ToolArgsAudit{
-			OriginalArgsJSON:  `{"prompt":"do things","path":"sub"}`,
-			EffectiveArgsJSON: `{"prompt":"do things"}`,
+			OriginalArgsJSON:  `{"job_id":"job-1","path":"sub"}`,
+			EffectiveArgsJSON: `{"job_id":"job-1"}`,
 			IgnoredArgs: []message.IgnoredToolArg{{
 				Path:      "args.path",
 				ValueJSON: `"sub"`,
@@ -444,7 +444,7 @@ func TestSpawnCardMovesIgnoredArgumentIntoOptionGroup(t *testing.T) {
 	rendered := strings.Join(block.Render(120, ""), "\n")
 	plain := stripANSI(rendered)
 	if !strings.Contains(plain, "(path=sub)") {
-		t.Fatalf("ignored argument should join the spawn option group:\n%s", plain)
+		t.Fatalf("ignored argument should join the job option group:\n%s", plain)
 	}
 	if strings.Contains(plain, " · path=") {
 		t.Fatalf("ignored argument must not be appended after the header:\n%s", plain)
@@ -577,8 +577,8 @@ func TestTodoCardShowsIgnoredArgumentInOptionGroup(t *testing.T) {
 
 func shellIgnoredPathAudit() *message.ToolArgsAudit {
 	return &message.ToolArgsAudit{
-		OriginalArgsJSON:  `{"command":"git status --short --branch","description":"Check git status and unpushed commits","path":".chord/memory/records/x.md","timeout":120}`,
-		EffectiveArgsJSON: `{"command":"git status --short --branch","description":"Check git status and unpushed commits","timeout":120}`,
+		OriginalArgsJSON:  `{"command":"git status --short --branch","description":"Check git status and unpushed commits","path":".chord/memory/records/x.md","timeout_ms":120000}`,
+		EffectiveArgsJSON: `{"command":"git status --short --branch","description":"Check git status and unpushed commits","timeout_ms":120000}`,
 		IgnoredArgs: []message.IgnoredToolArg{{
 			Path:      "args.path",
 			ValueJSON: `".chord/memory/records/x.md"`,
@@ -592,14 +592,14 @@ func TestShellCardMovesIgnoredArgumentIntoOptionGroup(t *testing.T) {
 		ID:            1,
 		Type:          BlockToolCall,
 		ToolName:      tools.NameShell,
-		Content:       `{"command":"git status --short --branch","description":"Check git status and unpushed commits","timeout":120}`,
+		Content:       `{"command":"git status --short --branch","description":"Check git status and unpushed commits","timeout_ms":120000}`,
 		ResultDone:    true,
 		ResultContent: "ok",
 		Audit:         shellIgnoredPathAudit(),
 	}
 	rendered := strings.Join(block.Render(160, ""), "\n")
 	plain := stripANSI(rendered)
-	want := "Check git status and unpushed commits (timeout=120, path=.chord/memory/records/x.md)"
+	want := "Check git status and unpushed commits (timeout=2m, path=.chord/memory/records/x.md)"
 	if !strings.Contains(plain, want) {
 		t.Fatalf("ignored argument should join the timeout option group, want %q:\n%s", want, plain)
 	}
@@ -640,7 +640,7 @@ func TestShellCollapsedCardKeepsIgnoredArgumentInOptionGroup(t *testing.T) {
 		ID:            1,
 		Type:          BlockToolCall,
 		ToolName:      tools.NameShell,
-		Content:       `{"command":"git status --short --branch","description":"Check git status and unpushed commits","timeout":120}`,
+		Content:       `{"command":"git status --short --branch","description":"Check git status and unpushed commits","timeout_ms":120000}`,
 		ResultDone:    true,
 		ResultContent: "ok",
 		Collapsed:     true,
@@ -648,7 +648,7 @@ func TestShellCollapsedCardKeepsIgnoredArgumentInOptionGroup(t *testing.T) {
 	}
 	rendered := strings.Join(block.Render(160, ""), "\n")
 	plain := stripANSI(rendered)
-	want := "Check git status and unpushed commits (timeout=120, path=.chord/memory/records/x.md)"
+	want := "Check git status and unpushed commits (timeout=2m, path=.chord/memory/records/x.md)"
 	if !strings.Contains(plain, want) {
 		t.Fatalf("collapsed header should keep the ignored option group, want %q:\n%s", want, plain)
 	}
@@ -662,7 +662,7 @@ func TestShellCardTruncatesStruckThroughOptionWithoutStyleLeak(t *testing.T) {
 		ID:            1,
 		Type:          BlockToolCall,
 		ToolName:      tools.NameShell,
-		Content:       `{"command":"git status --short --branch","description":"Check git status and unpushed commits","timeout":120}`,
+		Content:       `{"command":"git status --short --branch","description":"Check git status and unpushed commits","timeout_ms":120000}`,
 		ResultDone:    true,
 		ResultContent: "ok",
 		Audit:         shellIgnoredPathAudit(),
@@ -1195,7 +1195,7 @@ func TestExpandedShellToolCardKeepsElapsedOnHeader(t *testing.T) {
 	block := &Block{
 		Type:                   BlockToolCall,
 		ToolName:               tools.NameShell,
-		Content:                `{"command":"grep -n 'context' internal/agent/sub_routing_invalidated_test.go","timeout":120}`,
+		Content:                `{"command":"grep -n 'context' internal/agent/sub_routing_invalidated_test.go","timeout_ms":120000}`,
 		ResultContent:          "---\n internal/agent/sub_routing_invalidated_test.go | 9 ++++++---\n1\tfile changed, 6 insertions(+), 3 deletions(-)\n---\n(command took 1.3s)",
 		ResultDone:             true,
 		ToolCallDetailExpanded: true,
@@ -1993,7 +1993,7 @@ func TestBashHeaderUsesOnlyFirstCommandLine(t *testing.T) {
 		ID:                     1,
 		Type:                   BlockToolCall,
 		ToolName:               "shell",
-		Content:                fmt.Sprintf(`{"command":%q,"timeout":120}`, cmd),
+		Content:                fmt.Sprintf(`{"command":%q,"timeout_ms":120000}`, cmd),
 		ResultContent:          "ok",
 		ResultDone:             true,
 		ToolCallDetailExpanded: false,
@@ -2006,10 +2006,10 @@ func TestBashHeaderUsesOnlyFirstCommandLine(t *testing.T) {
 	}
 	joined := strings.Join(plain, "\n")
 
-	if !strings.Contains(joined, "shell echo first (timeout=120)") {
+	if !strings.Contains(joined, "shell echo first (timeout=2m)") {
 		t.Fatalf("expected header to contain only first command line with timeout; got:\n%s", joined)
 	}
-	if strings.Contains(joined, "echo second (timeout=120)") {
+	if strings.Contains(joined, "echo second (timeout=2m)") {
 		t.Fatalf("did not expect command continuation to appear in collapsed header; got:\n%s", joined)
 	}
 }
@@ -2020,14 +2020,14 @@ func TestCollapsedBashMultilineUsesDescriptionWhenPresent(t *testing.T) {
 		ID:                     1,
 		Type:                   BlockToolCall,
 		ToolName:               "shell",
-		Content:                fmt.Sprintf(`{"command":%q,"description":%q,"timeout":120}`, cmd, "Search existing permission-related tests"),
+		Content:                fmt.Sprintf(`{"command":%q,"description":%q,"timeout_ms":120000}`, cmd, "Search existing permission-related tests"),
 		ResultContent:          "ok",
 		ResultDone:             true,
 		ToolCallDetailExpanded: false,
 	}
 
 	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
-	if !strings.Contains(joined, "shell Search existing permission-related tests (timeout=120)") {
+	if !strings.Contains(joined, "shell Search existing permission-related tests (timeout=2m)") {
 		t.Fatalf("expected collapsed multiline Shell header to use description; got:\n%s", joined)
 	}
 	if strings.Contains(joined, "Command:") || strings.Contains(joined, "python3 - <<'PY'") || strings.Contains(joined, "ok") {
@@ -2040,15 +2040,44 @@ func TestCollapsedBashShowsCappedForegroundTimeoutInHeader(t *testing.T) {
 		ID:                     1,
 		Type:                   BlockToolCall,
 		ToolName:               "shell",
-		Content:                `{"command":"sleep 1","timeout":2400}`,
+		Content:                `{"command":"sleep 1","timeout_ms":2400000}`,
 		ResultContent:          "ok",
 		ResultDone:             true,
 		ToolCallDetailExpanded: false,
 	}
 
 	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
-	if !strings.Contains(joined, "shell sleep 1 (timeout=2400→600)") {
+	if !strings.Contains(joined, "shell sleep 1 (timeout=40m→10m)") {
 		t.Fatalf("expected collapsed Shell header to show requested and effective capped foreground timeout; got:\n%s", joined)
+	}
+}
+
+func TestCollapsedBashBackgroundTimeoutUsesLargerCapInHeader(t *testing.T) {
+	cases := []struct {
+		name      string
+		timeoutMs int
+		want      string
+	}{
+		{name: "hour-scale accepted for background", timeoutMs: 7200000, want: "shell sleep 1 (background, timeout=2h)"},
+		{name: "explicit foreground default is a real deadline for background", timeoutMs: 600000, want: "shell sleep 1 (background, timeout=10m)"},
+		{name: "beyond six hours capped", timeoutMs: 28800000, want: "shell sleep 1 (background, timeout=8h→6h)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			block := &Block{
+				ID:                     1,
+				Type:                   BlockToolCall,
+				ToolName:               "shell",
+				Content:                fmt.Sprintf(`{"command":"sleep 1","run_in_background":true,"timeout_ms":%d}`, tc.timeoutMs),
+				ResultContent:          "ok",
+				ResultDone:             true,
+				ToolCallDetailExpanded: false,
+			}
+			joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+			if !strings.Contains(joined, tc.want) {
+				t.Fatalf("expected collapsed Shell header to contain %q; got:\n%s", tc.want, joined)
+			}
+		})
 	}
 }
 
@@ -2058,14 +2087,14 @@ func TestCollapsedBashMultilineWithoutDescriptionFallsBackToCommand(t *testing.T
 		ID:                     1,
 		Type:                   BlockToolCall,
 		ToolName:               "shell",
-		Content:                fmt.Sprintf(`{"command":%q,"description":"   ","timeout":120}`, cmd),
+		Content:                fmt.Sprintf(`{"command":%q,"description":"   ","timeout_ms":120000}`, cmd),
 		ResultContent:          "ok",
 		ResultDone:             true,
 		ToolCallDetailExpanded: false,
 	}
 
 	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
-	if !strings.Contains(joined, "shell python3 - <<'PY' (timeout=120)") {
+	if !strings.Contains(joined, "shell python3 - <<'PY' (timeout=2m)") {
 		t.Fatalf("expected collapsed multiline Shell header to fall back to command first line; got:\n%s", joined)
 	}
 }
@@ -2076,14 +2105,14 @@ func TestExpandedBashMultilineKeepsCommandHeaderEvenWithDescription(t *testing.T
 		ID:                     1,
 		Type:                   BlockToolCall,
 		ToolName:               "shell",
-		Content:                fmt.Sprintf(`{"command":%q,"description":%q,"timeout":120}`, cmd, "Search existing permission-related tests"),
+		Content:                fmt.Sprintf(`{"command":%q,"description":%q,"timeout_ms":120000}`, cmd, "Search existing permission-related tests"),
 		ResultContent:          "ok",
 		ResultDone:             true,
 		ToolCallDetailExpanded: true,
 	}
 
 	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
-	if !strings.Contains(joined, "shell Search existing permission-related tests (timeout=120)") {
+	if !strings.Contains(joined, "shell Search existing permission-related tests (timeout=2m)") {
 		t.Fatalf("expected expanded Shell header to use summary description; got:\n%s", joined)
 	}
 	if !strings.Contains(joined, "Command:") || !strings.Contains(joined, "python3 - <<'PY'") || !strings.Contains(joined, "from pathlib import Path") || !strings.Contains(joined, "print('ok')") {
@@ -2101,7 +2130,7 @@ func TestExpandedBashShowsIndentedContinuationLines(t *testing.T) {
 		ID:                     1,
 		Type:                   BlockToolCall,
 		ToolName:               "shell",
-		Content:                fmt.Sprintf(`{"command":%q,"timeout":120}`, cmd),
+		Content:                fmt.Sprintf(`{"command":%q,"timeout_ms":120000}`, cmd),
 		ResultContent:          "ok",
 		ResultDone:             true,
 		ToolCallDetailExpanded: true,
@@ -2151,14 +2180,14 @@ func TestCollapsedBashShowsCommandPreviewAndExpandHint(t *testing.T) {
 		ID:                     1,
 		Type:                   BlockToolCall,
 		ToolName:               "shell",
-		Content:                fmt.Sprintf(`{"command":%q,"timeout":120}`, cmd),
+		Content:                fmt.Sprintf(`{"command":%q,"timeout_ms":120000}`, cmd),
 		ResultContent:          "ok",
 		ResultDone:             true,
 		ToolCallDetailExpanded: false,
 	}
 
 	joined := stripANSI(strings.Join(block.Render(80, ""), "\n"))
-	if !strings.Contains(joined, "✓ ▸ shell echo first (timeout=120)") {
+	if !strings.Contains(joined, "✓ ▸ shell echo first (timeout=2m)") {
 		t.Fatalf("expected collapsed Shell to show its first-line command summary; got:\n%s", joined)
 	}
 	for _, hidden := range []string{"Command:", "echo second", "echo third", "ok", "[space]"} {
@@ -2182,14 +2211,14 @@ func TestCollapsedBashLongCommandWithNoOutputKeepsCommandPreviewCollapsed(t *tes
 		ID:                     1,
 		Type:                   BlockToolCall,
 		ToolName:               "shell",
-		Content:                fmt.Sprintf(`{"command":%q,"description":"暂存滚轮修复相关改动","timeout":30}`, cmd),
+		Content:                fmt.Sprintf(`{"command":%q,"description":"暂存滚轮修复相关改动","timeout_ms":30000}`, cmd),
 		ResultContent:          "(Shell completed with no output)",
 		ResultDone:             true,
 		ToolCallDetailExpanded: false,
 	}
 
 	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if !strings.Contains(joined, "✓ ▸ shell 暂存滚轮修复相关改动 (timeout=30)") {
+	if !strings.Contains(joined, "✓ ▸ shell 暂存滚轮修复相关改动 (timeout=30s)") {
 		t.Fatalf("expected collapsed Shell to keep only the description summary; got:\n%s", joined)
 	}
 	for _, hidden := range []string{"Command:", "git add internal/tui/app_cached_render.go", "session_switch_test.go", "TestExample", "Shell completed", "[space]"} {
@@ -2205,14 +2234,14 @@ func TestCollapsedBashShowsSingleExpandHintWhenCommandAndOutputBothHidden(t *tes
 		ID:                     1,
 		Type:                   BlockToolCall,
 		ToolName:               "shell",
-		Content:                fmt.Sprintf(`{"command":%q,"timeout":120}`, cmd),
+		Content:                fmt.Sprintf(`{"command":%q,"timeout_ms":120000}`, cmd),
 		ResultContent:          "one\ntwo\nthree",
 		ResultDone:             true,
 		ToolCallDetailExpanded: false,
 	}
 
 	joined := stripANSI(strings.Join(block.Render(80, ""), "\n"))
-	if !strings.Contains(joined, "✓ ▸ shell echo first (timeout=120)") {
+	if !strings.Contains(joined, "✓ ▸ shell echo first (timeout=2m)") {
 		t.Fatalf("expected collapsed Shell to show its disclosure glyph; got:\n%s", joined)
 	}
 	for _, hidden := range []string{"Command:", "echo second", "echo third", "one", "two", "three", "[space]"} {
@@ -2830,7 +2859,7 @@ func TestCollapsedBashRejectedShowsExpandHintBeforeRejection(t *testing.T) {
 		ID:                     1,
 		Type:                   BlockToolCall,
 		ToolName:               "shell",
-		Content:                `{"command":"first command line\nsecond command line\nthird command line","timeout":120}`,
+		Content:                `{"command":"first command line\nsecond command line\nthird command line","timeout_ms":120000}`,
 		ResultContent:          `tool "shell" rejected by user: sample rejection reason`,
 		ResultStatus:           agent.ToolResultStatusError,
 		ResultDone:             true,

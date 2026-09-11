@@ -60,12 +60,25 @@ func TestSpeculativeExecutionPolicyBashReadOnlySubset(t *testing.T) {
 		`{"command":"cat README.md > /tmp/out"}`,
 		`{"command":"echo $(pwd)"}`,
 		`{"command":"rm README.md"}`,
+		`{"command":"ls internal","run_in_background":true}`,
 	}
 	for _, args := range rejected {
 		decision := evaluateSpeculativeExecutionPolicyWithPrefix(registry, nil, tools.NameShell, json.RawMessage(args), nil, "")
 		if decision.Allowed {
 			t.Fatalf("Shell args %s allowed, want reject", args)
 		}
+	}
+}
+
+func TestSpeculativeExecutionPolicyRejectsJobOutput(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.Register(tools.JobOutputTool{})
+	decision := evaluateSpeculativeExecutionPolicyWithPrefix(registry, nil, tools.NameJobOutput, json.RawMessage(`{"job_id":"job-1"}`), nil, "")
+	if decision.Allowed {
+		t.Fatal("job_output allowed for speculative execution, want reject")
+	}
+	if decision.Reason != "consumes_job_output" {
+		t.Fatalf("reason = %q, want consumes_job_output", decision.Reason)
 	}
 }
 

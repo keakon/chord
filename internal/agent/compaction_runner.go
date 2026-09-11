@@ -91,7 +91,7 @@ func (a *MainAgent) startCompactionAsyncWithContinuation(snapshot []message.Mess
 	a.recordCompactionLifecycleEvent("started", map[string]string{"trigger": trigger.analyticsName(), "message_count": strconv.Itoa(len(snapshot))})
 	todos := a.GetTodos()
 	subAgents := a.taskInfosForCompaction()
-	backgroundObjects := spawnStatesForSnapshot()
+	backgroundObjects := jobStatesForSnapshot()
 	// evidenceItemsForCompaction reads the event-loop-owned evidence tracker;
 	// capture the slice here and hand it to the worker so the draft never
 	// touches the tracker from another goroutine.
@@ -225,7 +225,7 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 
 	todos := a.GetTodos()
 	subAgents := a.taskInfosForCompaction()
-	backgroundObjects := spawnStatesForSnapshot()
+	backgroundObjects := jobStatesForSnapshot()
 	headSnapshot := snapshot[:headSplit]
 
 	evidenceItems, _ = applyCompactionProfile(a.ctxMgr, profile, headSnapshot, a.ctxMgr.GetMaxTokens(), evidenceItems)

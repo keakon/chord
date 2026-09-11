@@ -31,10 +31,10 @@ func TestPrepareSessionSwitchTerminatesBackgroundObjects(t *testing.T) {
 		t.Fatalf("Chdir: %v", err)
 	}
 	a := newTestMainAgent(t, projectRoot)
-	tools.StopAllSpawnedForShutdown()
-	resetSpawnRegistryForAgentTests(t)
+	tools.StopAllJobsForShutdown()
+	resetJobRegistryForAgentTests(t)
 
-	if _, err := tools.ExecuteSpawnForTest(tools.WithAgentID(context.Background(), a.instanceID), "service", "sleep 5", "Main background service", nil); err != nil {
+	if _, err := tools.ExecuteJobForTest(tools.WithAgentID(context.Background(), a.instanceID), "sleep 5", "Main background service", nil); err != nil {
 		t.Fatalf("start main background: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -43,7 +43,7 @@ func TestPrepareSessionSwitchTerminatesBackgroundObjects(t *testing.T) {
 	a.subs.mu.Lock()
 	a.subs.subAgents[sub.instanceID] = sub
 	a.subs.mu.Unlock()
-	if _, err := tools.ExecuteSpawnForTest(tools.WithAgentID(context.Background(), sub.instanceID), "job", "sleep 5", "Sub background object", new(5)); err != nil {
+	if _, err := tools.ExecuteJobForTest(tools.WithAgentID(context.Background(), sub.instanceID), "sleep 5", "Sub background object", new(5)); err != nil {
 		t.Fatalf("start sub background: %v", err)
 	}
 
@@ -54,14 +54,16 @@ func TestPrepareSessionSwitchTerminatesBackgroundObjects(t *testing.T) {
 	if turnCtx == nil {
 		t.Fatal("expected non-nil turn context")
 	}
-	if got := len(tools.SnapshotSpawnedProcesses()); got != 0 {
-		t.Fatalf("len(SnapshotSpawnedProcesses()) after prepareSessionSwitch = %d, want 0", got)
+	for _, state := range tools.SnapshotJobs() {
+		if state.Status == "running" || state.Status == "stopping" {
+			t.Fatalf("job %s status = %s after prepareSessionSwitch, want terminal", state.ID, state.Status)
+		}
 	}
 }
 
-func resetSpawnRegistryForAgentTests(t *testing.T) {
+func resetJobRegistryForAgentTests(t *testing.T) {
 	t.Helper()
-	restore := tools.ResetSpawnRegistryForTest()
+	restore := tools.ResetJobRegistryForTest()
 	t.Cleanup(restore)
 }
 

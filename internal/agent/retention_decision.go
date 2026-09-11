@@ -159,8 +159,8 @@ func retentionRecoveryFor(ctx requestReductionContext, class requestReductionCla
 		return retentionRecoveryNone
 	}
 	if irreducibleToolOutputRequiresArchive(toolName) {
-		// A spawn or a notification cannot be replayed and has no URL to
-		// re-fetch: without an address its payload is simply gone.
+		// A background job read or a notification cannot be replayed and has
+		// no URL to re-fetch: without an address its payload is simply gone.
 		return retentionRecoveryUnavailable
 	}
 	if toolName == tools.NameRead {

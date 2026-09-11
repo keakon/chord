@@ -96,7 +96,7 @@ func (a *MainAgent) cancelTaskTreeVisit(taskID, reason string, visited map[strin
 		// input in flight — this block is the only cleanup on that path.
 		a.releaseSubAgentSlot(sub)
 		a.fileTrack.ReleaseAll(sub.instanceID)
-		tools.StopAllSpawnedForAgent(sub.instanceID, "terminated with ancestor task")
+		tools.StopAllJobsForAgent(sub.instanceID, "terminated with ancestor task")
 		a.emitToTUI(AgentStatusEvent{AgentID: sub.instanceID, Status: string(status), Message: reason})
 		a.parkSubAgent(sub.instanceID)
 		return

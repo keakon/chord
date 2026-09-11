@@ -158,6 +158,7 @@ const (
 	readObservationSinkKey
 	deleteAuditSinkKey
 	turnIDKey
+	jobAccessKey
 )
 
 // WithAgentID returns a new context that carries the given agent ID.
@@ -171,6 +172,29 @@ func AgentIDFromContext(ctx context.Context) string {
 		return v
 	}
 	return ""
+}
+
+// JobAccess carries the extra job owners the calling agent behind a tool call
+// may reach besides jobs it started itself: the main agent instance (which owns
+// every job) and the caller's direct owner (so a worker can read a job its
+// owner launched). The zero value grants nothing beyond the caller's own jobs.
+type JobAccess struct {
+	OwnerAgentID string
+	MainAgentID  string
+}
+
+// WithJobAccess returns a new context carrying the caller's job access scope.
+func WithJobAccess(ctx context.Context, access JobAccess) context.Context {
+	return context.WithValue(ctx, jobAccessKey, access)
+}
+
+// JobAccessFromContext extracts the job access scope from the context, or the
+// zero value if absent.
+func JobAccessFromContext(ctx context.Context) JobAccess {
+	if v, ok := ctx.Value(jobAccessKey).(JobAccess); ok {
+		return v
+	}
+	return JobAccess{}
 }
 
 // WithTurnID returns a context carrying the logical turn that owns the work.

@@ -10,6 +10,7 @@ import (
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/recovery"
+	"github.com/keakon/chord/internal/tools"
 )
 
 // ---------------------------------------------------------------------------
@@ -61,9 +62,12 @@ func (a *MainAgent) toolExecutionPipeline() toolExecutionPipeline {
 		runtimeStartedAt: a.runtimeStartedAt,
 		eventSender:      a,
 		emit:             a.emitToTUI,
-		projectRoot:      a.projectRoot,
-		guidance:         mainToolOutputGuidance,
-		applyPatchRetry:  &a.applyPatchRetry,
+		// MainAgent owns every job; its own instance id both stamps its jobs and
+		// lets it reach jobs started by any SubAgent.
+		jobAccess:       tools.JobAccess{MainAgentID: a.instanceID},
+		projectRoot:     a.projectRoot,
+		guidance:        mainToolOutputGuidance,
+		applyPatchRetry: &a.applyPatchRetry,
 		currentRuleset: func() permission.Ruleset {
 			return a.effectiveRuleset()
 		},

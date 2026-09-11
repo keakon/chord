@@ -41,6 +41,7 @@ type toolExecutionPipeline struct {
 	runtimeStartedAt time.Time // runtime start; drift warnings omit mtimes predating it
 	eventSender      tools.EventSender
 	emit             func(AgentEvent)
+	jobAccess        tools.JobAccess
 	guidance         string
 	logPrefix        string
 	projectRoot      string
@@ -388,7 +389,7 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 		execResult.walltimeTarget = p.captureWalltimeTarget()
 	}
 
-	agentCtx := buildToolExecContext(ctx, tc, p.agentID, p.taskID, p.sessionDir, p.eventSender, p.emit)
+	agentCtx := buildToolExecContext(ctx, tc, p.agentID, p.taskID, p.sessionDir, p.eventSender, p.jobAccess, p.emit)
 	if p.currentTurnID != nil {
 		agentCtx = tools.WithTurnID(agentCtx, p.currentTurnID())
 	}
@@ -606,7 +607,7 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 	}
 	execResult.speculativeHooks = hooks
 
-	agentCtx := buildToolExecContext(ctx, tc, p.agentID, p.taskID, p.sessionDir, p.eventSender, p.emit)
+	agentCtx := buildToolExecContext(ctx, tc, p.agentID, p.taskID, p.sessionDir, p.eventSender, p.jobAccess, p.emit)
 	if p.currentTurnID != nil {
 		agentCtx = tools.WithTurnID(agentCtx, p.currentTurnID())
 	}

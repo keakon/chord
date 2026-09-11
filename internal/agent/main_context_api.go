@@ -215,7 +215,7 @@ func (a *MainAgent) KeyPoolNextTransition() time.Duration {
 	return client.KeyPoolNextTransitionForRef(ref)
 }
 
-func (a *MainAgent) mainBackgroundResultContent(payload *tools.SpawnFinishedPayload) string {
+func (a *MainAgent) mainBackgroundResultContent(payload *tools.JobFinishedPayload) string {
 	if payload == nil {
 		return ""
 	}
@@ -223,15 +223,11 @@ func (a *MainAgent) mainBackgroundResultContent(payload *tools.SpawnFinishedPayl
 	if content != "" {
 		return content
 	}
-	kind := strings.TrimSpace(payload.Kind)
-	if kind == "" {
-		kind = "job"
-	}
 	desc := strings.TrimSpace(payload.Description)
 	if desc == "" {
 		desc = payload.Command
 	}
-	return fmt.Sprintf("[Background %s %s completed]\n\nDescription: %s\nStatus: %s\nReview this result before continuing.", kind, payload.EffectiveID(), desc, payload.Status)
+	return fmt.Sprintf("[Background job %s completed]\n\nDescription: %s\nStatus: %s", payload.EffectiveID(), desc, payload.Status)
 }
 
 // SetSessionArtifactsDirFunc installs a callback that returns the active
@@ -313,7 +309,7 @@ func (a *MainAgent) SendAgentEvent(eventType, sourceID string, payload any) {
 	case "agent_log":
 		mapped = EventAgentLog
 	case "background_object_finished":
-		mapped = EventSpawnFinished
+		mapped = EventJobFinished
 	}
 
 	a.sendEvent(Event{

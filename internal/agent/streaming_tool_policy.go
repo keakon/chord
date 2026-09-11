@@ -45,6 +45,14 @@ func evaluateSpeculativeExecutionPolicyWithPrefix(registry *tools.Registry, rule
 		}
 	}
 
+	// job_output is read-only but not side-effect-free: reading advances the
+	// job's read cursor, and a terminal read suppresses the completion
+	// notification. A speculative call that gets discarded would take that
+	// output with it, so job_output only runs on the real path.
+	if toolName == tools.NameJobOutput {
+		return rejectSpeculativeExecution("consumes_job_output")
+	}
+
 	class := tools.ConcurrencyClassForTool(registry, toolName, args)
 	if class != tools.ToolConcurrencyClassReadOnly {
 		if toolName == tools.NameTodoWrite {
@@ -57,7 +65,7 @@ func evaluateSpeculativeExecutionPolicyWithPrefix(registry *tools.Registry, rule
 			return speculativeExecutionDecision{Allowed: true, Reason: "commit_on_promote_internal_state"}
 		}
 		switch toolName {
-		case tools.NameSpawn, tools.NameSpawnStop:
+		case tools.NameJobKill:
 			return rejectSpeculativeExecution("process_side_effect")
 		case tools.NameQuestion:
 			return rejectSpeculativeExecution("interactive_tool")

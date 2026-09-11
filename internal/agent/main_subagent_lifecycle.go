@@ -113,7 +113,7 @@ func (a *MainAgent) closeSubAgent(agentID string) {
 	}
 	a.releaseSubAgentSlot(sub)
 	a.fileTrack.ReleaseAll(agentID)
-	tools.StopAllSpawnedForAgent(agentID, "terminated on subagent close")
+	tools.StopAllJobsForAgent(agentID, "terminated on subagent close")
 	sub.cancel()
 	sub.closeLLMClient()
 	a.removeSubAgentMailboxState(agentID)
@@ -226,7 +226,7 @@ func (a *MainAgent) parkSubAgent(agentID string) bool {
 	}
 	a.releaseSubAgentSlot(sub)
 	a.fileTrack.ReleaseAll(agentID)
-	tools.StopAllSpawnedForAgent(agentID, "terminated on subagent park")
+	tools.StopAllJobsForAgent(agentID, "terminated on subagent park")
 	sub.cancel()
 	sub.closeLLMClient()
 	if focused {
@@ -420,7 +420,7 @@ func (a *MainAgent) sweepSubAgentLifecycle() {
 					a.emitToTUI(AgentStatusEvent{AgentID: sub.instanceID, Status: "cancelled", Message: reason})
 					a.releaseSubAgentSlot(sub)
 					a.fileTrack.ReleaseAll(sub.instanceID)
-					tools.StopAllSpawnedForAgent(sub.instanceID, "terminated on waiting-main expiry")
+					tools.StopAllJobsForAgent(sub.instanceID, "terminated on waiting-main expiry")
 					a.parkSubAgent(sub.instanceID)
 					if settled := a.taskRecordByTaskID(sub.taskID); settled != nil {
 						a.deliverSettledWaitingMainExpiryAlert(alert, alertDurable, settled)

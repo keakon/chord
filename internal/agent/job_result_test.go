@@ -10,14 +10,13 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-func backgroundResultPayload(agentID, backgroundID, description string) *tools.SpawnFinishedPayload {
-	return &tools.SpawnFinishedPayload{
+func backgroundResultPayload(agentID, backgroundID, description string) *tools.JobFinishedPayload {
+	return &tools.JobFinishedPayload{
 		BackgroundID: backgroundID,
 		AgentID:      agentID,
-		Kind:         "job",
 		Description:  description,
-		Status:       "finished (exit 0)",
-		Message:      "[Background object " + backgroundID + " completed]\n\nDescription: " + description + "\nStatus: finished (exit 0)",
+		Status:       "completed (exit code 0)",
+		Message:      "[Background job " + backgroundID + " finished]\n\nStatus: completed (exit code 0)\nPurpose: " + description,
 	}
 }
 
@@ -33,7 +32,7 @@ func mainInboxBackgroundResults(a *MainAgent) []SubAgentMailboxMessage {
 
 func TestHandleBackgroundObjectFinishedForMainIdleStartsTurnAndDelivers(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.handleSpawnFinished(Event{Type: EventSpawnFinished, SourceID: a.instanceID, Payload: backgroundResultPayload(a.instanceID, "job-1", "Run production build")})
+	a.handleJobFinished(Event{Type: EventJobFinished, SourceID: a.instanceID, Payload: backgroundResultPayload(a.instanceID, "job-1", "Run production build")})
 
 	if a.turn == nil {
 		t.Fatal("expected new turn to start after main background result")
@@ -99,7 +98,7 @@ func TestHandleBackgroundObjectFinishedForMainQueuesDurablyWhileBusy(t *testing.
 	a.turn.TotalToolCalls.Store(1)
 	a.turn.recordPendingToolCall(PendingToolCall{CallID: "grep-1", Name: "grep", ArgsJSON: `{"pattern":"TODO","paths":["internal"],"includes":["**/*.go"]}`})
 
-	a.handleSpawnFinished(Event{Type: EventSpawnFinished, SourceID: a.instanceID, Payload: backgroundResultPayload(a.instanceID, "job-1", "Run production build")})
+	a.handleJobFinished(Event{Type: EventJobFinished, SourceID: a.instanceID, Payload: backgroundResultPayload(a.instanceID, "job-1", "Run production build")})
 	a.flushPersist()
 
 	if a.turn == nil || a.turn.ID != turnID {
@@ -152,8 +151,8 @@ func TestHandleBackgroundObjectFinishedForMainKeepsDistinctDurableRows(t *testin
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn()
 
-	a.handleSpawnFinished(Event{Type: EventSpawnFinished, SourceID: a.instanceID, Payload: backgroundResultPayload(a.instanceID, "job-1", "Run production build")})
-	a.handleSpawnFinished(Event{Type: EventSpawnFinished, SourceID: a.instanceID, Payload: backgroundResultPayload(a.instanceID, "job-2", "Upload release bundle")})
+	a.handleJobFinished(Event{Type: EventJobFinished, SourceID: a.instanceID, Payload: backgroundResultPayload(a.instanceID, "job-1", "Run production build")})
+	a.handleJobFinished(Event{Type: EventJobFinished, SourceID: a.instanceID, Payload: backgroundResultPayload(a.instanceID, "job-2", "Upload release bundle")})
 
 	// One durable row per finished job: a JOB RESULT card without its own
 	// backing transcript slot would make the live view disagree with a restored
@@ -177,9 +176,9 @@ func TestHandleBackgroundObjectFinishedForMainDoesNotCoalesceAcrossUserInput(t *
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn()
 
-	a.handleSpawnFinished(Event{Type: EventSpawnFinished, SourceID: a.instanceID, Payload: backgroundResultPayload(a.instanceID, "job-1", "Run production build")})
+	a.handleJobFinished(Event{Type: EventJobFinished, SourceID: a.instanceID, Payload: backgroundResultPayload(a.instanceID, "job-1", "Run production build")})
 	a.handleUserMessage(Event{Payload: "queued user follow-up"})
-	a.handleSpawnFinished(Event{Type: EventSpawnFinished, SourceID: a.instanceID, Payload: backgroundResultPayload(a.instanceID, "job-2", "Upload release bundle")})
+	a.handleJobFinished(Event{Type: EventJobFinished, SourceID: a.instanceID, Payload: backgroundResultPayload(a.instanceID, "job-2", "Upload release bundle")})
 
 	if got := len(a.pendingUserMessages); got != 1 || a.pendingUserMessages[0].Content != "queued user follow-up" {
 		t.Fatalf("pendingUserMessages = %#v, want only the queued user follow-up", a.pendingUserMessages)
@@ -207,7 +206,7 @@ func TestHandleBackgroundObjectFinishedForMainDeliversAfterToolBatch(t *testing.
 	a.turn.TotalToolCalls.Store(1)
 	a.turn.recordPendingToolCall(PendingToolCall{CallID: "grep-1", Name: "grep", ArgsJSON: `{"pattern":"TODO","paths":["internal"],"includes":["**/*.go"]}`})
 
-	a.handleSpawnFinished(Event{Type: EventSpawnFinished, SourceID: a.instanceID, Payload: backgroundResultPayload(a.instanceID, "job-1", "Run production build")})
+	a.handleJobFinished(Event{Type: EventJobFinished, SourceID: a.instanceID, Payload: backgroundResultPayload(a.instanceID, "job-1", "Run production build")})
 
 	// A result that arrives while a tool batch is open must never land between
 	// the assistant tool_calls message and the tool result that closes it.
@@ -262,7 +261,7 @@ func TestHandleBackgroundObjectFinishedRoutesToOwnerSubAgentOnly(t *testing.T) {
 
 	payload := backgroundResultPayload(sub.instanceID, "job-7", "Run production build")
 
-	a.handleSpawnFinished(Event{Type: EventSpawnFinished, SourceID: sub.instanceID, Payload: payload})
+	a.handleJobFinished(Event{Type: EventJobFinished, SourceID: sub.instanceID, Payload: payload})
 
 	select {
 	case msg := <-sub.ctxAppendCh:
@@ -293,7 +292,7 @@ func TestHandleBackgroundObjectFinishedOrphanOwnerFallsBackToMain(t *testing.T) 
 	a.newTurn()
 
 	payload := backgroundResultPayload("builder-gone", "job-9", "Run production build")
-	a.handleSpawnFinished(Event{Type: EventSpawnFinished, SourceID: payload.AgentID, Payload: payload})
+	a.handleJobFinished(Event{Type: EventJobFinished, SourceID: payload.AgentID, Payload: payload})
 
 	// A terminated owner must not leave a card with no backing transcript slot:
 	// the result falls back to the main transcript like a main-owned result.
@@ -327,7 +326,7 @@ func TestHandleBackgroundObjectFinishedSubOwnerQueueFullSpoolsDurably(t *testing
 	a.subs.subAgents[sub.instanceID] = sub
 	a.subs.mu.Unlock()
 
-	a.handleSpawnFinished(Event{Type: EventSpawnFinished, SourceID: sub.instanceID, Payload: backgroundResultPayload(sub.instanceID, "job-8", "Run production build")})
+	a.handleJobFinished(Event{Type: EventJobFinished, SourceID: sub.instanceID, Payload: backgroundResultPayload(sub.instanceID, "job-8", "Run production build")})
 	a.flushPersist()
 
 	// A full owner queue must not drop the result: it stays a durable mailbox
@@ -361,10 +360,10 @@ func TestBackgroundCompletionToastLevelFollowsTerminalStatus(t *testing.T) {
 		status string
 		want   string
 	}{
-		{status: "finished (exit 0)", want: "info"},
-		{status: "finished (error: exit status 7)", want: "error"},
-		{status: "finished (error: command timed out after 120s: exit status 143)", want: "error"},
-		{status: "finished (error: command cancelled by SpawnStop)", want: "warn"},
+		{status: "completed (exit code 0)", want: "info"},
+		{status: "failed (exit code 7)", want: "error"},
+		{status: "killed (timed out after 120s)", want: "error"},
+		{status: "killed (cancelled by job_kill)", want: "warn"},
 	}
 	for _, tt := range tests {
 		if got := backgroundCompletionToastLevel(tt.status); got != tt.want {
@@ -373,35 +372,71 @@ func TestBackgroundCompletionToastLevelFollowsTerminalStatus(t *testing.T) {
 	}
 }
 
-// TestSpawnFinishedEventNormalizesMainOwnerAgentID pins that the lightweight
-// spawn-finished notification names the main agent with the shared identity
+// TestJobFinishedEventNormalizesMainOwnerAgentID pins that the lightweight
+// job-finished notification names the main agent with the shared identity
 // instead of its internal instance id, so the TUI's "main" -> "" normalization
 // applies uniformly; every other owner keeps its instance id.
-func TestSpawnFinishedEventNormalizesMainOwnerAgentID(t *testing.T) {
+func TestJobFinishedEventNormalizesMainOwnerAgentID(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.handleSpawnFinished(Event{Type: EventSpawnFinished, SourceID: identity.MainAgentID, Payload: backgroundResultPayload(a.instanceID, "job-main", "run tests")})
-	if got := lastSpawnFinishedEvent(t, a); got.AgentID != identity.MainAgentID {
-		t.Fatalf("SpawnFinishedEvent.AgentID = %q, want %q (main owner normalized)", got.AgentID, identity.MainAgentID)
+	a.handleJobFinished(Event{Type: EventJobFinished, SourceID: identity.MainAgentID, Payload: backgroundResultPayload(a.instanceID, "job-main", "run tests")})
+	if got := lastJobFinishedEvent(t, a); got.AgentID != identity.MainAgentID {
+		t.Fatalf("JobFinishedEvent.AgentID = %q, want %q (main owner normalized)", got.AgentID, identity.MainAgentID)
 	}
 
-	a.handleSpawnFinished(Event{Type: EventSpawnFinished, SourceID: identity.MainAgentID, Payload: backgroundResultPayload("worker-owner-1", "job-sub", "run tests")})
-	if got := lastSpawnFinishedEvent(t, a); got.AgentID != "worker-owner-1" {
-		t.Fatalf("SpawnFinishedEvent.AgentID = %q, want the sub-agent owner %q", got.AgentID, "worker-owner-1")
+	a.handleJobFinished(Event{Type: EventJobFinished, SourceID: identity.MainAgentID, Payload: backgroundResultPayload("worker-owner-1", "job-sub", "run tests")})
+	if got := lastJobFinishedEvent(t, a); got.AgentID != "worker-owner-1" {
+		t.Fatalf("JobFinishedEvent.AgentID = %q, want the sub-agent owner %q", got.AgentID, "worker-owner-1")
 	}
 }
 
-func lastSpawnFinishedEvent(t *testing.T, a *MainAgent) SpawnFinishedEvent {
+func lastJobFinishedEvent(t *testing.T, a *MainAgent) JobFinishedEvent {
 	t.Helper()
-	var found SpawnFinishedEvent
+	var found JobFinishedEvent
 	ok := false
 	for _, evt := range drainAgentEvents(a.outputCh) {
-		if e, isSpawn := evt.(SpawnFinishedEvent); isSpawn {
+		if e, isJobFinished := evt.(JobFinishedEvent); isJobFinished {
 			found = e
 			ok = true
 		}
 	}
 	if !ok {
-		t.Fatal("handleSpawnFinished emitted no SpawnFinishedEvent")
+		t.Fatal("handleJobFinished emitted no JobFinishedEvent")
 	}
 	return found
+}
+
+// TestHandleJobFinishedDropsCrossSessionCompletion pins the session-identity
+// guard: a job that finished after a session switch carries its origin session,
+// and its result must not be written into the new session's transcript.
+func TestHandleJobFinishedDropsCrossSessionCompletion(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	payload := backgroundResultPayload(a.instanceID, "job-cross-session-drop", "late build")
+	payload.SessionDir = a.SessionDir() + "-previous"
+	a.handleJobFinished(Event{Type: EventJobFinished, SourceID: a.instanceID, Payload: payload})
+
+	if a.turn != nil {
+		t.Fatal("a completion from another session must not start a turn")
+	}
+	if got := len(a.pendingSubAgentMailboxes); got != 0 {
+		t.Fatalf("len(pendingSubAgentMailboxes) = %d, want 0 for a dropped completion", got)
+	}
+	// The drop happens before the reported claim, so the result stays claimable
+	// rather than being silently marked delivered.
+	if !tools.ClaimJobReported(payload.EffectiveID()) {
+		t.Fatal("a dropped cross-session completion must remain claimable")
+	}
+}
+
+func TestHandleJobFinishedDeliversMatchingSessionCompletion(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	payload := backgroundResultPayload(a.instanceID, "job-cross-session-match", "build")
+	payload.SessionDir = a.SessionDir()
+	a.handleJobFinished(Event{Type: EventJobFinished, SourceID: a.instanceID, Payload: payload})
+
+	if a.turn == nil {
+		t.Fatal("a completion from the active session must deliver")
+	}
+	if got := len(a.pendingSubAgentMailboxes); got != 1 {
+		t.Fatalf("len(pendingSubAgentMailboxes) = %d, want 1 for a matching-session completion", got)
+	}
 }

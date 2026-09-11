@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,43 +11,125 @@ import (
 	"time"
 
 	"github.com/keakon/golog/log"
-
-	"github.com/keakon/chord/internal/shell"
 )
 
 const maxOutputBytes = 10 * 1024 * 1024 // 10 MB cap
 
-// cappedWriter wraps a bytes.Buffer and stops accepting data after maxBytes,
-// but continues counting total bytes written so callers can report the overflow.
-type cappedWriter struct {
+// tailWriter keeps only the most recent maxBytes of command output while
+// counting every byte ever written. A reader that falls behind therefore still
+// sees the newest output — where failures usually land — instead of a stale
+// head, and the absolute cursors let it report how much it missed.
+type tailWriter struct {
 	mu       sync.Mutex
-	buf      bytes.Buffer
-	total    int64
+	buf      []byte
+	start    int   // index of the oldest retained byte within buf
+	base     int64 // absolute offset of buf[start] in the stream
+	total    int64 // absolute count of bytes accepted
 	maxBytes int64
+	wrote    chan struct{}
 }
 
-func (c *cappedWriter) Write(p []byte) (int, error) {
+func newTailWriter(maxBytes int64) *tailWriter {
+	if maxBytes < 1 {
+		maxBytes = 1
+	}
+	return &tailWriter{maxBytes: maxBytes, wrote: make(chan struct{}, 1)}
+}
+
+func (c *tailWriter) Write(p []byte) (int, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.total += int64(len(p))
-	if remaining := c.maxBytes - int64(c.buf.Len()); remaining > 0 {
-		if int64(len(p)) <= remaining {
-			c.buf.Write(p)
-		} else {
-			c.buf.Write(p[:remaining])
+	if int64(len(p)) >= c.maxBytes {
+		// This single write fills the whole window: keep only its last bytes.
+		c.buf = append(c.buf[:0], p[len(p)-int(c.maxBytes):]...)
+		c.start = 0
+		c.base = c.total + int64(len(p)) - c.maxBytes
+	} else {
+		c.buf = append(c.buf, p...)
+		if extra := int64(len(c.buf)-c.start) - c.maxBytes; extra > 0 {
+			// Drop the oldest bytes by moving the window start on instead of
+			// memmoving the whole window on every write. The abandoned prefix is
+			// reclaimed once it reaches half the window, which bounds the live
+			// length to 1.5x the window while keeping the slide O(1) amortized
+			// rather than O(window) per write. That bound is on len, not cap:
+			// append growth can leave the backing array at a larger historical
+			// peak, so a job's steady-state memory may exceed 1.5x.
+			c.start += int(extra)
+			c.base += extra
+			if c.start >= int(c.maxBytes)/2 {
+				kept := copy(c.buf, c.buf[c.start:])
+				c.buf = c.buf[:kept]
+				c.start = 0
+			}
 		}
+	}
+	c.total += int64(len(p))
+	c.mu.Unlock()
+	select {
+	case c.wrote <- struct{}{}:
+	default:
 	}
 	return len(p), nil
 }
 
-func (c *cappedWriter) String() string {
+// hasDataAfter reports whether output beyond the absolute cursor is retained.
+func (c *tailWriter) hasDataAfter(cursor int64) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	s := c.buf.String()
-	if c.total > c.maxBytes {
-		s += fmt.Sprintf("\n...(output truncated: showed %d of %d bytes total)", c.buf.Len(), c.total)
+	return c.total > cursor
+}
+
+// writeSignal fires whenever new output arrives, so a wait can sleep instead of
+// polling. It is edge-triggered and shared, and it is never closed, so callers
+// must re-check hasDataAfter before waiting.
+func (c *tailWriter) writeSignal() <-chan struct{} { return c.wrote }
+
+// readFrom returns the output after the absolute cursor, the cursor to pass to
+// the next read, and how many bytes the reader missed because they had already
+// been dropped from the window.
+func (c *tailWriter) readFrom(cursor int64) (string, int64, int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var dropped int64
+	if cursor < c.base {
+		dropped = c.base - cursor
+		cursor = c.base
 	}
-	return s
+	if cursor > c.total {
+		cursor = c.total
+	}
+	return string(c.buf[c.start+int(cursor-c.base):]), c.total, dropped
+}
+
+// tail returns up to the last maxLen bytes of retained output, how many earlier
+// bytes were dropped from the window, and whether the excerpt was cut.
+func (c *tailWriter) tail(maxLen int) (string, int64, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	retained := c.buf[c.start:]
+	truncated := maxLen > 0 && len(retained) > maxLen
+	if truncated {
+		retained = retained[len(retained)-maxLen:]
+	}
+	return string(retained), c.base, truncated
+}
+
+// raw returns the retained output with no truncation notice attached. Logic
+// that classifies output — runtime-failure classification, build-failure
+// sniffing — must read this rather than String: a model-facing notice is
+// decoration and must never feed output-sniffing.
+func (c *tailWriter) raw() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return string(c.buf[c.start:])
+}
+
+func (c *tailWriter) String() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.base == 0 {
+		return string(c.buf[c.start:])
+	}
+	return fmt.Sprintf("...(output truncated: showing the most recent %d of %d bytes)\n", len(c.buf)-c.start, c.total) + string(c.buf[c.start:])
 }
 
 // ShellTool executes shell commands.
@@ -63,80 +144,149 @@ func NewShellTool(shellType string) ShellTool {
 }
 
 type shellArgs struct {
-	Command     string `json:"command"`
-	Description string `json:"description,omitempty"`
-	Workdir     string `json:"workdir,omitempty"`
-	Timeout     *int   `json:"timeout,omitempty"`
+	Command         string `json:"command"`
+	Description     string `json:"description,omitempty"`
+	Workdir         string `json:"workdir,omitempty"`
+	TimeoutMs       *int   `json:"timeout_ms,omitempty"`
+	YieldMs         *int   `json:"yield_ms,omitempty"`
+	RunInBackground bool   `json:"run_in_background,omitempty"`
 }
+
+// killGracePeriod is how long a process group gets between SIGTERM and SIGKILL.
+// It is a var so tests can shorten the escalation wait without weakening the
+// production grace period.
+var killGracePeriod = 3 * time.Second
 
 const (
-	defaultTimeoutSec = 30
-	maxTimeoutSec     = 600
-	killGracePeriod   = 3 * time.Second
+	// ShellDefaultTimeoutMs is the hard wall-clock deadline applied when
+	// timeout_ms is omitted. It must be larger than the default foreground
+	// yield, otherwise a long command would be killed before it could be
+	// promoted to the background.
+	ShellDefaultTimeoutMs = 600_000
+	ShellMaxTimeoutMs     = 600_000
+	// ShellMaxBackgroundTimeoutMs caps timeout_ms for an explicitly detached
+	// job. Hour-scale work stays inside Chord (session/process lifetime is the
+	// real bound), while day-scale work belongs to an external runner
+	// (tmux/systemd/CI) because a session switch or client exit still kills
+	// jobs. Foreground commands keep ShellMaxTimeoutMs so a command that cannot
+	// be auto-promoted never blocks the turn for hours.
+	ShellMaxBackgroundTimeoutMs = 6 * 60 * 60 * 1000
+	// ShellDefaultYieldMs is how long a command may hold the foreground before
+	// it is promoted to a background job. 0 disables auto-promotion.
+	ShellDefaultYieldMs = 90_000
+	shellMaxYieldMs     = 600_000
 )
 
-const (
-	ShellDefaultTimeoutSec = defaultTimeoutSec
-	ShellMaxTimeoutSec     = maxTimeoutSec
-)
-
-type ShellTimeoutInfo struct {
-	RequestedSec int
-	EffectiveSec int
-	HasRequested bool
-	HasLimit     bool
-	UsesDefault  bool
-	Clamped      bool
+// shellTimeoutSecFromMs resolves the millisecond timeout_ms argument into the
+// second-granularity hard deadline the job registry consumes; 0 means "no hard
+// deadline". background selects the larger cap for an explicitly detached job;
+// foreground callers keep the tighter cap so a non-promotable command cannot
+// block the turn for hours.
+func shellTimeoutSecFromMs(timeoutMs *int, background bool) int {
+	if timeoutMs == nil {
+		if background {
+			// An explicitly detached job gets no default deadline. It is
+			// started precisely because nobody waits for it, and its real bound
+			// is the session/process lifetime; inheriting the foreground
+			// deadline would SIGKILL a service or watcher ten minutes in
+			// without the model ever asking for a deadline.
+			return 0
+		}
+		return ShellDefaultTimeoutMs / 1000
+	}
+	if *timeoutMs <= 0 {
+		return 0
+	}
+	maxMs := ShellMaxTimeoutMs
+	if background {
+		maxMs = ShellMaxBackgroundTimeoutMs
+	}
+	sec := (*timeoutMs + 999) / 1000
+	if limit := maxMs / 1000; sec > limit {
+		sec = limit
+	}
+	return sec
 }
 
-func ResolveShellTimeout(timeout *int) ShellTimeoutInfo {
-	if timeout == nil {
-		return ResolveShellTimeoutValue(0, false)
+// resolveShellYieldMs clamps the yield_ms argument; 0 or negative disables
+// auto-promotion.
+func resolveShellYieldMs(yieldMs *int) int {
+	if yieldMs == nil {
+		return ShellDefaultYieldMs
 	}
-	return ResolveShellTimeoutValue(*timeout, true)
+	if *yieldMs <= 0 {
+		return 0
+	}
+	if *yieldMs > shellMaxYieldMs {
+		return shellMaxYieldMs
+	}
+	return *yieldMs
 }
 
-func ResolveShellTimeoutValue(requestedSec int, hasTimeout bool) ShellTimeoutInfo {
-	info := ShellTimeoutInfo{
-		RequestedSec: requestedSec,
-		HasRequested: hasTimeout,
-		HasLimit:     true,
+// autoBackgroundAllowed reports whether a command may be promoted to the
+// background on its own. A command is pinned to the foreground only when
+// *every* one of its subcommands is a deliberate wait or a short git query:
+// promotion must never reward a sleep-wait, and a `git status` gains nothing
+// from a job handle. One promotable subcommand is enough to promote the whole
+// command — the shell description tells the model to chain dependent work with
+// `&&`, so the very common `go test ./... && git status` shape must not lose
+// promotion because of its trailing query. A command that does not parse cannot
+// be reasoned about as a single command, so it stays in the foreground.
+func autoBackgroundAllowed(command string) bool {
+	trimmed := strings.TrimSpace(command)
+	if trimmed == "" {
+		return false
 	}
-	if !hasTimeout || requestedSec <= 0 {
-		info.EffectiveSec = defaultTimeoutSec
-		info.UsesDefault = true
-		return info
+	analysis, err := AnalyzeShellCommand(trimmed)
+	if err != nil {
+		return false
 	}
-	info.EffectiveSec = requestedSec
-	if info.EffectiveSec > maxTimeoutSec {
-		info.EffectiveSec = maxTimeoutSec
-		info.Clamped = true
+	sawSubcommand := false
+	for _, subcommand := range analysis.Subcommands {
+		if len(subcommand.LiteralArgs) == 0 {
+			continue
+		}
+		sawSubcommand = true
+		if !foregroundOnlySubcommand(subcommand.LiteralArgs) {
+			return true
+		}
 	}
-	return info
+	// Nothing recognizable to reason about (every word came from an expansion)
+	// keeps the previous permissive behavior; a command made only of waits and
+	// short git queries has nothing worth a job handle.
+	return !sawSubcommand
 }
 
-func ResolveSpawnTimeout(timeout *int) ShellTimeoutInfo {
-	if timeout == nil {
-		return ResolveSpawnTimeoutValue(0, false)
+// foregroundOnlySubcommand reports whether one subcommand never justifies a
+// background job on its own: a deliberate sleep-wait, or a git operation that
+// is a short local query rather than a long transfer or repack.
+func foregroundOnlySubcommand(args []string) bool {
+	switch args[0] {
+	case "sleep":
+		return true
+	case "git":
+		return !longRunningGitSubcommand(args[1:])
+	default:
+		return false
 	}
-	return ResolveSpawnTimeoutValue(*timeout, true)
 }
 
-func ResolveSpawnTimeoutValue(requestedSec int, hasTimeout bool) ShellTimeoutInfo {
-	info := ShellTimeoutInfo{
-		RequestedSec: requestedSec,
-		HasRequested: hasTimeout,
+// longRunningGitSubcommand reports whether a git invocation names one of the
+// operations that legitimately runs for minutes — network transfers and
+// repository maintenance — so it may be promoted like any other long command.
+// The check scans every word rather than locating the subcommand position,
+// because global options (`-c k=v`, `-C dir`, `--git-dir=...`) sit in between.
+// The trade-off is that a literal payload such as `git commit -m clone` also
+// matches; that only makes a sub-second command eligible for a promotion it
+// will never reach, so a false positive here is harmless.
+func longRunningGitSubcommand(args []string) bool {
+	for _, arg := range args {
+		switch arg {
+		case "clone", "fetch", "pull", "push", "submodule", "gc", "fsck", "repack", "bundle", "filter-branch":
+			return true
+		}
 	}
-	if !hasTimeout || requestedSec <= 0 {
-		return info
-	}
-	info.HasLimit = true
-	info.EffectiveSec = requestedSec
-	if info.EffectiveSec > maxTimeoutSec {
-		info.EffectiveSec = maxTimeoutSec
-		info.Clamped = true
-	}
-	return info
+	return false
 }
 
 func (ShellTool) Name() string { return NameShell }
@@ -151,16 +301,21 @@ func (ShellTool) ConcurrencyPolicy(_ json.RawMessage) ConcurrencyPolicy {
 
 // ConcurrencySafeReadOnly admits a narrow allowlist of side-effect-free shell
 // commands (no metacharacters) so they can batch alongside other read-only
-// tools. Everything else falls back to the exclusive ConcurrencyPolicy.
+// tools. Detached calls are excluded: starting a job is a process side effect,
+// not a read. Everything else falls back to the exclusive ConcurrencyPolicy.
 func (ShellTool) ConcurrencySafeReadOnly(args json.RawMessage) bool {
 	return shellReadOnlyCommandAllowed(args)
 }
 
 func shellReadOnlyCommandAllowed(args json.RawMessage) bool {
 	var parsed struct {
-		Command string `json:"command"`
+		Command         string `json:"command"`
+		RunInBackground bool   `json:"run_in_background"`
 	}
 	if err := json.Unmarshal(unwrapToolArgs(args), &parsed); err != nil {
+		return false
+	}
+	if parsed.RunInBackground {
 		return false
 	}
 	command := strings.TrimSpace(parsed.Command)
@@ -172,7 +327,31 @@ func shellReadOnlyCommandAllowed(args json.RawMessage) bool {
 		return false
 	}
 	switch fields[0] {
-	case "pwd", "ls", "cat", "which":
+	case "pwd", "ls", "cat", "which", "head", "tail", "wc", "stat", "file", "du", "df":
+		if fields[0] == "tail" {
+			for _, f := range fields[1:] {
+				// A follow-mode tail never returns; cover --follow[=mode] and
+				// short-option clusters such as -fn, not only the bare forms.
+				if strings.HasPrefix(f, "--follow") {
+					return false
+				}
+				if strings.HasPrefix(f, "-") && !strings.HasPrefix(f, "--") && strings.ContainsAny(f, "fF") {
+					return false
+				}
+			}
+		}
+		if fields[0] == "file" {
+			for _, f := range fields[1:] {
+				// `file -C/--compile` writes magic.mgc (in the current
+				// directory, or next to the -m path), so it is not a read.
+				if f == "--compile" || strings.HasPrefix(f, "--compile=") {
+					return false
+				}
+				if strings.HasPrefix(f, "-") && !strings.HasPrefix(f, "--") && strings.Contains(f[1:], "C") {
+					return false
+				}
+			}
+		}
 		return true
 	case "git":
 		if len(fields) < 2 {
@@ -262,14 +441,11 @@ func shellToolDescription(visible map[string]struct{}, shellType string) string 
 	}
 	parts = append(parts,
 		"Do not use shell redirection, heredocs, inline scripts, or `rm` as the default way to edit, write, or delete files when dedicated file tools are unavailable.",
-		"This tool is exclusively for foreground execution — all background process management uses the spawn tool.",
-		"If this turn needs the command's stdout/stderr, use this tool.",
-		"For long one-shot commands whose result is needed before continuing, use shell with an explicit timeout rather than spawn.",
-		"Only set timeout when you need a value other than the default 30s.",
+		"This tool also runs background jobs. Set run_in_background:true for services or work you do not need to wait for; the call returns a job id immediately and job_output/job_list/job_kill manage it.",
+		"Long one-shot commands (builds, test suites) are promoted to a background job after the yield budget (default 90s) and keep running; you will be notified when they finish. Do not sleep-wait or busy-poll — do independent work, or end your turn and wait for the notification.",
+		"Dependent commands must run in order: chain them in one call with `&&` or `;`, or wait for the previous result. A background job runs concurrently with other tool calls, so never start a command that depends on a job's output before that job finishes.",
+		"Only set timeout_ms when you need a hard deadline other than the foreground default of 600000ms — a job started with run_in_background:true has none until you set one, and accepts up to 21600000 for hour-scale work; only set yield_ms when you need a foreground budget other than the default 90000ms.",
 	)
-	if _, ok := visible[NameSpawn]; ok {
-		parts = append(parts, "For processes that must run independently of the current turn, use spawn instead.")
-	}
 	return strings.Join(parts, "\n")
 }
 
@@ -308,9 +484,17 @@ func (ShellTool) Parameters() map[string]any {
 				"type":        "string",
 				"description": "Working directory the command runs in. Omit it to run in the current Working directory — do not prefix the command with `cd`; set workdir only when the command must run somewhere else. Relative paths resolve from it, except `~` for the current user's home directory.",
 			},
-			"timeout": map[string]any{
+			"timeout_ms": map[string]any{
 				"type":        "integer",
-				"description": "Optional execution timeout in seconds (max 600); only set this field if you need a value other than the default 30 seconds.",
+				"description": "Optional hard deadline in milliseconds. A foreground command defaults to 600000 (10m); a job started with run_in_background:true has no deadline unless you set one. Capped at 600000 for a foreground command and at 21600000 (6h) when run_in_background is true; 0 means no deadline, which suits long-running services — a foreground command that cannot be promoted to a job still keeps the default deadline.",
+			},
+			"yield_ms": map[string]any{
+				"type":        "integer",
+				"description": "Optional foreground budget in milliseconds before the command continues as a background job (max 600000, default 90000). 0 keeps the command in the foreground until it finishes or hits timeout_ms.",
+			},
+			"run_in_background": map[string]any{
+				"type":        "boolean",
+				"description": "Set true to start the command as a background job without waiting (services, watchers, or work you do not need before continuing). Returns a job id; manage it with job_output, job_list, and job_kill.",
 			},
 		},
 		"required":             []string{"command"},
@@ -325,11 +509,14 @@ func (t ShellTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 	if err := json.Unmarshal(raw, &a); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
-	if a.Command == "" {
+	if strings.TrimSpace(a.Command) == "" {
 		return "", fmt.Errorf("command is required")
 	}
-	if a.Timeout != nil && *a.Timeout <= 0 {
-		return "", fmt.Errorf("timeout must be a positive integer")
+	if a.TimeoutMs != nil && *a.TimeoutMs < 0 {
+		return "", fmt.Errorf("timeout_ms must not be negative")
+	}
+	if a.YieldMs != nil && *a.YieldMs < 0 {
+		return "", fmt.Errorf("yield_ms must not be negative")
 	}
 	if a.Description != "" {
 		log.Debugf("shell tool description=%v command=%v", a.Description, a.Command)
@@ -339,64 +526,134 @@ func (t ShellTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 		return "", finding.Error()
 	}
 
-	timeoutInfo := ResolveShellTimeout(a.Timeout)
-	timeout := time.Duration(timeoutInfo.EffectiveSec) * time.Second
-
-	// Use the detected shell type to construct the correct command.
-	binary, args := resolveShellExecution(t.shellType, a.Command)
-	cmd := exec.Command(binary, args...)
-	_, _ = configureCommandProcessGroup(cmd)
 	resolvedWorkdir, err := resolveCommandWorkdir(a.Workdir, t.BaseDir)
 	if err != nil {
 		return "", err
 	}
-	if resolvedWorkdir != "" {
-		cmd.Dir = resolvedWorkdir
+	var logDir string
+	if sessionDir := SessionDirFromContext(ctx); sessionDir != "" {
+		logDir = sessionJobLogsDir(sessionDir)
 	}
-	buf := &cappedWriter{maxBytes: maxOutputBytes}
-	cmd.Stdout = buf
-	cmd.Stderr = buf
-	// ShellTool is intentionally non-interactive. Leaving Stdin nil makes Go
-	// connect the child process to the null device instead of the TUI stdin.
-	cmd.Env = appendNonInteractiveEnv(nil)
-	if err := cmd.Start(); err != nil {
-		return "", fmt.Errorf("starting command: %w", err)
+	// A foreground command must always be bounded by one of the two mechanisms
+	// below: a hard deadline, or a yield budget that hands it to a background
+	// job. With neither, the wait after start would block the turn until the
+	// process exits. Both are resolved before the job starts so the deadline can
+	// be decided with the yield budget in hand.
+	promotable := false
+	if !a.RunInBackground {
+		promotable = autoBackgroundAllowed(a.Command)
 	}
-
+	yieldBudget := time.Duration(0)
+	if yieldMs := resolveShellYieldMs(a.YieldMs); yieldMs > 0 && promotable {
+		yieldBudget = time.Duration(yieldMs) * time.Millisecond
+	}
+	timeoutSec := shellTimeoutSecFromMs(a.TimeoutMs, a.RunInBackground)
+	if timeoutSec > 0 && time.Duration(timeoutSec)*time.Second <= yieldBudget {
+		// The explicit deadline is tighter than the yield window, so promotion
+		// would race the deadline and only ever hand back an about-to-die job.
+		yieldBudget = 0
+	}
+	if !a.RunInBackground && timeoutSec <= 0 && yieldBudget <= 0 {
+		// timeout_ms: 0 asks for "no deadline", which only an explicitly
+		// detached job may have. A foreground command reaches here when it
+		// cannot be promoted (no yield timer would ever hand it off) or when
+		// promotion was switched off with yield_ms: 0, so it keeps the default
+		// cap rather than blocking the turn until the process exits.
+		timeoutSec = ShellDefaultTimeoutMs / 1000
+	}
+	job, err := globalJobRegistry.start(ctx, jobStartRequest{
+		Command:     a.Command,
+		Description: strings.TrimSpace(a.Description),
+		Workdir:     resolvedWorkdir,
+		TimeoutSec:  timeoutSec,
+		ShellType:   t.shellType,
+		LogDir:      logDir,
+		Detached:    a.RunInBackground,
+	})
+	if err != nil {
+		return "", err
+	}
 	started := time.Now()
-	doneCh := make(chan error, 1)
-	go func() { doneCh <- cmd.Wait() }()
-
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-
-	select {
-	case err := <-doneCh:
-		// Classify and format from the raw output; the duration note is
-		// model-facing decoration and must not feed output-sniffing logic.
-		raw := buf.String()
-		output := appendShellDurationNote(raw, time.Since(started))
-		if err != nil {
-			if ClassifyNonInteractiveRuntimeFailure(a.Command, err, raw) != nil {
-				return output, FormatNonInteractiveRuntimeError(NameShell, a.Command, err, raw)
-			}
-			if exitErr, ok := err.(*exec.ExitError); ok {
-				return output, shellExitErrorForCommand(a.Command, exitErr, raw)
-			}
-			return output, fmt.Errorf("command error: %w", err)
-		}
-		return output, nil
-	case <-timer.C:
-		_ = terminateCommandProcessGroup(cmd)
-		guidance := "Do not re-run the same command unchanged: either narrow it to the relevant subset, raise timeout if the command legitimately needs longer, or use spawn for background execution."
-		if timeoutInfo.EffectiveSec >= maxTimeoutSec {
-			guidance = "This is the maximum shell timeout: do not re-run the same command unchanged. Narrow it to the relevant subset (for example one package or test), or use spawn to run the long command in the background and poll its output."
-		}
-		return killProcessGroup(cmd, buf, fmt.Sprintf("timed out after %ds", timeoutInfo.EffectiveSec), guidance, doneCh)
-	case <-ctx.Done():
-		_ = terminateCommandProcessGroup(cmd)
-		return killProcessGroup(cmd, buf, "cancelled", "", doneCh)
+	if a.RunInBackground {
+		return backgroundJobHandle(job, "started in the background"), nil
 	}
+
+	if yieldBudget > 0 {
+		timer := time.NewTimer(yieldBudget)
+		defer timer.Stop()
+		select {
+		case <-job.done:
+			return t.foregroundResult(job, started)
+		case <-ctx.Done():
+			globalJobRegistry.kill(job.ID, "cancelled")
+			<-job.done
+			return t.cancelledResult(job)
+		case <-timer.C:
+			if !job.detach() {
+				<-job.done
+				return t.foregroundResult(job, started)
+			}
+			return backgroundJobHandle(job, fmt.Sprintf("exceeded the %ds foreground budget", int(yieldBudget/time.Second))), nil
+		}
+	}
+	select {
+	case <-job.done:
+		return t.foregroundResult(job, started)
+	case <-ctx.Done():
+		globalJobRegistry.kill(job.ID, "cancelled")
+		<-job.done
+		return t.cancelledResult(job)
+	}
+}
+
+func (t ShellTool) foregroundResult(j *job, started time.Time) (string, error) {
+	// Cleaned on the way out like a job_output read: the same command promoted
+	// to a job comes back stripped, so a foreground result must not be the only
+	// path that can hand raw escape sequences and redrawn progress to the model.
+	output := cleanJobOutputText(j.outputString())
+	// A deadline kill is reported through j.exitErr ("timed out after Ns"), and
+	// its wall-clock span includes the process-group teardown grace period, so a
+	// duration note here would contradict the error the model already sees.
+	if !j.isKilled() {
+		elapsed := time.Since(started)
+		output = appendShellDurationNote(output, elapsed)
+		output = appendShellCostNote(output, j.Command, elapsed)
+	}
+	// j.exitErr is published by finish() under j.mu after close(j.done); the
+	// foreground path observes it through that happens-before, but reading it
+	// here under the lock keeps the dependency explicit and robust if that sync
+	// ever changes.
+	j.mu.Lock()
+	err := j.exitErr
+	j.mu.Unlock()
+	return output, err
+}
+
+func (t ShellTool) cancelledResult(j *job) (string, error) {
+	output := cleanJobOutputText(j.outputString())
+	return output, fmt.Errorf("command cancelled after output:\n%s", truncateForError(output, 500))
+}
+
+// backgroundJobHandle is the model-facing text returned when a command is still
+// running after the foreground budget. It names the job, tells the model not to
+// wait or poll, and warns that the job now runs concurrently.
+func backgroundJobHandle(j *job, reason string) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "[background job %s] %s\n", j.ID, reason)
+	fmt.Fprintf(&sb, "status: %s\n", j.statusText())
+	if j.LogFile != "" {
+		fmt.Fprintf(&sb, "log_file: %s\n", j.LogFile)
+	}
+	if j.MaxRuntimeSec > 0 {
+		// A detached job only carries a deadline when the caller asked for one,
+		// so the model must be told: a silent SIGKILL mid-run is otherwise
+		// indistinguishable from a crash.
+		fmt.Fprintf(&sb, "deadline: %ds from start, then it is killed\n", j.MaxRuntimeSec)
+	}
+	sb.WriteString("The command keeps running and its output will not be lost. You will be notified when it finishes; do not sleep-wait or busy-poll.\n")
+	sb.WriteString("It may run concurrently with other tool calls: do not start a command that depends on its output before it completes.\n")
+	fmt.Fprintf(&sb, "Do independent work or end your turn; read incremental output with job_output(%s).", j.ID)
+	return sb.String()
 }
 
 // shellDurationNoteMin is the minimum elapsed time before a completed command's
@@ -415,20 +672,45 @@ func appendShellDurationNote(output string, elapsed time.Duration) string {
 	return output + fmt.Sprintf("\n(command took %.1fs)", elapsed.Seconds())
 }
 
-// resolveShellExecution returns the binary and args to execute command in the
-// detected shell. Falls back to bash for unknown shell types.
-func resolveShellExecution(shellType, command string) (string, []string) {
-	st := shell.ParseShellType(shellType)
-	binary, args := shell.GetShellCommand(st, command)
-	return binary, args
+// shellCostNoteMin is the elapsed time above which a successful verification
+// command gets an explicit cost note. Together with the failure-path guidance,
+// this is the feedback loop that lets the model weigh a full re-run against a
+// narrower check before spending the time again.
+const shellCostNoteMin = 60 * time.Second
+
+// shellTimeoutGuidance is appended to a deadline kill. Without it a timeout
+// invites the same command unchanged, which would hit the same deadline again;
+// promotion means a long but legitimate command belongs in a background job.
+const shellTimeoutGuidance = "Do not re-run the same command unchanged: narrow it to the relevant subset, raise timeout_ms, or start it with run_in_background: true so it keeps running while you do other work."
+
+func appendShellCostNote(output, command string, elapsed time.Duration) string {
+	if elapsed < shellCostNoteMin || !isTestOrVerificationCommand(command) {
+		return output
+	}
+	return output + fmt.Sprintf("\n(cost: this verification ran %.0fs — narrow it next time (single package, -run filter), or delegate long checks so you can keep working)", elapsed.Seconds())
+}
+
+// exitSignalName returns the signal that terminated a command, or "" when the
+// error is not a signal-terminated exit, so the job status detail and the shell
+// error agree on the wording.
+func exitSignalName(err error) string {
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok {
+		return ""
+	}
+	status, ok := exitErr.Sys().(syscall.WaitStatus)
+	if !ok || !status.Signaled() {
+		return ""
+	}
+	return status.Signal().String()
 }
 
 func shellExitErrorForCommand(command string, exitErr *exec.ExitError, output string) error {
 	if exitErr == nil {
 		return fmt.Errorf("command failed")
 	}
-	if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {
-		return fmt.Errorf("signal: %s", status.Signal())
+	if name := exitSignalName(exitErr); name != "" {
+		return fmt.Errorf("signal: %s", name)
 	}
 	msg := fmt.Sprintf("exit code %d", exitErr.ExitCode())
 	if isTestOrVerificationCommand(command) {
@@ -511,32 +793,6 @@ func isTestOrVerificationArgs(args []string) bool {
 	default:
 		return false
 	}
-}
-
-// killProcessGroup sends SIGTERM (then SIGKILL) to the process group and
-// returns whatever output was captured along with an error. guidance, when
-// non-empty, is appended after the output excerpt to steer the model's next
-// step (timeouts otherwise invite an unchanged, equally slow re-run).
-func killProcessGroup(cmd *exec.Cmd, buf *cappedWriter, reason, guidance string, doneCh <-chan error) (string, error) {
-	pid := cmd.Process.Pid
-	_ = pid
-	_ = terminateCommandProcessGroup(cmd)
-	select {
-	case <-doneCh:
-	case <-time.After(killGracePeriod):
-		_ = forceTerminateCommandProcessGroup(cmd)
-		select {
-		case <-doneCh:
-		case <-time.After(killGracePeriod):
-			// Avoid hanging forever if the process refuses to die.
-		}
-	}
-	output := buf.String()
-	err := fmt.Errorf("command %s after output:\n%s", reason, truncateForError(output, 500))
-	if guidance != "" {
-		err = fmt.Errorf("%w\n%s", err, guidance)
-	}
-	return output, err
 }
 
 // truncateForError trims output for inclusion in error messages.

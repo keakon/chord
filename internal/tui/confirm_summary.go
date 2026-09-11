@@ -163,10 +163,12 @@ func confirmActionText(toolName string) string {
 	switch toolNameKey(toolName) {
 	case tools.NameShell:
 		return "Execute shell command"
-	case tools.NameSpawn:
-		return "Start background process"
-	case tools.NameSpawnStop:
-		return "Stop background process"
+	case tools.NameJobOutput:
+		return "Read background job output"
+	case tools.NameJobKill:
+		return "Stop background job"
+	case tools.NameJobList:
+		return "List background jobs"
 	case tools.NameApplyPatch:
 		return "Patch file"
 	case tools.NameEdit:
@@ -197,11 +199,11 @@ func confirmActionText(toolName string) string {
 
 func confirmRiskForTool(toolName string) confirmRiskLevel {
 	switch toolNameKey(toolName) {
-	case tools.NameShell, tools.NameSpawn, tools.NameSpawnStop:
+	case tools.NameShell, tools.NameJobKill:
 		return confirmRiskHigh
 	case tools.NameEdit, tools.NameApplyPatch, tools.NameWrite, tools.NameDelete:
 		return confirmRiskMedium
-	case tools.NameRead, tools.NameViewImage, tools.NameGrep, tools.NameGlob, tools.NameLsp, tools.NameWebFetch:
+	case tools.NameRead, tools.NameViewImage, tools.NameGrep, tools.NameGlob, tools.NameLsp, tools.NameWebFetch, tools.NameJobOutput, tools.NameJobList:
 		return confirmRiskLow
 	default:
 		return confirmRiskMedium
@@ -231,18 +233,40 @@ func buildBashConfirmSummary(summary *confirmSummary, parsed map[string]any) {
 	}
 	appendConfirmField(&summary.Fields, newConfirmField("Workdir", workdir, true))
 
-	requestedTimeout, ok := confirmInt(parsed, "timeout")
-	handled["timeout"] = true
-	if !ok {
-		requestedTimeout = 0
+	capMs := tools.ShellMaxTimeoutMs
+	if runInBackground, ok := confirmBool(parsed, "run_in_background"); ok && runInBackground {
+		capMs = tools.ShellMaxBackgroundTimeoutMs
+	}
+	handled["timeout_ms"] = true
+	if timeoutMs, ok := confirmInt(parsed, "timeout_ms"); ok && timeoutMs > 0 {
+		effectiveMs := timeoutMs
+		if effectiveMs > capMs {
+			effectiveMs = capMs
+		}
+		appendConfirmField(&summary.Fields, newConfirmField("Timeout", formatShellMs(effectiveMs), true))
+		if timeoutMs > capMs {
+			summary.Warnings = append(summary.Warnings, fmt.Sprintf("Requested timeout %s capped to %s", formatShellMs(timeoutMs), formatShellMs(capMs)))
+		} else if timeoutMs > 60_000 {
+			summary.Warnings = append(summary.Warnings, fmt.Sprintf("Long timeout configured (%s)", formatShellMs(timeoutMs)))
+		}
+	} else if ok {
+		appendConfirmField(&summary.Fields, newConfirmField("Timeout", "no deadline", true))
+	} else {
+		appendConfirmField(&summary.Fields, newConfirmField("Timeout", formatShellMs(tools.ShellDefaultTimeoutMs), true))
 	}
 
-	timeoutInfo := tools.ResolveShellTimeoutValue(requestedTimeout, ok)
-	appendConfirmField(&summary.Fields, newConfirmField("Timeout", fmt.Sprintf("%ds", timeoutInfo.EffectiveSec), true))
-	if timeoutInfo.Clamped {
-		summary.Warnings = append(summary.Warnings, fmt.Sprintf("Requested timeout %ds capped to %ds", timeoutInfo.RequestedSec, timeoutInfo.EffectiveSec))
-	} else if timeoutInfo.EffectiveSec > 60 {
-		summary.Warnings = append(summary.Warnings, fmt.Sprintf("Long timeout configured (%ds)", timeoutInfo.EffectiveSec))
+	handled["yield_ms"] = true
+	if yieldMs, ok := confirmInt(parsed, "yield_ms"); ok {
+		if yieldMs > 0 {
+			appendConfirmField(&summary.Fields, newConfirmField("Foreground yield", formatShellMs(yieldMs), true))
+		} else {
+			appendConfirmField(&summary.Fields, newConfirmField("Foreground yield", "none (no promotion)", true))
+		}
+	}
+
+	if background, ok := confirmBool(parsed, "run_in_background"); ok {
+		handled["run_in_background"] = true
+		appendConfirmField(&summary.Fields, newConfirmField("Run in background", confirmYesNo(background), true))
 	}
 
 	appendUnhandledConfirmFields(summary, parsed, handled)
@@ -381,7 +405,7 @@ func buildWebFetchConfirmSummary(summary *confirmSummary, parsed map[string]any)
 }
 
 func buildGenericConfirmSummary(summary *confirmSummary, parsed map[string]any) {
-	priority := []string{"path", "paths", "patterns", "includes", "reason", "url", "command", "workdir", "timeout", "limit", "offset", "pattern"}
+	priority := []string{"path", "paths", "patterns", "includes", "reason", "url", "command", "workdir", "job_id", "timeout_ms", "yield_ms", "wait", "timeout", "limit", "offset", "pattern"}
 	seen := map[string]bool{}
 	for _, key := range priority {
 		value, ok := parsed[key]

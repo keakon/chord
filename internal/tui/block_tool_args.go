@@ -97,7 +97,7 @@ func (b *Block) toolHeaderMeta() (paramSummary, mainPart, grayPart, collapsedMai
 	if !b.toolHeaderCacheParamLinesOK {
 		paramVals := vals
 		switch b.ToolName {
-		case tools.NameRead, tools.NameViewImage, tools.NameDelete, tools.NameGrep, tools.NameGlob, tools.NameShell, tools.NameSpawn, tools.NameLsp:
+		case tools.NameRead, tools.NameViewImage, tools.NameDelete, tools.NameGrep, tools.NameGlob, tools.NameShell, tools.NameLsp:
 			paramVals = cloneToolValsWithDisplayDirs(b, vals)
 		}
 		b.toolHeaderCacheParamLines = append(b.toolHeaderCacheParamLines[:0], extractToolParamsLinesWithParsed(b.ToolName, keys, paramVals)...)
@@ -408,17 +408,8 @@ func formatToolHeaderPartsWithParsed(toolName string, keys []string, vals map[st
 			return "", ""
 		}
 		return mainPart, grayPart
-	case tools.NameSpawn:
-		cmd := firstDisplayLine(vals["command"])
-		if cmd == "" {
-			return "", ""
-		}
-		if d := vals["description"]; d != "" {
-			return cmd, "(" + d + ")"
-		}
-		return cmd, ""
-	case tools.NameSpawnStop:
-		if id := vals["id"]; id != "" {
+	case tools.NameJobOutput, tools.NameJobKill:
+		if id := vals["job_id"]; id != "" {
 			return id, ""
 		}
 		return "", ""
@@ -513,7 +504,7 @@ func (b *Block) formatToolHeaderPartsWithParsed(keys []string, vals map[string]s
 			return b.displayToolPath(filePaths[0]), gray
 		}
 		return fmt.Sprintf("%d files", len(filePaths)), gray
-	case tools.NameGrep, tools.NameGlob, tools.NameShell, tools.NameSpawn, tools.NameWebFetch, tools.NameSkill:
+	case tools.NameGrep, tools.NameGlob, tools.NameShell, tools.NameWebFetch, tools.NameSkill:
 		mainPart, grayPart := formatToolHeaderPartsWithParsed(b.ToolName, keys, cloneToolValsWithDisplayDirs(b, vals))
 		if b.ToolName == tools.NameGrep {
 			if diagMain, diagGray := b.grepDiagnosticHeaderParts(vals); diagMain != "" || diagGray != "" {
@@ -544,6 +535,12 @@ func (b *Block) formatToolHeaderPartsWithParsed(keys []string, vals map[string]s
 			}
 		}
 		return mainPart, grayPart
+	case tools.NameJobOutput, tools.NameJobKill, tools.NameJobList:
+		// The job id is the subject; ignored or invalid arguments fold into
+		// the option group so a schema-broken call keeps the same header shape
+		// as a valid one.
+		mainPart, _ = formatToolHeaderPartsWithParsed(b.ToolName, keys, vals)
+		return mainPart, mergeHeaderOptions("", b.diagnosticHeaderOptions())
 	default:
 		return formatToolHeaderPartsWithParsed(b.ToolName, keys, vals)
 	}
@@ -619,7 +616,7 @@ func (b *Block) formatToolHeaderParamsWithParsed(keys []string, vals map[string]
 			return summary + " " + gray
 		}
 		return summary
-	case tools.NameGrep, tools.NameGlob, tools.NameShell, tools.NameSpawn, tools.NameLsp:
+	case tools.NameGrep, tools.NameGlob, tools.NameShell, tools.NameLsp:
 		return b.toolHeaderParamsWithDisplayDirs(vals)
 	default:
 		return formatToolHeaderParamsWithParsed(b.ToolName, b.headerParamSummaryKeys(keys, vals), vals)
@@ -712,20 +709,8 @@ func formatToolHeaderParamsWithParsed(toolName string, keys []string, vals map[s
 			return cmd
 		}
 		return cmd + " (" + gray + ")"
-	case tools.NameSpawn:
-		cmd := firstDisplayLine(vals["command"])
-		if cmd == "" {
-			return ""
-		}
-		if runewidth.StringWidth(cmd) > 55 {
-			cmd = runewidth.Truncate(cmd, 55, "…")
-		}
-		if d := vals["description"]; d != "" {
-			return cmd + " (" + d + ")"
-		}
-		return cmd
-	case tools.NameSpawnStop:
-		if id := vals["id"]; id != "" {
+	case tools.NameJobOutput, tools.NameJobKill:
+		if id := vals["job_id"]; id != "" {
 			return id
 		}
 		return ""

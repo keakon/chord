@@ -523,7 +523,7 @@ func validCompactionSummaryForTest(history string) string {
 // summarizeCompactionHeadForTest invokes summarizeCompactionHead with the
 // continuation profile defaults previously baked into the deleted 2-arg wrapper.
 func summarizeCompactionHeadForTest(a *MainAgent, head []message.Message, historyPath string) (summary string, modelRef string, err error) {
-	summary, _, modelRef, err = a.summarizeCompactionHead(context.Background(), head, historyPath, nil, nil, a.GetTodos(), a.taskInfosForCompaction(), spawnStatesForSnapshot(), compactionAnchors{})
+	summary, _, modelRef, err = a.summarizeCompactionHead(context.Background(), head, historyPath, nil, nil, a.GetTodos(), a.taskInfosForCompaction(), jobStatesForSnapshot(), compactionAnchors{})
 	return summary, modelRef, err
 }
 
@@ -4979,7 +4979,6 @@ func TestBuildCompactionPromptIncludesBackgroundObjects(t *testing.T) {
 		[]recovery.BackgroundObjectState{{
 			ID:            "job-1",
 			AgentID:       "builder-2",
-			Kind:          "job",
 			Description:   "Run production build",
 			Command:       "npm test --watch",
 			StartedAt:     time.Unix(1700000000, 0),
@@ -4995,9 +4994,6 @@ func TestBuildCompactionPromptIncludesBackgroundObjects(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "agent=builder-2") {
 		t.Fatalf("prompt missing background object agent routing info:\n%s", prompt)
-	}
-	if !strings.Contains(prompt, "kind=job") {
-		t.Fatalf("prompt missing background object kind:\n%s", prompt)
 	}
 	if !strings.Contains(prompt, "max_runtime=300s") {
 		t.Fatalf("prompt missing background object max runtime:\n%s", prompt)
@@ -5239,17 +5235,17 @@ func TestCleanupStalePendingCompactions(t *testing.T) {
 	}
 }
 
-func TestSpawnFinishedEventHandledImmediatelyDuringCompaction(t *testing.T) {
+func TestJobFinishedEventHandledImmediatelyDuringCompaction(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerManual, continuationPlan{kind: compactionResumeIdle})
-	payload := &tools.SpawnFinishedPayload{BackgroundID: "job-1", AgentID: a.instanceID, Kind: "job", Status: "finished (exit 0)", Message: "background finished"}
-	a.dispatch(Event{Type: EventSpawnFinished, SourceID: "main", Payload: payload})
+	payload := &tools.JobFinishedPayload{BackgroundID: "job-1", AgentID: a.instanceID, Status: "completed (exit code 0)", Message: "[Background job job-1 finished]\n\nStatus: completed (exit code 0)"}
+	a.dispatch(Event{Type: EventJobFinished, SourceID: "main", Payload: payload})
 
 	// Events are no longer queued behind compaction.
-	// With no active turn, spawn-finished starts a new turn immediately.
+	// With no active turn, job-finished starts a new turn immediately.
 	if a.turn == nil {
-		t.Fatal("expected spawn-finished to start a turn immediately during compaction")
+		t.Fatal("expected job-finished to start a turn immediately during compaction")
 	}
 	if got := len(a.pendingUserMessages); got != 0 {
 		t.Fatalf("len(pendingUserMessages) = %d, want 0", got)
@@ -7211,7 +7207,6 @@ func TestSummarizeCompactionHeadSendsExactlyTheBudgetedInputs(t *testing.T) {
 	for i := range 80 {
 		backgroundObjects = append(backgroundObjects, recovery.BackgroundObjectState{
 			ID:          fmt.Sprintf("bg-%d", i),
-			Kind:        "server",
 			Description: strings.Repeat(fmt.Sprintf("background job %d detail ", i), 40),
 			Command:     "chord headless --port 4000",
 		})
@@ -7279,7 +7274,7 @@ func TestFitCompactionInputReturnsTheInputsUsedForPromptAssembly(t *testing.T) {
 	}
 	backgroundObjects := make([]recovery.BackgroundObjectState, 0, 40)
 	for i := range 40 {
-		backgroundObjects = append(backgroundObjects, recovery.BackgroundObjectState{ID: fmt.Sprintf("bg-%d", i), Kind: "server", Description: strings.Repeat(fmt.Sprintf("background job %d detail ", i), 20), Command: "chord headless"})
+		backgroundObjects = append(backgroundObjects, recovery.BackgroundObjectState{ID: fmt.Sprintf("bg-%d", i), Description: strings.Repeat(fmt.Sprintf("background job %d detail ", i), 20), Command: "chord headless"})
 	}
 
 	const contextLimit = 16384

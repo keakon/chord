@@ -124,8 +124,9 @@ func isFileAttributionNeutralTool(name string) bool {
 		tools.NameSaveArtifact,
 		tools.NameReadArtifact,
 		tools.NameViewImage,
-		tools.NameSpawnStatus,
-		tools.NameSpawnStop:
+		tools.NameJobOutput,
+		tools.NameJobList,
+		tools.NameJobKill:
 		return true
 	default:
 		return false

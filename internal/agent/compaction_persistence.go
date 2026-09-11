@@ -594,8 +594,8 @@ func nextHistoryIndexMinusOne(sessionDir string) int {
 	return next - 1
 }
 
-func spawnStatesForSnapshot() []recovery.BackgroundObjectState {
-	jobs := tools.SnapshotSpawnedProcesses()
+func jobStatesForSnapshot() []recovery.BackgroundObjectState {
+	jobs := tools.SnapshotJobs()
 	if len(jobs) == 0 {
 		return nil
 	}
@@ -604,7 +604,6 @@ func spawnStatesForSnapshot() []recovery.BackgroundObjectState {
 		states = append(states, recovery.BackgroundObjectState{
 			ID:            job.ID,
 			AgentID:       job.AgentID,
-			Kind:          job.Kind,
 			Description:   job.Description,
 			Command:       job.Command,
 			StartedAt:     job.StartedAt,

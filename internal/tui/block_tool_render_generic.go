@@ -75,6 +75,12 @@ func appendBashCollapsedSummary(result *[]string, b *Block, vals map[string]stri
 		return
 	}
 	if !b.toolResultIsError() && !b.toolResultIsCancelled() {
+		// A successful background start must still surface its job id: it is
+		// the handle every later job_output / job_kill call needs, and the
+		// collapsed card hides the result body that carries it.
+		if id := parseJobResultID(b.ResultContent); id != "" {
+			*result = append(*result, toolSummaryLine("Background job "+id))
+		}
 		return
 	}
 	// The description belongs to the call, not to the outcome, so it stays on

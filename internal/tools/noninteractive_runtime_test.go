@@ -138,51 +138,43 @@ func TestShellRuntimeFailureIgnoresTestCommandTextInArgument(t *testing.T) {
 	}
 }
 
-func TestSpawnRuntimeFailureDiagnosticInCompletionEvent(t *testing.T) {
-	resetSpawnRegistryOnlyForTest(t)
+func TestJobRuntimeFailureDiagnosticInCompletionEvent(t *testing.T) {
+	resetJobRegistryOnlyForTest(t)
 	sender := &recordingEventSender{ch: make(chan any, 1)}
 	ctx := WithEventSender(context.Background(), sender)
-	_, err := NewSpawnTool("").Execute(ctx, mustMarshal(t, map[string]any{
-		"command":     "printf 'fatal: could not read Username for https://example.invalid: terminal prompts disabled\n' >&2; exit 128",
-		"description": "runtime prompt failure",
-		"timeout":     5,
-	}))
+	_, err := ExecuteJobForTest(ctx, "printf 'fatal: could not read Username for https://example.invalid: terminal prompts disabled\n' >&2; exit 128", "runtime prompt failure", new(5))
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	select {
 	case payload := <-sender.ch:
-		finished, ok := payload.(*SpawnFinishedPayload)
+		finished, ok := payload.(*JobFinishedPayload)
 		if !ok {
-			t.Fatalf("payload type = %T, want *SpawnFinishedPayload", payload)
+			t.Fatalf("payload type = %T, want *JobFinishedPayload", payload)
 		}
-		for _, want := range []string{"non-interactive Spawn failure", "terminal prompts disabled", "exit code 128"} {
+		for _, want := range []string{"terminal prompts disabled", "exit code 128"} {
 			if !strings.Contains(finished.Status+finished.Message, want) {
 				t.Fatalf("finished status/message = %q / %q, want %q", finished.Status, finished.Message, want)
 			}
 		}
 	case <-time.After(3 * time.Second):
-		t.Fatal("timed out waiting for spawn completion event")
+		t.Fatal("timed out waiting for job completion event")
 	}
 }
 
-func TestSpawnOrdinaryFailureCompletionPreservesRelevantOutput(t *testing.T) {
-	resetSpawnRegistryOnlyForTest(t)
+func TestJobOrdinaryFailureCompletionPreservesRelevantOutput(t *testing.T) {
+	resetJobRegistryOnlyForTest(t)
 	sender := &recordingEventSender{ch: make(chan any, 1)}
 	ctx := WithEventSender(context.Background(), sender)
-	_, err := NewSpawnTool("").Execute(ctx, mustMarshal(t, map[string]any{
-		"command":     "printf 'stdout line\n'; printf 'stderr line\n' >&2; exit 7",
-		"description": "ordinary failure with output",
-		"timeout":     5,
-	}))
+	_, err := ExecuteJobForTest(ctx, "printf 'stdout line\n'; printf 'stderr line\n' >&2; exit 7", "ordinary failure with output", new(5))
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	select {
 	case payload := <-sender.ch:
-		finished, ok := payload.(*SpawnFinishedPayload)
+		finished, ok := payload.(*JobFinishedPayload)
 		if !ok {
-			t.Fatalf("payload type = %T, want *SpawnFinishedPayload", payload)
+			t.Fatalf("payload type = %T, want *JobFinishedPayload", payload)
 		}
 		if !strings.Contains(finished.Status, "exit code 7") {
 			t.Fatalf("finished status = %q, want exit code 7", finished.Status)
@@ -195,13 +187,13 @@ func TestSpawnOrdinaryFailureCompletionPreservesRelevantOutput(t *testing.T) {
 		if strings.Contains(finished.Message, "finished: finished") {
 			t.Fatalf("finished message repeated terminal wording: %q", finished.Message)
 		}
-		for _, want := range []string{"[Job ", " result]", "Status: finished (error:"} {
+		for _, want := range []string{"[Background job ", "Status: failed (exit code 7)"} {
 			if !strings.Contains(finished.Message, want) {
 				t.Fatalf("finished message = %q, want canonical field %q", finished.Message, want)
 			}
 		}
 	case <-time.After(3 * time.Second):
-		t.Fatal("timed out waiting for spawn completion event")
+		t.Fatal("timed out waiting for job completion event")
 	}
 }
 

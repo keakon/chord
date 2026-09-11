@@ -570,8 +570,8 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 			subTools.Register(t)
 		default:
 			// A task's write scope never removes command tools from the
-			// worker: shell/spawn side effects cannot be path-validated, so
-			// their availability follows the role's permission rules alone (a
+			// worker: shell side effects cannot be path-validated, so their
+			// availability follows the role's permission rules alone (a
 			// wildcard deny keeps them out of the registry).
 			if cfg.Ruleset.IsDisabled(t.Name()) {
 				continue
@@ -1406,14 +1406,6 @@ func (e *subAgentEventSender) SendAgentEvent(eventType, sourceID string, payload
 				log.Warnf("sub-agent notification progress rejected agent=%v", s.instanceID)
 			}
 		}
-	}
-	if eventType == EventSpawnFinished || eventType == "background_object_finished" {
-		s.parent.sendEvent(Event{
-			Type:     EventSpawnFinished,
-			SourceID: sourceID,
-			Payload:  payload,
-		})
-		return
 	}
 	s.parent.sendEvent(Event{
 		Type:     eventType,

@@ -14,9 +14,9 @@ const (
 	NameGlob           = toolname.Glob
 	NameWebFetch       = toolname.WebFetch
 	NameShell          = toolname.Shell
-	NameSpawn          = toolname.Spawn
-	NameSpawnStatus    = toolname.SpawnStatus
-	NameSpawnStop      = toolname.SpawnStop
+	NameJobOutput      = toolname.JobOutput
+	NameJobList        = toolname.JobList
+	NameJobKill        = toolname.JobKill
 	NameLsp            = toolname.Lsp
 	NameTodoWrite      = toolname.TodoWrite
 	NameQuestion       = toolname.Question

@@ -19,12 +19,8 @@ func visibleLLMTools(registry *toolpkg.Registry, ruleset permission.Ruleset, kee
 	}
 
 	filtered := make([]toolpkg.Tool, 0, len(allTools))
-	spawnDisabled := ruleset.IsDisabled(toolpkg.NameSpawn)
 	for _, tool := range allTools {
 		name := toolpkg.NormalizeName(tool.Name())
-		if (name == toolpkg.NameSpawnStop || name == toolpkg.NameSpawnStatus) && spawnDisabled {
-			continue
-		}
 		if controlled, ok := tool.(toolpkg.RulesetAwareVisibilityTool); ok && !controlled.VisibleWithRuleset(ruleset) {
 			continue
 		}
@@ -58,12 +54,41 @@ func visibleLLMTools(registry *toolpkg.Registry, ruleset permission.Ruleset, kee
 		if !keepInternal(name) && disabled {
 			continue
 		}
+		// The job management tools only read and stop jobs that shell starts,
+		// so a ruleset that disables shell hides them too. A non-wildcard rule
+		// naming the tool is the ruleset author asking for it directly and
+		// overrides the coupling: a worker with shell denied may still be
+		// granted job_output to read a job its owner started.
+		if jobManagementTool(name) && ruleset.IsDisabled(toolpkg.NameShell) && !jobManagementToolRequested(ruleset, name) {
+			continue
+		}
 		if available, ok := tool.(toolpkg.AvailableTool); ok && !available.IsAvailable() {
 			continue
 		}
 		filtered = append(filtered, tool)
 	}
 	return filtered
+}
+
+// jobManagementTool reports whether name is one of the background-job
+// management tools, which are only useful alongside shell.
+func jobManagementTool(name string) bool {
+	switch name {
+	case toolpkg.NameJobOutput, toolpkg.NameJobList, toolpkg.NameJobKill:
+		return true
+	default:
+		return false
+	}
+}
+
+// jobManagementToolRequested reports whether a non-wildcard rule targets the
+// tool, i.e. the ruleset author asked for it by name. The last such rule wins,
+// so a later `job_output: deny` turns an earlier allow back off (and IsDisabled
+// hides the tool first anyway). An allow or ask rule both count as the grant: a
+// `job_output: ask` rule still means the user wants the tool on the surface,
+// just confirmed per call.
+func jobManagementToolRequested(ruleset permission.Ruleset, toolName string) bool {
+	return specificToolRuleAction(ruleset, toolName, permission.ActionDeny) != permission.ActionDeny
 }
 
 func filterVisibleTools(tools []toolpkg.Tool, deny func(string) bool) []toolpkg.Tool {

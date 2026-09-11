@@ -10,6 +10,7 @@ const backgroundResultCardTitle = "JOB RESULT"
 type parsedBackgroundResult struct {
 	id          string
 	description string
+	command     string
 	status      string
 	residual    []string
 	output      []string
@@ -42,6 +43,9 @@ func formatSingleBackgroundResult(raw, id, status, command, description string) 
 	}
 	if strings.TrimSpace(status) == "" {
 		status = parsed.status
+	}
+	if strings.TrimSpace(command) == "" {
+		command = parsed.command
 	}
 	if strings.TrimSpace(description) == "" {
 		description = parsed.description
@@ -76,7 +80,7 @@ func formatSingleBackgroundResult(raw, id, status, command, description string) 
 	lines := []string{headline, statusLine}
 	for _, line := range parsed.residual {
 		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.EqualFold(trimmed, "background finished") || strings.EqualFold(trimmed, "Review this result before continuing.") {
+		if trimmed == "" {
 			continue
 		}
 		if commandDurationNote(trimmed) != "" {
@@ -137,8 +141,19 @@ func parseBackgroundResult(raw string) parsedBackgroundResult {
 			parsed.output = append(parsed.output, line)
 			continue
 		}
+		if value, ok := cutBackgroundResultField(trimmed, "Purpose:"); ok {
+			parsed.description = value
+			continue
+		}
 		if value, ok := cutBackgroundResultField(trimmed, "Description:"); ok {
 			parsed.description = value
+			continue
+		}
+		if value, ok := cutBackgroundResultField(trimmed, "Command:"); ok {
+			parsed.command = value
+			continue
+		}
+		if _, ok := cutBackgroundResultField(trimmed, "Kind:"); ok {
 			continue
 		}
 		if value, ok := cutBackgroundResultField(trimmed, "Status:"); ok {
@@ -184,13 +199,13 @@ func isBackgroundResultHeader(line string) bool {
 		return false
 	}
 	lower := strings.ToLower(line)
-	return strings.Contains(lower, "job ") || strings.Contains(lower, "service ") || strings.Contains(lower, "background ")
+	return strings.Contains(lower, "job ") || strings.Contains(lower, "background ")
 }
 
 func backgroundResultIDFromHeader(line string) string {
 	for field := range strings.FieldsSeq(strings.Trim(strings.TrimSpace(line), "[]")) {
 		candidate := strings.Trim(field, " :,;")
-		if strings.HasPrefix(candidate, "job-") || strings.HasPrefix(candidate, "svc-") {
+		if strings.HasPrefix(candidate, "job-") {
 			return candidate
 		}
 	}
@@ -202,6 +217,9 @@ func backgroundResultStatusLine(status string) (string, string) {
 	lower := strings.ToLower(status)
 	if strings.Contains(lower, "cancel") {
 		return "•", "Cancelled"
+	}
+	if code, ok := backgroundResultExitCode(lower); ok && code == 0 {
+		return "✓", "Completed successfully"
 	}
 	if strings.Contains(lower, "error") || strings.Contains(lower, "failed") || strings.Contains(lower, "timed out") || strings.Contains(lower, "exit status") || strings.Contains(lower, "exit code") {
 		detail := backgroundResultErrorDetail(status)
@@ -219,6 +237,31 @@ func backgroundResultStatusLine(status string) (string, string) {
 	return "•", status
 }
 
+// backgroundResultExitCode extracts the exit code from a status line such as
+// "completed (exit code 0)" or "failed (exit status 7)". Success text contains
+// the same "exit code" marker as the failure branch, so the code must be
+// parsed and checked before generic error-substring matching.
+func backgroundResultExitCode(lower string) (int, bool) {
+	for _, prefix := range []string{"exit code ", "exit status ", "exit "} {
+		idx := strings.Index(lower, prefix)
+		if idx < 0 {
+			continue
+		}
+		rest := lower[idx+len(prefix):]
+		end := 0
+		for end < len(rest) && rest[end] >= '0' && rest[end] <= '9' {
+			end++
+		}
+		if end == 0 {
+			continue
+		}
+		if code, err := strconv.Atoi(rest[:end]); err == nil {
+			return code, true
+		}
+	}
+	return 0, false
+}
+
 func backgroundResultErrorDetail(status string) string {
 	detail := strings.TrimSpace(status)
 	lower := strings.ToLower(detail)
@@ -230,6 +273,13 @@ func backgroundResultErrorDetail(status string) string {
 	const errorPrefix = "error:"
 	if strings.HasPrefix(lower, errorPrefix) {
 		return strings.TrimSpace(detail[len(errorPrefix):])
+	}
+	// Terminal status text is "failed (...)" or "killed (...)"; the headline
+	// glyph already says the job did not succeed, so show only the detail.
+	for _, verb := range []string{"failed (", "killed ("} {
+		if strings.HasPrefix(lower, verb) && strings.HasSuffix(detail, ")") {
+			return strings.TrimSpace(detail[len(verb) : len(detail)-1])
+		}
 	}
 	return detail
 }

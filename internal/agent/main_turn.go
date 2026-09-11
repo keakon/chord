@@ -118,6 +118,11 @@ func pendingUserMessageText(p pendingUserMessage) string {
 
 func (a *MainAgent) recordCommittedUserMessage(userMsg message.Message) {
 	a.ctxMgr.Append(userMsg)
+	if message.IsUserAuthored(userMsg) {
+		// Fresh user input resets the consecutive-wake budget, so the bound
+		// only applies to a back-to-back chain with no user in the loop.
+		a.consecutiveIdleWakes.Store(0)
+	}
 	a.trackObservedFileParts(userMsg.Parts)
 	a.recordEvidenceFromMessage(userMsg)
 	if a.usageLedger != nil {

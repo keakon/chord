@@ -19,6 +19,8 @@ Typical permission states:
 
 Rules are keyed by tool name; the full list of built-in tool names is in [Built-in tools](./tools.md).
 
+A rule that names a tool which no longer exists matches nothing. For example, the `spawn`, `spawn_status`, and `spawn_stop` tools were removed in favor of background `shell` jobs plus the `job_output`, `job_list`, and `job_kill` tools — a `spawn*` permission rule therefore no longer matches any registered tool. See the CHANGELOG for the full migration notes before reusing an old `spawn*` rule.
+
 In the TUI confirmation dialog, `M` opens the add-rule picker for the current tool call; press `Enter` in that picker to save the selected rule and allow the current call. For `delete`, the picker suggests reusable parent-directory rules instead of one-off exact-file rules. Directories covering more paths that still need approval appear first, `*` (any delete path) is always available, and `**` (anything under the current working directory) is also available when every requested path is inside that directory. The broad `**` and `*` choices are never selected by default.
 
 Permissions can be defined in Agent config. Start with this recommended personal-development template, then tighten or relax it for your project's risk profile:
@@ -123,18 +125,18 @@ A command-specific `allow` does, however, cover the full capability of that comm
 
 ## Shell / shell risk
 
-`shell` can execute system commands and should be treated carefully. `shell` and `spawn` are intentionally non-interactive: Chord does not wire model-controlled stdin into child processes, Unix child processes run without a controlling TTY, and high-confidence interactive commands are rejected before execution. Plain stdin reads such as shell `read`/`select` observe EOF instead of waiting for model input; provide data explicitly with a pipe, here-doc, file, or arguments when a command expects input. Login wizards, terminal editors, pagers/full-screen TUIs, password prompts, and commands that require `/dev/tty` should be run manually in a real terminal or rewritten with explicit non-interactive input/flags.
+`shell` can execute system commands and should be treated carefully. `shell` is intentionally non-interactive whether the command runs in the foreground or as a background job: Chord does not wire model-controlled stdin into child processes, Unix child processes run without a controlling TTY, and high-confidence interactive commands are rejected before execution. Plain stdin reads such as shell `read`/`select` observe EOF instead of waiting for model input; provide data explicitly with a pipe, here-doc, file, or arguments when a command expects input. Login wizards, terminal editors, pagers/full-screen TUIs, password prompts, and commands that require `/dev/tty` should be run manually in a real terminal or rewritten with explicit non-interactive input/flags.
 
-Platform notes for `shell` / `spawn`:
+Platform notes for `shell` (foreground or background job):
 
 - On Unix, Chord starts child processes in a new session and cleans up by process group on timeout/cancellation.
-- On Windows, Chord still keeps `shell` / `spawn` non-interactive, but there is no Unix-equivalent `setsid`/process-group control path here; timeout/cancellation cleanup falls back to direct process termination and may be less complete for descendant processes.
+- On Windows, Chord still keeps `shell` non-interactive for foreground commands and background jobs, but there is no Unix-equivalent `setsid`/process-group control path here; timeout/cancellation cleanup falls back to direct process termination and may be less complete for descendant processes.
 
 Common rewrites:
 
 - Use `git commit -m "message"` or `git commit -F file` instead of editor-driven `git commit`
 - For amend flows that should preserve the existing message, use explicit non-editor forms such as `git commit --amend --no-edit` or `git commit --amend -C HEAD`
-- Avoid interactive Git patch workflows (`git add -p`, `git commit -p`, `git stash -p`) from `shell` / `spawn`; stage explicit pathspecs or run them manually
+- Avoid interactive Git patch workflows (`git add -p`, `git commit -p`, `git stash -p`) from `shell`; stage explicit pathspecs or run them manually
 - Remove TTY allocation flags from container commands (`docker exec -it`, `docker run -t`, `podman run -t`, `kubectl exec -it`) unless you are running them manually in a real terminal
 - Use `npm init -y` / `--yes` or provide all required options explicitly
 - Use `sudo -n` when you want sudo to fail non-interactively instead of prompting

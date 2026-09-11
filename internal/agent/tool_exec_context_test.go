@@ -21,6 +21,7 @@ func TestBuildToolExecContextInjectsProgressReporter(t *testing.T) {
 		"adhoc-1",
 		"/tmp/session",
 		toolExecContextEventSender{},
+		tools.JobAccess{MainAgentID: "main-1"},
 		func(evt AgentEvent) { emitted = append(emitted, evt) },
 	)
 

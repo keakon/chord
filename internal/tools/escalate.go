@@ -7,10 +7,10 @@ import (
 	"strings"
 )
 
-type SpawnFinishedPayload struct {
+type JobFinishedPayload struct {
 	BackgroundID  string
 	AgentID       string
-	Kind          string
+	SessionDir    string
 	Status        string
 	Command       string
 	Description   string
@@ -19,7 +19,7 @@ type SpawnFinishedPayload struct {
 	LogFile       string
 }
 
-func (p *SpawnFinishedPayload) EffectiveID() string {
+func (p *JobFinishedPayload) EffectiveID() string {
 	if p == nil {
 		return ""
 	}

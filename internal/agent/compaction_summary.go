@@ -163,7 +163,7 @@ func (a *MainAgent) compactionReductionScratch() *MainAgent {
 		tools:       a.tools,
 		projectRoot: a.projectRoot,
 		// The session dir is the reduction archive root. Without it, a
-		// non-rebuildable output (spawn / delegate / notify / question) that the
+		// non-rebuildable output (job_output / delegate / notify / question) that the
 		// main request archives in full would silently degrade to a lossy
 		// generic marker in the durable summary input. Archive writes are
 		// content-addressed, so the main request and this pass produce identical
@@ -1357,7 +1357,7 @@ func formatBackgroundObjectsForPrompt(jobs []recovery.BackgroundObjectState) str
 	}
 	var sb strings.Builder
 	for _, job := range jobs {
-		fmt.Fprintf(&sb, "- %s | agent=%s | kind=%s | status=%s | started=%s | desc=%s", job.ID, backgroundObjectPromptAgent(job.AgentID), backgroundObjectPromptKind(job.Kind), job.Status, job.StartedAt.Format(time.DateTime), backgroundObjectPromptDescription(job.Description, job.Command))
+		fmt.Fprintf(&sb, "- %s | agent=%s | status=%s | started=%s | desc=%s", job.ID, backgroundObjectPromptAgent(job.AgentID), job.Status, job.StartedAt.Format(time.DateTime), backgroundObjectPromptDescription(job.Description, job.Command))
 		if job.MaxRuntimeSec > 0 {
 			fmt.Fprintf(&sb, " | max_runtime=%ds", job.MaxRuntimeSec)
 		}
@@ -1374,13 +1374,6 @@ func backgroundObjectPromptAgent(agentID string) string {
 		return "main"
 	}
 	return agentID
-}
-
-func backgroundObjectPromptKind(kind string) string {
-	if strings.TrimSpace(kind) == "" {
-		return "job"
-	}
-	return kind
 }
 
 func backgroundObjectPromptDescription(description, fallbackCommand string) string {

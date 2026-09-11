@@ -33,7 +33,7 @@ func DetectInteractiveShellCommand(command string) *InteractiveCommandFinding {
 		return nil
 	}
 	if hasDirectTTYRedirection(tokens) {
-		return interactiveFinding("/dev/tty", "direct /dev/tty redirection requires a controlling terminal", "Shell and Spawn run without an interactive TTY; remove /dev/tty redirection and provide input explicitly.")
+		return interactiveFinding("/dev/tty", "direct /dev/tty redirection requires a controlling terminal", "The shell runs without an interactive TTY; remove /dev/tty redirection and provide input explicitly.")
 	}
 	commands := splitShellCommandTokensWithContext(tokens)
 	for _, cmd := range commands {
@@ -73,9 +73,9 @@ func detectInteractiveCommandTokens(tokens []string, hasPipelineInput bool, hasP
 
 	switch name {
 	case "stty":
-		return interactiveFinding("stty", "stty requires a terminal", "Use explicit terminal capability values, or avoid terminal-dependent queries in Shell/Spawn.")
+		return interactiveFinding("stty", "stty requires a terminal", "Use explicit terminal capability values, or avoid terminal-dependent queries in shell commands.")
 	case "tput":
-		return interactiveFinding("tput", "tput requires a terminal", "Use explicit terminal capability values, or avoid terminal-dependent queries in Shell/Spawn.")
+		return interactiveFinding("tput", "tput requires a terminal", "Use explicit terminal capability values, or avoid terminal-dependent queries in shell commands.")
 	case "sudo":
 		if hasOption(tokens[1:], "-n", "") || hasOption(tokens[1:], "--non-interactive", "") {
 			return nil
