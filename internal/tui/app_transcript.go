@@ -3,7 +3,9 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"hash/maphash"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -135,6 +137,9 @@ func (m *Model) rebuildViewportFromMessagesPreservingActivity(reason string, pre
 		m.viewport.sticky = true
 		replaceStarted := time.Now()
 		m.viewport.ReplaceBlocks(nil)
+		// The viewport is now empty, so it belongs to the current epoch: a later
+		// rebuild in this session must be able to adopt again.
+		m.viewportBlockEpoch = m.sessionTranscriptEpoch
 		replaceDuration := time.Since(replaceStarted)
 		recalcStarted := time.Now()
 		m.recalcViewportSize()
@@ -325,38 +330,124 @@ func (m *Model) rebuildBlocksFromMessages(msgs []message.Message) []*Block {
 			block.displayWorkingDir = m.workingDir
 		}
 	}
-	oldBlocks := m.viewport.blocks
-	if shouldResetRebuiltBlockIDsAfterCompaction(oldBlocks, blocks) {
-		limit := min(len(blocks), len(oldBlocks))
-		for i := range limit {
-			preserveRebuiltBlockState(oldBlocks[i], blocks[i])
-		}
-		m.nextBlockID = highestBlockID(blocks) + 1
-		return blocks
-	}
-	limit := min(len(blocks), len(oldBlocks))
-	for i := range limit {
-		blocks[i].ID = oldBlocks[i].ID
-		preserveRebuiltBlockState(oldBlocks[i], blocks[i])
-	}
-
-	nextFreshID := highestBlockID(oldBlocks) + 1
-	for i := limit; i < len(blocks); i++ {
-		blocks[i].ID = nextFreshID
-		nextFreshID++
-	}
-	if nextFreshID > m.nextBlockID {
-		m.nextBlockID = nextFreshID
-	}
+	m.adoptRebuiltBlockState(blocks)
 	return blocks
 }
 
-func shouldResetRebuiltBlockIDsAfterCompaction(oldBlocks, newBlocks []*Block) bool {
-	if len(oldBlocks) == 0 || len(newBlocks) == 0 {
-		return false
+// adoptRebuiltBlockState carries block IDs and per-card view state from the
+// transcript currently in the viewport onto a freshly rebuilt block list built
+// from the agent's messages. Cards are matched by durable identity, never by
+// position: a durable compaction replaces the archived head with a single
+// summary card, so every surviving row shifts and positional pairing would
+// copy one card's collapse / detail / focus / timing state onto a different
+// card (for example folding an Edit card that should stay expanded). Cards
+// with no identity match in the previous transcript — a rewritten transcript
+// or a brand-new card — keep their freshly built state and receive an unused
+// ID; repeated identities (for example the same text in two transcripts) still
+// pair, consumed in transcript order.
+//
+// Adoption is scoped to one session. A session switch leaves the outgoing
+// cards in the viewport, and their content can match the incoming transcript
+// exactly (the same first prompt, the same canned reply) without being the same
+// card, so a rebuild that crosses a session epoch adopts nothing.
+func (m *Model) adoptRebuiltBlockState(blocks []*Block) {
+	oldBlocks := m.viewport.blocks
+	if m.viewportBlockEpoch != m.sessionTranscriptEpoch {
+		oldBlocks = nil
 	}
-	return newBlocks[0] != nil && newBlocks[0].Type == BlockCompactionSummary &&
-		(oldBlocks[0] == nil || oldBlocks[0].Type != BlockCompactionSummary)
+	unmatched := make(map[string][]*Block, len(oldBlocks))
+	for _, old := range oldBlocks {
+		key := rebuiltBlockIdentityKey(old)
+		if key == "" {
+			continue
+		}
+		unmatched[key] = append(unmatched[key], old)
+	}
+	nextFreshID := max(m.nextBlockID, highestBlockID(oldBlocks)+1)
+	for _, block := range blocks {
+		if block == nil {
+			continue
+		}
+		key := rebuiltBlockIdentityKey(block)
+		if key != "" {
+			if queue := unmatched[key]; len(queue) > 0 {
+				old := queue[0]
+				unmatched[key] = queue[1:]
+				block.ID = old.ID
+				preserveRebuiltBlockState(old, block)
+				continue
+			}
+		}
+		block.ID = nextFreshID
+		nextFreshID++
+	}
+	m.nextBlockID = nextFreshID
+	m.viewportBlockEpoch = m.sessionTranscriptEpoch
+}
+
+// rebuiltBlockIdentitySeed salts the content digests below. It is generated
+// per process, which is enough because identities only pair blocks within a
+// single live transcript.
+var rebuiltBlockIdentitySeed = maphash.MakeSeed()
+
+// rebuiltBlockIdentityDigest keeps identity keys bounded: keying on the raw
+// content would copy the whole transcript on every rebuild, and a spilled card
+// does not hold its content at all.
+func rebuiltBlockIdentityDigest(content string) string {
+	return strconv.FormatUint(maphash.String(rebuiltBlockIdentitySeed, content), 16)
+}
+
+// rebuiltBlockIdentityKey returns the durable identity a card carries across a
+// transcript rebuild, or "" when the card has none and must be treated as new.
+// The identity is the card's own content or tool call ID, not its message
+// index: compaction shifts every surviving message index when the archived head
+// is replaced by the summary, so index-based matching would mispair rows.
+// Tool call IDs are unique per invocation; content keys are consumed one-to-one
+// in transcript order, which keeps repeated identical rows paired in order.
+// A cold card no longer holds Content, so it falls back to the identity
+// captured when it was spilled.
+func rebuiltBlockIdentityKey(block *Block) string {
+	if block == nil {
+		return ""
+	}
+	if block.spillCold && block.spillIdentityKey != "" {
+		return block.spillIdentityKey
+	}
+	switch block.Type {
+	case BlockToolCall:
+		if block.ToolID == "" {
+			return ""
+		}
+		return "tool\x00" + block.ToolID
+	case BlockCompactionSummary:
+		raw := strings.TrimSpace(block.CompactionSummaryRaw)
+		if raw == "" {
+			return ""
+		}
+		return "summary\x00" + rebuiltBlockIdentityDigest(raw)
+	case BlockUser:
+		if block.Content == "" {
+			return ""
+		}
+		return "user\x00" + block.AgentID + "\x00" + rebuiltBlockIdentityDigest(block.Content)
+	case BlockAssistant:
+		if block.Content == "" {
+			return ""
+		}
+		return "assistant\x00" + block.AgentID + "\x00" + rebuiltBlockIdentityDigest(block.Content)
+	case BlockThinking:
+		if block.Content == "" {
+			return ""
+		}
+		return "thinking\x00" + block.AgentID + "\x00" + rebuiltBlockIdentityDigest(block.Content)
+	case BlockStatus:
+		if block.StatusTitle == "" && block.Content == "" {
+			return ""
+		}
+		return "status\x00" + block.AgentID + "\x00" + block.StatusTitle + "\x00" + rebuiltBlockIdentityDigest(block.Content)
+	default:
+		return ""
+	}
 }
 
 func highestBlockID(blocks []*Block) int {

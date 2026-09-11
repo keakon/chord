@@ -193,12 +193,19 @@ type Model struct {
 	thinkingStreamBlockIndex int
 	nextBlockID              int
 	lastDisplaySequence      map[string]int
-	streamFlushGeneration    uint64
-	streamFlushScheduled     bool
-	streamFlushDelay         time.Duration
-	scrollFlushGeneration    uint64
-	scrollFlushScheduled     bool
-	pendingScrollDelta       int
+	// sessionTranscriptEpoch increments whenever the viewport is about to hold a
+	// different session's transcript; viewportBlockEpoch records the epoch the
+	// blocks currently in the viewport were built in. A rebuild that crosses an
+	// epoch must not adopt their IDs or view state — two sessions can carry
+	// identical content without being the same card.
+	sessionTranscriptEpoch uint64
+	viewportBlockEpoch     uint64
+	streamFlushGeneration  uint64
+	streamFlushScheduled   bool
+	streamFlushDelay       time.Duration
+	scrollFlushGeneration  uint64
+	scrollFlushScheduled   bool
+	pendingScrollDelta     int
 
 	selectionState
 
@@ -763,6 +770,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.startupRestorePending = false
 		if shouldResetRuntimeCache {
 			m.lastDisplaySequence = make(map[string]int)
+			// The viewport still holds the outgoing session's cards. Advancing
+			// the epoch retires them so the rebuild below matches nothing: two
+			// sessions can carry identical text without it being the same card,
+			// and adopting by content would lend a fresh card the outgoing one's
+			// ID, focus, and fold state.
+			m.sessionTranscriptEpoch++
 		}
 		var (
 			staleErr  error

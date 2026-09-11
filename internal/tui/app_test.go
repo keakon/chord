@@ -5093,11 +5093,17 @@ func TestRebuildAfterCompactionResetsVisibleCardNumbers(t *testing.T) {
 	if blocks[0].Type != BlockCompactionSummary {
 		t.Fatalf("blocks[0].Type = %v, want BlockCompactionSummary", blocks[0].Type)
 	}
-	if blocks[0].ID != 0 || blocks[1].ID != 1 {
-		t.Fatalf("rebuilt block IDs = [%d, %d], want [0, 1]", blocks[0].ID, blocks[1].ID)
+	// The rebuilt rows share no identity with the dropped transcript, so they
+	// get fresh IDs past the previous allocator high-water mark instead of
+	// reusing the archived cards' IDs.
+	if blocks[0].ID == blocks[1].ID || blocks[0].ID < 100 || blocks[1].ID < 100 {
+		t.Fatalf("rebuilt block IDs = [%d, %d], want fresh unique IDs >= 100", blocks[0].ID, blocks[1].ID)
 	}
-	if m.nextBlockID != 2 {
-		t.Fatalf("nextBlockID = %d, want 2", m.nextBlockID)
+	if m.nextBlockID <= max(blocks[0].ID, blocks[1].ID) {
+		t.Fatalf("nextBlockID = %d, want past rebuilt ids [%d, %d]", m.nextBlockID, blocks[0].ID, blocks[1].ID)
+	}
+	if blocks[0].DisplaySequence != 1 {
+		t.Fatalf("compaction summary display sequence = %d, want 1", blocks[0].DisplaySequence)
 	}
 	joined := stripANSI(strings.Join(blocks[0].Render(120, ""), "\n"))
 	if !strings.Contains(joined, "CONTEXT SUMMARY #1") {

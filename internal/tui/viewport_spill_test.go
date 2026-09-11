@@ -310,3 +310,63 @@ func TestViewportSpillMissingFileFallsBackWithoutCrash(t *testing.T) {
 		t.Fatalf("expected rebuilt content after spill file removal, got %q", block.Content)
 	}
 }
+
+func TestSpilledBlockKeepsIdentityAcrossRebuild(t *testing.T) {
+	content := strings.Repeat("alpha ", 600)
+
+	v := NewViewport(40, 4)
+	v.maxHotBytes = 1024
+	v.AppendBlock(&Block{ID: 7, Type: BlockAssistant, AgentID: "agent-1", Content: content})
+	v.AppendBlock(&Block{ID: 8, Type: BlockAssistant, Content: "tail"})
+	v.ScrollToBottom()
+	if !v.blocks[0].spillCold {
+		t.Fatalf("expected assistant block to spill, got spillCold=%v", v.blocks[0].spillCold)
+	}
+
+	fresh := &Block{Type: BlockAssistant, AgentID: "agent-1", Content: content}
+	m := &Model{viewport: v}
+	m.adoptRebuiltBlockState([]*Block{fresh})
+
+	if fresh.ID != 7 {
+		t.Fatalf("rebuilt card ID = %d, want 7: a spilled card must keep its identity", fresh.ID)
+	}
+}
+
+func TestSpillRecoveryRestoresRebuiltNonToolBlockContent(t *testing.T) {
+	content := strings.Repeat("alpha ", 600)
+
+	v := NewViewport(40, 4)
+	v.maxHotBytes = 1024
+	v.AppendBlock(&Block{ID: 7, Type: BlockAssistant, AgentID: "agent-1", Content: content})
+	v.AppendBlock(&Block{ID: 8, Type: BlockAssistant, Content: "tail"})
+	v.ScrollToBottom()
+	if !v.blocks[0].spillCold {
+		t.Fatalf("expected assistant block to spill, got spillCold=%v", v.blocks[0].spillCold)
+	}
+
+	// The production recovery closure rebuilds from the agent messages: fresh
+	// cards carry the full content and only take an ID when pairing matches
+	// them to a card already in the transcript.
+	m := &Model{viewport: v}
+	v.SetSpillRecovery(func() []*Block {
+		fresh := []*Block{{Type: BlockAssistant, AgentID: "agent-1", Content: content}}
+		m.adoptRebuiltBlockState(fresh)
+		return fresh
+	})
+
+	if err := v.spill.file.Close(); err != nil {
+		t.Fatalf("close spill file: %v", err)
+	}
+	v.spill.file = nil
+	if err := os.Remove(v.spill.path); err != nil {
+		t.Fatalf("remove spill file: %v", err)
+	}
+
+	block := v.GetFocusedBlock(7)
+	if block == nil {
+		t.Fatal("expected block after spill failure")
+	}
+	if block.Content != content {
+		t.Fatalf("recovered content = %q, want the rebuilt message content", block.Content)
+	}
+}

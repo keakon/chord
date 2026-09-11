@@ -83,6 +83,7 @@ func (s *ViewportSpillStore) Append(block *Block) (*BlockSpillRef, error) {
 	payloadBlock.spillSummary = ""
 	payloadBlock.spillLineCounts = nil
 	payloadBlock.spillCold = false
+	payloadBlock.spillIdentityKey = ""
 	payloadBlock.lastAccess = 0
 	payloadBlock.mdCache = nil
 	payloadBlock.mdCacheWidth = 0
@@ -357,6 +358,9 @@ func (v *Viewport) spillBlock(block *Block) bool {
 	}
 	block.spillRef = ref
 	block.spillStore = v.spill
+	// Capture the identity before clearing Content so a later transcript
+	// rebuild can still pair this cold card with its rebuilt counterpart.
+	block.spillIdentityKey = rebuiltBlockIdentityKey(block)
 	block.spillCold = true
 	block.Content = ""
 	block.ResultContent = ""

@@ -355,6 +355,10 @@ type Block struct {
 	spillSummary    string
 	spillLineCounts map[int]int
 	spillCold       bool
-	lastAccess      uint64
-	spillRecover    func(blockID int) *Block
+	// spillIdentityKey carries the card identity across a spill: spilling
+	// clears Content, so a cold card could otherwise not be paired with the
+	// card rebuilt from the agent messages.
+	spillIdentityKey string
+	lastAccess       uint64
+	spillRecover     func(blockID int) *Block
 }

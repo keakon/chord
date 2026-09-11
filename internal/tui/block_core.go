@@ -65,6 +65,7 @@ func cloneBlockForDeferredSource(src *Block) *Block {
 	clone.spillSummary = ""
 	clone.spillLineCounts = cloneLineCounts(src.spillLineCounts)
 	clone.spillCold = false
+	clone.spillIdentityKey = ""
 	clone.lastAccess = 0
 	clone.spillRecover = nil
 	return &clone
