@@ -10,8 +10,6 @@
 
 - 超时默认值也有变化：前台 `shell` 现在默认 90 秒后转入后台、`timeout_ms` 默认 10 分钟；而显式 `run_in_background: true` 且不传 `timeout_ms` 的 job 没有硬截止——与旧 `spawn` 的默认一致——传 `timeout_ms: 0` 只是把这一点写得更明确。这个参数同时改了名字和单位：`timeout` 以秒计（最大 600，默认 30），`timeout_ms` 以毫秒计（前台最大 600000，`run_in_background: true` 时最大 21600000；前台默认 600000）。未知参数会被忽略而不是报错，所以仍然传 `timeout: 60` 的调用不会失败——它会退回默认值，而不是原本想要的那 60 秒。请把所有 `timeout: N` 迁移为 `timeout_ms: N * 1000`。job 句柄和完成通知只在实际存在截止时才写出它。
 
-- `spawn` 已写入 `main.jsonl` 的后台结果在升级后仍能正常渲染：旧的 `job-N` ID 会保留在卡片上，旧的 `svc-N` ID 不会保留，已废弃的 `Review this result before continuing.` 一行会作为普通正文行显示。
-
 ### 新功能
 
 - `shell` 现在也能承担后台任务，长命令不必再阻塞当前回合。前台命令超过预算（`yield_ms`，默认 90 秒）会自动转成后台 job：输出会保留，job 结束时发通知唤醒 agent，它可以先做别的事，或结束回合并由完成通知叫醒。`run_in_background: true` 立即启动后台任务而不等待，`timeout_ms: 0` 启动无硬截止的服务型命令。前台命令的 `timeout_ms` 仍最多 10 分钟，`run_in_background: true` 时最多可设 6 小时。
@@ -20,7 +18,7 @@
 
 ### 改进
 
-- 工具卡片不再共用同一套折叠规则。`write`、`edit`、`apply_patch`、`todo_write`、`handoff` 现在和 `delete`、各类报告卡一样恒展开：正文本身——diff、todo 列表、计划路径——是模型产出的内容，因此不再显示 `▸` / `▾` 标记，`Space`、`Enter`、`o` 对它们不生效。`read`、`grep`、`glob`、`shell`、`cancel` 和通用工具调用默认收起，保留折叠开关。折叠后已经完整显示失败原因的卡片——例如只有一行的错误——同样不带标记、不能折叠；折叠的 `shell` 与 `job_list` 卡片把后台 job 句柄与任务数量标在标题行（`shell … · job-8`、`job_list · 3 jobs`）。
+- 工具卡片不再共用同一套折叠规则。`write`、`edit`、`apply_patch`、`todo_write`、`handoff` 现在和 `delete`、各类报告卡一样恒展开：正文本身——diff、todo 列表、计划路径——是模型产出的内容，因此不再显示 `▸` / `▾` 标记，`Space`、`Enter`、`o` 对它们不生效。`read`、`grep`、`glob`、`shell`、`cancel` 和通用工具调用默认收起，保留折叠开关。展开后也不会多出正文的卡片——收起时已经完全显示正文——同样不带标记、不能折叠；折叠的 `shell` 与 `job_list` 卡片把后台 job 句柄与任务数量标在标题行（`shell … · job-8`、`job_list · 3 jobs`）。
 - 结束的后台 `shell` 任务改用折叠的 `JOB RESULT` 卡片：默认每个 job 只保留标题行，只有失败、取消或耗时等标题行表达不了的状态才会再占一行；展开后显示完整的命令、状态与输出。
 - 运行期通知卡可折叠成徽标行：`LOOP NOTICE` / `LOOP CONTINUE`、`REPLY RESUMED` 和上下文压力卡片（`CONTEXT PRESSURE`、`COMPACT WARNING`、`COMPACT IMMINENT`）默认收起，只显示 `LOOP CONTINUE #2 ▸` 这样的徽标行，按 `Space`、`Enter` 或 `o` 展开全文。通用 `NOTICE` 默认展开，因为它承载命令回复（`/role status`、`/models status`、`/mcp status`）和运行期诊断，需要时可折叠成同样的徽标行。正文本身只有一行时不再显示标记，也不能折叠；子代理回报卡继续完整显示消息原文。
 

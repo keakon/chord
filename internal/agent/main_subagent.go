@@ -803,7 +803,7 @@ func (a *MainAgent) handleJobFinished(evt Event) {
 		Kind:        SubAgentMailboxKindBackgroundResult,
 		Priority:    SubAgentMailboxPriorityNotify,
 		MessageType: AgentMessageTypeNotice,
-		Summary:     a.backgroundResultContent(sub, payload),
+		Summary:     backgroundResultContent(payload),
 	}
 	if sub != nil {
 		mailbox.OwnerAgentID = sub.instanceID
@@ -827,17 +827,11 @@ func (a *MainAgent) handleJobFinished(evt Event) {
 
 // backgroundResultContent is the exact text stored on the durable
 // background_result row and later appended to the owner's transcript, so the
-// live card and the restored card derive from the same raw text. The main
-// owner also gets the shared transcript formatting; a sub-agent owner receives
-// its own report unchanged.
-func (a *MainAgent) backgroundResultContent(sub *SubAgent, payload *tools.JobFinishedPayload) string {
-	if sub == nil {
-		return a.mainBackgroundResultContent(payload)
-	}
-	if content := strings.TrimSpace(payload.Message); content != "" {
-		return content
-	}
-	return fmt.Sprintf("[Background job %s completed]\n\nDescription: %s\nStatus: %s", payload.EffectiveID(), payload.Description, payload.Status)
+// live card and the restored card derive from the same raw text. The job
+// registry is the only producer and always fills Message with the completion
+// report, so there is no fallback format to reconcile.
+func backgroundResultContent(payload *tools.JobFinishedPayload) string {
+	return strings.TrimSpace(payload.Message)
 }
 
 func backgroundCompletionToastLevel(status string) string {

@@ -199,12 +199,13 @@ func cutBackgroundResultField(line, field string) (string, bool) {
 	return strings.TrimSpace(line[len(field):]), true
 }
 
+// isBackgroundResultHeader matches the headline the job registry writes: a
+// single "[Background job <id> finished]" line. Anything else is ordinary
+// body text, so a card can only derive its background object id from the
+// current format.
 func isBackgroundResultHeader(line string) bool {
-	if len(line) < 2 || line[0] != '[' || line[len(line)-1] != ']' {
-		return false
-	}
-	lower := strings.ToLower(line)
-	return strings.Contains(lower, "job ") || strings.Contains(lower, "background ")
+	lower := strings.ToLower(strings.TrimSpace(line))
+	return strings.HasPrefix(lower, "[background job ") && strings.HasSuffix(lower, " finished]")
 }
 
 func backgroundResultIDFromHeader(line string) string {

@@ -47,7 +47,7 @@ func TestBackgroundResultStatusLineClassifiesProductionStatuses(t *testing.T) {
 func TestBackgroundResultAppendedEventAppendsDurableStatusBlock(t *testing.T) {
 	m := NewModelWithSize(nil, 120, 30)
 
-	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("builder-2", "subagent-1", "[Job job-1 finished]\n\nDescription: Run production build\nStatus: completed (exit code 0)")})
+	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("builder-2", "subagent-1", "[Background job job-1 finished]\n\nDescription: Run production build\nStatus: completed (exit code 0)")})
 
 	block, ok := m.viewport.FindStatusBlockByBackgroundObject("job-1")
 	if !ok {
@@ -74,7 +74,7 @@ func TestBackgroundResultAppendedEventAppendsDurableStatusBlock(t *testing.T) {
 	if strings.Contains(rendered, "Completed successfully") {
 		t.Fatalf("folded card repeats the success summary its ✓ glyph already shows:\n%s", rendered)
 	}
-	if strings.Contains(rendered, "[Job job-1 finished]") {
+	if strings.Contains(rendered, "[Background job job-1 finished]") {
 		t.Fatalf("rendered background result repeated raw header:\n%s", rendered)
 	}
 }
@@ -82,7 +82,7 @@ func TestBackgroundResultAppendedEventAppendsDurableStatusBlock(t *testing.T) {
 func TestBackgroundResultAppendedEventRendersFailureInBodyUnderStableLabel(t *testing.T) {
 	m := NewModelWithSize(nil, 120, 30)
 
-	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("", "subagent-2", "[Background job job-1 completed]\n\nDescription: Start integration service\nStatus: killed (timed out after 120s)\n\nRelevant output:\nINFO: Application startup complete.")})
+	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("", "subagent-2", "[Background job job-1 finished]\n\nDescription: Start integration service\nStatus: killed (timed out after 120s)\n\nRelevant output:\nINFO: Application startup complete.")})
 
 	block, ok := m.viewport.FindStatusBlockByBackgroundObject("job-1")
 	if !ok {
@@ -127,7 +127,7 @@ func TestBackgroundResultAppendedEventRendersFailureInBodyUnderStableLabel(t *te
 
 func TestBackgroundResultAppendedEventShowsCompactDurationButCopiesOriginalNote(t *testing.T) {
 	m := NewModelWithSize(nil, 120, 30)
-	raw := "[Job job-duration finished]\n\nDescription: Run tests\nStatus: completed (exit code 0)\n\nRelevant output:\nok\n(command took 17.1s)"
+	raw := "[Background job job-duration finished]\n\nDescription: Run tests\nStatus: completed (exit code 0)\n\nRelevant output:\nok\n(command took 17.1s)"
 	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("", "subagent-3", raw)})
 
 	block, ok := m.viewport.FindStatusBlockByBackgroundObject("job-duration")
@@ -151,7 +151,7 @@ func TestBackgroundResultAppendedEventShowsCompactDurationButCopiesOriginalNote(
 
 func TestBackgroundResultAppendedEventHighlightsMarkdownOutputFence(t *testing.T) {
 	m := NewModelWithSize(nil, 120, 30)
-	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("", "subagent-4", "[Job job-2 finished]\n\nDescription: Apply patch\nStatus: completed (exit code 0)\n\nRelevant output:\n"+
+	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("", "subagent-4", "[Background job job-2 finished]\n\nDescription: Apply patch\nStatus: completed (exit code 0)\n\nRelevant output:\n"+
 		"```diff\n--- a/main.go\n+++ b/main.go\n@@ -1 +1 @@\n-old\n+new\n```")})
 
 	block, ok := m.viewport.FindStatusBlockByBackgroundObject("job-2")
@@ -175,7 +175,7 @@ func TestMessagesToBlocksRestoresBackgroundResultCard(t *testing.T) {
 	blocks := messagesToBlocks([]message.Message{{
 		Role:    message.RoleUser,
 		Kind:    message.KindBackgroundResult,
-		Content: "[Job job-9 result]\n\nDescription: Run production build\nStatus: completed (exit code 0)",
+		Content: "[Background job job-9 finished]\n\nDescription: Run production build\nStatus: completed (exit code 0)",
 	}}, &nextID)
 
 	if len(blocks) != 1 {
@@ -189,7 +189,7 @@ func TestMessagesToBlocksRestoresBackgroundResultCard(t *testing.T) {
 		t.Fatal("restored background result card must start collapsed")
 	}
 	rendered := stripANSI(strings.Join(block.Render(100, ""), "\n"))
-	if !strings.Contains(rendered, "✓ ▸ job-9 · Run production build") || strings.Contains(rendered, "[Job job-9 result]") {
+	if !strings.Contains(rendered, "✓ ▸ job-9 · Run production build") || strings.Contains(rendered, "[Background job job-9 finished]") {
 		t.Fatalf("restored background result rendered incorrectly:\n%s", rendered)
 	}
 }
@@ -198,7 +198,7 @@ func TestBackgroundResultAppendedEventUpdatesExistingDurableStatusBlock(t *testi
 	m := NewModelWithSize(nil, 120, 30)
 	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockStatus, Content: "old", BackgroundObjectID: "job-7", AgentID: "builder-2"})
 
-	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("builder-2", "subagent-5", "[Job job-7 finished]\n\nDescription: Run backend tests\nStatus: completed (exit code 0)")})
+	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("builder-2", "subagent-5", "[Background job job-7 finished]\n\nDescription: Run backend tests\nStatus: completed (exit code 0)")})
 
 	block, ok := m.viewport.FindStatusBlockByBackgroundObject("job-7")
 	if !ok {
@@ -213,7 +213,7 @@ func TestBackgroundResultAppendedEventForMainAgentVisibleInMainView(t *testing.T
 	m := NewModelWithSize(nil, 120, 30)
 	m.viewport.SetFilter("main")
 
-	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("main", "subagent-6", "[Job job-3 finished]\n\nDescription: Run integration tests\nStatus: completed (exit code 0)")})
+	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("main", "subagent-6", "[Background job job-3 finished]\n\nDescription: Run integration tests\nStatus: completed (exit code 0)")})
 
 	block, ok := m.viewport.FindStatusBlockByBackgroundObject("job-3")
 	if !ok {
@@ -246,7 +246,7 @@ func TestBackgroundResultAppendedEventRemovesQueuedMailboxEntry(t *testing.T) {
 		t.Fatalf("len(mailboxQueue) = %d, want the queued result before delivery", got)
 	}
 
-	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("main", "subagent-7", "[Job job-4 finished]\n\nDescription: Run production build\nStatus: completed (exit code 0)")})
+	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("main", "subagent-7", "[Background job job-4 finished]\n\nDescription: Run production build\nStatus: completed (exit code 0)")})
 
 	if got := len(m.mailboxQueue); got != 0 {
 		t.Fatalf("len(mailboxQueue) = %d, want the delivered result removed from the pending area", got)
@@ -283,7 +283,7 @@ func jobResultCardCount(m Model) int {
 
 func TestBackgroundResultAppendedEventUsesMessageIDWhenHeadlineCarriesNoJobID(t *testing.T) {
 	m := NewModelWithSize(nil, 120, 30)
-	// No "[Job ...]" header, so the parser cannot derive a background object id.
+	// No "[Background job ...]" header, so the parser cannot derive a background object id.
 	raw := "Background job finished\n\nDescription: Run production build\nStatus: completed (exit code 0)"
 
 	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("builder-2", "subagent-a", raw)})
@@ -334,7 +334,7 @@ func TestBackgroundResultCardParsesPurposeAndCommand(t *testing.T) {
 
 func TestBackgroundResultCardFoldsOutputAndExpandsOnToggle(t *testing.T) {
 	m := NewModelWithSize(nil, 120, 30)
-	raw := "[Job job-fold finished]\n\nDescription: Run folded tests\nStatus: completed (exit code 0)\n\nRelevant output:\nline one\nline two"
+	raw := "[Background job job-fold finished]\n\nDescription: Run folded tests\nStatus: completed (exit code 0)\n\nRelevant output:\nline one\nline two"
 
 	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("", "subagent-fold", raw)})
 	block, ok := m.viewport.FindStatusBlockByBackgroundObject("job-fold")
@@ -390,58 +390,5 @@ func TestOnlyBackgroundResultStatusCardsFold(t *testing.T) {
 	job := &Block{Type: BlockStatus, StatusTitle: backgroundResultCardTitle, Content: "✓ job-1 · task\nfinished"}
 	if !job.ToggleAtWidth(100) || !job.Collapsed {
 		t.Fatal("JOB RESULT cards must fold")
-	}
-}
-
-// CHANGELOG.md's Breaking Changes promise what an already-persisted spawn result
-// renders as after the upgrade, and the filter that used to hide the retired
-// "Review this result before continuing." line was deliberately deleted rather
-// than kept as a compatibility shim. Pin both halves of that promise so the
-// documented behaviour cannot rot silently.
-func TestMessagesToBlocksRendersLegacySpawnResult(t *testing.T) {
-	legacyJob := "[Background job job-1 completed]\n\nDescription: Start integration service\n" +
-		"Status: finished (error: command timed out after 120s: exit status 143)\n" +
-		"Review this result before continuing.\n\nRelevant output:\nINFO: Application startup complete."
-	legacyService := "[Background svc-3 completed]\n\nDescription: Start dev server\n" +
-		"Status: finished\nReview this result before continuing."
-
-	nextID := 0
-	blocks := messagesToBlocks([]message.Message{
-		{Role: message.RoleUser, Kind: message.KindBackgroundResult, Content: legacyJob},
-		{Role: message.RoleUser, Kind: message.KindBackgroundResult, Content: legacyService},
-	}, &nextID)
-
-	if len(blocks) != 2 {
-		t.Fatalf("len(blocks) = %d, want 2", len(blocks))
-	}
-	jobBlock, serviceBlock := blocks[0], blocks[1]
-	if jobBlock.BackgroundObjectID != "job-1" {
-		t.Fatalf("legacy job id = %q, want job-1 kept", jobBlock.BackgroundObjectID)
-	}
-	if serviceBlock.BackgroundObjectID != "" {
-		t.Fatalf("legacy service id = %q, want the retired svc- prefix dropped", serviceBlock.BackgroundObjectID)
-	}
-	if serviceBlock.StatusTitle != backgroundResultCardTitle {
-		t.Fatalf("legacy service result must still render as a JOB RESULT card, got %q", serviceBlock.StatusTitle)
-	}
-
-	folded := stripANSI(strings.Join(jobBlock.Render(120, ""), "\n"))
-	for _, want := range []string{"job-1", "Start integration service", "Error: command timed out"} {
-		if !strings.Contains(folded, want) {
-			t.Fatalf("folded legacy card missing %q:\n%s", want, folded)
-		}
-	}
-	if strings.Contains(folded, "Review this result before continuing.") {
-		t.Fatalf("a folded card hides its body lines:\n%s", folded)
-	}
-
-	if !jobBlock.ToggleAtWidth(120) || jobBlock.Collapsed {
-		t.Fatal("toggling must expand the legacy card")
-	}
-	expanded := stripANSI(strings.Join(jobBlock.Render(120, ""), "\n"))
-	for _, want := range []string{"Review this result before continuing.", "INFO: Application startup complete."} {
-		if !strings.Contains(expanded, want) {
-			t.Fatalf("expanded legacy card missing %q:\n%s", want, expanded)
-		}
 	}
 }

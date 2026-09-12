@@ -87,7 +87,7 @@ func TestRestoreSkipsDeliveredBackgroundResult(t *testing.T) {
 		t.Fatalf("MkdirAll(subagents): %v", err)
 	}
 	const messageID = "background-job-1"
-	const content = "[Background job background-job-1 completed]\n\nDescription: Run production build\nStatus: completed (exit code 0)"
+	const content = "[Background job background-job-1 finished]\n\nDescription: Run production build\nStatus: completed (exit code 0)"
 	rm := recovery.NewRecoveryManager(sessionDir)
 	for _, msg := range []message.Message{
 		{Role: message.RoleUser, Content: "Investigate the flaky test"},

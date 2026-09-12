@@ -31,8 +31,8 @@ func TestBackgroundResultAppendedEventUpdatesExistingSpilledStatusBlockAndRecomp
 	}
 
 	messages := []string{
-		"[Job job-7 finished]\n\nDescription: Run backend tests with a much longer summary that wraps across multiple lines\nStatus: completed (exit code 0)",
-		"[Job job-7 finished]\n\nDescription: Run backend tests with a much longer summary that wraps across multiple lines and then appends extra details for diagnostics\nStatus: completed (exit code 0)",
+		"[Background job job-7 finished]\n\nDescription: Run backend tests with a much longer summary that wraps across multiple lines\nStatus: completed (exit code 0)",
+		"[Background job job-7 finished]\n\nDescription: Run backend tests with a much longer summary that wraps across multiple lines and then appends extra details for diagnostics\nStatus: completed (exit code 0)",
 	}
 	for _, msg := range messages {
 		_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("builder-2", "subagent-8", msg)})

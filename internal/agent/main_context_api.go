@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"fmt"
 	"path/filepath"
 	"strings"
 	"time"
@@ -213,21 +212,6 @@ func (a *MainAgent) KeyPoolNextTransition() time.Duration {
 		return 0
 	}
 	return client.KeyPoolNextTransitionForRef(ref)
-}
-
-func (a *MainAgent) mainBackgroundResultContent(payload *tools.JobFinishedPayload) string {
-	if payload == nil {
-		return ""
-	}
-	content := strings.TrimSpace(payload.Message)
-	if content != "" {
-		return content
-	}
-	desc := strings.TrimSpace(payload.Description)
-	if desc == "" {
-		desc = payload.Command
-	}
-	return fmt.Sprintf("[Background job %s completed]\n\nDescription: %s\nStatus: %s", payload.EffectiveID(), desc, payload.Status)
 }
 
 // SetSessionArtifactsDirFunc installs a callback that returns the active
