@@ -110,6 +110,37 @@ func TestCompactionRebuildPreservesThinkingCollapsedState(t *testing.T) {
 	}
 }
 
+func TestCompactionRebuildDoesNotAdoptAmbiguousDuplicateCardState(t *testing.T) {
+	backend := &sessionControlAgent{}
+	m := NewModelWithSize(backend, 120, 24)
+	m.viewport.AppendBlock(&Block{ID: 0, Type: BlockUser, Content: "first prompt"})
+	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockThinking, Content: "repeated reasoning", ThinkingCollapsed: true})
+	m.viewport.AppendBlock(&Block{ID: 2, Type: BlockThinking, Content: "repeated reasoning", ThinkingCollapsed: false})
+	m.nextBlockID = 3
+
+	backend.messages = []message.Message{
+		{Role: "user", IsCompactionSummary: true, Content: "[Context Summary]\nsummary\n\n[Context compressed]"},
+		{Role: "assistant", ThinkingBlocks: []message.ThinkingBlock{{Thinking: "repeated reasoning"}}},
+	}
+	m.rebuildViewportFromMessagesWithReason("session_restored")
+
+	var thinking *Block
+	for _, b := range m.viewport.visibleBlocks() {
+		if b != nil && b.Type == BlockThinking && b.Content == "repeated reasoning" {
+			thinking = b
+		}
+	}
+	if thinking == nil {
+		t.Fatal("rebuilt transcript lost the surviving duplicate thinking card")
+	}
+	if thinking.ID == 1 || thinking.ID == 2 {
+		t.Fatalf("ambiguous duplicate thinking card reused an old ID %d", thinking.ID)
+	}
+	if thinking.ThinkingCollapsed {
+		t.Fatal("ambiguous duplicate thinking card inherited an old collapsed state")
+	}
+}
+
 // A card with no counterpart in the previous transcript keeps the state the
 // builder gave it instead of borrowing the collapse state of the old card that
 // sat at the same index.

@@ -359,13 +359,28 @@ func (m *Model) adoptRebuiltBlockState(blocks []*Block) {
 	if m.viewportBlockEpoch != m.sessionTranscriptEpoch {
 		oldBlocks = nil
 	}
+	// A changed occurrence count means at least one duplicate row was added or
+	// removed, so transcript order cannot prove which old card survived.
 	unmatched := make(map[string][]*Block, len(oldBlocks))
+	oldKeyCounts := make(map[string]int, len(oldBlocks))
 	for _, old := range oldBlocks {
 		key := rebuiltBlockIdentityKey(old)
 		if key == "" {
 			continue
 		}
 		unmatched[key] = append(unmatched[key], old)
+		oldKeyCounts[key]++
+	}
+	newKeyCounts := make(map[string]int, len(blocks))
+	for _, block := range blocks {
+		if key := rebuiltBlockIdentityKey(block); key != "" {
+			newKeyCounts[key]++
+		}
+	}
+	for key, oldCount := range oldKeyCounts {
+		if oldCount != newKeyCounts[key] {
+			delete(unmatched, key)
+		}
 	}
 	nextFreshID := max(m.nextBlockID, highestBlockID(oldBlocks)+1)
 	for _, block := range blocks {
@@ -445,6 +460,12 @@ func rebuiltBlockIdentityKey(block *Block) string {
 		}
 		return "thinking\x00" + block.AgentID + "\x00" + rebuiltBlockIdentityDigest(block.Content)
 	case BlockStatus:
+		if block.MailboxMessageID != "" {
+			return "mailbox\x00" + block.AgentID + "\x00" + block.MailboxMessageID
+		}
+		if block.BackgroundObjectID != "" {
+			return "background\x00" + block.AgentID + "\x00" + block.BackgroundObjectID
+		}
 		if block.StatusTitle == "" && block.Content == "" {
 			return ""
 		}
@@ -685,6 +706,10 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 		case "user":
 			if msg.Kind == message.KindBackgroundResult {
 				content, backgroundID := formatBackgroundResultCardContent(msg.Content, "", "", "", "")
+				mailboxMessageID := ""
+				if msg.Mailbox != nil {
+					mailboxMessageID = strings.TrimSpace(msg.Mailbox.MessageID)
+				}
 				blocks = append(blocks, &Block{
 					ID:                    *nextID,
 					Type:                  BlockStatus,
@@ -692,6 +717,7 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 					Content:               content,
 					BackgroundCopyContent: msg.Content,
 					BackgroundObjectID:    backgroundID,
+					MailboxMessageID:      mailboxMessageID,
 					MsgIndex:              msgIdx,
 					Collapsed:             true,
 				})

@@ -258,12 +258,18 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			block.BackgroundCopyContent = evt.Message.Content
 			block.StatusTitle = backgroundResultCardTitle
 			block.AgentID = agentID
+			if evt.Message.Mailbox != nil {
+				block.MailboxMessageID = strings.TrimSpace(evt.Message.Mailbox.MessageID)
+			}
 			block.MsgIndex = evt.MessageIndex
 			block.InvalidateCache()
 			m.updateViewportBlock(block)
 			m.markBlockSettled(block)
 		} else {
 			block := &Block{ID: m.nextBlockID, Type: BlockStatus, StatusTitle: backgroundResultCardTitle, Content: content, BackgroundCopyContent: evt.Message.Content, AgentID: agentID, BackgroundObjectID: backgroundID, MsgIndex: evt.MessageIndex, Collapsed: true}
+			if evt.Message.Mailbox != nil {
+				block.MailboxMessageID = strings.TrimSpace(evt.Message.Mailbox.MessageID)
+			}
 			m.nextBlockID++
 			m.appendViewportBlock(block)
 			m.markBlockSettled(block)
