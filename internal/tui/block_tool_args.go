@@ -14,6 +14,7 @@ import (
 	"github.com/mattn/go-runewidth"
 
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/markdownutil"
 )
 
 func (b *Block) toolArgsParsed() (keys []string, vals map[string]string) {
@@ -964,8 +965,7 @@ func appendTodoCallItemLines(result *[]string, item todoCallArgItem, contentWidt
 		idDisp += "."
 	}
 	content := strings.TrimSpace(sanitizeToolDisplayText(item.Content))
-	content = strings.ReplaceAll(content, "\r\n", "\n")
-	content = strings.ReplaceAll(content, "\r", "\n")
+	content = markdownutil.NormalizeNewlines(content)
 	content = strings.ReplaceAll(content, "\n", " ")
 	content = strings.TrimSpace(content)
 	prefixCols := runewidth.StringWidth(indent) + runewidth.StringWidth(marker) + 1

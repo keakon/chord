@@ -12,6 +12,7 @@ import (
 	"github.com/mattn/go-runewidth"
 
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/markdownutil"
 )
 
 var (
@@ -168,8 +169,7 @@ func toolCollapsedSummaryText(s string) string {
 	if trimmed == "" {
 		return ""
 	}
-	trimmed = strings.ReplaceAll(trimmed, "\r\n", "\n")
-	trimmed = strings.ReplaceAll(trimmed, "\r", "\n")
+	trimmed = markdownutil.NormalizeNewlines(trimmed)
 	lines := strings.Split(trimmed, "\n")
 	parts := make([]string, 0, 2)
 	for _, line := range lines {

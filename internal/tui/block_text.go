@@ -13,6 +13,7 @@ import (
 	"github.com/mattn/go-runewidth"
 
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/markdownutil"
 )
 
 const (
@@ -935,8 +936,7 @@ func wrapPreformattedText(text string, width int) []string {
 	if text == "" {
 		return []string{""}
 	}
-	text = strings.ReplaceAll(text, "\r\n", "\n")
-	text = strings.ReplaceAll(text, "\r", "\n")
+	text = markdownutil.NormalizeNewlines(text)
 	var result []string
 	for line := range strings.SplitSeq(text, "\n") {
 		expanded := expandTabsForDisplay(line, preformattedTabWidth)

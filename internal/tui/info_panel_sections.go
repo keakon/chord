@@ -16,6 +16,7 @@ import (
 	"github.com/keakon/chord/internal/bytefmt"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/skill"
+	"github.com/keakon/chord/internal/tui/markdownutil"
 	"github.com/keakon/chord/internal/tui/modelref"
 )
 
@@ -913,8 +914,7 @@ func truncateInfoPanelLine(s string, width int) string {
 	if width <= 0 {
 		return ""
 	}
-	s = strings.ReplaceAll(s, "\r\n", "\n")
-	s = strings.ReplaceAll(s, "\r", "\n")
+	s = markdownutil.NormalizeNewlines(s)
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.ReplaceAll(s, "\t", " ")
 	s = strings.TrimSpace(s)

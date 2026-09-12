@@ -19,6 +19,7 @@ import (
 	"github.com/keakon/chord/internal/buildinfo"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/llm"
+	"github.com/keakon/chord/internal/tui/markdownutil"
 )
 
 const diagnosticLogTailLines = 240
@@ -439,8 +440,7 @@ func isLogFieldEnd(line string, pos int) bool {
 }
 
 func sanitizeDiagnosticText(s, baseDir string) string {
-	s = strings.ReplaceAll(s, "\r\n", "\n")
-	s = strings.ReplaceAll(s, "\r", "\n")
+	s = markdownutil.NormalizeNewlines(s)
 	if strings.TrimSpace(baseDir) != "" {
 		s = strings.ReplaceAll(s, filepath.Clean(baseDir), "<project-root>")
 		s = strings.ReplaceAll(s, filepath.ToSlash(filepath.Clean(baseDir)), "<project-root>")

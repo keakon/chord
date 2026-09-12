@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/markdownutil"
 )
 
 func bashDescriptionSummary(vals map[string]string) string {
@@ -32,8 +33,7 @@ func bashSummaryParts(vals map[string]string) (mainPart, grayPart string) {
 }
 
 func bashCommandLines(command string) []string {
-	command = strings.ReplaceAll(command, "\r\n", "\n")
-	command = strings.ReplaceAll(command, "\r", "\n")
+	command = markdownutil.NormalizeNewlines(command)
 	if command == "" {
 		return nil
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/mattn/go-runewidth"
 
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/markdownutil"
 )
 
 type confirmRiskLevel int
@@ -558,8 +559,7 @@ func appendConfirmField(dst *[]confirmSummaryField, field confirmSummaryField) {
 }
 
 func confirmPreviewText(text string, maxLines int) string {
-	text = strings.ReplaceAll(text, "\r\n", "\n")
-	text = strings.ReplaceAll(text, "\r", "\n")
+	text = markdownutil.NormalizeNewlines(text)
 	if maxLines <= 0 || text == "" {
 		return text
 	}

@@ -4,12 +4,13 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/keakon/chord/internal/tui/markdownutil"
 )
 
 func firstDisplayLine(s string) string {
 	s = sanitizeToolDisplayText(s)
-	s = strings.ReplaceAll(s, "\r\n", "\n")
-	s = strings.ReplaceAll(s, "\r", "\n")
+	s = markdownutil.NormalizeNewlines(s)
 	if before, _, ok := strings.Cut(s, "\n"); ok {
 		return before
 	}
@@ -18,8 +19,7 @@ func firstDisplayLine(s string) string {
 
 func continuationDisplayLines(s string) []string {
 	s = sanitizeToolDisplayText(s)
-	s = strings.ReplaceAll(s, "\r\n", "\n")
-	s = strings.ReplaceAll(s, "\r", "\n")
+	s = markdownutil.NormalizeNewlines(s)
 	parts := strings.Split(s, "\n")
 	if len(parts) <= 1 {
 		return nil

@@ -3,6 +3,8 @@ package tui
 import (
 	"strconv"
 	"strings"
+
+	"github.com/keakon/chord/internal/tui/markdownutil"
 )
 
 const backgroundResultCardTitle = "JOB RESULT"
@@ -101,8 +103,7 @@ func formatSingleBackgroundResult(raw, id, status, command, description string) 
 }
 
 func splitBackgroundResultSections(raw string) []string {
-	raw = strings.ReplaceAll(raw, "\r\n", "\n")
-	raw = strings.ReplaceAll(raw, "\r", "\n")
+	raw = markdownutil.NormalizeNewlines(raw)
 	lines := strings.Split(strings.TrimSpace(raw), "\n")
 	var sections []string
 	var current []string
@@ -124,8 +125,7 @@ func splitBackgroundResultSections(raw string) []string {
 }
 
 func parseBackgroundResult(raw string) parsedBackgroundResult {
-	raw = strings.ReplaceAll(raw, "\r\n", "\n")
-	raw = strings.ReplaceAll(raw, "\r", "\n")
+	raw = markdownutil.NormalizeNewlines(raw)
 	var parsed parsedBackgroundResult
 	inOutput := false
 	headerChecked := false

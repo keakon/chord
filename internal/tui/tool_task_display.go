@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/markdownutil"
 )
 
 type taskToolArgs struct {
@@ -93,8 +94,7 @@ func taskToolDescriptionContent(argsJSON string) string {
 	if args.Description == "" {
 		return ""
 	}
-	desc := strings.ReplaceAll(args.Description, "\r\n", "\n")
-	desc = strings.ReplaceAll(desc, "\r", "\n")
+	desc := markdownutil.NormalizeNewlines(args.Description)
 	return strings.TrimSpace(desc)
 }
 

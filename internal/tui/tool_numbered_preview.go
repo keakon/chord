@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/keakon/chord/internal/tui/markdownutil"
 )
 
 type numberedToolPreviewOptions struct {
@@ -70,8 +72,7 @@ func parsePlainContentPreviewLines(content string) ([]readDisplayLine, string) {
 	if content == "" {
 		return nil, ""
 	}
-	normalized := strings.ReplaceAll(content, "\r\n", "\n")
-	normalized = strings.ReplaceAll(normalized, "\r", "\n")
+	normalized := markdownutil.NormalizeNewlines(content)
 	trimmed := strings.TrimSuffix(normalized, "\n")
 	var lines []string
 	if trimmed == "" {
