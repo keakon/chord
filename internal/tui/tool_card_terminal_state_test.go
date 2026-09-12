@@ -181,15 +181,19 @@ func TestParseJobResultIDTruncatesOversizedID(t *testing.T) {
 	}
 }
 
-// TestJobListSummaryLine pins the count parser: one row per job, two-space
-// separators, and the "no background jobs" sentinel job_list emits.
+// TestJobListSummaryLine pins the count parser: it counts job-shaped rows,
+// two-space separators, and the "no background jobs" sentinel job_list emits,
+// while label continuations and the truncation layer's guidance do not inflate
+// the count.
 func TestJobListSummaryLine(t *testing.T) {
 	tests := []struct{ name, result, want string }{
 		{"empty", "", "No jobs"},
 		{"sentinel", "no background jobs", "No jobs"},
 		{"single", "job-1  running  5s  build", "1 job"},
-		{"three", "a\nb\nc", "3 jobs"},
-		{"blank separators ignored", "a\n\nb\n", "2 jobs"},
+		{"three", "job-1  running  5s  build\njob-2  done  1s  test\njob-12  done  2s  lint", "3 jobs"},
+		{"label continuation ignored", "job-1  running  5s  line one\nline two\nline three", "1 job"},
+		{"guidance line ignored", "job-1  running  5s  build\n\nResult truncated to fit; full output saved to artifact", "1 job"},
+		{"non-job rows ignored", "a\nb\nc", "No jobs"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

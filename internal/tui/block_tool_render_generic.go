@@ -901,7 +901,8 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 	cardWidth := metrics.cardWidth
 	contentWidth := compactToolContentWidthForRenderWidth(width)
 
-	expanded := b.ToolCallDetailExpanded || b.compactToolResultForceExpanded(contentWidth)
+	forceExpanded := b.compactToolResultForceExpanded(contentWidth)
+	expanded := b.ToolCallDetailExpanded || forceExpanded
 	// Argument-level facts that would otherwise cost a body row: the handle a
 	// later job_output / job_kill call needs (a just-promoted background shell
 	// job) and the count job_list leaves behind its fold.
@@ -938,7 +939,7 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 	// a collapsed card with nothing hidden still opens on space, so it earns
 	// a ▸ like every other toggleable card. Force-expanded cards are stuck
 	// and must not claim a marker the toggle cannot honour.
-	if b.ResultDone && (b.ToolName == tools.NameShell || !b.compactToolResultForceExpanded(contentWidth)) {
+	if b.ResultDone && (b.ToolName == tools.NameShell || !forceExpanded) {
 		prefix = renderToolDisclosurePrefix(prefix, expanded)
 	}
 	toolHeaderLine := renderToolHeaderLine(prefix, b.ToolName)

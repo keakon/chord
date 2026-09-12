@@ -14,12 +14,13 @@ func (b *Block) renderSearchResultToolCall(width int, spinnerFrame string) []str
 	cardWidth := metrics.cardWidth
 	contentWidth := metrics.contentWidth
 
-	expanded := b.ToolCallDetailExpanded || b.compactToolResultForceExpanded(contentWidth)
+	forceExpanded := b.compactToolResultForceExpanded(contentWidth)
+	expanded := b.ToolCallDetailExpanded || forceExpanded
 	canExpand := b.searchResultCanExpand()
 	prefix := b.renderToolPrefixForExpanded(spinnerFrame, expanded)
 	// A force-expanded card is stuck open (the toggle refuses to collapse it),
 	// so it must not claim a marker the toggle cannot honour.
-	if b.ResultDone && canExpand && !b.compactToolResultForceExpanded(contentWidth) {
+	if b.ResultDone && canExpand && !forceExpanded {
 		prefix = renderToolDisclosurePrefix(prefix, expanded)
 	}
 	headerLine := renderToolHeaderLine(prefix, b.ToolName)

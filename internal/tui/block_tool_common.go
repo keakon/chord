@@ -894,20 +894,38 @@ func parseJobResultID(result string) string {
 // jobListSummaryLine counts the jobs in a job_list result for the collapsed
 // card's header. job_list never renders the list when collapsed, so without a
 // count the folded card would only say "job_list" and hide whether anything is
-// running. The result is either "no background jobs" or one line per job with
-// two-space separators.
+// running. The result is either the "no background jobs" sentinel or one line
+// per job, each starting with the job id and a two-space separator.
 func jobListSummaryLine(result string) string {
-	trimmed := strings.TrimSpace(result)
 	count := 0
-	for line := range strings.SplitSeq(trimmed, "\n") {
-		if strings.TrimSpace(line) != "" {
+	for line := range strings.SplitSeq(result, "\n") {
+		if isJobListRow(strings.TrimSpace(line)) {
 			count++
 		}
 	}
-	if count == 0 || strings.EqualFold(trimmed, "no background jobs") {
+	if count == 0 {
 		return "No jobs"
 	}
 	return fmt.Sprintf("%d %s", count, pluralizeToolCount("job", count))
+}
+
+// isJobListRow reports whether a line is a job_list row. Only the leading
+// "<id>  " shape counts: a multi-line label continues on an unindented line,
+// and the truncation layer's appended guidance does not start with a job id
+// either, so neither inflates the count.
+func isJobListRow(line string) bool {
+	rest, ok := strings.CutPrefix(line, "job-")
+	if !ok {
+		return false
+	}
+	digits := 0
+	for digits < len(rest) && rest[digits] >= '0' && rest[digits] <= '9' {
+		digits++
+	}
+	if digits == 0 {
+		return false
+	}
+	return digits == len(rest) || rest[digits] == ' ' || rest[digits] == '\t'
 }
 
 // formatToolResultSummaryLine returns the one-line state summary under the
