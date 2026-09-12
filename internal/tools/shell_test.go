@@ -593,7 +593,7 @@ func TestTailWriterConcurrentWriteAndString(t *testing.T) {
 		})
 	}
 	wg.Wait()
-	if got := w.total; got != 32*200*6 {
+	if got := w.buf.total; got != 32*200*6 {
 		t.Fatalf("total = %d, want %d", got, 32*200*6)
 	}
 }
@@ -625,8 +625,8 @@ func TestTailWriterReclaimsDroppedPrefix(t *testing.T) {
 		if _, err := w.Write([]byte{b}); err != nil {
 			t.Fatalf("write %q: %v", b, err)
 		}
-		if int64(len(w.buf)) > 2*w.maxBytes {
-			t.Fatalf("buffer grew to %d bytes after %q, want the dropped prefix reclaimed", len(w.buf), b)
+		if int64(len(w.buf.window)) > 2*w.buf.maxBytes {
+			t.Fatalf("buffer grew to %d bytes after %q, want the dropped prefix reclaimed", len(w.buf.window), b)
 		}
 	}
 	want := string(payload[len(payload)-8:])

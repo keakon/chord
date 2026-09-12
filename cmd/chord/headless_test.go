@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -3042,5 +3043,32 @@ func TestRunHeadlessWithDepsParentWatcherIsolationDisabled(t *testing.T) {
 	}
 	if getppidCalls != 0 {
 		t.Fatalf("getppid calls = %d, want 0 when parent watcher disabled", getppidCalls)
+	}
+}
+
+// A headless local shell command that outgrows the capture cap must keep its
+// newest output, the same tail the shell tool keeps: the failure that made the
+// output long lands at the end, so a stale head would hide exactly what the
+// integration needs.
+func TestRunHeadlessLocalShellKeepsTheNewestOutput(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not in PATH")
+	}
+	if _, err := exec.LookPath("yes"); err != nil {
+		t.Skip("yes not in PATH")
+	}
+	// Well past headlessLocalShellMaxBytes, with a marker at the very end.
+	out, err := runHeadlessLocalShell(context.Background(), "yes x | head -c 600000; printf END_MARKER")
+	if err != nil {
+		t.Fatalf("runHeadlessLocalShell: %v", err)
+	}
+	if !strings.Contains(out, "END_MARKER") {
+		t.Fatalf("captured output dropped the newest bytes (len=%d)", len(out))
+	}
+	if !strings.HasPrefix(out, "...(output truncated:") {
+		t.Fatalf("captured output is missing the truncation notice: %.60q", out)
+	}
+	if len(out) >= 600000 {
+		t.Fatalf("captured output len = %d, want the window bounded below the produced size", len(out))
 	}
 }

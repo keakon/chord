@@ -6,39 +6,14 @@ import (
 	"fmt"
 	"os/exec"
 	"time"
+
+	"github.com/keakon/chord/internal/tools"
 )
 
 const (
 	shellBangTimeoutSec = 120
 	shellBangMaxBytes   = 512 * 1024 // cap captured output for viewport performance
 )
-
-// cappedWriterShell mirrors tools.ShellTool output limiting for local ! commands.
-type cappedWriterShell struct {
-	buf      []byte
-	total    int64
-	maxBytes int64
-}
-
-func (c *cappedWriterShell) Write(p []byte) (int, error) {
-	c.total += int64(len(p))
-	if remaining := c.maxBytes - int64(len(c.buf)); remaining > 0 {
-		if int64(len(p)) <= remaining {
-			c.buf = append(c.buf, p...)
-		} else {
-			c.buf = append(c.buf, p[:remaining]...)
-		}
-	}
-	return len(p), nil
-}
-
-func (c *cappedWriterShell) String() string {
-	s := string(c.buf)
-	if c.total > c.maxBytes {
-		s += fmt.Sprintf("\n...(output truncated: showed %d of %d bytes total)", len(c.buf), c.total)
-	}
-	return s
-}
 
 // runBangShell runs bash -c with a timeout and combined stdout/stderr capture.
 // workDir may be empty to use the process working directory.
@@ -49,7 +24,11 @@ func runBangShell(workDir, bashLine string) (output string, err error) {
 	if workDir != "" {
 		cmd.Dir = workDir
 	}
-	buf := &cappedWriterShell{maxBytes: shellBangMaxBytes}
+	// tools.TailBuffer keeps the newest output, like the shell tool's own
+	// capture: a local command whose output outgrows the cap still shows the
+	// failure at its end. It needs no lock because os/exec serializes writes
+	// when Stdout and Stderr are the same writer.
+	buf := tools.NewTailBuffer(shellBangMaxBytes)
 	cmd.Stdout = buf
 	cmd.Stderr = buf
 	err = cmd.Run()

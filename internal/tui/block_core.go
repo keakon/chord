@@ -337,11 +337,14 @@ func (b *Block) ToggleAtWidth(width int) bool {
 			return true
 		}
 	case BlockStatus:
-		// JOB RESULT cards fold to each job's headline. Every other status card
-		// folds to its badge alone only when the collapsed form hides something:
-		// a mailbox card carries the worker model's own message and stays fully
-		// visible, and a body that renders to a single line is already its own
-		// summary.
+		// JOB RESULT cards fold to each job's headline and always accept the
+		// toggle: the disclosure marker sits on the headline that survives the
+		// toggle, so the marker itself changes even for a job whose collapsed
+		// body already showed everything, and the toggle is never a silent
+		// no-op. Every other status card folds to its badge alone only when the
+		// collapsed form hides something: a mailbox card carries the worker
+		// model's own message and stays fully visible, and a body that renders
+		// to a single line is already its own summary.
 		if b.isBackgroundResultCard() {
 			b.Collapsed = !b.Collapsed
 			b.InvalidateCache()

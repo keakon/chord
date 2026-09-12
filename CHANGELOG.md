@@ -30,6 +30,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Editing the tail user message of a compacted session no longer records the compaction checkpoint as the session's first message. The checkpoint stays marked as a summary, so session lists and previews keep showing the original prompt instead of the summary text.
 - The `/role status` and `/models status` reports render one entry per line; the card's Markdown renderer used to reflow the indented lines into a single paragraph.
 - Running `/mcp`, `/mcp status`, or `/mcp enable` / `/mcp disable` no longer leaves an echoed `USER` card in the transcript; these commands now route like the other local slash commands and report without starting a turn.
+- A local shell command whose output outgrows the capture cap keeps its newest output, the same tail the `shell` tool keeps: the TUI's `!` command and the headless local shell both used a capture that stopped at the cap and dropped everything after it, so a long command's failure at the end — the part worth reading — was the part that got dropped.
 
 ## 0.8.0 - 2026-09-11
 

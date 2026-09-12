@@ -79,7 +79,7 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 		}
 		if block := m.findBlockByMailboxMessageID(evt.Message.Mailbox); block == nil {
 			block := newSubAgentMailboxBlock(m.nextBlockID, evt.Message.Mailbox.Kind, evt.Message.Mailbox.Subtype, evt.Message.Mailbox.AgentID, evt.Message.Mailbox.TaskID, evt.Message.Content, targetAgentID)
-			block.MailboxMessageID = evt.Message.Mailbox.MessageID
+			block.MailboxMessageID = strings.TrimSpace(evt.Message.Mailbox.MessageID)
 			block.MsgIndex = evt.MessageIndex
 			m.nextBlockID++
 			m.appendViewportBlock(block)

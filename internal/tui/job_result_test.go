@@ -392,3 +392,57 @@ func TestOnlyBackgroundResultStatusCardsFold(t *testing.T) {
 		t.Fatal("JOB RESULT cards must fold")
 	}
 }
+
+// The header matcher accepts only the headline the job registry writes. A
+// result persisted by the removed spawn tool is body text now: it must not be
+// mistaken for a headline, and it must not yield a job id, because that id
+// names a handle no tool can use any more. The card still renders — the
+// Description/Status/Relevant output fields parse as before — so the loss is
+// limited to the id on the headline.
+func TestBackgroundResultHeaderMatchesOnlyTheCurrentFormat(t *testing.T) {
+	const legacy = "[Background job job-1 completed]\n\nDescription: Start integration service\nStatus: finished"
+	nextID := 0
+	blocks := messagesToBlocks([]message.Message{{
+		Role:    message.RoleUser,
+		Kind:    message.KindBackgroundResult,
+		Content: legacy,
+	}}, &nextID)
+	if len(blocks) != 1 {
+		t.Fatalf("len(blocks) = %d, want 1", len(blocks))
+	}
+	block := blocks[0]
+	if block.BackgroundObjectID != "" {
+		t.Fatalf("legacy header yielded job id %q, want none", block.BackgroundObjectID)
+	}
+	if block.StatusTitle != backgroundResultCardTitle {
+		t.Fatalf("legacy result must still render as a JOB RESULT card, got %q", block.StatusTitle)
+	}
+
+	folded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(folded, "Start integration service") {
+		t.Fatalf("folded legacy card lost its description:\n%s", folded)
+	}
+	if strings.Contains(folded, "job-1") {
+		t.Fatalf("folded legacy card must not name an unusable id:\n%s", folded)
+	}
+
+	if !block.ToggleAtWidth(120) || block.Collapsed {
+		t.Fatal("toggling must expand the legacy card")
+	}
+	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(expanded, "[Background job job-1 completed]") {
+		t.Fatalf("expanded legacy card must keep the unrecognized line as body text:\n%s", expanded)
+	}
+
+	// The current format still yields its id, so the strictness above is a
+	// format check and not a blanket refusal.
+	nextID = 0
+	blocks = messagesToBlocks([]message.Message{{
+		Role:    message.RoleUser,
+		Kind:    message.KindBackgroundResult,
+		Content: "[Background job job-7 finished]\n\nDescription: Run tests\nStatus: completed (exit code 0)",
+	}}, &nextID)
+	if len(blocks) != 1 || blocks[0].BackgroundObjectID != "job-7" {
+		t.Fatalf("current-format header must yield job-7, got %q", blocks[0].BackgroundObjectID)
+	}
+}

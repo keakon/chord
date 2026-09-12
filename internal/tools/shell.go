@@ -15,67 +15,35 @@ import (
 
 const maxOutputBytes = 10 * 1024 * 1024 // 10 MB cap
 
-// tailWriter keeps only the most recent maxBytes of command output while
-// counting every byte ever written. A reader that falls behind therefore still
-// sees the newest output — where failures usually land — instead of a stale
-// head, and the absolute cursors let it report how much it missed.
+// tailWriter is the concurrency-safe view of a TailBuffer that the job registry
+// reads: the lock makes the incremental cursor reads atomic against the writes,
+// and wrote wakes a waiter when new output arrives.
 type tailWriter struct {
-	mu       sync.Mutex
-	buf      []byte
-	start    int   // index of the oldest retained byte within buf
-	base     int64 // absolute offset of buf[start] in the stream
-	total    int64 // absolute count of bytes accepted
-	maxBytes int64
-	wrote    chan struct{}
+	mu    sync.Mutex
+	buf   TailBuffer
+	wrote chan struct{}
 }
 
 func newTailWriter(maxBytes int64) *tailWriter {
-	if maxBytes < 1 {
-		maxBytes = 1
-	}
-	return &tailWriter{maxBytes: maxBytes, wrote: make(chan struct{}, 1)}
+	return &tailWriter{buf: *NewTailBuffer(maxBytes), wrote: make(chan struct{}, 1)}
 }
 
 func (c *tailWriter) Write(p []byte) (int, error) {
 	c.mu.Lock()
-	if int64(len(p)) >= c.maxBytes {
-		// This single write fills the whole window: keep only its last bytes.
-		c.buf = append(c.buf[:0], p[len(p)-int(c.maxBytes):]...)
-		c.start = 0
-		c.base = c.total + int64(len(p)) - c.maxBytes
-	} else {
-		c.buf = append(c.buf, p...)
-		if extra := int64(len(c.buf)-c.start) - c.maxBytes; extra > 0 {
-			// Drop the oldest bytes by moving the window start on instead of
-			// memmoving the whole window on every write. The abandoned prefix is
-			// reclaimed once it reaches half the window, which bounds the live
-			// length to 1.5x the window while keeping the slide O(1) amortized
-			// rather than O(window) per write. That bound is on len, not cap:
-			// append growth can leave the backing array at a larger historical
-			// peak, so a job's steady-state memory may exceed 1.5x.
-			c.start += int(extra)
-			c.base += extra
-			if c.start >= int(c.maxBytes)/2 {
-				kept := copy(c.buf, c.buf[c.start:])
-				c.buf = c.buf[:kept]
-				c.start = 0
-			}
-		}
-	}
-	c.total += int64(len(p))
+	n, err := c.buf.Write(p)
 	c.mu.Unlock()
 	select {
 	case c.wrote <- struct{}{}:
 	default:
 	}
-	return len(p), nil
+	return n, err
 }
 
 // hasDataAfter reports whether output beyond the absolute cursor is retained.
 func (c *tailWriter) hasDataAfter(cursor int64) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.total > cursor
+	return c.buf.hasDataAfter(cursor)
 }
 
 // writeSignal fires whenever new output arrives, so a wait can sleep instead of
@@ -89,15 +57,7 @@ func (c *tailWriter) writeSignal() <-chan struct{} { return c.wrote }
 func (c *tailWriter) readFrom(cursor int64) (string, int64, int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	var dropped int64
-	if cursor < c.base {
-		dropped = c.base - cursor
-		cursor = c.base
-	}
-	if cursor > c.total {
-		cursor = c.total
-	}
-	return string(c.buf[c.start+int(cursor-c.base):]), c.total, dropped
+	return c.buf.readFrom(cursor)
 }
 
 // tail returns up to the last maxLen bytes of retained output, how many earlier
@@ -105,12 +65,7 @@ func (c *tailWriter) readFrom(cursor int64) (string, int64, int64) {
 func (c *tailWriter) tail(maxLen int) (string, int64, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	retained := c.buf[c.start:]
-	truncated := maxLen > 0 && len(retained) > maxLen
-	if truncated {
-		retained = retained[len(retained)-maxLen:]
-	}
-	return string(retained), c.base, truncated
+	return c.buf.tail(maxLen)
 }
 
 // raw returns the retained output with no truncation notice attached. Logic
@@ -120,16 +75,13 @@ func (c *tailWriter) tail(maxLen int) (string, int64, bool) {
 func (c *tailWriter) raw() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return string(c.buf[c.start:])
+	return c.buf.raw()
 }
 
 func (c *tailWriter) String() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.base == 0 {
-		return string(c.buf[c.start:])
-	}
-	return fmt.Sprintf("...(output truncated: showing the most recent %d of %d bytes)\n", len(c.buf)-c.start, c.total) + string(c.buf[c.start:])
+	return c.buf.String()
 }
 
 // ShellTool executes shell commands.

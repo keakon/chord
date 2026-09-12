@@ -1089,38 +1089,14 @@ func headlessCurrentRole(backend headlessBackend, state *headlessState) string {
 	return role
 }
 
-type headlessCappedWriter struct {
-	buf      []byte
-	total    int64
-	maxBytes int64
-}
-
-func (c *headlessCappedWriter) Write(p []byte) (int, error) {
-	c.total += int64(len(p))
-	if remaining := c.maxBytes - int64(len(c.buf)); remaining > 0 {
-		if int64(len(p)) <= remaining {
-			c.buf = append(c.buf, p...)
-		} else {
-			c.buf = append(c.buf, p[:remaining]...)
-		}
-	}
-	return len(p), nil
-}
-
-func (c *headlessCappedWriter) String() string {
-	s := string(c.buf)
-	if c.total > c.maxBytes {
-		s += fmt.Sprintf("\n...(output truncated: showed %d of %d bytes total)", len(c.buf), c.total)
-	}
-	return s
-}
-
 func runHeadlessLocalShell(ctx context.Context, command string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, headlessLocalShellTimeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "bash", "-c", command)
-	buf := &headlessCappedWriter{maxBytes: headlessLocalShellMaxBytes}
+	// tools.TailBuffer keeps the newest output, so a long local command's
+	// failure at the end is not the part that gets dropped.
+	buf := tools.NewTailBuffer(headlessLocalShellMaxBytes)
 	cmd.Stdout = buf
 	cmd.Stderr = buf
 	err := cmd.Run()

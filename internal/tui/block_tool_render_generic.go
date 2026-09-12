@@ -938,8 +938,10 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 	// The marker states what the toggle can do, not how much text is hidden:
 	// a collapsed card with nothing hidden still opens on space, so it earns
 	// a ▸ like every other toggleable card. Force-expanded cards are stuck
-	// and must not claim a marker the toggle cannot honour.
-	if b.ResultDone && (b.ToolName == tools.NameShell || !forceExpanded) {
+	// and must not claim a marker the toggle cannot honour. shell never
+	// force-expands (compactToolResultForceExpanded returns false for it), so
+	// it always keeps its marker.
+	if b.ResultDone && !forceExpanded {
 		prefix = renderToolDisclosurePrefix(prefix, expanded)
 	}
 	toolHeaderLine := renderToolHeaderLine(prefix, b.ToolName)
