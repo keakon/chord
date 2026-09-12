@@ -201,3 +201,32 @@ func TestSummarizeJobCommandKeepsFirstLineAndTruncates(t *testing.T) {
 		t.Fatalf("summarizeJobCommand(long) = %q, want a truncated first line", got)
 	}
 }
+
+// A cancel that suppresses the notification also clears an earlier promotion's
+// detached flag: the terminal state is delivered as a foreground result or not
+// at all, never twice, and never into a session that no longer owns the job.
+// This pins the last-writer-wins contract between detach and requestCancel that
+// a session switch, an agent stop, and job_kill all rely on.
+func TestRequestCancelClearsPromotedDetach(t *testing.T) {
+	j := &job{status: jobStatusRunning, cancelCh: make(chan string, 1)}
+	if !j.detach() {
+		t.Fatal("detach on a running job must report true")
+	}
+	if !j.detached {
+		t.Fatal("detach must mark the job background-owned")
+	}
+	if !j.requestCancel("terminated on session switch", false) {
+		t.Fatal("requestCancel on a running job must report true")
+	}
+	if j.detached {
+		t.Fatal("a notification-suppressing cancel must clear the promoted detached flag")
+	}
+	if j.status != jobStatusStopping {
+		t.Fatalf("status = %q, want %q", j.status, jobStatusStopping)
+	}
+	if j.isKilled() {
+		// isKilled reports the terminal status, which a pending cancel has not
+		// set: the job is still stopping, not killed.
+		t.Fatal("a pending cancel must not report a terminal kill")
+	}
+}

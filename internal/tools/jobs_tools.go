@@ -90,7 +90,7 @@ func (JobOutputTool) Execute(ctx context.Context, raw json.RawMessage) (string, 
 		return "", fmt.Errorf("job %s not found", id)
 	}
 	if !j.accessibleFrom(ctx) {
-		return "", fmt.Errorf("job %s is not owned by this agent", id)
+		return "", fmt.Errorf("job %s is not accessible to this agent", id)
 	}
 	if wait == jobWaitExit {
 		if !j.isFinished() {
@@ -204,7 +204,7 @@ func renderJobOutput(j *job, chunk string, dropped int64, note string) string {
 	return sb.String()
 }
 
-// JobListTool lists background jobs owned by the current agent.
+// JobListTool lists the background jobs the caller may act on.
 type JobListTool struct{}
 
 func (JobListTool) Name() string { return NameJobList }
@@ -214,7 +214,7 @@ func (JobListTool) IsReadOnly() bool { return true }
 func (JobListTool) ConcurrencySafeReadOnly(json.RawMessage) bool { return true }
 
 func (JobListTool) Description() string {
-	return "List background jobs owned by this agent (id, status, elapsed, label). Use it to see what is still running before deciding to wait, to do other work, or to end your turn."
+	return "List the background jobs you can read or stop (id, status, elapsed, label), including jobs started by the main agent and by your direct owner. Use it to see what is still running before deciding to wait, to do other work, or to end your turn."
 }
 
 func (JobListTool) Parameters() map[string]any {
@@ -226,13 +226,16 @@ func (JobListTool) Parameters() map[string]any {
 }
 
 func (JobListTool) Execute(ctx context.Context, _ json.RawMessage) (string, error) {
-	agentID := AgentIDFromContext(ctx)
 	states := SnapshotJobs()
 	now := time.Now()
 	var sb strings.Builder
 	shown := 0
 	for _, state := range states {
-		if agentID != "" && state.AgentID != "" && state.AgentID != agentID {
+		// The list must show exactly the jobs the caller may act on: it filters
+		// by the same predicate job_output and job_kill enforce per id, so the
+		// model never sees a job it cannot read and never misses one it can. An
+		// unowned job or a caller with no agent id is denied rather than shown.
+		if !jobOwnerAccessibleFrom(ctx, state.AgentID) {
 			continue
 		}
 		if shown > 0 {
@@ -318,7 +321,7 @@ func (JobKillTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 		return "", fmt.Errorf("job %s not found", id)
 	}
 	if !j.accessibleFrom(ctx) {
-		return "", fmt.Errorf("job %s is not owned by this agent", id)
+		return "", fmt.Errorf("job %s is not accessible to this agent", id)
 	}
 	if j.isFinished() {
 		return fmt.Sprintf("job %s already finished\n[status: %s]", id, j.statusText()), nil

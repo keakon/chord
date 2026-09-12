@@ -339,6 +339,14 @@ func (j *job) detach() bool {
 // the eventual terminal state is delivered as an asynchronous notification:
 // an explicit job_kill already tells the model the outcome, so it suppresses
 // the wakeup.
+//
+// It assigns j.detached outright rather than only clearing it, so a cancel that
+// suppresses the notification also cancels an earlier promotion's promise to
+// notify. That is deliberate last-writer-wins: a session switch or an agent
+// stop cancels jobs whose completion would be delivered into a transcript that
+// is going away, and job_kill reports the outcome itself. Either way the
+// terminal state is delivered as a foreground result or not at all, never
+// twice, and never to a session that no longer owns the job.
 func (j *job) requestCancel(reason string, notify bool) bool {
 	j.mu.Lock()
 	if j.finished {
@@ -620,17 +628,27 @@ func (r *JobRegistry) get(id string) (*job, bool) {
 }
 
 // accessibleFrom reports whether the caller identified by ctx may read or stop
-// this job. Identity is required on both sides: a caller with no agent id or a
-// job with no recorded owner is denied rather than treated as public. Besides
-// its own jobs, a caller may reach the main agent's jobs and jobs started by its
-// direct owner (a worker reading a job its owner launched). Job ownership is
-// immutable after start, so reading it here needs no lock.
+// this job.
 func (j *job) accessibleFrom(ctx context.Context) bool {
 	if j == nil {
 		return false
 	}
+	return jobOwnerAccessibleFrom(ctx, j.AgentID)
+}
+
+// jobOwnerAccessibleFrom reports whether the caller identified by ctx may reach
+// a job owned by owner. Identity is required on both sides: a caller with no
+// agent id or a job with no recorded owner is denied rather than treated as
+// public. Besides its own jobs, a caller may reach the main agent's jobs and
+// jobs started by its direct owner (a worker reading a job its owner launched).
+// Job ownership is immutable after start, so reading it here needs no lock.
+//
+// It is the single source of truth for job visibility: job_output and job_kill
+// gate one id with it, and job_list filters its snapshot with it, so the list
+// can neither reveal a job the caller cannot act on nor hide one it can.
+func jobOwnerAccessibleFrom(ctx context.Context, owner string) bool {
 	caller := strings.TrimSpace(AgentIDFromContext(ctx))
-	owner := strings.TrimSpace(j.AgentID)
+	owner = strings.TrimSpace(owner)
 	if caller == "" || owner == "" {
 		return false
 	}

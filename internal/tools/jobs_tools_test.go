@@ -127,16 +127,16 @@ func TestJobOutputAndKillEnforceOwnership(t *testing.T) {
 	}
 
 	// A caller that presents no agent identity cannot reach any job.
-	if _, err := (JobOutputTool{}).Execute(context.Background(), mustMarshal(t, map[string]any{"job_id": id, "wait": "none"})); err == nil || !strings.Contains(err.Error(), "not owned") {
+	if _, err := (JobOutputTool{}).Execute(context.Background(), mustMarshal(t, map[string]any{"job_id": id, "wait": "none"})); err == nil || !strings.Contains(err.Error(), "not accessible") {
 		t.Fatalf("anonymous job_output err = %v, want ownership rejection", err)
 	}
 
 	// A sibling agent that knows the id cannot read or stop another agent's job.
 	sibling := WithAgentID(context.Background(), "sibling-agent")
-	if _, err := (JobOutputTool{}).Execute(sibling, mustMarshal(t, map[string]any{"job_id": id, "wait": "none"})); err == nil || !strings.Contains(err.Error(), "not owned") {
+	if _, err := (JobOutputTool{}).Execute(sibling, mustMarshal(t, map[string]any{"job_id": id, "wait": "none"})); err == nil || !strings.Contains(err.Error(), "not accessible") {
 		t.Fatalf("sibling job_output err = %v, want ownership rejection", err)
 	}
-	if _, err := (JobKillTool{}).Execute(sibling, mustMarshal(t, map[string]any{"job_id": id})); err == nil || !strings.Contains(err.Error(), "not owned") {
+	if _, err := (JobKillTool{}).Execute(sibling, mustMarshal(t, map[string]any{"job_id": id})); err == nil || !strings.Contains(err.Error(), "not accessible") {
 		t.Fatalf("sibling job_kill err = %v, want ownership rejection", err)
 	}
 	if j, ok := globalJobRegistry.get(id); !ok || j.isFinished() {
@@ -284,5 +284,59 @@ func TestJobOutputPollStreakResetsAfterNewOutput(t *testing.T) {
 	after := runJobOutput(t, map[string]any{"job_id": id, "wait": "none"})
 	if strings.Contains(after, "[notice]") || strings.Contains(after, "rejected automatically") {
 		t.Fatalf("read after fresh output = %q, want the streak reset", after)
+	}
+}
+
+// The list shows exactly the jobs the caller may act on: it filters by the same
+// predicate job_output and job_kill enforce per id, so a job readable by id is
+// also listed, and a caller with no agent id sees nothing rather than every
+// agent's jobs.
+func TestJobListShowsExactlyAccessibleJobs(t *testing.T) {
+	resetJobRegistryOnlyForTest(t)
+	t.Cleanup(func() { StopAllJobsForShutdown() })
+
+	ownerCtx := WithAgentID(WithEventSender(context.Background(), &recordingEventSender{ch: make(chan any, 1)}), jobTestOwner)
+	ownerJob, err := ExecuteJobForTest(ownerCtx, "sleep 5", "owner job", nil)
+	if err != nil {
+		t.Fatalf("ExecuteJobForTest(owner): %v", err)
+	}
+	siblingJob, err := ExecuteJobForTest(WithAgentID(context.Background(), "sibling-1"), "sleep 5", "sibling job", nil)
+	if err != nil {
+		t.Fatalf("ExecuteJobForTest(sibling): %v", err)
+	}
+
+	// The main agent may read any job, so job_list must list any job.
+	mainCtx := WithJobAccess(WithAgentID(context.Background(), "main-9"), JobAccess{MainAgentID: "main-9"})
+	out, err := (JobListTool{}).Execute(mainCtx, nil)
+	if err != nil {
+		t.Fatalf("JobListTool.Execute(main): %v", err)
+	}
+	for _, want := range []string{ownerJob, siblingJob} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("job_list(main) = %q, want %s", out, want)
+		}
+	}
+
+	// A worker may read a job its direct owner started, so it must be listed.
+	workerCtx := WithJobAccess(WithAgentID(context.Background(), "worker-1"), JobAccess{OwnerAgentID: jobTestOwner})
+	out, err = (JobListTool{}).Execute(workerCtx, nil)
+	if err != nil {
+		t.Fatalf("JobListTool.Execute(worker): %v", err)
+	}
+	if !strings.Contains(out, ownerJob) {
+		t.Fatalf("job_list(worker) = %q, want the owner's job", out)
+	}
+	if strings.Contains(out, siblingJob) {
+		t.Fatalf("job_list(worker) leaked a sibling's job: %q", out)
+	}
+
+	// A caller with no agent id reaches no job by id, so it must not be shown
+	// every agent's jobs either.
+	out, err = (JobListTool{}).Execute(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("JobListTool.Execute(anonymous): %v", err)
+	}
+	if out != "no background jobs" {
+		t.Fatalf("job_list(anonymous) = %q, want no jobs", out)
 	}
 }
