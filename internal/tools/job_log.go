@@ -88,23 +88,28 @@ func (l *rotatingJobLog) Write(p []byte) (int, error) {
 	return total, nil
 }
 
-// rotate moves the active log aside and starts a fresh one. When the rename or
-// reopen fails it falls back to appending to the existing file so the job keeps
-// making progress instead of losing its output.
+// rotate starts a fresh active file, moving the full one aside to <path>.1 for
+// post-mortem reading. When the rename fails the backup copy is lost, but the
+// active file is still truncated: appending to it instead would leave it above
+// maxJobLogBytes, and every later write would retry the same failing rename and
+// grow the log without bound. Truncating keeps the size cap and the newest
+// output, which is what a diagnostic log is for.
 func (l *rotatingJobLog) rotate() {
 	_ = l.file.Close()
 	backup := l.path + ".1"
 	_ = os.Remove(backup)
 	if err := os.Rename(l.path, backup); err != nil {
 		log.Debugf("job log rotate %s: %v", l.path, err)
-		l.reopen(os.O_APPEND)
-		return
 	}
-	l.reopen(os.O_CREATE | os.O_WRONLY | os.O_TRUNC)
+	l.reopen()
 }
 
-func (l *rotatingJobLog) reopen(flag int) {
-	f, err := privatefs.OpenFile(l.sessionDir, l.path, flag)
+// reopen truncates the active file. A failed reopen leaves the sink disabled
+// (l.file == nil) instead of aborting the job: the diagnostic copy is
+// expendable, and Write still reports the bytes as written so the tee keeps
+// feeding the in-memory window the model reads.
+func (l *rotatingJobLog) reopen() {
+	f, err := privatefs.OpenFile(l.sessionDir, l.path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC)
 	if err != nil {
 		log.Debugf("job log reopen %s: %v", l.path, err)
 		l.file = nil
@@ -112,11 +117,6 @@ func (l *rotatingJobLog) reopen(flag int) {
 	}
 	l.file = f
 	l.size = 0
-	if flag&os.O_APPEND != 0 {
-		if info, err := f.Stat(); err == nil {
-			l.size = info.Size()
-		}
-	}
 }
 
 func (l *rotatingJobLog) Close() error {

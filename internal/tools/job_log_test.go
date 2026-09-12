@@ -54,6 +54,49 @@ func TestRotatingJobLogRotatesWhenExceedingMaxBytes(t *testing.T) {
 	}
 }
 
+func TestRotatingJobLogBoundsFileWhenRenameFails(t *testing.T) {
+	restore := maxJobLogBytes
+	maxJobLogBytes = 8
+	t.Cleanup(func() { maxJobLogBytes = restore })
+
+	sessionDir := t.TempDir()
+	logPath := filepath.Join(sessionDir, "job-1.log")
+	writer, err := openRotatingJobLog(sessionDir, logPath)
+	if err != nil {
+		t.Fatalf("openRotatingJobLog: %v", err)
+	}
+	t.Cleanup(func() { _ = writer.Close() })
+
+	// A non-empty directory at the backup path makes both the Remove and the
+	// Rename fail, so the full file cannot be moved aside.
+	backup := logPath + ".1"
+	if err := os.MkdirAll(filepath.Join(backup, "occupied"), 0o700); err != nil {
+		t.Fatalf("seed backup path: %v", err)
+	}
+
+	if _, err := writer.Write([]byte("aaaaaaaa")); err != nil {
+		t.Fatalf("first write: %v", err)
+	}
+	if _, err := writer.Write([]byte("bbbb")); err != nil {
+		t.Fatalf("second write: %v", err)
+	}
+
+	info, err := os.Stat(logPath)
+	if err != nil {
+		t.Fatalf("stat active log: %v", err)
+	}
+	if info.Size() > maxJobLogBytes {
+		t.Fatalf("active log size = %d, want <= %d after a failed rotation", info.Size(), maxJobLogBytes)
+	}
+	active, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read active log: %v", err)
+	}
+	if string(active) != "bbbb" {
+		t.Fatalf("active log = %q, want the newest bytes", active)
+	}
+}
+
 func TestRotatingJobLogWriteSurvivesReopenFailure(t *testing.T) {
 	restore := maxJobLogBytes
 	maxJobLogBytes = 4
