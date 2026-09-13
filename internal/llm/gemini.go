@@ -550,9 +550,9 @@ func geminiToolFunctionResponse(name string, msg message.Message) *geminiFunctio
 	for _, p := range msg.Parts {
 		switch p.Type {
 		case "image":
-			resp.Parts = append(resp.Parts, geminiPart{InlineData: &geminiInlineData{MimeType: p.MimeType, DisplayName: p.FileName, Data: encodeBase64Cached(p.Data)}})
+			resp.Parts = append(resp.Parts, geminiPart{InlineData: &geminiInlineData{MimeType: p.MimeType, DisplayName: p.FileName, Data: encodeBase64Cached(binaryPartPayload(p))}})
 		case "pdf":
-			resp.Parts = append(resp.Parts, geminiPart{InlineData: &geminiInlineData{MimeType: defaultPDFMediaType(p.MimeType), DisplayName: p.FileName, Data: encodeBase64Cached(p.Data)}})
+			resp.Parts = append(resp.Parts, geminiPart{InlineData: &geminiInlineData{MimeType: defaultPDFMediaType(p.MimeType), DisplayName: p.FileName, Data: encodeBase64Cached(binaryPartPayload(p))}})
 		}
 	}
 	return resp
@@ -566,9 +566,9 @@ func geminiUserParts(msg message.Message) []geminiPart {
 	for _, p := range msg.Parts {
 		switch p.Type {
 		case "image":
-			parts = append(parts, geminiPart{InlineData: &geminiInlineData{MimeType: p.MimeType, Data: encodeBase64Cached(p.Data)}})
+			parts = append(parts, geminiPart{InlineData: &geminiInlineData{MimeType: p.MimeType, Data: encodeBase64Cached(binaryPartPayload(p))}})
 		case "pdf":
-			parts = append(parts, geminiPart{InlineData: &geminiInlineData{MimeType: defaultPDFMediaType(p.MimeType), Data: encodeBase64Cached(p.Data)}})
+			parts = append(parts, geminiPart{InlineData: &geminiInlineData{MimeType: defaultPDFMediaType(p.MimeType), Data: encodeBase64Cached(binaryPartPayload(p))}})
 		default:
 			// Fold adjacent pure-text parts into a single text part so a
 			// text-only message takes one part. Insert a newline only when

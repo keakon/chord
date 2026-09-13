@@ -542,6 +542,10 @@ type MainAgent struct {
 	// invocation parses); see reductionToolCallMemo.
 	reductionMemo reductionToolCallMemo
 
+	// binaryPartCache bounds the lazily resolved attachment payloads held for
+	// the wire converter; see binaryPartReadCache.
+	binaryPartCache *binaryPartReadCache
+
 	// persistenceHealth tracks the durability of the main transcript writes.
 	// Degraded means writes are failing; the intent barrier then blocks tool
 	// dispatch while Q&A turns keep working until a checkpoint recovers.
@@ -1259,6 +1263,10 @@ func NewMainAgent(
 	if llmClient != nil {
 		llmClient.SetCandidateScorer(a.cacheAwareCandidateScore)
 	}
+	// Resolved lazily-read attachment payloads for the wire converter: restored
+	// sessions keep blobs on disk, so requests load them on demand instead of
+	// holding every attachment in memory from startup.
+	a.installBinaryPartResolver()
 	a.startPersistLoop()
 	a.refreshSessionSummary()
 

@@ -429,8 +429,21 @@ func TestPersistAndLoad_ImagePartsRoundTrip(t *testing.T) {
 	if img.FileName != "sample.png" {
 		t.Fatalf("FileName = %q, want sample.png", img.FileName)
 	}
-	if string(img.Data) != string(original) {
-		t.Fatalf("image data mismatch: got %v want %v", img.Data, original)
+	// Restored parts stay unresolved: the payload is loaded lazily by the
+	// wire converter and the TUI renderer, so LoadMessages keeps Data empty
+	// and records the persisted size instead.
+	if len(img.Data) != 0 {
+		t.Fatalf("image data = %d bytes, want empty (lazy resolution)", len(img.Data))
+	}
+	if img.DataBytes != int64(len(original)) {
+		t.Fatalf("DataBytes = %d, want %d", img.DataBytes, len(original))
+	}
+	onDisk, err := os.ReadFile(img.ImagePath)
+	if err != nil {
+		t.Fatalf("ReadFile(image): %v", err)
+	}
+	if string(onDisk) != string(original) {
+		t.Fatalf("persisted image bytes mismatch: got %v want %v", onDisk, original)
 	}
 }
 
@@ -478,8 +491,19 @@ func TestPersistAndLoad_PDFPartsRoundTrip(t *testing.T) {
 	if pdf.FileName != "report.pdf" {
 		t.Fatalf("FileName = %q, want report.pdf", pdf.FileName)
 	}
-	if string(pdf.Data) != string(original) {
-		t.Fatalf("pdf data mismatch: got %v want %v", pdf.Data, original)
+	// Same lazy contract as image parts: reference plus size, no inline bytes.
+	if len(pdf.Data) != 0 {
+		t.Fatalf("pdf data = %d bytes, want empty (lazy resolution)", len(pdf.Data))
+	}
+	if pdf.DataBytes != int64(len(original)) {
+		t.Fatalf("DataBytes = %d, want %d", pdf.DataBytes, len(original))
+	}
+	onDisk, err := os.ReadFile(pdf.ImagePath)
+	if err != nil {
+		t.Fatalf("ReadFile(pdf): %v", err)
+	}
+	if string(onDisk) != string(original) {
+		t.Fatalf("persisted pdf bytes mismatch: got %v want %v", onDisk, original)
 	}
 }
 

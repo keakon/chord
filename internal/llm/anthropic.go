@@ -696,7 +696,7 @@ func convertMessagesWithMap(msgs []message.Message) ([]anthropicMessage, []anthr
 							Source: &anthropicImageSource{
 								Type:      "base64",
 								MediaType: p.MimeType,
-								Data:      encodeBase64Cached(p.Data),
+								Data:      encodeBase64Cached(binaryPartPayload(p)),
 							},
 						})
 					case "pdf":
@@ -705,7 +705,7 @@ func convertMessagesWithMap(msgs []message.Message) ([]anthropicMessage, []anthr
 							Source: &anthropicImageSource{
 								Type:      "base64",
 								MediaType: defaultPDFMediaType(p.MimeType),
-								Data:      encodeBase64Cached(p.Data),
+								Data:      encodeBase64Cached(binaryPartPayload(p)),
 							},
 						})
 					default: // "text"
@@ -902,7 +902,7 @@ func anthropicToolResultContent(msg message.Message) any {
 				Source: &anthropicImageSource{
 					Type:      "base64",
 					MediaType: p.MimeType,
-					Data:      encodeBase64Cached(p.Data),
+					Data:      encodeBase64Cached(binaryPartPayload(p)),
 				},
 			})
 		case "pdf":
@@ -911,7 +911,7 @@ func anthropicToolResultContent(msg message.Message) any {
 				Source: &anthropicImageSource{
 					Type:      "base64",
 					MediaType: defaultPDFMediaType(p.MimeType),
-					Data:      encodeBase64Cached(p.Data),
+					Data:      encodeBase64Cached(binaryPartPayload(p)),
 				},
 			})
 		default:

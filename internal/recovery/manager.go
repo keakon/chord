@@ -539,6 +539,18 @@ func (r *RecoveryManager) Close() {
 // are written in order. Used when the last message needs to be surgically
 // removed (e.g. removing an interrupted thinking-only assistant block).
 func (r *RecoveryManager) RewriteLog(agentID string, msgs []message.Message) error {
+	// Marshal outside the write mutex: r.mu serializes every agent's
+	// PersistMessage, so marshaling the full history per message inside the
+	// lock would stall the persistence pump for the whole rewrite.
+	lines := make([][]byte, 0, len(msgs))
+	for _, msg := range msgs {
+		data, err := json.Marshal(msg)
+		if err != nil {
+			return fmt.Errorf("rewrite log: marshal: %w", err)
+		}
+		lines = append(lines, append(data, '\n'))
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -560,14 +572,8 @@ func (r *RecoveryManager) RewriteLog(agentID string, msgs []message.Message) err
 		return fmt.Errorf("rewrite log: create %s: %w", path, err)
 	}
 
-	for _, msg := range msgs {
-		data, err := json.Marshal(msg)
-		if err != nil {
-			f.Close()
-			return fmt.Errorf("rewrite log: marshal: %w", err)
-		}
-		data = append(data, '\n')
-		if _, err := f.Write(data); err != nil {
+	for _, line := range lines {
+		if _, err := f.Write(line); err != nil {
 			f.Close()
 			return fmt.Errorf("rewrite log: write: %w", err)
 		}

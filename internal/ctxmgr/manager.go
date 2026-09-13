@@ -510,7 +510,7 @@ func MessagePayloadBytes(messages []message.Message) int {
 	for _, msg := range messages {
 		if len(msg.Parts) > 0 {
 			for _, part := range msg.Parts {
-				total += len(part.Text) + len(part.Data)
+				total += len(part.Text) + int(part.PayloadBytes())
 			}
 		} else {
 			total += len(msg.Content)
@@ -567,7 +567,7 @@ func EstimateMessageTokens(msg message.Message) int {
 	if len(msg.Parts) > 0 {
 		payloadBytes = 0
 		for _, part := range msg.Parts {
-			payloadBytes += len(part.Text) + len(part.Data)
+			payloadBytes += len(part.Text) + int(part.PayloadBytes())
 		}
 	}
 	n := payloadBytes / 3
