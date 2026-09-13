@@ -49,19 +49,31 @@ type requestBodyReuse struct {
 	valid  bool
 	guard  requestBodyIdentity
 	cached []byte
+	extra  any
 }
 
 // body returns the cached body for identical inputs, or builds and caches it.
 func (r *requestBodyReuse) body(identity requestBodyIdentity, build func() ([]byte, error)) ([]byte, error) {
+	cached, _, err := r.bodyWithExtra(identity, func() ([]byte, any, error) {
+		data, err := build()
+		return data, nil, err
+	})
+	return cached, err
+}
+
+// bodyWithExtra is body with an opaque per-build artifact cached and returned
+// alongside the body — e.g. the converted input items a transport needs in
+// struct form next to the marshaled bytes.
+func (r *requestBodyReuse) bodyWithExtra(identity requestBodyIdentity, build func() ([]byte, any, error)) ([]byte, any, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.valid && r.guard == identity {
-		return r.cached, nil
+		return r.cached, r.extra, nil
 	}
-	body, err := build()
+	body, extra, err := build()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	r.guard, r.cached, r.valid = identity, body, true
-	return body, nil
+	r.guard, r.cached, r.extra, r.valid = identity, body, extra, true
+	return body, extra, nil
 }

@@ -37,6 +37,9 @@ type ResponsesProvider struct {
 	traceWriter  atomic.Pointer[TraceWriter]
 	proxyScheme  string
 	dialProxyURL string
+	// bodyReuse caches the marshaled HTTP request body across a target's key
+	// attempts; see requestBodyReuse. The WebSocket transport bypasses it.
+	bodyReuse requestBodyReuse
 	// codexWSCompleteFn is a test seam for the Codex WebSocket path. Production
 	// uses completeStreamCodexWebSocket directly.
 	codexWSCompleteFn func(context.Context, string, string, string, *responsesRequest, []responsesInputItem, StreamCallback, time.Time, codexWSCompleteOptions) (*message.Response, bool, error)
@@ -347,6 +350,15 @@ func resolveResponsesReasoningFields(effort, summary string) (string, string) {
 	return effort, summary
 }
 
+// responsesBuiltBody carries the build artifacts a CompleteStream call needs
+// alongside the marshaled body: the converted input items (the WebSocket
+// transport consumes them in struct form) and the request struct itself (its
+// ClientMetadata must agree with the bytes on the wire).
+type responsesBuiltBody struct {
+	fullInput []responsesInputItem
+	reqBody   responsesRequest
+}
+
 func (r *ResponsesProvider) CompleteStream(
 	ctx context.Context,
 	apiKey string,
@@ -382,180 +394,209 @@ func (r *ResponsesProvider) CompleteStream(
 	}
 
 	store := responsesConfiguredStore(r.provider, model)
-	// Convert messages to Responses API format. System/developer instructions are
-	// sent through the top-level instructions field (matching Codex) instead of as
-	// a system-role input message; some Responses-compatible backends reject typed
-	// system messages in input. apply_patch history replays in the shape matching
-	// this request's tool declarations (freeform custom_tool_call or JSON
-	// function_call), so the model sees the same wire form it is asked to emit.
 	freeform := shouldEmitFreeformApplyPatch(r.provider, model)
-	apiInput := convertMessagesToResponsesWithItemIDs("", messages, store, freeform)
-
-	// Validate that we have at least one input item.
-	if len(apiInput) == 0 {
-		return nil, fmt.Errorf("responses API requires at least one input item (system prompt or user message), system_prompt=%q messages_len=%d", systemPrompt, len(messages))
-	}
-
-	// Debug: log input length
-	log.Debugf("responses input system_prompt_len=%v messages_len=%v api_input_len=%v", len(systemPrompt), len(messages), len(apiInput))
-
-	// Convert tools. apply_patch may be emitted as a freeform custom tool for
-	// targets that support it (see convertToolsToResponsesForTarget).
-	apiTools := convertToolsToResponsesForTarget(r.provider, model, tools)
-
-	// HTTP path is full-input only. We do not send previous_response_id here;
-	// connection-scoped reuse belongs to the Codex WebSocket transport.
-	fullInput := apiInput
-	requestStartedAt := time.Now()
-	turnState := ResponsesTurnStateFromContext(ctx)
-	turnStateIdentity := responsesTurnStateIdentity(r.provider, apiKey)
-
-	// Keep the Responses HTTP request shape aligned with codex-rs for every
-	// Responses provider, not only preset:codex. Some relay endpoints validate
-	// these fields as the Responses client contract and reject narrower OpenAI
-	// samples that omit them. Provider compat.responses toggles can drop
-	// individual fields for gateways that reject them instead.
-	rc := (*config.ResponsesCompatConfig)(nil)
-	if r.provider != nil {
-		rc = r.provider.ResponsesCompat(model)
-	}
-	var sendStore, sendToolChoice, sendPromptCacheKey, sendReasoningInclude, sendMaxOutputTokens *bool
-	if rc != nil {
-		sendStore = rc.SendStore
-		sendToolChoice = rc.SendToolChoice
-		sendPromptCacheKey = rc.SendPromptCacheKey
-		sendReasoningInclude = rc.SendReasoningInclude
-		sendMaxOutputTokens = rc.SendMaxOutputTokens
-	}
-	// Hoist reasoning computation so the reasoning replay synthesis below shares
-	// the same reasoning-active signal as the request body.
-	effectiveReasoningEffort, effectiveReasoningSummary := resolveResponsesReasoningFields(ot.EffectiveReasoningEffort(), ot.ReasoningSummary)
 	var overrides config.RequestOverridesConfig
 	if r.provider != nil {
 		overrides = r.provider.RequestOverrides(model)
 	}
-	// Body overrides can enable thinking server-side (e.g. a gateway-injected
-	// thinking key) even when tuning carries no explicit effort or summary.
-	continuityMode := reasoningContinuityCompatMode(r.provider, model)
-	forcedToolChoiceSuppressed := ot.ToolChoice == "required" && forcedToolChoiceSuppressedInThinking(r.provider, model)
-	needsReasoningState := continuityMode == modelcompat.ReasoningContinuityOpenAIVisible ||
-		forcedToolChoiceSuppressed
-	reasoningActive := false
-	if needsReasoningState {
-		reasoningProbe := make(map[string]any, 1)
-		if reasoning := responsesReasoningProbeFields(effectiveReasoningEffort, effectiveReasoningSummary); len(reasoning) > 0 {
-			reasoningProbe["reasoning"] = reasoning
-		}
-		var err error
-		reasoningActive, err = effectiveRequestReasoningActive(reasoningProbe, overrides)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	// DeepSeek-family Responses backends reject a thinking-mode continuation
-	// whose replayed function-call turns carry no reasoning_text. Synthesize an
-	// empty reasoning_text item for turns whose native reasoning was dropped
-	// across a model switch or compaction; if the backend still requires the
-	// actual text, the replay ladder textifies those tool trajectories on
-	// retry. The openai_visible continuity mode also covers the Responses wire
-	// here: on chat it replays reasoning_content, on Responses it replays
-	// reasoning_text.
-	if reasoningActive && continuityMode == modelcompat.ReasoningContinuityOpenAIVisible {
-		fullInput = fillResponsesReasoningForReplay(fullInput)
-	}
-
-	reqBody := responsesRequest{
-		Model:   model,
-		Tools:   apiTools,
-		Store:   store,
-		Stream:  true,
-		Include: []string{},
-	}
-	// Tool-only fields are rejected by some Responses-compatible relays when
-	// no tools are declared. Mirror the chat-completions gating: with tools
-	// present, an explicit tuning override wins, otherwise default to true.
-	// parallel_tool_calls governs how many tool calls one response may carry,
-	// which is exactly what the Tool Selection prompt asks the model to batch;
-	// whether those calls then run concurrently is decided by the local tool
-	// pipeline (it serializes dependent and side-effecting calls), so a custom
-	// (freeform) apply_patch is no reason to forbid the emission. Gateways that
-	// reject the combination are handled by configuring parallel_tool_calls:
-	// false explicitly.
-	if len(apiTools) > 0 {
-		if ot.ParallelToolCalls != nil {
-			reqBody.ParallelToolCalls = ot.ParallelToolCalls
-		} else {
-			reqBody.ParallelToolCalls = new(true)
-		}
-		if compatBool(sendToolChoice, true) {
-			reqBody.ToolChoice = "auto"
-		}
-		if ot.ToolChoice != "" && !(ot.ToolChoice == "required" && reasoningActive && forcedToolChoiceSuppressed) {
-			reqBody.ToolChoice = ot.ToolChoice
-		}
-	}
-	reqBody.omitStore = !compatBool(sendStore, true)
-	reqBody.omitInclude = !compatBool(sendReasoningInclude, true)
-	reqBody.Input = fullInput
 	sessionKey := strings.TrimSpace(tuning.SessionKey)
-	if sessionKey != "" && compatBool(sendPromptCacheKey, true) {
-		reqBody.PromptCacheKey = sessionKey
-		reqBody.ClientMetadata = responsesClientMetadata(sessionKey, requestStartedAt)
-	}
-	if ot.ServiceTier != "" {
-		reqBody.ServiceTier = ot.ServiceTier
-	}
-	log.Debugf("responses: full model=%v store=%v input_len=%v", model, reqBody.Store, len(fullInput))
-	// Set instructions separately from input messages, matching Codex's Responses
-	// request shape and avoiding system-role input items on compatible backends.
-	if systemPrompt != "" {
-		instructions := systemPrompt
-		reqBody.Instructions = &instructions
-	}
+	// The WebSocket transport takes the live request struct and mutates it for
+	// incremental sends, so cached bodies only serve the plain HTTP path.
+	wsEligible := useOpenAIOAuth && r.provider != nil && r.provider.IsCodexOAuthTransport() && r.provider.EffectiveResponsesWebsocket() && requestOverridesEmpty(overrides)
 
-	if maxTokens > 0 {
-		if compatBool(sendMaxOutputTokens, false) {
-			reqBody.MaxOutputTokens = maxTokens
-		} else {
-			log.Debugf("omitting max_output_tokens for Responses request requested=%v", maxTokens)
+	// buildResponsesRequest converts the history and marshals the body. It is
+	// cached per target across key-rotation attempts (requestBodyReuse): the
+	// marshaled body depends on the request surface plus static per-target
+	// config, not on the API key. Turn metadata embeds the build-time start
+	// stamp and turn ID, so retries of one logical request share one turn
+	// identity instead of minting a fresh one per attempt.
+	buildResponsesRequest := func() ([]byte, any, error) {
+		// Convert messages to Responses API format. System/developer instructions are
+		// sent through the top-level instructions field (matching Codex) instead of as
+		// a system-role input message; some Responses-compatible backends reject typed
+		// system messages in input. apply_patch history replays in the shape matching
+		// this request's tool declarations (freeform custom_tool_call or JSON
+		// function_call), so the model sees the same wire form it is asked to emit.
+		apiInput := convertMessagesToResponsesWithItemIDs("", messages, store, freeform)
+
+		// Validate that we have at least one input item.
+		if len(apiInput) == 0 {
+			return nil, nil, fmt.Errorf("responses API requires at least one input item (system prompt or user message), system_prompt=%q messages_len=%d", systemPrompt, len(messages))
 		}
+
+		// Debug: log input length
+		log.Debugf("responses input system_prompt_len=%v messages_len=%v api_input_len=%v", len(systemPrompt), len(messages), len(apiInput))
+
+		// Convert tools. apply_patch may be emitted as a freeform custom tool for
+		// targets that support it (see convertToolsToResponsesForTarget).
+		apiTools := convertToolsToResponsesForTarget(r.provider, model, tools)
+
+		// HTTP path is full-input only. We do not send previous_response_id here;
+		// connection-scoped reuse belongs to the Codex WebSocket transport.
+		fullInput := apiInput
+		metadataStart := time.Now()
+
+		// Keep the Responses HTTP request shape aligned with codex-rs for every
+		// Responses provider, not only preset:codex. Some relay endpoints validate
+		// these fields as the Responses client contract and reject narrower OpenAI
+		// samples that omit them. Provider compat.responses toggles can drop
+		// individual fields for gateways that reject them instead.
+		rc := (*config.ResponsesCompatConfig)(nil)
+		if r.provider != nil {
+			rc = r.provider.ResponsesCompat(model)
+		}
+		var sendStore, sendToolChoice, sendPromptCacheKey, sendReasoningInclude, sendMaxOutputTokens *bool
+		if rc != nil {
+			sendStore = rc.SendStore
+			sendToolChoice = rc.SendToolChoice
+			sendPromptCacheKey = rc.SendPromptCacheKey
+			sendReasoningInclude = rc.SendReasoningInclude
+			sendMaxOutputTokens = rc.SendMaxOutputTokens
+		}
+		// Hoist reasoning computation so the reasoning replay synthesis below shares
+		// the same reasoning-active signal as the request body.
+		effectiveReasoningEffort, effectiveReasoningSummary := resolveResponsesReasoningFields(ot.EffectiveReasoningEffort(), ot.ReasoningSummary)
+		// Body overrides can enable thinking server-side (e.g. a gateway-injected
+		// thinking key) even when tuning carries no explicit effort or summary.
+		continuityMode := reasoningContinuityCompatMode(r.provider, model)
+		forcedToolChoiceSuppressed := ot.ToolChoice == "required" && forcedToolChoiceSuppressedInThinking(r.provider, model)
+		needsReasoningState := continuityMode == modelcompat.ReasoningContinuityOpenAIVisible ||
+			forcedToolChoiceSuppressed
+		reasoningActive := false
+		if needsReasoningState {
+			reasoningProbe := make(map[string]any, 1)
+			if reasoning := responsesReasoningProbeFields(effectiveReasoningEffort, effectiveReasoningSummary); len(reasoning) > 0 {
+				reasoningProbe["reasoning"] = reasoning
+			}
+			var err error
+			reasoningActive, err = effectiveRequestReasoningActive(reasoningProbe, overrides)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+
+		// DeepSeek-family Responses backends reject a thinking-mode continuation
+		// whose replayed function-call turns carry no reasoning_text. Synthesize an
+		// empty reasoning_text item for turns whose native reasoning was dropped
+		// across a model switch or compaction; if the backend still requires the
+		// actual text, the replay ladder textifies those tool trajectories on
+		// retry. The openai_visible continuity mode also covers the Responses wire
+		// here: on chat it replays reasoning_content, on Responses it replays
+		// reasoning_text.
+		if reasoningActive && continuityMode == modelcompat.ReasoningContinuityOpenAIVisible {
+			fullInput = fillResponsesReasoningForReplay(fullInput)
+		}
+
+		reqBody := responsesRequest{
+			Model:   model,
+			Tools:   apiTools,
+			Store:   store,
+			Stream:  true,
+			Include: []string{},
+		}
+		// Tool-only fields are rejected by some Responses-compatible relays when
+		// no tools are declared. Mirror the chat-completions gating: with tools
+		// present, an explicit tuning override wins, otherwise default to true.
+		// parallel_tool_calls governs how many tool calls one response may carry,
+		// which is exactly what the Tool Selection prompt asks the model to batch;
+		// whether those calls then run concurrently is decided by the local tool
+		// pipeline (it serializes dependent and side-effecting calls), so a custom
+		// (freeform) apply_patch is no reason to forbid the emission. Gateways that
+		// reject the combination are handled by configuring parallel_tool_calls:
+		// false explicitly.
+		if len(apiTools) > 0 {
+			if ot.ParallelToolCalls != nil {
+				reqBody.ParallelToolCalls = ot.ParallelToolCalls
+			} else {
+				reqBody.ParallelToolCalls = new(true)
+			}
+			if compatBool(sendToolChoice, true) {
+				reqBody.ToolChoice = "auto"
+			}
+			if ot.ToolChoice != "" && !(ot.ToolChoice == "required" && reasoningActive && forcedToolChoiceSuppressed) {
+				reqBody.ToolChoice = ot.ToolChoice
+			}
+		}
+		reqBody.omitStore = !compatBool(sendStore, true)
+		reqBody.omitInclude = !compatBool(sendReasoningInclude, true)
+		reqBody.Input = fullInput
+		if sessionKey != "" && compatBool(sendPromptCacheKey, true) {
+			reqBody.PromptCacheKey = sessionKey
+			reqBody.ClientMetadata = responsesClientMetadata(sessionKey, metadataStart)
+		}
+		if ot.ServiceTier != "" {
+			reqBody.ServiceTier = ot.ServiceTier
+		}
+		log.Debugf("responses: full model=%v store=%v input_len=%v", model, reqBody.Store, len(fullInput))
+		// Set instructions separately from input messages, matching Codex's Responses
+		// request shape and avoiding system-role input items on compatible backends.
+		if systemPrompt != "" {
+			instructions := systemPrompt
+			reqBody.Instructions = &instructions
+		}
+
+		if maxTokens > 0 {
+			if compatBool(sendMaxOutputTokens, false) {
+				reqBody.MaxOutputTokens = maxTokens
+			} else {
+				log.Debugf("omitting max_output_tokens for Responses request requested=%v", maxTokens)
+			}
+		}
+
+		// Responses reasoning is emitted whenever effort or summary is configured. Codex's
+		// request builder emits the block for any reasoning-capable model even when effort
+		// is empty (effort omitted, summary carried), so gating on effort alone dropped it.
+		// Summaries default to "auto" when reasoning is active: the encrypted reasoning
+		// payload is bound to the producing platform, so the summary is the only reasoning
+		// text that survives a later switch to another provider or wire family. "none"
+		// opts out explicitly.
+		if effectiveReasoningEffort != "" || effectiveReasoningSummary != "" {
+			reqBody.Reasoning = &reasoningConfig{Effort: effectiveReasoningEffort, Summary: effectiveReasoningSummary}
+		}
+		if ot.TextVerbosity != "" {
+			reqBody.Text = &textConfig{Verbosity: ot.TextVerbosity}
+		}
+		if !reqBody.omitInclude {
+			reqBody.Include = responsesReasoningIncludes()
+		}
+		bodyBytes, err := json.Marshal(reqBody)
+		if err != nil {
+			return nil, nil, fmt.Errorf("marshal request body: %w", err)
+		}
+		bodyBytes, err = applyRequestBodyOverrides(bodyBytes, overrides)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		log.Debugf("responses request model=%v max_output_tokens=%v messages=%v tools=%v reasoning_effort=%v reasoning_summary=%v request_bytes=%v", model, reqBody.MaxOutputTokens, len(messages), len(tools), effectiveReasoningEffort, ot.ReasoningSummary, len(bodyBytes))
+		return bodyBytes, responsesBuiltBody{fullInput: fullInput, reqBody: reqBody}, nil
 	}
 
-	// Responses reasoning is emitted whenever effort or summary is configured. Codex's
-	// request builder emits the block for any reasoning-capable model even when effort
-	// is empty (effort omitted, summary carried), so gating on effort alone dropped it.
-	// Summaries default to "auto" when reasoning is active: the encrypted reasoning
-	// payload is bound to the producing platform, so the summary is the only reasoning
-	// text that survives a later switch to another provider or wire family. "none"
-	// opts out explicitly.
-	if effectiveReasoningEffort != "" || effectiveReasoningSummary != "" {
-		reqBody.Reasoning = &reasoningConfig{Effort: effectiveReasoningEffort, Summary: effectiveReasoningSummary}
+	var bodyBytes []byte
+	var builtAny any
+	var err error
+	if wsEligible {
+		bodyBytes, builtAny, err = buildResponsesRequest()
+	} else {
+		bodyBytes, builtAny, err = r.bodyReuse.bodyWithExtra(requestBodyIdentityFor(systemPrompt, messages, tools, maxTokens), buildResponsesRequest)
 	}
-	if ot.TextVerbosity != "" {
-		reqBody.Text = &textConfig{Verbosity: ot.TextVerbosity}
-	}
-	if !reqBody.omitInclude {
-		reqBody.Include = responsesReasoningIncludes()
-	}
-	bodyBytes, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("marshal request body: %w", err)
-	}
-	bodyBytes, err = applyRequestBodyOverrides(bodyBytes, overrides)
 	if err != nil {
 		return nil, err
 	}
+	built := builtAny.(responsesBuiltBody)
+	fullInput := built.fullInput
+	reqBody := built.reqBody
+
 	// Copy the body only when a dump will actually read it.
 	var dumpRequestBody []byte
 	if dumpWriter != nil {
 		dumpRequestBody = append([]byte(nil), bodyBytes...)
 	}
 
-	log.Debugf("responses request model=%v max_output_tokens=%v messages=%v tools=%v reasoning_effort=%v reasoning_summary=%v request_bytes=%v", model, reqBody.MaxOutputTokens, len(messages), len(tools), effectiveReasoningEffort, ot.ReasoningSummary, len(bodyBytes))
-
-	start := requestStartedAt
-	if useOpenAIOAuth && r.provider != nil && r.provider.IsCodexOAuthTransport() && r.provider.EffectiveResponsesWebsocket() && requestOverridesEmpty(overrides) {
+	turnState := ResponsesTurnStateFromContext(ctx)
+	turnStateIdentity := responsesTurnStateIdentity(r.provider, apiKey)
+	start := time.Now()
+	if wsEligible {
 		wsComplete := r.codexWSCompleteFn
 		if wsComplete == nil {
 			wsComplete = r.completeStreamCodexWebSocket
