@@ -678,12 +678,12 @@ func appendErrorResultLines(result []string, content string, width int) []string
 	return result
 }
 
-func bashCollapsedOutcomeSummary(b *Block) (string, bool) {
+func bashCollapsedOutcomeSummary(b *Block) string {
 	if b == nil || !b.ResultDone {
-		return "", false
+		return ""
 	}
 	if b.toolResultIsCancelled() {
-		return "cancelled", false
+		return "cancelled"
 	}
 	if b.toolResultIsError() {
 		// A single-line error result is the whole cause (for example a
@@ -695,28 +695,28 @@ func bashCollapsedOutcomeSummary(b *Block) (string, bool) {
 		content := strings.TrimSpace(b.ResultContent)
 		if toolOutcomeNonEmptyLineCount(content) == 1 {
 			if line := bashFirstNonEmptyLine(sanitizeToolDisplayText(bashErrorText(content))); line != "" {
-				return truncateOneLine(line, 120), true
+				return truncateOneLine(line, 120)
 			}
 		}
 		if timedOut := sanitizeToolDisplayText(bashTimeoutSummary(content)); timedOut != "" {
-			return timedOut, true
+			return timedOut
 		}
 		if exit := bashExitCodeAnywhere(content); exit != "" {
-			return exit, true
+			return exit
 		}
 		if line := bashFirstNonEmptyLine(sanitizeToolDisplayText(bashErrorText(content))); line != "" {
-			return truncateOneLine(line, 120), true
+			return truncateOneLine(line, 120)
 		}
-		return "failed", true
+		return "failed"
 	}
 	_, stdout := bashSplitResultStreams(b)
 	if line := bashFirstNonEmptyLine(sanitizeToolDisplayText(stdout)); line != "" {
-		return truncateOneLine(line, 120), false
+		return truncateOneLine(line, 120)
 	}
 	if line := bashFirstNonEmptyLine(sanitizeToolDisplayText(strings.TrimSpace(b.ResultContent))); line != "" {
-		return truncateOneLine(line, 120), false
+		return truncateOneLine(line, 120)
 	}
-	return "completed", false
+	return "completed"
 }
 
 func bashExpandedExitLine(b *Block) string {
@@ -1018,15 +1018,8 @@ func formatToolResultSummaryLine(b *Block) string {
 		return lspResultSummary(b.Content, trimmed)
 	case tools.NameCancel:
 		handle, _, ok := parseTaskToolHandle(trimmed)
-		if ok && handle.Status != "" {
-			switch handle.Status {
-			case "stopped":
-				return "Stopped"
-			case "cancelled":
-				return "Cancelled"
-			default:
-				return "Stopped"
-			}
+		if ok && handle.Status == "cancelled" {
+			return "Cancelled"
 		}
 		return "Stopped"
 	case tools.NameNotify:

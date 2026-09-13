@@ -91,7 +91,7 @@ func appendBashCollapsedSummary(result *[]string, b *Block, vals map[string]stri
 			}
 		}
 	}
-	summary, _ := bashCollapsedOutcomeSummary(b)
+	summary := bashCollapsedOutcomeSummary(b)
 	appendToolOutcomeBody(result, toolOutcomeKindOf(b), summary, contentWidth, false)
 }
 
