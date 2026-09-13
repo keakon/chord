@@ -43,8 +43,8 @@ func (b *Block) renderUserLocalShell(width int, spinnerFrame string) []string {
 	}
 	prefix := pseudo.renderToolPrefix(spinnerFrame)
 	// The disclosure marker advertises toggling; only show it when the card
-	// can actually toggle (ToggleAtWidth requires a non-empty result).
-	if !b.UserLocalShellPending && strings.TrimSpace(b.UserLocalShellResult) != "" {
+	// can actually toggle (the same predicate ToggleAtWidth applies).
+	if userLocalShellToggleable(b) {
 		prefix = renderToolDisclosurePrefix(prefix, !b.Collapsed)
 	}
 	isActive := b.UserLocalShellPending && spinnerFrame != ""

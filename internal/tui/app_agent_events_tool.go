@@ -100,7 +100,6 @@ func (m *Model) ensureToolCallBlock(id, name, argsJSON, agentID string, state ag
 	if includeArgProgress {
 		displayArgs = streamingToolDisplayArgs(name, argsJSON, "")
 	}
-	collapsed := !toolCardAlwaysExpanded(name)
 	block := &Block{
 		ID:                 m.nextBlockID,
 		Type:               BlockToolCall,
@@ -108,14 +107,11 @@ func (m *Model) ensureToolCallBlock(id, name, argsJSON, agentID string, state ag
 		RawArgs:            argsJSON,
 		ToolName:           name,
 		ToolID:             id,
-		Collapsed:          collapsed,
 		AgentID:            agentID,
 		ToolExecutionState: state,
 		StartedAt:          time.Now(),
 	}
-	if toolCardAlwaysExpanded(name) && name != tools.NameDelegate {
-		block.ToolCallDetailExpanded = true
-	}
+	initToolCardFoldState(block, name)
 	if includeArgProgress {
 		if progress := inferToolArgProgress(name, argsJSON); progress != nil {
 			cp := *progress

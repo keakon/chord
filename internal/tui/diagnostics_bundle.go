@@ -356,7 +356,7 @@ func readSanitizedLogTail(path, baseDir string, pid int) (string, bool) {
 	if _, err := io.Copy(&buf, f); err != nil {
 		return "", false
 	}
-	lines := strings.Split(strings.ReplaceAll(buf.String(), "\r\n", "\n"), "\n")
+	lines := strings.Split(markdownutil.NormalizeNewlines(buf.String()), "\n")
 	if len(lines) > diagnosticLogTailLines {
 		lines = lines[len(lines)-diagnosticLogTailLines:]
 	}

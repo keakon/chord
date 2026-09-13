@@ -231,14 +231,7 @@ func (b *Block) tryRecoverFromSpillFailure() bool {
 
 func preserveMutableBlockState(src, dst *Block) {
 	dst.Focused = src.Focused
-	dst.Collapsed = src.Collapsed
-	dst.ToolCallDetailExpanded = src.ToolCallDetailExpanded
-	dst.ThinkingCollapsed = src.ThinkingCollapsed
-	dst.Streaming = src.Streaming
-	dst.UserLocalShellPending = src.UserLocalShellPending
-	dst.UserLocalShellFailed = src.UserLocalShellFailed
-	dst.StartedAt = src.StartedAt
-	dst.SettledAt = src.SettledAt
+	copyMutableBlockViewState(dst, src)
 	dst.CompactionSummaryRaw = src.CompactionSummaryRaw
 	dst.CompactionSummaryMode = src.CompactionSummaryMode
 }

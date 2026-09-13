@@ -12,6 +12,7 @@ import (
 	uv "github.com/keakon/ultraviolet"
 
 	"github.com/keakon/chord/internal/buildinfo"
+	"github.com/keakon/chord/internal/tui/markdownutil"
 )
 
 const maxTUIDiagnosticEvents = 128
@@ -98,7 +99,7 @@ func (m *Model) snapshotTUIDiagnosticEvents() []tuiDiagnosticEvent {
 }
 
 func writeDiagnosticDumpSection(sb *strings.Builder, content string) {
-	content = strings.ReplaceAll(content, "\r\n", "\n")
+	content = markdownutil.NormalizeNewlines(content)
 	content = strings.TrimRight(content, "\n")
 	if strings.TrimSpace(content) == "" {
 		fmt.Fprintf(sb, "(empty)\n")
@@ -120,7 +121,7 @@ func writeDiagnosticDumpSection(sb *strings.Builder, content string) {
 }
 
 func writeDiagnosticBottomLines(sb *strings.Builder, content string, startRow int) {
-	content = strings.ReplaceAll(content, "\r\n", "\n")
+	content = markdownutil.NormalizeNewlines(content)
 	content = strings.TrimRight(content, "\n")
 	if strings.TrimSpace(content) == "" {
 		fmt.Fprintf(sb, "(empty)\n")
@@ -289,7 +290,7 @@ func (m *Model) buildDiagnosticDumpContent(now time.Time, trigger, outputPath st
 	screenRender := ""
 	frameRender := ""
 	if scratch.RenderBuffer != nil {
-		screenRender = strings.ReplaceAll(scratch.Render(), "\r\n", "\n")
+		screenRender = markdownutil.NormalizeNewlines(scratch.Render())
 		frameRender = screenRender
 	}
 

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/keakon/chord/internal/tui/markdownutil"
 )
 
 type lspDisplayArgs struct {
@@ -158,7 +160,7 @@ func (b *Block) lspDisplayResultContent(result string) string {
 	if b == nil || lspNoLocationsSummary(result) != "" {
 		return ""
 	}
-	lines := strings.Split(strings.ReplaceAll(result, "\r\n", "\n"), "\n")
+	lines := strings.Split(markdownutil.NormalizeNewlines(result), "\n")
 	for i, line := range lines {
 		location, ok := parseLspDisplayLocation(line)
 		if !ok {

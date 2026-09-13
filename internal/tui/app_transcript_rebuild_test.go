@@ -234,3 +234,76 @@ func TestSameSessionRebuildStillAdoptsCardState(t *testing.T) {
 		t.Fatalf("same-session rebuild must still adopt state, got ID=%d collapsed=%v", thinking.ID, thinking.ThinkingCollapsed)
 	}
 }
+
+// A JOB RESULT card rebuilt from the durable background_result row must adopt
+// the live card's state through its durable identity — the mailbox message id,
+// with the background object id as fallback — so a compaction rebuild does not
+// reset a card whose long output would never match by content digest.
+func TestCompactionRebuildPreservesBackgroundResultCardState(t *testing.T) {
+	backend := &sessionControlAgent{}
+	m := NewModelWithSize(backend, 120, 24)
+	// The live card, as BackgroundResultAppendedEvent builds it: parsed
+	// headline content plus both durable identity fields.
+	m.viewport.AppendBlock(&Block{ID: 0, Type: BlockUser, Content: "first prompt"})
+	m.viewport.AppendBlock(&Block{
+		ID:                 1,
+		Type:               BlockStatus,
+		StatusTitle:        backgroundResultCardTitle,
+		Content:            "✓ job-1 · Run production build",
+		BackgroundObjectID: "job-1",
+		MailboxMessageID:   "mb-1",
+		Collapsed:          true,
+	})
+	m.nextBlockID = 2
+
+	backend.messages = []message.Message{
+		{Role: "user", IsCompactionSummary: true, Content: "[Context Summary]\nsummary\n\n[Context compressed]"},
+		{Role: "user", Kind: message.KindBackgroundResult, Content: "✓ job-1 · Run production build\nStatus: completed (exit code 0)", Mailbox: &message.MailboxMetadata{MessageID: "mb-1"}},
+	}
+	m.rebuildViewportFromMessagesWithReason("session_restored")
+
+	var restored *Block
+	for _, b := range m.viewport.visibleBlocks() {
+		if b.Type == BlockStatus && b.MailboxMessageID == "mb-1" {
+			restored = b
+			break
+		}
+	}
+	if restored == nil {
+		t.Fatal("rebuilt transcript lost the JOB RESULT card")
+	}
+	if restored.ID != 1 {
+		t.Fatalf("rebuilt JOB RESULT card ID = %d, want its pre-compaction ID 1", restored.ID)
+	}
+	if !restored.Collapsed {
+		t.Fatal("rebuilt JOB RESULT card lost its folded state")
+	}
+}
+
+// Repeated identical rows still pair in transcript order: with an unchanged
+// occurrence count, the nth rebuilt copy adopts the nth previous card's state,
+// so identical prompts do not reset each other's fold state and ID.
+func TestCompactionRebuildPairsRepeatedUserCardsInOrder(t *testing.T) {
+	backend := &sessionControlAgent{}
+	m := NewModelWithSize(backend, 120, 24)
+	m.viewport.AppendBlock(&Block{ID: 0, Type: BlockUser, Content: "continue"})
+	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockUser, Content: "continue", Collapsed: true})
+	m.nextBlockID = 2
+
+	backend.messages = []message.Message{
+		{Role: "user", Content: "continue"},
+		{Role: "user", Content: "continue"},
+	}
+	m.rebuildViewportFromMessagesWithReason("session_restored")
+
+	blocks := m.viewport.visibleBlocks()
+	if len(blocks) != 2 {
+		t.Fatalf("len(blocks) = %d, want 2", len(blocks))
+	}
+	if blocks[0].ID != 0 || blocks[0].Collapsed {
+		t.Fatalf("first repeated card: ID = %d collapsed = %v, want ID 0 expanded", blocks[0].ID, blocks[0].Collapsed)
+	}
+	if blocks[1].ID != 1 || !blocks[1].Collapsed {
+		t.Fatalf("second repeated card: ID = %d collapsed = %v, want ID 1 folded", blocks[1].ID, blocks[1].Collapsed)
+	}
+}

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"regexp"
 	"strings"
+
+	"github.com/keakon/chord/internal/tui/markdownutil"
 )
 
 // writeSuccessResultRe parses the canonical write result line
@@ -25,7 +27,7 @@ type writeResultSections struct {
 }
 
 func splitWriteResult(result string) writeResultSections {
-	result = strings.ReplaceAll(result, "\r\n", "\n")
+	result = markdownutil.NormalizeNewlines(result)
 	lines := strings.Split(result, "\n")
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)

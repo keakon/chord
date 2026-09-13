@@ -71,6 +71,21 @@ func cloneBlockForDeferredSource(src *Block) *Block {
 	return &clone
 }
 
+// copyMutableBlockViewState copies the per-card view state a rebuilt or
+// spill-restored block must keep from the live block it replaces: the fold and
+// toggle state plus the timing the status rows render. New per-card view state
+// belongs in this list, or a rebuilt card silently loses it.
+func copyMutableBlockViewState(dst, src *Block) {
+	dst.Collapsed = src.Collapsed
+	dst.ToolCallDetailExpanded = src.ToolCallDetailExpanded
+	dst.ThinkingCollapsed = src.ThinkingCollapsed
+	dst.Streaming = src.Streaming
+	dst.UserLocalShellPending = src.UserLocalShellPending
+	dst.UserLocalShellFailed = src.UserLocalShellFailed
+	dst.StartedAt = src.StartedAt
+	dst.SettledAt = src.SettledAt
+}
+
 func (b *Block) toolResultIsError() bool {
 	return b.ResultStatus == agent.ToolResultStatusError
 }
@@ -284,16 +299,17 @@ func (b *Block) MeasureLineCount(width int) int {
 	return len(b.Render(width, ""))
 }
 
-// Toggle flips the collapsed state (only meaningful for tool blocks and
-// assistant blocks with thinking parts).
-func (b *Block) Toggle() {
-	b.ToggleAtWidth(0)
+// userLocalShellToggleable reports whether a `!shell` user card has something
+// to fold: the disclosure marker is only rendered when the card can actually
+// toggle, so the marker and the toggle gate must agree.
+func userLocalShellToggleable(b *Block) bool {
+	return b.UserLocalShellCmd != "" && !b.UserLocalShellPending && strings.TrimSpace(b.UserLocalShellResult) != ""
 }
 
 func (b *Block) ToggleAtWidth(width int) bool {
 	switch b.Type {
 	case BlockUser:
-		if b.UserLocalShellCmd != "" && !b.UserLocalShellPending && strings.TrimSpace(b.UserLocalShellResult) != "" {
+		if userLocalShellToggleable(b) {
 			b.Collapsed = !b.Collapsed
 			b.InvalidateCache()
 			return true
@@ -307,9 +323,10 @@ func (b *Block) ToggleAtWidth(width int) bool {
 		// The read call card's disclosure depends on the body it will render;
 		// refuse the toggle when there is nothing to expand so the card never
 		// flips state with no visible change and no marker. BlockToolResult
-		// renders through the generic card, whose marker rule already matches
-		// its own body. width <= 0 is a programmatic toggle (no layout width);
-		// keep it permissive.
+		// keeps the permissive toggle: its header shape changes between the
+		// compact and expanded forms, and only the short restore-path cards
+		// can flip without a disclosure marker. width <= 0 is a programmatic
+		// toggle (no layout width); keep it permissive.
 		if b.Type == BlockToolCall && b.ToolName == tools.NameRead && width > 0 && !b.readCardHasDisclosure(newWideHeaderToolCardMetrics(width).contentWidth) {
 			return false
 		}

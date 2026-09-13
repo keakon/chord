@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+
+	"github.com/keakon/chord/internal/tui/markdownutil"
 )
 
 type deleteDisplaySection struct {
@@ -98,7 +100,7 @@ func appendDeleteRequestedPaths(result []string, b *Block, paths []string, width
 }
 
 func parseDeleteDisplayResult(content string) (string, []deleteDisplaySection) {
-	content = strings.ReplaceAll(content, "\r\n", "\n")
+	content = markdownutil.NormalizeNewlines(content)
 	var headline string
 	var sections []deleteDisplaySection
 	current := -1

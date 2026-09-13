@@ -368,7 +368,7 @@ func TestBackgroundResultCardFoldsOutputAndExpandsOnToggle(t *testing.T) {
 	}
 }
 
-func TestOnlyBackgroundResultStatusCardsFold(t *testing.T) {
+func TestStatusCardFoldFamilies(t *testing.T) {
 	// A runtime notice folds to a one-line summary when its body hides more
 	// than the first line.
 	notice := &Block{Type: BlockStatus, StatusTitle: "LOOP", Content: "Target:\n- finish current task"}

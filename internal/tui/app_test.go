@@ -4864,7 +4864,7 @@ func TestHandleAgentEventSkillToolCollapsedSummaryButExpandedBody(t *testing.T) 
 		t.Fatalf("collapsed skill card should hide args/body/tags, got:\n%s", collapsed)
 	}
 
-	block.Toggle()
+	block.ToggleAtWidth(120)
 	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
 	for _, want := range []string{"skill skill-creator", "Skill Creator", "Step one", "Step two"} {
 		if !strings.Contains(expanded, want) {
@@ -5071,7 +5071,7 @@ func TestMessagesToBlocksCompactionSummaryFullyExpandedAndNotCollapsible(t *test
 	if !strings.Contains(b.Content, "history-1.md") {
 		t.Fatalf("expanded content should show archived history path, got %q", b.Content)
 	}
-	b.Toggle()
+	b.ToggleAtWidth(120)
 	if b.Collapsed {
 		t.Fatal("compaction summary block should not collapse on toggle")
 	}

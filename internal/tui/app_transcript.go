@@ -155,6 +155,12 @@ func (m *Model) rebuildViewportFromMessagesPreservingActivity(reason string, pre
 	blocks := m.rebuildBlocksFromMessages(msgs)
 	blockBuildDuration := time.Since(blockBuildStarted)
 	if len(blocks) == 0 {
+		// Nothing to replace, so the viewport keeps whatever it held. Unlike the
+		// empty-transcript branch above, the epoch is deliberately NOT aligned
+		// here: if this rebuild followed a session switch, the untouched
+		// viewport still shows the outgoing session's cards, and aligning would
+		// let the next rebuild adopt from them. Within one session this branch
+		// is already aligned, so the guard is a no-op there.
 		m.logTranscriptRebuildTiming(reason, len(msgs), 0, messagesDuration, blockBuildDuration, 0, 0, 0, sidebarDuration, time.Since(rebuildStarted))
 		return
 	}
@@ -502,14 +508,7 @@ func preserveRebuiltBlockState(src, dst *Block) {
 		dst.StartedAt = src.StartedAt
 		dst.SettledAt = src.SettledAt
 	default:
-		dst.Collapsed = src.Collapsed
-		dst.ToolCallDetailExpanded = src.ToolCallDetailExpanded
-		dst.ThinkingCollapsed = src.ThinkingCollapsed
-		dst.Streaming = src.Streaming
-		dst.UserLocalShellPending = src.UserLocalShellPending
-		dst.UserLocalShellFailed = src.UserLocalShellFailed
-		dst.StartedAt = src.StartedAt
-		dst.SettledAt = src.SettledAt
+		copyMutableBlockViewState(dst, src)
 	}
 }
 
@@ -599,17 +598,14 @@ func newTranscriptToolCallBlock(nextID int, tc message.ToolCall) *Block {
 	}
 	toolName := tools.NormalizeName(tc.Name)
 	b := &Block{
-		ID:        nextID,
-		Type:      BlockToolCall,
-		Content:   stableToolDisplayArgs(toolName, argsStr, ""),
-		RawArgs:   argsStr,
-		ToolName:  toolName,
-		ToolID:    tc.ID,
-		Collapsed: !toolCardAlwaysExpanded(toolName),
+		ID:       nextID,
+		Type:     BlockToolCall,
+		Content:  stableToolDisplayArgs(toolName, argsStr, ""),
+		RawArgs:  argsStr,
+		ToolName: toolName,
+		ToolID:   tc.ID,
 	}
-	if toolCardAlwaysExpanded(toolName) && toolName != tools.NameDelegate {
-		b.ToolCallDetailExpanded = true
-	}
+	initToolCardFoldState(b, toolName)
 	applyDoneReportFromArgs(b, argsStr, "")
 	return b
 }

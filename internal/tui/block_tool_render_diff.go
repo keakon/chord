@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/markdownutil"
 )
 
 const (
@@ -378,7 +379,7 @@ type applyPatchErrorSections struct {
 }
 
 func splitApplyPatchErrorSections(content string) applyPatchErrorSections {
-	content = strings.TrimSpace(strings.ReplaceAll(content, "\r\n", "\n"))
+	content = strings.TrimSpace(markdownutil.NormalizeNewlines(content))
 	if !strings.HasPrefix(content, "apply_patch partially applied:") {
 		return applyPatchErrorSections{failure: toolErrorDisplayContent(content)}
 	}

@@ -146,6 +146,18 @@ func toolCardAlwaysExpanded(toolName string) bool {
 	return false
 }
 
+// initToolCardFoldState applies the shared initial fold state to a tool call
+// card: always-expanded cards start expanded and pin their detail pane open
+// (except a delegate's, which stays compact), everything else starts
+// collapsed. The restore builder and the live event builder must agree, so
+// both go through here instead of duplicating the combination.
+func initToolCardFoldState(b *Block, toolName string) {
+	b.Collapsed = !toolCardAlwaysExpanded(toolName)
+	if toolCardAlwaysExpanded(toolName) && toolName != tools.NameDelegate {
+		b.ToolCallDetailExpanded = true
+	}
+}
+
 // Disclosure markers for collapsible cards. renderToolDisclosurePrefix and
 // renderToolPrefixForExpanded must stay in sync through these constants.
 const (
@@ -816,7 +828,7 @@ func bashErrorText(content string) string {
 // carry the trailing "Error: " marker prefix are stripped first so the exit
 // code inside them is still found.
 func bashExitCodeAnywhere(content string) string {
-	for line := range strings.SplitSeq(strings.ReplaceAll(content, "\r\n", "\n"), "\n") {
+	for line := range strings.SplitSeq(markdownutil.NormalizeNewlines(content), "\n") {
 		line = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "Error: "))
 		if !strings.HasPrefix(line, "exit code ") {
 			continue
@@ -833,7 +845,7 @@ func bashExitCodeAnywhere(content string) string {
 }
 
 func bashFirstNonEmptyLine(content string) string {
-	for line := range strings.SplitSeq(strings.ReplaceAll(content, "\r\n", "\n"), "\n") {
+	for line := range strings.SplitSeq(markdownutil.NormalizeNewlines(content), "\n") {
 		line = strings.TrimSpace(line)
 		if line != "" {
 			return line
@@ -1030,9 +1042,6 @@ func formatToolResultSummaryLine(b *Block) string {
 			default:
 				return "Sent"
 			}
-		}
-		if strings.TrimSpace(trimmed) != "" {
-			return "Sent"
 		}
 		return "Sent"
 	default:
@@ -1253,7 +1262,7 @@ func parseGrepResultMeta(result string) grepResultMeta {
 		meta.EmptyResult = true
 		return meta
 	}
-	for line := range strings.SplitSeq(strings.ReplaceAll(trimmed, "\r\n", "\n"), "\n") {
+	for line := range strings.SplitSeq(markdownutil.NormalizeNewlines(trimmed), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -1301,7 +1310,7 @@ func parseGlobResultMeta(result string) globResultMeta {
 	if trimmed == "" {
 		return meta
 	}
-	for line := range strings.SplitSeq(strings.ReplaceAll(trimmed, "\r\n", "\n"), "\n") {
+	for line := range strings.SplitSeq(markdownutil.NormalizeNewlines(trimmed), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -1334,7 +1343,7 @@ func parseDiffResultMeta(diff string) diffResultMeta {
 		return meta
 	}
 	seenFiles := map[string]struct{}{}
-	for line := range strings.SplitSeq(strings.ReplaceAll(diff, "\r\n", "\n"), "\n") {
+	for line := range strings.SplitSeq(markdownutil.NormalizeNewlines(diff), "\n") {
 		switch {
 		case strings.HasPrefix(line, "--- "):
 			path := strings.TrimSpace(strings.TrimPrefix(line, "--- "))
