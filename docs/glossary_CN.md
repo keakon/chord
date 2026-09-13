@@ -4,7 +4,7 @@
 
 ## MainAgent
 
-会话内唯一的主 agent。它负责面向用户的对话，也是唯一能派出 SubAgent 的角色。当前主模式（role）显示在 TUI 状态栏，仅在 main 视图里可用 `Tab` 循环切换。
+会话内唯一的主 agent。它负责面向用户的对话，也是唯一能派出 SubAgent 的角色。当前主模式（role）显示在 TUI 状态栏，仅在 main 视图的 Insert 模式里用 `Shift+Tab` 循环切换。
 
 ## SubAgent
 

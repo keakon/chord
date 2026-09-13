@@ -328,8 +328,7 @@ Loop 模式还会检测连续重复的相同工具调用。发现卡住后，Cho
 
 Chord 支持 MainAgent 与 SubAgent 协作。
 
-- `Tab`：循环切换 main agent 的模式（role，显示在状态栏；仅在 main 视图生效）
-- `Shift+Tab`：在 main agent 与各 sub agent 之间循环切换当前查看的 agent 视图
+- `Shift+Tab`：Insert 模式下循环切换 main agent 的模式（role，显示在状态栏；仅在 main 视图生效）；Normal 模式下在 main agent 与各 sub agent 之间循环切换当前查看的 agent 视图
 
 在 SubAgent 视图中可查看该 agent 的上下文与输出，也可提交新输入。completed、failed、cancelled 只描述上一次执行结果，不会让该视图变成只读。
 

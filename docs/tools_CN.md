@@ -31,7 +31,7 @@
 
 | 工具 | 用途 |
 | --- | --- |
-| `shell` | 执行非交互式 shell 命令。默认前台运行；带 `run_in_background: true` 时作为后台 job 启动。前台命令超过 `yield_ms`（默认 90000）会自动转成后台 job；`timeout_ms` 限制执行时长：前台命令默认 600000、上限 600000；`run_in_background: true` 上限 21600000（6 小时），且未显式给出 `timeout_ms` 时不设截止；`0` 表示不设截止。不可自动提升的前台命令——只由刻意等待（`sleep`）和短 `git` 查询组成的命令，或无法解析的命令——即使传 `timeout_ms: 0` 也保留默认上限，因此前台调用不会无限阻塞当前回合；耗时较长的 `git` 操作（`clone`、`fetch`、`pull`、`push`、`submodule`、`gc`）和其它长命令一样可以提升。 |
+| `shell` | 执行非交互式 shell 命令。默认前台运行；带 `run_in_background: true` 时作为后台 job 启动。前台命令超过 `yield_ms`（默认 90000）会自动转成后台 job；`timeout_ms` 限制执行时长：前台命令默认 600000、上限 600000；`run_in_background: true` 上限 21600000（6 小时），且未显式给出 `timeout_ms` 时不设截止；`0` 表示不设截止。不可自动提升的前台命令——只由刻意等待（`sleep`）和短 `git` 查询组成的命令，或无法解析的命令——即使传 `timeout_ms: 0` 也保留默认上限，因此前台调用不会无限阻塞当前回合；耗时较长的 `git` 操作（`clone`、`fetch`、`pull`、`push`、`submodule`、`gc`、`fsck`、`repack`、`bundle`、`filter-branch`）和其它长命令一样可以提升。 |
 | `job_output` | 读取后台 job 自上次读取以来的输出，末尾附 `[status: ...]` 状态行。`wait` 决定这次调用是否阻塞：`none`（默认）只返回当前已有输出，`output` 等到有新输出，`exit` 等到 job 结束——每次等待都由 runtime 限制在 30 秒内。等待超时不算错误：job 继续运行，结果里会标成 running。连续多次非阻塞读取都没有新输出时，会先被提示为轮询、随后被拒绝，所以只在有理由时才继续读。返回给模型的文本会去掉终端转义序列。 |
 | `job_list` | 列出你可读取或停止的后台 job（id、status、已运行时长、标签），含主 agent 与你直接 owner 启动的 job。 |
 | `job_kill` | 按 `job_id` 停止后台 job，可选 `reason`。 |

@@ -4,7 +4,7 @@ Quick reference for the terms that appear across Chord's docs.
 
 ## MainAgent
 
-The single main agent for a session. It owns the user-facing conversation and is the only agent that can spawn SubAgents. The active main mode (role) is shown in the TUI status bar and can be cycled with `Tab` (main view only).
+The single main agent for a session. It owns the user-facing conversation and is the only agent that can spawn SubAgents. The active main mode (role) is shown in the TUI status bar and can be cycled with `Shift+Tab` in Insert mode (main view only).
 
 ## SubAgent
 

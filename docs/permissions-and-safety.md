@@ -19,7 +19,7 @@ Typical permission states:
 
 Rules are keyed by tool name; the full list of built-in tool names is in [Built-in tools](./tools.md).
 
-A rule that names a tool which no longer exists matches nothing. For example, the `spawn`, `spawn_status`, and `spawn_stop` tools were removed in favor of background `shell` jobs plus the `job_output`, `job_list`, and `job_kill` tools — a `spawn*` permission rule therefore no longer matches any registered tool. See the CHANGELOG for the full migration notes before reusing an old `spawn*` rule.
+A rule that names a nonexistent tool matches nothing, so a typo silently leaves that tool unmatched instead of failing. Background work runs through `shell` (with `run_in_background: true`) plus the `job_output`, `job_list`, and `job_kill` tools.
 
 In the TUI confirmation dialog, `M` opens the add-rule picker for the current tool call; press `Enter` in that picker to save the selected rule and allow the current call. For `delete`, the picker suggests reusable parent-directory rules instead of one-off exact-file rules. Directories covering more paths that still need approval appear first, `*` (any delete path) is always available, and `**` (anything under the current working directory) is also available when every requested path is inside that directory. The broad `**` and `*` choices are never selected by default.
 
