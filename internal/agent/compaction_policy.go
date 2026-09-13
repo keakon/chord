@@ -1142,7 +1142,7 @@ func (a *MainAgent) rememberPreparedLLMRequest(turnID uint64, original, prepared
 	shapes, source := a.incrementalMessageShapesLocked(original)
 	a.lastPreparedLLMRequestShape = shapes
 	a.lastPreparedLLMShapeSource = source
-	a.lastPreparedLLMRequestPrefix = cloneMessageSliceForRequestShape(prepared)
+	a.lastPreparedLLMRequestPrefix = cowRequestShapeSlice(a.lastPreparedLLMRequestPrefix, prepared)
 	a.lastPreparedLLMReducedIndices = reducedIndices
 	if discardedInputs != nil {
 		a.lastPreparedLLMDiscardedInputs = maps.Clone(discardedInputs)
@@ -1342,7 +1342,7 @@ func (a *MainAgent) updatePreparedLLMRequestSurface(turnID uint64, prepared []me
 		a.lastPreparedLLMShapeSource = append([]message.Message(nil), prepared...)
 	}
 	a.lastPreparedLLMTurnID = turnID
-	a.lastPreparedLLMRequestPrefix = cloneMessageSliceForRequestShape(prepared)
+	a.lastPreparedLLMRequestPrefix = cowRequestShapeSlice(a.lastPreparedLLMRequestPrefix, prepared)
 	a.lastPreparedReductionStats = cloneContextReductionStats(a.contextReductionStats)
 }
 
@@ -2261,6 +2261,28 @@ func cloneMessageSliceForRequestShape(messages []message.Message) []message.Mess
 	cloned := make([]message.Message, len(messages))
 	for i := range messages {
 		cloned[i] = cloneMessageForRequestShape(messages[i])
+	}
+	return cloned
+}
+
+// cowRequestShapeSlice builds the stored request-shape copy of prepared
+// against the previous stored copy: field-equal messages share the previous
+// copy's message values, only changed messages deep-clone. Sharing is safe
+// because the previous copy is already storage-owned, the LLM layer
+// deep-copies messages per target before any mutation
+// (modelcompat.NormalizeForTarget), and every stored-prefix consumer treats it
+// as read-only — so an in-place edit cannot leak into storage.
+func cowRequestShapeSlice(previous, prepared []message.Message) []message.Message {
+	if len(prepared) == 0 {
+		return nil
+	}
+	cloned := make([]message.Message, len(prepared))
+	for i := range prepared {
+		if i < len(previous) && stableReductionMessageEquivalent(&previous[i], &prepared[i]) {
+			cloned[i] = previous[i]
+			continue
+		}
+		cloned[i] = cloneMessageForRequestShape(prepared[i])
 	}
 	return cloned
 }
