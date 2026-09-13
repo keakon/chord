@@ -308,24 +308,6 @@ func (a *MainAgent) appendCompletedInterruptedToolResult(payload *ToolResultPayl
 // handleToolResult processes a single tool execution result. When all pending
 // tool calls for the current turn have completed, a new LLM call is initiated
 // to let the model decide what to do next.
-func findAssistantMessageForToolCall(msgs []message.Message, callID string) (message.Message, bool) {
-	callID = strings.TrimSpace(callID)
-	if callID == "" {
-		return message.Message{}, false
-	}
-	for _, msg := range slices.Backward(msgs) {
-
-		if msg.Role != "assistant" || len(msg.ToolCalls) == 0 {
-			continue
-		}
-		for _, tc := range msg.ToolCalls {
-			if tc.ID == callID {
-				return msg, true
-			}
-		}
-	}
-	return message.Message{}, false
-}
 
 func rawToolResultForVerification(payload *ToolResultPayload) string {
 	if payload == nil {
@@ -346,20 +328,79 @@ func (a *MainAgent) toolResultParts(text string, images []message.ContentPart) [
 	return parts
 }
 
+// toolCallSkillNameFromContext is the Snapshot-free form of
+// toolCallSkillName: it resolves the skill name through the manager's
+// read-locked backward scan.
+func (a *MainAgent) toolCallSkillNameFromContext(callID, fallbackArgsJSON string) string {
+	callID = strings.TrimSpace(callID)
+	if a == nil || a.ctxMgr == nil || callID == "" {
+		return toolCallSkillName(nil, callID, fallbackArgsJSON)
+	}
+	var name string
+	a.ctxMgr.ScanBackward(func(msg *message.Message) bool {
+		if msg.Role != message.RoleAssistant || len(msg.ToolCalls) == 0 {
+			return false
+		}
+		for _, tc := range msg.ToolCalls {
+			if tc.ID == callID && tools.NormalizeName(tc.Name) == tools.NameSkill {
+				if parsed := parseSkillToolCallName(tc.Args); parsed != "" {
+					name = parsed
+					return true
+				}
+			}
+		}
+		return false
+	})
+	if name != "" {
+		return name
+	}
+	return toolCallSkillName(nil, callID, fallbackArgsJSON)
+}
+
+// assistantContentForToolCall returns the content of the assistant message
+// that declared callID, resolved through the read-locked backward scan.
+func (a *MainAgent) assistantContentForToolCall(callID string) string {
+	callID = strings.TrimSpace(callID)
+	if a == nil || a.ctxMgr == nil || callID == "" {
+		return ""
+	}
+	var content string
+	found := false
+	a.ctxMgr.ScanBackward(func(msg *message.Message) bool {
+		if msg.Role != message.RoleAssistant || len(msg.ToolCalls) == 0 {
+			return false
+		}
+		for _, tc := range msg.ToolCalls {
+			if tc.ID == callID {
+				content = msg.Content
+				found = true
+				return true
+			}
+		}
+		return false
+	})
+	if !found {
+		return ""
+	}
+	return content
+}
+
+func parseSkillToolCallName(args []byte) string {
+	if len(args) == 0 {
+		return ""
+	}
+	var parsed struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(args, &parsed); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(parsed.Name)
+}
+
 func toolCallSkillName(msgs []message.Message, callID, fallbackArgsJSON string) string {
 	callID = strings.TrimSpace(callID)
-	parse := func(args []byte) string {
-		if len(args) == 0 {
-			return ""
-		}
-		var parsed struct {
-			Name string `json:"name"`
-		}
-		if err := json.Unmarshal(args, &parsed); err != nil {
-			return ""
-		}
-		return strings.TrimSpace(parsed.Name)
-	}
+	parse := parseSkillToolCallName
 	if callID != "" {
 		for _, msg := range slices.Backward(msgs) {
 
@@ -409,7 +450,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 			})
 		}
 		if tools.NormalizeName(payload.Name) == tools.NameSkill {
-			if skillName := toolCallSkillName(a.ctxMgr.Snapshot(), payload.CallID, payload.ArgsJSON); skillName != "" {
+			if skillName := a.toolCallSkillNameFromContext(payload.CallID, payload.ArgsJSON); skillName != "" {
 				a.MarkSkillInvokedByName(skillName)
 			}
 		}
@@ -487,11 +528,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		}
 	}
 	if payload.Name == tools.NameDone && payload.Error == nil {
-		assistantMsg, ok := findAssistantMessageForToolCall(a.ctxMgr.Snapshot(), payload.CallID)
-		assistantContent := ""
-		if ok {
-			assistantContent = assistantMsg.Content
-		}
+		assistantContent := a.assistantContentForToolCall(payload.CallID)
 		a.pendingLoopExitResults = append(a.pendingLoopExitResults, &loopExitResult{CallID: payload.CallID, Reason: strings.TrimSpace(contextResult), AssistantContent: assistantContent, TurnID: a.turn.ID, ArgsJSON: payload.ArgsJSON})
 	}
 
