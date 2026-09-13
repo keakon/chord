@@ -134,7 +134,7 @@ func (r *streamContentReducer) handleThinking(text string) {
 	r.thinkingAccum.WriteString(text)
 	r.thinkingFull.WriteString(text)
 	if r.thinkingFlushInterval <= 0 {
-		// SubAgent historically forwards thinking deltas immediately while still
+		// No batching interval: forward each delta immediately while still
 		// retaining the full accumulated block for thinking_end.
 		r.emitThinkingDelta(text, r.scrubThinkingDelta)
 		return

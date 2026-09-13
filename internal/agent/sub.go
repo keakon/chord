@@ -1060,7 +1060,7 @@ func (s *SubAgent) newSubLLMStreamReducer(turn *Turn, promoteStreamingActivity f
 		scrubThinkingFinal:           scrubThinkingMarkers,
 		thinkingCommitMode:           streamContentCommitFullText,
 		textFlushInterval:            defaultStreamTextFlushInterval,
-		thinkingFlushInterval:        0,
+		thinkingFlushInterval:        defaultStreamThinkingFlushInterval,
 	}
 	streamReducer.tool = streamToolDeltaReducer{
 		agentID:          s.instanceID,

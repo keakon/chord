@@ -67,7 +67,7 @@ func TestStreamContentReducerThinkingStartedIncludesAgentID(t *testing.T) {
 	}
 }
 
-func TestStreamContentReducerSubAgentKeepsImmediateThinkingDeltaAndFinalText(t *testing.T) {
+func TestStreamContentReducerZeroThinkingIntervalEmitsImmediateDeltaAndFinalText(t *testing.T) {
 	var events []AgentEvent
 	reducer := streamContentReducer{
 		agentID:               "agent-1",
@@ -257,6 +257,18 @@ func TestSubLLMStreamReducerEmitsRequestProgress(t *testing.T) {
 	}
 	if state.requestProgressBytes != 40_934 || state.requestProgressEvents != 95 {
 		t.Fatalf("progress state = %#v, want bytes=40934 events=95", state)
+	}
+}
+
+func TestSubLLMStreamReducerBatchesThinkingOnSharedCadence(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := &SubAgent{
+		instanceID: "agent-1",
+		parent:     a,
+	}
+	reducer := sub.newSubLLMStreamReducer(&Turn{ID: 1}, func(string) {}, false, nil)
+	if got := reducer.content.thinkingFlushInterval; got != defaultStreamThinkingFlushInterval {
+		t.Fatalf("sub-agent thinking flush interval = %v, want %v", got, defaultStreamThinkingFlushInterval)
 	}
 }
 

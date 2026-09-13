@@ -239,12 +239,27 @@ func (a *MainAgent) resetSubAgentMailboxRuntime() {
 	a.refreshSubAgentInboxSummary()
 }
 
+// mailboxMessageBytes estimates the encoded size of a mailbox message for the
+// memory budget. Budget accounting only needs an approximation, so it sums
+// the dominant payload fields instead of marshaling the whole struct on every
+// enqueue and release.
 func mailboxMessageBytes(msg SubAgentMailboxMessage) int {
-	data, err := json.Marshal(msg)
-	if err == nil {
-		return len(data)
+	total := len(msg.Summary) + len(msg.Payload) + len(msg.MessagePayload)
+	if msg.Completion != nil {
+		total += len(msg.Completion.Summary) + len(msg.Completion.Result)
+		for _, f := range msg.Completion.FilesChanged {
+			total += len(f)
+		}
 	}
-	return len(msg.Summary) + len(msg.Payload)
+	for _, ref := range msg.ArtifactRefs {
+		total += len(ref.Path) + len(ref.ID) + len(ref.Description)
+	}
+	// Fixed overhead: identifiers, kind/priority enums and struct scaffolding.
+	const perMessageOverhead = 320
+	return total + perMessageOverhead + len(msg.MessageID) + len(msg.AgentID) +
+		len(msg.TaskID) + len(msg.OwnerAgentID) + len(msg.OwnerTaskID) +
+		len(msg.InReplyTo) + len(msg.Subtype) + len(msg.SourceTaskID) +
+		len(msg.TargetTaskID) + len(msg.CorrelationID)
 }
 
 func (a *MainAgent) mailboxMemoryLimits() (int, int) {
