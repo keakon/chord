@@ -130,8 +130,7 @@ type llmTraceCollector struct {
 }
 
 type toolTraceState struct {
-	trace     LLMTraceToolCall
-	lastInput string
+	trace LLMTraceToolCall
 }
 
 func newLLMTraceCollector(provider, model string, cb StreamCallback) *llmTraceCollector {
@@ -369,16 +368,9 @@ func (c *llmTraceCollector) addToolInputBytes(state *toolTraceState, tc *message
 	if state == nil || tc == nil {
 		return
 	}
-	input := tc.Input
-	if input == "" {
-		return
-	}
-	if strings.HasPrefix(input, state.lastInput) {
-		state.trace.ArgsBytes += len(input) - len(state.lastInput)
-	} else {
-		state.trace.ArgsBytes += len(input)
-	}
-	state.lastInput = input
+	// Providers deliver argument fragments, so each delta's length is exactly
+	// the number of new bytes.
+	state.trace.ArgsBytes += len(tc.Input)
 }
 
 func persistLLMTrace(writer *TraceWriter, collector *llmTraceCollector, httpStatus int, transport string, startedAt time.Time, resp *message.Response, err error) {

@@ -178,15 +178,24 @@ func TestParseGeminiSSEStream(t *testing.T) {
 		t.Fatalf("tool calls = %#v", resp.ToolCalls)
 	}
 	var sawThinkingEnd, sawText, sawToolEnd bool
+	var streamedArgs strings.Builder
 	for _, ev := range events {
 		switch ev.Type {
 		case message.StreamDeltaThinkingEnd:
 			sawThinkingEnd = true
 		case message.StreamDeltaText:
 			sawText = true
+		case message.StreamDeltaToolUseDelta:
+			streamedArgs.WriteString(ev.ToolCall.Input)
 		case message.StreamDeltaToolUseEnd:
 			sawToolEnd = true
+			if ev.ToolCall.Input != "" {
+				t.Fatalf("tool_use_end Input = %q, want the args delivered as fragments only", ev.ToolCall.Input)
+			}
 		}
+	}
+	if got := streamedArgs.String(); got != `{"q":"x"}` {
+		t.Fatalf("streamed argument fragments = %q, want the final args exactly once", got)
 	}
 	if !sawThinkingEnd || !sawText || !sawToolEnd {
 		t.Fatalf("missing expected stream events: thinking_end=%v text=%v tool_end=%v events=%#v", sawThinkingEnd, sawText, sawToolEnd, events)

@@ -485,7 +485,9 @@ func parseResponsesSSEWithOutputItemsAndTurnState(reader io.Reader, cb StreamCal
 					cb(message.StreamDelta{Progress: &message.StreamProgressDelta{Bytes: progressBytes, Events: progressEvents}})
 				}
 				dataChunkIndex++
-				eventDataParts = append(eventDataParts, append([]byte(nil), data...))
+				// data is a fresh per-line slice from readSSELine; appending
+				// it directly skips a redundant byte copy per SSE line.
+				eventDataParts = append(eventDataParts, data)
 				if collector != nil {
 					collector.Add(string(data))
 				}
@@ -754,11 +756,15 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 			acc.args.WriteString(delta.Delta)
 			// Stream callbacks must remain paired: deltas are emitted only after
 			// a start has been emitted for the same accumulator. Args still
-			// accumulate so finalize can make the discard decision.
+			// accumulate so finalize can make the discard decision. Input
+			// carries this delta's fragment only: consumers accumulate, so
+			// re-sending the accumulated args on every delta would be quadratic
+			// in the arguments' size. The empty "{}" argument object stays
+			// unsent (as under the cumulative protocol); the len check keeps
+			// that guard O(1) for every other fragment.
 			if state.cb != nil && acc.streamStartEmitted && acc.args.Len() > 0 {
-				argsStr := acc.args.String()
-				if argsStr != "{}" {
-					state.cb(message.StreamDelta{Type: message.StreamDeltaToolUseDelta, ToolCall: &message.ToolCallDelta{ID: responsesToolStreamID(acc), Name: acc.name, Input: argsStr}})
+				if !(acc.args.Len() == 2 && acc.args.String() == "{}") {
+					state.cb(message.StreamDelta{Type: message.StreamDeltaToolUseDelta, ToolCall: &message.ToolCallDelta{ID: responsesToolStreamID(acc), Name: acc.name, Input: delta.Delta}})
 				}
 			}
 		}

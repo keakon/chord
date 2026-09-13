@@ -29,7 +29,8 @@ func TestStreamToolDeltaReducerFreeformInputTextAccumulatesCanonicalArgs(t *test
 	// Streaming updates carry the growing raw text but not the canonical
 	// envelope: the envelope is a full copy of the patch, so rebuilding it per
 	// fragment is quadratic in the patch size, and nothing reads it before the
-	// arguments complete.
+	// arguments complete. Updates are coalesced to the flush cadence, so this
+	// two-fragment burst lands as a single update carrying the first fragment.
 	var texts []string
 	for _, evt := range events {
 		update, ok := evt.(ToolCallUpdateEvent)
@@ -41,8 +42,8 @@ func TestStreamToolDeltaReducerFreeformInputTextAccumulatesCanonicalArgs(t *test
 			t.Fatalf("streaming update ArgsJSON = %q, want no per-fragment envelope", update.ArgsJSON)
 		}
 	}
-	if len(texts) != 2 || texts[0] != "*** Begin Patch\n" || texts[1] != "*** Begin Patch\n*** Update File: src/demo.go\n" {
-		t.Fatalf("InputText accumulation = %#v, want incremental raw text", texts)
+	if len(texts) != 1 || texts[0] != "*** Begin Patch\n" {
+		t.Fatalf("InputText streaming updates = %#v, want one coalesced update", texts)
 	}
 	// The completion event is where the envelope has to be exact: speculative
 	// validation, tool execution and finalize all read it from there.
@@ -85,6 +86,56 @@ func TestStreamToolDeltaReducerFreeformInputTextSkipsJSONBranch(t *testing.T) {
 	}
 	if call.InputText != "*** Begin Patch\n" {
 		t.Fatalf("mixed-channel InputText = %q", call.InputText)
+	}
+}
+
+// A freeform patch is the largest streamed payload in the suite's coverage:
+// each delta must append to the builder (linear) and only the flush cadence may
+// emit the accumulated text, or the reducer is quadratic in the patch size.
+func TestStreamToolFreeformInputTextCoalescesToFlushCadence(t *testing.T) {
+	turn := newStreamToolReducerTestTurn()
+	var events []AgentEvent
+	reducer := streamToolDeltaReducer{turn: turn, emit: func(evt AgentEvent) { events = append(events, evt) }}
+
+	const fragCount = 40
+	var want strings.Builder
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseStart, ToolCall: &message.ToolCallDelta{ID: "call-patch", Name: tools.NameApplyPatch}})
+	for range fragCount {
+		fragment := "+" + strings.Repeat("x", 200) + "\n"
+		want.WriteString(fragment)
+		reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseDelta, ToolCall: &message.ToolCallDelta{ID: "call-patch", Name: tools.NameApplyPatch, InputText: fragment}})
+	}
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseEnd, ToolCall: &message.ToolCallDelta{ID: "call-patch"}})
+
+	var updates, done int
+	for _, evt := range events {
+		update, ok := evt.(ToolCallUpdateEvent)
+		if !ok {
+			continue
+		}
+		if update.ArgsStreamingDone {
+			done++
+			continue
+		}
+		updates++
+	}
+	// The whole burst lands well inside the flush window, so only the first
+	// fragment flushes a streaming update.
+	if updates != 1 {
+		t.Fatalf("streaming updates = %d, want 1 coalesced update", updates)
+	}
+	if done != 1 {
+		t.Fatalf("args-end updates = %d, want 1", done)
+	}
+	call, ok := turn.getStreamingToolCall("call-patch")
+	if !ok {
+		t.Fatal("streaming tool call not recorded")
+	}
+	if call.InputText != want.String() {
+		t.Fatalf("stored InputText length = %d, want %d", len(call.InputText), want.Len())
+	}
+	if wantJSON := canonicalApplyPatchArgsJSON(want.String()); call.ArgsJSON != wantJSON {
+		t.Fatalf("stored ArgsJSON length = %d, want %d", len(call.ArgsJSON), len(wantJSON))
 	}
 }
 
@@ -622,5 +673,71 @@ func TestStreamToolDeltaReducerDeltaCanCreateMissingStartMetadata(t *testing.T) 
 	}
 	if drained[0].CallID != "call-4" || drained[0].ArgsJSON != `{"path":"README.md"}` {
 		t.Fatalf("drained[0] = %#v", drained[0])
+	}
+}
+
+// Argument fragments must coalesce to the flush cadence: the first fragment
+// flushes immediately, further fragments inside the window are suppressed, and
+// the args-end event always carries the exact accumulated args. The final args
+// must equal a one-shot accumulation — fragments are the protocol, not a
+// lossy preview.
+func TestStreamToolArgsUpdatesCoalesceToFlushCadence(t *testing.T) {
+	turn := newStreamToolReducerTestTurn()
+	var events []AgentEvent
+	reducer := streamToolDeltaReducer{turn: turn, emit: func(evt AgentEvent) { events = append(events, evt) }}
+
+	const fragCount = 40
+	frag := `{"path":"notes.md","content":"` + strings.Repeat("x", 250)
+	var want strings.Builder
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseStart, ToolCall: &message.ToolCallDelta{ID: "call-1", Name: tools.NameWrite}})
+	for i := range fragCount {
+		fragment := frag
+		if i == fragCount-1 {
+			fragment = `"}` // close the JSON object on the last fragment
+		}
+		want.WriteString(fragment)
+		reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseDelta, ToolCall: &message.ToolCallDelta{ID: "call-1", Name: tools.NameWrite, Input: fragment}})
+	}
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseEnd, ToolCall: &message.ToolCallDelta{ID: "call-1"}})
+
+	var updates, done int
+	var lastArgs string
+	for _, evt := range events {
+		update, ok := evt.(ToolCallUpdateEvent)
+		if !ok {
+			continue
+		}
+		if update.ArgsStreamingDone {
+			done++
+			lastArgs = update.ArgsJSON
+			continue
+		}
+		updates++
+	}
+	// The whole burst lands well inside the flush window, so only the first
+	// fragment flushes a streaming update.
+	if updates != 1 {
+		t.Fatalf("streaming updates = %d, want 1 coalesced update", updates)
+	}
+	if done != 1 {
+		t.Fatalf("args-end updates = %d, want 1", done)
+	}
+	if lastArgs != want.String() {
+		t.Fatalf("args-end ArgsJSON length = %d, want %d (content mismatch)", len(lastArgs), want.Len())
+	}
+}
+
+// BenchmarkStreamToolArgsReduceLarge guards the fragment accumulation path:// reducing a large streamed tool call must stay linear in the args size, not
+// re-send or re-copy the accumulated args per fragment.
+func BenchmarkStreamToolArgsReduceLarge(b *testing.B) {
+	turn := newStreamToolReducerTestTurn()
+	var events int
+	reducer := streamToolDeltaReducer{turn: turn, emit: func(AgentEvent) { events++ }}
+	fragment := strings.Repeat("x", 250)
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseStart, ToolCall: &message.ToolCallDelta{ID: "call-1", Name: tools.NameWrite}})
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseDelta, ToolCall: &message.ToolCallDelta{ID: "call-1", Name: tools.NameWrite, Input: fragment}})
 	}
 }

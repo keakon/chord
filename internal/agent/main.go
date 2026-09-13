@@ -93,6 +93,10 @@ type Turn struct {
 	streamingToolMu    sync.Mutex
 	streamingToolCalls map[string]PendingToolCall
 	streamingToolOrder []string
+	// streamingToolEmitAt records the last TUI args-update flush per call ID so
+	// per-fragment ToolCallUpdateEvents coalesce to the flush cadence.
+	// Protected by streamingToolMu.
+	streamingToolEmitAt map[string]time.Time
 	// partialText accumulates assistant text streamed during the current LLM
 	// round so it can be saved to history if the stream is interrupted before
 	// a normal DeltaStop. Protected by partialTextMu because the stream
@@ -188,6 +192,24 @@ type PendingToolCall struct {
 	// that is O(patch²) over a streamed patch. Readers call
 	// materializeStreamingToolCallArgsLocked to rebuild it.
 	inputArgsStale bool
+
+	// argsFragBuf accumulates streamed JSON argument fragments (Anthropic
+	// input_json_delta, OpenAI function.arguments, Responses
+	// function_call_arguments.delta). The builder keeps per-fragment cost
+	// amortized O(1); ArgsJSON materializes from it on demand as an owned copy
+	// (see materializeStreamingToolCallArgsLocked) because the builder keeps
+	// growing on the streaming goroutine and its buffer must not escape as a
+	// string. argsLenAtMaterialize is the builder length at the last
+	// materialization, so repeated reads between fragments skip the re-clone.
+	argsFragBuf          *strings.Builder
+	argsLenAtMaterialize int
+
+	// inputTextBuf accumulates freeform input fragments (Responses custom
+	// apply_patch deltas) under the same contract as argsFragBuf: InputText
+	// materializes on demand as an owned copy, and inputTextLenAtMaterialize
+	// skips the re-clone between fragments.
+	inputTextBuf              *strings.Builder
+	inputTextLenAtMaterialize int
 }
 
 // toolCallStageTrace tracks per-call timing markers from streaming args-end to

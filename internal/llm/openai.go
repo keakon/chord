@@ -1085,16 +1085,20 @@ func parseOpenAISSEStreamOptions(reader io.Reader, cb StreamCallback, collector 
 						acc.args.WriteString(frag)
 					} else {
 						// Fallback: some proxies send raw JSON instead of a string.
+						frag = string(tc.Function.Arguments)
 						acc.args.Write(tc.Function.Arguments)
 					}
 					maybeEmitOpenAIToolStart(acc, cb)
-					if cb != nil && acc.streamStartEmitted {
+					// Input carries this delta's fragment only: consumers
+					// accumulate, so re-sending the accumulated args on every
+					// delta would be quadratic in the arguments' size.
+					if cb != nil && acc.streamStartEmitted && frag != "" {
 						cb(message.StreamDelta{
 							Type: message.StreamDeltaToolUseDelta,
 							ToolCall: &message.ToolCallDelta{
 								ID:    acc.id,
 								Name:  acc.name,
-								Input: acc.args.String(),
+								Input: frag,
 							},
 						})
 					}

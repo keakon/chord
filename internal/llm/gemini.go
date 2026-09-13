@@ -880,7 +880,11 @@ func finalizeGeminiToolCalls(toolCalls map[int]*openAIToolAccumulator, resp *mes
 		}
 		resp.ToolCalls = append(resp.ToolCalls, message.ToolCall{ID: cloneLongLivedLLMString(acc.id), Name: cloneLongLivedLLMString(acc.name), Args: args, ThoughtSignature: acc.thoughtSignature})
 		if cb != nil {
-			cb(message.StreamDelta{Type: message.StreamDeltaToolUseEnd, ToolCall: &message.ToolCallDelta{ID: acc.id, Name: acc.name, Input: string(args)}})
+			// The arguments already streamed as a ToolUseDelta fragment when the
+			// functionCall part arrived; the end delta carries identity only, so
+			// the fragment contract holds (a second copy of the args would be
+			// counted twice by consumers that sum fragment bytes).
+			cb(message.StreamDelta{Type: message.StreamDeltaToolUseEnd, ToolCall: &message.ToolCallDelta{ID: acc.id, Name: acc.name}})
 		}
 		delete(toolCalls, idx)
 	}

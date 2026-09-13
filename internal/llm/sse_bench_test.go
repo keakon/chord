@@ -91,10 +91,6 @@ func loadFixedCallbackFixtures() []fixedSSEBenchFixture {
 	}
 }
 
-func BenchmarkSSEParseWithCallbackCumulative(b *testing.B) {
-	benchmarkSSEParseWithCallbackMode(b, false)
-}
-
 func TestOpenAIFixedSSEParseAllocsGuard(t *testing.T) {
 	var parsed *message.Response
 	allocs := testing.AllocsPerRun(50, func() {
@@ -122,11 +118,11 @@ func TestOpenAIFixedSSEParseAllocsGuard(t *testing.T) {
 	}
 }
 
-func BenchmarkSSEParseWithCallbackIncremental(b *testing.B) {
-	benchmarkSSEParseWithCallbackMode(b, true)
-}
-
-func benchmarkSSEParseWithCallbackMode(b *testing.B, incremental bool) {
+// BenchmarkSSEParseWithCallback measures the decode path with a consumer that
+// counts the tool-argument bytes crossing the callback. Providers emit
+// fragments (each delta's own bytes), so the count is exact without any
+// cumulative-to-fragment normalization.
+func BenchmarkSSEParseWithCallback(b *testing.B) {
 	fixtures := loadFixedCallbackFixtures()
 	providers := []string{"openai", "responses", "responses_ws"}
 	for _, provider := range providers {
@@ -142,29 +138,18 @@ func benchmarkSSEParseWithCallbackMode(b *testing.B, incremental bool) {
 		if !ok || len(fixture.body) == 0 {
 			continue
 		}
-		mode := "cumulative"
-		if incremental {
-			mode = "incremental"
-		}
-		b.Run(provider+"/fixed/"+mode, func(b *testing.B) {
+		b.Run(provider+"/fixed", func(b *testing.B) {
 			b.ReportAllocs()
 			b.SetBytes(int64(len(fixture.body)))
 			for i := 0; i < b.N; i++ {
 				var sink int
-				lastByID := map[string]string{}
 				cb := func(delta message.StreamDelta) {
 					switch delta.Type {
 					case message.StreamDeltaText, message.StreamDeltaThinking:
 						sink += len(delta.Text)
 					case message.StreamDeltaToolUseDelta:
 						if delta.ToolCall != nil {
-							input := delta.ToolCall.Input
-							if incremental {
-								prev := lastByID[delta.ToolCall.ID]
-								input = strings.TrimPrefix(input, prev)
-								lastByID[delta.ToolCall.ID] = delta.ToolCall.Input
-							}
-							sink += len(input)
+							sink += len(delta.ToolCall.Input)
 						}
 					}
 				}

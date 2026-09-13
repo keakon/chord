@@ -308,13 +308,16 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 					block.toolInput.WriteString(ev.Delta.PartialJSON)
 					// Suppress delta for blocks with empty id/name; their start was
 					// never emitted and the call will be discarded at stop/EOF.
-					if cb != nil && block.toolID != "" && block.toolName != "" {
+					// Input carries this delta's fragment only: consumers
+					// accumulate, so re-sending the accumulated args on every
+					// delta would be quadratic in the arguments' size.
+					if cb != nil && block.toolID != "" && block.toolName != "" && ev.Delta.PartialJSON != "" {
 						cb(message.StreamDelta{
 							Type: message.StreamDeltaToolUseDelta,
 							ToolCall: &message.ToolCallDelta{
 								ID:    block.toolID,
 								Name:  block.toolName,
-								Input: block.toolInput.String(),
+								Input: ev.Delta.PartialJSON,
 							},
 						})
 					}

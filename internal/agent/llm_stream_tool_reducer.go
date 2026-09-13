@@ -68,6 +68,13 @@ func (r streamToolDeltaReducer) handleToolUseStart(delta message.StreamDelta) {
 			ArgsJSON: delta.ToolCall.Input,
 			AgentID:  r.agentID,
 		})
+		// A start can carry the first argument bytes; they seed the fragment
+		// accumulator so later fragments concatenate onto it. The seed is
+		// sanitized to match recordStreamingToolCall's hygiene for the
+		// recorded present.
+		if seed := delta.ToolCall.Input; seed != "" {
+			r.turn.appendStreamingToolCallInput(delta.ToolCall.ID, name, tools.StripZeroWidthFormat(seed), r.agentID)
+		}
 	}
 	if r.emit != nil {
 		r.emit(ToolCallStartEvent{
@@ -90,15 +97,22 @@ func (r streamToolDeltaReducer) handleToolUseDelta(delta message.StreamDelta) {
 	name := tools.NormalizeName(delta.ToolCall.Name)
 	if delta.ToolCall.InputText != "" {
 		// Freeform input (Responses custom apply_patch deltas): accumulate the
-		// raw text and hand it to the TUI as the growing patch preview. The
-		// canonical {patch} args object is deliberately not carried here — it
-		// is a full copy of the patch, so emitting it per fragment is
-		// quadratic in the patch size — and nothing reads it before the
-		// arguments complete: the TUI renders InputText, and speculative
+		// raw text and hand it to the TUI as the growing patch preview,
+		// coalesced to the args flush cadence — each update carries the whole
+		// accumulated text, so flushing per fragment is quadratic in the patch
+		// size, far faster than the UI can re-render it (the JSON fragment path
+		// below makes the same tradeoff). The canonical {patch} args object is
+		// deliberately not carried here — it is a full copy of the patch, so
+		// emitting it per fragment is quadratic too — and nothing reads it before
+		// the arguments complete: the TUI renders InputText, and speculative
 		// validation and finalize both run off the stored call at args-end,
 		// where the envelope is materialized.
-		accumulated := r.turn.appendStreamingToolCallInputText(delta.ToolCall.ID, name, delta.ToolCall.InputText, r.agentID)
-		if accumulated == "" {
+		r.turn.appendStreamingToolCallInputText(delta.ToolCall.ID, name, delta.ToolCall.InputText, r.agentID)
+		if !r.turn.streamingArgsFlushDue(delta.ToolCall.ID, time.Now()) {
+			return
+		}
+		accumulated, ok := r.turn.streamingToolCallInputText(delta.ToolCall.ID)
+		if !ok || accumulated == "" {
 			return
 		}
 		if r.emit != nil {
@@ -114,27 +128,46 @@ func (r streamToolDeltaReducer) handleToolUseDelta(delta message.StreamDelta) {
 	if delta.ToolCall.Input == "" {
 		return
 	}
-	accumulated := r.turn.appendStreamingToolCallInput(delta.ToolCall.ID, name, delta.ToolCall.Input, r.agentID)
-	if accumulated == "" {
+	// Fragments accumulate in the turn's per-call builder; both the TUI update
+	// and the speculative-start attempt run at the args flush cadence. Per-
+	// fragment updates each carried the accumulated args — quadratic in the
+	// args' size — far faster than the UI can re-render them (see the freeform
+	// path above for the same tradeoff on the text side).
+	r.turn.appendStreamingToolCallInput(delta.ToolCall.ID, name, delta.ToolCall.Input, r.agentID)
+	if !r.turn.streamingArgsFlushDue(delta.ToolCall.ID, time.Now()) {
+		return
+	}
+	call, ok := r.turn.getStreamingToolCall(delta.ToolCall.ID)
+	if !ok {
 		return
 	}
 	if r.emit != nil {
 		r.emit(ToolCallUpdateEvent{
 			ID:       delta.ToolCall.ID,
 			Name:     name,
-			ArgsJSON: accumulated,
+			ArgsJSON: call.ArgsJSON,
 			AgentID:  r.agentID,
 		})
 	}
-	r.maybeStartEarlySpeculativeTool(delta.ToolCall.ID)
+	r.maybeStartEarlySpeculativeToolCall(delta.ToolCall.ID, call)
 }
 
 func (r streamToolDeltaReducer) maybeStartEarlySpeculativeTool(callID string) {
-	if r.turn == nil || r.turn.streamingToolExec == nil || callID == "" {
+	if r.turn == nil || callID == "" {
 		return
 	}
 	call, ok := r.turn.getStreamingToolCall(callID)
 	if !ok {
+		return
+	}
+	r.maybeStartEarlySpeculativeToolCall(callID, call)
+}
+
+// maybeStartEarlySpeculativeToolCall runs the early speculative-start attempt
+// with an already-materialized call, so callers that just materialized (the
+// throttled delta path) do not pay a second args clone.
+func (r streamToolDeltaReducer) maybeStartEarlySpeculativeToolCall(callID string, call PendingToolCall) {
+	if r.turn == nil || r.turn.streamingToolExec == nil || callID == "" {
 		return
 	}
 	callName := tools.NormalizeName(call.Name)

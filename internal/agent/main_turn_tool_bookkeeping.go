@@ -137,11 +137,14 @@ func (t *Turn) recordStreamingToolCallLocked(callID string) {
 	}
 }
 
-// appendStreamingToolCallInput appends one streamed tool-argument fragment to the
-// speculative tool metadata and returns the accumulated JSON string.
-func (t *Turn) appendStreamingToolCallInput(callID, name, fragment, agentID string) string {
+// appendStreamingToolCallInput appends one streamed tool-argument fragment to
+// the speculative tool metadata. Providers deliver fragments (the delta's own
+// bytes), so they accumulate in a per-call strings.Builder — amortized O(1) per
+// fragment, with no string aliasing — and ArgsJSON materializes from it on
+// demand (see materializeStreamingToolCallArgsLocked).
+func (t *Turn) appendStreamingToolCallInput(callID, name, fragment, agentID string) {
 	if t == nil || callID == "" || fragment == "" {
-		return ""
+		return
 	}
 	t.streamingToolMu.Lock()
 	defer t.streamingToolMu.Unlock()
@@ -157,17 +160,36 @@ func (t *Turn) appendStreamingToolCallInput(callID, name, fragment, agentID stri
 	if call.AgentID == "" {
 		call.AgentID = agentID
 	}
-	switch {
-	case call.ArgsJSON == "":
-		call.ArgsJSON = fragment
-	case strings.HasPrefix(fragment, call.ArgsJSON):
-		call.ArgsJSON = fragment
-	case strings.HasPrefix(call.ArgsJSON, fragment):
-	default:
-		call.ArgsJSON += fragment
+	if call.argsFragBuf == nil {
+		call.argsFragBuf = new(strings.Builder)
 	}
+	call.argsFragBuf.WriteString(fragment)
 	t.streamingToolCalls[callID] = call
-	return call.ArgsJSON
+}
+
+// streamToolArgsFlushInterval is the coalescing window for per-fragment
+// ToolCallUpdateEvents. Each update carries the accumulated args, so flushing
+// per fragment is quadratic in the args' size; the text flush cadence bounds
+// updates to what the UI can usefully re-render.
+const streamToolArgsFlushInterval = defaultStreamTextFlushInterval
+
+// streamingArgsFlushDue reports whether a TUI args update for callID should
+// flush now, recording the flush when it is due. The first fragment of a call
+// always flushes.
+func (t *Turn) streamingArgsFlushDue(callID string, now time.Time) bool {
+	if t == nil || callID == "" {
+		return false
+	}
+	t.streamingToolMu.Lock()
+	defer t.streamingToolMu.Unlock()
+	if last, ok := t.streamingToolEmitAt[callID]; ok && now.Sub(last) < streamToolArgsFlushInterval {
+		return false
+	}
+	if t.streamingToolEmitAt == nil {
+		t.streamingToolEmitAt = make(map[string]time.Time)
+	}
+	t.streamingToolEmitAt[callID] = now
+	return true
 }
 
 // canonicalApplyPatchArgsJSON builds the canonical {"patch": ...} args object
@@ -182,31 +204,43 @@ func canonicalApplyPatchArgsJSON(text string) string {
 }
 
 // materializeStreamingToolCallArgsLocked rebuilds the canonical {patch}
-// envelope from InputText when a freeform fragment has invalidated it. Callers
-// must hold streamingToolMu.
+// envelope from InputText when a freeform fragment has invalidated it,
+// materializes InputText from its fragment builder, and materializes ArgsJSON
+// from the JSON fragment builder as an owned copy. Callers must hold
+// streamingToolMu.
 //
-// This is the deferred half of appendStreamingToolCallInputText: rebuilding per
-// fragment costs O(len(patch)) each time, which is O(patch²) across a streamed
-// patch, and no consumer reads the envelope until the arguments are complete.
+// The envelope rebuild is deferred (rather than run per fragment) because it
+// costs O(len(patch)) each time, which is O(patch²) across a streamed
+// patch — and no consumer reads the envelope until the arguments are complete.
+// The clones are equally load-bearing: a builder's buffer keeps growing on the
+// streaming goroutine, so handing out its alias would mutate the string under
+// concurrent readers (TUI previews, speculative validation).
 func materializeStreamingToolCallArgsLocked(call *PendingToolCall) {
-	if !call.inputArgsStale {
+	materializeStreamingToolCallInputTextLocked(call)
+	if call.inputArgsStale {
+		call.ArgsJSON = canonicalApplyPatchArgsJSON(call.InputText)
+		call.inputArgsStale = false
 		return
 	}
-	call.ArgsJSON = canonicalApplyPatchArgsJSON(call.InputText)
-	call.inputArgsStale = false
+	if call.argsFragBuf != nil && call.argsFragBuf.Len() != call.argsLenAtMaterialize {
+		call.ArgsJSON = strings.Clone(call.argsFragBuf.String())
+		call.argsLenAtMaterialize = call.argsFragBuf.Len()
+	}
 }
 
 // appendStreamingToolCallInputText appends one freeform text fragment
-// (ToolCallDelta.InputText, e.g. Responses custom apply_patch deltas) and
-// returns the accumulated raw text. The accumulated text is kept on the call so
-// TUI consumers can render the growing patch; the canonical {patch} args object
-// is rebuilt lazily (see materializeStreamingToolCallArgsLocked) because
+// (ToolCallDelta.InputText, e.g. Responses custom apply_patch deltas). Fragments
+// accumulate in a per-call strings.Builder — amortized O(1) per fragment instead
+// of the string concatenation that rebuilt the whole stored InputText on every
+// fragment — and InputText materializes on demand as an owned copy (see
+// materializeStreamingToolCallInputTextLocked). The canonical {patch} args
+// object is rebuilt lazily too (materializeStreamingToolCallArgsLocked) because
 // re-serializing the whole patch on every fragment is quadratic in the patch
 // size. Every reader of the stored call observes a materialized, valid JSON
 // ArgsJSON, so speculative validation and finalize are unaffected.
-func (t *Turn) appendStreamingToolCallInputText(callID, name, fragment, agentID string) string {
+func (t *Turn) appendStreamingToolCallInputText(callID, name, fragment, agentID string) {
 	if t == nil || callID == "" || fragment == "" {
-		return ""
+		return
 	}
 	t.streamingToolMu.Lock()
 	defer t.streamingToolMu.Unlock()
@@ -222,10 +256,41 @@ func (t *Turn) appendStreamingToolCallInputText(callID, name, fragment, agentID 
 	if call.AgentID == "" {
 		call.AgentID = agentID
 	}
-	call.InputText += fragment
+	if call.inputTextBuf == nil {
+		call.inputTextBuf = new(strings.Builder)
+	}
+	call.inputTextBuf.WriteString(fragment)
 	call.inputArgsStale = true
 	t.streamingToolCalls[callID] = call
+}
+
+// materializeStreamingToolCallInputTextLocked materializes InputText from the
+// freeform fragment builder as an owned copy. Callers must hold streamingToolMu.
+func materializeStreamingToolCallInputTextLocked(call *PendingToolCall) string {
+	if call.inputTextBuf != nil && call.inputTextBuf.Len() != call.inputTextLenAtMaterialize {
+		call.InputText = strings.Clone(call.inputTextBuf.String())
+		call.inputTextLenAtMaterialize = call.inputTextBuf.Len()
+	}
 	return call.InputText
+}
+
+// streamingToolCallInputText materializes and returns the accumulated freeform
+// text for callID. It deliberately skips the canonical {patch} envelope rebuild:
+// the streaming preview reads the raw text, and the envelope is the O(patch)
+// half that only the finalized call consumes.
+func (t *Turn) streamingToolCallInputText(callID string) (string, bool) {
+	if t == nil || callID == "" {
+		return "", false
+	}
+	t.streamingToolMu.Lock()
+	defer t.streamingToolMu.Unlock()
+	call, ok := t.streamingToolCalls[callID]
+	if !ok {
+		return "", false
+	}
+	materializeStreamingToolCallInputTextLocked(&call)
+	t.streamingToolCalls[callID] = call
+	return call.InputText, true
 }
 
 // drainStreamingToolCalls removes and returns all speculative streaming tool
@@ -248,6 +313,7 @@ func (t *Turn) drainStreamingToolCalls() []PendingToolCall {
 	}
 	t.streamingToolCalls = nil
 	t.streamingToolOrder = nil
+	t.streamingToolEmitAt = nil
 	return out
 }
 
@@ -261,6 +327,7 @@ func (t *Turn) removeStreamingToolCall(callID string) {
 		return
 	}
 	delete(t.streamingToolCalls, callID)
+	delete(t.streamingToolEmitAt, callID)
 	for i, id := range t.streamingToolOrder {
 		if id == callID {
 			t.streamingToolOrder = append(t.streamingToolOrder[:i], t.streamingToolOrder[i+1:]...)
