@@ -844,7 +844,10 @@ func readHeadlessStdinLines(ctx context.Context, r io.Reader, out chan<- headles
 		if err == nil {
 			line = bytes.TrimSuffix(line, []byte("\n"))
 			line = bytes.TrimSuffix(line, []byte("\r"))
-			if !sendHeadlessStdinLine(ctx, out, headlessStdinLine{line: append([]byte(nil), line...)}) {
+			// line is reader-owned: the append above copies out of the bufio
+			// buffer, and line is reset below, so ownership can move to the
+			// consumer without a second copy.
+			if !sendHeadlessStdinLine(ctx, out, headlessStdinLine{line: line}) {
 				return
 			}
 			line = nil

@@ -2926,6 +2926,30 @@ func TestReadHeadlessStdinLinesReportsTooLongAndContinues(t *testing.T) {
 	}
 }
 
+func TestReadHeadlessStdinLinesKeepsLineContentsIndependent(t *testing.T) {
+	// A line larger than the 64KB reader window forces several buffer refills,
+	// so the bufio buffer is recycled before the next line arrives; each
+	// delivered line must keep its own bytes.
+	longLine := strings.Repeat("a", 70*1024)
+	lines := make(chan headlessStdinLine, 4)
+	readHeadlessStdinLines(context.Background(), strings.NewReader(longLine+"\n"+"b\n"), lines)
+
+	first, ok := <-lines
+	if !ok {
+		t.Fatal("expected first line")
+	}
+	if string(first.line) != longLine || first.err != nil {
+		t.Fatalf("first line mutated after later reads: len=%d err=%v", len(first.line), first.err)
+	}
+	second, ok := <-lines
+	if !ok {
+		t.Fatal("expected second line")
+	}
+	if string(second.line) != "b" || second.err != nil {
+		t.Fatalf("second line = %q err=%v, want %q", second.line, second.err, "b")
+	}
+}
+
 func TestHeadlessParentWatcherCancelsOnParentChange(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
