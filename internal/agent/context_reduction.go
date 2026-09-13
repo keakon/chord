@@ -361,8 +361,13 @@ const (
 )
 
 type requestReductionContext struct {
-	ToolName    string
-	Meta        toolCallMeta
+	ToolName   string
+	ToolCallID string
+	Meta       toolCallMeta
+	// parseMemo carries the agent's per-call shell-parse memo so the
+	// command-derived shape gates reuse the parse computed for this call on an
+	// earlier request. A nil memo falls back to parsing directly.
+	parseMemo   *reductionToolCallMemo
 	Content     string
 	ToolStatus  string
 	FileState   *message.ToolFileState
@@ -1972,7 +1977,7 @@ type goTestSuccessSummary struct {
 }
 
 func reduceGoTestSuccessOutputSummary(ctx requestReductionContext) (string, bool) {
-	if isToolResultUnsuccessfulStatus(ctx.ToolStatus) || !isDirectGoTestCommand(ctx.Meta.Args) {
+	if isToolResultUnsuccessfulStatus(ctx.ToolStatus) || !isDirectGoTestCommandMemo(ctx.parseMemo, ctx.ToolCallID, ctx.Meta.Args) {
 		return "", false
 	}
 	summary := summarizeGoTestSuccess(ctx.Content, 4)
@@ -2004,7 +2009,7 @@ func commandDerivedShellShape(ctx requestReductionContext) (requestReductionClas
 	if ctx.ToolName != tools.NameShell {
 		return requestReductionNone, false
 	}
-	return shellOutputShapeFromCommand(ctx.Meta.Args)
+	return shellOutputShapeFromCommandMemo(ctx.parseMemo, ctx.ToolCallID, ctx.Meta.Args)
 }
 
 // shellOutputShapeFromCommand returns the reduction class a shell result takes
@@ -2023,7 +2028,11 @@ func commandDerivedShellShape(ctx requestReductionContext) (requestReductionClas
 // unmapped falls through unchanged, which makes this a subtraction from the
 // sniffing surface rather than a replacement for it.
 func shellOutputShapeFromCommand(argsJSON string) (requestReductionClass, bool) {
-	literal, ok := singleShellInvocationLiteralArgs(argsJSON, "git")
+	return shellOutputShapeFromCommandMemo(nil, "", argsJSON)
+}
+
+func shellOutputShapeFromCommandMemo(memo *reductionToolCallMemo, toolCallID, argsJSON string) (requestReductionClass, bool) {
+	literal, ok := memo.shellInvocationLiteralArgs(toolCallID, argsJSON, "git")
 	if !ok || literal[0] != "git" {
 		return requestReductionNone, false
 	}
@@ -2097,8 +2106,8 @@ func singleShellInvocationLiteralArgs(argsJSON, program string) ([]string, bool)
 	return literal, true
 }
 
-func isDirectGoTestCommand(argsJSON string) bool {
-	literal, ok := singleShellInvocationLiteralArgs(argsJSON, "go")
+func isDirectGoTestCommandMemo(memo *reductionToolCallMemo, toolCallID, argsJSON string) bool {
+	literal, ok := memo.shellInvocationLiteralArgs(toolCallID, argsJSON, "go")
 	if !ok || literal[0] != "go" || literal[1] != "test" {
 		return false
 	}

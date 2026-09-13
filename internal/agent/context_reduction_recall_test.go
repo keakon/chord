@@ -211,26 +211,26 @@ func TestDetectRepeatedToolOutputsIgnoresFailedRerun(t *testing.T) {
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc2", Name: tools.NameGrep, Args: args}}},
 		{Role: "tool", ToolCallID: "tc2", Content: "grep failed", ToolStatus: string(ToolResultStatusError)},
 	}
-	if repeated := detectRepeatedToolOutputs(msgs, buildToolCallMeta(msgs)); len(repeated) != 0 {
+	if repeated := detectRepeatedToolOutputs(msgs, buildToolCallMeta(msgs), nil); len(repeated) != 0 {
 		t.Fatalf("a failed rerun must not mark the earlier success repeated: %v", repeated)
 	}
 	msgs[3].ToolStatus = ""
 	msgs[3].Content = "Error: grep failed"
-	if repeated := detectRepeatedToolOutputs(msgs, buildToolCallMeta(msgs)); len(repeated) != 0 {
+	if repeated := detectRepeatedToolOutputs(msgs, buildToolCallMeta(msgs), nil); len(repeated) != 0 {
 		t.Fatalf("a legacy rendered error must not mark the earlier success repeated: %v", repeated)
 	}
 	msgs[3].ToolStatus = string(ToolResultStatusSuccess)
 	msgs[3].Content = "a.go:1: callSite()"
-	if repeated := detectRepeatedToolOutputs(msgs, buildToolCallMeta(msgs)); !repeated[1] {
+	if repeated := detectRepeatedToolOutputs(msgs, buildToolCallMeta(msgs), nil); !repeated[1] {
 		t.Fatal("a successful rerun must mark the earlier output repeated")
 	}
 	msgs[3].Content = "a.go:1: callSite() // Error: wrapped by caller"
 	msgs[1].Content = msgs[3].Content
-	if repeated := detectRepeatedToolOutputs(msgs, buildToolCallMeta(msgs)); !repeated[1] {
+	if repeated := detectRepeatedToolOutputs(msgs, buildToolCallMeta(msgs), nil); !repeated[1] {
 		t.Fatal("an explicit success mentioning Error: mid-output must still establish the fresher copy")
 	}
 	msgs[3].ToolStatus = ""
-	if repeated := detectRepeatedToolOutputs(msgs, buildToolCallMeta(msgs)); !repeated[1] {
+	if repeated := detectRepeatedToolOutputs(msgs, buildToolCallMeta(msgs), nil); !repeated[1] {
 		t.Fatal("a status-less result not rendered as an error must still establish the fresher copy")
 	}
 }
@@ -247,11 +247,11 @@ func TestDetectRepeatedToolOutputsRequiresIdenticalContent(t *testing.T) {
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc2", Name: tools.NameShell, Args: args}}},
 		{Role: "tool", ToolCallID: "tc2", Content: " M internal/agent/a.go\n M internal/agent/b.go", ToolStatus: string(ToolResultStatusSuccess)},
 	}
-	if repeated := detectRepeatedToolOutputs(msgs, buildToolCallMeta(msgs)); repeated[1] {
+	if repeated := detectRepeatedToolOutputs(msgs, buildToolCallMeta(msgs), nil); repeated[1] {
 		t.Fatal("a later call with the same arguments but different output must not collapse the earlier state")
 	}
 	msgs[3].Content = msgs[1].Content
-	if repeated := detectRepeatedToolOutputs(msgs, buildToolCallMeta(msgs)); !repeated[1] {
+	if repeated := detectRepeatedToolOutputs(msgs, buildToolCallMeta(msgs), nil); !repeated[1] {
 		t.Fatal("a byte-identical later copy must still collapse the earlier output")
 	}
 }
@@ -271,7 +271,7 @@ func TestDetectRepeatedToolOutputsComparesAgainstNewestCopy(t *testing.T) {
 		call("tc2"), result("tc2", "FAIL agent"),
 		call("tc3"), result("tc3", "ok"),
 	}
-	repeated := detectRepeatedToolOutputs(msgs, buildToolCallMeta(msgs))
+	repeated := detectRepeatedToolOutputs(msgs, buildToolCallMeta(msgs), nil)
 	if !repeated[1] {
 		t.Fatal("the oldest copy matches the newest content and must collapse")
 	}

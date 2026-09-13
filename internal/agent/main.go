@@ -515,6 +515,11 @@ type MainAgent struct {
 	// shell commands for the reduction pass (see shellReadOnlyClassMemo).
 	shellReadOnlyClass shellReadOnlyClassMemo
 
+	// reductionMemo caches the byte-derived per-call verdicts of the reduction
+	// pass (call metadata, repeat-detection digests and input keys, shell
+	// invocation parses); see reductionToolCallMemo.
+	reductionMemo reductionToolCallMemo
+
 	// persistenceHealth tracks the durability of the main transcript writes.
 	// Degraded means writes are failing; the intent barrier then blocks tool
 	// dispatch while Q&A turns keep working until a checkpoint recovers.

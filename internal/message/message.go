@@ -54,6 +54,11 @@ type ContentPart struct {
 	Data        []byte          `json:"data,omitempty"`         // for type="image"/"pdf", raw bytes (not persisted; loaded from ImagePath)
 	ImagePath   string          `json:"image_path,omitempty"`   // for type="image"/"pdf", path to persisted file on disk
 	FileName    string          `json:"file_name,omitempty"`    // optional display name for image/pdf attachments
+	// DataBytes records the size of the blob persisted at ImagePath. It is
+	// stamped when the part is materialized to disk, so byte/token estimates
+	// account for the payload without loading it: restored parts keep Data
+	// empty (the blob is resolved lazily) while still reporting their size.
+	DataBytes int64 `json:"data_bytes,omitempty"`
 }
 
 // IsBinary reports whether the part carries out-of-band binary bytes (an image
@@ -62,6 +67,20 @@ type ContentPart struct {
 // treat image and pdf parts identically.
 func (p ContentPart) IsBinary() bool {
 	return p.Type == ContentPartImage || p.Type == ContentPartPDF
+}
+
+// PayloadBytes reports the binary payload size of the part: the inline bytes
+// when they are held in memory, otherwise the size recorded when the blob was
+// materialized to disk. Wire/estimate paths use this so a lazily resolved
+// part (Data empty, ImagePath set) still accounts for its payload.
+func (p ContentPart) PayloadBytes() int64 {
+	if len(p.Data) > 0 {
+		return int64(len(p.Data))
+	}
+	if p.DataBytes > 0 {
+		return p.DataBytes
+	}
+	return 0
 }
 
 type IgnoredToolArgReason string

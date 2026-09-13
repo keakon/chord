@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io"
 	"maps"
 	"path/filepath"
 	"slices"
@@ -68,6 +69,7 @@ func (a *MainAgent) prepareMessagesForLLM(messages []message.Message) []message.
 // prepared copy. Not safe for concurrent use.
 type reductionHistoryScan struct {
 	messages      []message.Message
+	memo          *reductionToolCallMemo
 	meta          map[string]toolCallMeta
 	repeated      map[int]bool
 	evidence      fileEvidenceView
@@ -79,16 +81,26 @@ func newReductionHistoryScan(messages []message.Message) *reductionHistoryScan {
 	return &reductionHistoryScan{messages: messages}
 }
 
+// newReductionHistoryScanForAgent attaches the agent's per-call memo so the
+// whole-history scans reuse byte-derived verdicts computed on earlier requests.
+func newReductionHistoryScanForAgent(a *MainAgent, messages []message.Message) *reductionHistoryScan {
+	scan := newReductionHistoryScan(messages)
+	if a != nil {
+		scan.memo = &a.reductionMemo
+	}
+	return scan
+}
+
 func (s *reductionHistoryScan) callMeta() map[string]toolCallMeta {
 	if s.meta == nil {
-		s.meta = buildToolCallMeta(s.messages)
+		s.meta = s.memo.cachedToolCallMeta(s.messages)
 	}
 	return s.meta
 }
 
 func (s *reductionHistoryScan) repeatedOutputs() map[int]bool {
 	if s.repeated == nil {
-		s.repeated = detectRepeatedToolOutputs(s.messages, s.callMeta())
+		s.repeated = detectRepeatedToolOutputs(s.messages, s.callMeta(), s.memo)
 	}
 	return s.repeated
 }
@@ -126,7 +138,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		}
 		return messages
 	}
-	scan := newReductionHistoryScan(messages)
+	scan := newReductionHistoryScanForAgent(a, messages)
 	currentBatch := a.currentRequestBatch(messages)
 	externalReadInvalidated := a.externallyInvalidatedReadsAfterMutatingShell(messages, scan)
 	// Two independent read-invalidation sources merge here. The mutating-shell
@@ -368,7 +380,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		if incrementalEnabled && frozenReducedIndices != nil && i < len(frozenReducedIndices) && frozenReducedIndices[i] && prepared[i].Role == message.RoleTool {
 			meta := callMeta[prepared[i].ToolCallID]
 			toolName := toolname.Normalize(meta.Name)
-			key := contextReductionToolInputKey(toolName, meta.Args)
+			key := scan.memo.toolInputKey(prepared[i].ToolCallID, meta)
 			if _, discarded := discardedInputs[key]; !discarded {
 				continue
 			}
@@ -404,6 +416,8 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 			}
 			ctx := requestReductionContext{
 				ToolName:             toolName,
+				ToolCallID:           prepared[i].ToolCallID,
+				parseMemo:            scan.memo,
 				Meta:                 meta,
 				Content:              messages[i].Content,
 				ToolStatus:           messages[i].ToolStatus,
@@ -436,6 +450,8 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		if externalReadInvalidated[i] && toolName == tools.NameRead {
 			ctx := requestReductionContext{
 				ToolName:    toolName,
+				ToolCallID:  prepared[i].ToolCallID,
+				parseMemo:   scan.memo,
 				Meta:        meta,
 				Content:     messages[i].Content,
 				ToolStatus:  messages[i].ToolStatus,
@@ -472,6 +488,8 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		}
 		ctx := requestReductionContext{
 			ToolName:              toolName,
+			ToolCallID:            prepared[i].ToolCallID,
+			parseMemo:             scan.memo,
 			Meta:                  meta,
 			Content:               prepared[i].Content,
 			ToolStatus:            prepared[i].ToolStatus,
@@ -487,7 +505,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 			DiagnosticsSuperseded: diagnosticsSuperseded[i],
 			ArchiveDir:            a.sessionDir,
 		}
-		inputKey := contextReductionToolInputKey(toolName, meta.Args)
+		inputKey := scan.memo.toolInputKey(prepared[i].ToolCallID, meta)
 		// Recall protection applies to content-fetch shapes only (reads, web
 		// fetches, searches, read-only shell): re-running a mutating command
 		// seeks fresh state, not lost content. Older duplicates keep collapsing
@@ -637,7 +655,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		}
 		if !p.repeated && p.recallable && incrementalEnabled && p.index < frozenBoundary {
 			meta := callMeta[prepared[p.index].ToolCallID]
-			recordDiscardedInputEvidence(discardedInputs, contextReductionToolInputKey(p.toolName, meta.Args), prepared[p.index].ToolCallID)
+			recordDiscardedInputEvidence(discardedInputs, scan.memo.toolInputKey(prepared[p.index].ToolCallID, meta), prepared[p.index].ToolCallID)
 		}
 		original := prepared[p.index].Content
 		prepared[p.index].Content = p.reduced
@@ -1588,8 +1606,15 @@ func stableReductionProvenanceShapeFor(provenance *message.MessageProvenance) st
 	}
 }
 
+// stableReductionHashString hashes via io.WriteString so the whole content is
+// not copied into a []byte before digesting; callers hash multi-KB tool
+// outputs on every request.
 func stableReductionHashString(value string) [sha256.Size]byte {
-	return sha256.Sum256([]byte(value))
+	h := sha256.New()
+	_, _ = io.WriteString(h, value)
+	var digest [sha256.Size]byte
+	copy(digest[:], h.Sum(nil))
+	return digest
 }
 
 func stableReductionStringMapHash(values map[string]string) [sha256.Size]byte {
@@ -1629,6 +1654,11 @@ func stableReductionContentPartsHash(parts []message.ContentPart) [sha256.Size]b
 		stableReductionWriteString(h, part.InlineToken)
 		stableReductionWriteString(h, part.MimeType)
 		stableReductionWriteBytes(h, part.Data)
+		// A restored part keeps Data empty and its size on DataBytes, so the
+		// fingerprint distinguishes it from a part with no payload at all.
+		if len(part.Data) == 0 {
+			stableReductionWriteInt(h, int(part.DataBytes))
+		}
 		stableReductionWriteString(h, part.ImagePath)
 		stableReductionWriteString(h, part.FileName)
 	}
@@ -2109,6 +2139,11 @@ func (a *MainAgent) clearReductionCache(clearVisibleStats bool) {
 		a.shellReadOnlyClass.mu.Lock()
 		a.shellReadOnlyClass.verdicts = nil
 		a.shellReadOnlyClass.mu.Unlock()
+		// The reduction memo's verdicts are content-derived and would stay
+		// correct, but restore/compaction/model changes retire most of the
+		// history they were computed over; reset to reclaim the retained
+		// args strings and bound the maps.
+		a.reductionMemo.reset()
 	}
 }
 
@@ -2335,7 +2370,7 @@ func requestBatchesAfter(messages []message.Message, currentBatch uint64) []int 
 // that asserts the calls are identical would delete evidence and misstate what
 // remains, so a differing older copy is left to the normal shape-based rules,
 // which summarize it without claiming a fresher copy carries it.
-func detectRepeatedToolOutputs(messages []message.Message, meta map[string]toolCallMeta) map[int]bool {
+func detectRepeatedToolOutputs(messages []message.Message, meta map[string]toolCallMeta, memo *reductionToolCallMemo) map[int]bool {
 	repeated := make(map[int]bool)
 	seen := make(map[string][sha256.Size]byte)
 	for i := len(messages) - 1; i >= 0; i-- {
@@ -2347,9 +2382,9 @@ func detectRepeatedToolOutputs(messages []message.Message, meta map[string]toolC
 		if !ok {
 			continue
 		}
-		key := contextReductionToolInputKey(call.Name, call.Args)
+		key := memo.toolInputKey(msg.ToolCallID, call)
 		if digest, established := seen[key]; established {
-			if digest == stableReductionHashString(msg.Content) {
+			if digest == memo.toolResultDigest(msg.ToolCallID, msg.Content) {
 				repeated[i] = true
 			}
 			// The newest trustworthy copy stays the comparison base: it is the
@@ -2364,10 +2399,9 @@ func detectRepeatedToolOutputs(messages []message.Message, meta map[string]toolC
 		// "Error:" prefix, as in classifyRequestReductionToolOutput): an
 		// explicit success that merely mentions "Error:" mid-output — a grep
 		// over error handling, a log dump — is still a trustworthy copy.
-		trustworthy := isToolResultSuccessStatus(msg.ToolStatus) ||
-			(strings.TrimSpace(msg.ToolStatus) == "" && !isToolErrorContent(msg.Content))
+		trustworthy := memo.toolResultTrustworthy(msg.ToolCallID, msg.ToolStatus, msg.Content)
 		if trustworthy {
-			seen[key] = stableReductionHashString(msg.Content)
+			seen[key] = memo.toolResultDigest(msg.ToolCallID, msg.Content)
 		}
 	}
 	return repeated

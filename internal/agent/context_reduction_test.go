@@ -441,7 +441,11 @@ func TestTimeVaryingShellRerunIsSummarizedNotCollapsedAsRepeated(t *testing.T) {
 	}
 
 	// A byte-identical rerun still collapses: nothing is lost because the
-	// later copy carries the same content.
+	// later copy carries the same content. The rerun rewrites this fixture's
+	// tool result in place, which production history never does (a real rerun
+	// appends a new call ID), so drop the per-call verdicts the previous
+	// prepare cached for the old content first.
+	a.clearReductionCache(true)
 	msgs[4].Content = before
 	prepared = a.prepareMessagesForLLM(msgs)
 	if !strings.Contains(prepared[2].Content, "Repeated ") {
