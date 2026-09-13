@@ -1828,6 +1828,9 @@ func TestActivateLoadedSessionRefreshesVisibleContextReductionStats(t *testing.T
 	if result.MessageCount != len(msgs) {
 		t.Fatalf("MessageCount = %d, want %d", result.MessageCount, len(msgs))
 	}
+	// The scan now runs off the restore path on a deferred loop event; the
+	// test harness never starts the loop, so invoke the handler directly.
+	a.handleRefreshReductionStats()
 	stats := a.currentMainContextReductionStats()
 	if stats.Bytes <= 0 || stats.CurrentBytes <= 0 {
 		t.Fatalf("restored visible reduction stats = %+v, want reduced bytes and current surface", stats)

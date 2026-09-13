@@ -856,7 +856,7 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	if err := a.restoreMainRoleFromSession(loaded.ActiveRole); err != nil {
 		log.Warnf("restore session role failed session=%v role=%v error=%v", loaded.SessionPath, loaded.ActiveRole, err)
 	}
-	a.refreshVisibleContextReductionStats(restoredMessages)
+	a.scheduleReductionStatsRefresh()
 	if loaded.MailboxSeqMax > 0 {
 		a.subAgentMailboxSeq.Store(loaded.MailboxSeqMax)
 	}

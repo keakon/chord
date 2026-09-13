@@ -117,6 +117,33 @@ func (a *MainAgent) refreshVisibleContextReductionStats(messages []message.Messa
 	_ = a.prepareMessagesForLLMWithOptions(messages, false)
 }
 
+// statsRefreshDeferral delays the restore-time reduction scan (file stat/hash
+// revalidation included) so it runs after the restore burst settles instead of
+// stalling activateLoadedSession for a sidebar statistic.
+const statsRefreshDeferral = 250 * time.Millisecond
+
+// scheduleReductionStatsRefresh recomputes the visible context-reduction stats
+// on the event loop shortly after the caller returns. The handler re-derives
+// the history from the manager, so a session switch between scheduling and
+// firing simply refreshes the new session's stats.
+func (a *MainAgent) scheduleReductionStatsRefresh() {
+	if a == nil {
+		return
+	}
+	time.AfterFunc(statsRefreshDeferral, func() {
+		a.sendEvent(Event{Type: EventRefreshReductionStats})
+	})
+}
+
+// handleRefreshReductionStats runs the deferred stats refresh on the event
+// loop, where reading turn state needs no synchronization.
+func (a *MainAgent) handleRefreshReductionStats() {
+	if a == nil || a.ctxMgr == nil {
+		return
+	}
+	a.refreshVisibleContextReductionStats(a.ctxMgr.Snapshot())
+}
+
 func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message, rememberPrepared bool) []message.Message {
 	if a != nil && rememberPrepared {
 		a.setPreparedStablePrefixLen(0)

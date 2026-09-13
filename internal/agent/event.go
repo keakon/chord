@@ -51,6 +51,10 @@ const (
 	EventCompactionCancel           = "compaction_cancel"
 	EventCompactionOversizeSuspend  = "compaction_oversize_suspend"  // LLM call suspended due to oversize while compaction running
 	EventCompactionDownshiftSuspend = "compaction_downshift_suspend" // fallback call suspended before a smaller model window request
+
+	// EventRefreshReductionStats recomputes the visible context-reduction
+	// stats off the restore path; payload is unused.
+	EventRefreshReductionStats = "refresh_reduction_stats"
 )
 
 // Event is an internal event in the MainAgent event loop.

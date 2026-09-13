@@ -127,6 +127,8 @@ func (a *MainAgent) dispatch(evt Event) {
 		a.handleLLMResponse(evt)
 	case EventLLMFallbackBoundary:
 		a.handleLLMFallbackBoundary(evt)
+	case EventRefreshReductionStats:
+		a.handleRefreshReductionStats()
 	case EventToolResult:
 		a.handleToolResult(evt)
 	case EventTurnCancelled:
