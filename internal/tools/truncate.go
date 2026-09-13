@@ -305,10 +305,22 @@ func truncateStringToValidUTF8Prefix(s string, n int) string {
 		return ""
 	}
 	s = s[:n]
-	for !utf8.ValidString(s) && len(s) > 0 {
-		s = s[:len(s)-1]
+	// Single forward pass: the original loop re-validated the whole prefix per
+	// trimmed byte, which is quadratic for binary output. The longest valid
+	// UTF-8 prefix ends either at the first invalid sequence or at the start
+	// of a rune the boundary splits.
+	i := 0
+	for i < n {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if r == utf8.RuneError && size == 1 {
+			return s[:i]
+		}
+		if i+size > n {
+			return s[:i]
+		}
+		i += size
 	}
-	return s
+	return s[:n]
 }
 
 // TruncateOutputWithOptions truncates output according to the supplied options.
