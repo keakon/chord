@@ -123,3 +123,10 @@ func normalizeDenyReason(reason string) string {
 	reason = strings.TrimSpace(reason)
 	return reason
 }
+
+// effectiveToolBaseDir resolves the base directory tools execute against,
+// matching toolExecutionPipeline.effectiveToolBaseDir without constructing the
+// pipeline (some per-result paths only need the directory).
+func (a *MainAgent) effectiveToolBaseDir() string {
+	return a.projectRoot
+}

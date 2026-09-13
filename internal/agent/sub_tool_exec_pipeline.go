@@ -95,3 +95,10 @@ func (s *SubAgent) captureWalltimeTarget() *walltimeTarget {
 	}
 	return s.parent.walltime.captureAt(s.instanceID, s.agentDefName, s.currentTurnID())
 }
+
+// effectiveToolBaseDir resolves the base directory tools execute against,
+// matching toolExecutionPipeline.effectiveToolBaseDir (the sub pipeline pins
+// toolBaseDir to s.workDir) without constructing the pipeline.
+func (s *SubAgent) effectiveToolBaseDir() string {
+	return s.workDir
+}

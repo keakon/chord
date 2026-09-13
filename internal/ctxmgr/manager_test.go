@@ -81,6 +81,37 @@ func TestAnyAssistantDeclaresToolCallID(t *testing.T) {
 	}
 }
 
+// Dropping messages must drop the tool-call declarations they carried; a stale
+// index entry would let a synthetic tool result persist against an API that
+// rejects an output no assistant message declares.
+func TestDropMessagesRebuildDeclaredToolCallIDIndex(t *testing.T) {
+	m := NewManager(1000, 0)
+	m.Append(message.Message{Role: "user", Content: "hello"})
+	m.Append(message.Message{Role: "assistant", ToolCalls: []message.ToolCall{
+		{ID: "call-1", Name: "Read", Args: json.RawMessage(`{}`)},
+		{ID: "call-2", Name: "Read", Args: json.RawMessage(`{}`)},
+	}})
+	if !m.AnyAssistantDeclaresToolCallID("call-1") || !m.AnyAssistantDeclaresToolCallID("call-2") {
+		t.Fatal("both declared calls should be indexed")
+	}
+
+	// DropLastMessage removes the declaring assistant message.
+	m.DropLastMessage()
+	if m.AnyAssistantDeclaresToolCallID("call-1") || m.AnyAssistantDeclaresToolCallID("call-2") {
+		t.Fatal("declarations survived DropLastMessage")
+	}
+
+	// DropLastMessages must also re-index when tool results trail the
+	// declaring assistant message.
+	m.Append(message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "call-3", Name: "Read", Args: json.RawMessage(`{}`)}}})
+	m.Append(message.Message{Role: "tool", ToolCallID: "call-3", Content: "ok"})
+	m.Append(message.Message{Role: "tool", ToolCallID: "call-3", Content: "more"})
+	m.DropLastMessages(3)
+	if m.AnyAssistantDeclaresToolCallID("call-3") {
+		t.Fatal("declaring assistant message survived DropLastMessages(3)")
+	}
+}
+
 func TestSafeKeepBoundaryAndManagerWrapper(t *testing.T) {
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},

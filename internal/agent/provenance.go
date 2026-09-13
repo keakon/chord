@@ -1,10 +1,10 @@
 package agent
 
 import (
-	"slices"
 	"strings"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 )
@@ -46,23 +46,28 @@ func subAssistantProvenance(s *SubAgent) *message.MessageProvenance {
 	return provenanceFromClient("chord", client, selectedRef, runningRef)
 }
 
-func toolProvenanceForCall(msgs []message.Message, callID string) *message.MessageProvenance {
+// toolProvenanceFromContext is the Snapshot-free form of
+// toolProvenanceForCall: it scans the manager backward under its read lock
+// instead of copying the whole history at every tool result.
+func toolProvenanceFromContext(mgr *ctxmgr.Manager, callID string) *message.MessageProvenance {
 	callID = strings.TrimSpace(callID)
-	if callID == "" {
+	if callID == "" || mgr == nil {
 		return nil
 	}
-	for _, msg := range slices.Backward(msgs) {
-
-		if msg.Role != "assistant" || len(msg.ToolCalls) == 0 {
-			continue
+	var out *message.MessageProvenance
+	mgr.ScanBackward(func(msg *message.Message) bool {
+		if msg.Role != message.RoleAssistant || len(msg.ToolCalls) == 0 {
+			return false
 		}
 		for _, tc := range msg.ToolCalls {
 			if strings.TrimSpace(tc.ID) == callID {
-				return cloneProvenance(msg.Provenance)
+				out = cloneProvenance(msg.Provenance)
+				return true
 			}
 		}
-	}
-	return nil
+		return false
+	})
+	return out
 }
 
 func provenanceFromClient(source string, client *llm.Client, selectedRef, runningRef string) *message.MessageProvenance {

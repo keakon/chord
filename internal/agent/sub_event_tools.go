@@ -320,7 +320,7 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 	// contextResult changes; the display result (and the TUI) stays untouched.
 	// Runs behind the efficiency note so it lands last among the agent-appended
 	// notes.
-	toolBaseDir := s.toolExecutionPipeline().effectiveToolBaseDir()
+	toolBaseDir := s.effectiveToolBaseDir()
 	s.applyPatchRetry.observeResult(result.Name, result.ArgsJSON, toolBaseDir, result.Error)
 	contextResult = appendEditRetryAdvice(&s.editMatchFailStreak, contextResult, result.Name, result.ArgsJSON, toolBaseDir, result.Error, isError)
 
@@ -377,7 +377,7 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 		FileAttributionIncomplete: fileAttributionIncomplete,
 		LSPReviews:                append([]message.LSPReview(nil), result.LSPReviews...),
 		Audit:                     result.Audit.Clone(),
-		Provenance:                toolProvenanceForCall(s.ctxMgr.Snapshot(), result.CallID),
+		Provenance:                toolProvenanceFromContext(s.ctxMgr, result.CallID),
 		ToolRecoveryState:         result.RecoveryState,
 	}
 	s.ctxMgr.Append(toolMsg)

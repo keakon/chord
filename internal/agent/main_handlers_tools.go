@@ -239,9 +239,10 @@ func todoWriteArgsAllDone(argsJSON string) bool {
 // wrote it (payload/notes split, diffs, audit, LSP reviews, file state and
 // provenance used to drift between hand-assembled copies).
 //
-// snapshot is the conversation the provenance lookup runs against; callers
-// that already hold one pass it in instead of paying for a second copy.
-func (a *MainAgent) buildToolResultMessage(payload *ToolResultPayload, contextResult string, parts []message.ContentPart, isError bool, snapshot []message.Message) message.Message {
+// provenance is the attribution of the assistant message that declared the
+// call; callers resolve it through the manager's read-locked backward scan
+// (toolProvenanceFromContext) instead of copying the whole history.
+func (a *MainAgent) buildToolResultMessage(payload *ToolResultPayload, contextResult string, parts []message.ContentPart, isError bool, provenance *message.MessageProvenance) message.Message {
 	return message.Message{
 		Role:       message.RoleTool,
 		Content:    contextResult,
@@ -260,7 +261,7 @@ func (a *MainAgent) buildToolResultMessage(payload *ToolResultPayload, contextRe
 		Audit:             payload.Audit.Clone(),
 		LSPReviews:        append([]message.LSPReview(nil), payload.LSPReviews...),
 		FileState:         payload.FileState.Clone(),
-		Provenance:        toolProvenanceForCall(snapshot, payload.CallID),
+		Provenance:        provenance,
 		ToolRecoveryState: payload.RecoveryState,
 	}
 }
@@ -295,9 +296,8 @@ func (a *MainAgent) appendCompletedInterruptedToolResult(payload *ToolResultPayl
 		Duration:    payload.Duration,
 	})
 
-	snapshot := a.ctxMgr.Snapshot()
-	a.queueLSPDiagnosticOverlay(snapshot, payload)
-	toolMsg := a.buildToolResultMessage(payload, contextResult, parts, isError, snapshot)
+	a.queueLSPDiagnosticOverlayFromContext(payload)
+	toolMsg := a.buildToolResultMessage(payload, contextResult, parts, isError, toolProvenanceFromContext(a.ctxMgr, payload.CallID))
 	a.ctxMgr.Append(toolMsg)
 	if a.recoveryManager() != nil {
 		a.persistAsync(identity.MainAgentID, toolMsg)
@@ -455,7 +455,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 	// after the hooks above so user-configured transformations are not
 	// overwritten. Only contextResult changes; displayResult (and the TUI)
 	// stays untouched.
-	toolBaseDir := a.toolExecutionPipeline().effectiveToolBaseDir()
+	toolBaseDir := a.effectiveToolBaseDir()
 	a.applyPatchRetry.observeResult(payload.Name, payload.ArgsJSON, toolBaseDir, payload.Error)
 	contextResult = appendEditRetryAdvice(&a.editMatchFailStreak, contextResult, payload.Name, payload.ArgsJSON, toolBaseDir, payload.Error, isError)
 	// Bounded stop-loss for the notify response-protocol error family: the
@@ -540,9 +540,9 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		})
 	}
 
-	a.queueLSPDiagnosticOverlay(a.ctxMgr.Snapshot(), payload)
+	a.queueLSPDiagnosticOverlayFromContext(payload)
 	if !deferToolResultEmission {
-		toolMsg := a.buildToolResultMessage(payload, contextResult, parts, isError, a.ctxMgr.Snapshot())
+		toolMsg := a.buildToolResultMessage(payload, contextResult, parts, isError, toolProvenanceFromContext(a.ctxMgr, payload.CallID))
 		a.ctxMgr.Append(toolMsg)
 		if a.recoveryManager() != nil {
 			a.persistAsync(identity.MainAgentID, toolMsg)

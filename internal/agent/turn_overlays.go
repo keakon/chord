@@ -8,6 +8,8 @@ import (
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
+
+	"github.com/keakon/chord/internal/ctxmgr"
 )
 
 // The full policy lives in the stable system prompt's "LSP diagnostic
@@ -275,6 +277,36 @@ func (a *MainAgent) queueLSPDiagnosticOverlay(history []message.Message, payload
 	a.pendingLSPDiagnosticOverlay = pendingLSPDiagnosticOverlayText
 }
 
+// queueLSPDiagnosticOverlayFromContext is the Snapshot-free form of
+// queueLSPDiagnosticOverlay; it reads the manager through ScanBackward
+// instead of copying the whole history.
+func (a *MainAgent) queueLSPDiagnosticOverlayFromContext(payload *ToolResultPayload) {
+	if a == nil || a.ctxMgr == nil {
+		return
+	}
+	if payload == nil {
+		return
+	}
+	if payload.Name != tools.NameEdit && payload.Name != tools.NameApplyPatch && payload.Name != tools.NameWrite {
+		return
+	}
+	if len(payload.LSPReviews) == 0 || !hasNonZeroLSPReviews(payload.LSPReviews) {
+		return
+	}
+	path := reviewedToolPayloadPath(payload)
+	if path == "" {
+		return
+	}
+	prev, ok := latestLSPReviewsFromContext(a.ctxMgr, path)
+	if !ok {
+		a.pendingLSPDiagnosticOverlay = pendingLSPDiagnosticOverlayText
+		return
+	}
+	if !sameLSPReviews(prev, payload.LSPReviews) {
+		a.pendingLSPDiagnosticOverlay = pendingLSPDiagnosticOverlayText
+	}
+}
+
 func shouldQueueLSPDiagnosticOverlay(history []message.Message, payload *ToolResultPayload) bool {
 	if payload == nil {
 		return false
@@ -304,6 +336,28 @@ func reviewedToolPayloadPath(payload *ToolResultPayload) string {
 		return payload.FileState.Writes[0].Path
 	}
 	return extractHookFilePath([]byte(payload.ArgsJSON))
+}
+
+// latestLSPReviewsFromContext scans the manager backward under its read lock
+// for the newest LSP review of path, avoiding a full Snapshot copy per
+// edit-like tool result.
+func latestLSPReviewsFromContext(mgr *ctxmgr.Manager, path string) ([]message.LSPReview, bool) {
+	if mgr == nil || path == "" {
+		return nil, false
+	}
+	var (
+		out []message.LSPReview
+		ok  bool
+	)
+	mgr.ScanBackward(func(msg *message.Message) bool {
+		if len(msg.LSPReviews) == 0 || reviewedToolMessagePath(*msg) != path {
+			return false
+		}
+		out = append([]message.LSPReview(nil), msg.LSPReviews...)
+		ok = true
+		return true
+	})
+	return out, ok
 }
 
 func latestLSPReviewsForPath(history []message.Message, path string) ([]message.LSPReview, bool) {

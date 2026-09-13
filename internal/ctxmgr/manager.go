@@ -20,12 +20,17 @@ type Manager struct {
 	systemPromptBytes        int
 	systemPromptContextBytes int
 	messages                 []message.Message
-	payloadBytes             int
-	contextBytes             int
-	lastInputTokens          int // full prompt size for compaction thresholds and input-budget displays
-	lastTotalContextTokens   int // post-response context baseline (full prompt + output)
-	calibrationInputTokens   int
-	calibrationContextBytes  int
+	// declaredToolCallIDs indexes the tool call IDs assistant messages in the
+	// history declare, so AnyAssistantDeclaresToolCallID answers O(1) instead
+	// of scanning the full history per tool result. nil until first needed;
+	// guarded by mu.
+	declaredToolCallIDs     map[string]struct{}
+	payloadBytes            int
+	contextBytes            int
+	lastInputTokens         int // full prompt size for compaction thresholds and input-budget displays
+	lastTotalContextTokens  int // post-response context baseline (full prompt + output)
+	calibrationInputTokens  int
+	calibrationContextBytes int
 	// usageCalibration keeps a bounded window of (full prompt tokens, prompt
 	// bytes) samples from completed LLM calls; the median tokens/bytes ratio is
 	// the usage-calibrated estimator. The window deliberately survives session
@@ -209,9 +214,35 @@ func (m *Manager) Threshold() float64 {
 func (m *Manager) Append(msg message.Message) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.trackToolCallIDsLocked(msg)
 	m.messages = append(m.messages, msg)
 	m.payloadBytes += MessagePayloadBytes([]message.Message{msg})
 	m.contextBytes += messageContextBytes([]message.Message{msg})
+}
+
+// trackToolCallIDsLocked records the tool call IDs an appended assistant
+// message declares. Callers hold m.mu.
+func (m *Manager) trackToolCallIDsLocked(msg message.Message) {
+	if len(msg.ToolCalls) == 0 {
+		return
+	}
+	if m.declaredToolCallIDs == nil {
+		m.declaredToolCallIDs = make(map[string]struct{})
+	}
+	for _, tc := range msg.ToolCalls {
+		if tc.ID != "" {
+			m.declaredToolCallIDs[tc.ID] = struct{}{}
+		}
+	}
+}
+
+// rebuildToolCallIDIndexLocked recomputes the declared-ID index after a
+// wholesale message-list rewrite. Callers hold m.mu.
+func (m *Manager) rebuildToolCallIDIndexLocked() {
+	m.declaredToolCallIDs = nil
+	for i := range m.messages {
+		m.trackToolCallIDsLocked(m.messages[i])
+	}
 }
 
 // DropLastMessage removes the last message from the conversation history.
@@ -223,6 +254,7 @@ func (m *Manager) DropLastMessage() {
 		m.payloadBytes -= MessagePayloadBytes(m.messages[n-1:])
 		m.contextBytes -= messageContextBytes(m.messages[n-1:])
 		m.messages = m.messages[:n-1]
+		m.rebuildToolCallIDIndexLocked()
 	}
 }
 
@@ -243,6 +275,11 @@ func (m *Manager) DropLastMessages(n int) {
 	m.payloadBytes -= MessagePayloadBytes(m.messages[len(m.messages)-n:])
 	m.contextBytes -= messageContextBytes(m.messages[len(m.messages)-n:])
 	m.messages = m.messages[:len(m.messages)-n]
+	// The declared-ID index must track the removal: a dropped assistant message
+	// no longer declares its tool calls, and a stale entry would keep
+	// AnyAssistantDeclaresToolCallID true for a call the history no longer
+	// contains (letting a synthetic result persist against a strict API).
+	m.rebuildToolCallIDIndexLocked()
 }
 
 // Snapshot returns a copy of the current message history. The returned slice
@@ -275,6 +312,7 @@ func (m *Manager) RestoreMessages(msgs []message.Message) {
 	m.messages = replaced
 	m.payloadBytes = MessagePayloadBytes(replaced)
 	m.contextBytes = messageContextBytes(replaced)
+	m.rebuildToolCallIDIndexLocked()
 	m.calibrationInputTokens = 0
 	m.calibrationContextBytes = 0
 	if len(repaired) == 0 {
@@ -313,6 +351,21 @@ func (m *Manager) ComputeSafeKeepBoundary(rawBoundary int) int {
 	return SafeKeepBoundary(m.messages, rawBoundary)
 }
 
+// ScanBackward visits messages newest-first under the read lock until visit
+// returns true. Targeted backward lookups (tool provenance, LSP review
+// attribution, skill attribution) use this instead of Snapshot, which copies
+// the whole history on every tool result. The visitor must not retain or
+// mutate the message pointer; clone whatever escapes the callback.
+func (m *Manager) ScanBackward(visit func(msg *message.Message) bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for i := len(m.messages) - 1; i >= 0; i-- {
+		if visit(&m.messages[i]) {
+			return
+		}
+	}
+}
+
 // AnyAssistantDeclaresToolCallID reports whether any assistant message in the
 // current history lists the given tool call id in ToolCalls.
 func (m *Manager) AnyAssistantDeclaresToolCallID(callID string) bool {
@@ -320,17 +373,30 @@ func (m *Manager) AnyAssistantDeclaresToolCallID(callID string) bool {
 		return false
 	}
 	m.mu.RLock()
-	defer m.mu.RUnlock()
+	if m.declaredToolCallIDs != nil {
+		_, ok := m.declaredToolCallIDs[callID]
+		m.mu.RUnlock()
+		return ok
+	}
 	for i := range m.messages {
 		if m.messages[i].Role != message.RoleAssistant {
 			continue
 		}
 		for _, tc := range m.messages[i].ToolCalls {
 			if tc.ID == callID {
+				// First call after a rewrite: build the index, then answer
+				// from it. The RLock→Lock upgrade drops the read lock first
+				// — the index is content-derived, so racing appends only
+				// add entries.
+				m.mu.RUnlock()
+				m.mu.Lock()
+				m.rebuildToolCallIDIndexLocked()
+				m.mu.Unlock()
 				return true
 			}
 		}
 	}
+	m.mu.RUnlock()
 	return false
 }
 
@@ -986,6 +1052,10 @@ func (m *Manager) refreshMessageByteStateLocked() {
 	m.contextBytes = messageContextBytes(m.messages)
 	m.calibrationInputTokens = 0
 	m.calibrationContextBytes = 0
+	// Byte-state refresh runs exactly after wholesale rewrites (compaction
+	// replace, orphan repair, restore), where the declared-ID index must be
+	// rebuilt; incremental appends never reach here.
+	m.rebuildToolCallIDIndexLocked()
 }
 
 // repairOrphanToolResultsInTail removes tool messages from tail that don't have

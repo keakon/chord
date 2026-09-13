@@ -223,7 +223,7 @@ func (a *MainAgent) appendDeferredModelDrivenToolResult(payload *ToolResultPaylo
 	// Deferred emission must produce the same durable message shape as the
 	// normal batch path: the shared constructor keeps payload/notes, diffs,
 	// audit, LSP reviews and provenance from silently going missing here.
-	toolMsg := a.buildToolResultMessage(payload, strings.TrimSpace(contextResult), parts, isError, a.ctxMgr.Snapshot())
+	toolMsg := a.buildToolResultMessage(payload, strings.TrimSpace(contextResult), parts, isError, toolProvenanceFromContext(a.ctxMgr, payload.CallID))
 	a.ctxMgr.Append(toolMsg)
 	if a.recoveryManager() != nil {
 		a.persistAsync(identity.MainAgentID, toolMsg)
