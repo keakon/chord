@@ -103,6 +103,9 @@ type UsageLedger struct {
 	eventSeq                 uint64
 	summaryLoaded            bool
 	summary                  *SessionUsageSummary
+	// file caches the open usage.jsonl handle; guarded by mu. Dropped and
+	// reopened on write errors.
+	file *os.File
 }
 
 // NewUsageLedger creates a ledger bound to one session directory.
@@ -390,6 +393,21 @@ func (l *UsageLedger) BuildSessionEvidence() (SessionStats, int64, map[string]Ag
 	return res.stats, res.count, res.refs, res.walltime, nil
 }
 
+// Close releases the cached ledger file handle. The ledger is per-session;
+// the agent drops the old ledger on session switch and restore, so the cached
+// handle must be released there.
+func (l *UsageLedger) Close() {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.file != nil {
+		l.file.Close()
+		l.file = nil
+	}
+}
+
 // AppendEvent appends one usage event and refreshes usage-summary.json.
 func (l *UsageLedger) AppendEvent(event UsageEvent) error {
 	l.mu.Lock()
@@ -444,18 +462,22 @@ func (l *UsageLedger) AppendEvent(event UsageEvent) error {
 }
 
 // appendLedgerLineLocked appends one marshaled event line to usage.jsonl.
-// Callers must hold l.mu.
+// The file handle is cached on the ledger (the ledger is per-session, and the
+// session dir is fixed at construction), so an event costs one write syscall
+// instead of an EnsureDir walk plus open/write/close per event. Callers must
+// hold l.mu.
 func (l *UsageLedger) appendLedgerLineLocked(data []byte) error {
-	f, err := privatefs.OpenFile(l.sessionDir, l.usagePath(), os.O_CREATE|os.O_WRONLY|os.O_APPEND)
-	if err != nil {
-		return fmt.Errorf("open usage ledger: %w", err)
+	if l.file == nil {
+		f, err := privatefs.OpenFile(l.sessionDir, l.usagePath(), os.O_CREATE|os.O_WRONLY|os.O_APPEND)
+		if err != nil {
+			return fmt.Errorf("open usage ledger: %w", err)
+		}
+		l.file = f
 	}
-	if _, err := f.Write(data); err != nil {
-		f.Close()
+	if _, err := l.file.Write(data); err != nil {
+		l.file.Close()
+		l.file = nil
 		return fmt.Errorf("append usage ledger: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("close usage ledger: %w", err)
 	}
 	return nil
 }

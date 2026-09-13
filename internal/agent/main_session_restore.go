@@ -817,6 +817,9 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	a.pruneCompactionIndexAllocators(loaded.SessionPath)
 	cleanupStalePendingCompactions(a.sessionDir, 5*time.Minute)
 	a.installRecoveryManager(recovery.NewRecoveryManager(loaded.SessionPath))
+	if a.usageLedger != nil {
+		a.usageLedger.Close()
+	}
 	a.usageLedger = analytics.NewUsageLedger(loaded.SessionPath, a.projectRoot)
 	if a.fileBackups != nil {
 		// activateLoadedSession bypasses installSessionTarget (which switches

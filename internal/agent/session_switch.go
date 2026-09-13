@@ -339,12 +339,18 @@ func (a *MainAgent) installSessionTarget(sessionDir string) {
 		a.fileBackups.SetSessionDir(sessionDir)
 	}
 	a.installRecoveryManager(recovery.NewRecoveryManager(sessionDir))
+	if a.usageLedger != nil {
+		a.usageLedger.Close()
+	}
 	a.usageLedger = analytics.NewUsageLedger(sessionDir, a.projectRoot)
 	if a.walltime != nil {
 		a.walltime.repointLedger(a.usageLedger)
 		a.walltime.restoreStats(nil)
 	}
 	a.setTaskRecords(nil)
+	// Pending debounced persists belong to the previous session; a late flush
+	// must never write old meta files into the new session directory.
+	a.subPersists.reset()
 	a.resetTaskCoordination(a.sessionEpoch, nil)
 	a.resetAgentRequests(nil)
 	a.setSessionSummary(buildSessionSummaryForDir(sessionDir, a.sessionLock != nil))
