@@ -53,9 +53,9 @@ func (m *Model) handleSessionAgentEvent(event agent.AgentEvent) (bool, agentEven
 		m.thinkingStreamBlockIndex = 0
 		m.pendingSessionRestoreRebuild = true
 		m.preserveComposerStateOnNextRebuild = evt.PreserveComposerState
-		reason := "session_restored"
+		reason := transcriptRestoreReasonSession
 		if m.startupRestorePending {
-			reason = "startup_restored"
+			reason = transcriptRestoreReasonStartup
 		}
 		m.resetPendingScrollFlush()
 		m.setFocusedAgent("")

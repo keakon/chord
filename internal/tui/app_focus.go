@@ -49,7 +49,7 @@ func (m *Model) rebuildFocusedViewport(agentID, viewportFilter string) {
 	currentBlocks := append([]*Block(nil), m.viewport.blocks...)
 	if state := m.startupDeferredTranscript; state != nil {
 		m.restoreStartupDeferredTranscriptRetention(state)
-		m.logStartupDeferredTranscriptExit(state, "focus_switch", viewportFilter)
+		m.logStartupDeferredTranscriptExit(state, transcriptRestoreReasonFocusSwitch, viewportFilter)
 		m.startupDeferredTranscript = nil
 		m.startupDeferredPreheatGeneration++
 	}
@@ -72,7 +72,7 @@ func (m *Model) rebuildFocusedViewport(agentID, viewportFilter string) {
 	baseCount := len(blocks)
 	blocks = m.mergeFocusedViewportLiveBlocks(blocks, currentBlocks)
 	m.continueFocusedLiveDisplaySequences(blocks[baseCount:], agentID)
-	blocks = m.maybeWindowStartupTranscript("focus_switch", blocks)
+	blocks = m.maybeWindowStartupTranscript(transcriptRestoreReasonFocusSwitch, blocks)
 	m.viewport.SetFilter(viewportFilter)
 	m.viewport.SetWorkingDir(m.workingDir)
 	m.viewport.ReplaceBlocks(blocks)

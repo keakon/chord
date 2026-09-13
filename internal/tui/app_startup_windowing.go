@@ -12,6 +12,32 @@ const (
 	startupTranscriptTailBlocks      = 48
 )
 
+// Transcript rebuild reasons. The first four are eligible for deferred
+// transcript windowing: any rebuild that installs a whole-session transcript
+// (startup restore, mid-session resume, focus switch, initial model build)
+// pays the same synchronous full-render cost, so all of them window the tail
+// instead of rendering every block eagerly.
+const (
+	transcriptRestoreReasonStartup     = "startup_restored"
+	transcriptRestoreReasonSession     = "session_restored"
+	transcriptRestoreReasonFocusSwitch = "focus_switch"
+	transcriptRestoreReasonModelInit   = "model_init"
+	transcriptRestoreReasonUnspecified = "unspecified"
+)
+
+func transcriptReasonWindows(reason string) bool {
+	switch reason {
+	case transcriptRestoreReasonStartup, transcriptRestoreReasonSession,
+		transcriptRestoreReasonFocusSwitch, transcriptRestoreReasonModelInit:
+		return true
+	}
+	return false
+}
+
+func transcriptReasonForcesCompactionFocus(reason string) bool {
+	return reason == transcriptRestoreReasonSession || reason == transcriptRestoreReasonStartup
+}
+
 const (
 	startupTranscriptWindowTop  = "top"
 	startupTranscriptWindowTail = "tail"
@@ -159,7 +185,7 @@ func (m *Model) applyStartupDeferredTranscriptWindow(start, end int, trigger str
 }
 
 func (m *Model) maybeWindowStartupTranscript(reason string, blocks []*Block) []*Block {
-	if reason != "startup_restored" && reason != "focus_switch" {
+	if !transcriptReasonWindows(reason) {
 		m.startupDeferredTranscript = nil
 		m.startupDeferredPreheatGeneration++
 		return blocks

@@ -542,7 +542,7 @@ func NewModelWithSize(a agent.AgentForTUI, width, height int) Model {
 		}
 		if !pending && a.FocusedAgentID() == "" && len(a.GetMessages()) > 0 {
 			m.setFocusedAgent("")
-			m.rebuildViewportFromMessagesWithReason("model_init")
+			m.rebuildViewportFromMessagesWithReason(transcriptRestoreReasonModelInit)
 		}
 	}
 

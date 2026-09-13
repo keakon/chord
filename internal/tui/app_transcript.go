@@ -176,7 +176,7 @@ func (m *Model) rebuildViewportFromMessagesPreservingActivity(reason string, pre
 	m.revalidateFocusedBlock()
 	recalcStarted := time.Now()
 	m.recalcViewportSize() // ensure viewport uses current layout width so background blocks align
-	forceCompactionFocus := reason == "session_restored" || reason == "startup_restored"
+	forceCompactionFocus := transcriptReasonForcesCompactionFocus(reason)
 	m.maybeFocusVisibleCompactionSummary(forceCompactionFocus)
 	recalcDuration := time.Since(recalcStarted)
 	m.maybeEnforceStartupDeferredTranscriptRetention()
@@ -185,7 +185,7 @@ func (m *Model) rebuildViewportFromMessagesPreservingActivity(reason string, pre
 }
 
 func (m *Model) logTranscriptRebuildTiming(reason string, messageCount, blockCount int, messagesDuration, blockBuildDuration, clearSettledDuration, replaceDuration, recalcDuration, sidebarDuration, totalDuration time.Duration) {
-	if strings.TrimSpace(reason) == "" || reason == "unspecified" {
+	if strings.TrimSpace(reason) == "" || reason == transcriptRestoreReasonUnspecified {
 		return
 	}
 	log.Debugf("tui transcript rebuild timing reason=%v messages=%v blocks=%v message_fetch_ms=%v build_blocks_ms=%v clear_settled_ms=%v replace_blocks_ms=%v recalc_viewport_ms=%v sidebar_file_edits_ms=%v total_ms=%v", reason, messageCount, blockCount, messagesDuration.Milliseconds(), blockBuildDuration.Milliseconds(), clearSettledDuration.Milliseconds(), replaceDuration.Milliseconds(), recalcDuration.Milliseconds(), sidebarDuration.Milliseconds(), totalDuration.Milliseconds())

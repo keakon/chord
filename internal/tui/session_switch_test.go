@@ -4899,3 +4899,30 @@ func TestForkSessionEventRestoresAtLiteralButNotInjectedFilePayload(t *testing.T
 		t.Fatalf("mode = %v, want ModeInsert (should still switch even with empty input)", m2.mode)
 	}
 }
+
+// A mid-session /resume delivers SessionRestoredEvent without a startup
+// restore pending. Its transcript must get the same deferred windowing as a
+// startup restore: windowing only on startup reasons would synchronously
+// render every block of the resumed session before the next frame.
+func TestMidSessionRestoreWindowsDeferredTranscript(t *testing.T) {
+	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+130)
+	for i := range startupTranscriptWindowMinBlocks + 130 {
+		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
+	}
+	backend := &sessionControlAgent{resumePending: false, messages: messages}
+	m := NewModelWithSize(backend, 120, 24)
+	m.mode = ModeNormal
+
+	// Hydration clears the deferred state; the next restore rebuild must
+	// re-establish windowing.
+	m.startupDeferredTranscript = nil
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.SessionRestoredEvent{}})
+	applyTestCmd(t, &m, cmd)
+	if !m.hasDeferredStartupTranscript() {
+		t.Fatal("mid-session restore should window the deferred transcript")
+	}
+	state := m.startupDeferredTranscript
+	if state.windowEnd != len(state.allBlocks) || state.windowStart != len(state.allBlocks)-startupTranscriptTailBlocks {
+		t.Fatalf("window after mid-session restore = [%d,%d), want the tail window", state.windowStart, state.windowEnd)
+	}
+}
