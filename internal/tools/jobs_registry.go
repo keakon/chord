@@ -2,8 +2,10 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -68,10 +70,11 @@ type job struct {
 	StartedAt     time.Time
 	MaxRuntimeSec int
 
-	cmdMu     sync.Mutex
+	// cmd is written once by start before the run goroutine is launched; the
+	// goroutine start gives run its happens-before edge, so no extra locking
+	// guards it.
 	cmd       *exec.Cmd
 	cancelCh  chan string
-	startedCh chan struct{}
 	logWriter *rotatingJobLog
 	output    *tailWriter
 	done      chan struct{}
@@ -140,17 +143,43 @@ func (r *JobRegistry) maybePruneJobLogs(dir string) {
 	pruneJobLogs(dir)
 }
 
+// jobWaitDelay bounds how long cmd.Wait keeps draining a job's I/O after the
+// job's own process has exited (see cmd.WaitDelay in start).
+const jobWaitDelay = 3 * time.Second
+
 func (r *JobRegistry) start(ctx context.Context, req jobStartRequest) (*job, error) {
 	// The sweep does directory I/O outside r.mu so it cannot block concurrent
 	// job_output / job_list calls.
 	r.maybePruneJobLogs(req.LogDir)
+	// The id comes from an atomic counter, so the diagnostic log can be opened
+	// outside r.mu as well: file creation is real I/O and the registry lock
+	// must not serialize behind a slow filesystem. A capacity rejection below
+	// merely skips one id and leaves an empty log file for the retention sweep
+	// to reclaim.
+	id := fmt.Sprintf("job-%d", r.seq.Add(1))
+	var (
+		logWriter *rotatingJobLog
+		logPath   string
+	)
+	if req.LogDir != "" {
+		logPath = jobLogFilePath(req.LogDir, id)
+		sessionDir := filepath.Dir(req.LogDir)
+		writer, err := openRotatingJobLog(sessionDir, logPath)
+		if err != nil {
+			return nil, fmt.Errorf("creating log file: %w", err)
+		}
+		logWriter = writer
+	}
 	r.mu.Lock()
 	r.evictFinishedLocked()
 	if len(r.jobs) >= maxJobs {
 		r.mu.Unlock()
+		if logWriter != nil {
+			_ = logWriter.Close()
+			_ = os.Remove(logPath)
+		}
 		return nil, fmt.Errorf("maximum number of background jobs (%d) reached; wait for or kill a job first", maxJobs)
 	}
-	id := fmt.Sprintf("job-%d", r.seq.Add(1))
 	// The session directory the job belongs to travels with the completion
 	// event so a job that finishes across a session switch is not delivered
 	// into the new session's transcript.
@@ -164,18 +193,25 @@ func (r *JobRegistry) start(ctx context.Context, req jobStartRequest) (*job, err
 		SessionDir:  jobSessionDir,
 		Command:     req.Command,
 		Description: req.Description,
+		LogFile:     logPath,
 		StartedAt:   time.Now(),
 		status:      jobStatusRunning,
 		detached:    req.Detached,
 		cancelCh:    make(chan string, 1),
-		startedCh:   make(chan struct{}),
 		done:        make(chan struct{}),
+		logWriter:   logWriter,
 	}
 	j.MaxRuntimeSec = req.TimeoutSec
 	st := shell.ParseShellType(req.ShellType)
 	binary, args := shell.GetShellCommand(st, req.Command)
 	cmd := exec.Command(binary, args...)
 	_, _ = configureCommandProcessGroup(cmd)
+	// A job's own process exiting does not guarantee its pipes close: a
+	// daemonized descendant that outlives the process group can hold stdout or
+	// stderr open forever, and cmd.Wait would block on their EOF past every
+	// grace period. WaitDelay bounds that wait to an already-terminal process;
+	// run maps the abandoned-I/O error back to the recorded exit status.
+	cmd.WaitDelay = jobWaitDelay
 	if req.Workdir != "" {
 		cmd.Dir = req.Workdir
 	}
@@ -184,25 +220,14 @@ func (r *JobRegistry) start(ctx context.Context, req jobStartRequest) (*job, err
 	cmd.Env = appendNonInteractiveEnv(nil)
 	outputBuf := newTailWriter(maxOutputBytes)
 	j.output = outputBuf
-	if req.LogDir != "" {
-		logPath := filepath.Join(req.LogDir, id+".log")
-		sessionDir := filepath.Dir(req.LogDir)
-		writer, err := openRotatingJobLog(sessionDir, logPath)
-		if err != nil {
-			r.mu.Unlock()
-			return nil, fmt.Errorf("creating log file: %w", err)
-		}
-		j.LogFile = logPath
-		j.logWriter = writer
-		cmd.Stdout = io.MultiWriter(writer, outputBuf)
-		cmd.Stderr = io.MultiWriter(writer, outputBuf)
+	if logWriter != nil {
+		cmd.Stdout = io.MultiWriter(logWriter, outputBuf)
+		cmd.Stderr = io.MultiWriter(logWriter, outputBuf)
 	} else {
 		cmd.Stdout = outputBuf
 		cmd.Stderr = outputBuf
 	}
-	j.cmdMu.Lock()
 	j.cmd = cmd
-	j.cmdMu.Unlock()
 	r.jobs[id] = j
 	r.mu.Unlock()
 
@@ -212,23 +237,11 @@ func (r *JobRegistry) start(ctx context.Context, req jobStartRequest) (*job, err
 }
 
 func (r *JobRegistry) run(ctx context.Context, j *job) {
-	j.cmdMu.Lock()
 	cmd := j.cmd
-	j.cmdMu.Unlock()
-	if cmd == nil {
-		close(j.startedCh)
-		r.finish(ctx, j, jobStatusFailed, "missing process handle", fmt.Errorf("starting command: missing process handle"))
-		return
-	}
 	if err := cmd.Start(); err != nil {
-		// Unblock anyone waiting for the process to exist: the job is already
-		// terminal, and startedCh only gates "a process handle is available",
-		// which a start failure answers just as definitively.
-		close(j.startedCh)
 		r.finish(ctx, j, jobStatusFailed, "failed to start", fmt.Errorf("starting command: %w", err))
 		return
 	}
-	close(j.startedCh)
 
 	waitCh := waitForCommand(cmd, j.done)
 	var (
@@ -237,6 +250,15 @@ func (r *JobRegistry) run(ctx context.Context, j *job) {
 		err    error
 	)
 	handleExit := func(rawErr error) {
+		// WaitDelay expiry means the process exited successfully but descendants
+		// kept the pipes open: the recorded exit status is authoritative, and
+		// the abandoned I/O only fed the in-memory window and the diagnostic
+		// log, both expendable. Report success instead of the I/O cutoff. A
+		// non-zero exit surfaces as *exec.ExitError and never carries
+		// ErrWaitDelay, so the exit status needs no reconstruction here.
+		if errors.Is(rawErr, exec.ErrWaitDelay) {
+			rawErr = nil
+		}
 		if rawErr == nil {
 			status, detail, err = jobStatusCompleted, "exit code 0", nil
 			return
@@ -305,18 +327,14 @@ func (r *JobRegistry) finish(ctx context.Context, j *job, status jobStatus, deta
 	}
 	statusText := j.statusText()
 	sender.SendAgentEvent(
-		"background_object_finished",
+		EventBackgroundObjectFinished,
 		j.AgentID,
 		&JobFinishedPayload{
-			BackgroundID:  j.ID,
-			AgentID:       j.AgentID,
-			SessionDir:    j.SessionDir,
-			Status:        statusText,
-			Command:       j.Command,
-			Description:   j.Description,
-			MaxRuntimeSec: j.MaxRuntimeSec,
-			Message:       j.completionMessage(status, statusText),
-			LogFile:       j.LogFile,
+			BackgroundID: j.ID,
+			AgentID:      j.AgentID,
+			SessionDir:   j.SessionDir,
+			Status:       statusText,
+			Message:      j.completionMessage(status, statusText),
 		},
 	)
 }
@@ -422,11 +440,9 @@ func (j *job) state() JobState {
 		AgentID:       j.AgentID,
 		Description:   j.Description,
 		Command:       j.Command,
-		LogFile:       j.LogFile,
 		StartedAt:     j.StartedAt,
 		MaxRuntimeSec: j.MaxRuntimeSec,
 		Status:        string(j.status),
-		Detail:        j.detail,
 		FinishedAt:    j.finishedAt,
 	}
 }
@@ -439,7 +455,7 @@ func (j *job) formatRuntimeError(err error) error {
 	if ClassifyNonInteractiveRuntimeFailure(j.Command, err, output) != nil {
 		return FormatNonInteractiveRuntimeError(NameShell, j.Command, err, output)
 	}
-	if exitErr, ok := err.(*exec.ExitError); ok {
+	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 		return shellExitErrorForCommand(j.Command, exitErr, output)
 	}
 	return fmt.Errorf("command error: %w", err)
@@ -564,7 +580,7 @@ func shortExitDetail(err error) string {
 	if err == nil {
 		return ""
 	}
-	if exitErr, ok := err.(*exec.ExitError); ok {
+	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 		if name := exitSignalName(exitErr); name != "" {
 			return "signal: " + name
 		}
@@ -727,11 +743,9 @@ type JobState struct {
 	AgentID       string
 	Description   string
 	Command       string
-	LogFile       string
 	StartedAt     time.Time
 	MaxRuntimeSec int
 	Status        string
-	Detail        string
 	FinishedAt    time.Time
 }
 

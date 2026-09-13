@@ -28,22 +28,22 @@ const (
 	EventPendingDraftRemove = "pending_draft_remove"
 
 	// Multi-agent orchestration event types.
-	EventAgentDone               = "agent_done"       // SubAgent completed its task
-	EventAgentNotify             = "agent_notify"     // SubAgent non-blocking notify update
-	EventEscalate                = "escalate"         // SubAgent requests owner/MainAgent intervention
-	EventSubAgentMailbox         = "subagent_mailbox" // structured mailbox message from or about a SubAgent
+	EventAgentDone               = "agent_done" // SubAgent completed its task
+	EventAgentNotify             = tools.EventAgentNotify
+	EventEscalate                = tools.EventEscalate // SubAgent requests owner/MainAgent intervention
+	EventSubAgentMailbox         = "subagent_mailbox"  // structured mailbox message from or about a SubAgent
 	EventSubAgentStateChanged    = "subagent_state_changed"
 	EventSubAgentCloseRequested  = "subagent_close_requested"
 	EventSubAgentProgressUpdated = "subagent_progress_updated"
 	EventSubAgentSendMessage     = "subagent_send_message"
 	EventSubAgentStop            = "subagent_stop"
-	EventAgentLog                = "agent_log"                  // Informational log from SubAgent (e.g. buffer overflow warning)
-	EventSubAgentRequestBoundary = "subagent_request_boundary"  // SubAgent LLM request finished; apply deferred routing changes
-	EventJobFinished             = "background_object_finished" // Background job finished; runtime-only notification
-	EventContinue                = "continue"                   // re-run LLM with existing context (no new user message)
-	EventHandoffResolve          = "handoff_resolve"            // user decision for a pending handoff (payload: *handoffResolvePayload)
-	EventLoopAssessment          = "loop_assessment"            // internal loop-controller decision point after a completed assistant round
-	EventLLMFallbackBoundary     = "llm_fallback_boundary"      // update a pending fallback request before provider dispatch
+	EventAgentLog                = "agent_log"                 // Informational log from SubAgent (e.g. buffer overflow warning)
+	EventSubAgentRequestBoundary = "subagent_request_boundary" // SubAgent LLM request finished; apply deferred routing changes
+	EventJobFinished             = tools.EventBackgroundObjectFinished
+	EventContinue                = "continue"              // re-run LLM with existing context (no new user message)
+	EventHandoffResolve          = "handoff_resolve"       // user decision for a pending handoff (payload: *handoffResolvePayload)
+	EventLoopAssessment          = "loop_assessment"       // internal loop-controller decision point after a completed assistant round
+	EventLLMFallbackBoundary     = "llm_fallback_boundary" // update a pending fallback request before provider dispatch
 
 	// Durable compaction (async worker); payloads are *compactionDraft / error.
 	EventCompactionReady            = "compaction_ready"

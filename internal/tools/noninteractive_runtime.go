@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"runtime"
@@ -72,7 +73,7 @@ func FormatNonInteractiveRuntimeError(toolName, command string, err error, outpu
 		return err
 	}
 	prefix := "command failed"
-	if exitErr, ok := err.(*exec.ExitError); ok {
+	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 		prefix = fmt.Sprintf("exit code %d", exitErr.ExitCode())
 	}
 	msg := fmt.Sprintf("%s: non-interactive %s failure: %s. %s", prefix, toolName, finding.Reason, nonInteractiveRuntimeAdvice())

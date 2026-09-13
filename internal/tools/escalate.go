@@ -7,16 +7,23 @@ import (
 	"strings"
 )
 
+// Wire names for the events tools hand to the agent's event loop through
+// EventSender. The agent package aliases these in its own Event* constants, so
+// the producer and the consumer cannot silently drift apart.
+const (
+	EventEscalate = "escalate"
+	// EventAgentNotify is the non-blocking progress/notice update NotifyTool sends.
+	EventAgentNotify = "agent_notify"
+	// EventBackgroundObjectFinished delivers a finished background job's result.
+	EventBackgroundObjectFinished = "background_object_finished"
+)
+
 type JobFinishedPayload struct {
-	BackgroundID  string
-	AgentID       string
-	SessionDir    string
-	Status        string
-	Command       string
-	Description   string
-	MaxRuntimeSec int
-	Message       string
-	LogFile       string
+	BackgroundID string
+	AgentID      string
+	SessionDir   string
+	Status       string
+	Message      string
 }
 
 func (p *JobFinishedPayload) EffectiveID() string {
@@ -93,7 +100,7 @@ func (t *EscalateTool) Execute(ctx context.Context, raw json.RawMessage) (string
 	}
 
 	agentID := AgentIDFromContext(ctx)
-	t.sender.SendAgentEvent("escalate", agentID, a)
+	t.sender.SendAgentEvent(EventEscalate, agentID, a)
 
 	return "The parent-agent coordination chain has been notified. This task will wait for its direct owner's reply.", nil
 }

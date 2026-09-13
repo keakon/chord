@@ -31,18 +31,6 @@ func parseBackgroundJobID(t *testing.T, out string) string {
 	return strings.TrimSpace(id)
 }
 
-func waitForJobToStart(t *testing.T, j *job) {
-	t.Helper()
-	select {
-	case <-j.startedCh:
-		return
-	case <-j.done:
-		t.Fatalf("job %s exited before reaching started state", j.ID)
-	case <-time.After(2 * time.Second):
-		t.Fatalf("job %s did not reach started state before deadline", j.ID)
-	}
-}
-
 func TestAutoBackgroundAllowedExceptions(t *testing.T) {
 	cases := []struct {
 		command string
@@ -453,9 +441,6 @@ func TestStopAllJobsForAgentStopsOnlyMatchingOwner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start other background: %v", err)
 	}
-
-	waitForJobToStart(t, job1)
-	waitForJobToStart(t, job2)
 
 	start := time.Now()
 	stopped := StopAllJobsForAgent("sub-1", "terminated on session switch")

@@ -278,26 +278,14 @@ func (a *MainAgent) GetTodos() []tools.TodoItem {
 	return out
 }
 
-// SendAgentEvent maps tool event type strings to internal event constants and
-// forwards the event through the event bus. It implements the
-// tools.EventSender interface.
+// SendAgentEvent forwards a tool-sent event through the event bus. It
+// implements the tools.EventSender interface. The event type is one of the
+// wire names declared by the tools package (tools.EventEscalate,
+// tools.EventAgentNotify, tools.EventBackgroundObjectFinished); the agent's
+// Event* constants alias those names, so the value is forwarded unchanged.
 func (a *MainAgent) SendAgentEvent(eventType, sourceID string, payload any) {
-	mapped := eventType
-	switch eventType {
-	case "escalate":
-		mapped = EventEscalate
-	case "agent_notify":
-		mapped = EventAgentNotify
-	case "agent_done":
-		mapped = EventAgentDone
-	case "agent_log":
-		mapped = EventAgentLog
-	case "background_object_finished":
-		mapped = EventJobFinished
-	}
-
 	a.sendEvent(Event{
-		Type:     mapped,
+		Type:     eventType,
 		SourceID: sourceID,
 		Payload:  payload,
 	})

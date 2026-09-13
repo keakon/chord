@@ -14,7 +14,6 @@ func backgroundResultPayload(agentID, backgroundID, description string) *tools.J
 	return &tools.JobFinishedPayload{
 		BackgroundID: backgroundID,
 		AgentID:      agentID,
-		Description:  description,
 		Status:       "completed (exit code 0)",
 		Message:      "[Background job " + backgroundID + " finished]\n\nStatus: completed (exit code 0)\nPurpose: " + description,
 	}

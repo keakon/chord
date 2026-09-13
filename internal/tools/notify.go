@@ -255,7 +255,7 @@ func (t *NotifyTool) Execute(ctx context.Context, raw json.RawMessage) (string, 
 		return "", fmt.Errorf("message_type must be progress or notice")
 	}
 	agentID := AgentIDFromContext(ctx)
-	t.sender.SendAgentEvent("agent_notify", agentID, AgentNotifyPayload{
+	t.sender.SendAgentEvent(EventAgentNotify, agentID, AgentNotifyPayload{
 		Message: a.Message, Kind: a.Kind, MessageType: a.MessageType, Subtype: a.Subtype,
 		CorrelationID: a.CorrelationID, Payload: a.Payload,
 	})

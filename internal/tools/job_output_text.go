@@ -11,6 +11,12 @@ import (
 // final state. Only model-facing reads go through it — the in-memory window,
 // the byte counters and the on-disk log keep the raw bytes so cursors, dropped
 // accounting and post-mortem diagnosis stay exact.
+//
+// The cleaning sees one read chunk at a time and keeps no state between reads,
+// so an escape sequence or a carriage-return redraw split across two read
+// boundaries is not folded away. That is cosmetic (a stray fragment at worst),
+// and avoiding it would require either withholding output at the window or a
+// stateful scanner in front of the raw-byte invariant above.
 func cleanJobOutputText(s string) string {
 	if s == "" || !strings.ContainsAny(s, "\x1b\r") {
 		return s

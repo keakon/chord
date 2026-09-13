@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -45,6 +46,28 @@ func openRotatingJobLog(sessionDir, path string) (*rotatingJobLog, error) {
 		return nil, err
 	}
 	return &rotatingJobLog{sessionDir: sessionDir, path: path, file: f}, nil
+}
+
+// jobLogFilePath returns the log path for a job. The id sequence restarts
+// whenever a new JobRegistry replaces the old one (a process restart resuming
+// the same session, or a test reset), so the first candidate must not clobber
+// the log a previous run left in the same session directory — the file is
+// opened with O_TRUNC and the rotation backup is removed on rotate. Probing
+// for a free suffix keeps every run's diagnostics distinct; a session
+// directory is owned by one live Chord process, so no other writer races the
+// probe.
+func jobLogFilePath(dir, id string) string {
+	n := 1
+	path := filepath.Join(dir, id+".log")
+	for {
+		if _, err := os.Stat(path); err != nil {
+			// Not stat'able: treat as free and let the open report a real
+			// failure if there is one.
+			return path
+		}
+		n++
+		path = filepath.Join(dir, fmt.Sprintf("%s-%d.log", id, n))
+	}
 }
 
 func (l *rotatingJobLog) Write(p []byte) (int, error) {

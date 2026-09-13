@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -394,11 +395,25 @@ func shellToolDescription(visible map[string]struct{}, shellType string) string 
 	parts = append(parts,
 		"Do not use shell redirection, heredocs, inline scripts, or `rm` as the default way to edit, write, or delete files when dedicated file tools are unavailable.",
 		"This tool also runs background jobs. Set run_in_background:true for services or work you do not need to wait for; the call returns a job id immediately and job_output/job_list/job_kill manage it.",
-		"Long one-shot commands (builds, test suites) are promoted to a background job after the yield budget (default 90s) and keep running; you will be notified when they finish. Do not sleep-wait or busy-poll — do independent work, or end your turn and wait for the notification.",
+		fmt.Sprintf("Long one-shot commands (builds, test suites) are promoted to a background job after the yield budget (default %s) and keep running; you will be notified when they finish. Do not sleep-wait or busy-poll — do independent work, or end your turn and wait for the notification.", durationLabel(ShellDefaultYieldMs)),
 		"Dependent commands must run in order: chain them in one call with `&&` or `;`, or wait for the previous result. A background job runs concurrently with other tool calls, so never start a command that depends on a job's output before that job finishes.",
-		"Only set timeout_ms when you need a hard deadline other than the foreground default of 600000ms — a job started with run_in_background:true has none until you set one, and accepts up to 21600000 for hour-scale work; only set yield_ms when you need a foreground budget other than the default 90000ms.",
+		fmt.Sprintf("Only set timeout_ms when you need a hard deadline other than the foreground default of %dms — a job started with run_in_background:true has none until you set one, and accepts up to %d for hour-scale work; only set yield_ms when you need a foreground budget other than the default %dms.", ShellDefaultTimeoutMs, ShellMaxBackgroundTimeoutMs, ShellDefaultYieldMs),
 	)
 	return strings.Join(parts, "\n")
+}
+
+// durationLabel renders a whole-second millisecond budget as a compact human
+// duration ("90s", "10m", "6h"), so the prose descriptions and the constants
+// they advertise cannot drift apart.
+func durationLabel(ms int) string {
+	switch {
+	case ms >= 3_600_000 && ms%3_600_000 == 0:
+		return fmt.Sprintf("%dh", ms/3_600_000)
+	case ms >= 60_000 && ms%60_000 == 0:
+		return fmt.Sprintf("%dm", ms/60_000)
+	default:
+		return fmt.Sprintf("%ds", ms/1000)
+	}
 }
 
 // shellFileDeletionHint routes explicit file deletions to whichever dedicated
@@ -437,12 +452,13 @@ func (ShellTool) Parameters() map[string]any {
 				"description": "Working directory the command runs in. Omit it to run in the current Working directory — do not prefix the command with `cd`; set workdir only when the command must run somewhere else. Relative paths resolve from it, except `~` for the current user's home directory.",
 			},
 			"timeout_ms": map[string]any{
-				"type":        "integer",
-				"description": "Optional hard deadline in milliseconds. A foreground command defaults to 600000 (10m); a job started with run_in_background:true has no deadline unless you set one. Capped at 600000 for a foreground command and at 21600000 (6h) when run_in_background is true; 0 means no deadline, which suits long-running services — a foreground command that cannot be promoted to a job still keeps the default deadline.",
+				"type": "integer",
+				"description": fmt.Sprintf("Optional hard deadline in milliseconds. A foreground command defaults to %d (%s); a job started with run_in_background:true has no deadline unless you set one. Capped at %d for a foreground command and at %d (%s) when run_in_background is true; 0 means no deadline, which suits long-running services — a foreground command that cannot be promoted to a job still keeps the default deadline.",
+					ShellDefaultTimeoutMs, durationLabel(ShellDefaultTimeoutMs), ShellMaxTimeoutMs, ShellMaxBackgroundTimeoutMs, durationLabel(ShellMaxBackgroundTimeoutMs)),
 			},
 			"yield_ms": map[string]any{
 				"type":        "integer",
-				"description": "Optional foreground budget in milliseconds before the command continues as a background job (max 600000, default 90000). 0 keeps the command in the foreground until it finishes or hits timeout_ms.",
+				"description": fmt.Sprintf("Optional foreground budget in milliseconds before the command continues as a background job (max %d, default %d). 0 keeps the command in the foreground until it finishes or hits timeout_ms.", shellMaxYieldMs, ShellDefaultYieldMs),
 			},
 			"run_in_background": map[string]any{
 				"type":        "boolean",
@@ -646,7 +662,7 @@ func appendShellCostNote(output, command string, elapsed time.Duration) string {
 // error is not a signal-terminated exit, so the job status detail and the shell
 // error agree on the wording.
 func exitSignalName(err error) string {
-	exitErr, ok := err.(*exec.ExitError)
+	exitErr, ok := errors.AsType[*exec.ExitError](err)
 	if !ok {
 		return ""
 	}
