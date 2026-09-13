@@ -20,7 +20,6 @@ import (
 
 	sonicjson "github.com/bytedance/sonic"
 
-	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/modelcompat"
 )
@@ -33,6 +32,10 @@ type OpenAIProvider struct {
 	traceWriter       atomic.Pointer[TraceWriter]
 	proxyScheme       string // "http"/"https"/"socks5" when using proxy, "" otherwise (for request logging)
 	responsesProvider *ResponsesProvider
+
+	// bodyReuse caches the marshaled request body across a target's key
+	// attempts; see requestBodyReuse.
+	bodyReuse requestBodyReuse
 }
 
 // NewOpenAIProviderWithClient creates an OpenAI provider using a caller-supplied HTTP client.
@@ -288,43 +291,20 @@ func (o *OpenAIProvider) CompleteStream(
 	}
 	dumpWriter := o.dumpWriter.Load()
 	traceWriter := o.traceWriter.Load()
-	traceCollector := newLLMTraceCollector("openai", model, cb)
-	traceCB := traceCollector.Callback
+	// The trace collector only books diagnostics; without a trace writer it
+	// would burn per-chunk work (event dedup, tool-input accounting) for a
+	// record nobody persists, so the raw callback is wired straight through.
+	var traceCollector *llmTraceCollector
+	traceCB := cb
+	if traceWriter != nil {
+		traceCollector = newLLMTraceCollector("openai", model, cb)
+		traceCB = traceCollector.Callback
+	}
 
 	ot := tuning.OpenAI
 	if tuning.DisableReasoning {
 		ot.ReasoningEffort = ""
 	}
-	// Resolve the chat-completions compat once for the whole request; the
-	// resolver takes the provider lock and re-merges layers on every call.
-	var chatCompat *config.ChatCompletionsCompatConfig
-	if o.provider != nil {
-		chatCompat = o.provider.ChatCompletionsCompat(model)
-	}
-	// Convert messages to OpenAI format.
-	wireFamily := providerWireFamily(o.provider)
-	continuityMode := reasoningContinuityCompatMode(o.provider, model)
-	convertOpts := openAIConvertOptions{}
-	if chatCompat != nil {
-		convertOpts.requiresToolResultName = compatBool(chatCompat.RequiresToolResultName, false)
-		convertOpts.requiresAssistantAfterToolResult = compatBool(chatCompat.RequiresAssistantAfterToolResult, false)
-	}
-	apiMessages := convertMessagesToOpenAIWithOptions(systemPrompt, wireFamily, continuityMode, messages, convertOpts)
-	// When the wire keeps visible reasoning continuity, thinking-mode backends
-	// require every current-turn assistant tool-call message to carry
-	// reasoning_content. Fill even when reasoning was disabled for this
-	// request: DisableReasoning only strips the request-side thinking
-	// controls, and endpoints that enable thinking server-side (DeepSeek
-	// family behind gateways) keep validating the field regardless — a
-	// session dump shows 12 "reasoning_content must be passed back" 400s on
-	// requests whose thinking key was already stripped.
-	if wireFamily == modelcompat.WireFamilyOpenAIChat && continuityMode == modelcompat.ReasoningContinuityOpenAIVisible {
-		fillCurrentTurnEmptyReasoning(apiMessages)
-	}
-
-	// Convert tools.
-	apiTools := convertToolsToOpenAI(tools)
-
 	// Resolve request overrides up front so the forced tool_choice guard sees
 	// the final reasoning fields after compatibility patches.
 	overrides := o.provider.RequestOverrides(model)
@@ -334,87 +314,130 @@ func (o *OpenAIProvider) CompleteStream(
 
 	// Build request body.
 	url := o.provider.APIURL()
-	reqBody := openAIRequest{
-		Model:    model,
-		Messages: apiMessages,
-		Tools:    apiTools,
-		Stream:   true,
-	}
-	// parallel_tool_calls and tool_choice are only valid when tools are
-	// declared (OpenAI rejects them with 400 otherwise). Probe-style requests
-	// like `chord doctor models` send no tools, so omit both. With tools
-	// present, an explicit tuning override wins, otherwise default to true.
-	if len(apiTools) > 0 {
-		if ot.ParallelToolCalls != nil {
-			reqBody.ParallelToolCalls = ot.ParallelToolCalls
-		} else {
-			reqBody.ParallelToolCalls = new(true)
-		}
-	}
-	suppressForcedToolChoice := false
-	if ot.ToolChoice == "required" && forcedToolChoiceSuppressedInThinking(o.provider, model) {
-		if tuning.DisableReasoning {
-			// The DisableReasoning strip above only silences the request-side
-			// reasoning controls for replay compatibility; it never turns off
-			// server-side thinking, and suppress_in_thinking models are exactly
-			// the backends that keep thinking enabled by default (DeepSeek
-			// family behind gateways). The strip must therefore not count as
-			// "reasoning inactive": keep suppressing forced tool_choice, or the
-			// request ships thinking + tool_choice=required and gets a 400.
-			suppressForcedToolChoice = true
-		} else {
-			reasoningProbe := make(map[string]any, 1)
-			if effort := ot.EffectiveReasoningEffort(); effort != "" {
-				reasoningProbe["reasoning_effort"] = effort
-			}
-			var err error
-			suppressForcedToolChoice, err = effectiveRequestReasoningActive(reasoningProbe, overrides)
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
-	if ot.ToolChoice != "" && !suppressForcedToolChoice && len(apiTools) > 0 {
-		reqBody.ToolChoice = ot.ToolChoice
-	}
-	// Request usage stats in the final streaming chunk.
-	// Without this, OpenAI-compatible APIs never populate chunk.Usage
-	// and token counts remain 0. Gateways that reject stream_options can
-	// disable it via compat.chat_completions.send_stream_options: false
-	// (token usage then stays unreported).
-	var sendStreamOptions *bool
-	if chatCompat != nil {
-		sendStreamOptions = chatCompat.SendStreamOptions
-	}
-	if compatBool(sendStreamOptions, true) {
-		reqBody.StreamOptions = &openAIStreamOptions{IncludeUsage: true}
-	}
+	// Resolve the chat-completions compat once for the whole request; the
+	// resolver takes the provider lock and re-merges layers on every call.
+	// It also decides InferFinishReason on the response side, so it stays
+	// outside the cached body build.
+	chatCompat := o.provider.ChatCompletionsCompat(model)
 
-	if effort := ot.EffectiveReasoningEffort(); effort != "" {
-		reqBody.ReasoningEffort = effort
-		if maxTokens > 0 {
-			// OpenAI reasoning models require max_completion_tokens. Compatible
-			// providers can rename this dynamically computed field through
-			// request_overrides.rename_body_fields.
-			reqBody.MaxCompletionTokens = maxTokens
-			reqBody.MaxTokens = 0
+	// The marshaled body depends only on (system, messages, tools, maxTokens,
+	// tuning) plus static provider config — not on the API key. Caching it per
+	// target lets key rotation resend the identical bytes instead of
+	// re-converting and re-marshaling the full history on every attempt.
+	bodyBytes, err := o.bodyReuse.body(requestBodyIdentityFor(systemPrompt, messages, tools, maxTokens), func() ([]byte, error) {
+		// Convert messages to OpenAI format.
+		wireFamily := providerWireFamily(o.provider)
+		continuityMode := reasoningContinuityCompatMode(o.provider, model)
+		convertOpts := openAIConvertOptions{}
+		if chatCompat != nil {
+			convertOpts.requiresToolResultName = compatBool(chatCompat.RequiresToolResultName, false)
+			convertOpts.requiresAssistantAfterToolResult = compatBool(chatCompat.RequiresAssistantAfterToolResult, false)
 		}
-	} else if maxTokens > 0 {
-		reqBody.MaxTokens = maxTokens
-	}
+		apiMessages := convertMessagesToOpenAIWithOptions(systemPrompt, wireFamily, continuityMode, messages, convertOpts)
+		// When the wire keeps visible reasoning continuity, thinking-mode backends
+		// require every current-turn assistant tool-call message to carry
+		// reasoning_content. Fill even when reasoning was disabled for this
+		// request: DisableReasoning only strips the request-side thinking
+		// controls, and endpoints that enable thinking server-side (DeepSeek
+		// family behind gateways) keep validating the field regardless — a
+		// session dump shows 12 "reasoning_content must be passed back" 400s on
+		// requests whose thinking key was already stripped.
+		if wireFamily == modelcompat.WireFamilyOpenAIChat && continuityMode == modelcompat.ReasoningContinuityOpenAIVisible {
+			fillCurrentTurnEmptyReasoning(apiMessages)
+		}
 
-	if ot.TextVerbosity != "" {
-		reqBody.Verbosity = ot.TextVerbosity
-	}
-	bodyBytes, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("marshal request body: %w", err)
-	}
-	bodyBytes, err = applyRequestBodyOverrides(bodyBytes, overrides)
+		// Convert tools.
+		apiTools := convertToolsToOpenAI(tools)
+
+		reqBody := openAIRequest{
+			Model:    model,
+			Messages: apiMessages,
+			Tools:    apiTools,
+			Stream:   true,
+		}
+		// parallel_tool_calls and tool_choice are only valid when tools are
+		// declared (OpenAI rejects them with 400 otherwise). Probe-style requests
+		// like `chord doctor models` send no tools, so omit both. With tools
+		// present, an explicit tuning override wins, otherwise default to true.
+		if len(apiTools) > 0 {
+			if ot.ParallelToolCalls != nil {
+				reqBody.ParallelToolCalls = ot.ParallelToolCalls
+			} else {
+				reqBody.ParallelToolCalls = new(true)
+			}
+		}
+		suppressForcedToolChoice := false
+		if ot.ToolChoice == "required" && forcedToolChoiceSuppressedInThinking(o.provider, model) {
+			if tuning.DisableReasoning {
+				// The DisableReasoning strip above only silences the request-side
+				// reasoning controls for replay compatibility; it never turns off
+				// server-side thinking, and suppress_in_thinking models are exactly
+				// the backends that keep thinking enabled by default (DeepSeek
+				// family behind gateways). The strip must therefore not count as
+				// "reasoning inactive": keep suppressing forced tool_choice, or the
+				// request ships thinking + tool_choice=required and gets a 400.
+				suppressForcedToolChoice = true
+			} else {
+				reasoningProbe := make(map[string]any, 1)
+				if effort := ot.EffectiveReasoningEffort(); effort != "" {
+					reasoningProbe["reasoning_effort"] = effort
+				}
+				var err error
+				suppressForcedToolChoice, err = effectiveRequestReasoningActive(reasoningProbe, overrides)
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
+		if ot.ToolChoice != "" && !suppressForcedToolChoice && len(apiTools) > 0 {
+			reqBody.ToolChoice = ot.ToolChoice
+		}
+		// Request usage stats in the final streaming chunk.
+		// Without this, OpenAI-compatible APIs never populate chunk.Usage
+		// and token counts remain 0. Gateways that reject stream_options can
+		// disable it via compat.chat_completions.send_stream_options: false
+		// (token usage then stays unreported).
+		var sendStreamOptions *bool
+		if chatCompat != nil {
+			sendStreamOptions = chatCompat.SendStreamOptions
+		}
+		if compatBool(sendStreamOptions, true) {
+			reqBody.StreamOptions = &openAIStreamOptions{IncludeUsage: true}
+		}
+
+		if effort := ot.EffectiveReasoningEffort(); effort != "" {
+			reqBody.ReasoningEffort = effort
+			if maxTokens > 0 {
+				// OpenAI reasoning models require max_completion_tokens. Compatible
+				// providers can rename this dynamically computed field through
+				// request_overrides.rename_body_fields.
+				reqBody.MaxCompletionTokens = maxTokens
+				reqBody.MaxTokens = 0
+			}
+		} else if maxTokens > 0 {
+			reqBody.MaxTokens = maxTokens
+		}
+
+		if ot.TextVerbosity != "" {
+			reqBody.Verbosity = ot.TextVerbosity
+		}
+		bodyBytes, err := json.Marshal(reqBody)
+		if err != nil {
+			return nil, fmt.Errorf("marshal request body: %w", err)
+		}
+		bodyBytes, err = applyRequestBodyOverrides(bodyBytes, overrides)
+		if err != nil {
+			return nil, err
+		}
+		return bodyBytes, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	dumpRequestBody := append([]byte(nil), bodyBytes...)
+	var dumpRequestBody []byte
+	if dumpWriter != nil {
+		dumpRequestBody = append([]byte(nil), bodyBytes...)
+	}
 
 	// Build HTTP request with a derived context for per-chunk timeout enforcement.
 	streamCtx, streamCancel := context.WithCancel(ctx)

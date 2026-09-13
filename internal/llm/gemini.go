@@ -31,6 +31,10 @@ type GeminiProvider struct {
 	dumpWriter  atomic.Pointer[DumpWriter]
 	traceWriter atomic.Pointer[TraceWriter]
 	proxyScheme string
+
+	// bodyReuse caches the marshaled request body across a target's key
+	// attempts; see requestBodyReuse.
+	bodyReuse requestBodyReuse
 }
 
 func NewGeminiProviderWithClient(provider *ProviderConfig, client *http.Client, proxyURL string) (*GeminiProvider, error) {
@@ -209,63 +213,83 @@ func (g *GeminiProvider) CompleteStream(
 ) (*message.Response, error) {
 	dumpWriter := g.dumpWriter.Load()
 	traceWriter := g.traceWriter.Load()
-	traceCollector := newLLMTraceCollector("gemini", model, cb)
-	traceCB := traceCollector.Callback
-	contents := convertMessagesToGemini(messages)
-	ensureGeminiActiveLoopSignatures(contents, model)
-	// Tool config is only valid while tools are declared (Gemini rejects
-	// toolConfig without function declarations).
-	apiTools := convertToolsToGemini(tools)
-	reqBody := geminiRequest{
-		Contents: contents,
-		Tools:    apiTools,
-	}
-	if len(apiTools) > 0 && tuning.Gemini.ToolChoice != "" {
-		reqBody.ToolConfig = geminiToolConfigFromTuning(tuning.Gemini.ToolChoice)
-	}
-	if systemPrompt != "" {
-		reqBody.SystemInstruction = &geminiContent{Parts: []geminiPart{{Text: systemPrompt}}}
-	}
-
-	var genCfg geminiGenerationConfig
-	if maxTokens > 0 {
-		genCfg.MaxOutputTokens = maxTokens
-	}
-	// Gemini rejects a request carrying both thinkingBudget and thinkingLevel,
-	// so normalize first and let the resolved shape drive the include_thoughts
-	// default too (a dropped budget must not imply active thinking).
-	geminiThinking := normalizeGeminiThinking(tuning.Gemini)
-	if geminiThinking.ThinkingBudget != nil || geminiThinking.ThinkingLevel != "" || geminiThinking.IncludeThoughts != nil {
-		// Gemini thinkingLevel values are documented as lowercase strings in the
-		// public Gemini API docs (e.g. "minimal"|"low"|"medium"|"high"). Keep the
-		// configured casing as-is.
-		includeThoughts := geminiThinking.IncludeThoughts
-		if includeThoughts == nil &&
-			((geminiThinking.ThinkingBudget != nil && *geminiThinking.ThinkingBudget != 0) || geminiThinking.ThinkingLevel != "") {
-			// Thought signatures are bound to the producing model, so the
-			// visible thought summary is the only reasoning text that survives
-			// a later switch to another provider or wire family. Capture it by
-			// default whenever thinking is active; include_thoughts: false in
-			// the model config opts out explicitly.
-			v := true
-			includeThoughts = &v
-		}
-		genCfg.ThinkingConfig = &geminiThinkingConfig{ThinkingBudget: geminiThinking.ThinkingBudget, ThinkingLevel: geminiThinking.ThinkingLevel, IncludeThoughts: includeThoughts}
-	}
-	if genCfg.MaxOutputTokens > 0 || genCfg.ThinkingConfig != nil {
-		reqBody.GenerationConfig = &genCfg
-	}
-
-	bodyBytes, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("marshal request body: %w", err)
+	// The trace collector only books diagnostics; without a trace writer it
+	// would burn per-chunk work (event dedup, tool-input accounting) for a
+	// record nobody persists, so the raw callback is wired straight through.
+	var traceCollector *llmTraceCollector
+	traceCB := cb
+	if traceWriter != nil {
+		traceCollector = newLLMTraceCollector("gemini", model, cb)
+		traceCB = traceCollector.Callback
 	}
 	overrides := g.provider.RequestOverrides(model)
-	bodyBytes, err = applyRequestBodyOverrides(bodyBytes, overrides)
+	// The marshaled body depends only on (system, messages, tools, maxTokens,
+	// tuning) plus static provider config — not on the API key. Caching it per
+	// target lets key rotation resend the identical bytes instead of
+	// re-converting and re-marshaling the full history on every attempt.
+	bodyBytes, err := g.bodyReuse.body(requestBodyIdentityFor(systemPrompt, messages, tools, maxTokens), func() ([]byte, error) {
+		contents := convertMessagesToGemini(messages)
+		ensureGeminiActiveLoopSignatures(contents, model)
+		// Tool config is only valid while tools are declared (Gemini rejects
+		// toolConfig without function declarations).
+		apiTools := convertToolsToGemini(tools)
+		reqBody := geminiRequest{
+			Contents: contents,
+			Tools:    apiTools,
+		}
+		if len(apiTools) > 0 && tuning.Gemini.ToolChoice != "" {
+			reqBody.ToolConfig = geminiToolConfigFromTuning(tuning.Gemini.ToolChoice)
+		}
+		if systemPrompt != "" {
+			reqBody.SystemInstruction = &geminiContent{Parts: []geminiPart{{Text: systemPrompt}}}
+		}
+
+		var genCfg geminiGenerationConfig
+		if maxTokens > 0 {
+			genCfg.MaxOutputTokens = maxTokens
+		}
+		// Gemini rejects a request carrying both thinkingBudget and thinkingLevel,
+		// so normalize first and let the resolved shape drive the include_thoughts
+		// default too (a dropped budget must not imply active thinking).
+		geminiThinking := normalizeGeminiThinking(tuning.Gemini)
+		if geminiThinking.ThinkingBudget != nil || geminiThinking.ThinkingLevel != "" || geminiThinking.IncludeThoughts != nil {
+			// Gemini thinkingLevel values are documented as lowercase strings in the
+			// public Gemini API docs (e.g. "minimal"|"low"|"medium"|"high"). Keep the
+			// configured casing as-is.
+			includeThoughts := geminiThinking.IncludeThoughts
+			if includeThoughts == nil &&
+				((geminiThinking.ThinkingBudget != nil && *geminiThinking.ThinkingBudget != 0) || geminiThinking.ThinkingLevel != "") {
+				// Thought signatures are bound to the producing model, so the
+				// visible thought summary is the only reasoning text that survives
+				// a later switch to another provider or wire family. Capture it by
+				// default whenever thinking is active; include_thoughts: false in
+				// the model config opts out explicitly.
+				v := true
+				includeThoughts = &v
+			}
+			genCfg.ThinkingConfig = &geminiThinkingConfig{ThinkingBudget: geminiThinking.ThinkingBudget, ThinkingLevel: geminiThinking.ThinkingLevel, IncludeThoughts: includeThoughts}
+		}
+		if genCfg.MaxOutputTokens > 0 || genCfg.ThinkingConfig != nil {
+			reqBody.GenerationConfig = &genCfg
+		}
+
+		bodyBytes, err := json.Marshal(reqBody)
+		if err != nil {
+			return nil, fmt.Errorf("marshal request body: %w", err)
+		}
+		bodyBytes, err = applyRequestBodyOverrides(bodyBytes, overrides)
+		if err != nil {
+			return nil, err
+		}
+		return bodyBytes, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	dumpRequestBody := append([]byte(nil), bodyBytes...)
+	var dumpRequestBody []byte
+	if dumpWriter != nil {
+		dumpRequestBody = append([]byte(nil), bodyBytes...)
+	}
 
 	streamCtx, streamCancel := context.WithCancel(ctx)
 	defer streamCancel()

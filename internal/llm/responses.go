@@ -361,8 +361,15 @@ func (r *ResponsesProvider) CompleteStream(
 	ot := tuning.OpenAI
 	dumpWriter := r.dumpWriter.Load()
 	traceWriter := r.traceWriter.Load()
-	traceCollector := newLLMTraceCollector("responses", model, cb)
-	traceCB := traceCollector.Callback
+	// The trace collector only books diagnostics; without a trace writer it
+	// would burn per-chunk work (event dedup, tool-input accounting) for a
+	// record nobody persists, so the raw callback is wired straight through.
+	var traceCollector *llmTraceCollector
+	traceCB := cb
+	if traceWriter != nil {
+		traceCollector = newLLMTraceCollector("responses", model, cb)
+		traceCB = traceCollector.Callback
+	}
 	useOpenAIOAuth := r.provider != nil && r.provider.isOpenAIOAuthKey(apiKey)
 	url := r.provider.APIURL()
 	if useOpenAIOAuth {
@@ -539,7 +546,11 @@ func (r *ResponsesProvider) CompleteStream(
 	if err != nil {
 		return nil, err
 	}
-	dumpRequestBody := append([]byte(nil), bodyBytes...)
+	// Copy the body only when a dump will actually read it.
+	var dumpRequestBody []byte
+	if dumpWriter != nil {
+		dumpRequestBody = append([]byte(nil), bodyBytes...)
+	}
 
 	log.Debugf("responses request model=%v max_output_tokens=%v messages=%v tools=%v reasoning_effort=%v reasoning_summary=%v request_bytes=%v", model, reqBody.MaxOutputTokens, len(messages), len(tools), effectiveReasoningEffort, ot.ReasoningSummary, len(bodyBytes))
 

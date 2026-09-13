@@ -141,8 +141,12 @@ func (r *ResponsesProvider) Compact(
 	if err != nil {
 		return nil, fmt.Errorf("marshal compact request body: %w", err)
 	}
-	dumpRequestBody := append([]byte(nil), bodyBytes...)
 	dumpWriter := r.dumpWriter.Load()
+	// Copy the body only when a dump will actually read it.
+	var dumpRequestBody []byte
+	if dumpWriter != nil {
+		dumpRequestBody = append([]byte(nil), bodyBytes...)
+	}
 	streamCtx, streamCancel := context.WithCancel(ctx)
 	defer streamCancel()
 	req, err := http.NewRequestWithContext(streamCtx, http.MethodPost, url, bytes.NewReader(bodyBytes))

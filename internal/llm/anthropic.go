@@ -20,6 +20,8 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"sync"
+
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
 )
@@ -31,6 +33,10 @@ type AnthropicProvider struct {
 	dumpWriter  atomic.Pointer[DumpWriter] // optional: when non-nil, each request/response is dumped to disk
 	traceWriter atomic.Pointer[TraceWriter]
 	proxyScheme string // "http"/"https"/"socks5" when using proxy, "" otherwise (for request logging)
+
+	// bodyReuse caches the marshaled request body across a target's key
+	// attempts; see requestBodyReuse.
+	bodyReuse requestBodyReuse
 }
 
 // NewAnthropicProviderWithClient creates an Anthropic provider using a caller-supplied HTTP client.
@@ -177,78 +183,98 @@ func (a *AnthropicProvider) CompleteStream(
 ) (*message.Response, error) {
 	dumpWriter := a.dumpWriter.Load()
 	traceWriter := a.traceWriter.Load()
-	traceCollector := newLLMTraceCollector("anthropic", model, cb)
-	traceCB := traceCollector.Callback
+	// The trace collector only books diagnostics; without a trace writer it
+	// would burn per-chunk work (event dedup, tool-input accounting) for a
+	// record nobody persists, so the raw callback is wired straight through.
+	var traceCollector *llmTraceCollector
+	traceCB := cb
+	if traceWriter != nil {
+		traceCollector = newLLMTraceCollector("anthropic", model, cb)
+		traceCB = traceCollector.Callback
+	}
 	at := tuning.Anthropic
 	at, err := validateAnthropicTuning(at)
 	if err != nil {
 		return nil, fmt.Errorf("validate anthropic tuning: %w", err)
 	}
 
-	// Build system content blocks.
-	systemBlocks := buildSystemBlocks(systemPrompt)
-
-	// Convert internal messages to Anthropic API format.
-	apiMessages, messageMap := convertMessagesWithMap(messages)
-	at.CacheBoundary = resolveAnthropicCacheBoundary(at.CacheBoundary, messageMap)
-	at.CacheLatestBoundary = resolveAnthropicCacheBoundary(at.CacheLatestBoundary, messageMap)
-
-	// Convert tool definitions with optional cache markers.
-	apiTools := convertToolsWithCache(tools, at)
-
-	// Build the request body.
-	reqBody := anthropicRequest{
-		Model:     model,
-		MaxTokens: maxTokens,
-		System:    systemBlocks,
-		Messages:  apiMessages,
-		Tools:     apiTools,
-		Stream:    true,
-	}
-	if at.ToolChoice != "" && len(apiTools) > 0 {
-		// Extended thinking is incompatible with forced tool use: Anthropic
-		// returns 400 for tool_choice "any"/"tool" when thinking is
-		// enabled/adaptive. "auto" stays valid, so only the forced choice is
-		// suppressed here (the loop exit-control path requests "required",
-		// which maps to "any").
-		thinkingActive := at.ThinkingType == "enabled" || at.ThinkingType == "adaptive"
-		if tc := anthropicToolChoiceFromTuning(at.ToolChoice); tc != nil && !(thinkingActive && tc.Type == "any") {
-			reqBody.ToolChoice = tc
-		}
-	}
-	if at.Temperature != nil && at.ThinkingType != "enabled" && at.ThinkingType != "adaptive" {
-		reqBody.Temperature = at.Temperature
-	}
-
-	// Apply prompt caching strategy.
-	if err := applyPromptCaching(at, &reqBody); err != nil {
-		return nil, fmt.Errorf("apply anthropic prompt caching: %w", err)
-	}
-
-	// Configure thinking.
-	if thinking := buildAnthropicThinking(at); thinking != nil {
-		reqBody.Thinking = thinking
-	}
-	if oc := buildAnthropicOutputConfig(at); oc != nil {
-		reqBody.OutputConfig = oc
-	}
-	if at.ServiceTier != "" {
-		reqBody.Speed = at.ServiceTier
-	}
-	if userIDPayload := stableAnthropicMetadataUserIDPayload(a.provider); userIDPayload != "" {
-		reqBody.Metadata = &anthropicMetadata{UserID: userIDPayload}
-	}
-
-	bodyBytes, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("marshal request body: %w", err)
-	}
 	overrides := a.provider.RequestOverrides(model)
-	bodyBytes, err = applyRequestBodyOverrides(bodyBytes, overrides)
+	// The marshaled body depends only on (system, messages, tools, maxTokens,
+	// tuning) plus static provider config — not on the API key. Caching it per
+	// target lets key rotation resend the identical bytes instead of
+	// re-converting and re-marshaling the full history on every attempt.
+	bodyBytes, err := a.bodyReuse.body(requestBodyIdentityFor(systemPrompt, messages, tools, maxTokens), func() ([]byte, error) {
+		// Build system content blocks.
+		systemBlocks := buildSystemBlocks(systemPrompt)
+
+		// Convert internal messages to Anthropic API format.
+		apiMessages, messageMap := convertMessagesWithMap(messages)
+		at.CacheBoundary = resolveAnthropicCacheBoundary(at.CacheBoundary, messageMap)
+		at.CacheLatestBoundary = resolveAnthropicCacheBoundary(at.CacheLatestBoundary, messageMap)
+
+		// Convert tool definitions with optional cache markers.
+		apiTools := convertToolsWithCache(tools, at)
+
+		// Build the request body.
+		reqBody := anthropicRequest{
+			Model:     model,
+			MaxTokens: maxTokens,
+			System:    systemBlocks,
+			Messages:  apiMessages,
+			Tools:     apiTools,
+			Stream:    true,
+		}
+		if at.ToolChoice != "" && len(apiTools) > 0 {
+			// Extended thinking is incompatible with forced tool use: Anthropic
+			// returns 400 for tool_choice "any"/"tool" when thinking is
+			// enabled/adaptive. "auto" stays valid, so only the forced choice is
+			// suppressed here (the loop exit-control path requests "required",
+			// which maps to "any").
+			thinkingActive := at.ThinkingType == "enabled" || at.ThinkingType == "adaptive"
+			if tc := anthropicToolChoiceFromTuning(at.ToolChoice); tc != nil && !(thinkingActive && tc.Type == "any") {
+				reqBody.ToolChoice = tc
+			}
+		}
+		if at.Temperature != nil && at.ThinkingType != "enabled" && at.ThinkingType != "adaptive" {
+			reqBody.Temperature = at.Temperature
+		}
+
+		// Apply prompt caching strategy.
+		if err := applyPromptCaching(at, &reqBody); err != nil {
+			return nil, fmt.Errorf("apply anthropic prompt caching: %w", err)
+		}
+
+		// Configure thinking.
+		if thinking := buildAnthropicThinking(at); thinking != nil {
+			reqBody.Thinking = thinking
+		}
+		if oc := buildAnthropicOutputConfig(at); oc != nil {
+			reqBody.OutputConfig = oc
+		}
+		if at.ServiceTier != "" {
+			reqBody.Speed = at.ServiceTier
+		}
+		if userIDPayload := stableAnthropicMetadataUserIDPayload(a.provider); userIDPayload != "" {
+			reqBody.Metadata = &anthropicMetadata{UserID: userIDPayload}
+		}
+
+		bodyBytes, err := json.Marshal(reqBody)
+		if err != nil {
+			return nil, fmt.Errorf("marshal request body: %w", err)
+		}
+		bodyBytes, err = applyRequestBodyOverrides(bodyBytes, overrides)
+		if err != nil {
+			return nil, err
+		}
+		return bodyBytes, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	dumpRequestBody := append([]byte(nil), bodyBytes...)
+	var dumpRequestBody []byte
+	if dumpWriter != nil {
+		dumpRequestBody = append([]byte(nil), bodyBytes...)
+	}
 
 	// Build the HTTP request with a derived context for per-chunk timeout enforcement.
 	streamCtx, streamCancel := context.WithCancel(ctx)
@@ -564,7 +590,24 @@ func anthropicBetaHeader(tuning AnthropicTuning, effectiveContext int) string {
 	return strings.Join(merged, ",")
 }
 
+// anthropicMetadataUserIDMemo caches the payload per provider config: the
+// inputs (config home, username, hostname) never change within a process, but
+// the payload was recomputed — including two SHA-256 sums — on every request.
+var anthropicMetadataUserIDMemo sync.Map
+
 func stableAnthropicMetadataUserIDPayload(provider *ProviderConfig) string {
+	if provider == nil {
+		return ""
+	}
+	if cached, ok := anthropicMetadataUserIDMemo.Load(provider); ok {
+		return cached.(string)
+	}
+	payload := computeAnthropicMetadataUserIDPayload(provider)
+	anthropicMetadataUserIDMemo.Store(provider, payload)
+	return payload
+}
+
+func computeAnthropicMetadataUserIDPayload(provider *ProviderConfig) string {
 	if provider == nil {
 		return ""
 	}
