@@ -48,7 +48,7 @@ func (m *Model) refreshAtMentionList() {
 			if exact, ok := atMentionExactIndexedMatch(m.atMentionFiles, m.atMentionQuery); ok {
 				matches = []atMentionOption{exact}
 			} else {
-				matches = atMentionFuzzyMatches(m.atMentionFiles, m.atMentionQuery)
+				matches = atMentionFuzzyMatchesWithLower(m.atMentionFiles, m.atMentionFilesLower, m.atMentionQuery)
 			}
 			matches = mergeAtMentionOptions(matches, atMentionOptionsMissingFromIndex(rootMatches, m.atMentionFiles), m.atMentionQuery)
 		}

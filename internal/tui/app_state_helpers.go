@@ -102,6 +102,10 @@ type completionState struct {
 	atMentionLoading    bool
 	atMentionLoadedAt   time.Time
 	atMentionFiles      []string
+	// atMentionFilesLower caches the lowercase form of every indexed path,
+	// built once per index load so per-keystroke scoring skips 10k ToLower
+	// allocations.
+	atMentionFilesLower map[string]string
 	atMentionList       *OverlayList
 
 	// Slash command completion (when input starts with "/")

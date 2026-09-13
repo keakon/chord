@@ -1036,6 +1036,14 @@ func atMentionSortTieBreak(a, b string, query string) int {
 }
 
 func atMentionFuzzyMatches(files []string, query string) []atMentionOption {
+	return atMentionFuzzyMatchesWithLower(files, nil, query)
+}
+
+// atMentionFuzzyMatchesWithLower scores the index against the query. lowerByFile
+// carries the precomputed lowercase forms built once per index load; without it
+// (ad-hoc callers) each file lowercases per keystroke, which on a 10k-file
+// index dominates the per-key cost.
+func atMentionFuzzyMatchesWithLower(files []string, lowerByFile map[string]string, query string) []atMentionOption {
 	matchQuery := normalizeAtMentionQueryForMatching(query)
 	allowHidden := atMentionHiddenSegmentsAllowed(matchQuery)
 	query = strings.ToLower(matchQuery)
@@ -1053,7 +1061,13 @@ func atMentionFuzzyMatches(files []string, query string) []atMentionOption {
 			matched = append(matched, scored{path: file, score: 0, queryLower: query})
 			continue
 		}
-		fileLower := strings.ToLower(file)
+		var fileLower string
+		if lowerByFile != nil {
+			fileLower = lowerByFile[file]
+		}
+		if fileLower == "" {
+			fileLower = strings.ToLower(file)
+		}
 		score := -1
 		matchedScore := false
 		if strings.Contains(query, "/") {
@@ -1116,4 +1130,18 @@ func atMentionPathDepth(path string) int {
 		return 0
 	}
 	return strings.Count(path, "/")
+}
+
+// buildAtMentionLowerIndex precomputes the lowercase form of every indexed
+// path once per index load, so per-keystroke fuzzy scoring does not re-lower
+// the whole index on every keypress.
+func buildAtMentionLowerIndex(files []string) map[string]string {
+	if len(files) == 0 {
+		return nil
+	}
+	lower := make(map[string]string, len(files))
+	for _, file := range files {
+		lower[file] = strings.ToLower(file)
+	}
+	return lower
 }

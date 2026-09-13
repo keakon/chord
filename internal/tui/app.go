@@ -895,6 +895,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case atMentionFilesLoadedMsg:
 		m.atMentionFiles = msg.files
+		m.atMentionFilesLower = buildAtMentionLowerIndex(msg.files)
 		m.atMentionLoaded = true
 		m.atMentionLoadedAt = time.Now()
 		m.atMentionLoading = false
