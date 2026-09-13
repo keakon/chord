@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/keakon/chord/internal/privatefs"
@@ -91,6 +92,64 @@ func loadArchivedTaskRecordByInstanceID(sessionDir, instanceID string) (*Durable
 	if instanceID == "" {
 		return nil, nil
 	}
+	return lookupArchivedTaskRecordByInstanceID(sessionDir, instanceID)
+}
+
+// archivedTaskRecordMemo caches archive lookups by instance ID. The archive
+// file is append-only, so an unchanged size means the previous lookup result —
+// positive or negative — still holds; a permanently unroutable spooled message
+// then stops re-reading and re-decoding the whole archive on every idle check.
+// Entries reset wholesale when the budget is exceeded, and session switches
+// never collide because the key carries the session directory.
+const archivedTaskRecordMemoCap = 64
+
+type archivedTaskRecordEntry struct {
+	sessionDir  string
+	archiveSize int64 // -1 while the archive file does not exist
+	record      *DurableTaskRecord
+}
+
+var archivedTaskRecordLookups struct {
+	sync.Mutex
+	entries map[string]archivedTaskRecordEntry
+}
+
+func lookupArchivedTaskRecordByInstanceID(sessionDir, instanceID string) (*DurableTaskRecord, error) {
+	key := sessionDir + "\x00" + instanceID
+	archivePath := durableTaskArchivePath(sessionDir)
+	var archiveSize int64 = -1
+	if archivePath != "" {
+		if info, err := os.Stat(archivePath); err == nil {
+			archiveSize = info.Size()
+		} else if !os.IsNotExist(err) {
+			return loadArchivedTaskRecordByInstanceIDUncached(sessionDir, instanceID)
+		}
+	}
+
+	archivedTaskRecordLookups.Lock()
+	entry, ok := archivedTaskRecordLookups.entries[key]
+	if ok && entry.sessionDir == sessionDir && entry.archiveSize == archiveSize {
+		archivedTaskRecordLookups.Unlock()
+		return cloneDurableTaskRecord(entry.record), nil
+	}
+	archivedTaskRecordLookups.Unlock()
+
+	rec, err := loadArchivedTaskRecordByInstanceIDUncached(sessionDir, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	archivedTaskRecordLookups.Lock()
+	if archivedTaskRecordLookups.entries == nil {
+		archivedTaskRecordLookups.entries = make(map[string]archivedTaskRecordEntry)
+	} else if len(archivedTaskRecordLookups.entries) >= archivedTaskRecordMemoCap {
+		archivedTaskRecordLookups.entries = make(map[string]archivedTaskRecordEntry)
+	}
+	archivedTaskRecordLookups.entries[key] = archivedTaskRecordEntry{sessionDir: sessionDir, archiveSize: archiveSize, record: cloneDurableTaskRecord(rec)}
+	archivedTaskRecordLookups.Unlock()
+	return rec, nil
+}
+
+func loadArchivedTaskRecordByInstanceIDUncached(sessionDir, instanceID string) (*DurableTaskRecord, error) {
 	return loadArchivedTaskRecord(sessionDir, func(rec *DurableTaskRecord) bool {
 		return durableTaskRecordIncludesInstance(rec, instanceID)
 	})
