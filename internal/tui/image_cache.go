@@ -10,14 +10,69 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 type imageRuntimeCacheStore struct {
 	mu      sync.Mutex
 	entries map[string]*imageRuntimeCacheEntry
+}
+
+// imageRuntimeCacheBudget bounds the resident payload bytes (raw + transport
+// PNG + base64) the runtime cache keeps across all entries. Entries are
+// derived data — every field re-derives from the part on demand — so eviction
+// is always safe; the next render of an evicted image re-encodes once.
+const imageRuntimeCacheBudget = 64 << 20
+
+// imagePartKeyRef identifies a part for key memoization: the backing array of
+// inline data plus the path. Renders repeat the same part several times per
+// frame (layout, protocol command, kitty ID), and the key is byte-proportional
+// for inline payloads, so repeated computation is pure waste.
+type imagePartKeyRef struct {
+	dataRef *byte
+	dataLen int
+	path    string
+	mime    string
+}
+
+func imagePartKeyRefFor(part BlockImagePart) imagePartKeyRef {
+	ref := imagePartKeyRef{dataLen: len(part.Data), path: part.ImagePath, mime: part.MimeType}
+	if len(part.Data) > 0 {
+		ref.dataRef = &part.Data[0]
+	}
+	return ref
+}
+
+var imageRuntimeKeyMemo = struct {
+	mu      sync.Mutex
+	entries map[imagePartKeyRef]imagePartKeyEntry
+}{entries: make(map[imagePartKeyRef]imagePartKeyEntry)}
+
+type imagePartKeyEntry struct {
+	key string
+	err error
+}
+
+const imageRuntimeKeyMemoMaxEntries = 256
+
+// imageRuntimeCacheKeyCached memoizes imageRuntimeCacheKey per part identity.
+func imageRuntimeCacheKeyCached(part BlockImagePart) (string, error) {
+	ref := imagePartKeyRefFor(part)
+	imageRuntimeKeyMemo.mu.Lock()
+	defer imageRuntimeKeyMemo.mu.Unlock()
+	if entry, ok := imageRuntimeKeyMemo.entries[ref]; ok {
+		return entry.key, entry.err
+	}
+	key, err := imageRuntimeCacheKey(part)
+	if len(imageRuntimeKeyMemo.entries) >= imageRuntimeKeyMemoMaxEntries {
+		imageRuntimeKeyMemo.entries = make(map[imagePartKeyRef]imagePartKeyEntry)
+	}
+	imageRuntimeKeyMemo.entries[ref] = imagePartKeyEntry{key: key, err: err}
+	return key, err
 }
 
 type imageRuntimeCacheEntry struct {
@@ -41,6 +96,17 @@ type imageRuntimeCacheEntry struct {
 	base64Loaded bool
 	base64PNG    string
 	base64Err    error
+
+	// lastAccess drives budget eviction; guarded by the store mutex.
+	lastAccess int64
+}
+
+// approxBytes reports the resident payload bytes held by the entry.
+func (e *imageRuntimeCacheEntry) approxBytes() int64 {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	total := int64(len(e.rawData)) + int64(len(e.pngData)) + int64(len(e.base64PNG))
+	return total
 }
 
 var imageRuntimeCache = imageRuntimeCacheStore{entries: make(map[string]*imageRuntimeCacheEntry)}
@@ -53,18 +119,56 @@ var (
 )
 
 func imageRuntimeEntryForPart(part BlockImagePart) (*imageRuntimeCacheEntry, error) {
-	key, err := imageRuntimeCacheKey(part)
+	key, err := imageRuntimeCacheKeyCached(part)
 	if err != nil {
 		return nil, err
 	}
+	now := time.Now().UnixNano()
 	imageRuntimeCache.mu.Lock()
 	defer imageRuntimeCache.mu.Unlock()
 	if entry, ok := imageRuntimeCache.entries[key]; ok {
+		entry.lastAccess = now
 		return entry, nil
 	}
-	entry := &imageRuntimeCacheEntry{}
+	entry := &imageRuntimeCacheEntry{lastAccess: now}
 	imageRuntimeCache.entries[key] = entry
+	imageRuntimeCache.enforceBudgetLocked()
 	return entry, nil
+}
+
+// enforceBudgetLocked evicts least-recently-accessed entries until resident
+// payload bytes fit the budget. Callers hold the store mutex; entry locks are
+// taken inside, which is the consistent store→entry order.
+func (s *imageRuntimeCacheStore) enforceBudgetLocked() {
+	const minEntriesBeforeEnforce = 8
+	if len(s.entries) < minEntriesBeforeEnforce {
+		return
+	}
+	type resident struct {
+		key   string
+		entry *imageRuntimeCacheEntry
+		bytes int64
+	}
+	total := int64(0)
+	residents := make([]resident, 0, len(s.entries))
+	for key, entry := range s.entries {
+		cost := entry.approxBytes()
+		total += cost
+		residents = append(residents, resident{key: key, entry: entry, bytes: cost})
+	}
+	if total <= imageRuntimeCacheBudget {
+		return
+	}
+	sort.Slice(residents, func(i, j int) bool {
+		return residents[i].entry.lastAccess < residents[j].entry.lastAccess
+	})
+	for _, r := range residents {
+		if total <= imageRuntimeCacheBudget {
+			break
+		}
+		delete(s.entries, r.key)
+		total -= r.bytes
+	}
 }
 
 func imageRuntimeCacheKey(part BlockImagePart) (string, error) {

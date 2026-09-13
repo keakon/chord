@@ -7,7 +7,7 @@ import (
 )
 
 func kittyImageIDForVariant(part BlockImagePart, variant string) (int, error) {
-	key, err := imageRuntimeCacheKey(part)
+	key, err := imageRuntimeCacheKeyCached(part)
 	if err != nil {
 		return 0, err
 	}
