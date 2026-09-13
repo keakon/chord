@@ -896,6 +896,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case atMentionFilesLoadedMsg:
 		m.atMentionFiles = msg.files
 		m.atMentionFilesLower = buildAtMentionLowerIndex(msg.files)
+		// The candidate set the narrowing cache remembers belongs to the
+		// previous index; a reload invalidates it.
+		m.atMentionNarrow = atMentionNarrowCache{}
 		m.atMentionLoaded = true
 		m.atMentionLoadedAt = time.Now()
 		m.atMentionLoading = false

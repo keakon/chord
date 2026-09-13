@@ -1039,21 +1039,48 @@ func atMentionFuzzyMatches(files []string, query string) []atMentionOption {
 	return atMentionFuzzyMatchesWithLower(files, nil, query)
 }
 
-// atMentionFuzzyMatchesWithLower scores the index against the query. lowerByFile
+func atMentionFuzzyMatchesWithLower(files []string, lowerByFile map[string]string, query string) []atMentionOption {
+	return atMentionFuzzyMatchesNarrowable(files, lowerByFile, query, nil)
+}
+
+// atMentionNarrowCache carries the previous fuzzy match's full candidate set so
+// the next query that extends it (characters appended at the end, no new path
+// separator) rescoring only the previous matches instead of the whole index.
+// Every scorer's weakest tier is subsequence matching, and subsequence
+// containment is transitive, so the match set shrinks monotonically under such
+// extensions: files outside the previous set cannot match the extended query.
+// Any other query change (backspace, cursor move, a typed "/") misses the
+// prefix guard and falls back to a full scan.
+type atMentionNarrowCache struct {
+	valid       bool
+	query       string
+	allowHidden bool
+	matched     []string
+}
+
+// atMentionFuzzyMatchesNarrowable scores the index against the query. lowerByFile
 // carries the precomputed lowercase forms built once per index load; without it
 // (ad-hoc callers) each file lowercases per keystroke, which on a 10k-file
-// index dominates the per-key cost.
-func atMentionFuzzyMatchesWithLower(files []string, lowerByFile map[string]string, query string) []atMentionOption {
+// index dominates the per-key cost. narrow, when non-nil, remembers the full
+// match set of the scored query and lets an appending query rescore only the
+// previous matches.
+func atMentionFuzzyMatchesNarrowable(files []string, lowerByFile map[string]string, query string, narrow *atMentionNarrowCache) []atMentionOption {
 	matchQuery := normalizeAtMentionQueryForMatching(query)
 	allowHidden := atMentionHiddenSegmentsAllowed(matchQuery)
 	query = strings.ToLower(matchQuery)
+	candidates := files
+	if narrow != nil && narrow.valid && allowHidden == narrow.allowHidden &&
+		len(matchQuery) > len(narrow.query) && strings.HasPrefix(matchQuery, narrow.query) &&
+		!strings.Contains(matchQuery[len(narrow.query):], "/") {
+		candidates = narrow.matched
+	}
 	type scored struct {
 		path       string
 		score      int
 		queryLower string
 	}
 	var matched []scored
-	for _, file := range files {
+	for _, file := range candidates {
 		if !allowHidden && atMentionIsHiddenPath(file) {
 			continue
 		}
@@ -1114,6 +1141,15 @@ func atMentionFuzzyMatchesWithLower(files []string, lowerByFile map[string]strin
 		}
 		return atMentionSortTieBreak(a.path, b.path, a.queryLower)
 	})
+	if narrow != nil {
+		narrow.valid = true
+		narrow.query = matchQuery
+		narrow.allowHidden = allowHidden
+		narrow.matched = make([]string, len(matched))
+		for i, match := range matched {
+			narrow.matched[i] = match.path
+		}
+	}
 	if len(matched) > 50 {
 		matched = matched[:50]
 	}

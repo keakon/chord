@@ -106,7 +106,10 @@ type completionState struct {
 	// built once per index load so per-keystroke scoring skips 10k ToLower
 	// allocations.
 	atMentionFilesLower map[string]string
-	atMentionList       *OverlayList
+	// atMentionNarrow remembers the previous fuzzy match's full candidate set
+	// so appending queries rescore only the previous matches.
+	atMentionNarrow atMentionNarrowCache
+	atMentionList   *OverlayList
 
 	// Slash command completion (when input starts with "/")
 	slashCompleteSelected int            // index into current completion list

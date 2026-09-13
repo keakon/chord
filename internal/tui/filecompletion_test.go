@@ -1359,3 +1359,55 @@ func mustWriteFile(t *testing.T, path, content string) {
 		t.Fatalf("WriteFile(%q): %v", path, err)
 	}
 }
+
+// Typing a query character by character must produce exactly the same
+// completion list as scoring every query against the full index: the narrowing
+// cache only skips files the previous query's full match set already excludes,
+// which is sound because subsequence-based scoring shrinks the match set
+// monotonically under query extension.
+func TestAtMentionFuzzyNarrowingMatchesFullScan(t *testing.T) {
+	files := []string{
+		"cmd/chord/headless.go",
+		"internal/agent/main_loop.go",
+		"internal/agent/main_handlers_tools.go",
+		"internal/ctxmgr/manager.go",
+		"internal/llm/responses_convert.go",
+		"internal/tui/filecompletion_paths.go",
+		"internal/tui/filecompletion_ui.go",
+		"internal/tools/truncate.go",
+		"docs/usage.md",
+		"README.md",
+	}
+	lower := buildAtMentionLowerIndex(files)
+	queries := []string{"m", "ma", "mai", "main", "main_", "main_lo", "main_loop", "f", "fi", "file", "filec", "filecompletion", "resp", "respo", "responses", "u", "us", "usa", "usage"}
+
+	var narrow atMentionNarrowCache
+	for _, query := range queries {
+		full := atMentionFuzzyMatchesNarrowable(files, lower, query, nil)
+		narrowed := atMentionFuzzyMatchesNarrowable(files, lower, query, &narrow)
+		if len(full) != len(narrowed) {
+			t.Fatalf("query %q: full scan returned %d matches, narrowed returned %d", query, len(full), len(narrowed))
+		}
+		for i := range full {
+			if full[i].Path != narrowed[i].Path {
+				t.Fatalf("query %q: match %d = %q, want %q", query, i, narrowed[i].Path, full[i].Path)
+			}
+		}
+	}
+
+	// A query that deletes a character (prefix moved backwards) must not reuse
+	// the cached candidate set: widen the query and compare against full scans.
+	var restart atMentionNarrowCache
+	for _, query := range []string{"main_loop", "main_lo", "main", "ma"} {
+		full := atMentionFuzzyMatchesNarrowable(files, lower, query, nil)
+		narrowed := atMentionFuzzyMatchesNarrowable(files, lower, query, &restart)
+		if len(full) != len(narrowed) {
+			t.Fatalf("shrinking query %q: full scan returned %d matches, narrowed returned %d", query, len(full), len(narrowed))
+		}
+		for i := range full {
+			if full[i].Path != narrowed[i].Path {
+				t.Fatalf("shrinking query %q: match %d = %q, want %q", query, i, narrowed[i].Path, full[i].Path)
+			}
+		}
+	}
+}
