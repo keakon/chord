@@ -274,7 +274,7 @@ func (a *MainAgent) queueLoopEvent(evt Event) {
 
 func firstCoalescibleEventIndex(queue []Event) int {
 	for i := range queue {
-		if coalescibleEventKey(queue[i]) != "" {
+		if coalescibleEventType(queue[i].Type) {
 			return i
 		}
 	}
@@ -349,12 +349,11 @@ func (a *MainAgent) updateEventOverflowPeakLocked() {
 }
 
 func (a *MainAgent) coalesceQueuedEventLocked(queue []Event, evt Event) bool {
-	key := coalescibleEventKey(evt)
-	if key == "" {
+	if !coalescibleEventType(evt.Type) {
 		return false
 	}
 	for i, q := range slices.Backward(queue) {
-		if coalescibleEventKey(q) == key {
+		if coalescibleEventsMatch(q, evt) {
 			copy(queue[i:], queue[i+1:])
 			queue[len(queue)-1] = a.sequenceEvent(evt)
 			return true
@@ -363,12 +362,24 @@ func (a *MainAgent) coalesceQueuedEventLocked(queue []Event, evt Event) bool {
 	return false
 }
 
-func coalescibleEventKey(evt Event) string {
+func coalescibleEventType(t string) bool {
+	switch t {
+	case EventSubAgentProgressUpdated:
+		return true
+	default:
+		return false
+	}
+}
+
+// coalescibleEventsMatch reports whether a queued event would be replaced by
+// the incoming one. Field comparison avoids building a key string per queued
+// event per send while progress events stream.
+func coalescibleEventsMatch(queued, evt Event) bool {
 	switch evt.Type {
 	case EventSubAgentProgressUpdated:
-		return evt.Type + "\x00" + evt.SourceID
+		return queued.Type == evt.Type && queued.SourceID == evt.SourceID
 	default:
-		return ""
+		return false
 	}
 }
 
@@ -526,9 +537,17 @@ func (a *MainAgent) hasRunnableMailboxWork() bool {
 	// wake (for example one not addressed by the owner's own descendant) is
 	// temporarily unroutable: routing refuses it on every drain, so counting it
 	// here would suppress global idle forever.
+	// Only non-progress messages can be routable work (the loop below skips
+	// progress), and progress snapshots dominate owner queues during bursts,
+	// so filtering during the copy keeps the per-event clone small. The copy
+	// exists because routability checks run after the lock is released.
 	queuedMsgs := make([]SubAgentMailboxMessage, 0)
 	for _, queued := range a.ownedSubAgentMailboxes {
-		queuedMsgs = append(queuedMsgs, queued...)
+		for _, msg := range queued {
+			if msg.Kind != SubAgentMailboxKindProgress {
+				queuedMsgs = append(queuedMsgs, msg)
+			}
+		}
 	}
 	spooledIDs := make([]string, 0)
 	for _, spooled := range a.ownedMailboxSpool {
