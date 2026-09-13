@@ -114,8 +114,12 @@ func firstLineOrUnknown(value string, max int) string {
 // declarative constraints so they survive with their semantics intact.
 // Synthetic user-role messages other than mailbox deliveries (compaction
 // summaries, pressure notices, loop notices, job results) carry no owner
-// instruction and are skipped; the [system] prefix excludes the context
-// checkpoints this function renders.
+// instruction and are skipped. The [system] content prefix is checked
+// alongside the structured IsUserAuthored marker because checkpoints persisted
+// before that marker existed have no other discriminator; it also excludes the
+// context checkpoints this function renders. A real owner message that
+// happens to open with "[system]" is skipped too — an accepted limitation of
+// the legacy format.
 func latestOwnerInstructionForCheckpoint(messages []message.Message) string {
 	for i := len(messages) - 1; i >= 0; i-- {
 		msg := &messages[i]

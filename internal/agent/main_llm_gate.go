@@ -1058,7 +1058,7 @@ func (a *MainAgent) resumePendingMainLLMAfterCompaction(pending *pendingMainLLMC
 					continue
 				}
 				c := strings.TrimSpace(pendingUserMessageText(p))
-				if c == "/resume" || strings.HasPrefix(c, "/resume ") || c == "/new" || c == "/mcp" || strings.HasPrefix(c, "/mcp ") || IsLoopSlashCommand(c) {
+				if IsIdleOnlySlashCommand(c) {
 					continue // idle-only slash: deferred, never appended here.
 				}
 				if IsTUILocalOnlySlashCommand(c) {

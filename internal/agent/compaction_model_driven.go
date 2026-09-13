@@ -860,7 +860,7 @@ func (a *MainAgent) pendingUserMessagesForPreflight() []message.Message {
 	var out []message.Message
 	for _, p := range a.pendingUserMessages {
 		c := strings.TrimSpace(pendingUserMessageText(p))
-		if c == "/resume" || strings.HasPrefix(c, "/resume ") || c == "/new" || c == "/mcp" || strings.HasPrefix(c, "/mcp ") || IsLoopSlashCommand(c) {
+		if IsIdleOnlySlashCommand(c) {
 			continue
 		}
 		if m, ok := a.pendingUserMessageToConversationMessage(p); ok {

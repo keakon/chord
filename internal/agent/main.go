@@ -2115,7 +2115,7 @@ func (a *MainAgent) consumePendingUserMessagesForRequest(messages []message.Mess
 	for _, p := range pending {
 		content := pendingUserMessageText(p)
 		c := strings.TrimSpace(content)
-		if c == "/resume" || strings.HasPrefix(c, "/resume ") || c == "/new" || c == "/mcp" || strings.HasPrefix(c, "/mcp ") || IsLoopSlashCommand(c) {
+		if IsIdleOnlySlashCommand(c) {
 			deferred = append(deferred, p)
 			continue
 		}

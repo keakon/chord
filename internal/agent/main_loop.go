@@ -499,6 +499,12 @@ func (a *MainAgent) hasRunnableMailboxWork() bool {
 	a.subAgentMailboxIDsMu.Lock()
 	// Only the main-inbox queues are subject to the wake budget; the owner
 	// forwarding state below is drained on a path the budget does not gate.
+	// The main-inbox spool queues (spoolUrgent/spoolNormal) are deliberately
+	// not counted either, although mailboxHeadState includes their heads in
+	// the budget gate above: a budget-held head is not runnable work by the
+	// same argument, and any spooled row that can actually be delivered is
+	// drained (and opens a turn) before global idle is judged, so counting it
+	// here would only risk suppressing idle for rows the drain would surface.
 	pendingMainWork := len(a.subAgentInbox.urgent) > 0 ||
 		(inboxRunnable && len(a.subAgentInbox.normal) > 0) ||
 		len(a.pendingSubAgentMailboxes) > 0 || len(a.activeSubAgentMailboxes) > 0 ||

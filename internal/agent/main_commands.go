@@ -102,6 +102,23 @@ func IsLoopSlashCommand(content string) bool {
 	}
 }
 
+// IsIdleOnlySlashCommand reports whether content is a slash command that must
+// wait for an idle drain instead of riding a busy turn: /resume, /new, /mcp,
+// and the loop commands. Every pending-user-message filter (the drain's own
+// consumer, the LLM-gate merge check, and the compaction preflight) goes
+// through here so they cannot drift apart. The TUI's local routing uses the
+// separate IsTUILocalOnlySlashCommand; the two sets overlap on /mcp but are
+// deliberately not identical (/resume and /new are idle-only; /role, /export
+// and friends are TUI-local), so keep both in sync by hand when a command
+// moves between them.
+func IsIdleOnlySlashCommand(content string) bool {
+	c := strings.TrimSpace(content)
+	return c == "/resume" || strings.HasPrefix(c, "/resume ") ||
+		c == "/new" ||
+		c == "/mcp" || strings.HasPrefix(c, "/mcp ") ||
+		IsLoopSlashCommand(c)
+}
+
 func parseLoopOnCommand(content string) (target string, maxIterations int, maxSet bool, err error) {
 	rest := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(content), "/loop on"))
 	if rest == "" {

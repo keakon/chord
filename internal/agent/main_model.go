@@ -437,6 +437,10 @@ func (a *MainAgent) handleModelsCommand(content string, busy bool) {
 	}
 }
 
+// ModelsStatusText formats the current model pool and its overrides for the
+// TUI's NOTICE card. The output contract is Markdown (list items, blank-line
+// separated sections); headless consumers receive it verbatim in the JSON
+// `status` field, so it is presentational text, not a machine-readable record.
 func (a *MainAgent) ModelsStatusText() string {
 	if a.modelPoolPolicy == nil {
 		return "Model pool policy not configured"
