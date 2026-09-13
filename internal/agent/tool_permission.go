@@ -112,6 +112,64 @@ func donePermissionAction(ruleset permission.Ruleset) permission.Action {
 // need on top of the ruleset itself. The zero value is the conservative
 // default: no runtime mode is active, so every gated tool falls back to plain
 // wildcard semantics.
+// permRulesetIdentity captures the identity of the ruleset a permission
+// decision was evaluated against. Rulesets are replaced wholesale on every
+// change (overlay merge, role refresh, session-rule intent), so the backing
+// array header plus the YOLO flag distinguish every state the evaluation
+// semantics depend on; no in-place rule mutation happens.
+type permRulesetIdentity struct {
+	ruleset *permission.Rule
+	length  int
+	yolo    bool
+}
+
+func rulesetSliceID(rs permission.Ruleset) *permission.Rule {
+	if len(rs) > 0 {
+		return &rs[0]
+	}
+	return nil
+}
+
+// permApprovalRecord is one cached allow decision: the exact evaluation inputs
+// are re-checked before reuse, so any drift (hook-modified args, ruleset or
+// YOLO change, different cwd, loop-mode pctx) falls back to a fresh evaluation.
+type permApprovalRecord struct {
+	args      string
+	rulesetID permRulesetIdentity
+	cwd       string
+}
+
+// recordPermissionApproval stores an allow decision for this turn's call.
+func (t *Turn) recordPermissionApproval(callID, args, cwd string, rulesetID permRulesetIdentity) {
+	if t == nil || callID == "" {
+		return
+	}
+	t.permissionApprovalsMu.Lock()
+	defer t.permissionApprovalsMu.Unlock()
+	if t.permissionApprovals == nil {
+		t.permissionApprovals = make(map[string]permApprovalRecord)
+	}
+	t.permissionApprovals[callID] = permApprovalRecord{args: args, rulesetID: rulesetID, cwd: cwd}
+}
+
+// permissionApprovalMatches reports whether a recorded allow decision still
+// applies to the exact evaluation inputs the finalize path would use. pctx
+// must be the zero value: recorded decisions were taken without loop context.
+func (t *Turn) permissionApprovalMatches(callID, args, cwd string, current permRulesetIdentity, pctx toolPermissionContext) bool {
+	if t == nil || callID == "" || pctx != (toolPermissionContext{}) {
+		return false
+	}
+	t.permissionApprovalsMu.Lock()
+	defer t.permissionApprovalsMu.Unlock()
+	record, ok := t.permissionApprovals[callID]
+	if !ok {
+		return false
+	}
+	return record.args == args &&
+		record.cwd == cwd &&
+		record.rulesetID == current
+}
+
 type toolPermissionContext struct {
 	// LoopExitAuthorized reports that loop mode is currently active, which
 	// authorizes done against wildcard-only rules. See donePermissionAction.

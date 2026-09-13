@@ -85,6 +85,8 @@ func (e *shutdownHookEngine) RunAutomation(context.Context, hook.Envelope) ([]ho
 	return nil, nil
 }
 
+func (e *shutdownHookEngine) HasSyncHooks(string) bool { return false }
+
 func (e *shutdownHookEngine) snapshot() (int, []time.Duration) {
 	e.mu.Lock()
 	defer e.mu.Unlock()

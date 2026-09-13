@@ -34,6 +34,8 @@ func (m *recordingBackgroundHookManager) RunAutomation(context.Context, hook.Env
 	return nil, nil
 }
 
+func (*recordingBackgroundHookManager) HasSyncHooks(string) bool { return false }
+
 func (r *recordingActivityObserver) OnAgentActivity(agentID string, activity ActivityType) {
 	r.agentID = agentID
 	r.activity = activity

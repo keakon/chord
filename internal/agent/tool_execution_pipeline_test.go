@@ -1149,6 +1149,8 @@ func (e fixedToolHookEngine) RunAutomation(context.Context, hook.Envelope) ([]ho
 	return nil, nil
 }
 
+func (e fixedToolHookEngine) HasSyncHooks(string) bool { return false }
+
 func TestMainAndSubToolExecutionPipelineConsistentPermissionDecisions(t *testing.T) {
 	tests := []struct {
 		name        string

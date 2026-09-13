@@ -178,6 +178,10 @@ type Manager interface {
 	Fire(ctx context.Context, env Envelope) (*Result, error)
 	FireBackground(ctx context.Context, env Envelope)
 	RunAutomation(ctx context.Context, env Envelope) ([]AutomationJobResult, error)
+	// HasSyncHooks reports whether any hook is configured for the point. It
+	// lets agents keep fast paths (speculative execution, inline no-op hook
+	// calls) whenever no user hook would run there anyway.
+	HasSyncHooks(point string) bool
 }
 
 // NoopEngine is used when no hooks are configured.
@@ -188,6 +192,8 @@ func (e *NoopEngine) Fire(_ context.Context, _ Envelope) (*Result, error) {
 }
 
 func (e *NoopEngine) FireBackground(_ context.Context, _ Envelope) {}
+
+func (e *NoopEngine) HasSyncHooks(_ string) bool { return false }
 
 func (e *NoopEngine) RunAutomation(_ context.Context, _ Envelope) ([]AutomationJobResult, error) {
 	return nil, nil
@@ -235,6 +241,10 @@ func (e *CommandEngine) Fire(ctx context.Context, env Envelope) (*Result, error)
 	default:
 		return e.fireSync(ctx, env, hooks)
 	}
+}
+
+func (e *CommandEngine) HasSyncHooks(point string) bool {
+	return len(e.hooks[point]) > 0
 }
 
 func (e *CommandEngine) FireBackground(ctx context.Context, env Envelope) {

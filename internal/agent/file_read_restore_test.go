@@ -531,6 +531,8 @@ func (e *modifyReadPathHookEngine) RunAutomation(context.Context, hook.Envelope)
 	return nil, nil
 }
 
+func (*modifyReadPathHookEngine) HasSyncHooks(string) bool { return false }
+
 func newRestoreEditTestAgent(t *testing.T, projectRoot string) *MainAgent {
 	t.Helper()
 	oldWD, err := os.Getwd()

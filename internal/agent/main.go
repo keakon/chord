@@ -97,6 +97,12 @@ type Turn struct {
 	// per-fragment ToolCallUpdateEvents coalesce to the flush cadence.
 	// Protected by streamingToolMu.
 	streamingToolEmitAt map[string]time.Time
+	// permissionApprovals caches non-interactive allow decisions recorded by
+	// the speculative-reuse prefilter so the finalize path skips a second
+	// evaluation with identical inputs. Guarded by permissionApprovalsMu;
+	// entries live for the turn.
+	permissionApprovalsMu sync.Mutex
+	permissionApprovals   map[string]permApprovalRecord
 	// partialText accumulates assistant text streamed during the current LLM
 	// round so it can be saved to history if the stream is interrupted before
 	// a normal DeltaStop. Protected by partialTextMu because the stream

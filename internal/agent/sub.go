@@ -59,7 +59,10 @@ type toolResult struct {
 	RecoveryState string
 	// walltimeTarget preserves this SubAgent instance's session attribution
 	// until its result is processed by the independent event loop.
-	walltimeTarget   *walltimeTarget
+	walltimeTarget *walltimeTarget
+	// composed carries the display/context texts when the execution goroutine
+	// already ran composition and the sync append hook.
+	composed         *composedToolResultTexts
 	speculativeHooks *speculativeToolHooks
 }
 
@@ -1064,6 +1067,7 @@ func (s *SubAgent) newSubLLMStreamReducer(turn *Turn, promoteStreamingActivity f
 	}
 	streamReducer.tool = streamToolDeltaReducer{
 		agentID:          s.instanceID,
+		syncHookGate:     s.syncToolHooksConfigured,
 		turn:             turn,
 		registry:         s.tools,
 		ruleset:          func() permission.Ruleset { return s.currentRuleset() },

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -419,6 +420,65 @@ func toolCallSkillName(msgs []message.Message, callID, fallbackArgsJSON string) 
 	return parse([]byte(fallbackArgsJSON))
 }
 
+// composedToolResultTexts carries the loop-finalized display/context texts of
+// a tool result.
+type composedToolResultTexts struct {
+	Display   string
+	Context   string
+	ErrorText string
+	IsError   bool
+}
+
+// finalizeToolResultTexts composes the model/display-facing texts of a tool
+// result and runs the sync on_before_tool_result_append hook. It runs on the
+// tool-execution goroutine that produced the result: the hook may block for
+// its full timeout, and running it here delays only this result's delivery,
+// never event-loop dispatch. The efficiency note is consumed here as well (the
+// state is mutex-guarded), so the hook sees the same context text it always
+// has; the loop-side advice appended after the hook (retry guidance, protocol
+// guards) keeps its post-hook position.
+func finalizeToolResultTexts(ctx context.Context, turn *Turn, fireHook func(context.Context, string, uint64, map[string]any) (*hook.Result, error), callID, name, argsJSON, rawResult string, resultErr error, audit *message.ToolArgsAudit, fileState *message.ToolFileState) *composedToolResultTexts {
+	displayResult, contextResult, errorText, isError := composeToolResultTexts(rawResult, resultErr)
+	contextResult = applyToolArgsAuditToContextResult(contextResult, audit)
+	contextResult = appendModelContextNote(contextResult, turn.efficiencyNoteForToolResult(callID, name, argsJSON, rawResult, isError))
+
+	hookResult, hookErr := fireHook(ctx, hook.OnBeforeToolResultAppend, turn.ID, buildBeforeToolResultAppendData(
+		name,
+		argsJSON,
+		rawResult,
+		displayResult,
+		contextResult,
+		resultErr,
+		audit,
+		fileState,
+	))
+	if hookErr != nil {
+		log.Warnf("on_before_tool_result_append hook error error=%v", hookErr)
+	} else if hookResult != nil {
+		switch hookResult.Action {
+		case hook.ActionBlock:
+			log.Warn("on_before_tool_result_append returned block; ignoring")
+		case hook.ActionModify:
+			displayResult, contextResult = applyBeforeToolResultAppendHook(displayResult, contextResult, hookResult)
+		}
+	}
+	return &composedToolResultTexts{Display: displayResult, Context: contextResult, ErrorText: errorText, IsError: isError}
+}
+
+// composeToolResultTextsOffLoop runs the composition pipeline (including the
+// sync on_before_tool_result_append hook) for a result that reached the event
+// loop without composed texts, then re-delivers the finished payload. Synthetic
+// results — persistence-barrier failures and batch cancellations — are the only
+// ones that arrive this way with sync hooks configured, and they must not stall
+// event-loop dispatch behind a hook that can block for its full timeout.
+func (a *MainAgent) composeToolResultTextsOffLoop(turnID uint64, payload *ToolResultPayload) {
+	turn := a.turn
+	go func() {
+		payload.composedTexts = finalizeToolResultTexts(turn.Ctx, turn, a.fireHook, payload.CallID, payload.Name, payload.ArgsJSON, payload.Result, payload.Error, payload.Audit, payload.FileState)
+		a.sendEvent(Event{Type: EventToolResult, TurnID: turnID, Payload: payload})
+	}()
+}
+
 func (a *MainAgent) handleToolResult(evt Event) {
 	if a.turn == nil || evt.TurnID != a.turn.ID {
 		log.Debugf("discarding stale tool result event_turn=%v current_turn=%v", evt.TurnID, a.currentTurnID())
@@ -428,6 +488,15 @@ func (a *MainAgent) handleToolResult(evt Event) {
 	payload, ok := evt.Payload.(*ToolResultPayload)
 	if !ok {
 		log.Errorf("handleToolResult: invalid payload type payload_type=%v", fmt.Sprintf("%T", evt.Payload))
+		return
+	}
+	if payload.composedTexts == nil && a.syncToolHooksConfigured() {
+		// Synthetic results (persistence-barrier failures, batch cancellations)
+		// are built without composed texts. Composing one here would run the
+		// sync on_before_tool_result_append hook on the event loop, so compose it
+		// on a goroutine and re-deliver the finished payload; the composed branch
+		// below then owns the bookkeeping exactly once.
+		a.composeToolResultTextsOffLoop(evt.TurnID, payload)
 		return
 	}
 	if a.walltime != nil {
@@ -457,28 +526,40 @@ func (a *MainAgent) handleToolResult(evt Event) {
 	}
 
 	rawResult := payload.Result
-	displayResult, contextResult, errorText, isError := composeToolResultTexts(rawResult, payload.Error)
-	contextResult = applyToolArgsAuditToContextResult(contextResult, payload.Audit)
-	contextResult = appendModelContextNote(contextResult, a.turn.efficiencyNoteForToolResult(payload.CallID, payload.Name, payload.ArgsJSON, rawResult, isError))
+	var displayResult, contextResult, errorText string
+	var isError bool
+	if composed := payload.composedTexts; composed != nil {
+		// The execution goroutine already composed the texts and ran the sync
+		// append hook off the event loop.
+		displayResult, contextResult, errorText, isError = composed.Display, composed.Context, composed.ErrorText, composed.IsError
+	} else {
+		// Promoted speculative results and synthetic results finalize here.
+		// Without user hooks this is a fast path; hook-configured runs have no
+		// promoted speculative results (they skip speculative reuse), so the
+		// blocking hook only ever runs off the event loop.
+		displayResult, contextResult, errorText, isError = composeToolResultTexts(rawResult, payload.Error)
+		contextResult = applyToolArgsAuditToContextResult(contextResult, payload.Audit)
+		contextResult = appendModelContextNote(contextResult, a.turn.efficiencyNoteForToolResult(payload.CallID, payload.Name, payload.ArgsJSON, rawResult, isError))
 
-	hookResult, hookErr := a.fireHook(a.turn.Ctx, hook.OnBeforeToolResultAppend, a.turn.ID, buildBeforeToolResultAppendData(
-		payload.Name,
-		payload.ArgsJSON,
-		rawResult,
-		displayResult,
-		contextResult,
-		payload.Error,
-		payload.Audit,
-		payload.FileState,
-	))
-	if hookErr != nil {
-		log.Warnf("on_before_tool_result_append hook error error=%v", hookErr)
-	} else if hookResult != nil {
-		switch hookResult.Action {
-		case hook.ActionBlock:
-			log.Warn("on_before_tool_result_append returned block; ignoring")
-		case hook.ActionModify:
-			displayResult, contextResult = applyBeforeToolResultAppendHook(displayResult, contextResult, hookResult)
+		hookResult, hookErr := a.fireHook(a.turn.Ctx, hook.OnBeforeToolResultAppend, a.turn.ID, buildBeforeToolResultAppendData(
+			payload.Name,
+			payload.ArgsJSON,
+			rawResult,
+			displayResult,
+			contextResult,
+			payload.Error,
+			payload.Audit,
+			payload.FileState,
+		))
+		if hookErr != nil {
+			log.Warnf("on_before_tool_result_append hook error error=%v", hookErr)
+		} else if hookResult != nil {
+			switch hookResult.Action {
+			case hook.ActionBlock:
+				log.Warn("on_before_tool_result_append returned block; ignoring")
+			case hook.ActionModify:
+				displayResult, contextResult = applyBeforeToolResultAppendHook(displayResult, contextResult, hookResult)
+			}
 		}
 	}
 

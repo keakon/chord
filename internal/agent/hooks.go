@@ -396,6 +396,40 @@ func (a *MainAgent) fireHook(ctx context.Context, point string, turnID uint64, d
 	))
 }
 
+// syncToolHooksConfigured reports whether user hooks exist at either sync tool
+// point. When they do, speculative execution and its loop-side finalize hook
+// step aside: calls dispatch through the execution pipeline, whose sync hooks
+// run on the execution goroutine.
+func (a *MainAgent) syncToolHooksConfigured() bool {
+	return a.hookEngine.HasSyncHooks(hook.OnToolCall) ||
+		a.hookEngine.HasSyncHooks(hook.OnBeforeToolResultAppend)
+}
+
+func (a *MainAgent) permRulesetIdentity() permRulesetIdentity {
+	a.stateMu.RLock()
+	defer a.stateMu.RUnlock()
+	return permRulesetIdentity{ruleset: rulesetSliceID(a.ruleset), length: len(a.ruleset), yolo: a.yoloEnabled.Load()}
+}
+
+// recordPermissionApproval caches a non-interactive allow decision taken on
+// the event loop by the speculative-reuse prefilter.
+func (a *MainAgent) recordPermissionApproval(turn *Turn, callID, args, cwd string) {
+	if turn == nil {
+		return
+	}
+	turn.recordPermissionApproval(callID, args, cwd, a.permRulesetIdentity())
+}
+
+// permissionApprovalMatches consults the current turn's cached allow decision
+// from the execution pipeline's finalize path.
+func (a *MainAgent) permissionApprovalMatches(callID, args, cwd string, pctx toolPermissionContext) bool {
+	turn := a.currentTurn()
+	if turn == nil {
+		return false
+	}
+	return turn.permissionApprovalMatches(callID, args, cwd, a.permRulesetIdentity(), pctx)
+}
+
 func (a *MainAgent) fireHookBackground(ctx context.Context, point string, turnID uint64, data map[string]any) {
 	a.hookEngine.FireBackground(ctx, newHookEnvelope(
 		point,
@@ -440,6 +474,45 @@ func (a *MainAgent) appendHookFeedback(content string) {
 	if a.recoveryManager() != nil {
 		a.persistAsync(identity.MainAgentID, msg)
 	}
+}
+
+// syncToolHooksConfigured mirrors the parent gate: SubAgents share the
+// parent's hook engine.
+func (s *SubAgent) syncToolHooksConfigured() bool {
+	if s == nil || s.parent == nil {
+		return false
+	}
+	return s.parent.hookEngine.HasSyncHooks(hook.OnToolCall) ||
+		s.parent.hookEngine.HasSyncHooks(hook.OnBeforeToolResultAppend)
+}
+
+func (s *SubAgent) permRulesetIdentity() permRulesetIdentity {
+	if s == nil {
+		return permRulesetIdentity{}
+	}
+	if published := s.rulesetPtr.Load(); published != nil {
+		rs := *published
+		return permRulesetIdentity{ruleset: rulesetSliceID(rs), length: len(rs)}
+	}
+	return permRulesetIdentity{}
+}
+
+// recordPermissionApproval caches a non-interactive allow decision taken on
+// the SubAgent event loop by its speculative-reuse prefilter.
+func (s *SubAgent) recordPermissionApproval(turn *Turn, callID, args, cwd string) {
+	if turn == nil {
+		return
+	}
+	turn.recordPermissionApproval(callID, args, cwd, s.permRulesetIdentity())
+}
+
+// permissionApprovalMatches consults the cached allow decision captured at
+// dispatch time from the finalize path.
+func (s *SubAgent) permissionApprovalMatches(turn *Turn, callID, args, cwd string, pctx toolPermissionContext) bool {
+	if turn == nil {
+		return false
+	}
+	return turn.permissionApprovalMatches(callID, args, cwd, s.permRulesetIdentity(), pctx)
 }
 
 func (s *SubAgent) fireHook(ctx context.Context, point string, turnID uint64, data map[string]any) (*hook.Result, error) {

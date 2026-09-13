@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/keakon/chord/internal/filelock"
@@ -49,7 +50,11 @@ func (s *SubAgent) toolExecutionPipeline() toolExecutionPipeline {
 		applyPatchRetry: &s.applyPatchRetry,
 		projectRoot:     s.parent.projectRoot,
 		toolBaseDir:     s.workDir,
-		currentRuleset:  s.currentRuleset,
+		preapprovedPermission: func(callID string, args json.RawMessage, cwd string, pctx toolPermissionContext) bool {
+			turn := s.turn
+			return s.permissionApprovalMatches(turn, callID, string(args), cwd, pctx)
+		},
+		currentRuleset: s.currentRuleset,
 		refreshRulesetAfterRuleIntent: func(toolName string, intent *ConfirmRuleIntent) permission.Ruleset {
 			if s.parent != nil {
 				s.parent.processRuleIntent(toolName, intent, s.agentDefName)

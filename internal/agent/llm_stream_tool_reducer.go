@@ -22,6 +22,10 @@ type streamToolDeltaReducer struct {
 	promoteStreamingActivity     func(source string)
 	recordToolUseEnd             func(callID, callName, agentID string, at time.Time)
 	discardSpeculativeOnRollback func(turn *Turn, reason string)
+	// syncHookGate reports whether sync tool hooks are configured; when they
+	// are, speculative execution stands down so every call dispatches through
+	// the pipeline whose sync hooks run off the event loop.
+	syncHookGate func() bool
 	// drainPartialOnRollback clears the turn's partial-text accumulator when a
 	// streamed attempt is rolled back to retry, so the abandoned attempt's text
 	// does not concatenate with the replacement. Sub-agents leave this false:
@@ -195,7 +199,10 @@ func (r streamToolDeltaReducer) maybeStartEarlySpeculativeToolCall(callID string
 	if r.ruleset != nil {
 		ruleset = r.ruleset()
 	}
-	decision := evaluateSpeculativeExecutionPolicyWithPrefix(r.registry, ruleset, callName, json.RawMessage(call.ArgsJSON), r.turn.streamingToolCallsBefore(callID), r.toolBaseDir)
+	decision := rejectSpeculativeExecution("sync_hooks_configured")
+	if r.syncHookGate == nil || !r.syncHookGate() {
+		decision = evaluateSpeculativeExecutionPolicyWithPrefix(r.registry, ruleset, callName, json.RawMessage(call.ArgsJSON), r.turn.streamingToolCallsBefore(callID), r.toolBaseDir)
+	}
 	if decision.Allowed {
 		decision = r.checkVisibleSpeculativeTool(callName)
 	}
@@ -223,7 +230,10 @@ func (r streamToolDeltaReducer) handleToolUseEnd(delta message.StreamDelta) {
 	if r.ruleset != nil {
 		ruleset = r.ruleset()
 	}
-	decision := evaluateSpeculativeExecutionPolicyWithPrefix(r.registry, ruleset, callName, json.RawMessage(argsJSON), r.turn.streamingToolCallsBefore(callID), r.toolBaseDir)
+	decision := rejectSpeculativeExecution("sync_hooks_configured")
+	if r.syncHookGate == nil || !r.syncHookGate() {
+		decision = evaluateSpeculativeExecutionPolicyWithPrefix(r.registry, ruleset, callName, json.RawMessage(argsJSON), r.turn.streamingToolCallsBefore(callID), r.toolBaseDir)
+	}
 	if decision.Allowed && r.registry != nil {
 		if tool, ok := r.registry.Get(callName); ok {
 			if err := tools.ValidateToolArgs(tool, llm.UnwrapToolArgs(json.RawMessage(argsJSON))); err != nil {

@@ -109,7 +109,11 @@ type ToolResultPayload struct {
 	RecoveryState string
 	// walltimeTarget is runtime-only ownership metadata captured when the tool
 	// reached its execution anchor; it is never serialized into tool messages.
-	walltimeTarget   *walltimeTarget
+	walltimeTarget *walltimeTarget
+	// composedTexts carries the display/context texts when the execution
+	// goroutine already ran composition and the sync append hook; the loop
+	// skips its own composition then. Runtime-only, never serialized.
+	composedTexts    *composedToolResultTexts
 	speculativeHooks *speculativeToolHooks
 }
 

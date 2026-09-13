@@ -66,7 +66,12 @@ type toolExecutionPipeline struct {
 	// loopExitAuthorized reports whether loop mode is active, which authorizes
 	// done against wildcard-only rules. nil means "not a loop-capable agent"
 	// (SubAgents), so done keeps plain wildcard semantics there.
-	loopExitAuthorized    func() bool
+	loopExitAuthorized func() bool
+	// preapprovedPermission consults a per-turn cache of non-interactive allow
+	// decisions recorded by the speculative-reuse prefilter. It re-checks every
+	// evaluation input (args, ruleset identity, cwd, pctx) before reusing the
+	// recorded allow; true skips the re-evaluation in applyPermission.
+	preapprovedPermission func(callID string, args json.RawMessage, cwd string, pctx toolPermissionContext) bool
 	visibleToolNames      func() map[string]struct{}
 	appendToolActivity    func(recovery.ToolActivityRecord) error
 	captureWalltimeTarget func() *walltimeTarget
@@ -903,6 +908,9 @@ func (p toolExecutionPipeline) applyPermission(ctx context.Context, tc *message.
 	pctx := toolPermissionContext{}
 	if p.loopExitAuthorized != nil {
 		pctx.LoopExitAuthorized = p.loopExitAuthorized()
+	}
+	if p.preapprovedPermission != nil && p.preapprovedPermission(tc.ID, tc.Args, p.effectiveToolBaseDir(), pctx) {
+		return nil
 	}
 	decision := evaluateToolPermissionInDirWithContext(ruleset, tc.Name, tc.Args, p.effectiveToolBaseDir(), pctx)
 	switch decision.Action {

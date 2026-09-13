@@ -40,7 +40,9 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 
 	pendingCalls := make([]message.ToolCall, 0, len(batch.Calls))
 	for _, tc := range batch.Calls {
-		if turn.streamingToolExec == nil {
+		// Speculative reuse stands down under sync tool hooks so their finalize
+		// hook never runs on this event loop (mirror of the MainAgent gate).
+		if turn.streamingToolExec == nil || s.syncToolHooksConfigured() {
 			pendingCalls = append(pendingCalls, tc)
 			continue
 		}
@@ -52,6 +54,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 				pendingCalls = append(pendingCalls, tc)
 				continue
 			}
+			s.recordPermissionApproval(turn, tc.ID, string(tc.Args), s.workDir)
 		}
 
 		effective := tc
@@ -154,8 +157,10 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 							batchCancel()
 						}
 					}
+					tr := &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Images: execResult.Images, Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), Duration: toolExecDuration(tc.Name, execResult, completedAt), walltimeTarget: execResult.walltimeTarget}
+					tr.composed = finalizeToolResultTexts(batchCtx, turn, s.fireHook, tr.CallID, tr.Name, tr.ArgsJSON, tr.Result, tr.Error, tr.Audit, tr.FileState)
 					select {
-					case s.toolCh <- &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Images: execResult.Images, Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), Duration: toolExecDuration(tc.Name, execResult, completedAt), walltimeTarget: execResult.walltimeTarget}:
+					case s.toolCh <- tr:
 					case <-s.parentCtx.Done():
 					}
 				}(effective)
@@ -220,8 +225,10 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 					batchCancel()
 				}
 			}
+			tr := &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Images: execResult.Images, Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), Duration: toolExecDuration(tc.Name, execResult, completedAt), walltimeTarget: execResult.walltimeTarget}
+			tr.composed = finalizeToolResultTexts(batchCtx, turn, s.fireHook, tr.CallID, tr.Name, tr.ArgsJSON, tr.Result, tr.Error, tr.Audit, tr.FileState)
 			select {
-			case s.toolCh <- &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Images: execResult.Images, Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), Duration: toolExecDuration(tc.Name, execResult, completedAt), walltimeTarget: execResult.walltimeTarget}:
+			case s.toolCh <- tr:
 			case <-s.parentCtx.Done():
 			}
 		}(tc)
@@ -274,11 +281,25 @@ func (s *SubAgent) runActivityHeartbeat(ctx context.Context, interval time.Durat
 	}
 }
 
+// composeToolResultTextsOffLoop mirrors the MainAgent path for a result that
+// reached the SubAgent loop without composed texts: the sync
+// on_before_tool_result_append hook runs on a goroutine and the finished result
+// is re-delivered, so the loop never waits on a hook.
+func (s *SubAgent) composeToolResultTextsOffLoop(result *toolResult) {
+	turn := s.turn
+	go func() {
+		result.composed = finalizeToolResultTexts(turn.Ctx, turn, s.fireHook, result.CallID, result.Name, result.ArgsJSON, result.Result, result.Error, result.Audit, result.FileState)
+		select {
+		case s.toolCh <- result:
+		case <-s.parentCtx.Done():
+		}
+	}()
+}
+
 // handleToolResult processes a single tool execution result. When all pending
 // tool calls for the current turn have completed, it either sends
 // EventAgentDone (if pendingComplete is set) or continues the LLM loop.
-func (s *SubAgent) handleToolResult(result *toolResult) {
-	// Turn isolation: discard stale results.
+func (s *SubAgent) handleToolResult(result *toolResult) { // Turn isolation: discard stale results.
 	if s.turn == nil || result.TurnID != s.turn.ID {
 		log.Debugf("SubAgent: discarding stale tool result agent=%v result_turn=%v current_turn=%v", s.instanceID, result.TurnID, s.currentTurnID())
 		return
@@ -287,32 +308,51 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 	// a worker that only does tool round trips is never marked as stalled.
 	s.markActivity()
 
-	rawResult := result.Result
-	displayResult, contextResult, errorText, isError := composeToolResultTexts(rawResult, result.Error)
-	toolChangedPaths, fileAttributionIncomplete := s.recordTaskToolChanges(result, isError)
-	contextResult = applyToolArgsAuditToContextResult(contextResult, result.Audit)
-	contextResult = appendModelContextNote(contextResult, s.turn.efficiencyNoteForToolResult(result.CallID, result.Name, result.ArgsJSON, rawResult, isError))
+	if result.composed == nil && s.syncToolHooksConfigured() {
+		// Synthetic results (batch cancellations) arrive without composed texts.
+		// Composing one here would run the sync append hook on the SubAgent loop,
+		// so compose it on a goroutine and re-deliver the finished result.
+		s.composeToolResultTextsOffLoop(result)
+		return
+	}
 
-	hookResult, hookErr := s.fireHook(s.turn.Ctx, hook.OnBeforeToolResultAppend, s.turn.ID, buildBeforeToolResultAppendData(
-		result.Name,
-		result.ArgsJSON,
-		rawResult,
-		displayResult,
-		contextResult,
-		result.Error,
-		result.Audit,
-		result.FileState,
-	))
-	if hookErr != nil {
-		log.Warnf("SubAgent on_before_tool_result_append hook error agent=%v error=%v", s.instanceID, hookErr)
-	} else if hookResult != nil {
-		switch hookResult.Action {
-		case hook.ActionBlock:
-			log.Warnf("SubAgent on_before_tool_result_append returned block; ignoring agent=%v", s.instanceID)
-		case hook.ActionModify:
-			displayResult, contextResult = applyBeforeToolResultAppendHook(displayResult, contextResult, hookResult)
+	rawResult := result.Result
+	var displayResult, contextResult, errorText string
+	var isError bool
+	var composed *composedToolResultTexts
+	if composed = result.composed; composed != nil {
+		// The execution goroutine already composed the texts and ran the sync
+		// append hook off the SubAgent event loop.
+		displayResult, contextResult, errorText, isError = composed.Display, composed.Context, composed.ErrorText, composed.IsError
+	} else {
+		// Promoted speculative results and synthetic results finalize here;
+		// without user hooks this is a fast path.
+		displayResult, contextResult, errorText, isError = composeToolResultTexts(rawResult, result.Error)
+		contextResult = applyToolArgsAuditToContextResult(contextResult, result.Audit)
+		contextResult = appendModelContextNote(contextResult, s.turn.efficiencyNoteForToolResult(result.CallID, result.Name, result.ArgsJSON, rawResult, isError))
+
+		hookResult, hookErr := s.fireHook(s.turn.Ctx, hook.OnBeforeToolResultAppend, s.turn.ID, buildBeforeToolResultAppendData(
+			result.Name,
+			result.ArgsJSON,
+			rawResult,
+			displayResult,
+			contextResult,
+			result.Error,
+			result.Audit,
+			result.FileState,
+		))
+		if hookErr != nil {
+			log.Warnf("SubAgent on_before_tool_result_append hook error agent=%v error=%v", s.instanceID, hookErr)
+		} else if hookResult != nil {
+			switch hookResult.Action {
+			case hook.ActionBlock:
+				log.Warnf("SubAgent on_before_tool_result_append returned block; ignoring agent=%v", s.instanceID)
+			case hook.ActionModify:
+				displayResult, contextResult = applyBeforeToolResultAppendHook(displayResult, contextResult, hookResult)
+			}
 		}
 	}
+	toolChangedPaths, fileAttributionIncomplete := s.recordTaskToolChanges(result, isError)
 
 	// Model-facing advisory for repeated approximate-match failures. It is
 	// appended after the result hooks (matching MainAgent) so a user-configured

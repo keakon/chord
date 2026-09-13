@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
@@ -39,9 +40,11 @@ const (
 )
 
 // toolEfficiencyState tracks per-turn tool usage patterns for efficiency
-// notes. Owned by the agent's event-loop goroutine, like Turn.MalformedCount;
-// no synchronization needed.
+// notes. Note consumption runs on the tool-execution goroutine that finalizes
+// the result (it must precede the sync append hook), dispatch classification
+// runs on the event loop, so access is mutex-guarded.
 type toolEfficiencyState struct {
+	mu                            sync.Mutex
 	consecutiveSingleLookupRounds int
 	armedBatchingCallID           string
 	armedStreakLen                int
@@ -71,6 +74,8 @@ func (t *Turn) noteDispatchedToolRound(calls []message.ToolCall, forcedShape boo
 		return
 	}
 	s := &t.Efficiency
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	// A new dispatch invalidates any arm left unconsumed by a cancelled round.
 	s.armedBatchingCallID = ""
 	if len(calls) != 1 || !isBatchableLookupTool(calls[0].Name) {
@@ -97,6 +102,8 @@ func (t *Turn) efficiencyNoteForToolResult(callID, toolName, argsJSON, rawResult
 		return ""
 	}
 	s := &t.Efficiency
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	armed := callID != "" && callID == s.armedBatchingCallID
 	if armed {
 		s.armedBatchingCallID = ""

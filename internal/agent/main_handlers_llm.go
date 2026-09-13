@@ -717,7 +717,11 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 	pendingCalls := make([]message.ToolCall, 0, len(batch.Calls))
 	promoted := false
 	for _, tc := range batch.Calls {
-		if turn.streamingToolExec != nil {
+		// Speculative reuse needs the finalize hook to run on the event loop
+		// (the result already exists when the decision is made). With sync tool
+		// hooks configured, every call dispatches through the execution
+		// pipeline instead, where both sync hooks run off the loop.
+		if turn.streamingToolExec != nil && !a.syncToolHooksConfigured() {
 			// Only attempt to reuse speculative results when permission is non-interactive.
 			if len(a.ruleset) > 0 && !isInternalControlTool(tc.Name) {
 				decision := evaluateToolPermissionInDir(a.effectiveRuleset(), tc.Name, tc.Args, a.projectRoot)
@@ -725,6 +729,10 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 					pendingCalls = append(pendingCalls, tc)
 					continue
 				}
+				// The finalize path re-evaluates permission with the same
+				// inputs; record the allow so it can skip the second
+				// evaluation (see applyPermission's preapproval consult).
+				a.recordPermissionApproval(turn, tc.ID, string(tc.Args), a.projectRoot)
 			}
 
 			effective := tc
@@ -810,7 +818,9 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 							effectiveCall.Args = json.RawMessage(execResult.EffectiveArgsJSON)
 							diff = toolExecutionDiff(effectiveCall, execResult)
 						}
-						a.sendEvent(Event{Type: EventToolResult, TurnID: turnID, Payload: &ToolResultPayload{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Payload: execResult.Payload, Notes: append([]string(nil), execResult.Notes...), Images: execResult.Images, Error: err, TurnID: turnID, Duration: toolExecDuration(tc.Name, execResult, completedAt), Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), walltimeTarget: execResult.walltimeTarget}})
+						resultPayload := &ToolResultPayload{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Payload: execResult.Payload, Notes: append([]string(nil), execResult.Notes...), Images: execResult.Images, Error: err, TurnID: turnID, Duration: toolExecDuration(tc.Name, execResult, completedAt), Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), walltimeTarget: execResult.walltimeTarget}
+						resultPayload.composedTexts = finalizeToolResultTexts(turn.Ctx, turn, a.fireHook, resultPayload.CallID, resultPayload.Name, resultPayload.ArgsJSON, resultPayload.Result, resultPayload.Error, resultPayload.Audit, resultPayload.FileState)
+						a.sendEvent(Event{Type: EventToolResult, TurnID: turnID, Payload: resultPayload})
 					}(effective)
 					promoted = true
 					continue
@@ -873,29 +883,31 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 					batchCancel()
 				}
 			}
+			resultPayload := &ToolResultPayload{
+				CallID:         tc.ID,
+				Name:           tc.Name,
+				ArgsJSON:       execResult.EffectiveArgsJSON,
+				Audit:          execResult.Audit,
+				Result:         execResult.Result,
+				Payload:        execResult.Payload,
+				Notes:          append([]string(nil), execResult.Notes...),
+				Images:         execResult.Images,
+				Error:          err,
+				TurnID:         turnID,
+				Duration:       toolExecDuration(tc.Name, execResult, completedAt),
+				Diff:           diff.Text,
+				DiffAdded:      diff.Added,
+				DiffRemoved:    diff.Removed,
+				FileCreated:    tc.Name == tools.NameWrite && !execResult.PreExisted,
+				LSPReviews:     append([]message.LSPReview(nil), execResult.LSPReviews...),
+				FileState:      execResult.FileState.Clone(),
+				walltimeTarget: execResult.walltimeTarget,
+			}
+			resultPayload.composedTexts = finalizeToolResultTexts(batchCtx, turn, a.fireHook, resultPayload.CallID, resultPayload.Name, resultPayload.ArgsJSON, resultPayload.Result, resultPayload.Error, resultPayload.Audit, resultPayload.FileState)
 			a.sendEvent(Event{
-				Type:   EventToolResult,
-				TurnID: turnID,
-				Payload: &ToolResultPayload{
-					CallID:         tc.ID,
-					Name:           tc.Name,
-					ArgsJSON:       execResult.EffectiveArgsJSON,
-					Audit:          execResult.Audit,
-					Result:         execResult.Result,
-					Payload:        execResult.Payload,
-					Notes:          append([]string(nil), execResult.Notes...),
-					Images:         execResult.Images,
-					Error:          err,
-					TurnID:         turnID,
-					Duration:       toolExecDuration(tc.Name, execResult, completedAt),
-					Diff:           diff.Text,
-					DiffAdded:      diff.Added,
-					DiffRemoved:    diff.Removed,
-					FileCreated:    tc.Name == tools.NameWrite && !execResult.PreExisted,
-					LSPReviews:     append([]message.LSPReview(nil), execResult.LSPReviews...),
-					FileState:      execResult.FileState.Clone(),
-					walltimeTarget: execResult.walltimeTarget,
-				},
+				Type:    EventToolResult,
+				TurnID:  turnID,
+				Payload: resultPayload,
 			})
 		}(tc)
 	}

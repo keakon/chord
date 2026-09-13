@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -104,7 +105,10 @@ func (a *MainAgent) toolExecutionPipeline() toolExecutionPipeline {
 			return a.YoloEnabled() && yoloAskDowngradeTool(name)
 		},
 		loopExitAuthorized: a.loopExitAuthorized,
-		visibleToolNames:   a.mainVisibleLLMToolNames,
+		preapprovedPermission: func(callID string, args json.RawMessage, cwd string, pctx toolPermissionContext) bool {
+			return a.permissionApprovalMatches(callID, string(args), cwd, pctx)
+		},
+		visibleToolNames: a.mainVisibleLLMToolNames,
 		appendToolActivity: func(rec recovery.ToolActivityRecord) error {
 			// Tool goroutines outlive a session switch, so the manager is
 			// resolved per record rather than captured with the pipeline.
