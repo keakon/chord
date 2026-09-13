@@ -297,10 +297,8 @@ func TestStartupDeferredTranscriptPreheatPopulatesHaloMetadata(t *testing.T) {
 	if rightIdx >= 0 && rightIdx < state.windowEnd {
 		t.Fatalf("right halo index %d should be at/after windowEnd %d", rightIdx, state.windowEnd)
 	}
-	state.blockMeta[leftIdx].SearchableText = ""
 	state.blockMeta[leftIdx].LineCounts = nil
 	if rightIdx >= 0 {
-		state.blockMeta[rightIdx].SearchableText = ""
 		state.blockMeta[rightIdx].LineCounts = nil
 	}
 
@@ -309,11 +307,11 @@ func TestStartupDeferredTranscriptPreheatPopulatesHaloMetadata(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("preheat tick should reschedule while deferred transcript remains active")
 	}
-	if state.blockMeta[leftIdx].SearchableText == "" || startupDeferredBlockLineCount(state.blockMeta[leftIdx], m.viewport.width) <= 0 {
+	if state.blockMeta[leftIdx].LineCounts == nil || startupDeferredBlockLineCount(state.blockMeta[leftIdx], m.viewport.width) <= 0 {
 		t.Fatalf("left halo metadata not preheated: %#v", state.blockMeta[leftIdx])
 	}
 	if rightIdx >= 0 {
-		if state.blockMeta[rightIdx].SearchableText == "" || startupDeferredBlockLineCount(state.blockMeta[rightIdx], m.viewport.width) <= 0 {
+		if state.blockMeta[rightIdx].LineCounts == nil || startupDeferredBlockLineCount(state.blockMeta[rightIdx], m.viewport.width) <= 0 {
 			t.Fatalf("right halo metadata not preheated: %#v", state.blockMeta[rightIdx])
 		}
 	}
@@ -352,10 +350,8 @@ func TestDeferredWindowSwitchRestartsPreheatForNewHalo(t *testing.T) {
 	if rightIdx < 0 {
 		t.Fatal("top window should have a right halo to preheat")
 	}
-	state.blockMeta[rightIdx].SearchableText = ""
 	state.blockMeta[rightIdx].LineCounts = nil
 	if leftIdx < state.windowStart {
-		state.blockMeta[leftIdx].SearchableText = ""
 		state.blockMeta[leftIdx].LineCounts = nil
 	}
 
@@ -364,7 +360,7 @@ func TestDeferredWindowSwitchRestartsPreheatForNewHalo(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("restarted preheat tick should reschedule while deferred transcript remains active")
 	}
-	if state.blockMeta[rightIdx].SearchableText == "" || startupDeferredBlockLineCount(state.blockMeta[rightIdx], m.viewport.width) <= 0 {
+	if state.blockMeta[rightIdx].LineCounts == nil || startupDeferredBlockLineCount(state.blockMeta[rightIdx], m.viewport.width) <= 0 {
 		t.Fatalf("right halo metadata not preheated after window switch: %#v", state.blockMeta[rightIdx])
 	}
 }

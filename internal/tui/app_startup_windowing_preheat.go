@@ -112,11 +112,5 @@ func preheatStartupDeferredBlock(state *startupDeferredTranscriptState, index, w
 		}
 		meta.LineCounts[width] = lineCount
 	}
-	if meta.SearchableText == "" {
-		meta.SearchableText = block.searchableTextLower()
-	}
-	if meta.Summary == "" {
-		meta.Summary = block.Summary()
-	}
 	return lineCount > 0
 }

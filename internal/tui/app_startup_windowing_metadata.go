@@ -6,25 +6,47 @@ import (
 )
 
 func startupDeferredMetaSearchInnerOffset(meta startupDeferredBlockMeta, query string, width int) int {
-	if query == "" || strings.TrimSpace(meta.SearchableText) == "" {
+	searchable := meta.searchableText()
+	if query == "" || strings.TrimSpace(searchable) == "" {
 		return 0
 	}
 	if width <= 0 {
 		width = 80
 	}
 	lowerQuery := strings.ToLower(query)
-	if offset, ok := wrappedSearchMatchLineOffset(meta.SearchableText, lowerQuery, width); ok {
+	if offset, ok := wrappedSearchMatchLineOffset(searchable, lowerQuery, width); ok {
 		return offset
 	}
 	return 0
 }
 
+// startupDeferredBlockMeta is the archive-side descriptor of one deferred
+// block. Summary and searchable text stay on the block and resolve on demand
+// (search is the only consumer and runs on explicit user action), so long
+// sessions no longer keep a lowercase copy of every block resident outside the
+// spill budget.
 type startupDeferredBlockMeta struct {
-	BlockID        int
-	Type           BlockType
-	Summary        string
-	SearchableText string
-	LineCounts     map[int]int
+	BlockID    int
+	Type       BlockType
+	block      *Block
+	LineCounts map[int]int
+}
+
+// summary resolves the block's one-line description; an archive entry without
+// a live block (should not happen) yields an empty summary.
+func (meta startupDeferredBlockMeta) summary() string {
+	if meta.block == nil {
+		return ""
+	}
+	return meta.block.Summary()
+}
+
+// searchableText resolves the block's cached lowercase search text.
+func (meta startupDeferredBlockMeta) searchableText() string {
+	if meta.block == nil {
+		return ""
+	}
+	return meta.block.searchableTextLower()
 }
 
 func cloneLineCounts(src map[int]int) map[int]int {
@@ -58,11 +80,10 @@ func buildStartupDeferredBlockMeta(blocks []*Block, width int) []startupDeferred
 			}
 		}
 		meta = append(meta, startupDeferredBlockMeta{
-			BlockID:        block.ID,
-			Type:           block.Type,
-			Summary:        block.Summary(),
-			SearchableText: block.searchableTextLower(),
-			LineCounts:     lineCounts,
+			BlockID:    block.ID,
+			Type:       block.Type,
+			block:      block,
+			LineCounts: lineCounts,
 		})
 	}
 	return meta
@@ -89,14 +110,15 @@ func startupDeferredBlockLineCount(meta startupDeferredBlockMeta, width int) int
 }
 
 func startupDeferredMetaSearchVisible(meta startupDeferredBlockMeta) bool {
-	if strings.TrimSpace(meta.SearchableText) == "" {
+	searchable := meta.searchableText()
+	if strings.TrimSpace(searchable) == "" {
 		return false
 	}
-	if searchDiagnosticArtifactExcluded(meta.Type, meta.SearchableText) {
+	if searchDiagnosticArtifactExcluded(meta.Type, searchable) {
 		return false
 	}
 	if meta.Type == BlockThinking {
-		return strings.TrimSpace(preprocessThinkingMarkdown(meta.SearchableText)) != ""
+		return strings.TrimSpace(preprocessThinkingMarkdown(searchable)) != ""
 	}
 	return true
 }
@@ -112,9 +134,9 @@ func findMatchesInStartupDeferredBlockMeta(meta []startupDeferredBlockMeta, quer
 	matches := make([]MatchPosition, 0)
 	lineOffset := 0
 	for i, blockMeta := range meta {
-		candidate := strings.Contains(blockMeta.SearchableText, lowerQuery)
+		candidate := strings.Contains(blockMeta.searchableText(), lowerQuery)
 		if !candidate && blockMeta.Type == BlockAssistant {
-			candidate = assistantMarkdownMayContainQuery(blockMeta.SearchableText, lowerQuery)
+			candidate = assistantMarkdownMayContainQuery(blockMeta.searchableText(), lowerQuery)
 		}
 		if candidate && startupDeferredMetaSearchVisible(blockMeta) {
 			matches = append(matches, MatchPosition{

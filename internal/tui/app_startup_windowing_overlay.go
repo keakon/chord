@@ -23,7 +23,7 @@ func (m *Model) deferredStartupTranscriptDirectoryEntries() []DirectoryEntry {
 			BlockIndex: i,
 			BlockID:    meta.BlockID,
 			LineOffset: lineOffset,
-			Summary:    meta.Summary,
+			Summary:    meta.summary(),
 			Type:       meta.Type,
 		})
 		lineOffset += startupDeferredBlockLineCount(meta, width)

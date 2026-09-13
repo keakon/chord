@@ -254,7 +254,7 @@ func startupDeferredMetaForBlock(block *Block, width int) startupDeferredBlockMe
 	return startupDeferredBlockMeta{
 		BlockID: block.ID,
 		Type:    block.Type,
-		Summary: block.Summary(),
+		block:   block,
 	}
 }
 
