@@ -515,7 +515,11 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 
 	// Use ReplacePrefixAtomic: replace [0, headSplit) with d.NewMessages,
 	// preserving [headSplit:) as tail. The under callback atomically rewrites
-	// the session file.
+	// the session file. The persistence pump is drained here, outside the
+	// ctxmgr write lock: the rewrite's rename must observe a drained pump, but
+	// waiting inside the callback would stall every Snapshot/Append reader for
+	// the drain duration.
+	a.flushPersist()
 	var backupPath string
 	err := a.ctxMgr.ReplacePrefixAtomic(headSplit, d.NewMessages, func(tail []message.Message) ([]message.Message, error) {
 		// Build the complete new message list: prefix (summary + evidence) + tail

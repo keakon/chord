@@ -292,6 +292,7 @@ func (r *RecoveryManager) persistBinaryParts(msg message.Message) (message.Messa
 		}
 		parts[i].Data = nil
 		parts[i].ImagePath = filePath
+		parts[i].DataBytes = int64(len(p.Data))
 	}
 	msg.Parts = parts
 	return msg, nil
@@ -470,17 +471,13 @@ func (r *RecoveryManager) LoadMessages(agentID string) ([]message.Message, error
 			}
 			break
 		}
-		// Restore image/pdf data from disk for any parts that have ImagePath set.
-		for i, p := range msg.Parts {
-			if p.IsBinary() && p.ImagePath != "" && len(p.Data) == 0 {
-				data, err := os.ReadFile(p.ImagePath)
-				if err != nil {
-					log.Warnf("failed to load attachment from disk path=%v error=%v", p.ImagePath, err)
-					continue
-				}
-				msg.Parts[i].Data = data
-			}
-		}
+		// Binary parts stay unresolved: the message keeps ImagePath with Data
+		// empty, and the payload is loaded lazily by the wire converter (via
+		// the llm binary-part resolver) and the TUI renderer, which both read
+		// the persisted file on demand. Eagerly reading every attachment on
+		// restore made resume/session-switch latency and resident memory grow
+		// with the total size of every image/PDF the session ever attached —
+		// including parts a model filter would drop unused.
 		messages = append(messages, msg)
 	}
 	return messages, nil

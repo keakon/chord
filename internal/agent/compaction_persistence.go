@@ -473,7 +473,10 @@ func (a *MainAgent) captureOriginalFirstUserHint() string {
 }
 
 func (a *MainAgent) rewriteSessionAfterCompaction(index int, messages []message.Message, originalFirstUserHint string) (string, error) {
-	a.flushPersist()
+	// The caller drains the persistence pump before entering
+	// ReplacePrefixAtomic: the wait can take unbounded time while the pump is
+	// backed up, and it does not touch the ctxmgr lock, so waiting inside the
+	// replace critical section would only stall Snapshot/Append readers.
 
 	mainPath := filepath.Join(a.sessionDir, identity.MainSessionLogFilename)
 	backupPath := filepath.Join(a.sessionDir, fmt.Sprintf("main.pre-compress-%d.jsonl", index))
