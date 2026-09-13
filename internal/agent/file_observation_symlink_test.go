@@ -32,8 +32,7 @@ func TestLazyReadValidationFollowsSymlinkTarget(t *testing.T) {
 		t.Fatalf("hash through symlink: exists=%v err=%v", exists, err)
 	}
 
-	verdicts := map[string]externalReadLazyVerdict{}
-	if a.lazyReadStatCheck(link, expected, verdicts) {
+	if a.lazyReadStatCheck(link, expected) {
 		t.Fatal("unmodified symlink read reported as changed")
 	}
 
@@ -54,7 +53,7 @@ func TestLazyReadValidationFollowsSymlinkTarget(t *testing.T) {
 		t.Skip("platform updates the symlink's own stat on target writes")
 	}
 
-	if !a.lazyReadStatCheck(link, expected, verdicts) {
+	if !a.lazyReadStatCheck(link, expected) {
 		t.Fatal("edit to the symlink target was not detected: the stale read stays marked current")
 	}
 }
