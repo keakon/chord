@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -1493,10 +1494,29 @@ func estimateInputTokens(messages []message.Message) int {
 	return total
 }
 
+// toolEstimateMemo caches the schema-marshal estimate for the most recent tool
+// slice. Tool definitions are frozen once built (the same immutability premise
+// as requestBodyIdentity's slice-identity guard), so one entry keyed by the
+// backing array serves the per-attempt and per-request estimators; a rebuilt
+// slice just recomputes.
+var toolEstimateMemo struct {
+	sync.Mutex
+	toolsPtr *message.ToolDefinition
+	toolsLen int
+	tokens   int
+}
+
 func estimateToolDefinitionTokens(tools []message.ToolDefinition) int {
 	if len(tools) == 0 {
 		return 0
 	}
+	toolEstimateMemo.Lock()
+	if toolEstimateMemo.toolsPtr == &tools[0] && toolEstimateMemo.toolsLen == len(tools) {
+		tokens := toolEstimateMemo.tokens
+		toolEstimateMemo.Unlock()
+		return tokens
+	}
+	toolEstimateMemo.Unlock()
 	total := 0
 	for _, tool := range tools {
 		n := len(tool.Name) + len(tool.Description)
@@ -1508,7 +1528,11 @@ func estimateToolDefinitionTokens(tools []message.ToolDefinition) int {
 	if total == 0 {
 		return 0
 	}
-	return total / 3
+	tokens := total / 3
+	toolEstimateMemo.Lock()
+	toolEstimateMemo.toolsPtr, toolEstimateMemo.toolsLen, toolEstimateMemo.tokens = &tools[0], len(tools), tokens
+	toolEstimateMemo.Unlock()
+	return tokens
 }
 
 func estimateRequestInputTokens(systemPrompt string, messages []message.Message, tools []message.ToolDefinition) int {
