@@ -706,6 +706,13 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 				if msg.Mailbox != nil {
 					mailboxMessageID = strings.TrimSpace(msg.Mailbox.MessageID)
 				}
+				if backgroundID == "" {
+					// Same fallback the live event path applies: re-delivery of
+					// this result after a rebuild looks the card up by the
+					// durable message identity, so the restored card must
+					// carry it too.
+					backgroundID = mailboxMessageID
+				}
 				blocks = append(blocks, &Block{
 					ID:                    *nextID,
 					Type:                  BlockStatus,

@@ -280,6 +280,35 @@ func TestCompactionRebuildPreservesBackgroundResultCardState(t *testing.T) {
 	}
 }
 
+// A background result whose headline is not the registry's "[Background job
+// <id> finished]" line derives no background object id from its content, so
+// the rebuild must fall back to the durable mailbox message id — the same
+// fallback the live event path applies — or a re-delivery after the rebuild
+// would look the card up by that identity, miss, and append a duplicate.
+func TestCompactionRebuildFallsBackToMailboxIdentityForBackgroundResults(t *testing.T) {
+	backend := &sessionControlAgent{}
+	m := NewModelWithSize(backend, 120, 24)
+	backend.messages = []message.Message{
+		{Role: "user", IsCompactionSummary: true, Content: "[Context Summary]\nsummary\n\n[Context compressed]"},
+		{Role: "user", Kind: message.KindBackgroundResult, Content: "Background job finished\nStatus: completed (exit code 0)", Mailbox: &message.MailboxMetadata{MessageID: "mb-9"}},
+	}
+	m.rebuildViewportFromMessagesWithReason("session_restored")
+
+	var restored *Block
+	for _, b := range m.viewport.visibleBlocks() {
+		if b.Type == BlockStatus && b.MailboxMessageID == "mb-9" {
+			restored = b
+			break
+		}
+	}
+	if restored == nil {
+		t.Fatal("rebuilt transcript lost the JOB RESULT card")
+	}
+	if restored.BackgroundObjectID != "mb-9" {
+		t.Fatalf("rebuilt card BackgroundObjectID = %q, want the mailbox message id", restored.BackgroundObjectID)
+	}
+}
+
 // Repeated identical rows still pair in transcript order: with an unchanged
 // occurrence count, the nth rebuilt copy adopts the nth previous card's state,
 // so identical prompts do not reset each other's fold state and ID.
