@@ -657,7 +657,7 @@ func convertMessagesToOpenAIWithOptions(systemPrompt, targetWireFamily, continui
 						blocks = append(blocks, openAIContentBlock{
 							Type: "image_url",
 							ImageURL: &openAIImageURL{
-								URL: "data:" + p.MimeType + ";base64," + encodeBase64Cached(binaryPartPayload(p)),
+								URL: binaryPartDataURL(p.MimeType, binaryPartPayload(p)),
 							},
 						})
 					case "pdf":
@@ -665,7 +665,7 @@ func convertMessagesToOpenAIWithOptions(systemPrompt, targetWireFamily, continui
 							Type: "file",
 							File: &openAIFile{
 								Filename: defaultPDFFilename(p.FileName),
-								FileData: "data:" + defaultPDFMediaType(p.MimeType) + ";base64," + encodeBase64Cached(binaryPartPayload(p)),
+								FileData: binaryPartDataURL(defaultPDFMediaType(p.MimeType), binaryPartPayload(p)),
 							},
 						})
 					default: // "text"

@@ -227,14 +227,14 @@ func convertMessagesToResponsesWithItemIDs(systemPrompt string, msgs []message.M
 					case "image":
 						content = append(content, responsesContentBlock{
 							Type:     "input_image",
-							ImageURL: "data:" + p.MimeType + ";base64," + encodeBase64Cached(binaryPartPayload(p)),
+							ImageURL: binaryPartDataURL(p.MimeType, binaryPartPayload(p)),
 							Detail:   "auto",
 						})
 					case "pdf":
 						content = append(content, responsesContentBlock{
 							Type:     "input_file",
 							Filename: defaultPDFFilename(p.FileName),
-							FileData: "data:" + defaultPDFMediaType(p.MimeType) + ";base64," + encodeBase64Cached(binaryPartPayload(p)),
+							FileData: binaryPartDataURL(defaultPDFMediaType(p.MimeType), binaryPartPayload(p)),
 						})
 					default:
 						appendResponsesTextBlock(&content, p.Text)
@@ -497,14 +497,14 @@ func responsesToolOutput(msg message.Message) any {
 		case "image":
 			content = append(content, responsesContentBlock{
 				Type:     "input_image",
-				ImageURL: "data:" + p.MimeType + ";base64," + encodeBase64Cached(binaryPartPayload(p)),
+				ImageURL: binaryPartDataURL(p.MimeType, binaryPartPayload(p)),
 				Detail:   "auto",
 			})
 		case "pdf":
 			content = append(content, responsesContentBlock{
 				Type:     "input_file",
 				Filename: defaultPDFFilename(p.FileName),
-				FileData: "data:" + defaultPDFMediaType(p.MimeType) + ";base64," + encodeBase64Cached(binaryPartPayload(p)),
+				FileData: binaryPartDataURL(defaultPDFMediaType(p.MimeType), binaryPartPayload(p)),
 			})
 		default:
 			if p.Text == "" {

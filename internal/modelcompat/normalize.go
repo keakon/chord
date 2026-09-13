@@ -925,7 +925,11 @@ func deepCopyMessages(msgs []message.Message) []message.Message {
 			copy(parts, msg.Parts)
 			for j := range parts {
 				if parts[j].Data != nil {
-					parts[j].Data = append([]byte(nil), parts[j].Data...)
+					// Normalization never mutates a part's binary payload — it
+					// drops whole messages or edits text fields — so the copy
+					// shares the bytes instead of duplicating every image/PDF
+					// in the history per fallback target.
+					parts[j].Data = msg.Parts[j].Data
 				}
 			}
 			out[i].Parts = parts
