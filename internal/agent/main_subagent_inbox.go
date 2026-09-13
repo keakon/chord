@@ -325,8 +325,7 @@ func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
 		a.emitToTUI(AgentStatusEvent{AgentID: live.instanceID, Status: "running", Message: statusMsg})
 		a.orchestrationMetrics.recordMailboxDelivery(msg.MessageID, msg.CreatedAt)
 		live.armStartupWatchdog()
-		a.persistSubAgentMeta(live)
-		a.syncTaskRecordFromSub(live, "")
+		a.syncSubAgentPersists(live, "")
 		a.saveRecoverySnapshot()
 		return true
 	}

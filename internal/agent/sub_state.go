@@ -144,8 +144,7 @@ func (s *SubAgent) enterWaitingDescendant(reason string) {
 		Status:  string(SubAgentStateWaitingDescendant),
 		Message: reason,
 	})
-	s.parent.persistSubAgentMeta(s)
-	s.parent.syncTaskRecordFromSub(s, "")
+	s.parent.syncSubAgentPersists(s, "")
 	s.parent.saveRecoverySnapshot()
 	s.parent.parkSubAgent(s.instanceID)
 }

@@ -37,8 +37,16 @@ func (a *MainAgent) handleSubAgentStateChangedEvent(evt Event) {
 		return
 	}
 	a.noteSubAgentStateTransition(sub, payload.State)
-	a.persistSubAgentMeta(sub)
-	a.syncTaskRecordFromSub(sub, "")
+	switch payload.State {
+	// Terminal states persist synchronously: the final state must be durable
+	// before the event loop moves on. Everything else coalesces through the
+	// debounced flush so bursts of worker events do not stall dispatch.
+	case SubAgentStateCompleted, SubAgentStateFailed, SubAgentStateCancelled:
+		a.persistSubAgentMeta(sub)
+		a.syncTaskRecordFromSub(sub, "")
+	default:
+		a.syncSubAgentPersists(sub, "")
+	}
 	if strings.TrimSpace(payload.Summary) == "" {
 		return
 	}
@@ -78,8 +86,7 @@ func (a *MainAgent) handleSubAgentProgressUpdatedEvent(evt Event) {
 	if !sub.updateProgress(summary) {
 		return
 	}
-	a.persistSubAgentMeta(sub)
-	a.syncTaskRecordFromSub(sub, "")
+	a.syncSubAgentPersists(sub, "")
 	log.Debugf("SubAgent progress updated agent=%v summary_len=%v", evt.SourceID, len(summary))
 }
 

@@ -225,9 +225,10 @@ func persistDurableTaskRecords(sessionDir string, records map[string]*DurableTas
 	if path == "" {
 		return nil
 	}
+	// records is caller-owned (every caller passes a freshly cloned map), so
+	// cloning each record again here only doubled the copy cost per rewrite.
 	ordered := make([]*DurableTaskRecord, 0, len(records))
 	for _, rec := range records {
-		rec = cloneDurableTaskRecord(rec)
 		if rec == nil || rec.TaskID == "" {
 			continue
 		}

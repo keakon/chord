@@ -297,6 +297,9 @@ func (a *MainAgent) resetSessionRuntimeState() {
 	a.invokedSkills = make(map[string]*skill.Meta)
 	a.skillsMu.Unlock()
 	a.setTaskRecords(nil)
+	// Pending debounced persists belong to the previous session; a late flush
+	// must never write old meta files into the new session directory.
+	a.subPersists.reset()
 	a.resetTaskCoordination(a.sessionEpoch, nil)
 	a.resetAgentRequests(nil)
 	a.explicitUserTurnCount.Store(0)

@@ -546,6 +546,10 @@ type MainAgent struct {
 	// the wire converter; see binaryPartReadCache.
 	binaryPartCache *binaryPartReadCache
 
+	// subPersists coalesces sub-agent meta/registry writes off the event loop;
+	// see subAgentPersistDebouncer.
+	subPersists *subAgentPersistDebouncer
+
 	// persistenceHealth tracks the durability of the main transcript writes.
 	// Degraded means writes are failing; the intent barrier then blocks tool
 	// dispatch while Q&A turns keep working until a checkpoint recovers.
@@ -1254,6 +1258,7 @@ func NewMainAgent(
 		mcpReady:                make(chan struct{}),
 	}
 	a.interaction = newInteractionBroker(a.stoppingCh)
+	a.subPersists = newSubAgentPersistDebouncer(a.flushDirtySubPersists, a.SessionDir)
 	a.walltime = newWalltimeRecorder(a.usageLedger, a.persist, a.stoppingCh)
 	a.interaction.setSettledHook(func(target *walltimeTarget, d time.Duration) {
 		if a.walltime != nil {
@@ -1690,6 +1695,11 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 		}
 		cancel()
 	}
+
+	// Flush the debounced sub-agent meta/registry writes before the flag below
+	// turns the debouncer's flush into a no-op, so the final snapshot keeps the
+	// last window of non-terminal worker progress.
+	a.flushPendingSubPersists()
 
 	// Mark as shutting down so UpdateTodos stops saving snapshots (the final
 	// snapshot is saved below and must not be overwritten).
