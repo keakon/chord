@@ -51,8 +51,15 @@ func startupDeferredPageUpSwitchThreshold(viewportHeight int) int {
 }
 
 type startupDeferredTranscriptState struct {
-	allBlocks              []*Block
-	blockMeta              []startupDeferredBlockMeta
+	allBlocks []*Block
+	blockMeta []startupDeferredBlockMeta
+	// indexByID maps block ID → its position in allBlocks (blockMeta runs
+	// parallel to allBlocks), so per-event syncs skip the linear scans.
+	indexByID map[int]int
+	// metaSigs remembers the content signature behind each meta entry so a
+	// re-sync that changed no searchable content (e.g. a SettledAt stamp)
+	// skips the Summary/searchable rebuild.
+	metaSigs               map[int]uint64
 	hiddenBlocks           int
 	anchorBlockID          int
 	windowStart            int
@@ -210,6 +217,8 @@ func (m *Model) maybeWindowStartupTranscript(reason string, blocks []*Block) []*
 	state := &startupDeferredTranscriptState{
 		allBlocks:              cloneBlocksForDeferredSource(blocks),
 		blockMeta:              buildStartupDeferredBlockMeta(blocks, m.viewport.width),
+		indexByID:              buildDeferredBlockIndex(blocks),
+		metaSigs:               buildDeferredMetaSigs(blocks),
 		hiddenBlocks:           hiddenCount,
 		anchorBlockID:          anchorID,
 		windowStart:            hiddenCount,

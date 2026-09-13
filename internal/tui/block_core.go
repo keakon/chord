@@ -42,24 +42,31 @@ func cloneBlockForDeferredSource(src *Block) *Block {
 	clone.mdCache = append([]string(nil), src.mdCache...)
 	clone.mdCacheContent = src.mdCacheContent
 	clone.mdCacheThemeVersion = src.mdCacheThemeVersion
-	clone.mdCacheSyntheticPrefixWidths = append([]int(nil), src.mdCacheSyntheticPrefixWidths...)
-	clone.mdCacheSoftWrapContinuations = append([]bool(nil), src.mdCacheSoftWrapContinuations...)
-	clone.streamSettledLines = append([]string(nil), src.streamSettledLines...)
-	clone.streamSettledSyntheticPrefixWidths = append([]int(nil), src.streamSettledSyntheticPrefixWidths...)
-	clone.streamSettledSoftWrapContinuations = append([]bool(nil), src.streamSettledSoftWrapContinuations...)
-	clone.streamSettledLineCount = src.streamSettledLineCount
+	clone.mdCacheSyntheticPrefixWidths = nil
+	clone.mdCacheSoftWrapContinuations = nil
+	// The deferred clone is the archive source of record, not a render
+	// source: hydrated blocks rebuild their render caches on first paint, so
+	// deep-copying the streaming/render line caches here would multiply the
+	// per-event clone cost and keep every synced block's rendered lines hot
+	// outside the viewport's spill budget.
+	clone.streamSettledLines = nil
+	clone.streamSettledSyntheticPrefixWidths = nil
+	clone.streamSettledSoftWrapContinuations = nil
+	clone.streamSettledLineCount = 0
 	clone.streamTailRaw = src.streamTailRaw
-	clone.streamTailWidth = src.streamTailWidth
-	clone.streamTailLines = append([]string(nil), src.streamTailLines...)
-	clone.streamTailSyntheticPrefixWidths = append([]int(nil), src.streamTailSyntheticPrefixWidths...)
-	clone.streamTailSoftWrapContinuations = append([]bool(nil), src.streamTailSoftWrapContinuations...)
-	clone.streamCardHeadLines = append([]string(nil), src.streamCardHeadLines...)
-	clone.streamCardHeadBody = append([]string(nil), src.streamCardHeadBody...)
-	clone.streamCardHeadKey = src.streamCardHeadKey
-	clone.lineCache = append([]string(nil), src.lineCache...)
-	clone.viewportCache = append([]string(nil), src.viewportCache...)
-	clone.renderSyntheticPrefixWidths = append([]int(nil), src.renderSyntheticPrefixWidths...)
-	clone.renderSoftWrapContinuations = append([]bool(nil), src.renderSoftWrapContinuations...)
+	clone.streamTailWidth = 0
+	clone.streamTailLines = nil
+	clone.streamTailSyntheticPrefixWidths = nil
+	clone.streamTailSoftWrapContinuations = nil
+	clone.streamCardHeadLines = nil
+	clone.streamCardHeadBody = nil
+	clone.streamCardHeadKey = streamCardHeadKey{}
+	clone.lineCache = nil
+	clone.lineCacheWidth = 0
+	clone.lineCountCache = 0
+	clone.viewportCache = nil
+	clone.renderSyntheticPrefixWidths = nil
+	clone.renderSoftWrapContinuations = nil
 	clone.spillRef = nil
 	clone.spillStore = nil
 	clone.spillSummary = ""

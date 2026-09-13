@@ -161,10 +161,16 @@ func (m *Model) findBlockByLinkedTask(taskID string) (*Block, bool) {
 	})
 }
 
+// startupDeferredBlockIndex resolves a block ID to its allBlocks position.
+// blockMeta runs parallel to allBlocks, so this is also the meta index; the
+// linear fallback keeps a desynced map from silently skipping updates.
 func (m *Model) startupDeferredTranscriptBlockIndex(blockID int) int {
 	state := m.startupDeferredTranscript
 	if state == nil || blockID < 0 {
 		return -1
+	}
+	if idx, ok := state.indexByID[blockID]; ok && idx < len(state.allBlocks) && state.allBlocks[idx] != nil && state.allBlocks[idx].ID == blockID {
+		return idx
 	}
 	for i, block := range state.allBlocks {
 		if block != nil && block.ID == blockID {
@@ -175,16 +181,62 @@ func (m *Model) startupDeferredTranscriptBlockIndex(blockID int) int {
 }
 
 func (m *Model) startupDeferredTranscriptMetaIndex(blockID int) int {
-	state := m.startupDeferredTranscript
-	if state == nil || blockID < 0 {
-		return -1
-	}
-	for i, meta := range state.blockMeta {
-		if meta.BlockID == blockID {
-			return i
+	return m.startupDeferredTranscriptBlockIndex(blockID)
+}
+
+// buildDeferredBlockIndex builds the ID → index map for a block list.
+func buildDeferredBlockIndex(blocks []*Block) map[int]int {
+	index := make(map[int]int, len(blocks))
+	for i, block := range blocks {
+		if block != nil {
+			index[block.ID] = i
 		}
 	}
-	return -1
+	return index
+}
+
+// startupDeferredMetaSig is a cheap content fingerprint of the fields the
+// deferred meta (Summary + searchable text) derives from. Length-based, so a
+// pathological same-length content edit could miss a rebuild — search would
+// then read stale text for one block until its next real change.
+func startupDeferredMetaSig(block *Block) uint64 {
+	h := uint64(14695981039346656037)
+	mix := func(v uint64) {
+		h ^= v
+		h *= 1099511628211
+	}
+	mix(uint64(block.Type))
+	mix(uint64(len(block.Content)))
+	mix(uint64(len(block.ToolName)))
+	mix(uint64(len(block.ResultContent)))
+	mix(uint64(len(block.Diff)))
+	mix(uint64(len(block.DoneSummary)))
+	mix(uint64(len(block.DoneReport)))
+	mix(uint64(len(block.CompactionSummaryRaw)))
+	mix(uint64(len(block.FileRefs)))
+	mix(uint64(len(block.ThinkingParts)))
+	mix(uint64(len(block.PDFNames)))
+	mix(uint64(len(block.ImageParts)))
+	if block.ToolProgress != nil {
+		mix(1)
+		mix(uint64(len(block.ToolProgress.Text)))
+		mix(uint64(int(block.ToolProgress.Current)))
+		mix(uint64(int(block.ToolProgress.Total)))
+	}
+	if block.ResultDone {
+		mix(3)
+	}
+	return h
+}
+
+func buildDeferredMetaSigs(blocks []*Block) map[int]uint64 {
+	sigs := make(map[int]uint64, len(blocks))
+	for _, block := range blocks {
+		if block != nil {
+			sigs[block.ID] = startupDeferredMetaSig(block)
+		}
+	}
+	return sigs
 }
 
 func (m *Model) startupDeferredMetaWidth() int {
@@ -264,7 +316,18 @@ func (m *Model) syncStartupDeferredTranscriptBlock(block *Block) {
 	state.allBlocks[idx] = clone
 	metaIdx := m.startupDeferredTranscriptMetaIndex(block.ID)
 	if metaIdx >= 0 {
-		state.blockMeta[metaIdx] = startupDeferredMetaForBlock(clone, m.startupDeferredMetaWidth())
+		// Tool results re-sync each block twice (once on the result event,
+		// once through markBlockSettled); the second pass usually changes
+		// only SettledAt, which the meta never reads. Skip the Summary and
+		// searchable-text rebuild unless the content signature moved.
+		sig := startupDeferredMetaSig(clone)
+		if state.metaSigs == nil {
+			state.metaSigs = make(map[int]uint64)
+		}
+		if state.metaSigs[block.ID] != sig {
+			state.blockMeta[metaIdx] = startupDeferredMetaForBlock(clone, m.startupDeferredMetaWidth())
+			state.metaSigs[block.ID] = sig
+		}
 	}
 }
 
@@ -304,9 +367,13 @@ func (m *Model) syncStartupDeferredTranscriptAfterViewportRemove(blockID int) {
 	}
 	if idx := m.startupDeferredTranscriptBlockIndex(blockID); idx >= 0 {
 		state.allBlocks = append(state.allBlocks[:idx], state.allBlocks[idx+1:]...)
+		// Indices shift for every later block; rebuild the map rather than
+		// maintain it decrementally — removals are rare.
+		state.indexByID = buildDeferredBlockIndex(state.allBlocks)
 	}
 	if metaIdx := m.startupDeferredTranscriptMetaIndex(blockID); metaIdx >= 0 {
 		state.blockMeta = append(state.blockMeta[:metaIdx], state.blockMeta[metaIdx+1:]...)
+		delete(state.metaSigs, blockID)
 	}
 	m.syncStartupDeferredTranscriptWindowToViewport()
 }
@@ -327,6 +394,11 @@ func (m *Model) syncStartupDeferredTranscriptAfterViewportAppend() {
 	}
 	clone := cloneBlockForDeferredSource(block)
 	state.allBlocks = append(state.allBlocks, clone)
+	if state.indexByID == nil {
+		state.indexByID = buildDeferredBlockIndex(state.allBlocks)
+	} else {
+		state.indexByID[clone.ID] = len(state.allBlocks) - 1
+	}
 	state.blockMeta = append(state.blockMeta, startupDeferredMetaForBlock(clone, m.startupDeferredMetaWidth()))
 	state.anchorBlockID = block.ID
 	wasShowingTail := state.windowEnd >= len(state.allBlocks)-1
