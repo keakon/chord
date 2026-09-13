@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/keakon/chord/internal/convformat"
 	"github.com/keakon/chord/internal/imageutil"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
 )
 
 type attachmentReadyMsg struct {
@@ -66,7 +68,7 @@ type shellBangResultMsg struct {
 
 func shellBangCmd(workDir, userLine, bashLine, agentID string, blockID int) tea.Cmd {
 	return func() tea.Msg {
-		out, err := runBangShell(workDir, bashLine)
+		out, err := tools.RunLocalShellCapture(context.Background(), workDir, bashLine)
 		return shellBangResultMsg{userLine: userLine, cmd: bashLine, output: out, err: err, agentID: agentID, blockID: blockID}
 	}
 }

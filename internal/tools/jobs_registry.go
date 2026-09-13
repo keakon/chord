@@ -143,9 +143,10 @@ func (r *JobRegistry) maybePruneJobLogs(dir string) {
 	pruneJobLogs(dir)
 }
 
-// jobWaitDelay bounds how long cmd.Wait keeps draining a job's I/O after the
-// job's own process has exited (see cmd.WaitDelay in start).
-const jobWaitDelay = 3 * time.Second
+// commandWaitDelay bounds how long cmd.Wait keeps draining a command's I/O
+// after the command's own process has exited (see cmd.WaitDelay in start and
+// RunLocalShellCapture).
+const commandWaitDelay = 3 * time.Second
 
 func (r *JobRegistry) start(ctx context.Context, req jobStartRequest) (*job, error) {
 	// The sweep does directory I/O outside r.mu so it cannot block concurrent
@@ -211,7 +212,7 @@ func (r *JobRegistry) start(ctx context.Context, req jobStartRequest) (*job, err
 	// stderr open forever, and cmd.Wait would block on their EOF past every
 	// grace period. WaitDelay bounds that wait to an already-terminal process;
 	// run maps the abandoned-I/O error back to the recorded exit status.
-	cmd.WaitDelay = jobWaitDelay
+	cmd.WaitDelay = commandWaitDelay
 	if req.Workdir != "" {
 		cmd.Dir = req.Workdir
 	}

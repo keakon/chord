@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -26,9 +25,7 @@ import (
 )
 
 const (
-	headlessLocalShellTimeout  = 120 * time.Second
-	headlessLocalShellMaxBytes = 512 * 1024
-	headlessStdinMaxLineBytes  = 1024 * 1024
+	headlessStdinMaxLineBytes = 1024 * 1024
 )
 
 type headlessStdinLine struct {
@@ -1089,24 +1086,6 @@ func headlessCurrentRole(backend headlessBackend, state *headlessState) string {
 	return role
 }
 
-func runHeadlessLocalShell(ctx context.Context, command string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, headlessLocalShellTimeout)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "bash", "-c", command)
-	// tools.TailBuffer keeps the newest output, so a long local command's
-	// failure at the end is not the part that gets dropped.
-	buf := tools.NewTailBuffer(headlessLocalShellMaxBytes)
-	cmd.Stdout = buf
-	cmd.Stderr = buf
-	err := cmd.Run()
-	out := buf.String()
-	if err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return out, fmt.Errorf("timed out after %ds", int(headlessLocalShellTimeout/time.Second))
-	}
-	return out, err
-}
-
 func emitHeadlessLocalShellResult(out *stdoutWriter, command, output string, err error) {
 	payload := map[string]any{
 		"command": command,
@@ -1169,7 +1148,7 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 			emitHeadlessLocalShellResult(out, command, "", fmt.Errorf("empty local shell command"))
 			return
 		}
-		output, err := runHeadlessLocalShell(context.Background(), command)
+		output, err := tools.RunLocalShellCapture(context.Background(), "", command)
 		emitHeadlessLocalShellResult(out, command, output, err)
 
 	case "send":

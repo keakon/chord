@@ -31,6 +31,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - The `/role status` and `/models status` reports render one entry per line; the card's Markdown renderer used to reflow the indented lines into a single paragraph.
 - Running `/mcp`, `/mcp status`, or `/mcp enable` / `/mcp disable` no longer leaves an echoed `USER` card in the transcript; these commands now route like the other local slash commands and report without starting a turn.
 - A local shell command whose output outgrows the capture cap keeps its newest output, the same tail the `shell` tool keeps: the TUI's `!` command and the headless local shell both used a capture that stopped at the cap and dropped everything after it, so a long command's failure at the end — the part worth reading — was the part that got dropped.
+- A `!` command or a headless `local_shell` command that daemonizes a process holding the output pipe no longer hangs its caller forever: the deadline terminates the whole process group, and the pipe drain is bounded so the command always returns with the shell's own exit status.
+- A re-delivered background result keeps updating its existing card after a transcript rebuild instead of appending a duplicate, matching how the live path matches re-deliveries by durable identity.
 
 ## 0.8.0 - 2026-09-11
 

@@ -1,9 +1,12 @@
 package tui
 
 import (
+	"context"
 	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/keakon/chord/internal/tools"
 )
 
 func TestRunBangShell(t *testing.T) {
@@ -11,7 +14,7 @@ func TestRunBangShell(t *testing.T) {
 		t.Skip("bash not in PATH")
 	}
 	dir := t.TempDir()
-	out, err := runBangShell(dir, "echo chord-bang-test")
+	out, err := tools.RunLocalShellCapture(context.Background(), dir, "echo chord-bang-test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,7 +27,7 @@ func TestRunBangShellExitErrorStillCapturesOutput(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not in PATH")
 	}
-	out, err := runBangShell(t.TempDir(), "echo out; exit 42")
+	out, err := tools.RunLocalShellCapture(context.Background(), t.TempDir(), "echo out; exit 42")
 	if err == nil {
 		t.Fatal("expected error for exit 42")
 	}
@@ -43,10 +46,10 @@ func TestRunBangShellKeepsTheNewestOutput(t *testing.T) {
 	if _, err := exec.LookPath("yes"); err != nil {
 		t.Skip("yes not in PATH")
 	}
-	// Well past shellBangMaxBytes, with a marker at the very end.
-	out, err := runBangShell(t.TempDir(), "yes x | head -c 600000; printf END_MARKER")
+	// Well past the capture cap, with a marker at the very end.
+	out, err := tools.RunLocalShellCapture(context.Background(), t.TempDir(), "yes x | head -c 600000; printf END_MARKER")
 	if err != nil {
-		t.Fatalf("runBangShell: %v", err)
+		t.Fatalf("RunLocalShellCapture: %v", err)
 	}
 	if !strings.Contains(out, "END_MARKER") {
 		t.Fatalf("captured output dropped the newest bytes (len=%d)", len(out))

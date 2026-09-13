@@ -17,6 +17,7 @@ import (
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
+	"github.com/keakon/chord/internal/tools"
 )
 
 // ---------------------------------------------------------------------------
@@ -3057,10 +3058,10 @@ func TestRunHeadlessLocalShellKeepsTheNewestOutput(t *testing.T) {
 	if _, err := exec.LookPath("yes"); err != nil {
 		t.Skip("yes not in PATH")
 	}
-	// Well past headlessLocalShellMaxBytes, with a marker at the very end.
-	out, err := runHeadlessLocalShell(context.Background(), "yes x | head -c 600000; printf END_MARKER")
+	// Well past the capture cap, with a marker at the very end.
+	out, err := tools.RunLocalShellCapture(context.Background(), "", "yes x | head -c 600000; printf END_MARKER")
 	if err != nil {
-		t.Fatalf("runHeadlessLocalShell: %v", err)
+		t.Fatalf("RunLocalShellCapture: %v", err)
 	}
 	if !strings.Contains(out, "END_MARKER") {
 		t.Fatalf("captured output dropped the newest bytes (len=%d)", len(out))
