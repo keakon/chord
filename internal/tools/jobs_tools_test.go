@@ -340,3 +340,26 @@ func TestJobListShowsExactlyAccessibleJobs(t *testing.T) {
 		t.Fatalf("job_list(anonymous) = %q, want no jobs", out)
 	}
 }
+
+func TestDetachedJobNotifiesAfterOwnerContextCancellation(t *testing.T) {
+	resetJobRegistryOnlyForTest(t)
+	t.Cleanup(func() { StopAllJobsForShutdown() })
+	sender := &recordingEventSender{ch: make(chan any, 1)}
+	ctx, cancel := context.WithCancel(WithEventSender(jobTestCtx(), sender))
+	if _, err := ExecuteJobForTest(ctx, "sleep 0.1; printf done", "context cancellation", nil); err != nil {
+		t.Fatalf("ExecuteJobForTest: %v", err)
+	}
+	cancel()
+	select {
+	case payload := <-sender.ch:
+		finished, ok := payload.(*JobFinishedPayload)
+		if !ok {
+			t.Fatalf("payload type = %T, want *JobFinishedPayload", payload)
+		}
+		if finished.Status != "completed (exit code 0)" {
+			t.Fatalf("finished status = %q, want completed status", finished.Status)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for completion after owner context cancellation")
+	}
+}

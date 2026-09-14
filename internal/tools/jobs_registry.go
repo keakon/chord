@@ -64,6 +64,7 @@ type job struct {
 	ID            string
 	AgentID       string
 	SessionDir    string
+	eventSender   EventSender
 	Command       string
 	Description   string
 	LogFile       string
@@ -204,6 +205,7 @@ func (r *JobRegistry) start(ctx context.Context, req jobStartRequest) (*job, err
 		ID:          id,
 		AgentID:     AgentIDFromContext(ctx),
 		SessionDir:  jobSessionDir,
+		eventSender: EventSenderFromContext(ctx),
 		Command:     req.Command,
 		Description: req.Description,
 		LogFile:     logPath,
@@ -244,15 +246,15 @@ func (r *JobRegistry) start(ctx context.Context, req jobStartRequest) (*job, err
 	r.jobs[id] = j
 	r.mu.Unlock()
 
-	go r.run(ctx, j)
+	go r.run(j)
 	log.Debugf("job started id=%v command=%v max_runtime_sec=%v detached=%v agent_id=%v", id, req.Command, j.MaxRuntimeSec, req.Detached, j.AgentID)
 	return j, nil
 }
 
-func (r *JobRegistry) run(ctx context.Context, j *job) {
+func (r *JobRegistry) run(j *job) {
 	cmd := j.cmd
 	if err := cmd.Start(); err != nil {
-		r.finish(ctx, j, jobStatusFailed, "failed to start", fmt.Errorf("starting command: %w", err))
+		r.finish(j, jobStatusFailed, "failed to start", fmt.Errorf("starting command: %w", err))
 		return
 	}
 
@@ -304,13 +306,13 @@ func (r *JobRegistry) run(ctx context.Context, j *job) {
 			err = fmt.Errorf("%w\n%s", err, shellTimeoutGuidance)
 		}
 	}
-	r.finish(ctx, j, status, detail, err)
+	r.finish(j, status, detail, err)
 }
 
 // finish records the terminal state, wakes any waiter, and delivers the
 // completion notification when the job completed while detached. Detaching and
 // finishing share j.mu, so a job cannot both complete as foreground and notify.
-func (r *JobRegistry) finish(ctx context.Context, j *job, status jobStatus, detail string, exitErr error) {
+func (r *JobRegistry) finish(j *job, status jobStatus, detail string, exitErr error) {
 	j.mu.Lock()
 	if j.finished {
 		j.mu.Unlock()
@@ -330,7 +332,7 @@ func (r *JobRegistry) finish(ctx context.Context, j *job, status jobStatus, deta
 	if !notify {
 		return
 	}
-	sender := EventSenderFromContext(ctx)
+	sender := j.eventSender
 	if sender == nil {
 		// A detached job that finished without a sender would silently lose its
 		// result, and the model would wait forever on a notification that can
