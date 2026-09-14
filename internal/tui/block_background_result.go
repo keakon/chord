@@ -150,6 +150,11 @@ func parseBackgroundResult(raw string) parsedBackgroundResult {
 			parsed.description = value
 			continue
 		}
+		// Description and Kind are the removed spawn tool's field names. The
+		// header matcher no longer recognizes a legacy headline, so such a
+		// record loses its id, but its fields still parse: a session archived
+		// before the job registry landed keeps folding to a useful summary
+		// instead of a raw "Background job" line.
 		if value, ok := cutBackgroundResultField(trimmed, "Description:"); ok {
 			parsed.description = value
 			continue

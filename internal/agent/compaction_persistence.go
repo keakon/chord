@@ -554,6 +554,11 @@ func (a *MainAgent) rewriteSessionAfterCompaction(index int, messages []message.
 	a.installRecoveryManager(rm)
 	if a.usageLedger != nil {
 		firstUser := ""
+		// Deliberately the raw user role, not IsUserAuthored: this records the
+		// head of the *rewritten* history, which after a compaction is the
+		// summary card — the ledger marks that separately with
+		// FirstUserMessageIsCompactionSummary. The originalFirstUser scan above
+		// is the one that must skip synthetic messages.
 		for _, msg := range messages {
 			if msg.Role == message.RoleUser {
 				firstUser = message.UserPromptPlainText(msg)

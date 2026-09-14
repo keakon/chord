@@ -23,6 +23,7 @@
 - 运行期通知卡可折叠成徽标行：`LOOP NOTICE` / `LOOP CONTINUE`、`REPLY RESUMED` 和上下文压力卡片（`CONTEXT PRESSURE`、`COMPACT WARNING`、`COMPACT IMMINENT`）默认收起，只显示 `LOOP CONTINUE #2 ▸` 这样的徽标行，按 `Space`、`Enter` 或 `o` 展开全文。通用 `NOTICE` 默认展开，因为它承载命令回复（`/role status`、`/models status`、`/mcp status`）和运行期诊断，需要时可折叠成同样的徽标行。正文本身只有一行时不再显示标记，也不能折叠；子代理回报卡继续完整显示消息原文。
 - 新增 `compat.chat_completions.keep_reasoning_effort` 选项：回放的 assistant tool call 不带 `reasoning_content` 时，仍在本回合全程保留 `reasoning_effort` 和 reasoning 请求覆盖项。对接受 reasoning 控制、但没有 reasoning 回放契约的端点（例如走 Chat Completions 线路的 Grok），按请求设置的 effort 现在能在多请求回合里全程生效，而不是只作用于第一个请求。
 - setup wizard 为 Gemini 端点生成的起始模型从 `gemini-3.5-flash` 换成 `gemini-3.8-flash`（1M 上下文、最大 64K 输出）。
+- 模型驱动的上下文重置现在会重新载入 `compact_context` `state_files` 所列文件的有界开头，续接的上下文因此直接拿到真正承载恢复状态的笔记与计划文档，而不只是它们的路径。这一条取代 0.8.0 中「`state_files` 只是路径引用、永不读取」的说法：只有本会话已经读过或写过、且 `read` 权限规则当前仍解析为 `allow` 的路径才会被重新载入——`ask` 规则绝不会被静默放行——因此重置既不会扩大模型本就能触达的范围，也不会打开它从未接触过的文件。可载入范围为 `.chord/notes/` 与 `.chord/plans/`；memory 记录、会话归档与 trace 仍被过滤。`state_files` 为空依然合法。
 
 ### 修复
 
