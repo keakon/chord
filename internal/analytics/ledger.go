@@ -106,6 +106,11 @@ type UsageLedger struct {
 	// file caches the open usage.jsonl handle; guarded by mu. Dropped and
 	// reopened on write errors.
 	file *os.File
+	// closed records that the owner released this ledger (session switch or
+	// restore). Late writers legitimately still reach it — a walltime segment
+	// holds the ledger it started under — so appends keep working, but the
+	// handle is no longer cached: nothing would ever close it again.
+	closed bool
 }
 
 // NewUsageLedger creates a ledger bound to one session directory.
@@ -402,6 +407,7 @@ func (l *UsageLedger) Close() {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.closed = true
 	if l.file != nil {
 		l.file.Close()
 		l.file = nil
@@ -467,6 +473,19 @@ func (l *UsageLedger) AppendEvent(event UsageEvent) error {
 // instead of an EnsureDir walk plus open/write/close per event. Callers must
 // hold l.mu.
 func (l *UsageLedger) appendLedgerLineLocked(data []byte) error {
+	if l.closed {
+		// Released ledger: open, write, close. Caching the handle here would
+		// leak it, since the owner has already run its only Close.
+		f, err := privatefs.OpenFile(l.sessionDir, l.usagePath(), os.O_CREATE|os.O_WRONLY|os.O_APPEND)
+		if err != nil {
+			return fmt.Errorf("open usage ledger: %w", err)
+		}
+		defer f.Close()
+		if _, err := f.Write(data); err != nil {
+			return fmt.Errorf("append usage ledger: %w", err)
+		}
+		return nil
+	}
 	if l.file == nil {
 		f, err := privatefs.OpenFile(l.sessionDir, l.usagePath(), os.O_CREATE|os.O_WRONLY|os.O_APPEND)
 		if err != nil {

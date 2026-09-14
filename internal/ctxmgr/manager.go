@@ -335,6 +335,12 @@ func (m *Manager) RepairOrphanToolMessagesInPlace() int {
 	m.contextBytes = messageContextBytes(repaired)
 	m.calibrationInputTokens = 0
 	m.calibrationContextBytes = 0
+	// Every other path that replaces m.messages wholesale rebuilds the index.
+	// Today the repair only drops tool-role messages, so the declared-call set
+	// is unchanged — but that is a property of RepairOrphanToolResults, not of
+	// this function, and the index is the one piece of state that goes silently
+	// wrong rather than loudly.
+	m.rebuildToolCallIDIndexLocked()
 	if len(repaired) == 0 {
 		m.lastInputTokens = 0
 		m.lastTotalContextTokens = 0
