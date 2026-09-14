@@ -183,6 +183,7 @@ func (v CompactContextValidator) ParseCompactContextArgs(raw json.RawMessage) (C
 		return CompactContextArgs{}, fmt.Errorf("validate planned_state_files: %w", err)
 	}
 	args.PlannedStateFiles = plannedStateFiles
+	args.PlannedStateFiles = removeRegisteredStateFiles(args.PlannedStateFiles, args.StateFiles)
 	if args.EvidenceRefs, err = validateCompactContextList(args.EvidenceRefs, 24, "evidence_refs"); err != nil {
 		return CompactContextArgs{}, err
 	}
@@ -281,6 +282,23 @@ func (v CompactContextValidator) ParseCompactContextArgs(raw json.RawMessage) (C
 		return CompactContextArgs{}, fmt.Errorf("continuation state exceeds the token budget (estimated_cost=%d, budget=%d)%s; shorten %s and retry", cost, limit, largest, strings.Join(shorten, "/"))
 	}
 	return args, nil
+}
+
+func removeRegisteredStateFiles(planned, registered []string) []string {
+	if len(planned) == 0 || len(registered) == 0 {
+		return planned
+	}
+	seen := make(map[string]struct{}, len(registered))
+	for _, path := range registered {
+		seen[path] = struct{}{}
+	}
+	kept := planned[:0]
+	for _, path := range planned {
+		if _, exists := seen[path]; !exists {
+			kept = append(kept, path)
+		}
+	}
+	return kept
 }
 
 // maxCompactContextClaims caps how many claims claim_evidence and claim_kinds
