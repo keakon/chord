@@ -1614,6 +1614,12 @@ func stableReductionMessageEquivalent(a, b *message.Message) bool {
 			!bytes.Equal(ap.Data, bp.Data) {
 			return false
 		}
+		// The shape hash folds in DataBytes for a part whose payload is not
+		// inlined, so the equality check has to as well or it would claim
+		// equality the hash denies.
+		if len(ap.Data) == 0 && ap.DataBytes != bp.DataBytes {
+			return false
+		}
 	}
 	return true
 }
@@ -2299,6 +2305,14 @@ func cloneMessageSliceForRequestShape(messages []message.Message) []message.Mess
 // deep-copies messages per target before any mutation
 // (modelcompat.NormalizeForTarget), and every stored-prefix consumer treats it
 // as read-only — so an in-place edit cannot leak into storage.
+//
+// "Field-equal" is stableReductionMessageEquivalent, which compares the
+// reduction shape: the role, content, tool calls, provenance and parts the
+// shape hash covers. Bookkeeping fields outside that set — FileState,
+// LSPReviews, ToolPayload, ToolNotes, Usage, StopReason, MCPTools — are not
+// compared, so a shared message keeps the values the previous stored copy had.
+// That holds because ctxmgr messages are not rewritten after append; a future
+// field that does change in place must either join the shape or force a clone.
 func cowRequestShapeSlice(previous, prepared []message.Message) []message.Message {
 	if len(prepared) == 0 {
 		return nil
