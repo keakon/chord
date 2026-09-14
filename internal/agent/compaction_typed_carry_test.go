@@ -288,13 +288,21 @@ func TestMergeTypedStateListDeduplicatesAcrossGenerations(t *testing.T) {
 	}
 }
 
-func TestMergeTypedStateListDeduplicatesWhitespaceAndTerminalPunctuation(t *testing.T) {
-	merged, omitted := mergeTypedStateList(nil, []string{"  decision one。", "decision one", "decision two!"}, typedStateCarryMaxDecisions)
+func TestMergeTypedStateListDeduplicatesWhitespace(t *testing.T) {
+	merged, omitted := mergeTypedStateList(nil, []string{"  decision one  ", "decision one", "decision two"}, typedStateCarryMaxDecisions)
 	if omitted != 0 {
 		t.Fatalf("omitted = %d, want 0", omitted)
 	}
-	if len(merged) != 2 || merged[0] != "  decision one。" || merged[1] != "decision two!" {
+	if len(merged) != 2 || merged[0] != "  decision one  " || merged[1] != "decision two" {
 		t.Fatalf("merged = %q, want the first presentation of each distinct item", merged)
+	}
+}
+
+func TestRemoveCheckpointItemsDropsOnlyCompletedDuplicates(t *testing.T) {
+	items := []string{"done item", "still open", "Done item."}
+	kept := removeCheckpointItems(items, []string{"done item"})
+	if len(kept) != 2 || kept[0] != "still open" || kept[1] != "Done item." {
+		t.Fatalf("kept = %q, want only exact normalized duplicate removed", kept)
 	}
 }
 

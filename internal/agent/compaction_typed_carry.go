@@ -332,9 +332,6 @@ func truncateRunes(s string, n int) string {
 // growing the list without bound. The returned lists are item-bounded, so the
 // readable sections and the machine typed block carry exactly the same text.
 func mergeCheckpointTypedStates(prior, current checkpointTypedState) (merged checkpointTypedState, omitted int, claimsOmitted int) {
-	if len(prior.Decisions) == 0 && len(prior.OpenIssues) == 0 && len(prior.EvidenceRefs) == 0 && len(prior.Claims) == 0 && prior.StageID == "" && prior.StageStatus == "" && prior.Kind == "" {
-		return mergeCheckpointTypedStatesWithoutPrior(current)
-	}
 	var dropped int
 	merged.Decisions, dropped = mergeTypedStateList(prior.Decisions, current.Decisions, typedStateCarryMaxDecisions)
 	omitted += dropped
@@ -373,26 +370,8 @@ func mergeCheckpointTypedStates(prior, current checkpointTypedState) (merged che
 	return merged, omitted, claimsOmitted
 }
 
-func mergeCheckpointTypedStatesWithoutPrior(current checkpointTypedState) (checkpointTypedState, int, int) {
-	var omitted int
-	current.Decisions, omitted = capTypedStateList(current.Decisions, typedStateCarryMaxDecisions)
-	var dropped int
-	current.OpenIssues, dropped = capTypedStateList(current.OpenIssues, typedStateCarryMaxOpenIssues)
-	omitted += dropped
-	current.EvidenceRefs, dropped = capTypedStateList(current.EvidenceRefs, typedStateCarryMaxEvidenceRefs)
-	omitted += dropped
-	return current, omitted, 0
-}
-
-func capTypedStateList(items []string, limit int) ([]string, int) {
-	if len(items) <= limit {
-		return items, 0
-	}
-	return items[:limit], len(items) - limit
-}
-
 func checkpointItemKey(item string) string {
-	return strings.TrimRight(strings.TrimSpace(item), "。.!！?？;；:：")
+	return strings.TrimSpace(item)
 }
 
 // mergeTypedClaims merges a carried claim set with a fresh submission. A

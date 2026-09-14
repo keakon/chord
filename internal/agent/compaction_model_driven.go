@@ -1452,9 +1452,12 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 	headSnapshot := snapshot[:headSplit]
 	anchor := resolveLatestUserRequestAnchor(snapshot)
 	constraints := renderEvidenceKindForFallback(&compactionInput{EvidenceItems: bundle.evidenceItems}, evidenceUserCorrection, "- No preserved user constraints.")
-	openIssues := renderModelStateList(req.Args.OpenIssues, "(none reported by the model)")
-	decisions := renderModelStateList(req.Args.Decisions, "(none reported by the model)")
 	completed := renderModelStateList(req.Args.Completed, "(none reported by the model)")
+	// Completed work is the primary readable home for facts that are already
+	// done. Do not repeat an identical item in decisions or open issues; keep
+	// near-matches because they may intentionally describe a different state.
+	decisions := renderModelStateList(removeCheckpointItems(req.Args.Decisions, req.Args.Completed), "(none reported by the model)")
+	openIssues := renderModelStateList(removeCheckpointItems(req.Args.OpenIssues, req.Args.Completed), "(none reported by the model)")
 	stateFiles := renderStateFilesSection(req.Args.StateFiles)
 	plannedStateFiles := renderPlannedStateFilesSection(req.Args.PlannedStateFiles)
 	evidenceRefs := renderEvidenceRefsSection(req.Args.EvidenceRefs)
@@ -1528,6 +1531,23 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 	// history files rather than as a growing verbatim appendix.
 	anchors := buildCompactionAnchors(latestCompactionAnchors(headSnapshot), bundle.originalRequest, bundle.evidenceItems)
 	return withCompactionAnchors(summary, anchors)
+}
+
+func removeCheckpointItems(items, excluded []string) []string {
+	if len(items) == 0 || len(excluded) == 0 {
+		return items
+	}
+	excludedKeys := make(map[string]struct{}, len(excluded))
+	for _, item := range excluded {
+		excludedKeys[checkpointItemKey(item)] = struct{}{}
+	}
+	kept := make([]string, 0, len(items))
+	for _, item := range items {
+		if _, found := excludedKeys[checkpointItemKey(item)]; !found {
+			kept = append(kept, item)
+		}
+	}
+	return kept
 }
 
 // effectiveCheckpointClaims returns the authoritative claim set of a request:
