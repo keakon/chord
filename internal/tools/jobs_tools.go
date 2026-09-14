@@ -44,7 +44,8 @@ func (JobOutputTool) Description() string {
 	return "Read output from a background job started by shell (including a command that exceeded the foreground budget).\n" +
 		"Returns the output produced since the previous read (or since the job started), then a final `[status: ...]` line.\n" +
 		fmt.Sprintf("`wait` selects whether the call blocks: `none` (default) returns whatever is available now, `output` waits until the job writes more output, and `exit` waits until it reaches a terminal state. Every wait is capped at %ds by the runtime; a wait that expires is not an error — the job keeps running, the reply still carries whatever output was produced, and the status line reads `[status: running]`.\n", jobOutputWaitSeconds()) +
-		"Prefer `wait: none` and end your turn when you are not blocked on the result: you are notified when the job finishes, and polling wastes calls. Use `wait: exit` only when you genuinely need the result now.\n" +
+		"Use `wait: none` only for a needed snapshot, not to poll.\n" +
+		jobOutputWaitGuidance + "\n" +
 		"Repeated non-blocking reads that find no new output are flagged as polling and then rejected."
 }
 
@@ -179,12 +180,19 @@ const (
 	jobOutputPollRefuseStreak = 3
 )
 
+// Shared so the description and anti-polling replies cannot give conflicting wait advice.
+const jobOutputWaitGuidance = "Use `wait: output` when the next step needs an output chunk expected within the wait cap; the job may keep running. " +
+	"Use `wait: exit` when the next step needs a terminal result expected within the cap. " +
+	"Renew `wait: output` only while new chunks advance the next step; progress logs alone do not justify renewals when only the final result matters. " +
+	"For your own jobs, do other work or end the turn and await the completion notification instead of repeatedly waiting for a final result. " +
+	"Reading another agent's job does not subscribe you to its completion notification; coordinate with its owner instead."
+
 func jobOutputPollNotice(streak int) string {
-	return fmt.Sprintf("[notice] no new output across %d consecutive non-blocking reads; polling job_output will not produce a result. Do other work or end the turn — the completion notification wakes you — or block with wait: output / wait: exit.", streak)
+	return fmt.Sprintf("[notice] no new output across %d consecutive non-blocking reads; stop polling. %s", streak, jobOutputWaitGuidance)
 }
 
 func jobOutputPollRefusal(j *job, streak int) string {
-	return fmt.Sprintf("Tool call rejected automatically: job %s produced no new output across %d consecutive non-blocking job_output reads. Stop polling: do other work or end the turn and let the completion notification wake you, or block with wait: output / wait: exit.\n[status: %s]", j.ID, streak, j.statusText())
+	return fmt.Sprintf("Tool call rejected automatically: job %s produced no new output across %d consecutive non-blocking job_output reads. Stop polling. %s\n[status: %s]", j.ID, streak, jobOutputWaitGuidance, j.statusText())
 }
 
 // renderJobOutput formats one model-facing read: the cleaned chunk, the

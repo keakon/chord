@@ -458,7 +458,7 @@ func (ShellTool) Parameters() map[string]any {
 			},
 			"yield_ms": map[string]any{
 				"type":        "integer",
-				"description": fmt.Sprintf("Optional foreground budget in milliseconds before the command continues as a background job (max %d, default %d). 0 keeps the command in the foreground until it finishes or hits timeout_ms.", shellMaxYieldMs, ShellDefaultYieldMs),
+				"description": fmt.Sprintf("Optional foreground budget in milliseconds before the command continues as a background job (max %d, default %d). 0 keeps the command in the foreground until it finishes or hits timeout_ms — use it when this turn needs the result and the command fits the foreground deadline; cancelling the turn kills the command.", shellMaxYieldMs, ShellDefaultYieldMs),
 			},
 			"run_in_background": map[string]any{
 				"type":        "boolean",

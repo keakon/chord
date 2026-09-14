@@ -195,13 +195,16 @@ func TestJobListFiltersByOwner(t *testing.T) {
 func TestJobOutputWaitOutputReturnsOnNextWrite(t *testing.T) {
 	resetJobRegistryOnlyForTest(t)
 	t.Cleanup(func() { StopAllJobsForShutdown() })
-	id, err := ExecuteJobForTest(jobTestCtx(), "sleep 0.2; printf 'later'", "wait for output", nil)
+	id, err := ExecuteJobForTest(jobTestCtx(), "sleep 0.2; printf 'later'; sleep 5", "wait for output", nil)
 	if err != nil {
 		t.Fatalf("ExecuteJobForTest: %v", err)
 	}
 	out := runJobOutput(t, map[string]any{"job_id": id, "wait": "output"})
 	if !strings.Contains(out, "later") {
 		t.Fatalf("wait:output = %q, want the output that arrived during the wait", out)
+	}
+	if !strings.Contains(out, "[status: running]") {
+		t.Fatalf("wait:output = %q, want output before the job exits", out)
 	}
 }
 
@@ -284,6 +287,46 @@ func TestJobOutputPollStreakResetsAfterNewOutput(t *testing.T) {
 	after := runJobOutput(t, map[string]any{"job_id": id, "wait": "none"})
 	if strings.Contains(after, "[notice]") || strings.Contains(after, "rejected automatically") {
 		t.Fatalf("read after fresh output = %q, want the streak reset", after)
+	}
+}
+
+func TestJobOutputDescriptionDistinguishesWaitPurposes(t *testing.T) {
+	desc := JobOutputTool{}.Description()
+	for _, want := range []string{
+		"Use `wait: none` only for a needed snapshot, not to poll",
+		"`wait: output` when the next step needs an output chunk expected within the wait cap; the job may keep running",
+		"`wait: exit` when the next step needs a terminal result expected within the cap",
+		"Renew `wait: output` only while new chunks advance the next step",
+		"progress logs alone do not justify renewals when only the final result matters",
+	} {
+		if !strings.Contains(desc, want) {
+			t.Fatalf("description missing %q in %q", want, desc)
+		}
+	}
+}
+
+func TestJobOutputDescriptionLimitsCompletionNotificationsToOwner(t *testing.T) {
+	desc := JobOutputTool{}.Description()
+	for _, want := range []string{
+		"For your own jobs, do other work or end the turn and await the completion notification instead of repeatedly waiting for a final result",
+		"Reading another agent's job does not subscribe you to its completion notification",
+		"coordinate with its owner instead",
+	} {
+		if !strings.Contains(desc, want) {
+			t.Fatalf("description missing %q in %q", want, desc)
+		}
+	}
+}
+
+func TestJobOutputPollMessagesShareWaitGuidance(t *testing.T) {
+	for _, msg := range []string{
+		JobOutputTool{}.Description(),
+		jobOutputPollNotice(jobOutputPollWarnStreak),
+		jobOutputPollRefusal(&job{ID: "job-1", status: jobStatusRunning}, jobOutputPollRefuseStreak),
+	} {
+		if !strings.Contains(msg, jobOutputWaitGuidance) {
+			t.Fatalf("message %q must carry the shared wait guidance %q", msg, jobOutputWaitGuidance)
+		}
 	}
 }
 

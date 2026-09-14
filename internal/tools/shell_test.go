@@ -407,6 +407,14 @@ func TestShellParametersExposeYieldAndBackgroundControls(t *testing.T) {
 	if !strings.Contains(yieldDesc, "default 90000") {
 		t.Fatalf("yield_ms description missing default in %q", yieldDesc)
 	}
+	for _, want := range []string{
+		"use it when this turn needs the result and the command fits the foreground deadline",
+		"cancelling the turn kills the command",
+	} {
+		if !strings.Contains(yieldDesc, want) {
+			t.Fatalf("yield_ms description missing %q in %q", want, yieldDesc)
+		}
+	}
 }
 
 func TestJobKillDescriptionClarifiesLifecycle(t *testing.T) {
