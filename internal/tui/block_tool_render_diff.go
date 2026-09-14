@@ -119,7 +119,10 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 		displayDiff = b.applyPatchDisplayDiff(applyPatchTargets)
 	}
 	hasOperationSummaries := successfulApplyPatch && applyPatchHasSummaryOnlyTargets(applyPatchTargets)
-	filePath := b.diffToolFilePathWithTargets(applyPatchTargets)
+	// filePath is a header display summary ("a → b", "D path", "path +N files"),
+	// which is not a path; syntax highlighting needs the undecorated target so
+	// lexerForFilePath can resolve the real lexer.
+	filePath, syntaxPath := b.diffToolPathsWithTargets(applyPatchTargets)
 	if filePath != "" {
 		filePath = b.displayToolPath(filePath)
 	}
@@ -175,7 +178,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 		}
 		if strings.TrimSpace(displayDiff) == "" && !applyPatchNoChanges && !b.toolResultIsError() && !b.toolResultIsCancelled() &&
 			!applyPatchOnlyMoveOrDeleteTargets(applyPatchTargets) {
-			result = appendApplyPatchPreview(result, b, filePath, cardWidth-4)
+			result = appendApplyPatchPreview(result, b, syntaxPath, cardWidth-4)
 		}
 		if applyPatchNoChanges {
 			result = append(result, toolFieldStandalone(DimStyle, "No changes"))
@@ -189,7 +192,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	// Sample the diff content once; the initial highlighter and every per-file
 	// section highlighter of a multi-file patch share the same sample.
 	diffSample := diffContentSample(displayDiff)
-	hl := ensureCodeHighlighter(&b.codeHL, filePath, diffSample)
+	hl := ensureCodeHighlighter(&b.codeHL, syntaxPath, diffSample)
 	seenHunk := false
 	renderedDiffFileCount := 0
 	var oldLineNum, newLineNum int
@@ -342,7 +345,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 		case tools.NameApplyPatch:
 			sections := splitApplyPatchErrorSections(b.ResultContent)
 			if strings.TrimSpace(displayDiff) == "" {
-				result = appendApplyPatchPreview(result, b, filePath, cardWidth-4)
+				result = appendApplyPatchPreview(result, b, syntaxPath, cardWidth-4)
 				if sections.applied != "" && !hasOperationSummaries {
 					result = append(result, toolFieldSection(ToolResultExpandedStyle, "Applied changes"))
 					result = appendApplyPatchErrorTextLines(result, sections.applied, textWrap)
@@ -357,7 +360,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 		case tools.NameEdit:
 			if strings.TrimSpace(displayDiff) == "" {
 				if hasReplaceArgs {
-					result = appendReplaceEditPreview(result, replaceArgs, filePath, cardWidth-4)
+					result = appendReplaceEditPreview(result, replaceArgs, syntaxPath, cardWidth-4)
 				} else {
 					result = appendEditPatchPreview(result, b.editPatchArgsJSON(), cardWidth-4)
 				}
@@ -618,7 +621,7 @@ func (b *Block) patchPreviewCoalesceWindow() int {
 	return b.patchPreviewLen / patchPreviewCoalesceDivisor
 }
 
-func appendApplyPatchPreview(result []string, b *Block, filePath string, width int) []string {
+func appendApplyPatchPreview(result []string, b *Block, syntaxPath string, width int) []string {
 	argsJSON := b.editPatchArgsJSON()
 	// Sanitize the display copy before splitting it into lines. In particular,
 	// a CR left inside a patch line would be interpreted by the screen renderer
@@ -634,7 +637,7 @@ func appendApplyPatchPreview(result []string, b *Block, filePath string, width i
 	if patch == "" {
 		return result
 	}
-	hl := b.applyPatchPreviewHighlighter(filePath, patch)
+	hl := b.applyPatchPreviewHighlighter(syntaxPath, patch)
 	result = append(result, toolFieldSection(ToolResultExpandedStyle, "Requested patch"))
 	result = append(result, b.appendApplyPatchPreviewLines(patch, width, hl)...)
 	return result
@@ -1054,41 +1057,35 @@ func (b *Block) diffToolFilePath() string {
 	return b.diffToolFilePathWithTargets(b.applyPatchTargets())
 }
 
-// diffToolFilePathWithTargets is the allocation-conscious variant: callers
-// that already parsed the apply_patch targets (renderFileDiffCall) pass them
-// in so the args JSON is not parsed a second time in the same frame.
+// diffToolFilePathWithTargets is the display-only view used by headers, copy
+// and selection output; see diffToolPathsWithTargets for the lexer seed.
 func (b *Block) diffToolFilePathWithTargets(targets []tools.ApplyPatchDisplayTarget) string {
+	displayPath, _ := b.diffToolPathsWithTargets(targets)
+	return displayPath
+}
+
+// diffToolPathsWithTargets is the allocation-conscious variant: callers that
+// already parsed the apply_patch targets (renderFileDiffCall, the streaming card
+// layout) pass them in so the args JSON is not parsed a second time in the same
+// frame. It resolves the header display path and the undecorated syntax path in
+// one pass: the display form ("a → b", "D path", "path +N files") is not a path,
+// and lexerForFilePath resolves any of those to no lexer at all, which silently
+// turns a card's preview into plain text.
+func (b *Block) diffToolPathsWithTargets(targets []tools.ApplyPatchDisplayTarget) (displayPath, syntaxPath string) {
 	if toolNameKey(b.ToolName) == tools.NameApplyPatch {
 		if len(targets) == 0 {
-			var parsed struct {
-				Paths []string `json:"paths"`
-			}
-			var paths []string
-			if json.Unmarshal([]byte(b.Content), &parsed) == nil {
-				paths = parsed.Paths
-			}
+			paths := b.unparsedApplyPatchPaths()
 			if len(paths) == 0 {
-				paths = paramStringList(tolerantToolArgValue(b.Content, "paths"))
+				return "", ""
 			}
-			if len(paths) == 0 {
-				// The card body may still carry the raw streamed patch (freeform
-				// custom-tool input, or a JSON document that has not finished).
-				// Derive the header target from the patch markers directly, so
-				// the header shows a real path while the patch is still arriving.
-				if patch := applyPatchStreamingPreview(b.Content); patch != "" {
-					paths = streamingApplyPatchFilePaths(patch)
-				}
-			}
-			if len(paths) == 0 {
-				return ""
-			}
-			return applyPatchPathSummary(paths[0], len(paths))
+			return applyPatchPathSummary(paths[0], len(paths)), strings.TrimSpace(paths[0])
 		}
+		syntaxPath = applyPatchTargetSyntaxPath(targets[0])
 		marker, path := applyPatchTargetDisplay(targets[0])
 		if marker == "D" {
 			path = marker + " " + path
 		}
-		return applyPatchPathSummary(path, len(targets))
+		return applyPatchPathSummary(path, len(targets)), syntaxPath
 	}
 	if b.ToolName == tools.NameEdit {
 		path := tools.ExtractEditPathFromArgs(json.RawMessage(b.Content))
@@ -1096,18 +1093,54 @@ func (b *Block) diffToolFilePathWithTargets(targets []tools.ApplyPatchDisplayTar
 			path = strings.TrimSpace(tolerantToolArgValue(b.Content, "path"))
 		}
 		if path == "" {
-			return ""
+			return "", ""
 		}
 		// ExtractEditPathFromArgs resolves to an absolute path. Shorten it to a
 		// cwd-relative form so a long absolute prefix (deep tree, long $HOME,
 		// worktree) does not push the file name out of the width-clipped header.
 		// The caller additionally relativizes against displayWorkingDir.
 		if rel := relToProcessWorkingDir(path); rel != "" {
-			return rel
+			return rel, rel
 		}
-		return path
+		return path, path
 	}
-	return strings.TrimSpace(tolerantToolArgValue(b.Content, "path"))
+	path := strings.TrimSpace(tolerantToolArgValue(b.Content, "path"))
+	return path, path
+}
+
+// unparsedApplyPatchPaths resolves the file paths visible while the args cannot
+// yet be read as a complete apply_patch document: the explicit "paths" argument
+// when present, otherwise the markers in the still-streaming patch text.
+func (b *Block) unparsedApplyPatchPaths() []string {
+	var parsed struct {
+		Paths []string `json:"paths"`
+	}
+	var paths []string
+	if json.Unmarshal([]byte(b.Content), &parsed) == nil {
+		paths = parsed.Paths
+	}
+	if len(paths) == 0 {
+		paths = paramStringList(tolerantToolArgValue(b.Content, "paths"))
+	}
+	if len(paths) == 0 {
+		// The card body may still carry the raw streamed patch (freeform
+		// custom-tool input, or a JSON document that has not finished). Derive
+		// the header target from the patch markers directly, so the header shows
+		// a real path while the patch is still arriving.
+		if patch := applyPatchStreamingPreview(b.Content); patch != "" {
+			paths = streamingApplyPatchFilePaths(patch)
+		}
+	}
+	return paths
+}
+
+// applyPatchTargetSyntaxPath picks the path whose content the diff shows: the
+// destination of a move or rename, otherwise the source file.
+func applyPatchTargetSyntaxPath(target tools.ApplyPatchDisplayTarget) string {
+	if target.TargetPath != "" {
+		return target.TargetPath
+	}
+	return target.SourcePath
 }
 
 // streamingApplyPatchFilePaths returns the model-facing file paths mentioned in

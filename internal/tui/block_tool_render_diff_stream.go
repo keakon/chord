@@ -19,6 +19,7 @@ type streamingApplyPatchCardLayout struct {
 	lineStarts  []int
 	patchWidth  int
 	filePath    string
+	syntaxPath  string
 	patchStart  int
 	totalLines  int
 	highlighter *codeHighlighter
@@ -100,7 +101,9 @@ func (b *Block) streamingApplyPatchCardLayout(width int, spinnerFrame string) st
 	toolName := toolNameKey(b.ToolName)
 
 	targets := b.applyPatchTargets()
-	filePath := b.diffToolFilePathWithTargets(targets)
+	// The header path may be a display summary; keep the undecorated target for
+	// the preview's syntax highlighting (see diffToolPathsWithTargets).
+	filePath, syntaxPath := b.diffToolPathsWithTargets(targets)
 	if filePath != "" {
 		filePath = b.displayToolPath(filePath)
 	}
@@ -151,6 +154,7 @@ func (b *Block) streamingApplyPatchCardLayout(width int, spinnerFrame string) st
 		lineStarts: lineStarts,
 		patchWidth: cardWidth - 4,
 		filePath:   filePath,
+		syntaxPath: syntaxPath,
 		patchStart: patchStart,
 		totalLines: total,
 	}
@@ -175,7 +179,7 @@ func (b *Block) renderStreamingApplyPatchRange(width int, spinnerFrame string, s
 	}
 
 	if layout.patch != "" {
-		layout.highlighter = b.applyPatchPreviewHighlighter(layout.filePath, layout.patch)
+		layout.highlighter = b.applyPatchPreviewHighlighter(layout.syntaxPath, layout.patch)
 	}
 	out := make([]string, 0, end-start)
 	contentStart := layout.frame.marginTop + layout.frame.padTop

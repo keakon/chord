@@ -29,6 +29,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- Syntax highlighting no longer disappears from a multi-file `apply_patch` preview while the patch is still streaming. The preview fell back to plain text as soon as the patch mentioned a second file (or a move/rename), and only recovered once the call finished and the card rebuilt its diff.
 - A context compaction no longer clears the composer: images and files you had already pasted, queued messages, and per-agent drafts survive the transcript rebuild that follows a compaction.
 - Tool cards no longer change their expanded/collapsed state after a context compaction or a transcript rebuild. The rebuild used to match each new card against the old card at the same position, but the summary card that replaces the archived head shifts every surviving row, so a card could inherit an unrelated card's fold state — for example, an expanded Edit result came back collapsed. Cards are now matched by their own identity, and rewritten transcripts no longer borrow state from the transcript they replaced.
 - Pressing `Up` in an empty composer recalls user messages only: after a context compaction it no longer fills the box with the summary text, and forking a user card can no longer load the summary either.
