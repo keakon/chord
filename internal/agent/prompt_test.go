@@ -2153,6 +2153,9 @@ func TestModelDrivenContextPromptBlockInjectedWhenEnabled(t *testing.T) {
 		"safe stop",
 		"provisional checkpoint",
 		"only the final response remains",
+		"refresh the notes file before you request a checkpoint",
+		"Read the registered files first after a reset",
+		"Leave state_files empty only when",
 	} {
 		if !strings.Contains(block, want) {
 			t.Fatalf("block must mention %q, got:\n%s", want, block)

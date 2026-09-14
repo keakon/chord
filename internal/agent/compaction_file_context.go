@@ -12,6 +12,8 @@ import (
 
 	"github.com/keakon/chord/internal/filectx"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/permission"
+	"github.com/keakon/chord/internal/tools"
 )
 
 const (
@@ -84,7 +86,7 @@ func (a *MainAgent) refreshCompactionFileRevisions(messages []message.Message) [
 		if !msg.IsCompactionSummary {
 			continue
 		}
-		paths := extractCompactionKeyFiles(msg.Content, a.projectRoot)
+		paths := a.compactionContinuationFiles(msg.Content)
 		msg.CompactionFileRevisions = captureCompactionFileRevisions(paths, a.resolveCheckpointFilePath)
 		break
 	}
@@ -113,6 +115,50 @@ func (a *MainAgent) resolveCheckpointFilePath(path string) string {
 	return filepath.Join(a.projectRoot, filepath.FromSlash(path))
 }
 
+// compactionContinuationFiles is the ordered, de-duplicated file set a
+// continuation re-loads after a checkpoint: the summary's key files plus the
+// state_files the checkpoint registered, filtered to files this session has
+// already read or written and that the read permission rule still allows.
+func (a *MainAgent) compactionContinuationFiles(signature string) []string {
+	if a == nil {
+		return nil
+	}
+	files := extractCompactionKeyFiles(signature, a.projectRoot)
+	declared := extractCompactionStateFiles(signature, a.projectRoot)
+	if len(declared) == 0 {
+		return files
+	}
+	seen := make(map[string]bool, len(files)+len(declared))
+	for _, f := range files {
+		seen[f] = true
+	}
+	for _, rel := range declared {
+		if seen[rel] || !a.stateFileInjectableForRead(a.resolveCheckpointFilePath(rel)) {
+			continue
+		}
+		seen[rel] = true
+		files = append(files, rel)
+	}
+	return files
+}
+
+// stateFileInjectableForRead reports whether the runtime may put a
+// model-declared state file back into the context after a reset. The overlay
+// must never widen what the model could already reach: this session must have
+// already read or written the file (so its content passed the permission gate
+// once) and the read permission rule must still resolve to allow — an ask rule
+// would otherwise turn the overlay into a silent auto-approval.
+func (a *MainAgent) stateFileInjectableForRead(absPath string) bool {
+	if a == nil || absPath == "" {
+		return false
+	}
+	if a.fileTrack == nil || !a.fileTrack.HasSnapshot(absPath, a.instanceID) {
+		return false
+	}
+	action := a.effectiveRuleset().EvaluatePath(tools.NameRead, absPath, a.projectRoot)
+	return normalizeToolPermissionAction(tools.NameRead, action) == permission.ActionAllow
+}
+
 // injectCompactionFileContext inserts the request-local key-file overlay right
 // after the latest compaction checkpoint. It returns the (possibly) extended
 // message list plus the index the overlay was inserted at, or -1 when nothing
@@ -131,7 +177,7 @@ func (a *MainAgent) injectCompactionFileContext(messages []message.Message) ([]m
 	if compactionFileContextAlreadyInjected(messages, checkpointIdx) {
 		return messages, -1
 	}
-	keyFiles := extractCompactionKeyFiles(signature, a.projectRoot)
+	keyFiles := a.compactionContinuationFiles(signature)
 	if len(keyFiles) == 0 {
 		return messages, -1
 	}

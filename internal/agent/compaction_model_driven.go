@@ -1783,15 +1783,23 @@ func stripLeadingHeadingMarkers(line string) string {
 // is a model-declared reference rendered as its own bullet.
 //
 // The model submits these paths as part of its checkpoint; the system treats
-// each as an unverified claim. Existence is not checked at checkpoint time:
-// the compact_context contract says state_files are pure references, never
-// read, injected, or existence-verified, so stamping them would turn a
-// checkpoint request into a cross-permission-boundary existence probe. The
-// continuation must re-read any path with the read tool before relying on it,
-// and a missing file surfaces then.
+// each as an unverified claim and never stats it. Existence is therefore not
+// checked at checkpoint time — stamping it would turn a checkpoint request
+// into a cross-permission-boundary existence probe. What the continuation may
+// re-load is decided later, from the same bullet list: only a file this
+// session already read or wrote, and only while the read permission rule still
+// allows it (see compactionContinuationFiles). Anything else — including a
+// missing file — surfaces when the model reads it with the read tool.
 func renderStateFilesSection(paths []string) string {
 	if len(paths) == 0 {
-		return "- (none reported by the model)\n- Model-declared references only; existence is not verified."
+		// An empty list is legitimate (pure analysis, final delivery, a role
+		// without write tools), so it is never a rejection. The continuation
+		// still gets an actionable line: the checkpoint sections and the
+		// archived history are the whole recovery state, and the next
+		// checkpoint is where a notes/plan file gets registered.
+		return "- (none reported by the model)\n" +
+			"- Model-declared references only; existence is not verified.\n" +
+			"- No durable state file was registered: the continuation must recover from the sections above and the archived history. If this workstream has (or should have) a notes or plan file, write it and register it at the next checkpoint so the continuation can re-read it instead of re-deriving it."
 	}
 	var sb strings.Builder
 	sb.WriteString("- Model-declared references only; existence is not verified. Use the read tool to load any path before relying on it:\n")

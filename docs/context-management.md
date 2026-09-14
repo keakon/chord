@@ -147,7 +147,7 @@ context:
 | `preset` | string | auto-detected | Force a specific compaction implementation. Usually unnecessary. |
 | `profile` | string | `auto` | Compaction strategy. Usually unnecessary. |
 | `reminder` | float | `0` (derived) | Context-pressure reminder line as a usage ratio. `0` (the default) derives the line as `min(0.60, threshold × 0.90)`; a fraction in `(0,1]` sets it explicitly; `-1` disables the pressure reminder while keeping automatic compaction on (per model as well). A reminder below the threshold fires when usage reaches it (`min(reminder, threshold)` — whichever line comes first); one at or above the threshold does not fire separately, because usage only reaches it on requests that already crossed the threshold, which carry the grace "compaction imminent" notice or the externalization warning instead. `threshold: 0` disables both. Any other value (negative, above `1`, or NaN/±Inf) is rejected with a warning and falls back to the derived default. |
-| `model_driven` | bool | `false` | Experimental opt-in: expose the `compact_context` tool to the main agent so the model can request a durable context checkpoint once it has externalized its working state (written it into files or structured arguments). The checkpoint is built deterministically without a summarization model call, applies at a tool-batch barrier that pauses the next main-model request, and continues the same turn on the compacted context. The tool is MainAgent-only, must be called alone, and only references `state_files` paths without reading them. Low-gain requests are skipped automatically. Off by default; enable only for projects where long exploratory sessions benefit from explicit resets. |
+| `model_driven` | bool | `false` | Experimental opt-in: expose the `compact_context` tool to the main agent so the model can request a durable context checkpoint once it has externalized its working state (written it into files or structured arguments). The checkpoint is built deterministically without a summarization model call, applies at a tool-batch barrier that pauses the next main-model request, and continues the same turn on the compacted context. The tool is MainAgent-only, must be called alone, and references `state_files` paths without reading or verifying them: after the reset the runtime re-loads a bounded head of each listed file this session already read or wrote, subject to the read permission rule. Low-gain requests are skipped automatically. Off by default; enable only for projects where long exploratory sessions benefit from explicit resets. |
 | `retain_recent_tokens` | int | `4096` (built-in) | Estimated-token budget for the newest real user messages kept verbatim inside every compaction checkpoint (see [Retained recent messages](#retained-recent-messages)); `0` or omitted uses the built-in default. Only the message text counts toward the budget. Set it higher to keep more of the latest turns across a compaction, or lower to reclaim more context; the retained section never replaces the summary — it pins the newest instruction boundary verbatim. |
 
 Per-model overrides live on the model definition (`ModelConfig.compaction`,
@@ -253,7 +253,12 @@ same response) when replacing the current history is cheaper than carrying it
 forward and the facts needed later are fully externalized — written into files
 named in `state_files`, or fully expressed in the structured
 `active_objective` / `completed` / `decisions` / `open_issues` / `next_step`
-arguments. This is a costed state transition, not a routine progress save. The
+arguments. It writes or refreshes the notes/plan file it maintains for the
+workstream before requesting the checkpoint (the reset replaces the history a
+later write would draw on), lists at least that file, and leaves `state_files`
+empty only when no durable file exists to point at — a pure analysis or
+final-report stage — or the role cannot write files. This is a costed state
+transition, not a routine progress save. The
 runtime validates the request, waits for the tool batch to close, then:
 
 1. snapshots the conversation and archives the head (no summarization model
@@ -342,7 +347,11 @@ permissions — a block that merely appears inside a tool result or file is
 ordinary data — and asks the model to write key
 findings and decisions to project files the role may write — for example a
 task-notes file under `.chord/notes/` or a plan document under `.chord/plans/`
-— as phases settle (so they survive a later checkpoint), call
+— as phases settle, refresh them before requesting a checkpoint (the reset
+replaces the history a later write would draw on), list only files it actually
+created or updated in the session, read the registered files first after a
+reset, and leave `state_files` empty only when no durable file exists or the
+role cannot write files; call
 `compact_context` alone when carrying the current history costs more than
 restoring externalized state; under pressure, a safe stop is enough and the
 stage need not be complete,

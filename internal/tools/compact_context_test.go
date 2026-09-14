@@ -499,6 +499,38 @@ func TestCompactContextDescriptionExplainsPressureAwareSafeStops(t *testing.T) {
 	}
 }
 
+// An empty state_files list stays valid (pure analysis, final delivery, or a
+// role without write tools), so the contract must state when it is the right
+// answer instead of leaving the model to infer it from a rejection it cannot
+// afford on the checkpoint's critical path.
+func TestCompactContextStatesWhenStateFilesMayBeEmpty(t *testing.T) {
+	tool := NewCompactContextTool(testCompactValidator())
+	description := tool.Description()
+	for _, want := range []string{
+		"list at least that file",
+		"leave state_files empty only when no durable file exists",
+		"your role cannot write files",
+	} {
+		if !strings.Contains(description, want) {
+			t.Fatalf("description must mention %q, got:\n%s", want, description)
+		}
+	}
+	properties, ok := tool.Parameters()["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("Parameters() must expose a properties object")
+	}
+	stateFiles, ok := properties["state_files"].(map[string]any)
+	if !ok {
+		t.Fatal("Parameters() must declare state_files")
+	}
+	schema, _ := stateFiles["description"].(string)
+	for _, want := range []string{"Prefer at least one entry", "leave it empty only when no such file exists"} {
+		if !strings.Contains(schema, want) {
+			t.Fatalf("state_files schema must mention %q, got:\n%s", want, schema)
+		}
+	}
+}
+
 // Claim keys are normalized the same way in claim_evidence and claim_kinds.
 // claim_evidence keys have always been trimmed, so a padded claim_kinds key
 // used to survive untouched and drift apart from its claim_evidence twin —

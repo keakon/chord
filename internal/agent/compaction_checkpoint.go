@@ -408,11 +408,14 @@ func compactionSummaryBody(content string) string {
 }
 
 func compactionFilesAndEvidenceSection(summaryContent string) string {
+	return compactionHeadingSection(summaryContent, "## Files and Evidence")
+}
+
+func compactionHeadingSection(summaryContent, heading string) string {
 	body := compactionSummaryBody(summaryContent)
 	if body == "" {
 		return ""
 	}
-	const heading = "## Files and Evidence"
 	start := strings.Index(body, heading)
 	if start < 0 {
 		return ""
@@ -426,7 +429,24 @@ func compactionFilesAndEvidenceSection(summaryContent string) string {
 }
 
 func extractCompactionKeyFiles(summaryContent, projectRoot string) []string {
-	section := compactionFilesAndEvidenceSection(summaryContent)
+	return extractCompactionPathBullets(compactionFilesAndEvidenceSection(summaryContent), projectRoot, false)
+}
+
+// extractCompactionStateFiles reads the state_files a checkpoint registered
+// from its Externalized State section. These are model-declared references
+// (CompactContextArgs.StateFiles), so unlike the key-file list a continuation
+// may re-load them after the reset — including the .chord/notes and
+// .chord/plans documents the key-file list filters out as harness-internal.
+func extractCompactionStateFiles(summaryContent, projectRoot string) []string {
+	return extractCompactionPathBullets(compactionHeadingSection(summaryContent, "## Externalized State"), projectRoot, true)
+}
+
+// extractCompactionPathBullets parses one path per "- " bullet, dropping the
+// section's own prose: the boilerplate lines carry ": " and fail path
+// normalization. With allowNotesRoots set, agent-owned .chord/notes and
+// .chord/plans documents are accepted; the rest of the .chord/ tree stays
+// filtered as harness-internal.
+func extractCompactionPathBullets(section, projectRoot string, allowNotesRoots bool) []string {
 	if strings.TrimSpace(section) == "" {
 		return nil
 	}
@@ -441,7 +461,7 @@ func extractCompactionKeyFiles(summaryContent, projectRoot string) []string {
 		line = strings.Trim(line, "`")
 		line = strings.TrimRight(line, ".,;:!?)]}>\"'，。；：！？）】》」』’”")
 		line = strings.TrimPrefix(line, "@")
-		path := normalizeCheckpointFilePath(line, projectRoot)
+		path := normalizeCheckpointPath(line, projectRoot, allowNotesRoots)
 		if path == "" || seen[path] {
 			continue
 		}
@@ -452,6 +472,10 @@ func extractCompactionKeyFiles(summaryContent, projectRoot string) []string {
 }
 
 func normalizeCheckpointFilePath(path, projectRoot string) string {
+	return normalizeCheckpointPath(path, projectRoot, false)
+}
+
+func normalizeCheckpointPath(path, projectRoot string, allowNotesRoots bool) string {
 	path = strings.TrimSpace(path)
 	if path == "" || projectRoot == "" {
 		return ""
@@ -472,7 +496,7 @@ func normalizeCheckpointFilePath(path, projectRoot string) string {
 		return ""
 	}
 	rel := filepath.ToSlash(candidate)
-	if strings.HasPrefix(rel, ".chord/") {
+	if strings.HasPrefix(rel, ".chord/") && !(allowNotesRoots && isCompactionNotesPath(rel)) {
 		return ""
 	}
 	info, err := os.Stat(filepath.Join(projectRoot, candidate))
@@ -480,6 +504,13 @@ func normalizeCheckpointFilePath(path, projectRoot string) string {
 		return ""
 	}
 	return rel
+}
+
+// isCompactionNotesPath reports whether a .chord/-internal path is one of the
+// agent-owned note or plan documents a continuation may re-load. Everything
+// else under .chord/ (memory records, session archives, traces) stays out.
+func isCompactionNotesPath(rel string) bool {
+	return strings.HasPrefix(rel, ".chord/notes/") || strings.HasPrefix(rel, ".chord/plans/")
 }
 
 func extractCompactionKeyFileCandidates(messages []message.Message, projectRoot string, limit int) []string {

@@ -37,6 +37,18 @@ func TestStateFilesSectionEmptyFallback(t *testing.T) {
 	if !strings.Contains(section, "none reported") {
 		t.Fatalf("empty state_files must render a fallback marker:\n%s", section)
 	}
+	// An empty list is legitimate, so the fallback is actionable rather than a
+	// rejection: it names where the continuation's state lives and points at
+	// the next checkpoint as the place to register a notes/plan file.
+	if !strings.Contains(section, "register it at the next checkpoint") {
+		t.Fatalf("empty state_files must tell the continuation how to close the gap:\n%s", section)
+	}
+	// The nudge belongs to the empty case only; a registered reference must
+	// not carry it.
+	registered := renderStateFilesSection([]string{"notes/current.md"})
+	if strings.Contains(registered, "register it at the next checkpoint") {
+		t.Fatalf("a non-empty state_files section must not carry the empty-case nudge:\n%s", registered)
+	}
 }
 
 // TestCheckpointContinuationStatesPrecedence covers the rule the checkpoint

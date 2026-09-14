@@ -460,6 +460,8 @@ func (t CompactContextTool) Description() string {
 		"- when a compaction-imminent or threshold warning says the context is ending soon, stop optional exploration, record the active objective, completed work, next step, and open issues, and request a provisional checkpoint at the next safe stop;\n" +
 		"- never interrupt an in-flight tool, file write, sibling task, or other operation; a safe stop means the current operation has ended and the next action can be stated concretely;\n" +
 		"- every fact needed later is captured in state_files or in the structured arguments;\n" +
+		"- write or refresh the notes/plan file you maintain for this workstream before requesting the checkpoint, and list at least that file: the checkpoint cannot create the file, and a file written after the reset cannot carry this checkpoint's state;\n" +
+		"- leave state_files empty only when no durable file exists to point at (a pure analysis or final-report stage), your role cannot write files, or the state is fully carried by the structured arguments above;\n" +
 		todoSync +
 		"- no key fact exists only in the current context that cannot be re-read or re-derived.\n" +
 		"Do not call it when the task is complete and only the final response remains, or merely to make the context look smaller;\n" +
@@ -469,7 +471,7 @@ func (t CompactContextTool) Description() string {
 		"Prefer Delegate (SubAgent) for separable sub-tasks whose results the main thread can consume; use compact_context when the main thread itself must keep reasoning and carrying the current context is more expensive than restoring the externalized state.\n" +
 		"A success result only means the request was accepted; a later model-driven [Context Summary] checkpoint confirms the reset was applied.\n" +
 		"state_files entries must resolve inside the project root: workspace-relative paths (e.g. \"docs/usage.md\") are expected, and absolute, \"~\"-, \"./\"- or \"../\"-prefixed spellings of in-project files are accepted too and stored normalized as workspace-relative paths; spellings that resolve outside the project root are rejected.\n" +
-		"Entries are pure references: never read, injected, or existence-verified, so only list project files you intend to re-read with the read tool.\n" +
+		"Entries are pure references: the tool never reads them and never verifies that they exist. After a reset the runtime re-loads a bounded head of them when this session already read or wrote the file and the read permission rule allows it, so keep the top of each file a self-contained resume block and list only files worth re-reading.\n" +
 		"Roles that are allowed to write plan or notes files (for example .chord/plans/YYYYMMDD-<slug>.md or a task-notes file under .chord/notes/ in a planner role) may list those files here; state_files itself never reads or writes anything, and write permissions are still governed by the role's permission rules.\n" +
 		"State outside the project (temp dirs, logs, session files, other checkouts) cannot be referenced here; capture it in completed/decisions/open_issues text instead.\n" +
 		budget +
@@ -512,7 +514,7 @@ func (CompactContextTool) Parameters() map[string]any {
 				"type":        "array",
 				"maxItems":    16,
 				"items":       map[string]any{"type": "string", "minLength": 1},
-				"description": "Paths of files carrying externalized state: workspace-relative (e.g. docs/usage.md), or absolute / ~-prefixed / ./- / ../-prefixed spellings that resolve inside the project root (stored normalized as workspace-relative); out-of-project state must be captured in completed/decisions/open_issues text instead. References only: never read, injected, or existence-verified.",
+				"description": "Paths of files carrying externalized state: workspace-relative (e.g. docs/usage.md), or absolute / ~-prefixed / ./- / ../-prefixed spellings that resolve inside the project root (stored normalized as workspace-relative); out-of-project state must be captured in completed/decisions/open_issues text instead. References only: the tool never reads them and never verifies that they exist. After a reset a bounded head of each listed file is re-injected when this session already read or wrote the file and the read permission rule allows it. Prefer at least one entry whenever this workstream has a durable file (the task-notes or plan file you maintain, written before the checkpoint); leave it empty only when no such file exists (a pure analysis or final-report stage), your role cannot write files, or the state is fully carried by the structured arguments.",
 			},
 			"planned_state_files": map[string]any{
 				"type": "array", "maxItems": 16,
