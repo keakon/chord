@@ -121,11 +121,16 @@ func (JobOutputTool) Execute(ctx context.Context, raw json.RawMessage) (string, 
 		// looks like an ordinary successful read.
 		return "", errors.New(jobOutputPollRefusal(j, streak))
 	}
-	if j.isFinished() {
-		// The caller has seen the terminal result, so the completion
+	if j.isFinished() && strings.TrimSpace(AgentIDFromContext(ctx)) == strings.TrimSpace(j.AgentID) {
+		// The owner has seen the terminal result, so its completion
 		// notification would be a duplicate. Claim it through the same one-shot
 		// state machine the event uses; if the event claimed it first the
 		// explicit read still returns the content the caller asked for.
+		//
+		// Only the owner may claim: the notification is delivered to the owner,
+		// and access extends to the main agent and to the caller's owner, so a
+		// non-owner read would otherwise consume a notification the owner never
+		// receives — leaving it waiting on a job it was promised a wake for.
 		globalJobRegistry.claimReported(j.ID)
 	}
 	note := ""
