@@ -132,12 +132,14 @@ func (m *reductionToolCallMemo) shellInvocationLiteralArgs(toolCallID, argsJSON,
 		m.mu.Unlock()
 		return parse.literal, parse.ok
 	}
+	m.mu.Unlock()
+	// The bash AST parse runs unlocked, so reset() may have dropped the map in
+	// the meantime; re-check capacity after re-acquiring rather than before.
+	literal, ok := singleShellInvocationLiteralArgs(argsJSON, program)
+	m.mu.Lock()
 	if m.shell == nil || len(m.shell) >= reductionToolCallMemoMaxEntries {
 		m.shell = make(map[string]shellInvocationParse, 64)
 	}
-	m.mu.Unlock()
-	literal, ok := singleShellInvocationLiteralArgs(argsJSON, program)
-	m.mu.Lock()
 	m.shell[key] = shellInvocationParse{literal: literal, ok: ok}
 	m.mu.Unlock()
 	return literal, ok

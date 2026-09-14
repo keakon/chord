@@ -157,11 +157,19 @@ func (a *MainAgent) flushPendingSubPersists() {
 		log.Debugf("dropping debounced sub-agent persists from an inactive session pending_dir=%v current_dir=%v", sessionDir, a.SessionDir())
 		return
 	}
+	// Serialize against the synchronous writers (persistSubAgentMeta and the
+	// registry writer both take this): the meta file is rewritten in place
+	// rather than renamed, so a timer-goroutine write racing the event loop's
+	// terminal write can both interleave bytes and land last with a stale
+	// non-terminal state — after which nothing writes the file again. The lock
+	// is released before the registry write, which takes it itself.
+	a.subAgentMetaPersistMu.Lock()
 	for _, sub := range subs {
 		if err := a.persistSubAgentMetaToSession(sub, sessionDir); err != nil {
 			log.Warnf("failed to persist subagent meta agent=%v error=%v", sub.instanceID, err)
 		}
 	}
+	a.subAgentMetaPersistMu.Unlock()
 	if registryDirty {
 		if err := a.persistTaskRegistry(); err != nil {
 			log.Warnf("failed to persist durable task registry session=%v error=%v", sessionDir, err)
