@@ -283,7 +283,7 @@ providers:
   gemini:
     api_url: https://generativelanguage.googleapis.com/v1beta/models
     models:
-      gemini-3.5-flash:
+      gemini-3.8-flash:
         limit:
           context: 1048576
           output: 65536
@@ -291,7 +291,7 @@ providers:
           input: [text, image, pdf]
 ```
 
-For Gemini, set `api_url` to the `/models` base path. Chord detects `type: generate-content` from the URL path's `/models` suffix, so `type` can be omitted. Do not include the model name or `:streamGenerateContent?alt=sse`; Chord appends `/{model}:streamGenerateContent?alt=sse` automatically. The model map key, such as `gemini-3.5-flash`, is the model ID sent to Gemini.
+For Gemini, set `api_url` to the `/models` base path. Chord detects `type: generate-content` from the URL path's `/models` suffix, so `type` can be omitted. Do not include the model name or `:streamGenerateContent?alt=sse`; Chord appends `/{model}:streamGenerateContent?alt=sse` automatically. The model map key, such as `gemini-3.8-flash`, is the model ID sent to Gemini.
 
 Gemini thinking options use the same unified `thinking` object as other providers (no separate `gemini_thinking` key):
 
@@ -669,8 +669,9 @@ Model field semantics:
   (`max_output_tokens`, default `64000`).
 - `limit.output`: model output capacity. Runtime requests are also capped by the
   global `max_output_tokens` setting and remaining total-context space.
-- `reasoning.effort`: reasoning depth/budget. Chord normalizes whitespace and
-  casing, then forwards the value supported by the target provider.
+- `reasoning.effort`: reasoning depth. Chord keeps no local whitelist: whatever
+  level the provider supports reaches the upstream unchanged, and the Responses
+  wire additionally normalizes whitespace and casing before sending.
   - Chat Completions sends top-level `reasoning_effort`.
   - Responses sends `reasoning.effort` and optional `reasoning.summary`.
 - `reasoning.effort_map`: maps the canonical effort value to the wire value the
@@ -1446,6 +1447,7 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | `compat.chat_completions.requires_tool_result_name` | bool | `false` — Emit the paired tool name on tool result messages for gateways that require `name` alongside `tool_call_id`. |
 | `compat.chat_completions.requires_assistant_after_tool_result` | bool | `false` — Insert a synthetic assistant message between a tool result and the next user message for gateways that reject a user message directly after tool results. |
 | `compat.chat_completions.mcp_system_tools_message` | bool | `false` — Mount runtime manual-MCP schemas as fixed-anchor `role: system` messages with a `tools` field and no `content`, instead of changing top-level `tools`. Enable only for models known to accept the Kimi-compatible dynamic-tool shape. Every model in a fallback pool must opt in; mixed pools use top-level tools. |
+| `compat.chat_completions.keep_reasoning_effort` | bool | `false` — Keep `reasoning_effort` and reasoning request overrides active when a current-turn assistant tool-call message replays without `reasoning_content`. Chord otherwise reads the missing content as a backend that cannot replay reasoning and strips those controls for the rest of the turn; enable it for endpoints that accept reasoning controls without a reasoning-content replay contract, such as Grok on the Chat Completions wire. It only keeps the request-side controls in place; it does not supply reasoning content to backends whose contract validates the replayed history (DeepSeek when a request carries tools, Kimi K3, Qwen `preserve_thinking`). |
 | `compat.usage.input_includes_cache_read` | bool | Protocol default — Override whether the provider's top-level input count already contains cache-read tokens. Defaults: Messages `false`; Chat Completions / Responses / Generate Content `true`. |
 | `compat.usage.input_includes_cache_write` | bool | Protocol default — Override whether the provider's top-level input count already contains cache-write/cache-creation tokens. Defaults: Chat Completions / Responses `true`; Messages / Generate Content `false`. |
 | `models`       | map    | Map of model id → [model config](#model-field-reference).                                                                                               |
@@ -1458,9 +1460,9 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | `limit.input`     | int    | Separate input cap when a provider publishes one. Chord uses it to compact or retry before the prompt is too large.               |
 | `limit.output`    | int    | Maximum output tokens; runtime is also clamped by `max_output_tokens`.                                                             |
 | `compaction`      | object | Per-model compaction overrides: `compaction.threshold` (auto-compaction usage ratio; `0` disables for this model) and `compaction.reminder` (pressure-reminder line; `0`/absent derives `min(0.60, threshold×0.90)`, `-1` disables the reminder only). Unset fields inherit the global `context.compaction.*`. Out-of-range values are rejected with a warning and inherit the global value. See [Context compaction](./context-management.md#context-compaction). |
-| `reasoning`       | object | OpenAI reasoning options. `reasoning.effort` is normalized and passed through verbatim, so any provider-supported level (e.g. GLM `max` / `minimal` / `none`) reaches the upstream unchanged (unset = omit and use provider/model default). For Responses, `reasoning.summary` supports `auto` / `concise` / `detailed` / `none`; when reasoning is active, unset defaults to `auto`, while `none` opts out explicitly. |
+| `reasoning`       | object | OpenAI reasoning options. `reasoning.effort` passes through without a local whitelist, so any provider-supported level (e.g. GLM `max` / `minimal` / `none`) reaches the upstream unchanged; Responses normalizes whitespace and casing before sending (unset = omit and use provider/model default). For Responses, `reasoning.summary` supports `auto` / `concise` / `detailed` / `none`; when reasoning is active, unset defaults to `auto`, while `none` opts out explicitly. |
 | `text.verbosity`  | string | Optional OpenAI text verbosity hint where supported; leave unset to use the provider/model default unless you intentionally want `low` / `medium` / `high`. |
-| `thinking`        | object | Anthropic extended-thinking options. `type: adaptive` lets Chord derive a budget from `effort`; `thinking.effort` is sent as `output_config.effort` for Messages requests; `display: summarized` enables summarized thinking blocks (valid only with `type: enabled` or `adaptive`). |
+| `thinking`        | object | Extended-thinking options. Messages: `type: adaptive` carries no token budget and pairs with `thinking.effort`, which Chord sends as `output_config.effort`; `type: enabled` requires `thinking.budget`; `display` applies only to `enabled` / `adaptive`. Gemini: `thinking.level` / `thinking.budget` / `thinking.include_thoughts` map into the generation request (see [Google Gemini](#google-gemini)). |
 | `compat.reasoning_continuity.mode` | string | Optional continuity override. Use `openai_visible` for Chat Completions models that require unchanged assistant `reasoning_content` and can accept portable visible reasoning from other wires; it also enables the missing-`reasoning_text` fallback for Responses targets with that continuity contract. Use `anthropic_unsigned` only for verified Messages-compatible models that replay or accept visible unsigned `thinking`; use `none` to opt out of a provider-level default. |
 | `compat.reasoning_continuity.preserve_history` | bool | Keep plaintext reasoning from completed turns in the replayed conversation, for backends whose contract requires the full assistant history (DeepSeek when a request carries tools, Kimi K3 / `keep: all`, Qwen `preserve_thinking`, GLM `clear_thinking: false`). Default `false`: completed-turn `reasoning_content` and unsigned `thinking` are stripped because most thinking backends drop them server-side while billing them as input. |
 | `compat.forced_tool_choice.suppress_in_thinking` | bool | Downgrade loop-forced `tool_choice: required` to the backend default while reasoning/thinking is active, for OpenAI-compatible endpoints that reject forced tool choice in thinking mode. |
@@ -1468,6 +1470,7 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | `compat.request_overrides.rename_body_fields` | map | Renames final JSON fields while preserving Chord's computed values. A `null` target deletes the source field. |
 | `compat.request_overrides.headers` | map | Sets final request headers. A `null` value removes that header. |
 | `compat.chat_completions.mcp_system_tools_message` | bool | Model-level override for the provider default described above. |
+| `compat.chat_completions.keep_reasoning_effort` | bool | Model-level override for the provider default described above. |
 | `compat.responses.mcp_additional_tools` | bool | Model-level override for the provider default described above. |
 | `compat.apply_patch.enabled` | bool | Model-level override for the provider default described above. |
 | `compat.apply_patch.freeform` | bool | Model-level override for the provider default described above. |

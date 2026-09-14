@@ -271,7 +271,7 @@ providers:
   gemini:
     api_url: https://generativelanguage.googleapis.com/v1beta/models
     models:
-      gemini-3.5-flash:
+      gemini-3.8-flash:
         limit:
           context: 1048576
           output: 65536
@@ -279,7 +279,7 @@ providers:
           input: [text, image, pdf]
 ```
 
-Gemini 的 `api_url` 应设为 `/models` 基础路径。Chord 根据 URL path 的 `/models` 后缀自动识别为 `type: generate-content`，可省略 `type`。不要在 URL 中包含模型名或 `:streamGenerateContent?alt=sse`，Chord 会自动追加 `/{model}:streamGenerateContent?alt=sse`。`models` 下的 key（如 `gemini-3.5-flash`）即为发送给 Gemini 的模型 ID。
+Gemini 的 `api_url` 应设为 `/models` 基础路径。Chord 根据 URL path 的 `/models` 后缀自动识别为 `type: generate-content`，可省略 `type`。不要在 URL 中包含模型名或 `:streamGenerateContent?alt=sse`，Chord 会自动追加 `/{model}:streamGenerateContent?alt=sse`。`models` 下的 key（如 `gemini-3.8-flash`）即为发送给 Gemini 的模型 ID。
 
 Gemini 的 thinking 参数与其他 provider 一样统一放在 `thinking` 下（不使用 `gemini_thinking` 之类的专有键）：
 
@@ -633,8 +633,8 @@ providers:
   （`max_output_tokens`，默认 `64000`）。
 - `limit.output`：模型输出能力上限。实际请求还受全局
   `max_output_tokens` 和总窗口剩余空间限制。
-- `reasoning.effort`：推理深度或预算。Chord 规范化空格和大小写后，将
-  provider 支持的值透传给上游。
+- `reasoning.effort`：推理深度。Chord 不做本地白名单校验，provider 支持的
+  取值原样到达上游；Responses 线路发送前还会额外规范化空格和大小写。
   - Chat Completions 发送顶层 `reasoning_effort`。
   - Responses 发送 `reasoning.effort` 和可选的 `reasoning.summary`。
 - `reasoning.effort_map`：把规范 effort 值映射成 provider 实际接受的 wire
@@ -1265,6 +1265,7 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `compat.chat_completions.requires_tool_result_name` | bool | `false` — 对要求 tool result 消息同时携带 `name` 和 `tool_call_id` 的网关，回填配对的工具名。 |
 | `compat.chat_completions.requires_assistant_after_tool_result` | bool | `false` — 对不接受 tool result 后直接跟 user 消息的网关，在中间插入一条合成 assistant 消息。 |
 | `compat.chat_completions.mcp_system_tools_message` | bool | `false` — 把运行时 manual MCP schema 挂成固定位置的 `role: system` 消息，消息只带 `tools`、不带 `content`，不改写顶层 `tools`。只为已确认接受 Kimi 兼容动态工具形态的模型开启。Fallback 池里每个模型都必须开启；混合池退回顶层工具。 |
+| `compat.chat_completions.keep_reasoning_effort` | bool | `false` — 本轮回放的 assistant tool-call 消息没有 `reasoning_content` 时，仍保留 `reasoning_effort` 与 reasoning 请求覆盖项。默认行为下 Chord 会把缺少 reasoning content 判定为该后端无法回放 reasoning，在本回合后续请求中剥离这些控制项；对接受 reasoning 控制、但没有 reasoning 回放契约的后端（例如走 Chat Completions 线路的 Grok）开启。它只保留请求侧控制项，不会为校验回放历史的后端（带 tools 的 DeepSeek、Kimi K3、Qwen `preserve_thinking`）补上 reasoning content。 |
 | `compat.usage.input_includes_cache_read` | bool | 协议默认值 — 覆盖 provider 顶层 input 是否已包含 cache read。默认：Messages 为 `false`；Chat Completions / Responses / Generate Content 为 `true`。 |
 | `compat.usage.input_includes_cache_write` | bool | 协议默认值 — 覆盖 provider 顶层 input 是否已包含 cache write/cache creation。默认：Chat Completions / Responses 为 `true`；Messages / Generate Content 为 `false`。 |
 | `models`      | map    | model id → [模型配置](#模型字段参考)。                                                                                                              |
@@ -1277,9 +1278,9 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `limit.input`     | int    | provider 单独公布输入上限时填写。Chord 用它判断何时在 prompt 过大前压缩或恢复重试。                |
 | `limit.output`    | int    | 输出 token 上限；运行时还会受 `max_output_tokens` 限制。                                                          |
 | `compaction`      | object | 该模型的自定义压缩参数：`compaction.threshold`（自动压缩使用率阈值；`0` 对该模型禁用）与 `compaction.reminder`（压力提醒线；`0`/缺省按 `min(0.60, threshold×0.90)` 派生；`-1` 只关闭提醒）。未设字段继承全局 `context.compaction.*`。越界值会被拒绝并回退继承全局值。详见[上下文压缩](./context-management_CN.md#上下文压缩compaction)。 |
-| `reasoning`       | object | OpenAI reasoning 选项。`reasoning.effort` 会先归一化再原样透传，因此 provider 支持的任意取值（如 GLM 的 `max` / `minimal` / `none`）都能不变地到达上游（留空 = 不发送，使用 provider/model 默认）。Responses 的 `reasoning.summary` 支持 `auto` / `concise` / `detailed` / `none`；启用 reasoning 时留空默认使用 `auto`，配置 `none` 可明确关闭。 |
+| `reasoning`       | object | OpenAI reasoning 选项。`reasoning.effort` 不做本地白名单校验，provider 支持的任意取值（如 GLM 的 `max` / `minimal` / `none`）都原样到达上游；Responses 线路发送前会额外规范化空格和大小写（留空 = 不发送，使用 provider/model 默认）。Responses 的 `reasoning.summary` 支持 `auto` / `concise` / `detailed` / `none`；启用 reasoning 时留空默认使用 `auto`，配置 `none` 可明确关闭。 |
 | `text.verbosity`  | string | 可选的 OpenAI 文本详细程度提示，支持的模型生效；除非明确要覆盖为 `low` / `medium` / `high`，否则建议留空使用 provider/model 默认值。 |
-| `thinking`        | object | Anthropic 扩展思考选项。`type: adaptive` 让 Chord 按 `effort` 推算预算；`thinking.effort` 在 Messages 请求中会生成 `output_config.effort`；`display: summarized` 启用 summarized thinking block（仅 `type: enabled` 或 `adaptive` 有效）。 |
+| `thinking`        | object | 扩展思考选项。Messages：`type: adaptive` 不携带 token 预算，与 `thinking.effort` 搭配，Chord 会把它发送为 `output_config.effort`；`type: enabled` 必须配置 `thinking.budget`；`display` 仅对 `enabled` / `adaptive` 生效。Gemini：`thinking.level` / `thinking.budget` / `thinking.include_thoughts` 会映射进生成请求（见 [Google Gemini](#google-gemini)）。 |
 | `compat.reasoning_continuity.mode` | string | 可选的连续性覆盖项。Chat Completions 模型需要原样回放 assistant `reasoning_content`，并接收其他 wire 的可移植可见 reasoning 时使用 `openai_visible`；Responses 目标采用同类连续性契约时，这个模式也会启用缺失 `reasoning_text` 的兜底。只有已验证的 Messages 兼容模型需要回放或接收可见无签名 `thinking` 时才使用 `anthropic_unsigned`；模型级 `none` 可关闭 provider 级默认值。 |
 | `compat.reasoning_continuity.preserve_history` | bool | 在回放会话中保留已完成轮次的明文 reasoning，用于契约要求完整 assistant 历史的后端（DeepSeek 在请求带 tools 时、Kimi K3 / `keep: all`、Qwen `preserve_thinking`、GLM `clear_thinking: false`）。默认 `false`：已完成轮次的 `reasoning_content` 和无签名 `thinking` 会被剥离——多数 thinking 后端在服务端丢弃它们，但回放仍按输入计费。 |
 | `compat.forced_tool_choice.suppress_in_thinking` | bool | reasoning/thinking 启用时，把 loop 强制的 `tool_choice: required` 降级为后端默认选择。适用于拒绝 thinking 模式下 forced tool choice 的 OpenAI 兼容端点。 |
@@ -1287,6 +1288,7 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `compat.request_overrides.rename_body_fields` | map | 重命名最终 JSON 字段，同时保留 Chord 动态计算的值。目标值为 `null` 时删除源字段。 |
 | `compat.request_overrides.headers` | map | 设置最终请求 header。值为 `null` 时删除该 header。 |
 | `compat.chat_completions.mcp_system_tools_message` | bool | 模型级覆盖项；provider 默认值见上表。 |
+| `compat.chat_completions.keep_reasoning_effort` | bool | 模型级覆盖项；provider 默认值见上表。 |
 | `compat.responses.mcp_additional_tools` | bool | 模型级覆盖项；provider 默认值见上表。 |
 | `compat.apply_patch.enabled` | bool | 模型级覆盖项；provider 默认值见上表。 |
 | `compat.apply_patch.freeform` | bool | 模型级覆盖项；provider 默认值见上表。 |
