@@ -288,6 +288,16 @@ func TestMergeTypedStateListDeduplicatesAcrossGenerations(t *testing.T) {
 	}
 }
 
+func TestMergeTypedStateListDeduplicatesWhitespaceAndTerminalPunctuation(t *testing.T) {
+	merged, omitted := mergeTypedStateList(nil, []string{"  decision one。", "decision one", "decision two!"}, typedStateCarryMaxDecisions)
+	if omitted != 0 {
+		t.Fatalf("omitted = %d, want 0", omitted)
+	}
+	if len(merged) != 2 || merged[0] != "  decision one。" || merged[1] != "decision two!" {
+		t.Fatalf("merged = %q, want the first presentation of each distinct item", merged)
+	}
+}
+
 func TestTypedStateFromBodyDistinguishesMalformedBlock(t *testing.T) {
 	if _, found, malformed := typedStateFromBody(""); found || malformed {
 		t.Fatalf("empty body: found=%v malformed=%v, want neither", found, malformed)
