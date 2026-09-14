@@ -286,6 +286,38 @@ func TestCollapsedJobOutputCardSummarizesItsRead(t *testing.T) {
 	}
 }
 
+// TestNarrowCollapsedJobOutputCardKeepsItsJobID covers the truncation priority
+// behind that summary: the job id is the handle every later job_output /
+// job_kill call needs, so it must survive a narrow card the way job_kill's id
+// does, while the read summary yields first.
+func TestNarrowCollapsedJobOutputCardKeepsItsJobID(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{
+		ID: 1, Type: BlockToolCall, ToolName: tools.NameJobOutput,
+		Content: `{"job_id":"job-8"}`, ResultContent: "line one\nline two\n[status: running]",
+		ResultDone: true, ResultStatus: agent.ToolResultStatusSuccess,
+	}
+	wide := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(wide, "job-8 · 2 new lines") {
+		t.Fatalf("wide card should keep the job id and the read summary:\n%s", wide)
+	}
+	// The summary yields before the id: a card that still shows the read
+	// summary shows the id too, and a tighter card drops the summary alone.
+	sawIDWithoutSummary := false
+	for width := 30; width <= 60; width += 2 {
+		plain := stripANSI(strings.Join(block.Render(width, ""), "\n"))
+		if strings.Contains(plain, "2 new lines") && !strings.Contains(plain, "job-8") {
+			t.Fatalf("width %d kept the read summary but dropped the job id:\n%s", width, plain)
+		}
+		if strings.Contains(plain, "job-8") && !strings.Contains(plain, "2 new lines") {
+			sawIDWithoutSummary = true
+		}
+	}
+	if !sawIDWithoutSummary {
+		t.Fatal("no width dropped the read summary while keeping the job id")
+	}
+}
+
 // TestCollapsedShellCardNamesItsJobID covers the reason the collapsed shell
 // header carries the ID at all: the job handle must be readable without
 // expanding, because it is the argument every later job_output / job_kill call

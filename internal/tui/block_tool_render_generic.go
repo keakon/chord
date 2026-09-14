@@ -896,9 +896,12 @@ func (b *Block) compactToolResultForceExpandedForRenderWidth(width int) bool {
 
 // compactToolHeaderResultSummary reports the one-line result summary a compact
 // card carries on its header instead of in a body row: the search hit count
-// joins the query like grep's match count, and job_kill's stop acknowledgment
-// joins the job id. Both are the fact the collapsed body would have shown, so
-// the folded card stays a single line. ok is true whenever the card owns a
+// joins the query like grep's match count, job_kill's stop acknowledgment and
+// job_output's read summary join the job id. All are the fact the collapsed
+// body would have shown, so the folded card stays a single line. Sharing the
+// header with the primary argument is also what keeps that argument on a
+// narrow card: the job id is the handle the next job_output / job_kill call
+// needs, so the summary yields first. ok is true whenever the card owns a
 // header summary — with an empty summary it renders no body row either.
 func compactToolHeaderResultSummary(b *Block) (summary string, ok bool) {
 	if b == nil {
@@ -910,6 +913,11 @@ func compactToolHeaderResultSummary(b *Block) (summary string, ok bool) {
 			return "", true
 		}
 		return formatToolResultSummaryLine(b), true
+	case tools.NameJobOutput:
+		if !b.ResultDone || b.toolResultIsError() || b.toolResultIsCancelled() {
+			return "", true
+		}
+		return jobOutputSummaryLine(b.ResultContent), true
 	}
 	return "", false
 }
@@ -925,8 +933,9 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 	expanded := b.ToolCallDetailExpanded || forceExpanded
 	// Argument-level facts that would otherwise cost a body row: the handle a
 	// later job_output / job_kill call needs (a just-promoted background shell
-	// job), the count job_list leaves behind its fold, and how much fresh
-	// output a job_output read returned.
+	// job) and the count job_list leaves behind its fold. job_output's read
+	// summary rides the header next to the id it read, so its id survives a
+	// narrow card (compactToolHeaderResultSummary).
 	headerSuffix := ""
 	switch {
 	case b.ToolName == tools.NameShell:
@@ -936,10 +945,6 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 	case b.ToolName == tools.NameJobList:
 		if b.ResultDone && !b.toolResultIsError() && !b.toolResultIsCancelled() {
 			headerSuffix = jobListSummaryLine(b.ResultContent)
-		}
-	case b.ToolName == tools.NameJobOutput:
-		if b.ResultDone && !b.toolResultIsError() && !b.toolResultIsCancelled() {
-			headerSuffix = jobOutputSummaryLine(b.ResultContent)
 		}
 	}
 	keys, vals := b.toolArgsParsed()
