@@ -764,13 +764,18 @@ type fallbackSummarySection struct {
 // by both the structured-fallback and truncate-only summary builders.
 func renderFallbackSummarySections(sections []fallbackSummarySection, backgroundObjects []recovery.BackgroundObjectState) string {
 	var sb strings.Builder
-	for i, sec := range sections {
-		if i > 0 {
+	rendered := 0
+	for _, sec := range sections {
+		if isEmptyOptionalSummarySection(sec) {
+			continue
+		}
+		if rendered > 0 {
 			sb.WriteString("\n\n")
 		}
 		sb.WriteString(sec.heading)
 		sb.WriteString("\n")
 		sb.WriteString(strings.TrimSpace(sec.body))
+		rendered++
 	}
 	if len(backgroundObjects) > 0 {
 		sb.WriteString("\n\n<!-- Background objects preserved:\n")
@@ -778,6 +783,19 @@ func renderFallbackSummarySections(sections []fallbackSummarySection, background
 		sb.WriteString("\n-->")
 	}
 	return strings.TrimSpace(sb.String())
+}
+
+func isEmptyOptionalSummarySection(section fallbackSummarySection) bool {
+	if !slices.Contains([]string{
+		"## Planned Externalized State",
+		"## Evidence References",
+		"## Claim Evidence",
+		"## Claim Classification",
+	}, section.heading) {
+		return false
+	}
+	body := strings.TrimSpace(section.body)
+	return body == "- (none reported by the model)" || body == "- No stage metadata reported by the model."
 }
 
 func buildStructuredFallbackSummary(historyPath string, input *compactionInput, summarizeErr error, keyFiles []string, todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState) string {
