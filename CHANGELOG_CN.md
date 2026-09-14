@@ -13,12 +13,14 @@
 ### 新功能
 
 - `shell` 现在也能承担后台任务，长命令不必再阻塞当前回合。前台命令超过预算（`yield_ms`，默认 90 秒）会自动转成后台 job：输出会保留，job 结束时发通知唤醒 agent，它可以先做别的事，或结束回合并由完成通知叫醒。`run_in_background: true` 立即启动后台任务而不等待，`timeout_ms: 0` 启动无硬截止的服务型命令。前台命令的 `timeout_ms` 仍最多 10 分钟，`run_in_background: true` 时最多可设 6 小时。
-- 新增 `job_output`、`job_list`、`job_kill` 三个工具管理后台任务。`job_output` 只返回自上次读取以来的新增输出，可用 `wait` 选择是否阻塞（`none` / `output` / `exit`），每次等待由 runtime 限制，慢任务不会占住回合，等待超时也不会杀掉 job；连续多次读取都没有新输出会被视为轮询——先提示、后拒绝，返回给模型的输出也会去掉终端转义序列。`job_list` 列出你可读取或停止的 job——你自己的、主 agent 的，以及你的直接 owner 启动的——`job_kill` 停止任务且不产生完成通知。
+- 新增 `job_output`、`job_list`、`job_kill` 三个工具管理后台任务。`job_output` 只返回自上次读取以来的新增输出，可用 `wait` 选择是否阻塞（`none` / `output` / `exit`），每次等待由 runtime 限制，慢任务不会占住回合，等待超时也不会杀掉 job；连续多次读取都没有新输出会被视为轮询——先提示、后拒绝，返回给模型的输出也会去掉终端转义序列。`job_list` 列出你可读取或停止的 job——你自己的、主 agent 的，以及你的直接 owner 启动的——`job_kill` 停止任务且不产生完成通知。折叠后的 `job_output` 卡片会在标题行写出这次读取的结果——`job_output job-8 · 2 new lines`，没有新输出时是 `· no new output`——折叠的 `job_kill` 卡片则显示 `job_kill job-64 · Stop requested`，状态不必展开就能看到。
 - 连续的后台完成唤醒之间没有用户输入时最多 3 次，超过后新的完成结果要等下一条用户消息才会投递。
 
 ### 改进
 
 - 工具卡片不再共用同一套折叠规则。`write`、`edit`、`apply_patch`、`todo_write`、`handoff` 现在和 `delete`、各类报告卡一样恒展开：正文本身——diff、todo 列表、计划路径——是模型产出的内容，因此不再显示 `▸` / `▾` 标记，`Space`、`Enter`、`o` 对它们不生效。`read`、`grep`、`glob`、`shell`、`cancel` 和通用工具调用默认收起，保留折叠开关。展开后也不会多出正文的卡片——收起时已经完全显示正文——同样不带标记、不能折叠；折叠的 `shell` 与 `job_list` 卡片把后台 job 句柄与任务数量标在标题行（`shell … · job-8`、`job_list · 3 jobs`）。
+- `lsp` 卡片把命中数量摘要放在标题行——`lsp find references internal/tools/jobs_registry.go:771:6 · 7 references · 4 files`——与 `grep`、`glob` 一致，折叠时只占一行，展开后只显示位置列表。宽度不足时优先保住数量摘要、先让位置让位，和搜索卡片先丢参数、后丢命中数的规则相同。
+- 折叠的 `cancel` 卡片把状态放在标题行——`cancel #7 · Stopped (workflow changed)`——不再为它多花一行 `↳ Stopped`；`notify` 返回结构化 handle 时状态也不再出现两次，只保留 `Result` 区块的 `status:` 字段，与已取消任务展开卡片的行为一致。
 - 结束的后台 `shell` 任务改用折叠的 `JOB RESULT` 卡片：默认每个 job 只保留标题行，只有失败、取消或耗时等标题行表达不了的状态才会再占一行；展开后显示完整的命令、状态与输出。
 - 运行期通知卡可折叠成徽标行：`LOOP NOTICE` / `LOOP CONTINUE`、`REPLY RESUMED` 和上下文压力卡片（`CONTEXT PRESSURE`、`COMPACT WARNING`、`COMPACT IMMINENT`）默认收起，只显示 `LOOP CONTINUE #2 ▸` 这样的徽标行，按 `Space`、`Enter` 或 `o` 展开全文。通用 `NOTICE` 默认展开，因为它承载命令回复（`/role status`、`/models status`、`/mcp status`）和运行期诊断，需要时可折叠成同样的徽标行。正文本身只有一行时不再显示标记，也不能折叠；子代理回报卡继续完整显示消息原文。
 - 新增 `compat.chat_completions.keep_reasoning_effort` 选项：回放的 assistant tool call 不带 `reasoning_content` 时，仍在本回合全程保留 `reasoning_effort` 和 reasoning 请求覆盖项。对接受 reasoning 控制、但没有 reasoning 回放契约的端点（例如走 Chat Completions 线路的 Grok），按请求设置的 effort 现在能在多请求回合里全程生效，而不是只作用于第一个请求。

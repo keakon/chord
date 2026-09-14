@@ -940,10 +940,42 @@ func isJobListRow(line string) bool {
 	return digits == len(rest) || rest[digits] == ' ' || rest[digits] == '\t'
 }
 
-// formatToolResultSummaryLine returns the one-line state summary under the
-// tool header. Error and cancelled results render their detail in the shared
-// ↳ Error / ↳ Cancelled envelope, so they return "" instead of a redundant
-// label like "Search failed" or a second "Cancelled" row above the envelope.
+// jobOutputSummaryLine summarizes one job_output read for the card's header.
+// The model-facing result is the cleaned output followed by the tool's own
+// meta lines — the dropped-bytes notice, the anti-polling note and the
+// trailing "[status: …]" line — so those must not inflate the line count. An
+// empty read is the anti-polling signal the folded card exists to show.
+func jobOutputSummaryLine(result string) string {
+	lines := 0
+	skipped := false
+	for line := range strings.SplitSeq(strings.TrimRight(result, "\n"), "\n") {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case trimmed == "":
+		case strings.HasPrefix(trimmed, "[status: "):
+		case strings.HasPrefix(trimmed, "[notice] "):
+		case strings.HasPrefix(trimmed, "(skipped "):
+			skipped = true
+		default:
+			lines++
+		}
+	}
+	switch {
+	case lines > 0:
+		return fmt.Sprintf("%d new %s", lines, pluralizeToolCount("line", lines))
+	case skipped:
+		return "new output (earlier skipped)"
+	default:
+		return "no new output"
+	}
+}
+
+// formatToolResultSummaryLine returns the one-line state summary for a tool
+// result. Callers render it as a "↳" row under the tool header, except for the
+// tools compactToolHeaderResultSummary folds onto the header itself. Error and
+// cancelled results render their detail in the shared ↳ Error / ↳ Cancelled
+// envelope, so they return "" instead of a redundant label like "Search failed"
+// or a second "Cancelled" row above the envelope.
 func formatToolResultSummaryLine(b *Block) string {
 	if b == nil {
 		return ""
@@ -967,7 +999,8 @@ func formatToolResultSummaryLine(b *Block) string {
 		return ""
 	case tools.NameJobOutput, tools.NameJobList:
 		// The body already carries the incremental output and the status line;
-		// job_list's count sits on the header instead (jobListSummaryLine).
+		// job_list's count and job_output's read summary sit on the header
+		// instead (jobListSummaryLine / jobOutputSummaryLine).
 		return ""
 	case tools.NameJobKill:
 		return "Stop requested"

@@ -381,8 +381,27 @@ func (b *Block) renderCancelCall(width int, spinnerFrame string) []string {
 		target = "unknown"
 	}
 
+	var handle tools.TaskHandle
+	handleOK := false
+	if b.ResultContent != "" {
+		handle, _, handleOK = parseTaskToolHandle(b.ResultContent)
+	}
+	// The folded card has no Result section, so its state summary belongs on
+	// the header. An expanded card keeps it there too, unless the Result
+	// section below echoes the handle's own status field — printing both would
+	// show the same state twice.
+	headerSummary := ""
+	if b.Collapsed || !handleOK || handle.Status == "" {
+		headerSummary = formatToolResultSummaryLine(b)
+	}
+
 	var result []string
 	headerLine := renderToolHeaderLine(prefix, b.ToolName) + " " + target
+	// The status outranks the reason: it is the result fact the card exists to
+	// report, while the reason is an argument echo that yields to it.
+	if headerSummary != "" {
+		headerLine = appendToolHeaderSummary(headerLine, "", "· "+headerSummary, "", cardWidth-4)
+	}
 	if reason := toolHeaderProseSummary(args.Reason); reason != "" {
 		headerLine = appendToolHeaderSummary(headerLine, "", "("+reason+")", "", cardWidth-4)
 	}
@@ -390,29 +409,12 @@ func (b *Block) renderCancelCall(width int, spinnerFrame string) []string {
 	result = append(result, headerLine)
 
 	if b.Collapsed {
-		if summary := formatToolResultSummaryLine(b); summary != "" {
-			result = append(result, toolSummaryLine(summary))
-		}
 		appendToolOutcome(&result, b, contentWidth, false)
 	} else {
 		if args.Reason != "" {
 			result = append(result, toolFieldSection(ToolResultExpandedStyle, "Reason"))
 			for _, line := range wrapText(sanitizeToolDisplayText(args.Reason), contentWidth) {
 				result = append(result, DimStyle.Render("    "+line))
-			}
-		}
-		var handle tools.TaskHandle
-		handleOK := false
-		if b.ResultContent != "" {
-			handle, _, handleOK = parseTaskToolHandle(b.ResultContent)
-		}
-		// The top-level "↳ Status:" summary is the compact status; when the
-		// Result section below already renders the handle's own status field,
-		// showing both would print the state twice. Only an expanded card
-		// without a structured handle keeps the summary row.
-		if !handleOK || handle.Status == "" {
-			if summary := formatToolResultSummaryLine(b); summary != "" {
-				result = append(result, toolSummaryLine(summary))
 			}
 		}
 		if handleOK {
@@ -484,12 +486,16 @@ func (b *Block) renderNotifyCall(width int, spinnerFrame string) []string {
 			result = append(result, toolFieldBody(DimStyle, line))
 		}
 	}
-	if summary := formatToolResultSummaryLine(b); summary != "" {
-		result = append(result, toolSummaryLine(summary))
+	handle, _, handleOK := parseTaskToolHandle(b.ResultContent)
+	// The Result section below prints the handle's own status field, so a
+	// top-level "↳ Status:" row would show the same state twice.
+	if !handleOK || handle.Status == "" {
+		if summary := formatToolResultSummaryLine(b); summary != "" {
+			result = append(result, toolSummaryLine(summary))
+		}
 	}
 	if b.ResultContent != "" {
-		handle, _, ok := parseTaskToolHandle(b.ResultContent)
-		if ok {
+		if handleOK {
 			result = append(result, toolFieldSection(ToolResultExpandedStyle, "Result"))
 			appendTaskHandleFieldRow(&result, "status", handle.Status, contentWidth)
 			// The Target row above already names the task in its readable

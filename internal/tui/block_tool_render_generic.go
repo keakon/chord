@@ -861,7 +861,7 @@ func (b *Block) compactToolResultForceExpanded(contentWidth int) bool {
 		return false
 	}
 	switch b.ToolName {
-	case tools.NameGrep, tools.NameGlob, tools.NameShell:
+	case tools.NameGrep, tools.NameGlob, tools.NameShell, tools.NameLsp:
 		// Search cards have their own count-based summaries; the generic
 		// "only one hidden line" heuristic must not force them expanded, or
 		// Space could never collapse them again (the toggle guard below).
@@ -894,6 +894,26 @@ func (b *Block) compactToolResultForceExpandedForRenderWidth(width int) bool {
 	return b.compactToolResultForceExpanded(compactToolContentWidthForRenderWidth(width))
 }
 
+// compactToolHeaderResultSummary reports the one-line result summary a compact
+// card carries on its header instead of in a body row: the search hit count
+// joins the query like grep's match count, and job_kill's stop acknowledgment
+// joins the job id. Both are the fact the collapsed body would have shown, so
+// the folded card stays a single line. ok is true whenever the card owns a
+// header summary — with an empty summary it renders no body row either.
+func compactToolHeaderResultSummary(b *Block) (summary string, ok bool) {
+	if b == nil {
+		return "", false
+	}
+	switch toolNameKey(b.ToolName) {
+	case tools.NameLsp, tools.NameJobKill:
+		if b.toolExecutionIsQueued() {
+			return "", true
+		}
+		return formatToolResultSummaryLine(b), true
+	}
+	return "", false
+}
+
 func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) []string {
 	metrics := newWideHeaderToolCardMetrics(width)
 	blockStyle := metrics.blockStyle
@@ -905,7 +925,8 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 	expanded := b.ToolCallDetailExpanded || forceExpanded
 	// Argument-level facts that would otherwise cost a body row: the handle a
 	// later job_output / job_kill call needs (a just-promoted background shell
-	// job) and the count job_list leaves behind its fold.
+	// job), the count job_list leaves behind its fold, and how much fresh
+	// output a job_output read returned.
 	headerSuffix := ""
 	switch {
 	case b.ToolName == tools.NameShell:
@@ -915,6 +936,10 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 	case b.ToolName == tools.NameJobList:
 		if b.ResultDone && !b.toolResultIsError() && !b.toolResultIsCancelled() {
 			headerSuffix = jobListSummaryLine(b.ResultContent)
+		}
+	case b.ToolName == tools.NameJobOutput:
+		if b.ResultDone && !b.toolResultIsError() && !b.toolResultIsCancelled() {
+			headerSuffix = jobOutputSummaryLine(b.ResultContent)
 		}
 	}
 	keys, vals := b.toolArgsParsed()
@@ -944,8 +969,15 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 	if b.ResultDone && !forceExpanded {
 		prefix = renderToolDisclosurePrefix(prefix, expanded)
 	}
+	headerSummary, summaryOnHeader := compactToolHeaderResultSummary(b)
 	toolHeaderLine := renderToolHeaderLine(prefix, b.ToolName)
-	toolHeaderLine = appendToolHeaderSummary(toolHeaderLine, mainPart, grayPart, paramSummary, cardWidth-4)
+	if summaryOnHeader {
+		// The summary joins the header like grep's match count, so the
+		// collapsed card is a single line and the body is only the result.
+		toolHeaderLine = appendSearchHeaderSummary(toolHeaderLine, mainPart, grayPart, headerSummary, cardWidth-4)
+	} else {
+		toolHeaderLine = appendToolHeaderSummary(toolHeaderLine, mainPart, grayPart, paramSummary, cardWidth-4)
+	}
 	toolHeaderLine = buildToolHeaderLine(toolHeaderLine, b.ToolProgress, cardWidth, b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent, isActive)
 	result = append(result, toolHeaderLine)
 
@@ -978,8 +1010,12 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 	}
 
 	if b.ResultContent != "" || b.DoneSummary != "" || b.toolExecutionIsQueued() {
-		if summary := formatToolResultSummaryLine(b); summary != "" && !b.toolExecutionIsQueued() && !(b.ToolName == tools.NameShell && !expanded) {
-			result = append(result, toolSummaryLine(summary))
+		// A summary that already rides the header must not print again as a
+		// body row.
+		if !summaryOnHeader {
+			if summary := formatToolResultSummaryLine(b); summary != "" && !b.toolExecutionIsQueued() && !(b.ToolName == tools.NameShell && !expanded) {
+				result = append(result, toolSummaryLine(summary))
+			}
 		}
 		if b.ToolName == tools.NameShell {
 			if expanded {

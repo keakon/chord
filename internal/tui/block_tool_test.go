@@ -1015,6 +1015,63 @@ func TestReadCardStrikesThroughShadowedDuplicateValues(t *testing.T) {
 	}
 }
 
+func TestLspCollapsedSingleLineFoldShowsCountInHeader(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{
+		ID:                     1,
+		Type:                   BlockToolCall,
+		ToolName:               tools.NameLsp,
+		Content:                `{"operation":"references","path":"internal/tools/jobs_registry.go","line":771,"character":6}`,
+		ResultDone:             true,
+		ToolCallDetailExpanded: false,
+		ResultContent:          "internal/tools/jobs_registry.go:771:6\ninternal/agent/main.go:1:1",
+	}
+
+	collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(collapsed, "✓ ▸ lsp find references internal/tools/jobs_registry.go:771:6 · 2 references · 2 files") {
+		t.Fatalf("expected collapsed LSP count in header, got:\n%s", collapsed)
+	}
+	if strings.Contains(collapsed, "↳") {
+		t.Fatalf("collapsed LSP card should be a single header line without a body summary, got:\n%s", collapsed)
+	}
+	if strings.Contains(collapsed, "internal/agent/main.go:1:1") {
+		t.Fatalf("collapsed LSP card should hide the location body, got:\n%s", collapsed)
+	}
+
+	block.ToggleAtWidth(120)
+	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	for _, want := range []string{
+		"✓ ▾ lsp find references internal/tools/jobs_registry.go:771:6 · 2 references · 2 files",
+		"internal/agent/main.go:1:1",
+	} {
+		if !strings.Contains(expanded, want) {
+			t.Fatalf("expected expanded LSP card to contain %q, got:\n%s", want, expanded)
+		}
+	}
+}
+
+func TestCollapsedLspHeaderKeepsCountAndYieldsLocationWhenNarrow(t *testing.T) {
+	// Same contract as the grep/glob headers: the count summary survives width
+	// clipping and the secondary location yields first.
+	ApplyTheme(DefaultTheme())
+	block := &Block{
+		ID:                     1,
+		Type:                   BlockToolCall,
+		ToolName:               tools.NameLsp,
+		Content:                `{"operation":"references","path":"internal/tools/jobs_registry.go","line":771,"character":6}`,
+		ResultDone:             true,
+		ToolCallDetailExpanded: false,
+		ResultContent:          "internal/tools/jobs_registry.go:771:6\ninternal/agent/main.go:1:1",
+	}
+	joined := stripANSI(strings.Join(block.Render(60, ""), "\n"))
+	if !strings.Contains(joined, "2 references · 2 files") {
+		t.Fatalf("expected narrow collapsed LSP header to keep the count summary, got:\n%s", joined)
+	}
+	if strings.Contains(joined, "jobs_registry.go:771:6") {
+		t.Fatalf("expected narrow collapsed LSP header to yield the location before the count, got:\n%s", joined)
+	}
+}
+
 func TestLspCardShowsSemanticHeaderSummaryAndRelativeLocations(t *testing.T) {
 	wd := filepath.Join(string(os.PathSeparator), "tmp", "workspace")
 	queryPath := filepath.Join(wd, "internal", "agent", "main_subagent_control.go")
@@ -6080,6 +6137,36 @@ func TestCancelSubAgentShowsCancelledSemantic(t *testing.T) {
 	}
 }
 
+// TestCollapsedCancelCardInlinesStatusOnHeader pins the folded Cancel contract:
+// the status joins the header — after the readable target and before the reason
+// — so the card is a single line instead of spending a "↳ Stopped" row on a
+// status the folded card never renders a Result section for.
+func TestCollapsedCancelCardInlinesStatusOnHeader(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{
+		ID:                     1,
+		Type:                   BlockToolCall,
+		ToolName:               tools.NameCancel,
+		Collapsed:              true,
+		Content:                `{"target_task_id":"adhoc-9","reason":"workflow changed"}`,
+		ResultContent:          `{"status":"stopped","task_id":"adhoc-9","agent_id":"reviewer-2"}`,
+		ResultDone:             true,
+		ResultStatus:           agent.ToolResultStatusSuccess,
+		ToolCallDetailExpanded: false,
+	}
+
+	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(joined, "cancel #9 · Stopped (workflow changed)") {
+		t.Fatalf("expected the folded cancel header to inline the status, got:\n%s", joined)
+	}
+	if strings.Contains(joined, "↳ Stopped") {
+		t.Fatalf("folded cancel must not repeat the status in a body row, got:\n%s", joined)
+	}
+	if strings.Contains(joined, "adhoc-9") {
+		t.Fatalf("folded cancel must keep the readable target, got:\n%s", joined)
+	}
+}
+
 func TestNotifySubAgentCollapsedDoesNotShowRawJSON(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	block := &Block{
@@ -6106,8 +6193,13 @@ func TestNotifySubAgentCollapsedDoesNotShowRawJSON(t *testing.T) {
 	if strings.Contains(joined, "adhoc-5") {
 		t.Fatalf("expected notify collapsed view to not expose adhoc- prefix; got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "Delivered") {
-		t.Fatalf("expected notify to show delivered semantic; got:\n%s", joined)
+	// The Result section echoes the status field, so a second top-level
+	// "↳ Status: Delivered" row would only repeat it.
+	if !strings.Contains(joined, "↳ Status: delivered") {
+		t.Fatalf("expected notify to show the delivered status; got:\n%s", joined)
+	}
+	if got := strings.Count(strings.ToLower(joined), "delivered"); got != 1 {
+		t.Fatalf("expected the status to appear exactly once, got %d:\n%s", got, joined)
 	}
 	if !strings.Contains(joined, "reply") {
 		t.Fatalf("expected notify to show kind; got:\n%s", joined)
@@ -6137,8 +6229,8 @@ func TestNotifySubAgentExpandedShowsStructuredDetails(t *testing.T) {
 	if !strings.Contains(joined, "↳ Message:") || !strings.Contains(joined, "continue with option B") {
 		t.Fatalf("expected notify expanded to show message; got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "Delivered") {
-		t.Fatalf("expected notify to show delivered semantic; got:\n%s", joined)
+	if !strings.Contains(joined, "↳ Status: delivered") {
+		t.Fatalf("expected notify to show the delivered status; got:\n%s", joined)
 	}
 }
 

@@ -204,6 +204,30 @@ func TestJobListSummaryLine(t *testing.T) {
 	}
 }
 
+// TestJobOutputSummaryLine pins the count: the tool's own meta lines — the
+// dropped-bytes notice, the anti-polling note and the trailing status — are not
+// output, while a read that dropped earlier bytes still reports fresh output
+// rather than a quiet "no new output".
+func TestJobOutputSummaryLine(t *testing.T) {
+	tests := []struct{ name, result, want string }{
+		{"empty", "", "no new output"},
+		{"status only", "[status: completed (exit code 0)]", "no new output"},
+		{"single line", "hello\n[status: running]", "1 new line"},
+		{"two lines", "hello\nworld\n[status: running]", "2 new lines"},
+		{"blank lines ignored", "\nhello\n\nworld\n[status: running]", "2 new lines"},
+		{"notice is not output", "[notice] no new output across 2 consecutive non-blocking reads; stop polling.\n[status: running]", "no new output"},
+		{"dropped bytes are output", "(skipped 4096 bytes of earlier output; recent log: /tmp/job.log)\n[status: running]", "new output (earlier skipped)"},
+		{"dropped bytes with fresh tail", "(skipped 4096 bytes of earlier output)\nhello\n[status: running]", "1 new line"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := jobOutputSummaryLine(tt.result); got != tt.want {
+				t.Fatalf("jobOutputSummaryLine(%q) = %q, want %q", tt.result, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestCollapsedJobListCardCountsItsJobs covers the folded card: job_list hides
 // its rows behind the toggle, so the header carries the count instead of leaving
 // the reader with a bare tool name.
@@ -231,6 +255,32 @@ func TestCollapsedJobListCardCountsItsJobs(t *testing.T) {
 			plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
 			if !strings.Contains(plain, tt.want) {
 				t.Fatalf("job_list card missing %q:\n%s", tt.want, plain)
+			}
+		})
+	}
+}
+
+// TestCollapsedJobOutputCardSummarizesItsRead covers the folded card:
+// job_output hides its output behind the toggle, so the header reports what the
+// read returned — the fresh line count, or the "no new output" that tells the
+// reader (and the model's own next step) there is nothing new to poll for.
+func TestCollapsedJobOutputCardSummarizesItsRead(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	tests := []struct{ name, result, want string }{
+		{"fresh output", "line one\nline two\n[status: running]", "✓ ▸ job_output job-8 · 2 new lines"},
+		{"empty read", "[status: running]", "✓ ▸ job_output job-8 · no new output"},
+		{"anti-polling notice", "[notice] no new output across 2 consecutive non-blocking reads; stop polling.\n[status: running]", "✓ ▸ job_output job-8 · no new output"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			block := &Block{
+				ID: 1, Type: BlockToolCall, ToolName: tools.NameJobOutput,
+				Content: `{"job_id":"job-8"}`, ResultContent: tt.result, ResultDone: true,
+				ResultStatus: agent.ToolResultStatusSuccess,
+			}
+			plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+			if !strings.Contains(plain, tt.want) {
+				t.Fatalf("job_output card missing %q:\n%s", tt.want, plain)
 			}
 		})
 	}
@@ -305,6 +355,12 @@ func TestCollapsedJobKillCardKeepsOneID(t *testing.T) {
 		ToolCallDetailExpanded: false,
 	}
 	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	if !strings.Contains(plain, "✓ ▸ job_kill job-64 · Stop requested") {
+		t.Fatalf("collapsed job_kill should inline the stop acknowledgment on its header; got:\n%s", plain)
+	}
+	if strings.Contains(plain, "↳ Stop requested") {
+		t.Fatalf("collapsed job_kill should not repeat the acknowledgment in a body row; got:\n%s", plain)
+	}
 	if strings.Count(plain, "job-64") != 1 {
 		t.Fatalf("job_kill should name the job ID exactly once; got %d:\n%s", strings.Count(plain, "job-64"), plain)
 	}
