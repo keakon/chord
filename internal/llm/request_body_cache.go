@@ -6,12 +6,32 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
+// sliceID identifies a slice by its backing array, for use as a cache guard.
+//
+// This is a valid identity only for slices that are frozen once built: every
+// new request surface (a new turn, replay reinforcement, normalization for
+// another pool target) allocates a fresh slice, so a matching (pointer, length)
+// pair means the contents are still the ones a cached value was derived from.
+// A path that mutates such a slice in place would defeat every guard built on
+// this, and must rebuild the slice instead.
+//
+// The length must be compared alongside the pointer — a reslice shares the
+// first element — and the caller must keep the returned pointer reachable for
+// as long as it holds the cached value. Both callers here store it in the
+// guard itself, which pins the backing array, so a freed array's address
+// cannot be recycled into a false match. (partDigestRef deliberately does the
+// opposite with a weak pointer, because that memo must not pin every payload
+// it has ever hashed.)
+func sliceID[T any](s []T) *T {
+	if len(s) == 0 {
+		return nil
+	}
+	return &s[0]
+}
+
 // requestBodyIdentity captures the inputs a provider's marshaled body derives
 // from, comparable by value. The message and tool slices are identified by
-// their backing arrays: every new request surface (a new turn, replay
-// reinforcement, normalization for another pool target) builds a fresh slice,
-// so identity is a sufficient guard against reusing a body for changed
-// inputs. Request tuning is deliberately not part of the identity, which is
+// sliceID. Request tuning is deliberately not part of the identity, which is
 // sound only while one (messages, tools) slice is converted under a single
 // model and tuning: the pool's key-attempt loop reuses one target's slice while
 // rotating only the auth key, and modelcompat.NormalizeForTarget builds a fresh
@@ -28,14 +48,14 @@ type requestBodyIdentity struct {
 }
 
 func requestBodyIdentityFor(systemPrompt string, messages []message.Message, tools []message.ToolDefinition, maxTokens int) requestBodyIdentity {
-	id := requestBodyIdentity{system: systemPrompt, maxTokens: maxTokens, msgsLen: len(messages), toolsLen: len(tools)}
-	if len(messages) > 0 {
-		id.msgs = &messages[0]
+	return requestBodyIdentity{
+		system:    systemPrompt,
+		maxTokens: maxTokens,
+		msgs:      sliceID(messages),
+		msgsLen:   len(messages),
+		tools:     sliceID(tools),
+		toolsLen:  len(tools),
 	}
-	if len(tools) > 0 {
-		id.tools = &tools[0]
-	}
-	return id
 }
 
 // requestBodyReuse is a single-entry cache for a provider's marshaled request
