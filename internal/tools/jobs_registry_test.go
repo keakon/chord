@@ -166,6 +166,8 @@ func TestRelevantOutputForCompletionKeepsTheTail(t *testing.T) {
 	}
 }
 
+// Two batched reads by the same agent must split the window between them, not
+// replay or drop it.
 func TestReadIncrementalConcurrentClaimsDeliverEachByteOnce(t *testing.T) {
 	j := &job{ID: "job-concurrent", output: newTailWriter(1 << 16)}
 	const payload = "0123456789"
@@ -180,7 +182,7 @@ func TestReadIncrementalConcurrentClaimsDeliverEachByteOnce(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			chunk, _ := j.readIncremental()
+			chunk, _ := j.readIncremental("agent-1")
 			mu.Lock()
 			got.WriteString(chunk)
 			mu.Unlock()
@@ -228,5 +230,69 @@ func TestRequestCancelClearsPromotedDetach(t *testing.T) {
 		// isKilled reports the terminal status, which a pending cancel has not
 		// set: the job is still stopping, not killed.
 		t.Fatal("a pending cancel must not report a terminal kill")
+	}
+}
+
+// A job is readable by more than its owner, so one reader must not consume
+// another's output or advance another's anti-polling streak. Before readers had
+// their own cursors, a single main-agent read left the owner with an empty
+// window and a streak that refused its next calls outright.
+func TestReadersDoNotConsumeEachOthersOutputOrStreak(t *testing.T) {
+	j := &job{ID: "job-two-readers", output: newTailWriter(1 << 16)}
+	if _, err := j.output.Write([]byte("first batch\n")); err != nil {
+		t.Fatalf("write output: %v", err)
+	}
+
+	if chunk, _ := j.readIncremental("main"); chunk != "first batch\n" {
+		t.Fatalf("main read %q, want the full output", chunk)
+	}
+	if chunk, _ := j.readIncremental("owner"); chunk != "first batch\n" {
+		t.Fatalf("owner read %q, want the same output main already read", chunk)
+	}
+
+	// Each reader advances independently from here.
+	if _, err := j.output.Write([]byte("second batch\n")); err != nil {
+		t.Fatalf("write output: %v", err)
+	}
+	if chunk, _ := j.readIncremental("owner"); chunk != "second batch\n" {
+		t.Fatalf("owner read %q, want only the new output", chunk)
+	}
+	if chunk, _ := j.readIncremental("owner"); chunk != "" {
+		t.Fatalf("owner re-read %q, want nothing left", chunk)
+	}
+	if chunk, _ := j.readIncremental("main"); chunk != "second batch\n" {
+		t.Fatalf("main read %q, want the new output the owner already consumed", chunk)
+	}
+
+	// Streaks are per reader: main polling itself into a refusal leaves the
+	// owner's first read at streak 1.
+	for i := 1; i <= jobOutputPollRefuseStreak; i++ {
+		if got := j.noteReadOutcome("main", true); got != i {
+			t.Fatalf("main streak = %d, want %d", got, i)
+		}
+	}
+	if got := j.noteReadOutcome("owner", true); got != 1 {
+		t.Fatalf("owner streak = %d, want 1 — main's polling must not refuse the owner", got)
+	}
+	if got := j.noteReadOutcome("main", false); got != 0 {
+		t.Fatalf("main streak after new bytes = %d, want 0", got)
+	}
+}
+
+// hasUnreadOutput answers per reader, so a wait:output call does not return
+// immediately just because some other agent has not caught up.
+func TestHasUnreadOutputIsPerReader(t *testing.T) {
+	j := &job{ID: "job-unread", output: newTailWriter(1 << 16)}
+	if _, err := j.output.Write([]byte("data")); err != nil {
+		t.Fatalf("write output: %v", err)
+	}
+	if !j.hasUnreadOutput("owner") {
+		t.Fatal("owner has unread output, want true")
+	}
+	if _, _ = j.readIncremental("owner"); j.hasUnreadOutput("owner") {
+		t.Fatal("owner consumed its window, want false")
+	}
+	if !j.hasUnreadOutput("main") {
+		t.Fatal("main has not read yet, want true")
 	}
 }

@@ -92,6 +92,10 @@ func (JobOutputTool) Execute(ctx context.Context, raw json.RawMessage) (string, 
 	if !j.accessibleFrom(ctx) {
 		return "", fmt.Errorf("job %s is not accessible to this agent", id)
 	}
+	// Cursor and anti-polling streak are per reading agent: accessibleFrom
+	// admits the main agent and the caller's owner besides the job's own owner,
+	// and the incremental read consumes what it returns.
+	reader := strings.TrimSpace(AgentIDFromContext(ctx))
 	if wait == jobWaitExit {
 		if !j.isFinished() {
 			waitForJob(ctx, j, false)
@@ -104,24 +108,24 @@ func (JobOutputTool) Execute(ctx context.Context, raw json.RawMessage) (string, 
 		case <-j.output.writeSignal():
 		default:
 		}
-		if !j.hasUnreadOutput() {
+		if !j.hasUnreadOutput(reader) {
 			waitForJob(ctx, j, true)
 		}
 	}
-	chunk, dropped := j.readIncremental()
+	chunk, dropped := j.readIncremental(reader)
 	noNewBytes := chunk == "" && dropped == 0
 	if wait != jobWaitNone {
 		// A blocking wait that expired is a renewal, not polling.
 		noNewBytes = false
 	}
-	streak := j.noteReadOutcome(noNewBytes)
+	streak := j.noteReadOutcome(reader, noNewBytes)
 	if streak >= jobOutputPollRefuseStreak {
 		// Returning this as a tool error (not a successful result) makes the
 		// refusal visible as an error terminal state instead of a card that
 		// looks like an ordinary successful read.
 		return "", errors.New(jobOutputPollRefusal(j, streak))
 	}
-	if j.isFinished() && strings.TrimSpace(AgentIDFromContext(ctx)) == strings.TrimSpace(j.AgentID) {
+	if j.isFinished() && reader == strings.TrimSpace(j.AgentID) {
 		// The owner has seen the terminal result, so its completion
 		// notification would be a duplicate. Claim it through the same one-shot
 		// state machine the event uses; if the event claimed it first the

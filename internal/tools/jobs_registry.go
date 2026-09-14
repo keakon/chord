@@ -79,15 +79,27 @@ type job struct {
 	output    *tailWriter
 	done      chan struct{}
 
-	mu              sync.Mutex
-	status          jobStatus
-	detail          string
-	exitErr         error
-	finished        bool
-	finishedAt      time.Time
-	detached        bool
-	reported        bool
-	readOffset      int64
+	mu         sync.Mutex
+	status     jobStatus
+	detail     string
+	exitErr    error
+	finished   bool
+	finishedAt time.Time
+	detached   bool
+	reported   bool
+	// readers holds one cursor and anti-polling streak per reading agent. A
+	// job is deliberately readable by more than its owner - job_list offers the
+	// main agent's jobs and the caller's owner's jobs - and the incremental read
+	// consumes what it returns, so a single shared cursor would let one reader
+	// swallow another's output and drive it into the polling refusal without it
+	// ever seeing a byte. Keyed by agent id; the set is bounded by the agents
+	// that can reach the job.
+	readers map[string]*jobReaderState
+}
+
+// jobReaderState is one reader's view of a job's output.
+type jobReaderState struct {
+	offset          int64
 	noProgressReads int
 }
 
@@ -541,38 +553,57 @@ func (j *job) relevantOutputForCompletion() string {
 	return prefix + snippet
 }
 
-// readIncremental returns output produced since the previous read, and how many
-// bytes the reader missed because they had already fallen out of the window.
-// The cursor read and commit share one critical section: job_output advertises
-// itself as concurrency-safe, so two batched reads of the same job must each
-// claim a disjoint window instead of replaying or dropping one.
-func (j *job) readIncremental() (string, int64) {
+// readerStateLocked returns the reader's cursor and streak, creating it on
+// first read. Callers must hold j.mu.
+func (j *job) readerStateLocked(reader string) *jobReaderState {
+	if j.readers == nil {
+		j.readers = make(map[string]*jobReaderState, 2)
+	}
+	state, ok := j.readers[reader]
+	if !ok {
+		state = &jobReaderState{}
+		j.readers[reader] = state
+	}
+	return state
+}
+
+// readIncremental returns output produced since this reader's previous read,
+// and how many bytes it missed because they had already fallen out of the
+// window. The cursor read and commit share one critical section: job_output
+// advertises itself as concurrency-safe, so two batched reads by the same
+// reader must each claim a disjoint window instead of replaying or dropping
+// one. Readers do not consume from each other: each has its own cursor.
+func (j *job) readIncremental(reader string) (string, int64) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	chunk, next, dropped := j.output.readFrom(j.readOffset)
-	j.readOffset = next
+	state := j.readerStateLocked(reader)
+	chunk, next, dropped := j.output.readFrom(state.offset)
+	state.offset = next
 	return chunk, dropped
 }
 
-// noteReadOutcome increments the consecutive no-new-output streak and returns
-// it. Callers pass false for a read that produced bytes, and for blocking waits
-// (output/exit), which are legitimate renewals rather than polling.
-func (j *job) noteReadOutcome(noNewBytes bool) int {
+// noteReadOutcome increments this reader's consecutive no-new-output streak and
+// returns it. Callers pass false for a read that produced bytes, and for
+// blocking waits (output/exit), which are legitimate renewals rather than
+// polling. The streak is per reader, so one agent's polling cannot refuse
+// another's first read.
+func (j *job) noteReadOutcome(reader string, noNewBytes bool) int {
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	state := j.readerStateLocked(reader)
 	if noNewBytes {
-		j.noProgressReads++
+		state.noProgressReads++
 	} else {
-		j.noProgressReads = 0
+		state.noProgressReads = 0
 	}
-	return j.noProgressReads
+	return state.noProgressReads
 }
 
 // hasUnreadOutput reports whether the retained window holds bytes this reader
 // has not consumed yet.
-func (j *job) hasUnreadOutput() bool {
+func (j *job) hasUnreadOutput(reader string) bool {
 	j.mu.Lock()
-	cursor := j.readOffset
+	cursor := j.readerStateLocked(reader).offset
 	j.mu.Unlock()
 	return j.output.hasDataAfter(cursor)
 }
