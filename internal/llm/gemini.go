@@ -695,9 +695,23 @@ func convertSchemaListToGemini(value any) ([]map[string]any, bool) {
 	return converted, true
 }
 
+// geminiToolCallSeq makes synthesized Gemini tool-call IDs unique for the whole
+// conversation, not just for one response. Gemini does not send IDs of its own,
+// so Chord assigns them; a plain per-response counter handed out "gemini_0" to
+// the first call of every turn, and consumers that key by tool-call ID (the
+// reduction memos, the tool-call ID index) treat two calls sharing an ID as the
+// same call. The seed keeps IDs distinct from those a previous process wrote
+// into a session that is being resumed.
+var geminiToolCallSeq = func() *atomic.Uint64 {
+	var seq atomic.Uint64
+	seq.Store(uint64(time.Now().UnixNano()))
+	return &seq
+}()
+
 func parseGeminiSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector) (*message.Response, error) {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, sseInitialBufferSize), sseMaxTokenSize)
+	streamToken := geminiToolCallSeq.Add(1)
 	var resp message.Response
 	var content strings.Builder
 	var reasoning strings.Builder
@@ -790,7 +804,7 @@ func parseGeminiSSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 					finishThinking()
 					idx := nextToolIndex
 					nextToolIndex++
-					id := fmt.Sprintf("gemini_%d", idx)
+					id := fmt.Sprintf("gemini_%x_%d", streamToken, idx)
 					name := part.FunctionCall.Name
 					if name == "" {
 						log.Warnf("discarding Gemini tool call with empty id or name tool=%v id=%v", name, id)
