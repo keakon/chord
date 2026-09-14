@@ -16,7 +16,14 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-func cloneMessageForForkSeed(msg message.Message) message.Message {
+// cloneMessageForForkSeed prepares a prefix message for the forked session's
+// own transcript. Clearing ImagePath makes the fork persist its own copy of the
+// attachment instead of pointing at the source session's file — but only once
+// the bytes are in hand. A restored session holds its attachments lazily (no
+// Data, just the path and the size), so the path is dropped only when the
+// payload resolves; otherwise it is kept, and the fork shares the source file
+// rather than losing the attachment entirely.
+func (a *MainAgent) cloneMessageForForkSeed(msg message.Message) message.Message {
 	cloned := msg
 	if len(msg.Parts) == 0 {
 		return cloned
@@ -27,12 +34,19 @@ func cloneMessageForForkSeed(msg message.Message) message.Message {
 		if !parts[i].IsBinary() {
 			continue
 		}
-		if len(parts[i].Data) > 0 {
-			parts[i].Data = append([]byte(nil), parts[i].Data...)
+		if len(parts[i].Data) == 0 && parts[i].ImagePath != "" {
+			data, err := a.resolveBinaryPart(parts[i])
+			if err != nil {
+				log.Warnf("fork session: keeping source attachment path, payload unavailable path=%v error=%v", parts[i].ImagePath, err)
+				continue
+			}
+			parts[i].Data = data
 		}
-		if parts[i].ImagePath != "" {
-			parts[i].ImagePath = ""
+		if len(parts[i].Data) == 0 {
+			continue
 		}
+		parts[i].Data = append([]byte(nil), parts[i].Data...)
+		parts[i].ImagePath = ""
 	}
 	cloned.Parts = parts
 	return cloned
@@ -530,7 +544,7 @@ func (a *MainAgent) handleForkSessionCommand(msgIndex int) {
 	seedRecovery := recovery.NewRecoveryManager(newSessionDir)
 	seededMessages := 0
 	for _, msg := range prefix {
-		seedMsg := cloneMessageForForkSeed(msg)
+		seedMsg := a.cloneMessageForForkSeed(msg)
 		if err := seedRecovery.PersistMessage("main", seedMsg); err != nil {
 			seedRecovery.Close()
 			_ = newLock.Release()
