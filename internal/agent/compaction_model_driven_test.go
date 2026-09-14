@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1991,6 +1992,110 @@ func TestValidateModelDrivenClaimKindsObservedRequiresEvidence(t *testing.T) {
 	}
 	if err := validateModelDrivenCheckpointKind(args); err == nil {
 		t.Fatal("observed claim without evidence should be rejected")
+	}
+}
+
+// A rejection whose remedy depends on runtime state must carry that state: the
+// observed-without-evidence error names the evidence IDs this context actually
+// resolves, so the model can cite one or reclassify the claim instead of
+// guessing what "observed" required.
+func TestExplainCheckpointRejectionHintsResolvableEvidence(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.evidence.add(evidenceItem{Kind: evidenceToolDiff, Key: "resolvable-diff", Excerpt: "diff"})
+	id := evidenceItemID(a.evidence.snapshot()[0])
+
+	err := a.explainCheckpointRejection(checkpointClaimNeedsEvidenceError{claim: "tests pass"})
+	if err == nil {
+		t.Fatal("observed claim without evidence must stay rejected")
+	}
+	for _, want := range []string{"tests pass", id, "claim_evidence", "top-level evidence_refs", "derived/assumed/proposed"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("rejection hint %q must contain %q", err, want)
+		}
+	}
+}
+
+// Only the evidence check needs runtime state appended; every other violation
+// text is already complete, so wrapping it would bury the reason.
+func TestExplainCheckpointRejectionLeavesOtherErrorsUnchanged(t *testing.T) {
+	a := &MainAgent{}
+	original := errors.New("committed compact_context requires stage_status=completed")
+	if got := a.explainCheckpointRejection(original); got != original {
+		t.Fatalf("non-evidence rejection must pass through unchanged, got %v", got)
+	}
+}
+
+func TestResolvableEvidenceHintOmitsNegativeAndInvalidated(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.evidence.add(evidenceItem{Kind: evidenceToolDiff, Key: "positive", Excerpt: "diff"})
+	a.evidence.add(evidenceItem{Kind: evidenceToolError, Key: "negative", Excerpt: "failed"})
+	a.evidence.add(evidenceItem{Kind: evidenceToolDiff, Key: "stale", Excerpt: "old", Validity: evidenceValidityInvalidated})
+	byKey := make(map[string]string)
+	for _, item := range a.evidence.snapshot() {
+		byKey[item.Key] = evidenceItemID(item)
+	}
+
+	hint := a.resolvableEvidenceHint()
+	if !strings.Contains(hint, byKey["positive"]) {
+		t.Fatalf("hint must list the positive evidence ID, got %q", hint)
+	}
+	if strings.Contains(hint, byKey["negative"]) || strings.Contains(hint, byKey["stale"]) {
+		t.Fatalf("hint must omit negative and invalidated evidence, got %q", hint)
+	}
+}
+
+// A checkpoint evidence pack is the only place an archived item's ID remains
+// citable, and its rendered classification and validity must filter the hint
+// the same way live records do, or following the hint would trade one
+// rejection for another.
+func TestResolvableEvidenceHintOmitsNegativeAndInvalidatedPackIDs(t *testing.T) {
+	a := &MainAgent{tools: tools.NewRegistry(), ctxMgr: ctxmgr.NewManager(10000, 1000)}
+	positive := buildEvidenceItem(evidenceToolDiff, "positive", "needed", "tool", "diff")
+	negative := buildEvidenceItem(evidenceToolError, "negative", "needed", "tool", "failed")
+	invalidated := buildEvidenceItem(evidenceToolDiff, "invalidated", "needed", "tool", "stale")
+	invalidated.Validity = evidenceValidityInvalidated
+	checkpoint := buildCompactionCheckpointMessage("## Current User Request\n- continue", nil, compactionSummaryModeModelDriven, []evidenceItem{positive, negative, invalidated})
+	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: checkpoint, IsCompactionSummary: true})
+
+	hint := a.resolvableEvidenceHint()
+	if !strings.Contains(hint, evidenceItemID(positive)) {
+		t.Fatalf("hint must list the positive pack ID, got %q", hint)
+	}
+	for _, item := range []evidenceItem{negative, invalidated} {
+		if strings.Contains(hint, evidenceItemID(item)) {
+			t.Fatalf("hint must omit pack evidence %s %q, got %q", item.Kind, evidenceItemID(item), hint)
+		}
+	}
+}
+
+func TestResolvableEvidenceHintWithoutEvidence(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	hint := a.resolvableEvidenceHint()
+	if !strings.Contains(hint, "no evidence ID is resolvable in this context") {
+		t.Fatalf("hint without evidence must say none is resolvable, got %q", hint)
+	}
+}
+
+// End-to-end through the arm path: the rejection the model sees must be the
+// hinted one, and a rejected request must not arm a pending checkpoint.
+func TestTryArmModelDrivenCheckpointHintsResolvableEvidence(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.newTurn()
+	a.evidence.add(evidenceItem{Kind: evidenceToolDiff, Key: "arm-hint-diff", Excerpt: "diff"})
+	id := evidenceItemID(a.evidence.snapshot()[0])
+	ccID := "cc-observed"
+	a.ctxMgr.Append(message.Message{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{testToolCall(ccID, tools.NameCompactContext)}})
+
+	args := `{"active_objective":"a","next_step":"b","completed":["tests pass"],"claim_kinds":{"tests pass":"observed"}}`
+	_, err := a.tryArmModelDrivenCheckpoint(ccID, args)
+	if err == nil {
+		t.Fatal("observed claim without claim_evidence must be rejected")
+	}
+	if !strings.Contains(err.Error(), id) {
+		t.Fatalf("rejection %q must name the resolvable evidence ID %q", err, id)
+	}
+	if a.pendingModelDriven != nil {
+		t.Fatal("a rejected request must not arm a pending checkpoint")
 	}
 }
 

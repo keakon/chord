@@ -499,6 +499,31 @@ func TestCompactContextDescriptionExplainsPressureAwareSafeStops(t *testing.T) {
 	}
 }
 
+// The rejection guidance must stay generic. The runtime validates every field
+// against its own schema description and returns the reason, so the model fixes
+// a rejection by addressing the reported problem — not by memorizing one
+// field's remedy. Baking a parameter-specific fix into the description is the
+// failure mode where each new violation grew its own example, so this pins the
+// generic contract and the absence of such examples.
+func TestCompactContextDescriptionKeepsRejectionGuidanceGeneric(t *testing.T) {
+	description := NewCompactContextTool(testCompactValidator()).Description()
+	for _, want := range []string{
+		"The runtime validates every field against its own description before the checkpoint is armed",
+		"a violation rejects the whole request with the reason",
+		"re-submitting the same values cannot succeed",
+		"If the arguments are rejected, fix the reported problem and retry",
+	} {
+		if !strings.Contains(description, want) {
+			t.Fatalf("description must state %q, got:\n%s", want, description)
+		}
+	}
+	for _, gone := range []string{"shorten over-budget text", "drop non-workspace paths"} {
+		if strings.Contains(description, gone) {
+			t.Fatalf("rejection guidance must not bake a parameter-specific remedy %q, got:\n%s", gone, description)
+		}
+	}
+}
+
 // An empty state_files list stays valid (pure analysis, final delivery, or a
 // role without write tools), so the contract must state when it is the right
 // answer instead of leaving the model to infer it from a rejection it cannot

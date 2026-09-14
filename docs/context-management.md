@@ -270,6 +270,12 @@ runtime validates the request, waits for the tool batch to close, then:
    snapshot as a live tail, and continues the same turn on the compacted
    context.
 
+Failed tool batches from the current turn are re-attached as real records
+directly behind the checkpoint card, so a rejected call (for example a
+`compact_context` request the runtime declined) keeps its error card, and a
+fork of that generation still replays it, instead of surviving only as the
+card's excerpt.
+
 The stopping point is pressure-aware rather than tied to a completed phase:
 
 - With comfortable context, request a checkpoint only when the expected

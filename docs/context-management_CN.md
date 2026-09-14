@@ -102,6 +102,8 @@ providers:
 2. 当预计收益低于保守门槛（2048 tokens 且占 prepared surface 的 10%）时拒绝 reset；距上次成功 apply 不足 3 个主模型请求批次时同样会跳过；
 3. 原子应用 checkpoint，快照后追加的内容作为 live tail 保留，并在压缩后的上下文上继续同一 turn。
 
+当前回合里失败的工具批次会作为真实记录重新挂在 checkpoint 卡片之后：被拒绝的调用（例如 runtime 驳回的 `compact_context` 请求）保留错误卡片，对该代做 fork 时也仍会回放，不会只剩卡片里的摘录。
+
 checkpoint 的停点按上下文压力调整，不要求每次都等完整阶段结束：
 
 - 上下文充足时，只有预计节省的后续上下文成本高于 checkpoint 和重新读取状态的成本，才请求压缩。阶段完成只是有利边界，不是必要条件。

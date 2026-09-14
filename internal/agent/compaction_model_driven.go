@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -304,7 +305,7 @@ func (a *MainAgent) tryArmModelDrivenCheckpoint(callID string, rawArgs string) (
 		}
 	}
 	if err := validateModelDrivenCheckpointKind(args); err != nil {
-		return "", err
+		return "", a.explainCheckpointRejection(err)
 	}
 	if err := a.validateObservedClaimEvidence(args); err != nil {
 		return "", err
@@ -336,6 +337,81 @@ func (a *MainAgent) tryArmModelDrivenCheckpoint(callID string, rawArgs string) (
 	// surfaced by the continuation notice).
 	a.markReminderCompactContextCalled()
 	return result, nil
+}
+
+// explainCheckpointRejection appends the runtime state a rejection needs to be
+// actionable. Most violations are fixed by editing the field the message
+// names, so their text is already complete; a check whose remedy depends on
+// what the runtime currently resolves gets that list appended instead of
+// leaving the model to guess. It cannot live in the tool description, which is
+// baked at registration and participates in the tool-surface hash and the
+// frozen prompt prefix, while the resolvable IDs change every generation.
+func (a *MainAgent) explainCheckpointRejection(err error) error {
+	if _, ok := errors.AsType[checkpointClaimNeedsEvidenceError](err); !ok {
+		return err
+	}
+	return fmt.Errorf("%w; %s", err, a.resolvableEvidenceHint())
+}
+
+// evidenceHintMaxIDs bounds how many IDs the rejection hint names: it rides on
+// the tool result of a rejected request, so it stays short — the model needs
+// one ID that supports its claim, not the whole menu.
+const evidenceHintMaxIDs = 8
+
+// resolvableEvidenceHint reports the evidence IDs an observed claim can cite
+// in this context right now, or that none are resolvable. Only IDs the
+// observed rules accept (a positive kind, not invalidated) are listed, so
+// acting on the hint cannot trade one rejection for another.
+func (a *MainAgent) resolvableEvidenceHint() string {
+	ids, truncated := a.resolvableClaimEvidenceIDs(evidenceHintMaxIDs)
+	if len(ids) == 0 {
+		return "no evidence ID is resolvable in this context (no live evidence candidate and no [Context Evidence] pack), so no claim can be observed here; classify it as derived/assumed/proposed or drop claim_kinds for it"
+	}
+	list := strings.Join(ids, ", ")
+	if truncated {
+		list += fmt.Sprintf(" (first %d; more are resolvable)", len(ids))
+	}
+	return fmt.Sprintf("evidence IDs resolvable in this context: %s; cite the supporting ID in claim_evidence and in the top-level evidence_refs, or classify the claim as derived/assumed/proposed", list)
+}
+
+// resolvableClaimEvidenceIDs lists the evidence IDs currently resolvable that
+// could anchor an observed claim: live runtime evidence with a positive kind
+// first, then IDs a checkpoint evidence pack still in the transcript renders.
+// Negative kinds (tool_error, done_rejected, escalate) and invalidated records
+// are omitted because validateObservedClaimEvidence rejects them.
+func (a *MainAgent) resolvableClaimEvidenceIDs(limit int) ([]string, bool) {
+	seen := make(map[string]bool)
+	var out []string
+	add := func(id string) {
+		if id == "" || seen[id] {
+			return
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	if a != nil {
+		for _, item := range a.evidence.snapshot() {
+			if !evidenceKindSupportsCompletion(item.Kind) || item.Validity == evidenceValidityInvalidated {
+				continue
+			}
+			add(evidenceItemID(item))
+		}
+	}
+	var carried []string
+	for id, meta := range a.contextEvidencePackMetadata() {
+		if seen[id] || meta.invalidated || (meta.kind != "" && !evidenceKindSupportsCompletion(meta.kind)) {
+			continue
+		}
+		carried = append(carried, id)
+	}
+	slices.Sort(carried)
+	for _, id := range carried {
+		add(id)
+	}
+	if limit > 0 && len(out) > limit {
+		return out[:limit], true
+	}
+	return out, false
 }
 
 // evidenceKindSupportsCompletion reports whether an evidence record of the
@@ -581,6 +657,19 @@ func (a *MainAgent) validateCommittedEvidence(args tools.CompactContextArgs) err
 	return nil
 }
 
+// checkpointClaimNeedsEvidenceError marks the arm-time rejection a runtime hint
+// can make self-correcting: an observed claim with no claim_evidence. The
+// refusal text still states the contract; the arming path wraps it with the
+// evidence IDs this context actually offers, so the model can either cite one
+// or reclassify the claim instead of guessing what "observed" required.
+type checkpointClaimNeedsEvidenceError struct {
+	claim string
+}
+
+func (e checkpointClaimNeedsEvidenceError) Error() string {
+	return fmt.Sprintf("claim_kinds %q is observed but has no claim_evidence", e.claim)
+}
+
 func validateModelDrivenCheckpointKind(args tools.CompactContextArgs) error {
 	if args.CheckpointKind == checkpointKindCommitted && args.StageStatus != stageStatusCompleted {
 		return fmt.Errorf("committed compact_context requires stage_status=completed; retry with checkpoint_kind=provisional when the stage is not authoritative yet")
@@ -594,7 +683,7 @@ func validateModelDrivenCheckpointKind(args tools.CompactContextArgs) error {
 	// before the first checkpoint of a session renders its evidence pack.
 	for claim, kind := range args.ClaimKinds {
 		if kind == claimKindObserved && len(args.ClaimEvidence[claim]) == 0 {
-			return fmt.Errorf("claim_kinds %q is observed but has no claim_evidence", claim)
+			return checkpointClaimNeedsEvidenceError{claim: claim}
 		}
 		if kind == claimKindObserved {
 			refs := make(map[string]struct{}, len(args.EvidenceRefs))
@@ -1085,7 +1174,12 @@ func (a *MainAgent) produceModelDrivenDraftAsync(ctx context.Context, bundle mod
 	preflight.AnchorBytes = contentStats.AnchorBytes
 	preflight.HistoryMapBytes = contentStats.HistoryMapBytes
 	preflight.ContinuationTokens = contentStats.ContinuationTokens
+	// Failed tool batches of the current turn stay live: the archival profile
+	// drops every record of the head, so without them the failure would be
+	// readable only as the card's excerpt and could no longer be forked.
+	retainedFailures := checkpointRetainedFailureRecords(headSnapshot)
 	projected := []message.Message{{Role: message.RoleUser, Content: checkpointContent, IsCompactionSummary: true}}
+	projected = append(projected, retainedFailures...)
 	projected = append(projected, snapshot[headSplit:]...)
 	projected = append(projected, bundle.queuedUserMessages...)
 	projectedTokens := bundle.estimateTokens(projected) + bundle.postResetFixedRequestTokens + modelDrivenPostResetOverlayTokens
@@ -1106,7 +1200,9 @@ func (a *MainAgent) produceModelDrivenDraftAsync(ctx context.Context, bundle mod
 		CompactionSummaryMode: compactionSummaryModeModelDriven,
 	}
 
-	newMessages := []message.Message{contextSummaryMsg}
+	newMessages := make([]message.Message, 0, 1+len(retainedFailures))
+	newMessages = append(newMessages, contextSummaryMsg)
+	newMessages = append(newMessages, retainedFailures...)
 	historyCommitted = true
 	return &compactionDraft{
 		PlanID:                planID,
@@ -1170,6 +1266,7 @@ func (a *MainAgent) modelDrivenLowGainPreflight(bundle modelDrivenBarrierSnapsho
 	checkpointContent, preflight := builder.render("")
 	preflight.CurrentSource = currentSource
 	projected := []message.Message{{Role: message.RoleUser, Content: checkpointContent, IsCompactionSummary: true}}
+	projected = append(projected, checkpointRetainedFailureRecords(snapshot[:headSplit])...)
 	projected = append(projected, snapshot[headSplit:]...)
 	projected = append(projected, bundle.queuedUserMessages...)
 

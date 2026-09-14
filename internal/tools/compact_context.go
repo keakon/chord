@@ -492,8 +492,9 @@ func (t CompactContextTool) Description() string {
 		"Entries are pure references: the tool never reads them and never verifies that they exist. After a reset the runtime re-loads a bounded head of them when this session already read or wrote the file and the read permission rule allows it, so keep the top of each file a self-contained resume block and list only files worth re-reading.\n" +
 		"Roles that are allowed to write plan or notes files (for example .chord/plans/YYYYMMDD-<slug>.md or a task-notes file under .chord/notes/ in a planner role) may list those files here; state_files itself never reads or writes anything, and write permissions are still governed by the role's permission rules.\n" +
 		"State outside the project (temp dirs, logs, session files, other checkouts) cannot be referenced here; capture it in completed/decisions/open_issues text instead.\n" +
+		"The runtime validates every field against its own description before the checkpoint is armed: a violation rejects the whole request with the reason, and re-submitting the same values cannot succeed.\n" +
 		budget +
-		"If the arguments are rejected, fix the reported problem (shorten over-budget text, or drop non-workspace paths from state_files) and retry; never work around the limits by splitting the checkpoint."
+		"If the arguments are rejected, fix the reported problem and retry; never work around the limits by splitting the checkpoint."
 }
 
 func (CompactContextTool) Parameters() map[string]any {

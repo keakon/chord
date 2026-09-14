@@ -40,6 +40,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - A local shell command whose output outgrows the capture cap keeps its newest output, the same tail the `shell` tool keeps: the TUI's `!` command and the headless local shell both used a capture that stopped at the cap and dropped everything after it, so a long command's failure at the end — the part worth reading — was the part that got dropped.
 - A `!` command or a headless `local_shell` command that daemonizes a process holding the output pipe no longer hangs its caller forever: the deadline terminates the whole process group, and the pipe drain is bounded so the command always returns with the shell's own exit status.
 - A re-delivered background result keeps updating its existing card after a transcript rebuild instead of appending a duplicate, matching how the live path matches re-deliveries by durable identity.
+- A model-driven checkpoint no longer drops the failed tool calls of the current turn. The reset archives the head, and a rejected call (for example a `compact_context` request the runtime declined) used to survive only as an excerpt inside the checkpoint: its error card disappeared from the transcript, and a fork of that generation no longer replayed the failure. The failed batch now stays as real records directly behind the checkpoint card.
 
 ## 0.8.0 - 2026-09-11
 
