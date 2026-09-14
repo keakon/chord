@@ -172,16 +172,18 @@ func (m *Model) startupDeferredTranscriptBlockIndex(blockID int) int {
 	if idx, ok := state.indexByID[blockID]; ok && idx < len(state.allBlocks) && state.allBlocks[idx] != nil && state.allBlocks[idx].ID == blockID {
 		return idx
 	}
-	for i, block := range state.allBlocks {
-		if block != nil && block.ID == blockID {
-			return i
-		}
-	}
-	return -1
+	return blockIndexByID(state.allBlocks, blockID)
 }
 
-func (m *Model) startupDeferredTranscriptMetaIndex(blockID int) int {
-	return m.startupDeferredTranscriptBlockIndex(blockID)
+// metaIndexFor maps an allBlocks position to its blockMeta slot. The two run
+// parallel, so the position is the answer; the identity check keeps a slice
+// that has drifted (shorter, or holding another block) from being edited at
+// the wrong offset.
+func (state *startupDeferredTranscriptState) metaIndexFor(idx, blockID int) int {
+	if idx < 0 || idx >= len(state.blockMeta) || state.blockMeta[idx].BlockID != blockID {
+		return -1
+	}
+	return idx
 }
 
 // buildDeferredBlockIndex builds the ID → index map for a block list.
@@ -314,8 +316,7 @@ func (m *Model) syncStartupDeferredTranscriptBlock(block *Block) {
 	}
 	clone := cloneBlockForDeferredSource(block)
 	state.allBlocks[idx] = clone
-	metaIdx := m.startupDeferredTranscriptMetaIndex(block.ID)
-	if metaIdx >= 0 {
+	if metaIdx := state.metaIndexFor(idx, block.ID); metaIdx >= 0 {
 		// Tool results re-sync each block twice (once on the result event,
 		// once through markBlockSettled); the second pass usually changes
 		// only SettledAt, which the meta never reads. Skip the Summary and
@@ -366,14 +367,19 @@ func (m *Model) syncStartupDeferredTranscriptAfterViewportRemove(blockID int) {
 		return
 	}
 	if idx := m.startupDeferredTranscriptBlockIndex(blockID); idx >= 0 {
+		// Resolve the meta slot before allBlocks loses the entry: the index is
+		// derived from allBlocks, so dropping the block first would leave the
+		// parallel blockMeta permanently one entry long and shift every later
+		// block's metadata.
+		metaIdx := state.metaIndexFor(idx, blockID)
 		state.allBlocks = append(state.allBlocks[:idx], state.allBlocks[idx+1:]...)
 		// Indices shift for every later block; rebuild the map rather than
 		// maintain it decrementally — removals are rare.
 		state.indexByID = buildDeferredBlockIndex(state.allBlocks)
-	}
-	if metaIdx := m.startupDeferredTranscriptMetaIndex(blockID); metaIdx >= 0 {
-		state.blockMeta = append(state.blockMeta[:metaIdx], state.blockMeta[metaIdx+1:]...)
-		delete(state.metaSigs, blockID)
+		if metaIdx >= 0 {
+			state.blockMeta = append(state.blockMeta[:metaIdx], state.blockMeta[metaIdx+1:]...)
+			delete(state.metaSigs, blockID)
+		}
 	}
 	m.syncStartupDeferredTranscriptWindowToViewport()
 }

@@ -60,7 +60,16 @@ type imagePartKeyEntry struct {
 const imageRuntimeKeyMemoMaxEntries = 256
 
 // imageRuntimeCacheKeyCached memoizes imageRuntimeCacheKey per part identity.
+// Only inline payloads are memoized: their key is an FNV hash over the whole
+// payload, which the part identity pins exactly. A path-backed key folds in the
+// file's size and mtime precisely so a rewritten file re-encodes, and the part
+// identity cannot see that — memoizing it would freeze the first key (or the
+// first "missing" verdict) for the life of the memo. The stat it costs instead
+// is cheap next to the hash this memo exists to avoid.
 func imageRuntimeCacheKeyCached(part BlockImagePart) (string, error) {
+	if len(part.Data) == 0 {
+		return imageRuntimeCacheKey(part)
+	}
 	ref := imagePartKeyRefFor(part)
 	imageRuntimeKeyMemo.mu.Lock()
 	defer imageRuntimeKeyMemo.mu.Unlock()
