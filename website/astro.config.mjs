@@ -67,6 +67,7 @@ export default defineConfig({
             { slug: 'configuration', translations: { 'zh-CN': '配置与认证' } },
             { slug: 'context-management', translations: { 'zh-CN': '上下文管理' } },
             { slug: 'model-configs', translations: { 'zh-CN': '模型配置速查' } },
+            { slug: 'reasoning', translations: { 'zh-CN': '推理与思考' } },
             { slug: 'tools', translations: { 'zh-CN': '内置工具' } },
             { slug: 'edit-tools', translations: { 'zh-CN': '编辑工具' } },
             { slug: 'keybindings', translations: { 'zh-CN': '快捷键' } },

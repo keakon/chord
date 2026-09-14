@@ -768,19 +768,19 @@ providers:
   gemini:
     api_url: https://generativelanguage.googleapis.com/v1beta/models
     models:
-      gemini-3.5-flash: *gemini-flash
-      gemini-3.7-flash: *gemini-flash
+      gemini-3.8-flash: *gemini-flash
 
 model_pools:
   default:
-    - gemini/gemini-3.5-flash
+    - gemini/gemini-3.8-flash
 ```
 
 Notes:
 
 - Keep `api_url` at the `/models` base path. Chord appends `/{model}:streamGenerateContent?alt=sse` automatically.
 - `type` can be omitted; Chord auto-detects Gemini from the `/models` path.
-- Gemini 3.7 Flash (GA August 2026) is the current workhorse: introductory $0.75 / $3.75 per 1M tokens through 2026, then $1.50 / $7.50 from 2027. Its thinking levels are `low` / `medium` / `high` only — `minimal` is not supported, and `thinking_budget` is deprecated, so the template above uses `level` only. Gemini 3.5/3.6 Flash share this shape (they also accept `level`).
+- Gemini 3.8 Flash (GA September 2, 2026) is the current workhorse: 1M-token context, 64K max output, and thinking levels `low` / `medium` (the provider default) / `high`. `minimal` is not supported and `thinking_budget` is deprecated, so the template above uses `level` only; it pins `high` for agentic work — dropping to `medium` or `low` cuts latency and token burn for everyday tasks.
+- Gemini 3.5 / 3.6 Flash share this shape and also accept `minimal`; the Flash-Lite series defaults to `minimal`. Gemini 3.1 Pro takes `low` / `medium` / `high` and rejects `minimal` too, so do not reuse one `minimal` variant across the family.
 
 ### Compaction tuning for Gemini
 
@@ -791,10 +791,12 @@ compaction rule:
   MRCR v2 8-needle retrieval lands around 0.26), so keep compaction aggressive:
   `threshold` ~0.2 and `reminder` ~0.15 of the usable budget (roughly 150K–210K
   on a 1M window).
-- **Gemini 3.7 Flash / Flash-Lite** hold up well at long context (MRCR v2 8-needle
-  near 0.97, among the best on the leaderboard), so aggressive early compaction
-  just discards context it can still use. Leave Flash at the global default
-  (`threshold` 0.8) or omit the per-model block entirely.
+- **Gemini 3.8 Flash / Flash-Lite** are built for the 1M window and hold up well
+  at long context, so aggressive early compaction just discards context they can
+  still use. Leave Flash at the global default (`threshold` 0.8) or omit the
+  per-model block entirely. 3.8 Flash buys better accuracy with higher token
+  consumption by design, so rising usage on long agentic runs is expected — it
+  is not a signal to compact earlier.
 
 ```yaml
 # Per-model Gemini compaction. Providers referencing the template inherit it.
@@ -806,12 +808,13 @@ model_templates:
       include_thoughts: true
     variants:
       high: {thinking: {level: "high"}}
-      minimal: {thinking: {level: "minimal"}}
+      medium: {thinking: {level: "medium"}}
+      low: {thinking: {level: "low"}}
     modalities: {input: [text, image, pdf]}
 ```
 
 Pricing note: only **Gemini 3.1 Pro** steps up to the higher input tier above
-200K tokens (the whole request is billed at the higher tier). Gemini 3.7 Flash
+200K tokens (the whole request is billed at the higher tier). Gemini 3.8 Flash
 and Flash-Lite are flat-priced at any context length, so there is no cost reason
 to compact Flash early — do it only if quality actually degrades for your
 workload. If you need both a long reliable window *and* Pro-class quality, that is
@@ -1170,9 +1173,9 @@ Additional notes:
   longer outputs.
 - `reasoning_effort` (Chat) and `output_config.effort` (Messages) accept `low`
   / `high` / `max`, and Responses `reasoning.effort` also accepts `none` to
-  turn thinking off; the default is `high`. Other values are aliases: `minimal`
-  maps to `low`, `medium` and `xhigh` to `high`, and `ultra` to `max` — which
-  is why the templates only define the `low` / `high` / `max` variants.
+  turn thinking off; the default is `high`. Other values are remapped by the
+  backend: `medium` and `xhigh` map to `high` — which is why the templates only
+  define the `low` / `high` / `max` variants.
 - The Responses API lives at `api.deepseek.com/v1/responses`, and its
   `output_tokens_details.reasoning_tokens` field is handled by Chord's standard
   reasoning replay without extra configuration.
@@ -1236,9 +1239,10 @@ model entry when you run genuinely long agentic runs.
 
 Qwen returns visible reasoning through `reasoning_content`, but most models
 ignore that field in history by default. Only enable replay on a model that
-documents `preserve_thinking` support (currently Qwen 3.6/3.7 Max and Plus
-families); older Qwen 3/3.5 models may still emit reasoning but should leave
-continuity disabled.
+documents `preserve_thinking` support — currently Qwen 3.8 Max; 3.7 Max, Plus,
+and Flash; and 3.6 Max preview and Plus, dated snapshots included. Check the
+official list for your model: older Qwen 3/3.5 models may still emit reasoning
+but should leave continuity disabled.
 
 ```yaml
 model_templates:
@@ -1274,10 +1278,12 @@ reasoning counts as input tokens and billing when `preserve_thinking` is true;
 ## Kimi K3
 
 Kimi K3 is the current flagship thinking model. It has a 1M-token context,
-always reasons, currently accepts only `reasoning_effort: max`, and requires
-the complete assistant message (including `reasoning_content`) in multi-turn
-conversations and tool-call loops. Do not pass the K2.x `thinking` parameter or
-fixed sampling fields such as `temperature`.
+always reasons, and accepts `reasoning_effort: low`, `high`, or `max` (default
+`max`); switching effort mid-session invalidates the prefix cache, so keep it
+stable within a conversation. K3 requires the complete assistant message
+(including `reasoning_content`) in multi-turn conversations and tool-call
+loops. Do not pass the K2.x `thinking` parameter or sampling fields: K3 fixes
+`temperature` at 1.0, `top_p` at 0.95, and the penalties at 0.
 
 ```yaml
 model_templates:
@@ -1379,7 +1385,7 @@ Reasoning-only turns are not copied as fallback text. This keeps cross-protocol
 context focused on action-relevant state and avoids paying repeatedly for old
 chain-of-thought that is not tied to a tool round.
 
-## Grok 4.6 (xAI Responses)
+## Grok 4.6 (xAI)
 
 xAI recommends the Responses API for Grok. Grok 4.6 supports text and image
 input, function calling, structured output, reasoning, and a 500K context
@@ -1428,6 +1434,140 @@ Use `grok-4.6` as the model ID. Do not configure
 Chat Completions `reasoning_content`. `reasoning.effort` accepts `low`,
 `medium`, `high`, and `xhigh` (Grok 4.6 only; models that do not support it
 treat it as `high`). High is the default and reasoning cannot be disabled.
+
+### Chat Completions
+
+xAI also serves Grok 4.6 on the OpenAI-compatible `/v1/chat/completions`
+endpoint and keeps documenting it; only new integrations are steered to
+Responses. The wire accepts `reasoning_effort` (`low`, `medium`, `high`
+default, `xhigh`), rejects `stop`, `presence_penalty`, and `frequency_penalty`
+on reasoning models, and deprecates `max_tokens` in favor of
+`max_completion_tokens`.
+
+Gateways differ in whether they return `reasoning_content`. When the gateway
+never returns it, Chord has nothing to replay on assistant tool calls, reads
+the backend as replay-incompatible, and strips `reasoning_effort` for the rest
+of the turn — per-request effort tuning then only affects the first request.
+Set `compat.chat_completions.keep_reasoning_effort: true` to keep the effort
+and reasoning request overrides active for the whole turn:
+
+```yaml
+model_templates:
+  grok-4.6: &grok-4-6
+    limit:
+      context: 500000
+      output: 64000
+    reasoning:
+      effort: high
+    compat:
+      chat_completions:
+        keep_reasoning_effort: true
+    variants:
+      low:
+        reasoning:
+          effort: low
+      medium:
+        reasoning:
+          effort: medium
+      high:
+        reasoning:
+          effort: high
+      xhigh:
+        reasoning:
+          effort: xhigh
+    modalities:
+      input: [text, image]
+
+providers:
+  grok-gateway:
+    type: chat-completions
+    api_url: https://example.com/v1/chat/completions
+    models:
+      grok-4.6: *grok-4-6
+
+model_pools:
+  default:
+    - grok-gateway/grok-4.6@xhigh
+```
+
+`openai_visible` is still unnecessary: Grok does not require a replayed
+`reasoning_content` contract. Cache hits depend on sticky routing — xAI accepts
+a `prompt_cache_key` on Chat Completions and routes it through
+`x-grok-conv-id`, so a gateway that forwards neither re-sends every request as
+a cache miss.
+
+## MiniMax M3 / M2.x (OpenAI-compatible)
+
+Pair with `~/.config/chord/auth.yaml`:
+
+```yaml
+minimax:
+  - "$MINIMAX_API_KEY"
+```
+
+The OpenAI-compatible endpoint is `https://api.minimax.io/v1/chat/completions`.
+`MiniMax-M3` is the multimodal flagship with a 1M-token window; the M2.x line
+(`MiniMax-M2.7`, `MiniMax-M2.5`, `MiniMax-M2.1`, `MiniMax-M2`, and their
+`-highspeed` variants) is text-only with a 204,800-token window. Thinking is on
+by default on M3 and always on for M2.x; only M3 accepts
+`thinking: {type: disabled}` to skip it.
+
+```yaml
+model_templates:
+  minimax-m3: &minimax-m3
+    limit:
+      context: 1000000
+    modalities:
+      input: [text, image]
+
+  minimax-m2x: &minimax-m2x
+    limit:
+      context: 204800
+    modalities:
+      input: [text]
+
+providers:
+  minimax:
+    type: chat-completions
+    api_url: https://api.minimax.io/v1/chat/completions
+    models:
+      MiniMax-M3: *minimax-m3
+      MiniMax-M2.7: *minimax-m2x
+
+model_pools:
+  default:
+    - minimax/MiniMax-M3
+```
+
+MiniMax documents the context windows but no output cap, so the templates leave
+`limit.output` unset and inherit the global cap. M3 also takes video input;
+Chord's chat wire sends text and images only.
+
+By default the API returns thinking inside the assistant `content` field,
+wrapped in tags, and asks for that content to be preserved completely. Chord
+replays assistant content verbatim, so this shape needs no extra configuration;
+thinking shows up as ordinary assistant text rather than in the reasoning
+display.
+
+To move thinking onto the reasoning channel, set `reasoning_split: true`: the
+API then returns `reasoning_content` alongside `reasoning_details`. Chord parses
+and can replay `reasoning_content`, but `reasoning_details` has no Chord
+counterpart, and MiniMax asks for both to be preserved. Use the split shape only
+when your endpoint accepts plain `reasoning_content` replay:
+
+```yaml
+# Structured reasoning: MiniMax moves thinking to reasoning_content.
+model_templates:
+  minimax-m3-split: &minimax-m3-split
+    <<: *minimax-m3
+    compat:
+      request_overrides:
+        body:
+          reasoning_split: true
+      reasoning_continuity:
+        mode: openai_visible
+        preserve_history: true
+```
 
 ## Verify any recipe
 

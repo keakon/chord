@@ -705,26 +705,26 @@ providers:
   gemini:
     api_url: https://generativelanguage.googleapis.com/v1beta/models
     models:
-      gemini-3.5-flash: *gemini-flash
-      gemini-3.7-flash: *gemini-flash
+      gemini-3.8-flash: *gemini-flash
 
 model_pools:
   default:
-    - gemini/gemini-3.5-flash
+    - gemini/gemini-3.8-flash
 ```
 
 要点：
 
 - `api_url` 保持在 `/models` 基础路径即可；Chord 会自动追加 `/{model}:streamGenerateContent?alt=sse`。
 - `type` 可以省略；Chord 会根据 `/models` 路径自动识别 Gemini。
-- Gemini 3.7 Flash（2026 年 8 月 GA）是目前的主力模型：促销价每百万 token $0.75 / $3.75 到 2026 年底，2027 年起 $1.50 / $7.50。它的 thinking 级别只有 `low` / `medium` / `high`——不支持 `minimal`，且 `thinking_budget` 已废弃，所以上面模板只用 `level`。Gemini 3.5 / 3.6 Flash 也是同一套结构（同样只接受 `level`）。
+- Gemini 3.8 Flash（2026 年 9 月 2 日 GA）是目前的主力模型：1M token 上下文、最大 64K 输出，thinking 级别为 `low` / `medium`（官方默认）/ `high`。它不支持 `minimal`，且 `thinking_budget` 已废弃，所以上面模板只用 `level`；模板固定用 `high` 服务 agentic 场景——日常任务降到 `medium` / `low` 可以省延迟和 token。
+- Gemini 3.5 / 3.6 Flash 也是同一套结构，并且仍然接受 `minimal`；Flash-Lite 系列则以 `minimal` 为默认值。Gemini 3.1 Pro 只接受 `low` / `medium` / `high`，同样不支持 `minimal`，所以不要把一个 `minimal` variant 套用到整个家族。
 
 ### Gemini 的压缩调优
 
 Gemini 长上下文表现随档位差异极大，没有统一的压缩规则：
 
 - **Gemini 3.1 Pro** 的多针长上下文确实弱（公开 MRCR v2 8-needle 检索约 0.26），所以要保留激进压缩：`threshold` 取可用预算的约 0.2、`reminder` 约 0.15（1M 窗口约合 150K–210K）。
-- **Gemini 3.7 Flash / Flash-Lite** 长上下文表现很好（MRCR v2 8-needle 接近 0.97，在榜单上名列前茅），激进提前压缩只会丢掉它还能用的上下文。Flash 用全局默认（`threshold` 0.8）或直接不写该模板块即可。
+- **Gemini 3.8 Flash、Flash-Lite** 为 1M 窗口设计，长上下文表现很好，激进提前压缩只会丢掉它们还能用的上下文。Flash 用全局默认（`threshold` 0.8）或直接不写该模板块即可。3.8 Flash 靠更高的 token 消耗换取更好的准确率，所以长时间 agentic 任务里用量上涨属于正常现象——不是该提前压缩的信号。
 
 ```yaml
 # 按模型分别配 Gemini 的 compaction；引用该模板的 provider 全部继承。
@@ -736,11 +736,12 @@ model_templates:
       include_thoughts: true
     variants:
       high: {thinking: {level: "high"}}
-      minimal: {thinking: {level: "minimal"}}
+      medium: {thinking: {level: "medium"}}
+      low: {thinking: {level: "low"}}
     modalities: {input: [text, image, pdf]}
 ```
 
-计费提醒：只有 **Gemini 3.1 Pro** 在超过 200K 输入后进入更高输入档（整请求按高价档计费）；Gemini 3.7 Flash 与 Flash-Lite 在任何上下文长度下都是平价，所以 Flash 没有为省钱而提前压缩的理由——只有当你的工作负载确实出现质量退化时才压。如果你既要长可靠窗口、又要 Pro 级质量，那才是该换用 GPT-5.6 Sol / Claude 5 这类模型的场景。
+计费提醒：只有 **Gemini 3.1 Pro** 在超过 200K 输入后进入更高输入档（整请求按高价档计费）；Gemini 3.8 Flash 与 Flash-Lite 在任何上下文长度下都是平价，所以 Flash 没有为省钱而提前压缩的理由——只有当你的工作负载确实出现质量退化时才压。如果你既要长可靠窗口、又要 Pro 级质量，那才是该换用 GPT-5.6 Sol / Claude 5 这类模型的场景。
 
 ## GLM-5.2 / BigModel Coding Plan
 
@@ -1075,9 +1076,9 @@ model_pools:
   本地分配，需要更长输出时按需调大。
 - `reasoning_effort`（Chat）与 `output_config.effort`（Messages）接受
   `low` / `high` / `max`，Responses 的 `reasoning.effort` 还接受 `none`
-  （关闭思考）；默认值是 `high`。其余取值都是别名：`minimal` 映射到
-  `low`，`medium` 和 `xhigh` 映射到 `high`，`ultra` 映射到 `max`——所以
-  模板只定义 `low` / `high` / `max` 三个 variant。
+  （关闭思考）；默认值是 `high`。其余取值由后端重映射：`medium` 和
+  `xhigh` 映射到 `high`——所以模板只定义 `low` / `high` / `max`
+  三个 variant。
 - Responses API 位于 `api.deepseek.com/v1/responses`；响应中的
   `output_tokens_details.reasoning_tokens` 由 Chord 按标准 reasoning 回显
   处理，无需额外配置。
@@ -1136,8 +1137,9 @@ DeepSeek 的缓存命中价是业界最低的（$0.003/M），因此一次能保
 
 Qwen 通过 `reasoning_content` 返回可见思考，但大多数型号默认忽略历史
 消息里的该字段。只有模型文档明确支持 `preserve_thinking` 时才应开启
-回放（目前主要是 Qwen 3.6/3.7 Max、Plus 系列）；较早的 Qwen 3/3.5
-即使会输出思考，也应保持 continuity 关闭。
+回放——目前是 Qwen 3.8 Max，3.7 Max / Plus / Flash，以及 3.6 Max
+preview / Plus（含带日期的快照版本）。请以官方支持列表为准；较早的
+Qwen 3/3.5 即使会输出思考，也应保持 continuity 关闭。
 
 ```yaml
 model_templates:
@@ -1172,10 +1174,12 @@ model_pools:
 
 ## Kimi K3
 
-Kimi K3 是当前旗舰思考模型，提供 1M token 上下文、始终启用思考，目前
-只接受 `reasoning_effort: max`，并要求多轮对话和工具调用循环完整回传
-assistant 消息（包括 `reasoning_content`）。不要发送 K2.x 的 `thinking`
-参数，也不要显式发送 `temperature` 等固定采样字段。
+Kimi K3 是当前旗舰思考模型，提供 1M token 上下文、始终启用思考，
+`reasoning_effort` 接受 `low` / `high` / `max`（默认 `max`）；会话中途
+切换 effort 会让 prefix cache 失效，所以不要频繁改。它要求多轮对话和
+工具调用循环完整回传 assistant 消息（包括 `reasoning_content`）。不要
+发送 K2.x 的 `thinking` 参数，也不要显式发送采样字段：K3 把
+`temperature` 固定为 1.0、`top_p` 固定为 0.95、penalties 固定为 0。
 
 ```yaml
 model_templates:
@@ -1268,7 +1272,7 @@ Chord 会保留已完成工具轮次中可迁移的部分：
 纯 reasoning-only 历史不会转换为 fallback 文本。这样可以把跨协议上下文
 集中在与动作相关的状态上，避免为和工具轮次无关的旧思考链重复付费。
 
-## Grok 4.6（xAI Responses）
+## Grok 4.6（xAI）
 
 xAI 推荐通过 Responses API 使用 Grok。Grok 4.6 支持文本和图片输入、
 function calling、structured output、reasoning，并提供 500K 上下文。xAI
@@ -1314,6 +1318,131 @@ xAI 只公布了 Grok 4.6 的 500K 总上下文窗口，没有再给出更低的
 Chat Completions 的 `reasoning_content`。`reasoning.effort` 支持 `low`、
 `medium`、`high`、`xhigh`（仅 Grok 4.6 可用，不支持该档位的模型会按 `high`
 处理）；`high` 是默认值，且 reasoning 不可关闭。
+
+### Chat Completions
+
+Grok 4.6 也能走 OpenAI 兼容的 `/v1/chat/completions`，官方仍在维护这条线路，
+只是建议新集成改用 Responses。它同样接受 `reasoning_effort`（`low`、`medium`、
+`high` 默认、`xhigh`）；reasoning 模型不接受 `stop`、`presence_penalty`、
+`frequency_penalty`，`max_tokens` 已弃用，应改用 `max_completion_tokens`。
+
+网关是否回传 `reasoning_content` 各不相同。网关一直不回传时，Chord 回放
+assistant tool call 没有 reasoning content 可用，会按「该后端无法回放
+reasoning」处理，从出现工具调用的下一次请求起剥离 `reasoning_effort`——按请求
+设置的 effort 就只对每个回合的首个请求生效。想让 effort 和 reasoning 请求覆盖项
+在整个回合都保持生效，就用 `compat.chat_completions.keep_reasoning_effort: true`：
+
+```yaml
+model_templates:
+  grok-4.6: &grok-4-6
+    limit:
+      context: 500000
+      output: 64000
+    reasoning:
+      effort: high
+    compat:
+      chat_completions:
+        keep_reasoning_effort: true
+    variants:
+      low:
+        reasoning:
+          effort: low
+      medium:
+        reasoning:
+          effort: medium
+      high:
+        reasoning:
+          effort: high
+      xhigh:
+        reasoning:
+          effort: xhigh
+    modalities:
+      input: [text, image]
+
+providers:
+  grok-gateway:
+    type: chat-completions
+    api_url: https://example.com/v1/chat/completions
+    models:
+      grok-4.6: *grok-4-6
+
+model_pools:
+  default:
+    - grok-gateway/grok-4.6@xhigh
+```
+
+`openai_visible` 依然不用配：Grok 不要求回放 `reasoning_content`。缓存命中
+取决于粘性路由：xAI 在 Chat Completions 上接受 `prompt_cache_key` 并映射为
+`x-grok-conv-id`；网关两者都不透传时，每个请求都会以缓存未命中重发。
+
+## MiniMax M3 / M2.x（OpenAI 兼容接口）
+
+在 `~/.config/chord/auth.yaml` 中配置：
+
+```yaml
+minimax:
+  - "$MINIMAX_API_KEY"
+```
+
+OpenAI 兼容端点是 `https://api.minimax.io/v1/chat/completions`。`MiniMax-M3`
+是支持多模态的旗舰，窗口 1M token；M2.x 系列（`MiniMax-M2.7`、
+`MiniMax-M2.5`、`MiniMax-M2.1`、`MiniMax-M2` 及各自的 `-highspeed` 变体）
+只收文本，窗口 204,800 token。M3 默认开启思考（不传 `thinking` 即为
+adaptive），M2.x 始终开启、无法关闭；只有 M3 接受
+`thinking: {type: disabled}` 跳过思考。
+
+```yaml
+model_templates:
+  minimax-m3: &minimax-m3
+    limit:
+      context: 1000000
+    modalities:
+      input: [text, image]
+
+  minimax-m2x: &minimax-m2x
+    limit:
+      context: 204800
+    modalities:
+      input: [text]
+
+providers:
+  minimax:
+    type: chat-completions
+    api_url: https://api.minimax.io/v1/chat/completions
+    models:
+      MiniMax-M3: *minimax-m3
+      MiniMax-M2.7: *minimax-m2x
+
+model_pools:
+  default:
+    - minimax/MiniMax-M3
+```
+
+MiniMax 只公布了上下文窗口，没有公布输出上限，所以模板不写 `limit.output`，
+沿用全局上限。M3 还能收视频，但 Chord 的 chat 线路只发送文本和图片。
+
+默认请求形状下，思考内容会带标签写在 assistant 的 `content` 里，官方要求这段
+content 完整保留。Chord 会原样回放 assistant content，所以默认形状无需额外
+配置；代价是思考会作为普通正文显示，而不是进入 reasoning 展示区。
+
+想让思考走 reasoning 通道，就设置 `reasoning_split: true`：接口会把思考放进
+`reasoning_content`，同时返回 `reasoning_details`。Chord 能解析并回放
+`reasoning_content`，但没有 `reasoning_details` 的对应实现，而官方要求两者都
+完整保留。只有当你的端点接受纯 `reasoning_content` 回放时，才用下面这种形状：
+
+```yaml
+# 结构化 reasoning：MiniMax 把思考移到 reasoning_content。
+model_templates:
+  minimax-m3-split: &minimax-m3-split
+    <<: *minimax-m3
+    compat:
+      request_overrides:
+        body:
+          reasoning_split: true
+      reasoning_continuity:
+        mode: openai_visible
+        preserve_history: true
+```
 
 ## 如何验证任意一份配置
 

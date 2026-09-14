@@ -9,7 +9,7 @@
 ## 按任务找文档
 
 - **快速启动**：[快速开始](./quickstart_CN.md)
-- **配置模型**：[配置与认证](./configuration_CN.md) · [模型配置速查](./model-configs_CN.md) · [示例配置库](./examples/index_CN.md)
+- **配置模型**：[配置与认证](./configuration_CN.md) · [模型配置速查](./model-configs_CN.md) · [推理与思考](./reasoning_CN.md) · [示例配置库](./examples/index_CN.md)
 - **安全编辑文件**：[编辑工具](./edit-tools_CN.md) · [权限与安全](./permissions-and-safety_CN.md)
 - **远程控制**：[Headless](./headless_CN.md) · [权限与安全](./permissions-and-safety_CN.md)
 - **长任务**：[使用指南 — `/loop`](./usage_CN.md#loop--持续执行模式) · [上下文管理](./context-management_CN.md)
@@ -29,6 +29,7 @@
 - [配置与认证](./configuration_CN.md) —— `config.yaml`、`auth.yaml`、provider、模型池、完整速查表
 - [上下文管理](./context-management_CN.md) —— 上下文压缩与上下文剪裁：原理、配置、调参
 - [模型配置速查](./model-configs_CN.md) —— 常见 provider / model 家族的可复制片段
+- [推理与思考](./reasoning_CN.md) —— 思考如何按线路请求、返回与回放，怎么判断回放契约，以及各家族配方入口
 - [内置工具](./tools_CN.md) —— 全部工具名，配权限规则和 hook 过滤器时用
 - [编辑工具](./edit-tools_CN.md) —— `edit`、`apply_patch`、`write` 如何选择，以及参数格式、示例和安全行为
 - [项目记忆](./usage_CN.md#项目记忆memory) —— 跨会话记忆：`MEMORY.md`、自动抽取、信任边界与 Git 语义

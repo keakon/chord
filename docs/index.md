@@ -9,7 +9,7 @@ Start with what works out of the box; move on to customization and advanced work
 ## Find docs by task
 
 - **Start quickly**: [Quickstart](./quickstart.md)
-- **Configure models**: [Configuration & Auth](./configuration.md) · [Model configuration recipes](./model-configs.md) · [Examples](./examples/index.md)
+- **Configure models**: [Configuration & Auth](./configuration.md) · [Model configuration recipes](./model-configs.md) · [Reasoning and thinking](./reasoning.md) · [Examples](./examples/index.md)
 - **Edit files safely**: [Edit tools](./edit-tools.md) · [Permissions & Safety](./permissions-and-safety.md)
 - **Remote control**: [Headless](./headless.md) · [Permissions & Safety](./permissions-and-safety.md)
 - **Long-running tasks**: [Usage — `/loop`](./usage.md#loop--continuous-execution-mode) · [Context management](./context-management.md)
@@ -29,6 +29,7 @@ Start with what works out of the box; move on to customization and advanced work
 - [Configuration & Auth](./configuration.md) — `config.yaml`, `auth.yaml`, providers, model pools, full schema cheatsheet
 - [Context management](./context-management.md) — compaction and reduction: how they work, configuration, tuning
 - [Model configuration recipes](./model-configs.md) — copy-paste snippets for common provider/model families
+- [Reasoning and thinking](./reasoning.md) — how thinking is requested, returned, and replayed per wire family, the continuity decision, and the recipe index
 - [Built-in tools](./tools.md) — every tool name, for permission rules and hook filters
 - [Edit tools](./edit-tools.md) — choose between `edit`, `apply_patch`, and `write`; formats, examples, and safety behavior
 - [Project Memory](./usage.md#project-memory) — cross-session memory: `MEMORY.md`, auto-extraction, trust boundary, and git semantics
