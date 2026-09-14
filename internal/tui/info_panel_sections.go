@@ -16,6 +16,7 @@ import (
 	"github.com/keakon/chord/internal/bytefmt"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/skill"
+	"github.com/keakon/chord/internal/tools"
 	"github.com/keakon/chord/internal/tui/markdownutil"
 	"github.com/keakon/chord/internal/tui/modelref"
 )
@@ -323,7 +324,7 @@ func formatWalltimeValue(lineW int, key string, duration time.Duration, percent 
 func walltimeDurationVariants(d time.Duration) []string {
 	d = d.Round(time.Second)
 	sec := int(d.Seconds())
-	variants := []string{formatWalltimeDuration(d)}
+	variants := []string{tools.FormatElapsed(d)}
 	appendVariant := func(value string) {
 		if value != variants[len(variants)-1] {
 			variants = append(variants, value)
@@ -335,7 +336,7 @@ func walltimeDurationVariants(d time.Duration) []string {
 			minutes := sec / 60 % 60
 			withoutSeconds := fmt.Sprintf("%dh", hours)
 			if minutes > 0 {
-				withoutSeconds = fmt.Sprintf("%dh%dm", hours, minutes)
+				withoutSeconds = fmt.Sprintf("%dh%02dm", hours, minutes)
 			}
 			appendVariant(withoutSeconds)
 			appendVariant(fmt.Sprintf("%dh", hours))
@@ -344,31 +345,6 @@ func walltimeDurationVariants(d time.Duration) []string {
 		}
 	}
 	return variants
-}
-
-// formatWalltimeDuration renders a wall-clock duration for the TIME section:
-// "38s", "1m42s", "1h2m3s". Callers only pass buckets of at least one second
-// (sub-second buckets are hidden entirely), so the smallest output is "1s".
-func formatWalltimeDuration(d time.Duration) string {
-	d = d.Round(time.Second)
-	sec := int(d.Seconds())
-	if sec < 60 {
-		return fmt.Sprintf("%ds", sec)
-	}
-	m := sec / 60
-	s := sec % 60
-	if m >= 60 {
-		h := m / 60
-		m = m % 60
-		if s > 0 {
-			return fmt.Sprintf("%dh%dm%ds", h, m, s)
-		}
-		return fmt.Sprintf("%dh%dm", h, m)
-	}
-	if s > 0 {
-		return fmt.Sprintf("%dm%ds", m, s)
-	}
-	return fmt.Sprintf("%dm", m)
 }
 
 func (m *Model) buildInfoPanelLSPBlock(lineW int) string {

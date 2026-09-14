@@ -22,6 +22,7 @@
 - `lsp` 卡片把命中数量摘要放在标题行——`lsp find references internal/tools/jobs_registry.go:771:6 · 7 references · 4 files`——与 `grep`、`glob` 一致，折叠时只占一行，展开后只显示位置列表。宽度不足时优先保住数量摘要、先让位置让位，和搜索卡片先丢参数、后丢命中数的规则相同。
 - 折叠的 `cancel` 卡片把状态放在标题行——`cancel #7 · Stopped (workflow changed)`——不再为它多花一行 `↳ Stopped`；`notify` 返回结构化 handle 时状态也不再出现两次，只保留 `Result` 区块的 `status:` 字段，与已取消任务展开卡片的行为一致。
 - 结束的后台 `shell` 任务改用折叠的 `JOB RESULT` 卡片：默认每个 job 只保留标题行，只有失败、取消或耗时等标题行表达不了的状态才会再占一行；展开后显示完整的命令、状态与输出。
+- 耗时显示统一成同一种写法：不足一分钟按秒（`45s`），超过一分钟给秒补零（`3m05s`），超过一小时改用小时（`1h02m03s`）。工具卡片、状态栏、agent 侧边栏、`job_list` 表格、结束的后台任务 `JOB RESULT` 行，以及侧边栏 TIME 分区都用同一套写法——62 分钟的时长不会再一处写 `62m03s`、另一处写 `1h2m3s`。运行中耗时的标记在所有位置统一为 `⏱`，状态栏与侧边栏此前用的是 `⚙`。
 - 运行期通知卡可折叠成徽标行：`LOOP NOTICE` / `LOOP CONTINUE`、`REPLY RESUMED` 和上下文压力卡片（`CONTEXT PRESSURE`、`COMPACT WARNING`、`COMPACT IMMINENT`）默认收起，只显示 `LOOP CONTINUE #2 ▸` 这样的徽标行，按 `Space`、`Enter` 或 `o` 展开全文。通用 `NOTICE` 默认展开，因为它承载命令回复（`/role status`、`/models status`、`/mcp status`）和运行期诊断，需要时可折叠成同样的徽标行。正文本身只有一行时不再显示标记，也不能折叠；子代理回报卡继续完整显示消息原文。
 - 新增 `compat.chat_completions.keep_reasoning_effort` 选项：回放的 assistant tool call 不带 `reasoning_content` 时，仍在本回合全程保留 `reasoning_effort` 和 reasoning 请求覆盖项。对接受 reasoning 控制、但没有 reasoning 回放契约的端点（例如走 Chat Completions 线路的 Grok），按请求设置的 effort 现在能在多请求回合里全程生效，而不是只作用于第一个请求。
 - setup wizard 为 Gemini 端点生成的起始模型从 `gemini-3.5-flash` 换成 `gemini-3.8-flash`（1M 上下文、最大 64K 输出）。

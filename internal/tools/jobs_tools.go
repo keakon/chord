@@ -267,23 +267,12 @@ func (JobListTool) Execute(ctx context.Context, _ json.RawMessage) (string, erro
 		if label == "" {
 			label = state.Command
 		}
-		fmt.Fprintf(&sb, "%s  %s  %s  %s", state.ID, state.Status, formatJobElapsed(elapsed), label)
+		fmt.Fprintf(&sb, "%s  %s  %s  %s", state.ID, state.Status, FormatElapsed(elapsed), label)
 	}
 	if shown == 0 {
 		return "no background jobs", nil
 	}
 	return sb.String(), nil
-}
-
-func formatJobElapsed(d time.Duration) string {
-	if d < time.Second {
-		return "0s"
-	}
-	seconds := int(d.Seconds())
-	if seconds < 60 {
-		return fmt.Sprintf("%ds", seconds)
-	}
-	return fmt.Sprintf("%dm%02ds", seconds/60, seconds%60)
 }
 
 // JobKillTool stops a background job started by shell.

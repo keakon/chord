@@ -141,7 +141,7 @@ func (b *Block) toolElapsedLabel() string {
 	if elapsed < time.Second {
 		return ""
 	}
-	return elapsed.Truncate(time.Second).String()
+	return tools.FormatElapsed(elapsed)
 }
 
 // IsUserLocalShell reports a merged USER + local !shell block.

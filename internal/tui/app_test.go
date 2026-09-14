@@ -845,7 +845,7 @@ func TestRequestProgressResetsPerCardAcrossAssistantToolAssistant(t *testing.T) 
 	m.activityStartTime["main"] = time.Now().Add(-3 * time.Second)
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.RequestProgressEvent{AgentID: "main", Bytes: 225 * 1024, Events: 93}})
 	plain2 := stripANSI(m.renderStatusBar())
-	if !strings.Contains(plain2, "⚙ 3s") {
+	if !strings.Contains(plain2, "⏱ 3s") {
 		t.Fatalf("tool card should use executing style, got %q", plain2)
 	}
 
@@ -963,7 +963,7 @@ func TestLeavingRequestActivityClearsPreviousRequestProgress(t *testing.T) {
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.RequestProgressEvent{AgentID: "main", Bytes: 64 * 1024, Events: 10}})
 	// Switching to ActivityExecuting should NOT clear request progress yet —
 	// tool arg streaming may still be in flight and RequestProgressEvent{Done:true}
-	// has not arrived. The status bar will show executing state (⚙) because
+	// has not arrived. The status bar will show executing state (⏱) because
 	// buildStatusBarActivityDisplay checks activity type first, but the progress
 	// data is retained until explicitly done or a new cycle starts.
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentActivityEvent{Type: agent.ActivityExecuting, AgentID: "main"}})
@@ -972,7 +972,7 @@ func TestLeavingRequestActivityClearsPreviousRequestProgress(t *testing.T) {
 	}
 	plain := stripANSI(m.renderStatusBar())
 	// Status bar shows executing icon, not download progress, because activity type is Executing
-	if !strings.Contains(plain, "⚙") {
+	if !strings.Contains(plain, "⏱") {
 		t.Fatalf("status bar should show executing state, got %q", plain)
 	}
 	// Now simulate RequestProgressEvent{Done:true} — this should clear the progress
@@ -3360,24 +3360,24 @@ func TestRenderActivitySummaryFallsBackToExistingLabels(t *testing.T) {
 	}
 }
 
-func TestRenderExecutingSummaryShowsGearAndElapsed(t *testing.T) {
+func TestRenderExecutingSummaryShowsElapsed(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 12)
 	m.activityStartTime["main"] = time.Now().Add(-12 * time.Second)
 	got := m.renderExecutingSummary("main")
-	if !strings.HasPrefix(got, "⚙ ") {
-		t.Fatalf("renderExecutingSummary = %q, want gear prefix", got)
+	if !strings.HasPrefix(got, "⏱ ") {
+		t.Fatalf("renderExecutingSummary = %q, want elapsed glyph prefix", got)
 	}
 	if !strings.Contains(got, "12s") {
 		t.Fatalf("renderExecutingSummary = %q, want elapsed seconds", got)
 	}
 }
 
-func TestRenderActivityExecutingUsesGearElapsedStyle(t *testing.T) {
+func TestRenderActivityExecutingUsesElapsedStyle(t *testing.T) {
 	m := NewModelWithSize(nil, 200, 24)
 	m.activityStartTime["main"] = time.Now().Add(-12 * time.Second)
 	out := stripANSI(m.renderActivity(agent.AgentActivityEvent{AgentID: "main", Type: agent.ActivityExecuting}, 200))
-	if !strings.Contains(out, "⚙ 12s") {
-		t.Fatalf("renderActivity(executing) = %q, want gear elapsed", out)
+	if !strings.Contains(out, "⏱ 12s") {
+		t.Fatalf("renderActivity(executing) = %q, want elapsed time", out)
 	}
 	if strings.Contains(out, "Loop:") {
 		t.Fatalf("renderActivity(executing) should not include loop phase label; got %q", out)
@@ -6634,33 +6634,22 @@ func TestStatusBarViewingPillColorRefreshesWhenFocusedAgentChanges(t *testing.T)
 	}
 }
 
-func TestFormatBusyTotalWall(t *testing.T) {
-	if got := formatBusyTotalWall(59 * time.Second); got != "" {
-		t.Fatalf("under 1m should be empty; got %q", got)
+func TestFormatStatusBarElapsed(t *testing.T) {
+	tests := []struct {
+		in   time.Duration
+		want string
+	}{
+		{in: 45 * time.Second, want: " 45s"},
+		{in: 59 * time.Second, want: " 59s"},
+		{in: time.Minute, want: " 1m00s"},
+		{in: 135 * time.Second, want: " 2m15s"},
+		{in: 3720 * time.Second, want: " 1h02m00s"},
+		{in: 400 * time.Millisecond, want: " 0s"},
 	}
-	if got := formatBusyTotalWall(90 * time.Second); got != "1m30s" {
-		t.Fatalf("90s = %q, want 1m30s", got)
-	}
-	if got := formatBusyTotalWall(3720 * time.Second); got != "1h2m0s" {
-		t.Fatalf("3720s = %q, want 1h2m0s", got)
-	}
-}
-
-func TestFormatStatusBarElapsedParen(t *testing.T) {
-	if got := formatStatusBarElapsed(45 * time.Second); got != " 45s" {
-		t.Fatalf("45s = %q, want \" 45s\"", got)
-	}
-	if got := formatStatusBarElapsed(59 * time.Second); got != " 59s" {
-		t.Fatalf("59s = %q, want \" 59s\"", got)
-	}
-	if got := formatStatusBarElapsed(60 * time.Second); got != " 1m0s" {
-		t.Fatalf("60s = %q, want \" 1m0s\"", got)
-	}
-	if got := formatStatusBarElapsed(135 * time.Second); got != " 2m15s" {
-		t.Fatalf("135s = %q, want \" 2m15s\"", got)
-	}
-	if got := formatStatusBarElapsed(3720 * time.Second); got != " 1h2m0s" {
-		t.Fatalf("3720s = %q, want \" 1h2m0s\"", got)
+	for _, tt := range tests {
+		if got := formatStatusBarElapsed(tt.in); got != tt.want {
+			t.Fatalf("formatStatusBarElapsed(%v) = %q, want %q", tt.in, got, tt.want)
+		}
 	}
 }
 
@@ -7107,7 +7096,7 @@ func TestRenderActivityPrefersNewerToolStartOverEarlierSettledBlock(t *testing.T
 	m.viewport.AppendBlock(&Block{ID: 2, Type: BlockToolCall, ToolName: "shell", StartedAt: newer})
 	a := agent.AgentActivityEvent{Type: agent.ActivityExecuting, AgentID: "main"}
 	out := stripANSI(m.renderActivity(a, 200))
-	if !strings.Contains(out, "⚙ 1m30s") {
+	if !strings.Contains(out, "⏱ 1m30s") {
 		t.Fatalf("expected newer tool start to anchor executing elapsed; got %q", out)
 	}
 }

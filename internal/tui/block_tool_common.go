@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"charm.land/lipgloss/v2"
@@ -50,6 +51,11 @@ const toolResultIndent = "    "
 var activeToolSpinnerSegments = [...]string{"▖", "▘", "▝", "▗"}
 
 const queuedToolGlyph = "⏸"
+
+// elapsedGlyph marks a rendered elapsed time on tool cards, the status bar, the
+// agent sidebar and the JOB RESULT line, so a duration always reads as a
+// measured time instead of as the activity that produced it.
+const elapsedGlyph = "⏱"
 
 // receivingToolGlyph is used while the provider is still streaming tool
 // arguments. It is deliberately static: receiving arguments is not execution.
@@ -637,7 +643,7 @@ func appendToolHeaderSuffix(headerLine, suffix string, maxWidth int) string {
 // appendToolElapsedSuffix appends " · ⏱ <elapsed>" to a header line, truncating
 // the header with "…" when needed so the elapsed stays visible within maxWidth.
 func appendToolElapsedSuffix(headerLine, elapsed string, maxWidth int) string {
-	return appendToolHeaderSuffix(headerLine, DimStyle.Render(" · ⏱ "+elapsed), maxWidth)
+	return appendToolHeaderSuffix(headerLine, DimStyle.Render(" · "+elapsedGlyph+" "+elapsed), maxWidth)
 }
 
 // truncateToolHeaderForSuffix shrinks a styled tool header line until
@@ -663,14 +669,14 @@ func truncateToolHeaderForSuffix(headerLine, suffix string, maxWidth, headerBudg
 
 func shellDurationNoteLabel(result string) string {
 	matches := shellDurationNoteRE.FindStringSubmatch(result)
-	if len(matches) == 2 {
-		seconds, err := strconv.ParseFloat(matches[1], 64)
-		if err != nil || seconds < 1 {
-			return ""
-		}
-		return fmt.Sprintf("%ds", int(seconds))
+	if len(matches) != 2 {
+		return ""
 	}
-	return ""
+	seconds, err := strconv.ParseFloat(matches[1], 64)
+	if err != nil || seconds < 1 {
+		return ""
+	}
+	return tools.FormatElapsed(time.Duration(seconds * float64(time.Second)))
 }
 
 func appendErrorResultLines(result []string, content string, width int) []string {

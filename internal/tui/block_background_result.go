@@ -3,7 +3,9 @@ package tui
 import (
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/keakon/chord/internal/tools"
 	"github.com/keakon/chord/internal/tui/markdownutil"
 )
 
@@ -64,7 +66,7 @@ func formatSingleBackgroundResult(raw, id, status, command, description string) 
 
 	glyph, statusLine := backgroundResultStatusLine(status)
 	if duration != "" {
-		statusLine += " · ⏱ " + duration
+		statusLine += " · " + elapsedGlyph + " " + duration
 	}
 	id = strings.TrimSpace(id)
 	description = strings.TrimSpace(description)
@@ -194,7 +196,7 @@ func commandDurationNote(line string) string {
 	if err != nil || seconds < 0 {
 		return ""
 	}
-	return strconv.Itoa(int(seconds)) + "s"
+	return tools.FormatElapsed(time.Duration(seconds * float64(time.Second)))
 }
 
 func cutBackgroundResultField(line, field string) (string, bool) {

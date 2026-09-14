@@ -11,33 +11,13 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/bytefmt"
+	"github.com/keakon/chord/internal/tools"
 )
-
-func formatBusyTotalWall(d time.Duration) string {
-	d = d.Round(time.Second)
-	sec := int(d.Seconds())
-	if sec < 60 {
-		return ""
-	}
-	m := sec / 60
-	s := sec % 60
-	if m >= 60 {
-		h := m / 60
-		m = m % 60
-		return fmt.Sprintf("%dh%dm%ds", h, m, s)
-	}
-	return fmt.Sprintf("%dm%ds", m, s)
-}
 
 // formatStatusBarElapsed formats activity/shell elapsed time for the status bar
 // as a primary inline value, without parentheses.
 func formatStatusBarElapsed(d time.Duration) string {
-	d = d.Round(time.Second)
-	sec := int(d.Seconds())
-	if sec < 60 {
-		return fmt.Sprintf(" %ds", sec)
-	}
-	return " " + formatBusyTotalWall(d)
+	return " " + tools.FormatElapsed(d.Round(time.Second))
 }
 
 func statusBarIdleLabel() string {
@@ -124,10 +104,10 @@ func (m Model) renderExecutingSummary(agentID string) string {
 		}
 	}
 	if startedAt.IsZero() {
-		return "⚙"
+		return elapsedGlyph
 	}
 	elapsed := max(time.Since(startedAt).Round(time.Second), time.Second)
-	return "⚙ · " + elapsed.String()
+	return elapsedGlyph + " · " + tools.FormatElapsed(elapsed)
 }
 
 func statusBarTimingAnchor(agentID string) string {
@@ -262,7 +242,7 @@ func (m Model) buildStatusBarActivityDisplayAt(a agent.AgentActivityEvent, now t
 		hasRequestState = act.Type == agent.ActivityConnecting || act.Type == agent.ActivityWaitingHeaders || act.Type == agent.ActivityWaitingToken || act.Type == agent.ActivityStreaming
 	}
 	if a.Type == agent.ActivityExecuting {
-		display.Icon = "⚙"
+		display.Icon = elapsedGlyph
 		display.Text = m.statusBarExecutingElapsedText(agentID)
 		return display
 	}
