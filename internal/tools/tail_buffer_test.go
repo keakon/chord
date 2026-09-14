@@ -77,3 +77,16 @@ func TestTailBufferCursorsReportDroppedBytes(t *testing.T) {
 		t.Fatal("tail(99) must not report a cut when the window fits")
 	}
 }
+
+func BenchmarkTailBufferStringTruncated(b *testing.B) {
+	buffer := NewTailBuffer(1 << 20)
+	chunk := []byte(strings.Repeat("x", 64<<10))
+	for i := 0; i < 32; i++ {
+		_, _ = buffer.Write(chunk)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = buffer.String()
+	}
+}

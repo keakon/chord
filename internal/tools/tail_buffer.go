@@ -1,6 +1,9 @@
 package tools
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // TailBuffer keeps the most recent maxBytes written while counting every byte
 // ever written. A reader that falls behind therefore still sees the newest
@@ -97,5 +100,8 @@ func (c *TailBuffer) String() string {
 	if c.base == 0 {
 		return string(c.window[c.start:])
 	}
-	return fmt.Sprintf("...(output truncated: showing the most recent %d of %d bytes)\n", len(c.window)-c.start, c.total) + string(c.window[c.start:])
+	var builder strings.Builder
+	fmt.Fprintf(&builder, "...(output truncated: showing the most recent %d of %d bytes)\n", len(c.window)-c.start, c.total)
+	builder.Write(c.window[c.start:])
+	return builder.String()
 }
