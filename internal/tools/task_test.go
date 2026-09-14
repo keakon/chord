@@ -154,8 +154,8 @@ func TestDelegateToolDescriptionKeepsUsageSemantics(t *testing.T) {
 	desc := NewDelegateTool(taskTestCreator{}).Description()
 	for _, want := range []string{
 		"delivered asynchronously and flows back to you automatically",
-		"reuse it with Notify or Cancel for follow-up instead of creating a duplicate delegate",
-		"delegation workflow section governs when to continue an existing task with Notify versus creating a new delegate, and when parallel delegates are safe",
+		"task_id is the stable durable handle",
+		"delegation workflow governs task selection, follow-up, and safe parallelism",
 		"Roles that can write files must declare a non-empty expected_write_scope",
 		"a read-only delegation pairs a read-only role with an empty scope object {}",
 	} {
@@ -169,6 +169,8 @@ func TestDelegateToolDescriptionKeepsUsageSemantics(t *testing.T) {
 		"Spawn", // Delegate results flow back asynchronously; no background-process tool references belong here
 		"Use Notify(existing) for the same task's follow-up",
 		"Only parallelize tasks when their write scopes are clearly independent",
+		"Prefer using Read",
+		"with Notify or Cancel",
 	} {
 		if strings.Contains(desc, unwanted) {
 			t.Fatalf("Description() should not duplicate workflow-block strategy %q in %q", unwanted, desc)

@@ -499,6 +499,34 @@ func TestCompactContextDescriptionExplainsPressureAwareSafeStops(t *testing.T) {
 	}
 }
 
+func TestCompactContextDescriptionRetainsCallConstraintsWithoutDelegation(t *testing.T) {
+	tool := NewCompactContextTool(CompactContextValidator{
+		ContinuationStateMaxTokens: 2048,
+		TodoWriteVisible:           true,
+	})
+	description := tool.Description()
+	for _, want := range []string{
+		"about 2048 estimated tokens",
+		"Call it alone",
+		"sync drifted entries with todo_write",
+		"state_files entries must resolve inside the project root",
+		"never reads them and never verifies that they exist",
+		"a later model-driven [Context Summary] checkpoint confirms the reset was applied",
+		"normal policy result, not an error",
+	} {
+		if !strings.Contains(description, want) {
+			t.Errorf("missing call constraint %q", want)
+		}
+	}
+	if strings.Contains(strings.ToLower(description), NameDelegate) {
+		t.Fatal("compaction tool must not route to a possibly unavailable delegate")
+	}
+	required := tool.Parameters()["required"].([]string)
+	if !slices.Equal(required, []string{"active_objective", "next_step"}) {
+		t.Fatalf("required = %v, want only the minimum continuation state", required)
+	}
+}
+
 // The rejection guidance must stay generic. The runtime validates every field
 // against its own schema description and returns the reason, so the model fixes
 // a rejection by addressing the reported problem — not by memorizing one

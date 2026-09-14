@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/mcp"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -33,7 +34,7 @@ func TestIntegrationStatusRespectsActiveRolePermissions(t *testing.T) {
 		t.Fatalf("visibleMCPServersPromptBlock() = %q, want empty without MCP prompt", got)
 	}
 
-	a.mcpServersPrompt = "## MCP (Model Context Protocol) integrations\n- **exa** — tools: mcp_exa_web_search_exa"
+	a.mcpServersPrompt = mcp.RenderServersPromptBlock([]mcp.ServerTools{{Name: "exa", Tools: []string{"mcp_exa_web_search_exa"}}})
 	a.ruleset = permission.Ruleset{
 		{Permission: "*", Pattern: "*", Action: permission.ActionDeny},
 		{Permission: "mcp_*", Pattern: "*", Action: permission.ActionAllow},
@@ -79,14 +80,14 @@ func TestMCPPromptFiltersDeniedToolsWithinVisibleServer(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools.Register(dummyTool{name: "mcp_exa_search"})
 	a.tools.Register(dummyTool{name: "mcp_exa_admin"})
-	a.mcpServersPrompt = "## MCP (Model Context Protocol) integrations\nThe following external servers are connected.\n\n- **exa** — tools: mcp_exa_admin, mcp_exa_search\n"
+	a.mcpServersPrompt = mcp.RenderServersPromptBlock([]mcp.ServerTools{{Name: "exa", Tools: []string{"mcp_exa_admin", "mcp_exa_search"}}})
 	a.ruleset = permission.Ruleset{
 		{Permission: "*", Pattern: "*", Action: permission.ActionDeny},
 		{Permission: "mcp_exa_search", Pattern: "*", Action: permission.ActionAllow},
 	}
 
 	got := a.visibleMCPServersPromptBlock()
-	if !strings.Contains(got, "The following external servers are connected.") {
+	if !strings.Contains(got, "MCP integrations and tools are available in this role.") {
 		t.Fatalf("visibleMCPServersPromptBlock() dropped MCP guidance: %q", got)
 	}
 	if !strings.Contains(got, "mcp_exa_search") {
@@ -94,6 +95,28 @@ func TestMCPPromptFiltersDeniedToolsWithinVisibleServer(t *testing.T) {
 	}
 	if strings.Contains(got, "mcp_exa_admin") {
 		t.Fatalf("visibleMCPServersPromptBlock() = %q, denied tool leaked", got)
+	}
+}
+
+func TestMCPPromptPreservesEscapedNamesDuringVisibilityFiltering(t *testing.T) {
+	const server = "search_api & [sample]"
+	allowed := mcp.RegisteredMCPToolName(server, "lookup")
+	denied := mcp.RegisteredMCPToolName(server, "admin")
+	a := &MainAgent{tools: tools.NewRegistry()}
+	a.tools.Register(dummyMCPTool{dummyTool: dummyTool{name: allowed}, server: server})
+	a.tools.Register(dummyMCPTool{dummyTool: dummyTool{name: denied}, server: server})
+	a.mcpServersPrompt = mcp.RenderServersPromptBlock([]mcp.ServerTools{
+		{Name: server, Tools: []string{allowed, denied}},
+		{Name: "hidden", Tools: []string{"mcp_hidden_lookup"}},
+	})
+	a.ruleset = permission.Ruleset{
+		{Permission: "*", Pattern: "*", Action: permission.ActionDeny},
+		{Permission: allowed, Pattern: "*", Action: permission.ActionAllow},
+	}
+	block := a.visibleMCPServersPromptBlock()
+	rows := mcp.ParseServersPromptBlock(block)
+	if len(rows) != 1 || rows[0].Name != server || len(rows[0].Tools) != 1 || rows[0].Tools[0] != allowed {
+		t.Fatalf("filtered rows = %+v, want only %s under %q; block: %s", rows, allowed, server, block)
 	}
 }
 

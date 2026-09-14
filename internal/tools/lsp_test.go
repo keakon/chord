@@ -262,7 +262,6 @@ func TestGrepToolDescriptionExplainsDiscoveryRole(t *testing.T) {
 		"Use paths for one or more files/directories",
 		"includes for optional path globs",
 		"Best for discovering candidate files, symbols, or text matches when the exact location is not known yet.",
-		"For semantic navigation at a known position (definition, references, implementations), prefer the lsp tool",
 	} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("Description() missing %q: %q", want, desc)
@@ -299,7 +298,7 @@ func TestGlobToolDescriptionExplainsDiscoveryRole(t *testing.T) {
 	desc := (GlobTool{}).Description()
 	for _, want := range []string{
 		"patterns are path globs, not regular expressions and not file-contents searches.",
-		"Best for discovering candidate files by path or extension before using read, grep, or lsp.",
+		"Best for discovering candidate files by path or extension.",
 	} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("Description() missing %q: %q", want, desc)

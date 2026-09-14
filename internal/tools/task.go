@@ -150,11 +150,9 @@ func (DelegateTool) Name() string { return NameDelegate }
 func (DelegateTool) Description() string {
 	return "Delegate a task to a SubAgent for parallel execution. " +
 		"The SubAgent runs independently with its own context and tool access, and reports back when done. " +
-		"Prefer using Read, Grep, and Shell directly when one or a few tool calls suffice; " +
-		"use Delegate only for substantial sub-work that benefits from a dedicated agent (e.g. multi-file edits or independent plan items). " +
-		"Your system prompt's delegation workflow section governs when to continue an existing task with Notify versus creating a new delegate, and when parallel delegates are safe. " +
+		"Your system prompt's delegation workflow governs task selection, follow-up, and safe parallelism. " +
 		"IMPORTANT: The result is delivered asynchronously and flows back to you automatically — do NOT poll or retrieve SubAgent results. " +
-		"The returned task_id is the stable durable handle for that delegate; reuse it with Notify or Cancel for follow-up instead of creating a duplicate delegate. " +
+		"The returned task_id is the stable durable handle for that delegate and identifies the same task across follow-up attempts. " +
 		"Roles that can write files must declare a non-empty expected_write_scope; a read-only delegation pairs a read-only role with an empty scope object {}."
 }
 

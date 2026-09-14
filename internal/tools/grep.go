@@ -178,8 +178,7 @@ func (GrepTool) Description() string {
 		" If the exact file path is known, pass the full file path in paths instead of searching its parent directory with the filename in includes; includes filters files during traversal and does not avoid walking the search path." +
 		" Single bare strings are tolerated for paths/includes but arrays are preferred." +
 		" Returns matching lines with file paths and line numbers." +
-		" Best for discovering candidate files, symbols, or text matches when the exact location is not known yet." +
-		" For semantic navigation at a known position (definition, references, implementations), prefer the lsp tool when the file type has LSP coverage."
+		" Best for discovering candidate files, symbols, or text matches when the exact location is not known yet."
 }
 
 func (GrepTool) Parameters() map[string]any {

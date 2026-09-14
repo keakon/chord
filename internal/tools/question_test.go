@@ -106,6 +106,31 @@ func TestQuestionToolParametersOptInToObjectCoercion(t *testing.T) {
 	}
 }
 
+func TestQuestionToolLabelLengthsAreGuidance(t *testing.T) {
+	tool := NewQuestionTool(func(_ context.Context, questions []QuestionItem) ([]QuestionAnswer, error) {
+		if len(questions) != 1 || len(questions[0].Header) <= 30 || len(strings.Fields(questions[0].Options[0].Label)) <= 5 {
+			t.Fatalf("unexpected questions: %+v", questions)
+		}
+		return []QuestionAnswer{{Header: questions[0].Header, Selected: []string{questions[0].Options[0].Label}}}, nil
+	})
+	properties := tool.Parameters()["properties"].(map[string]any)
+	items := properties["questions"].(map[string]any)["items"].(map[string]any)
+	fields := items["properties"].(map[string]any)
+	header := fields["header"].(map[string]any)
+	options := fields["options"].(map[string]any)["items"].(map[string]any)
+	label := options["properties"].(map[string]any)["label"].(map[string]any)
+	if !strings.Contains(header["description"].(string), "aim for 30 characters or fewer") {
+		t.Fatalf("header must state a recommendation: %v", header)
+	}
+	if _, hardLimit := header["maxLength"]; hardLimit || strings.Contains(label["description"].(string), "1-5 words") {
+		t.Fatalf("length guidance must not imply runtime limits: header=%v label=%v", header, label)
+	}
+	raw := json.RawMessage(`{"questions":[{"question":"Which option should be selected?","header":"Choose how to organize the generated report","options":[{"label":"Keep all related items in one report","description":"Group the related items together."}]}]}`)
+	if _, err := tool.Execute(context.Background(), raw); err != nil {
+		t.Fatalf("length recommendations must not reject valid questions: %v", err)
+	}
+}
+
 func TestQuestionToolExecuteAcceptsSingleObject(t *testing.T) {
 	var received []QuestionItem
 	tool := NewQuestionTool(func(_ context.Context, qs []QuestionItem) ([]QuestionAnswer, error) {

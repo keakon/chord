@@ -34,8 +34,8 @@ func (t WriteTool) Description() string {
 	// (## LSP diagnostic follow-up), not per-tool descriptions; see
 	// lspDiagnosticPromptBlock. "Replaces the entire file" stays in the
 	// content parameter description rather than duplicated here.
-	return "Write the full contents of a file, creating parent directories as needed. This is for whole-file writes; to modify an existing snippet prefer Edit instead of rewriting the whole file with Write. " +
-		"When the target file already exists and you have not read it (or it changed on disk after you read it), its previous contents are backed up to the session directory before being replaced, when they can be read, and the result names that backup. Empty content truncates the file to zero bytes but does not delete it; use Delete only when the file should no longer exist."
+	return "Write the full contents of a file, creating parent directories as needed. " +
+		"When the target file already exists and you have not read it (or it changed on disk after you read it), its previous contents are backed up to the session directory before being replaced, when they can be read, and the result names that backup. Empty content truncates the file to zero bytes but does not delete it."
 }
 
 func (t WriteTool) Parameters() map[string]any {

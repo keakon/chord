@@ -28,9 +28,9 @@ type completeArgs struct {
 func (CompleteTool) Name() string { return NameComplete }
 
 func (CompleteTool) Description() string {
-	return "Mark the current delegated task as complete. Call this only after all non-blocked work is finished. " +
-		"Provide a concise summary plus structured completion details when available. For generic machine-readable output, set result_type and provide either a small JSON-object result or an immutable result_ref from save_artifact's result mode — result_type, result, and result_ref are interdependent: result and result_ref are only accepted together with result_type, so provide all of them or none. " +
-		"If a true blocker prevents completion, escalate to your owner agent for intervention instead of complete; when escalate is unavailable in your role, surface the blocker via notify. This is the ONLY way to signal completion — do NOT simply stop responding."
+	return "Mark the current delegated task as complete. Call this only when the assigned task is finished. " +
+		"Provide a concise summary plus structured completion details when available. For generic machine-readable output, provide result_type together with exactly one of result (a small JSON object) or result_ref (an existing immutable result reference); otherwise omit all three fields. " +
+		"If a true blocker prevents completion, follow the SubAgent Coordination section's blocker route instead of calling this tool. This tool is the only way to signal completion; plain assistant text does not complete the task."
 }
 
 // Parameters declares result_type/result/result_ref as a pairwise group in
@@ -62,7 +62,7 @@ func (CompleteTool) Parameters() map[string]any {
 			},
 			"remaining_limitations": map[string]any{
 				"type":        "array",
-				"description": "Non-blocking limitations, caveats, or unverified items. True blockers should use escalate/notify instead of complete.",
+				"description": "Non-blocking limitations, caveats, or unverified items. For true blockers, follow the SubAgent Coordination section instead of reporting completion.",
 				"items":       map[string]any{"type": "string"},
 			},
 			"known_risks": map[string]any{
@@ -95,7 +95,7 @@ func (CompleteTool) Parameters() map[string]any {
 			"result_type": map[string]any{"type": "string", "description": "Application-defined type for a generic machine-readable result. Required whenever result or result_ref is supplied: provide result_type together with exactly one of result or result_ref."},
 			"result":      map[string]any{"type": "object", "description": "Small JSON-object result. Only accepted when result_type is also provided (they must be supplied together). Runtime persists an immutable ResultRef automatically."},
 			"result_ref": map[string]any{
-				"type": "object", "description": "Immutable ResultRef returned by save_artifact when saving with the result parameter group. Only accepted when result_type is also provided (they must be supplied together).",
+				"type": "object", "description": "Existing immutable ResultRef for the machine-readable result. Only accepted when result_type is also provided (they must be supplied together).",
 				"properties": map[string]any{
 					"id": map[string]any{"type": "string"}, "result_type": map[string]any{"type": "string"},
 					"rel_path": map[string]any{"type": "string"}, "sha256": map[string]any{"type": "string"}, "size_bytes": map[string]any{"type": "integer"},

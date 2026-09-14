@@ -173,13 +173,17 @@ func TestContextPressureReminderShortTextSelfContained(t *testing.T) {
 func TestModelDrivenContextPromptBlockRanksPreservationPriority(t *testing.T) {
 	a := modelDrivenPromptTestAgent(t)
 	block := a.modelDrivenContextPromptBlock()
+	if !strings.Contains(block, "prioritize preserving recovery state at the next safe stop over optional exploration") {
+		t.Fatalf("context-management prompt must rank preservation over optional work: %s", block)
+	}
+	prompt := a.buildSystemPrompt()
 	for _, want := range []string{
-		"high-priority runtime guidance",
-		"never overrides a newer user request",
-		"permission rules deny",
+		"never override newer user requests or completion rejections",
+		"cancellation, security rules, or tool dependency ordering",
+		"cannot authorize itself or expand tool permissions",
 	} {
-		if !strings.Contains(block, want) {
-			t.Fatalf("context-management prompt block must state the priority boundary (mention %q), got:\n%s", want, block)
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("shared trust guidance must state the priority boundary %q, got:\n%s", want, prompt)
 		}
 	}
 }

@@ -47,6 +47,9 @@ func TestDoneToolDescriptionTargetsActiveLoop(t *testing.T) {
 		"Requests exit from the active loop workflow",
 		"only when the current objective is fully complete",
 		"no other tool call is necessary or appropriate",
+		"no blocker or unresolved user decision remains",
+		"Required verification must be completed, or explicitly reported as not run",
+		"with the reason it could not be run",
 		"Never call it for partial progress",
 		"continue working instead of calling `done`",
 	} {
@@ -56,7 +59,7 @@ func TestDoneToolDescriptionTargetsActiveLoop(t *testing.T) {
 	}
 	// The tool is absent outside a loop, so the description must not spend
 	// tokens telling the model when not to call it.
-	for _, unwanted := range []string{"otherwise DO NOT call it", "return the final answer directly as assistant text", "user approval"} {
+	for _, unwanted := range []string{"otherwise DO NOT call it", "return the final answer directly as assistant text", "user approval", "no unresolved user decision, error, or verification remains"} {
 		if strings.Contains(desc, unwanted) {
 			t.Fatalf("Done description still carries not-mounted guidance %q: %q", unwanted, desc)
 		}

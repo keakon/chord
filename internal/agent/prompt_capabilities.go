@@ -77,6 +77,9 @@ func toolSelectionPromptBlock(visible map[string]struct{}) string {
 		lines = append(lines, "- Use "+toolPromptName(tools.NameRead)+" for file contents when the target path is already known or has been verified.")
 		lines = append(lines, "- When the user provides complete file contents in a "+"`<file path=...>`"+" reference, treat that content as the working context; do not re-read the same file merely to obtain duplicate contents. Re-read only when the supplied content is incomplete, the file may have changed on disk, or the edit workflow requires fresh file state, and then read only the needed range.")
 	}
+	if hasVisibleTool(visible, tools.NameLsp) {
+		lines = append(lines, "- For semantic navigation at a known position (definition, references, implementations), prefer "+toolPromptName(tools.NameLsp)+" when the file type has LSP coverage.")
+	}
 	// Check for either edit tool (patch or edit/replace)
 	editToolName := visibleEditToolName(visible)
 	patchOnlySurface := editToolName == tools.NameApplyPatch &&
@@ -118,6 +121,7 @@ func toolSelectionPromptBlock(visible map[string]struct{}) string {
 		lines = append(lines, "- Use "+strings.Join(discoveryTools, " / ")+" for discovery and navigation.")
 		if hasVisibleTool(visible, tools.NameGrep) && hasVisibleTool(visible, tools.NameRead) {
 			lines = append(lines, "- When "+toolPromptName(tools.NameGrep)+" returns path:line:snippet hits, use those line numbers to read narrow ranges around relevant matches instead of scanning broad file chunks; when several matches land in the same file or the file is central to the change, one fuller read of that file beats repeated narrow reads.")
+			lines = append(lines, "- For single-line content too large for "+toolPromptName(tools.NameRead)+", use "+toolPromptName(tools.NameGrep)+" for targeted text matches instead of repeating line-based reads.")
 		}
 		if pathTools := visibleExistingPathTools(visible); len(pathTools) > 0 {
 			lines = append(lines, "- If you are unsure of the exact target path for "+strings.Join(pathTools, " / ")+

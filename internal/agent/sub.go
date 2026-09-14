@@ -1318,11 +1318,11 @@ func (s *SubAgent) buildSystemPrompt() string {
 	// next to "use `notify`"; the closure block names no control tool at all
 	// and points back at the coordination section instead.
 	visible := s.visibleToolNames()
-	parts = append(parts, subAgentIdentityPrompt, sharedAgentValuesPrompt, subAgentCodingGuidelinesPrompt, sharedReasoningDisciplinePrompt, subAgentCoordinationPromptText(visible), subAgentResponseClosurePrompt)
+	parts = append(parts, subAgentIdentityPrompt, sharedAgentValuesPrompt, subAgentCodingGuidelinesPrompt, sharedContentTrustPrompt, sharedReasoningDisciplinePrompt, subAgentCoordinationPromptText(visible), subAgentResponseClosurePrompt)
 	if s.customPrompt != "" {
 		parts = append(parts, s.customPrompt)
 	}
-	if block := s.delegationPromptBlock(); block != "" {
+	if block := s.delegationPromptBlock(visible); block != "" {
 		parts = append(parts, block)
 	}
 	if block := s.capabilityPromptBlock(visible); block != "" {
@@ -1358,11 +1358,11 @@ func (s *SubAgent) capabilityPromptBlock(visible map[string]struct{}) string {
 	return buildDynamicCapabilityPromptBlock(visible, s.currentRuleset(), capabilityPromptAudienceSub)
 }
 
-func (s *SubAgent) delegationPromptBlock() string {
+func (s *SubAgent) delegationPromptBlock(visible map[string]struct{}) string {
 	if s == nil || s.parent == nil {
 		return ""
 	}
-	if _, ok := s.tools.Get(tools.NameDelegate); !ok {
+	if !hasVisibleTool(visible, tools.NameDelegate) {
 		return ""
 	}
 	agents := s.parent.availableSubAgentsForRuleset(s.currentRuleset(), "")
@@ -1372,7 +1372,7 @@ func (s *SubAgent) delegationPromptBlock() string {
 	var sb strings.Builder
 	sb.WriteString("## Nested Delegation\n")
 	sb.WriteString("- You may delegate child work only when the sub-problem is clearly independent and within your configured delegation depth.\n")
-	sb.WriteString(delegationStrategyPromptLines())
+	sb.WriteString(delegationStrategyPromptLines(visible))
 	sb.WriteString("- Child workers are owned by you directly; do not assume higher-level ancestors can message or stop them for you.\n")
 	sb.WriteString("- When `child_join` is enabled, do not consider your task complete until all joined child tasks have finished or been explicitly stopped.\n")
 	sb.WriteString("- If you need to finish early, explicitly stop the child task first; do not assume a later ancestor will clean it up for you.\n")

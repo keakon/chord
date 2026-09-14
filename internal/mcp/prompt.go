@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"html"
 	"sort"
 	"strings"
 )
@@ -20,7 +21,7 @@ type ServerTools struct {
 // parser keys on its first line, so renderer and parser must only be changed
 // together (guarded by the round-trip test).
 const serversPromptHeader = "## MCP (Model Context Protocol) integrations\n" +
-	"The following external servers are connected. Each MCP tool is named **`mcp_<server>_<tool>`** (use that exact id when calling). " +
+	"The following MCP integrations and tools are available in this role. Each MCP tool is named **`mcp_<server>_<tool>`** (use that exact id when calling). " +
 	"When the user asks which MCPs you have, list **server names** and the **registered tool ids** under each.\n"
 
 const serverRowPrefix = "- **"
@@ -88,14 +89,14 @@ func RenderServersPromptBlock(servers []ServerTools) string {
 	b.WriteString("\n")
 	for _, srv := range servers {
 		b.WriteString(serverRowPrefix)
-		b.WriteString(srv.Name)
+		b.WriteString(escapeServerPromptText(srv.Name))
 		switch {
 		case len(srv.Tools) > 0:
 			b.WriteString(serverToolsSeparator)
 			b.WriteString(strings.Join(srv.Tools, ", "))
 		case srv.Note != "":
 			b.WriteString(serverNoteSeparator)
-			b.WriteString(srv.Note)
+			b.WriteString(escapeServerPromptText(srv.Note))
 		default:
 			b.WriteString(serverNoteSeparator)
 			b.WriteString("(no tools)")
@@ -103,6 +104,26 @@ func RenderServersPromptBlock(servers []ServerTools) string {
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+// Keep external names and notes within one Markdown row without losing their
+// exact values when the agent parses this block to filter visible tools.
+func escapeServerPromptText(text string) string {
+	var b strings.Builder
+	for _, r := range text {
+		if r < ' ' || r == 0x7f || strings.ContainsRune("&<>\\`*_[]", r) {
+			fmt.Fprintf(&b, "&#%d;", r)
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func unescapeServerPromptText(text string) string {
+	// HTML decoding replaces &#0; with U+FFFD. Preserve the original NUL so
+	// filtering still uses the exact configured server name.
+	return html.UnescapeString(strings.ReplaceAll(text, "&#0;", "\x00"))
 }
 
 // ParseServersPromptBlock parses a block produced by RenderServersPromptBlock
@@ -123,7 +144,7 @@ func ParseServersPromptBlock(block string) []ServerTools {
 		}
 		rest := trimmed[len(serverRowPrefix):]
 		if name, toolList, ok := strings.Cut(rest, serverToolsSeparator); ok {
-			row := ServerTools{Name: name}
+			row := ServerTools{Name: unescapeServerPromptText(name)}
 			for tool := range strings.SplitSeq(toolList, ",") {
 				if tool = strings.TrimSpace(tool); tool != "" {
 					row.Tools = append(row.Tools, tool)
@@ -133,7 +154,7 @@ func ParseServersPromptBlock(block string) []ServerTools {
 			continue
 		}
 		if name, note, ok := strings.Cut(rest, serverNoteSeparator); ok {
-			servers = append(servers, ServerTools{Name: name, Note: note})
+			servers = append(servers, ServerTools{Name: unescapeServerPromptText(name), Note: unescapeServerPromptText(note)})
 		}
 	}
 	return servers

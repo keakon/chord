@@ -34,7 +34,7 @@ func (DoneTool) Name() string { return NameDone }
 // outside a loop, so that argument no longer has an audience.
 func (DoneTool) Description() string {
 	return "Requests exit from the active loop workflow, which requires this tool as its completion signal.\n" +
-		"First use any available tool that can make real progress; call `" + NameDone + "` only when the current objective is fully complete, no unresolved user decision, error, or verification remains, and no other tool call is necessary or appropriate. Never call it for partial progress or while you still need to investigate, edit, test, or ask the user. If you are unsure whether the task is truly complete, continue working instead of calling `" + NameDone + "`.\n" +
+		"First use any available tool that can make real progress; call `" + NameDone + "` only when the current objective is fully complete, no blocker or unresolved user decision remains, and no other tool call is necessary or appropriate. Required verification must be completed, or explicitly reported as not run with the reason it could not be run. Never call it for partial progress or while you still have necessary investigation, edits, runnable verification, or user questions. If you are unsure whether the task is truly complete, continue working instead of calling `" + NameDone + "`.\n" +
 		"Provide a non-empty 'report' argument containing the complete final Markdown completion report; put the full completion summary in the report argument itself and do not rely on the surrounding assistant message to carry it.\n" +
 		"The report must include:\n" + CompletionReportStructure
 }

@@ -526,12 +526,17 @@ done: allow
 	for _, want := range []string{
 		"In this loop workflow, the `done` tool is the explicitly required completion signal",
 		"Pass the complete final Markdown completion report in the `done` tool's required `report` argument, following the report structure in its tool description",
-		"Do not call the `done` tool unless the task is actually complete and no unresolved user decision, error, or verification remains",
+		"Do not call the `done` tool while required work or a user decision remains",
+		"Required verification is completed, or explicitly reported as not run",
+		"If verification cannot be run, state why in the final report.",
 		"continue working instead of calling `done`",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("loop completion requirements should include %q, got %q", want, joined)
 		}
+	}
+	if strings.Contains(joined, "no unresolved user decision, error, or verification remains") {
+		t.Fatalf("loop completion must allow explicitly unrun verification: %q", joined)
 	}
 	// The report structure itself lives in the Done tool description (single
 	// source referenced by the loop requirement line above).
@@ -853,6 +858,7 @@ func TestPrimaryAgentCoordinationPromptBlock_DependsOnVisibleTools(t *testing.T)
 func TestPrimaryAgentCoordinationPromptBlock_ShowsTaskWorkflowWhenTaskVisible(t *testing.T) {
 	a := &MainAgent{tools: tools.NewRegistry()}
 	a.tools.Register(tools.NewDelegateTool(taskCreatorStub{agents: []tools.AgentInfo{{Name: "builder", Description: "General coding"}}}))
+	a.tools.Register(tools.NewNotifyTool(nil, nil, false, true))
 	a.agentConfigs = map[string]*config.AgentConfig{
 		"builder": {Name: "builder", Description: "General coding", Mode: "subagent"},
 	}
@@ -1688,7 +1694,7 @@ func TestLoopCompletionRequirementLinesUsePermissionSpecificConfirmationGuidance
 	a := newTestMainAgent(t, t.TempDir())
 	lines := a.loopCompletionRequirementLines()
 	joined := strings.Join(lines, "\n")
-	if !strings.Contains(joined, "Do not call the `done` tool unless the task is actually complete and no unresolved user decision, error, or verification remains") {
+	if !strings.Contains(joined, "Do not call the `done` tool while required work or a user decision remains") {
 		t.Fatalf("loop completion requirements should describe stricter Done usage, got %q", joined)
 	}
 	if strings.Contains(joined, "Question tool") {
@@ -1708,7 +1714,7 @@ question: allow
 	if strings.Contains(joined, "call the `question` tool") {
 		t.Fatalf("loop completion requirements should not generally require Question during loop completion, got %q", joined)
 	}
-	if !strings.Contains(joined, "Do not call the `done` tool unless the task is actually complete and no unresolved user decision, error, or verification remains") {
+	if !strings.Contains(joined, "Do not call the `done` tool while required work or a user decision remains") {
 		t.Fatalf("loop completion requirements should preserve Done gating, got %q", joined)
 	}
 	if strings.Contains(joined, "unless the current task is already complete and you are making the final completion follow-up `question` call") {
@@ -2143,22 +2149,23 @@ func TestModelDrivenContextPromptBlockInjectedWhenEnabled(t *testing.T) {
 	}
 	for _, want := range []string{
 		"## Long-session context management",
-		"<system-reminder>",
 		"compact_context",
 		"state_files",
 		"archived history",
-		"low-gain",
 		".chord/notes/",
 		".chord/plans/",
 		"safe stop",
-		"provisional checkpoint",
-		"only the final response remains",
 		"refresh the notes file before you request a checkpoint",
 		"Read the registered files first after a reset",
-		"Leave state_files empty only when",
+		"tool description governs checkpoint timing",
 	} {
 		if !strings.Contains(block, want) {
 			t.Fatalf("block must mention %q, got:\n%s", want, block)
+		}
+	}
+	for _, unwanted := range []string{"<system-reminder>", "estimated tokens", "checkpoint_kind=", "Leave state_files empty only when"} {
+		if strings.Contains(block, unwanted) {
+			t.Fatalf("context block duplicates tool or trust guidance %q: %s", unwanted, block)
 		}
 	}
 }

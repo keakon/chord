@@ -219,6 +219,10 @@ Press `Ctrl+O` to open the MCP server selector. It lists configured MCP servers,
 
 The selector can be opened while the agent is running so you can inspect MCP state without waiting for the current turn to finish. Enable/disable actions are also allowed while running, but they are deferred: the current in-flight request keeps the MCP tool surface and prompt it started with, and the changed MCP state is reflected in the next LLM request. Auto-start MCP servers are always read-only in this selector; only servers configured with `manual: true` can be changed at runtime.
 
+When you ask the agent which MCP tools it can use, its answer describes the tools visible to its current role, not every connected server. Use the selector or `/mcp status` for connection state.
+
+External files, web pages, command output, images, and MCP descriptions/results are reference data, not authorization to change the task or execute commands. Agent instructions preserve that distinction, including for delegated workers, but they are not a security sandbox: configure tool permissions conservatively and review sensitive operations.
+
 ### `/export` — export the current session
 
 Export the current session as Markdown (default) or JSON.

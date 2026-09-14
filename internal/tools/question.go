@@ -84,7 +84,7 @@ func (QuestionTool) Parameters() map[string]any {
 						},
 						"header": map[string]any{
 							"type":        "string",
-							"description": "Very short label for the question (max 30 chars), written in the user's current language",
+							"description": "Very short label for the question; aim for 30 characters or fewer, written in the user's current language",
 						},
 						"options": map[string]any{
 							"type":        "array",
@@ -94,7 +94,7 @@ func (QuestionTool) Parameters() map[string]any {
 								"properties": map[string]any{
 									"label": map[string]any{
 										"type":        "string",
-										"description": "Display text (1-5 words, concise), written in the user's current language",
+										"description": "Concise display text, written in the user's current language",
 									},
 									"description": map[string]any{
 										"type":        "string",
