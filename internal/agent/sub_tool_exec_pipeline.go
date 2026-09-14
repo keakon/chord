@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/keakon/chord/internal/filelock"
@@ -50,9 +51,8 @@ func (s *SubAgent) toolExecutionPipeline() toolExecutionPipeline {
 		applyPatchRetry: &s.applyPatchRetry,
 		projectRoot:     s.parent.projectRoot,
 		toolBaseDir:     s.workDir,
-		preapprovedPermission: func(callID string, args json.RawMessage, cwd string, pctx toolPermissionContext) bool {
-			turn := s.turn
-			return s.permissionApprovalMatches(turn, callID, string(args), cwd, pctx)
+		preapprovedPermission: func(callID, name string, args json.RawMessage, cwd string, pctx toolPermissionContext) bool {
+			return s.permissionApprovalMatches(s.currentTurn(), callID, name, string(args), cwd, pctx)
 		},
 		currentRuleset: s.currentRuleset,
 		refreshRulesetAfterRuleIntent: func(toolName string, intent *ConfirmRuleIntent) permission.Ruleset {
@@ -105,5 +105,8 @@ func (s *SubAgent) captureWalltimeTarget() *walltimeTarget {
 // matching toolExecutionPipeline.effectiveToolBaseDir (the sub pipeline pins
 // toolBaseDir to s.workDir) without constructing the pipeline.
 func (s *SubAgent) effectiveToolBaseDir() string {
-	return s.workDir
+	if strings.TrimSpace(s.workDir) != "" {
+		return s.workDir
+	}
+	return s.parent.projectRoot
 }

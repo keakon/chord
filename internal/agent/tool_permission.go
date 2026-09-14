@@ -134,13 +134,18 @@ func rulesetSliceID(rs permission.Ruleset) *permission.Rule {
 // are re-checked before reuse, so any drift (hook-modified args, ruleset or
 // YOLO change, different cwd, loop-mode pctx) falls back to a fresh evaluation.
 type permApprovalRecord struct {
+	// name is part of the identity, not redundant with callID: a provider is
+	// free to reuse a call id, and two different tools can carry byte-identical
+	// args ({"path":"x"} for read and for delete), so without it an allow could
+	// be replayed for a tool the ruleset denies.
+	name      string
 	args      string
 	rulesetID permRulesetIdentity
 	cwd       string
 }
 
 // recordPermissionApproval stores an allow decision for this turn's call.
-func (t *Turn) recordPermissionApproval(callID, args, cwd string, rulesetID permRulesetIdentity) {
+func (t *Turn) recordPermissionApproval(callID, name, args, cwd string, rulesetID permRulesetIdentity) {
 	if t == nil || callID == "" {
 		return
 	}
@@ -149,13 +154,13 @@ func (t *Turn) recordPermissionApproval(callID, args, cwd string, rulesetID perm
 	if t.permissionApprovals == nil {
 		t.permissionApprovals = make(map[string]permApprovalRecord)
 	}
-	t.permissionApprovals[callID] = permApprovalRecord{args: args, rulesetID: rulesetID, cwd: cwd}
+	t.permissionApprovals[callID] = permApprovalRecord{name: name, args: args, rulesetID: rulesetID, cwd: cwd}
 }
 
 // permissionApprovalMatches reports whether a recorded allow decision still
 // applies to the exact evaluation inputs the finalize path would use. pctx
 // must be the zero value: recorded decisions were taken without loop context.
-func (t *Turn) permissionApprovalMatches(callID, args, cwd string, current permRulesetIdentity, pctx toolPermissionContext) bool {
+func (t *Turn) permissionApprovalMatches(callID, name, args, cwd string, current permRulesetIdentity, pctx toolPermissionContext) bool {
 	if t == nil || callID == "" || pctx != (toolPermissionContext{}) {
 		return false
 	}
@@ -165,7 +170,8 @@ func (t *Turn) permissionApprovalMatches(callID, args, cwd string, current permR
 	if !ok {
 		return false
 	}
-	return record.args == args &&
+	return record.name == name &&
+		record.args == args &&
 		record.cwd == cwd &&
 		record.rulesetID == current
 }

@@ -105,8 +105,8 @@ func (a *MainAgent) toolExecutionPipeline() toolExecutionPipeline {
 			return a.YoloEnabled() && yoloAskDowngradeTool(name)
 		},
 		loopExitAuthorized: a.loopExitAuthorized,
-		preapprovedPermission: func(callID string, args json.RawMessage, cwd string, pctx toolPermissionContext) bool {
-			return a.permissionApprovalMatches(callID, string(args), cwd, pctx)
+		preapprovedPermission: func(callID, name string, args json.RawMessage, cwd string, pctx toolPermissionContext) bool {
+			return a.permissionApprovalMatches(callID, name, string(args), cwd, pctx)
 		},
 		visibleToolNames: a.mainVisibleLLMToolNames,
 		appendToolActivity: func(rec recovery.ToolActivityRecord) error {

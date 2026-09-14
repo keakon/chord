@@ -413,21 +413,21 @@ func (a *MainAgent) permRulesetIdentity() permRulesetIdentity {
 
 // recordPermissionApproval caches a non-interactive allow decision taken on
 // the event loop by the speculative-reuse prefilter.
-func (a *MainAgent) recordPermissionApproval(turn *Turn, callID, args, cwd string) {
+func (a *MainAgent) recordPermissionApproval(turn *Turn, callID, name, args, cwd string) {
 	if turn == nil {
 		return
 	}
-	turn.recordPermissionApproval(callID, args, cwd, a.permRulesetIdentity())
+	turn.recordPermissionApproval(callID, name, args, cwd, a.permRulesetIdentity())
 }
 
 // permissionApprovalMatches consults the current turn's cached allow decision
 // from the execution pipeline's finalize path.
-func (a *MainAgent) permissionApprovalMatches(callID, args, cwd string, pctx toolPermissionContext) bool {
+func (a *MainAgent) permissionApprovalMatches(callID, name, args, cwd string, pctx toolPermissionContext) bool {
 	turn := a.currentTurn()
 	if turn == nil {
 		return false
 	}
-	return turn.permissionApprovalMatches(callID, args, cwd, a.permRulesetIdentity(), pctx)
+	return turn.permissionApprovalMatches(callID, name, args, cwd, a.permRulesetIdentity(), pctx)
 }
 
 func (a *MainAgent) fireHookBackground(ctx context.Context, point string, turnID uint64, data map[string]any) {
@@ -499,20 +499,20 @@ func (s *SubAgent) permRulesetIdentity() permRulesetIdentity {
 
 // recordPermissionApproval caches a non-interactive allow decision taken on
 // the SubAgent event loop by its speculative-reuse prefilter.
-func (s *SubAgent) recordPermissionApproval(turn *Turn, callID, args, cwd string) {
+func (s *SubAgent) recordPermissionApproval(turn *Turn, callID, name, args, cwd string) {
 	if turn == nil {
 		return
 	}
-	turn.recordPermissionApproval(callID, args, cwd, s.permRulesetIdentity())
+	turn.recordPermissionApproval(callID, name, args, cwd, s.permRulesetIdentity())
 }
 
 // permissionApprovalMatches consults the cached allow decision captured at
 // dispatch time from the finalize path.
-func (s *SubAgent) permissionApprovalMatches(turn *Turn, callID, args, cwd string, pctx toolPermissionContext) bool {
+func (s *SubAgent) permissionApprovalMatches(turn *Turn, callID, name, args, cwd string, pctx toolPermissionContext) bool {
 	if turn == nil {
 		return false
 	}
-	return turn.permissionApprovalMatches(callID, args, cwd, s.permRulesetIdentity(), pctx)
+	return turn.permissionApprovalMatches(callID, name, args, cwd, s.permRulesetIdentity(), pctx)
 }
 
 func (s *SubAgent) fireHook(ctx context.Context, point string, turnID uint64, data map[string]any) (*hook.Result, error) {

@@ -1152,6 +1152,18 @@ func isSubAgentInternalTool(toolName string) bool {
 // Turn management
 // ---------------------------------------------------------------------------
 
+// currentTurn reads the active turn under turnMu. Tool goroutines run
+// concurrently with newTurn, so they must not read s.turn directly — the
+// MainAgent side reads its own through the same kind of guarded accessor.
+func (s *SubAgent) currentTurn() *Turn {
+	if s == nil {
+		return nil
+	}
+	s.turnMu.Lock()
+	defer s.turnMu.Unlock()
+	return s.turn
+}
+
 // newTurn cancels any in-flight work and creates a fresh Turn.
 func (s *SubAgent) newTurn() *Turn {
 	if s.parent != nil {

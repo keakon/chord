@@ -732,7 +732,7 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 				// The finalize path re-evaluates permission with the same
 				// inputs; record the allow so it can skip the second
 				// evaluation (see applyPermission's preapproval consult).
-				a.recordPermissionApproval(turn, tc.ID, string(tc.Args), a.projectRoot)
+				a.recordPermissionApproval(turn, tc.ID, tc.Name, string(tc.Args), a.projectRoot)
 			}
 
 			effective := tc
@@ -903,7 +903,11 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 				FileState:      execResult.FileState.Clone(),
 				walltimeTarget: execResult.walltimeTarget,
 			}
-			resultPayload.composedTexts = finalizeToolResultTexts(batchCtx, turn, a.fireHook, resultPayload.CallID, resultPayload.Name, resultPayload.ArgsJSON, resultPayload.Result, resultPayload.Error, resultPayload.Audit, resultPayload.FileState)
+			// Hook context is the turn, not the batch: batchCancel above fires
+			// before this line whenever a sibling failed, and a cancelled ctx
+			// makes the append hook's process fail on spawn — silently dropping
+			// every ActionModify in the batch, including the failing call's own.
+			resultPayload.composedTexts = finalizeToolResultTexts(turn.Ctx, turn, a.fireHook, resultPayload.CallID, resultPayload.Name, resultPayload.ArgsJSON, resultPayload.Result, resultPayload.Error, resultPayload.Audit, resultPayload.FileState)
 			a.sendEvent(Event{
 				Type:    EventToolResult,
 				TurnID:  turnID,

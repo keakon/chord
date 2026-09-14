@@ -54,7 +54,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 				pendingCalls = append(pendingCalls, tc)
 				continue
 			}
-			s.recordPermissionApproval(turn, tc.ID, string(tc.Args), s.workDir)
+			s.recordPermissionApproval(turn, tc.ID, tc.Name, string(tc.Args), s.workDir)
 		}
 
 		effective := tc
@@ -158,7 +158,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 						}
 					}
 					tr := &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Images: execResult.Images, Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), Duration: toolExecDuration(tc.Name, execResult, completedAt), walltimeTarget: execResult.walltimeTarget}
-					tr.composed = finalizeToolResultTexts(batchCtx, turn, s.fireHook, tr.CallID, tr.Name, tr.ArgsJSON, tr.Result, tr.Error, tr.Audit, tr.FileState)
+					tr.composed = finalizeToolResultTexts(turn.Ctx, turn, s.fireHook, tr.CallID, tr.Name, tr.ArgsJSON, tr.Result, tr.Error, tr.Audit, tr.FileState)
 					select {
 					case s.toolCh <- tr:
 					case <-s.parentCtx.Done():
@@ -226,7 +226,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 				}
 			}
 			tr := &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Images: execResult.Images, Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), Duration: toolExecDuration(tc.Name, execResult, completedAt), walltimeTarget: execResult.walltimeTarget}
-			tr.composed = finalizeToolResultTexts(batchCtx, turn, s.fireHook, tr.CallID, tr.Name, tr.ArgsJSON, tr.Result, tr.Error, tr.Audit, tr.FileState)
+			tr.composed = finalizeToolResultTexts(turn.Ctx, turn, s.fireHook, tr.CallID, tr.Name, tr.ArgsJSON, tr.Result, tr.Error, tr.Audit, tr.FileState)
 			select {
 			case s.toolCh <- tr:
 			case <-s.parentCtx.Done():
