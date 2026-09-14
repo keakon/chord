@@ -61,34 +61,88 @@ func TestHasEnabledLSPServers_ProjectOverrideCanDisableGlobalServer(t *testing.T
 	}
 }
 
-func TestShouldQueueLSPDiagnosticOverlay_RequiresRelevantChangedDiagnostics(t *testing.T) {
+// The gate runs against the manager the live path reads, so the reviews are
+// appended to a real ctxmgr rather than handed over as a history slice.
+func TestQueueLSPDiagnosticOverlayFromContext_RequiresRelevantChangedDiagnostics(t *testing.T) {
+	newAgent := func() *MainAgent {
+		a := newReadyTestMainAgent(t)
+		a.pendingLSPDiagnosticOverlay = ""
+		return a
+	}
+	recordReview := func(a *MainAgent, reviews []message.LSPReview) {
+		a.ctxMgr.Append(message.Message{
+			Role:       message.RoleTool,
+			FileState:  &message.ToolFileState{Writes: []message.TrackedFileState{{Path: "/repo/main.go", Exists: true}}},
+			LSPReviews: reviews,
+		})
+	}
+	payloadWith := func(reviews []message.LSPReview) *ToolResultPayload {
+		return &ToolResultPayload{
+			Name:       tools.NameWrite,
+			ArgsJSON:   `{"path":"main.go"}`,
+			FileState:  &message.ToolFileState{Writes: []message.TrackedFileState{{Path: "/repo/main.go", Exists: true}}},
+			LSPReviews: reviews,
+		}
+	}
+
+	a := newAgent()
+	a.queueLSPDiagnosticOverlayFromContext(payloadWith([]message.LSPReview{{ServerID: "gopls", Errors: 1, Warnings: 0}}))
+	if a.pendingLSPDiagnosticOverlay == "" {
+		t.Fatal("overlay not armed, want armed for the first non-zero review on a written file")
+	}
+
+	a = newAgent()
+	recordReview(a, []message.LSPReview{{ServerID: "gopls", Errors: 1, Warnings: 0}})
+	a.queueLSPDiagnosticOverlayFromContext(payloadWith([]message.LSPReview{{ServerID: "gopls", Errors: 1, Warnings: 0}}))
+	if a.pendingLSPDiagnosticOverlay != "" {
+		t.Fatal("overlay armed, want inert when the review state is unchanged")
+	}
+
+	a = newAgent()
+	recordReview(a, []message.LSPReview{{ServerID: "gopls", Errors: 1, Warnings: 0}})
+	a.queueLSPDiagnosticOverlayFromContext(payloadWith([]message.LSPReview{{ServerID: "gopls", Errors: 1, Warnings: 1}}))
+	if a.pendingLSPDiagnosticOverlay == "" {
+		t.Fatal("overlay not armed, want armed when the review state changes")
+	}
+
+	a = newAgent()
+	recordReview(a, []message.LSPReview{{ServerID: "gopls", Errors: 1, Warnings: 0}})
+	a.queueLSPDiagnosticOverlayFromContext(payloadWith([]message.LSPReview{{ServerID: "gopls", Errors: 0, Warnings: 0}}))
+	if a.pendingLSPDiagnosticOverlay != "" {
+		t.Fatal("overlay armed, want inert for zero diagnostics")
+	}
+}
+
+// The gate itself is pure: the lookup is injected, so the path-matching and
+// change-detection rules are pinned without a manager.
+func TestLSPDiagnosticOverlayDue_GateRules(t *testing.T) {
+	never := func(string) ([]message.LSPReview, bool) { return nil, false }
 	payload := &ToolResultPayload{
 		Name:       tools.NameWrite,
 		ArgsJSON:   `{"path":"main.go"}`,
 		FileState:  &message.ToolFileState{Writes: []message.TrackedFileState{{Path: "/repo/main.go", Exists: true}}},
 		LSPReviews: []message.LSPReview{{ServerID: "gopls", Errors: 1, Warnings: 0}},
 	}
-	if !shouldQueueLSPDiagnosticOverlay(nil, payload) {
-		t.Fatal("shouldQueueLSPDiagnosticOverlay() = false, want true for first non-zero review on a written file")
+	if !lspDiagnosticOverlayDue(payload, never) {
+		t.Fatal("lspDiagnosticOverlayDue() = false, want true with no prior review recorded")
 	}
 
-	history := []message.Message{{
-		Role:       "tool",
-		FileState:  &message.ToolFileState{Writes: []message.TrackedFileState{{Path: "/repo/main.go", Exists: true}}},
-		LSPReviews: []message.LSPReview{{ServerID: "gopls", Errors: 1, Warnings: 0}},
-	}}
-	if shouldQueueLSPDiagnosticOverlay(history, payload) {
-		t.Fatal("shouldQueueLSPDiagnosticOverlay() = true, want false when the review state is unchanged")
+	// The lookup is keyed by the written path, not by the tool arguments.
+	var askedFor string
+	sameAsBefore := func(path string) ([]message.LSPReview, bool) {
+		askedFor = path
+		return []message.LSPReview{{ServerID: "gopls", Errors: 1, Warnings: 0}}, true
+	}
+	if lspDiagnosticOverlayDue(payload, sameAsBefore) {
+		t.Fatal("lspDiagnosticOverlayDue() = true, want false when the review state is unchanged")
+	}
+	if askedFor != "/repo/main.go" {
+		t.Fatalf("lookup path = %q, want the written path", askedFor)
 	}
 
-	payload.LSPReviews = []message.LSPReview{{ServerID: "gopls", Errors: 1, Warnings: 1}}
-	if !shouldQueueLSPDiagnosticOverlay(history, payload) {
-		t.Fatal("shouldQueueLSPDiagnosticOverlay() = false, want true when the review state changes")
-	}
-
-	payload.LSPReviews = []message.LSPReview{{ServerID: "gopls", Errors: 0, Warnings: 0}}
-	if shouldQueueLSPDiagnosticOverlay(history, payload) {
-		t.Fatal("shouldQueueLSPDiagnosticOverlay() = true, want false for zero diagnostics")
+	payload.Name = tools.NameGrep
+	if lspDiagnosticOverlayDue(payload, never) {
+		t.Fatal("lspDiagnosticOverlayDue() = true, want false for a non-editing tool")
 	}
 }
 
@@ -107,7 +161,7 @@ func TestLSPDiagnosticOverlay_IsInjectedAsOneShotOverlay(t *testing.T) {
 		LSPReviews: []message.LSPReview{{ServerID: "gopls", Errors: 2, Warnings: 1}},
 	}
 
-	a.queueLSPDiagnosticOverlay(nil, payload)
+	a.queueLSPDiagnosticOverlayFromContext(payload)
 	overlays := a.buildTurnOverlayMessages()
 	if len(overlays) == 0 {
 		t.Fatal("expected LSP diagnostic overlay to be present")
@@ -154,8 +208,8 @@ func TestLSPDiagnosticOverlay_MultipleQueuedResultsStillProduceSingleGenericRemi
 		LSPReviews: []message.LSPReview{{ServerID: "gopls", Errors: 0, Warnings: 2}},
 	}
 
-	a.queueLSPDiagnosticOverlay(nil, first)
-	a.queueLSPDiagnosticOverlay(nil, second)
+	a.queueLSPDiagnosticOverlayFromContext(first)
+	a.queueLSPDiagnosticOverlayFromContext(second)
 	overlays := a.buildTurnOverlayMessages()
 	count := 0
 	for _, o := range overlays {
@@ -179,7 +233,7 @@ func TestLSPDiagnosticOverlay_IsDroppedWhenCurrentRoleNoLongerQualifies(t *testi
 			FileState:  &message.ToolFileState{Writes: []message.TrackedFileState{{Path: "/repo/pkg/foo.go", Exists: true}}},
 			LSPReviews: []message.LSPReview{{ServerID: "gopls", Errors: 1, Warnings: 0}},
 		}
-		a.queueLSPDiagnosticOverlay(nil, payload)
+		a.queueLSPDiagnosticOverlayFromContext(payload)
 		a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, "\n\"*\": deny\nWrite: deny\nEdit: deny\n")}
 		a.rebuildRuleset()
 
@@ -203,7 +257,7 @@ func TestLSPDiagnosticOverlay_IsDroppedWhenCurrentRoleNoLongerQualifies(t *testi
 			FileState:  &message.ToolFileState{Writes: []message.TrackedFileState{{Path: "/repo/pkg/foo.go", Exists: true}}},
 			LSPReviews: []message.LSPReview{{ServerID: "gopls", Errors: 1, Warnings: 0}},
 		}
-		a.queueLSPDiagnosticOverlay(nil, payload)
+		a.queueLSPDiagnosticOverlayFromContext(payload)
 		a.globalConfig = &config.Config{LSP: config.LSPConfig{"gopls": {Disabled: true}}}
 
 		for _, o := range a.buildTurnOverlayMessages() {

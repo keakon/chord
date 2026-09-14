@@ -2,7 +2,6 @@ package agent
 
 import (
 	"maps"
-	"slices"
 	"strings"
 
 	"github.com/keakon/chord/internal/identity"
@@ -270,45 +269,26 @@ func (a *MainAgent) takePendingLSPDiagnosticOverlay() string {
 	return prompt
 }
 
-func (a *MainAgent) queueLSPDiagnosticOverlay(history []message.Message, payload *ToolResultPayload) {
-	if !shouldQueueLSPDiagnosticOverlay(history, payload) {
-		return
-	}
-	a.pendingLSPDiagnosticOverlay = pendingLSPDiagnosticOverlayText
-}
-
-// queueLSPDiagnosticOverlayFromContext is the Snapshot-free form of
-// queueLSPDiagnosticOverlay; it reads the manager through ScanBackward
-// instead of copying the whole history.
+// queueLSPDiagnosticOverlayFromContext arms the one-shot LSP overlay when an
+// edit-like result carries diagnostics that differ from the newest ones already
+// recorded for the same path. The history lookup goes through ScanBackward, so
+// no Snapshot copy is made per tool result.
 func (a *MainAgent) queueLSPDiagnosticOverlayFromContext(payload *ToolResultPayload) {
 	if a == nil || a.ctxMgr == nil {
 		return
 	}
-	if payload == nil {
-		return
-	}
-	if payload.Name != tools.NameEdit && payload.Name != tools.NameApplyPatch && payload.Name != tools.NameWrite {
-		return
-	}
-	if len(payload.LSPReviews) == 0 || !hasNonZeroLSPReviews(payload.LSPReviews) {
-		return
-	}
-	path := reviewedToolPayloadPath(payload)
-	if path == "" {
-		return
-	}
-	prev, ok := latestLSPReviewsFromContext(a.ctxMgr, path)
-	if !ok {
-		a.pendingLSPDiagnosticOverlay = pendingLSPDiagnosticOverlayText
-		return
-	}
-	if !sameLSPReviews(prev, payload.LSPReviews) {
+	if lspDiagnosticOverlayDue(payload, func(path string) ([]message.LSPReview, bool) {
+		return latestLSPReviewsFromContext(a.ctxMgr, path)
+	}) {
 		a.pendingLSPDiagnosticOverlay = pendingLSPDiagnosticOverlayText
 	}
 }
 
-func shouldQueueLSPDiagnosticOverlay(history []message.Message, payload *ToolResultPayload) bool {
-	if payload == nil {
+// lspDiagnosticOverlayDue is the overlay gate, separated from where the
+// previous reviews come from so it can be exercised without a live agent.
+// latest reports the newest recorded reviews for a path, and whether any exist.
+func lspDiagnosticOverlayDue(payload *ToolResultPayload, latest func(path string) ([]message.LSPReview, bool)) bool {
+	if payload == nil || latest == nil {
 		return false
 	}
 	if payload.Name != tools.NameEdit && payload.Name != tools.NameApplyPatch && payload.Name != tools.NameWrite {
@@ -321,7 +301,7 @@ func shouldQueueLSPDiagnosticOverlay(history []message.Message, payload *ToolRes
 	if path == "" {
 		return false
 	}
-	prev, ok := latestLSPReviewsForPath(history, path)
+	prev, ok := latest(path)
 	if !ok {
 		return true
 	}
@@ -358,20 +338,6 @@ func latestLSPReviewsFromContext(mgr *ctxmgr.Manager, path string) ([]message.LS
 		return true
 	})
 	return out, ok
-}
-
-func latestLSPReviewsForPath(history []message.Message, path string) ([]message.LSPReview, bool) {
-	for _, msg := range slices.Backward(history) {
-
-		if len(msg.LSPReviews) == 0 {
-			continue
-		}
-		if reviewedToolMessagePath(msg) != path {
-			continue
-		}
-		return append([]message.LSPReview(nil), msg.LSPReviews...), true
-	}
-	return nil, false
 }
 
 func reviewedToolMessagePath(msg message.Message) string {
