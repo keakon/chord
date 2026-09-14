@@ -496,7 +496,11 @@ func normalizeCheckpointPath(path, projectRoot string, allowNotesRoots bool) str
 		return ""
 	}
 	rel := filepath.ToSlash(candidate)
-	if strings.HasPrefix(rel, ".chord/") && !(allowNotesRoots && isCompactionNotesPath(rel)) {
+	// Case-folded: on a case-insensitive filesystem (APFS, NTFS) ".Chord/..."
+	// opens the very same harness-internal files, so the filter has to reject
+	// the spelling the model wrote, not just the canonical one.
+	relFold := strings.ToLower(rel)
+	if strings.HasPrefix(relFold, ".chord/") && !(allowNotesRoots && isCompactionNotesPath(relFold)) {
 		return ""
 	}
 	info, err := os.Stat(filepath.Join(projectRoot, candidate))
