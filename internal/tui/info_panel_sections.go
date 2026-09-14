@@ -38,6 +38,11 @@ func joinInfoPanelBlockLines(lines []string) string {
 		return lines[0]
 	default:
 		var b strings.Builder
+		total := len(lines) - 1
+		for _, line := range lines {
+			total += len(line)
+		}
+		b.Grow(total)
 		for i, line := range lines {
 			if i > 0 {
 				b.WriteByte('\n')

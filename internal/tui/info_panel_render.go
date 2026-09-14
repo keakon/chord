@@ -345,6 +345,12 @@ func (m *Model) renderInfoPanel(width int, height int) string {
 			content = blockParts[0]
 		default:
 			var sb strings.Builder
+			total := 0
+			for _, part := range blockParts {
+				total += len(part)
+			}
+			total += len(sep) * (len(blockParts) - 1)
+			sb.Grow(total)
 			for _, part := range blockParts {
 				sb.WriteString(part)
 			}
