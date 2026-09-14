@@ -240,10 +240,7 @@ func buildBashConfirmSummary(summary *confirmSummary, parsed map[string]any) {
 	}
 	handled["timeout_ms"] = true
 	if timeoutMs, ok := confirmInt(parsed, "timeout_ms"); ok && timeoutMs > 0 {
-		effectiveMs := timeoutMs
-		if effectiveMs > capMs {
-			effectiveMs = capMs
-		}
+		effectiveMs := min(timeoutMs, capMs)
 		appendConfirmField(&summary.Fields, newConfirmField("Timeout", formatShellMs(effectiveMs), true))
 		if timeoutMs > capMs {
 			summary.Warnings = append(summary.Warnings, fmt.Sprintf("Requested timeout %s capped to %s", formatShellMs(timeoutMs), formatShellMs(capMs)))

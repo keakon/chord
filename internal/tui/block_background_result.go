@@ -254,11 +254,10 @@ func backgroundResultStatusLine(status string) (string, string) {
 // parsed and checked before generic error-substring matching.
 func backgroundResultExitCode(lower string) (int, bool) {
 	for _, prefix := range []string{"exit code ", "exit status ", "exit "} {
-		idx := strings.Index(lower, prefix)
-		if idx < 0 {
+		_, rest, found := strings.Cut(lower, prefix)
+		if !found {
 			continue
 		}
-		rest := lower[idx+len(prefix):]
 		end := 0
 		for end < len(rest) && rest[end] >= '0' && rest[end] <= '9' {
 			end++

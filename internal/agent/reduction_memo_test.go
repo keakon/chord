@@ -89,7 +89,7 @@ func TestReductionMemoCapDropsWholesale(t *testing.T) {
 	messages := memoEquivalenceMessages()
 	want := benchmarkContextReductionAgent().prepareMessagesForLLM(messages)
 
-	for i := 0; i < reductionToolCallMemoMaxEntries; i++ {
+	for i := range reductionToolCallMemoMaxEntries {
 		a.reductionMemo.toolResultDigest(fmt.Sprintf("cap-%d", i), "x")
 	}
 	if got := a.prepareMessagesForLLM(messages); len(got) != len(want) {

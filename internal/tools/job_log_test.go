@@ -139,12 +139,12 @@ func TestRotatingJobLogConcurrentWrites(t *testing.T) {
 	const writers = 4
 	const iterations = 200
 	var wg sync.WaitGroup
-	for id := 0; id < writers; id++ {
+	for id := range writers {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
 			chunk := bytes.Repeat([]byte{byte('a' + id)}, 64)
-			for i := 0; i < iterations; i++ {
+			for range iterations {
 				if _, err := writer.Write(chunk); err != nil {
 					t.Errorf("writer %d: %v", id, err)
 					return

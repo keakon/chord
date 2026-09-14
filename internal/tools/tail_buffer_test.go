@@ -81,12 +81,12 @@ func TestTailBufferCursorsReportDroppedBytes(t *testing.T) {
 func BenchmarkTailBufferStringTruncated(b *testing.B) {
 	buffer := NewTailBuffer(1 << 20)
 	chunk := []byte(strings.Repeat("x", 64<<10))
-	for i := 0; i < 32; i++ {
+	for range 32 {
 		_, _ = buffer.Write(chunk)
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = buffer.String()
 	}
 }

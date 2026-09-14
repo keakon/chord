@@ -179,14 +179,12 @@ func TestReadIncrementalConcurrentClaimsDeliverEachByteOnce(t *testing.T) {
 	var mu sync.Mutex
 	var got strings.Builder
 	for range 2 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			chunk, _ := j.readIncremental("agent-1")
 			mu.Lock()
 			got.WriteString(chunk)
 			mu.Unlock()
-		}()
+		})
 	}
 	wg.Wait()
 	if got.String() != payload {
