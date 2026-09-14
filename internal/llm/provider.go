@@ -82,7 +82,7 @@ type GeminiTuning struct {
 	// ThinkingLevel is ""|"minimal"|"low"|"medium"|"high" (Gemini 3+). Gemini
 	// rejects a request carrying both a budget and a level, so
 	// normalizeGeminiThinking drops the budget whenever a level is set; some
-	// models (e.g. Gemini 3.1 Pro, 3.7 Flash) reject "minimal" outright.
+	// models (e.g. Gemini 3.1 Pro, 3.8 Flash) reject "minimal" outright.
 	ThinkingLevel   string
 	IncludeThoughts *bool  // nil = omit; true/false explicit includeThoughts
 	ToolChoice      string // ""|"auto"|"required"|"none" (required maps to Gemini ANY)
@@ -520,6 +520,9 @@ func (p *ProviderConfig) ChatCompletionsCompat(modelID string) *config.ChatCompl
 	}
 	if modelCfg.MCPSystemToolsMessage != nil {
 		merged.MCPSystemToolsMessage = modelCfg.MCPSystemToolsMessage
+	}
+	if modelCfg.KeepReasoningEffort != nil {
+		merged.KeepReasoningEffort = modelCfg.KeepReasoningEffort
 	}
 	return merged
 }

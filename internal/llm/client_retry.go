@@ -1177,6 +1177,14 @@ func replayCompatibleRequestTuning(tuning RequestTuning, messages []message.Mess
 		!openAIChatReasoningEnabled(tuning, target) {
 		return tuning
 	}
+	// Compat opt-out for endpoints that accept reasoning controls without a
+	// reasoning-content replay contract (for example Grok on the Chat
+	// Completions wire): keep the controls even though replayed assistant
+	// tool-call messages carry no reasoning content.
+	if compat := target.ProviderConfig.ChatCompletionsCompat(target.ModelID); compat != nil &&
+		compatBool(compat.KeepReasoningEffort, false) {
+		return tuning
+	}
 	// Thinking-mode chat backends only validate reasoning presence for
 	// assistant tool-call messages after the last user message, so a
 	// reasoning-free turn that has already scrolled out of the current turn

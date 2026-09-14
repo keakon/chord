@@ -653,6 +653,53 @@ func TestReplayCompatibleRequestTuningDisablesMissingToolReasoning(t *testing.T)
 	}
 }
 
+func TestReplayCompatibleRequestTuningKeepReasoningEffortCompat(t *testing.T) {
+	missing := []message.Message{{
+		Role:      message.RoleAssistant,
+		ToolCalls: []message.ToolCall{{ID: "call_1", Name: "read", Args: []byte(`{}`)}},
+	}}
+	providerFlag := NewProviderConfig("openai", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Compat: &config.ProviderCompatConfig{ChatCompletions: &config.ChatCompletionsCompatConfig{
+			KeepReasoningEffort: new(true),
+		}},
+		Models: map[string]config.ModelConfig{"test-model": {Reasoning: &config.ReasoningConfig{Effort: "high"}}},
+	}, []string{"key"})
+	// A model-level flag must survive merging over an unrelated provider default.
+	modelFlag := NewProviderConfig("openai", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Compat: &config.ProviderCompatConfig{ChatCompletions: &config.ChatCompletionsCompatConfig{
+			SendStreamOptions: new(false),
+		}},
+		Models: map[string]config.ModelConfig{"test-model": {
+			Reasoning: &config.ReasoningConfig{Effort: "high"},
+			Compat: &config.ModelCompatConfig{ChatCompletions: &config.ChatCompletionsCompatConfig{
+				KeepReasoningEffort: new(true),
+			}},
+		}},
+	}, []string{"key"})
+	explicitOff := NewProviderConfig("openai", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Compat: &config.ProviderCompatConfig{ChatCompletions: &config.ChatCompletionsCompatConfig{
+			KeepReasoningEffort: new(false),
+		}},
+		Models: map[string]config.ModelConfig{"test-model": {Reasoning: &config.ReasoningConfig{Effort: "high"}}},
+	}, []string{"key"})
+
+	for name, cfg := range map[string]*ProviderConfig{"provider": providerFlag, "model": modelFlag} {
+		target := FallbackModel{ProviderConfig: cfg, ModelID: "test-model"}
+		tuning := tuningForPoolTarget(target)
+		if got := replayCompatibleRequestTuning(tuning, missing, target); got.DisableReasoning {
+			t.Fatalf("%s compat missing-reasoning tuning = %+v, want reasoning controls kept", name, got)
+		}
+	}
+	target := FallbackModel{ProviderConfig: explicitOff, ModelID: "test-model"}
+	tuning := tuningForPoolTarget(target)
+	if got := replayCompatibleRequestTuning(tuning, missing, target); !got.DisableReasoning {
+		t.Fatalf("explicit false tuning = %+v, want disabled", got)
+	}
+}
+
 func TestCompleteStreamTargetPassesReplayCompatibleTuning(t *testing.T) {
 	cfg := NewProviderConfig("openai", config.ProviderConfig{
 		Type: config.ProviderTypeChatCompletions,
@@ -685,6 +732,44 @@ func TestCompleteStreamTargetPassesReplayCompatibleTuning(t *testing.T) {
 	defer impl.mu.Unlock()
 	if len(impl.tunings) != 1 || !impl.tunings[0].DisableReasoning {
 		t.Fatalf("provider tunings = %+v, want DisableReasoning", impl.tunings)
+	}
+}
+
+func TestCompleteStreamTargetKeepsReasoningEffortWithCompat(t *testing.T) {
+	cfg := NewProviderConfig("openai", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{"test-model": {
+			Reasoning: &config.ReasoningConfig{Effort: "high"},
+			Compat: &config.ModelCompatConfig{ChatCompletions: &config.ChatCompletionsCompatConfig{
+				KeepReasoningEffort: new(true),
+			}},
+		}},
+	}, []string{"key"})
+	impl := &replayRejectingProvider{}
+	client := NewClient(cfg, impl, "test-model", 1024, "")
+	result, _, err := client.completeStreamTarget(
+		context.Background(), streamRetryTarget{
+			provider: cfg, impl: impl, modelID: "test-model", maxTokens: 1024,
+			contextLimit: 128000, inputLimit: 128000, isFallback: true,
+			tuning: tuningForPoolTarget(FallbackModel{ProviderConfig: cfg, ModelID: "test-model"}),
+		},
+		0, []message.Message{
+			{
+				Role:       message.RoleAssistant,
+				ToolCalls:  []message.ToolCall{{ID: "call_1", Name: "read", Args: []byte(`{}`)}},
+				Provenance: &message.MessageProvenance{WireFamily: modelcompat.WireFamilyAnthropic},
+			},
+			{Role: message.RoleTool, ToolCallID: "call_1", Content: "READ_RESULT ok"},
+		}, nil, nil, false, nil, 0, false, &CallStatus{}, "", 0, 0,
+		func() error { return nil }, nil, "",
+	)
+	if err != nil || result.resp == nil {
+		t.Fatalf("completeStreamTarget = (%+v, %v), want success", result, err)
+	}
+	impl.mu.Lock()
+	defer impl.mu.Unlock()
+	if len(impl.tunings) != 1 || impl.tunings[0].DisableReasoning {
+		t.Fatalf("provider tunings = %+v, want reasoning kept", impl.tunings)
 	}
 }
 

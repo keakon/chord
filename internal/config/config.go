@@ -759,6 +759,15 @@ type ChatCompletionsCompatConfig struct {
 	// top-level tools array. Default false: only enable it for models that
 	// accept the Kimi-compatible dynamic-tool shape.
 	MCPSystemToolsMessage *bool `json:"mcp_system_tools_message,omitempty" yaml:"mcp_system_tools_message,omitempty"`
+	// KeepReasoningEffort keeps the reasoning request controls when a
+	// current-turn assistant tool-call message replays without reasoning
+	// content (default false). Chord otherwise reads the missing reasoning
+	// content as a backend that does not replay reasoning and strips
+	// reasoning_effort and reasoning request overrides for the rest of the
+	// turn. Enable it for endpoints that accept reasoning controls without a
+	// reasoning-content replay contract, such as Grok on the Chat Completions
+	// wire.
+	KeepReasoningEffort *bool `json:"keep_reasoning_effort,omitempty" yaml:"keep_reasoning_effort,omitempty"`
 }
 
 // RequestOverridesConfig applies protocol-agnostic patches after Chord builds a
