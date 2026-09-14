@@ -123,21 +123,25 @@ func (a *MainAgent) compactionContinuationFiles(signature string) []string {
 	if a == nil {
 		return nil
 	}
-	files := extractCompactionKeyFiles(signature, a.projectRoot)
+	keyFiles := extractCompactionKeyFiles(signature, a.projectRoot)
 	declared := extractCompactionStateFiles(signature, a.projectRoot)
 	if len(declared) == 0 {
-		return files
+		return keyFiles
 	}
-	seen := make(map[string]bool, len(files)+len(declared))
-	for _, f := range files {
-		seen[f] = true
-	}
+	files := make([]string, 0, len(keyFiles)+len(declared))
+	seen := make(map[string]bool, len(keyFiles)+len(declared))
 	for _, rel := range declared {
 		if seen[rel] || !a.stateFileInjectableForRead(a.resolveCheckpointFilePath(rel)) {
 			continue
 		}
 		seen[rel] = true
 		files = append(files, rel)
+	}
+	for _, rel := range keyFiles {
+		if !seen[rel] {
+			seen[rel] = true
+			files = append(files, rel)
+		}
 	}
 	return files
 }

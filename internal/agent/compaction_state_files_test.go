@@ -7,10 +7,41 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/filectx"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
+
+func TestCompactionStateFilesPrecedeKeyFilesUnderBudget(t *testing.T) {
+	projectRoot := t.TempDir()
+	notesPath := filepath.Join(projectRoot, ".chord", "notes", "resume.md")
+	if err := os.MkdirAll(filepath.Dir(notesPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(notesPath, []byte("## Resume\nNext: verify the parser.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, "source.go"), []byte(strings.Repeat("source body\n", 100)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	agent := newTestMainAgent(t, projectRoot)
+	agent.ruleset = permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionAllow}}
+	agent.fileTrack.TrackObservedSnapshot(notesPath, agent.instanceID, "sha256:notes")
+	summary := "## Files and Evidence\n- source.go\n\n## Externalized State\n- .chord/notes/resume.md\n- source.go\n"
+	paths := agent.compactionContinuationFiles(summary)
+	if !slices.Equal(paths, []string{".chord/notes/resume.md", "source.go"}) {
+		t.Fatalf("paths = %v", paths)
+	}
+	result := filectx.BuildFilePartsWithOptions(paths, agent.resolveCheckpointFilePath, filectx.BuildFilePartsOptions{MaxFileBytes: 64, MaxTotalBytes: 64})
+	found := false
+	for _, part := range result.Parts {
+		found = found || strings.Contains(part.Text, "Next: verify the parser.")
+	}
+	if !found {
+		t.Fatalf("notes lost under file budget: %+v", result)
+	}
+}
 
 // The Externalized State section is the only place a checkpoint records the
 // files the continuation must re-read, so the extractor must accept the
