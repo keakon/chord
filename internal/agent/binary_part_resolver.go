@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"container/list"
 	"fmt"
 	"os"
 	"sync"
@@ -15,19 +16,29 @@ import (
 // the budget only bounds how many recently used blobs stay resident for the
 // wire converter, which re-reads the same attachments on every request of a
 // turn.
+// The recency order is a container/list, so a hit is O(1). A slice of paths
+// costs a linear scan per hit, and this cache is keyed by attachment rather
+// than by byte budget: a session with many small attachments accumulates
+// entries far past what a per-request scan should pay for.
 type binaryPartReadCache struct {
 	mu      sync.Mutex
-	entries map[string][]byte
-	order   []string
+	entries map[string]*list.Element // path → element holding *binaryPartCacheEntry
+	order   *list.List               // front = least recently used
 	bytes   int64
 	budget  int64
+}
+
+type binaryPartCacheEntry struct {
+	path string
+	data []byte
 }
 
 const binaryPartReadCacheBudget = 64 << 20 // 64 MiB
 
 func newBinaryPartReadCache() *binaryPartReadCache {
 	return &binaryPartReadCache{
-		entries: make(map[string][]byte),
+		entries: make(map[string]*list.Element),
+		order:   list.New(),
 		budget:  binaryPartReadCacheBudget,
 	}
 }
@@ -35,42 +46,33 @@ func newBinaryPartReadCache() *binaryPartReadCache {
 func (c *binaryPartReadCache) get(path string) ([]byte, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	data, ok := c.entries[path]
-	if ok {
-		c.touchLocked(path)
+	elem, ok := c.entries[path]
+	if !ok {
+		return nil, false
 	}
-	return data, ok
+	c.order.MoveToBack(elem)
+	return elem.Value.(*binaryPartCacheEntry).data, true
 }
 
 func (c *binaryPartReadCache) put(path string, data []byte) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if _, ok := c.entries[path]; ok {
-		c.touchLocked(path)
+	if elem, ok := c.entries[path]; ok {
+		c.order.MoveToBack(elem)
 		return
 	}
 	if int64(len(data)) > c.budget {
 		return
 	}
-	for c.bytes+int64(len(data)) > c.budget && len(c.order) > 0 {
-		oldest := c.order[0]
-		c.order = c.order[1:]
-		c.bytes -= int64(len(c.entries[oldest]))
-		delete(c.entries, oldest)
+	for c.bytes+int64(len(data)) > c.budget && c.order.Len() > 0 {
+		oldest := c.order.Front()
+		entry := oldest.Value.(*binaryPartCacheEntry)
+		c.order.Remove(oldest)
+		delete(c.entries, entry.path)
+		c.bytes -= int64(len(entry.data))
 	}
-	c.entries[path] = data
-	c.order = append(c.order, path)
+	c.entries[path] = c.order.PushBack(&binaryPartCacheEntry{path: path, data: data})
 	c.bytes += int64(len(data))
-}
-
-func (c *binaryPartReadCache) touchLocked(path string) {
-	for i, p := range c.order {
-		if p == path {
-			c.order = append(c.order[:i], c.order[i+1:]...)
-			c.order = append(c.order, path)
-			break
-		}
-	}
 }
 
 // resolveBinaryPart loads a persisted attachment for the wire converter. The
