@@ -131,6 +131,27 @@ func TestQuestionToolLabelLengthsAreGuidance(t *testing.T) {
 	}
 }
 
+// Both the question dialog and the answered tool card render label-only
+// choices, so an omitted option description must not fail validation and cost
+// a model retry.
+func TestQuestionToolAcceptsLabelOnlyOptions(t *testing.T) {
+	raw := json.RawMessage(`{"questions":[{"question":"Which strategy should be used?","header":"Strategy","options":[{"label":"Additive"},{"label":"Replace"}]}]}`)
+	if err := ValidateToolArgs(NewQuestionTool(nil), raw); err != nil {
+		t.Fatalf("label-only options should pass validation: %v", err)
+	}
+
+	// The label stays mandatory, and a non-string description still fails the
+	// type check.
+	missingLabel := json.RawMessage(`{"questions":[{"question":"q","header":"h","options":[{"description":"d"}]}]}`)
+	if err := ValidateToolArgs(NewQuestionTool(nil), missingLabel); err == nil || !strings.Contains(err.Error(), "args.questions[0].options[0].label is required") {
+		t.Fatalf("missing label should still fail, got %v", err)
+	}
+	wrongType := json.RawMessage(`{"questions":[{"question":"q","header":"h","options":[{"label":"a","description":7}]}]}`)
+	if err := ValidateToolArgs(NewQuestionTool(nil), wrongType); err == nil || !strings.Contains(err.Error(), "args.questions[0].options[0].description must be a string") {
+		t.Fatalf("non-string description should still fail, got %v", err)
+	}
+}
+
 func TestQuestionToolExecuteAcceptsSingleObject(t *testing.T) {
 	var received []QuestionItem
 	tool := NewQuestionTool(func(_ context.Context, qs []QuestionItem) ([]QuestionAnswer, error) {

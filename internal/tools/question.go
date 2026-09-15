@@ -98,10 +98,10 @@ func (QuestionTool) Parameters() map[string]any {
 									},
 									"description": map[string]any{
 										"type":        "string",
-										"description": "Explanation of this choice, written in the user's current language",
+										"description": "Explanation of this choice and its tradeoffs, written in the user's current language. Optional: omit it when the label alone is self-explanatory.",
 									},
 								},
-								"required": []string{"label", "description"},
+								"required": []string{"label"},
 							},
 						},
 						"multiple": map[string]any{
