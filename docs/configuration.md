@@ -587,8 +587,8 @@ key level**, and the current entry wins on conflict:
   and `compaction.reminder: -1` are the documented exceptions that disable
   those two behaviors explicitly.
 
-Keep this page focused on protocol semantics. For current model limits, pricing,
-and complete GPT / Claude / Gemini / GLM / DeepSeek snippets, use
+This page covers protocol and field semantics. For current model limits,
+pricing, and complete GPT / Claude / Gemini / GLM / DeepSeek snippets, see
 [Model configuration recipes](./model-configs.md).
 
 ```yaml

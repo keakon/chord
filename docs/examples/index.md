@@ -1,6 +1,6 @@
 # Configuration examples
 
-These examples are organized by **real file layout**, not by stuffing multiple files into comments inside one YAML blob. Pick a scenario and create the files at the paths shown on that page.
+These examples use a **real file layout**: pick a scenario and create the files at the paths shown on that page.
 
 ## Choose a starting point
 

@@ -1,6 +1,6 @@
 # Model configuration recipes
 
-Use this page when you already know which provider/model family you want and just need a copy-paste-ready starting point. Keep [Configuration & Auth](./configuration.md) for field semantics and full schema details; use [Examples](./examples/index.md) for full multi-file workstation/team layouts.
+Use this page when you already know which provider/model family you want and just need a copy-paste-ready starting point. Field semantics and the full schema live in [Configuration & Auth](./configuration.md); full multi-file workstation/team layouts live in [Examples](./examples/index.md).
 
 > **Per-model compaction tuning.** Every recipe below is a `model_pools` /
 > `providers` recipe for wiring up the model. To tune context
