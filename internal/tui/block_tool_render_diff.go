@@ -371,7 +371,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 		case tools.NameApplyPatch:
 			if strings.TrimSpace(displayDiff) == "" {
 				result = appendApplyPatchPreview(result, b, syntaxPath, cardWidth-4)
-				if applyPatchSections.applied != "" && !hasOperationSummaries {
+				if applyPatchSections.applied != "" {
 					result = append(result, toolFieldSection(ToolResultExpandedStyle, "Applied changes"))
 					result = appendApplyPatchErrorTextLines(result, applyPatchSections.applied, textWrap)
 				}
