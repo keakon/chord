@@ -226,12 +226,7 @@ func excludeRetainedFailureEvidence(items []evidenceItem, retained map[string]st
 // batchHasRetainedFailure reports whether any result of the batch ended
 // unsuccessfully.
 func batchHasRetainedFailure(results []message.Message) bool {
-	for _, result := range results {
-		if retainedFailureResult(result) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(results, retainedFailureResult)
 }
 
 // retainedFailureResult reports whether a tool result records an outcome the

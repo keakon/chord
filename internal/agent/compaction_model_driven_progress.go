@@ -1,13 +1,15 @@
 package agent
 
 import (
+	"slices"
+
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
 func modelDrivenHasProgressSinceCheckpoint(snapshot []message.Message) bool {
 	boundary := -1
-	for index := len(snapshot) - 1; index >= 0; index-- {
+	for index := range slices.Backward(snapshot) {
 		if snapshot[index].IsCompactionSummary {
 			if snapshot[index].CompactionSummaryMode != compactionSummaryModeModelDriven {
 				return true

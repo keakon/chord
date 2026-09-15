@@ -268,7 +268,7 @@ func TestStreamingApplyPatchHighlightsMultiFilePatch(t *testing.T) {
 	// preserveBackground re-inserts the card background after every reset, so the
 	// highlighted run is not one contiguous substring of the rendered line; every
 	// coloured segment of it must still land in the line.
-	for _, segment := range strings.Split(highlighted, "\x1b[m") {
+	for segment := range strings.SplitSeq(highlighted, "\x1b[m") {
 		if segment != "" && !strings.Contains(bodyLine, segment) {
 			t.Fatalf("rendered patch line is missing highlighter segment %q:\n%s", segment, bodyLine)
 		}

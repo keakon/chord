@@ -103,8 +103,8 @@ func TestMCPPromptPreservesEscapedNamesDuringVisibilityFiltering(t *testing.T) {
 	allowed := mcp.RegisteredMCPToolName(server, "lookup")
 	denied := mcp.RegisteredMCPToolName(server, "admin")
 	a := &MainAgent{tools: tools.NewRegistry()}
-	a.tools.Register(dummyMCPTool{dummyTool: dummyTool{name: allowed}, server: server})
-	a.tools.Register(dummyMCPTool{dummyTool: dummyTool{name: denied}, server: server})
+	a.tools.Register(dummyMCPTool{name: allowed, server: server})
+	a.tools.Register(dummyMCPTool{name: denied, server: server})
 	a.mcpServersPrompt = mcp.RenderServersPromptBlock([]mcp.ServerTools{
 		{Name: server, Tools: []string{allowed, denied}},
 		{Name: "hidden", Tools: []string{"mcp_hidden_lookup"}},
