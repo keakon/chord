@@ -349,7 +349,6 @@ func (m *Model) renderInfoPanel(width int, height int) string {
 			for _, part := range blockParts {
 				total += len(part)
 			}
-			total += len(sep) * (len(blockParts) - 1)
 			sb.Grow(total)
 			for _, part := range blockParts {
 				sb.WriteString(part)
