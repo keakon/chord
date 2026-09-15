@@ -329,8 +329,11 @@ func truncateRunes(s string, n int) string {
 // see the merge body below). Carried items fill the remaining list capacity
 // oldest-last, and the entries that do
 // not fit are dropped with a disclosed omission count instead of silently
-// growing the list without bound. The returned lists are item-bounded, so the
-// readable sections and the machine typed block carry exactly the same text.
+// growing the list without bound. The returned lists are item-bounded; the
+// readable sections may render fewer of them after the display-side
+// de-duplication against completed work, while the machine typed block keeps
+// the full carried lists because it is the only channel that hands retained
+// state to the next checkpoint.
 func mergeCheckpointTypedStates(prior, current checkpointTypedState) (merged checkpointTypedState, omitted int, claimsOmitted int) {
 	var dropped int
 	merged.Decisions, dropped = mergeTypedStateList(prior.Decisions, current.Decisions, typedStateCarryMaxDecisions)

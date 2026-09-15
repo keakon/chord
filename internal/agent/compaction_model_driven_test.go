@@ -2290,6 +2290,27 @@ func TestModelDrivenClaimAndStageRenderersEscapeMultilineHeadingValues(t *testin
 	assertNoFakeTopLevelSection(t, "state files", stateFiles)
 }
 
+func TestRenderFallbackSummarySectionsDropsEmptyCheckpointStage(t *testing.T) {
+	rendered := renderFallbackSummarySections([]fallbackSummarySection{
+		{"## Current User Request", "- keep going"},
+		{"## Checkpoint Stage", renderModelDrivenStageSection("", "", "")},
+	}, nil)
+	if strings.Contains(rendered, "## Checkpoint Stage") {
+		t.Fatalf("empty stage section must be omitted, got:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "No stage metadata reported by the model") {
+		t.Fatalf("empty stage body must not survive, got:\n%s", rendered)
+	}
+
+	kept := renderFallbackSummarySections([]fallbackSummarySection{
+		{"## Current User Request", "- keep going"},
+		{"## Checkpoint Stage", renderModelDrivenStageSection("stage-1", "completed", "committed")},
+	}, nil)
+	if !strings.Contains(kept, "## Checkpoint Stage") || !strings.Contains(kept, "Stage ID: stage-1") {
+		t.Fatalf("reported stage metadata must be kept, got:\n%s", kept)
+	}
+}
+
 func TestModelDrivenRuntimeStateFingerprintIgnoresSubAgentOrder(t *testing.T) {
 	base := modelDrivenBarrierSnapshot{
 		todos: []tools.TodoItem{{ID: "t1", Content: "first"}},

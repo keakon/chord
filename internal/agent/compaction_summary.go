@@ -791,6 +791,7 @@ func isEmptyOptionalSummarySection(section fallbackSummarySection) bool {
 		"## Evidence References",
 		"## Claim Evidence",
 		"## Claim Classification",
+		"## Checkpoint Stage",
 	}, section.heading) {
 		return false
 	}
