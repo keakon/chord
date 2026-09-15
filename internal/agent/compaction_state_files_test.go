@@ -54,6 +54,9 @@ func TestExtractCompactionStateFilesScopesChordRoots(t *testing.T) {
 		".chord/plans/20260914-plan.md",
 		".chord/memory/records/rec.md",
 		".chord/sessions/s1/main.jsonl",
+		".Chord/notes/UPPER.md",
+		".Chord/memory/records/upper.md",
+		".Chord/sessions/s1/main.jsonl",
 		"src/main.go",
 	} {
 		abs := filepath.Join(projectRoot, filepath.FromSlash(rel))
@@ -74,13 +77,19 @@ func TestExtractCompactionStateFilesScopesChordRoots(t *testing.T) {
 		"- src/main.go",
 		"- src/missing.go",
 		"- ../outside.go",
+		"- .Chord/notes/UPPER.md",
+		"- .Chord/memory/records/upper.md",
+		"- .Chord/sessions/s1/main.jsonl",
 		"",
 		"## Next Step",
 		"- continue",
 	}, "\n")
 
 	got := extractCompactionStateFiles(section, projectRoot)
-	want := []string{".chord/notes/task.md", ".chord/plans/20260914-plan.md", "src/main.go"}
+	// The uppercase spellings exist on disk, so a verdict of "filtered" here
+	// comes from the path rule and not from a failed stat: an APFS or NTFS
+	// host opens .Chord/memory/... as the harness-internal file it is.
+	want := []string{".chord/notes/task.md", ".chord/plans/20260914-plan.md", "src/main.go", ".Chord/notes/UPPER.md"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("extractCompactionStateFiles = %v, want %v", got, want)
 	}
