@@ -20,6 +20,80 @@ const pendingLSPDiagnosticOverlayText = "LSP diagnostics changed after one or mo
 // user turn by callLLM. SubAgent mailbox messages are also appended to ctxMgr
 // and persisted because they are real owner-visible model input. Other runtime
 // hints remain request-scoped overlays.
+// appendMailboxMessageToContext persists one pending mailbox message to the
+// durable conversation and reports the request overlay carrying it. It is the
+// shared body of the initial-request path (buildTurnOverlayMessages) and the
+// fallback-retry path (injectPendingMailboxMessagesForRequest) so both attach
+// the same durable text for the same mailbox row.
+//
+// The second return value reports whether the caller must carry the message in
+// this request: a background result whose backing row is already durable is
+// skipped entirely, while a duplicate SubAgent mailbox notice is still
+// returned and left for the request assembler to dedupe against the messages
+// slice (see applyTurnOverlayMessages), mirroring the historical behavior.
+func (a *MainAgent) appendMailboxMessageToContext(mailbox *SubAgentMailboxMessage, durableMailboxIDs map[string]struct{}) (message.Message, bool) {
+	if mailbox == nil {
+		return message.Message{}, false
+	}
+	if mailbox.Kind == SubAgentMailboxKindBackgroundResult {
+		content := strings.TrimSpace(mailbox.Summary)
+		if content == "" {
+			return message.Message{}, false
+		}
+		msg := message.Message{
+			Role:    message.RoleUser,
+			Kind:    message.KindBackgroundResult,
+			Content: content,
+			Mailbox: mailboxMetadata(mailbox),
+		}
+		id := strings.TrimSpace(mailbox.MessageID)
+		if id != "" && mapContains(durableMailboxIDs, id) {
+			return message.Message{}, false
+		}
+		messageIndex := a.ctxMgr.MessageCount()
+		a.ctxMgr.Append(msg)
+		a.persistAsyncAfter(identity.MainAgentID, msg, func(err error) {
+			if err != nil {
+				a.noteOverlayAppendPersistFailure(msg, identity.MainAgentID, messageIndex, true)
+				a.notePersistenceFailure(err)
+				return
+			}
+			a.emitToTUI(BackgroundResultAppendedEvent{Message: msg, TargetAgentID: identity.MainAgentID, MessageIndex: messageIndex})
+		})
+		if id != "" {
+			if durableMailboxIDs == nil {
+				durableMailboxIDs = make(map[string]struct{})
+			}
+			durableMailboxIDs[id] = struct{}{}
+		}
+		return msg, true
+	}
+	content := strings.TrimSpace(formatSubAgentMailboxInjectionText(mailbox))
+	if content == "" {
+		return message.Message{}, false
+	}
+	msg := subAgentMailboxConversationMessage(mailbox, "<system-reminder>\n"+content+"\n</system-reminder>")
+	if id := strings.TrimSpace(mailbox.MessageID); id == "" || !mapContains(durableMailboxIDs, id) {
+		messageIndex := a.ctxMgr.MessageCount()
+		a.ctxMgr.Append(msg)
+		a.persistAsyncAfter(identity.MainAgentID, msg, func(err error) {
+			if err != nil {
+				a.noteOverlayAppendPersistFailure(msg, identity.MainAgentID, messageIndex, false)
+				a.notePersistenceFailure(err)
+				return
+			}
+			a.emitToTUI(MailboxTranscriptAppendedEvent{Message: msg, TargetAgentID: identity.MainAgentID, MessageIndex: messageIndex})
+		})
+		if id != "" {
+			if durableMailboxIDs == nil {
+				durableMailboxIDs = make(map[string]struct{})
+			}
+			durableMailboxIDs[id] = struct{}{}
+		}
+	}
+	return msg, true
+}
+
 func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 	// Drop notices staged by a previous request that never reached dispatch;
 	// this assembly stages a fresh set.
@@ -59,66 +133,9 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 
 	if len(pendingMailboxes) > 0 {
 		for _, mailbox := range pendingMailboxes {
-			if mailbox == nil {
+			msg, ok := a.appendMailboxMessageToContext(mailbox, durableMailboxIDs)
+			if !ok {
 				continue
-			}
-			// A background result is delivered as the raw KindBackgroundResult
-			// message the transcript and the restore path already understand,
-			// not as a system-reminder mailbox notice. Its card is emitted only
-			// after this append is durable, so a queued-but-undelivered result
-			// never shows a card without a backing message.
-			if mailbox.Kind == SubAgentMailboxKindBackgroundResult {
-				content := strings.TrimSpace(mailbox.Summary)
-				if content == "" {
-					continue
-				}
-				msg := message.Message{
-					Role:    message.RoleUser,
-					Kind:    message.KindBackgroundResult,
-					Content: content,
-					Mailbox: mailboxMetadata(mailbox),
-				}
-				id := strings.TrimSpace(mailbox.MessageID)
-				if id != "" && mapContains(durableMailboxIDs, id) {
-					// The backing row is already in the durable conversation;
-					// adding it again as a transient overlay would duplicate it.
-					continue
-				}
-				messageIndex := a.ctxMgr.MessageCount()
-				a.ctxMgr.Append(msg)
-				a.persistAsyncAfter(identity.MainAgentID, msg, func(err error) {
-					if err != nil {
-						a.noteOverlayAppendPersistFailure(msg, identity.MainAgentID, messageIndex, true)
-						a.notePersistenceFailure(err)
-						return
-					}
-					a.emitToTUI(BackgroundResultAppendedEvent{Message: msg, TargetAgentID: identity.MainAgentID, MessageIndex: messageIndex})
-				})
-				if id != "" {
-					durableMailboxIDs[id] = struct{}{}
-				}
-				overlays = append(overlays, msg)
-				continue
-			}
-			content := strings.TrimSpace(formatSubAgentMailboxInjectionText(mailbox))
-			if content == "" {
-				continue
-			}
-			msg := subAgentMailboxConversationMessage(mailbox, "<system-reminder>\n"+content+"\n</system-reminder>")
-			if id := strings.TrimSpace(mailbox.MessageID); id == "" || !mapContains(durableMailboxIDs, id) {
-				messageIndex := a.ctxMgr.MessageCount()
-				a.ctxMgr.Append(msg)
-				a.persistAsyncAfter(identity.MainAgentID, msg, func(err error) {
-					if err != nil {
-						a.noteOverlayAppendPersistFailure(msg, identity.MainAgentID, messageIndex, false)
-						a.notePersistenceFailure(err)
-						return
-					}
-					a.emitToTUI(MailboxTranscriptAppendedEvent{Message: msg, TargetAgentID: identity.MainAgentID, MessageIndex: messageIndex})
-				})
-				if id != "" {
-					durableMailboxIDs[id] = struct{}{}
-				}
 			}
 			overlays = append(overlays, msg)
 		}
@@ -422,6 +439,81 @@ func containsSubAgentMailboxMessage(messages []message.Message, messageID string
 		}
 	}
 	return false
+}
+
+func containsBackgroundResultMessage(messages []message.Message, messageID string) bool {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return false
+	}
+	for _, msg := range messages {
+		if msg.Kind == message.KindBackgroundResult && msg.Mailbox != nil && strings.TrimSpace(msg.Mailbox.MessageID) == messageID {
+			return true
+		}
+	}
+	return false
+}
+
+// injectPendingMailboxMessagesForRequest attaches mailbox arrivals to a fallback
+// retry request, mirroring the queued-user-message guarantee: any mailbox row
+// waiting in the inbox when the next model request dispatches rides that
+// request. It runs on the event loop at the LLM fallback boundary, after the
+// queued user messages were merged, so the durable order stays user input then
+// mailbox, and the request order matches it by inserting before the transient
+// tail overlays.
+//
+// Only durable mailbox rows are injected here. Transient turn overlays
+// (coordination snapshot, pressure reminders) were already assembled for the
+// initial attempt and stay at the tail; rebuilding them per retry would move
+// the cacheable prefix on every fallback.
+func (a *MainAgent) injectPendingMailboxMessagesForRequest(messages []message.Message, tailOverlayCount int) []message.Message {
+	if a == nil || a.ctxMgr == nil {
+		return messages
+	}
+	// Drain the inbox first: a JOB RESULT that arrived mid-retry sits in the
+	// inbox queues, and without this stage a mailbox-only arrival (no queued
+	// user input to trigger consumePendingUserMessagesForRequest's own stage)
+	// would never reach the retry.
+	a.stageNextSubAgentMailboxBatch()
+	pending := a.takePendingSubAgentMailboxes()
+	if len(pending) == 0 {
+		return messages
+	}
+	durableMailboxIDs := conversationMailboxIDs(a.ctxMgr.Snapshot())
+	var toInject []message.Message
+	for _, mailbox := range pending {
+		msg, ok := a.appendMailboxMessageToContext(mailbox, durableMailboxIDs)
+		if !ok {
+			continue
+		}
+		messageID := ""
+		if msg.Mailbox != nil {
+			messageID = strings.TrimSpace(msg.Mailbox.MessageID)
+		}
+		switch msg.Kind {
+		case message.KindSubAgentMailbox:
+			if messageID != "" && (containsSubAgentMailboxMessage(messages, messageID) || containsSubAgentMailboxMessage(toInject, messageID)) {
+				continue
+			}
+		case message.KindBackgroundResult:
+			if messageID != "" && (containsBackgroundResultMessage(messages, messageID) || containsBackgroundResultMessage(toInject, messageID)) {
+				continue
+			}
+		default:
+			continue
+		}
+		toInject = append(toInject, msg)
+	}
+	if len(toInject) == 0 {
+		return messages
+	}
+	tailOverlayCount = min(max(tailOverlayCount, 0), len(messages))
+	insertionAt := len(messages) - tailOverlayCount
+	out := make([]message.Message, 0, len(messages)+len(toInject))
+	out = append(out, messages[:insertionAt]...)
+	out = append(out, toInject...)
+	out = append(out, messages[insertionAt:]...)
+	return out
 }
 
 // hasCoordinationTaskRecords reports whether this session has any SubAgent task

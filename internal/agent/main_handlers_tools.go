@@ -866,8 +866,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		}
 
 		log.Debugf("all tool calls complete, calling LLM again turn_id=%v", a.turn.ID)
-		a.prepareSubAgentMailboxBatchForTurnContinuation()
-		a.processPendingUserMessagesBeforeLLMInTurn()
+		a.mergePendingInputsForTurnContinuation()
 		turnID := a.turn.ID
 		turnCtx := a.turn.Ctx
 		a.beginMainLLMAfterPreparation(turnCtx, turnID, "")

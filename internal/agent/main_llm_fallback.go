@@ -199,6 +199,7 @@ func (a *MainAgent) handleLLMFallbackBoundary(evt Event) {
 		return
 	}
 	messages := a.consumePendingUserMessagesForRequest(payload.messages, payload.tailOverlayCount)
+	messages = a.injectPendingMailboxMessagesForRequest(messages, payload.tailOverlayCount)
 	if !payload.fallbackDownshiftBypass {
 		if err := a.deferFallbackModelDownshift(payload); err != nil {
 			payload.reply <- llmFallbackBoundaryResult{err: err}

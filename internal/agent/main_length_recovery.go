@@ -71,8 +71,7 @@ func (a *MainAgent) beginLengthRecoveryRetry(recoveryPrompt string, turnID uint6
 	// the pending mailbox batch exactly like the tool-batch closeout. Consuming
 	// an empty queue is a no-op, so the compaction-resume caller that already
 	// merged queued input before entering here is unaffected.
-	a.processPendingUserMessagesBeforeLLMInTurn()
-	a.prepareSubAgentMailboxBatchForTurnContinuation()
+	a.mergePendingInputsForTurnContinuation()
 	a.beginMainLLMAfterPreparation(turnCtx, turnID, "")
 }
 

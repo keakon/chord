@@ -1174,14 +1174,10 @@ func (a *MainAgent) resumePendingMainLLMAfterCompaction(pending *pendingMainLLMC
 			a.emitLoopStateChanged()
 		}
 		a.newTurn()
-		a.processPendingUserMessagesBeforeLLMInTurn()
+		a.mergePendingInputsForTurnContinuation()
 		if a.turn == nil {
 			return true
 		}
-		// The fresh resume turn must also carry any mailbox that arrived while
-		// compaction was pending: with only mailbox queued (no FromUser message)
-		// the drain above stages nothing on its own.
-		a.prepareSubAgentMailboxBatchForTurnContinuation()
 		turnID := a.turn.ID
 		turnCtx := a.turn.Ctx
 		a.beginMainLLMAfterPreparation(turnCtx, turnID, "")
@@ -1232,8 +1228,7 @@ func (a *MainAgent) resumePendingMainLLMAfterCompaction(pending *pendingMainLLMC
 	}
 	// Deferred events may have queued additional user input for the same turn.
 	// Merge that input before deciding how to resume the main-agent continuation.
-	a.processPendingUserMessagesBeforeLLMInTurn()
-	a.prepareSubAgentMailboxBatchForTurnContinuation()
+	a.mergePendingInputsForTurnContinuation()
 	if a.turn == nil || a.turn.ID != pending.turnID || a.turn.Epoch != pending.turnEpoch {
 		return false
 	}

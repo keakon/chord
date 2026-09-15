@@ -960,3 +960,129 @@ func TestFallbackRequiresFreshAdmission(t *testing.T) {
 		})
 	}
 }
+
+func fallbackBoundaryMessages(t *testing.T, a *MainAgent, messages []message.Message, tailOverlayCount int) []message.Message {
+	t.Helper()
+	payload := &llmFallbackBoundaryPayload{
+		turnID:               a.turn.ID,
+		messages:             messages,
+		tailOverlayCount:     tailOverlayCount,
+		primaryModelRef:      "provider/model-1",
+		primaryContextLimit:  128000,
+		primaryInputLimit:    96000,
+		fallbackModelRef:     "provider/model-2",
+		fallbackContextLimit: 128000,
+		fallbackInputLimit:   96000,
+		reply:                make(chan llmFallbackBoundaryResult, 1),
+	}
+	a.handleLLMFallbackBoundary(Event{Type: EventLLMFallbackBoundary, TurnID: payload.turnID, Payload: payload})
+	result := <-payload.reply
+	if result.err != nil {
+		t.Fatalf("boundary err = %v", result.err)
+	}
+	if result.rebuild {
+		t.Fatal("rebuild = true, want equivalent budgets without a rebuild")
+	}
+	return result.messages
+}
+
+func requestHasBackgroundResult(messages []message.Message, want string) bool {
+	for _, msg := range messages {
+		if msg.Kind == message.KindBackgroundResult && strings.Contains(msg.Content, want) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestFallbackBoundaryIncludesQueuedMailboxResult pins the mailbox/retry parity:
+// a JOB RESULT waiting in the mailbox inbox when a fallback retry dispatches
+// must ride that retry, exactly like a queued user message does.
+func TestFallbackBoundaryIncludesQueuedMailboxResult(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.newTurn()
+	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "hi"})
+
+	a.handleJobFinished(Event{Type: EventJobFinished, SourceID: a.instanceID, Payload: backgroundResultPayload(a.instanceID, "job-1", "Run production build")})
+	if got := len(a.ctxMgr.Snapshot()); got != 1 {
+		t.Fatalf("ctx snapshot = %d messages, want only the initial user message before the retry", got)
+	}
+
+	messages := []message.Message{{Role: message.RoleUser, Content: "hi"}}
+	got := fallbackBoundaryMessages(t, a, messages, 0)
+	if !requestHasBackgroundResult(got, "Run production build") {
+		t.Fatalf("fallback messages = %#v, want the queued JOB RESULT", got)
+	}
+	if !requestHasBackgroundResult(a.ctxMgr.Snapshot(), "Run production build") {
+		t.Fatal("queued JOB RESULT was not committed to conversation context")
+	}
+	if len(a.pendingSubAgentMailboxes) != 0 {
+		t.Fatalf("pendingSubAgentMailboxes = %d, want the staged batch consumed by the retry", len(a.pendingSubAgentMailboxes))
+	}
+
+	// A second boundary with no new arrivals must not duplicate the result.
+	again := fallbackBoundaryMessages(t, a, got, 0)
+	count := 0
+	for _, msg := range again {
+		if msg.Kind == message.KindBackgroundResult && strings.Contains(msg.Content, "Run production build") {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("background result copies = %d, want exactly 1 after a retry with no new arrivals", count)
+	}
+}
+
+// TestFallbackBoundaryMergesUserInputBeforeMailboxResult pins the durable order
+// for a retry that picks up both inputs at once: the queued user follow-up
+// comes first, then the JOB RESULT, matching the turn-continuation order.
+func TestFallbackBoundaryMergesUserInputBeforeMailboxResult(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.newTurn()
+	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "hi"})
+
+	a.handleJobFinished(Event{Type: EventJobFinished, SourceID: a.instanceID, Payload: backgroundResultPayload(a.instanceID, "job-2", "Upload release bundle")})
+	a.handleUserMessage(Event{Payload: "queued user follow-up"})
+
+	messages := []message.Message{
+		{Role: message.RoleUser, Content: "hi"},
+		{Role: message.RoleUser, Content: "transient tail", Kind: message.KindTurnOverlay},
+	}
+	got := fallbackBoundaryMessages(t, a, messages, 1)
+	userIdx := -1
+	jobIdx := -1
+	for i, msg := range got {
+		if msg.Role == message.RoleUser && msg.Content == "queued user follow-up" {
+			userIdx = i
+		}
+		if msg.Kind == message.KindBackgroundResult && strings.Contains(msg.Content, "Upload release bundle") {
+			jobIdx = i
+		}
+	}
+	if userIdx < 0 {
+		t.Fatalf("fallback messages = %#v, want the queued user follow-up", got)
+	}
+	if jobIdx < 0 {
+		t.Fatalf("fallback messages = %#v, want the queued JOB RESULT", got)
+	}
+	if userIdx > jobIdx {
+		t.Fatalf("user idx = %d, job idx = %d, want user input before the JOB RESULT", userIdx, jobIdx)
+	}
+	if last := got[len(got)-1]; last.Kind != message.KindTurnOverlay {
+		t.Fatalf("last message = %#v, want the transient tail to stay last", last)
+	}
+	snapshot := a.ctxMgr.Snapshot()
+	snapUserIdx := -1
+	snapJobIdx := -1
+	for i, msg := range snapshot {
+		if msg.Role == message.RoleUser && msg.Content == "queued user follow-up" {
+			snapUserIdx = i
+		}
+		if msg.Kind == message.KindBackgroundResult && strings.Contains(msg.Content, "Upload release bundle") {
+			snapJobIdx = i
+		}
+	}
+	if snapUserIdx < 0 || snapJobIdx < 0 || snapUserIdx > snapJobIdx {
+		t.Fatalf("ctx snapshot = %#v, want user input before the JOB RESULT", snapshot)
+	}
+}

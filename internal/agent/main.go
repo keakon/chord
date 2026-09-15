@@ -2146,6 +2146,24 @@ func (a *MainAgent) processPendingUserMessagesBeforeLLMInTurn() {
 	a.consumePendingUserMessagesForRequest(nil, 0)
 }
 
+// mergePendingInputsForTurnContinuation carries every queued input to the next
+// request of the active turn: queued user messages plus the pending mailbox
+// batch (including JOB RESULT background rows). It is the single dispatch
+// boundary for turn continuations (tool-batch closeout, malformed retry,
+// length-recovery retry, routing-invalidation resume, compaction resumes), so
+// a mailbox-only arrival without user input is staged exactly like a queued
+// follow-up.
+//
+// Order is user first, then mailbox: consumePendingUserMessagesForRequest
+// already stages newly arrived mailbox rows when it merges manual input, and
+// prepareSubAgentMailboxBatchForTurnContinuation is a no-op when that stage
+// already filled the pending batch, so the second step only covers the
+// mailbox-only case without double-draining.
+func (a *MainAgent) mergePendingInputsForTurnContinuation() {
+	a.processPendingUserMessagesBeforeLLMInTurn()
+	a.prepareSubAgentMailboxBatchForTurnContinuation()
+}
+
 func (a *MainAgent) consumePendingUserMessagesForRequest(messages []message.Message, tailOverlayCount int) []message.Message {
 	if len(a.pendingUserMessages) == 0 {
 		return messages
@@ -2484,11 +2502,10 @@ func (a *MainAgent) resumeTurnAfterRoutingInvalidation(turnID uint64) bool {
 	if a.turn == nil || turnID == 0 || a.turn.ID != turnID {
 		return false
 	}
-	a.processPendingUserMessagesBeforeLLMInTurn()
 	// The routing-invalidation resume is a dispatch boundary too: stage any
 	// mailbox that arrived while the turn was paused so its next request carries
 	// it alongside the queued user input.
-	a.prepareSubAgentMailboxBatchForTurnContinuation()
+	a.mergePendingInputsForTurnContinuation()
 	a.syncBugTriagePromptFromSnapshot()
 	turnCtx := a.turn.Ctx
 	a.beginMainLLMAfterPreparation(turnCtx, turnID, "")
