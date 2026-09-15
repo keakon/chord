@@ -444,3 +444,26 @@ func TestSessionSelectModalMouseClickSelectsFilteredOption(t *testing.T) {
 		t.Fatalf("ResumeSessionID() calls = %+v, want [sess-300]", got)
 	}
 }
+
+// A prefetched empty list is a complete answer from the emitter: the picker must
+// render the empty state immediately instead of showing a loading frame.
+func TestOpenSessionSelectPrefetchedEmptyShowsEmptyStateImmediately(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	m := NewModelWithSize(nil, 120, 32)
+
+	m.openSessionSelect(nil, true)
+
+	if m.mode != ModeSessionSelect {
+		t.Fatalf("mode = %v, want ModeSessionSelect", m.mode)
+	}
+	if m.sessionSelect.loading {
+		t.Fatal("prefetched empty session list is still marked loading")
+	}
+	dialog := stripANSI(m.renderSessionSelectDialog())
+	if strings.Contains(dialog, "Loading sessions...") {
+		t.Fatalf("prefetched empty session list rendered a loading frame:\n%s", dialog)
+	}
+	if !strings.Contains(dialog, "No previous sessions to choose from") {
+		t.Fatalf("prefetched empty session list missing empty-state hint:\n%s", dialog)
+	}
+}

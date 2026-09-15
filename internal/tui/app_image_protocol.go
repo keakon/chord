@@ -215,7 +215,7 @@ func (m *Model) iterm2InlineProtocolCmd() tea.Cmd {
 	if m.viewport == nil || m.imageCaps.Backend != ImageBackendITerm2 || !m.imageCaps.SupportsInline {
 		return nil
 	}
-	layout := m.ensureLayoutForHitTest()
+	layout := m.ensureLayout()
 	blocks := m.viewport.visibleBlocks()
 	starts := m.viewport.blockStarts()
 	windowStart := m.viewport.offset

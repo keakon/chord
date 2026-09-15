@@ -158,7 +158,12 @@ func centeredRect(container image.Rectangle, content string) image.Rectangle {
 	return image.Rect(x0, y0, x0+cw, y0+ch)
 }
 
-func (m *Model) ensureLayoutForHitTest() tuiLayout {
+// ensureLayout returns the layout of the frame on screen, computing it when no
+// frame has been drawn yet. Callers that answer rect-based questions outside the
+// render path — mouse hit testing, inline image placement, and the bottom-left
+// overlay predicate — need this: the zero layout would otherwise make every such
+// question answer "nothing here".
+func (m *Model) ensureLayout() tuiLayout {
 	if m.layout.main.Dx() <= 0 || m.layout.main.Dy() <= 0 {
 		m.layout = m.generateLayout(m.width, m.height)
 	}
@@ -166,7 +171,7 @@ func (m *Model) ensureLayoutForHitTest() tuiLayout {
 }
 
 func (m *Model) overlayRect(content string) image.Rectangle {
-	layout := m.ensureLayoutForHitTest()
+	layout := m.ensureLayout()
 	return centeredRect(layout.area, content)
 }
 

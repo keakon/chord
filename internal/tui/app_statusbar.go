@@ -613,7 +613,7 @@ func (m *Model) renderStatusBar() string {
 			statusLine += strings.Repeat(" ", effectiveWidth-leftWidth)
 		}
 		padded := strings.Repeat(" ", statusBarLeftMargin) + statusLine + strings.Repeat(" ", statusBarRightMargin)
-		return StatusBarStyle.Width(m.width).Render(padded)
+		return m.renderStatusBarLine(padded)
 	}
 
 	if m.statusPath.display != "" {
@@ -633,7 +633,16 @@ func (m *Model) renderStatusBar() string {
 
 	statusLine := renderStatusBarPlacedLine(leftSide, leftWidth, rightStart, rightSide, activityText, activityWidth, effectiveWidth)
 	padded := strings.Repeat(" ", statusBarLeftMargin) + statusLine + strings.Repeat(" ", statusBarRightMargin)
-	return StatusBarStyle.Width(m.width).Render(padded)
+	return m.renderStatusBarLine(padded)
+}
+
+// renderStatusBarLine renders the assembled status row within drawableLineWidth,
+// leaving the terminal's last physical column unwritten. Truncating up front
+// keeps the row on a single line: StatusBarStyle.Width wraps (rather than
+// truncates) overlong content, and the wrapped tail would land on a second line.
+func (m *Model) renderStatusBarLine(padded string) string {
+	width := m.drawableLineWidth()
+	return StatusBarStyle.Width(width).Render(ansi.Truncate(padded, width, ""))
 }
 
 func statusBarCanFitEscHint(leftWidth, rightStart, activityWidth, effectiveWidth int, hint string) bool {

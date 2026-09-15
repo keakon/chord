@@ -216,10 +216,11 @@ func loadSessionSummaryDetailsCmd(a agent.AgentForTUI, list []agent.SessionSumma
 // Opening the picker
 // ---------------------------------------------------------------------------
 
-// openSessionSelect opens the session picker. If prefill is non-nil, that list
-// is used; otherwise the list is loaded asynchronously from the agent.
-func (m *Model) openSessionSelect(prefill []agent.SessionSummary) tea.Cmd {
-	if m.agent == nil && prefill == nil {
+// openSessionSelect opens the session picker. When prefetched is set, prefill is
+// the emitter's complete listing — possibly empty — and is rendered directly;
+// otherwise the list is loaded asynchronously from the agent.
+func (m *Model) openSessionSelect(prefill []agent.SessionSummary, prefetched bool) tea.Cmd {
+	if m.agent == nil && !prefetched {
 		return nil
 	}
 	m.sessionSelect.loadSeq++
@@ -229,7 +230,7 @@ func (m *Model) openSessionSelect(prefill []agent.SessionSummary) tea.Cmd {
 		list    []agent.SessionSummary
 		loading bool
 	)
-	if prefill != nil {
+	if prefetched {
 		list = prefill
 		loading = false
 	} else {

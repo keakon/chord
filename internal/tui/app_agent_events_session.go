@@ -39,7 +39,7 @@ func (m *Model) handleSessionAgentEvent(event agent.AgentEvent) (bool, agentEven
 		m.openMCPSelect()
 		return true, effects
 	case agent.SessionSelectEvent:
-		effects.addFollowup(m.openSessionSelect(evt.Sessions))
+		effects.addFollowup(m.openSessionSelect(evt.Sessions, evt.Prefetched))
 		return true, effects
 	case agent.SessionSwitchStartedEvent:
 		m.beginSessionSwitch(evt.Kind, evt.SessionID)

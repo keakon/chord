@@ -180,7 +180,7 @@ func (m *Model) imageViewerPhysicalPlacement() (placementID, row, col, pxOffsetX
 }
 
 func (m *Model) imageViewerContentRect() (cols, rows int) {
-	layout := m.ensureLayoutForHitTest()
+	layout := m.ensureLayout()
 	cols = layout.main.Dx()
 	rows = layout.main.Dy()
 	if cols <= 0 {
@@ -294,7 +294,7 @@ func (m *Model) imageViewerOverlayRect() (image.Rectangle, string) {
 	if dialog == "" {
 		return image.Rectangle{}, ""
 	}
-	layout := m.ensureLayoutForHitTest()
+	layout := m.ensureLayout()
 	return centeredRect(layout.area, dialog), dialog
 }
 

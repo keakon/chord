@@ -706,7 +706,19 @@ func scrollFlushTick(generation uint64, delay time.Duration) tea.Cmd {
 type applyResizeMsg struct{ version int }
 
 // Update is the central message dispatcher.
-func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
+	// A bottom-left overlay can go away without anything else on that row
+	// changing (dismissing the slash completion dropdown, leaving insert mode),
+	// and the incremental renderer then never rewrites the stale cell it left
+	// behind. Force one full repaint on that transition, and re-announce the
+	// inline images the repaint can drop, like the resize path does.
+	overlayWasDrawn := m.bottomLeftOverlayDrawn()
+	defer func() {
+		if overlayWasDrawn && !m.bottomLeftOverlayDrawn() {
+			m.resetKittyPlacements()
+			cmd = tea.Batch(cmd, tea.Sequence(tea.ClearScreen, m.imageProtocolCmdWithReason("overlay-dismissed")))
+		}
+	}()
 	m.ensureViewportCallbacks()
 	switch msg := msg.(type) {
 

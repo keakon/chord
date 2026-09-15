@@ -816,10 +816,12 @@ func (RoleSelectEvent) agentEvent() {}
 // SessionSelectEvent signals the TUI to open the session picker overlay.
 // Emitted when the user runs /resume with no arguments; the user then
 // chooses a session from the list to restore.
-// Sessions, when non-nil, is a pre-fetched list supplied by the emitter; the
-// TUI uses it instead of calling ListSessionSummaries().
+// Prefetched reports that Sessions is the emitter's complete listing, so the
+// TUI renders it directly instead of calling ListSessionSummaries(); without it
+// an empty list is indistinguishable from a list that is still loading.
 type SessionSelectEvent struct {
-	Sessions []SessionSummary // optional: pre-fetched list
+	Sessions   []SessionSummary // pre-fetched list when Prefetched is set
+	Prefetched bool
 }
 
 func (SessionSelectEvent) agentEvent() {}

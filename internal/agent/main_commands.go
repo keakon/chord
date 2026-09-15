@@ -254,7 +254,7 @@ func (a *MainAgent) tryHandleSlashCommand(content string) bool {
 		if a.controlActionCanSetBaseline() {
 			a.markControlAction()
 		}
-		a.emitToTUI(SessionSelectEvent{Sessions: list})
+		a.emitToTUI(SessionSelectEvent{Sessions: list, Prefetched: true})
 		a.setIdleAndDrainPending()
 		return true
 	case strings.HasPrefix(c, "/resume "):

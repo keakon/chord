@@ -254,6 +254,20 @@ func (m *Model) getSlashCompletions(input string) []slashCommand {
 	return out
 }
 
+// slashCompletionOverlay returns the dropdown text to draw and the number of
+// rows it occupies, or "" with zero rows when there is nothing to draw. The
+// renderer and bottomLeftOverlayDrawn both go through it, so the condition the
+// predicate reports can never drift from the condition the renderer draws
+// under: a dropdown taller than the main area is not drawn, and reporting it as
+// drawn would cost a needless full repaint on dismissal.
+func (m *Model) slashCompletionOverlay() (text string, rows int) {
+	drop := m.renderSlashCompletionDropdown(m.input.DisplayValue())
+	if drop == "" {
+		return "", 0
+	}
+	return drop, strings.Count(drop, "\n") + 1
+}
+
 // renderSlashCompletionDropdown returns a small dropdown list when input starts
 // with "/" and there are matching commands. Empty string otherwise.
 func (m *Model) renderSlashCompletionDropdown(value string) string {

@@ -159,9 +159,17 @@ func (m *Model) drawMainLayer(scr uv.Screen, layout tuiLayout) {
 				"",
 				strings.Join(welcomeHints, "\n"),
 			)
+			// The hints are wider than a narrow viewport, and lipgloss.Place
+			// pads a block to its box rather than truncating it: the overflow
+			// is clipped by the screen buffer instead, landing a glyph on the
+			// terminal's last physical column. Writing that column makes some
+			// hosts emit an extra wrap for the frame, so clamp the block to one
+			// column less first and leave the column clear.
+			welcomeBody := lipgloss.NewStyle().MaxWidth(max(viewportWidth-1, 1)).
+				Render(lipgloss.JoinVertical(lipgloss.Center, welcomeParts...))
 			welcome := lipgloss.Place(viewportWidth, m.viewport.height,
 				lipgloss.Center, lipgloss.Center,
-				lipgloss.JoinVertical(lipgloss.Center, welcomeParts...),
+				welcomeBody,
 			)
 			mainContent = welcome
 		}
@@ -242,12 +250,12 @@ func (m *Model) drawBaseLayers(scr uv.Screen, layout tuiLayout) {
 		var inputArea string
 		switch m.mode {
 		case ModeInsert:
-			sep := m.renderAnimatedInputSeparator(m.width)
+			sep := m.renderAnimatedInputSeparator(m.drawableLineWidth())
 			inputArea = sep + "\n" + m.input.ViewWithSelection() + "\n"
 		case ModeSearch:
 			inputArea = searchInputArea
 		default:
-			sep := m.renderAnimatedInputSeparator(m.width)
+			sep := m.renderAnimatedInputSeparator(m.drawableLineWidth())
 			inputArea = sep + "\n" + m.input.ViewWithSelection() + "\n"
 		}
 		if inputSuppressed {
@@ -417,16 +425,12 @@ func (m *Model) drawOverlayLayers(scr uv.Screen, area image.Rectangle, layout tu
 
 	// Slash completion: draw absolutely last, above all other dialogs/panels
 	if m.mode == ModeInsert {
-		if drop := m.renderSlashCompletionDropdown(m.input.DisplayValue()); drop != "" {
+		if drop, dropLines := m.slashCompletionOverlay(); drop != "" && dropLines <= layout.main.Dy() {
 			// Slash completion: draw at bottom of main area
-			dropLines := strings.Count(drop, "\n") + 1
-			dy := layout.main.Dy()
-			if dropLines <= dy {
-				y0 := layout.main.Max.Y - dropLines
-				// Keep within main area so it doesn't overlap the info panel/sidebar.
-				dropRect := image.Rect(layout.main.Min.X, y0, layout.main.Max.X, layout.main.Max.Y)
-				uv.NewStyledString(drop).Draw(scr, dropRect)
-			}
+			y0 := layout.main.Max.Y - dropLines
+			// Keep within main area so it doesn't overlap the info panel/sidebar.
+			dropRect := image.Rect(layout.main.Min.X, y0, layout.main.Max.X, layout.main.Max.Y)
+			uv.NewStyledString(drop).Draw(scr, dropRect)
 		}
 		// @ mention file completion popup
 		if m.atMentionOpen && m.atMentionList != nil && m.atMentionList.Len() > 0 {
@@ -439,6 +443,27 @@ func (m *Model) drawOverlayLayers(scr uv.Screen, area image.Rectangle, layout tu
 			uv.NewStyledString(popup).Draw(scr, popupRect)
 		}
 	}
+}
+
+// bottomLeftOverlayDrawn reports whether an overlay covers the first cell of the
+// last main row right now: the slash completion dropdown and the @ mention list
+// are the only layers drawn there. The renderer only rewrites cells it believes
+// changed, so once such an overlay goes away that cell keeps whatever the host
+// still shows until the next full repaint. Callers therefore compare this before
+// and after handling a message to detect the dismissal.
+//
+// It must describe the frame on screen, so it reads the layout the render path
+// keeps — via ensureLayout, which computes it when nothing has been drawn yet —
+// rather than a freshly derived one, and it asks slashCompletionOverlay for the
+// dropdown instead of re-deriving the condition the renderer draws under.
+func (m *Model) bottomLeftOverlayDrawn() bool {
+	if m.mode != ModeInsert {
+		return false
+	}
+	if _, dropLines := m.slashCompletionOverlay(); dropLines > 0 && dropLines <= m.ensureLayout().main.Dy() {
+		return true
+	}
+	return m.atMentionOpen && m.atMentionList != nil && m.atMentionList.Len() > 0
 }
 
 // View renders the entire screen (Bubble Tea v2: returns tea.View with Content from buffer).
@@ -539,6 +564,14 @@ func (m *Model) ensureScreenBuffer(width, height int) {
 	m.screenBuf.Method = ansi.GraphemeWidth
 	m.screenBuf.Resize(width, height)
 	m.refreshScreenBlankLine(width)
+}
+
+// drawableLineWidth is the widest row content that still leaves the terminal's
+// last physical column unwritten. A character in that column makes some hosts
+// emit an extra wrap for the frame, and the diff renderer only rewrites cells it
+// believes changed, so the stale row would survive until a full repaint.
+func (m *Model) drawableLineWidth() int {
+	return max(m.width-1, 1)
 }
 
 func (m *Model) refreshScreenBlankLine(width int) {
