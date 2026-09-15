@@ -785,6 +785,97 @@ func TestLoadMessages_EmptyFile(t *testing.T) {
 	}
 }
 
+// Records written before data_bytes existed carry only the image path, so a
+// restored session must recover the size from disk: without it PayloadBytes
+// reports several MB of attachments as zero, skewing compaction thresholds
+// and context trimming. The payload itself stays lazy — only a stat, no read.
+func TestLoadMessages_RecoversSizeForPreDataBytesRecords(t *testing.T) {
+	rm, dir := newTestManager(t)
+	defer rm.Close()
+
+	blob := []byte("legacy attachment bytes")
+	imagesDir := filepath.Join(dir, "images")
+	if err := os.MkdirAll(imagesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	imgPath := filepath.Join(imagesDir, "legacy.png")
+	if err := os.WriteFile(imgPath, blob, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A pre-data_bytes record: image_path set, Data and DataBytes empty.
+	legacy, err := json.Marshal(message.Message{
+		Role: "user",
+		Parts: []message.ContentPart{
+			{Type: "text", Text: "look"},
+			{Type: "image", MimeType: "image/png", ImagePath: imgPath, FileName: "legacy.png"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.jsonl"), append(legacy, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := rm.LoadMessages("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded) != 1 || len(loaded[0].Parts) != 2 {
+		t.Fatalf("unexpected loaded shape: %#v", loaded)
+	}
+	img := loaded[0].Parts[1]
+	if len(img.Data) != 0 {
+		t.Fatalf("image data = %d bytes, want empty (lazy resolution)", len(img.Data))
+	}
+	if got, want := img.PayloadBytes(), int64(len(blob)); got != want {
+		t.Fatalf("PayloadBytes = %d, want %d", got, want)
+	}
+
+	// A missing file leaves the part alone: the payload resolver reports the
+	// same missing file later with the context to explain it.
+	missing, err := json.Marshal(message.Message{
+		Role: "user",
+		Parts: []message.ContentPart{
+			{Type: "image", MimeType: "image/png", ImagePath: filepath.Join(imagesDir, "gone.png")},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.jsonl"), append(missing, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Rewrite the log with both records: the second references a file that
+	// was never persisted.
+	loaded, err = rm.LoadMessages("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded) != 1 {
+		t.Fatalf("expected 1 message before appending the missing-file record, got %d", len(loaded))
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "main.jsonl"), os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Write(append(missing, '\n')); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	f.Close()
+	loaded, err = rm.LoadMessages("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(loaded))
+	}
+	if got := loaded[1].Parts[0].PayloadBytes(); got != 0 {
+		t.Fatalf("missing-file PayloadBytes = %d, want 0", got)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // messageLogPath
 // ---------------------------------------------------------------------------
