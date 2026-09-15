@@ -66,7 +66,7 @@ func attachmentPartType(mimeType string) message.ContentPartType {
 }
 
 func attachmentContentPart(att Attachment) message.ContentPart {
-	return message.ContentPart{Type: attachmentPartType(att.MimeType), MimeType: att.MimeType, Data: att.Data, ImagePath: att.ImagePath, FileName: att.FileName}
+	return message.ContentPart{Type: attachmentPartType(att.MimeType), MimeType: att.MimeType, Data: att.Data, DataBytes: int64(att.SizeBytes), ImagePath: att.ImagePath, FileName: att.FileName}
 }
 
 func interleaveAttachmentsInTextPart(part message.ContentPart, attachments []Attachment, used []bool) []message.ContentPart {

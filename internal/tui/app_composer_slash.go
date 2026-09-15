@@ -161,6 +161,7 @@ func attachmentsFromParts(parts []message.ContentPart) []Attachment {
 			FileName:               fileName,
 			MimeType:               part.MimeType,
 			Data:                   part.Data,
+			SizeBytes:              int(part.PayloadBytes()),
 			ImagePath:              part.ImagePath,
 			InlineImagePlaceholder: part.Type == message.ContentPartImage,
 		})

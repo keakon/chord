@@ -478,33 +478,9 @@ func (r *RecoveryManager) LoadMessages(agentID string) ([]message.Message, error
 		// restore made resume/session-switch latency and resident memory grow
 		// with the total size of every image/PDF the session ever attached —
 		// including parts a model filter would drop unused.
-		//
-		// Records written before data_bytes existed carry only the path, and
-		// every byte/token estimate downstream reads the size from the part —
-		// so a session restored from such a record would budget several MB of
-		// attachments as zero. One stat per unsized part restores the estimate
-		// without reading the payload.
-		fillMissingBinaryPartSizes(msg.Parts)
 		messages = append(messages, msg)
 	}
 	return messages, nil
-}
-
-// fillMissingBinaryPartSizes stats the persisted file of every lazily loaded
-// binary part whose recorded size is missing, so PayloadBytes reports the real
-// payload for records written before the size was persisted. A stat failure
-// leaves the part alone: the payload resolver reports the same missing file
-// later with the context to explain it.
-func fillMissingBinaryPartSizes(parts []message.ContentPart) {
-	for i := range parts {
-		p := &parts[i]
-		if !p.IsBinary() || len(p.Data) > 0 || p.DataBytes > 0 || p.ImagePath == "" {
-			continue
-		}
-		if info, err := os.Stat(p.ImagePath); err == nil && !info.IsDir() {
-			p.DataBytes = info.Size()
-		}
-	}
 }
 
 // SaveSnapshot atomically writes a session snapshot to snapshot.json.
