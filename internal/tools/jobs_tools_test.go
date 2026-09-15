@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -205,6 +206,49 @@ func TestJobOutputWaitOutputReturnsOnNextWrite(t *testing.T) {
 	}
 	if !strings.Contains(out, "[status: running]") {
 		t.Fatalf("wait:output = %q, want output before the job exits", out)
+	}
+}
+
+// One write must wake every concurrent waiter: the generation channel is
+// closed and replaced per write instead of a single-slot token, so two readers
+// that sampled the same quiet generation are both released by the output.
+func TestJobOutputWaitOutputWakesAllReaders(t *testing.T) {
+	resetJobRegistryOnlyForTest(t)
+	t.Cleanup(func() { StopAllJobsForShutdown() })
+	restoreWait := jobOutputWaitMs
+	t.Cleanup(func() { jobOutputWaitMs = restoreWait })
+	jobOutputWaitMs = 5000
+
+	id, err := ExecuteJobForTest(jobTestCtx(), "sleep 1; printf 'shared'; sleep 5", "broadcast output", nil)
+	if err != nil {
+		t.Fatalf("ExecuteJobForTest: %v", err)
+	}
+	mainCtx := WithJobAccess(WithAgentID(context.Background(), "main-9"), JobAccess{MainAgentID: "main-9"})
+	read := func(ctx context.Context) string {
+		t.Helper()
+		out, err := (JobOutputTool{}).Execute(ctx, mustMarshal(t, map[string]any{"job_id": id, "wait": "output"}))
+		if err != nil {
+			t.Errorf("JobOutputTool.Execute: %v", err)
+			return err.Error()
+		}
+		return out
+	}
+	results := make([]string, 2)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		results[0] = read(jobTestCtx())
+	}()
+	go func() {
+		defer wg.Done()
+		results[1] = read(mainCtx)
+	}()
+	wg.Wait()
+	for i, out := range results {
+		if !strings.Contains(out, "shared") {
+			t.Fatalf("reader %d reached %q, want the write to have woken it", i, out)
+		}
 	}
 }
 

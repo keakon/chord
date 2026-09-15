@@ -277,20 +277,52 @@ func TestReadersDoNotConsumeEachOthersOutputOrStreak(t *testing.T) {
 	}
 }
 
-// hasUnreadOutput answers per reader, so a wait:output call does not return
+// outputWaitState answers per reader, so a wait:output call does not return
 // immediately just because some other agent has not caught up.
 func TestHasUnreadOutputIsPerReader(t *testing.T) {
 	j := &job{ID: "job-unread", output: newTailWriter(1 << 16)}
 	if _, err := j.output.Write([]byte("data")); err != nil {
 		t.Fatalf("write output: %v", err)
 	}
-	if !j.hasUnreadOutput("owner") {
+	if _, unread := j.outputWaitState("owner"); !unread {
 		t.Fatal("owner has unread output, want true")
 	}
-	if _, _ = j.readIncremental("owner"); j.hasUnreadOutput("owner") {
+	if _, _ = j.readIncremental("owner"); func() bool {
+		_, unread := j.outputWaitState("owner")
+		return unread
+	}() {
 		t.Fatal("owner consumed its window, want false")
 	}
-	if !j.hasUnreadOutput("main") {
+	if _, unread := j.outputWaitState("main"); !unread {
 		t.Fatal("main has not read yet, want true")
+	}
+}
+
+// Every reader waiting on the same output generation must wake from one write.
+// The channel is closed, rather than receiving one shared token, so a main
+// agent and its owner cannot leave one another parked until the wait timeout.
+func TestOutputWaitStateBroadcastsToAllReaders(t *testing.T) {
+	j := &job{ID: "job-broadcast", output: newTailWriter(1 << 16)}
+	ownerSignal, ownerUnread := j.outputWaitState("owner")
+	mainSignal, mainUnread := j.outputWaitState("main")
+	if ownerUnread || mainUnread {
+		t.Fatalf("empty output reported unread: owner=%v main=%v", ownerUnread, mainUnread)
+	}
+	if ownerSignal != mainSignal {
+		t.Fatal("readers waiting on one output generation must share its signal")
+	}
+
+	if _, err := j.output.Write([]byte("new output")); err != nil {
+		t.Fatalf("write output: %v", err)
+	}
+	for name, signal := range map[string]<-chan struct{}{
+		"owner": ownerSignal,
+		"main":  mainSignal,
+	} {
+		select {
+		case <-signal:
+		default:
+			t.Fatalf("%s reader was not woken by the output write", name)
+		}
 	}
 }

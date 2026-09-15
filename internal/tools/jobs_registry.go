@@ -601,13 +601,14 @@ func (j *job) noteReadOutcome(reader string, noNewBytes bool) int {
 	return state.noProgressReads
 }
 
-// hasUnreadOutput reports whether the retained window holds bytes this reader
-// has not consumed yet.
-func (j *job) hasUnreadOutput(reader string) bool {
+// outputWaitState returns the current output generation and whether this reader
+// already has unread bytes. The cursor and notification generation are sampled
+// as one wait predicate, so a write cannot slip between the check and select.
+func (j *job) outputWaitState(reader string) (<-chan struct{}, bool) {
 	j.mu.Lock()
+	defer j.mu.Unlock()
 	cursor := j.readerStateLocked(reader).offset
-	j.mu.Unlock()
-	return j.output.hasDataAfter(cursor)
+	return j.output.waitSignalAfter(cursor)
 }
 
 func shortExitDetail(err error) string {

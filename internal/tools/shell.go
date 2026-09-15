@@ -18,7 +18,7 @@ const maxOutputBytes = 10 * 1024 * 1024 // 10 MB cap
 
 // tailWriter is the concurrency-safe view of a TailBuffer that the job registry
 // reads: the lock makes the incremental cursor reads atomic against the writes,
-// and wrote wakes a waiter when new output arrives.
+// and each output generation has a broadcast channel for waiters.
 type tailWriter struct {
 	mu    sync.Mutex
 	buf   TailBuffer
@@ -26,31 +26,30 @@ type tailWriter struct {
 }
 
 func newTailWriter(maxBytes int64) *tailWriter {
-	return &tailWriter{buf: *NewTailBuffer(maxBytes), wrote: make(chan struct{}, 1)}
+	return &tailWriter{buf: *NewTailBuffer(maxBytes), wrote: make(chan struct{})}
 }
 
 func (c *tailWriter) Write(p []byte) (int, error) {
 	c.mu.Lock()
 	n, err := c.buf.Write(p)
-	c.mu.Unlock()
-	select {
-	case c.wrote <- struct{}{}:
-	default:
+	if n > 0 {
+		close(c.wrote)
+		c.wrote = make(chan struct{})
 	}
+	c.mu.Unlock()
 	return n, err
 }
 
-// hasDataAfter reports whether output beyond the absolute cursor is retained.
-func (c *tailWriter) hasDataAfter(cursor int64) bool {
+// waitSignalAfter returns the current output generation and whether output
+// beyond the cursor is already retained. The generation channel is closed and
+// replaced after each write, so every waiter for that generation is released.
+// The channel and predicate are sampled under one lock to avoid a write
+// landing between the predicate check and the wait.
+func (c *tailWriter) waitSignalAfter(cursor int64) (<-chan struct{}, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.buf.hasDataAfter(cursor)
+	return c.wrote, c.buf.hasDataAfter(cursor)
 }
-
-// writeSignal fires whenever new output arrives, so a wait can sleep instead of
-// polling. It is edge-triggered and shared, and it is never closed, so callers
-// must re-check hasDataAfter before waiting.
-func (c *tailWriter) writeSignal() <-chan struct{} { return c.wrote }
 
 // readFrom returns the output after the absolute cursor, the cursor to pass to
 // the next read, and how many bytes the reader missed because they had already

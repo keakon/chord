@@ -99,18 +99,12 @@ func (JobOutputTool) Execute(ctx context.Context, raw json.RawMessage) (string, 
 	reader := strings.TrimSpace(AgentIDFromContext(ctx))
 	if wait == jobWaitExit {
 		if !j.isFinished() {
-			waitForJob(ctx, j, false)
+			waitForJob(ctx, j, false, nil)
 		}
 	} else if wait == jobWaitOutput && !j.isFinished() {
-		// Drop a token left by an earlier write: without this, a stale signal
-		// would return immediately on every call. Output that arrived before
-		// the drain is still reported by the re-check below.
-		select {
-		case <-j.output.writeSignal():
-		default:
-		}
-		if !j.hasUnreadOutput(reader) {
-			waitForJob(ctx, j, true)
+		signal, unread := j.outputWaitState(reader)
+		if !unread {
+			waitForJob(ctx, j, true, signal)
 		}
 	}
 	chunk, dropped := j.readIncremental(reader)
@@ -147,12 +141,12 @@ func (JobOutputTool) Execute(ctx context.Context, raw json.RawMessage) (string, 
 
 // waitForJob blocks until the job finishes, the requested event arrives, the
 // runtime wait budget expires, or the caller cancels. untilOutput additionally
-// wakes on new output; the exit wait ignores output so it cannot return early
-// with a job that is still running.
-func waitForJob(ctx context.Context, j *job, untilOutput bool) {
+// wakes on the output generation captured with the unread predicate; the exit
+// wait ignores output so it cannot return early with a job that is still
+// running.
+func waitForJob(ctx context.Context, j *job, untilOutput bool, signal <-chan struct{}) {
 	timer := time.NewTimer(time.Duration(jobOutputWaitMs) * time.Millisecond)
 	defer timer.Stop()
-	signal := j.output.writeSignal()
 	if untilOutput {
 		select {
 		case <-j.done:
