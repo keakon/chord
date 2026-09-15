@@ -36,7 +36,9 @@ const (
 	// externalization opportunity on the request that runs alongside the
 	// automatic-compaction start, and says plainly that the compaction does
 	// not wait for it.
-	compactionWarningText = "The context has reached the automatic-compaction threshold and will be compacted at the next safe boundary.\nIf important findings, decisions, or working state are not yet written to files, write them now to a project file your role may write (for example a task-notes file under .chord/notes/, named with a YYYYMMDD date prefix, or a plan document under .chord/plans/) — this may be the last request on the current context.\nThe compaction does not wait for this message."
+	compactionWarningText = "The context has reached the automatic-compaction threshold and will be compacted at the next safe boundary.\n" +
+		"If important findings, decisions, or working state are not yet written to files, write them now to a project file your role may write (" + contextStateFileTargetHint + ") — this may be the last request on the current context.\n" +
+		"The compaction does not wait for this message."
 )
 
 // reminderOverlayClaim is the per-window claim shared by the context-pressure
@@ -545,7 +547,23 @@ func (a *MainAgent) queueCompactionWarning() {
 const contextPressureReminderShortText = "Context pressure is still active and the context may be compacted soon.\n" +
 	contextCheckpointPressureAction
 
-const contextCheckpointPressureAction = "If only the final response remains, deliver it without a checkpoint; if user input is required, use the normal question or waiting mechanism. Otherwise finish the current atomic operation, stop optional exploration, and preserve the minimum recovery state in structured arguments or permitted state files. Request a provisional checkpoint with compact_context alone when its preparation requirements are met; do not claim unfinished work is complete."
+// contextStateFileTargetHint names where externalized state goes and how the
+// file is named. Both context-pressure overlays share it because they compete
+// for the same moment: the reminder is sticky above the reminder line and
+// therefore arrives first and repeats, while the warning fires once on the
+// request that starts the compaction. Stating the target in only one of them
+// left the sticky text asking for a file write without saying where or under
+// what name, so the naming drifted whenever that was the only text in view.
+// The convention itself is the published one (docs/paths.md) and matches the
+// plan-document naming the planning prompt block and the handoff tool already
+// mandate; it lives here once so the two overlays cannot drift apart.
+// It carries the location and the name only; each overlay keeps its own
+// permission qualifier ("a project file your role may write", "permitted state
+// files") because a role that cannot write those paths must not read the hint
+// as an instruction to try.
+const contextStateFileTargetHint = "a task-notes file under .chord/notes/ or a plan document under .chord/plans/, named with a YYYYMMDD date prefix such as 20260915-auth-token-refresh.md"
+
+const contextCheckpointPressureAction = "If only the final response remains, deliver it without a checkpoint; if user input is required, use the normal question or waiting mechanism. Otherwise finish the current atomic operation, stop optional exploration, and preserve the minimum recovery state in structured arguments or permitted state files (" + contextStateFileTargetHint + "). Request a provisional checkpoint with compact_context alone when its preparation requirements are met; do not claim unfinished work is complete."
 
 // buildContextPressureReminderText renders the full reminder text. It does not
 // quote the current usage ratio or the remaining budget: the model cannot act

@@ -170,6 +170,36 @@ func TestContextPressureReminderShortTextSelfContained(t *testing.T) {
 	}
 }
 
+// TestContextPressureOverlaysShareStateFileNaming pins that every overlay which
+// asks for a file write also says where the file goes and how it is named. The
+// sticky reminder arrives first and repeats, while the warning fires once; when
+// only the sticky text named a target, the naming had nothing to follow on the
+// requests that mattered most. All four therefore render the one shared hint.
+func TestContextPressureOverlaysShareStateFileNaming(t *testing.T) {
+	texts := map[string]string{
+		"full reminder":  buildContextPressureReminderText(),
+		"short reminder": contextPressureReminderShortText,
+		"warning":        compactionWarningText,
+		"imminent":       compactionImminentText(1),
+	}
+	for name, text := range texts {
+		if !strings.Contains(text, contextStateFileTargetHint) {
+			t.Fatalf("%s must carry the shared state-file target hint, got %q", name, text)
+		}
+		// Bare content only: the turn-overlay injector owns the
+		// <system-reminder> wrapper, so a placeholder like YYYYMMDD-<slug>.md
+		// must not smuggle angle brackets into the text.
+		if strings.Contains(text, "<") {
+			t.Fatalf("%s must stay bare content without angle brackets, got %q", name, text)
+		}
+	}
+	for _, want := range []string{".chord/notes/", ".chord/plans/", "YYYYMMDD"} {
+		if !strings.Contains(contextStateFileTargetHint, want) {
+			t.Fatalf("state-file hint must mention %q, got %q", want, contextStateFileTargetHint)
+		}
+	}
+}
+
 func TestModelDrivenContextPromptDelegatesPreparationAndPreservesTrustBoundary(t *testing.T) {
 	a := modelDrivenPromptTestAgent(t)
 	block := a.modelDrivenContextPromptBlock()
