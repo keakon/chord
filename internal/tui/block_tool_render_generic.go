@@ -974,12 +974,16 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 	if b.ResultDone && !forceExpanded {
 		prefix = renderToolDisclosurePrefix(prefix, expanded)
 	}
+	var elapsedOnHeader bool
 	headerSummary, summaryOnHeader := compactToolHeaderResultSummary(b)
 	toolHeaderLine := renderToolHeaderLine(prefix, b.ToolName)
 	if summaryOnHeader {
-		// The summary joins the header like grep's match count, so the
-		// collapsed card is a single line and the body is only the result.
-		toolHeaderLine = appendSearchHeaderSummary(toolHeaderLine, mainPart, grayPart, headerSummary, cardWidth-4)
+		if b.ToolName == tools.NameJobOutput && !b.toolResultIsError() && !b.toolResultIsCancelled() {
+			toolHeaderLine = appendJobOutputHeaderDetails(toolHeaderLine, mainPart, grayPart, headerSummary, b.toolElapsedLabel(), cardWidth-4)
+			elapsedOnHeader = true
+		} else {
+			toolHeaderLine = appendSearchHeaderSummary(toolHeaderLine, mainPart, grayPart, headerSummary, cardWidth-4)
+		}
 	} else {
 		toolHeaderLine = appendToolHeaderSummary(toolHeaderLine, mainPart, grayPart, paramSummary, cardWidth-4)
 	}
@@ -1058,7 +1062,9 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 		}
 	}
 
-	result = appendToolElapsedToHeader(result, b, cardWidth)
+	if !elapsedOnHeader {
+		result = appendToolElapsedToHeader(result, b, cardWidth)
+	}
 	// The handle/count is appended after the elapsed suffix so a tight card
 	// drops the timestamp rather than the identifier a follow-up call needs.
 	if headerSuffix != "" && len(result) > 0 {
@@ -1227,6 +1233,75 @@ func appendToolHeaderSummary(headerLine, mainPart, grayPart, paramSummary string
 		grayPart = truncateToolHeaderGray(grayPart, remaining)
 	}
 	return headerLine + " " + mainPart + " " + DimStyle.Render(grayPart)
+}
+
+// appendJobOutputHeaderDetails appends a job_output read summary, an optional
+// ignored/invalid argument group, and the elapsed label to the header line as
+// one prioritized layout decision. The id is the handle every later
+// job_output / job_kill call needs, so it truncates last: the elapsed label
+// yields first, then the read summary, and only then is the id narrowed to
+// the remaining header width.
+func appendJobOutputHeaderDetails(headerLine, pattern, grayPart, summary, elapsed string, maxWidth int) string {
+	baseWidth := runewidth.StringWidth(stripANSI(headerLine))
+	if baseWidth >= maxWidth {
+		return runewidth.Truncate(headerLine, maxWidth, "…")
+	}
+	budget := maxWidth - baseWidth - 1
+	if budget <= 0 {
+		return headerLine
+	}
+	pattern = sanitizeToolDisplayText(pattern)
+	summary = sanitizeToolDisplayText(summary)
+	elapsed = strings.TrimSpace(elapsed)
+
+	const sep = " · "
+	var suffix string
+	var suffixWidth int
+	var summaryWidth int
+	if summary != "" {
+		suffix = summary
+		summaryWidth = runewidth.StringWidth(summary)
+		suffixWidth = summaryWidth
+	}
+	if grayPart != "" {
+		// The ignored/invalid-argument group rides the same summary: when the
+		// summary cannot fit, the option group still has one word of its own.
+		optionSuffix := grayPart
+		widthDelta := runewidth.StringWidth(stripANSI(optionSuffix))
+		if suffix != "" {
+			widthDelta += runewidth.StringWidth(sep) + suffixWidth
+			suffix = optionSuffix + sep + suffix
+		} else {
+			suffix, suffixWidth = optionSuffix, widthDelta
+		}
+	}
+	if elapsed != "" {
+		timerSuffix := elapsedGlyph + " " + elapsed
+		timerWidth := runewidth.StringWidth(timerSuffix)
+		if suffix != "" {
+			suffixWidth += runewidth.StringWidth(sep) + timerWidth
+			suffix += sep + timerSuffix
+		} else {
+			suffix, suffixWidth = timerSuffix, timerWidth
+		}
+	}
+	patternWidth := runewidth.StringWidth(pattern)
+	if patternWidth > budget {
+		pattern = truncateToolHeaderMiddle(pattern, budget)
+		patternWidth = runewidth.StringWidth(pattern)
+	}
+	if suffix == "" {
+		return headerLine + " " + pattern
+	}
+	if suffixWidth <= budget-patternWidth-1 {
+		return headerLine + " " + pattern + sep + suffix
+	}
+	// The suffix does not fit whole: the elapsed label is dropped first, then
+	// the optional argument group, and the id is the only fact left to keep.
+	if summaryWidth <= budget-patternWidth-1 {
+		return headerLine + " " + pattern + sep + DimStyle.Render(summary)
+	}
+	return headerLine + " " + pattern
 }
 
 // appendSearchHeaderSummary appends the pattern, optional search parameters and

@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mattn/go-runewidth"
 
@@ -309,9 +310,40 @@ func TestNarrowCollapsedJobOutputCardKeepsItsJobID(t *testing.T) {
 		if strings.Contains(plain, "2 new lines") && !strings.Contains(plain, "job-8") {
 			t.Fatalf("width %d kept the read summary but dropped the job id:\n%s", width, plain)
 		}
-		if strings.Contains(plain, "job-8") && !strings.Contains(plain, "2 new lines") {
-			sawIDWithoutSummary = true
+		sawIDWithoutSummary = sawIDWithoutSummary || strings.Contains(plain, "job-8") && !strings.Contains(plain, "2 new lines")
+	}
+	if strings.Contains(wide, "⏱ 30s") {
+		t.Fatalf("wide card should keep the elapsed label when time is present:\n%s", wide)
+	}
+	if !sawIDWithoutSummary {
+		t.Fatal("no width dropped the read summary while keeping the job id")
+	}
+}
+
+// TestNarrowJobOutputCardKeepsIDWhenElapsedIsPresent covers the narrow card
+// with a real elapsed time on the header: the read summary yields before the
+// elapsed label, and the id is joined last.
+func TestNarrowJobOutputCardKeepsIDWhenElapsedIsPresent(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{
+		ID: 1, Type: BlockToolCall, ToolName: tools.NameJobOutput,
+		Content:           `{"job_id":"job-8"}`,
+		ResultContent:     "line one\nline two\n[status: running]",
+		ResultDone:        true,
+		ResultStatus:      agent.ToolResultStatusSuccess,
+		PersistedDuration: 30 * time.Second,
+	}
+	wide := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(wide, "job-8 · 2 new lines · ⏱ 30s") {
+		t.Fatalf("wide card should carry the id, read summary and elapsed label:\n%s", wide)
+	}
+	sawIDWithoutSummary := false
+	for width := 30; width <= 60; width += 2 {
+		plain := stripANSI(strings.Join(block.Render(width, ""), "\n"))
+		if strings.Contains(plain, "2 new lines") && !strings.Contains(plain, "job-8") {
+			t.Fatalf("width %d kept the read summary but dropped the job id:\n%s", width, plain)
 		}
+		sawIDWithoutSummary = sawIDWithoutSummary || strings.Contains(plain, "job-8") && !strings.Contains(plain, "2 new lines") && !strings.Contains(plain, "⏱ 30s")
 	}
 	if !sawIDWithoutSummary {
 		t.Fatal("no width dropped the read summary while keeping the job id")
