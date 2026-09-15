@@ -1,6 +1,6 @@
 # Usage
 
-This page covers Chord's main modes, core interactions, and the features you will use most often day to day.
+Chord runs either as the local TUI or as the `chord headless` control plane. Most of this page is about daily TUI work: sending messages, reading tool cards, navigating sessions, and steering agents.
 
 ## Modes
 
@@ -320,7 +320,7 @@ A good pattern is:
 3. let the agent continue through edits, test failures, and follow-up fixes
 4. only confirm the final `done` request when the work is actually complete
 
-This reduces manual prompts such as “continue” or “run the tests too.” Do **not** use `/loop` just to keep the model running: normal mode is easier to control when the task is exploratory, ambiguous, or likely to need product decisions.
+This reduces manual prompts such as "continue" or "run the tests too." Do **not** use `/loop` just to keep the model running: normal mode is easier to control when the task is exploratory, ambiguous, or likely to need product decisions.
 
 If the task is genuinely blocked, the agent can still report `<blocked>category: reason</blocked>`. You can always press `Esc` to cancel the current iteration.
 
@@ -395,13 +395,6 @@ See [Headless](./headless.md) for details.
 Chord picks the file-editing tool per active model: gpt-5-and-later family names (gpt-5, gpt-5-mini, gpt-5-nano, gpt-5-codex, any `gpt-5.*` name, and future majors like gpt-6) and `codex-auto-review` use `apply_patch`, everything else defaults to `edit` — see [Edit tools](./edit-tools.md) for the full matrix and the rationale. On compatible Responses endpoints, patch-native models additionally receive `apply_patch` as a freeform custom tool instead of a JSON function tool.
 
 When a model name or gateway behaves differently from the inference, override it per provider or model with `compat.apply_patch.enabled` (tool surface) and `compat.apply_patch.freeform` (wire shape). Both keys are three-state: omitted means infer from the model name and endpoint, so you only set the knob you need to change. The authoritative field reference is in [Configuration & Auth](./configuration.md).
-
-## Daily usage tips
-
-- Start with a minimal provider config to confirm requests work
-- Add LSP when you need stronger code awareness
-- Add MCP or Hooks only when you need external tool integration
-- Keep high-risk tools as `ask`; do not globally `allow` them by default
 
 ## Related
 

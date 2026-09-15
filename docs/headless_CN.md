@@ -272,7 +272,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 - `/role status`、`/role <name>`：查询或切换当前主角色（与 `role` 协议命令同一操作）
 - `/help`、`/stats`、`/compact`、`/loop on`、`/loop off`（仅当当前 MainAgent 角色可使用 `done` 工具时）
 
-裸 `/models` 会被当作 `/models status`，裸 `/role` 会被当作 `/role status`。部分 slash 命令是 TUI 专用的（例如 `/new`、`/resume` 需要交互式 picker）；在 headless 模式下尝试调用时，会返回 `error` envelope，说明“X 仅在本地 TUI 模式可用”。
+裸 `/models` 会被当作 `/models status`，裸 `/role` 会被当作 `/role status`。部分 slash 命令是 TUI 专用的（例如 `/new`、`/resume` 需要交互式 picker）；在 headless 模式下尝试调用时，会返回 `error` envelope，说明「X 仅在本地 TUI 模式可用」。
 
 ## 最小 Python 客户端示例
 
@@ -319,7 +319,7 @@ send({"type": "send", "content": "Summarize the project structure."})
 - 权限交互：把 `confirm_request` / `question_request` 渲染成聊天回复，再映射回 `confirm` / `question` 命令。
 - 基于以上 wire format 的重连辅助。
 
-本页描述的是更底层的协议契约，适合那些需要 `chord-gateway` 之外能力的集成方。如果你的目标是“让人能在手机上和 Chord 对话”，优先从 chord-gateway 开始；只有在你有明确理由时，再直接下沉到 headless 协议。
+本页描述的是更底层的协议契约，适合那些需要 `chord-gateway` 之外能力的集成方。如果你的目标是「让人能在手机上和 Chord 对话」，优先从 chord-gateway 开始；只有在你有明确理由时，再直接下沉到 headless 协议。
 
 ## 适合的用法
 

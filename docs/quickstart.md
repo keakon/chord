@@ -1,7 +1,5 @@
 # Quickstart
 
-This page is for first-time Chord users. The goal is to complete a minimal working setup in a few minutes.
-
 ## 1. Install
 
 Prebuilt binaries do not require Go. Installing with `go install` or building from source requires Go 1.27.0+.

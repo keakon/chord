@@ -73,7 +73,7 @@ ime_switch_target: com.apple.keylayout.ABC          # macOS 示例
 很多终端默认不响铃，开启方式也各不相同：
 
 - **Ghostty（macOS 需 ≥ 1.3，GTK 需 ≥ 1.2）**：在 Ghostty 配置里加 `bell-features = system,audio`（`system` 播系统警示音，`audio` 可用 `bell-audio-path`、`bell-audio-volume` 播自定义音频）；`attention`（Dock 跳动）和 `title`（标题加 🔔）默认开启。
-- **iTerm2**：Settings → Profiles → Terminal → Notification Center alerts，按 profile 配置；"Silence bell" 必须关闭，铃声才会到达通知中心。
+- **iTerm2**：Settings → Profiles → Terminal → Notification Center alerts，按 profile 配置；「Silence bell」必须关闭，铃声才会到达通知中心。
 - **kitty**：`kitty.conf` 里的 `enable_audio_bell` / `visual_bell_duration`。
 - **tmux**：铃声按窗口经 `monitor-bell` / `bell-action` 路由；`set -g bell-action any` 可以在其他窗口收到提醒。
 - **Windows Terminal**：默认播系统音，可在 Terminal 设置 → Advanced → Bell notification style 里调整或静音。
@@ -135,7 +135,7 @@ WSL 自动探测不会选 `Scripts\python.exe` 里的 Windows venv。WSL 内开�
 - **Windows Terminal**：作为通用 TUI 没问题；图片协议和通知依赖版本/宿主链路
 - **macOS 自带终端（Terminal.app）**：基础 TUI 使用没问题，但它 **不一定能可靠区分修饰后的 Enter**（例如 `Shift+Enter`）。在输入框里需要换行时请用 `Ctrl+J`，或改用 iTerm2 / Ghostty / WezTerm 获得完整按键行为。
 
-按键区分提示：在 `tmux` / `zellij` 这类终端复用器里，`Shift+Enter` 这类“带修饰键的 Enter”可能会丢失或被改写（取决于外层终端与复用器的 extended keys 配置）。不确定时请直接用 `Ctrl+J` 换行（所有终端都可用）。
+按键区分提示：在 `tmux` / `zellij` 这类终端复用器里，`Shift+Enter` 这类「带修饰键的 Enter」可能会丢失或被改写（取决于外层终端与复用器的 extended keys 配置）。不确定时请直接用 `Ctrl+J` 换行（所有终端都可用）。
 
 `tmux`、`screen` 在 Chord 与终端之间又多一层；部分功能（终端通知、某些图片流程）需要显式配置 pass-through，而且 Chord 当前默认会在 `tmux` / `zellij` 内禁用图片预览。
 

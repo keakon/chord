@@ -1,6 +1,6 @@
 # Paths and Files
 
-This page describes every file and directory Chord reads or writes, and how to safely clean them up.
+This page describes every file and directory Chord reads or writes, and what is safe to delete.
 
 ## Three layers
 

@@ -24,7 +24,7 @@
 
 ## Reduction（上下文剪裁）
 
-每次 LLM 请求前执行的轻量级确定性裁剪。根据工具输出的年龄和大小启发式规则，从当前 prompt 中裁剪过时的内容——不会修改磁盘上的会话历史。与上下文压缩不同，上下文剪裁不调用 LLM，对用户完全透明。详见 [上下文管理 — 上下文剪裁](./context-management_CN.md#上下文剪裁reduction)。
+每次 LLM 请求前执行的轻量级确定性剪裁。根据工具输出的年龄和大小启发式规则，从当前 prompt 中剪裁过时的内容——不会修改磁盘上的会话历史。与上下文压缩不同，上下文剪裁不调用 LLM，对用户完全透明。详见 [上下文管理 — 上下文剪裁](./context-management_CN.md#上下文剪裁reduction)。
 
 ## Service tier
 
@@ -32,7 +32,7 @@
 
 ## Loop mode
 
-Chord 自主连续执行任务的模式，适合长时间任务。loop 模式下 agent 会持续处理任务、工具和结果，直到通过 `done` 工具申请退出。loop 模式不改变上下文处理方式：请求级剪裁和上下文压缩都保持启用，以便长会话在上下文额度用尽后继续推进。
+Chord 自主连续执行任务的模式。loop 模式下 agent 会持续处理任务、工具和结果，直到通过 `done` 工具申请退出。loop 模式不改变上下文处理方式：请求级剪裁和上下文压缩都保持启用，以便长会话在上下文额度用尽后继续推进。
 
 ## Thinking
 
@@ -60,7 +60,7 @@ Codex preset provider 使用的认证流程。Chord 将稳定 OAuth 字段保存
 
 ## Context window（上下文窗口）
 
-模型一次请求最多能处理的 token 数。对大多数模型，实用规则就是：“输入 + 请求输出”必须放进这个窗口。配置中对应 `limit.context`。
+模型一次请求最多能处理的 token 数。对大多数模型，实用规则就是：「输入 + 请求输出」必须放进这个窗口。配置中对应 `limit.context`。
 
 ## 模型限制（`limit.*`）
 
@@ -72,7 +72,7 @@ Codex preset provider 使用的认证流程。Chord 将稳定 OAuth 字段保存
 
 ## 分离限制（split limits）
 
-provider 文档里有时会用这个词表示“一个模型公布了不止一种限制”，通常是总上下文窗口外，另外还有单独的输入上限。一些 GPT 模型属于这种情况。如果 provider 文档同时列出这两个数字，就同时配置 `limit.context` 和 `limit.input`，这样 Chord 才能在输入过大前进行压缩。
+provider 文档里有时会用这个词表示「一个模型公布了不止一种限制」，通常是总上下文窗口外，另外还有单独的输入上限。一些 GPT 模型属于这种情况。如果 provider 文档同时列出这两个数字，就同时配置 `limit.context` 和 `limit.input`，这样 Chord 才能在输入过大前进行压缩。
 
 ## 请求输出上限（`max_output_tokens`）
 
@@ -80,7 +80,7 @@ Chord 每次请求时主动要求的最大输出量。它和模型的 `limit.out
 
 ## Oversize recovery（超限恢复）
 
-provider 因请求过大而拒绝后，Chord 采用的恢复重试流程。Chord 会根据已配置的输入预算压缩或裁剪对话，并在可以安全重试时再次发送请求。
+provider 因请求过大而拒绝后，Chord 采用的恢复重试流程。Chord 会根据已配置的输入预算压缩或剪裁对话，并在可以安全重试时再次发送请求。
 
 ## Worktree
 
@@ -88,7 +88,7 @@ Chord 管理的 git worktree（位于 `<state-dir>/worktrees/<repo-id>/<slug>`�
 
 ## Skill
 
-一段可复用的"专长"模块，由 Markdown 正文和 YAML frontmatter 组成（`SKILL.md`），按需加载。模型在相关时调用 `skill` 工具加载——Chord 不会把所有 skill 都预灌到每次 prompt。从 `.chord/skills/`、`.agents/skills/`、`~/.config/chord/skills/` 以及 `skills.paths` 配置的额外目录发现。详见 [扩展与定制 — Skills](./customization_CN.md#skills)。
+一段可复用的「专长」模块，由 Markdown 正文和 YAML frontmatter 组成（`SKILL.md`），按需加载。模型在相关时调用 `skill` 工具加载——Chord 不会把所有 skill 都预灌到每次 prompt。从 `.chord/skills/`、`.agents/skills/`、`~/.config/chord/skills/` 以及 `skills.paths` 配置的额外目录发现。详见 [扩展与定制 — Skills](./customization_CN.md#skills)。
 
 ## Hook
 
@@ -122,7 +122,7 @@ Chord 从项目根路径计算出的稳定、清洗后标识（如 `~/projects/c
 
 ## Local TUI / Local mode
 
-"Local TUI"和"local mode"均指默认 `chord` 启动方式：MainAgent 在进程内运行，驱动终端 UI。没有 IPC、没有 socket、没有独立服务。与之相对的是 `chord headless`：运行时不带 TUI，专供外层控制面调用。
+「Local TUI」和「local mode」均指默认 `chord` 启动方式：MainAgent 在进程内运行，驱动终端 UI。没有 IPC、没有 socket、没有独立服务。与之相对的是 `chord headless`：运行时不带 TUI，专供外层控制面调用。
 
 ## Diagnostics bundle（诊断包）
 

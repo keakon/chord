@@ -24,11 +24,11 @@ gpt-4/4o、gpt-3.5 和 o 系列家族**不是**补丁原生：`apply_patch` 工�
 
 当补丁原生模型保留 `apply_patch` 时，Chord 还会隐藏 `write` 和 `delete`：信封本身已覆盖它们（`*** Add File:` 创建、`*** Delete File:` 删除），与这些模型训练时熟悉的原生 Codex CLI 工具面一致。回退组合会保留 `write`/`delete`：非补丁原生模型仅因 `edit` 被禁用才拿到 `apply_patch` 时仍能看到它们；补丁原生模型被降级到 `edit` 时也需要 `write` 才能创建文件。
 
-### Freeform（custom tool）发射
+### Freeform（custom tool）发送形式
 
-在 OpenAI 兼容的 **Responses** 端点上，gpt-5 及之后家族或 `codex-auto-review` 模型还会把 `apply_patch` 作为 **freeform custom tool**（`type: "custom"` 携带 Lark grammar）发射，而不是 JSON function tool。Chord 会把 grammar 放进请求的 `format.definition` 字段；服务端支持约束解码时，它会在模型生成过程中限制补丁的协议结构，而不只是影响客户端解析。当前 grammar 与 Codex 的定义保持一致，要求至少一个文件操作、非空新增文件和合法的补丁行结构。客户端仍会用自己的解析器和执行器再次校验，因此未受约束的响应——未携带 grammar、被网关改写，或服务端并未执行约束——仍可走兼容兜底；grammar 不负责判断上下文是否来自最新文件，也不保证修改符合用户意图。其他模型一律收到 JSON function 形态；非 Responses 端点没有 custom tool 类型，一律使用 function 形态。
+在 OpenAI 兼容的 **Responses** 端点上，gpt-5 及之后家族或 `codex-auto-review` 模型还会把 `apply_patch` 作为 **freeform custom tool**（`type: "custom"`，随请求带上 Lark grammar）发送，而不是 JSON function tool。Chord 会把 grammar 放进请求的 `format.definition` 字段；服务端支持约束解码时，它会在模型生成过程中限制补丁的协议结构，而不只是影响客户端解析。当前 grammar 与 Codex 的定义保持一致，要求至少一个文件操作、非空新增文件和合法的补丁行结构。客户端仍会用自己的解析器和执行器再次校验，因此未受约束的响应——未携带 grammar、被网关改写，或服务端并未执行约束——仍可走兼容兜底；grammar 不负责判断上下文是否来自最新文件，也不保证修改符合用户意图。其他模型一律收到 JSON function 形式的调用；非 Responses 端点没有 custom tool 类型，也只能用 function 形式。
 
-接受 Responses 请求但拒绝 custom tool 的主机没有内置例外：那里的补丁原生模型默认会发射 freeform 形态，网关会报出带操作指引的错误。这类主机请设置 `compat.apply_patch.freeform: false` 强制使用 JSON function 形态。
+接受 Responses 请求但拒绝 custom tool 的主机没有内置例外：那里的补丁原生模型默认按 freeform 形式发送，网关会报出带操作指引的错误。这类主机请设置 `compat.apply_patch.freeform: false` 强制改用 JSON function 形式。
 
 ### 覆盖默认值
 
@@ -41,7 +41,7 @@ providers:
     compat:
       apply_patch:
         enabled: true   # 工具面：保留 apply_patch（隐藏 edit + write/delete）
-        freeform: false # 发射形态：JSON function tool，不用 custom
+        freeform: false # 发送形式：JSON function tool，不用 custom
   openai:
     type: responses
     models:
@@ -53,7 +53,7 @@ providers:
 
 - `enabled: true` 对任意模型采用完整补丁原生语义（保留 patch、隐藏 `edit`/`write`/`delete`、prompt 改用 patch-only 指引）。
 - `enabled: false` 强制 edit 工具面，即使对补丁原生模型也生效。
-- `freeform: true` 强制 custom tool 形态；`freeform: false` 强制 JSON function 形态。
+- `freeform: true` 强制 custom tool 形式；`freeform: false` 强制 JSON function 形式。
 
 如果网关把 custom tool 错误降级成 `{"input": "..."}`（而不是 `{"patch": "..."}`），Chord 会返回指向 `compat.apply_patch.freeform: false` 的可操作错误；设置后请求会以 function tool 发送。
 
@@ -63,7 +63,7 @@ providers:
 
 ### 格式
 
-在 Responses freeform 形态下，Lark grammar 是随 custom tool 一起发送给服务端的生成约束，不是客户端专用的解析格式。它限制的是补丁的协议骨架：整个补丁至少包含一个文件操作，新增文件至少包含一行 `+` 内容，更新块必须符合 Codex 的行和 hunk 结构。它不能验证文件中的锚点是否唯一、文件是否在读取后发生变化，也不能判断修改是否符合语义。Chord 收到结果后仍会通过客户端解析器和事务执行器复核；因此 grammar 丢失或服务端未执行时，客户端仍负责拒绝非法结果或按兼容规则解析。
+在 Responses 的 freeform 形式下，Lark grammar 是随 custom tool 一起发送给服务端的生成约束，不是客户端专用的解析格式。它限制的是补丁的协议骨架：整个补丁至少包含一个文件操作，新增文件至少包含一行 `+` 内容，更新块必须符合 Codex 的行和 hunk 结构。它不能验证文件中的锚点是否唯一、文件是否在读取后发生变化，也不能判断修改是否符合语义。Chord 收到结果后仍会通过客户端解析器和事务执行器复核；因此 grammar 丢失或服务端未执行时，客户端仍负责拒绝非法结果或按兼容规则解析。
 
 单个 `patch` 参数携带 Codex 补丁正文。Chord 接受完整信封；若缺少 `*** Begin Patch` 和/或 `*** End Patch` 外壳，也会在解析前补齐。正文里可以包含任意数量的文件操作：
 
@@ -132,11 +132,11 @@ providers:
 
 ### 错误消息
 
-- **"hunk not found (N/M)"**：指定差异块与当前文件不匹配。错误会标出第一条期望完整行；诊断预览发生截断时，会明确写成“行前缀”。如果能够判断，还会说明该文本只是某个较长行的片段，或位于前一个差异块之前。同文件前面的差异块在内存里匹配成功、后面却失败时，该文件组的所有块都没有应用。先重新读取目标范围，用当前文件的完整行重建失败块，保留同组其他块，再提交修订后的操作参考。
-- **"cannot add file that already exists"**：`*** Add File:` 的目标已存在；改用 `*** Update File:`。
-- **"apply_patch contains overlapping operations"**：同一信封中的两个操作所触及的路径互为包含关系（例如 `dir` 与 `dir/file`），或通过不同名称解析到同一个文件；把它们合并为一个操作。针对完全相同路径的连续 `*** Update File:` 段是被允许的，并按顺序应用。
-- **"changed after planning"**：文件在验证与提交之间被修改；没有任何写入——基于当前内容重试。
-- **"apply_patch partially applied: N changes committed, M file groups not applied: ..."**：部分独立修改已提交，其他操作组没有应用（单数时使用 "change" / "file group"）。"Applied patch" 下的修改已经落盘，不要重做。"Not applied" 会列出每个失败操作组的路径和原因。先解决每项原因，再用当前文件内容重建失败操作组，只提交这些操作；不要重发已提交的修改，也不用回显整个补丁。
+- **「hunk not found (N/M)」**：指定差异块与当前文件不匹配。错误会标出第一条期望完整行；诊断预览发生截断时，会明确写成「行前缀」。如果能够判断，还会说明该文本只是某个较长行的片段，或位于前一个差异块之前。同文件前面的差异块在内存里匹配成功、后面却失败时，该文件组的所有块都没有应用。先重新读取目标范围，用当前文件的完整行重建失败块，保留同组其他块，再提交修订后的操作参考。
+- **「cannot add file that already exists」**：`*** Add File:` 的目标已存在；改用 `*** Update File:`。
+- **「apply_patch contains overlapping operations」**：同一信封中的两个操作所触及的路径互为包含关系（例如 `dir` 与 `dir/file`），或通过不同名称解析到同一个文件；把它们合并为一个操作。针对完全相同路径的连续 `*** Update File:` 段是被允许的，并按顺序应用。
+- **「changed after planning」**：文件在验证与提交之间被修改；没有任何写入——基于当前内容重试。
+- **「apply_patch partially applied: N changes committed, M file groups not applied: ...」**：部分独立修改已提交，其他操作组没有应用（单数时使用「change」 / 「file group」）。「Applied patch」下的修改已经落盘，不要重做。「Not applied」会列出每个失败操作组的路径和原因。先解决每项原因，再用当前文件内容重建失败操作组，只提交这些操作；不要重发已提交的修改，也不用回显整个补丁。
 
 ---
 
@@ -188,11 +188,11 @@ providers:
 
 ### 错误消息
 
-- **"old_string not found in file"**：即使经过标点容错，精确文本也不存在。检查空白、缩进和换行符。当差异是字符级（漏字或多字）时，错误还会指出文件中最近的匹配块——行号、相似度以及具体的差异行——让你不用重读整个文件就能看出那一处字符错误（比如缺 `)` 或双逗号 `,,`）。整行漂移、展示的差异行不足以重建原文时，错误会改为点明漂移，并给出最近匹配区间的 `read` 坐标（offset/limit），或建议改用更小的 2-4 行锚点。
-- **"old_string found N times"**：找到多个匹配。可以：
+- **「old_string not found in file」**：即使经过标点容错，精确文本也不存在。检查空白、缩进和换行符。当差异是字符级（漏字或多字）时，错误还会指出文件中最近的匹配块——行号、相似度以及具体的差异行——让你不用重读整个文件就能看出那一处字符错误（比如缺 `)` 或双逗号 `,,`）。整行漂移、展示的差异行不足以重建原文时，错误会改为点明漂移，并给出最近匹配区间的 `read` 坐标（offset/limit），或建议改用更小的 2-4 行锚点。
+- **「old_string found N times」**：找到多个匹配。可以：
   - 添加更多上下文使其唯一
   - 设置 `replace_all: true` 如果你想替换所有出现
-- **"old_string and new_string are identical"**：无需更改。
+- **「old_string and new_string are identical」**：无需更改。
 
 同一目标文件反复多次近似匹配失败时，agent 会从第二次失败起在面向模型的结果里追加一条提示：先重新读取目标区间（或改用 `write` 整段落地），不要凭记忆重打同一段旧文本。提示不会出现在界面上，任意一次成功或进入新 turn 后计数重置。
 
@@ -211,7 +211,7 @@ providers:
 
 当精确匹配与尾随换行匹配都失败时，工具会按常见标点变体等价的方式重试——与 `apply_patch` 使用同一套 1:1 归一化面：
 
-- 弯引号与直引号（`“ ”` ↔ `" "`，`‘ ’` ↔ `' '`）
+- 弯引号与直引号（`「 」` ↔ `" "`，`‘ ’` ↔ `' '`）
 - 破折号（`–`、`—`、`−` ↔ `-`）
 - 全角与半角 CJK 标点（`,` `;` `:` `.` `!` `?` `(` `)`）
 
@@ -239,7 +239,7 @@ providers:
 
 两个工具都很适用。根据模型训练选择：
 
-- **apply_patch**：当你需要位置控制时更好（例如，"更改此函数中的第一个出现"）。
+- **apply_patch**：当你需要位置控制时更好（例如，「更改此函数中的第一个出现」）。
 - **Edit**：对于具有清晰边界的简单查找替换更好。
 
 ### 重命名/重构

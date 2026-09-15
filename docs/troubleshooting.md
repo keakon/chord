@@ -1,6 +1,6 @@
 # Troubleshooting
 
-This page focuses on common user-facing issues around installation, config, auth, sessions, extensions, and performance.
+Symptoms are grouped roughly in the order you are likely to hit them: startup and auth first, then request failures, sessions, TUI rendering, and performance.
 
 ## Startup failures
 

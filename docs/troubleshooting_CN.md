@@ -1,6 +1,6 @@
 # 常见问题排查
 
-聚焦安装、配置、认证、会话、扩展和性能相关的常见问题。
+按通常会遇到的顺序排列：先是启动与认证，然后是请求失败、会话、TUI 渲染和性能。
 
 ## 启动失败
 
@@ -121,7 +121,7 @@ different conversation.`。Chord 能识别这类拒绝，并自动丢弃 thinkin
 一次，通常无需手动处理；重试会保留正文和已完成的工具事实。如果错误反复
 出现，请导出诊断包，并在反馈中附上会话 ID。
 
-### Codex WebSocket 400 "No tool call found for function call output"
+### Codex WebSocket 400 「No tool call found for function call output」
 
 这类 WebSocket 会话状态不一致通常会由 Chord 使用本地完整对话自动重试恢复。如果错误反复出现，请导出诊断包，并在反馈中附上会话 ID。
 
@@ -340,7 +340,7 @@ github.com/keakon/chord/internal/tui.renderMarkdownContent
 - 从最新 `read` 输出中重新复制目标块，并确认 context/removal 行缩进与当前文件一致；如果 hunk 来自旧的带编号输出，先移除复制进来的行号前缀；
 - 当同样的代码块在文件中重复出现时，在 `@@` hunk 中加入附近未变化的行、使用 `@@ header` 锚点，或用 `*** End of File` 钉住文件末尾的修改，让目标位置无歧义；
 - 把过大的 patch 拆成更小的信封或更小的 hunk；
-- 不要通过 `shell` 执行外部 `apply_patch`；请使用 Chord 原生 `apply_patch` 工具，这样权限、stale tracking、diff、LSP 和 rollback 才会保持接入。
+- 不要通过 `shell` 执行外部 `apply_patch`；请使用 Chord 原生 `apply_patch` 工具，这样权限、stale tracking、diff、LSP 和回滚才会保持接入。
 
 ## 性能问题
 
@@ -367,20 +367,20 @@ github.com/keakon/chord/internal/tui.renderMarkdownContent
 
 ## 上下文剪裁误裁重要内容
 
-**现象**：模型似乎"忘了"之前的工具输出，但会话文件里内容还在。
+**现象**：模型似乎「忘了」之前的工具输出，但会话文件里内容还在。
 
 排查步骤：
 
-1. 这是上下文剪裁（Reduction）的正常行为：每次 LLM 请求前，过时的工具输出会被从 prompt 中裁剪，但**不会修改**磁盘上的会话文件。
+1. 这是上下文剪裁（Reduction）的正常行为：每次 LLM 请求前，过时的工具输出会被从 prompt 中剪裁，但**不会修改**磁盘上的会话文件。
 2. 如果你经常需要回头参考较早的读取/搜索结果，可调高 `read_like_age_turns` 和 `read_like_output_bytes`。
 3. 如果构建 / 测试日志仍然是重要上下文，可调高 `shell_success_bytes`。
-4. 如果希望更保守的裁剪行为，整体调高各 `*_age_turns` 和 `*_bytes` 参数。
+4. 如果希望更保守的剪裁行为，整体调高各 `*_age_turns` 和 `*_bytes` 参数。
 
 详见 [上下文管理 — 上下文剪裁](./context-management_CN.md#上下文剪裁reduction)。
 
 ## 请求被拒绝：`context length` / `input too large`
 
-**现象**：provider 返回类似 "context length exceeded" 或 "input too large" 的错误。
+**现象**：provider 返回类似「context length exceeded」或「input too large」的错误。
 
 排查步骤：
 

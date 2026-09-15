@@ -4,8 +4,6 @@ This documentation is for end users: installation, configuration, daily usage, c
 
 - 中文版入口：见 [index_CN.md](./index_CN.md)
 
-Start with what works out of the box; move on to customization and advanced workflows when you need more.
-
 ## Find docs by task
 
 - **Start quickly**: [Quickstart](./quickstart.md)

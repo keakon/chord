@@ -64,8 +64,8 @@ disk.
 
 Every checkpoint opens with a **session anchors** block: the original request
 that started the session, plus the standing constraints extracted from your
-corrections. Compaction is recursive — each run re-summarizes the previous
-checkpoint — so anything left to the summarizer erodes a little every round.
+corrections. Compaction is recursive: each run re-summarizes the previous
+checkpoint, so anything left to the summarizer erodes a little every round.
 Anchors are exempt: they are copied forward verbatim from the previous
 checkpoint instead of being regenerated, and the summarizer is told not to
 restate or contradict them. The constraint list is bounded; on overflow the
@@ -75,8 +75,8 @@ kept while the middle is dropped.
 Constraints the session later contradicted are not silently dropped: the
 newest instruction supersedes the older constraint, and the superseded entry
 stays visible in the anchors block with a `~` prefix so the model can see the
-direction change. Declarative constraints you state in a plain message — for
-example "keep the existing API behavior" — get the same anchor authority as
+direction change. Declarative constraints you state in a plain message, such as
+"keep the existing API behavior", get the same anchor authority as
 imperative corrections, because they too are standing instructions that would
 otherwise erode over repeated compactions. The checkpoint also lists the most
 recently archived `history-N.md` files with their content topics as a **history
@@ -93,8 +93,8 @@ whole archives through truncation.
 Continuation-oriented compaction keeps a safe recent tail as verbatim messages
 after the checkpoint. It prefers whole user turns (normally the latest two)
 within a token budget of about 5% of the context window; when even a single user
-turn exceeds that budget — the usual case once that turn carries a full tool loop
-— it falls back to the longest safe suffix that does fit rather than dropping the
+turn exceeds that budget (the usual case once that turn carries a full tool loop)
+it falls back to the longest safe suffix that does fit rather than dropping the
 tail entirely. Tool-call/result pairs are never split, and short histories fall
 back to summarizing the full safe head when preserving the tail would leave too
 little material to summarize.
@@ -102,13 +102,13 @@ little material to summarize.
 ### Retained recent messages
 
 Every checkpoint also embeds the newest real user messages from the archived
-head verbatim — plus a dangling interrupted assistant reply when the
-conversation ends on one — as a `## Retained Recent Messages` section inside
+head verbatim, plus a dangling interrupted assistant reply when the
+conversation ends on one, as a `## Retained Recent Messages` section inside
 the checkpoint, within a small estimated-token budget (`retain_recent_tokens`,
 built-in default 4096). Continuation profiles keep the most recent turns as raw
 messages below the checkpoint; the retained section covers the messages just
-before them, and for `archival` profiles — which keep no raw tail and are
-otherwise summary-only — it is the only verbatim remnant of the latest
+before them, and for `archival` profiles (which keep no raw tail and are
+otherwise summary-only) it is the only verbatim remnant of the latest
 instructions. When a model-driven archival checkpoint has no live tail, the
 assistant text that declared the `compact_context` call is kept the same way,
 so the model's own analysis written just before the reset survives into the
@@ -117,7 +117,7 @@ newest instruction boundary so the continuation can resume without re-reading
 the archives.
 After a checkpoint applies, the continuation guidance states the precedence
 explicitly: when the checkpoint conflicts with a newer source, the newer one
-wins — latest user message or Done rejection, then current runtime state
+wins: latest user message or Done rejection, then current runtime state
 (todos, subagents, background tasks), then the files on disk, then tool results
 still in this conversation, then archived artifacts, and only then the
 checkpoint's own text. A summary is navigation and candidate working memory; it
@@ -194,7 +194,7 @@ model-level `reminder: -1` disables the pressure reminder while automatic
 compaction stays on.
 
 When the automatic-compaction threshold is crossed, Chord starts the
-usage-driven compaction right away — it runs asynchronously in the background
+usage-driven compaction right away: it runs asynchronously in the background
 and applies at the next continuation barrier, so the request that crosses the
 line keeps running in parallel with it. Provider rejections (oversize) still
 force compaction immediately.
@@ -205,8 +205,8 @@ main-model requests: the first request after the crossing and one more run
 before the summary-based compaction takes over, giving the model room to wrap
 up the phase and request a model-driven checkpoint or externalize state. Every
 request inside the deferral carries a "compaction imminent" notice with the
-true remaining countdown — two requests left on the crossing request itself,
-one on the final round — so the model always sees how much room is left even
+true remaining countdown (two requests left on the crossing request itself,
+one on the final round), so the model always sees how much room is left even
 if it never saw the crossing notice (a one-shot notice would be gone by the
 time the model reached the final round). The grace is skipped or cut short
 once usage reaches 95% of the usable input budget (a single batch that pulled
@@ -220,10 +220,10 @@ a fresh window.
 
 The request-side reminder and warning overlays only fire while model-driven
 compaction is enabled; with it off, automatic compaction is fully
-runtime-owned — as in Codex's local and remote compaction paths, which never
-notify the working model — and the session simply keeps running until the
+runtime-owned, as in Codex's local and remote compaction paths, which never
+notify the working model, and the session simply keeps running until the
 compaction applies at the barrier. The reminder only applies while the session
-keeps issuing main requests — if the turn ends right at the crossing, the
+keeps issuing main requests; if the turn ends right at the crossing, the
 usage-driven compaction runs through the normal end-of-turn path instead. The
 one-shot externalization warning is shown on the request that actually starts
 the compaction, which under the grace period is not the first request after
@@ -242,15 +242,15 @@ compaction once it applies.
 
 When `context.compaction.model_driven: true`, the main agent gains the
 `compact_context` tool. Registration is part of enabling the feature, so
-wildcard-only permission rules — such as an allowlist's `"*": deny` plus a few
-explicitly allowed tools — never hide the tool or block its calls; only a
+wildcard-only permission rules (such as an allowlist's `"*": deny` plus a few
+explicitly allowed tools) never hide the tool or block its calls; only a
 non-global tool rule whose pattern matches `compact_context` still applies
 (`deny` removes the tool and reports a one-time diagnostic, `ask` keeps it
 behind confirmation, and `allow` matches the default). Narrow patterns such as
 `compact_*` count as matching rules. A role whose allowlist grants no file-writing
 tools can still checkpoint its state in the structured arguments. The model calls it alone (no sibling tool calls in the
 same response) when replacing the current history is cheaper than carrying it
-forward and the facts needed later are fully externalized — written into files
+forward and the facts needed later are fully externalized: written into files
 named in `state_files`, or fully expressed in the structured
 `active_objective` / `completed` / `decisions` / `open_issues` / `next_step`
 arguments (`completed` records verified outcomes with how each was verified;
@@ -263,7 +263,7 @@ transition, not a routine progress save. The
 runtime validates the request, waits for the tool batch to close, then:
 
 1. snapshots the conversation and archives the head (no summarization model
-   call — the checkpoint is deterministic),
+   call; the checkpoint is deterministic),
 2. refuses the reset when the projected savings are below a conservative
    low-gain gate (2048 tokens and 10% of the prepared surface), or when fewer than three
    main-model requests have passed since the last applied checkpoint,
@@ -313,7 +313,7 @@ background worker, or its draft is ready and waiting at the continuation
 barrier), the request running alongside it may still submit `compact_context`.
 The model chose that boundary on purpose, so its checkpoint wins: the runtime
 discards the automatic draft and applies the model's checkpoint instead.
-Automatic compaction is the fallback, not a lock — a threshold crossing never
+Automatic compaction is the fallback, not a lock: a threshold crossing never
 takes the reset away from a model that is wrapping up. The one-shot
 externalization warning does not mention this override (the model does not
 need to know an automatic compaction is running, only that the current context
@@ -321,12 +321,12 @@ is ending soon); a voluntary checkpoint made earlier on its own initiative
 keeps working exactly as before.
 
 A skip is a normal policy result: retrying the same request immediately is
-cooled down briefly and does not change the outcome — the model should wait or
+cooled down briefly and does not change the outcome. The model should wait or
 move on. When context usage stays above the reminder line, requests carry a
 context-pressure reminder: the full text once per compaction window, then a short,
-self-contained line restating the action — the reminder is a transient overlay
+self-contained line restating the action (the reminder is a transient overlay
 rebuilt on every request, so a repeat cannot assume the full text is still in
-context — and telling the model to prepare for the compaction
+context) and telling the model to prepare for the compaction
 (finish the current atomic operation, preserve recovery state in structured
 arguments or permitted files, and request a provisional checkpoint only when
 work remains; deliver a final response or ask the user directly otherwise) instead of quoting how
@@ -335,16 +335,16 @@ much context is left. Re-attachment stops once the model calls
 drops back below the line, or a durable apply, session switch, restore, or
 model change starts a fresh window. File writes remain subject to role
 permissions; checkpoint preparation does not require creating a file. The usage-driven
-compaction starts on the threshold crossing itself — or, while model-driven is
+compaction starts on the threshold crossing itself, or, while model-driven is
 enabled, once the grace period described above has deferred it across two
-requests — and the request that actually starts it carries a one-time
+requests; the request that actually starts it carries a one-time
 externalization warning (under the grace, every request inside the window
 carries the "compaction imminent" notice with the remaining count instead). Both
-overlays are wrapped in a `<system-reminder>` block — the same runtime-message
-convention every harness injection uses — so the model can tell them apart
+overlays are wrapped in a `<system-reminder>` block, the same runtime-message
+convention every harness injection uses, so the model can tell them apart
 from user-written messages (research on memory-pressure signals, e.g. MemGPT,
 injects these as system messages for exactly this reason). They are injected
-only while `model_driven` is enabled — without it the model has no
+only while `model_driven` is enabled; without it the model has no
 externalization contract, so they would be unactionable noise. The first
 delivery of each notice in a compaction window is additionally recorded as a
 durable context-notice message in the transcript. Like every other harness
@@ -385,8 +385,8 @@ receives the previous checkpoint's body as a protected input section and
 appends it as a `## Previous Checkpoint` section, so that content never
 depends on the summarizer happening to restate it. The carry is bounded, not a
 full verbatim copy: natural-language content is kept only up to a fixed budget
-and truncated beyond it, while the machine-readable typed block — when the
-prior body carries one — is exempt from that budget and re-appended whole. A
+and truncated beyond it, while the machine-readable typed block (when the
+prior body carries one) is exempt from that budget and re-appended whole. A
 model-driven checkpoint instead carries only machine state across generations:
 verified decisions, open problems, evidence references and stage metadata
 travel as a structured typed block (`## Typed Checkpoint State`) that the next
@@ -407,8 +407,8 @@ such as `docs/usage.md`; absolute, `~`-prefixed, `./`- or `../`-prefixed
 spellings are also accepted when they lexically resolve inside the project
 root, and are normalized to workspace-relative form before the checkpoint is
 built. Each entry stays a model-declared reference: a stale or missing path is
-surfaced only when the file is actually read — the read tool reports the
-missing file — rather than by a silent checkpoint-time probe. The checkpoint's
+surfaced only when the file is actually read (the read tool reports the
+missing file), rather than by a silent checkpoint-time probe. The checkpoint's
 `Current User Request` always comes from your real messages, never from the
 model's arguments. A success result only means the request was accepted; a later
 model-driven `[Context Summary]` checkpoint confirms the reset applied. If the
@@ -427,7 +427,7 @@ model requests resets and how many are accepted.
 Chord uses the **usable input budget** as
 the baseline. If the model config sets `limit.input`, that value is used
 as-is; otherwise Chord derives it as `limit.context` minus the model's own
-`limit.output` — the provider-published input allocation (e.g. the Codex
+`limit.output`, the provider-published input allocation (e.g. the Codex
 400K-window/128K-output pair yields a 272K budget). Only a model declaring no
 `limit.output` falls back to reserving the effective default output cap
 (`max_output_tokens`, default `64000`). If `reserved` is set, it is subtracted
@@ -523,7 +523,7 @@ selected models have smaller input budgets or split input/output limits.
 
 Before each LLM request, Chord applies deterministic rules to inspect tool
 results and trim large, stale output. **This only affects the current request
-prompt — it never rewrites the conversation stored on disk.** Decisions use tool
+prompt; it never rewrites the conversation stored on disk.** Decisions use tool
 type, actual main-model request batches, size, and local validity state. Context
 usage affects durable compaction only and cannot change the reduction surface.
 
@@ -538,7 +538,7 @@ read points at the newer copy, a read invalidated by an edit or a patch can be
 re-read for the parts that did not change while the replaced text stays in the
 edit's own arguments, diagnostics keep their structured body, and a confirmation
 has no payload. A read invalidated by a whole-file write, a delete or a change
-made outside the editing tools is archived instead — re-reading returns the new
+made outside the editing tools is archived instead: re-reading returns the new
 content, so the version that was actually observed exists nowhere else.
 
 ### First-use tool-output budget
@@ -570,7 +570,7 @@ context:
 ```
 
 `context.reduction: false` disables request-level reduction entirely (durable
-Compaction still applies); `true` / `{}` — or omitting `context.reduction` —
+Compaction still applies); `true` / `{}`, or omitting `context.reduction`,
 keeps the default request-level reduction behavior.
 
 Configuration layers use the usual more-specific-wins rule. In particular, a
@@ -669,11 +669,11 @@ How to read the age and size parameters:
   sessions without batch metadata use a conservative user/assistant-response
   fallback.
 - `*_bytes` is the **minimum output size in bytes** for that category to be
-  eligible for trimming. Smaller outputs stay intact — short output doesn't
+  eligible for trimming. Smaller outputs stay intact; short output doesn't
   need reduction.
-- A `read` output that is still current — its displayed range has not been
+- A `read` output that is still current (its displayed range has not been
   overlapped by a later edit/apply_patch, its file has not been replaced or deleted,
-  and no later read covers the same range — is **never trimmed**, regardless
+  and no later read covers the same range) is **never trimmed**, regardless
   of age, size, or how many other reads share the context. Such an output is
   the model's only current view of that content; trimming it forces either a
   redundant re-read (extra rounds, broken prompt cache) or an answer guessed

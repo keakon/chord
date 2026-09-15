@@ -36,7 +36,7 @@ Use this page when you already know which provider/model family you want and jus
 The GPT-5.4 / GPT-5.5 / GPT-5.6 / GPT-6 Astra snippets use the limits published
 on the OpenAI model pages: GPT-5.4 / 5.6 / 6 run a `1050000 / 922000 / 128000`
 allocation (1.05M total window; the 922K input budget derives as `context`
-minus `output` — these models publish no separate input cap) on both the API
+minus `output`, since these models publish no separate input cap) on both the API
 and the current Codex catalog, while GPT-5.5 stays on
 `400000 / 272000 / 128000`. If your account or relay still serves an older
 profile, fall back to `400000 / 272000 / 128000` for the affected models. The
@@ -172,6 +172,7 @@ model_templates:
           effort: max
     modalities:
       input: [text, image, pdf]
+```
 
 ### GPT-5.6 Sol
 
@@ -274,10 +275,10 @@ chord doctor models --model openai/gpt-5.6-sol@xhigh
 
 #### Compaction tuning for GPT-5.6
 
-Start from two questions: **which budget the model runs against** — the
-1.05M / 922K allocation used by the examples above, or a
+Start from two questions: **which budget the model runs against**, the
+1.05M / 922K allocation used by the examples above or a
 `400000 / 272000` fallback profile when your account/relay still serves the
-older Codex catalog — and **what the threshold is for**: keeping quality up,
+older Codex catalog, and **what the threshold is for**: keeping quality up,
 staying under the 272K long-context pricing tier, or using the window for raw
 capacity. The trigger is `threshold × usable input budget`, so the same ratio
 fires at very different token counts under the two budgets; a recipe tuned
@@ -285,13 +286,13 @@ for one does not transfer to the other.
 
 **Long-context quality** (MRCR v2 8-needle results as reported by OpenAI):
 Sol/Terra stay strong in the 256K–512K band (91.5% / 89.6%) and drop to ~73%
-(73.8% / 72.5%) in the 512K–1M band, while Luna sits at 41.3% in both — a
-cliff, not a slope. The bands are averages, so treat them as a broad guide
+(73.8% / 72.5%) in the 512K–1M band, while Luna sits at 41.3% in both, a
+cliff rather than a slope. The bands are averages, so treat them as a broad guide
 for where quality starts slipping, not as an exact cliff location.
 
 **Pricing** (official OpenAI API): a prompt that exceeds 272K input tokens
 (exactly 272000 does not) bills the **entire request** at the long-context
-rates — 2x input / cache-read / cache-write and 1.5x output, not just the
+rates (2x input / cache-read / cache-write and 1.5x output), not just the
 portion above 272K. Relays and Codex OAuth set their own prices, so this tier
 does not necessarily apply there. Chord's cost accounting selects the tier
 from the full prompt, but automatic compaction does not know about price
@@ -299,8 +300,8 @@ tiers: it fires on a usage ratio, so keeping requests under 272K is a tuning
 goal, not a guarantee. The trigger compares the last provider-reported usage
 with the budget, a single large tool result can push the next prompt past the
 line, and while `model_driven` is enabled the grace period lets crossing
-requests run before compaction starts. Leave headroom below the line — and
-note that every compaction costs a summarization call and loses raw context,
+requests run before compaction starts. Leave headroom below the line. Every
+compaction also costs a summarization call and loses raw context,
 so compressing too eagerly can cost more than the tier it avoids.
 
 Cost-first (Sol/Terra/Luna share this: it keeps usage under the 272K tier
@@ -333,7 +334,7 @@ the long-context rate and some quality loss, and 0.8 (~738K–789K) even more
 so. Do not reuse the old 0.3 Luna recipe under this window: it fires at
 ~277K–296K, already past the pricing line.
 
-##### Codex subscription windows are server-controlled — verify before setting `limit.input`
+##### Codex subscription windows are server-controlled
 
 On a Codex subscription endpoint (`preset: codex`, or a `/codex/responses`
 relay), the window a ChatGPT account actually gets comes from the
@@ -350,7 +351,7 @@ before the first request and the real cap only after it. So:
 - If your account or relay still serves the older profile, fall back to
   `400000 / 272000 / 128000` for that provider.
 - `threshold` is decoupled from the window: it is the fraction of the usable
-  budget at which to compact, chosen by your quality/cost tradeoff — but the
+  budget at which to compact, chosen by your quality/cost tradeoff, but the
   API's >272K-input whole-request 2× pricing cliff applies regardless of the
   window, so keep the trigger inside it if that pricing applies to your
   route. Leave headroom: the trigger compares the last provider-reported
@@ -368,7 +369,7 @@ merges it; for per-tier tuning, give that tier its own template.
 GPT-6 Astra is OpenAI's current flagship (`gpt-6-astra`): a 1,050,000-token
 context window with 128,000 max output and 922,000 usable input (derived as
 `context` minus `output` when `input` is unset). Reasoning supports `low`,
-`medium`, `high`, `xhigh`, and `max` — there is no `none` effort. Standard
+`medium`, `high`, `xhigh`, and `max`; there is no `none` effort. Standard
 pricing is $10 input / $50 output per 1M with $1 cached input and $12.50
 cache writes; prompts above 272K input bill the whole request at 2×
 input/cache and 1.5× output. Unlike GPT-5.6 there are no Sol/Terra/Luna tiers
@@ -469,13 +470,13 @@ Notes:
 
 The base template above already carries the cost-first `compaction`
 (0.25/0.2). The 272K pricing cliff is the hard constraint; the quality
-ceiling is not — OpenAI reports GPT-6 Astra at 100% on MRCR v2 8-needle at
+ceiling is not: OpenAI reports GPT-6 Astra at 100% on MRCR v2 8-needle at
 256K–512K and 96.3% at 512K–1M, a gentle slope rather than the cliff GPT-5.6
 Sol hits (73.8% at 512K–1M). So Astra's threshold choice beyond cost-first is
 a price/capacity tradeoff, not a quality-preservation one.
 
 **Cost-first** (the base template, 0.25/0.2): fires at ~231K, under the 272K
-cliff. Recommended default — the 2× repricing dwarfs any other lever, and
+cliff. Recommended default: the 2× repricing dwarfs any other lever, and
 the trigger sits well inside the full-quality band.
 
 **Quality-first / capacity-first** (accept the 2× long-context rate): because
@@ -502,7 +503,7 @@ threshold to the actual measured window, not the API full window.
 
 Use this when you want ChatGPT/Codex OAuth instead of API keys. Codex OAuth
 differs from the API-key examples only in the provider preset and the
-authentication method — the model windows match the API allocation.
+authentication method: the model windows match the API allocation.
 
 The model allocations used in this section are:
 
@@ -645,13 +646,13 @@ model_pools:
     - anthropic/claude-opus-5@high
 ```
 
-Claude Opus 5 / 4.8 / 4.7 share the same context window (1M), max output (128K), pricing, adaptive thinking, and input modalities, so all three reuse the single `&claude-opus` template — only the model ID differs. Remove the entries you don't use, and point `model_pools` at your preferred model (e.g. `anthropic/claude-opus-5@high`).
+Claude Opus 5 / 4.8 / 4.7 share the same context window (1M), max output (128K), pricing, adaptive thinking, and input modalities, so all three reuse the single `&claude-opus` template; only the model ID differs. Remove the entries you don't use, and point `model_pools` at your preferred model (e.g. `anthropic/claude-opus-5@high`).
 
 For a lower-cost Claude family config, use the same shape with `claude-sonnet-5`, `cost: {input: 2, output: 10}`, and `output: 64000` for a conservative local allocation. Sonnet 5's $2 / $10 per-1M pricing became permanent in August 2026.
 
 ### Claude Fable 5.1
 
-`claude-fable-5-1` (released September 2026) keeps Fable 5's $10 / $50 per-1M input/output rates but cuts cache reads to $0.25 per 1M tokens — 0.025x of base input instead of the standard 0.1x multiplier — so set `cache_read: 0.25`, not 1.0. It shares Fable 5's 1M context, 128K max output, adaptive thinking, and PDF support.
+`claude-fable-5-1` (released September 2026) keeps Fable 5's $10 / $50 per-1M input/output rates but cuts cache reads to $0.25 per 1M tokens (0.025x of base input instead of the standard 0.1x multiplier), so set `cache_read: 0.25`, not 1.0. It shares Fable 5's 1M context, 128K max output, adaptive thinking, and PDF support.
 
 ```yaml
 model_templates:
@@ -726,7 +727,7 @@ providers:
 ```
 
 `reminder` is omitted on purpose: it derives to `min(0.60, 0.7×0.9) = 0.60`,
-a sensible pressure head start for these models — set it explicitly only when
+a sensible pressure head start for these models; set it explicitly only when
 you want the reminder earlier or later than the derived value.
 
 Note the tokenizer change since Opus 4.7: the same text produces ~30% more
@@ -786,7 +787,7 @@ compaction rule:
   at long context, so aggressive early compaction just discards context they can
   still use. Leave Flash at the global default (`threshold` 0.8) or omit the
   per-model block entirely. 3.8 Flash buys better accuracy with higher token
-  consumption by design, so rising usage on long agentic runs is expected — it
+  consumption by design, so rising usage on long agentic runs is expected and it
   is not a signal to compact earlier.
 
 ```yaml
@@ -807,7 +808,7 @@ model_templates:
 Pricing note: only **Gemini 3.1 Pro** steps up to the higher input tier above
 200K tokens (the whole request is billed at the higher tier). Gemini 3.8 Flash
 and Flash-Lite are flat-priced at any context length, so there is no cost reason
-to compact Flash early — do it only if quality actually degrades for your
+to compact Flash early; do it only if quality actually degrades for your
 workload. If you need both a long reliable window *and* Pro-class quality, that is
 the case where a GPT-5.6 Sol / Claude 5-class model is the better fit.
 
@@ -955,7 +956,7 @@ Notes:
 - The example default pool uses `glm-5.3-flash` — the Coding Plan workhorse
   with native multimodal input. For text-only work, point the pool at
   `bigmodel/glm-5.3`, or keep `bigmodel/glm-5.2` when you want GLM-5.2's wider
-  effort set (`xhigh` / `medium` / `minimal` / `none`) — the provider `models`
+  effort set (`xhigh` / `medium` / `minimal` / `none`); the provider `models`
   map above still lists it as an available text model under the same templates.
 
 ### Compaction tuning for GLM-5.x
@@ -1126,7 +1127,7 @@ Notes:
   instead of `data: [DONE]`.
 - DeepSeek Messages supports `output_config.effort`; Chord derives it from
   `thinking.effort`. Disable Anthropic beta headers for the compatible
-  endpoint — it ignores them outside the Files API. `thinking.budget_tokens` is
+  endpoint; it ignores them outside the Files API. `thinking.budget_tokens` is
   accepted but ignored: thinking depth comes from the effort value, not from a
   token budget. DeepSeek's Anthropic-compatible endpoint may return unsigned
   `thinking` blocks rather than Claude-style signed blocks.
@@ -1137,7 +1138,7 @@ Notes:
 - All three wire families accept images, billed as input tokens (the official
   cap is 1024 tokens per image). The endpoint takes inline base64, external
   URLs, or Files API `file_id`s, detects the format by content
-  (JPEG / PNG / GIF / WebP), and accepts images only in user messages — an
+  (JPEG / PNG / GIF / WebP), and accepts images only in user messages; an
   image in a system or assistant message returns a `400`. Request limits are
   ≤48 MiB per body, ≤600 images per request, ≤64 MiB of images per request
   (≤200 MiB when `file_id`s are used), and ≤8192 px per side (4096 px once a
@@ -1165,7 +1166,7 @@ Additional notes:
 - `reasoning_effort` (Chat) and `output_config.effort` (Messages) accept `low`
   / `high` / `max`, and Responses `reasoning.effort` also accepts `none` to
   turn thinking off; the default is `high`. Other values are remapped by the
-  backend: `medium` and `xhigh` map to `high` — which is why the templates only
+  backend: `medium` and `xhigh` map to `high`, which is why the templates only
   define the `low` / `high` / `max` variants.
 - The Responses API lives at `api.deepseek.com/v1/responses`, and its
   `output_tokens_details.reasoning_tokens` field is handled by Chord's standard
@@ -1209,7 +1210,7 @@ sharp drop that mirrors the Gemini 3.1 Pro cliff. V4.1 has no public
 long-context evaluation yet, so until one appears the practical guidance stays
 the same: treat the reliable working window as roughly 200K and compact early.
 The Flash family is the cheapest by a wide margin even on cache misses, so
-frequent compaction is far cheaper than on premium models — compact early and
+frequent compaction is far cheaper than on premium models; compact early and
 often:
 
 ```yaml
@@ -1230,7 +1231,7 @@ model entry when you run genuinely long agentic runs.
 
 Qwen returns visible reasoning through `reasoning_content`, but most models
 ignore that field in history by default. Only enable replay on a model that
-documents `preserve_thinking` support — currently Qwen 3.8 Max; 3.7 Max, Plus,
+documents `preserve_thinking` support: currently Qwen 3.8 Max; 3.7 Max, Plus,
 and Flash; and 3.6 Max preview and Plus, dated snapshots included. Check the
 official list for your model: older Qwen 3/3.5 models may still emit reasoning
 but should leave continuity disabled.
@@ -1438,7 +1439,7 @@ on reasoning models, and deprecates `max_tokens` in favor of
 Gateways differ in whether they return `reasoning_content`. When the gateway
 never returns it, Chord has nothing to replay on assistant tool calls, reads
 the backend as replay-incompatible, and strips `reasoning_effort` for the rest
-of the turn — per-request effort tuning then only affects the first request.
+of the turn, so per-request effort tuning then only affects the first request.
 Set `compat.chat_completions.keep_reasoning_effort: true` to keep the effort
 and reasoning request overrides active for the whole turn:
 
@@ -1482,7 +1483,7 @@ model_pools:
 ```
 
 `openai_visible` is still unnecessary: Grok does not require a replayed
-`reasoning_content` contract. Cache hits depend on sticky routing — xAI accepts
+`reasoning_content` contract. Cache hits depend on sticky routing: xAI accepts
 a `prompt_cache_key` on Chat Completions and routes it through
 `x-grok-conv-id`, so a gateway that forwards neither re-sends every request as
 a cache miss.
@@ -1498,7 +1499,7 @@ output budget and the usable input budget derives as roughly
 `500000 − 64000 = 436000`. A `threshold` of 0.4 fires at ~174K, under the 200K
 tier with headroom for a single large tool result pushing the next prompt past
 the line (the trigger compares the last provider-reported usage with the
-budget, so staying under the tier is a tuning goal, not a guarantee — the same
+budget, so staying under the tier is a tuning goal, not a guarantee; the same
 caveat as the GPT pricing tiers). Add it to whichever Grok template you use;
 every provider referencing the template inherits it:
 
@@ -1595,7 +1596,7 @@ cache reads double too.
 The M3 template sets no `limit.output`, so Chord reserves its default `64000`
 output budget and the usable input budget derives as roughly
 `1000000 − 64000 = 936000` (`512000 / 936000 ≈ 0.55`). A `threshold` of 0.5
-fires at ~468K, under the 512K rate with headroom — the trigger compares the
+fires at ~468K, under the 512K rate with headroom; the trigger compares the
 last provider-reported usage with the budget, so a single large tool result
 can still push the next prompt past the line. Add it to the M3 template you
 already use:
@@ -1676,8 +1677,8 @@ model_pools:
 Notes:
 
 - No `compat` block is needed. Responses providers already send
-  `include: ["reasoning.encrypted_content"]` with `store: false` — Meta's
-  recommended stateless-replay pairing — and Chord replays reasoning items with
+  `include: ["reasoning.encrypted_content"]` with `store: false`, Meta's
+  recommended stateless-replay pairing, and Chord replays reasoning items with
   an explicit `summary` field, which Meta requires. `prompt_cache_key` is sent
   by default and supported; `client_metadata` is accepted and ignored.
 - Muse Spark always reasons, so `reasoning.effort: none` returns `HTTP 400`:

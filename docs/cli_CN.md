@@ -76,7 +76,7 @@ chord [全局 flag] [命令] [命令 flag] [参数]
 
 两条入口走的是同一条恢复管线，区别只在如何定位会话：
 
-- `chord --resume <id>`（别名 `-r`）恢复**当前项目内**的会话：该会话必须属于当前目录所在项目，Chord 不会切换目录。它可以与 `--continue` / `--worktree` 组合，也是脚本与 headless 使用的形态。如果会话属于其它 chord 管理 worktree，会以"找不到会话"报错。
+- `chord --resume <id>`（别名 `-r`）恢复**当前项目内**的会话：该会话必须属于当前目录所在项目，Chord 不会切换目录。它可以与 `--continue` / `--worktree` 组合，也是脚本与 headless 使用的形态。如果会话属于其它 chord 管理 worktree，会以「找不到会话」报错。
 - `chord resume <id>` 从**任意目录**按 session id 恢复：它读取仓库索引，找到该会话属于哪个 chord 管理 worktree（或主仓库），切换过去再恢复。
 
 一句话选择：人已经在会话所在项目里 → 用 `chord --resume`；人在别处、或不确定会话在哪个 worktree → 用 `chord resume <id>`。
@@ -338,7 +338,7 @@ Worktree 落地在 `<state-dir>/worktrees/<repo-id>/<slug>`（仓库之外），
 | Flag                     | 说明                                                                                                                               |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
 | `--onto <分支>`          | 要先合入 worktree、再 squash 回去的目标分支（默认主 worktree 当前分支）                                                           |
-| `--check`                | 在临时 worktree 中预检“目标分支能否干净合入 worktree”；真正执行 finish 时若出现冲突，真实 worktree 可能停留在 merge 状态，等待你解决                                             |
+| `--check`                | 在临时 worktree 中预检「目标分支能否干净合入 worktree」；真正执行 finish 时若出现冲突，真实 worktree 可能停留在 merge 状态，等待你解决                                             |
 | `-m, --message <message>` | 覆盖自动生成的 squash commit message，手动指定最终 finish commit 的说明                                                           |
 
 如果把目标分支合并进 worktree 时会冲突，`finish` 会打印冲突详情，保持目标分支不变，并把真实 worktree 保留在这次 merge 中，供你解决后重跑。

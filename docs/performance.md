@@ -1,6 +1,6 @@
 # Performance
 
-Chord is optimized for long interactive sessions: large transcripts, streaming model output, scrolling, and background agent activity. This page explains what Chord does to stay fast, what you can do when something feels slow, and what to collect for a useful bug report.
+Chord is optimized for long interactive sessions: large transcripts, streaming model output, scrolling, and background agent activity.
 
 ## Measured results
 
@@ -10,7 +10,7 @@ Both benchmarks below were run against the versions named in the tables; Chord v
 
 ### Real-world coding task
 
-We benchmarked Chord against Codex-CLI on a [real-world database system task](https://github.com/datacurve-ai/deep-swe/tree/main/tasks/pebble-durability-wait-apis): implementing durability wait APIs in Pebble. Far from simple CRUD, the task requires understanding commit/WAL sync and concurrency semantics, reasoning across write paths, event listeners, and DB lifecycle subsystems.
+We benchmarked Chord against Codex-CLI on a [real-world database system task](https://github.com/datacurve-ai/deep-swe/tree/main/tasks/pebble-durability-wait-apis): implementing durability wait APIs in Pebble. The task requires understanding commit/WAL sync and concurrency semantics, and reasoning across write paths, event listeners, and DB lifecycle subsystems.
 
 | Metric | Chord v0.6.3 | Codex-CLI v0.136.0 | Improvement |
 |--------|--------------|---------------------|-------------|

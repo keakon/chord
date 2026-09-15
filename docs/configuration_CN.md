@@ -28,7 +28,7 @@ Chord 将行为配置与凭据配置分开管理。
 
 兼顾用户习惯、项目差异和不同 Agent 的能力特化。
 
-项目配置 `.chord/config.yaml` 会先按“无内置默认值注入”的方式加载，再覆盖到已加载的全局配置上。运行时命令把当前工作目录视为项目根，因此项目层配置读取的是启动 cwd 下的 `./.chord/config.yaml`，不会自动向父目录继续查找。因此：
+项目配置 `.chord/config.yaml` 会先按「无内置默认值注入」的方式加载，再覆盖到已加载的全局配置上。运行时命令把当前工作目录视为项目根，因此项目层配置读取的是启动 cwd 下的 `./.chord/config.yaml`，不会自动向父目录继续查找。因此：
 
 - 项目里没写的字段会保持真正的未设置状态，不会意外遮蔽全局默认值；
 - 任何配置文件里无法识别的键、类型不对的值、或超出范围的取值，都会记录到 `chord.log` 并按未配置处理，文件其余部分照常生效；项目配置里的非法字段回退到被覆盖的全局值。YAML 语法错误（文件无法解析）会阻止启动，可用 `chord doctor config` 查看完整问题列表；
@@ -157,7 +157,7 @@ openai:
 
 按这个顺序理解模型限制：
 
-1. `limit.context` 是总窗口。对大多数模型，只要“输入 + 请求输出”放得进这个数字即可。
+1. `limit.context` 是总窗口。对大多数模型，只要「输入 + 请求输出」放得进这个数字即可。
 2. `limit.input` 只在 provider 还单独列出输入上限时才需要。部分 GPT 模型属于这种情况；如果省略，Chord 按 `limit.context` 减去模型自身的 `limit.output` 推导可用输入预算，只有模型未声明 `limit.output` 时才回退到全局默认输出上限（`max_output_tokens`，默认 `64000`）。显式声明的 `limit.input` 始终按原值使用。
 3. `limit.output` 是模型的最大输出能力。Chord 默认 `max_output_tokens` 为 `64000`，因此在按可用上下文继续收缩前，实际请求上限为 `min(64000, limit.output)`。如需不同的全局上限，请显式设置 `max_output_tokens`。若某模型实际输出能力低于 `64000` 且未配置 `limit.output`，在服务端校验 `max_tokens` 的后端会直接拒绝这类请求——请为该模型声明 `limit.output`，或调低全局 `max_output_tokens`。
 
@@ -445,7 +445,7 @@ Chord 支持多个 API key / OAuth 账号时的两层选择策略：`key_rotatio
 
 - `key_rotation: on_failure`（默认）：尽量固定使用当前 key，只有失败、冷却或不可用时才切换。
 - `key_rotation: per_request`：每次请求前都重新选择 key，适合多个独立 key 做负载均衡。
-- `key_order: sequential`（默认的非 Codex 行为）：按可用 key 的稳定顺序选择，通常接近“最久未使用优先”。
+- `key_order: sequential`（默认的非 Codex 行为）：按可用 key 的稳定顺序选择，通常接近「最久未使用优先」。
 - `key_order: random`：在可用 key 中随机挑选。
 - `key_order: smart`：仅 Codex provider 支持。会优先健康、额度更充足、reset 更近的 OAuth 账号。
 
@@ -550,7 +550,7 @@ merge key（`<<:`）把被引用映射**按键级别**复制进当前条目，�
   都要写全整块。
 - 链式继承同理（`gpt-5.6-luna: &gpt-5-6-luna {<<: *gpt-5-6-base}`）：
   越深层的条目按整个 key 胜出。
-- 无法“撤销”祖先模板声明的字段——要么用具体值覆盖，要么不再引用该模板。
+- 无法「撤销」祖先模板声明的字段——要么用具体值覆盖，要么不再引用该模板。
   `compaction.threshold: 0` 与 `compaction.reminder: -1` 是例外，用来显式
   关闭这两个行为。
 
@@ -706,7 +706,7 @@ providers:
   使该绑定失效、API 以 invalid-signature 拒绝回放时，Chord 会丢弃 thinking
   block 重试一次，并保留该轮正文和已完成的工具事实。
   请求级 turn overlay（每轮注入的 `<system-reminder>` 提示）不算作用户
-  消息边界，因此追加在对话尾部的 overlay 不会把"已完成轮次"的边界推到
+  消息边界，因此追加在对话尾部的 overlay 不会把「已完成轮次」的边界推到
   当前轮之后，也就不会剥离当前工具链中后端真正消费的 reasoning。
 - `compat.forced_tool_choice.suppress_in_thinking`：reasoning/thinking 启用
   时，把 loop 强制的 `tool_choice: required` 降级为后端默认选择。只有
@@ -745,8 +745,6 @@ providers:
 ```
 
 Chord 仅在压缩能减小体积时才发送压缩请求体，否则按原文发送；压缩失败同样回退为原文并记日志。响应方向不受影响：仍然只声明并自己解压 gzip 响应。除非确定 provider 或网关接受压缩请求体，否则保持不配置——官方 Codex backend 和 `api.anthropic.com` 接受（Anthropic 只收 `gzip`，不收 `zstd`），多数 OpenAI-compatible 网关不接受。
-
-1.0 前的布尔写法（`compress: true`）已不再接受：会被忽略（压缩保持关闭），并由 `chord doctor config` 报告。想恢复旧行为就写 `compress: gzip`。
 
 Provider / 模型请求默认用 `User-Agent: chord/<version>` 标识客户端。仅当某个 provider 或网关要求特定值时，才配置 provider 级 `user_agent`：
 
@@ -821,10 +819,10 @@ max_output_tokens: 64000
 
 ## 流式重试上限
 
-`stream_retry_rounds` 用来给公开 LLM 流式请求的“整轮重试”设置硬上限。
+`stream_retry_rounds` 用来给公开 LLM 流式请求的「整轮重试」设置硬上限。
 每一轮里仍会按正常顺序遍历当前模型池和 provider key；这个设置限制的是 `CompleteStream` 最多做多少轮完整重试。
 
-这里的“一轮”指的是整个公开重试回合，而不是单次 provider/model 尝试。比如 `stream_retry_rounds: 2` 表示最多允许两次完整的路由遍历；一旦达到上限，即使是 all-keys-cooling、并发 429，或非官方兼容网关返回的可重试 HTTP 400 这类通常会等待后继续的错误，也会直接停止。
+这里的「一轮」指的是整个公开重试回合，而不是单次 provider/model 尝试。比如 `stream_retry_rounds: 2` 表示最多允许两次完整的路由遍历；一旦达到上限，即使是 all-keys-cooling、并发 429，或非官方兼容网关返回的可重试 HTTP 400 这类通常会等待后继续的错误，也会直接停止。
 
 Provider HTTP 400 的处理是有意保守的：
 
@@ -947,8 +945,8 @@ orchestration:
 
 - 这些设置既可写在全局配置，也可写在项目 `.chord/config.yaml` 中。项目配置中的正数标量会覆盖对应的全局值。
 - `provider_max_active_requests` 和 `model_max_active_requests` 按 key 合并：项目配置替换同名全局条目，同时保留其他全局条目。
-- 标量为零或负数不表示“无限制”，而是保留继承值或内置默认值。`subagent_compact_usage` 只有严格位于 `(0, 1)` 时才有效：越界值（含 `0`）会被忽略并记录警告，项目层此时继承合并后的全局值，全局未配置时回退到 `0.8`。与 `context.compaction.threshold: 0` 不同，零不会关闭 SubAgent 上下文保护。
-- provider/model map 中只有正数限制会生效。建议使用明确的 key 和正整数，不要把零当作通用的“无限制”开关。
+- 标量为零或负数不表示「无限制」，而是保留继承值或内置默认值。`subagent_compact_usage` 只有严格位于 `(0, 1)` 时才有效：越界值（含 `0`）会被忽略并记录警告，项目层此时继承合并后的全局值，全局未配置时回退到 `0.8`。与 `context.compaction.threshold: 0` 不同，零不会关闭 SubAgent 上下文保护。
+- provider/model map 中只有正数限制会生效。建议使用明确的 key 和正整数，不要把零当作通用的「无限制」开关。
 - 所有限制只在单个进程内生效，不会协调多个 Chord 进程之间的配额。
 
 ### 调优建议
@@ -1079,7 +1077,7 @@ prompt: |
 - `mode`：`main` 表示 MainAgent 角色，`subagent` 表示 SubAgent。为空或其他值时按 `main` 处理；`sub_agent` 和 `sub` 也可作为 SubAgent 别名。只有当委派角色能看到至少一个 `subagent` 角色时，`delegate` 工具才会注册；因此没有任何 subagent 定义的配置根本不存在委派面 —— 这通常就是 `delegate` 看起来消失的原因。
 - `model_pools`：可选的有序池名列表，用于限制该 agent 可使用的池。池定义位于 `config.yaml` 顶层 `model_pools`；省略时，该 agent 可使用所有顶层池并按池名排序。`openai/gpt-5.5@high` 这类 inline variant 写在池定义中。
 - `variant`：model ref 未写 `@variant` 时的默认 variant。
-- `permission`：该 agent 的逐工具权限策略。权限直接保存在 agent 配置文件中；确认弹窗里选择“记住规则”时，`project` 会更新当前项目的 `.chord/agents/<role>.yaml`，`global` 会更新用户配置目录的 `agents/<role>.yaml`（默认 `~/.config/chord/agents/<role>.yaml`），不会写入单独的 permissions 文件夹。部分编排工具有特殊语义（`delegate` 的 pattern 会匹配 `agent_type`，并联动控制委派工作相关能力，如 `cancel`；`handoff` 和 `done` 的 `allow` / `ask` 都表示工作流可用，并由 Chord 自己的确认 gate 控制关键节点）。依赖精细控制工具规则前，请先阅读[权限与安全](./permissions-and-safety_CN.md#特殊权限语义)。
+- `permission`：该 agent 的逐工具权限策略。权限直接保存在 agent 配置文件中；确认弹窗里选择「记住规则」时，`project` 会更新当前项目的 `.chord/agents/<role>.yaml`，`global` 会更新用户配置目录的 `agents/<role>.yaml`（默认 `~/.config/chord/agents/<role>.yaml`），不会写入单独的 permissions 文件夹。部分编排工具有特殊语义（`delegate` 的 pattern 会匹配 `agent_type`，并联动控制委派工作相关能力，如 `cancel`；`handoff` 和 `done` 的 `allow` / `ask` 都表示工作流可用，并由 Chord 自己的确认 gate 控制关键节点）。依赖精细控制工具规则前，请先阅读[权限与安全](./permissions-and-safety_CN.md#特殊权限语义)。
 - `mcp`：作用域限定在该 agent 的增量、自动启动 MCP 配置。Agent MCP 不能与最终生效的全局/项目 `mcp` server 重名，否则启动时报错；也不能设置 `manual: true`，因为运行时 MCP 控制只管理顶层 server，如需手动启停请改在项目/全局配置中声明。要继承顶层 server，请删除 agent 中的重复项；要使用独立私有 server，请改名；要为整个项目替换顶层 server，请在 `.chord/config.yaml` 中覆盖。不同 agent 可以使用相同的私有 server 名称而互不共享连接，同一 agent 定义的多个实例则会复用连接。
 - `delegation`：本 agent 定义的委派限制；超过上限或使用负数会导致配置报错：
   - `max_children`：该 agent 同一时刻可拥有的直接活跃子任务数上限。默认 `10`，上限 `64`。
@@ -1134,13 +1132,13 @@ permission:
 
 ## 上下文管理
 
-长会话的上下文处理——**上下文压缩（Compaction）**（调用 LLM 生成摘要并改写会话历史）和**上下文剪裁（Reduction）**（请求前裁剪过时工具输出）——通过顶层 `context:` 配置，详见独立页面：[上下文管理](./context-management_CN.md)。
+长会话的上下文处理——**上下文压缩（Compaction）**（调用 LLM 生成摘要并改写会话历史）和**上下文剪裁（Reduction）**（请求前剪裁过时工具输出）——通过顶层 `context:` 配置，详见独立页面：[上下文管理](./context-management_CN.md)。
 
 ## 工具后诊断
 
 `edit`、`apply_patch` 或 `write` 修改文件后，Chord 可以把语言诊断追加到工具结果里，让模型立刻看到编译或 lint 问题。这由 `diagnostics` 配置控制，默认对 Python 启用（LSP 语义后端 + Ruff quick 回退）。设 `diagnostics.enabled: false` 可整体关闭这条流水线。
 
-Chord 的原生文件工具会在同步 `textDocument` 前向匹配的 LSP 服务发送 `workspace/didChangeWatchedFiles` 文件事件：`write` 新建文件发送 Created，覆盖已有文件和 `edit` / `apply_patch` 发送 Changed，`delete` 成功删除文件发送 Deleted。这让 Pyright、TypeScript、gopls、rust-analyzer 等服务更容易及时刷新项目图，减少“新建模块已存在但 import 仍报 unresolved”的暂态误报。诊断仍会在文件工具结果中即时返回，便于模型判断问题是否由本次改动引入；但通过 `shell` 或外部程序创建/删除的文件目前不会由 Chord 的原生文件工具自动上报为文件系统 watcher 事件。
+Chord 的原生文件工具会在同步 `textDocument` 前向匹配的 LSP 服务发送 `workspace/didChangeWatchedFiles` 文件事件：`write` 新建文件发送 Created，覆盖已有文件和 `edit` / `apply_patch` 发送 Changed，`delete` 成功删除文件发送 Deleted。这让 Pyright、TypeScript、gopls、rust-analyzer 等服务更容易及时刷新项目图，减少「新建模块已存在但 import 仍报 unresolved」的暂态误报。诊断仍会在文件工具结果中即时返回，便于模型判断问题是否由本次改动引入；但通过 `shell` 或外部程序创建/删除的文件目前不会由 Chord 的原生文件工具自动上报为文件系统 watcher 事件。
 
 Python 使用两个后端：
 
@@ -1201,7 +1199,7 @@ chord doctor models --pool thinking
 | `model_pools`           | `map[name][]ref`      | —                               | global / project         | 可复用的命名模型池，元素为完整 `provider/model[@variant]` ref。见 [模型池](#模型池)。           |
 | `thinking_translation`  | object                | 关闭（`max_chars: 1000`）        | global / project         | 可选的 thinking / reasoning 卡片附加翻译预览。需要 `target_language` 和 `model_pool`；失败只跳过受影响的 thinking block。 |
 | `context`               | object                | 见下文                          | global / project         | `compaction`（上下文压缩）和 `reduction`（上下文剪裁）两项配置。见[上下文管理](./context-management_CN.md)。 |
-| `diagnostics`           | object                | 启用（Python LSP + Ruff 回退）  | global / project         | `edit`、`apply_patch` 或 `write` 完成后追加的诊断信息。`diagnostics.python.semantic_backend` 是主 LSP 服务（默认 `pyright`）；`diagnostics.python.quick_backend` 是一次性回退命令（默认 `ruff check`）。`diagnostics.python.large_file.{line_threshold, byte_threshold, strategy}` 决定大文件何时走 quick backend；`run_semantic_when_quick_unavailable: true` 在 quick backend 不可用时仍强制跑语义诊断。`diagnostics.python.output.{max_near_diagnostics, max_outside_diagnostics, max_total_diagnostics, near_range_before_lines, near_range_after_lines}` 控制追加文本的长度和裁剪窗口。诊断按严重级别优先展示（错误/警告优先，仍有名额时再显示 info/hint）。设 `diagnostics.enabled: false` 可整体关闭。 |
+| `diagnostics`           | object                | 启用（Python LSP + Ruff 回退）  | global / project         | `edit`、`apply_patch` 或 `write` 完成后追加的诊断信息。`diagnostics.python.semantic_backend` 是主 LSP 服务（默认 `pyright`）；`diagnostics.python.quick_backend` 是一次性回退命令（默认 `ruff check`）。`diagnostics.python.large_file.{line_threshold, byte_threshold, strategy}` 决定大文件何时走 quick backend；`run_semantic_when_quick_unavailable: true` 在 quick backend 不可用时仍强制跑语义诊断。`diagnostics.python.output.{max_near_diagnostics, max_outside_diagnostics, max_total_diagnostics, near_range_before_lines, near_range_after_lines}` 控制追加文本的长度和剪裁窗口。诊断按严重级别优先展示（错误/警告优先，仍有名额时再显示 info/hint）。设 `diagnostics.enabled: false` 可整体关闭。 |
 | `skills`                | object                | 空                              | global / project         | `paths: [...]` —— 在默认目录外追加 skill 目录。                                                                     |
 | `confirm_timeout`       | int（秒）             | `0`（不超时）                   | global / project         | TUI 确认浮层超时；`0` 表示永远等。                                                                                    |
 | `diff`                  | object                | `{inline_max_columns: 200}`     | global / project         | TUI diff 渲染。`inline_max_columns` 限制单行 inline diff 宽度。                                                    |
@@ -1259,7 +1257,7 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `compat.responses.*` | object | 协议默认值 — provider 级 Responses 可选字段开关：`send_store`、`send_reasoning_include`、`send_tool_choice`、`send_prompt_cache_key`、`send_max_output_tokens`、`mcp_additional_tools`。 |
 | `compat.responses.mcp_additional_tools` | bool | `false` — 把运行时 manual MCP schema 挂成固定位置的 `input[type="additional_tools"]` item，不改写顶层 `tools`。只为已确认接受该 item 的 Responses endpoint / 模型开启。Fallback 池里每个模型都必须开启；混合池退回顶层工具。 |
 | `compat.apply_patch.enabled` | bool | 三态 — 省略时按模型名推断。`true` 保留 `apply_patch`（同时隐藏 `edit`、`write`、`delete`）；`false` 退回 `edit`，`write`/`delete` 重新可见。gpt-5 及之后家族（`gpt-5`、`gpt-5-mini`、`gpt-5-nano`、`gpt-5-codex`、任意 `gpt-5.*` 名称，以及未来的 `gpt-6` 等）和 `codex-auto-review` 默认 `true`；`gpt-oss-*`、gpt-3.5、gpt-4/4o、o 系列及非 OpenAI 模型默认 `false`。 |
-| `compat.apply_patch.freeform` | bool | 三态 — 省略时按模型名和 wire 类型推断。`true` 把 `apply_patch` 发射成 freeform custom tool（`type: "custom"` 携带 grammar）；`false` 发射成 JSON function tool。gpt-5 及之后家族名称和 `codex-auto-review` 在 Responses 端点上默认 `true`；非 Responses wire 一律默认 `false`（没有 custom tool 类型）。接受 Responses 但拒绝 custom tool 的主机没有内置例外：请在那里设置 `false`；只有确实支持 custom tool 的网关才设 `true`。 |
+| `compat.apply_patch.freeform` | bool | 三态 — 省略时按模型名和 wire 类型推断。`true` 把 `apply_patch` 作为 freeform custom tool 发送（`type: "custom"`，随请求带上 grammar）；`false` 按 JSON function tool 发送。gpt-5 及之后家族名称和 `codex-auto-review` 在 Responses 端点上默认 `true`；非 Responses wire 一律默认 `false`（没有 custom tool 类型）。接受 Responses 但拒绝 custom tool 的主机没有内置例外：请在那里设置 `false`；只有确实支持 custom tool 的网关才设 `true`。 |
 | `compat.chat_completions.send_stream_options` | bool | `true` — 对拒绝 `stream_options` 的网关设为 `false`；此时流式 token usage 不再可用。 |
 | `compat.chat_completions.infer_finish_reason` | bool | `false` — 对结束流时不发 `finish_reason` 的兼容网关，自动推断为正常的 `stop` / `tool_calls` 完成；不开启时这类流会被当成中断处理。 |
 | `compat.chat_completions.requires_tool_result_name` | bool | `false` — 对要求 tool result 消息同时携带 `name` 和 `tool_call_id` 的网关，回填配对的工具名。 |

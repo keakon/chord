@@ -170,7 +170,7 @@ Read model limits in this order:
 
 1. `limit.context` is the total window. For most models, input + requested output just needs to fit inside this number.
 2. `limit.input` is only needed when the provider also lists a separate input cap. Some GPT models work this way; if you omit it, Chord derives the usable input budget as `limit.context` minus the model's own `limit.output` (only a model declaring no output cap falls back to the global `max_output_tokens` default). A declared `limit.input` is always used as-is.
-3. `limit.output` is the model's own output capacity. Chord's default requested output cap (`max_output_tokens`) is `64000`, so real requests use `min(64000, limit.output)` before the available-context clamp. Set `max_output_tokens` explicitly to choose a different global cap. If a model's real output capacity is below `64000` and `limit.output` is omitted, backends that validate the requested `max_tokens` server-side will reject those requests — declare `limit.output` for such models, or lower the global `max_output_tokens`.
+3. `limit.output` is the model's own output capacity. Chord's default requested output cap (`max_output_tokens`) is `64000`, so real requests use `min(64000, limit.output)` before the available-context clamp. Set `max_output_tokens` explicitly to choose a different global cap. If a model's real output capacity is below `64000` and `limit.output` is omitted, backends that validate the requested `max_tokens` server-side will reject those requests. Declare `limit.output` for such models, or lower the global `max_output_tokens`.
 
 `parallel_tool_calls` defaults to `true` for Responses and Chat Completions providers. Set it to `false` on a provider, model, or variant only when the backend or workflow requires serial tool calls. Provider-level `user_agent` is also available for gateways that require a specific client identifier.
 
@@ -718,7 +718,7 @@ Compatibility fields:
     On `openai_visible` Responses targets whose thinking mode requires
     replayed function-call turns to carry reasoning, Chord replays the native
     plaintext `reasoning_text` when available. For turns that lost their native
-    reasoning — for example after a cross-provider model switch — a backend
+    reasoning (for example after a cross-provider model switch), a backend
     rejection escalates the replay to plain-text historical tool records, so
     the continuation no longer needs the missing reasoning.
     For third-party OpenAI-compatible gateways, Chord keeps the configured
@@ -745,7 +745,7 @@ Compatibility fields:
     remembered per target.
 - `compat.reasoning_continuity.preserve_history`: by default Chord strips
   plaintext reasoning (`reasoning_content` and unsigned `thinking` blocks)
-  from completed turns — everything before the last user message — because
+  from completed turns (everything before the last user message), because
   most thinking backends drop earlier-turn reasoning server-side while still
   billing it as input. Set `preserve_history: true` when the target's contract
   requires the complete assistant history (DeepSeek when a request carries
@@ -814,13 +814,9 @@ size; otherwise it sends the request uncompressed. Compression failures are
 logged and the request is sent uncompressed too. The response direction is
 unaffected: Chord still advertises only `gzip` responses and decodes them
 itself. Leave `compress` unset unless your provider or gateway is known to
-accept compressed request bodies — the official Codex backend and
+accept compressed request bodies: the official Codex backend and
 `api.anthropic.com` do (Anthropic accepts `gzip`, not `zstd`), most
 OpenAI-compatible gateways do not.
-
-The pre-1.0 boolean form (`compress: true`) is no longer accepted: it is
-ignored (compression stays off) and `chord doctor config` reports it. Set
-`compress: gzip` to restore the old behavior.
 
 Provider/model requests identify the client with `User-Agent: chord/<version>` by default. Set provider-level `user_agent` only when a provider or gateway requires a specific value:
 
@@ -874,7 +870,7 @@ providers:
 For an ordinary 429, the key cooldown follows a single priority order: a
 confirmed quota reset window wins, then a valid `Retry-After` (bounded by
 `retry_after_max_s`) applies verbatim, and only a hint-less 429 falls to the
-retry pacing above — the configured `exponential`/`fixed`/`none` mode, or the
+retry pacing above: the configured `exponential`/`fixed`/`none` mode, or the
 one-second exponential default when neither field is set. Invalid or
 deactivated credentials, and cooldowns already established by other hard
 states, are never shortened or cleared. This 429 pacing applies before and
@@ -884,7 +880,7 @@ cools the key down and rotates to the next one.
 Codex OAuth follows the same rules: every Codex 429 is an ordinary 429. A
 retry hint (`Retry-After` or WebSocket `resets_in_seconds`) is honored ahead
 of explicit settings, and a usage-limit 429 carrying neither a hint nor an
-exhausted quota snapshot uses the ordinary defaults above — not the one-minute
+exhausted quota snapshot uses the ordinary defaults above, not the one-minute
 cooldown of the `codex` preset, which still covers non-429 usage-limit errors.
 When a Codex rate-limit snapshot shows an exhausted window with a future
 reset, Chord treats that as confirmed quota exhaustion and keeps the provider
@@ -985,7 +981,7 @@ prevent_sleep: true
   questions, Handoff, and loop decisions waiting for input; user-initiated
   navigation that settles into idle (session / model-pool / MCP switches,
   idle slash commands) stays silent.
-  Whether the bell is audible depends on terminal setup — see
+  Whether the bell is audible depends on terminal setup; see
   [Platforms](platforms.md).
 - `desktop_notification_foreground`: controls whether notifications (both the
   escape sequence and the bell) are sent while the TUI is focused. Defaults to
@@ -1088,7 +1084,7 @@ orchestration:
 
 - These settings may appear in the global config and in project `.chord/config.yaml`. Positive project scalar values override the corresponding global values.
 - `provider_max_active_requests` and `model_max_active_requests` are merged by key. A project entry replaces the same global key while preserving unrelated global entries.
-- Scalar values that are zero or negative do not mean “unlimited”: they retain the inherited or built-in default. `subagent_compact_usage` is only valid strictly between `0` and `1`: an out-of-range value (including `0`) is ignored with a warning, a project value then inherits the merged global value, and an unset global falls back to `0.8`. Unlike `context.compaction.threshold: 0`, zero does not disable SubAgent context protection.
+- Scalar values that are zero or negative do not mean "unlimited": they retain the inherited or built-in default. `subagent_compact_usage` is only valid strictly between `0` and `1`: an out-of-range value (including `0`) is ignored with a warning, a project value then inherits the merged global value, and an unset global falls back to `0.8`. Unlike `context.compaction.threshold: 0`, zero does not disable SubAgent context protection.
 - Only positive provider/model map limits are enforced. Keep map keys explicit and use positive integers; do not rely on zero as a general unlimited-mode switch.
 - Limits are process-local. They do not coordinate quotas across multiple Chord processes.
 
@@ -1176,7 +1172,7 @@ Auto-start MCP servers still connect asynchronously after the TUI starts, but **
 
 Built-in roles include `builder` and `planner`. Both are main-mode, so
 `delegate` is not registered until you define at least one `mode: subagent`
-role of your own — see [`mode`](#agent-config) below. You can also add custom
+role of your own; see [`mode`](#agent-config) below. You can also add custom
 agents or override built-ins. Agent files can live in:
 
 - `~/.config/chord/agents/`
@@ -1228,8 +1224,8 @@ Common fields include:
 - `mcp`: additional auto-start MCP servers scoped to this agent. Agent MCP is additive: a server name already present in the effective global/project `mcp` config is a startup error. Agent-scoped servers cannot use `manual: true` because runtime MCP controls manage the top-level server surface; configure a manual server at the project/global level instead. Remove an agent entry to inherit a top-level server, rename it for a separate private server, or override the top-level server in `.chord/config.yaml` for the whole project. Different agents may reuse the same private server name without sharing the connection unless they are instances of the same agent definition.
 - `delegation`: delegation limits for this agent definition. Values above the ceiling or negative values are configuration errors:
   - `max_children`: how many direct, still-active child tasks this agent may have at once. Defaults to `10`; the ceiling is `64`.
-  - `max_depth`: how deep nested delegation may go. It is evaluated **per worker, against the worker's own definition** — a SubAgent's ability to delegate further is checked against its own `delegation.max_depth` and its current depth, never against its parent's or the root role's setting, so a root role with `max_depth: 1` cannot stop a child definition that declares `max_depth: 8` from nesting deeper. Defaults to `1` (a first-level SubAgent cannot delegate further until its own definition raises the value); the ceiling is `8`.
-  - `child_join`: whether children a SubAgent delegates stay tied to the owner's task. Defaults to `true`: the owner cannot complete while joined children are still running — its completion is deferred until they finish or are explicitly stopped — and a cancelled or failed owner cancels its joined children with it. With `false`, the owner may finish early and its still-running children detach and continue under the main agent instead of being cancelled. Only nested delegation is affected: children delegated by the main agent never join, because the main agent is not itself a task.
+  - `max_depth`: how deep nested delegation may go. It is evaluated **per worker, against the worker's own definition**: a SubAgent's ability to delegate further is checked against its own `delegation.max_depth` and its current depth, never against its parent's or the root role's setting, so a root role with `max_depth: 1` cannot stop a child definition that declares `max_depth: 8` from nesting deeper. Defaults to `1` (a first-level SubAgent cannot delegate further until its own definition raises the value); the ceiling is `8`.
+  - `child_join`: whether children a SubAgent delegates stay tied to the owner's task. Defaults to `true`: the owner cannot complete while joined children are still running, so its completion is deferred until they finish or are explicitly stopped, and a cancelled or failed owner cancels its joined children with it. With `false`, the owner may finish early and its still-running children detach and continue under the main agent instead of being cancelled. Only nested delegation is affected: children delegated by the main agent never join, because the main agent is not itself a task.
 - `prompt` / `system_prompt`: system prompt for plain YAML files. Setting either one **replaces** any built-in prompt block the role would otherwise get.
 - `prompt_preset`: selects a built-in role prompt block by capability instead of by role name. Accepted values are `planning` and `none`. `planning` injects the built-in planning block (plan-document naming and format, the direct-answer-versus-plan decision, handoff ordering, and plan quality rules); it also suppresses the bug-triage block, which would otherwise duplicate the planning workflow's own investigation outline. `none` suppresses any built-in block. When the field is omitted, the role gets no built-in block whatever it is called — the role name never selects one, so a custom role named `planner` has to declare `prompt_preset: planning` to keep the planning block. Unknown values are a configuration error.
 - `prompt_append`: text appended after the effective role prompt — after the preset block, or after `prompt` / `system_prompt` when the role replaces it. Use this to add project conventions without taking over maintenance of the whole block, which also keeps the preset's tool-aware wording (it adapts to the tools the role can actually see).

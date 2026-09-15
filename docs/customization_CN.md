@@ -1,12 +1,12 @@
 # 扩展与定制
 
-Chord 支持多种可选扩展能力。建议先把基础使用跑通，再逐步添加。
+下面每一项扩展能力都是可选的：仓库指令、agent 定义、skills、hooks、LSP 服务器、MCP 服务器和自定义 slash 命令。
 
 ## 仓库指令
 
 项目需要给自动化 agent 提供长期有效的规则时，可以添加 `AGENTS.md`，例如编码规范、验证命令、安全要求或仓库专属审查准则。
 
-会话开始时，Chord 会从 session working directory 向上探索到项目根目录，发现适用的 `AGENTS.md` 文件；随后按“项目根目录 → session working directory”的顺序注入每个非空文件的完整内容，并用相对 session working directory 的路径作为段落标题（例如从嵌套目录运行时会显示 `## ../../AGENTS.md`、`## ../AGENTS.md` 和 `## AGENTS.md`）。如果 session working directory 就是项目根目录，则只加载根目录的 `AGENTS.md`。这些指令会作为内部 user-role 消息注入 LLM 请求，位置在第一条真实用户消息之前。AGENTS.md 内容会以自识别的头部交付：首行为 `# AGENTS.md instructions`，随后是 `<INSTRUCTIONS> ... </INSTRUCTIONS>` 块。这个 meta message 可能不会显示在可见对话记录里，但 main agent 与 sub-agent 都会把它当作持久工作区指导来遵守，除非它与更高优先级的 system、developer 或 user 指令冲突。
+会话开始时，Chord 会从 session working directory 向上探索到项目根目录，发现适用的 `AGENTS.md` 文件；随后按「项目根目录 → session working directory」的顺序注入每个非空文件的完整内容，并用相对 session working directory 的路径作为段落标题（例如从嵌套目录运行时会显示 `## ../../AGENTS.md`、`## ../AGENTS.md` 和 `## AGENTS.md`）。如果 session working directory 就是项目根目录，则只加载根目录的 `AGENTS.md`。这些指令会作为内部 user-role 消息注入 LLM 请求，位置在第一条真实用户消息之前。AGENTS.md 内容会以自识别的头部交付：首行为 `# AGENTS.md instructions`，随后是 `<INSTRUCTIONS> ... </INSTRUCTIONS>` 块。这个 meta message 可能不会显示在可见对话记录里，但 main agent 与 sub-agent 都会把它当作持久工作区指导来遵守，除非它与更高优先级的 system、developer 或 user 指令冲突。
 
 Chord 也会为当前会话探测一个 Python 虚拟环境：从 session working directory 向上探索到项目根目录，并在每一层按 `.venv`、`venv`、`env` 的顺序检查。找到第一个有效环境后，prompt 会用相对 session working directory 的路径提示该环境，并要求 agent 运行 Python 命令时优先使用其中的解释器。
 
@@ -41,7 +41,7 @@ TUI 侧边栏的 **SKILLS** 区块只显示当前已发现的 skills。`skill` �
 Skill discovery 的结果是工作区级 catalog，但这不表示 MainAgent 与 SubAgent 共享相同权限或调用状态：
 
 - 每个 Agent 都用自己的最新 Agent 配置和 permission rules 过滤 catalog，决定哪些 skills 可见、可由 `skill` 工具加载；
-- MainAgent 与每个 SubAgent 分别记录 invoked 状态。一个 Agent 成功加载 skill，不会让其他 Agent 的同名 skill 变成“已调用”；
+- MainAgent 与每个 SubAgent 分别记录 invoked 状态。一个 Agent 成功加载 skill，不会让其他 Agent 的同名 skill 变成「已调用」；
 - parked SubAgent 恢复后，会从 durable task 状态及该任务的历史 transcript 恢复 invoked 名称，再按当前工作区 catalog 和最新 Agent 权限过滤展示；
 - 当前正在进行的模型请求继续使用它开始时冻结的 prompt/tool surface；TUI 和后续 `skill` 工具解析使用当前 catalog 与当前 Agent 配置。
 
@@ -156,7 +156,7 @@ lsp:
 
 ## MCP
 
-MCP 适合将外部工具或远端数据源接入 Chord。
+MCP 服务器把外部工具或远端数据源暴露给模型。
 
 ```yaml
 mcp:
@@ -186,17 +186,9 @@ commands:
 
 输入 `/review` 后，如果出现自动补全列表，先用 `Tab` 或 `Enter` 接受补全，再按 `Enter`；Chord 会将对应文本作为用户消息发送给模型。自定义命令也会出现在 `/` 自动补全列表中。
 
-适合：统一代码审查提示词、统一提交说明模板、团队常用工作流入口。
-
 ## 通知
 
-可通过 Hooks 或桌面通知配置，在以下场景提醒自己：权限确认、问题等待输入、agent 完全停止。
-
-## 使用建议
-
-- 先加 LSP，再考虑 Hooks / MCP
-- 先做最小可用集成，再补复杂自动化
-- 对每个扩展明确权限及失败时行为
+Hooks 或桌面通知配置可以在以下场景提醒你：权限确认、问题等待输入、agent 完全停止。
 
 ## 相关文档
 

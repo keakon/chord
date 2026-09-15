@@ -1,6 +1,6 @@
 # 性能
 
-Chord 面向长时间交互会话做了性能优化：大 transcript、模型流式输出、滚屏，以及后台 agent 活动都应保持可控。本页说明 Chord 为保持流畅做了什么、感觉变慢时你能做什么，以及上报问题时该收集哪些信息。
+Chord 面向长时间交互会话做了性能优化：大 transcript、模型流式输出、滚屏，以及后台 agent 活动都应保持可控。
 
 ## 实测数据
 
@@ -10,7 +10,7 @@ Chord 面向长时间交互会话做了性能优化：大 transcript、模型流
 
 ### 真实编码任务
 
-我们在一个[真实数据库系统任务](https://github.com/datacurve-ai/deep-swe/tree/main/tasks/pebble-durability-wait-apis)上对比了 Chord 和 Codex-CLI：为 Pebble 实现 durability wait API。该任务并非简单的增删改查——需要理解 commit/WAL sync 和并发语义，跨越写入路径、事件监听、DB 生命周期等多个子系统推理。
+我们在一个[真实数据库系统任务](https://github.com/datacurve-ai/deep-swe/tree/main/tasks/pebble-durability-wait-apis)上对比了 Chord 和 Codex-CLI：为 Pebble 实现 durability wait API。该任务需要理解 commit/WAL sync 和并发语义，并在写入路径、事件监听、DB 生命周期等子系统之间推理。
 
 | 指标 | Chord v0.6.3 | Codex-CLI v0.136.0 | 改进 |
 |------|--------------|---------------------|------|
@@ -53,7 +53,7 @@ Chord 面向长时间交互会话做了性能优化：大 transcript、模型流
 ## 工作方式
 
 - **流式批处理** —— 流式文本以很小的 delta 到达；Chord 会合并 provider delta，让一次 UI 更新处理多个 delta，而不是每个小片段都唤醒 TUI。
-- **渲染 cadence** —— 流式内容按节奏刷新到屏幕，而不是每个 token 都重绘。真正的结构变化（新 block、布局边界、rollback）仍会及时刷新。
+- **渲染 cadence** —— 流式内容按节奏刷新到屏幕，而不是每个 token 都重绘。真正的结构变化（新 block、布局边界、回滚）仍会及时刷新。
 - **streaming cheap path** —— assistant 和 thinking block 流式输出期间，只有稳定下来的内容走完整 Markdown 渲染；正在变化的尾部走更便宜的纯文本路径。所以长段落在流式期间看起来更朴素——这是预期行为，不是渲染故障。
 - **View 缓存** —— 主 viewport、info panel、status bar 等高成本区域按帧缓存，只有输入变化时才重新渲染。
 - **滚屏批处理** —— 鼠标滚轮和触摸板 delta 会合并后按短 cadence 应用；大 transcript 只有可见窗口保持热数据，屏幕外区域保持冷却。
@@ -62,13 +62,13 @@ Chord 面向长时间交互会话做了性能优化：大 transcript、模型流
 
 ## 请求与上下文成本
 
-性能不只在 UI 侧。Chord 还会在请求时裁剪陈旧工具输出、保留结构化摘要，并在长会话接近模型限制前做压缩。这些优化能降低延迟、token 用量和 provider 成本，同时不删除持久会话历史。
+性能不只在 UI 侧。Chord 还会在请求时剪裁陈旧工具输出、保留结构化摘要，并在长会话接近模型限制前做压缩。这些优化能降低延迟、token 用量和 provider 成本，同时不删除持久会话历史。
 
 可配置项见[上下文管理 — 上下文剪裁](./context-management_CN.md#上下文剪裁reduction)。
 
 ## 工具流式早执行
 
-Chord 还会在模型响应完全结束前就启动安全工具，降低体感延迟。模型流式输出某个工具调用的参数时，只要参数已经完整且合法，Chord 就可能立刻开始执行该工具，不必等 provider 的"整轮结束"信号——结果一就绪就展示出来。适用对象是本地、低副作用的工具，如 `read`、`grep`、`glob` 和只读 shell 命令；`web_fetch` 这类网络请求仍等流结束再发，会改动文件的工具只在调用被确认为最终时提交（若被丢弃则回滚）。Chord 对判定安全的工具默认开启，无需配置；哪些工具能早执行、能碰什么，仍由与普通工具调用相同的权限规则约束。
+Chord 还会在模型响应完全结束前就启动安全工具，降低体感延迟。模型流式输出某个工具调用的参数时，只要参数已经完整且合法，Chord 就可能立刻开始执行该工具，不必等 provider 的「整轮结束」信号——结果一就绪就展示出来。适用对象是本地、低副作用的工具，如 `read`、`grep`、`glob` 和只读 shell 命令；`web_fetch` 这类网络请求仍等流结束再发，会改动文件的工具只在调用被确认为最终时提交（若被丢弃则回滚）。Chord 对判定安全的工具默认开启，无需配置；哪些工具能早执行、能碰什么，仍由与普通工具调用相同的权限规则约束。
 
 ## 感觉变慢时
 

@@ -2,10 +2,8 @@
 
 Thinking configuration has three parts: the request-side switch, the
 response-side field that carries thinking back, and the replay contract that
-decides whether completed thinking must be sent again on the next request. This
-page maps the three across the protocol families, shows how to pick the
-continuity mode for a backend, and links to the per-model recipes. Field-level
-semantics live in
+decides whether completed thinking must be sent again on the next request.
+Field-level semantics live in
 [Configuration & Auth — Model field reference](./configuration.md#model-field-reference).
 
 ## Request keys by wire family
@@ -23,7 +21,7 @@ whitespace and casing first, so `high` and `High` both work there.
 
 ## Decide the replay contract
 
-Ask one question: does the backend require its own reasoning content back?
+The answer depends on whether the backend requires its own reasoning content back:
 
 1. **No thinking** — the model does not reason, or you never turn thinking on.
    Nothing to configure.

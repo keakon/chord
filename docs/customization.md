@@ -1,6 +1,6 @@
 # Customization
 
-Chord supports multiple optional extension points. Start with the basics, then add capabilities gradually.
+Every extension point below is optional: repository instructions, agent definitions, skills, hooks, LSP servers, MCP servers, and custom slash commands.
 
 ## Repository instructions
 
@@ -159,7 +159,7 @@ lsp:
 
 ## MCP
 
-MCP is useful for connecting external tools or remote data sources to Chord.
+MCP servers expose external tools or remote data sources to the model.
 
 ```yaml
 mcp:
@@ -189,25 +189,13 @@ commands:
 
 Type `/review`, accept the autocomplete with `Tab` or `Enter` if it is shown, then press `Enter`; Chord sends the corresponding text as a user message to the model. Custom commands also appear in the `/` autocomplete list.
 
-Suitable uses:
-
-- Standard code review prompts
-- Standard commit-message templates
-- Team workflow entry points
-
 ## Notifications
 
-You can use Hooks or desktop notification config to notify yourself when:
+Hooks or the desktop notification config can alert you when:
 
 - permission confirmation is required
 - a question is waiting for input
 - an agent has fully stopped
-
-## Usage recommendations
-
-- Add LSP first, then consider Hooks / MCP
-- Start with a minimal working integration before adding complex automation
-- Define permissions and failure behavior for each extension
 
 ## Related
 

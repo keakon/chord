@@ -51,7 +51,7 @@ permission:
     "git tag *": ask
 ```
 
-This means: allow most tools by default; disable `handoff` and `delegate`; require confirmation for file deletion, selected WebFetch URL patterns, and common high-risk shell/git commands. Permission rules use “last match wins”, so the more specific `web_fetch` and `shell` rules above override the top-level `"*": allow`. This is reasonable for a single-user trusted workspace; shared repositories, team services, or automated headless deployments should tighten it further. This page starts from `"*": allow` as a trusted-workspace baseline; for a least-privilege baseline instead, the `builder` agent in [Configuration — Agent config](./configuration.md#agent-config) starts from `"*": deny` and opts in only to the tools a role needs. Pick whichever baseline matches your trust model.
+This means: allow most tools by default; disable `handoff` and `delegate`; require confirmation for file deletion, selected WebFetch URL patterns, and common high-risk shell/git commands. Permission rules use "last match wins", so the more specific `web_fetch` and `shell` rules above override the top-level `"*": allow`. This is reasonable for a single-user trusted workspace; shared repositories, team services, or automated headless deployments should tighten it further. This page starts from `"*": allow` as a trusted-workspace baseline; for a least-privilege baseline instead, the `builder` agent in [Configuration — Agent config](./configuration.md#agent-config) starts from `"*": deny` and opts in only to the tools a role needs.
 
 Permission matching examines the tool call and the session working directory (the directory the tool executes in). For `shell`, only the command string is matched — a `workdir` argument does not participate. For file tools (`read`, `write`, `edit`, `apply_patch`, `delete`, `view_image`), the target path is normalized against the working directory before rules are matched: a path inside the working directory is matched in cwd-relative form (so `foo.go`, `./foo.go`, and an absolute spelling of the same file all hit the same rule), while a path outside the working directory stays absolute.
 
@@ -202,8 +202,6 @@ Each capability expands the runtime boundary. Before enabling one, confirm:
 
 ## Usage recommendations
 
-- Start with a minimal provider config and minimal permissions
-- Observe behavior in a personal repository before gradually relaxing permissions
 - In shared repositories or team environments, do not globally `allow` by default
 - Expose only the minimum necessary Hook and MCP tools
 
