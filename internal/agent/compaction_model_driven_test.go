@@ -1413,6 +1413,33 @@ func TestModelDrivenCooldownExpiresDespitePerBatchRetries(t *testing.T) {
 	}
 }
 
+// TestModelDrivenDuplicateSkipKeepsLowGainCooldownAnchor pins that a duplicate
+// verdict leaves the cooldown state alone. No gate reads "duplicate" — the
+// cooldown binds to low_gain and the duplicate verdict re-derives itself from
+// the checkpoint fingerprint — so recording it would only overwrite a live
+// low-gain anchor with a reason nothing consults, cutting that window short.
+func TestModelDrivenDuplicateSkipKeepsLowGainCooldownAnchor(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.newTurn()
+	a.settleModelDrivenSkip(modelDrivenSkipDraft(1, compactionTarget{}, "projected savings too small", modelDrivenSkipReasonLowGain, 10, nil))
+
+	// A duplicate request settles at a later batch: the low-gain anchor and its
+	// reason must survive so the cooldown window still expires on its own clock.
+	skipReason := modelDrivenSkipReasonDuplicate
+	a.settleModelDrivenSkip(modelDrivenSkipDraft(2, compactionTarget{}, "no new work since the last applied checkpoint", skipReason, modelDrivenPolicySkipRecordBatch(skipReason, 11), nil))
+	if a.lastModelDrivenSkipBatch != 10 || a.lastModelDrivenSkipReason != modelDrivenSkipReasonLowGain {
+		t.Fatalf("duplicate skip must not touch the cooldown state, got batch=%d reason=%q, want 10/%q", a.lastModelDrivenSkipBatch, a.lastModelDrivenSkipReason, modelDrivenSkipReasonLowGain)
+	}
+	if _, _, skip := a.modelDrivenIntervalCooldownVerdict(modelDrivenBarrierSnapshot{
+		currentRequestBatch:       11,
+		lastModelDrivenSkipReason: a.lastModelDrivenSkipReason,
+		lastModelDrivenSkipBatch:  a.lastModelDrivenSkipBatch,
+	}); !skip {
+		t.Fatal("the original low-gain cooldown must still hold at batch 11 after a duplicate skip")
+	}
+}
+
 // TestModelDrivenCheckpointCarriesPriorCheckpointBody pins that consecutive
 // model-driven resets do not erase the previous checkpoint's body: the prior
 // checkpoint inside the archived head is carried forward verbatim, exactly as

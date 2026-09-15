@@ -1408,16 +1408,25 @@ const (
 )
 
 // modelDrivenPolicySkipRecordBatch returns the batch a pre-preflight policy
-// skip records on the cooldown state. A cooldown short-circuit records nothing
-// (batch 0, which settleModelDrivenSkip ignores): the cooldown window is
-// anchored on the ORIGINAL low-gain skip, and re-stamping the current batch on
-// every cooled-down retry would turn a fixed window into a sliding one — a
-// model that retries on every batch keeps current-last at 1, the window never
-// expires, and the low-gain preflight would never run again. An interval skip
-// has no such feedback loop (it is re-decided from the apply anchor) and
-// records normally.
+// skip records on the cooldown state. Only the interval reason records one:
+// the cooldown state exists for the gates that read it, and the interval gate
+// is the one re-decided from the apply anchor, so re-stamping it is harmless.
+//
+// A low-gain cooldown short-circuit records nothing (batch 0, which
+// settleModelDrivenSkip ignores): the cooldown window is anchored on the
+// ORIGINAL low-gain skip, and re-stamping the current batch on every
+// cooled-down retry would turn a fixed window into a sliding one — a model
+// that retries on every batch keeps current-last at 1, the window never
+// expires, and the low-gain preflight would never run again.
+//
+// A duplicate verdict records nothing either, and for a sharper reason: no
+// gate reads "duplicate" (modelDrivenIntervalCooldownVerdict binds its
+// cooldown to low_gain alone, and the duplicate verdict re-derives itself from
+// the checkpoint fingerprint), so recording it would only overwrite a live
+// low-gain anchor with a reason nothing consults — cutting that cooldown
+// window short and letting the expensive preflight run again early.
 func modelDrivenPolicySkipRecordBatch(skipReason string, current uint64) uint64 {
-	if skipReason == modelDrivenSkipReasonLowGain {
+	if skipReason != modelDrivenSkipReasonInterval {
 		return 0
 	}
 	return current
