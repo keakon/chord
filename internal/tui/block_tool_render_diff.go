@@ -305,8 +305,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 				continue
 			case strings.HasPrefix(line, "@@"):
 				if seenHunk {
-					sep := DimStyle.Render("  ─────────────")
-					result = append(result, "  "+sep)
+					result = append(result, applyPatchDiffSeparator(cardWidth-4))
 				}
 				seenHunk = true
 				hunkLine, _, _ := strings.Cut(line, "\n")
@@ -326,7 +325,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 				if groupedApplyPatchDiff && i+1 < len(diffLines) && strings.HasPrefix(diffLines[i+1], "+++ ") {
 					marker, path, syntaxPath := b.applyPatchDiffSectionDisplay(applyPatchTargets, line, diffLines[i+1])
 					if renderedDiffFileCount > 0 {
-						result = append(result, "  "+DimStyle.Render("─────────────"))
+						result = append(result, applyPatchDiffSeparator(cardWidth-4))
 					}
 					// Every diff section on an errored card is a group that
 					// already landed on disk, so its header carries the same ✓
@@ -789,9 +788,19 @@ func renderApplyPatchPreviewHunkHeader(line string, width int) string {
 	// Keep the hunk separator on the header row so the line-level render memo
 	// stays one-to-one with the patch input. The body remains independently
 	// highlighted; this is only a visual boundary, not a new syntax block.
+	// Standalone diff separators use applyPatchDiffSeparator with the same
+	// full-width dim rule so requested-patch and applied-diff views share one
+	// visual language.
 	ruleWidth := width - headerWidth
 	rule := strings.Repeat("─", ruleWidth)
 	return "    " + ToolResultExpandedStyle.Render(header) + DimStyle.Render(rule)
+}
+
+// applyPatchDiffSeparator renders a standalone full-width dim rule for applied
+// diff hunk/file boundaries, matching the inline rule in
+// renderApplyPatchPreviewHunkHeader. Width is the content width (cardWidth-4).
+func applyPatchDiffSeparator(width int) string {
+	return "    " + DimStyle.Render(strings.Repeat("─", max(width, 1)))
 }
 
 func truncateApplyPatchDisplayLine(line string, width int) string {
