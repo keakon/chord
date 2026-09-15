@@ -1219,10 +1219,11 @@ func (s *SubAgent) newTurn() *Turn {
 
 // currentTurnID is a small helper for log messages.
 func (s *SubAgent) currentTurnID() uint64 {
-	if s.turn == nil {
+	turn := s.currentTurn()
+	if turn == nil {
 		return 0
 	}
-	return s.turn.ID
+	return turn.ID
 }
 
 // ---------------------------------------------------------------------------

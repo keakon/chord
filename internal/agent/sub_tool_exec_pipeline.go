@@ -77,8 +77,8 @@ func (s *SubAgent) toolExecutionPipeline() toolExecutionPipeline {
 		captureWalltimeTarget: s.captureWalltimeTarget,
 		fireHook:              s.fireHook,
 		updatePending: func(call PendingToolCall) {
-			if s.turn != nil {
-				s.turn.updatePendingToolCall(call)
+			if turn := s.currentTurn(); turn != nil {
+				turn.updatePendingToolCall(call)
 			}
 		},
 		visibleToolNames: s.visibleToolNames,

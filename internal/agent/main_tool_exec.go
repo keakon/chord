@@ -83,8 +83,8 @@ func (a *MainAgent) toolExecutionPipeline() toolExecutionPipeline {
 		captureWalltimeTarget: a.captureMainWalltimeTarget,
 		fireHook:              a.fireHook,
 		updatePending: func(call PendingToolCall) {
-			if a.turn != nil {
-				a.turn.updatePendingToolCall(call)
+			if turn := a.currentTurn(); turn != nil {
+				turn.updatePendingToolCall(call)
 			}
 		},
 		reservedToolError: func(name string) error {
