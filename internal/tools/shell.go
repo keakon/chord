@@ -631,12 +631,15 @@ func backgroundJobHandle(j *job, reason string) string {
 const shellDurationNoteMin = time.Second
 
 // appendShellDurationNote appends the elapsed wall-clock time to command output
-// so the model can factor real cost into deciding what to run next.
+// so the model can factor real cost into deciding what to run next. The note is
+// rounded to whole seconds: a tenth of a second says nothing about cost, and
+// the TUI parses this same text back to label the card when a restored
+// transcript carries no recorded duration.
 func appendShellDurationNote(output string, elapsed time.Duration) string {
 	if elapsed < shellDurationNoteMin {
 		return output
 	}
-	return output + fmt.Sprintf("\n(command took %.1fs)", elapsed.Seconds())
+	return output + fmt.Sprintf("\n(command took %ds)", int(elapsed.Round(time.Second)/time.Second))
 }
 
 // shellCostNoteMin is the elapsed time above which a successful verification

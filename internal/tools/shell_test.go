@@ -644,6 +644,25 @@ func TestShellAppendsDurationNoteForSlowCommand(t *testing.T) {
 	}
 }
 
+func TestShellDurationNoteRoundsToWholeSeconds(t *testing.T) {
+	cases := []struct {
+		name    string
+		elapsed time.Duration
+		want    string
+	}{
+		{name: "below one second stays unannotated", elapsed: 900 * time.Millisecond, want: "ok"},
+		{name: "rounds down", elapsed: 14400 * time.Millisecond, want: "ok\n(command took 14s)"},
+		{name: "rounds up", elapsed: 14600 * time.Millisecond, want: "ok\n(command took 15s)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := appendShellDurationNote("ok", tc.elapsed); got != tc.want {
+				t.Fatalf("appendShellDurationNote(ok, %v) = %q, want %q", tc.elapsed, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestShellOmitsDurationNoteForFastCommand(t *testing.T) {
 	out, err := ShellTool{}.Execute(context.Background(), mustMarshal(t, map[string]any{
 		"command": "echo quick",
