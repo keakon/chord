@@ -322,7 +322,6 @@ func formatWalltimeValue(lineW int, key string, duration time.Duration, percent 
 }
 
 func walltimeDurationVariants(d time.Duration) []string {
-	d = d.Round(time.Second)
 	sec := int(d.Seconds())
 	variants := []string{tools.FormatElapsed(d)}
 	appendVariant := func(value string) {

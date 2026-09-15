@@ -1224,7 +1224,7 @@ func TestRestoredShellToolCardShowsPersistedDuration(t *testing.T) {
 		t.Fatalf("messagesToBlocks() returned %d blocks, want 1", len(blocks))
 	}
 	rendered := stripANSI(strings.Join(blocks[0].Render(80, ""), "\n"))
-	if !strings.Contains(rendered, "⏱ 8s") {
+	if !strings.Contains(rendered, "⏱ 9s") {
 		t.Fatalf("expected restored shell card to show duration clock; got:\n%s", rendered)
 	}
 	if strings.Contains(rendered, "command took") {

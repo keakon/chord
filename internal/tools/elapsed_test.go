@@ -13,7 +13,8 @@ func TestFormatElapsed(t *testing.T) {
 	}{
 		{name: "sub-second", in: 300 * time.Millisecond, want: "0s"},
 		{name: "under a minute", in: 45 * time.Second, want: "45s"},
-		{name: "partial second is truncated", in: 1900 * time.Millisecond, want: "1s"},
+		{name: "partial second is rounded to the nearest", in: 1900 * time.Millisecond, want: "2s"},
+		{name: "half a second rounds up", in: 1500 * time.Millisecond, want: "2s"},
 		{name: "minute boundary", in: time.Minute, want: "1m00s"},
 		{name: "minutes and seconds", in: 3*time.Minute + 5*time.Second, want: "3m05s"},
 		{name: "hour boundary", in: time.Hour, want: "1h00m00s"},

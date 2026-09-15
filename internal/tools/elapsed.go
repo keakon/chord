@@ -8,12 +8,14 @@ import (
 // FormatElapsed renders a duration for user-visible text: whole seconds below
 // a minute, zero-padded seconds above it, and hours once the duration passes
 // one, so a long job never reads as "62m03s". The tool result text and the TUI
-// share it so the same duration cannot print two ways.
+// share it so the same duration cannot print two ways. Rounding belongs here
+// alone: callers pass the raw duration, and the value shown is the one the
+// user is closest to.
 func FormatElapsed(d time.Duration) string {
 	if d < time.Second {
 		return "0s"
 	}
-	total := int(d.Truncate(time.Second).Seconds())
+	total := int(d.Round(time.Second).Seconds())
 	if total < 60 {
 		return fmt.Sprintf("%ds", total)
 	}

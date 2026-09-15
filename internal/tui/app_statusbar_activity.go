@@ -17,7 +17,7 @@ import (
 // formatStatusBarElapsed formats activity/shell elapsed time for the status bar
 // as a primary inline value, without parentheses.
 func formatStatusBarElapsed(d time.Duration) string {
-	return " " + tools.FormatElapsed(d.Round(time.Second))
+	return " " + tools.FormatElapsed(d)
 }
 
 func statusBarIdleLabel() string {
@@ -106,7 +106,7 @@ func (m Model) renderExecutingSummary(agentID string) string {
 	if startedAt.IsZero() {
 		return elapsedGlyph
 	}
-	elapsed := max(time.Since(startedAt).Round(time.Second), time.Second)
+	elapsed := max(time.Since(startedAt), time.Second)
 	return elapsedGlyph + " · " + tools.FormatElapsed(elapsed)
 }
 
