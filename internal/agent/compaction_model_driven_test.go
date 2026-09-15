@@ -2076,6 +2076,55 @@ func TestResolvableEvidenceHintWithoutEvidence(t *testing.T) {
 	}
 }
 
+// The unknown-ID exit must be as self-correcting as the observed path: a
+// rejection without the resolvable menu left the model to regenerate an
+// ev-<12hex> shape from memory (the reported session's invented-ID failures).
+func TestUnknownEvidenceRefHintListsResolvableEvidence(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.evidence.add(evidenceItem{Kind: evidenceToolDiff, Key: "unknown-ref", Excerpt: "diff"})
+	id := evidenceItemID(a.evidence.snapshot()[0])
+	err := a.validateModelDrivenEvidenceRefs([]string{"ev-000000000000"})
+	if err == nil {
+		t.Fatal("invented evidence ID must stay rejected")
+	}
+	for _, want := range []string{"ev-000000000000", id, "evidence IDs resolvable in this context"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("unknown-ID rejection %q must carry the resolvable menu entry %q", err, want)
+		}
+	}
+	if err := a.validateModelDrivenEvidenceRefs([]string{id}); err != nil {
+		t.Fatalf("live tracker ID must stay resolvable: %v", err)
+	}
+}
+
+func TestUnknownEvidenceRefHintListsPackIDs(t *testing.T) {
+	positive := buildEvidenceItem(evidenceToolDiff, "unknown-pack", "needed", "tool", "diff")
+	checkpoint := buildCompactionCheckpointMessage("## Current User Request\n- continue", nil, compactionSummaryModeModelDriven, []evidenceItem{positive})
+	a := &MainAgent{tools: tools.NewRegistry(), ctxMgr: ctxmgr.NewManager(10000, 1000)}
+	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: checkpoint, IsCompactionSummary: true})
+	err := a.validateModelDrivenEvidenceRefs([]string{"ev-000000000000"})
+	if err == nil {
+		t.Fatal("invented ID must stay rejected with a pack in context")
+	}
+	if !strings.Contains(err.Error(), evidenceItemID(positive)) {
+		t.Fatalf("unknown-ID rejection %q must list the pack-resolvable ID %q", err, evidenceItemID(positive))
+	}
+}
+
+func TestUnknownEvidenceRefHintWithoutEvidence(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	hint := a.unknownEvidenceRefHint()
+	if !strings.Contains(hint, "no evidence ID is resolvable in this context") {
+		t.Fatalf("hint without evidence must say none is resolvable, got %q", hint)
+	}
+	if !strings.Contains(hint, "derived/assumed/proposed") {
+		t.Fatalf("empty menu must keep the downgrade path actionable, got %q", hint)
+	}
+	if strings.Contains(hint, "resolvable in this context: ") {
+		t.Fatalf("hint without evidence must not render an ID list, got %q", hint)
+	}
+}
+
 // End-to-end through the arm path: the rejection the model sees must be the
 // hinted one, and a rejected request must not arm a pending checkpoint.
 func TestTryArmModelDrivenCheckpointHintsResolvableEvidence(t *testing.T) {
@@ -2090,6 +2139,30 @@ func TestTryArmModelDrivenCheckpointHintsResolvableEvidence(t *testing.T) {
 	_, err := a.tryArmModelDrivenCheckpoint(ccID, args)
 	if err == nil {
 		t.Fatal("observed claim without claim_evidence must be rejected")
+	}
+	if !strings.Contains(err.Error(), id) {
+		t.Fatalf("rejection %q must name the resolvable evidence ID %q", err, id)
+	}
+	if a.pendingModelDriven != nil {
+		t.Fatal("a rejected request must not arm a pending checkpoint")
+	}
+}
+
+// Same guarantee for the unknown-ID exit: a rejected evidence_refs entry must
+// carry the resolvable menu, and a rejected request must never arm a pending
+// checkpoint.
+func TestTryArmModelDrivenCheckpointUnknownEvidenceRefHintsResolvable(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.newTurn()
+	a.evidence.add(evidenceItem{Kind: evidenceToolDiff, Key: "unknown-arm", Excerpt: "diff"})
+	id := evidenceItemID(a.evidence.snapshot()[0])
+	ccID := "cc-unknown"
+	a.ctxMgr.Append(message.Message{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{testToolCall(ccID, tools.NameCompactContext)}})
+
+	args := `{"active_objective":"a","next_step":"b","evidence_refs":["ev-000000000000"]}`
+	_, err := a.tryArmModelDrivenCheckpoint(ccID, args)
+	if err == nil {
+		t.Fatal("unknown evidence ID must be rejected at arm time")
 	}
 	if !strings.Contains(err.Error(), id) {
 		t.Fatalf("rejection %q must name the resolvable evidence ID %q", err, id)

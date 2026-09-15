@@ -363,15 +363,42 @@ const evidenceHintMaxIDs = 8
 // observed rules accept (a positive kind, not invalidated) are listed, so
 // acting on the hint cannot trade one rejection for another.
 func (a *MainAgent) resolvableEvidenceHint() string {
+	clause, anyResolvable := a.resolvableEvidenceClause()
+	if !anyResolvable {
+		return clause + ", so no claim can be observed here; classify it as derived/assumed/proposed or drop claim_kinds for it"
+	}
+	return clause + "; cite the supporting ID in claim_evidence and in the top-level evidence_refs, or classify the claim as derived/assumed/proposed"
+}
+
+// resolvableEvidenceClause renders the resolvable-ID part both arm-time
+// rejection hints share (observed claim without evidence, unknown evidence
+// reference). The runtime-filtered menu must have one source: both hints keep
+// naming only IDs that pass the other validation gates, so acting on a hint
+// never trades one rejection for another.
+func (a *MainAgent) resolvableEvidenceClause() (string, bool) {
 	ids, truncated := a.resolvableClaimEvidenceIDs(evidenceHintMaxIDs)
 	if len(ids) == 0 {
-		return "no evidence ID is resolvable in this context (no live evidence candidate and no [Context Evidence] pack), so no claim can be observed here; classify it as derived/assumed/proposed or drop claim_kinds for it"
+		return "no evidence ID is resolvable in this context (no live evidence candidate and no [Context Evidence] pack)", false
 	}
 	list := strings.Join(ids, ", ")
 	if truncated {
 		list += fmt.Sprintf(" (first %d; more are resolvable)", len(ids))
 	}
-	return fmt.Sprintf("evidence IDs resolvable in this context: %s; cite the supporting ID in claim_evidence and in the top-level evidence_refs, or classify the claim as derived/assumed/proposed", list)
+	return "evidence IDs resolvable in this context: " + list, true
+}
+
+// unknownEvidenceRefHint turns the unknown-ID rejection self-correcting the
+// way the observed path already is: the reported session's one-hop recoveries
+// worked because the rejection named the resolvable IDs, while this exit left
+// the model to regenerate an ev-<12hex> shape from memory. An empty menu
+// leaves only the non-evidence routes actionable (drop the reference, drop or
+// reclassify an observed claim), never citing another rejection.
+func (a *MainAgent) unknownEvidenceRefHint() string {
+	clause, anyResolvable := a.resolvableEvidenceClause()
+	if !anyResolvable {
+		return clause + "; drop the unknown reference, and drop or reclassify affected observed claims as derived/assumed/proposed"
+	}
+	return clause + "; cite a listed ID where the unknown one was, or drop the reference"
 }
 
 // resolvableClaimEvidenceIDs lists the evidence IDs currently resolvable that
@@ -455,7 +482,7 @@ func (a *MainAgent) validateModelDrivenEvidenceRefs(refs []string) error {
 		}
 		meta, ok := carried[ref]
 		if !ok {
-			return fmt.Errorf("compact_context evidence_refs contains unknown evidence ID %q", ref)
+			return fmt.Errorf("compact_context evidence_refs contains unknown evidence ID %q; %s", ref, a.unknownEvidenceRefHint())
 		}
 		if meta.invalidated {
 			return fmt.Errorf("compact_context evidence_refs contains %s evidence %q", evidenceValidityInvalidated, ref)
