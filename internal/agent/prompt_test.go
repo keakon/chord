@@ -642,6 +642,40 @@ func TestSharedCodingGuidelinesPrompt_SeparatesProductLevelAndImplementationLeve
 	}
 }
 
+func TestSharedCodingGuidelinesPrompt_RequiresEvidenceDiscriminationAndAmbiguityConvergence(t *testing.T) {
+	got := sharedCodingGuidelinesPrompt
+	for _, want := range []string{
+		// Evidence discrimination.
+		"also fits a plausible alternative that would change it",
+		"find the smallest check that tells them apart",
+		"not only the final output",
+		"investigation separates what was observed from what is inferred before naming a cause",
+		"code review confirms a reachable path and the surrounding guards before calling something a defect",
+		"analysis states the goal and constraints before recommending",
+		"treats reading code, tests, and history as evidence gathering rather than requiring a build, test run, or execution",
+		// Ambiguity convergence.
+		"separate explicit requirements, observed facts, and your own assumptions",
+		"stop re-guessing unstated intent",
+		"do not independently confirm the assumption itself",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("sharedCodingGuidelinesPrompt missing %q in %q", want, got)
+		}
+	}
+	// The rules are shared with SubAgents, not main-only guidance.
+	if !strings.Contains(subAgentCodingGuidelinesPrompt, "stop re-guessing unstated intent") {
+		t.Fatalf("subAgentCodingGuidelinesPrompt missing shared ambiguity-convergence rule: %q", subAgentCodingGuidelinesPrompt)
+	}
+	for _, unwanted := range []string{
+		"if assumptions are uncertain, ask before implementing",
+		"if anything is unclear, stop and ask",
+	} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("sharedCodingGuidelinesPrompt unexpectedly contains %q in %q", unwanted, got)
+		}
+	}
+}
+
 func TestSharedAgentValuesPrompt_AllowsNecessaryLowRiskAdjacentWork(t *testing.T) {
 	got := sharedAgentValuesPrompt
 	for _, want := range []string{
