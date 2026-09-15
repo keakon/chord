@@ -107,6 +107,83 @@ func ignoredToolArgValue(valueJSON string) string {
 	return truncateToolParamValue(sanitizeToolDisplayText(value))
 }
 
+// stripResultNotes drops the runtime's own note lines from a result before a
+// card derives its body from it. Those notes are model-facing — they tell the
+// model what the runtime did to its call — and the card surfaces the argument
+// facts from the argument audit, so repainting them inside an output section
+// would make a diagnostic read as command output.
+//
+// Matching runs line by line, not just on a trailing suffix: a failed call
+// carries "Error: …" after the notes, and for shell the duration note follows
+// them, so only a whole-line removal keeps the result body intact. A card
+// restored from a transcript without a notes list keeps the text.
+func (b *Block) stripResultNotes(content string) string {
+	if b == nil || content == "" || len(b.ResultNotes) == 0 {
+		return content
+	}
+	lines := strings.Split(content, "\n")
+	out := make([]string, 0, len(lines))
+	removed := false
+	for _, line := range lines {
+		if b.isResultNote(line) {
+			removed = true
+			continue
+		}
+		out = append(out, line)
+	}
+	if !removed {
+		return content
+	}
+	return strings.TrimRight(strings.Join(out, "\n"), "\r\n")
+}
+
+// isResultNote reports whether one result line is a recorded runtime note.
+// Comparison trims surrounding whitespace so CRLF results match the recorded
+// notes the same way LF ones do.
+func (b *Block) isResultNote(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return false
+	}
+	for _, note := range b.ResultNotes {
+		if trimmed == strings.TrimSpace(note) {
+			return true
+		}
+	}
+	return false
+}
+
+// diagnosticBaseText renders the unprefixed text one diagnostic contributes to
+// a header: "path" for a flag, "path=value" otherwise, and "path=<missing>"
+// when the value never arrived. It is the single source of truth for that
+// spelling, because the header restyling path locates the text already rendered
+// into the header by string search; a second copy drifting from this one would
+// silently stop matching and render the value twice.
+func diagnosticBaseText(diagnostic toolArgDiagnostic) string {
+	text := diagnostic.path
+	if diagnostic.missing {
+		text += "=<missing>"
+	} else if diagnostic.value != "" {
+		text += "=" + diagnostic.value
+	}
+	return text
+}
+
+// diagnosticOptionPlain renders the inline text a header carries for one
+// diagnostic. An ignored value keeps an "ignored " prefix so the strikethrough
+// is not the only signal that it never reached the tool: the value is something
+// the model passed and the runtime dropped, not an option that took effect.
+func diagnosticOptionPlain(diagnostic toolArgDiagnostic) string {
+	text := diagnosticBaseText(diagnostic)
+	if text == "" {
+		return ""
+	}
+	if diagnostic.ignored {
+		return "ignored " + text
+	}
+	return text
+}
+
 // diagnosticArgHeaderOption renders the diagnostic option for canonical with
 // the same styling contract as formatDiagnosticOption: struck-through for
 // ignored values, error-styled for missing ones, plain otherwise.
@@ -303,22 +380,17 @@ func (b *Block) formatDiagnosticOption(diagnostic *toolArgDiagnostic) string {
 	if diagnostic == nil {
 		return ""
 	}
-	plain := diagnostic.path
-	if diagnostic.missing {
-		plain += "=<missing>"
-	} else if diagnostic.value != "" {
-		plain += "=" + diagnostic.value
-	}
-	if plain == "" {
+	text := diagnosticOptionPlain(*diagnostic)
+	if text == "" {
 		return ""
 	}
 	if diagnostic.ignored {
-		return DimStyle.Strikethrough(true).Render(plain)
+		return DimStyle.Strikethrough(true).Render(text)
 	}
 	if diagnostic.missing {
-		return ErrorStyle.Render(plain)
+		return ErrorStyle.Render(text)
 	}
-	return plain
+	return text
 }
 
 // deleteDiagnosticHeaderParts keeps schema-broken Delete calls on the same
@@ -412,13 +484,7 @@ func (b *Block) headerParamSummaryKeys(keys []string, vals map[string]string) []
 		if b.diagnosticArgOccupiesHeader(diagnostic) {
 			continue
 		}
-		plain := diagnostic.path
-		if diagnostic.missing {
-			plain += "=<missing>"
-		} else if diagnostic.value != "" {
-			plain += "=" + diagnostic.value
-		}
-		plainByKey[diagnostic.path] = plain
+		plainByKey[diagnostic.path] = diagnosticBaseText(diagnostic)
 	}
 	out := make([]string, 0, len(keys))
 	for _, key := range keys {
@@ -446,38 +512,31 @@ func (b *Block) appendToolArgDiagnostics(body []string, contentWidth int) []stri
 		if b.diagnosticArgOccupiesHeader(diagnostic) {
 			continue
 		}
-		plain := diagnostic.path
-		if diagnostic.missing {
-			plain += "=<missing>"
-		} else if diagnostic.value != "" {
-			plain += "=" + diagnostic.value
+		plain := diagnosticBaseText(diagnostic)
+		text := diagnosticOptionPlain(diagnostic)
+		if text == "" {
+			continue
 		}
 		if !diagnostic.missing && strings.Contains(stripANSI(header), plain) {
-			style := DimStyle.Strikethrough(true)
-			if !diagnostic.ignored {
-				style = ErrorStyle
-			}
-			header = strings.Replace(header, plain, style.Render(plain), 1)
+			style := diagnosticOptionStyle(diagnostic)
+			header = strings.Replace(header, plain, style.Render(text), 1)
 			continue
 		}
 		separator := " · "
-		partWidth := runewidth.StringWidth(separator + plain)
+		partWidth := runewidth.StringWidth(separator + text)
 		if partWidth > remaining {
 			if appended == 0 && remaining > runewidth.StringWidth(separator)+1 {
-				plain = runewidth.Truncate(plain, remaining-runewidth.StringWidth(separator), "…")
+				text = runewidth.Truncate(text, remaining-runewidth.StringWidth(separator), "…")
 			} else {
 				break
 			}
 		}
-		style := DimStyle.Strikethrough(true)
-		if !diagnostic.ignored {
-			style = ErrorStyle
-		}
+		style := diagnosticOptionStyle(diagnostic)
 		if appended == 0 && remaining <= 0 {
 			break
 		}
-		header += separator + style.Render(plain)
-		remaining -= runewidth.StringWidth(separator + plain)
+		header += separator + style.Render(text)
+		remaining -= runewidth.StringWidth(separator + text)
 		appended++
 		if remaining <= 0 {
 			break
@@ -485,6 +544,21 @@ func (b *Block) appendToolArgDiagnostics(body []string, contentWidth int) []stri
 	}
 	body[0] = header
 	return body
+}
+
+// diagnosticOptionStyle picks the style the header audit slot renders one
+// diagnostic in: an ignored value is struck through, because the runtime dropped
+// it and it should read as absent rather than wrong, and everything else is an
+// error on the call. Callers must already have routed diagnostic.missing
+// elsewhere — that branch has its own text and never reaches this one.
+//
+// It deliberately differs from formatDiagnosticOption, which renders a
+// neither-ignored-nor-missing diagnostic unstyled; both keep their behavior.
+func diagnosticOptionStyle(diagnostic toolArgDiagnostic) lipgloss.Style {
+	if diagnostic.ignored {
+		return DimStyle.Strikethrough(true)
+	}
+	return ErrorStyle
 }
 
 // diagnosticArgOccupiesHeader reports whether the tool already accounts for

@@ -40,11 +40,11 @@ func (b *Block) renderHandoffCall(width int, spinnerFrame string) []string {
 	result = append(result, headerLine)
 
 	if b.toolResultIsError() {
-		if strings.TrimSpace(b.ResultContent) != "" {
-			result = appendErrorResultLines(result, b.ResultContent, contentWidth)
+		if displayResult := b.stripResultNotes(b.ResultContent); strings.TrimSpace(displayResult) != "" {
+			result = appendErrorResultLines(result, displayResult, contentWidth)
 		}
 	} else if b.toolResultIsCancelled() {
-		result = appendCancelledResultLines(result, b.ResultContent, contentWidth)
+		result = appendCancelledResultLines(result, b.stripResultNotes(b.ResultContent), contentWidth)
 	} else if b.ResultDone {
 		// Success terminal state: the raw result is the structured JSON used by
 		// the runtime; the plan path is already in the header, so show only the

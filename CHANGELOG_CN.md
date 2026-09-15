@@ -29,6 +29,7 @@
 - 模型驱动 checkpoint 的 `evidence_refs` 或 `claim_evidence` 引用了运行时解析不了的证据 ID 时，拒绝报错会当场列出本上下文可解析的 ID（前 8 个），与 observed claim 的报错对齐：续接侧可以直接从列表里引用或省掉该引用，而不是再凭记忆编一个 `ev-` 格式的 ID。
 - 主代理和子代理的共享指引明确区分外部数据与任务指令，涵盖文件、网页、图片、命令输出及 MCP 说明和结果。即使没有开启模型驱动压缩，这些规则也会生效；实际工具执行仍由权限系统把关。
 - 工具卡片不再共用同一套折叠规则。`write`、`edit`、`apply_patch`、`todo_write`、`handoff` 现在和 `delete`、各类报告卡一样恒展开：正文本身——diff、todo 列表、计划路径——是模型产出的内容，因此不再显示 `▸` / `▾` 标记，`Space`、`Enter`、`o` 对它们不生效。`read`、`grep`、`glob`、`shell`、`cancel` 和通用工具调用默认收起，保留折叠开关。展开后也不会多出正文的卡片——收起时已经完全显示正文——同样不带标记、不能折叠；折叠的 `shell` 与 `job_list` 卡片把后台 job 句柄与任务数量标在标题行（`shell … · job-8`、`job_list · 3 jobs`）。
+- 工具卡正文不再重画 runtime 追加的参数提示：`Note: ignored unrecognized parameter(s): …` 此前混在命令输出或文件内容里，读起来像工具自己的结果。被忽略的参数在标题行已经用 `ignored args.offset=10` 这类标注写明，复制和导出的文本仍保留提示原文。runtime 开始把提示随结果一并保存之前记录的会话，正文仍会重复这一行：标题行标注来自参数审计，更早的记录本来就有，而正文只会移除结果中确实记录过的提示。
 - `lsp` 卡片把命中数量摘要放在标题行——`lsp find references internal/tools/jobs_registry.go:771:6 · 7 references · 4 files`——与 `grep`、`glob` 一致，折叠时只占一行，展开后只显示位置列表。宽度不足时优先保住数量摘要、先让位置让位，和搜索卡片先丢参数、后丢命中数的规则相同。
 - 折叠的 `cancel` 卡片把状态放在标题行——`cancel #7 · Stopped (workflow changed)`——不再为它多花一行 `↳ Stopped`；`notify` 返回结构化 handle 时状态也不再出现两次，只保留 `Result` 区块的 `status:` 字段，与已取消任务展开卡片的行为一致。
 - 结束的后台 `shell` 任务改用折叠的 `JOB RESULT` 卡片：默认每个 job 只保留标题行，只有失败、取消或耗时等标题行表达不了的状态才会再占一行；展开后显示完整的命令、状态与输出。

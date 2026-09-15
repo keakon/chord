@@ -607,7 +607,7 @@ func toolHeaderElapsedLabel(b *Block) string {
 	}
 	elapsed := b.toolElapsedLabel()
 	if elapsed == "" && tools.NormalizeName(b.ToolName) == tools.NameShell {
-		elapsed = shellDurationNoteLabel(b.ResultContent)
+		elapsed = shellDurationNoteLabel(b.stripResultNotes(b.ResultContent))
 	}
 	return elapsed
 }
@@ -719,7 +719,7 @@ func bashCollapsedOutcomeSummary(b *Block) string {
 		// recover. Multi-line errors are too ambiguous to guess which line is
 		// the real cause, so keep only a concise status (exit code / timeout)
 		// and leave the detail to the expanded card.
-		content := strings.TrimSpace(b.ResultContent)
+		content := strings.TrimSpace(b.stripResultNotes(b.ResultContent))
 		if toolOutcomeNonEmptyLineCount(content) == 1 {
 			if line := bashFirstNonEmptyLine(sanitizeToolDisplayText(bashErrorText(content))); line != "" {
 				return truncateOneLine(line, 120)
@@ -740,7 +740,7 @@ func bashCollapsedOutcomeSummary(b *Block) string {
 	if line := bashFirstNonEmptyLine(sanitizeToolDisplayText(stdout)); line != "" {
 		return truncateOneLine(line, 120)
 	}
-	if line := bashFirstNonEmptyLine(sanitizeToolDisplayText(strings.TrimSpace(b.ResultContent))); line != "" {
+	if line := bashFirstNonEmptyLine(sanitizeToolDisplayText(strings.TrimSpace(b.stripResultNotes(b.ResultContent)))); line != "" {
 		return truncateOneLine(line, 120)
 	}
 	return "completed"
@@ -776,7 +776,7 @@ func bashSplitResultStreams(b *Block) (stderr, stdout string) {
 	if b == nil {
 		return "", ""
 	}
-	trimmed := strings.TrimSpace(shellDurationNoteRE.ReplaceAllString(b.ResultContent, ""))
+	trimmed := strings.TrimSpace(shellDurationNoteRE.ReplaceAllString(b.stripResultNotes(b.ResultContent), ""))
 	if trimmed == "" {
 		return "", ""
 	}
@@ -1014,7 +1014,7 @@ func formatToolResultSummaryLine(b *Block) string {
 	if !b.ResultDone {
 		return ""
 	}
-	trimmed := strings.TrimSpace(b.ResultContent)
+	trimmed := strings.TrimSpace(b.stripResultNotes(b.ResultContent))
 	// Unlisted tools fall through to the default branch, whose audit note stays
 	// meaningful on error results too.
 	if b.toolResultIsError() && toolSummarySuppressesErrors(b.ToolName) {

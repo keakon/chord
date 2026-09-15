@@ -80,7 +80,7 @@ func (b *Block) renderReadCall(width int, spinnerFrame string) []string {
 			// result lacks a READ_RESULT header (legacy/restored output) the
 			// gutter starts there, and 0 (absent) clamps to line 1 inside
 			// parseReadDisplayLines.
-			rows, sourceSample := parseReadDisplayLines(b.ResultContent, resultOffset)
+			rows, sourceSample := parseReadDisplayLines(b.stripResultNotes(b.ResultContent), resultOffset)
 			result = append(result, renderNumberedToolPreview(numberedToolPreviewOptions{
 				filePath:     filePath,
 				rows:         rows,
@@ -184,6 +184,6 @@ func (b *Block) readCardHasDisclosure(contentWidth int) bool {
 	if b.ResultContent == "" {
 		return false
 	}
-	rows, _ := parseReadDisplayLines(b.ResultContent, b.readResultOffset())
+	rows, _ := parseReadDisplayLines(b.stripResultNotes(b.ResultContent), b.readResultOffset())
 	return len(rows) > 0
 }

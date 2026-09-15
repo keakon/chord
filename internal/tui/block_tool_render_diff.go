@@ -127,7 +127,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	applyPatchError := b.ToolName == tools.NameApplyPatch && b.toolResultIsError()
 	var applyPatchSections applyPatchErrorSections
 	if applyPatchError {
-		applyPatchSections = splitApplyPatchErrorSections(b.ResultContent)
+		applyPatchSections = splitApplyPatchErrorSections(b.stripResultNotes(b.ResultContent))
 	}
 	// filePath is a header display summary ("a → b", "D path", "path +N files"),
 	// which is not a path; syntax highlighting needs the undecorated target so
@@ -363,7 +363,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	}
 	if (b.ToolName == tools.NameEdit || b.ToolName == tools.NameApplyPatch) && strings.TrimSpace(b.ResultContent) != "" && !b.toolResultIsError() && !b.toolResultIsCancelled() && !toolShouldHideSuccessfulFileOpResult(b) {
 		result = append(result, toolFieldSection(ToolResultExpandedStyle, "Diagnostics"))
-		result = append(result, renderLSPDiagnosticsLines(editSuccessDiagnosticsContent(b.ResultContent), "    ", textWrap)...)
+		result = append(result, renderLSPDiagnosticsLines(editSuccessDiagnosticsContent(b.stripResultNotes(b.ResultContent)), "    ", textWrap)...)
 	}
 	if b.toolResultIsError() && b.ResultContent != "" {
 		switch b.ToolName {
@@ -390,7 +390,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 				}
 			}
 			result = append(result, toolFieldSection(ErrorStyle, "Error"))
-			result = append(result, renderLSPDiagnosticsLines(toolErrorDisplayContent(b.ResultContent), "    ", textWrap)...)
+			result = append(result, renderLSPDiagnosticsLines(toolErrorDisplayContent(b.stripResultNotes(b.ResultContent)), "    ", textWrap)...)
 		}
 	} else if b.toolResultIsCancelled() {
 		appendToolOutcomeBody(&result, toolOutcomeCancelled, toolDisplayResultContent(b), textWrap, true)

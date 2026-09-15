@@ -314,7 +314,9 @@ func (b *Block) renderDoneCall(width int, spinnerFrame string) []string {
 		}
 	}
 	if b.ResultDone && strings.TrimSpace(b.ResultContent) != "" {
-		statusText := strings.TrimSpace(b.ResultContent)
+		// The runtime's own notes are not a status: when the result held
+		// nothing else, the card shows no status section at all.
+		statusText := strings.TrimSpace(b.stripResultNotes(b.ResultContent))
 		if b.toolResultIsError() {
 			statusText = toolErrorDisplayContent(statusText)
 		}
@@ -326,6 +328,8 @@ func (b *Block) renderDoneCall(width int, spinnerFrame string) []string {
 			}
 		}
 		switch {
+		case statusText == "":
+			// Nothing but runtime notes left after the strip above.
 		case doneResultIsRejected(statusText):
 			// A rejection is not a schema error: keep its own label, but on
 			// the shared "↳ Label:" shape.
@@ -772,7 +776,7 @@ func compactToolHiddenResultLines(b *Block, contentWidth int) int {
 	if strings.TrimSpace(b.ResultContent) == "" || (b.toolResultIsCancelled() && toolCancelledDetailText(b.ResultContent) == "") {
 		return 0
 	}
-	displayResult := toolExpandedResultContent(b.ToolName, b.ResultContent)
+	displayResult := b.stripResultNotes(toolExpandedResultContent(b.ToolName, b.ResultContent))
 	if b.ToolName == tools.NameLsp && !b.toolResultIsError() && !b.toolResultIsCancelled() {
 		displayResult = toolDisplayResultContent(b)
 	}
@@ -842,7 +846,7 @@ func compactToolHiddenDetailLines(b *Block, keys []string, vals map[string]strin
 			}
 		case tools.NameComplete:
 			if !b.toolResultIsError() && !b.toolResultIsCancelled() {
-				if more := toolCollapsedVisibleLineCount(b.ResultContent, contentWidth) - 2; more > 0 {
+				if more := toolCollapsedVisibleLineCount(b.stripResultNotes(b.ResultContent), contentWidth) - 2; more > 0 {
 					hidden += more
 				}
 			} else {
@@ -916,7 +920,7 @@ func compactToolHeaderResultSummary(b *Block) (summary string, ok bool) {
 		if !b.ResultDone || b.toolResultIsError() || b.toolResultIsCancelled() {
 			return "", true
 		}
-		return jobOutputSummaryLine(b.ResultContent), true
+		return jobOutputSummaryLine(b.stripResultNotes(b.ResultContent)), true
 	}
 	return "", false
 }

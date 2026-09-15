@@ -18,7 +18,12 @@ func (b *Block) renderTaskCall(width int, spinnerFrame string) []string {
 	contentWidth := metrics.contentWidth
 
 	args := parseTaskToolArgs(b.Content)
-	hasResultText := strings.TrimSpace(b.ResultContent) != ""
+	// The runtime appends its own notes after the JSON payload (e.g. "Note:
+	// ignored unrecognized parameter(s): …"); those are the model's
+	// diagnostics, and the card shows the argument facts on the header
+	// instead of repainting a note line as body text.
+	displayResult := b.stripResultNotes(b.ResultContent)
+	hasResultText := strings.TrimSpace(displayResult) != ""
 	subType := strings.TrimSpace(args.AgentType)
 	isActive := b.toolExecutionIsRunning() && spinnerFrame != ""
 	prefix := b.renderToolPrefix(spinnerFrame)
@@ -39,23 +44,23 @@ func (b *Block) renderTaskCall(width int, spinnerFrame string) []string {
 			result = append(result, "    "+line)
 		}
 	}
-	handle, rest, handleOK := parseTaskToolHandle(b.ResultContent)
+	handle, rest, handleOK := parseTaskToolHandle(displayResult)
 	if handleOK || (hasResultText && !b.toolResultIsError() && !b.toolResultIsCancelled()) {
 		result = append(result, toolFieldSection(ToolResultExpandedStyle, "Worker"))
 		switch {
 		case handleOK:
 			appendTaskHandleFieldRows(&result, handle, contentWidth)
-			// The runtime often appends commentary after the JSON payload
-			// (e.g. "Note: ignored unrecognized parameter(s): …"). Render it
-			// as a trailing dimmed line under the section, not concatenated
-			// back into the structured fields.
+			// Anything the runtime appended after the JSON payload that is
+			// not one of its own notes (a failed call's "Error: …" tail, for
+			// instance) renders as a trailing dimmed line under the section,
+			// not concatenated back into the structured fields.
 			if rest != "" {
 				for _, line := range wrapText(sanitizeToolDisplayText(rest), contentWidth) {
 					result = append(result, toolFieldBody(DimStyle, line))
 				}
 			}
 		default:
-			for _, line := range wrapText(sanitizeToolDisplayText(strings.TrimSpace(b.ResultContent)), contentWidth) {
+			for _, line := range wrapText(sanitizeToolDisplayText(strings.TrimSpace(displayResult)), contentWidth) {
 				result = append(result, toolFieldBody(DimStyle, line))
 			}
 		}
@@ -104,9 +109,9 @@ func (b *Block) renderTodoCall(width int, spinnerFrame string) []string {
 	}
 
 	if b.toolResultIsError() && b.ResultContent != "" {
-		result = appendErrorResultLines(result, b.ResultContent, contentWidth)
+		result = appendErrorResultLines(result, b.stripResultNotes(b.ResultContent), contentWidth)
 	} else if b.toolResultIsCancelled() && b.ResultContent != "" {
-		result = appendCancelledResultLines(result, b.ResultContent, contentWidth)
+		result = appendCancelledResultLines(result, b.stripResultNotes(b.ResultContent), contentWidth)
 	}
 	// Empty list: don't show "(no items)" prominently; just omit the list body
 
@@ -429,7 +434,7 @@ func (b *Block) renderCancelCall(width int, spinnerFrame string) []string {
 			appendTaskHandleFieldRow(&result, "message", handle.Message, contentWidth)
 		} else if !b.toolResultIsError() && !b.toolResultIsCancelled() {
 			result = append(result, toolFieldSection(ToolResultExpandedStyle, "Result"))
-			for _, line := range wrapText(sanitizeToolDisplayText(strings.TrimSpace(b.ResultContent)), contentWidth) {
+			for _, line := range wrapText(sanitizeToolDisplayText(strings.TrimSpace(b.stripResultNotes(b.ResultContent))), contentWidth) {
 				result = append(result, DimStyle.Render("    "+line))
 			}
 		}
@@ -507,7 +512,7 @@ func (b *Block) renderNotifyCall(width int, spinnerFrame string) []string {
 			appendTaskHandleFieldRow(&result, "message", handle.Message, contentWidth)
 		} else if !b.toolResultIsError() && !b.toolResultIsCancelled() {
 			result = append(result, toolFieldSection(ToolResultExpandedStyle, "Result"))
-			for _, line := range wrapText(sanitizeToolDisplayText(strings.TrimSpace(b.ResultContent)), contentWidth) {
+			for _, line := range wrapText(sanitizeToolDisplayText(strings.TrimSpace(b.stripResultNotes(b.ResultContent))), contentWidth) {
 				result = append(result, toolFieldBody(DimStyle, line))
 			}
 		}

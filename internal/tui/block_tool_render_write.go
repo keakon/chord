@@ -106,7 +106,7 @@ func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
 	sections := writeResultSections{}
 	headerSummary := ""
 	if !b.toolResultIsError() && !b.toolResultIsCancelled() {
-		sections = splitWriteResult(b.ResultContent)
+		sections = splitWriteResult(b.stripResultNotes(b.ResultContent))
 		headerSummary = writeSuccessCountSummary(sections.summary)
 	}
 	headerLine := appendSearchHeaderSummary(renderToolHeaderLine(prefix, b.ToolName), filePath, strings.Join(extras, ", "), headerSummary, cardWidth-4)
@@ -131,7 +131,7 @@ func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
 		// The diagnostics renderer keeps LSP paths aligned, so this card
 		// formats its own body under the shared "↳ Error:" header.
 		result = append(result, toolFieldSection(ErrorStyle, "Error"))
-		result = append(result, renderLSPDiagnosticsLines(toolErrorDisplayContent(b.ResultContent), "    ", cardWidth-4)...)
+		result = append(result, renderLSPDiagnosticsLines(toolErrorDisplayContent(b.stripResultNotes(b.ResultContent)), "    ", cardWidth-4)...)
 	} else if b.toolResultIsCancelled() {
 		appendToolOutcomeBody(&result, toolOutcomeCancelled, toolDisplayResultContent(b), cardWidth-4, true)
 	}

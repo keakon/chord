@@ -174,6 +174,7 @@ func toolDisplayResultContent(b *Block) string {
 		return ""
 	}
 	result := toolExpandedResultContent(b.ToolName, b.ResultContent)
+	result = b.stripResultNotes(result)
 	result = shellDurationNoteRE.ReplaceAllString(result, "")
 	if b.toolResultIsError() || b.toolResultIsCancelled() {
 		return result

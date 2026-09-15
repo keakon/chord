@@ -84,12 +84,16 @@ func (b *Block) renderSearchResultToolCall(width int, spinnerFrame string) []str
 }
 
 func (b *Block) searchResultSummaryLine() (string, bool) {
-	if b == nil || strings.TrimSpace(b.ResultContent) == "" {
+	if b == nil {
+		return "", false
+	}
+	content := b.stripResultNotes(b.ResultContent)
+	if strings.TrimSpace(content) == "" {
 		return "", false
 	}
 	switch tools.NormalizeName(b.ToolName) {
 	case tools.NameGrep:
-		meta := parseGrepResultMeta(b.ResultContent)
+		meta := parseGrepResultMeta(content)
 		if meta.NoMatches {
 			return "No matches", true
 		}
@@ -102,9 +106,9 @@ func (b *Block) searchResultSummaryLine() (string, bool) {
 		}
 		return strings.Join(parts, " · "), true
 	case tools.NameGlob:
-		meta := parseGlobResultMeta(b.ResultContent)
+		meta := parseGlobResultMeta(content)
 		if meta.Files == 0 {
-			if strings.HasPrefix(strings.TrimSpace(b.ResultContent), "No files matched") {
+			if strings.HasPrefix(strings.TrimSpace(content), "No files matched") {
 				return "No files", true
 			}
 			return "", false
@@ -116,18 +120,22 @@ func (b *Block) searchResultSummaryLine() (string, bool) {
 }
 
 func (b *Block) searchResultCanExpand() bool {
-	if b == nil || strings.TrimSpace(b.ResultContent) == "" {
+	if b == nil {
+		return false
+	}
+	content := b.stripResultNotes(b.ResultContent)
+	if strings.TrimSpace(content) == "" {
 		return false
 	}
 	switch tools.NormalizeName(b.ToolName) {
 	case tools.NameGrep:
-		meta := parseGrepResultMeta(b.ResultContent)
+		meta := parseGrepResultMeta(content)
 		if meta.NoMatches {
 			return meta.Notes > 0 || meta.Fallback || meta.Truncated || meta.Skipped > 0
 		}
 		return meta.Matches > 0 || meta.Notes > 0 || meta.Fallback || meta.Truncated || meta.Skipped > 0
 	case tools.NameGlob:
-		meta := parseGlobResultMeta(b.ResultContent)
+		meta := parseGlobResultMeta(content)
 		return meta.Files > 0 || meta.Truncated || meta.Artifact != ""
 	default:
 		return false

@@ -145,6 +145,94 @@ func TestHeaderParamSummaryKeysSkipsDuplicatedDiagnosticSummary(t *testing.T) {
 	}
 }
 
+func TestDiagnosticBaseTextMatchesHeaderRestyleSpelling(t *testing.T) {
+	// The header restyle path locates a diagnostic's text by searching the
+	// header for the spelling diagnosticBaseText produces, so that spelling is
+	// shared rather than re-derived per call site: a second copy drifting (say,
+	// rendering "=<missing>" as "(missing)") would silently stop matching.
+	cases := []struct {
+		name       string
+		diagnostic toolArgDiagnostic
+		wantBase   string
+		wantPlain  string
+	}{
+		{
+			name:       "flag",
+			diagnostic: toolArgDiagnostic{path: "verbose"},
+			wantBase:   "verbose",
+			wantPlain:  "verbose",
+		},
+		{
+			name:       "value",
+			diagnostic: toolArgDiagnostic{path: "limit", value: "7"},
+			wantBase:   "limit=7",
+			wantPlain:  "limit=7",
+		},
+		{
+			name:       "missing",
+			diagnostic: toolArgDiagnostic{path: "patterns", missing: true},
+			wantBase:   "patterns=<missing>",
+			wantPlain:  "patterns=<missing>",
+		},
+		{
+			name:       "ignored keeps the base text",
+			diagnostic: toolArgDiagnostic{path: "verbose", value: "true", ignored: true},
+			wantBase:   "verbose=true",
+			wantPlain:  "ignored verbose=true",
+		},
+		{
+			name:       "empty path renders nothing",
+			diagnostic: toolArgDiagnostic{},
+			wantBase:   "",
+			wantPlain:  "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := diagnosticBaseText(tc.diagnostic); got != tc.wantBase {
+				t.Fatalf("diagnosticBaseText = %q, want %q", got, tc.wantBase)
+			}
+			if got := diagnosticOptionPlain(tc.diagnostic); got != tc.wantPlain {
+				t.Fatalf("diagnosticOptionPlain = %q, want %q", got, tc.wantPlain)
+			}
+		})
+	}
+}
+
+func TestGenericCardRestylesDiagnosticInPlaceWithoutDuplicating(t *testing.T) {
+	// The generic header already carries "limit=7" verbatim, so the diagnostic
+	// must be restyled where it stands. If the base-text spelling used for the
+	// search ever drifted from the one used for display, the search would miss,
+	// the original value would stay unstyled, and the diagnostic would be
+	// appended as a second copy on the same line.
+	block := &Block{
+		ID:       9,
+		Type:     BlockToolCall,
+		ToolName: "mcp__sample__search",
+		Content:  `{"query":"chord","limit":7}`,
+		Audit: &message.ToolArgsAudit{
+			OriginalArgsJSON:  `{"query":"chord","limit":7}`,
+			EffectiveArgsJSON: `{"query":"chord"}`,
+			IgnoredArgs: []message.IgnoredToolArg{{
+				Path:      "args.limit",
+				ValueJSON: "7",
+				Reason:    message.IgnoredToolArgReasonUnrecognized,
+			}},
+		},
+	}
+	rendered := strings.Join(block.Render(120, ""), "\n")
+	plain := stripANSI(rendered)
+	if got := strings.Count(plain, "limit=7"); got != 1 {
+		t.Fatalf("header should carry limit=7 exactly once, got %d:\n%s", got, plain)
+	}
+	if !strings.Contains(plain, "ignored limit=7") {
+		t.Fatalf("ignored diagnostic should be restyled in place:\n%s", plain)
+	}
+	if !strings.Contains(rendered, `;9m`) {
+		t.Fatalf("restyled diagnostic is not struck through: %q", rendered)
+	}
+}
+
 func TestGenericToolParamSummarySanitizesParameterNames(t *testing.T) {
 	keys, vals := parseToolArgs("{\"query\\n\":\"search\"}")
 	got := formatToolHeaderParamsWithParsed("mcp_any_tool", keys, vals)
@@ -443,7 +531,7 @@ func TestJobCardMovesIgnoredArgumentIntoOptionGroup(t *testing.T) {
 	}
 	rendered := strings.Join(block.Render(120, ""), "\n")
 	plain := stripANSI(rendered)
-	if !strings.Contains(plain, "(path=sub)") {
+	if !strings.Contains(plain, "(ignored path=sub)") {
 		t.Fatalf("ignored argument should join the job option group:\n%s", plain)
 	}
 	if strings.Contains(plain, " · path=") {
@@ -474,7 +562,7 @@ func TestWebFetchCardMovesIgnoredArgumentIntoOptionGroup(t *testing.T) {
 	}
 	rendered := strings.Join(block.Render(120, ""), "\n")
 	plain := stripANSI(rendered)
-	if !strings.Contains(plain, "https://example.invalid/notes (raw=true)") {
+	if !strings.Contains(plain, "https://example.invalid/notes (ignored raw=true)") {
 		t.Fatalf("ignored argument should join the webfetch option group:\n%s", plain)
 	}
 	if !strings.Contains(rendered, ";9m") {
@@ -502,7 +590,7 @@ func TestWriteCardJoinsIgnoredArgumentToExtras(t *testing.T) {
 	}
 	rendered := strings.Join(block.Render(120, ""), "\n")
 	plain := stripANSI(rendered)
-	if !strings.Contains(plain, "append=true") {
+	if !strings.Contains(plain, "ignored append=true") {
 		t.Fatalf("ignored argument should join the write extras chain:\n%s", plain)
 	}
 	if strings.Contains(plain, " · append=") {
@@ -533,7 +621,7 @@ func TestEditCardJoinsIgnoredArgumentToHeaderOptions(t *testing.T) {
 	}
 	rendered := strings.Join(block.Render(120, ""), "\n")
 	plain := stripANSI(rendered)
-	if !strings.Contains(plain, "(create_dirs=true)") {
+	if !strings.Contains(plain, "(ignored create_dirs=true)") {
 		t.Fatalf("ignored argument should join the edit option group:\n%s", plain)
 	}
 	if strings.Contains(plain, " · create_dirs=") {
@@ -564,7 +652,7 @@ func TestTodoCardShowsIgnoredArgumentInOptionGroup(t *testing.T) {
 	}
 	rendered := strings.Join(block.Render(120, ""), "\n")
 	plain := stripANSI(rendered)
-	if !strings.Contains(plain, "(priority=high)") {
+	if !strings.Contains(plain, "(ignored priority=high)") {
 		t.Fatalf("ignored argument should form its own option group:\n%s", plain)
 	}
 	if strings.Contains(plain, " · priority=") {
@@ -599,7 +687,7 @@ func TestShellCardMovesIgnoredArgumentIntoOptionGroup(t *testing.T) {
 	}
 	rendered := strings.Join(block.Render(160, ""), "\n")
 	plain := stripANSI(rendered)
-	want := "Check git status and unpushed commits (timeout=2m, path=.chord/memory/records/x.md)"
+	want := "Check git status and unpushed commits (timeout=2m, ignored path=.chord/memory/records/x.md)"
 	if !strings.Contains(plain, want) {
 		t.Fatalf("ignored argument should join the timeout option group, want %q:\n%s", want, plain)
 	}
@@ -626,7 +714,7 @@ func TestShellCardShowsIgnoredArgumentWithoutTimeout(t *testing.T) {
 	}
 	rendered := strings.Join(block.Render(160, ""), "\n")
 	plain := stripANSI(rendered)
-	want := "Check git status and unpushed commits (path=.chord/memory/records/x.md)"
+	want := "Check git status and unpushed commits (ignored path=.chord/memory/records/x.md)"
 	if !strings.Contains(plain, want) {
 		t.Fatalf("ignored argument should form its own option group, want %q:\n%s", want, plain)
 	}
@@ -648,7 +736,7 @@ func TestShellCollapsedCardKeepsIgnoredArgumentInOptionGroup(t *testing.T) {
 	}
 	rendered := strings.Join(block.Render(160, ""), "\n")
 	plain := stripANSI(rendered)
-	want := "Check git status and unpushed commits (timeout=2m, path=.chord/memory/records/x.md)"
+	want := "Check git status and unpushed commits (timeout=2m, ignored path=.chord/memory/records/x.md)"
 	if !strings.Contains(plain, want) {
 		t.Fatalf("collapsed header should keep the ignored option group, want %q:\n%s", want, plain)
 	}
@@ -670,7 +758,7 @@ func TestShellCardTruncatesStruckThroughOptionWithoutStyleLeak(t *testing.T) {
 	lines := block.Render(80, "")
 	var header string
 	for _, line := range lines {
-		if strings.Contains(stripANSI(line), "path=") {
+		if strings.Contains(stripANSI(line), "ignored") {
 			header = line
 			break
 		}
@@ -714,7 +802,7 @@ func TestReadCardStrikesThroughIgnoredUnrecognizedArgument(t *testing.T) {
 	rendered := strings.Join(block.Render(120, ""), "\n")
 	plain := strings.ReplaceAll(stripANSI(rendered), "…", "")
 	plain = strings.ReplaceAll(plain, "\x1b", "")
-	if !strings.Contains(plain, "sample.go (limit=40, format=json)") {
+	if !strings.Contains(plain, "sample.go (limit=40, ignored format=json)") {
 		t.Fatalf("ignored argument should join the read option group:\n%s", plain)
 	}
 	if !strings.Contains(rendered, ";9m") {
@@ -916,7 +1004,7 @@ func TestGrepCardFoldsPluralPatternsIntoOptionGroup(t *testing.T) {
 	}
 	// The plural must sit inside the option group beside the valid includes,
 	// not after it behind the " · " separator.
-	if !strings.Contains(plain, `(includes=**/*.go, patterns=`) {
+	if !strings.Contains(plain, `(includes=**/*.go, ignored patterns=`) {
 		t.Fatalf("discarded plural patterns should join the option group:\n%s", plain)
 	}
 	if strings.Contains(plain, `· patterns=`) {
@@ -1000,7 +1088,7 @@ func TestReadCardStrikesThroughShadowedDuplicateValues(t *testing.T) {
 			},
 		},
 	}
-	rendered := strings.Join(block.Render(120, ""), "\n")
+	rendered := strings.Join(block.Render(160, ""), "\n")
 	plain := stripANSI(rendered)
 	for _, want := range []string{"second.go (offset=300, limit=40, ", "limit=75", "offset=664", "path=first.go"} {
 		if !strings.Contains(plain, want) {
@@ -1211,6 +1299,216 @@ func TestToolDisplayResultHidesModelFacingShellDurationNote(t *testing.T) {
 	}
 	if copied := blockCopyContent(block); !strings.Contains(copied, "(command took 12.3s)") {
 		t.Fatalf("expected copied shell card to retain duration note; got:\n%s", copied)
+	}
+}
+
+func TestShellCardStripsIgnoredArgNoteFromOutputSection(t *testing.T) {
+	// The model reaches for a name the schema does not define (here the old
+	// "yield_ms"), so the runtime drops it and appends a model-facing note. The
+	// card surfaces that fact on the header instead of repainting the note as
+	// command output.
+	note := "Note: ignored unrecognized parameter(s): args.yield_ms"
+	block := &Block{
+		ID:                     1,
+		Type:                   BlockToolCall,
+		ToolName:               tools.NameShell,
+		Content:                `{"command":"go test ./internal/tui/","yield_ms":240000}`,
+		ResultContent:          "done\n(command took 14s)\n" + note,
+		ResultNotes:            []string{note},
+		ResultDone:             true,
+		ToolCallDetailExpanded: true,
+		Audit: &message.ToolArgsAudit{
+			OriginalArgsJSON:  `{"command":"go test ./internal/tui/","yield_ms":240000}`,
+			EffectiveArgsJSON: `{"command":"go test ./internal/tui/"}`,
+			IgnoredArgs: []message.IgnoredToolArg{{
+				Path:      "args.yield_ms",
+				ValueJSON: "240000",
+				Reason:    message.IgnoredToolArgReasonUnrecognized,
+			}},
+		},
+	}
+	rendered := stripANSI(strings.Join(block.Render(160, ""), "\n"))
+	if !strings.Contains(rendered, "⏱ 14s") {
+		t.Fatalf("expected whole-second duration on the header; got:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "ignored yield_ms=240000") {
+		t.Fatalf("expected the ignored argument on the header; got:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "done") {
+		t.Fatalf("expected command output to stay in the body; got:\n%s", rendered)
+	}
+	for _, unwanted := range []string{"command took", "Note:", "ignored unrecognized parameter(s)"} {
+		if strings.Contains(rendered, unwanted) {
+			t.Fatalf("did not expect %q in the rendered card; got:\n%s", unwanted, rendered)
+		}
+	}
+	if copied := blockCopyContent(block); !strings.Contains(copied, note) || !strings.Contains(copied, "(command took 14s)") {
+		t.Fatalf("expected copied shell card to retain the model-facing note and duration; got:\n%s", copied)
+	}
+}
+
+func TestFailedShellCardStripsIgnoredArgNoteBeforeErrorTail(t *testing.T) {
+	// A failed call appends "Error: …" after the runtime's notes, so the note
+	// is not the tail of the result text. The card must still not repaint it as
+	// command output: the argument audit on the header carries the fact.
+	note := "Note: ignored unrecognized parameter(s): args.yield_ms"
+	block := &Block{
+		ID:                     2,
+		Type:                   BlockToolCall,
+		ToolName:               tools.NameShell,
+		Content:                `{"command":"go build ./...","yield_ms":240000}`,
+		ResultContent:          "out\n" + note + "\n\nError: exit code 1",
+		ResultNotes:            []string{note},
+		ResultDone:             true,
+		ResultStatus:           agent.ToolResultStatusError,
+		ToolCallDetailExpanded: true,
+		Audit: &message.ToolArgsAudit{
+			OriginalArgsJSON:  `{"command":"go build ./...","yield_ms":240000}`,
+			EffectiveArgsJSON: `{"command":"go build ./..."}`,
+			IgnoredArgs: []message.IgnoredToolArg{{
+				Path:      "args.yield_ms",
+				ValueJSON: "240000",
+				Reason:    message.IgnoredToolArgReasonUnrecognized,
+			}},
+		},
+	}
+	rendered := stripANSI(strings.Join(block.Render(160, ""), "\n"))
+	if !strings.Contains(rendered, "ignored yield_ms=240000") {
+		t.Fatalf("expected the ignored argument on the header; got:\n%s", rendered)
+	}
+	for _, want := range []string{"out", "exit code 1"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("expected %q in the failed card; got:\n%s", want, rendered)
+		}
+	}
+	for _, unwanted := range []string{"Note:", "ignored unrecognized parameter(s)"} {
+		if strings.Contains(rendered, unwanted) {
+			t.Fatalf("did not expect %q in the rendered card; got:\n%s", unwanted, rendered)
+		}
+	}
+	if copied := blockCopyContent(block); !strings.Contains(copied, note) {
+		t.Fatalf("expected the copied card to retain the model-facing note; got:\n%s", copied)
+	}
+}
+
+func TestReadCardStripsIgnoredArgNoteFromFilePreview(t *testing.T) {
+	// The read preview repaints every result line as file content, so a runtime
+	// note appended after the payload used to read as an extra file line.
+	note := "Note: ignored unrecognized parameter(s): args.line_limit"
+	block := &Block{
+		ID:                     3,
+		Type:                   BlockToolCall,
+		ToolName:               tools.NameRead,
+		Content:                `{"path":"internal/tui/block.go","line_limit":10}`,
+		ResultContent:          "READ_RESULT lines=1-1 total=1\npackage tui\n" + note,
+		ResultNotes:            []string{note},
+		ResultDone:             true,
+		ToolCallDetailExpanded: true,
+		Audit: &message.ToolArgsAudit{
+			OriginalArgsJSON:  `{"path":"internal/tui/block.go","line_limit":10}`,
+			EffectiveArgsJSON: `{"path":"internal/tui/block.go"}`,
+			IgnoredArgs: []message.IgnoredToolArg{{
+				Path:      "args.line_limit",
+				ValueJSON: "10",
+				Reason:    message.IgnoredToolArgReasonUnrecognized,
+			}},
+		},
+	}
+	rendered := stripANSI(strings.Join(block.Render(160, ""), "\n"))
+	if !strings.Contains(rendered, "ignored line_limit=10") {
+		t.Fatalf("expected the ignored argument on the header; got:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "package tui") {
+		t.Fatalf("expected the file preview in the body; got:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "Note:") {
+		t.Fatalf("did not expect the runtime note in the file preview; got:\n%s", rendered)
+	}
+	if copied := blockCopyContent(block); !strings.Contains(copied, note) {
+		t.Fatalf("expected the copied card to retain the model-facing note; got:\n%s", copied)
+	}
+}
+
+func TestGenericToolCardStripsIgnoredArgNoteFromResult(t *testing.T) {
+	// Tools without a dedicated renderer echo the whole result as the body, so
+	// the runtime's note must not be painted as that tool's output.
+	note := "Note: ignored unrecognized parameter(s): args.verbose"
+	block := &Block{
+		ID:                     4,
+		Type:                   BlockToolCall,
+		ToolName:               "mcp__sample__ping",
+		Content:                `{"target":"example.invalid","verbose":true}`,
+		ResultContent:          "pong\n" + note,
+		ResultNotes:            []string{note},
+		ResultDone:             true,
+		ToolCallDetailExpanded: true,
+		Audit: &message.ToolArgsAudit{
+			OriginalArgsJSON:  `{"target":"example.invalid","verbose":true}`,
+			EffectiveArgsJSON: `{"target":"example.invalid"}`,
+			IgnoredArgs: []message.IgnoredToolArg{{
+				Path:      "args.verbose",
+				ValueJSON: "true",
+				Reason:    message.IgnoredToolArgReasonUnrecognized,
+			}},
+		},
+	}
+	rendered := stripANSI(strings.Join(block.Render(160, ""), "\n"))
+	if !strings.Contains(rendered, "ignored verbose=true") {
+		t.Fatalf("expected the ignored argument on the header; got:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "pong") {
+		t.Fatalf("expected the tool output in the body; got:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "Note:") {
+		t.Fatalf("did not expect the runtime note in the result body; got:\n%s", rendered)
+	}
+}
+
+func TestDelegateWorkerDropsRuntimeNote(t *testing.T) {
+	// The Worker section renders the handle's structured fields; the runtime's
+	// notes are the model's diagnostics and must not join that field list.
+	note := "Note: ignored unrecognized parameter(s): args.expected_write_scope.extra"
+	block := &Block{
+		ID:            5,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameDelegate,
+		Content:       `{"description":"review the card styles","agent_type":"reviewer"}`,
+		ResultContent: `{"status":"started","task_id":"adhoc-7","agent_id":"expert-12","message":"running in background"}` + "\n" + note,
+		ResultNotes:   []string{note},
+		ResultDone:    true,
+	}
+	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(plain, "↳ Task id: adhoc-7") {
+		t.Fatalf("expected the handle fields to render; got:\n%s", plain)
+	}
+	if strings.Contains(plain, "Note:") {
+		t.Fatalf("did not expect the runtime note in the Worker section; got:\n%s", plain)
+	}
+}
+
+func TestStripResultNotesRemovesOnlyRecordedRuntimeNotes(t *testing.T) {
+	noteA := "Note: ignored unrecognized parameter(s): args.yield_ms"
+	noteB := "Note: ignored null parameter(s): args.timeout_ms; treated as unset, so pass a value or omit the parameter"
+	withNotes := &Block{ResultNotes: []string{noteA, noteB}}
+
+	cases := []struct {
+		name string
+		b    *Block
+		in   string
+		want string
+	}{
+		{"notes before an error tail", withNotes, "out\n" + noteA + "\n\nError: exit code 1", "out\n\nError: exit code 1"},
+		{"notes at the tail", withNotes, "out\n" + noteA + "\n" + noteB, "out"},
+		{"crlf line endings", withNotes, "out\r\n" + noteA + "\r\n", "out"},
+		{"unrecorded note-like line", withNotes, "out\nNote: ignored unrecognized parameter(s): args.other", "out\nNote: ignored unrecognized parameter(s): args.other"},
+		{"no notes recorded", &Block{}, "out\n" + noteA, "out\n" + noteA},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.b.stripResultNotes(tc.in); got != tc.want {
+				t.Fatalf("stripResultNotes(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -3100,7 +3398,7 @@ func TestDeleteCardShowsDiagnosticPathsLikeNormalHeader(t *testing.T) {
 	}
 	rendered := strings.Join(block.Render(120, ""), "\n")
 	joined := stripANSI(rendered)
-	if !strings.Contains(joined, "delete cleanup generated files (.paths=internal/tui/obsolete.go,cmd/old.go, paths=<missing>)") {
+	if !strings.Contains(joined, "delete cleanup generated files (ignored .paths=internal/tui/obsolete.go,cmd/old.go, paths=<missing>)") {
 		t.Fatalf("expected delete diagnostic header to keep the ignored paths beside the reason; got:\n%s", joined)
 	}
 	if !strings.Contains(rendered, ";9m") {

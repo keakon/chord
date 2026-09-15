@@ -58,7 +58,7 @@ func (b *Block) renderDeleteCall(width int, spinnerFrame string) []string {
 		return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
 	}
 
-	displayResult := b.ResultContent
+	displayResult := b.stripResultNotes(b.ResultContent)
 	if b.toolResultIsError() {
 		displayResult = toolErrorDisplayContent(displayResult)
 	}
