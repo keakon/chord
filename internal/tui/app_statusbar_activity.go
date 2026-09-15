@@ -114,8 +114,7 @@ func (m Model) renderExecutingSummary(agentID string) string {
 	if !ok {
 		return executingGlyph
 	}
-	elapsed := max(time.Since(startedAt), time.Second)
-	return executingGlyph + " · " + tools.FormatElapsed(elapsed)
+	return executingGlyph + " · " + tools.FormatElapsed(time.Since(startedAt))
 }
 
 func statusBarTimingAnchor(agentID string) string {
@@ -225,8 +224,7 @@ func (m Model) buildStatusBarActivityDisplayAt(a agent.AgentActivityEvent, now t
 		agentID = "main"
 	}
 
-	elapsedText := m.statusBarElapsedText(agentID)
-
+	elapsedText := ""
 	prog, ok := m.requestProgress[agentID]
 	hasRequestState := false
 	if act, okAct := m.activities[agentID]; okAct {
@@ -242,6 +240,7 @@ func (m Model) buildStatusBarActivityDisplayAt(a agent.AgentActivityEvent, now t
 		}
 		return display
 	}
+	elapsedText = m.statusBarElapsedText(agentID)
 	if hasRequestState {
 		display.Icon = "↓"
 		bytes := int64(0)

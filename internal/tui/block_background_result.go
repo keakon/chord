@@ -193,7 +193,7 @@ func commandDurationNote(line string) string {
 	}
 	secondsText := strings.TrimSuffix(strings.TrimPrefix(line, prefix), "s)")
 	seconds, err := strconv.ParseFloat(secondsText, 64)
-	if err != nil || seconds < 0 {
+	if err != nil || seconds < 1 {
 		return ""
 	}
 	return tools.FormatElapsed(time.Duration(seconds * float64(time.Second)))

@@ -846,7 +846,7 @@ func TestRequestProgressResetsPerCardAcrossAssistantToolAssistant(t *testing.T) 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.RequestProgressEvent{AgentID: "main", Bytes: 225 * 1024, Events: 93}})
 	plain2 := stripANSI(m.renderStatusBar())
 	if !strings.Contains(plain2, "⚙ 3s") {
-		t.Fatalf("tool card should use executing style, got %q", plain2)
+		t.Fatalf("status bar should show executing activity with elapsed, got %q", plain2)
 	}
 
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
@@ -3369,6 +3369,15 @@ func TestRenderExecutingSummaryShowsElapsed(t *testing.T) {
 	}
 	if !strings.Contains(got, "12s") {
 		t.Fatalf("renderExecutingSummary = %q, want elapsed seconds", got)
+	}
+}
+
+func TestRenderExecutingSummaryStartsFromZero(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 12)
+	m.activityStartTime["main"] = time.Now()
+	got := m.renderExecutingSummary("main")
+	if got != "⚙ · 0s" {
+		t.Fatalf("renderExecutingSummary = %q, want activity glyph with zero elapsed", got)
 	}
 }
 
