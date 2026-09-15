@@ -89,21 +89,29 @@ func (m Model) renderRequestProgressSummary(agentID string) string {
 	return summary
 }
 
+func (m Model) executingStartedAt(agentID string) (time.Time, bool) {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		agentID = "main"
+	}
+	if start, ok := m.activityStartTime[statusBarTimingAnchor(agentID)]; ok && !start.IsZero() {
+		return start, true
+	}
+	if start, ok := m.activityStartTime[agentID]; ok && !start.IsZero() {
+		return start, true
+	}
+	if t, ok := lastVisibleBlockStartedWall(m.viewport); ok {
+		return t, true
+	}
+	return time.Time{}, false
+}
+
 func (m Model) renderExecutingSummary(agentID string) string {
 	if agentID == "" {
 		agentID = "main"
 	}
-	anchor := statusBarTimingAnchor(agentID)
-	startedAt := m.activityStartTime[anchor]
-	if startedAt.IsZero() {
-		startedAt = m.activityStartTime[agentID]
-	}
-	if startedAt.IsZero() {
-		if t, ok := lastVisibleBlockStartedWall(m.viewport); ok {
-			startedAt = t
-		}
-	}
-	if startedAt.IsZero() {
+	startedAt, ok := m.executingStartedAt(agentID)
+	if !ok {
 		return executingGlyph
 	}
 	elapsed := max(time.Since(startedAt), time.Second)
@@ -210,21 +218,16 @@ func (m Model) statusBarElapsedText(agentID string) string {
 	return "0s"
 }
 
-func (m Model) statusBarExecutingElapsedText(agentID string) string {
+func (m Model) statusBarExecutingElapsedText(agentID string) (string, bool) {
 	agentID = strings.TrimSpace(agentID)
 	if agentID == "" {
 		agentID = "main"
 	}
-	if start, ok := m.activityStartTime[statusBarTimingAnchor(agentID)]; ok && !start.IsZero() {
-		return strings.TrimSpace(formatStatusBarElapsed(time.Since(start)))
+	start, ok := m.executingStartedAt(agentID)
+	if !ok {
+		return "", false
 	}
-	if start, ok := m.activityStartTime[agentID]; ok && !start.IsZero() {
-		return strings.TrimSpace(formatStatusBarElapsed(time.Since(start)))
-	}
-	if t, ok := lastVisibleBlockStartedWall(m.viewport); ok {
-		return strings.TrimSpace(formatStatusBarElapsed(time.Since(t)))
-	}
-	return "0s"
+	return strings.TrimSpace(formatStatusBarElapsed(time.Since(start))), true
 }
 
 func (m Model) buildStatusBarActivityDisplayAt(a agent.AgentActivityEvent, now time.Time) statusBarActivityDisplay {
@@ -242,8 +245,12 @@ func (m Model) buildStatusBarActivityDisplayAt(a agent.AgentActivityEvent, now t
 		hasRequestState = act.Type == agent.ActivityConnecting || act.Type == agent.ActivityWaitingHeaders || act.Type == agent.ActivityWaitingToken || act.Type == agent.ActivityStreaming
 	}
 	if a.Type == agent.ActivityExecuting {
-		display.Icon = elapsedGlyph
-		display.Text = m.statusBarExecutingElapsedText(agentID)
+		if elapsed, ok := m.statusBarExecutingElapsedText(agentID); ok {
+			display.Icon = elapsedGlyph
+			display.Text = elapsed
+		} else {
+			display.Icon = executingGlyph
+		}
 		return display
 	}
 	if hasRequestState {

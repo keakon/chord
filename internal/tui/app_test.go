@@ -3384,6 +3384,17 @@ func TestRenderActivityExecutingUsesElapsedStyle(t *testing.T) {
 	}
 }
 
+func TestRenderActivityExecutingWithoutStartShowsActivityGlyph(t *testing.T) {
+	m := NewModelWithSize(nil, 200, 24)
+	out := stripANSI(m.renderActivity(agent.AgentActivityEvent{AgentID: "main", Type: agent.ActivityExecuting}, 200))
+	if out != "⚙" {
+		t.Fatalf("renderActivity(executing without start) = %q, want activity glyph without elapsed", out)
+	}
+	if got := m.renderExecutingSummary("main"); got != "⚙" {
+		t.Fatalf("renderExecutingSummary without start = %q, want activity glyph", got)
+	}
+}
+
 func TestFlushVisibleRequestProgressPromotesRawValues(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 12)
 	m.requestProgress["main"] = requestProgressState{RawBytes: 2048, RawEvents: 3}
