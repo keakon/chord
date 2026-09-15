@@ -1672,6 +1672,101 @@ func TestModelDrivenResumeWithEmptyQueueAppendsContinueInstruction(t *testing.T)
 	}
 }
 
+func TestModelDrivenTerminalCandidateContinuesAfterApply(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.newTurn()
+	turnID := a.turn.ID
+	target := compactionTarget{turnID: turnID, turnEpoch: a.turn.Epoch, sessionEpoch: a.sessionEpoch}
+	a.startCompactionState(11, target, compactionTriggerModelDriven, continuationPlan{
+		kind:      compactionResumeModelDriven,
+		turnID:    turnID,
+		turnEpoch: a.turn.Epoch,
+	})
+	pending := a.currentCompactionPendingCall()
+	if pending == nil {
+		t.Fatal("checkpoint must preserve its continuation")
+	}
+	a.resetCompactionState()
+	a.ctxMgr.Append(message.Message{
+		Role:                  message.RoleUser,
+		Content:               "checkpoint summary",
+		IsCompactionSummary:   true,
+		CompactionSummaryMode: compactionSummaryModeModelDriven,
+	})
+
+	if !a.resumePendingMainLLMAfterCompaction(pending, true) {
+		t.Fatal("terminal checkpoint apply must own the idle barrier")
+	}
+	if a.turn == nil || a.turn.ID != turnID {
+		t.Fatal("checkpoint must keep the turn alive for remaining work or the final response")
+	}
+	if notice := a.pendingModelDrivenNotice; !strings.Contains(notice, "continue the current task") {
+		t.Fatalf("checkpoint must schedule a continuation notice, got %q", notice)
+	}
+}
+
+func TestModelDrivenTerminalCandidateContinuesForFreshUserInput(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.newTurn()
+	turnID := a.turn.ID
+	target := compactionTarget{turnID: turnID, turnEpoch: a.turn.Epoch, sessionEpoch: a.sessionEpoch}
+	a.startCompactionState(11, target, compactionTriggerModelDriven, continuationPlan{
+		kind:      compactionResumeModelDriven,
+		turnID:    turnID,
+		turnEpoch: a.turn.Epoch,
+	})
+	pending := a.currentCompactionPendingCall()
+	a.resetCompactionState()
+	a.ctxMgr.Append(message.Message{
+		Role:                  message.RoleUser,
+		Content:               "checkpoint summary",
+		IsCompactionSummary:   true,
+		CompactionSummaryMode: compactionSummaryModeModelDriven,
+	})
+	a.pendingUserMessages = []pendingUserMessage{{Content: "new request", FromUser: true}}
+
+	if !a.resumePendingMainLLMAfterCompaction(pending, true) {
+		t.Fatal("terminal checkpoint with fresh input must resume the turn")
+	}
+	if a.turn == nil || a.turn.ID != turnID {
+		t.Fatal("fresh user input must keep the checkpoint turn alive")
+	}
+	if len(a.pendingUserMessages) != 0 {
+		t.Fatalf("fresh user input must merge into the continuation, got %d queued", len(a.pendingUserMessages))
+	}
+	snapshot := a.ctxMgr.Snapshot()
+	if len(snapshot) != 2 || !strings.Contains(snapshot[1].Content, "new request") {
+		t.Fatalf("fresh user input must be visible in continuation context, got %+v", snapshot)
+	}
+}
+
+func TestModelDrivenCheckpointDuplicateUsesArgsAndRuntimeFingerprint(t *testing.T) {
+	runtime := modelDrivenRuntimeInputFingerprint(modelDrivenRuntimeInput{
+		todos: []tools.TodoItem{{ID: "task-1", Content: "finish", Status: "completed"}},
+	})
+	args := tools.CompactContextArgs{ActiveObjective: "finish", NextStep: "wait"}
+	req := &modelDrivenCheckpointRequest{
+		Args:            args,
+		ArgsFingerprint: modelDrivenArgsFingerprint(args),
+	}
+	bundle := modelDrivenBarrierSnapshot{
+		snapshot:                             []message.Message{{IsCompactionSummary: true, CompactionSummaryMode: compactionSummaryModeModelDriven}},
+		runtimeStateFingerprint:              runtime,
+		lastModelDrivenCheckpointFingerprint: modelDrivenCheckpointFingerprint(req.ArgsFingerprint, runtime),
+	}
+	if reason, skipReason, skip := (&MainAgent{}).modelDrivenCheckpointSkipVerdict(bundle, req); !skip || skipReason != modelDrivenSkipReasonDuplicate || !strings.Contains(reason, "unchanged") {
+		t.Fatalf("unchanged checkpoint must be skipped as duplicate: reason=%q skip_reason=%q skip=%v", reason, skipReason, skip)
+	}
+	bundle.runtimeStateFingerprint = modelDrivenRuntimeInputFingerprint(modelDrivenRuntimeInput{
+		todos: []tools.TodoItem{{ID: "task-1", Content: "finish", Status: "in_progress"}},
+	})
+	if _, skipReason, skip := (&MainAgent{}).modelDrivenCheckpointSkipVerdict(bundle, req); skip || skipReason == modelDrivenSkipReasonDuplicate {
+		t.Fatalf("changed runtime state must not be treated as duplicate: skip_reason=%q skip=%v", skipReason, skip)
+	}
+}
+
 // TestModelDrivenResumeBackgroundCompletionDoesNotSuppressContinueInstruction
 // pins the mergedUserInput criterion on its least obvious false positive: a
 // queued background-task completion is FromUser=false and drains into the

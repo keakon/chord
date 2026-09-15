@@ -163,7 +163,7 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 	}
 	if a.stageCompletionCandidatePending && !a.stageCompletionCandidatePromptDelivered {
 		a.stageCompletionCandidatePromptDelivered = true
-		overlays = append(overlays, message.Message{Role: "user", Kind: message.KindTurnOverlay, Content: "<system-reminder>\nA task stage has reached a terminal TODO state. Decide whether earlier exploration is still needed; if not, record verified continuation state and request a provisional context checkpoint with compact_context. Do not claim completion without evidence.\n</system-reminder>"})
+		overlays = append(overlays, message.Message{Role: "user", Kind: message.KindTurnOverlay, Content: "<system-reminder>\nThe TODO list reached a terminal state; this does not establish that the current user request is complete. Check remaining work and verification. If only the final response remains, deliver it without compact_context. Otherwise continue the work; a stage boundary alone is not a reason to checkpoint.\n</system-reminder>"})
 	}
 
 	// Context-pressure reminder (sticky per compaction window — full text once,

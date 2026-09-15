@@ -31,6 +31,9 @@ type modelDrivenCheckpointRequest struct {
 	ToolCallID    string
 	Args          tools.CompactContextArgs
 	ClaimStatuses map[string]string
+	// ArgsFingerprint is the canonical argument fingerprint used with the
+	// post-apply runtime fingerprint to reject an unchanged checkpoint request.
+	ArgsFingerprint string
 	// Claims is the authoritative claim set when it is set: the merged carry
 	// (fresh submission claims plus carried claims it did not restate) that
 	// mergePriorTypedCheckpointState produces. Rendering and invalidation read
@@ -138,8 +141,9 @@ type modelDrivenBarrierSnapshot struct {
 	// to maxRequestBatch(messages) after a process restart). The interval and
 	// cooldown verdicts and their settlement recording all use this one
 	// number, captured once on the event loop.
-	currentRequestBatch     uint64
-	runtimeStateFingerprint string
+	currentRequestBatch                  uint64
+	runtimeStateFingerprint              string
+	lastModelDrivenCheckpointFingerprint string
 	// lastModelDrivenApplyBatch / lastModelDrivenSkipBatch /
 	// lastModelDrivenSkipReason are the event-loop-owned apply/skip records at
 	// the barrier. The worker decides the interval and cooldown verdicts from
@@ -314,8 +318,9 @@ func (a *MainAgent) tryArmModelDrivenCheckpoint(callID string, rawArgs string) (
 		return "", err
 	}
 	a.pendingModelDriven = &modelDrivenCheckpointRequest{
-		ToolCallID: callID,
-		Args:       args,
+		ToolCallID:      callID,
+		Args:            args,
+		ArgsFingerprint: modelDrivenArgsFingerprint(args),
 	}
 	auditJSON := marshalCompactContextArgsForAudit(args)
 	a.armModelDrivenProposal(callID, args, auditJSON, "accepted by runtime validation")
@@ -337,6 +342,25 @@ func (a *MainAgent) tryArmModelDrivenCheckpoint(callID string, rawArgs string) (
 	// surfaced by the continuation notice).
 	a.markReminderCompactContextCalled()
 	return result, nil
+}
+
+func modelDrivenArgsFingerprint(args tools.CompactContextArgs) string {
+	data, err := json.Marshal(args)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(data)
+	return fmt.Sprintf("%x", sum[:])
+}
+
+func modelDrivenCheckpointFingerprint(argsFingerprint, runtimeFingerprint string) string {
+	argsFingerprint = strings.TrimSpace(argsFingerprint)
+	runtimeFingerprint = strings.TrimSpace(runtimeFingerprint)
+	if argsFingerprint == "" || runtimeFingerprint == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(argsFingerprint + "\x00" + runtimeFingerprint))
+	return fmt.Sprintf("%x", sum[:])
 }
 
 // explainCheckpointRejection appends the runtime state a rejection needs to be
@@ -766,7 +790,7 @@ func (a *MainAgent) maybeStartModelDrivenBarrier() bool {
 	// plan id, and the caller continues into beginMainLLMAfterPreparation
 	// without a model-driven continuation. The worker re-checks the same
 	// verdict defensively for paths that could reach it without this gate.
-	if reason, skipReason, skip := a.modelDrivenIntervalCooldownVerdict(bundle); skip {
+	if reason, skipReason, skip := a.modelDrivenCheckpointSkipVerdict(bundle, req); skip {
 		planID, target := a.nextCompactionPlan()
 		a.recordCompactionLifecycleEvent("started", map[string]string{
 			"trigger":        compactionTriggerModelDriven.analyticsName(),
@@ -842,30 +866,31 @@ func (a *MainAgent) captureModelDrivenBarrierSnapshot(snapshot []message.Message
 	// the evidence pack: the live record already shows it verbatim.
 	retainedFailures := retainedFailureCallIDs(checkpointRetainedFailureRecords(snapshot))
 	bundle := modelDrivenBarrierSnapshot{
-		snapshot:                    snapshot,
-		evidenceItems:               excludeRetainedFailureEvidence(a.evidenceItemsForCompaction(a.ctxMgr.GetMaxTokens()), retainedFailures),
-		todos:                       a.GetTodos(),
-		subAgents:                   a.taskInfosForCompaction(),
-		backgroundObjects:           jobStatesForSnapshot(),
-		maxTokens:                   a.ctxMgr.GetMaxTokens(),
-		sessionDir:                  a.sessionDir,
-		originalRequest:             a.captureOriginalFirstUserHint(),
-		responsesState:              a.currentTurnResponsesState(),
-		prepareReducedRequest:       a.compactionReductionScratch().prepareMessagesForLLM,
-		fixedRequestTokens:          a.estimateFixedRequestTokens(),
-		queuedUserMessages:          a.pendingUserMessagesForPreflight(),
-		postResetFixedRequestTokens: a.estimatePostResetFixedRequestTokens(),
-		currentRequestBatch:         a.currentRequestBatch(snapshot),
-		lastModelDrivenApplyBatch:   a.lastModelDrivenApplyBatch,
-		lastModelDrivenSkipBatch:    a.lastModelDrivenSkipBatch,
-		lastModelDrivenSkipReason:   a.lastModelDrivenSkipReason,
-		promptCacheCapable:          a.currentModelPromptCacheCapable(),
-		calibratedRatio:             a.ctxMgr.CalibratedRatio(),
-		retainRecentTokens:          a.effectiveCompactionRetainRecentTokens(),
-		archiveMeta:                 a.captureCompactionArchiveMeta(),
-		lastPreparedTurnID:          lastPreparedTurnID,
-		lastPreparedSource:          lastPreparedSource,
-		lastPreparedPrefix:          lastPreparedPrefix,
+		snapshot:                             snapshot,
+		evidenceItems:                        excludeRetainedFailureEvidence(a.evidenceItemsForCompaction(a.ctxMgr.GetMaxTokens()), retainedFailures),
+		todos:                                a.GetTodos(),
+		subAgents:                            a.taskInfosForCompaction(),
+		backgroundObjects:                    jobStatesForSnapshot(),
+		maxTokens:                            a.ctxMgr.GetMaxTokens(),
+		sessionDir:                           a.sessionDir,
+		originalRequest:                      a.captureOriginalFirstUserHint(),
+		responsesState:                       a.currentTurnResponsesState(),
+		prepareReducedRequest:                a.compactionReductionScratch().prepareMessagesForLLM,
+		fixedRequestTokens:                   a.estimateFixedRequestTokens(),
+		queuedUserMessages:                   a.pendingUserMessagesForPreflight(),
+		postResetFixedRequestTokens:          a.estimatePostResetFixedRequestTokens(),
+		currentRequestBatch:                  a.currentRequestBatch(snapshot),
+		lastModelDrivenApplyBatch:            a.lastModelDrivenApplyBatch,
+		lastModelDrivenCheckpointFingerprint: a.lastModelDrivenCheckpointFingerprint,
+		lastModelDrivenSkipBatch:             a.lastModelDrivenSkipBatch,
+		lastModelDrivenSkipReason:            a.lastModelDrivenSkipReason,
+		promptCacheCapable:                   a.currentModelPromptCacheCapable(),
+		calibratedRatio:                      a.ctxMgr.CalibratedRatio(),
+		retainRecentTokens:                   a.effectiveCompactionRetainRecentTokens(),
+		archiveMeta:                          a.captureCompactionArchiveMeta(),
+		lastPreparedTurnID:                   lastPreparedTurnID,
+		lastPreparedSource:                   lastPreparedSource,
+		lastPreparedPrefix:                   lastPreparedPrefix,
 	}
 	bundle.runtimeStateFingerprint = modelDrivenRuntimeStateFingerprint(bundle)
 	return bundle
@@ -1144,7 +1169,7 @@ func (a *MainAgent) produceModelDrivenDraftAsync(ctx context.Context, bundle mod
 	// prepareMessagesForLLM for a request whose outcome cannot change. The
 	// verdict batch/reason ride on the draft so the event-loop settlement
 	// records exactly the numbers the worker decided on.
-	if reason, skipReason, ok := a.modelDrivenIntervalCooldownVerdict(bundle); ok {
+	if reason, skipReason, ok := a.modelDrivenCheckpointSkipVerdict(bundle, req); ok {
 		return modelDrivenSkipDraft(planID, target, reason, skipReason, modelDrivenPolicySkipRecordBatch(skipReason, bundle.currentRequestBatch), nil), nil
 	}
 
@@ -1238,26 +1263,27 @@ func (a *MainAgent) produceModelDrivenDraftAsync(ctx context.Context, bundle mod
 	newMessages = append(newMessages, retainedFailures...)
 	historyCommitted = true
 	return &compactionDraft{
-		PlanID:                planID,
-		Target:                target,
-		NewMessages:           newMessages,
-		HeadSplit:             headSplit,
-		Index:                 index,
-		AbsHistoryPath:        absHistoryPath,
-		AbsHistoryMetaPath:    absHistoryMetaPath,
-		SourceRefs:            sourceRefs,
-		SourceFingerprint:     sourceFingerprint,
-		TransactionID:         transactionID,
-		TransactionSessionDir: bundle.archiveMeta.sessionDir,
-		SummaryMode:           compactionSummaryModeModelDriven,
-		Backend:               config.CompactionPresetGeneric,
-		Profile:               string(compactionProfileArchival),
-		ModelRef:              "model_declared",
-		Manual:                false,
-		ArchivedCount:         len(head),
-		EvidenceCount:         len(evidenceItems),
-		EvidenceArtifacts:     len(evidenceMsgs),
-		ModelDrivenPreflight:  &preflight,
+		PlanID:                     planID,
+		Target:                     target,
+		ModelDrivenArgsFingerprint: req.ArgsFingerprint,
+		NewMessages:                newMessages,
+		HeadSplit:                  headSplit,
+		Index:                      index,
+		AbsHistoryPath:             absHistoryPath,
+		AbsHistoryMetaPath:         absHistoryMetaPath,
+		SourceRefs:                 sourceRefs,
+		SourceFingerprint:          sourceFingerprint,
+		TransactionID:              transactionID,
+		TransactionSessionDir:      bundle.archiveMeta.sessionDir,
+		SummaryMode:                compactionSummaryModeModelDriven,
+		Backend:                    config.CompactionPresetGeneric,
+		Profile:                    string(compactionProfileArchival),
+		ModelRef:                   "model_declared",
+		Manual:                     false,
+		ArchivedCount:              len(head),
+		EvidenceCount:              len(evidenceItems),
+		EvidenceArtifacts:          len(evidenceMsgs),
+		ModelDrivenPreflight:       &preflight,
 	}, nil
 }
 
@@ -1368,10 +1394,12 @@ func modelDrivenCacheRebuildCost(projectedTokens int) int {
 }
 
 const (
-	// modelDrivenSkipReasonLowGain / modelDrivenSkipReasonInterval are the
+	// modelDrivenSkipReasonLowGain / modelDrivenSkipReasonInterval /
+	// modelDrivenSkipReasonDuplicate are the
 	// bound skip reasons recorded on the cooldown state.
-	modelDrivenSkipReasonLowGain  = "low_gain"
-	modelDrivenSkipReasonInterval = "interval"
+	modelDrivenSkipReasonLowGain   = "low_gain"
+	modelDrivenSkipReasonInterval  = "interval"
+	modelDrivenSkipReasonDuplicate = "duplicate"
 )
 
 // modelDrivenPolicySkipRecordBatch returns the batch a pre-preflight policy
@@ -1444,6 +1472,32 @@ func (a *MainAgent) modelDrivenIntervalCooldownVerdict(bundle modelDrivenBarrier
 		return "cooling down after a previous low_gain skip; wait a couple of model requests before retrying", modelDrivenSkipReasonLowGain, true
 	}
 	return "", "", false
+}
+
+func modelDrivenCheckpointDuplicate(bundle modelDrivenBarrierSnapshot, req *modelDrivenCheckpointRequest) bool {
+	if req == nil {
+		return false
+	}
+	// Queued user input is deliberately excluded from the runtime fingerprint
+	// because it is merged after the checkpoint apply. It is nevertheless fresh
+	// intent, so it must always make an otherwise identical request eligible.
+	if len(bundle.queuedUserMessages) > 0 {
+		return false
+	}
+	argsFingerprint := req.ArgsFingerprint
+	if argsFingerprint == "" {
+		argsFingerprint = modelDrivenArgsFingerprint(req.Args)
+	}
+	current := modelDrivenCheckpointFingerprint(argsFingerprint, bundle.runtimeStateFingerprint)
+	return current != "" && current == bundle.lastModelDrivenCheckpointFingerprint &&
+		!modelDrivenHasProgressSinceCheckpoint(bundle.snapshot)
+}
+
+func (a *MainAgent) modelDrivenCheckpointSkipVerdict(bundle modelDrivenBarrierSnapshot, req *modelDrivenCheckpointRequest) (string, string, bool) {
+	if modelDrivenCheckpointDuplicate(bundle, req) {
+		return "no new work or input since the last applied checkpoint, and the checkpoint arguments and runtime state are unchanged; continue the task or deliver the final response instead of retrying", modelDrivenSkipReasonDuplicate, true
+	}
+	return a.modelDrivenIntervalCooldownVerdict(bundle)
 }
 
 // --------------------------------------------------------------- checkpoint ---
@@ -1619,9 +1673,11 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 
 	sections := []fallbackSummarySection{
 		{"## Current User Request", modelDrivenCurrentUserRequestSection(anchor)},
-		{"## Active Objective", renderModelState(req.Args.ActiveObjective)},
-		{"## Background Goals", "- Earlier goals are background; follow only the Current User Request and Active Objective above."},
 		{"## User Constraints", constraints},
+		{"## Active Objective", renderModelState(req.Args.ActiveObjective)},
+		{"## Background Goals", "- Earlier goals and the model-declared Active Objective are subordinate to the Current User Request and User Constraints."},
+		{"## Next Step", renderModelState(req.Args.NextStep)},
+		{"## Open Problems", openIssues},
 		{"## Progress", completed},
 		{"## Key Decisions", decisions},
 		{"## Files and Evidence", "- Precise archived history is listed in the checkpoint wrapper's archived history map."},
@@ -1634,8 +1690,6 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 		{typedStateSectionHeading, typedState},
 		{"## Todo State", formatTodosAsRelevanceBullets(bundle.todos, anchor)},
 		{"## SubAgent State", formatSubAgentsAsBullets(bundle.subAgents)},
-		{"## Open Problems", openIssues},
-		{"## Next Step", renderModelState(req.Args.NextStep)},
 	}
 	summary := renderFallbackSummarySections(sections, bundle.backgroundObjects)
 	// The model-driven checkpoint has no model classification to fill the

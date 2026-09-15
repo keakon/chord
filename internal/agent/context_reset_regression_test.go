@@ -12,6 +12,7 @@ import (
 func TestUpdateTodosPreservesModelDrivenApplyAnchor(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.lastModelDrivenApplyBatch = 7
+	a.lastModelDrivenCheckpointFingerprint = "checkpoint-fingerprint"
 
 	if err := a.UpdateTodos([]tools.TodoItem{{
 		ID:      "task-1",
@@ -26,6 +27,9 @@ func TestUpdateTodosPreservesModelDrivenApplyAnchor(t *testing.T) {
 	}
 	if snapshot.LastModelDrivenApplyBatch != 7 {
 		t.Fatalf("last model-driven apply batch = %d, want 7", snapshot.LastModelDrivenApplyBatch)
+	}
+	if snapshot.LastModelDrivenCheckpointFingerprint != "checkpoint-fingerprint" {
+		t.Fatal("todo update must preserve the checkpoint fingerprint")
 	}
 	if len(snapshot.Todos) != 1 || snapshot.Todos[0].ID != "task-1" {
 		t.Fatalf("snapshot todos = %+v, want task-1", snapshot.Todos)

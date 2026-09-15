@@ -82,8 +82,11 @@ func TestStageCompletionCandidateOverlayIsOneShot(t *testing.T) {
 	a := turnOverlayBenchAgent(1)
 	a.stageCompletionCandidatePending = true
 	overlays := a.buildTurnOverlayMessages()
-	if len(overlays) != 1 || !strings.Contains(overlays[0].Content, "provisional context checkpoint") {
+	if len(overlays) != 1 || !strings.Contains(overlays[0].Content, "a stage boundary alone is not a reason to checkpoint") {
 		t.Fatalf("stage completion overlays = %#v", overlays)
+	}
+	if !strings.Contains(overlays[0].Content, "deliver it without compact_context") {
+		t.Fatal("stage completion must not request a checkpoint instead of the final response")
 	}
 	if !a.stageCompletionCandidatePromptDelivered || !a.stageCompletionCandidatePending {
 		t.Fatal("stage completion candidate prompt was not delivered while candidate was retained")

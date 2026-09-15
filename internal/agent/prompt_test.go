@@ -2152,18 +2152,15 @@ func TestModelDrivenContextPromptBlockInjectedWhenEnabled(t *testing.T) {
 		"compact_context",
 		"state_files",
 		"archived history",
-		".chord/notes/",
-		".chord/plans/",
-		"safe stop",
-		"refresh the notes file before you request a checkpoint",
-		"Read the registered files first after a reset",
+		"checkpoint and any injected file content",
+		"only for missing or changed information",
 		"tool description governs checkpoint timing",
 	} {
 		if !strings.Contains(block, want) {
 			t.Fatalf("block must mention %q, got:\n%s", want, block)
 		}
 	}
-	for _, unwanted := range []string{"<system-reminder>", "estimated tokens", "checkpoint_kind=", "Leave state_files empty only when"} {
+	for _, unwanted := range []string{"<system-reminder>", "estimated tokens", "checkpoint_kind=", "Leave state_files empty", "Call it alone", "refresh files"} {
 		if strings.Contains(block, unwanted) {
 			t.Fatalf("context block duplicates tool or trust guidance %q: %s", unwanted, block)
 		}

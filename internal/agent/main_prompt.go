@@ -440,19 +440,15 @@ func (a *MainAgent) mainAgentCapabilityPromptBlock() string {
 // and executable (enabled + registered + not denied by permission rules);
 // otherwise the tool does not exist on the model's surface and the guidance
 // would have no referent — no system prompt may push a tool that is invisible
-// or denied. Unlike the tool description (which governs how to call it), this
-// guidance tells the model when to start planning for it: during exploration,
-// write key findings to files as they settle so a later checkpoint can be
-// built from them, and choose a checkpoint based on the cost of carrying the
-// current history versus restoring externalized state.
+// or denied. The tool description owns checkpoint timing and preparation;
+// this block owns the long-session principle and recovery reading order.
 func (a *MainAgent) modelDrivenContextPromptBlock() string {
 	if !a.compactContextVisible() {
 		return ""
 	}
 	return "## Long-session context management\n" +
-		"- In a long session, keep writing important findings, decisions, and state to project files your role may write (for example a task-notes file under .chord/notes/ or a plan document under .chord/plans/) as phases settle, and refresh the notes file before you request a checkpoint: the reset replaces the history a later write would have drawn on.\n" +
-		"- Under context pressure, prioritize preserving recovery state at the next safe stop over optional exploration. The compact_context tool description governs checkpoint timing, exclusive calls, state-file rules, budgets, and skipped or rejected requests.\n" +
-		"- Read the registered files first after a reset; use registered `state_files` as the primary recovery source and read archived history only for exact details that are still needed."
+		"- Preserve important findings, decisions, and recovery state as part of the work. The compact_context tool description governs checkpoint timing and preparation.\n" +
+		"- After a reset, start from the checkpoint and any injected file content. Read registered state_files only for missing or changed information needed for the next action; read archived history only for exact details unavailable there."
 }
 
 // shouldUsePlannerPrompt reports whether the active role gets the built-in

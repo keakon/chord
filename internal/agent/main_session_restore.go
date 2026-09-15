@@ -32,32 +32,33 @@ type sessionRestoreResult struct {
 }
 
 type loadedSessionState struct {
-	SessionPath                     string
-	Messages                        []message.Message
-	TodoItems                       []tools.TodoItem
-	TaskRecords                     map[string]*DurableTaskRecord
-	TaskSettlements                 map[taskAttemptKey]*TaskSettlement
-	AgentRequests                   map[string]*DurableAgentRequest
-	AgentRequestsDegraded           bool
-	ActiveRole                      string
-	ModelPoolCurrentModelPool       string
-	ModelPoolAgentOverrides         map[string]string
-	UsageStats                      analytics.SessionStats
-	WalltimeStats                   map[string]*analytics.WalltimeStats
-	AgentModelRefs                  map[string]analytics.AgentModelRefs
-	ContextUsage                    message.TokenUsage
-	LastInputTokens                 int
-	LastTotalContextTokens          int
-	PendingCompactionResume         *recovery.PendingCompactionResume
-	LastModelDrivenApplyBatch       uint64
-	AutoCompactRequestGeneration    uint64
-	ModelDrivenProposal             *recovery.ModelDrivenProposalSnapshot
-	StageCompletionCandidateTurnID  uint64
-	StageCompletionCandidatePending bool
-	SubAgentStates                  []loadedSubAgentState
-	MailboxMessages                 []SubAgentMailboxMessage
-	MailboxSeqMax                   uint64
-	Summary                         *SessionSummary
+	SessionPath                          string
+	Messages                             []message.Message
+	TodoItems                            []tools.TodoItem
+	TaskRecords                          map[string]*DurableTaskRecord
+	TaskSettlements                      map[taskAttemptKey]*TaskSettlement
+	AgentRequests                        map[string]*DurableAgentRequest
+	AgentRequestsDegraded                bool
+	ActiveRole                           string
+	ModelPoolCurrentModelPool            string
+	ModelPoolAgentOverrides              map[string]string
+	UsageStats                           analytics.SessionStats
+	WalltimeStats                        map[string]*analytics.WalltimeStats
+	AgentModelRefs                       map[string]analytics.AgentModelRefs
+	ContextUsage                         message.TokenUsage
+	LastInputTokens                      int
+	LastTotalContextTokens               int
+	PendingCompactionResume              *recovery.PendingCompactionResume
+	LastModelDrivenApplyBatch            uint64
+	LastModelDrivenCheckpointFingerprint string
+	AutoCompactRequestGeneration         uint64
+	ModelDrivenProposal                  *recovery.ModelDrivenProposalSnapshot
+	StageCompletionCandidateTurnID       uint64
+	StageCompletionCandidatePending      bool
+	SubAgentStates                       []loadedSubAgentState
+	MailboxMessages                      []SubAgentMailboxMessage
+	MailboxSeqMax                        uint64
+	Summary                              *SessionSummary
 }
 
 type loadedSubAgentState struct {
@@ -423,6 +424,7 @@ func (a *MainAgent) applySessionSnapshot(loaded *loadedSessionState, sessionPath
 	loaded.LastTotalContextTokens = snap.LastTotalContextTokens
 	loaded.PendingCompactionResume = clonePendingCompactionResume(snap.PendingCompactionResume)
 	loaded.LastModelDrivenApplyBatch = snap.LastModelDrivenApplyBatch
+	loaded.LastModelDrivenCheckpointFingerprint = snap.LastModelDrivenCheckpointFingerprint
 	loaded.AutoCompactRequestGeneration = snap.AutoCompactRequestGeneration
 	loaded.ModelDrivenProposal = cloneModelDrivenProposalSnapshot(snap.ModelDrivenProposal)
 	loaded.StageCompletionCandidateTurnID = snap.StageCompletionCandidateTurnID
@@ -740,6 +742,7 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	}
 	a.setPendingCompactionResume(loaded.PendingCompactionResume)
 	a.lastModelDrivenApplyBatch = loaded.LastModelDrivenApplyBatch
+	a.lastModelDrivenCheckpointFingerprint = loaded.LastModelDrivenCheckpointFingerprint
 	if proposal := loaded.ModelDrivenProposal; proposal != nil {
 		a.modelDrivenProposal = modelDrivenProposalState{
 			requestID: strings.TrimSpace(proposal.RequestID),

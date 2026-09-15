@@ -90,6 +90,19 @@ func TestCompactionGraceDefersTwoBatchesThenExpires(t *testing.T) {
 	}
 }
 
+func TestCheckpointPressureNoticesSharePreparationContract(t *testing.T) {
+	for _, notice := range []string{buildContextPressureReminderText(), contextPressureReminderShortText, compactionImminentText(1), compactionImminentText(2)} {
+		if strings.Count(notice, contextCheckpointPressureAction) != 1 {
+			t.Fatal("pressure notices must share one self-contained action contract")
+		}
+		for _, forbidden := range []string{"Otherwise write", "otherwise keep writing", "never interrupt an in-flight", "read or wrote"} {
+			if strings.Contains(notice, forbidden) {
+				t.Fatalf("pressure notice contains conflicting requirement %q", forbidden)
+			}
+		}
+	}
+}
+
 func TestCompactionGraceOnlyWhileCompactContextVisible(t *testing.T) {
 	a := graceTestAgent(t, 0.85)
 	snapshot := a.ctxMgr.Snapshot()

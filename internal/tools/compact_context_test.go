@@ -492,6 +492,9 @@ func TestCompactContextDescriptionExplainsPressureAwareSafeStops(t *testing.T) {
 		"provisional checkpoint",
 		"stage remains active or candidate",
 		"task is complete and only the final response remains",
+		"A checkpoint never completes the task or replaces the final response",
+		"use the normal question or waiting mechanism",
+		"A terminal TODO state alone is not a reason to checkpoint",
 	} {
 		if !strings.Contains(description, want) {
 			t.Fatalf("description must mention %q, got:\n%s", want, description)
@@ -509,8 +512,6 @@ func TestCompactContextDescriptionRetainsCallConstraintsWithoutDelegation(t *tes
 		"about 2048 estimated tokens",
 		"Call it alone",
 		"sync drifted entries with todo_write",
-		"state_files entries must resolve inside the project root",
-		"never reads them and never verifies that they exist",
 		"a later model-driven [Context Summary] checkpoint confirms the reset was applied",
 		"normal policy result, not an error",
 	} {
@@ -536,8 +537,6 @@ func TestCompactContextDescriptionRetainsCallConstraintsWithoutDelegation(t *tes
 func TestCompactContextDescriptionKeepsRejectionGuidanceGeneric(t *testing.T) {
 	description := NewCompactContextTool(testCompactValidator()).Description()
 	for _, want := range []string{
-		"The runtime validates every field against its own description before the checkpoint is armed",
-		"a violation rejects the whole request with the reason",
 		"re-submitting the same values cannot succeed",
 		"If the arguments are rejected, fix the reported problem and retry",
 	} {
@@ -560,9 +559,8 @@ func TestCompactContextStatesWhenStateFilesMayBeEmpty(t *testing.T) {
 	tool := NewCompactContextTool(testCompactValidator())
 	description := tool.Description()
 	for _, want := range []string{
-		"list at least that file",
-		"leave state_files empty only when no durable file exists",
-		"your role cannot write files",
+		"Leave state_files empty when the structured arguments fully carry the recovery state",
+		"do not create or modify files solely to request a checkpoint",
 	} {
 		if !strings.Contains(description, want) {
 			t.Fatalf("description must mention %q, got:\n%s", want, description)
@@ -577,7 +575,7 @@ func TestCompactContextStatesWhenStateFilesMayBeEmpty(t *testing.T) {
 		t.Fatal("Parameters() must declare state_files")
 	}
 	schema, _ := stateFiles["description"].(string)
-	for _, want := range []string{"Prefer at least one entry", "leave it empty only when no such file exists"} {
+	for _, want := range []string{"Leave empty when structured arguments carry the state", "never reads them and never verifies that they exist", "current read permission allows it"} {
 		if !strings.Contains(schema, want) {
 			t.Fatalf("state_files schema must mention %q, got:\n%s", want, schema)
 		}

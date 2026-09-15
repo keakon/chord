@@ -137,9 +137,10 @@ type compactionDraft struct {
 	Target         compactionTarget
 	// RuntimeGeneration identifies the request-batch state captured at the
 	// model-driven barrier. A changed generation makes that continuation stale.
-	RuntimeGeneration       uint64
-	RuntimeStateFingerprint string
-	ModelDrivenRequestID    string
+	RuntimeGeneration          uint64
+	RuntimeStateFingerprint    string
+	ModelDrivenRequestID       string
+	ModelDrivenArgsFingerprint string
 
 	NewMessages           []message.Message
 	HeadSplit             int // Async mode: snapshot boundary for tail preservation

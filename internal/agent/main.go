@@ -746,6 +746,11 @@ type MainAgent struct {
 	// unthrottled; restore keeps the persisted value (the current > last
 	// guard prevents uint64 underflow on resumed sessions).
 	lastModelDrivenApplyBatch uint64
+	// lastModelDrivenCheckpointFingerprint identifies the arguments and
+	// post-apply runtime state of the last successful model-driven checkpoint.
+	// It prevents an unchanged continuation from re-arming the same reset
+	// when no new work or input follows the last checkpoint, including after restore.
+	lastModelDrivenCheckpointFingerprint string
 	// lastModelDrivenSkipBatch and lastModelDrivenSkipReason record the most
 	// recent low-gain / interval skip for the same-reason skip cooldown: a
 	// retry within minModelDrivenSkipCooldownBatches of the same reason

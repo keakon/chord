@@ -79,7 +79,8 @@ type SessionSnapshot struct {
 	// so a restored session keeps enforcing the minimum apply interval; the
 	// current > last comparison guards against uint64 underflow when the
 	// in-memory batch counter restarts at 0 after restore.
-	LastModelDrivenApplyBatch uint64 `json:"last_model_driven_apply_batch,omitempty"`
+	LastModelDrivenApplyBatch            uint64 `json:"last_model_driven_apply_batch,omitempty"`
+	LastModelDrivenCheckpointFingerprint string `json:"last_model_driven_checkpoint_fingerprint,omitempty"`
 	// AutoCompactRequestGeneration is the monotonic id of the last armed
 	// usage-driven auto-compact request. It is persisted so a restored session
 	// never reuses a generation (and its externalization-warning claim).

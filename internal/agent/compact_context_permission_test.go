@@ -163,18 +163,18 @@ func TestContextPressureReminderShortTextSelfContained(t *testing.T) {
 	if strings.Contains(contextPressureReminderShortText, "earlier notice") {
 		t.Fatalf("short reminder must not reference the transient earlier notice: %q", contextPressureReminderShortText)
 	}
-	for _, want := range []string{"compact_context", "project file"} {
+	for _, want := range []string{"compact_context", "structured arguments or permitted state files", "final response", "user input"} {
 		if !strings.Contains(contextPressureReminderShortText, want) {
 			t.Fatalf("short reminder must restate the action (mention %q), got %q", want, contextPressureReminderShortText)
 		}
 	}
 }
 
-func TestModelDrivenContextPromptBlockRanksPreservationPriority(t *testing.T) {
+func TestModelDrivenContextPromptDelegatesPreparationAndPreservesTrustBoundary(t *testing.T) {
 	a := modelDrivenPromptTestAgent(t)
 	block := a.modelDrivenContextPromptBlock()
-	if !strings.Contains(block, "prioritize preserving recovery state at the next safe stop over optional exploration") {
-		t.Fatalf("context-management prompt must rank preservation over optional work: %s", block)
+	if !strings.Contains(block, "tool description governs checkpoint timing and preparation") {
+		t.Fatalf("context-management prompt must defer preparation to the tool: %s", block)
 	}
 	prompt := a.buildSystemPrompt()
 	for _, want := range []string{

@@ -329,6 +329,7 @@ func (a *MainAgent) installSessionTarget(sessionDir string) {
 	// underflow against a freshly resumed counter). The new session's first
 	// model-driven request is treated as interval-satisfied.
 	a.lastModelDrivenApplyBatch = 0
+	a.lastModelDrivenCheckpointFingerprint = ""
 	a.lastModelDrivenSkipBatch = 0
 	a.lastModelDrivenSkipReason = ""
 	// A session switch starts a fresh compaction window for the

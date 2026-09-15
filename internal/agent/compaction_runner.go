@@ -602,6 +602,10 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	// anchor, which is exactly what the reset just made history.
 	a.recordCompactionAppliedAnalyticsEvent(d, headSplit, compactedMessages)
 	if d.SummaryMode == compactionSummaryModeModelDriven {
+		if d.ModelDrivenArgsFingerprint != "" {
+			runtimeFingerprint := modelDrivenRuntimeInputFingerprint(a.captureModelDrivenRuntimeInput())
+			a.lastModelDrivenCheckpointFingerprint = modelDrivenCheckpointFingerprint(d.ModelDrivenArgsFingerprint, runtimeFingerprint)
+		}
 		// A successful model-driven apply records its request batch as the new
 		// interval anchor: the next model-driven request must wait
 		// minModelDrivenApplyIntervalBatches batches. The anchor is assigned

@@ -470,30 +470,16 @@ func (t CompactContextTool) Description() string {
 	if t.validator.TodoWriteVisible {
 		todoSync = "- your todo list reflects actual progress (the checkpoint snapshots runtime todos verbatim; sync drifted entries with todo_write before requesting);\n"
 	}
-	return "Request a durable context checkpoint when replacing the current history will make the remaining work cheaper and the state needed to resume is fully externalized (written into state_files, or fully expressible in structured arguments). This is a costed state transition, not a routine progress save. Use planned_state_files only to record paths for future work; they do not externalize state.\n" +
-		"Runtime pauses the next main-model request, applies the checkpoint atomically, and continues the same turn on the compacted context. This involves a session history rewrite; it is NOT read-only.\n" +
-		"Call it alone (no sibling tool calls in the same response) and choose the stopping point by context pressure:\n" +
-		"- when context is comfortable, use it only when the expected reduction in future context cost is worth the checkpoint and re-read cost; a completed phase is a useful boundary, not a requirement;\n" +
-		"- when a context-pressure reminder is present, finish the current atomic operation, externalize the minimum recovery state, and request a provisional checkpoint even if the stage remains active or candidate; do not describe unfinished work as completed;\n" +
-		"- when a compaction-imminent or threshold warning says the context is ending soon, stop optional exploration, record the active objective, completed work, next step, and open issues, and request a provisional checkpoint at the next safe stop;\n" +
-		"- never interrupt an in-flight tool, file write, sibling task, or other operation; a safe stop means the current operation has ended and the next action can be stated concretely;\n" +
-		"- every fact needed later is captured in state_files or in the structured arguments;\n" +
-		"- write or refresh the notes/plan file you maintain for this workstream before requesting the checkpoint, and list at least that file: the checkpoint cannot create the file, and a file written after the reset cannot carry this checkpoint's state; if that refresh is nevertheless mid-flight, finish it first when only a couple of tool calls remain, otherwise register the pending file update as an explicit open issue so the continuation can apply it from its own fresh read;\n" +
-		"- leave state_files empty only when no durable file exists to point at (a pure analysis or final-report stage), your role cannot write files, or the state is fully carried by the structured arguments above;\n" +
+	return "Request a durable context checkpoint to reduce the cost of remaining work. This is a costed state transition, not a routine progress save: runtime rewrites session history and continues the same turn. A checkpoint never completes the task or replaces the final response.\n" +
+		"Do not call it when the task is complete and only the final response remains. If work requires user input or confirmation, use the normal question or waiting mechanism. A terminal TODO state alone is not a reason to checkpoint.\n" +
+		"Call it alone (no sibling tool calls in the same response), at a safe stop after the current atomic operation has ended. Unfinished background work may continue; do not describe it as completed.\n" +
+		"When context is comfortable, checkpoint only if expected savings justify the reset and recovery cost. Under context pressure, stop optional exploration, preserve the minimum recovery state, and request a provisional checkpoint even if the stage remains active or candidate.\n" +
+		"Capture every fact needed to resume in structured arguments or state_files; do not repeat full file contents in both. Refresh files you rely on before referencing them. Leave state_files empty when the structured arguments fully carry the recovery state, and do not create or modify files solely to request a checkpoint. Record unfinished updates as open_issues, not saved state.\n" +
+		"Use planned_state_files only for future paths; they do not externalize state. File paths and evidence requirements are defined by the corresponding parameter descriptions.\n" +
 		todoSync +
-		"- no key fact exists only in the current context that cannot be re-read or re-derived.\n" +
-		"Do not call it when the task is complete and only the final response remains, or merely to make the context look smaller;\n" +
-		"do not call it when the context is already small (the runtime rejects low-gain resets).\n" +
-		"The runtime may also skip the checkpoint when the minimum apply interval has not elapsed or projected savings are too small; that is a normal policy result, not an error, and retrying the same request repeatedly will not change the outcome.\n" +
-		"Use checkpoint_kind=provisional with stage_status=active or candidate when preserving unfinished work under pressure; checkpoint_kind=committed remains for an authoritative completed stage with acceptance evidence.\n" +
-		"A success result only means the request was accepted; a later model-driven [Context Summary] checkpoint confirms the reset was applied.\n" +
-		"state_files entries must resolve inside the project root: workspace-relative paths (e.g. \"docs/usage.md\") are expected, and absolute, \"~\"-, \"./\"- or \"../\"-prefixed spellings of in-project files are accepted too and stored normalized as workspace-relative paths; spellings that resolve outside the project root are rejected.\n" +
-		"Entries are pure references: the tool never reads them and never verifies that they exist. After a reset the runtime re-loads a bounded head of them when this session already read or wrote the file and the read permission rule allows it, so keep the top of each file a self-contained resume block and list only files worth re-reading.\n" +
-		"Roles that are allowed to write plan or notes files (for example .chord/plans/YYYYMMDD-<slug>.md or a task-notes file under .chord/notes/ in a planner role) may list those files here; state_files itself never reads or writes anything, and write permissions are still governed by the role's permission rules.\n" +
-		"State outside the project (temp dirs, logs, session files, other checkouts) cannot be referenced here; capture it in completed/decisions/open_issues text instead.\n" +
-		"The runtime validates every field against its own description before the checkpoint is armed: a violation rejects the whole request with the reason, and re-submitting the same values cannot succeed.\n" +
+		"A success result only means the request was accepted; a later model-driven [Context Summary] checkpoint confirms the reset was applied. A skip is a normal policy result, not an error: continue actual work or deliver the final response, rather than repeatedly retrying unchanged input.\n" +
 		budget +
-		"If the arguments are rejected, fix the reported problem and retry; never work around the limits by splitting the checkpoint."
+		"If the arguments are rejected, fix the reported problem and retry; re-submitting the same values cannot succeed. Never work around the limits by splitting the checkpoint."
 }
 
 func (CompactContextTool) Parameters() map[string]any {
@@ -509,13 +495,13 @@ func (CompactContextTool) Parameters() map[string]any {
 				"type":        "array",
 				"maxItems":    12,
 				"items":       map[string]any{"type": "string", "minLength": 1},
-				"description": "Concrete progress completed and safe to rely on later.",
+				"description": "Verified outcomes with how each was verified (tests, commands, files). Do not restate the todo list: runtime todos are snapshotted automatically and reconcile against this section after the reset.",
 			},
 			"decisions": map[string]any{
 				"type":        "array",
 				"maxItems":    8,
 				"items":       map[string]any{"type": "string", "minLength": 1},
-				"description": "Important decisions that must stay in effect, with a one-line reason each.",
+				"description": "Each item must be one non-empty string containing an important decision and, when useful, its one-line reason; do not use objects such as {\"value\":\"...\",\"reason\":\"...\"}.",
 			},
 			"open_issues": map[string]any{
 				"type":        "array",
@@ -526,13 +512,13 @@ func (CompactContextTool) Parameters() map[string]any {
 			"next_step": map[string]any{
 				"type":        "string",
 				"minLength":   1,
-				"description": "One concrete action executable immediately after the checkpoint applies.",
+				"description": "One concrete action executable immediately after the checkpoint applies, subordinate to the latest user request. Do not use a checkpoint just to wait for user input or deliver the final response.",
 			},
 			"state_files": map[string]any{
 				"type":        "array",
 				"maxItems":    16,
 				"items":       map[string]any{"type": "string", "minLength": 1},
-				"description": "Paths of files carrying externalized state: workspace-relative (e.g. docs/usage.md), or absolute / ~-prefixed / ./- / ../-prefixed spellings that resolve inside the project root (stored normalized as workspace-relative); out-of-project state must be captured in completed/decisions/open_issues text instead. References only: the tool never reads them and never verifies that they exist. After a reset a bounded head of each listed file is re-injected when this session already read or wrote the file and the read permission rule allows it. Prefer at least one entry whenever this workstream has a durable file (the task-notes or plan file you maintain, written before the checkpoint); leave it empty only when no such file exists (a pure analysis or final-report stage), your role cannot write files, or the state is fully carried by the structured arguments.",
+				"description": "Existing files carrying recovery state: paths must resolve inside the project root and are stored workspace-relative. References only: the tool never reads them and never verifies that they exist. After a reset eligible files may have a bounded head injected only when the current read permission allows it; do not assume the full file was loaded. Keep its head self-contained. Leave empty when structured arguments carry the state. Capture out-of-project state in structured arguments.",
 			},
 			"planned_state_files": map[string]any{
 				"type": "array", "maxItems": 16,
@@ -545,7 +531,7 @@ func (CompactContextTool) Parameters() map[string]any {
 				"description": "Stable evidence IDs from the checkpoint evidence pack that support completed work or decisions. IDs render as ev-<hash> in the checkpoint's evidence pack (e.g. the Evidence ID line / [evidence:ev-...] entries); invented IDs are rejected, so leave this empty when no evidence pack is in view — only observed claims and committed checkpoints require evidence, not every completed stage. Every evidence ID an observed claim references in claim_evidence must be repeated here: when you fill claim_evidence for observed claims, also add those IDs to the top-level evidence_refs.",
 			},
 			"stage_id":        map[string]any{"type": "string", "description": "Stable identifier for the current work stage."},
-			"stage_status":    map[string]any{"type": "string", "enum": compactContextStageStatuses, "description": "Whether this stage is still active or is a checkpoint candidate/completed."},
+			"stage_status":    map[string]any{"type": "string", "enum": compactContextStageStatuses, "description": "State of this work stage, not the whole user request. A completed stage does not end the turn or replace the final response."},
 			"checkpoint_kind": map[string]any{"type": "string", "enum": compactContextCheckpointKinds, "description": "Provisional reduces context but is not authoritative; committed requires runtime validation, and additionally requires stage_status=completed with at least one valid evidence_refs entry."},
 			"claim_evidence":  map[string]any{"type": "object", "maxProperties": maxCompactContextClaims, "additionalProperties": map[string]any{"type": "array", "maxItems": 8, "items": map[string]any{"type": "string", "minLength": 1}}, "description": "Maps each claim to the evidence IDs supporting it. Claim keys are natural language: usually a condensed conclusion from completed/decisions, where paraphrasing is fine and verbatim matching is never required; standalone claims are also allowed. Evidence IDs must be real ev-<hash> IDs from a recent checkpoint's evidence pack. A claim classified observed in claim_kinds needs at least one evidence ID here, and every ID listed for it must also appear in the top-level evidence_refs."},
 			"claim_kinds":     map[string]any{"type": "object", "maxProperties": maxCompactContextClaims, "additionalProperties": map[string]any{"type": "string", "enum": compactContextClaimKinds}, "description": "Classifies each claim (usually from completed/decisions); observed requires runtime evidence listed in claim_evidence/evidence_refs, derived is inferred from evidence, assumed is unverified, and proposed is future work. When no valid evidence is in view, prefer derived or assumed over observed."},

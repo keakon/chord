@@ -142,8 +142,8 @@ func TestQueueContextPressureReminderGates(t *testing.T) {
 	if reminder == "" {
 		t.Fatal("tool-visible session must queue a reminder above the line")
 	}
-	if !strings.Contains(reminder, "compact_context") || !strings.Contains(reminder, "automatic-compaction threshold") || !strings.Contains(reminder, ".chord/notes/") {
-		t.Fatalf("reminder text = %q, want actionable text naming compact_context and a concrete write target", reminder)
+	if !strings.Contains(reminder, "compact_context") || !strings.Contains(reminder, "automatic-compaction threshold") || !strings.Contains(reminder, "structured arguments or permitted state files") {
+		t.Fatalf("reminder text = %q, want actionable text naming compact_context and both recovery-state options", reminder)
 	}
 	if strings.Contains(reminder, "<context-pressure>") || strings.Contains(reminder, "<system-reminder>") {
 		t.Fatalf("queued reminder must be bare text; the injector wraps it in <system-reminder>, got %q", reminder)

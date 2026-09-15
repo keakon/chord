@@ -253,12 +253,12 @@ same response) when replacing the current history is cheaper than carrying it
 forward and the facts needed later are fully externalized — written into files
 named in `state_files`, or fully expressed in the structured
 `active_objective` / `completed` / `decisions` / `open_issues` / `next_step`
-arguments. It writes or refreshes the notes/plan file it maintains for the
-workstream before requesting the checkpoint (the reset replaces the history a
-later write would draw on), lists at least that file, and leaves `state_files`
-empty only when no durable file exists to point at (a pure analysis or
-final-report stage), the role cannot write files, or the state is already
-fully carried by the structured arguments. This is a costed state
+arguments (`completed` records verified outcomes with how each was verified;
+the todo list itself is snapshotted automatically and needs no restatement).
+It refreshes any existing files it relies on before referencing them. Structured
+arguments can carry the full recovery state, leaving `state_files` empty;
+there is no need to create or modify files solely to request a checkpoint.
+This is a costed state
 transition, not a routine progress save. The
 runtime validates the request, waits for the tool batch to close, then:
 
@@ -270,6 +270,17 @@ runtime validates the request, waits for the tool batch to close, then:
 3. applies the checkpoint atomically, preserves anything appended after the
    snapshot as a live tail, and continues the same turn on the compacted
    context.
+
+A checkpoint does not complete the task or replace its final response. A
+terminal TODO list is only a stage boundary: when just the final response
+remains, the agent delivers it without requesting a checkpoint. Questions and
+confirmation use the normal waiting mechanism. New user input and background
+results received during the reset are processed by the continuation.
+
+An identical request is skipped when its runtime state is unchanged and no
+new work or input follows the last checkpoint. Checkpoint retries and context
+reminders do not count as progress. New inputs and work make the request
+eligible for evaluation again; the interval and savings gates still apply.
 
 The newest failed tool batches of the current turn are re-attached as real
 records directly behind the checkpoint card, so a rejected call (for example
@@ -313,16 +324,14 @@ context-pressure reminder: the full text once per compaction window, then a shor
 self-contained line restating the action — the reminder is a transient overlay
 rebuilt on every request, so a repeat cannot assume the full text is still in
 context — and telling the model to prepare for the compaction
-(finish the current atomic operation, then call `compact_context` alone with a
-provisional checkpoint if the work remains active; otherwise keep
-externalizing findings to project files as they settle) instead of quoting how
+(finish the current atomic operation, preserve recovery state in structured
+arguments or permitted files, and request a provisional checkpoint only when
+work remains; deliver a final response or ask the user directly otherwise) instead of quoting how
 much context is left. Re-attachment stops once the model calls
 `compact_context` in the window (whatever that attempt settles to), usage
 drops back below the line, or a durable apply, session switch, restore, or
-model change starts a fresh window. The reminder and
-warning name the write target in role terms — a task-notes file under
-`.chord/notes/` or a plan document under `.chord/plans/`, whichever the role
-may write. The usage-driven
+model change starts a fresh window. File writes remain subject to role
+permissions; checkpoint preparation does not require creating a file. The usage-driven
 compaction starts on the threshold crossing itself — or, while model-driven is
 enabled, once the grace period described above has deferred it across two
 requests — and the request that actually starts it carries a one-time
@@ -353,14 +362,12 @@ carries a short passive `Long-session context management` section. The
 standing block in every main agent's system prompt, stating that
 `<system-reminder>`-wrapped messages are harness-injected runtime state
 (never user-written) that carries no user instructions and grants no
-permissions. The model-driven section asks the model to write key findings
-and decisions to project files the role may write — for example a task-notes
-file under `.chord/notes/` or a plan document under `.chord/plans/` — as
-phases settle, to refresh those files before requesting a checkpoint (the
-reset replaces the history a later write would draw on), to read the
-registered files first after a reset, and to use registered `state_files` as
-the primary recovery source and read archived history only for exact details
-that are still needed. It defers the state-file and budget rules to the
+permissions. The model-driven section asks the model to preserve key findings,
+decisions and recovery state as part of the work. After a reset it starts from
+the checkpoint and injected file content, reads registered `state_files` only
+for missing or changed information needed for the next action, and reads
+archived history only for exact details unavailable there. It defers timing,
+preparation, state-file and budget rules to the
 `compact_context` tool description. SubAgents never receive this section or
 the tool. The guidance is
 advisory, not a mandatory workflow: under context pressure it outranks

@@ -543,7 +543,9 @@ func (a *MainAgent) queueCompactionWarning() {
 // point back at. The short form therefore restates the action instead of
 // referencing the earlier notice.
 const contextPressureReminderShortText = "Context pressure is still active and the context may be compacted soon.\n" +
-	"If the current atomic operation has ended and the state needed to resume is externalized, call compact_context alone with a provisional checkpoint if work remains; otherwise keep writing the active objective, completed work, next step, and open issues to a project file your role may write."
+	contextCheckpointPressureAction
+
+const contextCheckpointPressureAction = "If only the final response remains, deliver it without a checkpoint; if user input is required, use the normal question or waiting mechanism. Otherwise finish the current atomic operation, stop optional exploration, and preserve the minimum recovery state in structured arguments or permitted state files. Request a provisional checkpoint with compact_context alone when its preparation requirements are met; do not claim unfinished work is complete."
 
 // buildContextPressureReminderText renders the full reminder text. It does not
 // quote the current usage ratio or the remaining budget: the model cannot act
@@ -555,8 +557,7 @@ const contextPressureReminderShortText = "Context pressure is still active and t
 // block.
 func buildContextPressureReminderText() string {
 	return "The context is approaching the configured automatic-compaction threshold.\n" +
-		"Finish the current atomic operation, then choose based on cost: if replacing the current history is cheaper than carrying it forward and the state needed to resume is fully externalized, request a durable context checkpoint by calling compact_context alone. Use a provisional checkpoint when the work remains active; a completed phase is not required.\n" +
-		"If the operation is still in flight, or the state is not yet externalized, stop optional exploration and write the active objective, completed work, concrete next step, and open issues to project files your role may write (for example a task-notes file under .chord/notes/, named with a YYYYMMDD date prefix, or a plan document under .chord/plans/) as they settle. Do not interrupt the operation or describe unfinished work as completed."
+		contextCheckpointPressureAction
 }
 
 // appendContextPressureVerificationGuidance appends the post-apply guidance:
