@@ -798,6 +798,29 @@ handoff: allow
 	}
 }
 
+func TestContainsASCIIWord_RespectsWordBoundaries(t *testing.T) {
+	cases := []struct {
+		text string
+		key  string
+		want bool
+	}{
+		// Incidental substrings inside an ordinary word must not match.
+		{"correctly handling stream consumption", "correct", false},
+		{"checkpath", "path", false},
+		{"showcase", "how", false},
+		// Real words match on either side.
+		{"is this correct", "correct", true},
+		{"two errors here", "errors", true},
+		{"an error!", "error", true},
+		{"root cause", "root cause", true},
+	}
+	for _, c := range cases {
+		if got := containsASCIIWord(c.text, c.key); got != c.want {
+			t.Errorf("containsASCIIWord(%q, %q) = %v, want %v", c.text, c.key, got, c.want)
+		}
+	}
+}
+
 func TestShouldEnableBugTriagePrompt_TriggersAndNonTriggers(t *testing.T) {
 	tests := []struct {
 		input string
@@ -822,6 +845,21 @@ func TestShouldEnableBugTriagePrompt_TriggersAndNonTriggers(t *testing.T) {
 		{"检查这个配置是否正确", false},
 		{"为什么会选择这个 API", false},
 		{"review the last two commits", false},
+		// Feature requests that merely describe a current limitation while
+		// naming expected behavior must not enter the workflow. "cannot" plus
+		// an adjective like "correctly" long regressed the routing because the
+		// analysis word matched inside the adjective.
+		{
+			"httpx responses cannot currently stream JSON values in a structured way. Users need an iterator interface that yields parsed JSON values incrementally while correctly handling stream consumption and common JSON streaming media types.",
+			false,
+		},
+		{"responses cannot stream values correctly, so add an incremental interface", false},
+		{"review this error handling", false},
+		// Common inflections must keep triggering: word-boundary matching would
+		// otherwise drop them.
+		{"why do these errors occur?", true},
+		{"investigating a regression from the last release", true},
+		{"analysis of the failure please", true},
 	}
 	for _, c := range tests {
 		msgs := []message.Message{{Role: "user", Content: c.input}}
@@ -829,6 +867,75 @@ func TestShouldEnableBugTriagePrompt_TriggersAndNonTriggers(t *testing.T) {
 			t.Errorf("shouldEnableBugTriagePrompt(%q) = %v, want %v", c.input, got, c.want)
 		}
 	}
+}
+
+// TestShouldEnableBugTriagePrompt_KeywordForms pins one prompt per keyword
+// form. Word-boundary matching routes only the forms spelled out in the
+// keyword lists, so a missing -s / -ed / -ing / -ly entry silently drops real
+// requests; every row pairs the form under test with a keyword from the other
+// list, so routing depends on that form alone.
+func TestShouldEnableBugTriagePrompt_KeywordForms(t *testing.T) {
+	type formCase struct{ form, input string }
+	analysisForms := []formCase{
+		{"analyze", "analyze this error"},
+		{"analyzes", "the agent analyzes this error"},
+		{"analyzing", "analyzing this error"},
+		{"analyzed", "we analyzed this error"},
+		{"analysis", "analysis of this error"},
+		{"analyses", "the analyses of this error disagree"},
+		{"investigate", "investigate this error"},
+		{"investigates", "the agent investigates this error"},
+		{"investigating", "investigating this error"},
+		{"investigated", "we investigated this error"},
+		{"investigation", "investigation of this error"},
+		{"debug", "debug this error"},
+		{"debugs", "the team debugs these errors"},
+		{"debugged", "debugged this error"},
+		{"debugging", "debugging this error"},
+		{"triage", "triage this error"},
+		{"triaged", "we triaged this error"},
+		{"root cause", "find the root cause of this error"},
+		{"root causes", "find the root causes of these errors"},
+		{"why", "why did this error happen"},
+		{"conclusion", "the conclusion of this error"},
+		{"conclusions", "the conclusions about this error"},
+	}
+	issueForms := []formCase{
+		{"bug", "analyze this bug"},
+		{"bugs", "analyze these bugs"},
+		{"buggy", "analyze this buggy path"},
+		{"regression", "analyze this regression"},
+		{"regressions", "analyze these regressions"},
+		{"root cause", "analyze the root cause"},
+		{"root causes", "analyze the root causes"},
+		{"failure", "analyze this failure"},
+		{"failures", "analyze these failures"},
+		{"error", "analyze this error"},
+		{"errors", "analyze these errors"},
+		{"broken", "analyze the broken path"},
+		{"wrong", "analyze what went wrong"},
+		{"wrongly", "analyze why the value is wrongly set"},
+		{"stale", "analyze the stale cache entry"},
+		{"incorrect", "analyze the incorrect value"},
+		{"incorrectly", "analyze the value returned incorrectly"},
+		{"mismatch", "analyze this mismatch"},
+		{"mismatches", "analyze these mismatches"},
+		{"mismatched", "analyze the mismatched parameter"},
+		{"not work", "analyze why the feature does not work"},
+		{"doesn't work", "analyze why it doesn't work"},
+		{"cannot", "analyze why we cannot connect"},
+	}
+	assertTriggers := func(label string, cases []formCase) {
+		t.Helper()
+		for _, c := range cases {
+			msgs := []message.Message{{Role: "user", Content: c.input}}
+			if got := shouldEnableBugTriagePrompt(msgs); !got {
+				t.Errorf("%s keyword %q: shouldEnableBugTriagePrompt(%q) = false, want true", label, c.form, c.input)
+			}
+		}
+	}
+	assertTriggers("analysis", analysisForms)
+	assertTriggers("issue", issueForms)
 }
 
 func TestPrimaryAgentCoordinationPromptBlock_DependsOnVisibleTools(t *testing.T) {

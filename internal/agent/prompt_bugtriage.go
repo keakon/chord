@@ -10,15 +10,25 @@ import (
 // "review" / "审查" are deliberately excluded: combined with broad issue words
 // like "error" / "错误" they would route ordinary code-review requests (e.g.
 // "review this error handling") into the bug-triage workflow.
+// English keywords are matched on word boundaries (see containsAnyKeyword) and
+// carry their common inflections explicitly, so a keyword cannot match inside
+// an unrelated word and inflected requests still trigger. A base word and its
+// -s / -ed / -ing / -ly forms are separate entries: a missing form silently
+// stops routing, which is why TestShouldEnableBugTriagePrompt_KeywordForms
+// pins one prompt per form.
 var bugTriageAnalysisKeywords = []string{
-	"analyze", "analysis", "investigate", "debug", "triage",
-	"why", "root cause", "conclusion", "correct",
+	"analyze", "analyzes", "analyzing", "analyzed", "analysis", "analyses",
+	"investigate", "investigates", "investigating", "investigated", "investigation",
+	"debug", "debugs", "debugged", "debugging", "triage", "triaged",
+	"why", "root cause", "root causes", "conclusion", "conclusions",
 	"分析", "排查", "定位", "调查", "根因", "为什么", "结论", "是否正确",
 }
 
 var bugTriageIssueKeywords = []string{
-	"bug", "regression", "root cause", "failure", "error", "broken",
-	"wrong", "stale", "incorrect", "mismatch", "not work", "doesn't work", "cannot",
+	"bug", "bugs", "buggy", "regression", "regressions", "root cause", "root causes",
+	"failure", "failures", "error", "errors", "broken",
+	"wrong", "wrongly", "stale", "incorrect", "incorrectly", "mismatch", "mismatches", "mismatched",
+	"not work", "doesn't work", "cannot",
 	"bug结论", "回归", "根因", "失败", "错误", "异常", "报错", "失效", "不工作", "不生效", "无法", "不能", "不对",
 }
 
@@ -46,13 +56,60 @@ func bugTriageConclusionComparison(text string) bool {
 		(strings.Contains(text, "更对") || strings.Contains(text, "更正确"))
 }
 
-func containsAnyFold(text string, keys []string) bool {
+// containsAnyKeyword reports whether text contains any key. Callers pass
+// already-lowercased text.
+func containsAnyKeyword(text string, keys []string) bool {
 	for _, key := range keys {
-		if key != "" && strings.Contains(text, key) {
+		if key == "" {
+			continue
+		}
+		if isASCIIKey(key) {
+			if containsASCIIWord(text, key) {
+				return true
+			}
+			continue
+		}
+		if strings.Contains(text, key) {
 			return true
 		}
 	}
 	return false
+}
+
+// isASCIIKey reports whether key is pure ASCII and therefore has word
+// boundaries worth checking. CJK keywords have no such boundaries and keep
+// plain substring matching.
+func isASCIIKey(key string) bool {
+	for i := 0; i < len(key); i++ {
+		if key[i] >= 0x80 {
+			return false
+		}
+	}
+	return true
+}
+
+// containsASCIIWord reports whether text contains key delimited by non-word
+// bytes on both sides. Both arguments must already be lowercased. The boundary
+// check keeps an incidental substring inside an ordinary word ("correct" in
+// "correctly") from standing in for a keyword.
+func containsASCIIWord(text, key string) bool {
+	for offset := 0; offset+len(key) <= len(text); {
+		i := strings.Index(text[offset:], key)
+		if i < 0 {
+			return false
+		}
+		i += offset
+		end := i + len(key)
+		if (i == 0 || !isASCIIAlnum(text[i-1])) && (end == len(text) || !isASCIIAlnum(text[end])) {
+			return true
+		}
+		offset = i + 1
+	}
+	return false
+}
+
+func isASCIIAlnum(b byte) bool {
+	return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9'
 }
 
 func latestUserPromptForBugTriage(messages []message.Message) string {
@@ -73,10 +130,10 @@ func shouldEnableBugTriagePrompt(messages []message.Message) bool {
 	if text == "" {
 		return false
 	}
-	if containsAnyFold(text, bugTriageExactPhrases) || bugTriageConclusionComparison(text) {
+	if containsAnyKeyword(text, bugTriageExactPhrases) || bugTriageConclusionComparison(text) {
 		return true
 	}
-	return containsAnyFold(text, bugTriageAnalysisKeywords) && containsAnyFold(text, bugTriageIssueKeywords)
+	return containsAnyKeyword(text, bugTriageAnalysisKeywords) && containsAnyKeyword(text, bugTriageIssueKeywords)
 }
 
 func (a *MainAgent) setBugTriagePromptActive(active bool) {

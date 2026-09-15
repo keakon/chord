@@ -41,6 +41,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- Feature requests that describe a current limitation while naming the expected behavior no longer trigger the bug-triage workflow. English analysis and issue keywords now match on word boundaries instead of as bare substrings, so an adjective like `correctly` can no longer stand in for the analysis intent `correct` and route an unrelated request into failure investigation; the common inflections that matching still needs are listed explicitly, and the weak `correct` keyword is gone. The investigation outline is therefore shown only for actual investigation requests.
 - Restricted roles no longer receive conflicting guidance to use unavailable search, editing, or coordination tools. Delegated workers without an escalation or notification tool are consistently directed to report blockers in their response rather than claim completion, and loop completion guidance consistently allows verification that cannot be run to be reported with a reason.
 - MCP tool listings describe the integrations available to the current role rather than all connected servers. Server names and tool-listing errors containing Markdown or line breaks no longer alter the structure of the listing.
 - Syntax highlighting no longer disappears from a multi-file `apply_patch` preview while the patch is still streaming. The preview fell back to plain text as soon as the patch mentioned a second file (or a move/rename), and only recovered once the call finished and the card rebuilt its diff.
