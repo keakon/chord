@@ -35,7 +35,7 @@ This documentation is for end users: installation, configuration, daily usage, c
 - [Paths](./paths.md) — config / state / cache / project layout, what is safe to delete
 - [Environment variables](./environment.md) — every `CHORD_*` / `XDG_*` / proxy variable Chord reads
 - [Platform support](./platforms.md) — what works on macOS / Linux / Windows / WSL
-- [Performance](./performance.md) — how Chord stays fast and what to do when it feels slow
+- [Performance](./performance.md) — measured results against other agent harnesses, optimization internals, and what to do when it feels slow
 
 ## Going further
 

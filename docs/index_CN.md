@@ -35,7 +35,7 @@
 - [目录与路径](./paths_CN.md) —— 配置 / state / cache / 项目级布局，哪些可删
 - [环境变量](./environment_CN.md) —— Chord 读取的所有 `CHORD_*` / `XDG_*` / 代理变量
 - [平台支持](./platforms_CN.md) —— macOS / Linux / Windows / WSL 各支持到什么程度
-- [性能](./performance_CN.md) —— Chord 如何保持流畅，变慢时怎么办
+- [性能](./performance_CN.md) —— 与其他 agent harness 的实测对比、Chord 的优化机制，变慢时怎么办
 
 ## 进阶
 

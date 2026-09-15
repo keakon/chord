@@ -4,43 +4,48 @@ Chord is optimized for long interactive sessions: large transcripts, streaming m
 
 ## Measured results
 
-These measurements are scenario-specific proof points, not universal guarantees. They show where Chord's context trimming, low-overhead TUI, and predictable shutdown behavior matter most. Results vary with hardware, environment, session content, model behavior, and implementation choices.
+These measurements are scenario-specific proof points, not universal guarantees. They show where Chord's context trimming, low-overhead TUI, and lean memory use matter most. Results vary with hardware, environment, session content, model behavior, and implementation choices.
 
-Both benchmarks below were run against the versions named in the tables; Chord v0.6.3 was released 2026-06-05.
+Each benchmark below was run against the versions named in its table.
 
 ### Real-world coding task
 
-We benchmarked Chord against Codex-CLI on a [real-world database system task](https://github.com/datacurve-ai/deep-swe/tree/main/tasks/pebble-durability-wait-apis): implementing durability wait APIs in Pebble. The task requires understanding commit/WAL sync and concurrency semantics, and reasoning across write paths, event listeners, and DB lifecycle subsystems.
+We ran a [DeepSWE v1.1 task](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration) — adding streaming JSON iteration to `httpx` — across six agent harnesses. Chord finished first and cheapest: 6m37s and $0.052, with the next-best run taking 1.5× as long and costing 1.5× as much.
 
-| Metric | Chord v0.6.3 | Codex-CLI v0.136.0 | Improvement |
-|--------|--------------|---------------------|-------------|
-| **Time** | **46m21s** | 61m18s | **24% faster** |
-| **LLM calls** | **93** | 118 | **21% fewer** |
-| **Input tokens** | **6.86M** | 18.47M | **63% fewer** |
-| **Output tokens** | **25K** | 74K | **66% fewer** |
-| **Cache read tokens** | **6.55M** | 17.64M | **63% fewer** |
-| **Cost** | **$5.58** | $15.15 | **63% cheaper** |
+The task requires handling structured JSON streaming per media type (`application/json`, `application/*+json`, NDJSON, and JSON text sequences), plus stream consumption, decoding errors, and content-type parameters.
+
+| Harness | Time | LLM calls | Input tokens | Output tokens | Cache read tokens | Cost |
+|---------|------|-----------|--------------|---------------|-------------------|------|
+| **Chord v0.8.1** | **6m37s** | **49** | **54,530** | **58,559** | **2,961,280** | **$0.052** |
+| deepseek-harness 0.1.5-rc.1 | 9m50s (1.5×) | 93 | 58,569 | 80,314 | 7,357,440 | $0.079 (1.5×) |
+| pi 0.85.1 | 10m22s (1.6×) | 101 | 79,189 | 94,733 | 5,871,488 | $0.086 (1.7×) |
+| codex 0.154.0 | 17m01s (2.6×) | 121 | 72,363 | 135,310 | 15,787,264 | $0.139 (2.7×) |
+| mini-swe-agent 2.4.6 | 18m29s (2.8×) | 158 | 161,893 | 77,320 | 18,206,592 | $0.125 (2.4×) |
+| claude code 2.1.272 | 22m25s (3.4×) | 143 | 106,546 | 214,126 | 7,024,768 | $0.166 (3.2×) |
+
+Multipliers are relative to Chord.
+
+Cost follows the token mix rather than the token total: cache reads cost 50× less than uncached input and 200× less than output, so Chord's 2.96M cache-read tokens add about a cent while its 58,559 output tokens account for two-thirds of the $0.052 bill. Chord also used the fewest input tokens, output tokens, and model calls of all six runs.
 
 Notes:
 
-- Both runs used GPT-5.5 (xhigh).
+- All six runs used deepseek-v4.1-flash.
+- Cost is estimated from each run's token totals at that model's listed prices per 1M tokens: $0.15 input, $0.60 output, $0.003 cache read.
 - Time excludes environment setup and final wrap-up, but includes model interaction, code changes, and test execution.
-- The task's reference solution spans 8 files and 670 changed lines; actual model output may be larger or smaller depending on tests, comments, and implementation choices.
 
-### App startup and memory
+### App memory
 
-We also measured the interactive app shell: time from launch to accepting input, normal exit time, and memory with an empty session and after loading 200 messages.
+We also measured the interactive app shell's memory: with an empty session and after loading 200 messages.
 
-| App | Startup to input | Normal exit | Empty session memory | 200-message memory |
-|-----|------------------|-------------|----------------------|--------------------|
-| Chord v0.6.3 | **<1s** | **<1s** | **31.6MB** | **~40MB** |
-| Codex-CLI v0.136.0 | **<1s** | ~20s | 35.8MB | ~80MB |
-| Claude Code v2.1.163 | 32s | ~2s | 156.3MB | >300MB |
+| Harness | Empty session memory | 200-message memory |
+|---------|----------------------|--------------------|
+| Chord v0.8.1 | 30MB | 39MB |
+| Codex-CLI v0.154.0 | 27MB | 47MB |
+| Claude Code v2.1.273 | 143MB | 216MB |
 
 Notes:
 
-- Codex-CLI waits for shutdown wrap-up and exits after about a 20-second timeout.
-- Claude Code waits on startup and becomes ready for input after about a 30-second timeout.
+- The memory numbers were measured on macOS 15.3.2 (arm64).
 - Memory use varies by session content and environment, so these numbers are only estimates for this measured scenario.
 
 ## What Chord optimizes

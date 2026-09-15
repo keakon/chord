@@ -76,7 +76,7 @@ import screenshot from '../../../../../docs/assets/screenshot.png';
 
 ## 性能实测
 
-在一个真实的 Pebble 数据库任务上，Chord 比 Codex-CLI **快 24%**，输入 token **少 63%**，成本**低 63%**。应用本身启动和退出都在 **1 秒内**，空会话内存 **31.6MB**。
+在六款 agent harness 跑同一个 [DeepSWE v1.1 任务](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration)（给 `httpx` 加流式 JSON 迭代接口）的对比里，Chord v0.8.1 既最快也最省：**6m37s**、**￥0.348**，比第二名**快 33%、便宜 34%**。应用本身空会话内存 **30MB**，加载 200 条消息后 **39MB**。
 
 这些是特定场景下的依据，不是对所有任务的通用承诺。完整数据表、测量方法和适用范围见[性能 — 实测数据](/chord/zh/performance/#实测数据)。
 

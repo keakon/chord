@@ -80,9 +80,9 @@ For manual provider/model setup and the `limit` fields, see [Quickstart](./docs/
 
 ## Performance snapshot
 
-In one Chord v0.6.3 run of a [real-world Pebble database task](https://github.com/datacurve-ai/deep-swe/tree/main/tasks/pebble-durability-wait-apis), Chord completed the task in 46m21s using 6.86M input tokens and an estimated $5.58. A Codex-CLI v0.136.0 comparison run using the same GPT-5.5 (xhigh) model took 61m18s, 18.47M input tokens, and an estimated $15.15.
+On a [DeepSWE v1.1 task](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration) — adding streaming JSON iteration to `httpx` — Chord v0.8.1 finished in 6m37s, using 54.5K input tokens, 2.96M cache-read tokens, and 58.6K output tokens, at an estimated $0.052. Among six agent harnesses run on the same task with deepseek-v4.1-flash, Chord finished first and cost the least: 33% faster and 34% cheaper than the next-best run.
 
-This is a single measured scenario, not a general guarantee. See [Performance — Measured results](./docs/performance.md#measured-results) for the full tables (including app startup and memory) and methodology.
+This is a single measured scenario, not a general guarantee. See [Performance — Measured results](./docs/performance.md#measured-results) for the full tables (including app memory) and methodology.
 
 ## Project links
 

@@ -80,9 +80,9 @@ cd my-project && chord
 
 ## 性能摘要
 
-在 Chord v0.6.3 的一次[真实 Pebble 数据库任务](https://github.com/datacurve-ai/deep-swe/tree/main/tasks/pebble-durability-wait-apis)测试中，Chord 用时 46m21s，使用 6.86M 输入 token，估算成本为 $5.58。同样使用 GPT-5.5（xhigh）的 Codex-CLI v0.136.0 对照运行用时 61m18s，使用 18.47M 输入 token，估算成本为 $15.15。
+在 Chord v0.8.1 的一次 [DeepSWE v1.1 任务](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration)测试中（给 `httpx` 加流式 JSON 迭代接口），Chord 用时 6m37s，输入 54.5K token、缓存读取 2.96M token、输出 58.6K token，估算成本 ￥0.348。同样使用 deepseek-v4.1-flash 的六款 agent harness 里，Chord 用时最短、成本最低：比第二名快 33%、便宜 34%。
 
-这只是单次场景实测，不代表普遍结果；完整数据表（含启动与内存占用）和测量方法见[性能 — 实测数据](./docs/performance_CN.md#实测数据)。
+这只是单次场景实测，不代表普遍结果；完整数据表（含应用内存）和测量方法见[性能 — 实测数据](./docs/performance_CN.md#实测数据)。
 
 ## 项目链接
 

@@ -76,7 +76,7 @@ import screenshot from '../../../../docs/assets/screenshot.png';
 
 ## Performance
 
-On a real-world Pebble database task, Chord finished **24% faster** than Codex-CLI while using **63% fewer input tokens** at **63% lower cost**. The app shell starts and exits in **under 1s** and holds an empty session in **31.6MB**.
+On a [DeepSWE v1.1 task](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration) — adding streaming JSON iteration to `httpx` — Chord v0.8.1 finished first and cheapest of six agent harnesses: **6m37s** and **$0.052**, **33% faster** and **34% cheaper** than the next-best run. The app shell holds an empty session in **30MB** and a 200-message session in **39MB**.
 
 These are scenario-specific proof points, not universal guarantees. Full tables, methodology, and caveats: [Performance — Measured results](/chord/performance/#measured-results).
 
