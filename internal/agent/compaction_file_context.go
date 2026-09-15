@@ -116,47 +116,50 @@ func (a *MainAgent) resolveCheckpointFilePath(path string) string {
 }
 
 // compactionContinuationFiles is the ordered, de-duplicated file set a
-// continuation re-loads after a checkpoint: the summary's key files plus the
-// state_files the checkpoint registered, filtered to files this session has
-// already read or written and that the read permission rule still allows.
+// continuation re-loads after a checkpoint: the state_files the checkpoint
+// registered, then the summary's key files that were not already declared.
+// Every candidate must still pass the read permission gate; a rejected path is
+// marked spent so the key-file pass cannot re-add it.
 func (a *MainAgent) compactionContinuationFiles(signature string) []string {
 	if a == nil {
 		return nil
 	}
-	keyFiles := extractCompactionKeyFiles(signature, a.projectRoot)
 	declared := extractCompactionStateFiles(signature, a.projectRoot)
-	if len(declared) == 0 {
-		return keyFiles
+	keyFiles := extractCompactionKeyFiles(signature, a.projectRoot)
+	if len(declared) == 0 && len(keyFiles) == 0 {
+		return nil
 	}
-	files := make([]string, 0, len(keyFiles)+len(declared))
-	seen := make(map[string]bool, len(keyFiles)+len(declared))
-	for _, rel := range declared {
-		if seen[rel] || !a.stateFileInjectableForRead(a.resolveCheckpointFilePath(rel)) {
-			continue
+	files := make([]string, 0, len(declared)+len(keyFiles))
+	seen := make(map[string]bool, len(declared)+len(keyFiles))
+	appendInjectable := func(rel string) {
+		if rel == "" || seen[rel] {
+			return
 		}
 		seen[rel] = true
+		if !a.stateFileInjectableForRead(a.resolveCheckpointFilePath(rel)) {
+			return
+		}
 		files = append(files, rel)
 	}
+	for _, rel := range declared {
+		appendInjectable(rel)
+	}
 	for _, rel := range keyFiles {
-		if !seen[rel] {
-			seen[rel] = true
-			files = append(files, rel)
-		}
+		appendInjectable(rel)
 	}
 	return files
 }
 
 // stateFileInjectableForRead reports whether the runtime may put a
-// model-declared state file back into the context after a reset. The overlay
-// must never widen what the model could already reach: this session must have
-// already read or written the file (so its content passed the permission gate
-// once) and the read permission rule must still resolve to allow — an ask rule
-// would otherwise turn the overlay into a silent auto-approval.
+// model-declared or summary-extracted state file back into the context after a
+// reset. The overlay must never widen what the model could already reach, so
+// the current read permission rule has to resolve to allow — an ask rule would
+// otherwise turn the overlay into a silent auto-approval. The file tracker is
+// deliberately not consulted: it only carries the surviving transcript, so an
+// archived checkpoint's read records are gone after a restore, and re-injecting
+// content the model itself registered is what this overlay exists for.
 func (a *MainAgent) stateFileInjectableForRead(absPath string) bool {
 	if a == nil || absPath == "" {
-		return false
-	}
-	if a.fileTrack == nil || !a.fileTrack.HasSnapshot(absPath, a.instanceID) {
 		return false
 	}
 	action := a.effectiveRuleset().EvaluatePath(tools.NameRead, absPath, a.projectRoot)

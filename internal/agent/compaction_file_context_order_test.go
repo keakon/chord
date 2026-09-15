@@ -10,6 +10,7 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -26,6 +27,7 @@ func TestStableSurfaceSurvivesKeyFileInjection(t *testing.T) {
 		t.Fatalf("write key file: %v", err)
 	}
 	a := newTestMainAgent(t, projectRoot)
+	a.ruleset = permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionAllow}}
 	a.projectConfig = &config.Config{
 		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 			ReadLikeAgeTurns:     1,

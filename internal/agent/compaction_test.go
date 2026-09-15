@@ -26,6 +26,7 @@ import (
 	"github.com/keakon/chord/internal/logtest"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/modelcompat"
+	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -4365,6 +4366,7 @@ func TestRefreshCompactionFileRevisionsUsesApplyTimeState(t *testing.T) {
 		t.Fatalf("WriteFile baseline: %v", err)
 	}
 	a := newTestMainAgent(t, projectRoot)
+	a.ruleset = permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionAllow}}
 	summary := buildCompactionCheckpointMessage(
 		"## Goal\n- continue\n\n## Files and Evidence\n- key.go\n\n## Next Step\n- continue",
 		nil,
@@ -4794,6 +4796,7 @@ func TestInjectCompactionFileContextStablePerRequest(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	a := newTestMainAgent(t, projectRoot)
+	a.ruleset = permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionAllow}}
 	summary := buildCompactionCheckpointMessage(
 		"## Goal\n- continue\n\n## User Constraints\n- none\n\n## Progress\n- progress\n\n## Key Decisions\n- decisions\n\n## Files and Evidence\n- Archived history: history-1.md\n- internal/agent/compaction.go\n\n## Todo State\n- none\n\n## SubAgent State\n- none\n\n## Open Problems\n- none\n\n## Next Step\n- continue",
 		[]string{".chord/sessions/test/history-1.md"},
@@ -4849,6 +4852,7 @@ func TestInjectCompactionFileContextDetectsChangeBeforeFirstInjection(t *testing
 		t.Fatalf("WriteFile baseline: %v", err)
 	}
 	a := newTestMainAgent(t, projectRoot)
+	a.ruleset = permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionAllow}}
 	summary := buildCompactionCheckpointMessage(
 		"## Goal\n- continue\n\n## Files and Evidence\n- key.go\n\n## Next Step\n- continue",
 		[]string{".chord/sessions/test/history-1.md"},
@@ -4877,6 +4881,7 @@ func TestInjectCompactionFileContextTreatsLegacyCheckpointAsChanged(t *testing.T
 		t.Fatalf("WriteFile: %v", err)
 	}
 	a := newTestMainAgent(t, projectRoot)
+	a.ruleset = permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionAllow}}
 	summary := buildCompactionCheckpointMessage(
 		"## Goal\n- continue\n\n## Files and Evidence\n- key.go\n\n## Next Step\n- continue",
 		[]string{".chord/sessions/test/history-1.md"},
@@ -4919,6 +4924,7 @@ func TestInjectCompactionFileContextHonorsByteBudgets(t *testing.T) {
 		nil,
 	)
 	a := newTestMainAgent(t, projectRoot)
+	a.ruleset = permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionAllow}}
 	msgs := []message.Message{
 		{Role: "user", IsCompactionSummary: true, Content: summary},
 		{Role: "user", Content: "continue"},
