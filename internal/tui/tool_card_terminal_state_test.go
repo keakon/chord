@@ -297,6 +297,7 @@ func TestNarrowCollapsedJobOutputCardKeepsItsJobID(t *testing.T) {
 		ID: 1, Type: BlockToolCall, ToolName: tools.NameJobOutput,
 		Content: `{"job_id":"job-8"}`, ResultContent: "line one\nline two\n[status: running]",
 		ResultDone: true, ResultStatus: agent.ToolResultStatusSuccess,
+		PersistedDuration: 30 * time.Second,
 	}
 	wide := stripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(wide, "job-8 · 2 new lines") {
@@ -312,7 +313,7 @@ func TestNarrowCollapsedJobOutputCardKeepsItsJobID(t *testing.T) {
 		}
 		sawIDWithoutSummary = sawIDWithoutSummary || strings.Contains(plain, "job-8") && !strings.Contains(plain, "2 new lines")
 	}
-	if strings.Contains(wide, "⏱ 30s") {
+	if !strings.Contains(wide, "⏱ 30s") {
 		t.Fatalf("wide card should keep the elapsed label when time is present:\n%s", wide)
 	}
 	if !sawIDWithoutSummary {

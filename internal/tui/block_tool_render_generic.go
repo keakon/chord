@@ -1243,18 +1243,25 @@ func appendToolHeaderSummary(headerLine, mainPart, grayPart, paramSummary string
 // the remaining header width.
 func appendJobOutputHeaderDetails(headerLine, pattern, grayPart, summary, elapsed string, maxWidth int) string {
 	baseWidth := runewidth.StringWidth(stripANSI(headerLine))
-	if baseWidth >= maxWidth {
+	const sep = " · "
+	sepWidth := runewidth.StringWidth(sep)
+	if baseWidth+sepWidth >= maxWidth {
 		return runewidth.Truncate(headerLine, maxWidth, "…")
 	}
-	budget := maxWidth - baseWidth - 1
-	if budget <= 0 {
+	// Every appended segment joins the line through a separator, so the whole
+	// pattern+suffix group has to fit in maxWidth minus the base and one
+	// separator. Reserving a plain 1 column here silently overflowed by
+	// sepWidth-1 and broke the documented priority below.
+	budget := maxWidth - baseWidth - sepWidth
+	// No room for even one separated segment: keep the header exactly as the
+	// caller passed it instead of truncating a line that already fits.
+	if budget <= 1 {
 		return headerLine
 	}
 	pattern = sanitizeToolDisplayText(pattern)
 	summary = sanitizeToolDisplayText(summary)
 	elapsed = strings.TrimSpace(elapsed)
 
-	const sep = " · "
 	var suffix string
 	var suffixWidth int
 	var summaryWidth int
@@ -1269,17 +1276,18 @@ func appendJobOutputHeaderDetails(headerLine, pattern, grayPart, summary, elapse
 		optionSuffix := grayPart
 		widthDelta := runewidth.StringWidth(stripANSI(optionSuffix))
 		if suffix != "" {
-			widthDelta += runewidth.StringWidth(sep) + suffixWidth
+			widthDelta += sepWidth + suffixWidth
 			suffix = optionSuffix + sep + suffix
 		} else {
-			suffix, suffixWidth = optionSuffix, widthDelta
+			suffix = optionSuffix
 		}
+		suffixWidth = widthDelta
 	}
 	if elapsed != "" {
 		timerSuffix := elapsedGlyph + " " + elapsed
 		timerWidth := runewidth.StringWidth(timerSuffix)
 		if suffix != "" {
-			suffixWidth += runewidth.StringWidth(sep) + timerWidth
+			suffixWidth += sepWidth + timerWidth
 			suffix += sep + timerSuffix
 		} else {
 			suffix, suffixWidth = timerSuffix, timerWidth
@@ -1293,12 +1301,12 @@ func appendJobOutputHeaderDetails(headerLine, pattern, grayPart, summary, elapse
 	if suffix == "" {
 		return headerLine + " " + pattern
 	}
-	if suffixWidth <= budget-patternWidth-1 {
-		return headerLine + " " + pattern + sep + suffix
+	if suffixWidth <= budget-patternWidth-sepWidth {
+		return headerLine + " " + pattern + sep + DimStyle.Render(suffix)
 	}
 	// The suffix does not fit whole: the elapsed label is dropped first, then
 	// the optional argument group, and the id is the only fact left to keep.
-	if summaryWidth <= budget-patternWidth-1 {
+	if summaryWidth <= budget-patternWidth-sepWidth {
 		return headerLine + " " + pattern + sep + DimStyle.Render(summary)
 	}
 	return headerLine + " " + pattern
