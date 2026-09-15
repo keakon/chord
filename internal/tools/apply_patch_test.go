@@ -2887,7 +2887,7 @@ func TestApplyPatchFuzzyRejectsTwoRuneDrift(t *testing.T) {
 	}
 	for _, want := range []string{
 		"hunk not found",
-		"first mismatch at rune 9: your line has U+0032, file has U+0031",
+		"first mismatch at rune 10 (1-based): your line has U+0032, file has U+0031",
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("err = %q, want substring %q", err, want)

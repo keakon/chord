@@ -1303,6 +1303,35 @@ func toolRuneToken(r rune, present bool) string {
 	return fmt.Sprintf("%U", r)
 }
 
+// firstMismatchHint renders the "first mismatch at ..." fragment shared by the
+// edit and apply_patch closest-match diagnostics. The rune offset is 1-based,
+// matching the 1-based line numbers in the same sentence.
+func firstMismatchHint(expected, actual string) string {
+	offset, expectRune, actualRune, expectPresent, actualPresent := firstRuneDiffLoc(expected, actual)
+	if !expectPresent && !actualPresent {
+		return ""
+	}
+	expectToken, actualToken := toolRuneToken(expectRune, expectPresent), toolRuneToken(actualRune, actualPresent)
+	if !expectPresent {
+		expectToken = absentRuneToken(offset)
+	}
+	if !actualPresent {
+		actualToken = absentRuneToken(offset)
+	}
+	return fmt.Sprintf("first mismatch at rune %d (1-based): your line has %s, file has %s", offset+1, expectToken, actualToken)
+}
+
+// absentRuneToken describes a side that has no rune at the first difference. At
+// offset 0 the line really is empty; past it the line only ends earlier than
+// the other side, which is a different thing to fix and must not be reported as
+// an empty line.
+func absentRuneToken(offset int) string {
+	if offset == 0 {
+		return "no characters (line is empty)"
+	}
+	return "no characters (line ends here)"
+}
+
 // IsApproximateMatchFailure reports whether a failed edit/apply_patch call
 // failed to find its target text even after punctuation/whitespace tolerance
 // — the drift or stale-read failure that a fresh bounded read of the target

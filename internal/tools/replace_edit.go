@@ -268,15 +268,8 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 			fmt.Fprintf(&b, "old_string not found in file, even after punctuation/whitespace tolerance. Closest match is at line %d (%d%% similar, %d character difference):\n", closest.StartLine, sim, closest.DiffRunes)
 			fmt.Fprintf(&b, "  file line %d: %s\n", closest.FileDiffLine, closest.Actual)
 			fmt.Fprintf(&b, "  your line %d: %s\n", closest.ExpectedDiffLine, closest.Expected)
-			if off, er, ar, ep, ap := firstRuneDiffLoc(closest.ExpectedRaw, closest.ActualRaw); ep || ap {
-				yourTok, fileTok := toolRuneToken(er, ep), toolRuneToken(ar, ap)
-				if !ep {
-					yourTok = "no characters (your line is empty)"
-				}
-				if !ap {
-					fileTok = "no characters (file line is empty)"
-				}
-				fmt.Fprintf(&b, "  first mismatch at rune %d: your line has %s, file has %s\n", off, yourTok, fileTok)
+			if hint := firstMismatchHint(closest.ExpectedRaw, closest.ActualRaw); hint != "" {
+				fmt.Fprintf(&b, "  %s\n", hint)
 			}
 			if closest.LineDiffOldExtra > 0 || closest.LineDiffSrcExtra > 0 {
 				blankNote := ""

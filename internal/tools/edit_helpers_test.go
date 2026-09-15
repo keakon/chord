@@ -524,6 +524,30 @@ func TestToolRuneToken(t *testing.T) {
 	}
 }
 
+// The shared first-mismatch hint reports a 1-based rune offset and does not
+// call a merely shorter line "empty": only a side with no rune at offset 0 is
+// an empty line, while one that ran out later simply ends there.
+func TestFirstMismatchHint(t *testing.T) {
+	tests := []struct {
+		name             string
+		expected, actual string
+		want             string
+	}{
+		{"identical", "abc", "abc", ""},
+		{"rune differs", "abc", "axc", "first mismatch at rune 2 (1-based): your line has U+0062, file has U+0078"},
+		{"actual is an empty line", "line", "", "first mismatch at rune 1 (1-based): your line has U+006C, file has no characters (line is empty)"},
+		{"actual line ends earlier", "line2x", "line2", "first mismatch at rune 6 (1-based): your line has U+0078, file has no characters (line ends here)"},
+		{"expected line ends earlier", "line2", "line2x", "first mismatch at rune 6 (1-based): your line has no characters (line ends here), file has U+0078"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := firstMismatchHint(tc.expected, tc.actual); got != tc.want {
+				t.Fatalf("firstMismatchHint(%q, %q) = %q, want %q", tc.expected, tc.actual, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestAlignEditWindowLines(t *testing.T) {
 	norm := normalizePatchPunctuationLine
 	tests := []struct {

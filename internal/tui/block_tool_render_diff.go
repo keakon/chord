@@ -119,6 +119,16 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 		displayDiff = b.applyPatchDisplayDiff(applyPatchTargets)
 	}
 	hasOperationSummaries := successfulApplyPatch && applyPatchHasSummaryOnlyTargets(applyPatchTargets)
+	// A failed apply_patch still commits the groups that planned cleanly. The
+	// result text names them ("Applied patch:") and lists the rest ("Not
+	// applied:"), so the card can mark each file with ✓/✗ without touching the
+	// model-facing text. Parse the sections once — the diff section headers
+	// below and the error body both read them.
+	applyPatchError := b.ToolName == tools.NameApplyPatch && b.toolResultIsError()
+	var applyPatchSections applyPatchErrorSections
+	if applyPatchError {
+		applyPatchSections = splitApplyPatchErrorSections(b.ResultContent)
+	}
 	// filePath is a header display summary ("a → b", "D path", "path +N files"),
 	// which is not a path; syntax highlighting needs the undecorated target so
 	// lexerForFilePath can resolve the real lexer.
@@ -169,12 +179,21 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	result = append(result, headerLine)
 	diffLines := strings.Split(displayDiff, "\n")
 	diffFileCount := unifiedDiffFileCount(diffLines)
-	groupedApplyPatchDiff := b.ToolName == tools.NameApplyPatch && (diffFileCount > 1 || hasOperationSummaries && diffFileCount > 0)
+	// An errored card groups per file even for a single diff section: the
+	// section header is where the ✓ marking that file as already on disk lives.
+	groupedApplyPatchDiff := b.ToolName == tools.NameApplyPatch &&
+		(diffFileCount > 1 || hasOperationSummaries && diffFileCount > 0 || applyPatchError && diffFileCount > 0)
 	if b.ToolName == tools.NameApplyPatch {
-		if hasOperationSummaries {
-			result = appendApplyPatchOperationSummaries(result, applyPatchTargets, cardWidth-4)
-		} else if !groupedApplyPatchDiff {
-			result = appendApplyPatchTargetLines(result, applyPatchTargets, cardWidth-4)
+		// On an errored card the args-derived target list and the summary-only
+		// rows carry no status: they would draw failed files unmarked right
+		// next to the ✓/✗ marks, so the per-file sections and the result text
+		// carry the whole status picture instead.
+		if !applyPatchError {
+			if hasOperationSummaries {
+				result = appendApplyPatchOperationSummaries(result, applyPatchTargets, cardWidth-4)
+			} else if !groupedApplyPatchDiff {
+				result = appendApplyPatchTargetLines(result, applyPatchTargets, cardWidth-4)
+			}
 		}
 		if strings.TrimSpace(displayDiff) == "" && !applyPatchNoChanges && !b.toolResultIsError() && !b.toolResultIsCancelled() &&
 			!applyPatchOnlyMoveOrDeleteTargets(applyPatchTargets) {
@@ -309,9 +328,16 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 					if renderedDiffFileCount > 0 {
 						result = append(result, "  "+DimStyle.Render("─────────────"))
 					}
-					filePrefix := "  ↳ " + marker + " "
+					// Every diff section on an errored card is a group that
+					// already landed on disk, so its header carries the same ✓
+					// the "Applied patch:" list would.
+					mark := ""
+					if applyPatchError {
+						mark = "✓ "
+					}
+					filePrefix := "  ↳ " + mark + marker + " "
 					fileLine := truncateApplyPatchDisplayLine(filePrefix+path, cardWidth)
-					result = append(result, ToolResultExpandedStyle.Render(filePrefix)+DimStyle.Render(strings.TrimPrefix(fileLine, filePrefix)))
+					result = append(result, applyPatchDiffSectionPrefix(mark, marker)+DimStyle.Render(strings.TrimPrefix(fileLine, filePrefix)))
 					seenHunk = false
 					oldLineNum, newLineNum = 0, 0
 					hl = newCodeHighlighterWithLanguage(syntaxPath, diffSample, "")
@@ -343,19 +369,18 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	if b.toolResultIsError() && b.ResultContent != "" {
 		switch b.ToolName {
 		case tools.NameApplyPatch:
-			sections := splitApplyPatchErrorSections(b.ResultContent)
 			if strings.TrimSpace(displayDiff) == "" {
 				result = appendApplyPatchPreview(result, b, syntaxPath, cardWidth-4)
-				if sections.applied != "" && !hasOperationSummaries {
+				if applyPatchSections.applied != "" && !hasOperationSummaries {
 					result = append(result, toolFieldSection(ToolResultExpandedStyle, "Applied changes"))
-					result = appendApplyPatchErrorTextLines(result, sections.applied, textWrap)
+					result = appendApplyPatchErrorTextLines(result, applyPatchSections.applied, textWrap)
 				}
 			}
 			result = append(result, toolFieldSection(ErrorStyle, "Error"))
-			result = appendApplyPatchErrorTextLines(result, sections.failure, textWrap)
-			if sections.diagnostics != "" {
+			result = appendApplyPatchErrorTextLines(result, applyPatchSections.failure, textWrap)
+			if applyPatchSections.diagnostics != "" {
 				result = append(result, toolFieldSection(ToolResultExpandedStyle, "Diagnostics"))
-				result = append(result, renderLSPDiagnosticsLines(sections.diagnostics, "    ", textWrap)...)
+				result = append(result, renderLSPDiagnosticsLines(applyPatchSections.diagnostics, "    ", textWrap)...)
 			}
 		case tools.NameEdit:
 			if strings.TrimSpace(displayDiff) == "" {
@@ -426,6 +451,11 @@ func splitApplyPatchErrorSections(content string) applyPatchErrorSections {
 // expected complete line: `\t\tif …`") is exactly what the user needs to fix
 // the patch, and clipping it hides the actionable information. Matches the
 // wrap behavior of renderLSPDiagnosticsLines and the collapsed error path.
+//
+// Each line also gets the status its own prefix implies, so a partially applied
+// patch reads at a glance instead of making the user compare the two lists: a
+// failed file group ("- path: reason") is marked ✗, and a committed file from
+// the "Applied patch:" list ("M path") is marked ✓.
 func appendApplyPatchErrorTextLines(result []string, content string, width int) []string {
 	// displayIndent is prepended BEFORE wrapping so wrapText treats it as the
 	// paragraph indent and re-applies it to every continuation line; otherwise
@@ -436,11 +466,47 @@ func appendApplyPatchErrorTextLines(result []string, content string, width int) 
 		// Expand tabs so an indented code snippet inside the diagnostic (e.g.
 		// `\t\tif isFoo(err) {`) aligns to the tab stop and wraps cleanly.
 		displayLine = expandTabsForDisplay(displayLine, preformattedTabWidth)
-		for _, wl := range wrapText(displayIndent+displayLine, width) {
-			result = append(result, ToolResultExpandedStyle.Render(wl))
+		mark, markStyle := "", ToolResultExpandedStyle
+		switch {
+		case strings.HasPrefix(displayLine, "- "):
+			mark, markStyle = "✗", ToolStatusErrorStyle
+			displayLine = strings.TrimPrefix(displayLine, "- ")
+		case strings.HasPrefix(displayLine, "A "), strings.HasPrefix(displayLine, "M "),
+			strings.HasPrefix(displayLine, "D "), strings.HasPrefix(displayLine, "R "):
+			mark, markStyle = "✓", ToolStatusSuccessStyle
+		}
+		if mark == "" {
+			for _, wl := range wrapText(displayIndent+displayLine, width) {
+				result = append(result, ToolResultExpandedStyle.Render(wl))
+			}
+			continue
+		}
+		// The mark joins the wrapped text so it consumes display width like any
+		// other rune and continuation lines still align under the body; only the
+		// glyph on the first line is coloured.
+		for i, wl := range wrapText(displayIndent+mark+" "+displayLine, width) {
+			after, ok := strings.CutPrefix(wl, displayIndent+mark)
+			if i != 0 || !ok {
+				result = append(result, ToolResultExpandedStyle.Render(wl))
+				continue
+			}
+			result = append(result, ToolResultExpandedStyle.Render(displayIndent)+markStyle.Render(mark)+ToolResultExpandedStyle.Render(after))
 		}
 	}
 	return result
+}
+
+// applyPatchDiffSectionPrefix styles the "  ↳ ✓ M " lead of a per-file diff
+// section header. mark is "" for a successful card; on an errored card it holds
+// the ✓ marking the file's changes as already on disk, which keeps the status
+// colour used by the other ✓/✗ marks.
+func applyPatchDiffSectionPrefix(mark, marker string) string {
+	if mark == "" {
+		return ToolResultExpandedStyle.Render("  ↳ " + marker + " ")
+	}
+	return ToolResultExpandedStyle.Render("  ↳ ") +
+		ToolStatusSuccessStyle.Render(strings.TrimSuffix(mark, " ")) +
+		ToolResultExpandedStyle.Render(" "+marker+" ")
 }
 
 func unifiedDiffFileCount(lines []string) int {

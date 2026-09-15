@@ -359,16 +359,20 @@ func TestPartiallyAppliedPatchShowsOnlyAppliedDiff(t *testing.T) {
 	}
 
 	plain := stripANSI(strings.Join(block.Render(80, ""), "\n"))
-	for _, want := range []string{"↳ Targets:", "↳ Applied changes:", "+new", "↳ Error:", "Not applied:", "↳ Diagnostics:", "missing field", "informational diagnostic"} {
+	for _, want := range []string{"↳ Applied changes:", "↳ ✓ M committed.go", "✗ failed.go: hunk not found", "+new", "↳ Error:", "Not applied:", "↳ Diagnostics:", "missing field", "informational diagnostic"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected partially applied patch to contain %q, got:\n%s", want, plain)
 		}
 	}
-	for _, duplicate := range []string{"↳ Requested patch:", "Applied patch:", "*** Begin Patch"} {
+	// The args-derived target list states no status, so an errored card drops
+	// it instead of drawing the failed target unmarked beside the ✓/✗ marks.
+	for _, duplicate := range []string{"↳ Requested patch:", "Applied patch:", "*** Begin Patch", "↳ Targets:"} {
 		if strings.Contains(plain, duplicate) {
 			t.Fatalf("expected partially applied patch to omit requested patch content %q, got:\n%s", duplicate, plain)
 		}
 	}
+	committedHeader := renderedLineContaining(t, block.Render(80, ""), "↳ ✓ M committed.go")
+	assertRenderedTextForeground(t, committedHeader, "✓", colorOfTheme(currentTheme.InfoPanelSuccessFg))
 	if strings.Count(plain, "M committed.go") != 1 {
 		t.Fatalf("expected committed target to appear once, got:\n%s", plain)
 	}
@@ -386,7 +390,8 @@ func TestPartiallyAppliedPatchShowsOnlyAppliedDiff(t *testing.T) {
 	if !strings.Contains(plain, longReasonTail) {
 		t.Fatalf("expected wrapped failure lines to surface the full tail %q in the rendered card, got:\n%s", longReasonTail, plain)
 	}
-	failureLine := renderedLineContaining(t, block.Render(80, ""), "- failed.go: hunk not found")
+	failureLine := renderedLineContaining(t, block.Render(80, ""), "✗ failed.go: hunk not found")
+	assertRenderedTextForeground(t, failureLine, "✗", colorOfTheme(currentTheme.ErrorFg))
 	if strings.Contains(stripANSI(failureLine), "…") {
 		t.Fatalf("expected long failure line to wrap instead of truncate, got %q", stripANSI(failureLine))
 	}
@@ -457,6 +462,94 @@ func TestApplyPatchFullFailureWrapsLongDiagnostic(t *testing.T) {
 				t.Fatalf("expected the long diagnostic to wrap to >=2 rendered lines, got %d matching lines", wrappedLines)
 			}
 		})
+	}
+}
+
+// A partially applied patch must say which file groups landed and which did
+// not: every diff section is a committed group, so its header carries ✓, and
+// each "Not applied:" entry carries ✗.
+func TestApplyPatchErrorCardMarksCommittedAndFailedFiles(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	args := `{"patch":"*** Begin Patch\n*** Update File: src/first.go\n@@\n-old\n+new\n*** Update File: src/second.go\n@@\n-old\n+new\n*** Update File: src/failed.go\n@@\n-missing\n+replacement\n*** End Patch"}`
+	block := &Block{
+		ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch,
+		Content: applyPatchToolDisplayArgs(args), RawArgs: args,
+		ResultDone: true, ResultStatus: agent.ToolResultStatusError,
+		ResultContent: strings.Join([]string{
+			"apply_patch partially applied: 2 changes committed; 1 file group not applied.",
+			"Applied patch:",
+			"M src/first.go",
+			"M src/second.go",
+			"",
+			"Not applied:",
+			"- src/failed.go: hunk not found (1/1)",
+			`Changes under "Applied patch" are already on disk; resolve each cause above and resubmit only the failed file groups rebuilt from current file contents.`,
+		}, "\n"),
+		Diff: "--- src/first.go\n+++ src/first.go\n@@ -1,1 +1,1 @@\n-old\n+new\n" +
+			"--- src/second.go\n+++ src/second.go\n@@ -1,1 +1,1 @@\n-old\n+new\n",
+	}
+	lines := block.Render(100, "")
+	plain := stripANSI(strings.Join(lines, "\n"))
+	for _, want := range []string{"↳ ✓ M src/first.go", "↳ ✓ M src/second.go", "✗ src/failed.go: hunk not found (1/1)"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("expected errored card to contain %q, got:\n%s", want, plain)
+		}
+	}
+	for _, committed := range []string{"↳ ✓ M src/first.go", "↳ ✓ M src/second.go"} {
+		header := renderedLineContaining(t, lines, committed)
+		assertRenderedTextForeground(t, header, "✓", colorOfTheme(currentTheme.InfoPanelSuccessFg))
+	}
+	failed := renderedLineContaining(t, lines, "✗ src/failed.go")
+	assertRenderedTextForeground(t, failed, "✗", colorOfTheme(currentTheme.ErrorFg))
+}
+
+// Committed groups whose diff is unavailable still have to read as applied, so
+// the "Applied patch:" list in the error body is marked ✓ as well.
+func TestApplyPatchErrorCardMarksAppliedListWithoutDiff(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	args := `{"patch":"*** Begin Patch\n*** Update File: src/first.go\n@@\n-old\n+new\n*** Update File: src/failed.go\n@@\n-missing\n+replacement\n*** End Patch"}`
+	block := &Block{
+		ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch,
+		Content: applyPatchToolDisplayArgs(args), RawArgs: args,
+		ResultDone: true, ResultStatus: agent.ToolResultStatusError,
+		ResultContent: strings.Join([]string{
+			"apply_patch partially applied: 1 change committed; 1 file group not applied.",
+			"Applied patch:",
+			"M src/first.go",
+			"",
+			"Not applied:",
+			"- src/failed.go: hunk not found (1/1)",
+		}, "\n"),
+	}
+	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	for _, want := range []string{"↳ Applied changes:", "✓ M src/first.go", "✗ src/failed.go: hunk not found (1/1)"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("expected errored card to contain %q, got:\n%s", want, plain)
+		}
+	}
+}
+
+// A successful card marks no per-file status: everything it shows already
+// landed, so ✓ on each section header would only add noise.
+func TestSuccessfulApplyPatchCardOmitsPerFileStatusMarks(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	args := `{"patch":"*** Begin Patch\n*** Update File: src/first.go\n@@\n-old\n+new\n*** Update File: src/second.go\n@@\n-old\n+new\n*** End Patch"}`
+	block := &Block{
+		ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch,
+		Content: applyPatchToolDisplayArgs(args), RawArgs: args,
+		ResultDone: true, ResultStatus: agent.ToolResultStatusSuccess,
+		ResultContent: "Applied patch:\nM src/first.go\nM src/second.go",
+		Diff: "--- src/first.go\n+++ src/first.go\n@@ -1,1 +1,1 @@\n-old\n+new\n" +
+			"--- src/second.go\n+++ src/second.go\n@@ -1,1 +1,1 @@\n-old\n+new\n",
+	}
+	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	if !strings.Contains(plain, "↳ M src/first.go") {
+		t.Fatalf("expected the grouped success card to render per-file sections, got:\n%s", plain)
+	}
+	for _, mark := range []string{"↳ ✓", "↳ ✗", "✗"} {
+		if strings.Contains(plain, mark) {
+			t.Fatalf("expected a successful card to omit %q, got:\n%s", mark, plain)
+		}
 	}
 }
 

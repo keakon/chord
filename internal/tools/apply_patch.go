@@ -2101,15 +2101,8 @@ func applyPatchHunkNotFoundErrorWithHints(fileLines, oldSeq []string, searchStar
 			// first differing rune by code point, so a dropped space or an
 			// orphan variation selector shows up instead of rendering
 			// identically to the expected line.
-			if off, er, ar, ep, ap := firstRuneDiffLoc(oldSeq[matched], fileLines[line+matched]); ep || ap {
-				yourTok, fileTok := toolRuneToken(er, ep), toolRuneToken(ar, ap)
-				if !ep {
-					yourTok = "no characters (your line is empty)"
-				}
-				if !ap {
-					fileTok = "no characters (file line is empty)"
-				}
-				detail += fmt.Sprintf("; first mismatch at rune %d: your line has %s, file has %s", off, yourTok, fileTok)
+			if hint := firstMismatchHint(oldSeq[matched], fileLines[line+matched]); hint != "" {
+				detail += "; " + hint
 			}
 		} else {
 			detail += fmt.Sprintf(": expected %s, but the file has no more lines", expected)

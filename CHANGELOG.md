@@ -30,6 +30,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - A model-driven context reset now re-loads a bounded head of the files listed in `compact_context` `state_files`, so the continuation starts with the notes and plan documents that actually hold its recovered state instead of only their paths. This supersedes 0.8.0's "`state_files` are pure path references that are never read": a listed path is re-loaded only when this session already read or wrote it *and* the `read` permission rule still resolves to `allow` — an `ask` rule is never silently auto-approved — so the reset can neither widen what the model could reach nor open a file it never touched. `.chord/notes/` and `.chord/plans/` are eligible; memory records, session archives, and traces stay filtered. An empty `state_files` list remains valid.
 - Checkpoint evidence packs stop spending their budget on tool failures the same tool has already recovered from. When the same tool later returns a successful result, the superseded failure no longer counts as a current blocker in the evidence pack, so the `[Context Evidence]` excerpts carried into the next continuation stay focused on the failures that still hold up the work.
 - Deterministic checkpoint summaries no longer duplicate the latest user request inside the Todo State classification: the request text already appears under Current User Request in the same summary, so each anchor is carried once instead of twice.
+- A partially applied `apply_patch` card marks each file it touched: the diff section of every group that landed carries `✓`, and every `Not applied:` entry carries `✗`. The errored card no longer prints the status-less `Targets:` list, so those two marks are what tells you which files changed and which failed.
 
 ### Fixes
 
@@ -46,6 +47,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - A `!` command or a headless `local_shell` command that daemonizes a process holding the output pipe no longer hangs its caller forever: the deadline terminates the whole process group, and the pipe drain is bounded so the command always returns with the shell's own exit status.
 - A re-delivered background result keeps updating its existing card after a transcript rebuild instead of appending a duplicate, matching how the live path matches re-deliveries by durable identity.
 - A model-driven checkpoint no longer drops the failed tool calls of the current turn. The reset archives the head, and a rejected call (for example a `compact_context` request the runtime declined) used to survive only as an excerpt inside the checkpoint: its error card disappeared from the transcript, and a fork of that generation no longer replayed the failure. The failed batch now stays as real records directly behind the checkpoint card.
+- The closest-match hint that `apply_patch` and `edit` print no longer calls a line that merely ends earlier an empty line, and its rune offset is 1-based like the line number in the same sentence.
 
 ## 0.8.0 - 2026-09-11
 

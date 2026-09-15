@@ -1150,7 +1150,7 @@ func TestEditToolFailureNamesFirstDifferingRune(t *testing.T) {
 	if err == nil {
 		t.Fatal("Execute = nil, want closest-match failure")
 	}
-	for _, want := range []string{"first mismatch at rune 4", "your line has U+0020", "file has U+0078"} {
+	for _, want := range []string{"first mismatch at rune 5 (1-based)", "your line has U+0020", "file has U+0078"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("error = %q, want substring %q", err.Error(), want)
 		}
@@ -1159,8 +1159,8 @@ func TestEditToolFailureNamesFirstDifferingRune(t *testing.T) {
 
 // When the model's block carries an extra whole line (here a non-blank line
 // the file lacks), the hint must say so via the line-count difference instead
-// of only showing a position-shifted content mismatch, and a missing file
-// line must read as "file line is empty", not a cryptic "<absent>".
+// of only showing a position-shifted content mismatch, and a missing file line
+// must read as an empty line, not a cryptic "<absent>".
 func TestEditToolFailureReportsLineCountDifference(t *testing.T) {
 	dir := t.TempDir()
 	file := "line1\n\nline2\n"
@@ -1174,7 +1174,7 @@ func TestEditToolFailureReportsLineCountDifference(t *testing.T) {
 		t.Fatal("Execute = nil, want closest-match failure")
 	}
 	for _, want := range []string{
-		"first mismatch at rune 0: your line has U+006C, file has no characters (file line is empty)",
+		"first mismatch at rune 1 (1-based): your line has U+006C, file has no characters (line is empty)",
 		"line-count difference: your old_string has 1 extra line(s), the file has 1 extra line(s)",
 	} {
 		if !strings.Contains(err.Error(), want) {
