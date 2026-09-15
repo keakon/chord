@@ -26,7 +26,7 @@
 > 上下文维持在该区间内），需要时可把 `reminder` 设在它下方一点。某模型的
 > 长上下文可靠性没有依据可写时，省略 `compaction` 块、让它用全局默认即可。
 
-## OpenAI Responses 兼容接口：GPT-5.4 / GPT-5.5 / GPT-5.6
+## OpenAI GPT（Responses 兼容接口）
 
 GPT-5.4 / GPT-5.5 / GPT-5.6 / GPT-6 Astra 片段使用 OpenAI 模型页公布的
 档位：GPT-5.4 / 5.6 / 6 为 `1050000 / 922000 / 128000`（1.05M 总窗口；
@@ -74,13 +74,13 @@ providers:
 
 model_pools:
   default:
-    - openai/gpt-5.4@high
+    - openai/gpt-5.4@xhigh
 ```
 
 验证：
 
 ```bash
-chord doctor models --model openai/gpt-5.4@high
+chord doctor models --model openai/gpt-5.4@xhigh
 ```
 
 ### GPT-5.5
@@ -115,20 +115,20 @@ providers:
 
 model_pools:
   default:
-    - openai/gpt-5.5@high
+    - openai/gpt-5.5@xhigh
 ```
 
 验证：
 
 ```bash
-chord doctor models --model openai/gpt-5.5@high
+chord doctor models --model openai/gpt-5.5@xhigh
 ```
 
-### GPT-5.6 alias（`gpt-5.6` → Sol）
+### GPT-5.6（Sol / Terra / Luna）
 
-5.6 三个档位共用相同的窗口、reasoning、variants 和 modalities，所以公共
-内容收进 `&gpt-5-6-base` anchor，各档位只需添加自己的 `cost` 块（只维护
-永久牌价，限时促销价不在这里维护）。
+5.6 家族有三个模型：`gpt-5.6-sol`、`gpt-5.6-terra` 和 `gpt-5.6-luna`。三者
+共用相同的窗口、reasoning、variants 和 modalities，这部分公共内容收进
+`&gpt-5-6-base` 锚点，各模型条目只需再补自己的 `cost` 块。
 
 ```yaml
 model_templates:
@@ -162,32 +162,6 @@ model_templates:
     modalities:
       input: [text, image, pdf]
 
-providers:
-  openai:
-    type: responses
-    api_url: https://api.openai.com/v1/responses
-    models:
-      gpt-5.6:
-        <<: *gpt-5-6-base
-        cost:
-          input: 5
-          output: 30
-          cache_read: 0.5
-          cache_write: 6.25
-          input_tiers:
-            - above_input_tokens: 272000
-              input: 10
-              output: 45
-              cache_read: 1
-              cache_write: 12.5
-
-model_pools:
-  default:
-    - openai/gpt-5.6@high
-```
-
-如果你要固定价格 / 行为，直接改用明确模型 ID：
-
 ### GPT-5.6 Sol
 
 ```yaml
@@ -209,6 +183,10 @@ providers:
               output: 45
               cache_read: 1
               cache_write: 12.5
+
+model_pools:
+  default:
+    - openai/gpt-5.6-sol@xhigh
 ```
 
 ### GPT-5.6 Terra
@@ -232,6 +210,10 @@ providers:
               output: 18
               cache_read: 0.4
               cache_write: 5
+
+model_pools:
+  default:
+    - openai/gpt-5.6-terra@max
 ```
 
 ### GPT-5.6 Luna
@@ -255,6 +237,10 @@ providers:
               output: 1.8
               cache_read: 0.04
               cache_write: 0.5
+
+model_pools:
+  default:
+    - openai/gpt-5.6-luna@max
 ```
 
 要点：
@@ -263,7 +249,6 @@ providers:
   由 `context` 减 `output` 推导（这些模型不公布独立输入上限），无需显式
   `input`。只有 400K 档模型（上面的 GPT-5.5 / 5.2）才保留 `input: 272000`。
   账号/中转仍是旧 Codex 档位时，5.6 各档回落 `400000 / 272000 / 128000`。
-- `gpt-5.6` 当前会解析到 Sol，因此它的 `cost` 应按 Sol 费率填写。
 - GPT-5.6 API 可用的 reasoning effort 包括 `none`、`low`、`medium`、`high`、`xhigh`、`max`。
 - Responses 在启用 reasoning 时默认使用 `reasoning.summary: auto`；如果不希望 Chord 请求可读 reasoning 摘要，请显式配置 `reasoning.summary: none`。
 - Chord 当前尚未暴露 GPT-5.6 的 `reasoning.mode: pro`。
@@ -271,7 +256,7 @@ providers:
 验证：
 
 ```bash
-chord doctor models --model openai/gpt-5.6@max
+chord doctor models --model openai/gpt-5.6-sol@xhigh
 ```
 
 #### GPT-5.6 的压缩调优
@@ -345,10 +330,11 @@ ChatGPT 账号实际拿到的窗口来自服务端模型目录（`context_window
 
 其余规则不变：`compaction` 写在模型模板上，引用它的 provider 都会继
 承；`reminder` 省略时按 `min(0.60, threshold × 0.90)` 派生；这两个字段
-调 usage-driven 自动压缩，与 `model_driven` 是否开启无关。用 `gpt-5.6`
-别名（解析到 Sol）时，把 `compaction` 加到该别名对应的模板上。
+调 usage-driven 自动压缩，与 `model_driven` 是否开启无关。写在
+`&gpt-5-6-base` 这类共用模板上的 `compaction` 会作用于所有合并它的模型；
+只想调某一档时，为该档单独建一个模板。
 
-## OpenAI Responses 兼容接口：GPT-6 Astra
+### GPT-6 Astra
 
 GPT-6 Astra 是 OpenAI 当前的旗舰模型（模型 ID `gpt-6-astra`）：1,050,000
 上下文窗口，最大输出 128,000，可用输入 922,000（不设 `input` 时由
@@ -363,8 +349,6 @@ API key 的 provider 需要在 `~/.config/chord/auth.yaml` 中配置同名条目
 openai:
   - "$OPENAI_API_KEY"
 ```
-
-### GPT-6 Astra
 
 基础模板默认带 cost-first 的 `compaction` 块：272K 是计价悬崖（整次请求
 重定价，不是只对超出部分计价），把用量压在悬崖下面是最大的成本杠杆，而
@@ -396,6 +380,9 @@ model_templates:
       low:
         reasoning:
           effort: low
+      medium:
+        reasoning:
+          effort: medium
       high:
         reasoning:
           effort: high
@@ -420,13 +407,13 @@ providers:
 
 model_pools:
   default:
-    - openai/gpt-6-astra@high
+    - openai/gpt-6-astra@medium
 ```
 
 验证：
 
 ```bash
-chord doctor models --model openai/gpt-6-astra@high
+chord doctor models --model openai/gpt-6-astra@medium
 ```
 
 要点：
@@ -439,7 +426,7 @@ chord doctor models --model openai/gpt-6-astra@high
 - Codex 受限窗口是另一种配额，见下方 [Codex OAuth preset](#codex-oauth-preset)
   的 Codex 档位示例。不要把这段 API 窗口直接搬到 Codex provider 上。
 - API 可用的 reasoning effort 是 `low`、`medium`、`high`、`xhigh`、`max`，
-  用 `openai/gpt-6-astra@max` 这样的引用选 variant。GPT-6 Astra 没有
+  用 `openai/gpt-6-astra@medium` 这样的引用选 variant。GPT-6 Astra 没有
   `none` effort。
 - Responses 在启用 reasoning 时默认用 `reasoning.summary: auto`；不希望
   Chord 请求可读摘要时显式设 `reasoning.summary: none`。
@@ -503,6 +490,9 @@ providers:
           input: 922000
           output: 128000
         variants:
+          medium:
+            reasoning:
+              effort: medium
           high:
             reasoning:
               effort: high
@@ -540,8 +530,8 @@ providers:
 
 model_pools:
   default:
-    - codex/gpt-6-astra@high
-    - codex/gpt-5.5@high
+    - codex/gpt-6-astra@medium
+    - codex/gpt-5.5@xhigh
 ```
 
 登录：
@@ -743,7 +733,7 @@ model_templates:
 
 计费提醒：只有 **Gemini 3.1 Pro** 在超过 200K 输入后进入更高输入档（整请求按高价档计费）；Gemini 3.8 Flash 与 Flash-Lite 在任何上下文长度下都是平价，所以 Flash 没有为省钱而提前压缩的理由——只有当你的工作负载确实出现质量退化时才压。如果你既要长可靠窗口、又要 Pro 级质量，那才是该换用 GPT-5.6 Sol / Claude 5 这类模型的场景。
 
-## GLM-5.2 / BigModel Coding Plan
+## GLM / BigModel Coding Plan
 
 在 `~/.config/chord/auth.yaml` 中配置：
 
@@ -901,7 +891,7 @@ model_templates:
 `compaction`。如果你的工作负载本来就短，省略 `compaction` 块、让模型用全局
 默认即可。
 
-## DeepSeek V4.1 Flash
+## DeepSeek
 
 在 `~/.config/chord/auth.yaml` 中配置：
 
@@ -1172,7 +1162,7 @@ model_pools:
 时，历史思考会计入输入 token 和费用；`preserve_history: true` 让 Chord
 不在客户端剥离这段历史。
 
-## Kimi K3
+## Kimi
 
 Kimi K3 是当前旗舰思考模型，提供 1M token 上下文、始终启用思考，
 `reasoning_effort` 接受 `low` / `high` / `max`（默认 `max`）；会话中途
@@ -1272,7 +1262,7 @@ Chord 会保留已完成工具轮次中可迁移的部分：
 纯 reasoning-only 历史不会转换为 fallback 文本。这样可以把跨协议上下文
 集中在与动作相关的状态上，避免为和工具轮次无关的旧思考链重复付费。
 
-## Grok 4.6（xAI）
+## Grok（xAI）
 
 xAI 推荐通过 Responses API 使用 Grok。Grok 4.6 支持文本和图片输入、
 function calling、structured output、reasoning，并提供 500K 上下文。xAI
@@ -1375,7 +1365,7 @@ model_pools:
 取决于粘性路由：xAI 在 Chat Completions 上接受 `prompt_cache_key` 并映射为
 `x-grok-conv-id`；网关两者都不透传时，每个请求都会以缓存未命中重发。
 
-## MiniMax M3 / M2.x（OpenAI 兼容接口）
+## MiniMax（OpenAI 兼容接口）
 
 在 `~/.config/chord/auth.yaml` 中配置：
 
@@ -1444,6 +1434,94 @@ model_templates:
         preserve_history: true
 ```
 
+## Meta Muse Spark
+
+`~/.config/chord/auth.yaml` 配好 key：
+
+```yaml
+meta:
+  - "$MODEL_API_KEY"
+```
+
+Muse Spark 1.3 是 Meta 的 agentic/编程模型，跑在 Meta Model API 上：上下文
+1,048,576 token，官方参考配置的输出上限 131,072，输入支持文本、图片和 PDF
+（接口还收 video 和 audio，但 Chord 的 Responses wire 发不出去），思考始终
+开启，effort 可取 `minimal` / `low` / `medium` / `high` / `xhigh` / `max`。
+三个兼容面里要选 Responses：只有它跨轮携带思考，Chord 会把思考作为加密
+reasoning item 回放。
+
+```yaml
+model_templates:
+  muse-spark-1.3: &muse-spark-1-3
+    limit:
+      context: 1048576
+      output: 131072
+    reasoning:
+      effort: high
+      summary: auto
+    variants:
+      minimal:
+        reasoning:
+          effort: minimal
+      low:
+        reasoning:
+          effort: low
+      medium:
+        reasoning:
+          effort: medium
+      high:
+        reasoning:
+          effort: high
+      xhigh:
+        reasoning:
+          effort: xhigh
+      max:              # 仅 Standard 档
+        reasoning:
+          effort: max
+    modalities:
+      input: [text, image, pdf]
+
+providers:
+  meta:
+    type: responses
+    api_url: https://api.meta.ai/v1/responses
+    models:
+      muse-spark-1.3: *muse-spark-1-3
+
+model_pools:
+  default:
+    - meta/muse-spark-1.3@xhigh
+```
+
+- 默认请求形状不需要 `compat`。Responses provider 本来就会发
+  `include: ["reasoning.encrypted_content"]` 加 `store: false`，正是 Meta 推荐
+  的 stateless 重放组合；回放 reasoning item 时 Chord 会显式带上 `summary`
+  字段，这是 Meta 的硬性要求。`prompt_cache_key` 默认发送且受支持，
+  `client_metadata` 则接受后忽略。
+- Muse Spark 始终思考，`reasoning.effort: none` 会返回 `HTTP 400`，不要加
+  `none` variant。`max` 仅 Standard 档提供。
+- 示例池从 `@xhigh` 起步；要拉满思考就换 `@max`，日常想快一点可以降到
+  `@medium` 或 `@low`。
+- `muse-spark-1.3-contributor` 是同一模型的低价档，代价是允许 Meta 用你的
+  prompt 和 completion 训练；能接受这个交换再用，而且该档没有 `max`。
+- `cost` 是可选项，这份配方不写，Chord 也就不会估算这个模型的花费；想统计
+  成本就按你账号的费率补上 `cost` 块。
+- `limit.output` 取 Meta 参考配置里的 `131072`。Chord 在 Responses 上默认不
+  发 `max_output_tokens`；想让 Chord 显式执行这个上限，设
+  `compat.responses.send_max_output_tokens: true`。
+- Meta 的发布评测显示长上下文检索基本不衰减（MRCR v2 8-needle 在 256K–512K
+  是 98.5，512K–1M 是 98.1），没有已知的质量悬崖要压，沿用全局 compaction
+  阈值即可。
+- 另有 Messages 兼容端点（`https://api.meta.ai/v1/messages`）给 Anthropic
+  形态的客户端用；本页只写 Responses 路径。Chat Completions 不跨轮携带思考，
+  agentic 场景不推荐。
+
+验证：
+
+```bash
+chord doctor models --model meta/muse-spark-1.3@xhigh
+```
+
 ## 如何验证任意一份配置
 
 复制完配置后，先跑一个定向检查：
@@ -1455,7 +1533,7 @@ chord doctor models --model provider/model
 然后再验证你实际要用的 variant，例如：
 
 ```bash
-chord doctor models --model openai/gpt-5.6@max
-chord doctor models --model codex/gpt-5.5@max
+chord doctor models --model openai/gpt-5.6-sol@xhigh
+chord doctor models --model codex/gpt-5.5@xhigh
 chord doctor models --model anthropic/claude-opus-5@high
 ```

@@ -73,14 +73,15 @@ structured, and that is the part which must survive a provider switch. See
 
 - [Anthropic Claude](./model-configs.md#anthropic-claude)
 - [OpenAI Codex OAuth preset](./model-configs.md#codex-oauth-preset)
-- [OpenAI GPT-6 Astra](./model-configs.md#gpt-6-astra)
+- [OpenAI GPT (Responses)](./model-configs.md#openai-gpt-responses)
 - [Google Gemini](./model-configs.md#google-gemini)
-- [GLM-5.2 / BigModel Coding Plan](./model-configs.md#glm-52--bigmodel-coding-plan)
-- [DeepSeek V4.1 Flash](./model-configs.md#deepseek-v41-flash)
+- [GLM / BigModel Coding Plan](./model-configs.md#glm--bigmodel-coding-plan)
+- [DeepSeek](./model-configs.md#deepseek)
 - [Qwen preserved thinking](./model-configs.md#qwen-preserved-thinking)
-- [Kimi K3](./model-configs.md#kimi-k3)
-- [Grok 4.6](./model-configs.md#grok-46-xai)
-- [MiniMax M3 / M2.x](./model-configs.md#minimax-m3--m2x-openai-compatible)
+- [Kimi](./model-configs.md#kimi)
+- [Grok](./model-configs.md#grok-xai)
+- [MiniMax](./model-configs.md#minimax-openai-compatible)
+- [Meta Muse Spark](./model-configs.md#meta-muse-spark)
 
 When a request fails with a thinking-mode error, start from
 [Troubleshooting](./troubleshooting.md#deepseek--openai-compatible-thinking-mode-400s).

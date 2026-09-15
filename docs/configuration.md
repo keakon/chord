@@ -113,7 +113,7 @@ providers:
     type: responses
     api_url: https://api.openai.com/v1/responses
     models:
-      gpt-5.6:
+      gpt-5.6-sol:
         limit:
           context: 1050000
           output: 128000
@@ -138,7 +138,7 @@ providers:
 
 model_pools:
   default:
-    - openai/gpt-5.6@high
+    - openai/gpt-5.6-sol@xhigh
 ```
 
 Pair this provider with an API key in `~/.config/chord/auth.yaml`:
@@ -148,7 +148,7 @@ openai:
   - "$OPENAI_API_KEY"
 ```
 
-- Replace both `gpt-5.6` occurrences with `gpt-5.6-sol`, `gpt-5.6-terra`, or `gpt-5.6-luna` to pin an explicit model ID.
+- `gpt-5.6-terra` and `gpt-5.6-luna` are wired the same way; keep the `models` key and the `model_pools` ref on the same model ID.
 - This snippet targets the **official OpenAI API**, so it declares the full
   `1050000` window with no `input`: Chord then derives the usable input budget
   as `context` minus the model's own `output` cap (`1050000 − 128000 = 922000`),
@@ -158,7 +158,7 @@ openai:
 - Codex OAuth uses the same model windows as the API: GPT-5.4 / 5.6 / 6 run
   the `1050000 / 922000 / 128000` allocation there too (see
   [OpenAI Codex preset](#openai-codex-preset) below).
-- Supported API reasoning efforts are `none`, `low`, `medium`, `high`, `xhigh`, and `max`; select a configured variant with a ref such as `openai/gpt-5.6@max`.
+- Supported API reasoning efforts are `none`, `low`, `medium`, `high`, `xhigh`, and `max`; select a configured variant with a ref such as `openai/gpt-5.6-sol@xhigh`.
 - When reasoning is active, Responses defaults `reasoning.summary` to `auto`; set it to `none` to opt out explicitly. Chord does not currently expose GPT-5.6 `reasoning.mode: pro`.
 - `preset: codex` providers can also use `max` when the selected model/backend supports it. Whether a given effort level is accepted is model/provider-specific.
 

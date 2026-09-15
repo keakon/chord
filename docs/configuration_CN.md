@@ -104,7 +104,7 @@ providers:
     type: responses
     api_url: https://api.openai.com/v1/responses
     models:
-      gpt-5.6:
+      gpt-5.6-sol:
         limit:
           context: 1050000
           output: 128000
@@ -129,7 +129,7 @@ providers:
 
 model_pools:
   default:
-    - openai/gpt-5.6@high
+    - openai/gpt-5.6-sol@xhigh
 ```
 
 还需要在 `~/.config/chord/auth.yaml` 中为这个 provider 配置 API key：
@@ -139,7 +139,7 @@ openai:
   - "$OPENAI_API_KEY"
 ```
 
-- 如需固定模型 ID，把配置中的两处 `gpt-5.6` 同时替换为 `gpt-5.6-sol`、`gpt-5.6-terra` 或 `gpt-5.6-luna`。
+- `gpt-5.6-terra` 和 `gpt-5.6-luna` 的配法相同；`models` 的 key 与 `model_pools` 的 ref 要用同一个模型 ID。
 - 这份片段面向**官方 OpenAI API**，因此直接声明 `1050000` 全窗口且不写
   `input`：Chord 按 `context` 减去模型声明的 `limit.output` 推导可用输入预算
   （此处为 `1050000 - 128000 = 922000`）；只有未声明 `limit.output` 的模型才回退到
@@ -147,7 +147,7 @@ openai:
   再补 `input: 272000`。
 - Codex OAuth 与 API 使用相同的模型窗口：GPT-5.4 / 5.6 / 6 在 Codex 上同样是
   `1050000 / 922000 / 128000` 档位（见下方 [OpenAI Codex preset](#openai-codex-preset)）。
-- API 支持的 reasoning effort 为 `none`、`low`、`medium`、`high`、`xhigh`、`max`；可用 `openai/gpt-5.6@max` 这样的 ref 选择已配置 variant。
+- API 支持的 reasoning effort 为 `none`、`low`、`medium`、`high`、`xhigh`、`max`；可用 `openai/gpt-5.6-sol@xhigh` 这样的 ref 选择已配置 variant。
 - Responses 在启用 reasoning 时默认使用 `reasoning.summary: auto`；如需明确关闭，请配置为 `none`。Chord 当前尚未暴露 GPT-5.6 的 `reasoning.mode: pro`。
 - `preset: codex` provider 也可以使用 `max`；是否接受该 effort 由具体模型 / 后端决定。
 

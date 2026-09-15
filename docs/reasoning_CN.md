@@ -62,14 +62,15 @@ continuity 模式，并给出各家族的配方入口。字段级语义见
 
 - [Anthropic Claude](./model-configs_CN.md#anthropic-claude)
 - [OpenAI Codex OAuth preset](./model-configs_CN.md#codex-oauth-preset)
-- [OpenAI GPT-6 Astra](./model-configs_CN.md#gpt-6-astra)
+- [OpenAI GPT（Responses 兼容接口）](./model-configs_CN.md#openai-gptresponses-兼容接口)
 - [Google Gemini](./model-configs_CN.md#google-gemini)
-- [GLM-5.2 / BigModel Coding Plan](./model-configs_CN.md#glm-52--bigmodel-coding-plan)
-- [DeepSeek V4.1 Flash](./model-configs_CN.md#deepseek-v41-flash)
+- [GLM / BigModel Coding Plan](./model-configs_CN.md#glm--bigmodel-coding-plan)
+- [DeepSeek](./model-configs_CN.md#deepseek)
 - [Qwen 保留历史思考](./model-configs_CN.md#qwen-保留历史思考)
-- [Kimi K3](./model-configs_CN.md#kimi-k3)
-- [Grok 4.6](./model-configs_CN.md#grok-46xai)
-- [MiniMax M3 / M2.x](./model-configs_CN.md#minimax-m3--m2xopenai-兼容接口)
+- [Kimi](./model-configs_CN.md#kimi)
+- [Grok](./model-configs_CN.md#grokxai)
+- [MiniMax](./model-configs_CN.md#minimaxopenai-兼容接口)
+- [Meta Muse Spark](./model-configs_CN.md#meta-muse-spark)
 
 请求报 thinking 模式错误时，从
 [常见问题排查](./troubleshooting_CN.md#deepseek--openai-兼容-thinking-模式-400)

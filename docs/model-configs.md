@@ -31,7 +31,7 @@ Use this page when you already know which provider/model family you want and jus
 > model's long-context reliability is not documented here, omit the
 > `compaction` block and let it use the global default.
 
-## OpenAI Responses-compatible: GPT-5.4 / GPT-5.5 / GPT-5.6
+## OpenAI GPT (Responses)
 
 The GPT-5.4 / GPT-5.5 / GPT-5.6 / GPT-6 Astra snippets use the limits published
 on the OpenAI model pages: GPT-5.4 / 5.6 / 6 run a `1050000 / 922000 / 128000`
@@ -82,13 +82,13 @@ providers:
 
 model_pools:
   default:
-    - openai/gpt-5.4@high
+    - openai/gpt-5.4@xhigh
 ```
 
 Verify:
 
 ```bash
-chord doctor models --model openai/gpt-5.4@high
+chord doctor models --model openai/gpt-5.4@xhigh
 ```
 
 ### GPT-5.5
@@ -123,21 +123,21 @@ providers:
 
 model_pools:
   default:
-    - openai/gpt-5.5@high
+    - openai/gpt-5.5@xhigh
 ```
 
 Verify:
 
 ```bash
-chord doctor models --model openai/gpt-5.5@high
+chord doctor models --model openai/gpt-5.5@xhigh
 ```
 
-### GPT-5.6 alias (`gpt-5.6` → Sol)
+### GPT-5.6 (Sol / Terra / Luna)
 
-The three 5.6 tiers share the same window, reasoning, variants, and
-modalities, so a common `&gpt-5-6-base` anchor carries those; each tier only
-adds its own `cost` block (permanent list prices; temporary promotions are not
-maintained here).
+The 5.6 family has three models: `gpt-5.6-sol`, `gpt-5.6-terra`, and
+`gpt-5.6-luna`. They share the same window, reasoning, variants, and
+modalities, so a common `&gpt-5-6-base` anchor carries those and each model
+entry only adds its own `cost` block.
 
 ```yaml
 model_templates:
@@ -173,32 +173,6 @@ model_templates:
     modalities:
       input: [text, image, pdf]
 
-providers:
-  openai:
-    type: responses
-    api_url: https://api.openai.com/v1/responses
-    models:
-      gpt-5.6:
-        <<: *gpt-5-6-base
-        cost:
-          input: 5
-          output: 30
-          cache_read: 0.5
-          cache_write: 6.25
-          input_tiers:
-            - above_input_tokens: 272000
-              input: 10
-              output: 45
-              cache_read: 1
-              cache_write: 12.5
-
-model_pools:
-  default:
-    - openai/gpt-5.6@high
-```
-
-Use explicit model IDs when you want fixed pricing/behavior:
-
 ### GPT-5.6 Sol
 
 ```yaml
@@ -220,6 +194,10 @@ providers:
               output: 45
               cache_read: 1
               cache_write: 12.5
+
+model_pools:
+  default:
+    - openai/gpt-5.6-sol@xhigh
 ```
 
 ### GPT-5.6 Terra
@@ -243,6 +221,10 @@ providers:
               output: 18
               cache_read: 0.4
               cache_write: 5
+
+model_pools:
+  default:
+    - openai/gpt-5.6-terra@max
 ```
 
 ### GPT-5.6 Luna
@@ -266,6 +248,10 @@ providers:
               output: 1.8
               cache_read: 0.04
               cache_write: 0.5
+
+model_pools:
+  default:
+    - openai/gpt-5.6-luna@max
 ```
 
 Notes:
@@ -276,7 +262,6 @@ Notes:
   explicit `input`. Only the 400K-allocation models (GPT-5.5 / 5.2 above)
   keep `input: 272000`. If your account or relay still serves the older
   Codex profile, fall back to `400000 / 272000 / 128000` for the 5.6 tiers.
-- `gpt-5.6` currently resolves to Sol, so its `cost` block should match Sol pricing.
 - GPT-5.6 API reasoning efforts can include `none`, `low`, `medium`, `high`, `xhigh`, and `max`.
 - Responses defaults `reasoning.summary` to `auto` while reasoning is active; set `reasoning.summary: none` when you do not want Chord to request a readable summary.
 - Chord does not currently expose GPT-5.6 `reasoning.mode: pro`.
@@ -284,7 +269,7 @@ Notes:
 Verify:
 
 ```bash
-chord doctor models --model openai/gpt-5.6@max
+chord doctor models --model openai/gpt-5.6-sol@xhigh
 ```
 
 #### Compaction tuning for GPT-5.6
@@ -374,11 +359,11 @@ before the first request and the real cap only after it. So:
 
 As everywhere on this page, the `compaction` block lives on the model
 template so every provider referencing it inherits it, and the fields tune
-the usage-driven automatic-compaction path regardless of `model_driven`. If
-you use the `gpt-5.6` alias (it resolves to Sol), put its `compaction` on
-the alias' template.
+the usage-driven automatic-compaction path regardless of `model_driven`. A
+block on a shared template such as `&gpt-5-6-base` applies to every model that
+merges it; for per-tier tuning, give that tier its own template.
 
-## OpenAI Responses-compatible: GPT-6 Astra
+### GPT-6 Astra
 
 GPT-6 Astra is OpenAI's current flagship (`gpt-6-astra`): a 1,050,000-token
 context window with 128,000 max output and 922,000 usable input (derived as
@@ -394,8 +379,6 @@ Pair the API-key provider with an entry in `~/.config/chord/auth.yaml`:
 openai:
   - "$OPENAI_API_KEY"
 ```
-
-### GPT-6 Astra
 
 The base template carries a cost-first `compaction` block by default: 272K is
 a pricing cliff (the whole request reprices, not just the tokens above the
@@ -428,6 +411,9 @@ model_templates:
       low:
         reasoning:
           effort: low
+      medium:
+        reasoning:
+          effort: medium
       high:
         reasoning:
           effort: high
@@ -452,13 +438,13 @@ providers:
 
 model_pools:
   default:
-    - openai/gpt-6-astra@high
+    - openai/gpt-6-astra@medium
 ```
 
 Verify:
 
 ```bash
-chord doctor models --model openai/gpt-6-astra@high
+chord doctor models --model openai/gpt-6-astra@medium
 ```
 
 Notes:
@@ -473,7 +459,7 @@ Notes:
   [Codex OAuth preset](#codex-oauth-preset) for the Codex-profile examples.
   Do not copy this API snippet's window onto a Codex provider.
 - Supported API reasoning efforts are `low`, `medium`, `high`, `xhigh`, and
-  `max`; select a configured variant with a ref such as `openai/gpt-6-astra@max`.
+  `max`; select a configured variant with a ref such as `openai/gpt-6-astra@medium`.
   GPT-6 Astra has no `none` effort.
 - Responses defaults `reasoning.summary` to `auto` while reasoning is active;
   set `reasoning.summary: none` when you do not want Chord to request a
@@ -544,6 +530,9 @@ providers:
           input: 922000
           output: 128000
         variants:
+          medium:
+            reasoning:
+              effort: medium
           high:
             reasoning:
               effort: high
@@ -581,8 +570,8 @@ providers:
 
 model_pools:
   default:
-    - codex/gpt-6-astra@high
-    - codex/gpt-5.5@high
+    - codex/gpt-6-astra@medium
+    - codex/gpt-5.5@xhigh
 ```
 
 Authenticate with:
@@ -820,7 +809,7 @@ to compact Flash early — do it only if quality actually degrades for your
 workload. If you need both a long reliable window *and* Pro-class quality, that is
 the case where a GPT-5.6 Sol / Claude 5-class model is the better fit.
 
-## GLM-5.2 / BigModel Coding Plan
+## GLM / BigModel Coding Plan
 
 Pair with `~/.config/chord/auth.yaml`:
 
@@ -989,7 +978,7 @@ GLM-5.2 is served by several providers in the recipes above (`bigmodel` chat,
 template gets the same `compaction`. If your workloads stay short, omit the
 `compaction` block and let the model use the global default.
 
-## DeepSeek V4.1 Flash
+## DeepSeek
 
 Pair with `~/.config/chord/auth.yaml`:
 
@@ -1275,7 +1264,7 @@ Use the limits and regional endpoint published for your account. Historical
 reasoning counts as input tokens and billing when `preserve_thinking` is true;
 `preserve_history: true` keeps Chord from stripping that history client-side.
 
-## Kimi K3
+## Kimi
 
 Kimi K3 is the current flagship thinking model. It has a 1M-token context,
 always reasons, and accepts `reasoning_effort: low`, `high`, or `max` (default
@@ -1385,7 +1374,7 @@ Reasoning-only turns are not copied as fallback text. This keeps cross-protocol
 context focused on action-relevant state and avoids paying repeatedly for old
 chain-of-thought that is not tied to a tool round.
 
-## Grok 4.6 (xAI)
+## Grok (xAI)
 
 xAI recommends the Responses API for Grok. Grok 4.6 supports text and image
 input, function calling, structured output, reasoning, and a 500K context
@@ -1496,7 +1485,7 @@ a `prompt_cache_key` on Chat Completions and routes it through
 `x-grok-conv-id`, so a gateway that forwards neither re-sends every request as
 a cache miss.
 
-## MiniMax M3 / M2.x (OpenAI-compatible)
+## MiniMax (OpenAI-compatible)
 
 Pair with `~/.config/chord/auth.yaml`:
 
@@ -1569,6 +1558,102 @@ model_templates:
         preserve_history: true
 ```
 
+## Meta Muse Spark
+
+Pair with `~/.config/chord/auth.yaml`:
+
+```yaml
+meta:
+  - "$MODEL_API_KEY"
+```
+
+Muse Spark 1.3 is Meta's agentic and coding model on Meta Model API: a
+1,048,576-token context window, an output cap of 131,072 in Meta's reference
+configuration, text / image / PDF input (the API also takes video and audio,
+which Chord's Responses wire cannot send), and always-on reasoning with
+`minimal` / `low` / `medium` / `high` / `xhigh` / `max` effort. Use the
+Responses endpoint: among the three compatible surfaces it is the only one that
+carries the model's reasoning across turns, which Chord replays as encrypted
+reasoning items.
+
+```yaml
+model_templates:
+  muse-spark-1.3: &muse-spark-1-3
+    limit:
+      context: 1048576
+      output: 131072
+    reasoning:
+      effort: high
+      summary: auto
+    variants:
+      minimal:
+        reasoning:
+          effort: minimal
+      low:
+        reasoning:
+          effort: low
+      medium:
+        reasoning:
+          effort: medium
+      high:
+        reasoning:
+          effort: high
+      xhigh:
+        reasoning:
+          effort: xhigh
+      max:              # Standard tier only
+        reasoning:
+          effort: max
+    modalities:
+      input: [text, image, pdf]
+
+providers:
+  meta:
+    type: responses
+    api_url: https://api.meta.ai/v1/responses
+    models:
+      muse-spark-1.3: *muse-spark-1-3
+
+model_pools:
+  default:
+    - meta/muse-spark-1.3@xhigh
+```
+
+Notes:
+
+- No `compat` block is needed. Responses providers already send
+  `include: ["reasoning.encrypted_content"]` with `store: false` — Meta's
+  recommended stateless-replay pairing — and Chord replays reasoning items with
+  an explicit `summary` field, which Meta requires. `prompt_cache_key` is sent
+  by default and supported; `client_metadata` is accepted and ignored.
+- Muse Spark always reasons, so `reasoning.effort: none` returns `HTTP 400`:
+  do not add a `none` variant. `max` is available on the Standard tier only.
+- The pool starts at `@xhigh`; switch to `@max` for maximum reasoning, or drop
+  to `@medium` / `@low` for faster everyday work.
+- `muse-spark-1.3-contributor` serves the same model much cheaper in exchange
+  for letting Meta train on your prompts and completions. Configure it only
+  where that tradeoff is acceptable, and note that it has no `max` effort.
+- `cost` is optional and left out of this recipe, so Chord does not estimate
+  this model's spending; add a `cost` block with your account's rates when you
+  want cost tracking.
+- `limit.output` follows Meta's reference configuration (`131072`). Chord does
+  not send `max_output_tokens` on Responses by default; set
+  `compat.responses.send_max_output_tokens: true` when you want Chord to
+  enforce the cap explicitly.
+- Meta's launch benchmarks report near-flat long-context retrieval (MRCR v2
+  8-needle 98.5 at 256K–512K and 98.1 at 512K–1M), so there is no documented
+  quality cliff to compact under; the global compaction threshold applies.
+- A Messages-compatible endpoint (`https://api.meta.ai/v1/messages`) exists for
+  Anthropic-format clients; this recipe documents the Responses path. Chat
+  Completions is not recommended for agentic work because it does not carry
+  reasoning across turns.
+
+Verify:
+
+```bash
+chord doctor models --model meta/muse-spark-1.3@xhigh
+```
+
 ## Verify any recipe
 
 After copying a recipe, run one targeted check first:
@@ -1580,7 +1665,7 @@ chord doctor models --model provider/model
 Then verify the exact variant you plan to use, for example:
 
 ```bash
-chord doctor models --model openai/gpt-5.6@max
-chord doctor models --model codex/gpt-5.5@max
+chord doctor models --model openai/gpt-5.6-sol@xhigh
+chord doctor models --model codex/gpt-5.5@xhigh
 chord doctor models --model anthropic/claude-opus-5@high
 ```
