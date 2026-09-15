@@ -626,6 +626,41 @@ func TestCodexNormalizeSearchArgsUseCurrentToolSchema(t *testing.T) {
 	}
 }
 
+func TestCodexNormalizeShellArgsUseCurrentToolSchema(t *testing.T) {
+	raw := codexNormalizeShellArgs(map[string]any{
+		"cmd":     "go test ./...",
+		"workdir": "/tmp",
+		"timeout": 30,
+	})
+	var args map[string]any
+	if err := json.Unmarshal(raw, &args); err != nil {
+		t.Fatalf("unmarshal shell args: %v", err)
+	}
+	if _, ok := args["timeout"]; ok {
+		t.Fatalf("shell args use legacy timeout field: %#v", args)
+	}
+	// Codex records the shell timeout in seconds; Chord's shell takes
+	// timeout_ms, so the imported deadline must be converted, not dropped.
+	if args["timeout_ms"] != float64(30000) {
+		t.Fatalf("timeout_ms=%v, want 30000", args["timeout_ms"])
+	}
+	if args["command"] != "go test ./..." || args["workdir"] != "/tmp" {
+		t.Fatalf("shell args=%#v", args)
+	}
+
+	fractional := codexNormalizeShellArgs(map[string]any{
+		"command": "sleep 2",
+		"timeout": 1.5,
+	})
+	var fractionalArgs map[string]any
+	if err := json.Unmarshal(fractional, &fractionalArgs); err != nil {
+		t.Fatalf("unmarshal fractional shell args: %v", err)
+	}
+	if fractionalArgs["timeout_ms"] != float64(1500) {
+		t.Fatalf("timeout_ms=%v, want 1500", fractionalArgs["timeout_ms"])
+	}
+}
+
 func TestImport_Codex_WritesRecoverableSession(t *testing.T) {
 	stateDir := t.TempDir()
 	t.Setenv("CHORD_STATE_DIR", stateDir)

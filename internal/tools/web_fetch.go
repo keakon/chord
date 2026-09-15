@@ -58,9 +58,27 @@ type WebFetchTool struct {
 }
 
 type webFetchArgs struct {
-	URL     string `json:"url"`
-	Raw     bool   `json:"raw,omitempty"`     // return raw text without HTML->Markdown conversion
-	Timeout int    `json:"timeout,omitempty"` // timeout in seconds (default 30, max 120)
+	URL       string `json:"url"`
+	Raw       bool   `json:"raw,omitempty"`        // return raw text without HTML->Markdown conversion
+	TimeoutMs int    `json:"timeout_ms,omitempty"` // request deadline in milliseconds (default 30000, capped at 120000)
+}
+
+// webFetchDefaultTimeoutMs is the request deadline applied when timeout_ms is
+// omitted; webFetchMaxTimeoutMs caps it so a value off by an order of magnitude
+// cannot hold the turn open for minutes.
+const (
+	webFetchDefaultTimeoutMs = 30_000
+	webFetchMaxTimeoutMs     = 120_000
+)
+
+// webFetchTimeout resolves the millisecond timeout_ms argument: an omitted or
+// non-positive value keeps the default, and anything above the cap is clamped
+// instead of rejected.
+func webFetchTimeout(timeoutMs int) time.Duration {
+	if timeoutMs <= 0 {
+		timeoutMs = webFetchDefaultTimeoutMs
+	}
+	return time.Duration(min(timeoutMs, webFetchMaxTimeoutMs)) * time.Millisecond
 }
 
 type webFetchResult struct {
@@ -200,9 +218,9 @@ func (WebFetchTool) Parameters() map[string]any {
 				"type":        "boolean",
 				"description": "Return raw text without HTML->Markdown conversion. Default false.",
 			},
-			"timeout": map[string]any{
+			"timeout_ms": map[string]any{
 				"type":        "integer",
-				"description": "Request timeout in seconds. Default 30, max 120.",
+				"description": fmt.Sprintf("Optional request timeout in milliseconds (default %d, capped at %d).", webFetchDefaultTimeoutMs, webFetchMaxTimeoutMs),
 			},
 		},
 		"required":             []string{"url"},
@@ -229,16 +247,13 @@ func (t WebFetchTool) Execute(ctx context.Context, raw json.RawMessage) (string,
 		return "", fmt.Errorf("url must start with http:// or https://")
 	}
 
-	timeoutSec := 30
-	if a.Timeout > 0 {
-		timeoutSec = min(a.Timeout, 120)
-	}
+	timeout := webFetchTimeout(a.TimeoutMs)
 
-	execCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
+	execCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	effectiveProxy := t.effectiveProxy()
-	client, err := newHTTPClientWithProxy(effectiveProxy, time.Duration(timeoutSec)*time.Second)
+	client, err := newHTTPClientWithProxy(effectiveProxy, timeout)
 	if err != nil {
 		return "", fmt.Errorf("create HTTP client: %w", err)
 	}

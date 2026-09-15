@@ -253,8 +253,8 @@ func buildBashConfirmSummary(summary *confirmSummary, parsed map[string]any) {
 		appendConfirmField(&summary.Fields, newConfirmField("Timeout", formatShellMs(tools.ShellDefaultTimeoutMs), true))
 	}
 
-	handled["yield_ms"] = true
-	if yieldMs, ok := confirmInt(parsed, "yield_ms"); ok {
+	handled["yield_time_ms"] = true
+	if yieldMs, ok := confirmInt(parsed, "yield_time_ms"); ok {
 		if yieldMs > 0 {
 			appendConfirmField(&summary.Fields, newConfirmField("Foreground yield", formatShellMs(yieldMs), true))
 		} else {
@@ -403,7 +403,7 @@ func buildWebFetchConfirmSummary(summary *confirmSummary, parsed map[string]any)
 }
 
 func buildGenericConfirmSummary(summary *confirmSummary, parsed map[string]any) {
-	priority := []string{"path", "paths", "patterns", "includes", "reason", "url", "command", "workdir", "job_id", "timeout_ms", "yield_ms", "wait", "timeout", "limit", "offset", "pattern"}
+	priority := []string{"path", "paths", "patterns", "includes", "reason", "url", "command", "workdir", "job_id", "timeout_ms", "yield_time_ms", "wait", "limit", "offset", "pattern"}
 	seen := map[string]bool{}
 	for _, key := range priority {
 		value, ok := parsed[key]

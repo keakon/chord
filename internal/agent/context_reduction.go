@@ -2700,9 +2700,9 @@ func reduceReadLikeOutputSummary(ctx requestReductionContext) string {
 
 func reduceWebFetchOutputSummary(argsJSON, content string) string {
 	var parsed struct {
-		URL     string `json:"url"`
-		Raw     bool   `json:"raw"`
-		Timeout int    `json:"timeout"`
+		URL       string `json:"url"`
+		Raw       bool   `json:"raw"`
+		TimeoutMs int    `json:"timeout_ms"`
 	}
 	_ = json.Unmarshal([]byte(argsJSON), &parsed)
 	snippetSource := stripWebFetchResultHeaders(content)
@@ -2712,11 +2712,11 @@ func reduceWebFetchOutputSummary(argsJSON, content string) string {
 	}
 	h := contentFingerprint(content)
 	return fmt.Sprintf(
-		"[Older %s output truncated for this request to save context; url=%q raw=%t timeout=%d content_fnv1a64=%016x]\n%s",
+		"[Older %s output truncated for this request to save context; url=%q raw=%t timeout_ms=%d content_fnv1a64=%016x]\n%s",
 		tools.NameWebFetch,
 		strings.TrimSpace(parsed.URL),
 		parsed.Raw,
-		parsed.Timeout,
+		parsed.TimeoutMs,
 		h,
 		snippet,
 	)

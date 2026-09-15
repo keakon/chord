@@ -1119,7 +1119,9 @@ func codexNormalizeShellArgs(args map[string]any) json.RawMessage {
 		result["workdir"] = wd
 	}
 	if timeout := codexPickFloat(args, "timeout"); timeout > 0 {
-		result["timeout"] = int(timeout)
+		// Codex records the shell timeout in seconds; Chord's shell takes
+		// timeout_ms, so convert to keep the imported deadline intact.
+		result["timeout_ms"] = int(timeout * 1000)
 	}
 	b, _ := json.Marshal(result)
 	return b

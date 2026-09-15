@@ -86,7 +86,7 @@ func bashHeaderGrayPart(vals map[string]string) string {
 			}
 		}
 	}
-	if raw := strings.TrimSpace(vals["yield_ms"]); raw != "" {
+	if raw := strings.TrimSpace(vals["yield_time_ms"]); raw != "" {
 		if ms, err := strconv.Atoi(raw); err == nil {
 			switch {
 			case ms <= 0:

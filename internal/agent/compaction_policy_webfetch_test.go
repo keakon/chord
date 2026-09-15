@@ -37,7 +37,10 @@ func TestCompactWebFetchOutputSummaryStripsResultHeadersFromSnippet(t *testing.T
 		"",
 		"This is the preserved body snippet.",
 	}, "\n")
-	summary := reduceWebFetchOutputSummary(`{"url":"https://example.com/article","timeout":30}`, content)
+	summary := reduceWebFetchOutputSummary(`{"url":"https://example.com/article","timeout_ms":30000}`, content)
+	if !strings.Contains(summary, "timeout_ms=30000") {
+		t.Fatalf("summary = %q, want the request deadline in the marker", summary)
+	}
 	if !strings.Contains(summary, "This is the preserved body snippet.") {
 		t.Fatalf("summary = %q, want body snippet", summary)
 	}

@@ -88,12 +88,12 @@ func TestShellBackgroundWithoutTimeoutHasNoHardDeadline(t *testing.T) {
 }
 
 func TestShellHardDeadlineKillsCommandBeforeYield(t *testing.T) {
-	// timeout_ms is tighter than yield_ms, so promotion is disabled and the
+	// timeout_ms is tighter than yield_time_ms, so promotion is disabled and the
 	// command dies on its deadline instead of being handed back about to die.
 	out, err := ShellTool{}.Execute(context.Background(), mustMarshal(t, map[string]any{
-		"command":    "sh -c 'sleep 2'",
-		"timeout_ms": 1000,
-		"yield_ms":   60000,
+		"command":       "sh -c 'sleep 2'",
+		"timeout_ms":    1000,
+		"yield_time_ms": 60000,
 	}))
 	if err == nil {
 		t.Fatal("expected timeout error")
@@ -137,7 +137,7 @@ func TestShellZeroTimeoutKeepsDefaultDeadlineForNonPromotableForeground(t *testi
 	}
 }
 
-// Switching promotion off (yield_ms: 0) leaves the command with no yield timer
+// Switching promotion off (yield_time_ms: 0) leaves the command with no yield timer
 // to hand it off either, so timeout_ms: 0 must not leave the foreground wait
 // with no deadline at all. A promotable command reaches that state too, so the
 // cap cannot be limited to the commands excluded from auto-promotion.
@@ -148,15 +148,15 @@ func TestShellZeroTimeoutWithPromotionDisabledKeepsDefaultDeadline(t *testing.T)
 	out, err := (ShellTool{}).Execute(context.Background(), mustMarshal(t, map[string]any{
 		// A promotable shape (nothing here is a deliberate wait or a short git
 		// query) that still exits immediately.
-		"command":    "sh -c 'true'",
-		"timeout_ms": 0,
-		"yield_ms":   0,
+		"command":       "sh -c 'true'",
+		"timeout_ms":    0,
+		"yield_time_ms": 0,
 	}))
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	if strings.Contains(out, "[background job ") {
-		t.Fatalf("yield_ms:0 must not promote: %q", out)
+		t.Fatalf("yield_time_ms:0 must not promote: %q", out)
 	}
 	states := SnapshotJobs()
 	if len(states) != 1 {
@@ -194,9 +194,9 @@ func TestShellPromotesLongCommandToBackground(t *testing.T) {
 	resetJobRegistryOnlyForTest(t)
 	t.Cleanup(func() { StopAllJobsForShutdown() })
 	out, err := ShellTool{}.Execute(context.Background(), mustMarshal(t, map[string]any{
-		"command":    "sh -c 'sleep 2'",
-		"timeout_ms": 5000,
-		"yield_ms":   50,
+		"command":       "sh -c 'sleep 2'",
+		"timeout_ms":    5000,
+		"yield_time_ms": 50,
 	}))
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -212,14 +212,14 @@ func TestShellPromotesLongCommandToBackground(t *testing.T) {
 
 func TestShellYieldDisabledKeepsCommandInForeground(t *testing.T) {
 	out, err := ShellTool{}.Execute(context.Background(), mustMarshal(t, map[string]any{
-		"command":  "sh -c 'sleep 0.2'; echo done",
-		"yield_ms": 0,
+		"command":       "sh -c 'sleep 0.2'; echo done",
+		"yield_time_ms": 0,
 	}))
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	if strings.Contains(out, "[background job ") {
-		t.Fatalf("yield_ms:0 must not promote: %q", out)
+		t.Fatalf("yield_time_ms:0 must not promote: %q", out)
 	}
 	if !strings.Contains(out, "done") {
 		t.Fatalf("output = %q, want command output", out)
@@ -356,7 +356,7 @@ func TestBashDescriptionIncludesToolSpecificHintsOnlyWhenVisible(t *testing.T) {
 		"Dependent commands must run in order",
 		"Only set timeout_ms when you need a hard deadline other than the foreground default of 600000ms",
 		"a job started with run_in_background:true has none until you set one, and accepts up to 21600000 for hour-scale work",
-		"only set yield_ms when you need a foreground budget other than the default 90000ms.",
+		"only set yield_time_ms when you need a foreground budget other than the default 90000ms.",
 	} {
 		if !strings.Contains(withoutHelpers, want) {
 			t.Fatalf("missing guidance %q in %q", want, withoutHelpers)
@@ -399,20 +399,20 @@ func TestShellParametersExposeYieldAndBackgroundControls(t *testing.T) {
 	if !strings.Contains(timeoutDesc, "0 means no deadline") {
 		t.Fatalf("timeout_ms description missing no-deadline guidance in %q", timeoutDesc)
 	}
-	yieldProp, ok := props["yield_ms"].(map[string]any)
+	yieldProp, ok := props["yield_time_ms"].(map[string]any)
 	if !ok {
-		t.Fatalf("yield_ms has unexpected type %T", props["yield_ms"])
+		t.Fatalf("yield_time_ms has unexpected type %T", props["yield_time_ms"])
 	}
 	yieldDesc, _ := yieldProp["description"].(string)
 	if !strings.Contains(yieldDesc, "default 90000") {
-		t.Fatalf("yield_ms description missing default in %q", yieldDesc)
+		t.Fatalf("yield_time_ms description missing default in %q", yieldDesc)
 	}
 	for _, want := range []string{
 		"use it when this turn needs the result and the command fits the foreground deadline",
 		"cancelling the turn kills the command",
 	} {
 		if !strings.Contains(yieldDesc, want) {
-			t.Fatalf("yield_ms description missing %q in %q", want, yieldDesc)
+			t.Fatalf("yield_time_ms description missing %q in %q", want, yieldDesc)
 		}
 	}
 }

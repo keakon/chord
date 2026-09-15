@@ -10,9 +10,11 @@
 
 - 超时默认值也有变化：前台 `shell` 现在默认 90 秒后转入后台、`timeout_ms` 默认 10 分钟；而显式 `run_in_background: true` 且不传 `timeout_ms` 的 job 没有硬截止——与旧 `spawn` 的默认一致——传 `timeout_ms: 0` 只是把这一点写得更明确。这个参数同时改了名字和单位：`timeout` 以秒计（最大 600，默认 30），`timeout_ms` 以毫秒计（前台最大 600000，`run_in_background: true` 时最大 21600000；前台默认 600000）。未知参数会被忽略而不是报错，所以仍然传 `timeout: 60` 的调用不会失败——它会退回默认值，而不是原本想要的那 60 秒。请把所有 `timeout: N` 迁移为 `timeout_ms: N * 1000`。job 句柄和完成通知只在实际存在截止时才写出它。
 
+- `web_fetch` 的 `timeout` 参数改名为 `timeout_ms`，单位也从秒改为毫秒：旧参数以秒计（默认 30，最大 120），新参数以毫秒计（默认 30000，上限 120000）。请把所有 `timeout: N` 迁移为 `timeout_ms: N * 1000`；未知参数会被忽略而不是报错，所以仍然传 `timeout: 30` 的调用不会失败，只会退回 30 秒默认值。
+
 ### 新功能
 
-- `shell` 现在也能承担后台任务，长命令不必再阻塞当前回合。前台命令超过预算（`yield_ms`，默认 90 秒）会自动转成后台 job：输出会保留，job 结束时发通知唤醒 agent，它可以先做别的事，或结束回合并由完成通知叫醒。`run_in_background: true` 立即启动后台任务而不等待，`timeout_ms: 0` 启动无硬截止的服务型命令。前台命令的 `timeout_ms` 仍最多 10 分钟，`run_in_background: true` 时最多可设 6 小时。
+- `shell` 现在也能承担后台任务，长命令不必再阻塞当前回合。前台命令超过预算（`yield_time_ms`，默认 90 秒）会自动转成后台 job：输出会保留，job 结束时发通知唤醒 agent，它可以先做别的事，或结束回合并由完成通知叫醒。`run_in_background: true` 立即启动后台任务而不等待，`timeout_ms: 0` 启动无硬截止的服务型命令。前台命令的 `timeout_ms` 仍最多 10 分钟，`run_in_background: true` 时最多可设 6 小时。
 - 新增 `job_output`、`job_list`、`job_kill` 三个工具管理后台任务。`job_output` 只返回自上次读取以来的新增输出，可用 `wait` 选择是否阻塞（`none` / `output` / `exit`），每次等待由 runtime 限制，慢任务不会占住回合，等待超时也不会杀掉 job；连续多次读取都没有新输出会被视为轮询——先提示、后拒绝，返回给模型的输出也会去掉终端转义序列。`job_list` 列出你可读取或停止的 job——你自己的、主 agent 的，以及你的直接 owner 启动的——`job_kill` 停止任务且不产生完成通知。折叠后的 `job_output` 卡片会在标题行写出这次读取的结果——`job_output job-8 · 2 new lines`，没有新输出时是 `· no new output`——折叠的 `job_kill` 卡片则显示 `job_kill job-64 · Stop requested`，状态不必展开就能看到。
 - 连续的后台完成唤醒之间没有用户输入时最多 3 次，超过后新的完成结果要等下一条用户消息才会投递。
 

@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	readability "github.com/mackee/go-readability"
 	"golang.org/x/net/html"
@@ -146,6 +147,41 @@ func TestWebFetchHonorsParentContextCancellation(t *testing.T) {
 	_, err = tool.Execute(ctx, raw)
 	if err == nil || !strings.Contains(err.Error(), "context canceled") {
 		t.Fatalf("expected context canceled error, got %v", err)
+	}
+}
+
+func TestWebFetchResolvesTimeoutMs(t *testing.T) {
+	cases := []struct {
+		name      string
+		timeoutMs int
+		want      time.Duration
+	}{
+		{name: "omitted keeps the default", timeoutMs: 0, want: 30 * time.Second},
+		{name: "value is milliseconds", timeoutMs: 250, want: 250 * time.Millisecond},
+		{name: "above the cap is clamped", timeoutMs: 600_000, want: 120 * time.Second},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := webFetchTimeout(tc.timeoutMs); got != tc.want {
+				t.Fatalf("webFetchTimeout(%d) = %v, want %v", tc.timeoutMs, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestWebFetchTimeoutMsAppliesToTheRequest(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(500 * time.Millisecond)
+		_, _ = io.WriteString(w, "<html><body>slow</body></html>")
+	}))
+	defer server.Close()
+
+	// Reading 50 as seconds would outlive the handler, so a pass here is proof
+	// the argument is milliseconds.
+	tool := NewWebFetchTool(webFetchTestConfig(), "")
+	_, err := executeWebFetchForTestAllowError(t, tool, map[string]any{"url": server.URL, "timeout_ms": 50})
+	if err == nil || !strings.Contains(err.Error(), "deadline exceeded") {
+		t.Fatalf("expected the 50ms deadline to abort the request, got %v", err)
 	}
 }
 

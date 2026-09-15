@@ -100,7 +100,7 @@ type shellArgs struct {
 	Description     string `json:"description,omitempty"`
 	Workdir         string `json:"workdir,omitempty"`
 	TimeoutMs       *int   `json:"timeout_ms,omitempty"`
-	YieldMs         *int   `json:"yield_ms,omitempty"`
+	YieldTimeMs     *int   `json:"yield_time_ms,omitempty"`
 	RunInBackground bool   `json:"run_in_background,omitempty"`
 }
 
@@ -160,7 +160,7 @@ func shellTimeoutSecFromMs(timeoutMs *int, background bool) int {
 	return sec
 }
 
-// resolveShellYieldMs clamps the yield_ms argument; 0 or negative disables
+// resolveShellYieldMs clamps the yield_time_ms argument; 0 or negative disables
 // auto-promotion.
 func resolveShellYieldMs(yieldMs *int) int {
 	if yieldMs == nil {
@@ -396,7 +396,7 @@ func shellToolDescription(visible map[string]struct{}, shellType string) string 
 		"This tool also runs background jobs. Set run_in_background:true for services or work you do not need to wait for; the call returns a job id immediately and job_output/job_list/job_kill manage it.",
 		fmt.Sprintf("Long one-shot commands (builds, test suites) are promoted to a background job after the yield budget (default %s) and keep running; you will be notified when they finish. Do not sleep-wait or busy-poll — do independent work, or end your turn and wait for the notification.", durationLabel(ShellDefaultYieldMs)),
 		"Dependent commands must run in order: chain them in one call with `&&` or `;`, or wait for the previous result. A background job runs concurrently with other tool calls, so never start a command that depends on a job's output before that job finishes.",
-		fmt.Sprintf("Only set timeout_ms when you need a hard deadline other than the foreground default of %dms — a job started with run_in_background:true has none until you set one, and accepts up to %d for hour-scale work; only set yield_ms when you need a foreground budget other than the default %dms.", ShellDefaultTimeoutMs, ShellMaxBackgroundTimeoutMs, ShellDefaultYieldMs),
+		fmt.Sprintf("Only set timeout_ms when you need a hard deadline other than the foreground default of %dms — a job started with run_in_background:true has none until you set one, and accepts up to %d for hour-scale work; only set yield_time_ms when you need a foreground budget other than the default %dms.", ShellDefaultTimeoutMs, ShellMaxBackgroundTimeoutMs, ShellDefaultYieldMs),
 	)
 	return strings.Join(parts, "\n")
 }
@@ -455,7 +455,7 @@ func (ShellTool) Parameters() map[string]any {
 				"description": fmt.Sprintf("Optional hard deadline in milliseconds. A foreground command defaults to %d (%s); a job started with run_in_background:true has no deadline unless you set one. Capped at %d for a foreground command and at %d (%s) when run_in_background is true; 0 means no deadline, which suits long-running services — a foreground command that cannot be promoted to a job still keeps the default deadline.",
 					ShellDefaultTimeoutMs, durationLabel(ShellDefaultTimeoutMs), ShellMaxTimeoutMs, ShellMaxBackgroundTimeoutMs, durationLabel(ShellMaxBackgroundTimeoutMs)),
 			},
-			"yield_ms": map[string]any{
+			"yield_time_ms": map[string]any{
 				"type":        "integer",
 				"description": fmt.Sprintf("Optional foreground budget in milliseconds before the command continues as a background job (max %d, default %d). 0 keeps the command in the foreground until it finishes or hits timeout_ms — use it when this turn needs the result and the command fits the foreground deadline; cancelling the turn kills the command.", shellMaxYieldMs, ShellDefaultYieldMs),
 			},
@@ -482,8 +482,8 @@ func (t ShellTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 	if a.TimeoutMs != nil && *a.TimeoutMs < 0 {
 		return "", fmt.Errorf("timeout_ms must not be negative")
 	}
-	if a.YieldMs != nil && *a.YieldMs < 0 {
-		return "", fmt.Errorf("yield_ms must not be negative")
+	if a.YieldTimeMs != nil && *a.YieldTimeMs < 0 {
+		return "", fmt.Errorf("yield_time_ms must not be negative")
 	}
 	if a.Description != "" {
 		log.Debugf("shell tool description=%v command=%v", a.Description, a.Command)
@@ -511,7 +511,7 @@ func (t ShellTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 		promotable = autoBackgroundAllowed(a.Command)
 	}
 	yieldBudget := time.Duration(0)
-	if yieldMs := resolveShellYieldMs(a.YieldMs); yieldMs > 0 && promotable {
+	if yieldMs := resolveShellYieldMs(a.YieldTimeMs); yieldMs > 0 && promotable {
 		yieldBudget = time.Duration(yieldMs) * time.Millisecond
 	}
 	timeoutSec := shellTimeoutSecFromMs(a.TimeoutMs, a.RunInBackground)
@@ -524,7 +524,7 @@ func (t ShellTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 		// timeout_ms: 0 asks for "no deadline", which only an explicitly
 		// detached job may have. A foreground command reaches here when it
 		// cannot be promoted (no yield timer would ever hand it off) or when
-		// promotion was switched off with yield_ms: 0, so it keeps the default
+		// promotion was switched off with yield_time_ms: 0, so it keeps the default
 		// cap rather than blocking the turn until the process exits.
 		timeoutSec = ShellDefaultTimeoutMs / 1000
 	}
