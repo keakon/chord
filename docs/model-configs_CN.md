@@ -654,7 +654,9 @@ model_pools:
 
 #### Claude 5 的压缩调优
 
-Claude 5 全系（Fable 5.1、Opus 5、Sonnet 5）都是 1M 上下文、128K 最大输出、全窗口统一按 token 计费。MRCR v2 8-needle 显示 Opus 级模型即使到 1M 仍能保持 ~76%（当前所有模型族里最平坦的曲线），可靠窗口确实很大。Opus 4.7 时代的模型为换取"拒绝而非编造"牺牲了检索准确率；Opus 5 和 Fable 5.1 恢复了强长上下文检索。默认 `threshold: 0.8` 对这类模型是合理起点；如果跑数小时的 agentic 长会话，0.7 能让模型避开 512K 以上的轻度退化带。
+Claude 5 全系（Fable 5.1、Opus 5、Sonnet 5）都是 1M 上下文、128K 最大输出、全窗口统一按 token 计费。MRCR v2 8-needle 显示 Opus 级模型即使到 1M 仍能保持 ~76%（当前所有模型族里最平坦的曲线），可靠窗口确实很大。Opus 4.7 时代的模型为换取"拒绝而非编造"牺牲了检索准确率；Opus 5 和 Fable 5.1 恢复了强长上下文检索。日常用直接不写 `compaction` 块，跟全局默认走
+（`threshold` 0.8，可用预算约 872K 里约 698K 触发）；跑数小时的 agentic 长会话
+再设 `threshold: 0.7`（约 610K），少在 512K 以上的轻度退化带深处待。
 
 ```yaml
 # 直接在既有 claude-fable-5-1 模板上加 compaction，引用它的 provider 全部继承
@@ -1365,6 +1367,28 @@ model_pools:
 取决于粘性路由：xAI 在 Chat Completions 上接受 `prompt_cache_key` 并映射为
 `x-grok-conv-id`；网关两者都不透传时，每个请求都会以缓存未命中重发。
 
+### Grok 4.6 的压缩调优
+
+Grok 4.6 在 200K prompt token 处有一道整单计费线：200K 以下
+按 $2 输入 / $0.5 缓存 / $6 输出（每 1M）计费，prompt 达到 200K 则整单按
+$4 / $1 / $12 计收。
+
+上面配方都没写 `limit.output`，Chord 按默认预留 64000，可用输入预算约
+`500000 − 64000 = 436000`。`threshold` 取 0.4，约 174K 触发，留了余量：触发器
+拿上次服务端报的用量跟预算比，一次大的工具结果就可能把下一次请求顶过线，
+跟 GPT 那几档一样，只能算调优目标，不是包票。用哪个 Grok 模板就加在哪个上，
+引用它的 provider 自动继承：
+
+```yaml
+model_templates:
+  grok-4.6: &grok-4-6
+    limit: {context: 500000}
+    compaction: {threshold: 0.4, reminder: 0.35}
+```
+
+`reminder` 不写会派生为 `min(0.60, 0.4×0.9) = 0.36`，这里显式写 0.35，只是让
+压力提示来得稍早一点。会话不长的话，`compaction` 块直接省略，跟全局默认走。
+
 ## MiniMax（OpenAI 兼容接口）
 
 在 `~/.config/chord/auth.yaml` 中配置：
@@ -1433,6 +1457,27 @@ model_templates:
         mode: openai_visible
         preserve_history: true
 ```
+
+### MiniMax M3 的压缩调优
+
+MiniMax-M3 在 512K 输入以上费率翻倍：≤512K 按标准价，>512K 按长上下文
+价，缓存读同样翻倍。
+
+M3 模板没写 `limit.output`，Chord 按默认预留 64000，可用输入预算约
+`1000000 − 64000 = 936000`（`512000 / 936000 ≈ 0.55`）。`threshold` 取 0.5，
+约 468K 触发，留了余量；同样，一次大的工具结果仍可能把下一次请求顶过线。
+加在已用的 M3 模板上即可：
+
+```yaml
+model_templates:
+  minimax-m3: &minimax-m3
+    limit: {context: 1000000}
+    compaction: {threshold: 0.5, reminder: 0.45}
+```
+
+`reminder` 不写会派生为 `min(0.60, 0.5×0.9) = 0.45`，显式写出来只是把默认值摆明。
+M2.x 系列（204800 窗口）没有长度加价的说法，沿用全局默认。M3 会话不长的话，
+`compaction` 块也可以直接省略。
 
 ## Meta Muse Spark
 

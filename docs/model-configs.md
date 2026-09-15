@@ -699,9 +699,11 @@ with 128K output and flat per-token pricing across the window. MRCR v2 8-needle
 shows Opus-class models holding ~76% even at 1M (the flattest curve of any
 current family), so the reliable window is genuinely large. Opus 4.7-era
 models trade retrieval accuracy for refusal honesty; Opus 5 and Fable 5.1
-restore strong long-context retrieval. The default `threshold: 0.8` is a
-reasonable starting point for these models; if you run many-hour agentic
-sessions, 0.7 keeps the model out of the mild 512K+ degradation band.
+restore strong long-context retrieval. For everyday work, omit the
+`compaction` block and stay on the global default (`threshold` 0.8, about 698K
+on the ~872K usable budget); for many-hour agentic sessions, set
+`threshold: 0.7` (about 610K) to limit time spent deep in the mild 512K+
+degradation band.
 
 ```yaml
 model_templates:
@@ -1485,6 +1487,32 @@ a `prompt_cache_key` on Chat Completions and routes it through
 `x-grok-conv-id`, so a gateway that forwards neither re-sends every request as
 a cache miss.
 
+### Compaction tuning for Grok 4.6
+
+Grok 4.6 has a whole-request pricing tier at 200K prompt tokens: below 200K
+the rates are $2 input / $0.50 cached input / $6 output per 1M, while a prompt
+that reaches 200K bills the whole request at $4 / $1 / $12.
+
+The recipes above omit `limit.output`, so Chord reserves its default `64000`
+output budget and the usable input budget derives as roughly
+`500000 − 64000 = 436000`. A `threshold` of 0.4 fires at ~174K, under the 200K
+tier with headroom for a single large tool result pushing the next prompt past
+the line (the trigger compares the last provider-reported usage with the
+budget, so staying under the tier is a tuning goal, not a guarantee — the same
+caveat as the GPT pricing tiers). Add it to whichever Grok template you use;
+every provider referencing the template inherits it:
+
+```yaml
+model_templates:
+  grok-4.6: &grok-4-6
+    limit: {context: 500000}
+    compaction: {threshold: 0.4, reminder: 0.35}
+```
+
+`reminder` derives to `min(0.60, 0.4×0.9) = 0.36` when omitted, so the explicit
+0.35 only pulls the pressure notice slightly earlier. If your sessions stay
+short, omit the `compaction` block and let the model use the global default.
+
 ## MiniMax (OpenAI-compatible)
 
 Pair with `~/.config/chord/auth.yaml`:
@@ -1557,6 +1585,32 @@ model_templates:
         mode: openai_visible
         preserve_history: true
 ```
+
+### Compaction tuning for MiniMax M3
+
+MiniMax-M3 doubles its rates above 512K input tokens: calls with ≤512K input
+bill at the standard rate, calls above 512K at the higher long-context rate —
+cache reads double too.
+
+The M3 template sets no `limit.output`, so Chord reserves its default `64000`
+output budget and the usable input budget derives as roughly
+`1000000 − 64000 = 936000` (`512000 / 936000 ≈ 0.55`). A `threshold` of 0.5
+fires at ~468K, under the 512K rate with headroom — the trigger compares the
+last provider-reported usage with the budget, so a single large tool result
+can still push the next prompt past the line. Add it to the M3 template you
+already use:
+
+```yaml
+model_templates:
+  minimax-m3: &minimax-m3
+    limit: {context: 1000000}
+    compaction: {threshold: 0.5, reminder: 0.45}
+```
+
+`reminder` derives to `min(0.60, 0.5×0.9) = 0.45` when omitted; the explicit
+value only states the default. The M2.x line (204800 window) has no documented
+length surcharge, so leave it on the global default. If your M3 sessions stay
+short, omit the `compaction` block entirely.
 
 ## Meta Muse Spark
 
