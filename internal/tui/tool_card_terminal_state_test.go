@@ -5,9 +5,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -318,6 +320,72 @@ func TestNarrowCollapsedJobOutputCardKeepsItsJobID(t *testing.T) {
 	}
 	if !sawIDWithoutSummary {
 		t.Fatal("no width dropped the read summary while keeping the job id")
+	}
+}
+
+// TestJobOutputHeaderSpendsItsWholeBudget covers the arithmetic behind that
+// priority. The fit checks subtract the separator themselves, so the shared
+// budget must not reserve it a second time: doing so kept every card inside its
+// width but dropped the read summary several columns before it actually stopped
+// fitting, defeating the priority order this header exists to implement.
+func TestJobOutputHeaderSpendsItsWholeBudget(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{
+		ID: 1, Type: BlockToolCall, ToolName: tools.NameJobOutput,
+		Content: `{"job_id":"job-8"}`, ResultContent: "line one\nline two\n[status: running]",
+		ResultDone: true, ResultStatus: agent.ToolResultStatusSuccess,
+		PersistedDuration: 30 * time.Second,
+		// An ignored argument puts the styled option group on the header too,
+		// so the suffix width has to account for the group, the summary and
+		// the separator joining them.
+		Audit: &message.ToolArgsAudit{
+			OriginalArgsJSON:  `{"job_id":"job-8","path":"sub"}`,
+			EffectiveArgsJSON: `{"job_id":"job-8"}`,
+			IgnoredArgs: []message.IgnoredToolArg{{
+				Path:      "args.path",
+				ValueJSON: `"sub"`,
+				Reason:    message.IgnoredToolArgReasonUnrecognized,
+			}},
+		},
+	}
+	for width := 36; width <= 80; width++ {
+		header := ""
+		for _, line := range block.Render(width, "") {
+			plain := strings.TrimRight(stripANSI(line), " ")
+			if strings.Contains(plain, "job-8") {
+				header = plain
+				break
+			}
+		}
+		if header == "" {
+			t.Fatalf("width %d rendered no header carrying the job id", width)
+		}
+		if used := ansi.StringWidth(header); used > width {
+			t.Fatalf("width %d overflowed to %d columns: %q", width, used, header)
+		}
+	}
+
+	// The card keeps a margin the header never sees, so the budget itself is
+	// checked against the width the renderer actually passes down.
+	headerLine := "    ✓ ▸ job_output"
+	grayPart := DimStyle.Render("(path=sub)")
+	const summarySegment = " · 2 new lines"
+	// Both sides of the arithmetic below use the metric the renderer uses:
+	// lipgloss pads the card with ansi.StringWidth, so a runewidth-based
+	// expectation would accept a header that drops a fitting suffix.
+	segmentWidth := ansi.StringWidth(summarySegment)
+	for maxWidth := 24; maxWidth <= 80; maxWidth++ {
+		plain := stripANSI(appendJobOutputHeaderDetails(headerLine, "job-8", grayPart, "2 new lines", "30s", maxWidth))
+		used := ansi.StringWidth(plain)
+		if used > maxWidth {
+			t.Fatalf("maxWidth %d overflowed to %d columns: %q", maxWidth, used, plain)
+		}
+		if strings.Contains(plain, "2 new lines") {
+			continue
+		}
+		if spare := maxWidth - used - segmentWidth; spare >= 0 {
+			t.Fatalf("maxWidth %d dropped the read summary with %d columns to spare: %q", maxWidth, spare, plain)
+		}
 	}
 }
 

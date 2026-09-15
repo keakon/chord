@@ -1242,20 +1242,22 @@ func appendToolHeaderSummary(headerLine, mainPart, grayPart, paramSummary string
 // yields first, then the read summary, and only then is the id narrowed to
 // the remaining header width.
 func appendJobOutputHeaderDetails(headerLine, pattern, grayPart, summary, elapsed string, maxWidth int) string {
-	baseWidth := runewidth.StringWidth(stripANSI(headerLine))
+	// Measure with ansi, not runewidth: lipgloss pads the card box with the
+	// same metric, and the two disagree on East-Asian-ambiguous glyphs (·, ✓,
+	// ▸). runewidth would spend more budget than the box actually gives away.
+	baseWidth := ansi.StringWidth(headerLine)
 	const sep = " · "
-	sepWidth := runewidth.StringWidth(sep)
-	if baseWidth+sepWidth >= maxWidth {
-		return runewidth.Truncate(headerLine, maxWidth, "…")
+	sepWidth := ansi.StringWidth(sep)
+	if baseWidth >= maxWidth {
+		return ansi.Truncate(headerLine, maxWidth, "…")
 	}
-	// Every appended segment joins the line through a separator, so the whole
-	// pattern+suffix group has to fit in maxWidth minus the base and one
-	// separator. Reserving a plain 1 column here silently overflowed by
-	// sepWidth-1 and broke the documented priority below.
-	budget := maxWidth - baseWidth - sepWidth
-	// No room for even one separated segment: keep the header exactly as the
-	// caller passed it instead of truncating a line that already fits.
-	if budget <= 1 {
+	// The pattern joins the header with a single space; everything after it
+	// joins through sep. budget is the width the pattern and its suffix group
+	// share, so the fit checks below subtract sepWidth themselves — taking it
+	// out of budget too would reserve the separator twice and drop a suffix
+	// that still fits.
+	budget := maxWidth - baseWidth - 1
+	if budget <= 0 {
 		return headerLine
 	}
 	pattern = sanitizeToolDisplayText(pattern)
@@ -1267,14 +1269,14 @@ func appendJobOutputHeaderDetails(headerLine, pattern, grayPart, summary, elapse
 	var summaryWidth int
 	if summary != "" {
 		suffix = summary
-		summaryWidth = runewidth.StringWidth(summary)
+		summaryWidth = ansi.StringWidth(summary)
 		suffixWidth = summaryWidth
 	}
 	if grayPart != "" {
 		// The ignored/invalid-argument group rides the same summary: when the
 		// summary cannot fit, the option group still has one word of its own.
 		optionSuffix := grayPart
-		widthDelta := runewidth.StringWidth(stripANSI(optionSuffix))
+		widthDelta := ansi.StringWidth(optionSuffix)
 		if suffix != "" {
 			widthDelta += sepWidth + suffixWidth
 			suffix = optionSuffix + sep + suffix
@@ -1285,7 +1287,7 @@ func appendJobOutputHeaderDetails(headerLine, pattern, grayPart, summary, elapse
 	}
 	if elapsed != "" {
 		timerSuffix := elapsedGlyph + " " + elapsed
-		timerWidth := runewidth.StringWidth(timerSuffix)
+		timerWidth := ansi.StringWidth(timerSuffix)
 		if suffix != "" {
 			suffixWidth += sepWidth + timerWidth
 			suffix += sep + timerSuffix
@@ -1293,10 +1295,10 @@ func appendJobOutputHeaderDetails(headerLine, pattern, grayPart, summary, elapse
 			suffix, suffixWidth = timerSuffix, timerWidth
 		}
 	}
-	patternWidth := runewidth.StringWidth(pattern)
+	patternWidth := ansi.StringWidth(pattern)
 	if patternWidth > budget {
 		pattern = truncateToolHeaderMiddle(pattern, budget)
-		patternWidth = runewidth.StringWidth(pattern)
+		patternWidth = ansi.StringWidth(pattern)
 	}
 	if suffix == "" {
 		return headerLine + " " + pattern
