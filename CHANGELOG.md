@@ -2,7 +2,14 @@
 
 This project follows Semantic Versioning-style releases. Before 1.0, releases may include breaking changes.
 
-## Unreleased
+## 0.8.1 - 2026-09-16
+
+### Highlights
+
+- Background work now runs through `shell`: a command that outlives its foreground budget is promoted to a job, and `job_output`, `job_list`, and `job_kill` manage it — `spawn`, `spawn_status`, and `spawn_stop` are removed.
+- Time arguments are renamed and reunitized: `timeout_ms` and `yield_time_ms` count milliseconds, and a foreground `shell` yields after 90 seconds with a 10-minute deadline.
+- Model-driven context checkpoints keep bounded completed-work records across resets, so a long session loses less progress to a reset.
+- A context compaction no longer clears the composer, and tool cards keep their expanded/collapsed state across the transcript rebuild.
 
 ### Breaking Changes
 
@@ -45,7 +52,6 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - A partially applied `apply_patch` card marks each file it touched: the diff section of every group that landed carries `✓`, and every `Not applied:` entry carries `✗`. The errored card no longer prints the status-less `Targets:` list, so those two marks are what tells you which files changed and which failed.
 - Shared guidance now asks for evidence that can tell a correct result from a plausible wrong one: before treating a key claim as settled, check whether the same evidence also fits an alternative that would change it, and find the smallest check that distinguishes them. The rule scales to the task — implementation and bug fixes verify the observable behavior the requirement implies rather than only the final output, investigation separates what was observed from what was inferred, code review confirms a reachable path and the guards around it, and analysis states its goal and constraints rather than treating evidence gathering as a build or test run. Guidance also now separates explicit requirements, observed facts, and your own assumptions when an ambiguity would change the outcome, and states that a test, analysis, or self-check produced under an assumption does not independently confirm that assumption.
 - On macOS, a clipboard image/PDF attachment (`Ctrl+V` / `Alt+V`) is now read by a short-lived `osascript` process instead of the Chord process, which no longer loads the clipboard framework's AppKit: linking it costs about 7 MB of resident memory in every session, used or not. There is nothing extra to install — the reader runs the system `osascript` with a script built into `chord`, and the process exits, freeing its memory, as soon as the read finishes.
-
 - Chord now targets `GOGC=50` when `GOGC` is not set, for the TUI and `chord headless` alike: the heap no longer grows toward the default target, so a 200-message session stays around 6 MB smaller (51.5 MB → 45.6 MB) and an empty session around 2 MB smaller. An explicit `GOGC` still wins, and `GOMEMLIMIT` is passed to the Go runtime unchanged — see [Environment variables: Memory tuning](./docs/environment.md#memory-tuning-gc) for how to pair it with a container limit.
 - A fallback to a different model is announced as soon as the retry loop starts it, naming the failure reason (timeout, 5xx, context length exceeded, and other classified reasons) and the target model, instead of waiting until the new model emits its first token — which can be tens of seconds later, after key rotation and cooldown waits. While the fallback is being reached, the status bar keeps showing that target, reason, and elapsed time. Retries that stay on the selected model (key rotation, same-target backoff) remain silent in the error panel.
 - Screen grids now hold 48-byte cells instead of 112-byte ones, which takes about 3 MB off an empty session and 3.5 MB off a 200-message session (in-use heap on a 50×200 terminal: 10.7 MB → 7.6 MB and 17.0 MB → 13.6 MB). Rendering is unchanged: recorded frames match byte for byte, and every render path allocates the same number of objects as before.
