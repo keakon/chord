@@ -49,6 +49,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - A re-delivered background result keeps updating its existing card after a transcript rebuild instead of appending a duplicate, matching how the live path matches re-deliveries by durable identity.
 - A model-driven checkpoint no longer drops the failed tool calls of the current turn. The reset archives the head, and a rejected call (for example a `compact_context` request the runtime declined) used to survive only as an excerpt inside the checkpoint: its error card disappeared from the transcript, and a fork of that generation no longer replayed the failure. The newest failed batches of the turn now stay as real records directly behind the checkpoint card; older failures remain only in the archive and the checkpoint's evidence pack.
 - The closest-match hint that `apply_patch` and `edit` print no longer calls a line that merely ends earlier an empty line, and its rune offset is 1-based like the line number in the same sentence.
+- The sidebar usage block no longer shows meaningless sub-1% ratio suffixes: the `Bytes` row hides `(↓0%)` when request-level context reduction saved less than 1% of bytes, and `Cache R` hides its share until it reaches 1%; the raw sizes are shown alone until then.
 
 ## 0.8.0 - 2026-09-11
 

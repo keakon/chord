@@ -515,8 +515,8 @@ func TestRenderInfoPanelUsageUsesSingleColumnAndHidesZeroValues(t *testing.T) {
 	backend := newInfoPanelAgent()
 	backend.contextLimit = 0 // isolate: only test token summary hiding zero values
 	backend.usage = analytics.SessionStats{
-		InputTokens:     123_456,
-		CacheReadTokens: 1_234,
+		InputTokens:     100_000,
+		CacheReadTokens: 1_020,
 	}
 
 	m := NewModel(backend)
@@ -525,8 +525,8 @@ func TestRenderInfoPanelUsageUsesSingleColumnAndHidesZeroValues(t *testing.T) {
 
 	want := []string{
 		"TOKENS",
-		"↑ 124.7k",
-		"Cache R   1.2k (1%)",
+		"↑ 101.0k",
+		"Cache R   1.0k (1%)",
 	}
 	if len(usageLines) != len(want) {
 		t.Fatalf("usage lines = %#v, want %#v", usageLines, want)
@@ -543,6 +543,26 @@ func TestRenderInfoPanelUsageUsesSingleColumnAndHidesZeroValues(t *testing.T) {
 	}
 	if strings.Contains(plain, "Cache W") {
 		t.Fatalf("rendered info panel should hide zero cache write line; got %q", plain)
+	}
+}
+
+func TestRenderInfoPanelUsageHidesNegligibleCacheShare(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.contextLimit = 0 // isolate: only test token summary ratio hiding
+	backend.usage = analytics.SessionStats{
+		InputTokens:     123_456,
+		CacheReadTokens: 1_234,
+	}
+
+	m := NewModel(backend)
+	lines := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(44, 20)), "USAGE")
+	if !slices.Contains(lines, "Cache R   1.2k") {
+		t.Fatalf("cache line should keep the absolute count without a ratio, got %#v", lines)
+	}
+	for _, line := range lines {
+		if strings.HasPrefix(line, "Cache R") && strings.Contains(line, "%") {
+			t.Fatalf("negligible cache share should not render a ratio, got %#v", lines)
+		}
 	}
 }
 
@@ -1030,6 +1050,31 @@ func TestRenderInfoPanelUsageShowsRequestSurfaceWhenAvailable(t *testing.T) {
 	}
 	if slices.Contains(lines, "Bytes: 150.0 KB") || slices.Contains(lines, "Messages: 122") || slices.Contains(lines, "Req:") {
 		t.Fatalf("raw context size and separate Req line should not render when request surface is available, got %#v", lines)
+	}
+}
+
+func TestRenderInfoPanelUsageHidesNegligibleByteReduction(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.contextCurrent = 39_700
+	backend.contextLimit = 200_000
+	backend.contextBytes = 153_600
+	backend.contextMessageCount = 122
+	backend.contextReduction = agent.ContextReductionStats{
+		Bytes:           500,
+		Messages:        37,
+		CurrentBytes:    100_000,
+		CurrentMessages: 85,
+	}
+
+	m := NewModel(backend)
+	lines := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(42, 24)), "USAGE")
+	if !slices.Contains(lines, "Bytes: 97.7 KB") {
+		t.Fatalf("bytes should omit negligible reduction ratio, got %#v", lines)
+	}
+	for _, line := range lines {
+		if strings.HasPrefix(line, "Bytes:") && strings.Contains(line, "↓") {
+			t.Fatalf("negligible byte reduction should not render a ratio, got %#v", lines)
+		}
 	}
 }
 

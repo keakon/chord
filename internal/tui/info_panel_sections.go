@@ -190,7 +190,11 @@ func (m *Model) buildInfoPanelUsageBlock(width, lineW int) string {
 			if reduction.Bytes > 0 {
 				requestBefore := currentBytes + reduction.Bytes
 				if requestBefore > 0 {
-					bytesValue = formatReductionPercentValue(bytesValue, formatPercent(float64(reduction.Bytes)/float64(requestBefore)))
+					// Hide negligible savings: a sub-1% ratio would round to
+					// "(↓0%)", which looks like a reduction the user cannot perceive.
+					if ratio := float64(reduction.Bytes) / float64(requestBefore); ratio >= 0.01 {
+						bytesValue = formatReductionPercentValue(bytesValue, formatPercent(ratio))
+					}
 				}
 			}
 			usageLines = append(usageLines, renderInfoPanelKVLine(lineW, "Bytes", InfoPanelValue.Render(bytesValue)))
@@ -885,7 +889,11 @@ func renderUsageCacheDetailLine(lineW int, label string, labelWidth int, value s
 func formatUsageCacheValue(cacheTokens, promptSideTokens int64) string {
 	text := InfoPanelValue.Render(formatUsageTokens(cacheTokens))
 	if promptSideTokens > 0 {
-		text += InfoPanelDim.Render(" (") + InfoPanelValue.Render(formatPercent(float64(cacheTokens)/float64(promptSideTokens))) + InfoPanelDim.Render(")")
+		// Hide negligible shares like "(0%)": the absolute token count stays,
+		// only the percent suffix is omitted until it reaches 1%.
+		if ratio := float64(cacheTokens) / float64(promptSideTokens); ratio >= 0.01 {
+			text += InfoPanelDim.Render(" (") + InfoPanelValue.Render(formatPercent(ratio)) + InfoPanelDim.Render(")")
+		}
 	}
 	return text
 }
