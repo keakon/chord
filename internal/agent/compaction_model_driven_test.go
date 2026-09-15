@@ -1767,6 +1767,71 @@ func TestModelDrivenCheckpointDuplicateUsesArgsAndRuntimeFingerprint(t *testing.
 	}
 }
 
+// TestModelDrivenApplyRecordsFingerprintForDuplicateSkip pins the record side
+// of the duplicate chain end to end: an applied checkpoint must write the
+// fingerprint the skip verdict reads, so re-arming the same args with the
+// same runtime state skips as duplicate. A test that only hand-sets the
+// fingerprint asserts the verdict in isolation; this one fails if the apply
+// stops recording it or records a different input.
+func TestModelDrivenApplyRecordsFingerprintForDuplicateSkip(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.newTurn()
+	a.requestBatches.reserve(a.sessionEpoch, 0)
+
+	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "verify parser"})
+	callID := "checkpoint-1"
+	a.ctxMgr.Append(message.Message{Role: message.RoleAssistant, RequestBatch: 1, ToolCalls: []message.ToolCall{testToolCall(callID, tools.NameCompactContext)}})
+	argsJSON := `{"active_objective":"verify parser","next_step":"run tests"}`
+	if _, err := a.tryArmModelDrivenCheckpoint(callID, argsJSON); err != nil {
+		t.Fatalf("tryArmModelDrivenCheckpoint: %v", err)
+	}
+	pending := a.pendingModelDriven
+	if pending == nil {
+		t.Fatal("arming must leave a pending model-driven call")
+	}
+	snapshot := a.ctxMgr.Snapshot()
+	bundle := a.captureModelDrivenBarrierSnapshot(snapshot)
+	draft := &compactionDraft{
+		SummaryMode:                compactionSummaryModeModelDriven,
+		RuntimeGeneration:          bundle.currentRequestBatch,
+		RuntimeStateFingerprint:    bundle.runtimeStateFingerprint,
+		ModelDrivenArgsFingerprint: pending.ArgsFingerprint,
+		HeadSplit:                  len(snapshot),
+		Index:                      1,
+		PlanID:                     1,
+		Target:                     compactionTarget{sessionEpoch: a.sessionEpoch},
+		NewMessages: []message.Message{{
+			Role:                  message.RoleUser,
+			Content:               "checkpoint summary",
+			IsCompactionSummary:   true,
+			CompactionSummaryMode: compactionSummaryModeModelDriven,
+		}},
+	}
+	if err := a.applyCompactionDraft(draft); err != nil {
+		t.Fatalf("applyCompactionDraft: %v", err)
+	}
+	if a.lastModelDrivenCheckpointFingerprint == "" {
+		t.Fatal("apply must record the checkpoint fingerprint")
+	}
+
+	// Re-arming the same args against the same runtime state must now skip
+	// as a duplicate; the fingerprint the verdict compares against has to be
+	// the one the apply just wrote, not a hand-set fixture.
+	after := a.captureModelDrivenBarrierSnapshot(a.ctxMgr.Snapshot())
+	retryCallID := "checkpoint-2"
+	a.ctxMgr.Append(message.Message{Role: message.RoleAssistant, RequestBatch: after.currentRequestBatch, ToolCalls: []message.ToolCall{testToolCall(retryCallID, tools.NameCompactContext)}})
+	if _, err := a.tryArmModelDrivenCheckpoint(retryCallID, argsJSON); err != nil {
+		t.Fatalf("re-arming identical args: %v", err)
+	}
+	retry := a.pendingModelDriven
+	if retry == nil {
+		t.Fatal("re-arming must leave a pending model-driven call")
+	}
+	if reason, skipReason, skip := a.modelDrivenCheckpointSkipVerdict(after, retry); !skip || skipReason != modelDrivenSkipReasonDuplicate {
+		t.Fatalf("re-armed identical checkpoint must skip as duplicate: reason=%q skip_reason=%q skip=%v", reason, skipReason, skip)
+	}
+}
+
 // TestModelDrivenResumeBackgroundCompletionDoesNotSuppressContinueInstruction
 // pins the mergedUserInput criterion on its least obvious false positive: a
 // queued background-task completion is FromUser=false and drains into the

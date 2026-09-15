@@ -17,10 +17,11 @@ const maxCheckpointRetainedFailureBatches = maxToolErrorEvidenceItems
 
 // maxCheckpointRetainedFailureBytes bounds what the retained records add to
 // the projected post-reset surface, measured the same way the preflight
-// measures it: messageContextBytes counts Content plus the assistant call's
-// ToolCalls[].Args (the preflight's estimateTokens path counts both too), so
-// the cap has to count both as well — otherwise a batch with a huge call
-// argument would slip past a byte budget that claims to cover it.
+// measures it: the projected surface is metered in messageContextBytes, which
+// counts payload bytes (Content, or the Parts text and binary payloads when a
+// message carries Parts) plus the assistant call's ToolCalls[].Args, so the
+// cap has to count both as well — otherwise a batch with a huge call argument
+// would slip past a byte budget that claims to cover it.
 // Retention must not argue against the checkpoint that triggered it: the
 // low-gain preflight weighs the projected surface against
 // modelDrivenLowGainMinTokens, and a batch of large successful results — kept
@@ -107,26 +108,65 @@ func checkpointRetainedFailureRecords(head []message.Message) []message.Message 
 // the checkpoint saves. Failures keep their text: they are the reason the
 // record stayed live.
 //
-// What is elided mirrors the preflight surface (messageContextBytes): Content,
-// ToolPayload and ToolDiff are the byte-heavy result bodies the token
-// estimator counts. ToolNotes are kept — the estimator does not count them,
-// and they are the runtime's own diagnosis (retry hints, polling guidance),
-// not a copy of the output. FileState is kept for the same reason: hashes are
-// bytes-cheap and restore-time sentinels read them, while clearing ToolDiff
-// but keeping ToolDiffAdded/Removed is safe because the shape hash only needs
-// the counts to detect a rewrite.
+// What is elided mirrors the preflight surface (messageContextBytes): Content
+// or, when the result carries Parts, the Parts text and binary payloads, plus
+// ToolPayload and ToolDiff. message.Message documents that Parts supersedes
+// Content, so clearing Content alone would leave the whole body live for an
+// image-bearing result. Binary payloads are counted by size and then dropped:
+// the restored transcript resolves lazily-loaded blobs through ImagePath, and
+// the retained marker records the byte count the cap policed. ToolNotes are
+// kept — the estimator does not count them, and they are the runtime's own
+// diagnosis (retry hints, polling guidance), not a copy of the output.
+// FileState is kept for the same reason: hashes are bytes-cheap and
+// restore-time sentinels read them, while clearing ToolDiff but keeping
+// ToolDiffAdded/Removed is safe because the shape hash only needs the counts
+// to detect a rewrite.
 func elideRetainedResult(msg message.Message) message.Message {
 	if msg.Role != message.RoleTool || retainedFailureResult(msg) {
 		return msg
 	}
 	msg.Content = elidedToolResultContent(msg)
+	msg.Parts = elideRetainedResultParts(msg.Parts, &msg.Content)
 	msg.ToolPayload = ""
 	msg.ToolDiff = ""
 	return msg
 }
 
+// elideRetainedResultParts drops the heavy bodies of a successful result's
+// Parts and folds their size into content, which the caller has already
+// replaced with the elision marker. Text parts keep nothing: their bytes were
+// counted into the marker and the archive holds the original. Binary parts
+// keep only their identity (type, mime, persisted path, name, size) so the
+// record still replays as an attachment reference without carrying the bytes;
+// the shape hash distinguishes a sized-but-unloaded part from an empty one,
+// so DataBytes stays while Data goes.
+func elideRetainedResultParts(parts []message.ContentPart, content *string) []message.ContentPart {
+	if len(parts) == 0 {
+		return nil
+	}
+	var size int64
+	elided := make([]message.ContentPart, 0, len(parts))
+	for _, part := range parts {
+		size += int64(len(part.Text)) + part.PayloadBytes()
+		if !part.IsBinary() {
+			continue
+		}
+		part.Text = ""
+		part.DisplayText = ""
+		part.Data = nil
+		elided = append(elided, part)
+	}
+	if size > 0 && content != nil {
+		*content = fmt.Sprintf("%s [parts elided by checkpoint: %d bytes]", *content, size)
+	}
+	return elided
+}
+
 func elidedToolResultContent(msg message.Message) string {
 	size := len(msg.Content) + len(msg.ToolPayload) + len(msg.ToolDiff)
+	for _, part := range msg.Parts {
+		size += len(part.Text) + int(part.PayloadBytes())
+	}
 	if size == 0 {
 		return ""
 	}
@@ -135,9 +175,13 @@ func elidedToolResultContent(msg message.Message) string {
 
 // retainedBatchBytes is what a batch costs once elision applies, in the same
 // units the cap polices: elided result bodies plus the assistant call's
-// argument bytes, matching messageContextBytes (Content + ToolCalls[].Args).
-// Assistant text is normally empty — the cost of a call is its arguments —
-// and non-text parts stay out exactly like they stay out of the estimator.
+// argument bytes, matching the payload half of messageContextBytes (Content,
+// or the Parts text and binary payloads when a message carries Parts, plus
+// ToolCalls[].Args). Assistant text is normally empty — the cost of a call is
+// its arguments — and the non-payload fields messageContextBytes also counts
+// (thinking blocks, responses output, reasoning content, call IDs) stay out
+// here exactly like they stay out of the retained records themselves: they
+// are never part of what this cap decides to keep or drop.
 func retainedBatchBytes(batch []message.Message) int {
 	total := 0
 	for _, msg := range batch {

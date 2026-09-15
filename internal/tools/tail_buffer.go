@@ -3,6 +3,7 @@ package tools
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 // TailBuffer keeps the most recent maxBytes written while counting every byte
@@ -84,6 +85,13 @@ func (c *TailBuffer) tail(maxLen int) (string, int64, bool) {
 	truncated := maxLen > 0 && len(retained) > maxLen
 	if truncated {
 		retained = retained[len(retained)-maxLen:]
+		// The cut is by bytes and may land inside a multi-byte rune; back off
+		// to the next rune boundary so completion snippets never emit a
+		// half-encoded character. At most UTFMax-1 leading continuation bytes
+		// need skipping, which also bounds the scan on binary output.
+		for i := 0; i < utf8.UTFMax-1 && len(retained) > 0 && !utf8.RuneStart(retained[0]); i++ {
+			retained = retained[1:]
+		}
 	}
 	return string(retained), c.base, truncated
 }

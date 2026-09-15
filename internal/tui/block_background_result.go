@@ -193,6 +193,10 @@ func commandDurationNote(line string) string {
 	}
 	secondsText := strings.TrimSuffix(strings.TrimPrefix(line, prefix), "s)")
 	seconds, err := strconv.ParseFloat(secondsText, 64)
+	// The shell tool only emits the note for elapsed >= 1s (see
+	// appendShellDurationNote), so seconds < 1 is unreachable from the
+	// current producer; the check stays as a guard aligned with that
+	// predicate rather than as live filtering.
 	if err != nil || seconds < 1 {
 		return ""
 	}

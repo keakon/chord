@@ -430,7 +430,14 @@ func (a *MainAgent) unknownEvidenceRefHint() string {
 // first, then IDs a checkpoint evidence pack still in the transcript renders.
 // Negative kinds (tool_error, done_rejected, escalate) and invalidated records
 // are omitted because validateObservedClaimEvidence rejects them.
+//
+// A nil receiver yields no IDs: the live loop and the carried checkpoint packs
+// both need agent state, so there is no meaningful non-empty subset to return
+// without an agent.
 func (a *MainAgent) resolvableClaimEvidenceIDs(limit int) ([]string, bool) {
+	if a == nil {
+		return nil, false
+	}
 	seen := make(map[string]bool)
 	var out []string
 	add := func(id string) {
@@ -440,13 +447,11 @@ func (a *MainAgent) resolvableClaimEvidenceIDs(limit int) ([]string, bool) {
 		seen[id] = true
 		out = append(out, id)
 	}
-	if a != nil {
-		for _, item := range a.evidence.snapshot() {
-			if !evidenceKindSupportsCompletion(item.Kind) || item.Validity == evidenceValidityInvalidated {
-				continue
-			}
-			add(evidenceItemID(item))
+	for _, item := range a.evidence.snapshot() {
+		if !evidenceKindSupportsCompletion(item.Kind) || item.Validity == evidenceValidityInvalidated {
+			continue
 		}
+		add(evidenceItemID(item))
 	}
 	var carried []string
 	for id, meta := range a.contextEvidencePackMetadata() {
@@ -2204,6 +2209,9 @@ func (a *MainAgent) appendModelDrivenContinuationNotice() {
 	if reason == "" {
 		reason = "projected savings were too small"
 	}
+	if !strings.HasSuffix(reason, ".") {
+		reason += "."
+	}
 	a.pendingModelDrivenNotice = "Context checkpoint not applied: " + reason + " The session continues on the previous context."
-	a.emitToTUI(ToastEvent{Message: "Context checkpoint not applied: " + reason, Level: "info"})
+	a.emitToTUI(ToastEvent{Message: "Context checkpoint not applied: " + strings.TrimSuffix(reason, "."), Level: "info"})
 }

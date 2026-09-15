@@ -664,9 +664,10 @@ func appendToolElapsedSuffix(headerLine, elapsed string, maxWidth int) string {
 // colour: only the widest headers reach this branch, and mcp_* names are both
 // the longest and carry the longest inline parameter summary, so they lost
 // their colour while short built-in names kept it — a visible per-tool colour
-// split with no styling code behind it. ansi.Truncate and runewidth disagree
-// on the width of some glyphs, so instead of trusting one measurement we keep
-// shrinking with the ANSI-aware truncate until the runewidth check passes.
+// split with no styling code behind it. ansi.Truncate counts grapheme clusters
+// (for example a base glyph plus VS16) wider than runewidth does, so instead
+// of trusting one measurement we keep shrinking with the ANSI-aware truncate
+// until the runewidth check passes.
 func truncateToolHeaderForSuffix(headerLine, suffix string, maxWidth, headerBudget int) string {
 	for budget := headerBudget; budget >= 1; budget-- {
 		truncated := ansi.Truncate(headerLine, budget, "…")

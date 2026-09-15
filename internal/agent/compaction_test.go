@@ -3264,6 +3264,35 @@ func TestValidateCompactionSummaryRequiresHeadingLinesInOrder(t *testing.T) {
 	}
 }
 
+// TestModelDrivenSummaryOrderIsDeliberate pins the segment-order contract the
+// model-driven builder intentionally breaks away from: its continuation-first
+// layout (Next Step ahead of Progress, Constraints ahead of Active Objective)
+// serves the resuming model, while validateCompactionSummary enforces the
+// canonical order only on model-authored summaries. If the builder ever
+// returns to canonical order — or the validator ever exempts model-driven
+// bodies — this test names the place both sides must change together.
+func TestModelDrivenSummaryOrderIsDeliberate(t *testing.T) {
+	agent := newTestMainAgent(t, t.TempDir())
+	request := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{
+		ActiveObjective: "verify parser", NextStep: "run parser tests",
+	}}
+	bundle := modelDrivenBarrierSnapshot{snapshot: []message.Message{{Role: message.RoleUser, Content: "verify parser"}}}
+	summary := agent.buildModelDrivenCheckpointSummary(bundle, bundle.snapshot, len(bundle.snapshot), request)
+	if err := validateCompactionSummary(summary); err == nil {
+		t.Fatal("model-driven summaries use continuation-first order and must stay outside the canonical-order validator")
+	}
+	nextStep := strings.Index(summary, "## Next Step")
+	progress := strings.Index(summary, "## Progress")
+	constraints := strings.Index(summary, "## User Constraints")
+	objective := strings.Index(summary, "## Active Objective")
+	if nextStep < 0 || progress < 0 || constraints < 0 || objective < 0 {
+		t.Fatalf("model-driven summary lost a continuation section:\n%s", summary)
+	}
+	if !(constraints < objective && nextStep < progress) {
+		t.Fatal("model-driven summary must keep Constraints before Active Objective and Next Step before Progress")
+	}
+}
+
 func TestValidateCompactionSummaryRejectsVagueNextStep(t *testing.T) {
 	summary := strings.Replace(
 		validCompactionSummaryForTest("history-1.md"),

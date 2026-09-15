@@ -481,16 +481,19 @@ func isVagueCompactionNextStep(section string) bool {
 		normalized = strings.TrimSpace(strings.TrimPrefix(normalized, "-"))
 	}
 	normalized = strings.Trim(strings.TrimSuffix(normalized, "."), " ")
-	return slices.Contains([]string{
-		"continue",
+	switch normalized {
+	case "continue",
 		"continue working",
 		"continue the task",
 		"keep working",
 		"proceed",
 		"resume",
 		"resume work",
-		"carry on",
-	}, normalized)
+		"carry on":
+		return true
+	default:
+		return false
+	}
 }
 
 func validateCompactionTodoState(summary string) error {
@@ -786,13 +789,13 @@ func renderFallbackSummarySections(sections []fallbackSummarySection, background
 }
 
 func isEmptyOptionalSummarySection(section fallbackSummarySection) bool {
-	if !slices.Contains([]string{
-		"## Planned Externalized State",
+	switch section.heading {
+	case "## Planned Externalized State",
 		"## Evidence References",
 		"## Claim Evidence",
 		"## Claim Classification",
-		"## Checkpoint Stage",
-	}, section.heading) {
+		"## Checkpoint Stage":
+	default:
 		return false
 	}
 	body := strings.TrimSpace(section.body)
@@ -1346,6 +1349,8 @@ func formatSubAgentsAsBullets(subAgents []SubAgentInfo) string {
 // archive files. The rendering is deterministic and position-preserving, so
 // the structured-fallback and truncate-only summaries pass through unchanged
 // and the required-section ordering validation still applies afterwards.
+// Model-driven summaries use their own continuation-first order and never
+// pass through this validator (see TestModelDrivenSummaryOrderIsDeliberate).
 func ensureCompactionSubAgentSnapshot(summary string, subAgents []SubAgentInfo) string {
 	if strings.TrimSpace(summary) == "" {
 		return summary

@@ -132,6 +132,60 @@ func TestCheckpointRetainedFailureRecordsCapsRetainedBytes(t *testing.T) {
 	}
 }
 
+func TestCheckpointRetainedFailureRecordsElidesImageParts(t *testing.T) {
+	payload := make([]byte, maxCheckpointRetainedFailureBytes+1)
+	for i := range payload {
+		payload[i] = byte(i)
+	}
+	head := []message.Message{
+		{Role: message.RoleUser, Content: "request"},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "old-call", Name: tools.NameRead, Args: json.RawMessage(`{}`)}}},
+		{Role: message.RoleTool, ToolCallID: "old-call", ToolStatus: message.ToolStatusSuccess, Content: "stale", Parts: []message.ContentPart{
+			{Type: message.ContentPartText, Text: "stale image result"},
+			{Type: message.ContentPartImage, MimeType: "image/png", FileName: "stale.png", ImagePath: "stale.png", Data: payload},
+		}},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "fresh-call", Name: tools.NameShell, Args: json.RawMessage(`{}`)}}},
+		{Role: message.RoleTool, ToolCallID: "fresh-call", ToolStatus: message.ToolStatusError, Content: "exit status 1"},
+	}
+
+	got := checkpointRetainedFailureRecords(head)
+	if len(got) != 2 || got[0].ToolCalls[0].ID != "fresh-call" {
+		t.Fatalf("retained %d records starting with %q, want the image-heavy older batch dropped by the byte cap: %+v", len(got), got[0].ToolCalls[0].ID, got)
+	}
+}
+
+func TestElideRetainedResultDropsImageBytesKeepsReference(t *testing.T) {
+	payload := []byte{1, 2, 3}
+	msg := message.Message{
+		Role:       message.RoleTool,
+		ToolCallID: "img-call",
+		ToolStatus: message.ToolStatusSuccess,
+		Content:    "image result",
+		Parts: []message.ContentPart{
+			{Type: message.ContentPartText, Text: "here is the image"},
+			{Type: message.ContentPartImage, MimeType: "image/png", FileName: "shot.png", ImagePath: "shot.png", Data: payload, DataBytes: int64(len(payload))},
+		},
+	}
+
+	got := elideRetainedResult(msg)
+	if len(got.Parts) != 1 {
+		t.Fatalf("elided parts = %+v, want only the binary reference to stay", got.Parts)
+	}
+	kept := got.Parts[0]
+	if kept.Type != message.ContentPartImage || kept.MimeType != "image/png" || kept.FileName != "shot.png" || kept.ImagePath != "shot.png" {
+		t.Fatalf("elided part lost its attachment identity: %+v", kept)
+	}
+	if len(kept.Data) != 0 || kept.Text != "" || kept.DisplayText != "" {
+		t.Fatalf("elided part must drop its bytes and text: %+v", kept)
+	}
+	if kept.DataBytes != int64(len(payload)) {
+		t.Fatalf("elided part DataBytes = %d, want %d so the sized-but-unloaded shape stays distinct", kept.DataBytes, len(payload))
+	}
+	if !strings.Contains(got.Content, "[result elided by checkpoint:") || !strings.Contains(got.Content, "[parts elided by checkpoint:") {
+		t.Fatalf("elided content = %q, want both the body marker and the parts size marker", got.Content)
+	}
+}
+
 func TestExcludeRetainedFailureEvidenceKeepsArchivedFailuresOnly(t *testing.T) {
 	records := []message.Message{
 		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "live-call", Name: tools.NameShell, Args: json.RawMessage(`{}`)}}},

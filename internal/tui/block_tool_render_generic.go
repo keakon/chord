@@ -1198,9 +1198,10 @@ func (b *Block) renderToolPrefixForExpanded(spinnerFrame string, compactExpanded
 // appendToolHeaderSummary appends the main parameter, gray options and the
 // parameter summary to a styled tool header line as one prioritized layout
 // decision. Widths use the same metric the card box is padded with
-// (ansi.StringWidth, matching lipgloss): runewidth disagrees with it on
-// East-Asian-ambiguous glyphs (·, ✓, ▸), and a budget measured with the wrong
-// ruler either overflows the card or drops a suffix that still fits.
+// (ansi.StringWidth, matching lipgloss): it also counts grapheme clusters
+// (for example a base glyph plus VS16) the way the box does, where runewidth
+// counts them narrower — a budget measured with the wrong ruler either
+// overflows the card or drops a suffix that still fits.
 func appendToolHeaderSummary(headerLine, mainPart, grayPart, paramSummary string, maxWidth int) string {
 	baseWidth := ansi.StringWidth(headerLine)
 	if baseWidth >= maxWidth {
@@ -1248,8 +1249,9 @@ func appendToolHeaderSummary(headerLine, mainPart, grayPart, paramSummary string
 // the remaining header width.
 func appendJobOutputHeaderDetails(headerLine, pattern, grayPart, summary, elapsed string, maxWidth int) string {
 	// Measure with ansi, not runewidth: lipgloss pads the card box with the
-	// same metric, and the two disagree on East-Asian-ambiguous glyphs (·, ✓,
-	// ▸). runewidth would spend more budget than the box actually gives away.
+	// same metric, which counts grapheme clusters (for example a base glyph
+	// plus VS16) the way the box does. runewidth counts them narrower and
+	// would spend more budget than the box actually gives away.
 	baseWidth := ansi.StringWidth(headerLine)
 	const sep = " · "
 	sepWidth := ansi.StringWidth(sep)
@@ -1305,7 +1307,10 @@ func appendJobOutputHeaderDetails(headerLine, pattern, grayPart, summary, elapse
 		pattern = truncateToolHeaderMiddle(pattern, budget)
 		patternWidth = ansi.StringWidth(pattern)
 	}
-	if suffix == "" {
+	// summary is never empty from the production caller (jobOutputSummaryLine
+	// always returns a sentence), but a defensive empty must not print a
+	// dangling separator: fall back to the id alone instead.
+	if suffix == "" || summary == "" && grayPart == "" && elapsed == "" {
 		return headerLine + " " + pattern
 	}
 	if suffixWidth <= budget-patternWidth-sepWidth {
@@ -1408,8 +1413,8 @@ func appendSearchHeaderSummary(headerLine, mainPart, grayPart, summary string, m
 
 // truncateToolHeaderMiddle cuts a plain-text header segment to a width measured
 // with the card-box metric (see appendToolHeaderSummary): callers pass text
-// whose budget was computed with ansi.StringWidth, and grayPart is measured
-// the same way before it reaches truncateToolHeaderGray.
+// whose budget was computed with ansi.StringWidth, and gray segments are
+// measured the same way before they reach truncateToolHeaderGray.
 
 // truncateToolHeaderGray shortens a gray header tail that may embed ANSI
 // styled diagnostic options; rune-level middle cuts would split escape

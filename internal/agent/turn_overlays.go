@@ -20,6 +20,7 @@ const pendingLSPDiagnosticOverlayText = "LSP diagnostics changed after one or mo
 // user turn by callLLM. SubAgent mailbox messages are also appended to ctxMgr
 // and persisted because they are real owner-visible model input. Other runtime
 // hints remain request-scoped overlays.
+
 // appendMailboxMessageToContext persists one pending mailbox message to the
 // durable conversation and reports the request overlay carrying it. It is the
 // shared body of the initial-request path (buildTurnOverlayMessages) and the

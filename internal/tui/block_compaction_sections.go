@@ -63,6 +63,8 @@ func splitCompactionSections(content string) []compactionSection {
 	// A legacy display-hint tail (written by checkpoints before the hint was
 	// removed) is cut off and dropped rather than rendered: the card is always
 	// fully expanded, so the "press toggle-collapse" text is stale scaffolding.
+	// Keep the cut while any persisted session or archived history can still
+	// carry the tail; it can go once no reader still recognizes the marker.
 	if idx := strings.Index(rest, strings.TrimSpace(message.CompactionDisplayHint)); idx >= 0 {
 		rest = rest[:idx]
 	}
