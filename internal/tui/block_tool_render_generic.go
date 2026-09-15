@@ -978,7 +978,7 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 	toolHeaderLine := renderToolHeaderLine(prefix, b.ToolName)
 	if summaryOnHeader {
 		if b.ToolName == tools.NameJobOutput && !b.toolResultIsError() && !b.toolResultIsCancelled() {
-			toolHeaderLine = appendJobOutputHeaderDetails(toolHeaderLine, mainPart, grayPart, headerSummary, b.toolElapsedLabel(), cardWidth-4)
+			toolHeaderLine = appendJobOutputHeaderDetails(toolHeaderLine, mainPart, grayPart, headerSummary, toolHeaderElapsedLabel(b), cardWidth-4)
 			elapsedOnHeader = true
 		} else {
 			toolHeaderLine = appendSearchHeaderSummary(toolHeaderLine, mainPart, grayPart, headerSummary, cardWidth-4)

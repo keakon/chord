@@ -590,28 +590,38 @@ func appendToolOutcome(result *[]string, b *Block, contentWidth int, expanded bo
 	appendToolOutcomeBody(result, kind, toolDisplayResultContent(b), contentWidth, expanded)
 }
 
-// appendToolElapsedToHeader appends the tool elapsed label to the header line
-// (result[0]) so the time stays in place whether the card is collapsed or
-// expanded, instead of moving to the end of the body. cardWidth bounds the
-// header so a near-full header is truncated rather than overflowing the card.
-func appendToolElapsedToHeader(result []string, b *Block, cardWidth int) []string {
+// toolHeaderElapsedLabel returns the elapsed label a card header may show, or ""
+// when the card must not show one. Only a finished call owns a total: while the
+// call still runs, the status bar carries the live time and the header shows
+// progress instead, so the same number never counts up in two places.
+func toolHeaderElapsedLabel(b *Block) string {
 	if b == nil || !b.ResultDone {
-		return result
+		return ""
 	}
 	// A Question card's clock starts when the prompt opens and stops when the
 	// user answers, so the number is how long the user took to reply, not work
 	// the agent did. Rendering it charges the tool for the user's own thinking
 	// time, which reads as a cost the call incurred.
 	if toolElapsedIsUserWaitTime(b.ToolName) {
-		return result
+		return ""
 	}
 	elapsed := b.toolElapsedLabel()
 	if elapsed == "" && tools.NormalizeName(b.ToolName) == tools.NameShell {
 		elapsed = shellDurationNoteLabel(b.ResultContent)
 	}
-	if elapsed != "" && len(result) > 0 {
-		result[0] = appendToolElapsedSuffix(result[0], elapsed, cardWidth-4)
+	return elapsed
+}
+
+// appendToolElapsedToHeader appends the tool elapsed label to the header line
+// (result[0]) so the time stays in place whether the card is collapsed or
+// expanded, instead of moving to the end of the body. cardWidth bounds the
+// header so a near-full header is truncated rather than overflowing the card.
+func appendToolElapsedToHeader(result []string, b *Block, cardWidth int) []string {
+	elapsed := toolHeaderElapsedLabel(b)
+	if elapsed == "" || len(result) == 0 {
+		return result
 	}
+	result[0] = appendToolElapsedSuffix(result[0], elapsed, cardWidth-4)
 	return result
 }
 

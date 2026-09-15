@@ -136,9 +136,15 @@ func (b *Block) toolElapsed() time.Duration {
 	return 0
 }
 
+// toolElapsedLabelMin is the shortest total a finished card bothers to print.
+// Sub-second calls are the common case and a header slot that reads "0s" or
+// "1s" says nothing about the work, so the card stays quiet and the status bar
+// carries the live time while the call runs.
+const toolElapsedLabelMin = time.Second
+
 func (b *Block) toolElapsedLabel() string {
 	elapsed := b.toolElapsed()
-	if elapsed < time.Second {
+	if elapsed < toolElapsedLabelMin {
 		return ""
 	}
 	return tools.FormatElapsed(elapsed)

@@ -2720,6 +2720,85 @@ func TestToolCallRendersStructuredElapsedFooterAfterCompletion(t *testing.T) {
 	}
 }
 
+func TestJobOutputCardShowsElapsedOnlyAfterCompletion(t *testing.T) {
+	m := NewModelWithSize(nil, 96, 12)
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
+		ID:       "call-job-output-running",
+		Name:     "job_output",
+		AgentID:  "",
+		ArgsJSON: `{"job_id":"job-8"}`,
+	}})
+	block, ok := m.viewport.FindBlockByToolID("call-job-output-running")
+	if !ok {
+		t.Fatal("expected job_output block")
+	}
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallExecutionEvent{
+		ID:       "call-job-output-running",
+		Name:     "job_output",
+		ArgsJSON: `{"job_id":"job-8"}`,
+		State:    agent.ToolCallExecutionStateRunning,
+		AgentID:  "",
+	}})
+	if block.StartedAt.IsZero() {
+		t.Fatal("running job_output should record StartedAt")
+	}
+	block.StartedAt = time.Now().Add(-6 * time.Second)
+
+	joined := stripANSI(strings.Join(block.Render(96, "●"), "\n"))
+	if !strings.Contains(joined, "job-8") {
+		t.Fatalf("running job_output card should keep the read handle; got:\n%s", joined)
+	}
+	if strings.Contains(joined, "⏱") {
+		t.Fatalf("job_output card must not show a live timer while it runs; got:\n%s", joined)
+	}
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
+		CallID:   "call-job-output-running",
+		Name:     "job_output",
+		ArgsJSON: `{"job_id":"job-8"}`,
+		Result:   "line one\nline two\n[status: running]",
+		Status:   agent.ToolResultStatusSuccess,
+		AgentID:  "",
+		Duration: 7 * time.Second,
+	}})
+	joined = stripANSI(strings.Join(block.Render(96, "●"), "\n"))
+	if !strings.Contains(joined, "⏱ 7s") {
+		t.Fatalf("finished job_output card should show the total elapsed; got:\n%s", joined)
+	}
+}
+
+func TestFinishedJobOutputCardHidesSubSecondTotal(t *testing.T) {
+	m := NewModelWithSize(nil, 96, 12)
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
+		ID:       "call-job-output-fast",
+		Name:     "job_output",
+		AgentID:  "",
+		ArgsJSON: `{"job_id":"job-9"}`,
+	}})
+	block, ok := m.viewport.FindBlockByToolID("call-job-output-fast")
+	if !ok {
+		t.Fatal("expected job_output block")
+	}
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
+		CallID:   "call-job-output-fast",
+		Name:     "job_output",
+		ArgsJSON: `{"job_id":"job-9"}`,
+		Result:   "line one\n[status: running]",
+		Status:   agent.ToolResultStatusSuccess,
+		AgentID:  "",
+		Duration: 400 * time.Millisecond,
+	}})
+	joined := stripANSI(strings.Join(block.Render(96, "●"), "\n"))
+	if !strings.Contains(joined, "job-9") {
+		t.Fatalf("finished job_output card should keep the read handle; got:\n%s", joined)
+	}
+	if strings.Contains(joined, "⏱") {
+		t.Fatalf("a sub-second total does not deserve a header slot; got:\n%s", joined)
+	}
+}
+
 func TestToolResultSuccessIsNotOverwrittenByLateCancellation(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 12)
 
