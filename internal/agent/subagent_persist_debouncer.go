@@ -161,15 +161,19 @@ func (a *MainAgent) flushPendingSubPersists() {
 	// registry writer both take this): the meta file is rewritten in place
 	// rather than renamed, so a timer-goroutine write racing the event loop's
 	// terminal write can both interleave bytes and land last with a stale
-	// non-terminal state — after which nothing writes the file again. The lock
-	// is released before the registry write, which takes it itself.
-	a.subAgentMetaPersistMu.Lock()
+	// non-terminal state — after which nothing writes the file again. Each
+	// file takes the lock for its own write only, so an event-loop terminal
+	// write waits for one file instead of the whole batch — the blocking this
+	// debouncer exists to remove. The registry writer takes
+	// taskRegistryPersistMu, a different lock.
 	for _, sub := range subs {
-		if err := a.persistSubAgentMetaToSession(sub, sessionDir); err != nil {
+		a.subAgentMetaPersistMu.Lock()
+		err := a.persistSubAgentMetaToSession(sub, sessionDir)
+		a.subAgentMetaPersistMu.Unlock()
+		if err != nil {
 			log.Warnf("failed to persist subagent meta agent=%v error=%v", sub.instanceID, err)
 		}
 	}
-	a.subAgentMetaPersistMu.Unlock()
 	if registryDirty {
 		if err := a.persistTaskRegistry(); err != nil {
 			log.Warnf("failed to persist durable task registry session=%v error=%v", sessionDir, err)
