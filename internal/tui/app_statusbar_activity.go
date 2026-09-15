@@ -104,7 +104,7 @@ func (m Model) renderExecutingSummary(agentID string) string {
 		}
 	}
 	if startedAt.IsZero() {
-		return elapsedGlyph
+		return executingGlyph
 	}
 	elapsed := max(time.Since(startedAt), time.Second)
 	return elapsedGlyph + " · " + tools.FormatElapsed(elapsed)

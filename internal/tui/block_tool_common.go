@@ -57,6 +57,12 @@ const queuedToolGlyph = "⏸"
 // measured time instead of as the activity that produced it.
 const elapsedGlyph = "⏱"
 
+// executingGlyph stands for the activity itself, for the surfaces that must say
+// "running" without a duration to show. elapsedGlyph never appears alone: a
+// stopwatch with no time next to it reads as a missing value rather than as
+// work in progress.
+const executingGlyph = "⚙"
+
 // receivingToolGlyph is used while the provider is still streaming tool
 // arguments. It is deliberately static: receiving arguments is not execution.
 const receivingToolGlyph = "◌"
