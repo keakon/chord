@@ -5568,13 +5568,13 @@ func TestEvidenceSelectionLimitsRepeatedToolErrors(t *testing.T) {
 
 func TestSelectEvidenceItemsSkipsToolErrorSupersededByLaterSuccess(t *testing.T) {
 	msgs := []message.Message{
-		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-1", Name: tools.NameRead}}},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"src/a.go"}`)}}},
 		{Role: message.RoleTool, ToolCallID: "call-1", Content: "Error: file not found", ToolStatus: string(ToolResultStatusError)},
-		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-2", Name: tools.NameRead}}},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-2", Name: tools.NameRead, Args: json.RawMessage(`{"path":"src/a.go"}`)}}},
 		{Role: message.RoleTool, ToolCallID: "call-2", Content: "file contents", ToolStatus: string(ToolResultStatusSuccess)},
-		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-3", Name: tools.NameEdit}}},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-3", Name: tools.NameEdit, Args: json.RawMessage(`{"path":"src/a.go"}`)}}},
 		{Role: message.RoleTool, ToolCallID: "call-3", Content: "Error: patch failed", ToolStatus: string(ToolResultStatusError)},
-		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-4", Name: tools.NameRead}}},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-4", Name: tools.NameRead, Args: json.RawMessage(`{"path":"src/b.go"}`)}}},
 		{Role: message.RoleTool, ToolCallID: "call-4", Content: "Error: file missing again", ToolStatus: string(ToolResultStatusError)},
 	}
 
@@ -5597,16 +5597,82 @@ func TestSelectEvidenceItemsSkipsToolErrorSupersededByLaterSuccess(t *testing.T)
 	}
 }
 
+// The supersede filter must match the operation's target, not just the tool
+// name: a successful read of another file says nothing about the failure, and
+// a shell command's effect is not attributable to a path at all.
+func TestToolFailureSupersededOnlyOnMatchingTargets(t *testing.T) {
+	call := func(id, name, args string) message.Message {
+		return message.Message{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: id, Name: name, Args: json.RawMessage(args)}}}
+	}
+	failure := func(id string) message.Message {
+		return message.Message{Role: message.RoleTool, ToolCallID: id, Content: "Error: file not found", ToolStatus: string(ToolResultStatusError)}
+	}
+	success := func(id string) message.Message {
+		return message.Message{Role: message.RoleTool, ToolCallID: id, Content: "file contents", ToolStatus: string(ToolResultStatusSuccess)}
+	}
+
+	tests := []struct {
+		name string
+		msgs []message.Message
+		want string
+	}{
+		{
+			name: "same tool same target supersedes",
+			msgs: []message.Message{
+				call("fail", tools.NameRead, `{"path":"src/a.go"}`), failure("fail"),
+				call("ok", tools.NameRead, `{"path":"src/a.go"}`), success("ok"),
+			},
+			want: "fail",
+		},
+		{
+			name: "same tool different target keeps the failure",
+			msgs: []message.Message{
+				call("fail", tools.NameRead, `{"path":"src/a.go"}`), failure("fail"),
+				call("ok", tools.NameRead, `{"path":"src/b.go"}`), success("ok"),
+			},
+		},
+		{
+			name: "unattributable tool keeps the failure",
+			msgs: []message.Message{
+				call("fail", tools.NameShell, `{"command":"go build ./..."}`), failure("fail"),
+				call("ok", tools.NameShell, `{"command":"go build ./..."}`), success("ok"),
+			},
+		},
+		{
+			name: "later successful write covering the same file supersedes the patch failure",
+			msgs: []message.Message{
+				call("fail", tools.NameEdit, `{"path":"src/a.go"}`), failure("fail"),
+				call("ok", tools.NameEdit, `{"paths":["src/a.go"]}`), success("ok"),
+			},
+			want: "fail",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := toolFailureSupersededByLaterSuccess(tt.msgs)
+			if tt.want == "" {
+				if len(got) != 0 {
+					t.Fatalf("superseded = %v, want none", got)
+				}
+				return
+			}
+			if _, ok := got[tt.want]; !ok || len(got) != 1 {
+				t.Fatalf("superseded = %v, want exactly %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestEvidenceToolErrorPackSkipsSupersededTrackerCandidate(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.ctxMgr = ctxmgr.NewManager(100000, 0.5)
 	msgs := []message.Message{
-		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-1", Name: tools.NameRead}}},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"src/a.go"}`)}}},
 		{Role: message.RoleTool, ToolCallID: "call-1", Content: "Error: file not found", ToolStatus: string(ToolResultStatusError)},
-		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-2", Name: tools.NameRead}}},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-2", Name: tools.NameRead, Args: json.RawMessage(`{"path":"src/a.go"}`)}}},
 		{Role: message.RoleTool, ToolCallID: "call-2", Content: "file contents", ToolStatus: string(ToolResultStatusSuccess)},
-		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-3", Name: tools.NameEdit}}},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-3", Name: tools.NameEdit, Args: json.RawMessage(`{"path":"src/a.go"}`)}}},
 		{Role: message.RoleTool, ToolCallID: "call-3", Content: "Error: patch failed", ToolStatus: string(ToolResultStatusError)},
 	}
 	a.ctxMgr.RestoreMessages(msgs)

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -927,12 +928,14 @@ func (a *MainAgent) evidenceItemsForCompaction(contextLimit int) []evidenceItem 
 }
 
 // toolFailureSupersededByLaterSuccess reports the tool-call IDs whose failing
-// result is followed by a successful result of the same tool in the same
-// history: the later success shows that failure no longer blocks the work, so
+// result is followed by a successful result of the same tool on the same
+// targets: the later success shows that failure no longer blocks the work, so
 // the evidence pack should keep its budget for unresolved blockers instead.
-// Failures that cannot be matched to a tool name (for example a truncated
-// history that lost the assistant call record) are never superseded; the
-// filter stays conservative rather than dropping a possibly-current blocker.
+// Only calls whose targets are known paths are matched — a shell command's
+// effect is not attributable to one, and a failure that cannot be matched is
+// never superseded: keeping an excerpt that has gone stale costs a few tokens,
+// while dropping a still-current blocker (a build that is still broken) leaves
+// the continuation reasoning from a false premise.
 func toolFailureSupersededByLaterSuccess(messages []message.Message) map[string]struct{} {
 	nameByCallID := make(map[string]string)
 	for _, msg := range messages {
@@ -947,12 +950,14 @@ func toolFailureSupersededByLaterSuccess(messages []message.Message) map[string]
 			}
 		}
 	}
-	type toolFailureRecord struct {
-		callID string
-		index  int
+	targetsByCallID := fileToolTargets(messages)
+	type toolResult struct {
+		callID  string
+		tool    string
+		index   int
+		targets map[string]struct{}
 	}
-	failuresByTool := make(map[string][]toolFailureRecord)
-	lastSuccessSeq := make(map[string]int)
+	var failures, successes []toolResult
 	for index, msg := range messages {
 		if msg.Role != message.RoleTool {
 			continue
@@ -962,30 +967,85 @@ func toolFailureSupersededByLaterSuccess(messages []message.Message) map[string]
 		if !ok {
 			continue
 		}
+		targets := targetsByCallID[callID]
+		if len(targets) == 0 {
+			continue
+		}
 		// Mirror the collector's classification exactly: an explicit
 		// terminal status takes precedence, and legacy failures whose status
 		// is missing are still found by the content sniff, so a padded
 		// history cannot leave stale failures behind while the collector
 		// records fresh ones.
-		if isToolResultSuccessStatus(msg.ToolStatus) {
-			lastSuccessSeq[name] = index
-		} else if isToolResultErrorMessage(msg) {
-			failuresByTool[name] = append(failuresByTool[name], toolFailureRecord{callID: callID, index: index})
+		switch {
+		case isToolResultSuccessStatus(msg.ToolStatus):
+			successes = append(successes, toolResult{callID: callID, tool: name, index: index, targets: targets})
+		case isToolResultErrorMessage(msg):
+			failures = append(failures, toolResult{callID: callID, tool: name, index: index, targets: targets})
 		}
 	}
 	superseded := make(map[string]struct{})
-	for name, failures := range failuresByTool {
-		successSeq, ok := lastSuccessSeq[name]
-		if !ok {
-			continue
-		}
-		for _, failure := range failures {
-			if failure.index < successSeq {
+	for _, failure := range failures {
+		for _, success := range successes {
+			if success.tool != failure.tool || success.index <= failure.index {
+				continue
+			}
+			if coversTargets(success.targets, failure.targets) {
 				superseded[failure.callID] = struct{}{}
+				break
 			}
 		}
 	}
 	return superseded
+}
+
+// coversTargets reports whether a later success touched every path the failure
+// did: a partial overlap does not prove the failed operation went through.
+func coversTargets(success, failure map[string]struct{}) bool {
+	for path := range failure {
+		if _, ok := success[path]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// fileToolTargets maps each file-tool call to the workspace paths its
+// operation covers, read from the call arguments. Calls of other tools carry
+// no targets: their effect is not attributable to a path, so they can never
+// supersede a failure.
+func fileToolTargets(messages []message.Message) map[string]map[string]struct{} {
+	targets := make(map[string]map[string]struct{})
+	for _, msg := range messages {
+		if msg.Role != message.RoleAssistant {
+			continue
+		}
+		for _, call := range msg.ToolCalls {
+			callID := strings.TrimSpace(call.ID)
+			if callID == "" || evidenceOperation(call.Name) == "" {
+				continue
+			}
+			var args struct {
+				Path  string   `json:"path"`
+				Paths []string `json:"paths"`
+			}
+			if err := json.Unmarshal([]byte(call.Args), &args); err != nil {
+				continue
+			}
+			for _, path := range append([]string{args.Path}, args.Paths...) {
+				path = reductionNormalizePath(path)
+				if path == "" {
+					continue
+				}
+				set := targets[callID]
+				if set == nil {
+					set = make(map[string]struct{})
+					targets[callID] = set
+				}
+				set[path] = struct{}{}
+			}
+		}
+	}
+	return targets
 }
 
 // filterSupersededToolErrorEvidence drops tool-error evidence whose failing
