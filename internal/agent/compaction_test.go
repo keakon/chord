@@ -5560,6 +5560,80 @@ func TestEvidenceSelectionLimitsRepeatedToolErrors(t *testing.T) {
 	}
 }
 
+func TestSelectEvidenceItemsSkipsToolErrorSupersededByLaterSuccess(t *testing.T) {
+	msgs := []message.Message{
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-1", Name: tools.NameRead}}},
+		{Role: message.RoleTool, ToolCallID: "call-1", Content: "Error: file not found", ToolStatus: string(ToolResultStatusError)},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-2", Name: tools.NameRead}}},
+		{Role: message.RoleTool, ToolCallID: "call-2", Content: "file contents", ToolStatus: string(ToolResultStatusSuccess)},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-3", Name: tools.NameEdit}}},
+		{Role: message.RoleTool, ToolCallID: "call-3", Content: "Error: patch failed", ToolStatus: string(ToolResultStatusError)},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-4", Name: tools.NameRead}}},
+		{Role: message.RoleTool, ToolCallID: "call-4", Content: "Error: file missing again", ToolStatus: string(ToolResultStatusError)},
+	}
+
+	kept := make(map[string]struct{})
+	for _, item := range selectEvidenceItems(msgs, 4096) {
+		if item.Kind == evidenceToolError {
+			kept[item.SourceID] = struct{}{}
+		}
+	}
+	if _, ok := kept["call-1"]; ok {
+		t.Fatalf("superseded failure (call-1) must be dropped: %v", kept)
+	}
+	for _, want := range []string{"call-3", "call-4"} {
+		if _, ok := kept[want]; !ok {
+			t.Fatalf("unresolved failure %q must stay in the pack: %v", want, kept)
+		}
+	}
+	if len(kept) != 2 {
+		t.Fatalf("unexpected extra tool-error evidence: %v", kept)
+	}
+}
+
+func TestEvidenceToolErrorPackSkipsSupersededTrackerCandidate(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.ctxMgr = ctxmgr.NewManager(100000, 0.5)
+	msgs := []message.Message{
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-1", Name: tools.NameRead}}},
+		{Role: message.RoleTool, ToolCallID: "call-1", Content: "Error: file not found", ToolStatus: string(ToolResultStatusError)},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-2", Name: tools.NameRead}}},
+		{Role: message.RoleTool, ToolCallID: "call-2", Content: "file contents", ToolStatus: string(ToolResultStatusSuccess)},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-3", Name: tools.NameEdit}}},
+		{Role: message.RoleTool, ToolCallID: "call-3", Content: "Error: patch failed", ToolStatus: string(ToolResultStatusError)},
+	}
+	a.ctxMgr.RestoreMessages(msgs)
+	for _, msg := range msgs {
+		if msg.Role != message.RoleTool || !isToolResultErrorMessage(msg) {
+			continue
+		}
+		a.addToolEvidenceCandidate(buildEvidenceItem(
+			evidenceToolError,
+			"Latest failing tool result",
+			"This looks like a current blocker; preserving the exact error helps the next continuation avoid guessing.",
+			"tool result",
+			compactTextSnippet(strings.TrimSpace(msg.Content), 800),
+		), msg)
+	}
+
+	kept := make(map[string]struct{})
+	for _, item := range a.evidenceItemsForCompaction(4096) {
+		if item.Kind == evidenceToolError {
+			kept[item.SourceID] = struct{}{}
+		}
+	}
+	if _, ok := kept["call-1"]; ok {
+		t.Fatalf("tracker pack kept the superseded failure (call-1): %v", kept)
+	}
+	if _, ok := kept["call-3"]; !ok {
+		t.Fatalf("tracker pack lost the unresolved failure (call-3): %v", kept)
+	}
+	if len(kept) != 1 {
+		t.Fatalf("unexpected extra tool-error evidence: %v", kept)
+	}
+}
+
 func TestEnsureCompactionTodoSnapshotPreservesEveryRuntimeTodo(t *testing.T) {
 	todos := []tools.TodoItem{
 		{ID: "1", Content: "inspect the parser", Status: "in_progress", ActiveForm: "inspecting the parser"},
@@ -5729,21 +5803,21 @@ func TestCompactionPromptAnchorsLatestRequestAgainstStaleTodo(t *testing.T) {
 
 func TestStructuredFallbackSummaryDemotesTodosWhenDoneRejectionChangesTarget(t *testing.T) {
 	input := &compactionInput{
-		EvidenceItems: []evidenceItem{{Kind: evidenceDoneRejected, Excerpt: "分析所有会话并找出可沉淀命令"}},
+		EvidenceItems: []evidenceItem{{Kind: evidenceDoneRejected, Excerpt: "analyze all sessions and collect durable commands"}},
 	}
 	summary := buildStructuredFallbackSummary(
 		"history-2.md",
 		input,
 		fmt.Errorf("summary quality fallback"),
 		nil,
-		[]tools.TodoItem{{ID: "old", Content: "更新文档并提交相关改动", Status: "in_progress"}},
+		[]tools.TodoItem{{ID: "old", Content: "update docs and commit the change", Status: "in_progress"}},
 		nil,
 		nil,
 	)
 	for _, want := range []string{
-		"## Current User Request\n- Latest Done rejected reason: 分析所有会话并找出可沉淀命令",
-		"- Active/relevant to latest request:\n  - Latest Done rejected reason: 分析所有会话并找出可沉淀命令",
-		"- Stale/superseded:\n  - [in_progress] old: 更新文档并提交相关改动",
+		"## Current User Request\n- Latest Done rejected reason: analyze all sessions and collect durable commands",
+		"- Active/relevant to latest request:\n  - (not classified by fallback; the anchor is stated under Current User Request above)",
+		"- Stale/superseded:\n  - [in_progress] old: update docs and commit the change",
 	} {
 		if !strings.Contains(summary, want) {
 			t.Fatalf("summary missing %q:\n%s", want, summary)

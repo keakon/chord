@@ -1080,13 +1080,15 @@ func fallbackNextStepSection(input *compactionInput) string {
 // user request) or no anchor must not label runtime todos stale: the complete
 // list is carried by ensureCompactionTodoSnapshot as the `### Runtime TODO
 // snapshot` block, and restore only drops todos it sees in the stale bucket.
-// Line-escaping keeps a todo containing newlines or headings from escaping
-// its section or forging a top-level heading.
+// The anchor text is not echoed here: Current User Request above already
+// carries it verbatim, and restore only reads the classification bullets
+// underneath. Line-escaping keeps a todo containing newlines or headings from
+// escaping its section or forging a top-level heading.
 func formatTodosAsRelevanceBullets(todos []tools.TodoItem, anchor fallbackAnchor) string {
 	if strings.TrimSpace(anchor.Text) != "" {
 		lines := []string{
 			"- Active/relevant to latest request:",
-			"  - " + anchor.Label + ": " + strings.ReplaceAll(anchor.Text, "\n", " "),
+			"  - (not classified by fallback; the anchor is stated under Current User Request above)",
 			"- Completed/background:",
 			"  - (none classified by fallback)",
 			"- Stale/superseded:",

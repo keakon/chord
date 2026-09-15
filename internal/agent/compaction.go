@@ -877,6 +877,7 @@ func collectEvidenceItems(messages []message.Message) []evidenceItem {
 					fmt.Sprintf("message %d (tool result)", i+1),
 					compactTextSnippet(text, 800),
 				)
+				item.SourceID = msg.ToolCallID
 				item.Sequence = sourceSeq
 				if !seen[item.Key] {
 					seen[item.Key] = true
@@ -903,7 +904,10 @@ func collectEvidenceItems(messages []message.Message) []evidenceItem {
 }
 
 func selectEvidenceItems(messages []message.Message, contextLimit int) []evidenceItem {
-	items := collectEvidenceItems(messages)
+	items := filterSupersededToolErrorEvidence(
+		collectEvidenceItems(messages),
+		toolFailureSupersededByLaterSuccess(messages),
+	)
 	return evidenceItemsFromCandidates(items, contextLimit)
 }
 
@@ -912,7 +916,95 @@ func selectEvidenceItems(messages []message.Message, contextLimit int) []evidenc
 // result can be handed to the compaction worker without sharing tracker state.
 func (a *MainAgent) evidenceItemsForCompaction(contextLimit int) []evidenceItem {
 	a.refreshEvidenceValidity()
-	return evidenceItemsFromCandidates(a.evidence.snapshot(), contextLimit)
+	items := a.evidence.snapshot()
+	if a.ctxMgr != nil {
+		items = filterSupersededToolErrorEvidence(
+			items,
+			toolFailureSupersededByLaterSuccess(a.ctxMgr.Snapshot()),
+		)
+	}
+	return evidenceItemsFromCandidates(items, contextLimit)
+}
+
+// toolFailureSupersededByLaterSuccess reports the tool-call IDs whose failing
+// result is followed by a successful result of the same tool in the same
+// history: the later success shows that failure no longer blocks the work, so
+// the evidence pack should keep its budget for unresolved blockers instead.
+// Failures that cannot be matched to a tool name (for example a truncated
+// history that lost the assistant call record) are never superseded; the
+// filter stays conservative rather than dropping a possibly-current blocker.
+func toolFailureSupersededByLaterSuccess(messages []message.Message) map[string]struct{} {
+	nameByCallID := make(map[string]string)
+	for _, msg := range messages {
+		if msg.Role != message.RoleAssistant {
+			continue
+		}
+		for _, call := range msg.ToolCalls {
+			id := strings.TrimSpace(call.ID)
+			name := strings.TrimSpace(call.Name)
+			if id != "" && name != "" {
+				nameByCallID[id] = name
+			}
+		}
+	}
+	type toolFailureRecord struct {
+		callID string
+		index  int
+	}
+	failuresByTool := make(map[string][]toolFailureRecord)
+	lastSuccessSeq := make(map[string]int)
+	for index, msg := range messages {
+		if msg.Role != message.RoleTool {
+			continue
+		}
+		callID := strings.TrimSpace(msg.ToolCallID)
+		name, ok := nameByCallID[callID]
+		if !ok {
+			continue
+		}
+		// Mirror the collector's classification exactly: an explicit
+		// terminal status takes precedence, and legacy failures whose status
+		// is missing are still found by the content sniff, so a padded
+		// history cannot leave stale failures behind while the collector
+		// records fresh ones.
+		if isToolResultSuccessStatus(msg.ToolStatus) {
+			lastSuccessSeq[name] = index
+		} else if isToolResultErrorMessage(msg) {
+			failuresByTool[name] = append(failuresByTool[name], toolFailureRecord{callID: callID, index: index})
+		}
+	}
+	superseded := make(map[string]struct{})
+	for name, failures := range failuresByTool {
+		successSeq, ok := lastSuccessSeq[name]
+		if !ok {
+			continue
+		}
+		for _, failure := range failures {
+			if failure.index < successSeq {
+				superseded[failure.callID] = struct{}{}
+			}
+		}
+	}
+	return superseded
+}
+
+// filterSupersededToolErrorEvidence drops tool-error evidence whose failing
+// call was later followed by a successful call of the same tool (see
+// toolFailureSupersededByLaterSuccess). Items without a tool-call source ID
+// cannot be matched safely and are always kept.
+func filterSupersededToolErrorEvidence(items []evidenceItem, superseded map[string]struct{}) []evidenceItem {
+	if len(items) == 0 || len(superseded) == 0 {
+		return items
+	}
+	filtered := make([]evidenceItem, 0, len(items))
+	for _, item := range items {
+		_, supersededCall := superseded[item.SourceID]
+		if item.Kind == evidenceToolError && supersededCall {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return filtered
 }
 
 // evidenceFileHashEntry records the verified content hash of a file together

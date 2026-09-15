@@ -101,7 +101,7 @@ func TestFilterRestoredTodosKeepsFallbackLayoutTodos(t *testing.T) {
 
 ## Todo State
 - Active/relevant to latest request:
-  - Latest user request: keep going
+  - (not classified by fallback; the anchor is stated under Current User Request above)
 - Completed/background:
   - (none classified by fallback)
 - Stale/superseded:

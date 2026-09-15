@@ -478,7 +478,7 @@ func (t CompactContextTool) Description() string {
 		"- when a compaction-imminent or threshold warning says the context is ending soon, stop optional exploration, record the active objective, completed work, next step, and open issues, and request a provisional checkpoint at the next safe stop;\n" +
 		"- never interrupt an in-flight tool, file write, sibling task, or other operation; a safe stop means the current operation has ended and the next action can be stated concretely;\n" +
 		"- every fact needed later is captured in state_files or in the structured arguments;\n" +
-		"- write or refresh the notes/plan file you maintain for this workstream before requesting the checkpoint, and list at least that file: the checkpoint cannot create the file, and a file written after the reset cannot carry this checkpoint's state;\n" +
+		"- write or refresh the notes/plan file you maintain for this workstream before requesting the checkpoint, and list at least that file: the checkpoint cannot create the file, and a file written after the reset cannot carry this checkpoint's state; if that refresh is nevertheless mid-flight, finish it first when only a couple of tool calls remain, otherwise register the pending file update as an explicit open issue so the continuation can apply it from its own fresh read;\n" +
 		"- leave state_files empty only when no durable file exists to point at (a pure analysis or final-report stage), your role cannot write files, or the state is fully carried by the structured arguments above;\n" +
 		todoSync +
 		"- no key fact exists only in the current context that cannot be re-read or re-derived.\n" +
