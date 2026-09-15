@@ -1010,9 +1010,23 @@ func coversTargets(success, failure map[string]struct{}) bool {
 }
 
 // fileToolTargets maps each file-tool call to the workspace paths its
-// operation covers, read from the call arguments. Calls of other tools carry
-// no targets: their effect is not attributable to a path, so they can never
-// supersede a failure.
+// operation covers, read from the call arguments alone. That narrow source is
+// deliberate, not an oversight:
+//
+//   - evidenceObservations prefers msg.FileState (runtime-observed revisions)
+//     with the same path/paths parse as a fallback. FileState only exists on
+//     tool results, while supersede matching starts from assistant calls —
+//     using it here would couple the call side to the result side's
+//     attribution pipeline.
+//   - extractToolArgFilePaths walks every nested key (path/paths/file/…) for
+//     checkpoint key-file recall, where over-inclusion is cheap. Supersede
+//     matching needs the opposite bias: matching an unrelated success retires
+//     a live blocker, so only the tool's own top-level path/paths keys count.
+//
+// Calls of other tools carry no targets: their effect is not attributable to
+// a path, so they can never supersede a failure. A call whose arguments are
+// missing or unparsable matches nothing and its failure is always kept — the
+// conservative direction.
 func fileToolTargets(messages []message.Message) map[string]map[string]struct{} {
 	targets := make(map[string]map[string]struct{})
 	for _, msg := range messages {

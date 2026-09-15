@@ -16,11 +16,16 @@ import (
 const maxCheckpointRetainedFailureBatches = maxToolErrorEvidenceItems
 
 // maxCheckpointRetainedFailureBytes bounds what the retained records add to
-// the projected post-reset surface. Retention must not argue against the
-// checkpoint that triggered it: the low-gain preflight weighs the projected
-// surface against modelDrivenLowGainMinTokens, and a batch of large successful
-// results — kept only because it shares the turn with a failure — would
-// otherwise eat that margin and turn a worthwhile checkpoint into a skip.
+// the projected post-reset surface, measured the same way the preflight
+// measures it: messageContextBytes counts Content plus the assistant call's
+// ToolCalls[].Args (the preflight's estimateTokens path counts both too), so
+// the cap has to count both as well — otherwise a batch with a huge call
+// argument would slip past a byte budget that claims to cover it.
+// Retention must not argue against the checkpoint that triggered it: the
+// low-gain preflight weighs the projected surface against
+// modelDrivenLowGainMinTokens, and a batch of large successful results — kept
+// only because it shares the turn with a failure — would otherwise eat that
+// margin and turn a worthwhile checkpoint into a skip.
 // Successful bodies are elided below; this cap is the backstop for what
 // elision cannot shrink (tool-call arguments, non-text parts). Batches yield
 // oldest-first like the count cap, and the newest batch always stays so the
@@ -101,6 +106,15 @@ func checkpointRetainedFailureRecords(head []message.Message) []message.Message 
 // but its output is in the archive, and a full copy of it can weigh more than
 // the checkpoint saves. Failures keep their text: they are the reason the
 // record stayed live.
+//
+// What is elided mirrors the preflight surface (messageContextBytes): Content,
+// ToolPayload and ToolDiff are the byte-heavy result bodies the token
+// estimator counts. ToolNotes are kept — the estimator does not count them,
+// and they are the runtime's own diagnosis (retry hints, polling guidance),
+// not a copy of the output. FileState is kept for the same reason: hashes are
+// bytes-cheap and restore-time sentinels read them, while clearing ToolDiff
+// but keeping ToolDiffAdded/Removed is safe because the shape hash only needs
+// the counts to detect a rewrite.
 func elideRetainedResult(msg message.Message) message.Message {
 	if msg.Role != message.RoleTool || retainedFailureResult(msg) {
 		return msg
@@ -119,11 +133,18 @@ func elidedToolResultContent(msg message.Message) string {
 	return fmt.Sprintf("[result elided by checkpoint: %d bytes]", size)
 }
 
-// retainedBatchBytes is what a batch costs once elision applies.
+// retainedBatchBytes is what a batch costs once elision applies, in the same
+// units the cap polices: elided result bodies plus the assistant call's
+// argument bytes, matching messageContextBytes (Content + ToolCalls[].Args).
+// Assistant text is normally empty — the cost of a call is its arguments —
+// and non-text parts stay out exactly like they stay out of the estimator.
 func retainedBatchBytes(batch []message.Message) int {
 	total := 0
 	for _, msg := range batch {
 		total += len(elideRetainedResult(msg).Content)
+		for _, call := range msg.ToolCalls {
+			total += len(call.Args)
+		}
 	}
 	return total
 }

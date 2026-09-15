@@ -106,6 +106,20 @@ func TestCheckpointRetainedFailureRecordsCapsRetainedBytes(t *testing.T) {
 		t.Fatalf("retained %d records starting with %q, want the byte cap to drop the older batch and keep the newest", len(got), got[0].ToolCalls[0].ID)
 	}
 
+	// The byte cap counts the assistant call's arguments too (matching the
+	// preflight surface): a batch whose failure body is small but whose args
+	// are huge still costs the cap.
+	hugeArgs := []message.Message{
+		{Role: message.RoleUser, Content: "request"},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "args-call", Name: tools.NameShell, Args: json.RawMessage(`{"command":"` + strings.Repeat("y", maxCheckpointRetainedFailureBytes) + `"}`)}}},
+		{Role: message.RoleTool, ToolCallID: "args-call", ToolStatus: message.ToolStatusError, Content: "exit status 1"},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "fresh-call", Name: tools.NameShell, Args: json.RawMessage(`{}`)}}},
+		{Role: message.RoleTool, ToolCallID: "fresh-call", ToolStatus: message.ToolStatusError, Content: "exit status 1"},
+	}
+	if got := checkpointRetainedFailureRecords(hugeArgs); len(got) != 2 || got[0].ToolCalls[0].ID != "fresh-call" {
+		t.Fatalf("a batch dominated by call args must yield to the newest batch, got %+v", got)
+	}
+
 	// The newest batch is what the checkpoint is being written for, so it stays
 	// live even when it alone exceeds the cap.
 	only := []message.Message{

@@ -11,7 +11,6 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/mattn/go-runewidth"
 
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
@@ -226,8 +225,8 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 	}
 	if paramSummary == "" {
 		paramSummary = extractToolParamsWithParsed(keys, vals, cardWidth-16)
-	} else if runewidth.StringWidth(paramSummary) > cardWidth-16 {
-		paramSummary = runewidth.Truncate(paramSummary, cardWidth-16, "…")
+	} else if ansi.StringWidth(paramSummary) > cardWidth-16 {
+		paramSummary = ansi.Truncate(paramSummary, cardWidth-16, "…")
 	}
 	var result []string
 	if b.Collapsed {
@@ -1196,10 +1195,16 @@ func (b *Block) renderToolPrefixForExpanded(spinnerFrame string, compactExpanded
 	return toolDisclosureExpanded
 }
 
+// appendToolHeaderSummary appends the main parameter, gray options and the
+// parameter summary to a styled tool header line as one prioritized layout
+// decision. Widths use the same metric the card box is padded with
+// (ansi.StringWidth, matching lipgloss): runewidth disagrees with it on
+// East-Asian-ambiguous glyphs (·, ✓, ▸), and a budget measured with the wrong
+// ruler either overflows the card or drops a suffix that still fits.
 func appendToolHeaderSummary(headerLine, mainPart, grayPart, paramSummary string, maxWidth int) string {
-	baseWidth := runewidth.StringWidth(stripANSI(headerLine))
+	baseWidth := ansi.StringWidth(headerLine)
 	if baseWidth >= maxWidth {
-		return runewidth.Truncate(headerLine, maxWidth, "…")
+		return ansi.Truncate(headerLine, maxWidth, "…")
 	}
 	budget := maxWidth - baseWidth - 1
 	if budget <= 0 {
@@ -1219,8 +1224,8 @@ func appendToolHeaderSummary(headerLine, mainPart, grayPart, paramSummary string
 		return headerLine + " " + DimStyle.Render(truncateToolHeaderGray(grayPart, budget))
 	}
 
-	mainWidth := runewidth.StringWidth(mainPart)
-	grayWidth := runewidth.StringWidth(stripANSI(grayPart))
+	mainWidth := ansi.StringWidth(mainPart)
+	grayWidth := ansi.StringWidth(grayPart)
 	if grayPart == "" || mainWidth >= budget {
 		return headerLine + " " + truncateToolHeaderTail(mainPart, budget)
 	}
@@ -1321,9 +1326,9 @@ func appendJobOutputHeaderDetails(headerLine, pattern, grayPart, summary, elapse
 // a result summary exists, parameters only share the line with an intact
 // pattern + summary pair; otherwise they use the space left by the pattern.
 func appendSearchHeaderSummary(headerLine, mainPart, grayPart, summary string, maxWidth int) string {
-	baseWidth := runewidth.StringWidth(stripANSI(headerLine))
+	baseWidth := ansi.StringWidth(headerLine)
 	if baseWidth >= maxWidth {
-		return runewidth.Truncate(headerLine, maxWidth, "…")
+		return ansi.Truncate(headerLine, maxWidth, "…")
 	}
 	budget := maxWidth - baseWidth - 1
 	if budget <= 0 {
@@ -1341,7 +1346,7 @@ func appendSearchHeaderSummary(headerLine, mainPart, grayPart, summary string, m
 			}
 			return headerLine + " " + DimStyle.Render(truncateToolHeaderGray(grayPart, budget))
 		}
-		mainWidth := runewidth.StringWidth(mainPart)
+		mainWidth := ansi.StringWidth(mainPart)
 		if grayPart == "" || mainWidth >= budget {
 			return headerLine + " " + truncateToolHeaderMiddle(mainPart, budget)
 		}
@@ -1349,7 +1354,7 @@ func appendSearchHeaderSummary(headerLine, mainPart, grayPart, summary string, m
 		if remaining < minGrayCols {
 			return headerLine + " " + mainPart
 		}
-		if grayWidth := runewidth.StringWidth(stripANSI(grayPart)); grayWidth > remaining {
+		if grayWidth := ansi.StringWidth(grayPart); grayWidth > remaining {
 			grayPart = truncateToolHeaderGray(grayPart, remaining)
 		}
 		return headerLine + " " + mainPart + " " + DimStyle.Render(grayPart)
@@ -1364,20 +1369,21 @@ func appendSearchHeaderSummary(headerLine, mainPart, grayPart, summary string, m
 	// pattern is ever middle-truncated.
 	const minPatternCols = 8
 	const sep = " · "
-	suffixW := runewidth.StringWidth(stripANSI(summary))
-	patternBudget := budget - suffixW - runewidth.StringWidth(sep)
+	sepWidth := ansi.StringWidth(sep)
+	suffixW := ansi.StringWidth(summary)
+	patternBudget := budget - suffixW - sepWidth
 	if patternBudget < minPatternCols {
 		patternBudget = minPatternCols
-		if avail := budget - patternBudget - runewidth.StringWidth(sep); avail > 0 {
+		if avail := budget - patternBudget - sepWidth; avail > 0 {
 			summary = truncateToolHeaderGray(summary, avail)
 		} else {
 			summary = ""
 		}
-		suffixW = runewidth.StringWidth(stripANSI(summary))
-		patternBudget = budget - suffixW - runewidth.StringWidth(sep)
+		suffixW = ansi.StringWidth(summary)
+		patternBudget = budget - suffixW - sepWidth
 	}
 	pattern := mainPart
-	if runewidth.StringWidth(mainPart) > patternBudget {
+	if ansi.StringWidth(mainPart) > patternBudget {
 		pattern = truncateToolHeaderMiddle(mainPart, patternBudget)
 	}
 	if summary == "" {
@@ -1389,8 +1395,8 @@ func appendSearchHeaderSummary(headerLine, mainPart, grayPart, summary string, m
 	// Pattern and summary are intact; the parameters follow the pattern
 	// glued with a space, compressed to the remaining width when they do not
 	// fit whole, and dropped when only a meaningless fragment would remain.
-	remaining := budget - runewidth.StringWidth(pattern) - runewidth.StringWidth(sep) - suffixW
-	if grayWidth := runewidth.StringWidth(stripANSI(grayPart)); remaining-1 >= grayWidth {
+	remaining := budget - ansi.StringWidth(pattern) - sepWidth - suffixW
+	if grayWidth := ansi.StringWidth(grayPart); remaining-1 >= grayWidth {
 		return headerLine + " " + pattern + " " + DimStyle.Render(grayPart) + " · " + DimStyle.Render(summary)
 	}
 	if remaining-1 >= minGrayCols {
@@ -1399,6 +1405,11 @@ func appendSearchHeaderSummary(headerLine, mainPart, grayPart, summary string, m
 	}
 	return headerLine + " " + pattern + sep + DimStyle.Render(summary)
 }
+
+// truncateToolHeaderMiddle cuts a plain-text header segment to a width measured
+// with the card-box metric (see appendToolHeaderSummary): callers pass text
+// whose budget was computed with ansi.StringWidth, and grayPart is measured
+// the same way before it reaches truncateToolHeaderGray.
 
 // truncateToolHeaderGray shortens a gray header tail that may embed ANSI
 // styled diagnostic options; rune-level middle cuts would split escape
@@ -1417,20 +1428,20 @@ func truncateToolHeaderTail(s string, maxWidth int) string {
 	if maxWidth <= 0 {
 		return ""
 	}
-	if runewidth.StringWidth(s) <= maxWidth {
+	if ansi.StringWidth(s) <= maxWidth {
 		return s
 	}
 	if maxWidth == 1 {
 		return "…"
 	}
-	return runewidth.Truncate(s, maxWidth, "…")
+	return ansi.Truncate(s, maxWidth, "…")
 }
 
 func truncateToolHeaderMiddle(s string, maxWidth int) string {
 	if maxWidth <= 0 {
 		return ""
 	}
-	if runewidth.StringWidth(s) <= maxWidth {
+	if ansi.StringWidth(s) <= maxWidth {
 		return s
 	}
 	if maxWidth <= 1 {
@@ -1455,19 +1466,11 @@ func tuiCutRight(s string, maxWidth int) string {
 	if maxWidth <= 0 {
 		return ""
 	}
-	if runewidth.StringWidth(s) <= maxWidth {
+	total := ansi.StringWidth(s)
+	if total <= maxWidth {
 		return s
 	}
-	runes := []rune(s)
-	width := 0
-	for i, rune := range slices.Backward(runes) {
-		w := runewidth.RuneWidth(rune)
-		if width+w > maxWidth {
-			return string(runes[i+1:])
-		}
-		width += w
-	}
-	return s
+	return tuiCut(s, total-maxWidth, total)
 }
 
 func (b *Block) renderToolResult(width int) []string {
