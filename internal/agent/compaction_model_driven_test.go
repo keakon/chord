@@ -2444,18 +2444,18 @@ func TestModelDrivenClaimAndStageRenderersEscapeMultilineHeadingValues(t *testin
 	// the heading markers and flatten the value, so no value can open a fake
 	// top-level section that the next generation's parsers would read as a
 	// real heading.
-	evidence := renderClaimEvidenceSection(map[string][]string{
-		"## Claim One": {"ev-1", "## Fake Evidence"},
-		"plain":        {"ev-2"},
-	})
+	evidence := renderCheckpointClaims(&modelDrivenCheckpointRequest{Claims: map[string]checkpointClaim{
+		"## Claim One": {Kind: "observed", EvidenceRefs: []string{"ev-1", "## Fake Evidence"}},
+		"plain":        {EvidenceRefs: []string{"ev-2"}},
+	}})
 	assertNoFakeTopLevelSection(t, "claim evidence", evidence)
 	if !strings.Contains(evidence, "Claim One") {
 		t.Fatalf("flattened claim name must still read:\n%s", evidence)
 	}
 
-	kinds := renderClaimKindsSection(map[string]string{
-		"## Fake Claim": "## observed",
-	})
+	kinds := renderCheckpointClaims(&modelDrivenCheckpointRequest{Claims: map[string]checkpointClaim{
+		"## Fake Claim": {Kind: "## observed"},
+	}})
 	assertNoFakeTopLevelSection(t, "claim kinds", kinds)
 	if !strings.Contains(kinds, "Fake Claim | kind: observed") {
 		t.Fatalf("flattened kind line = %q", kinds)
@@ -2630,9 +2630,6 @@ func TestValidateCommittedEvidenceJudgesArchivedPackEvidenceByRenderedKind(t *te
 		t.Fatalf("committed checkpoint over an archived positive record must validate: %v", err)
 	}
 
-	// Presence-only proof (an older pack format without the kind line) must
-	// not upgrade to committed, but still resolves for evidence_refs and stays
-	// allowed for observed claims the pack's full record can back.
 	_, diffCheckpoint := newAgentWithCheckpoint(diff, "")
 	var legacyLines []string
 	for line := range strings.SplitSeq(diffCheckpoint, "\n") {
@@ -2649,8 +2646,8 @@ func TestValidateCommittedEvidenceJudgesArchivedPackEvidenceByRenderedKind(t *te
 	if err := legacyAgent.validateObservedClaimEvidence(tools.CompactContextArgs{
 		ClaimKinds:    map[string]string{"tests pass": "observed"},
 		ClaimEvidence: map[string][]string{"tests pass": {diffID}},
-	}); err != nil {
-		t.Fatalf("presence-only pack ID must stay allowed for observed claims: %v", err)
+	}); err == nil {
+		t.Fatal("observed claim must reject evidence without classification")
 	}
 	if err := legacyAgent.validateCommittedEvidence(tools.CompactContextArgs{CheckpointKind: "committed", EvidenceRefs: []string{diffID}}); err == nil {
 		t.Fatal("committed checkpoint must not upgrade over ID-existence-only proof")

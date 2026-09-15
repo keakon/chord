@@ -66,6 +66,7 @@ type CompactContextArgs struct {
 	Completed         []string            `json:"completed"`
 	Decisions         []string            `json:"decisions"`
 	OpenIssues        []string            `json:"open_issues"`
+	RetiredItems      []string            `json:"retired_items"`
 	NextStep          string              `json:"next_step"`
 	StateFiles        []string            `json:"state_files"`
 	PlannedStateFiles []string            `json:"planned_state_files"`
@@ -173,6 +174,9 @@ func (v CompactContextValidator) ParseCompactContextArgs(raw json.RawMessage) (C
 	if args.OpenIssues, err = validateCompactContextList(args.OpenIssues, 8, "open_issues"); err != nil {
 		return CompactContextArgs{}, err
 	}
+	if args.RetiredItems, err = validateCompactContextList(args.RetiredItems, 40, "retired_items"); err != nil {
+		return CompactContextArgs{}, err
+	}
 	stateFiles, err := validateStateFiles(args.StateFiles, 16, v.currentProjectRoot())
 	if err != nil {
 		return CompactContextArgs{}, err
@@ -216,6 +220,22 @@ func (v CompactContextValidator) ParseCompactContextArgs(raw json.RawMessage) (C
 			return CompactContextArgs{}, fmt.Errorf("invalid claim_kinds value %q for %q", kind, claim)
 		}
 	}
+	refs := slices.Clone(args.EvidenceRefs)
+	claimKeys := make([]string, 0, len(claimEvidence))
+	for claim := range claimEvidence {
+		claimKeys = append(claimKeys, claim)
+	}
+	slices.Sort(claimKeys)
+	for _, claim := range claimKeys {
+		for _, ref := range claimEvidence[claim] {
+			if !slices.Contains(refs, ref) {
+				refs = append(refs, ref)
+			}
+		}
+	}
+	if args.EvidenceRefs, err = validateCompactContextList(refs, 24, "evidence_refs"); err != nil {
+		return CompactContextArgs{}, err
+	}
 
 	// The continuation-state budget uses the same usage-calibrated token
 	// accounting as other context-pressure decisions. state_files paths are
@@ -230,6 +250,7 @@ func (v CompactContextValidator) ParseCompactContextArgs(raw json.RawMessage) (C
 		{"completed", strings.Join(args.Completed, "\n")},
 		{"decisions", strings.Join(args.Decisions, "\n")},
 		{"open_issues", strings.Join(args.OpenIssues, "\n")},
+		{"retired_items", strings.Join(args.RetiredItems, "\n")},
 		{"state_files", strings.Join(args.StateFiles, "\n")},
 		{"planned_state_files", strings.Join(args.PlannedStateFiles, "\n")},
 		{"evidence_refs", strings.Join(args.EvidenceRefs, "\n")},
@@ -333,16 +354,18 @@ func normalizeCompactContextClaims[V any](claims map[string]V, name string) (map
 // over the declared maxItems, and returns the trimmed items. Items carry no
 // length cap of their own; the aggregated token budget bounds them.
 func validateCompactContextList(items []string, maxItems int, name string) ([]string, error) {
-	if len(items) > maxItems {
-		return nil, fmt.Errorf("argument %s contains %d items, exceeding the maximum of %d", name, len(items), maxItems)
-	}
 	out := make([]string, 0, len(items))
 	for i, item := range items {
 		item = strings.TrimSpace(item)
 		if item == "" {
 			return nil, fmt.Errorf("argument %s contains an empty item at index %d", name, i)
 		}
-		out = append(out, item)
+		if !slices.Contains(out, item) {
+			out = append(out, item)
+		}
+	}
+	if len(out) > maxItems {
+		return nil, fmt.Errorf("argument %s contains %d items, exceeding the maximum of %d", name, len(out), maxItems)
 	}
 	return out, nil
 }
@@ -461,7 +484,7 @@ func (t CompactContextTool) Description() string {
 	// it has already authored the whole state.
 	budget := ""
 	if limit := t.validator.ContinuationStateMaxTokens; limit > 0 {
-		budget = fmt.Sprintf("All text fields together (active_objective, next_step, completed, decisions, open_issues, state_files, planned_state_files, evidence_refs, stage_id, stage_status, checkpoint_kind, claim_evidence, claim_kinds) must fit a combined budget of about %d estimated tokens; there are no per-field or per-item caps, so a long item is fine as long as the whole state stays within the budget.\n", limit)
+		budget = fmt.Sprintf("All text fields together (active_objective, next_step, completed, decisions, open_issues, retired_items, state_files, planned_state_files, evidence_refs, stage_id, stage_status, checkpoint_kind, claim_evidence, claim_kinds) must fit a combined budget of about %d estimated tokens; there are no per-field or per-item caps, so a long item is fine as long as the whole state stays within the budget.\n", limit)
 	}
 	// The todo-sync line is rendered only when todo_write is visible in the
 	// same surface, so the description never pushes a tool the model cannot
@@ -476,6 +499,7 @@ func (t CompactContextTool) Description() string {
 		"When context is comfortable, checkpoint only if expected savings justify the reset and recovery cost. Under context pressure, stop optional exploration, preserve the minimum recovery state, and request a provisional checkpoint even if the stage remains active or candidate.\n" +
 		"Capture every fact needed to resume in structured arguments or state_files; do not repeat full file contents in both. Refresh files you rely on before referencing them. Leave state_files empty when the structured arguments fully carry the recovery state, and do not create or modify files solely to request a checkpoint. Record unfinished updates as open_issues, not saved state.\n" +
 		"Use planned_state_files only for future paths; they do not externalize state. File paths and evidence requirements are defined by the corresponding parameter descriptions.\n" +
+		"Only active_objective and next_step are required. Report new progress and changed decisions; bounded prior completed work, decisions and open issues carry forward automatically. Use retired_items to remove resolved or superseded entries by their exact checkpoint text. Omission alone never deletes an entry. Evidence and stage metadata are optional; do not invent evidence IDs.\n" +
 		todoSync +
 		"A success result only means the request was accepted; a later model-driven [Context Summary] checkpoint confirms the reset was applied. A skip is a normal policy result, not an error: continue actual work or deliver the final response, rather than repeatedly retrying unchanged input.\n" +
 		budget +
@@ -514,6 +538,11 @@ func (CompactContextTool) Parameters() map[string]any {
 				"minLength":   1,
 				"description": "One concrete action executable immediately after the checkpoint applies, subordinate to the latest user request. Do not use a checkpoint just to wait for user input or deliver the final response.",
 			},
+			"retired_items": map[string]any{
+				"type": "array", "maxItems": 40,
+				"items":       map[string]any{"type": "string", "minLength": 1},
+				"description": "Exact text of prior completed, decision, open issue or claim entries to retire. Use for resolved issues or superseded conclusions; supply replacements in the normal fields. Unknown entries are harmless. Never removes runtime facts or user instructions.",
+			},
 			"state_files": map[string]any{
 				"type":        "array",
 				"maxItems":    16,
@@ -528,12 +557,12 @@ func (CompactContextTool) Parameters() map[string]any {
 			"evidence_refs": map[string]any{
 				"type": "array", "maxItems": 24,
 				"items":       map[string]any{"type": "string", "minLength": 1},
-				"description": "Stable evidence IDs from the checkpoint evidence pack that support completed work or decisions. IDs render as ev-<hash> in the checkpoint's evidence pack (e.g. the Evidence ID line / [evidence:ev-...] entries); invented IDs are rejected, so leave this empty when no evidence pack is in view — only observed claims and committed checkpoints require evidence, not every completed stage. Every evidence ID an observed claim references in claim_evidence must be repeated here: when you fill claim_evidence for observed claims, also add those IDs to the top-level evidence_refs.",
+				"description": "Stable evidence IDs from the checkpoint evidence pack that support completed work or decisions. IDs render as ev-<hash> in the checkpoint's evidence pack (e.g. the Evidence ID line / [evidence:ev-...] entries); invented IDs are rejected, so leave this empty when no evidence pack is in view — only observed claims and committed checkpoints require evidence, not every completed stage. Evidence IDs in claim_evidence are automatically included in evidence_refs; do not repeat them here.",
 			},
 			"stage_id":        map[string]any{"type": "string", "description": "Stable identifier for the current work stage."},
 			"stage_status":    map[string]any{"type": "string", "enum": compactContextStageStatuses, "description": "State of this work stage, not the whole user request. A completed stage does not end the turn or replace the final response."},
 			"checkpoint_kind": map[string]any{"type": "string", "enum": compactContextCheckpointKinds, "description": "Provisional reduces context but is not authoritative; committed requires runtime validation, and additionally requires stage_status=completed with at least one valid evidence_refs entry."},
-			"claim_evidence":  map[string]any{"type": "object", "maxProperties": maxCompactContextClaims, "additionalProperties": map[string]any{"type": "array", "maxItems": 8, "items": map[string]any{"type": "string", "minLength": 1}}, "description": "Maps each claim to the evidence IDs supporting it. Claim keys are natural language: usually a condensed conclusion from completed/decisions, where paraphrasing is fine and verbatim matching is never required; standalone claims are also allowed. Evidence IDs must be real ev-<hash> IDs from a recent checkpoint's evidence pack. A claim classified observed in claim_kinds needs at least one evidence ID here, and every ID listed for it must also appear in the top-level evidence_refs."},
+			"claim_evidence":  map[string]any{"type": "object", "maxProperties": maxCompactContextClaims, "additionalProperties": map[string]any{"type": "array", "maxItems": 8, "items": map[string]any{"type": "string", "minLength": 1}}, "description": "Maps each claim to the evidence IDs supporting it. Claim keys are natural language: usually a condensed conclusion from completed/decisions, where paraphrasing is fine and verbatim matching is never required; standalone claims are also allowed. Evidence IDs must be real ev-<hash> IDs from a recent checkpoint's evidence pack. An observed claim needs at least one supporting ID here. These IDs are automatically included in evidence_refs; no duplicate entry is required."},
 			"claim_kinds":     map[string]any{"type": "object", "maxProperties": maxCompactContextClaims, "additionalProperties": map[string]any{"type": "string", "enum": compactContextClaimKinds}, "description": "Classifies each claim (usually from completed/decisions); observed requires runtime evidence listed in claim_evidence/evidence_refs, derived is inferred from evidence, assumed is unverified, and proposed is future work. When no valid evidence is in view, prefer derived or assumed over observed."},
 		},
 		"required":             []string{"active_objective", "next_step"},

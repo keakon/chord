@@ -391,24 +391,23 @@ func (a *MainAgent) resolvableEvidenceHint() string {
 	if !anyResolvable {
 		return clause + ", so no claim can be observed here; classify it as derived/assumed/proposed or drop claim_kinds for it"
 	}
-	return clause + "; cite the supporting ID in claim_evidence and in the top-level evidence_refs, or classify the claim as derived/assumed/proposed"
+	return clause + "; cite the supporting ID in claim_evidence (automatically included in top-level evidence_refs), or classify the claim as derived/assumed/proposed"
 }
 
 // resolvableEvidenceClause renders the resolvable-ID part both arm-time
 // rejection hints share (observed claim without evidence, unknown evidence
-// reference). The runtime-filtered menu must have one source: both hints keep
-// naming only IDs that pass the other validation gates, so acting on a hint
-// never trades one rejection for another.
+// reference). Both hints offer the stricter observed-compatible subset, not
+// every provenance reference. Live records take precedence over archived ones.
 func (a *MainAgent) resolvableEvidenceClause() (string, bool) {
 	ids, truncated := a.resolvableClaimEvidenceIDs(evidenceHintMaxIDs)
 	if len(ids) == 0 {
-		return "no evidence ID is resolvable in this context (no live evidence candidate and no [Context Evidence] pack)", false
+		return "no evidence ID is resolvable in this context for an observed claim; provenance-only references may still exist", false
 	}
 	list := strings.Join(ids, ", ")
 	if truncated {
 		list += fmt.Sprintf(" (first %d; more are resolvable)", len(ids))
 	}
-	return "evidence IDs resolvable in this context: " + list, true
+	return "evidence IDs resolvable in this context for observed claims: " + list, true
 }
 
 // unknownEvidenceRefHint turns the unknown-ID rejection self-correcting the
@@ -429,7 +428,9 @@ func (a *MainAgent) unknownEvidenceRefHint() string {
 // could anchor an observed claim: live runtime evidence with a positive kind
 // first, then IDs a checkpoint evidence pack still in the transcript renders.
 // Negative kinds (tool_error, done_rejected, escalate) and invalidated records
-// are omitted because validateObservedClaimEvidence rejects them.
+// are omitted because validateObservedClaimEvidence rejects them. Archived
+// records additionally require classification; live records retain the
+// runtime validator's category rules.
 //
 // A nil receiver yields no IDs: the live loop and the carried checkpoint packs
 // both need agent state, so there is no meaningful non-empty subset to return
@@ -447,7 +448,9 @@ func (a *MainAgent) resolvableClaimEvidenceIDs(limit int) ([]string, bool) {
 		seen[id] = true
 		out = append(out, id)
 	}
-	for _, item := range a.evidence.snapshot() {
+	items := a.evidence.snapshot()
+	live := evidenceItemsByID(items)
+	for _, item := range items {
 		if !evidenceKindSupportsCompletion(item.Kind) || item.Validity == evidenceValidityInvalidated {
 			continue
 		}
@@ -455,7 +458,10 @@ func (a *MainAgent) resolvableClaimEvidenceIDs(limit int) ([]string, bool) {
 	}
 	var carried []string
 	for id, meta := range a.contextEvidencePackMetadata() {
-		if seen[id] || meta.invalidated || (meta.kind != "" && !evidenceKindSupportsCompletion(meta.kind)) {
+		if _, exists := live[id]; exists {
+			continue
+		}
+		if seen[id] || meta.kind == "" || meta.invalidated || !evidenceKindSupportsCompletion(meta.kind) {
 			continue
 		}
 		carried = append(carried, id)
@@ -635,9 +641,7 @@ func (a *MainAgent) validateObservedClaimEvidence(args tools.CompactContextArgs)
 				// the same category and validity checks: when the pack renders
 				// the item's classification, a negative kind rejects the
 				// observed claim exactly like a live one would, and a rendered
-				// invalidation rejects it too. A record without a rendered
-				// classification (an older pack format) stays allowed: the
-				// pack still shows the full record for the model to judge.
+				// invalidation rejects it too.
 				if carried == nil {
 					carried = a.contextEvidencePackMetadata()
 				}
@@ -645,7 +649,10 @@ func (a *MainAgent) validateObservedClaimEvidence(args tools.CompactContextArgs)
 				if !ok {
 					return fmt.Errorf("observed claim %q references unknown evidence %q", claim, ref)
 				}
-				if meta.kind != "" && !evidenceKindSupportsCompletion(meta.kind) {
+				if meta.kind == "" {
+					return fmt.Errorf("observed claim %q references evidence %q without classification", claim, ref)
+				}
+				if !evidenceKindSupportsCompletion(meta.kind) {
 					return fmt.Errorf("observed claim %q cannot use %s evidence %q", claim, meta.kind, ref)
 				}
 				if meta.invalidated {
@@ -1113,7 +1120,7 @@ func (a *MainAgent) startModelDrivenCompactionAsync(bundle modelDrivenBarrierSna
 			draft.HeadSplit = headSplit
 			draft.RuntimeGeneration = bundle.currentRequestBatch
 			draft.RuntimeStateFingerprint = bundle.runtimeStateFingerprint
-			draft.ModelDrivenRequestID = a.modelDrivenProposal.requestID
+			draft.ModelDrivenRequestID = req.ToolCallID
 		}
 		a.sendEvent(Event{Type: EventCompactionReady, Payload: draft})
 	}(ctx, bundle, planID, target, headSplit, req)
@@ -1659,13 +1666,7 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 	stateFiles := renderStateFilesSection(req.Args.StateFiles)
 	plannedStateFiles := renderPlannedStateFilesSection(req.Args.PlannedStateFiles)
 	evidenceRefs := renderEvidenceRefsSection(req.Args.EvidenceRefs)
-	// The readable claim sections and the typed block all render the
-	// authoritative merged claim set (see effectiveCheckpointClaims), so a
-	// carried claim that the fresh submission did not restate appears
-	// consistently in both instead of vanishing from the checkpoint.
-	claimEvidenceMap, claimKindsMap := claimRenderMaps(req)
-	claimEvidence := renderClaimEvidenceSection(claimEvidenceMap)
-	claimKinds := renderClaimKindsSection(claimKindsMap)
+	claims := renderCheckpointClaims(req)
 	stage := renderModelDrivenStageSection(req.Args.StageID, req.Args.StageStatus, req.Args.CheckpointKind)
 	typedState := renderTypedCheckpointState(req)
 	if claimsCarryOmitted > 0 {
@@ -1698,8 +1699,7 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 		{"## Externalized State", stateFiles},
 		{"## Planned Externalized State", plannedStateFiles},
 		{"## Evidence References", evidenceRefs},
-		{"## Claim Evidence", claimEvidence},
-		{"## Claim Classification", claimKinds},
+		{"## Claims", claims},
 		{"## Checkpoint Stage", stage},
 		{typedStateSectionHeading, typedState},
 		{"## Todo State", formatTodosAsRelevanceBullets(bundle.todos, anchor)},
@@ -1721,8 +1721,8 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 	summary = ensureCheckpointSkillsSection(summary, skillNames, skillsOmitted)
 	// The previous checkpoint's machine-carryable state was merged into the
 	// typed state block above; its natural-language body is deliberately NOT
-	// carried forward. The model re-states its current objective, progress and
-	// claims on every submission, and carried decisions/open issues/evidence
+	// carried forward. The model re-states its current objective on every
+	// submission, and carried completed work/decisions/open issues/evidence
 	// references/stage travel structurally through the typed block — so two
 	// consecutive model-driven resets cannot erase prior verified decisions,
 	// and everything else the model did not restate exists in the archived
@@ -1759,31 +1759,6 @@ func effectiveCheckpointClaims(req *modelDrivenCheckpointRequest) map[string]che
 		return req.Claims
 	}
 	return typedClaimsFromArgs(req.Args)
-}
-
-// claimRenderMaps splits the authoritative claim set into the maps the
-// readable `## Claim Evidence` / `## Claim Classification` sections render
-// from, so those sections never contradict the typed block.
-func claimRenderMaps(req *modelDrivenCheckpointRequest) (evidence map[string][]string, kinds map[string]string) {
-	claims := effectiveCheckpointClaims(req)
-	if len(claims) == 0 {
-		return nil, nil
-	}
-	for claim, item := range claims {
-		if len(item.EvidenceRefs) > 0 {
-			if evidence == nil {
-				evidence = make(map[string][]string, len(claims))
-			}
-			evidence[claim] = item.EvidenceRefs
-		}
-		if item.Kind != "" {
-			if kinds == nil {
-				kinds = make(map[string]string, len(claims))
-			}
-			kinds[claim] = item.Kind
-		}
-	}
-	return evidence, kinds
 }
 
 // markTypedClaimsInvalidated downgrades claims whose evidence can no longer
@@ -1859,8 +1834,10 @@ func mergePriorTypedCheckpointState(req *modelDrivenCheckpointRequest, prior str
 	if broken {
 		return req, 0, 0, true
 	}
+	priorState = retireCheckpointItems(priorState, req.Args.RetiredItems)
 	merged, omitted, claimsOmitted := mergeCheckpointTypedStates(priorState, typedStateFromArgs(req.Args))
 	copyReq := *req
+	copyReq.Args.Completed = merged.Completed
 	copyReq.Args.Decisions = merged.Decisions
 	copyReq.Args.OpenIssues = merged.OpenIssues
 	copyReq.Args.EvidenceRefs = merged.EvidenceRefs
@@ -2070,38 +2047,6 @@ func renderEvidenceRefsSection(refs []string) string {
 		return "- (none reported by the model)"
 	}
 	return "- Model-declared evidence references; runtime verified that these IDs exist:\n- " + strings.Join(refs, "\n- ")
-}
-
-func renderClaimEvidenceSection(claims map[string][]string) string {
-	if len(claims) == 0 {
-		return "- (none reported by the model)"
-	}
-	keys := make([]string, 0, len(claims))
-	for key := range claims {
-		keys = append(keys, key)
-	}
-	slices.Sort(keys)
-	var b strings.Builder
-	for _, key := range keys {
-		fmt.Fprintf(&b, "- %s | evidence: %s\n", checkpointInlineValue(key), checkpointInlineValue(strings.Join(claims[key], ", ")))
-	}
-	return strings.TrimRight(b.String(), "\n")
-}
-
-func renderClaimKindsSection(kinds map[string]string) string {
-	if len(kinds) == 0 {
-		return "- (none reported by the model)"
-	}
-	keys := make([]string, 0, len(kinds))
-	for key := range kinds {
-		keys = append(keys, key)
-	}
-	slices.Sort(keys)
-	var b strings.Builder
-	for _, key := range keys {
-		fmt.Fprintf(&b, "- %s | kind: %s\n", checkpointInlineValue(key), checkpointInlineValue(kinds[key]))
-	}
-	return strings.TrimRight(b.String(), "\n")
 }
 
 func renderModelDrivenStageSection(id, status, kind string) string {

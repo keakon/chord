@@ -792,14 +792,13 @@ func isEmptyOptionalSummarySection(section fallbackSummarySection) bool {
 	switch section.heading {
 	case "## Planned Externalized State",
 		"## Evidence References",
-		"## Claim Evidence",
-		"## Claim Classification",
+		"## Claims",
 		"## Checkpoint Stage":
 	default:
 		return false
 	}
 	body := strings.TrimSpace(section.body)
-	return body == "- (none reported by the model)" || body == "- No stage metadata reported by the model."
+	return body == "" || body == "- (none reported by the model)" || body == "- No stage metadata reported by the model."
 }
 
 func buildStructuredFallbackSummary(historyPath string, input *compactionInput, summarizeErr error, keyFiles []string, todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState) string {

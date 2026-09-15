@@ -686,16 +686,13 @@ func TestCompactContextTokenBudgetShortenListIncludesStageMetadata(t *testing.T)
 	}
 }
 
-// Observed claims need their evidence IDs repeated in the top-level
-// evidence_refs, so the tool schema must say so where claim_evidence and
-// evidence_refs are documented (the runtime enforces it).
 func TestCompactContextParametersCrossReferenceEvidenceRefsForObservedClaims(t *testing.T) {
 	tool := NewCompactContextTool(testCompactValidator())
 	properties := tool.Parameters()["properties"].(map[string]any)
 	claimEvidence := properties["claim_evidence"].(map[string]any)["description"].(string)
 	evidenceRefs := properties["evidence_refs"].(map[string]any)["description"].(string)
 	for name, desc := range map[string]string{"claim_evidence": claimEvidence, "evidence_refs": evidenceRefs} {
-		if !strings.Contains(desc, "evidence_refs") || !strings.Contains(desc, "observed") {
+		if !strings.Contains(desc, "evidence_refs") || !strings.Contains(desc, "automatically included") {
 			t.Fatalf("%s description must cross-reference evidence_refs for observed claims: %q", name, desc)
 		}
 	}

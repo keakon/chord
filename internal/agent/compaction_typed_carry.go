@@ -17,8 +17,8 @@ import (
 // metadata — so it travels as a structured `## Typed Checkpoint State` block
 // inside the checkpoint body, parsed back and re-merged by the next
 // generation. The whole previous checkpoint body is deliberately NOT carried
-// as natural-language Markdown: the model re-states its current objective and
-// progress each round, and narrative that a later checkpoint did not restate
+// as natural-language Markdown: the model re-states its current objective
+// each round, and narrative that a later checkpoint did not restate
 // lives in the archived history files, not in a growing verbatim appendix.
 //
 // The typed block is a single JSON line (like the anchors tag) so the
@@ -38,6 +38,7 @@ const (
 	// compact_context.go): the carried list can never grow past what a single
 	// fresh submission could express.
 	typedStateCarryMaxDecisions    = 8
+	typedStateCarryMaxCompleted    = 12
 	typedStateCarryMaxOpenIssues   = 8
 	typedStateCarryMaxEvidenceRefs = 24
 	// typedStateCarryMaxItemRunes caps a single carried item. Items that
@@ -89,9 +90,9 @@ const (
 // checkpointTypedState is the machine-carryable task state a checkpoint
 // carries across generations. It is exactly the state with a durable,
 // cross-generation meaning; everything else the checkpoint renders (current
-// user request, active objective, progress, claims) is re-stated by the model
-// on every submission.
+// user request and active objective) is resolved anew on every submission.
 type checkpointTypedState struct {
+	Completed    []string
 	Decisions    []string
 	OpenIssues   []string
 	EvidenceRefs []string
@@ -111,6 +112,7 @@ type checkpointClaim struct {
 // compact_context submission.
 func typedStateFromArgs(args tools.CompactContextArgs) checkpointTypedState {
 	return checkpointTypedState{
+		Completed:    append([]string(nil), args.Completed...),
 		Decisions:    append([]string(nil), args.Decisions...),
 		OpenIssues:   append([]string(nil), args.OpenIssues...),
 		EvidenceRefs: append([]string(nil), args.EvidenceRefs...),
@@ -216,6 +218,7 @@ func typedStateFromBody(body string) (state checkpointTypedState, found bool, ma
 			continue
 		}
 		var decoded struct {
+			Completed    []string                   `json:"completed"`
 			Decisions    []string                   `json:"decisions"`
 			OpenIssues   []string                   `json:"open_issues"`
 			EvidenceRefs []string                   `json:"evidence_refs"`
@@ -229,6 +232,7 @@ func typedStateFromBody(body string) (state checkpointTypedState, found bool, ma
 			continue
 		}
 		return checkpointTypedState{
+			Completed:    decoded.Completed,
 			Decisions:    decoded.Decisions,
 			OpenIssues:   decoded.OpenIssues,
 			EvidenceRefs: decoded.EvidenceRefs,
@@ -249,6 +253,7 @@ func typedStateFromBody(body string) (state checkpointTypedState, found bool, ma
 // the JSON stays parseable by typedStateFromBody.
 func renderTypedStateJSON(state checkpointTypedState) string {
 	payload := struct {
+		Completed    []string                   `json:"completed,omitempty"`
 		Decisions    []string                   `json:"decisions,omitempty"`
 		OpenIssues   []string                   `json:"open_issues,omitempty"`
 		EvidenceRefs []string                   `json:"evidence_refs,omitempty"`
@@ -257,6 +262,7 @@ func renderTypedStateJSON(state checkpointTypedState) string {
 		Kind         string                     `json:"checkpoint_kind,omitempty"`
 		Claims       map[string]checkpointClaim `json:"claims,omitempty"`
 	}{
+		Completed:    boundTypedStateItems(state.Completed),
 		Decisions:    boundTypedStateItems(state.Decisions),
 		OpenIssues:   boundTypedStateItems(state.OpenIssues),
 		EvidenceRefs: boundTypedStateItems(state.EvidenceRefs),
@@ -336,6 +342,9 @@ func truncateRunes(s string, n int) string {
 // state to the next checkpoint.
 func mergeCheckpointTypedStates(prior, current checkpointTypedState) (merged checkpointTypedState, omitted int, claimsOmitted int) {
 	var dropped int
+	merged.Completed, dropped = mergeTypedStateList(prior.Completed, current.Completed, typedStateCarryMaxCompleted)
+	omitted += dropped
+	merged.Completed = boundTypedStateItems(merged.Completed)
 	merged.Decisions, dropped = mergeTypedStateList(prior.Decisions, current.Decisions, typedStateCarryMaxDecisions)
 	omitted += dropped
 	merged.OpenIssues, dropped = mergeTypedStateList(prior.OpenIssues, current.OpenIssues, typedStateCarryMaxOpenIssues)

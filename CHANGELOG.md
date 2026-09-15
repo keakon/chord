@@ -18,6 +18,9 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements
 
+- Model-driven context checkpoints retain bounded completed-work records across resets and support explicitly retiring resolved issues and superseded decisions. Evidence references no longer need to be repeated across tool parameters, and claim summaries use a single compact view with their validity status.
+- Archived evidence without classification can no longer support an `observed` claim. Obtain classified evidence or report the conclusion as inferred or unverified instead; provenance references alone do not prove a conclusion.
+
 - Model-driven context management no longer treats a completed TODO list as a reason to checkpoint. The agent checks remaining work and delivers the final response directly when nothing else remains, avoiding unnecessary resets at task completion.
 - A checkpoint is a continuation boundary, not a completion signal: applying it never closes the turn, and new user input or background results that arrive during the reset are processed by the continuation instead of being dropped.
 - A model-driven checkpoint request identical to the last applied one is skipped when no new work or input followed that checkpoint — retries of the same request and context reminders do not count as progress — while any new input or work makes the request eligible for evaluation again.

@@ -466,8 +466,7 @@ func TestCrossGenerationCarriedClaimsSurviveWithoutRestatement(t *testing.T) {
 	if secondKind := state.Claims["design final"]; secondKind.Kind != "assumed" {
 		t.Fatalf("carried assumed claim lost its kind: %#v", secondKind)
 	}
-	// The readable Claim Evidence section renders the same carried evidence.
-	if !strings.Contains(second, "tests pass | evidence: ev-1, ev-2") {
+	if !strings.Contains(second, "tests pass | kind: observed | status: invalidated | evidence: ev-1, ev-2") {
 		t.Fatalf("round-2 checkpoint must re-render the carried claim evidence:\n%s", second)
 	}
 	if !strings.Contains(second, "design final | kind: assumed") {
@@ -573,7 +572,7 @@ func TestRestatedInvalidatedClaimReadsFreshActive(t *testing.T) {
 	if got.Kind != "observed" || len(got.EvidenceRefs) != 1 || got.EvidenceRefs[0] != freshID {
 		t.Fatalf("restated claim must carry the fresh classification and evidence: %#v", got)
 	}
-	if !strings.Contains(second, "claims A works | evidence: "+freshID) {
+	if !strings.Contains(second, "claims A works | kind: observed | status: active | evidence: "+freshID) {
 		t.Fatalf("round-2 checkpoint must re-render the restated claim evidence:\n%s", second)
 	}
 }
