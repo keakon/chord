@@ -4515,6 +4515,73 @@ func TestProgressArrivalMergesIntoQueuedMailboxBatch(t *testing.T) {
 	}
 }
 
+// TestStageNextSubAgentMailboxBatchDrainsEveryQueuedMessage pins the
+// whole-backlog rule: one staging cycle claims every actionable message in the
+// inbox — not only a completed run — so one request carries all of them, with
+// urgent messages ahead of normal ones and FIFO kept inside each class.
+func TestStageNextSubAgentMailboxBatchDrainsEveryQueuedMessage(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.subAgentInbox.urgent = []SubAgentMailboxMessage{
+		{MessageID: "u-1", AgentID: "worker-1", TaskID: "task-a", Kind: SubAgentMailboxKindDecisionRequired, Priority: SubAgentMailboxPriorityInterrupt, Summary: "needs a decision"},
+		{MessageID: "u-2", AgentID: "worker-2", TaskID: "task-b", Kind: SubAgentMailboxKindRiskAlert, Priority: SubAgentMailboxPriorityUrgent, Summary: "risk spotted"},
+	}
+	a.subAgentInbox.normal = []SubAgentMailboxMessage{
+		{MessageID: "n-1", AgentID: "worker-3", TaskID: "task-c", Kind: SubAgentMailboxKindBackgroundResult, Priority: SubAgentMailboxPriorityNotify, Summary: "job finished"},
+		{MessageID: "n-2", AgentID: "worker-4", TaskID: "task-d", Kind: SubAgentMailboxKindBlocked, Priority: SubAgentMailboxPriorityNotify, Summary: "blocked on input"},
+	}
+
+	if !a.stageNextSubAgentMailboxBatch() {
+		t.Fatal("stageNextSubAgentMailboxBatch() = false with four queued messages")
+	}
+	got := make([]string, 0, len(a.pendingSubAgentMailboxes))
+	for _, msg := range a.pendingSubAgentMailboxes {
+		if msg == nil {
+			t.Fatalf("pending batch holds a nil entry: %#v", a.pendingSubAgentMailboxes)
+		}
+		got = append(got, msg.MessageID)
+	}
+	want := []string{"u-1", "u-2", "n-1", "n-2"}
+	if len(got) != len(want) {
+		t.Fatalf("pending batch = %v, want all four messages %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("pending batch = %v, want %v (urgent first, FIFO within a class)", got, want)
+		}
+	}
+	if len(a.subAgentInbox.urgent) != 0 || len(a.subAgentInbox.normal) != 0 {
+		t.Fatalf("queues still hold messages after staging: urgent=%v normal=%v", a.subAgentInbox.urgent, a.subAgentInbox.normal)
+	}
+	if len(a.activeSubAgentMailboxes) != len(want) {
+		t.Fatalf("active batch = %v, want the same four messages retained for closeout", a.activeSubAgentMailboxes)
+	}
+	if a.activeSubAgentMailbox == nil || a.activeSubAgentMailbox.MessageID != "u-1" {
+		t.Fatalf("activeSubAgentMailbox = %#v, want the oldest queue head u-1", a.activeSubAgentMailbox)
+	}
+
+	// The single request assembling this batch must carry every message, not
+	// just the first one it used to stop at. A background result is delivered
+	// as a KindBackgroundResult message, so it is counted by content instead of
+	// by the mailbox-notice helper.
+	overlays := a.buildTurnOverlayMessages()
+	for _, id := range []string{"u-1", "u-2", "n-2"} {
+		if got := countSubAgentMailboxMessages(overlays, id); got != 1 {
+			t.Fatalf("request overlays = %#v, want exactly one %s message", overlays, id)
+		}
+	}
+	if !requestHasBackgroundResult(overlays, "job finished") {
+		t.Fatalf("request overlays = %#v, want the background result n-1", overlays)
+	}
+	// A second staging cycle finds nothing left, so the main can go idle once
+	// the request consumed the batch.
+	a.pendingSubAgentMailboxes = nil
+	a.activeSubAgentMailboxes = nil
+	a.activeSubAgentMailbox = nil
+	if a.stageNextSubAgentMailboxBatch() {
+		t.Fatal("stageNextSubAgentMailboxBatch() = true with the queues drained")
+	}
+}
+
 // TestIdleMailboxDrainLeavesActiveTurnAndProgressUntouched pins the idle-wake
 // gate: the between-turns drain (drainSubAgentInbox) never fires while a turn is
 // in flight. A progress snapshot that arrives mid-turn is delivered by the next

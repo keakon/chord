@@ -1625,11 +1625,13 @@ func (a *MainAgent) stageNextSubAgentMailboxBatch() bool {
 	if a.mailboxDeliveryPaused.Load() {
 		return false
 	}
-	// One staging cycle merges every current main-inbox progress snapshot into
-	// the staged batch, so the next request carries the whole routable backlog
-	// in one batch. Progress/notice is claimed at every request boundary, mid-
-	// turn included: like a queued user message it rides the next LLM request
-	// without interrupting the one in flight or starting a request of its own.
+	// One staging cycle drains the whole routable main-inbox backlog — every
+	// urgent/normal queue message (FIFO within its priority class, urgent
+	// first) plus every current progress snapshot — so the next request carries
+	// all pending mailbox messages together instead of one message per request.
+	// Progress/notice is claimed at every request boundary, mid-turn included:
+	// like a queued user message it rides the next LLM request without
+	// interrupting the one in flight or starting a request of its own.
 	var progress []SubAgentMailboxMessage
 	// A deferred delivery retry only runs between turns: each due entry
 	// reloads the mailbox log and requeues, so re-running it on every mid-turn
@@ -1639,72 +1641,45 @@ func (a *MainAgent) stageNextSubAgentMailboxBatch() bool {
 		a.retryDeferredMailboxDeliveries()
 	}
 	progress = a.takeMainInboxProgressSnapshots()
-	msg := a.dequeueNextSubAgentMailbox()
-	if msg == nil {
-		if len(progress) == 0 {
-			return false
+	var queued []*SubAgentMailboxMessage
+	for {
+		msg := a.dequeueNextSubAgentMailbox()
+		if msg == nil {
+			break
 		}
-	} else if msg.Kind == SubAgentMailboxKindProgress {
-		// Progress does not ride the urgent/normal queues as an actionable
-		// head; whether the main is busy or idle it folds into the snapshot set
-		// staged below and is delivered with the same next request.
-		progress = append(progress, *msg)
-		msg = nil
+		if msg.Kind == SubAgentMailboxKindProgress {
+			// Progress does not ride the urgent/normal queues as an actionable
+			// head; whether the main is busy or idle it folds into the snapshot
+			// set staged below so it is delivered with the same request.
+			progress = append(progress, *msg)
+			continue
+		}
+		if !a.ensureSubAgentMailboxPersisted(msg) {
+			// Only the message whose persist failed is unclaimed; the loop
+			// stops here so the rest of the queue keeps its order behind it.
+			a.requeueSubAgentMailboxInMemory(*msg)
+			break
+		}
+		queued = append(queued, msg)
 	}
-	if msg == nil && len(progress) == 0 {
+	if len(queued) == 0 && len(progress) == 0 {
 		return false
 	}
 	var pending []*SubAgentMailboxMessage
-	if msg != nil {
-		if !a.ensureSubAgentMailboxPersisted(msg) {
-			a.requeueSubAgentMailboxInMemory(*msg)
-			// requeueSubAgentMailboxInMemory prepends, so roll back in reverse
-			// to keep the claimed order.
-			for _, p := range slices.Backward(progress) {
-				a.requeueSubAgentMailboxInMemory(p)
-			}
-			return false
-		}
-		pending = append(pending, msg)
-		if msg.Kind == SubAgentMailboxKindCompleted {
-			for {
-				next := a.dequeueNextSubAgentMailbox()
-				if next == nil {
-					break
-				}
-				if next.Kind == SubAgentMailboxKindProgress {
-					// A stray queue-resident progress update (progress normally
-					// lives in the per-agent snapshot map, not the actionable
-					// queues) folds into the same snapshot set as the head so it
-					// is delivered with the same request instead of blocking the
-					// completed-head batch.
-					progress = append(progress, *next)
-					continue
-				}
-				if !a.ensureSubAgentMailboxPersisted(next) {
-					a.requeueSubAgentMailboxInMemory(*next)
-					break
-				}
-				if next.Kind != SubAgentMailboxKindCompleted {
-					a.requeueSubAgentMailboxInMemory(*next)
-					break
-				}
-				pending = append(pending, next)
-			}
-		}
-	}
+	pending = append(pending, queued...)
 	// Progress snapshots join after the actionable queue heads so batch order
 	// stays stable for the overlay and ack consumers.
 	for i := range progress {
 		if !a.ensureSubAgentMailboxPersisted(&progress[i]) {
 			// requeueSubAgentMailboxInMemory prepends to its queue, so the
 			// rollback walks the claimed batch in reverse: the last-claimed
-			// message must go back first for the queue order to match the
-			// order this batch was taken in.
+			// message must go back first for the queue order to match this
+			// batch's order, which is every queued head followed by the
+			// progress snapshots.
 			for j := len(progress) - 1; j >= i; j-- {
 				a.requeueSubAgentMailboxInMemory(progress[j])
 			}
-			for _, p := range slices.Backward(pending) {
+			for _, p := range slices.Backward(queued) {
 				a.requeueSubAgentMailboxInMemory(*p)
 			}
 			return false
@@ -1719,11 +1694,15 @@ func (a *MainAgent) stageNextSubAgentMailboxBatch() bool {
 	// accumulates every batch until the turn closeout acks or requeues it. The
 	// active head pointer is only filled when it was empty: it marks the first
 	// not-yet-acked message, not the newest arrival.
+	var batchHead *SubAgentMailboxMessage
+	if len(queued) > 0 {
+		batchHead = queued[0]
+	}
 	a.subAgentMailboxIDsMu.Lock()
 	a.pendingSubAgentMailboxes = append(a.pendingSubAgentMailboxes, pending...)
 	a.activeSubAgentMailboxes = append(a.activeSubAgentMailboxes, pending...)
 	if a.activeSubAgentMailbox == nil {
-		a.activeSubAgentMailbox = msg
+		a.activeSubAgentMailbox = batchHead
 	}
 	a.activeSubAgentMailboxAck = true
 	a.subAgentMailboxIDsMu.Unlock()
