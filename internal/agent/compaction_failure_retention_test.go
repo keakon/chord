@@ -2,11 +2,13 @@ package agent
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
@@ -132,17 +134,23 @@ func TestCheckpointRetainedFailureRecordsCapsRetainedBytes(t *testing.T) {
 	}
 }
 
-func TestCheckpointRetainedFailureRecordsElidesImageParts(t *testing.T) {
+// TestCheckpointRetainedFailureRecordsCapsImagePayloadBytes pins the byte cap
+// against the largest payload class. A failed result keeps its body — that is
+// the whole reason the batch stays live — so an image-bearing failure is what
+// the cap has to weigh, and it carries its weight in a part rather than in
+// Content. A cap that only measured Content would keep both batches and hand
+// the projected surface the whole blob.
+func TestCheckpointRetainedFailureRecordsCapsImagePayloadBytes(t *testing.T) {
 	payload := make([]byte, maxCheckpointRetainedFailureBytes+1)
 	for i := range payload {
 		payload[i] = byte(i)
 	}
 	head := []message.Message{
 		{Role: message.RoleUser, Content: "request"},
-		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "old-call", Name: tools.NameRead, Args: json.RawMessage(`{}`)}}},
-		{Role: message.RoleTool, ToolCallID: "old-call", ToolStatus: message.ToolStatusSuccess, Content: "stale", Parts: []message.ContentPart{
-			{Type: message.ContentPartText, Text: "stale image result"},
-			{Type: message.ContentPartImage, MimeType: "image/png", FileName: "stale.png", ImagePath: "stale.png", Data: payload},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "img-call", Name: tools.NameViewImage, Args: json.RawMessage(`{}`)}}},
+		{Role: message.RoleTool, ToolCallID: "img-call", ToolStatus: message.ToolStatusError, Content: "stale", Parts: []message.ContentPart{
+			{Type: message.ContentPartText, Text: "image render failed"},
+			{Type: message.ContentPartImage, MimeType: "image/png", FileName: "stale.png", ImagePath: "stale.png", Data: payload, DataBytes: int64(len(payload))},
 		}},
 		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "fresh-call", Name: tools.NameShell, Args: json.RawMessage(`{}`)}}},
 		{Role: message.RoleTool, ToolCallID: "fresh-call", ToolStatus: message.ToolStatusError, Content: "exit status 1"},
@@ -150,11 +158,49 @@ func TestCheckpointRetainedFailureRecordsElidesImageParts(t *testing.T) {
 
 	got := checkpointRetainedFailureRecords(head)
 	if len(got) != 2 || got[0].ToolCalls[0].ID != "fresh-call" {
-		t.Fatalf("retained %d records starting with %q, want the image-heavy older batch dropped by the byte cap: %+v", len(got), got[0].ToolCalls[0].ID, got)
+		t.Fatalf("retained %d records starting with %+v, want the image-heavy older batch dropped by the byte cap: %+v", len(got), got[0].ToolCalls, got)
 	}
 }
 
-func TestElideRetainedResultDropsImageBytesKeepsReference(t *testing.T) {
+// TestCheckpointRetainedFailureRecordsElidesSuccessPayloadInKeptBatch pins the
+// division of labour between elision and the cap: a successful result sharing
+// the batch with a failure keeps its call/response pairing but contributes no
+// payload bytes, so a large attachment cannot push the batch over the cap or
+// into the projected surface.
+func TestCheckpointRetainedFailureRecordsElidesSuccessPayloadInKeptBatch(t *testing.T) {
+	payload := make([]byte, maxCheckpointRetainedFailureBytes+1)
+	head := []message.Message{
+		{Role: message.RoleUser, Content: "request"},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{
+			{ID: "img-call", Name: tools.NameViewImage, Args: json.RawMessage(`{}`)},
+			{ID: "bad-call", Name: tools.NameShell, Args: json.RawMessage(`{}`)},
+		}},
+		{Role: message.RoleTool, ToolCallID: "img-call", ToolStatus: message.ToolStatusSuccess, Parts: []message.ContentPart{
+			{Type: message.ContentPartImage, MimeType: "image/png", FileName: "shot.png", ImagePath: "shot.png", Data: payload, DataBytes: int64(len(payload))},
+		}},
+		{Role: message.RoleTool, ToolCallID: "bad-call", ToolStatus: message.ToolStatusError, Content: "exit status 1"},
+	}
+
+	got := checkpointRetainedFailureRecords(head)
+	if len(got) != 3 {
+		t.Fatalf("retained %d records, want the whole batch kept: %+v", len(got), got)
+	}
+	if bytes := ctxmgr.MessagePayloadBytes(got); bytes > maxCheckpointRetainedFailureBytes {
+		t.Fatalf("retained payload bytes = %d, want the elided attachment to keep the batch under the cap (%d)", bytes, maxCheckpointRetainedFailureBytes)
+	}
+	for _, msg := range got {
+		if msg.ToolCallID == "img-call" && len(msg.Parts) != 0 {
+			t.Fatalf("the elided success result still carries parts: %+v", msg.Parts)
+		}
+	}
+}
+
+// TestElideRetainedResultDropsBinaryPayloadEntirely pins that no elided
+// successful result can still reach the provider with its blob: a part left
+// with only ImagePath would be resolved back from disk by binaryPartPayload at
+// request time, so elision must drop the parts outright and the message must
+// report zero payload bytes to the estimator afterwards.
+func TestElideRetainedResultDropsBinaryPayloadEntirely(t *testing.T) {
 	payload := []byte{1, 2, 3}
 	msg := message.Message{
 		Role:       message.RoleTool,
@@ -168,21 +214,54 @@ func TestElideRetainedResultDropsImageBytesKeepsReference(t *testing.T) {
 	}
 
 	got := elideRetainedResult(msg)
-	if len(got.Parts) != 1 {
-		t.Fatalf("elided parts = %+v, want only the binary reference to stay", got.Parts)
+	if len(got.Parts) != 0 {
+		t.Fatalf("elided parts = %+v, want every part dropped so no payload can be resolved from disk", got.Parts)
 	}
-	kept := got.Parts[0]
-	if kept.Type != message.ContentPartImage || kept.MimeType != "image/png" || kept.FileName != "shot.png" || kept.ImagePath != "shot.png" {
-		t.Fatalf("elided part lost its attachment identity: %+v", kept)
+	// The marker must account for what was removed, including the binary bytes
+	// the estimator charged through PayloadBytes.
+	wantSize := len("here is the image") + len(payload)
+	if want := fmt.Sprintf("[result elided by checkpoint: %d bytes]", wantSize); got.Content != want {
+		t.Fatalf("elided content = %q, want %q", got.Content, want)
 	}
-	if len(kept.Data) != 0 || kept.Text != "" || kept.DisplayText != "" {
-		t.Fatalf("elided part must drop its bytes and text: %+v", kept)
+	if bytes := ctxmgr.MessagePayloadBytes([]message.Message{got}); bytes != len(got.Content) {
+		t.Fatalf("elided payload bytes = %d, want only the marker text (%d)", bytes, len(got.Content))
 	}
-	if kept.DataBytes != int64(len(payload)) {
-		t.Fatalf("elided part DataBytes = %d, want %d so the sized-but-unloaded shape stays distinct", kept.DataBytes, len(payload))
+	if got.ToolStatus != message.ToolStatusSuccess || got.ToolCallID != "img-call" {
+		t.Fatalf("elided record lost its batch identity: %+v", got)
 	}
-	if !strings.Contains(got.Content, "[result elided by checkpoint:") || !strings.Contains(got.Content, "[parts elided by checkpoint:") {
-		t.Fatalf("elided content = %q, want both the body marker and the parts size marker", got.Content)
+}
+
+// TestElidedToolResultContentReportsRemovedBytesOnce pins the marker's byte
+// count against double counting. message.Message defines Content as the
+// model-visible combination of the raw payload and the runtime's notes, so a
+// structured tool result carries its ToolPayload inside Content; adding both
+// would overstate what the elision removed. ToolDiff is a separate field and
+// must still be counted.
+func TestElidedToolResultContentReportsRemovedBytesOnce(t *testing.T) {
+	payload := "structured output"
+	diff := "@@ -1 +1 @@"
+	msg := message.Message{
+		Role:        message.RoleTool,
+		ToolCallID:  "edit-call",
+		ToolStatus:  message.ToolStatusSuccess,
+		Content:     payload + "\n\nretry hint",
+		ToolPayload: payload,
+		ToolDiff:    diff,
+		ToolNotes:   []string{"retry hint"},
+	}
+
+	want := len(msg.Content) + len(diff)
+	got := elideRetainedResult(msg)
+	if expected := fmt.Sprintf("[result elided by checkpoint: %d bytes]", want); got.Content != expected {
+		t.Fatalf("elided content = %q, want %q (Content already contains ToolPayload)", got.Content, expected)
+	}
+	if got.ToolPayload != "" || got.ToolDiff != "" {
+		t.Fatalf("elided record kept a body copy: payload=%q diff=%q", got.ToolPayload, got.ToolDiff)
+	}
+	// The notes are the runtime's own diagnosis, not a copy of the output, so
+	// they survive the elision the marker describes.
+	if len(got.ToolNotes) != 1 {
+		t.Fatalf("elided record dropped its runtime notes: %+v", got.ToolNotes)
 	}
 }
 
