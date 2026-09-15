@@ -52,15 +52,19 @@ var activeToolSpinnerSegments = [...]string{"▖", "▘", "▝", "▗"}
 
 const queuedToolGlyph = "⏸"
 
-// elapsedGlyph marks a rendered elapsed time on tool cards, the status bar, the
-// agent sidebar and the JOB RESULT line, so a duration always reads as a
-// measured time instead of as the activity that produced it.
+// elapsedGlyph marks the measured duration a surface appends to a call's own
+// header — tool cards and the JOB RESULT line — so the time reads as a
+// measurement instead of as the activity that produced it. It never appears
+// alone: a stopwatch with no time beside it reads as a missing value rather
+// than as work in progress. The surfaces whose icon names the activity kind
+// (the status bar lane and the agent sidebar) use executingGlyph and put the
+// elapsed after it as plain text.
 const elapsedGlyph = "⏱"
 
-// executingGlyph stands for the activity itself, for the surfaces that must say
-// "running" without a duration to show. elapsedGlyph never appears alone: a
-// stopwatch with no time next to it reads as a missing value rather than as
-// work in progress.
+// executingGlyph fills the icon slot of a surface whose icon names what the
+// agent is doing — the status bar activity lane and the agent sidebar — while a
+// tool call runs. The elapsed text follows the glyph when a start time exists,
+// so the icon never doubles as the time marker.
 const executingGlyph = "⚙"
 
 // receivingToolGlyph is used while the provider is still streaming tool

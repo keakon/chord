@@ -845,7 +845,7 @@ func TestRequestProgressResetsPerCardAcrossAssistantToolAssistant(t *testing.T) 
 	m.activityStartTime["main"] = time.Now().Add(-3 * time.Second)
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.RequestProgressEvent{AgentID: "main", Bytes: 225 * 1024, Events: 93}})
 	plain2 := stripANSI(m.renderStatusBar())
-	if !strings.Contains(plain2, "⏱ 3s") {
+	if !strings.Contains(plain2, "⚙ 3s") {
 		t.Fatalf("tool card should use executing style, got %q", plain2)
 	}
 
@@ -963,7 +963,7 @@ func TestLeavingRequestActivityClearsPreviousRequestProgress(t *testing.T) {
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.RequestProgressEvent{AgentID: "main", Bytes: 64 * 1024, Events: 10}})
 	// Switching to ActivityExecuting should NOT clear request progress yet —
 	// tool arg streaming may still be in flight and RequestProgressEvent{Done:true}
-	// has not arrived. The status bar will show executing state (⏱) because
+	// has not arrived. The status bar will show executing state (⚙) because
 	// buildStatusBarActivityDisplay checks activity type first, but the progress
 	// data is retained until explicitly done or a new cycle starts.
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentActivityEvent{Type: agent.ActivityExecuting, AgentID: "main"}})
@@ -972,7 +972,7 @@ func TestLeavingRequestActivityClearsPreviousRequestProgress(t *testing.T) {
 	}
 	plain := stripANSI(m.renderStatusBar())
 	// Status bar shows executing icon, not download progress, because activity type is Executing
-	if !strings.Contains(plain, "⏱") {
+	if !strings.Contains(plain, "⚙") {
 		t.Fatalf("status bar should show executing state, got %q", plain)
 	}
 	// Now simulate RequestProgressEvent{Done:true} — this should clear the progress
@@ -3364,8 +3364,8 @@ func TestRenderExecutingSummaryShowsElapsed(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 12)
 	m.activityStartTime["main"] = time.Now().Add(-12 * time.Second)
 	got := m.renderExecutingSummary("main")
-	if !strings.HasPrefix(got, "⏱ ") {
-		t.Fatalf("renderExecutingSummary = %q, want elapsed glyph prefix", got)
+	if !strings.HasPrefix(got, "⚙ ") {
+		t.Fatalf("renderExecutingSummary = %q, want activity glyph prefix", got)
 	}
 	if !strings.Contains(got, "12s") {
 		t.Fatalf("renderExecutingSummary = %q, want elapsed seconds", got)
@@ -3376,7 +3376,7 @@ func TestRenderActivityExecutingUsesElapsedStyle(t *testing.T) {
 	m := NewModelWithSize(nil, 200, 24)
 	m.activityStartTime["main"] = time.Now().Add(-12 * time.Second)
 	out := stripANSI(m.renderActivity(agent.AgentActivityEvent{AgentID: "main", Type: agent.ActivityExecuting}, 200))
-	if !strings.Contains(out, "⏱ 12s") {
+	if !strings.Contains(out, "⚙ 12s") {
 		t.Fatalf("renderActivity(executing) = %q, want elapsed time", out)
 	}
 	if strings.Contains(out, "Loop:") {
@@ -7107,7 +7107,7 @@ func TestRenderActivityPrefersNewerToolStartOverEarlierSettledBlock(t *testing.T
 	m.viewport.AppendBlock(&Block{ID: 2, Type: BlockToolCall, ToolName: "shell", StartedAt: newer})
 	a := agent.AgentActivityEvent{Type: agent.ActivityExecuting, AgentID: "main"}
 	out := stripANSI(m.renderActivity(a, 200))
-	if !strings.Contains(out, "⏱ 1m30s") {
+	if !strings.Contains(out, "⚙ 1m30s") {
 		t.Fatalf("expected newer tool start to anchor executing elapsed; got %q", out)
 	}
 }

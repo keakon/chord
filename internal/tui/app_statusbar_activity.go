@@ -115,7 +115,7 @@ func (m Model) renderExecutingSummary(agentID string) string {
 		return executingGlyph
 	}
 	elapsed := max(time.Since(startedAt), time.Second)
-	return elapsedGlyph + " · " + tools.FormatElapsed(elapsed)
+	return executingGlyph + " · " + tools.FormatElapsed(elapsed)
 }
 
 func statusBarTimingAnchor(agentID string) string {
@@ -218,18 +218,6 @@ func (m Model) statusBarElapsedText(agentID string) string {
 	return "0s"
 }
 
-func (m Model) statusBarExecutingElapsedText(agentID string) (string, bool) {
-	agentID = strings.TrimSpace(agentID)
-	if agentID == "" {
-		agentID = "main"
-	}
-	start, ok := m.executingStartedAt(agentID)
-	if !ok {
-		return "", false
-	}
-	return strings.TrimSpace(formatStatusBarElapsed(time.Since(start))), true
-}
-
 func (m Model) buildStatusBarActivityDisplayAt(a agent.AgentActivityEvent, now time.Time) statusBarActivityDisplay {
 	display := statusBarActivityDisplay{}
 	agentID := strings.TrimSpace(a.AgentID)
@@ -245,11 +233,12 @@ func (m Model) buildStatusBarActivityDisplayAt(a agent.AgentActivityEvent, now t
 		hasRequestState = act.Type == agent.ActivityConnecting || act.Type == agent.ActivityWaitingHeaders || act.Type == agent.ActivityWaitingToken || act.Type == agent.ActivityStreaming
 	}
 	if a.Type == agent.ActivityExecuting {
-		if elapsed, ok := m.statusBarExecutingElapsedText(agentID); ok {
-			display.Icon = elapsedGlyph
-			display.Text = elapsed
-		} else {
-			display.Icon = executingGlyph
+		// The lane's icon names the activity kind (⇋ connecting, ↓ streaming,
+		// ■ compacting), so executing keeps its own glyph and the elapsed
+		// follows as plain text instead of taking over the icon slot.
+		display.Icon = executingGlyph
+		if startedAt, ok := m.executingStartedAt(agentID); ok {
+			display.Text = strings.TrimSpace(formatStatusBarElapsed(time.Since(startedAt)))
 		}
 		return display
 	}
