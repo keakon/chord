@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 
@@ -13,6 +14,18 @@ import (
 // and the checkpoint's evidence pack agree on how many failures still count:
 // older failures stay in the archive and, as labeled excerpts, in the pack.
 const maxCheckpointRetainedFailureBatches = maxToolErrorEvidenceItems
+
+// maxCheckpointRetainedFailureBytes bounds what the retained records add to
+// the projected post-reset surface. Retention must not argue against the
+// checkpoint that triggered it: the low-gain preflight weighs the projected
+// surface against modelDrivenLowGainMinTokens, and a batch of large successful
+// results — kept only because it shares the turn with a failure — would
+// otherwise eat that margin and turn a worthwhile checkpoint into a skip.
+// Successful bodies are elided below; this cap is the backstop for what
+// elision cannot shrink (tool-call arguments, non-text parts). Batches yield
+// oldest-first like the count cap, and the newest batch always stays so the
+// failure behind this checkpoint remains readable.
+const maxCheckpointRetainedFailureBytes = 8 << 10
 
 // checkpointRetainedFailureRecords returns the tool-call batches of the
 // current turn — everything after the last user-authored message — that ended
@@ -64,11 +77,94 @@ func checkpointRetainedFailureRecords(head []message.Message) []message.Message 
 	if len(batches) > maxCheckpointRetainedFailureBatches {
 		batches = batches[len(batches)-maxCheckpointRetainedFailureBatches:]
 	}
+	sizes := make([]int, len(batches))
+	total := 0
+	for i, batch := range batches {
+		sizes[i] = retainedBatchBytes(batch)
+		total += sizes[i]
+	}
+	for len(batches) > 1 && total > maxCheckpointRetainedFailureBytes {
+		total -= sizes[0]
+		batches, sizes = batches[1:], sizes[1:]
+	}
 	var out []message.Message
 	for _, batch := range batches {
-		out = append(out, batch...)
+		for _, msg := range batch {
+			out = append(out, elideRetainedResult(msg))
+		}
 	}
 	return out
+}
+
+// elideRetainedResult replaces a successful result's bodies with a size marker.
+// The record has to stay so the batch replays as a complete call/response pair,
+// but its output is in the archive, and a full copy of it can weigh more than
+// the checkpoint saves. Failures keep their text: they are the reason the
+// record stayed live.
+func elideRetainedResult(msg message.Message) message.Message {
+	if msg.Role != message.RoleTool || retainedFailureResult(msg) {
+		return msg
+	}
+	msg.Content = elidedToolResultContent(msg)
+	msg.ToolPayload = ""
+	msg.ToolDiff = ""
+	return msg
+}
+
+func elidedToolResultContent(msg message.Message) string {
+	size := len(msg.Content) + len(msg.ToolPayload) + len(msg.ToolDiff)
+	if size == 0 {
+		return ""
+	}
+	return fmt.Sprintf("[result elided by checkpoint: %d bytes]", size)
+}
+
+// retainedBatchBytes is what a batch costs once elision applies.
+func retainedBatchBytes(batch []message.Message) int {
+	total := 0
+	for _, msg := range batch {
+		total += len(elideRetainedResult(msg).Content)
+	}
+	return total
+}
+
+// retainedFailureCallIDs returns the call IDs of the failures the checkpoint
+// keeps in the live transcript, so the evidence pack can leave those out: each
+// one is already readable in full as a retained record.
+func retainedFailureCallIDs(records []message.Message) map[string]struct{} {
+	var ids map[string]struct{}
+	for _, msg := range records {
+		if msg.Role != message.RoleTool || !retainedFailureResult(msg) {
+			continue
+		}
+		id := strings.TrimSpace(msg.ToolCallID)
+		if id == "" {
+			continue
+		}
+		if ids == nil {
+			ids = make(map[string]struct{})
+		}
+		ids[id] = struct{}{}
+	}
+	return ids
+}
+
+// excludeRetainedFailureEvidence drops the tool-error evidence whose live
+// record the checkpoint re-attaches. The live record shows the failure
+// verbatim, so the pack's budget stays with the failures that survive only as
+// excerpts.
+func excludeRetainedFailureEvidence(items []evidenceItem, retained map[string]struct{}) []evidenceItem {
+	if len(retained) == 0 {
+		return items
+	}
+	kept := make([]evidenceItem, 0, len(items))
+	for _, item := range items {
+		if _, ok := retained[strings.TrimSpace(item.SourceID)]; ok {
+			continue
+		}
+		kept = append(kept, item)
+	}
+	return kept
 }
 
 // batchHasRetainedFailure reports whether any result of the batch ended

@@ -838,9 +838,12 @@ func (a *MainAgent) discardCompactionForModelOverride() {
 // bundle is immutable; the worker only ever reads it.
 func (a *MainAgent) captureModelDrivenBarrierSnapshot(snapshot []message.Message) modelDrivenBarrierSnapshot {
 	lastPreparedTurnID, lastPreparedSource, lastPreparedPrefix := a.captureLastPreparedSurfaceForPreflight()
+	// A failure the checkpoint re-attaches as a live record must not also ride
+	// the evidence pack: the live record already shows it verbatim.
+	retainedFailures := retainedFailureCallIDs(checkpointRetainedFailureRecords(snapshot))
 	bundle := modelDrivenBarrierSnapshot{
 		snapshot:                    snapshot,
-		evidenceItems:               a.evidenceItemsForCompaction(a.ctxMgr.GetMaxTokens()),
+		evidenceItems:               excludeRetainedFailureEvidence(a.evidenceItemsForCompaction(a.ctxMgr.GetMaxTokens()), retainedFailures),
 		todos:                       a.GetTodos(),
 		subAgents:                   a.taskInfosForCompaction(),
 		backgroundObjects:           jobStatesForSnapshot(),
@@ -891,7 +894,10 @@ func (a *MainAgent) captureModelDrivenRuntimeInput() modelDrivenRuntimeInput {
 		todos:             a.GetTodos(),
 		subAgents:         a.taskInfosForCompaction(),
 		backgroundObjects: jobStatesForSnapshot(),
-		evidenceItems:     a.evidenceItemsForCompaction(a.ctxMgr.GetMaxTokens()),
+		evidenceItems: excludeRetainedFailureEvidence(
+			a.evidenceItemsForCompaction(a.ctxMgr.GetMaxTokens()),
+			retainedFailureCallIDs(checkpointRetainedFailureRecords(a.ctxMgr.Snapshot())),
+		),
 	}
 }
 

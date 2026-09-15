@@ -83,6 +83,66 @@ func TestCheckpointRetainedFailureRecordsKeepsWholeParallelBatch(t *testing.T) {
 	if len(got[0].ToolCalls) != 2 || got[1].ToolCallID != "ok-call" || got[2].ToolCallID != "bad-call" {
 		t.Fatalf("retained batch = %+v, want both responses behind the assistant record", got)
 	}
+	// The successful sibling keeps its place in the pair but not its body: the
+	// archive carries the output, and the retained copy only has to explain
+	// where it went. The failure keeps every byte.
+	if want := "[result elided by checkpoint: 13 bytes]"; got[1].Content != want {
+		t.Fatalf("successful sibling content = %q, want %q", got[1].Content, want)
+	}
+	if got[2].Content != "exit status 1" {
+		t.Fatalf("failure content = %q, want the original error text", got[2].Content)
+	}
+}
+
+func TestCheckpointRetainedFailureRecordsCapsRetainedBytes(t *testing.T) {
+	big := strings.Repeat("x", maxCheckpointRetainedFailureBytes+1)
+	head := []message.Message{{Role: message.RoleUser, Content: "request"}}
+	head = appendAll(head, toolBatchMessages("old-call", tools.NameRead, message.ToolStatusError, big))
+	head = appendAll(head, toolBatchMessages("mid-call", tools.NameShell, message.ToolStatusError, big))
+	head = appendAll(head, toolBatchMessages("new-call", tools.NameShell, message.ToolStatusError, "exit status 1"))
+
+	got := checkpointRetainedFailureRecords(head)
+	if len(got) != 2 || got[0].ToolCalls[0].ID != "new-call" {
+		t.Fatalf("retained %d records starting with %q, want the byte cap to drop the older batch and keep the newest", len(got), got[0].ToolCalls[0].ID)
+	}
+
+	// The newest batch is what the checkpoint is being written for, so it stays
+	// live even when it alone exceeds the cap.
+	only := []message.Message{
+		{Role: message.RoleUser, Content: "request"},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "huge-call", Name: tools.NameShell, Args: json.RawMessage(`{}`)}}},
+		{Role: message.RoleTool, ToolCallID: "huge-call", ToolStatus: message.ToolStatusError, Content: strings.Repeat("x", 2*maxCheckpointRetainedFailureBytes)},
+	}
+	if got := checkpointRetainedFailureRecords(only); len(got) != 2 || got[0].ToolCalls[0].ID != "huge-call" {
+		t.Fatalf("the newest batch must stay live even over the byte cap, got %+v", got)
+	}
+}
+
+func TestExcludeRetainedFailureEvidenceKeepsArchivedFailuresOnly(t *testing.T) {
+	records := []message.Message{
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "live-call", Name: tools.NameShell, Args: json.RawMessage(`{}`)}}},
+		{Role: message.RoleTool, ToolCallID: "live-call", ToolStatus: message.ToolStatusError, Content: "exit status 1"},
+		{Role: message.RoleTool, ToolCallID: "ok-call", ToolStatus: message.ToolStatusSuccess, Content: "fine"},
+	}
+	retained := retainedFailureCallIDs(records)
+	if len(retained) != 1 {
+		t.Fatalf("retainedFailureCallIDs = %v, want only the failed live call", retained)
+	}
+	if _, ok := retained["live-call"]; !ok {
+		t.Fatalf("retainedFailureCallIDs = %v, want the failed call id", retained)
+	}
+
+	items := []evidenceItem{
+		{Kind: evidenceToolError, SourceID: "live-call"},
+		{Kind: evidenceToolError, SourceID: "archived-call"},
+	}
+	kept := excludeRetainedFailureEvidence(items, retained)
+	if len(kept) != 1 || kept[0].SourceID != "archived-call" {
+		t.Fatalf("excludeRetainedFailureEvidence = %+v, want the archived failure only", kept)
+	}
+	if got := excludeRetainedFailureEvidence(items, nil); len(got) != 2 {
+		t.Fatalf("without retained records the pack must stay untouched, got %+v", got)
+	}
 }
 
 func TestCheckpointRetainedFailureRecordsDropsIncompleteBatches(t *testing.T) {
