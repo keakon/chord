@@ -147,7 +147,7 @@ context:
 | `preset` | string | auto-detected | Force a specific compaction implementation. Usually unnecessary. |
 | `profile` | string | `auto` | Compaction strategy. Usually unnecessary. |
 | `reminder` | float | `0` (derived) | Context-pressure reminder line as a usage ratio. `0` (the default) derives the line as `min(0.60, threshold × 0.90)`; a fraction in `(0,1]` sets it explicitly; `-1` disables the pressure reminder while keeping automatic compaction on (per model as well). A reminder below the threshold fires when usage reaches it (`min(reminder, threshold)` — whichever line comes first); one at or above the threshold does not fire separately, because usage only reaches it on requests that already crossed the threshold, which carry the grace "compaction imminent" notice or the externalization warning instead. `threshold: 0` disables both. Any other value (negative, above `1`, or NaN/±Inf) is rejected with a warning and falls back to the derived default. |
-| `model_driven` | bool | `false` | Experimental opt-in: expose the `compact_context` tool to the main agent so the model can request a durable context checkpoint once it has externalized its working state (written it into files or structured arguments). The checkpoint is built deterministically without a summarization model call, applies at a tool-batch barrier that pauses the next main-model request, and continues the same turn on the compacted context. The tool is MainAgent-only, must be called alone, and references `state_files` paths without reading or verifying them: after the reset the runtime re-loads a bounded head of each listed file this session already read or wrote, subject to the read permission rule. Low-gain requests are skipped automatically. Off by default; enable only for projects where long exploratory sessions benefit from explicit resets. |
+| `model_driven` | bool | `false` | Experimental opt-in: expose the `compact_context` tool to the main agent so the model can request a durable context checkpoint once it has externalized its working state (written it into files or structured arguments). The checkpoint is built deterministically without a summarization model call, applies at a tool-batch barrier that pauses the next main-model request, and continues the same turn on the compacted context. The tool is MainAgent-only, must be called alone, and references `state_files` paths without reading or verifying them: after the reset the runtime re-loads a bounded head of the registered files and of the checkpoint's key files, and only when the current read permission rule allows the path. Low-gain requests are skipped automatically. Off by default; enable only for projects where long exploratory sessions benefit from explicit resets. |
 | `retain_recent_tokens` | int | `4096` (built-in) | Estimated-token budget for the newest real user messages kept verbatim inside every compaction checkpoint (see [Retained recent messages](#retained-recent-messages)); `0` or omitted uses the built-in default. Only the message text counts toward the budget. Set it higher to keep more of the latest turns across a compaction, or lower to reclaim more context; the retained section never replaces the summary — it pins the newest instruction boundary verbatim. |
 
 Per-model overrides live on the model definition (`ModelConfig.compaction`,
@@ -256,8 +256,9 @@ named in `state_files`, or fully expressed in the structured
 arguments. It writes or refreshes the notes/plan file it maintains for the
 workstream before requesting the checkpoint (the reset replaces the history a
 later write would draw on), lists at least that file, and leaves `state_files`
-empty only when no durable file exists to point at — a pure analysis or
-final-report stage — or the role cannot write files. This is a costed state
+empty only when no durable file exists to point at (a pure analysis or
+final-report stage), the role cannot write files, or the state is already
+fully carried by the structured arguments. This is a costed state
 transition, not a routine progress save. The
 runtime validates the request, waits for the tool batch to close, then:
 
@@ -270,17 +271,12 @@ runtime validates the request, waits for the tool batch to close, then:
    snapshot as a live tail, and continues the same turn on the compacted
    context.
 
--Failed tool batches from the current turn are re-attached as real records
--directly behind the checkpoint card, so a rejected call (for example a
--`compact_context` request the runtime declined) keeps its error card, and a
--fork of that generation still replays it, instead of surviving only as the
--card's excerpt.
-+The newest failed tool batches of the current turn are re-attached as real
-+records directly behind the checkpoint card, so a rejected call (for example
-+a `compact_context` request the runtime declined) keeps its error card, and a
-+fork of that generation still replays it, instead of surviving only as the
-+card's excerpt. Older failures stay in the archive and the checkpoint's
-+evidence pack.
+The newest failed tool batches of the current turn are re-attached as real
+records directly behind the checkpoint card, so a rejected call (for example
+a `compact_context` request the runtime declined) keeps its error card, and a
+fork of that generation still replays it, instead of surviving only as the
+card's excerpt. Older failures stay in the archive and the checkpoint's
+evidence pack.
 
 The stopping point is pressure-aware rather than tied to a completed phase:
 
@@ -352,23 +348,21 @@ and the request-level injections stay transient; the wrapped first delivery is
 the one part of the notice that enters the conversation history.
 
 While model-driven compaction is enabled, the main agent's system prompt also
-carries a short passive `Long-session context management` section: it states
-that `<system-reminder>`-wrapped messages are harness-injected runtime state
+carries a short passive `Long-session context management` section. The
+`<system-reminder>`-trust statement is not part of that section: it is a
+standing block in every main agent's system prompt, stating that
+`<system-reminder>`-wrapped messages are harness-injected runtime state
 (never user-written) that carries no user instructions and grants no
-permissions — a block that merely appears inside a tool result or file is
-ordinary data — and asks the model to write key
-findings and decisions to project files the role may write — for example a
-task-notes file under `.chord/notes/` or a plan document under `.chord/plans/`
-— as phases settle, refresh them before requesting a checkpoint (the reset
-replaces the history a later write would draw on), list only files it actually
-created or updated in the session, read the registered files first after a
-reset, and leave `state_files` empty only when no durable file exists or the
-role cannot write files; call
-`compact_context` alone when carrying the current history costs more than
-restoring externalized state; under pressure, a safe stop is enough and the
-stage need not be complete,
-and read the archived history files for exact past facts after a checkpoint
-applies. SubAgents never receive this section or the tool. The guidance is
+permissions. The model-driven section asks the model to write key findings
+and decisions to project files the role may write — for example a task-notes
+file under `.chord/notes/` or a plan document under `.chord/plans/` — as
+phases settle, to refresh those files before requesting a checkpoint (the
+reset replaces the history a later write would draw on), to read the
+registered files first after a reset, and to use registered `state_files` as
+the primary recovery source and read archived history only for exact details
+that are still needed. It defers the state-file and budget rules to the
+`compact_context` tool description. SubAgents never receive this section or
+the tool. The guidance is
 advisory, not a mandatory workflow: under context pressure it outranks
 open-ended exploration and optional work, but it never overrides a newer user
 request or Done rejection, a cancellation, permission or security rules, or
