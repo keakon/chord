@@ -101,10 +101,12 @@ func (c *TailBuffer) String() string {
 		return string(c.window[c.start:])
 	}
 	var builder strings.Builder
-	// The fixed text plus two decimal counters stays below this reserve for
-	// practical output sizes; reserving it avoids a second growth copy while
-	// still letting the builder handle unusually large counters safely.
-	builder.Grow(len(c.window) - c.start + 64)
+	// The fixed notice plus up to two decimal counters: the "showing the most
+	// recent W of T bytes" text is 58 bytes and each counter reaches 10 bytes
+	// for a 10 GiB window, so the worst case stays below 128. Reserving the
+	// real upper bound avoids a second growth copy that the old +64 could not
+	// cover, while the builder still handles anything larger safely.
+	builder.Grow(len(c.window) - c.start + 128)
 	fmt.Fprintf(&builder, "...(output truncated: showing the most recent %d of %d bytes)\n", len(c.window)-c.start, c.total)
 	builder.Write(c.window[c.start:])
 	return builder.String()

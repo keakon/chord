@@ -97,20 +97,26 @@ func (JobOutputTool) Execute(ctx context.Context, raw json.RawMessage) (string, 
 	// admits the main agent and the caller's owner besides the job's own owner,
 	// and the incremental read consumes what it returns.
 	reader := strings.TrimSpace(AgentIDFromContext(ctx))
+	blocked := false
 	if wait == jobWaitExit {
 		if !j.isFinished() {
+			blocked = true
 			waitForJob(ctx, j, false, nil)
 		}
 	} else if wait == jobWaitOutput && !j.isFinished() {
 		signal, unread := j.outputWaitState(reader)
 		if !unread {
+			blocked = true
 			waitForJob(ctx, j, true, signal)
 		}
 	}
 	chunk, dropped := j.readIncremental(reader)
 	noNewBytes := chunk == "" && dropped == 0
-	if wait != jobWaitNone {
-		// A blocking wait that expired is a renewal, not polling.
+	if blocked {
+		// Only a wait that actually blocked counts as a renewal. A wait:"exit"
+		// on an already-finished job returns immediately and the caller is
+		// still polling: treating it as a renewal disabled the anti-polling
+		// streak for the most common finished-job read.
 		noNewBytes = false
 	}
 	streak := j.noteReadOutcome(reader, noNewBytes)
