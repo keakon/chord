@@ -3444,19 +3444,49 @@ func TestDeleteAlwaysShowsAllPartialResultsAndCannotCollapse(t *testing.T) {
 }
 
 func TestWebFetchHeaderShowsURLAndTimeout(t *testing.T) {
-	block := &Block{
-		ID:                     1,
-		Type:                   BlockToolCall,
-		ToolName:               "web_fetch",
-		Content:                `{"url":"https://iterm2.com/documentation-images.html","timeout":40}`,
-		ResultContent:          "URL: https://iterm2.com/documentation-images.html\nContent-Type: text/html",
-		ResultDone:             true,
-		ToolCallDetailExpanded: false,
+	const url = "https://example.invalid/documentation-images.html"
+	cases := []struct {
+		name     string
+		args     string
+		want     string
+		noOption bool
+	}{
+		{
+			name: "non-default deadline renders as a duration",
+			args: `{"url":"` + url + `","timeout_ms":45000}`,
+			want: "web_fetch " + url + " (timeout=45s)",
+		},
+		{
+			name:     "default deadline stays off the header",
+			args:     `{"url":"` + url + `","timeout_ms":30000}`,
+			want:     "web_fetch " + url,
+			noOption: true,
+		},
+		{
+			name: "over-cap deadline names the effective value",
+			args: `{"url":"` + url + `","timeout_ms":300000}`,
+			want: "web_fetch " + url + " (timeout=5m→2m)",
+		},
 	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			block := &Block{
+				ID:            1,
+				Type:          BlockToolCall,
+				ToolName:      tools.NameWebFetch,
+				Content:       tc.args,
+				ResultContent: "URL: " + url + "\nContent-Type: text/html",
+				ResultDone:    true,
+			}
 
-	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if !strings.Contains(joined, "web_fetch https://iterm2.com/documentation-images.html (timeout=40)") {
-		t.Fatalf("expected web_fetch header to include URL and timeout; got:\n%s", joined)
+			joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+			if !strings.Contains(joined, tc.want) {
+				t.Fatalf("expected web_fetch header to contain %q; got:\n%s", tc.want, joined)
+			}
+			if tc.noOption && strings.Contains(joined, "timeout=") {
+				t.Fatalf("default deadline must not appear on the header; got:\n%s", joined)
+			}
+		})
 	}
 }
 

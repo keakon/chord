@@ -82,14 +82,14 @@ func TestCancelCurrentTurnWithPendingToolsPersistsCancelledToolResult(t *testing
 		ToolCalls: []message.ToolCall{{
 			ID:   "tool-1",
 			Name: "web_fetch",
-			Args: []byte(`{"url":"https://missing.example","timeout":40}`),
+			Args: []byte(`{"url":"https://missing.example","timeout_ms":40000}`),
 		}},
 	}
 	a.ctxMgr.Append(assistant)
 	a.persistAsync("main", assistant)
 	a.flushPersist()
 	a.turn.PendingToolCalls.Store(1)
-	a.turn.recordPendingToolCall(PendingToolCall{CallID: "tool-1", Name: "web_fetch", ArgsJSON: `{"url":"https://missing.example","timeout":40}`})
+	a.turn.recordPendingToolCall(PendingToolCall{CallID: "tool-1", Name: "web_fetch", ArgsJSON: `{"url":"https://missing.example","timeout_ms":40000}`})
 
 	if cancelled := a.CancelCurrentTurn(); !cancelled {
 		t.Fatal("CancelCurrentTurn() = false, want true")
@@ -100,7 +100,7 @@ func TestCancelCurrentTurnWithPendingToolsPersistsCancelledToolResult(t *testing
 		TurnID: turnID,
 		Payload: &TurnCancelledPayload{
 			TurnID: turnID,
-			Calls:  []PendingToolCall{{CallID: "tool-1", Name: "web_fetch", ArgsJSON: `{"url":"https://missing.example","timeout":40}`}},
+			Calls:  []PendingToolCall{{CallID: "tool-1", Name: "web_fetch", ArgsJSON: `{"url":"https://missing.example","timeout_ms":40000}`}},
 		},
 	})
 	a.flushPersist()

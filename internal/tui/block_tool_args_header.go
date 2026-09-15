@@ -78,11 +78,11 @@ func bashHeaderGrayPart(vals map[string]string) string {
 			case ms > maxMs:
 				// The runtime caps the deadline, so the header must not claim
 				// the requested value as the effective one.
-				opts = append(opts, "timeout="+formatShellMs(ms)+"→"+formatShellMs(maxMs))
+				opts = append(opts, "timeout="+formatToolMs(ms)+"→"+formatToolMs(maxMs))
 			case background || ms != tools.ShellDefaultTimeoutMs:
 				// A detached job has no default deadline, so an explicit value
 				// — even the foreground default — is a deliberate deadline.
-				opts = append(opts, "timeout="+formatShellMs(ms))
+				opts = append(opts, "timeout="+formatToolMs(ms))
 			}
 		}
 	}
@@ -92,7 +92,7 @@ func bashHeaderGrayPart(vals map[string]string) string {
 			case ms <= 0:
 				opts = append(opts, "no promotion")
 			case ms != tools.ShellDefaultYieldMs:
-				opts = append(opts, "yield="+formatShellMs(ms))
+				opts = append(opts, "yield="+formatToolMs(ms))
 			}
 		}
 	}
@@ -102,7 +102,10 @@ func bashHeaderGrayPart(vals map[string]string) string {
 	return "(" + strings.Join(opts, ", ") + ")"
 }
 
-func formatShellMs(ms int) string {
+// formatToolMs renders a millisecond argument value the way tool headers show
+// deadlines: the largest exact unit ("2m", "45s"), never the zero-padded clock
+// form FormatElapsed uses for a measured elapsed time.
+func formatToolMs(ms int) string {
 	if ms%3600000 == 0 {
 		return fmt.Sprintf("%dh", ms/3600000)
 	}

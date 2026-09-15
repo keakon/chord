@@ -6,6 +6,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -450,8 +451,16 @@ func formatToolHeaderPartsWithParsed(toolName string, keys []string, vals map[st
 		if vals["raw"] == "true" {
 			opts = append(opts, "raw")
 		}
-		if v := vals["timeout"]; v != "" && v != "0" && v != "30" {
-			opts = append(opts, "timeout="+v)
+		if raw := strings.TrimSpace(vals["timeout_ms"]); raw != "" {
+			if ms, err := strconv.Atoi(raw); err == nil && ms > 0 && ms != tools.WebFetchDefaultTimeoutMs {
+				// web_fetch clamps an over-cap deadline instead of rejecting it,
+				// so the header must not claim the requested value as effective.
+				if ms > tools.WebFetchMaxTimeoutMs {
+					opts = append(opts, "timeout="+formatToolMs(ms)+"→"+formatToolMs(tools.WebFetchMaxTimeoutMs))
+				} else {
+					opts = append(opts, "timeout="+formatToolMs(ms))
+				}
+			}
 		}
 		if len(opts) == 0 {
 			return url, ""

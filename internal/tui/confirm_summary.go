@@ -241,22 +241,22 @@ func buildBashConfirmSummary(summary *confirmSummary, parsed map[string]any) {
 	handled["timeout_ms"] = true
 	if timeoutMs, ok := confirmInt(parsed, "timeout_ms"); ok && timeoutMs > 0 {
 		effectiveMs := min(timeoutMs, capMs)
-		appendConfirmField(&summary.Fields, newConfirmField("Timeout", formatShellMs(effectiveMs), true))
+		appendConfirmField(&summary.Fields, newConfirmField("Timeout", formatToolMs(effectiveMs), true))
 		if timeoutMs > capMs {
-			summary.Warnings = append(summary.Warnings, fmt.Sprintf("Requested timeout %s capped to %s", formatShellMs(timeoutMs), formatShellMs(capMs)))
+			summary.Warnings = append(summary.Warnings, fmt.Sprintf("Requested timeout %s capped to %s", formatToolMs(timeoutMs), formatToolMs(capMs)))
 		} else if timeoutMs > 60_000 {
-			summary.Warnings = append(summary.Warnings, fmt.Sprintf("Long timeout configured (%s)", formatShellMs(timeoutMs)))
+			summary.Warnings = append(summary.Warnings, fmt.Sprintf("Long timeout configured (%s)", formatToolMs(timeoutMs)))
 		}
 	} else if ok {
 		appendConfirmField(&summary.Fields, newConfirmField("Timeout", "no deadline", true))
 	} else {
-		appendConfirmField(&summary.Fields, newConfirmField("Timeout", formatShellMs(tools.ShellDefaultTimeoutMs), true))
+		appendConfirmField(&summary.Fields, newConfirmField("Timeout", formatToolMs(tools.ShellDefaultTimeoutMs), true))
 	}
 
 	handled["yield_time_ms"] = true
 	if yieldMs, ok := confirmInt(parsed, "yield_time_ms"); ok {
 		if yieldMs > 0 {
-			appendConfirmField(&summary.Fields, newConfirmField("Foreground yield", formatShellMs(yieldMs), true))
+			appendConfirmField(&summary.Fields, newConfirmField("Foreground yield", formatToolMs(yieldMs), true))
 		} else {
 			appendConfirmField(&summary.Fields, newConfirmField("Foreground yield", "none (no promotion)", true))
 		}
@@ -387,12 +387,12 @@ func buildWebFetchConfirmSummary(summary *confirmSummary, parsed map[string]any)
 	}
 	appendConfirmField(&summary.Fields, newConfirmField("URL", url, true))
 
-	timeout, ok := confirmInt(parsed, "timeout")
-	handled["timeout"] = true
-	if !ok || timeout <= 0 {
-		timeout = 30
+	handled["timeout_ms"] = true
+	timeoutMs, _ := confirmInt(parsed, "timeout_ms")
+	appendConfirmField(&summary.Fields, newConfirmField("Timeout", formatToolMs(tools.WebFetchEffectiveTimeoutMs(timeoutMs)), true))
+	if timeoutMs > tools.WebFetchMaxTimeoutMs {
+		summary.Warnings = append(summary.Warnings, fmt.Sprintf("Requested timeout %s capped to %s", formatToolMs(timeoutMs), formatToolMs(tools.WebFetchMaxTimeoutMs)))
 	}
-	appendConfirmField(&summary.Fields, newConfirmField("Timeout", fmt.Sprintf("%ds", timeout), true))
 
 	if raw, ok := confirmBool(parsed, "raw"); ok {
 		handled["raw"] = true

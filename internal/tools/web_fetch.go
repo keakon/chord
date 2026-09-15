@@ -63,22 +63,31 @@ type webFetchArgs struct {
 	TimeoutMs int    `json:"timeout_ms,omitempty"` // request deadline in milliseconds (default 30000, capped at 120000)
 }
 
-// webFetchDefaultTimeoutMs is the request deadline applied when timeout_ms is
-// omitted; webFetchMaxTimeoutMs caps it so a value off by an order of magnitude
-// cannot hold the turn open for minutes.
+// WebFetchDefaultTimeoutMs is the request deadline applied when timeout_ms is
+// omitted; WebFetchMaxTimeoutMs caps it so a value off by an order of magnitude
+// cannot hold the turn open for minutes. Both are exported because the TUI
+// mirrors them when it shows the effective deadline on a card or confirmation.
 const (
-	webFetchDefaultTimeoutMs = 30_000
-	webFetchMaxTimeoutMs     = 120_000
+	WebFetchDefaultTimeoutMs = 30_000
+	WebFetchMaxTimeoutMs     = 120_000
 )
 
-// webFetchTimeout resolves the millisecond timeout_ms argument: an omitted or
-// non-positive value keeps the default, and anything above the cap is clamped
-// instead of rejected.
-func webFetchTimeout(timeoutMs int) time.Duration {
+// WebFetchEffectiveTimeoutMs resolves a timeout_ms argument the way the tool
+// does: an omitted or non-positive value keeps the default, and anything above
+// the cap is clamped instead of rejected. It is the one place that rule lives,
+// so the confirmation dialog and the tool card cannot show a deadline the
+// request will not use.
+func WebFetchEffectiveTimeoutMs(timeoutMs int) int {
 	if timeoutMs <= 0 {
-		timeoutMs = webFetchDefaultTimeoutMs
+		return WebFetchDefaultTimeoutMs
 	}
-	return time.Duration(min(timeoutMs, webFetchMaxTimeoutMs)) * time.Millisecond
+	return min(timeoutMs, WebFetchMaxTimeoutMs)
+}
+
+// webFetchTimeout turns the resolved timeout_ms argument into the request
+// deadline.
+func webFetchTimeout(timeoutMs int) time.Duration {
+	return time.Duration(WebFetchEffectiveTimeoutMs(timeoutMs)) * time.Millisecond
 }
 
 type webFetchResult struct {
@@ -220,7 +229,7 @@ func (WebFetchTool) Parameters() map[string]any {
 			},
 			"timeout_ms": map[string]any{
 				"type":        "integer",
-				"description": fmt.Sprintf("Optional request timeout in milliseconds (default %d, capped at %d).", webFetchDefaultTimeoutMs, webFetchMaxTimeoutMs),
+				"description": fmt.Sprintf("Optional request timeout in milliseconds (default %d, capped at %d).", WebFetchDefaultTimeoutMs, WebFetchMaxTimeoutMs),
 			},
 		},
 		"required":             []string{"url"},

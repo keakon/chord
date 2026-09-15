@@ -8547,7 +8547,7 @@ func TestToolErrorCardDisplaysAndCopiesErrorResult(t *testing.T) {
 		ID:            1,
 		Type:          BlockToolCall,
 		ToolName:      "web_fetch",
-		Content:       `{"raw":false,"timeout":60,"url":"https://raw.githubusercontent.com/datacurve-ai/pier/main/docs/agents.md"}`,
+		Content:       `{"raw":false,"timeout_ms":60000,"url":"https://raw.githubusercontent.com/datacurve-ai/pier/main/docs/agents.md"}`,
 		ResultContent: "Error: HTTP 404: 404 Not Found",
 		ResultStatus:  agent.ToolResultStatusError,
 		ResultDone:    true,

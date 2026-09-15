@@ -1361,7 +1361,7 @@ func persistInterruptedMainSession(t *testing.T, sessionDir string) {
 		ToolCalls: []message.ToolCall{{
 			ID:   "tool-main-1",
 			Name: "web_fetch",
-			Args: []byte(`{"url":"https://slow.example","timeout":40}`),
+			Args: []byte(`{"url":"https://slow.example","timeout_ms":40000}`),
 		}},
 	}
 	if err := rm.PersistMessage("main", assistant); err != nil {

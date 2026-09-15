@@ -4079,9 +4079,9 @@ func TestRebuildViewportFromMessagesMarksRestoredToolErrorsAndCancellationsDone(
 		{
 			Role: "assistant",
 			ToolCalls: []message.ToolCall{
-				{ID: "tool-error", Name: "web_fetch", Args: []byte(`{"url":"https://missing.example","timeout":40}`)},
+				{ID: "tool-error", Name: "web_fetch", Args: []byte(`{"url":"https://missing.example","timeout_ms":40000}`)},
 				{ID: "tool-cancel", Name: "web_fetch", Args: []byte(`{"url":"https://slow.example"}`)},
-				{ID: "tool-pending", Name: "web_fetch", Args: []byte(`{"timeout":40}`)},
+				{ID: "tool-pending", Name: "web_fetch", Args: []byte(`{"timeout_ms":40000}`)},
 			},
 		},
 		{Role: "tool", ToolCallID: "tool-error", Content: "Model stopped before completing this tool call: context canceled"},

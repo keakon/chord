@@ -99,6 +99,44 @@ func TestRenderConfirmSummaryShowsEffectiveForegroundTimeoutWhenCapped(t *testin
 	}
 }
 
+func TestRenderConfirmSummaryShowsWebFetchTimeout(t *testing.T) {
+	cases := []struct {
+		name string
+		args string
+		want []string
+	}{
+		{
+			name: "default deadline",
+			args: `{"url":"https://example.invalid/article"}`,
+			want: []string{"Timeout: 30s"},
+		},
+		{
+			name: "explicit deadline",
+			args: `{"url":"https://example.invalid/article","timeout_ms":60000}`,
+			want: []string{"Timeout: 1m"},
+		},
+		{
+			name: "over-cap deadline reports the effective value",
+			args: `{"url":"https://example.invalid/article","timeout_ms":240000}`,
+			want: []string{"Timeout: 2m", "Requested timeout 4m capped to 2m"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewModel(nil)
+			m.width = 100
+			m.confirm.request = &ConfirmRequest{ToolName: "web_fetch", ArgsJSON: tc.args}
+
+			plain := stripANSI(m.renderConfirmDialog())
+			for _, want := range tc.want {
+				if !strings.Contains(plain, want) {
+					t.Fatalf("expected confirm summary to contain %q, got:\n%s", want, plain)
+				}
+			}
+		})
+	}
+}
+
 func TestRenderConfirmSummaryDoesNotTreatShellAsBackground(t *testing.T) {
 	m := NewModel(nil)
 	m.width = 100
@@ -201,6 +239,55 @@ func confirmSummaryHasField(summary confirmSummary, label string) bool {
 		}
 	}
 	return false
+}
+
+func confirmSummaryFieldValue(summary confirmSummary, label string) (string, bool) {
+	for _, field := range summary.Fields {
+		if field.Label == label {
+			return field.SummaryValue, true
+		}
+	}
+	return "", false
+}
+
+func TestWebFetchConfirmTimeoutMatchesResolvedDeadline(t *testing.T) {
+	// The dialog and the tool resolve timeout_ms through the same helper, so the
+	// deadline shown is the one the request will actually use: the default when
+	// the argument is absent or non-positive, and the cap when it asks for more.
+	cases := []struct {
+		name        string
+		argsJSON    string
+		wantTimeout string
+		wantCapped  bool
+	}{
+		{"omitted keeps the default", `{"url":"https://example.invalid"}`, formatToolMs(tools.WebFetchDefaultTimeoutMs), false},
+		{"explicit value passes through", `{"url":"https://example.invalid","timeout_ms":45000}`, formatToolMs(45000), false},
+		{"zero keeps the default", `{"url":"https://example.invalid","timeout_ms":0}`, formatToolMs(tools.WebFetchDefaultTimeoutMs), false},
+		{"negative keeps the default", `{"url":"https://example.invalid","timeout_ms":-1}`, formatToolMs(tools.WebFetchDefaultTimeoutMs), false},
+		{"exactly the cap is not clamped", `{"url":"https://example.invalid","timeout_ms":120000}`, formatToolMs(tools.WebFetchMaxTimeoutMs), false},
+		{"over the cap is clamped and reported", `{"url":"https://example.invalid","timeout_ms":600000}`, formatToolMs(tools.WebFetchMaxTimeoutMs), true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			summary := buildConfirmSummary(tools.NameWebFetch, tc.argsJSON, nil, nil)
+			got, ok := confirmSummaryFieldValue(summary, "Timeout")
+			if !ok {
+				t.Fatalf("summary has no Timeout field, fields = %+v", summary.Fields)
+			}
+			if got != tc.wantTimeout {
+				t.Fatalf("Timeout = %q, want %q", got, tc.wantTimeout)
+			}
+			capped := false
+			for _, warning := range summary.Warnings {
+				if strings.Contains(warning, "capped to") {
+					capped = true
+				}
+			}
+			if capped != tc.wantCapped {
+				t.Fatalf("capped warning = %v, want %v (warnings = %v)", capped, tc.wantCapped, summary.Warnings)
+			}
+		})
+	}
 }
 
 func TestBuildConfirmSummaryReadHidesDefaultOffset(t *testing.T) {
