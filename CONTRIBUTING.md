@@ -122,7 +122,7 @@ For a broader but bounded comparison, start with:
 CHORD_BENCH_FULL=1 CHORD_BENCH_TIME=100ms ./scripts/bench_tui_regression.sh
 ```
 
-Raise `CHORD_BENCH_TIME` to `1s` or more only for release checks, benchstat-quality comparisons, or when the shorter run is too noisy. Keep benchmarks with real sleeps, I/O, large fixture construction, or expensive setup outside the default stable micro-benchmark set; the default smoke path should remain comfortably below one minute.
+Raise `CHORD_BENCH_TIME` to `1s` or more only for release checks, benchstat-quality comparisons, or when the shorter run is too noisy. Keep benchmarks with real sleeps, I/O, large fixture construction, or expensive setup outside the default stable micro-benchmark set; the default smoke path should remain comfortably below one minute. The regression script keeps benchmarks whose per-round setup runs with the timer stopped in a separate paced group that always uses a fixed iteration count, so raising `CHORD_BENCH_TIME` never inflates their wall-clock cost; add new benchmarks of that shape to `PACED_BENCH_PATTERN` in the script rather than to the stable sets.
 
 When benchmark results do not explain real CPU usage, collect a profile during the problematic interaction:
 

@@ -469,24 +469,6 @@ func BenchmarkStreamTextDeltaBurstCadenceFlush(b *testing.B) {
 	}
 }
 
-func BenchmarkStreamTextDeltaSteadyStateCadenceFlush(b *testing.B) {
-	deltas := repeatedStreamDeltas(128, "alpha beta gamma ")
-	b.ResetTimer()
-	b.ReportAllocs()
-	for b.Loop() {
-		b.StopTimer()
-		m := newStreamTextRenderedModel(b, "seed")
-		b.StartTimer()
-		for i, delta := range deltas {
-			_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: delta}})
-			if (i+1)%32 == 0 {
-				m.handleStreamFlushTick(streamFlushTickMsg{generation: m.streamFlushGeneration})
-			}
-			_ = m.View()
-		}
-	}
-}
-
 func BenchmarkStreamThinkingDeltaBurstDeferredView(b *testing.B) {
 	deltas := repeatedStreamDeltas(128, "analysis detail ")
 	b.ReportAllocs()
