@@ -1,5 +1,7 @@
 # Usage
 
+<!-- description: Everyday usage: input modes, key bindings, sessions, slash commands, worktrees, images, and headless mode. -->
+
 Keep daily TUI work moving: send messages, read tool cards, recover sessions, and steer long tasks. Chord runs either as the local TUI or as the `chord headless` control plane; most of this page is about the TUI.
 
 ## How to use this page
@@ -23,13 +25,9 @@ Most personal development workflows should start with the local TUI.
 
 After startup, the input box is focused by default. Type a message and press `Enter` to send.
 
-Tool cards show terminal-safe previews. File paths inside the session working directory are displayed as relative paths; external paths remain absolute. Tool path arguments accept `~/...` prefixes, which expand against the home directory. Cards that fold start compact, keeping only key facts such as ranges, counts, command intent, and terminal status; full output, diagnostics, truncation details, and artifact references appear when expanded. A `▸` / `▾` beside the terminal-state marker indicates that the card can be expanded or collapsed: focus it and press `Space`, `Enter`, or `o`.
+Tool cards show terminal-safe previews. File paths inside the session working directory are displayed as relative paths; external paths remain absolute. Tool path arguments accept `~/...` prefixes, which expand against the home directory. Collapsible cards start compact, keeping only key facts such as ranges, counts, command intent, and terminal status; full output, diagnostics, truncation details, and artifact references appear when expanded. A `▸` / `▾` beside the terminal-state marker means the card folds: focus it and press `Space`, `Enter`, or `o`.
 
-`write`, `edit`, `apply_patch`, `todo_write`, `delete` and `handoff` cards are always expanded, so they show their full body (file content, diff, todo list, error detail or plan path) and carry no disclosure marker. `read`, `grep`, `glob`, successful `shell` output and generic tool calls start collapsed and keep the fold toggle. A card with nothing more to reveal when expanded (the collapsed row already carries the whole outcome) carries no marker either and does not toggle. The collapsed background `shell` card names its job id on the header line (`shell … · job-8`), and a collapsed `job_list` shows how many jobs exist (`job_list · 3 jobs`), so neither needs expanding just to identify the target. An `apply_patch` card shows the growing patch text with `+`/`-`/`@@` highlighting while its arguments are still streaming; each `@@` hunk is marked with an inline separator without changing line-by-line code highlighting. If the patch fails without an applied diff, the card keeps this requested-patch preview and labels it separately from the error; it switches to the final diff once execution completes successfully. `yy` copies the complete underlying card content regardless of its visible state.
-
-MCP tool calls show a compact summary of the model-generated arguments in their card header, with JSON values summarized as `{N fields}` / `[N items]` and long values truncated. MCP server startup arguments and environment variables remain separate from tool-call arguments and are not added to the card. Completed tool cards append the call's wall-clock duration to the header in whole seconds; durations under one second are hidden. `question` cards never show a duration (its clock measures the user's reply time, not the agent's work), and thinking and assistant message cards do not show per-card durations. Finished background `shell` work renders as a dedicated `JOB RESULT` card: it starts collapsed to each job's headline, adding a second line only when the status carries something the headline glyph does not (a failure, a cancellation, or the elapsed time), and expands to the full command, status, and output.
-
-The right info panel's `TIME` section breaks down the focused agent's elapsed wall-clock time into `Model`, `Tools`, `Cooldown`, and `User wait` buckets with percentage shares. Buckets under one second are hidden (a sub-second bucket would read as `0s (1%)`), so the section appears once any bucket reaches one second. Compaction time is included directly in the `Model` bucket and is not shown separately.
+`write`, `edit`, `apply_patch`, `todo_write`, `delete` and `handoff` cards are always expanded, so their body (file content, diff, todo list, error detail or plan path) is what you see, and they carry no disclosure marker. `read`, `grep`, `glob`, successful `shell` output and generic tool calls fold. `yy` copies the complete card content either way.
 
 When Chord is running in the background, the terminal title shows a one-shot `✅` completion marker when the focused agent transitions from busy to idle. Focusing the terminal clears the marker; ordinary tab/window focus changes do not re-add it unless new background work later completes.
 
@@ -79,6 +77,26 @@ Navigation:
 - `Esc`: close the panel
 
 The error panel keeps the most recent 80 errors in a ring buffer (newest first). Use it to diagnose why a model fallback occurred or which keys are hitting rate limits.
+
+## Info panel
+
+### `USAGE` block
+
+- `Context` shows the actual input-side token burden reported for the most recent model request.
+- `Bytes` and `Messages` describe the conversation context that will be sent to the model. After request-level context reduction runs, `Bytes` shows the current request's post-reduction context byte count followed by `↓` and the percentage saved relative to that request's unreduced context: `(bytes before reduction - bytes after reduction) / bytes before reduction`. This is not a cumulative value across requests; savings from frozen reduced summaries still count whenever those summaries are used in the current request. When a session is restored, Chord precomputes the same reduction for display, so `Bytes` starts at the post-reduction estimate instead of dropping after the next request; before any request surface can be prepared, it falls back to the current durable context estimate.
+- `Bytes` counts the installed system prompt, message content, image payloads, and tool names/descriptions. It excludes JSON escaping overhead, tool-call argument JSON, thinking metadata, and request parameters such as stream settings or thinking budgets.
+- These reductions are not persistent compaction: older tool results are usually replaced with shorter placeholder summaries for the request, while durable session history remains intact. `/compact`, automatic compaction, tool-output growth, and system prompt or tool-definition changes update the fallback durable estimate; new request preparation refreshes the actual sent request size, including while loop mode is active.
+- When `Cache R` shows a percentage, it is cache-read tokens divided by input-side prompt tokens plus separately reported cache-write tokens. Output tokens are excluded because prompt caching applies only to the input side.
+- `Think` appears only when the provider reports reasoning/thinking tokens. These tokens are already included in output-token billing; the line is a visibility breakdown, not an additional token bucket.
+- `Calls` counts the real LLM requests issued by the focused agent (main agent, running SubAgent, or parked task). It comes from the persisted usage ledger, so it survives session restore and is not reset by context compaction.
+
+### `TIME` block
+
+`TIME` reports cumulative wall-clock durations for the focused agent: `Model` (LLM streaming), `Tools` (tool execution), `Cooldown` (key/model cooldown waits), and `User wait` (waits for your confirmations or answers). These are sums of operation intervals, not exclusive slices of elapsed session time; parallel operations can therefore contribute to more than one bucket at once. Each bucket's percentage uses the sum of the displayed buckets as its denominator.
+
+- Buckets under one second are hidden, including from the percentage split; if every bucket is sub-second the whole section is hidden.
+- `Model` includes time spent streaming compaction drafts. When a confirmation dialog, Question prompt, or Handoff selector is pending, tool cards show execution time only: confirmation, answer, and handoff-decision waits are recorded under `User wait`, never under `Tools`.
+- The section follows the focused agent (main agent, running SubAgent, or parked task) and is rebuilt from the session's usage ledger after restore or resume.
 
 ## File mentions (`@path`)
 
@@ -243,24 +261,6 @@ Export the current session as Markdown (default) or JSON.
 ```
 
 The export includes every conversation message plus the current session usage statistics. On success, the TUI displays the saved path.
-
-### Reading the info panel `USAGE` block
-
-- `Context` shows the actual input-side token burden reported for the most recent model request.
-- `Bytes` and `Messages` describe the conversation context that will be sent to the model. After request-level context reduction runs, `Bytes` shows the current request's post-reduction context byte count followed by `↓` and the percentage saved relative to that request's unreduced context: `(bytes before reduction - bytes after reduction) / bytes before reduction`. This is not a cumulative value across requests; savings from frozen reduced summaries still count whenever those summaries are used in the current request. When a session is restored, Chord precomputes the same reduction for display, so `Bytes` starts at the post-reduction estimate instead of dropping after the next request; before any request surface can be prepared, it falls back to the current durable context estimate.
-- `Bytes` counts the installed system prompt, message content, image payloads, and tool names/descriptions. It excludes JSON escaping overhead, tool-call argument JSON, thinking metadata, and request parameters such as stream settings or thinking budgets.
-- These reductions are not persistent compaction: older tool results are usually replaced with shorter placeholder summaries for the request, while durable session history remains intact. `/compact`, automatic compaction, tool-output growth, and system prompt or tool-definition changes update the fallback durable estimate; new request preparation refreshes the actual sent request size, including while loop mode is active.
-- When `Cache R` shows a percentage, it is cache-read tokens divided by input-side prompt tokens plus separately reported cache-write tokens. Output tokens are excluded because prompt caching applies only to the input side.
-- `Think` appears only when the provider reports reasoning/thinking tokens. These tokens are already included in output-token billing; the line is a visibility breakdown, not an additional token bucket.
-- `Calls` counts the real LLM requests issued by the focused agent (main agent, running SubAgent, or parked task). It comes from the persisted usage ledger, so it survives session restore and is not reset by context compaction.
-
-### Reading the info panel `TIME` block
-
-`TIME` reports cumulative wall-clock durations for the focused agent: `Model` (LLM streaming), `Tools` (tool execution), `Cooldown` (key/model cooldown waits), and `User wait` (waits for your confirmations or answers). These are sums of operation intervals, not exclusive slices of elapsed session time; parallel operations can therefore contribute to more than one bucket at once. Each bucket's percentage uses the sum of the displayed buckets as its denominator.
-
-- Buckets under one second are hidden, including from the percentage split; if every bucket is sub-second the whole section is hidden.
-- `Model` includes time spent streaming compaction drafts. When a confirmation dialog, Question prompt, or Handoff selector is pending, tool cards show execution time only: confirmation, answer, and handoff-decision waits are recorded under `User wait`, never under `Tools`.
-- The section follows the focused agent (main agent, running SubAgent, or parked task) and is rebuilt from the session's usage ledger after restore or resume.
 
 ### `/stats`: usage statistics overlay
 

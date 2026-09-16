@@ -1,5 +1,7 @@
 # Context Management
 
+<!-- description: How Chord keeps long sessions inside the model's context window: request trimming, durable compaction, and the optional model-driven checkpoint. -->
+
 Chord provides two complementary context management layers:
 **context compaction** rewrites the session history with an LLM-generated
 summary, while **context reduction** trims stale tool output from each
@@ -229,6 +231,8 @@ merely shares the batch is replaced by a `[result elided by checkpoint: N
 bytes]` marker, and its attachments are not carried back into the new context —
 its full output is in the archive.
 
+#### When to request a checkpoint
+
 The stopping point is pressure-aware rather than tied to a completed phase:
 
 - With comfortable context, request a checkpoint only when the expected
@@ -244,6 +248,8 @@ The stopping point is pressure-aware rather than tied to a completed phase:
   Never interrupt an in-flight tool, file write, sibling task, or other
   operation.
 
+#### Interaction with automatic compaction
+
 An automatic compaction never locks the model out of its checkpoint. When a
 usage-driven compaction is already running (a threshold crossing started its
 background worker, or its draft is ready and waiting at the continuation
@@ -256,6 +262,8 @@ externalization warning does not mention this override (the model does not
 need to know an automatic compaction is running, only that the current context
 is ending soon); a voluntary checkpoint made earlier on its own initiative
 keeps working exactly as before.
+
+#### Skips and context reminders
 
 A skip is a normal policy result: retrying the same request immediately is
 cooled down briefly and does not change the outcome. The model should wait or
@@ -296,6 +304,8 @@ notices, because they describe the previous model's lines. The repeat pointers
 and the request-level injections stay transient; the wrapped first delivery is
 the one part of the notice that enters the conversation history.
 
+#### System prompt guidance
+
 While model-driven compaction is enabled, the main agent's system prompt also
 carries a short passive `Long-session context management` section. The
 `<system-reminder>`-trust statement is not part of that section: it is a
@@ -314,6 +324,8 @@ advisory, not a mandatory workflow: under context pressure it outranks
 open-ended exploration and optional work, but it never overrides a newer user
 request or Done rejection, a cancellation, permission or security rules, or
 tool dependency ordering.
+
+#### What carries across checkpoints
 
 Compaction is recursive: the next automatic summary is written over a history
 that already begins with a checkpoint. The session anchors (original request,
@@ -334,6 +346,8 @@ disclosed and stays recoverable in the archived history files. The previous
 natural-language body is not re-appended, and each round re-states the
 objective, progress and claims it considers current.
 
+#### Checkpoint arguments and evidence
+
 Only `active_objective` and `next_step` are required. Submit new completed work and changed decisions rather than copying the previous checkpoint. Chord carries bounded completed work, decisions, open issues and claims across checkpoints; omission does not delete an entry. To resolve an issue or supersede a conclusion, include its exact checkpoint text in `retired_items` and put any replacement in the normal fields. Retirement affects model-authored memory only, never user instructions or runtime state. Older entries beyond the bounds remain in the archive; keep extensive recovery details in a state file when needed. Evidence references remain bounded provenance after retirement; they do not reactivate retired claims or prove completion.
 
 `evidence_refs` may reference stable IDs from the checkpoint evidence pack; Chord validates those IDs before the barrier. `claim_kinds` classifies each claim as observed, derived, assumed, or proposed. Claim keys are natural-language assertions: usually a condensed restatement of a conclusion from `completed`/`decisions`, where rewording is fine, verbatim matching is never required, and fully standalone claims are allowed. When merging with a prior checkpoint's claims, keys set identity: an earlier claim is superseded only when the fresh submission restates the same key; a reworded key leaves the old claim in place alongside the new one. Observed claims must have `claim_evidence`; Chord automatically includes these IDs in `evidence_refs`, so they do not need to be supplied twice. IDs must still resolve to valid classified evidence. A reference proves provenance, not that the model's conclusion is correct. `state_files` are references to current external state; `planned_state_files`
@@ -352,7 +366,9 @@ model-driven `[Context Summary]` checkpoint confirms the reset applied. If the
 request is skipped or fails, the session continues on the old context and the
 usage-driven automatic-compaction safety net stays armed.
 
-Observability: the TUI status bar labels a model-requested checkpoint
+#### Observability
+
+The TUI status bar labels a model-requested checkpoint
 distinctly from a usage-driven compaction ("model checkpoint") and briefly
 shows the skip/failure reason, and `/stats` includes a "Context Compaction"
 section that counts lifecycle events per stage and trigger (for example
