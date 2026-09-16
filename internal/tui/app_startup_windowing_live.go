@@ -321,12 +321,17 @@ func (m *Model) syncStartupDeferredTranscriptBlock(block *Block) {
 		// once through markBlockSettled); the second pass usually changes
 		// only SettledAt, which the meta never reads. Skip the Summary and
 		// searchable-text rebuild unless the content signature moved.
+		meta := &state.blockMeta[metaIdx]
+		// The meta must follow the object the archive now holds: leaving it on
+		// the replaced clone would pin that block's render caches for as long
+		// as the deferred transcript lives.
+		meta.block = clone
 		sig := startupDeferredMetaSig(clone)
 		if state.metaSigs == nil {
 			state.metaSigs = make(map[int]uint64)
 		}
 		if state.metaSigs[block.ID] != sig {
-			state.blockMeta[metaIdx] = startupDeferredMetaForBlock(clone, m.startupDeferredMetaWidth())
+			meta.LineCounts = startupDeferredMetaForBlock(clone, m.startupDeferredMetaWidth()).LineCounts
 			state.metaSigs[block.ID] = sig
 		}
 	}

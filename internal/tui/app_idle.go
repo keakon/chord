@@ -146,7 +146,8 @@ func (m *Model) performIdleSweep() {
 	if m.viewport == nil {
 		return
 	}
-	// Drop render caches for off-screen blocks.
+	// Drop render caches for off-screen blocks, including the derived Markdown
+	// and highlighter state that only a foreground sweep keeps.
 	m.viewport.DropOffScreenCaches()
 
 	// Shrink hot budget for aggressive spill.

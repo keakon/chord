@@ -38,6 +38,21 @@ func (m *Model) restartStartupDeferredTranscriptPreheat(delay time.Duration) tea
 	return startupDeferredPreheatTick(m.startupDeferredPreheatGeneration, delay)
 }
 
+// restartDeferredTranscriptPreheatAfterResize re-arms the halo preheat when a
+// terminal resize changed the viewport width while a deferred transcript is
+// active. Halo line counts are recorded per width and the preheat tick stops
+// re-arming itself once the halo is covered, so a width change has to restart
+// it explicitly.
+func (m *Model) restartDeferredTranscriptPreheatAfterResize(previousViewportWidth int) tea.Cmd {
+	if m == nil || m.viewport == nil || m.startupDeferredTranscript == nil {
+		return nil
+	}
+	if m.viewport.width == previousViewportWidth {
+		return nil
+	}
+	return m.restartStartupDeferredTranscriptPreheat(startupDeferredTranscriptPreheatDelay)
+}
+
 func (m *Model) handleStartupDeferredTranscriptPreheat(msg startupDeferredPreheatTickMsg) tea.Cmd {
 	if msg.generation != m.startupDeferredPreheatGeneration {
 		return nil
@@ -60,6 +75,13 @@ func (m *Model) handleStartupDeferredTranscriptPreheat(msg startupDeferredPrehea
 		m.viewport.enforceHotBudgetCachedOnly()
 	}
 	if m.startupDeferredTranscript == nil {
+		return nil
+	}
+	if !preheated {
+		// Every halo block already carries a line count for the current width,
+		// so re-arming the timer would only re-scan the same neighbors and
+		// re-run the budget enforcement every tick. A window switch or a width
+		// change restarts the preheat when the halo needs measuring again.
 		return nil
 	}
 	return m.scheduleStartupDeferredTranscriptPreheat(startupDeferredTranscriptPreheatDelay)
@@ -91,6 +113,11 @@ func (m *Model) preheatStartupDeferredTranscriptNeighbors(state *startupDeferred
 	return preheated
 }
 
+// preheatStartupDeferredBlock measures one halo block at the viewport width and
+// records its line count in the archive metadata. It reports whether the block
+// needed a render: a block that already carries a count for this width is left
+// warm but is not new work, which is what lets the preheat timer stop once the
+// halo is covered.
 func preheatStartupDeferredBlock(state *startupDeferredTranscriptState, index, width int) bool {
 	if state == nil || index < 0 || index >= len(state.allBlocks) || index >= len(state.blockMeta) {
 		return false
@@ -100,8 +127,9 @@ func preheatStartupDeferredBlock(state *startupDeferredTranscriptState, index, w
 		return false
 	}
 	meta := &state.blockMeta[index]
+	warm := block.lineCountCache > 0 && block.lineCacheWidth == width
 	lineCount := 0
-	if block.lineCountCache > 0 && block.lineCacheWidth == width {
+	if warm {
 		lineCount = block.lineCountCache
 	} else {
 		lineCount = block.LineCount(width)
@@ -112,5 +140,5 @@ func preheatStartupDeferredBlock(state *startupDeferredTranscriptState, index, w
 		}
 		meta.LineCounts[width] = lineCount
 	}
-	return lineCount > 0
+	return !warm && lineCount > 0
 }

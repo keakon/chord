@@ -26,16 +26,17 @@ func (v *Viewport) cachedLineCount(block *Block, width int) (int, bool) {
 	return 0, false
 }
 
-// DropOffScreenCaches clears render caches for blocks that are not currently
-// visible in the viewport window. It preserves:
+// DropOffScreenCaches reclaims the render caches of blocks that are not
+// currently visible in the viewport window. It preserves:
 //   - The currently visible window and its immediate neighbors
 //   - Blocks that are still streaming or pending
 //   - The focused block
 //
 // This is a lightweight operation: it only clears cache references, it does
-// not re-render anything or perform spill-store I/O. Blocks without cached line
-// counts stop the sweep conservatively so later block positions are not computed
-// from stale line offsets.
+// not re-render anything or perform spill-store I/O. It is called from the
+// background idle sweep, so it also drops the derived caches (rendered
+// Markdown, highlighters) that a sweep on the visible foreground path would
+// keep for instant scroll-back.
 func (v *Viewport) DropOffScreenCaches() {
 	if v == nil {
 		return
@@ -47,8 +48,8 @@ func (v *Viewport) DropOffScreenCaches() {
 
 	currentLine := 0
 	blocks := v.visibleBlocks()
-	for _, block := range blocks {
-		blockLines, ok := v.cachedLineCount(block, v.width)
+	for i, block := range blocks {
+		blockLines, ok := v.offscreenSweepSpan(blocks, i, block)
 		if !ok {
 			return
 		}
@@ -57,12 +58,28 @@ func (v *Viewport) DropOffScreenCaches() {
 
 		if blockEnd < visibleStart || blockStart > visibleEnd {
 			if v.canDropBlockCache(block) {
-				block.InvalidateCache()
+				block.ReleaseDerivedRenderCaches()
 			}
 		}
 
 		currentLine = blockEnd
 	}
+}
+
+// offscreenSweepSpan returns the line span the viewport currently assigns to a
+// block. The viewport's own position cache is authoritative while it is valid,
+// so a block whose per-block line cache was already released no longer stops
+// the sweep and leaves every later off-screen block uncleared. Without a valid
+// position cache it falls back to the per-block cache; a block with neither
+// still stops the sweep conservatively, so later offsets are never computed
+// from stale line counts.
+func (v *Viewport) offscreenSweepSpan(blocks []*Block, index int, block *Block) (int, bool) {
+	if v.blockPositionCacheValid(blocks) && index < len(v.blockSpansCache) {
+		if span := v.blockSpansCache[index]; span > 0 {
+			return span, true
+		}
+	}
+	return v.cachedLineCount(block, v.width)
 }
 
 // canDropBlockCache returns true if it's safe to drop a block's render cache.

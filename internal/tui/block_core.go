@@ -44,6 +44,7 @@ func cloneBlockForDeferredSource(src *Block) *Block {
 	clone.mdCacheThemeVersion = src.mdCacheThemeVersion
 	clone.mdCacheSyntheticPrefixWidths = nil
 	clone.mdCacheSoftWrapContinuations = nil
+	clone.streamSettledPrefixedLines = nil
 	// The deferred clone is the archive source of record, not a render
 	// source: hydrated blocks rebuild their render caches on first paint, so
 	// deep-copying the streaming/render line caches here would multiply the
@@ -395,9 +396,10 @@ func (b *Block) ToggleAtWidth(width int) bool {
 }
 
 // InvalidateCache clears render caches that must be recomputed after content
-// changes. It intentionally preserves streamSettled* and thinkingStreamSettled
-// so append-only streaming updates can reuse already-rendered stable prefixes
-// across deltas.
+// changes. A streaming block preserves the streamSettled* and
+// thinkingStreamSettled caches so append-only updates can reuse already-rendered
+// stable prefixes across deltas; a block that stopped streaming can no longer
+// extend them, so they are reclaimed along with the rest.
 func (b *Block) InvalidateCache() {
 	b.lineCache = nil
 	b.lineCacheWidth = 0
@@ -424,6 +426,35 @@ func (b *Block) InvalidateCache() {
 	b.searchMatchOffset = 0
 	b.searchMatchFound = false
 	b.searchMatchReady = false
+	if !b.Streaming {
+		b.InvalidateStreamingSettledCache()
+		b.InvalidateThinkingStreamingSettledCache()
+	}
+}
+
+// ReleaseDerivedRenderCaches drops everything a card can rebuild from its own
+// content — the rendered Markdown body, the syntax highlighters and the
+// search-match caches — for memory reclaim rather than content invalidation.
+// Content, thinking parts, image parts and the line-count metadata all stay, so
+// a released card renders again after one re-render pass and the transcript's
+// cached block offsets remain valid. Streaming blocks are skipped: their settled
+// prefixes are still being extended by the next delta.
+func (b *Block) ReleaseDerivedRenderCaches() {
+	if b == nil || b.Streaming {
+		return
+	}
+	b.InvalidateCache()
+	b.mdCache = nil
+	b.mdCacheWidth = 0
+	b.mdCacheContent = ""
+	b.mdCacheThemeVersion = 0
+	b.mdCacheSyntheticPrefixWidths = nil
+	b.mdCacheSoftWrapContinuations = nil
+	b.codeHL = nil
+	b.previewHL = nil
+	b.richMarkdownHL = nil
+	b.compactionSectionHL = nil
+	b.hotBytesMemoValid = false
 }
 
 // InvalidateStreamingSettledCache clears the cached rendered markdown for the
@@ -435,6 +466,7 @@ func (b *Block) InvalidateStreamingSettledCache() {
 	b.streamSettledFrontier = 0
 	b.streamSettledWidth = 0
 	b.streamSettledLines = nil
+	b.streamSettledPrefixedLines = nil
 	b.streamSettledSyntheticPrefixWidths = nil
 	b.streamSettledSoftWrapContinuations = nil
 	b.streamTailRaw = ""
@@ -449,6 +481,8 @@ func (b *Block) InvalidateStreamingSettledCache() {
 	b.streamTableCheckedLen = 0
 	b.streamTableFound = false
 	b.streamFrontierScanner = nil
+	b.streamContentBuilder = nil
+	b.hotBytesMemoValid = false
 }
 
 // InvalidateThinkingStreamingSettledCache clears cached rendered markdown for
@@ -459,6 +493,7 @@ func (b *Block) InvalidateThinkingStreamingSettledCache() {
 	b.streamCardHeadLines = nil
 	b.streamCardHeadBody = nil
 	b.streamCardHeadKey = streamCardHeadKey{}
+	b.hotBytesMemoValid = false
 }
 
 // GetViewportCache returns the styled and truncated lines cached for Viewport.Render,

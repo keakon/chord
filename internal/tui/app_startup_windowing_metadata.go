@@ -5,8 +5,7 @@ import (
 	"strings"
 )
 
-func startupDeferredMetaSearchInnerOffset(meta startupDeferredBlockMeta, query string, width int) int {
-	searchable := meta.searchableText()
+func startupDeferredMetaSearchInnerOffset(searchable, query string, width int) int {
 	if query == "" || strings.TrimSpace(searchable) == "" {
 		return 0
 	}
@@ -41,12 +40,27 @@ func (meta startupDeferredBlockMeta) summary() string {
 	return meta.block.Summary()
 }
 
-// searchableText resolves the block's cached lowercase search text.
+// searchableText resolves the block's cached lowercase search text. A block
+// that has since been spilled no longer carries its content, so the text comes
+// from a temporary copy loaded out of the spill store — the same fallback the
+// non-deferred search path uses. The copy is dropped as soon as the text is
+// built, so a search never keeps spilled cards materialized.
 func (meta startupDeferredBlockMeta) searchableText() string {
 	if meta.block == nil {
 		return ""
 	}
-	return meta.block.searchableTextLower()
+	if !meta.block.spillCold {
+		return meta.block.searchableTextLower()
+	}
+	inspect, temporary := meta.block.inspectionBlock()
+	if inspect == nil {
+		return ""
+	}
+	text := inspect.searchableTextLower()
+	if temporary {
+		inspect.InvalidateCache()
+	}
+	return text
 }
 
 func cloneLineCounts(src map[int]int) map[int]int {
@@ -109,8 +123,7 @@ func startupDeferredBlockLineCount(meta startupDeferredBlockMeta, width int) int
 	return 1
 }
 
-func startupDeferredMetaSearchVisible(meta startupDeferredBlockMeta) bool {
-	searchable := meta.searchableText()
+func startupDeferredMetaSearchVisible(meta startupDeferredBlockMeta, searchable string) bool {
 	if strings.TrimSpace(searchable) == "" {
 		return false
 	}
@@ -134,16 +147,20 @@ func findMatchesInStartupDeferredBlockMeta(meta []startupDeferredBlockMeta, quer
 	matches := make([]MatchPosition, 0)
 	lineOffset := 0
 	for i, blockMeta := range meta {
-		candidate := strings.Contains(blockMeta.searchableText(), lowerQuery)
+		// Resolve the searchable text once per block: a spilled archive block
+		// reads it back from the spill store, so the candidate and visibility
+		// checks must share a single load.
+		searchable := blockMeta.searchableText()
+		candidate := strings.Contains(searchable, lowerQuery)
 		if !candidate && blockMeta.Type == BlockAssistant {
-			candidate = assistantMarkdownMayContainQuery(blockMeta.searchableText(), lowerQuery)
+			candidate = assistantMarkdownMayContainQuery(searchable, lowerQuery)
 		}
-		if candidate && startupDeferredMetaSearchVisible(blockMeta) {
+		if candidate && startupDeferredMetaSearchVisible(blockMeta, searchable) {
 			matches = append(matches, MatchPosition{
 				BlockIndex:  i,
 				BlockID:     blockMeta.BlockID,
 				LineOffset:  lineOffset,
-				InnerOffset: startupDeferredMetaSearchInnerOffset(blockMeta, query, width),
+				InnerOffset: startupDeferredMetaSearchInnerOffset(searchable, query, width),
 				Query:       query,
 			})
 		}

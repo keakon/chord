@@ -3719,6 +3719,126 @@ func TestDeferredStartupTranscriptMetadataSupportsSearchAndDirectoryAfterSpill(t
 	}
 }
 
+func TestDeferredStartupTranscriptMetadataReferencesArchiveClones(t *testing.T) {
+	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
+	for i := range startupTranscriptWindowMinBlocks + 200 {
+		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d %s", i, strings.Repeat("payload ", 32))})
+	}
+	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
+	m := NewModelWithSize(backend, 120, 24)
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.SessionRestoredEvent{}})
+	applyTestCmd(t, &m, cmd)
+	state := m.startupDeferredTranscript
+	if state == nil {
+		t.Fatal("startup transcript should remain deferred for metadata ownership test")
+	}
+	if len(state.blockMeta) != len(state.allBlocks) {
+		t.Fatalf("len(blockMeta) = %d, want %d", len(state.blockMeta), len(state.allBlocks))
+	}
+	for i, block := range state.allBlocks {
+		if block == nil {
+			continue
+		}
+		if state.blockMeta[i].block != block {
+			t.Fatalf("blockMeta[%d].block = %p, want archive clone %p", i, state.blockMeta[i].block, block)
+		}
+	}
+}
+
+func TestDeferredStartupTranscriptSyncRebindsMetadataToReplacedClone(t *testing.T) {
+	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
+	for i := range startupTranscriptWindowMinBlocks + 200 {
+		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d %s", i, strings.Repeat("payload ", 32))})
+	}
+	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
+	m := NewModelWithSize(backend, 120, 24)
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.SessionRestoredEvent{}})
+	applyTestCmd(t, &m, cmd)
+	state := m.startupDeferredTranscript
+	if state == nil {
+		t.Fatal("startup transcript should remain deferred for sync rebind test")
+	}
+	idx := state.windowStart
+	if idx < 0 || idx >= len(state.allBlocks) || len(m.viewport.blocks) == 0 {
+		t.Fatalf("deferred window start %d is out of range for %d archive blocks", idx, len(state.allBlocks))
+	}
+	live := m.viewport.blocks[0]
+	if state.allBlocks[idx] != live {
+		t.Fatalf("archive[%d] = %p, want the viewport block %p", idx, state.allBlocks[idx], live)
+	}
+
+	previous := state.allBlocks[idx]
+	m.syncStartupDeferredTranscriptBlock(live)
+	if state.allBlocks[idx] == previous {
+		t.Fatal("sync should replace the archive block object")
+	}
+	if got := state.blockMeta[idx].block; got != state.allBlocks[idx] {
+		t.Fatalf("blockMeta[%d].block = %p, want replaced archive clone %p", idx, got, state.allBlocks[idx])
+	}
+}
+
+func TestStartupDeferredTranscriptPreheatStopsWhenHaloIsWarm(t *testing.T) {
+	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
+	for i := range startupTranscriptWindowMinBlocks + 200 {
+		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d %s", i, strings.Repeat("payload ", 32))})
+	}
+	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
+	m := NewModelWithSize(backend, 120, 24)
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.SessionRestoredEvent{}})
+	applyTestCmd(t, &m, cmd)
+	state := m.startupDeferredTranscript
+	if state == nil {
+		t.Fatal("startup transcript should remain deferred for preheat stop test")
+	}
+	if state.windowStart <= 0 {
+		t.Fatalf("windowStart = %d, want a left halo to preheat", state.windowStart)
+	}
+
+	cold := m.handleStartupDeferredTranscriptPreheat(startupDeferredPreheatTickMsg{generation: m.startupDeferredPreheatGeneration})
+	if cold == nil {
+		t.Fatal("a cold halo should keep the preheat timer armed")
+	}
+	warm := m.handleStartupDeferredTranscriptPreheat(startupDeferredPreheatTickMsg{generation: m.startupDeferredPreheatGeneration})
+	if warm != nil {
+		t.Fatal("a warm halo must not re-arm the preheat timer")
+	}
+}
+
+func TestDeferredTranscriptPreheatRestartsOnViewportWidthChange(t *testing.T) {
+	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
+	for i := range startupTranscriptWindowMinBlocks + 200 {
+		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d %s", i, strings.Repeat("payload ", 32))})
+	}
+	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages}
+	m := NewModelWithSize(backend, 120, 24)
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.SessionRestoredEvent{}})
+	applyTestCmd(t, &m, cmd)
+	if m.startupDeferredTranscript == nil {
+		t.Fatal("startup transcript should remain deferred for resize preheat test")
+	}
+	previous := m.viewport.width
+	if cmd := m.restartDeferredTranscriptPreheatAfterResize(previous); cmd != nil {
+		t.Fatal("an unchanged viewport width must not restart the preheat")
+	}
+
+	generation := m.startupDeferredPreheatGeneration
+	m.viewport.SetSize(previous+20, m.viewport.height)
+	preheatCmd := m.restartDeferredTranscriptPreheatAfterResize(previous)
+	if preheatCmd == nil {
+		t.Fatal("a viewport width change should restart the preheat")
+	}
+	if m.startupDeferredPreheatGeneration == generation {
+		t.Fatalf("preheat generation = %d, want it advanced past %d", m.startupDeferredPreheatGeneration, generation)
+	}
+	if _, ok := preheatCmd().(startupDeferredPreheatTickMsg); !ok {
+		t.Fatal("restarted preheat should schedule a preheat tick")
+	}
+}
+
 func TestDeferredStartupTranscriptSearchesVisibleAssistantMarkdown(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	block := &Block{ID: 1, Type: BlockAssistant, Content: "visible **needle** phrase"}

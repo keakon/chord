@@ -214,11 +214,17 @@ func (m *Model) maybeWindowStartupTranscript(reason string, blocks []*Block) []*
 	if anchor != nil {
 		anchorID = anchor.ID
 	}
+	// The archive clones are the deferred transcript's only block objects: the
+	// metadata, the ID index and the signature table all read from them, so the
+	// blocks handed in here stay reachable only through the viewport window.
+	// Keeping the meta pointed at the originals would retain one extra Block
+	// (and whatever render caches it had accumulated) per hidden card.
+	archived := cloneBlocksForDeferredSource(blocks)
 	state := &startupDeferredTranscriptState{
-		allBlocks:              cloneBlocksForDeferredSource(blocks),
-		blockMeta:              buildStartupDeferredBlockMeta(blocks, m.viewport.width),
-		indexByID:              buildDeferredBlockIndex(blocks),
-		metaSigs:               buildDeferredMetaSigs(blocks),
+		allBlocks:              archived,
+		blockMeta:              buildStartupDeferredBlockMeta(archived, m.viewport.width),
+		indexByID:              buildDeferredBlockIndex(archived),
+		metaSigs:               buildDeferredMetaSigs(archived),
 		hiddenBlocks:           hiddenCount,
 		anchorBlockID:          anchorID,
 		windowStart:            hiddenCount,
