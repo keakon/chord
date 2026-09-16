@@ -102,9 +102,9 @@ stdout 不是合法 JSON 时记录为解析失败；非零退出码记录为执�
 }
 ```
 
-- `continue`（stdout 为空时的默认）— 让动作继续。
-- `block` — 终止动作；`message` 显示给用户。
-- `modify` — 用 `data` 替换下游的载荷。`data` 的形状须匹配该触发点的原始载荷（如 `on_tool_call` 时 `data` 应是改过的 tool args）。
+- `continue`（stdout 为空时的默认）：让动作继续。
+- `block`：终止动作；`message` 显示给用户。
+- `modify`：用 `data` 替换下游的载荷。`data` 的形状须匹配该触发点的原始载荷（如 `on_tool_call` 时 `data` 应是改过的 tool args）。
 
 ### Automation hook（`on_tool_batch_complete`）
 

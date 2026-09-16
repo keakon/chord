@@ -21,7 +21,7 @@ chord headless
 go run ./cmd/chord/ headless
 ```
 
-CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree`。详见 [CLI — `chord headless`](./cli_CN.md#chord-headless)。
+CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree`。详见 [CLI：`chord headless`](./cli_CN.md#chord-headless)。
 
 ## 协议格式
 
@@ -194,7 +194,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 
 `action` 可用 `accept` / `allow`（或空 action）表示批准，`deny` / `reject` 表示带原因拒绝；`cancel` 关闭待决 handoff，不执行 plan，也不追加拒绝消息。`agent` 默认使用请求里的默认 agent；可选的 `pool` 会在执行前切换该 agent 的模型池。
 
-待决 handoff 依附于发起它的回合与会话。只要 Chord 在没有 client 决策的情况下丢弃它——会话切换、更新的回合开始，或 `send` 新消息时自动关闭（见 [`send`](#send)）——都会向订阅了 `handoff_cancelled` 的客户端推送该事件；随后 `status_response.pending_handoff` 为 `null`，集成方据此停止等待，而不是继续展示一个 agent 早已放弃的审批提示。
+待决 handoff 依附于发起它的回合与会话。只要 Chord 在没有 client 决策的情况下丢弃它，即会话切换、更新的回合开始，或 `send` 新消息时自动关闭（见 [`send`](#send)），都会向订阅了 `handoff_cancelled` 的客户端推送该事件；随后 `status_response.pending_handoff` 为 `null`，集成方据此停止等待，而不是继续展示一个 agent 早已放弃的审批提示。
 
 ### `local_shell`
 
@@ -340,6 +340,6 @@ send({"type": "send", "content": "Summarize the project structure."})
 ## 相关
 
 - [使用指南](./usage_CN.md)
-- [CLI — chord headless](./cli_CN.md#chord-headless)
+- [CLI：chord headless](./cli_CN.md#chord-headless)
 - [权限与安全](./permissions-and-safety_CN.md)
 - [常见问题排查](./troubleshooting_CN.md)

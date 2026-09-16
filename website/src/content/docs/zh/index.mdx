@@ -1,12 +1,12 @@
 ---
 title: Chord
-description: 花更少的 token，干更难的活。一个轻量的终端 Coding Agent：告别上下文腐烂，模型不可用时自动切换。
+description: 一个终端 Coding Agent：任务跑得更快、花费更低、内存占用保持很小。
 template: splash
 head:
   - tag: title
-    content: Chord — 花更少的 token，干更难的活
+    content: "Chord：更快、更省、更轻的终端 Coding Agent"
 hero:
-  tagline: 花更少的 token，干更难的活：告别上下文腐烂，模型不可用时自动切换。
+  tagline: 一个终端 Coding Agent：任务跑得更快、花费更低、内存占用保持很小。
   actions:
     - text: 快速开始
       link: /chord/zh/quickstart/
@@ -20,6 +20,22 @@ hero:
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
 import screenshot from '../../../../../docs/assets/screenshot.png';
+
+## 实测数据
+
+<CardGrid>
+  <Card title="6m37s" icon="rocket">
+    同一个 DeepSWE 任务里六款 agent harness 中最快，比第二名快 33%（第二名 9m50s）。
+  </Card>
+  <Card title="￥0.348" icon="approve-check-circle">
+    六次运行里成本最低，比第二名便宜 34%（第二名 ￥0.527）。
+  </Card>
+  <Card title="39MB" icon="database">
+    加载 200 条消息后的内存，空会话时为 30MB。Claude Code 达到 216MB。
+  </Card>
+</CardGrid>
+
+以上数据来自一次任务实测和一次内存场景，不代表普遍结果。完整数据表、测量方法和实现说明见[性能](/chord/zh/performance/#实测数据)。
 
 <figure class="chord-screenshot">
   <img src={screenshot.src} alt="Chord 终端界面截图" />
@@ -57,28 +73,18 @@ import screenshot from '../../../../../docs/assets/screenshot.png';
   </Card>
 </CardGrid>
 
-## 为什么选 Chord
+## 其他能力
 
-<CardGrid>
-  <Card title="长会话更省 token" icon="database" />
-  <Card title="启动快、内存占用低" icon="approve-check-circle" />
-  <Card title="尽可能展示所有细节" icon="analytics" />
-  <Card title="键盘优先、Vim 风格" icon="vim" />
-  <Card title="需要你处理时才通知" icon="email" />
-  <Card title="模型池热切换" icon="random" />
-  <Card title="支持导入 Claude Code、Codex、OpenCode 的会话" icon="cloud-download" />
-  <Card title="LSP 集成" icon="magnifier" />
-  <Card title="支持预览图片" icon="document" />
-  <Card title="显示 Codex 订阅额度与重置时间" icon="clock" />
-  <Card title="健壮且可自定义的 Agent 团队" icon="puzzle" />
-  <Card title="基于 git worktree 的并行任务" icon="code-branch" />
-</CardGrid>
-
-## 性能实测
-
-在六款 agent harness 跑同一个 [DeepSWE v1.1 任务](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration)（给 `httpx` 加流式 JSON 迭代接口）的对比里，Chord v0.8.1 既最快也最省：**6m37s**、**￥0.348**，比第二名**快 33%、便宜 34%**。应用本身空会话内存 **30MB**，加载 200 条消息后 **39MB**。
-
-这些是特定场景下的依据，不是对所有任务的通用承诺。完整数据表、测量方法和适用范围见[性能 — 实测数据](/chord/zh/performance/#实测数据)。
+- 键盘优先，Vim 风格
+- 需要你处理时才通知
+- 模型池热切换，无需重启
+- 通过 `chord headless` 远程操控
+- 导入 Claude Code、Codex、OpenCode 的会话
+- LSP 集成
+- 终端内预览图片
+- 显示 Codex 订阅额度与重置时间
+- 可自定义的 Agent 团队
+- 基于 git worktree 的并行任务
 
 ## 按任务找文档
 
@@ -92,7 +98,7 @@ import screenshot from '../../../../../docs/assets/screenshot.png';
     [配置 →](/chord/zh/configuration/) · [示例 →](/chord/zh/examples/)
   </Card>
   <Card title="CLI 参考" icon="laptop">
-    所有命令、子命令、flag——包括 `chord cleanup`、worktree、headless。
+    所有命令、子命令和 flag，包括 `chord cleanup`、worktree、headless。
     [前往 →](/chord/zh/cli/)
   </Card>
   <Card title="权限与安全" icon="padlock">
@@ -101,7 +107,7 @@ import screenshot from '../../../../../docs/assets/screenshot.png';
   </Card>
   <Card title="长任务" icon="list-format">
     用 `/loop` 和 `Done` 承接多步骤实现、验证和修复。
-    [前往 →](/chord/zh/usage/#loop--持续执行模式)
+    [前往 →](/chord/zh/usage/#loop持续执行模式)
   </Card>
   <Card title="扩展定制" icon="puzzle">
     Agents、skills、MCP、hooks、自定义 slash 命令。

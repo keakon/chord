@@ -40,10 +40,10 @@ If you prefer to write YAML manually instead of using the wizard, see [Configura
 
 For API-key setup, the wizard provides one API-key provider path. It asks for an API URL whose path ends in one of these suffixes, with examples in the prompt:
 
-- `/responses` — OpenAI Responses API / compatible gateways
-- `/messages` — Anthropic Messages API / compatible gateways
-- `/chat/completions` — OpenAI Chat Completions compatible gateways
-- `/models` — Gemini Generate Content base path
+- `/responses`: OpenAI Responses API / compatible gateways
+- `/messages`: Anthropic Messages API / compatible gateways
+- `/chat/completions`: OpenAI Chat Completions compatible gateways
+- `/models`: Gemini Generate Content base path
 
 Based on that endpoint, Chord recommends a starter provider name and model such as `openai` / `gpt-6-astra`, `anthropic` / `claude-opus-4.8`, or `gemini` / `gemini-3.8-flash`.
 

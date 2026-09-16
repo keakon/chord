@@ -124,16 +124,16 @@ When no Python interpreter is configured for Pyright, Chord searches upward from
 
 WSL auto-discovery intentionally **does not** pick up Windows venvs under `Scripts\python.exe`. If you work inside WSL, create a Linux venv inside WSL, or set `python.pythonPath` explicitly under `lsp.pyright.options`.
 
-For more, see [Customization — LSP](./customization.md#lsp).
+For more, see [Customization: LSP](./customization.md#lsp).
 
 ## Terminal compatibility
 
 Most "this works on macOS but not on my Linux box" reports really come down to the terminal emulator, not the OS. Recommended terminals where Chord behaves best:
 
-- **iTerm2** (macOS) — image preview, terminal notifications, clipboard image paste
-- **Ghostty** (cross-platform) — image preview, terminal notifications (tries OSC 777)
-- **WezTerm** (cross-platform) — image preview, terminal notifications (tries OSC 777), clipboard image paste
-- **kitty** (Linux/macOS) — image preview, terminal notifications
+- **iTerm2** (macOS): image preview, terminal notifications, clipboard image paste
+- **Ghostty** (cross-platform): image preview, terminal notifications (tries OSC 777)
+- **WezTerm** (cross-platform): image preview, terminal notifications (tries OSC 777), clipboard image paste
+- **kitty** (Linux/macOS): image preview, terminal notifications
 - **macOS Terminal.app** works for basic TUI use, but it does **not** reliably deliver modified `Enter` keys (for example `Shift+Enter`). Use `Ctrl+J` for newline in the composer, or switch to iTerm2 / Ghostty / WezTerm for full key behavior.
 
 Key disambiguation note: in terminal multiplexers like `tmux` / `zellij`, modified keys such as `Shift+Enter` can be lost or rewritten unless the host chain is configured for extended keys. When in doubt, use `Ctrl+J` for newline (it works everywhere).
@@ -145,7 +145,7 @@ Key disambiguation note: in terminal multiplexers like `tmux` / `zellij`, modifi
 Chord runs on Windows but is not the primary platform. Concretely:
 
 - TUI works in modern terminals (Windows Terminal, WezTerm).
-- `prevent_sleep` is a no-op — use Windows power settings.
+- `prevent_sleep` is a no-op: use Windows power settings.
 - `ime_switch_target` works with `im-select.exe`.
 - File paths in tool calls follow Windows conventions; backslashes are preserved verbatim.
 - `shell` (foreground commands and background jobs) remains non-interactive on Windows too, but timeout/cancellation cleanup uses direct process termination instead of Unix-style session/process-group control; descendant process cleanup may therefore be less complete than on Unix.
@@ -170,7 +170,7 @@ When reporting a bug that you suspect is platform-related, include:
 - Whether you are inside `tmux` / `screen` / WSL
 - A diagnostics bundle (`Ctrl+G`)
 
-See [Troubleshooting — When to check logs](./troubleshooting.md#when-to-check-logs) for log location and bundle layout.
+See [Troubleshooting: When to check logs](./troubleshooting.md#when-to-check-logs) for log location and bundle layout.
 
 ## Related
 

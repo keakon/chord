@@ -6,27 +6,24 @@
 
 🌐 [中文介绍](./README_CN.md)
 
-**Spend fewer tokens, take on harder work.** A lightweight terminal coding agent — no context rot, automatic model switching.
+**Finish coding tasks faster, spend less on each one, and keep memory small.** A lightweight terminal coding agent for long sessions: it keeps context clean and switches models automatically when one is unavailable.
 
 <p align="center">
   <img src="./docs/assets/screenshot.png" alt="Chord terminal UI screenshot" width="900">
 </p>
 
-## Why Chord
+## What else Chord does
 
-- **Long sessions use less context**
-- **Fast startup and low memory usage**
-- **Shows as much detail as possible**
-- **Keyboard-first, Vim-style**
-- **Notifies you only when you're needed**
-- **Hot-swap model setups**
-- **Drive it remotely**
-- **Import sessions from Claude Code, Codex, and OpenCode**
-- **LSP integration**
-- **Preview images in the terminal**
-- **Codex subscription quota and reset time**
-- **Robust and customizable agent teams**
-- **Parallel work via git worktrees**
+- Keyboard-first, Vim-style keybindings
+- Notifies you only when you're needed
+- Hot-swap model pools without restarting
+- Drive it remotely through `chord headless`
+- Import sessions from Claude Code, Codex, and OpenCode
+- LSP integration
+- Preview images in the terminal
+- Codex subscription quota and reset time
+- Customizable agent teams
+- Parallel work via git worktrees
 
 ## Three-step setup
 
@@ -78,11 +75,11 @@ For manual provider/model setup and the `limit` fields, see [Quickstart](./docs/
 - Safety: [Permissions & Safety](./docs/permissions-and-safety.md)
 - Troubleshooting: [Troubleshooting](./docs/troubleshooting.md)
 
-## Performance snapshot
+## Measured results
 
-On a [DeepSWE v1.1 task](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration) — adding streaming JSON iteration to `httpx` — Chord v0.8.1 finished in 6m37s, using 54.5K input tokens, 2.96M cache-read tokens, and 58.6K output tokens, at an estimated $0.052. Among six agent harnesses run on the same task with deepseek-v4.1-flash, Chord finished first and cost the least: 33% faster and 34% cheaper than the next-best run.
+On a [DeepSWE v1.1 task](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration) that adds streaming JSON iteration to `httpx`, Chord v0.8.1 finished in 6m37s, using 54.5K input tokens, 2.96M cache-read tokens, and 58.6K output tokens, at an estimated $0.052. Among six agent harnesses run on the same task with deepseek-v4.1-flash, Chord finished first and cost the least: 33% faster and 34% cheaper than the next-best run. Memory stays small too: 30MB with an empty session and 39MB after 200 messages.
 
-This is a single measured scenario, not a general guarantee. See [Performance — Measured results](./docs/performance.md#measured-results) for the full tables (including app memory) and methodology.
+These measurements come from one task and one memory scenario; your numbers will differ. Full tables (including app memory) and methodology: [Performance](./docs/performance.md).
 
 ## Project links
 

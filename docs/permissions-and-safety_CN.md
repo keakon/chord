@@ -51,7 +51,7 @@ permission:
     "git tag *": ask
 ```
 
-这套配置的含义：默认允许大多数工具；禁用 `handoff` 与 `delegate`；删除文件、选定的 WebFetch URL pattern、以及常见高风险 shell/git 命令需要确认。权限规则按「最后匹配优先」生效，因此 `web_fetch` 和 `shell` 下更具体的规则会覆盖顶层 `"*": allow`。适合单人、可信工作区；共享仓库、团队服务或自动化 headless 部署应进一步收紧。本页以 `"*": allow` 作为可信工作区基线；若想改用最小授权基线，[配置 — Agent 配置](./configuration_CN.md#agent-配置)中的 `builder` agent 从 `"*": deny` 起步，只对角色确需的工具逐项放开。
+这套配置的含义：默认允许大多数工具；禁用 `handoff` 与 `delegate`；删除文件、选定的 WebFetch URL pattern、以及常见高风险 shell/git 命令需要确认。权限规则按「最后匹配优先」生效，因此 `web_fetch` 和 `shell` 下更具体的规则会覆盖顶层 `"*": allow`。适合单人、可信工作区；共享仓库、团队服务或自动化 headless 部署应进一步收紧。本页以 `"*": allow` 作为可信工作区基线；若想改用最小授权基线，[配置：Agent 配置](./configuration_CN.md#agent-配置)中的 `builder` agent 从 `"*": deny` 起步，只对角色确需的工具逐项放开。
 
 权限匹配会看工具调用和会话工作目录（工具实际执行的目录）。`shell` 只匹配命令字符串，`workdir` 参数不参与。文件类工具（`read`、`write`、`edit`、`apply_patch`、`delete`、`view_image`）的目标路径会先按工作目录归一化，再与规则匹配：工作目录内的路径按相对形式匹配（`foo.go`、`./foo.go` 以及同一文件的绝对拼写都会命中同一条规则），工作目录外的路径保持绝对形式。
 
@@ -107,11 +107,11 @@ web_fetch:
 - `delegate` 也控制一组委派工作流。如果有效的通配 `deny` 将它整体禁用，Chord 还会禁用通过 `cancel` 取消 SubAgent、从 SubAgent 中隐藏嵌套的 `delegate` / `cancel`，并把 SubAgent 的 `notify` 限制为只通知自己的 owner，而不是任意指定目标。原因是取消或定向通知其他委派任务本身属于管理 delegated workstreams；如果禁用委派却允许这些片段，会形成一个不完整但仍可干扰委派工作的控制面。
 - 因此 `cancel` 依赖 `delegate`：即使配置了 `cancel: allow`，只要 `delegate` 被禁用，`cancel` 仍会被拒绝。若希望某个角色能取消委派工作，需要同时启用 `delegate` 和 `cancel`。
 - `question: ask` 会被归一化为 `allow`。`question` 工具本身就是向用户提出结构化问题并等待回答；如果在提问前再加一次权限确认，只会产生重复弹窗，并不能降低最终决策风险。
-- 有两个控制工具不受纯通配规则约束，因为让它们变得可用的那个开关本身就是授权：`compact_context`（仅在启用 `context.compaction.model_driven` 时注册）和 `done`（仅在 loop 运行期间挂载）。allowlist 角色的 `"*": deny` 既不会隐藏它们，也不会拦截其调用——否则用户启用了模型驱动压缩或开启了 loop，却发现毫无反应，除非他还知道要额外放行一个内部工具名。只有**指名**该工具的规则才能覆盖这个默认：`deny` 移除工具，`ask` 保留工具但每次调用需确认，`allow` 与默认一致。像 `compact_*` 这样的窄匹配算指名，写成带参数形式的规则也算——这两个工具都不接受用于权限匹配的参数。它们也都没有对外副作用：一个收缩上下文，一个结束 loop，通配规则在这里没有可保护的能力。
-- YOLO 消除的是日常工作中高频确认带来的摩擦——文件编辑和 shell 命令。开启期间，主 agent 的普通工具会完全跳过权限检查：`ask` 不再弹确认，`deny` 也不会拦截。这个放宽是单向的，只放宽不收紧——关闭 YOLO 时可用的工具，开启期间不会变得不可用——关掉 YOLO 即完全恢复原权限。YOLO **不是**对角色边界的重新定义。控制工具改变的是 agent 拓扑和会话生命周期，而不是单次操作的风险面；它们调用频率很低，确认它们本来就不是 YOLO 想消除的那种摩擦，因此 YOLO 下它们仍按配置的规则执行：`handoff`、`delegate`、`cancel`、`done`、`compact_context`。它们分为两类：
-  - `handoff`、`delegate`、`cancel` 会给角色带来它原本没有的能力——把会话交给另一个角色、派发子 agent 工作、取消不属于自己的任务。YOLO 下它们仍按配置的规则判定，只放宽一处：`ask` 不再弹共享确认框、直接放行。`allow` 照常放行，`deny` 照常拒绝；通配默认也和关闭时一致——宽泛的 `"*": allow` 会让它们保持可用，allowlist 的 `"*": deny` 让它们保持拒绝，规则没提到它们（或根本没配规则）时行为也与关闭时相同。所以 YOLO 不会授予规则之外的新编排能力：`builder` 这类单 agent 角色在 YOLO 开启时仍然是单 agent，是因为它自己的规则 deny 了 `handoff` 和 `delegate`，这条 deny 在 YOLO 下照常生效。为了跳过编辑确认而打开 YOLO，并不等于声明这个角色现在应该去编排 SubAgent。
+- 有两个控制工具不受纯通配规则约束，因为让它们变得可用的那个开关本身就是授权：`compact_context`（仅在启用 `context.compaction.model_driven` 时注册）和 `done`（仅在 loop 运行期间挂载）。allowlist 角色的 `"*": deny` 既不会隐藏它们，也不会拦截其调用，否则用户启用了模型驱动压缩或开启了 loop，却发现毫无反应，除非他还知道要额外放行一个内部工具名。只有**指名**该工具的规则才能覆盖这个默认：`deny` 移除工具，`ask` 保留工具但每次调用需确认，`allow` 与默认一致。像 `compact_*` 这样的窄匹配算指名，写成带参数形式的规则也算：这两个工具都不接受用于权限匹配的参数。它们也都没有对外副作用：一个收缩上下文，一个结束 loop，通配规则在这里没有可保护的能力。
+- YOLO 消除的是日常工作中高频确认带来的摩擦：文件编辑和 shell 命令。开启期间，主 agent 的普通工具会完全跳过权限检查：`ask` 不再弹确认，`deny` 也不会拦截。这个放宽是单向的，只放宽不收紧（关闭 YOLO 时可用的工具，开启期间不会变得不可用），关掉 YOLO 即完全恢复原权限。YOLO **不是**对角色边界的重新定义。控制工具改变的是 agent 拓扑和会话生命周期，而不是单次操作的风险面；它们调用频率很低，确认它们本来就不是 YOLO 想消除的那种摩擦，因此 YOLO 下它们仍按配置的规则执行：`handoff`、`delegate`、`cancel`、`done`、`compact_context`。它们分为两类：
+  - `handoff`、`delegate`、`cancel` 会给角色带来它原本没有的能力：把会话交给另一个角色、派发子 agent 工作、取消不属于自己的任务。YOLO 下它们仍按配置的规则判定，只放宽一处：`ask` 不再弹共享确认框、直接放行。`allow` 照常放行，`deny` 照常拒绝；通配默认也和关闭时一致：宽泛的 `"*": allow` 会让它们保持可用，allowlist 的 `"*": deny` 让它们保持拒绝，规则没提到它们（或根本没配规则）时行为也与关闭时相同。所以 YOLO 不会授予规则之外的新编排能力：`builder` 这类单 agent 角色在 YOLO 开启时仍然是单 agent，是因为它自己的规则 deny 了 `handoff` 和 `delegate`，这条 deny 在 YOLO 下照常生效。为了跳过编辑确认而打开 YOLO，并不等于声明这个角色现在应该去编排 SubAgent。
   - `done` 和 `compact_context` 只是结束或收缩当前这段工作，YOLO 不改变它们的专门语义，行为与关闭时完全一致：指名它们的规则照常生效（`deny` 仍会移除或禁用对应工具，`compact_context` 的显式 `ask` 在 YOLO 下仍会逐次确认）。
-  - SubAgent 在执行时继承该模式，但始终按自己的完整规则集判定：YOLO 开启期间，它们需要 `ask` 的调用——普通工具和上面的机制工具都一样——不再弹共享确认框、直接放行；`deny` 依然拒绝（只读 worker 的 `write: deny` 仍然生效），`done`、`compact_context` 保持各自语义。继承是即时的：关闭 YOLO 后，SubAgent 的后续调用立即恢复确认。
+  - SubAgent 在执行时继承该模式，但始终按自己的完整规则集判定：YOLO 开启期间，它们需要 `ask` 的调用（普通工具和上面的机制工具都一样）不再弹共享确认框、直接放行；`deny` 依然拒绝（只读 worker 的 `write: deny` 仍然生效），`done`、`compact_context` 保持各自语义。继承是即时的：关闭 YOLO 后，SubAgent 的后续调用立即恢复确认。
 
 > 权限属于 Agent 级配置，不是简单的全局开关。
 

@@ -102,9 +102,9 @@ Anything you put under the hook's `environment:` map is also passed through verb
 }
 ```
 
-- `continue` (default if stdout is empty) — let the action proceed.
-- `block` — abort the action; `message` is shown to the user.
-- `modify` — replace the data flowing downstream with `data`. The exact shape of `data` matches the original payload of that point (e.g. for `on_tool_call`, `data` should be the modified tool args).
+- `continue` (default if stdout is empty): let the action proceed.
+- `block`: abort the action; `message` is shown to the user.
+- `modify`: replace the data flowing downstream with `data`. The exact shape of `data` matches the original payload of that point (e.g. for `on_tool_call`, `data` should be the modified tool args).
 
 ### Automation hooks (`on_tool_batch_complete`)
 
@@ -245,7 +245,7 @@ When a hook misbehaves:
 
 ## Related
 
-- [Customization](./customization.md) — higher-level recipes
-- [Configuration & Auth](./configuration.md) — full `config.yaml` schema
-- [Environment variables](./environment.md) — `CHORD_HOOK_DEBUG`
-- [Permissions & Safety](./permissions-and-safety.md) — when to use hooks vs permission rules
+- [Customization](./customization.md): higher-level recipes
+- [Configuration & Auth](./configuration.md): full `config.yaml` schema
+- [Environment variables](./environment.md): `CHORD_HOOK_DEBUG`
+- [Permissions & Safety](./permissions-and-safety.md): when to use hooks vs permission rules

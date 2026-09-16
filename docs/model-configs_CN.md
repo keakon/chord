@@ -612,7 +612,7 @@ thinking 与输入模态完全一致，因此共用同一个 `&claude-opus` 模�
 
 ### Claude Fable 5.1
 
-`claude-fable-5-1`（2026 年 9 月发布）沿用了 Fable 5 的 $10 / $50（每百万 token 输入 / 输出）费率，但缓存读取降到每百万 token $0.25——是基础输入价的 0.025x，而不是常见的 0.1x 乘数——所以 `cache_read` 要填 0.25，不要按比例填成 1.0。它与 Fable 5 一样是 1M 上下文、128K 最大输出、adaptive thinking，并支持 PDF。
+`claude-fable-5-1`（2026 年 9 月发布）沿用了 Fable 5 的 $10 / $50（每百万 token 输入 / 输出）费率，但缓存读取降到每百万 token $0.25（是基础输入价的 0.025x，而不是常见的 0.1x 乘数），所以 `cache_read` 要填 0.25，不要按比例填成 1.0。它与 Fable 5 一样是 1M 上下文、128K 最大输出、adaptive thinking，并支持 PDF。
 
 ```yaml
 model_templates:
@@ -946,7 +946,7 @@ model_pools:
   Completions 模板继承，只需补 `modalities.input`。`thinking.type` 只支持
   `enabled`（无法关闭思考），chat 模板已配置好。第三方中转可能只实现了
   旧的仅 URL 形式 `file_url`，依赖 Base64 `file_data` 前先确认中转支持。
-- 示例默认池优先选 `glm-5.3-flash`——Coding Plan 主力、原生多模态输入。
+- 示例默认池优先选 `glm-5.3-flash`：Coding Plan 主力、原生多模态输入。
   纯文本场景把池条目换成 `bigmodel/glm-5.3`；需要 GLM-5.2 更宽的 effort
   档位（`xhigh` / `medium` / `minimal` / `none`）时也可以保留
   `bigmodel/glm-5.2`——上面的 provider `models` 仍把它列为可选文本模型，
@@ -1139,7 +1139,7 @@ model_pools:
 - 第三方 `/responses` 端点由网关自行实现；只有网关明确说明映射方式时，
   才使用 `reasoning.effort` 和 `openai_visible`。
 - 对兼容网关，请使用该网关 / 账号实际公开的模型 ID 和限制。见
-  [常见问题排查 — DeepSeek / OpenAI 兼容 thinking 模式 400](./troubleshooting_CN.md#deepseek--openai-兼容-thinking-模式-400)。
+  [常见问题排查：DeepSeek / OpenAI 兼容 thinking 模式 400](./troubleshooting_CN.md#deepseek--openai-兼容-thinking-模式-400)。
 
 补充：
 

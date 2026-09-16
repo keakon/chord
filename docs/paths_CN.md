@@ -23,7 +23,7 @@ Chord 读写的所有文件和目录，以及如何安全地清理。
 
 有些功能需要拆分存储：可移植、用户可读的项目内容放在项目目录；高频记账、锁和可重建索引放在 state 或 cache。不要跨层复制同一份权威内容，每个文件都要有唯一、清楚的权威源。
 
-## 配置主目录 — `~/.config/chord/`
+## 配置主目录：`~/.config/chord/`
 
 这些文件由你编辑，可以视为源文件。
 
@@ -39,11 +39,11 @@ Chord 读写的所有文件和目录，以及如何安全地清理。
 └── skills/                # 全局 skill，每个为 <name>/SKILL.md
 ```
 
-`config.yaml` 的 schema 见 [配置与认证](./configuration_CN.md)。Agent 见 [扩展与定制 — Agent](./customization_CN.md#自定义-agents)。Skill 见 [扩展与定制 — Skills](./customization_CN.md#skills)。自定义 slash 命令见 [扩展与定制 — 自定义 slash 命令](./customization_CN.md#自定义-slash-commands)。
+`config.yaml` 的 schema 见 [配置与认证](./configuration_CN.md)。Agent 见 [扩展与定制：Agent](./customization_CN.md#自定义-agents)。Skill 见 [扩展与定制：Skills](./customization_CN.md#skills)。自定义 slash 命令见 [扩展与定制：自定义 slash 命令](./customization_CN.md#自定义-slash-commands)。
 
 `auth.state.json` 是共享运行时缓存，用来保存 OAuth 状态、Codex 额度快照、reset 时间和 warm-up 时间戳。它由 Chord 自动维护，通常不需要手工编辑。删除它是安全的，但在后续 warm-up 重新填充前，会暂时失去跨重启保留的额度排序缓存。
 
-## state 目录 — `~/.local/state/chord/`
+## state 目录：`~/.local/state/chord/`
 
 Chord 写在这里。删了就丢历史。
 
@@ -87,9 +87,9 @@ Sessions、运行时缓存、exports 都以这个 key 为索引——在 `~/proj
 
 `chord --worktree <name>` 会在 `worktrees/<repo-id>/<slug>` 下创建 chord 管理的 git worktree，**位于原仓库之外**，拥有自己的 project key。每个 chord 管理的 worktree 的 sessions、cache、exports 因此天然隔离。
 
-清理 worktree（仅删 chord 一侧的数据），用 `chord worktree remove <name>`——见 [CLI — chord worktree](./cli_CN.md#chord-worktree)。**不要**手动删 worktree 目录，那会留下注册表中的孤儿条目（之后会被 `chord cleanup project` 标记）。
+清理 worktree（仅删 chord 一侧的数据），用 `chord worktree remove <name>`——见 [CLI：chord worktree](./cli_CN.md#chord-worktree)。**不要**手动删 worktree 目录，那会留下注册表中的孤儿条目（之后会被 `chord cleanup project` 标记）。
 
-## cache 目录 — `~/.cache/chord/`
+## cache 目录：`~/.cache/chord/`
 
 全是可重建数据，任何时候都可以删，代价仅是一次重新预热。
 
@@ -101,7 +101,7 @@ Sessions、运行时缓存、exports 都以这个 key 为索引——在 `~/proj
             └── <session-id>/           # 内存会话快照、恢复状态
 ```
 
-## 项目级目录 — `<project>/.chord/`
+## 项目级目录：`<project>/.chord/`
 
 `chord` 首次在某项目启动时会按需创建项目根下的 `.chord/`。这是**唯一**位于用户仓库内部的 chord 目录。
 
@@ -168,7 +168,7 @@ key-value 片段仅作人类可读文本，不是稳定的结构化日志 schema
 | 移除孤儿项目注册项          | `chord cleanup project --yes`                         |
 | 移除 chord 管理的 worktree  | `chord worktree remove <name>`                        |
 
-`cleanup` 全部子命令默认是 **dry-run**——不加 `--yes` 时只预览不真删。完整参考见 [CLI — chord cleanup](./cli_CN.md#chord-cleanup)。
+`cleanup` 全部子命令默认是 **dry-run**——不加 `--yes` 时只预览不真删。完整参考见 [CLI：chord cleanup](./cli_CN.md#chord-cleanup)。
 
 ## 哪些可以手动删？
 
@@ -187,7 +187,7 @@ key-value 片段仅作人类可读文本，不是稳定的结构化日志 schema
 
 ## 相关
 
-- [CLI — 全局 flag](./cli_CN.md#全局-flag)
+- [CLI：全局 flag](./cli_CN.md#全局-flag)
 - [环境变量](./environment_CN.md)
 - [配置与认证](./configuration_CN.md)
 - [常见问题排查](./troubleshooting_CN.md)

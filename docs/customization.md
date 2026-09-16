@@ -28,7 +28,7 @@ Common uses:
 - Add specialized reviewer, backend, frontend, docs, or other roles
 - Reuse a built-in role prompt block under your own role name via `prompt_preset`, and extend it with `prompt_append` instead of replacing it
 
-For the full agent schema (fields, examples, and delegation options), see [Configuration & Auth — Agent config](./configuration.md#agent-config).
+For the full agent schema (fields, examples, and delegation options), see [Configuration & Auth: Agent config](./configuration.md#agent-config).
 
 ## Skills
 

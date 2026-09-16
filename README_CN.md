@@ -6,27 +6,24 @@
 
 🌐 [English introduction](./README.md)
 
-**花更少的 token，干更难的活。** 一个轻量的终端 Coding Agent：告别上下文腐烂，模型不可用时自动切换。
+**任务跑得更快，单次花费更低，内存占用保持很小。** 一个面向长会话的轻量终端 Coding Agent：上下文保持干净，模型不可用时自动切换。
 
 <p align="center">
   <img src="./docs/assets/screenshot.png" alt="Chord 终端界面截图" width="900">
 </p>
 
-## 为什么选 Chord
+## 其他能力
 
-- **长会话更省 token**
-- **启动快、内存占用低**
-- **尽可能展示所有细节**
-- **键盘优先、Vim 风格**
-- **需要你处理时才通知**
-- **模型池热切换**
-- **支持远程操控**
-- **支持导入 Claude Code、Codex、OpenCode 的会话**
-- **LSP 集成**
-- **支持预览图片**
-- **显示 Codex 订阅额度与重置时间**
-- **健壮且可自定义的 Agent 团队**
-- **基于 git worktree 的并行任务**
+- 键盘优先，Vim 风格
+- 需要你处理时才通知
+- 模型池热切换，无需重启
+- 支持远程操控
+- 支持导入 Claude Code、Codex、OpenCode 的会话
+- LSP 集成
+- 支持预览图片
+- 显示 Codex 订阅额度与重置时间
+- 可自定义的 Agent 团队
+- 基于 git worktree 的并行任务
 
 ## 三步上手
 
@@ -78,11 +75,11 @@ cd my-project && chord
 - 安全：[权限与安全](./docs/permissions-and-safety_CN.md)
 - 排障：[常见问题排查](./docs/troubleshooting_CN.md)
 
-## 性能摘要
+## 实测数据
 
-在 Chord v0.8.1 的一次 [DeepSWE v1.1 任务](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration)测试中（给 `httpx` 加流式 JSON 迭代接口），Chord 用时 6m37s，输入 54.5K token、缓存读取 2.96M token、输出 58.6K token，估算成本 ￥0.348。同样使用 deepseek-v4.1-flash 的六款 agent harness 里，Chord 用时最短、成本最低：比第二名快 33%、便宜 34%。
+在 Chord v0.8.1 的一次 [DeepSWE v1.1 任务](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration)测试中（给 `httpx` 加流式 JSON 迭代接口），Chord 用时 6m37s，输入 54.5K token、缓存读取 2.96M token、输出 58.6K token，估算成本 ￥0.348。同样使用 deepseek-v4.1-flash 的六款 agent harness 里，Chord 用时最短、成本最低：比第二名快 33%、便宜 34%。内存同样保持在低位：空会话 30MB，加载 200 条消息后 39MB。
 
-这只是单次场景实测，不代表普遍结果；完整数据表（含应用内存）和测量方法见[性能 — 实测数据](./docs/performance_CN.md#实测数据)。
+以上数据来自一次任务实测和一次内存场景，不代表普遍结果。完整数据表（含应用内存）和测量方法见[性能](./docs/performance_CN.md)。
 
 ## 项目链接
 

@@ -1,12 +1,12 @@
 ---
 title: Chord
-description: Spend fewer tokens, take on harder work — a lightweight terminal coding agent with no context rot and automatic model switching.
+description: A terminal coding agent that finishes coding tasks faster, runs cheaper, and stays small in memory.
 template: splash
 head:
   - tag: title
-    content: Chord — Spend fewer tokens, take on harder work
+    content: "Chord: a faster, cheaper, lighter terminal coding agent"
 hero:
-  tagline: Spend fewer tokens, take on harder work — no context rot, automatic model switching.
+  tagline: A terminal coding agent that finishes coding tasks faster, runs cheaper, and stays small in memory.
   actions:
     - text: Quickstart
       link: /chord/quickstart/
@@ -20,6 +20,22 @@ hero:
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
 import screenshot from '../../../../docs/assets/screenshot.png';
+
+## Measured results
+
+<CardGrid>
+  <Card title="6m37s" icon="rocket">
+    Fastest of six agent harnesses on the same DeepSWE task, 33% faster than the next best (9m50s).
+  </Card>
+  <Card title="$0.052" icon="approve-check-circle">
+    Lowest cost of the six runs, 34% cheaper than the next best ($0.079).
+  </Card>
+  <Card title="39MB" icon="database">
+    Memory after loading 200 messages, up from 30MB when empty. Claude Code reaches 216MB.
+  </Card>
+</CardGrid>
+
+One measured task and one memory scenario; your numbers will differ. Full tables, methodology, and implementation notes: [Performance](/chord/performance/#measured-results).
 
 <figure class="chord-screenshot">
   <img src={screenshot.src} alt="Chord terminal UI screenshot" />
@@ -57,28 +73,18 @@ import screenshot from '../../../../docs/assets/screenshot.png';
   </Card>
 </CardGrid>
 
-## Why Chord
+## What else Chord does
 
-<CardGrid>
-  <Card title="Long sessions use less context" icon="database" />
-  <Card title="Fast startup and low memory usage" icon="approve-check-circle" />
-  <Card title="Shows as much detail as possible" icon="analytics" />
-  <Card title="Keyboard-first, Vim-style" icon="vim" />
-  <Card title="Notifies you only when you're needed" icon="email" />
-  <Card title="Hot-swap model setups" icon="random" />
-  <Card title="Import sessions from Claude Code, Codex, and OpenCode" icon="cloud-download" />
-  <Card title="LSP integration" icon="magnifier" />
-  <Card title="Preview images in the terminal" icon="document" />
-  <Card title="Codex subscription quota and reset time" icon="clock" />
-  <Card title="Robust and customizable agent teams" icon="puzzle" />
-  <Card title="Parallel work via git worktrees" icon="code-branch" />
-</CardGrid>
-
-## Performance
-
-On a [DeepSWE v1.1 task](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration) — adding streaming JSON iteration to `httpx` — Chord v0.8.1 finished first and cheapest of six agent harnesses: **6m37s** and **$0.052**, **33% faster** and **34% cheaper** than the next-best run. The app shell holds an empty session in **30MB** and a 200-message session in **39MB**.
-
-These are scenario-specific proof points, not universal guarantees. Full tables, methodology, and caveats: [Performance — Measured results](/chord/performance/#measured-results).
+- Keyboard-first, Vim-style keybindings
+- Notifies you only when you're needed
+- Hot-swap model pools without restarting
+- Remote control through `chord headless`
+- Session import from Claude Code, Codex, and OpenCode
+- LSP integration
+- Image preview in the terminal
+- Codex subscription quota and reset time
+- Customizable agent teams
+- Parallel work via git worktrees
 
 ## Find docs by task
 
@@ -92,7 +98,7 @@ These are scenario-specific proof points, not universal guarantees. Full tables,
     [Config →](/chord/configuration/) · [Examples →](/chord/examples/)
   </Card>
   <Card title="CLI reference" icon="laptop">
-    Every command, subcommand, and flag — including `chord cleanup`, worktrees, and headless.
+    Every command, subcommand, and flag, including `chord cleanup`, worktrees, and headless.
     [Open →](/chord/cli/)
   </Card>
   <Card title="Permissions and safety" icon="padlock">
@@ -101,7 +107,7 @@ These are scenario-specific proof points, not universal guarantees. Full tables,
   </Card>
   <Card title="Long tasks" icon="list-format">
     Use `/loop` and `Done` for multi-step implementation work.
-    [Open →](/chord/usage/#loop--continuous-execution-mode)
+    [Open →](/chord/usage/#loop-continuous-execution-mode)
   </Card>
   <Card title="Extend and customize" icon="puzzle">
     Agents, skills, MCP, hooks, and custom slash commands.

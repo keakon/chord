@@ -3,7 +3,7 @@
 思考配置分三块：请求侧的开关、响应侧承载思考的字段，以及决定「下一轮是否必须
 回传已完成思考」的回放契约。
 字段级语义见
-[配置与认证 — 模型字段参考](./configuration_CN.md#模型字段参考)。
+[配置与认证：模型字段参考](./configuration_CN.md#模型字段参考)。
 
 ## 按线路选请求键位
 
@@ -29,18 +29,18 @@ Gemini 用 `extra_body.google.thinking_config`，Claude 用
 
 答案取决于后端是否要求把自己的思考内容再传回去：
 
-1. **不思考**——模型本身不推理，或者你从不开启思考。无需配置。
-2. **会返回思考，但不要求回传**——默认配置就够。Chord 首次尝试会乐观回放
+1. **不思考**：模型本身不推理，或者你从不开启思考。无需配置。
+2. **会返回思考，但不要求回传**：默认配置就够。Chord 首次尝试会乐观回放
    chat 原生 reasoning，被拒后退化为结构化的已完成工具事实。如果后端根本
    不返回 `reasoning_content`，Chord 会判定它无法回放 reasoning，并在本回合
    后续请求中剥离按请求的 reasoning 控制项；只有确认端点接受这些控制项、
    但没有 reasoning 回放契约时（文档里的例子是走 Chat Completions 的 Grok），
    才设置 `compat.chat_completions.keep_reasoning_effort: true`。
-3. **后端会校验回传的思考**——设置 `compat.reasoning_continuity.mode:
+3. **后端会校验回传的思考**：设置 `compat.reasoning_continuity.mode:
    openai_visible` 加 `preserve_history: true`，让每条 assistant 消息原样
    回传。带 tools 的 DeepSeek、Kimi K3、Qwen `preserve_thinking`、
    GLM `clear_thinking: false` 都属于这一类。
-4. **Responses、Messages、Gemini**——原生 continuity 自动生效：Chord 会保存
+4. **Responses、Messages、Gemini**：原生 continuity 自动生效：Chord 会保存
    明文或带签名 / 加密的状态，并在目标线路允许时回放，无需配置。
 
 `preserve_history: true` 会让已完成轮次的思考在每次请求中重复回放，后端按

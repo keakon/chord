@@ -2,7 +2,7 @@
 
 This page lists every built-in tool name the model can call. Use these exact names in agent `permission:` rules, hook `tools:` filters, and skill `allowed_tools` lists.
 
-For how `allow` / `ask` / `deny` are evaluated — including the special coupling between the orchestration tools — see [Permissions & Safety](./permissions-and-safety.md).
+For how `allow` / `ask` / `deny` are evaluated, including the special coupling between the orchestration tools, see [Permissions & Safety](./permissions-and-safety.md).
 
 ## Files
 
@@ -36,7 +36,7 @@ In the TUI, an `lsp` card shows the operation and query position in its header (
 | `job_list` | List the background jobs you can read or stop (id, status, elapsed, label), including jobs started by the main agent and by your direct owner. |
 | `job_kill` | Stop a background job by `job_id`, with an optional `reason`. |
 
-Long commands do not have to block the turn. A command that outlives its foreground budget keeps running as a background job, the tool card names its job id, and the agent is notified when the job finishes — so it can do independent work or end the turn and be woken by the completion instead of waiting. `job_output` reads incremental output and only reports what is new, and a bounded wait that expires leaves the job alive. Consecutive job-completion wakes with no user input in between are bounded; after that, further completions wait for your next message. A background job also ends with the session — switching sessions or exiting the client stops it — so day-scale work belongs in an external runner such as tmux, systemd, or CI.
+Long commands do not have to block the turn. A command that outlives its foreground budget keeps running as a background job, the tool card names its job id, and the agent is notified when the job finishes, so it can do independent work or end the turn and be woken by the completion instead of waiting. `job_output` reads incremental output and only reports what is new, and a bounded wait that expires leaves the job alive. Consecutive job-completion wakes with no user input in between are bounded; after that, further completions wait for your next message. A background job also ends with the session (switching sessions or exiting the client stops it), so day-scale work belongs in an external runner such as tmux, systemd, or CI.
 
 ## Web
 
@@ -54,11 +54,11 @@ Long commands do not have to block the turn. A command that outlives its foregro
 | `save_artifact` | Save or update a session artifact (report, task graph, log) or store an immutable machine-readable result, under the session's artifacts directory. |
 | `read_artifact` | Read a session artifact by session-relative path. |
 
-`save_artifact` takes two mutually exclusive parameter shapes. `filename` with `content` (plus `mode: create` / `append` / `overwrite` when needed) writes or updates a session artifact; alternatively, the `result_type` + `result` pair — `result` must be a JSON object — stores the payload as an immutable, content-addressed result under `artifacts/results/` and returns a ResultRef (`id`, `result_type`, `rel_path`, `sha256`, `size_bytes`), which `complete` accepts directly as its `result_ref`.
+`save_artifact` takes two mutually exclusive parameter shapes. `filename` with `content` (plus `mode: create` / `append` / `overwrite` when needed) writes or updates a session artifact; alternatively, the `result_type` + `result` pair (`result` must be a JSON object) stores the payload as an immutable, content-addressed result under `artifacts/results/` and returns a ResultRef (`id`, `result_type`, `rel_path`, `sha256`, `size_bytes`), which `complete` accepts directly as its `result_ref`.
 
 ## Orchestration and control
 
-These tools control agent workflows rather than local side effects, so YOLO does not sweep their permission rules aside the way it does ordinary tools' — it removes the confirmation friction of file edits and shell commands, not the role's boundary. `handoff`, `delegate`, and `cancel` grant a capability the role did not otherwise have, so under YOLO they keep resolving through the user's configured rules, with exactly one relaxation: an `ask` rule passes without raising the confirmation dialog. `allow` stays allowed and `deny` keeps rejecting — the built-in `builder` denies `handoff` and `delegate` explicitly to stay single-agent, and those denials keep applying — and a wildcard default behaves as it does with YOLO off. `done` and `compact_context` only end or shrink the current unit of work, so YOLO leaves their dedicated semantics untouched. Turning YOLO off restores the original permissions. See [Permissions & Safety](./permissions-and-safety.md).
+These tools control agent workflows rather than local side effects, so YOLO does not sweep their permission rules aside the way it does ordinary tools': it removes the confirmation friction of file edits and shell commands, not the role's boundary. `handoff`, `delegate`, and `cancel` grant a capability the role did not otherwise have, so under YOLO they keep resolving through the user's configured rules, with exactly one relaxation: an `ask` rule passes without raising the confirmation dialog. `allow` stays allowed and `deny` keeps rejecting (the built-in `builder` denies `handoff` and `delegate` explicitly to stay single-agent, and those denials keep applying), and a wildcard default behaves as it does with YOLO off. `done` and `compact_context` only end or shrink the current unit of work, so YOLO leaves their dedicated semantics untouched. Turning YOLO off restores the original permissions. See [Permissions & Safety](./permissions-and-safety.md).
 
 | Tool | What it does |
 | --- | --- |
@@ -80,7 +80,7 @@ These tools control agent workflows rather than local side effects, so YOLO does
 
 `done`, `complete`, and `escalate` may carry a long Markdown report, summary, or escalation reason. While the arguments are still streaming, the TUI shows a temporary `N chars received` indicator; once they are complete, the prose is rendered as Markdown in the card body. `complete` also keeps structured completion details — changed files, remaining limitations, known risks, follow-up recommendations, and artifact references.
 
-These cards are always expanded and their header is only the tool name: the report is the card, so a collapsed preview with a one-line summary of it on the header would only repeat what the body already shows. The same applies to `compact_context` (objective, completed work, decisions, open issues, next step, state files), `delegate` (description, worker handle, completion), `question` (every question, its options and the selection) and `notify` (target, kind, message): no disclosure marker, and `o` / `Enter` / `Space` leaves them as they are. `write`, `edit`, `apply_patch`, `delete`, `todo_write` and `handoff` are always expanded too — their body is the card's content, not a hidden detail — so they carry no disclosure marker and ignore the fold keys. Cards that fold — `read`, `grep`, `glob`, `shell`, `cancel` and generic tool calls — start collapsed and keep their collapsible body behind the argument-indexed header line, marked with `▸` / `▾`.
+These cards are always expanded and their header is only the tool name: the report is the card, so a collapsed preview with a one-line summary of it on the header would only repeat what the body already shows. The same applies to `compact_context` (objective, completed work, decisions, open issues, next step, state files), `delegate` (description, worker handle, completion), `question` (every question, its options and the selection) and `notify` (target, kind, message): no disclosure marker, and `o` / `Enter` / `Space` leaves them as they are. `write`, `edit`, `apply_patch`, `delete`, `todo_write` and `handoff` are always expanded too: their body is the card's content, not a hidden detail, so they carry no disclosure marker and ignore the fold keys. Cards that fold (`read`, `grep`, `glob`, `shell`, `cancel` and generic tool calls) start collapsed and keep their collapsible body behind the argument-indexed header line, marked with `▸` / `▾`.
 
 `delegate` has one tool result: the asynchronous startup handle. Later `complete` calls and mailbox updates are separate runtime events that update the existing delegated task/card by stable `task_id`; they never produce additional `delegate` tool results. Each `complete` report raises an owner-visible **AGENT COMPLETE** notification card, and terminal worker failures are shown as **AGENT BLOCKED** and wake the direct owner.
 
@@ -92,7 +92,7 @@ The runtime, not the model, is the source of truth for delegation state. A worke
 
 ## MCP tools
 
-Tools exposed by configured MCP servers are registered as `mcp_<server>_<tool>` (for example `mcp_search_web_search_exa`) and can be referenced in permission rules by that full name. Use `allowed_tools` in the MCP server config to limit which remote tools are registered at all; see [Configuration — MCP](./configuration.md#mcp).
+Tools exposed by configured MCP servers are registered as `mcp_<server>_<tool>` (for example `mcp_search_web_search_exa`) and can be referenced in permission rules by that full name. Use `allowed_tools` in the MCP server config to limit which remote tools are registered at all; see [Configuration: MCP](./configuration.md#mcp).
 
 ## Related
 

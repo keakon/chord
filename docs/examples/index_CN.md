@@ -20,7 +20,7 @@ Agent 定义可以写成 `.md`、`.yaml` 或 `.yml`。示例里使用 `.md`，�
 
 ## 上下文和输出限制
 
-示例配置会为每个模型设置 `limit.context` 和 `limit.output`；只有 provider 单独公布输入上限时，示例才会写 `limit.input`。各字段的含义，以及 provider 未单独公布输入上限时 Chord 如何推导输入预算，见[术语表](../glossary_CN.md)。这些限制如何与压缩配合，见[上下文管理 — 上下文压缩](../context-management_CN.md#上下文压缩compaction)。
+示例配置会为每个模型设置 `limit.context` 和 `limit.output`；只有 provider 单独公布输入上限时，示例才会写 `limit.input`。各字段的含义，以及 provider 未单独公布输入上限时 Chord 如何推导输入预算，见[术语表](../glossary_CN.md)。这些限制如何与压缩配合，见[上下文管理：上下文压缩](../context-management_CN.md#上下文压缩compaction)。
 
 ## 各类文件放哪里
 

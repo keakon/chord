@@ -20,11 +20,11 @@ A named parameter preset for a single model — for example `claude-opus-5@high`
 
 ## Compaction
 
-The runtime process of summarizing earlier conversation into a compact context summary so a long session can keep going without exceeding the model's context window. Auto-compaction means Chord triggers this process before the request gets too large; you can also trigger it manually with `/compact`. See [Context management — Compaction](./context-management.md#context-compaction).
+The runtime process of summarizing earlier conversation into a compact context summary so a long session can keep going without exceeding the model's context window. Auto-compaction means Chord triggers this process before the request gets too large; you can also trigger it manually with `/compact`. See [Context management: Compaction](./context-management.md#context-compaction).
 
 ## Reduction (context reduction)
 
-A lightweight, deterministic pruning pass that runs before every LLM request. It trims stale tool results from the current prompt based on age and size heuristics — it never modifies saved session history on disk. Unlike compaction, reduction does not call an LLM and is entirely invisible to users. See [Context management — Reduction](./context-management.md#context-reduction).
+A lightweight, deterministic pruning pass that runs before every LLM request. It trims stale tool results from the current prompt based on age and size heuristics — it never modifies saved session history on disk. Unlike compaction, reduction does not call an LLM and is entirely invisible to users. See [Context management: Reduction](./context-management.md#context-reduction).
 
 ## Service tier
 
@@ -84,11 +84,11 @@ The retry path Chord uses after a provider rejects a request as too large. Chord
 
 ## Worktree
 
-A chord-managed git worktree (under `<state-dir>/worktrees/<repo-id>/<slug>`) with its own project key, sessions, cache, and exports. Create or enter one via `chord --worktree <name>` or `chord worktree <name>`; manage existing ones via `chord worktree list / remove / finish`. Useful for running multiple parallel chord tasks on the same repo without crosstalk. See [Paths — Worktrees](./paths.md#worktrees).
+A chord-managed git worktree (under `<state-dir>/worktrees/<repo-id>/<slug>`) with its own project key, sessions, cache, and exports. Create or enter one via `chord --worktree <name>` or `chord worktree <name>`; manage existing ones via `chord worktree list / remove / finish`. Useful for running multiple parallel chord tasks on the same repo without crosstalk. See [Paths: Worktrees](./paths.md#worktrees).
 
 ## Skill
 
-A reusable, on-demand piece of expertise expressed as a markdown body plus YAML frontmatter (`SKILL.md`). The model loads matching skills via the `skill` tool when relevant — Chord does not preload them into every prompt. Discovered from `.chord/skills/`, `.agents/skills/`, `~/.config/chord/skills/`, and any extra paths configured via `skills.paths`. See [Customization — Skills](./customization.md#skills).
+A reusable, on-demand piece of expertise expressed as a markdown body plus YAML frontmatter (`SKILL.md`). The model loads matching skills via the `skill` tool when relevant — Chord does not preload them into every prompt. Discovered from `.chord/skills/`, `.agents/skills/`, `~/.config/chord/skills/`, and any extra paths configured via `skills.paths`. See [Customization: Skills](./customization.md#skills).
 
 ## Hook
 
@@ -108,15 +108,15 @@ Chord may run a small set of safe, read-only tool calls while the model response
 
 ## Project key
 
-A stable, sanitized identifier Chord computes from a project's canonical filesystem root (e.g. `HOME-projects-chord` for `~/projects/chord`). Used as the namespace for sessions, runtime cache, exports, and worktree identity. If two distinct paths sanitize to the same key, Chord appends an 8-character fingerprint. See [Paths — `<project-key>`](./paths.md#project-key--what-is-it).
+A stable, sanitized identifier Chord computes from a project's canonical filesystem root (e.g. `HOME-projects-chord` for `~/projects/chord`). Used as the namespace for sessions, runtime cache, exports, and worktree identity. If two distinct paths sanitize to the same key, Chord appends an 8-character fingerprint. See [Paths: `<project-key>`](./paths.md#project-key-what-is-it).
 
 ## Permission action
 
 The result of evaluating a permission rule against a tool call. The three outcomes are:
 
-- `allow` — auto-execute
-- `ask` — pause and require user confirmation
-- `deny` — refuse outright
+- `allow`: auto-execute
+- `ask`: pause and require user confirmation
+- `deny`: refuse outright
 
 Permissions are agent-level config: global defaults live in `~/.config/chord/agents/<role>.yaml`, and project overrides live in `.chord/agents/<role>.yaml`. They are product-level risk control, not an OS-level sandbox. See [Permissions & Safety](./permissions-and-safety.md).
 
@@ -126,7 +126,7 @@ Permissions are agent-level config: global defaults live in `~/.config/chord/age
 
 ## Diagnostics bundle
 
-A snapshot exported by `Ctrl+G`: includes recent log lines, runtime state, TUI-specific debug info, and a recent lightweight LLM request trace from the current session. Full raw request / SSE dumps still require `log_level: debug`. Use it when reporting bugs. See [Troubleshooting — When to check logs](./troubleshooting.md#when-to-check-logs).
+A snapshot exported by `Ctrl+G`: includes recent log lines, runtime state, TUI-specific debug info, and a recent lightweight LLM request trace from the current session. Full raw request / SSE dumps still require `log_level: debug`. Use it when reporting bugs. See [Troubleshooting: When to check logs](./troubleshooting.md#when-to-check-logs).
 
 ## Insert / Normal mode
 
@@ -134,7 +134,7 @@ The two TUI modes inspired by Vim. **Insert** is the input-focused mode where yo
 
 ## Custom slash command
 
-A user-defined command of the form `/name [args]` that, when entered in the input box, expands into a fixed (or `$ARGUMENTS`-templated) text and is sent to the model as a user message. Defined under `commands:` in `config.yaml` or as files under `commands/`. See [Customization — Custom slash commands](./customization.md#custom-slash-commands).
+A user-defined command of the form `/name [args]` that, when entered in the input box, expands into a fixed (or `$ARGUMENTS`-templated) text and is sent to the model as a user message. Defined under `commands:` in `config.yaml` or as files under `commands/`. See [Customization: Custom slash commands](./customization.md#custom-slash-commands).
 
 ## Related
 

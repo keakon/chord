@@ -26,7 +26,7 @@ content in the project tree, but keep high-frequency bookkeeping, locks, and
 rebuildable indexes in state or cache. Do not duplicate the same authoritative
 content across layers; each file needs one clear source of truth.
 
-## Config home — `~/.config/chord/`
+## Config home: `~/.config/chord/`
 
 You edit these files. Treat them as source.
 
@@ -42,11 +42,11 @@ On the first root `chord` run, if global `config.yaml` is missing and Chord can 
 └── skills/                # global skills, each as <name>/SKILL.md
 ```
 
-For the `config.yaml` schema, see [Configuration & Auth](./configuration.md). For agents, see [Customization — Agents](./customization.md#agents). For skills, see [Customization — Skills](./customization.md#skills). For custom slash commands, see [Customization — Custom slash commands](./customization.md#custom-slash-commands).
+For the `config.yaml` schema, see [Configuration & Auth](./configuration.md). For agents, see [Customization: Agents](./customization.md#agents). For skills, see [Customization: Skills](./customization.md#skills). For custom slash commands, see [Customization: Custom slash commands](./customization.md#custom-slash-commands).
 
 `auth.state.json` is a shared runtime cache for OAuth status, Codex quota snapshots, reset times, and warm-up timestamps. Chord manages it automatically; users normally should not hand-edit it. Deleting it is safe, but Chord will lose restart-stable cached quota ordering until warm-up repopulates it.
 
-## State dir — `~/.local/state/chord/`
+## State dir: `~/.local/state/chord/`
 
 Chord writes here. Lose it and you lose history.
 
@@ -91,7 +91,7 @@ maintaining a separate project-level index. Copying or restoring files can make
 filesystem times misleading, and activity that updates neither file may not
 affect the order.
 
-### `<project-key>` — what is it?
+### `<project-key>`: what is it?
 
 Chord identifies a project by its canonical filesystem root, then derives a stable, sanitized key — for example `HOME-projects-chord` for `~/projects/chord`. If two projects collide on the sanitized key, Chord appends an 8-character fingerprint to disambiguate. The full canonical root is stored alongside the key in `project.json`, so the registry stays unambiguous even when paths look similar.
 
@@ -101,9 +101,9 @@ Sessions, runtime cache, and exports are all keyed on this — that is how a fre
 
 `chord --worktree <name>` creates a chord-managed git worktree under `worktrees/<repo-id>/<slug>` **outside the original repository**, with its own project key. Each chord-managed worktree therefore has isolated sessions, cache, and exports.
 
-To remove a worktree (and only its chord-side data), use `chord worktree remove <name>` — see [CLI — chord worktree](./cli.md#chord-worktree). Manually deleting the worktree directory is not recommended; you would leave orphan registry entries that `chord cleanup project` would later flag.
+To remove a worktree (and only its chord-side data), use `chord worktree remove <name>` — see [CLI: chord worktree](./cli.md#chord-worktree). Manually deleting the worktree directory is not recommended; you would leave orphan registry entries that `chord cleanup project` would later flag.
 
-## Cache dir — `~/.cache/chord/`
+## Cache dir: `~/.cache/chord/`
 
 Everything here is rebuildable; deleting it is safe at any time, at the cost of one re-warmup.
 
@@ -115,7 +115,7 @@ Everything here is rebuildable; deleting it is safe at any time, at the cost of 
             └── <session-id>/           # in-memory session snapshots, recovery state
 ```
 
-## Project-local — `<project>/.chord/`
+## Project-local: `<project>/.chord/`
 
 When `chord` runs in a project for the first time, it ensures the project root has a `.chord/` directory. This is the only chord directory that lives **inside** the user's repository.
 
@@ -130,7 +130,7 @@ When `chord` runs in a project for the first time, it ensures the project root h
     └── records/           # one immutable file per auto-extracted record
 ```
 
-Project-level files have higher priority than global ones (same-name keys override). It is normal — and useful — to commit `.chord/` into your repository so that team members share the same agent setup and slash commands. Memory records are ordinary project files: Chord does not stage or commit them, and you can keep them local via `.gitignore` or `.git/info/exclude`.
+Project-level files have higher priority than global ones (same-name keys override). It is normal, and useful, to commit `.chord/` into your repository so that team members share the same agent setup and slash commands. Memory records are ordinary project files: Chord does not stage or commit them, and you can keep them local via `.gitignore` or `.git/info/exclude`.
 
 `auth.yaml` is **never** read from `.chord/`: credentials always live in `~/.config/chord/auth.yaml`.
 
@@ -193,7 +193,7 @@ Use `chord cleanup` rather than `rm -rf` — it knows which paths are safe and w
 | Remove orphan project entries     | `chord cleanup project --yes`                          |
 | Remove a chord-managed worktree   | `chord worktree remove <name>`                         |
 
-All `cleanup` subcommands default to **dry-run** — without `--yes` they only list what would be removed. Full reference: [CLI — chord cleanup](./cli.md#chord-cleanup).
+All `cleanup` subcommands default to **dry-run** — without `--yes` they only list what would be removed. Full reference: [CLI: chord cleanup](./cli.md#chord-cleanup).
 
 ## What is safe to delete by hand?
 
@@ -212,7 +212,7 @@ All `cleanup` subcommands default to **dry-run** — without `--yes` they only l
 
 ## Related
 
-- [CLI — global flags](./cli.md#global-flags)
+- [CLI: global flags](./cli.md#global-flags)
 - [Environment variables](./environment.md)
 - [Configuration & Auth](./configuration.md)
 - [Troubleshooting](./troubleshooting.md)

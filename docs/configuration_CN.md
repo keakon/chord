@@ -550,7 +550,7 @@ merge key（`<<:`）把被引用映射**按键级别**复制进当前条目，�
   都要写全整块。
 - 链式继承同理（`gpt-5.6-luna: &gpt-5-6-luna {<<: *gpt-5-6-base}`）：
   越深层的条目按整个 key 胜出。
-- 无法「撤销」祖先模板声明的字段——要么用具体值覆盖，要么不再引用该模板。
+- 无法「撤销」祖先模板声明的字段：要么用具体值覆盖，要么不再引用该模板。
   `compaction.threshold: 0` 与 `compaction.reminder: -1` 是例外，用来显式
   关闭这两个行为。
 
@@ -875,9 +875,9 @@ web_fetch:
   proxy: socks5://127.0.0.1:1080  # 支持 http, https, socks5
 ```
 
-- `proxy: nil`（默认）—— 继承全局 `proxy` 配置
-- `proxy: ""`（空字符串）—— 显式直连（不走代理）
-- `proxy: "http://..."`、`"https://..."`、`"socks5://..."` —— 使用指定代理
+- `proxy: nil`（默认）： 继承全局 `proxy` 配置
+- `proxy: ""`（空字符串）： 显式直连（不走代理）
+- `proxy: "http://..."`、`"https://..."`、`"socks5://..."`：使用指定代理
 
 `web_fetch` 保持轻量级静态 HTTP 读取，不运行本地浏览器。对 JS-heavy 页面，若返回的 HTML 只有应用空壳而非可读正文，结果会标记为 `Content-Quality: suspect-shell`。
 
@@ -1034,7 +1034,7 @@ mcp:
 
 ## Agent 配置
 
-内置角色包括 `builder`、`planner`。两者都是 main 模式，因此在你自行定义至少一个 `mode: subagent` 角色之前，`delegate` 不会被注册 —— 见下方的 `mode` 字段说明。可新增自定义 agent 或覆盖内置 agent。Agent 文件可放在：
+内置角色包括 `builder`、`planner`。两者都是 main 模式，因此在你自行定义至少一个 `mode: subagent` 角色之前，`delegate` 不会被注册，见下方的 `mode` 字段说明。可新增自定义 agent 或覆盖内置 agent。Agent 文件可放在：
 
 - `~/.config/chord/agents/`
 - `.chord/agents/`
@@ -1077,7 +1077,7 @@ prompt: |
 - `name`：agent 名称。省略时使用不带扩展名的文件名；显式填写时，必须与不带扩展名的文件名一致（例如 `builder.yaml` 必须声明 `name: builder`）。同一目录内不能存在重名 agent，包括 `.md`、`.yaml`、`.yml` 之间的重名；项目级 agent 仍可按既有设计覆盖同名的全局 agent。
 - `description`：简短描述，在可委派给该 agent 时展示给 main agent。
 - `capabilities` / `preferred_tasks` / `write_mode` / `delegation_policy`：描述该 agent 用途的可选标注，用于你要委派给的 `subagent` 定义时最有价值。Chord 不解析也不强制这些值——它们只是以 `capabilities=…`、`preferred=…`、`write_mode=…`、`delegation_policy=…` 这样的短 meta 文本出现在委派模型看到的 agent 选择上，帮助它选对类型。前两个是字符串列表，后两个是单个字符串；写得简短、能自解释即可，长的内容放 `description`。
-- `mode`：`main` 表示 MainAgent 角色，`subagent` 表示 SubAgent。为空或其他值时按 `main` 处理；`sub_agent` 和 `sub` 也可作为 SubAgent 别名。只有当委派角色能看到至少一个 `subagent` 角色时，`delegate` 工具才会注册；因此没有任何 subagent 定义的配置根本不存在委派面 —— 这通常就是 `delegate` 看起来消失的原因。
+- `mode`：`main` 表示 MainAgent 角色，`subagent` 表示 SubAgent。为空或其他值时按 `main` 处理；`sub_agent` 和 `sub` 也可作为 SubAgent 别名。只有当委派角色能看到至少一个 `subagent` 角色时，`delegate` 工具才会注册；因此没有任何 subagent 定义的配置根本不存在委派面，这通常就是 `delegate` 看起来消失的原因。
 - `model_pools`：可选的有序池名列表，用于限制该 agent 可使用的池。池定义位于 `config.yaml` 顶层 `model_pools`；省略时，该 agent 可使用所有顶层池并按池名排序。`openai/gpt-5.5@high` 这类 inline variant 写在池定义中。
 - `variant`：model ref 未写 `@variant` 时的默认 variant。
 - `permission`：该 agent 的逐工具权限策略。权限直接保存在 agent 配置文件中；确认弹窗里选择「记住规则」时，`project` 会更新当前项目的 `.chord/agents/<role>.yaml`，`global` 会更新用户配置目录的 `agents/<role>.yaml`（默认 `~/.config/chord/agents/<role>.yaml`），不会写入单独的 permissions 文件夹。部分编排工具有特殊语义（`delegate` 的 pattern 会匹配 `agent_type`，并联动控制委派工作相关能力，如 `cancel`；`handoff` 和 `done` 的 `allow` / `ask` 都表示工作流可用，并由 Chord 自己的确认 gate 控制关键节点）。依赖精细控制工具规则前，请先阅读[权限与安全](./permissions-and-safety_CN.md#特殊权限语义)。
@@ -1087,8 +1087,8 @@ prompt: |
   - `max_depth`：嵌套委派可达到的深度。它按**被委派 worker 自己的定义**生效——一个 SubAgent 能否再往下委派，看的是它自己声明的 `delegation.max_depth` 和当前所处深度，而不是父角色或根角色的设置；根角色把 `max_depth` 设为 `1`，挡不住一个声明 `max_depth: 8` 的子角色继续嵌套。默认 `1`（第一层 SubAgent 要往下委派，必须由它自己的定义提高该值），上限 `8`。
   - `child_join`：SubAgent 委派出的子任务是否并入它自己的任务生命周期（默认 `true`）。开启时，owner 不能在有已加入的子任务仍在运行时完成——`complete` 会被延迟，直到这些子任务结束或被显式停止；owner 若被取消或失败，也会连带取消已加入的子任务。关闭时，owner 可以提前收工，仍在运行中的子任务会与它解绑并转由 main agent 继续托管，而不是被连带取消。该选项只影响嵌套委派：main agent 直接委派出的子任务从不并入，因为 main 本身不是任务。
 - `prompt` / `system_prompt`：纯 YAML agent 文件中的 system prompt。设置其中任一个会**整块替换**该角色本来会获得的内置 prompt 块。
-- `prompt_preset`：按能力而非角色名选择内置角色 prompt 块，可选值为 `planning` 和 `none`。`planning` 会注入内置规划块（计划文档命名与格式、直接回答与产出计划的判断、handoff 时序、计划质量要求），同时抑制 bug triage 块 —— 后者与规划工作流自带的调查提纲重复。`none` 表示不注入任何内置块。省略该字段时，无论角色叫什么都不获得内置块 —— 角色名不参与选择，因此自定义的 `planner` 角色需要显式声明 `prompt_preset: planning` 才能保留规划块。填写未知值会导致配置报错。
-- `prompt_append`：追加在最终生效的角色 prompt 之后 —— 即 preset 块之后，或角色用 `prompt` / `system_prompt` 替换了基础块时追加在其后。用它可以在不接管整块维护责任的前提下补充项目约定，同时保留 preset 中随角色可见工具自适应的措辞。
+- `prompt_preset`：按能力而非角色名选择内置角色 prompt 块，可选值为 `planning` 和 `none`。`planning` 会注入内置规划块（计划文档命名与格式、直接回答与产出计划的判断、handoff 时序、计划质量要求），同时抑制 bug triage 块，后者与规划工作流自带的调查提纲重复。`none` 表示不注入任何内置块。省略该字段时，无论角色叫什么都不获得内置块，角色名不参与选择，因此自定义的 `planner` 角色需要显式声明 `prompt_preset: planning` 才能保留规划块。填写未知值会导致配置报错。
+- `prompt_append`：追加在最终生效的角色 prompt 之后，即 preset 块之后，或角色用 `prompt` / `system_prompt` 替换了基础块时追加在其后。用它可以在不接管整块维护责任的前提下补充项目约定，同时保留 preset 中随角色可见工具自适应的措辞。
 
 复用内置规划块的自定义角色：
 
@@ -1130,12 +1130,12 @@ permission:
 
 在这样的 allowlist 里，开头的 `"*": deny` 覆盖了所有你没列出的工具，因此角色需要什么就必须写什么。有两个例外值得知道，否则容易被误认为功能坏了：
 
-- `compact_context` 和 `done` **不受**该通配规则约束。让它们各自变得可用的那个开关——前者是 `context.compaction.model_driven`，后者是开启 loop——本身就是授权，因此这个角色不必列出它们也能使用模型驱动压缩和 loop 模式。确实想收回某个工具时，指名写出来即可（例如 `done: deny`）。详见[权限与安全](./permissions-and-safety_CN.md)。
+- `compact_context` 和 `done` **不受**该通配规则约束。让它们各自变得可用的那个开关（前者是 `context.compaction.model_driven`，后者是开启 loop）本身就是授权，因此这个角色不必列出它们也能使用模型驱动压缩和 loop 模式。确实想收回某个工具时，指名写出来即可（例如 `done: deny`）。详见[权限与安全](./permissions-and-safety_CN.md)。
 - 其余工具都按常规规则处理。`todo_write` 和 `question` 在这里就是普通工具：不列出它们，意味着模型不再维护 TODO 列表，并改用纯文本向用户提问而不是结构化弹窗。两者都会平滑降级，按需添加即可。
 
 ## 上下文管理
 
-长会话的上下文处理——**上下文压缩（Compaction）**（调用 LLM 生成摘要并改写会话历史）和**上下文剪裁（Reduction）**（请求前剪裁过时工具输出）——通过顶层 `context:` 配置，详见独立页面：[上下文管理](./context-management_CN.md)。
+长会话的上下文处理涵盖**上下文压缩（Compaction）**（调用 LLM 生成摘要并改写会话历史）和**上下文剪裁（Reduction）**（请求前剪裁过时工具输出），两者都通过顶层 `context:` 配置，详见独立页面：[上下文管理](./context-management_CN.md)。
 
 ## 工具后诊断
 
@@ -1145,8 +1145,8 @@ Chord 的原生文件工具会在同步 `textDocument` 前向匹配的 LSP 服�
 
 Python 使用两个后端：
 
-- `diagnostics.python.semantic_backend` —— 主 LSP 服务（默认 `pyright`）。其 `server` 字段必须与 `lsp` 下的某个 server key 一致，语言服务器才真正配置生效。
-- `diagnostics.python.quick_backend` —— 一次性回退命令（默认 `ruff check`），用于大文件，或语义后端不可用时。
+- `diagnostics.python.semantic_backend`：主 LSP 服务（默认 `pyright`）。其 `server` 字段必须与 `lsp` 下的某个 server key 一致，语言服务器才真正配置生效。
+- `diagnostics.python.quick_backend`：一次性回退命令（默认 `ruff check`），用于大文件，或语义后端不可用时。
 
 `diagnostics.python.large_file.{line_threshold, byte_threshold, strategy}` 决定文件多大时改用 quick backend 而非语义后端；`run_semantic_when_quick_unavailable: true` 会在 quick backend 缺失时，对大文件也强制跑语义后端。Ruff quick diagnostics 不更新 LSP 侧边栏——只出现在 `edit`、`apply_patch` 或 `write` 结果中，并提示完整语义诊断已跳过。
 
@@ -1170,7 +1170,7 @@ diagnostics:
 
 `diagnostics.python.output.{max_near_diagnostics, max_outside_diagnostics, max_total_diagnostics, near_range_before_lines, near_range_after_lines}` 控制追加诊断文本的长度，并按错误/警告优先于 info/hint 的顺序展示。完整字段表见[配置字段速查表](#配置字段速查表)。
 
-工具结果里追加的诊断包含编辑文件自身的问题，以及与任一编辑文件同目录的其他文件缓存问题（Go 按目录编译包，workspace 诊断会覆盖被诊断包里的所有文件）。同一个其他文件诊断每个会话只附加一次：该诊断从服务器发布集合中消失后，问题再次出现才会重新报告。后续编辑也不会重复：已经告知过模型的问题再复述一遍只是浪费上下文，因此仍然存在的诊断保持抑制，只报告发生变化的部分。而被修复掉的问题——被其他 agent 改好、被复制覆盖、或被 `git checkout` 还原——不会继续从缓存里报出来：文件一旦与诊断计算时的内容不再一致，缓存诊断就先被扣下；等服务器发布的集合里不再包含它，就彻底丢弃。恢复会话时抑制状态不会被清空，而是从恢复的对话记录里还原已渲染过的诊断，因此 `--continue` 不会重复播报同一段对话中已经可见的问题。文件自服务器上次发布诊断以来已在磁盘上变化（比如被其他编辑器或进程修好）时，Chord 会先跳过其缓存诊断；等 Chord 同步该文件并收到 fresh diagnostics 后才重新采用，避免把过期结果当成当前问题。
+工具结果里追加的诊断包含编辑文件自身的问题，以及与任一编辑文件同目录的其他文件缓存问题（Go 按目录编译包，workspace 诊断会覆盖被诊断包里的所有文件）。同一个其他文件诊断每个会话只附加一次：该诊断从服务器发布集合中消失后，问题再次出现才会重新报告。后续编辑也不会重复：已经告知过模型的问题再复述一遍只是浪费上下文，因此仍然存在的诊断保持抑制，只报告发生变化的部分。而被修复掉的问题（被其他 agent 改好、被复制覆盖、或被 `git checkout` 还原）不会继续从缓存里报出来：文件一旦与诊断计算时的内容不再一致，缓存诊断就先被扣下；等服务器发布的集合里不再包含它，就彻底丢弃。恢复会话时抑制状态不会被清空，而是从恢复的对话记录里还原已渲染过的诊断，因此 `--continue` 不会重复播报同一段对话中已经可见的问题。文件自服务器上次发布诊断以来已在磁盘上变化（比如被其他编辑器或进程修好）时，Chord 会先跳过其缓存诊断；等 Chord 同步该文件并收到 fresh diagnostics 后才重新采用，避免把过期结果当成当前问题。
 
 ## Provider/model 诊断
 
@@ -1209,13 +1209,13 @@ chord doctor models --pool thinking
 | `desktop_notification`  | bool                  | `false`                         | global / project         | 启用本地 TUI 终端通知；Chord 按终端自动选择 OSC 9 或 OSC 777，并在每次通知时附一声终端铃声（BEL）（不支持的终端通常会忽略该序列；见[平台说明](./platforms_CN.md#desktop_notification终端通知)）。 |
 | `desktop_notification_foreground` | bool | `true` | global / project | TUI 聚焦时是否发送本地终端通知（转义序列和铃声一起）；设为 `false` 后仅在终端失焦时通知。 |
 | `prevent_sleep`         | bool                  | `false`                         | global / project         | agent 活动时阻止 macOS idle sleep。仅 macOS 生效，其他平台 no-op。                                              |
-| `keymap`                | `map[action][]key`    | 见 [快捷键 — Action 名速查](./keybindings_CN.md#action-名速查) | global / project | 覆盖键位绑定。Action 名采用 lower snake_case。                                                                       |
-| `commands`              | `map[/cmd]text`       | 空                              | global / project         | 自定义 slash 命令；`"/cmd"` → 作为用户消息发送的文本。见 [扩展与定制 — 自定义 slash 命令](./customization_CN.md#自定义-slash-commands)。 |
+| `keymap`                | `map[action][]key`    | 见 [快捷键：Action 名速查](./keybindings_CN.md#action-名速查) | global / project | 覆盖键位绑定。Action 名采用 lower snake_case。                                                                       |
+| `commands`              | `map[/cmd]text`       | 空                              | global / project         | 自定义 slash 命令；`"/cmd"` → 作为用户消息发送的文本。见 [扩展与定制：自定义 slash 命令](./customization_CN.md#自定义-slash-commands)。 |
 | `ime_switch_target`     | string                | 空                              | global / project         | 进 Normal 模式时传给 `im-select` / `im-select.exe` 的 IM 标识。                           |
 | `log_level`             | string                | `info`                          | global / project         | `debug` / `info` / `warn` / `error`。`debug` 输出较多。                                                              |
 | `paths`                 | object                | XDG 默认值                      | 仅 global                | `state_dir`、`cache_dir`、`sessions_dir`、`logs_dir`。会被 CLI flag 与 `CHORD_*` 环境变量覆盖。                       |
 | `maintenance`           | object                | 关闭                            | 仅 global                | `size_check_on_startup`、`warn_state_bytes`、`warn_cache_bytes`。                       |
-| `lsp`                   | `map[name]Server`     | 空                              | global / project         | 各 language server 的配置。见 [扩展与定制 — LSP](./customization_CN.md#lsp)。                                      |
+| `lsp`                   | `map[name]Server`     | 空                              | global / project         | 各 language server 的配置。见 [扩展与定制：LSP](./customization_CN.md#lsp)。                                      |
 | `mcp`                   | `map[name]MCP`        | 空                              | global / project / agent | 各 MCP 服务器的配置。见 [MCP](#mcp)。                                                                              |
 | `hooks`                 | object                | 空                              | global / project / agent | 按触发点分组的 hooks。见 [Hooks](./hooks_CN.md)。                                                                    |
 | `max_output_tokens`     | int                   | `64000`                        | global / project         | 全局输出 token 上限。实际请求还会受各模型 `limit.output` 限制；reasoning 请求同样遵守该上限。                      |
@@ -1310,7 +1310,7 @@ compat:
     input_includes_cache_write: false
 ```
 
-反过来，若某个 Messages 兼容网关按包含式语义上报——`input_tokens` 是包含缓存命中的总输入，`cache_read_input_tokens` 只是其中的命中子集——就需要设成 `true`，否则 Chord 会把 cache read 重复计一次，导致缓存命中率被低估：
+反过来，若某个 Messages 兼容网关按包含式语义上报（`input_tokens` 是包含缓存命中的总输入，`cache_read_input_tokens` 只是其中的命中子集），就需要设成 `true`，否则 Chord 会把 cache read 重复计一次，导致缓存命中率被低估：
 
 ```yaml
 compat:

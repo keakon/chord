@@ -1015,9 +1015,9 @@ web_fetch:
   proxy: socks5://127.0.0.1:1080  # http, https, socks5 supported
 ```
 
-- `proxy: nil` (default) — inherits the global `proxy` setting
-- `proxy: ""` (empty string) — explicitly disables proxy ("direct" mode)
-- `proxy: "http://..."`, `"https://..."`, `"socks5://..."` — uses specified proxy
+- `proxy: nil` (default): inherits the global `proxy` setting
+- `proxy: ""` (empty string): explicitly disables proxy ("direct" mode)
+- `proxy: "http://..."`, `"https://..."`, `"socks5://..."`: uses specified proxy
 
 `web_fetch` intentionally remains a lightweight static HTTP reader. It does not run a local browser; JS-heavy pages may be marked as `Content-Quality: suspect-shell` when the returned HTML looks like an application shell rather than readable content.
 
@@ -1277,8 +1277,8 @@ list, so anything the role needs must be named. Two exceptions are worth
 knowing, because they would otherwise look like the feature is broken:
 
 - `compact_context` and `done` are **not** covered by the wildcard. The switch
-  that makes each reachable — `context.compaction.model_driven` for the former,
-  starting a loop for the latter — is itself the authorization, so this role can
+  that makes each reachable (`context.compaction.model_driven` for the former,
+  starting a loop for the latter) is itself the authorization, so this role can
   run model-driven compaction and loop mode without listing them. Name a tool
   explicitly (`done: deny`) when you do want to withhold it. See
   [Permissions & Safety](./permissions-and-safety.md).
@@ -1289,10 +1289,11 @@ knowing, because they would otherwise look like the feature is broken:
 
 ## Context management
 
-Long-session context handling — **context compaction** (LLM-generated summaries
-that rewrite session history) and **context reduction** (request-time trimming
-of stale tool output) — is configured under the top-level `context:` key and
-documented on its own page: [Context management](./context-management.md).
+Long-session context handling covers **context compaction** (LLM-generated
+summaries that rewrite session history) and **context reduction** (request-time
+trimming of stale tool output). Both are configured under the top-level
+`context:` key and documented on their own page:
+[Context management](./context-management.md).
 
 ## Post-tool diagnostics
 
@@ -1302,8 +1303,8 @@ Native file tools also send `workspace/didChangeWatchedFiles` events to matching
 
 For Python, two backends are used:
 
-- `diagnostics.python.semantic_backend` — the primary LSP server (default `pyright`). Its `server` field must match a server key under `lsp` so the language server is actually configured.
-- `diagnostics.python.quick_backend` — a one-shot fallback (default `ruff check`) used for large files, or when the semantic backend is unavailable.
+- `diagnostics.python.semantic_backend`: the primary LSP server (default `pyright`). Its `server` field must match a server key under `lsp` so the language server is actually configured.
+- `diagnostics.python.quick_backend`: a one-shot fallback (default `ruff check`) used for large files, or when the semantic backend is unavailable.
 
 `diagnostics.python.large_file.{line_threshold, byte_threshold, strategy}` decides when a file is large enough to use the quick backend instead of the semantic one; `run_semantic_when_quick_unavailable: true` forces the semantic backend even on large files when the quick backend is missing. Ruff quick diagnostics do not update the LSP sidebar — they appear only in `edit`, `apply_patch`, or `write` results and note that full semantic diagnostics were skipped.
 
@@ -1327,7 +1328,7 @@ diagnostics:
 
 `diagnostics.python.output.{max_near_diagnostics, max_outside_diagnostics, max_total_diagnostics, near_range_before_lines, near_range_after_lines}` shapes how much appended diagnostics text is shown, prioritizing errors and warnings before info and hints. See the [Configuration cheatsheet](#configuration-cheatsheet) for the full field list.
 
-Diagnostics appended to the tool result cover the edited files' own problems, plus cached problems from *other* files in the same directory as an edited file (Go packages are compiled per directory, and workspace diagnostics cover every file in a diagnosed package). Each other-file diagnostic is attached only once per session — the same problem is not repeated in later tool results until that diagnostic disappears from the server's published set, after which a reappearing problem is reported again. Later edits do not repeat it either: a problem the model already has costs context to restate, so a surviving diagnostic stays suppressed and only changes are reported. A problem that was fixed — by another agent, a file copy, or a `git checkout` restore — stops being reported instead of being served from cache: the cached diagnostics are withheld as soon as the file no longer matches what they were computed from, and they are dropped once the server publishes without them. Resuming a session keeps the suppression instead of restarting it — diagnostics already rendered in the restored transcript are recovered from it, so `--continue` does not re-announce problems that are already visible earlier in the same conversation. Diagnostics for a file that changed on disk since the server last published them (for example, fixed by another editor or process) are skipped until Chord synchronizes the file and receives fresh diagnostics, because the cached result may no longer reflect its current content.
+Diagnostics appended to the tool result cover the edited files' own problems, plus cached problems from *other* files in the same directory as an edited file (Go packages are compiled per directory, and workspace diagnostics cover every file in a diagnosed package). Each other-file diagnostic is attached only once per session: the same problem is not repeated in later tool results until that diagnostic disappears from the server's published set, after which a reappearing problem is reported again. Later edits do not repeat it either: a problem the model already has costs context to restate, so a surviving diagnostic stays suppressed and only changes are reported. A problem that was fixed (by another agent, a file copy, or a `git checkout` restore) stops being reported instead of being served from cache: the cached diagnostics are withheld as soon as the file no longer matches what they were computed from, and they are dropped once the server publishes without them. Resuming a session keeps the suppression instead of restarting it: diagnostics already rendered in the restored transcript are recovered from it, so `--continue` does not re-announce problems that are already visible earlier in the same conversation. Diagnostics for a file that changed on disk since the server last published them (for example, fixed by another editor or process) are skipped until Chord synchronizes the file and receives fresh diagnostics, because the cached result may no longer reflect its current content.
 
 ## Provider/model diagnostics
 
@@ -1367,12 +1368,12 @@ The full top-level keys of `config.yaml` (both global `~/.config/chord/config.ya
 | `desktop_notification_foreground` | bool | `true` | global / project | Send local-TUI terminal notifications (escape sequence and bell) while the terminal is focused. Set to `false` for background-only notifications. |
 | `prevent_sleep`         | bool                  | `false`                          | global / project         | Prevent macOS idle sleep while any agent is active. macOS-only; no-op elsewhere.                                         |
 | `keymap`                | `map[action][]key`    | see [Keybindings](./keybindings.md#action-name-reference) | global / project | Override key bindings. Action names use lower snake_case.                                                                |
-| `commands`              | `map[/cmd]text`       | empty                            | global / project         | Custom slash commands; `"/cmd"` → text inserted as a user message. See [Customization — Custom slash commands](./customization.md#custom-slash-commands). |
+| `commands`              | `map[/cmd]text`       | empty                            | global / project         | Custom slash commands; `"/cmd"` → text inserted as a user message. See [Customization: Custom slash commands](./customization.md#custom-slash-commands). |
 | `ime_switch_target`     | string                | empty                            | global / project         | IM identifier passed to `im-select` / `im-select.exe` when entering Normal mode. Linux/macOS/Windows.                    |
 | `log_level`             | string                | `info`                           | global / project         | `debug` / `info` / `warn` / `error`. `debug` is verbose.                                                                |
 | `paths`                 | object                | XDG defaults                     | global only              | `state_dir`, `cache_dir`, `sessions_dir`, `logs_dir`. CLI flags and `CHORD_*` env vars override.                         |
 | `maintenance`           | object                | disabled                         | global only              | `size_check_on_startup`, `warn_state_bytes`, `warn_cache_bytes`.                            |
-| `lsp`                   | `map[name]Server`     | empty                            | global / project         | Per-language-server config. See [Customization — LSP](./customization.md#lsp).                                          |
+| `lsp`                   | `map[name]Server`     | empty                            | global / project         | Per-language-server config. See [Customization: LSP](./customization.md#lsp).                                          |
 | `mcp`                   | `map[name]MCP`        | empty                            | global / project / agent | Per-MCP-server config. See [MCP](#mcp).                                                                                  |
 | `hooks`                 | object                | empty                            | global / project / agent | Hooks per trigger point. See [Hooks](./hooks.md).                                                                        |
 | `max_output_tokens`     | int                   | `64000`                          | global / project         | Global cap on requested output tokens. Effective limit is also clamped by each model's `limit.output`; reasoning requests also respect it. |

@@ -40,10 +40,10 @@ codesign --force --sign - /path/to/chord
 
 对于 API key 配置，向导提供一个通用的 API key provider 路径。它会要求你输入一个 URL path 以下列后缀结尾的 API URL，并在提示里给出示例：
 
-- `/responses` —— OpenAI Responses API / 兼容网关
-- `/messages` —— Anthropic Messages API / 兼容网关
-- `/chat/completions` —— OpenAI Chat Completions 兼容网关
-- `/models` —— Gemini Generate Content 基础路径
+- `/responses`：OpenAI Responses API / 兼容网关
+- `/messages`：Anthropic Messages API / 兼容网关
+- `/chat/completions`：OpenAI Chat Completions 兼容网关
+- `/models`：Gemini Generate Content 基础路径
 
 Chord 会根据这个端点推荐起始 provider 名和模型名，例如 `openai` / `gpt-6-astra`、`anthropic` / `claude-opus-4.8`、`gemini` / `gemini-3.8-flash`。
 

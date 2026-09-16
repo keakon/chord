@@ -4,7 +4,7 @@ Thinking configuration has three parts: the request-side switch, the
 response-side field that carries thinking back, and the replay contract that
 decides whether completed thinking must be sent again on the next request.
 Field-level semantics live in
-[Configuration & Auth — Model field reference](./configuration.md#model-field-reference).
+[Configuration & Auth: Model field reference](./configuration.md#model-field-reference).
 
 ## Request keys by wire family
 
@@ -31,7 +31,7 @@ with `compat.chat_completions.native_thinking`; see
 
 The answer depends on whether the backend requires its own reasoning content back:
 
-1. **No thinking** — the model does not reason, or you never turn thinking on.
+1. **No thinking**: the model does not reason, or you never turn thinking on.
    Nothing to configure.
 2. **Thinking comes back, but the backend does not require it again** — the
    default is enough. Chord replays chat-native reasoning optimistically on the
@@ -42,12 +42,12 @@ The answer depends on whether the backend requires its own reasoning content bac
    `compat.chat_completions.keep_reasoning_effort: true` only for endpoints
    that accept those controls without a reasoning-content contract (Grok on
    Chat Completions is the documented case).
-3. **The backend validates the replayed reasoning** — set
+3. **The backend validates the replayed reasoning**: set
    `compat.reasoning_continuity.mode: openai_visible` plus
    `preserve_history: true` so every assistant message goes back unchanged.
    This is the contract for DeepSeek when a request carries tools, Kimi K3,
    Qwen `preserve_thinking`, and GLM `clear_thinking: false`.
-4. **Responses, Messages, and Gemini** — native continuity is automatic. Chord
+4. **Responses, Messages, and Gemini**: native continuity is automatic. Chord
    captures the plaintext or signed/encrypted state and replays it where the
    wire allows; nothing to configure.
 

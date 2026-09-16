@@ -10,47 +10,46 @@ This documentation is for end users: installation, configuration, daily usage, c
 - **Configure models**: [Configuration & Auth](./configuration.md) · [Model configuration recipes](./model-configs.md) · [Reasoning and thinking](./reasoning.md) · [Examples](./examples/index.md)
 - **Edit files safely**: [Edit tools](./edit-tools.md) · [Permissions & Safety](./permissions-and-safety.md)
 - **Remote control**: [Headless](./headless.md) · [Permissions & Safety](./permissions-and-safety.md)
-- **Long-running tasks**: [Usage — `/loop`](./usage.md#loop--continuous-execution-mode) · [Context management](./context-management.md)
+- **Long-running tasks**: [Usage: `/loop`](./usage.md#loop-continuous-execution-mode) · [Context management](./context-management.md)
 - **Extend and customize**: [Customization](./customization.md) · [Hooks](./hooks.md)
-- **Understand performance**: [Performance](./performance.md)
 - **Troubleshoot issues**: [Troubleshooting](./troubleshooting.md)
 
 ## Getting started
 
-- [Quickstart](./quickstart.md) — get running in minutes
-- [Usage](./usage.md) — TUI basics, sessions, common commands, headless mode
-- [Glossary](./glossary.md) — vocabulary used across these docs
+- [Quickstart](./quickstart.md): get running in minutes
+- [Usage](./usage.md): TUI basics, sessions, common commands, headless mode
+- [Glossary](./glossary.md): vocabulary used across these docs
 
 ## Reference
 
-- [CLI](./cli.md) — every command, subcommand, and flag
-- [Configuration & Auth](./configuration.md) — `config.yaml`, `auth.yaml`, providers, model pools, full schema cheatsheet
-- [Context management](./context-management.md) — compaction and reduction: how they work, configuration, tuning
-- [Model configuration recipes](./model-configs.md) — copy-paste snippets for common provider/model families
-- [Reasoning and thinking](./reasoning.md) — how thinking is requested, returned, and replayed per wire family, the continuity decision, and the recipe index
-- [Built-in tools](./tools.md) — every tool name, for permission rules and hook filters
-- [Edit tools](./edit-tools.md) — choose between `edit`, `apply_patch`, and `write`; formats, examples, and safety behavior
-- [Project Memory](./usage.md#project-memory) — cross-session memory: `MEMORY.md`, auto-extraction, trust boundary, and git semantics
-- [Keybindings](./keybindings.md) — complete key map and how to customize it
-- [Paths](./paths.md) — config / state / cache / project layout, what is safe to delete
-- [Environment variables](./environment.md) — every `CHORD_*` / `XDG_*` / proxy variable Chord reads
-- [Platform support](./platforms.md) — what works on macOS / Linux / Windows / WSL
-- [Performance](./performance.md) — measured results against other agent harnesses, optimization internals, and what to do when it feels slow
+- [CLI](./cli.md): every command, subcommand, and flag
+- [Configuration & Auth](./configuration.md): `config.yaml`, `auth.yaml`, providers, model pools, full schema cheatsheet
+- [Context management](./context-management.md): compaction and reduction: how they work, configuration, tuning
+- [Model configuration recipes](./model-configs.md): copy-paste snippets for common provider/model families
+- [Reasoning and thinking](./reasoning.md): how thinking is requested, returned, and replayed per wire family, the continuity decision, and the recipe index
+- [Built-in tools](./tools.md): every tool name, for permission rules and hook filters
+- [Edit tools](./edit-tools.md): choose between `edit`, `apply_patch`, and `write`; formats, examples, and safety behavior
+- [Project Memory](./usage.md#project-memory): cross-session memory: `MEMORY.md`, auto-extraction, trust boundary, and git semantics
+- [Keybindings](./keybindings.md): complete key map and how to customize it
+- [Paths](./paths.md): config / state / cache / project layout, what is safe to delete
+- [Environment variables](./environment.md): every `CHORD_*` / `XDG_*` / proxy variable Chord reads
+- [Platform support](./platforms.md): what works on macOS / Linux / Windows / WSL
+- [Performance](./performance.md): measured results against other agent harnesses, optimization internals, and what to do when it feels slow
 
 ## Going further
 
-- [Customization](./customization.md) — agents, skills, MCP, optional LSP setup, custom slash commands
-- [Hooks](./hooks.md) — 14 trigger points, payload contract, examples
-- [Examples](./examples/index.md) — copy-paste-ready `config.yaml` setups for common situations
+- [Customization](./customization.md): agents, skills, MCP, optional LSP setup, custom slash commands
+- [Hooks](./hooks.md): 14 trigger points, payload contract, examples
+- [Examples](./examples/index.md): copy-paste-ready `config.yaml` setups for common situations
 
 ## Integration
 
-- [Headless](./headless.md) — `chord headless` JSON control plane and `chord-gateway`
+- [Headless](./headless.md): `chord headless` JSON control plane and `chord-gateway`
 
 ## Safety
 
-- [Permissions & Safety](./permissions-and-safety.md) — the permission model and security boundaries
+- [Permissions & Safety](./permissions-and-safety.md): the permission model and security boundaries
 
 ## Troubleshooting
 
-- [Troubleshooting](./troubleshooting.md) — symptoms, common causes, and how to collect logs
+- [Troubleshooting](./troubleshooting.md): symptoms, common causes, and how to collect logs

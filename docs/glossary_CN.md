@@ -20,11 +20,11 @@
 
 ## Compaction（上下文压缩）
 
-将早期对话压缩为摘要的运行时过程，让长会话在接近模型上下文窗口上限时仍能继续。自动压缩表示 Chord 会在请求过大前自动触发；也可以手动执行 `/compact`。详见 [上下文管理 — 上下文压缩](./context-management_CN.md#上下文压缩compaction)。
+将早期对话压缩为摘要的运行时过程，让长会话在接近模型上下文窗口上限时仍能继续。自动压缩表示 Chord 会在请求过大前自动触发；也可以手动执行 `/compact`。详见 [上下文管理：上下文压缩](./context-management_CN.md#上下文压缩compaction)。
 
 ## Reduction（上下文剪裁）
 
-每次 LLM 请求前执行的轻量级确定性剪裁。根据工具输出的年龄和大小启发式规则，从当前 prompt 中剪裁过时的内容——不会修改磁盘上的会话历史。与上下文压缩不同，上下文剪裁不调用 LLM，对用户完全透明。详见 [上下文管理 — 上下文剪裁](./context-management_CN.md#上下文剪裁reduction)。
+每次 LLM 请求前执行的轻量级确定性剪裁。根据工具输出的年龄和大小启发式规则，从当前 prompt 中剪裁过时的内容——不会修改磁盘上的会话历史。与上下文压缩不同，上下文剪裁不调用 LLM，对用户完全透明。详见 [上下文管理：上下文剪裁](./context-management_CN.md#上下文剪裁reduction)。
 
 ## Service tier
 
@@ -84,11 +84,11 @@ provider 因请求过大而拒绝后，Chord 采用的恢复重试流程。Chord
 
 ## Worktree
 
-Chord 管理的 git worktree（位于 `<state-dir>/worktrees/<repo-id>/<slug>`），拥有独立的 project key、sessions、cache、exports。可通过 `chord --worktree <name>` 或 `chord worktree <name>` 创建或进入；已有 worktree 通过 `chord worktree list / remove / finish` 管理。适合在同一仓库上并行跑多个 Chord 任务而不互相干扰。详见 [目录与路径 — Worktree](./paths_CN.md#worktree)。
+Chord 管理的 git worktree（位于 `<state-dir>/worktrees/<repo-id>/<slug>`），拥有独立的 project key、sessions、cache、exports。可通过 `chord --worktree <name>` 或 `chord worktree <name>` 创建或进入；已有 worktree 通过 `chord worktree list / remove / finish` 管理。适合在同一仓库上并行跑多个 Chord 任务而不互相干扰。详见 [目录与路径：Worktree](./paths_CN.md#worktree)。
 
 ## Skill
 
-一段可复用的「专长」模块，由 Markdown 正文和 YAML frontmatter 组成（`SKILL.md`），按需加载。模型在相关时调用 `skill` 工具加载——Chord 不会把所有 skill 都预灌到每次 prompt。从 `.chord/skills/`、`.agents/skills/`、`~/.config/chord/skills/` 以及 `skills.paths` 配置的额外目录发现。详见 [扩展与定制 — Skills](./customization_CN.md#skills)。
+一段可复用的「专长」模块，由 Markdown 正文和 YAML frontmatter 组成（`SKILL.md`），按需加载。模型在相关时调用 `skill` 工具加载——Chord 不会把所有 skill 都预灌到每次 prompt。从 `.chord/skills/`、`.agents/skills/`、`~/.config/chord/skills/` 以及 `skills.paths` 配置的额外目录发现。详见 [扩展与定制：Skills](./customization_CN.md#skills)。
 
 ## Hook
 
@@ -108,15 +108,15 @@ Chord 可能在模型响应仍在流式传输时提前运行少量安全的只�
 
 ## Project key
 
-Chord 从项目根路径计算出的稳定、清洗后标识（如 `~/projects/chord` 的 key 为 `HOME-projects-chord`），用作 sessions、运行时缓存、exports、worktree 身份的命名空间。两个不同路径清洗后冲突时，Chord 追加 8 字符指纹消歧。详见 [目录与路径 — `<project-key>`](./paths_CN.md#project-key-是什么)。
+Chord 从项目根路径计算出的稳定、清洗后标识（如 `~/projects/chord` 的 key 为 `HOME-projects-chord`），用作 sessions、运行时缓存、exports、worktree 身份的命名空间。两个不同路径清洗后冲突时，Chord 追加 8 字符指纹消歧。详见 [目录与路径：`<project-key>`](./paths_CN.md#project-key-是什么)。
 
 ## Permission action（权限决策）
 
 权限规则对工具调用的判定结果，三选一：
 
-- `allow` —— 自动执行
-- `ask` —— 暂停，需要用户确认
-- `deny` —— 直接拒绝
+- `allow`：自动执行
+- `ask`：暂停，需要用户确认
+- `deny`：直接拒绝
 
 权限是 agent 级配置：全局默认写在 `~/.config/chord/agents/<role>.yaml`，项目覆盖写在 `.chord/agents/<role>.yaml`。属于产品层面的风险控制，**不是** OS 级安全沙箱。详见 [权限与安全](./permissions-and-safety_CN.md)。
 
@@ -126,7 +126,7 @@ Chord 从项目根路径计算出的稳定、清洗后标识（如 `~/projects/c
 
 ## Diagnostics bundle（诊断包）
 
-`Ctrl+G` 导出的快照，含最近日志、运行时状态、TUI 调试信息，以及当前 session 最近的轻量 LLM 请求 trace。完整 raw request / SSE dump 仍需 `log_level: debug`。报 bug 时附上。详见 [常见问题排查 — 何时检查日志](./troubleshooting_CN.md#何时检查日志)。
+`Ctrl+G` 导出的快照，含最近日志、运行时状态、TUI 调试信息，以及当前 session 最近的轻量 LLM 请求 trace。完整 raw request / SSE dump 仍需 `log_level: debug`。报 bug 时附上。详见 [常见问题排查：何时检查日志](./troubleshooting_CN.md#何时检查日志)。
 
 ## Insert / Normal 模式
 
@@ -134,7 +134,7 @@ Vim 风格的两种 TUI 模式。**Insert** 是输入态，用于打字；**Norm
 
 ## 自定义 slash 命令
 
-用户定义的 `/name [args]` 命令，输入框中输入后展开为固定文本（或 `$ARGUMENTS` 模板），作为用户消息发给模型。在 `config.yaml` 的 `commands:` 下定义，或放到 `commands/` 目录。详见 [扩展与定制 — 自定义 slash 命令](./customization_CN.md#自定义-slash-commands)。
+用户定义的 `/name [args]` 命令，输入框中输入后展开为固定文本（或 `$ARGUMENTS` 模板），作为用户消息发给模型。在 `config.yaml` 的 `commands:` 下定义，或放到 `commands/` 目录。详见 [扩展与定制：自定义 slash 命令](./customization_CN.md#自定义-slash-commands)。
 
 ## 相关
 

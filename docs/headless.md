@@ -21,7 +21,7 @@ chord headless
 go run ./cmd/chord/ headless
 ```
 
-CLI flags: `-d/--session-dir`, `-c/--continue`, `-r/--resume`, `-w/--worktree`. See [CLI — `chord headless`](./cli.md#chord-headless).
+CLI flags: `-d/--session-dir`, `-c/--continue`, `-r/--resume`, `-w/--worktree`. See [CLI: `chord headless`](./cli.md#chord-headless).
 
 ## Wire format
 
@@ -149,7 +149,7 @@ Response:
 }
 ```
 
-`list` puts the active role in `role` and the full list in `roles`, where the entry with `current: true` is the active one. `set` switches to the named role and returns the new state, and the switch takes effect immediately — even while a turn is in flight. A `set` is rejected while a `handoff_request` is pending (`resolve the pending handoff before switching role`), as are switches to the already-active role (`already the active role: <name>`), to unknown names, and to roles that exist only as SubAgent definitions. Failures carry `ok: false` with a human-readable `message`; surface the message verbatim to the user. A successful role switch is also pushed as a `role_change` event when subscribed, and the current role appears in `status_response` as `current_role`. Note that `role_change` and `role_response` are written by different paths, so their arrival order is not guaranteed — treat `role_response` as authoritative.
+`list` puts the active role in `role` and the full list in `roles`, where the entry with `current: true` is the active one. `set` switches to the named role and returns the new state, and the switch takes effect immediately, even while a turn is in flight. A `set` is rejected while a `handoff_request` is pending (`resolve the pending handoff before switching role`), as are switches to the already-active role (`already the active role: <name>`), to unknown names, and to roles that exist only as SubAgent definitions. Failures carry `ok: false` with a human-readable `message`; surface the message verbatim to the user. A successful role switch is also pushed as a `role_change` event when subscribed, and the current role appears in `status_response` as `current_role`. Note that `role_change` and `role_response` are written by different paths, so their arrival order is not guaranteed; treat `role_response` as authoritative.
 
 ### `confirm`
 
@@ -194,7 +194,7 @@ Resolve a pending `handoff_request`. Approving starts executing the saved plan w
 
 `action` accepts `accept` / `allow` (or an empty action) to approve and `deny` / `reject` to reject with a reason. `cancel` closes the pending handoff without executing the plan and without appending a rejection message. `agent` defaults to the request's default agent, and optional `pool` switches that agent's model pool before execution.
 
-A pending handoff belongs to the turn and session that raised it. Whenever Chord discards it without a client decision — on a session switch, when a superseding turn starts, or when a `send` auto-dismisses it (see [`send`](#send)) — Chord pushes a `handoff_cancelled` event to subscribed clients, and the following `status_response` reports `pending_handoff: null`, so an integration stops waiting instead of showing an approval prompt the agent has already abandoned.
+A pending handoff belongs to the turn and session that raised it. Whenever Chord discards it without a client decision (on a session switch, when a superseding turn starts, or when a `send` auto-dismisses it, as described under [`send`](#send)), Chord pushes a `handoff_cancelled` event to subscribed clients, and the following `status_response` reports `pending_handoff: null`, so an integration stops waiting instead of showing an approval prompt the agent has already abandoned.
 
 ### `local_shell`
 
@@ -262,7 +262,7 @@ If an input line on stdin exceeds the protocol line limit, Chord emits an `error
 
 Quiescent SubAgents may release their live runtime while their task and transcript remain durable. A later authorized targeted notification can rehydrate the task with a new `agent_id`; use stable `task_id` for routing and use `previous_agent_id` on `agent_started` to replace runtime-specific labels.
 
-`idle` is a global quiescence signal, not a per-request completion signal. Chord does not emit it while any agent is running, any internal event or actionable mailbox message is queued, a Handoff decision is pending, or a SubAgent has input waiting for its next request. A busy target processes queued messages at the next request boundary; a resumable non-running target is woken first. Progress and notice snapshots bound for the main inbox are actionable rather than informational: while the main is idle, Chord merges the pending undelivered updates into a single delivery batch, delivered in arrival order, and wakes the main for that delivery turn before global idle can fire — every arriving batch therefore costs one extra main turn and LLM request, and the idle event is held back until the batch has been delivered. `suppress_user_notification` does not change the idle state transition; it only tells user-facing integrations not to emit a generic completion reminder when the quiescence was not preceded by real agent work — for example startup, session / model-pool / MCP switches, or other user-initiated navigation. It is `true` unless the agent actually ran (a main turn, loop execution, or active SubAgent work) since the previous idle event. `notification` is the complementary explicit reminder for a runtime state that is waiting for user input; `reason="user_input_required"` currently covers permissions, questions, Handoff, and loop decisions.
+`idle` is a global quiescence signal, not a per-request completion signal. Chord does not emit it while any agent is running, any internal event or actionable mailbox message is queued, a Handoff decision is pending, or a SubAgent has input waiting for its next request. A busy target processes queued messages at the next request boundary; a resumable non-running target is woken first. Progress and notice snapshots bound for the main inbox are actionable rather than informational: while the main is idle, Chord merges the pending undelivered updates into a single delivery batch, delivered in arrival order, and wakes the main for that delivery turn before global idle can fire; every arriving batch therefore costs one extra main turn and LLM request, and the idle event is held back until the batch has been delivered. `suppress_user_notification` does not change the idle state transition; it only tells user-facing integrations not to emit a generic completion reminder when the quiescence was not preceded by real agent work: for example startup, session / model-pool / MCP switches, or other user-initiated navigation. It is `true` unless the agent actually ran (a main turn, loop execution, or active SubAgent work) since the previous idle event. `notification` is the complementary explicit reminder for a runtime state that is waiting for user input; `reason="user_input_required"` currently covers permissions, questions, Handoff, and loop decisions.
 
 ## Slash compatibility via `send`
 
@@ -309,7 +309,7 @@ send({"type": "send", "content": "Summarize the project structure."})
 
 In production, also handle `confirm_request` (reply via `confirm`), `question_request` (reply via `question`), and `handoff_request` (reply via `handoff`); the agent will block waiting for those replies.
 
-## chord-gateway — recommended way to consume headless
+## chord-gateway: recommended way to consume headless
 
 If you want to drive Chord from a chat surface (Feishu, WeChat, …) or build a multi-user gateway, you usually do **not** need to implement the headless protocol from scratch. The companion project [keakon/chord-gateway](https://github.com/keakon/chord-gateway) already wraps it and adds the bits the protocol intentionally leaves out:
 
@@ -340,6 +340,6 @@ For higher-level deployment patterns, see [chord-gateway](https://github.com/kea
 ## Related
 
 - [Usage](./usage.md)
-- [CLI — chord headless](./cli.md#chord-headless)
+- [CLI: chord headless](./cli.md#chord-headless)
 - [Permissions & Safety](./permissions-and-safety.md)
 - [Troubleshooting](./troubleshooting.md)

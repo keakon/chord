@@ -729,7 +729,7 @@ context:
 
 ## Related
 
-- [Configuration & Auth](./configuration.md) — configuration files, layers, and the full schema cheatsheet
-- [Usage — `/compact`](./usage.md#local-slash-commands)
+- [Configuration & Auth](./configuration.md): configuration files, layers, and the full schema cheatsheet
+- [Usage: `/compact`](./usage.md#local-slash-commands)
 - [Performance](./performance.md)
 - [Troubleshooting](./troubleshooting.md)

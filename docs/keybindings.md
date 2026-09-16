@@ -6,8 +6,8 @@ This page is the complete reference for Chord's TUI key bindings. Every binding 
 
 The TUI has two modes:
 
-- **Insert mode** — the input box is focused; you type messages
-- **Normal mode** — the transcript is focused; you navigate, search, fold, scroll, etc.
+- **Insert mode**: the input box is focused; you type messages
+- **Normal mode**: the transcript is focused; you navigate, search, fold, scroll, etc.
 
 Press `Esc` to leave Insert mode for Normal mode; press `i` (or any unbound printable key) to return to Insert mode. While the agent is running, pressing `Esc` a second time in Normal mode cancels the current turn.
 
@@ -30,7 +30,7 @@ Press `Esc` to leave Insert mode for Normal mode; press `i` (or any unbound prin
 | `Shift+Tab`        | Cycle the main agent role shown in the status bar. A switch is announced with a toast (`role: planner → builder`) because it rebuilds permissions, invalidates the cached prompt prefix, and may select the role's own model. On a SubAgent view, where a role switch does not apply, it cycles the focused view instead |
 | `Tab`              | Complete the visible slash-command or `@`-mention suggestion; otherwise does nothing            |
 
-### Normal mode — leaving and meta
+### Normal mode: leaving and meta
 
 | Key                | Action                                          |
 | ------------------ | ----------------------------------------------- |
@@ -49,7 +49,7 @@ the current mode is consulted, `switch_role` and `switch_agent` sharing a
 default binding is not a conflict. Press `?` to see each mode's effective
 bindings separately.
 
-### Normal mode — scrolling
+### Normal mode: scrolling
 
 | Key                  | Action                                                   |
 | -------------------- | -------------------------------------------------------- |
@@ -59,7 +59,7 @@ bindings separately.
 | `G`                  | Jump to the bottom                                       |
 | `gg`                 | Jump to the top (two-key sequence)                       |
 
-### Normal mode — message blocks
+### Normal mode: message blocks
 
 | Key                       | Action                                                                                |
 | ------------------------- | ------------------------------------------------------------------------------------- |
@@ -73,7 +73,7 @@ bindings separately.
 
 The structural jumps (`}`, `)`, `]` and their counterparts) accept a count prefix, so `3}` moves three user cards forward and `2(` moves two assistant cards backward. Each jump skips all other card types and never lands on error cards; when no matching card exists in that direction the view stays put. `]` / `[` use the focused card's type as the template, or the card at the top of the viewport when nothing is focused.
 
-### Normal mode — overlays
+### Normal mode: overlays
 
 | Key       | Action                                                              |
 | --------- | ------------------------------------------------------------------- |
@@ -81,7 +81,7 @@ The structural jumps (`}`, `)`, `]` and their counterparts) accept a count prefi
 | `Ctrl+E`  | Open the error panel                                                |
 | `$`       | Open the usage statistics overlay                                   |
 
-### Normal mode — search
+### Normal mode: search
 
 | Key      | Action                                                |
 | -------- | ----------------------------------------------------- |
@@ -95,7 +95,7 @@ Search covers visible textual content across conversation cards, including user 
 
 Search also covers older regions of lazily loaded large sessions. Chord loads a cold card only long enough to verify that the match is actually visible, then keeps the off-screen region cold until navigation needs it.
 
-### Both modes — agents, models, and integrations
+### Both modes: agents, models, and integrations
 
 | Key          | Action                                                                                                    |
 | ------------ | --------------------------------------------------------------------------------------------------------- |
@@ -113,7 +113,7 @@ Search also covers older regions of lazily loaded large sessions. Chord loads a 
 
 Transcript cards, the composer input, and Done/Handoff Markdown viewers share the same mouse selection gestures: drag to select a range, double-click to select the current word, and triple-click to select the current visible line.
 
-### Content viewer — Done reports and Handoff plans
+### Content viewer: Done reports and Handoff plans
 
 Done confirmation dialogs and Handoff plan selectors can open a read-only Markdown viewer with `V`. The viewer keeps the right sidebar visible, supports mouse-wheel scrolling, and shows `esc ⇢ close view` in the status bar.
 
@@ -221,6 +221,6 @@ Press `?` in Normal mode to toggle an in-app cheatsheet that reflects your curre
 
 ## Related
 
-- [Usage](./usage.md) — workflow context for the bindings above
-- [Configuration & Auth](./configuration.md) — full `config.yaml` schema
-- [Customization](./customization.md) — agents, hooks, skills, MCP, LSP
+- [Usage](./usage.md): workflow context for the bindings above
+- [Configuration & Auth](./configuration.md): full `config.yaml` schema
+- [Customization](./customization.md): agents, hooks, skills, MCP, LSP

@@ -12,7 +12,7 @@ Chord 读取的所有环境变量，按用途分组，附优先级规则。
 4. **XDG 标准环境变量**（如 `XDG_STATE_HOME`）
 5. **内置默认值**（如 `~/.local/state/chord`）
 
-`auth.yaml` 中的凭据变量仅在标量以 `$` 或 `${...}` 开头时展开。详见 [配置与认证 — auth.yaml 中的环境变量](./configuration_CN.md#authyaml-中的环境变量)。
+`auth.yaml` 中的凭据变量仅在标量以 `$` 或 `${...}` 开头时展开。详见 [配置与认证：auth.yaml 中的环境变量](./configuration_CN.md#authyaml-中的环境变量)。
 
 ## 路径覆盖
 
@@ -70,7 +70,7 @@ Chord 使用 Go 标准的 `http.ProxyFromEnvironment` 解析出站 HTTP 代理�
 | `NO_PROXY`          | 用逗号分隔的不走代理的主机模式                                                  |
 | `http_proxy` / `https_proxy` / `no_proxy` | 小写变体也会识别                                            |
 
-只想给某个工具单独设代理（如只让 `web_fetch` 走 SOCKS5），见 [配置与认证 — WebFetch](./configuration_CN.md#webfetch)。
+只想给某个工具单独设代理（如只让 `web_fetch` 走 SOCKS5），见 [配置与认证：WebFetch](./configuration_CN.md#webfetch)。
 
 ## 终端检测（只读）
 
@@ -128,6 +128,6 @@ Chord 会对所有终端禁用终端硬滚动优化，因为这些滚动序列�
 ## 相关
 
 - [目录与路径](./paths_CN.md)
-- [CLI — 全局 flag](./cli_CN.md#全局-flag)
+- [CLI：全局 flag](./cli_CN.md#全局-flag)
 - [配置与认证](./configuration_CN.md)
 - [常见问题排查](./troubleshooting_CN.md)

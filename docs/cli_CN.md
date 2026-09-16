@@ -50,7 +50,7 @@ chord [全局 flag] [命令] [命令 flag] [参数]
 
 `-v/--version` 只在 root 命令上可用。各子命令都支持 `-h/--help`，并接受上表中的路径 / API 覆盖类全局 flag。
 
-## `chord`（默认 — TUI）
+## `chord`（默认：TUI）
 
 在当前目录启动本地 TUI。该目录会成为 session working directory：相对文件路径、省略的 `shell` workdir，以及省略的 `grep` / `glob` 搜索根都会从这里解析。当 `--worktree` 或 `chord resume` 切换到 Chord 管理的 worktree 时，该 worktree 路径会成为 session working directory；文件工具本身不需要理解 git worktree。Chord 会在第一条用户消息前（以及上下文压缩后）注入这个目录，让模型看到与工具一致的路径基准。面向用户的工具卡片可以为了可读性显示相对该目录的路径，但原始 tool-call 参数和 session 导出会保留模型实际传入的路径，便于审计。
 
@@ -377,12 +377,12 @@ chord resume 20260428064910975 --fork-history      # fork 最近一次已应用�
 chord resume 20260428064910975 --fork-history=2    # fork 第 2 次已应用的边界
 ```
 
-- 压缩边界就是会话中途应用过的 `[Context Summary]` checkpoint：每次压缩都会把压缩前的完整会话备份为 `main.pre-compress-N.jsonl`，并配套写入 `history-N.status.json`，只有应用全部完成才标记为 applied。fork 到已应用的边界 N 会还原那一代会话的真实状态：fork 的 `main.jsonl` 逐条取自 `main.pre-compress-N.jsonl`，正文记录原样复制——包括它开头的 checkpoint 摘要卡，那是当时真实看到的状态的一部分（fork 第 2 次边界时，第 1 次的摘要卡就在顶部）。更早的 `history-1..N-1.md` 压缩归档会一并复制过来，checkpoint 里的历史地图因此仍然有效：模型可以按需读取归档，查边界之前被压缩掉的内容。边界自身的 `history-N.md` 不会复制——被 fork 的 `pre-compress-N` 正文仍原样带着那些消息，复制它只会让内容重复。更早的内容通过归档查看，而不是拼回会话正文。
+- 压缩边界就是会话中途应用过的 `[Context Summary]` checkpoint：每次压缩都会把压缩前的完整会话备份为 `main.pre-compress-N.jsonl`，并配套写入 `history-N.status.json`，只有应用全部完成才标记为 applied。fork 到已应用的边界 N 会还原那一代会话的真实状态：fork 的 `main.jsonl` 逐条取自 `main.pre-compress-N.jsonl`，正文记录原样复制，包括它开头的 checkpoint 摘要卡，那是当时真实看到的状态的一部分（fork 第 2 次边界时，第 1 次的摘要卡就在顶部）。更早的 `history-1..N-1.md` 压缩归档会一并复制过来，checkpoint 里的历史地图因此仍然有效：模型可以按需读取归档，查边界之前被压缩掉的内容。边界自身的 `history-N.md` 不会复制：被 fork 的 `pre-compress-N` 正文仍原样带着那些消息，复制它只会让内容重复。更早的内容通过归档查看，而不是拼回会话正文。
 - 消息正文（用户输入、助手回复、工具调用与结果、diff）原样保留：内容里的会话号、路径、命令是当时的历史事实，不做改写。图片/PDF 附件会复制进新会话并改写引用路径。
 - fork 出的新会话从零开始：usage/token 统计与运行状态不复制。`session-meta.json` 记录 `forked_from`，并沿用源会话的 worktree 归属与手动启用的 MCP server。
 - 新会话 id 会打印出来，随后自动恢复进入 TUI。会话至少要有一次已应用的压缩；请求超出可用范围的边界会报错，并列出合法的 `history-N` 取值。
 
-**不复制的内容：** fork 只带主会话正文与压缩归档，其余一律不复制。子代理的独立会话记录、委托任务（task）状态、mailbox、后台任务、artifacts，以及源会话 `subagents/`、`artifacts/`、`snapshot.json` 下的其他运行期状态——这些状态属于正在运行的源会话，无法在历史时间点如实重建，usage 统计同样绑定源会话。影响：浏览历史不受影响；但如果在 fork 里继续干活，fork 之前的委托任务只保留为可见的消息卡片——无法再查询或恢复执行，依赖那些子代理/任务的线也接不下去。fork 内部新发起的子代理与任务一切正常。
+**不复制的内容：** fork 只带主会话正文与压缩归档，其余一律不复制。子代理的独立会话记录、委托任务（task）状态、mailbox、后台任务、artifacts，以及源会话 `subagents/`、`artifacts/`、`snapshot.json` 下的其他运行期状态：这些状态属于正在运行的源会话，无法在历史时间点如实重建，usage 统计同样绑定源会话。影响：浏览历史不受影响；但如果在 fork 里继续干活，fork 之前的委托任务只保留为可见的消息卡片，无法再查询或恢复执行，依赖那些子代理/任务的线也接不下去。fork 内部新发起的子代理与任务一切正常。
 
 ## `chord import <source> [file]`
 
@@ -426,7 +426,7 @@ chord import claude ~/.claude/projects/**/<sessionId>.jsonl
 chord import claude --id <session-id>
 ```
 
-完整的工具/推理策略、转换告警、provider 安全 wire view 见 [使用指南 — 导入外部会话](./usage_CN.md#导入外部会话)。
+完整的工具/推理策略、转换告警、provider 安全 wire view 见 [使用指南：导入外部会话](./usage_CN.md#导入外部会话)。
 
 ## `chord completion <shell>`
 

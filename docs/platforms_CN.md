@@ -124,7 +124,7 @@ Chord 当前自动检测并启用：
 
 WSL 自动探测不会选 `Scripts\python.exe` 里的 Windows venv。WSL 内开发请在 WSL 里建 Linux venv，或在 `lsp.pyright.options` 中显式设置 `python.pythonPath`。
 
-详见 [扩展与定制 — LSP](./customization_CN.md#lsp)。
+详见 [扩展与定制：LSP](./customization_CN.md#lsp)。
 
 ## 终端兼容
 
@@ -146,7 +146,7 @@ WSL 自动探测不会选 `Scripts\python.exe` 里的 Windows venv。WSL 内开�
 Chord 能在 Windows 上跑，但 Windows 不是主要平台。具体：
 
 - TUI 在现代终端（Windows Terminal、WezTerm）下工作正常。
-- `prevent_sleep` 是 no-op——请用 Windows 电源设置。
+- `prevent_sleep` 是 no-op：请用 Windows 电源设置。
 - `ime_switch_target` 需要 `im-select.exe`。
 - 工具调用中的文件路径走 Windows 风格，反斜杠原样保留。
 - `shell`（前台命令与后台 job）在 Windows 上也仍是非交互的，但超时 / 取消清理依赖直接终止进程，而不是 Unix 风格的 session / 进程组控制；因此对后代进程的清理可能不如 Unix 完整。
@@ -171,7 +171,7 @@ WSL 大致表现得像 Linux：
 - 是否在 `tmux` / `screen` / WSL 内
 - 一份诊断包（`Ctrl+G`）
 
-日志位置和包结构见 [常见问题排查 — 何时检查日志](./troubleshooting_CN.md#何时检查日志)。
+日志位置和包结构见 [常见问题排查：何时检查日志](./troubleshooting_CN.md#何时检查日志)。
 
 ## 相关
 

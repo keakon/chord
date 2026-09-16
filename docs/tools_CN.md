@@ -36,7 +36,7 @@
 | `job_list` | 列出你可读取或停止的后台 job（id、status、已运行时长、标签），含主 agent 与你直接 owner 启动的 job。 |
 | `job_kill` | 按 `job_id` 停止后台 job，可选 `reason`。 |
 
-长命令不必阻塞当前回合。超出前台预算的命令会继续作为后台 job 运行，工具卡片会显示它的 job id，job 结束时 agent 会收到通知——它可以先做别的事，或结束回合并等完成通知唤醒，无需干等。`job_output` 只返回增量输出；有界等待超时也不会杀掉 job。连续的后台完成唤醒之间没有用户输入时会被限制次数，超过后新的完成结果要等你下一条消息才会投递。后台 job 也会随会话结束——切换会话或退出客户端都会终止它——所以天级任务应交给 tmux、systemd 或 CI 这类外部 runner。
+长命令不必阻塞当前回合。超出前台预算的命令会继续作为后台 job 运行，工具卡片会显示它的 job id，job 结束时 agent 会收到通知，它可以先做别的事，或结束回合并等完成通知唤醒，无需干等。`job_output` 只返回增量输出；有界等待超时也不会杀掉 job。连续的后台完成唤醒之间没有用户输入时会被限制次数，超过后新的完成结果要等你下一条消息才会投递。后台 job 也会随会话结束（切换会话或退出客户端都会终止它），所以天级任务应交给 tmux、systemd 或 CI 这类外部 runner。
 
 ## Web
 
@@ -54,11 +54,11 @@
 | `save_artifact` | 在会话 artifacts 目录下保存或更新会话产物（报告、任务图、日志等），或保存不可变的机器可读结果。 |
 | `read_artifact` | 按会话相对路径读取会话产物。 |
 
-`save_artifact` 有两种互斥的参数形态：用 `filename` 加 `content`（必要时配 `mode: create / append / overwrite`）写入或更新会话产物；或者改用 `result_type` 加 `result` 参数对——`result` 必须是 JSON object——把载荷作为不可变、内容寻址的结果存入 `artifacts/results/`，返回的 ResultRef（`id`、`result_type`、`rel_path`、`sha256`、`size_bytes`）可以直接作为 `complete` 的 `result_ref` 传入。
+`save_artifact` 有两种互斥的参数形态：用 `filename` 加 `content`（必要时配 `mode: create / append / overwrite`）写入或更新会话产物；或者改用 `result_type` 加 `result` 参数对（`result` 必须是 JSON object）把载荷作为不可变、内容寻址的结果存入 `artifacts/results/`，返回的 ResultRef（`id`、`result_type`、`rel_path`、`sha256`、`size_bytes`）可以直接作为 `complete` 的 `result_ref` 传入。
 
 ## 编排与控制
 
-这些工具控制的是 agent 工作流而不是本地副作用，YOLO 不会像对普通工具那样把它们的权限规则一起放开——它消除的是确认文件编辑和 shell 命令的摩擦，不是角色的边界。`handoff`、`delegate`、`cancel` 会给角色带来原本没有的能力，YOLO 下它们仍按配置的规则判定，只放宽一处：`ask` 不再弹确认框、直接放行。`allow` 照常可用，`deny` 照常拒绝——内置 `builder` 显式 deny `handoff` 和 `delegate` 以保持单 agent，这两条 deny 在 YOLO 下继续生效——通配默认的行为也和关闭时一致。`done` 和 `compact_context` 只是结束或收缩当前这段工作，YOLO 不改变它们的专门语义。关闭 YOLO 即恢复原权限。详见[权限与安全](./permissions-and-safety_CN.md)。
+这些工具控制的是 agent 工作流而不是本地副作用，YOLO 不会像对普通工具那样把它们的权限规则一起放开：它消除的是确认文件编辑和 shell 命令的摩擦，不是角色的边界。`handoff`、`delegate`、`cancel` 会给角色带来原本没有的能力，YOLO 下它们仍按配置的规则判定，只放宽一处：`ask` 不再弹确认框、直接放行。`allow` 照常可用，`deny` 照常拒绝（内置 `builder` 显式 deny `handoff` 和 `delegate` 以保持单 agent，这两条 deny 在 YOLO 下继续生效），通配默认的行为也和关闭时一致。`done` 和 `compact_context` 只是结束或收缩当前这段工作，YOLO 不改变它们的专门语义。关闭 YOLO 即恢复原权限。详见[权限与安全](./permissions-and-safety_CN.md)。
 
 | 工具 | 用途 |
 | --- | --- |
@@ -80,7 +80,7 @@
 
 `done`、`complete` 和 `escalate` 可能携带较长的 Markdown 报告、总结或升级原因。参数仍在流式接收时，TUI 会临时显示 `N chars received`；接收完成后，正文按 Markdown 直接渲染在卡片里。`complete` 还会保留结构化完成信息——修改文件、遗留限制、已知风险、后续建议和 artifact 引用。
 
-这类卡片恒展开，标题行只有工具名：报告本身就是卡片的全部内容，折叠成一行预览、再把摘要压回标题，只是把正文里已有的内容重说一遍。`compact_context`（目标、已完成、决策、遗留问题、下一步、状态文件）、`delegate`（描述、worker 句柄、完成信息）、`question`（每个问题、选项与选中项）和 `notify`（target、kind、消息）同样如此：没有折叠标记，`o` / `Enter` / `Space` 对它们不生效。`write`、`edit`、`apply_patch`、`delete`、`todo_write`、`handoff` 也恒展开：正文才是卡片的主体，不该藏起来，因此同样没有折叠标记，也不响应折叠键。可折叠的卡片——`read`、`grep`、`glob`、`shell`、`cancel` 以及通用工具调用——默认收起，保留可折叠正文和以参数为索引的标题行，标题带 `▸` / `▾`。
+这类卡片恒展开，标题行只有工具名：报告本身就是卡片的全部内容，折叠成一行预览、再把摘要压回标题，只是把正文里已有的内容重说一遍。`compact_context`（目标、已完成、决策、遗留问题、下一步、状态文件）、`delegate`（描述、worker 句柄、完成信息）、`question`（每个问题、选项与选中项）和 `notify`（target、kind、消息）同样如此：没有折叠标记，`o` / `Enter` / `Space` 对它们不生效。`write`、`edit`、`apply_patch`、`delete`、`todo_write`、`handoff` 也恒展开：正文才是卡片的主体，不该藏起来，因此同样没有折叠标记，也不响应折叠键。可折叠的卡片（`read`、`grep`、`glob`、`shell`、`cancel` 以及通用工具调用）默认收起，保留可折叠正文和以参数为索引的标题行，标题带 `▸` / `▾`。
 
 `delegate` 只有一个工具结果，即异步启动句柄。后续 `complete` 调用和 mailbox 更新是独立的 runtime 事件，按稳定的 `task_id` 更新已有委派任务/卡片，不会生成额外的 `delegate` 工具结果。每次 `complete` 报告都会在 owner 视图创建一张 **AGENT COMPLETE** 通知卡；worker 终止失败显示为 **AGENT BLOCKED**，并唤醒直接 owner。
 
@@ -92,7 +92,7 @@ agent 间消息遵守请求边界：目标 busy 时，消息只入队并随其�
 
 ## MCP 工具
 
-已配置 MCP server 暴露的工具会以 `mcp_<server>_<tool>` 形式注册（例如 `mcp_search_web_search_exa`），权限规则按这个完整名称匹配。用 MCP server 配置里的 `allowed_tools` 可以限制注册哪些远程工具，见[配置 — MCP](./configuration_CN.md#mcp)。
+已配置 MCP server 暴露的工具会以 `mcp_<server>_<tool>` 形式注册（例如 `mcp_search_web_search_exa`），权限规则按这个完整名称匹配。用 MCP server 配置里的 `allowed_tools` 可以限制注册哪些远程工具，见[配置：MCP](./configuration_CN.md#mcp)。
 
 ## 相关
 

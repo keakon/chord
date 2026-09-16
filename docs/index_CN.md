@@ -10,47 +10,46 @@
 - **配置模型**：[配置与认证](./configuration_CN.md) · [模型配置速查](./model-configs_CN.md) · [推理与思考](./reasoning_CN.md) · [示例配置库](./examples/index_CN.md)
 - **安全编辑文件**：[编辑工具](./edit-tools_CN.md) · [权限与安全](./permissions-and-safety_CN.md)
 - **远程控制**：[Headless](./headless_CN.md) · [权限与安全](./permissions-and-safety_CN.md)
-- **长任务**：[使用指南 — `/loop`](./usage_CN.md#loop--持续执行模式) · [上下文管理](./context-management_CN.md)
+- **长任务**：[使用指南：`/loop`](./usage_CN.md#loop持续执行模式) · [上下文管理](./context-management_CN.md)
 - **扩展定制**：[扩展与定制](./customization_CN.md) · [Hooks](./hooks_CN.md)
-- **理解性能**：[性能](./performance_CN.md)
 - **排障**：[常见问题排查](./troubleshooting_CN.md)
 
 ## 入门
 
-- [快速开始](./quickstart_CN.md) —— 几分钟跑起来
-- [使用指南](./usage_CN.md) —— TUI 基础、会话、常用命令、headless 模式
-- [术语表](./glossary_CN.md) —— 文档中反复出现的概念
+- [快速开始](./quickstart_CN.md)：几分钟跑起来
+- [使用指南](./usage_CN.md)：TUI 基础、会话、常用命令、headless 模式
+- [术语表](./glossary_CN.md)：文档中反复出现的概念
 
 ## 参考
 
-- [CLI](./cli_CN.md) —— 所有命令、子命令、flag
-- [配置与认证](./configuration_CN.md) —— `config.yaml`、`auth.yaml`、provider、模型池、完整速查表
-- [上下文管理](./context-management_CN.md) —— 上下文压缩与上下文剪裁：原理、配置、调参
-- [模型配置速查](./model-configs_CN.md) —— 常见 provider / model 家族的可复制片段
-- [推理与思考](./reasoning_CN.md) —— 思考如何按线路请求、返回与回放，怎么判断回放契约，以及各家族配方入口
-- [内置工具](./tools_CN.md) —— 全部工具名，配权限规则和 hook 过滤器时用
-- [编辑工具](./edit-tools_CN.md) —— `edit`、`apply_patch`、`write` 如何选择，以及参数格式、示例和安全行为
-- [项目记忆](./usage_CN.md#项目记忆memory) —— 跨会话记忆：`MEMORY.md`、自动抽取、信任边界与 Git 语义
-- [快捷键](./keybindings_CN.md) —— 完整键位与自定义方式
-- [目录与路径](./paths_CN.md) —— 配置 / state / cache / 项目级布局，哪些可删
-- [环境变量](./environment_CN.md) —— Chord 读取的所有 `CHORD_*` / `XDG_*` / 代理变量
-- [平台支持](./platforms_CN.md) —— macOS / Linux / Windows / WSL 各支持到什么程度
-- [性能](./performance_CN.md) —— 与其他 agent harness 的实测对比、Chord 的优化机制，变慢时怎么办
+- [CLI](./cli_CN.md)：所有命令、子命令、flag
+- [配置与认证](./configuration_CN.md)：`config.yaml`、`auth.yaml`、provider、模型池、完整速查表
+- [上下文管理](./context-management_CN.md)：上下文压缩与上下文剪裁：原理、配置、调参
+- [模型配置速查](./model-configs_CN.md)：常见 provider / model 家族的可复制片段
+- [推理与思考](./reasoning_CN.md)：思考如何按线路请求、返回与回放，怎么判断回放契约，以及各家族配方入口
+- [内置工具](./tools_CN.md)：全部工具名，配权限规则和 hook 过滤器时用
+- [编辑工具](./edit-tools_CN.md)：`edit`、`apply_patch`、`write` 如何选择，以及参数格式、示例和安全行为
+- [项目记忆](./usage_CN.md#项目记忆memory)：跨会话记忆：`MEMORY.md`、自动抽取、信任边界与 Git 语义
+- [快捷键](./keybindings_CN.md)：完整键位与自定义方式
+- [目录与路径](./paths_CN.md)：配置 / state / cache / 项目级布局，哪些可删
+- [环境变量](./environment_CN.md)：Chord 读取的所有 `CHORD_*` / `XDG_*` / 代理变量
+- [平台支持](./platforms_CN.md)：macOS / Linux / Windows / WSL 各支持到什么程度
+- [性能](./performance_CN.md)：与其他 agent harness 的实测对比、Chord 的优化机制，变慢时怎么办
 
 ## 进阶
 
-- [扩展与定制](./customization_CN.md) —— agents、skills、MCP、按需配置 LSP、自定义 slash 命令
-- [Hooks](./hooks_CN.md) —— 14 个触发点、payload 协议、示例
-- [示例配置库](./examples/index_CN.md) —— 4 套可直接复制粘贴的 `config.yaml`
+- [扩展与定制](./customization_CN.md)：agents、skills、MCP、按需配置 LSP、自定义 slash 命令
+- [Hooks](./hooks_CN.md)：14 个触发点、payload 协议、示例
+- [示例配置库](./examples/index_CN.md)：4 套可直接复制粘贴的 `config.yaml`
 
 ## 集成
 
-- [Headless](./headless_CN.md) —— `chord headless` JSON 控制面与 `chord-gateway`
+- [Headless](./headless_CN.md)：`chord headless` JSON 控制面与 `chord-gateway`
 
 ## 安全
 
-- [权限与安全](./permissions-and-safety_CN.md) —— 权限模型与安全边界
+- [权限与安全](./permissions-and-safety_CN.md)：权限模型与安全边界
 
 ## 排障
 
-- [常见问题排查](./troubleshooting_CN.md) —— 症状、常见原因、日志采集
+- [常见问题排查](./troubleshooting_CN.md)：症状、常见原因、日志采集

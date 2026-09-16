@@ -23,7 +23,7 @@ Chord 也会为当前会话探测一个 Python 虚拟环境：从 session workin
 
 常见用途：为不同角色设置不同模型链和权限，或增加专门的 reviewer、backend、frontend、docs 等角色；也可以通过 `prompt_preset` 让自定义角色复用内置角色 prompt 块，并用 `prompt_append` 在其基础上补充而非替换。
 
-完整 Agent 配置字段、示例和委派选项见 [配置与认证 — Agent 配置](./configuration_CN.md#agent-配置)。
+完整 Agent 配置字段、示例和委派选项见 [配置与认证：Agent 配置](./configuration_CN.md#agent-配置)。
 
 ## Skills
 

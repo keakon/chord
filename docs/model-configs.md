@@ -1244,7 +1244,7 @@ Notes:
   `reasoning.effort` and `openai_visible` only when the gateway documents its
   mapping.
 - For compatible gateways, use the exact model ID and limits published by that
-  gateway/account. See [Troubleshooting — DeepSeek / OpenAI-compatible thinking-mode 400s](./troubleshooting.md#deepseek--openai-compatible-thinking-mode-400s).
+  gateway/account. See [Troubleshooting: DeepSeek / OpenAI-compatible thinking-mode 400s](./troubleshooting.md#deepseek--openai-compatible-thinking-mode-400s).
 
 Additional notes:
 

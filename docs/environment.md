@@ -12,7 +12,7 @@ For paths and the API base, Chord resolves a value with this order:
 4. **XDG-standard env var** (e.g. `XDG_STATE_HOME`)
 5. **Built-in default** (e.g. `~/.local/state/chord`)
 
-For credentials referenced by `auth.yaml`, the variable is expanded only when the YAML scalar starts with `$` or `${...}`. See [Configuration & Auth — Environment variables in auth.yaml](./configuration.md#environment-variables-in-authyaml).
+For credentials referenced by `auth.yaml`, the variable is expanded only when the YAML scalar starts with `$` or `${...}`. See [Configuration & Auth: Environment variables in auth.yaml](./configuration.md#environment-variables-in-authyaml).
 
 ## Path overrides
 
@@ -70,7 +70,7 @@ Chord uses Go's standard proxy resolution (`http.ProxyFromEnvironment`) for outb
 | `NO_PROXY`         | Comma-separated host patterns that bypass the proxy                                                                |
 | `http_proxy` / `https_proxy` / `no_proxy` | Lowercase variants are also recognized                                                                  |
 
-For per-tool proxy override (e.g. routing only `web_fetch` through a SOCKS5), see [Configuration & Auth — WebFetch](./configuration.md#webfetch).
+For per-tool proxy override (e.g. routing only `web_fetch` through a SOCKS5), see [Configuration & Auth: WebFetch](./configuration.md#webfetch).
 
 ## Terminal detection (read-only)
 
@@ -128,6 +128,6 @@ These are intended for development, troubleshooting, and bug reports — not for
 ## Related
 
 - [Paths](./paths.md)
-- [CLI — global flags](./cli.md#global-flags)
+- [CLI: global flags](./cli.md#global-flags)
 - [Configuration & Auth](./configuration.md)
 - [Troubleshooting](./troubleshooting.md)
