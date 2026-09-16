@@ -123,6 +123,26 @@ func (a *MainAgent) armLengthRecoveryResume(prompt string) {
 	a.syncPendingCompactionResumeSnapshot()
 }
 
+// armModelDrivenAutoContinueResume records the durable resume intent for a
+// model-driven checkpoint that was just applied. The in-process continuation
+// resumes the same turn through a transient notice that dies with the process,
+// so without this the intent would live only in memory: a crash before that
+// continuation's response lands would restore a session holding a bare
+// checkpoint and no instruction to continue on it. Mirrors
+// armOversizeAutoContinueResume; the next successful main response retires it.
+func (a *MainAgent) armModelDrivenAutoContinueResume() {
+	if a == nil {
+		return
+	}
+	state := &recovery.PendingCompactionResume{
+		Kind:       string(compactionResumeAutoContinue),
+		UserIntent: strings.TrimSpace(a.latestRecoverableUserIntent()),
+	}
+	state.Mode = a.chooseCompactionResumeMode(state.UserIntent)
+	a.setPendingCompactionResume(state)
+	a.syncPendingCompactionResumeSnapshot()
+}
+
 func (a *MainAgent) applyPendingCompactionResumeOverlays(state *recovery.PendingCompactionResume) {
 	if a == nil {
 		return

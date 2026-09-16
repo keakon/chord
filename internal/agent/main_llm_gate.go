@@ -1089,7 +1089,11 @@ func (a *MainAgent) resumePendingMainLLMAfterCompaction(pending *pendingMainLLMC
 				// summary message itself, which the model must not mistake for
 				// a fresh request to execute. When queued input was merged it
 				// already leads the request, so no instruction is appended.
+				// The instruction is transient, so the same intent is also
+				// persisted: a crash before this continuation's response lands
+				// must still resume on an instruction, not a bare checkpoint.
 				a.pendingModelDrivenNotice = appendContextPressureVerificationGuidance("A model-driven context checkpoint was applied; continue the current task on the compacted context, processing any new input or task results first. If only the final response remains, deliver it without another checkpoint.")
+				a.armModelDrivenAutoContinueResume()
 			}
 			a.beginMainLLMAfterPreparation(a.turn.Ctx, pending.turnID, pending.agentErrSourceID)
 			return true

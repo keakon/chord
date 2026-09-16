@@ -1648,6 +1648,9 @@ func TestModelDrivenResumeMergesQueuedUserMessageIntoContinuation(t *testing.T) 
 	if notice := a.pendingModelDrivenNotice; notice != "" {
 		t.Fatalf("merged user input leads the continuation, so no 'continue the current task' notice may be appended, got %q", notice)
 	}
+	if resume := a.snapshotPendingCompactionResume(); resume != nil {
+		t.Fatalf("merged user input leads the continuation, so no durable resume may be armed, got %#v", resume)
+	}
 	snapshot := a.ctxMgr.Snapshot()
 	if len(snapshot) != 3 {
 		t.Fatalf("continuation context must read [summary, first, second], got %d messages", len(snapshot))
@@ -1692,6 +1695,16 @@ func TestModelDrivenResumeWithEmptyQueueAppendsContinueInstruction(t *testing.T)
 	}
 	if notice := a.pendingModelDrivenNotice; notice == "" || !strings.Contains(notice, "continue the current task") {
 		t.Fatalf("an empty queue must not suppress the 'continue the current task' instruction, got %q", notice)
+	}
+	// The instruction above dies with the process, so the same intent must be
+	// recoverable from the session snapshot until this continuation's response
+	// lands.
+	resume := a.snapshotPendingCompactionResume()
+	if resume == nil || resume.Kind != string(compactionResumeAutoContinue) {
+		t.Fatalf("an empty-queue continuation must arm a durable auto-continue resume, got %#v", resume)
+	}
+	if resume.Mode != compactionResumeModeSyntheticContinue || resume.AwaitUserInput {
+		t.Fatalf("resume = %#v, want an unconditional synthetic continue", resume)
 	}
 	snapshot := a.ctxMgr.Snapshot()
 	if len(snapshot) != 1 || !snapshot[0].IsCompactionSummary {

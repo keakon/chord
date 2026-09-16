@@ -512,6 +512,48 @@ func TestRestoreSessionAtStartupRestoresPendingCompactionResume(t *testing.T) {
 	}
 }
 
+// TestRestoreSessionAtStartupResumesCrashedModelDrivenContinuation pins the
+// crash window between a model-driven checkpoint apply and its continuation
+// response: the transcript ends in the model-driven checkpoint while the
+// snapshot still carries the auto-continue intent, so a restored session must
+// resume on an explicit instruction instead of a bare checkpoint.
+func TestRestoreSessionAtStartupResumesCrashedModelDrivenContinuation(t *testing.T) {
+	projectRoot := t.TempDir()
+	sessionDir := testProjectSessionDir(t, projectRoot, "model-driven-auto-continue")
+	rm := recovery.NewRecoveryManager(sessionDir)
+	checkpoint := "[Context Summary]\n## Current User Request\n- Latest user request: finish the parser refactor\n\n## Next Step\n- run the parser tests\n\n[Context compressed]\nEarlier conversation was compacted into this model-driven context checkpoint."
+	if err := rm.PersistMessage("main", message.Message{
+		Role:                  "user",
+		Content:               checkpoint,
+		IsCompactionSummary:   true,
+		CompactionSummaryMode: compactionSummaryModeModelDriven,
+	}); err != nil {
+		t.Fatalf("PersistMessage(checkpoint): %v", err)
+	}
+	if err := rm.SaveSnapshot(&recovery.SessionSnapshot{PendingCompactionResume: &recovery.PendingCompactionResume{
+		Kind: string(compactionResumeAutoContinue),
+		Mode: compactionResumeModeSyntheticContinue,
+	}}); err != nil {
+		t.Fatalf("SaveSnapshot: %v", err)
+	}
+	rm.Close()
+
+	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
+	if err := a.RestoreSessionAtStartup(); err != nil {
+		t.Fatalf("RestoreSessionAtStartup: %v", err)
+	}
+	if a.pendingCompactionResume == nil || a.pendingCompactionResume.AwaitUserInput {
+		t.Fatalf("pendingCompactionResume = %#v, want a live auto-continue resume", a.pendingCompactionResume)
+	}
+	a.applyPendingCompactionResumeOverlaysForContinue()
+	if got := a.pendingAutoContinuePrompt; !strings.Contains(got, "compaction completed successfully") {
+		t.Fatalf("pendingAutoContinuePrompt = %q, want the auto-continue instruction", got)
+	}
+	if a.pendingCompactionResume != nil {
+		t.Fatal("expected the resume to be consumed by the continue")
+	}
+}
+
 func TestRestoreSessionAtStartupPausesUnknownCompactionResume(t *testing.T) {
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "unknown-compaction-resume")
