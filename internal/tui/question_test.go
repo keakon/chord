@@ -416,3 +416,49 @@ func TestQuestionDialogQuickSelectHintMatchesOptionCount(t *testing.T) {
 		t.Fatalf("quick-select hint should not advertise 1-9 for 2 options, got:\n%s", plain)
 	}
 }
+
+// TestQuestionDialogCustomInputPreservesDialogBackground guards the regression
+// where the custom-answer textarea rows dropped the dialog background: the
+// textarea's View() emits SGR resets that wiped the DialogBg established by the
+// border box, leaving the answer rows on the terminal default background.
+func TestQuestionDialogCustomInputPreservesDialogBackground(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+
+	m := NewModelWithSize(nil, 120, 40)
+	m.mode = ModeQuestion
+	ta := newQuestionTextarea(80)
+	ta.SetValue("alpha query\nbeta view\n")
+	m.question = questionState{
+		request: &QuestionRequest{Questions: []tools.QuestionItem{{
+			Header:   "Direction",
+			Question: "Choose one",
+		}}},
+		input:  ta,
+		custom: true,
+	}
+
+	out := m.renderQuestionDialog()
+	if out == "" {
+		t.Fatal("expected non-empty question dialog")
+	}
+
+	dialogBg := colorOfTheme(currentTheme.DialogBg)
+
+	// The first answer line and a later line must both sit on the dialog
+	// background, including the cell that abuts the textarea's trailing pad
+	// cells. Each needle is the last character of one answer line and occurs
+	// nowhere earlier in the dialog.
+	for _, needle := range []string{"y", "w"} {
+		line := findRenderedLineContaining(out, needle)
+		if line == "" {
+			t.Fatalf("missing input line containing %q in dialog: %q", needle, stripANSI(out))
+		}
+		cell, ok := findRenderedCell(line, needle)
+		if !ok {
+			t.Fatalf("missing input text cell %q in line: %q", needle, stripANSI(line))
+		}
+		if !colorsEqual(cell.Style.Bg, dialogBg) {
+			t.Fatalf("custom-answer cell %q background = %v, want dialog bg %v", needle, cell.Style.Bg, dialogBg)
+		}
+	}
+}

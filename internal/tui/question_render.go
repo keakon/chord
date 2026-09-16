@@ -149,8 +149,13 @@ func (m *Model) renderQuestionDialog() string {
 		))
 	}
 
-	body := strings.Join(lines, "\n")
-	out := DirectoryBorderStyle.Width(maxWidth).Render(body)
+	// Route the body through renderDialogBox so every line (including the
+	// textarea's custom-answer lines) keeps the dialog background. The textarea
+	// View() emits its own SGR resets that would otherwise wipe the DialogBg
+	// established by the border box, leaving the answer rows on the terminal's
+	// default background. styleDialogBodyLines re-applies DialogBg after each
+	// reset (preserveBackground), matching renderConfirmDialog.
+	out := renderDialogBox(maxWidth, lines)
 	if !m.question.custom && m.question.deadline.IsZero() && len(q.Options) > 0 {
 		m.question.renderCacheWidth = m.width
 		m.question.renderCacheTheme = m.theme.Name
