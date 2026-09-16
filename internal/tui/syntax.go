@@ -98,9 +98,78 @@ var syntaxHighlightExtWhitelist = map[string]struct{}{
 	".zsh":      {},
 }
 
+// syntaxHighlightExtAliases names the lexer for whitelisted extensions that
+// Chroma's filename globs do not resolve at all (nothing claims ".mdx"), yet
+// that we still want highlighted as the given language.
 var syntaxHighlightExtAliases = map[string]string{
+	".mdx": "markdown",
+}
+
+// syntaxHighlightExtFastNames maps the whitelisted extensions that appear most
+// often in tool output to the registered name of the lexer Chroma's filename
+// globs resolve them to. Chroma's registry only consults its name and alias
+// tables while the lookup contains no dot, so a dotted extension like ".go"
+// always falls through to a Match that scans every lexer's patterns and their
+// ignored-suffix variants; naming the lexer here skips that scan for the first
+// file of each type. Extensions missing from the table fall back to the
+// memoized glob lookup, so an incomplete table costs speed and never
+// correctness, and TestLexerFastNamesMatchGlobMatch pins every entry to the
+// lexer that fallback returns.
+var syntaxHighlightExtFastNames = map[string]string{
+	".bash":     "Bash",
+	".c":        "C",
+	".cc":       "C++",
+	".cjs":      "JavaScript",
+	".cpp":      "C++",
+	".css":      "CSS",
+	".cxx":      "C++",
+	".dart":     "Dart",
+	".fish":     "Fish",
+	".go":       "Go",
+	".graphql":  "GraphQL",
+	".h":        "C",
+	".hcl":      "HCL",
+	".hh":       "C++",
+	".htm":      "HTML",
+	".html":     "HTML",
+	".hpp":      "C++",
+	".ini":      "INI",
+	".java":     "Java",
+	".js":       "JavaScript",
+	".json":     "JSON",
+	".jsx":      "react",
+	".kt":       "Kotlin",
+	".kts":      "Kotlin",
+	".lua":      "Lua",
+	".m":        "Mathematica",
 	".markdown": "markdown",
-	".mdx":      "markdown",
+	".md":       "markdown",
+	".mjs":      "JavaScript",
+	".nim":      "Nim",
+	".php":      "PHP",
+	".proto":    "Protocol Buffer",
+	".ps1":      "PowerShell",
+	".py":       "Python",
+	".rb":       "Ruby",
+	".rs":       "Rust",
+	".rst":      "reStructuredText",
+	".sass":     "Sass",
+	".scala":    "Scala",
+	".scss":     "SCSS",
+	".sh":       "Bash",
+	".sql":      "MySQL",
+	".svelte":   "Svelte",
+	".swift":    "Swift",
+	".tf":       "Terraform",
+	".toml":     "TOML",
+	".ts":       "TypeScript",
+	".tsx":      "TypeScript",
+	".vue":      "vue",
+	".xml":      "XML",
+	".yaml":     "YAML",
+	".yml":      "YAML",
+	".zig":      "Zig",
+	".zsh":      "Bash",
 }
 
 type specialFilenameLexerRule struct {
@@ -170,13 +239,16 @@ func lexerForWhitelistedExtension(base string) chroma.Lexer {
 	if lexerName, ok := syntaxHighlightExtAliases[ext]; ok {
 		return chromaLexerForName(lexerName)
 	}
-	// Chroma resolves the dotted extension through its filename glob table,
-	// which is what keeps ".sql" on the MySQL lexer and leaves ".gql"
-	// unhighlighted. The name and alias tables disagree with that table in both
-	// directions (".gql" resolves as a name but no lexer claims the glob, and
-	// the ".sql" name resolves to a lexer the glob match outranks), so looking
-	// the bare name up first is not equivalent. The memoized lookup pays the
-	// glob match once per extension instead.
+	if lexerName, ok := syntaxHighlightExtFastNames[ext]; ok {
+		return chromaLexerForName(lexerName)
+	}
+	// Everything else is resolved through Chroma's filename glob table, which
+	// leaves the extensions no lexer claims unhighlighted (".gql") and, for the
+	// extensions it does claim, is what the fast table above spells out. Looking
+	// the bare name up first is not equivalent: the ".sql" name resolves to a
+	// lexer the glob match outranks, and ".gql" resolves as a name although no
+	// lexer claims the glob. The memoized lookup pays that glob match once per
+	// extension.
 	return chromaLexerForName(ext)
 }
 
