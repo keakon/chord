@@ -16,7 +16,7 @@ All three can be moved by environment variable, CLI flag, or `config.yaml` `path
 
 You edit these files. Treat them as source.
 
-On the first root `chord` run, if global `config.yaml` is missing and Chord can get a controlling TTY, it starts a one-time setup wizard and then prints the exact resolved paths for `config.yaml` and `auth.yaml`. This is especially useful when you launch with `--config-home`, `CHORD_CONFIG_HOME`, or on Windows where `~` is not the most discoverable form.
+When the [first-run setup wizard](./quickstart.md#2-first-run) finishes, it prints the exact resolved paths for `config.yaml` and `auth.yaml`. This is especially useful when you launch with `--config-home`, `CHORD_CONFIG_HOME`, or on Windows where `~` is not the most discoverable form.
 
 ```text
 ~/.config/chord/
@@ -51,7 +51,7 @@ Chord writes here. Lose it and you lose history.
 ├── exports/
 │   └── <project-key>/                  # `/export` output (markdown / JSON)
 ├── memory/
-│   └── <project-key>/                  # per-project memory machine state (see [Usage — Project Memory](./usage.md#project-memory))
+│   └── <project-key>/                  # per-project memory machine state (see [Project Memory](./project-memory.md))
 │       ├── extraction-checkpoints.json # per-session extraction coverage (rebuildable)
 │       └── memory.lock                 # cross-process commit lock
 ├── worktrees/
@@ -108,7 +108,7 @@ When `chord` runs in a project for the first time, it ensures the project root h
 ├── commands/              # project-level custom slash commands
 ├── skills/                # project-level skills
 ├── plans/                 # user-visible planning documents
-└── memory/                # detailed Memory records (see [Usage — Project Memory](./usage.md#project-memory))
+└── memory/                # detailed Memory records (see [Project Memory](./project-memory.md))
     └── records/           # one immutable file per auto-extracted record
 ```
 

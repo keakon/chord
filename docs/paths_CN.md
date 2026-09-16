@@ -16,7 +16,7 @@ Chord 读写的所有文件和目录，以及如何安全地清理。
 
 这些文件由你编辑，可以视为源文件。
 
-首次直接运行 `chord` 时，如果全局 `config.yaml` 缺失且 Chord 能拿到控制 TTY，它会启动一次性初始化向导，并在结束时输出 `config.yaml` 和 `auth.yaml` 的实际解析路径。当你通过 `--config-home`、`CHORD_CONFIG_HOME` 启动，或在 Windows 上 `~` 不易直观定位时，这个行为尤其有用。
+[首次运行向导](./quickstart_CN.md#2-第一次运行)结束时，会输出 `config.yaml` 和 `auth.yaml` 的实际解析路径。通过 `--config-home`、`CHORD_CONFIG_HOME` 启动，或在 Windows 上 `~` 不易直观定位时，这个行为尤其有用。
 
 ```text
 ~/.config/chord/
@@ -51,7 +51,7 @@ Chord 写在这里。删了就丢历史。
 ├── exports/
 │   └── <project-key>/                  # `/export` 输出（markdown / JSON）
 ├── memory/
-│   └── <project-key>/                  # 每项目 memory 机器状态（见 [使用指南 — 项目记忆](./usage_CN.md#项目记忆memory)）
+│   └── <project-key>/                  # 每项目 memory 机器状态（见 [项目记忆](./project-memory_CN.md)）
 │       ├── extraction-checkpoints.json # 按会话记录的抽取覆盖状态（可重建）
 │       └── memory.lock                 # 跨进程提交锁
 ├── worktrees/
@@ -101,7 +101,7 @@ Sessions、运行时缓存、exports 都以这个 key 为索引——在 `~/proj
 ├── commands/              # 项目级自定义 slash 命令
 ├── skills/                # 项目级 skill
 ├── plans/                 # 用户可见的计划文档
-└── memory/                # Memory 详细记录（见 [使用指南 — 项目记忆](./usage_CN.md#项目记忆memory)）
+└── memory/                # Memory 详细记录（见 [项目记忆](./project-memory_CN.md)）
     └── records/           # 每条自动记录一个不可变文件
 ```
 

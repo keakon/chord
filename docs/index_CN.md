@@ -31,6 +31,7 @@
 
 - [扩展与定制](./customization_CN.md)：配置角色、技能、代码诊断和外部工具
 - [Hooks](./hooks_CN.md)：自动通知、检查和处理工具结果
+- [项目记忆](./project-memory_CN.md)：沉淀可跨会话复用、便于审阅的项目记忆
 - [Headless 集成](./headless_CN.md)：从脚本或其他界面控制 Chord
 
 ## 示例配置
