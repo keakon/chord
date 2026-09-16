@@ -554,11 +554,20 @@ type evidencePackRefMeta struct {
 // remains in the transcript; once that checkpoint is archived by a later
 // apply, its IDs stop resolving here and are rejected as unknown again.
 func (a *MainAgent) contextEvidencePackMetadata() map[string]evidencePackRefMeta {
-	out := make(map[string]evidencePackRefMeta)
 	if a == nil || a.ctxMgr == nil {
-		return out
+		return make(map[string]evidencePackRefMeta)
 	}
-	for _, msg := range a.ctxMgr.Snapshot() {
+	return checkpointPackMetadataFromMessages(a.ctxMgr.Snapshot())
+}
+
+// checkpointPackMetadataFromMessages indexes the machine metadata of every
+// Evidence ID rendered by the evidence packs of the checkpoint messages in
+// messages. The first occurrence of an ID wins: the scan follows transcript
+// order, and the live context holds one pack per checkpoint with the nearest
+// generation first.
+func checkpointPackMetadataFromMessages(messages []message.Message) map[string]evidencePackRefMeta {
+	out := make(map[string]evidencePackRefMeta)
+	for _, msg := range messages {
 		if msg.Role != message.RoleUser {
 			continue
 		}
@@ -635,6 +644,36 @@ func evidencePackRegion(content string) string {
 		region = region[:idx]
 	}
 	return region
+}
+
+// checkpointEvidenceRefMetadata indexes the classification and validity the
+// runtime resolved for the evidence IDs a checkpoint submission may declare:
+// every live tracker item the barrier captured, plus the pack rows of the
+// prior checkpoints inside the archived head. A live item wins over a pack row
+// for the same ID, matching resolvableClaimEvidenceIDs.
+//
+// The index exists because the rendered pack is not a complete record of what
+// the checkpoint declares: the archival filter drops the kinds the pack never
+// carries (user_request, subagent_done, done_rejected) and every invalidated
+// item, and the evidence caps can leave a live item out — yet the merged
+// `## Evidence References` section still lists those refs. Re-rendering each
+// declared ref with its classification is what keeps it resolvable one
+// generation later, when the new checkpoint's pack is the only resolution
+// source left.
+func checkpointEvidenceRefMetadata(bundle modelDrivenBarrierSnapshot, headSnapshot []message.Message) map[string]evidencePackRefMeta {
+	metadata := make(map[string]evidencePackRefMeta, len(bundle.evidenceItems))
+	for _, item := range bundle.evidenceItems {
+		metadata[evidenceItemID(item)] = evidencePackRefMeta{
+			kind:        item.Kind,
+			invalidated: item.Validity == evidenceValidityInvalidated,
+		}
+	}
+	for id, meta := range checkpointPackMetadataFromMessages(headSnapshot) {
+		if _, exists := metadata[id]; !exists {
+			metadata[id] = meta
+		}
+	}
+	return metadata
 }
 
 func (a *MainAgent) validateObservedClaimEvidence(args tools.CompactContextArgs) error {
@@ -1550,6 +1589,11 @@ type modelDrivenCheckpointBuilder struct {
 	req           *modelDrivenCheckpointRequest
 	summaryText   string
 	evidenceItems []evidenceItem
+	// refMetadata indexes the classification and validity the runtime resolved
+	// for every evidence ID this checkpoint's submission may declare, so a
+	// declared ref the pack itself does not carry can be re-rendered as a
+	// machine row (see carriedEvidencePackRows).
+	refMetadata map[string]evidencePackRefMeta
 	// retainedRecent is the rendered `## Retained Recent Messages` section.
 	retainedRecent string
 	// historyLines are the rendered map lines of the committed archive chain
@@ -1571,6 +1615,7 @@ func (a *MainAgent) newModelDrivenCheckpointBuilder(bundle modelDrivenBarrierSna
 		req:           req,
 		summaryText:   a.buildModelDrivenCheckpointSummary(bundle, snapshot, headSplit, req),
 		evidenceItems: filterCompactionEvidenceForArchival(bundle.evidenceItems),
+		refMetadata:   checkpointEvidenceRefMetadata(bundle, headSnapshot),
 		// The newest real user messages of the archived head (and any dangling
 		// interrupted reply) stay verbatim inside the checkpoint within the
 		// retention budget, deterministic like the rest of this path — no model
@@ -1600,6 +1645,9 @@ func (b *modelDrivenCheckpointBuilder) render(exportedArchive string) (string, m
 		historyRefs = append(append(make([]string, 0, len(b.historyLines)+1), b.historyLines...), exportedLine...)
 	}
 	checkpointContent := buildCompactionCheckpointMessage(b.summaryText, historyRefs, compactionSummaryModeModelDriven, b.evidenceItems, b.retainedRecent)
+	if rows := b.carriedEvidencePackRows(); rows != "" {
+		checkpointContent = appendCarriedEvidencePackRows(checkpointContent, rows)
+	}
 
 	var historyMapBytes int
 	for _, ref := range historyRefs {
@@ -1621,6 +1669,91 @@ func (b *modelDrivenCheckpointBuilder) render(exportedArchive string) (string, m
 		HistoryMapBytes:    historyMapBytes,
 		ContinuationTokens: b.bundle.estimateTokens([]message.Message{{Role: message.RoleUser, Content: req.Args.ActiveObjective + "\n" + req.Args.NextStep + "\n" + strings.Join(req.Args.Completed, "\n") + "\n" + strings.Join(req.Args.Decisions, "\n") + "\n" + strings.Join(req.Args.OpenIssues, "\n") + "\n" + strings.Join(req.Args.StateFiles, "\n")}}),
 	}
+}
+
+// carriedEvidencePackRows renders the machine rows for the evidence references
+// the checkpoint declares but its evidence pack does not carry. The declared
+// refs come from the summary's `## Evidence References` section — the only
+// place the merged set (the fresh submission plus the carried typed state)
+// exists after the carry merge — and each row carries the runtime's own
+// classification and validity for that ID, so the next generation, which
+// resolves refs against checkpoint packs alone, sees the same facts the live
+// tracker gave this one. A ref the runtime cannot classify renders as a bare
+// Evidence ID row: it resolves by existence, and an observed claim citing it is
+// rejected with the existing "without classification" error, which is what
+// tells the model to reclassify the claim instead of resubmitting the ref.
+func (b *modelDrivenCheckpointBuilder) carriedEvidencePackRows() string {
+	refs := checkpointDeclaredEvidenceRefs(b.summaryText)
+	if len(refs) == 0 {
+		return ""
+	}
+	inPack := evidenceItemsByID(b.evidenceItems)
+	var rows []string
+	for _, ref := range refs {
+		if _, ok := inPack[ref]; ok {
+			continue
+		}
+		rows = append(rows, "Evidence ID: "+ref)
+		meta, ok := b.refMetadata[ref]
+		if !ok {
+			continue
+		}
+		if meta.kind != "" {
+			rows = append(rows, "Evidence Kind: "+string(meta.kind))
+		}
+		if meta.invalidated {
+			rows = append(rows, "Validity: "+string(evidenceValidityInvalidated))
+		}
+	}
+	if len(rows) == 0 {
+		return ""
+	}
+	return carriedEvidenceRefsHeading + "\n" + strings.Join(rows, "\n")
+}
+
+// carriedEvidenceRefsHeading labels the machine rows that re-render declared
+// evidence references the pack above does not carry. The line is prose, so the
+// pack parser ignores it and reads only the Evidence ID/Kind/Validity rows it
+// introduces.
+const carriedEvidenceRefsHeading = "Carried evidence references (declared by this checkpoint; their excerpts are in the archived history):"
+
+// checkpointDeclaredEvidenceRefs returns the evidence references the
+// `## Evidence References` section of a model-driven checkpoint summary
+// declares. The section is the runtime's own rendering of the merged,
+// already-validated ref set, and the extraction still matches the evidence-ID
+// spelling; a string that merely echoes the shape (a user message quoted into
+// the anchors block, say) can at most contribute an existence-only row, and an
+// unclassified ID can never support an observed claim.
+func checkpointDeclaredEvidenceRefs(summary string) []string {
+	_, section, ok := strings.Cut(summary, "\n## Evidence References\n")
+	if !ok {
+		return nil
+	}
+	if end := strings.Index(section, "\n## "); end >= 0 {
+		section = section[:end]
+	}
+	var refs []string
+	for line := range strings.SplitSeq(section, "\n") {
+		ref, isBullet := strings.CutPrefix(strings.TrimSpace(line), "- ")
+		ref = strings.TrimSpace(ref)
+		if !isBullet || !tools.EvidenceIDShape.MatchString(ref) {
+			continue
+		}
+		refs = append(refs, ref)
+	}
+	return refs
+}
+
+// appendCarriedEvidencePackRows appends the rows to the checkpoint's evidence
+// region, opening the region when the pack itself rendered no items: the pack
+// parser reads that region and nothing else, so the rows must land after the
+// [Context Evidence] tag.
+func appendCarriedEvidencePackRows(checkpointContent, rows string) string {
+	checkpointContent = strings.TrimRight(checkpointContent, "\n")
+	if !strings.Contains(checkpointContent, message.CompactionEvidenceTag) {
+		checkpointContent += "\n" + message.CompactionEvidenceTag
+	}
+	return checkpointContent + "\n" + rows
 }
 
 // buildModelDrivenCheckpointSummary renders the deterministic checkpoint

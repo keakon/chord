@@ -5684,6 +5684,34 @@ func TestToolFailureSupersededOnlyOnMatchingTargets(t *testing.T) {
 			want: "fail",
 		},
 		{
+			// The accepted retry's result is deferred to the barrier, so the
+			// snapshot that decides retention holds the declaration without a
+			// result. That is still the retry that replaced the rejection.
+			name: "in-flight compact_context retry supersedes the rejection",
+			msgs: []message.Message{
+				call("fail", tools.NameCompactContext, `{"active_objective":"a","next_step":"b"}`), failure("fail"),
+				call("ok", tools.NameCompactContext, `{"active_objective":"a","next_step":"b"}`),
+			},
+			want: "fail",
+		},
+		{
+			name: "unanswered declaration of another tool does not supersede",
+			msgs: []message.Message{
+				call("fail", tools.NameCompactContext, `{"active_objective":"a","next_step":"b"}`), failure("fail"),
+				call("ok", tools.NameRead, `{"path":"src/a.go"}`),
+			},
+		},
+		{
+			// An answered call is not in flight: a cancelled result is
+			// unresolved, so the rejection is still the newest outcome.
+			name: "answered compact_context call with a cancelled result keeps the failure",
+			msgs: []message.Message{
+				call("fail", tools.NameCompactContext, `{"active_objective":"a","next_step":"b"}`), failure("fail"),
+				call("ok", tools.NameCompactContext, `{"active_objective":"a","next_step":"b"}`),
+				{Role: message.RoleTool, ToolCallID: "ok", Content: "cancelled", ToolStatus: message.ToolStatusCancelled},
+			},
+		},
+		{
 			name: "compact_context rejection with no later acceptance keeps the failure",
 			msgs: []message.Message{
 				call("fail", tools.NameCompactContext, `{"active_objective":"a","next_step":"b"}`), failure("fail"),

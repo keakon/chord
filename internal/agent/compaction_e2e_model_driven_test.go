@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -353,5 +354,109 @@ func TestE2EModelDrivenStageSwitchAcrossUnrelatedTasks(t *testing.T) {
 	// current direction marker.
 	if slices.Equal(state.Decisions, []string{"task two: rewrite the loader", "task one completed cleanly"}) == false {
 		t.Fatalf("completed-stage decision must still be carried: %v", state.Decisions)
+	}
+}
+
+// TestE2EModelDrivenCheckpointRerendersDeclaredEvidenceRefs pins the evidence
+// reference carry across a durable apply. The checkpoint's `## Evidence
+// References` section lists the merged ref set, but the next generation
+// resolves refs against evidence packs alone — the live tracker is rebuilt
+// from the compacted transcript — so a declared ref the pack does not itself
+// render (the archival filter drops its kind, or the evidence caps left it
+// out) has to be re-rendered as machine rows or it dies one generation later
+// while the checkpoint still declares it.
+func TestE2EModelDrivenCheckpointRerendersDeclaredEvidenceRefs(t *testing.T) {
+	sessionDir := t.TempDir()
+	a := newTestMainAgent(t, sessionDir)
+	a.sessionDir = sessionDir
+	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "implement the carry fix"})
+	a.ctxMgr.Append(message.Message{Role: message.RoleAssistant, Content: "working on it"})
+
+	// One declared ref the pack carries, one of a kind the archival filter
+	// never carries: pack-only resolution would lose the second.
+	packed := evidenceItem{Kind: evidenceToolError, Title: "build failure", Excerpt: "undefined: foo", Key: "err:1", Sequence: 1}
+	live := evidenceItem{Kind: evidenceUserRequest, Title: "latest user request", Key: "request:1", Sequence: 2}
+	packedID := evidenceItemID(packed)
+	liveID := evidenceItemID(live)
+
+	snapshot := a.ctxMgr.Snapshot()
+	req := e2eCheckpointRequest("implement the carry fix", []string{"d1: keep refs resolvable"}, nil, []string{packedID, liveID}, "impl", "candidate", "provisional")
+	bundle := modelDrivenBarrierSnapshot{snapshot: snapshot, sessionDir: sessionDir, evidenceItems: []evidenceItem{packed, live}}
+	content, _ := a.newModelDrivenCheckpointBuilder(bundle, snapshot, 1, req).render("")
+
+	meta := parseCheckpointEvidencePackMetadata(content)
+	if got := meta[packedID].kind; got != evidenceToolError {
+		t.Fatalf("the packed ref must resolve from its own row, got %q:\n%s", got, content)
+	}
+	if got := meta[liveID].kind; got != evidenceUserRequest {
+		t.Fatalf("the declared ref outside the pack must be re-rendered with its kind, got %q:\n%s", got, content)
+	}
+	if got := strings.Count(content, "Evidence ID: "+packedID); got != 1 {
+		t.Fatalf("a ref the pack already carries must not be re-rendered, got %d rows", got)
+	}
+
+	// The next generation holds only the applied checkpoint. Both refs must
+	// still resolve, and the re-rendered classification must still support an
+	// observed claim.
+	next := newTestMainAgent(t, t.TempDir())
+	next.ctxMgr = ctxmgr.NewManager(100000, 0.5)
+	next.ctxMgr.RestoreMessages([]message.Message{{Role: message.RoleUser, Content: content, IsCompactionSummary: true}})
+	if err := next.validateModelDrivenEvidenceRefs("evidence_refs", []string{packedID, liveID}); err != nil {
+		t.Fatalf("the re-rendered refs must resolve for the next generation: %v", err)
+	}
+	if err := next.validateObservedClaimEvidence(tools.CompactContextArgs{
+		ClaimKinds:    map[string]string{"the carry works": claimKindObserved},
+		ClaimEvidence: map[string][]string{"the carry works": {liveID}},
+	}); err != nil {
+		t.Fatalf("an observed claim must resolve through the re-rendered kind: %v", err)
+	}
+}
+
+// A declared ref the runtime cannot classify still re-renders as a bare
+// Evidence ID row: it stays resolvable by existence, so the next generation
+// answers with the actionable "without classification" rejection — which tells
+// the model to reclassify the claim — instead of an unknown-ID one.
+func TestE2EModelDrivenCheckpointRerendersUnclassifiedCarriedRef(t *testing.T) {
+	const carriedRef = "ev-0123456789ab"
+	sessionDir := t.TempDir()
+	a := newTestMainAgent(t, sessionDir)
+	a.sessionDir = sessionDir
+	// The prior checkpoint declares a ref whose pack is gone: only the typed
+	// state carries the ID, so the runtime has no classification for it.
+	prior := buildCompactionCheckpointMessage(`## Typed Checkpoint State
+- {"evidence_refs":["`+carriedRef+`"]}`, nil, compactionSummaryModeModelDriven, nil)
+	snapshot := []message.Message{
+		{Role: message.RoleUser, Content: prior, IsCompactionSummary: true},
+		{Role: message.RoleUser, Content: "keep going"},
+	}
+	req := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{
+		ActiveObjective: "keep going",
+		NextStep:        "continue",
+		StageStatus:     "candidate",
+		CheckpointKind:  "provisional",
+	}}
+	bundle := modelDrivenBarrierSnapshot{snapshot: snapshot, sessionDir: sessionDir}
+	content, _ := a.newModelDrivenCheckpointBuilder(bundle, snapshot, len(snapshot), req).render("")
+
+	meta, ok := parseCheckpointEvidencePackMetadata(content)[carriedRef]
+	if !ok {
+		t.Fatalf("the carried ref must be re-rendered by existence:\n%s", content)
+	}
+	if meta.kind != "" {
+		t.Fatalf("no classification is known for the carried ref, got %q", meta.kind)
+	}
+
+	next := newTestMainAgent(t, t.TempDir())
+	next.ctxMgr = ctxmgr.NewManager(100000, 0.5)
+	next.ctxMgr.RestoreMessages([]message.Message{{Role: message.RoleUser, Content: content, IsCompactionSummary: true}})
+	if err := next.validateModelDrivenEvidenceRefs("evidence_refs", []string{carriedRef}); err != nil {
+		t.Fatalf("an existence-only ref must resolve for the next generation: %v", err)
+	}
+	err := next.validateObservedClaimEvidence(tools.CompactContextArgs{
+		ClaimKinds:    map[string]string{"the carry works": claimKindObserved},
+		ClaimEvidence: map[string][]string{"the carry works": {carriedRef}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "without classification") {
+		t.Fatalf("an observed claim on an unclassified ref must get the classification hint, got %v", err)
 	}
 }

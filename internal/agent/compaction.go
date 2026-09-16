@@ -939,18 +939,30 @@ func (a *MainAgent) evidenceItemsForCompaction(contextLimit int) []evidenceItem 
 // the continuation reasoning from a false premise. compact_context is the one
 // exception, because it has no path target to match: the call only asks the
 // runtime to checkpoint, so a later accepted call of the same tool proves the
-// refusal was retried rather than overwritten by some unrelated success.
+// refusal was retried rather than overwritten by some unrelated success. The
+// accepted retry counts even before its result exists: the accepted request's
+// result is deferred to the barrier, so an unanswered declaration is exactly
+// what the snapshot holds while that retry is in flight.
 func toolFailureSupersededByLaterSuccess(messages []message.Message) map[string]struct{} {
 	nameByCallID := make(map[string]string)
-	for _, msg := range messages {
+	type declaration struct {
+		callID string
+		index  int
+	}
+	var compactContextDeclarations []declaration
+	for index, msg := range messages {
 		if msg.Role != message.RoleAssistant {
 			continue
 		}
 		for _, call := range msg.ToolCalls {
 			id := strings.TrimSpace(call.ID)
 			name := strings.TrimSpace(call.Name)
-			if id != "" && name != "" {
-				nameByCallID[id] = name
+			if id == "" || name == "" {
+				continue
+			}
+			nameByCallID[id] = name
+			if name == tools.NameCompactContext {
+				compactContextDeclarations = append(compactContextDeclarations, declaration{callID: id, index: index})
 			}
 		}
 	}
@@ -962,6 +974,7 @@ func toolFailureSupersededByLaterSuccess(messages []message.Message) map[string]
 		targets map[string]struct{}
 	}
 	var failures, successes []toolResult
+	answeredCompactContexts := make(map[string]struct{})
 	for index, msg := range messages {
 		if msg.Role != message.RoleTool {
 			continue
@@ -970,6 +983,9 @@ func toolFailureSupersededByLaterSuccess(messages []message.Message) map[string]
 		name, ok := nameByCallID[callID]
 		if !ok {
 			continue
+		}
+		if name == tools.NameCompactContext {
+			answeredCompactContexts[callID] = struct{}{}
 		}
 		targets := targetsByCallID[callID]
 		// A compact_context result is attributable without path targets: the
@@ -990,6 +1006,17 @@ func toolFailureSupersededByLaterSuccess(messages []message.Message) map[string]
 		case isToolResultErrorMessage(msg):
 			failures = append(failures, toolResult{callID: callID, tool: name, index: index, targets: targets})
 		}
+	}
+	// An accepted compact_context request has no result yet when this snapshot
+	// is taken: its result is deferred to the barrier (main_handlers_tools.go),
+	// while a rejected or completed call always appends its result immediately.
+	// So a declaration without a result can only be the in-flight retry a
+	// refusal was waiting for, and it counts as a later success.
+	for _, pending := range compactContextDeclarations {
+		if _, ok := answeredCompactContexts[pending.callID]; ok {
+			continue
+		}
+		successes = append(successes, toolResult{callID: pending.callID, tool: tools.NameCompactContext, index: pending.index})
 	}
 	superseded := make(map[string]struct{})
 	for _, failure := range failures {

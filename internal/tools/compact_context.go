@@ -351,12 +351,14 @@ func normalizeCompactContextClaims[V any](claims map[string]V, name string) (map
 	return normalized, nil
 }
 
-// compactContextEvidenceIDShape is the only evidence-reference spelling the
-// runtime resolves: every ID is minted as "ev-" plus the first six bytes of a
-// SHA-256 digest in lowercase hex, and both resolution sources — the live
-// evidence tracker and the Evidence ID lines rendered by checkpoint packs —
-// carry exactly that form.
-var compactContextEvidenceIDShape = regexp.MustCompile(`^ev-[0-9a-f]{12}$`)
+// EvidenceIDShape is the only evidence-reference spelling the runtime
+// resolves: every ID is minted as "ev-" plus the first six bytes of a SHA-256
+// digest in lowercase hex, and both resolution sources — the live evidence
+// tracker and the Evidence ID lines rendered by checkpoint packs — carry
+// exactly that form. It is exported so a scanner of already-rendered
+// checkpoint text recognizes the same spelling a submitted list is validated
+// against instead of re-deriving it.
+var EvidenceIDShape = regexp.MustCompile(`^ev-[0-9a-f]{12}$`)
 
 // validateCompactContextEvidenceRefs applies the list contract plus the
 // evidence-ID shape to one reference list. field is the argument the list came
@@ -376,7 +378,7 @@ func validateCompactContextEvidenceRefs(refs []string, maxItems int, field, clai
 		where = fmt.Sprintf("%s for claim %q", field, claim)
 	}
 	for _, ref := range out {
-		if compactContextEvidenceIDShape.MatchString(ref) {
+		if EvidenceIDShape.MatchString(ref) {
 			continue
 		}
 		return nil, fmt.Errorf("%s: %q is not an evidence ID (an ID is ev- followed by 12 lowercase hex characters, copied from an Evidence ID line visible in this conversation); cite such an ID or omit the entry", where, ref)

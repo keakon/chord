@@ -64,6 +64,7 @@
 - 运行 `/mcp`、`/mcp status`、`/mcp enable` / `/mcp disable` 不再在会话里留下一张回显命令的 `USER` 卡片，它们和其余本地斜杠命令一样，不启动回合就能给出结果。
 - 本地 shell 命令的输出超过捕获上限时保留最新的内容，与 `shell` 工具保留的尾部一致：TUI 的 `!` 命令与 headless 本地 shell 此前都在到达上限后停止接收、把后面的输出全部丢掉，于是长命令末尾的失败信息（最该看的那部分）反而被丢掉。
 - `!` 命令或 headless `local_shell` 命令 daemon 化的进程持有输出管道时，不再让调用方永久挂起：超时会终止整个进程组，管道排水也有上界，命令总能带着 shell 自身的退出状态返回。
+- 上下文 checkpoint 声明的证据引用，对下一个 checkpoint 仍然可解析。checkpoint 现在会重新渲染它列出的每个 ID，并带上运行时解析出的类别与有效性，即使该 ID 没有摘录留在这次 checkpoint 的证据段落里——引用当前可见 checkpoint 里 ID 的 `compact_context` 调用因此不再被判为未知引用。被后续已接受调用取代的 `compact_context` 拒绝也不再随新 checkpoint 回到上下文，重置后不会马上冒出一张报错卡片。
 - 后台结果在历史重建后再次投递时，会继续更新已有的卡片而不是追加一张重复卡片，与实时路径按持久身份匹配重复投递的行为保持一致。
 - 模型驱动的 checkpoint 不再丢掉当前回合里失败的工具调用。重置会归档整个 head，此前被拒绝的调用（例如 runtime 驳回的 `compact_context` 请求）只留在 checkpoint 内的摘录里：错误卡片从会话中消失，对该代做 fork 时也不再回放这次失败。现在本回合内最新几组失败批次会作为真实记录保留在 checkpoint 卡片之后；更早的失败只留在归档和 checkpoint 的证据包里。只有失败本身保留原文：同批里顺带成功的结果会换成 `[result elided by checkpoint: N bytes]` 标记，附件也不会被带回新上下文，保留失败因此不会把 checkpoint 刚回收的上下文重新占掉。
 - `apply_patch` 与 `edit` 的最近匹配提示不再把「只是更短」的行说成空行，报出的 rune 偏移也改成 1 基，与同一句里的行号一致。

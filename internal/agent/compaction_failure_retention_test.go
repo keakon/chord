@@ -78,6 +78,21 @@ func TestCheckpointRetainedFailureRecordsDropsSupersededCompactContextRejection(
 	}
 }
 
+// At barrier time the accepted retry's result does not exist yet — it is
+// deferred to the barrier — so the head holds the retry's declaration alone.
+// That in-flight declaration is still the call that replaced the rejection:
+// the rejection must not be re-attached under the checkpoint it would read as
+// failing right after.
+func TestCheckpointRetainedFailureRecordsDropsRejectionSupersededByInFlightRetry(t *testing.T) {
+	head := appendAll([]message.Message{{Role: message.RoleUser, Content: "request"}},
+		toolBatchMessages("rejected-call", tools.NameCompactContext, message.ToolStatusError, `Context checkpoint rejected: compact_context evidence_refs contains unknown evidence ID "derived"`),
+		[]message.Message{{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "accepted-call", Name: tools.NameCompactContext, Args: json.RawMessage(`{}`)}}}},
+	)
+	if got := checkpointRetainedFailureRecords(head); len(got) != 0 {
+		t.Fatalf("retained %d records, want the rejection dropped while the accepted retry is in flight: %+v", len(got), got)
+	}
+}
+
 // A batch that carries any call besides compact_context keeps its failure: a
 // sibling failure is not the checkpoint's own, so nothing about it is
 // superseded.
