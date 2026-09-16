@@ -1,8 +1,8 @@
 # Chord Docs
 
-**Finish coding tasks faster, spend less on each one, and keep memory small.** Chord keeps long sessions responsive: automatic fallback when a key or model fails, request trimming plus compaction to control cost, and a small memory footprint.
+**A faster, cheaper, lighter terminal coding agent.** Chord keeps long sessions responsive: automatic fallback when a key or model fails, request trimming plus compaction to control cost, and a small memory footprint.
 
-New to Chord? Start with the [Quickstart](./quickstart.md), copy a provider from [Model recipes](./model-configs.md), then set approval rules in [Permissions & Safety](./permissions-and-safety.md). Already using it? Find the relevant guide below.
+New to Chord? Start with the [Quickstart](./quickstart.md), copy a provider from [Model configuration recipes](./model-configs.md), then set approval rules in [Permissions & Safety](./permissions-and-safety.md). Already using it? Find the relevant guide below.
 
 In one DeepSWE v1.1 task Chord finished first and cheapest (6m37s, $0.052); see [Performance](./performance.md) for the full table and methodology.
 
@@ -17,7 +17,7 @@ In one DeepSWE v1.1 task Chord finished first and cheapest (6m37s, $0.052); see 
 ## Models and credentials
 
 - [Configuration & Auth](./configuration.md): Configuration files, credentials, model pools, and field reference
-- [Model recipes](./model-configs.md): Choose a ready-to-copy provider configuration
+- [Model configuration recipes](./model-configs.md): Choose a ready-to-copy provider configuration
 - [Reasoning and thinking](./reasoning.md): Choose thinking settings and understand usage implications
 - [Context management](./context-management.md): Understand compaction, reduction, and long-session settings
 

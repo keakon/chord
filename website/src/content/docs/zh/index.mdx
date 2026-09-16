@@ -34,12 +34,30 @@ import screenshot from '../../../../../docs/assets/screenshot.png';
 ## 亮点功能
 
 <ul className="chord-highlights">
-  <li>Vim 风格键盘操作</li>
-  <li>失败时自动切换备用模型</li>
-  <li>支持预览图片</li>
-  <li>导入外部会话</li>
-  <li>查看 Codex 额度与重置时间</li>
-  <li>只在真正需要你时才通知</li>
+  <li>
+    <a href="/chord/zh/configuration/#模型池">模型自动切换</a>
+    <span class="chord-why">key 或模型失败时不停工。</span>
+  </li>
+  <li>
+    <a href="/chord/zh/context-management/">请求级剪裁＋持久压缩</a>
+    <span class="chord-why">长会话留在上下文窗口内，每轮花的 token 更少。</span>
+  </li>
+  <li>
+    <a href="/chord/zh/performance/#工具流式早执行">流式工具早执行</a>
+    <span class="chord-why">参数一完整就执行安全工具，不必等模型写完。</span>
+  </li>
+  <li>
+    <a href="/chord/zh/performance/#应用内存">内存占用小</a>
+    <span class="chord-why">实测空会话 30MB，200 条消息后 39MB。</span>
+  </li>
+  <li>
+    <a href="/chord/zh/usage/#导入外部会话">导入 Claude Code、Codex、OpenCode 会话</a>
+    <span class="chord-why">换工具时保留已有历史。</span>
+  </li>
+  <li>
+    <a href="/chord/zh/keybindings/">Vim 风格键盘操作</a>
+    <span class="chord-why">全程不离开键盘。</span>
+  </li>
 </ul>
 
 ## 实测数据
@@ -52,7 +70,7 @@ import screenshot from '../../../../../docs/assets/screenshot.png';
 |---------|------|------|
 | Chord 0.8.1 | **6m37s** <span class="chord-bar" style="--bar: 30%"></span> | **￥0.348** <span class="chord-bar" style="--bar: 32%"></span> |
 | deepseek-harness 0.1.5-rc.1 | 9m50s（1.49 倍） <span class="chord-bar" style="--bar: 44%"></span> | ￥0.527（1.51 倍） <span class="chord-bar" style="--bar: 48%"></span> |
-| pi 0.85.1 | 10m22s（1.57 倍） <span class="chord-bar" style="--bar: 46%"></span> | ￥0.576（1.66 倍） <span class="chord-bar" style="--bar: 52%"></span> |
+| pi 0.85.1 | 10m22s（1.57 倍） <span class="chord-bar" style="--bar: 46%"></span> | ￥0.576（1.65 倍） <span class="chord-bar" style="--bar: 52%"></span> |
 | codex 0.154.0 | 17m01s（2.57 倍） <span class="chord-bar" style="--bar: 76%"></span> | ￥0.929（2.67 倍） <span class="chord-bar" style="--bar: 84%"></span> |
 | mini-swe-agent 2.4.6 | 18m29s（2.79 倍） <span class="chord-bar" style="--bar: 82%"></span> | ￥0.835（2.40 倍） <span class="chord-bar" style="--bar: 76%"></span> |
 | claude code 2.1.272 | 22m25s（3.39 倍） <span class="chord-bar" style="--bar: 100%"></span> | ￥1.104（3.17 倍） <span class="chord-bar" style="--bar: 100%"></span> |
@@ -71,7 +89,7 @@ import screenshot from '../../../../../docs/assets/screenshot.png';
 
 以上数据来自一次任务实测和一次内存场景，不代表普遍结果。完整数据表、测量方法和实现说明见[性能](/chord/zh/performance/#实测数据)。
 
-## 两步上手
+## 三步上手
 
 <CardGrid>
   <Card title="1. 安装" icon="download">
@@ -89,6 +107,13 @@ import screenshot from '../../../../../docs/assets/screenshot.png';
     chord
     ```
     第一次运行时，如果未检测到 `config.yaml`，会启动初始化向导。然后直接描述第一个任务，按 `Enter` 发送。
+  </Card>
+  <Card title="3. 发送第一个任务" icon="pencil">
+    直接描述你想让它做什么，按 `Enter` 发送。第一次可以先让它读一遍项目：
+
+    ```text
+    请解释这个项目的主要模块和测试入口，先不要修改文件。
+    ```
   </Card>
 </CardGrid>
 

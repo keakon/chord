@@ -12,7 +12,7 @@ hero:
       link: /chord/quickstart/
       icon: right-arrow
       variant: primary
-    - text: Model recipes
+    - text: Model configuration recipes
       link: /chord/model-configs/
       variant: secondary
     - text: GitHub
@@ -34,28 +34,46 @@ import screenshot from '../../../../docs/assets/screenshot.png';
 ## Feature highlights
 
 <ul className="chord-highlights">
-  <li>Vim-style keyboard controls</li>
-  <li>Automatic model fallback</li>
-  <li>Image previews</li>
-  <li>Import external sessions</li>
-  <li>Codex quota and reset times</li>
-  <li>Notifications when you’re needed</li>
+  <li>
+    <a href="/chord/configuration/#model-pools-selecting-providermodel">Automatic model fallback</a>
+    <span class="chord-why">A failing key or model does not stop the session.</span>
+  </li>
+  <li>
+    <a href="/chord/context-management/">Request trimming plus compaction</a>
+    <span class="chord-why">Long sessions stay inside the context window and spend fewer tokens.</span>
+  </li>
+  <li>
+    <a href="/chord/performance/#streaming-tool-early-execution">Streaming tool early execution</a>
+    <span class="chord-why">Safe tools start before the model finishes its response.</span>
+  </li>
+  <li>
+    <a href="/chord/performance/#app-memory">Small memory footprint</a>
+    <span class="chord-why">30MB empty and 39MB after 200 messages in the measured scenario.</span>
+  </li>
+  <li>
+    <a href="/chord/usage/#importing-external-sessions">Import Claude Code, Codex, and OpenCode sessions</a>
+    <span class="chord-why">Keep your history when you switch tools.</span>
+  </li>
+  <li>
+    <a href="/chord/keybindings/">Vim-style keyboard controls</a>
+    <span class="chord-why">Stay in the terminal flow without reaching for the mouse.</span>
+  </li>
 </ul>
 
 ## Measured results
 
-Six agent harnesses ran the same [DeepSWE v1.1 task](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration): adding streaming JSON iteration to `httpx`. All six runs used deepseek-v4.1-flash. Chord 0.8.1 finished first and cheapest, with the next-best run taking 1.49× as long and costing 1.52× as much.
+Six agent harnesses ran the same [DeepSWE v1.1 task](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration): adding streaming JSON iteration to `httpx`. All six runs used deepseek-v4.1-flash. Chord 0.8.1 finished first and cheapest, with the next-best run taking 1.49× as long and costing 1.51× as much.
 
 ### Real-world coding task
 
 | Harness | Time | Cost |
 |---------|------|------|
 | Chord 0.8.1 | **6m37s** <span class="chord-bar" style="--bar: 30%"></span> | **$0.052** <span class="chord-bar" style="--bar: 32%"></span> |
-| deepseek-harness 0.1.5-rc.1 | 9m50s (1.49×) <span class="chord-bar" style="--bar: 44%"></span> | $0.079 (1.52×) <span class="chord-bar" style="--bar: 48%"></span> |
+| deepseek-harness 0.1.5-rc.1 | 9m50s (1.49×) <span class="chord-bar" style="--bar: 44%"></span> | $0.079 (1.51×) <span class="chord-bar" style="--bar: 48%"></span> |
 | pi 0.85.1 | 10m22s (1.57×) <span class="chord-bar" style="--bar: 46%"></span> | $0.086 (1.65×) <span class="chord-bar" style="--bar: 52%"></span> |
 | codex 0.154.0 | 17m01s (2.57×) <span class="chord-bar" style="--bar: 76%"></span> | $0.139 (2.67×) <span class="chord-bar" style="--bar: 84%"></span> |
 | mini-swe-agent 2.4.6 | 18m29s (2.79×) <span class="chord-bar" style="--bar: 82%"></span> | $0.125 (2.40×) <span class="chord-bar" style="--bar: 76%"></span> |
-| claude code 2.1.272 | 22m25s (3.39×) <span class="chord-bar" style="--bar: 100%"></span> | $0.166 (3.19×) <span class="chord-bar" style="--bar: 100%"></span> |
+| claude code 2.1.272 | 22m25s (3.39×) <span class="chord-bar" style="--bar: 100%"></span> | $0.166 (3.17×) <span class="chord-bar" style="--bar: 100%"></span> |
 
 Multipliers are relative to Chord.
 
@@ -71,7 +89,7 @@ Measured on macOS 15.3.2 (arm64).
 
 One measured task and one memory scenario; your numbers will differ. Full tables, methodology, and implementation notes: [Performance](/chord/performance/#measured-results).
 
-## Two-step setup
+## Three-step setup
 
 <CardGrid>
   <Card title="1. Install" icon="download">
@@ -89,6 +107,13 @@ One measured task and one memory scenario; your numbers will differ. Full tables
     chord
     ```
     On the first run, if no `config.yaml` is found, Chord starts the setup wizard. Then describe your first task and press `Enter`.
+  </Card>
+  <Card title="3. Send your first task" icon="pencil">
+    Describe what you want and press `Enter`. Start by asking Chord to read the project:
+
+    ```text
+    Explain this project's main modules and how to run its tests. Do not change any files yet.
+    ```
   </Card>
 </CardGrid>
 

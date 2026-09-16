@@ -10,29 +10,29 @@ Each benchmark below was run against the versions named in its table.
 
 ### Real-world coding task
 
-We ran a [DeepSWE v1.1 task](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration) that adds streaming JSON iteration to `httpx`, across six agent harnesses. Chord finished first and cheapest: 6m37s and $0.052, with the next-best run taking 1.49× as long and costing 1.52× as much.
+We ran a [DeepSWE v1.1 task](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration) that adds streaming JSON iteration to `httpx`, across six agent harnesses. Chord finished first and cheapest: 6m37s and $0.052, with the next-best run taking 1.49× as long and costing 1.51× as much.
 
 The task requires handling structured JSON streaming per media type (`application/json`, `application/*+json`, NDJSON, and JSON text sequences), plus stream consumption, decoding errors, and content-type parameters.
 
 | Harness | Time | Cost |
 |---------|------|------|
 | **Chord 0.8.1** | **6m37s** | **$0.052** |
-| deepseek-harness 0.1.5-rc.1 | 9m50s (1.49×) | $0.079 (1.52×) |
+| deepseek-harness 0.1.5-rc.1 | 9m50s (1.49×) | $0.079 (1.51×) |
 | pi 0.85.1 | 10m22s (1.57×) | $0.086 (1.65×) |
 | codex 0.154.0 | 17m01s (2.57×) | $0.139 (2.67×) |
 | mini-swe-agent 2.4.6 | 18m29s (2.79×) | $0.125 (2.40×) |
-| claude code 2.1.272 | 22m25s (3.39×) | $0.166 (3.19×) |
+| claude code 2.1.272 | 22m25s (3.39×) | $0.166 (3.17×) |
 
 Full token breakdown:
 
 | Harness | Time | LLM calls | Input tokens | Output tokens | Cache read tokens | Cost |
 |---------|------|-----------|--------------|---------------|-------------------|------|
 | **Chord 0.8.1** | **6m37s** | **49** | **54,530** | **58,559** | **2,961,280** | **$0.052** |
-| deepseek-harness 0.1.5-rc.1 | 9m50s (1.49×) | 93 | 58,569 | 80,314 | 7,357,440 | $0.079 (1.52×) |
+| deepseek-harness 0.1.5-rc.1 | 9m50s (1.49×) | 93 | 58,569 | 80,314 | 7,357,440 | $0.079 (1.51×) |
 | pi 0.85.1 | 10m22s (1.57×) | 101 | 79,189 | 94,733 | 5,871,488 | $0.086 (1.65×) |
 | codex 0.154.0 | 17m01s (2.57×) | 121 | 72,363 | 135,310 | 15,787,264 | $0.139 (2.67×) |
 | mini-swe-agent 2.4.6 | 18m29s (2.79×) | 158 | 161,893 | 77,320 | 18,206,592 | $0.125 (2.40×) |
-| claude code 2.1.272 | 22m25s (3.39×) | 143 | 106,546 | 214,126 | 7,024,768 | $0.166 (3.19×) |
+| claude code 2.1.272 | 22m25s (3.39×) | 143 | 106,546 | 214,126 | 7,024,768 | $0.166 (3.17×) |
 
 Multipliers are relative to Chord.
 
@@ -41,7 +41,7 @@ Cost follows the token mix rather than the token total: cache reads cost 50× le
 Notes:
 
 - All six runs used deepseek-v4.1-flash.
-- Cost is estimated from each run's token totals at that model's listed prices per 1M tokens: $0.15 input, $0.60 output, $0.003 cache read.
+- Cost is estimated from each run's token totals at that model's listed prices per 1M tokens: $0.15 input, $0.60 output, $0.003 cache read. Multipliers are computed from the unrounded estimates, so they can differ slightly from dividing the rounded costs shown above.
 - Time excludes environment setup and final wrap-up, but includes model interaction, code changes, and test execution.
 
 ### App memory
@@ -99,11 +99,8 @@ CHORD_PPROF_PORT=6060 chord
 go tool pprof http://127.0.0.1:6060/debug/pprof/profile?seconds=15
 ```
 
-## For contributors
-
-Benchmark suites, regression checks, hotspot interpretation, and tuning trade-offs for performance-sensitive changes are documented in [CONTRIBUTING](https://github.com/keakon/chord/blob/main/CONTRIBUTING.md#performance-sensitive-changes). `./scripts/bench_tui_regression.sh` is the canonical validation entry point.
-
 ## Related
 
 - [Configuration & Auth](./configuration.md)
 - [Troubleshooting](./troubleshooting.md)
+- [Contributing: performance-sensitive changes](https://github.com/keakon/chord/blob/main/CONTRIBUTING.md#performance-sensitive-changes)

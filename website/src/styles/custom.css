@@ -72,6 +72,41 @@
   line-height: 1.5;
 }
 
+.sl-markdown-content .chord-highlights li a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.sl-markdown-content .chord-highlights li a:hover {
+  color: var(--sl-color-accent-high);
+}
+
+:root[data-theme='light'] .sl-markdown-content .chord-highlights li a:hover {
+  color: var(--sl-color-accent);
+}
+
+.sl-markdown-content .chord-why {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.92rem;
+  font-weight: 400;
+  line-height: 1.45;
+  color: var(--sl-color-gray-3);
+}
+
+/* The homepage benchmark tables otherwise shrink to their content and leave
+   the bars only a few dozen pixels long. */
+[data-has-hero] .sl-markdown-content table {
+  width: 100%;
+}
+
+/* Setup cards are narrow on phones; wrap the install command instead of
+   letting it scroll out of view. */
+[data-has-hero] .sl-markdown-content .card pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 50rem) {
   .sl-markdown-content .chord-highlights {
     grid-template-columns: repeat(2, minmax(0, 1fr));

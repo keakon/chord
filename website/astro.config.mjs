@@ -13,7 +13,7 @@ export default defineConfig({
   integrations: [
     starlight({
       title: 'Chord',
-      description: 'A terminal coding agent that finishes coding tasks faster, runs cheaper, and stays small in memory.',
+      description: 'A faster, cheaper, lighter terminal coding agent.',
       social: [{ icon: 'github', label: 'GitHub', href: repo }],
       // assets/logo/chord-wordmark*.svg are the brand sources; scripts/sync-docs.mjs
       // regenerates the root-served images into website/public/ before every
@@ -109,6 +109,18 @@ export default defineConfig({
             { slug: 'performance', translations: { 'zh-CN': '性能' } },
             { slug: 'troubleshooting', translations: { 'zh-CN': '常见问题排查' } },
             { slug: 'glossary', translations: { 'zh-CN': '术语表' } },
+            {
+              label: 'Changelog',
+              translations: { 'zh-CN': '更新日志（英文）' },
+              link: 'https://github.com/keakon/chord/blob/main/CHANGELOG.md',
+              attrs: { target: '_blank', rel: 'noopener' },
+            },
+            {
+              label: 'Releases',
+              translations: { 'zh-CN': '发布版本' },
+              link: 'https://github.com/keakon/chord/releases',
+              attrs: { target: '_blank', rel: 'noopener' },
+            },
           ],
         },
       ],

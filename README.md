@@ -6,7 +6,7 @@
 
 🌐 [中文介绍](./README_CN.md)
 
-**Finish coding tasks faster, spend less on each one, and keep memory small.** A lightweight terminal coding agent for long sessions: it keeps context clean and switches models automatically when one is unavailable.
+**A faster, cheaper, lighter terminal coding agent.** Built for long sessions: it keeps context clean, trims and compacts what the model sees, and switches models automatically when one is unavailable.
 
 <p align="center">
   <img src="./docs/assets/screenshot.png" alt="Chord terminal UI screenshot" width="900">
@@ -14,12 +14,12 @@
 
 ## Feature highlights
 
-- Vim-style keyboard controls
-- Automatic model fallback
-- Image previews
-- Import Claude Code, Codex, and OpenCode sessions
-- Codex quota and reset times
-- Notifications when you’re needed
+- [Automatic model fallback](./docs/configuration.md#model-pools-selecting-providermodel): a failing key or model does not stop the session; the next model in the pool takes over.
+- [Request trimming plus compaction](./docs/context-management.md): long sessions stay inside the context window and spend fewer tokens per turn.
+- [Streaming tool early execution](./docs/performance.md#streaming-tool-early-execution): safe tools start before the model finishes its response, so turns come back sooner.
+- [Small memory footprint](./docs/performance.md#app-memory): 30MB with an empty session and 39MB after 200 messages in the measured scenario.
+- [Import Claude Code, Codex, and OpenCode sessions](./docs/usage.md#importing-external-sessions): keep your history when you switch.
+- [Vim-style keyboard controls](./docs/keybindings.md): stay in the terminal flow without reaching for the mouse.
 
 ## Three-step setup
 
@@ -64,13 +64,13 @@ Explain this project's main modules and how to run its tests. Do not change any 
 
 Inspect the response and tool results. Once you know your way around, ask Chord to make a specific change.
 
-For manual provider/model setup and the `limit` fields, see [Quickstart](./docs/quickstart.md) and the [Glossary](./docs/glossary.md); ready-to-paste `config.yaml` files are in [example configs](./docs/examples/index.md).
+For manual provider/model setup and the `limit` fields, see [Quickstart](./docs/quickstart.md) and the [Glossary](./docs/glossary.md); ready-to-paste `config.yaml` files are in the [configuration examples](./docs/examples/index.md).
 
 ## Documentation
 
 - [Quickstart](./docs/quickstart.md): install and complete your first task
 - [Usage](./docs/usage.md): everyday controls, session recovery, and long tasks
-- [Model recipes](./docs/model-configs.md) · [Examples](./docs/examples/index.md): connect your models and providers
+- [Model configuration recipes](./docs/model-configs.md) · [Configuration examples](./docs/examples/index.md): connect your models and providers
 - [Permissions & Safety](./docs/permissions-and-safety.md): choose which actions need approval
 - [Headless](./docs/headless.md): control Chord from another interface with `chord headless`
 - [Troubleshooting](./docs/troubleshooting.md) · [Full documentation index](./docs/index.md)

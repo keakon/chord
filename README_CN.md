@@ -6,7 +6,7 @@
 
 🌐 [English introduction](./README.md)
 
-**任务跑得更快，单次花费更低，内存占用保持很小。** 一个面向长会话的轻量终端 Coding Agent：上下文保持干净，模型不可用时自动切换。
+**更快、更省、更轻的终端 Coding Agent。** 为长会话而生：上下文保持干净，只把必要内容送给模型，模型不可用时自动切换。
 
 <p align="center">
   <img src="./docs/assets/screenshot.png" alt="Chord 终端界面截图" width="900">
@@ -14,12 +14,12 @@
 
 ## 亮点功能
 
-- Vim 风格键盘操作
-- 失败时自动切换备用模型
-- 支持预览图片
-- 导入 Claude Code、Codex、OpenCode 会话
-- 查看 Codex 额度与重置时间
-- 只在真正需要你时才通知
+- [模型自动切换](./docs/configuration_CN.md#模型池)：key 或模型失败时不停工，池中的下一个模型自动接手。
+- [请求级剪裁＋持久压缩](./docs/context-management_CN.md)：长会话始终留在上下文窗口内，每轮花的 token 更少。
+- [流式工具早执行](./docs/performance_CN.md#工具流式早执行)：参数一完整就执行安全工具，不必等模型写完回复，响应更快。
+- [内存占用小](./docs/performance_CN.md#应用内存)：实测空会话 30MB，加载 200 条消息后 39MB。
+- [导入 Claude Code、Codex、OpenCode 会话](./docs/usage_CN.md#导入外部会话)：换工具时保留已有历史。
+- [Vim 风格键盘操作](./docs/keybindings_CN.md)：全程不离开键盘，终端里的操作节奏不断。
 
 ## 三步上手
 
@@ -64,13 +64,13 @@ chord
 
 查看回答和工具执行结果。熟悉项目后，再让 Chord 实现具体改动。
 
-手动配置 provider / 模型以及 `limit` 字段的规则见[快速开始](./docs/quickstart_CN.md)与[术语表](./docs/glossary_CN.md)；可直接复制的 `config.yaml` 见[示例配置库](./docs/examples/index_CN.md)。
+手动配置 provider / 模型以及 `limit` 字段的规则见[快速开始](./docs/quickstart_CN.md)与[术语表](./docs/glossary_CN.md)；可直接复制的 `config.yaml` 见[配置示例](./docs/examples/index_CN.md)。
 
 ## 文档
 
 - [快速开始](./docs/quickstart_CN.md)：安装并完成第一个任务
 - [使用指南](./docs/usage_CN.md)：日常操作、恢复会话和长任务
-- [配置模型](./docs/model-configs_CN.md) · [示例配置](./docs/examples/index_CN.md)：接入自己的模型和服务商
+- [模型配置速查](./docs/model-configs_CN.md) · [配置示例](./docs/examples/index_CN.md)：接入自己的模型和服务商
 - [权限与安全](./docs/permissions-and-safety_CN.md)：决定哪些操作需要确认
 - [Headless 集成](./docs/headless_CN.md)：通过 `chord headless` 从其他入口操控
 - [排障](./docs/troubleshooting_CN.md) · [完整文档目录](./docs/index_CN.md)

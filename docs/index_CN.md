@@ -1,6 +1,6 @@
 # Chord 文档
 
-**任务跑得更快，单次花费更低，内存占用保持很小。** Chord 为长会话设计：key 或模型失败时自动切换，用请求级剪裁加压缩控制成本，内存占用保持低位。
+**更快、更省、更轻的终端 Coding Agent。** Chord 为长会话设计：key 或模型失败时自动切换，用请求级剪裁加压缩控制成本，内存占用保持低位。
 
 第一次使用时，建议按这个顺序走：先看[快速开始](./quickstart_CN.md)跑通第一个任务，再从[模型配置速查](./model-configs_CN.md)复制服务商配置，最后在[权限与安全](./permissions-and-safety_CN.md)定好审批规则；已经在用时，按下面的目标找答案。
 
@@ -35,7 +35,7 @@
 
 ## 示例配置
 
-- [示例配置库](./examples/index_CN.md)：按场景选择完整配置
+- [配置示例](./examples/index_CN.md)：按场景选择完整配置
 - [最小可用](./examples/examples-minimal_CN.md)：一个服务商、一个模型池
 - [Codex + LSP](./examples/examples-codex-workstation_CN.md)：登录、代码诊断和审查角色
 - [OpenAI 兼容网关](./examples/examples-openai-compat_CN.md)：多密钥和备用接口
