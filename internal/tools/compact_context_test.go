@@ -700,3 +700,30 @@ func TestCompactContextParametersCrossReferenceEvidenceRefsForObservedClaims(t *
 		t.Fatalf("claim_evidence maxProperties = %v, want %d", got, maxCompactContextClaims)
 	}
 }
+
+// The evidence-ID contract must teach the only form the main model actually
+// sees and rule out stand-in values: a bare path or prose description in
+// claim_evidence/evidence_refs is the observed first-attempt failure, and the
+// [evidence:ev-...] rendering lives only in the summarization prompt, so
+// pointing the main model at it sends it looking for an ID it cannot find.
+func TestCompactContextEvidenceParamsStateVisibleIDContract(t *testing.T) {
+	properties := NewCompactContextTool(testCompactValidator()).Parameters()["properties"].(map[string]any)
+	for _, field := range []string{"claim_evidence", "claim_kinds", "evidence_refs"} {
+		desc, _ := properties[field].(map[string]any)["description"].(string)
+		if !strings.Contains(strings.ToLower(desc), "evidence id") {
+			t.Errorf("%s description must name evidence IDs, got: %q", field, desc)
+		}
+		if !strings.Contains(desc, "visible in this conversation") {
+			t.Errorf("%s description must require an ID visible in this conversation, got: %q", field, desc)
+		}
+		if strings.Contains(desc, "[evidence:") {
+			t.Errorf("%s description must not point at the summarization-only [evidence:...] rendering, got: %q", field, desc)
+		}
+	}
+	claimEvidence, _ := properties["claim_evidence"].(map[string]any)["description"].(string)
+	for _, want := range []string{"File paths", "are not evidence IDs", "claim kinds", "derived or assumed"} {
+		if !strings.Contains(claimEvidence, want) {
+			t.Errorf("claim_evidence description must forbid stand-in values and name the fallback, missing %q in: %q", want, claimEvidence)
+		}
+	}
+}
