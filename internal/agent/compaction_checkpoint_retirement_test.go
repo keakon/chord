@@ -50,7 +50,7 @@ func TestModelDrivenDerivedEvidenceStillValidatesAtBarrier(t *testing.T) {
 			agent.evidence.add(item)
 			ref := evidenceItemID(item)
 			if !valid {
-				ref = "ev-unknown"
+				ref = "ev-000000000000"
 			}
 			agent.ctxMgr.Append(message.Message{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{testToolCall("checkpoint", tools.NameCompactContext)}})
 			args := fmt.Sprintf(`{"active_objective":"finish parser","next_step":"run tests","claim_kinds":{"parser updated":"observed"},"claim_evidence":{"parser updated":[%q]}}`, ref)
@@ -58,8 +58,15 @@ func TestModelDrivenDerivedEvidenceStillValidatesAtBarrier(t *testing.T) {
 			if valid && err != nil {
 				t.Fatal(err)
 			}
-			if !valid && (err == nil || !strings.Contains(err.Error(), "unknown evidence ID")) {
-				t.Fatalf("unknown evidence not rejected: %v", err)
+			if !valid {
+				if err == nil || !strings.Contains(err.Error(), "unknown evidence ID") {
+					t.Fatalf("unknown evidence not rejected: %v", err)
+				}
+				// The tool folds claim_evidence into evidence_refs, so a
+				// rejection has to name the claim that carried the bad ID.
+				if !strings.Contains(err.Error(), `claim_evidence["parser updated"]`) {
+					t.Fatalf("rejection must name the claim_evidence entry, got: %v", err)
+				}
 			}
 		})
 	}

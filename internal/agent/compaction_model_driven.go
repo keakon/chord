@@ -300,13 +300,22 @@ func (a *MainAgent) tryArmModelDrivenCheckpoint(callID string, rawArgs string) (
 	if err != nil {
 		return "", err
 	}
-	if err := a.validateModelDrivenEvidenceRefs(args.EvidenceRefs); err != nil {
-		return "", err
+	// claim_evidence is validated before the merged top-level list: the tool
+	// folds claim_evidence values into evidence_refs, so a bad reference
+	// authored under a claim would otherwise be reported as an evidence_refs
+	// entry and send the model to edit the field it authored correctly.
+	claims := make([]string, 0, len(args.ClaimEvidence))
+	for claim := range args.ClaimEvidence {
+		claims = append(claims, claim)
 	}
-	for claim, refs := range args.ClaimEvidence {
-		if err := a.validateModelDrivenEvidenceRefs(refs); err != nil {
-			return "", fmt.Errorf("claim_evidence %q: %w", claim, err)
+	slices.Sort(claims)
+	for _, claim := range claims {
+		if err := a.validateModelDrivenEvidenceRefs(fmt.Sprintf("claim_evidence[%q]", claim), args.ClaimEvidence[claim]); err != nil {
+			return "", err
 		}
+	}
+	if err := a.validateModelDrivenEvidenceRefs("evidence_refs", args.EvidenceRefs); err != nil {
+		return "", err
 	}
 	if err := validateModelDrivenCheckpointKind(args); err != nil {
 		return "", a.explainCheckpointRejection(err)
@@ -497,8 +506,11 @@ func evidenceKindSupportsCompletion(kind evidenceKind) bool {
 // evidence packs that are still in the context: after an apply, a previous
 // checkpoint's pack is the only place its Evidence IDs remain visible, and the
 // tool surface documents those checkpoint-pack IDs as the referenceable form.
-// Invented IDs stay rejected.
-func (a *MainAgent) validateModelDrivenEvidenceRefs(refs []string) error {
+// Invented IDs stay rejected. field names the argument the references came
+// from — "evidence_refs" or "claim_evidence[<claim>]" — because the tool folds
+// claim_evidence values into the top-level list, so a rejection must say which
+// field the model has to edit rather than reporting the merged union.
+func (a *MainAgent) validateModelDrivenEvidenceRefs(field string, refs []string) error {
 	if len(refs) == 0 {
 		return nil
 	}
@@ -508,7 +520,7 @@ func (a *MainAgent) validateModelDrivenEvidenceRefs(refs []string) error {
 		item, ok := known[ref]
 		if ok {
 			if item.Validity == evidenceValidityInvalidated {
-				return fmt.Errorf("compact_context evidence_refs contains %s evidence %q", item.Validity, ref)
+				return fmt.Errorf("compact_context %s contains %s evidence %q", field, item.Validity, ref)
 			}
 			continue
 		}
@@ -517,10 +529,10 @@ func (a *MainAgent) validateModelDrivenEvidenceRefs(refs []string) error {
 		}
 		meta, ok := carried[ref]
 		if !ok {
-			return fmt.Errorf("compact_context evidence_refs contains unknown evidence ID %q; %s", ref, a.unknownEvidenceRefHint())
+			return fmt.Errorf("compact_context %s contains unknown evidence ID %q; %s", field, ref, a.unknownEvidenceRefHint())
 		}
 		if meta.invalidated {
-			return fmt.Errorf("compact_context evidence_refs contains %s evidence %q", evidenceValidityInvalidated, ref)
+			return fmt.Errorf("compact_context %s contains %s evidence %q", field, evidenceValidityInvalidated, ref)
 		}
 	}
 	return nil

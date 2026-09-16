@@ -2180,7 +2180,7 @@ func TestValidateModelDrivenCheckpointKindEvidenceRequirements(t *testing.T) {
 func TestValidateModelDrivenEvidenceRefsUsesFullTracker(t *testing.T) {
 	a := &MainAgent{}
 	a.evidence.add(evidenceItem{Kind: evidenceToolDiff, Key: "full-evidence", Excerpt: "important"})
-	if err := a.validateModelDrivenEvidenceRefs([]string{evidenceItemID(a.evidence.snapshot()[0])}); err != nil {
+	if err := a.validateModelDrivenEvidenceRefs("evidence_refs", []string{evidenceItemID(a.evidence.snapshot()[0])}); err != nil {
 		t.Fatalf("full tracker evidence was rejected: %v", err)
 	}
 }
@@ -2283,7 +2283,7 @@ func TestUnknownEvidenceRefHintListsResolvableEvidence(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.evidence.add(evidenceItem{Kind: evidenceToolDiff, Key: "unknown-ref", Excerpt: "diff"})
 	id := evidenceItemID(a.evidence.snapshot()[0])
-	err := a.validateModelDrivenEvidenceRefs([]string{"ev-000000000000"})
+	err := a.validateModelDrivenEvidenceRefs("evidence_refs", []string{"ev-000000000000"})
 	if err == nil {
 		t.Fatal("invented evidence ID must stay rejected")
 	}
@@ -2292,7 +2292,7 @@ func TestUnknownEvidenceRefHintListsResolvableEvidence(t *testing.T) {
 			t.Fatalf("unknown-ID rejection %q must carry the resolvable menu entry %q", err, want)
 		}
 	}
-	if err := a.validateModelDrivenEvidenceRefs([]string{id}); err != nil {
+	if err := a.validateModelDrivenEvidenceRefs("evidence_refs", []string{id}); err != nil {
 		t.Fatalf("live tracker ID must stay resolvable: %v", err)
 	}
 }
@@ -2302,7 +2302,7 @@ func TestUnknownEvidenceRefHintListsPackIDs(t *testing.T) {
 	checkpoint := buildCompactionCheckpointMessage("## Current User Request\n- continue", nil, compactionSummaryModeModelDriven, []evidenceItem{positive})
 	a := &MainAgent{tools: tools.NewRegistry(), ctxMgr: ctxmgr.NewManager(10000, 1000)}
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: checkpoint, IsCompactionSummary: true})
-	err := a.validateModelDrivenEvidenceRefs([]string{"ev-000000000000"})
+	err := a.validateModelDrivenEvidenceRefs("evidence_refs", []string{"ev-000000000000"})
 	if err == nil {
 		t.Fatal("invented ID must stay rejected with a pack in context")
 	}
@@ -2653,7 +2653,7 @@ func TestValidateCommittedEvidenceJudgesArchivedPackEvidenceByRenderedKind(t *te
 	legacyContent := strings.Join(legacyLines, "\n")
 	legacyAgent := &MainAgent{tools: tools.NewRegistry(), ctxMgr: ctxmgr.NewManager(10000, 1000)}
 	legacyAgent.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: legacyContent, IsCompactionSummary: true})
-	if err := legacyAgent.validateModelDrivenEvidenceRefs([]string{diffID}); err != nil {
+	if err := legacyAgent.validateModelDrivenEvidenceRefs("evidence_refs", []string{diffID}); err != nil {
 		t.Fatalf("presence-only pack ID must still resolve as an evidence reference: %v", err)
 	}
 	if err := legacyAgent.validateObservedClaimEvidence(tools.CompactContextArgs{
@@ -2683,7 +2683,7 @@ func TestValidateModelDrivenEvidenceRefsResolvesCheckpointPackID(t *testing.T) {
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: checkpoint, IsCompactionSummary: true})
 	// The tracker is empty: the item's source messages were archived.
 	id := evidenceItemID(item)
-	if err := a.validateModelDrivenEvidenceRefs([]string{id}); err != nil {
+	if err := a.validateModelDrivenEvidenceRefs("evidence_refs", []string{id}); err != nil {
 		t.Fatalf("checkpoint-pack evidence ID must validate after its source was archived: %v", err)
 	}
 	if err := a.validateObservedClaimEvidence(tools.CompactContextArgs{
@@ -2692,7 +2692,7 @@ func TestValidateModelDrivenEvidenceRefsResolvesCheckpointPackID(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("observed claim over checkpoint-pack evidence must validate: %v", err)
 	}
-	if err := a.validateModelDrivenEvidenceRefs([]string{"ev-000000000000"}); err == nil {
+	if err := a.validateModelDrivenEvidenceRefs("evidence_refs", []string{"ev-000000000000"}); err == nil {
 		t.Fatal("invented evidence ID must still be rejected")
 	}
 }
@@ -2767,7 +2767,7 @@ func TestE2EModelDrivenEvidenceIDSurvivesApplyIntoNextGeneration(t *testing.T) {
 	if len(live) == 0 || !strings.Contains(live[0].Content, "Evidence ID: "+packID) {
 		t.Fatalf("checkpoint must render the evidence pack with the ID:\n%s", live[0].Content)
 	}
-	if err := a.validateModelDrivenEvidenceRefs([]string{packID}); err != nil {
+	if err := a.validateModelDrivenEvidenceRefs("evidence_refs", []string{packID}); err != nil {
 		t.Fatalf("previous-generation evidence pack ID rejected after apply: %v", err)
 	}
 }

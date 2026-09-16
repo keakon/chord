@@ -52,8 +52,8 @@ func TestCompactContextPlannedStateFilesAreNormalizedSeparately(t *testing.T) {
 }
 
 func TestCompactContextEvidenceRefsAreTrimmedAndBudgeted(t *testing.T) {
-	args, err := testCompactValidator().ParseCompactContextArgs(json.RawMessage(`{"active_objective":"a","next_step":"b","evidence_refs":["  e-1  "]}`))
-	if err != nil || !slices.Equal(args.EvidenceRefs, []string{"e-1"}) {
+	args, err := testCompactValidator().ParseCompactContextArgs(json.RawMessage(`{"active_objective":"a","next_step":"b","evidence_refs":["  ev-000000000001  "]}`))
+	if err != nil || !slices.Equal(args.EvidenceRefs, []string{"ev-000000000001"}) {
 		t.Fatalf("args=%#v err=%v", args, err)
 	}
 }
@@ -457,17 +457,17 @@ func TestCompactContextRejectsUnknownStageMetadata(t *testing.T) {
 }
 
 func TestCompactContextClaimEvidenceIsTrimmed(t *testing.T) {
-	args, err := testCompactValidator().ParseCompactContextArgs(json.RawMessage(`{"active_objective":"a","next_step":"b","completed":["tests pass"],"claim_evidence":{"tests pass":["  ev-1  "]}}`))
+	args, err := testCompactValidator().ParseCompactContextArgs(json.RawMessage(`{"active_objective":"a","next_step":"b","completed":["tests pass"],"claim_evidence":{"tests pass":["  ev-000000000001  "]}}`))
 	if err != nil {
 		t.Fatalf("ParseCompactContextArgs: %v", err)
 	}
-	if !slices.Equal(args.ClaimEvidence["tests pass"], []string{"ev-1"}) {
+	if !slices.Equal(args.ClaimEvidence["tests pass"], []string{"ev-000000000001"}) {
 		t.Fatalf("claim_evidence = %#v", args.ClaimEvidence)
 	}
 }
 
 func TestCompactContextClaimEvidenceAcceptsStandaloneClaim(t *testing.T) {
-	raw := `{"active_objective":"a","next_step":"b","completed":["implemented parser"],"claim_evidence":{"unrelated claim":["ev-1"]}}`
+	raw := `{"active_objective":"a","next_step":"b","completed":["implemented parser"],"claim_evidence":{"unrelated claim":["ev-000000000001"]}}`
 	args, err := testCompactValidator().ParseCompactContextArgs(json.RawMessage(raw))
 	if err != nil {
 		t.Fatalf("standalone claim evidence should be accepted: %v", err)
@@ -592,7 +592,7 @@ func TestCompactContextClaimKindsKeysNormalizedLikeClaimEvidence(t *testing.T) {
 	raw := `{
 		"active_objective": "a", "next_step": "b",
 		"completed": ["tests pass"],
-		"claim_evidence": {"tests pass": ["ev-1"]},
+		"claim_evidence": {"tests pass": ["ev-000000000001"]},
 		"claim_kinds": {"  tests pass  ": "observed"}
 	}`
 	args, err := testCompactValidator().ParseCompactContextArgs(json.RawMessage(raw))
@@ -608,7 +608,7 @@ func TestCompactContextClaimKindsKeysNormalizedLikeClaimEvidence(t *testing.T) {
 }
 
 func TestCompactContextClaimEvidenceCollapsesWhitespaceTwins(t *testing.T) {
-	raw := `{"active_objective":"a","next_step":"b","claim_evidence":{"fact":["ev-1"],"  fact  ":["ev-2"]}}`
+	raw := `{"active_objective":"a","next_step":"b","claim_evidence":{"fact":["ev-000000000001"],"  fact  ":["ev-000000000002"]}}`
 	args, err := testCompactValidator().ParseCompactContextArgs(json.RawMessage(raw))
 	if err != nil {
 		t.Fatalf("ParseCompactContextArgs: %v", err)
@@ -698,6 +698,54 @@ func TestCompactContextParametersCrossReferenceEvidenceRefsForObservedClaims(t *
 	}
 	if got := properties["claim_evidence"].(map[string]any)["maxProperties"]; got != maxCompactContextClaims {
 		t.Fatalf("claim_evidence maxProperties = %v, want %d", got, maxCompactContextClaims)
+	}
+}
+
+// Values that can never resolve are rejected where the error can name the
+// field and the claim they came from: the runtime validates the merged
+// evidence_refs union, so its unknown-ID rejection cannot say which field the
+// model has to edit.
+func TestCompactContextRejectsNonEvidenceIDReferences(t *testing.T) {
+	v := testCompactValidator()
+	cases := []struct {
+		name string
+		raw  string
+		want []string
+	}{
+		{
+			name: "claim_kind_in_evidence_refs",
+			raw:  `{"active_objective":"a","next_step":"b","evidence_refs":["derived"]}`,
+			want: []string{"argument evidence_refs", `"derived"`, "not an evidence ID"},
+		},
+		{
+			name: "claim_kind_in_claim_evidence",
+			raw:  `{"active_objective":"a","next_step":"b","claim_evidence":{"tests pass":["derived"]}}`,
+			want: []string{`claim_evidence for claim "tests pass"`, `"derived"`, "not an evidence ID"},
+		},
+		{
+			name: "path_in_claim_evidence",
+			raw:  `{"active_objective":"a","next_step":"b","claim_evidence":{"tests pass":["internal/agent/compaction.go"]}}`,
+			want: []string{`claim_evidence for claim "tests pass"`, "not an evidence ID"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := v.ParseCompactContextArgs(json.RawMessage(tc.raw))
+			if err == nil {
+				t.Fatal("expected a rejection")
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("error %q must contain %q", err, want)
+				}
+			}
+		})
+	}
+	// A well-shaped but unresolvable ID passes the tool layer: only the
+	// runtime can tell whether it exists.
+	args, err := v.ParseCompactContextArgs(json.RawMessage(`{"active_objective":"a","next_step":"b","evidence_refs":["ev-000000000000"]}`))
+	if err != nil || !slices.Equal(args.EvidenceRefs, []string{"ev-000000000000"}) {
+		t.Fatalf("well-shaped IDs must pass the tool layer: args=%+v err=%v", args, err)
 	}
 }
 

@@ -60,7 +60,10 @@ type retainedCheckpointBlock struct {
 // carries non-empty own text: under the archival profile the reasoning that
 // led to the checkpoint request lives only in that body (plus what the model
 // wrote into the continuation-state arguments), so dropping it would sever the
-// model from its own just-completed analysis. At most maxUserMessages user
+// model from its own just-completed analysis. A declaring segment whose
+// rejection a later compact_context call replaced is skipped instead: that
+// retry decided the outcome, so the rejected attempt's body is not the
+// reasoning behind the checkpoint being written. At most maxUserMessages user
 // messages are kept; the budget counts message text only.
 func selectCheckpointRetainedRecentBlocks(messages []message.Message, maxUserMessages int, budgetTokens int, estimateTokens func(text string) int) []retainedCheckpointBlock {
 	if budgetTokens <= 0 || estimateTokens == nil || maxUserMessages <= 0 {
@@ -68,6 +71,8 @@ func selectCheckpointRetainedRecentBlocks(messages []message.Message, maxUserMes
 	}
 	remaining := budgetTokens
 	var blocks []retainedCheckpointBlock
+	var superseded map[string]struct{}
+	supersededLoaded := false
 	users := 0
 	partialKept := false
 	ccKept := false
@@ -96,11 +101,17 @@ func selectCheckpointRetainedRecentBlocks(messages []message.Message, maxUserMes
 			// newer tool-only rounds in the scan, so retaining it cannot
 			// resurrect a superseded exchange; only one such block per head.
 			if !ccKept && users == 0 && assistantDeclaresCompactContext(msg) {
-				if text := retainedAssistantPartialText(msg); text != "" {
-					ccKept = true
-					blocks, remaining = addCheckpointRetainedBlock(blocks, remaining, estimateTokens, retainedCheckpointBlock{label: retainedCheckpointRequestLabel, text: text})
-					if remaining <= 0 {
-						return blocks
+				if !supersededLoaded {
+					superseded = toolFailureSupersededByLaterSuccess(messages)
+					supersededLoaded = true
+				}
+				if _, replaced := superseded[msg.ToolCalls[0].ID]; !replaced {
+					if text := retainedAssistantPartialText(msg); text != "" {
+						ccKept = true
+						blocks, remaining = addCheckpointRetainedBlock(blocks, remaining, estimateTokens, retainedCheckpointBlock{label: retainedCheckpointRequestLabel, text: text})
+						if remaining <= 0 {
+							return blocks
+						}
 					}
 				}
 			}

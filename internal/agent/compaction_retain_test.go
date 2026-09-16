@@ -301,6 +301,25 @@ func TestSelectCheckpointRetainedRecentBlocksSkipsEmptyOrSupersededCheckpointReq
 	}
 }
 
+func TestSelectCheckpointRetainedRecentBlocksSkipsSupersededCheckpointRequestBody(t *testing.T) {
+	rejected := message.ToolCall{ID: "cc-rejected", Name: tools.NameCompactContext}
+	accepted := message.ToolCall{ID: "cc-accepted", Name: tools.NameCompactContext}
+	head := []message.Message{
+		{Role: message.RoleUser, Content: "Land it."},
+		{Role: message.RoleAssistant, Content: "Checkpointing the remaining work.", ToolCalls: []message.ToolCall{rejected}},
+		{Role: message.RoleTool, ToolCallID: rejected.ID, ToolStatus: message.ToolStatusError, Content: "Context checkpoint rejected: unknown evidence ID"},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{accepted}},
+		{Role: message.RoleTool, ToolCallID: accepted.ID, ToolStatus: message.ToolStatusSuccess, Content: "Context checkpoint request accepted"},
+	}
+	// The retry's own body is empty and the rejected attempt is superseded, so
+	// only the real user message is retained: the accepted call, not the
+	// rejection, is the reasoning behind the checkpoint being written.
+	blocks := selectCheckpointRetainedRecentBlocks(head, compactRetainRecentUserMessages, 1<<20, estimatorTokensPerChar)
+	if len(blocks) != 1 || blocks[0].label != retainedUserLabel {
+		t.Fatalf("superseded checkpoint-request body must not be retained, got %+v", blocks)
+	}
+}
+
 func TestSelectCheckpointRetainedRecentBlocksBudgetPrefersNewerOverCheckpointRequest(t *testing.T) {
 	cc := message.ToolCall{ID: "cc-1", Name: tools.NameCompactContext}
 	head := []message.Message{

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -188,7 +189,7 @@ func (v CompactContextValidator) ParseCompactContextArgs(raw json.RawMessage) (C
 	}
 	args.PlannedStateFiles = plannedStateFiles
 	args.PlannedStateFiles = removeRegisteredStateFiles(args.PlannedStateFiles, args.StateFiles)
-	if args.EvidenceRefs, err = validateCompactContextList(args.EvidenceRefs, 24, "evidence_refs"); err != nil {
+	if args.EvidenceRefs, err = validateCompactContextEvidenceRefs(args.EvidenceRefs, 24, "evidence_refs", ""); err != nil {
 		return CompactContextArgs{}, err
 	}
 	// Claim keys are natural-language assertions, not indices into
@@ -204,7 +205,7 @@ func (v CompactContextValidator) ParseCompactContextArgs(raw json.RawMessage) (C
 	}
 	args.ClaimEvidence = claimEvidence
 	for claim, refs := range claimEvidence {
-		normalized, err := validateCompactContextList(refs, 8, "claim_evidence")
+		normalized, err := validateCompactContextEvidenceRefs(refs, 8, "claim_evidence", claim)
 		if err != nil {
 			return CompactContextArgs{}, err
 		}
@@ -348,6 +349,39 @@ func normalizeCompactContextClaims[V any](claims map[string]V, name string) (map
 		return nil, fmt.Errorf("%s contains %d claims, exceeding the maximum of %d", name, len(normalized), maxCompactContextClaims)
 	}
 	return normalized, nil
+}
+
+// compactContextEvidenceIDShape is the only evidence-reference spelling the
+// runtime resolves: every ID is minted as "ev-" plus the first six bytes of a
+// SHA-256 digest in lowercase hex, and both resolution sources — the live
+// evidence tracker and the Evidence ID lines rendered by checkpoint packs —
+// carry exactly that form.
+var compactContextEvidenceIDShape = regexp.MustCompile(`^ev-[0-9a-f]{12}$`)
+
+// validateCompactContextEvidenceRefs applies the list contract plus the
+// evidence-ID shape to one reference list. field is the argument the list came
+// from and claim, when non-empty, is the claim_evidence key, so a rejection
+// names the entry the model has to edit: the runtime validates the merged
+// evidence_refs union, where a value authored under a claim is indistinguishable
+// from a top-level one. Values that can never resolve (a claim kind, a path, a
+// paraphrase) are rejected here instead of coming back as an unknown-ID
+// rejection against the wrong field.
+func validateCompactContextEvidenceRefs(refs []string, maxItems int, field, claim string) ([]string, error) {
+	out, err := validateCompactContextList(refs, maxItems, field)
+	if err != nil {
+		return nil, err
+	}
+	where := "argument " + field
+	if claim != "" {
+		where = fmt.Sprintf("%s for claim %q", field, claim)
+	}
+	for _, ref := range out {
+		if compactContextEvidenceIDShape.MatchString(ref) {
+			continue
+		}
+		return nil, fmt.Errorf("%s: %q is not an evidence ID (an ID is ev- followed by 12 lowercase hex characters, copied from an Evidence ID line visible in this conversation); cite such an ID or omit the entry", where, ref)
+	}
+	return out, nil
 }
 
 // validateCompactContextList trims every item, rejects empty items and arrays

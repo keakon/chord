@@ -33,11 +33,11 @@ func TestCheckpointHintMatchesObservedValidation(t *testing.T) {
 		if err := agent.validateObservedClaimEvidence(args); err != nil {
 			t.Fatal(err)
 		}
-		if err := agent.validateModelDrivenEvidenceRefs(args.EvidenceRefs); err != nil {
+		if err := agent.validateModelDrivenEvidenceRefs("evidence_refs", args.EvidenceRefs); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := agent.validateModelDrivenEvidenceRefs([]string{evidenceItemID(unclassified)}); err != nil {
+	if err := agent.validateModelDrivenEvidenceRefs("evidence_refs", []string{evidenceItemID(unclassified)}); err != nil {
 		t.Fatalf("provenance-only reference rejected: %v", err)
 	}
 }

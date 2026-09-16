@@ -5675,6 +5675,28 @@ func TestToolFailureSupersededOnlyOnMatchingTargets(t *testing.T) {
 			},
 			want: "fail",
 		},
+		{
+			name: "accepted compact_context retry supersedes the rejection",
+			msgs: []message.Message{
+				call("fail", tools.NameCompactContext, `{"active_objective":"a","next_step":"b"}`), failure("fail"),
+				call("ok", tools.NameCompactContext, `{"active_objective":"a","next_step":"b"}`), success("ok"),
+			},
+			want: "fail",
+		},
+		{
+			name: "compact_context rejection with no later acceptance keeps the failure",
+			msgs: []message.Message{
+				call("fail", tools.NameCompactContext, `{"active_objective":"a","next_step":"b"}`), failure("fail"),
+				call("ok", tools.NameCompactContext, `{"active_objective":"a","next_step":"b"}`), failure("ok"),
+			},
+		},
+		{
+			name: "another tool's success does not supersede a compact_context rejection",
+			msgs: []message.Message{
+				call("fail", tools.NameCompactContext, `{"active_objective":"a","next_step":"b"}`), failure("fail"),
+				call("ok", tools.NameRead, `{"path":"src/a.go"}`), success("ok"),
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

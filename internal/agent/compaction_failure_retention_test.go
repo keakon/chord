@@ -52,6 +52,52 @@ func TestCheckpointRetainedFailureRecordsKeepsOnlyCurrentTurnFailures(t *testing
 	}
 }
 
+// A rejected compact_context request that a later call of the same tool was
+// accepted for is not a failure the checkpoint carries forward: the retry
+// decided the outcome, and the retained records are re-attached directly under
+// the new checkpoint, where the superseded rejection reads as a checkpoint
+// that ran and failed right after one applied.
+func TestCheckpointRetainedFailureRecordsDropsSupersededCompactContextRejection(t *testing.T) {
+	rejection := toolBatchMessages("rejected-call", tools.NameCompactContext, message.ToolStatusError, `Context checkpoint rejected: compact_context evidence_refs contains unknown evidence ID "derived"`)
+	head := appendAll([]message.Message{{Role: message.RoleUser, Content: "request"}},
+		rejection,
+		toolBatchMessages("accepted-call", tools.NameCompactContext, message.ToolStatusSuccess, "Context checkpoint request accepted"),
+	)
+	if got := checkpointRetainedFailureRecords(head); len(got) != 0 {
+		t.Fatalf("retained %d records, want the superseded rejection dropped: %+v", len(got), got)
+	}
+
+	// A later rejection does not supersede the earlier one: without an
+	// accepted call, the failure is still what the head settled on.
+	unresolved := appendAll([]message.Message{{Role: message.RoleUser, Content: "request"}},
+		rejection,
+		toolBatchMessages("rejected-again", tools.NameCompactContext, message.ToolStatusError, "Context checkpoint rejected: unknown evidence ID"),
+	)
+	if got := checkpointRetainedFailureRecords(unresolved); len(got) != 4 {
+		t.Fatalf("retained %d records, want both rejections kept: %+v", len(got), got)
+	}
+}
+
+// A batch that carries any call besides compact_context keeps its failure: a
+// sibling failure is not the checkpoint's own, so nothing about it is
+// superseded.
+func TestCheckpointRetainedFailureRecordsKeepsBatchWithSiblingFailure(t *testing.T) {
+	head := appendAll([]message.Message{{Role: message.RoleUser, Content: "request"}},
+		[]message.Message{
+			{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{
+				{ID: "cc-call", Name: tools.NameCompactContext, Args: json.RawMessage(`{}`)},
+				{ID: "read-call", Name: tools.NameRead, Args: json.RawMessage(`{}`)},
+			}},
+			{Role: message.RoleTool, ToolCallID: "cc-call", ToolStatus: message.ToolStatusError, Content: "Context checkpoint rejected"},
+			{Role: message.RoleTool, ToolCallID: "read-call", ToolStatus: message.ToolStatusError, Content: "read failed"},
+		},
+		toolBatchMessages("accepted-call", tools.NameCompactContext, message.ToolStatusSuccess, "Context checkpoint request accepted"),
+	)
+	if got := checkpointRetainedFailureRecords(head); len(got) != 3 {
+		t.Fatalf("retained %d records, want the batch with the sibling failure kept: %+v", len(got), got)
+	}
+}
+
 func TestCheckpointRetainedFailureRecordsCapsToNewestBatches(t *testing.T) {
 	head := []message.Message{{Role: message.RoleUser, Content: "request"}}
 	for _, callID := range []string{"call-1", "call-2", "call-3"} {

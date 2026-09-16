@@ -7,12 +7,12 @@ import (
 )
 
 func TestCompactContextDerivesEvidenceUnion(t *testing.T) {
-	raw := json.RawMessage(`{"active_objective":"finish parser","next_step":"run tests","evidence_refs":["ev-a"],"claim_evidence":{"parser checked":["ev-b","ev-a"]},"claim_kinds":{"parser checked":"observed"},"retired_items":[" obsolete decision "]}`)
+	raw := json.RawMessage(`{"active_objective":"finish parser","next_step":"run tests","evidence_refs":["ev-00000000000a"],"claim_evidence":{"parser checked":["ev-00000000000b","ev-00000000000a"]},"claim_kinds":{"parser checked":"observed"},"retired_items":[" obsolete decision "]}`)
 	args, err := testCompactValidator().ParseCompactContextArgs(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(args.EvidenceRefs, []string{"ev-a", "ev-b"}) || !slices.Equal(args.RetiredItems, []string{"obsolete decision"}) {
+	if !slices.Equal(args.EvidenceRefs, []string{"ev-00000000000a", "ev-00000000000b"}) || !slices.Equal(args.RetiredItems, []string{"obsolete decision"}) {
 		t.Fatalf("unexpected normalization: %+v", args)
 	}
 	encoded, err := json.Marshal(args)

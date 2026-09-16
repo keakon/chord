@@ -936,7 +936,10 @@ func (a *MainAgent) evidenceItemsForCompaction(contextLimit int) []evidenceItem 
 // effect is not attributable to one, and a failure that cannot be matched is
 // never superseded: keeping an excerpt that has gone stale costs a few tokens,
 // while dropping a still-current blocker (a build that is still broken) leaves
-// the continuation reasoning from a false premise.
+// the continuation reasoning from a false premise. compact_context is the one
+// exception, because it has no path target to match: the call only asks the
+// runtime to checkpoint, so a later accepted call of the same tool proves the
+// refusal was retried rather than overwritten by some unrelated success.
 func toolFailureSupersededByLaterSuccess(messages []message.Message) map[string]struct{} {
 	nameByCallID := make(map[string]string)
 	for _, msg := range messages {
@@ -969,7 +972,11 @@ func toolFailureSupersededByLaterSuccess(messages []message.Message) map[string]
 			continue
 		}
 		targets := targetsByCallID[callID]
-		if len(targets) == 0 {
+		// A compact_context result is attributable without path targets: the
+		// call only asks the runtime to checkpoint, and whether the runtime
+		// refused or accepted it is the whole outcome. Every other tool is
+		// skipped when its targets are unknown rather than guessed at.
+		if len(targets) == 0 && name != tools.NameCompactContext {
 			continue
 		}
 		// Mirror the collector's classification exactly: an explicit
@@ -990,7 +997,7 @@ func toolFailureSupersededByLaterSuccess(messages []message.Message) map[string]
 			if success.tool != failure.tool || success.index <= failure.index {
 				continue
 			}
-			if coversTargets(success.targets, failure.targets) {
+			if failure.tool == tools.NameCompactContext || coversTargets(success.targets, failure.targets) {
 				superseded[failure.callID] = struct{}{}
 				break
 			}

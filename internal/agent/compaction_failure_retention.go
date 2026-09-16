@@ -52,6 +52,12 @@ const maxCheckpointRetainedFailureBytes = 8 << 10
 // providers reject. Unsuccessful results are the failure/cancellation
 // vocabulary plus legacy results that read as errors (see
 // retainedFailureResult). Records are returned in their original order.
+//
+// A rejected compact_context request that a later successful call of the same
+// tool already replaced is not retained: the retry, not the rejection, is what
+// the head settled on, and the retained records are re-attached directly under
+// the new checkpoint — a superseded rejection there reads as a checkpoint that
+// ran and failed right after one applied.
 func checkpointRetainedFailureRecords(head []message.Message) []message.Message {
 	if len(head) == 0 {
 		return nil
@@ -64,6 +70,8 @@ func checkpointRetainedFailureRecords(head []message.Message) []message.Message 
 		}
 	}
 	var batches [][]message.Message
+	var superseded map[string]struct{}
+	supersededLoaded := false
 	for i := turnStart; i < len(head); {
 		assistant := head[i]
 		if assistant.Role != message.RoleAssistant || len(assistant.ToolCalls) == 0 {
@@ -76,6 +84,14 @@ func checkpointRetainedFailureRecords(head []message.Message) []message.Message 
 		}
 		results := head[i+1 : end]
 		if !toolCallBatchComplete(assistant, results) || !batchHasRetainedFailure(results) {
+			i = end
+			continue
+		}
+		if !supersededLoaded {
+			superseded = toolFailureSupersededByLaterSuccess(head)
+			supersededLoaded = true
+		}
+		if supersededCompactContextBatch(assistant, superseded) {
 			i = end
 			continue
 		}
@@ -100,6 +116,29 @@ func checkpointRetainedFailureRecords(head []message.Message) []message.Message 
 		out = append(out, batch...)
 	}
 	return out
+}
+
+// supersededCompactContextBatch reports whether every tool call of a retained
+// batch is a compact_context request the runtime rejected and a later call of
+// the same tool already replaced (toolFailureSupersededByLaterSuccess). A
+// rejected request never settled — the barrier refused it before it could arm —
+// so once a later call was accepted, the rejection is no longer part of the
+// head's outcome: keeping it would replay a failure that the checkpoint being
+// written just superseded, directly under that checkpoint. Requiring every
+// call of the batch to be in the set leaves a batch that also carries another
+// call alone, because that failure is not the checkpoint's own; such a call
+// can only have entered the set through the path rule, which never covers a
+// compact_context call (it has no target).
+func supersededCompactContextBatch(assistant message.Message, superseded map[string]struct{}) bool {
+	if len(superseded) == 0 || len(assistant.ToolCalls) == 0 {
+		return false
+	}
+	for _, call := range assistant.ToolCalls {
+		if _, ok := superseded[strings.TrimSpace(call.ID)]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // elideRetainedBatch applies elision once, at the point a batch becomes a
