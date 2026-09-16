@@ -65,7 +65,7 @@ Response:
 {"type": "subscribe_response", "payload": {"events": ["activity", "assistant_message", "idle", "done_completion"]}}
 ```
 
-Available event types: `activity`, `assistant_message`, `idle`, `confirm_request`, `question_request`, `handoff_request`, `handoff_cancelled`, `role_change`, `error`, `agent_started`, `agent_notify`, `agent_done`, `info`, `toast`, `done_completion`, `local_shell_result`, `assistant_rollback`, `todos`, `compaction_status`.
+Available event types: `activity`, `assistant_message`, `idle`, `confirm_request`, `question_request`, `notification`, `handoff_request`, `handoff_cancelled`, `role_change`, `error`, `agent_started`, `agent_notify`, `agent_done`, `info`, `toast`, `done_completion`, `local_shell_result`, `assistant_rollback`, `todos`, `compaction_status`, `session_switched`, `background_result`, `context_notice`.
 
 ### `status`
 
@@ -96,6 +96,8 @@ Response:
 }
 ```
 
+`session_id` tracks the active session, not just the startup snapshot. An in-band switch that replaces the session without restarting the process (handoff plan execution, `/resume <id>`, `/new`) updates the tracked id, and the change is announced with an explicit `session_switched` push; the cached value alone never counts as the gateway having seen the new session. Restores that keep the session (startup replay, durable compaction rewrite) only refresh the timestamp and emit nothing. The tracked id moves even without a `session_switched` subscription, so `status_response` always reports the session the runtime actually runs.
+
 ### `send`
 
 Send a user message to the agent. Slash commands work the same as in the TUI; bare `/models` is treated as `/models status` because there is no TUI overlay.
@@ -104,7 +106,7 @@ Send a user message to the agent. Slash commands work the same as in the TUI; ba
 {"type": "send", "content": "Please summarize the project structure."}
 ```
 
-If a `confirm_request`, `question_request`, or `handoff_request` is pending and the user sends a regular message (not via `confirm`, `question`, or `handoff` below), Chord auto-dismisses the pending interaction so the new message is consumed. The dismissed interaction stops appearing as pending in the next `status_response`. When the dismissed interaction is a `handoff_request`, Chord also pushes a `handoff_cancelled` event to subscribed clients, just like the runtime-initiated cancellation in the [`handoff`](#handoff) section.
+If a `confirm_request`, `question_request`, or `handoff_request` is pending and the user sends a regular message (not via `confirm`, `question`, or `handoff` below), Chord auto-dismisses the pending interaction so the new message is consumed. A pending `confirm_request` is auto-denied with an empty reason and a pending `question_request` is auto-cancelled; neither emits a dedicated cancelled event, so follow the next `status_response` (`pending_confirm` / `pending_question` cleared) to stop waiting. The dismissed interaction stops appearing as pending in the next `status_response`. When the dismissed interaction is a `handoff_request`, Chord also pushes a `handoff_cancelled` event to subscribed clients, just like the runtime-initiated cancellation in the [`handoff`](#handoff) section.
 
 ### `models`
 
@@ -265,9 +267,14 @@ You receive these on stdout. The list below covers what is emitted by default pl
 | `toast`                 | Transient notification surfaced to the user in the TUI; safe to ignore in headless                | `agent_id`, `message`, `level` (`info` / `warn` / `error`)                                                   |
 | `todos`                 | Replacement todo list                                                                             | `todos[]` with `{id, content, status, active_form}`. Multiple `in_progress` items can be valid when each maps to a distinct active workstream and uses a unique `active_form`. |
 | `compaction_status`     | Compaction lifecycle events: `started` and terminal outcomes (`succeeded`, `skipped`, `failed`, `cancelled`) | `status`, `trigger` (`manual`, `usage_driven`, `length_recovery`, `oversize_driven`, `model_driven`, `model_downshift`), `reason`, `plan_id` (bounded compaction plan identifier for correlating the terminal outcome with the plan that produced it). Progress telemetry is not forwarded. |
+| `session_switched`      | The active session changed without restarting the process (handoff plan execution, `/resume <id>`, `/new`) | `session_id` (the new active session) |
+| `background_result`     | A finished background job's durable result; the only delivery channel for the JOB RESULT card, which typically lands after the turn is idle so no later `assistant_message` summarizes it | `target_agent_id`, `message_index`, `content` |
+| `context_notice`        | Durable context-pressure warning with no other headless channel | `level`, `message`, `message_index` |
 | `error`                 | Runtime error                                                                                     | `agent_id`, `message`, optional `code`                                                                         |
 
 If an input line on stdin exceeds the protocol line limit, Chord emits an `error` envelope with `code: "stdin_line_too_long"` and continues reading later lines. Integrations should use `code` for classification when present and keep `message` for human-readable diagnostics.
+
+Silent retry telemetry is never pushed. A retry the TUI only records in the error panel emits no `error` envelope and leaves `last_error` / `last_outcome` (`status_response` and `idle`) untouched, so a turn that hits a silent retry and recovers still reports `completed`. A terminal failure is always followed by a non-silent error, which is the one integrations observe.
 
 `assistant_message.text` may be empty for tool-only rounds (including a SubAgent `Complete` call). Chord logs a warning for observability; gateway integrations should skip the empty message and use `agent_done.summary` as the authoritative SubAgent completion content.
 

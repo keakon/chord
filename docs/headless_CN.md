@@ -65,7 +65,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 {"type": "subscribe_response", "payload": {"events": ["activity", "assistant_message", "idle", "done_completion"]}}
 ```
 
-可订阅事件类型：`activity`、`assistant_message`、`idle`、`confirm_request`、`question_request`、`handoff_request`、`handoff_cancelled`、`role_change`、`error`、`agent_started`、`agent_notify`、`agent_done`、`info`、`toast`、`done_completion`、`local_shell_result`、`assistant_rollback`、`todos`、`compaction_status`。
+可订阅事件类型：`activity`、`assistant_message`、`idle`、`confirm_request`、`question_request`、`notification`、`handoff_request`、`handoff_cancelled`、`role_change`、`error`、`agent_started`、`agent_notify`、`agent_done`、`info`、`toast`、`done_completion`、`local_shell_result`、`assistant_rollback`、`todos`、`compaction_status`、`session_switched`、`background_result`、`context_notice`。
 
 ### `status`
 
@@ -96,6 +96,8 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 }
 ```
 
+`session_id` 跟的是当前实际会话，不是启动时的快照。进程不重启、直接换会话时（执行 handoff plan、`/resume <id>`、`/new`），Chord 会更新这个跟踪值，并用一条显式的 `session_switched` 推送告诉订阅方；光靠缓存值变化不算网关已经看到新会话。会话没换的恢复（启动回放、持久压缩重写）只刷新时间戳，不推送。即使没订阅 `session_switched`，跟踪值照样会更新，所以 `status_response` 永远报实际运行的那个会话。
+
 ### `send`
 
 向 agent 发送用户消息。slash 命令的行为与 TUI 一致；裸 `/models` 会被当作 `/models status`，因为 headless 没有 TUI overlay。
@@ -104,7 +106,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 {"type": "send", "content": "请总结一下项目结构。"}
 ```
 
-如果当前有待处理的 `confirm_request`、`question_request` 或 `handoff_request`，而用户发送了普通消息（不是下面的 `confirm`、`question` 或 `handoff`），Chord 会先自动关闭该待处理交互，再消费这条新消息。被关闭的交互不会在下一次 `status_response` 中继续显示为待决；如果被关闭的是 `handoff_request`，Chord 还会向订阅了 `handoff_cancelled` 的客户端推送该事件，和 [`handoff`](#handoff) 一节里 runtime 主动取消的路径一致。
+如果当前有待处理的 `confirm_request`、`question_request` 或 `handoff_request`，而用户发送了普通消息（不是下面的 `confirm`、`question` 或 `handoff`），Chord 会先自动关闭该待处理交互，再消费这条新消息。待决的 `confirm_request` 会按空理由自动拒绝，待决的 `question_request` 会自动取消；这两类关闭没有专门的取消事件，看下一次 `status_response` 里 `pending_confirm` / `pending_question` 已清空就知道不用再等。被关闭的交互不会在下一次 `status_response` 中继续显示为待决；如果被关闭的是 `handoff_request`，Chord 还会向订阅了 `handoff_cancelled` 的客户端推送该事件，和 [`handoff`](#handoff) 一节里 runtime 主动取消的路径一致。
 
 ### `models`
 
@@ -265,9 +267,14 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 | `toast`              | TUI 中的瞬时通知；headless 可以忽略          | `agent_id`、`message`、`level`（`info` / `warn` / `error`） |
 | `todos`              | 替换当前 todo 列表                           | `todos[]`，元素结构为 `{id, content, status, active_form}`；启用 `todo_write` 时，多个独立且正在处理的工作流可以同时为 `in_progress`，但必须使用唯一的 `active_form`。 |
 | `compaction_status`  | 压缩生命周期事件：`started` 与终态（`succeeded`、`skipped`、`failed`、`cancelled`） | `status`、`trigger`（`manual`、`usage_driven`、`length_recovery`、`oversize_driven`、`model_driven`、`model_downshift`）、`reason`、`plan_id`（有界压缩计划标识，用于把终态与产生它的具体计划关联）。进度类遥测不转发。 |
+| `session_switched`   | 当前会话换了，但进程没重启（执行 handoff plan、`/resume <id>`、`/new`） | `session_id`（换完之后的新会话） |
+| `background_result`  | 后台任务结束后的持久结果；JOB RESULT 卡片唯一的推送通道——它通常在回合 `idle` 之后才落盘，后面不会再有 `assistant_message` 总结它 | `target_agent_id`、`message_index`、`content` |
+| `context_notice`     | 持久的上下文压力提醒，headless 没有别的通道能收到它 | `level`、`message`、`message_index` |
 | `error`              | 运行时错误                                   | `agent_id`、`message`，可选 `code` |
 
 如果 stdin 上的单行输入超过协议行长度限制，Chord 会输出带 `code: "stdin_line_too_long"` 的 `error` envelope，并继续读取后续行。集成方应在存在 `code` 时用它做错误分类，把 `message` 作为面向人的诊断信息。
+
+静默重试不会推送。TUI 只记在错误面板里的那次重试不会产生 `error` `envelope`，也不会动 `last_error` / `last_outcome`（`status_response` 与 `idle` 里看到的）——中途重试一次、最后恢复成功的回合，`idle` 里看到的仍然是 `completed`。真正失败时总会跟一条非静默错误，集成方只管看那一条。
 
 纯工具调用轮次（包括 SubAgent 调用 `Complete`）的 `assistant_message.text` 可能为空。Chord 会记 warning 便于观测；gateway 集成应跳过空消息，并以 `agent_done.summary` 作为权威的 SubAgent 完成内容。
 

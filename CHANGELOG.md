@@ -4,9 +4,16 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
+### Features
+
+- Headless control-plane clients can now subscribe to three more push events: `session_switched` announces an in-band session change (handoff plan execution, `/resume <id>`) with the new `session_id`, and `status_response.session_id` now tracks that active session instead of staying on the startup snapshot; `background_result` delivers a finished background job's durable result (`target_agent_id`, `message_index`, `content`), the only channel for JOB RESULT output that lands after the turn is idle; `context_notice` forwards durable context-pressure warnings (`level`, `message`, `message_index`) that have no other headless channel.
+- New `compat.forced_tool_choice.auto_only` option downgrades any non-`auto` `tool_choice` to the backend default, for backends that only support `tool_choice: "auto"` and reject `required`, `none`, or named choices. Set it at the provider level with per-model override; an explicit `auto` is still sent unchanged.
+
 ### Fixes
 
 - Dialog overlays no longer show mismatched row backgrounds: the Cancel action in Delete Session, the inputs and Scope/Action rows in the rules add form, the handoff deny-reason input, and multi-segment rows in selector dialogs now stay on the dialog surface instead of falling back to the terminal background.
+- Silent LLM retry telemetry no longer surfaces as a headless `error`: it emits no envelope and leaves `last_error` / `idle.last_outcome` untouched, so a turn that retries silently and recovers still reports `completed` instead of sticking on `error`. Terminal failures are still reported through the following non-silent error.
+- Narrow `shell` allow rules now require review for command substitution, process substitution and unresolved quoting: a command containing an unquoted `$(...)`, backtick, or `<(...)` / `>(...)` (including inside double quotes), an unterminated quote, or a trailing backslash no longer auto-matches a specific `allow` pattern such as `"git *"`, and falls through to the next matching rule. Plain redirection targets are not affected.
 
 ## 0.8.1 - 2026-09-16
 
