@@ -16,9 +16,6 @@ type cachedRenderable struct {
 	text       string
 	lines      [][]uv.Cell
 	cellsValid bool
-	scratch    uv.ScreenBuffer
-	scratchW   int
-	scratchOK  bool
 }
 
 func (m *Model) shouldFreezeRender() bool {
@@ -262,38 +259,49 @@ func (m *Model) renderToCache(cache *cachedRenderable, text string) {
 		if w <= 0 {
 			w = 1
 		}
-		buf := cache.renderScratchBuffer(w)
+		buf := m.renderScratchBuffer(w)
 		uv.NewStyledString(part).Draw(buf, buf.Bounds())
 		line := buf.Line(0)
-		copied := make([]uv.Cell, min(w, len(line)))
-		copy(copied, line[:len(copied)])
+		// Trailing blank cells cost 112 bytes each and are indistinguishable
+		// from the cleared destination the blit writes them onto, so keep only
+		// the cells that can actually change the frame.
+		end := min(w, len(line))
+		for end > 0 && line[end-1].Equal(&uv.EmptyCell) {
+			end--
+		}
+		if end == 0 {
+			cache.lines[i] = nil
+			continue
+		}
+		copied := make([]uv.Cell, end)
+		copy(copied, line[:end])
 		cache.lines[i] = copied
 	}
 	cache.cellsValid = true
 }
 
-func (cache *cachedRenderable) renderScratchBuffer(width int) uv.ScreenBuffer {
+func (m *Model) renderScratchBuffer(width int) uv.ScreenBuffer {
 	if width <= 0 {
 		width = 1
 	}
-	if !cache.scratchOK || cache.scratch.RenderBuffer == nil {
-		cache.scratch = newScreenBuffer(width, 1)
-		cache.scratchW = width
-		cache.scratchOK = true
-		return cache.scratch
+	if !m.renderScratchOK || m.renderScratch.RenderBuffer == nil {
+		m.renderScratch = newScreenBuffer(width, 1)
+		m.renderScratchW = width
+		m.renderScratchOK = true
+		return m.renderScratch
 	}
-	if cache.scratchW < width {
-		cache.scratch.Resize(width, 1)
-		cache.scratchW = width
+	if m.renderScratchW < width {
+		m.renderScratch.Resize(width, 1)
+		m.renderScratchW = width
 	} else {
-		cache.scratch.Resize(cache.scratchW, 1)
+		m.renderScratch.Resize(m.renderScratchW, 1)
 	}
-	cache.scratch.Method = ansi.GraphemeWidth
-	line := cache.scratch.Line(0)
+	m.renderScratch.Method = ansi.GraphemeWidth
+	line := m.renderScratch.Line(0)
 	for i := range line {
 		line[i] = uv.EmptyCell
 	}
-	return cache.scratch
+	return m.renderScratch
 }
 
 func (m *Model) queuedDraftsFingerprint(width, maxLines int) string {

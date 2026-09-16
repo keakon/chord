@@ -386,6 +386,13 @@ type Model struct {
 	// screen buffer width, so Draw can clear the reused buffer with row copies
 	// instead of per-cell loops.
 	screenBlankLine uv.Line
+	// renderScratch renders one line of a region's text into cells while a
+	// cachedRenderable is rebuilt. Every region shares it because the cells are
+	// copied out before the next line is rendered; a buffer per region would
+	// only retain another row of cells (112 bytes each).
+	renderScratch   uv.ScreenBuffer
+	renderScratchW  int
+	renderScratchOK bool
 
 	// Compaction background status (dual-lane status bar)
 	compactionBgStatus compactionBackgroundStatus
