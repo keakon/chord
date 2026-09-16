@@ -9,11 +9,11 @@ Start from the symptom and find the next command to run. Symptoms are grouped ro
 Run `chord --version` in a terminal first to check that the command is available and the program starts. Prebuilt binaries do not need Go; only source builds require checking the Go version and source entry point.
 
 1. **Command not found or blocked by the OS**: check the install path. For downloaded macOS binaries, see [Quickstart](./quickstart.md#1-install).
-2. **Missing configuration**: run `chord` in an interactive terminal and follow the setup wizard.
+2. **Missing configuration**: run `chord` in an interactive terminal and follow the [setup wizard](./quickstart.md#2-first-run).
 3. **Invalid configuration**: run `chord doctor config` and correct the reported YAML or field issues.
 4. **Still unable to start**: keep the terminal error output, then use the log collection guidance at the end of this page.
 
-The wizard only runs when `config.yaml` is missing; it does not overwrite an existing malformed file. Redirected stdin is fine if a controlling terminal is still available. Without one, setup returns an initialization error; complete configuration interactively first.
+The wizard only runs when `config.yaml` is missing; it does not overwrite an existing malformed file. Without a controlling terminal it returns an initialization error, so complete configuration interactively first.
 
 ## 401 / 403 / auth failures
 

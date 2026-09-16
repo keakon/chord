@@ -35,10 +35,12 @@ chord
 
 缺少 `config.yaml` 时，初始化向导会引导你选择接入方式：
 
-- **API key**：准备服务商给出的完整 API URL、模型名称和密钥；需要代理时可在向导中填写。
+- **API key**：准备服务商给出的完整 API URL、模型名称和密钥；需要代理时可在向导中填写。URL 路径以 `/responses`、`/messages`、`/chat/completions` 或 `/models` 结尾都可以，向导会按后缀推荐 provider / 模型的默认值。
 - **Codex OAuth**：按提示完成登录，无需手动填写 API key。
 
 向导会创建最小可用的 `config.yaml`，必要时创建 `auth.yaml`，并显示保存位置；已有匹配凭据时会尽量复用。首次进入项目时，Chord 也会按需创建 `.chord/`。
+
+初始化需要有控制终端：仅仅重定向 stdin 不会跳过向导，只要还能打开控制 TTY，交互就发生在那里；完全没有控制终端时 Chord 直接报初始化错误，不会停下来等输入。
 
 想手写配置？从[示例配置库](./examples/index_CN.md)选一个起点。API URL 格式、凭据和模型池设置见[配置与认证](./configuration_CN.md)。无交互终端的初始化问题见[常见问题排查](./troubleshooting_CN.md)。
 

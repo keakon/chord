@@ -35,10 +35,12 @@ chord
 
 If `config.yaml` is missing, the setup wizard offers two ways to connect:
 
-- **API key**: have your provider's full API URL, model name, and key ready. You can also enter a proxy URL if needed.
+- **API key**: have your provider's full API URL, model name, and key ready. You can also enter a proxy URL if needed. Accepted endpoint paths end in `/responses`, `/messages`, `/chat/completions`, or `/models`, and the wizard recommends starter provider/model defaults from that suffix.
 - **Codex OAuth**: follow the sign-in prompts without entering an API key manually.
 
 The wizard creates a minimal `config.yaml` and, when needed, `auth.yaml`, then shows where it saved them. It reuses matching credentials when possible. Chord also creates the project's `.chord/` directory as needed.
+
+Setup needs a controlling terminal: redirected stdin alone does not disable the wizard as long as Chord can still open the controlling TTY, and without one Chord exits with an initialization error instead of waiting for input.
 
 Prefer to write configuration yourself? Start with an [example](./examples/index.md). See [Configuration & Auth](./configuration.md) for endpoint formats, credentials, and model pools. For setup without an interactive terminal, see [Troubleshooting](./troubleshooting.md).
 

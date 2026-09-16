@@ -2,6 +2,13 @@
 
 Chord provides two complementary tools for editing files, optimized for different model training backgrounds.
 
+## How to use this page
+
+- **Pick a format:** [Quick Comparison](#quick-comparison) and [Tool Selection](#tool-selection) — which tool Chord sends by default, and how to override it.
+- **Wire shapes:** [apply_patch Tool (Codex envelope)](#apply_patch-tool-codex-envelope) and [Edit (Replace) Tool](#edit-replace-tool) document the exact envelopes and matching rules.
+- **Day to day:** [Recommended Workflow](#recommended-workflow) and [Task-Specific Guidance](#task-specific-guidance).
+- **Approvals:** [Permissions](#permissions) covers write scope and auto-approval.
+
 ## Quick Comparison
 
 | Feature | **apply_patch Tool** | **Edit (Replace) Tool** |
@@ -26,7 +33,9 @@ When a patch-native model keeps `apply_patch`, Chord also hides `write` and `del
 
 ### Freeform (custom tool) emission
 
-On OpenAI-compatible **Responses** endpoints, a gpt-5-and-later family model or `codex-auto-review` additionally receives `apply_patch` as a **freeform custom tool** (`type: "custom"` with a Lark grammar), instead of a JSON function tool. Chord sends the grammar in the request's `format.definition` field; when the server supports constrained decoding, it restricts the patch protocol during model generation. The grammar currently matches Codex's definition and requires at least one file operation, non-empty added-file content, and valid patch-line structure. The client still validates and executes the returned text with its own parser, so unconstrained responses (from a gateway that strips or rewrites the grammar, or from a server that does not enforce it) retain a tolerant fallback path. Grammar cannot determine whether context came from the latest file or whether the requested change is semantically correct. All other models receive the JSON function shape, and non-Responses endpoints always use the function shape (they have no custom tool type).
+On OpenAI-compatible **Responses** endpoints, a gpt-5-and-later family model or `codex-auto-review` additionally receives `apply_patch` as a **freeform custom tool** (`type: "custom"` with a Lark grammar), instead of a JSON function tool. Chord sends the grammar in the request's `format.definition` field; when the server supports constrained decoding, it restricts the patch protocol during model generation. The grammar currently matches Codex's definition and requires at least one file operation, non-empty added-file content, and valid patch-line structure.
+
+The client still validates and executes the returned text with its own parser, so unconstrained responses (from a gateway that strips or rewrites the grammar, or from a server that does not enforce it) retain a tolerant fallback path. Grammar cannot determine whether context came from the latest file or whether the requested change is semantically correct. All other models receive the JSON function shape, and non-Responses endpoints always use the function shape (they have no custom tool type).
 
 Hosts that accept Responses requests but reject custom tools do not get a built-in exception: a patch-native model there will emit the freeform shape by default, and the gateway rejects it with an actionable error. Set `compat.apply_patch.freeform: false` for such hosts to force the JSON function shape.
 
@@ -63,7 +72,9 @@ If a gateway lowers a custom tool into `{"input": "..."}` instead of `{"patch": 
 
 ### Format
 
-For the Responses freeform shape, the Lark grammar is sent to the server as a generation constraint with the custom tool, so it constrains the patch protocol skeleton on the server side: the complete patch has at least one file operation, added files have at least one `+` content line, and update chunks follow Codex's line and hunk structure. It cannot verify that a file anchor is unique, that the file was unchanged after reading, or that the edit is semantically correct. Chord still revalidates and executes the returned text with its client parser and transactional executor, so a missing or unenforced grammar leaves the client responsible for rejecting invalid results or applying its compatibility rules.
+For the Responses freeform shape, the Lark grammar is sent to the server as a generation constraint with the custom tool, so it constrains the patch protocol skeleton on the server side: the complete patch has at least one file operation, added files have at least one `+` content line, and update chunks follow Codex's line and hunk structure. It cannot verify that a file anchor is unique, that the file was unchanged after reading, or that the edit is semantically correct.
+
+Chord still revalidates and executes the returned text with its client parser and transactional executor, so a missing or unenforced grammar leaves the client responsible for rejecting invalid results or applying its compatibility rules.
 
 The single `patch` argument carries the Codex patch body. Chord accepts the normal complete envelope and also repairs a missing `*** Begin Patch` and/or `*** End Patch` wrapper before parsing. Inside the body, you can include any number of file operations:
 
@@ -90,7 +101,9 @@ Supported operations:
 - **`*** Delete File: path`**: remove a file; no body.
 - **`*** End of File`**: after a hunk, pins that hunk to the file tail (useful when the same block also appears earlier).
 
-Hunks apply in order; each hunk is matched at the first position after the previous hunk's application point. Repeated plain `*** Update File:` sections for the same normalized path follow Codex ordering semantics: each section patches the previous section's in-memory result, and that file is committed as one mutation (so a later mismatch leaves that file unchanged rather than exposing Codex's partial-write behavior). Lines inside a hunk keep their raw `' '`/`+`/`-` prefix, so file content that itself begins with `***` followed by a space stays ordinary context—only lines beginning with an unprefixed `***` followed by a space are protocol markers.
+Hunks apply in order; each hunk is matched at the first position after the previous hunk's application point. Repeated plain `*** Update File:` sections for the same normalized path follow Codex ordering semantics: each section patches the previous section's in-memory result, and that file is committed as one mutation (so a later mismatch leaves that file unchanged rather than exposing Codex's partial-write behavior).
+
+Lines inside a hunk keep their raw `' '`/`+`/`-` prefix, so file content that itself begins with `***` followed by a space stays ordinary context—only lines beginning with an unprefixed `***` followed by a space are protocol markers.
 
 ### When to Use
 
@@ -122,9 +135,13 @@ You can add text after `@@` to help locate ambiguous blocks:
 
 ### Transactional Behavior
 
-All operations in one envelope are planned from a single filesystem snapshot **before any file is modified**. Envelope-wide preflight failures (such as malformed syntax, unsafe overlapping paths, or an unreadable snapshot) leave every file unchanged. An operation-level failure, such as a missing update source or an existing `Add` target, rejects that file group while independent file groups can still commit. If any planned file changes on disk before commit, the commit is rejected without writing its successful subset. If a write fails mid-commit, already-written mutations from that commit attempt are rolled back.
+All operations in one envelope are planned from a single filesystem snapshot **before any file is modified**. Envelope-wide preflight failures (such as malformed syntax, unsafe overlapping paths, or an unreadable snapshot) leave every file unchanged. An operation-level failure, such as a missing update source or an existing `Add` target, rejects that file group while independent file groups can still commit.
 
-Atomicity is per file, not per envelope. Each file is an independent unit: all operations that touch one file (including repeated `*** Update File:` sections for that same path) commit together, or are rolled back together. When one file fails the other independent files in the same envelope are still applied and written to disk. The failure result lists the committed changes (which do not need to be redone), explains which operation groups were not applied and why, and tells you to rebuild the failed operations from current file contents and resubmit only those. Resolve each reported failure and submit the rebuilt operations against the current workspace; do not re-emit committed files, and the result does not repeat the submitted patch.
+If any planned file changes on disk before commit, the commit is rejected without writing its successful subset. If a write fails mid-commit, already-written mutations from that commit attempt are rolled back.
+
+Atomicity is per file, not per envelope. Each file is an independent unit: all operations that touch one file (including repeated `*** Update File:` sections for that same path) commit together, or are rolled back together. When one file fails the other independent files in the same envelope are still applied and written to disk.
+
+The failure result lists the committed changes (which do not need to be redone), explains which operation groups were not applied and why, and tells you to rebuild the failed operations from current file contents and resubmit only those. Resolve each reported failure and submit the rebuilt operations against the current workspace; do not re-emit committed files, and the result does not repeat the submitted patch.
 
 A failed file drags its whole group: if an earlier operation on the same file matched in memory but a later one failed, all of that file's operations are reported as unapplied and omitted from the final plan. Earlier successful prerequisite groups remain eligible to commit, while groups that depend on the discarded group are omitted with it. The result lists every operation carried along (including the ones that matched), so the model can rebuild the complete failed dependency chain from its own submitted patch.
 
@@ -198,7 +215,11 @@ When the same target file repeatedly fails approximate matching on `edit`/`apply
 
 ### Invisible Character Cleaning
 
-The write paths of `edit`, `apply_patch`, and `write` strip zero-width formatting characters and floating combining marks that models leak into tool arguments (zero-width space, zero-width non-joiner, zero-width joiner outside emoji sequences, word joiner, mid-stream BOM, soft hyphen; and a diacritic with no visible base, such as a stray macron sitting after a space instead of on a letter). These runes carry no content, and a floating mark cannot change what any character means, so stripping them cannot change what the text means; leaving them in would plant invisible bytes in the file. When any are removed, the tool result reports exactly which code points were cleaned (for example `U+200B×2, U+0304×1`), so the model learns to stop emitting them. A combining mark over any visible base is kept (letter, digit, symbol, or punctuation) so legitimate diacritics (Vietnamese/Arabic/Devanagari text, stacked marks) and sequences such as a U+0305 overline over a digit in math notation survive untouched. In `apply_patch` the clean is limited to the lines the patch adds: existing content elsewhere in the file is never scanned or rewritten by this clean.
+The write paths of `edit`, `apply_patch`, and `write` strip zero-width formatting characters and floating combining marks that models leak into tool arguments (zero-width space, zero-width non-joiner, zero-width joiner outside emoji sequences, word joiner, mid-stream BOM, soft hyphen; and a diacritic with no visible base, such as a stray macron sitting after a space instead of on a letter). These runes carry no content, and a floating mark cannot change what any character means, so stripping them cannot change what the text means; leaving them in would plant invisible bytes in the file.
+
+When any are removed, the tool result reports exactly which code points were cleaned (for example `U+200B×2, U+0304×1`), so the model learns to stop emitting them. A combining mark over any visible base is kept (letter, digit, symbol, or punctuation) so legitimate diacritics (Vietnamese/Arabic/Devanagari text, stacked marks) and sequences such as a U+0305 overline over a digit in math notation survive untouched.
+
+In `apply_patch` the clean is limited to the lines the patch adds: existing content elsewhere in the file is never scanned or rewritten by this clean.
 
 ### Trailing Newline Tolerance
 
@@ -217,7 +238,11 @@ When exact matching and trailing-newline matching both fail, the tool retries wi
 
 The fallback applies only when the normalized `old_string` has one unique match, reports its use in the tool result, and preserves the file's original punctuation for unchanged context. Multiple normalized matches error with the "found N times" message.
 
-A single space directly adjacent to a separator punctuation mark is also treated as optional — `：` and `:` with a trailing space (and `:the` when the space is dropped) match the same text, as does an inter-word space (`diff and` and `diffand`). This covers models that tokenize `": "` as one token and re-emit it as `：`, or drop/insert a word-boundary space. The folding is deliberately narrow: only one space right after `,` `;` `:` `.` `!` `?` `(` (or right before `)`) or between two word characters is optional. Double spaces, spaces after quotes or dashes, indentation, and newlines stay significant, so a genuine layout mismatch still fails with "old_string not found" instead of silently applying a wrong edit. The result text reports when the tolerance was used; the tool description deliberately does not advertise it, so models still aim for exact matches.
+A single space directly adjacent to a separator punctuation mark is also treated as optional — `：` and `:` with a trailing space (and `:the` when the space is dropped) match the same text, as does an inter-word space (`diff and` and `diffand`). This covers models that tokenize `": "` as one token and re-emit it as `：`, or drop/insert a word-boundary space.
+
+The folding is deliberately narrow: only one space right after `,` `;` `:` `.` `!` `?` `(` (or right before `)`) or between two word characters is optional. Double spaces, spaces after quotes or dashes, indentation, and newlines stay significant, so a genuine layout mismatch still fails with "old_string not found" instead of silently applying a wrong edit.
+
+The result text reports when the tolerance was used; the tool description deliberately does not advertise it, so models still aim for exact matches.
 
 A combining mark with no visible base (at the start of a line or preceded only by whitespace) is folded out during this normalization: it is a tokenizer artifact that never exists in real file content at that position, but does leak into copied text when a tokenizer splits a heading like `### [U+0304].2.1`. A mark over any visible base (letter, digit, symbol, or punctuation) is kept untouched, so legitimate diacritics (Arabic, Devanagari, Vietnamese, including stacked sequences) and marks on digits or symbols (math overlines) are never folded away.
 
@@ -306,9 +331,13 @@ permission:
 
 ### Matching Tolerance
 
-`apply_patch` matches hunk context in three exact passes: exact match first, then ignoring trailing whitespace, then ignoring surrounding whitespace. Punctuation/whitespace tolerance (quotes, dashes, full-width CJK punctuation, and the optional space after separator punctuation) is deliberately **not** a fourth pass: it is a single separate step that must land in exactly one place, and an ambiguous tolerant match is rejected with the candidate lines named instead of silently taking the first one. Repeated blocks still need enough nearby context (or an `*** End of File` marker) to make the intended location clear.
+`apply_patch` matches hunk context in three exact passes: exact match first, then ignoring trailing whitespace, then ignoring surrounding whitespace.
 
-For any file that can be decoded as text, a final fallback also treats common Chinese and ASCII punctuation as equivalent, and, like the `edit` tool, treats a single space adjacent to a separator punctuation mark as optional (`：`, `:` followed by a space, and `:the` match the same line). Both tools share the same normalization and the same preservation rules. This includes source files, dotenv files such as `.env.example`, and extensionless text files. The fallback applies only when the complete hunk has one unique match. It preserves punctuation from the current file in unchanged parts of replacement lines and reports its use in the tool result. Ambiguous matches are rejected, and a fragment occurring inside a longer line is diagnostic only—not an automatic substring edit. Binary or otherwise undecodable files do not enter this fallback because text decoding fails before hunk matching.
+Punctuation/whitespace tolerance (quotes, dashes, full-width CJK punctuation, and the optional space after separator punctuation) is deliberately **not** a fourth pass: it is a single separate step that must land in exactly one place, and an ambiguous tolerant match is rejected with the candidate lines named instead of silently taking the first one. Repeated blocks still need enough nearby context (or an `*** End of File` marker) to make the intended location clear.
+
+For any file that can be decoded as text, a final fallback also treats common Chinese and ASCII punctuation as equivalent, and, like the `edit` tool, treats a single space adjacent to a separator punctuation mark as optional (`：`, `:` followed by a space, and `:the` match the same line). Both tools share the same normalization and the same preservation rules. This includes source files, dotenv files such as `.env.example`, and extensionless text files. The fallback applies only when the complete hunk has one unique match.
+
+It preserves punctuation from the current file in unchanged parts of replacement lines and reports its use in the tool result. Ambiguous matches are rejected, and a fragment occurring inside a longer line is diagnostic only—not an automatic substring edit. Binary or otherwise undecodable files do not enter this fallback because text decoding fails before hunk matching.
 
 ## FAQ
 

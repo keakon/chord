@@ -4,6 +4,16 @@ This page lists every built-in tool name the model can call. Use these exact nam
 
 For how `allow` / `ask` / `deny` are evaluated, including the special coupling between the orchestration tools, see [Permissions & Safety](./permissions-and-safety.md).
 
+## How to use this page
+
+Find the section for the job you are doing:
+
+- **Read and edit files:** [Files](#files), [Search and navigation](#search-and-navigation).
+- **Run commands and long jobs:** [Execution](#execution).
+- **Fetch a page:** [Web](#web).
+- **Plan, ask, and delegate:** [Workflow](#workflow), [Orchestration and control](#orchestration-and-control).
+- **External tool servers:** [MCP tools](#mcp-tools).
+
 ## Files
 
 | Tool | What it does |
@@ -38,9 +48,13 @@ In the TUI, an `lsp` card shows the operation and query position in its header (
 
 ### Command execution and timeouts
 
-Run a non-interactive shell command, either in the foreground or as a background job with `run_in_background: true`. A foreground command that runs past `yield_time_ms` (default 90000) is promoted to a background job automatically; `timeout_ms` caps execution: a foreground command defaults to 600000 and is capped at 600000, while `run_in_background: true` is capped at 21600000 (6h) and carries no deadline unless `timeout_ms` is given; `0` means no deadline. A foreground command that cannot be promoted — one made only of deliberate waits (`sleep`) and short `git` queries, or a command that does not parse — keeps the default cap even when `timeout_ms` is `0`, so no foreground call can block the turn without a deadline; a long `git` operation (`clone`, `fetch`, `pull`, `push`, `submodule`, `gc`, `fsck`, `repack`, `bundle`, `filter-branch`) is promotable like any other long command.
+Run a non-interactive shell command, either in the foreground or as a background job with `run_in_background: true`. A foreground command that runs past `yield_time_ms` (default 90000) is promoted to a background job automatically; `timeout_ms` caps execution: a foreground command defaults to 600000 and is capped at 600000, while `run_in_background: true` is capped at 21600000 (6h) and carries no deadline unless `timeout_ms` is given; `0` means no deadline.
 
-Long commands do not have to block the turn. A command that outlives its foreground budget keeps running as a background job, the tool card names its job id, and the agent is notified when the job finishes, so it can do independent work or end the turn and be woken by the completion instead of waiting. `job_output` reads incremental output and only reports what is new, and a bounded wait that expires leaves the job alive. Consecutive job-completion wakes with no user input in between are bounded; after that, further completions wait for your next message. A background job also ends with the session (switching sessions or exiting the client stops it), so day-scale work belongs in an external runner such as tmux, systemd, or CI.
+A foreground command that cannot be promoted — one made only of deliberate waits (`sleep`) and short `git` queries, or a command that does not parse — keeps the default cap even when `timeout_ms` is `0`, so no foreground call can block the turn without a deadline; a long `git` operation (`clone`, `fetch`, `pull`, `push`, `submodule`, `gc`, `fsck`, `repack`, `bundle`, `filter-branch`) is promotable like any other long command.
+
+Long commands do not have to block the turn. A command that outlives its foreground budget keeps running as a background job, the tool card names its job id, and the agent is notified when the job finishes, so it can do independent work or end the turn and be woken by the completion instead of waiting.
+
+`job_output` reads incremental output and only reports what is new, and a bounded wait that expires leaves the job alive. Consecutive job-completion wakes with no user input in between are bounded; after that, further completions wait for your next message. A background job also ends with the session (switching sessions or exiting the client stops it), so day-scale work belongs in an external runner such as tmux, systemd, or CI.
 
 ### Reading background output
 
@@ -80,7 +94,13 @@ These tools control agent workflows rather than local side effects, so YOLO does
 
 ### Delegation and work scope
 
-Start a delegated SubAgent workstream and return its startup handle (`task_id` / `agent_id`) immediately. It does not wait for completion. The call must include an `expected_write_scope`: declare the narrowest `files`, `path_prefix`, or `modules` scope covering the work. The declaration is coordination metadata, not an enforced boundary — whether the worker may modify files at all is decided by its role's permission rules (a role that denies `write`, `edit`, `delete`, and `apply_patch` registers none of them), and the runtime never blocks a worker's file tools outside the declared paths. Declaring an honest narrow scope keeps sibling-overlap hints meaningful: when the declared scope overlaps another still-active task's, the delegation still starts and the handle carries `scope_conflict: true` with `suggested_task_id` and `suggested_action: serialize_or_worktree` — telling you to run the two tasks serially, coordinate the shared edits through `notify`, or give the new worker its own git worktree. A read-only task should pick an agent whose role registers no file-modifying tools and pass an empty scope, which is accepted only for such roles; a role that can write files must declare a non-empty scope or the delegation is rejected. Command tools such as `shell` are never scope-restricted and stay governed by the role's permission rules. Denying `delegate` also disables `cancel` and nested delegation for that role.
+Start a delegated SubAgent workstream and return its startup handle (`task_id` / `agent_id`) immediately. It does not wait for completion. The call must include an `expected_write_scope`: declare the narrowest `files`, `path_prefix`, or `modules` scope covering the work.
+
+The declaration is coordination metadata, not an enforced boundary — whether the worker may modify files at all is decided by its role's permission rules (a role that denies `write`, `edit`, `delete`, and `apply_patch` registers none of them), and the runtime never blocks a worker's file tools outside the declared paths.
+
+Declaring an honest narrow scope keeps sibling-overlap hints meaningful: when the declared scope overlaps another still-active task's, the delegation still starts and the handle carries `scope_conflict: true` with `suggested_task_id` and `suggested_action: serialize_or_worktree` — telling you to run the two tasks serially, coordinate the shared edits through `notify`, or give the new worker its own git worktree.
+
+A read-only task should pick an agent whose role registers no file-modifying tools and pass an empty scope, which is accepted only for such roles; a role that can write files must declare a non-empty scope or the delegation is rejected. Command tools such as `shell` are never scope-restricted and stay governed by the role's permission rules. Denying `delegate` also disables `cancel` and nested delegation for that role.
 
 ### Notifications and replies
 
@@ -98,7 +118,11 @@ These cards are always expanded and their header is only the tool name: the repo
 
 ### Delegated task boundaries
 
-Agent-to-agent messages respect request boundaries: if the target is busy, the message is queued and included in its next LLM request instead of interrupting the active one; a resumable idle target is woken to receive it. Progress and notice updates sent to an idle main agent are not purely informational: every undelivered update is kept and delivered in the order it was produced, and at the next between-turn boundary Chord merges the pending updates into a single delivery batch that wakes the main for one extra turn (one extra LLM request) before it can go quiet again. Mailbox and coordination state is durable: parent-child request/response records and queued payloads survive compaction and restart, and delivery stays idempotent across task rehydration.
+Agent-to-agent messages respect request boundaries: if the target is busy, the message is queued and included in its next LLM request instead of interrupting the active one; a resumable idle target is woken to receive it.
+
+Progress and notice updates sent to an idle main agent are not purely informational: every undelivered update is kept and delivered in the order it was produced, and at the next between-turn boundary Chord merges the pending updates into a single delivery batch that wakes the main for one extra turn (one extra LLM request) before it can go quiet again.
+
+Mailbox and coordination state is durable: parent-child request/response records and queued payloads survive compaction and restart, and delivery stays idempotent across task rehydration.
 
 The runtime, not the model, is the source of truth for delegation state. A worker that fails to emit a coordination tool (`complete`, `escalate`, or `notify`) receives one bounded follow-up request; if it still cannot comply, or provider/model retries are exhausted, Chord marks it failed, records a `risk_alert`, and wakes the owner. A rehydrated runtime may receive a new `agent_id`; coordination should continue through the stable delegated `task_id`.
 

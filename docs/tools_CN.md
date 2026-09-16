@@ -4,6 +4,16 @@
 
 `allow` / `ask` / `deny` 的判定方式（包括编排类工具之间的特殊耦合）见[权限与安全](./permissions-and-safety_CN.md)。
 
+## 本页怎么读
+
+按要做的任务找对应小节：
+
+- **读写文件**：[文件](#文件)、[搜索与导航](#搜索与导航)。
+- **执行命令与长任务**：[执行](#执行)。
+- **抓取网页**：[Web](#web)。
+- **规划、提问与委派**：[工作流](#工作流)、[编排与控制](#编排与控制)。
+- **外部工具服务**：[MCP 工具](#mcp-工具)。
+
 ## 文件
 
 | 工具 | 用途 |
@@ -80,7 +90,13 @@
 
 ### 委派任务与工作范围
 
-启动一个委派的 SubAgent 工作流并立即返回它的启动句柄（`task_id` / `agent_id`），不等它完成。调用必须携带 `expected_write_scope`：声明覆盖工作范围的最小 `files` / `path_prefix` / `modules`。这份声明是协调元数据，不是运行时边界——worker 能否改文件完全由角色的权限规则决定（deny 掉 `write` / `edit` / `delete` / `apply_patch` 的角色注册不到这些工具），声明路径之外的调用不会被运行时拦截。诚实声明最窄范围，兄弟任务的叠加提示才有意义：新任务的声明范围与另一个仍活跃的任务重叠时，委派照常启动，句柄会带 `scope_conflict: true`、`suggested_task_id` 和 `suggested_action: serialize_or_worktree`，提示你把两个任务串行执行、用 `notify` 协调共享文件的编辑，或让新 worker 在独立的 git worktree 里工作。只读任务应选择注册不到文件修改工具的角色并传空 scope——空 scope 只对这种角色放行，能写文件的角色必须声明非空范围，否则委派被拒绝。`shell` 这类命令工具不受 scope 约束，可用性由角色的权限规则决定。拒绝 `delegate` 会同时禁用该角色的 `cancel` 与嵌套委派。
+启动一个委派的 SubAgent 工作流并立即返回它的启动句柄（`task_id` / `agent_id`），不等它完成。调用必须携带 `expected_write_scope`：声明覆盖工作范围的最小 `files` / `path_prefix` / `modules`。
+
+这份声明是协调元数据，不是运行时边界——worker 能否改文件完全由角色的权限规则决定（deny 掉 `write` / `edit` / `delete` / `apply_patch` 的角色注册不到这些工具），声明路径之外的调用不会被运行时拦截。
+
+诚实声明最窄范围，兄弟任务的叠加提示才有意义：新任务的声明范围与另一个仍活跃的任务重叠时，委派照常启动，句柄会带 `scope_conflict: true`、`suggested_task_id` 和 `suggested_action: serialize_or_worktree`，提示你把两个任务串行执行、用 `notify` 协调共享文件的编辑，或让新 worker 在独立的 git worktree 里工作。
+
+只读任务应选择注册不到文件修改工具的角色并传空 scope——空 scope 只对这种角色放行，能写文件的角色必须声明非空范围，否则委派被拒绝。`shell` 这类命令工具不受 scope 约束，可用性由角色的权限规则决定。拒绝 `delegate` 会同时禁用该角色的 `cancel` 与嵌套委派。
 
 ### 通知与请求回复
 

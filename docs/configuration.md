@@ -41,7 +41,7 @@ Project configuration is read from `.chord/config.yaml` in the startup directory
 - `mcp` merges by server name, with each same-name project server replacing the entire global server definition rather than inheriting individual connection or permission fields;
 - append-style extension points keep global entries and add project entries: currently `skills.paths` and per-trigger hook arrays under `hooks.*` append rather than replace.
 
-On the first run, if you launch `chord` in an interactive terminal and `config.yaml` is missing, Chord starts a one-time setup wizard. It writes a minimal `config.yaml` and, when needed, `auth.yaml`, reuses matching existing credentials from `auth.yaml` when possible, then prints the resolved file locations. Redirected stdin does not by itself make startup non-interactive; if Chord can still open the controlling TTY, the wizard uses that TTY. If no controlling TTY is available, it exits instead of waiting for input.
+If global `config.yaml` is missing, the first `chord` run starts a one-time setup wizard that writes `config.yaml` and, when needed, `auth.yaml` — see [Quickstart](./quickstart.md#2-first-run). Prefer to write both files yourself? Everything below is the full field reference.
 
 ## Minimal provider config
 
@@ -389,7 +389,9 @@ That split is intentional:
 - `auth.yaml` remains the user-edited source of truth for credentials and stable OAuth fields such as `refresh`, `access`, `expires`, `account_id`, and `email`; empty OAuth fields are omitted when Chord rewrites the file, and OAuth `status` does not belong in `auth.yaml`;
 - `auth.state.json` is machine-managed shared runtime state. Normal entries are keyed directly by `account_user_id` below each provider so quota / reset updates and account states such as `expired`, `deactivated`, and `invalidated` do not constantly rewrite `auth.yaml` while the user may also be editing it. Refresh-only credentials whose account is not known yet can temporarily use a `refresh_sha256:<digest>` state entry until the first successful refresh backfills `account_user_id`. State entries without a matching `auth.yaml` OAuth credential, and unrecognized legacy state-key formats, are removed by `chord auth state clean`.
 
-For OAuth credentials with `access`, the access token must carry parseable account and user/account-user claims. If `auth.yaml` already has `account_id`, the token's account ID must match; otherwise the access token is rejected as a mismatched credential. Chord can also keep a refresh-only OAuth entry (`refresh` without `access`) and refresh it on first use; after a successful refresh, Chord extracts `account_id` and switches runtime state to the `account_user_id` key. If refresh fails unrecoverably before the account is known, Chord records the invalid state under `refresh_sha256:<digest>` so `chord auth state clean` can remove the unusable credential later. An OAuth entry with neither `access` nor `refresh` is unusable.
+For OAuth credentials with `access`, the access token must carry parseable account and user/account-user claims. If `auth.yaml` already has `account_id`, the token's account ID must match; otherwise the access token is rejected as a mismatched credential. Chord can also keep a refresh-only OAuth entry (`refresh` without `access`) and refresh it on first use; after a successful refresh, Chord extracts `account_id` and switches runtime state to the `account_user_id` key.
+
+If refresh fails unrecoverably before the account is known, Chord records the invalid state under `refresh_sha256:<digest>` so `chord auth state clean` can remove the unusable credential later. An OAuth entry with neither `access` nor `refresh` is unusable.
 
 `expires` is the access-token expiry timestamp in Unix milliseconds. When `access` contains a JWT `exp` claim, Chord uses that value as the most accurate expiry metadata and can cache the resulting expiry in `auth.state.json` without storing the access token there. A missing or locally expired `expires` value does not by itself mark an OAuth slot `expired` or unhealthy. Chord still tries the existing access token first, and only after an authentication failure will it refresh the credential or mark it expired if recovery is impossible.
 
@@ -467,7 +469,9 @@ Loop mode still follows the configured `key_rotation` / `key_order`. For Codex l
 
 Only providers with `preset: codex` are treated as OAuth providers.
 
-For Codex providers, prefer configuring only `preset: codex` plus model settings. Do not manually override preset-managed fields such as `api_url`, `token_url`, `client_id`, `type`, `store`, `responses_websocket`, or `supported_service_tiers` unless you are deliberately testing transport internals. The preset selects the official OAuth transport, Responses endpoint, WebSocket/cache defaults, quota polling, smart key ordering, and service-tier capability. It does not define a separate HTTP request body or force a Codex User-Agent: non-Codex `type: responses` providers use the same Responses wire shape described above, and all providers default to `User-Agent: chord/<version>`. Use `supported_service_tiers` when you need an explicit tier matrix.
+For Codex providers, prefer configuring only `preset: codex` plus model settings. Do not manually override preset-managed fields such as `api_url`, `token_url`, `client_id`, `type`, `store`, `responses_websocket`, or `supported_service_tiers` unless you are deliberately testing transport internals. The preset selects the official OAuth transport, Responses endpoint, WebSocket/cache defaults, quota polling, smart key ordering, and service-tier capability.
+
+It does not define a separate HTTP request body or force a Codex User-Agent: non-Codex `type: responses` providers use the same Responses wire shape described above, and all providers default to `User-Agent: chord/<version>`. Use `supported_service_tiers` when you need an explicit tier matrix.
 
 Codex OAuth account selection is controlled by `key_rotation` / `key_order` in [Provider key selection](#provider-key-selection). Codex defaults to `key_order: smart`, which considers quota snapshots, soft cooldown, and reset timing when choosing an account.
 
@@ -547,7 +551,9 @@ the alphabetically first top-level pool.
 
 At runtime, use `/models` to switch the pool for the **current view** (per project,
 persisted across restarts). In the main view this means the current main role; in a
-SubAgent view it means that SubAgent's agent pool selection. Switching pools updates
+SubAgent view it means that SubAgent's agent pool selection.
+
+Switching pools updates
 the full fallback chain for subsequent LLM calls, even if the currently selected
 `provider/model` exists in both pools (in-flight requests keep using their starting
 snapshot). You can also set a named
@@ -708,26 +714,13 @@ Compatibility fields:
 - `compat.reasoning_continuity.mode`:
   - `none`: no provider-specific visible reasoning replay.
   - `openai_visible`: replays unchanged assistant `reasoning_content` during
-    Chat Completions tool loops and accepts portable visible reasoning from
-    other wire families as `reasoning_content`. It does not inject request
-    fields; configure those with `request_overrides.body`. On the first
-    attempt Chord still optimistically replays chat-native reasoning to any
-    Chat Completions target, even across providers, so documented in-provider
-    upgrades such as Kimi K2.6/K2.7 to K3 and same-model provider fallback
-    both keep continuity. If a target rejects that request, Chord degrades the
-    target for the rest of the session while keeping completed tool calls and
-    paired results structured until strict compatibility requires text facts.
-    On `openai_visible` Responses targets whose thinking mode requires
-    replayed function-call turns to carry reasoning, Chord replays the native
-    plaintext `reasoning_text` when available. For turns that lost their native
-    reasoning (for example after a cross-provider model switch), a backend
-    rejection escalates the replay to plain-text historical tool records, so
-    the continuation no longer needs the missing reasoning.
-    For third-party OpenAI-compatible gateways, Chord keeps the configured
-    endpoint and does not redirect to DeepSeek's official `/beta` endpoint. A
-    reasoning-only output truncation may receive one bounded request-only
-    reasoning replay on that same endpoint; if the gateway rejects it, Chord
-    falls back to the ordinary recovery prompt.
+    Chat Completions tool loops and accepts portable visible reasoning from other wire families as `reasoning_content`. It does not inject request fields; configure those with `request_overrides.body`. On the first attempt Chord still optimistically replays chat-native reasoning to any Chat Completions target, even across providers, so documented in-provider upgrades such as Kimi K2.6/K2.7 to K3 and same-model provider fallback both keep continuity.
+
+    If a target rejects that request, Chord degrades the target for the rest of the session while keeping completed tool calls and paired results structured until strict compatibility requires text facts. On `openai_visible` Responses targets whose thinking mode requires replayed function-call turns to carry reasoning, Chord replays the native plaintext `reasoning_text` when available.
+
+    For turns that lost their native reasoning (for example after a cross-provider model switch), a backend rejection escalates the replay to plain-text historical tool records, so the continuation no longer needs the missing reasoning. For third-party OpenAI-compatible gateways, Chord keeps the configured endpoint and does not redirect to DeepSeek's official `/beta` endpoint.
+
+    A reasoning-only output truncation may receive one bounded request-only reasoning replay on that same endpoint; if the gateway rejects it, Chord falls back to the ordinary recovery prompt.
   - `anthropic_unsigned`: opt-in for Messages-compatible models such as
     DeepSeek/GLM endpoints that return visible `thinking` blocks without Claude
     signatures. Unsigned thinking is replayed natively only to the same
@@ -735,36 +728,17 @@ Compatibility fields:
     visible reasoning from other wire families is converted into unsigned
     `thinking` blocks instead of being injected into assistant text.
   - Responses, signed Claude Messages, and Gemini otherwise use their
-    protocol-native continuity mechanisms automatically. Chord captures opaque
-    encrypted/signature state and replays it only where the target wire and
-    provenance permit. Across incompatible protocols, portable visible
-    reasoning is converted only when the target has a structured carrier
-    (`openai_visible` or `anthropic_unsigned`); otherwise it is dropped. Opaque
-    state is never fabricated, and reasoning is never injected into ordinary
-    assistant content. Completed tool facts are converted to the target
-    protocol's structured representation whenever possible and textified only
-    if a target rejects that shape. The achieved degradation level is
-    remembered per target.
+    protocol-native continuity mechanisms automatically. Chord captures opaque encrypted/signature state and replays it only where the target wire and provenance permit. Across incompatible protocols, portable visible reasoning is converted only when the target has a structured carrier (`openai_visible` or `anthropic_unsigned`); otherwise it is dropped. Opaque state is never fabricated, and reasoning is never injected into ordinary assistant content.
+
+    Completed tool facts are converted to the target protocol's structured representation whenever possible and textified only if a target rejects that shape. The achieved degradation level is remembered per target.
 - `compat.reasoning_continuity.preserve_history`: by default Chord strips
-  plaintext reasoning (`reasoning_content` and unsigned `thinking` blocks)
-  from completed turns (everything before the last user message), because
-  most thinking backends drop earlier-turn reasoning server-side while still
-  billing it as input. Set `preserve_history: true` when the target's contract
-  requires the complete assistant history (DeepSeek when a request carries
-  tools, Kimi K3 and `keep: all` models, Qwen `preserve_thinking`, GLM
-  `clear_thinking: false`); historical reasoning is then replayed unchanged
-  and billed on every request. Current-turn reasoning always follows the mode
-  above, and signed or encrypted payloads (Claude signed thinking, Responses
-  items, Gemini thought signatures) are unaffected by this switch. Anthropic
-  additionally binds each thinking block to the conversation prefix that
-  produced it: when a history rewrite invalidates that binding and the API
-  rejects the replay with an invalid-signature error, Chord retries once with
-  the thinking blocks dropped and keeps the turn's text and completed tool
-  facts.
-  Request-scoped turn overlays (per-turn `<system-reminder>` hints) are not
-  counted as user turns, so an overlay appended at the tail cannot shift the
-  completed-turn boundary past the current turn and strip the reasoning the
-  backend consumes in this turn's tool chain.
+  plaintext reasoning (`reasoning_content` and unsigned `thinking` blocks) from completed turns (everything before the last user message), because most thinking backends drop earlier-turn reasoning server-side while still billing it as input.
+
+  Set `preserve_history: true` when the target's contract requires the complete assistant history (DeepSeek when a request carries tools, Kimi K3 and `keep: all` models, Qwen `preserve_thinking`, GLM `clear_thinking: false`); historical reasoning is then replayed unchanged and billed on every request. Current-turn reasoning always follows the mode above, and signed or encrypted payloads (Claude signed thinking, Responses items, Gemini thought signatures) are unaffected by this switch.
+
+  Anthropic additionally binds each thinking block to the conversation prefix that produced it: when a history rewrite invalidates that binding and the API rejects the replay with an invalid-signature error, Chord retries once with the thinking blocks dropped and keeps the turn's text and completed tool facts.
+
+  Request-scoped turn overlays (per-turn `<system-reminder>` hints) are not counted as user turns, so an overlay appended at the tail cannot shift the completed-turn boundary past the current turn and strip the reasoning the backend consumes in this turn's tool chain.
 - `compat.forced_tool_choice.suppress_in_thinking`: downgrades loop-forced
   `tool_choice: required` to the backend default while reasoning/thinking is
   active. Enable it only for OpenAI-compatible endpoints that reject forced
@@ -874,15 +848,9 @@ providers:
   Invalid modes, negative values, and values above the cap are configuration
   errors.
 
-For an ordinary 429, the key cooldown follows a single priority order: a
-confirmed quota reset window wins, then a valid `Retry-After` (bounded by
-`retry_after_max_s`) applies verbatim, and only a hint-less 429 falls to the
-retry pacing above: the configured `exponential`/`fixed`/`none` mode, or the
-one-second exponential default when neither field is set. Invalid or
-deactivated credentials, and cooldowns already established by other hard
-states, are never shortened or cleared. This 429 pacing applies before and
-after visible streaming output alike: a 429 that interrupts a visible stream
-cools the key down and rotates to the next one.
+For an ordinary 429, the key cooldown follows a single priority order: a confirmed quota reset window wins, then a valid `Retry-After` (bounded by `retry_after_max_s`) applies verbatim, and only a hint-less 429 falls to the retry pacing above: the configured `exponential`/`fixed`/`none` mode, or the one-second exponential default when neither field is set. Invalid or deactivated credentials, and cooldowns already established by other hard states, are never shortened or cleared.
+
+This 429 pacing applies before and after visible streaming output alike: a 429 that interrupts a visible stream cools the key down and rotates to the next one.
 
 Codex OAuth follows the same rules: every Codex 429 is an ordinary 429. A
 retry hint (`Retry-After` or WebSocket `resets_in_seconds`) is honored ahead
@@ -979,17 +947,9 @@ prevent_sleep: true
 ```
 
 - `desktop_notification`: enables terminal notifications in local TUI mode,
-  regardless of whether the terminal is focused. Each notification pairs the
-  terminal notification escape sequence (auto-selected by terminal, OSC 9 or
-  OSC 777) with a terminal bell (BEL), so it can be heard even where the
-  terminal hides notification banners while focused. Chord notifies when the
-  agent actually ran and then stopped (a completed, cancelled, or loop-finished
-  turn, or all SubAgents finishing) and for permission confirmations and
-  questions, Handoff, and loop decisions waiting for input; user-initiated
-  navigation that settles into idle (session / model-pool / MCP switches,
-  idle slash commands) stays silent.
-  Whether the bell is audible depends on terminal setup; see
-  [Platforms](platforms.md).
+  regardless of whether the terminal is focused. Each notification pairs the terminal notification escape sequence (auto-selected by terminal, OSC 9 or OSC 777) with a terminal bell (BEL), so it can be heard even where the terminal hides notification banners while focused.
+
+  Chord notifies when the agent actually ran and then stopped (a completed, cancelled, or loop-finished turn, or all SubAgents finishing) and for permission confirmations and questions, Handoff, and loop decisions waiting for input; user-initiated navigation that settles into idle (session / model-pool / MCP switches, idle slash commands) stays silent. Whether the bell is audible depends on terminal setup; see [Platforms](platforms.md).
 - `desktop_notification_foreground`: controls whether notifications (both the
   escape sequence and the bell) are sent while the TUI is focused. Defaults to
   `true`; set it to `false` to notify only when the terminal is unfocused.
@@ -1026,7 +986,7 @@ web_fetch:
 
 ## Project memory (automatic extraction)
 
-The top-level `memory` section controls automatic cross-session memory extraction. Reading an existing project `MEMORY.md` is always automatic and needs no config; this key only decides whether Chord sends frozen history sessions to the model to grow memory records and writes project files.
+The top-level `memory` section controls automatic cross-session memory extraction. Reading an existing project `MEMORY.md` is always automatic and needs no config; this key only decides whether Chord sends frozen history sessions to the model to grow memory records and writes project files. What gets stored, how the summary loads, and how to review or remove entries: [Project Memory](./project-memory.md).
 
 ```yaml
 memory:
@@ -1148,7 +1108,9 @@ mcp:
       x-api-key: "$EXA_API_KEY"
 ```
 
-A header value starting with `$` is expanded from the environment (here `EXA_API_KEY`), so secrets do not have to be written into the config file; a `$` value that expands to an empty string is a configuration error, since it would authenticate with a blank credential. Header names must be valid HTTP header names, and values must not contain CR or LF. `headers` applies only to remote (`url`) servers; stdio servers do not carry HTTP requests, and configuring `headers` for one is rejected. Protocol-managed headers (`Content-Type`, `Accept`, `Mcp-Session-Id`) are set by Chord and are not affected by `headers`.
+A header value starting with `$` is expanded from the environment (here `EXA_API_KEY`), so secrets do not have to be written into the config file; a `$` value that expands to an empty string is a configuration error, since it would authenticate with a blank credential. Header names must be valid HTTP header names, and values must not contain CR or LF.
+
+`headers` applies only to remote (`url`) servers; stdio servers do not carry HTTP requests, and configuring `headers` for one is rejected. Protocol-managed headers (`Content-Type`, `Accept`, `Mcp-Session-Id`) are set by Chord and are not affected by `headers`.
 
 ### Manual (on-demand) MCP servers
 
@@ -1302,7 +1264,9 @@ trimming of stale tool output). Both are configured under the top-level
 
 After `edit`, `apply_patch`, or `write` modifies a file, Chord can append language diagnostics to the tool result so the model sees compile or lint problems immediately. This is controlled by the `diagnostics` config and is enabled by default for Python (an LSP semantic backend with a Ruff quick fallback). Set `diagnostics.enabled: false` to skip the whole pipeline.
 
-Native file tools also send `workspace/didChangeWatchedFiles` events to matching LSP servers before syncing the `textDocument`: `write` sends Created for new files, `write` on existing files plus `edit` / `apply_patch` send Changed, and successful `delete` sends Deleted. This helps Pyright, TypeScript, gopls, rust-analyzer, and similar servers refresh their project graph promptly, reducing transient unresolved-import/module diagnostics after new files are created. Diagnostics are still returned immediately in file-tool results so the model can attribute problems to the current edit; files created or removed by `shell` commands or external programs are not yet reported through a full filesystem watcher.
+Native file tools also send `workspace/didChangeWatchedFiles` events to matching LSP servers before syncing the `textDocument`: `write` sends Created for new files, `write` on existing files plus `edit` / `apply_patch` send Changed, and successful `delete` sends Deleted. This helps Pyright, TypeScript, gopls, rust-analyzer, and similar servers refresh their project graph promptly, reducing transient unresolved-import/module diagnostics after new files are created.
+
+Diagnostics are still returned immediately in file-tool results so the model can attribute problems to the current edit; files created or removed by `shell` commands or external programs are not yet reported through a full filesystem watcher.
 
 For Python, two backends are used:
 
@@ -1331,7 +1295,13 @@ diagnostics:
 
 `diagnostics.python.output.{max_near_diagnostics, max_outside_diagnostics, max_total_diagnostics, near_range_before_lines, near_range_after_lines}` shapes how much appended diagnostics text is shown, prioritizing errors and warnings before info and hints. See the [Configuration cheatsheet](#configuration-cheatsheet) for the full field list.
 
-Diagnostics appended to the tool result cover the edited files' own problems, plus cached problems from *other* files in the same directory as an edited file (Go packages are compiled per directory, and workspace diagnostics cover every file in a diagnosed package). Each other-file diagnostic is attached only once per session: the same problem is not repeated in later tool results until that diagnostic disappears from the server's published set, after which a reappearing problem is reported again. Later edits do not repeat it either: a problem the model already has costs context to restate, so a surviving diagnostic stays suppressed and only changes are reported. A problem that was fixed (by another agent, a file copy, or a `git checkout` restore) stops being reported instead of being served from cache: the cached diagnostics are withheld as soon as the file no longer matches what they were computed from, and they are dropped once the server publishes without them. Resuming a session keeps the suppression instead of restarting it: diagnostics already rendered in the restored transcript are recovered from it, so `--continue` does not re-announce problems that are already visible earlier in the same conversation. Diagnostics for a file that changed on disk since the server last published them (for example, fixed by another editor or process) are skipped until Chord synchronizes the file and receives fresh diagnostics, because the cached result may no longer reflect its current content.
+Diagnostics appended to the tool result cover the edited files' own problems, plus cached problems from *other* files in the same directory as an edited file (Go packages are compiled per directory, and workspace diagnostics cover every file in a diagnosed package). Each other-file diagnostic is attached only once per session: the same problem is not repeated in later tool results until that diagnostic disappears from the server's published set, after which a reappearing problem is reported again.
+
+Later edits do not repeat it either: a problem the model already has costs context to restate, so a surviving diagnostic stays suppressed and only changes are reported. A problem that was fixed (by another agent, a file copy, or a `git checkout` restore) stops being reported instead of being served from cache: the cached diagnostics are withheld as soon as the file no longer matches what they were computed from, and they are dropped once the server publishes without them.
+
+Resuming a session keeps the suppression instead of restarting it: diagnostics already rendered in the restored transcript are recovered from it, so `--continue` does not re-announce problems that are already visible earlier in the same conversation.
+
+Diagnostics for a file that changed on disk since the server last published them (for example, fixed by another editor or process) are skipped until Chord synchronizes the file and receives fresh diagnostics, because the cached result may no longer reflect its current content.
 
 ## Provider/model diagnostics
 
@@ -1387,26 +1357,15 @@ The full top-level keys of `config.yaml` (both global `~/.config/chord/config.ya
 
 ### Provider field reference
 
-Chord automatically propagates the current Chord session id to OpenAI-family
-providers as cache/routing affinity metadata: OpenAI Responses requests include
-`prompt_cache_key`, and OpenAI Chat Completions / Responses HTTP requests include
-`X-Session-Id` and `session-id` headers when a session id is available. The key is per client rather than per provider: the main agent uses the current
-Chord session id, and each SubAgent derives its own `<session>:sub:<instanceID>`
-key so one agent's requests never inherit another's cache identity. These
-fields are not user-configurable; they follow the active Chord session and are
-cleared or changed on session switch/resume. Anthropic prompt caching is driven
-by `cache_control` blocks, and Chord also sends JSON-formatted
-`metadata.user_id` automatically with a stable anonymous `device_id` plus a
-stable routing `session_id` derived from local/provider identity. These
-Anthropic metadata fields are not user-configurable. In `explicit` mode (the
-default for Anthropic models), Chord places up to four `cache_control`
-breakpoints by priority: the last system block, the frozen reduced-prefix
-boundary (when incremental reduction has frozen a stable prefix), the newest
-durable message, and the last assistant message — so long agent loops reuse the
-frozen historical surface instead of re-writing the moving tail each turn. The
-newest breakpoint deliberately skips request-scoped overlays (runtime hints
-appended after the conversation tail), because those bytes are gone on the next
-request and a cache entry written past them could never be read back.
+Chord automatically propagates the current Chord session id to OpenAI-family providers as cache/routing affinity metadata: OpenAI Responses requests include `prompt_cache_key`, and OpenAI Chat Completions / Responses HTTP requests include `X-Session-Id` and `session-id` headers when a session id is available.
+
+The key is per client rather than per provider: the main agent uses the current Chord session id, and each SubAgent derives its own `<session>:sub:<instanceID>` key so one agent's requests never inherit another's cache identity. These fields are not user-configurable; they follow the active Chord session and are cleared or changed on session switch/resume.
+
+Anthropic prompt caching is driven by `cache_control` blocks, and Chord also sends JSON-formatted `metadata.user_id` automatically with a stable anonymous `device_id` plus a stable routing `session_id` derived from local/provider identity. These Anthropic metadata fields are not user-configurable.
+
+In `explicit` mode (the default for Anthropic models), Chord places up to four `cache_control` breakpoints by priority: the last system block, the frozen reduced-prefix boundary (when incremental reduction has frozen a stable prefix), the newest durable message, and the last assistant message — so long agent loops reuse the frozen historical surface instead of re-writing the moving tail each turn.
+
+The newest breakpoint deliberately skips request-scoped overlays (runtime hints appended after the conversation tail), because those bytes are gone on the next request and a cache entry written past them could never be read back.
 
 For Anthropic models, `prompt_cache.ttl` accepts `5m` (the default when
 omitted) and `1h`, and applies to every breakpoint Chord places in both `auto`
@@ -1464,7 +1423,7 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | `limit.context`   | int    | Total request window in tokens when known. If `limit.input` is omitted, Chord derives the input budget from this minus the model's `limit.output` (falling back to the `max_output_tokens` default when no output cap is declared). |
 | `limit.input`     | int    | Separate input cap when a provider publishes one. Chord uses it to compact or retry before the prompt is too large.               |
 | `limit.output`    | int    | Maximum output tokens; runtime is also clamped by `max_output_tokens`.                                                             |
-| `compaction`      | object | Per-model compaction overrides: `compaction.threshold` (auto-compaction usage ratio; `0` disables for this model) and `compaction.reminder` (pressure-reminder line; `0`/absent derives `min(0.60, threshold×0.90)`, `-1` disables the reminder only). Unset fields inherit the global `context.compaction.*`. Out-of-range values are rejected with a warning and inherit the global value. See [Context compaction](./context-management.md#context-compaction). |
+| `compaction`      | object | Per-model compaction overrides: `compaction.threshold` (auto-compaction usage ratio; `0` disables for this model) and `compaction.reminder` (pressure-reminder line; derived from `threshold` when absent, `-1` disables the reminder only). Unset fields inherit the global `context.compaction.*`. Out-of-range values are rejected with a warning and inherit the global value. Derivation and tuning guidance: [Context compaction](./context-management.md#context-compaction). |
 | `reasoning`       | object | OpenAI reasoning options. `reasoning.effort` passes through without a local whitelist, so any provider-supported level (e.g. GLM `max` / `minimal` / `none`) reaches the upstream unchanged; Responses normalizes whitespace and casing before sending (unset = omit and use provider/model default). For Responses, `reasoning.summary` supports `auto` / `concise` / `detailed` / `none`; when reasoning is active, unset defaults to `auto`, while `none` opts out explicitly. |
 | `text.verbosity`  | string | Optional OpenAI text verbosity hint where supported; leave unset to use the provider/model default unless you intentionally want `low` / `medium` / `high`. |
 | `thinking`        | object | Extended-thinking options. Messages: `type: adaptive` carries no token budget and pairs with `thinking.effort`, which Chord sends as `output_config.effort`; `type: enabled` requires `thinking.budget`; `display` applies only to `enabled` / `adaptive`. Gemini: `thinking.level` / `thinking.budget` / `thinking.include_thoughts` map into the generation request (see [Google Gemini](#google-gemini)). |

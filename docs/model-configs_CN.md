@@ -4,6 +4,8 @@
 
 当你已经确定要用哪一类 provider / model，只想要一段可复制的起始配置时，用这一页。字段语义和完整 schema 仍以[配置与认证](./configuration_CN.md)为准；完整的多文件工作站 / 团队布局示例见[配置示例](./examples/index_CN.md)。
 
+## 本页怎么读
+
 先选接入方式，再复制对应片段。第一次配置可以先保留默认的上下文设置，等模型连接正常后再调优。
 
 | 想接入什么 | 配方 |
@@ -296,8 +298,8 @@ model_templates:
       threshold: 0.55       # ≈ 507K；0.5–0.65 都合理
 ```
 
-上面示例里的 `reminder` 可以省略：省略时按 `min(0.60, threshold × 0.90)`
-派生（质量优先模板对应 0.50）。超过约 0.65 后触发点进入约 600K–640K，
+上面示例里的 `reminder` 可以省略：省略时取按 `threshold` 派生的值
+（质量优先模板对应 0.50，推导见[按模型调压缩](#按模型调压缩)）。超过约 0.65 后触发点进入约 600K–640K，
 已经在 Sol/Terra 只有 ~73% 的区段里；0.7（约 645K–690K）是容量优先选
 择，等于明确接受长上下文计费和部分质量损失，0.8（约 738K–789K）更甚。
 别把旧的 Luna 0.3 配方搬到这里：该窗口下 0.3 在约 277K–296K 才触发，
@@ -321,7 +323,7 @@ ChatGPT 账号实际拿到的窗口来自服务端模型目录（`context_window
   provider 返回的 usage，一次大工具结果就可能把下一次请求推过线。
 
 其余规则不变：`compaction` 写在模型模板上，引用它的 provider 都会继
-承；`reminder` 省略时按 `min(0.60, threshold × 0.90)` 派生；这两个字段
+承；`reminder` 省略时取按 `threshold` 派生的值；这两个字段
 调 usage-driven 自动压缩，与 `model_driven` 是否开启无关。写在
 `&gpt-5-6-base` 这类共用模板上的 `compaction` 会作用于所有合并它的模型；
 只想调某一档时，为该档单独建一个模板。
@@ -447,7 +449,7 @@ model_templates:
       threshold: 0.65      # 约 600K 触发；接受 2× 长上下文费率
 ```
 
-省略 `reminder` 时按 `min(0.60, threshold × 0.90)` 派生。在 Codex 受限
+省略 `reminder` 时取按 `threshold` 派生的值。在 Codex 受限
 provider 上（其窗口由服务端控制、Astra 尚未实测），把 `compaction` 写到
 那个 provider 的模型条目上，阈值按实测窗口调，而不是按 API 全窗口。
 
@@ -641,7 +643,7 @@ model_templates:
     compaction: {threshold: 0.7}   # 针对数小时 agentic 长会话调低到 0.7
 ```
 
-`reminder` 故意省略：缺省派生为 `min(0.60, 0.7×0.9) = 0.60`，对这些模型是
+`reminder` 故意省略：派生值 0.60 对这些模型是
 合理的提前量——只有想更早/更晚提示时才显式设置。Opus 5 等同一可靠档的
 模型加同样一行即可。
 
@@ -1477,7 +1479,7 @@ model_templates:
     compaction: {threshold: 0.4, reminder: 0.35}
 ```
 
-`reminder` 不写会派生为 `min(0.60, 0.4×0.9) = 0.36`，这里显式写 0.35，只是让
+该阈值下的派生值是 0.36，这里显式写 0.35，只是让
 压力提示来得稍早一点。会话不长的话，`compaction` 块直接省略，跟全局默认走。
 
 ## MiniMax（OpenAI 兼容接口）
@@ -1566,7 +1568,7 @@ model_templates:
     compaction: {threshold: 0.5, reminder: 0.45}
 ```
 
-`reminder` 不写会派生为 `min(0.60, 0.5×0.9) = 0.45`，显式写出来只是把默认值摆明。
+该阈值下的派生值是 0.45，显式写出来只是把默认值摆明。
 M2.x 系列（204800 窗口）没有长度加价的说法，沿用全局默认。M3 会话不长的话，
 `compaction` 块也可以直接省略。
 
@@ -1691,9 +1693,9 @@ providers:
 ```
 
 没有 `compaction` 块的模型继承全局 `context.compaction.threshold`；
-`reminder` 未设置时按 `min(0.60, threshold × 0.90)` 派生；`reminder: -1`
-则只关闭该模型的压力提醒，自动压缩保持开启。这两个字段调
-的是 usage-driven 自动压缩路径，**无论是否启用 `model_driven` 都生效**。
+`reminder` 未设置时按 `threshold` 派生（[推导方式与调参建议](./context-management_CN.md#上下文压缩compaction)）；`reminder: -1`
+则只关闭该模型的压力提醒，自动压缩保持开启。
+这两个字段调的是 usage-driven 自动压缩路径，**无论是否启用 `model_driven` 都生效**。
 本页给出的建议把模型的 `threshold` 调到可靠工作窗口的**上沿**（压缩把
 上下文维持在该区间内），需要时可把 `reminder` 设在它下方一点。某模型的
 长上下文可靠性没有依据可写时，省略 `compaction` 块、让它用全局默认即可。

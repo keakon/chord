@@ -4,6 +4,8 @@
 
 Use this page when you already know which provider/model family you want and just need a copy-paste-ready starting point. Field semantics and the full schema live in [Configuration & Auth](./configuration.md); full multi-file workstation/team layouts live in [Examples](./examples/index.md).
 
+## How to use this page
+
 Choose a connection type, then copy its recipe. Keep the default context settings until the model connects successfully; tune them later if needed.
 
 | Connection | Recipe |
@@ -19,17 +21,9 @@ After copying a recipe, [verify the configuration and connection](#verify-any-re
 
 ## OpenAI GPT (Responses)
 
-The GPT-5.4 / GPT-5.5 / GPT-5.6 / GPT-6 Astra snippets use the limits published
-on the OpenAI model pages: GPT-5.4 / 5.6 / 6 run a `1050000 / 922000 / 128000`
-allocation (1.05M total window; the 922K input budget derives as `context`
-minus `output`, since these models publish no separate input cap) on both the API
-and the current Codex catalog, while GPT-5.5 stays on
-`400000 / 272000 / 128000`. If your account or relay still serves an older
-profile, fall back to `400000 / 272000 / 128000` for the affected models. The
-cost blocks use OpenAI API pricing; override them when your relay charges
-different rates. Codex OAuth has a separate preset block below. Pair API-key
-providers with the matching entry in
-`~/.config/chord/auth.yaml`:
+The GPT-5.4 / GPT-5.5 / GPT-5.6 / GPT-6 Astra snippets use the limits published on the OpenAI model pages: GPT-5.4 / 5.6 / 6 run a `1050000 / 922000 / 128000` allocation (1.05M total window; the 922K input budget derives as `context` minus `output`, since these models publish no separate input cap) on both the API and the current Codex catalog, while GPT-5.5 stays on `400000 / 272000 / 128000`. If your account or relay still serves an older profile, fall back to `400000 / 272000 / 128000` for the affected models.
+
+The cost blocks use OpenAI API pricing; override them when your relay charges different rates. Codex OAuth has a separate preset block below. Pair API-key providers with the matching entry in `~/.config/chord/auth.yaml`:
 
 ```yaml
 openai:
@@ -277,18 +271,9 @@ cliff rather than a slope. The bands are averages, so treat them as a broad guid
 for where quality starts slipping, not as an exact cliff location.
 
 **Pricing** (official OpenAI API): a prompt that exceeds 272K input tokens
-(exactly 272000 does not) bills the **entire request** at the long-context
-rates (2x input / cache-read / cache-write and 1.5x output), not just the
-portion above 272K. Relays and Codex OAuth set their own prices, so this tier
-does not necessarily apply there. Chord's cost accounting selects the tier
-from the full prompt, but automatic compaction does not know about price
-tiers: it fires on a usage ratio, so keeping requests under 272K is a tuning
-goal, not a guarantee. The trigger compares the last provider-reported usage
-with the budget, a single large tool result can push the next prompt past the
-line, and while `model_driven` is enabled the grace period lets crossing
-requests run before compaction starts. Leave headroom below the line. Every
-compaction also costs a summarization call and loses raw context,
-so compressing too eagerly can cost more than the tier it avoids.
+(exactly 272000 does not) bills the **entire request** at the long-context rates (2x input / cache-read / cache-write and 1.5x output), not just the portion above 272K. Relays and Codex OAuth set their own prices, so this tier does not necessarily apply there. Chord's cost accounting selects the tier from the full prompt, but automatic compaction does not know about price tiers: it fires on a usage ratio, so keeping requests under 272K is a tuning goal, not a guarantee.
+
+The trigger compares the last provider-reported usage with the budget, a single large tool result can push the next prompt past the line, and while `model_driven` is enabled the grace period lets crossing requests run before compaction starts. Leave headroom below the line. Every compaction also costs a summarization call and loses raw context, so compressing too eagerly can cost more than the tier it avoids.
 
 Cost-first (Sol/Terra/Luna share this: it keeps usage under the 272K tier
 and below Luna's 256K+ collapse zone):
@@ -312,8 +297,9 @@ model_templates:
       threshold: 0.55       # ≈ 507K; 0.5–0.65 are reasonable
 ```
 
-The `reminder` above is optional: it derives as `min(0.60, threshold × 0.90)`
-when omitted (0.50 for the quality-first template). Going above ~0.65 moves
+The `reminder` above is optional: omit it to accept the value derived from
+`threshold` (0.50 for the quality-first template; derivation in
+[Per-model compaction tuning](#per-model-compaction-tuning)). Going above ~0.65 moves
 the trigger past ~600K–640K, already inside the band where Sol/Terra measure
 ~73%; 0.7 (~645K–690K) is a capacity-first choice that deliberately accepts
 the long-context rate and some quality loss, and 0.8 (~738K–789K) even more
@@ -352,15 +338,9 @@ merges it; for per-tier tuning, give that tier its own template.
 
 ### GPT-6 Astra
 
-GPT-6 Astra is OpenAI's current flagship (`gpt-6-astra`): a 1,050,000-token
-context window with 128,000 max output and 922,000 usable input (derived as
-`context` minus `output` when `input` is unset). Reasoning supports `low`,
-`medium`, `high`, `xhigh`, and `max`; there is no `none` effort. Standard
-pricing is $10 input / $50 output per 1M with $1 cached input and $12.50
-cache writes; prompts above 272K input bill the whole request at 2×
-input/cache and 1.5× output. Unlike GPT-5.6 there are no Sol/Terra/Luna tiers
-— `gpt-6-astra` is a single model ID, so its recipe carries no tier variants.
-Pair the API-key provider with an entry in `~/.config/chord/auth.yaml`:
+GPT-6 Astra is OpenAI's current flagship (`gpt-6-astra`): a 1,050,000-token context window with 128,000 max output and 922,000 usable input (derived as `context` minus `output` when `input` is unset). Reasoning supports `low`, `medium`, `high`, `xhigh`, and `max`; there is no `none` effort. Standard pricing is $10 input / $50 output per 1M with $1 cached input and $12.50 cache writes; prompts above 272K input bill the whole request at 2× input/cache and 1.5× output.
+
+Unlike GPT-5.6 there are no Sol/Terra/Luna tiers — `gpt-6-astra` is a single model ID, so its recipe carries no tier variants. Pair the API-key provider with an entry in `~/.config/chord/auth.yaml`:
 
 ```yaml
 openai:
@@ -480,7 +460,7 @@ model_templates:
       threshold: 0.65      # fires at ~600K; accepts the 2× long-context rate
 ```
 
-The `reminder` derives as `min(0.60, threshold × 0.90)` when omitted. On a
+Omit `reminder` to accept the value derived from `threshold`. On a
 Codex-backed provider (its window is server-controlled and unverified for
 Astra), put the `compaction` on that provider's model entry and tune the
 threshold to the actual measured window, not the API full window.
@@ -664,16 +644,9 @@ model_pools:
 
 ### Compaction tuning for Claude 5
 
-The whole Claude 5 line (Fable 5.1, Opus 5, Sonnet 5) advertises 1M tokens
-with 128K output and flat per-token pricing across the window. MRCR v2 8-needle
-shows Opus-class models holding ~76% even at 1M (the flattest curve of any
-current family), so the reliable window is genuinely large. Opus 4.7-era
-models trade retrieval accuracy for refusal honesty; Opus 5 and Fable 5.1
-restore strong long-context retrieval. For everyday work, omit the
-`compaction` block and stay on the global default (`threshold` 0.8, about 698K
-on the ~872K usable budget); for many-hour agentic sessions, set
-`threshold: 0.7` (about 610K) to limit time spent deep in the mild 512K+
-degradation band.
+The whole Claude 5 line (Fable 5.1, Opus 5, Sonnet 5) advertises 1M tokens with 128K output and flat per-token pricing across the window. MRCR v2 8-needle shows Opus-class models holding ~76% even at 1M (the flattest curve of any current family), so the reliable window is genuinely large. Opus 4.7-era models trade retrieval accuracy for refusal honesty; Opus 5 and Fable 5.1 restore strong long-context retrieval.
+
+For everyday work, omit the `compaction` block and stay on the global default (`threshold` 0.8, about 698K on the ~872K usable budget); for many-hour agentic sessions, set `threshold: 0.7` (about 610K) to limit time spent deep in the mild 512K+ degradation band.
 
 ```yaml
 model_templates:
@@ -695,7 +668,7 @@ providers:
       claude-opus-5: *claude-fable-5-1     # same profile; adjust cost block
 ```
 
-`reminder` is omitted on purpose: it derives to `min(0.60, 0.7×0.9) = 0.60`,
+`reminder` is omitted on purpose: the derived 0.60 is
 a sensible pressure head start for these models; set it explicitly only when
 you want the reminder earlier or later than the derived value.
 
@@ -1046,19 +1019,9 @@ Notes:
   max output), so it can reuse any of the GLM-5.2 templates above unchanged —
   only the model ID differs (e.g. `glm-5.3` in your provider's `models` map).
 - GLM-5.3-Flash (released August 2026) is the family's first natively
-  multimodal model: image/video/file input, with 1M context and 128K max
-  output. PDF input is officially supported: the GLM Chat Completion API
-  accepts a `file` content block whose `file` object takes `file_id`,
-  `file_url`, or `file_data` (a Base64 `data:<MIME>;base64,...` URL), up to
-  50 MB per file, in `pdf`/`txt`/`word`/`jsonl`/`xlsx`/`pptx` formats. That
-  matches Chord's chat-completions PDF payload exactly (`type: file` with
-  `filename` and `file_data`), so no compatibility config is needed. Text
-  parameters match GLM-5.3, so it derives from the Chat Completions template
-  above and only adds the multimodal `modalities.input`. `thinking.type`
-  supports `enabled` only (thinking cannot be turned off), which the chat
-  template already sets. Third-party relays may only implement the older
-  URL-only `file_url` form; check the relay before relying on Base64
-  `file_data`.
+  multimodal model: image/video/file input, with 1M context and 128K max output. PDF input is officially supported: the GLM Chat Completion API accepts a `file` content block whose `file` object takes `file_id`, `file_url`, or `file_data` (a Base64 `data:<MIME>;base64,...` URL), up to 50 MB per file, in `pdf`/`txt`/`word`/`jsonl`/`xlsx`/`pptx` formats. That matches Chord's chat-completions PDF payload exactly (`type: file` with `filename` and `file_data`), so no compatibility config is needed.
+
+  Text parameters match GLM-5.3, so it derives from the Chat Completions template above and only adds the multimodal `modalities.input`. `thinking.type` supports `enabled` only (thinking cannot be turned off), which the chat template already sets. Third-party relays may only implement the older URL-only `file_url` form; check the relay before relying on Base64 `file_data`.
 - The example default pool uses `glm-5.3-flash` — the Coding Plan workhorse
   with native multimodal input. For text-only work, point the pool at
   `bigmodel/glm-5.3`, or keep `bigmodel/glm-5.2` when you want GLM-5.2's wider
@@ -1215,15 +1178,9 @@ model_pools:
 Notes:
 
 - DeepSeek Chat thinking uses `thinking.type`, top-level `reasoning_effort`, and
-  `max_tokens`. `request_overrides` supplies the request-shape differences;
-  during thinking + tool-call loops, `openai_visible` returns the assistant's
-  `reasoning_content` unchanged. When a request carries tools, DeepSeek requires
-  the full `reasoning_content` back in every later turn and returns a `400`
-  otherwise, so the templates set `preserve_history: true` to keep completed-turn
-  reasoning client-side; without tools the field is ignored. DeepSeek also
-  rejects forced tool choice while thinking is active, so the template
-  downgrades loop-forced `tool_choice: required` to the backend default for
-  those requests.
+  `max_tokens`. `request_overrides` supplies the request-shape differences; during thinking + tool-call loops, `openai_visible` returns the assistant's `reasoning_content` unchanged. When a request carries tools, DeepSeek requires the full `reasoning_content` back in every later turn and returns a `400` otherwise, so the templates set `preserve_history: true` to keep completed-turn reasoning client-side; without tools the field is ignored.
+
+  DeepSeek also rejects forced tool choice while thinking is active, so the template downgrades loop-forced `tool_choice: required` to the backend default for those requests.
 - DeepSeek Responses supports `tool_choice: required`, so its template keeps
   loop-forced tool choice. Plaintext `reasoning_text` makes the encrypted
   reasoning include unnecessary, while `max_output_tokens` remains enabled
@@ -1232,15 +1189,9 @@ Notes:
   the stream ends with a `response.completed` / `incomplete` / `failed` event
   instead of `data: [DONE]`.
 - DeepSeek Messages supports `output_config.effort`; Chord derives it from
-  `thinking.effort`. Disable Anthropic beta headers for the compatible
-  endpoint; it ignores them outside the Files API. `thinking.budget_tokens` is
-  accepted but ignored: thinking depth comes from the effort value, not from a
-  token budget. DeepSeek's Anthropic-compatible endpoint may return unsigned
-  `thinking` blocks rather than Claude-style signed blocks.
-  `anthropic_unsigned` replays same-provider/model unsigned thinking natively
-  and can also accept portable visible reasoning from other wire families as
-  unsigned `thinking` blocks; if the target still rejects that shape, strict
-  compatibility drops the reasoning carrier while preserving the tool round.
+  `thinking.effort`. Disable Anthropic beta headers for the compatible endpoint; it ignores them outside the Files API. `thinking.budget_tokens` is accepted but ignored: thinking depth comes from the effort value, not from a token budget. DeepSeek's Anthropic-compatible endpoint may return unsigned `thinking` blocks rather than Claude-style signed blocks.
+
+  `anthropic_unsigned` replays same-provider/model unsigned thinking natively and can also accept portable visible reasoning from other wire families as unsigned `thinking` blocks; if the target still rejects that shape, strict compatibility drops the reasoning carrier while preserving the tool round.
 - All three wire families accept images, billed as input tokens (the official
   cap is 1024 tokens per image). The endpoint takes inline base64, external
   URLs, or Files API `file_id`s, detects the format by content
@@ -1309,15 +1260,9 @@ providers:
 
 ### Compaction tuning for DeepSeek V4.1 Flash
 
-DeepSeek V4.1 Flash advertises a 1M window, but long-range reliability is the
-family's weak spot: independent multi-needle evals of the previous V4
-generation put V4 Pro around ~41% at 1M (8-needle) versus ~78% single-needle, a
-sharp drop that mirrors the Gemini 3.1 Pro cliff. V4.1 has no public
-long-context evaluation yet, so until one appears the practical guidance stays
-the same: treat the reliable working window as roughly 200K and compact early.
-The Flash family is the cheapest by a wide margin even on cache misses, so
-frequent compaction is far cheaper than on premium models; compact early and
-often:
+DeepSeek V4.1 Flash advertises a 1M window, but long-range reliability is the family's weak spot: independent multi-needle evals of the previous V4 generation put V4 Pro around ~41% at 1M (8-needle) versus ~78% single-needle, a sharp drop that mirrors the Gemini 3.1 Pro cliff. V4.1 has no public long-context evaluation yet, so until one appears the practical guidance stays the same: treat the reliable working window as roughly 200K and compact early.
+
+The Flash family is the cheapest by a wide margin even on cache misses, so frequent compaction is far cheaper than on premium models; compact early and often:
 
 ```yaml
 # Add compaction to the deepseek-v4.1-chat / -messages / -responses templates
@@ -1447,19 +1392,11 @@ mode and `keep: all` behavior are fixed, so the template does not send a
 sets both fields explicitly. K2.5 does not support preserved thinking and is
 being retired for new users; prefer K3 for new configurations.
 
-For all `openai_visible` recipes (DeepSeek, GLM, supported Qwen, and Kimi),
-Chord first replays native reasoning optimistically to any Chat Completions
-target, so documented in-provider upgrades such as Kimi K2.6/K2.7 to K3 and
-same-model provider fallback can keep continuity. Recipes for backends whose
-tool-mode contract requires the full reasoning history (DeepSeek) and
-preserved-thinking recipes (GLM `clear_thinking: false`, Qwen
-`preserve_thinking`, Kimi K3 / `keep: all`) set `preserve_history: true` so
-the complete assistant history is replayed unchanged. If a target rejects native
-reasoning, Chord removes or converts only the incompatible reasoning payload.
-Completed tool calls and their paired results remain available to the next
-model; they are not treated as disposable chain-of-thought data. A strict
-compatibility fallback may textify the completed action history when the target
-cannot accept the structured shape.
+For all `openai_visible` recipes (DeepSeek, GLM, supported Qwen, and Kimi), Chord first replays native reasoning optimistically to any Chat Completions target, so documented in-provider upgrades such as Kimi K2.6/K2.7 to K3 and same-model provider fallback can keep continuity.
+
+Recipes for backends whose tool-mode contract requires the full reasoning history (DeepSeek) and preserved-thinking recipes (GLM `clear_thinking: false`, Qwen `preserve_thinking`, Kimi K3 / `keep: all`) set `preserve_history: true` so the complete assistant history is replayed unchanged. If a target rejects native reasoning, Chord removes or converts only the incompatible reasoning payload.
+
+Completed tool calls and their paired results remain available to the next model; they are not treated as disposable chain-of-thought data. A strict compatibility fallback may textify the completed action history when the target cannot accept the structured shape.
 
 ### Cross-protocol fallback continuity
 
@@ -1485,16 +1422,9 @@ chain-of-thought that is not tied to a tool round.
 
 ## Grok (xAI)
 
-xAI recommends the Responses API for Grok. Grok 4.6 supports text and image
-input, function calling, structured output, reasoning, and a 500K context
-window. xAI also accepts PDF attachments as `input_file` with a public
-`file_url` or an uploaded `file_id`, which activates the server-side
-`attachment_search` tool; Chord sends PDF attachments as inline base64
-`file_data`, which the xAI Responses API does not accept for non-image
-documents, so `modalities.input` stays `[text, image]`. Grok 4.6
-emits reasoning text through `response.reasoning_text.*` stream events; Chord
-maps those events to the normal thinking stream while preserving the ordered
-Responses output items for tool-loop continuity.
+xAI recommends the Responses API for Grok. Grok 4.6 supports text and image input, function calling, structured output, reasoning, and a 500K context window. xAI also accepts PDF attachments as `input_file` with a public `file_url` or an uploaded `file_id`, which activates the server-side `attachment_search` tool; Chord sends PDF attachments as inline base64 `file_data`, which the xAI Responses API does not accept for non-image documents, so `modalities.input` stays `[text, image]`.
+
+Grok 4.6 emits reasoning text through `response.reasoning_text.*` stream events; Chord maps those events to the normal thinking stream while preserving the ordered Responses output items for tool-loop continuity.
 
 ```yaml
 model_templates:
@@ -1616,7 +1546,7 @@ model_templates:
     compaction: {threshold: 0.4, reminder: 0.35}
 ```
 
-`reminder` derives to `min(0.60, 0.4×0.9) = 0.36` when omitted, so the explicit
+The derived value for this threshold is 0.36, so the explicit
 0.35 only pulls the pressure notice slightly earlier. If your sessions stay
 short, omit the `compaction` block and let the model use the global default.
 
@@ -1714,7 +1644,7 @@ model_templates:
     compaction: {threshold: 0.5, reminder: 0.45}
 ```
 
-`reminder` derives to `min(0.60, 0.5×0.9) = 0.45` when omitted; the explicit
+The derived value for this threshold is 0.45; the explicit
 value only states the default. The M2.x line (204800 window) has no documented
 length surcharge, so leave it on the global default. If your M3 sessions stay
 short, omit the `compaction` block entirely.
@@ -1847,14 +1777,6 @@ providers:
       gpt-5.6-luna: *luna-full-window
 ```
 
-A model without a `compaction` block inherits the global
-`context.compaction.threshold`; `reminder` defaults to
-`min(0.60, threshold × 0.90)` when unset; `reminder: -1` disables the
-pressure reminder for the model while keeping its automatic compaction.
-These fields tune the usage-driven
-automatic-compaction path and take effect whether or not `model_driven` is
-enabled. Where the benchmark evidence below gives a recommended usage band
-for a model, tune its `threshold` to the *top* of that band (compaction keeps
-the context inside it) and optionally set `reminder` just below it. When a
-model's long-context reliability is not documented here, omit the
-`compaction` block and let it use the global default.
+A model without a `compaction` block inherits the global `context.compaction.threshold`; `reminder` is derived from `threshold` when unset ([derivation and tuning guidance](./context-management.md#context-compaction)); `reminder: -1` disables the pressure reminder for the model while keeping its automatic compaction. These fields tune the usage-driven automatic-compaction path and take effect whether or not `model_driven` is enabled.
+
+Where the benchmark evidence below gives a recommended usage band for a model, tune its `threshold` to the *top* of that band (compaction keeps the context inside it) and optionally set `reminder` just below it. When a model's long-context reliability is not documented here, omit the `compaction` block and let it use the global default.

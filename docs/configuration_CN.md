@@ -40,7 +40,7 @@
 - `mcp` 按 server 名称合并：项目里的同名 server 会完整替换全局定义，不会逐字段继承旧的连接、凭据或工具权限；
 - 追加型扩展点会保留全局条目并附加项目条目：当前包括 `skills.paths` 和 `hooks.*` 下各触发点的 hook 列表，它们是 append，不是 replace。
 
-首次在交互式终端里运行 `chord` 且 `config.yaml` 缺失时，Chord 会启动一次性的初始化向导。它会写入最小可用的 `config.yaml`，必要时再写入 `auth.yaml`，如果已有匹配的 `auth.yaml` 凭据则尽量直接复用，并在结束时展示真实解析后的路径。stdin 被重定向本身不等于非交互；只要还能打开控制 TTY，向导仍会使用该 TTY。只有没有控制 TTY 时，它才会直接退出，不会等待输入。
+全局 `config.yaml` 缺失时，首次运行 `chord` 会启动一次性的初始化向导，写入 `config.yaml`，必要时再写入 `auth.yaml`——具体交互见[快速开始](./quickstart_CN.md#2-第一次运行)。想自己写这两个文件也没问题，本页以下内容就是完整的字段参考。
 
 ## 最小 provider 配置
 
@@ -670,22 +670,9 @@ providers:
 - `compat.reasoning_continuity.mode`：
   - `none`：不回放 provider 专属的可见 reasoning。
   - `openai_visible`：在 Chat Completions 工具循环中原样回放 assistant 的
-    `reasoning_content`，并把其他 wire family 的可移植可见 reasoning 转成
-    `reasoning_content`。它不注入请求字段；字段差异由
-    `request_overrides.body` 配置。首次尝试时，Chord 仍会把 chat 原生
-    reasoning 乐观回放给任何 Chat Completions 目标（包括跨 provider），
-    因此 Kimi K2.6/K2.7→K3 这类官方支持的同 provider 升级和同模型跨
-    provider fallback 都能保留连续性。目标拒绝该请求后，Chord 会对该
-    target 降级，但在严格级别之前仍尽量保留结构化工具事实。
-    在 `openai_visible` 的 Responses 目标上，如果 thinking 模式要求回放的
-    函数调用回合携带 reasoning，Chord 会先回放可用的原生明文
-    `reasoning_text`；跨 provider 切换模型导致原生 reasoning 丢失时，后端
-    拒绝后 Chord 会把对应工具轨迹降级为文本历史记录，续跑不再依赖缺失的
-    reasoning。
-    对第三方 OpenAI 兼容网关，Chord 始终使用配置中的 endpoint，不会重定向
-    到 DeepSeek 官方 `/beta` endpoint。reasoning-only 输出截断时，Chord
-    可能在同一 endpoint 上做一次有上限的 request-only reasoning 回放；网关
-    拒绝后会退回普通恢复提示。
+    `reasoning_content`，并把其他 wire family 的可移植可见 reasoning 转成 `reasoning_content`。它不注入请求字段；字段差异由 `request_overrides.body` 配置。首次尝试时，Chord 仍会把 chat 原生 reasoning 乐观回放给任何 Chat Completions 目标（包括跨 provider），因此 Kimi K2.6/K2.7→K3 这类官方支持的同 provider 升级和同模型跨 provider fallback 都能保留连续性。
+
+    目标拒绝该请求后，Chord 会对该 target 降级，但在严格级别之前仍尽量保留结构化工具事实。在 `openai_visible` 的 Responses 目标上，如果 thinking 模式要求回放的函数调用回合携带 reasoning，Chord 会先回放可用的原生明文 `reasoning_text`；跨 provider 切换模型导致原生 reasoning 丢失时，后端拒绝后 Chord 会把对应工具轨迹降级为文本历史记录，续跑不再依赖缺失的 reasoning。对第三方 OpenAI 兼容网关，Chord 始终使用配置中的 endpoint，不会重定向到 DeepSeek 官方 `/beta` endpoint。reasoning-only 输出截断时，Chord 可能在同一 endpoint 上做一次有上限的 request-only reasoning 回放；网关拒绝后会退回普通恢复提示。
   - `anthropic_unsigned`：仅用于已验证的 Messages 兼容模型，例如返回无
     Claude signature 的可见 `thinking` 的 DeepSeek/GLM endpoint。无签名
     thinking 首次只对同 provider/model 原生回放；对兼容 target，其他
@@ -699,20 +686,9 @@ providers:
     正文。已完成工具事实会尽量转换为目标协议的结构化表示，只有目标拒绝
     该形状时才文本化。达到的降级级别按 target 记忆。
 - `compat.reasoning_continuity.preserve_history`：默认情况下 Chord 会剥离
-  已完成轮次（最后一条 user 消息之前）的明文 reasoning（`reasoning_content`
-  和无签名 `thinking` block）——多数 thinking 后端会在服务端丢弃更早轮次的
-  reasoning，但回放它仍按输入计费。当目标契约要求回传完整 assistant
-  历史时设置 `preserve_history: true`（DeepSeek 在请求带 tools 时、Kimi K3
-  及 `keep: all` 系列、Qwen `preserve_thinking`、GLM
-  `clear_thinking: false`），历史 reasoning 会原样回放并在每次请求中计费。
-  当前轮的 reasoning 始终遵循上述 mode；签名/加密载荷（Claude 签名
-  thinking、Responses items、Gemini thought 签名）不受此开关影响。
-  Anthropic 还会把每个 thinking block 绑定到生成它的对话前缀：当历史改写
-  使该绑定失效、API 以 invalid-signature 拒绝回放时，Chord 会丢弃 thinking
-  block 重试一次，并保留该轮正文和已完成的工具事实。
-  请求级 turn overlay（每轮注入的 `<system-reminder>` 提示）不算作用户
-  消息边界，因此追加在对话尾部的 overlay 不会把「已完成轮次」的边界推到
-  当前轮之后，也就不会剥离当前工具链中后端真正消费的 reasoning。
+  已完成轮次（最后一条 user 消息之前）的明文 reasoning（`reasoning_content` 和无签名 `thinking` block）——多数 thinking 后端会在服务端丢弃更早轮次的 reasoning，但回放它仍按输入计费。
+
+  当目标契约要求回传完整 assistant 历史时设置 `preserve_history: true`（DeepSeek 在请求带 tools 时、Kimi K3 及 `keep: all` 系列、Qwen `preserve_thinking`、GLM `clear_thinking: false`），历史 reasoning 会原样回放并在每次请求中计费。当前轮的 reasoning 始终遵循上述 mode；签名/加密载荷（Claude 签名 thinking、Responses items、Gemini thought 签名）不受此开关影响。Anthropic 还会把每个 thinking block 绑定到生成它的对话前缀：当历史改写使该绑定失效、API 以 invalid-signature 拒绝回放时，Chord 会丢弃 thinking block 重试一次，并保留该轮正文和已完成的工具事实。请求级 turn overlay（每轮注入的 `<system-reminder>` 提示）不算作用户消息边界，因此追加在对话尾部的 overlay 不会把「已完成轮次」的边界推到当前轮之后，也就不会剥离当前工具链中后端真正消费的 reasoning。
 - `compat.forced_tool_choice.suppress_in_thinking`：reasoning/thinking 启用
   时，把 loop 强制的 `tool_choice: required` 降级为后端默认选择。只有
   OpenAI 兼容端点明确拒绝 thinking 模式下的 forced tool choice 时才开启；
@@ -892,7 +868,7 @@ web_fetch:
 
 ## 项目记忆（自动抽取）
 
-顶层 `memory` 配置控制自动跨会话记忆抽取。读取项目中已有的 `MEMORY.md` 始终自动进行，不需要任何配置；这个键只决定 Chord 是否把冻结的历史会话发送给模型以生成记忆记录，并写入项目文件。
+顶层 `memory` 配置控制自动跨会话记忆抽取。读取项目中已有的 `MEMORY.md` 始终自动进行，不需要任何配置；这个键只决定 Chord 是否把冻结的历史会话发送给模型以生成记忆记录，并写入项目文件。记录了什么、摘要如何加载、如何审阅和删除条目见[项目记忆](./project-memory_CN.md)。
 
 ```yaml
 memory:
@@ -1235,7 +1211,9 @@ chord doctor models --pool thinking
 
 ### Provider 字段参考
 
-Chord 会把当前 Chord session id 自动传给 OpenAI 系 provider，作为缓存 / 路由亲和元数据：OpenAI Responses 请求会包含 `prompt_cache_key`，OpenAI Chat Completions / Responses HTTP 请求会在有 session id 时包含 `X-Session-Id` 和 `session-id` header。该 key 按 client 而非 provider 隔离：main agent 用当前 Chord session id，每个 SubAgent 另行派生 `<session>:sub:<instanceID>` 形式的 key，因此一个 agent 的请求不会继承另一个的缓存身份。这些字段不能手动配置，会随当前 Chord session 自动切换 / 恢复。Anthropic prompt caching 由 `cache_control` block 驱动；Chord 还会自动发送 JSON 格式的 `metadata.user_id`，其中包含稳定匿名的 `device_id`，以及由本地 / provider 身份派生出的稳定路由 `session_id`。这些 Anthropic metadata 字段不能手动配置。在 `explicit` 模式（Anthropic 模型默认）下，Chord 按优先级放置最多 4 个 `cache_control` 断点：最后一个 system block、冻结的已剪裁前缀边界（当渐进式剪裁已冻结稳定前缀时）、最新的持久化消息、最后一条 assistant 消息——使长 agent loop 能复用冻结的历史前缀，而不是每轮重新写入移动的尾部。最新断点会刻意跳过 request-scoped overlay（追加在对话尾部的运行时提示），因为这些内容在下一次请求中就不存在了，写在它们之后的缓存条目永远不可能被读回。
+Chord 会把当前 Chord session id 自动传给 OpenAI 系 provider，作为缓存 / 路由亲和元数据：OpenAI Responses 请求会包含 `prompt_cache_key`，OpenAI Chat Completions / Responses HTTP 请求会在有 session id 时包含 `X-Session-Id` 和 `session-id` header。该 key 按 client 而非 provider 隔离：main agent 用当前 Chord session id，每个 SubAgent 另行派生 `<session>:sub:<instanceID>` 形式的 key，因此一个 agent 的请求不会继承另一个的缓存身份。这些字段不能手动配置，会随当前 Chord session 自动切换 / 恢复。
+
+Anthropic prompt caching 由 `cache_control` block 驱动；Chord 还会自动发送 JSON 格式的 `metadata.user_id`，其中包含稳定匿名的 `device_id`，以及由本地 / provider 身份派生出的稳定路由 `session_id`。这些 Anthropic metadata 字段不能手动配置。在 `explicit` 模式（Anthropic 模型默认）下，Chord 按优先级放置最多 4 个 `cache_control` 断点：最后一个 system block、冻结的已剪裁前缀边界（当渐进式剪裁已冻结稳定前缀时）、最新的持久化消息、最后一条 assistant 消息——使长 agent loop 能复用冻结的历史前缀，而不是每轮重新写入移动的尾部。最新断点会刻意跳过 request-scoped overlay（追加在对话尾部的运行时提示），因为这些内容在下一次请求中就不存在了，写在它们之后的缓存条目永远不可能被读回。
 
 对于 Anthropic 模型，`prompt_cache.ttl` 接受 `5m`（省略时的默认值）和 `1h`，且在 `auto` 与 `explicit` 两种模式下都会应用到 Chord 放置的每一个断点：
 
@@ -1288,7 +1266,7 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `limit.context`   | int    | 已知时表示总请求窗口上限；未配置 `limit.input` 时，Chord 按总窗口减去模型声明的 `limit.output` 推导输入预算（模型未声明输出上限时回退到 `max_output_tokens` 默认值）。                                       |
 | `limit.input`     | int    | provider 单独公布输入上限时填写。Chord 用它判断何时在 prompt 过大前压缩或恢复重试。                |
 | `limit.output`    | int    | 输出 token 上限；运行时还会受 `max_output_tokens` 限制。                                                          |
-| `compaction`      | object | 该模型的自定义压缩参数：`compaction.threshold`（自动压缩使用率阈值；`0` 对该模型禁用）与 `compaction.reminder`（压力提醒线；`0`/缺省按 `min(0.60, threshold×0.90)` 派生；`-1` 只关闭提醒）。未设字段继承全局 `context.compaction.*`。越界值会被拒绝并回退继承全局值。详见[上下文压缩](./context-management_CN.md#上下文压缩compaction)。 |
+| `compaction`      | object | 该模型的自定义压缩参数：`compaction.threshold`（自动压缩使用率阈值；`0` 对该模型禁用）与 `compaction.reminder`（压力提醒线；缺省时按 `threshold` 派生，`-1` 只关闭提醒）。未设字段继承全局 `context.compaction.*`。越界值会被拒绝并回退继承全局值。推导方式与调参建议见[上下文压缩](./context-management_CN.md#上下文压缩compaction)。 |
 | `reasoning`       | object | OpenAI reasoning 选项。`reasoning.effort` 不做本地白名单校验，provider 支持的任意取值（如 GLM 的 `max` / `minimal` / `none`）都原样到达上游；Responses 线路发送前会额外规范化空格和大小写（留空 = 不发送，使用 provider/model 默认）。Responses 的 `reasoning.summary` 支持 `auto` / `concise` / `detailed` / `none`；启用 reasoning 时留空默认使用 `auto`，配置 `none` 可明确关闭。 |
 | `text.verbosity`  | string | 可选的 OpenAI 文本详细程度提示，支持的模型生效；除非明确要覆盖为 `low` / `medium` / `high`，否则建议留空使用 provider/model 默认值。 |
 | `thinking`        | object | 扩展思考选项。Messages：`type: adaptive` 不携带 token 预算，与 `thinking.effort` 搭配，Chord 会把它发送为 `output_config.effort`；`type: enabled` 必须配置 `thinking.budget`；`display` 仅对 `enabled` / `adaptive` 生效。Gemini：`thinking.level` / `thinking.budget` / `thinking.include_thoughts` 会映射进生成请求（见 [Google Gemini](#google-gemini)）。 |
