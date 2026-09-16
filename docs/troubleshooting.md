@@ -1,5 +1,7 @@
 # Troubleshooting
 
+<!-- description: Fixes for common Chord problems: startup and provider errors, broken terminal rendering, lost sessions, and noisy tools. -->
+
 Start from the symptom and find the next command to run. Symptoms are grouped roughly in the order you are likely to hit them: startup and auth first, then request failures, sessions, TUI rendering, and performance.
 
 ## Startup failures

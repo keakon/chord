@@ -1,5 +1,7 @@
 # Model configuration recipes
 
+<!-- description: Ready-to-copy provider and model pool recipes: OpenAI, Anthropic, Codex OAuth, and OpenAI-compatible gateways. -->
+
 Use this page when you already know which provider/model family you want and just need a copy-paste-ready starting point. Field semantics and the full schema live in [Configuration & Auth](./configuration.md); full multi-file workstation/team layouts live in [Examples](./examples/index.md).
 
 Choose a connection type, then copy its recipe. Keep the default context settings until the model connects successfully; tune them later if needed.

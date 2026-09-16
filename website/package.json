@@ -9,6 +9,7 @@
   },
   "scripts": {
     "sync": "node ../scripts/sync-docs.mjs",
+    "test": "node --test ../scripts/sync-docs.test.mjs",
     "dev": "npm run sync && astro dev",
     "build": "npm run sync && astro check && astro build",
     "preview": "astro preview",

@@ -6,11 +6,13 @@
 //   2. Strips the leading H1 (Starlight uses frontmatter title instead).
 //   3. Adds Starlight frontmatter: title (from H1), description (first paragraph).
 //   4. Rewrites relative ./xxx.md links to root /xxx/ slugs for English and /zh/xxx/ for Chinese.
-//   5. Promotes "> **Note:** ...", "> **Important:** ..." block-quotes into
-//      Starlight :::note / :::caution / :::danger admonitions.
-//   6. Syncs docs/examples/*.md as ordinary markdown pages. Example YAML files
+//   5. Promotes "> **Note:** ..." and other "> **Label:** ..." block-quotes into
+//      Starlight admonitions (unknown labels become notes).
+//   6. Honours an optional "<!-- description: ... -->" marker right after the H1
+//      instead of deriving the meta description from the first paragraph.
+//   7. Syncs docs/examples/*.md as ordinary markdown pages. Example YAML files
 //      remain source assets and can still be linked from the docs or repository.
-//   7. Regenerates the site's root-served brand images (favicon, touch icons,
+//   8. Regenerates the site's root-served brand images (favicon, touch icons,
 //      social card) from assets/logo/chord-wordmark.svg into website/public/.
 //
 // Source of truth stays in docs/. The sync target markdown files are gitignored — never edit them by hand.
@@ -88,6 +90,11 @@ function deriveDescription(body) {
 
 const SITE_BASE = '/chord';
 
+// A page can declare its own site meta description with a marker comment right
+// after the H1; the marker itself is stripped from the generated page.
+//   <!-- description: One sentence used for the site meta tag. -->
+const DESCRIPTION_MARKER = /<!--\s*description:\s*([\s\S]*?)\s*-->/;
+
 function sitePath(lang, slug, anchor = '') {
   const langPrefix = lang === 'zh' ? '/zh' : '';
   return `${SITE_BASE}${langPrefix}/${slug}/${anchor}`;
@@ -109,6 +116,10 @@ function rewriteLinks(body, lang) {
     .replace(/\(\.\.\/examples\/([\w.-]+)\.yaml\)/g, (_m, name) =>
       `(https://github.com/keakon/chord/blob/main/docs/examples/${name}.yaml)`,
     )
+    // Sibling .yaml inside docs/examples/ → repo blob link
+    .replace(/\(\.\/([\w.-]+)\.yaml\)/g, (_m, name) =>
+      `(https://github.com/keakon/chord/blob/main/docs/examples/${name}.yaml)`,
+    )
     // Sibling .md links: ./xxx_CN.md → /chord/zh/xxx/ ; ./xxx.md → /chord/xxx/
     .replace(/\(\.\/([\w-]+?)(_CN)?\.md([^)]*)\)/g, (_m, slug, cn, rest) => {
       const anchor = (rest || '').startsWith('#') ? rest : '';
@@ -121,22 +132,26 @@ function rewriteLinks(body, lang) {
     });
 }
 
-// Promote the simple "> **Note:**" / "> **Important:** / **Warning:**" patterns
-// into Starlight ::: admonitions.
-function rewriteAdmonitions(body) {
+// Promote "> **Label:** ..." block-quotes into Starlight admonitions. Known
+// labels map to the closest flavour; any other label becomes a note so pages
+// like Headless ("Protocol stability") still stand out on the site. The label
+// is kept as the admonition title, and both ASCII (:) and full-width (：)
+// colons are accepted so Chinese pages convert too.
+export function rewriteAdmonitions(body) {
   return body.replace(
-    /(^|\n)>\s+\*\*(Note|Important|Warning|Tip|Caution|Danger)(?::|\*\*:)\*\*\s*([^\n]+(?:\n>\s+[^\n]+)*)/g,
-    (_m, prefix, kind, content) => {
+    /(^|\n)>\s+\*\*([^*\n]+?)[:：]\*\*\s*([^\n]+(?:\n>\s+[^\n]+)*)/g,
+    (_m, prefix, label, content) => {
+      const title = label.trim();
       const flavour = {
-        Note: 'note',
-        Tip: 'tip',
-        Important: 'caution',
-        Warning: 'caution',
-        Caution: 'caution',
-        Danger: 'danger',
-      }[kind] || 'note';
+        note: 'note',
+        tip: 'tip',
+        important: 'caution',
+        warning: 'caution',
+        caution: 'caution',
+        danger: 'danger',
+      }[title.toLowerCase()] || 'note';
       const inner = content.replace(/\n>\s?/g, '\n').trim();
-      return `${prefix}:::${flavour}\n${inner}\n:::`;
+      return `${prefix}:::${flavour}[${title}]\n${inner}\n:::`;
     },
   );
 }
@@ -162,8 +177,9 @@ function sourceEditUrl(srcPath) {
 async function syncOne(srcPath, lang, targetSlug) {
   const raw = await readFile(srcPath, 'utf8');
   const { title, body } = extractTitleAndBody(raw);
-  const description = deriveDescription(body);
-  let processed = rewriteLinks(body, lang);
+  const marker = body.match(DESCRIPTION_MARKER);
+  const description = marker ? marker[1].replace(/\s+/g, ' ').trim() : deriveDescription(body);
+  let processed = rewriteLinks(body.replace(DESCRIPTION_MARKER, ''), lang);
   processed = rewriteAdmonitions(processed);
   const out = buildFrontmatter({ title, description, editUrl: sourceEditUrl(srcPath) }) + processed.trimStart() + '\n';
   const targetDir = lang === 'zh' ? zhDir : enDir;
@@ -222,7 +238,9 @@ async function main() {
   console.log(`Generated ${brandAssets.join(', ')} in website/public/ from assets/logo/chord-wordmark.svg.`);
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

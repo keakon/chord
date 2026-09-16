@@ -1,5 +1,7 @@
 # Platform Support
 
+<!-- description: Which Chord features work on macOS, Linux, Windows, and WSL, and what to install for each. -->
+
 Chord is developed and tested primarily on macOS. Other platforms work to varying degrees: most features are platform-agnostic, but a few depend on OS-specific machinery and degrade or no-op elsewhere. This page lists where features really work, where they fall back, and what to install on each OS.
 
 ## Quick matrix

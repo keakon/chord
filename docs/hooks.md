@@ -1,5 +1,7 @@
 # Hooks
 
+<!-- description: Run external commands at Chord lifecycle events such as before a tool call, after an LLM response, or when an agent goes idle. -->
+
 Hooks let you run external commands at well-defined points in Chord's lifecycle: when a tool is about to run, when an LLM call returns, when an agent goes idle, etc. They are useful for notifications, auditing, automation gates, and post-batch checks.
 
 This page is the complete reference. For higher-level usage advice, see [Customization](./customization.md).

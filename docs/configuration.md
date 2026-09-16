@@ -1,5 +1,7 @@
 # Configuration & Auth
 
+<!-- description: Where Chord reads configuration from, how global and project settings merge, and how to set up credentials, model pools, and agents. -->
+
 Connect your models once, then reuse pools, fallback, and project overrides. Chord separates behavior configuration and credentials:
 
 - `~/.config/chord/config.yaml`: providers, models, extensions, defaults

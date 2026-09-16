@@ -1,5 +1,7 @@
 # Hooks
 
+<!-- description: 在 Chord 生命周期节点（工具调用前、LLM 返回后、agent 空闲等）运行你自己的命令。 -->
+
 Hooks 让你在 Chord 生命周期的明确节点运行外部命令——工具即将执行、LLM 调用返回、Agent 进入 idle 等。常见用途是通知、审计、自动化门禁、批量操作后的检查。
 
 本页是完整参考。更高层的用法建议见 [扩展与定制](./customization_CN.md)。
