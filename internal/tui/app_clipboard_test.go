@@ -1,22 +1,15 @@
 package tui
 
 import (
-	"bytes"
-	"context"
 	"encoding/base64"
 	"errors"
-	"image"
-	"image/color"
-	"image/jpeg"
-	"image/png"
 	"os"
 	"path/filepath"
 	"testing"
 
 	tea "github.com/keakon/bubbletea/v2"
-	clipboard "golang.design/x/clipboard"
-	"golang.org/x/image/bmp"
 
+	"github.com/keakon/chord/internal/clipboardread"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -41,7 +34,7 @@ func TestHandleNonKeyInputMsgKeepsImagePathPasteAsText(t *testing.T) {
 	orig := readAttachmentFromClipboard
 	readAttachmentFromClipboard = func() ([]byte, string, error) {
 		attachmentReads++
-		return nil, "", errNoClipboardAttachment
+		return nil, "", clipboardread.ErrNoAttachment
 	}
 	t.Cleanup(func() { readAttachmentFromClipboard = orig })
 	m := NewModelWithSize(nil, 80, 24)
@@ -86,178 +79,6 @@ func TestPasteMsgInsertsTextWithoutReadingClipboardAttachment(t *testing.T) {
 	}
 	if attachmentReads != 0 {
 		t.Fatalf("clipboard attachment reads = %d, want 0", attachmentReads)
-	}
-}
-
-func TestReadAttachmentFromClipboardFallsBackToBMP(t *testing.T) {
-	img := image.NewRGBA(image.Rect(0, 0, 2, 2))
-	img.Set(1, 1, color.RGBA{R: 200, G: 100, B: 50, A: 255})
-	var encoded bytes.Buffer
-	if err := bmp.Encode(&encoded, img); err != nil {
-		t.Fatal(err)
-	}
-
-	bmpFormat := clipboard.Register("image/bmp")
-	origInit := clipboardInit
-	origFormats := clipboardFormats
-	origRead := clipboardRead
-	clipboardInit = func() error { return nil }
-	clipboardFormats = func(context.Context) ([]clipboard.Format, error) {
-		return []clipboard.Format{bmpFormat}, nil
-	}
-	clipboardRead = func(_ context.Context, format clipboard.Format) ([]byte, error) {
-		if format == bmpFormat {
-			return encoded.Bytes(), nil
-		}
-		return nil, clipboard.ErrNoData
-	}
-	t.Cleanup(func() {
-		clipboardInit = origInit
-		clipboardFormats = origFormats
-		clipboardRead = origRead
-	})
-
-	data, mimeType, err := readAttachmentFromClipboardImpl()
-	if err != nil {
-		t.Fatalf("readAttachmentFromClipboardImpl: %v", err)
-	}
-	if mimeType != "image/png" && mimeType != "image/jpeg" {
-		t.Fatalf("mime type = %q, want normalized PNG/JPEG", mimeType)
-	}
-	if _, _, err := image.Decode(bytes.NewReader(data)); err != nil {
-		t.Fatalf("normalized clipboard BMP is not decodable: %v", err)
-	}
-}
-
-func TestReadAttachmentFromClipboardPrefersPNGOverOtherImageMIMEs(t *testing.T) {
-	img := image.NewRGBA(image.Rect(0, 0, 2, 2))
-	var pngBuf bytes.Buffer
-	if err := png.Encode(&pngBuf, img); err != nil {
-		t.Fatal(err)
-	}
-	var jpegBuf bytes.Buffer
-	if err := jpeg.Encode(&jpegBuf, img, nil); err != nil {
-		t.Fatal(err)
-	}
-
-	pngFormat := clipboard.Register("image/png")
-	jpegFormat := clipboard.Register("image/jpeg")
-	origInit := clipboardInit
-	origFormats := clipboardFormats
-	origRead := clipboardRead
-	clipboardInit = func() error { return nil }
-	clipboardFormats = func(context.Context) ([]clipboard.Format, error) {
-		return []clipboard.Format{jpegFormat, pngFormat}, nil
-	}
-	clipboardRead = func(_ context.Context, format clipboard.Format) ([]byte, error) {
-		switch format {
-		case pngFormat:
-			return pngBuf.Bytes(), nil
-		case jpegFormat:
-			return jpegBuf.Bytes(), nil
-		default:
-			return nil, clipboard.ErrNoData
-		}
-	}
-	t.Cleanup(func() {
-		clipboardInit = origInit
-		clipboardFormats = origFormats
-		clipboardRead = origRead
-	})
-
-	data, mimeType, err := readAttachmentFromClipboardImpl()
-	if err != nil {
-		t.Fatalf("readAttachmentFromClipboardImpl: %v", err)
-	}
-	if len(data) == 0 || (mimeType != "image/png" && mimeType != "image/jpeg") {
-		t.Fatalf("read clipboard PNG = %d bytes, %q", len(data), mimeType)
-	}
-}
-
-func TestReadAttachmentFromClipboardFallsBackWhenFmtImageIsInvalid(t *testing.T) {
-	img := image.NewRGBA(image.Rect(0, 0, 2, 2))
-	var jpegBuf bytes.Buffer
-	if err := jpeg.Encode(&jpegBuf, img, nil); err != nil {
-		t.Fatal(err)
-	}
-
-	jpegFormat := clipboard.Register("image/jpeg")
-	origInit := clipboardInit
-	origFormats := clipboardFormats
-	origRead := clipboardRead
-	clipboardInit = func() error { return nil }
-	clipboardFormats = func(context.Context) ([]clipboard.Format, error) {
-		return []clipboard.Format{clipboard.FmtImage, jpegFormat}, nil
-	}
-	clipboardRead = func(_ context.Context, format clipboard.Format) ([]byte, error) {
-		if format == clipboard.FmtImage {
-			return []byte("invalid PNG"), nil
-		}
-		if format == jpegFormat {
-			return jpegBuf.Bytes(), nil
-		}
-		return nil, clipboard.ErrNoData
-	}
-	t.Cleanup(func() {
-		clipboardInit = origInit
-		clipboardFormats = origFormats
-		clipboardRead = origRead
-	})
-
-	data, mimeType, err := readAttachmentFromClipboardImpl()
-	if err != nil {
-		t.Fatalf("readAttachmentFromClipboardImpl: %v", err)
-	}
-	if mimeType != "image/jpeg" || !bytes.Equal(data, jpegBuf.Bytes()) {
-		t.Fatalf("clipboard fallback = %d bytes, %q; want original JPEG", len(data), mimeType)
-	}
-}
-
-func TestReadAttachmentFromClipboardReportsUnreachableClipboard(t *testing.T) {
-	pngFormat := clipboard.Register("image/png")
-	origInit := clipboardInit
-	origFormats := clipboardFormats
-	origRead := clipboardRead
-	clipboardInit = func() error { return nil }
-	clipboardFormats = func(context.Context) ([]clipboard.Format, error) {
-		return []clipboard.Format{pngFormat}, nil
-	}
-	clipboardRead = func(context.Context, clipboard.Format) ([]byte, error) {
-		return nil, clipboard.ErrUnavailable
-	}
-	t.Cleanup(func() {
-		clipboardInit = origInit
-		clipboardFormats = origFormats
-		clipboardRead = origRead
-	})
-
-	// A clipboard that advertises a format but cannot be read is not an empty
-	// clipboard; reporting it as one sends the user looking for the wrong thing.
-	if _, _, err := readAttachmentFromClipboardImpl(); !errors.Is(err, clipboard.ErrUnavailable) {
-		t.Fatalf("readAttachmentFromClipboardImpl() error = %v, want %v", err, clipboard.ErrUnavailable)
-	}
-}
-
-func TestReadAttachmentFromClipboardTreatsMissingDataAsEmpty(t *testing.T) {
-	pngFormat := clipboard.Register("image/png")
-	origInit := clipboardInit
-	origFormats := clipboardFormats
-	origRead := clipboardRead
-	clipboardInit = func() error { return nil }
-	clipboardFormats = func(context.Context) ([]clipboard.Format, error) {
-		return []clipboard.Format{pngFormat}, nil
-	}
-	clipboardRead = func(context.Context, clipboard.Format) ([]byte, error) {
-		return nil, clipboard.ErrNoData
-	}
-	t.Cleanup(func() {
-		clipboardInit = origInit
-		clipboardFormats = origFormats
-		clipboardRead = origRead
-	})
-
-	if _, _, err := readAttachmentFromClipboardImpl(); !errors.Is(err, errNoClipboardAttachment) {
-		t.Fatalf("readAttachmentFromClipboardImpl() error = %v, want %v", err, errNoClipboardAttachment)
 	}
 }
 
@@ -381,7 +202,7 @@ func TestInsertAttachClipboardAddsPDFWithoutInlineImagePlaceholder(t *testing.T)
 func TestInsertAttachClipboardReportsNoAttachmentWithoutTextFallback(t *testing.T) {
 	origAttachment := readAttachmentFromClipboard
 	readAttachmentFromClipboard = func() ([]byte, string, error) {
-		return nil, "", errNoClipboardAttachment
+		return nil, "", clipboardread.ErrNoAttachment
 	}
 	origText := clipboardReadAll
 	textReads := 0

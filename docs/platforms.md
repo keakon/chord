@@ -84,7 +84,7 @@ Terminals not listed here may ignore BEL entirely or only flash the window; chec
 
 `Ctrl+V` or `Alt+V` reads an image or PDF from the system clipboard and adds it as an attachment. The read and any image conversion run asynchronously, so the TUI remains responsive; sending is temporarily held until the read finishes. Ordinary terminal paste events, including the usual macOS `Cmd+V`, are text-only and never probe clipboard attachments.
 
-Chord uses native clipboard backends rather than `osascript`, `xclip`, or `wl-paste`. Clipboard PNG is preferred, followed by JPEG, WebP, and BMP; BMP/WebP are safely normalized to PNG/JPEG before attachment. If both PDF and image representations are present, PDF takes priority. If no supported attachment is available, Chord shows a warning and does not fall back to text.
+Chord reads the clipboard through each platform's own backend: the native library on Linux and Windows, and the system `osascript` on macOS. Clipboard PNG is preferred, then TIFF on macOS, followed by JPEG, WebP, and BMP; TIFF/BMP/WebP are normalized to PNG/JPEG before attachment. If both PDF and image representations are present, PDF takes priority. If no supported attachment is available, Chord shows a warning and does not fall back to text.
 
 Inline image attachments are capped at 5 per composer message. Literal placeholder text like `[image1]` is not special by itself; only Chord-inserted inline placeholders are backed by real attachments.
 
@@ -95,6 +95,8 @@ Common cases:
 - **Linux Wayland / X11**: `Ctrl+V` uses the local clipboard when the compositor exposes data-control or an X11/XWayland display is available.
 - **Windows Terminal / WSL hosted by it**: use `Alt+V`; Windows Terminal reserves `Ctrl+V` for ordinary text paste by default. WSLg BMP clipboard images are normalized before attachment.
 - **Inside tmux / SSH**: the Chord process reads the clipboard of the machine where it runs, not automatically the terminal client's clipboard.
+
+On macOS the probe runs in a short-lived `osascript` process, so the clipboard framework never loads in Chord itself and its memory is reclaimed as soon as the read finishes. Nothing extra needs to be installed: the read is built into `chord`.
 
 When clipboard attachment access is unavailable, you can still bind `insert_attach_file` and attach images/PDFs by path from the composer.
 

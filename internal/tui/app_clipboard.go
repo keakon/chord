@@ -9,6 +9,7 @@ import (
 	"github.com/atotto/clipboard"
 	tea "github.com/keakon/bubbletea/v2"
 
+	"github.com/keakon/chord/internal/clipboardread"
 	"github.com/keakon/chord/internal/imageutil"
 )
 
@@ -31,6 +32,11 @@ var (
 	clipboardReadAll  = clipboard.ReadAll
 	clipboardWriteAll = clipboard.WriteAll
 )
+
+// readAttachmentFromClipboard is a variable so tests can replace the native
+// clipboard boundary without touching global OS clipboard state. macOS reads
+// the pasteboard through osascript; the other platforms read in-process.
+var readAttachmentFromClipboard = clipboardread.Read
 
 func writeClipboardCmd(text, success string) tea.Cmd {
 	return tea.Sequence(

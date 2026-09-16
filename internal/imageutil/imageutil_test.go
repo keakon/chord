@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"golang.org/x/image/bmp"
+	"golang.org/x/image/tiff"
 )
 
 func writePNG(t *testing.T, path string, w, h int) {
@@ -125,6 +126,21 @@ func TestNormalizeClipboardImage(t *testing.T) {
 	}
 	if _, _, err := image.Decode(bytes.NewReader(data)); err != nil {
 		t.Fatalf("normalized BMP output is not decodable: %v", err)
+	}
+
+	var tiffBuf bytes.Buffer
+	if err := tiff.Encode(&tiffBuf, img, nil); err != nil {
+		t.Fatal(err)
+	}
+	data, mimeType, err = NormalizeClipboardImage(tiffBuf.Bytes(), "image/tiff")
+	if err != nil {
+		t.Fatalf("NormalizeClipboardImage(tiff): %v", err)
+	}
+	if len(data) == 0 || (mimeType != "image/png" && mimeType != "image/jpeg") {
+		t.Fatalf("NormalizeClipboardImage(tiff) = %d bytes, %q", len(data), mimeType)
+	}
+	if _, _, err := image.Decode(bytes.NewReader(data)); err != nil {
+		t.Fatalf("normalized TIFF output is not decodable: %v", err)
 	}
 
 	const tinyWebPBase64 = "UklGRrIBAABXRUJQVlA4TKUBAAAvSsAYAA8w//M///MfeJAkbXvaSG7m8Q3GfYSBJekwQztm/IcZlgwnmWImn2BK7aFmBtnVir6q//8VOkFE/xm4baTIu8c48ArEo6+B3zFKYln3pqClSCKX0begFTAXFOLXHSyF8cCNcZEG4OywuA4KVVfJCiArU7GAgJI8+lJP/OKMT/fBAjevg1cYB7YVkFuWga2lyPi5I0HFy5YTpWIHg0RZpkniRVW9odHAKOwosWuOGdxIyn2OvaCDvhg/we6TwadPBPbqBV58MsLmMJ8yZnOWk8SRz4N+QoyPL+MnamzMvcE1rHNEr91F9GKZPVUcS9w7PhhH36suB9qPeYb/oLk6cuTiJ0wOK3m5h1cKjW6EVZCYMK7dxcKCBdgP9HkKr9gkAO2P8GKZGWVdIAatQa+1IDpt6qyorVwdy01xdW8Jkfk6xjEXmVQQ+HQdFr6OKhIN34dXWq0+0qr6EJSCeeVLH9+gvGTLyqM65PQ44ihzlTXxQKjKbAvshXgir7Lil9w4L2bvMycmjQcqXaMCO6BlY28i+FOLzbfI1vEqxAhotocAAA=="

@@ -1,10 +1,11 @@
-package tui
+//go:build !darwin
+
+package clipboardread
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"runtime"
 	"slices"
 	"time"
 
@@ -12,8 +13,6 @@ import (
 
 	"github.com/keakon/chord/internal/imageutil"
 )
-
-var errNoClipboardAttachment = errors.New("no image or PDF found in clipboard")
 
 // clipboardAttachmentBudget bounds one attachment read attempt. A clipboard read
 // waits for the owning application to answer, and the backends cap a single read
@@ -55,11 +54,11 @@ func readClipboardData(ctx context.Context, format clipboard.Format, firstErr *e
 	return data, len(data) > 0
 }
 
-// readAttachmentFromClipboard is a variable so tests can replace the native
-// clipboard boundary without touching global OS clipboard state.
-var readAttachmentFromClipboard = readAttachmentFromClipboardImpl
-
-func readAttachmentFromClipboardImpl() ([]byte, string, error) {
+// Read probes the clipboard for a PDF or image attachment and returns the bytes
+// normalized for a provider, plus the MIME type of the result. It reports
+// ErrNoAttachment when the clipboard holds neither, and otherwise leaves the
+// clipboard untouched.
+func Read() ([]byte, string, error) {
 	if err := clipboardInit(); err != nil {
 		return nil, "", fmt.Errorf("clipboard attachment unavailable: %w", err)
 	}
@@ -73,19 +72,11 @@ func readAttachmentFromClipboardImpl() ([]byte, string, error) {
 		return nil, "", fmt.Errorf("read clipboard formats: %w", err)
 	}
 	if clipboardHasMIME(formats, "application/pdf") {
-		pdfFormats := []clipboard.Format{clipboardRegister("application/pdf")}
-		if runtime.GOOS == "darwin" {
-			// AppKit usually advertises PDF data under its native pasteboard UTI,
-			// but some producers use the MIME type verbatim.
-			pdfFormats = append([]clipboard.Format{clipboardRegister("com.adobe.pdf")}, pdfFormats...)
-		}
-		for _, pdfFormat := range pdfFormats {
-			if data, ok := readClipboardData(ctx, pdfFormat, &firstErr); ok {
-				if err := imageutil.CheckPDFSize(data); err != nil {
-					return nil, "", err
-				}
-				return data, "application/pdf", nil
+		if data, ok := readClipboardData(ctx, clipboardRegister("application/pdf"), &firstErr); ok {
+			if err := imageutil.CheckPDFSize(data); err != nil {
+				return nil, "", err
 			}
+			return data, "application/pdf", nil
 		}
 	}
 
@@ -117,7 +108,7 @@ func readAttachmentFromClipboardImpl() ([]byte, string, error) {
 		return nil, "", firstErr
 	}
 
-	return nil, "", errNoClipboardAttachment
+	return nil, "", ErrNoAttachment
 }
 
 func clipboardHasFormat(formats []clipboard.Format, target clipboard.Format) bool {

@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"golang.org/x/image/bmp"
+	"golang.org/x/image/tiff"
 	"golang.org/x/image/webp"
 )
 
@@ -68,8 +69,8 @@ func CheckImageSize(data []byte) error {
 }
 
 // NormalizeClipboardImage validates and converts clipboard image bytes into a
-// provider-ready PNG or JPEG. PNG/JPEG stay encoded when possible; BMP/WebP are
-// decoded and re-encoded because providers do not accept those formats here.
+// provider-ready PNG or JPEG. PNG/JPEG stay encoded when possible; BMP/WebP/TIFF
+// are decoded and re-encoded because providers do not accept those formats here.
 func NormalizeClipboardImage(data []byte, mimeType string) ([]byte, string, error) {
 	if len(data) == 0 {
 		return nil, "", fmt.Errorf("empty clipboard image")
@@ -94,6 +95,9 @@ func NormalizeClipboardImage(data []byte, mimeType string) ([]byte, string, erro
 	case "image/webp":
 		decodeConfig = func(data []byte) (image.Config, error) { return webp.DecodeConfig(bytes.NewReader(data)) }
 		decode = func(data []byte) (image.Image, error) { return webp.Decode(bytes.NewReader(data)) }
+	case "image/tiff":
+		decodeConfig = func(data []byte) (image.Config, error) { return tiff.DecodeConfig(bytes.NewReader(data)) }
+		decode = func(data []byte) (image.Image, error) { return tiff.Decode(bytes.NewReader(data)) }
 	default:
 		return nil, "", fmt.Errorf("unsupported clipboard image format %q", mimeType)
 	}
@@ -113,7 +117,7 @@ func NormalizeClipboardImage(data []byte, mimeType string) ([]byte, string, erro
 			return nil, "", fmt.Errorf("decode clipboard png image: %w", err)
 		}
 		data, mimeType = compressPNGImage(data, img)
-	} else if mimeType == "image/bmp" || mimeType == "image/webp" {
+	} else if mimeType == "image/bmp" || mimeType == "image/webp" || mimeType == "image/tiff" {
 		img, err := decode(data)
 		if err != nil {
 			return nil, "", fmt.Errorf("decode clipboard %s image: %w", strings.TrimPrefix(mimeType, "image/"), err)

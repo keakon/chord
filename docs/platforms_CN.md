@@ -84,7 +84,7 @@ ime_switch_target: com.apple.keylayout.ABC          # macOS 示例
 
 `Ctrl+V` 或 `Alt+V` 会从系统剪贴板读取图片或 PDF 并作为附件添加。读取及图片转换都在后台异步执行，因此 TUI 不会被阻塞；读取完成前会暂时阻止发送。普通终端 paste 事件（包括 macOS 常见的 `Cmd+V`）只粘贴文本，绝不会探测剪贴板附件。
 
-Chord 使用原生剪贴板后端，不再依赖 `osascript`、`xclip` 或 `wl-paste`。剪贴板图片按 PNG、JPEG、WebP、BMP 的顺序读取；BMP/WebP 会先安全归一化为 PNG/JPEG。若同时提供 PDF 和图片表示，优先附加 PDF；如果没有支持的附件，会显示提示且不会回退为文本。
+Chord 通过各平台自己的后端读取剪贴板：Linux 和 Windows 用原生库，macOS 用系统 `osascript`。剪贴板图片按 PNG、macOS 的 TIFF、JPEG、WebP、BMP 的顺序读取；TIFF/BMP/WebP 会先归一化为 PNG/JPEG。若同时提供 PDF 和图片表示，优先附加 PDF；如果没有支持的附件，会显示提示且不会回退为文本。
 
 每条输入框消息最多支持 5 张 inline 图片附件。手动输入 `[image1]` 这类占位符文本本身不会附加图片；只有 Chord 内部插入的 inline 占位符才会绑定真实附件。
 
@@ -95,6 +95,8 @@ Chord 使用原生剪贴板后端，不再依赖 `osascript`、`xclip` 或 `wl-p
 - **Linux Wayland / X11**：compositor 提供 data-control，或 X11/XWayland display 可用时，`Ctrl+V` 读取本机剪贴板。
 - **Windows Terminal / 由其承载的 WSL**：请使用 `Alt+V`；Windows Terminal 默认把 `Ctrl+V` 用于普通文本粘贴。WSLg 提供的 BMP 剪贴板图片会在附加前归一化。
 - **tmux / SSH 内部**：Chord 读取运行所在机器的剪贴板，不会自动读取终端客户端剪贴板。
+
+macOS 上的探测在短生命周期的 `osascript` 进程里完成，剪贴板框架不会载入 Chord 进程本身，读取结束内存即回收。不需要额外安装任何东西：读取逻辑内置于 `chord`。
 
 剪贴板附件不可用时，你仍可给 `insert_attach_file` 绑定快捷键，再通过输入框里的路径附加图片/PDF。
 
