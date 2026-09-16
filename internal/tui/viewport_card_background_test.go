@@ -66,7 +66,7 @@ func TestViewportKeepsToolCardBackgroundEdge(t *testing.T) {
 			t.Fatalf("row %d: viewport moved card background edge from %d to %d", y, wantEdge, gotEdge)
 		}
 		for x := wantEdge + 1; x < width; x++ {
-			if cell := screen.Line(y).At(x); cell != nil && cell.Style.Bg != nil {
+			if cell := screen.Line(y).At(x); cell != nil && !cell.Style.Bg.IsZero() {
 				t.Fatalf("row %d: column %d outside card surface still has background %v", y, x, cell.Style.Bg)
 			}
 		}

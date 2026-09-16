@@ -29,7 +29,7 @@ func TestKeycapCardRowFillsCardWidthOnScreen(t *testing.T) {
 		row := sb.RenderBuffer.Line(y)
 		last := -1
 		for x := range termWidth {
-			if c := row.At(x); c != nil && c.Style.Bg != nil {
+			if c := row.At(x); c != nil && !c.Style.Bg.IsZero() {
 				last = x
 			}
 		}
@@ -57,7 +57,7 @@ func TestKeycapCardRowFillsCardWidthOnScreen(t *testing.T) {
 		if got := reference(y); got != edge {
 			t.Fatalf("keycap row %d: card background ends at column %d, want %d (one column short exposes the default background)", y, got, edge)
 		}
-		if margin := row.At(edge + 1); margin != nil && margin.Style.Bg != nil {
+		if margin := row.At(edge + 1); margin != nil && !margin.Style.Bg.IsZero() {
 			t.Fatalf("keycap row %d: surface background bleeds past the card edge", y)
 		}
 	}

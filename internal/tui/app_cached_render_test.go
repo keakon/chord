@@ -131,7 +131,7 @@ func TestDrawCachedRenderableToClearedAreaClearsStaleCellsWhenSourceLineEmpty(t 
 	buf := uv.NewScreenBuffer(width, 1)
 
 	// Seed the row with styled content that should be cleared.
-	styled := uv.Cell{Content: "─", Width: 1, Style: uv.Style{Fg: color.RGBA{R: 255, G: 0, B: 0, A: 255}}}
+	styled := uv.Cell{Content: "─", Width: 1, Style: uv.Style{Fg: uv.ColorFrom(color.RGBA{R: 255, G: 0, B: 0, A: 255})}}
 	for x := range width {
 		buf.SetCell(x, 0, &styled)
 	}
@@ -153,7 +153,7 @@ func TestDrawCachedRenderableToClearedAreaClearsStaleCellsBeyondSourceHeight(t *
 	height := 3
 	buf := uv.NewScreenBuffer(width, height)
 
-	styled := uv.Cell{Content: "X", Width: 1, Style: uv.Style{Fg: color.RGBA{R: 255, G: 0, B: 0, A: 255}}}
+	styled := uv.Cell{Content: "X", Width: 1, Style: uv.Style{Fg: uv.ColorFrom(color.RGBA{R: 255, G: 0, B: 0, A: 255})}}
 	for y := range height {
 		for x := range width {
 			buf.SetCell(x, y, &styled)

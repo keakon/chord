@@ -47,6 +47,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - Chord now targets `GOGC=50` when `GOGC` is not set, for the TUI and `chord headless` alike: the heap no longer grows toward the default target, so a 200-message session stays around 6 MB smaller (51.5 MB → 45.6 MB) and an empty session around 2 MB smaller. An explicit `GOGC` still wins, and `GOMEMLIMIT` is passed to the Go runtime unchanged — see [Environment variables — Memory tuning](./docs/environment.md#memory-tuning-gc) for how to pair it with a container limit.
 - A fallback to a different model is announced as soon as the retry loop starts it, naming the failure reason (timeout, 5xx, context length exceeded, and other classified reasons) and the target model, instead of waiting until the new model emits its first token — which can be tens of seconds later, after key rotation and cooldown waits. While the fallback is being reached, the status bar keeps showing that target, reason, and elapsed time. Retries that stay on the selected model (key rotation, same-target backoff) remain silent in the error panel.
+- Screen grids now hold 48-byte cells instead of 112-byte ones, which takes about 3 MB off an empty session and 3.5 MB off a 200-message session (in-use heap on a 50×200 terminal: 10.7 MB → 7.6 MB and 17.0 MB → 13.6 MB). Rendering is unchanged: recorded frames match byte for byte, and every render path allocates the same number of objects as before.
 
 ### Fixes
 

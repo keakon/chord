@@ -87,8 +87,8 @@ github.com/keakon/bubbletea/v2 v2.0.7-fork.2 h1:4L503k2uKATnevX4MFotYg9JDba8zBb+
 github.com/keakon/bubbletea/v2 v2.0.7-fork.2/go.mod h1:RVwlK/+PKUIKjMOzvwLeSdIL/tvxjYVtUufbmZ0GFgE=
 github.com/keakon/golog v0.4.1 h1:ypNKDc+jIs1uiGP5uMSGaxa9SQKuG1G8QrnAofUOP10=
 github.com/keakon/golog v0.4.1/go.mod h1:VaRf1sNrjyL0MBAGAJUXajaJ3Zg0Z8+5A6faep08BHA=
-github.com/keakon/ultraviolet v0.0.1-fork.4 h1:0oA5vST4k6Bl9rKajjj2nMpQXxqKkqVQlpNGZcRTzVU=
-github.com/keakon/ultraviolet v0.0.1-fork.4/go.mod h1:iuYlFEcftBeT5Cc/uPLHgJ0ucPUY4guq8JqcRsi/XYE=
+github.com/keakon/ultraviolet v0.0.1-fork.5 h1:ye5MBZrXK7huV3zrXnsZ/iIgHm3nz6E5SKqRpqcG70U=
+github.com/keakon/ultraviolet v0.0.1-fork.5/go.mod h1:iuYlFEcftBeT5Cc/uPLHgJ0ucPUY4guq8JqcRsi/XYE=
 github.com/keakon/x/powernap v0.1.5-fork.1 h1:lLtdZ0esEtcVqulf5unB9NCRUT+Z5Cxv2+SCeY56x+k=
 github.com/keakon/x/powernap v0.1.5-fork.1/go.mod h1:w8nObTAIcIPJI/msiOXCFs6utx3yuLVl7lm0oa2/DAY=
 github.com/klauspost/compress v1.20.0 h1:a3C1ke2ohxFymNlb2HWAHjDeKCI90scRskErZkR0ezA=
