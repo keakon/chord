@@ -264,7 +264,17 @@ func (m Model) buildStatusBarActivityDisplayAt(a agent.AgentActivityEvent, now t
 	case agent.ActivityCompacting:
 		display.Icon = compactionPillIconAt(now)
 		display.Text = elapsedText
-	case agent.ActivityWaitingHeaders, agent.ActivityWaitingToken, agent.ActivityRetrying, agent.ActivityRetryingKey, agent.ActivityCooling:
+	case agent.ActivityRetrying:
+		display.Icon = "↺"
+		// The detail explains why the request is waiting (fallback: <model>
+		// (<reason>), same key, round N) and outlives the toast that announced the
+		// transition, which matters when the wait lasts tens of seconds.
+		if detail := strings.TrimSpace(a.Detail); detail != "" {
+			display.Text = detail + " · " + elapsedText
+		} else {
+			display.Text = elapsedText
+		}
+	case agent.ActivityWaitingHeaders, agent.ActivityWaitingToken, agent.ActivityRetryingKey, agent.ActivityCooling:
 		display.Icon = "↺"
 		display.Text = elapsedText
 	case agent.ActivityStreaming:

@@ -311,7 +311,7 @@ func TestCallLLMMixedFallbackErrorsDoNotStartOversizeCompaction(t *testing.T) {
 	}
 }
 
-func TestCallLLMShowsFallbackToastOnFirstThinkingToken(t *testing.T) {
+func TestCallLLMFallbackAttemptToastForContextLengthExceeded(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 
 	primaryCfg := llm.NewProviderConfig("primary-prov", config.ProviderConfig{
@@ -389,7 +389,7 @@ func TestCallLLMShowsFallbackToastOnFirstThinkingToken(t *testing.T) {
 	}
 }
 
-func TestCallLLMDoesNotShowFallbackToastWhenFallbackNeverStreams(t *testing.T) {
+func TestCallLLMFallbackAttemptToastWhenFallbackNeverStreams(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 
 	primaryCfg := llm.NewProviderConfig("primary-prov", config.ProviderConfig{
@@ -425,7 +425,8 @@ func TestCallLLMDoesNotShowFallbackToastWhenFallbackNeverStreams(t *testing.T) {
 	}
 	fallbackImpl := &blockingStreamProvider{
 		calls: []scriptedStreamCall{{
-			// No streams -> no key_confirmed -> fallback toast must NOT be shown.
+			// No streams -> the switch is never confirmed, but the attempt toast
+			// must already have told the user why the selected model was left.
 			err: io.ErrUnexpectedEOF,
 		}},
 	}
@@ -449,13 +450,22 @@ func TestCallLLMDoesNotShowFallbackToastWhenFallbackNeverStreams(t *testing.T) {
 
 	<-primaryImpl.streamedCh
 
-	// Drain agent events briefly and assert no fallback toast is emitted.
+	// The fallback attempt is announced when the retry loop starts it; the
+	// switch itself is never confirmed because that target never streams.
+	var attemptToasts []string
 	deadline := time.After(250 * time.Millisecond)
 	for {
 		select {
 		case evt := <-a.Events():
-			if toast, ok := evt.(ToastEvent); ok && strings.Contains(toast.Message, "Switched to fallback model") {
-				t.Fatalf("unexpected fallback toast: %+v", toast)
+			toast, ok := evt.(ToastEvent)
+			if !ok {
+				continue
+			}
+			if strings.Contains(toast.Message, "Switched to fallback model") {
+				t.Fatalf("fallback target never streamed; unexpected switch toast: %+v", toast)
+			}
+			if strings.Contains(toast.Message, "trying fallback model") {
+				attemptToasts = append(attemptToasts, toast.Message)
 			}
 		case <-deadline:
 			close(primaryImpl.releaseCh)
@@ -472,8 +482,12 @@ waitDone:
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for callLLM to finish")
 	}
+
+	if len(attemptToasts) != 1 || !strings.Contains(attemptToasts[0], "fallback-prov/fallback-model") {
+		t.Fatalf("attempt toasts = %q, want exactly one announcing fallback-prov/fallback-model", attemptToasts)
+	}
 }
-func TestCallLLMNoFallbackToastForSameModelNameDifferentProvider(t *testing.T) {
+func TestCallLLMNoFallbackAttemptToastForSameModelNameDifferentProvider(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 
 	primaryCfg := llm.NewProviderConfig("prov-a", config.ProviderConfig{
@@ -528,17 +542,16 @@ func TestCallLLMNoFallbackToastForSameModelNameDifferentProvider(t *testing.T) {
 
 	<-fallbackImpl.streamedCh
 
-	// No "Switched to fallback model" toast should appear because the model
-	// name is the same; only the provider changed.
+	// The model name is the same; only the provider changed, so this is a key
+	// switch rather than a model fallback: neither an attempt nor a switch
+	// toast may mention a fallback.
 	timeout := time.After(500 * time.Millisecond)
 drainLoop:
 	for {
 		select {
 		case evt := <-a.Events():
-			if toast, ok := evt.(ToastEvent); ok {
-				if strings.Contains(toast.Message, "Switched to fallback model") {
-					t.Fatalf("unexpected fallback toast: %q", toast.Message)
-				}
+			if toast, ok := evt.(ToastEvent); ok && strings.Contains(toast.Message, "fallback") {
+				t.Fatalf("unexpected fallback toast for same model name: %q", toast.Message)
 			}
 		case <-timeout:
 			break drainLoop
@@ -556,10 +569,11 @@ drainLoop:
 	}
 }
 
-// TestCallLLMDifferentModelNamesShowsFallbackToast verifies that switching
-// to a genuinely different model name (e.g. "prov-a/glm-5.1" → "prov-b/gpt-5.5")
-// still emits the "Switched to fallback model" toast as before.
-func TestCallLLMDifferentModelNamesShowsFallbackToast(t *testing.T) {
+// TestCallLLMDifferentModelNamesAnnounceFallbackAttempt verifies that moving to
+// a genuinely different model name (e.g. "prov-a/glm-5.1" → "prov-b/gpt-5.5")
+// emits the attempt toast as soon as the retry loop starts it, and that
+// confirming the switch does not repeat the same notice.
+func TestCallLLMDifferentModelNamesAnnounceFallbackAttempt(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 
 	primaryCfg := llm.NewProviderConfig("prov-a", config.ProviderConfig{
@@ -614,9 +628,12 @@ func TestCallLLMDifferentModelNamesShowsFallbackToast(t *testing.T) {
 	}()
 
 	<-fallbackImpl.streamedCh
-	toast := waitForToastEvent(t, a.Events(), "Switched to fallback model")
+	toast := waitForToastEvent(t, a.Events(), "trying fallback model")
 	if !strings.Contains(toast.Message, "prov-b/gpt-5.5") {
 		t.Fatalf("toast = %q, want fallback model ref prov-b/gpt-5.5", toast.Message)
+	}
+	if !strings.Contains(toast.Message, "5xx") {
+		t.Fatalf("toast = %q, want the classified failure reason 5xx", toast.Message)
 	}
 
 	close(fallbackImpl.releaseCh)
@@ -627,6 +644,65 @@ func TestCallLLMDifferentModelNamesShowsFallbackToast(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for callLLM to finish")
+	}
+
+	// key_confirmed confirms the same target the attempt toast already named, so
+	// the switch must not be reported again.
+	for _, evt := range drainAgentEvents(a.Events()) {
+		if extra, ok := evt.(ToastEvent); ok && strings.Contains(extra.Message, "Switched to fallback model") {
+			t.Fatalf("confirmed switch must not repeat the attempt notice: %q", extra.Message)
+		}
+	}
+}
+
+// TestMainLLMFallbackAttemptToastAnnouncedOncePerTarget verifies the attempt
+// notice fires when the retry loop starts a fallback target, is not repeated
+// for the same target in a later round, and never fires for a same-name model
+// served by a different provider.
+func TestMainLLMFallbackAttemptToastAnnouncedOncePerTarget(t *testing.T) {
+	a := newReadyTestMainAgent(t)
+	drainAgentEvents(a.Events()) // clear setup events
+
+	state := &mainLLMStreamState{}
+	reducer := a.newMainLLMStreamReducer(nil, "prov-a/glm-5.1", "", nil, false, state)
+	handle := func(modelRef, reason string) {
+		reducer.Handle(message.StreamDelta{
+			Type: message.StreamDeltaStatus,
+			Status: &message.StatusDelta{
+				Type:     "retrying",
+				ModelRef: modelRef,
+				Reason:   reason,
+			},
+		})
+	}
+
+	handle("prov-b/glm-5.1", "5xx")     // same model name: key switch, not a fallback
+	handle("prov-b/gpt-5.5", "5xx")     // fallback target: announced
+	handle("prov-b/gpt-5.5", "timeout") // same target in a later round: not repeated
+	handle("prov-c/gpt-6", "429")       // next fallback target: announced
+
+	var got []string
+	for _, evt := range drainAgentEvents(a.Events()) {
+		toast, ok := evt.(ToastEvent)
+		if !ok {
+			continue
+		}
+		if toast.Category != toastCategoryFallback {
+			t.Fatalf("unexpected toast category %q: %+v", toast.Category, toast)
+		}
+		got = append(got, toast.Message)
+	}
+	want := []string{
+		"Model error (5xx); trying fallback model: prov-b/gpt-5.5",
+		"Model error (429); trying fallback model: prov-c/gpt-6",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("toasts = %q, want %q", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("toasts = %q, want %q", got, want)
+		}
 	}
 }
 

@@ -44,7 +44,7 @@ Common keys:
 
 Press `Ctrl+E` in normal mode to open the error panel, which shows all errors encountered during the current session. This includes:
 
-- **Intermediate retry errors**: API errors that triggered a key rotation, model fallback, or stream retry (e.g., 429 rate limits, 503 service unavailable, context length exceeded, timeouts). These are recorded silently and only appear in the error panel, keeping the conversation flow clean.
+- **Intermediate retry errors**: API errors that triggered a key rotation, model fallback, or stream retry (e.g., 429 rate limits, 503 service unavailable, context length exceeded, timeouts). These are recorded silently and only appear in the error panel, keeping the conversation flow clean. Switching to a different fallback model is the exception: the notification appears as soon as the fallback starts, naming the reason and the target model, and the status bar keeps showing that target, reason, and elapsed time while the new model is being reached.
 - **Final errors**: errors that exhausted all retries and appear as red error blocks in the conversation.
 
 Each error record shows:

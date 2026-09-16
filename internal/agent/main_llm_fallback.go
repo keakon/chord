@@ -4,12 +4,32 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 )
+
+// toastCategoryFallback groups fallback-attempt notifications so the TUI merges
+// repeats of the same transition instead of queueing one toast per retry round.
+const toastCategoryFallback = "llm_fallback"
+
+// fallbackAttemptToastMessage describes a fallback attempt that just started:
+// the selected model failed and the retry loop is moving to another model. The
+// toast is emitted when the attempt starts, so it says "trying" instead of
+// claiming the switch already happened.
+func fallbackAttemptToastMessage(reason, modelRef string) string {
+	switch reason = strings.TrimSpace(reason); reason {
+	case "context_length_exceeded":
+		return fmt.Sprintf("Current model context exceeded; trying fallback model: %s", modelRef)
+	case "":
+		return fmt.Sprintf("Model error; trying fallback model: %s", modelRef)
+	default:
+		return fmt.Sprintf("Model error (%s); trying fallback model: %s", reason, modelRef)
+	}
+}
 
 type fallbackModelDownshiftCompactionPendingError struct {
 	planID           uint64

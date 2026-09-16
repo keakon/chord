@@ -285,8 +285,7 @@ func (a *MainAgent) PrewarmModelPolicy() error {
 type mainLLMStreamState struct {
 	pendingKeySwitch      bool
 	pendingSwitchBack     bool
-	pendingFallbackRef    string
-	pendingFallbackReason string
+	announcedFallbackRef  string
 	streamingPromoted     bool
 	requestProgressBytes  int64
 	requestProgressEvents int64
@@ -325,46 +324,19 @@ func (a *MainAgent) newMainLLMStreamReducer(llmClient *llm.Client, selectedRef, 
 		}
 	}
 
-	emitConfirmedSwitchToast := func(confirmedRef, confirmedReason string) {
+	emitConfirmedSwitchToast := func(confirmedRef string) {
 		confirmedRef = strings.TrimSpace(confirmedRef)
-		// If we had queued a fallback candidate but the first visible token came
-		// from a different model, discard the stale candidate to avoid emitting
-		// a misleading toast on a later key_confirmed.
-		if state.pendingFallbackRef != "" && confirmedRef != "" && confirmedRef != state.pendingFallbackRef {
-			state.pendingFallbackRef = ""
-			state.pendingFallbackReason = ""
-		}
+		// A fallback attempt announces its target and reason when the retry loop
+		// leaves the selected model, so a later key_confirmed only confirms that
+		// target and has nothing new to report.
 		switch {
-		case state.pendingFallbackRef != "" && confirmedRef != "" && confirmedRef == state.pendingFallbackRef:
-			reason := strings.TrimSpace(state.pendingFallbackReason)
-			if reason == "" {
-				reason = strings.TrimSpace(confirmedReason)
-			}
-			msg := fmt.Sprintf("Switched to fallback model: %s", confirmedRef)
-			if reason == "context_length_exceeded" {
-				msg = fmt.Sprintf("Current model context exceeded; switched to fallback model: %s", confirmedRef)
-			} else if reason != "" {
-				msg = fmt.Sprintf("Switched to fallback model (%s): %s", reason, confirmedRef)
-			}
-
-			a.emitToTUI(ToastEvent{Message: msg, Level: "warn"})
 		case state.pendingSwitchBack && confirmedRef != "" && modelNameFromRef(confirmedRef) == modelNameFromRef(selectedRef):
-			msg := "Switched back to selected model"
-
-			a.emitToTUI(ToastEvent{Message: msg, Level: "info"})
+			a.emitToTUI(ToastEvent{Message: "Switched back to selected model", Level: "info"})
+			state.pendingSwitchBack = false
+			state.pendingKeySwitch = false
 		case state.pendingKeySwitch:
 			a.emitToTUI(ToastEvent{Message: "Switched key", Level: "info"})
-		default:
-			return
-		}
-
-		state.pendingKeySwitch = false
-		// Only clear switch-back after it is actually confirmed on a visible token.
-		if state.pendingFallbackRef != "" && confirmedRef == state.pendingFallbackRef {
-			state.pendingFallbackRef = ""
-			state.pendingFallbackReason = ""
-		} else if state.pendingSwitchBack && confirmedRef != "" && modelNameFromRef(confirmedRef) == modelNameFromRef(selectedRef) {
-			state.pendingSwitchBack = false
+			state.pendingKeySwitch = false
 		}
 	}
 
@@ -444,8 +416,18 @@ func (a *MainAgent) newMainLLMStreamReducer(llmClient *llm.Client, selectedRef, 
 			// Only treat as fallback if the model name differs from selected.
 			// Same model name with different provider is effectively a key switch.
 			if status.Type == "retrying" && modelNameFromRef(status.ModelRef) != modelNameFromRef(selectedRef) {
-				state.pendingFallbackRef = status.ModelRef
-				state.pendingFallbackReason = status.Reason
+				// Announce the attempt as soon as the retry loop leaves the
+				// selected model: key_confirmed only arrives after the fallback
+				// target emits its first visible token, which can be tens of
+				// seconds later, and the user needs the reason while waiting.
+				if status.ModelRef != state.announcedFallbackRef {
+					state.announcedFallbackRef = status.ModelRef
+					a.emitToTUI(ToastEvent{
+						Message:  fallbackAttemptToastMessage(status.Reason, status.ModelRef),
+						Level:    "warn",
+						Category: toastCategoryFallback,
+					})
+				}
 			}
 		}
 	}
@@ -477,15 +459,13 @@ func (a *MainAgent) newMainLLMStreamReducer(llmClient *llm.Client, selectedRef, 
 		// First visible token received on the current key: update key availability now.
 		a.emitToTUI(KeyPoolChangedEvent{})
 		confirmedRef := ""
-		confirmedReason := ""
 		if status != nil {
 			confirmedRef = status.ModelRef
-			confirmedReason = status.Reason
 		}
 		// Ensure the sidebar reflects the model that actually produced the first visible token.
 		updateRunningModelRef(confirmedRef)
 		// Confirmed toasts must be keyed off the model that actually emitted output.
-		emitConfirmedSwitchToast(confirmedRef, confirmedReason)
+		emitConfirmedSwitchToast(confirmedRef)
 	}
 	streamReducer.onRetryError = func(err error, provider, model, maskedKey, accountID, email string) {
 		a.emitToTUI(ErrorEvent{

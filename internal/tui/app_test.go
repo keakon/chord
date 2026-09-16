@@ -6951,16 +6951,21 @@ func TestRenderActivityCompactingUsesUnifiedProgressStyle(t *testing.T) {
 	}
 }
 
-func TestRenderActivityRetryingUsesExplicitRoundAndElapsedLabels(t *testing.T) {
+func TestRenderActivityRetryingShowsDetailAndElapsed(t *testing.T) {
 	m := NewModelWithSize(nil, 200, 24)
 	m.activityStartTime["main"] = time.Now().Add(-17 * time.Second)
-	a := agent.AgentActivityEvent{Type: agent.ActivityRetrying, AgentID: "main", Detail: "round 6"}
-	out := stripANSI(m.renderActivity(a, 200))
-	if !strings.Contains(out, "↺") {
-		t.Fatalf("retrying render should still show icon, got %q", out)
+
+	retrying := stripANSI(m.renderActivity(agent.AgentActivityEvent{Type: agent.ActivityRetrying, AgentID: "main", Detail: "round 6"}, 200))
+	if !strings.Contains(retrying, "↺") {
+		t.Fatalf("retrying render should still show icon, got %q", retrying)
 	}
-	if !strings.Contains(out, " 17s") {
-		t.Fatalf("retrying render should show current phase timer in parens, got %q", out)
+	if !strings.Contains(retrying, "round 6") || !strings.Contains(retrying, "17s") {
+		t.Fatalf("retrying render should show the detail and the phase timer, got %q", retrying)
+	}
+
+	fallback := stripANSI(m.renderActivity(agent.AgentActivityEvent{Type: agent.ActivityRetrying, AgentID: "main", Detail: "fallback: fallback-model (5xx)"}, 200))
+	if !strings.Contains(fallback, "fallback: fallback-model (5xx)") || !strings.Contains(fallback, "17s") {
+		t.Fatalf("fallback wait render should name the target, reason, and elapsed time, got %q", fallback)
 	}
 }
 

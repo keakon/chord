@@ -621,9 +621,13 @@ func (c *Client) completeStreamTarget(
 			if err := abortIfCancelled(); err != nil {
 				return result, lastInputTokens, err
 			}
+			detail := fmt.Sprintf("fallback: %s", t.modelID)
+			if reason != "" {
+				detail = fmt.Sprintf("fallback: %s (%s)", t.modelID, reason)
+			}
 			emitStreamStatusDelta(cb, message.StatusDelta{
 				Type:     "retrying",
-				Detail:   fmt.Sprintf("fallback: %s", t.modelID),
+				Detail:   detail,
 				ModelRef: t.displayRef(),
 				Reason:   reason,
 			})
