@@ -1176,8 +1176,25 @@ func TestConcurrentDuplicateCreateSharesAdmissionResult(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("first admission did not reach LLM factory")
 	}
-	go create()
-	time.Sleep(20 * time.Millisecond)
+	secondStarted := make(chan struct{})
+	go func() {
+		close(secondStarted)
+		create()
+	}()
+	<-secondStarted
+	// Give the second admission a bounded chance to (incorrectly) reach the
+	// LLM factory while the first is blocked: poll with a timeout instead of
+	// a single fixed sleep so slow machines still observe the overlap and a
+	// duplicate factory call fails fast. The window only has to cover one
+	// scheduling delay of an already-started goroutine (secondStarted above),
+	// and the correct path pays it in full, so keep it short.
+	admissionDeadline := time.Now().Add(100 * time.Millisecond)
+	for time.Now().Before(admissionDeadline) {
+		if got := factoryCalls.Load(); got != 1 {
+			t.Fatalf("LLM factory calls before release = %d, want 1", got)
+		}
+		time.Sleep(time.Millisecond)
+	}
 	if got := factoryCalls.Load(); got != 1 {
 		t.Fatalf("LLM factory calls before release = %d, want 1", got)
 	}
@@ -2629,7 +2646,17 @@ func TestConcurrentTaskRehydratePublishesOneRuntime(t *testing.T) {
 		})
 	}
 	<-factoryStarted
-	time.Sleep(20 * time.Millisecond)
+	// Give the follower a bounded chance to (incorrectly) reach the LLM
+	// factory while the leader is blocked: poll with a timeout instead of a
+	// single fixed sleep so slow machines still observe the overlap. The
+	// correct path pays the window in full, so keep it short.
+	activationDeadline := time.Now().Add(100 * time.Millisecond)
+	for time.Now().Before(activationDeadline) {
+		if got := factoryCalls.Load(); got != 1 {
+			t.Fatalf("LLM factory calls while activation is in flight = %d, want 1", got)
+		}
+		time.Sleep(time.Millisecond)
+	}
 	if got := factoryCalls.Load(); got != 1 {
 		t.Fatalf("LLM factory calls while activation is in flight = %d, want 1", got)
 	}

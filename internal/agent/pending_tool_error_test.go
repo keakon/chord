@@ -183,7 +183,7 @@ func TestHandleAgentErrorDiscardsCompletedSpeculativeToolWithoutAssistantDeclara
 		return ToolExecutionResult{EffectiveArgsJSON: call.ArgsJSON, Result: "     1\thello"}, nil
 	})
 	a.turn.streamingToolExec.Start(message.ToolCall{ID: call.CallID, Name: call.Name, Args: json.RawMessage(call.ArgsJSON)})
-	time.Sleep(50 * time.Millisecond)
+	waitForStreamingToolDone(t, a.turn.streamingToolExec, call.CallID)
 
 	a.handleAgentError(Event{Type: EventAgentError, TurnID: a.turn.ID, Payload: context.DeadlineExceeded})
 	a.flushPersist()

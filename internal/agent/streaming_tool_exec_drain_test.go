@@ -45,8 +45,10 @@ func TestStreamingToolExecutor_DrainCompletedResults(t *testing.T) {
 		t.Fatal("Failed to start speculative execution")
 	}
 
-	// Wait for both to complete
-	time.Sleep(50 * time.Millisecond)
+	// Wait for both speculative executions to finish instead of guessing a
+	// fixed window that flakes under load.
+	waitForStreamingToolDone(t, exec, call1.ID)
+	waitForStreamingToolDone(t, exec, call2.ID)
 
 	// Drain completed results
 	results := exec.DrainCompletedResults()
@@ -107,8 +109,21 @@ func TestStreamingToolExecutor_DrainCompletedResults_IgnoresIncomplete(t *testin
 		t.Fatal("Failed to start speculative execution")
 	}
 
-	// Drain immediately without waiting for completion
-	time.Sleep(10 * time.Millisecond)
+	// Observe that the slow execution has started (entry tracked) instead of
+	// guessing a fixed window; draining must then see no completed result.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		exec.mu.Lock()
+		_, tracked := exec.entries[call.ID]
+		exec.mu.Unlock()
+		if tracked {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for slow speculative execution to start")
+		}
+		time.Sleep(time.Millisecond)
+	}
 	results := exec.DrainCompletedResults()
 
 	// Should not include the still-running tool

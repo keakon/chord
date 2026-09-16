@@ -126,6 +126,24 @@ func waitForSubAgentLLMResult(t *testing.T, sub *SubAgent, timeout time.Duration
 	}
 }
 
+// waitForBlockingStreamProviderCalls polls the provider's locked snapshot until
+// it has recorded want CompleteStream calls. It replaces fixed time.Sleep
+// waits for the async LLM goroutine to start: under load the goroutine may not
+// be scheduled within a fixed window, while polling observes the actual entry.
+func waitForBlockingStreamProviderCalls(t *testing.T, p *blockingStreamProvider, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		msgs, _ := p.snapshot()
+		if len(msgs) >= want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	msgs, _ := p.snapshot()
+	t.Fatalf("blocking provider calls = %d, want at least %d", len(msgs), want)
+}
+
 func newReadyTestMainAgent(t *testing.T) *MainAgent {
 	t.Helper()
 	a := newTestMainAgent(t, t.TempDir())

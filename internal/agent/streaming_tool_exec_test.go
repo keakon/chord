@@ -282,7 +282,22 @@ func TestStreamingToolExecutorDiscardSuppressesVisibleResult(t *testing.T) {
 		t.Fatalf("discarded len = %d, want 1", len(discarded))
 	}
 	close(release)
-	time.Sleep(50 * time.Millisecond)
+	// Wait for the discarded background execution to finish instead of
+	// guessing a fixed window: the entry stays tracked until runEntry
+	// completes its rollback, so polling its removal observes completion.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		exec.mu.Lock()
+		_, tracked := exec.entries[call.ID]
+		exec.mu.Unlock()
+		if !tracked {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for discarded speculative execution to finish")
+		}
+		time.Sleep(time.Millisecond)
+	}
 	for {
 		select {
 		case evt := <-events:

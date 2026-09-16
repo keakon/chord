@@ -254,9 +254,16 @@ func TestShutdownUnblocksReliableOutputFromEventLoop(t *testing.T) {
 		t.Fatal("Run did not start")
 	}
 	a.sendEvent(Event{Type: EventAgentError, Payload: errors.New("boom"), SourceID: identity.MainAgentID})
-	// Give the event loop time to enter the reliable output send. Before the
-	// shutdown signal moved earlier, Shutdown could not release this wait.
-	time.Sleep(20 * time.Millisecond)
+	// Wait until the event loop has taken the error event before shutting
+	// down, so the test deterministically exercises the reliable-output
+	// blocking path instead of guessing a fixed window.
+	deadline = time.Now().Add(2 * time.Second)
+	// sendEvent spills to deferredEvents/loopEvents once eventCh is full, so
+	// poll every queue: checking eventCh alone can exit while the error event
+	// still sits in overflow and Shutdown races the loop's handling of it.
+	for (len(a.eventCh) > 0 || a.hasDeferredEvents()) && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
 
 	if err := a.Shutdown(time.Second); err != nil {
 		t.Fatalf("Shutdown: %v", err)

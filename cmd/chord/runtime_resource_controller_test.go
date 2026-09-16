@@ -98,7 +98,22 @@ func TestRuntimeResourceControllerEnsureReadyWaitsForInFlightUnload(t *testing.T
 		ready <- ctrl.EnsureReady(context.Background())
 	}()
 
-	time.Sleep(10 * time.Millisecond)
+	// Observe that EnsureReady has started (it bumps idleGen via
+	// cancelIdleUnload before waiting on done) instead of guessing a fixed
+	// window in which the goroutine may not be scheduled yet.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		ctrl.mu.Lock()
+		gen := ctrl.idleGen
+		ctrl.mu.Unlock()
+		if gen != 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for EnsureReady to start waiting for unload")
+		}
+		time.Sleep(time.Millisecond)
+	}
 	if got := restored.Load(); got != 0 {
 		t.Fatalf("restore calls before unload completion = %d, want 0", got)
 	}

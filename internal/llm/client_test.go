@@ -6404,7 +6404,17 @@ func TestCompleteStreamWithRetryStopsOnRoutingInvalidationDuringBackoff(t *testi
 		resultCh <- err
 	}()
 
-	time.Sleep(100 * time.Millisecond)
+	// Observe the first provider attempt instead of guessing a fixed window:
+	// under load the async goroutine may not be scheduled within 100ms, and
+	// invalidating before the retry backoff starts would not exercise the
+	// abort path.
+	deadline := time.Now().Add(2 * time.Second)
+	for impl.CallCount() < 1 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if impl.CallCount() < 1 {
+		t.Fatal("timed out waiting for CompleteStream to start the first attempt")
+	}
 	c.InvalidateRouting("model_pool_changed")
 
 	select {

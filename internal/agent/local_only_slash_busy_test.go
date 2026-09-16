@@ -396,7 +396,7 @@ func TestModelSwitchInvalidatesPreviousClientRetryPlan(t *testing.T) {
 		errCh <- err
 	}()
 
-	time.Sleep(100 * time.Millisecond)
+	waitForBlockingStreamProviderCalls(t, oldProvider, 1)
 	if err := a.switchModel("provider/model-b", false); err != nil {
 		t.Fatalf("switchModel returned error: %v", err)
 	}
@@ -433,7 +433,7 @@ func TestBusyCurrentModelPoolSwitchInvalidatesPreviousClientRetryPlan(t *testing
 		errCh <- err
 	}()
 
-	time.Sleep(100 * time.Millisecond)
+	waitForBlockingStreamProviderCalls(t, oldProvider, 1)
 	a.mainLLMRequestInFlight.Store(true)
 	a.SetCurrentModelPool("fast")
 	dispatchPendingEvents(t, a)

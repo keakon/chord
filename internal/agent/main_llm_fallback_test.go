@@ -761,10 +761,12 @@ func TestCallLLMNoFallbackExhaustedToastOnCancel(t *testing.T) {
 		done <- err
 	}()
 
-	// Wait briefly for the first round to complete (current pool head + next pool entry both
-	// fail, FallbackExhausted is set), then cancel the context so the retry
-	// backoff aborts.
-	time.Sleep(200 * time.Millisecond)
+	// Wait for the first round to complete (both providers have been tried and
+	// FallbackExhausted is set), then cancel so the retry backoff aborts.
+	// Polling the providers' recorded calls observes the actual progress
+	// instead of guessing a fixed window.
+	waitForBlockingStreamProviderCalls(t, primaryImpl, 1)
+	waitForBlockingStreamProviderCalls(t, fallbackImpl, 1)
 	cancel()
 
 	select {
