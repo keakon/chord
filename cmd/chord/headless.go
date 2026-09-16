@@ -98,6 +98,14 @@ type headlessState struct {
 	// this separate already-announced marker.
 	lastBroadcastRole string
 	updatedAt         time.Time
+	// sessionID is the active session directory base name reported in
+	// status_response. It is seeded at startup and refreshed when a
+	// SessionRestoredEvent resolves a different backend session: an in-band
+	// switch (handoff plan execution, /resume <id>) replaces the session
+	// without restarting the process. A change is announced with an explicit
+	// session_switched push; the cached value alone never counts as the
+	// gateway having seen the new session.
+	sessionID string
 
 	// subscriptions is the set of event types the gateway wants to receive.
 	// If nil, no subscribe command has been received and all event types are
@@ -217,6 +225,9 @@ var headlessEventTypes = map[string]bool{
 	"assistant_rollback": true,
 	"todos":              true,
 	"compaction_status":  true,
+	"session_switched":   true,
+	"background_result":  true,
+	"context_notice":     true,
 }
 
 // filterHeadlessEvent converts an AgentEvent to one or more headlessEnvelopes.
@@ -225,6 +236,24 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 	var backend headlessBackend
 	if len(backends) > 0 {
 		backend = backends[0]
+	}
+	// Handoff plan file IO and agent-option lookup stay outside state.mu: both
+	// can block while the event loop and command handlers contend on the lock.
+	var preHandoffAgents []agent.HandoffAgentOption
+	var preHandoffPlanText, preHandoffPlanError string
+	if he, ok := ev.(agent.HandoffEvent); ok {
+		preHandoffAgents = []agent.HandoffAgentOption{}
+		if hb, ok := backend.(headlessHandoffBackend); ok {
+			preHandoffAgents = hb.HandoffAgentOptions()
+		}
+		if preHandoffAgents == nil {
+			preHandoffAgents = []agent.HandoffAgentOption{}
+		}
+		if b, err := os.ReadFile(he.PlanPath); err == nil {
+			preHandoffPlanText = string(b)
+		} else {
+			preHandoffPlanError = err.Error()
+		}
 	}
 	state.mu.Lock()
 	defer state.mu.Unlock()
@@ -376,6 +405,19 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 			}})
 		}
 	case agent.ErrorEvent:
+		if e.Silent {
+			// Silent retry telemetry never reaches the user: the TUI records
+			// it in the error panel without settling cards or rendering an
+			// error block, and a terminal failure is always followed by a
+			// non-silent error. Promoting it here would flip last_outcome to
+			// "error" for turns that recover and complete.
+			// Invariant: every silent-only sequence is eventually followed by
+			// a non-silent error on terminal failure, so dropping the event
+			// here is safe. Any new path that emits only silent errors must
+			// also emit a non-silent terminal error.
+			state.updatedAt = time.Now()
+			return nil
+		}
 		state.pendingOutcome = "error"
 		if e.Err != nil {
 			state.lastError = e.Err.Error()
@@ -431,22 +473,14 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 		// legal handoff target exists (the active role is the only main-mode
 		// agent) and must reach the client as-is instead of a fabricated
 		// default the runtime would reject on approval.
-		options := []agent.HandoffAgentOption{}
-		if hb, ok := backend.(headlessHandoffBackend); ok {
-			options = hb.HandoffAgentOptions()
-		}
-		if options == nil {
-			options = []agent.HandoffAgentOption{}
-		}
+		// Agent options and plan file contents were loaded before acquiring
+		// state.mu; only the cache update runs under the lock.
 		payload := &headlessHandoffPayload{
 			RequestID: e.RequestID,
 			PlanPath:  e.PlanPath,
-			Agents:    options,
-		}
-		if b, err := os.ReadFile(e.PlanPath); err == nil {
-			payload.PlanText = string(b)
-		} else {
-			payload.PlanError = err.Error()
+			Agents:    preHandoffAgents,
+			PlanText:  preHandoffPlanText,
+			PlanError: preHandoffPlanError,
 		}
 		state.pendingHandoff = payload
 		state.updatedAt = time.Now()
@@ -510,6 +544,54 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 	case agent.ToastEvent:
 		if state.isSubscribed("toast") {
 			out = append(out, &headlessEnvelope{Type: "toast", Payload: map[string]string{"message": e.Message, "level": e.Level, "agent_id": e.AgentID}})
+		}
+	case agent.SessionRestoredEvent:
+		// An in-band session switch (handoff plan execution, /resume <id>)
+		// replaces the session without restarting the process, so the startup
+		// session snapshot alone would leave status_response and the gateway
+		// pin on the old session. Refresh the tracked id from the backend's
+		// committed state and announce the change explicitly. Restores that
+		// keep the session (startup replay, durable compaction rewrite) only
+		// refresh the timestamp.
+		state.updatedAt = time.Now()
+		sessionID := headlessBackendSessionID(backend)
+		if sessionID == "" || sessionID == state.sessionID {
+			// No committed id to adopt, or the id is already the tracked one:
+			// either way there is nothing new to announce.
+			break
+		}
+		state.sessionID = sessionID
+		if state.isSubscribed("session_switched") {
+			out = append(out, &headlessEnvelope{Type: "session_switched", Payload: map[string]string{
+				"session_id": sessionID,
+			}})
+		}
+	case agent.BackgroundResultAppendedEvent:
+		// A finished background job's result is durable now, and this event is
+		// the only delivery channel for the JOB RESULT card: background output
+		// typically lands after the turn is idle, so no later
+		// assistant_message summarizes it.
+		state.updatedAt = time.Now()
+		if state.isSubscribed("background_result") {
+			out = append(out, &headlessEnvelope{Type: "background_result", Payload: map[string]any{
+				"target_agent_id": e.TargetAgentID,
+				"message_index":   e.MessageIndex,
+				"content":         e.Message.Content,
+			}})
+		}
+	case agent.ContextNoticeEvent:
+		// Durable context-pressure warning with no other headless channel (no
+		// toast/info accompanies it). Gateway notifications are
+		// fire-and-forget, so there is no card state for
+		// ContextNoticeClearedEvent to retract; the cleared event stays
+		// TUI-only by design.
+		state.updatedAt = time.Now()
+		if state.isSubscribed("context_notice") {
+			out = append(out, &headlessEnvelope{Type: "context_notice", Payload: map[string]any{
+				"level":         e.Level,
+				"message":       e.Message,
+				"message_index": e.MessageIndex,
+			}})
 		}
 	}
 	if len(out) == 0 {
@@ -739,6 +821,7 @@ func runHeadlessWithDeps(deps headlessRunDeps) error {
 	state := &headlessState{}
 	state.updatedAt = time.Now()
 	sessionID := filepath.Base(ac.SessionDir)
+	state.sessionID = sessionID
 
 	// Emit a one-time ready marker so gateways can detect successful init.
 	readyPayload := map[string]any{
@@ -964,6 +1047,27 @@ func handleHeadlessModelsCommand(cmd headlessCommand, backend headlessModelsBack
 	}
 }
 
+// headlessSessionBackend exposes the backend's committed session directory so
+// session-switch pushes report the session the runtime actually runs, not a
+// stale startup snapshot. MainAgent satisfies it.
+type headlessSessionBackend interface {
+	SessionDir() string
+}
+
+// headlessBackendSessionID resolves the active session id (directory base
+// name, matching the ready/status_response convention), or "" when the backend
+// cannot report one.
+func headlessBackendSessionID(backend headlessBackend) string {
+	sb, ok := backend.(headlessSessionBackend)
+	if !ok {
+		return ""
+	}
+	if dir := sb.SessionDir(); dir != "" {
+		return filepath.Base(dir)
+	}
+	return ""
+}
+
 // headlessRoleBackend is the capability required by the role list/set commands.
 // MainAgent satisfies it.
 type headlessRoleBackend interface {
@@ -1124,23 +1228,36 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 	case "status":
 		currentRole := headlessCurrentRole(backend, state)
 		state.mu.Lock()
+		sid := sessionID
+		if state.sessionID != "" {
+			sid = state.sessionID
+		}
+		busy := state.busy
+		phase := state.phase
+		phaseDetail := state.phaseDetail
+		pendingConfirm := state.pendingConfirm
+		pendingQuestion := state.pendingQuestion
+		pendingHandoff := state.pendingHandoff
+		lastError := state.lastError
+		lastOutcome := state.lastOutcome
+		updatedAt := state.updatedAt
+		state.mu.Unlock()
 		out.emit(headlessEnvelope{
 			Type: "status_response",
 			Payload: map[string]any{
-				"session_id":       sessionID,
-				"busy":             state.busy,
-				"phase":            state.phase,
-				"phase_detail":     state.phaseDetail,
-				"pending_confirm":  state.pendingConfirm,
-				"pending_question": state.pendingQuestion,
-				"pending_handoff":  state.pendingHandoff,
-				"last_error":       state.lastError,
-				"last_outcome":     state.lastOutcome,
+				"session_id":       sid,
+				"busy":             busy,
+				"phase":            phase,
+				"phase_detail":     phaseDetail,
+				"pending_confirm":  pendingConfirm,
+				"pending_question": pendingQuestion,
+				"pending_handoff":  pendingHandoff,
+				"last_error":       lastError,
+				"last_outcome":     lastOutcome,
 				"current_role":     currentRole,
-				"updated_at":       state.updatedAt.Format(time.RFC3339),
+				"updated_at":       updatedAt.Format(time.RFC3339),
 			},
 		})
-		state.mu.Unlock()
 
 	case "local_shell":
 		command := strings.TrimSpace(cmd.Command)
