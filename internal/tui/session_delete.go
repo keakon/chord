@@ -130,8 +130,7 @@ func (m *Model) renderSessionDeleteConfirmDialog() string {
 			ConfirmDenyStyle.Render("[n/esc] Cancel"),
 		),
 	)
-	body := strings.Join(lines, "\n")
-	out := DirectoryBorderStyle.Width(maxWidth).Render(body)
+	out := renderDialogBox(maxWidth, lines)
 	m.sessionDeleteConfirm.renderCacheWidth = m.width
 	m.sessionDeleteConfirm.renderCacheTheme = m.theme.Name
 	m.sessionDeleteConfirm.renderCacheID = target.ID

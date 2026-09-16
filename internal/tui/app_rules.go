@@ -361,8 +361,7 @@ func (m *Model) renderRulesList() string {
 	lines = append(lines, "")
 	lines = append(lines, DimStyle.Render("[A] Add  [↑↓] Move  [D] Delete  [O] Open file  [Esc/Q] Close"))
 
-	body := strings.Join(lines, "\n")
-	return DirectoryBorderStyle.Width(maxWidth).Render(body)
+	return renderDialogBox(maxWidth, lines)
 }
 
 func (m *Model) renderRulesAdd(maxWidth int) string {
@@ -387,7 +386,7 @@ func (m *Model) renderRulesAdd(maxWidth int) string {
 	}
 	lines = append(lines, "")
 	lines = append(lines, DimStyle.Render("[Tab] field  [Ctrl+S] scope  [Ctrl+A] action  [Enter] add  [Esc] back"))
-	return DirectoryBorderStyle.Width(maxWidth).Render(strings.Join(lines, "\n"))
+	return renderDialogBox(maxWidth, lines)
 }
 
 func scopeLabelStr(scope permission.RuleScope) string {

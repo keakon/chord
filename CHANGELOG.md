@@ -2,6 +2,12 @@
 
 This project follows Semantic Versioning-style releases. Before 1.0, releases may include breaking changes.
 
+## Unreleased
+
+### Fixes
+
+- Dialog overlays no longer show mismatched row backgrounds: the Cancel action in Delete Session, the inputs and Scope/Action rows in the rules add form, the handoff deny-reason input, and multi-segment rows in selector dialogs now stay on the dialog surface instead of falling back to the terminal background.
+
 ## 0.8.1 - 2026-09-16
 
 ### Highlights

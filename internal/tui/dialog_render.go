@@ -28,3 +28,25 @@ func styleDialogBodyLines(lines []string, width int) []string {
 	}
 	return out
 }
+
+// preserveDialogBackground re-applies DialogBg after inner ANSI resets on each
+// line of an already-joined body. It keeps existing layout/widths untouched:
+// unlike styleDialogBodyLines it does not add padding or wrap with
+// DialogBodyStyle, so selector rows that intentionally carry SelectedBg and
+// image blocks that carry UserCardBg keep their own surfaces while trailing
+// spaces and multi-segment rows (JoinHorizontal buttons, "Scope: "+styled,
+// textinput/textarea View lines) fall back to DialogBg instead of the
+// terminal default.
+func preserveDialogBackground(body string) string {
+	if currentTheme.DialogBg == "" || body == "" {
+		return body
+	}
+	lines := strings.Split(body, "\n")
+	for i, line := range lines {
+		if line == "" || !strings.Contains(line, "\x1b[") {
+			continue
+		}
+		lines[i] = ensureStyledLineReset(preserveBackground(line, currentTheme.DialogBg))
+	}
+	return strings.Join(lines, "\n")
+}

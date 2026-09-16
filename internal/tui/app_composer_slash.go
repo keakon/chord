@@ -347,6 +347,7 @@ func (m *Model) renderSlashCompletionDropdown(value string) string {
 
 	frameWidth := DirectoryBorderStyle.GetHorizontalPadding() + DirectoryBorderStyle.GetHorizontalBorderSize()
 	body := strings.Join(lines, "\n")
+	body = preserveDialogBackground(body)
 	out := DirectoryBorderStyle.Width(contentWidth + frameWidth).Render(body)
 	m.slashCache = slashRenderCache{
 		width: m.width,

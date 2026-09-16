@@ -333,9 +333,12 @@ func (m *Model) renderImageViewerOverlay() string {
 	caps := m.imageCaps
 	fitCols, fitRows, err := m.imageViewerFitSize()
 	if err != nil {
-		return DirectoryBorderStyle.Width(max(24, min(m.width-4, 60))).Render(
-			DialogTitleStyle.Render(m.imageViewerTitle()) + "\n\n" + ErrorStyle.Render(err.Error()),
-		)
+		errWidth := max(24, min(m.width-4, 60))
+		return renderDialogBox(errWidth, []string{
+			DialogTitleStyle.Render(m.imageViewerTitle()),
+			"",
+			ErrorStyle.Render(err.Error()),
+		})
 	}
 	m.imageViewer.FitWidth = fitCols
 	m.imageViewer.FitHeight = fitRows
@@ -382,6 +385,7 @@ func (m *Model) renderImageViewerOverlay() string {
 		lines = append(lines, DimStyle.Render(fmt.Sprintf("%d / %d", m.imageViewer.Index+1, m.imageViewer.Total)))
 	}
 	body := strings.Join(lines, "\n")
+	body = preserveDialogBackground(body)
 	width := min(max(24, min(m.width-4, max(fitCols+2*imageViewerInnerPadX+4, 40))), m.width)
 	return DirectoryBorderStyle.Width(width).Render(body)
 }

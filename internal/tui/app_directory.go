@@ -33,7 +33,8 @@ func (m Model) renderDirectory() string {
 	m.dirList.SetMaxVisible(m.directoryMaxVisible())
 	content := m.dirList.Render(innerWidth)
 	title := DialogTitleStyle.Render("Message Directory")
-	box := DirectoryBorderStyle.Width(maxWidth).Render(title + "\n" + content)
+	body := preserveDialogBackground(title + "\n" + content)
+	box := DirectoryBorderStyle.Width(maxWidth).Render(body)
 
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
 }

@@ -48,6 +48,7 @@ func RenderOverlay(cfg OverlayConfig, content string, contentHeight int, area im
 		bodyLines = append(bodyLines, "", DimStyle.Render(cfg.Hint))
 	}
 	body := strings.Join(bodyLines, "\n")
+	body = preserveDialogBackground(body)
 
 	innerWidth := lipgloss.Width(body)
 	if innerWidth+4 < cfg.MinWidth {
