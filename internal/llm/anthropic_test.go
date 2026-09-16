@@ -956,6 +956,54 @@ func TestAnthropicCompleteStreamKeepsAutoToolChoiceWhenThinkingEnabled(t *testin
 	}
 }
 
+func TestAnthropicCompleteStreamOmitsForcedToolChoiceWhenAutoOnly(t *testing.T) {
+	var captured anthropicRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"forced test error"}}`))
+	}))
+	defer srv.Close()
+
+	provider := NewProviderConfig("anthropic-main", config.ProviderConfig{
+		Type:   config.ProviderTypeMessages,
+		APIURL: srv.URL,
+		Models: map[string]config.ModelConfig{
+			"claude-sonnet": {
+				Compat: &config.ModelCompatConfig{
+					ForcedToolChoice: &config.ForcedToolChoiceCompatConfig{AutoOnly: new(true)},
+				},
+			},
+		},
+	}, []string{"test-key"})
+	anthropicProvider, err := NewAnthropicProvider(provider, "")
+	if err != nil {
+		t.Fatalf("NewAnthropicProvider: %v", err)
+	}
+
+	_, err = anthropicProvider.CompleteStream(
+		context.Background(),
+		"test-key",
+		"claude-sonnet",
+		"base system prompt",
+		[]message.Message{{Role: "user", Content: "hello"}},
+		[]message.ToolDefinition{{Name: "done", Description: "Finish", InputSchema: map[string]any{"type": "object"}}},
+		2048,
+		RequestTuning{Anthropic: AnthropicTuning{ToolChoice: "required"}},
+		func(message.StreamDelta) {},
+	)
+	if err == nil {
+		t.Fatal("expected forced server error")
+	}
+	if captured.ToolChoice != nil {
+		t.Fatalf("tool_choice = %#v, want omitted when forced choice is disabled", captured.ToolChoice)
+	}
+}
+
 func TestAnthropicCompleteStreamSetsDefaultUserAgent(t *testing.T) {
 	var gotUserAgent string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

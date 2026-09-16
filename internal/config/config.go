@@ -689,14 +689,20 @@ type ApplyPatchCompatConfig struct {
 }
 
 // ForcedToolChoiceCompatConfig controls whether request-level forced tool
-// choice (loop exit-control tool_choice "required") may be combined with
-// reasoning/thinking. Some compatible chat backends reject non-auto tool
-// choice while thinking is enabled, so Chord downgrades the forced choice to
-// the server default for those targets instead of sending a rejected request.
+// choice (loop exit-control tool_choice "required") may be sent to the target.
+// Some compatible chat backends reject non-auto tool choice while thinking is
+// enabled, so Chord downgrades the forced choice to the server default for
+// those targets instead of sending a rejected request. Other backends only
+// support "auto" at all (for example a gateway that rejects "required",
+// "none" and named choices with a 400); AutoOnly covers those targets by
+// downgrading any non-auto choice regardless of reasoning state.
 type ForcedToolChoiceCompatConfig struct {
 	// SuppressInThinking downgrades forced tool_choice to "auto" whenever
 	// reasoning/thinking is active for the request.
 	SuppressInThinking *bool `json:"suppress_in_thinking,omitempty" yaml:"suppress_in_thinking,omitempty"`
+	// AutoOnly downgrades any non-auto tool_choice to the backend default for
+	// targets that only support "auto".
+	AutoOnly *bool `json:"auto_only,omitempty" yaml:"auto_only,omitempty"`
 }
 
 // UsageCompatConfig overrides provider usage-field semantics when a compatible

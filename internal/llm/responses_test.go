@@ -3848,6 +3848,66 @@ func TestResponsesProvider_SuppressesForcedToolChoiceUnderThinking(t *testing.T)
 	}
 }
 
+func TestResponsesProvider_AutoOnlyToolChoice(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		tuning     RequestTuning
+		wantChoice any
+	}{
+		{
+			name:       "required downgraded without reasoning",
+			tuning:     RequestTuning{OpenAI: OpenAITuning{ToolChoice: "required"}},
+			wantChoice: "auto",
+		},
+		{
+			name:       "required downgraded with reasoning",
+			tuning:     RequestTuning{OpenAI: OpenAITuning{ToolChoice: "required", ReasoningEffort: "high"}},
+			wantChoice: "auto",
+		},
+		{
+			name:       "explicit auto still sent",
+			tuning:     RequestTuning{OpenAI: OpenAITuning{ToolChoice: "auto"}},
+			wantChoice: "auto",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotBody map[string]any
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewDecoder(r.Body).Decode(&gotBody)
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w, `data: {"type":"response.completed","response":{"id":"resp-1","status":"completed","output":[],"usage":{"input_tokens":5,"output_tokens":2}}}`+"\n\n")
+				_, _ = io.WriteString(w, "data: [DONE]\n\n")
+			}))
+			defer server.Close()
+
+			providerCfg := NewProviderConfig("sample", config.ProviderConfig{
+				Type:   config.ProviderTypeResponses,
+				APIURL: server.URL + "/v1/responses",
+				Models: map[string]config.ModelConfig{
+					"test-model": {
+						Compat: &config.ModelCompatConfig{
+							ForcedToolChoice: &config.ForcedToolChoiceCompatConfig{AutoOnly: new(true)},
+						},
+					},
+				},
+			}, []string{"test-key"})
+			r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
+			_, err := r.CompleteStream(
+				context.Background(), "test-key", "test-model", "",
+				[]message.Message{{Role: "user", Content: "hello"}},
+				[]message.ToolDefinition{{Name: "done", Description: "Finish", InputSchema: map[string]any{"type": "object"}}}, 0, tc.tuning,
+				func(message.StreamDelta) {},
+			)
+			if err != nil {
+				t.Fatalf("CompleteStream: %v", err)
+			}
+			if got := gotBody["tool_choice"]; got != tc.wantChoice {
+				t.Fatalf("tool_choice = %#v, want %#v", got, tc.wantChoice)
+			}
+		})
+	}
+}
+
 func TestResponsesProvider_SynthesizesReasoningTextForReplay(t *testing.T) {
 	var gotBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

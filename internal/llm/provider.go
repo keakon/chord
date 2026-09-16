@@ -650,9 +650,13 @@ func (p *ProviderConfig) ForcedToolChoiceCompat(modelID string) *config.ForcedTo
 	merged := &config.ForcedToolChoiceCompatConfig{}
 	if providerCfg != nil {
 		merged.SuppressInThinking = providerCfg.SuppressInThinking
+		merged.AutoOnly = providerCfg.AutoOnly
 	}
 	if modelCfg != nil && modelCfg.SuppressInThinking != nil {
 		merged.SuppressInThinking = modelCfg.SuppressInThinking
+	}
+	if modelCfg != nil && modelCfg.AutoOnly != nil {
+		merged.AutoOnly = modelCfg.AutoOnly
 	}
 	return merged
 }
@@ -666,6 +670,25 @@ func forcedToolChoiceSuppressedInThinking(provider *ProviderConfig, modelID stri
 	}
 	cfg := provider.ForcedToolChoiceCompat(modelID)
 	return cfg != nil && cfg.SuppressInThinking != nil && *cfg.SuppressInThinking
+}
+
+// forcedToolChoiceAutoOnly reports whether the target model only supports
+// "auto" tool_choice. Callers use it to downgrade any non-auto choice to the
+// server default regardless of reasoning state.
+func forcedToolChoiceAutoOnly(provider *ProviderConfig, modelID string) bool {
+	if provider == nil {
+		return false
+	}
+	cfg := provider.ForcedToolChoiceCompat(modelID)
+	return cfg != nil && cfg.AutoOnly != nil && *cfg.AutoOnly
+}
+
+// forcedToolChoiceDowngraded reports whether the requested tool_choice has to
+// be dropped to the backend default because the target only supports "auto".
+// An empty or explicit "auto" choice is left alone so callers stay free to send
+// it as-is; every other choice is downgraded for auto-only targets.
+func forcedToolChoiceDowngraded(provider *ProviderConfig, modelID, toolChoice string) bool {
+	return toolChoice != "" && toolChoice != "auto" && forcedToolChoiceAutoOnly(provider, modelID)
 }
 
 // ReasoningContinuityCompat resolves reasoning-continuity compatibility config

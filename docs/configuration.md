@@ -768,6 +768,12 @@ Compatibility fields:
   active. Enable it only for OpenAI-compatible endpoints that reject forced
   tool choice in thinking mode; ordinary tool availability and automatic tool
   choice still work.
+- `compat.forced_tool_choice.auto_only`: downgrades any non-auto `tool_choice`
+  to the backend default unconditionally. Enable it for backends that only
+  support `tool_choice: "auto"` and reject `required`, `none`, or named
+  choices with a 400; automatic tool choice still works. Chat Completions,
+  Messages, and Gemini omit the field; Responses still sends an explicit
+  `tool_choice: "auto"` unless `compat.responses.send_tool_choice` is false.
 - `compat.thinking_toolcall`: enables a provider-specific parser for gateways
   that encode tool calls inside visible reasoning text. Leave disabled unless
   the gateway requires that format.
@@ -1463,6 +1469,7 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | `compat.reasoning_continuity.mode` | string | Optional continuity override. Use `openai_visible` for Chat Completions models that require unchanged assistant `reasoning_content` and can accept portable visible reasoning from other wires; it also enables the missing-`reasoning_text` fallback for Responses targets with that continuity contract. Use `anthropic_unsigned` only for verified Messages-compatible models that replay or accept visible unsigned `thinking`; use `none` to opt out of a provider-level default. |
 | `compat.reasoning_continuity.preserve_history` | bool | Keep plaintext reasoning from completed turns in the replayed conversation, for backends whose contract requires the full assistant history (DeepSeek when a request carries tools, Kimi K3 / `keep: all`, Qwen `preserve_thinking`, GLM `clear_thinking: false`). Default `false`: completed-turn `reasoning_content` and unsigned `thinking` are stripped because most thinking backends drop them server-side while billing them as input. |
 | `compat.forced_tool_choice.suppress_in_thinking` | bool | Downgrade loop-forced `tool_choice: required` to the backend default while reasoning/thinking is active, for OpenAI-compatible endpoints that reject forced tool choice in thinking mode. |
+| `compat.forced_tool_choice.auto_only` | bool | Downgrade any non-auto `tool_choice` to the backend default unconditionally, for backends that only support `tool_choice: "auto"`. Chat Completions / Messages / Gemini omit the field; Responses still sends `"auto"` unless `compat.responses.send_tool_choice` is false. |
 | `compat.request_overrides.body` | object | Recursive JSON patch applied after Chord constructs the protocol request. `null` deletes a field. |
 | `compat.request_overrides.rename_body_fields` | map | Renames final JSON fields while preserving Chord's computed values. A `null` target deletes the source field. |
 | `compat.request_overrides.headers` | map | Sets final request headers. A `null` value removes that header. |

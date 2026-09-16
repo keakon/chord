@@ -1854,13 +1854,13 @@ func TestProviderConfig_ForcedToolChoiceCompat_Merge(t *testing.T) {
 	cfg := config.ProviderConfig{
 		Type: config.ProviderTypeResponses,
 		Compat: &config.ProviderCompatConfig{
-			ForcedToolChoice: &config.ForcedToolChoiceCompatConfig{SuppressInThinking: new(true)},
+			ForcedToolChoice: &config.ForcedToolChoiceCompatConfig{SuppressInThinking: new(true), AutoOnly: new(false)},
 		},
 		Models: map[string]config.ModelConfig{
 			"inherits": {},
 			"overrides": {
 				Compat: &config.ModelCompatConfig{
-					ForcedToolChoice: &config.ForcedToolChoiceCompatConfig{SuppressInThinking: new(false)},
+					ForcedToolChoice: &config.ForcedToolChoiceCompatConfig{SuppressInThinking: new(false), AutoOnly: new(true)},
 				},
 			},
 			"unconfigured": {},
@@ -1875,6 +1875,18 @@ func TestProviderConfig_ForcedToolChoiceCompat_Merge(t *testing.T) {
 	}
 	if got := p.ForcedToolChoiceCompat("unconfigured"); got == nil || got.SuppressInThinking == nil || !*got.SuppressInThinking {
 		t.Fatalf("expected empty model to inherit provider default, got %#v", got)
+	}
+	if got := p.ForcedToolChoiceCompat("inherits"); got == nil || got.AutoOnly == nil || *got.AutoOnly {
+		t.Fatalf("expected provider-level auto_only=false to be inherited, got %#v", got)
+	}
+	if got := p.ForcedToolChoiceCompat("overrides"); got == nil || got.AutoOnly == nil || !*got.AutoOnly {
+		t.Fatalf("expected model-level auto_only=true to override, got %#v", got)
+	}
+	if forcedToolChoiceAutoOnly(p, "overrides") != true {
+		t.Fatal("expected forcedToolChoiceAutoOnly=true for overrides")
+	}
+	if forcedToolChoiceAutoOnly(p, "inherits") != false {
+		t.Fatal("expected forcedToolChoiceAutoOnly=false for inherits")
 	}
 }
 

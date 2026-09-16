@@ -224,12 +224,13 @@ func (a *AnthropicProvider) CompleteStream(
 			Tools:     apiTools,
 			Stream:    true,
 		}
-		if at.ToolChoice != "" && len(apiTools) > 0 {
+		if at.ToolChoice != "" && len(apiTools) > 0 && !forcedToolChoiceDowngraded(a.provider, model, at.ToolChoice) {
 			// Extended thinking is incompatible with forced tool use: Anthropic
 			// returns 400 for tool_choice "any"/"tool" when thinking is
 			// enabled/adaptive. "auto" stays valid, so only the forced choice is
 			// suppressed here (the loop exit-control path requests "required",
-			// which maps to "any").
+			// which maps to "any"). Backends that only support "auto" are
+			// already excluded by the outer guard regardless of thinking state.
 			thinkingActive := at.ThinkingType == "enabled" || at.ThinkingType == "adaptive"
 			if tc := anthropicToolChoiceFromTuning(at.ToolChoice); tc != nil && !(thinkingActive && tc.Type == "any") {
 				reqBody.ToolChoice = tc

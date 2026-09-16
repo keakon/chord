@@ -168,3 +168,73 @@ func TestOpenAIProvider_SuppressesForcedToolChoiceUnderThinking(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenAIProvider_AutoOnlyToolChoice(t *testing.T) {
+	cases := []struct {
+		name        string
+		tuning      RequestTuning
+		wantPresent bool
+		wantValue   string
+	}{
+		{
+			name:        "required downgraded even without reasoning",
+			tuning:      RequestTuning{OpenAI: OpenAITuning{ToolChoice: "required"}},
+			wantPresent: false,
+		},
+		{
+			name:        "required downgraded with reasoning",
+			tuning:      RequestTuning{OpenAI: OpenAITuning{ToolChoice: "required", ReasoningEffort: "high"}},
+			wantPresent: false,
+		},
+		{
+			name:        "explicit auto still sent",
+			tuning:      RequestTuning{OpenAI: OpenAITuning{ToolChoice: "auto"}},
+			wantPresent: true,
+			wantValue:   "auto",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotBody map[string]any
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				data, _ := io.ReadAll(r.Body)
+				_ = json.Unmarshal(data, &gotBody)
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w, "data: [DONE]\n\n")
+			}))
+			defer server.Close()
+
+			provider := NewProviderConfig("sample", config.ProviderConfig{
+				Type:   config.ProviderTypeChatCompletions,
+				APIURL: server.URL + "/v1/chat/completions",
+				Models: map[string]config.ModelConfig{
+					"test-model": {
+						Limit: config.ModelLimit{Context: 1000000, Output: 64000},
+						Compat: &config.ModelCompatConfig{
+							ForcedToolChoice: &config.ForcedToolChoiceCompatConfig{AutoOnly: new(true)},
+						},
+					},
+				},
+			}, []string{"test-key"})
+			o := &OpenAIProvider{provider: provider, client: server.Client(), responsesProvider: &ResponsesProvider{}}
+
+			_, err := o.CompleteStream(
+				context.Background(), "test-key", "test-model", "",
+				[]message.Message{{Role: "user", Content: "hello"}},
+				[]message.ToolDefinition{{Name: "done", Description: "Finish", InputSchema: map[string]any{"type": "object"}}},
+				128, tc.tuning,
+				func(message.StreamDelta) {},
+			)
+			if err != nil {
+				t.Fatalf("CompleteStream: %v", err)
+			}
+			got, has := gotBody["tool_choice"]
+			if has != tc.wantPresent {
+				t.Fatalf("tool_choice present = %v, want %v (value %#v)", has, tc.wantPresent, got)
+			}
+			if tc.wantPresent && got != tc.wantValue {
+				t.Fatalf("tool_choice = %#v, want %#v", got, tc.wantValue)
+			}
+		})
+	}
+}

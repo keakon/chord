@@ -220,6 +220,7 @@ providers:
         compat:
           forced_tool_choice:
             suppress_in_thinking: true
+            auto_only: true
 `
 	var cfg Config
 	if err := yaml.Unmarshal([]byte(raw), &cfg); err != nil {
@@ -231,6 +232,9 @@ providers:
 	}
 	if got := model.Compat.ForcedToolChoice.SuppressInThinking; got == nil || !*got {
 		t.Fatalf("suppress_in_thinking = %#v, want true", got)
+	}
+	if got := model.Compat.ForcedToolChoice.AutoOnly; got == nil || !*got {
+		t.Fatalf("auto_only = %#v, want true", got)
 	}
 }
 

@@ -715,6 +715,11 @@ providers:
   时，把 loop 强制的 `tool_choice: required` 降级为后端默认选择。只有
   OpenAI 兼容端点明确拒绝 thinking 模式下的 forced tool choice 时才开启；
   普通工具可用性和自动工具选择不受影响。
+- `compat.forced_tool_choice.auto_only`：无条件把任何非 `auto` 的 `tool_choice`
+  降级为后端默认选择。适用于只支持 `tool_choice: "auto"`、对 `required`/
+  `none`/指定工具名返回 400 的后端；自动工具选择不受影响。Chat Completions、
+  Messages、Gemini 会省略该字段；Responses 仍会显式发送 `tool_choice: "auto"`，
+  除非把 `compat.responses.send_tool_choice` 设为 false。
 - `compat.thinking_toolcall`：为把工具调用编码进可见 reasoning 文本的网关
   启用专用解析器。只有网关明确要求时才开启。
 
@@ -1288,6 +1293,7 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `compat.reasoning_continuity.mode` | string | 可选的连续性覆盖项。Chat Completions 模型需要原样回放 assistant `reasoning_content`，并接收其他 wire 的可移植可见 reasoning 时使用 `openai_visible`；Responses 目标采用同类连续性契约时，这个模式也会启用缺失 `reasoning_text` 的兜底。只有已验证的 Messages 兼容模型需要回放或接收可见无签名 `thinking` 时才使用 `anthropic_unsigned`；模型级 `none` 可关闭 provider 级默认值。 |
 | `compat.reasoning_continuity.preserve_history` | bool | 在回放会话中保留已完成轮次的明文 reasoning，用于契约要求完整 assistant 历史的后端（DeepSeek 在请求带 tools 时、Kimi K3 / `keep: all`、Qwen `preserve_thinking`、GLM `clear_thinking: false`）。默认 `false`：已完成轮次的 `reasoning_content` 和无签名 `thinking` 会被剥离——多数 thinking 后端在服务端丢弃它们，但回放仍按输入计费。 |
 | `compat.forced_tool_choice.suppress_in_thinking` | bool | reasoning/thinking 启用时，把 loop 强制的 `tool_choice: required` 降级为后端默认选择。适用于拒绝 thinking 模式下 forced tool choice 的 OpenAI 兼容端点。 |
+| `compat.forced_tool_choice.auto_only` | bool | 无条件把任何非 `auto` 的 `tool_choice` 降级为后端默认选择。适用于只支持 `tool_choice: "auto"` 的后端。Chat Completions / Messages / Gemini 省略该字段；Responses 仍发 `"auto"`，除非 `compat.responses.send_tool_choice` 为 false。 |
 | `compat.request_overrides.body` | object | Chord 构造完协议请求后应用的递归 JSON patch。`null` 删除字段。 |
 | `compat.request_overrides.rename_body_fields` | map | 重命名最终 JSON 字段，同时保留 Chord 动态计算的值。目标值为 `null` 时删除源字段。 |
 | `compat.request_overrides.headers` | map | 设置最终请求 header。值为 `null` 时删除该 header。 |

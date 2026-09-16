@@ -255,7 +255,7 @@ func (g *GeminiProvider) CompleteStream(
 			Contents: contents,
 			Tools:    apiTools,
 		}
-		if len(apiTools) > 0 && tuning.Gemini.ToolChoice != "" {
+		if len(apiTools) > 0 && tuning.Gemini.ToolChoice != "" && !forcedToolChoiceDowngraded(g.provider, model, tuning.Gemini.ToolChoice) {
 			reqBody.ToolConfig = geminiToolConfigFromTuning(tuning.Gemini.ToolChoice)
 		}
 		if systemPrompt != "" {

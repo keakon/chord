@@ -460,6 +460,7 @@ func (r *ResponsesProvider) CompleteStream(
 		// thinking key) even when tuning carries no explicit effort or summary.
 		continuityMode := reasoningContinuityCompatMode(r.provider, model)
 		forcedToolChoiceSuppressed := ot.ToolChoice == "required" && forcedToolChoiceSuppressedInThinking(r.provider, model)
+		autoOnlyChoice := forcedToolChoiceDowngraded(r.provider, model, ot.ToolChoice)
 		needsReasoningState := continuityMode == modelcompat.ReasoningContinuityOpenAIVisible ||
 			forcedToolChoiceSuppressed
 		reasoningActive := false
@@ -513,7 +514,7 @@ func (r *ResponsesProvider) CompleteStream(
 			if compatBool(sendToolChoice, true) {
 				reqBody.ToolChoice = "auto"
 			}
-			if ot.ToolChoice != "" && !(ot.ToolChoice == "required" && reasoningActive && forcedToolChoiceSuppressed) {
+			if ot.ToolChoice != "" && !autoOnlyChoice && !(ot.ToolChoice == "required" && reasoningActive && forcedToolChoiceSuppressed) {
 				reqBody.ToolChoice = ot.ToolChoice
 			}
 		}

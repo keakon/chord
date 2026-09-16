@@ -408,7 +408,9 @@ func (o *OpenAIProvider) CompleteStream(
 			}
 		}
 		suppressForcedToolChoice := false
-		if ot.ToolChoice == "required" && forcedToolChoiceSuppressedInThinking(o.provider, model) {
+		if forcedToolChoiceDowngraded(o.provider, model, ot.ToolChoice) {
+			suppressForcedToolChoice = true
+		} else if ot.ToolChoice == "required" && forcedToolChoiceSuppressedInThinking(o.provider, model) {
 			if tuning.DisableReasoning {
 				// The DisableReasoning strip above only silences the request-side
 				// reasoning controls for replay compatibility; it never turns off
