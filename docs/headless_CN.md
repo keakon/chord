@@ -36,6 +36,17 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 
 你收到的第一行一定是 `{"type": "ready", ...}`；在它之前不要发送其他命令。
 
+## 先跑通一次交互
+
+配置好模型后，在终端启动 `chord headless`，然后依次操作：
+
+1. 等待 stdout 输出 `ready`，确认控制面已就绪。
+2. 在 stdin 输入 `{"type":"status"}` 并回车，确认收到 `status_response`。
+3. 输入 `{"type":"send","content":"Explain this project without changing files."}` 并回车，发送一个只读任务。
+4. 查看返回事件。遇到确认、问题或交接请求时，按下方对应命令回复；不要把“正在等你回答”误判为任务卡住。
+
+实际集成中，保持进程 stdin 打开，逐行读取 stdout，并单独收集 stderr。无需先实现事件过滤：未发送 `subscribe` 时会收到所有可订阅事件。
+
 ## 命令
 
 向 stdin 发送以下命令。未知命令会收到 `error` envelope。

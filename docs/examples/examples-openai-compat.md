@@ -5,6 +5,8 @@ Use this pattern when you sit behind an OpenAI-compatible gateway and want:
 - multiple keys under a provider for rotation or failover
 - model-pool fallback from a primary endpoint to a backup endpoint
 
+Replace example domains, model names, and environment variables with your gateway settings. Verify the primary endpoint before adding the backup so you can diagnose one connection at a time.
+
 ## `~/.config/chord/auth.yaml`
 
 ```yaml

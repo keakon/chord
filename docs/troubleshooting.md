@@ -1,19 +1,17 @@
 # Troubleshooting
 
-Symptoms are grouped roughly in the order you are likely to hit them: startup and auth first, then request failures, sessions, TUI rendering, and performance.
+Start from the symptom and find the next command to run. Symptoms are grouped roughly in the order you are likely to hit them: startup and auth first, then request failures, sessions, TUI rendering, and performance.
 
 ## Startup failures
 
-Check first:
+Run `chord --version` in a terminal first to check that the command is available and the program starts. Prebuilt binaries do not need Go; only source builds require checking the Go version and source entry point.
 
-- Whether your Go version meets the requirement
-- Whether you are using the correct source entry point: `go run ./cmd/chord/`
-- Whether `config.yaml` is missing or malformed
-- Whether `auth.yaml` has obvious YAML formatting errors
+1. **Command not found or blocked by the OS**: check the install path. For downloaded macOS binaries, see [Quickstart](./quickstart.md#1-install).
+2. **Missing configuration**: run `chord` in an interactive terminal and follow the setup wizard.
+3. **Invalid configuration**: run `chord doctor config` and correct the reported YAML or field issues.
+4. **Still unable to start**: keep the terminal error output, then use the log collection guidance at the end of this page.
 
-If `config.yaml` is missing, run `chord` once in an interactive terminal to launch the setup wizard. If stdin is redirected but Chord can still open the controlling TTY, the wizard runs there. If there is no controlling TTY, Chord exits immediately with an initialization error. If `config.yaml` exists but is malformed, fix the file first; the wizard only runs for missing configs.
-
-If you are using a built binary, rerun it and inspect terminal error output.
+The wizard only runs when `config.yaml` is missing; it does not overwrite an existing malformed file. Redirected stdin is fine if a controlling terminal is still available. Without one, setup returns an initialization error; complete configuration interactively first.
 
 ## 401 / 403 / auth failures
 
@@ -35,15 +33,6 @@ To narrow the check to a known model or model pool:
 chord doctor models --model openai/gpt-5.5@high
 chord doctor models --pool thinking
 ```
-
-### Large OAuth account pools start slowly
-
-When `auth.yaml` contains hundreds or thousands of OpenAI / ChatGPT OAuth accounts, Chord loads credential metadata in the background. Missing metadata alone should not block startup.
-
-- Personal Plus/Pro accounts may carry only `user_id` and no `chatgpt_account_id`. They can still be used for ordinary requests, but Chord omits `ChatGPT-Account-ID` and skips account-id-dependent Codex usage / rate-limit polling for them.
-- `account_user_id mismatch` or `account_id mismatch` logs mean metadata explicitly configured in `auth.yaml` conflicts with what the token itself exposes. Fix or remove that credential.
-
-When manually converting Codex/sub2api exports, keep any available `email`, `account_id`, and `account_user_id`. Use `chord doctor models` for deliberate account diagnostics.
 
 ## 429 / quota exhausted
 
@@ -241,28 +230,30 @@ For a tool whose result was never saved, the repaired card shows one of two mark
 - **Not started**: the tool had not begun executing, so no side effect could have happened. Re-check the preconditions and retry if appropriate.
 - **Result unknown**: the tool had already started, so its side effects may be partially or fully applied. Verify the current file or remote state before retrying.
 
+> **Warning:** `Result unknown` means the tool may already have changed files or remote state. Verify first, then decide whether to retry.
+
 Chord writes the tool-call message to disk before running the tool, so an interruption cannot leave side effects that Chord does not know were intended. If the session directory becomes unwritable (for example, the disk is full), Chord pauses tool execution to avoid unrecoverable repeated side effects, shows a status card with the cause, and resumes tools automatically once writing succeeds again.
 
 ## A delegated SubAgent appears stuck or an `escalate` card keeps running
 
-Current builds automatically recover two failure modes that older sessions could expose:
+Two failure modes can make a delegated SubAgent look stuck; Chord recovers both automatically:
 
-If MODEL or Pool is empty after resuming and focusing a SubAgent, the current build first uses model refs stored in the task, recovery snapshot, and usage ledger. For legacy records without model data, it resolves the latest Agent configuration, so task or meta files do not need manual editing.
+If MODEL or Pool is empty after resuming and focusing a SubAgent, Chord first uses model refs stored in the task, recovery snapshot, and usage ledger. When a record has no model data, it resolves the latest Agent configuration, so task or meta files do not need manual editing.
 
 On restore, the durable `task_id` is the stable identity of delegated work. Agent IDs such as `explorer-4` and `explorer-6` are successive runtime instances of that task. Historical instance transcripts are merged by task, while the sidebar and focus router expose only the task's canonical latest instance. Do not treat an older `agent_id` as a separate task or copy/delete instance files to alter restore behavior.
 
-If the TUI becomes unresponsive after switching to a large SubAgent transcript or pressing Enter to continue from a parked SubAgent, the current build uses a bounded transcript window and moves transcript loading, rehydration, and continuation off the TUI update path. A separate rehydration failure also existed: the info panel could recurse through `MainAgent.InvokedSkills → SubAgent.InvokedSkills → MainAgent.InvokedSkills` until stack overflow. That routing cycle is removed. Agents share a workspace skill catalog, but MainAgent and each SubAgent apply their own latest permissions and keep invoked state separate.
+If the TUI becomes unresponsive after switching to a large SubAgent transcript or pressing Enter to continue from a parked SubAgent, Chord confines the switch to a bounded transcript window and keeps loading the rest in the background. Agents share a workspace skill catalog, but MainAgent and each SubAgent apply their own latest permissions and keep invoked state separate.
 
-Process stderr now writes directly to the rotating log file instead of being consumed from a pipe by a Go goroutine and fed back into the logging system. A runtime fatal can therefore write its complete stack and exit instead of appearing as a permanent freeze where every key, including raw-mode Ctrl+C, stops working. If an old build is still stuck, terminate it from another terminal and run `reset` in the original terminal before exporting diagnostics.
+Process stderr writes directly to the rotating log file, so a runtime fatal writes its complete stack and exits instead of appearing as a permanent freeze where every key, including raw-mode Ctrl+C, stops working. If the TUI is stuck in this state, terminate it from another terminal and run `reset` in the original terminal before exporting diagnostics.
 
-- When a parked SubAgent is rehydrated, queued input explicitly wakes its event loop. A startup watchdog retries that wake once if the worker stays `running` without creating a turn.
+- When a parked SubAgent resumes, queued input wakes it; if the worker stays `running` without creating a turn, Chord retries the wake once.
 - If the worker still cannot start, or its provider/model retries end in a terminal error, Chord marks the task failed, records a `risk_alert`, and wakes the owner/MainAgent to retry, reassign, or report the blocker. It does not fabricate a successful `complete` result.
 
-An `escalate` request is a local coordination event, not a long-running network operation. Older runtimes could persist its tool result immediately before the assistant tool call, making a completed card look pending after resume. Current builds repair this narrowly when the adjacent messages have the same `tool_call_id`; unmatched orphan results are still discarded.
+An `escalate` request is a local coordination event, not a long-running network operation. If a completed card still looks pending after resume, Chord repairs it when the adjacent messages have the same `tool_call_id`; unmatched orphan results are discarded.
 
-If a session created by an older build is already stuck:
+If a resumed session is still stuck:
 
-1. rebuild or install the current Chord version and restart with `--resume <session-id>`;
+1. restart with `--resume <session-id>` using the current Chord version;
 2. use the stable `task_id`, not the previous runtime `agent_id`, when retrying or targeting the delegated task;
 3. do not manually edit `agents/*.jsonl`, `subagents/tasks.json`, or mailbox files;
 4. with `log_level: debug`, inspect `chord.log` for `startup watchdog retrying wake`, `SubAgent failed`, or `removed orphan tool messages`.
@@ -439,6 +430,15 @@ Override with `--logs-dir <path>` or `CHORD_LOGS_DIR=<path>`. To reproduce and c
 ```bash
 chord --logs-dir ./chord-logs
 ```
+
+## Large OAuth account pools start slowly
+
+When `auth.yaml` contains hundreds or thousands of OpenAI / ChatGPT OAuth accounts, Chord loads credential metadata in the background. Missing metadata alone should not block startup.
+
+- Personal Plus/Pro accounts may carry only `user_id` and no `chatgpt_account_id`. They can still be used for ordinary requests, but Chord omits `ChatGPT-Account-ID` and skips account-id-dependent Codex usage / rate-limit polling for them.
+- `account_user_id mismatch` or `account_id mismatch` logs mean metadata explicitly configured in `auth.yaml` conflicts with what the token itself exposes. Fix or remove that credential.
+
+When manually converting Codex/sub2api exports, keep any available `email`, `account_id`, and `account_user_id`. Use `chord doctor models` for deliberate account diagnostics.
 
 ## Related
 

@@ -36,6 +36,17 @@ Every outbound envelope has the shape:
 
 The first line you receive is always `{"type": "ready", ...}` — wait for it before sending other commands.
 
+## Try one interaction first
+
+After configuring a model, start `chord headless` in a terminal:
+
+1. Wait for `ready` on stdout before sending commands.
+2. Enter `{"type":"status"}` on stdin and press Enter. Expect a `status_response`.
+3. Enter `{"type":"send","content":"Explain this project without changing files."}` and press Enter to send a read-only task.
+4. Read the returned events. If an approval, question, or handoff needs a response, use its corresponding command below; waiting for your answer is not a stuck task.
+
+In an integration, keep the process's stdin open, read stdout line by line, and collect stderr separately. You can defer event filtering: before `subscribe` is sent, all subscribable events are forwarded.
+
 ## Commands
 
 You send these on stdin. Unknown command types are answered with an `error` envelope.

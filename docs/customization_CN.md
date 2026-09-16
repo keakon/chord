@@ -1,16 +1,24 @@
 # 扩展与定制
 
-下面每一项扩展能力都是可选的：仓库指令、agent 定义、skills、hooks、LSP 服务器、MCP 服务器和自定义 slash 命令。
+先选择你想改变的行为，不需要一次配置所有扩展：
+
+| 想做什么 | 使用哪项扩展 |
+| --- | --- |
+| 让 Agent 遵守项目规则 | [仓库指令](#仓库指令) |
+| 给不同任务分配模型和权限 | [自定义 Agents](#自定义-agents) |
+| 按需加载专业知识或操作步骤 | [Skills](#skills) |
+| 自动通知、检查或处理工具结果 | [Hooks](#hooks) |
+| 获取代码诊断、定义和引用 | [LSP](#lsp) |
+| 接入外部工具 | [MCP](#mcp) |
+| 保存常用提示词 | [自定义命令](#自定义-slash-commands) |
 
 ## 仓库指令
 
 项目需要给自动化 agent 提供长期有效的规则时，可以添加 `AGENTS.md`，例如编码规范、验证命令、安全要求或仓库专属审查准则。
 
-会话开始时，Chord 会从 session working directory 向上探索到项目根目录，发现适用的 `AGENTS.md` 文件；随后按「项目根目录 → session working directory」的顺序注入每个非空文件的完整内容，并用相对 session working directory 的路径作为段落标题（例如从嵌套目录运行时会显示 `## ../../AGENTS.md`、`## ../AGENTS.md` 和 `## AGENTS.md`）。如果 session working directory 就是项目根目录，则只加载根目录的 `AGENTS.md`。这些指令会作为内部 user-role 消息注入 LLM 请求，位置在第一条真实用户消息之前。AGENTS.md 内容会以自识别的头部交付：首行为 `# AGENTS.md instructions`，随后是 `<INSTRUCTIONS> ... </INSTRUCTIONS>` 块。这个 meta message 可能不会显示在可见对话记录里，但 main agent 与 sub-agent 都会把它当作持久工作区指导来遵守，除非它与更高优先级的 system、developer 或 user 指令冲突。
+会话开始时，Chord 从当前工作目录向上查找，直到项目根目录，再按从根目录到当前目录的顺序加载 `AGENTS.md`。从项目根启动时，只加载根目录的文件。主 Agent 和子 Agent 都会收到这些规则；它们不覆盖更高优先级的指令。
 
-Chord 也会为当前会话探测一个 Python 虚拟环境：从 session working directory 向上探索到项目根目录，并在每一层按 `.venv`、`venv`、`env` 的顺序检查。找到第一个有效环境后，prompt 会用相对 session working directory 的路径提示该环境，并要求 agent 运行 Python 命令时优先使用其中的解释器。
-
-系统提示词是完全静态的：它只包含身份、准则和能力描述，不含任何动态字段。工作目录、平台、当前日期和探测到的虚拟环境路径通过同一个 session-context meta user 消息交付（与 AGENTS.md 内容相同的注入机制），注入在第一条真实用户消息之前，而不是嵌入在可缓存的系统前缀中。这样系统提示词在不同会话、不同日期、不同工作目录下都完全相同，最大化前缀缓存复用。上下文压缩后该 meta 消息会重新注入，因此环境信息不会丢失。
+Python 项目中，Chord 会沿同一路径寻找最近的有效虚拟环境，每层依次检查 `.venv`、`venv`、`env`，并提示 Agent 优先使用其中的解释器。工作目录、平台和虚拟环境信息会在上下文压缩后继续提供，无需重复说明。
 
 ## 自定义 Agents
 
@@ -38,14 +46,7 @@ Chord 默认从以下目录发现 Skills：
 
 TUI 侧边栏的 **SKILLS** 区块只显示当前已发现的 skills。`skill` 工具成功加载某个 skill 后，该 skill 以绿色显示为已调用；加载失败不会标记，未发现/不存在的 skill 也不显示（直至被发现）。
 
-Skill discovery 的结果是工作区级 catalog，但这不表示 MainAgent 与 SubAgent 共享相同权限或调用状态：
-
-- 每个 Agent 都用自己的最新 Agent 配置和 permission rules 过滤 catalog，决定哪些 skills 可见、可由 `skill` 工具加载；
-- MainAgent 与每个 SubAgent 分别记录 invoked 状态。一个 Agent 成功加载 skill，不会让其他 Agent 的同名 skill 变成「已调用」；
-- parked SubAgent 恢复后，会从 durable task 状态及该任务的历史 transcript 恢复 invoked 名称，再按当前工作区 catalog 和最新 Agent 权限过滤展示；
-- 当前正在进行的模型请求继续使用它开始时冻结的 prompt/tool surface；TUI 和后续 `skill` 工具解析使用当前 catalog 与当前 Agent 配置。
-
-因此，工作区 catalog 可以安全复用，但 Agent 的可见列表、权限判断和 invoked 状态不能直接复用 MainAgent 的结果。
+每个 Agent 只能看到和加载自己权限允许的技能。加载状态分别记录：主 Agent 加载过某个技能，不代表子 Agent 也已加载。恢复子任务时，Chord 会恢复其加载记录，并按当前权限显示。
 
 最小结构示例：
 

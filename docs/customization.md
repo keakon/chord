@@ -1,16 +1,24 @@
 # Customization
 
-Every extension point below is optional: repository instructions, agent definitions, skills, hooks, LSP servers, MCP servers, and custom slash commands.
+Start with the behavior you want to change. You do not need to configure every extension.
+
+| Goal | Extension |
+| --- | --- |
+| Follow project conventions | [Repository instructions](#repository-instructions) |
+| Assign models and permissions by role | [Agents](#agents) |
+| Load specialized knowledge or procedures on demand | [Skills](#skills) |
+| Automate notifications, checks, or tool-result processing | [Hooks](#hooks) |
+| Get code diagnostics, definitions, and references | [LSP](#lsp) |
+| Connect external tools | [MCP](#mcp) |
+| Save reusable prompts | [Custom commands](#custom-slash-commands) |
 
 ## Repository instructions
 
 Add `AGENTS.md` files when a project needs durable instructions for automated agents, such as coding conventions, verification commands, safety rules, or repository-specific review expectations.
 
-At session start, Chord discovers applicable `AGENTS.md` files by walking from the session working directory up to the project root. It then injects the complete non-empty contents in project-root-to-session-working-directory order, with each section labeled by its path relative to the session working directory (for example, `## ../../AGENTS.md`, `## ../AGENTS.md`, and `## AGENTS.md` when running from a nested directory). If the session working directory is the project root, only the root `AGENTS.md` is loaded. The instructions are sent in the LLM request as an internal user-role message before the first real user message. AGENTS.md content is delivered under a self-identifying header: a first line of `# AGENTS.md instructions` followed by an `<INSTRUCTIONS> ... </INSTRUCTIONS>` block. This meta message may not appear in the visible transcript, but main and sub-agents treat it as durable workspace guidance unless it conflicts with higher-priority system, developer, or user instructions.
+At session start, Chord searches from the working directory up to the project root, then loads `AGENTS.md` files from root to working directory. Starting at the project root loads only its root file. Main and sub-agents receive these rules; they do not override higher-priority instructions.
 
-Chord also discovers one Python virtual environment for the session by walking from the session working directory upward to the project root and checking `.venv`, `venv`, then `env` at each level. When the first valid environment is found, the prompt shows its path relative to the session working directory and asks agents to prefer that interpreter for Python commands.
-
-The system prompt is fully static: it contains identity, guidelines, and capabilities but no dynamic fields. Working directory, platform, current date, and the detected virtual environment path are delivered via the same session-context meta user message that carries AGENTS.md content — injected before the first real user message, not embedded in the cached system prefix. This keeps the system prompt identical across sessions, days, and working directories, maximizing prefix-cache reuse. The session-context meta message is re-injected after context compaction so the environment is never lost.
+For Python projects, Chord searches the same directories for the nearest valid virtual environment, checking `.venv`, `venv`, then `env` at each level. It asks agents to prefer that interpreter. Working directory, platform, and virtual environment information remain available after compaction, so you do not need to repeat them.
 
 ## Agents
 
@@ -43,14 +51,7 @@ At runtime, Chord does not preload every skill body into the system prompt. The 
 
 In the TUI, the **SKILLS** panel lists discovered skills. A skill turns green only after the `skill` tool successfully loads it during the session. Failed skill loads do not mark the skill as invoked, and unknown (not-discovered) skills are not shown until they are discovered.
 
-Skill discovery produces a workspace-level catalog, but MainAgent and SubAgents do not share one permission view or invoked state:
-
-- Each Agent filters the catalog through its latest Agent configuration and permission rules to determine which skills are visible and loadable through the `skill` tool.
-- MainAgent and every SubAgent track invoked state independently. Successfully loading a skill in one Agent does not mark that skill as invoked in another Agent.
-- After a parked SubAgent is restored, invoked names are recovered from durable task state and the task's historical transcript, then filtered against the current workspace catalog and latest Agent permissions.
-- An in-flight model request keeps the prompt/tool surface frozen when that request started; the TUI and subsequent `skill` tool resolution use the current catalog and current Agent configuration.
-
-The workspace catalog is therefore safe to reuse, while an Agent's visible list, permission decisions, and invoked state must not reuse MainAgent's computed results.
+Each agent can see and load only the skills its permissions allow. Loading state is separate: a skill loaded by the main agent is not automatically marked as loaded by a sub-agent. Restoring a sub-task recovers its loading history and applies current permissions.
 
 Minimal structure example:
 

@@ -1,6 +1,6 @@
 # Configuration & Auth
 
-Chord separates behavior configuration and credentials:
+Connect your models once, then reuse pools, fallback, and project overrides. Chord separates behavior configuration and credentials:
 
 - `~/.config/chord/config.yaml`: providers, models, extensions, defaults
 - `~/.config/chord/auth.yaml`: API keys / OAuth credentials
@@ -29,11 +29,7 @@ A practical precedence model is:
 This lets you keep personal defaults, project-specific behavior, and per-agent
 capabilities separate.
 
-Project config is loaded from `.chord/config.yaml` without injecting built-in
-defaults first, then merged onto the already-loaded global config. Runtime
-commands treat the current working directory as the project root, so the
-project-layer config is read from `./.chord/config.yaml` under the startup cwd
-rather than by searching parent directories. That means:
+Project configuration is read from `.chord/config.yaml` in the startup directory; Chord does not search parent directories. Set only the fields you want to override and leave the rest inherited. Merge rules:
 
 - omitted project fields stay truly unset instead of silently shadowing global defaults;
 - unrecognized keys, wrongly typed values, and out-of-range settings in any config file are logged to `chord.log` and treated as not configured while the rest of the file still applies; in a project config an invalid leaf falls back to the inherited global value. Malformed YAML (a syntax error) prevents startup; run `chord doctor config` for the full problem list;
@@ -817,10 +813,9 @@ Chord compresses the request body only if compression reduces the payload
 size; otherwise it sends the request uncompressed. Compression failures are
 logged and the request is sent uncompressed too. The response direction is
 unaffected: Chord still advertises only `gzip` responses and decodes them
-itself. Leave `compress` unset unless your provider or gateway is known to
-accept compressed request bodies: the official Codex backend and
-`api.anthropic.com` do (Anthropic accepts `gzip`, not `zstd`), most
-OpenAI-compatible gateways do not.
+itself.
+
+> **Note:** Leave `compress` unset unless your provider or gateway is known to accept compressed request bodies: the official Codex backend and `api.anthropic.com` do (Anthropic accepts `gzip`, not `zstd`), most OpenAI-compatible gateways do not.
 
 Provider/model requests identify the client with `User-Agent: chord/<version>` by default. Set provider-level `user_agent` only when a provider or gateway requires a specific value:
 
@@ -1071,7 +1066,7 @@ orchestration:
 |-------|---------|-------------|
 | `max_live_runtimes` | `10` | Maximum normally admitted Agent runtimes. Further normal runtime acquisition waits until a slot is released. Wake reactivation may use the separately bounded borrowed or bypass pools when ordinary capacity is exhausted. |
 | `max_borrowed_runtimes` | `1` | Additional temporary runtime admissions used to wake orchestration work that must make progress, such as a parent resuming after a child event. Borrowing is bounded separately from normal runtime slots. |
-| `max_bypass_runtimes` | `4` | Maximum wake reactivations that may bypass both the normal and borrowed runtime pools. This separate safety pool prevents the event loop from deadlocking while keeping the escape hatch bounded; when it is exhausted, the wake is refused and the durable message remains queued. |
+| `max_bypass_runtimes` | `4` | Maximum wake reactivations that may bypass both the normal and borrowed runtime pools when neither can make progress. When it is exhausted, the wake is refused and the durable message remains queued. |
 | `max_active_llm_requests` | `10` | Process-wide maximum concurrent LLM requests across orchestrated agents. Eligible requests wait when the limit is full. |
 | `provider_max_active_requests` | none | Optional concurrent-request limits keyed by provider name, for example `openai`. A request must satisfy this limit and the process-wide limit. |
 | `model_max_active_requests` | none | Optional concurrent-request limits keyed by `provider/model`. Inline variants such as `@high` are ignored for matching, so `openai/gpt-5.5` covers all variants of that model. |
@@ -1079,7 +1074,7 @@ orchestration:
 | `subagent_queue_bytes` | `4194304` | Maximum estimated bytes of pending input for each SubAgent. This is an in-memory admission bound, not a disk spool. |
 | `mailbox_memory_messages` | `512` | Maximum SubAgent mailbox messages retained in memory across the MainAgent inbox and owner-specific mailboxes. |
 | `mailbox_memory_bytes` | `8388608` | Maximum estimated bytes retained by those in-memory mailboxes. Durable non-progress messages that exceed the memory budget are referenced through the on-disk mailbox spool; progress updates may be coalesced or omitted from memory. |
-| `subagent_compact_usage` | `0.8` | Proactively compress a SubAgent's context when estimated usage reaches this fraction of its usable input budget. The default matches `context.compaction.threshold`; this separate setting remains available because SubAgents use local token estimates and a lightweight sliding-window checkpoint rather than MainAgent's usage-driven compaction pipeline. Must be greater than `0` and less than `1`. |
+| `subagent_compact_usage` | `0.8` | Proactively compress a SubAgent's context when estimated usage reaches this fraction of its usable input budget. The default matches `context.compaction.threshold`; SubAgents use local token estimates and a lightweight sliding-window checkpoint rather than MainAgent's usage-driven compaction pipeline. Must be greater than `0` and less than `1`. |
 | `waiting_main_expiry_turns` | `5` | User-turn budget for a SubAgent parked while waiting for its owner. The turn budget expires only after `waiting_main_min_wait_sec` has also elapsed; `waiting_main_max_wait_sec` still expires the wait unconditionally. |
 | `waiting_main_min_wait_sec` | `300` | Minimum wall-clock wait, in seconds, before the turn budget can expire a `waiting_main` task. |
 | `waiting_main_max_wait_sec` | `3600` | Maximum wall-clock wait, in seconds, after which a `waiting_main` task expires regardless of user-turn activity. The effective value is never below `waiting_main_min_wait_sec`; when both clocks are set explicitly and this maximum is below the minimum, loading fails instead of clamping. |
@@ -1095,7 +1090,7 @@ orchestration:
 ### Tuning guidance
 
 - To comply with an API quota, set the provider or model limit first; keep `max_active_llm_requests` as the overall safety ceiling.
-- Keep `max_bypass_runtimes` small and positive. It exists only to let wake reactivations make progress when normal and borrowed capacity cannot be released by the event loop; it is not ordinary throughput capacity.
+- Keep `max_bypass_runtimes` small and positive. It exists only to let wake reactivations make progress when normal and borrowed capacity are exhausted; it is not ordinary throughput capacity.
 - On a memory-constrained host, reduce mailbox byte/message limits gradually. Overflow uses durable storage, so lower limits trade memory for additional disk I/O.
 - Reduce SubAgent queue limits only when producers can handle enqueue rejection. These queues do not spill to disk, and overly small limits can interrupt parent/child coordination.
 - Keep `max_borrowed_runtimes` small but positive. Borrowed slots exist to break orchestration progress stalls, not to increase ordinary throughput.

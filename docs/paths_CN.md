@@ -75,7 +75,7 @@ Chord 写在这里。删了就丢历史。
     └── tui-dumps/                      # `Ctrl+G` 输出
 ```
 
-`<session-id>` 是 17 位纯数字（`YYYYMMDDHHmmSSfff`），由本地墙钟生成，因此一眼能看出本地日期时间，作为目录名/文件名也安全。此前生成的会话 ID 由 UTC 派生且不会被改写，因此同一个 sessions 目录里可能两种并存：在非 UTC 时区下，旧 ID 显示的时间与它实际创建的本地时间不同。SID 只是标识和粗略的创建时间提示，不充当会话排序键，所以这种混用不影响 Chord 选择哪个会话。会话列表取 `main.jsonl` 与已有 `usage-summary.json` 两个修改时间中较新的那个。Chord 只 stat 这些小文件，不会扫描完整会话，也不会额外维护项目级索引。复制或恢复文件可能让文件时间失真；没有更新这两个文件的活动，也不会改变排序。
+`<session-id>` 是 17 位纯数字（`YYYYMMDDHHmmSSfff`），由本地墙钟生成，因此一眼能看出本地日期时间，作为目录名/文件名也安全。SID 只是标识和粗略的创建时间提示，不充当会话排序键，所以这种混用不影响 Chord 选择哪个会话。会话列表取 `main.jsonl` 与已有 `usage-summary.json` 两个修改时间中较新的那个。Chord 只 stat 这些小文件，不会扫描完整会话，也不会额外维护项目级索引。复制或恢复文件可能让文件时间失真；没有更新这两个文件的活动，也不会改变排序。
 
 ### `<project-key>` 是什么？
 
@@ -87,7 +87,7 @@ Sessions、运行时缓存、exports 都以这个 key 为索引——在 `~/proj
 
 `chord --worktree <name>` 会在 `worktrees/<repo-id>/<slug>` 下创建 chord 管理的 git worktree，**位于原仓库之外**，拥有自己的 project key。每个 chord 管理的 worktree 的 sessions、cache、exports 因此天然隔离。
 
-清理 worktree（仅删 chord 一侧的数据），用 `chord worktree remove <name>`——见 [CLI：chord worktree](./cli_CN.md#chord-worktree)。**不要**手动删 worktree 目录，那会留下注册表中的孤儿条目（之后会被 `chord cleanup project` 标记）。
+移除 worktree，用 `chord worktree remove <name>`。它会删除工作目录及对应的会话、缓存和导出数据，默认保留分支；`--force` 还会强制删除分支——见 [CLI：chord worktree](./cli_CN.md#chord-worktree)。**不要**手动删 worktree 目录，那会留下注册表中的孤儿条目（之后会被 `chord cleanup project` 标记）。
 
 ## cache 目录：`~/.cache/chord/`
 

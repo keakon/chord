@@ -1,10 +1,12 @@
 # Reasoning and thinking
 
-Thinking configuration has three parts: the request-side switch, the
-response-side field that carries thinking back, and the replay contract that
-decides whether completed thinking must be sent again on the next request.
-Field-level semantics live in
-[Configuration & Auth: Model field reference](./configuration.md#model-field-reference).
+Start with a [recipe for your model](./model-configs.md); you do not need to understand every protocol field first.
+
+- **To change thinking effort**: find your connection type in the table below and adjust its supported fields.
+- **If a request fails after a tool call because thinking is missing**: use the replay-contract guidance below to determine whether historical thinking must be preserved.
+- **To read a translation**: configure [thinking translation](./configuration.md#appended-thinking-translation). It affects display only, not the model's thinking request settings.
+
+Thinking affects cost: newly generated thinking counts as output, and thinking sent again with history counts as input. See the [model field reference](./configuration.md#model-field-reference) for full field definitions.
 
 ## Request keys by wire family
 

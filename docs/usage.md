@@ -1,13 +1,21 @@
 # Usage
 
-Chord runs either as the local TUI or as the `chord headless` control plane. Most of this page is about daily TUI work: sending messages, reading tool cards, navigating sessions, and steering agents.
+Keep daily TUI work moving: send messages, read tool cards, recover sessions, and steer long tasks. Chord runs either as the local TUI or as the `chord headless` control plane; most of this page is about the TUI.
+
+## How to use this page
+
+You do not need to read this page from top to bottom:
+
+- **First task:** [TUI basics](#tui-basics) covers sending, tool cards, and approvals; set rules in [Permissions & Safety](./permissions-and-safety.md) before the first edit.
+- **Long tasks:** [`/loop`](#loop-continuous-execution-mode) keeps implement, test, and fix moving without nudging.
+- **Parallel work:** [Worktrees](#worktrees) isolates sessions per task; resume, fork, and import live under [Sessions](#sessions).
 
 ## Modes
 
 Chord has two main usage paths:
 
-- **Local TUI**: the default mode, running MainAgent in the current process
-- **Headless control plane**: `chord headless` exposes a stdio JSONL interface for external gateways/bots
+- **Local terminal interface**: the default mode for sending tasks, inspecting results, and handling approvals
+- **Headless mode**: use `chord headless` to control Chord from a script, gateway, or chat bot
 
 Most personal development workflows should start with the local TUI.
 

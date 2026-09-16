@@ -5,6 +5,8 @@
 - 一个 provider 下放多个 key，做轮询或故障切换
 - 模型池里先走主 endpoint，再回退到备用 endpoint
 
+将示例域名、模型名和环境变量替换为网关实际提供的值。先验证主接口，再添加备用接口，避免同时排查两套连接。
+
 ## `~/.config/chord/auth.yaml`
 
 ```yaml

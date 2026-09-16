@@ -12,18 +12,14 @@
   <img src="./docs/assets/screenshot.png" alt="Chord terminal UI screenshot" width="900">
 </p>
 
-## What else Chord does
+## Feature highlights
 
-- Keyboard-first, Vim-style keybindings
-- Notifies you only when you're needed
-- Hot-swap model pools without restarting
-- Drive it remotely through `chord headless`
-- Import sessions from Claude Code, Codex, and OpenCode
-- LSP integration
-- Preview images in the terminal
-- Codex subscription quota and reset time
-- Customizable agent teams
-- Parallel work via git worktrees
+- Vim-style keyboard controls
+- Automatic model fallback
+- Image previews
+- Import Claude Code, Codex, and OpenCode sessions
+- Codex quota and reset times
+- Notifications when you’re needed
 
 ## Three-step setup
 
@@ -45,11 +41,12 @@ chord --version
 
 On macOS, the downloaded binary may be blocked on first run because it came from the internet and is not notarized; see [Quickstart](./docs/quickstart.md#1-install) for the `xattr` / `codesign` commands that unblock it.
 
-### 2. Run the setup wizard
+### 2. Start in your project
 
-Run `chord` in an interactive terminal:
+Open your project in an interactive terminal:
 
 ```bash
+cd my-project
 chord
 ```
 
@@ -57,23 +54,26 @@ If `config.yaml` is missing, Chord launches a one-time setup wizard: it creates 
 
 To write YAML manually or use a different provider/model setup, see [Quickstart](./docs/quickstart.md).
 
-### 3. Run from your project
+### 3. Send your first task
 
-```bash
-cd my-project && chord
+Describe what you want and press `Enter`. For example, have it read through your project first:
+
+```text
+Explain this project's main modules and how to run its tests. Do not change any files yet.
 ```
+
+Inspect the response and tool results. Once you know your way around, ask Chord to make a specific change.
 
 For manual provider/model setup and the `limit` fields, see [Quickstart](./docs/quickstart.md) and the [Glossary](./docs/glossary.md); ready-to-paste `config.yaml` files are in [example configs](./docs/examples/index.md).
 
 ## Documentation
 
-- [Docs home](./docs/index.md)
-- Getting started: [Quickstart](./docs/quickstart.md) · [Usage](./docs/usage.md) · [Glossary](./docs/glossary.md)
-- Reference: [CLI](./docs/cli.md) · [Configuration & Auth](./docs/configuration.md) · [Context management](./docs/context-management.md) · [Model configuration recipes](./docs/model-configs.md) · [Built-in tools](./docs/tools.md) · [Edit tools](./docs/edit-tools.md) · [Keybindings](./docs/keybindings.md) · [Paths](./docs/paths.md) · [Environment variables](./docs/environment.md) · [Platform support](./docs/platforms.md) · [Performance](./docs/performance.md)
-- Going further: [Customization](./docs/customization.md) · [Hooks](./docs/hooks.md) · [Examples](./docs/examples/index.md)
-- Integration: [Headless](./docs/headless.md) (`chord headless`)
-- Safety: [Permissions & Safety](./docs/permissions-and-safety.md)
-- Troubleshooting: [Troubleshooting](./docs/troubleshooting.md)
+- [Quickstart](./docs/quickstart.md): install and complete your first task
+- [Usage](./docs/usage.md): everyday controls, session recovery, and long tasks
+- [Model recipes](./docs/model-configs.md) · [Examples](./docs/examples/index.md): connect your models and providers
+- [Permissions & Safety](./docs/permissions-and-safety.md): choose which actions need approval
+- [Headless](./docs/headless.md): control Chord from another interface with `chord headless`
+- [Troubleshooting](./docs/troubleshooting.md) · [Full documentation index](./docs/index.md)
 
 ## Measured results
 

@@ -1,124 +1,106 @@
 ---
 title: Chord
-description: A terminal coding agent that finishes coding tasks faster, runs cheaper, and stays small in memory.
+description: A faster, cheaper, lighter terminal coding agent.
 template: splash
 head:
   - tag: title
     content: "Chord: a faster, cheaper, lighter terminal coding agent"
 hero:
-  tagline: A terminal coding agent that finishes coding tasks faster, runs cheaper, and stays small in memory.
+  tagline: A faster, cheaper, lighter terminal coding agent.
   actions:
     - text: Quickstart
       link: /chord/quickstart/
       icon: right-arrow
       variant: primary
+    - text: Model recipes
+      link: /chord/model-configs/
+      variant: secondary
     - text: GitHub
       link: https://github.com/keakon/chord
       icon: external
       variant: minimal
 ---
 
-import { Card, CardGrid } from '@astrojs/starlight/components';
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 import screenshot from '../../../../docs/assets/screenshot.png';
+
+<figure class="chord-screenshot">
+  <img
+    src={screenshot.src}
+    alt="Chord terminal UI: tool calls, patches, and diagnostics on the left; model, usage, todos, and changed files on the right"
+  />
+</figure>
+
+## Feature highlights
+
+<ul className="chord-highlights">
+  <li>Vim-style keyboard controls</li>
+  <li>Automatic model fallback</li>
+  <li>Image previews</li>
+  <li>Import external sessions</li>
+  <li>Codex quota and reset times</li>
+  <li>Notifications when you’re needed</li>
+</ul>
 
 ## Measured results
 
-<CardGrid>
-  <Card title="6m37s" icon="rocket">
-    Fastest of six agent harnesses on the same DeepSWE task, 33% faster than the next best (9m50s).
-  </Card>
-  <Card title="$0.052" icon="approve-check-circle">
-    Lowest cost of the six runs, 34% cheaper than the next best ($0.079).
-  </Card>
-  <Card title="39MB" icon="database">
-    Memory after loading 200 messages, up from 30MB when empty. Claude Code reaches 216MB.
-  </Card>
-</CardGrid>
+Six agent harnesses ran the same [DeepSWE v1.1 task](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration): adding streaming JSON iteration to `httpx`. All six runs used deepseek-v4.1-flash. Chord 0.8.1 finished first and cheapest, with the next-best run taking 1.49× as long and costing 1.52× as much.
+
+### Real-world coding task
+
+| Harness | Time | Cost |
+|---------|------|------|
+| Chord 0.8.1 | **6m37s** <span class="chord-bar" style="--bar: 30%"></span> | **$0.052** <span class="chord-bar" style="--bar: 32%"></span> |
+| deepseek-harness 0.1.5-rc.1 | 9m50s (1.49×) <span class="chord-bar" style="--bar: 44%"></span> | $0.079 (1.52×) <span class="chord-bar" style="--bar: 48%"></span> |
+| pi 0.85.1 | 10m22s (1.57×) <span class="chord-bar" style="--bar: 46%"></span> | $0.086 (1.65×) <span class="chord-bar" style="--bar: 52%"></span> |
+| codex 0.154.0 | 17m01s (2.57×) <span class="chord-bar" style="--bar: 76%"></span> | $0.139 (2.67×) <span class="chord-bar" style="--bar: 84%"></span> |
+| mini-swe-agent 2.4.6 | 18m29s (2.79×) <span class="chord-bar" style="--bar: 82%"></span> | $0.125 (2.40×) <span class="chord-bar" style="--bar: 76%"></span> |
+| claude code 2.1.272 | 22m25s (3.39×) <span class="chord-bar" style="--bar: 100%"></span> | $0.166 (3.19×) <span class="chord-bar" style="--bar: 100%"></span> |
+
+Multipliers are relative to Chord.
+
+### App memory
+
+Measured on macOS 15.3.2 (arm64).
+
+| Harness | Empty session | 200 messages | Growth |
+|---------|---------------|--------------|--------|
+| Chord 0.8.1 | 30MB | **39MB** | **+9MB** |
+| codex 0.154.0 | **27MB** | 47MB | +20MB |
+| claude code 2.1.273 | 143MB | 216MB | +73MB |
 
 One measured task and one memory scenario; your numbers will differ. Full tables, methodology, and implementation notes: [Performance](/chord/performance/#measured-results).
 
-<figure class="chord-screenshot">
-  <img src={screenshot.src} alt="Chord terminal UI screenshot" />
-</figure>
-
-## Three-step setup
+## Two-step setup
 
 <CardGrid>
   <Card title="1. Install" icon="download">
-    Prebuilt binaries do not require Go. If you already have Go 1.27.0+ installed:
+    **With Go 1.27.0 or newer**:
 
     ```bash
     go install github.com/keakon/chord/cmd/chord@latest
     ```
 
-    If not, download a prebuilt binary from [GitHub Releases](https://github.com/keakon/chord/releases), extract it, and put `chord` on your `PATH`.
+    **Without Go**: download a prebuilt binary from [GitHub Releases](https://github.com/keakon/chord/releases), extract it, and put `chord` on your `PATH`.
   </Card>
-  <Card title="2. Run setup once" icon="pen">
-    Run `chord` in an interactive terminal:
-
-    ```bash
-    chord
-    ```
-
-    If `config.yaml` is missing, Chord launches a one-time setup wizard. The wizard creates the minimal `config.yaml` and, when needed, `auth.yaml`.
-
-    Prefer to write YAML manually or need a different provider/model setup? See [Quickstart](/chord/quickstart/).
-  </Card>
-  <Card title="3. Run from your project" icon="window">
+  <Card title="2. Run from your project" icon="window">
     ```bash
     cd my-project
     chord
     ```
-    On first run in a project, Chord creates `.chord/` as needed.
+    On the first run, if no `config.yaml` is found, Chord starts the setup wizard. Then describe your first task and press `Enter`.
   </Card>
 </CardGrid>
 
-## What else Chord does
+Supported on macOS, Linux, and Windows (including WSL); a few system-level features are platform-specific. See [Platform support](/chord/platforms/).
 
-- Keyboard-first, Vim-style keybindings
-- Notifies you only when you're needed
-- Hot-swap model pools without restarting
-- Remote control through `chord headless`
-- Session import from Claude Code, Codex, and OpenCode
-- LSP integration
-- Image preview in the terminal
-- Codex subscription quota and reset time
-- Customizable agent teams
-- Parallel work via git worktrees
-
-## Find docs by task
+## Docs
 
 <CardGrid>
-  <Card title="Start quickly" icon="rocket">
-    Install, initialize a provider, run `chord doctor models`, and send the first task.
-    [Open →](/chord/quickstart/)
-  </Card>
-  <Card title="Configure models" icon="setting">
-    Provider/auth schema plus copy-paste examples for common setups.
-    [Config →](/chord/configuration/) · [Examples →](/chord/examples/)
-  </Card>
-  <Card title="CLI reference" icon="laptop">
-    Every command, subcommand, and flag, including `chord cleanup`, worktrees, and headless.
-    [Open →](/chord/cli/)
-  </Card>
-  <Card title="Permissions and safety" icon="padlock">
-    The permission model, approval flow, and the security boundaries Chord enforces.
-    [Open →](/chord/permissions-and-safety/)
-  </Card>
-  <Card title="Long tasks" icon="list-format">
-    Use `/loop` and `Done` for multi-step implementation work.
-    [Open →](/chord/usage/#loop-continuous-execution-mode)
-  </Card>
-  <Card title="Extend and customize" icon="puzzle">
-    Agents, skills, MCP, hooks, and custom slash commands.
-    [Customize →](/chord/customization/) · [Hooks →](/chord/hooks/)
-  </Card>
-  <Card title="Remote control" icon="server">
-    Use `chord headless` and chord-gateway safely from another surface.
-    [Open →](/chord/headless/)
-  </Card>
-  <Card title="Troubleshoot" icon="warning">
-    Startup, auth, model, TUI, context, and integration symptoms.
-    [Open →](/chord/troubleshooting/)
-  </Card>
+  <LinkCard title="Start quickly" href="/chord/quickstart/" description="Install, connect a model, and complete your first task." />
+  <LinkCard title="Configure models" href="/chord/configuration/" description="Models and credentials, with ready-to-copy examples for common setups." />
+  <LinkCard title="Permissions and safety" href="/chord/permissions-and-safety/" description="Choose which actions need approval and understand file and command risks." />
+  <LinkCard title="Long tasks" href="/chord/usage/#loop-continuous-execution-mode" description="Keep implementation, checks, and fixes moving." />
+  <LinkCard title="Extend and customize" href="/chord/customization/" description="Customize roles, skills, and external tools; automate checks with hooks." />
+  <LinkCard title="Troubleshoot" href="/chord/troubleshooting/" description="Startup, auth, model, TUI, context, and integration symptoms." />
 </CardGrid>

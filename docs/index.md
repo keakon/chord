@@ -1,55 +1,52 @@
 # Chord Docs
 
-This documentation is for end users: installation, configuration, daily usage, customization, and troubleshooting.
+**Finish coding tasks faster, spend less on each one, and keep memory small.** Chord keeps long sessions responsive: automatic fallback when a key or model fails, request trimming plus compaction to control cost, and a small memory footprint.
 
-- 中文版入口：见 [index_CN.md](./index_CN.md)
+New to Chord? Start with the [Quickstart](./quickstart.md), copy a provider from [Model recipes](./model-configs.md), then set approval rules in [Permissions & Safety](./permissions-and-safety.md). Already using it? Find the relevant guide below.
 
-## Find docs by task
+In one DeepSWE v1.1 task Chord finished first and cheapest (6m37s, $0.052); see [Performance](./performance.md) for the full table and methodology.
 
-- **Start quickly**: [Quickstart](./quickstart.md)
-- **Configure models**: [Configuration & Auth](./configuration.md) · [Model configuration recipes](./model-configs.md) · [Reasoning and thinking](./reasoning.md) · [Examples](./examples/index.md)
-- **Edit files safely**: [Edit tools](./edit-tools.md) · [Permissions & Safety](./permissions-and-safety.md)
-- **Remote control**: [Headless](./headless.md) · [Permissions & Safety](./permissions-and-safety.md)
-- **Long-running tasks**: [Usage: `/loop`](./usage.md#loop-continuous-execution-mode) · [Context management](./context-management.md)
-- **Extend and customize**: [Customization](./customization.md) · [Hooks](./hooks.md)
-- **Troubleshoot issues**: [Troubleshooting](./troubleshooting.md)
+[中文](./index_CN.md)
 
 ## Getting started
 
-- [Quickstart](./quickstart.md): get running in minutes
-- [Usage](./usage.md): TUI basics, sessions, common commands, headless mode
-- [Glossary](./glossary.md): vocabulary used across these docs
+- [Quickstart](./quickstart.md): Install and send your first task
+- [Usage](./usage.md): Everyday controls, sessions, long tasks, and parallel work
+- [Keybindings](./keybindings.md): Find and customize keyboard controls
 
-## Reference
+## Models and credentials
 
-- [CLI](./cli.md): every command, subcommand, and flag
-- [Configuration & Auth](./configuration.md): `config.yaml`, `auth.yaml`, providers, model pools, full schema cheatsheet
-- [Context management](./context-management.md): compaction and reduction: how they work, configuration, tuning
-- [Model configuration recipes](./model-configs.md): copy-paste snippets for common provider/model families
-- [Reasoning and thinking](./reasoning.md): how thinking is requested, returned, and replayed per wire family, the continuity decision, and the recipe index
-- [Built-in tools](./tools.md): every tool name, for permission rules and hook filters
-- [Edit tools](./edit-tools.md): choose between `edit`, `apply_patch`, and `write`; formats, examples, and safety behavior
-- [Project Memory](./usage.md#project-memory): cross-session memory: `MEMORY.md`, auto-extraction, trust boundary, and git semantics
-- [Keybindings](./keybindings.md): complete key map and how to customize it
-- [Paths](./paths.md): config / state / cache / project layout, what is safe to delete
-- [Environment variables](./environment.md): every `CHORD_*` / `XDG_*` / proxy variable Chord reads
-- [Platform support](./platforms.md): what works on macOS / Linux / Windows / WSL
-- [Performance](./performance.md): measured results against other agent harnesses, optimization internals, and what to do when it feels slow
+- [Configuration & Auth](./configuration.md): Configuration files, credentials, model pools, and field reference
+- [Model recipes](./model-configs.md): Choose a ready-to-copy provider configuration
+- [Reasoning and thinking](./reasoning.md): Choose thinking settings and understand usage implications
+- [Context management](./context-management.md): Understand compaction, reduction, and long-session settings
 
-## Going further
+## Tools and safety
 
-- [Customization](./customization.md): agents, skills, MCP, optional LSP setup, custom slash commands
-- [Hooks](./hooks.md): 14 trigger points, payload contract, examples
-- [Examples](./examples/index.md): copy-paste-ready `config.yaml` setups for common situations
+- [Permissions & Safety](./permissions-and-safety.md): Set approval rules and understand risks
+- [Built-in tools](./tools.md): Look up tool names, purposes, and key limits
+- [Edit tools](./edit-tools.md): Understand file edits, partial success, and retries
 
-## Integration
+## Customization and integration
 
-- [Headless](./headless.md): `chord headless` JSON control plane and `chord-gateway`
+- [Customization](./customization.md): Configure roles, skills, code diagnostics, and external tools
+- [Hooks](./hooks.md): Automate notifications, checks, and tool-result processing
+- [Headless](./headless.md): Control Chord from scripts or another interface
 
-## Safety
+## Configuration examples
 
-- [Permissions & Safety](./permissions-and-safety.md): the permission model and security boundaries
+- [Examples](./examples/index.md): Choose a complete setup for your workflow
+- [Minimal setup](./examples/examples-minimal.md): One provider and one model pool
+- [Codex + LSP](./examples/examples-codex-workstation.md): Sign-in, code diagnostics, and a reviewer
+- [OpenAI-compatible gateway](./examples/examples-openai-compat.md): Multiple keys and a backup endpoint
+- [Team setup](./examples/examples-team.md): Project configuration and role-based work
 
-## Troubleshooting
+## Reference and troubleshooting
 
-- [Troubleshooting](./troubleshooting.md): symptoms, common causes, and how to collect logs
+- [CLI reference](./cli.md): Commands, options, and examples
+- [Paths](./paths.md): Locate configuration, sessions, and caches; understand cleanup
+- [Environment variables](./environment.md): Path, proxy, and debugging settings
+- [Platform support](./platforms.md): Find platform-specific behavior
+- [Performance](./performance.md): Measurements, test conditions, and troubleshooting slowness
+- [Troubleshooting](./troubleshooting.md): Find your next step by symptom
+- [Glossary](./glossary.md): Look up terminology

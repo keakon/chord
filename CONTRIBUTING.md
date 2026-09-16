@@ -171,7 +171,7 @@ lychee --no-progress --cache --max-cache-age 30d --max-concurrency 16 --accept 2
 
 `make docs-check` verifies docs consistency; it does not run the `lychee` link checker.
 
-`npm run dev` runs the sync script first, so any edits under `docs/` show up after a refresh. Do **not** edit files under `website/src/content/docs/{en,zh}/` directly — they are gitignored and regenerated on every build.
+`npm run dev` syncs the source docs once at startup. After editing `docs/`, run `npm run sync` in another terminal under `website/`, or restart the dev server. Do **not** edit the generated `.md` files under `website/src/content/docs/` or its `zh/` directory; edit their sources in `docs/`. The two `index.mdx` landing pages are maintained by hand.
 
 When you add a new top-level page under `docs/`, also list it in:
 

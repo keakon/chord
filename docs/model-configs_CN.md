@@ -2,29 +2,18 @@
 
 当你已经确定要用哪一类 provider / model，只想要一段可复制的起始配置时，用这一页。字段语义和完整 schema 仍以[配置与认证](./configuration_CN.md)为准；完整的多文件工作站 / 团队布局示例见[配置示例](./examples/index_CN.md)。
 
-> **按模型调压缩。** 本页每一份 recipe 都是把模型接进 `model_pools` /
-> `providers` 的接线配置。想按模型分别调整上下文自动压缩，在
-> 模型自身定义或模板上加 `compaction` 块即可（详见[上下文压缩](./context-management_CN.md#上下文压缩compaction)）：
->
-> ```yaml
-> model_templates:
->   luna-full-window: &luna-full-window
->     limit: {context: 1050000, output: 128000}   # 官方全窗口：不写 input
->     compaction: {threshold: 0.25, reminder: 0.2}   # 把用量留在 272K 长上下文计价档之下
->
-> providers:
->   openai:
->     models:
->       gpt-5.6-luna: *luna-full-window
-> ```
->
-> 没有 `compaction` 块的模型继承全局 `context.compaction.threshold`；
-> `reminder` 未设置时按 `min(0.60, threshold × 0.90)` 派生；`reminder: -1`
-> 则只关闭该模型的压力提醒，自动压缩保持开启。这两个字段调
-> 的是 usage-driven 自动压缩路径，**无论是否启用 `model_driven` 都生效**。
-> 本页给出的建议把模型的 `threshold` 调到可靠工作窗口的**上沿**（压缩把
-> 上下文维持在该区间内），需要时可把 `reminder` 设在它下方一点。某模型的
-> 长上下文可靠性没有依据可写时，省略 `compaction` 块、让它用全局默认即可。
+先选接入方式，再复制对应片段。第一次配置可以先保留默认的上下文设置，等模型连接正常后再调优。
+
+| 想接入什么 | 配方 |
+| --- | --- |
+| OpenAI API / Responses 兼容接口 | [OpenAI GPT](#openai-gptresponses-兼容接口) |
+| Codex OAuth | [Codex 登录配置](#codex-oauth-preset) |
+| Anthropic API | [Claude](#anthropic-claude) |
+| Google API | [Gemini](#google-gemini) |
+| 其他模型 | [GLM](#glm--bigmodel-coding-plan) · [DeepSeek](#deepseek) · [Qwen](#qwen-保留历史思考) · [Kimi](#kimi) · [Grok](#grokxai) · [MiniMax](#minimaxopenai-兼容接口) · [Muse Spark](#meta-muse-spark) |
+| Chat Completions 网关的思考设置 | [网关配置](#走-chat-completions-网关的-thinking) |
+
+复制后按[验证步骤](#如何验证任意一份配置)检查配置和连接。需要长期运行或控制上下文成本时，再看文末的[按模型调压缩](#按模型调压缩)。
 
 ## OpenAI GPT（Responses 兼容接口）
 
@@ -610,34 +599,19 @@ thinking 与输入模态完全一致，因此共用同一个 `&claude-opus` 模�
 
 如果想要更低成本的 Claude 配置，可沿用同样结构，改为 `claude-sonnet-5`、`cost: {input: 2, output: 10}`，并按需把 `output` 调低（例如 64000）做保守的本地分配。Sonnet 5 的 $2 / $10（每百万 token）定价已于 2026 年 8 月转为永久。
 
-### Claude Fable 5.1
-
-`claude-fable-5-1`（2026 年 9 月发布）沿用了 Fable 5 的 $10 / $50（每百万 token 输入 / 输出）费率，但缓存读取降到每百万 token $0.25（是基础输入价的 0.025x，而不是常见的 0.1x 乘数），所以 `cache_read` 要填 0.25，不要按比例填成 1.0。它与 Fable 5 一样是 1M 上下文、128K 最大输出、adaptive thinking，并支持 PDF。
+`claude-fable-5-1`（2026 年 9 月发布）沿用同样的结构：1M 上下文、128K 最大输出、adaptive thinking 和 PDF 支持都一样，只有 cost 块不同。它沿用了 Fable 5 的 $10 / $50（每百万 token 输入 / 输出）费率，但缓存读取降到每百万 token $0.25（是基础输入价的 0.025x，而不是常见的 0.1x 乘数），所以 `cache_read` 要填 0.25，不要按比例填成 1.0。`claude-fable-5` 仍可用，费率相同，只有缓存读取是 $1.0。
 
 ```yaml
+# 需要同一文件上方的 `&claude-opus` 模板。
 model_templates:
   claude-fable-5.1: &claude-fable-5-1
-    limit:
-      context: 1000000
-      output: 128000
+    <<: *claude-opus
     cost:
       input: 10
       output: 50
       cache_read: 0.25
       cache_write: 12.5
       cache_write_1h: 20
-    thinking:
-      type: adaptive
-      display: summarized
-    variants:
-      high:
-        thinking:
-          effort: high
-      xhigh:
-        thinking:
-          effort: xhigh
-    modalities:
-      input: [text, image, pdf]
 
 providers:
   anthropic:
@@ -651,9 +625,7 @@ model_pools:
     - anthropic/claude-fable-5-1@high
 ```
 
-`claude-fable-5` 仍可用，费率相同，只有缓存读取是 $1.0。
-
-#### Claude 5 的压缩调优
+### Claude 5 的压缩调优
 
 Claude 5 全系（Fable 5.1、Opus 5、Sonnet 5）都是 1M 上下文、128K 最大输出、全窗口统一按 token 计费。MRCR v2 8-needle 显示 Opus 级模型即使到 1M 仍能保持 ~76%（当前所有模型族里最平坦的曲线），可靠窗口确实很大。Opus 4.7 时代的模型为换取「拒绝而非编造」牺牲了检索准确率；Opus 5 和 Fable 5.1 恢复了强长上下文检索。日常用直接不写 `compaction` 块，跟全局默认走
 （`threshold` 0.8，可用预算约 872K 里约 698K 触发）；跑数小时的 agentic 长会话
@@ -1666,8 +1638,6 @@ model_pools:
   `@medium` 或 `@low`。
 - `muse-spark-1.3-contributor` 是同一模型的低价档，代价是允许 Meta 用你的
   prompt 和 completion 训练；能接受这个交换再用，而且该档没有 `max`。
-- `cost` 是可选项，这份配方不写，Chord 也就不会估算这个模型的花费；想统计
-  成本就按你账号的费率补上 `cost` 块。
 - `limit.output` 取 Meta 参考配置里的 `131072`。Chord 在 Responses 上默认不
   发 `max_output_tokens`；想让 Chord 显式执行这个上限，设
   `compat.responses.send_max_output_tokens: true`。
@@ -1699,3 +1669,29 @@ chord doctor models --model openai/gpt-5.6-sol@xhigh
 chord doctor models --model codex/gpt-5.5@xhigh
 chord doctor models --model anthropic/claude-opus-5@high
 ```
+
+## 按模型调压缩
+
+**按模型调压缩。** 本页每一份 recipe 都是把模型接进 `model_pools` /
+`providers` 的接线配置。想按模型分别调整上下文自动压缩，在
+模型自身定义或模板上加 `compaction` 块即可（详见[上下文压缩](./context-management_CN.md#上下文压缩compaction)）：
+
+```yaml
+model_templates:
+  luna-full-window: &luna-full-window
+    limit: {context: 1050000, output: 128000}   # 官方全窗口：不写 input
+    compaction: {threshold: 0.25, reminder: 0.2}   # 把用量留在 272K 长上下文计价档之下
+
+providers:
+  openai:
+    models:
+      gpt-5.6-luna: *luna-full-window
+```
+
+没有 `compaction` 块的模型继承全局 `context.compaction.threshold`；
+`reminder` 未设置时按 `min(0.60, threshold × 0.90)` 派生；`reminder: -1`
+则只关闭该模型的压力提醒，自动压缩保持开启。这两个字段调
+的是 usage-driven 自动压缩路径，**无论是否启用 `model_driven` 都生效**。
+本页给出的建议把模型的 `threshold` 调到可靠工作窗口的**上沿**（压缩把
+上下文维持在该区间内），需要时可把 `reminder` 设在它下方一点。某模型的
+长上下文可靠性没有依据可写时，省略 `compaction` 块、让它用全局默认即可。

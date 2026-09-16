@@ -5,6 +5,8 @@ repository root.
 
 ## Quick start
 
+Use Node.js 22.12.0 or newer.
+
 ```bash
 cd website
 npm install
@@ -49,6 +51,8 @@ website/
 ```
 
 ## Authoring
+
+The dev command syncs source docs once at startup. After changing `docs/`, run `npm run sync` in another terminal under `website/`, or restart the dev server. Refreshing the browser alone does not copy source changes.
 
 - For new or updated docs content: **edit `docs/*.md` and `docs/*_CN.md`** at
   the repo root. They remain readable on GitHub directly.

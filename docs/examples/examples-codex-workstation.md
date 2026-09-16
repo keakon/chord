@@ -6,6 +6,8 @@ Use this setup when you want:
 - Go and Python LSP support
 - an extra read-only reviewer agent
 
+Complete Codex sign-in and confirm the model works first, then add LSP and the reviewer as needed. Remove unused providers, pools, or roles together with their references. Install the corresponding language servers before enabling LSP.
+
 ## `~/.config/chord/config.yaml`
 
 ```yaml

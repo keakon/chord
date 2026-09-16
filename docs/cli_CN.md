@@ -1,6 +1,6 @@
 # CLI 参考
 
-这里列出 Chord 面向用户的命令、子命令和 flag，也包括二进制通过 Cobra 暴露的 `help` 与 `completion` 辅助命令。
+查找启动、登录、会话、清理和 worktree 管理命令，以及各命令的选项与示例。
 
 首次使用建议先看 [快速开始](./quickstart_CN.md)。
 

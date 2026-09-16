@@ -12,18 +12,14 @@
   <img src="./docs/assets/screenshot.png" alt="Chord 终端界面截图" width="900">
 </p>
 
-## 其他能力
+## 亮点功能
 
-- 键盘优先，Vim 风格
-- 需要你处理时才通知
-- 模型池热切换，无需重启
-- 支持远程操控
-- 支持导入 Claude Code、Codex、OpenCode 的会话
-- LSP 集成
+- Vim 风格键盘操作
+- 失败时自动切换备用模型
 - 支持预览图片
-- 显示 Codex 订阅额度与重置时间
-- 可自定义的 Agent 团队
-- 基于 git worktree 的并行任务
+- 导入 Claude Code、Codex、OpenCode 会话
+- 查看 Codex 额度与重置时间
+- 只在真正需要你时才通知
 
 ## 三步上手
 
@@ -45,11 +41,12 @@ chord --version
 
 macOS 上首次运行下载的二进制可能被系统阻止（文件来自互联网且未公证），解除阻止的 `xattr` / `codesign` 命令见[快速开始](./docs/quickstart_CN.md#1-安装)。
 
-### 2. 运行初始化向导
+### 2. 在项目里启动
 
-在交互式终端运行：
+在交互式终端进入项目目录：
 
 ```bash
+cd my-project
 chord
 ```
 
@@ -57,23 +54,26 @@ chord
 
 想手写 YAML 或需要不同的 provider / 模型配置，见[快速开始](./docs/quickstart_CN.md)。
 
-### 3. 在项目里启动
+### 3. 发送第一个任务
 
-```bash
-cd my-project && chord
+直接说明你想让它做什么，按 `Enter` 发送。比如先让它读一遍你的项目：
+
+```text
+请解释这个项目的主要模块和测试入口，先不要修改文件。
 ```
+
+查看回答和工具执行结果。熟悉项目后，再让 Chord 实现具体改动。
 
 手动配置 provider / 模型以及 `limit` 字段的规则见[快速开始](./docs/quickstart_CN.md)与[术语表](./docs/glossary_CN.md)；可直接复制的 `config.yaml` 见[示例配置库](./docs/examples/index_CN.md)。
 
 ## 文档
 
-- [文档首页](./docs/index_CN.md)
-- 入门：[快速开始](./docs/quickstart_CN.md) · [使用指南](./docs/usage_CN.md) · [术语表](./docs/glossary_CN.md)
-- 参考：[CLI](./docs/cli_CN.md) · [配置与认证](./docs/configuration_CN.md) · [上下文管理](./docs/context-management_CN.md) · [模型配置速查](./docs/model-configs_CN.md) · [内置工具](./docs/tools_CN.md) · [编辑工具](./docs/edit-tools_CN.md) · [快捷键](./docs/keybindings_CN.md) · [目录与路径](./docs/paths_CN.md) · [环境变量](./docs/environment_CN.md) · [平台支持](./docs/platforms_CN.md) · [性能](./docs/performance_CN.md)
-- 进阶：[扩展与定制](./docs/customization_CN.md) · [Hooks](./docs/hooks_CN.md) · [示例配置库](./docs/examples/index_CN.md)
-- 集成：[Headless](./docs/headless_CN.md)（`chord headless`）
-- 安全：[权限与安全](./docs/permissions-and-safety_CN.md)
-- 排障：[常见问题排查](./docs/troubleshooting_CN.md)
+- [快速开始](./docs/quickstart_CN.md)：安装并完成第一个任务
+- [使用指南](./docs/usage_CN.md)：日常操作、恢复会话和长任务
+- [配置模型](./docs/model-configs_CN.md) · [示例配置](./docs/examples/index_CN.md)：接入自己的模型和服务商
+- [权限与安全](./docs/permissions-and-safety_CN.md)：决定哪些操作需要确认
+- [Headless 集成](./docs/headless_CN.md)：通过 `chord headless` 从其他入口操控
+- [排障](./docs/troubleshooting_CN.md) · [完整文档目录](./docs/index_CN.md)
 
 ## 实测数据
 

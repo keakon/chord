@@ -302,15 +302,7 @@ permission:
 
 ### Why Two Tools?
 
-Models exhibit strong preferences based on their training data:
-
-- GPT models have seen extensive `@@`-style patches in their training (OpenAI's `apply_patch`)
-- Claude, Qwen, and similar models perform better with intuitive find-replace formats
-
-Empirical testing (Aider's edit-bench, internal chord metrics) shows:
-
-- **GPT models**: 91-96% success with the patch format, ~70% with replace
-- **Non-GPT models**: 81-96% success with the replace format, 44-79% with patch
+`edit` locates a local replacement by its original text; `apply_patch` describes additions, updates, moves, and deletions as a patch. Chord selects the tool for the model, so manual tuning is usually unnecessary. If a model or endpoint cannot use the default format, override the selection with `compat.apply_patch.enabled`.
 
 ### Matching Tolerance
 
@@ -318,36 +310,10 @@ Empirical testing (Aider's edit-bench, internal chord metrics) shows:
 
 For any file that can be decoded as text, a final fallback also treats common Chinese and ASCII punctuation as equivalent, and, like the `edit` tool, treats a single space adjacent to a separator punctuation mark as optional (`：`, `:` followed by a space, and `:the` match the same line). Both tools share the same normalization and the same preservation rules. This includes source files, dotenv files such as `.env.example`, and extensionless text files. The fallback applies only when the complete hunk has one unique match. It preserves punctuation from the current file in unchanged parts of replacement lines and reports its use in the tool result. Ambiguous matches are rejected, and a fragment occurring inside a longer line is diagnostic only—not an automatic substring edit. Binary or otherwise undecodable files do not enter this fallback because text decoding fails before hunk matching.
 
-### Token Efficiency
-
-- **Replace**: Generally 20-40% fewer tokens for small edits (no context lines required)
-- **apply_patch**: More tokens due to context and envelope, but better precision for complex and multi-file edits
-
-### Implementation
-
-- Both tools validate hunks/strings before writing
-- Both support LSP integration (workspace notifications)
-- Both participate in the same concurrent editing controls (path-based locking)
-- Both generate unified diffs for display (regardless of input format)
-
----
-
-## Migration from Single-Tool Systems
-
-If you're upgrading from a system with only one edit tool:
-
-1. **No action required**: Chord automatically selects the right tool per model
-2. **SessionImport compatibility**: Historical edit calls are mapped:
-   - `codex` provider → `apply_patch` tool
-   - Other providers → `edit` tool
-3. **Permission continuity**: Both tools share the file permission family, and `patch` rules are read as `apply_patch`
-
----
-
 ## FAQ
 
 **Q: Can I force a specific tool?**
-A: The tool selection is automatic and model-specific. Overriding it may reduce success rates.
+A: Yes. Set `compat.apply_patch.enabled: true` for patches or `false` for replacements. Usually, leave the automatic selection in place.
 
 **Q: What if my model isn't recognized?**
 A: By default, unrecognized models use the `edit` (replace) tool. gpt-5-and-later family names (gpt-5, gpt-5-mini, gpt-5-nano, gpt-5-codex, any `gpt-5.*` name, future majors like gpt-6) and `codex-auto-review` use `apply_patch`; you can override any model via `compat.apply_patch.enabled`.
@@ -357,9 +323,6 @@ A: Yes. Both work with any text file (detected encoding: UTF-8, UTF-16, GB18030,
 
 **Q: Can I use both tools in the same conversation?**
 A: Only one tool is visible at a time, based on the active model. You won't see both simultaneously.
-
-**Q: What about `hashline` (content-addressed anchors)?**
-A: Not currently enabled. It's a potential future enhancement after validation in production workloads.
 
 ---
 

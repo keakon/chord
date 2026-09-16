@@ -1,6 +1,6 @@
 # CLI Reference
 
-This page lists Chord's user-facing commands, subcommands, and flags. It also notes the Cobra-provided `help` and `completion` helpers exposed by the binary.
+Find commands, options, and examples for startup, authentication, sessions, cleanup, and worktree management.
 
 For installation and first-time setup, start with the [Quickstart](./quickstart.md).
 

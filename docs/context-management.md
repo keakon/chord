@@ -10,6 +10,12 @@ Both are configured under the top-level `context:` key in `config.yaml`. For
 the surrounding configuration model (files, layers, providers), see
 [Configuration & Auth](./configuration.md).
 
+Start with the defaults for most sessions. For everyday use, remember:
+
+- Reduction changes the current model request, not the saved conversation.
+- Compaction replaces subsequent context with a summary and archives the original in `history-N.md`. A summary is not the full source; consult the archive when details matter.
+- Use `/compact` to shorten context manually. Tune the thresholds below if compaction happens too often or requests exceed the context limit.
+
 ## Quick comparison
 
 | Aspect | Context compaction | Context reduction |
@@ -35,22 +41,7 @@ reduction settings: a session that raised its retention thresholds also gets a
 durable summary built from the larger retained input. The `history-N.md` archive
 is unaffected and always holds the full, untrimmed original.
 
-Automatic compaction is primarily driven by provider-reported input usage.
-Request-level reduction may make the current prompt smaller, but local estimates
-from that reduced prompt do not cancel a compaction request that was already
-triggered by provider usage. If a provider or gateway later stops reporting
-usage (or reports `input_tokens: 0`), Chord can use the last trusted non-zero
-usage sample and current context-contributing message bytes as a conservative
-fallback signal for the same automatic threshold.
-
-When a normal main-model response ends with `stop`, reaching the threshold does
-not by itself start a new compaction while the agent returns to idle. Chord
-keeps the automatic request armed and starts compaction at the next
-continuation barrier while preparing the next main-model request. The request
-and compaction may run in parallel; an oversized request is suspended until
-the compaction applies. If compaction was already running before the response
-stopped, Chord does not cancel it; its ready draft is still applied at the next
-safe continuation or idle barrier.
+Automatic compaction primarily uses input usage reported by the provider, with an estimate based on recent trusted usage when reporting is unavailable. After the threshold is reached, it normally starts before the next model request, not merely because a response ended. Compaction already in progress can finish and apply its result safely. A request paused for exceeding the context limit resumes after compaction.
 
 ## Context compaction
 
@@ -62,80 +53,26 @@ decisions, file evidence, etc.), archives old messages, and replaces the
 conversation history with the summary. The compacted session is persisted to
 disk.
 
-Every checkpoint opens with a **session anchors** block: the original request
-that started the session, plus the standing constraints extracted from your
-corrections. Compaction is recursive: each run re-summarizes the previous
-checkpoint, so anything left to the summarizer erodes a little every round.
-Anchors are exempt: they are copied forward verbatim from the previous
-checkpoint instead of being regenerated, and the summarizer is told not to
-restate or contradict them. The constraint list is bounded; on overflow the
-earliest entries (usually project-wide ground rules) and the newest ones are
-kept while the middle is dropped.
-
-Constraints the session later contradicted are not silently dropped: the
-newest instruction supersedes the older constraint, and the superseded entry
-stays visible in the anchors block with a `~` prefix so the model can see the
-direction change. Declarative constraints you state in a plain message, such as
-"keep the existing API behavior", get the same anchor authority as
-imperative corrections, because they too are standing instructions that would
-otherwise erode over repeated compactions. The checkpoint also lists the most
-recently archived `history-N.md` files with their content topics as a **history
-map**, so the model can read the exact archive back with the read tool when it
-needs the original wording instead of guessing which file to open. Older entries
-collapse into a single count so the map cannot grow without bound; their names
-follow the same `history-N.md` pattern and stay readable. Each archive also
-starts with a short **message index** (one line per message segment: start
-line, block kind, first-line snippet, `LARGE` marker for oversized tool
-output); the checkpoint tells the model to read the index first and then only
-the line ranges it needs, so exact-history lookups no longer mean re-reading
-whole archives through truncation.
-
-Continuation-oriented compaction keeps a safe recent tail as verbatim messages
-after the checkpoint. It prefers whole user turns (normally the latest two)
-within a token budget of about 5% of the context window; when even a single user
-turn exceeds that budget (the usual case once that turn carries a full tool loop)
-it falls back to the longest safe suffix that does fit rather than dropping the
-tail entirely. Tool-call/result pairs are never split, and short histories fall
-back to summarizing the full safe head when preserving the tail would leave too
-little material to summarize.
-
-### Retained recent messages
-
-Every checkpoint also embeds the newest real user messages from the archived
-head verbatim, plus a dangling interrupted assistant reply when the
-conversation ends on one, as a `## Retained Recent Messages` section inside
-the checkpoint, within a small estimated-token budget (`retain_recent_tokens`,
-built-in default 4096). Continuation profiles keep the most recent turns as raw
-messages below the checkpoint; the retained section covers the messages just
-before them, and for `archival` profiles (which keep no raw tail and are
-otherwise summary-only) it is the only verbatim remnant of the latest
-instructions. When a model-driven archival checkpoint has no live tail, the
-assistant text that declared the `compact_context` call is kept the same way,
-so the model's own analysis written just before the reset survives into the
-new window. Retention never substitutes for the summary: it only pins the
-newest instruction boundary so the continuation can resume without re-reading
-the archives.
-After a checkpoint applies, the continuation guidance states the precedence
-explicitly: when the checkpoint conflicts with a newer source, the newer one
-wins: latest user message or Done rejection, then current runtime state
-(todos, subagents, background tasks), then the files on disk, then tool results
-still in this conversation, then archived artifacts, and only then the
-checkpoint's own text. A summary is navigation and candidate working memory; it
-never becomes the authority for runtime, file, or transcript facts.
-Key files reloaded from the checkpoint are request-local overlays read from disk
-on every request; each `<file>` block includes its SHA-256 revision and whether
-it changed since that checkpoint's first injection. The overlay is injected only
-after the stable reduction surface is remembered, so it never enters
-prefix-compatibility checks and cannot invalidate incremental reduction reuse.
-
 **Minimal config** (enable automatic compaction):
 
 ```yaml
 context:
   compaction:
     threshold: 0.8
-    model_pool: compact
 ```
+
+Without `model_pool`, compaction uses the current agent's model pool. To use a dedicated pool, set `model_pool` to a pool you have already defined and prefer a model with a sufficiently large context window.
+
+### Retained recent messages
+
+The compacted summary is called a checkpoint. It preserves goals, key progress, and session constraints, with an index of history archives. Read the corresponding `history-N.md` when you need the original wording.
+
+- Continuation compaction tries to preserve recent complete turns, normally the latest two, within about 5% of the context window. If a turn is too large, it keeps a safe suffix without splitting tool calls from their results. An explicit `archival` profile does not keep this raw tail.
+- The checkpoint also retains recent archived user messages verbatim within `retain_recent_tokens`, whose default budget is 4096 estimated tokens. Interrupted replies or relevant assistant text preceding model-driven compaction can also be retained.
+- Session constraints carry forward. When capacity is exceeded, the earliest and most recent entries take priority. Superseded constraints are marked when newer instructions replace them.
+- A summary cannot override your latest message or completion rejection. Current task state, files on disk, and verifiable tool results take precedence over conflicting summary text. Key files used to restore context are read from disk again.
+
+Verbatim retention is bounded, and summaries can miss details. Put important requirements in project instructions or files, and consult archives when exact history matters.
 
 **Configuration fields**:
 

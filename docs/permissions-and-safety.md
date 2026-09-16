@@ -1,6 +1,6 @@
 # Permissions & Safety
 
-Chord is a coding agent that can read files, modify files, execute commands, and call external tools. Before public or shared use, make sure you understand its permission model and safety boundaries.
+Chord is a coding agent that can read files, modify files, execute commands, and call external tools. Inspect actions before approving them. Permission rules control risk; they are not an operating-system sandbox.
 
 ## Principles
 
@@ -153,17 +153,29 @@ Recommendations:
 
 ## File modification risk
 
-`edit`, `write`, and `delete` directly modify workspace files. `edit` is for local changes to one existing file, `write` creates or intentionally replaces a whole file, and `delete` removes whole files. `read`, `view_image`, and `grep` are read-only, but they still operate on local filesystem paths and can expose local file contents to the transcript/model context. Path-reading tools intentionally reject blocked device-style paths such as standard-stream device files (`/dev/stdin`, `/dev/stdout`, `/dev/stderr`, and similar) instead of treating them as normal files. Local text file tools prefer UTF-8 or BOM-marked Unicode (UTF-8/UTF-16/UTF-32) and retain constrained support for common regional encodings such as GB18030, Big5, and Shift-JIS. Ambiguous or unsupported encodings fail fast; `web_fetch` still honors declared HTTP response charsets.
+File tools act directly on the workspace; they are not a dry run. Use Git for important repositories and keep production configuration, deployment scripts, and secret files subject to `ask`.
 
-For existing regular files, `write` never refuses: it replaces the whole file and, when the model has not read the current version (or the file changed on disk after the model's last read), the previous contents are backed up to the session directory before being replaced, and the result warns and names that backup — the same text the model sees. When the change is recent, the warning also says how long ago the file's modification time shows the change happened (for example "about 45s ago"), so the model can tell an active external writer apart from a settled state; the age is best-effort and is only shown within 24 hours and never for timestamps predating the runtime start, which for a resumed session is later than the session's own start. Paged or budget-truncated reads simply mean the pre-write contents are treated as unobserved and backed up. If the existing file's contents cannot be read at all (for example read permission is denied), the write still proceeds, but no backup is possible and the result only warns. Content matching the state the model itself last wrote or edited is treated as known and is replaced without a warning or backup. Creating a new file needs no prior-version observation. `delete` is path-authorized instead of read-gated: its safety is carried by path resolution, permission rules, tracked locks, and pre-delete backups, so removing a file does not force a full read first. Because a delete does not require a prior read, Chord attempts to back up the file's exact on-disk bytes (including empty files) under the session directory unless the model already observed that current content this session; No backup follows a symbolic link: deleting a link only drops the directory entry and leaves its target untouched, and `write` refuses to follow one at all, so a link target is never copied into the session directory.
+### Which actions change files
 
-`edit` and `apply_patch` still read the current disk state at execution time and guard against stale anchors through exact-match / patch-plan validation; if drift is detected at runtime but the current anchors still validate, Chord warns instead of rejecting and makes a best-effort backup of risky non-empty pre-write contents under the active session directory. Backups are capped at 10 per path, 200 per session, 10 MiB per file, and 50 MiB per session; if a required backup exceeds those limits or otherwise fails, Chord logs the failure and continues the localized edit without adding backup diagnostics to the model result. Session deletion/cleanup removes these backups with the session directory.
+| Action | Effect |
+| --- | --- |
+| `write` | Create a file or replace an entire existing regular file. |
+| `edit` / `apply_patch` | Change local content; patches can also add, move, and delete files. Independent file groups may succeed partially, so inspect applied changes before retrying. |
+| `delete` | Delete a file without requiring a complete read first. Deleting a symbolic link removes the link, not its target; `write` refuses to follow symbolic links. |
+| `read` / `view_image` / `grep` | Leave files unchanged, but their content can enter the conversation and model requests. Read-only does not prevent sensitive data from leaving the machine. |
 
-Recommendations:
+### Checks and backups before writing
 
-- Use Git in important repositories so changes are easy to review and roll back
-- Keep production config, deployment scripts, and secret files as `ask`
-- Use finer-grained rules for generated files or test artifact directories
+- **Whole-file replacement**: `write` does not refuse solely because the model has not read the current version. Unread, partially read, or subsequently changed content is backed up when possible, with the location reported in the result. Content matching the model's most recent write or edit needs no additional backup.
+- **Unreadable previous content**: the write may still proceed without a backup; the result warns about the risk. A new file does not require a previous-version backup.
+- **Local edits**: `edit` and `apply_patch` check their anchors against the current file. If a changed file still has valid anchors, editing may proceed after a warning, with a best-effort backup of risky non-empty previous content.
+- **Deletion**: if the model has not observed the file's current content, Chord attempts to back up its exact disk bytes, including empty files. Backups do not follow symbolic links.
+
+Backups are limited to 10 per path, 200 per session, 10 MiB per file, and 50 MiB per session. A failed or oversized backup does not stop a local edit, and the failure may appear only in logs. **Session backups are not a substitute for version control; cleaning up a session also deletes its backups.**
+
+### File-reading limits
+
+Path-reading tools reject restricted device paths such as `/dev/stdin`, `/dev/stdout`, and `/dev/stderr`. Local text tools prefer UTF-8 or BOM-marked Unicode, with limited support for encodings such as GB18030, Big5, and Shift-JIS. Ambiguous or unsupported encodings fail with an error. `web_fetch` decodes the character set declared by the HTTP response.
 
 ## Credentials and config
 

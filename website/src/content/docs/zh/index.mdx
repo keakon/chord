@@ -1,124 +1,106 @@
 ---
 title: Chord
-description: 一个终端 Coding Agent：任务跑得更快、花费更低、内存占用保持很小。
+description: 更快、更省、更轻的终端 Coding Agent。
 template: splash
 head:
   - tag: title
     content: "Chord：更快、更省、更轻的终端 Coding Agent"
 hero:
-  tagline: 一个终端 Coding Agent：任务跑得更快、花费更低、内存占用保持很小。
+  tagline: 更快、更省、更轻的终端 Coding Agent。
   actions:
     - text: 快速开始
       link: /chord/zh/quickstart/
       icon: right-arrow
       variant: primary
+    - text: 模型配置速查
+      link: /chord/zh/model-configs/
+      variant: secondary
     - text: GitHub
       link: https://github.com/keakon/chord
       icon: external
       variant: minimal
 ---
 
-import { Card, CardGrid } from '@astrojs/starlight/components';
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 import screenshot from '../../../../../docs/assets/screenshot.png';
+
+<figure class="chord-screenshot">
+  <img
+    src={screenshot.src}
+    alt="Chord 终端界面：左侧是工具调用、补丁和诊断，右侧是模型、用量、待办和变更文件"
+  />
+</figure>
+
+## 亮点功能
+
+<ul className="chord-highlights">
+  <li>Vim 风格键盘操作</li>
+  <li>失败时自动切换备用模型</li>
+  <li>支持预览图片</li>
+  <li>导入外部会话</li>
+  <li>查看 Codex 额度与重置时间</li>
+  <li>只在真正需要你时才通知</li>
+</ul>
 
 ## 实测数据
 
-<CardGrid>
-  <Card title="6m37s" icon="rocket">
-    同一个 DeepSWE 任务里六款 agent harness 中最快，比第二名快 33%（第二名 9m50s）。
-  </Card>
-  <Card title="￥0.348" icon="approve-check-circle">
-    六次运行里成本最低，比第二名便宜 34%（第二名 ￥0.527）。
-  </Card>
-  <Card title="39MB" icon="database">
-    加载 200 条消息后的内存，空会话时为 30MB。Claude Code 达到 216MB。
-  </Card>
-</CardGrid>
+六款同类编码 agent 用同一个模型（deepseek-v4.1-flash）跑同一个 [DeepSWE v1.1 任务](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration)：给 `httpx` 加上流式 JSON 迭代接口。Chord 0.8.1 用时最短、成本最低，第二名的耗时是它的 1.49 倍、成本是 1.51 倍。
+
+### 真实编码任务
+
+| 工具 | 耗时 | 成本 |
+|---------|------|------|
+| Chord 0.8.1 | **6m37s** <span class="chord-bar" style="--bar: 30%"></span> | **￥0.348** <span class="chord-bar" style="--bar: 32%"></span> |
+| deepseek-harness 0.1.5-rc.1 | 9m50s（1.49 倍） <span class="chord-bar" style="--bar: 44%"></span> | ￥0.527（1.51 倍） <span class="chord-bar" style="--bar: 48%"></span> |
+| pi 0.85.1 | 10m22s（1.57 倍） <span class="chord-bar" style="--bar: 46%"></span> | ￥0.576（1.66 倍） <span class="chord-bar" style="--bar: 52%"></span> |
+| codex 0.154.0 | 17m01s（2.57 倍） <span class="chord-bar" style="--bar: 76%"></span> | ￥0.929（2.67 倍） <span class="chord-bar" style="--bar: 84%"></span> |
+| mini-swe-agent 2.4.6 | 18m29s（2.79 倍） <span class="chord-bar" style="--bar: 82%"></span> | ￥0.835（2.40 倍） <span class="chord-bar" style="--bar: 76%"></span> |
+| claude code 2.1.272 | 22m25s（3.39 倍） <span class="chord-bar" style="--bar: 100%"></span> | ￥1.104（3.17 倍） <span class="chord-bar" style="--bar: 100%"></span> |
+
+括号里是相对 Chord 的倍数。
+
+### 应用内存
+
+测试环境：macOS 15.3.2（arm64）。
+
+| 工具 | 空会话 | 200 条消息 | 增量 |
+|---------|--------|------------|------|
+| Chord 0.8.1 | 30MB | **39MB** | **+9MB** |
+| codex 0.154.0 | **27MB** | 47MB | +20MB |
+| claude code 2.1.273 | 143MB | 216MB | +73MB |
 
 以上数据来自一次任务实测和一次内存场景，不代表普遍结果。完整数据表、测量方法和实现说明见[性能](/chord/zh/performance/#实测数据)。
 
-<figure class="chord-screenshot">
-  <img src={screenshot.src} alt="Chord 终端界面截图" />
-</figure>
-
-## 三步上手
+## 两步上手
 
 <CardGrid>
   <Card title="1. 安装" icon="download">
-    下载预构建二进制不需要安装 Go。已安装 Go 1.27.0+ 时，也可以直接用源码安装：
+    **已安装 Go 1.27.0+**：直接用源码安装：
 
     ```bash
     go install github.com/keakon/chord/cmd/chord@latest
     ```
 
-    未安装 Go 1.27.0+ 时，可从 [GitHub Releases](https://github.com/keakon/chord/releases) 下载预构建二进制，解压后把 `chord` 放到 `PATH` 中。
+    **未安装 Go 1.27.0+**：从 [GitHub Releases](https://github.com/keakon/chord/releases) 下载预构建二进制，解压后把 `chord` 放到 `PATH` 中。
   </Card>
-  <Card title="2. 先运行一次初始化向导" icon="pen">
-    在交互式终端里直接运行：
-
-    ```bash
-    chord
-    ```
-
-    如果缺少 `config.yaml`，Chord 会启动一次性的初始化向导。向导会创建最小可用的 `config.yaml`，必要时再创建 `auth.yaml`。
-
-    如果你更希望手写 YAML，或需要不同的 provider / 模型配置，见[快速开始](/chord/zh/quickstart/)。
-  </Card>
-  <Card title="3. 在项目里启动" icon="window">
+  <Card title="2. 在项目里启动" icon="window">
     ```bash
     cd my-project
     chord
     ```
-    在某个项目中首次运行时，Chord 会按需创建 `.chord/`。
+    第一次运行时，如果未检测到 `config.yaml`，会启动初始化向导。然后直接描述第一个任务，按 `Enter` 发送。
   </Card>
 </CardGrid>
 
-## 其他能力
+支持 macOS、Linux、Windows（含 WSL），少数系统级能力只在部分平台生效，见[平台支持](/chord/zh/platforms/)。
 
-- 键盘优先，Vim 风格
-- 需要你处理时才通知
-- 模型池热切换，无需重启
-- 通过 `chord headless` 远程操控
-- 导入 Claude Code、Codex、OpenCode 的会话
-- LSP 集成
-- 终端内预览图片
-- 显示 Codex 订阅额度与重置时间
-- 可自定义的 Agent 团队
-- 基于 git worktree 的并行任务
-
-## 按任务找文档
+## 文档
 
 <CardGrid>
-  <Card title="快速启动" icon="rocket">
-    安装、初始化 provider、运行 `chord doctor models`，然后发送第一个任务。
-    [前往 →](/chord/zh/quickstart/)
-  </Card>
-  <Card title="配置模型" icon="setting">
-    Provider / auth schema，以及常见场景的可复制示例。
-    [配置 →](/chord/zh/configuration/) · [示例 →](/chord/zh/examples/)
-  </Card>
-  <Card title="CLI 参考" icon="laptop">
-    所有命令、子命令和 flag，包括 `chord cleanup`、worktree、headless。
-    [前往 →](/chord/zh/cli/)
-  </Card>
-  <Card title="权限与安全" icon="padlock">
-    权限模型、审批流程，以及 Chord 强制执行的安全边界。
-    [前往 →](/chord/zh/permissions-and-safety/)
-  </Card>
-  <Card title="长任务" icon="list-format">
-    用 `/loop` 和 `Done` 承接多步骤实现、验证和修复。
-    [前往 →](/chord/zh/usage/#loop持续执行模式)
-  </Card>
-  <Card title="扩展定制" icon="puzzle">
-    Agents、skills、MCP、hooks、自定义 slash 命令。
-    [定制 →](/chord/zh/customization/) · [Hooks →](/chord/zh/hooks/)
-  </Card>
-  <Card title="远程控制" icon="server">
-    安全地通过 `chord headless` 和 chord-gateway 从其他入口操控本机 Chord。
-    [前往 →](/chord/zh/headless/)
-  </Card>
-  <Card title="排障" icon="warning">
-    启动、认证、模型、TUI、上下文和集成问题。
-    [前往 →](/chord/zh/troubleshooting/)
-  </Card>
+  <LinkCard title="快速启动" href="/chord/zh/quickstart/" description="安装、连接模型，完成第一个任务。" />
+  <LinkCard title="配置模型" href="/chord/zh/configuration/" description="设置模型和登录凭据，按场景复制示例。" />
+  <LinkCard title="权限与安全" href="/chord/zh/permissions-and-safety/" description="决定哪些操作需要确认，了解文件和命令的风险。" />
+  <LinkCard title="长任务" href="/chord/zh/usage/#loop持续执行模式" description="让实现、检查和修复连续推进。" />
+  <LinkCard title="扩展定制" href="/chord/zh/customization/" description="定制角色、技能和外部工具，用 hooks 自动执行检查。" />
+  <LinkCard title="排障" href="/chord/zh/troubleshooting/" description="启动、认证、模型、TUI、上下文和集成问题。" />
 </CardGrid>

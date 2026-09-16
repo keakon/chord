@@ -10,18 +10,29 @@ Each benchmark below was run against the versions named in its table.
 
 ### Real-world coding task
 
-We ran a [DeepSWE v1.1 task](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration) that adds streaming JSON iteration to `httpx`, across six agent harnesses. Chord finished first and cheapest: 6m37s and $0.052, with the next-best run taking 1.5× as long and costing 1.5× as much.
+We ran a [DeepSWE v1.1 task](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration) that adds streaming JSON iteration to `httpx`, across six agent harnesses. Chord finished first and cheapest: 6m37s and $0.052, with the next-best run taking 1.49× as long and costing 1.52× as much.
 
 The task requires handling structured JSON streaming per media type (`application/json`, `application/*+json`, NDJSON, and JSON text sequences), plus stream consumption, decoding errors, and content-type parameters.
 
+| Harness | Time | Cost |
+|---------|------|------|
+| **Chord 0.8.1** | **6m37s** | **$0.052** |
+| deepseek-harness 0.1.5-rc.1 | 9m50s (1.49×) | $0.079 (1.52×) |
+| pi 0.85.1 | 10m22s (1.57×) | $0.086 (1.65×) |
+| codex 0.154.0 | 17m01s (2.57×) | $0.139 (2.67×) |
+| mini-swe-agent 2.4.6 | 18m29s (2.79×) | $0.125 (2.40×) |
+| claude code 2.1.272 | 22m25s (3.39×) | $0.166 (3.19×) |
+
+Full token breakdown:
+
 | Harness | Time | LLM calls | Input tokens | Output tokens | Cache read tokens | Cost |
 |---------|------|-----------|--------------|---------------|-------------------|------|
-| **Chord v0.8.1** | **6m37s** | **49** | **54,530** | **58,559** | **2,961,280** | **$0.052** |
-| deepseek-harness 0.1.5-rc.1 | 9m50s (1.5×) | 93 | 58,569 | 80,314 | 7,357,440 | $0.079 (1.5×) |
-| pi 0.85.1 | 10m22s (1.6×) | 101 | 79,189 | 94,733 | 5,871,488 | $0.086 (1.7×) |
-| codex 0.154.0 | 17m01s (2.6×) | 121 | 72,363 | 135,310 | 15,787,264 | $0.139 (2.7×) |
-| mini-swe-agent 2.4.6 | 18m29s (2.8×) | 158 | 161,893 | 77,320 | 18,206,592 | $0.125 (2.4×) |
-| claude code 2.1.272 | 22m25s (3.4×) | 143 | 106,546 | 214,126 | 7,024,768 | $0.166 (3.2×) |
+| **Chord 0.8.1** | **6m37s** | **49** | **54,530** | **58,559** | **2,961,280** | **$0.052** |
+| deepseek-harness 0.1.5-rc.1 | 9m50s (1.49×) | 93 | 58,569 | 80,314 | 7,357,440 | $0.079 (1.52×) |
+| pi 0.85.1 | 10m22s (1.57×) | 101 | 79,189 | 94,733 | 5,871,488 | $0.086 (1.65×) |
+| codex 0.154.0 | 17m01s (2.57×) | 121 | 72,363 | 135,310 | 15,787,264 | $0.139 (2.67×) |
+| mini-swe-agent 2.4.6 | 18m29s (2.79×) | 158 | 161,893 | 77,320 | 18,206,592 | $0.125 (2.40×) |
+| claude code 2.1.272 | 22m25s (3.39×) | 143 | 106,546 | 214,126 | 7,024,768 | $0.166 (3.19×) |
 
 Multipliers are relative to Chord.
 
@@ -39,9 +50,9 @@ We also measured the interactive app shell's memory: with an empty session and a
 
 | Harness | Empty session memory | 200-message memory |
 |---------|----------------------|--------------------|
-| Chord v0.8.1 | 30MB | 39MB |
-| Codex-CLI v0.154.0 | 27MB | 47MB |
-| Claude Code v2.1.273 | 143MB | 216MB |
+| Chord 0.8.1 | 30MB | 39MB |
+| codex 0.154.0 | 27MB | 47MB |
+| claude code 2.1.273 | 143MB | 216MB |
 
 Notes:
 
@@ -67,7 +78,7 @@ Notes:
 
 ## Request and context cost
 
-Not all performance work is UI-side. Chord also reduces model-side cost by pruning stale tool outputs at request time, preserving structured summaries, and compacting long-running conversations before they hit the model limit. These optimizations reduce latency, token usage, and provider cost without deleting durable session history.
+Not all performance work is UI-side. Chord also reduces model-side cost by pruning stale tool outputs at request time, preserving structured summaries, and compacting long-running conversations before they hit the model limit. Request reduction leaves saved history unchanged; durable compaction replaces subsequent context with a summary and archives the original. These mechanisms control request size and cost; the benefit depends on the task.
 
 See [Context management: Reduction](./context-management.md#context-reduction) for the available context reduction settings.
 

@@ -80,11 +80,7 @@ Chord writes here. Lose it and you lose history.
 
 `<session-id>` is a 17-digit number (`YYYYMMDDHHmmSSfff`) generated from the
 local wall clock, so it reads as local date/time and stays safe as a directory
-or file name. Session IDs created before this change were derived from UTC and
-are not rewritten, so a sessions directory can mix both: outside UTC, an older
-ID reads as a different wall time than the one it was created at. The ID is an
-identifier and a rough creation-time hint, not the session ordering key, so the
-mix does not affect which session Chord picks. Session lists use the newer of
+or file name. The ID is an identifier and a rough creation-time hint, not the session ordering key. Session lists use the newer of
 two modification times, `main.jsonl` and an existing `usage-summary.json`. Chord
 stats these small per-session files instead of scanning full transcripts or
 maintaining a separate project-level index. Copying or restoring files can make
@@ -101,7 +97,7 @@ Sessions, runtime cache, and exports are all keyed on this — that is how a fre
 
 `chord --worktree <name>` creates a chord-managed git worktree under `worktrees/<repo-id>/<slug>` **outside the original repository**, with its own project key. Each chord-managed worktree therefore has isolated sessions, cache, and exports.
 
-To remove a worktree (and only its chord-side data), use `chord worktree remove <name>` — see [CLI: chord worktree](./cli.md#chord-worktree). Manually deleting the worktree directory is not recommended; you would leave orphan registry entries that `chord cleanup project` would later flag.
+Use `chord worktree remove <name>` to remove the working directory and its sessions, caches, and exports. The branch is kept by default; `--force` also force-deletes the branch — see [CLI: chord worktree](./cli.md#chord-worktree). Manually deleting the worktree directory is not recommended; you would leave orphan registry entries that `chord cleanup project` would later flag.
 
 ## Cache dir: `~/.cache/chord/`
 

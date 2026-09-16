@@ -11,7 +11,7 @@ For how `allow` / `ask` / `deny` are evaluated, including the special coupling b
 | `read` | Read a local file into context, with optional 1-based `offset` / `limit` line paging. |
 | `write` | Create a file or intentionally replace a whole file. |
 | `edit` | Replace exact text in one existing file. |
-| `apply_patch` | Apply a Codex-style patch envelope (`*** Begin Patch`): add, update, delete, or move one or more files in a single transactional call. `patch` is accepted as a legacy alias in rules and filters. |
+| `apply_patch` | Apply a Codex-style patch envelope (`*** Begin Patch`): add, update, delete, or move files. Independent file groups may succeed partially; check applied changes before retrying. |
 | `delete` | Remove whole files. |
 | `view_image` | Load a local PNG/JPEG into context; available only when the active model pool's first model supports image input. Uses the same local-path permission handling as `read`. |
 
@@ -31,12 +31,20 @@ In the TUI, an `lsp` card shows the operation and query position in its header (
 
 | Tool | What it does |
 | --- | --- |
-| `shell` | Run a non-interactive shell command, either in the foreground or as a background job with `run_in_background: true`. A foreground command that runs past `yield_time_ms` (default 90000) is promoted to a background job automatically; `timeout_ms` caps execution: a foreground command defaults to 600000 and is capped at 600000, while `run_in_background: true` is capped at 21600000 (6h) and carries no deadline unless `timeout_ms` is given; `0` means no deadline. A foreground command that cannot be promoted — one made only of deliberate waits (`sleep`) and short `git` queries, or a command that does not parse — keeps the default cap even when `timeout_ms` is `0`, so no foreground call can block the turn without a deadline; a long `git` operation (`clone`, `fetch`, `pull`, `push`, `submodule`, `gc`, `fsck`, `repack`, `bundle`, `filter-branch`) is promotable like any other long command. |
-| `job_output` | Read a background job's output since the previous read, then its `[status: ...]` line. `wait` selects whether the call blocks: `none` (default) returns what is available now, `output` waits for the next output, and `exit` waits for the job to finish — each capped at 30s by the runtime. A wait that expires is not an error: the job keeps running and the reply reports it as running. Repeated non-blocking reads that find no new output are reported as polling and then rejected, so keep reading only while there is a reason to. Terminal escape sequences are stripped from what the model sees. |
+| `shell` | Run commands; long commands can continue as background jobs. See below. |
+| `job_output` | Read new job output, or wait briefly for output or completion. |
 | `job_list` | List the background jobs you can read or stop (id, status, elapsed, label), including jobs started by the main agent and by your direct owner. |
 | `job_kill` | Stop a background job by `job_id`, with an optional `reason`. |
 
+### Command execution and timeouts
+
+Run a non-interactive shell command, either in the foreground or as a background job with `run_in_background: true`. A foreground command that runs past `yield_time_ms` (default 90000) is promoted to a background job automatically; `timeout_ms` caps execution: a foreground command defaults to 600000 and is capped at 600000, while `run_in_background: true` is capped at 21600000 (6h) and carries no deadline unless `timeout_ms` is given; `0` means no deadline. A foreground command that cannot be promoted — one made only of deliberate waits (`sleep`) and short `git` queries, or a command that does not parse — keeps the default cap even when `timeout_ms` is `0`, so no foreground call can block the turn without a deadline; a long `git` operation (`clone`, `fetch`, `pull`, `push`, `submodule`, `gc`, `fsck`, `repack`, `bundle`, `filter-branch`) is promotable like any other long command.
+
 Long commands do not have to block the turn. A command that outlives its foreground budget keeps running as a background job, the tool card names its job id, and the agent is notified when the job finishes, so it can do independent work or end the turn and be woken by the completion instead of waiting. `job_output` reads incremental output and only reports what is new, and a bounded wait that expires leaves the job alive. Consecutive job-completion wakes with no user input in between are bounded; after that, further completions wait for your next message. A background job also ends with the session (switching sessions or exiting the client stops it), so day-scale work belongs in an external runner such as tmux, systemd, or CI.
+
+### Reading background output
+
+Read a background job's output since the previous read, then its `[status: ...]` line. `wait` selects whether the call blocks: `none` (default) returns what is available now, `output` waits for the next output, and `exit` waits for the job to finish — each capped at 30s by the runtime. A wait that expires is not an error: the job keeps running and the reply reports it as running. Repeated non-blocking reads that find no new output are reported as polling and then rejected, so keep reading only while there is a reason to. Terminal escape sequences are stripped from what the model sees.
 
 ## Web
 
@@ -64,11 +72,15 @@ These tools control agent workflows rather than local side effects, so YOLO does
 | --- | --- |
 | `done` | Request loop exit with a final Markdown report. Mounted only while a loop is running, so ordinary sessions never see it and return their completion directly as assistant text. Loop exits remain gated by exit conditions and local confirmation. |
 | `handoff` | Transfer a plan/work to another role for execution. |
-| `delegate` | Start a delegated SubAgent workstream and return its startup handle (`task_id` / `agent_id`) immediately. It does not wait for completion. The call must include an `expected_write_scope`: declare the narrowest `files`, `path_prefix`, or `modules` scope covering the work. The declaration is coordination metadata, not an enforced boundary — whether the worker may modify files at all is decided by its role's permission rules (a role that denies `write`, `edit`, `delete`, and `apply_patch` registers none of them), and the runtime never blocks a worker's file tools outside the declared paths. Declaring an honest narrow scope keeps sibling-overlap hints meaningful: when the declared scope overlaps another still-active task's, the delegation still starts and the handle carries `scope_conflict: true` with `suggested_task_id` and `suggested_action: serialize_or_worktree` — telling you to run the two tasks serially, coordinate the shared edits through `notify`, or give the new worker its own git worktree. A read-only task should pick an agent whose role registers no file-modifying tools and pass an empty scope, which is accepted only for such roles; a role that can write files must declare a non-empty scope or the delegation is rejected. Command tools such as `shell` are never scope-restricted and stay governed by the role's permission rules. Denying `delegate` also disables `cancel` and nested delegation for that role. |
+| `delegate` | Start a sub-task and return its handle immediately. Role permissions determine capabilities; declared scope coordinates work. |
 | `cancel` | Cancel a delegated worker; requires `delegate` to be enabled. |
 | `complete` | SubAgent-side: mark the current delegated task as complete with a summary. |
 | `escalate` | SubAgent-side: request parent-agent intervention without ending the task. |
 | `notify` | Send a non-blocking update to the owner or a specific delegated worker. A targeted message resumes a worker that already finished or failed, with its own transcript; a cancelled task is not resumable. See the message forms below. |
+
+### Delegation and work scope
+
+Start a delegated SubAgent workstream and return its startup handle (`task_id` / `agent_id`) immediately. It does not wait for completion. The call must include an `expected_write_scope`: declare the narrowest `files`, `path_prefix`, or `modules` scope covering the work. The declaration is coordination metadata, not an enforced boundary — whether the worker may modify files at all is decided by its role's permission rules (a role that denies `write`, `edit`, `delete`, and `apply_patch` registers none of them), and the runtime never blocks a worker's file tools outside the declared paths. Declaring an honest narrow scope keeps sibling-overlap hints meaningful: when the declared scope overlaps another still-active task's, the delegation still starts and the handle carries `scope_conflict: true` with `suggested_task_id` and `suggested_action: serialize_or_worktree` — telling you to run the two tasks serially, coordinate the shared edits through `notify`, or give the new worker its own git worktree. A read-only task should pick an agent whose role registers no file-modifying tools and pass an empty scope, which is accepted only for such roles; a role that can write files must declare a non-empty scope or the delegation is rejected. Command tools such as `shell` are never scope-restricted and stay governed by the role's permission rules. Denying `delegate` also disables `cancel` and nested delegation for that role.
 
 ### Notifications and replies
 

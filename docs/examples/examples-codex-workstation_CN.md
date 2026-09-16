@@ -6,6 +6,8 @@
 - 想开 Go / Python LSP
 - 想额外放一个只读 reviewer agent
 
+先完成 Codex 登录并确认模型可用，再按需要添加 LSP 和审查角色。不使用的服务商、模型池或角色应连同其引用一起移除；启用 LSP 前要先安装对应语言服务器。
+
 ## `~/.config/chord/config.yaml`
 
 ```yaml

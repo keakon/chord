@@ -32,68 +32,45 @@ codesign --force --sign - /path/to/chord
 
 ## 2. 第一次运行
 
-在交互式终端里直接运行 `chord`。如果缺少 `config.yaml`，Chord 会启动一次性的初始化向导。
-向导会创建最小可用的 `config.yaml`，必要时再创建 `auth.yaml`，如果已有匹配的 `auth.yaml` 凭据则尽量直接复用，并在结束时展示实际路径。
-即使 stdin 被重定向，只要还能拿到控制 TTY，向导仍会使用该 TTY 交互；只有没有控制 TTY 时，Chord 才会立即返回初始化错误而不是等待输入。
+在交互式终端里进入你的项目，再启动 Chord：
 
-如果你更希望手写 YAML 而不是使用向导，见[配置与认证](./configuration_CN.md)或可直接复制粘贴的[示例配置库](./examples/index_CN.md)。
+```bash
+cd my-project
+chord
+```
 
-对于 API key 配置，向导提供一个通用的 API key provider 路径。它会要求你输入一个 URL path 以下列后缀结尾的 API URL，并在提示里给出示例：
+缺少 `config.yaml` 时，初始化向导会引导你选择接入方式：
 
-- `/responses`：OpenAI Responses API / 兼容网关
-- `/messages`：Anthropic Messages API / 兼容网关
-- `/chat/completions`：OpenAI Chat Completions 兼容网关
-- `/models`：Gemini Generate Content 基础路径
+- **API key**：准备服务商给出的完整 API URL、模型名称和密钥；需要代理时可在向导中填写。
+- **Codex OAuth**：按提示完成登录，无需手动填写 API key。
 
-Chord 会根据这个端点推荐起始 provider 名和模型名，例如 `openai` / `gpt-6-astra`、`anthropic` / `claude-opus-4.8`、`gemini` / `gemini-3.8-flash`。
+向导会创建最小可用的 `config.yaml`，必要时创建 `auth.yaml`，并显示保存位置；已有匹配凭据时会尽量复用。首次进入项目时，Chord 也会按需创建 `.chord/`。
 
-如果 provider 需要代理，向导也可以把 proxy URL 写入 `config.yaml`，并给出 `http://127.0.0.1:1080`、`socks5://127.0.0.1:1080` 这类示例。
+想手写配置？从[示例配置库](./examples/index_CN.md)选一个起点。API URL 格式、凭据和模型池设置见[配置与认证](./configuration_CN.md)。无交互终端的初始化问题见[常见问题排查](./troubleshooting_CN.md)。
 
-如果你选择的是 API key provider 路径，可用下面的命令检查已配置模型：
+## 3. 检查连接
+
+完成配置后就可以发送消息。若 API key 配置无法请求模型，退出 Chord 后运行：
 
 ```bash
 chord doctor models
 ```
 
-如果你选择的是 Codex OAuth 路径，向导会在结束前直接完成 OAuth 登录。它会创建一个 `preset: codex` provider，以 `gpt-6-astra` 作为初始模型，并把 GPT-5.6 Sol/Terra/Luna 与 GPT-5.2–5.5 配置为 fallback。
+先解决认证或连接错误，再重新运行 `chord`。错误排查见[常见问题排查](./troubleshooting_CN.md)。
 
-## 3. 运行
-
-在项目目录中执行：
-
-```bash
-cd my-project
-chord
-# 或
-go run ./cmd/chord/
-```
-
-首次运行时，Chord 会按需创建项目级 `.chord/` 目录。
-
-无界面控制面模式：
-
-```bash
-chord headless
-# 或
-go run ./cmd/chord/ headless
-```
-
-headless 模式说明见 [Headless 集成](./headless_CN.md)。
+> `go run ./cmd/chord/` 仅适用于 Chord 源码仓库。在自己的项目中使用已安装的 `chord`，不要把源码启动命令当作替代。
 
 ## 4. 首次交互
 
-启动后：
-
-1. 直接输入问题
-2. 按 `Enter` 发送
-3. 按 `Esc` 进入 Normal 模式
-4. 按 `q` 退出，或 2 秒内连按两次 `Ctrl+C`
-
-试试一条简单消息：
+直接说明你想让它做什么，按 `Enter` 发送。比如先让它读一遍你的项目：
 
 ```text
-请先阅读当前项目结构，然后总结它的主要模块。
+请解释这个项目的主要模块和测试入口，先不要修改文件。
 ```
+
+查看回答和工具执行结果；遇到权限确认时，先阅读待执行操作，再决定是否允许。熟悉项目后，可以继续要求实现一个具体改动，并检查产生的差异。
+
+退出时按 `Esc` 进入 Normal 模式，再按 `q`；也可在 2 秒内连按两次 `Ctrl+C`。
 
 ## 5. 常用启动方式
 
@@ -118,8 +95,10 @@ worktree 列表/移除、跨 worktree resume 与 headless 集成等完整用法�
 
 ## 6. 下一步阅读
 
-- [使用指南](./usage_CN.md)
-- [配置与认证](./configuration_CN.md)
-- [权限与安全](./permissions-and-safety_CN.md)
-- [扩展与定制](./customization_CN.md)
-- [常见问题排查](./troubleshooting_CN.md)
+按这个顺序读：
+
+1. [权限与安全](./permissions-and-safety_CN.md)：第一次改文件前先定好审批规则。
+2. [使用指南](./usage_CN.md)：日常操作、会话与长任务。
+3. [配置与认证](./configuration_CN.md)：服务商、凭据和模型池。
+4. [扩展与定制](./customization_CN.md)：角色、技能与项目配置。
+5. [常见问题排查](./troubleshooting_CN.md)：出错时看这里。

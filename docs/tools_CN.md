@@ -11,7 +11,7 @@
 | `read` | 读取本地文件进上下文，支持 1-based 的 `offset` / `limit` 行分页。 |
 | `write` | 创建文件，或有意整体替换一个文件。 |
 | `edit` | 在现有文件中替换精确文本。 |
-| `apply_patch` | 应用 Codex 风格补丁信封（`*** Begin Patch`）：在单次事务性调用中新增、更新、删除或移动一个或多个文件。规则和过滤器中仍接受旧别名 `patch`。 |
+| `apply_patch` | 应用 Codex 风格补丁信封（`*** Begin Patch`）：新增、更新、删除或移动文件。独立文件组可能部分成功；重试前先检查已应用的修改。 |
 | `delete` | 删除整个文件。 |
 | `view_image` | 加载本地 PNG/JPEG 进上下文；仅当生效模型池的第一个模型支持图片输入时可用。本地路径权限处理与 `read` 相同。 |
 
@@ -31,12 +31,20 @@
 
 | 工具 | 用途 |
 | --- | --- |
-| `shell` | 执行非交互式 shell 命令。默认前台运行；带 `run_in_background: true` 时作为后台 job 启动。前台命令超过 `yield_time_ms`（默认 90000）会自动转成后台 job；`timeout_ms` 限制执行时长：前台命令默认 600000、上限 600000；`run_in_background: true` 上限 21600000（6 小时），且未显式给出 `timeout_ms` 时不设截止；`0` 表示不设截止。不可自动提升的前台命令——只由刻意等待（`sleep`）和短 `git` 查询组成的命令，或无法解析的命令——即使传 `timeout_ms: 0` 也保留默认上限，因此前台调用不会无限阻塞当前回合；耗时较长的 `git` 操作（`clone`、`fetch`、`pull`、`push`、`submodule`、`gc`、`fsck`、`repack`、`bundle`、`filter-branch`）和其它长命令一样可以提升。 |
-| `job_output` | 读取后台 job 自上次读取以来的输出，末尾附 `[status: ...]` 状态行。`wait` 决定这次调用是否阻塞：`none`（默认）只返回当前已有输出，`output` 等到有新输出，`exit` 等到 job 结束——每次等待都由 runtime 限制在 30 秒内。等待超时不算错误：job 继续运行，结果里会标成 running。连续多次非阻塞读取都没有新输出时，会先被提示为轮询、随后被拒绝，所以只在有理由时才继续读。返回给模型的文本会去掉终端转义序列。 |
+| `shell` | 执行命令；长命令可转为后台任务，详见下方说明。 |
+| `job_output` | 增量读取后台任务输出，或限时等待输出、完成。 |
 | `job_list` | 列出你可读取或停止的后台 job（id、status、已运行时长、标签），含主 agent 与你直接 owner 启动的 job。 |
 | `job_kill` | 按 `job_id` 停止后台 job，可选 `reason`。 |
 
+### 命令执行与超时
+
+执行非交互式 shell 命令。默认前台运行；带 `run_in_background: true` 时作为后台 job 启动。前台命令超过 `yield_time_ms`（默认 90000）会自动转成后台 job；`timeout_ms` 限制执行时长：前台命令默认 600000、上限 600000；`run_in_background: true` 上限 21600000（6 小时），且未显式给出 `timeout_ms` 时不设截止；`0` 表示不设截止。不可自动提升的前台命令——只由刻意等待（`sleep`）和短 `git` 查询组成的命令，或无法解析的命令——即使传 `timeout_ms: 0` 也保留默认上限，因此前台调用不会无限阻塞当前回合；耗时较长的 `git` 操作（`clone`、`fetch`、`pull`、`push`、`submodule`、`gc`、`fsck`、`repack`、`bundle`、`filter-branch`）和其它长命令一样可以提升。
+
 长命令不必阻塞当前回合。超出前台预算的命令会继续作为后台 job 运行，工具卡片会显示它的 job id，job 结束时 agent 会收到通知，它可以先做别的事，或结束回合并等完成通知唤醒，无需干等。`job_output` 只返回增量输出；有界等待超时也不会杀掉 job。连续的后台完成唤醒之间没有用户输入时会被限制次数，超过后新的完成结果要等你下一条消息才会投递。后台 job 也会随会话结束（切换会话或退出客户端都会终止它），所以天级任务应交给 tmux、systemd 或 CI 这类外部 runner。
+
+### 读取后台输出
+
+读取后台 job 自上次读取以来的输出，末尾附 `[status: ...]` 状态行。`wait` 决定这次调用是否阻塞：`none`（默认）只返回当前已有输出，`output` 等到有新输出，`exit` 等到 job 结束——每次等待都由 runtime 限制在 30 秒内。等待超时不算错误：job 继续运行，结果里会标成 running。连续多次非阻塞读取都没有新输出时，会先被提示为轮询、随后被拒绝，所以只在有理由时才继续读。返回给模型的文本会去掉终端转义序列。
 
 ## Web
 
@@ -64,11 +72,15 @@
 | --- | --- |
 | `done` | 携带最终 Markdown 报告申请 loop 退出。仅在 loop 运行期间挂载，因此普通会话根本看不到它，完成结果直接用 assistant 正文返回。Loop 退出仍受退出条件和本地确认门控。 |
 | `handoff` | 把计划/工作移交给另一个角色执行。 |
-| `delegate` | 启动一个委派的 SubAgent 工作流并立即返回它的启动句柄（`task_id` / `agent_id`），不等它完成。调用必须携带 `expected_write_scope`：声明覆盖工作范围的最小 `files` / `path_prefix` / `modules`。这份声明是协调元数据，不是运行时边界——worker 能否改文件完全由角色的权限规则决定（deny 掉 `write` / `edit` / `delete` / `apply_patch` 的角色注册不到这些工具），声明路径之外的调用不会被运行时拦截。诚实声明最窄范围，兄弟任务的叠加提示才有意义：新任务的声明范围与另一个仍活跃的任务重叠时，委派照常启动，句柄会带 `scope_conflict: true`、`suggested_task_id` 和 `suggested_action: serialize_or_worktree`，提示你把两个任务串行执行、用 `notify` 协调共享文件的编辑，或让新 worker 在独立的 git worktree 里工作。只读任务应选择注册不到文件修改工具的角色并传空 scope——空 scope 只对这种角色放行，能写文件的角色必须声明非空范围，否则委派被拒绝。`shell` 这类命令工具不受 scope 约束，可用性由角色的权限规则决定。拒绝 `delegate` 会同时禁用该角色的 `cancel` 与嵌套委派。 |
+| `delegate` | 启动子任务并立即返回句柄；角色权限决定其能力，声明的工作范围用于协调。 |
 | `cancel` | 取消一个被委派的 worker；前提是 `delegate` 已启用。 |
 | `complete` | SubAgent 侧：携带摘要把当前委派任务标记为完成。 |
 | `escalate` | SubAgent 侧：请求父 agent 介入，但不结束自己的任务。 |
 | `notify` | 向上级代理或指定子代理发送非阻塞通知。定向消息可唤醒已完成或已失败的子代理，并保留它自己的会话历史；已取消的任务不可恢复。具体参数见下方。 |
+
+### 委派任务与工作范围
+
+启动一个委派的 SubAgent 工作流并立即返回它的启动句柄（`task_id` / `agent_id`），不等它完成。调用必须携带 `expected_write_scope`：声明覆盖工作范围的最小 `files` / `path_prefix` / `modules`。这份声明是协调元数据，不是运行时边界——worker 能否改文件完全由角色的权限规则决定（deny 掉 `write` / `edit` / `delete` / `apply_patch` 的角色注册不到这些工具），声明路径之外的调用不会被运行时拦截。诚实声明最窄范围，兄弟任务的叠加提示才有意义：新任务的声明范围与另一个仍活跃的任务重叠时，委派照常启动，句柄会带 `scope_conflict: true`、`suggested_task_id` 和 `suggested_action: serialize_or_worktree`，提示你把两个任务串行执行、用 `notify` 协调共享文件的编辑，或让新 worker 在独立的 git worktree 里工作。只读任务应选择注册不到文件修改工具的角色并传空 scope——空 scope 只对这种角色放行，能写文件的角色必须声明非空范围，否则委派被拒绝。`shell` 这类命令工具不受 scope 约束，可用性由角色的权限规则决定。拒绝 `delegate` 会同时禁用该角色的 `cancel` 与嵌套委派。
 
 ### 通知与请求回复
 

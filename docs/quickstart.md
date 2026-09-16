@@ -32,68 +32,45 @@ Replace `/path/to/chord` with the actual installed path, such as `/usr/local/bin
 
 ## 2. First run
 
-Run `chord` in an interactive terminal. If `config.yaml` is missing, Chord launches a one-time setup wizard.
-The wizard creates the minimal `config.yaml` and, when needed, `auth.yaml`, reuses matching existing `auth.yaml` credentials when possible, and then prints the exact paths it used.
-If stdin is redirected but Chord can still get a controlling TTY, the wizard uses that TTY. If no controlling TTY is available, Chord exits immediately with an initialization error instead of waiting for input.
+Open your project in an interactive terminal and start Chord:
 
-If you prefer to write YAML manually instead of using the wizard, see [Configuration & Auth](./configuration.md) or the copy-paste-ready [Examples](./examples/index.md).
+```bash
+cd my-project
+chord
+```
 
-For API-key setup, the wizard provides one API-key provider path. It asks for an API URL whose path ends in one of these suffixes, with examples in the prompt:
+If `config.yaml` is missing, the setup wizard offers two ways to connect:
 
-- `/responses`: OpenAI Responses API / compatible gateways
-- `/messages`: Anthropic Messages API / compatible gateways
-- `/chat/completions`: OpenAI Chat Completions compatible gateways
-- `/models`: Gemini Generate Content base path
+- **API key**: have your provider's full API URL, model name, and key ready. You can also enter a proxy URL if needed.
+- **Codex OAuth**: follow the sign-in prompts without entering an API key manually.
 
-Based on that endpoint, Chord recommends a starter provider name and model such as `openai` / `gpt-6-astra`, `anthropic` / `claude-opus-4.8`, or `gemini` / `gemini-3.8-flash`.
+The wizard creates a minimal `config.yaml` and, when needed, `auth.yaml`, then shows where it saved them. It reuses matching credentials when possible. Chord also creates the project's `.chord/` directory as needed.
 
-If your provider requires a proxy, the wizard can also write a proxy URL into `config.yaml`. It shows examples such as `http://127.0.0.1:1080` and `socks5://127.0.0.1:1080`.
+Prefer to write configuration yourself? Start with an [example](./examples/index.md). See [Configuration & Auth](./configuration.md) for endpoint formats, credentials, and model pools. For setup without an interactive terminal, see [Troubleshooting](./troubleshooting.md).
 
-If you chose the API-key provider path, verify the configured models with:
+## 3. Check the connection
+
+After setup, you can send your first message. If an API-key configuration cannot reach the model, exit Chord and run:
 
 ```bash
 chord doctor models
 ```
 
-If you choose the Codex OAuth path, the wizard completes OAuth sign-in before setup finishes. It creates a `preset: codex` provider, uses `gpt-6-astra` as the initial model, and configures GPT-5.6 Sol/Terra/Luna plus GPT-5.2–5.5 as fallbacks.
+Resolve authentication or connection errors before running `chord` again. See [Troubleshooting](./troubleshooting.md) for help.
 
-## 3. Run
-
-Run Chord from your project directory:
-
-```bash
-cd my-project
-chord
-# or
-go run ./cmd/chord/
-```
-
-On first run, Chord creates the project-level `.chord/` directory as needed.
-
-For headless control-plane mode:
-
-```bash
-chord headless
-# or
-go run ./cmd/chord/ headless
-```
-
-Headless overview: [Headless](./headless.md).
+> `go run ./cmd/chord/` only works in the Chord source checkout. Use the installed `chord` command in your own project instead.
 
 ## 4. First interaction
 
-After startup:
-
-1. Type your question directly
-2. Press `Enter` to send
-3. Press `Esc` to enter Normal mode
-4. Press `q` to quit, or press `Ctrl+C` twice within 2 seconds
-
-Try a simple first message, for example:
+Describe what you want and press `Enter`. For example, have it read through your project first:
 
 ```text
-Please read the current project structure first, then summarize its main modules.
+Explain this project's main modules and how to run its tests. Do not change any files yet.
 ```
+
+Read the response and tool results. If an action needs approval, inspect it before deciding whether to allow it. Once you know your way around, ask for a specific change and review the resulting diff.
+
+To quit, press `Esc` to enter Normal mode, then `q`; alternatively, press `Ctrl+C` twice within 2 seconds.
 
 ## 5. Common startup commands
 
@@ -119,8 +96,10 @@ For full worktree workflow (list/remove, cross-worktree resume, headless integra
 
 ## 6. Next
 
-- [Usage](./usage.md)
-- [Configuration & Auth](./configuration.md)
-- [Permissions & Safety](./permissions-and-safety.md)
-- [Customization](./customization.md)
-- [Troubleshooting](./troubleshooting.md)
+Read in this order:
+
+1. [Permissions & Safety](./permissions-and-safety.md): set approval rules before the first edit.
+2. [Usage](./usage.md): daily controls, sessions, and long tasks.
+3. [Configuration & Auth](./configuration.md): providers, credentials, and model pools.
+4. [Customization](./customization.md): roles, skills, and project setup.
+5. [Troubleshooting](./troubleshooting.md): when something fails.

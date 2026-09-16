@@ -1,19 +1,17 @@
 # 常见问题排查
 
-按通常会遇到的顺序排列：先是启动与认证，然后是请求失败、会话、TUI 渲染和性能。
+从症状出发，找到下一步该运行的命令。内容按通常会遇到的顺序排列：先是启动与认证，然后是请求失败、会话、TUI 渲染和性能。
 
 ## 启动失败
 
-先看看这几项：
+先在终端运行 `chord --version`，确认命令能找到且程序可以启动。下载的二进制不需要 Go；只有源码构建才需要检查 Go 版本和启动入口。
 
-- Go 版本是否满足要求
-- 是否使用了正确入口：`go run ./cmd/chord/`
-- `config.yaml` 是否缺失或已损坏
-- `auth.yaml` 是否存在明显的 YAML 格式错误
+1. **命令找不到或被系统阻止**：检查安装路径；macOS 下载版的处理步骤见[快速开始](./quickstart_CN.md#1-安装)。
+2. **配置缺失**：在交互式终端运行 `chord`，按初始化向导配置。
+3. **配置错误**：运行 `chord doctor config`，根据报告修正 YAML 或字段。
+4. **仍无法启动**：保留终端错误输出，再查看本页末尾的日志采集说明。
 
-如果 `config.yaml` 缺失，请在交互式终端里先运行一次 `chord` 来启动初始化向导。即使 stdin 被重定向，只要还能打开控制 TTY，向导仍会在那里运行；只有没有控制 TTY 时，Chord 才会立即返回初始化错误。若 `config.yaml` 已存在但 YAML 损坏，请先修好文件；向导只会在缺失配置时触发。
-
-如果是构建好的二进制，建议重新运行并查看终端错误输出。
+初始化向导只在 `config.yaml` 缺失时运行，不会覆盖已有的损坏配置。stdin 重定向时，只要仍有控制终端就可以交互；完全没有控制终端时会返回初始化错误，应先在交互式环境完成配置。
 
 ## 401 / 403 / 认证失败
 
@@ -35,15 +33,6 @@ chord doctor models
 chord doctor models --model openai/gpt-5.5@high
 chord doctor models --pool thinking
 ```
-
-### OAuth 账号池很大时启动慢
-
-`auth.yaml` 中包含数百或数千个 OpenAI / ChatGPT OAuth 账号时，Chord 会在后台加载凭据元数据。仅缺少元数据不应阻止启动。
-
-- 个人 Plus/Pro 账号可能只有 `user_id`，没有 `chatgpt_account_id`。这类账号仍可用于普通请求，但不会发送 `ChatGPT-Account-ID`，也不会参与依赖 account id 的 Codex usage / rate-limit polling。
-- 若日志显示 `account_user_id mismatch` 或 `account_id mismatch`，说明配置里显式写出的身份和 token 自身能解析出的身份冲突；这类应修正或移除对应 credential。
-
-手动转换 Codex/sub2api 导出的账号时，请保留能获取到的 `email`、`account_id` 和 `account_user_id`。需要逐项诊断时，运行 `chord doctor models`。
 
 ## 429 / quota exhausted
 
@@ -209,28 +198,30 @@ Chord 会在恢复前自动修复进程中断造成的不完整轮次。如果�
 - **未启动**：工具在中断前还没有开始执行，不可能产生副作用，重新核对前置条件后可以重试。
 - **结果未知**：工具已经开始执行，副作用可能部分或全部发生，先核对当前文件或远端状态，再决定是否重试。
 
+> **Warning:** 「结果未知」表示工具可能已经改了文件或远端状态，先核对再决定是否重试。
+
 Chord 会在运行工具前先把对应的工具调用消息写盘，因此中断后不会出现「副作用已经发生、但 Chord 不知道当时要执行这个工具」的情况。如果会话目录写不进去（例如磁盘满了），Chord 会暂停工具执行，避免产生无法恢复的重复副作用；状态卡会说明原因，写入恢复后工具会自动继续可用。
 
 ## 委派的 SubAgent 看似卡住，或 `escalate` 卡片一直执行
 
-当前版本会自动恢复旧会话中可能暴露的两类故障：
+下面两类故障会导致委派的 SubAgent 看似卡住，Chord 都会自动恢复：
 
-如果恢复会话后聚焦 SubAgent，右侧 MODEL 或 Pool 为空，当前版本会先读取任务、recovery snapshot 和 usage ledger 中保存的模型；旧记录没有模型时，会按最新 Agent 配置解析。因此不需要手动编辑 `subagents/tasks.json` 或 meta 文件。
+如果恢复会话后聚焦 SubAgent，右侧 MODEL 或 Pool 为空，Chord 会先读取任务、recovery snapshot 和 usage ledger 中保存的模型；记录里没有模型数据时，会按最新 Agent 配置解析。因此不需要手动编辑 `subagents/tasks.json` 或 meta 文件。
 
 恢复时，durable `task_id` 是委派工作的稳定身份；`explorer-4`、`explorer-6` 之类的 `agent_id` 只是该任务历次 runtime instance。历史 instance 的 transcript 会按 task 合并，但 sidebar 和焦点路由只暴露该 task 的 canonical 最新实例。不要把旧 `agent_id` 当作另一项独立任务，也不要通过手工复制/删除 instance 文件改变恢复结果。
 
-如果切换到大型 SubAgent transcript，或在 parked SubAgent 视图按 Enter 继续后整个 TUI 不再响应，当前版本会在焦点切换时使用有界 transcript 窗口，并将上下文读取、rehydrate 与继续请求移出 TUI 更新热路径。此前还有一条独立故障链：rehydrate 后 info panel 会触发 `MainAgent.InvokedSkills → SubAgent.InvokedSkills → MainAgent.InvokedSkills` 递归并导致 stack overflow；该路由循环现已移除。工作区共享 skill catalog，但 MainAgent 与每个 SubAgent 会按各自最新权限过滤可见项，并分别记录 invoked 状态。
+如果切换到大型 SubAgent transcript，或在 parked SubAgent 视图按 Enter 继续后整个 TUI 不再响应，Chord 只加载有界 transcript 窗口，其余内容在后台继续加载。工作区共享 skill catalog，但 MainAgent 与每个 SubAgent 会按各自最新权限过滤可见项，并分别记录 invoked 状态。
 
-进程 stderr 现在直接写入 rotating log 文件，不再由 Go goroutine 从 pipe 读取后回灌日志系统。因此即使出现 runtime fatal，完整堆栈也会写入 `chord.log` 并让进程退出，不会再次表现为所有按键（包括 raw-mode Ctrl+C）都失效的永久卡死。若旧版本仍无响应，先从另一个终端终止对应进程并用 `reset` 恢复原终端，然后导出 diagnostics。
+进程 stderr 直接写入 rotating log 文件，因此即使出现 runtime fatal，完整堆栈也会写入 `chord.log` 并让进程退出，不会表现为所有按键（包括 raw-mode Ctrl+C）都失效的永久卡死。若 TUI 卡死，先从另一个终端终止对应进程并用 `reset` 恢复原终端，然后导出 diagnostics。
 
-- Parked SubAgent 被 rehydrate 后，排队输入会显式唤醒其事件循环。如果 worker 保持 `running` 却没有创建 turn，启动 watchdog 会自动重试一次唤醒。
+- Parked SubAgent 恢复后，排队输入会唤醒它；如果 worker 保持 `running` 却没有创建 turn，Chord 会自动重试一次唤醒。
 - 如果 worker 仍无法启动，或者 provider / 模型重试最终失败，Chord 会把任务标记为 failed、记录 `risk_alert`，并唤醒 owner/MainAgent，由其重试、重新委派或报告 blocker；系统不会伪造成功的 `complete` 结果。
 
-`escalate` 是本地协调事件，不是长时间运行的网络操作。旧版本可能把它的 tool result 落盘在 assistant tool call 之前，导致恢复后一个已经完成的卡片看起来仍是 pending。当前版本会在相邻消息具有相同 `tool_call_id` 时做严格的局部修复；无法匹配的 orphan result 仍会被丢弃。
+`escalate` 是本地协调事件，不是长时间运行的网络操作。如果恢复后一个已经完成的卡片看起来仍是 pending，Chord 会在相邻消息具有相同 `tool_call_id` 时做严格的局部修复；无法匹配的 orphan result 会被丢弃。
 
-如果旧版本创建的会话已经卡住：
+如果恢复后的会话仍然卡住：
 
-1. 重新构建或安装当前 Chord，并通过 `--resume <session-id>` 重启；
+1. 用当前 Chord 通过 `--resume <session-id>` 重启；
 2. 重试或定向通知委派任务时使用稳定的 `task_id`，不要使用旧 runtime 的 `agent_id`；
 3. 不要手工编辑 `agents/*.jsonl`、`subagents/tasks.json` 或 mailbox 文件；
 4. 开启 `log_level: debug` 后，在 `chord.log` 中搜索 `startup watchdog retrying wake`、`SubAgent failed` 或 `removed orphan tool messages`。
@@ -389,6 +380,15 @@ github.com/keakon/chord/internal/tui.renderMarkdownContent
 3. 增大 `context.compaction.reserved` 可提前触发压缩，避免请求被拒。
 4. 如果频繁出现，可使用 `/compact` 立即手动压缩，或降低 `threshold` 提前触发自动压缩。
 5. 在 `log_level: debug` 的日志中搜索 `oversize`，确认是否触发了 oversize recovery（压缩后再重试）。如果自动压缩已关闭，Chord 会停止并报告实际尝试过的所有候选模型都超过当前上下文，而不是无限重试。
+
+## OAuth 账号池很大时启动慢
+
+`auth.yaml` 中包含数百或数千个 OpenAI / ChatGPT OAuth 账号时，Chord 会在后台加载凭据元数据。仅缺少元数据不应阻止启动。
+
+- 个人 Plus/Pro 账号可能只有 `user_id`，没有 `chatgpt_account_id`。这类账号仍可用于普通请求，但不会发送 `ChatGPT-Account-ID`，也不会参与依赖 account id 的 Codex usage / rate-limit polling。
+- 若日志显示 `account_user_id mismatch` 或 `account_id mismatch`，说明配置里显式写出的身份和 token 自身能解析出的身份冲突；这类应修正或移除对应 credential。
+
+手动转换 Codex/sub2api 导出的账号时，请保留能获取到的 `email`、`account_id` 和 `account_user_id`。需要逐项诊断时，运行 `chord doctor models`。
 
 ## 何时检查日志
 

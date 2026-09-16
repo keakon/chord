@@ -7,6 +7,8 @@ This page shows a **shared project layout** under `.chord/`:
 - let the primary role orchestrate work instead of editing everything directly
 - split sub-agents into read-only discovery, mechanical execution, and review
 
+This is a combined example, not an all-or-nothing template. Get the global model configuration working first, then add project settings and the roles you need. Supply the scripts referenced by hook commands, or remove those hooks until ready. Keep credentials in personal configuration, never in the shared repository.
+
 ## `~/.config/chord/config.yaml`
 
 ```yaml

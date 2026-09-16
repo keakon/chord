@@ -1,13 +1,21 @@
 # 使用指南
 
-Chord 有两种运行方式：本地 TUI 和 `chord headless` 控制面。本页主要讲日常 TUI 操作：发消息、看工具卡、切换会话与 agent。
+让日常 TUI 操作不停下来：发消息、看工具卡、恢复会话，推动长任务。Chord 有两种运行方式：本地 TUI 和 `chord headless` 控制面，本页主要讲 TUI。
+
+## 如何使用本页
+
+无需从头到尾阅读本页：
+
+- **第一个任务：**先看 [TUI 基本交互](#tui-基本交互)了解发送、工具卡和确认；第一次改文件前，先在[权限与安全](./permissions-and-safety_CN.md)定好规则。
+- **长任务：**用 [`/loop`](#loop持续执行模式)让实现、测试和修复连续推进，不用反复催促。
+- **并行工作：**用 [Worktree](#worktree)按任务隔离会话；恢复、分叉与导入见[会话](#会话)。
 
 ## 运行模式
 
 Chord 有两条主要使用路径：
 
-- **本地 TUI**：默认模式，直接在当前进程内运行 MainAgent
-- **Headless 控制面**：通过 `chord headless` 使用 stdio JSONL 与外部 gateway / bot 集成
+- **本地终端界面**：默认模式，在终端里输入任务、查看执行结果和处理确认
+- **Headless 模式**：用 `chord headless` 从脚本、网关或聊天机器人控制 Chord
 
 大多数个人开发场景推荐直接用本地 TUI。
 

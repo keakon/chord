@@ -2,6 +2,8 @@
 
 This is the smallest practical personal setup: one provider, one key, and one model pool.
 
+Create the two files below and set the environment variable to your own key. Add other features after confirming the model connects.
+
 ## `~/.config/chord/auth.yaml`
 
 ```yaml

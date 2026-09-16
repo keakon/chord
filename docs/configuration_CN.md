@@ -1,6 +1,6 @@
 # 配置与认证
 
-Chord 将行为配置与凭据配置分开管理。
+一次接好模型，再用模型池、自动切换和项目覆盖去复用。Chord 将行为配置与凭据配置分开管理。
 
 - `~/.config/chord/config.yaml`：provider、模型、权限、扩展能力等行为配置
 - `~/.config/chord/auth.yaml`：API key 或 OAuth 凭据
@@ -28,7 +28,7 @@ Chord 将行为配置与凭据配置分开管理。
 
 兼顾用户习惯、项目差异和不同 Agent 的能力特化。
 
-项目配置 `.chord/config.yaml` 会先按「无内置默认值注入」的方式加载，再覆盖到已加载的全局配置上。运行时命令把当前工作目录视为项目根，因此项目层配置读取的是启动 cwd 下的 `./.chord/config.yaml`，不会自动向父目录继续查找。因此：
+项目配置读取启动目录下的 `.chord/config.yaml`，不会向父目录查找。只填写需要覆盖的字段，其余沿用全局设置。合并规则如下：
 
 - 项目里没写的字段会保持真正的未设置状态，不会意外遮蔽全局默认值；
 - 任何配置文件里无法识别的键、类型不对的值、或超出范围的取值，都会记录到 `chord.log` 并按未配置处理，文件其余部分照常生效；项目配置里的非法字段回退到被覆盖的全局值。YAML 语法错误（文件无法解析）会阻止启动，可用 `chord doctor config` 查看完整问题列表；
@@ -747,7 +747,9 @@ providers:
     compress: zstd   # codex-backend 接受 zstd 请求体
 ```
 
-Chord 仅在压缩能减小体积时才发送压缩请求体，否则按原文发送；压缩失败同样回退为原文并记日志。响应方向不受影响：仍然只声明并自己解压 gzip 响应。除非确定 provider 或网关接受压缩请求体，否则保持不配置——官方 Codex backend 和 `api.anthropic.com` 接受（Anthropic 只收 `gzip`，不收 `zstd`），多数 OpenAI-compatible 网关不接受。
+Chord 仅在压缩能减小体积时才发送压缩请求体，否则按原文发送；压缩失败同样回退为原文并记日志。响应方向不受影响：仍然只声明并自己解压 gzip 响应。
+
+> **Note:** 除非确定 provider 或网关接受压缩请求体，否则保持不配置——官方 Codex backend 和 `api.anthropic.com` 接受（Anthropic 只收 `gzip`，不收 `zstd`），多数 OpenAI-compatible 网关不接受。
 
 Provider / 模型请求默认用 `User-Agent: chord/<version>` 标识客户端。仅当某个 provider 或网关要求特定值时，才配置 provider 级 `user_agent`：
 
@@ -931,7 +933,7 @@ orchestration:
 |------|--------|------|
 | `max_live_runtimes` | `10` | 正常准入的 Agent runtime 最大数量。达到上限后，后续普通 runtime 获取会等待已有槽位释放。唤醒重激活在普通容量耗尽时，还可以使用单独设限的 borrowed pool 或 bypass pool。 |
 | `max_borrowed_runtimes` | `1` | 为必须继续推进的编排工作临时增加的 runtime 准入量，例如子 Agent 事件到达后恢复父 Agent。借用额度与正常 runtime 槽位分开设限。 |
-| `max_bypass_runtimes` | `4` | 唤醒重激活在正常 runtime 池和 borrowed pool 都耗尽时可以使用的最大 bypass 数量。这个独立的安全池既避免 event loop 因等待自身释放容量而死锁，也让应急通道保持有界；达到上限后，唤醒会被拒绝，持久化消息留在队列中等待后续处理。 |
+| `max_bypass_runtimes` | `4` | 正常 runtime 池和 borrowed pool 都耗尽时，唤醒重激活可以使用的最大 bypass 数量；达到上限后，唤醒会被拒绝，持久化消息留在队列中等待后续处理。 |
 | `max_active_llm_requests` | `10` | 进程内所有编排 Agent 的 LLM 请求总并发上限。达到上限后，符合条件的请求等待。 |
 | `provider_max_active_requests` | 无 | 可选的 provider 级请求并发上限，key 如 `openai`。请求必须同时满足该限制和进程总限制。 |
 | `model_max_active_requests` | 无 | 可选的 `provider/model` 级请求并发上限。匹配时忽略 `@high` 等 inline variant，因此 `openai/gpt-5.5` 覆盖该模型的所有 variant。 |
@@ -939,7 +941,7 @@ orchestration:
 | `subagent_queue_bytes` | `4194304` | 每个 SubAgent 待处理输入的估算字节数上限。这是内存准入限制，不会溢写到磁盘 spool。 |
 | `mailbox_memory_messages` | `512` | MainAgent inbox 和按 owner 分类的 mailbox 在内存中保留的 SubAgent 消息总数上限。 |
 | `mailbox_memory_bytes` | `8388608` | 上述内存 mailbox 的估算总字节数上限。超过内存预算的持久化非 progress 消息会通过磁盘 mailbox spool 引用；progress 更新可能在内存中合并或省略。 |
-| `subagent_compact_usage` | `0.8` | 当 SubAgent 的估算上下文用量达到可用输入预算的这一比例时，主动压缩其上下文。默认值与 `context.compaction.threshold` 一致；之所以保留单独配置，是因为 SubAgent 使用本地 token 估算和轻量滑动窗口 checkpoint，而不是 MainAgent 的 usage 驱动压缩管线。有效值必须严格大于 `0` 且小于 `1`。 |
+| `subagent_compact_usage` | `0.8` | 当 SubAgent 的估算上下文用量达到可用输入预算的这一比例时，主动压缩其上下文。默认值与 `context.compaction.threshold` 一致；SubAgent 使用本地 token 估算和轻量滑动窗口 checkpoint，而不是 MainAgent 的 usage 驱动压缩管线。有效值必须严格大于 `0` 且小于 `1`。 |
 | `waiting_main_expiry_turns` | `5` | SubAgent 停在 `waiting_main`、等待 owner 回复时允许经过的用户回合数。只有同时满足 `waiting_main_min_wait_sec` 后，这条回合数限制才会让任务过期；`waiting_main_max_wait_sec` 仍会无条件结束等待。 |
 | `waiting_main_min_wait_sec` | `300` | 回合数限制可以让 `waiting_main` 任务过期前必须经过的最短墙钟时间，单位为秒。 |
 | `waiting_main_max_wait_sec` | `3600` | `waiting_main` 任务最多等待的墙钟时间，单位为秒。达到后不论用户回合数如何都会过期；实际值不会小于 `waiting_main_min_wait_sec`。若两者都显式配置且该最大值小于最小值，配置加载会直接失败，而不是静默钳制。 |
@@ -955,7 +957,7 @@ orchestration:
 ### 调优建议
 
 - 为满足 API 配额，优先设置 provider 或 model 限制，并将 `max_active_llm_requests` 保留为整体安全上限。
-- `max_bypass_runtimes` 应保持较小的正数。它只用于普通槽位和 borrowed 容量都无法由 event loop 及时释放时，让唤醒重激活继续推进，不是普通吞吐量配额。
+- `max_bypass_runtimes` 应保持较小的正数。它只用于普通槽位和 borrowed 容量都耗尽时，让唤醒重激活继续推进，不是普通吞吐量配额。
 - 在内存有限的主机上，逐步降低 mailbox 消息数/字节数限制。overflow 使用持久化存储，因此更低的内存限制会以更多磁盘 I/O 为代价。
 - 只有当消息生产方能够处理入队拒绝时，才降低 SubAgent 队列限制。这些队列不会溢写到磁盘，限制过小可能中断父子 Agent 协作。
 - `max_borrowed_runtimes` 应保持较小的正数。借用槽位用于解除编排推进停滞，不用于提高普通吞吐量。

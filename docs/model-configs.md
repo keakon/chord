@@ -2,34 +2,18 @@
 
 Use this page when you already know which provider/model family you want and just need a copy-paste-ready starting point. Field semantics and the full schema live in [Configuration & Auth](./configuration.md); full multi-file workstation/team layouts live in [Examples](./examples/index.md).
 
-> **Per-model compaction tuning.** Every recipe below is a `model_pools` /
-> `providers` recipe for wiring up the model. To tune context
-> auto-compaction per model, add a `compaction` block to the model's own
-> definition or template (see [Context compaction](./context-management.md#context-compaction)):
->
-> ```yaml
-> model_templates:
->   luna-full-window: &luna-full-window
->     limit: {context: 1050000, output: 128000}   # full API window: no `input`
->     compaction: {threshold: 0.25, reminder: 0.2}   # stay under the 272K long-context pricing tier
->
-> providers:
->   openai:
->     models:
->       gpt-5.6-luna: *luna-full-window
-> ```
->
-> A model without a `compaction` block inherits the global
-> `context.compaction.threshold`; `reminder` defaults to
-> `min(0.60, threshold × 0.90)` when unset; `reminder: -1` disables the
-> pressure reminder for the model while keeping its automatic compaction.
-> These fields tune the usage-driven
-> automatic-compaction path and take effect whether or not `model_driven` is
-> enabled. Where the benchmark evidence below gives a recommended usage band
-> for a model, tune its `threshold` to the *top* of that band (compaction keeps
-> the context inside it) and optionally set `reminder` just below it. When a
-> model's long-context reliability is not documented here, omit the
-> `compaction` block and let it use the global default.
+Choose a connection type, then copy its recipe. Keep the default context settings until the model connects successfully; tune them later if needed.
+
+| Connection | Recipe |
+| --- | --- |
+| OpenAI API / Responses-compatible endpoint | [OpenAI GPT](#openai-gpt-responses) |
+| Codex OAuth | [Codex sign-in](#codex-oauth-preset) |
+| Anthropic API | [Claude](#anthropic-claude) |
+| Google API | [Gemini](#google-gemini) |
+| Other models | [GLM](#glm--bigmodel-coding-plan) · [DeepSeek](#deepseek) · [Qwen](#qwen-preserved-thinking) · [Kimi](#kimi) · [Grok](#grok-xai) · [MiniMax](#minimax-openai-compatible) · [Muse Spark](#meta-muse-spark) |
+| Thinking through a Chat Completions gateway | [Gateway settings](#thinking-behind-a-chat-completions-gateway) |
+
+After copying a recipe, [verify the configuration and connection](#verify-any-recipe). For long sessions or context-cost tuning, see [Per-model compaction tuning](#per-model-compaction-tuning) at the end of this page.
 
 ## OpenAI GPT (Responses)
 
@@ -650,34 +634,19 @@ Claude Opus 5 / 4.8 / 4.7 share the same context window (1M), max output (128K),
 
 For a lower-cost Claude family config, use the same shape with `claude-sonnet-5`, `cost: {input: 2, output: 10}`, and `output: 64000` for a conservative local allocation. Sonnet 5's $2 / $10 per-1M pricing became permanent in August 2026.
 
-### Claude Fable 5.1
-
-`claude-fable-5-1` (released September 2026) keeps Fable 5's $10 / $50 per-1M input/output rates but cuts cache reads to $0.25 per 1M tokens (0.025x of base input instead of the standard 0.1x multiplier), so set `cache_read: 0.25`, not 1.0. It shares Fable 5's 1M context, 128K max output, adaptive thinking, and PDF support.
+For `claude-fable-5-1` (released September 2026), reuse the same shape: it shares the 1M context, 128K max output, adaptive thinking, and PDF support, and only the cost block differs. It keeps Fable 5's $10 / $50 per-1M input/output rates but cuts cache reads to $0.25 per 1M tokens (0.025x of base input instead of the standard 0.1x multiplier), so set `cache_read: 0.25`, not 1.0. `claude-fable-5` remains available with the same rates except cache reads at $1.0.
 
 ```yaml
+# Requires the `&claude-opus` template above in the same file.
 model_templates:
   claude-fable-5.1: &claude-fable-5-1
-    limit:
-      context: 1000000
-      output: 128000
+    <<: *claude-opus
     cost:
       input: 10
       output: 50
       cache_read: 0.25
       cache_write: 12.5
       cache_write_1h: 20
-    thinking:
-      type: adaptive
-      display: summarized
-    variants:
-      high:
-        thinking:
-          effort: high
-      xhigh:
-        thinking:
-          effort: xhigh
-    modalities:
-      input: [text, image, pdf]
 
 providers:
   anthropic:
@@ -691,9 +660,7 @@ model_pools:
     - anthropic/claude-fable-5-1@high
 ```
 
-`claude-fable-5` remains available with the same rates except cache reads at $1.0.
-
-#### Compaction tuning for Claude 5
+### Compaction tuning for Claude 5
 
 The whole Claude 5 line (Fable 5.1, Opus 5, Sonnet 5) advertises 1M tokens
 with 128K output and flat per-token pricing across the window. MRCR v2 8-needle
@@ -1522,7 +1489,7 @@ window. xAI also accepts PDF attachments as `input_file` with a public
 `file_url` or an uploaded `file_id`, which activates the server-side
 `attachment_search` tool; Chord sends PDF attachments as inline base64
 `file_data`, which the xAI Responses API does not accept for non-image
-documents, so this recipe keeps `pdf` out of `modalities.input`. Grok 4.6
+documents, so `modalities.input` stays `[text, image]`. Grok 4.6
 emits reasoning text through `response.reasoning_text.*` stream events; Chord
 maps those events to the normal thinking stream while preserving the ordered
 Responses output items for tool-loop continuity.
@@ -1550,7 +1517,7 @@ model_pools:
 ```
 
 xAI publishes a 500K total context window for Grok 4.6, but not a lower,
-separate model output cap, so this recipe omits `limit.output`. Chord therefore
+separate model output cap, so `limit.output` is unset. Chord therefore
 does not send `max_output_tokens` to xAI and lets the API fit output within the
 remaining context. Locally, Chord still reserves its default `64000` output
 budget when deriving the input budget from `limit.context`. Set `limit.output`,
@@ -1825,9 +1792,6 @@ Notes:
 - `muse-spark-1.3-contributor` serves the same model much cheaper in exchange
   for letting Meta train on your prompts and completions. Configure it only
   where that tradeoff is acceptable, and note that it has no `max` effort.
-- `cost` is optional and left out of this recipe, so Chord does not estimate
-  this model's spending; add a `cost` block with your account's rates when you
-  want cost tracking.
 - `limit.output` follows Meta's reference configuration (`131072`). Chord does
   not send `max_output_tokens` on Responses by default; set
   `compat.responses.send_max_output_tokens: true` when you want Chord to
@@ -1861,3 +1825,34 @@ chord doctor models --model openai/gpt-5.6-sol@xhigh
 chord doctor models --model codex/gpt-5.5@xhigh
 chord doctor models --model anthropic/claude-opus-5@high
 ```
+
+## Per-model compaction tuning
+
+**Per-model compaction tuning.** Every recipe below is a `model_pools` /
+`providers` recipe for wiring up the model. To tune context
+auto-compaction per model, add a `compaction` block to the model's own
+definition or template (see [Context compaction](./context-management.md#context-compaction)):
+
+```yaml
+model_templates:
+  luna-full-window: &luna-full-window
+    limit: {context: 1050000, output: 128000}   # full API window: no `input`
+    compaction: {threshold: 0.25, reminder: 0.2}   # stay under the 272K long-context pricing tier
+
+providers:
+  openai:
+    models:
+      gpt-5.6-luna: *luna-full-window
+```
+
+A model without a `compaction` block inherits the global
+`context.compaction.threshold`; `reminder` defaults to
+`min(0.60, threshold × 0.90)` when unset; `reminder: -1` disables the
+pressure reminder for the model while keeping its automatic compaction.
+These fields tune the usage-driven
+automatic-compaction path and take effect whether or not `model_driven` is
+enabled. Where the benchmark evidence below gives a recommended usage band
+for a model, tune its `threshold` to the *top* of that band (compaction keeps
+the context inside it) and optionally set `reminder` just below it. When a
+model's long-context reliability is not documented here, omit the
+`compaction` block and let it use the global default.
