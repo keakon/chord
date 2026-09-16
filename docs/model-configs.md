@@ -822,6 +822,55 @@ model_pools:
   Whether the upstream returns summary text at all still depends on the gateway
   and model; the level and budget apply to the request either way.
 
+### Thinking state and signatures
+
+A model that returns provider-bound replay state on its native API does the
+same through the gateway, and expects it back on the next call. Chord carries it
+in the shape the model's family uses:
+
+| Family | Where the gateway returns it | What Chord sends back |
+| --- | --- | --- |
+| Gemini | one thought signature per step: `tool_calls[].extra_content.google.thought_signature` (Google's own compatibility endpoint), `tool_calls[].thought_signature`, or `provider_specific_fields.thought_signature` | `extra_content.google.thought_signature` on the step's first tool call |
+| Claude | message-level `thinking_blocks` (the LiteLLM convention), also read from the `provider_specific_fields` mirror | the same `thinking_blocks` array on the assistant message |
+
+These blobs are opaque and bound to the backend that produced them, so Chord
+replays them to the same model family rather than over the same wire: a
+signature captured on a Gemini endpoint is reused when the conversation
+continues through a gateway, another provider, or the native API, and the
+reverse holds too. A request that reaches a different family strips the blobs;
+their readable text still goes out as portable thinking where the target accepts
+it.
+
+For a Chat Completions model alias, set `native_thinking` to `anthropic` or
+`gemini` to identify its backend. Chord records that family with the response,
+so saved sessions retain the replay identity even when the model name does not
+identify it. Family checks apply before converting between wire formats. A
+Gemini signature carried in a Messages thinking block is sent on the first
+tool call when continuing over Chat Completions. Tool-call continuations retain
+the configured Gemini thinking controls even without visible reasoning text.
+
+Missing or rejected state is repaired instead of sent as a guaranteed failure:
+
+- Gemini 3 rejects a function-call step that has no thought signature. When an
+  assistant step after the last user message lost its signature (a model switch,
+  a gateway that dropped it), Chord sends the documented placeholder
+  `skip_thought_signature_validator`, which the backend accepts in place of a
+  real signature. The repair needs a name that identifies a Gemini 3 model: a
+  gateway alias that hides it takes `native_thinking: gemini` plus a model name
+  that still contains `gemini-3`.
+- A Claude-backed endpoint whose current turn no longer has replayable
+  `thinking_blocks` is called without the `thinking` controls, matching the
+  history the request carries; asking for reasoning the replayed history cannot
+  back would only be rejected.
+- A signature the backend does reject still escalates the replay compatibility
+  ladder: Chord retries with the blobs stripped instead of failing the turn.
+
+`native_thinking: off` also stops this state from being sent or replayed, which
+matches an endpoint that rejects the native request fields.
+
+Whether the gateway returns the state at all is still up to the gateway: a proxy
+that drops `extra_content` or `thinking_blocks` leaves Chord nothing to replay.
+
 ## Google Gemini
 
 Pair with `~/.config/chord/auth.yaml`:

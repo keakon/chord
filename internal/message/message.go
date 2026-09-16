@@ -572,13 +572,14 @@ type GeminiReplayPart struct {
 // normalization, where provider-specific payloads may need to be replayed,
 // downgraded, or dropped depending on the current target model.
 type MessageProvenance struct {
-	Source     string `json:"source,omitempty"`      // chord|import:claude|import:codex|import:opencode
-	ProviderID string `json:"provider_id,omitempty"` // anthropic-main / openai / gemini ...
-	ModelID    string `json:"model_id,omitempty"`
-	Variant    string `json:"variant,omitempty"`
-	ModelRef   string `json:"model_ref,omitempty"`   // provider/model[@variant]
-	WireFamily string `json:"wire_family,omitempty"` // anthropic|openai-chat|openai-responses|gemini|unknown
-	Imported   bool   `json:"imported,omitempty"`
+	Source       string `json:"source,omitempty"`      // chord|import:claude|import:codex|import:opencode
+	ProviderID   string `json:"provider_id,omitempty"` // anthropic-main / openai / gemini ...
+	ModelID      string `json:"model_id,omitempty"`
+	Variant      string `json:"variant,omitempty"`
+	ModelRef     string `json:"model_ref,omitempty"`   // provider/model[@variant]
+	WireFamily   string `json:"wire_family,omitempty"` // anthropic|openai-chat|openai-responses|gemini|unknown
+	NativeFamily string `json:"native_family,omitempty"`
+	Imported     bool   `json:"imported,omitempty"`
 }
 
 // Response represents a complete LLM response.

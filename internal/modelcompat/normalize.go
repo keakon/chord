@@ -69,7 +69,12 @@ type TargetModel struct {
 	Variant    string
 	ModelRef   string
 
-	WireFamily              string
+	WireFamily string
+	// NativeFamily is the upstream model family the target reaches (see
+	// thinking_family.go). It gates provider-bound replay state by the family
+	// that can validate it instead of by the wire that carries it; the wire
+	// family stays the fallback when no model family resolves.
+	NativeFamily            string
 	ReasoningContinuityMode string
 	// PreserveHistoricalReasoning exempts the target from the completed-turn
 	// plaintext reasoning strip: preserved-thinking backends keep earlier-turn
@@ -87,11 +92,12 @@ type TargetModel struct {
 const (
 	// ReplayCompatNative optimistically replays provider-bound native payloads
 	// (encrypted Responses items, thinking blocks, thought signatures, visible
-	// reasoning) to any target speaking the producing wire protocol, regardless
-	// of which configured provider entry or model version produced them.
-	// Whether a backend accepts such a payload is decided by that backend and
-	// cannot be derived from client-side config, so the richest
-	// protocol-compatible shape is sent first; a rejection escalates the level.
+	// reasoning) to any target that reaches the family which produced them,
+	// regardless of the wire carrying the request and of which configured
+	// provider entry or model version produced them. Whether a backend accepts
+	// such a payload is decided by that backend and cannot be derived from
+	// client-side config, so the richest shape is sent first; a rejection
+	// escalates the level.
 	ReplayCompatNative = 0
 	// ReplayCompatSynthesized falls back to strict provenance matching for
 	// native payloads. Foreign native Responses items are re-synthesized as
@@ -161,7 +167,7 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 		return out, report
 	}
 
-	allowThinking := reasoningContinuityAllowsAnthropicBlocks(target)
+	allowThinking := targetCarriesAnthropicBlocks(target)
 	allowUnsignedThinking := reasoningContinuityAllowsUnsignedAnthropicBlocks(target)
 	// A provider-bound Anthropic thinking block records the conversation prefix
 	// that produced it, so a history rewrite (context compaction, restore
@@ -244,15 +250,22 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 			report.DroppedThinkingBlocks += len(msg.ThinkingBlocks)
 			msg.ThinkingBlocks = nil
 		} else if len(msg.ThinkingBlocks) > 0 {
-			strictProvenance := messageAllowsAnthropicThinkingReplay(*msg, target)
+			familyMatches := sameNativeFamily(MessageNativeFamily(*msg), targetNativeFamily(target))
+			strictProvenance := familyMatches && messageProvenanceMatchesTarget(*msg, target) &&
+				provenanceWireFamily(*msg) == WireFamilyAnthropic && strings.TrimSpace(target.WireFamily) == WireFamilyAnthropic
 			// anthropic_unsigned targets declare a backend that returns and
 			// consumes visible unsigned thinking only: it cannot verify
 			// Anthropic signatures, so optimistic foreign replay of signed or
 			// redacted-encrypted blocks would ship Anthropic signature blobs
 			// to a third party for a guaranteed rejection. Their text routes
 			// through the portable path into unsigned thinking instead.
-			foreignProvenance := !strictProvenance && opts.ReplayCompat <= ReplayCompatNative &&
-				provenanceWireFamily(*msg) == WireFamilyAnthropic && !allowUnsignedThinking
+			// A resolved family match replays across wires and providers: the
+			// same backend validates the same signature whether Chord reaches
+			// it through the Messages wire, a Chat Completions gateway, or the
+			// native generateContent API. Unresolved families stay stripped,
+			// and an explicit anthropic_unsigned target keeps rejecting
+			// signature blobs it declared it cannot verify.
+			familyProvenance := !allowUnsignedThinking && familyMatches && opts.ReplayCompat <= ReplayCompatNative
 			foreignKept := false
 			var portableThinking []string
 			kept := make([]message.ThinkingBlock, 0, len(msg.ThinkingBlocks))
@@ -271,8 +284,8 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 					portableThinking = appendPortableText(portableThinking, block.Thinking)
 					continue
 				}
-				if !strictProvenance {
-					if !foreignProvenance {
+				if !strictProvenance || allowUnsignedThinking {
+					if !familyProvenance {
 						report.DroppedThinkingBlocks++
 						portableThinking = appendPortableText(portableThinking, block.Thinking)
 						report.Warnings = append(report.Warnings, "dropped thinking blocks: missing/invalid anthropic provenance")
@@ -286,6 +299,11 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 				report.ForeignNativeReplays++
 			}
 			msg.ThinkingBlocks = kept
+			if len(kept) > 0 && targetNativeFamily(target) == NativeFamilyGemini {
+				if adaptThinkingStateCarrier(msg, target) > 0 {
+					report.ConvertedReasoning++
+				}
+			}
 			if len(portableThinking) > 0 {
 				routePortableReasoning(portableThinking, &portableReasoningForChat, &portableReasoningForUnsignedThinking, target, opts.ReplayCompat)
 			}
@@ -380,17 +398,23 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 			out[i].MCPTools = append([]message.ToolDefinition(nil), msg.MCPTools...)
 		}
 
-		if !allowsGeminiThoughtSignatureReplay(*msg, target) {
-			hasSignatures := len(msg.GeminiParts) > 0
-			for j := range msg.ToolCalls {
-				if msg.ToolCalls[j].ThoughtSignature != "" {
-					hasSignatures = true
-				}
+		hasGeminiSignatures := len(msg.GeminiParts) > 0
+		for j := range msg.ToolCalls {
+			if msg.ToolCalls[j].ThoughtSignature != "" {
+				hasGeminiSignatures = true
 			}
+		}
+		if hasGeminiSignatures {
 			switch {
-			case !hasSignatures:
+			case allowsGeminiThoughtSignatureReplay(*msg, target):
+				if adaptThinkingStateCarrier(msg, target) > 0 {
+					report.ConvertedReasoning++
+				}
 			case opts.ReplayCompat <= ReplayCompatNative && allowsForeignGeminiThoughtSignatureReplay(*msg, target):
 				report.ForeignNativeReplays++
+				if adaptThinkingStateCarrier(msg, target) > 0 {
+					report.ConvertedReasoning++
+				}
 			default:
 				portableThoughts := geminiThoughtText(msg.GeminiParts)
 				msg.GeminiParts = nil
@@ -616,14 +640,6 @@ func allowsForeignResponsesOutputReplay(msg message.Message, target TargetModel)
 		provenanceWireFamily(msg) == WireFamilyOpenAIResponses
 }
 
-func reasoningContinuityAllowsAnthropicBlocks(target TargetModel) bool {
-	if strings.TrimSpace(target.WireFamily) != WireFamilyAnthropic {
-		return false
-	}
-	mode := strings.TrimSpace(target.ReasoningContinuityMode)
-	return mode == ReasoningContinuityAnthropicBlocks || mode == ReasoningContinuityAnthropicUnsigned
-}
-
 func reasoningContinuityAllowsUnsignedAnthropicBlocks(target TargetModel) bool {
 	return strings.TrimSpace(target.WireFamily) == WireFamilyAnthropic && strings.TrimSpace(target.ReasoningContinuityMode) == ReasoningContinuityAnthropicUnsigned
 }
@@ -646,29 +662,29 @@ func AllowsOpenAIVisibleReasoningReplay(msg message.Message) bool {
 }
 
 // allowsGeminiThoughtSignatureReplay reports whether msg's Gemini thought
-// signatures can be replayed to the current target. Signatures are bound to
-// the producing model, so replay requires a gemini target with matching
-// provenance; anything else strips them (other wire formats never serialize
-// them, but stale signatures must not survive a model switch back to gemini).
+// signatures can be replayed to the current target. A signature is bound to
+// the producing model, so replay needs a target that reaches the same family,
+// with matching provenance; anything else strips them (a stale signature must
+// not survive a model switch back to gemini).
 func allowsGeminiThoughtSignatureReplay(msg message.Message, target TargetModel) bool {
-	if strings.TrimSpace(target.WireFamily) != WireFamilyGemini {
+	if !targetCarriesGeminiSignatures(target) {
 		return false
 	}
-	if provenanceWireFamily(msg) != WireFamilyGemini {
+	if geminiSignatureFamily(msg) != NativeFamilyGemini {
 		return false
 	}
 	return messageProvenanceMatchesTarget(msg, target)
 }
 
 // allowsForeignGeminiThoughtSignatureReplay is the relaxed variant for
-// ReplayCompatNative: signatures produced through the gemini wire protocol are
-// replayed to any gemini target, since the backend — not client-side config —
-// decides whether it can validate them; a rejection escalates the replay
-// compatibility level. Non-gemini targets always strip, so stale signatures
-// never survive a switch away from the gemini wire format.
+// ReplayCompatNative: a signature produced by a gemini-family model is
+// replayed to any target that reaches that family, on whichever wire, since
+// the backend — not client-side config — decides whether it can still validate
+// the blob; a rejection escalates the replay compatibility level. Non-gemini
+// targets always strip, so stale signatures never survive a switch away from
+// the gemini family.
 func allowsForeignGeminiThoughtSignatureReplay(msg message.Message, target TargetModel) bool {
-	return strings.TrimSpace(target.WireFamily) == WireFamilyGemini &&
-		provenanceWireFamily(msg) == WireFamilyGemini
+	return targetCarriesGeminiSignatures(target) && geminiSignatureFamily(msg) == NativeFamilyGemini
 }
 
 func provenanceWireFamily(msg message.Message) string {
@@ -676,15 +692,6 @@ func provenanceWireFamily(msg message.Message) string {
 		return ""
 	}
 	return strings.TrimSpace(msg.Provenance.WireFamily)
-}
-
-func messageAllowsAnthropicThinkingReplay(msg message.Message, target TargetModel) bool {
-	if msg.Provenance == nil {
-		return false
-	}
-	wire := strings.TrimSpace(msg.Provenance.WireFamily)
-	providerID := strings.TrimSpace(msg.Provenance.ProviderID)
-	return wire == WireFamilyAnthropic && (providerID == "" || providerID == strings.TrimSpace(target.ProviderID))
 }
 
 func messageProvenanceMatchesTarget(msg message.Message, target TargetModel) bool {

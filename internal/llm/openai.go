@@ -139,6 +139,9 @@ type openAIMessage struct {
 	ToolCalls        []openAIToolCall `json:"tool_calls,omitempty"`
 	ToolCallID       string           `json:"tool_call_id,omitempty"`
 	Tools            []openAITool     `json:"tools,omitempty"`
+	// ThinkingBlocks carries Anthropic-shaped thinking blocks for gateways
+	// that front a Claude model (see openai_thinking_state.go).
+	ThinkingBlocks []anthropicContent `json:"thinking_blocks,omitempty"`
 }
 
 // openAIContentBlock is a content block (text, image_url, or tool result).
@@ -173,6 +176,13 @@ type openAIToolCall struct {
 	ID       string         `json:"id"`
 	Type     string         `json:"type"`
 	Function openAIFunction `json:"function"`
+	// ExtraContent is the documented carrier for the Gemini thought signature
+	// (extra_content.google.thought_signature). The top-level
+	// thought_signature and provider_specific_fields mirrors are read-only;
+	// they are never populated on a request.
+	ExtraContent           *openAIToolCallExtraContent   `json:"extra_content,omitempty"`
+	ThoughtSignature       string                        `json:"thought_signature,omitempty"`
+	ProviderSpecificFields *openAIProviderSpecificFields `json:"provider_specific_fields,omitempty"`
 }
 
 // openAIFunction is the function definition in a tool call.
@@ -213,6 +223,10 @@ type openAIStreamDelta struct {
 	Reasoning        reasoningAlias   `json:"reasoning,omitempty"`
 	ReasoningText    reasoningAlias   `json:"reasoning_text,omitempty"`
 	ToolCalls        []openAIToolCall `json:"tool_calls,omitempty"`
+	// ThinkingBlocks is the message-level Claude replay carrier; gateways that
+	// return it send the whole block array in one chunk.
+	ThinkingBlocks         []anthropicContent            `json:"thinking_blocks,omitempty"`
+	ProviderSpecificFields *openAIProviderSpecificFields `json:"provider_specific_fields,omitempty"`
 }
 
 type reasoningAlias string
@@ -334,7 +348,21 @@ func (o *OpenAIProvider) CompleteStream(
 		// Convert messages to OpenAI format.
 		wireFamily := providerWireFamily(o.provider)
 		continuityMode := reasoningContinuityCompatMode(o.provider, model)
-		convertOpts := openAIConvertOptions{}
+		// Resolve the chat dialect once for the whole request: it selects both
+		// the thinking controls and the thinking-state carrier this endpoint
+		// reads, and the converter and the body writer must agree.
+		dialect, dialectErr := chatCompletionsNativeThinking(model, chatCompat)
+		if dialectErr != nil {
+			return nil, dialectErr
+		}
+		convertOpts := openAIConvertOptions{chatNativeThinking: dialect}
+		if tuning.DisableReasoning && dialect == nativeThinkingAnthropic {
+			// A replay-degraded request must not ship Claude thinking blocks:
+			// the backend rejects blocks the request no longer matches. Gemini
+			// signatures stay, because Gemini 3 validates function-call history
+			// regardless of this request's thinking setting.
+			convertOpts.chatNativeThinking = nativeThinkingOff
+		}
 		if chatCompat != nil {
 			convertOpts.requiresToolResultName = compatBool(chatCompat.RequiresToolResultName, false)
 			convertOpts.requiresAssistantAfterToolResult = compatBool(chatCompat.RequiresAssistantAfterToolResult, false)
@@ -350,6 +378,13 @@ func (o *OpenAIProvider) CompleteStream(
 		// requests whose thinking key was already stripped.
 		if wireFamily == modelcompat.WireFamilyOpenAIChat && continuityMode == modelcompat.ReasoningContinuityOpenAIVisible {
 			fillCurrentTurnEmptyReasoning(apiMessages)
+		}
+		if dialect == nativeThinkingGemini {
+			// Gemini 3 rejects function-call history whose thought signature is
+			// missing; a step without one (never captured, or stripped by the
+			// replay ladder) gets the documented placeholder instead of a
+			// guaranteed 400.
+			ensureChatGeminiActiveLoopSignatures(apiMessages, model)
 		}
 
 		// Convert tools.
@@ -435,10 +470,6 @@ func (o *OpenAIProvider) CompleteStream(
 		// (DisableReasoning) must not ship a thinking request the rest of the
 		// body no longer matches.
 		if !tuning.DisableReasoning {
-			dialect, dialectErr := chatCompletionsNativeThinking(model, chatCompat)
-			if dialectErr != nil {
-				return nil, dialectErr
-			}
 			applyNativeThinking(&reqBody, dialect, tuning)
 		}
 		bodyBytes, err := json.Marshal(reqBody)
@@ -634,6 +665,10 @@ func convertMessagesToOpenAI(systemPrompt, targetWireFamily, continuityMode stri
 type openAIConvertOptions struct {
 	requiresToolResultName           bool
 	requiresAssistantAfterToolResult bool
+	// chatNativeThinking is the resolved dialect of a Chat Completions target.
+	// It selects the thinking-state carrier written into the request
+	// (openai_thinking_state.go); empty disables the carriers.
+	chatNativeThinking nativeThinkingDialect
 }
 
 func convertMessagesToOpenAIWithOptions(systemPrompt, targetWireFamily, continuityMode string, msgs []message.Message, opts openAIConvertOptions) []openAIMessage {
@@ -781,7 +816,17 @@ func convertMessagesToOpenAIWithOptions(systemPrompt, targetWireFamily, continui
 					},
 				})
 			}
-			if contentText == "" && len(omi.ToolCalls) == 0 && omi.ReasoningContent == nil {
+			// Attach the target wire's thinking-state carrier. Normalization
+			// already decided which provider-bound blobs this target may see;
+			// the carrier only shapes what survived. Gemini rides on the first
+			// function call of the step, Claude on the message.
+			switch opts.chatNativeThinking {
+			case nativeThinkingGemini:
+				applyChatGeminiThoughtSignature(&omi, modelcompat.ToolCallsThoughtSignature(msg.ToolCalls))
+			case nativeThinkingAnthropic:
+				omi.ThinkingBlocks = carrierBlocksFromThinkingBlocks(msg.ThinkingBlocks)
+			}
+			if contentText == "" && len(omi.ToolCalls) == 0 && omi.ReasoningContent == nil && len(omi.ThinkingBlocks) == 0 {
 				log.Warn("skipping empty/reasoning-only assistant message in OpenAI history")
 				continue
 			}
@@ -933,6 +978,9 @@ func parseOpenAISSEStreamOptions(reader io.Reader, cb StreamCallback, collector 
 		resp      message.Response
 		content   strings.Builder
 		toolCalls = make(map[int]*openAIToolAccumulator) // index → accumulator
+		// pendingThinkingBlocks keeps the last non-empty message-level thinking
+		// block array seen in a delta (the Claude replay carrier).
+		pendingThinkingBlocks []anthropicContent
 		// inThinking tracks whether we are currently inside a reasoning_content
 		inThinking     bool
 		truncated      bool
@@ -1001,6 +1049,7 @@ func parseOpenAISSEStreamOptions(reader io.Reader, cb StreamCallback, collector 
 			if reasoningBuf.Len() > 0 {
 				resp.ReasoningContent = reasoningBuf.String()
 			}
+			resp.ThinkingBlocks = thinkingBlocksFromCarrier(pendingThinkingBlocks)
 			flushContent()
 			if inferFinishReason {
 				applyInferredFinishReason(&resp, len(resp.ToolCalls) > 0)
@@ -1032,6 +1081,11 @@ func parseOpenAISSEStreamOptions(reader io.Reader, cb StreamCallback, collector 
 
 		// Process choices.
 		for _, choice := range chunk.Choices {
+			if blocks := openAIThinkingBlocksFromCarriers(choice.Delta.ThinkingBlocks, choice.Delta.ProviderSpecificFields); len(blocks) > 0 {
+				// Gateways send the block array whole; keep the last non-empty
+				// array so a repeated or extended one wins.
+				pendingThinkingBlocks = blocks
+			}
 			// OpenAI-compatible providers use several fields for visible reasoning.
 			// Prefer reasoning_content when a gateway duplicates the same delta
 			// under multiple aliases.
@@ -1113,6 +1167,12 @@ func parseOpenAISSEStreamOptions(reader io.Reader, cb StreamCallback, collector 
 					}
 					toolCalls[tc.Index] = acc
 					maybeEmitOpenAIToolStart(acc, cb)
+				}
+				// A thought signature may ride on any chunk of the call (the
+				// compatibility endpoint returns it with the first function
+				// call of the step); keep the last non-empty copy.
+				if sig := openAIToolCallThoughtSignature(tc); sig != "" {
+					acc.thoughtSignature = cloneLongLivedLLMString(sig)
 				}
 				// Subsequent chunks carry argument fragments.
 				//
@@ -1223,6 +1283,7 @@ func parseOpenAISSEStreamOptions(reader io.Reader, cb StreamCallback, collector 
 	if reasoningBuf.Len() > 0 {
 		resp.ReasoningContent = reasoningBuf.String()
 	}
+	resp.ThinkingBlocks = thinkingBlocksFromCarrier(pendingThinkingBlocks)
 	flushContent()
 	if inferFinishReason && accumulatedToolCallArgsComplete(toolCalls) {
 		applyInferredFinishReason(&resp, len(toolCalls) > 0)
@@ -1337,9 +1398,10 @@ func finalizeToolCalls(
 		}
 		log.Debugf("finalized tool call tool=%v id=%v args=%v", acc.name, acc.id, string(args))
 		resp.ToolCalls = append(resp.ToolCalls, message.ToolCall{
-			ID:   cloneLongLivedLLMString(acc.id),
-			Name: cloneLongLivedLLMString(acc.name),
-			Args: args,
+			ID:               cloneLongLivedLLMString(acc.id),
+			Name:             cloneLongLivedLLMString(acc.name),
+			Args:             args,
+			ThoughtSignature: cloneLongLivedLLMString(acc.thoughtSignature),
 		})
 		if cb != nil {
 			cb(message.StreamDelta{

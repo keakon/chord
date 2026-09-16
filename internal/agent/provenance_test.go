@@ -5,7 +5,9 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/llm"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/modelcompat"
+	"github.com/keakon/chord/internal/recovery"
 )
 
 func TestMainAssistantProvenanceUsesProviderTypeWireFamily(t *testing.T) {
@@ -69,5 +71,33 @@ func TestMainAssistantProvenanceUsesRunningFallbackWireFamily(t *testing.T) {
 	}
 	if prov.WireFamily != modelcompat.WireFamilyAnthropic {
 		t.Fatalf("WireFamily = %q, want %q", prov.WireFamily, modelcompat.WireFamilyAnthropic)
+	}
+}
+
+func TestAssistantProvenanceRecordsConfiguredNativeFamily(t *testing.T) {
+	provider := llm.NewProviderConfig("sample", config.ProviderConfig{
+		Type:   config.ProviderTypeChatCompletions,
+		Compat: &config.ProviderCompatConfig{ChatCompletions: &config.ChatCompletionsCompatConfig{NativeThinking: config.NativeThinkingAnthropic}},
+		Models: map[string]config.ModelConfig{"deployment-a": {}},
+	}, []string{"test-key"})
+	client := llm.NewClient(provider, stubProvider{}, "deployment-a", 4096, "sys")
+	prov := provenanceFromClient("chord", client, "sample/deployment-a", "sample/deployment-a")
+	if prov == nil || prov.NativeFamily != modelcompat.NativeFamilyAnthropic {
+		t.Fatalf("provenance = %+v", prov)
+	}
+	dir := t.TempDir()
+	writer := recovery.NewRecoveryManager(dir)
+	if err := writer.PersistMessage("main", message.Message{Role: message.RoleAssistant, Content: "ok", Provenance: prov}); err != nil {
+		t.Fatal(err)
+	}
+	writer.Close()
+	reader := recovery.NewRecoveryManager(dir)
+	t.Cleanup(reader.Close)
+	restored, err := reader.LoadMessages("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(restored) != 1 || restored[0].Provenance == nil || restored[0].Provenance.NativeFamily != modelcompat.NativeFamilyAnthropic {
+		t.Fatalf("restored = %+v", restored)
 	}
 }

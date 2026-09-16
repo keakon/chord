@@ -18,6 +18,7 @@
 - 新增 `job_output`、`job_list`、`job_kill` 三个工具管理后台任务。`job_output` 只返回自上次读取以来的新增输出，可用 `wait` 选择是否阻塞（`none` / `output` / `exit`），每次等待由 runtime 限制，慢任务不会占住回合，等待超时也不会杀掉 job；连续多次读取都没有新输出会被视为轮询——先提示、后拒绝，返回给模型的输出也会去掉终端转义序列。`job_list` 列出你可读取或停止的 job（你自己的、主 agent 的，以及你的直接 owner 启动的），`job_kill` 停止任务且不产生完成通知。折叠后的 `job_output` 卡片会在标题行写出这次读取的结果（`job_output job-8 · 2 new lines`，没有新输出时是 `· no new output`），折叠的 `job_kill` 卡片则显示 `job_kill job-64 · Stop requested`，状态不必展开就能看到。
 - 连续的后台完成唤醒之间没有用户输入时最多 3 次，超过后新的完成结果要等下一条用户消息才会投递。
 - 模型挂在把请求转成原生 API 的 Chat Completions 网关后面时，其 `thinking.*` 配置会按该 API 自己的形状发送：Gemini 用 `extra_body.google.thinking_config`，Claude 用 `thinking: {type, budget_tokens}`，DeepSeek / GLM / Kimi K2.x / Doubao 用 `thinking: {type}`，Qwen 用 `enable_thinking`。形状按模型名推断、无需配置，同一份模板既能在网关后面生效，也能直接连模型的原生端点；模型名看不出上游时可用 `compat.chat_completions.native_thinking` 指定形状，对拒绝未知请求体字段的端点也可用它关闭。不属于这些家族的模型仍用 `compat.request_overrides.body.thinking`。
+- 网关把 Chat Completions 请求转给带思考能力的模型时，现在能跨工具轮次保留该模型的原生思考状态，并回放给产出它的后端家族——不再因为线路变化就被剥掉。Gemini 的 thought signature 放在该步第一条工具调用的 `extra_content.google.thought_signature` 里，Claude 的思考块放在消息级 `thinking_blocks` 里；同一份签名换个 provider、换条线路（Messages、原生 API）续聊都能继续用，落到别的家族时则剥掉，而不是发送后端校验不了的 blob。状态缺失时会修复而不是必然失败：Gemini 3 的函数调用历史缺签名时补上官方文档给出的 `skip_thought_signature_validator` 占位值，Claude 线路当前回合已经没有可回放思考块时该请求不带 reasoning 控制字段。
 
 ### 改进
 

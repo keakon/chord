@@ -1485,6 +1485,7 @@ func normalizeMessagesForPoolTargetWithOptions(msgs []message.Message, target Fa
 		Variant:                     variant,
 		ModelRef:                    modelRef,
 		WireFamily:                  providerWireFamily(target.ProviderConfig),
+		NativeFamily:                target.ProviderConfig.NativeFamily(target.ModelID),
 		ReasoningContinuityMode:     reasoningContinuityMode(target.ProviderConfig, target.ModelID, tuning),
 		PreserveHistoricalReasoning: preserveHistoricalReasoning(target.ProviderConfig, target.ModelID),
 		ToolResultEncoding:          toolResultEncoding(target.ProviderConfig),
@@ -1529,6 +1530,42 @@ func providerWireFamily(provider *ProviderConfig) string {
 		return modelcompat.WireFamilyGemini
 	default:
 		return modelcompat.WireFamilyUnknown
+	}
+}
+
+// NativeFamily resolves the upstream model family a request reaches. The
+// wire only implies a family for the native endpoints; a Chat Completions
+// endpoint is usually a gateway, so the model name — or an explicit
+// compat.chat_completions.native_thinking selector — is what identifies the
+// backend whose provider-bound thinking state it can validate.
+func (p *ProviderConfig) NativeFamily(modelID string) string {
+	wire := providerWireFamily(p)
+	if wire == modelcompat.WireFamilyOpenAIChat && p != nil {
+		if compat := p.ChatCompletionsCompat(modelID); compat != nil &&
+			!strings.EqualFold(strings.TrimSpace(compat.NativeThinkingValue()), config.NativeThinkingAuto) {
+			// An explicit selector declares what the backend reads, including
+			// `off` for endpoints that reject the native fields.
+			dialect, err := chatCompletionsNativeThinking(modelID, compat)
+			if err != nil {
+				return modelcompat.NativeFamilyUnknown
+			}
+			return nativeFamilyForDialect(dialect)
+		}
+	}
+	if family := modelcompat.ModelNativeFamily(modelID); family != modelcompat.NativeFamilyUnknown {
+		return family
+	}
+	return modelcompat.WireNativeFamily(wire)
+}
+
+func nativeFamilyForDialect(dialect nativeThinkingDialect) string {
+	switch dialect {
+	case nativeThinkingGemini:
+		return modelcompat.NativeFamilyGemini
+	case nativeThinkingAnthropic:
+		return modelcompat.NativeFamilyAnthropic
+	default:
+		return modelcompat.NativeFamilyUnknown
 	}
 }
 

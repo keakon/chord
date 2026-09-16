@@ -606,8 +606,8 @@ func TestFallbackReplayLevelSynthesizesSameWireTargetMismatch(t *testing.T) {
 			WireFamily: modelcompat.WireFamilyGemini,
 		},
 	}
-	if got := minimumReplayLevelForTarget([]message.Message{geminiMsg}, FallbackModel{ProviderConfig: geminiCfg, ModelID: "target-model"}); got != modelcompat.ReplayCompatSynthesized {
-		t.Fatalf("Gemini tool-signature target mismatch level = %v, want synthesized", got)
+	if got := minimumReplayLevelForTarget([]message.Message{geminiMsg}, FallbackModel{ProviderConfig: geminiCfg, ModelID: "target-model"}); got != modelcompat.ReplayCompatNative {
+		t.Fatalf("Gemini same-family replay level = %v, want native", got)
 	}
 }
 

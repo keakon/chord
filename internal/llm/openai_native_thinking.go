@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/modelcompat"
 )
 
 // A Chat Completions endpoint is frequently a gateway that translates the call
@@ -61,12 +62,14 @@ func resolveNativeThinkingDialect(modelID, selector string) (nativeThinkingDiale
 // fail the request, and the previous behavior (an inert thinking block) is the
 // safer default. Those setups name the dialect explicitly instead.
 func inferNativeThinkingDialect(modelID string) nativeThinkingDialect {
+	switch modelcompat.ModelNativeFamily(modelID) {
+	case modelcompat.NativeFamilyGemini:
+		return nativeThinkingGemini
+	case modelcompat.NativeFamilyAnthropic:
+		return nativeThinkingAnthropic
+	}
 	m := strings.ToLower(modelID)
 	switch {
-	case strings.Contains(m, "gemini"):
-		return nativeThinkingGemini
-	case strings.Contains(m, "claude"), strings.Contains(m, "anthropic"):
-		return nativeThinkingAnthropic
 	case strings.Contains(m, "qwen"), strings.Contains(m, "qwq"):
 		return nativeThinkingQwen
 	case strings.Contains(m, "deepseek"), strings.Contains(m, "glm"), strings.Contains(m, "zhipu"),

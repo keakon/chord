@@ -751,6 +751,44 @@ model_pools:
 - 思考摘要以 `reasoning_content` 返回并显示为 thinking。上游是否真的返回摘要文本仍
   取决于网关和模型；无论是否返回，级别和预算都会作用到请求上。
 
+### 思考状态与签名
+
+模型的原生 API 会返回与后端绑定的回放状态，经过网关时也一样，而且下一次调用必须
+把它带回去。Chord 按模型所属家族用对应的形状承托：
+
+| 家族 | 网关返回的位置 | Chord 回传的位置 |
+| --- | --- | --- |
+| Gemini | 每步一个 thought signature：`tool_calls[].extra_content.google.thought_signature`（Google 官方兼容端点）、`tool_calls[].thought_signature`，或 `provider_specific_fields.thought_signature` | 该步第一条工具调用的 `extra_content.google.thought_signature` |
+| Claude | assistant 消息级的 `thinking_blocks`（LiteLLM 的约定），也读 `provider_specific_fields` 里的镜像 | 同一个 `thinking_blocks` 数组 |
+
+这些 blob 对 Chord 不透明，只由产出它的后端校验，所以 Chord 按**模型家族**回放，
+而不是看请求走哪条线路：在 Gemini 端点上拿到的签名，续聊时换成网关、换个 provider
+或直连原生 API 都能继续用，反过来也一样。请求落到别的家族时会剥掉这些 blob；其中
+可读的思考文本仍会按目标接受的形式作为普通 thinking 发出。
+
+Chat Completions 模型使用别名时，用 `native_thinking: anthropic` 或 `gemini`
+明确后端家族。Chord 会把家族信息随响应保存，恢复会话后也不必靠别名猜测来源。
+只有家族匹配，才会转换回放载体：例如 Messages 思考块中的 Gemini 签名，切到
+Chat Completions 后会放在第一条工具调用上。Gemini 工具续轮即使没有可见思考文本，
+也会保留配置的思考控制参数。
+
+状态缺失或被拒时，Chord 会修好请求再发，而不是发一个必然失败的请求：
+
+- Gemini 3 不接受缺 thought signature 的 function call 步骤。最后一条用户消息之后
+  的 assistant 步骤签名已丢时（换了模型、网关把它丢了），Chord 会补上官方文档给出的
+  占位值 `skip_thought_signature_validator`，后端接受它代替真实签名。这个修复要求模型
+  名里能看出 Gemini 3：网关别名把名字藏了的话，要同时设置 `native_thinking: gemini`，
+  并让模型名保留 `gemini-3`。
+- Claude 线路当前回合已经没有可回放的 `thinking_blocks` 时，该请求不会再带 `thinking`
+  控制字段——发出的历史里没有对应的思考块，声明了思考反而会被拒。
+- 后端确实拒绝某个签名时，仍会按回放兼容等级逐级降级：Chord 剥掉 blob 重试，而不是
+  让这一轮直接失败。
+
+`native_thinking: off` 会一并停掉这些状态的发送与回放，适用于拒绝原生字段的端点。
+
+网关是否真的返回这些状态仍取决于它自己：代理若丢掉 `extra_content` 或
+`thinking_blocks`，Chord 也就无从回放。
+
 ## Google Gemini
 
 在 `~/.config/chord/auth.yaml` 中配置：

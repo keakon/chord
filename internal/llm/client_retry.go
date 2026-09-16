@@ -1110,8 +1110,8 @@ func (c *Client) completeStreamTarget(
 }
 
 // minimumReplayLevelForTarget selects a portable replay floor whenever provider-native
-// payload provenance does not match the request target. This applies to the
-// cursor-head target as well as fallbacks: a model switch can make opaque
+// payload provenance does not match the request target or a supported native
+// family. This applies to the cursor-head target as well as fallbacks: a model switch can make opaque
 // reasoning invalid even when both targets use the same wire protocol.
 // Synthesized retains portable reasoning and structured tool calls; Strict is
 // reserved for an explicit rejection or a request-scoped recovery probe.
@@ -1122,6 +1122,7 @@ func minimumReplayLevelForTarget(messages []message.Message, target FallbackMode
 	}
 	targetProvider := strings.TrimSpace(target.ProviderConfig.Name())
 	targetModel := strings.TrimSpace(target.ModelID)
+	nativeFamily := target.ProviderConfig.NativeFamily(target.ModelID)
 	for _, msg := range messages {
 		hasNativePayload := len(msg.ResponsesOutput) > 0 || len(msg.ThinkingBlocks) > 0 ||
 			strings.TrimSpace(msg.ReasoningContent) != "" || len(msg.GeminiParts) > 0
@@ -1134,6 +1135,11 @@ func minimumReplayLevelForTarget(messages []message.Message, target FallbackMode
 			}
 		}
 		if !hasNativePayload {
+			continue
+		}
+		if len(msg.ResponsesOutput) == 0 &&
+			(nativeFamily == modelcompat.NativeFamilyAnthropic || nativeFamily == modelcompat.NativeFamilyGemini) &&
+			modelcompat.MessageNativeFamily(msg) == nativeFamily {
 			continue
 		}
 		if msg.Provenance == nil || strings.TrimSpace(msg.Provenance.WireFamily) != targetFamily ||
@@ -1193,12 +1199,29 @@ func replayCompatibleRequestTuning(tuning RequestTuning, messages []message.Mess
 	// assistant tool-call messages after the last user message, so a
 	// reasoning-free turn that has already scrolled out of the current turn
 	// must not suppress reasoning for the rest of the session.
+	nativeFamily := target.ProviderConfig.NativeFamily(target.ModelID)
+	if nativeFamily == modelcompat.NativeFamilyGemini {
+		return tuning
+	}
 	for i := lastUserMessageIndex(messages) + 1; i < len(messages); i++ {
 		msg := messages[i]
-		if msg.Role == message.RoleAssistant && len(msg.ToolCalls) > 0 && strings.TrimSpace(msg.ReasoningContent) == "" {
-			tuning.DisableReasoning = true
-			return tuning
+		if msg.Role != message.RoleAssistant || len(msg.ToolCalls) == 0 {
+			continue
 		}
+		// A Claude-backed chat endpoint replays its thinking through the
+		// message-level thinking_blocks carrier, so a step that still carries
+		// replayable blocks keeps the reasoning controls (LiteLLM's
+		// modify_params behavior); disabling reasoning would drop the chain the
+		// backend validates.
+		if nativeFamily == modelcompat.NativeFamilyAnthropic {
+			if message.HasReplayableThinkingBlocks(msg.ThinkingBlocks) {
+				continue
+			}
+		} else if strings.TrimSpace(msg.ReasoningContent) != "" {
+			continue
+		}
+		tuning.DisableReasoning = true
+		return tuning
 	}
 	return tuning
 }
