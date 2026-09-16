@@ -11,7 +11,114 @@ import (
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/llm"
+	"github.com/keakon/chord/internal/message"
 )
+
+// ModelOption describes a model available for runtime switching.
+type ModelOption struct {
+	ProviderModel string // e.g. "anthropic-main/claude-opus-4.7" or "anthropic-main/claude-opus-4.7@high"
+	ProviderName  string // e.g. "anthropic-main"
+	ModelID       string // e.g. "claude-opus-4.7"
+	ContextLimit  int
+	OutputLimit   int
+}
+
+// SupportsInput reports whether the active main-agent model accepts the given
+// input modality (e.g. "image", "pdf").
+func (a *MainAgent) SupportsInput(modality string) bool {
+	if a == nil {
+		return false
+	}
+	a.llmMu.RLock()
+	client := a.llmClient
+	a.llmMu.RUnlock()
+	return client != nil && client.SupportsInput(modality)
+}
+
+// SupportsViewImageTool reports whether the stable primary model for this agent
+// can expose view_image. It intentionally follows the model-pool primary rather
+// than the current fallback cursor so the tool surface does not change as
+// fallback routing moves between candidates.
+func (a *MainAgent) SupportsViewImageTool() bool {
+	if a == nil {
+		return false
+	}
+	a.llmMu.RLock()
+	client := a.llmClient
+	a.llmMu.RUnlock()
+	return client != nil && client.PrimarySupportsViewImageTool()
+}
+
+// filterUnsupportedParts removes image/pdf parts that the current model does
+// not support. When parts are removed, a toast is emitted to notify the user.
+// If all non-text parts are removed, the result falls back to plain text.
+func (a *MainAgent) filterUnsupportedParts(content string, parts []message.ContentPart) (string, []message.ContentPart) {
+	if len(parts) == 0 {
+		return content, parts
+	}
+
+	a.llmMu.RLock()
+	client := a.llmClient
+	modelName := a.modelName
+	a.llmMu.RUnlock()
+	if client == nil {
+		return content, parts
+	}
+
+	var filtered []message.ContentPart
+	var dropped []string
+	for _, p := range parts {
+		switch p.Type {
+		case message.ContentPartImage:
+			if !client.SupportsInput("image") {
+				dropped = append(dropped, "image")
+				continue
+			}
+		case message.ContentPartPDF:
+			if !client.SupportsInput("pdf") {
+				dropped = append(dropped, "pdf")
+				continue
+			}
+		}
+		filtered = append(filtered, p)
+	}
+
+	if len(dropped) == 0 {
+		return content, parts
+	}
+
+	// Deduplicate dropped types for the toast message.
+	seen := map[string]bool{}
+	var unique []string
+	for _, d := range dropped {
+		if !seen[d] {
+			seen[d] = true
+			unique = append(unique, d)
+		}
+	}
+	if a.unsupportedPartToast.first(modelName, toastCategoryInput, droppedSummary(unique)) {
+		a.emitToTUI(ToastEvent{
+			Message: "The current model does not support " + strings.Join(unique, "/") + " input; attachments were ignored",
+			Level:   "warn",
+		})
+	}
+
+	// If only text parts remain, collapse to plain content.
+	if len(filtered) == 0 {
+		return content, nil
+	}
+	allText := true
+	for _, p := range filtered {
+		if p.Type != message.ContentPartText {
+			allText = false
+			break
+		}
+	}
+	if allText && len(filtered) == 1 {
+		return filtered[0].Text, nil
+	}
+	return content, filtered
+}
 
 // ModelName returns the name of the model the agent is using.
 func (a *MainAgent) ModelName() string {

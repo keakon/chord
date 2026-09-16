@@ -12,6 +12,94 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
+// processPendingUserMessagesBeforeLLMInTurn appends queued user messages to the
+// conversation so the next LLM call sees tool results and user input together.
+// Slash commands that require idle (/loop*, /resume*, /new, /mcp*) are left on the
+// queue for the next idle drain. /compact is local-only and schedules background
+// compaction immediately, even while a turn is active.
+func (a *MainAgent) processPendingUserMessagesBeforeLLMInTurn() {
+	a.consumePendingUserMessagesForRequest(nil, 0)
+}
+
+// mergePendingInputsForTurnContinuation carries every queued input to the next
+// request of the active turn: queued user messages plus the pending mailbox
+// batch (including JOB RESULT background rows). It is the single dispatch
+// boundary for turn continuations (tool-batch closeout, malformed retry,
+// length-recovery retry, routing-invalidation resume, compaction resumes), so
+// a mailbox-only arrival without user input is staged exactly like a queued
+// follow-up.
+//
+// Order is user first, then mailbox: consumePendingUserMessagesForRequest
+// already stages newly arrived mailbox rows when it merges manual input, and
+// prepareSubAgentMailboxBatchForTurnContinuation is a no-op when that stage
+// already filled the pending batch, so the second step only covers the
+// mailbox-only case without double-draining.
+func (a *MainAgent) mergePendingInputsForTurnContinuation() {
+	a.processPendingUserMessagesBeforeLLMInTurn()
+	a.prepareSubAgentMailboxBatchForTurnContinuation()
+}
+
+func (a *MainAgent) consumePendingUserMessagesForRequest(messages []message.Message, tailOverlayCount int) []message.Message {
+	if len(a.pendingUserMessages) == 0 {
+		return messages
+	}
+	// This request injects the queue, so a parked state ends here: the injected
+	// entries (and any idle-only slash command re-queued below) return to normal
+	// drain semantics.
+	a.resumePendingUserDrain()
+	pending := a.pendingUserMessages
+	a.pendingUserMessages = nil
+	var deferred []pendingUserMessage
+	type consumedPendingDraft struct {
+		draftID string
+		msg     message.Message
+	}
+	var consumed []consumedPendingDraft
+	manualInputConsumed := false
+	for _, p := range pending {
+		content := pendingUserMessageText(p)
+		c := strings.TrimSpace(content)
+		if IsIdleOnlySlashCommand(c) {
+			deferred = append(deferred, p)
+			continue
+		}
+		m, ok := a.pendingUserMessageToConversationMessage(p)
+		if !ok {
+			continue
+		}
+		consumed = append(consumed, consumedPendingDraft{draftID: p.DraftID, msg: m})
+		manualInputConsumed = manualInputConsumed || p.FromUser
+	}
+	// Re-queue /resume* and anything that arrived concurrently (should be rare).
+	a.pendingUserMessages = append(deferred, a.pendingUserMessages...)
+	if len(consumed) == 0 {
+		return messages
+	}
+	if manualInputConsumed {
+		// Merge any mailbox that arrived since the continuation staging ran;
+		// staging appends to (never overwrites) the pending batch, so a batch
+		// already prepared for this request is preserved.
+		a.stageNextSubAgentMailboxBatch()
+	}
+	log.Debugf("injecting pending user messages with tool results count=%v", len(consumed))
+	tailOverlayCount = min(max(tailOverlayCount, 0), len(messages))
+	insertionAt := len(messages) - tailOverlayCount
+	requestMessages := make([]message.Message, 0, len(messages)+len(consumed))
+	requestMessages = append(requestMessages, messages[:insertionAt]...)
+	for _, item := range consumed {
+		a.ctxMgr.Append(item.msg)
+		requestMessages = append(requestMessages, item.msg)
+		a.recordEvidenceFromMessage(item.msg)
+		if a.recoveryManager() != nil {
+			a.persistAsync(identity.MainAgentID, item.msg)
+		}
+		a.emitPendingDraftConsumed(item.draftID, item.msg)
+	}
+	requestMessages = append(requestMessages, messages[insertionAt:]...)
+	a.syncBugTriagePromptFromSnapshot()
+	return requestMessages
+}
+
 // CancelCurrentTurn cancels the agent's active turn (if any), aborting any
 // in-flight LLM call or tool execution. It is safe to call from any goroutine
 // (typically the TUI's Ctrl+C handler). Returns true if a turn was active and

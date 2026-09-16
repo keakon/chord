@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -9,6 +10,50 @@ import (
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
+
+// ---------------------------------------------------------------------------
+// Confirm/Question response types for the Event+Resolve interaction path.
+// ---------------------------------------------------------------------------
+
+// ErrAgentShutdown is returned when the agent is shutting down and can no
+// longer process interactive requests.
+var ErrAgentShutdown = fmt.Errorf("agent is shutting down")
+
+// ConfirmResponse carries the user's response to a ConfirmRequestEvent.
+type ConfirmResponse struct {
+	Approved      bool
+	FinalArgsJSON string
+	EditSummary   string
+	DenyReason    string
+	RuleIntent    *ConfirmRuleIntent // nil = no new rule
+}
+
+// ConfirmRuleIntent captures the user's intent to add a permission rule.
+type ConfirmRuleIntent struct {
+	Patterns []string
+	Scope    int // 0=session, 1=project, 2=userGlobal (matches permission.RuleScope)
+}
+
+// QuestionResponse carries the user's response to a QuestionRequestEvent.
+type QuestionResponse struct {
+	Answers   []string
+	Cancelled bool
+}
+
+// ConfirmFunc is the callback the agent invokes when a tool call requires user
+// confirmation (permission action "ask"). The TUI (or test harness) supplies
+// the implementation.
+//
+//   - ctx:          context for cancellation (e.g. turn cancelled while waiting)
+//   - toolName:     the name of the tool being invoked (e.g. "Shell")
+//   - args:         the raw JSON arguments string
+//   - needsApproval: explicit arguments covered by this approval prompt
+//   - alreadyAllowed: explicit arguments already allowed by rules in the same batch
+//   - needsApprovalRules: rule patterns that matched ask items in this prompt
+//   - alreadyAllowedRules: rule patterns that matched allowed items in the same batch
+//   - ConfirmResponse: approved decision plus the final args JSON chosen by the user
+//   - err:          non-nil if the confirmation flow itself fails
+type ConfirmFunc func(ctx context.Context, toolName string, args string, needsApproval []string, alreadyAllowed []string, needsApprovalRules []string, alreadyAllowedRules []string) (ConfirmResponse, error)
 
 // ResolveConfirm sends the user's confirmation response back to the waiting
 // ConfirmFunc goroutine via the broker's requestID→channel map. The resolve

@@ -176,3 +176,29 @@ func TestResolveRuleScopePathUsesProjectRootInsteadOfWorkingDir(t *testing.T) {
 		t.Fatalf("confirm rule picker should not use workingDir as project root: %q", plain)
 	}
 }
+
+func TestRulesModeConsumesMouseEventsAndDoesNotPassThrough(t *testing.T) {
+	m := NewModelWithSize(nil, 140, 24)
+	m.mode = ModeRules
+	m.layout = m.generateLayout(m.width, m.height)
+	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: "hello"})
+
+	updated, cmd := m.Update(tea.MouseClickMsg{X: 1, Y: 1, Button: tea.MouseLeft})
+	model := updated.(*Model)
+	if cmd != nil {
+		t.Fatalf("rules overlay click should not schedule command, got %#v", cmd)
+	}
+	if model.focusedBlockID != 0 && model.focusedBlockID != -1 {
+		// focusedBlockID defaults to 0 in some constructors; ensure it didn't switch to block 1.
+		if model.focusedBlockID == 1 {
+			t.Fatalf("rules overlay should consume clicks; focusedBlockID=%d", model.focusedBlockID)
+		}
+	}
+	if model.focusedBlockID == 1 {
+		t.Fatalf("rules overlay should consume clicks; focusedBlockID=%d", model.focusedBlockID)
+	}
+	blk := model.viewport.GetFocusedBlock(1)
+	if blk != nil && blk.Focused {
+		t.Fatal("rules overlay should not change underlying block focus")
+	}
+}

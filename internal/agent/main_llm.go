@@ -7,6 +7,7 @@ import (
 	"maps"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/keakon/golog"
@@ -19,6 +20,50 @@ import (
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
+
+type requestBatchState struct {
+	mu           sync.Mutex
+	sessionEpoch uint64
+	sequence     uint64
+}
+
+func (s *requestBatchState) reserve(sessionEpoch, historyMax uint64) uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sessionEpoch != sessionEpoch {
+		s.sessionEpoch = sessionEpoch
+		s.sequence = historyMax
+	} else if s.sequence < historyMax {
+		s.sequence = historyMax
+	}
+	s.sequence++
+	return s.sequence
+}
+
+func (s *requestBatchState) rollback(sessionEpoch, batch uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sessionEpoch == sessionEpoch && s.sequence == batch {
+		s.sequence--
+	}
+}
+
+func (s *requestBatchState) current(sessionEpoch uint64) uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sessionEpoch != sessionEpoch {
+		return 0
+	}
+	return s.sequence
+}
+
+func maxRequestBatch(messages []message.Message) uint64 {
+	var maximum uint64
+	for _, msg := range messages {
+		maximum = max(maximum, msg.RequestBatch)
+	}
+	return maximum
+}
 
 // contextLengthExceededPendingCompactionError indicates that an LLM request
 // must wait for event-loop-owned context compaction before retrying.

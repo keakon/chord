@@ -167,3 +167,70 @@ func TestQueuedMailboxLineCountMatchesVisibleRows(t *testing.T) {
 		}
 	}
 }
+
+func TestMessagesToBlocksRestoresDurableSubAgentMailboxCard(t *testing.T) {
+	content := "<system-reminder>\nSubAgent mailbox update:\n- agent_id: worker-1\n- task_id: task-1\n- kind: completed\n- summary: finished review\n</system-reminder>"
+	msgs := []message.Message{{
+		Role:    "user",
+		Content: content,
+		Kind:    message.KindSubAgentMailbox,
+		Mailbox: &message.MailboxMetadata{
+			MessageID: "worker-1-1",
+			AgentID:   "worker-1",
+			TaskID:    "task-1",
+			Kind:      "completed",
+		},
+	}}
+	nextID := 1
+	blocks := messagesToBlocks(msgs, &nextID)
+	if len(blocks) != 1 {
+		t.Fatalf("block count = %d, want 1", len(blocks))
+	}
+	block := blocks[0]
+	if block.Type != BlockStatus || block.StatusTitle != "AGENT COMPLETE" {
+		t.Fatalf("block = %#v, want AGENT COMPLETE status", block)
+	}
+	if block.Content != content {
+		t.Fatalf("block content = %q, want exact model message %q", block.Content, content)
+	}
+	if block.LinkedAgentID != "worker-1" || block.LinkedTaskID != "task-1" {
+		t.Fatalf("block links = (%q, %q), want worker-1/task-1", block.LinkedAgentID, block.LinkedTaskID)
+	}
+}
+
+// The live event path and the session-restore path build the same card from
+// different data shapes — an AgentNotifyEvent versus a persisted
+// MailboxMetadata. They used to hand-roll the Block and drifted, so a resumed
+// session badged a risk alert "AGENT RISK" where the run had shown "AGENT
+// BLOCKED". Both now share one constructor; this pins the fields that must
+// agree no matter which path produced the card.
+func TestSubAgentMailboxCardAgreesAcrossLiveAndRestore(t *testing.T) {
+	live := newSubAgentMailboxBlock(1, "risk_alert", "", "worker-1", "adhoc-1", "worker cannot continue", "")
+	meta := &message.MailboxMetadata{AgentID: "worker-1", TaskID: "adhoc-1", Kind: "risk_alert"}
+	restored := newSubAgentMailboxBlock(1, meta.Kind, "", meta.AgentID, meta.TaskID, "<persisted body>", "")
+
+	if live.StatusTitle != restored.StatusTitle {
+		t.Fatalf("title live %q vs restored %q", live.StatusTitle, restored.StatusTitle)
+	}
+	if live.StatusFrom != restored.StatusFrom {
+		t.Fatalf("from live %q vs restored %q", live.StatusFrom, restored.StatusFrom)
+	}
+	if live.StatusKind != restored.StatusKind {
+		t.Fatalf("kind live %q vs restored %q", live.StatusKind, restored.StatusKind)
+	}
+	if live.LinkedTaskID != restored.LinkedTaskID {
+		t.Fatalf("task live %q vs restored %q", live.LinkedTaskID, restored.LinkedTaskID)
+	}
+	if live.StatusTitle != "AGENT BLOCKED" {
+		t.Fatalf("risk alert title = %q, want AGENT BLOCKED per docs/tools.md", live.StatusTitle)
+	}
+	if got := subAgentMailboxCardTitle("completed", ""); got != "AGENT COMPLETE" {
+		t.Fatalf("completed title = %q, want AGENT COMPLETE", got)
+	}
+	if got := subAgentMailboxCardTitle("progress", ""); got != "AGENT MESSAGE" {
+		t.Fatalf("progress title = %q, want AGENT MESSAGE", got)
+	}
+	if got := subAgentMailboxCardTitle("risk_alert", agent.SubAgentStallResolvedSubtype); got != "AGENT BLOCKED RESOLVED" {
+		t.Fatalf("stall-resolved title = %q, want AGENT BLOCKED RESOLVED", got)
+	}
+}

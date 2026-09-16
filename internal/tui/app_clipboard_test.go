@@ -5,12 +5,18 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
 	tea "github.com/keakon/bubbletea/v2"
 
+	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/clipboardread"
+	"github.com/keakon/chord/internal/convformat"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
 )
 
 const tinyPNGBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=="
@@ -645,5 +651,709 @@ func TestSyncAttachmentsWithoutInlinePastesReclaimsOnlyInlineImageAttachments(t 
 	}
 	if got := []string{m.attachments[0].FileName, m.attachments[1].FileName}; got[0] != "report.pdf" || got[1] != "path.png" {
 		t.Fatalf("attachments after orphan reclaim = %v, want [report.pdf path.png]", got)
+	}
+}
+
+func TestToolCallCopyContentFormatsDoneAsMarkdown(t *testing.T) {
+	block := &Block{
+		Type:          BlockToolCall,
+		ToolName:      "done",
+		DoneReport:    "## Completion status\nDone\n\n- Verification passed",
+		ResultContent: "Done rejected: coverage is too low\nrequired minimum is 80%",
+	}
+
+	got := blockCopyContent(block)
+	for _, want := range []string{
+		"# Tool call: Done",
+		"## Report\n\n## Completion status\nDone",
+		"## Rejection reason\n\ncoverage is too low\nrequired minimum is 80%",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("blockCopyContent = %q, want %q", got, want)
+		}
+	}
+	if strings.Contains(got, "Done rejected:") {
+		t.Fatalf("Done copy content should omit raw rejection prefix, got %q", got)
+	}
+}
+
+func TestToolCallCopyContentFormatsGenericToolAsMarkdown(t *testing.T) {
+	block := &Block{
+		Type:          BlockToolCall,
+		ToolName:      "shell",
+		Content:       `{"command":"echo hi"}`,
+		ResultContent: "hi",
+	}
+
+	got := blockCopyContent(block)
+	for _, want := range []string{
+		"# Tool call: shell",
+		"## Arguments\n\n```json\n{\"command\":\"echo hi\"}\n```",
+		"## Result\n\nhi",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("blockCopyContent = %q, want %q", got, want)
+		}
+	}
+}
+
+func TestMessageCardCopyContentIncludesCardType(t *testing.T) {
+	tests := []struct {
+		name  string
+		block *Block
+		want  string
+	}{
+		{
+			name:  "user",
+			block: &Block{Type: BlockUser, Content: "Run the focused test."},
+			want:  "User:\n\nRun the focused test.",
+		},
+		{
+			name:  "assistant",
+			block: &Block{Type: BlockAssistant, Content: "The focused test passed."},
+			want:  "Assistant:\n\nThe focused test passed.",
+		},
+		{
+			name: "terminal",
+			block: &Block{
+				Type:                 BlockUser,
+				Content:              "!ls sample.json",
+				UserLocalShellCmd:    "ls sample.json",
+				UserLocalShellResult: "sample.json\n",
+			},
+			want: "TERMINAL (!):\n\ncommand:\nls sample.json\n\noutput:\nsample.json",
+		},
+		{
+			name:  "thinking",
+			block: &Block{Type: BlockThinking, Content: "  check the failing assertion first.  "},
+			want:  "Thinking:\n\ncheck the failing assertion first.",
+		},
+		{
+			name:  "error",
+			block: &Block{Type: BlockError, Content: "failed"},
+			want:  "Error:\n\nfailed",
+		},
+		{
+			name:  "boundary marker",
+			block: &Block{Type: BlockBoundaryMarker, Content: "12 earlier messages"},
+			want:  "Boundary:\n\n12 earlier messages",
+		},
+		{
+			name:  "status with title",
+			block: &Block{Type: BlockStatus, StatusTitle: "LOOP", Content: "continue working on the failing test"},
+			want:  "LOOP:\n\ncontinue working on the failing test",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := blockCopyContent(tt.block); got != tt.want {
+				t.Fatalf("blockCopyContent() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestToolCardCopyContentIsSelfContainedMarkdown(t *testing.T) {
+	block := &Block{
+		Type:          BlockToolCall,
+		ToolName:      "grep",
+		Content:       `{"pattern":"foo"}`,
+		ResultContent: "grep failed: exit status 2",
+	}
+
+	got := blockCopyContent(block)
+	if strings.Contains(got, "TOOL CALL (grep):") {
+		t.Fatalf("tool copy content should not add outer tool label, got %q", got)
+	}
+	for _, want := range []string{
+		"# Tool call: grep",
+		"## Arguments\n\n```json\n{\"pattern\":\"foo\"}\n```",
+		"## Result\n\ngrep failed: exit status 2",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("blockCopyContent(tool) = %q, want %q", got, want)
+		}
+	}
+}
+
+func TestToolCopyContentIsIndependentOfCollapsedStateForReadWriteAndApplyPatch(t *testing.T) {
+	tests := []struct {
+		name  string
+		block *Block
+	}{
+		{
+			name: "read",
+			block: &Block{
+				Type:          BlockToolCall,
+				ToolName:      tools.NameRead,
+				Content:       `{"path":"sample.go"}`,
+				ResultContent: "READ_RESULT lines=1-2 total=2\nfirst\nsecond",
+				ResultDone:    true,
+			},
+		},
+		{
+			name: "write",
+			block: &Block{
+				Type:          BlockToolCall,
+				ToolName:      tools.NameWrite,
+				Content:       `{"path":"sample.go","content":"first\nsecond\n"}`,
+				ResultContent: "Successfully wrote 2 lines, 13 bytes",
+				ResultDone:    true,
+			},
+		},
+		{
+			name: "apply_patch",
+			block: &Block{
+				Type:          BlockToolCall,
+				ToolName:      tools.NameApplyPatch,
+				Content:       `{"patch":"*** Begin Patch\n*** Update File: sample.go\n@@\n-old\n+new\n*** End Patch"}`,
+				ResultContent: "Applied patch to sample.go (+1 -1)",
+				Diff:          "--- sample.go\n+++ sample.go\n@@ -1 +1 @@\n-old\n+new\n",
+				ResultDone:    true,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			collapsed := *tt.block
+			collapsed.Collapsed = true
+			collapsed.ToolCallDetailExpanded = false
+
+			expanded := *tt.block
+			expanded.Collapsed = false
+			expanded.ToolCallDetailExpanded = true
+
+			gotCollapsed := blockCopyContent(&collapsed)
+			gotExpanded := blockCopyContent(&expanded)
+			if gotCollapsed != gotExpanded {
+				t.Fatalf("copy content mismatch\ncollapsed:\n%s\n\nexpanded:\n%s", gotCollapsed, gotExpanded)
+			}
+			for _, forbidden := range []string{"[space] expand", "[space] collapse", "more lines"} {
+				if strings.Contains(gotCollapsed, forbidden) {
+					t.Fatalf("copy content should not include UI hint %q: %s", forbidden, gotCollapsed)
+				}
+			}
+		})
+	}
+}
+
+func TestToolErrorCardDisplaysAndCopiesErrorResult(t *testing.T) {
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      "web_fetch",
+		Content:       `{"raw":false,"timeout_ms":60000,"url":"https://raw.githubusercontent.com/datacurve-ai/pier/main/docs/agents.md"}`,
+		ResultContent: "Error: HTTP 404: 404 Not Found",
+		ResultStatus:  agent.ToolResultStatusError,
+		ResultDone:    true,
+		Collapsed:     true,
+	}
+
+	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	// A short single-line failure already reads fully in its collapsed row, so
+	// the card carries no disclosure marker.
+	for _, want := range []string{"✗ web_fetch", "Error:", "HTTP 404: 404 Not Found"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("rendered error tool card missing %q; got:\n%s", want, plain)
+		}
+	}
+	if strings.Contains(plain, toolDisclosureCollapsed) {
+		t.Fatalf("single-line failure should not carry a disclosure marker; got:\n%s", plain)
+	}
+
+	got := blockCopyContent(block)
+	for _, want := range []string{
+		"# Tool call: web_fetch",
+		"## Arguments",
+		"## Result\n\nError: HTTP 404: 404 Not Found",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("blockCopyContent(error tool) = %q, want %q", got, want)
+		}
+	}
+}
+
+func TestStandaloneToolResultCopyIncludesErrorContent(t *testing.T) {
+	block := &Block{
+		Type:          BlockToolResult,
+		ToolName:      "web_fetch",
+		Content:       "Error: HTTP 404: 404 Not Found",
+		ResultContent: "Error: HTTP 404: 404 Not Found",
+		ResultStatus:  agent.ToolResultStatusError,
+		ResultDone:    true,
+	}
+
+	got := blockCopyContent(block)
+	for _, want := range []string{
+		"# Tool result: web_fetch",
+		"## Result\n\nError: HTTP 404: 404 Not Found",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("blockCopyContent(standalone result) = %q, want %q", got, want)
+		}
+	}
+}
+
+func TestCopyFocusedBlockHydratesSpilledContent(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 6)
+	m.mode = ModeNormal
+	m.viewport.maxHotBytes = 1024
+	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: strings.Repeat("alpha ", 600)})
+	m.viewport.AppendBlock(&Block{ID: 2, Type: BlockAssistant, Content: "tail"})
+
+	if !m.viewport.blocks[0].spillCold {
+		t.Fatalf("expected block 1 to spill, got spillCold=%v", m.viewport.blocks[0].spillCold)
+	}
+	m.focusedBlockID = 1
+	m.refreshBlockFocus()
+
+	cmd := m.copyFocusedBlock()
+	if cmd == nil {
+		t.Fatal("copyFocusedBlock should return clipboard command")
+	}
+	msg := cmd()
+	v := reflect.ValueOf(msg)
+	if v.Kind() != reflect.Slice || v.Len() != 2 {
+		t.Fatalf("clipboard command msg = %T, want 2-command sequence", msg)
+	}
+	second := v.Index(1).Call(nil)[0].Interface().(clipboardWriteResultMsg)
+	if second.success != "Message card copied to clipboard" {
+		t.Fatalf("clipboard success = %q, want %q", second.success, "Message card copied to clipboard")
+	}
+	block := m.viewport.GetFocusedBlock(1)
+	if block == nil || block.spillCold {
+		t.Fatalf("focused block after copy = %#v, want hydrated block", block)
+	}
+	if got := blockPlainContent(block); !strings.Contains(got, "alpha") {
+		t.Fatalf("blockPlainContent after copy = %q, want alpha content", got)
+	}
+}
+
+func TestCopyFocusedBlocksHydratesSpilledBlocks(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 6)
+	m.mode = ModeNormal
+	m.viewport.maxHotBytes = 1024
+	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: strings.Repeat("alpha ", 600)})
+	m.viewport.AppendBlock(&Block{ID: 2, Type: BlockAssistant, Content: strings.Repeat("beta ", 600)})
+	m.viewport.AppendBlock(&Block{ID: 3, Type: BlockAssistant, Content: "tail"})
+
+	m.focusedBlockID = 1
+	m.refreshBlockFocus()
+	cmd := m.copyFocusedBlocks(2)
+	if cmd == nil {
+		t.Fatal("copyFocusedBlocks should return clipboard command")
+	}
+	msg := cmd()
+	v := reflect.ValueOf(msg)
+	if v.Kind() != reflect.Slice || v.Len() != 2 {
+		t.Fatalf("clipboard command msg = %T, want 2-command sequence", msg)
+	}
+	second := v.Index(1).Call(nil)[0].Interface().(clipboardWriteResultMsg)
+	if second.success != "2 message cards copied to clipboard" {
+		t.Fatalf("clipboard success = %q, want %q", second.success, "2 message cards copied to clipboard")
+	}
+	for _, id := range []int{1, 2} {
+		block := m.viewport.GetFocusedBlock(id)
+		if block == nil || block.spillCold {
+			t.Fatalf("block %d after copy = %#v, want hydrated block", id, block)
+		}
+	}
+}
+
+func TestHandleNormalKeyYyIgnoresMouseSelectionAndCopiesFocusedImageCard(t *testing.T) {
+	origWrite := clipboardWriteAll
+	var copied string
+	clipboardWriteAll = func(text string) error {
+		copied = text
+		return nil
+	}
+	defer func() { clipboardWriteAll = origWrite }()
+
+	ApplyTheme(DefaultTheme())
+	m := NewModelWithSize(nil, 80, 24)
+	m.mode = ModeNormal
+	block := &Block{
+		ID:      1,
+		Type:    BlockUser,
+		Content: "caption text",
+		ImageParts: []BlockImagePart{{
+			FileName:        "image1.jpg",
+			RenderStartLine: 4,
+			RenderEndLine:   6,
+		}},
+	}
+	m.viewport.AppendBlock(block)
+	m.focusedBlockID = 1
+	m.refreshBlockFocus()
+	m.selStartBlockID = 1
+	m.selStartLine = 4
+	m.selStartCol = 0
+	m.selEndBlockID = 1
+	m.selEndLine = 4
+	m.selEndCol = 10
+
+	if cmd := m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: "y", Code: 'y'})); cmd == nil {
+		t.Fatal("first y of yy should start chord command")
+	}
+	if !m.chord.active() || m.chord.op != chordY {
+		t.Fatal("expected first y of yy to start chordY")
+	}
+	if !m.hasMouseSelection() {
+		t.Fatal("expected first y of yy to preserve mouse selection until second y")
+	}
+
+	cmd := m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: "y", Code: 'y'}))
+	if cmd == nil {
+		t.Fatal("second y of yy should return clipboard command")
+	}
+	msg := cmd()
+	v := reflect.ValueOf(msg)
+	if v.Kind() != reflect.Slice || v.Len() != 2 {
+		t.Fatalf("yy clipboard command msg = %T, want 2-command sequence", msg)
+	}
+	second := v.Index(1).Call(nil)[0].Interface().(clipboardWriteResultMsg)
+	if second.success != "Message card copied to clipboard" {
+		t.Fatalf("yy clipboard success = %q, want %q", second.success, "Message card copied to clipboard")
+	}
+
+	want := blockCopyContent(block)
+	if copied != want {
+		t.Fatalf("yy copied = %q, want %q", copied, want)
+	}
+	if m.hasMouseSelection() {
+		t.Fatal("second y of yy must clear the pending mouse selection so a text selection cannot divert a later copy")
+	}
+}
+
+func TestCopyFocusedBlocksToolCallMatchesSingleBlockFormat(t *testing.T) {
+	origWrite := clipboardWriteAll
+	var copied string
+	clipboardWriteAll = func(text string) error {
+		copied = text
+		return nil
+	}
+	defer func() { clipboardWriteAll = origWrite }()
+
+	m := NewModelWithSize(nil, 80, 8)
+	m.mode = ModeNormal
+	tool := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      "grep",
+		Content:       `{"pattern":"foo"}`,
+		ResultContent: "grep failed: exit status 2",
+	}
+	m.viewport.AppendBlock(tool)
+	m.focusedBlockID = 1
+	m.refreshBlockFocus()
+
+	cmd := m.copyFocusedBlocks(2)
+	if cmd == nil {
+		t.Fatal("copyFocusedBlocks should return clipboard command")
+	}
+	msg := cmd()
+	v := reflect.ValueOf(msg)
+	if v.Kind() != reflect.Slice || v.Len() != 2 {
+		t.Fatalf("clipboard command msg = %T, want 2-command sequence", msg)
+	}
+	second := v.Index(1).Call(nil)[0].Interface().(clipboardWriteResultMsg)
+	if second.success != "Message card copied to clipboard" {
+		t.Fatalf("clipboard success = %q, want %q", second.success, "Message card copied to clipboard")
+	}
+
+	want := blockCopyContent(tool)
+	if copied != want {
+		t.Fatalf("multi-card tool copy mismatch\n got: %q\nwant: %q", copied, want)
+	}
+	if strings.Contains(copied, "TOOL CALL (grep):") {
+		t.Fatalf("multi-card tool copy should not include duplicate outer label, got %q", copied)
+	}
+}
+
+func TestCopyFocusedBlocksMixedAssistantAndToolKeepsSingleToolHeading(t *testing.T) {
+	origWrite := clipboardWriteAll
+	var copied string
+	clipboardWriteAll = func(text string) error {
+		copied = text
+		return nil
+	}
+	defer func() { clipboardWriteAll = origWrite }()
+
+	m := NewModelWithSize(nil, 80, 10)
+	m.mode = ModeNormal
+	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: "Working on it"})
+	m.viewport.AppendBlock(&Block{ID: 2, Type: BlockToolCall, ToolName: "grep", Content: `{"pattern":"foo"}`, ResultContent: "grep failed: exit status 2"})
+	m.focusedBlockID = 1
+	m.refreshBlockFocus()
+
+	cmd := m.copyFocusedBlocks(2)
+	if cmd == nil {
+		t.Fatal("copyFocusedBlocks should return clipboard command")
+	}
+	msg := cmd()
+	v := reflect.ValueOf(msg)
+	if v.Kind() != reflect.Slice || v.Len() != 2 {
+		t.Fatalf("clipboard command msg = %T, want 2-command sequence", msg)
+	}
+	second := v.Index(1).Call(nil)[0].Interface().(clipboardWriteResultMsg)
+	if second.success != "2 message cards copied to clipboard" {
+		t.Fatalf("clipboard success = %q, want %q", second.success, "2 message cards copied to clipboard")
+	}
+
+	if !strings.Contains(copied, blockCopyContent(&Block{Type: BlockAssistant, Content: "Working on it"})) {
+		t.Fatalf("mixed copy missing assistant block, got %q", copied)
+	}
+	if !strings.Contains(copied, "# Tool call: grep") {
+		t.Fatalf("mixed copy missing tool markdown heading, got %q", copied)
+	}
+	if strings.Contains(copied, "TOOL CALL (grep):") {
+		t.Fatalf("mixed copy should not include duplicate outer tool label, got %q", copied)
+	}
+	if !strings.Contains(copied, convformat.BlockSep) {
+		t.Fatalf("mixed copy should include block separator, got %q", copied)
+	}
+}
+
+func TestCopyFocusedBlocksJoinsPerCardCopyRepresentations(t *testing.T) {
+	origWrite := clipboardWriteAll
+	var copied string
+	clipboardWriteAll = func(text string) error {
+		copied = text
+		return nil
+	}
+	defer func() { clipboardWriteAll = origWrite }()
+
+	m := NewModelWithSize(nil, 80, 10)
+	m.mode = ModeNormal
+	b1 := &Block{ID: 1, Type: BlockAssistant, Content: "Assistant reply"}
+	b2 := &Block{ID: 2, Type: BlockThinking, Content: "Reasoning details"}
+	b3 := &Block{ID: 3, Type: BlockToolCall, ToolName: "grep", Content: `{"pattern":"foo"}`, ResultContent: "grep failed: exit status 2"}
+	m.viewport.AppendBlock(b1)
+	m.viewport.AppendBlock(b2)
+	m.viewport.AppendBlock(b3)
+	m.focusedBlockID = 1
+	m.refreshBlockFocus()
+
+	cmd := m.copyFocusedBlocks(3)
+	if cmd == nil {
+		t.Fatal("copyFocusedBlocks should return clipboard command")
+	}
+	msg := cmd()
+	v := reflect.ValueOf(msg)
+	if v.Kind() != reflect.Slice || v.Len() != 2 {
+		t.Fatalf("clipboard command msg = %T, want 2-command sequence", msg)
+	}
+	second := v.Index(1).Call(nil)[0].Interface().(clipboardWriteResultMsg)
+	if second.success != "3 message cards copied to clipboard" {
+		t.Fatalf("clipboard success = %q, want %q", second.success, "3 message cards copied to clipboard")
+	}
+
+	want := convformat.JoinBlocks([]string{
+		blockCopyContent(b1),
+		blockCopyContent(b2),
+		blockCopyContent(b3),
+	})
+	if copied != want {
+		t.Fatalf("multi-card copy should join per-card copy content\n got: %q\nwant: %q", copied, want)
+	}
+}
+
+func TestCopyFocusedBlocksPreservesConversationCardTypes(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 12)
+	m.mode = ModeNormal
+	blocks := []*Block{
+		{ID: 1, Type: BlockUser, Content: "Check the file."},
+		{ID: 2, Type: BlockAssistant, Content: "I will inspect it."},
+		{
+			ID:                   3,
+			Type:                 BlockUser,
+			Content:              "!ls sample.json",
+			UserLocalShellCmd:    "ls sample.json",
+			UserLocalShellResult: "sample.json\n",
+		},
+		{ID: 4, Type: BlockAssistant, Content: "The file exists."},
+	}
+	for _, block := range blocks {
+		m.viewport.AppendBlock(block)
+	}
+	m.focusedBlockID = blocks[0].ID
+	m.refreshBlockFocus()
+
+	cmd := m.copyFocusedBlocks(4)
+	if cmd == nil {
+		t.Fatal("copyFocusedBlocks should return clipboard command")
+	}
+	msg := cmd()
+	v := reflect.ValueOf(msg)
+	if v.Kind() != reflect.Slice || v.Len() != 2 {
+		t.Fatalf("clipboard command msg = %T, want 2-command sequence", msg)
+	}
+	originalWriteAll := clipboardWriteAll
+	var copied string
+	clipboardWriteAll = func(text string) error {
+		copied = text
+		return nil
+	}
+	t.Cleanup(func() { clipboardWriteAll = originalWriteAll })
+	second := v.Index(1).Call(nil)[0].Interface().(clipboardWriteResultMsg)
+	if second.success != "4 message cards copied to clipboard" {
+		t.Fatalf("clipboard success = %q, want 4-card message", second.success)
+	}
+
+	want := convformat.JoinBlocks([]string{
+		"User:\n\nCheck the file.",
+		"Assistant:\n\nI will inspect it.",
+		"TERMINAL (!):\n\ncommand:\nls sample.json\n\noutput:\nsample.json",
+		"Assistant:\n\nThe file exists.",
+	})
+	if copied != want {
+		t.Fatalf("copied conversation = %q, want %q", copied, want)
+	}
+}
+
+func TestCopyFocusedBlockCopiesErrorCard(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 8)
+	m.mode = ModeNormal
+	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockError, Content: "failed"})
+	m.focusedBlockID = 1
+	m.refreshBlockFocus()
+
+	cmd := m.copyFocusedBlock()
+	if cmd == nil || blockCopyContent(m.viewport.GetFocusedBlock(1)) != "Error:\n\nfailed" {
+		t.Fatal("copyFocusedBlock should copy labeled BlockError content")
+	}
+}
+
+func TestSuperCopyMouseSelectionKeepsLastCharacter(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 20)
+	m.mode = ModeNormal
+	block := &Block{ID: 1, Type: BlockAssistant, Content: "prefix `app_id/app_secret` suffix"}
+	m.viewport.AppendBlock(block)
+
+	lines := block.Render(m.viewport.width, "")
+	target := -1
+	startCol := -1
+	for i, line := range lines {
+		plain := stripANSI(line)
+		if before, _, ok := strings.Cut(plain, "app_id/app_secret"); ok {
+			target = i
+			startCol = ansi.StringWidth(before)
+			break
+		}
+	}
+	if target < 0 || startCol < 0 {
+		t.Fatalf("failed to find rendered inline code in %#v", lines)
+	}
+
+	m.selStartBlockID = 1
+	m.selStartLine = target
+	m.selStartCol = startCol
+	m.selEndBlockID = 1
+	m.selEndLine = target
+	m.selEndCol = startCol + len("app_id/app_secret") - 1
+	m.selEndInclusiveForCopy = true
+
+	cmd := m.handleSuperCopy()
+	if cmd == nil {
+		t.Fatal("handleSuperCopy should return clipboard command for mouse selection")
+	}
+	msg := cmd()
+	v := reflect.ValueOf(msg)
+	if v.Kind() != reflect.Slice || v.Len() != 2 {
+		t.Fatalf("clipboard command msg = %T, want 2-command sequence", msg)
+	}
+	second := v.Index(1).Call(nil)[0].Interface().(clipboardWriteResultMsg)
+	if second.success != "Selection copied to clipboard" {
+		t.Fatalf("clipboard success = %q, want %q", second.success, "Selection copied to clipboard")
+	}
+	if got := m.viewport.ExtractSelectionText(m.mouseSelectionRange()); got != "app_id/app_secret" {
+		t.Fatalf("copied selection text = %q, want %q", got, "app_id/app_secret")
+	}
+}
+
+func TestSuperCopyCopiesErrorCard(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 8)
+	m.mode = ModeNormal
+	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockError, Content: "failed"})
+	m.focusedBlockID = 1
+	m.refreshBlockFocus()
+
+	cmd := m.handleSuperCopy()
+	if cmd == nil || blockCopyContent(m.viewport.GetFocusedBlock(1)) != "Error:\n\nfailed" {
+		t.Fatal("handleSuperCopy should copy labeled BlockError content")
+	}
+}
+
+func TestNormalModeYankCopiesErrorCardAtViewport(t *testing.T) {
+	originalWriteAll := clipboardWriteAll
+	defer func() { clipboardWriteAll = originalWriteAll }()
+	var copied string
+	clipboardWriteAll = func(text string) error {
+		copied = text
+		return nil
+	}
+	m := NewModelWithSize(nil, 80, 8)
+	m.mode = ModeNormal
+	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockError, Content: "failed"})
+	m.viewport.AppendBlock(&Block{ID: 2, Type: BlockAssistant, Content: "hello"})
+	m.viewport.ScrollToTop()
+
+	if cmd := m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: "y", Code: 'y'})); cmd == nil {
+		t.Fatal("first y should start yank chord")
+	}
+	cmd := m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: "y", Code: 'y'}))
+	if cmd == nil {
+		t.Fatal("yy should return clipboard command")
+	}
+	if m.focusedBlockID != 1 {
+		t.Fatalf("focusedBlockID = %d, want 1 (copy BlockError)", m.focusedBlockID)
+	}
+	msg := cmd()
+	v := reflect.ValueOf(msg)
+	if v.Kind() != reflect.Slice || v.Len() != 2 {
+		t.Fatalf("clipboard command msg = %T, want 2-command sequence", msg)
+	}
+	second := v.Index(1).Call(nil)[0].Interface().(clipboardWriteResultMsg)
+	if second.success != "Message card copied to clipboard" {
+		t.Fatalf("clipboard success = %q, want %q", second.success, "Message card copied to clipboard")
+	}
+	if copied != "Error:\n\nfailed" {
+		t.Fatalf("copied text = %q, want labeled error content", copied)
+	}
+}
+
+func TestNormalModeCountedYankCopiesVisibleBlocks(t *testing.T) {
+	m := NewModel(nil)
+	m.mode = ModeNormal
+	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockUser, Content: "one"})
+	m.viewport.AppendBlock(&Block{ID: 2, Type: BlockAssistant, Content: "two"})
+	m.viewport.AppendBlock(&Block{ID: 3, Type: BlockAssistant, Content: "three"})
+
+	if cmd := m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: "2", Code: '2'})); cmd == nil {
+		t.Fatal("2 should start count prefix")
+	}
+	if cmd := m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: "y", Code: 'y'})); cmd == nil {
+		t.Fatal("y should start yank chord")
+	}
+	cmd := m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: "y", Code: 'y'}))
+	if cmd == nil {
+		t.Fatal("2yy should return clipboard command")
+	}
+	if m.chord.active() {
+		t.Fatal("2yy should clear chord state")
+	}
+	if m.focusedBlockID != 1 {
+		t.Fatalf("focusedBlockID = %d, want 1 from viewport top", m.focusedBlockID)
+	}
+	msg := cmd()
+	v := reflect.ValueOf(msg)
+	if v.Kind() != reflect.Slice || v.Len() != 2 {
+		t.Fatalf("clipboard command msg = %T, want 2-command sequence", msg)
+	}
+	second := v.Index(1).Call(nil)[0].Interface().(clipboardWriteResultMsg)
+	if second.success != "2 message cards copied to clipboard" {
+		t.Fatalf("clipboard success = %q, want %q", second.success, "2 message cards copied to clipboard")
 	}
 }

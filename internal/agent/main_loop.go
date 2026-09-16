@@ -13,6 +13,11 @@ import (
 	"github.com/keakon/chord/internal/hook"
 )
 
+const (
+	defaultEventOverflowLimit = 4096
+	defaultLoopEventLimit     = 256
+)
+
 const outputDropLogMinInterval = 2 * time.Second
 
 // Run starts the blocking event loop. It returns when ctx is cancelled,

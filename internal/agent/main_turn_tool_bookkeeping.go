@@ -11,6 +11,26 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
+// toolCallStageTrace tracks per-call timing markers from streaming args-end to
+// finalized execution dispatch. Used for queue-latency diagnostics.
+type toolCallStageTrace struct {
+	CallID string
+	Name   string
+	Agent  string
+
+	ToolUseEndAt           time.Time
+	SpeculativeStartAt     time.Time
+	FirstVisibleResultAt   time.Time
+	CallLLMReturnedAt      time.Time
+	OnAfterLLMCallDoneAt   time.Time
+	LLMResponseEventSentAt time.Time
+	LLMResponseHandledAt   time.Time
+	ExecutionRunningAt     time.Time
+
+	PersistBlockedTotal time.Duration
+	PersistBlockedCount int
+}
+
 func (t *Turn) recordPendingToolCall(call PendingToolCall) {
 	if t == nil || call.CallID == "" {
 		return

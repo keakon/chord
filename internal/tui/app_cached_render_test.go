@@ -1,10 +1,13 @@
 package tui
 
 import (
+	"image"
 	"image/color"
+	"strings"
 	"testing"
 	"time"
 
+	tea "github.com/keakon/bubbletea/v2"
 	uv "github.com/keakon/ultraviolet"
 )
 
@@ -176,5 +179,165 @@ func TestDrawCachedRenderableToClearedAreaClearsStaleCellsBeyondSourceHeight(t *
 				t.Fatalf("cell[%d,%d] = %#v, want EmptyCell", x, y, row[x])
 			}
 		}
+	}
+}
+
+func TestDrawCachedRenderableSkipsRowsOutsideCachedContent(t *testing.T) {
+	m := NewModelWithSize(nil, 40, 10)
+	cache := &cachedRenderable{
+		lines: [][]uv.Cell{
+			{{Content: "A", Width: 1}},
+		},
+	}
+	scr := newCountingScreen(8, 4)
+	area := image.Rect(0, 0, 8, 4)
+
+	m.drawCachedRenderable(scr, area, cache)
+
+	if scr.setCalls != area.Dx() {
+		t.Fatalf("drawCachedRenderable should only write cached row width, got %d SetCell calls want %d", scr.setCalls, area.Dx())
+	}
+}
+
+func TestRenderToCachePreservesAllPlainTextCells(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	var cache cachedRenderable
+	text := "hello\nworld"
+	m.renderToCache(&cache, text)
+	if cache.text != text {
+		t.Fatalf("cache.text = %q, want %q", cache.text, text)
+	}
+	if len(cache.lines) != 2 {
+		t.Fatalf("len(cache.lines) = %d, want 2", len(cache.lines))
+	}
+	var got []string
+	for _, line := range cache.lines {
+		var sb strings.Builder
+		for i := range line {
+			if line[i].IsZero() || line[i].Content == "" {
+				continue
+			}
+			sb.WriteString(stripANSI(line[i].Content))
+		}
+		got = append(got, sb.String())
+	}
+	if strings.Join(got, "\n") != text {
+		t.Fatalf("cached lines = %q, want %q", strings.Join(got, "\n"), text)
+	}
+}
+
+func TestEnsureScreenBufferReusesExistingBuffer(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.ensureScreenBuffer(80, 24)
+	if m.screenBuf.RenderBuffer == nil {
+		t.Fatal("ensureScreenBuffer should initialize screen buffer")
+	}
+	ptr := m.screenBuf.RenderBuffer
+	m.ensureScreenBuffer(80, 24)
+	if m.screenBuf.RenderBuffer != ptr {
+		t.Fatal("ensureScreenBuffer should reuse buffer when size is unchanged")
+	}
+	m.ensureScreenBuffer(100, 30)
+	if m.screenBuf.RenderBuffer != ptr {
+		t.Fatal("ensureScreenBuffer should resize existing buffer instead of replacing it")
+	}
+	if got := m.screenBuf.Bounds(); got.Dx() != 100 || got.Dy() != 30 {
+		t.Fatalf("screen buffer bounds = %v, want 100x30", got)
+	}
+}
+
+func TestStreamingAssistantUsesCheapWrapPath(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{Type: BlockAssistant, Streaming: true, Content: "- bullet one that wraps nicely\n- bullet two that also wraps"}
+	lines := block.Render(50, "")
+	if len(lines) == 0 {
+		t.Fatal("streaming assistant should render lines")
+	}
+	if block.mdCacheWidth != 50 {
+		t.Fatalf("mdCacheWidth = %d, want 50", block.mdCacheWidth)
+	}
+	if len(block.streamTailSoftWrapContinuations) != len(block.streamTailLines) {
+		t.Fatalf("tail soft wrap metadata len = %d, want %d", len(block.streamTailSoftWrapContinuations), len(block.streamTailLines))
+	}
+	for _, wrapped := range block.streamTailSoftWrapContinuations {
+		if wrapped {
+			t.Fatal("streaming cheap path should not mark synthetic markdown soft-wrap continuations")
+		}
+	}
+}
+
+func TestHasVisibleInlineImageRequiresVisibleRenderedImage(t *testing.T) {
+	v := NewViewport(80, 5)
+	block := &Block{
+		ID:   1,
+		Type: BlockUser,
+		ImageParts: []BlockImagePart{{
+			RenderRows:      3,
+			RenderStartLine: 1,
+			RenderEndLine:   3,
+		}},
+	}
+	v.AppendBlock(block)
+	if !v.HasVisibleInlineImage() {
+		t.Fatal("expected visible rendered image to be detected")
+	}
+	v.offset = 10
+	if v.HasVisibleInlineImage() {
+		t.Fatal("off-screen image should not be reported as visible")
+	}
+	block.ImageParts[0].RenderRows = 0
+	v.offset = 0
+	if v.HasVisibleInlineImage() {
+		t.Fatal("image with no rendered rows should not be visible")
+	}
+}
+
+func TestNewScreenBufferUsesGraphemeWidth(t *testing.T) {
+	canvas := newScreenBuffer(80, 24)
+
+	// This exact sequence appears in session logs and overflows the right panel
+	// when counted with wcwidth-style rules instead of grapheme-aware width.
+	s := "\u200d\u2640\ufe0f"
+	if got := canvas.WidthMethod().StringWidth(s); got != 2 {
+		t.Fatalf("screen buffer width(%q) = %d, want 2", s, got)
+	}
+}
+
+func TestSpaceToggleInvalidatesMainRenderCache(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 24)
+	m.mode = ModeNormal
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      "shell",
+		Content:       `{"command":"echo first"}`,
+		ResultContent: "first",
+		ResultDone:    true,
+		Collapsed:     true,
+	}
+	m.viewport.AppendBlock(block)
+	m.recalcViewportSize()
+
+	// Space without a focused block toggles the card under the current offset.
+	// The main-area draw cache is keyed on mainRenderKey (which includes the
+	// viewport render version); without a version bump after the toggle the
+	// cached frame is reused and the change only becomes visible after a scroll.
+	keyBefore := m.mainRenderKey(ModeNormal, 100)
+	_ = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Code: tea.KeySpace}))
+	keyAfter := m.mainRenderKey(ModeNormal, 100)
+	if keyBefore == keyAfter {
+		t.Fatal("Space toggle left mainRenderKey unchanged; cached main frame would be reused until a scroll changes the offset")
+	}
+	if !block.ToolCallDetailExpanded {
+		t.Fatal("Space should expand the shell card (ToolCallDetailExpanded)")
+	}
+	// Toggling again must advance the render version once more (two-way switch).
+	keyAfterFirst := keyAfter
+	_ = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Code: tea.KeySpace}))
+	if got := m.mainRenderKey(ModeNormal, 100); got == keyAfterFirst {
+		t.Fatal("second Space toggle left mainRenderKey unchanged")
+	}
+	if block.ToolCallDetailExpanded {
+		t.Fatal("second Space should collapse the shell card again")
 	}
 }

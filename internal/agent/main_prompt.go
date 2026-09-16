@@ -10,9 +10,83 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/mcp"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
+
+// extractToolArgument returns the string used for permission pattern matching.
+//
+// For Shell the full command string is used (e.g. "git push origin main").
+// For file tools (Read/Write/Edit) the path argument is extracted so that
+// path-based rules like `Write: { "/etc/*": deny }` work correctly.
+// For search tools (Grep/Glob) the pattern argument is extracted.
+// All other tools fall back to "*" (whole-tool match).
+// ---------------------------------------------------------------------------
+
+// ReloadAgentsMD reloads project AGENTS.md from disk and marks the startup
+// gate (agentsMDReady) so ensureSessionBuilt can proceed. The content is
+// consumed the next time ensureSessionBuilt rebuilds the session-context
+// reminder (on session-head events). Mid-session edits to AGENTS.md are not
+// picked up until the next /new, /resume, or equivalent reset; AGENTS.md is
+// treated as a session-scope snapshot.
+func (a *MainAgent) ReloadAgentsMD() bool {
+	content := loadAgentsMDWithWorkDir(a.projectRoot, a.cachedWorkDir)
+
+	a.promptMetaMu.Lock()
+	if content == a.cachedAgentsMD {
+		a.promptMetaMu.Unlock()
+		a.markAgentsMDReady()
+		return false
+	}
+	a.cachedAgentsMD = content
+	a.promptMetaMu.Unlock()
+	a.markAgentsMDReady()
+	return true
+}
+
+func (a *MainAgent) refreshSystemPrompt() {
+	a.llmMu.RLock()
+	override := a.systemPromptOverride
+	a.llmMu.RUnlock()
+	if override != "" {
+		a.installSystemPrompt(override)
+		return
+	}
+	a.installSystemPrompt(a.buildSystemPrompt())
+}
+
+func (a *MainAgent) setSystemPromptOverride(prompt string) {
+	a.llmMu.Lock()
+	a.systemPromptOverride = prompt
+	a.llmMu.Unlock()
+	a.installSystemPrompt(prompt)
+}
+
+func (a *MainAgent) clearSystemPromptOverride() {
+	a.llmMu.Lock()
+	a.systemPromptOverride = ""
+	a.llmMu.Unlock()
+}
+
+func (a *MainAgent) installSystemPrompt(prompt string) {
+	a.llmMu.Lock()
+	if prompt == a.installedSysPrompt {
+		a.llmMu.Unlock()
+		return
+	}
+	a.installedSysPrompt = prompt
+	client := a.llmClient
+	a.llmMu.Unlock()
+
+	if client != nil {
+		client.SetSystemPrompt(prompt)
+	}
+	a.ctxMgr.SetSystemPrompt(message.Message{
+		Role:    message.RoleSystem,
+		Content: prompt,
+	})
+}
 
 // buildSystemPrompt constructs the default system prompt that is injected at
 // the start of every conversation. It is fully static: identity, guidelines,

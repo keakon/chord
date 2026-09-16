@@ -19,6 +19,28 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
+// SubAgentInfo carries read-only information about a running SubAgent for TUI
+// display (sidebar listing). The fields are snapshot values safe to read from
+// any goroutine.
+type SubAgentInfo struct {
+	InstanceID       string
+	TaskID           string
+	OwnerAgentID     string
+	OwnerTaskID      string
+	Depth            int
+	AgentDefName     string
+	TaskDesc         string
+	ModelName        string
+	Persistence      PersistenceHealth
+	SelectedRef      string
+	RunningRef       string
+	State            string
+	Color            string // optional ANSI color code from agent config
+	LastSummary      string
+	UrgentInboxCount int
+	LastArtifact     tools.ArtifactRef
+}
+
 type delegationCaller struct {
 	AgentID    string
 	TaskID     string

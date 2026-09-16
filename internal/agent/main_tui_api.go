@@ -10,6 +10,16 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
+// handleLocalOnlySlashCommands runs local-only slash commands that must never
+// be appended to the conversation or sent to the model. Returns true if
+// handled. busy reports whether an active turn is in flight (a.turn != nil)
+// so handlers can avoid clearing turn state mid-retry. Runs even when the
+// agent is busy (not queued), including when the submitted message carries
+// image parts.
+func (a *MainAgent) handleLocalOnlySlashCommands(content string, parts []message.ContentPart, busy bool) bool {
+	return a.executeLocalOnlySlashCommand(content, parts, busy)
+}
+
 // IsTUILocalOnlySlashCommand reports whether content is a local-only slash
 // command (/export, /models, /tier, /rename, /role, /compact, /yolo, /mcp) that must run on the main agent's event
 // loop and must never be routed to a focused SubAgent. Predicate only —

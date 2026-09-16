@@ -7,10 +7,23 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/recovery"
 )
+
+// persistEntry is a queued persistence request for ordered JSONL writes.
+type persistEntry struct {
+	agentID        string
+	msg            message.Message
+	recovery       *recovery.RecoveryManager // manager resolved at enqueue time; nil means the write's session is gone
+	after          func(error)
+	walltimeLedger *analytics.UsageLedger
+	walltimeEvent  *analytics.UsageEvent
+	barrier        chan struct{}
+	stop           bool
+}
 
 // persistencePump owns the ordered async-persistence channel and its drain
 // goroutine's lifecycle. It was carved out of MainAgent, where the channel, the
