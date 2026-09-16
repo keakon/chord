@@ -8,6 +8,7 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
@@ -115,6 +116,38 @@ var specialFilenameLexerRules = []specialFilenameLexerRule{
 	{name: "justfile", lexerName: "justfile", allowSuffix: true},
 }
 
+// lexerLookupMaxEntries bounds the lexer memo. Keys include code fence
+// languages taken from model output, which the whitelisted extensions above do
+// not bound, so a long session can meet arbitrarily many distinct names. Every
+// entry is recomputable from the registry, so the memo is emptied at the cap
+// instead of tracking recency.
+const lexerLookupMaxEntries = 256
+
+// chromaLexerForName memoizes lexer lookups. lexers.Get falls back to
+// LexerRegistry.Match when the name is neither an exact lexer name nor an
+// alias; Match scans every lexer's file patterns plus their ignored-suffix
+// variants, so a miss costs milliseconds where a hit costs nanoseconds.
+// Chroma's registry already shares these lexer instances, so the cache only
+// adds a map slot.
+func chromaLexerForName(name string) chroma.Lexer {
+	lexerLookupMu.Lock()
+	defer lexerLookupMu.Unlock()
+	if lexer, ok := lexerLookup[name]; ok {
+		return lexer
+	}
+	lexer := lexers.Get(name)
+	if len(lexerLookup) >= lexerLookupMaxEntries {
+		clear(lexerLookup)
+	}
+	lexerLookup[name] = lexer
+	return lexer
+}
+
+var (
+	lexerLookupMu sync.Mutex
+	lexerLookup   = map[string]chroma.Lexer{}
+)
+
 func lexerForFilePath(filePath string) chroma.Lexer {
 	base := filepath.Base(filePath)
 	if base == "" || base == "." {
@@ -135,23 +168,30 @@ func lexerForWhitelistedExtension(base string) chroma.Lexer {
 		return nil
 	}
 	if lexerName, ok := syntaxHighlightExtAliases[ext]; ok {
-		return lexers.Get(lexerName)
+		return chromaLexerForName(lexerName)
 	}
-	return lexers.Get(ext)
+	// Chroma resolves the dotted extension through its filename glob table,
+	// which is what keeps ".sql" on the MySQL lexer and leaves ".gql"
+	// unhighlighted. The name and alias tables disagree with that table in both
+	// directions (".gql" resolves as a name but no lexer claims the glob, and
+	// the ".sql" name resolves to a lexer the glob match outranks), so looking
+	// the bare name up first is not equivalent. The memoized lookup pays the
+	// glob match once per extension instead.
+	return chromaLexerForName(ext)
 }
 
 func lexerForSpecialFilename(base string) chroma.Lexer {
 	lowerBase := strings.ToLower(base)
 	for _, rule := range specialFilenameLexerRules {
 		if lowerBase == rule.name {
-			return lexers.Get(rule.lexerName)
+			return chromaLexerForName(rule.lexerName)
 		}
 		if !rule.allowSuffix {
 			continue
 		}
 		for _, sep := range []string{".", "-", "_"} {
 			if strings.HasPrefix(lowerBase, rule.name+sep) {
-				return lexers.Get(rule.lexerName)
+				return chromaLexerForName(rule.lexerName)
 			}
 		}
 	}
@@ -177,7 +217,7 @@ func lexerForExplicitLanguage(language string) chroma.Lexer {
 		candidates = append(candidates, "text")
 	}
 	for _, name := range candidates {
-		if l := lexers.Get(name); l != nil {
+		if l := chromaLexerForName(name); l != nil {
 			return l
 		}
 	}
@@ -212,7 +252,13 @@ func newCodeHighlighterWithLanguage(filePath, sample, language string) *codeHigh
 	}
 }
 
-func toolCodeChromaStyle() *chroma.Style {
+// toolCodeChromaStyle returns the style every code block highlights with.
+// Building it parses and resolves 16 token rules over the Monokai base (about
+// 10µs and 5KB of garbage per call), and the palette is fixed and only read
+// afterwards, so one instance serves the process.
+var toolCodeChromaStyle = sync.OnceValue(buildToolCodeChromaStyle)
+
+func buildToolCodeChromaStyle() *chroma.Style {
 	baseStyle := styles.Get("monokai")
 	if baseStyle == nil {
 		baseStyle = styles.Fallback
