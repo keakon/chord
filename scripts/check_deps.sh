@@ -72,7 +72,6 @@ if replace_or_exclude:
         errors.append(f"go.mod:{lineno}: replace/exclude directives require explicit dependency-audit review: {text}")
 
 allowed_pseudo = {
-    "github.com/bytedance/sonic": "Pinned to main until a tagged release supports Go 1.27: v1.15.2 excludes go1.27 in its build constraints, so a tagged version silently falls back to the encoding/json compat decoder on the LLM streaming hot path. Drop this entry once upstream tags a release whose constraints admit the go directive in go.mod.",
     "github.com/charmbracelet/ultraviolet": "Charm TUI syntax highlighter API currently pinned before a stable tag.",
     "github.com/charmbracelet/x/exp/slice": "Transitive Charm experimental helper pinned by the current TUI stack.",
     "golang.org/x/exp/shiny": "Transitive desktop dependency of the native clipboard backend; upstream currently publishes pseudo-version releases.",
