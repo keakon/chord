@@ -140,6 +140,17 @@ Interpreting common hotspots:
 
 Tuning trade-offs to keep in mind: larger stream micro-batch windows reduce CPU but make text feel less immediate; longer flush cadence reduces redraws but makes streamed output chunkier; more aggressive cache retention improves redraw speed but increases memory, while more aggressive eviction does the opposite. Prefer the smallest change that fixes the measured bottleneck, and keep benchmarks close to the path being optimized.
 
+## Where new files live
+
+Use these rules when adding a new Chord file or directory:
+
+1. Put it in the project root or `.chord/` when users should read or edit it, repository-relative links matter, or it should move with the project. State its Git policy explicitly; a hidden path is not automatically private.
+2. Put it in the config home when it is user-owned configuration that applies across projects. Credentials belong here, never in a project directory.
+3. Put it in the state directory when Chord owns durable machine state such as history, bookkeeping, locks, checkpoints, or registries. Losing state may lose history or require recovery work.
+4. Put it in the cache directory only when deleting it cannot lose user-authored content or durable history and Chord can rebuild it from another source.
+
+Some features need a split layout. Keep portable, human-readable project content in the project tree, but keep high-frequency bookkeeping, locks, and rebuildable indexes in state or cache. Do not duplicate the same authoritative content across layers; each file needs one clear source of truth.
+
 ## Scope & style
 
 - Keep PRs small and focused

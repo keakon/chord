@@ -8,7 +8,7 @@
 
 ## SubAgent
 
-由 MainAgent（或允许层级深度内的其他 SubAgent）派出的下级 agent，专注于某个子任务。SubAgent 有自己的对话预算（context window，上下文窗口）、system prompt 和权限，完成后通过 `agent_done` 事件汇报摘要。`Shift+Tab` 可在主 agent 与各 SubAgent 之间循环切换当前查看的 agent 视图。
+由 MainAgent（或允许层级深度内的其他 SubAgent）派出的下级 agent，专注于某个子任务。SubAgent 有自己的对话预算（context window，上下文窗口）、system prompt 和权限，完成后把摘要汇报给派出它的 agent。`Shift+Tab` 可在主 agent 与各 SubAgent 之间循环切换当前查看的 agent 视图。
 
 ## Pool（模型池）
 

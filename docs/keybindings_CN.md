@@ -156,7 +156,7 @@ macOS 上的 `Cmd+V` 经常会先被终端或外层封装处理。Chord 会把�
 
 如果某个自定义键位不生效，先按 `?` 确认 Chord 已加载该映射，再用 `showkey`、`cat` 或终端自带的 key-event inspector 检查该按键是否真的传到了终端应用。
 
-action 名是 [`internal/tui/keymap.go` 中 `KeyMap` 字段](https://github.com/keakon/chord/blob/main/internal/tui/keymap.go)的 lower snake_case 形式。键名沿用 Bubble Tea `tea.KeyMsg.String()` 的写法，如 `"esc"`、`"enter"`、`"shift+enter"`、`"ctrl+p"`、`"ctrl+shift+left"`、`"j"`、`"down"`、`"space"`、`" "`。
+action 名就是 `config.yaml` 里可设置的 lower snake_case 标识符，下方速查表列出 Chord 自带的全部 action。键名沿用 Bubble Tea `tea.KeyMsg.String()` 的写法，如 `"esc"`、`"enter"`、`"shift+enter"`、`"ctrl+p"`、`"ctrl+shift+left"`、`"j"`、`"down"`、`"space"`、`" "`。
 
 ### Action 名速查
 

@@ -8,7 +8,7 @@ The single main agent for a session. It owns the user-facing conversation and is
 
 ## SubAgent
 
-A delegated agent spawned by the MainAgent (or another SubAgent, when delegation depth allows) to work on a focused task. SubAgents have their own conversation budget (context window), system prompt, and permissions, and report back via an `agent_done` event with a summary. Cycle the focused agent view across the main agent and SubAgents with `Shift+Tab`.
+A delegated agent spawned by the MainAgent (or another SubAgent, when delegation depth allows) to work on a focused task. SubAgents have their own conversation budget (context window), system prompt, and permissions, and report a summary back to the agent that spawned them when they finish. Cycle the focused agent view across the main agent and SubAgents with `Shift+Tab`.
 
 ## Pool (model pool)
 

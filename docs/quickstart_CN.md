@@ -5,11 +5,7 @@
 下载预构建二进制不需要安装 Go。用 `go install` 或从源码构建时，需要 Go 1.27.0+。
 
 ```bash
-# 用 Go 从源码安装
 go install github.com/keakon/chord/cmd/chord@latest
-
-# 或构建当前 checkout
-go build -o chord ./cmd/chord/
 ```
 
 也可从 [GitHub Releases](https://github.com/keakon/chord/releases) 下载预构建二进制。macOS 下载版首次运行时，系统可能因文件来自互联网且未公证而阻止运行，执行以下命令即可：
@@ -27,8 +23,6 @@ codesign --force --sign - /path/to/chord
 ```
 
 把 `/path/to/chord` 换成实际安装路径，如 `/usr/local/bin/chord`。
-
-> 运行源码入口时用 `go run ./cmd/chord/`，不要用 `go run cmd/chord/main.go`。
 
 ## 2. 第一次运行
 
@@ -57,8 +51,6 @@ chord doctor models
 ```
 
 先解决认证或连接错误，再重新运行 `chord`。错误排查见[常见问题排查](./troubleshooting_CN.md)。
-
-> `go run ./cmd/chord/` 仅适用于 Chord 源码仓库。在自己的项目中使用已安装的 `chord`，不要把源码启动命令当作替代。
 
 ## 4. 首次交互
 

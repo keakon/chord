@@ -5,11 +5,7 @@
 Prebuilt binaries do not require Go. Installing with `go install` or building from source requires Go 1.27.0+.
 
 ```bash
-# Install from source with Go
 go install github.com/keakon/chord/cmd/chord@latest
-
-# Or build the local checkout
-go build -o chord ./cmd/chord/
 ```
 
 You can also download prebuilt binaries from [GitHub Releases](https://github.com/keakon/chord/releases). On macOS, a downloaded binary may be blocked on first run because it came from the internet and is not notarized. If that happens, run:
@@ -27,8 +23,6 @@ codesign --force --sign - /path/to/chord
 ```
 
 Replace `/path/to/chord` with the actual installed path, such as `/usr/local/bin/chord`.
-
-> When running from source, use `go run ./cmd/chord/` (not `go run cmd/chord/main.go`).
 
 ## 2. First run
 
@@ -57,8 +51,6 @@ chord doctor models
 ```
 
 Resolve authentication or connection errors before running `chord` again. See [Troubleshooting](./troubleshooting.md) for help.
-
-> `go run ./cmd/chord/` only works in the Chord source checkout. Use the installed `chord` command in your own project instead.
 
 ## 4. First interaction
 

@@ -162,7 +162,7 @@ Avoid these as default/custom bindings unless you have tested them in your exact
 
 If a custom binding does not work, press `?` to confirm Chord loaded the mapping, then check whether the terminal receives the key with tools such as `showkey`, `cat`, or your terminal's key-event inspector.
 
-Action names are lower snake_case mirrors of the [`KeyMap` fields](https://github.com/keakon/chord/blob/main/internal/tui/keymap.go) in `internal/tui/keymap.go`. Keys are the strings produced by Bubble Tea's `tea.KeyMsg.String()`, e.g. `"esc"`, `"enter"`, `"shift+enter"`, `"ctrl+p"`, `"ctrl+shift+left"`, `"j"`, `"down"`, `"space"`, `" "`.
+Action names are the lower snake_case identifiers you set in `config.yaml`; the table below lists the ones Chord ships. Keys are the strings produced by Bubble Tea's `tea.KeyMsg.String()`, e.g. `"esc"`, `"enter"`, `"shift+enter"`, `"ctrl+p"`, `"ctrl+shift+left"`, `"j"`, `"down"`, `"space"`, `" "`.
 
 ### Action name reference
 
