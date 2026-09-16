@@ -178,6 +178,8 @@ func applyRuntimeAPIBaseOverride(providerCfg config.ProviderConfig) config.Provi
 }
 
 func main() {
+	applyDefaultGCPercent()
+
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 

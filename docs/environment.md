@@ -103,6 +103,15 @@ Notes:
 - Inside `tmux` / `zellij`, Chord conservatively disables image preview by default; these overrides are mainly for debugging or known-good setups.
 - WezTerm currently auto-selects the iTerm2 image protocol; Ghostty / kitty auto-select Kitty graphics.
 
+## Memory tuning (GC)
+
+Chord sets the garbage-collector target to `GOGC=50` when `GOGC` is not already in the environment, for both the TUI and `chord headless`. A long session keeps a large message store around, and a lower target keeps the resident heap flat instead of letting it grow toward the default one, at the cost of a little extra CPU. An explicit `GOGC` always wins.
+
+`GOMEMLIMIT` is not touched — the Go runtime reads it directly. Use it when Chord runs under an external memory budget:
+
+- **TUI**: leave `GOMEMLIMIT` unset. A desktop session has no external budget, and a limit close to the live heap keeps the collector running, which shows up as slower scrolling and streaming.
+- **`chord headless` in a container**: set `GOMEMLIMIT` a bit below the container limit (a common choice is roughly 90% of it) so the process keeps headroom instead of getting killed, but never below what the process normally needs — too low means the collector thrashes. Keep `GOGC=50` as well; the two settings work together.
+
 ## Development and debugging
 
 | Variable             | Purpose                                                                                                                        |
