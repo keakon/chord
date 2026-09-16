@@ -282,10 +282,13 @@ func shellCompoundCommandNeedsReview(permission, command, rulePattern string) bo
 	if strings.TrimSpace(rulePattern) == "*" {
 		return false
 	}
-	return shellCommandContainsSeparator(command)
+	return shellCommandNeedsReview(command)
 }
 
-func shellCommandContainsSeparator(command string) bool {
+// shellCommandNeedsReview reports whether a shell command carries work beyond
+// its matched narrow allow rule: separators, command/process substitution, or
+// broken quoting that defeats the quote-aware scan.
+func shellCommandNeedsReview(command string) bool {
 	inSingle := false
 	inDouble := false
 	escaped := false
@@ -313,9 +316,34 @@ func shellCommandContainsSeparator(command string) bool {
 				continue
 			}
 			return true
+		case '`':
+			// Legacy command substitution runs even inside double quotes;
+			// only single quotes keep it literal.
+			if !inSingle {
+				return true
+			}
+		case '$':
+			// $(...) command substitution (and $((...)) arithmetic, kept
+			// conservative) runs outside single quotes, including inside
+			// double quotes. ${...} parameter expansion alone is not a new
+			// command and stays allowed.
+			if !inSingle && i+1 < len(command) && command[i+1] == '(' {
+				return true
+			}
+		case '<', '>':
+			// Process substitution (<(...) / >(...)) spawns a subcommand just
+			// like $(...), so it needs the same review. Plain redirection runs
+			// no new command and stays part of the matched command. Inside
+			// double quotes < and > are literal, like single quotes.
+			if !inSingle && !inDouble && i+1 < len(command) && command[i+1] == '(' {
+				return true
+			}
 		}
 	}
-	return false
+	// Unbalanced quotes or a trailing escape mean the quote-aware scan above
+	// may have misclassified separators, so treat the parse failure as
+	// needing review rather than auto-allowing it.
+	return escaped || inSingle || inDouble
 }
 
 // globMatch matches a string against a glob pattern.
