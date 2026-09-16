@@ -1,10 +1,14 @@
 # Codex + LSP
 
+<!-- description: 完整的 Codex 工作流配置：OAuth 登录、Go 与 Python LSP，以及只读 reviewer agent。 -->
+
 这个场景适合：
 
 - 用 `preset: codex` 走 OAuth
 - 想开 Go / Python LSP
 - 想额外放一个只读 reviewer agent
+
+同一份配置也提供可直接复制的文件：[`codex-oauth-with-lsp.yaml`](./codex-oauth-with-lsp.yaml)。
 
 先完成 Codex 登录并确认模型可用，再按需要添加 LSP 和审查角色。不使用的服务商、模型池或角色应连同其引用一起移除；启用 LSP 前要先安装对应语言服务器。
 

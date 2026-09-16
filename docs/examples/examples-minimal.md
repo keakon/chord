@@ -4,6 +4,8 @@ This is the smallest practical personal setup: one provider, one key, and one mo
 
 Create the two files below and set the environment variable to your own key. Add other features after confirming the model connects.
 
+The same configuration is available as a ready-to-copy file: [`anthropic-minimal.yaml`](./anthropic-minimal.yaml).
+
 ## `~/.config/chord/auth.yaml`
 
 ```yaml

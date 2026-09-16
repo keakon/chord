@@ -1,9 +1,13 @@
 # OpenAI 兼容网关
 
+<!-- description: 让 Chord 走 OpenAI 兼容网关：多 key 轮换与备用 endpoint 的模型池 fallback。 -->
+
 这个场景适合挂在 OpenAI 兼容网关前：
 
 - 一个 provider 下放多个 key，做轮询或故障切换
 - 模型池里先走主 endpoint，再回退到备用 endpoint
+
+同一份配置也提供可直接复制的文件：[`openai-compat-load-balance.yaml`](./openai-compat-load-balance.yaml)。
 
 将示例域名、模型名和环境变量替换为网关实际提供的值。先验证主接口，再添加备用接口，避免同时排查两套连接。
 

@@ -1,11 +1,15 @@
 # Team setup
 
+<!-- description: A shared project layout for teams: project-level hooks and defaults, plus focused sub-agent roles. -->
+
 This page shows a **shared project layout** under `.chord/`:
 
 - keep personal credentials and default providers in global config
 - put team-shared hooks, LSP, commands, and defaults in project-level `.chord/config.yaml`
 - let the primary role orchestrate work instead of editing everything directly
 - split sub-agents into read-only discovery, mechanical execution, and review
+
+The global `config.yaml` from this page is available as a ready-to-copy file: [`team-ready.yaml`](./team-ready.yaml).
 
 This is a combined example, not an all-or-nothing template. Get the global model configuration working first, then add project settings and the roles you need. Supply the scripts referenced by hook commands, or remove those hooks until ready. Keep credentials in personal configuration, never in the shared repository.
 

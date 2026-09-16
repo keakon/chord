@@ -1,10 +1,14 @@
 # Codex + LSP
 
+<!-- description: A complete Codex workspace setup: OAuth sign-in, Go and Python LSP, and a read-only reviewer agent. -->
+
 Use this setup when you want:
 
 - OAuth with `preset: codex`
 - Go and Python LSP support
 - an extra read-only reviewer agent
+
+The same configuration is available as a ready-to-copy file: [`codex-oauth-with-lsp.yaml`](./codex-oauth-with-lsp.yaml).
 
 Complete Codex sign-in and confirm the model works first, then add LSP and the reviewer as needed. Remove unused providers, pools, or roles together with their references. Install the corresponding language servers before enabling LSP.
 

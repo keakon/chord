@@ -4,6 +4,8 @@
 
 只需创建下面两个文件，并把环境变量设为自己的密钥。确认能连接模型后，再增加其他功能。
 
+同一份配置也提供可直接复制的文件：[`anthropic-minimal.yaml`](./anthropic-minimal.yaml)。
+
 ## `~/.config/chord/auth.yaml`
 
 ```yaml
