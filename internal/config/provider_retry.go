@@ -64,5 +64,8 @@ func ValidateProviderRuntime(providerName string, cfg ProviderConfig) error {
 	if err := ValidateProviderKeySelection(providerName, cfg); err != nil {
 		return err
 	}
-	return ValidateProviderRetry(providerName, cfg)
+	if err := ValidateProviderRetry(providerName, cfg); err != nil {
+		return err
+	}
+	return ValidateProviderNativeThinking(providerName, cfg)
 }

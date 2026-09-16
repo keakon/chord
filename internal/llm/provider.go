@@ -524,6 +524,9 @@ func (p *ProviderConfig) ChatCompletionsCompat(modelID string) *config.ChatCompl
 	if modelCfg.KeepReasoningEffort != nil {
 		merged.KeepReasoningEffort = modelCfg.KeepReasoningEffort
 	}
+	if modelCfg.NativeThinking != "" {
+		merged.NativeThinking = modelCfg.NativeThinking
+	}
 	return merged
 }
 

@@ -768,6 +768,27 @@ type ChatCompletionsCompatConfig struct {
 	// reasoning-content replay contract, such as Grok on the Chat Completions
 	// wire.
 	KeepReasoningEffort *bool `json:"keep_reasoning_effort,omitempty" yaml:"keep_reasoning_effort,omitempty"`
+	// NativeThinking selects the request shape Chord uses to hand a model's
+	// thinking settings to a Chat Completions endpoint that translates the call
+	// into the model's native API. Empty (default) infers the shape from the
+	// model name; "off" disables the conversion for endpoints that reject the
+	// field instead of translating it. Accepted shapes are "gemini"
+	// (extra_body.google.thinking_config), "anthropic"
+	// (thinking:{type,budget_tokens}), "thinking" (the native thinking:{type}
+	// object used by DeepSeek, GLM, Kimi K2.x, and Doubao), and "qwen"
+	// (enable_thinking). Family aliases (claude, deepseek, glm, kimi, ...) name
+	// the same shapes, for models whose id does not reveal the upstream.
+	// Nothing is emitted when the model configures no thinking knobs, so an
+	// unconfigured model is unaffected by the inference.
+	NativeThinking string `json:"native_thinking,omitempty" yaml:"native_thinking,omitempty"`
+}
+
+// NativeThinkingValue returns the configured native thinking selector.
+func (c *ChatCompletionsCompatConfig) NativeThinkingValue() string {
+	if c == nil {
+		return ""
+	}
+	return strings.TrimSpace(c.NativeThinking)
 }
 
 // RequestOverridesConfig applies protocol-agnostic patches after Chord builds a
@@ -1822,8 +1843,8 @@ func collectConfigIssues(data []byte, cfg *Config) []string {
 	return issues
 }
 
-// collectProviderIssues returns the retry, compression, and key-selection
-// problems for one provider config.
+// collectProviderIssues returns the retry, compression, key-selection, and
+// native-thinking problems for one provider config.
 func collectProviderIssues(providerName string, cfg *ProviderConfig) []string {
 	var issues []string
 	if err := ValidateProviderRetry(providerName, *cfg); err != nil {
@@ -1833,6 +1854,9 @@ func collectProviderIssues(providerName string, cfg *ProviderConfig) []string {
 		issues = append(issues, err.Error())
 	}
 	if err := ValidateProviderKeySelection(providerName, *cfg); err != nil {
+		issues = append(issues, err.Error())
+	}
+	if err := ValidateProviderNativeThinking(providerName, *cfg); err != nil {
 		issues = append(issues, err.Error())
 	}
 	return issues
@@ -1860,7 +1884,7 @@ func resetInvalidProviderFields(cfg ProviderConfig) ProviderConfig {
 	if !validRequestCompression(cfg.Compress) {
 		cfg.Compress = ""
 	}
-	return cfg
+	return resetInvalidNativeThinking(cfg)
 }
 
 // stripTypeInvalidOverride removes override leaves whose values cannot be

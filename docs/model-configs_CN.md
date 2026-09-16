@@ -673,6 +673,84 @@ model_templates:
 
 注意 Opus 4.7 起换了 tokenizer：同样文本在 Claude 5 模型上比老模型多约 30% token，所以在老模型上感觉合适的上下文预算要相应下调。
 
+## 走 Chat Completions 网关的 thinking
+
+网关可以把多个模型暴露在 `/v1/chat/completions` 上，再把请求转成上游原生 API。
+Chord 的 `thinking.*` 与线路无关，但网关只认它自己转换逻辑里的字段形状，所以
+Chord 会按模型名推断出的方言，把这些配置写进 chat 请求体：
+
+| 模型 | Chord 追加的字段 | 取值来源 |
+| --- | --- | --- |
+| Gemini | `extra_body.google.thinking_config` | `thinking.level`、`thinking.budget`、`thinking.include_thoughts`；键名用 snake_case，预算与级别的冲突规则、`include_thoughts` 默认值都和原生线路一致 |
+| Claude | `thinking: {type, budget_tokens}` | `thinking.type`、`thinking.budget`、`thinking.display` |
+| DeepSeek、GLM、Kimi K2.x、Doubao | `thinking: {type}` | `thinking.type`，`adaptive` 映射成 `enabled` |
+| Qwen | `enable_thinking` | `thinking.type`、`thinking.budget` |
+
+没有配置 thinking 块的模型不会追加任何字段；不属于上表的模型也不会把 thinking 配置
+写进 chat 请求体，这类情况按下文显式指定方言。
+
+```yaml
+model_templates:
+  gemini-flash: &gemini-flash
+    limit: {context: 1048576, output: 65536}
+    thinking:
+      include_thoughts: true
+    variants:
+      high: {thinking: {level: high}}
+      medium: {thinking: {level: medium}}
+      low: {thinking: {level: low}}
+
+  claude-chat: &claude-chat
+    limit: {context: 200000, output: 64000}
+    thinking: {type: enabled, budget: 8192}
+
+  deepseek-chat: &deepseek-chat
+    limit: {context: 1000000, output: 64000}
+    reasoning: {effort: high}
+    thinking: {type: enabled}
+
+  glm-chat: &glm-chat
+    limit: {context: 200000, output: 64000}
+    thinking: {type: enabled}
+    compat:
+      # 家族特有的附加项留在 override 里；Chord 会把它合并进由上面模型级
+      # thinking 块生成的 thinking 对象。
+      request_overrides:
+        body:
+          thinking: {clear_thinking: false}
+
+providers:
+  gateway:
+    type: chat-completions
+    api_url: https://example.com/v1/chat/completions
+    models:
+      gemini-3.8-flash: *gemini-flash
+      claude-fable-5.1: *claude-chat
+      deepseek-v4.1-flash: *deepseek-chat
+      glm-5.2: *glm-chat
+
+model_pools:
+  default:
+    - gateway/gemini-3.8-flash@high
+    - gateway/claude-fable-5.1
+    - gateway/deepseek-v4.1-flash
+    - gateway/glm-5.2
+```
+
+- 不需要额外配置：字段完全由你已配置的 thinking 项生成，同一份模板既能在网关后面
+  生效，也能直接连模型的原生端点。
+- 端点拒绝未知请求体字段、既不忽略也不转换时，用
+  `compat.chat_completions.native_thinking: off`（模型级或 provider 级）关掉。
+- 模型名看不出上游（网关别名、私有部署）时直接指定形状：`gemini`、`anthropic`、
+  `thinking`、`qwen`；`claude`、`deepseek`、`glm`、`kimi`、`doubao` 等家族名等价。
+- Kimi K3 不接受 K2.x 的 `thinking` 参数，所以不要给它配模型级 thinking 块；K2.x
+  模型按上面的说明使用该块。
+- `reasoning.effort` 仍按可移植的 `reasoning_effort` 字段发送。网关自己映射 effort
+  时（Claude、Gemini 网关通常如此），只配它就够。Google 官方兼容端点里
+  `reasoning.effort` 与 `extra_body.google.thinking_config` 互斥，二者只设其一。
+- 思考摘要以 `reasoning_content` 返回并显示为 thinking。上游是否真的返回摘要文本仍
+  取决于网关和模型；无论是否返回，级别和预算都会作用到请求上。
+
 ## Google Gemini
 
 在 `~/.config/chord/auth.yaml` 中配置：

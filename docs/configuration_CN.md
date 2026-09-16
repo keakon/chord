@@ -572,6 +572,9 @@ model_templates:
         rename_body_fields:
           max_completion_tokens: max_tokens
         body:
+          # 「走 Chat Completions 网关的 thinking」（model-configs_CN.md）里列出的
+          # 模型家族会自动写入这个对象；这里的 override 覆盖其他后端，也用于补充
+          # 同一对象里的家族特有字段（如 GLM 的 clear_thinking）。
           thinking:
             type: enabled
       # 回放原生 reasoning_content，并把其他 wire family 的可移植可见
@@ -1264,6 +1267,7 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `compat.chat_completions.requires_assistant_after_tool_result` | bool | `false` — 对不接受 tool result 后直接跟 user 消息的网关，在中间插入一条合成 assistant 消息。 |
 | `compat.chat_completions.mcp_system_tools_message` | bool | `false` — 把运行时 manual MCP schema 挂成固定位置的 `role: system` 消息，消息只带 `tools`、不带 `content`，不改写顶层 `tools`。只为已确认接受 Kimi 兼容动态工具形态的模型开启。Fallback 池里每个模型都必须开启；混合池退回顶层工具。 |
 | `compat.chat_completions.keep_reasoning_effort` | bool | `false` — 本轮回放的 assistant tool-call 消息没有 `reasoning_content` 时，仍保留 `reasoning_effort` 与 reasoning 请求覆盖项。默认行为下 Chord 会把缺少 reasoning content 判定为该后端无法回放 reasoning，在本回合后续请求中剥离这些控制项；对接受 reasoning 控制、但没有 reasoning 回放契约的后端（例如走 Chat Completions 线路的 Grok）开启。它只保留请求侧控制项，不会为校验回放历史的后端（带 tools 的 DeepSeek、Kimi K3、Qwen `preserve_thinking`）补上 reasoning content。 |
+| `compat.chat_completions.native_thinking` | string | 端点是把 chat/completions 转成模型原生 API 的网关时，用哪个请求形状把该模型的 thinking 配置交上去。留空（默认）按模型名推断：`gemini*` → `extra_body.google.thinking_config`，`claude*` → `thinking:{type,budget_tokens}`，`deepseek*` / `glm*` / `kimi*` / `doubao*` → `thinking:{type}`，`qwen*` → `enable_thinking`。`off` 用于拒绝未知请求体字段的端点，关闭转换；`gemini`、`anthropic`、`thinking`、`qwen` 用于模型名看不出上游时直接指定形状，`claude`、`deepseek`、`glm`、`kimi`、`doubao` 等家族名等价。没有配置 thinking 块的模型不会发送该字段。见[走 Chat Completions 网关的 thinking](./model-configs_CN.md#走-chat-completions-网关的-thinking)。 |
 | `compat.usage.input_includes_cache_read` | bool | 协议默认值 — 覆盖 provider 顶层 input 是否已包含 cache read。默认：Messages 为 `false`；Chat Completions / Responses / Generate Content 为 `true`。 |
 | `compat.usage.input_includes_cache_write` | bool | 协议默认值 — 覆盖 provider 顶层 input 是否已包含 cache write/cache creation。默认：Chat Completions / Responses 为 `true`；Messages / Generate Content 为 `false`。 |
 | `models`      | map    | model id → [模型配置](#模型字段参考)。                                                                                                              |
@@ -1287,6 +1291,7 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `compat.request_overrides.headers` | map | 设置最终请求 header。值为 `null` 时删除该 header。 |
 | `compat.chat_completions.mcp_system_tools_message` | bool | 模型级覆盖项；provider 默认值见上表。 |
 | `compat.chat_completions.keep_reasoning_effort` | bool | 模型级覆盖项；provider 默认值见上表。 |
+| `compat.chat_completions.native_thinking` | string | 模型级覆盖项；provider 默认值见上表。 |
 | `compat.responses.mcp_additional_tools` | bool | 模型级覆盖项；provider 默认值见上表。 |
 | `compat.apply_patch.enabled` | bool | 模型级覆盖项；provider 默认值见上表。 |
 | `compat.apply_patch.freeform` | bool | 模型级覆盖项；provider 默认值见上表。 |

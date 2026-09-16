@@ -1203,6 +1203,9 @@ func openAIChatReasoningEnabled(tuning RequestTuning, target FallbackModel) bool
 	if openAIReasoningEffortActive(tuning.OpenAI.EffectiveReasoningEffort()) {
 		return true
 	}
+	if nativeThinkingConfigured(tuning) {
+		return true
+	}
 	return requestOverridesEnableReasoning(target.ProviderConfig.RequestOverrides(target.ModelID))
 }
 

@@ -19,6 +19,14 @@ Field-level semantics live in
 lets the backend accept, clamp, or reject it. Only the Responses wire normalizes
 whitespace and casing first, so `high` and `High` both work there.
 
+On Chat Completions, a gateway that translates the call into the model's native
+API receives the thinking settings as that API's own field: Gemini as
+`extra_body.google.thinking_config`, Claude as `thinking: {type, budget_tokens}`,
+DeepSeek / GLM / Kimi K2.x / Doubao as `thinking: {type}`, and Qwen as
+`enable_thinking`. The shape is inferred from the model name and can be forced
+with `compat.chat_completions.native_thinking`; see
+[Thinking behind a Chat Completions gateway](./model-configs.md#thinking-behind-a-chat-completions-gateway).
+
 ## Decide the replay contract
 
 The answer depends on whether the backend requires its own reasoning content back:

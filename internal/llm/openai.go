@@ -113,6 +113,12 @@ type openAIRequest struct {
 	Temperature         float64              `json:"temperature,omitempty"`
 	ReasoningEffort     string               `json:"reasoning_effort,omitempty"`
 	Verbosity           string               `json:"verbosity,omitempty"`
+	// ExtraBody, Thinking, and EnableThinking are the dialect-specific carriers
+	// for a model served by a gateway that translates chat/completions into the
+	// model's native API; at most one is set (see openai_native_thinking.go).
+	ExtraBody      *openAIExtraBody   `json:"extra_body,omitempty"`
+	Thinking       *anthropicThinking `json:"thinking,omitempty"`
+	EnableThinking *bool              `json:"enable_thinking,omitempty"`
 }
 
 // openAIMessage is a single message in the OpenAI API format.
@@ -420,6 +426,20 @@ func (o *OpenAIProvider) CompleteStream(
 
 		if ot.TextVerbosity != "" {
 			reqBody.Verbosity = ot.TextVerbosity
+		}
+		// A gateway that translates chat/completions into the target model's
+		// native API can only read the thinking controls in its own dialect.
+		// The model's thinking config is wire-independent, so convert it into
+		// the shape the resolved dialect expects; nothing is emitted when the
+		// model configures no thinking knobs. A replay-compatible degradation
+		// (DisableReasoning) must not ship a thinking request the rest of the
+		// body no longer matches.
+		if !tuning.DisableReasoning {
+			dialect, dialectErr := chatCompletionsNativeThinking(model, chatCompat)
+			if dialectErr != nil {
+				return nil, dialectErr
+			}
+			applyNativeThinking(&reqBody, dialect, tuning)
 		}
 		bodyBytes, err := json.Marshal(reqBody)
 		if err != nil {

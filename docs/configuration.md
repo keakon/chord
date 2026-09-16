@@ -606,6 +606,10 @@ model_templates:
         rename_body_fields:
           max_completion_tokens: max_tokens
         body:
+          # Gateways for the model families listed in "Thinking behind a Chat
+          # Completions gateway" (model-configs.md) get this object written
+          # automatically; the override covers other backends — and any extra
+          # field of the same object, such as GLM's clear_thinking.
           thinking:
             type: enabled
       # Replays native reasoning_content and accepts portable visible
@@ -1444,6 +1448,7 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | `compat.chat_completions.requires_assistant_after_tool_result` | bool | `false` — Insert a synthetic assistant message between a tool result and the next user message for gateways that reject a user message directly after tool results. |
 | `compat.chat_completions.mcp_system_tools_message` | bool | `false` — Mount runtime manual-MCP schemas as fixed-anchor `role: system` messages with a `tools` field and no `content`, instead of changing top-level `tools`. Enable only for models known to accept the Kimi-compatible dynamic-tool shape. Every model in a fallback pool must opt in; mixed pools use top-level tools. |
 | `compat.chat_completions.keep_reasoning_effort` | bool | `false` — Keep `reasoning_effort` and reasoning request overrides active when a current-turn assistant tool-call message replays without `reasoning_content`. Chord otherwise reads the missing content as a backend that cannot replay reasoning and strips those controls for the rest of the turn; enable it for endpoints that accept reasoning controls without a reasoning-content replay contract, such as Grok on the Chat Completions wire. It only keeps the request-side controls in place; it does not supply reasoning content to backends whose contract validates the replayed history (DeepSeek when a request carries tools, Kimi K3, Qwen `preserve_thinking`). |
+| `compat.chat_completions.native_thinking` | string | Selects the request shape Chord uses for a model's thinking settings when the endpoint is a Chat Completions gateway that translates the call into the model's native API. Empty (default) infers the shape from the model name: `gemini*` → `extra_body.google.thinking_config`, `claude*` → `thinking:{type,budget_tokens}`, `deepseek*` / `glm*` / `kimi*` / `doubao*` → `thinking:{type}`, `qwen*` → `enable_thinking`. `off` disables the conversion for endpoints that reject unknown body fields; `gemini`, `anthropic`, `thinking`, and `qwen` force a shape for model names that hide the upstream, with family names such as `claude`, `deepseek`, `glm`, `kimi`, and `doubao` accepted as aliases. A model that configures no thinking block never sends the field. See [Thinking behind a Chat Completions gateway](./model-configs.md#thinking-behind-a-chat-completions-gateway). |
 | `compat.usage.input_includes_cache_read` | bool | Protocol default — Override whether the provider's top-level input count already contains cache-read tokens. Defaults: Messages `false`; Chat Completions / Responses / Generate Content `true`. |
 | `compat.usage.input_includes_cache_write` | bool | Protocol default — Override whether the provider's top-level input count already contains cache-write/cache-creation tokens. Defaults: Chat Completions / Responses `true`; Messages / Generate Content `false`. |
 | `models`       | map    | Map of model id → [model config](#model-field-reference).                                                                                               |
@@ -1467,6 +1472,7 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | `compat.request_overrides.headers` | map | Sets final request headers. A `null` value removes that header. |
 | `compat.chat_completions.mcp_system_tools_message` | bool | Model-level override for the provider default described above. |
 | `compat.chat_completions.keep_reasoning_effort` | bool | Model-level override for the provider default described above. |
+| `compat.chat_completions.native_thinking` | string | Model-level override for the provider default described above. |
 | `compat.responses.mcp_additional_tools` | bool | Model-level override for the provider default described above. |
 | `compat.apply_patch.enabled` | bool | Model-level override for the provider default described above. |
 | `compat.apply_patch.freeform` | bool | Model-level override for the provider default described above. |

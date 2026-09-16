@@ -111,6 +111,24 @@ func normalizeGeminiThinking(t GeminiTuning) GeminiTuning {
 	return t
 }
 
+// geminiIncludeThoughts resolves the include_thoughts default for an already
+// normalized thinking shape. Thought signatures are bound to the producing
+// model, so the visible thought summary is the only reasoning text that
+// survives a later switch to another provider or wire family. Capture it by
+// default whenever thinking is active; include_thoughts: false in the model
+// config opts out explicitly. Both wire shapes that carry Gemini thinking call
+// this, so the native generate-content body and the OpenAI-compatible
+// extra_body mapping cannot drift apart on the default.
+func geminiIncludeThoughts(t GeminiTuning) *bool {
+	if t.IncludeThoughts != nil {
+		return t.IncludeThoughts
+	}
+	if (t.ThinkingBudget != nil && *t.ThinkingBudget != 0) || t.ThinkingLevel != "" {
+		return new(true)
+	}
+	return nil
+}
+
 type geminiGenerationConfig struct {
 	MaxOutputTokens int                   `json:"maxOutputTokens,omitempty"`
 	ThinkingConfig  *geminiThinkingConfig `json:"thinkingConfig,omitempty"`
@@ -256,18 +274,7 @@ func (g *GeminiProvider) CompleteStream(
 			// Gemini thinkingLevel values are documented as lowercase strings in the
 			// public Gemini API docs (e.g. "minimal"|"low"|"medium"|"high"). Keep the
 			// configured casing as-is.
-			includeThoughts := geminiThinking.IncludeThoughts
-			if includeThoughts == nil &&
-				((geminiThinking.ThinkingBudget != nil && *geminiThinking.ThinkingBudget != 0) || geminiThinking.ThinkingLevel != "") {
-				// Thought signatures are bound to the producing model, so the
-				// visible thought summary is the only reasoning text that survives
-				// a later switch to another provider or wire family. Capture it by
-				// default whenever thinking is active; include_thoughts: false in
-				// the model config opts out explicitly.
-				v := true
-				includeThoughts = &v
-			}
-			genCfg.ThinkingConfig = &geminiThinkingConfig{ThinkingBudget: geminiThinking.ThinkingBudget, ThinkingLevel: geminiThinking.ThinkingLevel, IncludeThoughts: includeThoughts}
+			genCfg.ThinkingConfig = &geminiThinkingConfig{ThinkingBudget: geminiThinking.ThinkingBudget, ThinkingLevel: geminiThinking.ThinkingLevel, IncludeThoughts: geminiIncludeThoughts(geminiThinking)}
 		}
 		if genCfg.MaxOutputTokens > 0 || genCfg.ThinkingConfig != nil {
 			reqBody.GenerationConfig = &genCfg

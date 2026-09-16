@@ -18,6 +18,13 @@
 拒绝。只有 Responses 线路会先归一化空格和大小写，所以那里 `high` 和 `High`
 都行。
 
+走 Chat Completions 时，把请求转成模型原生 API 的网关会按自己的形状收到思考配置：
+Gemini 用 `extra_body.google.thinking_config`，Claude 用
+`thinking: {type, budget_tokens}`，DeepSeek / GLM / Kimi K2.x / Doubao 用
+`thinking: {type}`，Qwen 用 `enable_thinking`。形状按模型名推断，也可以用
+`compat.chat_completions.native_thinking` 指定；见
+[走 Chat Completions 网关的 thinking](./model-configs_CN.md#走-chat-completions-网关的-thinking)。
+
 ## 决定回放契约
 
 答案取决于后端是否要求把自己的思考内容再传回去：

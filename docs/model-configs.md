@@ -734,6 +734,94 @@ Note the tokenizer change since Opus 4.7: the same text produces ~30% more
 tokens on Claude 5 models than on older ones, so a context budget that felt
 right on an older model should be scaled down accordingly.
 
+## Thinking behind a Chat Completions gateway
+
+A gateway can expose models on `/v1/chat/completions` and translate each call
+into the upstream's native API. Chord's `thinking.*` keys are wire-independent,
+but the gateway only reads the thinking controls in the shape its own
+translation understands, so Chord writes them into the chat body as the dialect
+the model name implies:
+
+| Model | Field Chord adds | Built from |
+| --- | --- | --- |
+| Gemini | `extra_body.google.thinking_config` | `thinking.level`, `thinking.budget`, `thinking.include_thoughts` — snake_case keys, with the same budget/level rule and the same `include_thoughts` default as the native wire |
+| Claude | `thinking: {type, budget_tokens}` | `thinking.type`, `thinking.budget`, `thinking.display` |
+| DeepSeek, GLM, Kimi K2.x, Doubao | `thinking: {type}` | `thinking.type`, with `adaptive` mapped to `enabled` |
+| Qwen | `enable_thinking` | `thinking.type`, `thinking.budget` |
+
+A model that configures no thinking block sends nothing, and a model outside
+these families keeps its thinking settings out of the chat body — name the
+dialect explicitly for those, below.
+
+```yaml
+model_templates:
+  gemini-flash: &gemini-flash
+    limit: {context: 1048576, output: 65536}
+    thinking:
+      include_thoughts: true
+    variants:
+      high: {thinking: {level: high}}
+      medium: {thinking: {level: medium}}
+      low: {thinking: {level: low}}
+
+  claude-chat: &claude-chat
+    limit: {context: 200000, output: 64000}
+    thinking: {type: enabled, budget: 8192}
+
+  deepseek-chat: &deepseek-chat
+    limit: {context: 1000000, output: 64000}
+    reasoning: {effort: high}
+    thinking: {type: enabled}
+
+  glm-chat: &glm-chat
+    limit: {context: 200000, output: 64000}
+    thinking: {type: enabled}
+    compat:
+      # Family extras stay in the override; Chord merges them into the
+      # thinking object it writes from the model-level block above.
+      request_overrides:
+        body:
+          thinking: {clear_thinking: false}
+
+providers:
+  gateway:
+    type: chat-completions
+    api_url: https://example.com/v1/chat/completions
+    models:
+      gemini-3.8-flash: *gemini-flash
+      claude-fable-5.1: *claude-chat
+      deepseek-v4.1-flash: *deepseek-chat
+      glm-5.2: *glm-chat
+
+model_pools:
+  default:
+    - gateway/gemini-3.8-flash@high
+    - gateway/claude-fable-5.1
+    - gateway/deepseek-v4.1-flash
+    - gateway/glm-5.2
+```
+
+- Nothing to configure: the field is built from the thinking knobs you already
+  set, so one template works unchanged behind the gateway and on the model's
+  native endpoint.
+- A gateway that rejects unknown body fields instead of ignoring or translating
+  them needs `compat.chat_completions.native_thinking: off`, set on the model or
+  on the provider.
+- A model name that hides the upstream (a gateway alias, a private deployment)
+  names the shape directly: `native_thinking: gemini`, `anthropic`, `thinking`,
+  or `qwen`. Family names such as `claude`, `deepseek`, `glm`, `kimi`, and
+  `doubao` select the same shapes.
+- Kimi K3 rejects the K2.x `thinking` parameter, so do not give it a model-level
+  thinking block; K2.x models use the block as described above.
+- `reasoning.effort` still goes out as the portable `reasoning_effort` field.
+  Gateways that map effort themselves (Claude and Gemini ones usually do) work
+  with it alone. On Google's own compatibility endpoint `reasoning.effort` and
+  `extra_body.google.thinking_config` are mutually exclusive, so set one of
+  them there, not both.
+- Thought summaries come back as `reasoning_content` and display as thinking.
+  Whether the upstream returns summary text at all still depends on the gateway
+  and model; the level and budget apply to the request either way.
+
 ## Google Gemini
 
 Pair with `~/.config/chord/auth.yaml`:
