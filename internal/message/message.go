@@ -2,6 +2,8 @@ package message
 
 import (
 	"encoding/json"
+	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/keakon/chord/internal/ratelimit"
@@ -356,6 +358,40 @@ func IsUserAuthored(msg Message) bool {
 	default:
 		return true
 	}
+}
+
+// A durable checkpoint that keeps an unsuccessful tool batch in the live
+// transcript elides the successful siblings' bodies and leaves this marker in
+// their place. The marker stays model-visible, so it is a persisted content
+// contract: producers format it with FormatToolResultElided, and surfaces that
+// must not print it verbatim (anything rendering for the user) recognize it
+// with ToolResultElidedBytes.
+const (
+	toolResultElidedPrefix = "[result elided by checkpoint: "
+	toolResultElidedSuffix = " bytes]"
+)
+
+// FormatToolResultElided renders the marker a durable checkpoint writes in
+// place of a tool result body it removed, reporting the payload bytes the
+// elision took out of the request surface.
+func FormatToolResultElided(bytes int) string {
+	return fmt.Sprintf("%s%d%s", toolResultElidedPrefix, bytes, toolResultElidedSuffix)
+}
+
+// ToolResultElidedBytes reports the payload bytes a durable checkpoint removed
+// from a tool result body when content is exactly the elision marker. It
+// returns false for ordinary output that merely mentions the marker text.
+func ToolResultElidedBytes(content string) (int, bool) {
+	trimmed := strings.TrimSpace(content)
+	if !strings.HasPrefix(trimmed, toolResultElidedPrefix) || !strings.HasSuffix(trimmed, toolResultElidedSuffix) {
+		return 0, false
+	}
+	digits := trimmed[len(toolResultElidedPrefix) : len(trimmed)-len(toolResultElidedSuffix)]
+	size, err := strconv.Atoi(digits)
+	if err != nil || size < 0 {
+		return 0, false
+	}
+	return size, true
 }
 
 // ToolCall represents a single tool invocation by the LLM.

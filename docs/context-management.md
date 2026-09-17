@@ -195,7 +195,7 @@ eligible for evaluation again; the interval and savings gates still apply.
 
 The newest failed tool batches of the current turn are re-attached as real records directly behind the checkpoint card, so a rejected call (for example a `compact_context` request the runtime declined) keeps its error card, and a fork of that generation still replays it, instead of surviving only as the card's excerpt. Older failures stay in the archive and the checkpoint's evidence pack.
 
-Only the failures keep their text: a successful result that merely shares the batch is replaced by a `[result elided by checkpoint: N bytes]` marker, and its attachments are not carried back into the new context — its full output is in the archive.
+Only the failures keep their text: a successful result that merely shares the batch is replaced by a `[result elided by checkpoint: N bytes]` marker, and its attachments are not carried back into the new context — its full output is in the archive. In the transcript the marker reads as a note that the checkpoint archived the result; a restored `edit` card falls back to the requested replacement when its applied diff was elided, and the changed file stays in the sidebar.
 
 #### When to request a checkpoint
 

@@ -8,14 +8,15 @@
 
 - headless 控制面新增三个可订阅推送：`session_switched` 在进程不重启、直接换会话时（执行 handoff plan、`/resume <id>`、`/new`）广播新的 `session_id`，`status_response.session_id` 也改成跟当前实际会话，不再停在启动快照上；`background_result` 推送后台任务结束后的持久结果（`target_agent_id`、`message_index`、`content`），回合 `idle` 之后才落盘的 JOB RESULT 输出只走这个通道；`context_notice` 转发持久的上下文压力提醒（`level`、`message`、`message_index`），这类提醒在 headless 没有别的通道。
 - 新增 `compat.forced_tool_choice.auto_only` 选项：只支持 `tool_choice: "auto"` 的后端，遇到 `required`、`none` 或指名工具都会拒掉，打开它就把所有非 `auto` 的选择降级为后端默认。provider 层设置、按模型覆盖；显式写 `auto` 的请求照常发送。
-- headless 里携带状态的 envelope（事件循环推送、命令路径上的 `role_change` / `handoff_cancelled` 公告、以及 `status_response`）现在带单调递增的 `seq`，集成方可以丢掉被更新推送超车的 `status_response` 旧快照。首次推送前的快照也带非零版本号，每个进程单独计数。命令路径上关掉待决 confirm / question / handoff 但不发推送时，同样会抬高 `seq`，因此之后的 `status_response` 不会被待决还在时拷的旧快照超车。
+- headless 里携带状态的 envelope（事件循环推送、命令路径上的 `role_change` / `handoff_cancelled` 公告、以及 `status_response`）现在带单调递增的 `seq`，集成方可以丢掉被更新推送超车的 `status_response` 旧快照。首次推送前的快照也带非零版本号，每个进程单独计数。任何改了缓存状态的突变都会递增 `seq`，即使网关没订阅对应的推送、或者这次突变根本没有推送，因此之后的 `status_response` 不会被突变前拷的旧快照超车。
 
 ### 修复
 
 - 对话框浮层不再出现行背景错位：删除会话的 Cancel 操作、规则新增表单里的输入与 Scope/Action 行、handoff 拒绝理由的输入，以及选择类对话框里的多段行，都会留在对话框底色上，不再退回终端默认背景。
 - 静默的 LLM 重试不再冒充 headless `error`：它不产生 envelope，也不碰 `last_error` / `idle.last_outcome`，中途重试一次、最后恢复成功的回合仍会报 `completed`，不会卡在 `error` 上。真正失败时照常走后面的非静默错误上报。
-- shell 的窄 `allow` 规则现在对命令替换、进程替换和解析不了的引号也要求确认：命令里出现未引用的 `$(...)`、反引号（双引号里的也算）或 `<(...)` / `>(...)`，以及引号没闭合或结尾是反斜杠时，不再自动命中 `"git *"` 这类具体 `allow` pattern，而是继续匹配后续规则。普通的重定向目标不在此列。
-- 用 `Esc` 中断正在流式输出的回复时，回答不再被拆成两张卡片：中断前模型已经产出的文本会继续落进同一张卡，等这批尾部内容到了卡片才收口。
+- shell 的窄 `allow` 规则现在对命令替换、进程替换和解析不了的引号也要求确认：命令里出现单引号外的 `$(...)`、反引号（双引号里的也算），或任何引号外的 `<(...)` / `>(...)`，以及引号没闭合或结尾是反斜杠时，不再自动命中 `"git *"` 这类具体 `allow` pattern，而是继续匹配后续规则。普通的重定向目标不在此列。
+- 用 `Esc` 中断正在流式输出的回复时，回答不再被拆成两张卡片：中断前模型已经产出的文本会继续落进同一张卡，思考过程的后续增量也留在同一张思考卡，每张卡都等自己生产者的尾部内容到了才收口。
+- 上下文 checkpoint 省略掉某个成功工具结果的正文后，恢复出的卡片不再丢掉这次调用的结果：空白或被省略的结果会说明它已被 checkpoint 归档，不再直接打印占位文本；`edit` 卡片在应用后的 diff 被省略时回退显示请求的替换内容，改动过的文件也仍留在侧栏。
 
 ## 0.8.1 - 2026-09-16
 

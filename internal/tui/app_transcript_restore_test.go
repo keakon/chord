@@ -536,7 +536,7 @@ func TestSessionRestoreKeepsCompletedReplyAtTail(t *testing.T) {
 	}
 }
 
-func TestMessagesToBlocksRestoredEditWithoutToolDiffHidesSuccessResult(t *testing.T) {
+func TestMessagesToBlocksRestoredEditWithoutToolDiffFallsBackToArgsPreview(t *testing.T) {
 	nextID := 1
 	msgs := []message.Message{
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "patch-1", Name: tools.NameEdit, Args: []byte(`{"path":"foo.txt","patch":"@@\n-old\n+new\n"}`)}}},
@@ -571,6 +571,97 @@ func TestMessagesToBlocksRestoredEditWithoutToolDiffHidesSuccessResult(t *testin
 	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if strings.Contains(plain, "↳ Result:") || strings.Contains(plain, "Applied patch") {
 		t.Fatalf("restored Edit without ToolDiff should hide routine success result, got:\n%s", plain)
+	}
+	// The requested change stays readable even though the applied diff is gone.
+	for _, want := range []string{"Patch", "-old", "+new"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("restored Edit without ToolDiff should keep the requested change (missing %q), got:\n%s", want, plain)
+		}
+	}
+}
+
+func TestMessagesToBlocksRestoredElidedEditShowsRequestedReplacement(t *testing.T) {
+	nextID := 1
+	oldText := "reducer := newReducer(&Turn{ID: 1}, nil, false, nil)\n"
+	newText := "reducer := newReducer(&Turn{ID: 1}, nil, false, nil, 0)\n"
+	args, err := json.Marshal(map[string]any{"path": "internal/agent/sample_test.go", "old_string": oldText, "new_string": newText})
+	if err != nil {
+		t.Fatal(err)
+	}
+	msgs := []message.Message{
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "edit-1", Name: tools.NameEdit, Args: args}}},
+		{Role: "tool", ToolCallID: "edit-1", Content: message.FormatToolResultElided(1219), ToolStatus: string(agent.ToolResultStatusSuccess), ToolDiffAdded: 1, ToolDiffRemoved: 1},
+	}
+
+	blocks := messagesToBlocks(msgs, &nextID)
+	if len(blocks) != 1 {
+		t.Fatalf("len(blocks) = %d, want 1", len(blocks))
+	}
+	block := blocks[0]
+	if block.Diff != "" {
+		t.Fatalf("elided Edit should carry no applied diff, got %q", block.Diff)
+	}
+	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	for _, want := range []string{"- " + strings.TrimSuffix(oldText, "\n"), "+ " + strings.TrimSuffix(newText, "\n")} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("elided Edit card should preview the requested replacement (missing %q), got:\n%s", want, plain)
+		}
+	}
+	if strings.Contains(plain, "elided by checkpoint") {
+		t.Fatalf("elided Edit card leaked the internal marker, got:\n%s", plain)
+	}
+}
+
+func TestMessagesToBlocksRestoredElidedResultRendersArchiveNote(t *testing.T) {
+	nextID := 1
+	msgs := []message.Message{
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "shell-1", Name: tools.NameShell, Args: []byte(`{"command":"go test ./internal/agent/"}`)}}},
+		{Role: "tool", ToolCallID: "shell-1", Content: message.FormatToolResultElided(4096), ToolStatus: string(agent.ToolResultStatusSuccess)},
+	}
+
+	blocks := messagesToBlocks(msgs, &nextID)
+	if len(blocks) != 1 {
+		t.Fatalf("len(blocks) = %d, want 1", len(blocks))
+	}
+	if got := blocks[0].ResultContent; got != contextCheckpointArchiveNote {
+		t.Fatalf("restored ResultContent = %q, want the archive note", got)
+	}
+	// A routine successful shell card stays collapsed, so the note is only
+	// visible once the user expands it; the raw marker must never surface.
+	collapsed := stripANSI(strings.Join(blocks[0].Render(120, ""), "\n"))
+	if strings.Contains(collapsed, "elided by checkpoint") {
+		t.Fatalf("collapsed restored card leaked the internal elision marker, got:\n%s", collapsed)
+	}
+	blocks[0].ToolCallDetailExpanded = true
+	plain := stripANSI(strings.Join(blocks[0].Render(120, ""), "\n"))
+	if strings.Contains(plain, "elided by checkpoint") {
+		t.Fatalf("expanded restored card leaked the internal elision marker, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, contextCheckpointArchiveNote) {
+		t.Fatalf("expanded restored card should explain the archived result, got:\n%s", plain)
+	}
+}
+
+func TestRestoredElidedEditCopyKeepsReplacementAndArchiveNote(t *testing.T) {
+	nextID := 1
+	args := []byte(`{"path":"src/demo.go","old_string":"old\n","new_string":"new\n"}`)
+	msgs := []message.Message{
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "edit-2", Name: tools.NameEdit, Args: args}}},
+		{Role: "tool", ToolCallID: "edit-2", Content: message.FormatToolResultElided(946), ToolStatus: string(agent.ToolResultStatusSuccess), ToolDiffAdded: 1, ToolDiffRemoved: 1},
+	}
+
+	blocks := messagesToBlocks(msgs, &nextID)
+	if len(blocks) != 1 {
+		t.Fatalf("len(blocks) = %d, want 1", len(blocks))
+	}
+	copied := blockCopyContent(blocks[0])
+	for _, want := range []string{"## old_string", "## new_string", contextCheckpointArchiveNote} {
+		if !strings.Contains(copied, want) {
+			t.Fatalf("copied elided Edit should keep %q, got:\n%s", want, copied)
+		}
+	}
+	if strings.Contains(copied, "elided by checkpoint") {
+		t.Fatalf("copied elided Edit leaked the internal marker, got:\n%s", copied)
 	}
 }
 

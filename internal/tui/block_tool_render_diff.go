@@ -365,6 +365,14 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 		result = append(result, toolFieldSection(ToolResultExpandedStyle, "Diagnostics"))
 		result = append(result, renderLSPDiagnosticsLines(editSuccessDiagnosticsContent(b.stripResultNotes(b.ResultContent)), "    ", textWrap)...)
 	}
+	// A successful edit shows the change it applied. When the diff is missing —
+	// a durable checkpoint elides it together with the rest of the body, the
+	// diff was never persisted, or it could not be generated — the requested
+	// replacement still sits in the args, so the card falls back to the same
+	// preview a failed edit renders instead of losing what changed.
+	if b.ResultDone && b.ToolName == tools.NameEdit && !b.toolResultIsError() && !b.toolResultIsCancelled() && strings.TrimSpace(displayDiff) == "" {
+		result = appendEditArgsPreview(result, b, replaceArgs, hasReplaceArgs, syntaxPath, cardWidth-4)
+	}
 	if b.toolResultIsError() && b.ResultContent != "" {
 		switch b.ToolName {
 		case tools.NameApplyPatch:
@@ -383,11 +391,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 			}
 		case tools.NameEdit:
 			if strings.TrimSpace(displayDiff) == "" {
-				if hasReplaceArgs {
-					result = appendReplaceEditPreview(result, replaceArgs, syntaxPath, cardWidth-4)
-				} else {
-					result = appendEditPatchPreview(result, b.editPatchArgsJSON(), cardWidth-4)
-				}
+				result = appendEditArgsPreview(result, b, replaceArgs, hasReplaceArgs, syntaxPath, cardWidth-4)
 			}
 			result = append(result, toolFieldSection(ErrorStyle, "Error"))
 			result = append(result, renderLSPDiagnosticsLines(toolErrorDisplayContent(b.stripResultNotes(b.ResultContent)), "    ", textWrap)...)
@@ -605,6 +609,15 @@ func (b *Block) applyPatchDiffSectionDisplay(targets []tools.ApplyPatchDisplayTa
 	default:
 		return "M", oldPath, oldPath
 	}
+}
+
+// appendEditArgsPreview renders the requested edit when no diff is available,
+// preferring the replace args preview and falling back to the patch preview.
+func appendEditArgsPreview(result []string, b *Block, replaceArgs replaceEditArgs, hasReplaceArgs bool, syntaxPath string, width int) []string {
+	if hasReplaceArgs {
+		return appendReplaceEditPreview(result, replaceArgs, syntaxPath, width)
+	}
+	return appendEditPatchPreview(result, b.editPatchArgsJSON(), width)
 }
 
 func appendEditPatchPreview(result []string, argsJSON string, width int) []string {

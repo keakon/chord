@@ -207,6 +207,37 @@ func TestLegacyPatchChangedFilesRestoreFromTranscript(t *testing.T) {
 	}
 }
 
+func TestElidedEditDiffRestoresSidebarFromCounts(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 30)
+	m.sidebar.Update(nil, "main", "builder")
+	m.rebuildSidebarFileEditsFromMessages([]message.Message{
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "edit-1", Name: tools.NameEdit, Args: []byte(`{"path":"src/demo.go","old_string":"old","new_string":"new"}`)}}},
+		{Role: "tool", ToolCallID: "edit-1", ToolStatus: string(agent.ToolResultStatusSuccess), Content: message.FormatToolResultElided(601), ToolDiffAdded: 1, ToolDiffRemoved: 1},
+	})
+
+	edits := m.sidebar.CurrentAgentFiles()
+	if len(edits) != 1 {
+		t.Fatalf("restored elided edit files = %+v, want src/demo.go", edits)
+	}
+	assertFileEdit(t, edits[0], "src/demo.go", 1, 1, false)
+}
+
+func TestElidedEditDiffRestoresSidebarFromFileState(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 30)
+	m.sidebar.Update(nil, "main", "builder")
+	m.rebuildSidebarFileEditsFromMessages([]message.Message{
+		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "edit-1", Name: tools.NameEdit, Args: []byte(`{"path":"src/demo.go","old_string":"old","new_string":"new"}`)}}},
+		{Role: "tool", ToolCallID: "edit-1", ToolStatus: string(agent.ToolResultStatusSuccess), Content: message.FormatToolResultElided(601),
+			FileState: &message.ToolFileState{Changes: []message.ToolFileChange{{Path: "src/demo.go", Added: 1, Removed: 1}}}},
+	})
+
+	edits := m.sidebar.CurrentAgentFiles()
+	if len(edits) != 1 {
+		t.Fatalf("restored elided edit files = %+v, want src/demo.go", edits)
+	}
+	assertFileEdit(t, edits[0], "src/demo.go", 1, 1, false)
+}
+
 func assertFileEdit(t *testing.T, got FileEdit, path string, added, removed int, deleted bool) {
 	t.Helper()
 	if got.Path != path || got.Added != added || got.Removed != removed || got.Deleted != deleted {

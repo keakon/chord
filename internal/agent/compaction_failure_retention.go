@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"fmt"
 	"slices"
 	"strings"
 
@@ -201,7 +200,7 @@ func elidedToolResultContent(msg message.Message) string {
 	if size == 0 {
 		return ""
 	}
-	return fmt.Sprintf("[result elided by checkpoint: %d bytes]", size)
+	return message.FormatToolResultElided(size)
 }
 
 // retainedBatchBytes is what an already-elided batch costs, in the same units

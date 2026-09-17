@@ -252,7 +252,12 @@ func (m *Model) rebuildSidebarFileEditsFromMessages(msgs []message.Message) {
 			}
 			continue
 		}
-		if msg.ToolDiff == "" {
+		// A checkpoint elides the stored diff of the successful siblings in the
+		// failure batch it keeps in the transcript. The changed-line counts and
+		// the tracked file state survive, so a mutation without a diff still
+		// counts as an edit instead of dropping out of the sidebar.
+		if msg.ToolDiff == "" && msg.ToolDiffAdded == 0 && msg.ToolDiffRemoved == 0 {
+			m.addSidebarFileState("main", msg.FileState)
 			continue
 		}
 		for _, path := range extractTranscriptToolPaths(call.Args) {
@@ -698,6 +703,21 @@ func applyTaskHandleFromResult(block *Block) {
 	}
 }
 
+// contextCheckpointArchiveNote replaces the checkpoint elision marker in the
+// transcript. The marker is written for the model (it must know the body sits
+// in the archive); printed verbatim as card body text it would surface internal
+// wording in the conversation.
+const contextCheckpointArchiveNote = "[result archived by context checkpoint]"
+
+// toolResultContentForDisplay maps the checkpoint elision marker to the
+// user-facing note, leaving every other result untouched.
+func toolResultContentForDisplay(content string) string {
+	if _, ok := message.ToolResultElidedBytes(content); !ok {
+		return content
+	}
+	return contextCheckpointArchiveNote
+}
+
 func messagesToBlocks(msgs []message.Message, nextID *int) []*Block {
 	return messagesToBlocksWithThinkingTranslations(msgs, nextID, nil)
 }
@@ -892,7 +912,7 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 		case "tool":
 			if b, ok := toolIDToBlock[msg.ToolCallID]; ok {
 				applyStableToolResultToBlock(b, transcriptToolResult{
-					result:         msg.Content,
+					result:         toolResultContentForDisplay(msg.Content),
 					payload:        msg.ToolPayload,
 					notes:          msg.ToolNotes,
 					status:         toolResultStatusFromRestoredMessage(msg),

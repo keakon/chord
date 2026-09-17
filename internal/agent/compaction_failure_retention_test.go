@@ -2,7 +2,6 @@ package agent
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -149,7 +148,7 @@ func TestCheckpointRetainedFailureRecordsKeepsWholeParallelBatch(t *testing.T) {
 	// The successful sibling keeps its place in the pair but not its body: the
 	// archive carries the output, and the retained copy only has to explain
 	// where it went. The failure keeps every byte.
-	if want := "[result elided by checkpoint: 13 bytes]"; got[1].Content != want {
+	if want := message.FormatToolResultElided(13); got[1].Content != want {
 		t.Fatalf("successful sibling content = %q, want %q", got[1].Content, want)
 	}
 	if got[2].Content != "exit status 1" {
@@ -281,7 +280,7 @@ func TestElideRetainedResultDropsBinaryPayloadEntirely(t *testing.T) {
 	// The marker must account for what was removed, including the binary bytes
 	// the estimator charged through PayloadBytes.
 	wantSize := len("here is the image") + len(payload)
-	if want := fmt.Sprintf("[result elided by checkpoint: %d bytes]", wantSize); got.Content != want {
+	if want := message.FormatToolResultElided(wantSize); got.Content != want {
 		t.Fatalf("elided content = %q, want %q", got.Content, want)
 	}
 	if bytes := ctxmgr.MessagePayloadBytes([]message.Message{got}); bytes != len(got.Content) {
@@ -313,7 +312,7 @@ func TestElidedToolResultContentReportsRemovedBytesOnce(t *testing.T) {
 
 	want := len(msg.Content) + len(diff)
 	got := elideRetainedResult(msg)
-	if expected := fmt.Sprintf("[result elided by checkpoint: %d bytes]", want); got.Content != expected {
+	if expected := message.FormatToolResultElided(want); got.Content != expected {
 		t.Fatalf("elided content = %q, want %q (Content already contains ToolPayload)", got.Content, expected)
 	}
 	if got.ToolPayload != "" || got.ToolDiff != "" {
