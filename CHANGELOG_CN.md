@@ -6,13 +6,14 @@
 
 ### 新功能
 
-- headless 控制面新增三个可订阅推送：`session_switched` 在进程不重启、直接换会话时（执行 handoff plan、`/resume <id>`）广播新的 `session_id`，`status_response.session_id` 也改成跟当前实际会话，不再停在启动快照上；`background_result` 推送后台任务结束后的持久结果（`target_agent_id`、`message_index`、`content`），回合 `idle` 之后才落盘的 JOB RESULT 输出只走这个通道；`context_notice` 转发持久的上下文压力提醒（`level`、`message`、`message_index`），这类提醒在 headless 没有别的通道。
+- headless 控制面新增三个可订阅推送：`session_switched` 在进程不重启、直接换会话时（执行 handoff plan、`/resume <id>`、`/new`）广播新的 `session_id`，`status_response.session_id` 也改成跟当前实际会话，不再停在启动快照上；`background_result` 推送后台任务结束后的持久结果（`target_agent_id`、`message_index`、`content`），回合 `idle` 之后才落盘的 JOB RESULT 输出只走这个通道；`context_notice` 转发持久的上下文压力提醒（`level`、`message`、`message_index`），这类提醒在 headless 没有别的通道。
 - 新增 `compat.forced_tool_choice.auto_only` 选项：只支持 `tool_choice: "auto"` 的后端，遇到 `required`、`none` 或指名工具都会拒掉，打开它就把所有非 `auto` 的选择降级为后端默认。provider 层设置、按模型覆盖；显式写 `auto` 的请求照常发送。
+- headless 里携带状态的 envelope（事件循环推送、命令路径上的 `role_change` / `handoff_cancelled` 公告、以及 `status_response`）现在带单调递增的 `seq`，集成方可以丢掉被更新推送超车的 `status_response` 旧快照。首次推送前的快照也带非零版本号，每个进程单独计数。命令路径上关掉待决 confirm / question / handoff 但不发推送时，同样会抬高 `seq`，因此之后的 `status_response` 不会被待决还在时拷的旧快照超车。
 
 ### 修复
 
 - 对话框浮层不再出现行背景错位：删除会话的 Cancel 操作、规则新增表单里的输入与 Scope/Action 行、handoff 拒绝理由的输入，以及选择类对话框里的多段行，都会留在对话框底色上，不再退回终端默认背景。
-- 静默的 LLM 重试不再冒充 headless `error`：它不产生 `envelope`，也不碰 `last_error` / `idle.last_outcome`，中途重试一次、最后恢复成功的回合仍会报 `completed`，不会卡在 `error` 上。真正失败时照常走后面的非静默错误上报。
+- 静默的 LLM 重试不再冒充 headless `error`：它不产生 envelope，也不碰 `last_error` / `idle.last_outcome`，中途重试一次、最后恢复成功的回合仍会报 `completed`，不会卡在 `error` 上。真正失败时照常走后面的非静默错误上报。
 - shell 的窄 `allow` 规则现在对命令替换、进程替换和解析不了的引号也要求确认：命令里出现未引用的 `$(...)`、反引号（双引号里的也算）或 `<(...)` / `>(...)`，以及引号没闭合或结尾是反斜杠时，不再自动命中 `"git *"` 这类具体 `allow` pattern，而是继续匹配后续规则。普通的重定向目标不在此列。
 
 ## 0.8.1 - 2026-09-16

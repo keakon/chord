@@ -26,6 +26,10 @@ import (
 
 const (
 	headlessStdinMaxLineBytes = 1024 * 1024
+	// headlessGenesisSeq is the version of state that has never been pushed.
+	// Status snapshots copy it; the first push bumps past it so a snapshot
+	// taken before that push is strictly older.
+	headlessGenesisSeq uint64 = 1
 )
 
 type headlessStdinLine struct {
@@ -106,6 +110,19 @@ type headlessState struct {
 	// session_switched push; the cached value alone never counts as the
 	// gateway having seen the new session.
 	sessionID string
+	// seq is a monotonic version counter for emitted state. Genesis is 1, so a
+	// status_response copied before any push still has a nonzero seq on the
+	// wire (uint64 0 would be omitted by json omitempty and look unversioned).
+	// Pushes bump under mu — both the event-loop batches from
+	// filterHeadlessEvent and command-path announcements such as role_change
+	// and handoff_cancelled. Any cached-state mutation bumps the same way,
+	// even when the gateway did not subscribe to the corresponding push (or
+	// the mutation has no push at all, like auto-dismissing a pending
+	// confirm), so a later snapshot is strictly newer than one copied before
+	// the mutation. status_response snapshots read the current value without
+	// bumping: a snapshot whose seq is smaller than an already-seen version
+	// was copied before that mutation and must not be applied.
+	seq uint64
 
 	// subscriptions is the set of event types the gateway wants to receive.
 	// If nil, no subscribe command has been received and all event types are
@@ -115,6 +132,8 @@ type headlessState struct {
 }
 
 // isSubscribed returns true if the given event type should be forwarded.
+// Caller must hold s.mu: subscribe replaces the map while the event loop
+// and command path read it.
 func (s *headlessState) isSubscribed(eventType string) bool {
 	if s.subscriptions == nil {
 		return true // default before subscribe: all events
@@ -122,9 +141,31 @@ func (s *headlessState) isSubscribed(eventType string) bool {
 	return s.subscriptions[eventType]
 }
 
+// stampHeadlessSeq versions state-carrying envelopes. Caller must hold s.mu.
+// Snapshots (bump=false) reuse the current version so a later push can
+// overtake them; pushes (bump=true) allocate a newer version first.
+func (s *headlessState) stampHeadlessSeq(bump bool, envs ...*headlessEnvelope) uint64 {
+	if s.seq < headlessGenesisSeq {
+		s.seq = headlessGenesisSeq
+	}
+	if bump {
+		s.seq++
+	}
+	for _, env := range envs {
+		if env != nil {
+			env.Seq = s.seq
+		}
+	}
+	return s.seq
+}
+
 // headlessEnvelope is the JSON envelope for stdio protocol messages.
+// Seq carries the state version for state-carrying envelopes (event-loop
+// pushes, command-path announcements, and status_response snapshots); it is
+// omitted everywhere else.
 type headlessEnvelope struct {
 	Type    string `json:"type"`
+	Seq     uint64 `json:"seq,omitempty"`
 	Payload any    `json:"payload,omitempty"`
 }
 
@@ -259,16 +300,26 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 	defer state.mu.Unlock()
 
 	var out []*headlessEnvelope
+	// mutated tracks whether cached state changed: any mutation must bump seq
+	// even when no envelope is emitted (unsubscribed), so later
+	// status_response snapshots stay strictly newer than earlier ones.
+	mutated := false
+	// touch records a cached-state mutation: it marks the state dirty for the
+	// seq bump above and timestamps the change.
+	touch := func() {
+		mutated = true
+		state.updatedAt = time.Now()
+	}
 
 	switch e := ev.(type) {
 	case agent.AgentActivityEvent:
 		if e.Type == agent.ActivityIdle {
 			return nil // filtered; idle is expressed via GlobalIdleEvent
 		}
+		touch()
 		state.busy = true
 		state.phase = string(e.Type)
 		state.phaseDetail = e.Detail
-		state.updatedAt = time.Now()
 		if e.Type == agent.ActivityCompacting {
 			// Don't modify pendingOutcome for compacting
 		} else if state.pendingOutcome != "error" && state.pendingOutcome != "cancelled" {
@@ -282,10 +333,11 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 			}})
 		}
 	case agent.CompactionStatusEvent:
-		state.updatedAt = time.Now()
+		touch()
 		// The control plane observes started and terminal outcomes only;
 		// internal progress telemetry stays on the TUI slot.
 		if e.Status == agent.CompactionStatusProgress {
+			state.stampHeadlessSeq(true)
 			return nil
 		}
 		if state.isSubscribed("compaction_status") {
@@ -298,7 +350,7 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 			}})
 		}
 	case agent.AssistantMessageEvent:
-		state.updatedAt = time.Now()
+		touch()
 		if strings.TrimSpace(e.Text) == "" {
 			log.Warnf("headless observed empty assistant_message agent_id=%v tool_calls=%v", e.AgentID, e.ToolCalls)
 		} else {
@@ -315,7 +367,7 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 			}})
 		}
 	case agent.AgentStartedEvent:
-		state.updatedAt = time.Now()
+		touch()
 		if state.isSubscribed("agent_started") {
 			out = append(out, &headlessEnvelope{Type: "agent_started", Payload: map[string]string{
 				"agent_id":          e.AgentID,
@@ -328,7 +380,7 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 			}})
 		}
 	case agent.AgentNotifyEvent:
-		state.updatedAt = time.Now()
+		touch()
 		if state.isSubscribed("agent_notify") {
 			payload := map[string]string{
 				"agent_id":        e.AgentID,
@@ -350,8 +402,9 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 			out = append(out, &headlessEnvelope{Type: "agent_notify", Payload: payload})
 		}
 	case agent.IdleEvent:
-		state.updatedAt = time.Now()
+		touch()
 	case agent.GlobalIdleEvent:
+		touch()
 		state.busy = false
 		state.phase = ""
 		state.phaseDetail = ""
@@ -361,7 +414,6 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 		state.pendingConfirm = nil
 		state.pendingQuestion = nil
 		state.lastError = ""
-		state.updatedAt = time.Now()
 		if state.isSubscribed("idle") {
 			out = append(out, &headlessEnvelope{Type: "idle", Payload: map[string]any{
 				"last_outcome":               outcome,
@@ -386,18 +438,18 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 			}
 		}
 		changed := state.lastBroadcastRole != role
+		touch()
 		state.role = role
 		if changed {
 			state.lastBroadcastRole = role
 		}
-		state.updatedAt = time.Now()
 		if changed && state.isSubscribed("role_change") {
 			out = append(out, &headlessEnvelope{Type: "role_change", Payload: map[string]string{
 				"role": role,
 			}})
 		}
 	case agent.NotificationEvent:
-		state.updatedAt = time.Now()
+		touch()
 		if state.isSubscribed("notification") {
 			out = append(out, &headlessEnvelope{Type: "notification", Payload: map[string]string{
 				"reason":  e.Reason,
@@ -408,21 +460,21 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 		if e.Silent {
 			// Silent retry telemetry never reaches the user: the TUI records
 			// it in the error panel without settling cards or rendering an
-			// error block, and a terminal failure is always followed by a
-			// non-silent error. Promoting it here would flip last_outcome to
-			// "error" for turns that recover and complete.
-			// Invariant: every silent-only sequence is eventually followed by
-			// a non-silent error on terminal failure, so dropping the event
-			// here is safe. Any new path that emits only silent errors must
-			// also emit a non-silent terminal error.
-			state.updatedAt = time.Now()
+			// error block. Promoting it here would flip last_outcome to
+			// "error" for turns that recover and complete. Dropping it is
+			// safe because every silent-only sequence is eventually followed
+			// by a non-silent error on terminal failure; any new path that
+			// emits only silent errors must also emit a non-silent terminal
+			// error.
+			touch()
+			state.stampHeadlessSeq(true)
 			return nil
 		}
+		touch()
 		state.pendingOutcome = "error"
 		if e.Err != nil {
 			state.lastError = e.Err.Error()
 		}
-		state.updatedAt = time.Now()
 		if state.isSubscribed("error") {
 			out = append(out, &headlessEnvelope{Type: "error", Payload: map[string]string{
 				"message":  state.lastError,
@@ -430,12 +482,12 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 			}})
 		}
 	case agent.ConfirmRequestEvent:
+		touch()
 		doneReason, doneReport := parseHeadlessDoneArgs(e.ArgsJSON)
 		if strings.TrimSpace(e.DoneReport) != "" {
 			doneReport = strings.TrimSpace(e.DoneReport)
 		}
 		state.pendingConfirm = &headlessConfirmPayload{ToolName: e.ToolName, ArgsJSON: e.ArgsJSON, RequestID: e.RequestID, TimeoutMS: e.Timeout.Milliseconds(), NeedsApproval: e.NeedsApproval, AlreadyAllowed: e.AlreadyAllowed, NeedsApprovalRules: e.NeedsApprovalRules, AlreadyAllowedRules: e.AlreadyAllowedRules, DoneReport: doneReport, DoneReason: doneReason, AgentID: e.AgentID}
-		state.updatedAt = time.Now()
 		if state.isSubscribed("confirm_request") {
 			out = append(out, &headlessEnvelope{Type: "confirm_request", Payload: map[string]any{
 				"tool_name":             e.ToolName,
@@ -452,8 +504,8 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 			}})
 		}
 	case agent.QuestionRequestEvent:
+		touch()
 		state.pendingQuestion = &headlessQuestionPayload{ToolName: e.ToolName, Header: e.Header, Question: e.Question, Options: e.Options, OptionDetails: e.OptionDetails, DefaultAnswer: e.DefaultAnswer, Multiple: e.Multiple, RequestID: e.RequestID, TimeoutMS: e.Timeout.Milliseconds(), AgentID: e.AgentID}
-		state.updatedAt = time.Now()
 		if state.isSubscribed("question_request") {
 			out = append(out, &headlessEnvelope{Type: "question_request", Payload: map[string]any{
 				"tool_name":      e.ToolName,
@@ -475,6 +527,7 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 		// default the runtime would reject on approval.
 		// Agent options and plan file contents were loaded before acquiring
 		// state.mu; only the cache update runs under the lock.
+		touch()
 		payload := &headlessHandoffPayload{
 			RequestID: e.RequestID,
 			PlanPath:  e.PlanPath,
@@ -483,12 +536,11 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 			PlanError: preHandoffPlanError,
 		}
 		state.pendingHandoff = payload
-		state.updatedAt = time.Now()
 		if state.isSubscribed("handoff_request") {
 			out = append(out, &headlessEnvelope{Type: "handoff_request", Payload: payload})
 		}
 	case agent.HandoffCancelledEvent:
-		state.updatedAt = time.Now()
+		touch()
 		// A new turn or session switch discarded the pending handoff before the
 		// client decided. Only clear the cached request when this cancellation
 		// targets it (an empty RequestID cancels whatever is pending); a stale
@@ -505,7 +557,7 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 			}})
 		}
 	case agent.AgentDoneEvent:
-		state.updatedAt = time.Now()
+		touch()
 		if state.isSubscribed("agent_done") {
 			out = append(out, &headlessEnvelope{Type: "agent_done", Payload: map[string]string{
 				"agent_id":        e.AgentID,
@@ -521,7 +573,7 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 			out = append(out, &headlessEnvelope{Type: "info", Payload: map[string]string{"message": e.Message, "agent_id": e.AgentID}})
 		}
 	case agent.ToolResultEvent:
-		state.updatedAt = time.Now()
+		touch()
 		if strings.EqualFold(e.Name, tools.NameDone) && e.AgentID == "" {
 			reason, report := parseHeadlessDoneArgs(e.ArgsJSON)
 			if strings.TrimSpace(e.DoneReport) != "" {
@@ -532,12 +584,12 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 			}
 		}
 	case agent.StreamRollbackEvent:
-		state.updatedAt = time.Now()
+		touch()
 		if state.isSubscribed("assistant_rollback") {
 			out = append(out, &headlessEnvelope{Type: "assistant_rollback", Payload: map[string]string{"reason": e.Reason, "agent_id": e.AgentID}})
 		}
 	case agent.TodosUpdatedEvent:
-		state.updatedAt = time.Now()
+		touch()
 		if state.isSubscribed("todos") {
 			out = append(out, &headlessEnvelope{Type: "todos", Payload: map[string]any{"todos": e.Todos}})
 		}
@@ -553,7 +605,7 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 		// committed state and announce the change explicitly. Restores that
 		// keep the session (startup replay, durable compaction rewrite) only
 		// refresh the timestamp.
-		state.updatedAt = time.Now()
+		touch()
 		sessionID := headlessBackendSessionID(backend)
 		if sessionID == "" || sessionID == state.sessionID {
 			// No committed id to adopt, or the id is already the tracked one:
@@ -571,7 +623,7 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 		// the only delivery channel for the JOB RESULT card: background output
 		// typically lands after the turn is idle, so no later
 		// assistant_message summarizes it.
-		state.updatedAt = time.Now()
+		touch()
 		if state.isSubscribed("background_result") {
 			out = append(out, &headlessEnvelope{Type: "background_result", Payload: map[string]any{
 				"target_agent_id": e.TargetAgentID,
@@ -585,7 +637,7 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 		// fire-and-forget, so there is no card state for
 		// ContextNoticeClearedEvent to retract; the cleared event stays
 		// TUI-only by design.
-		state.updatedAt = time.Now()
+		touch()
 		if state.isSubscribed("context_notice") {
 			out = append(out, &headlessEnvelope{Type: "context_notice", Payload: map[string]any{
 				"level":         e.Level,
@@ -595,8 +647,12 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 		}
 	}
 	if len(out) == 0 {
+		if mutated {
+			state.stampHeadlessSeq(true)
+		}
 		return nil
 	}
+	state.stampHeadlessSeq(true, out...)
 	return out
 }
 
@@ -818,10 +874,8 @@ func runHeadlessWithDeps(deps headlessRunDeps) error {
 	go out.run()
 	defer out.close()
 
-	state := &headlessState{}
-	state.updatedAt = time.Now()
 	sessionID := filepath.Base(ac.SessionDir)
-	state.sessionID = sessionID
+	state := &headlessState{sessionID: sessionID, updatedAt: time.Now()}
 
 	// Emit a one-time ready marker so gateways can detect successful init.
 	readyPayload := map[string]any{
@@ -899,7 +953,7 @@ func runHeadlessWithDeps(deps headlessRunDeps) error {
 				})
 				continue
 			}
-			handleHeadlessCommand(hcmd, backend, state, out, sessionID)
+			handleHeadlessCommand(hcmd, backend, state, out)
 		}
 	}
 }
@@ -1155,12 +1209,24 @@ func handleHeadlessRoleCommand(cmd headlessCommand, backend headlessRoleBackend,
 		if announce {
 			state.lastBroadcastRole = role
 		}
+		state.updatedAt = time.Now()
+		var change *headlessEnvelope
+		if announce {
+			if state.isSubscribed("role_change") {
+				change = &headlessEnvelope{Type: "role_change", Payload: map[string]string{
+					"role": role,
+				}}
+				state.stampHeadlessSeq(true, change)
+			} else {
+				// The role cache moved even though no envelope is emitted:
+				// bump so later status_response snapshots stay ordered.
+				state.stampHeadlessSeq(true)
+			}
+		}
 		state.mu.Unlock()
 		emitHeadlessRoleResponse(out, true, "", role, headlessRoleItems(backend))
-		if announce && state.isSubscribed("role_change") {
-			out.emit(&headlessEnvelope{Type: "role_change", Payload: map[string]string{
-				"role": role,
-			}})
+		if change != nil {
+			out.emit(change)
 		}
 	default:
 		emitHeadlessRoleResponse(out, false, "unsupported role action: "+cmd.Action, "", nil)
@@ -1171,6 +1237,10 @@ func handleHeadlessRoleCommand(cmd headlessCommand, backend headlessRoleBackend,
 // from the backend on first query. Startup chooses the role during session
 // restore, which headlessState cannot know in advance, so the cache starts
 // empty and converges on the first RoleChangedEvent or status query.
+//
+// The returned value is not a seq-consistent snapshot: a RoleChangedEvent can
+// bump seq after this returns. Status re-reads state.role under the same lock
+// as stampHeadlessSeq.
 func headlessCurrentRole(backend headlessBackend, state *headlessState) string {
 	state.mu.Lock()
 	role := state.role
@@ -1183,13 +1253,13 @@ func headlessCurrentRole(backend headlessBackend, state *headlessState) string {
 		return ""
 	}
 	role = roleBackend.CurrentRole()
-	if role != "" {
-		state.mu.Lock()
-		if state.role == "" {
-			state.role = role
-		}
-		state.mu.Unlock()
+	state.mu.Lock()
+	if state.role == "" {
+		state.role = role
+	} else {
+		role = state.role
 	}
+	state.mu.Unlock()
 	return role
 }
 
@@ -1206,7 +1276,7 @@ func emitHeadlessLocalShellResult(out *stdoutWriter, command, output string, err
 }
 
 // handleHeadlessCommand processes a single command from stdin.
-func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *headlessState, out *stdoutWriter, sessionID string) {
+func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *headlessState, out *stdoutWriter) {
 	switch cmd.Type {
 	case "subscribe":
 		subs := make(map[string]bool, len(cmd.Events))
@@ -1226,12 +1296,14 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 		})
 
 	case "status":
-		currentRole := headlessCurrentRole(backend, state)
+		// Fill an empty role cache before the snapshot. CurrentRole can block,
+		// so it stays outside state.mu. The snapshot below re-reads state.role
+		// under the same lock as seq so a concurrent RoleChangedEvent cannot
+		// bind an older role to a newer version.
+		headlessCurrentRole(backend, state)
 		state.mu.Lock()
-		sid := sessionID
-		if state.sessionID != "" {
-			sid = state.sessionID
-		}
+		currentRole := state.role
+		sid := state.sessionID
 		busy := state.busy
 		phase := state.phase
 		phaseDetail := state.phaseDetail
@@ -1241,9 +1313,11 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 		lastError := state.lastError
 		lastOutcome := state.lastOutcome
 		updatedAt := state.updatedAt
+		seq := state.stampHeadlessSeq(false)
 		state.mu.Unlock()
 		out.emit(headlessEnvelope{
 			Type: "status_response",
+			Seq:  seq,
 			Payload: map[string]any{
 				"session_id":       sid,
 				"busy":             busy,
@@ -1306,8 +1380,12 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 			state.mu.Lock()
 			if state.pendingConfirm != nil && state.pendingConfirm.RequestID == pendingConfirm.RequestID {
 				state.pendingConfirm = nil
+				state.updatedAt = time.Now()
+				// No cancelled envelope exists for confirm, but the cache
+				// change still needs a newer version so a status snapshot
+				// copied while the request was pending cannot restore it.
+				state.stampHeadlessSeq(true)
 			}
-			state.updatedAt = time.Now()
 			state.mu.Unlock()
 		}
 		if pendingQuestion != nil {
@@ -1316,8 +1394,9 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 			state.mu.Lock()
 			if state.pendingQuestion != nil && state.pendingQuestion.RequestID == pendingQuestion.RequestID {
 				state.pendingQuestion = nil
+				state.updatedAt = time.Now()
+				state.stampHeadlessSeq(true)
 			}
-			state.updatedAt = time.Now()
 			state.mu.Unlock()
 		}
 		if pendingHandoff != nil {
@@ -1326,20 +1405,30 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 				hb.ResolveHandoff(pendingHandoff.RequestID, "cancel", "", "")
 			}
 			state.mu.Lock()
+			cleared := false
 			if state.pendingHandoff != nil && state.pendingHandoff.RequestID == pendingHandoff.RequestID {
 				state.pendingHandoff = nil
+				cleared = true
+				state.updatedAt = time.Now()
 			}
-			state.updatedAt = time.Now()
-			subscribed := state.isSubscribed("handoff_cancelled")
+			var cancelled *headlessEnvelope
+			if state.isSubscribed("handoff_cancelled") {
+				cancelled = &headlessEnvelope{Type: "handoff_cancelled", Payload: map[string]string{
+					"request_id": pendingHandoff.RequestID,
+					"reason":     headlessHandoffCancelledReasonSuperseded,
+				}}
+			}
+			if cleared || cancelled != nil {
+				// Bump even without a cancelled envelope: the pending cache
+				// changed, so a status snapshot copied earlier must not restore it.
+				state.stampHeadlessSeq(true, cancelled)
+			}
 			state.mu.Unlock()
 			// The client still holds this request as pending; tell subscribers it
 			// is gone before the new message starts a fresh turn. The emit happens
 			// outside the lock so stdout backpressure never stalls state.mu.
-			if subscribed {
-				out.emit(headlessEnvelope{Type: "handoff_cancelled", Payload: map[string]string{
-					"request_id": pendingHandoff.RequestID,
-					"reason":     headlessHandoffCancelledReasonSuperseded,
-				}})
+			if cancelled != nil {
+				out.emit(cancelled)
 			}
 		}
 		backend.SendUserMessage(content)
@@ -1408,8 +1497,9 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 		state.mu.Lock()
 		if state.pendingHandoff != nil && state.pendingHandoff.RequestID == pending.RequestID {
 			state.pendingHandoff = nil
+			state.updatedAt = time.Now()
+			state.stampHeadlessSeq(true)
 		}
-		state.updatedAt = time.Now()
 		state.mu.Unlock()
 
 	case "confirm":
@@ -1435,8 +1525,9 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 		state.mu.Lock()
 		if state.pendingConfirm != nil && state.pendingConfirm.RequestID == cmd.RequestID {
 			state.pendingConfirm = nil
+			state.updatedAt = time.Now()
+			state.stampHeadlessSeq(true)
 		}
-		state.updatedAt = time.Now()
 		state.mu.Unlock()
 
 	case "question":
@@ -1444,8 +1535,9 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 		state.mu.Lock()
 		if state.pendingQuestion != nil && state.pendingQuestion.RequestID == cmd.RequestID {
 			state.pendingQuestion = nil
+			state.updatedAt = time.Now()
+			state.stampHeadlessSeq(true)
 		}
-		state.updatedAt = time.Now()
 		state.mu.Unlock()
 
 	case "cancel":
@@ -1453,6 +1545,7 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 		state.mu.Lock()
 		state.pendingOutcome = "cancelled"
 		state.updatedAt = time.Now()
+		state.stampHeadlessSeq(true)
 		state.mu.Unlock()
 
 	default:

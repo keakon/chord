@@ -34,6 +34,8 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 { "type": "<event-type>", "payload": { ... } }
 ```
 
+携带状态的 envelope（事件循环推送、命令路径上的 `role_change` / `handoff_cancelled` 公告、以及 `status_response` 快照）会多带一个单调递增的 `seq`（`{ "type": "<event-type>", "seq": 12, "payload": { ... } }`）。推送按 `seq` 顺序发出，但 `status_response` 快照是在命令路径上拷贝再发出的，所以它可能比之后更新的推送晚到。任何改了缓存状态的突变都会递增 `seq`，即使网关没订阅对应的推送、或者这次突变根本没有推送（`send` 自动关掉待决 confirm / question，或显式回复 `confirm` / `question` / `handoff`），因此之后的 `status_response` 一定比突变前拷的那份新。把 `status_response` 合并进缓存状态的集成方，必须丢掉 `seq` 比已见 `seq` 更小的快照。每条 `status_response` 都带非零的 `seq`，包括首次推送前的快照。版本号只在当前进程内有效；新进程发出 `ready` 时，清空已记录的最大版本号。
+
 你收到的第一行一定是 `{"type": "ready", ...}`；在它之前不要发送其他命令。
 
 ## 先跑通一次交互
@@ -80,6 +82,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 ```json
 {
   "type": "status_response",
+  "seq": 1,
   "payload": {
     "session_id": "20260508120000000",
     "busy": false,
@@ -96,7 +99,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 }
 ```
 
-`session_id` 跟的是当前实际会话，不是启动时的快照。进程不重启、直接换会话时（执行 handoff plan、`/resume <id>`、`/new`），Chord 会更新这个跟踪值，并用一条显式的 `session_switched` 推送告诉订阅方；光靠缓存值变化不算网关已经看到新会话。会话没换的恢复（启动回放、持久压缩重写）只刷新时间戳，不推送。即使没订阅 `session_switched`，跟踪值照样会更新，所以 `status_response` 永远报实际运行的那个会话。
+`session_id` 跟的是当前实际会话，不是启动时的快照。进程不重启、直接换会话时（执行 handoff plan、`/resume <id>`、`/new`），Chord 会更新这个跟踪值，并用一条显式的 `session_switched` 推送告诉订阅方；仅凭缓存值变化不能视为网关已看到新会话。会话没换的恢复（启动回放、持久压缩重写）只刷新时间戳，不推送。即使没订阅 `session_switched`，跟踪值照样会更新，所以 `status_response` 永远报实际运行的那个会话。
 
 ### `send`
 
@@ -274,7 +277,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 
 如果 stdin 上的单行输入超过协议行长度限制，Chord 会输出带 `code: "stdin_line_too_long"` 的 `error` envelope，并继续读取后续行。集成方应在存在 `code` 时用它做错误分类，把 `message` 作为面向人的诊断信息。
 
-静默重试不会推送。TUI 只记在错误面板里的那次重试不会产生 `error` `envelope`，也不会动 `last_error` / `last_outcome`（`status_response` 与 `idle` 里看到的）——中途重试一次、最后恢复成功的回合，`idle` 里看到的仍然是 `completed`。真正失败时总会跟一条非静默错误，集成方只管看那一条。
+静默重试不会推送。TUI 只记在错误面板里的那次重试不会产生 `error` envelope，也不会动 `last_error` / `last_outcome`（`status_response` 与 `idle` 里看到的）——中途重试一次、最后恢复成功的回合，`idle` 里看到的仍然是 `completed`。真正失败时总会跟一条非静默错误，集成方只管看那一条。
 
 纯工具调用轮次（包括 SubAgent 调用 `Complete`）的 `assistant_message.text` 可能为空。Chord 会记 warning 便于观测；gateway 集成应跳过空消息，并以 `agent_done.summary` 作为权威的 SubAgent 完成内容。
 
@@ -290,7 +293,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 - `/role status`、`/role <name>`：查询或切换当前主角色（与 `role` 协议命令同一操作）
 - `/help`、`/stats`、`/compact`、`/loop on`、`/loop off`（仅当当前 MainAgent 角色可使用 `done` 工具时）
 
-裸 `/models` 会被当作 `/models status`，裸 `/role` 会被当作 `/role status`。部分 slash 命令是 TUI 专用的（例如 `/new`、`/resume` 需要交互式 picker）；在 headless 模式下尝试调用时，会返回 `error` envelope，说明「X 仅在本地 TUI 模式可用」。
+裸 `/models` 会被当作 `/models status`，裸 `/role` 会被当作 `/role status`。`/new` 和 `/resume <id>` 在 headless 里可用，会在进程内换会话（并推送 `session_switched`）。裸 `/resume` 仍然需要 TUI 的选择器，`/export` 这类命令也是；这些会返回 `error` envelope，说明「X 仅在本地 TUI 模式可用」。
 
 ## 最小 Python 客户端示例
 

@@ -34,6 +34,8 @@ Every outbound envelope has the shape:
 { "type": "<event-type>", "payload": { ... } }
 ```
 
+State-carrying envelopes — event-loop pushes, command-path announcements such as `role_change` and `handoff_cancelled`, and `status_response` snapshots — additionally carry a monotonic `seq` (`{ "type": "<event-type>", "seq": 12, "payload": { ... } }`). Pushes leave the process in `seq` order, but a `status_response` snapshot is copied and emitted on the command path, so a snapshot taken before a newer push can arrive after it. Any cached-state mutation bumps `seq`, even when the gateway did not subscribe to the corresponding push or the mutation has no push at all — auto-dismissing a pending confirm or question on `send`, or an explicit `confirm` / `question` / `handoff` reply — so a later `status_response` is strictly newer than one copied before the mutation. Integrations that merge `status_response` into cached state must drop a snapshot whose `seq` is smaller than an already-seen `seq`. Every `status_response`, including one sent before the first push, has a nonzero `seq`. Reset the highest observed version when a new process sends `ready`; versions are local to that process.
+
 The first line you receive is always `{"type": "ready", ...}` — wait for it before sending other commands.
 
 ## Try one interaction first
@@ -80,6 +82,7 @@ Response:
 ```json
 {
   "type": "status_response",
+  "seq": 1,
   "payload": {
     "session_id": "20260508120000000",
     "busy": false,
@@ -290,7 +293,7 @@ For convenience, headless also accepts these via `send` so you can drive Chord f
 - `/role status`, `/role <name>`: query or switch the active main role (same operation as the `role` protocol command)
 - `/help`, `/stats`, `/compact`, `/loop on`, `/loop off` (only when the active MainAgent role can use the `done` tool)
 
-Bare `/models` is treated as `/models status`, and bare `/role` as `/role status`. Some slash commands are TUI-only (e.g. `/new`, `/resume` — they require an interactive picker); attempting them in headless mode returns an `error` envelope explaining "X is only available in local TUI mode".
+Bare `/models` is treated as `/models status`, and bare `/role` as `/role status`. `/new` and `/resume <id>` work in headless and switch the session in-band (they emit `session_switched`). Bare `/resume` still needs the TUI picker, and so do a few other slash commands such as `/export`; those return an `error` envelope explaining "X is only available in local TUI mode".
 
 ## Minimal Python client
 

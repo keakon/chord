@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/keakon/chord/internal/agent"
@@ -181,13 +183,431 @@ func TestHeadlessSessionSwitchedRespectsSubscription(t *testing.T) {
 	}
 }
 
+func TestHeadlessInitialStatusSeqSurvivesWireEncoding(t *testing.T) {
+	var output bytes.Buffer
+	writer := newStdoutWriter(t.Context(), &output)
+	go writer.run()
+	state := &headlessState{sessionID: "session-start"}
+	handleHeadlessCommand(headlessCommand{Type: "status"}, &mockBackend{}, state, writer)
+	writer.close()
+
+	var envelope struct {
+		Type string  `json:"type"`
+		Seq  *uint64 `json:"seq"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode status envelope: %v", err)
+	}
+	if envelope.Type != "status_response" || envelope.Seq == nil || *envelope.Seq != headlessGenesisSeq {
+		t.Fatalf("initial status must carry genesis seq %d: %s", headlessGenesisSeq, output.String())
+	}
+}
+
+func TestHeadlessStatusSeqOrdersSnapshotAgainstPushes(t *testing.T) {
+	state := &headlessState{
+		sessionID:     "sess-old",
+		subscriptions: map[string]bool{"session_switched": true},
+	}
+	backend := sessionDirBackend{mockBackend: &mockBackend{}, dir: "/tmp/chord/sess-new"}
+
+	// Snapshot taken before the switch: still the old session.
+	to := newTestOut()
+	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
+	stale := findHeadlessEnvelopeValue(to.drain(), "status_response")
+	if stale == nil {
+		t.Fatal("status_response not emitted")
+	}
+
+	// The switch commits and pushes after the snapshot was copied.
+	envs := filterHeadlessEvent(agent.SessionRestoredEvent{}, state, backend)
+	push := findHeadlessEnvelope(envs, "session_switched")
+	if push == nil {
+		t.Fatal("session_switched envelope not emitted")
+	}
+
+	// Snapshot taken after the switch: the new session, same version as the push.
+	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
+	fresh := findHeadlessEnvelopeValue(to.drain(), "status_response")
+	if fresh == nil {
+		t.Fatal("second status_response not emitted")
+	}
+
+	if stale.Seq == 0 {
+		t.Fatal("initial status snapshot must have a nonzero version")
+	}
+	if stale.Seq >= push.Seq {
+		t.Errorf("stale status seq = %d, want < push seq = %d", stale.Seq, push.Seq)
+	}
+	if fresh.Seq != push.Seq {
+		t.Errorf("fresh status seq = %d, want push seq = %d", fresh.Seq, push.Seq)
+	}
+	stalePayload := headlessPayloadMap(t, stale.Payload)
+	freshPayload := headlessPayloadMap(t, fresh.Payload)
+	if stalePayload["session_id"] != "sess-old" {
+		t.Errorf("stale session_id = %v, want sess-old", stalePayload["session_id"])
+	}
+	if freshPayload["session_id"] != "sess-new" {
+		t.Errorf("fresh session_id = %v, want sess-new", freshPayload["session_id"])
+	}
+}
+
+// Push envelopes are versioned in emission order across event types.
+func TestHeadlessPushSeqIncreasesInEmissionOrder(t *testing.T) {
+	state := &headlessState{}
+
+	first := filterHeadlessEvent(agent.AgentActivityEvent{Type: agent.ActivityStreaming, Detail: "one"}, state)
+	second := filterHeadlessEvent(agent.AgentActivityEvent{Type: agent.ActivityStreaming, Detail: "two"}, state)
+
+	find := func(envs []*headlessEnvelope) *headlessEnvelope {
+		for _, env := range envs {
+			if env.Type == "activity" {
+				return env
+			}
+		}
+		return nil
+	}
+	a, b := find(first), find(second)
+	if a == nil || b == nil {
+		t.Fatalf("activity envelopes not emitted: %v %v", first, second)
+	}
+	if a.Seq <= headlessGenesisSeq || b.Seq != a.Seq+1 {
+		t.Errorf("push seqs = %d, %d, want consecutive versions after genesis %d", a.Seq, b.Seq, headlessGenesisSeq)
+	}
+}
+
+// A role set announces role_change on the command path. That push must bump
+// seq so a status snapshot copied before the switch is strictly older and a
+// later snapshot shares the announcement's version.
+func TestHeadlessCommandPathRoleChangeSeqOrdersSnapshot(t *testing.T) {
+	backend := &mockBackend{availableRoles: []string{"builder", "planner"}, currentRole: "builder"}
+	state := &headlessState{role: "builder", subscriptions: map[string]bool{"role_change": true}}
+
+	to := newTestOut()
+	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
+	stale := findHeadlessEnvelopeValue(to.drain(), "status_response")
+	if stale == nil {
+		t.Fatal("status_response not emitted")
+	}
+
+	handleHeadlessCommand(headlessCommand{Type: "role", Action: "set", Role: "planner"}, backend, state, to.writer())
+	push := findHeadlessEnvelopeValue(to.drain(), "role_change")
+	if push == nil {
+		t.Fatal("role_change not emitted")
+	}
+	if push.Seq == 0 {
+		t.Fatal("command-path role_change must be versioned")
+	}
+	if stale.Seq >= push.Seq {
+		t.Errorf("stale status seq = %d, want < role_change seq = %d", stale.Seq, push.Seq)
+	}
+
+	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
+	fresh := findHeadlessEnvelopeValue(to.drain(), "status_response")
+	if fresh == nil {
+		t.Fatal("second status_response not emitted")
+	}
+	if fresh.Seq != push.Seq {
+		t.Errorf("fresh status seq = %d, want role_change seq = %d", fresh.Seq, push.Seq)
+	}
+	if payload := headlessPayloadMap(t, fresh.Payload); payload["current_role"] != "planner" {
+		t.Errorf("current_role = %v, want planner", payload["current_role"])
+	}
+}
+
+// A status snapshot copies role and seq under one lock. An event-loop
+// RoleChangedEvent that races the copy must not bind the previous role to the
+// announcement's version — gateway would then treat that snapshot as current
+// and roll CurrentRole back.
+func TestHeadlessStatusSnapshotRoleMatchesSeqAgainstEventLoop(t *testing.T) {
+	backend := &mockBackend{availableRoles: []string{"builder", "planner"}, currentRole: "builder"}
+	state := &headlessState{role: "builder", subscriptions: map[string]bool{"role_change": true}}
+	to := newTestOut()
+
+	const goroutines = 6
+	const statusesPer = 24
+	var start sync.WaitGroup
+	start.Add(1)
+	var wg sync.WaitGroup
+	for range goroutines {
+		wg.Go(func() {
+			start.Wait()
+			for range statusesPer {
+				handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
+			}
+		})
+	}
+	start.Done()
+	pushEnvs := filterHeadlessEvent(agent.RoleChangedEvent{Role: "planner"}, state)
+	wg.Wait()
+
+	if len(pushEnvs) != 1 || pushEnvs[0].Type != "role_change" {
+		t.Fatalf("role_change envelopes = %#v, want one announcement", pushEnvs)
+	}
+	pushSeq := pushEnvs[0].Seq
+	if pushSeq == 0 {
+		t.Fatal("event-loop role_change must be versioned")
+	}
+
+	sawStatus := false
+	for _, env := range to.drain() {
+		if env.Type != "status_response" {
+			continue
+		}
+		sawStatus = true
+		role := headlessPayloadMap(t, env.Payload)["current_role"]
+		switch {
+		case env.Seq < pushSeq:
+			if role != "builder" {
+				t.Errorf("pre-switch status seq=%d current_role=%v, want builder", env.Seq, role)
+			}
+		case env.Seq == pushSeq:
+			if role != "planner" {
+				t.Errorf("status seq=%d (role_change version) current_role=%v, want planner", env.Seq, role)
+			}
+		default:
+			t.Errorf("status seq=%d > role_change seq=%d", env.Seq, pushSeq)
+		}
+	}
+	if !sawStatus {
+		t.Fatal("expected status_response envelopes from the racing status commands")
+	}
+}
+
+// An empty role cache backfills outside the snapshot lock. If RoleChangedEvent
+// commits and bumps seq while CurrentRole is still in flight, status must use
+// the cached role, not the stale backfill return value, with that new seq.
+func TestHeadlessStatusSnapshotIgnoresStaleRoleBackfill(t *testing.T) {
+	backend := &delayedCurrentRoleBackend{
+		mockBackend: &mockBackend{availableRoles: []string{"builder", "planner"}, currentRole: "builder"},
+		started:     make(chan struct{}),
+		release:     make(chan struct{}),
+	}
+	state := &headlessState{subscriptions: map[string]bool{"role_change": true}}
+	to := newTestOut()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
+	}()
+	<-backend.started
+	pushEnvs := filterHeadlessEvent(agent.RoleChangedEvent{Role: "planner"}, state)
+	close(backend.release)
+	<-done
+
+	if len(pushEnvs) != 1 || pushEnvs[0].Type != "role_change" {
+		t.Fatalf("role_change envelopes = %#v, want one announcement", pushEnvs)
+	}
+	env := findHeadlessEnvelopeValue(to.drain(), "status_response")
+	if env == nil {
+		t.Fatal("status_response not emitted")
+	}
+	if env.Seq != pushEnvs[0].Seq {
+		t.Errorf("status seq = %d, want role_change seq %d", env.Seq, pushEnvs[0].Seq)
+	}
+	if payload := headlessPayloadMap(t, env.Payload); payload["current_role"] != "planner" {
+		t.Errorf("current_role = %v, want planner (event-loop cache), not the stale backfill", payload["current_role"])
+	}
+}
+
+type delayedCurrentRoleBackend struct {
+	*mockBackend
+	startedOnce sync.Once
+	started     chan struct{}
+	release     chan struct{}
+}
+
+func (b *delayedCurrentRoleBackend) CurrentRole() string {
+	b.startedOnce.Do(func() { close(b.started) })
+	<-b.release
+	return b.mockBackend.CurrentRole()
+}
+
+// Auto-cancelling a pending handoff on send is a command-path state mutation.
+// Its handoff_cancelled push must bump seq the same way an event-loop cancel
+// does, so a snapshot copied while the request was still pending is stale.
+func TestHeadlessCommandPathHandoffCancelledSeqOrdersSnapshot(t *testing.T) {
+	backend := &mockBackend{}
+	state := &headlessState{
+		subscriptions:  map[string]bool{"handoff_cancelled": true},
+		pendingHandoff: &headlessHandoffPayload{RequestID: "handoff-1", PlanPath: "/tmp/plan.md"},
+	}
+
+	to := newTestOut()
+	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
+	stale := findHeadlessEnvelopeValue(to.drain(), "status_response")
+	if stale == nil {
+		t.Fatal("status_response not emitted")
+	}
+
+	handleHeadlessCommand(headlessCommand{Type: "send", Content: "revise"}, backend, state, to.writer())
+	push := findHeadlessEnvelopeValue(to.drain(), "handoff_cancelled")
+	if push == nil {
+		t.Fatal("handoff_cancelled not emitted")
+	}
+	if push.Seq == 0 {
+		t.Fatal("command-path handoff_cancelled must be versioned")
+	}
+	if stale.Seq >= push.Seq {
+		t.Errorf("stale status seq = %d, want < handoff_cancelled seq = %d", stale.Seq, push.Seq)
+	}
+
+	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
+	fresh := findHeadlessEnvelopeValue(to.drain(), "status_response")
+	if fresh == nil {
+		t.Fatal("second status_response not emitted")
+	}
+	if fresh.Seq != push.Seq {
+		t.Errorf("fresh status seq = %d, want handoff_cancelled seq = %d", fresh.Seq, push.Seq)
+	}
+	if payload := headlessPayloadMap(t, fresh.Payload); payload["pending_handoff"] != nil {
+		t.Fatalf("pending_handoff = %#v, want null", payload["pending_handoff"])
+	}
+}
+
+// Auto-denying a pending confirm on send has no cancelled envelope, but the
+// cache mutation still bumps seq so a snapshot copied while the request was
+// pending is strictly older than a later status that reports it gone.
+func TestHeadlessCommandPathAutoDenyConfirmSeqOrdersSnapshot(t *testing.T) {
+	backend := &mockBackend{}
+	state := &headlessState{
+		pendingConfirm: &headlessConfirmPayload{RequestID: "confirm-1", ToolName: "shell"},
+	}
+
+	to := newTestOut()
+	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
+	stale := findHeadlessEnvelopeValue(to.drain(), "status_response")
+	if stale == nil {
+		t.Fatal("status_response not emitted")
+	}
+	if payload := headlessPayloadMap(t, stale.Payload); payload["pending_confirm"] == nil {
+		t.Fatal("stale status should still report the pending confirm")
+	}
+
+	handleHeadlessCommand(headlessCommand{Type: "send", Content: "do something else"}, backend, state, to.writer())
+	if len(backend.confirmCalls) != 1 || backend.confirmCalls[0].action != "deny" {
+		t.Fatalf("auto-deny confirm calls = %#v, want one deny", backend.confirmCalls)
+	}
+
+	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
+	fresh := findHeadlessEnvelopeValue(to.drain(), "status_response")
+	if fresh == nil {
+		t.Fatal("second status_response not emitted")
+	}
+	if stale.Seq == 0 || fresh.Seq <= stale.Seq {
+		t.Errorf("stale seq = %d, fresh seq = %d, want fresh strictly newer", stale.Seq, fresh.Seq)
+	}
+	if payload := headlessPayloadMap(t, fresh.Payload); payload["pending_confirm"] != nil {
+		t.Fatalf("pending_confirm = %#v, want null", payload["pending_confirm"])
+	}
+}
+
+// Auto-cancelling a pending question on send is the same class of silent
+// command-path mutation as auto-denying a confirm: bump seq without a push.
+func TestHeadlessCommandPathAutoCancelQuestionSeqOrdersSnapshot(t *testing.T) {
+	backend := &mockBackend{}
+	state := &headlessState{
+		pendingQuestion: &headlessQuestionPayload{RequestID: "question-1", Question: "which file?"},
+	}
+
+	to := newTestOut()
+	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
+	stale := findHeadlessEnvelopeValue(to.drain(), "status_response")
+	if stale == nil {
+		t.Fatal("status_response not emitted")
+	}
+
+	handleHeadlessCommand(headlessCommand{Type: "send", Content: "never mind"}, backend, state, to.writer())
+	if len(backend.questionCalls) != 1 || !backend.questionCalls[0].cancelled {
+		t.Fatalf("auto-cancel question calls = %#v, want one cancelled", backend.questionCalls)
+	}
+
+	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
+	fresh := findHeadlessEnvelopeValue(to.drain(), "status_response")
+	if fresh == nil {
+		t.Fatal("second status_response not emitted")
+	}
+	if stale.Seq == 0 || fresh.Seq <= stale.Seq {
+		t.Errorf("stale seq = %d, fresh seq = %d, want fresh strictly newer", stale.Seq, fresh.Seq)
+	}
+	if payload := headlessPayloadMap(t, fresh.Payload); payload["pending_question"] != nil {
+		t.Fatalf("pending_question = %#v, want null", payload["pending_question"])
+	}
+}
+
+// An explicit confirm command also clears pending state without a push, so
+// the next status_response must be a newer version than a snapshot copied
+// while the request was still pending.
+func TestHeadlessConfirmCommandSeqOrdersSnapshot(t *testing.T) {
+	backend := &mockBackend{}
+	state := &headlessState{
+		pendingConfirm: &headlessConfirmPayload{RequestID: "confirm-2", ToolName: "shell"},
+	}
+
+	to := newTestOut()
+	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
+	stale := findHeadlessEnvelopeValue(to.drain(), "status_response")
+	if stale == nil {
+		t.Fatal("status_response not emitted")
+	}
+
+	handleHeadlessCommand(headlessCommand{Type: "confirm", Action: "allow", RequestID: "confirm-2"}, backend, state, to.writer())
+
+	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
+	fresh := findHeadlessEnvelopeValue(to.drain(), "status_response")
+	if fresh == nil {
+		t.Fatal("second status_response not emitted")
+	}
+	if stale.Seq == 0 || fresh.Seq <= stale.Seq {
+		t.Errorf("stale seq = %d, fresh seq = %d, want fresh strictly newer", stale.Seq, fresh.Seq)
+	}
+	if payload := headlessPayloadMap(t, fresh.Payload); payload["pending_confirm"] != nil {
+		t.Fatalf("pending_confirm = %#v, want null", payload["pending_confirm"])
+	}
+}
+
+// Auto-cancelling a pending handoff still bumps seq when the client is not
+// subscribed to handoff_cancelled, because the pending cache changed even
+// though no envelope is emitted.
+func TestHeadlessCommandPathAutoCancelHandoffWithoutSubscriptionSeqOrdersSnapshot(t *testing.T) {
+	backend := &mockBackend{}
+	state := &headlessState{
+		subscriptions:  map[string]bool{"idle": true},
+		pendingHandoff: &headlessHandoffPayload{RequestID: "handoff-2", PlanPath: "/tmp/plan.md"},
+	}
+
+	to := newTestOut()
+	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
+	stale := findHeadlessEnvelopeValue(to.drain(), "status_response")
+	if stale == nil {
+		t.Fatal("status_response not emitted")
+	}
+
+	handleHeadlessCommand(headlessCommand{Type: "send", Content: "revise"}, backend, state, to.writer())
+	if env := findHeadlessEnvelopeValue(to.drain(), "handoff_cancelled"); env != nil {
+		t.Fatalf("handoff_cancelled should not be forwarded without a subscription: %#v", env)
+	}
+
+	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
+	fresh := findHeadlessEnvelopeValue(to.drain(), "status_response")
+	if fresh == nil {
+		t.Fatal("second status_response not emitted")
+	}
+	if stale.Seq == 0 || fresh.Seq <= stale.Seq {
+		t.Errorf("stale seq = %d, fresh seq = %d, want fresh strictly newer", stale.Seq, fresh.Seq)
+	}
+	if payload := headlessPayloadMap(t, fresh.Payload); payload["pending_handoff"] != nil {
+		t.Fatalf("pending_handoff = %#v, want null", payload["pending_handoff"])
+	}
+}
+
 // status_response reports the tracked session id, falling back to the startup
 // snapshot only before any restore was observed.
 func TestHeadlessStatusReportsTrackedSession(t *testing.T) {
 	to := newTestOut()
 	state := &headlessState{sessionID: "sess-new"}
 
-	handleHeadlessCommand(headlessCommand{Type: "status"}, &mockBackend{}, state, to.writer(), "sess-old")
+	handleHeadlessCommand(headlessCommand{Type: "status"}, &mockBackend{}, state, to.writer())
 
 	env := findHeadlessEnvelopeValue(to.drain(), "status_response")
 	if env == nil {
@@ -282,7 +702,7 @@ func TestHeadlessSubscribeAcceptsNewPushTypes(t *testing.T) {
 	handleHeadlessCommand(headlessCommand{
 		Type:   "subscribe",
 		Events: []string{"session_switched", "background_result", "context_notice", "no_such_event"},
-	}, &mockBackend{}, state, to.writer(), "test-session")
+	}, &mockBackend{}, state, to.writer())
 	to.drain()
 
 	backend := sessionDirBackend{mockBackend: &mockBackend{}, dir: "/sessions/sess-new"}
@@ -304,5 +724,72 @@ func TestHeadlessSubscribeAcceptsNewPushTypes(t *testing.T) {
 	state.mu.Unlock()
 	if subscribedUnknown {
 		t.Error("unknown event names must not enter subscriptions")
+	}
+}
+
+// An unsubscribed event-loop mutation still bumps seq: the cache moved, so a
+// status snapshot copied before it must compare older than a later snapshot.
+func TestHeadlessUnsubscribedEventLoopMutationBumpsSeq(t *testing.T) {
+	backend := &mockBackend{}
+	state := &headlessState{
+		sessionID:     "sess-old",
+		subscriptions: map[string]bool{"idle": true},
+	}
+
+	to := newTestOut()
+	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
+	stale := findHeadlessEnvelopeValue(to.drain(), "status_response")
+	if stale == nil {
+		t.Fatal("status_response not emitted")
+	}
+
+	// session_switched is not subscribed, so no envelope is emitted, but the
+	// tracked session moves and the version must advance.
+	switchBackend := sessionDirBackend{mockBackend: &mockBackend{}, dir: "/tmp/chord/sess-new"}
+	if envs := filterHeadlessEvent(agent.SessionRestoredEvent{}, state, switchBackend); len(envs) != 0 {
+		t.Fatalf("session_switched must not be forwarded without a subscription, got %v", envs)
+	}
+
+	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
+	fresh := findHeadlessEnvelopeValue(to.drain(), "status_response")
+	if fresh == nil {
+		t.Fatal("second status_response not emitted")
+	}
+	if stale.Seq == 0 || fresh.Seq <= stale.Seq {
+		t.Errorf("stale seq = %d, fresh seq = %d, want fresh strictly newer", stale.Seq, fresh.Seq)
+	}
+	if payload := headlessPayloadMap(t, fresh.Payload); payload["session_id"] != "sess-new" {
+		t.Errorf("session_id = %v, want sess-new", payload["session_id"])
+	}
+}
+
+// A command-path role switch without a role_change subscription still bumps
+// seq, so snapshots before and after compare ordered.
+func TestHeadlessCommandPathRoleChangeWithoutSubscriptionBumpsSeq(t *testing.T) {
+	backend := &mockBackend{availableRoles: []string{"builder", "planner"}, currentRole: "builder"}
+	state := &headlessState{role: "builder", subscriptions: map[string]bool{"idle": true}}
+
+	to := newTestOut()
+	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
+	stale := findHeadlessEnvelopeValue(to.drain(), "status_response")
+	if stale == nil {
+		t.Fatal("status_response not emitted")
+	}
+
+	handleHeadlessCommand(headlessCommand{Type: "role", Action: "set", Role: "planner"}, backend, state, to.writer())
+	if env := findHeadlessEnvelopeValue(to.drain(), "role_change"); env != nil {
+		t.Fatalf("role_change should not be forwarded without a subscription: %#v", env)
+	}
+
+	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
+	fresh := findHeadlessEnvelopeValue(to.drain(), "status_response")
+	if fresh == nil {
+		t.Fatal("second status_response not emitted")
+	}
+	if stale.Seq == 0 || fresh.Seq <= stale.Seq {
+		t.Errorf("stale seq = %d, fresh seq = %d, want fresh strictly newer", stale.Seq, fresh.Seq)
+	}
+	if payload := headlessPayloadMap(t, fresh.Payload); payload["current_role"] != "planner" {
+		t.Errorf("current_role = %v, want planner", payload["current_role"])
 	}
 }

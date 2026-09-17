@@ -307,7 +307,7 @@ func TestHeadlessSendCommandRejectsBareMCP(t *testing.T) {
 	state := &headlessState{}
 
 	hcmd := headlessCommand{Type: "send", Content: "/mcp"}
-	handleHeadlessCommand(hcmd, backend, state, to.writer(), "sess")
+	handleHeadlessCommand(hcmd, backend, state, to.writer())
 
 	envs := to.drain()
 	env := findHeadlessEnvelopeValue(envs, "error")
@@ -355,7 +355,7 @@ func TestHeadlessHandoffEventAndCommand(t *testing.T) {
 	}
 
 	to := newTestOut()
-	handleHeadlessCommand(headlessCommand{Type: "handoff", RequestID: payload.RequestID, Action: "accept", Agent: "reviewer", Pool: "smart"}, backend, state, to.writer(), "sess")
+	handleHeadlessCommand(headlessCommand{Type: "handoff", RequestID: payload.RequestID, Action: "accept", Agent: "reviewer", Pool: "smart"}, backend, state, to.writer())
 
 	state.mu.Lock()
 	pending := state.pendingHandoff
@@ -509,7 +509,7 @@ func TestHeadlessHandoffCancelledClearsStatusPendingHandoff(t *testing.T) {
 	filterHeadlessEvent(agent.HandoffCancelledEvent{RequestID: "handoff-1", Reason: "superseded"}, state)
 
 	to := newTestOut()
-	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
 
 	env := findHeadlessEnvelopeValue(to.drain(), "status_response")
 	if env == nil {
@@ -533,7 +533,7 @@ func TestHeadlessHandoffDenyContinuesFromContext(t *testing.T) {
 	backend := &mockBackend{}
 	to := newTestOut()
 
-	handleHeadlessCommand(headlessCommand{Type: "handoff", RequestID: "handoff-1", Action: "deny", DenyReason: "needs more detail"}, backend, state, to.writer(), "sess")
+	handleHeadlessCommand(headlessCommand{Type: "handoff", RequestID: "handoff-1", Action: "deny", DenyReason: "needs more detail"}, backend, state, to.writer())
 
 	backend.mu.Lock()
 	defer backend.mu.Unlock()
@@ -560,7 +560,7 @@ func TestHeadlessPendingConfirmClearedAfterConfirm(t *testing.T) {
 		Action:    "allow",
 		RequestID: "req-1",
 	}
-	handleHeadlessCommand(cmd, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(cmd, backend, state, to.writer())
 
 	state.mu.Lock()
 	defer state.mu.Unlock()
@@ -586,7 +586,7 @@ func TestHeadlessConfirmSupportsRuleIntent(t *testing.T) {
 		RulePattern: "git *",
 		RuleScope:   "project",
 	}
-	handleHeadlessCommand(cmd, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(cmd, backend, state, to.writer())
 
 	backend.mu.Lock()
 	defer backend.mu.Unlock()
@@ -617,7 +617,7 @@ func TestHeadlessConfirmRejectsInvalidRuleScope(t *testing.T) {
 		RulePattern: "git *",
 		RuleScope:   "invalid-scope",
 	}
-	handleHeadlessCommand(cmd, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(cmd, backend, state, to.writer())
 
 	backend.mu.Lock()
 	callCount := len(backend.confirmCalls)
@@ -647,7 +647,7 @@ func TestHeadlessPendingQuestionClearedAfterQuestion(t *testing.T) {
 		Answers:   []string{"yes"},
 		RequestID: "req-2",
 	}
-	handleHeadlessCommand(cmd, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(cmd, backend, state, to.writer())
 
 	state.mu.Lock()
 	defer state.mu.Unlock()
@@ -670,7 +670,7 @@ func TestHeadlessAutoDenyConfirmOnUserMessage(t *testing.T) {
 		Type:    "send",
 		Content: "do something else",
 	}
-	handleHeadlessCommand(cmd, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(cmd, backend, state, to.writer())
 
 	state.mu.Lock()
 	pc := state.pendingConfirm
@@ -705,7 +705,7 @@ func TestHeadlessAutoCancelQuestionOnUserMessage(t *testing.T) {
 		Type:    "send",
 		Content: "skip the question",
 	}
-	handleHeadlessCommand(cmd, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(cmd, backend, state, to.writer())
 
 	state.mu.Lock()
 	pq := state.pendingQuestion
@@ -740,7 +740,7 @@ func TestHeadlessAutoCancelHandoffOnUserMessage(t *testing.T) {
 		Type:    "send",
 		Content: "revise the plan instead",
 	}
-	handleHeadlessCommand(cmd, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(cmd, backend, state, to.writer())
 
 	state.mu.Lock()
 	pending := state.pendingHandoff
@@ -777,7 +777,7 @@ func TestHeadlessAutoCancelHandoffOnUserMessageEmitsCancelled(t *testing.T) {
 	to := newTestOut()
 	backend := &mockBackend{}
 
-	handleHeadlessCommand(headlessCommand{Type: "send", Content: "revise the plan instead"}, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(headlessCommand{Type: "send", Content: "revise the plan instead"}, backend, state, to.writer())
 
 	state.mu.Lock()
 	pending := state.pendingHandoff
@@ -801,7 +801,7 @@ func TestHeadlessAutoCancelHandoffOnUserMessageEmitsCancelled(t *testing.T) {
 		t.Errorf("reason = %v, want %q", payload["reason"], headlessHandoffCancelledReasonSuperseded)
 	}
 
-	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
 	statusEnv := findHeadlessEnvelopeValue(to.drain(), "status_response")
 	if statusEnv == nil {
 		t.Fatal("status_response not emitted")
@@ -830,7 +830,7 @@ func TestHeadlessAutoCancelHandoffWithoutSubscriptionDoesNotEmit(t *testing.T) {
 	to := newTestOut()
 	backend := &mockBackend{}
 
-	handleHeadlessCommand(headlessCommand{Type: "send", Content: "next"}, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(headlessCommand{Type: "send", Content: "next"}, backend, state, to.writer())
 
 	if env := findHeadlessEnvelopeValue(to.drain(), "handoff_cancelled"); env != nil {
 		t.Fatalf("handoff_cancelled should not be forwarded without a subscription: %#v", env)
@@ -848,7 +848,7 @@ func TestHeadlessAutoCancelHandoffWithoutPendingDoesNotEmit(t *testing.T) {
 	to := newTestOut()
 	backend := &mockBackend{}
 
-	handleHeadlessCommand(headlessCommand{Type: "send", Content: "hello"}, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(headlessCommand{Type: "send", Content: "hello"}, backend, state, to.writer())
 
 	if env := findHeadlessEnvelopeValue(to.drain(), "handoff_cancelled"); env != nil {
 		t.Fatalf("handoff_cancelled should not be emitted with no pending handoff: %#v", env)
@@ -874,7 +874,7 @@ func TestHeadlessExplicitHandoffCancelDoesNotEmitCancelled(t *testing.T) {
 	to := newTestOut()
 	backend := &mockBackend{}
 
-	handleHeadlessCommand(headlessCommand{Type: "handoff", RequestID: "handoff-1", Action: "cancel"}, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(headlessCommand{Type: "handoff", RequestID: "handoff-1", Action: "cancel"}, backend, state, to.writer())
 
 	if env := findHeadlessEnvelopeValue(to.drain(), "handoff_cancelled"); env != nil {
 		t.Fatalf("explicit handoff cancel must not emit handoff_cancelled: %#v", env)
@@ -905,7 +905,7 @@ func TestHeadlessAutoDenyBothConfirmAndQuestionOnUserMessage(t *testing.T) {
 		Type:    "send",
 		Content: "new message",
 	}
-	handleHeadlessCommand(cmd, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(cmd, backend, state, to.writer())
 
 	state.mu.Lock()
 	pc := state.pendingConfirm
@@ -943,7 +943,7 @@ func TestHeadlessNoAutoDenyWhenNoPendingConfirm(t *testing.T) {
 		Type:    "send",
 		Content: "hello",
 	}
-	handleHeadlessCommand(cmd, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(cmd, backend, state, to.writer())
 
 	backend.mu.Lock()
 	cc := backend.confirmCalls
@@ -1066,7 +1066,7 @@ func TestHeadlessPendingOutcomeCancelled(t *testing.T) {
 
 	// Simulate cancel command
 	cmd := headlessCommand{Type: "cancel"}
-	handleHeadlessCommand(cmd, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(cmd, backend, state, to.writer())
 
 	state.mu.Lock()
 	po := state.pendingOutcome
@@ -1114,7 +1114,7 @@ func TestHeadlessBareModelsSendMapsToStatus(t *testing.T) {
 	to := newTestOut()
 	backend := &mockBackend{}
 
-	handleHeadlessCommand(headlessCommand{Type: "send", Content: "/models"}, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(headlessCommand{Type: "send", Content: "/models"}, backend, state, to.writer())
 
 	backend.mu.Lock()
 	msgs := append([]string(nil), backend.sentMessages...)
@@ -1129,7 +1129,7 @@ func TestHeadlessBareRoleSendMapsToStatus(t *testing.T) {
 	to := newTestOut()
 	backend := &mockBackend{}
 
-	handleHeadlessCommand(headlessCommand{Type: "send", Content: "/role"}, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(headlessCommand{Type: "send", Content: "/role"}, backend, state, to.writer())
 
 	backend.mu.Lock()
 	msgs := append([]string(nil), backend.sentMessages...)
@@ -1144,7 +1144,7 @@ func TestHeadlessModelsCommandStatus(t *testing.T) {
 	to := newTestOut()
 	backend := &mockBackend{}
 
-	handleHeadlessCommand(headlessCommand{Type: "models", Action: "status"}, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(headlessCommand{Type: "models", Action: "status"}, backend, state, to.writer())
 
 	env := findHeadlessEnvelopeValue(to.drain(), "models_response")
 	if env == nil {
@@ -1164,7 +1164,7 @@ func TestHeadlessModelsCommandSetCurrentModelPool(t *testing.T) {
 	to := newTestOut()
 	backend := &mockBackend{}
 
-	handleHeadlessCommand(headlessCommand{Type: "models", Action: "set_current_model_pool", Pool: "fast"}, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(headlessCommand{Type: "models", Action: "set_current_model_pool", Pool: "fast"}, backend, state, to.writer())
 
 	backend.mu.Lock()
 	msgs := append([]string(nil), backend.sentMessages...)
@@ -1220,7 +1220,7 @@ func TestHeadlessRoleListCommand(t *testing.T) {
 	to := newTestOut()
 	backend := &mockBackend{}
 
-	handleHeadlessCommand(headlessCommand{Type: "role", Action: "list"}, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(headlessCommand{Type: "role", Action: "list"}, backend, state, to.writer())
 
 	env := findHeadlessEnvelopeValue(to.drain(), "role_response")
 	if env == nil {
@@ -1250,7 +1250,7 @@ func TestHeadlessRoleListCommandPreservesBackendOrder(t *testing.T) {
 	to := newTestOut()
 	backend := &mockBackend{availableRoles: []string{"zeta", "builder"}, currentRole: "zeta"}
 
-	handleHeadlessCommand(headlessCommand{Type: "role", Action: "list"}, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(headlessCommand{Type: "role", Action: "list"}, backend, state, to.writer())
 
 	env := findHeadlessEnvelopeValue(to.drain(), "role_response")
 	if env == nil {
@@ -1278,7 +1278,7 @@ func TestHeadlessRoleSetSwitchesRoleAndUpdatesStatus(t *testing.T) {
 
 	// role set switches the backend's active role.
 	to := newTestOut()
-	handleHeadlessCommand(headlessCommand{Type: "role", Action: "set", Role: "planner"}, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(headlessCommand{Type: "role", Action: "set", Role: "planner"}, backend, state, to.writer())
 
 	env := findHeadlessEnvelopeValue(to.drain(), "role_response")
 	if env == nil {
@@ -1304,7 +1304,7 @@ func TestHeadlessRoleSetSwitchesRoleAndUpdatesStatus(t *testing.T) {
 
 	// A later list reports the new active role.
 	to = newTestOut()
-	handleHeadlessCommand(headlessCommand{Type: "role", Action: "list"}, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(headlessCommand{Type: "role", Action: "list"}, backend, state, to.writer())
 	env = findHeadlessEnvelopeValue(to.drain(), "role_response")
 	payload = env.Payload.(map[string]any)
 	if payload["role"] != "planner" {
@@ -1314,7 +1314,7 @@ func TestHeadlessRoleSetSwitchesRoleAndUpdatesStatus(t *testing.T) {
 	// status_response.current_role reflects the backend role before any
 	// RoleChangedEvent has flowed through the event filter.
 	to = newTestOut()
-	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
 	env = findHeadlessEnvelopeValue(to.drain(), "status_response")
 	payload = env.Payload.(map[string]any)
 	if payload["current_role"] != "planner" {
@@ -1330,7 +1330,7 @@ func TestHeadlessRoleSetRefreshesWarmRoleCache(t *testing.T) {
 	state := &headlessState{role: "builder"}
 
 	to := newTestOut()
-	handleHeadlessCommand(headlessCommand{Type: "role", Action: "set", Role: "planner"}, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(headlessCommand{Type: "role", Action: "set", Role: "planner"}, backend, state, to.writer())
 
 	env := findHeadlessEnvelopeValue(to.drain(), "role_response")
 	if env == nil {
@@ -1345,7 +1345,7 @@ func TestHeadlessRoleSetRefreshesWarmRoleCache(t *testing.T) {
 	// write on the set path must make an immediate status report the new role
 	// instead of the stale cached one.
 	to = newTestOut()
-	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
 	env = findHeadlessEnvelopeValue(to.drain(), "status_response")
 	if env == nil {
 		t.Fatal("status_response missing")
@@ -1415,7 +1415,7 @@ func TestHeadlessRoleSetFailureBranches(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			to := newTestOut()
-			handleHeadlessCommand(tc.cmd, tc.backend, tc.state, to.writer(), "test-session")
+			handleHeadlessCommand(tc.cmd, tc.backend, tc.state, to.writer())
 			env := findHeadlessEnvelopeValue(to.drain(), "role_response")
 			if env == nil {
 				t.Fatal("role_response missing")
@@ -1480,7 +1480,7 @@ func TestHeadlessRoleChangeEventFilteredWithoutSubscriptionButStateUpdated(t *te
 
 	// A later status query answers current_role from the cached state.
 	to := newTestOut()
-	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
 	env := findHeadlessEnvelopeValue(to.drain(), "status_response")
 	payload := env.Payload.(map[string]any)
 	if payload["current_role"] != "planner" {
@@ -1502,7 +1502,7 @@ func TestHeadlessRoleCommandRejectedByNonRoleBackend(t *testing.T) {
 	to := newTestOut()
 	var backend headlessBackend = &headlessSendOnlyBackend{}
 
-	handleHeadlessCommand(headlessCommand{Type: "role", Action: "list"}, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(headlessCommand{Type: "role", Action: "list"}, backend, state, to.writer())
 
 	env := findHeadlessEnvelopeValue(to.drain(), "error")
 	if env == nil {
@@ -1822,12 +1822,12 @@ func TestHeadlessRoleChangeEventDoesNotRegressRoleCacheAfterRoleSet(t *testing.T
 	// Two rapid sets (executor, then planner). Each commits synchronously on the
 	// backend and refreshes the cache on the set path.
 	to := newTestOut()
-	handleHeadlessCommand(headlessCommand{Type: "role", Action: "set", Role: "executor"}, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(headlessCommand{Type: "role", Action: "set", Role: "executor"}, backend, state, to.writer())
 	if env := findHeadlessEnvelopeValue(to.drain(), "role_response"); env == nil {
 		t.Fatal("role_response missing for set executor")
 	}
 	to = newTestOut()
-	handleHeadlessCommand(headlessCommand{Type: "role", Action: "set", Role: "planner"}, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(headlessCommand{Type: "role", Action: "set", Role: "planner"}, backend, state, to.writer())
 	if env := findHeadlessEnvelopeValue(to.drain(), "role_response"); env == nil {
 		t.Fatal("role_response missing for set planner")
 	}
@@ -1846,7 +1846,7 @@ func TestHeadlessRoleChangeEventDoesNotRegressRoleCacheAfterRoleSet(t *testing.T
 
 	// Status still reports the latest committed role.
 	to = newTestOut()
-	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
 	env := findHeadlessEnvelopeValue(to.drain(), "status_response")
 	payload := env.Payload.(map[string]any)
 	if payload["current_role"] != "planner" {
@@ -1865,7 +1865,7 @@ func TestHeadlessRoleSetAnnouncesRoleChangeOnceDespiteDelayedEvent(t *testing.T)
 	state := &headlessState{role: "builder", subscriptions: map[string]bool{"role_change": true}}
 
 	to := newTestOut()
-	handleHeadlessCommand(headlessCommand{Type: "role", Action: "set", Role: "planner"}, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(headlessCommand{Type: "role", Action: "set", Role: "planner"}, backend, state, to.writer())
 	envs := to.drain()
 	if findHeadlessEnvelopeValue(envs, "role_response") == nil {
 		t.Fatal("role_response missing for role set")
@@ -1991,7 +1991,7 @@ func TestHeadlessLocalShellCommandEmitsResult(t *testing.T) {
 	backend := &mockBackend{}
 	state := &headlessState{}
 
-	handleHeadlessCommand(headlessCommand{Type: "local_shell", Command: "printf chord-local-shell"}, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(headlessCommand{Type: "local_shell", Command: "printf chord-local-shell"}, backend, state, to.writer())
 
 	items := to.drain()
 	env := findHeadlessEnvelopeValue(items, "local_shell_result")
@@ -2018,7 +2018,7 @@ func TestHeadlessLocalShellEmptyCommandEmitsFailure(t *testing.T) {
 	backend := &mockBackend{}
 	state := &headlessState{}
 
-	handleHeadlessCommand(headlessCommand{Type: "local_shell", Command: "   "}, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(headlessCommand{Type: "local_shell", Command: "   "}, backend, state, to.writer())
 
 	items := to.drain()
 	env := findHeadlessEnvelopeValue(items, "local_shell_result")
@@ -2051,7 +2051,7 @@ func TestHeadlessSubscribeFiltersEvents(t *testing.T) {
 	}
 	to := newTestOut()
 	backend := &mockBackend{}
-	handleHeadlessCommand(cmd, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(cmd, backend, state, to.writer())
 
 	// Verify subscribe_response was emitted
 	items := to.drain()
@@ -2106,7 +2106,7 @@ func TestHeadlessSubscribeUnknownOnlyDoesNotFallBackToAll(t *testing.T) {
 	}
 	to := newTestOut()
 	backend := &mockBackend{}
-	handleHeadlessCommand(cmd, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(cmd, backend, state, to.writer())
 
 	items := to.drain()
 	if len(items) != 1 || items[0].Type != "subscribe_response" {
@@ -2348,7 +2348,7 @@ func TestHeadlessSendCommandUnsupportedRejection(t *testing.T) {
 			backend := &mockBackend{}
 
 			cmd := headlessCommand{Type: "send", Content: tt.content}
-			handleHeadlessCommand(cmd, backend, state, to.writer(), "test-session")
+			handleHeadlessCommand(cmd, backend, state, to.writer())
 
 			items := to.drain()
 			if tt.want {
@@ -2376,6 +2376,7 @@ func TestHeadlessSendCommandUnsupportedRejection(t *testing.T) {
 
 func TestHeadlessStatusCommand(t *testing.T) {
 	state := &headlessState{
+		sessionID:   "test-session",
 		busy:        true,
 		phase:       "streaming",
 		phaseDetail: "analyzing code",
@@ -2395,7 +2396,7 @@ func TestHeadlessStatusCommand(t *testing.T) {
 	backend := &mockBackend{}
 
 	cmd := headlessCommand{Type: "status"}
-	handleHeadlessCommand(cmd, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(cmd, backend, state, to.writer())
 
 	items := to.drain()
 	if len(items) != 1 {
@@ -2473,7 +2474,7 @@ func TestHeadlessStatusResponseLastOutcome(t *testing.T) {
 			backend := &mockBackend{}
 
 			cmd := headlessCommand{Type: "status"}
-			handleHeadlessCommand(cmd, backend, state, to.writer(), "test-session")
+			handleHeadlessCommand(cmd, backend, state, to.writer())
 
 			items := to.drain()
 			if len(items) != 1 {
@@ -2517,7 +2518,7 @@ func TestHeadlessConfirmMismatchedRequestID(t *testing.T) {
 		Action:    "allow",
 		RequestID: "req-wrong",
 	}
-	handleHeadlessCommand(cmd, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(cmd, backend, state, to.writer())
 
 	state.mu.Lock()
 	pc := state.pendingConfirm
@@ -2542,7 +2543,7 @@ func TestHeadlessQuestionMismatchedRequestID(t *testing.T) {
 		Answers:   []string{"yes"},
 		RequestID: "req-wrong",
 	}
-	handleHeadlessCommand(cmd, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(cmd, backend, state, to.writer())
 
 	state.mu.Lock()
 	pq := state.pendingQuestion
@@ -2568,7 +2569,7 @@ func TestHeadlessToolResultEventIsNotForwarded(t *testing.T) {
 
 func TestHeadlessDoneToolResultEmitsDoneCompletion(t *testing.T) {
 	state := &headlessState{}
-	handleHeadlessCommand(headlessCommand{Type: "subscribe", Events: []string{"done_completion"}}, &mockBackend{}, state, newTestOut().writer(), "test-session")
+	handleHeadlessCommand(headlessCommand{Type: "subscribe", Events: []string{"done_completion"}}, &mockBackend{}, state, newTestOut().writer())
 
 	envs := filterHeadlessEvent(agent.ToolResultEvent{
 		CallID:     "call-done",
@@ -2602,7 +2603,7 @@ func TestHeadlessDoneToolResultEmitsDoneCompletion(t *testing.T) {
 
 func TestHeadlessDoneToolResultWithoutReportDoesNotNotify(t *testing.T) {
 	state := &headlessState{}
-	handleHeadlessCommand(headlessCommand{Type: "subscribe", Events: []string{"done_completion"}}, &mockBackend{}, state, newTestOut().writer(), "test-session")
+	handleHeadlessCommand(headlessCommand{Type: "subscribe", Events: []string{"done_completion"}}, &mockBackend{}, state, newTestOut().writer())
 
 	envs := filterHeadlessEvent(agent.ToolResultEvent{
 		CallID: "call-done",
@@ -2625,7 +2626,7 @@ func TestHeadlessSubscribeIgnoresUnknownEventTypes(t *testing.T) {
 	}
 	to := newTestOut()
 	backend := &mockBackend{}
-	handleHeadlessCommand(cmd, backend, state, to.writer(), "test-session")
+	handleHeadlessCommand(cmd, backend, state, to.writer())
 
 	// Only "idle" should be in subscriptions
 	state.mu.Lock()
@@ -2807,7 +2808,7 @@ func TestHeadlessHandoffApproveRejectsUnavailableAgent(t *testing.T) {
 	backend := &mockBackend{}
 	to := newTestOut()
 
-	handleHeadlessCommand(headlessCommand{Type: "handoff", RequestID: "handoff-1", Action: "accept", Agent: "ghost"}, backend, state, to.writer(), "sess")
+	handleHeadlessCommand(headlessCommand{Type: "handoff", RequestID: "handoff-1", Action: "accept", Agent: "ghost"}, backend, state, to.writer())
 
 	envs := to.drain()
 	if len(envs) != 1 || envs[0].Type != "error" || !strings.Contains(headlessErrorMessage(t, envs[0]), "not available") {
@@ -2821,14 +2822,14 @@ func TestHeadlessHandoffApproveRejectsUnavailableAgent(t *testing.T) {
 	}
 
 	// The current active role is never selectable either.
-	handleHeadlessCommand(headlessCommand{Type: "handoff", RequestID: "handoff-1", Action: "accept", Agent: "planner"}, backend, state, to.writer(), "sess")
+	handleHeadlessCommand(headlessCommand{Type: "handoff", RequestID: "handoff-1", Action: "accept", Agent: "planner"}, backend, state, to.writer())
 	if state.pendingHandoff == nil || len(backend.handoffCalls) != 0 {
 		t.Fatalf("current-role target must also be rejected: pending=%+v calls=%+v", state.pendingHandoff, backend.handoffCalls)
 	}
 
 	// With no eligible agents at all, a bare accept cannot invent a target.
 	state.pendingHandoff = &headlessHandoffPayload{RequestID: "handoff-2", PlanPath: "/tmp/plan.md"}
-	handleHeadlessCommand(headlessCommand{Type: "handoff", RequestID: "handoff-2", Action: "accept"}, backend, state, to.writer(), "sess")
+	handleHeadlessCommand(headlessCommand{Type: "handoff", RequestID: "handoff-2", Action: "accept"}, backend, state, to.writer())
 	last := to.drain()
 	if len(last) == 0 || last[len(last)-1].Type != "error" || !strings.Contains(headlessErrorMessage(t, last[len(last)-1]), "no eligible") {
 		t.Fatalf("envelopes = %+v, want no-eligible-agent error", last)
