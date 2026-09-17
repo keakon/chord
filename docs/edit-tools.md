@@ -147,6 +147,8 @@ A failed file drags its whole group: if an earlier operation on the same file ma
 
 A move binds both its source and destination into the same dependency boundary. If the move fails, later operations touching either path are also rejected and included in the unapplied operations. The same rule applies when a source group fails after an earlier move appeared to succeed: operations that depended on the moved destination are rolled back with it. This keeps the failure complete instead of reporting a dependent destination edit as committed after its prerequisite was discarded, so a rebuilt operation does not miss this dependency chain.
 
+Failure display: when the patch fails without an applied diff, the tool card keeps the requested-patch preview and labels it separately from the error; it switches to the final diff once execution completes successfully.
+
 ### Error Messages
 
 - **"hunk not found (N/M)"**: The indicated hunk does not match the current file. The error identifies the first expected complete line, or labels it as a prefix when the diagnostic preview is truncated. When available, it also explains that the text occurs only within a longer line or earlier than the preceding hunk. If earlier hunks of the same file matched in memory but a later one failed, none of that file group's hunks were applied. Re-read the target range, rebuild the failing hunk from current complete lines, and keep the group's other hunks with it when you resubmit.
