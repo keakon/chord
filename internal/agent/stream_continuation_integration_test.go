@@ -180,7 +180,7 @@ func TestPreservedInterruptionResumeRotatesKeysAndCompletes(t *testing.T) {
 		completedReply("and the second half"),
 	)
 
-	_, err := a.callLLM(t.Context(), []message.Message{{Role: message.RoleUser, Content: "explain the failure"}})
+	_, err := a.callLLMForRequest(t.Context(), []message.Message{{Role: message.RoleUser, Content: "explain the failure"}}, 0)
 	if err == nil {
 		t.Fatal("callLLM err = nil, want the escalated stream interruption")
 	}
@@ -252,7 +252,7 @@ func TestPreservedInterruptionResumeWaitsForTheOnlyKeyToCool(t *testing.T) {
 		completedReply("and the second half"),
 	)
 
-	_, err := a.callLLM(t.Context(), []message.Message{{Role: message.RoleUser, Content: "explain the failure"}})
+	_, err := a.callLLMForRequest(t.Context(), []message.Message{{Role: message.RoleUser, Content: "explain the failure"}}, 0)
 	if !llm.IsPreservableStreamInterruption(err) {
 		t.Fatalf("callLLM err = %v, want a preservable stream interruption", err)
 	}
@@ -268,7 +268,7 @@ func TestPreservedInterruptionResumeWaitsForTheOnlyKeyToCool(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	_, retryErr := a.callLLM(ctx, a.GetMessages())
+	_, retryErr := a.callLLMForRequest(ctx, a.GetMessages(), 0)
 	waited := time.Since(start)
 
 	if retryErr == nil {
@@ -300,7 +300,7 @@ func TestStreamContinuationMatchesWhatAPrefillCapablePoolReceives(t *testing.T) 
 		t.Skip("chat-completions test pool is not prefill-capable in this build")
 	}
 
-	_, err := a.callLLM(t.Context(), []message.Message{{Role: message.RoleUser, Content: "explain the failure"}})
+	_, err := a.callLLMForRequest(t.Context(), []message.Message{{Role: message.RoleUser, Content: "explain the failure"}}, 0)
 	if !llm.IsPreservableStreamInterruption(err) {
 		t.Fatalf("callLLM err = %v, want a preservable stream interruption", err)
 	}
@@ -347,7 +347,7 @@ func TestConsecutiveResumesKeepEveryPartialAndOneContinuationEach(t *testing.T) 
 		completedReply("the ending"),
 	)
 
-	_, err := a.callLLM(t.Context(), []message.Message{{Role: message.RoleUser, Content: "explain the failure"}})
+	_, err := a.callLLMForRequest(t.Context(), []message.Message{{Role: message.RoleUser, Content: "explain the failure"}}, 0)
 	if !llm.IsPreservableStreamInterruption(err) {
 		t.Fatalf("callLLM err = %v, want a preservable stream interruption", err)
 	}

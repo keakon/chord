@@ -420,6 +420,16 @@ func (t *Turn) streamingToolCallsBefore(callID string) []PendingToolCall {
 	return out
 }
 
+// streamTurnID returns t.ID for tagging streamed deltas, tolerating a nil turn
+// from paths that build a stream reducer before the turn exists. Zero means
+// "unknown" to consumers, which keep the legacy unattributed behavior.
+func streamTurnID(t *Turn) uint64 {
+	if t == nil {
+		return 0
+	}
+	return t.ID
+}
+
 // appendPartialText adds streamed assistant text to the turn's accumulator.
 func (t *Turn) appendPartialText(s string) {
 	if t == nil || s == "" {

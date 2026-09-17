@@ -663,10 +663,10 @@ func TestCallLLMDropsOrphanToolResultsBeforeRequest(t *testing.T) {
 	a.MarkSkillsReady()
 	a.markMCPReady()
 
-	_, err := a.callLLM(context.Background(), []message.Message{
+	_, err := a.callLLMForRequest(context.Background(), []message.Message{
 		{Role: "user", Content: "continue"},
 		{Role: "tool", ToolCallID: "missing", Content: "orphan result"},
-	})
+	}, 0)
 	if err != nil {
 		t.Fatalf("callLLM: %v", err)
 	}
@@ -907,7 +907,7 @@ func TestLazyMainModelPolicyRefreshesEditApplyPatchToolsBeforeRequest(t *testing
 		return client, "claude-sonnet-4", 16384, nil
 	})
 
-	if _, err := a.callLLM(context.Background(), []message.Message{{Role: message.RoleUser, Content: "hi"}}); err != nil {
+	if _, err := a.callLLMForRequest(context.Background(), []message.Message{{Role: message.RoleUser, Content: "hi"}}, 0); err != nil {
 		t.Fatalf("callLLM: %v", err)
 	}
 	if hasToolDefinition(provider.tools, tools.NameApplyPatch) || !hasToolDefinition(provider.tools, tools.NameEdit) {

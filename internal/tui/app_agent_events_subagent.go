@@ -269,7 +269,7 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 		effects.addFollowup(m.startActiveAnimation())
 		if evt.Type == agent.ActivityIdle {
 			if evt.AgentID != "" && evt.AgentID != "main" {
-				m.finalizeAgentStream(evt.AgentID)
+				m.finalizeAgentStreamForIdleEvent(evt.AgentID)
 			}
 			if m.inflightDraftBelongsToAgent(evt.AgentID) {
 				m.inflightDraft = nil

@@ -350,6 +350,123 @@ func TestAppendCompletedInterruptedToolResultPersistsPayload(t *testing.T) {
 	}
 }
 
+// TestCancelCurrentTurnStreamSegmentEndFollowsFlushedTail pins the ESC-cancel
+// producer ordering. The cancelled turn ends immediately and its IdleEvent is
+// emitted right away; the request goroutine still flushes the last text and
+// thinking batches afterwards and only then reports the end of its streaming
+// segment, on the same output channel. The TUI settles the streaming card on
+// that report, so the tail is rendered before the card closes instead of opening
+// a second card holding the rest of the reply (see StreamSegmentEndedEvent).
+// Both kinds of delta carry the segment identity the TUI attributes them by.
+func TestCancelCurrentTurnStreamSegmentEndFollowsFlushedTail(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	providerCfg := llm.NewProviderConfig("sample/test-provider", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"test-model": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+		},
+	}, []string{"test-key"})
+	provider := &shutdownBlockingProvider{
+		started:        make(chan struct{}),
+		release:        make(chan struct{}),
+		thinkingDeltas: []string{"weighing ", "options"},
+		textDeltas:     []string{"first chunk ", "second chunk"},
+	}
+	a.swapLLMClientWithRef(llm.NewClient(providerCfg, provider, "test-model", 4096, "sys"), "test-model", 128000, "sample/test-provider/test-model")
+	a.markAgentsMDReady()
+	a.MarkSkillsReady()
+	a.markMCPReady()
+
+	a.newTurn()
+	turnID := a.turn.ID
+	a.spawnMainLLMResponseGoroutine(a.turn.Ctx, turnID, []message.Message{{Role: "user", Content: "hello"}}, "")
+	<-provider.started
+
+	if cancelled := a.CancelCurrentTurn(); !cancelled {
+		t.Fatal("CancelCurrentTurn() = false, want true")
+	}
+	a.dispatch(Event{
+		Type:   EventTurnCancelled,
+		TurnID: turnID,
+		Payload: &TurnCancelledPayload{
+			TurnID: turnID,
+		},
+	})
+
+	if a.turn != nil {
+		t.Fatal("the cancelled turn must end as soon as it is handled, without waiting for the producer")
+	}
+
+	// The producer wakes on the cancelled context, flushes its buffered text and
+	// reports the segment end last.
+	a.outputWg.Wait()
+
+	var text, thinking string
+	sawThinkingStarted := false
+	sawThinkingCommit := false
+	sawEnd := false
+	for _, evt := range drainAgentEvents(a.Events()) {
+		switch evt := evt.(type) {
+		case ThinkingStartedEvent:
+			if sawEnd {
+				t.Fatal("ThinkingStartedEvent emitted after StreamSegmentEndedEvent")
+			}
+			if evt.TurnID != turnID || evt.RequestSeq == 0 {
+				t.Fatalf("ThinkingStartedEvent identity = (turn %d, request %d), want turn %d and a request sequence", evt.TurnID, evt.RequestSeq, turnID)
+			}
+			sawThinkingStarted = true
+		case StreamThinkingDeltaEvent:
+			if sawEnd {
+				t.Fatalf("thinking delta %q emitted after StreamSegmentEndedEvent", evt.Text)
+			}
+			if evt.TurnID != turnID || evt.RequestSeq == 0 {
+				t.Fatalf("thinking delta identity = (turn %d, request %d), want turn %d and a request sequence", evt.TurnID, evt.RequestSeq, turnID)
+			}
+			thinking += evt.Text
+		case StreamThinkingEvent:
+			if sawEnd {
+				t.Fatal("thinking commit emitted after StreamSegmentEndedEvent")
+			}
+			if evt.TurnID != turnID || evt.RequestSeq == 0 {
+				t.Fatalf("thinking commit identity = (turn %d, request %d), want turn %d and a request sequence", evt.TurnID, evt.RequestSeq, turnID)
+			}
+			sawThinkingCommit = true
+		case StreamTextEvent:
+			if sawEnd {
+				t.Fatalf("text delta %q emitted after StreamSegmentEndedEvent", evt.Text)
+			}
+			if evt.TurnID != turnID || evt.RequestSeq == 0 {
+				t.Fatalf("text delta identity = (turn %d, request %d), want turn %d and a request sequence", evt.TurnID, evt.RequestSeq, turnID)
+			}
+			text += evt.Text
+		case StreamSegmentEndedEvent:
+			sawEnd = true
+			if evt.TurnID != turnID {
+				t.Fatalf("segment end turn = %d, want %d", evt.TurnID, turnID)
+			}
+			if evt.RequestSeq == 0 {
+				t.Fatal("segment end must carry the request sequence that produced the text")
+			}
+		}
+	}
+	if !sawEnd {
+		t.Fatal("StreamSegmentEndedEvent must be emitted after the producer's final flush")
+	}
+	if thinking != "weighing options" {
+		t.Fatalf("streamed thinking = %q, want the reasoning the cancelled request flushed", thinking)
+	}
+	if !sawThinkingStarted {
+		t.Fatal("ThinkingStartedEvent must carry the cancelled request's segment identity")
+	}
+	if !sawThinkingCommit {
+		t.Fatal("the thinking block must be committed before the segment end")
+	}
+	if text != "first chunk second chunk" {
+		t.Fatalf("streamed text = %q, want the full text flushed by the cancelled request", text)
+	}
+}
+
 func TestHandleTurnCancelledIgnoresStaleEventAfterNewTurn(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)

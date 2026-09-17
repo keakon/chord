@@ -128,6 +128,15 @@ func (m *Model) rebuildViewportFromMessagesPreservingActivity(reason string, pre
 	m.currentThinkingBlock = nil
 	m.thinkingBlockAppended = false
 	m.subAgentStreamStates = nil
+	// Both records describe the cards the rebuild is about to drop, so they go
+	// with them: a segment that starts after the rebuild reports its own end,
+	// and a delta of a pre-rebuild segment can no longer be attributed to a
+	// card. Keeping settledStreamSegments would be worse than clearing it — a
+	// rebuild can land while a producer is still streaming, and the record
+	// would then fold the rest of that live reply into a card that no longer
+	// exists, dropping it instead of showing it in a card of its own.
+	m.streamEndedSegments = nil
+	m.settledStreamSegments = nil
 	m.resetTimingStateForSessionRestore(preserveRequestActivity)
 	m.closeAtMention()
 	messagesStarted := time.Now()

@@ -336,7 +336,7 @@ type mainLLMStreamState struct {
 	requestProgressEvents int64
 }
 
-func (a *MainAgent) newMainLLMStreamReducer(llmClient *llm.Client, selectedRef, prevRunningRef string, turn *Turn, scrubThinkingMarkers bool, state *mainLLMStreamState) *llmStreamReducer {
+func (a *MainAgent) newMainLLMStreamReducer(llmClient *llm.Client, selectedRef, prevRunningRef string, turn *Turn, scrubThinkingMarkers bool, state *mainLLMStreamState, requestSeq uint64) *llmStreamReducer {
 	if state == nil {
 		state = &mainLLMStreamState{}
 	}
@@ -387,8 +387,10 @@ func (a *MainAgent) newMainLLMStreamReducer(llmClient *llm.Client, selectedRef, 
 
 	streamReducer := &llmStreamReducer{}
 	streamReducer.content = streamContentReducer{
-		agentID: "",
-		emit:    a.emitToTUI,
+		agentID:    "",
+		turnID:     streamTurnID(turn),
+		requestSeq: requestSeq,
+		emit:       a.emitToTUI,
 		appendPartialText: func(text string) {
 			if turn != nil {
 				turn.appendPartialText(text)
@@ -530,10 +532,12 @@ func (a *MainAgent) newMainLLMStreamReducer(llmClient *llm.Client, selectedRef, 
 	return streamReducer
 }
 
-// callLLM invokes the LLM with the given message history. Streaming deltas are
-// forwarded to the TUI in real-time via emitToTUI. Token usage is recorded in
-// the context manager.
-func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*message.Response, error) {
+// callLLMForRequest runs one main-agent LLM request. requestSeq is the streaming
+// segment the emitted deltas belong to, so a consumer can attribute them to the
+// request that produced them; 0 marks a caller without an allocated segment
+// (direct calls in tests). The production path passes the sequence allocated by
+// spawnMainLLMResponseGoroutine.
+func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Message, requestSeq uint64) (*message.Response, error) {
 	if err := a.ensureMainModelPolicy(); err != nil {
 		return nil, err
 	}
@@ -658,7 +662,7 @@ func (a *MainAgent) callLLM(ctx context.Context, messages []message.Message) (*m
 	// reader, so high-volume deltas stay best-effort while durable/structural
 	// events are emitted through the shared reducer.
 	streamState := &mainLLMStreamState{}
-	streamReducer := a.newMainLLMStreamReducer(llmClient, selectedRef, prevRunningRef, turn, scrubThinkingMarkers, streamState)
+	streamReducer := a.newMainLLMStreamReducer(llmClient, selectedRef, prevRunningRef, turn, scrubThinkingMarkers, streamState, requestSeq)
 	callback := streamReducer.Handle
 
 	// Request-context telemetry helps diagnose oversized prompts without changing the request surface.

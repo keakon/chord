@@ -10,7 +10,7 @@ import (
 
 // backgroundResultAppended builds the durable-append event a finished
 // background job emits: the card is driven by the persisted
-// KindBackgroundResult message, not by the live JobFinishedEvent.
+// KindBackgroundResult message, not by a live completion notification.
 func backgroundResultAppended(targetAgentID, messageID, raw string) agent.BackgroundResultAppendedEvent {
 	return agent.BackgroundResultAppendedEvent{
 		Message: message.Message{

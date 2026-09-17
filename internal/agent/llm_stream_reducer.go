@@ -21,7 +21,13 @@ const (
 
 type streamContentReducer struct {
 	agentID string
-	emit    func(AgentEvent)
+	// turnID and requestSeq tag every emitted delta and ThinkingStartedEvent
+	// with the streaming segment that produced it, so a late chunk (the final
+	// batch flushed after a cancel) stays attributable to the request it came
+	// from, and a thinking placeholder is not settled by an older segment end.
+	turnID     uint64
+	requestSeq uint64
+	emit       func(AgentEvent)
 
 	appendPartialText            func(string)
 	appendPartialResponsesOutput func(message.ResponsesOutputItem)
@@ -127,7 +133,7 @@ func (r *streamContentReducer) handleThinking(text string) {
 	if !r.thinkingActive {
 		r.thinkingActive = true
 		if r.emitThinkingStarted && r.emit != nil {
-			r.emit(ThinkingStartedEvent{AgentID: r.agentID})
+			r.emit(ThinkingStartedEvent{AgentID: r.agentID, TurnID: r.turnID, RequestSeq: r.requestSeq})
 		}
 		r.thinkingLastEmit = time.Now()
 	}
@@ -152,7 +158,7 @@ func (r *streamContentReducer) flushTextDelta() {
 		text := r.textAccum.String()
 		r.textAccum.Reset()
 		if r.emit != nil {
-			r.emit(StreamTextEvent{Text: text, AgentID: r.agentID})
+			r.emit(StreamTextEvent{Text: text, AgentID: r.agentID, TurnID: r.turnID, RequestSeq: r.requestSeq})
 		}
 	}
 	r.textLastEmit = time.Now()
@@ -178,7 +184,7 @@ func (r *streamContentReducer) emitThinkingDelta(text string, scrub bool) {
 		text = scrubThinkingToolcallMarkers(text)
 	}
 	if strings.TrimSpace(text) != "" {
-		r.emit(StreamThinkingDeltaEvent{Text: text, AgentID: r.agentID})
+		r.emit(StreamThinkingDeltaEvent{Text: text, AgentID: r.agentID, TurnID: r.turnID, RequestSeq: r.requestSeq})
 	}
 }
 
@@ -210,7 +216,7 @@ func (r *streamContentReducer) closeThinkingBlock() {
 	r.thinkingFull.Reset()
 	r.thinkingActive = false
 	if r.emit != nil {
-		r.emit(StreamThinkingEvent{Text: finalText, AgentID: r.agentID})
+		r.emit(StreamThinkingEvent{Text: finalText, AgentID: r.agentID, TurnID: r.turnID, RequestSeq: r.requestSeq})
 	}
 }
 

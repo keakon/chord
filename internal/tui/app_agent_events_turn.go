@@ -14,7 +14,12 @@ func (m *Model) handleTurnAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 	case agent.IdleEvent:
 		effects.invalidateUsage = true
 		m.clearSessionSwitch()
-		m.finalizeTurn()
+		// The turn is over: a text or thinking delta still in flight (the final
+		// batch a cancelled provider goroutine flushes after this event)
+		// belongs to the settled card and must merge back instead of opening a
+		// second card split mid-word.
+		m.markAgentStreamSettled("")
+		m.finalizeTurnForIdleEvent()
 		cancelledByUser := m.pauseQueuedDraftDrainOnce
 		prevMain := m.activities["main"].Type
 		m.markAgentIdle("main")
@@ -41,7 +46,11 @@ func (m *Model) handleTurnAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 	case agent.GlobalIdleEvent:
 		effects.invalidateUsage = true
 		m.clearSessionSwitch()
-		m.finalizeTurn()
+		m.markAgentStreamSettled("")
+		for agentID := range m.subAgentStreamStates {
+			m.markAgentStreamSettled(agentID)
+		}
+		m.finalizeTurnForIdleEvent()
 		m.markAgentIdle("main")
 		m.stopActiveAnimationIfIdle()
 		pendingAutoContinue := m.queuedDraftsAutoContinue() || (!m.queueSyncEnabled && len(m.visibleQueuedDrafts()) > 0)
@@ -59,9 +68,9 @@ func (m *Model) handleTurnAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			m.editingQueuedDraftID = ""
 		}
 		if evt.AgentID == "" || evt.AgentID == "main" {
-			m.finalizeTurn()
+			m.finalizeTurnForIdleEvent()
 		} else {
-			m.finalizeAgentStream(evt.AgentID)
+			m.finalizeAgentStreamForIdleEvent(evt.AgentID)
 		}
 		imageCount := 0
 		content := userBlockTextFromParts(draft.contentParts(), draft.Content)

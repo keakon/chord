@@ -2201,7 +2201,7 @@ func TestCallLLMLogsPreparedReductionStatsWhenFocusedSubAgentExists(t *testing.T
 		{Role: "user", Content: "u4"},
 	}
 
-	if _, err := a.callLLM(context.Background(), msgs); err != nil {
+	if _, err := a.callLLMForRequest(context.Background(), msgs, 0); err != nil {
 		t.Fatalf("callLLM: %v", err)
 	}
 	logOutput := buf.String()
@@ -5273,7 +5273,7 @@ func TestCleanupStalePendingCompactions(t *testing.T) {
 	}
 }
 
-func TestJobFinishedEventHandledImmediatelyDuringCompaction(t *testing.T) {
+func TestJobFinishedHandledImmediatelyDuringCompaction(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerManual, continuationPlan{kind: compactionResumeIdle})

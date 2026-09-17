@@ -45,7 +45,7 @@ func TestCallLLMPromotesStreamingActivityOnToolUseStartWithoutStatusDelta(t *tes
 	client := llm.NewClient(providerCfg, providerImpl, "test-model", 4096, "sys")
 	a.swapLLMClientWithRef(client, "test-model", 128000, "sample/test-model")
 
-	_, err := a.callLLM(context.Background(), []message.Message{{Role: "user", Content: "hi"}})
+	_, err := a.callLLMForRequest(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, 0)
 	if err != nil {
 		t.Fatalf("callLLM: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestMainLLMStatusModelRefUpdatesRunningModelBeforeVisibleOutput(t *testing.
 	a.SetProviderModelRef("sample/gpt-5.5@xhigh")
 
 	state := &mainLLMStreamState{}
-	reducer := a.newMainLLMStreamReducer(nil, "sample/gpt-5.5@xhigh", "sample/gpt-5.5@xhigh", nil, false, state)
+	reducer := a.newMainLLMStreamReducer(nil, "sample/gpt-5.5@xhigh", "sample/gpt-5.5@xhigh", nil, false, state, 0)
 	reducer.Handle(message.StreamDelta{
 		Type: "status",
 		Status: &message.StatusDelta{
@@ -127,7 +127,7 @@ func TestCallLLMClosesThinkingBeforeFirstText(t *testing.T) {
 	client := llm.NewClient(providerCfg, providerImpl, "test-model", 4096, "sys")
 	a.swapLLMClientWithRef(client, "test-model", 128000, "sample/test-model")
 
-	if _, err := a.callLLM(context.Background(), []message.Message{{Role: "user", Content: "hi"}}); err != nil {
+	if _, err := a.callLLMForRequest(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, 0); err != nil {
 		t.Fatalf("callLLM: %v", err)
 	}
 
@@ -142,8 +142,12 @@ func TestCallLLMClosesThinkingBeforeFirstText(t *testing.T) {
 	if len(streamEvents) != 4 {
 		t.Fatalf("stream event count = %d, want 4; events=%#v", len(streamEvents), streamEvents)
 	}
-	if _, ok := streamEvents[0].(ThinkingStartedEvent); !ok {
+	started, ok := streamEvents[0].(ThinkingStartedEvent)
+	if !ok {
 		t.Fatalf("streamEvents[0] = %T, want ThinkingStartedEvent", streamEvents[0])
+	}
+	if started.TurnID != a.turn.ID {
+		t.Fatalf("ThinkingStartedEvent.TurnID = %d, want the active turn %d", started.TurnID, a.turn.ID)
 	}
 	thinkDelta, ok := streamEvents[1].(StreamThinkingDeltaEvent)
 	if !ok {
@@ -204,7 +208,7 @@ func TestCallLLMDoesNotTranslateStreamingThinkingBlocks(t *testing.T) {
 	client := llm.NewClient(providerCfg, providerImpl, "test-model", 4096, "sys")
 	a.swapLLMClientWithRef(client, "test-model", 128000, "sample/test-model")
 
-	if _, err := a.callLLM(context.Background(), a.GetMessages()); err != nil {
+	if _, err := a.callLLMForRequest(context.Background(), a.GetMessages(), 0); err != nil {
 		t.Fatalf("callLLM: %v", err)
 	}
 	a.outputWg.Wait()
@@ -351,7 +355,7 @@ func TestCallLLMOnlyEmitsOneStreamingActivityWhenStatusAlsoArrives(t *testing.T)
 	client := llm.NewClient(providerCfg, providerImpl, "test-model", 4096, "sys")
 	a.swapLLMClientWithRef(client, "test-model", 128000, "sample/test-model")
 
-	_, err := a.callLLM(context.Background(), []message.Message{{Role: "user", Content: "hi"}})
+	_, err := a.callLLMForRequest(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, 0)
 	if err != nil {
 		t.Fatalf("callLLM: %v", err)
 	}

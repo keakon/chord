@@ -70,7 +70,7 @@ func TestCallLLMInjectsWorkingDirectoryReminderIntoFirstProviderRequest(t *testi
 	}, []string{"test-key"})
 	a.llmClient = llm.NewClient(providerCfg, provider, "model", 1024, "")
 
-	_, err := a.callLLM(t.Context(), []message.Message{{Role: "user", Content: "where am I"}})
+	_, err := a.callLLMForRequest(t.Context(), []message.Message{{Role: "user", Content: "where am I"}}, 0)
 	if err != nil {
 		t.Fatalf("callLLM: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestCallLLMInjectsAgentsMDReminderIntoFirstProviderRequest(t *testing.T) {
 	}, []string{"test-key"})
 	a.llmClient = llm.NewClient(providerCfg, provider, "model", 1024, "")
 
-	_, err := a.callLLM(t.Context(), []message.Message{{Role: "user", Content: "analyze hardcoded behavior"}})
+	_, err := a.callLLMForRequest(t.Context(), []message.Message{{Role: "user", Content: "analyze hardcoded behavior"}}, 0)
 	if err != nil {
 		t.Fatalf("callLLM: %v", err)
 	}

@@ -210,6 +210,15 @@ type Block struct {
 	// message this card represents. It is meaningful only for thinking blocks.
 	ThinkingBlockIndex int
 
+	// StreamTurnID and StreamRequestSeq identify the producer segment that owns
+	// this streaming card (0 = unknown, e.g. transcript-restored or test-built
+	// cards). A delta carrying the same identity continues the card; an older
+	// segment's delta merges back into the card it produced; a newer one opens
+	// a new card. The card is settled by the StreamSegmentEndedEvent of this
+	// identity, not by a scheduling idle signal (see streamSegmentPending).
+	StreamTurnID     uint64
+	StreamRequestSeq uint64
+
 	// FileRefs holds the @-mentioned file paths injected with this user message.
 	// Used only for TUI display; not sent to the LLM separately (content is in Parts).
 	FileRefs []string

@@ -90,9 +90,14 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		// extra input), so a non-empty Text is rendered as the status card for
 		// that message — what the user sees is exactly what the model was sent,
 		// never a display-only notice.
+		//
+		// The interrupted request's producer is finished (its error already
+		// reached the loop), so its segment is recorded as settled: a batch it
+		// flushed after this boundary folds into the card just settled rather
+		// than opening a second card holding the tail of the same reply.
 		m.invalidateStatusBarAgentSnapshot()
 		m.invalidateDrawCaches()
-		m.finalizeAgentStream(evt.AgentID)
+		m.finalizeAgentStreamSettled(evt.AgentID)
 		content := strings.TrimSpace(evt.Text)
 		if content == "" {
 			return true, effects
@@ -222,17 +227,6 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		return true, effects
 	case agent.ContextNoticeClearedEvent:
 		m.removeContextNoticeBlocks()
-		return true, effects
-	case agent.JobFinishedEvent:
-		// A finished background object no longer builds a card here: the card
-		// comes from BackgroundResultAppendedEvent once the result is durably
-		// in the owner's transcript, so a queued-but-undelivered result shows
-		// in the pending area instead of as a card with no backing message.
-		agentID := evt.AgentID
-		if agentID == "main" {
-			agentID = ""
-		}
-		m.finalizeAgentStream(agentID)
 		return true, effects
 	case agent.BackgroundResultAppendedEvent:
 		// The result is durable now: drop its pending-area entry and build the

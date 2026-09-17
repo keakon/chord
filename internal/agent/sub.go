@@ -92,24 +92,28 @@ const inputChanCap = 64
 // external user input is enqueued via InjectUserMessage / InjectUserMessageWithParts.
 // Cross-goroutine lifecycle flags use atomics.
 type SubAgent struct {
-	instanceID           string // immutable, from NextInstanceID()
-	taskID               string // plan task ID or "adhoc-N"
-	agentDefName         string // agent definition name (e.g. "backend-coder")
-	taskDesc             string // task description (from Plan or ad-hoc)
-	planTaskRef          string
-	semanticTaskKey      string
-	writeScopeMu         sync.RWMutex
-	writeScope           tools.WriteScope
-	ownerMu              sync.RWMutex
-	ownerAgentID         string
-	ownerTaskID          string
-	depth                int
-	joinToOwner          bool
-	delegation           config.DelegationConfig
-	color                string // optional ANSI color code from agent config for TUI display
-	llmMu                sync.RWMutex
-	llmClient            *llm.Client
-	llmRequestInFlight   atomic.Bool
+	instanceID         string // immutable, from NextInstanceID()
+	taskID             string // plan task ID or "adhoc-N"
+	agentDefName       string // agent definition name (e.g. "backend-coder")
+	taskDesc           string // task description (from Plan or ad-hoc)
+	planTaskRef        string
+	semanticTaskKey    string
+	writeScopeMu       sync.RWMutex
+	writeScope         tools.WriteScope
+	ownerMu            sync.RWMutex
+	ownerAgentID       string
+	ownerTaskID        string
+	depth              int
+	joinToOwner        bool
+	delegation         config.DelegationConfig
+	color              string // optional ANSI color code from agent config for TUI display
+	llmMu              sync.RWMutex
+	llmClient          *llm.Client
+	llmRequestInFlight atomic.Bool
+	// llmRequestSeq counts this agent's LLM request goroutines. It is written
+	// only by the run loop before spawning one, so the goroutine can capture a
+	// stable streaming-segment identity (see StreamSegmentEndedEvent).
+	llmRequestSeq        uint64
 	unsupportedPartToast toastGate
 	persistenceHealth    agentPersistenceHealth
 	startupWatchdogSeq   atomic.Uint64
@@ -873,7 +877,13 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.M
 	compatCfg := llmClient.ThinkingToolcallCompat()
 	scrubThinkingMarkers := compatCfg != nil && compatCfg.EnabledValue()
 
+	s.llmRequestSeq++
+	requestSeq := s.llmRequestSeq
 	s.llmWG.Go(func() {
+		// Report the segment end last: this goroutine emits this request's last
+		// text delta in streamReducer.Finish below, and the TUI settles the
+		// streaming card on this event (see StreamSegmentEndedEvent).
+		defer s.parent.emitToTUI(StreamSegmentEndedEvent{AgentID: s.instanceID, TurnID: turn.ID, RequestSeq: requestSeq})
 		resultQueued := false
 		defer func() {
 			// A queued result still belongs to the active request until runLoop
@@ -930,7 +940,7 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.M
 		}
 
 		streamState := &subLLMStreamState{}
-		streamReducer := s.newSubLLMStreamReducer(turn, promoteStreamingActivity, scrubThinkingMarkers, streamState)
+		streamReducer := s.newSubLLMStreamReducer(turn, promoteStreamingActivity, scrubThinkingMarkers, streamState, requestSeq)
 
 		callback := streamReducer.Handle
 
@@ -1030,7 +1040,7 @@ type subLLMStreamState struct {
 	requestProgressEvents int64
 }
 
-func (s *SubAgent) newSubLLMStreamReducer(turn *Turn, promoteStreamingActivity func(string), scrubThinkingMarkers bool, state *subLLMStreamState) *llmStreamReducer {
+func (s *SubAgent) newSubLLMStreamReducer(turn *Turn, promoteStreamingActivity func(string), scrubThinkingMarkers bool, state *subLLMStreamState, requestSeq uint64) *llmStreamReducer {
 	if state == nil {
 		state = &subLLMStreamState{}
 	}
@@ -1056,6 +1066,8 @@ func (s *SubAgent) newSubLLMStreamReducer(turn *Turn, promoteStreamingActivity f
 	}
 	streamReducer.content = streamContentReducer{
 		agentID:                      s.instanceID,
+		turnID:                       streamTurnID(turn),
+		requestSeq:                   requestSeq,
 		emit:                         s.parent.emitToTUI,
 		appendPartialText:            turn.appendPartialText,
 		appendPartialResponsesOutput: turn.appendPartialResponsesOutput,

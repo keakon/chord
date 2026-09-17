@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -369,39 +368,6 @@ func TestBackgroundCompletionToastLevelFollowsTerminalStatus(t *testing.T) {
 			t.Errorf("backgroundCompletionToastLevel(%q) = %q, want %q", tt.status, got, tt.want)
 		}
 	}
-}
-
-// TestJobFinishedEventNormalizesMainOwnerAgentID pins that the lightweight
-// job-finished notification names the main agent with the shared identity
-// instead of its internal instance id, so the TUI's "main" -> "" normalization
-// applies uniformly; every other owner keeps its instance id.
-func TestJobFinishedEventNormalizesMainOwnerAgentID(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	a.handleJobFinished(Event{Type: EventJobFinished, SourceID: identity.MainAgentID, Payload: backgroundResultPayload(a.instanceID, "job-main", "run tests")})
-	if got := lastJobFinishedEvent(t, a); got.AgentID != identity.MainAgentID {
-		t.Fatalf("JobFinishedEvent.AgentID = %q, want %q (main owner normalized)", got.AgentID, identity.MainAgentID)
-	}
-
-	a.handleJobFinished(Event{Type: EventJobFinished, SourceID: identity.MainAgentID, Payload: backgroundResultPayload("worker-owner-1", "job-sub", "run tests")})
-	if got := lastJobFinishedEvent(t, a); got.AgentID != "worker-owner-1" {
-		t.Fatalf("JobFinishedEvent.AgentID = %q, want the sub-agent owner %q", got.AgentID, "worker-owner-1")
-	}
-}
-
-func lastJobFinishedEvent(t *testing.T, a *MainAgent) JobFinishedEvent {
-	t.Helper()
-	var found JobFinishedEvent
-	ok := false
-	for _, evt := range drainAgentEvents(a.outputCh) {
-		if e, isJobFinished := evt.(JobFinishedEvent); isJobFinished {
-			found = e
-			ok = true
-		}
-	}
-	if !ok {
-		t.Fatal("handleJobFinished emitted no JobFinishedEvent")
-	}
-	return found
 }
 
 // TestHandleJobFinishedDropsCrossSessionCompletion pins the session-identity

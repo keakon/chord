@@ -584,10 +584,17 @@ func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID
 func (a *MainAgent) spawnMainLLMResponseGoroutine(turnCtx context.Context, turnID uint64, messages []message.Message, agentErrSourceID string) {
 	a.pendingLoopContinuation = nil
 	a.mainLLMRequestInFlight.Store(true)
+	a.mainRequestSeq++
+	requestSeq := a.mainRequestSeq
 	turnEpoch := a.currentTurnEpoch()
 	sessionEpoch := a.sessionEpoch
 	a.outputWg.Go(func() {
-		resp, err := a.callLLM(turnCtx, messages)
+		// Report the segment end last: callLLM below emits this request's final
+		// text flush before returning, and the TUI settles the streaming card on
+		// this event rather than on a scheduling idle signal that can overtake
+		// that flush (see StreamSegmentEndedEvent).
+		defer a.emitToTUI(StreamSegmentEndedEvent{TurnID: turnID, RequestSeq: requestSeq})
+		resp, err := a.callLLMForRequest(turnCtx, messages, requestSeq)
 		if err != nil {
 			if turnCtx.Err() != nil {
 				return

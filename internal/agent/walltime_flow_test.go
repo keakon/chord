@@ -33,7 +33,7 @@ func TestWalltimeMainLLMCallSettlesModelTime(t *testing.T) {
 	a.MarkSkillsReady()
 	a.markMCPReady()
 
-	_, err := a.callLLM(context.Background(), []message.Message{{Role: "user", Content: "hi"}})
+	_, err := a.callLLMForRequest(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, 0)
 	if err != nil {
 		t.Fatalf("callLLM: %v", err)
 	}

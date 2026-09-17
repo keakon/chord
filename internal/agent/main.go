@@ -285,6 +285,10 @@ type MainAgent struct {
 	// are applied at the next request boundary, so they do not invalidate the
 	// request currently producing output.
 	mainLLMRequestInFlight atomic.Bool
+	// mainRequestSeq counts the main LLM request goroutines spawned for the
+	// foreground LLM slot. It is event-loop owned and doubles as the streaming
+	// segment identity of the request (see StreamSegmentEndedEvent).
+	mainRequestSeq uint64
 	// mainSlotForeground tracks whether the shared main activity slot currently
 	// shows a live foreground request/tool state. Compaction activity emissions
 	// consult it so heartbeats never clobber visible main-model progress. It is

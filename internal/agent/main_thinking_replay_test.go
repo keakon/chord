@@ -253,9 +253,9 @@ func TestCallLLMInjectsThinkingReplayPrefixWireOnly(t *testing.T) {
 	a.MarkSkillsReady()
 	a.markMCPReady()
 
-	_, err := a.callLLM(context.Background(), []message.Message{
+	_, err := a.callLLMForRequest(context.Background(), []message.Message{
 		{Role: "user", Content: "original question"},
-	})
+	}, 0)
 	if err != nil {
 		t.Fatalf("callLLM: %v", err)
 	}

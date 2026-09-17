@@ -57,7 +57,7 @@ func TestCallLLMShowsKeySwitchToastOnFirstToolCallToken(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := a.callLLM(context.Background(), []message.Message{{Role: "user", Content: "hi"}})
+		_, err := a.callLLMForRequest(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, 0)
 		done <- err
 	}()
 
@@ -138,7 +138,7 @@ func TestCallLLMEmitsToolArgCompletionUpdateOnToolUseEnd(t *testing.T) {
 	client := llm.NewClient(providerCfg, providerImpl, "test-model", 4096, "sys")
 	a.swapLLMClientWithRef(client, "test-model", 128000, "sample/test-model")
 
-	_, err := a.callLLM(context.Background(), []message.Message{{Role: "user", Content: "hi"}})
+	_, err := a.callLLMForRequest(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, 0)
 	if err != nil {
 		t.Fatalf("callLLM: %v", err)
 	}

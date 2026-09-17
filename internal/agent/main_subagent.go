@@ -831,15 +831,6 @@ func (a *MainAgent) handleJobFinished(evt Event) {
 		mailbox.OwnerAgentID = sub.instanceID
 		mailbox.OwnerTaskID = taskIDForSub(sub)
 	}
-	// Normalize the main owner (payload.AgentID is the main instance id, not
-	// the shared identity) so the TUI's "main" -> "" normalization applies and
-	// the event names the main agent uniformly. Every other owner keeps its
-	// instance id.
-	ownerAgentID := payload.AgentID
-	if ownerAgentID == a.instanceID {
-		ownerAgentID = identity.MainAgentID
-	}
-	a.emitToTUI(JobFinishedEvent{AgentID: ownerAgentID})
 	a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Background job %s finished", backgroundID), Level: backgroundCompletionToastLevel(payload.Status), AgentID: payload.AgentID})
 	a.enqueueSubAgentMailbox(mailbox)
 	if sub == nil && a.turn == nil && !a.mailboxDeliveryPaused.Load() {

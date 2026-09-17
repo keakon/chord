@@ -31,6 +31,37 @@ type agentStreamState struct {
 	thinkingAppended  bool
 }
 
+// streamSegmentIdentity identifies one producer streaming segment: the turn it
+// belongs to plus the request sequence within that turn. One turn holds several
+// requests when tools or compaction continue it, so the turn alone cannot say
+// whether an incoming delta continues the current card or belongs to a segment
+// whose card is already gone.
+type streamSegmentIdentity struct {
+	turnID     uint64
+	requestSeq uint64
+}
+
+// known reports whether the identity carries producer information. A zero
+// identity comes from a path (or a test) that never tagged its deltas; such
+// cards keep the legacy behavior of settling on any terminal event.
+func (id streamSegmentIdentity) known() bool {
+	return id.turnID != 0 || id.requestSeq != 0
+}
+
+// after reports whether id is a strictly newer segment than other.
+func (id streamSegmentIdentity) after(other streamSegmentIdentity) bool {
+	if id.turnID != other.turnID {
+		return id.turnID > other.turnID
+	}
+	return id.requestSeq > other.requestSeq
+}
+
+// covers reports whether other is id or an older segment, i.e. its producer has
+// finished by the time id ended.
+func (id streamSegmentIdentity) covers(other streamSegmentIdentity) bool {
+	return !other.after(id)
+}
+
 func (m *Model) streamState(agentID string) agentStreamState {
 	if agentID == "" {
 		return agentStreamState{
@@ -114,6 +145,34 @@ func (m *Model) markAllReceivingToolCallsComplete() {
 
 func (m *Model) finalizeAgentStream(agentID string) {
 	m.finalizeAgentStreamForCard(agentID, false)
+}
+
+// markAgentStreamSettled records agentID's streaming cards as settled, so a
+// batch the producer flushes afterwards folds back into its own card instead of
+// opening a second one.
+func (m *Model) markAgentStreamSettled(agentID string) {
+	state := m.streamState(agentID)
+	if b := state.assistant; b != nil {
+		m.markStreamSegmentSettled(agentID, blockStreamSegmentIdentity(b))
+	}
+	if b := state.thinking; b != nil {
+		m.markStreamSegmentSettled(agentID, blockStreamSegmentIdentity(b))
+	}
+}
+
+// finalizeAgentStreamSettled settles agentID's streaming cards and records the
+// segment they belonged to as settled, so a batch the producer flushes
+// afterwards folds back into its own card instead of opening a second one.
+//
+// Use it only at a boundary where the producer is known to be finished — a
+// preserved stream interruption being resumed, whose request already returned
+// its error. It is deliberately not what finalizeAgentStream does: a transcript
+// rebuild settles cards through that path while a producer may still be
+// streaming, and recording the segment there would make the rest of a live
+// reply merge into a card the rebuild just dropped, i.e. lose it.
+func (m *Model) finalizeAgentStreamSettled(agentID string) {
+	m.markAgentStreamSettled(agentID)
+	m.finalizeAgentStream(agentID)
 }
 
 // finalizeAgentStreamForCard settles the in-flight streaming blocks for

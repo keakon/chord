@@ -43,10 +43,12 @@ func TestStreamContentReducerMainClosesThinkingBeforeTextAndIgnoresLateThinking(
 	}
 }
 
-func TestStreamContentReducerThinkingStartedIncludesAgentID(t *testing.T) {
+func TestStreamContentReducerThinkingStartedIncludesSegmentIdentity(t *testing.T) {
 	var events []AgentEvent
 	reducer := streamContentReducer{
 		agentID:               "agent-1",
+		turnID:                4,
+		requestSeq:            2,
 		emit:                  func(evt AgentEvent) { events = append(events, evt) },
 		emitThinkingStarted:   true,
 		thinkingCommitMode:    streamContentCommitFullText,
@@ -64,6 +66,9 @@ func TestStreamContentReducerThinkingStartedIncludesAgentID(t *testing.T) {
 	}
 	if started.AgentID != "agent-1" {
 		t.Fatalf("ThinkingStartedEvent.AgentID = %q, want agent-1", started.AgentID)
+	}
+	if started.TurnID != 4 || started.RequestSeq != 2 {
+		t.Fatalf("ThinkingStartedEvent identity = (turn %d, request %d), want (4, 2)", started.TurnID, started.RequestSeq)
 	}
 }
 
@@ -167,7 +172,7 @@ func TestLLMStreamReducerIgnoresTraceOnlyEventDelta(t *testing.T) {
 func TestMainLLMStreamReducerEmitsSilentRetryError(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	retryErr := errors.New("rate limited")
-	reducer := a.newMainLLMStreamReducer(nil, "provider/model-1", "", nil, false, nil)
+	reducer := a.newMainLLMStreamReducer(nil, "provider/model-1", "", nil, false, nil, 0)
 
 	reducer.Handle(message.StreamDelta{
 		Type:      message.StreamDeltaRetryError,
@@ -203,7 +208,7 @@ func TestSubLLMStreamReducerEmitsSilentRetryError(t *testing.T) {
 		instanceID: "agent-1",
 		parent:     a,
 	}
-	reducer := sub.newSubLLMStreamReducer(&Turn{ID: 1}, func(string) {}, false, nil)
+	reducer := sub.newSubLLMStreamReducer(&Turn{ID: 1}, func(string) {}, false, nil, 0)
 
 	reducer.Handle(message.StreamDelta{
 		Type:      message.StreamDeltaRetryError,
@@ -239,7 +244,7 @@ func TestSubLLMStreamReducerEmitsRequestProgress(t *testing.T) {
 		parent:     a,
 	}
 	state := &subLLMStreamState{}
-	reducer := sub.newSubLLMStreamReducer(&Turn{ID: 1}, func(string) {}, false, state)
+	reducer := sub.newSubLLMStreamReducer(&Turn{ID: 1}, func(string) {}, false, state, 0)
 
 	reducer.Handle(message.StreamDelta{Progress: &message.StreamProgressDelta{Bytes: 40_934, Events: 95}})
 
@@ -266,7 +271,7 @@ func TestSubLLMStreamReducerBatchesThinkingOnSharedCadence(t *testing.T) {
 		instanceID: "agent-1",
 		parent:     a,
 	}
-	reducer := sub.newSubLLMStreamReducer(&Turn{ID: 1}, func(string) {}, false, nil)
+	reducer := sub.newSubLLMStreamReducer(&Turn{ID: 1}, func(string) {}, false, nil, 0)
 	if got := reducer.content.thinkingFlushInterval; got != defaultStreamThinkingFlushInterval {
 		t.Fatalf("sub-agent thinking flush interval = %v, want %v", got, defaultStreamThinkingFlushInterval)
 	}
@@ -319,5 +324,37 @@ func TestStreamContentReducerReasoningItemWithoutCallbackIsIgnored(t *testing.T)
 	}
 	if len(events) != 0 {
 		t.Fatalf("events = %#v, want none for reasoning_item", events)
+	}
+}
+
+func TestStreamContentReducerTagsStreamEventsWithSegmentIdentity(t *testing.T) {
+	var events []AgentEvent
+	reducer := streamContentReducer{
+		turnID:                42,
+		requestSeq:            3,
+		emit:                  func(evt AgentEvent) { events = append(events, evt) },
+		textFlushInterval:     time.Hour,
+		thinkingFlushInterval: time.Hour,
+		thinkingCommitMode:    streamContentCommitFullText,
+	}
+
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaText, Text: "first"})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaText, Text: " second"})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaThinking, Text: "plan"})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaThinkingEnd})
+	reducer.Finish()
+
+	if len(events) != 3 {
+		t.Fatalf("events len = %d, want immediate first text, its flushed tail and the thinking commit: %#v", len(events), events)
+	}
+	for i, want := range []string{"first", " second"} {
+		got, ok := events[i].(StreamTextEvent)
+		if !ok || got.Text != want || got.TurnID != 42 || got.RequestSeq != 3 {
+			t.Fatalf("events[%d] = %#v, want text %q tagged with turn 42 request 3", i, events[i], want)
+		}
+	}
+	thinking, ok := events[2].(StreamThinkingEvent)
+	if !ok || thinking.Text != "plan" || thinking.TurnID != 42 || thinking.RequestSeq != 3 {
+		t.Fatalf("events[2] = %#v, want the thinking commit tagged with turn 42 request 3", events[2])
 	}
 }

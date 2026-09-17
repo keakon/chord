@@ -180,11 +180,30 @@ type Model struct {
 	usageStats usageStatsState
 
 	// Streaming assistant block (nil when idle)
-	currentAssistantBlock    *Block
-	assistantBlockAppended   bool   // true once we've appended the block (avoids empty blocks)
-	currentThinkingBlock     *Block // standalone streaming thinking block (nil when idle)
-	thinkingBlockAppended    bool   // true once thinking block has been appended to viewport
-	subAgentStreamStates     map[string]agentStreamState
+	currentAssistantBlock  *Block
+	assistantBlockAppended bool   // true once we've appended the block (avoids empty blocks)
+	currentThinkingBlock   *Block // standalone streaming thinking block (nil when idle)
+	thinkingBlockAppended  bool   // true once thinking block has been appended to viewport
+	subAgentStreamStates   map[string]agentStreamState
+	// settledStreamSegments records, per agent, the newest streaming segment
+	// (turn + request sequence) whose card has stopped streaming — either its
+	// producer reported the segment end or a boundary that only settles
+	// (IdleEvent, a resumed interruption) recorded it. A delta of a settled
+	// segment folds back into the card that segment produced instead of opening
+	// a second card holding the tail of the same reply. Only the newest segment
+	// per agent is kept: a newer segment subsumes older ones.
+	//
+	// Cleared on transcript rebuild, deliberately: a rebuild can land while a
+	// producer is still streaming, and keeping the record would make its
+	// remaining deltas merge into a card the rebuild dropped — i.e. lose them.
+	settledStreamSegments map[string]streamSegmentIdentity
+	// streamEndedSegments records, per agent, the newest producer segment
+	// (turn + request sequence) whose StreamSegmentEndedEvent has arrived. It is
+	// what tells streamSegmentPending that a streaming card's producer is done,
+	// so a scheduling idle signal may settle it. Cleared on transcript rebuild
+	// with the cards it described: nothing is left to gate, and a segment that
+	// starts after the rebuild reports its own end.
+	streamEndedSegments      map[string]streamSegmentIdentity
 	thinkingStreamMsgIndex   int
 	thinkingStreamBlockIndex int
 	nextBlockID              int

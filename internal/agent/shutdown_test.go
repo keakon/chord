@@ -26,6 +26,11 @@ type shutdownBlockingProvider struct {
 	started   chan struct{}
 	release   chan struct{}
 	startOnce sync.Once
+	// textDeltas and thinkingDeltas are streamed before the provider blocks, so
+	// a test can observe the final flush a cancelled request emits after
+	// callLLM returns.
+	textDeltas     []string
+	thinkingDeltas []string
 }
 
 func (p *shutdownBlockingProvider) CompleteStream(
@@ -42,6 +47,12 @@ func (p *shutdownBlockingProvider) CompleteStream(
 	p.startOnce.Do(func() { close(p.started) })
 	if cb != nil {
 		cb(message.StreamDelta{Progress: &message.StreamProgressDelta{Bytes: 1, Events: 1}})
+		for _, text := range p.thinkingDeltas {
+			cb(message.StreamDelta{Type: message.StreamDeltaThinking, Text: text})
+		}
+		for _, text := range p.textDeltas {
+			cb(message.StreamDelta{Type: message.StreamDeltaText, Text: text})
+		}
 	}
 	select {
 	case <-ctx.Done():

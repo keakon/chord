@@ -220,14 +220,44 @@ type AgentEvent interface{ agentEvent() }
 type StreamTextEvent struct {
 	Text    string
 	AgentID string // originating agent ("" = main agent)
+	// TurnID and RequestSeq identify the streaming segment that produced this
+	// chunk: the turn it belongs to plus the request sequence within that turn
+	// (0 = unknown, e.g. test-built events; one turn holds several requests
+	// when tools or compaction continue the turn). The pair is what
+	// StreamSegmentEndedEvent reports the end of, so a late chunk can be
+	// attributed to the segment that produced it even when a newer request has
+	// already taken over the agent's streaming card.
+	TurnID     uint64
+	RequestSeq uint64
 }
 
 func (StreamTextEvent) agentEvent() {}
 
+// StreamSegmentEndedEvent reports that the request goroutine which produced an
+// agent's streamed text has finished its final flush and will emit no more
+// content for the segment identified by (AgentID, TurnID, RequestSeq). It is
+// sent by the producing goroutine after its last delta on the same output
+// channel, so a consumer that reaches it may settle that segment's streaming
+// card; the card must never be settled on a scheduling idle signal before it,
+// or a batch flushed afterwards would open a second card holding the tail of
+// the same reply.
+type StreamSegmentEndedEvent struct {
+	AgentID    string // originating agent ("" = main agent)
+	TurnID     uint64
+	RequestSeq uint64
+}
+
+func (StreamSegmentEndedEvent) agentEvent() {}
+
 // ThinkingStartedEvent is emitted when the first thinking delta is received
 // in a block, so the TUI can start that agent's "thought duration" timer.
+// TurnID and RequestSeq identify the streaming segment the same way
+// StreamThinkingDeltaEvent does, so a placeholder thinking card created here
+// is not settled by an older request's StreamSegmentEndedEvent.
 type ThinkingStartedEvent struct {
-	AgentID string
+	AgentID    string
+	TurnID     uint64
+	RequestSeq uint64
 }
 
 func (ThinkingStartedEvent) agentEvent() {}
@@ -239,6 +269,12 @@ func (ThinkingStartedEvent) agentEvent() {}
 type StreamThinkingEvent struct {
 	Text    string // full thinking content for this block
 	AgentID string // originating agent ("" = main agent)
+	// TurnID and RequestSeq carry the same streaming segment identity as
+	// StreamThinkingDeltaEvent, so a thinking card created by this final payload
+	// — a short block that never flushed a delta — is still attributed to the
+	// segment that produced it.
+	TurnID     uint64
+	RequestSeq uint64
 }
 
 func (StreamThinkingEvent) agentEvent() {}
@@ -249,6 +285,11 @@ func (StreamThinkingEvent) agentEvent() {}
 type StreamThinkingDeltaEvent struct {
 	Text    string // incremental thinking content since last delta
 	AgentID string // originating agent ("" = main agent)
+	// TurnID and RequestSeq mirror StreamTextEvent's segment identity so a
+	// thinking card is attributed to the same producer segment as the answer
+	// text of that request.
+	TurnID     uint64
+	RequestSeq uint64
 }
 
 func (StreamThinkingDeltaEvent) agentEvent() {}
@@ -881,19 +922,6 @@ func (ForkSessionEvent) agentEvent() {}
 type EnvStatusUpdateEvent struct{}
 
 func (EnvStatusUpdateEvent) agentEvent() {}
-
-// JobFinishedEvent is emitted when a background job started by shell completes.
-// It is a lightweight runtime notification that only identifies the originating
-// agent so the TUI can finalize that agent's stream; stdout/stderr remain in the
-// returned log_file, and the JOB RESULT card comes from BackgroundResultAppendedEvent
-// once the result is durable.
-type JobFinishedEvent struct {
-	// AgentID is the instance id of the agent that started the job, normalized
-	// to identity.MainAgentID for the main agent (the TUI then maps "main" to "").
-	AgentID string
-}
-
-func (JobFinishedEvent) agentEvent() {}
 
 // BackgroundResultAppendedEvent reports that a finished background job's
 // result was durably appended to TargetAgentID's transcript at MessageIndex.

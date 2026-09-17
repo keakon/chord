@@ -15,6 +15,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Dialog overlays no longer show mismatched row backgrounds: the Cancel action in Delete Session, the inputs and Scope/Action rows in the rules add form, the handoff deny-reason input, and multi-segment rows in selector dialogs now stay on the dialog surface instead of falling back to the terminal background.
 - Silent LLM retry telemetry no longer surfaces as a headless `error`: it emits no envelope and leaves `last_error` / `idle.last_outcome` untouched, so a turn that retries silently and recovers still reports `completed` instead of sticking on `error`. Terminal failures are still reported through the following non-silent error.
 - Narrow `shell` allow rules now require review for command substitution, process substitution and unresolved quoting: a command containing an unquoted `$(...)`, backtick, or `<(...)` / `>(...)` (including inside double quotes), an unterminated quote, or a trailing backslash no longer auto-matches a specific `allow` pattern such as `"git *"`, and falls through to the next matching rule. Plain redirection targets are not affected.
+- Interrupting a streaming reply with `Esc` no longer splits that answer across two cards: the text the model had already produced keeps landing in the same card, and the card closes only after that trailing batch arrives.
 
 ## 0.8.1 - 2026-09-16
 

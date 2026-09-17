@@ -127,7 +127,7 @@ func TestCallLLMOversizeRequestsEventLoopCompaction(t *testing.T) {
 	client := llm.NewClient(providerCfg, provider, "primary-model", 4096, "sys")
 	a.swapLLMClientWithRef(client, "primary-model", 400000, "primary-prov/primary-model")
 
-	_, err := a.callLLM(context.Background(), []message.Message{{Role: "user", Content: "hi"}})
+	_, err := a.callLLMForRequest(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, 0)
 	if err == nil {
 		t.Fatal("callLLM err = nil, want pending compaction error")
 	}
@@ -238,7 +238,7 @@ func TestCallLLMOversizeStopsWhenAutoCompactionDisabled(t *testing.T) {
 	}})
 	a.swapLLMClientWithRef(client, "primary-model", 400000, "primary-prov/primary-model")
 
-	_, err := a.callLLM(context.Background(), []message.Message{{Role: "user", Content: "hi"}})
+	_, err := a.callLLMForRequest(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, 0)
 	if err == nil {
 		t.Fatal("callLLM err = nil, want context-length error")
 	}
@@ -290,7 +290,7 @@ func TestCallLLMMixedFallbackErrorsDoNotStartOversizeCompaction(t *testing.T) {
 	}})
 	a.swapLLMClientWithRef(client, "primary-model", 400000, "primary-prov/primary-model")
 
-	_, err := a.callLLM(context.Background(), []message.Message{{Role: "user", Content: "hi"}})
+	_, err := a.callLLMForRequest(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, 0)
 	if err == nil {
 		t.Fatal("callLLM err = nil, want mixed fallback error")
 	}
@@ -362,7 +362,7 @@ func TestCallLLMFallbackAttemptToastForContextLengthExceeded(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := a.callLLM(context.Background(), []message.Message{{Role: "user", Content: "hi"}})
+		_, err := a.callLLMForRequest(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, 0)
 		done <- err
 	}()
 
@@ -444,7 +444,7 @@ func TestCallLLMFallbackAttemptToastWhenFallbackNeverStreams(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := a.callLLM(context.Background(), []message.Message{{Role: "user", Content: "hi"}})
+		_, err := a.callLLMForRequest(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, 0)
 		done <- err
 	}()
 
@@ -536,7 +536,7 @@ func TestCallLLMNoFallbackAttemptToastForSameModelNameDifferentProvider(t *testi
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := a.callLLM(context.Background(), []message.Message{{Role: "user", Content: "hi"}})
+		_, err := a.callLLMForRequest(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, 0)
 		done <- err
 	}()
 
@@ -623,7 +623,7 @@ func TestCallLLMDifferentModelNamesAnnounceFallbackAttempt(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := a.callLLM(context.Background(), []message.Message{{Role: "user", Content: "hi"}})
+		_, err := a.callLLMForRequest(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, 0)
 		done <- err
 	}()
 
@@ -664,7 +664,7 @@ func TestMainLLMFallbackAttemptToastAnnouncedOncePerTarget(t *testing.T) {
 	drainAgentEvents(a.Events()) // clear setup events
 
 	state := &mainLLMStreamState{}
-	reducer := a.newMainLLMStreamReducer(nil, "prov-a/glm-5.1", "", nil, false, state)
+	reducer := a.newMainLLMStreamReducer(nil, "prov-a/glm-5.1", "", nil, false, state, 0)
 	handle := func(modelRef, reason string) {
 		reducer.Handle(message.StreamDelta{
 			Type: message.StreamDeltaStatus,
@@ -757,7 +757,7 @@ func TestCallLLMNoFallbackExhaustedToastOnCancel(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := a.callLLM(ctx, []message.Message{{Role: "user", Content: "hi"}})
+		_, err := a.callLLMForRequest(ctx, []message.Message{{Role: "user", Content: "hi"}}, 0)
 		done <- err
 	}()
 
@@ -816,7 +816,7 @@ func TestCallLLMSurfacesUpstreamStreamFailureActionably(t *testing.T) {
 	client.SetStreamRetryRounds(1)
 	a.swapLLMClientWithRef(client, "primary-model", 128000, "primary-prov/primary-model")
 
-	_, err := a.callLLM(context.Background(), []message.Message{{Role: "user", Content: "hi"}})
+	_, err := a.callLLMForRequest(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, 0)
 	if err == nil {
 		t.Fatal("callLLM err = nil, want actionable upstream outage error")
 	}
@@ -864,7 +864,7 @@ func TestCallLLMFailedFallbackPersistsLastRunningModel(t *testing.T) {
 	}})
 	a.swapLLMClientWithRef(client, "primary-model", 128000, "primary-prov/primary-model")
 
-	_, err := a.callLLM(context.Background(), []message.Message{{Role: "user", Content: "hi"}})
+	_, err := a.callLLMForRequest(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, 0)
 	if err == nil {
 		t.Fatal("callLLM err = nil, want fallback failure")
 	}
