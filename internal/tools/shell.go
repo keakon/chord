@@ -564,9 +564,7 @@ func (t ShellTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 		case <-job.done:
 			return t.foregroundResult(job, started)
 		case <-ctx.Done():
-			globalJobRegistry.kill(job.ID, "cancelled")
-			<-job.done
-			return t.cancelledResult(job)
+			return t.cancelOrForegroundResult(job, started)
 		case <-timer.C:
 			if !job.detach() {
 				<-job.done
@@ -579,10 +577,22 @@ func (t ShellTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 	case <-job.done:
 		return t.foregroundResult(job, started)
 	case <-ctx.Done():
-		globalJobRegistry.kill(job.ID, "cancelled")
-		<-job.done
-		return t.cancelledResult(job)
+		return t.cancelOrForegroundResult(job, started)
 	}
+}
+
+// cancelOrForegroundResult resolves the race between the caller's cancellation
+// and the command completing on its own. Both select cases can be ready at
+// once, and a cancellation that lost the race must not overwrite a real exit
+// status: kill reports false when the job had already finished, in which case
+// its natural terminal result is the answer.
+func (t ShellTool) cancelOrForegroundResult(j *job, started time.Time) (string, error) {
+	if globalJobRegistry.kill(j.ID, "cancelled") {
+		<-j.done
+		return t.cancelledResult(j)
+	}
+	<-j.done
+	return t.foregroundResult(j, started)
 }
 
 func (t ShellTool) foregroundResult(j *job, started time.Time) (string, error) {
@@ -629,7 +639,7 @@ func backgroundJobHandle(j *job, reason string) string {
 		// indistinguishable from a crash.
 		fmt.Fprintf(&sb, "deadline: %ds from start, then it is killed\n", j.MaxRuntimeSec)
 	}
-	sb.WriteString("The command keeps running and its output will not be lost. You will be notified when it finishes; do not sleep-wait or busy-poll.\n")
+	sb.WriteString("The command keeps running and its output will not be lost. You will be notified when it finishes; do not sleep-wait or busy-poll. If this worker is released (parked) before it finishes, the completion is reported to the main transcript instead.\n")
 	sb.WriteString("It may run concurrently with other tool calls: do not start a command that depends on its output before it completes.\n")
 	fmt.Fprintf(&sb, "Do independent work or end your turn; read incremental output with job_output(%s).", j.ID)
 	return sb.String()

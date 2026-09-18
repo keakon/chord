@@ -738,3 +738,32 @@ func TestShellTimeoutSecFromMsSelectsCapByBackground(t *testing.T) {
 		})
 	}
 }
+
+// A cancellation that arrives after the command already finished must report
+// the real terminal result instead of turning a natural exit into a cancel.
+func TestCancelOrForegroundResultKeepsFinishedJobResult(t *testing.T) {
+	resetJobRegistryOnlyForTest(t)
+	j, err := globalJobRegistry.start(context.Background(), jobStartRequest{Command: "sh -c 'exit 0'", Description: "quick"})
+	if err != nil {
+		t.Fatalf("start job: %v", err)
+	}
+	<-j.done
+
+	if _, err := (ShellTool{}).cancelOrForegroundResult(j, time.Now()); err != nil {
+		t.Fatalf("finished job reported as %v, want its natural exit status", err)
+	}
+}
+
+// A job still running when the cancellation lands is reported as cancelled.
+func TestCancelOrForegroundResultReportsRunningJobCancellation(t *testing.T) {
+	resetJobRegistryOnlyForTest(t)
+	j, err := globalJobRegistry.start(context.Background(), jobStartRequest{Command: "sh -c 'sleep 5'", Description: "long"})
+	if err != nil {
+		t.Fatalf("start job: %v", err)
+	}
+
+	_, err = (ShellTool{}).cancelOrForegroundResult(j, time.Now())
+	if err == nil || !strings.Contains(err.Error(), "command cancelled") {
+		t.Fatalf("error = %v, want cancellation for a running job", err)
+	}
+}
