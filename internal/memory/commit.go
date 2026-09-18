@@ -238,6 +238,12 @@ func (m *Manager) commitExtraction(ctx context.Context, sessionID, fingerprint s
 			supersededByBatch[id] = true
 		}
 	}
+	recordsByID := make(map[string]*Record, len(active.Records))
+	for _, rec := range active.Records {
+		if rec != nil {
+			recordsByID[rec.ID] = rec
+		}
+	}
 	for _, c := range out.Candidates {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -258,8 +264,18 @@ func (m *Manager) commitExtraction(ctx context.Context, sessionID, fingerprint s
 			return nil, fmt.Errorf("candidate does not materially change superseded record %q", id)
 		}
 
-		if err := writeRecordImmutable(m.layout, rec); err != nil {
+		created, err := writeRecordImmutable(m.layout, rec)
+		if err != nil {
 			return nil, err
+		}
+		if !created && !activeIDs[id] {
+			// The record file already exists but is not indexed: the documented
+			// removal contract keeps it an orphan, so a re-derived conclusion
+			// must not resurrect a deleted or superseded index line. Supersede
+			// targets stay indexed with it — removing them while adding nothing
+			// would erase the conclusion from every future session instead.
+			result.AlreadyKnown = append(result.AlreadyKnown, id)
+			continue
 		}
 		link := filepath.ToSlash(filepath.Join(ProjectLayoutDir, recordFileName(id)))
 		if entry, ok := managedEntryFor(idx, id); ok && entry.Summary == rec.Summary {
@@ -269,25 +285,28 @@ func (m *Manager) commitExtraction(ctx context.Context, sessionID, fingerprint s
 		}
 		entries = append(entries, ManagedEntry{ID: id, Link: link, Summary: rec.Summary})
 		for _, oldID := range supersedes {
+			// What the user stated is not the model's to forget: a merge must
+			// not silently drop a user-stated entry from the index, same as the
+			// retirement and promotion paths. The superseding candidate is
+			// still committed, so the user can retire the original themselves
+			// once they have read the merge.
+			if old := recordsByID[oldID]; old != nil && old.Confidence == ConfidenceUserStated {
+				result.Warnings = append(result.Warnings, fmt.Sprintf("kept user-stated record %q indexed despite supersede", oldID))
+				continue
+			}
 			delete(activeIDs, oldID)
 			result.Superseded = append(result.Superseded, oldID)
 		}
 		activeIDs[id] = true
 		active.Records = append(active.Records, rec)
+		recordsByID[id] = rec
 	}
-
 	// Retirements run after the candidate pass so a record already replaced by a
 	// superseding conclusion is simply skipped. Unlike supersedes — where a
 	// dangling target would leave a duplicate conclusion indexed — a retirement
 	// is a removal with no replacement, so an ineligible or already-gone target
 	// is a warning rather than a failed batch: failing here would also discard
 	// the valid additions, and the retry would hit the same bad item.
-	recordsByID := make(map[string]*Record, len(active.Records))
-	for _, rec := range active.Records {
-		if rec != nil {
-			recordsByID[rec.ID] = rec
-		}
-	}
 	var retired []string
 	for _, r := range out.Retire {
 		if !activeIDs[r.ID] {
@@ -434,27 +453,32 @@ func recordFromCandidate(sessionID, fingerprint string, c Candidate) *Record {
 	return rec
 }
 
-// writeRecordImmutable writes a record file with exclusive-create semantics:
-// same ID + identical canonical content is an idempotent success; same ID with
-// different content is a conflict error; the file is never overwritten.
-func writeRecordImmutable(l *Layout, rec *Record) error {
+// writeRecordImmutable writes a record file with exclusive-create semantics
+// and reports whether it created the file. An existing file carrying identical
+// canonical content is an idempotent success with created=false — the caller
+// must then treat the record as an already-known orphan and never re-add it to
+// the managed index, because the documented removal contract keeps a deleted
+// index line deleted even when a later session re-derives the same conclusion.
+// Same ID with different content is a conflict error; the file is never
+// overwritten.
+func writeRecordImmutable(l *Layout, rec *Record) (bool, error) {
 	if err := validateRecordBounds(rec); err != nil {
-		return err
+		return false, err
 	}
 	if err := os.MkdirAll(l.RecordsDir, 0o755); err != nil {
-		return fmt.Errorf("create records dir: %w", err)
+		return false, fmt.Errorf("create records dir: %w", err)
 	}
 	path := recordPath(l.RecordsDir, rec.ID)
 	data, err := MarshalRecord(rec)
 	if err != nil {
-		return err
+		return false, err
 	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if err == nil {
 		if _, werr := f.Write(data); werr != nil {
 			_ = f.Close()
 			_ = os.Remove(path)
-			return fmt.Errorf("write record %s: %w", rec.ID, werr)
+			return false, fmt.Errorf("write record %s: %w", rec.ID, werr)
 		}
 		// Records are immutable and the index/checkpoint are committed after
 		// them; sync the file so a crash cannot leave an empty or partial
@@ -462,33 +486,33 @@ func writeRecordImmutable(l *Layout, rec *Record) error {
 		if serr := f.Sync(); serr != nil {
 			_ = f.Close()
 			_ = os.Remove(path)
-			return fmt.Errorf("sync record %s: %w", rec.ID, serr)
+			return false, fmt.Errorf("sync record %s: %w", rec.ID, serr)
 		}
 		if cerr := f.Close(); cerr != nil {
 			_ = os.Remove(path)
-			return fmt.Errorf("close record %s: %w", rec.ID, cerr)
+			return false, fmt.Errorf("close record %s: %w", rec.ID, cerr)
 		}
 		// The directory entry must be durable before the index/checkpoint that
 		// reference it, or a crash could leave a checkpointed index pointing at
 		// a record that never materialized.
 		if serr := privatefs.SyncDir(l.RecordsDir); serr != nil {
-			return fmt.Errorf("sync records dir: %w", serr)
+			return false, fmt.Errorf("sync records dir: %w", serr)
 		}
-		return nil
+		return true, nil
 	}
 	if !errors.Is(err, os.ErrExist) {
-		return fmt.Errorf("create record %s: %w", rec.ID, err)
+		return false, fmt.Errorf("create record %s: %w", rec.ID, err)
 	}
 	// Existing file: compare canonical content.
 	existing, err := loadRecord(path)
 	if err != nil {
-		return fmt.Errorf("record %s exists but cannot be parsed: %w", rec.ID, err)
+		return false, fmt.Errorf("record %s exists but cannot be parsed: %w", rec.ID, err)
 	}
 	existing.ID = rec.ID
 	if existing.ContentHash() != rec.ContentHash() {
-		return fmt.Errorf("record id %s already exists with different content", rec.ID)
+		return false, fmt.Errorf("record id %s already exists with different content", rec.ID)
 	}
-	return nil
+	return false, nil
 }
 
 // writeMemoryFileIfChanged writes the merged MEMORY.md only when the managed

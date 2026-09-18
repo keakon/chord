@@ -493,18 +493,21 @@ func TestWriteRecordImmutableConflict(t *testing.T) {
 	}
 	hash := rec.ContentHash()
 	rec.ID = RecordID(rec.Summary, hash)
-	if err := writeRecordImmutable(m.layout, rec); err != nil {
-		t.Fatalf("first write: %v", err)
+	created, err := writeRecordImmutable(m.layout, rec)
+	if err != nil || !created {
+		t.Fatalf("first write: created=%v err=%v", created, err)
 	}
-	// Same content → idempotent.
-	if err := writeRecordImmutable(m.layout, rec); err != nil {
-		t.Fatalf("idempotent write: %v", err)
+	// Same content → idempotent, and reported as not-created so the caller can
+	// keep the record an orphan instead of re-indexing it.
+	created, err = writeRecordImmutable(m.layout, rec)
+	if err != nil || created {
+		t.Fatalf("idempotent write: created=%v err=%v", created, err)
 	}
 	// Different content under same ID → conflict.
 	rec2 := *rec
 	rec2.Statement = "Different statement."
 	rec2.ID = rec.ID
-	if err := writeRecordImmutable(m.layout, &rec2); err == nil {
+	if _, err := writeRecordImmutable(m.layout, &rec2); err == nil {
 		t.Fatal("expected conflict for different content with same ID")
 	}
 }
@@ -654,6 +657,9 @@ func TestCommitExtractionSupersedesActiveRecord(t *testing.T) {
 		t.Fatalf("NewManager: %v", err)
 	}
 	old := testCandidate(TypePreference, "Prefer the compact display.", "Prefer compact display.")
+	// The supersede path only exempts user-stated records; a reported one is
+	// the model's to revise, so seed it reported to exercise the normal path.
+	old.Confidence = ConfidenceReported
 	res, err := m.CommitExtractionCtx(context.Background(), "s1", "fp1", 1, 0, extractionOf(old))
 	if err != nil {
 		t.Fatalf("old commit: %v", err)
@@ -808,7 +814,8 @@ func TestCommitExtractionDoesNotOverwriteConcurrentUserEdit(t *testing.T) {
 // Manual editing is the supported way to remove a record: deleting its line
 // from the managed section leaves the record file as an orphan, and Chord must
 // never auto-revive it. A later extraction with a different fingerprint must
-// not re-add the removed entry unless the model produces it as new content.
+// not re-add the removed entry; a re-derived identical conclusion counts as
+// already known (see TestManualIndexEditNotRevivedByIdenticalConclusion).
 func TestManualIndexEditNotAutoRevived(t *testing.T) {
 	t.Setenv("CHORD_STATE_DIR", filepath.Join(t.TempDir(), "state"))
 	root := t.TempDir()
@@ -859,6 +866,67 @@ func TestManualIndexEditNotAutoRevived(t *testing.T) {
 	// The record file stays as an orphan.
 	if _, err := os.Stat(filepath.Join(m.layout.RecordsDir, id+".md")); err != nil {
 		t.Fatalf("record file should remain as orphan: %v", err)
+	}
+}
+
+// The orphan contract covers identical content too: a later session re-deriving
+// the exact removed conclusion must not resurrect the deleted index line. The
+// re-derivation counts as already known, so the checkpoint still advances and
+// the extraction does not retry the same conclusion forever.
+func TestManualIndexEditNotRevivedByIdenticalConclusion(t *testing.T) {
+	t.Setenv("CHORD_STATE_DIR", filepath.Join(t.TempDir(), "state"))
+	root := t.TempDir()
+	m, err := NewManager(root)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	res, err := m.CommitExtractionCtx(context.Background(), "s1", "fp1", 1, 0,
+		extractionOf(testCandidate(TypeFact, "The release gate runs after docs sync.", "Release gate ordering.")))
+	if err != nil {
+		t.Fatalf("CommitExtraction: %v", err)
+	}
+	id := res.Added[0]
+	// User removes the entry by editing MEMORY.md (keeping the managed markers).
+	data, err := os.ReadFile(m.layout.IndexPath)
+	if err != nil {
+		t.Fatalf("read index: %v", err)
+	}
+	// Remove the "- [id](link)" line and its "  — summary" continuation line.
+	lines := strings.Split(string(data), "\n")
+	var kept []string
+	for i := 0; i < len(lines); i++ {
+		if strings.HasPrefix(lines[i], "- ["+id+"](") {
+			if i+1 < len(lines) && strings.HasPrefix(strings.TrimSpace(lines[i+1]), "—") {
+				i++
+			}
+			continue
+		}
+		kept = append(kept, lines[i])
+	}
+	if err := os.WriteFile(m.layout.IndexPath, []byte(strings.Join(kept, "\n")), 0o644); err != nil {
+		t.Fatalf("manual edit: %v", err)
+	}
+
+	res2, err := m.CommitExtractionCtx(context.Background(), "s2", "fp2", 1, 0,
+		extractionOf(testCandidate(TypeFact, "The release gate runs after docs sync.", "Release gate ordering.")))
+	if err != nil {
+		t.Fatalf("identical re-derivation must not fail the commit: %v", err)
+	}
+	if len(res2.Added) != 0 || len(res2.AlreadyKnown) != 1 {
+		t.Fatalf("result = %+v, want the orphan re-derivation reported as already known", res2)
+	}
+	idx, err := m.LoadIndex()
+	if err != nil {
+		t.Fatalf("LoadIndex: %v", err)
+	}
+	for _, e := range idx.Managed {
+		if e.ID == id {
+			t.Fatalf("orphan entry resurrected in the index: %+v", idx.Managed)
+		}
+	}
+	cp, err := LoadCheckpoint(m.layout)
+	if err != nil || cp == nil || !cp.Covered("s2", "fp2") {
+		t.Fatalf("orphan re-derivation did not advance checkpoint: cp=%+v err=%v", cp, err)
 	}
 }
 
@@ -1525,6 +1593,48 @@ func TestCommitRefusesToRetireUserStatedRecord(t *testing.T) {
 	}
 	if len(idx.Managed) != 1 || idx.Managed[0].ID != id {
 		t.Fatalf("user-stated entry should stay indexed: %+v", idx.Managed)
+	}
+}
+
+// Supersede is a removal with a replacement, but the replacement is model
+// text: merging a user-stated entry into a consolidated candidate must not
+// silently drop it from the index, same as retirement and promotion.
+func TestCommitSupersedeKeepsUserStatedSourceIndexed(t *testing.T) {
+	t.Setenv("CHORD_STATE_DIR", filepath.Join(t.TempDir(), "state"))
+	root := t.TempDir()
+	m, err := NewManager(root)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	// testCandidate is user_stated by construction.
+	res, err := m.CommitExtractionCtx(context.Background(), "s1", "fp1", 1, 0,
+		extractionOf(testCandidate(TypePreference, "Always fix mechanical lint directly.", "Fix lint directly.")))
+	if err != nil {
+		t.Fatalf("seed commit: %v", err)
+	}
+	statedID := res.Added[0]
+
+	merged := testCandidate(TypePreference, "Fix mechanical lint directly in the same pass.", "Lint handling.")
+	merged.Supersedes = []string{statedID}
+	res, err = m.CommitExtractionCtx(context.Background(), "s2", "fp2", 1, 0, extractionOf(merged))
+	if err != nil {
+		t.Fatalf("superseding a user-stated record must not fail the commit: %v", err)
+	}
+	if len(res.Superseded) != 0 {
+		t.Fatalf("superseded = %v, want the user-stated record kept indexed", res.Superseded)
+	}
+	if len(res.Added) != 1 {
+		t.Fatalf("added = %v, want the merged candidate committed", res.Added)
+	}
+	if len(res.Warnings) == 0 {
+		t.Fatal("the kept entry must be surfaced as a warning, not silently retained")
+	}
+	idx, err := m.LoadIndex()
+	if err != nil {
+		t.Fatalf("LoadIndex: %v", err)
+	}
+	if len(idx.Managed) != 2 {
+		t.Fatalf("managed entries = %+v, want the user-stated entry and the merged candidate", idx.Managed)
 	}
 }
 
