@@ -9,9 +9,9 @@ import (
 )
 
 // Visible returns true if the sidebar should be displayed (at least one
-// SubAgent or pending placeholder exists beyond the main agent).
+// SubAgent exists beyond the main agent).
 func (s *Sidebar) Visible() bool {
-	return len(s.agents) > 1 || s.pendingTasks > 0
+	return len(s.agents) > 1
 }
 
 // Width returns the sidebar's column width (including border).
@@ -185,18 +185,6 @@ type sidebarRenderedLine struct {
 	AgentID string
 }
 
-func renderSidebarPendingPlaceholder(width int) string {
-	return SidebarEntryStyle.Width(width).Render(
-		SidebarStatusStyle.Render(statusIndicator("pending", false)),
-	)
-}
-
-func renderInfoPanelPendingPlaceholder(width int) string {
-	return InfoPanelLineBg.Width(width).Render(
-		InfoPanelAgentStatusStyle.Render(statusIndicator("pending", false)),
-	)
-}
-
 // buildInfoPanelRenderedLines is like buildLines but uses InfoPanelLineBg-compatible
 // styling and keeps row ownership so the AGENTS block can map mouse clicks back to agent IDs.
 func (s Sidebar) buildInfoPanelRenderedLines(innerWidth int) []sidebarRenderedLine {
@@ -226,9 +214,6 @@ func (s Sidebar) buildInfoPanelRenderedLines(innerWidth int) []sidebarRenderedLi
 			line = InfoPanelLineBg.Width(innerWidth).Render(infoPanelAgentRowStyle(entry, false).Render(fmt.Sprintf("%s %s", indicator, name)))
 		}
 		lines = append(lines, sidebarRenderedLine{Text: line, AgentID: entry.ID})
-	}
-	for range s.pendingTasks {
-		lines = append(lines, sidebarRenderedLine{Text: renderInfoPanelPendingPlaceholder(innerWidth)})
 	}
 	return lines
 }
@@ -316,9 +301,6 @@ func (s Sidebar) buildLines(innerWidth int) []string {
 			lines = append(lines, SidebarFileStyle.Render(fmt.Sprintf("  +%d more", extra)))
 		}
 	}
-	for range s.pendingTasks {
-		lines = append(lines, renderSidebarPendingPlaceholder(innerWidth))
-	}
 	return lines
 }
 
@@ -351,8 +333,6 @@ func statusIndicator(status string, focused bool) string {
 		return "✗"
 	case "idle":
 		return "…"
-	case "pending":
-		return "◌"
 	default:
 		return "○"
 	}

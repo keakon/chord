@@ -966,7 +966,7 @@ func TestToolCallDiscardEventRemovesSpeculativeToolCard(t *testing.T) {
 	}
 }
 
-func TestTaskToolResultErrorClearsPendingPlaceholder(t *testing.T) {
+func TestDelegateArgStreamingDoesNotShowSidebarPlaceholder(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 12)
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
@@ -974,45 +974,28 @@ func TestTaskToolResultErrorClearsPendingPlaceholder(t *testing.T) {
 		Name:    "delegate",
 		AgentID: "",
 	}})
-	if got := m.sidebar.PendingTasks(); got != 1 {
-		t.Fatalf("PendingTasks after Delegate start = %d, want 1", got)
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallUpdateEvent{
+		ID:                "task-call-1",
+		Name:              "delegate",
+		AgentID:           "",
+		ArgsJSON:          `{"description":"child work","agent_type":"worker"}`,
+		ArgsStreamingDone: false,
+	}})
+
+	if m.sidebar.Visible() {
+		t.Fatalf("sidebar must stay hidden while Delegate arguments are still streaming; agents=%#v", m.sidebar.Agents())
+	}
+	if got := len(m.sidebar.Agents()); got != 0 {
+		t.Fatalf("sidebar agents = %d, want 0 before the delegated SubAgent exists", got)
 	}
 
-	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
-		CallID:   "task-call-1",
-		Name:     "delegate",
-		Status:   agent.ToolResultStatusError,
-		Result:   "max concurrent agents reached",
-		AgentID:  "",
-		ArgsJSON: `{"description":"child work","agent_type":"worker"}`,
-	}})
-	if got := m.sidebar.PendingTasks(); got != 0 {
-		t.Fatalf("PendingTasks after Delegate error = %d, want 0", got)
-	}
-}
-
-func TestTaskToolResultWithoutAgentIDClearsPendingPlaceholder(t *testing.T) {
-	m := NewModelWithSize(nil, 80, 12)
-
-	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
-		ID:      "task-call-2",
-		Name:    "delegate",
-		AgentID: "",
-	}})
-	if got := m.sidebar.PendingTasks(); got != 1 {
-		t.Fatalf("PendingTasks after Delegate start = %d, want 1", got)
-	}
-
-	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
-		CallID:   "task-call-2",
-		Name:     "delegate",
-		Status:   agent.ToolResultStatusSuccess,
-		Result:   `{"status":"child_limit_reached","message":"direct active child limit reached (max_children=10)"}`,
-		AgentID:  "",
-		ArgsJSON: `{"description":"child work","agent_type":"worker"}`,
-	}})
-	if got := m.sidebar.PendingTasks(); got != 0 {
-		t.Fatalf("PendingTasks after Delegate child_limit_reached = %d, want 0", got)
+	m.sidebar.Update([]agent.SubAgentInfo{{
+		InstanceID:   "agent-1",
+		AgentDefName: "worker",
+		TaskDesc:     "child work",
+	}}, "main", "builder")
+	if !m.sidebar.Visible() {
+		t.Fatal("sidebar must become visible once the delegated SubAgent exists")
 	}
 }
 

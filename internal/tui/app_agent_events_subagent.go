@@ -174,9 +174,7 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 		return true, effects
 	case agent.AgentStatusEvent:
 		m.sidebar.UpdateStatus(evt.AgentID, evt.Status)
-		if evt.Status == string(agent.SubAgentStateRunning) {
-			m.sidebar.ResolvePendingTask()
-		} else if subAgentStatusSuspendsActivity(evt.Status) {
+		if subAgentStatusSuspendsActivity(evt.Status) {
 			prevType := m.activities[evt.AgentID].Type
 			if m.inflightDraftBelongsToAgent(evt.AgentID) {
 				m.inflightDraft = nil

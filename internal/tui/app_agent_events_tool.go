@@ -288,11 +288,6 @@ func shellCommandMayRunGit(command string) bool {
 func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffects {
 	var effects agentEventEffects
 	evt.Name = toolNameKey(evt.Name)
-	if evt.Name == tools.NameDelegate && evt.AgentID == "" {
-		m.sidebar.ResolvePendingTask()
-		effects.refreshSidebar = true
-		m.recalcViewportSize()
-	}
 	if block := m.ensureToolResultBlock(evt); block != nil {
 		delete(m.toolArgRenderState, evt.CallID)
 		if block.ResultDone && block.ResultStatus == evt.Status && block.ResultContent == evt.Result && strings.TrimSpace(block.ToolID) == strings.TrimSpace(evt.CallID) {
@@ -437,11 +432,6 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			}
 			m.recordToolArgRender(evt.ID, evt.ArgsJSON, time.Now())
 			m.markPriorReceivingToolCallsComplete(evt.AgentID, evt.ID)
-		}
-		if created && evt.Name == tools.NameDelegate && evt.AgentID == "" {
-			m.sidebar.AddPendingTask()
-			effects.refreshSidebar = true
-			m.recalcViewportSize()
 		}
 		return true, effects
 	case agent.ToolCallUpdateEvent:

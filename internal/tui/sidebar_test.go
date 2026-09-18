@@ -245,34 +245,6 @@ func TestSidebarBuildLinesPrioritizesFileStatsWhenNarrow(t *testing.T) {
 	}
 }
 
-func TestSidebarPendingTaskUsesIconOnlyPlaceholder(t *testing.T) {
-	sidebar := NewSidebar(DefaultTheme())
-	sidebar.Update(nil, "main", "builder")
-	sidebar.AddPendingTask()
-
-	lines := sidebar.buildLines(12)
-	if len(lines) < 2 {
-		t.Fatalf("sidebar lines = %#v, want main row + pending placeholder", lines)
-	}
-	got := strings.TrimSpace(stripANSI(lines[len(lines)-1]))
-	if got != "◌" {
-		t.Fatalf("pending placeholder = %q, want %q", got, "◌")
-	}
-	if strings.Contains(stripANSI(lines[len(lines)-1]), "launching") {
-		t.Fatalf("pending placeholder should not show launching text, got %q", stripANSI(lines[len(lines)-1]))
-	}
-}
-
-func TestSidebarAgentsSummaryCountsPendingPlaceholderInTotal(t *testing.T) {
-	sidebar := NewSidebar(DefaultTheme())
-	sidebar.Update(nil, "main", "builder")
-	sidebar.AddPendingTask()
-
-	if got := sidebar.AgentsSummary(); got != "0/1" {
-		t.Fatalf("AgentsSummary() = %q, want %q", got, "0/1")
-	}
-}
-
 func TestSidebarCompletedStatusUsesDoneSemantics(t *testing.T) {
 	sidebar := NewSidebar(DefaultTheme())
 	sidebar.Update([]agent.SubAgentInfo{{InstanceID: "agent-1", TaskDesc: "ship tests"}}, "main", "builder")

@@ -220,9 +220,6 @@ func applyPanelStyles(t Theme) {
 	SidebarTaskStyle = lipgloss.NewStyle().
 		Foreground(lipgloss.Color(t.SidebarTaskFg))
 
-	SidebarStatusStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color(t.SidebarStatusFg))
-
 	SidebarFileStyle = lipgloss.NewStyle().
 		Foreground(lipgloss.Color(t.SidebarTaskFg))
 

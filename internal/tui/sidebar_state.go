@@ -53,13 +53,12 @@ type SidebarEntry struct {
 // Sidebar displays active SubAgent status in a narrow panel to the left of
 // the main viewport. It is only rendered when at least one SubAgent exists.
 type Sidebar struct {
-	agents       []SidebarEntry
-	focusedID    string // instance ID of focused agent ("" or "main" = main agent)
-	workingDir   string // project root used to canonicalize changed-file paths
-	width        int
-	theme        Theme
-	pendingTasks int // Delegate tool calls that have started but whose SubAgent hasn't appeared yet
-	fileEditSeq  uint64
+	agents      []SidebarEntry
+	focusedID   string // instance ID of focused agent ("" or "main" = main agent)
+	workingDir  string // project root used to canonicalize changed-file paths
+	width       int
+	theme       Theme
+	fileEditSeq uint64
 }
 
 // DefaultSidebarWidth is the fixed width (in terminal columns) for the sidebar
@@ -564,35 +563,15 @@ func (s *Sidebar) fileEditRevision() uint64 {
 	return s.fileEditSeq
 }
 
-// AddPendingTask increments the pending-task counter, causing the sidebar to
-// become visible immediately when a Delegate tool call starts.
-func (s *Sidebar) AddPendingTask() {
-	s.pendingTasks++
-}
-
-// ResolvePendingTask decrements the pending-task counter when a SubAgent
-// transitions to "running" (meaning the placeholder is no longer needed).
-func (s *Sidebar) ResolvePendingTask() {
-	if s.pendingTasks > 0 {
-		s.pendingTasks--
-	}
-}
-
-// PendingTasks returns the current pending-task counter.
-func (s *Sidebar) PendingTasks() int {
-	return s.pendingTasks
-}
-
 // Agents returns the raw sidebar entries (for fingerprinting without rendering).
 func (s *Sidebar) Agents() []SidebarEntry {
 	return s.agents
 }
 
 // AgentsSummary returns a compact AGENTS header summary in done/total form.
-// The main agent is excluded; pending task placeholders count toward total.
+// The main agent is excluded.
 func (s Sidebar) AgentsSummary() string {
-	total := s.pendingTasks
-	done := 0
+	var total, done int
 	for _, entry := range s.agents {
 		if entry.ID == "main" {
 			continue

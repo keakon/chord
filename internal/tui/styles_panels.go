@@ -12,7 +12,6 @@ var (
 	SidebarFocusedStyle        lipgloss.Style
 	SidebarEntryStyle          lipgloss.Style
 	SidebarTaskStyle           lipgloss.Style
-	SidebarStatusStyle         lipgloss.Style
 	SidebarFileStyle           lipgloss.Style
 	SidebarAddedStyle          lipgloss.Style
 	SidebarRemovedStyle        lipgloss.Style

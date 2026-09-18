@@ -271,11 +271,6 @@ func (m *Model) infoPanelFingerprint(width, height int) string {
 		b.WriteString(e.LastArtifact.Type)
 		appendSep()
 	}
-	if pending := m.sidebar.PendingTasks(); pending > 0 {
-		b.WriteString("PT")
-		appendInt(pending)
-		appendSep()
-	}
 	appendBool(m.isInfoPanelSectionCollapsed(infoPanelSectionAgents))
 	appendSep()
 

@@ -1810,31 +1810,6 @@ func TestRenderInfoPanelAgentsRendersEveryAgentWithoutOverflowRow(t *testing.T) 
 	}
 }
 
-func TestRenderInfoPanelPendingAgentPlaceholderUsesIconOnly(t *testing.T) {
-	backend := newInfoPanelAgent()
-	m := NewModel(backend)
-	m.sidebar.Update(nil, "main", "builder")
-	m.sidebar.AddPendingTask()
-
-	plain := stripANSI(m.renderInfoPanel(48, 24))
-	if !strings.Contains(plain, "▼ AGENTS") || !strings.Contains(plain, "0/1") {
-		t.Fatalf("AGENTS header should include pending placeholder in total, got %q", plain)
-	}
-	section := infoPanelSectionLines(infoPanelPlainLines(plain), "▼ AGENTS")
-	if len(section) < 2 {
-		t.Fatalf("AGENTS section = %#v, want main row + pending placeholder", section)
-	}
-	if section[0] != "● builder" {
-		t.Fatalf("AGENTS main row = %q, want %q", section[0], "● builder")
-	}
-	if section[1] != "◌" {
-		t.Fatalf("AGENTS pending row = %q, want %q", section[1], "◌")
-	}
-	if strings.Contains(strings.Join(section, "\n"), "launching...") {
-		t.Fatalf("AGENTS pending row should not show launching text, got %#v", section)
-	}
-}
-
 func TestRenderInfoPanelAgentsApplyConfiguredColorToNonFocusedRows(t *testing.T) {
 	backend := newInfoPanelAgent()
 	m := NewModel(backend)
