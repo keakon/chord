@@ -181,6 +181,12 @@ func elideRetainedResult(msg message.Message) message.Message {
 	if msg.Role != message.RoleTool || retainedFailureResult(msg) {
 		return msg
 	}
+	// A record already carrying the marker was elided by an earlier checkpoint.
+	// Eliding again would measure the marker itself and shrink the reported
+	// size to the marker's own length.
+	if _, ok := message.ToolResultElidedBytes(msg.Content); ok {
+		return msg
+	}
 	msg.Content = elidedToolResultContent(msg)
 	msg.Parts = nil
 	msg.ToolPayload = ""

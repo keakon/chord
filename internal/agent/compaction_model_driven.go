@@ -599,9 +599,17 @@ func parseCheckpointEvidencePackMetadata(content string) map[string]evidencePack
 	for line := range strings.SplitSeq(region, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if rest, ok := strings.CutPrefix(trimmed, "Evidence ID: "); ok {
-			current = strings.TrimSpace(rest)
+			// An excerpt quotes raw evidence text verbatim, so a quoted line can
+			// look exactly like a pack row. Only the minted ID spelling enters
+			// the index; otherwise quoted text could make an unrelated
+			// reference resolvable.
+			id := strings.TrimSpace(rest)
+			if !tools.EvidenceIDShape.MatchString(id) {
+				continue
+			}
+			current = id
 			inExcerpt = false
-			if _, exists := out[current]; !exists && current != "" {
+			if _, exists := out[current]; !exists {
 				out[current] = evidencePackRefMeta{}
 			}
 			continue

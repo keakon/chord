@@ -481,3 +481,19 @@ func TestModelDrivenCheckpointKeepsFailedToolRecordsLive(t *testing.T) {
 		}
 	}
 }
+
+// A record an earlier checkpoint already elided must survive a later retention
+// pass unchanged: re-eliding would measure the marker itself and shrink the
+// reported size to the marker's own length.
+func TestElideRetainedResultDoesNotReElideMarker(t *testing.T) {
+	msg := message.Message{
+		Role:       message.RoleTool,
+		ToolCallID: "call-1",
+		ToolStatus: message.ToolStatusSuccess,
+		Content:    message.FormatToolResultElided(4096),
+	}
+	got := elideRetainedResult(msg)
+	if got.Content != msg.Content {
+		t.Fatalf("double elision rewrote %q to %q", msg.Content, got.Content)
+	}
+}
