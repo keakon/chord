@@ -16,7 +16,7 @@
 
 ## Variant
 
-模型的命名参数预设——例如 `claude-opus-5@high` 选高 reasoning effort。Variant 在 `config.yaml` 的 `models.<name>.variants` 下定义，在模型池中以 `provider/model@variant` 形式引用。
+模型的命名参数预设，例如 `claude-opus-5@high` 选高 reasoning effort。Variant 在 `config.yaml` 的 `models.<name>.variants` 下定义，在模型池中以 `provider/model@variant` 形式引用。
 
 ## Compaction（上下文压缩）
 
@@ -24,7 +24,7 @@
 
 ## Reduction（上下文剪裁）
 
-每次 LLM 请求前执行的轻量级确定性剪裁。根据工具输出的年龄和大小启发式规则，从当前 prompt 中剪裁过时的内容——不会修改磁盘上的会话历史。与上下文压缩不同，上下文剪裁不调用 LLM，对用户完全透明。详见 [上下文管理：上下文剪裁](./context-management_CN.md#上下文剪裁reduction)。
+每次 LLM 请求前执行的轻量级确定性剪裁。根据工具输出的年龄和大小启发式规则，从当前 prompt 中剪裁过时的内容，不会修改磁盘上的会话历史。与上下文压缩不同，上下文剪裁不调用 LLM，对用户完全透明。详见 [上下文管理：上下文剪裁](./context-management_CN.md#上下文剪裁reduction)。
 
 ## Service tier
 
@@ -88,7 +88,7 @@ Chord 管理的 git worktree（位于 `<state-dir>/worktrees/<repo-id>/<slug>`�
 
 ## Skill
 
-一段可复用的「专长」模块，由 Markdown 正文和 YAML frontmatter 组成（`SKILL.md`），按需加载。模型在相关时调用 `skill` 工具加载——Chord 不会把所有 skill 都预灌到每次 prompt。从 `.chord/skills/`、`.agents/skills/`、`~/.config/chord/skills/` 以及 `skills.paths` 配置的额外目录发现。详见 [扩展与定制：Skills](./customization_CN.md#skills)。
+一段可复用的「专长」模块，由 Markdown 正文和 YAML frontmatter 组成（`SKILL.md`），按需加载。模型在相关时调用 `skill` 工具加载，Chord 不会把所有 skill 都预灌到每次 prompt。从 `.chord/skills/`、`.agents/skills/`、`~/.config/chord/skills/` 以及 `skills.paths` 配置的额外目录发现。详见 [扩展与定制：Skills](./customization_CN.md#skills)。
 
 ## Hook
 

@@ -71,7 +71,7 @@ description: Go language development expert
 
 Hooks 让你在运行时的明确节点（工具调用前、LLM 调用后、idle 时、工具批量完成后等）运行外部命令，用途包括通知、审计、自动化检查、工具结果清洗。
 
-简单示例——agent idle 时弹桌面通知：
+agent idle 时弹桌面通知的简单示例：
 
 ```yaml
 hooks:
@@ -129,7 +129,7 @@ Chord 根据配置中的服务器名或可执行文件名识别类型：`typescr
 
 Python、TypeScript 和 JavaScript 都会按文件发现最近的 workspace root；同一服务器名可以为不同根目录缓存独立实例。
 
-通常无需手动设置 `python.pythonPath`。仅当需覆盖自动发现逻辑、改用自定义解释器路径时，才需设置它。`python.analysis` 也是按需启用的 Pyright 行为调优项，如调整类型检查严格度。这类配置请使用嵌套 `options`：
+通常无需手动设置 `python.pythonPath`。只有需覆盖自动发现逻辑或改用自定义解释器路径，才需设置它。`python.analysis` 也是按需启用的 Pyright 行为调优项，如调整类型检查严格度。这类配置请使用嵌套 `options`：
 
 ```yaml
 lsp:

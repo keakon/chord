@@ -211,7 +211,7 @@ action 名就是 `config.yaml` 里可设置的 lower snake_case 标识符，下�
 
 ## 运行时查看当前键位
 
-Normal 模式按 `?` 唤出内置 cheatsheet 浮层，里面显示的是当前实际生效的键位——修改 `keymap` 后尤其有用。
+Normal 模式按 `?` 唤出内置 cheatsheet 浮层，里面显示的是当前实际生效的键位，修改 `keymap` 后尤其有用。
 
 ## 相关
 

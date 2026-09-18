@@ -269,7 +269,7 @@ sessions: 42 across 7 projects
 
 ### `chord cleanup sessions | cache | logs | project`
 
-清理指定类别的数据。**默认是 dry-run**——加 `--yes` 才真正删除。
+清理指定类别的数据。**默认是 dry-run**：加 `--yes` 才真正删除。
 
 | Flag                          | 说明                                                                                  |
 | ----------------------------- | ------------------------------------------------------------------------------------- |
@@ -362,7 +362,7 @@ chord worktree finish feat-auth --onto main -m "feat(auth): finalize auth flow"
 
 ## `chord resume <session-id>`
 
-按 session id 恢复会话。与 `chord --resume` 不同，此命令能自动定位该 session 所属的 chord 管理 worktree 并切换过去——即便当前 cwd 不在那个 worktree 内也可以。何时用哪个入口见上文[恢复会话](#恢复会话)。
+按 session id 恢复会话。与 `chord --resume` 不同，此命令能自动定位该 session 所属的 chord 管理 worktree 并切换过去，即便当前 cwd 不在那个 worktree 内也可以。何时用哪个入口见上文[恢复会话](#恢复会话)。
 
 ```bash
 chord resume 20260428064910975

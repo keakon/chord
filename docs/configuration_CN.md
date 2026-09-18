@@ -40,7 +40,7 @@
 - `mcp` 按 server 名称合并：项目里的同名 server 会完整替换全局定义，不会逐字段继承旧的连接、凭据或工具权限；
 - 追加型扩展点会保留全局条目并附加项目条目：当前包括 `skills.paths` 和 `hooks.*` 下各触发点的 hook 列表，它们是 append，不是 replace。
 
-全局 `config.yaml` 缺失时，首次运行 `chord` 会启动一次性的初始化向导，写入 `config.yaml`，必要时再写入 `auth.yaml`——具体交互见[快速开始](./quickstart_CN.md#2-第一次运行)。想自己写这两个文件也没问题，本页以下内容就是完整的字段参考。
+全局 `config.yaml` 缺失时，首次运行 `chord` 会启动一次性的初始化向导，写入 `config.yaml`，必要时再写入 `auth.yaml`，具体交互见[快速开始](./quickstart_CN.md#2-第一次运行)。想自己写这两个文件也没问题，本页以下内容就是完整的字段参考。
 
 ## 最小 provider 配置
 
@@ -161,7 +161,7 @@ openai:
 
 1. `limit.context` 是总窗口。对大多数模型，只要「输入 + 请求输出」放得进这个数字即可。
 2. `limit.input` 只在 provider 还单独列出输入上限时才需要。部分 GPT 模型属于这种情况；如果省略，Chord 按 `limit.context` 减去模型自身的 `limit.output` 推导可用输入预算，只有模型未声明 `limit.output` 时才回退到全局默认输出上限（`max_output_tokens`，默认 `64000`）。显式声明的 `limit.input` 始终按原值使用。
-3. `limit.output` 是模型的最大输出能力。Chord 默认 `max_output_tokens` 为 `64000`，因此在按可用上下文继续收缩前，实际请求上限为 `min(64000, limit.output)`。如需不同的全局上限，请显式设置 `max_output_tokens`。若某模型实际输出能力低于 `64000` 且未配置 `limit.output`，在服务端校验 `max_tokens` 的后端会直接拒绝这类请求——请为该模型声明 `limit.output`，或调低全局 `max_output_tokens`。
+3. `limit.output` 是模型的最大输出能力。Chord 默认 `max_output_tokens` 为 `64000`，因此在按可用上下文继续收缩前，实际请求上限为 `min(64000, limit.output)`。如需不同的全局上限，请显式设置 `max_output_tokens`。若某模型实际输出能力低于 `64000` 且未配置 `limit.output`，在服务端校验 `max_tokens` 的后端会直接拒绝这类请求，请为该模型声明 `limit.output`，或调低全局 `max_output_tokens`。
 
 Responses 和 Chat Completions 服务商的 `parallel_tool_calls` 默认都是 `true`。只有后端或工作流要求串行工具调用时，才在服务商、模型或变体上设为 `false`。部分网关要求特定客户端标识时，还可以配置服务商级 `user_agent`。
 
@@ -374,7 +374,7 @@ openai:
 
 可配置多个 key 作为轮换或备用。
 
-对于 `preset: codex` 的 OAuth provider，Chord 会把高频变化的运行时状态（额度快照、重置时间、最近 warm-up 时间、共享 OAuth 状态缓存）写入 `auth.state.json`，而不是继续频繁改写 `auth.yaml`。
+对于 `preset: codex` 的 OAuth provider，Chord 把高频变化的运行时状态（额度快照、重置时间、最近 warm-up 时间、共享 OAuth 状态缓存）写入 `auth.state.json`，避免频繁改写 `auth.yaml`。
 
 这样拆分是有意为之：
 
@@ -409,7 +409,7 @@ openai:
 }
 ```
 
-`status` 字段只在 `auth.state.json` 中权威生效。当 access token 已不可用且凭据无法刷新时，Chord 会写入 `expired`（包括 refresh token 缺失、无效、过期或已被复用），服务端报告账号停用 / 封禁时写入 `deactivated`，账号需要重新认证时写入 `invalidated`。任意非空状态都会让该 OAuth slot 不再被选择，直到清理或替换凭据。
+`status` 字段只在 `auth.state.json` 中权威生效。access token 已不可用且凭据无法刷新时，Chord 会写入 `expired`（包括 refresh token 缺失、无效、过期或已被复用），服务端报告账号停用 / 封禁时写入 `deactivated`，账号需要重新认证时写入 `invalidated`。任意非空状态都会让该 OAuth slot 不再被选择，直到清理或替换凭据。
 
 这些 Codex 缓存字段是跨重启保留的调度与展示提示，不是硬封禁：
 
@@ -439,7 +439,7 @@ local-provider:
   - ""
 ```
 
-不要依赖未设置的环境变量来表示空 key——未设置的 `$ENV_VAR` 会被视为缺失凭据而过滤掉。
+不要依赖未设置的环境变量来表示空 key：未设置的 `$ENV_VAR` 会被视为缺失凭据而过滤掉。
 
 ## Provider key 选择
 
@@ -686,9 +686,9 @@ providers:
     正文。已完成工具事实会尽量转换为目标协议的结构化表示，只有目标拒绝
     该形状时才文本化。达到的降级级别按 target 记忆。
 - `compat.reasoning_continuity.preserve_history`：默认情况下 Chord 会剥离
-  已完成轮次（最后一条 user 消息之前）的明文 reasoning（`reasoning_content` 和无签名 `thinking` block）——多数 thinking 后端会在服务端丢弃更早轮次的 reasoning，但回放它仍按输入计费。
+  已完成轮次（最后一条 user 消息之前）的明文 reasoning（`reasoning_content` 和无签名 `thinking` block），多数 thinking 后端会在服务端丢弃更早轮次的 reasoning，但回放它仍按输入计费。
 
-  当目标契约要求回传完整 assistant 历史时设置 `preserve_history: true`（DeepSeek 在请求带 tools 时、Kimi K3 及 `keep: all` 系列、Qwen `preserve_thinking`、GLM `clear_thinking: false`），历史 reasoning 会原样回放并在每次请求中计费。当前轮的 reasoning 始终遵循上述 mode；签名/加密载荷（Claude 签名 thinking、Responses items、Gemini thought 签名）不受此开关影响。Anthropic 还会把每个 thinking block 绑定到生成它的对话前缀：当历史改写使该绑定失效、API 以 invalid-signature 拒绝回放时，Chord 会丢弃 thinking block 重试一次，并保留该轮正文和已完成的工具事实。请求级 turn overlay（每轮注入的 `<system-reminder>` 提示）不算作用户消息边界，因此追加在对话尾部的 overlay 不会把「已完成轮次」的边界推到当前轮之后，也就不会剥离当前工具链中后端真正消费的 reasoning。
+  目标契约要求回传完整 assistant 历史时设置 `preserve_history: true`（DeepSeek 在请求带 tools 时、Kimi K3 及 `keep: all` 系列、Qwen `preserve_thinking`、GLM `clear_thinking: false`），历史 reasoning 会原样回放并在每次请求中计费。当前轮的 reasoning 始终遵循上述 mode；签名/加密载荷（Claude 签名 thinking、Responses items、Gemini thought 签名）不受此开关影响。Anthropic 还会把每个 thinking block 绑定到生成它的对话前缀：当历史改写使该绑定失效、API 以 invalid-signature 拒绝回放时，Chord 会丢弃 thinking block 重试一次，并保留该轮正文和已完成的工具事实。请求级 turn overlay（每轮注入的 `<system-reminder>` 提示）不算作用户消息边界，因此追加在对话尾部的 overlay 不会把「已完成轮次」的边界推到当前轮之后，也就不会剥离当前工具链中后端真正消费的 reasoning。
 - `compat.forced_tool_choice.suppress_in_thinking`：reasoning/thinking 启用
   时，把 loop 强制的 `tool_choice: required` 降级为后端默认选择。只有
   OpenAI 兼容端点明确拒绝 thinking 模式下的 forced tool choice 时才开启；
@@ -719,7 +719,7 @@ HTTP，确保最终 JSON patch 生效。
 
 ## Provider 请求压缩
 
-Provider 级别的 `compress` 选择上游 HTTP 请求体的压缩编码：`gzip` 或 `zstd`（`zstd` 是 Codex 客户端发给 codex-backend 请求体用的编码）。它和上下文管理（compaction / reduction）是两回事——只影响请求传输编码，不会总结或移除对话历史。
+Provider 级别的 `compress` 选择上游 HTTP 请求体的压缩编码：`gzip` 或 `zstd`（`zstd` 是 Codex 客户端发给 codex-backend 请求体用的编码）。它和上下文管理（compaction / reduction）是两回事：只影响请求传输编码，不会总结或移除对话历史。
 
 ```yaml
 providers:
@@ -732,9 +732,9 @@ providers:
 
 Chord 仅在压缩能减小体积时才发送压缩请求体，否则按原文发送；压缩失败同样回退为原文并记日志。响应方向不受影响：仍然只声明并自己解压 gzip 响应。
 
-> **Note:** 除非确定 provider 或网关接受压缩请求体，否则保持不配置——官方 Codex backend 和 `api.anthropic.com` 接受（Anthropic 只收 `gzip`，不收 `zstd`），多数 OpenAI-compatible 网关不接受。
+> **Note:** 除非确定 provider 或网关接受压缩请求体，否则保持不配置；官方 Codex backend 和 `api.anthropic.com` 接受（Anthropic 只收 `gzip`，不收 `zstd`），多数 OpenAI-compatible 网关不接受。
 
-Provider / 模型请求默认用 `User-Agent: chord/<version>` 标识客户端。仅当某个 provider 或网关要求特定值时，才配置 provider 级 `user_agent`：
+Provider / 模型请求默认用 `User-Agent: chord/<version>` 标识客户端。只有某个 provider 或网关要求特定值，才配置 provider 级 `user_agent`：
 
 ```yaml
 providers:
@@ -769,7 +769,7 @@ providers:
 - `retry_backoff: none` 关闭 Chord 生成的轮间退避。没有 `Retry-After` 提示的普通 429 不给失败 key 设置定时冷却，只把它标为 recovering，让健康 key 和 fallback target 保持优先；默认轮次没有上限，`none` 下上游快速持续失败时会被零间隔连续重试；
 - `retry_delay_ms` 可取 `0` 到 `60000`；`0` / 省略表示 1000ms。策略拼错、负数或超过上限都会作为配置错误暴露。
 
-普通 429 的 key 冷却遵循单一优先级：已确认的配额重置窗口最优先，其次是合法的 `Retry-After`（受 `retry_after_max_s` 限制、按原值生效），只有不带提示的 429 才落到上面的重试节奏——已配置的 `exponential` / `fixed` / `none`，或两个字段都没配置时的 1 秒起步指数退避。失效或停用凭据，以及其它硬状态已经建立的冷却，永远不会被缩短或清除。这套 429 节奏在可见流式输出前后一致：打断可见输出流的 429 会冷却该 key 并轮换到下一个。
+普通 429 的 key 冷却遵循单一优先级：已确认的配额重置窗口最优先，其次是合法的 `Retry-After`（受 `retry_after_max_s` 限制、按原值生效），只有不带提示的 429 才落到上面的重试节奏：已配置的 `exponential` / `fixed` / `none`，或两个字段都没配置时的 1 秒起步指数退避。失效或停用凭据，以及其它硬状态已经建立的冷却，永远不会被缩短或清除。这套 429 节奏在可见流式输出前后一致：打断可见输出流的 429 会冷却该 key 并轮换到下一个。
 
 Codex OAuth 遵循同样的规则：Codex 的所有 429 都算普通 429。重试提示（`Retry-After` 或 WebSocket 的 `resets_in_seconds`）优先于显式配置生效；既没有提示、也没有已耗尽额度快照的 usage-limit 429 使用上文的普通默认值，而不是 `codex` preset 的 1 分钟冷却（后者仍用于非 429 的 usage-limit 错误）。若 Codex 额度快照显示某个窗口已耗尽，并带有未来重置时间，Chord 会确认额度耗尽，仍以服务端重置时间为准。
 
@@ -790,7 +790,7 @@ providers:
 
 - `response_header_timeout`：从开始流式 HTTP 请求到收到响应头的超时，包括连接建立与请求体上传。收到响应头后该计时器即停止，不限制健康流的总耗时；流式 chunk 之间的最大空闲时间由 `stream_idle_timeout` 控制。`0` 保持内置默认值。
 - `stream_idle_timeout`：流式模型数据的最大空闲等待时间。设置后会覆盖该 provider 的普通 SSE idle timeout 和慢阶段 idle timeout，也会用于 Codex Responses WebSocket 读等待。
-- `stream_total_timeout`：单条流的墙钟上限，单位秒，从响应体开始读取时计时。设置后也用于 Codex Responses WebSocket 读等待。`0` / 省略表示不设上限（默认）：持续产出数据的流只是慢、并非故障，只由 `stream_idle_timeout` 约束。设置它可以覆盖 idle 超时兜不住的那种形态——持续以足够频率滴数据从而不断重置 idle 计时器、但永不结束的流。超时后读取以超时错误结束，走正常的 key/model 重试路径。
+- `stream_total_timeout`：单条流的墙钟上限，单位秒，从响应体开始读取时计时。设置后也用于 Codex Responses WebSocket 读等待。`0` / 省略表示不设上限（默认）：持续产出数据的流只是慢、并非故障，只由 `stream_idle_timeout` 约束。设置它可以覆盖 idle 超时兜不住的那种形态：持续以足够频率滴数据从而不断重置 idle 计时器、但永不结束的流。超时后读取以超时错误结束，走正常的 key/model 重试路径。
 - `websocket_handshake_timeout`：Responses WebSocket 握手超时，主要用于启用了该 transport 的 provider，例如 `preset: codex` 且 `responses_websocket` 生效时。
 
 这些配置按 provider 生效，因此项目级 `.chord/config.yaml` 可以只覆盖某一个 provider 的超时，不影响其他 provider。它们不会改变底层固定连接默认值，例如 TCP dial 或 TLS handshake timeout。
@@ -839,7 +839,7 @@ ime_switch_target: com.apple.keylayout.ABC
 prevent_sleep: true
 ```
 
-- `desktop_notification`：启用本地 TUI 的终端通知。每次通知都会同时发出通知转义序列（按终端自动选择 OSC 9 或 OSC 777）和一声终端铃声（BEL）——终端聚焦时多数终端会隐藏通知横幅，铃声保证此时也能听到提示。Chord 只在 agent 真正运行过然后停下（回合完成、被取消、loop 结束，或所有 SubAgent 都完成）以及权限、Question、Handoff、loop 决策等待用户输入时通知；会话 / model pool / MCP 切换、空闲型斜杠命令这类用户主动操作导致回到空闲时保持静默。铃声是否出声取决于终端配置，各终端的开启方式见[平台说明](platforms_CN.md)。
+- `desktop_notification`：启用本地 TUI 的终端通知。每次通知都会同时发出通知转义序列（按终端自动选择 OSC 9 或 OSC 777）和一声终端铃声（BEL）。终端聚焦时多数终端会隐藏通知横幅，铃声保证此时也能听到提示。Chord 只在 agent 真正运行过然后停下（回合完成、被取消、loop 结束，或所有 SubAgent 都完成）以及权限、Question、Handoff、loop 决策等待用户输入时通知；会话 / model pool / MCP 切换、空闲型斜杠命令这类用户主动操作导致回到空闲时保持静默。铃声是否出声取决于终端配置，各终端的开启方式见[平台说明](platforms_CN.md)。
 - `desktop_notification_foreground`：控制 TUI 聚焦时是否发送通知（转义序列和铃声一起），默认值为 `true`；设为 `false` 后仅在终端失焦时通知。
 - `ime_switch_target`：进入 Normal 模式时通过 `im-select`（Windows 为 `im-select.exe`）切换到指定输入法，回到 Insert 模式时恢复。常用于让快捷键在英文键盘布局下工作。
 - `prevent_sleep`：任意 agent 活跃时阻止 macOS 空闲睡眠，仅本地 TUI 模式生效。
@@ -944,7 +944,7 @@ orchestration:
 - 为满足 API 配额，优先设置 provider 或 model 限制，并将 `max_active_llm_requests` 保留为整体安全上限。
 - `max_bypass_runtimes` 应保持较小的正数。它只用于普通槽位和 borrowed 容量都耗尽时，让唤醒重激活继续推进，不是普通吞吐量配额。
 - 在内存有限的主机上，逐步降低 mailbox 消息数/字节数限制。overflow 使用持久化存储，因此更低的内存限制会以更多磁盘 I/O 为代价。
-- 只有当消息生产方能够处理入队拒绝时，才降低 SubAgent 队列限制。这些队列不会溢写到磁盘，限制过小可能中断父子 Agent 协作。
+- 只有消息生产方能够处理入队拒绝，才降低 SubAgent 队列限制。这些队列不会溢写到磁盘，限制过小可能中断父子 Agent 协作。
 - `max_borrowed_runtimes` 应保持较小的正数。借用槽位用于解除编排推进停滞，不用于提高普通吞吐量。
 - `waiting_main` 任务会在「回合数限制与最短等待时间都满足」或「达到最长等待时间」时过期。owner 需要更多时间回复时，可提高回合数限制或最短等待时间；只有希望任务更久保持可恢复状态时，才提高最长等待时间。
 - 降低 `subagent_compact_usage` 可减少上下文溢出风险，但会更早、更频繁地压缩；提高它可减少压缩开销，但会缩小恢复余量。
@@ -992,7 +992,7 @@ mcp:
       x-api-key: "$EXA_API_KEY"
 ```
 
-以 `$` 开头的 header 值会从环境变量展开（此处即 `EXA_API_KEY`），避免把密钥写进配置文件；`$` 值展开后为空字符串属于配置错误——那等于用空凭据认证。header 名必须是合法的 HTTP header 名，值中不能包含 CR 或 LF。`headers` 只对远程（`url`）server 生效；stdio server 不发起 HTTP 请求，为它配置 `headers` 会被拒绝。协议管理的请求头（`Content-Type`、`Accept`、`Mcp-Session-Id`）由 Chord 覆盖，不会受 `headers` 影响。
+以 `$` 开头的 header 值会从环境变量展开（此处即 `EXA_API_KEY`），避免把密钥写进配置文件；`$` 值展开后为空字符串属于配置错误，那等于用空凭据认证。header 名必须是合法的 HTTP header 名，值中不能包含 CR 或 LF。`headers` 只对远程（`url`）server 生效；stdio server 不发起 HTTP 请求，为它配置 `headers` 会被拒绝。协议管理的请求头（`Content-Type`、`Accept`、`Mcp-Session-Id`）由 Chord 覆盖，不会受 `headers` 影响。
 
 ### 手动（按需）启用 MCP
 
@@ -1012,7 +1012,7 @@ mcp:
   - `/mcp disable <server>`
   - `/mcp status`
 - Agent 运行中也可以执行 `/mcp enable|disable`。当前正在进行的请求继续使用启动时的工具表面；下一次 LLM 请求（包括自动重试 / 恢复请求）才会应用新的执行状态。
-- 默认情况下，下一次请求会重建顶层 MCP 工具表面，因此已有提示词缓存可能无法命中。模型显式开启 `compat.chat_completions.mcp_system_tools_message` 或 `compat.responses.mcp_additional_tools` 后，Chord 会把工具声明挂在固定的对话位置，并在后续请求里原位回放。禁用 server 只会拦截执行，不删除已经发出的声明，因此前缀保持稳定。模型切换、会话恢复/切换或上下文压缩后，Chord 会退回顶层工具并提示缓存复用可能下降——这些边界会破坏提示词缓存复用，固定挂载位置也不再可信。
+- 默认情况下，下一次请求会重建顶层 MCP 工具表面，因此已有提示词缓存可能无法命中。模型显式开启 `compat.chat_completions.mcp_system_tools_message` 或 `compat.responses.mcp_additional_tools` 后，Chord 会把工具声明挂在固定的对话位置，并在后续请求里原位回放。禁用 server 只会拦截执行，不删除已经发出的声明，因此前缀保持稳定。模型切换、会话恢复/切换或上下文压缩后，Chord 会退回顶层工具并提示缓存复用可能下降：这些边界会破坏提示词缓存复用，固定挂载位置也不再可信。
 - manual server 的启用 / 禁用意图会随会话保存：`/mcp enable` 写入该意图，`/mcp disable` 清除它；之后 resume 该会话（包括重启后 resume）时会重新连接上次处于启用状态的 manual server。连接失败不会清除意图，server 会保持「enabled (unavailable)」状态，方便之后重试，而不是悄悄退回禁用。
 
 ### 启动一致性
@@ -1063,15 +1063,15 @@ prompt: |
 
 - `name`：agent 名称。省略时使用不带扩展名的文件名；显式填写时，必须与不带扩展名的文件名一致（例如 `builder.yaml` 必须声明 `name: builder`）。同一目录内不能存在重名 agent，包括 `.md`、`.yaml`、`.yml` 之间的重名；项目级 agent 仍可按既有设计覆盖同名的全局 agent。
 - `description`：简短描述，在可委派给该 agent 时展示给 main agent。选人意图写在这里；Chord 不再单独提供 preferred tasks / write mode 这类标注。角色能不能写文件由 `permission` 决定，Delegate 会在每个可选项上标 `empty_scope=allowed` 或 `non_empty_scope=required`。
-- `mode`：`main` 表示 MainAgent 角色，`subagent` 表示 SubAgent。为空或其他值时按 `main` 处理；`sub_agent` 和 `sub` 也可作为 SubAgent 别名。只有当委派角色能看到至少一个 `subagent` 角色时，`delegate` 工具才会注册；因此没有任何 subagent 定义的配置根本不存在委派面，这通常就是 `delegate` 看起来消失的原因。
+- `mode`：`main` 表示 MainAgent 角色，`subagent` 表示 SubAgent。为空或其他值时按 `main` 处理；`sub_agent` 和 `sub` 也可作为 SubAgent 别名。只有委派角色能看到至少一个 `subagent` 角色，`delegate` 工具才会注册；因此没有任何 subagent 定义的配置根本不存在委派面，这通常就是 `delegate` 看起来消失的原因。
 - `model_pools`：可选的有序池名列表，用于限制该 agent 可使用的池。池定义位于 `config.yaml` 顶层 `model_pools`；省略时，该 agent 可使用所有顶层池并按池名排序。`openai/gpt-5.5@high` 这类 inline variant 写在池定义中。
 - `variant`：model ref 未写 `@variant` 时的默认 variant。
 - `permission`：该 agent 的逐工具权限策略。权限直接保存在 agent 配置文件中；确认弹窗里选择「记住规则」时，`project` 会更新当前项目的 `.chord/agents/<role>.yaml`，`global` 会更新用户配置目录的 `agents/<role>.yaml`（默认 `~/.config/chord/agents/<role>.yaml`），不会写入单独的 permissions 文件夹。部分编排工具有特殊语义（`delegate` 的 pattern 会匹配 `agent_type`，并联动控制委派工作相关能力，如 `cancel`；`handoff` 和 `done` 的 `allow` / `ask` 都表示工作流可用，并由 Chord 自己的确认 gate 控制关键节点）。依赖精细控制工具规则前，请先阅读[权限与安全](./permissions-and-safety_CN.md#特殊权限语义)。
 - `mcp`：作用域限定在该 agent 的增量、自动启动 MCP 配置。Agent MCP 不能与最终生效的全局/项目 `mcp` server 重名，否则启动时报错；也不能设置 `manual: true`，因为运行时 MCP 控制只管理顶层 server，如需手动启停请改在项目/全局配置中声明。要继承顶层 server，请删除 agent 中的重复项；要使用独立私有 server，请改名；要为整个项目替换顶层 server，请在 `.chord/config.yaml` 中覆盖。不同 agent 可以使用相同的私有 server 名称而互不共享连接，同一 agent 定义的多个实例则会复用连接。
 - `delegation`：本 agent 定义的委派限制；超过上限或使用负数会导致配置报错：
   - `max_children`：该 agent 同一时刻可拥有的直接活跃子任务数上限。默认 `10`，上限 `64`。
-  - `max_depth`：嵌套委派可达到的深度。它按**被委派 worker 自己的定义**生效——一个 SubAgent 能否再往下委派，看的是它自己声明的 `delegation.max_depth` 和当前所处深度，而不是父角色或根角色的设置；根角色把 `max_depth` 设为 `1`，挡不住一个声明 `max_depth: 8` 的子角色继续嵌套。默认 `1`（第一层 SubAgent 要往下委派，必须由它自己的定义提高该值），上限 `8`。
-  - `child_join`：SubAgent 委派出的子任务是否并入它自己的任务生命周期（默认 `true`）。开启时，owner 不能在有已加入的子任务仍在运行时完成——`complete` 会被延迟，直到这些子任务结束或被显式停止；owner 若被取消或失败，也会连带取消已加入的子任务。关闭时，owner 可以提前收工，仍在运行中的子任务会与它解绑并转由 main agent 继续托管，而不是被连带取消。该选项只影响嵌套委派：main agent 直接委派出的子任务从不并入，因为 main 本身不是任务。
+  - `max_depth`：嵌套委派可达到的深度。它按**被委派 worker 自己的定义**生效：一个 SubAgent 能否再往下委派，看的是它自己声明的 `delegation.max_depth` 和当前所处深度，而不是父角色或根角色的设置；根角色把 `max_depth` 设为 `1`，挡不住一个声明 `max_depth: 8` 的子角色继续嵌套。默认 `1`（第一层 SubAgent 要往下委派，必须由它自己的定义提高该值），上限 `8`。
+  - `child_join`：SubAgent 委派出的子任务是否并入它自己的任务生命周期（默认 `true`）。开启时，owner 不能在有已加入的子任务仍在运行时完成：`complete` 会被延迟，直到这些子任务结束或被显式停止；owner 若被取消或失败，也会连带取消已加入的子任务。关闭时，owner 可以提前收工，仍在运行中的子任务会与它解绑并转由 main agent 继续托管，而不是被连带取消。该选项只影响嵌套委派：main agent 直接委派出的子任务从不并入，因为 main 本身不是任务。
 - `prompt` / `system_prompt`：纯 YAML agent 文件中的 system prompt。设置其中任一个会**整块替换**该角色本来会获得的内置 prompt 块。
 - `prompt_preset`：按能力而非角色名选择内置角色 prompt 块，可选值为 `planning` 和 `none`。`planning` 会注入内置规划块（计划文档命名与格式、直接回答与产出计划的判断、handoff 时序、计划质量要求），同时抑制 bug triage 块，后者与规划工作流自带的调查提纲重复。`none` 表示不注入任何内置块。省略该字段时，无论角色叫什么都不获得内置块，角色名不参与选择，因此自定义的 `planner` 角色需要显式声明 `prompt_preset: planning` 才能保留规划块。填写未知值会导致配置报错。
 - `prompt_append`：追加在最终生效的角色 prompt 之后，即 preset 块之后，或角色用 `prompt` / `system_prompt` 替换了基础块时追加在其后。用它可以在不接管整块维护责任的前提下补充项目约定，同时保留 preset 中随角色可见工具自适应的措辞。
@@ -1134,7 +1134,7 @@ Python 使用两个后端：
 - `diagnostics.python.semantic_backend`：主 LSP 服务（默认 `pyright`）。其 `server` 字段必须与 `lsp` 下的某个 server key 一致，语言服务器才真正配置生效。
 - `diagnostics.python.quick_backend`：一次性回退命令（默认 `ruff check`），用于大文件，或语义后端不可用时。
 
-`diagnostics.python.large_file.{line_threshold, byte_threshold, strategy}` 决定文件多大时改用 quick backend 而非语义后端；`run_semantic_when_quick_unavailable: true` 会在 quick backend 缺失时，对大文件也强制跑语义后端。Ruff quick diagnostics 不更新 LSP 侧边栏——只出现在 `edit`、`apply_patch` 或 `write` 结果中，并提示完整语义诊断已跳过。
+`diagnostics.python.large_file.{line_threshold, byte_threshold, strategy}` 决定文件多大时改用 quick backend 而非语义后端；`run_semantic_when_quick_unavailable: true` 会在 quick backend 缺失时，对大文件也强制跑语义后端。Ruff quick diagnostics 不更新 LSP 侧边栏，只出现在 `edit`、`apply_patch` 或 `write` 结果中，并提示完整语义诊断已跳过。
 
 推荐 Python 配置骨架：
 
@@ -1156,7 +1156,13 @@ diagnostics:
 
 `diagnostics.python.output.{max_near_diagnostics, max_outside_diagnostics, max_total_diagnostics, near_range_before_lines, near_range_after_lines}` 控制追加诊断文本的长度，并按错误/警告优先于 info/hint 的顺序展示。完整字段表见[配置字段速查表](#配置字段速查表)。
 
-工具结果里追加的诊断包含编辑文件自身的问题，以及与任一编辑文件同目录的其他文件缓存问题（Go 按目录编译包，workspace 诊断会覆盖被诊断包里的所有文件）。同一个其他文件诊断每个会话只附加一次：该诊断从服务器发布集合中消失后，问题再次出现才会重新报告。后续编辑也不会重复：已经告知过模型的问题再复述一遍只是浪费上下文，因此仍然存在的诊断保持抑制，只报告发生变化的部分。而被修复掉的问题（被其他 agent 改好、被复制覆盖、或被 `git checkout` 还原）不会继续从缓存里报出来：文件一旦与诊断计算时的内容不再一致，缓存诊断就先被扣下；等服务器发布的集合里不再包含它，就彻底丢弃。恢复会话时抑制状态不会被清空，而是从恢复的对话记录里还原已渲染过的诊断，因此 `--continue` 不会重复播报同一段对话中已经可见的问题。文件自服务器上次发布诊断以来已在磁盘上变化（比如被其他编辑器或进程修好）时，Chord 会先跳过其缓存诊断；等 Chord 同步该文件并收到 fresh diagnostics 后才重新采用，避免把过期结果当成当前问题。
+工具结果里追加的诊断包含编辑文件自身的问题，以及与任一编辑文件同目录的其他文件缓存问题（Go 按目录编译包，workspace 诊断会覆盖被诊断包里的所有文件）。同一个其他文件诊断每个会话只附加一次：该诊断从服务器发布集合中消失后，问题再次出现才会重新报告。
+
+后续编辑也不会重复：已经告知过模型的问题再复述一遍只是浪费上下文，因此仍然存在的诊断保持抑制，只报告发生变化的部分。而被修复掉的问题（被其他 agent 改好、被复制覆盖、或被 `git checkout` 还原）不会继续从缓存里报出来：文件一旦与诊断计算时的内容不再一致，缓存诊断就先被扣下；等服务器发布的集合里不再包含它，就彻底丢弃。
+
+恢复会话时抑制状态不会被清空，而是从恢复的对话记录里还原已渲染过的诊断，因此 `--continue` 不会重复播报同一段对话中已经可见的问题。
+
+文件自服务器上次发布诊断以来已在磁盘上变化（比如被其他编辑器或进程修好）时，Chord 会先跳过其缓存诊断；等 Chord 同步该文件并收到 fresh diagnostics 后才重新采用，避免把过期结果当成当前问题。
 
 ## Provider/model 诊断
 
@@ -1214,7 +1220,7 @@ chord doctor models --pool thinking
 
 Chord 会把当前 Chord session id 自动传给 OpenAI 系 provider，作为缓存 / 路由亲和元数据：OpenAI Responses 请求会包含 `prompt_cache_key`，OpenAI Chat Completions / Responses HTTP 请求会在有 session id 时包含 `X-Session-Id` 和 `session-id` header。该 key 按 client 而非 provider 隔离：main agent 用当前 Chord session id，每个 SubAgent 另行派生 `<session>:sub:<instanceID>` 形式的 key，因此一个 agent 的请求不会继承另一个的缓存身份。这些字段不能手动配置，会随当前 Chord session 自动切换 / 恢复。
 
-Anthropic prompt caching 由 `cache_control` block 驱动；Chord 还会自动发送 JSON 格式的 `metadata.user_id`，其中包含稳定匿名的 `device_id`，以及由本地 / provider 身份派生出的稳定路由 `session_id`。这些 Anthropic metadata 字段不能手动配置。在 `explicit` 模式（Anthropic 模型默认）下，Chord 按优先级放置最多 4 个 `cache_control` 断点：最后一个 system block、冻结的已剪裁前缀边界（当渐进式剪裁已冻结稳定前缀时）、最新的持久化消息、最后一条 assistant 消息——使长 agent loop 能复用冻结的历史前缀，而不是每轮重新写入移动的尾部。最新断点会刻意跳过 request-scoped overlay（追加在对话尾部的运行时提示），因为这些内容在下一次请求中就不存在了，写在它们之后的缓存条目永远不可能被读回。
+Anthropic prompt caching 由 `cache_control` block 驱动；Chord 还会自动发送 JSON 格式的 `metadata.user_id`，其中包含稳定匿名的 `device_id`，以及由本地 / provider 身份派生出的稳定路由 `session_id`。这些 Anthropic metadata 字段不能手动配置。在 `explicit` 模式（Anthropic 模型默认）下，Chord 按优先级放置最多 4 个 `cache_control` 断点：最后一个 system block、冻结的已剪裁前缀边界（当渐进式剪裁已冻结稳定前缀时）、最新的持久化消息、最后一条 assistant 消息，使长 agent loop 能复用冻结的历史前缀，而不是每轮重新写入移动的尾部。最新断点会刻意跳过 request-scoped overlay（追加在对话尾部的运行时提示），因为这些内容在下一次请求中就不存在了，写在它们之后的缓存条目永远不可能被读回。
 
 对于 Anthropic 模型，`prompt_cache.ttl` 接受 `5m`（省略时的默认值）和 `1h`，且在 `auto` 与 `explicit` 两种模式下都会应用到 Chord 放置的每一个断点：
 

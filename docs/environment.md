@@ -31,7 +31,7 @@ For the directory layout these variables affect, see [Paths](./paths.md).
 
 ## Credentials referenced by `auth.yaml`
 
-Chord does not read provider keys from the environment directly — it reads `auth.yaml` and expands `$VAR` / `${VAR}` placeholders inside it. Convention is to use `<PROVIDER>_API_KEY` style names, but you can pick any variable name.
+Chord does not read provider keys from the environment directly: it reads `auth.yaml` and expands `$VAR` / `${VAR}` placeholders inside it. Convention is to use `<PROVIDER>_API_KEY` style names, but you can pick any variable name.
 
 ```yaml
 # ~/.config/chord/auth.yaml
@@ -107,10 +107,10 @@ Notes:
 
 Chord sets the garbage-collector target to `GOGC=50` when `GOGC` is not already in the environment, for both the TUI and `chord headless`. A long session keeps a large message store around, and a lower target keeps the resident heap flat instead of letting it grow toward the default one, at the cost of a little extra CPU. An explicit `GOGC` always wins.
 
-`GOMEMLIMIT` is not touched — the Go runtime reads it directly. Use it when Chord runs under an external memory budget:
+`GOMEMLIMIT` is not touched: the Go runtime reads it directly. Use it when Chord runs under an external memory budget:
 
 - **TUI**: leave `GOMEMLIMIT` unset. A desktop session has no external budget, and a limit close to the live heap keeps the collector running, which shows up as slower scrolling and streaming.
-- **`chord headless` in a container**: set `GOMEMLIMIT` a bit below the container limit (a common choice is roughly 90% of it) so the process keeps headroom instead of getting killed, but never below what the process normally needs — too low means the collector thrashes. Keep `GOGC=50` as well; the two settings work together.
+- **`chord headless` in a container**: set `GOMEMLIMIT` a bit below the container limit (a common choice is roughly 90% of it) so the process keeps headroom instead of getting killed, but never below what the process normally needs; too low means the collector thrashes. Keep `GOGC=50` as well; the two settings work together.
 
 ## Development and debugging
 
@@ -119,7 +119,7 @@ Chord sets the garbage-collector target to `GOGC=50` when `GOGC` is not already 
 | `CHORD_HOOK_DEBUG`   | Set to `1` to log every hook invocation (input/output/exit code/duration). Verbose; use only when diagnosing hook misbehavior.  |
 | `CHORD_PPROF_PORT`   | Set to a port number (e.g. `6060`) to expose Go pprof on `127.0.0.1`. Off by default.                                          |
 
-These are intended for development, troubleshooting, and bug reports — not for daily use.
+These are intended for development, troubleshooting, and bug reports, not for daily use.
 
 ## A note on `CHORD_API_BASE`
 

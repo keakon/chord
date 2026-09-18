@@ -21,7 +21,7 @@ Chord 只接受 API key，或 Codex OAuth（`chord auth codex`）。订阅如果
 
 ### 1. 已经在订别的
 
-表里是「能」，就用它。是「不能」，原来的应用照旧，接着看第 2、3、4 条。Codex：一份套餐就能填满五个角色——orchestrator、explorer、coder 用账号目录里最便宜的模型，expert 和 reviewer 用在额度允许范围内最强的模型。便宜套餐或 API key，分法见第 2 条。
+表里是「能」，就用它。是「不能」，原来的应用照旧，接着看第 2、3、4 条。Codex：一份套餐就能填满五个角色：orchestrator、explorer、coder 用账号目录里最便宜的模型，expert 和 reviewer 用在额度允许范围内最强的模型。便宜套餐或 API key，分法见第 2 条。
 
 ### 2. 少量使用，追求性价比
 
@@ -33,7 +33,7 @@ Chord 只接受 API key，或 Codex OAuth（`chord auth codex`）。订阅如果
 
 ### 4. 不太在意账单
 
-把当时能拿到的最强 API 模型——按这份口径是 GPT-6 Astra 和 Claude Fable 5.1——留给 expert 和 reviewer。orchestrator、explorer、coder 用便宜、快的模型就够了，用不到旗舰。
+把当时能拿到的最强 API 模型（按这份口径是 GPT-6 Astra 和 Claude Fable 5.1）留给 expert 和 reviewer。orchestrator、explorer、coder 用便宜、快的模型就够了，用不到旗舰。
 
 ## 哪个角色用什么模型？
 
@@ -74,7 +74,7 @@ Chord 只接受 API key，或 Codex OAuth（`chord auth codex`）。订阅如果
 2. **GPT-6 Astra**：单独买 OpenAI API key 就行。它更省 token，适合「问题已经收窄、要一次做对」的场景；缓存更贵，别把整个仓库每轮喂给它。
 3. **Muse Spark 1.3**（Meta Model API）：GPT、Claude 渠道之外最强的一个。长程实现、大仓库是它的强项；根因和架构上的判断弱一档，派给它时把 expert 的活拆小、多验证。
 4. **GLM-5.3 或 Kimi K3**：开源模型里最强的两个，OpenCode Go、Command Code GOAT 这类开源模型套餐就有。能顶 expert 的活，但架构、并发的终审别交给它们。
-5. **上面都没有**：把 expert 的问题压小——让便宜模型复现、缩小范围；等判断错了会变成隐性债时，再回头看前面几条。日常讨论可以让 Gemini 3.8 Flash 先顶一轮，别让它当终审。
+5. **上面都没有**：把 expert 的问题压小：让便宜模型复现、缩小范围；等判断错了会变成隐性债时，再回头看前面几条。日常讨论可以让 Gemini 3.8 Flash 先顶一轮，别让它当终审。
 
 reviewer 跟 expert 用同一个模型。只有一份旗舰预算时先给 expert，reviewer 在实质改动后再开。
 

@@ -54,7 +54,7 @@ For the full directory layout, see [Paths](./paths.md). For all environment vari
 
 Runs the local TUI in the current directory. That directory becomes the session working directory: relative file paths, omitted `shell` workdirs, and omitted `grep` / `glob` search roots resolve from it. When `--worktree` or `chord resume` switches into a chord-managed worktree, that worktree path becomes the session working directory instead; file tools do not need to understand git worktrees separately. The session working directory is injected before the first user message (and again after context compaction) so the model sees the same path base that tools use. User-facing tool cards may display paths relative to it for readability, while raw tool-call arguments and session exports preserve the model's original paths for auditing.
 
-On the first run, if global `config.yaml` is missing and Chord can get a controlling TTY, it starts a one-time setup wizard before opening the TUI — see [Quickstart](./quickstart.md#2-first-run) for what it asks, what it writes, and how it behaves without a controlling TTY. `help`, `version`, and non-root subcommands do not trigger the wizard.
+On the first run, if global `config.yaml` is missing and Chord can get a controlling TTY, it starts a one-time setup wizard before opening the TUI; see [Quickstart](./quickstart.md#2-first-run) for what it asks, what it writes, and how it behaves without a controlling TTY. `help`, `version`, and non-root subcommands do not trigger the wizard.
 
 ### Flags
 
@@ -269,7 +269,7 @@ sessions: 42 across 7 projects
 
 ### `chord cleanup sessions | cache | logs | project`
 
-Clean a specific kind of managed data. **Defaults to a dry run** — pass `--yes` to actually delete.
+Clean a specific kind of managed data. **Defaults to a dry run**: pass `--yes` to actually delete.
 
 | Flag                        | Description                                                                                  |
 | --------------------------- | -------------------------------------------------------------------------------------------- |
@@ -362,7 +362,7 @@ chord worktree finish feat-auth --onto main -m "feat(auth): finalize auth flow"
 
 ## `chord resume <session-id>`
 
-Resume a session by ID. Unlike `chord --resume`, this command can locate the session even when the original worktree differs from the current directory — it auto-detects which chord-managed worktree the session belongs to and switches into it. For when to use each entry point, see [Resuming sessions](#resuming-sessions).
+Resume a session by ID. Unlike `chord --resume`, this command can locate the session even when the original worktree differs from the current directory; it auto-detects which chord-managed worktree the session belongs to and switches into it. For when to use each entry point, see [Resuming sessions](#resuming-sessions).
 
 ```bash
 chord resume 20260428064910975

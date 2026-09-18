@@ -21,7 +21,7 @@ Chord is developed and tested primarily on macOS. Other platforms work to varyin
 | MCP servers (stdio / HTTP)                          | ✅     | ✅            | ✅              | ✅               |
 | Power-aware idle handling                           | ✅     | ❌ (no-op)   | ❌ (no-op)      | ❌ (no-op)       |
 
-[^im]: Requires the `im-select` binary in `PATH` (`im-select.exe` on Windows). Install separately — Chord ships only the integration, not the binary itself.
+[^im]: Requires the `im-select` binary in `PATH` (`im-select.exe` on Windows). Install separately; Chord ships only the integration, not the binary itself.
 [^im-linux]: `im-select` is a macOS-first tool; on Linux you need a compatible build or a wrapper script with the same CLI.
 [^im-win]: Use `im-select.exe` (e.g. from <https://github.com/daipeihust/im-select#-windows>).
 [^im-wsl]: Inside WSL, IM switching usually targets the host (Windows) IM. You typically run `im-select.exe` over interop and may need PATH or wrapper setup.
@@ -54,7 +54,7 @@ ime_switch_target: com.apple.keylayout.ABC          # macOS example
 # ime_switch_target: 1033                           # Windows example (locale id)
 ```
 
-Install `im-select` separately. The variable name is just a string — Chord passes it verbatim to `im-select`, so the format depends on the platform-specific tool.
+Install `im-select` separately. The variable name is just a string: Chord passes it verbatim to `im-select`, so the format depends on the platform-specific tool.
 
 ### `desktop_notification` (terminal notifications)
 
@@ -109,7 +109,7 @@ Chord currently auto-detects and enables:
 - **Kitty graphics** (kitty, Ghostty)
 - **iTerm2 inline images** (iTerm2, WezTerm)
 
-If neither protocol is available, image attachments are still sent to the model — they just are not previewed in the TUI.
+If neither protocol is available, image attachments are still sent to the model; they just are not previewed in the TUI.
 
 Notes:
 
@@ -160,7 +160,7 @@ WSL behaves like Linux for the most part:
 - Chord runs as a Linux binary inside WSL; sessions and config use Linux paths (`~/.config/chord/`, etc.).
 - `prevent_sleep` is a no-op; use Windows power settings on the host.
 - `ime_switch_target` typically goes through Windows interop (`im-select.exe`).
-- Pyright venv auto-discovery uses **Linux** venvs (`.venv/bin/python` etc.) inside WSL — Windows-style `Scripts\python.exe` venvs are intentionally not selected.
+- Pyright venv auto-discovery uses **Linux** venvs (`.venv/bin/python` etc.) inside WSL; Windows-style `Scripts\python.exe` venvs are intentionally not selected.
 - Terminal capabilities depend on the Windows terminal hosting WSL (Windows Terminal, WezTerm, Ghostty).
 
 ## Reporting platform-specific issues

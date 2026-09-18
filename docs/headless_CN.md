@@ -139,7 +139,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 
 ### `role`
 
-查询或切换当前主角色——TUI Shift+Tab 的远程等价。`list` 返回当前角色与有序的主模式角色列表（builder 恒第一、planner 若配置则第二、自定义角色按字母序）；`set` 切换角色并保留会话上下文，与 TUI 循环一致。
+查询或切换当前主角色：TUI Shift+Tab 的远程等价。`list` 返回当前角色与有序的主模式角色列表（builder 恒第一、planner 若配置则第二、自定义角色按字母序）；`set` 切换角色并保留会话上下文，与 TUI 循环一致。
 
 ```json
 {"type": "role", "action": "list"}
@@ -165,7 +165,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 }
 ```
 
-`list` 把当前角色放在 `role`，完整列表放在 `roles`，其中 `current: true` 的那一项就是当前角色。`set` 切换到指定角色并返回切换后的状态，切换立即生效——即使还有回合在跑也一样。有 `handoff_request` 待决时 `set` 会被拒绝（`resolve the pending handoff before switching role`），切到已是当前的角色（`already the active role: <name>`）、未知角色名、只作为 SubAgent 定义存在的角色同样会被拒绝。失败响应带 `ok: false` 和面向人的 `message`，原样展示给用户即可。订阅了 `role_change` 时，切换成功还会收到一条 `role_change` 推送；当前角色也会出现在 `status_response` 的 `current_role` 里。注意：`role_change` 事件与 `role_response` 由不同路径写出、先后顺序不定，客户端应以 `role_response` 为准。
+`list` 把当前角色放在 `role`，完整列表放在 `roles`，其中 `current: true` 的那一项就是当前角色。`set` 切换到指定角色并返回切换后的状态，切换立即生效，即使还有回合在跑也一样。有 `handoff_request` 待决时 `set` 会被拒绝（`resolve the pending handoff before switching role`），切到已是当前的角色（`already the active role: <name>`）、未知角色名、只作为 SubAgent 定义存在的角色同样会被拒绝。失败响应带 `ok: false` 和面向人的 `message`，原样展示给用户即可。订阅了 `role_change` 时，切换成功还会收到一条 `role_change` 推送；当前角色也会出现在 `status_response` 的 `current_role` 里。注意：`role_change` 事件与 `role_response` 由不同路径写出、先后顺序不定，客户端应以 `role_response` 为准。
 
 ### `confirm`
 
@@ -277,13 +277,13 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 
 如果 stdin 上的单行输入超过协议行长度限制，Chord 会输出带 `code: "stdin_line_too_long"` 的 `error` envelope，并继续读取后续行。集成方应在存在 `code` 时用它做错误分类，把 `message` 作为面向人的诊断信息。
 
-静默重试不会推送。TUI 只记在错误面板里的那次重试不会产生 `error` envelope，也不会动 `last_error` / `last_outcome`（`status_response` 与 `idle` 里看到的）——中途重试一次、最后恢复成功的回合，`idle` 里看到的仍然是 `completed`。真正失败时总会跟一条非静默错误，集成方只管看那一条。
+静默重试不会推送。TUI 只记在错误面板里的那次重试不会产生 `error` envelope，也不会动 `last_error` / `last_outcome`（`status_response` 与 `idle` 里看到的）：中途重试一次、最后恢复成功的回合，`idle` 里看到的仍然是 `completed`。真正失败时总会跟一条非静默错误，集成方只管看那一条。
 
 纯工具调用轮次（包括 SubAgent 调用 `Complete`）的 `assistant_message.text` 可能为空。Chord 会记 warning 便于观测；gateway 集成应跳过空消息，并以 `agent_done.summary` 作为权威的 SubAgent 完成内容。
 
 进入静止状态的 SubAgent 可能释放 live runtime，但 task 与 transcript 会持久保留。后续获授权的定向通知可用新的 `agent_id` rehydrate 该任务；集成方应使用稳定的 `task_id` 路由，并根据 `agent_started.previous_agent_id` 替换 runtime 级标签。
 
-`idle` 是全局静默信号，不是单次请求完成信号。只要任一 agent 仍在运行、内部事件或需要处理的 mailbox 消息仍在排队、Handoff 决策还没完成，或某个 SubAgent 还有等待下一请求消费的输入，Chord 就不会发出 `idle`。目标 busy 时，排队消息会在下一个请求边界处理；可恢复但未运行的目标会先被唤醒。发往主 inbox 的 progress / notice 快照是可处理的工作，不是纯信息：主代理空闲时，Chord 会把待投递的更新合并成一批、按到达顺序投递，在发出全局 idle 之前先唤醒主代理投递完这批——每来一批都会多一次主回合与 LLM 请求，idle 也要等这批投递收尾才发出。`suppress_user_notification` 不改变 idle 状态收口，只告诉面向用户的集成：当这次静默之前并没有真实的 agent 工作（例如启动、会话 / model pool / MCP 切换或其它用户主动导航）时，不要发出通用完成提醒。除非 agent 在上一次 idle 事件之后确实运行过（主回合、loop 执行或活跃的 SubAgent 工作），否则该字段为 `true`。`notification` 则用于 runtime 明确等待用户输入的提醒；当前 `reason="user_input_required"` 覆盖权限、Question、Handoff 和 loop 决策。
+`idle` 是全局静默信号，不是单次请求完成信号。只要任一 agent 仍在运行、内部事件或需要处理的 mailbox 消息仍在排队、Handoff 决策还没完成，或某个 SubAgent 还有等待下一请求消费的输入，Chord 就不会发出 `idle`。目标 busy 时，排队消息会在下一个请求边界处理；可恢复但未运行的目标会先被唤醒。发往主 inbox 的 progress / notice 快照是可处理的工作，不是纯信息：主代理空闲时，Chord 会把待投递的更新合并成一批、按到达顺序投递，在发出全局 idle 之前先唤醒主代理投递完这批，每来一批都会多一次主回合与 LLM 请求，idle 也要等这批投递收尾才发出。`suppress_user_notification` 不改变 idle 状态收口，只告诉面向用户的集成：当这次静默之前并没有真实的 agent 工作（例如启动、会话 / model pool / MCP 切换或其它用户主动导航）时，不要发出通用完成提醒。除非 agent 在上一次 idle 事件之后确实运行过（主回合、loop 执行或活跃的 SubAgent 工作），否则该字段为 `true`。`notification` 则用于 runtime 明确等待用户输入的提醒；当前 `reason="user_input_required"` 覆盖权限、Question、Handoff 和 loop 决策。
 
 ## 通过 `send` 兼容 slash 命令
 

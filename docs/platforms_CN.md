@@ -14,7 +14,7 @@ Chord 主要在 macOS 上开发和测试。其他平台不同程度可用：大�
 | `prevent_sleep`（阻止系统休眠）                          | ✅    | ❌（no-op）    | ❌（no-op）      | ❌（no-op）       |
 | `ime_switch_target`（模式切换时自动切输入法）            | ✅[^im]| ⚠️[^im-linux]| ✅[^im-win]    | ⚠️[^im-wsl]      |
 | `desktop_notification`（终端通知）                         | ⚠️[^osc] | ⚠️[^osc] | ⚠️[^osc]      | ⚠️[^osc]        |
-| 剪贴板图片/PDF附件（`Ctrl+V` / `Alt+V`）              | ✅    | ⚠️[^clip]    | ⚠️[^clip]       | ⚠️[^clip]        |
+| 剪贴板图片/PDF 附件（`Ctrl+V` / `Alt+V`）              | ✅    | ⚠️[^clip]    | ⚠️[^clip]       | ⚠️[^clip]        |
 | 终端图片渲染（Kitty / iTerm2）                           | ⚠️[^img]| ⚠️[^img]  | ⚠️[^img]       | ⚠️[^img]         |
 | LSP — gopls / typescript / rust-analyzer                 | ✅[^lsp]| ✅[^lsp]   | ✅[^lsp]       | ✅[^lsp]         |
 | LSP — Pyright + 项目 venv 自动探测                       | ✅[^py-unix] | ✅[^py-unix] | ✅[^py-win] | ✅[^py-unix]（仅 WSL Linux venv，详见下文） |
@@ -46,7 +46,7 @@ macOS 下用 `caffeinate(1)` 实现。Linux / Windows / WSL 上是 no-op。其�
 
 从 Insert 切到 Normal 时，Chord 可调用 `im-select`（或 `im-select.exe`）切到指定 IM（通常是英文键盘布局），切回 Insert 时恢复原来的 IM。
 
-在支持的平台上，首次运行向导也可能询问这个值。只有当你平时确实使用中文 / 日文 / 韩文等输入法，并希望 Normal 模式快捷键更稳定时，才建议配置。
+在支持的平台上，首次运行向导也可能询问这个值。只有你平时确实使用中文 / 日文 / 韩文等输入法，并希望 Normal 模式快捷键更稳定，才建议配置。
 
 ```yaml
 # ~/.config/chord/config.yaml
@@ -70,7 +70,7 @@ ime_switch_target: com.apple.keylayout.ABC          # macOS 示例
 
 `tmux` 中可能需要 `set -g allow-passthrough on`，通知序列才可能透传到宿主终端。
 
-多数终端（包括 Ghostty 和 iTerm2）在自己处于前台时会抑制通知横幅和声音——正盯着终端看时，OSC 通知通常是无声的。因此 Chord 的每条通知都会附带一声终端铃声（BEL），终端把铃声当作注意力信号而不是通知，行为和横幅不同。想聚焦时完全静音，可设 `desktop_notification_foreground: false`。
+多数终端（包括 Ghostty 和 iTerm2）在自己处于前台时会抑制通知横幅和声音：正盯着终端看时，OSC 通知通常是无声的。因此 Chord 的每条通知都会附带一声终端铃声（BEL），终端把铃声当作注意力信号而不是通知，行为和横幅不同。想聚焦时完全静音，可设 `desktop_notification_foreground: false`。
 
 很多终端默认不响铃，开启方式也各不相同：
 
@@ -82,7 +82,7 @@ ime_switch_target: com.apple.keylayout.ABC          # macOS 示例
 
 没列到的终端可能完全忽略 BEL，或只闪烁窗口；具体看对应终端的 bell/attention 配置文档。
 
-### 剪贴板图片/PDF附件
+### 剪贴板图片/PDF 附件
 
 `Ctrl+V` 或 `Alt+V` 会从系统剪贴板读取图片或 PDF 并作为附件添加。读取及图片转换都在后台异步执行，因此 TUI 不会被阻塞；读取完成前会暂时阻止发送。普通终端 paste 事件（包括 macOS 常见的 `Cmd+V`）只粘贴文本，绝不会探测剪贴板附件。
 

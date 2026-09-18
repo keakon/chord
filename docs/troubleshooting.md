@@ -78,7 +78,7 @@ curl -I https://api.openai.com/v1
 
 ### OpenAI-compatible 400s and timeouts
 
-Set `trust_http_400: true` for endpoints that follow official API error semantics — Chord then treats HTTP 400 as a terminal request error. The `Retry-After` header always applies as the key cooldown hint, ahead of any configured retry pacing; `retry_after_max_s` bounds the longest honored wait (default 60 seconds for third-party gateways, 86400 for `preset: codex`). For aggregating or proxy gateways that may wrap upstream failures as HTTP 400, set `trust_http_400: false` or omit the field so unknown 400s can use the normal retry and fallback path.
+Set `trust_http_400: true` for endpoints that follow official API error semantics: Chord then treats HTTP 400 as a terminal request error. The `Retry-After` header always applies as the key cooldown hint, ahead of any configured retry pacing; `retry_after_max_s` bounds the longest honored wait (default 60 seconds for third-party gateways, 86400 for `preset: codex`). For aggregating or proxy gateways that may wrap upstream failures as HTTP 400, set `trust_http_400: false` or omit the field so unknown 400s can use the normal retry and fallback path.
 
 If requests remain in `connecting` and then retry, test the endpoint directly, check proxy settings, and inspect the error panel. Chord applies a connection timeout so one unavailable key or gateway does not wait indefinitely.
 
@@ -146,7 +146,7 @@ What to check:
    reported separately; for `chat-completions` / `responses` providers,
    `input_tokens` already includes the cached portion.
 3. A compatible gateway may report usage with the other protocol's semantics
-   while still exposing a `messages` endpoint — most commonly `input_tokens`
+   while still exposing a `messages` endpoint: most commonly `input_tokens`
    is the full input including cache hits, and `cache_read_input_tokens` is
    only the hit subset. Chord then counts the cache reads twice, which
    roughly halves the displayed percentage.
@@ -328,12 +328,12 @@ Note: fragments like `;250m pyright` during a corruption episode are usually not
 If the main symptom is repeated horizontal lines, duplicated input/status separators, stale card borders, or old sidebar borders:
 
 1. Take a screenshot before forcing a redraw. Include the full terminal window, especially the input area, status bar, and right sidebar.
-2. Export a diagnostics bundle (`Ctrl+G`) immediately, before resizing the terminal — the bundle captures the frame Chord most recently rendered, so it lets maintainers tell a Chord-drawn duplicate from a stale terminal artifact.
+2. Export a diagnostics bundle (`Ctrl+G`) immediately, before resizing the terminal: the bundle captures the frame Chord most recently rendered, so it lets maintainers tell a Chord-drawn duplicate from a stale terminal artifact.
 3. Attach both to your report, plus your terminal emulator name and version.
 
 Two quick local observations also help narrow it down:
 
-- If the extra line disappears when the terminal is made one or two columns narrower, mention that — it points at right-edge wrap behavior.
+- If the extra line disappears when the terminal is made one or two columns narrower, mention that; it points at right-edge wrap behavior.
 - If the artifact appears right after image preview, paste image, or diagnostics export, mention that too.
 
 ## Bottom transcript rows are unreachable in long sessions
@@ -357,7 +357,7 @@ Re-run `read` before retrying. When Chord manages to create a backup, the tool r
 
 ## apply_patch reports `hunk not found`
 
-`apply_patch` matches hunks line-by-line: exact context passes first, then a separate punctuation/whitespace-tolerant step that is applied only when it lands in exactly one place — a tolerant match hitting several positions is rejected with the ambiguous lines named rather than silently taking the first one. Repeated blocks still need enough nearby context to make the intended location clear.
+`apply_patch` matches hunks line-by-line: exact context passes first, then a separate punctuation/whitespace-tolerant step that is applied only when it lands in exactly one place; a tolerant match hitting several positions is rejected with the ambiguous lines named rather than silently taking the first one. Repeated blocks still need enough nearby context to make the intended location clear.
 
 If you see this:
 
@@ -378,7 +378,7 @@ See [Performance](./performance.md) for how rendering and streaming are optimize
 
 ## Compaction not triggering / triggering too often
 
-**Symptom**: context usage is high but compaction never runs; or the opposite — frequent compaction disrupts your workflow.
+**Symptom**: context usage is high but compaction never runs; or the opposite: frequent compaction disrupts your workflow.
 
 What to check:
 

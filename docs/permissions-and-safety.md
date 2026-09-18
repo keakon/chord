@@ -7,7 +7,7 @@ Chord is a coding agent that can read files, modify files, execute commands, and
 ## How to use this page
 
 - **How rules are evaluated:** [Principles](#principles), [Permission model](#permission-model).
-- **Before allowing a command:** [Shell / shell risk](#shell--shell-risk) — `shell` is the broadest capability you can grant.
+- **Before allowing a command:** [Shell / shell risk](#shell--shell-risk); `shell` is the broadest capability you can grant.
 - **Before allowing writes:** [File modification risk](#file-modification-risk).
 - **Credentials and remote surfaces:** [Credentials and config](#credentials-and-config), [Headless boundary](#headless-boundary), [Network and external integrations](#network-and-external-integrations).
 
@@ -64,14 +64,14 @@ This means: allow most tools by default; disable `handoff` and `delegate`; requi
 
 This page starts from `"*": allow` as a trusted-workspace baseline; for a least-privilege baseline instead, the `builder` agent in [Configuration: Agent config](./configuration.md#agent-config) starts from `"*": deny` and opts in only to the tools a role needs.
 
-Permission matching examines the tool call and the session working directory (the directory the tool executes in). For `shell`, only the command string is matched — a `workdir` argument does not participate. For file tools (`read`, `write`, `edit`, `apply_patch`, `delete`, `view_image`), the target path is normalized against the working directory before rules are matched: a path inside the working directory is matched in cwd-relative form (so `foo.go`, `./foo.go`, and an absolute spelling of the same file all hit the same rule), while a path outside the working directory stays absolute.
+Permission matching examines the tool call and the session working directory (the directory the tool executes in). For `shell`, only the command string is matched: a `workdir` argument does not participate. For file tools (`read`, `write`, `edit`, `apply_patch`, `delete`, `view_image`), the target path is normalized against the working directory before rules are matched: a path inside the working directory is matched in cwd-relative form (so `foo.go`, `./foo.go`, and an absolute spelling of the same file all hit the same rule), while a path outside the working directory stays absolute.
 
 File-tool rule patterns are scoped by their form:
 
 - `*` matches every path spelling: the same "any path" it always meant.
 - A relative pattern (`**`, `src/**`, `tmp/*`) is anchored to the working directory and only matches in-cwd paths. `**` therefore means "everything under the current directory"; `./**` is accepted as the same thing.
 - An absolute pattern (`/Users/me/other/**`, `~/other/**`, `/**`) only matches out-of-cwd absolute paths. `/**` means "every absolute path"; combining it with `**` covers the same ground as `*`. On Windows, home-relative patterns accept either separator (`~\other\**` and `~/other/**`).
-- An absolute rule no longer matches a file inside the working directory — write the in-cwd rule in relative form instead.
+- An absolute rule no longer matches a file inside the working directory; write the in-cwd rule in relative form instead.
 
 Shell rules only constrain the submitted command string: they do not sandbox the command's filesystem effects, and an allowed command can still `cd` elsewhere, invoke another program, or act on an absolute path. Use narrow shell patterns for approval policy and an OS-level sandbox when actual filesystem confinement is required.
 
@@ -123,18 +123,18 @@ Most tools use the literal `allow` / `ask` / `deny` meaning above, but a few orc
 - `cancel` therefore depends on `delegate`: even if `cancel: allow` is configured, `cancel` is denied when `delegate` is disabled. To allow a role to cancel delegated work, enable both `delegate` and `cancel`.
 - `question: ask` is normalized to `allow`. The `question` tool already asks the user a structured question and waits for their answer, so adding a separate permission confirmation before asking the question would create a redundant prompt without reducing the risk of the final decision.
 - Two control tools are exempt from wildcard-only rules, because the feature that makes them reachable is itself the authorization: `compact_context` and `done`. An allowlist role's `"*": deny` neither hides them nor rejects their calls; otherwise enabling model-driven compaction or starting a loop would silently do nothing. Only a rule that *names* the tool overrides this: `deny` removes it, `ask` keeps it and confirms each call, `allow` matches the default. Narrow globs such as `compact_*` count as naming it, and so do rules written with an argument pattern, since neither tool takes a permission-matching argument. Neither has an external side effect (one shrinks the context, the other ends a loop), so a wildcard rule has no capability to protect here.
-- YOLO removes the confirmation friction of ordinary work — file edits and shell commands — and nothing else. While it is on, the main agent's ordinary tools skip permission checks entirely: `ask` rules do not raise a confirmation and `deny` rules do not block. The bypass only widens permissions, and switching YOLO off restores the original permissions. Control tools change the agent topology or the session lifecycle rather than the risk of one operation, so under YOLO they keep following their configured rules: `handoff`, `delegate`, `cancel`, `done`, and `compact_context`. They split into two groups:
+- YOLO removes the confirmation friction of ordinary work (file edits and shell commands) and nothing else. While it is on, the main agent's ordinary tools skip permission checks entirely: `ask` rules do not raise a confirmation and `deny` rules do not block. The bypass only widens permissions, and switching YOLO off restores the original permissions. Control tools change the agent topology or the session lifecycle rather than the risk of one operation, so under YOLO they keep following their configured rules: `handoff`, `delegate`, `cancel`, `done`, and `compact_context`. They split into two groups:
   - `handoff`, `delegate`, and `cancel` grant the role a capability it did not otherwise have, so YOLO applies exactly one relaxation: an `ask` rule passes without raising the shared confirmation dialog. `allow` stays allowed, `deny` keeps rejecting, and wildcard defaults behave as they do without YOLO. YOLO therefore never adds an orchestration capability the rules do not already grant: a single-agent role such as `builder` stays single-agent while YOLO is on, because its own rules deny `handoff` and `delegate`.
-  - `done` and `compact_context` only end or shrink the current unit of work, so YOLO leaves their dedicated semantics untouched: each behaves exactly as it does without YOLO, and a rule that names one of them keeps its effect — `deny` still removes the tool or workflow, and an explicit `ask` on `compact_context` still confirms each call.
+  - `done` and `compact_context` only end or shrink the current unit of work, so YOLO leaves their dedicated semantics untouched: each behaves exactly as it does without YOLO, and a rule that names one of them keeps its effect: `deny` still removes the tool or workflow, and an explicit `ask` on `compact_context` still confirms each call.
   - SubAgents evaluate their own rules and inherit the mode at execution time: while YOLO is on, their `ask` decisions pass without raising the shared confirmation dialog, while their `deny` rules keep rejecting (a read-only worker keeps its `write: deny`). Switching YOLO off restores their confirmations on later calls.
 
 > Permissions are Agent-level configuration, not a simple global switch.
 
 For `shell`, a specific `allow` pattern such as `"git *": allow` does not auto-allow a command that carries extra work: unquoted shell separators (`;`, `&&`, `||`, `|`, `&`, or newlines), command substitution (`$(...)` or backticks, including inside double quotes), process substitution (`<(...)` or `>(...)`, which spawns a subcommand of its own), and a quote the scan cannot resolve (an unterminated quote, or a trailing backslash). Those calls fall through to the next matching rule, typically `ask` or `deny`.
 
-Metacharacters that are literal payload — single-quoted, or escaped with a backslash — still match the narrow rule. Use this as a safety backstop, not as shell sandboxing; keep broad rules like `shell: allow` or `shell: { "*": allow }` for only fully trusted roles.
+Metacharacters that are literal payload (single-quoted, or escaped with a backslash) still match the narrow rule. Use this as a safety backstop, not as shell sandboxing; keep broad rules like `shell: allow` or `shell: { "*": allow }` for only fully trusted roles.
 
-A command-specific `allow` does, however, cover the full capability of that command, including output redirections and inline environment-assignment prefixes. If `echo *` is allowed, then `echo secret > ~/.bashrc`, `echo x >> file`, `data > /dev/tcp/host/port`, and `LD_PRELOAD=./x.so echo hi` are all allowed — the redirection target and the environment prefix are part of that single shell command, not a separate tool call, so they are not matched or gated on their own.
+A command-specific `allow` does, however, cover the full capability of that command, including output redirections and inline environment-assignment prefixes. If `echo *` is allowed, then `echo secret > ~/.bashrc`, `echo x >> file`, `data > /dev/tcp/host/port`, and `LD_PRELOAD=./x.so echo hi` are all allowed: the redirection target and the environment prefix are part of that single shell command, not a separate tool call, so they are not matched or gated on their own.
 
 Grant a command-level `allow` only to commands whose worst case (arbitrary file writes via redirection, an overridden environment) you accept; otherwise keep them at `ask`.
 
@@ -162,7 +162,7 @@ Common rewrites:
 Recommendations:
 
 - Keep file deletion, bulk rewrites, network downloads, and database operations as `ask` or `deny` by default
-- Use `web_fetch` patterns to gate local/private services or sensitive endpoints — by host/port (`web_fetch: { "localhost:8000": ask }`) or by address range (`web_fetch: { "169.254.0.0/16": deny, "*:8000-9000": ask }`)
+- Use `web_fetch` patterns to gate local/private services or sensitive endpoints: by host/port (`web_fetch: { "localhost:8000": ask }`) or by address range (`web_fetch: { "169.254.0.0/16": deny, "*:8000-9000": ask }`)
 - Set `allow` only for a small set of predictable development commands
 - Do not treat permission matching as a security sandbox
 

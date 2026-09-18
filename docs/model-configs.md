@@ -340,7 +340,7 @@ merges it; for per-tier tuning, give that tier its own template.
 
 GPT-6 Astra is OpenAI's current flagship (`gpt-6-astra`): a 1,050,000-token context window with 128,000 max output and 922,000 usable input (derived as `context` minus `output` when `input` is unset). Reasoning supports `low`, `medium`, `high`, `xhigh`, and `max`; there is no `none` effort. Standard pricing is $10 input / $50 output per 1M with $1 cached input and $12.50 cache writes; prompts above 272K input bill the whole request at 2× input/cache and 1.5× output.
 
-Unlike GPT-5.6 there are no Sol/Terra/Luna tiers — `gpt-6-astra` is a single model ID, so its recipe carries no tier variants. Pair the API-key provider with an entry in `~/.config/chord/auth.yaml`:
+Unlike GPT-5.6 there are no Sol/Terra/Luna tiers: `gpt-6-astra` is a single model ID, so its recipe carries no tier variants. Pair the API-key provider with an entry in `~/.config/chord/auth.yaml`:
 
 ```yaml
 openai:
@@ -692,7 +692,7 @@ the model name implies:
 | Qwen | `enable_thinking` | `thinking.type`, `thinking.budget` |
 
 A model that configures no thinking block sends nothing, and a model outside
-these families keeps its thinking settings out of the chat body — name the
+these families keeps its thinking settings out of the chat body; name the
 dialect explicitly for those, below.
 
 ```yaml
@@ -850,7 +850,7 @@ Notes:
 
 - Keep `api_url` at the `/models` base path. Chord appends `/{model}:streamGenerateContent?alt=sse` automatically.
 - `type` can be omitted; Chord auto-detects Gemini from the `/models` path.
-- Gemini 3.8 Flash (GA September 2, 2026) is the current workhorse: 1M-token context, 64K max output, and thinking levels `low` / `medium` (the provider default) / `high`. `minimal` is not supported and `thinking_budget` is deprecated, so the template above uses `level` only; it pins `high` for agentic work — dropping to `medium` or `low` cuts latency and token burn for everyday tasks.
+- Gemini 3.8 Flash (GA September 2, 2026) is the current workhorse: 1M-token context, 64K max output, and thinking levels `low` / `medium` (the provider default) / `high`. `minimal` is not supported and `thinking_budget` is deprecated, so the template above uses `level` only; it pins `high` for agentic work; dropping to `medium` or `low` cuts latency and token burn for everyday tasks.
 - Gemini 3.5 / 3.6 Flash share this shape and also accept `minimal`; the Flash-Lite series defaults to `minimal`. Gemini 3.1 Pro takes `low` / `medium` / `high` and rejects `minimal` too, so do not reuse one `minimal` variant across the family.
 
 ### Compaction tuning for Gemini
@@ -1016,13 +1016,13 @@ Notes:
 - A GLM `/responses` endpoint is gateway-specific. Use a separate template with
   `reasoning.effort` only when the gateway documents OpenAI Responses mapping.
 - GLM-5.3 (GA August 2026) keeps GLM-5.2's text-only specs (1M context, 128K
-  max output), so it can reuse any of the GLM-5.2 templates above unchanged —
+  max output), so it can reuse any of the GLM-5.2 templates above unchanged;
   only the model ID differs (e.g. `glm-5.3` in your provider's `models` map).
 - GLM-5.3-Flash (released August 2026) is the family's first natively
   multimodal model: image/video/file input, with 1M context and 128K max output. PDF input is officially supported: the GLM Chat Completion API accepts a `file` content block whose `file` object takes `file_id`, `file_url`, or `file_data` (a Base64 `data:<MIME>;base64,...` URL), up to 50 MB per file, in `pdf`/`txt`/`word`/`jsonl`/`xlsx`/`pptx` formats. That matches Chord's chat-completions PDF payload exactly (`type: file` with `filename` and `file_data`), so no compatibility config is needed.
 
   Text parameters match GLM-5.3, so it derives from the Chat Completions template above and only adds the multimodal `modalities.input`. `thinking.type` supports `enabled` only (thinking cannot be turned off), which the chat template already sets. Third-party relays may only implement the older URL-only `file_url` form; check the relay before relying on Base64 `file_data`.
-- The example default pool uses `glm-5.3-flash` — the Coding Plan workhorse
+- The example default pool uses `glm-5.3-flash`: the Coding Plan workhorse
   with native multimodal input. For text-only work, point the pool at
   `bigmodel/glm-5.3`, or keep `bigmodel/glm-5.2` when you want GLM-5.2's wider
   effort set (`xhigh` / `medium` / `minimal` / `none`); the provider `models`
@@ -1626,7 +1626,7 @@ model_templates:
 ### Compaction tuning for MiniMax M3
 
 MiniMax-M3 doubles its rates above 512K input tokens: calls with ≤512K input
-bill at the standard rate, calls above 512K at the higher long-context rate —
+bill at the standard rate, calls above 512K at the higher long-context rate;
 cache reads double too.
 
 The M3 template sets no `limit.output`, so Chord reserves its default `64000`

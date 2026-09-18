@@ -35,7 +35,7 @@ The answer depends on whether the backend requires its own reasoning content bac
 
 1. **No thinking**: the model does not reason, or you never turn thinking on.
    Nothing to configure.
-2. **Thinking comes back, but the backend does not require it again** — the
+2. **Thinking comes back, but the backend does not require it again**: the
    default is enough. Chord replays chat-native reasoning optimistically on the
    first attempt and degrades to structured completed tool facts if the target
    rejects it. If the backend never returns `reasoning_content` at all, Chord

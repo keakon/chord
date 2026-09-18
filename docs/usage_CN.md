@@ -110,7 +110,7 @@ Chord 在后台运行时，当前聚焦的 Agent 从 busy 变为 idle 后，终�
 
 ### 窄终端
 
-终端窄到放不下信息面板时，改由状态栏给一个纯文字计数 pill，例如 `2 agents · 1 job`。有空间就两个数都显示；地方不够先省掉 agent 那半，再不够就整个隐藏。点这个 pill 可以打开 JOBS 列表 overlay——信息面板可见时，同一份列表本来就在屏幕上。列表为空时 Chord 会给一条提示，不会弹个空 overlay 出来。
+终端窄到放不下信息面板时，改由状态栏给一个纯文字计数 pill，例如 `2 agents · 1 job`。有空间就两个数都显示；地方不够先省掉 agent 那半，再不够就整个隐藏。点这个 pill 可以打开 JOBS 列表 overlay：信息面板可见时，同一份列表本来就在屏幕上。列表为空时 Chord 会给一条提示，不会弹个空 overlay 出来。
 
 pill 和 `x` 都只认鼠标，没有鼠标上报的终端点不到。任何宽度下都可以用 `ctrl+j`（Normal 模式）打开同一份列表；进到列表后 `j` / `k`（或滚轮）移动选中行，`Enter` 打开该行的确认框。
 
@@ -122,7 +122,7 @@ pill 和 `x` 都只认鼠标，没有鼠标上报的终端点不到。任何宽�
 
 自己动手停的 job 不发 toast。job 结束后 owner 照样会收到完成结果，并写明是你停的；已经活过发起它那一轮的 job 会以 JOB RESULT 卡送达。
 
-`Esc` 和 `Ctrl+C` 都不会停掉后台 job，包括还挂在当前轮里跑的那些——超过前台预算的长命令已经变成 job 了。停它只有一条路：在确认框里确认（点行尾 `x`，或 `ctrl+j` 后用 `j` / `k` 选中再 `Enter`）。job 也不会活过 Chord 进程——退出或切换会话都会终止所有 job。
+`Esc` 和 `Ctrl+C` 都不会停掉后台 job，包括还挂在当前轮里跑的那些：超过前台预算的长命令已经变成 job 了。停它只有一条路：在确认框里确认（点行尾 `x`，或 `ctrl+j` 后用 `j` / `k` 选中再 `Enter`）。job 也不会活过 Chord 进程，退出或切换会话都会终止所有 job。
 
 ### 终端标题
 
@@ -133,8 +133,8 @@ pill 和 `x` 都只认鼠标，没有鼠标上报的终端点不到。任何宽�
 在输入框里于行首或空格后输入 `@`，会打开文件补全。
 
 - 裸 `@` 使用缓存的工作区文本文件索引。该索引包含已追踪文件，以及未追踪但未被忽略的文件；同时会跳过 Git ignore 路径、隐藏目录、二进制扩展名和常见噪声目录。
-- 当你开始输入根目录文件名前缀（例如 `@A`）时，Chord 还会额外直接检查 session working directory。因此像 `AGENTS.md` 这类即使被 `.gitignore` 或本地 Git exclude 排除出缓存索引的根目录文件，仍然可以补全。
-- 如果当前 query 已经明显是路径形式，例如 `@docs/`、`@./`、`@~/` 或 `@.config/`，Chord 会切换为直接读取该目录的文件系统补全，而不是继续停留在缓存索引上。也因此，当你显式朝某个被忽略路径输入时，路径模式补全仍可能显示这些 ignored 路径。
+- 你开始输入根目录文件名前缀（例如 `@A`）时，Chord 还会额外直接检查 session working directory。因此像 `AGENTS.md` 这类即使被 `.gitignore` 或本地 Git exclude 排除出缓存索引的根目录文件，仍然可以补全。
+- 如果当前 query 已经明显是路径形式，例如 `@docs/`、`@./`、`@~/` 或 `@.config/`，Chord 会切换为直接读取该目录的文件系统补全，而不是继续停留在缓存索引上。也因此，你显式朝某个被忽略路径输入时，路径模式补全仍可能显示这些 ignored 路径。
 - 隐藏项默认仍不会显示。若需要查看，请让 query 本身显式包含隐藏路径语义，例如 `@.`、`@.env`、`@./.` 或 `@.config/`。
 - 可以追加 1-based 行号后缀，只注入文本文件的一部分：`@path:42` 注入第 42 行，`@path:10-20` 注入第 10 到 20 行。接受补全时只替换路径部分，因此你已经输入的行号后缀会保留；如果真实文件名本身包含数字冒号后缀（例如 `note:12`），则优先按文件名处理，而不是解析成行号范围。
 - 补全只是输入辅助。真正发送消息时，Chord 会重新解析最终文本中的 `@path`；如果你在发送前删掉了这个引用，就不会附加该文件。
@@ -148,7 +148,7 @@ Chord 为当前项目维护持久化会话。
 - `chord`：新建会话
 - `chord --continue`：恢复当前项目最近的非空会话
 - `chord --resume <session-id>`：恢复当前项目内指定 session 的会话
-- `chord resume <session-id>`：从任意目录按 session id 恢复——自动定位会话所属的 chord 管理 worktree（或主仓库）并切换过去；带 `--fork-history[=N]` 则改为在某次压缩边界上 fork 出来再恢复（默认最近一次已应用边界；fork 原样复现那一代及压缩归档，usage 与运行状态从零开始）
+- `chord resume <session-id>`：从任意目录按 session id 恢复，自动定位会话所属的 chord 管理 worktree（或主仓库）并切换过去；带 `--fork-history[=N]` 则改为在某次压缩边界上 fork 出来再恢复（默认最近一次已应用边界；fork 原样复现那一代及压缩归档，usage 与运行状态从零开始）
 - `chord import <source> [file]`：导入外部会话到 Chord（支持 `opencode`/`codex`/`claude`）
 - `/new`：在 TUI 内创建新会话
 - `/resume`：在 TUI 内选择历史会话
@@ -206,7 +206,7 @@ chord import claude --id <session-id> [--root ~/.claude/projects]
 
 - `--project <path>`：写入哪个 project（默认当前目录）
 - `--sid <id>`：指定 session id（默认自动生成）
-- `--id <session-id>`：按来源工具自带的 session id 查找而非文件路径——Codex 的就是 `codex resume` 退出时打印的那个（支持 `codex` / `claude`）
+- `--id <session-id>`：按来源工具自带的 session id 查找而非文件路径，Codex 的就是 `codex resume` 退出时打印的那个（支持 `codex` / `claude`）
 - `--root <path>`：`--id` 查找的根目录
 - `--reasoning off|visible|strict`：reasoning 导入策略（默认 `strict`）
 - `--dry-run`：只解析输出报告，不写入 session
@@ -241,7 +241,7 @@ Worktree 路径位于 `<state-dir>/worktrees/<repo-id>/<slug>`（仓库目录之
 - `/mcp`：打开 MCP server 选择器；`/mcp status` 输出状态；`/mcp enable|disable <server>` 可切换手动 server。运行时切换会在下一次 LLM 请求生效，不影响当前正在进行的请求。
 - `/compact`：手动触发上下文压缩，将当前对话摘要为结构化归档，详见 [上下文管理：上下文压缩](./context-management_CN.md#上下文压缩compaction)
 - `/tier standard|fast|slow`：设置后续模型请求的 service tier（包括尚未开始的后续 retry round）。空的 `/tier` 不是状态查询命令；当前有效 tier 请看侧边栏/状态显示。如果手动输入当前 provider/model 不支持的 tier，Chord 会保持当前 tier 不变并显示错误提示。
-- `/yolo on|off`：临时放开主 agent 对普通工具的权限检查。开启期间，文件编辑、shell 命令这类调用直接放行：`ask` 不弹确认框，`deny` 规则也不拦截。放开是单向的，只放宽不收紧——关闭 YOLO 时能用的工具，开启期间不会变得不可用；关掉 YOLO 即恢复原权限。`handoff`、`delegate`、`cancel` 仍按配置的规则判定：`allow` 照常放行，`deny` 照常拒绝，`ask` 不再弹确认框、直接放行，通配默认与关闭时行为一致。`done` 和 `compact_context` 维持各自的专门语义。Agent 运行中也可以切换 YOLO：执行期的变化会立刻影响后续工具调用，LLM 可见的工具描述和权限提示则在下一次请求刷新。开启期间 SubAgent 也会继承该模式：需要 `ask` 的调用（普通工具和机制工具都一样）不再弹确认框，但 `deny` 规则依然拒绝。切换 YOLO 会立即影响 SubAgent 的后续调用。
+- `/yolo on|off`：临时放开主 agent 对普通工具的权限检查。开启期间，文件编辑、shell 命令这类调用直接放行：`ask` 不弹确认框，`deny` 规则也不拦截。放开是单向的，只放宽不收紧：关闭 YOLO 时能用的工具，开启期间不会变得不可用；关掉 YOLO 即恢复原权限。`handoff`、`delegate`、`cancel` 仍按配置的规则判定：`allow` 照常放行，`deny` 照常拒绝，`ask` 不再弹确认框、直接放行，通配默认与关闭时行为一致。`done` 和 `compact_context` 维持各自的专门语义。Agent 运行中也可以切换 YOLO：执行期的变化会立刻影响后续工具调用，LLM 可见的工具描述和权限提示则在下一次请求刷新。开启期间 SubAgent 也会继承该模式：需要 `ask` 的调用（普通工具和机制工具都一样）不再弹确认框，但 `deny` 规则依然拒绝。切换 YOLO 会立即影响 SubAgent 的后续调用。
 - `/help`：切换内置 cheatsheet 浮层（等同 Normal 模式按 `?`）
 
 启用非标准服务等级后，侧边栏会显示当前值。如果切换模型后该等级不再可用，它会以灰色删除线显示。`Ctrl+R` 只在当前服务商和模型支持的等级之间切换。
@@ -250,7 +250,7 @@ Worktree 路径位于 `<state-dir>/worktrees/<repo-id>/<slug>`（仓库目录之
 
 ### 项目记忆（Memory）
 
-Chord 可选的跨会话项目记忆——稳定的偏好、项目事实与可复用工作流——已独立成页：[项目记忆](./project-memory_CN.md)。那页说明记录了什么、摘要如何加载进会话、怎么开启自动抽取，以及如何审阅和删除条目。Memory 没有对应的斜杠命令。
+Chord 可选的跨会话项目记忆（稳定的偏好、项目事实与可复用工作流）已独立成页：[项目记忆](./project-memory_CN.md)。那页说明记录了什么、摘要如何加载进会话、怎么开启自动抽取，以及如何审阅和删除条目。Memory 没有对应的斜杠命令。
 
 ### MCP 选择器
 
@@ -302,13 +302,13 @@ Project 统计自动从本地 sessions 目录聚合，支持 `today`、`7d`、`3
 
 规则旁会显示作用域（`session` / `project` / `global`）和落盘文件路径。`session` 规则只在当前会话内生效；`project` 规则写入当前项目的 `.chord/agents/<role>.yaml`；`global` 规则写入用户配置目录的 `agents/<role>.yaml`（默认 `~/.config/chord/agents/<role>.yaml`）。这些规则会直接更新对应 agent 的 `permission` 配置，删除规则时也会从同一 agent 配置文件移除。
 
-权限确认弹窗也可以用 `M` 添加记住规则。在规则选择器中按 `E` 可在保存前编辑建议 pattern。Delete 确认不再提供单文件规则，而是按覆盖本次待审批目标的数量优先列出父目录规则。全局 `*` 通配项始终保留；当本次请求的所有目标都位于当前工作目录内时，选择器还会保留一个相对当前目录的 `**` 选项，方便放行当前目录下后续删除。`**` 和 `*` 都不会默认选中。
+权限确认弹窗也可以用 `M` 添加记住规则。在规则选择器中按 `E` 可在保存前编辑建议 pattern。Delete 确认时，选择器按覆盖本次待审批目标的数量，优先给出可复用的父目录规则。全局 `*` 通配项始终保留；本次请求的所有目标都位于当前工作目录内，选择器还会保留一个相对当前目录的 `**` 选项，方便放行当前目录下后续删除。`**` 和 `*` 都不会默认选中。
 
 ### `/loop`：持续执行模式
 
-持续执行模式让 agent 在每一轮结束后自动继续，无需反复催促。适合那种「帮我搞定这个功能」的一次性指令——你只需发一条消息，agent 会自己迭代、验证、直到完成、确实卡住，或你明确确认退出。
+持续执行模式让 agent 在每一轮结束后自动继续，无需反复催促。适合那种「帮我搞定这个功能」的一次性指令：你只需发一条消息，agent 会自己迭代、验证，直到任务完成、确实卡住，或你明确确认退出。
 
-只有当当前 MainAgent 角色可以使用 `done` 工具时，`/loop` 才可用——即 `done` 已注册且没有规则拒绝它。纯通配的 `"*": deny` 不算拒绝：挂载 `done` 正是进入 loop 模式这个动作本身，因此 loop 本身就是授权。想让某个角色用不了 loop 模式，写 `done: deny`，此时 `/loop on` 会被拒绝并给出 toast。
+只有当前 MainAgent 角色可以使用 `done` 工具，`/loop` 才可用：`done` 已注册且没有规则拒绝它。纯通配的 `"*": deny` 不算拒绝：挂载 `done` 正是进入 loop 模式这个动作本身，因此 loop 本身就是授权。想让某个角色用不了 loop 模式，写 `done: deny`，此时 `/loop on` 会被拒绝并给出 toast。
 
 启用方式：
 
@@ -330,7 +330,7 @@ Project 统计自动从本地 sessions 目录聚合，支持 `today`、`7d`、`3
 
 Agent 申请结束时，Chord 会检查退出条件，并用本地确认框展示完成报告。确认后停止；拒绝则继续运行。YOLO 模式不会绕过这次确认，也不会绕过 `done` 权限。
 
-`done` 工具只在 loop 运行期间挂载。不在 loop 中时，它根本不在工具面上，因此普通会话不必携带它的定义，模型也不用在「直接回复」和「调用完成工具」之间做选择——普通模式下 agent 直接用常规 assistant 正文结束即可。执行 `/loop on` 时才挂载它：支持 Chord request-only 动态工具挂载的模型（Responses 系模型与 Kimi dynamic tools）会在下一次请求里把它作为一次性动态工具声明补进去，不损失 prompt cache；其余模型则重建一次工具面，那一次请求会打断 prompt cache 复用。如果 `done` 已经在工具面里，Chord 会跳过挂载，不会重复注入。随后 loop 模式通过当前 runtime 的工具调用要求和 continuation 指令，把 `done` 作为明确的退出请求。执行 `/loop off` 会把 `done` 从工具面收回，后续工作恢复普通响应方式，同时取消尚未发送给模型的 loop continuation。
+`done` 工具只在 loop 运行期间挂载。不在 loop 中时，它根本不在工具面上，因此普通会话不必携带它的定义，模型也不用在「直接回复」和「调用完成工具」之间做选择，普通模式下 agent 直接用常规 assistant 正文结束即可。执行 `/loop on` 时才挂载它：支持 Chord request-only 动态工具挂载的模型（Responses 系模型与 Kimi dynamic tools）会在下一次请求里把它作为一次性动态工具声明补进去，不损失 prompt cache；其余模型则重建一次工具面，那一次请求会打断 prompt cache 复用。如果 `done` 已经在工具面里，Chord 会跳过挂载，不会重复注入。随后 loop 模式通过当前 runtime 的工具调用要求和 continuation 指令，把 `done` 作为明确的退出请求。执行 `/loop off` 会把 `done` 从工具面收回，后续工作恢复普通响应方式，同时取消尚未发送给模型的 loop continuation。
 
 Loop 模式还会检测连续重复的相同工具调用。发现卡住后，Chord 会打断重复；多次触发后，会询问你是停止还是继续。
 
@@ -370,7 +370,7 @@ Chord 支持 MainAgent 与 SubAgent 协作。
 当前支持：
 
 - 使用 `Ctrl+V` 或 `Alt+V` 从系统剪贴板附加图片或 PDF
-- 在当前模型支持对应输入类型时，把图片或 PDF 文件作为附件发送给当前聚焦的 Agent
+- 当前模型支持对应输入类型时，把图片或 PDF 文件作为附件发送给当前聚焦的 Agent
 - 在支持的终端里直接查看图片；PDF 会发送给模型，并在转录区显示为文件 chip，但不会 inline 预览
 - 编辑含图片或 PDF 的历史用户消息；如果这条消息已经在转录尾部，就直接在当前会话里回填编辑，否则会 fork 新会话；按路径恢复的附件会在重新发送该消息时再次加载
 - 当工具被权限规则允许、有效 model pool 的第一个模型支持 image 输入且这个第一个模型不是 OpenAI Chat Completions API 时，模型可以调用内置 `view_image` 工具把本地 PNG/JPEG 载入上下文。该工具使用与 `read` 相同的本地路径权限处理。
@@ -413,9 +413,9 @@ Chord 支持 MainAgent 与 SubAgent 协作。
 
 ## 模型编辑工具
 
-Chord 会根据当前模型选择文件编辑工具：gpt-5 及之后主版本家族（`gpt-5`、`gpt-5-mini`、`gpt-5-nano`、`gpt-5-codex`、任意 `gpt-5.*` 名称，以及未来的 `gpt-6` 等）和 `codex-auto-review` 使用 `apply_patch`，其余模型默认 `edit`——完整矩阵和依据见 [编辑工具](./edit-tools_CN.md)。在兼容的 Responses 端点上，补丁原生模型还会把 `apply_patch` 以 freeform custom tool 形式发送，而不是 JSON function tool。
+Chord 会根据当前模型选择文件编辑工具：gpt-5 及之后主版本家族（`gpt-5`、`gpt-5-mini`、`gpt-5-nano`、`gpt-5-codex`、任意 `gpt-5.*` 名称，以及未来的 `gpt-6` 等）和 `codex-auto-review` 使用 `apply_patch`，其余模型默认 `edit`，完整矩阵和依据见 [编辑工具](./edit-tools_CN.md)。在兼容的 Responses 端点上，补丁原生模型还会把 `apply_patch` 以 freeform custom tool 形式发送，而不是 JSON function tool。
 
-当模型名或网关的实际表现与推断不符时，可以用 `compat.apply_patch.enabled`（工具面）和 `compat.apply_patch.freeform`（发送形式）按 provider 或模型覆盖。两个键都是三态：省略表示按模型名和端点推断，只需设置要改的那个。字段权威说明见 [配置与认证](./configuration_CN.md)。
+模型名或网关的实际表现与推断不符时，可以用 `compat.apply_patch.enabled`（工具面）和 `compat.apply_patch.freeform`（发送形式）按 provider 或模型覆盖。两个键都是三态：省略表示按模型名和端点推断，只需设置要改的那个。字段权威说明见 [配置与认证](./configuration_CN.md)。
 
 ## 相关文档
 

@@ -295,9 +295,9 @@ permission:
 - Verify conclusions before handing execution back to the orchestrator or coder.
 ```
 
-This is closer to a real shared workflow than a single `builder` role with a few permissions:
+This layout splits the work across roles:
 
-- the primary role plans and routes work instead of editing everything directly
+- the primary role plans and routes work
 - `explorer` handles read-only discovery
 - `coder` executes explicit changes
 - `reviewer` owns final correctness, lint, and tests

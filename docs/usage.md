@@ -100,7 +100,7 @@ The error panel keeps the most recent 80 errors in a ring buffer (newest first).
 
 ## Background jobs
 
-Some work outlives the turn that started it — long shell commands, including the ones SubAgents launch. While such a command is running or stopping, Chord tracks it as a job, and the turn can finish without stopping it.
+Some work outlives the turn that started it: long shell commands, including the ones SubAgents launch. While such a command is running or stopping, Chord tracks it as a job, and the turn can finish without stopping it.
 
 ### JOBS block
 
@@ -110,7 +110,7 @@ With nothing running or stopping, the block is omitted entirely.
 
 ### Narrow terminals
 
-When the terminal is too narrow for the info panel, the status bar carries a plain-text counter pill instead, such as `2 agents · 1 job`. It shows both counts while there is room; when space runs short, Chord drops the agents half first and then hides the pill. Click the pill to open the JOBS list overlay — with the info panel visible, the same list is already on screen. With no jobs to show, Chord tells you so instead of opening an empty overlay.
+When the terminal is too narrow for the info panel, the status bar carries a plain-text counter pill instead, such as `2 agents · 1 job`. It shows both counts while there is room; when space runs short, Chord drops the agents half first and then hides the pill. Click the pill to open the JOBS list overlay; with the info panel visible, the same list is already on screen. With no jobs to show, Chord tells you so instead of opening an empty overlay.
 
 The pill and the `x` are click targets, so a terminal without mouse reporting cannot reach them. `ctrl+j` opens the same list from Normal mode at any width; inside it, `j` / `k` (or the mouse wheel) move the selection and `Enter` opens the confirmation for the selected row.
 
@@ -122,7 +122,7 @@ Only `y` confirms. `n` and `esc` cancel, and `Enter` is not bound. After you con
 
 Stopping a job yourself does not raise a toast. When the job ends, its owner still receives the result, stating plainly that you stopped it; a job that had outlived the turn that started it arrives as a JOB RESULT card.
 
-`Esc` and `Ctrl+C` do not stop a background job, including one still running inside the current turn: a long command that outran the foreground budget has already become a job. Confirming the stop dialog — reached by clicking `x`, or with `ctrl+j` then `j` / `k` and `Enter` — is the only way to stop one. Jobs do not outlive Chord itself — quitting or switching sessions terminates all of them.
+`Esc` and `Ctrl+C` do not stop a background job, including one still running inside the current turn: a long command that outran the foreground budget has already become a job. Confirming the stop dialog (reached by clicking `x`, or with `ctrl+j` then `j` / `k` and `Enter`) is the only way to stop one. Jobs do not outlive Chord itself: quitting or switching sessions terminates all of them.
 
 ### Terminal title
 
@@ -148,7 +148,7 @@ Common workflows:
 - `chord`: create a new session
 - `chord --continue`: resume the most recent non-empty session for this project
 - `chord --resume <session-id>`: resume a specific session of the current project
-- `chord resume <session-id>`: resume a session by ID from any directory — auto-locates the chord-managed worktree the session belongs to and switches into it; add `--fork-history[=N]` to resume a fork at a compaction boundary instead (default: latest applied boundary; the fork reproduces that generation with its compaction archives and starts usage and runtime state fresh)
+- `chord resume <session-id>`: resume a session by ID from any directory. It auto-locates the chord-managed worktree the session belongs to and switches into it; add `--fork-history[=N]` to resume a fork at a compaction boundary instead (default: latest applied boundary; the fork reproduces that generation with its compaction archives and starts usage and runtime state fresh)
 - `chord import <source> [file]`: import an external session into Chord's session store
 - `/new`: create a new session in the TUI
 - `/resume`: pick a historical session in the TUI
@@ -208,7 +208,7 @@ Common flags:
 
 - `--project <path>`: which project to write into (default: current directory)
 - `--sid <id>`: specify session id (default: auto-generated)
-- `--id <session-id>`: import by the source tool's own session id instead of file path — for Codex this is the id `codex resume` prints (supported for `codex` and `claude`)
+- `--id <session-id>`: import by the source tool's own session id instead of file path; for Codex this is the id `codex resume` prints (supported for `codex` and `claude`)
 - `--root <path>`: root directory for `--id` lookup
 - `--reasoning off|visible|strict`: reasoning import policy (default: `strict`)
 - `--dry-run`: parse and report only, no writes
@@ -239,7 +239,7 @@ These commands are handled by the local runtime and are not sent to the model as
 - `/rename <title>`: set the current session's display title; bare `/rename` clears it without changing the session ID
 - `/models`: view pool status or switch the current view's model pool (`main` view = current main role; `SubAgent` view = that agent)
 - `/models --agent <name> <pool>`: directly set a named agent's pool
-- `/role`: open a role-picker dialog and switch the active main agent (builder, planner, and custom main-mode roles) — the dialog form of `Shift+Tab`; `/role <name>` switches directly without the dialog, and `/role status` prints the current role and the available roles
+- `/role`: open a role-picker dialog and switch the active main agent (builder, planner, and custom main-mode roles), the dialog form of `Shift+Tab`; `/role <name>` switches directly without the dialog, and `/role status` prints the current role and the available roles
 - `/mcp`: open the MCP server selector; `/mcp status` prints status; `/mcp enable|disable <server>` toggles manual servers. Runtime changes take effect for the next LLM request, not the currently in-flight request.
 - `/compact`: manually trigger context compaction to summarize the current conversation as a structured archive; see [Context management: Compaction](./context-management.md#context-compaction)
 - `/tier standard|fast|slow`: set the service tier for subsequent model requests (including later retry rounds that have not started yet). Bare `/tier` is not a status command; use the sidebar/status display for the current effective tier. If you enter a tier that the current provider/model does not support, Chord leaves the current tier unchanged and shows an error.
@@ -252,7 +252,7 @@ The following commands have more interactive detail, expanded below.
 
 ### Project Memory
 
-Chord's optional cross-session project memory — stable preferences, project facts, and reusable workflows — has its own page: [Project Memory](./project-memory.md). It covers what gets stored, how the summary loads into a session, how to enable automatic extraction, and how to review or remove entries. There is no slash command for memory.
+Chord's optional cross-session project memory (stable preferences, project facts, and reusable workflows) has its own page: [Project Memory](./project-memory.md). It covers what gets stored, how the summary loads into a session, how to enable automatic extraction, and how to review or remove entries. There is no slash command for memory.
 
 ### MCP selector
 
@@ -308,9 +308,9 @@ The confirmation popup also supports adding a remembered rule with `M`. In the r
 
 ### `/loop`: continuous execution mode
 
-Continuous execution mode keeps the agent working after each round without you having to nudge it. Suitable for one-shot instructions like "implement feature X" — you send one message and the agent iterates, verifies, and pushes through until the work is done, genuinely blocked, or you explicitly confirm exit.
+Continuous execution mode keeps the agent working after each round without you having to nudge it. Suitable for one-shot instructions like "implement feature X": you send one message and the agent iterates, verifies, and pushes through until the work is done, genuinely blocked, or you explicitly confirm exit.
 
-`/loop` is available only when the current MainAgent role can use the `done` tool — that is, `done` is registered and no rule denies it. A wildcard-only `"*": deny` does not deny it: mounting `done` is what entering loop mode does, so the loop itself is the authorization. Write `done: deny` to keep a role out of loop mode; `/loop on` is then refused with a toast.
+`/loop` is available only when the current MainAgent role can use the `done` tool: that is, `done` is registered and no rule denies it. A wildcard-only `"*": deny` does not deny it: mounting `done` is what entering loop mode does, so the loop itself is the authorization. Write `done: deny` to keep a role out of loop mode; `/loop on` is then refused with a toast.
 
 Enabling:
 
@@ -332,7 +332,7 @@ The text after `/loop on` is the task target sent to the agent. When omitted, it
 
 When the agent asks to finish, Chord checks the loop exit conditions and shows a local confirmation containing the completion report. Confirm to stop, or reject to keep the loop running. YOLO mode does not bypass this confirmation or the `done` permission.
 
-The `done` tool is mounted only while a loop is running. Outside a loop it is absent from the tool surface entirely, so ordinary sessions do not carry its definition and the model is never asked to choose between answering directly and calling a completion tool — in normal mode the agent simply finishes with a regular assistant response. Enabling `/loop on` mounts it: on models that support Chord's request-only dynamic tool mounts (Responses-family models and Kimi dynamic tools) it is late-mounted for the next request at no prompt-cache cost, and everywhere else the tool surface is rebuilt once, which breaks prompt-cache reuse for that one request. Chord skips the mount when `done` is already present, so it never injects a duplicate. Loop mode then uses the current runtime's tool-call requirements and continuation instructions to make `done` the explicit exit request. Running `/loop off` takes `done` back off the surface, returns subsequent work to normal response behavior, and cancels any loop continuation that had not yet been sent to the model.
+The `done` tool is mounted only while a loop is running. Outside a loop it is absent from the tool surface entirely, so ordinary sessions do not carry its definition and the model is never asked to choose between answering directly and calling a completion tool; in normal mode the agent simply finishes with a regular assistant response. Enabling `/loop on` mounts it: on models that support Chord's request-only dynamic tool mounts (Responses-family models and Kimi dynamic tools) it is late-mounted for the next request at no prompt-cache cost, and everywhere else the tool surface is rebuilt once, which breaks prompt-cache reuse for that one request. Chord skips the mount when `done` is already present, so it never injects a duplicate. Loop mode then uses the current runtime's tool-call requirements and continuation instructions to make `done` the explicit exit request. Running `/loop off` takes `done` back off the surface, returns subsequent work to normal response behavior, and cancels any loop continuation that had not yet been sent to the model.
 
 Loop mode also detects repeated identical tool calls. It interrupts a stalled sequence and, after repeated interceptions, asks whether to stop or continue.
 
@@ -415,7 +415,7 @@ See [Headless](./headless.md) for details.
 
 ## Model editing tools
 
-Chord picks the file-editing tool per active model: gpt-5-and-later family names (gpt-5, gpt-5-mini, gpt-5-nano, gpt-5-codex, any `gpt-5.*` name, and future majors like gpt-6) and `codex-auto-review` use `apply_patch`, everything else defaults to `edit` — see [Edit tools](./edit-tools.md) for the full matrix and the rationale. On compatible Responses endpoints, patch-native models additionally receive `apply_patch` as a freeform custom tool instead of a JSON function tool.
+Chord picks the file-editing tool per active model: gpt-5-and-later family names (gpt-5, gpt-5-mini, gpt-5-nano, gpt-5-codex, any `gpt-5.*` name, and future majors like gpt-6) and `codex-auto-review` use `apply_patch`, everything else defaults to `edit`; see [Edit tools](./edit-tools.md) for the full matrix and the rationale. On compatible Responses endpoints, patch-native models additionally receive `apply_patch` as a freeform custom tool instead of a JSON function tool.
 
 When a model name or gateway behaves differently from the inference, override it per provider or model with `compat.apply_patch.enabled` (tool surface) and `compat.apply_patch.freeform` (wire shape). Both keys are three-state: omitted means infer from the model name and endpoint, so you only set the knob you need to change. The authoritative field reference is in [Configuration & Auth](./configuration.md).
 

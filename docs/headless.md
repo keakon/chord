@@ -34,9 +34,9 @@ Every outbound envelope has the shape:
 { "type": "<event-type>", "payload": { ... } }
 ```
 
-State-carrying envelopes — event-loop pushes, command-path announcements such as `role_change` and `handoff_cancelled`, and `status_response` snapshots — additionally carry a monotonic `seq` (`{ "type": "<event-type>", "seq": 12, "payload": { ... } }`). Pushes leave the process in `seq` order, but a `status_response` snapshot is copied and emitted on the command path, so a snapshot taken before a newer push can arrive after it. Any cached-state mutation bumps `seq`, even when the gateway did not subscribe to the corresponding push or the mutation has no push at all — auto-dismissing a pending confirm or question on `send`, or an explicit `confirm` / `question` / `handoff` reply — so a later `status_response` is strictly newer than one copied before the mutation. Integrations that merge `status_response` into cached state must drop a snapshot whose `seq` is smaller than an already-seen `seq`. Every `status_response`, including one sent before the first push, has a nonzero `seq`. Reset the highest observed version when a new process sends `ready`; versions are local to that process.
+State-carrying envelopes (event-loop pushes, command-path announcements such as `role_change` and `handoff_cancelled`, and `status_response` snapshots) additionally carry a monotonic `seq` (`{ "type": "<event-type>", "seq": 12, "payload": { ... } }`). Pushes leave the process in `seq` order, but a `status_response` snapshot is copied and emitted on the command path, so a snapshot taken before a newer push can arrive after it. Any cached-state mutation bumps `seq`, even when the gateway did not subscribe to the corresponding push or the mutation has no push at all: auto-dismissing a pending confirm or question on `send`, or an explicit `confirm` / `question` / `handoff` reply; so a later `status_response` is strictly newer than one copied before the mutation. Integrations that merge `status_response` into cached state must drop a snapshot whose `seq` is smaller than an already-seen `seq`. Every `status_response`, including one sent before the first push, has a nonzero `seq`. Reset the highest observed version when a new process sends `ready`; versions are local to that process.
 
-The first line you receive is always `{"type": "ready", ...}` — wait for it before sending other commands.
+The first line you receive is always `{"type": "ready", ...}`; wait for it before sending other commands.
 
 ## Try one interaction first
 
@@ -139,7 +139,7 @@ Response:
 
 ### `role`
 
-Query or switch the active main role — the remote equivalent of TUI Shift+Tab. `list` returns the current role and the ordered main-mode role list (builder first, planner second when configured, then custom roles alphabetically); `set` switches roles and keeps the conversation history, just like TUI cycling.
+Query or switch the active main role: the remote equivalent of TUI Shift+Tab. `list` returns the current role and the ordered main-mode role list (builder first, planner second when configured, then custom roles alphabetically); `set` switches roles and keeps the conversation history, just like TUI cycling.
 
 ```json
 {"type": "role", "action": "list"}

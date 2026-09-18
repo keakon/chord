@@ -2,7 +2,7 @@
 
 <!-- description: 在 Chord 生命周期节点（工具调用前、LLM 返回后、agent 空闲等）运行你自己的命令。 -->
 
-Hooks 让你在 Chord 生命周期的明确节点运行外部命令——工具即将执行、LLM 调用返回、Agent 进入 idle 等。常见用途是通知、审计、自动化门禁、批量操作后的检查。
+Hooks 让你在 Chord 生命周期的明确节点运行外部命令：工具即将执行、LLM 调用返回、Agent 进入 idle 等。常见用途是通知、审计、自动化门禁、批量操作后的检查。
 
 本页是完整参考。更高层的用法建议见 [扩展与定制](./customization_CN.md)。
 
@@ -128,7 +128,7 @@ stdout 不是合法 JSON 时记录为解析失败；非零退出码记录为执�
 
 ### Observer hook
 
-stdout 以纯字符串形式写入日志，没有 schema——想 print 什么就 print 什么，方便排错就行。
+stdout 以纯字符串形式写入日志，没有 schema：想 print 什么就 print 什么，方便排错就行。
 
 ## HookDef 字段
 
@@ -237,7 +237,7 @@ hooks:
 
 ## 调试 hook
 
-启动 Chord 前设 `CHORD_HOOK_DEBUG=1`——每次 hook 调用都会记录输入、输出、退出码、耗时。详见 [环境变量](./environment_CN.md#开发与调试)。
+启动 Chord 前设 `CHORD_HOOK_DEBUG=1`：每次 hook 调用都会记录输入、输出、退出码、耗时。详见 [环境变量](./environment_CN.md#开发与调试)。
 
 Hook 行为反常时：
 

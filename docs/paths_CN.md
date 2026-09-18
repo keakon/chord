@@ -10,7 +10,7 @@ Chord 读写的所有文件和目录，以及如何安全地清理。
 | **state 目录**     | `$XDG_STATE_HOME/chord` 或 `~/.local/state/chord`       | 持久运行时状态，丢了会失忆：sessions、exports、logs、project registry、worktrees                    |
 | **cache 目录**     | `$XDG_CACHE_HOME/chord` 或 `~/.cache/chord`             | 可重建运行时缓存；任何时候都可以删                                                                  |
 
-三个位置都可以通过环境变量、CLI flag 或 `config.yaml` 的 `paths:` 节覆盖——见 [环境变量](./environment_CN.md) 和 [CLI 全局 flag](./cli_CN.md#全局-flag)。
+三个位置都可以通过环境变量、CLI flag 或 `config.yaml` 的 `paths:` 节覆盖，见 [环境变量](./environment_CN.md) 和 [CLI 全局 flag](./cli_CN.md#全局-flag)。
 
 ## 配置主目录：`~/.config/chord/`
 
@@ -64,19 +64,19 @@ Chord 写在这里。删了就丢历史。
     └── tui-dumps/                      # `Ctrl+G` 输出
 ```
 
-`<session-id>` 是 17 位纯数字（`YYYYMMDDHHmmSSfff`），由本地墙钟生成，因此一眼能看出本地日期时间，作为目录名/文件名也安全。SID 只是标识和粗略的创建时间提示，不充当会话排序键，所以这种混用不影响 Chord 选择哪个会话。会话列表取 `main.jsonl` 与已有 `usage-summary.json` 两个修改时间中较新的那个。Chord 只 stat 这些小文件，不会扫描完整会话，也不会额外维护项目级索引。复制或恢复文件可能让文件时间失真；没有更新这两个文件的活动，也不会改变排序。
+`<session-id>` 是 17 位纯数字（`YYYYMMDDHHmmSSfff`），由本地墙钟生成，因此一眼能看出本地日期时间，作为目录名/文件名也安全。SID 只是标识和粗略的创建时间提示，不充当会话排序键。会话列表取 `main.jsonl` 与已有 `usage-summary.json` 两个修改时间中较新的那个。Chord 只 stat 这些小文件，不会扫描完整会话，也不会额外维护项目级索引。复制或恢复文件可能让文件时间失真；没有更新这两个文件的活动，也不会改变排序。
 
 ### `<project-key>` 是什么？
 
-Chord 用项目的规范文件系统根路径（解析符号链接、规范化大小写）作为身份，再据此推导一个稳定、清洗后的 key——例如 `~/projects/chord` 的 key 为 `HOME-projects-chord`。两个项目清洗后冲突时，Chord 追加 8 字符指纹消歧。完整的规范根路径也会写入 `project.json`，所以即使路径相似，注册表也不会混淆。
+Chord 用项目的规范文件系统根路径（解析符号链接、规范化大小写）作为身份，再据此推导一个稳定、清洗后的 key，例如 `~/projects/chord` 的 key 为 `HOME-projects-chord`。两个项目清洗后冲突时，Chord 追加 8 字符指纹消歧。完整的规范根路径也会写入 `project.json`，所以即使路径相似，注册表也不会混淆。
 
-Sessions、运行时缓存、exports 都以这个 key 为索引——在 `~/projects/chord` 重新跑 `chord` 能找到上次的会话。
+Sessions、运行时缓存、exports 都以这个 key 为索引：在 `~/projects/chord` 重新跑 `chord` 能找到上次的会话。
 
 ### Worktree
 
 `chord --worktree <name>` 会在 `worktrees/<repo-id>/<slug>` 下创建 chord 管理的 git worktree，**位于原仓库之外**，拥有自己的 project key。每个 chord 管理的 worktree 的 sessions、cache、exports 因此天然隔离。
 
-移除 worktree，用 `chord worktree remove <name>`。它会删除工作目录及对应的会话、缓存和导出数据，默认保留分支；`--force` 还会强制删除分支——见 [CLI：chord worktree](./cli_CN.md#chord-worktree)。**不要**手动删 worktree 目录，那会留下注册表中的孤儿条目（之后会被 `chord cleanup project` 标记）。
+移除 worktree，用 `chord worktree remove <name>`。它会删除工作目录及对应的会话、缓存和导出数据，默认保留分支；`--force` 还会强制删除分支，见 [CLI：chord worktree](./cli_CN.md#chord-worktree)。**不要**手动删 worktree 目录，那会留下注册表中的孤儿条目（之后会被 `chord cleanup project` 标记）。
 
 ## cache 目录：`~/.cache/chord/`
 
@@ -105,7 +105,7 @@ Sessions、运行时缓存、exports 都以这个 key 为索引——在 `~/proj
     └── records/           # 每条自动记录一个不可变文件
 ```
 
-项目级文件优先级高于全局（同名 key 覆盖）。把 `.chord/` 提交到仓库通常是好事——团队成员可以共享同一套 agent 与 slash 命令。Memory 记录是普通项目文件：Chord 不会暂存或提交它们，你也可以通过 `.gitignore` 或 `.git/info/exclude` 保持本地私有。
+项目级文件优先级高于全局（同名 key 覆盖）。把 `.chord/` 提交到仓库通常是好事：团队成员可以共享同一套 agent 与 slash 命令。Memory 记录是普通项目文件：Chord 不会暂存或提交它们，你也可以通过 `.gitignore` 或 `.git/info/exclude` 保持本地私有。
 
 `auth.yaml` **永远不会**从 `.chord/` 读取：凭据必须在 `~/.config/chord/auth.yaml`。
 
@@ -118,7 +118,7 @@ Sessions、运行时缓存、exports 都以这个 key 为索引——在 `~/proj
 - `.chord/plans/` 放计划文档，是否提交由项目自行决定。
   - planner → handoff 工作流的任务清单计划与主题/设计文档统一用同一命名：`YYYYMMDD-<slug>.md`（如 `20260903-session-key-isolation.md`），`YYYYMMDD` 为创建日期、`<slug>` 为由标题派生的短描述名。若同日期同 slug 的文件已存在（同主题的后续修订），追加 `-2`、`-3`。任务清单通过 `## Tasks` 的 `### N.` 条目（供执行 handoff 消费的机器可读格式）识别，不依赖文件名。
   - 取代旧文档时在开头声明一行 `supersedes: <file>`；完成或已取代的文档移入 `plans/archive/`（archive 文件保留原文件名）。
-- `.chord/notes/` 放会话为自己保留的可读工作笔记（发现、未收口线索），让长只读会话在被跟踪的树外有一个合法写盘目标；是否提交由项目自行决定。笔记命名用 `YYYYMMDD-<slug>.md`，方便按时间排序与判断时效；正文保持自由格式，不维护索引——结论已落入其它载体时，删除或标记 superseded 即可。笔记不会像 `MEMORY.md` 那样每轮注入：会话不主动打开就没人读，只有被检查点 `state_files` 引用后，才会带上一个有界的文件头。
+- `.chord/notes/` 放会话为自己保留的可读工作笔记（发现、未收口线索），让长只读会话在被跟踪的树外有一个合法写盘目标；是否提交由项目自行决定。笔记命名用 `YYYYMMDD-<slug>.md`，方便按时间排序与判断时效；正文保持自由格式，不维护索引；结论已落入其它载体时，删除或标记 superseded 即可。笔记不会像 `MEMORY.md` 那样每轮注入：会话不主动打开就没人读，只有被检查点 `state_files` 引用后，才会带上一个有界的文件头。
 - 项目内 Chord 文件引用仓库文件时，应使用相对项目根的路径，这样移动整个项目目录后仍然有效。
 
 不要把 `.chord/` 当成通用运行时状态目录。会话 transcript、usage ledger、恢复快照、项目注册表、日志、锁和其他不透明的运行时记账数据，应放在上面的 state 目录或 cache 目录中。用户需要直接编辑、使用相对路径引用或随项目移动的人类可读产物，可以放在项目目录，但必须明确 Git 和所有权语义。尤其不要把 `auth.yaml` 或其他凭据放进项目目录。
@@ -146,7 +146,7 @@ key-value 片段仅作人类可读文本，不是稳定的结构化日志 schema
 
 ## 维护
 
-优先使用 `chord cleanup`，**不要**直接 `rm -rf`——前者了解哪些路径删了会留下孤儿注册项。
+优先使用 `chord cleanup`，**不要**直接 `rm -rf`，前者了解哪些路径删了会留下孤儿注册项。
 
 | 目标                        | 命令                                                  |
 | --------------------------- | ----------------------------------------------------- |
@@ -157,7 +157,7 @@ key-value 片段仅作人类可读文本，不是稳定的结构化日志 schema
 | 移除孤儿项目注册项          | `chord cleanup project --yes`                         |
 | 移除 chord 管理的 worktree  | `chord worktree remove <name>`                        |
 
-`cleanup` 全部子命令默认是 **dry-run**——不加 `--yes` 时只预览不真删。完整参考见 [CLI：chord cleanup](./cli_CN.md#chord-cleanup)。
+`cleanup` 全部子命令默认是 **dry-run**：不加 `--yes` 时只预览不真删。完整参考见 [CLI：chord cleanup](./cli_CN.md#chord-cleanup)。
 
 ## 哪些可以手动删？
 
@@ -171,8 +171,8 @@ key-value 片段仅作人类可读文本，不是稳定的结构化日志 schema
 | `<state-dir>/projects/<project-key>.json`         | **不建议**：手动改会让注册表不一致。请用 `chord cleanup project`。                                                     |
 | `<state-dir>/worktrees/...`                       | **不建议**：用 `chord worktree remove <name>`。                                                                      |
 | `~/.config/chord/auth.state.json`                 | 可以。它只是机器维护的共享缓存；删掉只会丢失已缓存的 OAuth / quota 状态，之后可由 warm-up 重新生成。                    |
-| `~/.config/chord/`                                | 仅当想完全重装时。删 `auth.yaml` 之前确保 key 还在别处。                                                       |
-| `<project>/.chord/`                               | 仅当确实想丢弃项目级 chord 配置时。这个目录通常入 git。                                                       |
+| `~/.config/chord/`                                | 仅在需要完全重装时。删 `auth.yaml` 之前确保 key 还在别处。                                                       |
+| `<project>/.chord/`                               | 仅在确实想丢弃项目级 chord 配置时。这个目录通常入 git。                                                       |
 
 ## 相关
 

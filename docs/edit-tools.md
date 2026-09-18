@@ -4,7 +4,7 @@ Chord provides two complementary tools for editing files, optimized for differen
 
 ## How to use this page
 
-- **Pick a format:** [Quick Comparison](#quick-comparison) and [Tool Selection](#tool-selection) — which tool Chord sends by default, and how to override it.
+- **Pick a format:** [Quick Comparison](#quick-comparison) and [Tool Selection](#tool-selection): which tool Chord sends by default, and how to override it.
 - **Wire shapes:** [apply_patch Tool (Codex envelope)](#apply_patch-tool-codex-envelope) and [Edit (Replace) Tool](#edit-replace-tool) document the exact envelopes and matching rules.
 - **Day to day:** [Recommended Workflow](#recommended-workflow) and [Task-Specific Guidance](#task-specific-guidance).
 - **Approvals:** [Permissions](#permissions) covers write scope and auto-approval.
@@ -103,7 +103,7 @@ Supported operations:
 
 Hunks apply in order; each hunk is matched at the first position after the previous hunk's application point. Repeated plain `*** Update File:` sections for the same normalized path follow Codex ordering semantics: each section patches the previous section's in-memory result, and that file is committed as one mutation (so a later mismatch leaves that file unchanged rather than exposing Codex's partial-write behavior).
 
-Lines inside a hunk keep their raw `' '`/`+`/`-` prefix, so file content that itself begins with `***` followed by a space stays ordinary context—only lines beginning with an unprefixed `***` followed by a space are protocol markers.
+Lines inside a hunk keep their raw `' '`/`+`/`-` prefix, so file content that itself begins with `***` followed by a space stays ordinary context; only lines beginning with an unprefixed `***` followed by a space are protocol markers.
 
 ### When to Use
 
@@ -154,8 +154,8 @@ Failure display: when the patch fails without an applied diff, the tool card kee
 - **"hunk not found (N/M)"**: The indicated hunk does not match the current file. The error identifies the first expected complete line, or labels it as a prefix when the diagnostic preview is truncated. When available, it also explains that the text occurs only within a longer line or earlier than the preceding hunk. If earlier hunks of the same file matched in memory but a later one failed, none of that file group's hunks were applied. Re-read the target range, rebuild the failing hunk from current complete lines, and keep the group's other hunks with it when you resubmit.
 - **"cannot add file that already exists"**: `*** Add File:` targets an existing path; use `*** Update File:` instead.
 - **"apply_patch contains overlapping operations"**: Two operations in one envelope touch paths where one contains the other (for example `dir` and `dir/file`), or resolve to the same file through different names; merge them into one operation. Repeated `*** Update File:` sections for the exact same path are allowed and apply in order.
-- **"changed after planning"**: The file was modified between validation and commit; nothing was written—retry against the current content.
-- **"apply_patch partially applied: N changes committed, M file groups not applied: ..."**: One or more independent changes committed while other operation groups were omitted (the singular form uses "change" / "file group"). The changes under "Applied patch" are already on disk — do not redo them, and the failure does not echo the submitted patch back. "Not applied" lists each omitted operation group's path and cause; resolve each cause, rebuild those operations from current file contents, and submit only those.
+- **"changed after planning"**: The file was modified between validation and commit; nothing was written; retry against the current content.
+- **"apply_patch partially applied: N changes committed, M file groups not applied: ..."**: One or more independent changes committed while other operation groups were omitted (the singular form uses "change" / "file group"). The changes under "Applied patch" are already on disk; do not redo them, and the failure does not echo the submitted patch back. "Not applied" lists each omitted operation group's path and cause; resolve each cause, rebuild those operations from current file contents, and submit only those.
 
 ---
 
@@ -232,7 +232,7 @@ The tool automatically handles minor trailing newline differences:
 
 ### Punctuation Tolerance
 
-When exact matching and trailing-newline matching both fail, the tool retries with common punctuation variants treated as equivalent — the same 1:1 normalization surface `apply_patch` uses:
+When exact matching and trailing-newline matching both fail, the tool retries with common punctuation variants treated as equivalent, the same 1:1 normalization surface `apply_patch` uses:
 
 - Curly vs straight quotes (`“ ”` ↔ `" "`, `‘ ’` ↔ `' '`)
 - Dashes (`–`, `—`, `−` ↔ `-`)
@@ -240,7 +240,7 @@ When exact matching and trailing-newline matching both fail, the tool retries wi
 
 The fallback applies only when the normalized `old_string` has one unique match, reports its use in the tool result, and preserves the file's original punctuation for unchanged context. Multiple normalized matches error with the "found N times" message.
 
-A single space directly adjacent to a separator punctuation mark is also treated as optional — `：` and `:` with a trailing space (and `:the` when the space is dropped) match the same text, as does an inter-word space (`diff and` and `diffand`). This covers models that tokenize `": "` as one token and re-emit it as `：`, or drop/insert a word-boundary space.
+A single space directly adjacent to a separator punctuation mark is also treated as optional: `：` and `:` with a trailing space (and `:the` when the space is dropped) match the same text, as does an inter-word space (`diff and` and `diffand`). This covers models that tokenize `": "` as one token and re-emit it as `：`, or drop/insert a word-boundary space.
 
 The folding is deliberately narrow: only one space right after `,` `;` `:` `.` `!` `?` `(` (or right before `)`) or between two word characters is optional. Double spaces, spaces after quotes or dashes, indentation, and newlines stay significant, so a genuine layout mismatch still fails with "old_string not found" instead of silently applying a wrong edit.
 
@@ -256,7 +256,7 @@ Neither edit tool requires a prior `read`: both tools read current on-disk conte
 
 1. **Inspect the target area first** when you have not already verified the exact text, path, or hunk anchor. `read`, `grep`, or `lsp` are good ways to do that.
 2. **Use the smallest unique block** (2-4 lines). Large context blocks are more likely to become stale.
-3. **Re-read after failures**. If a hunk or string match fails, the file may have changed—read it again before retrying.
+3. **Re-read after failures**. If a hunk or string match fails, the file may have changed; read it again before retrying.
 
 ---
 
@@ -339,7 +339,7 @@ Punctuation/whitespace tolerance (quotes, dashes, full-width CJK punctuation, an
 
 For any file that can be decoded as text, a final fallback also treats common Chinese and ASCII punctuation as equivalent, and, like the `edit` tool, treats a single space adjacent to a separator punctuation mark as optional (`：`, `:` followed by a space, and `:the` match the same line). Both tools share the same normalization and the same preservation rules. This includes source files, dotenv files such as `.env.example`, and extensionless text files. The fallback applies only when the complete hunk has one unique match.
 
-It preserves punctuation from the current file in unchanged parts of replacement lines and reports its use in the tool result. Ambiguous matches are rejected, and a fragment occurring inside a longer line is diagnostic only—not an automatic substring edit. Binary or otherwise undecodable files do not enter this fallback because text decoding fails before hunk matching.
+It preserves punctuation from the current file in unchanged parts of replacement lines and reports its use in the tool result. Ambiguous matches are rejected, and a fragment occurring inside a longer line is diagnostic only, not an automatic substring edit. Binary or otherwise undecodable files do not enter this fallback because text decoding fails before hunk matching.
 
 ## FAQ
 

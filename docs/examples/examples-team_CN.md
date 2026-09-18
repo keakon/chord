@@ -295,9 +295,9 @@ permission:
 - Verify conclusions before handing execution back to the orchestrator or coder.
 ```
 
-这个团队方案比“单个 builder + 少量权限规则”更接近真实协作：
+这套布局把工作分给多个角色：
 
-- 主角色先做任务分解，而不是直接一把梭改代码
+- 主角色负责任务分解与编排
 - `explorer` 负责只读探路
 - `coder` 只做明确改动
 - `reviewer` 负责最后的 correctness / lint / tests

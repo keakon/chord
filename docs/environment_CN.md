@@ -31,7 +31,7 @@ Chord 读取的所有环境变量，按用途分组，附优先级规则。
 
 ## auth.yaml 引用的凭据
 
-Chord 不直接从环境读取 provider key——它读 `auth.yaml`，展开其中的 `$VAR` / `${VAR}` 占位符。惯例是用 `<PROVIDER>_API_KEY` 风格命名，但变量名随意。
+Chord 不直接从环境读取 provider key：它读 `auth.yaml`，展开其中的 `$VAR` / `${VAR}` 占位符。惯例是用 `<PROVIDER>_API_KEY` 风格命名，但变量名随意。
 
 ```yaml
 # ~/.config/chord/auth.yaml

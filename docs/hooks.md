@@ -128,7 +128,7 @@ Anything you put under the hook's `environment:` map is also passed through verb
 
 ### Observer hooks
 
-Stdout is recorded in logs as a plain string. There is no schema — feel free to print whatever helps you debug.
+Stdout is recorded in logs as a plain string. There is no schema: feel free to print whatever helps you debug.
 
 ## HookDef fields
 
@@ -237,7 +237,7 @@ hooks:
 
 ## Debugging hooks
 
-Set `CHORD_HOOK_DEBUG=1` before launching Chord — every hook invocation will be logged with input, output, exit code, and duration. See [Environment variables](./environment.md#development-and-debugging).
+Set `CHORD_HOOK_DEBUG=1` before launching Chord: every hook invocation will be logged with input, output, exit code, and duration. See [Environment variables](./environment.md#development-and-debugging).
 
 When a hook misbehaves:
 

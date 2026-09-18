@@ -23,7 +23,7 @@
 
 GPT-5.4 / GPT-5.5 / GPT-5.6 / GPT-6 Astra 片段使用 OpenAI 模型页公布的
 档位：GPT-5.4 / 5.6 / 6 为 `1050000 / 922000 / 128000`（1.05M 总窗口；
-922K 输入预算由 `context` 减 `output` 推导——这些模型不公布独立输入上
+922K 输入预算由 `context` 减 `output` 推导，这些模型不公布独立输入上
 限），API 与当前 Codex 目录一致；GPT-5.5 保持 `400000 / 272000 / 128000`。
 账号或中转仍是旧档位时，相应模型回落 `400000 / 272000 / 128000`。价格块
 使用 OpenAI API 费率；中转收费不同时需要自行覆盖。Codex OAuth 使用下方
@@ -255,22 +255,22 @@ chord doctor models --model openai/gpt-5.6-sol@xhigh
 
 #### GPT-5.6 的压缩调优
 
-先分清两件事再定阈值：**模型按哪个预算跑**——上面示例用的
+先分清两件事再定阈值：**模型按哪个预算跑**，上面示例用的
 1.05M / 922K 档位，还是账号/中转仍是旧目录时的 `400000 / 272000`
-回落档——以及**阈值为什么调**：保质量、避开 272K 长上下文计价档，还是
+回落档，以及**阈值为什么调**：保质量、避开 272K 长上下文计价档，还是
 把窗口当容量用。触发点 = `threshold × usable input budget`，同一比例在
 两种预算下的触发点相差很大，针对一种预算调出来的配方不能直接搬给另一种。
 
 **长上下文质量**（OpenAI 公布的 MRCR v2 8-needle 数据）：Sol/Terra 在
 256K–512K 段保持 91.5% / 89.6%，到 512K–1M 段降到 73.8% / 72.5%；Luna
-两段都是 41.3%——是悬崖而不是缓坡。区间是平均值，只能当「质量大致从哪
+两段都是 41.3%，是悬崖而不是缓坡。区间是平均值，只能当「质量大致从哪
 里开始下滑」的粗略参照，不能当精确拐点用。
 
 **计费**（官方 OpenAI API）：prompt 输入**超过** 272K（正好 272000 不算）
-时，**整次请求**按长上下文费率计费——输入 / 缓存读取 / 缓存写入都是 2
+时，**整次请求**按长上下文费率计费：输入 / 缓存读取 / 缓存写入都是 2
 倍、输出 1.5 倍，不是只对超出部分计价。中转和 Codex OAuth 自己定价，这
 条不一定适用。Chord 的费用统计按完整 prompt 选档，但自动压缩不认识价格
-档：它只按用量比例触发，所以「请求不超过 272K」是调参目标，不是保证——
+档：它只按用量比例触发，所以「请求不超过 272K」是调参目标，不是保证；
 触发比较的是上一次 provider 返回的 usage，一次大工具结果就可能把下一次
 请求推过线，启用 `model_driven` 时宽限期还会让越线后的请求照常发出。给
 272K 线留点余量；另外每次压缩都要调用摘要模型并丢失原始上下文，阈值压
@@ -318,7 +318,7 @@ ChatGPT 账号实际拿到的窗口来自服务端模型目录（`context_window
   oversize 拒绝）。
 - 账号/中转仍是旧档位时，为该 provider 回落 `400000 / 272000 / 128000`。
 - `threshold` 与窗口解耦：它是「在可用预算的多少比例处压缩」，按质量/成本
-  权衡选——但 API 的 >272K 输入整单 2× 计价悬崖与窗口无关，若你的路由
+  权衡选，但 API 的 >272K 输入整单 2× 计价悬崖与窗口无关，若你的路由
   适用该计价，触发线仍应压在悬崖内。留足余量：触发比较的是上一次
   provider 返回的 usage，一次大工具结果就可能把下一次请求推过线。
 
@@ -336,7 +336,7 @@ GPT-6 Astra 是 OpenAI 当前的旗舰模型（模型 ID `gpt-6-astra`）：1,05
 `high`、`xhigh`、`max`，**没有 `none`**。标准定价每 1M token：输入 $10 /
 输出 $50 / 缓存读取 $1 / 缓存写入 $12.50；prompt 输入超过 272K 时整次请求
 按输入/缓存 2×、输出 1.5× 计费。与 GPT-5.6 不同，Astra 没有 Sol/Terra/Luna
-分档——`gpt-6-astra` 是单一模型 ID，所以配方里也没有档位 variants。使用
+分档：`gpt-6-astra` 是单一模型 ID，所以配方里也没有档位 variants。使用
 API key 的 provider 需要在 `~/.config/chord/auth.yaml` 中配置同名条目：
 
 ```yaml
@@ -347,7 +347,7 @@ openai:
 基础模板默认带 cost-first 的 `compaction` 块：272K 是计价悬崖（整次请求
 重定价，不是只对超出部分计价），把用量压在悬崖下面是最大的成本杠杆，而
 Astra 在远低于悬崖的区间仍保持满格长上下文质量（OpenAI 公布 MRCR v2
-8-needle 在 256K–512K 段 100%）。只有当你愿意接受 2× 长上下文费率时，才
+8-needle 在 256K–512K 段 100%）。只有你愿意接受 2× 长上下文费率，才
 把 `threshold` 调过 0.29。
 
 ```yaml
@@ -428,13 +428,13 @@ chord doctor models --model openai/gpt-6-astra@medium
 #### GPT-6 Astra 的压缩调优
 
 上面的基础模板已经带了 cost-first 的 `compaction`（0.25/0.2）。272K 计价
-悬崖是硬约束，质量天花板却不是——OpenAI 公布 GPT-6 Astra 在 MRCR v2
+悬崖是硬约束，质量天花板却不是：OpenAI 公布 GPT-6 Astra 在 MRCR v2
 8-needle 的 256K–512K 段 100%、512K–1M 段 96.3%，是缓坡而不是 GPT-5.6 Sol
 那种悬崖（Sol 在 512K–1M 掉到 73.8%）。所以 Astra 在 cost-first 之外调
 阈值，权衡的是价格/容量，不是保质量。
 
 **成本优先**（基础模板，0.25/0.2）：约 231K 触发，低于 272K 悬崖。推荐
-默认——2× 重定价比任何其他杠杆都大，触发点又稳稳落在满格质量区段里。
+默认：2× 重定价比任何其他杠杆都大，触发点又稳稳落在满格质量区段里。
 
 **质量优先 / 容量优先**（接受 2× 长上下文费率）：因为 Astra 在约 512K 之前
 没有质量悬崖，阈值可以推到 GPT-5.6 Sol 不敢碰的位置，仍处在高质量区段。
@@ -456,7 +456,7 @@ provider 上（其窗口由服务端控制、Astra 尚未实测），把 `compac
 ## Codex OAuth preset
 
 当你要使用 ChatGPT/Codex OAuth，而不是 API key 时，用这个配置。Codex OAuth
-与上方 API key 示例的区别只在 provider preset 和认证方式——模型窗口与 API
+与上方 API key 示例的区别只在 provider preset 和认证方式：模型窗口与 API
 一致。
 
 本节使用的模型档位：
@@ -644,7 +644,7 @@ model_templates:
 ```
 
 `reminder` 故意省略：派生值 0.60 对这些模型是
-合理的提前量——只有想更早/更晚提示时才显式设置。Opus 5 等同一可靠档的
+合理的提前量，只有想更早/更晚提示时才显式设置。Opus 5 等同一可靠档的
 模型加同样一行即可。
 
 注意 Opus 4.7 起换了 tokenizer：同样文本在 Claude 5 模型上比老模型多约 30% token，所以在老模型上感觉合适的上下文预算要相应下调。
@@ -756,7 +756,7 @@ Chat Completions 后会放在第一条工具调用上。Gemini 工具续轮即�
   名里能看出 Gemini 3：网关别名把名字藏了的话，要同时设置 `native_thinking: gemini`，
   并让模型名保留 `gemini-3`。
 - Claude 线路当前回合已经没有可回放的 `thinking_blocks` 时，该请求不会再带 `thinking`
-  控制字段——发出的历史里没有对应的思考块，声明了思考反而会被拒。
+  控制字段：发出的历史里没有对应的思考块，声明了思考反而会被拒。
 - 后端确实拒绝某个签名时，仍会按回放兼容等级逐级降级：Chord 剥掉 blob 重试，而不是
   让这一轮直接失败。
 
@@ -801,7 +801,7 @@ model_pools:
 
 - `api_url` 保持在 `/models` 基础路径即可；Chord 会自动追加 `/{model}:streamGenerateContent?alt=sse`。
 - `type` 可以省略；Chord 会根据 `/models` 路径自动识别 Gemini。
-- Gemini 3.8 Flash（2026 年 9 月 2 日 GA）是目前的主力模型：1M token 上下文、最大 64K 输出，thinking 级别为 `low` / `medium`（官方默认）/ `high`。它不支持 `minimal`，且 `thinking_budget` 已废弃，所以上面模板只用 `level`；模板固定用 `high` 服务 agentic 场景——日常任务降到 `medium` / `low` 可以省延迟和 token。
+- Gemini 3.8 Flash（2026 年 9 月 2 日 GA）是目前的主力模型：1M token 上下文、最大 64K 输出，thinking 级别为 `low` / `medium`（官方默认）/ `high`。它不支持 `minimal`，且 `thinking_budget` 已废弃，所以上面模板只用 `level`；模板固定用 `high` 服务 agentic 场景；日常任务降到 `medium` / `low` 可以省延迟和 token。
 - Gemini 3.5 / 3.6 Flash 也是同一套结构，并且仍然接受 `minimal`；Flash-Lite 系列则以 `minimal` 为默认值。Gemini 3.1 Pro 只接受 `low` / `medium` / `high`，同样不支持 `minimal`，所以不要把一个 `minimal` variant 套用到整个家族。
 
 ### Gemini 的压缩调优
@@ -809,7 +809,7 @@ model_pools:
 Gemini 长上下文表现随档位差异极大，没有统一的压缩规则：
 
 - **Gemini 3.1 Pro** 的多针长上下文确实弱（公开 MRCR v2 8-needle 检索约 0.26），所以要保留激进压缩：`threshold` 取可用预算的约 0.2、`reminder` 约 0.15（1M 窗口约合 150K–210K）。
-- **Gemini 3.8 Flash、Flash-Lite** 为 1M 窗口设计，长上下文表现很好，激进提前压缩只会丢掉它们还能用的上下文。Flash 用全局默认（`threshold` 0.8）或直接不写该模板块即可。3.8 Flash 靠更高的 token 消耗换取更好的准确率，所以长时间 agentic 任务里用量上涨属于正常现象——不是该提前压缩的信号。
+- **Gemini 3.8 Flash、Flash-Lite** 为 1M 窗口设计，长上下文表现很好，激进提前压缩只会丢掉它们还能用的上下文。Flash 用全局默认（`threshold` 0.8）或直接不写该模板块即可。3.8 Flash 靠更高的 token 消耗换取更好的准确率，所以长时间 agentic 任务里用量上涨属于正常现象，不是该提前压缩的信号。
 
 ```yaml
 # 按模型分别配 Gemini 的 compaction；引用该模板的 provider 全部继承。
@@ -826,7 +826,7 @@ model_templates:
     modalities: {input: [text, image, pdf]}
 ```
 
-计费提醒：只有 **Gemini 3.1 Pro** 在超过 200K 输入后进入更高输入档（整请求按高价档计费）；Gemini 3.8 Flash 与 Flash-Lite 在任何上下文长度下都是平价，所以 Flash 没有为省钱而提前压缩的理由——只有当你的工作负载确实出现质量退化时才压。如果你既要长可靠窗口、又要 Pro 级质量，那才是该换用 GPT-5.6 Sol / Claude 5 这类模型的场景。
+计费提醒：只有 **Gemini 3.1 Pro** 在超过 200K 输入后进入更高输入档（整请求按高价档计费）；Gemini 3.8 Flash 与 Flash-Lite 在任何上下文长度下都是平价，所以 Flash 没有为省钱而提前压缩的理由，只有你的工作负载确实出现质量退化，才压。如果你既要长可靠窗口、又要 Pro 级质量，那才是该换用 GPT-5.6 Sol / Claude 5 这类模型的场景。
 
 ## GLM / BigModel Coding Plan
 
@@ -963,7 +963,7 @@ model_pools:
 - 示例默认池优先选 `glm-5.3-flash`：Coding Plan 主力、原生多模态输入。
   纯文本场景把池条目换成 `bigmodel/glm-5.3`；需要 GLM-5.2 更宽的 effort
   档位（`xhigh` / `medium` / `minimal` / `none`）时也可以保留
-  `bigmodel/glm-5.2`——上面的 provider `models` 仍把它列为可选文本模型，
+  `bigmodel/glm-5.2`：上面的 provider `models` 仍把它列为可选文本模型，
   沿用同一套模板。
 
 ### GLM-5.x 的压缩调优
@@ -1129,7 +1129,7 @@ model_pools:
   `response.completed` / `incomplete` / `failed` 事件结束，没有
   `data: [DONE]`。
 - DeepSeek Messages 支持 `output_config.effort`；Chord 从 `thinking.effort`
-  生成该字段。兼容接口应关闭 Anthropic beta header——它只对 Files API 生效。
+  生成该字段。兼容接口应关闭 Anthropic beta header：它只对 Files API 生效。
   `thinking.budget_tokens` 会被接受但忽略：思考深度由 effort 值决定，不是
   token 预算。DeepSeek 的 Anthropic 兼容接口可能返回无签名 `thinking`，
   而不是 Claude 风格的签名块。`anthropic_unsigned` 会原生回放同
@@ -1162,7 +1162,7 @@ model_pools:
 - `reasoning_effort`（Chat）与 `output_config.effort`（Messages）接受
   `low` / `high` / `max`，Responses 的 `reasoning.effort` 还接受 `none`
   （关闭思考）；默认值是 `high`。其余取值由后端重映射：`medium` 和
-  `xhigh` 映射到 `high`——所以模板只定义 `low` / `high` / `max`
+  `xhigh` 映射到 `high`，所以模板只定义 `low` / `high` / `max`
   三个 variant。
 - Responses API 位于 `api.deepseek.com/v1/responses`；响应中的
   `output_tokens_details.reasoning_tokens` 由 Chord 按标准 reasoning 回显
@@ -1200,10 +1200,10 @@ providers:
 
 DeepSeek V4.1 Flash 标称 1M 窗口，但长距离可靠性是这个家族的短板：上一代
 V4 的独立 multi-needle 评测中，V4 Pro 在 1M 处只有约 41%（8-needle），
-单 needle 约 78%——这种陡降和 Gemini 3.1 Pro 的悬崖如出一辙。V4.1 目前
+单 needle 约 78%：这种陡降和 Gemini 3.1 Pro 的悬崖如出一辙。V4.1 目前
 没有公开的长上下文评测，在此之前仍按同样的口径处理：把可靠工作窗口按
 约 200K 对待，尽早压缩。Flash 家族即使全部缓存未命中，也远比同级模型便宜
-得多，所以频繁压缩的代价比在高端模型上低——尽早压、多压几次：
+得多，所以频繁压缩的代价比在高端模型上低，尽早压、多压几次：
 
 ```yaml
 # 给上面配方里的 deepseek-v4.1-chat / -messages / -responses 模板加上
@@ -1222,7 +1222,7 @@ DeepSeek 的缓存命中价是业界最低的（$0.003/M），因此一次能保
 
 Qwen 通过 `reasoning_content` 返回可见思考，但大多数型号默认忽略历史
 消息里的该字段。只有模型文档明确支持 `preserve_thinking` 时才应开启
-回放——目前是 Qwen 3.8 Max，3.7 Max / Plus / Flash，以及 3.6 Max
+回放：目前是 Qwen 3.8 Max，3.7 Max / Plus / Flash，以及 3.6 Max
 preview / Plus（含带日期的快照版本）。请以官方支持列表为准；较早的
 Qwen 3/3.5 即使会输出思考，也应保持 continuity 关闭。
 
@@ -1336,7 +1336,7 @@ provider fallback 都能保留连续性。工具模式契约要求完整 reasoni
 Qwen `preserve_thinking`、Kimi K3 / `keep: all`）都设置
 `preserve_history: true`，完整 assistant 历史会原样回放。若目标拒绝原生 reasoning，Chord 只会
 删除或转换不兼容的 reasoning 负载；已完成且成对的工具调用和结果仍会保留。
-当目标连结构化形状也不接受时，严格降级会把已完成的动作历史文本化，而
+目标连结构化形状也不接受时，严格降级会把已完成的动作历史文本化，而
 不会把外部工具事实静默删除。
 
 ### 跨协议 fallback 的连续性
@@ -1413,7 +1413,7 @@ Grok 4.6 也能走 OpenAI 兼容的 `/v1/chat/completions`，官方仍在维护�
 
 网关是否回传 `reasoning_content` 各不相同。网关一直不回传时，Chord 回放
 assistant tool call 没有 reasoning content 可用，会按「该后端无法回放
-reasoning」处理，从出现工具调用的下一次请求起剥离 `reasoning_effort`——按请求
+reasoning」处理，从出现工具调用的下一次请求起剥离 `reasoning_effort`，按请求
 设置的 effort 就只对每个回合的首个请求生效。想让 effort 和 reasoning 请求覆盖项
 在整个回合都保持生效，就用 `compat.chat_completions.keep_reasoning_effort: true`：
 

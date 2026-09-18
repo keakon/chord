@@ -25,7 +25,7 @@ If the table says Yes, use it. If it says No, leave that app alone and continue 
 
 ### 2. Light use, and you want value
 
-Get a cheap official API key (for example Gemini 3.8 Flash, DeepSeek V4.1 Flash, or GPT-5.6 Luna), or a cheap plan that exposes a standard endpoint (for example Command Code GOAT or OpenCode Go). Use it for routing, search, most edits, and all five roles. Upgrade expert and reviewer only when hard decisions become common — if the cheap plan does not carry a strong enough model, add a separate official key for them.
+Get a cheap official API key (for example Gemini 3.8 Flash, DeepSeek V4.1 Flash, or GPT-5.6 Luna), or a cheap plan that exposes a standard endpoint (for example Command Code GOAT or OpenCode Go). Use it for routing, search, most edits, and all five roles. Upgrade expert and reviewer only when hard decisions become common; if the cheap plan does not carry a strong enough model, add a separate official key for them.
 
 ### 3. Heavy use
 
@@ -33,7 +33,7 @@ A flat subscription beats per-token billing when you use it every day. Subscribe
 
 ### 4. Bill size is not the issue
 
-Give the strongest API models you can get — GPT-6 Astra and Claude Fable 5.1 as of this snapshot — to expert and reviewer. Keep a cheap fast model on orchestrator, explorer, and coder; they do not need a flagship.
+Give the strongest API models you can get (GPT-6 Astra and Claude Fable 5.1 as of this snapshot) to expert and reviewer. Keep a cheap fast model on orchestrator, explorer, and coder; they do not need a flagship.
 
 ## Which model goes to which role?
 
@@ -74,7 +74,7 @@ Neither vendor requires a subscription: both sell API keys, so Fable 5.1 and Ast
 2. **GPT-6 Astra**: buy an OpenAI API key on its own. It spends fewer tokens, which suits a narrowed question that has to be settled in one pass; its cache is pricier, so do not feed it the whole repo every turn.
 3. **Muse Spark 1.3** (Meta Model API): the strongest model outside the GPT and Claude channels. Long-horizon implementation and large-repo work are its strengths; its root-cause and architecture judgment is a notch lower, so split expert work smaller and verify more.
 4. **GLM-5.3 or Kimi K3**: the strongest open models, carried by open-model plans such as OpenCode Go and Command Code GOAT. They can hold expert work, but not the final word on architecture or concurrency.
-5. **None of these**: keep the expert question small — have a cheap model reproduce it and narrow the range — and revisit the paid options above when a wrong call would become hidden debt. Gemini 3.8 Flash can hold a first discussion; do not let it be the final reviewer.
+5. **None of these**: keep the expert question small (have a cheap model reproduce it and narrow the range) and revisit the paid options above when a wrong call would become hidden debt. Gemini 3.8 Flash can hold a first discussion; do not let it be the final reviewer.
 
 Reviewer runs the same model as expert. With only one flagship budget, give it to expert first and open reviewer after a substantial change.
 

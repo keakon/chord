@@ -50,7 +50,7 @@ In the TUI, an `lsp` card shows the operation and query position in its header (
 
 Run a non-interactive shell command, either in the foreground or as a background job with `run_in_background: true`. A foreground command that runs past `yield_time_ms` (default 90000) is promoted to a background job automatically; `timeout_ms` caps execution: a foreground command defaults to 600000 and is capped at 600000, while `run_in_background: true` is capped at 21600000 (6h) and carries no deadline unless `timeout_ms` is given; `0` means no deadline.
 
-A foreground command that cannot be promoted — one made only of deliberate waits (`sleep`) and short `git` queries, or a command that does not parse — keeps the default cap even when `timeout_ms` is `0`, so no foreground call can block the turn without a deadline; a long `git` operation (`clone`, `fetch`, `pull`, `push`, `submodule`, `gc`, `fsck`, `repack`, `bundle`, `filter-branch`) is promotable like any other long command.
+A foreground command that cannot be promoted (one made only of deliberate waits (`sleep`) and short `git` queries, or a command that does not parse) keeps the default cap even when `timeout_ms` is `0`, so no foreground call can block the turn without a deadline; a long `git` operation (`clone`, `fetch`, `pull`, `push`, `submodule`, `gc`, `fsck`, `repack`, `bundle`, `filter-branch`) is promotable like any other long command.
 
 Long commands do not have to block the turn. A command that outlives its foreground budget keeps running as a background job, the tool card names its job id, and the agent is notified when the job finishes, so it can do independent work or end the turn and be woken by the completion instead of waiting.
 
@@ -58,7 +58,7 @@ Long commands do not have to block the turn. A command that outlives its foregro
 
 ### Reading background output
 
-Read a background job's output since the previous read, then its `[status: ...]` line. `wait` selects whether the call blocks: `none` (default) returns what is available now, `output` waits for the next output, and `exit` waits for the job to finish — each capped at 30s by the runtime. A wait that expires is not an error: the job keeps running and the reply reports it as running. Repeated non-blocking reads that find no new output are reported as polling and then rejected, so keep reading only while there is a reason to. Terminal escape sequences are stripped from what the model sees.
+Read a background job's output since the previous read, then its `[status: ...]` line. `wait` selects whether the call blocks: `none` (default) returns what is available now, `output` waits for the next output, and `exit` waits for the job to finish, each capped at 30s by the runtime. A wait that expires is not an error: the job keeps running and the reply reports it as running. Repeated non-blocking reads that find no new output are reported as polling and then rejected, so keep reading only while there is a reason to. Terminal escape sequences are stripped from what the model sees.
 
 ## Web
 
@@ -94,11 +94,11 @@ These tools control agent workflows rather than local side effects, so YOLO does
 
 ### Delegation and work scope
 
-Start a delegated SubAgent workstream and return its startup handle (`task_id` / `agent_id`) immediately. It does not wait for completion. The call must include an `expected_write_scope`: declare the narrowest `files`, `path_prefix`, or `modules` scope covering the work.
+`delegate` starts a delegated SubAgent workstream and returns its startup handle (`task_id` / `agent_id`) immediately, without waiting for completion. The call must include an `expected_write_scope` that declares the narrowest `files`, `path_prefix`, or `modules` scope covering the work.
 
-The declaration is coordination metadata, not an enforced boundary — whether the worker may modify files at all is decided by its role's permission rules (a role that denies `write`, `edit`, `delete`, and `apply_patch` registers none of them), and the runtime never blocks a worker's file tools outside the declared paths.
+The declaration is coordination metadata, not an enforced boundary: whether the worker may modify files at all is decided by its role's permission rules (a role that denies `write`, `edit`, `delete`, and `apply_patch` registers none of them), and the runtime never blocks a worker's file tools outside the declared paths.
 
-Declaring an honest narrow scope keeps sibling-overlap hints meaningful: when the declared scope overlaps another still-active task's, the delegation still starts and the handle carries `scope_conflict: true` with `suggested_task_id` and `suggested_action: serialize_or_worktree` — telling you to run the two tasks serially, coordinate the shared edits through `notify`, or give the new worker its own git worktree.
+Declaring an honest narrow scope keeps sibling-overlap hints meaningful: when the declared scope overlaps another still-active task's, the delegation still starts and the handle carries `scope_conflict: true` with `suggested_task_id` and `suggested_action: serialize_or_worktree`, which tells you to run the two tasks serially, coordinate the shared edits through `notify`, or give the new worker its own git worktree.
 
 A read-only task should pick an agent whose role registers no file-modifying tools and pass an empty scope, which is accepted only for such roles; a role that can write files must declare a non-empty scope or the delegation is rejected. Command tools such as `shell` are never scope-restricted and stay governed by the role's permission rules. Denying `delegate` also disables `cancel` and nested delegation for that role.
 
@@ -110,7 +110,7 @@ A read-only task should pick an agent whose role registers no file-modifying too
 
 ### Long-text control tools
 
-`done`, `complete`, and `escalate` may carry a long Markdown report, summary, or escalation reason. While the arguments are still streaming, the TUI shows a temporary `N chars received` indicator; once they are complete, the prose is rendered as Markdown in the card body. `complete` also keeps structured completion details — changed files, remaining limitations, known risks, follow-up recommendations, and artifact references.
+`done`, `complete`, and `escalate` may carry a long Markdown report, summary, or escalation reason. While the arguments are still streaming, the TUI shows a temporary `N chars received` indicator; once they are complete, the prose is rendered as Markdown in the card body. `complete` also keeps structured completion details: changed files, remaining limitations, known risks, follow-up recommendations, and artifact references.
 
 These cards are always expanded and their header is only the tool name: the report is the card. The same applies to `compact_context`, `delegate`, `question`, `notify`, `write`, `edit`, `apply_patch`, `delete`, `todo_write`, and `handoff`: no disclosure marker, and the fold keys leave them as they are. Only `read`, `grep`, `glob`, `shell`, `cancel`, and generic tool calls fold, marked with `▸` / `▾`. See [Usage: TUI basics](./usage.md#tui-basics) for the fold keys and how collapsed cards look.
 

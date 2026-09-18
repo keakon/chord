@@ -38,9 +38,17 @@ chord doctor models --pool thinking
 
 ## 429 / quota exhausted
 
-常见原因：key 已达配额上限、provider 限流、并发或高频请求触发了速率限制。
+常见原因：
 
-建议：换一个 key、降低并发或减少重试、检查是否存在异常循环调用。
+- key 已达配额上限
+- provider 限流
+- 并发或高频请求触发了速率限制
+
+建议：
+
+- 换一个 key
+- 降低并发或减少重试
+- 检查是否存在异常循环调用
 
 如果要判断哪些 key 或模型反复限流 / 报错：
 
@@ -124,7 +132,7 @@ different conversation.`。Chord 能识别这类拒绝，并自动丢弃 thinkin
 
 1. 该百分比 = cache-read token 数 ÷ 完整输入侧（未缓存 + cache-read + cache-write）。它只看输入侧，输出量不会稀释它。
 2. Chord 按协议假设 usage 字段语义：`messages` provider 的 `input_tokens` 是未缓存输入，缓存桶单独上报；`chat-completions` / `responses` provider 的 `input_tokens` 已包含缓存命中部分。
-3. 兼容网关可能在暴露 `messages` 端点的同时，按另一套协议语义上报 usage——常见的是 `input_tokens` 为包含缓存命中的总输入，`cache_read_input_tokens` 只是其中的命中子集。Chord 于是把 cache-read 重复计了一次，显示出来的百分比大约被砍半。
+3. 兼容网关可能在暴露 `messages` 端点的同时，按另一套协议语义上报 usage，常见的是 `input_tokens` 为包含缓存命中的总输入，`cache_read_input_tokens` 只是其中的命中子集。Chord 于是把 cache-read 重复计了一次，显示出来的百分比大约被砍半。
 4. 要确认，可查看该会话的 LLM dump，再对照网关 usage 文档，或用相同请求的 token counting 结果核验原始字段。若文档或对照结果能确认 `input_tokens` 是完整输入，而 `cache_read_input_tokens` 只是其中一部分，再给该 provider 设置 `compat.usage.input_includes_cache_read: true`（见[配置](./configuration_CN.md)）。仅凭两个字段的大小关系不足以判断语义。
 
 已写入的 usage 记录是 append-only 的，改配置后不会被重算；只有新请求会按修正后的语义统计。
@@ -296,7 +304,7 @@ github.com/keakon/chord/internal/tui.renderMarkdownContent
 如果主要现象是横线重复、输入区或状态栏分隔线重复、旧卡片边框残留，或右侧栏旧边框残留：
 
 1. 先截图，不要先调整窗口尺寸。截图应包含完整终端窗口，尤其是输入区、状态栏和右侧栏。
-2. 立即导出 diagnostics bundle（`Ctrl+G`），尽量在 resize 之前完成——bundle 记录了 Chord 最近渲染的 frame，维护者据此能区分是 Chord 画出的重复线还是终端残留伪影。
+2. 立即导出 diagnostics bundle（`Ctrl+G`），尽量在 resize 之前完成，bundle 记录了 Chord 最近渲染的 frame，维护者据此能区分是 Chord 画出的重复线还是终端残留伪影。
 3. 把两者连同终端名称和版本一起附在反馈里。
 
 两个本地观察也有助于缩小范围：
@@ -325,13 +333,13 @@ github.com/keakon/chord/internal/tui.renderMarkdownContent
 
 ## apply_patch 报 `hunk not found`
 
-`apply_patch` 按行匹配 hunk：先做精确上下文匹配，随后是一个独立的标点/空白容错步骤，且只有当容错匹配恰好落在一个位置时才应用——命中多个位置时会被拒绝并列出歧义行号，而不是静默取第一个。重复块仍需要足够的邻近上下文，让目标位置明确。
+`apply_patch` 按行匹配 hunk：先做精确上下文匹配，随后是一个独立的标点/空白容错步骤，且只有容错匹配恰好落在一个位置才应用；命中多个位置时会被拒绝并列出歧义行号，而不是静默取第一个。重复块仍需要足够的邻近上下文，让目标位置明确。
 
 看到这个错误时：
 
 - 重新 `read` 目标文件，并基于最新内容重建 patch；
 - 从最新 `read` 输出中重新复制目标块，并确认 context/removal 行缩进与当前文件一致；如果 hunk 来自旧的带编号输出，先移除复制进来的行号前缀；
-- 当同样的代码块在文件中重复出现时，在 `@@` hunk 中加入附近未变化的行、使用 `@@ header` 锚点，或用 `*** End of File` 钉住文件末尾的修改，让目标位置无歧义；
+- 同样的代码块在文件中重复出现时，在 `@@` hunk 中加入附近未变化的行、使用 `@@ header` 锚点，或用 `*** End of File` 钉住文件末尾的修改，让目标位置无歧义；
 - 把过大的 patch 拆成更小的信封或更小的 hunk；
 - 不要通过 `shell` 执行外部 `apply_patch`；请使用 Chord 原生 `apply_patch` 工具，这样权限、stale tracking、diff、LSP 和回滚才会保持接入。
 

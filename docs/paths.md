@@ -10,7 +10,7 @@ This page describes every file and directory Chord reads or writes, and what is 
 | **State dir**    | `$XDG_STATE_HOME/chord` or `~/.local/state/chord`       | Durable runtime state you would not want to lose: sessions, exports, logs, project registry, worktrees |
 | **Cache dir**    | `$XDG_CACHE_HOME/chord` or `~/.cache/chord`             | Rebuildable runtime caches; can be deleted at any time                                        |
 
-All three can be moved by environment variable, CLI flag, or `config.yaml` `paths:` — see [Environment variables](./environment.md) and [CLI flags](./cli.md#global-flags).
+All three can be moved by environment variable, CLI flag, or `config.yaml` `paths:`; see [Environment variables](./environment.md) and [CLI flags](./cli.md#global-flags).
 
 ## Config home: `~/.config/chord/`
 
@@ -75,15 +75,15 @@ affect the order.
 
 ### `<project-key>`: what is it?
 
-Chord identifies a project by its canonical filesystem root, then derives a stable, sanitized key — for example `HOME-projects-chord` for `~/projects/chord`. If two projects collide on the sanitized key, Chord appends an 8-character fingerprint to disambiguate. The full canonical root is stored alongside the key in `project.json`, so the registry stays unambiguous even when paths look similar.
+Chord identifies a project by its canonical filesystem root, then derives a stable, sanitized key, for example `HOME-projects-chord` for `~/projects/chord`. If two projects collide on the sanitized key, Chord appends an 8-character fingerprint to disambiguate. The full canonical root is stored alongside the key in `project.json`, so the registry stays unambiguous even when paths look similar.
 
-Sessions, runtime cache, and exports are all keyed on this — that is how a fresh `chord` started in `~/projects/chord` finds the previous session for the same project.
+Sessions, runtime cache, and exports are all keyed on this: that is how a fresh `chord` started in `~/projects/chord` finds the previous session for the same project.
 
 ### Worktrees
 
 `chord --worktree <name>` creates a chord-managed git worktree under `worktrees/<repo-id>/<slug>` **outside the original repository**, with its own project key. Each chord-managed worktree therefore has isolated sessions, cache, and exports.
 
-Use `chord worktree remove <name>` to remove the working directory and its sessions, caches, and exports. The branch is kept by default; `--force` also force-deletes the branch — see [CLI: chord worktree](./cli.md#chord-worktree). Manually deleting the worktree directory is not recommended; you would leave orphan registry entries that `chord cleanup project` would later flag.
+Use `chord worktree remove <name>` to remove the working directory and its sessions, caches, and exports. The branch is kept by default; `--force` also force-deletes the branch; see [CLI: chord worktree](./cli.md#chord-worktree). Manually deleting the worktree directory is not recommended; you would leave orphan registry entries that `chord cleanup project` would later flag.
 
 ## Cache dir: `~/.cache/chord/`
 
@@ -126,7 +126,7 @@ project, or for user-visible artifacts that a team may review:
 - `.chord/plans/` contains planning documents. Whether plans are committed is a project decision.
   - Planning documents for the planner → handoff workflow and topic/design documents both use the same naming convention: `YYYYMMDD-<slug>.md` (for example `20260903-session-key-isolation.md`), where `YYYYMMDD` is the creation date and `<slug>` is a short descriptive name derived from the title. If a file with the same date and slug already exists (a later revision of the same topic), append `-2`, `-3`, and so on. Task-list plans are recognised by their `## Tasks` body of `### N.` items (a machine-readable format consumed by the execution handoff), not by their filename.
   - A document that replaces an earlier one declares it with a `supersedes: <file>` line near the top; move finished or superseded documents to `plans/archive/` (archive files keep their original names).
-- `.chord/notes/` holds human-readable working notes a session keeps for itself (findings, open-thread state) so long read-mostly sessions have a legal write target outside the tracked tree; whether notes are committed is a project decision. Name notes `YYYYMMDD-<slug>.md` so they sort and age visibly; keep them free-form and maintain no index — when a note's conclusions are captured elsewhere, delete it or mark it superseded. Notes are not injected like `MEMORY.md`: nothing reads them unless the session opens the file, except for a bounded checkpoint header after a `state_files` reference.
+- `.chord/notes/` holds human-readable working notes a session keeps for itself (findings, open-thread state) so long read-mostly sessions have a legal write target outside the tracked tree; whether notes are committed is a project decision. Name notes `YYYYMMDD-<slug>.md` so they sort and age visibly; keep them free-form and maintain no index; when a note's conclusions are captured elsewhere, delete it or mark it superseded. Notes are not injected like `MEMORY.md`: nothing reads them unless the session opens the file, except for a bounded checkpoint header after a `state_files` reference.
 - Project-local Chord files should use paths relative to the project root when they refer to repository files, so the project remains portable when its directory moves.
 
 Do not use `.chord/` as a general runtime-state directory. Session transcripts,
@@ -164,7 +164,7 @@ Treat key-value fragments as human-readable text, not as a stable structured-log
 
 ## Maintenance
 
-Use `chord cleanup` rather than `rm -rf` — it knows which paths are safe and which would orphan registry entries.
+Use `chord cleanup` rather than `rm -rf`: it knows which paths are safe and which would orphan registry entries.
 
 | Goal                              | Command                                                |
 | --------------------------------- | ------------------------------------------------------ |
@@ -175,7 +175,7 @@ Use `chord cleanup` rather than `rm -rf` — it knows which paths are safe and w
 | Remove orphan project entries     | `chord cleanup project --yes`                          |
 | Remove a chord-managed worktree   | `chord worktree remove <name>`                         |
 
-All `cleanup` subcommands default to **dry-run** — without `--yes` they only list what would be removed. Full reference: [CLI: chord cleanup](./cli.md#chord-cleanup).
+All `cleanup` subcommands default to **dry-run**: without `--yes` they only list what would be removed. Full reference: [CLI: chord cleanup](./cli.md#chord-cleanup).
 
 ## What is safe to delete by hand?
 

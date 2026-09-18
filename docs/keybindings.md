@@ -217,7 +217,7 @@ Only the actions you list are overridden; all others fall back to the defaults a
 
 ## Discovering bindings at runtime
 
-Press `?` in Normal mode to toggle an in-app cheatsheet that reflects your current effective bindings — useful after you have customized `keymap`.
+Press `?` in Normal mode to toggle an in-app cheatsheet that reflects your current effective bindings, useful after you have customized `keymap`.
 
 ## Related
 

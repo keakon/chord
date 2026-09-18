@@ -76,7 +76,7 @@ Follow Effective Go and Go Code Review Comments.
 
 Hooks let you run external commands at well-defined runtime points (before a tool call, after an LLM call, on idle, on tool-batch complete, etc.) for notifications, auditing, automation checks, or tool-result cleanup.
 
-Quick example — desktop notification when an agent goes idle:
+A quick example of desktop notification when an agent goes idle:
 
 ```yaml
 hooks:

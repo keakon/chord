@@ -16,7 +16,7 @@ A named, ordered list of `provider/model` (and `model@variant`) refs. Each agent
 
 ## Variant
 
-A named parameter preset for a single model — for example `claude-opus-5@high` selects a higher reasoning effort. Variants are defined under `models.<name>.variants` in `config.yaml` and referenced as `provider/model@variant` inside model pools.
+A named parameter preset for a single model, for example `claude-opus-5@high` selects a higher reasoning effort. Variants are defined under `models.<name>.variants` in `config.yaml` and referenced as `provider/model@variant` inside model pools.
 
 ## Compaction
 
@@ -24,7 +24,7 @@ The runtime process of summarizing earlier conversation into a compact context s
 
 ## Reduction (context reduction)
 
-A lightweight, deterministic pruning pass that runs before every LLM request. It trims stale tool results from the current prompt based on age and size heuristics — it never modifies saved session history on disk. Unlike compaction, reduction does not call an LLM and is entirely invisible to users. See [Context management: Reduction](./context-management.md#context-reduction).
+A lightweight, deterministic pruning pass that runs before every LLM request. It trims stale tool results from the current prompt based on age and size heuristics: it never modifies saved session history on disk. Unlike compaction, reduction does not call an LLM and is entirely invisible to users. See [Context management: Reduction](./context-management.md#context-reduction).
 
 ## Service tier
 
@@ -88,7 +88,7 @@ A chord-managed git worktree (under `<state-dir>/worktrees/<repo-id>/<slug>`) wi
 
 ## Skill
 
-A reusable, on-demand piece of expertise expressed as a markdown body plus YAML frontmatter (`SKILL.md`). The model loads matching skills via the `skill` tool when relevant — Chord does not preload them into every prompt. Discovered from `.chord/skills/`, `.agents/skills/`, `~/.config/chord/skills/`, and any extra paths configured via `skills.paths`. See [Customization: Skills](./customization.md#skills).
+A reusable, on-demand piece of expertise expressed as a markdown body plus YAML frontmatter (`SKILL.md`). The model loads matching skills via the `skill` tool when relevant; Chord does not preload them into every prompt. Discovered from `.chord/skills/`, `.agents/skills/`, `~/.config/chord/skills/`, and any extra paths configured via `skills.paths`. See [Customization: Skills](./customization.md#skills).
 
 ## Hook
 

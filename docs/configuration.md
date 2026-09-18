@@ -41,7 +41,7 @@ Project configuration is read from `.chord/config.yaml` in the startup directory
 - `mcp` merges by server name, with each same-name project server replacing the entire global server definition rather than inheriting individual connection or permission fields;
 - append-style extension points keep global entries and add project entries: currently `skills.paths` and per-trigger hook arrays under `hooks.*` append rather than replace.
 
-If global `config.yaml` is missing, the first `chord` run starts a one-time setup wizard that writes `config.yaml` and, when needed, `auth.yaml` — see [Quickstart](./quickstart.md#2-first-run). Prefer to write both files yourself? Everything below is the full field reference.
+If global `config.yaml` is missing, the first `chord` run starts a one-time setup wizard that writes `config.yaml` and, when needed, `auth.yaml`; see [Quickstart](./quickstart.md#2-first-run). Prefer to write both files yourself? Everything below is the full field reference.
 
 ## Minimal provider config
 
@@ -358,8 +358,8 @@ thinking_translation:
 
 Notes:
 
-- Only **thinking / reasoning** output is translated — never the assistant final answer. The translation is appended under the corresponding thinking card with a neutral `Translated · <target_language>` header, rendered through the same Markdown / code-highlighting pipeline, and never written back into model context.
-- `target_language` and `model_pool` are both required; if either is missing, the feature is disabled. `model_pool` must point to a top-level `model_pools` entry — prefer a separate low-cost translation pool. The pool can contain multiple `provider/model[@variant]` refs; translation runs a **single fallback round** across them in order, moving to the next candidate on failure (including network/5xx/timeout) or when a result is empty, clearly truncated, or in the wrong language.
+- Only **thinking / reasoning** output is translated, never the assistant final answer. The translation is appended under the corresponding thinking card with a neutral `Translated · <target_language>` header, rendered through the same Markdown / code-highlighting pipeline, and never written back into model context.
+- `target_language` and `model_pool` are both required; if either is missing, the feature is disabled. `model_pool` must point to a top-level `model_pools` entry: prefer a separate low-cost translation pool. The pool can contain multiple `provider/model[@variant]` refs; translation runs a **single fallback round** across them in order, moving to the next candidate on failure (including network/5xx/timeout) or when a result is empty, clearly truncated, or in the wrong language.
 - `max_chars` (default `1000`) limits the thinking preview sent for translation; only the leading `max_chars` runes are translated, and text past that prefix will not appear in the translated card. Set a smaller value such as `500` for lower latency/cost, or a larger one for more complete translations.
 - A temporary failure only skips that one thinking block; it does not block later thinking translations or the main response. Per-provider transport timeouts (one-minute-class by default) still apply, so a stalled model or key can fail over while the rest of the pool gets a chance to run.
 - Translations are persisted in the session directory (`thinking_translations.json`) and restored when the session is resumed. A given thinking block is translated at most once: changing `thinking_translation.target_language` later does not re-translate already-stored blocks.
@@ -382,7 +382,7 @@ openai:
 
 You can list multiple keys for rotation or backup.
 
-For `preset: codex` OAuth providers, Chord now keeps frequently changing runtime status (quota snapshots, reset times, last warm-up timestamps, shared OAuth status cache) in `auth.state.json`, not in `auth.yaml`.
+For `preset: codex` OAuth providers, Chord keeps frequently changing runtime status (quota snapshots, reset times, last warm-up timestamps, shared OAuth status cache) in `auth.state.json`, not in `auth.yaml`.
 
 That split is intentional:
 
@@ -586,7 +586,7 @@ key level**, and the current entry wins on conflict:
   (`limit`, `cost`, `compaction`, `variants` entries, `modalities`, ...).
 - The same rule holds along a chain (`gpt-5.6-luna: &gpt-5-6-luna {<<: *gpt-5-6-base}`):
   the deepest entry wins per whole key.
-- You cannot *unset* a field an ancestor template declares — override it with
+- You cannot *unset* a field an ancestor template declares: override it with
   a concrete value, or stop referencing that template. `compaction.threshold: 0`
   and `compaction.reminder: -1` are the documented exceptions that disable
   those two behaviors explicitly.
@@ -878,7 +878,7 @@ providers:
 
 - `response_header_timeout`: timeout from starting a streaming HTTP request until response headers arrive, including connection setup and request-body upload. It stops once headers arrive and does not cap the total duration of a healthy stream; use `stream_idle_timeout` to bound gaps between streamed chunks. `0` keeps the built-in default.
 - `stream_idle_timeout`: maximum idle time between streamed model data. When set, it overrides both the normal SSE idle timeout and slow-phase idle timeout for that provider, and it also applies to Codex Responses WebSocket reads.
-- `stream_total_timeout`: wall-clock cap in seconds for one stream, counted from when the response body starts. When set, it also applies to Codex Responses WebSocket reads. `0` / omitted keeps the default of no cap: a stream that keeps producing data is slow, not broken, and is bounded by `stream_idle_timeout` alone. Set it to bound the one shape the idle timeout cannot catch — a stream that drips data often enough to reset the idle timer but never finishes. The read fails with a timeout error so the normal key/model retry path handles it.
+- `stream_total_timeout`: wall-clock cap in seconds for one stream, counted from when the response body starts. When set, it also applies to Codex Responses WebSocket reads. `0` / omitted keeps the default of no cap: a stream that keeps producing data is slow, not broken, and is bounded by `stream_idle_timeout` alone. Set it to bound the one shape the idle timeout cannot catch: a stream that drips data often enough to reset the idle timer but never finishes. The read fails with a timeout error so the normal key/model retry path handles it.
 - `websocket_handshake_timeout`: Responses WebSocket handshake timeout for providers using that transport, mainly `preset: codex` with `responses_websocket` enabled.
 
 These settings are provider-scoped, so project-level `.chord/config.yaml` can override them for one provider without changing other providers. They do not change fixed low-level connection defaults such as dial or TLS handshake timeouts.
@@ -1186,7 +1186,7 @@ Common fields include:
 
 - `name`: agent name. If omitted, Chord uses the filename without extension. If specified, it must match the filename without extension (for example, `builder.yaml` must declare `name: builder`). A single directory cannot contain duplicate agent names, including duplicates across `.md`, `.yaml`, and `.yml`. Project-level agents may still override same-named global agents by design.
 - `description`: short description shown to the main agent when delegation is available. Put routing intent here; Chord does not keep a separate annotation layer for preferred tasks or write mode. Whether a role may write files is decided by `permission`, and the Delegate tool surfaces that as `empty_scope=allowed` or `non_empty_scope=required` on each agent choice.
-- `mode`: `main` for a MainAgent role, or `subagent` for a SubAgent. Empty and unknown values behave as `main`; `sub_agent` and `sub` are accepted as SubAgent aliases. The `delegate` tool is registered only when at least one `subagent` role is visible to the delegating role, so a configuration with no subagent definitions has no delegation surface at all — that is the usual reason `delegate` appears to be missing.
+- `mode`: `main` for a MainAgent role, or `subagent` for a SubAgent. Empty and unknown values behave as `main`; `sub_agent` and `sub` are accepted as SubAgent aliases. The `delegate` tool is registered only when at least one `subagent` role is visible to the delegating role, so a configuration with no subagent definitions has no delegation surface at all: that is the usual reason `delegate` appears to be missing.
 - `model_pools`: optional ordered list of pool names this agent can use. Pool definitions live in `config.yaml` top-level `model_pools`; when omitted, the agent can use all top-level pools sorted by name.
   Inline variants such as `openai/gpt-5.5@high` are specified in the pool definitions.
 - `variant`: default variant when a model ref does not include `@variant`.
@@ -1197,8 +1197,8 @@ Common fields include:
   - `max_depth`: how deep nested delegation may go. It is evaluated **per worker, against the worker's own definition**: a SubAgent's ability to delegate further is checked against its own `delegation.max_depth` and its current depth, never against its parent's or the root role's setting, so a root role with `max_depth: 1` cannot stop a child definition that declares `max_depth: 8` from nesting deeper. Defaults to `1` (a first-level SubAgent cannot delegate further until its own definition raises the value); the ceiling is `8`.
   - `child_join`: whether children a SubAgent delegates stay tied to the owner's task. Defaults to `true`: the owner cannot complete while joined children are still running, so its completion is deferred until they finish or are explicitly stopped, and a cancelled or failed owner cancels its joined children with it. With `false`, the owner may finish early and its still-running children detach and continue under the main agent instead of being cancelled. Only nested delegation is affected: children delegated by the main agent never join, because the main agent is not itself a task.
 - `prompt` / `system_prompt`: system prompt for plain YAML files. Setting either one **replaces** any built-in prompt block the role would otherwise get.
-- `prompt_preset`: selects a built-in role prompt block by capability instead of by role name. Accepted values are `planning` and `none`. `planning` injects the built-in planning block (plan-document naming and format, the direct-answer-versus-plan decision, handoff ordering, and plan quality rules); it also suppresses the bug-triage block, which would otherwise duplicate the planning workflow's own investigation outline. `none` suppresses any built-in block. When the field is omitted, the role gets no built-in block whatever it is called — the role name never selects one, so a custom role named `planner` has to declare `prompt_preset: planning` to keep the planning block. Unknown values are a configuration error.
-- `prompt_append`: text appended after the effective role prompt — after the preset block, or after `prompt` / `system_prompt` when the role replaces it. Use this to add project conventions without taking over maintenance of the whole block, which also keeps the preset's tool-aware wording (it adapts to the tools the role can actually see).
+- `prompt_preset`: selects a built-in role prompt block by capability instead of by role name. Accepted values are `planning` and `none`. `planning` injects the built-in planning block (plan-document naming and format, the direct-answer-versus-plan decision, handoff ordering, and plan quality rules); it also suppresses the bug-triage block, which would otherwise duplicate the planning workflow's own investigation outline. `none` suppresses any built-in block. When the field is omitted, the role gets no built-in block whatever it is called: the role name never selects one, so a custom role named `planner` has to declare `prompt_preset: planning` to keep the planning block. Unknown values are a configuration error.
+- `prompt_append`: text appended after the effective role prompt: after the preset block, or after `prompt` / `system_prompt` when the role replaces it. Use this to add project conventions without taking over maintenance of the whole block, which also keeps the preset's tool-aware wording (it adapts to the tools the role can actually see).
 
 A custom planning role that reuses the built-in block:
 
@@ -1274,7 +1274,7 @@ For Python, two backends are used:
 - `diagnostics.python.semantic_backend`: the primary LSP server (default `pyright`). Its `server` field must match a server key under `lsp` so the language server is actually configured.
 - `diagnostics.python.quick_backend`: a one-shot fallback (default `ruff check`) used for large files, or when the semantic backend is unavailable.
 
-`diagnostics.python.large_file.{line_threshold, byte_threshold, strategy}` decides when a file is large enough to use the quick backend instead of the semantic one; `run_semantic_when_quick_unavailable: true` forces the semantic backend even on large files when the quick backend is missing. Ruff quick diagnostics do not update the LSP sidebar — they appear only in `edit`, `apply_patch`, or `write` results and note that full semantic diagnostics were skipped.
+`diagnostics.python.large_file.{line_threshold, byte_threshold, strategy}` decides when a file is large enough to use the quick backend instead of the semantic one; `run_semantic_when_quick_unavailable: true` forces the semantic backend even on large files when the quick backend is missing. Ruff quick diagnostics do not update the LSP sidebar: they appear only in `edit`, `apply_patch`, or `write` results and note that full semantic diagnostics were skipped.
 
 Recommended Python skeleton:
 
@@ -1364,7 +1364,7 @@ The key is per client rather than per provider: the main agent uses the current 
 
 Anthropic prompt caching is driven by `cache_control` blocks, and Chord also sends JSON-formatted `metadata.user_id` automatically with a stable anonymous `device_id` plus a stable routing `session_id` derived from local/provider identity. These Anthropic metadata fields are not user-configurable.
 
-In `explicit` mode (the default for Anthropic models), Chord places up to four `cache_control` breakpoints by priority: the last system block, the frozen reduced-prefix boundary (when incremental reduction has frozen a stable prefix), the newest durable message, and the last assistant message — so long agent loops reuse the frozen historical surface instead of re-writing the moving tail each turn.
+In `explicit` mode (the default for Anthropic models), Chord places up to four `cache_control` breakpoints by priority: the last system block, the frozen reduced-prefix boundary (when incremental reduction has frozen a stable prefix), the newest durable message, and the last assistant message, so long agent loops reuse the frozen historical surface instead of re-writing the moving tail each turn.
 
 The newest breakpoint deliberately skips request-scoped overlays (runtime hints appended after the conversation tail), because those bytes are gone on the next request and a cache entry written past them could never be read back.
 
@@ -1457,9 +1457,9 @@ compat:
     input_includes_cache_write: false
 ```
 
-A Messages-compatible gateway that reports inclusive usage — `input_tokens` is
+A Messages-compatible gateway that reports inclusive usage (`input_tokens` is
 the full input including cache hits, and `cache_read_input_tokens` is only the
-hit subset — needs the opposite override. Otherwise, Chord counts the cache
+hit subset) needs the opposite override. Otherwise, Chord counts the cache
 reads twice and understates the cache-hit rate:
 
 ```yaml
