@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -247,18 +248,98 @@ func TestSubAgentCheckpointRecordsLoadedSkills(t *testing.T) {
 	_, sub := newMixedBatchTestSubAgent(t)
 	defer sub.cancel()
 
-	if got := subAgentCheckpointSkills(sub); got != "none" {
+	if got := subAgentCheckpointSkills(sub, nil); got != "none" {
 		t.Fatalf("skills line with nothing loaded = %q, want \"none\"", got)
+	}
+	if names, omitted := parseSubAgentCheckpointSkillNames(buildSubAgentStructuredCheckpoint(sub, nil, 7, "proactive", "archives/sub-0.md")); len(names) != 0 || omitted != 0 {
+		t.Fatalf("parsing a skill-free checkpoint = %v / %d, want none", names, omitted)
 	}
 
 	sub.MarkSkillInvoked(&skill.Meta{Name: "code-review"})
-	line := subAgentCheckpointSkills(sub)
+	line := subAgentCheckpointSkills(sub, nil)
 	if !strings.Contains(line, "code-review") || !strings.Contains(line, "call `skill` again") {
 		t.Fatalf("skills line = %q, want the name plus the re-load hint", line)
 	}
 	checkpoint := buildSubAgentStructuredCheckpoint(sub, nil, 7, "proactive", "archives/sub-1.md")
 	if !strings.Contains(checkpoint, "- Skills loaded earlier: code-review") {
 		t.Fatalf("checkpoint missing the skills line:\n%s", checkpoint)
+	}
+}
+
+// Chained compressions must not erode the recorded names. The invoked state
+// is recomputed from the survivors after every compression, so the second
+// checkpoint can only keep a skill whose result the first one archived by
+// merging the previous checkpoint's line — and the previous checkpoint itself
+// always falls in the dropped prefix.
+func TestSubAgentCheckpointSkillsSurviveChainedCompression(t *testing.T) {
+	_, sub := newMixedBatchTestSubAgent(t)
+	defer sub.cancel()
+
+	sub.MarkSkillInvoked(&skill.Meta{Name: "alpha"})
+	msgs := []message.Message{{Role: message.RoleUser, Content: "start"}}
+	msgs = append(msgs, skillInvocationMessages("s1", "alpha")...)
+	msgs = append(msgs, subAgentCheckpointFiller(20)...)
+	first, ok := sub.compactContextForTarget(msgs, estimateMessagesTokens(sub.ctxMgr, msgs)/2, "proactive")
+	if !ok {
+		t.Fatal("first compression did not run")
+	}
+	if checkpoint := first[1].Content; !strings.Contains(checkpoint, "alpha") {
+		t.Fatalf("first checkpoint should record alpha:\n%s", checkpoint)
+	}
+
+	sub.MarkSkillInvoked(&skill.Meta{Name: "dataviz"})
+	msgs = append([]message.Message{}, sub.ctxMgr.Snapshot()...)
+	msgs = append(msgs, skillInvocationMessages("s2", "dataviz")...)
+	msgs = append(msgs, subAgentCheckpointFiller(20)...)
+	second, ok := sub.compactContextForTarget(msgs, estimateMessagesTokens(sub.ctxMgr, msgs)/2, "proactive")
+	if !ok {
+		t.Fatal("second compression did not run")
+	}
+	// The regression is only meaningful if the first checkpoint really was
+	// dropped; otherwise its text would satisfy the name assertions below.
+	if got := countSubAgentCheckpoints(second); got != 1 {
+		t.Fatalf("second compression kept %d checkpoints, want 1", got)
+	}
+	checkpoint := second[1].Content
+	for _, want := range []string{"alpha", "dataviz"} {
+		if !strings.Contains(checkpoint, want) {
+			t.Fatalf("chained checkpoint lost %q:\n%s", want, checkpoint)
+		}
+	}
+}
+
+func subAgentCheckpointFiller(n int) []message.Message {
+	out := make([]message.Message, 0, n)
+	for range n {
+		out = append(out, message.Message{Role: message.RoleUser, Content: strings.Repeat("filler ", 200)})
+	}
+	return out
+}
+
+func countSubAgentCheckpoints(messages []message.Message) int {
+	count := 0
+	for _, msg := range messages {
+		if strings.Contains(msg.Content, subAgentCheckpointSkillsPrefix) {
+			count++
+		}
+	}
+	return count
+}
+
+// The omission count has to parse back so an overflow survives the next
+// compression instead of being forgotten one checkpoint at a time.
+func TestSubAgentCheckpointSkillsCarryOverflow(t *testing.T) {
+	_, sub := newMixedBatchTestSubAgent(t)
+	defer sub.cancel()
+
+	total := checkpointMaxSkillNames + 3
+	for i := range total {
+		sub.MarkSkillInvoked(&skill.Meta{Name: fmt.Sprintf("skill-%02d", i)})
+	}
+	checkpoint := buildSubAgentStructuredCheckpoint(sub, nil, 9, "proactive", "archives/sub-1.md")
+	names, omitted := parseSubAgentCheckpointSkillNames(checkpoint)
+	if len(names) != checkpointMaxSkillNames || omitted != 3 {
+		t.Fatalf("parsed %d names / omitted %d, want %d / 3", len(names), omitted, checkpointMaxSkillNames)
 	}
 }
 

@@ -29,6 +29,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - The agents panel no longer shows a nameless placeholder row while a `delegate` call is still receiving its arguments: a SubAgent row appears only after the delegation actually starts, so a failed or rejected delegate leaves no empty entry behind.
 - Switching focus away from a long transcript and back while a reply is still streaming no longer freezes the pane at the content it held when you switched: the in-flight thinking or reply card keeps receiving its text, and the transcript stays at the tail.
 - Cancelling a turn now also settles an agent that had finished its own turn and was waiting on a joined child task: when the cancellation stops the child, a parked owner with no remaining joined children is marked cancelled together with it instead of staying non-terminal until the session is restored.
+- A SubAgent's context checkpoint now keeps the skills it loaded earlier across repeated compaction. The checkpoint was rebuilt only from the skills whose instructions were still in context, so a skill whose instructions an earlier compaction had archived disappeared from the list after the next compaction and the worker could no longer tell that the workflow had been in effect; each checkpoint now carries the previous checkpoint's names forward.
 
 ## 0.8.1 - 2026-09-16
 

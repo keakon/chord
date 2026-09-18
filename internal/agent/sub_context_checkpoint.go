@@ -51,7 +51,7 @@ func buildSubAgentStructuredCheckpoint(s *SubAgent, messages []message.Message, 
 	b.WriteString(subAgentCheckpointActions(messages, toolMeta))
 	b.WriteByte('\n')
 	b.WriteString("- Skills loaded earlier: ")
-	b.WriteString(subAgentCheckpointSkills(s))
+	b.WriteString(subAgentCheckpointSkills(s, messages))
 	b.WriteByte('\n')
 	b.WriteString("- Known failures: ")
 	b.WriteString(subAgentCheckpointFailures(messages, toolMeta))
@@ -61,28 +61,6 @@ func buildSubAgentStructuredCheckpoint(s *SubAgent, messages []message.Message, 
 	b.WriteByte('\n')
 	fmt.Fprintf(&b, "Full pre-checkpoint history: %s.", archiveRef)
 	return b.String()
-}
-
-// subAgentCheckpointSkills records the skills this subagent loaded, by name.
-// A skill's instructions exist only in its tool result, so the compression
-// that removes the history prefix can take them out of the context without
-// leaving any trace that a workflow was in effect. Names cost one line;
-// re-injecting the bodies would spend the context the compression just
-// reclaimed. The list comes from the subagent's own invoked-skill state, which
-// is recomputed only after this checkpoint is built, so a chain of
-// compressions cannot erode it. That state does not track which side of the
-// cut each skill landed on, hence the conditional wording — a skill whose
-// result survived is still readable above.
-func subAgentCheckpointSkills(s *SubAgent) string {
-	names := s.invokedSkillNamesSnapshot()
-	if len(names) == 0 {
-		return "none"
-	}
-	if len(names) > checkpointMaxSkillNames {
-		omitted := len(names) - checkpointMaxSkillNames
-		names = append(names[:checkpointMaxSkillNames:checkpointMaxSkillNames], fmt.Sprintf("(+%d more)", omitted))
-	}
-	return strings.Join(names, ", ") + " (instructions may have been removed above; call `skill` again when a workflow still applies)"
 }
 
 func blankToUnknown(value string) string {
