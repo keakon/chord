@@ -1074,6 +1074,8 @@ func TestExtractionDropsSessionLocalIdentifiers(t *testing.T) {
 		{"root", `{"candidates":[{"type":"fact","statement":"Config at /root/f must exist.","rationale":"why","application":"how","summary":"s","source_role":"assistant","confidence":"reported","outcome":"success","project_paths":["internal/agent/foo.go"]}]}`},
 		{"mnt", `{"candidates":[{"type":"fact","statement":"Data under /mnt/d/f is cached.","rationale":"why","application":"how","summary":"s","source_role":"assistant","confidence":"reported","outcome":"success","project_paths":["internal/agent/foo.go"]}]}`},
 		{"drive", `{"candidates":[{"type":"fact","statement":"Log at C:\\Users\\x\\f shows it.","rationale":"why","application":"how","summary":"s","source_role":"assistant","confidence":"reported","outcome":"success","project_paths":["internal/agent/foo.go"]}]}`},
+		{"devshm", `{"candidates":[{"type":"fact","statement":"Scratch files live under /dev/shm/chord-scratch.","rationale":"why","application":"how","summary":"s","source_role":"assistant","confidence":"reported","outcome":"success","project_paths":["internal/agent/foo.go"]}]}`},
+		{"devtty", `{"candidates":[{"type":"workflow","statement":"Attach the debugger to /dev/tty.usbserial-1420.","rationale":"why","application":"how","summary":"s","source_role":"assistant","confidence":"reported","outcome":"success","project_paths":["internal/agent/foo.go"]}]}`},
 	} {
 		out, err := ParseExtractionOutput([]byte(tc.raw), MaxRetirePerSessionRun)
 		cands, dropped := outParts(out)
@@ -1095,6 +1097,9 @@ func TestExtractionDropsSessionLocalIdentifiers(t *testing.T) {
 		{"issue", `{"candidates":[{"type":"fact","statement":"See issue 12345678 for context.","rationale":"why","application":"how","summary":"s","source_role":"assistant","confidence":"reported","outcome":"success","project_paths":["internal/agent/foo.go"]}]}`},
 		{"date", `{"candidates":[{"type":"fact","statement":"Decided on 20260918 to keep it.","rationale":"why","application":"how","summary":"s","source_role":"assistant","confidence":"reported","outcome":"success","project_paths":["internal/agent/foo.go"]}]}`},
 		{"home", `{"candidates":[{"type":"fact","statement":"Check ~/notes/20260918-x.md for the thread.","rationale":"why","application":"how","summary":"s","source_role":"assistant","confidence":"reported","outcome":"success","project_paths":["internal/agent/foo.go"]}]}`},
+		{"devnull", `{"candidates":[{"type":"workflow","statement":"Redirect the scan's stderr to /dev/null so only hits reach the log.","rationale":"why","application":"how","summary":"s","source_role":"assistant","confidence":"reported","outcome":"success","project_paths":["internal/agent/foo.go"]}]}`},
+		{"devstdin", `{"candidates":[{"type":"workflow","statement":"Read the patch from /dev/stdin when no file is given.","rationale":"why","application":"how","summary":"s","source_role":"assistant","confidence":"reported","outcome":"success","project_paths":["internal/agent/foo.go"]}]}`},
+		{"devstdout", `{"candidates":[{"type":"workflow","statement":"Write the report to /dev/stdout so the caller can pipe it.","rationale":"why","application":"how","summary":"s","source_role":"assistant","confidence":"reported","outcome":"success","project_paths":["internal/agent/foo.go"]}]}`},
 	} {
 		out, err := ParseExtractionOutput([]byte(tc.raw), MaxRetirePerSessionRun)
 		cands, dropped := outParts(out)

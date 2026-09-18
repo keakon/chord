@@ -138,7 +138,11 @@ var (
 	// reject absolute paths lexically; this covers the same shapes inside free
 	// text. Home-relative (~/...) references are deliberately not matched: they
 	// stay valid when the project moves between machines for the same user.
-	absolutePathRe = regexp.MustCompile(`/(Users|home|tmp|var|private|etc|opt|data|root|mnt|srv|usr|proc|sys|dev|run|System|Library|Volumes|Applications)/\S*|[A-Za-z]:[\\/][^\s]*`)
+	// /dev is included so per-machine device and shared-memory paths
+	// (/dev/shm, /dev/tty.*) drop. The three fixed POSIX names that travel
+	// between machines are stripped first by portableDevPathRe.
+	absolutePathRe    = regexp.MustCompile(`/(Users|home|tmp|var|private|etc|opt|data|root|mnt|srv|usr|proc|sys|dev|run|System|Library|Volumes|Applications)/\S*|[A-Za-z]:[\\/][^\s]*`)
+	portableDevPathRe = regexp.MustCompile(`/dev/(?:null|stdin|stdout)\b`)
 )
 
 // SanitizeText redacts known high-risk secret shapes from text. It is the
@@ -463,11 +467,19 @@ func validateCandidateDroppable(c Candidate) error {
 		if containsSessionSHALike(field.value) {
 			return fmt.Errorf("%s contains a session-local commit SHA", field.name)
 		}
-		if absolutePathRe.MatchString(field.value) {
+		if containsMachineAbsolutePath(field.value) {
 			return fmt.Errorf("%s contains a machine-absolute path", field.name)
 		}
 	}
 	return nil
+}
+
+// containsMachineAbsolutePath reports a host-local absolute path in durable
+// text. /dev/null, /dev/stdin and /dev/stdout are stripped first because they
+// are fixed POSIX names that travel between machines; remaining /dev paths
+// still match absolutePathRe.
+func containsMachineAbsolutePath(text string) bool {
+	return absolutePathRe.MatchString(portableDevPathRe.ReplaceAllString(text, ""))
 }
 
 // containsSessionSHALike reports whether text carries a hex token shaped like a
