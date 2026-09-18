@@ -27,6 +27,7 @@ func (a *MainAgent) interruptSubAgentTurnsForUserCancel() bool {
 	}
 
 	cancelled := false
+	cancelledTaskIDs := make([]string, 0, len(subs))
 	for _, sub := range subs {
 		interrupted := sub.interruptCurrentTurnWithStatus(ToolResultStatusError, context.Canceled, true)
 		state := sub.State()
@@ -54,8 +55,17 @@ func (a *MainAgent) interruptSubAgentTurnsForUserCancel() bool {
 				a.syncTaskRecordFromSub(sub, "")
 			}
 			a.emitToTUI(AgentStatusEvent{AgentID: sub.instanceID, Status: string(status), Message: "Stopped by user"})
+			if strings.TrimSpace(sub.taskID) != "" {
+				cancelledTaskIDs = append(cancelledTaskIDs, strings.TrimSpace(sub.taskID))
+			}
 			cancelled = true
 		}
+	}
+	// A parked owner that delegated with child_join is invisible to the walk
+	// above (it has no runtime), and a user cancel produces no mailbox, so its
+	// wait would never be resolved. Settle those ancestors now.
+	if a.settleStrandedWaitingDescendantOwners(cancelledTaskIDs) {
+		cancelled = true
 	}
 	if cancelled {
 		a.saveRecoverySnapshot()
