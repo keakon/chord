@@ -1016,6 +1016,81 @@ func TestExtractionOutputParsing(t *testing.T) {
 	}
 }
 
+// Session-local identifiers are machine-checkable, so the deterministic layer
+// drops them per-candidate: a commit SHA or machine-absolute path in durable
+// text either goes stale or leaks a local layout into every later session.
+// Prompt advice alone did not stop the same shapes from recurring post-rule.
+func TestExtractionDropsSessionLocalIdentifiers(t *testing.T) {
+	sha := `{"candidates":[{"type":"fact","statement":"Fixed in commit e127cde6 with the new helper.","rationale":"why it matters","application":"how to apply it","summary":"A fix","source_role":"assistant","confidence":"reported","outcome":"success","project_paths":["internal/agent/foo.go"]}]}`
+	out, err := ParseExtractionOutput([]byte(sha), MaxRetirePerSessionRun)
+	cands, dropped := outParts(out)
+	if err != nil {
+		t.Fatalf("SHA output must not fail the run: %v", err)
+	}
+	if len(cands) != 0 || len(dropped) != 1 {
+		t.Fatalf("SHA candidate not dropped: cands=%+v dropped=%v", cands, dropped)
+	}
+	abs := `{"candidates":[{"type":"fact","statement":"Config lives on this machine.","rationale":"why it matters","application":"Check /Users/tester/projects/chord for the file.","summary":"A fact","source_role":"assistant","confidence":"reported","outcome":"success","project_paths":["internal/agent/foo.go"]}]}`
+	out, err = ParseExtractionOutput([]byte(abs), MaxRetirePerSessionRun)
+	cands, dropped = outParts(out)
+	if err != nil {
+		t.Fatalf("absolute-path output must not fail the run: %v", err)
+	}
+	if len(cands) != 0 || len(dropped) != 1 {
+		t.Fatalf("absolute-path candidate not dropped: cands=%+v dropped=%v", cands, dropped)
+	}
+	// Best-effort prefixes beyond the common roots, plus Windows drives.
+	for _, tc := range []struct {
+		name string
+		raw  string
+	}{
+		{"root", `{"candidates":[{"type":"fact","statement":"Config at /root/f must exist.","rationale":"why","application":"how","summary":"s","source_role":"assistant","confidence":"reported","outcome":"success","project_paths":["internal/agent/foo.go"]}]}`},
+		{"mnt", `{"candidates":[{"type":"fact","statement":"Data under /mnt/d/f is cached.","rationale":"why","application":"how","summary":"s","source_role":"assistant","confidence":"reported","outcome":"success","project_paths":["internal/agent/foo.go"]}]}`},
+		{"drive", `{"candidates":[{"type":"fact","statement":"Log at C:\\Users\\x\\f shows it.","rationale":"why","application":"how","summary":"s","source_role":"assistant","confidence":"reported","outcome":"success","project_paths":["internal/agent/foo.go"]}]}`},
+	} {
+		out, err := ParseExtractionOutput([]byte(tc.raw), MaxRetirePerSessionRun)
+		cands, dropped := outParts(out)
+		if err != nil {
+			t.Fatalf("%s output must not fail the run: %v", tc.name, err)
+		}
+		if len(cands) != 0 || len(dropped) != 1 {
+			t.Fatalf("%s candidate not dropped: cands=%+v dropped=%v", tc.name, cands, dropped)
+		}
+	}
+	// Pure-digit tokens are issue numbers, counts, timeouts, or dates — never
+	// SHAs — and home-relative references stay portable, so all of these commit.
+	for _, tc := range []struct {
+		name string
+		raw  string
+	}{
+		{"timeout", `{"candidates":[{"type":"fact","statement":"Retry after 3000000 ms backoff.","rationale":"why","application":"how","summary":"s","source_role":"assistant","confidence":"reported","outcome":"success","project_paths":["internal/agent/foo.go"]}]}`},
+		{"count", `{"candidates":[{"type":"fact","statement":"Flushed 1234567 rows in one pass.","rationale":"why","application":"how","summary":"s","source_role":"assistant","confidence":"reported","outcome":"success","project_paths":["internal/agent/foo.go"]}]}`},
+		{"issue", `{"candidates":[{"type":"fact","statement":"See issue 12345678 for context.","rationale":"why","application":"how","summary":"s","source_role":"assistant","confidence":"reported","outcome":"success","project_paths":["internal/agent/foo.go"]}]}`},
+		{"date", `{"candidates":[{"type":"fact","statement":"Decided on 20260918 to keep it.","rationale":"why","application":"how","summary":"s","source_role":"assistant","confidence":"reported","outcome":"success","project_paths":["internal/agent/foo.go"]}]}`},
+		{"home", `{"candidates":[{"type":"fact","statement":"Check ~/notes/20260918-x.md for the thread.","rationale":"why","application":"how","summary":"s","source_role":"assistant","confidence":"reported","outcome":"success","project_paths":["internal/agent/foo.go"]}]}`},
+	} {
+		out, err := ParseExtractionOutput([]byte(tc.raw), MaxRetirePerSessionRun)
+		cands, dropped := outParts(out)
+		if err != nil {
+			t.Fatalf("%s output must not fail: %v", tc.name, err)
+		}
+		if len(cands) != 1 || len(dropped) != 0 {
+			t.Fatalf("%s candidate wrongly dropped: cands=%+v dropped=%v", tc.name, cands, dropped)
+		}
+	}
+	// Ordinary prose without hex tokens or absolute paths still commits, and
+	// pure-letter words spelled with a-f letters are not SHAs.
+	clean := `{"candidates":[{"type":"fact","statement":"The defaced card face must not be clamped again.","rationale":"why it matters","application":"Check internal/agent/foo.go before changing the render path.","summary":"A fact","source_role":"assistant","confidence":"reported","outcome":"success","project_paths":["internal/agent/foo.go"]}]}`
+	out, err = ParseExtractionOutput([]byte(clean), MaxRetirePerSessionRun)
+	cands, dropped = outParts(out)
+	if err != nil {
+		t.Fatalf("clean output must not fail: %v", err)
+	}
+	if len(cands) != 1 || len(dropped) != 0 {
+		t.Fatalf("clean candidate wrongly dropped: cands=%+v dropped=%v", cands, dropped)
+	}
+}
+
 func TestSanitizeTextRedactsSecrets(t *testing.T) {
 	input := "Authorization: Bearer abc123\nx-api-key: def456\npassword=secret12345\nhttps://user:pass@example.com\n-----BEGIN RSA PRIVATE KEY-----\nMIIE\n-----END RSA PRIVATE KEY-----"
 	out := SanitizeText(input)

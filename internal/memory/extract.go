@@ -124,6 +124,20 @@ var (
 	// separator so ordinary identifiers (skipLockedSessions, pkg_resources) are
 	// not mistaken for keys and redacted or dropped.
 	bareSecretTokenRe = regexp.MustCompile(`\b(?:(?:sk|pk|rk)[-_]|gh[pousr]_|glpat-|xox[baprs]-|AKIA)[A-Za-z0-9_-]{10,}`)
+	// sessionSHALikeRe catches session-local commit SHAs in durable text. A match
+	// counts only when it mixes hex letters and digits (see
+	// containsSessionSHALike): pure-letter words (defaced, effaced) and
+	// pure-digit tokens (issue numbers, timeouts, YYYYMMDD dates) are never
+	// SHAs. The residual miss is an all-digit short SHA (~3.7% of 7-char
+	// SHAs); the avoided false positives are far more common in practice.
+	sessionSHALikeRe = regexp.MustCompile(`\b[0-9a-f]{7,40}\b`)
+	// absolutePathRe catches machine-local absolute paths in durable text, on a
+	// best-effort prefix list plus Windows drive prefixes. Project-relative
+	// paths never start with these prefixes, and project_paths entries already
+	// reject absolute paths lexically; this covers the same shapes inside free
+	// text. Home-relative (~/...) references are deliberately not matched: they
+	// stay valid when the project moves between machines for the same user.
+	absolutePathRe = regexp.MustCompile(`/(Users|home|tmp|var|private|etc|opt|data|root|mnt|srv|usr|proc|sys|dev|run|System|Library|Volumes|Applications)/\S*|[A-Za-z]:[\\/][^\s]*`)
 )
 
 // SanitizeText redacts known high-risk secret shapes from text. It is the
@@ -370,9 +384,10 @@ func validateCandidateStructural(c Candidate) error {
 }
 
 // validateCandidateDroppable applies the per-candidate content checks: field
-// presence and length bounds, path/ID shape, and characters that would break
-// the managed index or record Markdown. A violation drops only the offending
-// candidate; the surviving candidates are still committed.
+// presence and length bounds, path/ID shape, session-local identifiers that
+// must never become durable text, and characters that would break the managed
+// index or record Markdown. A violation drops only the offending candidate;
+// the surviving candidates are still committed.
 func validateCandidateDroppable(c Candidate) error {
 	if strings.TrimSpace(c.Statement) == "" {
 		return errors.New("empty statement")
@@ -428,5 +443,34 @@ func validateCandidateDroppable(c Candidate) error {
 			return fmt.Errorf("invalid supersedes record id %q", s)
 		}
 	}
+	// Session-local identifiers are prompt-discouraged and partly
+	// machine-checkable, so the checkable shapes are dropped deterministically:
+	// a commit SHA or machine-absolute path in durable text would either go
+	// stale or leak a local layout into every later session. Temporary pins and
+	// one-off flaky-test noise have no stable machine-checkable shape (version
+	// strings and the word "flaky" also appear in legitimate durable text), so
+	// they stay at the prompt level only.
+	for _, field := range []string{c.Statement, c.Rationale, c.Application, c.Summary} {
+		if containsSessionSHALike(field) {
+			return errors.New("statement contains a session-local commit SHA")
+		}
+		if absolutePathRe.MatchString(field) {
+			return errors.New("statement contains a machine-absolute path")
+		}
+	}
 	return nil
+}
+
+// containsSessionSHALike reports whether text carries a hex token shaped like a
+// session commit SHA: at least 7 hex chars mixing a-f letters and digits.
+// Pure-letter matches are ordinary English words (defaced, effaced) and
+// pure-digit matches are issue numbers, counts, timeouts, or dates, so neither
+// trips the check.
+func containsSessionSHALike(text string) bool {
+	for _, m := range sessionSHALikeRe.FindAllString(text, -1) {
+		if strings.ContainsAny(m, "abcdef") && strings.ContainsAny(m, "0123456789") {
+			return true
+		}
+	}
+	return false
 }
