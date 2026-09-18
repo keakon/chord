@@ -76,6 +76,11 @@ func (m *Model) rebuildFocusedViewport(agentID, viewportFilter string) {
 	m.viewport.SetFilter(viewportFilter)
 	m.viewport.SetWorkingDir(m.workingDir)
 	m.viewport.ReplaceBlocks(blocks)
+	// A windowed rebuild installs deferred clones of the live stream cards, so
+	// the stream state must be rebound to the clones the viewport renders;
+	// otherwise later deltas keep updating the orphaned originals and the pane
+	// freezes at the content it held when the focus switched.
+	m.rebindLiveViewportBlocks()
 	m.revalidateFocusedBlock()
 	m.recalcViewportSize()
 	if agentID == "" {
