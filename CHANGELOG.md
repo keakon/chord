@@ -17,6 +17,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Narrow `shell` allow rules now require review for command substitution, process substitution and unresolved quoting: a command containing `$(...)` or a backtick outside single quotes (double-quoted still counts), `<(...)` / `>(...)` outside any quotes, an unterminated quote, or a trailing backslash no longer auto-matches a specific `allow` pattern such as `"git *"`, and falls through to the next matching rule. Plain redirection targets are not affected.
 - Interrupting a streaming reply with `Esc` no longer splits that answer across two cards: the text the model had already produced keeps landing in the same card, thinking follow-ups stay in the same thinking card, and each card closes only after its producer's trailing batch arrives.
 - Restoring a session after a context checkpoint no longer loses what a successful tool call produced: an elided result now explains that the checkpoint archived it instead of printing the raw placeholder, an `edit` card falls back to the requested replacement when its applied diff was elided, and the changed file still appears in the sidebar.
+- Project memory now only records conclusions you stated (or that the session could not proceed without asking you): model-discovered facts a later session could rediscover become review suggestions or are dropped, and session-local commit SHAs and machine-absolute paths are rejected from new records.
 
 ## 0.8.1 - 2026-09-16
 
