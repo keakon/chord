@@ -25,7 +25,7 @@ This project has historical memory in MEMORY.md and linked records.
 - Before recommending a file, function, or flag that a memory names, confirm it still exists.
 - To drop a memory, delete only its index line in MEMORY.md. Files under .chord/memory/records/ stay as provenance; deleting them destroys the source evidence.
 - The index and records are maintained outside this session. Never add or restate entries yourself — including this turn's progress or state. You may only delete an index line that plainly no longer applies.
-- Managed index order is injection priority: earlier lines are injected first and the tail is dropped when the budget runs out. Move a line up to raise it; never reorder the section wholesale.`
+- Managed index order is injection priority: earlier lines are injected first and the tail is dropped when the budget runs out.`
 
 // memoryExtractionGuidancePrompt is appended to the stable Memory discipline
 // only when automatic extraction is enabled, so the model knows new stable

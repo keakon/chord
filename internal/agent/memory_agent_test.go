@@ -389,12 +389,13 @@ func TestMemoryStableGuidanceCarriesLookupDiscipline(t *testing.T) {
 		"confirm it still exists",
 		"maintained outside this session",
 		"Never add or restate entries yourself",
+		"You may only delete an index line",
 	} {
 		if !strings.Contains(memoryStableGuidancePrompt, want) {
 			t.Errorf("stable memory guidance missing discipline: %q", want)
 		}
 	}
-	for _, unwanted := range []string{"compact_context", ".chord/notes/"} {
+	for _, unwanted := range []string{"compact_context", ".chord/notes/", "Move a line up"} {
 		if strings.Contains(memoryStableGuidancePrompt, unwanted) {
 			t.Errorf("stable memory guidance must not mention %q", unwanted)
 		}

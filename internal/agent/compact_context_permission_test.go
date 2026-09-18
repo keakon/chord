@@ -192,6 +192,9 @@ func TestContextPressureOverlaysShareStateFileNaming(t *testing.T) {
 		if strings.Contains(text, "<") {
 			t.Fatalf("%s must stay bare content without angle brackets, got %q", name, text)
 		}
+		if strings.Contains(text, "MEMORY.md") {
+			t.Fatalf("%s must not mention MEMORY.md, got %q", name, text)
+		}
 	}
 	for _, want := range []string{".chord/notes/", ".chord/plans/", "YYYYMMDD"} {
 		if !strings.Contains(contextStateFileTargetHint, want) {

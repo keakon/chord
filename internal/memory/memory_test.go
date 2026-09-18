@@ -1030,6 +1030,30 @@ func TestExtractionDropsSessionLocalIdentifiers(t *testing.T) {
 	if len(cands) != 0 || len(dropped) != 1 {
 		t.Fatalf("SHA candidate not dropped: cands=%+v dropped=%v", cands, dropped)
 	}
+	if !strings.Contains(dropped[0], "statement contains a session-local commit SHA") {
+		t.Fatalf("SHA drop reason should name the field, got %v", dropped)
+	}
+	upper := `{"candidates":[{"type":"fact","statement":"Fixed in commit E127CDE6 with the new helper.","rationale":"why it matters","application":"how to apply it","summary":"A fix","source_role":"assistant","confidence":"reported","outcome":"success","project_paths":["internal/agent/foo.go"]}]}`
+	out, err = ParseExtractionOutput([]byte(upper), MaxRetirePerSessionRun)
+	cands, dropped = outParts(out)
+	if err != nil {
+		t.Fatalf("uppercase SHA output must not fail the run: %v", err)
+	}
+	if len(cands) != 0 || len(dropped) != 1 {
+		t.Fatalf("uppercase SHA candidate not dropped: cands=%+v dropped=%v", cands, dropped)
+	}
+	rationaleSHA := `{"candidates":[{"type":"fact","statement":"Keep mechanical lint fixes short.","rationale":"The user said e127cde6 can be reworded.","application":"how to apply it","summary":"A preference","source_role":"assistant","confidence":"reported","outcome":"success","project_paths":["internal/agent/foo.go"]}]}`
+	out, err = ParseExtractionOutput([]byte(rationaleSHA), MaxRetirePerSessionRun)
+	cands, dropped = outParts(out)
+	if err != nil {
+		t.Fatalf("rationale SHA output must not fail the run: %v", err)
+	}
+	if len(cands) != 0 || len(dropped) != 1 {
+		t.Fatalf("rationale SHA candidate not dropped: cands=%+v dropped=%v", cands, dropped)
+	}
+	if !strings.Contains(dropped[0], "rationale contains a session-local commit SHA") {
+		t.Fatalf("rationale SHA drop reason should name the field, got %v", dropped)
+	}
 	abs := `{"candidates":[{"type":"fact","statement":"Config lives on this machine.","rationale":"why it matters","application":"Check /Users/tester/projects/chord for the file.","summary":"A fact","source_role":"assistant","confidence":"reported","outcome":"success","project_paths":["internal/agent/foo.go"]}]}`
 	out, err = ParseExtractionOutput([]byte(abs), MaxRetirePerSessionRun)
 	cands, dropped = outParts(out)
@@ -1038,6 +1062,9 @@ func TestExtractionDropsSessionLocalIdentifiers(t *testing.T) {
 	}
 	if len(cands) != 0 || len(dropped) != 1 {
 		t.Fatalf("absolute-path candidate not dropped: cands=%+v dropped=%v", cands, dropped)
+	}
+	if !strings.Contains(dropped[0], "application contains a machine-absolute path") {
+		t.Fatalf("absolute-path drop reason should name the field, got %v", dropped)
 	}
 	// Best-effort prefixes beyond the common roots, plus Windows drives.
 	for _, tc := range []struct {
@@ -1802,5 +1829,42 @@ func TestCommitPreservesExistingRowOrderAcrossRuns(t *testing.T) {
 	}
 	if string(before) != string(after) {
 		t.Fatalf("no-op commit rewrote MEMORY.md:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}
+
+// TestExtractionKeepsIdentifierBoundHexRuns pins the boundary the SHA drop
+// must not cross: a hex run glued into a longer identifier by '-' or '_' is a
+// UUID segment or this store's own <slug>--<hash> record id, both of which a
+// later session still resolves. Dropping them would make a record that cites
+// the one it supersedes unrepresentable. A bare SHA keeps dropping.
+func TestExtractionKeepsIdentifierBoundHexRuns(t *testing.T) {
+	candidate := func(statement string) string {
+		return `{"candidates":[{"type":"fact","statement":"` + statement + `","rationale":"why","application":"how","summary":"s","source_role":"assistant","confidence":"reported","outcome":"success","project_paths":["internal/agent/foo.go"]}]}`
+	}
+	for _, tc := range []struct {
+		name string
+		raw  string
+	}{
+		{"uuid", `The export dataset is 550e8400-e29b-41d4-a716-446655440abc.`},
+		{"recordid", `Supersedes retry-backoff--3f2a1b4c9d8e7f60.`},
+		{"snake", `Keyed by build_id 3f2a1b4c9d8e7f60_generated.`},
+	} {
+		out, err := ParseExtractionOutput([]byte(candidate(tc.raw)), MaxRetirePerSessionRun)
+		if err != nil {
+			t.Fatalf("%s output must not fail: %v", tc.name, err)
+		}
+		cands, dropped := outParts(out)
+		if len(cands) != 1 || len(dropped) != 0 {
+			t.Fatalf("%s candidate wrongly dropped: cands=%+v dropped=%v", tc.name, cands, dropped)
+		}
+	}
+	// Sentence punctuation is not a joiner: a bare SHA still drops.
+	out, err := ParseExtractionOutput([]byte(candidate("Use e127cde6 for the rebase.")), MaxRetirePerSessionRun)
+	if err != nil {
+		t.Fatalf("bare SHA output must not fail: %v", err)
+	}
+	cands, dropped := outParts(out)
+	if len(cands) != 0 || len(dropped) != 1 {
+		t.Fatalf("bare SHA candidate not dropped: cands=%+v dropped=%v", cands, dropped)
 	}
 }

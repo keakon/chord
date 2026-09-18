@@ -128,9 +128,10 @@ var (
 	// counts only when it mixes hex letters and digits (see
 	// containsSessionSHALike): pure-letter words (defaced, effaced) and
 	// pure-digit tokens (issue numbers, timeouts, YYYYMMDD dates) are never
-	// SHAs. The residual miss is an all-digit short SHA (~3.7% of 7-char
-	// SHAs); the avoided false positives are far more common in practice.
-	sessionSHALikeRe = regexp.MustCompile(`\b[0-9a-f]{7,40}\b`)
+	// SHAs. Matching is case-insensitive so copied uppercase short SHAs are
+	// dropped too. The residual miss is an all-digit short SHA (~3.7% of
+	// 7-char SHAs); the avoided false positives are far more common in practice.
+	sessionSHALikeRe = regexp.MustCompile(`(?i)\b[0-9a-f]{7,40}\b`)
 	// absolutePathRe catches machine-local absolute paths in durable text, on a
 	// best-effort prefix list plus Windows drive prefixes. Project-relative
 	// paths never start with these prefixes, and project_paths entries already
@@ -450,12 +451,20 @@ func validateCandidateDroppable(c Candidate) error {
 	// one-off flaky-test noise have no stable machine-checkable shape (version
 	// strings and the word "flaky" also appear in legitimate durable text), so
 	// they stay at the prompt level only.
-	for _, field := range []string{c.Statement, c.Rationale, c.Application, c.Summary} {
-		if containsSessionSHALike(field) {
-			return errors.New("statement contains a session-local commit SHA")
+	for _, field := range []struct {
+		name  string
+		value string
+	}{
+		{"statement", c.Statement},
+		{"rationale", c.Rationale},
+		{"application", c.Application},
+		{"summary", c.Summary},
+	} {
+		if containsSessionSHALike(field.value) {
+			return fmt.Errorf("%s contains a session-local commit SHA", field.name)
 		}
-		if absolutePathRe.MatchString(field) {
-			return errors.New("statement contains a machine-absolute path")
+		if absolutePathRe.MatchString(field.value) {
+			return fmt.Errorf("%s contains a machine-absolute path", field.name)
 		}
 	}
 	return nil
@@ -466,11 +475,37 @@ func validateCandidateDroppable(c Candidate) error {
 // Pure-letter matches are ordinary English words (defaced, effaced) and
 // pure-digit matches are issue numbers, counts, timeouts, or dates, so neither
 // trips the check.
+//
+// A hex run glued to a longer identifier by '-' or '_' is not a bare commit
+// SHA: UUID segments ("550e8400-e29b-41d4-...") and this store's own
+// "<slug>--<hash>" record ids are durable references a later session still
+// resolves, so a candidate that cites one must not be dropped — otherwise a
+// record could never point at the record it supersedes.
 func containsSessionSHALike(text string) bool {
-	for _, m := range sessionSHALikeRe.FindAllString(text, -1) {
-		if strings.ContainsAny(m, "abcdef") && strings.ContainsAny(m, "0123456789") {
+	for _, loc := range sessionSHALikeRe.FindAllStringIndex(text, -1) {
+		start, end := loc[0], loc[1]
+		if hexRunJoinedToIdentifier(text, start, end) {
+			continue
+		}
+		m := text[start:end]
+		// The regex is case-insensitive, so the hex-letter half must accept
+		// uppercase matches too.
+		if strings.ContainsAny(m, "abcdefABCDEF") && strings.ContainsAny(m, "0123456789") {
 			return true
 		}
 	}
 	return false
 }
+
+// hexRunJoinedToIdentifier reports whether the hex run at [start,end) is one
+// segment of a longer identifier: a '-' or '_' directly before or after it
+// means the run belongs to a UUID or a record id, not to a bare SHA. Sentence
+// punctuation is deliberately not a joiner, so "use e127cde6." still drops.
+func hexRunJoinedToIdentifier(text string, start, end int) bool {
+	if start > 0 && isIdentifierJoinByte(text[start-1]) {
+		return true
+	}
+	return end < len(text) && isIdentifierJoinByte(text[end])
+}
+
+func isIdentifierJoinByte(c byte) bool { return c == '-' || c == '_' }

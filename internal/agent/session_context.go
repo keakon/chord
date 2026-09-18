@@ -11,9 +11,10 @@ import (
 
 // SessionEnvSnapshot carries the session-stable environment fields previously
 // rendered inside the system prompt's <env> block. Moving them into the
-// session-context reminder (injected before the first user message) keeps the
-// system prompt fully static across sessions, days, and working directories,
-// which is the prefix prompt caching depends on.
+// session-context reminder (injected before the first user message) keeps
+// working directory, platform, date, and venv out of the cached system prefix.
+// The system prompt itself is cache-stable framing: it still varies with
+// Memory load and tool visibility, not with environment or time.
 type SessionEnvSnapshot struct {
 	WorkDir  string
 	Platform string

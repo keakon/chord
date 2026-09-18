@@ -11,6 +11,7 @@ import (
 const (
 	routingMemoryMarker      = "## Memory\nThis project has historical memory"
 	routingWriteContract     = "Never add or restate entries yourself"
+	routingDeleteOnly        = "You may only delete an index line"
 	routingExtractionNote    = "may be captured into memory automatically"
 	routingLongSessionMarker = "## Long-session context management"
 )
@@ -53,6 +54,9 @@ func assertRoutingPrompt(t *testing.T, prompt string, wantMemory, wantExtract, w
 	if wantMemory && !strings.Contains(prompt, routingWriteContract) {
 		t.Fatalf("Memory discipline must carry the unconditional write contract, got:\n%s", prompt)
 	}
+	if wantMemory && !strings.Contains(prompt, routingDeleteOnly) {
+		t.Fatalf("Memory discipline must say the only allowed write is deleting an index line, got:\n%s", prompt)
+	}
 	if strings.Contains(prompt, routingExtractionNote) != wantExtract {
 		t.Fatalf("extraction note present = %v, want %v in:\n%s", !wantExtract, wantExtract, prompt)
 	}
@@ -64,7 +68,7 @@ func assertRoutingPrompt(t *testing.T, prompt string, wantMemory, wantExtract, w
 	// legitimately name tools or files, so only the owning block is pinned.
 	if wantMemory {
 		block := promptSection(prompt, routingMemoryMarker)
-		for _, unwanted := range []string{"compact_context", ".chord/notes/"} {
+		for _, unwanted := range []string{"compact_context", ".chord/notes/", "Move a line up"} {
 			if strings.Contains(block, unwanted) {
 				t.Fatalf("Memory discipline block must not mention %q, got:\n%s", unwanted, block)
 			}
