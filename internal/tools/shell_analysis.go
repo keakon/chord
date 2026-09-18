@@ -23,8 +23,10 @@ type ShellSubcommand struct {
 }
 
 // AnalyzeShellCommand parses a Shell command and extracts simple subcommands in
-// source order. Function declaration bodies are skipped so permission matching
-// does not treat dormant helper definitions as immediately executing commands.
+// source order. Function declaration bodies are extracted like any other
+// subcommand: a body that runs in the same command string is executed content,
+// and permission matching must see it so a narrow allow rule can never
+// auto-allow an unreviewed subcommand hidden behind a definition.
 func AnalyzeShellCommand(command string) (ShellAnalysis, error) {
 	analysis := ShellAnalysis{
 		RawCommand: command,
@@ -43,8 +45,6 @@ func AnalyzeShellCommand(command string) (ShellAnalysis, error) {
 	subcommands := make([]ShellSubcommand, 0, 4)
 	syntax.Walk(file, func(node syntax.Node) bool {
 		switch n := node.(type) {
-		case *syntax.FuncDecl:
-			return false
 		case *syntax.CallExpr:
 			if len(n.Args) == 0 {
 				return true
@@ -84,6 +84,20 @@ func shellSubcommandSource(command string, expr *syntax.CallExpr) string {
 		return ""
 	}
 	start := int(expr.Args[0].Pos().Offset())
+	// A leading PATH assignment decides which binary the command name resolves
+	// to, so it must stay inside the matched source: otherwise
+	// `PATH=/tmp/evil git status` reads as a plain `git status` and a narrow
+	// `git *` allow rule would auto-allow an attacker-controlled binary.
+	// Assignments that only set an environment value stay stripped, so existing
+	// `FOO=bar cmd` matching is unchanged.
+	for _, assign := range expr.Assigns {
+		if assign == nil || assign.Name == nil || assign.Name.Value != "PATH" {
+			continue
+		}
+		if offset := int(assign.Pos().Offset()); offset >= 0 && offset < start {
+			start = offset
+		}
+	}
 	end := int(expr.Args[len(expr.Args)-1].End().Offset())
 	if start < 0 || end < start || end > len(command) {
 		return ""
