@@ -25,8 +25,12 @@ func normalizeOverlayConfig(cfg OverlayConfig, area image.Rectangle) OverlayConf
 	if cfg.MaxHeightRatio <= 0 {
 		cfg.MaxHeightRatio = 0.67
 	}
-	maxAllowed := area.Dx()
-	if maxAllowed > 0 && cfg.MaxWidth > maxAllowed {
+	// Leave the terminal's last physical column unwritten, matching
+	// drawableLineWidth: a full-width dialog that paints into it makes hosts such
+	// as Ghostty emit an extra wrap for the frame, and the cell-level diff then
+	// keeps the stale row until a full repaint.
+	maxAllowed := max(area.Dx()-1, 1)
+	if cfg.MaxWidth > maxAllowed {
 		cfg.MaxWidth = maxAllowed
 	}
 	if cfg.MinWidth > cfg.MaxWidth {
