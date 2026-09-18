@@ -1060,8 +1060,7 @@ prompt: |
 常用字段：
 
 - `name`：agent 名称。省略时使用不带扩展名的文件名；显式填写时，必须与不带扩展名的文件名一致（例如 `builder.yaml` 必须声明 `name: builder`）。同一目录内不能存在重名 agent，包括 `.md`、`.yaml`、`.yml` 之间的重名；项目级 agent 仍可按既有设计覆盖同名的全局 agent。
-- `description`：简短描述，在可委派给该 agent 时展示给 main agent。
-- `capabilities` / `preferred_tasks` / `write_mode` / `delegation_policy`：描述该 agent 用途的可选标注，用于你要委派给的 `subagent` 定义时最有价值。Chord 不解析也不强制这些值——它们只是以 `capabilities=…`、`preferred=…`、`write_mode=…`、`delegation_policy=…` 这样的短 meta 文本出现在委派模型看到的 agent 选择上，帮助它选对类型。前两个是字符串列表，后两个是单个字符串；写得简短、能自解释即可，长的内容放 `description`。
+- `description`：简短描述，在可委派给该 agent 时展示给 main agent。选人意图写在这里；Chord 不再单独提供 preferred tasks / write mode 这类标注。角色能不能写文件由 `permission` 决定，Delegate 会在每个可选项上标 `empty_scope=allowed` 或 `non_empty_scope=required`。
 - `mode`：`main` 表示 MainAgent 角色，`subagent` 表示 SubAgent。为空或其他值时按 `main` 处理；`sub_agent` 和 `sub` 也可作为 SubAgent 别名。只有当委派角色能看到至少一个 `subagent` 角色时，`delegate` 工具才会注册；因此没有任何 subagent 定义的配置根本不存在委派面，这通常就是 `delegate` 看起来消失的原因。
 - `model_pools`：可选的有序池名列表，用于限制该 agent 可使用的池。池定义位于 `config.yaml` 顶层 `model_pools`；省略时，该 agent 可使用所有顶层池并按池名排序。`openai/gpt-5.5@high` 这类 inline variant 写在池定义中。
 - `variant`：model ref 未写 `@variant` 时的默认 variant。

@@ -29,18 +29,17 @@ func (taskTestCreator) CreateSubAgent(ctx context.Context, description, agentTyp
 }
 
 func (taskTestCreator) AvailableSubAgents() []AgentInfo {
-	return []AgentInfo{{Name: "builder", Description: "General coding", Capabilities: []string{"edit", "test"}, PreferredTasks: []string{"feature", "bugfix"}, WriteMode: "write", DelegationPolicy: "leaf_preferred"}}
+	return []AgentInfo{{Name: "builder", Description: "General coding"}}
 }
 
-func TestDelegateToolParametersExposeIdentityScopeAndAgentMetadata(t *testing.T) {
+func TestDelegateToolParametersExposeIdentityAndScopeMetadata(t *testing.T) {
 	params := NewDelegateTool(taskTestCreator{}).Parameters()
 	text := fmt.Sprint(params)
 	for _, want := range []string{
 		"plan_task_ref",
 		"semantic_task_key",
 		"expected_write_scope",
-		"capabilities=edit,test",
-		"delegation_policy=leaf_preferred",
+		"non_empty_scope=required",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("Parameters() missing %q in %s", want, text)

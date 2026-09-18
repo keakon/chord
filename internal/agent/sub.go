@@ -1391,9 +1391,9 @@ func (s *SubAgent) delegationPromptBlock(visible map[string]struct{}) string {
 	sb.WriteString("- If you need to finish early, explicitly stop the child task first; do not assume a later ancestor will clean it up for you.\n")
 	sb.WriteString("- Use child control tools only for your own direct children.\n")
 	// The child role catalogue is not re-listed here: the delegate tool's
-	// agent_type parameter (name, description, capabilities, preferred tasks,
-	// write_mode, delegation_policy, filtered to this role's allowed targets)
-	// is the single source for which child agent types exist.
+	// agent_type parameter (name, description, empty-scope rule, filtered to
+	// this role's allowed targets) is the single source for which child
+	// agent types exist.
 	return strings.TrimSpace(sb.String())
 }
 

@@ -4,6 +4,10 @@
 
 ## 未发布
 
+### 不兼容变更
+
+- Agent 定义不再读取 `capabilities`、`preferred_tasks`、`write_mode`、`delegation_policy`。这些键从未被强制执行，只是 Delegate 选人列表上的标签。选人意图写进 `description`。角色能不能写文件仍由 `permission` 决定，Delegate 仍会在每个可选项上标 `empty_scope=allowed` 或 `non_empty_scope=required`。现有 agent 文件里残留的这些键会被忽略。
+
 ### 新功能
 
 - headless 控制面新增三个可订阅推送：`session_switched` 在进程不重启、直接换会话时（执行 handoff plan、`/resume <id>`、`/new`）广播新的 `session_id`，`status_response.session_id` 也改成跟当前实际会话，不再停在启动快照上；`background_result` 推送后台任务结束后的持久结果（`target_agent_id`、`message_index`、`content`），回合 `idle` 之后才落盘的 JOB RESULT 输出只走这个通道；`context_notice` 转发持久的上下文压力提醒（`level`、`message`、`message_index`），这类提醒在 headless 没有别的通道。

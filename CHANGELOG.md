@@ -4,6 +4,10 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
+### Breaking Changes
+
+- Agent definitions no longer read `capabilities`, `preferred_tasks`, `write_mode`, or `delegation_policy`. Those keys were never enforced: they only appeared as labels on Delegate's agent-type list. Put routing intent in `description`. Whether a role may write files is still decided by `permission`, and Delegate still marks each choice with `empty_scope=allowed` or `non_empty_scope=required`. Leftover keys in existing agent files are ignored.
+
 ### Features
 
 - Headless control-plane clients can now subscribe to three more push events: `session_switched` announces an in-band session change (handoff plan execution, `/resume <id>`, `/new`) with the new `session_id`, and `status_response.session_id` now tracks that active session instead of staying on the startup snapshot; `background_result` delivers a finished background job's durable result (`target_agent_id`, `message_index`, `content`), the only channel for JOB RESULT output that lands after the turn is idle; `context_notice` forwards durable context-pressure warnings (`level`, `message`, `message_index`) that have no other headless channel.

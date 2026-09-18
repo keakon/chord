@@ -35,21 +35,17 @@ type AgentConfig struct {
 	Models map[string][]string `json:"models,omitempty" yaml:"models,omitempty"`
 	// ModelPools is the user-facing agent configuration: an ordered list of pool names
 	// to look up in config.yaml's top-level model_pools.
-	ModelPools       []string         `json:"model_pools,omitempty" yaml:"model_pools,omitempty"`
-	Temperature      float64          `json:"temperature" yaml:"temperature"`
-	MaxTokens        int              `json:"max_tokens" yaml:"max_tokens"`
-	Variant          string           `json:"variant,omitempty" yaml:"variant,omitempty"`
-	Color            string           `json:"color,omitempty" yaml:"color,omitempty"`
-	Capabilities     []string         `json:"capabilities,omitempty" yaml:"capabilities,omitempty"`
-	PreferredTasks   []string         `json:"preferred_tasks,omitempty" yaml:"preferred_tasks,omitempty"`
-	WriteMode        string           `json:"write_mode,omitempty" yaml:"write_mode,omitempty"`
-	DelegationPolicy string           `json:"delegation_policy,omitempty" yaml:"delegation_policy,omitempty"`
-	Permission       yaml.Node        `json:"-" yaml:"permission"`
-	MCP              MCPConfig        `json:"mcp,omitempty" yaml:"mcp,omitempty"`
-	Delegation       DelegationConfig `json:"delegation" yaml:"delegation,omitempty"`
-	Prompt           string           `json:"-" yaml:"prompt,omitempty"`
-	PromptAlt        string           `json:"-" yaml:"system_prompt,omitempty"`
-	SystemPrompt     string           `json:"-" yaml:"-"`
+	ModelPools   []string         `json:"model_pools,omitempty" yaml:"model_pools,omitempty"`
+	Temperature  float64          `json:"temperature" yaml:"temperature"`
+	MaxTokens    int              `json:"max_tokens" yaml:"max_tokens"`
+	Variant      string           `json:"variant,omitempty" yaml:"variant,omitempty"`
+	Color        string           `json:"color,omitempty" yaml:"color,omitempty"`
+	Permission   yaml.Node        `json:"-" yaml:"permission"`
+	MCP          MCPConfig        `json:"mcp,omitempty" yaml:"mcp,omitempty"`
+	Delegation   DelegationConfig `json:"delegation" yaml:"delegation,omitempty"`
+	Prompt       string           `json:"-" yaml:"prompt,omitempty"`
+	PromptAlt    string           `json:"-" yaml:"system_prompt,omitempty"`
+	SystemPrompt string           `json:"-" yaml:"-"`
 	// PromptPreset selects a built-in role prompt block by capability instead of
 	// by agent name, so a role named anything can reuse the planning prompt and
 	// a role named "planner" can opt out of it. Empty means no built-in role

@@ -156,10 +156,6 @@ func newAgentPermissionDocumentFromBase(base *AgentConfig, rule permission.Rule)
 	appendStringSequenceField(mapping, "model_pools", base.ModelPools)
 	appendScalarField(mapping, "variant", strings.TrimSpace(base.Variant))
 	appendScalarField(mapping, "color", strings.TrimSpace(base.Color))
-	appendStringSequenceField(mapping, "capabilities", base.Capabilities)
-	appendStringSequenceField(mapping, "preferred_tasks", base.PreferredTasks)
-	appendScalarField(mapping, "write_mode", strings.TrimSpace(base.WriteMode))
-	appendScalarField(mapping, "delegation_policy", strings.TrimSpace(base.DelegationPolicy))
 	if base.Permission.Kind != 0 {
 		mapping.Content = append(mapping.Content, scalarNode("permission"), cloneYAMLNode(&base.Permission))
 	}

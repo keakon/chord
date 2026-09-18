@@ -10,12 +10,8 @@ import (
 
 // AgentInfo holds the name and description of an available SubAgent type.
 type AgentInfo struct {
-	Name             string
-	Description      string
-	Capabilities     []string
-	PreferredTasks   []string
-	WriteMode        string
-	DelegationPolicy string
+	Name        string
+	Description string
 }
 
 // WriteScope declares the paths a delegated task expects to modify. Whether
@@ -180,33 +176,17 @@ func (t *DelegateTool) Parameters() map[string]any {
 			sb.WriteString(": ")
 			sb.WriteString(a.Description)
 		}
-		meta := make([]string, 0, 5)
-		if len(a.Capabilities) > 0 {
-			meta = append(meta, "capabilities="+strings.Join(a.Capabilities, ","))
-		}
-		if len(a.PreferredTasks) > 0 {
-			meta = append(meta, "preferred="+strings.Join(a.PreferredTasks, ","))
-		}
-		if a.WriteMode != "" {
-			meta = append(meta, "write_mode="+a.WriteMode)
-		}
-		if a.DelegationPolicy != "" {
-			meta = append(meta, "delegation_policy="+a.DelegationPolicy)
-		}
 		// Every row states the role's empty-scope rule so the model does not
 		// need to read the expected_write_scope prose to pick a role. A role
 		// that registers no file-writing tools accepts an empty scope; a
 		// write-capable role requires a non-empty declaration.
+		sb.WriteString(" [")
 		if delegateTargetRoleRegistersNoFileWriteTools(t.creator, a.Name) {
-			meta = append(meta, "empty_scope=allowed")
+			sb.WriteString("empty_scope=allowed")
 		} else {
-			meta = append(meta, "non_empty_scope=required")
+			sb.WriteString("non_empty_scope=required")
 		}
-		if len(meta) > 0 {
-			sb.WriteString(" [")
-			sb.WriteString(strings.Join(meta, "; "))
-			sb.WriteString("]")
-		}
+		sb.WriteByte(']')
 		sb.WriteByte('\n')
 	}
 

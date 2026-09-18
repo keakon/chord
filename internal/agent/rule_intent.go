@@ -131,8 +131,6 @@ func (a *MainAgent) snapshotAgentConfigByName(roleName string) *config.AgentConf
 	}
 	cfg := *src
 	cfg.ModelPools = append([]string(nil), src.ModelPools...)
-	cfg.Capabilities = append([]string(nil), src.Capabilities...)
-	cfg.PreferredTasks = append([]string(nil), src.PreferredTasks...)
 	return &cfg
 }
 

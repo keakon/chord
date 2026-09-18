@@ -50,11 +50,10 @@ func (a *MainAgent) subAgentWorkflowPromptBlock() string {
 	}
 	delegate := toolPromptName(tools.NameDelegate)
 	var sb strings.Builder
-	// The delegate-able role catalogue (name, description, capabilities,
-	// preferred tasks, write_mode, delegation_policy) is rendered once by the
-	// Delegate tool's agent_type parameter description, which ships with the
-	// tool schema on every request where delegation is visible; it is not
-	// duplicated as a prompt list here.
+	// The delegate-able role catalogue (name, description, empty-scope rule)
+	// is rendered once by the Delegate tool's agent_type parameter
+	// description, which ships with the tool schema on every request where
+	// delegation is visible; it is not duplicated as a prompt list here.
 	sb.WriteString("## SubAgent Workflow\n")
 	sb.WriteString("- The ")
 	sb.WriteString(delegate)

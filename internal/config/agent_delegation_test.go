@@ -66,6 +66,35 @@ prompt: |
 	}
 }
 
+func TestLoadAgentConfigIgnoresRetiredRoutingAnnotations(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "worker.yaml")
+	content := `name: worker
+mode: subagent
+model_pools: [default]
+capabilities: [edit, test]
+preferred_tasks: [feature, bugfix]
+write_mode: write
+delegation_policy: leaf_preferred
+prompt: |
+  You are a YAML-defined worker.
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	cfg, err := LoadAgentConfig(path)
+	if err != nil {
+		t.Fatalf("LoadAgentConfig: %v", err)
+	}
+	if cfg.Name != "worker" {
+		t.Fatalf("Name = %q, want worker", cfg.Name)
+	}
+	if got := cfg.SystemPrompt; got != "You are a YAML-defined worker." {
+		t.Fatalf("SystemPrompt = %q, want YAML prompt body", got)
+	}
+}
+
 func TestLoadAgentConfigParsesPlainYAMLSystemPromptField(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "worker.yml")

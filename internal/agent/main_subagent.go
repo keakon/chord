@@ -1356,12 +1356,8 @@ func (a *MainAgent) availableSubAgentInfosForRuleset(ruleset permission.Ruleset,
 	infos := make([]tools.AgentInfo, 0, len(agents))
 	for _, ac := range agents {
 		infos = append(infos, tools.AgentInfo{
-			Name:             ac.Name,
-			Description:      ac.Description,
-			Capabilities:     append([]string(nil), ac.Capabilities...),
-			PreferredTasks:   append([]string(nil), ac.PreferredTasks...),
-			WriteMode:        strings.TrimSpace(ac.WriteMode),
-			DelegationPolicy: strings.TrimSpace(ac.DelegationPolicy),
+			Name:        ac.Name,
+			Description: ac.Description,
 		})
 	}
 	return infos
