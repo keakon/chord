@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"encoding/json"
 	"strings"
 	"unicode/utf8"
 
@@ -79,13 +80,42 @@ func BoundedSummary(idx *MemoryIndex) (string, bool) {
 	if out == "" {
 		return "", false
 	}
-	if len(out) > maxSummaryBytes {
-		out = boundedPrefixUTF8(out, maxSummaryBytes)
+	// The cap polices the bytes actually injected, and the reminder carries the
+	// summary JSON-escaped (see renderMemoryReminder): `"`, `\`, and the
+	// HTML-sensitive `<`, `>`, `&` each expand to a six-byte \uXXXX escape, so a
+	// summary dense in them would otherwise inject several times the cap.
+	if escapedWireLen(out) > maxSummaryBytes {
+		out = boundedEscapedPrefix(out, maxSummaryBytes)
 	}
 	if strings.TrimSpace(out) == "" {
 		return "", false
 	}
 	return out, true
+}
+
+// escapedWireLen is the byte length of s once the reminder JSON-serializes it,
+// quotes included.
+func escapedWireLen(s string) int {
+	encoded, err := json.Marshal(s)
+	if err != nil {
+		return len(s)
+	}
+	return len(encoded)
+}
+
+// boundedEscapedPrefix returns the longest UTF-8-safe prefix of s whose escaped
+// wire form fits byteLimit.
+func boundedEscapedPrefix(s string, byteLimit int) string {
+	lo, hi := 0, len(s)
+	for lo < hi {
+		mid := (lo + hi + 1) / 2
+		if escapedWireLen(boundedPrefixUTF8(s, mid)) <= byteLimit {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
+	}
+	return strings.TrimSpace(boundedPrefixUTF8(s, lo))
 }
 
 // renderManagedLines renders managed index entries as "- [id](link)\n  — summary",
