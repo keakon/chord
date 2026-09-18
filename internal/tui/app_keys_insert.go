@@ -284,7 +284,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 				return m.enqueueToast("Empty command after !", "warn")
 			}
 			wd, _ := os.Getwd()
-			return tea.Batch(shellBangCmd(wd, userLine, cmdStr, m.focusedAgentID, shellID), m.startAnimTick())
+			return tea.Batch(shellBangCmd(wd, userLine, cmdStr, m.focusedAgentID, shellID, m.sessionTranscriptEpoch), m.startAnimTick())
 		}
 
 		inlineParts := m.input.ContentParts()

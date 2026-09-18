@@ -49,7 +49,7 @@ func TestBackgroundResultAppendedEventAppendsDurableStatusBlock(t *testing.T) {
 
 	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("builder-2", "subagent-1", "[Background job job-1 finished]\n\nDescription: Run production build\nStatus: completed (exit code 0)")})
 
-	block, ok := m.viewport.FindStatusBlockByBackgroundObject("job-1")
+	block, ok := m.viewport.FindStatusBlockByBackgroundObject("subagent-1")
 	if !ok {
 		t.Fatal("expected durable status block for background object result")
 	}
@@ -84,7 +84,7 @@ func TestBackgroundResultAppendedEventRendersFailureInBodyUnderStableLabel(t *te
 
 	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("", "subagent-2", "[Background job job-1 finished]\n\nDescription: Start integration service\nStatus: killed (timed out after 120s)\n\nRelevant output:\nINFO: Application startup complete.")})
 
-	block, ok := m.viewport.FindStatusBlockByBackgroundObject("job-1")
+	block, ok := m.viewport.FindStatusBlockByBackgroundObject("subagent-2")
 	if !ok {
 		t.Fatal("expected background result block")
 	}
@@ -130,7 +130,7 @@ func TestBackgroundResultAppendedEventShowsCompactDurationButCopiesOriginalNote(
 	raw := "[Background job job-duration finished]\n\nDescription: Run tests\nStatus: completed (exit code 0)\n\nRelevant output:\nok\n(command took 17.1s)"
 	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("", "subagent-3", raw)})
 
-	block, ok := m.viewport.FindStatusBlockByBackgroundObject("job-duration")
+	block, ok := m.viewport.FindStatusBlockByBackgroundObject("subagent-3")
 	if !ok {
 		t.Fatal("expected background result block")
 	}
@@ -154,7 +154,7 @@ func TestBackgroundResultAppendedEventHighlightsMarkdownOutputFence(t *testing.T
 	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("", "subagent-4", "[Background job job-2 finished]\n\nDescription: Apply patch\nStatus: completed (exit code 0)\n\nRelevant output:\n"+
 		"```diff\n--- a/main.go\n+++ b/main.go\n@@ -1 +1 @@\n-old\n+new\n```")})
 
-	block, ok := m.viewport.FindStatusBlockByBackgroundObject("job-2")
+	block, ok := m.viewport.FindStatusBlockByBackgroundObject("subagent-4")
 	if !ok {
 		t.Fatal("expected background result block")
 	}
@@ -196,11 +196,13 @@ func TestMessagesToBlocksRestoresBackgroundResultCard(t *testing.T) {
 
 func TestBackgroundResultAppendedEventUpdatesExistingDurableStatusBlock(t *testing.T) {
 	m := NewModelWithSize(nil, 120, 30)
-	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockStatus, Content: "old", BackgroundObjectID: "job-7", AgentID: "builder-2"})
+	// The existing card was created by an earlier delivery of the same durable
+	// mailbox row, so it is keyed by that row's message id.
+	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockStatus, Content: "old", BackgroundObjectID: "mb-row-7", AgentID: "builder-2"})
 
-	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("builder-2", "subagent-5", "[Background job job-7 finished]\n\nDescription: Run backend tests\nStatus: completed (exit code 0)")})
+	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("builder-2", "mb-row-7", "[Background job job-7 finished]\n\nDescription: Run backend tests\nStatus: completed (exit code 0)")})
 
-	block, ok := m.viewport.FindStatusBlockByBackgroundObject("job-7")
+	block, ok := m.viewport.FindStatusBlockByBackgroundObject("mb-row-7")
 	if !ok {
 		t.Fatal("expected durable background status block to still exist")
 	}
@@ -209,13 +211,33 @@ func TestBackgroundResultAppendedEventUpdatesExistingDurableStatusBlock(t *testi
 	}
 }
 
+// The per-process job id restarts at job-1 after a restart, so a resumed
+// session's new job-1 must not overwrite the restored card of the previous
+// run's job-1: the durable mailbox row identity, not the headline id, decides
+// whether a re-delivery updates an existing card.
+func TestBackgroundResultAppendedEventDoesNotOverwriteRestoredCardWithReusedJobID(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 30)
+	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockStatus, StatusTitle: backgroundResultCardTitle, Content: "✓ job-1 · Run production build (previous run)", BackgroundObjectID: "mb-old", AgentID: "", Collapsed: true})
+
+	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("main", "mb-new", "[Background job job-1 finished]\n\nDescription: Run production build\nStatus: completed (exit code 0)")})
+
+	old, ok := m.viewport.FindStatusBlockByBackgroundObject("mb-old")
+	if !ok || !strings.Contains(old.Content, "previous run") {
+		t.Fatalf("restored previous-run card = (%#v, %v), want it intact", old, ok)
+	}
+	fresh, ok := m.viewport.FindStatusBlockByBackgroundObject("mb-new")
+	if !ok || !strings.Contains(fresh.Content, "Run production build") {
+		t.Fatalf("new-process result card = (%#v, %v), want its own card", fresh, ok)
+	}
+}
+
 func TestBackgroundResultAppendedEventForMainAgentVisibleInMainView(t *testing.T) {
 	m := NewModelWithSize(nil, 120, 30)
 	m.viewport.SetFilter("main")
 
-	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("main", "subagent-6", "[Background job job-3 finished]\n\nDescription: Run integration tests\nStatus: completed (exit code 0)")})
+	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("main", "mb-main-3", "[Background job job-3 finished]\n\nDescription: Run integration tests\nStatus: completed (exit code 0)")})
 
-	block, ok := m.viewport.FindStatusBlockByBackgroundObject("job-3")
+	block, ok := m.viewport.FindStatusBlockByBackgroundObject("mb-main-3")
 	if !ok {
 		t.Fatal("expected durable status block for main-agent background result")
 	}
@@ -224,7 +246,7 @@ func TestBackgroundResultAppendedEventForMainAgentVisibleInMainView(t *testing.T
 	}
 	visible := false
 	for _, b := range m.viewport.visibleBlocks() {
-		if b != nil && b.BackgroundObjectID == "job-3" {
+		if b != nil && b.BackgroundObjectID == "mb-main-3" {
 			visible = true
 			break
 		}
@@ -251,7 +273,7 @@ func TestBackgroundResultAppendedEventRemovesQueuedMailboxEntry(t *testing.T) {
 	if got := len(m.mailboxQueue); got != 0 {
 		t.Fatalf("len(mailboxQueue) = %d, want the delivered result removed from the pending area", got)
 	}
-	if _, ok := m.viewport.FindStatusBlockByBackgroundObject("job-4"); !ok {
+	if _, ok := m.viewport.FindStatusBlockByBackgroundObject("subagent-7"); !ok {
 		t.Fatal("expected the delivered background result card")
 	}
 }
@@ -315,7 +337,7 @@ func TestBackgroundResultCardParsesPurposeAndCommand(t *testing.T) {
 		"Relevant output:\nok\n\nRead its output with job_output(job-9)."
 
 	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("main", "subagent-9", raw)})
-	block, ok := m.viewport.FindStatusBlockByBackgroundObject("job-9")
+	block, ok := m.viewport.FindStatusBlockByBackgroundObject("subagent-9")
 	if !ok {
 		t.Fatal("expected a background result card for job-9")
 	}
@@ -337,7 +359,7 @@ func TestBackgroundResultCardFoldsOutputAndExpandsOnToggle(t *testing.T) {
 	raw := "[Background job job-fold finished]\n\nDescription: Run folded tests\nStatus: completed (exit code 0)\n\nRelevant output:\nline one\nline two"
 
 	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("", "subagent-fold", raw)})
-	block, ok := m.viewport.FindStatusBlockByBackgroundObject("job-fold")
+	block, ok := m.viewport.FindStatusBlockByBackgroundObject("subagent-fold")
 	if !ok {
 		t.Fatal("expected background result block")
 	}

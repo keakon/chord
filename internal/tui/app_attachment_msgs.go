@@ -64,12 +64,16 @@ type shellBangResultMsg struct {
 	err      error
 	agentID  string
 	blockID  int // merged USER block to update
+	// transcriptEpoch is the viewport transcript epoch at launch. A different
+	// epoch at delivery means a session switch/restore replaced the transcript
+	// the command was started in, so the result belongs to no visible card.
+	transcriptEpoch uint64
 }
 
-func shellBangCmd(workDir, userLine, bashLine, agentID string, blockID int) tea.Cmd {
+func shellBangCmd(workDir, userLine, bashLine, agentID string, blockID int, transcriptEpoch uint64) tea.Cmd {
 	return func() tea.Msg {
 		out, err := tools.RunLocalShellCapture(context.Background(), workDir, bashLine)
-		return shellBangResultMsg{userLine: userLine, cmd: bashLine, output: out, err: err, agentID: agentID, blockID: blockID}
+		return shellBangResultMsg{userLine: userLine, cmd: bashLine, output: out, err: err, agentID: agentID, blockID: blockID, transcriptEpoch: transcriptEpoch}
 	}
 }
 

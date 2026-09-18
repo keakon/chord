@@ -21,7 +21,9 @@ func TestBackgroundResultAppendedEventUpdatesExistingSpilledStatusBlockAndRecomp
 	m.viewport.maxHotBytes = 1024
 
 	// Add enough content after the status card to force it off-screen and spilled.
-	status := &Block{ID: 1, Type: BlockStatus, Content: "old", BackgroundObjectID: "job-7", AgentID: "builder-2"}
+	// The card is keyed by the durable mailbox row id, matching what a previous
+	// delivery of the same row created.
+	status := &Block{ID: 1, Type: BlockStatus, Content: "old", BackgroundObjectID: "subagent-8", AgentID: "builder-2"}
 	m.viewport.AppendBlock(status)
 	for i := range 8 {
 		m.viewport.AppendBlock(&Block{ID: 2 + i, Type: BlockAssistant, Content: strings.Repeat("tail ", 40)})
@@ -38,7 +40,7 @@ func TestBackgroundResultAppendedEventUpdatesExistingSpilledStatusBlockAndRecomp
 		_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("builder-2", "subagent-8", msg)})
 	}
 
-	block, ok := m.viewport.FindStatusBlockByBackgroundObject("job-7")
+	block, ok := m.viewport.FindStatusBlockByBackgroundObject("subagent-8")
 	if !ok {
 		t.Fatal("expected durable background status block to still exist")
 	}

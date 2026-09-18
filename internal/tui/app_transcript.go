@@ -106,6 +106,9 @@ func (m *Model) rebuildViewportFromMessagesPreservingActivity(reason string, pre
 	if m.agent == nil {
 		return
 	}
+	// Capture before any rebuild work: rebuildBlocksFromMessages aligns
+	// viewportBlockEpoch, so the same-session check must run first.
+	preservedShellBlocks := m.viewportOnlyUserLocalShellBlocks()
 	rebuildStarted := time.Now()
 	m.cancelClipboardAttachmentPaste()
 	m.finalizeTurn()
@@ -153,6 +156,7 @@ func (m *Model) rebuildViewportFromMessagesPreservingActivity(reason string, pre
 		// The viewport is now empty, so it belongs to the current epoch: a later
 		// rebuild in this session must be able to adopt again.
 		m.viewportBlockEpoch = m.sessionTranscriptEpoch
+		m.appendViewportOnlyLiveBlocks(preservedShellBlocks)
 		replaceDuration := time.Since(replaceStarted)
 		recalcStarted := time.Now()
 		m.recalcViewportSize()
@@ -182,6 +186,7 @@ func (m *Model) rebuildViewportFromMessagesPreservingActivity(reason string, pre
 	replaceStarted := time.Now()
 	m.viewport.ReplaceBlocks(blocks)
 	m.rebindLiveViewportBlocks()
+	m.appendViewportOnlyLiveBlocks(preservedShellBlocks)
 	m.revalidateFocusedBlock()
 	recalcStarted := time.Now()
 	m.recalcViewportSize() // ensure viewport uses current layout width so background blocks align
@@ -523,6 +528,12 @@ func preserveRebuiltBlockState(src, dst *Block) {
 		dst.SettledAt = src.SettledAt
 	default:
 		copyMutableBlockViewState(dst, src)
+		// A rebuilt card is derived from a committed message, so it is never
+		// streaming. The live card it replaces can still carry Streaming=true
+		// when this rebuild captured the messages before the stream's end event
+		// was processed; no stream state survives the rebuild to clear the bit,
+		// so copying it would leave the card stuck mid-stream forever.
+		dst.Streaming = false
 	}
 }
 
@@ -730,17 +741,18 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 		switch msg.Role {
 		case "user":
 			if msg.Kind == message.KindBackgroundResult {
-				content, backgroundID := formatBackgroundResultCardContent(msg.Content, "", "", "", "")
+				content, headlineID := formatBackgroundResultCardContent(msg.Content, "", "", "", "")
+				backgroundID := headlineID
 				mailboxMessageID := ""
 				if msg.Mailbox != nil {
 					mailboxMessageID = strings.TrimSpace(msg.Mailbox.MessageID)
-				}
-				if backgroundID == "" {
-					// Same fallback the live event path applies: re-delivery of
-					// this result after a rebuild looks the card up by the
-					// durable message identity, so the restored card must
-					// carry it too.
-					backgroundID = mailboxMessageID
+					if mailboxMessageID != "" {
+						// Same key the live event path applies: the durable row
+						// identity, so rebuild adoption and re-delivery match
+						// even when a later process reuses the per-process
+						// job-N id for a different job.
+						backgroundID = mailboxMessageID
+					}
 				}
 				blocks = append(blocks, &Block{
 					ID:                    *nextID,

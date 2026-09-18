@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "github.com/keakon/bubbletea/v2"
+	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/agent"
 )
@@ -141,6 +142,17 @@ func (m *Model) handleStreamFlushTick(msg streamFlushTickMsg) tea.Cmd {
 }
 
 func (m *Model) handleShellBangResult(msg shellBangResultMsg) tea.Cmd {
+	if m == nil {
+		return nil
+	}
+	if msg.transcriptEpoch != m.sessionTranscriptEpoch {
+		// The command ran in a transcript the viewport no longer holds: a
+		// session switch replaced the visible cards, so there is nothing to
+		// update and appending the output would inject it into the new
+		// session's context.
+		log.Infof("dropping local shell result from a replaced session transcript block_id=%v cmd=%q", msg.blockID, msg.cmd)
+		return nil
+	}
 	resultText := msg.output
 	if msg.err != nil {
 		if resultText != "" {

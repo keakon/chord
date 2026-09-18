@@ -239,13 +239,16 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		if agentID == "main" {
 			agentID = ""
 		}
-		content, backgroundID := formatBackgroundResultCardContent(evt.Message.Content, "", "", "", "")
-		if backgroundID == "" && evt.Message.Mailbox != nil {
-			// The result carries no job id in its headline. Fall back to the
-			// durable message identity so two different results with the same
-			// description are not merged into one card, while re-delivery of
-			// the same result still updates the existing card.
-			backgroundID = strings.TrimSpace(evt.Message.Mailbox.MessageID)
+		content, headlineID := formatBackgroundResultCardContent(evt.Message.Content, "", "", "", "")
+		backgroundID := headlineID
+		if evt.Message.Mailbox != nil {
+			// The durable mailbox row identity is the card key. Re-delivery of
+			// the same row still updates its card, while a new process reusing
+			// the per-process job-N id after a resume must not overwrite the
+			// restored card of a previous run's job with the same id.
+			if messageID := strings.TrimSpace(evt.Message.Mailbox.MessageID); messageID != "" {
+				backgroundID = messageID
+			}
 		}
 		if block, ok := m.findStatusBlockByBackgroundObject(backgroundID); ok {
 			block.Content = content

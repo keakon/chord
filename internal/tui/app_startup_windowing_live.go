@@ -30,6 +30,41 @@ func (m *Model) appendViewportBlock(block *Block) {
 	m.syncStartupDeferredTranscriptAfterViewportAppend()
 }
 
+// viewportOnlyUserLocalShellBlocks returns the running !command cards that
+// exist only in the viewport: a completed command persists a context message,
+// but the pending card has no durable counterpart until it finishes, so a full
+// rebuild from messages would otherwise drop it and leave the later result with
+// no card to update. Blocks are returned only while the viewport still holds
+// the current session's transcript; across a session switch they belong to the
+// outgoing session.
+func (m *Model) viewportOnlyUserLocalShellBlocks() []*Block {
+	if m == nil || m.viewport == nil || m.viewportBlockEpoch != m.sessionTranscriptEpoch {
+		return nil
+	}
+	var preserved []*Block
+	for _, block := range m.viewport.blocks {
+		if block != nil && block.IsUserLocalShell() && block.UserLocalShellPending {
+			preserved = append(preserved, block)
+		}
+	}
+	return preserved
+}
+
+// appendViewportOnlyLiveBlocks re-appends viewport-only live cards after a
+// rebuild replaced the transcript. The rebuilt cards were renumbered from one,
+// so each preserved card takes a fresh trailing sequence instead of keeping a
+// stale number that would collide with a rebuilt card.
+func (m *Model) appendViewportOnlyLiveBlocks(blocks []*Block) {
+	for _, block := range blocks {
+		if block == nil {
+			continue
+		}
+		block.DisplaySequence = 0
+		block.InvalidateCache()
+		m.appendViewportBlock(block)
+	}
+}
+
 func displaySequenceAgentKey(agentID string) string {
 	if agentID == "main" {
 		return ""

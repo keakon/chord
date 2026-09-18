@@ -243,14 +243,14 @@ func TestCompactionRebuildPreservesBackgroundResultCardState(t *testing.T) {
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 120, 24)
 	// The live card, as BackgroundResultAppendedEvent builds it: parsed
-	// headline content plus both durable identity fields.
+	// headline content plus the durable mailbox row identity as the card key.
 	m.viewport.AppendBlock(&Block{ID: 0, Type: BlockUser, Content: "first prompt"})
 	m.viewport.AppendBlock(&Block{
 		ID:                 1,
 		Type:               BlockStatus,
 		StatusTitle:        backgroundResultCardTitle,
 		Content:            "✓ job-1 · Run production build",
-		BackgroundObjectID: "job-1",
+		BackgroundObjectID: "mb-1",
 		MailboxMessageID:   "mb-1",
 		Collapsed:          true,
 	})
@@ -334,5 +334,34 @@ func TestCompactionRebuildPairsRepeatedUserCardsInOrder(t *testing.T) {
 	}
 	if blocks[1].ID != 1 || !blocks[1].Collapsed {
 		t.Fatalf("second repeated card: ID = %d collapsed = %v, want ID 1 folded", blocks[1].ID, blocks[1].Collapsed)
+	}
+}
+
+// A stream's end event can still be sitting in the event queue when a full
+// rebuild captures the committed message, so the live card it replaces may
+// still carry Streaming=true. If the committed content equals what that card
+// already streamed, identity adoption pairs the two; copying the flag would
+// then leave the rebuilt card streaming forever, because the rebuild drops the
+// stream state that could have settled it.
+func TestCompactionRebuildDoesNotAdoptStreamingFromLiveCard(t *testing.T) {
+	backend := &sessionControlAgent{}
+	m := NewModelWithSize(backend, 120, 24)
+	m.viewport.AppendBlock(&Block{ID: 7, Type: BlockAssistant, Content: "the final answer", Streaming: true})
+	m.nextBlockID = 8
+
+	backend.messages = []message.Message{
+		{Role: "assistant", Content: "the final answer"},
+	}
+	m.rebuildViewportFromMessagesWithReason("session_restored")
+
+	blocks := m.viewport.visibleBlocks()
+	if len(blocks) != 1 {
+		t.Fatalf("rebuilt card count = %d, want 1", len(blocks))
+	}
+	if blocks[0].ID != 7 {
+		t.Fatalf("rebuilt card ID = %d, want the adopted live card ID 7", blocks[0].ID)
+	}
+	if blocks[0].Streaming {
+		t.Fatal("a card rebuilt from a committed message must not stay Streaming")
 	}
 }
