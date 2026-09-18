@@ -26,9 +26,9 @@ var bugTriageAnalysisKeywords = []string{
 
 var bugTriageIssueKeywords = []string{
 	"bug", "bugs", "buggy", "regression", "regressions", "root cause", "root causes",
-	"failure", "failures", "error", "errors", "broken",
+	"failure", "failures", "fail", "fails", "failed", "failing", "error", "errors", "broken",
 	"wrong", "wrongly", "stale", "incorrect", "incorrectly", "mismatch", "mismatches", "mismatched",
-	"not work", "doesn't work", "cannot",
+	"not work", "not working", "stopped working", "doesn't work", "cannot",
 	"bug结论", "回归", "根因", "失败", "错误", "异常", "报错", "失效", "不工作", "不生效", "无法", "不能", "不对",
 }
 
