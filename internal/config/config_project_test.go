@@ -217,6 +217,7 @@ func TestMergeProjectConfigMergesProjectScopedKeysAndIgnoresGlobalOnlyKeys(t *te
     api_url: https://global.example/v1/responses
     response_header_timeout: 120
     stream_idle_timeout: 60
+    stream_total_timeout: 600
     websocket_handshake_timeout: 30
     models:
       gpt-global:
@@ -269,6 +270,7 @@ stream_retry_rounds: 0
   global:
     response_header_timeout: 180
     stream_idle_timeout: 90
+    stream_total_timeout: 900
     websocket_handshake_timeout: 45
     models:
       gpt-global:
@@ -402,6 +404,9 @@ keymap:
 	}
 	if got := mergedCfg.Providers["global"].StreamIdleTimeout; got != 90 {
 		t.Fatalf("merged provider stream_idle_timeout = %d, want 90", got)
+	}
+	if got := mergedCfg.Providers["global"].StreamTotalTimeout; got != 900 {
+		t.Fatalf("merged provider stream_total_timeout = %d, want 900", got)
 	}
 	if got := mergedCfg.Providers["global"].WebSocketHandshakeTimeout; got != 45 {
 		t.Fatalf("merged provider websocket_handshake_timeout = %d, want 45", got)

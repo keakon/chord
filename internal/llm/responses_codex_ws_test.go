@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -106,6 +107,58 @@ func TestNewResponsesWebsocketDialerUsesConfiguredHandshakeTimeout(t *testing.T)
 	}
 	if dialer.HandshakeTimeout != 12*time.Second {
 		t.Fatalf("HandshakeTimeout = %v, want 12s", dialer.HandshakeTimeout)
+	}
+}
+
+func TestCodexWSExecuteRequestUsesProviderTotalTimeout(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_, _, _ = conn.ReadMessage()
+		ticker := time.NewTicker(40 * time.Millisecond)
+		defer ticker.Stop()
+		for range ticker.C {
+			if err := conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"response.output_text.delta","delta":"x"}`)); err != nil {
+				return
+			}
+		}
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+
+	wsConn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer wsConn.Close()
+
+	provider := NewProviderConfig("test", config.ProviderConfig{
+		Type: config.ProviderTypeResponses,
+	}, nil)
+	provider.streamIdleTimeout = time.Second
+	provider.streamTotalTimeout = 120 * time.Millisecond
+	r := &ResponsesProvider{provider: provider, codexWSConn: wsConn}
+	env := codexWSResponseCreate{
+		Type:   "response.create",
+		Model:  "sample/test-model",
+		Stream: true,
+		Input:  []responsesInputItem{{Type: "message", Role: "user", Content: "hi"}},
+	}
+	_, _, err = r.codexWSExecuteRequestLocked(
+		context.Background(), "test-key", "sample/test-model", env, nil, false, time.Now(), true, nil, "", false,
+	)
+	timeout, ok := errors.AsType[*StreamTotalTimeoutError](err)
+	if !ok {
+		t.Fatalf("codexWSExecuteRequestLocked err = %v, want *StreamTotalTimeoutError", err)
+	}
+	if !timeout.Timeout() {
+		t.Fatal("StreamTotalTimeoutError must be a net.Error timeout so retry classification rotates keys")
 	}
 }
 

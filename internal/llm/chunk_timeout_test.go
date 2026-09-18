@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -58,6 +59,8 @@ func TestChunkTimeoutReaderTimerResetsOnEachDataRead(t *testing.T) {
 	}
 }
 
+// TestProviderChunkTimeoutReaderUsesFixedProviderIdleTimeout pins that the
+// provider idle override still wins over the parser's own phase timeouts.
 func TestProviderChunkTimeoutReaderUsesFixedProviderIdleTimeout(t *testing.T) {
 	p := NewProviderConfig("test", config.ProviderConfig{
 		Type:              config.ProviderTypeResponses,
@@ -74,6 +77,110 @@ func TestProviderChunkTimeoutReaderUsesFixedProviderIdleTimeout(t *testing.T) {
 	if cr.timeout != 3*time.Second {
 		t.Fatalf("slow phase timeout = %v, want fixed provider timeout 3s", cr.timeout)
 	}
+}
+
+// TestProviderChunkTimeoutReaderLeavesHealthyStreamUncappedByDefault pins the
+// documented default: a stream that keeps producing data is never cut off by
+// wall-clock time alone. Only stream_idle_timeout bounds it, and every arrival
+// resets that timer.
+func TestProviderChunkTimeoutReaderLeavesHealthyStreamUncappedByDefault(t *testing.T) {
+	p := NewProviderConfig("test", config.ProviderConfig{
+		Type: config.ProviderTypeResponses,
+	}, nil)
+	cancel := func() {}
+	cr := NewProviderChunkTimeoutReader(strings.NewReader("data"), p, DefaultChunkTimeout, cancel)
+	defer cr.Stop()
+
+	if cr.totalBudget != 0 {
+		t.Fatalf("total budget = %v, want 0 (uncapped) when stream_total_timeout is unset", cr.totalBudget)
+	}
+	if cr.totalTimer != nil {
+		t.Fatal("total timer armed for an uncapped stream")
+	}
+}
+
+// TestStreamTotalTimeoutBoundsSlowDrip pins the gap the idle timeout cannot
+// close: a stream that drips one byte just before each idle deadline resets
+// the idle timer every time, so without a wall-clock cap it never ends.
+// A steady drip must still be cut off once the budget elapses.
+func TestStreamTotalTimeoutBoundsSlowDrip(t *testing.T) {
+	p := NewProviderConfig("test", config.ProviderConfig{
+		Type:               config.ProviderTypeResponses,
+		StreamIdleTimeout:  1,
+		StreamTotalTimeout: 1,
+	}, nil)
+	// The timer goroutine fires the total budget, so the flag must be atomic.
+	var cancelled atomic.Bool
+	cancel := func() { cancelled.Store(true) }
+	// Drip faster than the idle timeout so only the total budget can fire.
+	cr := NewProviderChunkTimeoutReader(&dripReader{interval: 100 * time.Millisecond}, p, DefaultChunkTimeout, cancel)
+	defer cr.Stop()
+
+	buf := make([]byte, 64)
+	deadline := time.Now().Add(5 * time.Second)
+	var err error
+	for time.Now().Before(deadline) {
+		if _, err = cr.Read(buf); err != nil {
+			break
+		}
+	}
+	total, ok := errors.AsType[*StreamTotalTimeoutError](err)
+	if !ok {
+		t.Fatalf("read error = %v, want *StreamTotalTimeoutError", err)
+	}
+	if !cancelled.Load() {
+		t.Fatal("cancel was not called when the total budget fired")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) && !total.Timeout() {
+		t.Fatal("StreamTotalTimeoutError must be a net.Error timeout so retry classification rotates keys")
+	}
+}
+
+// TestStreamTotalTimeoutSurvivesCancelMasking pins that a total-budget fire is
+// reported as a timeout even when the cancelled underlying read surfaces
+// context.Canceled: classification looks at the error to decide whether to
+// rotate keys, and an opaque cancellation would be treated as a user abort.
+func TestStreamTotalTimeoutSurvivesCancelMasking(t *testing.T) {
+	// The timer goroutine fires the total budget, so the flag must be atomic.
+	var cancelled atomic.Bool
+	cancel := func() { cancelled.Store(true) }
+	cr := NewChunkTimeoutReader(&blockingReader{cancel: cancel}, time.Hour, cancel)
+	defer cr.Stop()
+	cr.SetTotalTimeout(50 * time.Millisecond)
+
+	_, err := cr.Read(make([]byte, 8))
+	if _, ok := errors.AsType[*StreamTotalTimeoutError](err); !ok {
+		t.Fatalf("read error = %v, want *StreamTotalTimeoutError (underlying read returns context.Canceled)", err)
+	}
+	if !cancelled.Load() {
+		t.Fatal("cancel was not called when the total budget fired")
+	}
+}
+
+// dripReader returns one byte per interval, forever — the slow-drip shape that
+// keeps an idle timer alive indefinitely.
+type dripReader struct {
+	interval time.Duration
+}
+
+func (r *dripReader) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	time.Sleep(r.interval)
+	p[0] = 'x'
+	return 1, nil
+}
+
+// blockingReader blocks until the total-budget timer cancels it, then reports
+// the cancellation, which is the masking case classification must survive.
+type blockingReader struct {
+	cancel func()
+}
+
+func (r *blockingReader) Read(_ []byte) (int, error) {
+	<-time.After(2 * time.Second)
+	return 0, context.Canceled
 }
 
 // slowChunkReader delivers chunks with simulated inter-chunk delays.

@@ -33,6 +33,19 @@ func (e *ChunkTimeoutError) Error() string {
 func (e *ChunkTimeoutError) Timeout() bool   { return true }
 func (e *ChunkTimeoutError) Temporary() bool { return true }
 
+// StreamTotalTimeoutError is the net.Error-compatible error returned when a
+// stream kept producing data but never finished inside its wall-clock budget.
+// It is the one shape the idle timeout cannot catch: every arrival resets the
+// idle timer, so a stream that drips a byte just before each deadline stays
+// alive forever. Classification treats it exactly like ChunkTimeoutError.
+type StreamTotalTimeoutError struct{ d time.Duration }
+
+func (e *StreamTotalTimeoutError) Error() string {
+	return "stream total timeout: still producing data after " + e.d.String()
+}
+func (e *StreamTotalTimeoutError) Timeout() bool   { return true }
+func (e *StreamTotalTimeoutError) Temporary() bool { return true }
+
 // chunkPhaser is the optional interface that SSE parsers use to adjust the
 // per-chunk timeout when entering or leaving a slow phase (thinking / tool_use).
 type chunkPhaser interface {
@@ -80,6 +93,15 @@ type ChunkTimeoutReader struct {
 	timeoutFiredAt      time.Time
 	timeoutReadReturned bool
 	timeoutReadBytes    int
+
+	// totalBudget is an optional wall-clock cap for the whole stream. Unlike
+	// the idle timer above it is never reset by incoming data, so it bounds the
+	// one shape the idle timeout cannot: a stream that drips data often enough
+	// to keep the idle timer alive but never finishes. Zero disables it — a
+	// long healthy stream is not a fault, so the default keeps no cap.
+	totalBudget   time.Duration
+	totalTimer    *time.Timer
+	totalTimedOut atomic.Bool
 }
 
 // NewChunkTimeoutReader wraps r with per-chunk deadline enforcement.
@@ -101,14 +123,38 @@ func NewChunkTimeoutReader(r io.Reader, initialTimeout time.Duration, cancel fun
 // shorten a provider-level timeout so completed content is not held hostage by
 // optional protocol trailers.
 func NewProviderChunkTimeoutReader(r io.Reader, provider *ProviderConfig, initialTimeout time.Duration, cancel func()) *ChunkTimeoutReader {
+	var cr *ChunkTimeoutReader
 	if provider != nil {
 		if d := provider.StreamIdleTimeout(); d > 0 {
-			cr := NewChunkTimeoutReader(r, d, cancel)
+			cr = NewChunkTimeoutReader(r, d, cancel)
 			cr.fixed = d
-			return cr
 		}
 	}
-	return NewChunkTimeoutReader(r, initialTimeout, cancel)
+	if cr == nil {
+		cr = NewChunkTimeoutReader(r, initialTimeout, cancel)
+	}
+	if provider != nil {
+		cr.SetTotalTimeout(provider.StreamTotalTimeout())
+	}
+	return cr
+}
+
+// SetTotalTimeout arms an optional wall-clock cap for the whole stream,
+// measured from the moment the reader is wrapped. It is deliberately not reset
+// by reads. A non-positive duration leaves the stream uncapped, which is the
+// default: a stream that keeps producing data is slow, not broken, and only an
+// operator who wants to bound that case opts in.
+func (cr *ChunkTimeoutReader) SetTotalTimeout(d time.Duration) {
+	cr.mu.Lock()
+	cr.totalBudget = d
+	if cr.totalTimer != nil {
+		cr.totalTimer.Stop()
+		cr.totalTimer = nil
+	}
+	if d > 0 {
+		cr.totalTimer = time.AfterFunc(d, cr.fireTotalTimeout)
+	}
+	cr.mu.Unlock()
 }
 
 func (cr *ChunkTimeoutReader) fireTimeout() {
@@ -119,14 +165,39 @@ func (cr *ChunkTimeoutReader) fireTimeout() {
 	cr.cancel()
 }
 
-func (cr *ChunkTimeoutReader) Read(p []byte) (int, error) {
+func (cr *ChunkTimeoutReader) fireTotalTimeout() {
+	cr.totalTimedOut.Store(true)
+	cr.cancel()
+}
+
+// streamError converts a timer-fired read into the error classification the
+// retry layer understands. Both timers cancel the request context, so the
+// underlying read surfaces context.Canceled unless this reports the real cause.
+func (cr *ChunkTimeoutReader) streamError() error {
+	if cr.totalTimedOut.Load() {
+		cr.mu.Lock()
+		d := cr.totalBudget
+		cr.mu.Unlock()
+		return &StreamTotalTimeoutError{d}
+	}
 	if cr.timedOut.Load() {
 		cr.mu.Lock()
 		d := cr.timeout
-		cr.timeoutReadReturned = true
-		cr.timeoutReadBytes = 0
 		cr.mu.Unlock()
-		return 0, &ChunkTimeoutError{d}
+		return &ChunkTimeoutError{d}
+	}
+	return nil
+}
+
+func (cr *ChunkTimeoutReader) Read(p []byte) (int, error) {
+	if err := cr.streamError(); err != nil {
+		if _, total := err.(*StreamTotalTimeoutError); !total {
+			cr.mu.Lock()
+			cr.timeoutReadReturned = true
+			cr.timeoutReadBytes = 0
+			cr.mu.Unlock()
+		}
+		return 0, err
 	}
 	n, err := cr.r.Read(p)
 	now := time.Now()
@@ -146,12 +217,13 @@ func (cr *ChunkTimeoutReader) Read(p []byte) (int, error) {
 		cr.timeoutReadReturned = true
 		cr.timeoutReadBytes = n
 	}
-	d := cr.timeout
 	cr.mu.Unlock()
-	if err != nil && cr.timedOut.Load() {
-		// Timer fired concurrently; surface ChunkTimeoutError instead of
+	if err != nil {
+		// A timer fired concurrently; surface the timeout instead of
 		// context.Canceled so error classification can rotate keys.
-		return n, &ChunkTimeoutError{d}
+		if timeout := cr.streamError(); timeout != nil {
+			return n, timeout
+		}
 	}
 	if n > 0 {
 		cr.mu.Lock()
@@ -185,10 +257,14 @@ func (cr *ChunkTimeoutReader) SetTerminalDrainTimeout(d time.Duration) {
 	cr.mu.Unlock()
 }
 
-// Stop cancels the internal timer. Call on stream completion to avoid leaks.
+// Stop cancels both timers. Call on stream completion to avoid leaks.
 func (cr *ChunkTimeoutReader) Stop() {
 	cr.mu.Lock()
 	cr.timer.Stop()
+	if cr.totalTimer != nil {
+		cr.totalTimer.Stop()
+		cr.totalTimer = nil
+	}
 	cr.mu.Unlock()
 }
 

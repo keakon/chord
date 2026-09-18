@@ -784,11 +784,13 @@ providers:
   codex:
     response_header_timeout: 180
     stream_idle_timeout: 90
+    stream_total_timeout: 1800
     websocket_handshake_timeout: 45
 ```
 
 - `response_header_timeout`：从开始流式 HTTP 请求到收到响应头的超时，包括连接建立与请求体上传。收到响应头后该计时器即停止，不限制健康流的总耗时；流式 chunk 之间的最大空闲时间由 `stream_idle_timeout` 控制。`0` 保持内置默认值。
 - `stream_idle_timeout`：流式模型数据的最大空闲等待时间。设置后会覆盖该 provider 的普通 SSE idle timeout 和慢阶段 idle timeout，也会用于 Codex Responses WebSocket 读等待。
+- `stream_total_timeout`：单条流的墙钟上限，单位秒，从响应体开始读取时计时。设置后也用于 Codex Responses WebSocket 读等待。`0` / 省略表示不设上限（默认）：持续产出数据的流只是慢、并非故障，只由 `stream_idle_timeout` 约束。设置它可以覆盖 idle 超时兜不住的那种形态——持续以足够频率滴数据从而不断重置 idle 计时器、但永不结束的流。超时后读取以超时错误结束，走正常的 key/model 重试路径。
 - `websocket_handshake_timeout`：Responses WebSocket 握手超时，主要用于启用了该 transport 的 provider，例如 `preset: codex` 且 `responses_websocket` 生效时。
 
 这些配置按 provider 生效，因此项目级 `.chord/config.yaml` 可以只覆盖某一个 provider 的超时，不影响其他 provider。它们不会改变底层固定连接默认值，例如 TCP dial 或 TLS handshake timeout。
@@ -1241,6 +1243,7 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `compress`    | string | 上游请求体的压缩编码：`gzip` 或 `zstd`；不设即关闭。只在压缩能缩小体积时生效。旧的布尔写法 `compress: true` 已删除——会被忽略并由 `chord doctor config` 报告（改成 `compress: gzip` 即可）。 |
 | `response_header_timeout` | int | 从开始该 provider 的流式 HTTP 请求到收到响应头的超时，单位秒，包括连接建立与请求体上传。`0` / 省略表示使用内置默认值；健康流由 `stream_idle_timeout` 约束，而不是总请求计时器。 |
 | `stream_idle_timeout` | int | 该 provider 的流式空闲超时，单位秒。`0` / 省略表示使用内置 SSE/WebSocket idle 默认值。 |
+| `stream_total_timeout` | int | 单条流的墙钟上限，单位秒，也包括 Codex Responses WebSocket 读等待。`0` / 省略表示不设上限——持续产出数据的流不会仅因耗时被截断。 |
 | `websocket_handshake_timeout` | int | Responses WebSocket 握手超时，单位秒。`0` / 省略表示使用内置默认值。 |
 | `parallel_tool_calls` | bool | `true` — provider 级 Responses / Chat Completions 工具并行默认值；模型和变体配置会覆盖它。 |
 | `compat.responses.*` | object | 协议默认值 — provider 级 Responses 可选字段开关：`send_store`、`send_reasoning_include`、`send_tool_choice`、`send_prompt_cache_key`、`send_max_output_tokens`、`mcp_additional_tools`。 |

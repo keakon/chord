@@ -379,6 +379,13 @@ func (r *ResponsesProvider) codexWSExecuteRequestLocked(
 
 	streamCtx, streamCancel := context.WithCancel(ctx)
 	defer streamCancel()
+	if r.provider != nil {
+		if d := r.provider.StreamTotalTimeout(); d > 0 {
+			var totalCancel context.CancelFunc
+			streamCtx, totalCancel = context.WithTimeoutCause(streamCtx, d, &StreamTotalTimeoutError{d})
+			defer totalCancel()
+		}
+	}
 
 	// Only emit "connecting" when establishing a new WebSocket; on a reused
 	// connection the write is immediate — skip the misleading state.
@@ -488,14 +495,14 @@ func (r *ResponsesProvider) codexWSReadResponseLocked(
 	for {
 		select {
 		case <-streamCtx.Done():
-			if err := streamCtx.Err(); err != nil {
-				return nil, nil, err
-			}
-			return nil, nil, context.Canceled
+			return nil, nil, websocketStreamContextError(streamCtx)
 		default:
 		}
 		msg, err := r.codexWSReadMessageWithIdleTimeoutLocked(streamCtx)
 		if err != nil {
+			if timeout, ok := errors.AsType[*StreamTotalTimeoutError](err); ok {
+				return nil, nil, timeout
+			}
 			return nil, nil, fmt.Errorf("reading websocket stream: %w", err)
 		}
 		if cb != nil {
@@ -620,13 +627,27 @@ func (r *ResponsesProvider) codexWSReadMessageWithIdleTimeoutLocked(streamCtx co
 
 	select {
 	case <-streamCtx.Done():
-		return nil, streamCtx.Err()
+		_ = r.codexWSConn.SetReadDeadline(time.Now())
+		return nil, websocketStreamContextError(streamCtx)
 	case <-timer.C:
 		_ = r.codexWSConn.SetReadDeadline(time.Now())
 		return nil, fmt.Errorf("idle timeout waiting for websocket message: no data from model for %s", idleTimeout)
 	case result := <-resultCh:
 		return result.msg, result.err
 	}
+}
+
+// websocketStreamContextError reports a cancelled WebSocket stream as the
+// timeout that caused it when one is recorded, so retry classification sees
+// StreamTotalTimeoutError instead of an opaque context.Canceled.
+func websocketStreamContextError(streamCtx context.Context) error {
+	if timeout, ok := errors.AsType[*StreamTotalTimeoutError](context.Cause(streamCtx)); ok {
+		return timeout
+	}
+	if err := streamCtx.Err(); err != nil {
+		return err
+	}
+	return context.Canceled
 }
 
 type codexWSCompleteOptions struct {

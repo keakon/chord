@@ -227,6 +227,7 @@ type ProviderConfig struct {
 	responsesWebsocket         *bool                        // provider-level Responses WebSocket preference; nil = preset default
 	responseHeaderTimeout      time.Duration                // provider HTTP response-header timeout; 0 means built-in default
 	streamIdleTimeout          time.Duration                // provider-level stream idle timeout; 0 means parser defaults
+	streamTotalTimeout         time.Duration                // provider-level wall-clock cap for one stream; 0 means no cap
 	websocketHandshakeTimeout  time.Duration                // provider-level Responses WebSocket handshake timeout; 0 means default
 	keyRotation                string                       // "on_failure" (default) | "per_request"
 	keyOrder                   string                       // "sequential" (default, non-Codex) | "random" | "smart" (Codex)
@@ -345,6 +346,7 @@ func NewProviderConfig(name string, cfg config.ProviderConfig, keys []string) *P
 		responsesWebsocket:         cfg.ResponsesWebsocket,
 		responseHeaderTimeout:      durationFromPositiveSecondsClamped(int64(cfg.ResponseHeaderTimeout), 0),
 		streamIdleTimeout:          durationFromPositiveSecondsClamped(int64(cfg.StreamIdleTimeout), 0),
+		streamTotalTimeout:         durationFromPositiveSecondsClamped(int64(cfg.StreamTotalTimeout), 0),
 		websocketHandshakeTimeout:  durationFromPositiveSecondsClamped(int64(cfg.WebSocketHandshakeTimeout), 0),
 		keyRotation:                keyRotation,
 		keyOrder:                   keyOrder,
@@ -891,6 +893,18 @@ func (p *ProviderConfig) ResponseHeaderTimeout() time.Duration {
 // StreamIdleTimeout returns the provider-level stream idle timeout override.
 func (p *ProviderConfig) StreamIdleTimeout() time.Duration {
 	return p.streamIdleTimeout
+}
+
+// StreamTotalTimeout returns the provider-level wall-clock cap for a single
+// stream, counted from when the HTTP body reader is wrapped or, for Codex
+// Responses WebSocket, when that request's read loop starts. Zero means no
+// cap: a stream that keeps producing data is never cut off by elapsed time
+// alone, which is the default because a long healthy stream is not a fault.
+// Set it to bound a stream that drips data indefinitely without ever
+// finishing — the one shape stream_idle_timeout cannot catch, since every
+// arrival resets the idle timer.
+func (p *ProviderConfig) StreamTotalTimeout() time.Duration {
+	return p.streamTotalTimeout
 }
 
 // WebSocketHandshakeTimeout returns the provider-level Responses WebSocket handshake timeout override.

@@ -872,11 +872,13 @@ providers:
   codex:
     response_header_timeout: 180
     stream_idle_timeout: 90
+    stream_total_timeout: 1800
     websocket_handshake_timeout: 45
 ```
 
 - `response_header_timeout`: timeout from starting a streaming HTTP request until response headers arrive, including connection setup and request-body upload. It stops once headers arrive and does not cap the total duration of a healthy stream; use `stream_idle_timeout` to bound gaps between streamed chunks. `0` keeps the built-in default.
 - `stream_idle_timeout`: maximum idle time between streamed model data. When set, it overrides both the normal SSE idle timeout and slow-phase idle timeout for that provider, and it also applies to Codex Responses WebSocket reads.
+- `stream_total_timeout`: wall-clock cap in seconds for one stream, counted from when the response body starts. When set, it also applies to Codex Responses WebSocket reads. `0` / omitted keeps the default of no cap: a stream that keeps producing data is slow, not broken, and is bounded by `stream_idle_timeout` alone. Set it to bound the one shape the idle timeout cannot catch — a stream that drips data often enough to reset the idle timer but never finishes. The read fails with a timeout error so the normal key/model retry path handles it.
 - `websocket_handshake_timeout`: Responses WebSocket handshake timeout for providers using that transport, mainly `preset: codex` with `responses_websocket` enabled.
 
 These settings are provider-scoped, so project-level `.chord/config.yaml` can override them for one provider without changing other providers. They do not change fixed low-level connection defaults such as dial or TLS handshake timeouts.
@@ -1397,6 +1399,7 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | `compress`     | string | Upstream request body compression encoding: `gzip` or `zstd`; unset = off. Applies only when compression shrinks the payload. The boolean `compress: true` form is gone — it is ignored and reported by `chord doctor config` (migrate to `compress: gzip`). |
 | `response_header_timeout` | int | Timeout in seconds from starting a streaming HTTP request until response headers arrive, including connection setup and request-body upload. `0` / omitted uses the built-in default; healthy streams are bounded by `stream_idle_timeout`, not a total request timer. |
 | `stream_idle_timeout` | int | Stream idle timeout in seconds for this provider. `0` / omitted uses built-in SSE/WebSocket idle defaults. |
+| `stream_total_timeout` | int | Wall-clock cap in seconds for one stream, including Codex Responses WebSocket reads. `0` / omitted applies no cap — a stream that keeps producing data is never cut off by elapsed time alone. |
 | `websocket_handshake_timeout` | int | Responses WebSocket handshake timeout in seconds. `0` / omitted uses the built-in default. |
 | `supported_service_tiers` | list | Provider-level default accepted non-standard tiers for its models, e.g. `[fast, slow]` or `[fast]`. Model entries can override it. |
 | `parallel_tool_calls` | bool | `true` — Provider-level default for Responses / Chat Completions tool parallelism; model and variant values override it. |
