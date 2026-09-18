@@ -291,6 +291,7 @@ func (a *MainAgent) resetSessionRuntimeState() {
 		a.emitLoopStateChanged()
 	}
 	a.ctxMgr.RestoreMessages(nil)
+	a.installContextNoticePresence(nil)
 	a.fileTrack = filelock.NewFileTracker()
 	a.clearEvidenceCandidates()
 	a.ctxMgr.RestoreStats(message.TokenUsage{})
@@ -408,6 +409,7 @@ func (a *MainAgent) editTailUserMessageInPlace(prefix []message.Message, forkMsg
 	}
 
 	a.ctxMgr.RestoreMessages(prefix)
+	a.installContextNoticePresence(prefix)
 	a.fileTrack = filelock.NewFileTracker()
 	a.restoreMainTrackedFileState(prefix)
 	a.resetRuntimeEvidenceFromMessages(prefix)
@@ -588,6 +590,7 @@ func (a *MainAgent) handleForkSessionCommand(msgIndex int) {
 	a.scheduleMemoryExtraction(oldSessionDir)
 
 	a.ctxMgr.RestoreMessages(prefix)
+	a.installContextNoticePresence(prefix)
 	// The forked session carries the copied history prefix: dynamic MCP
 	// mounts could be mis-anchored against it, so this run stays on
 	// top-level injection.

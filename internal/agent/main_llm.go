@@ -553,6 +553,7 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Me
 			a.requestBatches.rollback(a.sessionEpoch, requestBatch)
 		}
 	}()
+	messages = a.omitStaleContextNoticesFromRequest(messages)
 	messages = a.prepareMessagesForLLM(messages)
 	if repaired, dropped := message.RepairOrphanToolResults(messages); dropped > 0 {
 		log.Warnf("dropping orphan tool result messages before LLM request dropped=%v", dropped)

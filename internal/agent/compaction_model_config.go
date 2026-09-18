@@ -150,7 +150,7 @@ func (a *MainAgent) applyModelCompactionConfig() bool {
 		previousReminder := a.effectiveReminderPctForModelRef(previousModelRef, previousThreshold)
 		newReminder := a.effectiveReminderPctForModelRef(modelRef, newThreshold)
 		if newThreshold != previousThreshold || newReminder != previousReminder {
-			a.contextNoticesStale.Store(true)
+			a.armContextNoticeCleanup()
 		}
 	}
 	// A usage-driven request armed under the previous model's threshold may

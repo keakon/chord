@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
@@ -163,6 +164,48 @@ func TestQueueContextPressureReminderGates(t *testing.T) {
 	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
 	if a.pendingContextPressureReminder != contextPressureReminderShortText {
 		t.Fatalf("sticky reminder after delivery must re-queue the short text, got %q", a.pendingContextPressureReminder)
+	}
+}
+
+func TestQueueContextPressureReminderKeepsArmWhenReminderDisabled(t *testing.T) {
+	// A disabled reminder line means there is no pressure line to withdraw
+	// from: the usage-driven arm and grace must keep running so automatic
+	// compaction still starts at the threshold.
+	a := newTestMainAgent(t, t.TempDir())
+	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
+	a.ctxMgr.SetLastTotalContextTokens(100)
+	enableTestCompactContext(a)
+	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Reminder: config.CompactionReminderDisabled}}}
+	a.armUsageDrivenAutoCompactRequest()
+	a.pendingCompactionWarning = "queued warning"
+
+	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
+
+	if !a.autoCompactRequested.Load() {
+		t.Fatal("a disabled reminder line must not disarm the usage-driven compaction request")
+	}
+	if a.pendingContextPressureReminder != "" {
+		t.Fatalf("a disabled reminder must not queue an overlay, got %q", a.pendingContextPressureReminder)
+	}
+	if a.pendingCompactionWarning != "queued warning" {
+		t.Fatal("a disabled reminder line must not drop a queued compaction warning")
+	}
+	if a.contextNoticesStale.Load() {
+		t.Fatal("a disabled reminder line must not mark context notices stale")
+	}
+}
+
+func TestContextPressureBelowReminderLineDisabledLineIsNotBelow(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
+	a.ctxMgr.SetLastTotalContextTokens(100)
+	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Reminder: config.CompactionReminderDisabled}}}
+	if a.contextPressureBelowReminderLine(a.ctxMgr.AutoCompactDecision(), -1) {
+		t.Fatal("a disabled reminder line must not report below-line pressure")
+	}
+	a.globalConfig = &config.Config{}
+	if !a.contextPressureBelowReminderLine(a.ctxMgr.AutoCompactDecision(), -1) {
+		t.Fatal("usage far below the derived reminder line must report below-line pressure")
 	}
 }
 
@@ -689,4 +732,301 @@ func hasContextNotice(messages []message.Message) bool {
 		}
 	}
 	return false
+}
+
+func enableTestCompactContext(a *MainAgent) {
+	a.modelDrivenCompactionEnabled.Store(true)
+	a.tools.Register(tools.NewCompactContextTool(tools.CompactContextValidator{ContinuationStateMaxTokens: CompactContinuationStateMaxTokens}))
+}
+
+func TestQueueContextPressureReminderMarksNoticesStaleWhenUsageDrops(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
+	a.ctxMgr.SetLastTotalContextTokens(5000)
+	enableTestCompactContext(a)
+	a.armUsageDrivenAutoCompactRequest()
+	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
+	a.stashContextNotice(contextNoticePressure, a.pendingContextPressureReminder)
+	a.noteContextPressureReminderAttached()
+	a.markOverlayClaimsDelivered()
+
+	a.ctxMgr.SetLastTotalContextTokens(4000)
+	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
+	if a.pendingContextPressureReminder != "" {
+		t.Fatalf("usage below the line must stop the reminder, got %q", a.pendingContextPressureReminder)
+	}
+	if !a.contextNoticesStale.Load() {
+		t.Fatal("a delivered notice must be marked stale once usage drops below the reminder line")
+	}
+	if a.autoCompactRequested.Load() {
+		t.Fatal("a below-line queue must clear a stale usage-driven auto-compact request")
+	}
+}
+
+func TestQueueContextPressureReminderReCrossBeforeCleanupKeepsShortText(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
+	a.ctxMgr.SetLastTotalContextTokens(5000)
+	enableTestCompactContext(a)
+	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
+	a.stashContextNotice(contextNoticePressure, a.pendingContextPressureReminder)
+	a.noteContextPressureReminderAttached()
+	a.markOverlayClaimsDelivered()
+
+	a.ctxMgr.SetLastTotalContextTokens(4000)
+	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
+	if !a.contextNoticesStale.Load() {
+		t.Fatal("usage drop must mark the delivered notice stale")
+	}
+
+	a.pendingContextPressureReminder = ""
+	a.ctxMgr.SetLastTotalContextTokens(5000)
+	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
+	if a.pendingContextPressureReminder != contextPressureReminderShortText {
+		t.Fatalf("re-crossing before idle cleanup must keep the short text, got %q", a.pendingContextPressureReminder)
+	}
+	if a.contextNoticesStale.Load() {
+		t.Fatal("a same-window re-cross must cancel idle cleanup of an accurate notice")
+	}
+}
+
+func TestMaybeClearStaleContextNoticesResetsReminderDeliveryForRecross(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.installSessionTarget(t.TempDir())
+	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
+	a.ctxMgr.SetLastTotalContextTokens(5000)
+	enableTestCompactContext(a)
+
+	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
+	a.stashContextNotice(contextNoticePressure, a.pendingContextPressureReminder)
+	a.noteContextPressureReminderAttached()
+	a.markOverlayClaimsDelivered()
+	if !hasContextNotice(a.ctxMgr.Snapshot()) {
+		t.Fatal("first delivery must persist a context notice")
+	}
+
+	a.ctxMgr.SetLastTotalContextTokens(4000)
+	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
+	a.maybeClearStaleContextNotices()
+	if hasContextNotice(a.ctxMgr.Snapshot()) {
+		t.Fatal("idle cleanup must drop the leftover pressure notice")
+	}
+	waitForContextNoticeCleared(t, a)
+
+	a.overlayClaims.mu.Lock()
+	delivered := a.overlayClaims.reminder.delivered
+	ccCalled := a.overlayClaims.reminder.ccCalled
+	a.overlayClaims.mu.Unlock()
+	if delivered {
+		t.Fatal("idle cleanup must reset reminder delivery so a later re-cross can persist a new card")
+	}
+	if ccCalled {
+		t.Fatal("cleanup must not invent a compact_context call")
+	}
+
+	a.ctxMgr.SetLastTotalContextTokens(5000)
+	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
+	if got := a.pendingContextPressureReminder; got == "" || got == contextPressureReminderShortText {
+		t.Fatalf("re-crossing after cleanup must queue the full reminder, got %q", got)
+	}
+}
+
+func TestMaybeClearStaleContextNoticesKeepsCcCalledQuiet(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
+	a.ctxMgr.SetLastTotalContextTokens(5000)
+	enableTestCompactContext(a)
+	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
+	a.stashContextNotice(contextNoticePressure, "pressure")
+	a.noteContextPressureReminderAttached()
+	a.markOverlayClaimsDelivered()
+	a.markReminderCompactContextCalled()
+
+	a.ctxMgr.SetLastTotalContextTokens(4000)
+	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
+	a.maybeClearStaleContextNotices()
+
+	a.ctxMgr.SetLastTotalContextTokens(5000)
+	a.pendingContextPressureReminder = ""
+	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
+	if a.pendingContextPressureReminder != "" {
+		t.Fatalf("a compact_context call in the window must stay quiet after cleanup, got %q", a.pendingContextPressureReminder)
+	}
+}
+
+func TestOmitStaleContextNoticesFromRequestDropsCopyOnly(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	notice := message.Message{Role: message.RoleUser, Kind: message.KindContextNotice, Content: "stale pressure", NoticeLevel: contextNoticePressure}
+	kept := message.Message{Role: message.RoleUser, Content: "hello"}
+	a.ctxMgr.Append(notice)
+	a.ctxMgr.Append(kept)
+	snapshot := a.ctxMgr.Snapshot()
+
+	filtered := a.omitStaleContextNoticesFromRequest(snapshot)
+	if !hasContextNotice(filtered) {
+		t.Fatal("fresh notices must stay on the request until they are marked stale")
+	}
+
+	a.contextNoticesStale.Store(true)
+	filtered = a.omitStaleContextNoticesFromRequest(snapshot)
+	if hasContextNotice(filtered) {
+		t.Fatal("a stale marker must omit context notices from the request copy")
+	}
+	if !hasContextNotice(a.ctxMgr.Snapshot()) {
+		t.Fatal("omitting stale notices from the request must not rewrite durable history")
+	}
+}
+
+func TestMaybeClearStaleContextNoticesNoNoticeResetsDelivered(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.overlayClaims.mu.Lock()
+	a.overlayClaims.reminder.delivered = true
+	a.overlayClaims.mu.Unlock()
+	a.contextNoticesStale.Store(true)
+	a.maybeClearStaleContextNotices()
+	a.overlayClaims.mu.Lock()
+	delivered := a.overlayClaims.reminder.delivered
+	a.overlayClaims.mu.Unlock()
+	if delivered {
+		t.Fatal("cleanup with no matching notice must still consume the leftover delivered flag")
+	}
+}
+
+func TestInstallContextNoticePresenceRebuildsFromTranscript(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.contextNoticesStale.Store(true)
+	notice := message.Message{Role: message.RoleUser, Kind: message.KindContextNotice, Content: "pressure", NoticeLevel: contextNoticePressure}
+	a.installContextNoticePresence([]message.Message{notice})
+	if !a.contextNoticesPersisted.Load() {
+		t.Fatal("a loaded transcript carrying a notice row must rebuild presence")
+	}
+	if a.contextNoticesStale.Load() {
+		t.Fatal("a session load must drop the replaced session's armed cleanup")
+	}
+	a.installContextNoticePresence([]message.Message{{Role: message.RoleUser, Content: "hello"}})
+	if a.contextNoticesPersisted.Load() {
+		t.Fatal("a loaded transcript without a notice row must clear presence")
+	}
+	if a.contextNoticesStale.Load() {
+		t.Fatal("a session load must not leave a stale marker behind")
+	}
+}
+
+func TestContextNoticeCleanupDisarmsOnFirstDeliveryOnly(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.contextNoticesPersisted.Store(true)
+	a.armContextNoticeCleanup()
+	if !a.contextNoticesStale.Load() {
+		t.Fatal("presence with a withdrawn line must arm the cleanup")
+	}
+	// A fresh first delivery supersedes the pending withdrawal: the row it
+	// persists measures against the live line, so the sweep must be cancelled.
+	a.noteContextPressureReminderAttached()
+	a.markOverlayClaimsDelivered()
+	if a.contextNoticesStale.Load() {
+		t.Fatal("the first delivery must cancel the pending withdrawal")
+	}
+	// A sticky repeat re-attaches the same durable row: it must not cancel an
+	// armed withdrawal.
+	a.armContextNoticeCleanup()
+	a.noteContextPressureReminderAttached()
+	a.markOverlayClaimsDelivered()
+	if !a.contextNoticesStale.Load() {
+		t.Fatal("a repeat delivery must not cancel an armed withdrawal")
+	}
+	// The one-shot externalization warning persists its own row, so its
+	// delivery supersedes the withdrawal the same way.
+	a.disarmContextNoticeCleanup()
+	a.contextNoticesStale.Store(true)
+	a.noteCompactionWarningAttached()
+	a.markOverlayClaimsDelivered()
+	if a.contextNoticesStale.Load() {
+		t.Fatal("the externalization warning delivery must cancel the pending withdrawal")
+	}
+}
+
+func TestQueueContextPressureReminderMarksNonReminderNoticesStale(t *testing.T) {
+	// Every overlay class persists its own KindContextNotice row, and a window
+	// can deliver the grace imminent notice or the externalization warning
+	// without ever delivering the sticky reminder (an explicit reminder line at
+	// or above the threshold never injects on its own, and a compact_context
+	// call silences the reminder for the window). A below-line drop must still
+	// withdraw those durable rows.
+	cases := []struct {
+		name string
+		mark func(a *MainAgent)
+	}{
+		{name: "imminent", mark: func(a *MainAgent) {
+			a.syncOverlayWindowClaim(&a.overlayClaims.imminent, a.currentOverlayWindowKey())
+			a.queueCompactionImminentNotice(minCompactionGracePeriodBatches)
+			a.stashContextNotice(contextNoticeImminent, a.pendingCompactionImminent)
+			a.pendingCompactionImminent = ""
+			a.noteCompactionImminentAttached()
+		}},
+		{name: "warning", mark: func(a *MainAgent) {
+			a.stashContextNotice(contextNoticeWarning, compactionWarningText)
+			a.noteCompactionWarningAttached()
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a := newTestMainAgent(t, t.TempDir())
+			a.installSessionTarget(t.TempDir())
+			a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
+			a.ctxMgr.SetLastTotalContextTokens(5000)
+			enableTestCompactContext(a)
+			tc.mark(a)
+			a.markOverlayClaimsDelivered()
+			if !hasContextNotice(a.ctxMgr.Snapshot()) {
+				t.Fatal("the delivered overlay must persist a durable notice row")
+			}
+
+			a.ctxMgr.SetLastTotalContextTokens(4000)
+			a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
+			if !a.contextNoticesStale.Load() {
+				t.Fatal("a durable notice of any class must be marked stale once usage drops below the reminder line")
+			}
+			a.maybeClearStaleContextNotices()
+			if hasContextNotice(a.ctxMgr.Snapshot()) {
+				t.Fatal("idle cleanup must drop the durable notice")
+			}
+			a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
+			if a.contextNoticesStale.Load() {
+				t.Fatal("a withdrawn notice must not re-arm idle cleanup on a later below-line request")
+			}
+		})
+	}
+}
+
+func TestMaybeClearStaleContextNoticesResetsImminentDeliveryForRecross(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.installSessionTarget(t.TempDir())
+	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
+	a.ctxMgr.SetLastTotalContextTokens(5000)
+	enableTestCompactContext(a)
+
+	// Deliver only the grace imminent notice: its durable row exists while the
+	// sticky reminder was never attached.
+	a.syncOverlayWindowClaim(&a.overlayClaims.imminent, a.currentOverlayWindowKey())
+	a.queueCompactionImminentNotice(minCompactionGracePeriodBatches)
+	a.stashContextNotice(contextNoticeImminent, a.pendingCompactionImminent)
+	a.pendingCompactionImminent = ""
+	a.noteCompactionImminentAttached()
+	a.markOverlayClaimsDelivered()
+	if !hasContextNotice(a.ctxMgr.Snapshot()) {
+		t.Fatal("imminent delivery must persist a context notice")
+	}
+
+	a.ctxMgr.SetLastTotalContextTokens(4000)
+	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
+	a.maybeClearStaleContextNotices()
+	if hasContextNotice(a.ctxMgr.Snapshot()) {
+		t.Fatal("idle cleanup must drop the leftover imminent notice")
+	}
+	a.overlayClaims.mu.Lock()
+	delivered := a.overlayClaims.imminent.delivered
+	a.overlayClaims.mu.Unlock()
+	if delivered {
+		t.Fatal("idle cleanup must reset imminent delivery so a later re-cross can persist a new card")
+	}
 }

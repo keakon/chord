@@ -215,6 +215,16 @@ func TestApplyModelCompactionConfigModelChangeMarksNoticesStale(t *testing.T) {
 	)
 	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(1000000, 1000000, 0, 0.65)
 	a.appliedCompactionModelRef = "openai/gpt-5.6-sol"
+	// No durable notice row: the switch has nothing to withdraw, so no audit
+	// is armed.
+	a.applyModelCompactionConfig()
+	if a.contextNoticesStale.Load() {
+		t.Fatal("a model change must not arm the audit when no durable notice exists")
+	}
+	// With a durable row present the moved threshold arms the audit.
+	a.ctxMgr.SetThreshold(0.65)
+	a.appliedCompactionModelRef = "openai/gpt-5.6-sol"
+	a.contextNoticesPersisted.Store(true)
 	a.applyModelCompactionConfig()
 	if !a.contextNoticesStale.Load() {
 		t.Fatal("a model change that moves the threshold must mark the context notices stale")
@@ -230,6 +240,7 @@ func TestApplyModelCompactionConfigModelChangeSameThresholdKeepsNoticesFresh(t *
 	)
 	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(1000000, 1000000, 0, 0.65)
 	a.appliedCompactionModelRef = "openai/gpt-5.6-sol"
+	a.contextNoticesPersisted.Store(true)
 	a.applyModelCompactionConfig()
 	if a.contextNoticesStale.Load() {
 		t.Fatal("a model change that keeps the same line must keep the context notices fresh")
@@ -248,6 +259,7 @@ func TestApplyModelCompactionConfigModelChangeReminderOnlyMarksNoticesStale(t *t
 	)
 	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(1000000, 1000000, 0, 0.65)
 	a.appliedCompactionModelRef = "openai/gpt-5.6-sol"
+	a.contextNoticesPersisted.Store(true)
 	a.applyModelCompactionConfig()
 	if got := a.ctxMgr.Threshold(); got != 0.65 {
 		t.Fatalf("threshold = %v, want 0.65 (unchanged)", got)
@@ -261,6 +273,7 @@ func TestApplyModelCompactionConfigSameModelKeepsNoticesFresh(t *testing.T) {
 	a := modelCompTestAgent(config.CompactionConfig{Threshold: 0.65}, nil, "p/m")
 	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(1000000, 1000000, 0, 0.65)
 	a.appliedCompactionModelRef = "p/m"
+	a.contextNoticesPersisted.Store(true)
 	a.applyModelCompactionConfig()
 	if a.contextNoticesStale.Load() {
 		t.Fatal("a same-model re-apply must not mark the context notices stale")

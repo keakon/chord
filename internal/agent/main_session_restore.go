@@ -724,6 +724,7 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	a.clearReductionCache(true)
 	a.resetLLMModelRun()
 	a.ctxMgr.RestoreMessages(append([]message.Message(nil), loaded.Messages...))
+	a.installContextNoticePresence(loaded.Messages)
 	a.mailboxDeliveryPaused.Store(true)
 	// Activation replaces the session: the replaced session's in-memory
 	// mailbox pipeline is dropped wholesale (see

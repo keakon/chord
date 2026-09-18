@@ -477,12 +477,23 @@ type MainAgent struct {
 	// the threshold; not persisted, so after a restore the threshold is
 	// re-applied at the first request boundary.
 	appliedCompactionModelRef string
-	// contextNoticesStale marks durable context-pressure notices as measured
-	// against a previous compaction threshold after a model switch changed the
-	// line. The event loop drops them at the next idle boundary (see
-	// maybeClearStaleContextNotices); a notice computed for the old line would
-	// otherwise keep claiming pressure the new model is not under.
+	// contextNoticesStale marks durable context-pressure notices as no longer
+	// matching the live AutoCompactDecision: a model switch moved the
+	// compaction/reminder line, or usage in the same window dropped back below
+	// the reminder line. The event loop drops them at the next idle boundary
+	// (see maybeClearStaleContextNotices); a leftover notice would otherwise
+	// keep claiming pressure the current decision is not under. A fresh first
+	// delivery for the live window cancels the mark: that row belongs to the
+	// current line, so the audit must not sweep it away in the same turn.
 	contextNoticesStale atomic.Bool
+	// contextNoticesPersisted records that the transcript may still hold
+	// durable context-pressure notice rows. Overlay delivery claims are
+	// runtime memory that a restore or session switch never carries over, so
+	// presence — not a delivered claim — is what tells the cleanup whether
+	// there is anything to withdraw. Set when a row is appended, rebuilt from
+	// the transcript at every session load/switch, and recomputed by the idle
+	// cleanup scan itself.
+	contextNoticesPersisted atomic.Bool
 	// pendingOverlayAppends holds the mailbox-transcript / background-result
 	// card events whose backing transcript write failed, so a persistence
 	// recovery can re-emit them once the write path is healthy. The message is
@@ -1190,6 +1201,7 @@ func (a *MainAgent) switchRole(roleName string, clearHistory bool) error {
 	if clearHistory {
 		// Clear conversation history so the new role starts fresh.
 		a.ctxMgr.RestoreMessages(nil)
+		a.installContextNoticePresence(nil)
 		a.clearEvidenceCandidates()
 	}
 

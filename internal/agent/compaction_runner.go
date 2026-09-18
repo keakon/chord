@@ -167,6 +167,9 @@ func (a *MainAgent) maybeRunAutoCompaction() {
 		log.Infof("automatic context compaction request cleared before idle compaction last_input_tokens=%v threshold_tokens=%v input_budget=%v reserved_input=%v usable_input_budget=%v threshold=%v", decision.LastInputTokens, decision.ThresholdTokens, decision.InputBudget, decision.ReservedInput, decision.UsableInputBudget, decision.Threshold)
 		a.clearUsageDrivenAutoCompactRequest()
 		a.resetAutoCompactionFailureState()
+		if a.contextPressureBelowReminderLine(decision, -1) {
+			a.armContextNoticeCleanup()
+		}
 		return
 	}
 	if a.isUsageDrivenAutoCompactSuppressed() {
