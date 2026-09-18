@@ -167,9 +167,11 @@ type YoloController interface {
 }
 
 // MemoryStatusReporter exposes the effective automatic memory-extraction
-// setting for the main agent (status bar MEMORY pill).
+// setting for the main agent (status bar MEMORY pill), plus whether memory
+// setup or the last commit failed permanently.
 type MemoryStatusReporter interface {
 	MemoryEnabled() bool
+	MemoryDegraded() bool
 }
 
 // ServiceTierReporter exposes effective runtime service-tier state for command completion and status UI.

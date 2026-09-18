@@ -76,6 +76,7 @@ func (a *MainAgent) initMemory(projectRoot string) {
 	m, err := memory.NewManager(projectRoot, a.pathLocator)
 	if err != nil {
 		a.memoryErr = err
+		a.memoryDegraded.Store(true)
 		log.Warnf("memory: init error=%v", err)
 		return
 	}
@@ -113,6 +114,28 @@ func (a *MainAgent) MemoryEnabled() bool {
 		return false
 	}
 	return a.memoryExtractEnabled.Load()
+}
+
+// MemoryDegraded reports whether memory setup or the last commit failed
+// permanently, so the MEMORY pill can warn instead of implying a healthy
+// region.
+func (a *MainAgent) MemoryDegraded() bool {
+	if a == nil {
+		return false
+	}
+	return a.memoryDegraded.Load()
+}
+
+// noteMemoryOutcome tracks background commit health: a permanent failure marks
+// memory degraded (injection has stopped until external intervention), and any
+// later success clears the mark.
+func (a *MainAgent) noteMemoryOutcome(err error) {
+	switch {
+	case err == nil:
+		a.memoryDegraded.Store(false)
+	case memoryPermanentFailure(err):
+		a.memoryDegraded.Store(true)
+	}
 }
 
 // refreshMemoryReminderBlock reloads the bounded MEMORY.md summary into the
@@ -254,8 +277,28 @@ func (a *MainAgent) memoryWorkerLoop() {
 			return
 		case <-a.memoryWake:
 		}
-		a.drainMemoryQueue()
+		a.drainMemoryQueueSafely()
 	}
+}
+
+// drainMemoryQueueSafely runs one drain pass under its own recover so a panic
+// in a single extraction cannot stop the worker permanently. The inflight guard
+// is released for the next wake; the job that panicked was already popped, so
+// its fingerprint stays uncovered and a later backfill or explicit request
+// retries it.
+func (a *MainAgent) drainMemoryQueueSafely() {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Errorf("memory worker panic error=%v stack=%v", r, string(debug.Stack()))
+			a.memoryMu.Lock()
+			if a.memoryInflight != nil {
+				a.memoryInflight.cancel()
+				a.memoryInflight = nil
+			}
+			a.memoryMu.Unlock()
+		}
+	}()
+	a.drainMemoryQueue()
 }
 
 // memoryWakeIdle pokes the worker when the foreground becomes idle, so jobs
@@ -325,6 +368,7 @@ func (a *MainAgent) drainMemoryQueue() {
 		case err != nil:
 			sessionID := memoryJobSessionID(job)
 			log.Warnf("memory: extraction failed session=%v error=%v", sessionID, err)
+			a.noteMemoryOutcome(err)
 			if m := a.memoryMgr; m != nil {
 				memory.SaveFailure(m.Layout(), sessionID, err)
 			}
@@ -347,6 +391,7 @@ func (a *MainAgent) drainMemoryQueue() {
 			// Committed: reload the bounded summary into the cached reminder
 			// block. The per-request reminder is rebuilt by ensureSessionBuilt
 			// at the next request boundary (this goroutine must not touch it).
+			a.noteMemoryOutcome(nil)
 			a.refreshMemoryReminderBlock()
 		}
 	}

@@ -4357,6 +4357,7 @@ type sessionControlAgent struct {
 	cancelCalls             int
 	continueCalls           int
 	memoryEnabled           bool
+	memoryDegraded          bool
 	loopState               agent.LoopState
 	loopTarget              string
 	loopEnableCalls         int
@@ -4568,6 +4569,7 @@ func (s *sessionControlAgent) CurrentRole() string                              
 func (s *sessionControlAgent) LoopKeepsMainBusy() bool                                   { return false }
 func (s *sessionControlAgent) CurrentLoopState() agent.LoopState                         { return s.loopState }
 func (s *sessionControlAgent) MemoryEnabled() bool                                       { return s.memoryEnabled }
+func (s *sessionControlAgent) MemoryDegraded() bool                                      { return s.memoryDegraded }
 func (s *sessionControlAgent) CurrentLoopTarget() string                                 { return s.loopTarget }
 func (s *sessionControlAgent) CurrentLoopIteration() int {
 	if s.loopIteration == 0 {

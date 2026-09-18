@@ -126,6 +126,7 @@ type statusBarInputs struct {
 	LoopState           agent.LoopState
 	YoloEnabled         bool
 	MemoryEnabled       bool
+	MemoryDegraded      bool
 	PersistenceDegraded bool
 	LoopIteration       int
 	LoopMaxIterations   int
@@ -163,11 +164,13 @@ func (m *Model) statusBarInputs(now time.Time) statusBarInputs {
 	loopIteration := 0
 	loopMaxIterations := 0
 	memoryEnabled := false
+	memoryDegraded := false
 	if m.agent != nil {
 		loopState = m.agent.CurrentLoopState()
 		loopIteration = m.agent.CurrentLoopIteration()
 		loopMaxIterations = m.agent.CurrentLoopMaxIterations()
 		memoryEnabled = m.agent.MemoryEnabled()
+		memoryDegraded = m.agent.MemoryDegraded()
 	}
 	infoPanelVisible := m.rightPanelVisible && m.mode != ModeHelp
 	runningJobs := 0
@@ -193,6 +196,7 @@ func (m *Model) statusBarInputs(now time.Time) statusBarInputs {
 		LoopState:           loopState,
 		YoloEnabled:         m.yoloEnabled(),
 		MemoryEnabled:       memoryEnabled,
+		MemoryDegraded:      memoryDegraded,
 		PersistenceDegraded: m.persistenceDegraded,
 		LoopIteration:       loopIteration,
 		LoopMaxIterations:   loopMaxIterations,
@@ -347,8 +351,14 @@ func (m *Model) appendStatusBarYoloPill(pills []string, inputs statusBarInputs) 
 }
 
 func (m *Model) appendStatusBarMemoryPill(pills []string, inputs statusBarInputs) []string {
-	if !inputs.MemoryEnabled {
+	if !inputs.MemoryEnabled && !inputs.MemoryDegraded {
 		return pills
+	}
+	if inputs.MemoryDegraded {
+		// Setup or the last commit failed permanently, so injection has stopped
+		// even though the feature is enabled: say so instead of implying a
+		// healthy region.
+		return append(pills, ErrorStyle.Render("MEMORY-FAIL"))
 	}
 	return append(pills, StatusHintStyle.Render("MEMORY"))
 }

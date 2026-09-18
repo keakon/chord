@@ -757,6 +757,12 @@ type MainAgent struct {
 	memoryWorkerDone     chan struct{}
 	memoryExtractEnabled atomic.Bool // effective memory.enabled (project overrides user)
 	memoryActive         atomic.Bool
+	// memoryDegraded records that memory setup or a commit failed permanently
+	// (unreadable managed region, invalid extraction schema, unusable setup), so
+	// the status bar can surface a memory region that silently stopped
+	// injecting instead of showing only the enabled pill. A later successful
+	// commit clears it.
+	memoryDegraded atomic.Bool
 	// memoryReminderVersion is bumped whenever the cached Memory block changes
 	// (init, background extraction commit). ensureSessionBuilt rebuilds the
 	// per-request session reminder when it moves, so a background commit lands
