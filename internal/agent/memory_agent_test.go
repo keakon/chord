@@ -336,9 +336,13 @@ func TestMemoryExtractionPromptCarriesRetentionDiscipline(t *testing.T) {
 		`target "project_instructions"`,
 		`target "project_docs"`,
 		"Never assume a directory layout.",
-		// Admission: only what the user stated (or forced the model to ask for)
-		// is a memory candidate; rediscoverable model findings go to docs or drop.
+		// Admission: the user having said it is required, not sufficient;
+		// rediscoverable model findings go to docs or drop.
 		"could not proceed without asking the user",
+		"is required for memory, not sufficient",
+		"without this machine's filesystem layout",
+		"even when the user said them",
+		"Treat \"the user stated\" as a claim about a user item",
 		"Do not create a memory for rediscoverable facts",
 		"One transcript never shows cross-session frequency",
 		// Statement discipline: no session-local identifiers in the durable text.
@@ -366,6 +370,7 @@ func TestMemoryExtractionPromptCarriesRetentionDiscipline(t *testing.T) {
 		"frequently hit debugging anchors",
 		"Per-turn budget is for what recurs",
 		"Recurs across sessions",
+		"it is specific to this project, and it is not mandatory on every turn -> memory",
 	} {
 		if strings.Contains(memoryExtractionSystemPrompt, unwanted) {
 			t.Errorf("extraction system prompt must not use frequency-based admission: %q", unwanted)

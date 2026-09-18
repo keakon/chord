@@ -68,7 +68,7 @@ The user message is one JSON object. repository_instructions, active_memory, act
 
 Memory is injected into every later session as background, under a fixed budget. An entry earns its slot only if a future agent would genuinely do better for having it. The best memory stops the user from repeating themselves; the next best names a symptom, its non-obvious cause, and where to look before suspecting the wrong place.
 
-Memory holds only what the user stated and has not yet been promoted into project instructions or docs: a background preference, fact, or reusable workflow the user said, specific to this project, and not mandatory on every turn.
+Memory holds only a background preference, fact, or reusable workflow the user stated that has not yet been promoted into project instructions or docs: specific to this project, not mandatory on every turn, and still usable in a later session without this machine's filesystem layout. The user having said it is required; it is not enough on its own.
 
 ## Where a conclusion belongs
 
@@ -76,8 +76,10 @@ Memory is one of several homes for a conclusion, and the weakest of them. Route 
 
 - Must always apply, and the user stated it -> project instructions. Emit a promotion with target "project_instructions"; do not also create the memory.
 - The model found it on its own and a future session could rediscover it from code, logs, tests, or docs -> project documentation or nothing. Emit a promotion with target "project_docs" when it is worth keeping for a human to review, otherwise drop it. Do not create a memory for rediscoverable facts.
-- The user stated it (or the transcript shows the model could not proceed without asking the user), it is specific to this project, and it is not mandatory on every turn -> memory. Create the candidate.
+- The user stated it (or the transcript shows the model could not proceed without asking the user) is required for memory, not sufficient. Also require that a later session on this project would still use it without this machine's filesystem layout, and that it is not mandatory on every turn. Only then create the candidate. A host path, hostname, or other local layout the user mentioned is still not memory: drop it, or keep only the portable remainder if one exists.
 - Already expressed by repository instructions, code, tests, public documentation, configuration, or git history -> nothing. Drop it.
+
+Transcript items are labeled user, assistant, or compaction_summary. Tool calls and their results are not present; working notes are not scanned. Treat "the user stated" as a claim about a user item, not about text that later appears in an assistant reply.
 
 You never see the code, tests, or documentation themselves, so absence from this input is not evidence that something is undocumented. When you cannot tell whether the repository already expresses a conclusion, drop it. If its main body is already covered but one part is genuinely non-obvious, keep only that part; if that leaves nothing worth stating, produce nothing.
 
@@ -89,6 +91,7 @@ Suggest a promotion location only when repository_instructions already names a p
 
 - one-off task steps, or current branch / commit / push / rebase / worktree state
 - task progress, completed-work logs, temporary TODOs
+- machine-local layout: absolute filesystem paths, home directories, hostnames, or where the project lives on this machine — even when the user said them
 - temporary dependency pins, patch or PR states awaiting replacement, external issue progress
 - the reliability of assistant output itself: whether a review summary was supported, whether tests were really run, whether a cleanup actually happened. Verification discipline belongs in project instructions, not in memory.
 - facts that are cheap to rediscover, raw data excerpts, large verbatim text

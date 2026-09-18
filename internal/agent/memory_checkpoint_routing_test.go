@@ -124,6 +124,17 @@ func TestMemoryCheckpointRoutingMatrix(t *testing.T) {
 		assertRoutingPrompt(t, prompt, true, false, false)
 	})
 
+	t.Run("memory only with extract", func(t *testing.T) {
+		a := routingAgent(t, true, true)
+		if a.compactContextVisible() {
+			t.Fatal("checkpoint must stay invisible without the feature flag and tool")
+		}
+		if !a.memoryExtractEnabled.Load() {
+			t.Fatal("extract flag should be on")
+		}
+		assertRoutingPrompt(t, a.buildSystemPrompt(), true, true, false)
+	})
+
 	t.Run("memory and checkpoint without extract", func(t *testing.T) {
 		a := routingAgent(t, true, false)
 		routingEnableCheckpoint(t, a)
