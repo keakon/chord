@@ -24,6 +24,10 @@ type JobFinishedPayload struct {
 	SessionDir   string
 	Status       string
 	Message      string
+	// UserStopped marks a job the operator stopped from the interface. The
+	// result still reaches the model's transcript, but the completion toast is
+	// suppressed: the operator already knows they stopped it.
+	UserStopped bool
 }
 
 func (p *JobFinishedPayload) EffectiveID() string {

@@ -415,6 +415,16 @@ func (m *Model) drawOverlayLayers(scr uv.Screen, area image.Rectangle, layout tu
 			dialogRect := centeredRect(area, dialog)
 			m.renderOverlayCached(scr, dialogRect, &m.cachedDirRender, dialog)
 		}
+	case ModeStopJobConfirm:
+		if dialog := m.renderStopJobConfirmDialog(); dialog != "" {
+			dialogRect := centeredRect(area, dialog)
+			m.renderOverlayCached(scr, dialogRect, &m.cachedDirRender, dialog)
+		}
+	case ModeJobsOverlay:
+		if dialog := m.renderJobsOverlayDialog(); dialog != "" {
+			dialogRect := centeredRect(area, dialog)
+			m.renderOverlayCached(scr, dialogRect, &m.cachedDirRender, dialog)
+		}
 	}
 	if m.sessionSwitch.active() {
 		if dialog := m.renderSessionSwitchOverlay(area); dialog != "" {

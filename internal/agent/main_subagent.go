@@ -831,7 +831,12 @@ func (a *MainAgent) handleJobFinished(evt Event) {
 		mailbox.OwnerAgentID = sub.instanceID
 		mailbox.OwnerTaskID = taskIDForSub(sub)
 	}
-	a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Background job %s finished", backgroundID), Level: backgroundCompletionToastLevel(payload.Status), AgentID: payload.AgentID})
+	if !payload.UserStopped {
+		// The operator already knows they stopped it, so the completion toast
+		// would only repeat what they just did; the result still lands in the
+		// transcript as a mailbox row below.
+		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Background job %s finished", backgroundID), Level: backgroundCompletionToastLevel(payload.Status), AgentID: payload.AgentID})
+	}
 	a.enqueueSubAgentMailbox(mailbox)
 	if sub == nil && a.turn == nil && !a.mailboxDeliveryPaused.Load() {
 		a.drainSubAgentInbox()

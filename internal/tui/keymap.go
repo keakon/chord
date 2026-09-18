@@ -44,9 +44,10 @@ type KeyMap struct {
 	ForkSession        []string
 
 	// Normal mode – overlays
-	Directory  []string
-	UsageStats []string
-	ErrorPanel []string
+	Directory      []string
+	UsageStats     []string
+	ErrorPanel     []string
+	BackgroundJobs []string // list running background jobs (also the stop entry point)
 
 	// Normal mode – search
 	SearchStart []string // enter search mode
@@ -113,9 +114,14 @@ func DefaultKeyMap() KeyMap {
 		ForkSession:        []string{"e"},
 
 		// Normal mode – overlays
-		Directory:  []string{"ctrl+t"},
-		UsageStats: []string{"$"},
-		ErrorPanel: []string{"ctrl+e"},
+		// ctrl+j opens the background jobs list. It is bound in Normal mode
+		// only: Insert mode already uses ctrl+j for a newline. Background jobs
+		// are reachable without a mouse from Normal mode, which is where every
+		// other overlay key lives.
+		Directory:      []string{"ctrl+t"},
+		UsageStats:     []string{"$"},
+		ErrorPanel:     []string{"ctrl+e"},
+		BackgroundJobs: []string{"ctrl+j"},
 
 		// Normal mode – search
 		SearchStart: []string{"/"},

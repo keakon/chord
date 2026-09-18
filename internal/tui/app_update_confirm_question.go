@@ -31,7 +31,7 @@ func (m *Model) focusAgentForRequest(agentID string) {
 // Handoff counts as active while its plan-content viewer is open on top of it:
 // the decision is still pending.
 func (m *Model) dialogActive() bool {
-	return m.confirm.request != nil || m.question.request != nil || m.handoffSelect.active()
+	return m.confirm.request != nil || m.question.request != nil || m.handoffSelect.active() || m.stopJobConfirm.active()
 }
 
 func (m *Model) handleConfirmRequest(msg confirmRequestMsg) tea.Cmd {

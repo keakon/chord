@@ -16,9 +16,9 @@ func TestCompactionStatusBarRightCacheAdvancesWithTimeFrame(t *testing.T) {
 		StartedAt: now,
 	}
 
-	first, _, _ := m.renderStatusBarRightSide(now, 120, 0, 0, "", "")
+	first, _, _ := m.renderStatusBarRightSide(now, 120, 0, 0, "", "", 0, 0)
 	firstKey := m.cachedStatusBarRightKey
-	second, _, _ := m.renderStatusBarRightSide(now.Add(2*time.Second), 120, 0, 0, "", "")
+	second, _, _ := m.renderStatusBarRightSide(now.Add(2*time.Second), 120, 0, 0, "", "", 0, 0)
 
 	if firstKey == m.cachedStatusBarRightKey {
 		t.Fatal("compaction right-side cache key did not advance with time")
@@ -269,7 +269,7 @@ func TestCompactionPillSurvivesBusyActivityLane(t *testing.T) {
 		leftWidth      = 24
 		activityWidth  = 22
 	)
-	rightSide, rightStart, _ := m.renderStatusBarRightSide(now, effectiveWidth, leftWidth, activityWidth, "/Users/keakon/Workspace/chord", "20260902024540990")
+	rightSide, rightStart, _ := m.renderStatusBarRightSide(now, effectiveWidth, leftWidth, activityWidth, "/Users/keakon/Workspace/chord", "20260902024540990", 0, 0)
 
 	centerStart := max((effectiveWidth-activityWidth)/2, leftWidth+2)
 	centerEnd := centerStart + activityWidth

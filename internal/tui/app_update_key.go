@@ -81,6 +81,10 @@ func (m *Model) handleModeKey(msg tea.KeyMsg) tea.Cmd {
 		return m.handleImageViewerKey(msg)
 	case ModeRules:
 		return m.handleRulesKey(msg)
+	case ModeStopJobConfirm:
+		return m.handleStopJobConfirmKey(msg)
+	case ModeJobsOverlay:
+		return m.handleJobsOverlayKey(msg)
 	default:
 		return nil
 	}

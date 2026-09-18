@@ -340,6 +340,13 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg) tea.Cmd {
 		m.openUsageStats()
 		return nil
 
+	// -- background jobs ------------------------------------------------
+	// The jobs list is also reachable by clicking the status-bar pill, but a
+	// terminal without mouse reporting (plain SSH, tmux with mouse off) has no
+	// other way to inspect or stop a background job, so it needs a key too.
+	case keyMatches(key, m.keyMap.BackgroundJobs):
+		return m.openJobsOverlay()
+
 	// -- error panel -----------------------------------------------------
 	case keyMatches(key, m.keyMap.ErrorPanel):
 		m.openErrorPanel()

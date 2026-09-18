@@ -149,7 +149,15 @@ func (m *Model) deriveTerminalTitleState() terminalTitleDesiredState {
 		return state
 	}
 	if m.hasActiveAnimation() {
-		return terminalTitleDesiredState{mode: terminalTitleModeSpinner, tickerDelay: m.currentCadence().titleTickerDelay}
+		delay := m.currentCadence().titleTickerDelay
+		if delay <= 0 {
+			// A background job keeps the animation alive while the foreground
+			// cadence is background-idle, which has no title ticker of its own.
+			// Fall back to the background-active cadence so the spinner still
+			// advances instead of freezing after one tick.
+			delay = m.cadenceProfiles.withDefaults().backgroundActive.titleTickerDelay
+		}
+		return terminalTitleDesiredState{mode: terminalTitleModeSpinner, tickerDelay: delay}
 	}
 	if m.terminalTitleBackgroundCompletedAgentID != "" {
 		return terminalTitleDesiredState{mode: terminalTitleModeCompletion}

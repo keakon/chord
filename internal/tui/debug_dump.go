@@ -568,6 +568,10 @@ func debugModeString(mode Mode) string {
 		return "content-viewer"
 	case ModeImageViewer:
 		return "image-viewer"
+	case ModeStopJobConfirm:
+		return "stop-job-confirm"
+	case ModeJobsOverlay:
+		return "jobs-overlay"
 	default:
 		return fmt.Sprintf("mode(%d)", mode)
 	}

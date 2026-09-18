@@ -50,6 +50,26 @@ func (m *Model) handleModalMouseMsg(msg tea.MouseMsg) (tea.Cmd, bool) {
 		return nil, true
 	}
 
+	if m.mode == ModeJobsOverlay {
+		m.clearChordState()
+		switch mouse.Button {
+		case tea.MouseWheelUp:
+			// The wheel moves the selected row, not just the window: Enter acts
+			// on the cursor, so an off-screen cursor would stop a job the
+			// operator cannot see.
+			m.moveJobsOverlayCursor(-mouseWheelScrollStep)
+		case tea.MouseWheelDown:
+			m.moveJobsOverlayCursor(mouseWheelScrollStep)
+		default:
+			if _, isClick := msg.(tea.MouseClickMsg); isClick && mouse.Button == tea.MouseLeft {
+				if jobID, inStopZone, ok := m.jobsOverlayRowAt(mouse.X, mouse.Y); ok && inStopZone {
+					return m.openStopJobConfirm(jobID), true
+				}
+			}
+		}
+		return nil, true
+	}
+
 	if m.mode == ModeModelSelect {
 		m.clearChordState()
 		switch mouse.Button {
@@ -186,10 +206,10 @@ func (m *Model) handleModalMouseMsg(msg tea.MouseMsg) (tea.Cmd, bool) {
 		return nil, true
 	}
 
-	// Confirm/Question/Rules/UsageStats/Help overlay modes keep clicks from
-	// passing through, but allow wheel scrolling of the underlying viewport so
-	// long background cards remain readable while the overlay is open.
-	if m.mode == ModeConfirm || m.mode == ModeQuestion || m.mode == ModeRules || m.mode == ModeUsageStats || m.mode == ModeErrorPanel || m.mode == ModeHelp {
+	// Confirm/Question/Rules/UsageStats/Help/StopJob overlay modes keep clicks
+	// from passing through, but allow wheel scrolling of the underlying viewport
+	// so long background cards remain readable while the overlay is open.
+	if m.mode == ModeConfirm || m.mode == ModeQuestion || m.mode == ModeRules || m.mode == ModeUsageStats || m.mode == ModeErrorPanel || m.mode == ModeHelp || m.mode == ModeStopJobConfirm {
 		m.clearChordState()
 		switch mouse.Button {
 		case tea.MouseWheelUp, tea.MouseWheelDown:
@@ -220,6 +240,9 @@ func (m *Model) handleModalMouseMsg(msg tea.MouseMsg) (tea.Cmd, bool) {
 }
 
 func (m *Model) handleStatusCopyClick(x, y int) (tea.Cmd, bool) {
+	if m.statusJobsContainsPoint(x, y) {
+		return m.openJobsOverlay(), true
+	}
 	if m.statusSessionContainsPoint(x, y) {
 		return m.handleStatusClipboardClick(x, y, m.statusSession.value, writeStatusSessionClipboardCmd), true
 	}
@@ -367,6 +390,14 @@ func (m *Model) handleInfoPanelMouseClick(mouse tea.Mouse) tea.Cmd {
 		m.setFocusedAgent(agentID)
 		m.recalcViewportSize()
 		return m.restartStatusBarTick()
+	}
+	if jobID, inStopZone, ok := m.infoPanelJobAtPoint(mouse.X, mouse.Y); ok {
+		// Only the row's stop affordance acts; the rest of the row has no
+		// keyboard cursor to select, so it does nothing.
+		if inStopZone {
+			return m.openStopJobConfirm(jobID)
+		}
+		return nil
 	}
 	if section, ok := m.infoPanelSectionAtPoint(mouse.X, mouse.Y); ok {
 		m.toggleInfoPanelSection(section)

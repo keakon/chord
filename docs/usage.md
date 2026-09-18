@@ -98,6 +98,36 @@ The error panel keeps the most recent 80 errors in a ring buffer (newest first).
 - `Model` includes time spent streaming compaction drafts. When a confirmation dialog, Question prompt, or Handoff selector is pending, tool cards show execution time only: confirmation, answer, and handoff-decision waits are recorded under `User wait`, never under `Tools`.
 - The section follows the focused agent (main agent, running SubAgent, or parked task) and is rebuilt from the session's usage ledger after restore or resume.
 
+## Background jobs
+
+Some work outlives the turn that started it — long shell commands, including the ones SubAgents launch. While such a command is running or stopping, Chord tracks it as a job, and the turn can finish without stopping it.
+
+### JOBS block
+
+Whenever at least one job is running or stopping, the info panel gains a `JOBS` block. Each job takes one line, indented two columns, with a status dot, a label (the job description, or the command when there is no description), the elapsed time, and a trailing `x`. Jobs started by SubAgents are listed right alongside your own.
+
+With nothing running or stopping, the block is omitted entirely.
+
+### Narrow terminals
+
+When the terminal is too narrow for the info panel, the status bar carries a plain-text counter pill instead, such as `2 agents · 1 job`. It shows both counts while there is room; when space runs short, Chord drops the agents half first and then hides the pill. Click the pill to open the JOBS list overlay — with the info panel visible, the same list is already on screen. With no jobs to show, Chord tells you so instead of opening an empty overlay.
+
+The pill and the `x` are click targets, so a terminal without mouse reporting cannot reach them. `ctrl+j` opens the same list from Normal mode at any width; inside it, `j` / `k` (or the mouse wheel) move the selection and `Enter` opens the confirmation for the selected row.
+
+### Stopping a job
+
+Click a job's trailing `x` to open a confirmation dialog. It lists the job id, label, command, owner, status, elapsed time, the time of the last output, and the most recent output lines; when output was discarded, it also reports how many bytes were dropped and the path to the full log.
+
+Only `y` confirms. `n` and `esc` cancel, and `Enter` is not bound. After you confirm, that line switches to stopping and its `x` disappears.
+
+Stopping a job yourself does not raise a toast. When the job ends, its owner still receives the result, stating plainly that you stopped it; a job that had outlived the turn that started it arrives as a JOB RESULT card.
+
+`Esc` and `Ctrl+C` do not stop a background job, including one still running inside the current turn: a long command that outran the foreground budget has already become a job. Confirming the stop dialog — reached by clicking `x`, or with `ctrl+j` then `j` / `k` and `Enter` — is the only way to stop one. Jobs do not outlive Chord itself — quitting or switching sessions terminates all of them.
+
+### Terminal title
+
+The terminal title spinner keeps turning while only background jobs are running. With the window unfocused, that spinner is the only sign of life.
+
 ## File mentions (`@path`)
 
 Type `@` in the composer at the start of a line or after a space to open file completion.

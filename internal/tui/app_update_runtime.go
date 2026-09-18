@@ -57,6 +57,10 @@ func (m *Model) handleAnimTick(msg animTickMsg) tea.Cmd {
 	if msg.generation != m.animTickGeneration {
 		return nil
 	}
+	// Live dialog fields (elapsed, last-output age) advance at most once per
+	// second on the existing animation tick, rather than a dedicated timer.
+	m.refreshStopJobConfirmLive(time.Now())
+	m.refreshJobsOverlayLive(time.Now())
 	// Housekeeping: chord timeout (must run even in background).
 	if m.chord.active() && time.Since(m.chord.startAt) >= normalChordTimeout {
 		m.clearChordState()

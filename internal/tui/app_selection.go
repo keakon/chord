@@ -295,6 +295,18 @@ func (m *Model) statusPathContainsPoint(x, y int) bool {
 		x < m.statusPath.endX
 }
 
+func (m *Model) statusJobsContainsPoint(x, y int) bool {
+	// The pill only exists while it reports something; the counts guard the
+	// region against a stale display left from an earlier frame.
+	return m.layout.status.Dy() > 0 &&
+		y >= m.layout.status.Min.Y &&
+		y < m.layout.status.Max.Y &&
+		m.statusJobs.display != "" &&
+		(m.statusJobs.runningJobs > 0 || m.statusJobs.fallbackAgents > 0) &&
+		x >= m.statusJobs.startX &&
+		x < m.statusJobs.endX
+}
+
 func (m *Model) statusSessionContainsPoint(x, y int) bool {
 	return m.layout.status.Dy() > 0 &&
 		y >= m.layout.status.Min.Y &&

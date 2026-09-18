@@ -56,6 +56,11 @@ func (m *Model) tryEnterRenderFreeze(reason string) bool {
 	if m.activeToast != nil && shouldBreakFreezeForToastLevel(m.activeToast.Level) {
 		return false
 	}
+	if len(m.activeJobs()) > 0 {
+		// A live job is the only signal a blurred terminal still has, and it is
+		// carried by the terminal-title spinner, which freezing would stop.
+		return false
+	}
 	if m.backgroundIdleSince.IsZero() || time.Since(m.backgroundIdleSince) < 10*time.Second {
 		return false
 	}

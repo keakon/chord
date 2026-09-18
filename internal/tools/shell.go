@@ -23,6 +23,9 @@ type tailWriter struct {
 	mu    sync.Mutex
 	buf   TailBuffer
 	wrote chan struct{}
+	// lastOutputAt is when the most recent non-empty write landed; the zero
+	// value means the command has not produced output yet.
+	lastOutputAt time.Time
 }
 
 func newTailWriter(maxBytes int64) *tailWriter {
@@ -33,11 +36,20 @@ func (c *tailWriter) Write(p []byte) (int, error) {
 	c.mu.Lock()
 	n, err := c.buf.Write(p)
 	if n > 0 {
+		c.lastOutputAt = time.Now()
 		close(c.wrote)
 		c.wrote = make(chan struct{})
 	}
 	c.mu.Unlock()
 	return n, err
+}
+
+// lastOutputTime returns when the command last produced output, or the zero
+// value if it has not yet.
+func (c *tailWriter) lastOutputTime() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lastOutputAt
 }
 
 // waitSignalAfter returns the current output generation and whether output

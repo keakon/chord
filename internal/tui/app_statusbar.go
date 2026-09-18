@@ -133,9 +133,14 @@ type statusBarInputs struct {
 	DynamicCacheKey     string
 	InflightDraft       bool
 	LocalShellPending   bool
-	Width               int
-	Height              int
-	ViewportOffset      int
+	// RunningJobs and FallbackAgents back the narrow-layout activity pill. They
+	// are only populated while the info panel is hidden, so a visible panel (and
+	// its own AGENTS/JOBS sections) does not double-report the same counts.
+	RunningJobs    int
+	FallbackAgents int
+	Width          int
+	Height         int
+	ViewportOffset int
 }
 
 func (m *Model) statusBarInputs(now time.Time) statusBarInputs {
@@ -164,13 +169,20 @@ func (m *Model) statusBarInputs(now time.Time) statusBarInputs {
 		loopMaxIterations = m.agent.CurrentLoopMaxIterations()
 		memoryEnabled = m.agent.MemoryEnabled()
 	}
+	infoPanelVisible := m.rightPanelVisible && m.mode != ModeHelp
+	runningJobs := 0
+	fallbackAgents := 0
+	if !infoPanelVisible {
+		runningJobs = len(m.activeJobs())
+		fallbackAgents = m.activeSidebarWorkerCount()
+	}
 	return statusBarInputs{
 		Now:                 now,
 		ModeText:            m.statusBarModeText(),
 		Snapshot:            snap,
 		StatusActiveID:      statusActiveID,
 		StatusActivity:      m.activityForAgent(statusActiveID),
-		InfoPanelVisible:    m.rightPanelVisible && m.mode != ModeHelp,
+		InfoPanelVisible:    infoPanelVisible,
 		SessionSwitchKind:   m.sessionSwitch.kind,
 		SessionSwitchID:     m.sessionSwitch.sessionID,
 		WorkingDirDisplay:   displayWorkingDir(m.workingDir),
@@ -188,6 +200,8 @@ func (m *Model) statusBarInputs(now time.Time) statusBarInputs {
 		DynamicCacheKey:     dynamicCacheKey,
 		InflightDraft:       m.inflightDraft != nil,
 		LocalShellPending:   localShellPending,
+		RunningJobs:         runningJobs,
+		FallbackAgents:      fallbackAgents,
 		Width:               m.width,
 		Height:              m.height,
 		ViewportOffset:      m.viewport.offset,
@@ -270,7 +284,7 @@ func (m *Model) statusBarModePill(modeText string) string {
 	switch m.mode {
 	case ModeInsert:
 		modeStyle = ModeInsertStyle
-	case ModeConfirm, ModeSessionDeleteConfirm:
+	case ModeConfirm, ModeSessionDeleteConfirm, ModeStopJobConfirm:
 		modeStyle = ModeConfirmStyle
 	case ModeQuestion:
 		modeStyle = ModeQuestionStyle
@@ -409,6 +423,10 @@ func (m *Model) statusBarModeText() string {
 		return "IMAGE"
 	case ModeRules:
 		return "RULES"
+	case ModeStopJobConfirm:
+		return "STOP"
+	case ModeJobsOverlay:
+		return "JOBS"
 	default:
 		return ""
 	}
@@ -476,6 +494,10 @@ func (m *Model) statusBarFingerprint(now time.Time) string {
 		snap.busy,
 	)
 	b.WriteByte('|')
+	b.WriteString(strconv.Itoa(inputs.RunningJobs))
+	b.WriteByte('|')
+	b.WriteString(strconv.Itoa(inputs.FallbackAgents))
+	b.WriteByte('|')
 	b.WriteString(string(statusActivity.Type))
 	b.WriteByte('|')
 	b.WriteString(statusActivity.Detail)
@@ -507,6 +529,11 @@ func (m *Model) resetStatusBarCopyRegions() {
 	m.statusSession.display = ""
 	m.statusSession.startX = 0
 	m.statusSession.endX = 0
+	m.statusJobs.runningJobs = 0
+	m.statusJobs.fallbackAgents = 0
+	m.statusJobs.display = ""
+	m.statusJobs.startX = 0
+	m.statusJobs.endX = 0
 }
 
 // renderStatusBar builds the bottom status line using pill-styled components.
@@ -580,7 +607,7 @@ func (m *Model) renderStatusBar() string {
 	pathValue := inputs.WorkingDirDisplay
 	sessionValue := sessionID
 	activityText, activityWidth := m.renderStatusBarActivityLane(inputs, effectiveWidth, leftWidth)
-	rightSide, rightStart, rightWidth := m.renderStatusBarRightSide(inputs.Now, effectiveWidth, leftWidth, activityWidth, pathValue, sessionValue)
+	rightSide, rightStart, rightWidth := m.renderStatusBarRightSide(inputs.Now, effectiveWidth, leftWidth, activityWidth, pathValue, sessionValue, inputs.RunningJobs, inputs.FallbackAgents)
 	if inputs.NextEscHint != "" && statusBarCanFitEscHint(leftWidth, rightStart, activityWidth, effectiveWidth, inputs.NextEscHint) {
 		leftSide = lipgloss.JoinHorizontal(
 			lipgloss.Center,
@@ -590,24 +617,11 @@ func (m *Model) renderStatusBar() string {
 		)
 		leftWidth = lipgloss.Width(leftSide)
 		activityText, activityWidth = m.renderStatusBarActivityLane(inputs, effectiveWidth, leftWidth)
-		rightSide, rightStart, rightWidth = m.renderStatusBarRightSide(inputs.Now, effectiveWidth, leftWidth, activityWidth, pathValue, sessionValue)
+		rightSide, rightStart, rightWidth = m.renderStatusBarRightSide(inputs.Now, effectiveWidth, leftWidth, activityWidth, pathValue, sessionValue, inputs.RunningJobs, inputs.FallbackAgents)
 	}
 	separatorWidth := lipgloss.Width(DimStyle.Render(statusBarActivityPathGap))
 	if activityWidth == 0 && leftWidth <= rightStart {
-		if m.statusPath.display != "" {
-			pathWidth := ansi.StringWidth(m.statusPath.display)
-			m.statusPath.startX = statusBarLeftMargin + rightStart
-			m.statusPath.endX = m.statusPath.startX + pathWidth
-		}
-		if m.statusSession.display != "" {
-			sessionOffset := 0
-			if m.statusPath.display != "" {
-				sessionOffset = ansi.StringWidth(m.statusPath.display) + separatorWidth
-			}
-			sessionWidth := ansi.StringWidth(m.statusSession.display)
-			m.statusSession.startX = statusBarLeftMargin + rightStart + sessionOffset
-			m.statusSession.endX = m.statusSession.startX + sessionWidth
-		}
+		m.placeStatusBarRightRegions(rightStart, rightWidth, separatorWidth)
 		statusLine := leftSide + strings.Repeat(" ", max(rightStart-leftWidth, 0)) + rightSide
 		if rightWidth == 0 && leftWidth < effectiveWidth {
 			statusLine += strings.Repeat(" ", effectiveWidth-leftWidth)
@@ -616,24 +630,36 @@ func (m *Model) renderStatusBar() string {
 		return m.renderStatusBarLine(padded)
 	}
 
-	if m.statusPath.display != "" {
-		pathWidth := ansi.StringWidth(m.statusPath.display)
-		m.statusPath.startX = statusBarLeftMargin + rightStart
-		m.statusPath.endX = m.statusPath.startX + pathWidth
-	}
-	if m.statusSession.display != "" {
-		sessionOffset := 0
-		if m.statusPath.display != "" {
-			sessionOffset = ansi.StringWidth(m.statusPath.display) + separatorWidth
-		}
-		sessionWidth := ansi.StringWidth(m.statusSession.display)
-		m.statusSession.startX = statusBarLeftMargin + rightStart + sessionOffset
-		m.statusSession.endX = m.statusSession.startX + sessionWidth
-	}
+	m.placeStatusBarRightRegions(rightStart, rightWidth, separatorWidth)
 
 	statusLine := renderStatusBarPlacedLine(leftSide, leftWidth, rightStart, rightSide, activityText, activityWidth, effectiveWidth)
 	padded := strings.Repeat(" ", statusBarLeftMargin) + statusLine + strings.Repeat(" ", statusBarRightMargin)
 	return m.renderStatusBarLine(padded)
+}
+
+// placeStatusBarRightRegions records the absolute clickable columns of the
+// right-side regions for the row whose right-aligned group starts at rightStart.
+// The jobs pill is the group's last member, so its columns are measured from the
+// group's right edge; path and session keep their existing left-to-right offsets.
+func (m *Model) placeStatusBarRightRegions(rightStart, rightWidth, separatorWidth int) {
+	offset := 0
+	if m.statusPath.display != "" {
+		pathWidth := ansi.StringWidth(m.statusPath.display)
+		m.statusPath.startX = statusBarLeftMargin + rightStart + offset
+		m.statusPath.endX = m.statusPath.startX + pathWidth
+		offset += pathWidth + separatorWidth
+	}
+	if m.statusSession.display != "" {
+		sessionWidth := ansi.StringWidth(m.statusSession.display)
+		m.statusSession.startX = statusBarLeftMargin + rightStart + offset
+		m.statusSession.endX = m.statusSession.startX + sessionWidth
+		offset += sessionWidth + separatorWidth
+	}
+	if m.statusJobs.display != "" {
+		jobsWidth := ansi.StringWidth(m.statusJobs.display)
+		m.statusJobs.endX = statusBarLeftMargin + rightStart + rightWidth
+		m.statusJobs.startX = m.statusJobs.endX - jobsWidth
+	}
 }
 
 // renderStatusBarLine renders the assembled status row within drawableLineWidth,
@@ -752,9 +778,9 @@ func (m *Model) renderStatusBarActivityLane(inputs statusBarInputs, effectiveWid
 	return activityText, activityWidth
 }
 
-func (m *Model) renderStatusBarRightSide(now time.Time, effectiveWidth, leftWidth, activityWidth int, pathValue, sessionValue string) (string, int, int) {
+func (m *Model) renderStatusBarRightSide(now time.Time, effectiveWidth, leftWidth, activityWidth int, pathValue, sessionValue string, runningJobs, fallbackAgents int) (string, int, int) {
 	separatorWidth := lipgloss.Width(DimStyle.Render(statusBarActivityPathGap))
-	rightKey := statusBarRightKey(effectiveWidth, leftWidth, activityWidth, pathValue, sessionValue)
+	rightKey := statusBarRightKey(effectiveWidth, leftWidth, activityWidth, pathValue, sessionValue, runningJobs, fallbackAgents)
 	if !compactionBackgroundStatusVisibleAt(m.compactionBgStatus, now) {
 		rightKey += "|"
 	} else {
@@ -765,6 +791,9 @@ func (m *Model) renderStatusBarRightSide(now time.Time, effectiveWidth, leftWidt
 		m.statusPath.display = m.cachedStatusBarPathShown
 		m.statusSession.value = m.cachedStatusBarSessionValue
 		m.statusSession.display = m.cachedStatusBarSessionShown
+		m.statusJobs.display = m.cachedStatusJobsDisplay
+		m.statusJobs.runningJobs = m.cachedStatusJobsRunning
+		m.statusJobs.fallbackAgents = m.cachedStatusJobsAgents
 		return m.cachedStatusBarRightSide, m.cachedStatusBarRightStart, m.cachedStatusBarRightWidth
 	}
 
@@ -772,6 +801,7 @@ func (m *Model) renderStatusBarRightSide(now time.Time, effectiveWidth, leftWidt
 	rightStart := 0
 	pathText := ""
 	sessionText := ""
+	jobsPillText := ""
 	availableRight := effectiveWidth - leftWidth
 	if activityWidth > 0 {
 		centerStart := max((effectiveWidth-activityWidth)/2, leftWidth+2)
@@ -792,6 +822,20 @@ func (m *Model) renderStatusBarRightSide(now time.Time, effectiveWidth, leftWidt
 		availableRight -= lipgloss.Width(compactionPill) + separatorWidth
 		if availableRight < 0 {
 			availableRight = 0
+		}
+	}
+	// The background-activity fallback pill takes the next reservation (it
+	// yields to the compaction indicator): its label shortens to whatever space
+	// is left, keeping jobs before agents, and disappears when even the shortest
+	// form does not fit.
+	if runningJobs > 0 || fallbackAgents > 0 {
+		candidate := formatJobsActivityPill(runningJobs, fallbackAgents, max(availableRight-separatorWidth, 0))
+		if candidate != "" {
+			jobsPillText = candidate
+			availableRight -= separatorWidth + ansi.StringWidth(candidate)
+			if availableRight < 0 {
+				availableRight = 0
+			}
 		}
 	}
 	if availableRight > 0 {
@@ -834,7 +878,7 @@ func (m *Model) renderStatusBarRightSide(now time.Time, effectiveWidth, leftWidt
 		}
 	}
 
-	rightParts := make([]string, 0, 5)
+	rightParts := make([]string, 0, 6)
 	if compactionPill != "" {
 		rightParts = append(rightParts, compactionPill)
 	}
@@ -850,6 +894,15 @@ func (m *Model) renderStatusBarRightSide(now time.Time, effectiveWidth, leftWidt
 		}
 		rightParts = append(rightParts, sessionText)
 	}
+	if jobsPillText != "" {
+		if len(rightParts) > 0 {
+			rightParts = append(rightParts, DimStyle.Render(statusBarActivityPathGap))
+		}
+		rightParts = append(rightParts, StatusHintStyle.Render(jobsPillText))
+		m.statusJobs.display = jobsPillText
+		m.statusJobs.runningJobs = runningJobs
+		m.statusJobs.fallbackAgents = fallbackAgents
+	}
 	rightSide = lipgloss.JoinHorizontal(lipgloss.Center, rightParts...)
 	rightWidth := lipgloss.Width(rightSide)
 	rightStart = max(effectiveWidth-rightWidth, 0)
@@ -861,6 +914,9 @@ func (m *Model) renderStatusBarRightSide(now time.Time, effectiveWidth, leftWidt
 	m.cachedStatusBarPathShown = m.statusPath.display
 	m.cachedStatusBarSessionValue = m.statusSession.value
 	m.cachedStatusBarSessionShown = m.statusSession.display
+	m.cachedStatusJobsDisplay = m.statusJobs.display
+	m.cachedStatusJobsRunning = m.statusJobs.runningJobs
+	m.cachedStatusJobsAgents = m.statusJobs.fallbackAgents
 	return rightSide, rightStart, rightWidth
 }
 
@@ -975,9 +1031,9 @@ func statusBarActivityKey(mode string, availableCenter int, compactIdle bool, an
 	return b.String()
 }
 
-func statusBarRightKey(effectiveWidth, leftWidth, activityWidth int, pathValue, sessionValue string) string {
+func statusBarRightKey(effectiveWidth, leftWidth, activityWidth int, pathValue, sessionValue string, runningJobs, fallbackAgents int) string {
 	var b strings.Builder
-	b.Grow(len(pathValue) + len(sessionValue) + 48)
+	b.Grow(len(pathValue) + len(sessionValue) + 64)
 	b.WriteString(strconv.Itoa(effectiveWidth))
 	b.WriteByte('|')
 	b.WriteString(strconv.Itoa(leftWidth))
@@ -987,6 +1043,10 @@ func statusBarRightKey(effectiveWidth, leftWidth, activityWidth int, pathValue, 
 	b.WriteString(pathValue)
 	b.WriteByte('|')
 	b.WriteString(sessionValue)
+	b.WriteByte('|')
+	b.WriteString(strconv.Itoa(runningJobs))
+	b.WriteByte('|')
+	b.WriteString(strconv.Itoa(fallbackAgents))
 	return b.String()
 }
 

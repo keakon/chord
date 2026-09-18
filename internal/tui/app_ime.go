@@ -98,7 +98,7 @@ func (m *Model) queueIMEApply(target string) {
 
 func modeNeedsEnglishIME(mode Mode) bool {
 	switch mode {
-	case ModeNormal, ModeDirectory, ModeMCPSelect, ModeSessionSelect, ModeSessionDeleteConfirm, ModeConfirm, ModeQuestion, ModeRules, ModeContentViewer:
+	case ModeNormal, ModeDirectory, ModeMCPSelect, ModeSessionSelect, ModeSessionDeleteConfirm, ModeConfirm, ModeQuestion, ModeRules, ModeContentViewer, ModeStopJobConfirm, ModeJobsOverlay:
 		return true
 	default:
 		return false

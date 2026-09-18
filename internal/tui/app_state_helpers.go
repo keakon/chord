@@ -236,6 +236,9 @@ type viewCacheState struct {
 	statusBarSyntheticConnectingLogKey string
 	cachedStatusBarSessionValue        string
 	cachedStatusBarSessionShown        string
+	cachedStatusJobsDisplay            string
+	cachedStatusJobsRunning            int
+	cachedStatusJobsAgents             int
 	cachedModelPillRef                 string
 	cachedModelPillSelectedRef         string
 	cachedModelPillVariant             string

@@ -43,6 +43,8 @@ const (
 	ModeImageViewer                      // fullscreen image viewer overlay
 	ModeContentViewer                    // fullscreen markdown content viewer overlay
 	ModeRules                            // /rules overlay
+	ModeStopJobConfirm                   // stop-background-job confirmation overlay
+	ModeJobsOverlay                      // background jobs overlay (status-bar pill)
 )
 
 // ---------------------------------------------------------------------------
@@ -132,16 +134,33 @@ const (
 	infoPanelSectionFiles  infoPanelSectionID = "files"
 	infoPanelSectionSkills infoPanelSectionID = "skills"
 	infoPanelSectionAgents infoPanelSectionID = "agents"
+	infoPanelSectionJobs   infoPanelSectionID = "jobs"
 )
 
 type infoPanelSectionHitBox struct {
 	section infoPanelSectionID
 	agentID string
+	jobID   string
 	startY  int
 	endY    int
+	// stopZoneStartX/stopZoneEndX bound the row's stop affordance ("x") in
+	// panel-local columns; both are zero for rows without one.
+	stopZoneStartX int
+	stopZoneEndX   int
 }
 
 type statusPathState = statusBarCopyRegionState
+
+// statusJobsRegionState is the clickable read-only region of the narrow-layout
+// background-activity pill. It mirrors statusBarCopyRegionState but opens the
+// jobs overlay instead of copying text.
+type statusJobsRegionState struct {
+	runningJobs    int
+	fallbackAgents int
+	display        string
+	startX         int
+	endX           int
+}
 
 // ---------------------------------------------------------------------------
 // Model
@@ -350,6 +369,22 @@ type Model struct {
 	infoPanelScrollOffset      int
 	infoPanelContentHeight     int
 	infoPanelViewportHeight    int
+
+	// Background job state. tools.SnapshotJobs takes a registry-wide lock, so a
+	// frame shares one result: jobsSnapshot/activeJobsSnapshot are refreshed at
+	// most once per rendered frame (jobsSnapshotFrame holds the frame that
+	// produced them) and every consumer — the JOBS info-panel section, the
+	// status-bar pill, and the title spinner — reads the same snapshot.
+	jobsSnapshot       []tools.JobState
+	activeJobsSnapshot []tools.JobState
+	jobsSnapshotValid  bool
+	jobsSnapshotFrame  uint64
+	// jobsOverlay is the background jobs overlay (opened by clicking the
+	// narrow-layout status pill), stopJobConfirm the operator's stop dialog.
+	jobsOverlay    jobsOverlayState
+	stopJobConfirm stopJobConfirmState
+	// statusJobs is the clickable region of the narrow-layout activity pill.
+	statusJobs statusJobsRegionState
 
 	// Layered drawing layout.
 	layout tuiLayout
@@ -824,6 +859,7 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 			oldStore, oldHandle, staleErr = m.prepareRuntimeCacheSession(true)
 		}
 		m.rebuildViewportFromMessagesPreservingActivity(msg.reason, msg.preserveRequestActivity)
+		m.invalidateJobSnapshot()
 		animationCmd := m.startActiveAnimation()
 		m.finishRuntimeCacheSessionSwap(oldStore, oldHandle)
 		m.clearSessionSwitch()
@@ -966,6 +1002,7 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 	case agentEventBatchMsg:
 		var cmds []tea.Cmd
 		needKeyPoolTick := false
+		jobStateMaybeChanged := false
 		for _, item := range msg {
 			cmds = append(cmds, m.handleAgentEvent(item))
 			if m.displayState == stateBackground {
@@ -976,6 +1013,12 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 			if agentEventMayChangeKeyPool(item) {
 				needKeyPoolTick = true
 			}
+			if agentEventMayChangeJobState(item) {
+				jobStateMaybeChanged = true
+			}
+		}
+		if jobStateMaybeChanged {
+			cmds = append(cmds, m.syncJobAnimation())
 		}
 		// Re-subscribe once after processing the whole batch to avoid spawning
 		// N goroutines for N events in a single batch.

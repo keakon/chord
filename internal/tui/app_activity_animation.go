@@ -29,7 +29,7 @@ func (m Model) hasActiveAgentActivity() bool {
 	return false
 }
 
-func (m Model) hasActiveAnimation() bool {
+func (m *Model) hasActiveAnimation() bool {
 	if m.viewport != nil && m.viewport.HasUserLocalShellPending() {
 		return true
 	}
@@ -42,7 +42,10 @@ func (m Model) hasActiveAnimation() bool {
 			return true
 		}
 	}
-	return false
+	// A running (or stopping) background job keeps the spinner and terminal
+	// title alive even when no agent is active, so a long job still reads as
+	// "work in progress".
+	return len(m.activeJobs()) > 0
 }
 
 // startActiveAnimation routes activity-driven animation restarts through the

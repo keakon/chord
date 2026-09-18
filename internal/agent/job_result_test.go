@@ -405,3 +405,59 @@ func TestHandleJobFinishedDeliversMatchingSessionCompletion(t *testing.T) {
 		t.Fatalf("len(pendingSubAgentMailboxes) = %d, want 1 for a matching-session completion", got)
 	}
 }
+
+// drainCompletionToasts returns the completion toasts emitted for one background
+// id, so a test can assert on the UI notification independently of the mailbox
+// traffic that accompanies it.
+func drainCompletionToasts(a *MainAgent, backgroundID string) []ToastEvent {
+	var out []ToastEvent
+	for {
+		select {
+		case evt := <-a.outputCh:
+			toast, ok := evt.(ToastEvent)
+			if !ok || !strings.Contains(toast.Message, backgroundID) {
+				continue
+			}
+			out = append(out, toast)
+		default:
+			return out
+		}
+	}
+}
+
+// A user-initiated stop must not raise the completion toast: the operator just
+// did it, so the notification would only restate their action. The result must
+// still reach the transcript so the model learns the job stopped.
+func TestHandleJobFinishedSuppressesToastForUserStoppedJob(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	payload := backgroundResultPayload(a.instanceID, "job-1", "Run production build")
+	payload.UserStopped = true
+	a.handleJobFinished(Event{Type: EventJobFinished, SourceID: a.instanceID, Payload: payload})
+	a.flushPersist()
+
+	if toasts := drainCompletionToasts(a, "job-1"); len(toasts) != 0 {
+		t.Fatalf("user-stopped completion toasts = %v, want none", toasts)
+	}
+	rows, err := loadSubAgentMailboxMessages(a.sessionDir)
+	if err != nil {
+		t.Fatalf("loadSubAgentMailboxMessages: %v", err)
+	}
+	durable := 0
+	for _, row := range rows {
+		if row.Kind == SubAgentMailboxKindBackgroundResult && strings.Contains(row.Summary, "Run production build") {
+			durable++
+		}
+	}
+	if durable != 1 {
+		t.Fatalf("durable background_result rows = %d, want the stopped result delivered", durable)
+	}
+}
+
+func TestHandleJobFinishedToastsForNormalCompletion(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.handleJobFinished(Event{Type: EventJobFinished, SourceID: a.instanceID, Payload: backgroundResultPayload(a.instanceID, "job-1", "Run production build")})
+
+	if toasts := drainCompletionToasts(a, "job-1"); len(toasts) != 1 {
+		t.Fatalf("completion toasts = %v, want exactly one", toasts)
+	}
+}

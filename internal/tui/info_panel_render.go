@@ -274,6 +274,30 @@ func (m *Model) infoPanelFingerprint(width, height int) string {
 	appendBool(m.isInfoPanelSectionCollapsed(infoPanelSectionAgents))
 	appendSep()
 
+	// Running/stopping background jobs. The exact elapsed value stays out of the
+	// key (elapsed is computed at render time from StartedAt), but expanded rows
+	// that actually display it are bucketed by second: the panel rebuilds once
+	// per second while a job is visible so its elapsed advances, and not at all
+	// when there is nothing to show or the section is collapsed.
+	jobs := m.activeJobs()
+	for _, job := range jobs {
+		b.WriteByte('J')
+		b.WriteString(job.ID)
+		b.WriteString(job.Status)
+		b.WriteString(job.AgentID)
+		b.WriteString(job.Description)
+		b.WriteString(job.Command)
+		appendInt64(job.StartedAt.UnixNano())
+		appendSep()
+	}
+	jobsCollapsed := m.isInfoPanelSectionCollapsed(infoPanelSectionJobs)
+	appendBool(jobsCollapsed)
+	appendSep()
+	if len(jobs) > 0 && !jobsCollapsed {
+		appendInt64(time.Now().Unix())
+		appendSep()
+	}
+
 	return b.String()
 }
 
@@ -329,6 +353,13 @@ func (m *Model) renderInfoPanel(width int, height int) string {
 			appendBlock(infoPanelSectionAgents, agentBlock)
 			for _, hit := range agentRows {
 				m.recordInfoPanelAgentHitBox(hit.agentID, baseY+hit.startLine, baseY+hit.endLine)
+			}
+		}
+		if jobsBlock, jobRows := m.buildInfoPanelJobsBlock(lineW); jobsBlock != "" {
+			baseY := m.infoPanelRenderCursorY
+			appendBlock(infoPanelSectionJobs, jobsBlock)
+			for _, hit := range jobRows {
+				m.recordInfoPanelJobHitBox(hit.jobID, baseY+hit.startLine, baseY+hit.endLine, hit.stopZoneStartX, hit.stopZoneEndX)
 			}
 		}
 

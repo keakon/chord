@@ -47,6 +47,13 @@ const (
 	jobStatusFailed    jobStatus = "failed"
 )
 
+// jobStopOrigin records who requested a job's cancellation. A user-initiated
+// stop is the only origin that is surfaced in the completion event so the model
+// can tell "the operator stopped it" apart from a deadline or session switch.
+type jobStopOrigin string
+
+const jobStopOriginUser jobStopOrigin = "user"
+
 type jobStartRequest struct {
 	Command     string
 	Description string
@@ -88,6 +95,10 @@ type job struct {
 	finishedAt time.Time
 	detached   bool
 	reported   bool
+	// stopOrigin records who cancelled the job; empty when it was not stopped.
+	// It travels with the completion event so a user stop is distinguishable
+	// from a deadline, a job_kill, or a session-switch teardown.
+	stopOrigin jobStopOrigin
 	// readers holds one cursor and anti-polling streak per reading agent. A
 	// job is deliberately readable by more than its owner - job_list offers the
 	// main agent's jobs and the caller's owner's jobs - and the incremental read
@@ -324,6 +335,11 @@ func (r *JobRegistry) finish(j *job, status jobStatus, detail string, exitErr er
 	j.detail = detail
 	j.exitErr = exitErr
 	notify := j.detached
+	// A recorded user stop only counts when the kill actually took effect: a
+	// process that exited on its own between the stop request and the cancel
+	// being consumed finishes as completed, and must neither be reported to the
+	// model as a user stop nor lose its completion toast.
+	userStopped := j.stopOrigin == jobStopOriginUser && status == jobStatusKilled
 	j.mu.Unlock()
 	close(j.done)
 	if j.logWriter != nil {
@@ -350,6 +366,7 @@ func (r *JobRegistry) finish(j *job, status jobStatus, detail string, exitErr er
 			SessionDir:   j.SessionDir,
 			Status:       statusText,
 			Message:      j.completionMessage(status, statusText),
+			UserStopped:  userStopped,
 		},
 	)
 }
@@ -368,6 +385,34 @@ func (j *job) detach() bool {
 	return true
 }
 
+// beginStop is the shared core of requestCancel and stopByUser: it marks a
+// live job as stopping and delivers the cancel reason without waiting. origin
+// records who asked for the stop; empty leaves the recorded origin untouched.
+// setDetached overwrites j.detached in the same critical section when
+// non-nil, so the canceller goroutine can never observe a half-applied stop.
+func (j *job) beginStop(reason string, origin jobStopOrigin, setDetached *bool) bool {
+	j.mu.Lock()
+	if j.finished {
+		j.mu.Unlock()
+		return false
+	}
+	if j.status == jobStatusRunning {
+		j.status = jobStatusStopping
+	}
+	if origin != "" {
+		j.stopOrigin = origin
+	}
+	if setDetached != nil {
+		j.detached = *setDetached
+	}
+	j.mu.Unlock()
+	select {
+	case j.cancelCh <- reason:
+	default:
+	}
+	return true
+}
+
 // requestCancel signals cancellation without waiting. notify controls whether
 // the eventual terminal state is delivered as an asynchronous notification:
 // an explicit job_kill already tells the model the outcome, so it suppresses
@@ -381,21 +426,17 @@ func (j *job) detach() bool {
 // terminal state is delivered as a foreground result or not at all, never
 // twice, and never to a session that no longer owns the job.
 func (j *job) requestCancel(reason string, notify bool) bool {
-	j.mu.Lock()
-	if j.finished {
-		j.mu.Unlock()
-		return false
-	}
-	if j.status == jobStatusRunning {
-		j.status = jobStatusStopping
-	}
-	j.detached = notify
-	j.mu.Unlock()
-	select {
-	case j.cancelCh <- reason:
-	default:
-	}
-	return true
+	return j.beginStop(reason, "", &notify)
+}
+
+// stopByUser is the operator-initiated stop. Unlike requestCancel it never
+// touches j.detached: only an already-detached job needs an asynchronous
+// completion notification, while a job still owned by a waiting foreground
+// shell call is reported to the model through that tool result. Setting the
+// user stop origin lets finish() mark the completion event so the agent can
+// suppress the redundant toast.
+func (j *job) stopByUser(reason string) bool {
+	return j.beginStop(reason, jobStopOriginUser, nil)
 }
 
 // finishedTime reports when a terminal job finished. The finished flag and the
@@ -773,6 +814,18 @@ func ClaimJobReported(id string) bool {
 	return globalJobRegistry.claimReported(id)
 }
 
+// StopJobByUser stops a running job on the operator's behalf and reports
+// whether a live job was found. It is the interface-facing stop entry point:
+// a detached job still delivers an asynchronous completion notification marked
+// UserStopped, while a foreground job is told through its waiting shell result.
+func StopJobByUser(id, reason string) bool {
+	j, ok := globalJobRegistry.get(id)
+	if !ok {
+		return false
+	}
+	return j.stopByUser(reason)
+}
+
 type JobState struct {
 	ID            string
 	AgentID       string
@@ -807,6 +860,61 @@ func (r *JobRegistry) snapshotStates() []JobState {
 // SnapshotJobs returns the current lifecycle state of every tracked job.
 func SnapshotJobs() []JobState {
 	return globalJobRegistry.snapshotStates()
+}
+
+// JobDisplayPeek is a read-only projection of one job for the interface. It
+// carries no cursor and no reader state, so rendering it can never consume
+// output or advance an agent's job_output position.
+type JobDisplayPeek struct {
+	ID           string
+	Label        string
+	Command      string
+	Owner        string
+	Status       string
+	StartedAt    time.Time
+	LastOutputAt time.Time
+	LogFile      string
+	Tail         string
+	DroppedBytes int64
+	Truncated    bool
+}
+
+// PeekJobForDisplay returns a non-consuming view of one job's state and tail
+// output for the operator interface, or false for an unknown id. Unlike
+// job_output it neither advances a reader cursor nor claims the completion
+// notification, and it cleans the tail the same way the model-facing reads do,
+// since the interface cannot reach cleanJobOutputText.
+func PeekJobForDisplay(id string, maxTailBytes int) (JobDisplayPeek, bool) {
+	j, ok := globalJobRegistry.get(id)
+	if !ok {
+		return JobDisplayPeek{}, false
+	}
+	return j.displayPeek(maxTailBytes), true
+}
+
+func (j *job) displayPeek(maxTailBytes int) JobDisplayPeek {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	peek := JobDisplayPeek{
+		ID:        j.ID,
+		Label:     j.Description,
+		Command:   j.Command,
+		Owner:     j.AgentID,
+		Status:    string(j.status),
+		StartedAt: j.StartedAt,
+		LogFile:   j.LogFile,
+	}
+	if peek.Label == "" {
+		peek.Label = j.Command
+	}
+	if j.output != nil {
+		snippet, dropped, truncated := j.output.tail(maxTailBytes)
+		peek.Tail = cleanJobOutputText(snippet)
+		peek.DroppedBytes = dropped
+		peek.Truncated = truncated
+		peek.LastOutputAt = j.output.lastOutputTime()
+	}
+	return peek
 }
 
 func StopAllJobsForAgent(agentID string, reason string) int {
