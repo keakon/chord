@@ -207,3 +207,37 @@ func TestCompactionContinuationFilesGateKeyFilesByReadPermission(t *testing.T) {
 		t.Fatalf("a key file whose read rule asks must not be auto-loaded, got %v", got)
 	}
 }
+
+// Under YOLO the execution gate bypasses ordinary tools outright, so every
+// path is already reachable and the filtered ruleset's missing read rules must
+// not report a false deny: the overlay has to stay available or the flagship
+// state-file re-load silently no-ops in the mode long autonomous sessions use.
+func TestCompactionContinuationFilesInjectUnderYolo(t *testing.T) {
+	projectRoot := t.TempDir()
+	notesAbs := filepath.Join(projectRoot, ".chord", "notes", "task.md")
+	if err := os.MkdirAll(filepath.Dir(notesAbs), 0o755); err != nil {
+		t.Fatalf("mkdir notes dir: %v", err)
+	}
+	if err := os.WriteFile(notesAbs, []byte("# objective\nship it\n"), 0o644); err != nil {
+		t.Fatalf("write notes: %v", err)
+	}
+
+	a := newTestMainAgent(t, projectRoot)
+	a.SetInitialYoloMode(true)
+	// Deliberately no rules at all: the pre-fix gate evaluated the YOLO-
+	// filtered ruleset, found no read rules, and re-loaded nothing.
+	summary := "## Externalized State\n- .chord/notes/task.md\n\n## Next Step\n- continue"
+	if got := a.compactionContinuationFiles(summary); !slices.Equal(got, []string{".chord/notes/task.md"}) {
+		t.Fatalf("YOLO must mirror the execution bypass for state-file re-loads, got %v", got)
+	}
+
+	// An explicit wildcard allow plus a read deny still bypasses: YOLO never
+	// evaluates ordinary tools, and this must match the execution gate.
+	a.ruleset = permission.Ruleset{
+		{Permission: "*", Pattern: "*", Action: permission.ActionAllow},
+		{Permission: tools.NameRead, Pattern: ".chord/notes/*", Action: permission.ActionDeny},
+	}
+	if got := a.compactionContinuationFiles(summary); !slices.Equal(got, []string{".chord/notes/task.md"}) {
+		t.Fatalf("YOLO bypass must ignore ordinary read rules, got %v", got)
+	}
+}

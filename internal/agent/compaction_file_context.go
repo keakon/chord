@@ -162,6 +162,13 @@ func (a *MainAgent) stateFileInjectableForRead(absPath string) bool {
 	if a == nil || absPath == "" {
 		return false
 	}
+	// Under YOLO the execution gate bypasses ordinary tools outright, so a
+	// read of this file is already reachable and the overlay cannot widen
+	// anything: mirror the bypass instead of evaluating the filtered ruleset,
+	// whose ordinary read rules are dropped and would report a false deny.
+	if a.YoloEnabled() {
+		return true
+	}
 	action := a.effectiveRuleset().EvaluatePath(tools.NameRead, absPath, a.projectRoot)
 	return normalizeToolPermissionAction(tools.NameRead, action) == permission.ActionAllow
 }
