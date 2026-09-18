@@ -475,3 +475,38 @@ func TestIsRequestOrParamError400RequiresExplicitSignal(t *testing.T) {
 		t.Fatal("structured invalid_request signal should classify at any status")
 	}
 }
+
+// Deterministic 4xx statuses stop after the pool is exhausted regardless of
+// provider: no upstream overload maps to them, so another round over the same
+// pool can only repeat the same failures forever (previously a gateway that
+// started answering 404 for a deprecated model looped the pool with only
+// silent telemetry and the turn never failed).
+func TestTerminalModelPoolFailureForProviderDeterministic4xx(t *testing.T) {
+	t.Parallel()
+	compatible := NewProviderConfig("gateway", config.ProviderConfig{TrustHTTP400: new(false)}, nil)
+	for _, status := range []int{404, 405, 410, 414, 415} {
+		err := &APIError{StatusCode: status, Message: "no such model"}
+		if !isTerminalModelPoolFailureForProvider(compatible, err) {
+			t.Fatalf("status %d should stop after model pool exhaustion on any provider", status)
+		}
+	}
+}
+
+// 422 follows the 400 discipline: request-shape validation is deterministic
+// for trusted providers and explicit terminal signals, but an untrusted
+// gateway's bare 422 stays retryable across pool passes.
+func TestTerminalModelPoolFailureForProvider422Follows400Discipline(t *testing.T) {
+	t.Parallel()
+	compatible := NewProviderConfig("gateway", config.ProviderConfig{TrustHTTP400: new(false)}, nil)
+	official := NewProviderConfig("codex", config.ProviderConfig{Preset: "codex"}, nil)
+	bare := &APIError{StatusCode: 422, Message: "unprocessable"}
+	if isTerminalModelPoolFailureForProvider(compatible, bare) {
+		t.Fatal("compatible gateway bare 422 should stay retryable across pool passes")
+	}
+	if !isTerminalModelPoolFailureForProvider(official, bare) {
+		t.Fatal("official provider bare 422 should stop after model pool exhaustion")
+	}
+	if !isTerminalModelPoolFailureForProvider(compatible, &APIError{StatusCode: 422, Message: "missing required parameter: input"}) {
+		t.Fatal("422 with an explicit request/param signal should stop after model pool exhaustion")
+	}
+}

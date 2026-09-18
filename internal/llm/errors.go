@@ -948,6 +948,14 @@ func hasTerminalStructural400Signal(apiErr *APIError) bool {
 // way). Other non-official 400s remain retryable across pool passes because
 // compatible gateways often mis-map upstream overload/rate-limit/provider
 // failures to 400.
+//
+// 404/405/410/414/415 are terminal regardless of provider: no upstream
+// overload maps to them, so they mean the model or endpoint does not exist,
+// the method or media type is wrong, or the resource is gone — another round
+// over the same pool can only repeat the same deterministic failures. 422
+// follows the 400 discipline (official/trusted or explicit terminal signal):
+// request-shape validation is deterministic, but aggregating gateways have
+// been known to collapse upstream failures into generic 4xx bodies.
 func isTerminalModelPoolFailureForProvider(provider *ProviderConfig, err error) bool {
 	if _, ok := errors.AsType[*ReplayEvidenceEchoError](err); ok {
 		return true
@@ -958,6 +966,12 @@ func isTerminalModelPoolFailureForProvider(provider *ProviderConfig, err error) 
 	apiErr, ok := errors.AsType[*APIError](err)
 	if !ok || apiErr == nil {
 		return false
+	}
+	switch apiErr.StatusCode {
+	case 404, 405, 410, 414, 415:
+		return true
+	case 422:
+		return providerTrustsHTTP400(provider) || hasTerminalNonRetriable400Signal(apiErr)
 	}
 	if apiErr.StatusCode != 400 {
 		return false

@@ -36,6 +36,11 @@ func classifyFallbackReason(err error) string {
 		case apiErr.StatusCode == 413:
 			return "context_length_exceeded"
 		default:
+			if apiErr.StatusCode > 0 {
+				// A readable code beats the generic "error" label the UI would
+				// otherwise print, and it never claims to be a known class.
+				return fmt.Sprintf("http_%d", apiErr.StatusCode)
+			}
 			return "error"
 		}
 	}
