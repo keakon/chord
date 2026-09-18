@@ -621,7 +621,7 @@ func TestHeadlessStatusReportsTrackedSession(t *testing.T) {
 // A finished background job's durable result is the only delivery channel for
 // the JOB RESULT card, so it must be pushed explicitly.
 func TestHeadlessBackgroundResultPush(t *testing.T) {
-	state := &headlessState{subscriptions: map[string]bool{"background_result": true}}
+	state := &headlessState{subscriptions: map[string]bool{"background_result": true}, sessionID: "sess-1"}
 
 	envs := filterHeadlessEvent(agent.BackgroundResultAppendedEvent{
 		Message:       message.Message{Content: "JOB RESULT job-1\noutput here"},
@@ -643,6 +643,9 @@ func TestHeadlessBackgroundResultPush(t *testing.T) {
 	if payload["message_index"] != float64(7) {
 		t.Errorf("message_index = %v, want 7", payload["message_index"])
 	}
+	if payload["session_id"] != "sess-1" {
+		t.Errorf("session_id = %v, want the tracked session", payload["session_id"])
+	}
 }
 
 func TestHeadlessBackgroundResultRespectsSubscription(t *testing.T) {
@@ -660,7 +663,7 @@ func TestHeadlessBackgroundResultRespectsSubscription(t *testing.T) {
 // Context-pressure warnings are durable user-facing alerts with no other
 // headless channel, so they must be pushed explicitly.
 func TestHeadlessContextNoticePush(t *testing.T) {
-	state := &headlessState{subscriptions: map[string]bool{"context_notice": true}}
+	state := &headlessState{subscriptions: map[string]bool{"context_notice": true}, sessionID: "sess-1"}
 
 	envs := filterHeadlessEvent(agent.ContextNoticeEvent{
 		Level:        "warning",
@@ -681,6 +684,9 @@ func TestHeadlessContextNoticePush(t *testing.T) {
 	}
 	if payload["message_index"] != float64(12) {
 		t.Errorf("message_index = %v, want 12", payload["message_index"])
+	}
+	if payload["session_id"] != "sess-1" {
+		t.Errorf("session_id = %v, want the tracked session", payload["session_id"])
 	}
 }
 

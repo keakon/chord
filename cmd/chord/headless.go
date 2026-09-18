@@ -115,7 +115,9 @@ type headlessState struct {
 	// wire (uint64 0 would be omitted by json omitempty and look unversioned).
 	// Pushes bump under mu — both the event-loop batches from
 	// filterHeadlessEvent and command-path announcements such as role_change
-	// and handoff_cancelled. Any cached-state mutation bumps the same way,
+	// and handoff_cancelled — and each push's stamp and channel enqueue share
+	// one stdoutWriter.ordered section, so pushes reach the wire in seq order.
+	// Any cached-state mutation bumps the same way,
 	// even when the gateway did not subscribe to the corresponding push (or
 	// the mutation has no push at all, like auto-dismissing a pending
 	// confirm), so a later snapshot is strictly newer than one copied before
@@ -174,6 +176,7 @@ type stdoutWriter struct {
 	enc       *json.Encoder
 	ch        chan any
 	ctx       context.Context
+	orderMu   sync.Mutex
 	closeOnce sync.Once
 	done      chan struct{}
 }
@@ -194,6 +197,23 @@ func (w *stdoutWriter) run() {
 	for msg := range w.ch {
 		_ = w.enc.Encode(msg)
 	}
+}
+
+// ordered runs f while holding the push-ordering lock. Seq allocation and the
+// channel enqueue for a state-carrying push must happen inside one ordered
+// section (on both the event-loop and the command path): otherwise a concurrent
+// push could allocate the next seq and reach the wire in the stamp-to-emit gap,
+// and a client that applies only newer versions would drop the older push. For
+// role_change that loss is permanent — the announcement dedupe marker already
+// advanced at stamp time, so the switch is never re-announced.
+//
+// Sections must not take this lock while holding state.mu, and f must not block
+// indefinitely: emit under the lock only ever waits on the channel buffer
+// (stdout backpressure), which the writer goroutine drains independently.
+func (w *stdoutWriter) ordered(f func()) {
+	w.orderMu.Lock()
+	defer w.orderMu.Unlock()
+	f()
 }
 
 // emit sends a message to the channel. It blocks if the channel is full
@@ -626,6 +646,7 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 		touch()
 		if state.isSubscribed("background_result") {
 			out = append(out, &headlessEnvelope{Type: "background_result", Payload: map[string]any{
+				"session_id":      state.sessionID,
 				"target_agent_id": e.TargetAgentID,
 				"message_index":   e.MessageIndex,
 				"content":         e.Message.Content,
@@ -640,6 +661,7 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 		touch()
 		if state.isSubscribed("context_notice") {
 			out = append(out, &headlessEnvelope{Type: "context_notice", Payload: map[string]any{
+				"session_id":    state.sessionID,
 				"level":         e.Level,
 				"message":       e.Message,
 				"message_index": e.MessageIndex,
@@ -897,15 +919,19 @@ func runHeadlessWithDeps(deps headlessRunDeps) error {
 		Payload: readyPayload,
 	})
 
-	// Event loop: forward filtered events to stdout.
+	// Event loop: forward filtered events to stdout. Seq allocation and the
+	// enqueue share one ordered section so event pushes keep wire order
+	// aligned with seq order against command-path pushes.
 	backend := rt.Backend()
 	events := rt.Events()
 	go func() {
 		for ev := range events {
-			envs := filterHeadlessEvent(ev, state, backend)
-			for _, env := range envs {
-				out.emit(env)
-			}
+			out.ordered(func() {
+				envs := filterHeadlessEvent(ev, state, backend)
+				for _, env := range envs {
+					out.emit(env)
+				}
+			})
 		}
 	}()
 
@@ -1203,31 +1229,37 @@ func handleHeadlessRoleCommand(cmd headlessCommand, backend headlessRoleBackend,
 		// otherwise dedupe against the cache and the only role_change for the
 		// switch would never be pushed); the marker update makes the trailing
 		// event a no-op.
-		state.mu.Lock()
-		state.role = role
-		announce := state.lastBroadcastRole != role
-		if announce {
-			state.lastBroadcastRole = role
-		}
-		state.updatedAt = time.Now()
-		var change *headlessEnvelope
-		if announce {
-			if state.isSubscribed("role_change") {
-				change = &headlessEnvelope{Type: "role_change", Payload: map[string]string{
-					"role": role,
-				}}
-				state.stampHeadlessSeq(true, change)
-			} else {
-				// The role cache moved even though no envelope is emitted:
-				// bump so later status_response snapshots stay ordered.
-				state.stampHeadlessSeq(true)
-			}
-		}
-		state.mu.Unlock()
 		emitHeadlessRoleResponse(out, true, "", role, headlessRoleItems(backend))
-		if change != nil {
-			out.emit(change)
-		}
+		// The cache write, seq allocation, and the role_change enqueue form one
+		// ordered section: the announcement dedupe marker advances at stamp
+		// time, so a push that reaches the wire out of seq order would be
+		// dropped by version-comparing clients and never re-announced.
+		out.ordered(func() {
+			state.mu.Lock()
+			state.role = role
+			announce := state.lastBroadcastRole != role
+			if announce {
+				state.lastBroadcastRole = role
+			}
+			state.updatedAt = time.Now()
+			var change *headlessEnvelope
+			if announce {
+				if state.isSubscribed("role_change") {
+					change = &headlessEnvelope{Type: "role_change", Payload: map[string]string{
+						"role": role,
+					}}
+					state.stampHeadlessSeq(true, change)
+				} else {
+					// The role cache moved even though no envelope is emitted:
+					// bump so later status_response snapshots stay ordered.
+					state.stampHeadlessSeq(true)
+				}
+			}
+			state.mu.Unlock()
+			if change != nil {
+				out.emit(change)
+			}
+		})
 	default:
 		emitHeadlessRoleResponse(out, false, "unsupported role action: "+cmd.Action, "", nil)
 	}
@@ -1238,9 +1270,12 @@ func handleHeadlessRoleCommand(cmd headlessCommand, backend headlessRoleBackend,
 // restore, which headlessState cannot know in advance, so the cache starts
 // empty and converges on the first RoleChangedEvent or status query.
 //
-// The returned value is not a seq-consistent snapshot: a RoleChangedEvent can
-// bump seq after this returns. Status re-reads state.role under the same lock
-// as stampHeadlessSeq.
+// The backfill deliberately does not bump seq: it only fills an empty cache,
+// so no snapshot can have been copied "before" it (any snapshot either
+// backfilled first or already saw the cached role), and the filled value is
+// current at read time. Status re-reads state.role under the same lock as
+// stampHeadlessSeq, so the returned value is not seq-consistent on its own —
+// a RoleChangedEvent can bump seq after this returns.
 func headlessCurrentRole(backend headlessBackend, state *headlessState) string {
 	state.mu.Lock()
 	role := state.role
@@ -1404,32 +1439,36 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 			if hb, ok := backend.(headlessHandoffBackend); ok {
 				hb.ResolveHandoff(pendingHandoff.RequestID, "cancel", "", "")
 			}
-			state.mu.Lock()
-			cleared := false
-			if state.pendingHandoff != nil && state.pendingHandoff.RequestID == pendingHandoff.RequestID {
-				state.pendingHandoff = nil
-				cleared = true
-				state.updatedAt = time.Now()
-			}
-			var cancelled *headlessEnvelope
-			if state.isSubscribed("handoff_cancelled") {
-				cancelled = &headlessEnvelope{Type: "handoff_cancelled", Payload: map[string]string{
-					"request_id": pendingHandoff.RequestID,
-					"reason":     headlessHandoffCancelledReasonSuperseded,
-				}}
-			}
-			if cleared || cancelled != nil {
-				// Bump even without a cancelled envelope: the pending cache
-				// changed, so a status snapshot copied earlier must not restore it.
-				state.stampHeadlessSeq(true, cancelled)
-			}
-			state.mu.Unlock()
 			// The client still holds this request as pending; tell subscribers it
-			// is gone before the new message starts a fresh turn. The emit happens
-			// outside the lock so stdout backpressure never stalls state.mu.
-			if cancelled != nil {
-				out.emit(cancelled)
-			}
+			// is gone before the new message starts a fresh turn. The stamp and
+			// the enqueue share one ordered section (see ordered), and the emit
+			// inside it only ever waits on the channel buffer, so stdout
+			// backpressure never stalls state.mu — only other push sections.
+			out.ordered(func() {
+				state.mu.Lock()
+				cleared := false
+				if state.pendingHandoff != nil && state.pendingHandoff.RequestID == pendingHandoff.RequestID {
+					state.pendingHandoff = nil
+					cleared = true
+					state.updatedAt = time.Now()
+				}
+				var cancelled *headlessEnvelope
+				if state.isSubscribed("handoff_cancelled") {
+					cancelled = &headlessEnvelope{Type: "handoff_cancelled", Payload: map[string]string{
+						"request_id": pendingHandoff.RequestID,
+						"reason":     headlessHandoffCancelledReasonSuperseded,
+					}}
+				}
+				if cleared || cancelled != nil {
+					// Bump even without a cancelled envelope: the pending cache
+					// changed, so a status snapshot copied earlier must not restore it.
+					state.stampHeadlessSeq(true, cancelled)
+				}
+				state.mu.Unlock()
+				if cancelled != nil {
+					out.emit(cancelled)
+				}
+			})
 		}
 		backend.SendUserMessage(content)
 
