@@ -90,14 +90,11 @@ func TestOpenAIToolCallThoughtSignatureShapes(t *testing.T) {
 func TestEnsureChatGeminiActiveLoopSignatures(t *testing.T) {
 	cases := []struct {
 		name    string
-		model   string
-		old     string
 		current string
 		want    string
 	}{
-		{name: "gemini 3 fills the active step", model: "gemini-3-pro", want: geminiSkipThoughtSignatureValidator},
-		{name: "gemini 2 keeps no placeholder", model: "gemini-2.5-pro", want: ""},
-		{name: "a real signature is kept", model: "gemini-3-pro", current: "sig-real", want: "sig-real"},
+		{name: "missing signature is filled", want: geminiSkipThoughtSignatureValidator},
+		{name: "a real signature is kept", current: "sig-real", want: "sig-real"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -111,7 +108,7 @@ func TestEnsureChatGeminiActiveLoopSignatures(t *testing.T) {
 					{ID: "call-2", Type: "function"},
 				}},
 			}
-			ensureChatGeminiActiveLoopSignatures(messages, tc.model)
+			ensureChatGeminiActiveLoopSignatures(messages)
 			if got := openAIToolCallThoughtSignature(messages[1].ToolCalls[0]); got != "" {
 				t.Fatalf("completed turn signature = %q, want it untouched", got)
 			}
@@ -120,6 +117,56 @@ func TestEnsureChatGeminiActiveLoopSignatures(t *testing.T) {
 			}
 			if got := openAIToolCallThoughtSignature(messages[4].ToolCalls[1]); got != "" {
 				t.Fatalf("second call signature = %q, want the step carrier only on the first call", got)
+			}
+		})
+	}
+}
+
+// The gate cannot rely on the model name alone: an aliased Gemini 3 is only
+// identified by an explicitly pinned gemini dialect.
+func TestChatGeminiRequiresSignaturePlaceholder(t *testing.T) {
+	unset := &config.ChatCompletionsCompatConfig{}
+	pinnedGemini := &config.ChatCompletionsCompatConfig{NativeThinking: "gemini"}
+	cases := []struct {
+		name    string
+		model   string
+		compat  *config.ChatCompletionsCompatConfig
+		dialect nativeThinkingDialect
+		want    bool
+	}{
+		{name: "gemini 3 by name", model: "gemini-3-pro", compat: unset, dialect: nativeThinkingGemini, want: true},
+		{name: "gemini 2 keeps no placeholder", model: "gemini-2.5-pro", compat: unset, dialect: nativeThinkingGemini},
+		{name: "aliased gemini 3 with a pinned dialect", model: "deployment-a", compat: pinnedGemini, dialect: nativeThinkingGemini, want: true},
+		{name: "alias without a pin stays unnamed", model: "deployment-a", compat: unset, dialect: nativeThinkingGemini},
+		{name: "non-gemini dialect", model: "deployment-a", compat: pinnedGemini, dialect: nativeThinkingAnthropic},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := chatGeminiRequiresSignaturePlaceholder(tc.model, tc.compat, tc.dialect); got != tc.want {
+				t.Fatalf("chatGeminiRequiresSignaturePlaceholder(%q, %+v, %q) = %v, want %v", tc.model, tc.compat, tc.dialect, got, tc.want)
+			}
+		})
+	}
+}
+
+// An unset selector means auto, so it must not count as a pinned dialect: the
+// family resolution would otherwise read a gpt-* gateway as an unknown backend.
+func TestPinnedNativeThinkingDialectTreatsUnsetAsAuto(t *testing.T) {
+	cases := []struct {
+		name   string
+		compat *config.ChatCompletionsCompatConfig
+		want   bool
+	}{
+		{name: "no compat block", compat: nil},
+		{name: "unset selector", compat: &config.ChatCompletionsCompatConfig{}},
+		{name: "auto selector", compat: &config.ChatCompletionsCompatConfig{NativeThinking: "auto"}},
+		{name: "pinned gemini", compat: &config.ChatCompletionsCompatConfig{NativeThinking: "gemini"}, want: true},
+		{name: "pinned off", compat: &config.ChatCompletionsCompatConfig{NativeThinking: "off"}, want: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := pinnedNativeThinkingDialect(tc.compat); got != tc.want {
+				t.Fatalf("pinnedNativeThinkingDialect(%+v) = %v, want %v", tc.compat, got, tc.want)
 			}
 		})
 	}

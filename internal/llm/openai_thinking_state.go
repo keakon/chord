@@ -3,6 +3,7 @@ package llm
 import (
 	"strings"
 
+	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -135,15 +136,28 @@ func applyChatGeminiThoughtSignature(msg *openAIMessage, signature string) bool 
 	return true
 }
 
+// chatGeminiRequiresSignaturePlaceholder reports whether this Chat Completions
+// request has to fill missing active-loop signatures. The endpoint must read
+// the Gemini native thinking fields (the resolved dialect), and the upstream
+// must be a Gemini 3 either by name or through an explicitly pinned dialect —
+// an alias only reveals itself through the pin, so the name check cannot be the
+// only gate.
+func chatGeminiRequiresSignaturePlaceholder(model string, compat *config.ChatCompletionsCompatConfig, dialect nativeThinkingDialect) bool {
+	if dialect != nativeThinkingGemini {
+		return false
+	}
+	return isGemini3Model(model) || pinnedNativeThinkingDialect(compat)
+}
+
 // ensureChatGeminiActiveLoopSignatures mirrors
 // ensureGeminiActiveLoopSignatures for the Chat Completions wire: Gemini 3
 // rejects function-call history whose thought signature is missing, so the
 // active loop's assistant steps get the documented placeholder. The native
-// wire applies the same rule through the parts it serializes.
-func ensureChatGeminiActiveLoopSignatures(messages []openAIMessage, model string) {
-	if !isGemini3Model(model) {
-		return
-	}
+// wire applies the same rule through the parts it serializes. The caller
+// decides whether this target needs the placeholder; an aliased Gemini 3 only
+// reveals itself through an explicitly pinned gemini dialect, which the model
+// name cannot express.
+func ensureChatGeminiActiveLoopSignatures(messages []openAIMessage) {
 	activeStart := 0
 	for i := range messages {
 		if messages[i].Role != "user" || messages[i].Transient {

@@ -36,6 +36,18 @@ const (
 	nativeThinkingQwen nativeThinkingDialect = config.NativeThinkingQwen
 )
 
+// pinnedNativeThinkingDialect reports whether the compat block pins the chat
+// dialect explicitly, i.e. with a value other than unset or `auto`. The model
+// name cannot identify an aliased endpoint, so a pin is the only signal that an
+// unrecognized ID really speaks a known native dialect.
+func pinnedNativeThinkingDialect(compat *config.ChatCompletionsCompatConfig) bool {
+	if compat == nil {
+		return false
+	}
+	selector := strings.TrimSpace(compat.NativeThinkingValue())
+	return selector != "" && !strings.EqualFold(selector, config.NativeThinkingAuto)
+}
+
 // resolveNativeThinkingDialect picks the dialect for a Chat Completions target.
 // The configured selector wins over inference, and both are limited to the
 // dialects Chord knows how to build: a wrong selector fails the request with a

@@ -379,12 +379,12 @@ func (o *OpenAIProvider) CompleteStream(
 		if wireFamily == modelcompat.WireFamilyOpenAIChat && continuityMode == modelcompat.ReasoningContinuityOpenAIVisible {
 			fillCurrentTurnEmptyReasoning(apiMessages)
 		}
-		if dialect == nativeThinkingGemini {
+		if chatGeminiRequiresSignaturePlaceholder(model, chatCompat, dialect) {
 			// Gemini 3 rejects function-call history whose thought signature is
 			// missing; a step without one (never captured, or stripped by the
 			// replay ladder) gets the documented placeholder instead of a
 			// guaranteed 400.
-			ensureChatGeminiActiveLoopSignatures(apiMessages, model)
+			ensureChatGeminiActiveLoopSignatures(apiMessages)
 		}
 
 		// Convert tools.

@@ -1541,10 +1541,11 @@ func providerWireFamily(provider *ProviderConfig) string {
 func (p *ProviderConfig) NativeFamily(modelID string) string {
 	wire := providerWireFamily(p)
 	if wire == modelcompat.WireFamilyOpenAIChat && p != nil {
-		if compat := p.ChatCompletionsCompat(modelID); compat != nil &&
-			!strings.EqualFold(strings.TrimSpace(compat.NativeThinkingValue()), config.NativeThinkingAuto) {
+		if compat := p.ChatCompletionsCompat(modelID); pinnedNativeThinkingDialect(compat) {
 			// An explicit selector declares what the backend reads, including
-			// `off` for endpoints that reject the native fields.
+			// `off` for endpoints that reject the native fields. An unset
+			// selector means auto, exactly like an explicit `auto`, and keeps
+			// inferring the family from the model name below.
 			dialect, err := chatCompletionsNativeThinking(modelID, compat)
 			if err != nil {
 				return modelcompat.NativeFamilyUnknown
