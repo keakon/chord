@@ -226,7 +226,16 @@ func (a *MainAgent) parkSubAgent(agentID string) bool {
 	}
 	a.releaseSubAgentSlot(sub)
 	a.fileTrack.ReleaseAll(agentID)
-	tools.StopAllJobsForAgent(agentID, "terminated on subagent park")
+	// Detached jobs deliberately outlive the park: the backgroundJobHandle
+	// promise ("you will be notified when it finishes") only holds if the job
+	// keeps running, and the completion path attributes a finished job whose
+	// owner has no live runtime to the main transcript, so the orchestrator —
+	// and the JOBS surface, which the main agent can read and stop — still
+	// sees the result. Jobs are stopped only by explicit teardown of a live
+	// runtime: shutdown, session switch, subagent close/stop, ancestor
+	// cancellation, and waiting-main expiry while its runtime is still live.
+	// A parked record that expires later does not stop its jobs, because the
+	// surviving job is the only producer of that result.
 	sub.cancel()
 	sub.closeLLMClient()
 	if focused {

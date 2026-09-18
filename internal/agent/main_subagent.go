@@ -811,7 +811,15 @@ func (a *MainAgent) handleJobFinished(evt Event) {
 		a.subs.mu.RUnlock()
 	}
 	if sub == nil && payload.AgentID != "" && payload.AgentID != a.instanceID {
-		log.Warnf("handleJobFinished: owner subagent not found, attributing to main agent_id=%v background_id=%v", payload.AgentID, backgroundID)
+		// A parked owner has no live runtime by design; its detached job
+		// outlives the park and the completion reports here. Only an
+		// unexpectedly missing owner (no durable record either) stays a
+		// warning.
+		if a.taskRecordByInstanceID(payload.AgentID) != nil {
+			log.Infof("handleJobFinished: owner subagent parked or settled, attributing to main agent_id=%v background_id=%v", payload.AgentID, backgroundID)
+		} else {
+			log.Warnf("handleJobFinished: owner subagent not found, attributing to main agent_id=%v background_id=%v", payload.AgentID, backgroundID)
+		}
 	}
 
 	// Every finished job becomes one durable background_result mailbox row,
