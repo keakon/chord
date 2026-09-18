@@ -9,7 +9,7 @@ Use this pattern when you sit behind an OpenAI-compatible gateway and want:
 
 The same configuration is available as a ready-to-copy file: [`openai-compat-load-balance.yaml`](./openai-compat-load-balance.yaml).
 
-Replace example domains, model names, and environment variables with your gateway settings. Verify the primary endpoint before adding the backup so you can diagnose one connection at a time.
+Replace example domains, model names, and environment variables with your gateway settings. The snippet fills in a current flagship so every field is present; pick the model you will actually run in [Choosing models](../model-choice.md). Verify the primary endpoint before adding the backup so you can diagnose one connection at a time.
 
 ## `~/.config/chord/auth.yaml`
 

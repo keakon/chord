@@ -11,7 +11,9 @@ These examples use a **real file layout**: pick a scenario and create the files 
 | OpenAI-compatible gateway | Multi-key rotation and backup-endpoint failover | [OpenAI-compatible gateway](./examples-openai-compat.md) |
 | Team repository | Project-level `.chord/`, hooks, shared commands, multi-agent roles | [Team setup](./examples-team.md) |
 
-These examples are starting points, not rigid templates. For field semantics and the full config surface, see the [Configuration cheatsheet](../configuration.md#configuration-cheatsheet).
+These examples are starting points, not rigid templates. They fill in a current flagship so every field is present; pick the model you will actually run in [Choosing models](../model-choice.md).
+
+For field semantics and the full config surface, see the [Configuration cheatsheet](../configuration.md#configuration-cheatsheet).
 If you already know the provider/model you want and only need a minimal copy-paste snippet, start with [Model configuration recipes](../model-configs.md).
 
 ## Agent file formats

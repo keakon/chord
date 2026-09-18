@@ -10,7 +10,7 @@ Use this setup when you want:
 
 The same configuration is available as a ready-to-copy file: [`codex-oauth-with-lsp.yaml`](./codex-oauth-with-lsp.yaml).
 
-Complete Codex sign-in and confirm the model works first, then add LSP and the reviewer as needed. Remove unused providers, pools, or roles together with their references. Install the corresponding language servers before enabling LSP.
+The YAML fills in a current flagship so every field is present; pick the Codex model you will actually run in [Choosing models](../model-choice.md). Complete Codex sign-in and confirm the model works first, then add LSP and the reviewer as needed. Remove unused providers, pools, or roles together with their references. Install the corresponding language servers before enabling LSP.
 
 ## `~/.config/chord/config.yaml`
 
@@ -56,7 +56,7 @@ providers:
           output: 128000
 
 model_pools:
-  thinking:
+  deep:
     - codex/gpt-5.5@high
     - codex/gpt-5.5
   fast:
@@ -113,7 +113,7 @@ name: "reviewer"
 description: "Read-only code reviewer"
 mode: "subagent"
 model_pools:
-  - thinking
+  - deep
 permission:
   "*": deny
   read: allow
@@ -156,12 +156,12 @@ npm install -g pyright
 ## Verify
 
 ```bash
-chord doctor models --pool thinking
+chord doctor models --pool deep
 chord doctor models --pool fast
 ```
 
 ## Common failures
 
 - OAuth opens but never completes: rerun `chord auth codex` in a local browser-capable environment, or use the device-code login path.
-- `fast` pool fails while `thinking` works: the OpenAI API key for the `fast` provider is missing or the model name differs on your account.
+- `fast` pool fails while `deep` works: the OpenAI API key for the `fast` provider is missing or the model name differs on your account.
 - LSP indicators stay unavailable: `gopls` or `pyright-langserver` is not installed on `PATH`.

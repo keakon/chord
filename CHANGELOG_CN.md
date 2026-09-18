@@ -10,6 +10,7 @@
 
 ### 新功能
 
+- 文档新增[按工作选模型](./docs/model-choice_CN.md)：先看你已经在付的能不能进 Chord，再按预算和角色分模型。配方页和示例页仍填当前旗舰，方便把字段写全。
 - headless 控制面新增三个可订阅推送：`session_switched` 在进程不重启、直接换会话时（执行 handoff plan、`/resume <id>`、`/new`）广播新的 `session_id`，`status_response.session_id` 也改成跟当前实际会话，不再停在启动快照上；`background_result` 推送后台任务结束后的持久结果（`target_agent_id`、`message_index`、`content`），回合 `idle` 之后才落盘的 JOB RESULT 输出只走这个通道；`context_notice` 转发持久的上下文压力提醒（`level`、`message`、`message_index`），这类提醒在 headless 没有别的通道。
 - 新增 `compat.forced_tool_choice.auto_only` 选项：只支持 `tool_choice: "auto"` 的后端，遇到 `required`、`none` 或指名工具都会拒掉，打开它就把所有非 `auto` 的选择降级为后端默认。provider 层设置、按模型覆盖；显式写 `auto` 的请求照常发送。
 - headless 里携带状态的 envelope（事件循环推送、命令路径上的 `role_change` / `handoff_cancelled` 公告、以及 `status_response`）现在带单调递增的 `seq`，集成方可以丢掉被更新推送超车的 `status_response` 旧快照。首次推送前的快照也带非零版本号，每个进程单独计数。任何改了缓存状态的突变都会递增 `seq`，即使网关没订阅对应的推送、或者这次突变根本没有推送，因此之后的 `status_response` 不会被突变前拷的旧快照超车。

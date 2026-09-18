@@ -10,7 +10,7 @@
 
 同一份配置也提供可直接复制的文件：[`codex-oauth-with-lsp.yaml`](./codex-oauth-with-lsp.yaml)。
 
-先完成 Codex 登录并确认模型可用，再按需要添加 LSP 和审查角色。不使用的服务商、模型池或角色应连同其引用一起移除；启用 LSP 前要先安装对应语言服务器。
+YAML 填的是当前旗舰，方便把字段写全；真正跑哪个 Codex 模型见[按工作选模型](../model-choice_CN.md)。完成 Codex 登录并确认模型可用后，再按需要添加 LSP 和审查角色。不使用的服务商、模型池或角色应连同其引用一起移除；启用 LSP 前要先安装对应语言服务器。
 
 ## `~/.config/chord/config.yaml`
 
@@ -56,7 +56,7 @@ providers:
           output: 128000
 
 model_pools:
-  thinking:
+  deep:
     - codex/gpt-5.5@high
     - codex/gpt-5.5
   fast:
@@ -113,7 +113,7 @@ name: "reviewer"
 description: "Read-only code reviewer"
 mode: "subagent"
 model_pools:
-  - thinking
+  - deep
 permission:
   "*": deny
   read: allow
@@ -156,12 +156,12 @@ npm install -g pyright
 ## 验证命令
 
 ```bash
-chord doctor models --pool thinking
+chord doctor models --pool deep
 chord doctor models --pool fast
 ```
 
 ## 常见失败原因
 
 - OAuth 打开但无法完成：在能打开本地浏览器的环境中重新运行 `chord auth codex`，或改用 device-code 登录路径。
-- `thinking` 池正常但 `fast` 池失败：`fast` provider 的 OpenAI API key 缺失，或账号上的模型名不同。
+- `deep` 池正常但 `fast` 池失败：`fast` provider 的 OpenAI API key 缺失，或账号上的模型名不同。
 - LSP 状态不可用：`gopls` 或 `pyright-langserver` 未安装到 `PATH`。

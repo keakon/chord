@@ -2,7 +2,7 @@
 
 <!-- description: Ready-to-copy provider and model pool recipes: OpenAI, Anthropic, Codex OAuth, and OpenAI-compatible gateways. -->
 
-Use this page when you already know which provider/model family you want and just need a copy-paste-ready starting point. Field semantics and the full schema live in [Configuration & Auth](./configuration.md); full multi-file workstation/team layouts live in [Examples](./examples/index.md).
+Use this page when you already know which provider/model family you want and just need a copy-paste-ready starting point. If you have not chosen a channel yet, start with [Choosing models](./model-choice.md). Field semantics and the full schema live in [Configuration & Auth](./configuration.md); full multi-file workstation/team layouts live in [Examples](./examples/index.md).
 
 ## How to use this page
 

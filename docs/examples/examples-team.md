@@ -11,7 +11,7 @@ This page shows a **shared project layout** under `.chord/`:
 
 The global `config.yaml` from this page is available as a ready-to-copy file: [`team-ready.yaml`](./team-ready.yaml).
 
-This is a combined example, not an all-or-nothing template. Get the global model configuration working first, then add project settings and the roles you need. Supply the scripts referenced by hook commands, or remove those hooks until ready. Keep credentials in personal configuration, never in the shared repository.
+This is a combined example, not an all-or-nothing template. The YAML fills in a current flagship so every field is present; pick the model you will actually run in [Choosing models](../model-choice.md). Get the global model configuration working first, then add project settings and the roles you need. Supply the scripts referenced by hook commands, or remove those hooks until ready. Keep credentials in personal configuration, never in the shared repository.
 
 ## `~/.config/chord/config.yaml`
 
@@ -31,7 +31,7 @@ providers:
           display: summarized
 
 model_pools:
-  thinking:
+  deep:
     - anthropic/claude-opus-5
   fast:
     - anthropic/claude-opus-5
@@ -103,7 +103,7 @@ name: "orchestrator"
 description: "Primary agent for multi-file work — plans, delegates, and synthesizes results."
 mode: "main"
 model_pools:
-  - thinking
+  - deep
 permission:
   "*": allow
   handoff: deny
@@ -150,7 +150,7 @@ Set `ANTHROPIC_API_KEY` for the global provider. Before copying the project-leve
 ## Verify
 
 ```bash
-chord doctor models --pool thinking
+chord doctor models --pool deep
 chord doctor models --pool fast
 ```
 
@@ -205,7 +205,7 @@ name: "reviewer"
 description: "Read-only reviewer for correctness, tests, and lint."
 mode: "subagent"
 model_pools:
-  - thinking
+  - deep
 permission:
   "*": deny
   read: allow
@@ -269,7 +269,7 @@ name: "expert"
 description: "Judgment-heavy agent for bug analysis, architecture, and complex implementation."
 mode: "subagent"
 model_pools:
-  - thinking
+  - deep
 permission:
   "*": allow
   todo_write: deny

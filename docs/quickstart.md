@@ -94,6 +94,6 @@ Read in this order:
 
 1. [Permissions & Safety](./permissions-and-safety.md): set approval rules before the first edit.
 2. [Usage](./usage.md): daily controls, sessions, and long tasks.
-3. [Configuration & Auth](./configuration.md): providers, credentials, and model pools.
+3. [Choosing models](./model-choice.md) then [Configuration & Auth](./configuration.md): pick a channel, then wire providers, credentials, and model pools.
 4. [Customization](./customization.md): roles, skills, and project setup.
 5. [Troubleshooting](./troubleshooting.md): when something fails.

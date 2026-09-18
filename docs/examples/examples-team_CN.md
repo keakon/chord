@@ -11,7 +11,7 @@
 
 这一页的全局 `config.yaml` 也提供可直接复制的文件：[`team-ready.yaml`](./team-ready.yaml)。
 
-这是组合示例，不必整套复制。先让全局模型配置正常工作，再添加项目配置和所需角色。Hook 命令引用的脚本需要自行提供；尚未准备好时先移除对应 Hook。凭据保留在个人配置中，不要提交到团队仓库。
+这是组合示例，不必整套复制。YAML 填的是当前旗舰，方便把字段写全；真正跑哪个模型见[按工作选模型](../model-choice_CN.md)。全局模型配置跑通后，再添加项目配置和所需角色。Hook 命令引用的脚本需要自行提供；尚未准备好时先移除对应 Hook。凭据保留在个人配置中，不要提交到团队仓库。
 
 ## `~/.config/chord/config.yaml`
 
@@ -31,7 +31,7 @@ providers:
           display: summarized
 
 model_pools:
-  thinking:
+  deep:
     - anthropic/claude-opus-5
   fast:
     - anthropic/claude-opus-5
@@ -103,7 +103,7 @@ name: "orchestrator"
 description: "Primary agent for multi-file work — plans, delegates, and synthesizes results."
 mode: "main"
 model_pools:
-  - thinking
+  - deep
 permission:
   "*": allow
   handoff: deny
@@ -150,7 +150,7 @@ permission:
 ## 验证命令
 
 ```bash
-chord doctor models --pool thinking
+chord doctor models --pool deep
 chord doctor models --pool fast
 ```
 
@@ -205,7 +205,7 @@ name: "reviewer"
 description: "Read-only reviewer for correctness, tests, and lint."
 mode: "subagent"
 model_pools:
-  - thinking
+  - deep
 permission:
   "*": deny
   read: allow
@@ -269,7 +269,7 @@ name: "expert"
 description: "Judgment-heavy agent for bug analysis, architecture, and complex implementation."
 mode: "subagent"
 model_pools:
-  - thinking
+  - deep
 permission:
   "*": allow
   todo_write: deny

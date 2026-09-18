@@ -23,7 +23,7 @@ providers:
           display: summarized
 
 model_pools:
-  thinking:
+  deep:
     - anthropic/claude-opus-5
   fast:
     - anthropic/claude-opus-5

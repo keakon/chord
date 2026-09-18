@@ -11,7 +11,9 @@
 | OpenAI 兼容网关 | 多 key 轮询、主备 endpoint 故障转移 | [OpenAI 兼容网关](./examples-openai-compat_CN.md) |
 | 团队仓库 | 项目级 `.chord/`、hooks、共享命令、多 agent 分工 | [团队方案](./examples-team_CN.md) |
 
-这些示例是起点，不是模板生成器。字段含义和完整规则见[配置字段速查表](../configuration_CN.md#配置字段速查表)。
+这些示例是起点，不是模板生成器。页面填的是当前旗舰，方便把字段写全；真正跑哪个模型见[按工作选模型](../model-choice_CN.md)。
+
+字段含义和完整规则见[配置字段速查表](../configuration_CN.md#配置字段速查表)。
 如果你已经知道自己要用哪个 provider / model，只想找一段最小可复制配置，优先看[模型配置速查](../model-configs_CN.md)。
 
 ## Agent 文件格式

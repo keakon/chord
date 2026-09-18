@@ -70,7 +70,7 @@ chord
 
 - [快速开始](./docs/quickstart_CN.md)：安装并完成第一个任务
 - [使用指南](./docs/usage_CN.md)：日常操作、恢复会话和长任务
-- [模型配置速查](./docs/model-configs_CN.md) · [配置示例](./docs/examples/index_CN.md)：接入自己的模型和服务商
+- [按工作选模型](./docs/model-choice_CN.md) · [模型配置速查](./docs/model-configs_CN.md) · [配置示例](./docs/examples/index_CN.md)：先选渠道，再接入
 - [权限与安全](./docs/permissions-and-safety_CN.md)：决定哪些操作需要确认
 - [Headless 集成](./docs/headless_CN.md)：通过 `chord headless` 从其他入口操控
 - [排障](./docs/troubleshooting_CN.md) · [完整文档目录](./docs/index_CN.md)

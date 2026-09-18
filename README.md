@@ -70,7 +70,7 @@ For manual provider/model setup and the `limit` fields, see [Quickstart](./docs/
 
 - [Quickstart](./docs/quickstart.md): install and complete your first task
 - [Usage](./docs/usage.md): everyday controls, session recovery, and long tasks
-- [Model configuration recipes](./docs/model-configs.md) · [Configuration examples](./docs/examples/index.md): connect your models and providers
+- [Choosing models](./docs/model-choice.md) · [Model configuration recipes](./docs/model-configs.md) · [Configuration examples](./docs/examples/index.md): pick a channel, then connect it
 - [Permissions & Safety](./docs/permissions-and-safety.md): choose which actions need approval
 - [Headless](./docs/headless.md): control Chord from another interface with `chord headless`
 - [Troubleshooting](./docs/troubleshooting.md) · [Full documentation index](./docs/index.md)

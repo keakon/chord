@@ -13,7 +13,7 @@ Connect your models once, then reuse pools, fallback, and project overrides. Cho
 
 You do not need to read this page from top to bottom:
 
-- **First setup:** start with [Quickstart](./quickstart.md), then copy a provider from [Model configuration recipes](./model-configs.md).
+- **First setup:** start with [Quickstart](./quickstart.md), pick a channel in [Choosing models](./model-choice.md) if you have not already, then copy a provider from [Model configuration recipes](./model-configs.md).
 - **Credentials and OAuth:** jump to [`auth.yaml`](#authyaml) or [OAuth](#oauth).
 - **Routing and reliability:** use [Model pools](#model-pools-selecting-providermodel), [Provider timeouts](#provider-timeouts), and [Stream retry cap](#stream-retry-cap).
 - **Long sessions:** use [Context management](./context-management.md).

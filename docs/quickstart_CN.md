@@ -93,6 +93,6 @@ worktree 列表/移除、跨 worktree resume 与 headless 集成等完整用法�
 
 1. [权限与安全](./permissions-and-safety_CN.md)：第一次改文件前先定好审批规则。
 2. [使用指南](./usage_CN.md)：日常操作、会话与长任务。
-3. [配置与认证](./configuration_CN.md)：服务商、凭据和模型池。
+3. [按工作选模型](./model-choice_CN.md) 再看[配置与认证](./configuration_CN.md)：先选渠道，再接服务商、凭据和模型池。
 4. [扩展与定制](./customization_CN.md)：角色、技能与项目配置。
 5. [常见问题排查](./troubleshooting_CN.md)：出错时看这里。

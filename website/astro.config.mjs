@@ -64,6 +64,7 @@ export default defineConfig({
           translations: { 'zh-CN': '配置模型' },
           items: [
             { slug: 'configuration', translations: { 'zh-CN': '配置与认证' } },
+            { slug: 'model-choice', translations: { 'zh-CN': '按工作选模型' } },
             { slug: 'model-configs', translations: { 'zh-CN': '模型配置速查' } },
             { slug: 'reasoning', translations: { 'zh-CN': '推理与思考' } },
             { slug: 'context-management', translations: { 'zh-CN': '上下文管理' } },

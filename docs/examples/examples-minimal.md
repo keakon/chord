@@ -1,6 +1,6 @@
 # Minimal
 
-This is the smallest practical personal setup: one provider, one key, and one model pool.
+This is the smallest practical personal setup: one provider, one key, and one model pool. The YAML fills in a current flagship so every field is present; pick the model you will actually run in [Choosing models](../model-choice.md).
 
 Create the two files below and set the environment variable to your own key. Add other features after confirming the model connects.
 

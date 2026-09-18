@@ -2,7 +2,7 @@
 
 **更快、更省、更轻的终端 Coding Agent。** Chord 为长会话设计：key 或模型失败时自动切换，用请求级剪裁加压缩控制成本，内存占用保持低位。
 
-第一次使用时，建议按这个顺序走：先看[快速开始](./quickstart_CN.md)跑通第一个任务，再从[模型配置速查](./model-configs_CN.md)复制服务商配置，最后在[权限与安全](./permissions-and-safety_CN.md)定好审批规则；已经在用时，按下面的目标找答案。
+第一次使用时，建议按这个顺序走：先看[快速开始](./quickstart_CN.md)跑通第一个任务，还没选定渠道时先看[按工作选模型](./model-choice_CN.md)，再从[模型配置速查](./model-configs_CN.md)复制服务商配置，最后在[权限与安全](./permissions-and-safety_CN.md)定好审批规则；已经在用时，按下面的目标找答案。
 
 一次 DeepSWE v1.1 任务实测里 Chord 用时最短、成本最低（6m37s，￥0.348），完整表格与测量方法见[性能](./performance_CN.md)。
 
@@ -17,6 +17,7 @@
 ## 配置模型
 
 - [配置与认证](./configuration_CN.md)：配置文件、凭据、模型池与字段参考
+- [按工作选模型](./model-choice_CN.md)：按预算和角色选渠道与模型
 - [模型配置速查](./model-configs_CN.md)：按服务商选择可复制的配置
 - [推理与思考](./reasoning_CN.md)：选择思考设置，了解用量影响
 - [上下文管理](./context-management_CN.md)：了解压缩、剪裁和长会话调优

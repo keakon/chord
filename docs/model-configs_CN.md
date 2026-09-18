@@ -2,7 +2,7 @@
 
 <!-- description: 可直接复制的 provider 与模型池配置：OpenAI、Anthropic、Codex OAuth 和 OpenAI 兼容网关。 -->
 
-当你已经确定要用哪一类 provider / model，只想要一段可复制的起始配置时，用这一页。字段语义和完整 schema 仍以[配置与认证](./configuration_CN.md)为准；完整的多文件工作站 / 团队布局示例见[配置示例](./examples/index_CN.md)。
+当你已经确定要用哪一类 provider / model，只想要一段可复制的起始配置时，用这一页。还没选定渠道时，先看[按工作选模型](./model-choice_CN.md)。字段语义和完整 schema 仍以[配置与认证](./configuration_CN.md)为准；完整的多文件工作站 / 团队布局示例见[配置示例](./examples/index_CN.md)。
 
 ## 本页怎么读
 
