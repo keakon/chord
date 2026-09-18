@@ -24,6 +24,7 @@ This project has historical memory in MEMORY.md and linked records.
 - Weigh drift against verification cost: verify first when a memory is both likely stale and cheap to check; when checking is expensive, you may act on it but say the claim came from memory and may be outdated.
 - Before recommending a file, function, or flag that a memory names, confirm it still exists.
 - To drop a memory, delete only its index line in MEMORY.md. Files under .chord/memory/records/ stay as provenance; deleting them destroys the source evidence.
+- The index and records are maintained outside this session. Never add or restate entries yourself — including this turn's progress or state. You may only delete an index line that plainly no longer applies.
 - Managed index order is injection priority: earlier lines are injected first and the tail is dropped when the budget runs out. Move a line up to raise it; never reorder the section wholesale.`
 
 // memoryExtractionGuidancePrompt is appended to the stable Memory discipline
@@ -67,15 +68,15 @@ The user message is one JSON object. repository_instructions, active_memory, act
 
 Memory is injected into every later session as background, under a fixed budget. An entry earns its slot only if a future agent would genuinely do better for having it. The best memory stops the user from repeating themselves; the next best names a symptom, its non-obvious cause, and where to look before suspecting the wrong place.
 
-Priority when the budget is tight: user preferences and corrections > project or environment facts > frequently hit debugging anchors > single-function implementation detail.
+Memory holds only what the user stated and has not yet been promoted into project instructions or docs: a background preference, fact, or reusable workflow the user said, specific to this project, and not mandatory on every turn.
 
 ## Where a conclusion belongs
 
-Memory is one of several homes for a conclusion, and the weakest of them. Route by authority and by how often the conclusion is triggered:
+Memory is one of several homes for a conclusion, and the weakest of them. Route by who stated it and by authority, not by how important it looks in this one transcript. One transcript never shows cross-session frequency, so "looks reusable" alone never justifies a memory.
 
 - Must always apply, and the user stated it -> project instructions. Emit a promotion with target "project_instructions"; do not also create the memory.
-- Useful but rarely triggered (a narrow subsystem detail, a one-off diagnosis, an environment quirk) -> project documentation. Emit a promotion with target "project_docs". Per-turn budget is for what recurs.
-- Recurs across sessions, is not mandatory, and is specific to this project -> memory. Create the candidate.
+- The model found it on its own and a future session could rediscover it from code, logs, tests, or docs -> project documentation or nothing. Emit a promotion with target "project_docs" when it is worth keeping for a human to review, otherwise drop it. Do not create a memory for rediscoverable facts.
+- The user stated it (or the transcript shows the model could not proceed without asking the user), it is specific to this project, and it is not mandatory on every turn -> memory. Create the candidate.
 - Already expressed by repository instructions, code, tests, public documentation, configuration, or git history -> nothing. Drop it.
 
 You never see the code, tests, or documentation themselves, so absence from this input is not evidence that something is undocumented. When you cannot tell whether the repository already expresses a conclusion, drop it. If its main body is already covered but one part is genuinely non-obvious, keep only that part; if that leaves nothing worth stating, produce nothing.
@@ -114,6 +115,8 @@ active_memory is the current index. You are responsible for its quality, not onl
 ## Fields
 
 statement is the durable conclusion. rationale is why it matters beyond the source session. application names the future trigger and the concrete way to use it. If you cannot write all three without padding or repetition, do not create the memory.
+
+statement must not carry this session's commit SHA, temporary dependency pins, absolute filesystem paths, or one-off flaky-test noise. Name the subsystem or project-root-relative paths instead; a concrete instance, if needed at all, is at most one sentence.
 
 A pitfall must name at least one project path. A claim about this codebase that cannot point at the code is not a pitfall.
 

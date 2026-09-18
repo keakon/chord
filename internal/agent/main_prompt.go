@@ -89,8 +89,9 @@ func (a *MainAgent) installSystemPrompt(prompt string) {
 }
 
 // buildSystemPrompt constructs the default system prompt that is injected at
-// the start of every conversation. It is fully static: identity, guidelines,
-// capabilities, and cache-stable reminder framing live here. Dynamic
+// the start of every conversation. It is cache-stable framing: it varies with
+// Memory load and tool visibility, not with environment or time. Identity,
+// guidelines, capabilities, and reminder framing live here. Dynamic
 // environment fields (working directory, platform, date, venv) are delivered
 // via the session-context reminder before the first user message to keep this
 // prefix cache-stable.
@@ -102,7 +103,7 @@ func (a *MainAgent) buildSystemPrompt() string {
 	parts = append(parts, sharedAgentValuesPrompt)
 	// Dynamic environment info (working directory, platform, date, venv) is
 	// injected via the session-context reminder before the first user message to
-	// keep the system prompt fully static and maximize prefix cache reuse.
+	// keep the system prompt cache-stable and maximize prefix cache reuse.
 	parts = append(parts, sharedCodingGuidelinesPrompt)
 	parts = append(parts, sharedContentTrustPrompt)
 	parts = append(parts, sharedReasoningDisciplinePrompt)

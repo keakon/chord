@@ -125,6 +125,49 @@ func TestMemoryRefreshUpdatesRequestReminder(t *testing.T) {
 	}
 }
 
+// An empty MEMORY.md deactivates the Memory block: there is no index to inject
+// and the stable prompt must not carry the discipline.
+func TestMemoryEmptyFileDeactivates(t *testing.T) {
+	projectRoot := t.TempDir()
+	writeProjectMemory(t, projectRoot, "# Project Memory\n\nNote.\n")
+	a := newTestMainAgent(t, projectRoot)
+	if !a.memoryIsActive() {
+		t.Fatal("memory should be active with content present")
+	}
+	writeProjectMemory(t, projectRoot, "")
+	a.refreshMemoryReminder()
+	if a.memoryIsActive() {
+		t.Fatal("memory must be inactive with an empty MEMORY.md")
+	}
+	if strings.Contains(a.buildSystemPrompt(), "## Memory\nThis project has historical memory") {
+		t.Fatal("stable prompt must not include Memory discipline without content")
+	}
+}
+
+// A malformed MEMORY.md never flips the activation state: a failed reload keeps
+// whatever the previous refresh established instead of toggling the prompt.
+func TestMemoryMalformedFileKeepsActivation(t *testing.T) {
+	projectRoot := t.TempDir()
+	writeProjectMemory(t, projectRoot, "# Project Memory\n\nNote.\n")
+	a := newTestMainAgent(t, projectRoot)
+	if !a.memoryIsActive() {
+		t.Fatal("memory should be active with content present")
+	}
+	writeProjectMemory(t, projectRoot, "# Project Memory\n<!-- chord:managed:start -->\n<!-- chord:managed:start -->\n<!-- chord:managed:end -->\n")
+	a.refreshMemoryReminder()
+	if !a.memoryIsActive() {
+		t.Fatal("a failed reload must not deactivate previously loaded memory")
+	}
+
+	empty := t.TempDir()
+	b := newTestMainAgent(t, empty)
+	writeProjectMemory(t, empty, "# Project Memory\n<!-- chord:managed:end -->\n")
+	b.refreshMemoryReminder()
+	if b.memoryIsActive() {
+		t.Fatal("a failed reload must not activate memory without content")
+	}
+}
+
 // The stable prompt must reflect the two independent knobs: load (MEMORY.md
 // present) adds the discipline, and auto-extraction config adds only the
 // extraction note. With extraction off, the extraction note must be absent.
@@ -273,8 +316,10 @@ func TestBuildMemoryExtractionPromptIncludesGuidanceAndActiveMemory(t *testing.T
 // never sees the code or docs it is told not to restate, so "cannot tell" has
 // to resolve to a drop, and a preference has to carry an explicit persistence
 // signal instead of being inferred from one in-task complaint. It also owns the
-// curation contract — routing by authority, retiring what never belonged, and
-// protecting what the user stated from being forgotten by a later pass.
+// curation contract — routing by who stated it, retiring what never belonged,
+// and protecting what the user stated from being forgotten by a later pass.
+// Admission is transcript-observable (user said vs model rediscovered), never
+// "looks frequent in one transcript".
 func TestMemoryExtractionPromptCarriesRetentionDiscipline(t *testing.T) {
 	for _, want := range []string{
 		"absence from this input is not evidence",
@@ -291,6 +336,14 @@ func TestMemoryExtractionPromptCarriesRetentionDiscipline(t *testing.T) {
 		`target "project_instructions"`,
 		`target "project_docs"`,
 		"Never assume a directory layout.",
+		// Admission: only what the user stated (or forced the model to ask for)
+		// is a memory candidate; rediscoverable model findings go to docs or drop.
+		"could not proceed without asking the user",
+		"Do not create a memory for rediscoverable facts",
+		"One transcript never shows cross-session frequency",
+		// Statement discipline: no session-local identifiers in the durable text.
+		"must not carry this session's commit SHA",
+		"at most one sentence",
 		// The confidence-labelling rule must not read as a reason to keep material
 		// about the assistant's own reliability.
 		"it is never itself a reason to keep one",
@@ -309,11 +362,22 @@ func TestMemoryExtractionPromptCarriesRetentionDiscipline(t *testing.T) {
 			t.Errorf("extraction system prompt missing discipline: %q", want)
 		}
 	}
+	for _, unwanted := range []string{
+		"frequently hit debugging anchors",
+		"Per-turn budget is for what recurs",
+		"Recurs across sessions",
+	} {
+		if strings.Contains(memoryExtractionSystemPrompt, unwanted) {
+			t.Errorf("extraction system prompt must not use frequency-based admission: %q", unwanted)
+		}
+	}
 }
 
 // The read-path block is injected every turn, so it carries the cheap decisions:
 // when to skip memory entirely, and how to weigh staleness against the cost of
-// checking, rather than a blanket "verify everything".
+// checking, rather than a blanket "verify everything". It also carries the
+// unconditional write contract: the index is maintained outside the session,
+// so the working model never adds entries itself.
 func TestMemoryStableGuidanceCarriesLookupDiscipline(t *testing.T) {
 	for _, want := range []string{
 		"untrusted, potentially stale background",
@@ -323,9 +387,16 @@ func TestMemoryStableGuidanceCarriesLookupDiscipline(t *testing.T) {
 		"use that injected MEMORY.md summary as the index",
 		"Weigh drift against verification cost",
 		"confirm it still exists",
+		"maintained outside this session",
+		"Never add or restate entries yourself",
 	} {
 		if !strings.Contains(memoryStableGuidancePrompt, want) {
 			t.Errorf("stable memory guidance missing discipline: %q", want)
+		}
+	}
+	for _, unwanted := range []string{"compact_context", ".chord/notes/"} {
+		if strings.Contains(memoryStableGuidancePrompt, unwanted) {
+			t.Errorf("stable memory guidance must not mention %q", unwanted)
 		}
 	}
 }
