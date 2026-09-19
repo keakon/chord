@@ -70,6 +70,25 @@ func evaluateShellToolPermission(ruleset permission.Ruleset, args json.RawMessag
 		})
 		last := &items[len(items)-1]
 		match := ruleset.LastMatch(tools.NameShell, source)
+		// The reviewed text can keep a command from matching the rule written
+		// for it, so a rule that names the command's own text keeps its force:
+		// otherwise `FOO=bar; rm -rf /` would fall through to a broader rule
+		// instead of the `rm *` deny, and `FOO=bar rm -rf /` would fall through
+		// to a broad `allow` instead of the narrow `rm *` ask. An `ask` only
+		// overrides when the broader rule also covers the command text, so an
+		// explicit allow written for the assignment-bearing text still wins.
+		if commandSource := strings.TrimSpace(sub.CommandSource); commandSource != "" && commandSource != source {
+			if commandMatch := ruleset.LastMatch(tools.NameShell, commandSource); commandMatch.Found {
+				overrides := commandMatch.Rule.Action == permission.ActionDeny ||
+					(commandMatch.Rule.Action == permission.ActionAsk &&
+						match.Found && match.Rule.Action == permission.ActionAllow &&
+						match.Rule.Matches(tools.NameShell, commandSource))
+				if overrides {
+					match = commandMatch
+					last.Argument = commandSource
+				}
+			}
+		}
 		if match.Found {
 			last.Action = match.Rule.Action
 		} else {
@@ -77,12 +96,12 @@ func evaluateShellToolPermission(ruleset permission.Ruleset, args json.RawMessag
 		}
 		switch last.Action {
 		case permission.ActionAsk:
-			last.AskList = []string{source}
+			last.AskList = []string{last.Argument}
 			if match.Found {
 				last.AskRuleList = []string{match.Rule.Pattern}
 			}
 		case permission.ActionAllow:
-			last.AllowList = []string{source}
+			last.AllowList = []string{last.Argument}
 			if match.Found {
 				last.AllowRuleList = []string{match.Rule.Pattern}
 			}

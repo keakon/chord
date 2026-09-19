@@ -24,11 +24,20 @@ func (rs Ruleset) LastEvaluatedMatch(permission, pattern string) MatchResult {
 	return rs.lastMatch(permission, pattern, true)
 }
 
+// Matches reports whether this rule's permission and argument patterns both
+// cover the given lookup. It is the single definition of "this rule applies to
+// this call": callers that need to ask the same question about a rule the
+// ruleset already selected, instead of rescanning for the last match, must use
+// it so the two answers cannot drift apart.
+func (r Rule) Matches(permission, pattern string) bool {
+	return globMatch(toolname.Normalize(permission), toolname.Normalize(r.Permission)) && globMatch(pattern, r.Pattern)
+}
+
 func (rs Ruleset) lastMatch(permission, pattern string, skipCompoundShellAllow bool) MatchResult {
 	permission = toolname.Normalize(permission)
 	for _, r := range slices.Backward(rs) {
 
-		if globMatch(permission, toolname.Normalize(r.Permission)) && globMatch(pattern, r.Pattern) {
+		if r.Matches(permission, pattern) {
 			if skipCompoundShellAllow && r.Action == ActionAllow && shellCompoundCommandNeedsReview(permission, pattern, r.Pattern) {
 				continue
 			}

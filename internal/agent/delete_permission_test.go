@@ -432,7 +432,9 @@ shell:
 	}
 }
 
-func TestEvaluateToolPermissionBashStripsLeadingAssignmentsForSubcommandMatch(t *testing.T) {
+// A deny rule names the command itself, so an assignment that keeps the command
+// from matching the bare text must not push it into a broader fallback rule.
+func TestEvaluateToolPermissionBashDenyAnchorsToCommandText(t *testing.T) {
 	node := parsePermissionNode(t, `
 "*": deny
 shell:
