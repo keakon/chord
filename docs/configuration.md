@@ -852,6 +852,21 @@ For an ordinary 429, the key cooldown follows a single priority order: a confirm
 
 This 429 pacing applies before and after visible streaming output alike: a 429 that interrupts a visible stream cools the key down and rotates to the next one.
 
+When every key of every pool entry is cooling down, Chord waits instead of
+sending a request, and how long it sleeps depends on the pool. With a single
+model configured there is nothing else to try, so it waits for the earliest key
+recovery instant — a confirmed quota reset instant the provider defines, or a
+`Retry-After` hint already capped by `retry_after_max_s`. Nothing re-probes the
+pool during that stretch, so a credential added mid-wait is picked up once the
+wait ends. With fallback models configured it re-checks the pool at least once a
+minute, because a sibling model, a newly added credential, or a refreshed
+rate-limit snapshot can free up a request long before the longest cooldown ends.
+Either way the status bar counts down to the point a request can actually go
+out, not to the next internal re-check. The shortest cooldown in the pool always
+decides: a model that is ready again is never held back by a longer cooldown on
+another one, and a pool that is re-checked every minute picks a recovered key up
+as soon as it is ready.
+
 Codex OAuth follows the same rules: every Codex 429 is an ordinary 429. A
 retry hint (`Retry-After` or WebSocket `resets_in_seconds`) is honored ahead
 of explicit settings, and a usage-limit 429 carrying neither a hint nor an

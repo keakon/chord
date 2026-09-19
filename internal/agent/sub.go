@@ -193,6 +193,13 @@ type SubAgent struct {
 	llmSilenceEscalatedAt     time.Time // when the current recovery wait started
 	llmSilenceRecoveries      int       // watchdog restarts since the last real request boundary
 	llmSilenceAbandonedTurnID uint64    // turn failed for silence; its late results are dropped
+	// llmCoolingDeadline holds the end of the bounded cooling wait the LLM
+	// client last reported, as Unix nanoseconds (0 when not waiting). A request
+	// that sleeps out a key cooldown is deliberately silent, so liveness checks
+	// must not mistake it for a wedged goroutine. The request goroutine writes
+	// it from the stream callback; the run loop and the main-side stall sweep
+	// read it, hence the atomic.
+	llmCoolingDeadline atomic.Int64
 
 	// pendingComplete is set when Complete appears alongside other tool
 	// calls in one LLM response. The other tools execute first; EventAgentDone
@@ -958,9 +965,7 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.M
 		wallReq := s.parent.walltime.startRequestAt(s.instanceID, s.agentDefName, turn.ID)
 		if wallReq != nil {
 			defer wallReq.finish()
-			wallReq.wireStreamReducer(streamReducer, func(status *message.StatusDelta) {
-				s.parent.emitStatusActivity(s.instanceID, status)
-			})
+			wallReq.wireStreamReducer(streamReducer)
 		}
 		requestCtx := llm.WithResponsesTurnState(turn.Ctx, turn.LLMResponsesState)
 		resp, err := llmClient.CompleteStream(requestCtx, messages, toolDefs, callback)
@@ -1097,6 +1102,13 @@ func (s *SubAgent) newSubLLMStreamReducer(turn *Turn, promoteStreamingActivity f
 		},
 	}
 	streamReducer.emitActivity = func(status *message.StatusDelta) {
+		if status != nil {
+			if status.Type == message.StatusDeltaCooling {
+				s.noteLLMCoolingWait(status.Deadline)
+			} else {
+				s.clearLLMCoolingWait()
+			}
+		}
 		s.parent.emitStatusActivity(s.instanceID, status)
 	}
 	streamReducer.promoteStreamingActivity = promoteStreamingActivity

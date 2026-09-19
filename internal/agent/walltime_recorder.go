@@ -235,10 +235,17 @@ func (r *walltimeRecorder) startRequestAt(agentID, agentName string, turnID uint
 // status would stay open until the request terminal — inflating Cooldown and
 // shrinking Model. Wrapping the promotion path closes an open cooldown window
 // on the first visible text, thinking, or tool-use delta as well.
-func (w *requestWallclock) wireStreamReducer(r *llmStreamReducer, emit func(*message.StatusDelta)) {
+//
+// Both hooks wrap whatever the reducer already installed instead of replacing
+// it: emitActivity also carries the reducer's own bookkeeping (the SubAgent
+// cooling record its liveness checks read), and a replacement silently dropped
+// that writer. The reducer owns what an activity means; this hook only adds the
+// accounting.
+func (w *requestWallclock) wireStreamReducer(r *llmStreamReducer) {
 	if w == nil || r == nil {
 		return
 	}
+	emit := r.emitActivity
 	r.emitActivity = func(status *message.StatusDelta) {
 		if emit != nil {
 			emit(status)

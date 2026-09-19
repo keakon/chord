@@ -258,6 +258,12 @@ func runningSubAgentStallReason(sub *SubAgent, now time.Time) string {
 	if held, _ := sub.slotState(); !held {
 		return ""
 	}
+	// A worker sleeping out an API key cooldown is silent by design: the wait
+	// has a known end and the request resumes on its own, so reporting it as a
+	// suspected stall would send the owner chasing healthy work.
+	if !sub.llmCoolingWaitDeadline().IsZero() {
+		return ""
+	}
 	if now.Sub(sub.StateChangedAt()) > coordinationSnapshotStallAfter {
 		return "running with no recent state/progress update"
 	}

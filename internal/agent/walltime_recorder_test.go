@@ -374,7 +374,11 @@ func TestWireStreamReducerClosesCooldownOnStreamingPromotion(t *testing.T) {
 
 	reducer := &llmStreamReducer{}
 	var activities []ActivityType
-	req.wireStreamReducer(reducer, func(status *message.StatusDelta) { activities = append(activities, ActivityType(status.Type)) })
+	// The reducer installs its own emit hook first, exactly like
+	// newMainLLMStreamReducer / newSubLLMStreamReducer do; wiring must add the
+	// accounting on top of it instead of replacing it.
+	reducer.emitActivity = func(status *message.StatusDelta) { activities = append(activities, ActivityType(status.Type)) }
+	req.wireStreamReducer(reducer)
 
 	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: string(ActivityCooling)}})
 	time.Sleep(20 * time.Millisecond)

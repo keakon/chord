@@ -239,7 +239,7 @@ func TestCompleteStreamRetriesReplayEvidenceEchoWithReinforcedContinuation(t *te
 	result, _, err := client.completeStreamTarget(
 		context.Background(),
 		streamRetryTarget{provider: cfg, impl: impl, modelID: "gpt-5.6-sol", maxTokens: 1024, contextLimit: 128000, inputLimit: 128000, tuning: RequestTuning{ReplayCompat: &strict}},
-		0, strictCurrentTurnReplayMessages(), nil, func(delta message.StreamDelta) { deltas = append(deltas, delta) }, false, nil, 0, false,
+		0, strictCurrentTurnReplayMessages(), nil, func(delta message.StreamDelta) { deltas = append(deltas, delta) }, false, nil, roundCoolingWait{}, false,
 		&CallStatus{}, "", 0, 0, func() error { return nil }, nil, "",
 	)
 	if err != nil {
@@ -722,7 +722,7 @@ func TestCompleteStreamTargetPassesReplayCompatibleTuning(t *testing.T) {
 				Provenance: &message.MessageProvenance{WireFamily: modelcompat.WireFamilyAnthropic},
 			},
 			{Role: message.RoleTool, ToolCallID: "call_1", Content: "READ_RESULT ok"},
-		}, nil, nil, false, nil, 0, false, &CallStatus{}, "", 0, 0,
+		}, nil, nil, false, nil, roundCoolingWait{}, false, &CallStatus{}, "", 0, 0,
 		func() error { return nil }, nil, "",
 	)
 	if err != nil || result.resp == nil {
@@ -760,7 +760,7 @@ func TestCompleteStreamTargetKeepsReasoningEffortWithCompat(t *testing.T) {
 				Provenance: &message.MessageProvenance{WireFamily: modelcompat.WireFamilyAnthropic},
 			},
 			{Role: message.RoleTool, ToolCallID: "call_1", Content: "READ_RESULT ok"},
-		}, nil, nil, false, nil, 0, false, &CallStatus{}, "", 0, 0,
+		}, nil, nil, false, nil, roundCoolingWait{}, false, &CallStatus{}, "", 0, 0,
 		func() error { return nil }, nil, "",
 	)
 	if err != nil || result.resp == nil {
@@ -797,7 +797,7 @@ func TestCompleteStreamStrictlyTextifiesRejectedForeignToolTrajectory(t *testing
 				Provenance: &message.MessageProvenance{WireFamily: modelcompat.WireFamilyAnthropic},
 			},
 			{Role: message.RoleTool, ToolCallID: "call_1", Content: "READ_RESULT ok"},
-		}, nil, nil, false, nil, 0, false, &CallStatus{}, "", 0, 0,
+		}, nil, nil, false, nil, roundCoolingWait{}, false, &CallStatus{}, "", 0, 0,
 		func() error { return nil }, nil, "",
 	)
 	if err != nil || result.resp == nil {
@@ -862,7 +862,7 @@ func TestCompleteStreamCompactionReplayFloorUsesPortableShape(t *testing.T) {
 			contextLimit: 128000, inputLimit: 128000,
 			tuning: RequestTuning{ReplayCompat: &level},
 		},
-		0, crossProviderReplayMessages(), nil, nil, false, nil, 0, false,
+		0, crossProviderReplayMessages(), nil, nil, false, nil, roundCoolingWait{}, false,
 		&CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "",
 	)
 	if err != nil || result.resp == nil {
@@ -903,7 +903,7 @@ func TestCompleteStreamAmbiguousFailureRetriesUnchangedWithoutPersistingReplayLe
 					provider: cfg, impl: impl, modelID: "gpt-5.6-sol", maxTokens: 4096,
 					contextLimit: 128000, inputLimit: 128000,
 				},
-				0, messages, nil, nil, false, nil, 0, false,
+				0, messages, nil, nil, false, nil, roundCoolingWait{}, false,
 				&CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "",
 			)
 			if err != nil || result.resp == nil {
@@ -942,7 +942,7 @@ func TestCompleteStreamAmbiguousFailureProbeIsRequestScoped(t *testing.T) {
 			provider: cfg, impl: impl, modelID: "gpt-5.6-sol", maxTokens: 4096,
 			contextLimit: 128000, inputLimit: 128000,
 		},
-		0, messages, nil, nil, false, nil, 0, false,
+		0, messages, nil, nil, false, nil, roundCoolingWait{}, false,
 		&CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "",
 	)
 	if err != nil || result.resp == nil {
@@ -980,7 +980,7 @@ func TestCompleteStreamProbesRelayWrappedParam400WithReplaySensitiveInput(t *tes
 			provider: cfg, impl: impl, modelID: "gpt-5.6-sol", maxTokens: 4096,
 			contextLimit: 128000, inputLimit: 128000,
 		},
-		0, messages, nil, nil, false, nil, 0, false,
+		0, messages, nil, nil, false, nil, roundCoolingWait{}, false,
 		&CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "",
 	)
 	if err != nil || result.resp == nil {
@@ -1017,7 +1017,7 @@ func TestCompleteStreamOfficialParam400DoesNotProbe(t *testing.T) {
 			provider: cfg, impl: impl, modelID: "gpt-5.6-sol", maxTokens: 4096,
 			contextLimit: 128000, inputLimit: 128000,
 		},
-		0, messages, nil, nil, false, nil, 0, false,
+		0, messages, nil, nil, false, nil, roundCoolingWait{}, false,
 		&CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "",
 	)
 	if err == nil {
@@ -1045,7 +1045,7 @@ func TestCompleteStreamSkipsEquivalentReplayLevelBeforeStrict(t *testing.T) {
 	}
 	result, _, err := client.completeStreamTarget(
 		context.Background(), streamRetryTarget{provider: cfg, impl: impl, modelID: "deepseek-v4-pro", maxTokens: 4096, contextLimit: 128000, inputLimit: 128000, tuning: RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "adaptive"}}},
-		0, messages, nil, nil, false, nil, 0, false, &CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "",
+		0, messages, nil, nil, false, nil, roundCoolingWait{}, false, &CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "",
 	)
 	if err != nil || result.resp == nil {
 		t.Fatalf("completeStreamTarget = (%+v, %v)", result, err)
@@ -1084,7 +1084,7 @@ func TestCompleteStreamRecoversAnthropicPrefixBindingRejection(t *testing.T) {
 	}
 	result, _, err := client.completeStreamTarget(
 		context.Background(), streamRetryTarget{provider: cfg, impl: impl, modelID: "claude-x", maxTokens: 4096, contextLimit: 128000, inputLimit: 128000, tuning: RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "adaptive"}}},
-		0, messages, nil, nil, false, nil, 0, false, &CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "",
+		0, messages, nil, nil, false, nil, roundCoolingWait{}, false, &CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "",
 	)
 	if err != nil || result.resp == nil {
 		t.Fatalf("completeStreamTarget = (%+v, %v)", result, err)
@@ -1134,7 +1134,7 @@ func TestCompleteStreamDegradesConvertedUnsignedThinkingWithoutTextLeak(t *testi
 	}
 	result, _, err := client.completeStreamTarget(
 		context.Background(), streamRetryTarget{provider: cfg, impl: impl, modelID: "glm-5.2", maxTokens: 4096, contextLimit: 128000, inputLimit: 128000, tuning: RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "adaptive"}}},
-		0, messages, nil, nil, false, nil, 0, false, &CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "",
+		0, messages, nil, nil, false, nil, roundCoolingWait{}, false, &CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "",
 	)
 	if err != nil || result.resp == nil {
 		t.Fatalf("completeStreamTarget = (%+v, %v)", result, err)
@@ -1266,7 +1266,7 @@ func TestCompleteStreamDegradesProviderNativeReplayOnKnownRejections(t *testing.
 					provider: cfg, impl: impl, modelID: tc.modelID, maxTokens: 4096,
 					contextLimit: 128000, inputLimit: 128000, tuning: tc.tuning,
 				},
-				0, messages, nil, nil, false, nil, 0, false, &CallStatus{}, "sys", 0, 0,
+				0, messages, nil, nil, false, nil, roundCoolingWait{}, false, &CallStatus{}, "sys", 0, 0,
 				func() error { return nil }, nil, "",
 			)
 			if err != nil || result.resp == nil {

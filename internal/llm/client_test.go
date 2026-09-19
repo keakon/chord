@@ -3956,27 +3956,65 @@ func TestMergeRoundWaitPrefersShortestCoolingWindow(t *testing.T) {
 	if got := roundRetryDelay(0, 30*time.Millisecond); got != 30*time.Millisecond {
 		t.Fatalf("roundRetryDelay(0, 30ms) = %v, want mandatory cooling wait", got)
 	}
-	got := mergeRoundWait(0, time.Minute)
-	got = mergeRoundWait(got, time.Second)
-	if got != time.Second {
-		t.Fatalf("mergeRoundWait(1m, 1s) = %v, want 1s", got)
+	got := mergeCoolingWindow(roundCoolingWait{}, time.Minute, maxCoolingWait)
+	got = mergeCoolingWindow(got, time.Second, maxCoolingWait)
+	if got.sleep != time.Second || got.recovery != time.Second {
+		t.Fatalf("mergeCoolingWindow(1m, 1s) = %+v, want 1s for both", got)
 	}
-	got = mergeRoundWait(0, 0)
-	if got != time.Second {
-		t.Fatalf("mergeRoundWait(0, 0) = %v, want 1s clamp", got)
+	got = mergeCoolingWindow(roundCoolingWait{}, 0, maxCoolingWait)
+	if got.sleep != time.Second || got.recovery != time.Second {
+		t.Fatalf("mergeCoolingWindow(0) = %+v, want the 1s floor for both", got)
 	}
-	got = mergeRoundWait(0, 2*time.Minute)
-	if got != time.Minute {
-		t.Fatalf("mergeRoundWait(0, 2m) = %v, want 1m cap", got)
+	// A capped pool sleeps for the re-probe interval but still reports the real
+	// recovery instant, so the countdown never promises an earlier request.
+	got = mergeCoolingWindow(roundCoolingWait{}, 2*time.Minute, maxCoolingWait)
+	if got.sleep != maxCoolingWait {
+		t.Fatalf("mergeCoolingWindow(2m).sleep = %v, want the %v re-probe cap", got.sleep, maxCoolingWait)
+	}
+	if got.recovery != 2*time.Minute {
+		t.Fatalf("mergeCoolingWindow(2m).recovery = %v, want the real 2m window", got.recovery)
+	}
+	// An uncapped pool (single target) sleeps until the real recovery instant.
+	got = mergeCoolingWindow(roundCoolingWait{}, 3*time.Hour, 0)
+	if got.sleep != 3*time.Hour || got.recovery != 3*time.Hour {
+		t.Fatalf("mergeCoolingWindow(3h, uncapped) = %+v, want 3h for both", got)
+	}
+	// The shortest sleep and the shortest recovery can come from different
+	// targets, and each must keep its own minimum.
+	got = mergeCoolingWindow(roundCoolingWait{}, 30*time.Minute, maxCoolingWait)
+	got = mergeCoolingWindow(got, 5*time.Minute, maxCoolingWait)
+	if got.sleep != maxCoolingWait {
+		t.Fatalf("merged sleep = %v, want the %v re-probe cap", got.sleep, maxCoolingWait)
+	}
+	if got.recovery != 5*time.Minute {
+		t.Fatalf("merged recovery = %v, want the shortest real window", got.recovery)
 	}
 
-	got = mergePendingRoundWait(0, 0)
-	if got != 0 {
-		t.Fatalf("mergePendingRoundWait(0, 0) = %v, want 0 (no synthetic wait)", got)
+	if got := mergePendingCoolingWait(roundCoolingWait{}, roundCoolingWait{}); got.waiting() {
+		t.Fatalf("mergePendingCoolingWait(zero, zero) = %+v, want no synthetic wait", got)
 	}
-	got = mergePendingRoundWait(2*time.Second, 0)
-	if got != 2*time.Second {
-		t.Fatalf("mergePendingRoundWait(2s, 0) = %v, want 2s", got)
+	current := roundCoolingWait{sleep: 2 * time.Second, recovery: 2 * time.Second}
+	if got := mergePendingCoolingWait(current, roundCoolingWait{}); got != current {
+		t.Fatalf("mergePendingCoolingWait(2s, zero) = %+v, want %+v preserved", got, current)
+	}
+	got = mergePendingCoolingWait(
+		roundCoolingWait{sleep: maxCoolingWait, recovery: 30 * time.Minute},
+		roundCoolingWait{sleep: 5 * time.Second, recovery: 5 * time.Second},
+	)
+	if got.sleep != 5*time.Second || got.recovery != 5*time.Second {
+		t.Fatalf("mergePendingCoolingWait picked %+v, want the shorter target's window", got)
+	}
+}
+
+func TestCoolingWaitCapDependsOnPoolShape(t *testing.T) {
+	if got := coolingWaitCap(false, nil); got != 0 {
+		t.Fatalf("coolingWaitCap(false, nil) = %v, want 0 (uncapped single target)", got)
+	}
+	if got := coolingWaitCap(true, nil); got != 0 {
+		t.Fatalf("coolingWaitCap(true, nil) = %v, want 0 (uncapped single target)", got)
+	}
+	if got := coolingWaitCap(true, []FallbackModel{{ModelID: "model-1"}}); got != maxCoolingWait {
+		t.Fatalf("coolingWaitCap(true, 1 fallback) = %v, want %v", got, maxCoolingWait)
 	}
 }
 
@@ -4103,6 +4141,55 @@ func TestCompleteStreamCoolingStatusUsesMergedRoundWait(t *testing.T) {
 	lastDeadline := coolingDeadlines[len(coolingDeadlines)-1]
 	if !lastDeadline.After(start) || lastDeadline.Sub(start) > time.Minute {
 		t.Fatalf("last cooling deadline = %v (%v after start), want within the merged wait", lastDeadline, lastDeadline.Sub(start))
+	}
+}
+
+func TestCompleteStreamSingleTargetCoolingWaitsForRealRecovery(t *testing.T) {
+	const cooldown = 30 * time.Minute
+	cfg := testProviderConfigWithKeys("only-prov", "only-model", []string{"k1"})
+	// MarkCooldown clamps to maxProviderRetryDelay, so a window this long only
+	// comes from a confirmed quota reset instant: it carries the provider's own
+	// reset time and is not bounded by retry_after_max_s, which caps only a
+	// Retry-After hint.
+	start := time.Now()
+	cfg.MarkQuotaExhaustedUntil("k1", start.Add(cooldown))
+	impl := &recordingProvider{}
+	c := NewClient(cfg, impl, "only-model", 4096, "sys")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var coolingDeadlines []time.Time
+	var coolingDetails []string
+	// The first cooling status is emitted before the round sleeps, so cancelling
+	// from the callback observes the intended wait without waiting it out.
+	_, err := c.CompleteStream(ctx, []message.Message{{Role: "user", Content: "hi"}}, nil, func(delta message.StreamDelta) {
+		if delta.Type == message.StreamDeltaStatus && delta.Status != nil && delta.Status.Type == message.StatusDeltaCooling {
+			coolingDeadlines = append(coolingDeadlines, delta.Status.Deadline)
+			coolingDetails = append(coolingDetails, delta.Status.Detail)
+			cancel()
+		}
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("CompleteStream err = %v, want context.Canceled after observing the cooling status", err)
+	}
+	if got := impl.CallCount(); got != 0 {
+		t.Fatalf("provider calls = %d, want 0 while the only key is cooling", got)
+	}
+	if len(coolingDeadlines) == 0 {
+		t.Fatal("expected a cooling status for the single-target pool")
+	}
+	deadline := coolingDeadlines[0]
+	elapsed := deadline.Sub(start)
+	if elapsed <= maxCoolingWait {
+		t.Fatalf("cooling deadline = %v after start, want the real %v recovery instant instead of the %v re-probe cap", elapsed, cooldown, maxCoolingWait)
+	}
+	// The deadline is stamped a moment after the remaining window is measured,
+	// so it may land just past the reset instant.
+	if elapsed > cooldown+time.Second {
+		t.Fatalf("cooling deadline = %v after start, want at most the %v cooldown", elapsed, cooldown)
+	}
+	if got := coolingDetails[0]; got != cooldown.String() {
+		t.Fatalf("cooling detail = %q, want %v", got, cooldown)
 	}
 }
 

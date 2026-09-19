@@ -353,6 +353,138 @@ func TestStallSweepHoldsQuietWorkersWhileUserInteractionPending(t *testing.T) {
 	}
 }
 
+// TestCoolingWaitHoldsLivenessChecksForSilentRequest pins the long-cooldown
+// exemption: a worker whose request is sleeping out an API key cooldown is
+// silent by design, so neither the in-flight silence watchdog nor the
+// owner-facing stall sweep may treat it as wedged while the reported recovery
+// instant is still ahead — and both must resume judging it once the wait ends.
+func TestCoolingWaitHoldsLivenessChecksForSilentRequest(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "adhoc-cooling-wait")
+	sub.agentDefName = "worker"
+	sub.semHeld = true
+	sub.setState(SubAgentStateRunning, "working")
+	a.syncTaskRecordFromSub(sub, "")
+	a.mailboxDeliveryPaused.Store(true)
+
+	// A request is in flight and its heartbeat is already stale past both
+	// thresholds: without the cooling record this is a stall on both paths.
+	sub.llmSilenceBudget = time.Minute
+	sub.llmRequestInFlight.Store(true)
+	sub.turn = &Turn{ID: 1}
+	stale := time.Now().Add(-coordinationSnapshotStallAfter - time.Minute)
+	sub.runtimeState.stateChangedAt = stale
+
+	if _, armed := sub.llmSilenceWatchdogDeadline(); !armed {
+		t.Fatal("silence watchdog not armed for an in-flight request")
+	}
+	if got := runningSubAgentStallReason(sub, time.Now()); got == "" {
+		t.Fatal("stale in-flight worker not flagged before the cooling wait is recorded")
+	}
+
+	// The client reports a cooling wait that runs far past the silence budget
+	// (a real quota reset can be hours out). Both checks must stand down.
+	coolingUntil := time.Now().Add(3 * time.Hour)
+	sub.noteLLMCoolingWait(coolingUntil)
+	// noteLLMCoolingWait is the only writer here; markActivity (which clears
+	// the record) must not have run, so the heartbeat stays stale on purpose.
+	sub.runtimeState.stateChangedAt = stale
+	deadline, armed := sub.llmSilenceWatchdogDeadline()
+	if !armed {
+		t.Fatal("silence watchdog disarmed during a cooling wait; it must stay armed with a later deadline")
+	}
+	if !deadline.After(coolingUntil) {
+		t.Fatalf("silence deadline = %v, want after the cooling recovery instant %v", deadline, coolingUntil)
+	}
+	if sub.handleLLMSilenceIfDue() {
+		t.Fatal("silence watchdog escalated a request that is sleeping out a key cooldown")
+	}
+	if got := runningSubAgentStallReason(sub, time.Now()); got != "" {
+		t.Fatalf("stall reason during a cooling wait = %q, want empty", got)
+	}
+	a.dispatch(Event{Type: EventSubAgentLifecycleSweep})
+	dispatchQueuedEvents(t, a)
+	if got := countRiskAlertsForTask(a, sub.taskID); got != 0 {
+		t.Fatalf("stall risk_alert count during a cooling wait = %d, want 0", got)
+	}
+
+	// Once the recovery instant has passed, the grace window expires and both
+	// checks judge the worker normally again.
+	sub.noteLLMCoolingWait(time.Now().Add(-time.Second))
+	sub.runtimeState.stateChangedAt = stale
+	if !sub.llmCoolingWaitDeadline().IsZero() {
+		t.Fatal("a past cooling deadline must not keep the grace window open")
+	}
+	if got := runningSubAgentStallReason(sub, time.Now()); got == "" {
+		t.Fatal("stall detection did not resume after the cooling wait ended")
+	}
+
+	// Real progress also drops the record immediately: a request that streams
+	// after cooling must not carry the grace window into a later silence.
+	sub.noteLLMCoolingWait(time.Now().Add(time.Hour))
+	sub.markActivity()
+	if !sub.llmCoolingWaitDeadline().IsZero() {
+		t.Fatal("real activity must clear the recorded cooling wait")
+	}
+}
+
+// TestCoolingWaitSurvivesProductionStreamReducerWiring pins the wiring order a
+// SubAgent request actually goes through. The reducer installs its own
+// emitActivity while it is being built — that closure is the only writer of the
+// cooling record the liveness checks read — and the wall-clock recorder wires
+// its accounting on afterwards. Wiring therefore has to wrap the hook rather
+// than replace it: a replacement leaves every cooling wait unrecorded, so a
+// worker sleeping out a real key cooldown is reported as wedged again.
+//
+// The construction order below mirrors SubAgent.handleLLM
+// (newSubLLMStreamReducer -> startRequestAt -> wireStreamReducer -> Handle), so
+// the test fails if the accounting hook ever stops chaining.
+func TestCoolingWaitSurvivesProductionStreamReducerWiring(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "adhoc-cooling-wiring")
+	sub.agentDefName = "worker"
+	sub.semHeld = true
+	sub.setState(SubAgentStateRunning, "working")
+	a.syncTaskRecordFromSub(sub, "")
+
+	// The request is in flight with a stale heartbeat, so without the cooling
+	// record both liveness checks would call this worker stalled.
+	sub.llmSilenceBudget = time.Minute
+	sub.llmRequestInFlight.Store(true)
+	sub.turn = &Turn{ID: 1}
+	sub.runtimeState.stateChangedAt = time.Now().Add(-coordinationSnapshotStallAfter - time.Minute)
+
+	turn := &Turn{ID: 1}
+	reducer := sub.newSubLLMStreamReducer(turn, func(string) {}, false, nil, 0)
+	wallReq := a.walltime.startRequestAt(sub.instanceID, sub.agentDefName, turn.ID)
+	if wallReq == nil {
+		t.Fatal("walltime recorder not wired; the test cannot reproduce the production order")
+	}
+	wallReq.wireStreamReducer(reducer)
+	t.Cleanup(wallReq.finish)
+
+	coolingUntil := time.Now().Add(3 * time.Hour)
+	reducer.Handle(message.StreamDelta{
+		Type: message.StreamDeltaStatus,
+		Status: &message.StatusDelta{
+			Type:     message.StatusDeltaCooling,
+			Detail:   "3h",
+			Deadline: coolingUntil,
+		},
+	})
+
+	got := sub.llmCoolingWaitDeadline()
+	if got.IsZero() {
+		t.Fatal("cooling wait not recorded through the production wiring order; the reducer's emitActivity hook was replaced instead of wrapped")
+	}
+	if !got.Equal(coolingUntil) {
+		t.Fatalf("recorded cooling deadline = %v, want %v", got, coolingUntil)
+	}
+	if reason := runningSubAgentStallReason(sub, time.Now()); reason != "" {
+		t.Fatalf("stall reason after a cooling status through production wiring = %q, want empty", reason)
+	}
+}
+
 // TestStallSweepSkipsRunningWorkerWhoseTaskAlreadySettled pins the late-alert
 // guard: a live runtime that still reports Running while its durable record
 // already settled is a stale conflict survivor. The sweep must not raise a

@@ -726,9 +726,7 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Me
 	wallReq := a.walltime.startRequestAt(identity.MainAgentID, a.currentAgentName(), turnID)
 	if wallReq != nil {
 		defer wallReq.finish()
-		wallReq.wireStreamReducer(streamReducer, func(status *message.StatusDelta) {
-			a.emitStatusActivity("main", status)
-		})
+		wallReq.wireStreamReducer(streamReducer)
 	}
 	requestOptions := llm.CompleteStreamOptions{
 		BeforeFallback: func(fallbackCtx context.Context, requestMessages []message.Message, fallback llm.FallbackModel) ([]message.Message, error) {

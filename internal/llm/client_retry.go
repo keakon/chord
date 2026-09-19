@@ -156,7 +156,26 @@ func (t *visibleStreamTracker) HadTextDelta() bool {
 	return t != nil && t.textStated
 }
 
+// maxCoolingWait bounds the sleep between rounds when the pool holds more than
+// one target: the wait is only a re-probe interval there, because a sibling
+// target, a newly added credential or a refreshed rate-limit snapshot can make
+// progress possible long before the target that reported the longest cooldown
+// recovers. A single-target pool has nothing to re-probe — key selection is a
+// local check that returns the same AllKeysCoolingError until the key's
+// recovery instant — so capping the wait there only wakes up to sleep again.
 const maxCoolingWait = 1 * time.Minute
+
+// coolingWaitCap reports the upper bound for a cooling wait, or 0 when the wait
+// must run to the key's real recovery instant. A reported window needs no cap of
+// its own: the cooldown it comes from is already the instant the key becomes
+// usable — a Retry-After hint bounded by the provider's retry_after_max_s, or a
+// confirmed quota reset instant that the provider alone defines.
+func coolingWaitCap(fallbackEnabled bool, fallbackModels []FallbackModel) time.Duration {
+	if !fallbackEnabled || len(fallbackModels) == 0 {
+		return 0
+	}
+	return maxCoolingWait
+}
 
 func isAllKeysCoolingError(err error) bool {
 	_, ok := errors.AsType[*AllKeysCoolingError](err)
@@ -208,29 +227,59 @@ func shouldContinueRetryMode(retryCount, maxAttempts int, lastErr error, hardCap
 	return isAllKeysCoolingError(lastErr) || isConcurrentRequestLimit429(lastErr)
 }
 
-func clampCoolingWait(wait time.Duration) time.Duration {
+// clampCoolingWait bounds one reported cooling window to cap. cap <= 0 keeps
+// the reported window as-is; a zero or negative window still becomes the 1s
+// floor so a round never spins without pausing.
+func clampCoolingWait(wait, cap time.Duration) time.Duration {
 	if wait <= 0 {
 		return time.Second
 	}
-	if wait > maxCoolingWait {
-		return maxCoolingWait
+	if cap > 0 && wait > cap {
+		return cap
 	}
 	return wait
 }
 
-func mergeRoundWait(current, candidate time.Duration) time.Duration {
-	candidate = clampCoolingWait(candidate)
-	if current == 0 || candidate < current {
+// roundCoolingWait pairs the two durations a cooling round must keep apart.
+// sleep is how long the round actually pauses before probing the pool again,
+// bounded by the re-probe cap; recovery is the earliest instant a request can
+// really go out, taken from the reported key cooldowns without that cap. They
+// are equal for an uncapped (single-target) pool and diverge once the cap
+// shortens the sleep, which is why a user-facing countdown must read recovery:
+// waking up to re-probe is not the same as being able to send.
+type roundCoolingWait struct {
+	sleep    time.Duration
+	recovery time.Duration
+}
+
+func (w roundCoolingWait) waiting() bool { return w.sleep > 0 }
+
+// minPositiveDuration keeps the smaller non-zero duration. A zero candidate
+// means "this target reported no cooling at all" and must not pull the window
+// down to zero, which would turn the wait into an immediate re-probe.
+func minPositiveDuration(current, candidate time.Duration) time.Duration {
+	if candidate > 0 && (current == 0 || candidate < current) {
 		return candidate
 	}
 	return current
 }
 
-func mergePendingRoundWait(current, candidate time.Duration) time.Duration {
-	if candidate <= 0 {
-		return current
-	}
-	return mergeRoundWait(current, candidate)
+// mergeCoolingWindow folds one reported cooling window into the round's running
+// minimum. Both fields track their own minimum: the first target to re-probe
+// decides when the next round starts, and the first target to actually recover
+// decides what the countdown shows, and those can be different targets.
+func mergeCoolingWindow(current roundCoolingWait, candidate, cap time.Duration) roundCoolingWait {
+	current.sleep = minPositiveDuration(current.sleep, clampCoolingWait(candidate, cap))
+	current.recovery = minPositiveDuration(current.recovery, clampCoolingWait(candidate, 0))
+	return current
+}
+
+// mergePendingCoolingWait folds one target's accumulated window into the
+// round's, ignoring targets that reported no cooling at all.
+func mergePendingCoolingWait(current, candidate roundCoolingWait) roundCoolingWait {
+	current.sleep = minPositiveDuration(current.sleep, candidate.sleep)
+	current.recovery = minPositiveDuration(current.recovery, candidate.recovery)
+	return current
 }
 
 func roundRetryDelay(backoffDelay, pendingRoundWait time.Duration) time.Duration {
@@ -544,7 +593,7 @@ type streamTargetAttemptResult struct {
 	resp                *message.Response
 	lastErr             error
 	lastErrProvider     *ProviderConfig
-	pendingRoundWait    time.Duration
+	pendingRoundWait    roundCoolingWait
 	hadRequestAttempt   bool
 	roundHadUsableReply bool
 	skipProvider        bool
@@ -593,7 +642,7 @@ func (c *Client) completeStreamTarget(
 	cb StreamCallback,
 	fallbackEnabled bool,
 	fallbackModels []FallbackModel,
-	currentRoundWait time.Duration,
+	currentRoundWait roundCoolingWait,
 	hasNextTarget bool,
 	status *CallStatus,
 	systemPrompt string,
@@ -704,21 +753,25 @@ func (c *Client) completeStreamTarget(
 				break
 			}
 			if cooling, ok := errors.AsType[*AllKeysCoolingError](err); ok {
+				waitCap := coolingWaitCap(fallbackEnabled, fallbackModels)
 				result.setLastErr(t.provider, err)
-				result.pendingRoundWait = mergeRoundWait(result.pendingRoundWait, cooling.RetryAfter)
+				result.pendingRoundWait = mergeCoolingWindow(result.pendingRoundWait, cooling.RetryAfter, waitCap)
 				if hasNextTarget {
 					log.Infof("all API keys cooling; trying next model provider=%v model=%v", t.provider.Name(), t.modelID)
 				} else {
-					wait := mergeRoundWait(currentRoundWait, cooling.RetryAfter)
-					log.Infof("all API keys cooling; waiting before retry provider=%v model=%v attempt=%v retry_after=%v", t.provider.Name(), t.modelID, round+1, wait)
+					wait := mergeCoolingWindow(currentRoundWait, cooling.RetryAfter, waitCap)
+					log.Infof("all API keys cooling; waiting before retry provider=%v model=%v attempt=%v sleep=%v recovery_in=%v", t.provider.Name(), t.modelID, round+1, wait.sleep, wait.recovery)
 					if cb != nil {
 						if err := abortIfCancelled(); err != nil {
 							return result, lastInputTokens, err
 						}
+						// Detail and Deadline describe when a request can
+						// really go out, not when this round wakes up to
+						// re-probe the pool.
 						emitStreamStatusDelta(cb, message.StatusDelta{
 							Type:     message.StatusDeltaCooling,
-							Detail:   wait.Round(time.Second).String(),
-							Deadline: time.Now().Add(wait),
+							Detail:   wait.recovery.Round(time.Second).String(),
+							Deadline: time.Now().Add(wait.recovery),
 						})
 					}
 				}
@@ -1271,7 +1324,7 @@ func (c *Client) completeStreamWithRetry(
 ) (resp *message.Response, err error) {
 	var lastErr error
 	var lastErrProvider *ProviderConfig
-	var pendingRoundWait time.Duration
+	var pendingRoundWait roundCoolingWait
 	// pendingRollbackReason is non-empty while preserved partial output is
 	// still on screen across targets and rounds. On any non-cancel exit the
 	// preserved text must leave the screen: the turn failed, so a dangling
@@ -1345,16 +1398,19 @@ func (c *Client) completeStreamWithRetry(
 			if variantForStart != "" {
 				startDisplayRef += "@" + variantForStart
 			}
-			waitingForCooling := isAllKeysCoolingError(lastErr) && pendingRoundWait > 0
-			delay := roundRetryDelay(startProvider.GetRetryDelay(retryCount), pendingRoundWait)
+			waitingForCooling := isAllKeysCoolingError(lastErr) && pendingRoundWait.waiting()
+			delay := roundRetryDelay(startProvider.GetRetryDelay(retryCount), pendingRoundWait.sleep)
 			if waitingForCooling {
-				delay = pendingRoundWait
-				log.Infof("waiting for API keys to cool before next LLM request round attempt=%v delay=%v error=%v", round+1, delay, lastErr)
+				delay = pendingRoundWait.sleep
+				recovery := pendingRoundWait.recovery
+				log.Infof("waiting for API keys to cool before next LLM request round attempt=%v delay=%v recovery_in=%v error=%v", round+1, delay, recovery, lastErr)
 				if cb != nil {
 					if err := abortIfCancelled(); err != nil {
 						return nil, err
 					}
-					emitStreamStatusDelta(cb, message.StatusDelta{Type: message.StatusDeltaCooling, Detail: delay.Round(time.Second).String(), ModelRef: startDisplayRef, Deadline: time.Now().Add(delay)})
+					// The countdown must promise when a request can really go
+					// out, not when this round wakes up to re-probe the pool.
+					emitStreamStatusDelta(cb, message.StatusDelta{Type: message.StatusDeltaCooling, Detail: recovery.Round(time.Second).String(), ModelRef: startDisplayRef, Deadline: time.Now().Add(recovery)})
 				}
 			} else {
 				log.Infof("retrying LLM request round attempt=%v retry_count=%v delay=%v error=%v", round+1, retryCount, delay, lastErr)
@@ -1382,7 +1438,7 @@ func (c *Client) completeStreamWithRetry(
 				}
 			}
 		}
-		pendingRoundWait = 0
+		pendingRoundWait = roundCoolingWait{}
 		// roundHadRequestAttempt tracks whether this round reached the provider API
 		// at least once. If every target fails key selection with NoUsableKeysError,
 		// a full-round retry cannot make progress without external state changes.
@@ -1468,7 +1524,7 @@ func (c *Client) completeStreamWithRetry(
 				lastInputTokens = updatedLastInputTokens
 				lastErr = targetResult.lastErr
 				lastErrProvider = targetResult.lastErrProvider
-				pendingRoundWait = mergePendingRoundWait(pendingRoundWait, targetResult.pendingRoundWait)
+				pendingRoundWait = mergePendingCoolingWait(pendingRoundWait, targetResult.pendingRoundWait)
 				roundAttemptSummary.record(targetResult)
 				if targetResult.hadRequestAttempt {
 					roundHadRequestAttempt = true

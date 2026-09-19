@@ -46,19 +46,34 @@ func statusBarCoolingRemaining(a agent.AgentActivityEvent, now time.Time) (time.
 }
 
 // formatStatusBarCountdown renders a remaining wait at readable granularity:
-// whole seconds below a minute, minutes above it. Cooling waits never reach an
-// hour, so no hour form is needed.
+// whole seconds below a minute, minutes below an hour, then hours and minutes.
+// A provider quota reset can be hours out, so the wait does reach the hour form.
+//
+// The trailing field is zero-padded, matching tools.FormatElapsed's convention:
+// a countdown repaints every second, and an unpadded field would shift the digit
+// position on every tick that crosses a power of ten (1m10s -> 1m9s).
 func formatStatusBarCountdown(d time.Duration) string {
 	d = ceilDuration(max(d, 0), time.Second)
 	if d < time.Minute {
 		return fmt.Sprintf("%ds", int(d/time.Second))
 	}
-	minutes := int(d / time.Minute)
-	seconds := int((d % time.Minute) / time.Second)
-	if seconds == 0 {
-		return fmt.Sprintf("%dm", minutes)
+	if d < time.Hour {
+		minutes := int(d / time.Minute)
+		seconds := int((d % time.Minute) / time.Second)
+		if seconds == 0 {
+			return fmt.Sprintf("%dm", minutes)
+		}
+		return fmt.Sprintf("%dm%02ds", minutes, seconds)
 	}
-	return fmt.Sprintf("%dm%ds", minutes, seconds)
+	// Seconds are noise at this range: an hours-long wait is read as "about
+	// how long until I can work again", and a ticking seconds field would
+	// force a status-bar repaint every second for no added information.
+	hours := int(d / time.Hour)
+	minutes := int((d % time.Hour) / time.Minute)
+	if minutes == 0 {
+		return fmt.Sprintf("%dh", hours)
+	}
+	return fmt.Sprintf("%dh%02dm", hours, minutes)
 }
 
 func formatStatusBarBytes(n int64) string {

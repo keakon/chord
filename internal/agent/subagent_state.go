@@ -274,6 +274,53 @@ func (s *SubAgent) markActivity() {
 		return
 	}
 	s.runtimeState.markActivity()
+	// Real progress ends any cooling wait this request was granted: the
+	// heartbeat is fresh again, so the grace window must not keep extending
+	// the liveness deadlines for a request that later wedges. Every request
+	// boundary (issue, stream progress, response, tool result) lands here.
+	s.clearLLMCoolingWait()
+}
+
+// noteLLMCoolingWait records the end of a bounded cooling wait reported by the
+// LLM client, or clears it when the wait is over. A cooling request is silent
+// on purpose — the client is sleeping out a key cooldown that can legitimately
+// run far past the silence budget — so the liveness checks extend their
+// deadline instead of cancelling a healthy request.
+func (s *SubAgent) noteLLMCoolingWait(deadline time.Time) {
+	if s == nil {
+		return
+	}
+	if deadline.IsZero() || !deadline.After(time.Now()) {
+		s.llmCoolingDeadline.Store(0)
+		return
+	}
+	s.llmCoolingDeadline.Store(deadline.UnixNano())
+}
+
+// clearLLMCoolingWait forgets any recorded cooling wait. Called at request
+// boundaries so a finished request never leaves a stale grace window behind.
+func (s *SubAgent) clearLLMCoolingWait() {
+	if s == nil {
+		return
+	}
+	s.llmCoolingDeadline.Store(0)
+}
+
+// llmCoolingWaitDeadline returns the recorded cooling deadline while it is
+// still in the future, and the zero time otherwise.
+func (s *SubAgent) llmCoolingWaitDeadline() time.Time {
+	if s == nil {
+		return time.Time{}
+	}
+	nanos := s.llmCoolingDeadline.Load()
+	if nanos == 0 {
+		return time.Time{}
+	}
+	deadline := time.Unix(0, nanos)
+	if !deadline.After(time.Now()) {
+		return time.Time{}
+	}
+	return deadline
 }
 
 // stallAlertRaised reports whether the main-side lifecycle sweep already

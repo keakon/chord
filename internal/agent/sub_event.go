@@ -188,7 +188,18 @@ func (s *SubAgent) llmSilenceWatchdogDeadline() (time.Time, bool) {
 	if !s.llmRequestInFlight.Load() || s.turn == nil {
 		return time.Time{}, false
 	}
-	return s.StateChangedAt().Add(s.llmSilenceBudget), true
+	deadline := s.StateChangedAt().Add(s.llmSilenceBudget)
+	// A request sleeping out an API key cooldown is silent by design, and the
+	// cooldown can legitimately outlast the silence budget. Push the deadline
+	// past the reported recovery instant plus one budget: the extra budget
+	// gives the request that resumes at the deadline the same grace window a
+	// fresh request gets, instead of racing the watchdog the moment it wakes.
+	if coolingUntil := s.llmCoolingWaitDeadline(); !coolingUntil.IsZero() {
+		if extended := coolingUntil.Add(s.llmSilenceBudget); extended.After(deadline) {
+			deadline = extended
+		}
+	}
+	return deadline, true
 }
 
 // handleLLMSilenceIfDue escalates a wedged in-flight request when its silence

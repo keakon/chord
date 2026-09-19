@@ -352,6 +352,16 @@ func TestFormatStatusBarCountdown(t *testing.T) {
 		{33*time.Second + time.Millisecond, "34s"},
 		{time.Minute, "1m"},
 		{70 * time.Second, "1m10s"},
+		// The trailing field is zero-padded so a per-second repaint cannot
+		// shift the digit position when the value crosses a power of ten.
+		{65 * time.Second, "1m05s"},
+		{59*time.Minute + 59*time.Second, "59m59s"},
+		// A provider quota reset can be hours out; seconds are dropped at this
+		// range so the lane does not repaint every second.
+		{time.Hour, "1h"},
+		{90 * time.Minute, "1h30m"},
+		{3 * time.Hour, "3h"},
+		{2*time.Hour + 5*time.Minute + 30*time.Second, "2h05m"},
 	}
 	for _, tc := range cases {
 		if got := formatStatusBarCountdown(tc.in); got != tc.want {
