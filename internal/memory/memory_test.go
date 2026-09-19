@@ -930,6 +930,80 @@ func TestManualIndexEditNotRevivedByIdenticalConclusion(t *testing.T) {
 	}
 }
 
+// A commit interrupted between the record write and the index/checkpoint leaves
+// the record on disk with no index line. The retry of that same extraction must
+// adopt the record and finish the commit instead of reporting it as a
+// user-removed orphan.
+func TestCommitExtractionAdoptsInterruptedRecord(t *testing.T) {
+	t.Setenv("CHORD_STATE_DIR", filepath.Join(t.TempDir(), "state"))
+	m, err := NewManager(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	candidate := testCandidate(TypeFact, "The migration runs before the backup.", "Migration ordering.")
+	rec := recordFromCandidate("s1", "fp1", candidate)
+	rec.ID = RecordID(rec.Summary, rec.ContentHash())
+	if created, err := writeRecordImmutable(m.layout, rec); err != nil || !created {
+		t.Fatalf("seed interrupted record: created=%v err=%v", created, err)
+	}
+
+	res, err := m.CommitExtractionCtx(context.Background(), "s1", "fp1", 1, 0, extractionOf(candidate))
+	if err != nil {
+		t.Fatalf("retry commit: %v", err)
+	}
+	if len(res.Added) != 1 || res.Added[0] != rec.ID {
+		t.Fatalf("result = %+v, want the interrupted record adopted as added", res)
+	}
+	idx, err := m.LoadIndex()
+	if err != nil {
+		t.Fatalf("LoadIndex: %v", err)
+	}
+	if len(idx.Managed) != 1 || idx.Managed[0].ID != rec.ID {
+		t.Fatalf("index entries = %+v", idx.Managed)
+	}
+	cp, err := LoadCheckpoint(m.layout)
+	if err != nil || cp == nil || !cp.Covered("s1", "fp1") {
+		t.Fatalf("checkpoint not advanced: cp=%+v err=%v", cp, err)
+	}
+}
+
+// The same record shape written by another extraction is a user-removed orphan:
+// the retry reports it as already known and keeps it out of the index.
+func TestCommitExtractionKeepsForeignOrphan(t *testing.T) {
+	t.Setenv("CHORD_STATE_DIR", filepath.Join(t.TempDir(), "state"))
+	m, err := NewManager(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	candidate := testCandidate(TypeFact, "The migration runs before the backup.", "Migration ordering.")
+	rec := recordFromCandidate("other-session", "other-fingerprint", candidate)
+	rec.ID = RecordID(rec.Summary, rec.ContentHash())
+	if created, err := writeRecordImmutable(m.layout, rec); err != nil || !created {
+		t.Fatalf("seed orphan record: created=%v err=%v", created, err)
+	}
+
+	res, err := m.CommitExtractionCtx(context.Background(), "s1", "fp1", 1, 0, extractionOf(candidate))
+	if err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	if len(res.Added) != 0 || len(res.AlreadyKnown) != 1 || res.AlreadyKnown[0] != rec.ID {
+		t.Fatalf("result = %+v, want the foreign orphan reported as already known", res)
+	}
+	idx, err := m.LoadIndex()
+	if err != nil {
+		t.Fatalf("LoadIndex: %v", err)
+	}
+	for _, e := range idx.Managed {
+		if e.ID == rec.ID {
+			t.Fatalf("foreign orphan resurrected in the index: %+v", idx.Managed)
+		}
+	}
+	cp, err := LoadCheckpoint(m.layout)
+	if err != nil || cp == nil || !cp.Covered("s1", "fp1") {
+		t.Fatalf("checkpoint not advanced: cp=%+v err=%v", cp, err)
+	}
+}
+
 // User content outside the managed section must be preserved byte-for-byte,
 // including leading/trailing blank lines, on every managed-section rewrite.
 func TestCommitPreservesUserNotesVerbatim(t *testing.T) {

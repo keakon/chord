@@ -269,13 +269,19 @@ func (m *Manager) commitExtraction(ctx context.Context, sessionID, fingerprint s
 			return nil, err
 		}
 		if !created && !activeIDs[id] {
-			// The record file already exists but is not indexed: the documented
-			// removal contract keeps it an orphan, so a re-derived conclusion
-			// must not resurrect a deleted or superseded index line. Supersede
-			// targets stay indexed with it — removing them while adding nothing
-			// would erase the conclusion from every future session instead.
-			result.AlreadyKnown = append(result.AlreadyKnown, id)
-			continue
+			// The record file already exists but is not indexed. A file this
+			// same extraction wrote means the previous attempt was interrupted
+			// between the record write and the index/checkpoint (both commit
+			// after records), so finish that attempt. A file from any other
+			// writer falls to the documented removal contract: the orphan stays
+			// orphaned, and a re-derived conclusion must not resurrect a
+			// deleted or superseded index line. Supersede targets stay indexed
+			// with it — removing them while adding nothing would erase the
+			// conclusion from every future session instead.
+			if !recordOwnedByExtraction(m.layout, id, sessionID, fingerprint) {
+				result.AlreadyKnown = append(result.AlreadyKnown, id)
+				continue
+			}
 		}
 		link := filepath.ToSlash(filepath.Join(ProjectLayoutDir, recordFileName(id)))
 		if entry, ok := managedEntryFor(idx, id); ok && entry.Summary == rec.Summary {
@@ -453,14 +459,29 @@ func recordFromCandidate(sessionID, fingerprint string, c Candidate) *Record {
 	return rec
 }
 
+// recordOwnedByExtraction reports whether the record file already on disk was
+// written by this exact extraction, identified by its originating session and
+// source fingerprint. Records are immutable and the index and checkpoint are
+// committed after them, so an interrupted attempt leaves exactly this shape
+// behind: the file exists while neither the index lists it nor the checkpoint
+// covers it. The retry then adopts the record and finishes the commit. A
+// missing or unreadable record is never treated as ours.
+func recordOwnedByExtraction(l *Layout, id, sessionID, fingerprint string) bool {
+	rec, err := loadRecord(recordPath(l.RecordsDir, id))
+	if err != nil {
+		return false
+	}
+	return rec.OriginSessionID == sessionID && rec.SourceFingerprint == fingerprint
+}
+
 // writeRecordImmutable writes a record file with exclusive-create semantics
 // and reports whether it created the file. An existing file carrying identical
-// canonical content is an idempotent success with created=false — the caller
-// must then treat the record as an already-known orphan and never re-add it to
-// the managed index, because the documented removal contract keeps a deleted
-// index line deleted even when a later session re-derives the same conclusion.
-// Same ID with different content is a conflict error; the file is never
-// overwritten.
+// canonical content is an idempotent success with created=false; the caller
+// must then decide whether the record may re-enter the managed index (see
+// recordOwnedByExtraction) instead of blindly re-adding it, because the
+// documented removal contract keeps a deleted index line deleted even when a
+// later session re-derives the same conclusion. Same ID with different content
+// is a conflict error; the file is never overwritten.
 func writeRecordImmutable(l *Layout, rec *Record) (bool, error) {
 	if err := validateRecordBounds(rec); err != nil {
 		return false, err
