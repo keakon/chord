@@ -24,6 +24,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- Headless mode now drains already-published events before closing stdout, so a gateway that closes stdin still receives the tail of the session instead of losing the events emitted during shutdown.
 - Checkpoint file reloading no longer follows a symbolic link out of the project root: such a reference is skipped instead of loading the linked file into context.
 - Dialog overlays no longer show mismatched row backgrounds: the Cancel action in Delete Session, the inputs and Scope/Action rows in the rules add form, the handoff deny-reason input, and multi-segment rows in selector dialogs now stay on the dialog surface instead of falling back to the terminal background.
 - Silent LLM retry telemetry no longer surfaces as a headless `error`: it emits no envelope and leaves `last_error` / `idle.last_outcome` untouched, so a turn that retries silently and recovers still reports `completed` instead of sticking on `error`. Terminal failures are still reported through the following non-silent error.

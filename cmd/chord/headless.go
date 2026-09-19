@@ -880,21 +880,19 @@ func runHeadlessWithDeps(deps headlessRunDeps) error {
 	if err != nil {
 		return err
 	}
-	defer ac.Close()
-
 	if deps.watchParent {
 		startHeadlessParentWatcher(ac, deps.getppid(), deps.parentCheckInterval, deps.getppid)
 	}
 
 	rt, err := deps.createRuntime(ac)
 	if err != nil {
+		ac.Close()
 		return err
 	}
-	defer rt.Close()
-
-	out := newStdoutWriter(ac.Ctx, deps.stdout)
+	// Keep the writer alive through runtime shutdown so the event forwarder can
+	// drain already-published events after the application context is cancelled.
+	out := newStdoutWriter(context.Background(), deps.stdout)
 	go out.run()
-	defer out.close()
 
 	sessionID := filepath.Base(ac.SessionDir)
 	state := &headlessState{sessionID: sessionID, updatedAt: time.Now()}
@@ -924,7 +922,9 @@ func runHeadlessWithDeps(deps headlessRunDeps) error {
 	// aligned with seq order against command-path pushes.
 	backend := rt.Backend()
 	events := rt.Events()
+	eventDone := make(chan struct{})
 	go func() {
+		defer close(eventDone)
 		for ev := range events {
 			out.ordered(func() {
 				envs := filterHeadlessEvent(ev, state, backend)
@@ -933,6 +933,19 @@ func runHeadlessWithDeps(deps headlessRunDeps) error {
 				}
 			})
 		}
+	}()
+	defer func() {
+		rt.Close()
+		ac.Close()
+		// Drain already-published events before closing stdout, but never hang
+		// on a wedged event loop: the agent shutdown above got the same budget,
+		// so a stuck channel must not keep headless from exiting.
+		select {
+		case <-eventDone:
+		case <-time.After(agentShutdownWait):
+			log.Warnf("headless event drain timed out")
+		}
+		out.close()
 	}()
 
 	// Command loop: read stdin JSON lines.

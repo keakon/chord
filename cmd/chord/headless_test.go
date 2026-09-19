@@ -2871,6 +2871,33 @@ func TestRunHeadlessWithDepsEmitsReadyAndExitsOnStdinClose(t *testing.T) {
 	}
 }
 
+func TestRunHeadlessWithDepsDrainsEventsBeforeClosingOutput(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ac := &AppContext{Ctx: ctx, Cancel: cancel, SessionDir: filepath.Join(t.TempDir(), "session-drain")}
+	events := make(chan agent.AgentEvent, 1)
+	events <- agent.ContextNoticeEvent{Level: "pressure", Message: "context pressure", MessageIndex: 1}
+	close(events)
+	rt := &fakeHeadlessRuntime{events: events, backend: &mockBackend{}}
+	var stdout bytes.Buffer
+
+	err := runHeadlessWithDeps(headlessRunDeps{
+		initApp: func(bool, string, sessionStartupOptions) (*AppContext, error) { return ac, nil },
+		createRuntime: func(*AppContext) (headlessRuntime, error) {
+			return rt, nil
+		},
+		stdin:       strings.NewReader(""),
+		stdout:      &stdout,
+		watchParent: false,
+	})
+	if err != nil {
+		t.Fatalf("runHeadlessWithDeps: %v", err)
+	}
+	if findHeadlessEnvelopeValue(decodeHeadlessJSONLines(t, stdout.Bytes()), "context_notice") == nil {
+		t.Fatal("event emitted before shutdown was lost")
+	}
+}
+
 func TestRunHeadlessWithDepsReportsScannerError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
