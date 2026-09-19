@@ -585,9 +585,14 @@ func checkpointPackMetadataFromMessages(messages []message.Message) map[string]e
 
 // parseCheckpointEvidencePackMetadata scans a checkpoint message's rendered
 // evidence pack region for its Evidence IDs and the machine metadata each row
-// renders (the Evidence Kind and Validity lines). Excerpt text may quote the
-// same line shapes, so everything after an Excerpt: line until the next
-// Evidence ID: line is ignored.
+// renders (the Evidence Kind and Validity lines).
+//
+// Only column-0 lines are pack rows: renderEvidenceArtifactContent indents
+// every excerpt line by two spaces, and an excerpt quotes raw evidence text
+// that can contain a line shaped exactly like a row. A quoted line can
+// therefore never be read as metadata (including a well-formed Evidence ID
+// that would otherwise clear the excerpt). Lines after an Excerpt: line are
+// ignored until the next column-0 row.
 func parseCheckpointEvidencePackMetadata(content string) map[string]evidencePackRefMeta {
 	region := evidencePackRegion(content)
 	if region == "" {
@@ -597,12 +602,10 @@ func parseCheckpointEvidencePackMetadata(content string) map[string]evidencePack
 	current := ""
 	inExcerpt := false
 	for line := range strings.SplitSeq(region, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if rest, ok := strings.CutPrefix(trimmed, "Evidence ID: "); ok {
-			// An excerpt quotes raw evidence text verbatim, so a quoted line can
-			// look exactly like a pack row. Only the minted ID spelling enters
-			// the index; otherwise quoted text could make an unrelated
-			// reference resolvable.
+		if rest, ok := strings.CutPrefix(line, "Evidence ID: "); ok {
+			// Only the minted ID spelling enters the index; a quoted line can
+			// look like a row, so an unshaped ID must not clear the excerpt or
+			// make an unrelated reference resolvable.
 			id := strings.TrimSpace(rest)
 			if !tools.EvidenceIDShape.MatchString(id) {
 				continue
@@ -617,13 +620,13 @@ func parseCheckpointEvidencePackMetadata(content string) map[string]evidencePack
 		if current == "" || inExcerpt {
 			continue
 		}
-		if rest, ok := strings.CutPrefix(trimmed, "Evidence Kind: "); ok {
+		if rest, ok := strings.CutPrefix(line, "Evidence Kind: "); ok {
 			meta := out[current]
 			meta.kind = evidenceKind(strings.TrimSpace(rest))
 			out[current] = meta
 			continue
 		}
-		if rest, ok := strings.CutPrefix(trimmed, "Validity: "); ok {
+		if rest, ok := strings.CutPrefix(line, "Validity: "); ok {
 			if strings.TrimSpace(rest) == string(evidenceValidityInvalidated) {
 				meta := out[current]
 				meta.invalidated = true
@@ -631,7 +634,7 @@ func parseCheckpointEvidencePackMetadata(content string) map[string]evidencePack
 			}
 			continue
 		}
-		if strings.HasPrefix(trimmed, "Excerpt:") {
+		if strings.HasPrefix(line, "Excerpt:") {
 			inExcerpt = true
 		}
 	}

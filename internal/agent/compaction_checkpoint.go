@@ -271,8 +271,19 @@ func renderEvidenceArtifactContent(items []evidenceItem) string {
 		}
 		if item.Excerpt != "" {
 			sb.WriteString("Excerpt:\n")
-			sb.WriteString(item.Excerpt)
-			sb.WriteByte('\n')
+			// Indent every excerpt line: the excerpt is raw quoted text that can
+			// contain a line shaped exactly like a pack row, so the parser only
+			// accepts column-0 structural lines and quoted text can never forge
+			// one.
+			for line := range strings.SplitSeq(item.Excerpt, "\n") {
+				if line == "" {
+					sb.WriteByte('\n')
+					continue
+				}
+				sb.WriteString("  ")
+				sb.WriteString(line)
+				sb.WriteByte('\n')
+			}
 		}
 	}
 	return strings.TrimRight(sb.String(), "\n")
