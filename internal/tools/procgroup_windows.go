@@ -3,6 +3,8 @@
 package tools
 
 import (
+	"errors"
+	"os"
 	"os/exec"
 )
 
@@ -30,4 +32,11 @@ func forceTerminateCommandProcessGroupImpl(cmd *exec.Cmd) error {
 		return nil
 	}
 	return cmd.Process.Kill()
+}
+
+// processGroupAlreadyGone reports whether a failed termination means the
+// process was already reaped, i.e. the command exited on its own before the
+// stop signal arrived.
+func processGroupAlreadyGone(err error) bool {
+	return errors.Is(err, os.ErrProcessDone)
 }

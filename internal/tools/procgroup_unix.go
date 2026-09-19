@@ -3,6 +3,7 @@
 package tools
 
 import (
+	"errors"
 	"os/exec"
 	"syscall"
 )
@@ -24,8 +25,14 @@ func terminateCommandProcessGroupImpl(cmd *exec.Cmd) error {
 		return nil
 	}
 	pid := cmd.Process.Pid
-	_ = syscall.Kill(-pid, syscall.SIGTERM)
-	return nil
+	return syscall.Kill(-pid, syscall.SIGTERM)
+}
+
+// processGroupAlreadyGone reports whether a failed termination means the
+// process group was already reaped, i.e. the command exited on its own before
+// the stop signal arrived.
+func processGroupAlreadyGone(err error) bool {
+	return errors.Is(err, syscall.ESRCH)
 }
 
 func forceTerminateCommandProcessGroupImpl(cmd *exec.Cmd) error {

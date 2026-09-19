@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -793,5 +794,23 @@ func TestCancelOrForegroundResultKeepsNaturalExitWhenKillRacesExit(t *testing.T)
 	}
 	if strings.Contains(out, "cancelled") {
 		t.Fatalf("out = %q, want no cancellation marker", out)
+	}
+}
+
+func TestTerminateJobProcessGroupUsesPublishedNaturalExit(t *testing.T) {
+	cmd := exec.Command("sh", "-c", "exit 7")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start command: %v", err)
+	}
+	waitCh := waitForCommand(cmd)
+	<-waitCh.done
+
+	err, natural := terminateJobProcessGroup(cmd, "cancelled", waitCh)
+	if !natural {
+		t.Fatalf("natural = false, want the published exit result to win")
+	}
+	exitErr, ok := errors.AsType[*exec.ExitError](err)
+	if !ok || exitErr.ExitCode() != 7 {
+		t.Fatalf("err = %v, want exit code 7", err)
 	}
 }

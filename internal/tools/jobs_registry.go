@@ -269,7 +269,7 @@ func (r *JobRegistry) run(j *job) {
 		return
 	}
 
-	waitCh := waitForCommand(cmd, j.done)
+	waitCh := waitForCommand(cmd)
 	var (
 		status jobStatus
 		detail string
@@ -294,26 +294,16 @@ func (r *JobRegistry) run(j *job) {
 		err = j.formatRuntimeError(rawErr)
 	}
 
-	// killAfterExit records the real terminal state when the process already
-	// exited, so a cancel or timeout that races a natural exit does not report a
-	// completed command as killed. It reports whether it consumed waitCh.
-	killAfterExit := func() bool {
-		select {
-		case rawErr := <-waitCh:
-			handleExit(rawErr)
-			return true
-		default:
-			return false
-		}
-	}
-
 	if j.MaxRuntimeSec <= 0 {
 		select {
 		case reason := <-j.cancelCh:
-			if !killAfterExit() {
-				status, detail, err = jobStatusKilled, reason, terminateJobProcessGroup(cmd, reason, waitCh)
+			if rawErr, natural := terminateJobProcessGroup(cmd, reason, waitCh); natural {
+				handleExit(rawErr)
+			} else {
+				status, detail, err = jobStatusKilled, reason, rawErr
 			}
-		case rawErr := <-waitCh:
+		case <-waitCh.done:
+			rawErr, _ := waitCh.result()
 			handleExit(rawErr)
 		}
 	} else {
@@ -321,17 +311,23 @@ func (r *JobRegistry) run(j *job) {
 		defer timer.Stop()
 		select {
 		case reason := <-j.cancelCh:
-			if !killAfterExit() {
-				status, detail, err = jobStatusKilled, reason, terminateJobProcessGroup(cmd, reason, waitCh)
+			if rawErr, natural := terminateJobProcessGroup(cmd, reason, waitCh); natural {
+				handleExit(rawErr)
+			} else {
+				status, detail, err = jobStatusKilled, reason, rawErr
 			}
-		case rawErr := <-waitCh:
+		case <-waitCh.done:
+			rawErr, _ := waitCh.result()
 			handleExit(rawErr)
 		case <-timer.C:
-			if !killAfterExit() {
-				reason := fmt.Sprintf("timed out after %ds", j.MaxRuntimeSec)
-				status, detail, err = jobStatusKilled, reason, terminateJobProcessGroup(cmd, reason, waitCh)
-				// A timeout otherwise invites an unchanged, equally slow re-run:
-				// the model cannot see the deadline it hit, so steer the next step.
+			reason := fmt.Sprintf("timed out after %ds", j.MaxRuntimeSec)
+			if rawErr, natural := terminateJobProcessGroup(cmd, reason, waitCh); natural {
+				handleExit(rawErr)
+			} else {
+				status, detail, err = jobStatusKilled, reason, rawErr
+				// A timeout otherwise invites an unchanged, equally slow
+				// re-run: the model cannot see the deadline it hit, so
+				// steer the next step.
 				err = fmt.Errorf("%w\n%s", err, shellTimeoutGuidance)
 			}
 		}
@@ -684,16 +680,30 @@ func shortExitDetail(err error) string {
 	return err.Error()
 }
 
-func waitForCommand(cmd *exec.Cmd, done <-chan struct{}) <-chan error {
-	waitCh := make(chan error, 1)
+type commandWait struct {
+	mu       sync.Mutex
+	done     chan struct{}
+	err      error
+	finished bool
+}
+
+func waitForCommand(cmd *exec.Cmd) *commandWait {
+	waitCh := &commandWait{done: make(chan struct{})}
 	go func() {
 		err := cmd.Wait()
-		select {
-		case waitCh <- err:
-		case <-done:
-		}
+		waitCh.mu.Lock()
+		waitCh.err = err
+		waitCh.finished = true
+		close(waitCh.done)
+		waitCh.mu.Unlock()
 	}()
 	return waitCh
+}
+
+func (w *commandWait) result() (error, bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.err, w.finished
 }
 
 // cancelAll signals every id in one pass, then waits for them under a single
@@ -1002,27 +1012,46 @@ func (r *JobRegistry) evictFinishedLocked() {
 	}
 }
 
-func terminateJobProcessGroup(cmd *exec.Cmd, reason string, doneCh <-chan error) error {
+func terminateJobProcessGroup(cmd *exec.Cmd, reason string, waitCh *commandWait) (error, bool) {
 	if cmd == nil || cmd.Process == nil {
-		return fmt.Errorf("command %s", reason)
+		return fmt.Errorf("command %s", reason), false
 	}
-	_ = terminateCommandProcessGroup(cmd)
+	// Hold the same lock the wait goroutine publishes under, so the "already
+	// finished" test and the stop signal cannot interleave with publication.
+	waitCh.mu.Lock()
+	if waitCh.finished {
+		err := waitCh.err
+		waitCh.mu.Unlock()
+		return err, true
+	}
+	signalErr := terminateCommandProcessGroup(cmd)
+	waitCh.mu.Unlock()
+	if processGroupAlreadyGone(signalErr) {
+		// The group no longer existed when the stop arrived: the command exited
+		// on its own, so its result wins even though the wait goroutine had not
+		// published it yet.
+		<-waitCh.done
+		err, _ := waitCh.result()
+		return err, true
+	}
 	select {
-	case err := <-doneCh:
+	case <-waitCh.done:
+		err, _ := waitCh.result()
 		if err != nil {
-			return fmt.Errorf("command %s: %w", reason, err)
+			return fmt.Errorf("command %s: %w", reason, err), false
 		}
-		return fmt.Errorf("command %s", reason)
+		return fmt.Errorf("command %s", reason), false
 	case <-time.After(killGracePeriod):
 		_ = forceTerminateCommandProcessGroup(cmd)
 		select {
-		case err := <-doneCh:
+		case <-waitCh.done:
+			err, _ := waitCh.result()
 			if err != nil {
-				return fmt.Errorf("command %s: %w", reason, err)
+				return fmt.Errorf("command %s: %w", reason, err), false
 			}
-			return fmt.Errorf("command %s", reason)
+			return fmt.Errorf("command %s", reason), false
 		case <-time.After(killGracePeriod):
-			return fmt.Errorf("command %s", reason)
+			return fmt.Errorf("command %s", reason), false
 		}
 	}
 }
