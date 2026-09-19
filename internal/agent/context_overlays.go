@@ -340,10 +340,12 @@ func (a *MainAgent) emitStagedContextNotices(reminderStage, imminentStage string
 // rewrite can never race request assembly, a compaction draft whose headSplit
 // was measured against the current transcript, or a provider call that still
 // holds the old transcript. Clearing delivered notices also resets the
-// delivered flags of every overlay class (the sticky reminder, the grace
+// delivered flags of the withdrawn classes (the sticky reminder, the grace
 // imminent notice, and the externalization warning) so a later re-crossing can
 // persist a fresh first-delivery card instead of a silent repeat, and so a
 // withdrawn notice cannot keep re-arming cleanup on later below-line requests.
+// A reminder-class-only withdrawal leaves the threshold-class claims untouched:
+// their rows are still present and must not re-deliver.
 func (a *MainAgent) maybeClearStaleContextNotices() {
 	if a == nil || a.ctxMgr == nil || !a.contextNoticesStale.Load() {
 		return
@@ -351,7 +353,9 @@ func (a *MainAgent) maybeClearStaleContextNotices() {
 	if a.turn != nil || a.mainLLMRequestInFlight.Load() || a.IsCompactionRunning() {
 		return
 	}
+	pressureOnly := a.contextNoticesStalePressureOnly.Load()
 	a.contextNoticesStale.Store(false)
+	a.contextNoticesStalePressureOnly.Store(false)
 	// Any overlay queued for the next request was measured against the stale
 	// decision; drop it so the next request re-queues against live usage.
 	a.pendingContextPressureReminder = ""
@@ -363,7 +367,7 @@ func (a *MainAgent) maybeClearStaleContextNotices() {
 	kept := make([]message.Message, 0, len(messages))
 	removed := false
 	for _, msg := range messages {
-		if msg.Kind == message.KindContextNotice {
+		if msg.Kind == message.KindContextNotice && contextNoticeStale(msg, pressureOnly) {
 			removed = true
 			continue
 		}
@@ -375,7 +379,7 @@ func (a *MainAgent) maybeClearStaleContextNotices() {
 	if !removed {
 		// Consume a leftover delivered flag so a later below-line queue does
 		// not keep re-arming idle cleanup when there is nothing to rewrite.
-		a.resetOverlayDeliveryAfterNoticeClear()
+		a.resetOverlayDeliveryAfterNoticeClear(pressureOnly)
 		return
 	}
 	a.ctxMgr.RestoreMessages(kept)
@@ -384,30 +388,46 @@ func (a *MainAgent) maybeClearStaleContextNotices() {
 			a.notePersistenceFailure(err)
 		}
 	}
-	a.resetOverlayDeliveryAfterNoticeClear()
+	a.resetOverlayDeliveryAfterNoticeClear(pressureOnly)
 	a.emitToTUI(ContextNoticeClearedEvent{})
 }
 
-// resetOverlayDeliveryAfterNoticeClear returns every delivered overlay claim to
-// an undelivered first-delivery state after its durable rows were removed: the
-// sticky reminder, the grace imminent notice, and the externalization warning
-// each persist their own KindContextNotice row, and the delivered flag is what
-// suppresses the card on a repeat. Resetting them is also what stops a
-// withdrawn notice from re-arming idle cleanup on every later below-line
-// request. The reminder keeps ccCalled: a compact_context attempt in this
-// window already answered the nudge, so a later re-crossing must not resurrect
-// the reminder overlay until a fresh window resets the claim. The warning
-// keeps its (generation, batch) identity, so the batch guard keeps it one-shot
-// for the generation that already delivered it; a re-crossing arms a new
-// generation with a fresh claim anyway.
-func (a *MainAgent) resetOverlayDeliveryAfterNoticeClear() {
+// contextNoticeStale reports whether an armed cleanup withdraws this row. A
+// pressure-only withdrawal leaves the threshold-measured classes in place, and
+// a row that does not name the reminder class is never proven to be one, so it
+// survives: keeping a stale row costs a visible card, while withdrawing a live
+// threshold notice loses the externalization instruction the runtime just gave.
+func contextNoticeStale(msg message.Message, pressureOnly bool) bool {
+	if !pressureOnly {
+		return true
+	}
+	return msg.NoticeLevel == contextNoticePressure
+}
+
+// resetOverlayDeliveryAfterNoticeClear returns the withdrawn overlays' delivery
+// claims to an undelivered first-delivery state after their durable rows were
+// removed: the sticky reminder, the grace imminent notice, and the
+// externalization warning each persist their own KindContextNotice row, and the
+// delivered flag is what suppresses the card on a repeat. Resetting them is
+// also what stops a withdrawn notice from re-arming idle cleanup on every later
+// below-line request. A pressure-only withdrawal touches only the reminder
+// claim; resetting the threshold-class claims there would re-deliver their
+// still-present rows and churn. The reminder keeps ccCalled: a compact_context
+// attempt in this window already answered the nudge, so a later re-crossing
+// must not resurrect the reminder overlay until a fresh window resets the
+// claim. The warning keeps its (generation, batch) identity, so the batch guard
+// keeps it one-shot for the generation that already delivered it; a re-crossing
+// arms a new generation with a fresh claim anyway.
+func (a *MainAgent) resetOverlayDeliveryAfterNoticeClear(pressureOnly bool) {
 	a.overlayClaims.mu.Lock()
+	if !pressureOnly {
+		a.overlayClaims.imminent.deliveryPending = false
+		a.overlayClaims.imminent.delivered = false
+		a.overlayClaims.warning.deliveryPending = false
+		a.overlayClaims.warning.delivered = false
+	}
 	a.overlayClaims.reminder.deliveryPending = false
 	a.overlayClaims.reminder.delivered = false
-	a.overlayClaims.imminent.deliveryPending = false
-	a.overlayClaims.imminent.delivered = false
-	a.overlayClaims.warning.deliveryPending = false
-	a.overlayClaims.warning.delivered = false
 	a.overlayClaims.mu.Unlock()
 }
 
@@ -532,10 +552,13 @@ func (a *MainAgent) queueContextPressureReminder(decision ctxmgr.AutoCompactDeci
 	if reminderPct <= 0 {
 		// The reminder is explicitly disabled for this model: there is no line
 		// for usage to fall below, and the usage-driven arm and grace must keep
-		// running so automatic compaction still starts at the threshold. A
-		// durable notice from an earlier configuration is still unwanted, so
-		// only the notice withdrawal is armed.
-		a.armContextNoticeCleanup()
+		// running so automatic compaction still starts at the threshold. Only
+		// the reminder-class rows are withdrawn — a notice left by a
+		// configuration that injected one — while the rows measured against
+		// the live threshold (the grace notice and the externalization
+		// warning) must survive: sweeping them would delete a notice the
+		// runtime just wrote and rewrite it on the next request.
+		a.armContextPressureNoticeCleanup()
 		return
 	}
 	if a.contextPressureBelowReminderLine(decision, reminderPct) {
@@ -631,6 +654,7 @@ func (a *MainAgent) installContextNoticePresence(messages []message.Message) {
 	if a == nil {
 		return
 	}
+	a.contextNoticesStalePressureOnly.Store(false)
 	a.contextNoticesStale.Store(false)
 	a.contextNoticesPersisted.Store(containsContextNotice(messages))
 }
@@ -646,6 +670,20 @@ func (a *MainAgent) armContextNoticeCleanup() {
 	if a == nil || !a.contextNoticesPersisted.Load() {
 		return
 	}
+	// Scope before the mark: a reader that observes the mark must also observe
+	// which classes it withdraws.
+	a.contextNoticesStalePressureOnly.Store(false)
+	a.contextNoticesStale.Store(true)
+}
+
+// armContextPressureNoticeCleanup arms idle cleanup of the reminder-class rows
+// only, for a decision whose reminder line is gone while the compaction
+// threshold still justifies the threshold-measured classes.
+func (a *MainAgent) armContextPressureNoticeCleanup() {
+	if a == nil || !a.contextNoticesPersisted.Load() {
+		return
+	}
+	a.contextNoticesStalePressureOnly.Store(true)
 	a.contextNoticesStale.Store(true)
 }
 
@@ -659,22 +697,24 @@ func (a *MainAgent) disarmContextNoticeCleanup() {
 		return
 	}
 	a.contextNoticesStale.Store(false)
+	a.contextNoticesStalePressureOnly.Store(false)
 }
 
-// omitStaleContextNoticesFromRequest drops durable context-pressure notices
-// from a request-facing copy while idle cleanup has not yet rewritten
-// main.jsonl. It does not change ctxmgr.
+// omitStaleContextNoticesFromRequest drops the withdrawn durable context
+// notices from a request-facing copy while idle cleanup has not yet rewritten
+// main.jsonl. A scoped withdrawal removes only its own class. It does not change
+// ctxmgr.
 func (a *MainAgent) omitStaleContextNoticesFromRequest(messages []message.Message) []message.Message {
 	if a == nil || !a.contextNoticesStale.Load() {
 		return messages
 	}
-	return omitContextNoticeMessages(messages)
+	return omitContextNoticeMessages(messages, a.contextNoticesStalePressureOnly.Load())
 }
 
-func omitContextNoticeMessages(messages []message.Message) []message.Message {
+func omitContextNoticeMessages(messages []message.Message, pressureOnly bool) []message.Message {
 	n := 0
 	for i := range messages {
-		if messages[i].Kind == message.KindContextNotice {
+		if messages[i].Kind == message.KindContextNotice && contextNoticeStale(messages[i], pressureOnly) {
 			n++
 		}
 	}
@@ -683,9 +723,10 @@ func omitContextNoticeMessages(messages []message.Message) []message.Message {
 	}
 	out := make([]message.Message, 0, len(messages)-n)
 	for i := range messages {
-		if messages[i].Kind != message.KindContextNotice {
-			out = append(out, messages[i])
+		if messages[i].Kind == message.KindContextNotice && contextNoticeStale(messages[i], pressureOnly) {
+			continue
 		}
+		out = append(out, messages[i])
 	}
 	return out
 }

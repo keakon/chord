@@ -195,6 +195,37 @@ func TestQueueContextPressureReminderKeepsArmWhenReminderDisabled(t *testing.T) 
 	}
 }
 
+// A disabled reminder line withdraws only the reminder-class rows. The grace
+// and externalization rows are measured against the compaction threshold, which
+// is still live, so a sweep that removes them would delete a notice the runtime
+// just wrote and rewrite it on the next request.
+func TestQueueContextPressureReminderDisabledKeepsThresholdNotices(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
+	a.ctxMgr.SetLastTotalContextTokens(7600)
+	enableTestCompactContext(a)
+	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Reminder: config.CompactionReminderDisabled}}}
+	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Kind: message.KindContextNotice, Content: "pressure", NoticeLevel: contextNoticePressure})
+	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Kind: message.KindContextNotice, Content: "imminent", NoticeLevel: contextNoticeImminent})
+	a.contextNoticesPersisted.Store(true)
+
+	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
+	if !a.contextNoticesStale.Load() {
+		t.Fatal("a disabled reminder line must withdraw the reminder-class row")
+	}
+
+	a.maybeClearStaleContextNotices()
+	var levels []string
+	for _, msg := range a.ctxMgr.Snapshot() {
+		if msg.Kind == message.KindContextNotice {
+			levels = append(levels, msg.NoticeLevel)
+		}
+	}
+	if len(levels) != 1 || levels[0] != contextNoticeImminent {
+		t.Fatalf("surviving notices = %v, want only the threshold-driven imminent row", levels)
+	}
+}
+
 func TestContextPressureBelowReminderLineDisabledLineIsNotBelow(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)

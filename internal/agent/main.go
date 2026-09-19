@@ -486,6 +486,14 @@ type MainAgent struct {
 	// delivery for the live window cancels the mark: that row belongs to the
 	// current line, so the audit must not sweep it away in the same turn.
 	contextNoticesStale atomic.Bool
+	// contextNoticesStalePressureOnly narrows an armed cleanup to the
+	// reminder-class rows. A reminder line that is disabled for the current
+	// model withdraws only the rows measured against that line: the grace and
+	// externalization rows are measured against the compaction threshold,
+	// which is still live, so they must survive the sweep. Written before
+	// contextNoticesStale so a reader that observes the mark also observes its
+	// scope.
+	contextNoticesStalePressureOnly atomic.Bool
 	// contextNoticesPersisted records that the transcript may still hold
 	// durable context-pressure notice rows. Overlay delivery claims are
 	// runtime memory that a restore or session switch never carries over, so
