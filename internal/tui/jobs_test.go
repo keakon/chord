@@ -735,6 +735,122 @@ func overlayContentRows(dialog string) int {
 	return rows
 }
 
+// jobOverlayRowLines returns the raw (still ANSI-styled) job rows of the jobs
+// overlay, so a test can inspect which surface each one is drawn on.
+func jobOverlayRowLines(dialog string) []string {
+	var rows []string
+	for line := range strings.SplitSeq(dialog, "\n") {
+		if strings.Contains(stripANSI(line), statusIndicator("running", false)) {
+			rows = append(rows, line)
+		}
+	}
+	return rows
+}
+
+// Every segment of a job row paints its own background, so the selected row has
+// to be redrawn on the selection surface instead of being wrapped by an outer
+// style (whose color the row's own SGR overdraws). Repainting must not move the
+// row: the stop affordance is mapped back from fixed columns.
+func TestJobsOverlaySelectedRowUsesSelectionSurface(t *testing.T) {
+	if currentTheme.SelectedBg == "" || currentTheme.SelectedBg == currentTheme.DialogBg {
+		t.Skip("theme does not draw a distinct selection surface")
+	}
+	want := colorToANSIBgSeq(currentTheme.SelectedBg)
+	if want == "" {
+		t.Skip("theme selection surface is not expressible as an ANSI background")
+	}
+	m := newJobsTestModel(t, 120, 40)
+	startTestJob(t, "sleep 60", "first job")
+	startTestJob(t, "sleep 60", "second job")
+	refreshJobs(m)
+	m.openJobsOverlay()
+
+	m.jobsOverlay.cursor = 0
+	rows := jobOverlayRowLines(m.renderJobsOverlayDialog())
+	if len(rows) != 2 {
+		t.Fatalf("overlay rows = %d, want 2", len(rows))
+	}
+	if got := rowCellBackground(rows[0]); got != want {
+		t.Fatalf("selected row's first cell background = %q, want %q (row %q)", got, want, rows[0])
+	}
+	if got := rowCellBackground(rows[1]); got == want {
+		t.Fatalf("unselected row is drawn on the selection surface: %q", rows[1])
+	}
+	plainFirst := stripANSI(rows[0])
+
+	m.jobsOverlay.cursor = 1
+	rows = jobOverlayRowLines(m.renderJobsOverlayDialog())
+	if len(rows) != 2 {
+		t.Fatalf("overlay rows = %d, want 2", len(rows))
+	}
+	if stripANSI(rows[0]) != plainFirst {
+		t.Fatalf("selection changed the row layout: %q vs %q", stripANSI(rows[0]), plainFirst)
+	}
+	if got := rowCellBackground(rows[0]); got == want {
+		t.Fatalf("row 0 kept the selection surface after the cursor moved: %q", rows[0])
+	}
+	if got := rowCellBackground(rows[1]); got != want {
+		t.Fatalf("selection surface did not follow the cursor to row 1: %q", rows[1])
+	}
+}
+
+// rowCellBackground returns the background the SGR sequences select for the
+// first non-space cell after a dialog row's left border, skipping the border
+// and its padding. Comparing the background active at the cell, rather than the
+// presence of a sequence, is what distinguishes a real selection surface from
+// an outer style wrap that the row's own SGR overdraws.
+func rowCellBackground(line string) string {
+	rest := line
+	if i := strings.IndexRune(rest, '│'); i >= 0 {
+		rest = rest[i+len("│"):]
+	}
+	bg := ""
+	for i := 0; i < len(rest); {
+		if rest[i] == '\x1b' {
+			end := skipANSISequence(rest, i)
+			if seq, ok := sgrBackground(rest[i:end]); ok {
+				bg = seq
+			}
+			i = end
+			continue
+		}
+		if rest[i] == ' ' {
+			i++
+			continue
+		}
+		return bg
+	}
+	return bg
+}
+
+// sgrBackground extracts the background a single SGR sequence selects. The
+// second result is false when the sequence leaves the background unchanged.
+func sgrBackground(seq string) (string, bool) {
+	body, ok := strings.CutPrefix(seq, "\x1b[")
+	if !ok {
+		return "", false
+	}
+	body, ok = strings.CutSuffix(body, "m")
+	if !ok {
+		return "", false
+	}
+	params := strings.Split(body, ";")
+	for i := range len(params) {
+		switch params[i] {
+		case "0", "", "49":
+			return "", true
+		case "48":
+			if i+2 < len(params) && params[i+1] == "5" {
+				return "\x1b[48;5;" + params[i+2] + "m", true
+			}
+			if i+4 < len(params) && params[i+1] == "2" {
+				return "\x1b[48;2;" + params[i+2] + ";" + params[i+3] + ";" + params[i+4] + "m", true
+			}
+		}
+	}
+	return "", false
+}
+
 // --- dialog priority -------------------------------------------------------
 
 func TestStopJobConfirmQueuesNewConfirmRequests(t *testing.T) {

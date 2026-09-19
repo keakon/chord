@@ -195,20 +195,23 @@ func (m *Model) renderJobsOverlayDialog() string {
 		return m.jobsOverlay.renderCacheText
 	}
 	styles := dialogJobRowStyles()
+	selectedStyles := selectedJobRowStyles()
 	now := time.Now()
 	contentLines := make([]string, 0, max(visible, 1))
 	if visible == 0 {
 		contentLines = append(contentLines, DimStyle.Render("(no background jobs)"))
 	}
 	for i, job := range jobs[start : start+visible] {
-		line := renderJobRow(innerWidth, job, now, styles).text
-		// The selected row is tinted without adding a prefix: a "▸" column
-		// would shift the row and move the stop affordance out of the hit zone
-		// the click handler maps back.
+		rowStyles := styles
+		// The selected row is tinted by swapping the surface each segment is
+		// drawn on, not by wrapping the finished row: the segments already set
+		// their own background, which an outer style cannot repaint. No prefix
+		// is added either — a "▸" column would shift the row and move the stop
+		// affordance out of the hit zone the click handler maps back.
 		if start+i == m.jobsOverlay.cursor {
-			line = SelectedStyle.Width(innerWidth).Render(line)
+			rowStyles = selectedStyles
 		}
-		contentLines = append(contentLines, line)
+		contentLines = append(contentLines, renderJobRow(innerWidth, job, now, rowStyles).text)
 	}
 	content := strings.Join(contentLines, "\n")
 	scroll := ""

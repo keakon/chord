@@ -181,6 +181,23 @@ func dialogJobRowStyles() jobRowStyles {
 	}
 }
 
+// selectedJobRowStyles is dialogJobRowStyles on the selection surface. A job
+// row is a run of separately rendered segments and every one sets its own
+// background, so an outer SelectedStyle wrapper is overdrawn by the row itself;
+// a selected row has to carry the selection colors on each segment.
+func selectedJobRowStyles() jobRowStyles {
+	base := lipgloss.NewStyle().
+		Background(lipgloss.Color(currentTheme.SelectedBg)).
+		Foreground(lipgloss.Color(currentTheme.SelectedFg))
+	return jobRowStyles{
+		dotStyle:     base,
+		labelStyle:   base.Bold(true),
+		elapsedStyle: base,
+		stopStyle:    base,
+		gapStyle:     base,
+	}
+}
+
 // jobRowLayout is one rendered job row plus where its stop affordance sits
 // relative to the row's left edge, so callers can map clicks back to the job
 // after adding their own indentation.
