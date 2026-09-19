@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/keakon/chord/internal/ratelimit"
 )
@@ -30,7 +31,19 @@ const (
 	ContentPartPDF   ContentPartType = "pdf"
 )
 
-const StatusDeltaWaitingHeaders = "waiting_headers"
+// StatusDelta.Type values emitted by provider implementations and the retry
+// loop. They are the wire-level names shared with every consumer that maps a
+// request phase onto UI state, so both sides must agree on the exact string.
+const (
+	StatusDeltaConnecting     = "connecting"
+	StatusDeltaWaitingHeaders = "waiting_headers"
+	StatusDeltaWaitingToken   = "waiting_token"
+	StatusDeltaStreaming      = "streaming"
+	StatusDeltaRetrying       = "retrying"
+	StatusDeltaRetryingKey    = "retrying_key"
+	StatusDeltaCooling        = "cooling"
+	StatusDeltaCompacting     = "compacting"
+)
 
 const (
 	ToolStatusSuccess   = "success"
@@ -479,6 +492,10 @@ type StatusDelta struct {
 	Detail   string // e.g. "retry 2/5"
 	ModelRef string // non-empty when a model switch is in progress (e.g. fallback: "provider/model")
 	Reason   string // optional machine-readable reason for model routing changes (e.g. fallback cause)
+	// Deadline is the wall-clock time a bounded wait is expected to end
+	// ("cooling" while every API key is rate-limited), so consumers can show
+	// the remaining time instead of parsing Detail.
+	Deadline time.Time
 }
 
 // StreamProgressDelta reports cumulative response transport progress observed by

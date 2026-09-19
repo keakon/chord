@@ -515,7 +515,7 @@ func newStreamAttemptTracker(cb StreamCallback, target streamRetryTarget, apiKey
 			if cb == nil {
 				return
 			}
-			emitStreamStatus(cb, "streaming", "")
+			emitStreamStatus(cb, message.StatusDeltaStreaming, "")
 			// key_confirmed must carry the effective model ref so the agent/UI can
 			// confirm routing decisions (fallback/key switch) only after the model
 			// actually begins emitting visible output.
@@ -626,7 +626,7 @@ func (c *Client) completeStreamTarget(
 				detail = fmt.Sprintf("fallback: %s (%s)", t.modelID, reason)
 			}
 			emitStreamStatusDelta(cb, message.StatusDelta{
-				Type:     "retrying",
+				Type:     message.StatusDeltaRetrying,
 				Detail:   detail,
 				ModelRef: t.displayRef(),
 				Reason:   reason,
@@ -715,7 +715,11 @@ func (c *Client) completeStreamTarget(
 						if err := abortIfCancelled(); err != nil {
 							return result, lastInputTokens, err
 						}
-						emitStreamStatus(cb, "cooling", wait.Round(time.Second).String())
+						emitStreamStatusDelta(cb, message.StatusDelta{
+							Type:     message.StatusDeltaCooling,
+							Detail:   wait.Round(time.Second).String(),
+							Deadline: time.Now().Add(wait),
+						})
 					}
 				}
 			} else {
@@ -974,7 +978,7 @@ func (c *Client) completeStreamTarget(
 				if err := abortIfCancelled(); err != nil {
 					return result, lastInputTokens, err
 				}
-				emitStreamStatus(cb, "retrying_key", fmt.Sprintf("%d/%d", keyAttempt+2, keyCount))
+				emitStreamStatus(cb, message.StatusDeltaRetryingKey, fmt.Sprintf("%d/%d", keyAttempt+2, keyCount))
 			}
 			continue
 		}
@@ -1005,7 +1009,7 @@ func (c *Client) completeStreamTarget(
 				if err := abortIfCancelled(); err != nil {
 					return result, lastInputTokens, err
 				}
-				emitStreamStatus(cb, "retrying_key", fmt.Sprintf("%d/%d", keyAttempt+2, keyCount))
+				emitStreamStatus(cb, message.StatusDeltaRetryingKey, fmt.Sprintf("%d/%d", keyAttempt+2, keyCount))
 			}
 			continue
 		}
@@ -1044,7 +1048,7 @@ func (c *Client) completeStreamTarget(
 			if err := abortIfCancelled(); err != nil {
 				return result, lastInputTokens, err
 			}
-			emitStreamStatus(cb, "retrying", "same key")
+			emitStreamStatus(cb, message.StatusDeltaRetrying, "same key")
 		}
 	}
 	if !modelDone {
@@ -1065,7 +1069,7 @@ func (c *Client) completeStreamTarget(
 			}
 			emitRetryErrorForKey(cb, emptyErr, t.provider, t.modelID, apiKey)
 			if cb != nil {
-				emitStreamStatus(cb, "retrying_key", "next")
+				emitStreamStatus(cb, message.StatusDeltaRetryingKey, "next")
 			}
 			return result, lastInputTokens, nil
 		}
@@ -1350,7 +1354,7 @@ func (c *Client) completeStreamWithRetry(
 					if err := abortIfCancelled(); err != nil {
 						return nil, err
 					}
-					emitStreamStatusDelta(cb, message.StatusDelta{Type: "cooling", Detail: delay.Round(time.Second).String(), ModelRef: startDisplayRef})
+					emitStreamStatusDelta(cb, message.StatusDelta{Type: message.StatusDeltaCooling, Detail: delay.Round(time.Second).String(), ModelRef: startDisplayRef, Deadline: time.Now().Add(delay)})
 				}
 			} else {
 				log.Infof("retrying LLM request round attempt=%v retry_count=%v delay=%v error=%v", round+1, retryCount, delay, lastErr)
@@ -1359,13 +1363,10 @@ func (c *Client) completeStreamWithRetry(
 						return nil, err
 					}
 					detail := fmt.Sprintf("round %d", round+1)
-					cb(message.StreamDelta{
-						Type: "status",
-						Status: &message.StatusDelta{
-							Type:     "retrying",
-							Detail:   detail,
-							ModelRef: startDisplayRef,
-						},
+					emitStreamStatusDelta(cb, message.StatusDelta{
+						Type:     message.StatusDeltaRetrying,
+						Detail:   detail,
+						ModelRef: startDisplayRef,
 					})
 				}
 			}
@@ -1493,7 +1494,7 @@ func (c *Client) completeStreamWithRetry(
 				log.Infof("context length exceeded after model pool exhausted; returning for compaction recovery provider=%v model=%v input_tokens_est=%v", startProvider.Name(), startModelID, estimateRequestInputTokens(systemPrompt, messages, tools))
 			}
 			emitStreamStatusDelta(cb, message.StatusDelta{
-				Type:   "retrying",
+				Type:   message.StatusDeltaRetrying,
 				Detail: "pool exhausted; compacting context",
 				Reason: "context_length_exceeded",
 			})

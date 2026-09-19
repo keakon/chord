@@ -296,6 +296,70 @@ func TestRenderActivityRetryingShowsDetailAndElapsed(t *testing.T) {
 	}
 }
 
+func TestRenderActivityCoolingShowsRemainingCountdown(t *testing.T) {
+	m := NewModelWithSize(nil, 200, 24)
+	now := time.Unix(1_000_000, 0)
+	m.activityStartTime["main"] = now.Add(-12 * time.Second)
+	a := agent.AgentActivityEvent{Type: agent.ActivityCooling, AgentID: "main", Detail: "45s", Deadline: now.Add(33 * time.Second)}
+
+	out := stripANSI(m.renderActivityAt(a, 200, now))
+	if !strings.Contains(out, "33s left") {
+		t.Fatalf("cooling render should show the remaining wait, got %q", out)
+	}
+
+	later := stripANSI(m.renderActivityAt(a, 200, now.Add(20*time.Second)))
+	if !strings.Contains(later, "13s left") {
+		t.Fatalf("cooling countdown should shrink as time passes, got %q", later)
+	}
+}
+
+func TestRenderActivityCoolingDegradesToCompactCountdown(t *testing.T) {
+	m := NewModelWithSize(nil, 200, 24)
+	now := time.Unix(1_000_000, 0)
+	a := agent.AgentActivityEvent{Type: agent.ActivityCooling, AgentID: "main", Deadline: now.Add(33 * time.Second)}
+
+	out := stripANSI(m.renderActivityAt(a, 8, now))
+	if strings.Contains(out, "left") {
+		t.Fatalf("narrow cooling render should drop the label before truncating, got %q", out)
+	}
+	if !strings.Contains(out, "33s") {
+		t.Fatalf("narrow cooling render should keep the remaining time, got %q", out)
+	}
+}
+
+func TestRenderActivityCoolingFallsBackToElapsedWithoutDeadline(t *testing.T) {
+	m := NewModelWithSize(nil, 200, 24)
+	m.activityStartTime["main"] = time.Now().Add(-7 * time.Second)
+	a := agent.AgentActivityEvent{Type: agent.ActivityCooling, AgentID: "main", Detail: "45s"}
+
+	out := stripANSI(m.renderActivity(a, 200))
+	if strings.Contains(out, "left") {
+		t.Fatalf("cooling without a deadline should not claim a countdown, got %q", out)
+	}
+	if !strings.Contains(out, " 7s") {
+		t.Fatalf("cooling without a deadline should fall back to elapsed, got %q", out)
+	}
+}
+
+func TestFormatStatusBarCountdown(t *testing.T) {
+	cases := []struct {
+		in   time.Duration
+		want string
+	}{
+		{0, "0s"},
+		{200 * time.Millisecond, "1s"},
+		{33 * time.Second, "33s"},
+		{33*time.Second + time.Millisecond, "34s"},
+		{time.Minute, "1m"},
+		{70 * time.Second, "1m10s"},
+	}
+	for _, tc := range cases {
+		if got := formatStatusBarCountdown(tc.in); got != tc.want {
+			t.Fatalf("formatStatusBarCountdown(%v) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestRenderActivityWaitingUsesExplicitElapsedLabel(t *testing.T) {
 	m := NewModelWithSize(nil, 200, 24)
 	m.activityStartTime["main"] = time.Now().Add(-7 * time.Second)

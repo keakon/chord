@@ -306,7 +306,7 @@ func (a *AnthropicProvider) CompleteStream(
 	if a.proxyScheme != "" {
 		log.Debugf("LLM request via proxy provider=%v scheme=%v", "anthropic", a.proxyScheme)
 	}
-	traceCB(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: "connecting"}})
+	traceCB(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: message.StatusDeltaConnecting}})
 	httpResp, err := doRequestUntilHeaders(a.client, req, providerResponseHeaderTimeout(a.provider))
 	if err != nil {
 		callErr := fmt.Errorf("send request: %w", err)

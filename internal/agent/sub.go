@@ -958,8 +958,8 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.M
 		wallReq := s.parent.walltime.startRequestAt(s.instanceID, s.agentDefName, turn.ID)
 		if wallReq != nil {
 			defer wallReq.finish()
-			wallReq.wireStreamReducer(streamReducer, func(activity ActivityType, detail string) {
-				s.parent.emitActivity(s.instanceID, activity, detail)
+			wallReq.wireStreamReducer(streamReducer, func(status *message.StatusDelta) {
+				s.parent.emitStatusActivity(s.instanceID, status)
 			})
 		}
 		requestCtx := llm.WithResponsesTurnState(turn.Ctx, turn.LLMResponsesState)
@@ -1096,8 +1096,8 @@ func (s *SubAgent) newSubLLMStreamReducer(turn *Turn, promoteStreamingActivity f
 			s.parent.discardSpeculativeStreamToolsAndClearToolTrace(turn, reason)
 		},
 	}
-	streamReducer.emitActivity = func(activity ActivityType, detail string) {
-		s.parent.emitActivity(s.instanceID, activity, detail)
+	streamReducer.emitActivity = func(status *message.StatusDelta) {
+		s.parent.emitStatusActivity(s.instanceID, status)
 	}
 	streamReducer.promoteStreamingActivity = promoteStreamingActivity
 	var lastProgressEmitAt time.Time

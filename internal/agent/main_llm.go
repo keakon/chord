@@ -431,8 +431,8 @@ func (a *MainAgent) newMainLLMStreamReducer(llmClient *llm.Client, selectedRef, 
 		},
 		drainPartialOnRollback: true,
 	}
-	streamReducer.emitActivity = func(activity ActivityType, detail string) {
-		a.emitActivity("main", activity, detail)
+	streamReducer.emitActivity = func(status *message.StatusDelta) {
+		a.emitStatusActivity("main", status)
 	}
 	streamReducer.promoteStreamingActivity = promoteStreamingActivity
 	var lastProgressEmitAt time.Time
@@ -462,7 +462,7 @@ func (a *MainAgent) newMainLLMStreamReducer(llmClient *llm.Client, selectedRef, 
 			updateRunningModelRef(status.ModelRef)
 			// Only treat as fallback if the model name differs from selected.
 			// Same model name with different provider is effectively a key switch.
-			if status.Type == "retrying" && modelNameFromRef(status.ModelRef) != modelNameFromRef(selectedRef) {
+			if status.Type == message.StatusDeltaRetrying && modelNameFromRef(status.ModelRef) != modelNameFromRef(selectedRef) {
 				// Announce the attempt as soon as the retry loop leaves the
 				// selected model: key_confirmed only arrives after the fallback
 				// target emits its first visible token, which can be tens of
@@ -726,8 +726,8 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Me
 	wallReq := a.walltime.startRequestAt(identity.MainAgentID, a.currentAgentName(), turnID)
 	if wallReq != nil {
 		defer wallReq.finish()
-		wallReq.wireStreamReducer(streamReducer, func(activity ActivityType, detail string) {
-			a.emitActivity("main", activity, detail)
+		wallReq.wireStreamReducer(streamReducer, func(status *message.StatusDelta) {
+			a.emitStatusActivity("main", status)
 		})
 	}
 	requestOptions := llm.CompleteStreamOptions{

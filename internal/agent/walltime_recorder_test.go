@@ -374,7 +374,7 @@ func TestWireStreamReducerClosesCooldownOnStreamingPromotion(t *testing.T) {
 
 	reducer := &llmStreamReducer{}
 	var activities []ActivityType
-	req.wireStreamReducer(reducer, func(a ActivityType, _ string) { activities = append(activities, a) })
+	req.wireStreamReducer(reducer, func(status *message.StatusDelta) { activities = append(activities, ActivityType(status.Type)) })
 
 	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: string(ActivityCooling)}})
 	time.Sleep(20 * time.Millisecond)

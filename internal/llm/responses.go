@@ -787,7 +787,7 @@ func (r *ResponsesProvider) sendAndParse(
 		log.Debugf("LLM request via proxy provider=%v scheme=%v", "responses", r.proxyScheme)
 	}
 	if cb != nil {
-		cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: "connecting"}})
+		cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: message.StatusDeltaConnecting}})
 	}
 	httpResp, err := doRequestUntilHeaders(r.client, req, providerResponseHeaderTimeout(r.provider))
 	if err != nil {

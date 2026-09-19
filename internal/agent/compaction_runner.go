@@ -954,7 +954,7 @@ func (p *compactionProgressReporter) Callback() llm.StreamCallback {
 }
 
 func (p *compactionProgressReporter) update(delta message.StreamDelta) bool {
-	if delta.Status != nil && strings.HasPrefix(delta.Status.Type, "retrying") {
+	if delta.Status != nil && strings.HasPrefix(delta.Status.Type, message.StatusDeltaRetrying) {
 		p.startAttempt()
 		return false
 	}

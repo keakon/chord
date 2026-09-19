@@ -9,6 +9,7 @@ import (
 
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/identity"
+	"github.com/keakon/chord/internal/message"
 )
 
 // walltimeRecorder records settled wall-clock time segments per agent and
@@ -234,15 +235,17 @@ func (r *walltimeRecorder) startRequestAt(agentID, agentName string, turnID uint
 // status would stay open until the request terminal — inflating Cooldown and
 // shrinking Model. Wrapping the promotion path closes an open cooldown window
 // on the first visible text, thinking, or tool-use delta as well.
-func (w *requestWallclock) wireStreamReducer(r *llmStreamReducer, emit func(ActivityType, string)) {
+func (w *requestWallclock) wireStreamReducer(r *llmStreamReducer, emit func(*message.StatusDelta)) {
 	if w == nil || r == nil {
 		return
 	}
-	r.emitActivity = func(activity ActivityType, detail string) {
+	r.emitActivity = func(status *message.StatusDelta) {
 		if emit != nil {
-			emit(activity, detail)
+			emit(status)
 		}
-		w.onActivity(activity)
+		if status != nil {
+			w.onActivity(ActivityType(status.Type))
+		}
 	}
 	promote := r.promoteStreamingActivity
 	r.promoteStreamingActivity = func(source string) {

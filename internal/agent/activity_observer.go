@@ -6,6 +6,7 @@ package agent
 
 import (
 	"github.com/keakon/chord/internal/identity"
+	"github.com/keakon/chord/internal/message"
 )
 
 // ActivityObserver receives notifications when agent activity changes.
@@ -29,13 +30,29 @@ func (a *MainAgent) SetActivityObserver(obs ActivityObserver) {
 // emitActivity sends an AgentActivityEvent to the TUI and notifies
 // the activity observer if one is registered.
 func (a *MainAgent) emitActivity(agentID string, activity ActivityType, detail string) {
+	a.emitActivityEvent(AgentActivityEvent{AgentID: agentID, Type: activity, Detail: detail})
+}
+
+// emitStatusActivity maps one LLM stream status transition onto the activity
+// feed. A non-zero deadline marks a bounded wait (API key cooldown), so the
+// status bar can count down the remaining time instead of the elapsed time.
+func (a *MainAgent) emitStatusActivity(agentID string, status *message.StatusDelta) {
+	if status == nil {
+		return
+	}
+	a.emitActivityEvent(AgentActivityEvent{
+		AgentID:  agentID,
+		Type:     ActivityType(status.Type),
+		Detail:   status.Detail,
+		Deadline: status.Deadline,
+	})
+}
+
+func (a *MainAgent) emitActivityEvent(evt AgentActivityEvent) {
+	agentID := evt.AgentID
+	activity := evt.Type
 	if activity != ActivityIdle && activity != ActivityCompacting {
 		a.markRealWorkStarted()
-	}
-	evt := AgentActivityEvent{
-		AgentID: agentID,
-		Type:    activity,
-		Detail:  detail,
 	}
 	a.emitToTUI(evt)
 

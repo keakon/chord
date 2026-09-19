@@ -393,7 +393,7 @@ func (r *ResponsesProvider) codexWSExecuteRequestLocked(
 	// before dial, so reusingConn should always be true for the real-request
 	// call to avoid a duplicate.
 	if cb != nil && !reusingConn {
-		cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: "connecting"}})
+		cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: message.StatusDeltaConnecting}})
 	}
 
 	if err := r.codexWSConn.SetWriteDeadline(time.Now().Add(60 * time.Second)); err != nil {
@@ -511,7 +511,7 @@ func (r *ResponsesProvider) codexWSReadResponseLocked(
 		}
 		if !gotData {
 			if cb != nil {
-				cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: "waiting_token"}})
+				cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: message.StatusDeltaWaitingToken}})
 			}
 			gotData = true
 		}
@@ -702,7 +702,7 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 		// After this point the connection is considered established, so the
 		// real-request call below passes reusingConn=true to avoid a duplicate.
 		if cb != nil {
-			cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: "connecting"}})
+			cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: message.StatusDeltaConnecting}})
 		}
 		sess := strings.TrimSpace(opts.SessionKey)
 		if sess == "" {

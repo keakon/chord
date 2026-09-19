@@ -190,7 +190,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 		line := scanner.Text()
 
 		if !gotData && cb != nil {
-			cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: "waiting_token"}})
+			cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: message.StatusDeltaWaitingToken}})
 			gotData = true
 		}
 

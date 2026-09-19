@@ -139,12 +139,9 @@ func (c *Client) compactWithFallback(
 				break
 			}
 			if requestStarted && cb != nil {
-				cb(message.StreamDelta{
-					Type: message.StreamDeltaStatus,
-					Status: &message.StatusDelta{
-						Type:   "retrying",
-						Detail: "compact endpoint",
-					},
+				emitStreamStatusDelta(cb, message.StatusDelta{
+					Type:   message.StatusDeltaRetrying,
+					Detail: "compact endpoint",
 				})
 			}
 			requestStarted = true

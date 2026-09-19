@@ -224,7 +224,10 @@ type llmStreamReducer struct {
 	tool    streamToolDeltaReducer
 	content streamContentReducer
 
-	emitActivity             func(ActivityType, string)
+	// emitActivity forwards a non-streaming status transition. The whole
+	// StatusDelta rides along so bounded waits (cooling deadline) stay
+	// structured instead of being reconstructed from Detail.
+	emitActivity             func(*message.StatusDelta)
 	promoteStreamingActivity func(string)
 
 	onProgress       func(*message.StreamProgressDelta)
@@ -272,7 +275,7 @@ func (r *llmStreamReducer) Handle(delta message.StreamDelta) {
 			return
 		}
 		if r.emitActivity != nil {
-			r.emitActivity(ActivityType(delta.Status.Type), delta.Status.Detail)
+			r.emitActivity(delta.Status)
 		}
 	case message.StreamDeltaRateLimits:
 		if r.onRateLimits != nil {

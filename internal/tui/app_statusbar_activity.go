@@ -35,6 +35,32 @@ func formatStatusBarStartedAt(t time.Time) string {
 	return statusBarStartedLabel() + t.Format("15:04")
 }
 
+// statusBarCoolingRemaining reports how long a cooling wait still has to run.
+// The runtime attaches the wait deadline to the cooling activity; without one
+// the lane falls back to the elapsed phase time.
+func statusBarCoolingRemaining(a agent.AgentActivityEvent, now time.Time) (time.Duration, bool) {
+	if a.Deadline.IsZero() {
+		return 0, false
+	}
+	return max(a.Deadline.Sub(now), 0), true
+}
+
+// formatStatusBarCountdown renders a remaining wait at readable granularity:
+// whole seconds below a minute, minutes above it. Cooling waits never reach an
+// hour, so no hour form is needed.
+func formatStatusBarCountdown(d time.Duration) string {
+	d = ceilDuration(max(d, 0), time.Second)
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d/time.Second))
+	}
+	minutes := int(d / time.Minute)
+	seconds := int((d % time.Minute) / time.Second)
+	if seconds == 0 {
+		return fmt.Sprintf("%dm", minutes)
+	}
+	return fmt.Sprintf("%dm%ds", minutes, seconds)
+}
+
 func formatStatusBarBytes(n int64) string {
 	return bytefmt.Compact(n)
 }
@@ -197,6 +223,9 @@ func (m Model) renderStatusBarLocalShell(maxWidth int) string {
 type statusBarActivityDisplay struct {
 	Icon string
 	Text string
+	// CompactText is a narrower variant of Text for tight status bar widths
+	// (for example "33s" for "33s left"); it is preferred over truncation.
+	CompactText string
 }
 
 func (m Model) statusBarElapsedText(agentID string) string {
@@ -274,7 +303,18 @@ func (m Model) buildStatusBarActivityDisplayAt(a agent.AgentActivityEvent, now t
 		} else {
 			display.Text = elapsedText
 		}
-	case agent.ActivityWaitingHeaders, agent.ActivityWaitingToken, agent.ActivityRetryingKey, agent.ActivityCooling:
+	case agent.ActivityCooling:
+		// A cooling wait has a known end, so its primary time semantics is the
+		// remaining time rather than the elapsed phase time.
+		display.Icon = "↺"
+		if remaining, ok := statusBarCoolingRemaining(a, now); ok {
+			countdown := formatStatusBarCountdown(remaining)
+			display.Text = countdown + " left"
+			display.CompactText = countdown
+		} else {
+			display.Text = elapsedText
+		}
+	case agent.ActivityWaitingHeaders, agent.ActivityWaitingToken, agent.ActivityRetryingKey:
 		display.Icon = "↺"
 		display.Text = elapsedText
 	case agent.ActivityStreaming:
@@ -309,6 +349,11 @@ func (m Model) renderActivityAt(a agent.AgentActivityEvent, maxWidth int, now ti
 		out += " " + textStyle.Render(text)
 	}
 	if maxWidth > 0 && lipgloss.Width(out) > maxWidth && text != "" {
+		if display.CompactText != "" {
+			if compact := iconStyle.Render(icon) + " " + textStyle.Render(display.CompactText); lipgloss.Width(compact) <= maxWidth {
+				return compact
+			}
+		}
 		iconW := lipgloss.Width(iconStyle.Render(icon))
 		tw := max(maxWidth-iconW-1, 1)
 		truncated := runewidth.Truncate(text, tw, "…")

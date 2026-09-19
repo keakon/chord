@@ -317,7 +317,7 @@ func (g *GeminiProvider) CompleteStream(
 	if g.proxyScheme != "" {
 		log.Debugf("LLM request via proxy provider=%v scheme=%v", "gemini", g.proxyScheme)
 	}
-	traceCB(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: "connecting"}})
+	traceCB(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: message.StatusDeltaConnecting}})
 	httpResp, err := doRequestUntilHeaders(g.client, req, providerResponseHeaderTimeout(g.provider))
 	if err != nil {
 		callErr := fmt.Errorf("send request: %w", err)
@@ -746,7 +746,7 @@ func parseGeminiSSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if !gotData && cb != nil {
-			cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: "waiting_token"}})
+			cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: message.StatusDeltaWaitingToken}})
 			gotData = true
 		}
 		if !bytes.HasPrefix(line, []byte("data:")) {

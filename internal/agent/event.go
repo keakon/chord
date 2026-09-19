@@ -1014,24 +1014,32 @@ func (QuestionRequestEvent) agentEvent() {}
 // ActivityType represents the specific technical state of an agent's LLM or tool loop.
 type ActivityType string
 
+// Activity types that mirror an LLM request phase derive from the
+// message.StatusDelta wire names, so a reducer can convert a status delta into
+// an activity without a translation table. Idle and executing have no
+// status-delta counterpart: they describe the agent loop itself.
 const (
 	ActivityIdle           ActivityType = "idle"
-	ActivityConnecting     ActivityType = "connecting"
-	ActivityWaitingHeaders ActivityType = "waiting_headers"
-	ActivityWaitingToken   ActivityType = "waiting_token"
-	ActivityStreaming      ActivityType = "streaming"
+	ActivityConnecting     ActivityType = message.StatusDeltaConnecting
+	ActivityWaitingHeaders ActivityType = message.StatusDeltaWaitingHeaders
+	ActivityWaitingToken   ActivityType = message.StatusDeltaWaitingToken
+	ActivityStreaming      ActivityType = message.StatusDeltaStreaming
 	ActivityExecuting      ActivityType = "executing"
-	ActivityCompacting     ActivityType = "compacting"
-	ActivityRetrying       ActivityType = "retrying"
-	ActivityRetryingKey    ActivityType = "retrying_key"
-	ActivityCooling        ActivityType = "cooling"
+	ActivityCompacting     ActivityType = message.StatusDeltaCompacting
+	ActivityRetrying       ActivityType = message.StatusDeltaRetrying
+	ActivityRetryingKey    ActivityType = message.StatusDeltaRetryingKey
+	ActivityCooling        ActivityType = message.StatusDeltaCooling
 )
 
 // AgentActivityEvent is emitted to the TUI to show real-time progress.
 type AgentActivityEvent struct {
 	AgentID string
 	Type    ActivityType
-	Detail  string // e.g. "3 tools", "retry 2/6", "cooldown 5s"
+	Detail  string // e.g. "3 tools", "retry 2/6", "45s"
+	// Deadline, when non-zero, is the wall-clock time a bounded wait is
+	// expected to end (API key cooldown). The status bar renders the remaining
+	// time for such waits instead of the elapsed phase time.
+	Deadline time.Time
 }
 
 func (AgentActivityEvent) agentEvent() {}

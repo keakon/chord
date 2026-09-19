@@ -459,7 +459,7 @@ func parseResponsesSSEWithOutputItemsAndTurnState(reader io.Reader, cb StreamCal
 		line, readErr := readSSELine(br)
 		if readErr == nil || len(line) > 0 {
 			if !gotData && cb != nil {
-				cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: "waiting_token"}})
+				cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: message.StatusDeltaWaitingToken}})
 				gotData = true
 			}
 			switch {
@@ -934,7 +934,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 				state.resp.Content = done.Item.EncryptedContent
 			}
 			if state.cb != nil {
-				state.cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: "compacting"}})
+				state.cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: message.StatusDeltaCompacting}})
 			}
 			return nil, nil, false, nil
 		}

@@ -4077,10 +4077,13 @@ func TestCompleteStreamCoolingStatusUsesMergedRoundWait(t *testing.T) {
 		ContextLimit:   128000,
 	}})
 
+	start := time.Now()
 	var coolingDetails []string
+	var coolingDeadlines []time.Time
 	resp, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, func(delta message.StreamDelta) {
 		if delta.Type == "status" && delta.Status != nil && delta.Status.Type == "cooling" {
 			coolingDetails = append(coolingDetails, delta.Status.Detail)
+			coolingDeadlines = append(coolingDeadlines, delta.Status.Deadline)
 		}
 	})
 	if err != nil {
@@ -4094,6 +4097,12 @@ func TestCompleteStreamCoolingStatusUsesMergedRoundWait(t *testing.T) {
 	}
 	if got := coolingDetails[len(coolingDetails)-1]; got != "1s" {
 		t.Fatalf("last cooling detail = %q, want 1s", got)
+	}
+	// The status bar counts down from this deadline, so it must be a real
+	// future instant derived from the merged wait, not a zero value.
+	lastDeadline := coolingDeadlines[len(coolingDeadlines)-1]
+	if !lastDeadline.After(start) || lastDeadline.Sub(start) > time.Minute {
+		t.Fatalf("last cooling deadline = %v (%v after start), want within the merged wait", lastDeadline, lastDeadline.Sub(start))
 	}
 }
 

@@ -155,7 +155,7 @@ func TestLLMStreamReducerIgnoresTraceOnlyEventDelta(t *testing.T) {
 	var progress []*message.StreamProgressDelta
 	activity := 0
 	reducer := &llmStreamReducer{
-		emitActivity: func(ActivityType, string) { activity++ },
+		emitActivity: func(*message.StatusDelta) { activity++ },
 		onProgress:   func(p *message.StreamProgressDelta) { progress = append(progress, p) },
 	}
 	reducer.content = streamContentReducer{emit: func(evt AgentEvent) { events = append(events, evt) }}
@@ -356,5 +356,30 @@ func TestStreamContentReducerTagsStreamEventsWithSegmentIdentity(t *testing.T) {
 	thinking, ok := events[2].(StreamThinkingEvent)
 	if !ok || thinking.Text != "plan" || thinking.TurnID != 42 || thinking.RequestSeq != 3 {
 		t.Fatalf("events[2] = %#v, want the thinking commit tagged with turn 42 request 3", events[2])
+	}
+}
+
+func TestMainLLMStreamReducerForwardsCoolingDeadline(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	deadline := time.Now().Add(45 * time.Second)
+	reducer := a.newMainLLMStreamReducer(nil, "provider/model-1", "", nil, false, nil, 0)
+
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{
+		Type:     string(ActivityCooling),
+		Detail:   "45s",
+		Deadline: deadline,
+	}})
+
+	select {
+	case evt := <-a.outputCh:
+		activity, ok := evt.(AgentActivityEvent)
+		if !ok {
+			t.Fatalf("event = %T, want AgentActivityEvent", evt)
+		}
+		if activity.Type != ActivityCooling || activity.Detail != "45s" || !activity.Deadline.Equal(deadline) {
+			t.Fatalf("activity = %#v, want cooling with deadline %v", activity, deadline)
+		}
+	default:
+		t.Fatal("missing cooling AgentActivityEvent")
 	}
 }

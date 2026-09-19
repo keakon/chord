@@ -516,7 +516,7 @@ func (o *OpenAIProvider) CompleteStream(
 	if o.proxyScheme != "" {
 		log.Debugf("LLM request via proxy provider=%v scheme=%v", "openai", o.proxyScheme)
 	}
-	traceCB(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: "connecting"}})
+	traceCB(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: message.StatusDeltaConnecting}})
 	httpResp, err := doRequestUntilHeaders(o.client, req, providerResponseHeaderTimeout(o.provider))
 	if err != nil {
 		callErr := fmt.Errorf("send request: %w", err)
@@ -1014,7 +1014,7 @@ func parseOpenAISSEStreamOptions(reader io.Reader, cb StreamCallback, collector 
 		line := scanner.Bytes()
 
 		if !gotData && cb != nil {
-			cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: "waiting_token"}})
+			cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: message.StatusDeltaWaitingToken}})
 			gotData = true
 		}
 
