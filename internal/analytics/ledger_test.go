@@ -728,6 +728,78 @@ func TestFirstUserMessageLockedSkipsSyntheticUserMessages(t *testing.T) {
 	}
 }
 
+// An in-place tail edit rewrites a transcript whose head may already be a
+// compaction checkpoint. The ledger cannot read the original request out of
+// such a transcript — its first user-authored message is a mid-session prompt —
+// so with no hint it must leave the original unknown rather than freeze that
+// prompt as the session's original request.
+func TestRewriteFirstUserMessageDoesNotScanPastCheckpointForOriginal(t *testing.T) {
+	dir := t.TempDir()
+	writeCompactedMainLog(t, dir)
+	ledger := NewUsageLedger(dir, "/tmp/project")
+
+	if err := ledger.RewriteFirstUserMessage("mid-session prompt"); err != nil {
+		t.Fatalf("RewriteFirstUserMessage: %v", err)
+	}
+
+	summary, err := ledger.Summary()
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	if summary.FirstUserMessage != "mid-session prompt" {
+		t.Fatalf("FirstUserMessage = %q, want the rewritten preview", summary.FirstUserMessage)
+	}
+	if summary.OriginalFirstUserMessage != "" {
+		t.Fatalf("OriginalFirstUserMessage = %q, want empty: a post-checkpoint prompt is not the original request", summary.OriginalFirstUserMessage)
+	}
+}
+
+// The same rewrite with a caller hint seeds the original request from it: that
+// is the path the in-place tail edit takes, passing the checkpoint's anchors.
+func TestRewriteFirstUserMessageWithOriginalSeedsHintForCompactedTranscript(t *testing.T) {
+	dir := t.TempDir()
+	writeCompactedMainLog(t, dir)
+	ledger := NewUsageLedger(dir, "/tmp/project")
+
+	if err := ledger.RewriteFirstUserMessageWithOriginal("mid-session prompt", "REAL original request"); err != nil {
+		t.Fatalf("RewriteFirstUserMessageWithOriginal: %v", err)
+	}
+
+	summary, err := ledger.Summary()
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	if summary.OriginalFirstUserMessage != "REAL original request" {
+		t.Fatalf("OriginalFirstUserMessage = %q, want the caller hint", summary.OriginalFirstUserMessage)
+	}
+	if summary.FirstUserMessageIsCompactionSummary {
+		t.Fatal("FirstUserMessageIsCompactionSummary = true, want false: the preview is a real prompt")
+	}
+}
+
+// The transcript scan stays available for a history that still starts with a
+// real prompt: there the first user-authored message *is* the original request.
+func TestRewriteFirstUserMessageScansUncompactedHeadForOriginal(t *testing.T) {
+	dir := t.TempDir()
+	payload := []byte(`{"role":"user","content":"real first prompt"}` + "\n")
+	if err := os.WriteFile(filepath.Join(dir, "main.jsonl"), payload, 0o644); err != nil {
+		t.Fatalf("WriteFile(main.jsonl): %v", err)
+	}
+	ledger := NewUsageLedger(dir, "/tmp/project")
+
+	if err := ledger.RewriteFirstUserMessage("real first prompt"); err != nil {
+		t.Fatalf("RewriteFirstUserMessage: %v", err)
+	}
+
+	summary, err := ledger.Summary()
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	if summary.OriginalFirstUserMessage != "real first prompt" {
+		t.Fatalf("OriginalFirstUserMessage = %q, want the scanned head", summary.OriginalFirstUserMessage)
+	}
+}
+
 func TestLoadSessionUsageSummaryRebuildsWhenSummaryStale(t *testing.T) {
 	dir := t.TempDir()
 	ledger := NewUsageLedger(dir, "/tmp/project")

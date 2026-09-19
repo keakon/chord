@@ -214,6 +214,16 @@ func (l *UsageLedger) RewriteFirstUserMessageWithOriginalForCompaction(content, 
 	return l.rewriteFirstUserMessage(content, originalHint, true)
 }
 
+// RewriteFirstUserMessageWithOriginal behaves like RewriteFirstUserMessage but
+// lets the caller seed OriginalFirstUserMessage when neither the ledger nor the
+// on-disk summary has it set yet. Callers pass a hint when the rewritten
+// transcript cannot witness the original request any more — an in-place tail
+// edit whose prefix starts with a compaction checkpoint — so the fallback
+// below is not asked to name it from a post-checkpoint prompt.
+func (l *UsageLedger) RewriteFirstUserMessageWithOriginal(content, originalHint string) error {
+	return l.rewriteFirstUserMessage(content, originalHint, false)
+}
+
 func (l *UsageLedger) rewriteFirstUserMessage(content, originalHint string, firstUserIsCompactionSummary bool) error {
 	preview := usageFirstUserPreview(content)
 	originalPreview := usageFirstUserPreview(originalHint)
@@ -247,14 +257,19 @@ func (l *UsageLedger) rewriteFirstUserMessage(content, originalHint string, firs
 	if l.originalFirstUserMessage == "" && originalPreview != "" {
 		l.originalFirstUserMessage = originalPreview
 	}
-	// Only a non-compaction rewrite may fall back to the transcript. The
-	// compaction rewrite runs *after* main.jsonl has been replaced by the
-	// checkpoint, so a scan for the first user-authored message names the first
-	// prompt after it. Adopting that would be permanent: session lists prefer
-	// the original over the current preview, and every later checkpoint copies
-	// it forward as its "Original request:" anchor.
+	// Only a non-compaction rewrite may fall back to the transcript, and only
+	// when that transcript still starts with a real prompt. The compaction
+	// rewrite runs *after* main.jsonl has been replaced by the checkpoint, so a
+	// scan for the first user-authored message names the first prompt after it.
+	// The same trap waits for a later in-place tail edit (firstUserIsCompaction
+	// Summary is false there, because the prefix does hold a real prompt), so
+	// the head check is what keeps this branch honest: the cached mirror is not
+	// a substitute, since it can itself hold the checkpoint text the compaction
+	// rewrite recorded as the preview.
 	if l.originalFirstUserMessage == "" && !firstUserIsCompactionSummary {
-		l.originalFirstUserMessage = l.firstUserMessageLocked()
+		if scanned, headIsCompactionSummary := l.scanFirstUserMessageLocked(); !headIsCompactionSummary {
+			l.originalFirstUserMessage = scanned
+		}
 	}
 	l.firstUserMessage = preview
 	summary.FirstUserMessage = preview
@@ -1042,30 +1057,50 @@ func (l *UsageLedger) firstUserMessageLocked() string {
 	if l.firstUserMessage != "" {
 		return l.firstUserMessage
 	}
+	preview, _ := l.scanFirstUserMessageLocked()
+	if preview != "" {
+		l.firstUserMessage = preview
+	}
+	return preview
+}
 
+// scanFirstUserMessageLocked reads main.jsonl and returns the preview of its
+// first user-authored prompt together with whether a compaction checkpoint
+// precedes that prompt. A synthetic head means the transcript was compacted, so
+// the preview the scan returns is a mid-session one: usable as the current
+// preview, never as the original request. Callers must hold l.mu.
+func (l *UsageLedger) scanFirstUserMessageLocked() (string, bool) {
 	f, err := os.Open(l.mainPath())
 	if err != nil {
-		return ""
+		return "", false
 	}
 	defer f.Close()
 
 	dec := json.NewDecoder(f)
+	headIsCompactionSummary := false
 	for {
 		var msg message.Message
 		if err := dec.Decode(&msg); err != nil {
 			break
 		}
+		if msg.Role != message.RoleUser {
+			continue
+		}
+		// A checkpoint ahead of every real prompt means the history was
+		// compacted; whatever follows it is not the session's first request.
+		if msg.IsCompactionSummary {
+			headIsCompactionSummary = true
+			continue
+		}
 		// Synthetic user-role messages must not become the original user prompt.
 		if !message.IsUserAuthored(msg) {
 			continue
 		}
-		preview := usageFirstUserPreview(message.UserPromptPlainText(msg))
-		if preview != "" {
-			l.firstUserMessage = preview
-			return preview
+		if preview := usageFirstUserPreview(message.UserPromptPlainText(msg)); preview != "" {
+			return preview, headIsCompactionSummary
 		}
 	}
-	return ""
+	return "", headIsCompactionSummary
 }
 
 // OriginalFirstUserMessage returns the original first user message preview,

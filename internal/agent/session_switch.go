@@ -423,7 +423,14 @@ func (a *MainAgent) editTailUserMessageInPlace(prefix []message.Message, forkMsg
 	// session lists and previews do not present it as the user's prompt.
 	firstUser := ""
 	firstUserIsCompactionSummary := false
+	headIsCompactionSummary := false
 	for _, msg := range prefix {
+		if msg.Role == message.RoleUser && msg.IsCompactionSummary {
+			// The loop stops at the first real prompt, so any checkpoint seen
+			// here precedes it and the transcript head is synthetic.
+			headIsCompactionSummary = true
+			continue
+		}
 		if !message.IsUserAuthored(msg) {
 			continue
 		}
@@ -444,15 +451,36 @@ func (a *MainAgent) editTailUserMessageInPlace(prefix []message.Message, forkMsg
 			}
 		}
 	}
+	// A compacted prefix cannot witness the original request any more: its
+	// first user-authored message is a mid-session prompt, and the transcript
+	// scan that stands in for a missing preview skips the checkpoint and
+	// returns that same prompt. The checkpoint's anchors block is then the only
+	// candidate left, and the durable one — written while the real head was
+	// still observable, copied forward verbatim ever after. Only an uncompacted
+	// prefix may name its own head.
+	//
+	// This only ever fills a hole: an original that is already recorded stays
+	// as it is, so the ledger and this in-memory summary keep agreeing. Deciding
+	// which candidate *wins* is captureOriginalFirstUserHint's job, and it ranks
+	// the anchors first.
+	originalHint := ""
+	if summary := a.GetSessionSummary(); summary != nil {
+		originalHint = strings.TrimSpace(summary.OriginalFirstUserMessage)
+	}
+	if originalHint == "" {
+		originalHint = strings.TrimSpace(latestCompactionAnchors(prefix).OriginalRequest)
+	}
+	if originalHint == "" && !headIsCompactionSummary {
+		originalHint = strings.TrimSpace(firstUser)
+	}
 	if a.usageLedger != nil {
 		var err error
-		if firstUserIsCompactionSummary {
-			originalHint := ""
-			if summary := a.GetSessionSummary(); summary != nil {
-				originalHint = summary.OriginalFirstUserMessage
-			}
+		switch {
+		case firstUserIsCompactionSummary:
 			err = a.usageLedger.RewriteFirstUserMessageWithOriginalForCompaction(firstUser, originalHint)
-		} else {
+		case originalHint != "":
+			err = a.usageLedger.RewriteFirstUserMessageWithOriginal(firstUser, originalHint)
+		default:
 			err = a.usageLedger.RewriteFirstUserMessage(firstUser)
 		}
 		if err != nil {
@@ -469,9 +497,10 @@ func (a *MainAgent) editTailUserMessageInPlace(prefix []message.Message, forkMsg
 			summary.OriginalFirstUserMessage = ""
 			return
 		}
-		if !firstUserIsCompactionSummary &&
-			(summary.OriginalFirstUserMessage == "" || summary.OriginalFirstUserMessage == summary.FirstUserMessage) {
-			summary.OriginalFirstUserMessage = strings.TrimSpace(firstUser)
+		// The original is only ever filled in, never re-derived from the
+		// rewritten transcript, and only from a hint that already knew it.
+		if summary.OriginalFirstUserMessage == "" {
+			summary.OriginalFirstUserMessage = originalHint
 		}
 	})
 

@@ -1295,6 +1295,114 @@ func TestHandleForkSessionCommandTailEditDropsRemovedFirstUserPreview(t *testing
 	}
 }
 
+// A prefix that starts with a compaction checkpoint has no user-authored head
+// left: the first prompt in it is a mid-session one. Editing the tail must not
+// promote that prompt to the session's original request — session lists prefer
+// the original over the current preview, and every later checkpoint copies it
+// forward as its "Original request:" anchor. When the cached original is missing
+// (a summary written before OriginalFirstUserMessage existed, or one that lost
+// it), the checkpoint's own anchors block is the only remaining source.
+func TestHandleForkSessionCommandTailEditKeepsCheckpointAnchorAsOriginal(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.markAgentsMDReady()
+	a.MarkSkillsReady()
+	a.markMCPReady()
+
+	const (
+		original   = "REAL original request"
+		midSession = "mid-session prompt"
+		tail       = "tail prompt"
+	)
+	msgs := []message.Message{
+		checkpointWithAnchor(original),
+		{Role: "assistant", Content: "a1"},
+		{Role: "user", Content: midSession},
+		{Role: "assistant", Content: "a2"},
+		{Role: "user", Content: tail},
+	}
+	a.ctxMgr.RestoreMessages(msgs)
+	if err := a.recoveryManager().RewriteLog("main", msgs); err != nil {
+		t.Fatalf("RewriteLog(main): %v", err)
+	}
+	// Mirror what the compaction path records for a summary that has no cached
+	// original: the preview is the checkpoint and the original is left empty.
+	if err := a.usageLedger.RewriteFirstUserMessageWithOriginalForCompaction(
+		message.UserPromptPlainText(msgs[0]), ""); err != nil {
+		t.Fatalf("RewriteFirstUserMessageWithOriginalForCompaction: %v", err)
+	}
+	a.refreshSessionSummary()
+
+	a.handleForkSessionCommand(len(msgs) - 1)
+
+	summary, err := a.usageLedger.Summary()
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	if summary.OriginalFirstUserMessage != original {
+		t.Fatalf("usage summary original = %q, want %q", summary.OriginalFirstUserMessage, original)
+	}
+
+	// Read the session back through the same path the resume picker uses.
+	list, err := recovery.ListSessions(filepath.Dir(a.SessionDir()), "")
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("len(ListSessions) = %d, want 1", len(list))
+	}
+	if list[0].OriginalFirstUserMessage != original {
+		t.Fatalf("picker original = %q, want %q", list[0].OriginalFirstUserMessage, original)
+	}
+}
+
+// The same edit on a checkpoint that carries no anchors block has nothing left
+// that could name the original request. Leaving it empty is the only honest
+// outcome: recording the post-checkpoint prompt there would be permanent, since
+// session lists prefer the original and every later checkpoint copies it forward
+// as its "Original request:" anchor.
+func TestHandleForkSessionCommandTailEditLeavesUnknownOriginalEmpty(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.markAgentsMDReady()
+	a.MarkSkillsReady()
+	a.markMCPReady()
+
+	const (
+		midSession = "mid-session prompt"
+		tail       = "tail prompt"
+	)
+	msgs := []message.Message{
+		{Role: "user", Content: "[Context Summary]\n## Goal\n- carry on", IsCompactionSummary: true},
+		{Role: "assistant", Content: "a1"},
+		{Role: "user", Content: midSession},
+		{Role: "assistant", Content: "a2"},
+		{Role: "user", Content: tail},
+	}
+	a.ctxMgr.RestoreMessages(msgs)
+	if err := a.recoveryManager().RewriteLog("main", msgs); err != nil {
+		t.Fatalf("RewriteLog(main): %v", err)
+	}
+	if err := a.usageLedger.RewriteFirstUserMessageWithOriginalForCompaction(
+		message.UserPromptPlainText(msgs[0]), ""); err != nil {
+		t.Fatalf("RewriteFirstUserMessageWithOriginalForCompaction: %v", err)
+	}
+	a.refreshSessionSummary()
+
+	a.handleForkSessionCommand(len(msgs) - 1)
+
+	summary, err := a.usageLedger.Summary()
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	if summary.OriginalFirstUserMessage != "" {
+		t.Fatalf("usage summary original = %q, want empty", summary.OriginalFirstUserMessage)
+	}
+	if summary.FirstUserMessage != midSession {
+		t.Fatalf("usage summary preview = %q, want %q", summary.FirstUserMessage, midSession)
+	}
+}
+
 // The tail edit removes messages, so everything derived from them has to be
 // rebuilt: a deleted later user message must leave no trace in the inputs the
 // compaction summary is built from (transcript, evidence pack, anchors), while
