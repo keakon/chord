@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	tea "github.com/keakon/bubbletea/v2"
 
@@ -691,6 +692,22 @@ func TestJobsOverlayRowStopZoneOpensConfirm(t *testing.T) {
 	for _, state := range tools.SnapshotJobs() {
 		if state.ID == id && state.Status != jobStatusRunning {
 			t.Fatalf("overlay row click must not stop the job, status = %q", state.Status)
+		}
+	}
+}
+
+func TestJobsOverlayFitsNarrowTerminal(t *testing.T) {
+	for _, width := range []int{40, 50, 60, 71} {
+		m := newJobsTestModel(t, width, 40)
+		startTestJob(t, "sleep 60", "narrow overlay")
+		refreshJobs(m)
+		m.openJobsOverlay()
+		dialog := m.renderJobsOverlayDialog()
+		if dialog == "" {
+			t.Fatalf("width %d: empty dialog", width)
+		}
+		if got := lipgloss.Width(strings.Split(dialog, "\n")[0]); got > width-1 {
+			t.Fatalf("width %d: dialog line width %d exceeds drawable width %d", width, got, width-1)
 		}
 	}
 }

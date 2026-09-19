@@ -107,7 +107,7 @@ func (m *Model) jobsOverlayCursorJobID() (string, bool) {
 }
 
 func (m *Model) jobsOverlayMaxWidth() int {
-	return max(min(m.width-12, 110), 60)
+	return max(min(m.width-12, 110), 1)
 }
 
 func (m *Model) jobsOverlayInnerWidth() int {
