@@ -583,15 +583,16 @@ func (t ShellTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 
 // cancelOrForegroundResult resolves the race between the caller's cancellation
 // and the command completing on its own. Both select cases can be ready at
-// once, and a cancellation that lost the race must not overwrite a real exit
-// status: kill reports false when the job had already finished, in which case
-// its natural terminal result is the answer.
+// once, so the requested stop is not the outcome: after the job settles, its
+// final terminal state decides. A job that kept running is reported as
+// cancelled; one that had already exited keeps its real exit status instead of
+// being overwritten by a stop that lost the race.
 func (t ShellTool) cancelOrForegroundResult(j *job, started time.Time) (string, error) {
-	if globalJobRegistry.kill(j.ID, "cancelled") {
-		<-j.done
+	globalJobRegistry.kill(j.ID, "cancelled")
+	<-j.done
+	if j.isKilled() {
 		return t.cancelledResult(j)
 	}
-	<-j.done
 	return t.foregroundResult(j, started)
 }
 

@@ -767,3 +767,31 @@ func TestCancelOrForegroundResultReportsRunningJobCancellation(t *testing.T) {
 		t.Fatalf("error = %v, want cancellation for a running job", err)
 	}
 }
+
+// The narrow window where the process has already exited (done closed) but the
+// terminal state was not yet published as the job's own: the requested stop is
+// accepted, yet the natural exit status must still win over the cancellation.
+func TestCancelOrForegroundResultKeepsNaturalExitWhenKillRacesExit(t *testing.T) {
+	resetJobRegistryOnlyForTest(t)
+	done := make(chan struct{})
+	close(done)
+	j := &job{
+		ID:       "race-exit",
+		Command:  "sh -c 'exit 0'",
+		cancelCh: make(chan string, 1),
+		done:     done,
+		status:   jobStatusCompleted,
+		detail:   "exit code 0",
+	}
+	globalJobRegistry.mu.Lock()
+	globalJobRegistry.jobs[j.ID] = j
+	globalJobRegistry.mu.Unlock()
+
+	out, err := (ShellTool{}).cancelOrForegroundResult(j, time.Now())
+	if err != nil {
+		t.Fatalf("err = %v, want the natural exit reported instead of a cancellation", err)
+	}
+	if strings.Contains(out, "cancelled") {
+		t.Fatalf("out = %q, want no cancellation marker", out)
+	}
+}

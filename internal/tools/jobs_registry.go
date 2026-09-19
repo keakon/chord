@@ -294,10 +294,25 @@ func (r *JobRegistry) run(j *job) {
 		err = j.formatRuntimeError(rawErr)
 	}
 
+	// killAfterExit records the real terminal state when the process already
+	// exited, so a cancel or timeout that races a natural exit does not report a
+	// completed command as killed. It reports whether it consumed waitCh.
+	killAfterExit := func() bool {
+		select {
+		case rawErr := <-waitCh:
+			handleExit(rawErr)
+			return true
+		default:
+			return false
+		}
+	}
+
 	if j.MaxRuntimeSec <= 0 {
 		select {
 		case reason := <-j.cancelCh:
-			status, detail, err = jobStatusKilled, reason, terminateJobProcessGroup(cmd, reason, waitCh)
+			if !killAfterExit() {
+				status, detail, err = jobStatusKilled, reason, terminateJobProcessGroup(cmd, reason, waitCh)
+			}
 		case rawErr := <-waitCh:
 			handleExit(rawErr)
 		}
@@ -306,15 +321,19 @@ func (r *JobRegistry) run(j *job) {
 		defer timer.Stop()
 		select {
 		case reason := <-j.cancelCh:
-			status, detail, err = jobStatusKilled, reason, terminateJobProcessGroup(cmd, reason, waitCh)
+			if !killAfterExit() {
+				status, detail, err = jobStatusKilled, reason, terminateJobProcessGroup(cmd, reason, waitCh)
+			}
 		case rawErr := <-waitCh:
 			handleExit(rawErr)
 		case <-timer.C:
-			reason := fmt.Sprintf("timed out after %ds", j.MaxRuntimeSec)
-			status, detail, err = jobStatusKilled, reason, terminateJobProcessGroup(cmd, reason, waitCh)
-			// A timeout otherwise invites an unchanged, equally slow re-run: the
-			// model cannot see the deadline it hit, so steer the next step.
-			err = fmt.Errorf("%w\n%s", err, shellTimeoutGuidance)
+			if !killAfterExit() {
+				reason := fmt.Sprintf("timed out after %ds", j.MaxRuntimeSec)
+				status, detail, err = jobStatusKilled, reason, terminateJobProcessGroup(cmd, reason, waitCh)
+				// A timeout otherwise invites an unchanged, equally slow re-run:
+				// the model cannot see the deadline it hit, so steer the next step.
+				err = fmt.Errorf("%w\n%s", err, shellTimeoutGuidance)
+			}
 		}
 	}
 	r.finish(j, status, detail, err)
