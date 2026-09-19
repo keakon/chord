@@ -133,15 +133,19 @@ var (
 	// 7-char SHAs); the avoided false positives are far more common in practice.
 	sessionSHALikeRe = regexp.MustCompile(`(?i)\b[0-9a-f]{7,40}\b`)
 	// absolutePathRe catches machine-local absolute paths in durable text, on a
-	// best-effort prefix list plus Windows drive prefixes. Project-relative
-	// paths never start with these prefixes, and project_paths entries already
-	// reject absolute paths lexically; this covers the same shapes inside free
-	// text. Home-relative (~/...) references are deliberately not matched: they
-	// stay valid when the project moves between machines for the same user.
-	// /dev is included so per-machine device and shared-memory paths
-	// (/dev/shm, /dev/tty.*) drop. The three fixed POSIX names that travel
-	// between machines are stripped first by portableDevPathRe.
-	absolutePathRe    = regexp.MustCompile(`/(Users|home|tmp|var|private|etc|opt|data|root|mnt|srv|usr|proc|sys|dev|run|System|Library|Volumes|Applications)/\S*|[A-Za-z]:[\\/][^\s]*`)
+	// best-effort prefix list, and windowsPathRe catches drive-letter paths.
+	// Both match only a path that starts a token (see pathTokenStart): a
+	// relative path such as cmd/run/main.go must not read as the absolute
+	// /run/main.go, and a URL such as https://example.com/x must not read as
+	// the drive-like s://example.com/x. project_paths entries already reject
+	// absolute paths lexically; this covers the same shapes inside free text.
+	// Home-relative (~/...) references are deliberately not matched: they stay
+	// valid when the project moves between machines for the same user. /dev is
+	// included so per-machine device and shared-memory paths (/dev/shm,
+	// /dev/tty.*) drop. The three fixed POSIX names that travel between
+	// machines are stripped first by portableDevPathRe.
+	absolutePathRe    = regexp.MustCompile(`/(?:Users|home|tmp|var|private|etc|opt|data|root|mnt|srv|usr|proc|sys|dev|run|System|Library|Volumes|Applications)/\S*`)
+	windowsPathRe     = regexp.MustCompile(`[A-Za-z]:[\\/][^\s]*`)
 	portableDevPathRe = regexp.MustCompile(`/dev/(?:null|stdin|stdout)\b`)
 )
 
@@ -477,9 +481,39 @@ func validateCandidateDroppable(c Candidate) error {
 // containsMachineAbsolutePath reports a host-local absolute path in durable
 // text. /dev/null, /dev/stdin and /dev/stdout are stripped first because they
 // are fixed POSIX names that travel between machines; remaining /dev paths
-// still match absolutePathRe.
+// still match the path patterns.
 func containsMachineAbsolutePath(text string) bool {
-	return absolutePathRe.MatchString(portableDevPathRe.ReplaceAllString(text, ""))
+	text = portableDevPathRe.ReplaceAllString(text, "")
+	for _, loc := range absolutePathRe.FindAllStringIndex(text, -1) {
+		if pathTokenStart(text, loc[0]) {
+			return true
+		}
+	}
+	for _, loc := range windowsPathRe.FindAllStringIndex(text, -1) {
+		if pathTokenStart(text, loc[0]) {
+			return true
+		}
+	}
+	return false
+}
+
+// pathTokenStart reports whether offset begins a path token rather than
+// continuing a relative path, an identifier, or a URL. A token starts at the
+// beginning of the text or after a character that cannot be part of a path:
+// cmd/run/main.go must not read as the absolute /run/main.go, and
+// https://example.com/x must not read as the drive-like s://example.com/x.
+func pathTokenStart(text string, offset int) bool {
+	if offset == 0 {
+		return true
+	}
+	c := text[offset-1]
+	switch {
+	case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		return false
+	case c == '_' || c == '-' || c == '.' || c == '+' || c == '/' || c == '\\':
+		return false
+	}
+	return true
 }
 
 // containsSessionSHALike reports whether text carries a hex token shaped like a

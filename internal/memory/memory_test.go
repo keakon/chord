@@ -1191,6 +1191,46 @@ func TestExtractionDropsSessionLocalIdentifiers(t *testing.T) {
 	}
 }
 
+// The machine-absolute path check must fire only on a path that starts a
+// token: a URL or a project-relative path that happens to contain a prefix
+// segment (cmd/run, pkg/data, docs/etc) is durable text, not a local layout.
+func TestContainsMachineAbsolutePathTokenStart(t *testing.T) {
+	absolute := []string{
+		"/Users/tester/projects/chord",
+		"see /tmp/x for the socket",
+		"config=/home/user/.config/chord",
+		"under /var/log/chord.log",
+		"scratch at /dev/shm/chord-scratch",
+		`log at C:\Users\tester\chord.log shows it`,
+		"drive C:/Users/tester/x exists",
+		`quoted "/etc/chord/config" stays local`,
+		"before (/opt/app) after",
+	}
+	for _, text := range absolute {
+		if !containsMachineAbsolutePath(text) {
+			t.Fatalf("containsMachineAbsolutePath(%q) = false, want true", text)
+		}
+	}
+	portable := []string{
+		"https://example.com/x",
+		"https://example.com/tmp/x",
+		"cmd/run/main.go",
+		"pkg/data/store.go",
+		"scripts/dev/setup.sh",
+		"docs/etc/x.md",
+		"internal/agent/loop.go",
+		"use /dev/null for discard",
+		"read /dev/stdin and write /dev/stdout",
+		"check ~/notes/x.md",
+		"relative path tmp/x",
+	}
+	for _, text := range portable {
+		if containsMachineAbsolutePath(text) {
+			t.Fatalf("containsMachineAbsolutePath(%q) = true, want false", text)
+		}
+	}
+}
+
 func TestSanitizeTextRedactsSecrets(t *testing.T) {
 	input := "Authorization: Bearer abc123\nx-api-key: def456\npassword=secret12345\nhttps://user:pass@example.com\n-----BEGIN RSA PRIVATE KEY-----\nMIIE\n-----END RSA PRIVATE KEY-----"
 	out := SanitizeText(input)
