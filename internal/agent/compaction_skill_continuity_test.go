@@ -343,6 +343,34 @@ func TestSubAgentCheckpointSkillsCarryOverflow(t *testing.T) {
 	}
 }
 
+func TestSubAgentCheckpointSkillsDeduplicatesCarriedOverflow(t *testing.T) {
+	_, sub := newMixedBatchTestSubAgent(t)
+	defer sub.cancel()
+
+	total := checkpointMaxSkillNames + 1
+	for i := range total {
+		sub.MarkSkillInvoked(&skill.Meta{Name: fmt.Sprintf("skill-%02d", i)})
+	}
+	first := buildSubAgentStructuredCheckpoint(sub, nil, 9, "proactive", "archives/sub-1.md")
+	names, omitted := parseSubAgentCheckpointSkillNames(first)
+	if len(names) != checkpointMaxSkillNames || omitted != 1 {
+		t.Fatalf("first checkpoint parsed %d names / omitted %d, want %d / 1", len(names), omitted, checkpointMaxSkillNames)
+	}
+
+	// The overflowed name becomes visible again before the next checkpoint.
+	sub.MarkSkillInvoked(&skill.Meta{Name: fmt.Sprintf("skill-%02d", total-1)})
+	names, omitted = collectSubAgentCheckpointSkillNames(sub, []message.Message{
+		{
+			Role:                message.RoleUser,
+			IsCompactionSummary: true,
+			Content:             first,
+		},
+	})
+	if len(names) != checkpointMaxSkillNames || omitted != 1 {
+		t.Fatalf("recomputed %d names / omitted %d, want %d / 1", len(names), omitted, checkpointMaxSkillNames)
+	}
+}
+
 func TestSubAgentRestoreInvokedSkillsFollowsRemainingMessages(t *testing.T) {
 	_, sub := newMixedBatchTestSubAgent(t)
 	defer sub.cancel()
