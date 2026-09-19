@@ -744,13 +744,17 @@ func (a *MainAgent) setCurrentModelPool(pool string) error {
 	}
 
 	oldPool := a.modelPoolPolicy.CurrentModelPool()
-	if a.mainLLMRequestInFlight.Load() {
+	// A switch requested while the running request or the tool calls produced by
+	// its response are still in progress stays pending: the running model and
+	// its per-model tools only change once the next request is prepared.
+	deferred := a.mainRequestWindowActive()
+	if deferred {
 		a.capturePendingModelPoolRollback()
 	}
 	a.modelPoolPolicy.SetCurrentModelPool(pool)
 
 	cfg := a.currentActiveConfig()
-	if cfg != nil && a.mainLLMRequestInFlight.Load() {
+	if cfg != nil && deferred {
 		a.markMainModelPoolSwitchPending()
 		a.notifyMainRoutingChanged("model_pool_changed")
 	} else if cfg != nil {
@@ -838,12 +842,13 @@ func (a *MainAgent) setAgentModelPool(agentName, pool string) error {
 
 	prev, hadOverride := a.modelPoolPolicy.AgentOverride(agentName)
 	agentInFlight := a.agentModelPoolSwitchInFlight(agentName)
-	if a.mainLLMRequestInFlight.Load() || agentInFlight {
+	mainWindowActive := a.mainRequestWindowActive()
+	if mainWindowActive || agentInFlight {
 		a.capturePendingModelPoolRollback()
 	}
 	a.modelPoolPolicy.SetAgentOverride(agentName, pool)
 
-	if cfg.Name == a.CurrentRole() && a.mainLLMRequestInFlight.Load() {
+	if cfg.Name == a.CurrentRole() && mainWindowActive {
 		a.markMainModelPoolSwitchPending()
 		a.notifyMainRoutingChanged("agent_model_pool_changed")
 	} else if cfg.Name == a.CurrentRole() {

@@ -43,6 +43,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Background result cards are keyed by their durable mailbox row in both the live and rebuild paths: after a restart, a new job reusing an older `job-N` id gets its own card instead of overwriting the restored card of the previous run's job, while a re-delivery of the same row still updates the card it created.
 - A `!` command that is still running when the transcript rebuilds keeps its card, and its output lands there when it finishes; if a session switch replaced that transcript in the meantime, the stale result is discarded instead of being written into the new session.
 - Dialog overlays now stop one column short of the terminal's right edge, matching the status bar and the input separator: a full-width dialog that painted into the last column made hosts such as Ghostty add an extra frame line, and the cell-level diff then kept a stale row until a full repaint forced it away.
+- Switching models while a request is still running now takes effect only when the next request starts: the running model and its tools stay in place while the response's tool calls execute, so a call such as `apply_patch` still runs instead of being rejected as unsupported by the newly selected model.
 
 ## 0.8.1 - 2026-09-16
 

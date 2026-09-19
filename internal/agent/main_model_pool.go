@@ -358,6 +358,33 @@ func (a *MainAgent) agentModelPoolSwitchInFlight(agentName string) bool {
 	return false
 }
 
+// mainToolPhaseActive reports whether the main turn is still running the tool
+// calls produced by its latest LLM response, including batches not yet
+// started. Those calls were emitted against the running model's tool surface,
+// so a deferred model-pool switch waits out this window.
+func (a *MainAgent) mainToolPhaseActive() bool {
+	if a == nil {
+		return false
+	}
+	turn := a.turn
+	if turn == nil {
+		return false
+	}
+	if turn.PendingToolCalls.Load() > 0 {
+		return true
+	}
+	return turn.nextToolBatch < len(turn.toolExecutionBatches)
+}
+
+// mainRequestWindowActive reports whether the main agent is still inside the
+// window owned by its latest LLM request: the request itself is in flight, or
+// the tool calls produced by its response are still executing. The running
+// model and its per-model tools may only change once this window closes and
+// the next request is prepared.
+func (a *MainAgent) mainRequestWindowActive() bool {
+	return a.mainLLMRequestInFlight.Load() || a.mainToolPhaseActive()
+}
+
 func (a *MainAgent) pendingAgentModelPoolSwitchInFlight(pendingAgents map[string]struct{}) bool {
 	for agentName := range pendingAgents {
 		if a.agentModelPoolSwitchInFlight(agentName) {
@@ -429,7 +456,19 @@ func (a *MainAgent) applyPendingModelPoolSwitchesAtRequestBoundary() {
 	if a.pendingAgentModelPoolSwitchInFlight(pendingAgents) {
 		return
 	}
-	a.pendingMainModelPoolSwitch = false
+	// A main-role switch also waits out the current response's tool execution:
+	// those calls were emitted against the running model's tool surface, so the
+	// switch only lands once the next request is prepared. Sub-agent switches
+	// do not affect the main surface and apply as before.
+	if pendingMain && a.mainToolPhaseActive() {
+		pendingMain = false
+	}
+	if !pendingMain && len(pendingAgents) == 0 {
+		return
+	}
+	if pendingMain {
+		a.pendingMainModelPoolSwitch = false
+	}
 	a.pendingAgentModelPoolSwitch = nil
 
 	var applyErr error
@@ -472,9 +511,16 @@ func (a *MainAgent) applyPendingModelPoolSwitchesAtRequestBoundary() {
 			a.restorePendingModelPoolRollback()
 		} else {
 			a.restoreFailedModelPoolSelections(mainFailed, failedAgents)
-			a.pendingModelPoolRollback = nil
+			if !a.pendingMainModelPoolSwitch {
+				a.pendingModelPoolRollback = nil
+			}
 		}
 		a.emitToTUI(ErrorEvent{Err: fmt.Errorf("/models: switch model: %w", applyErr)})
+		return
+	}
+	if a.pendingMainModelPoolSwitch {
+		// The main switch is still held for a later request boundary; keep its
+		// rollback snapshot until it actually applies.
 		return
 	}
 	a.pendingModelPoolRollback = nil

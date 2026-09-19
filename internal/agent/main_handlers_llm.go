@@ -523,10 +523,16 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 	// TUI applies it only to settled thinking cards, so it must not affect the main
 	// response or streaming display.
 	a.maybeTranslateLatestThinkingAfterIdle(evt.TurnID)
-	a.applyPendingModelPoolSwitchesAtRequestBoundary()
 
 	// No valid tool calls → agent is idle, waiting for the next user message.
 	if len(validCalls) == 0 {
+		// This response owns no tool calls, so the request window it belongs to
+		// is already over and a deferred model-pool switch may land here. A
+		// response that does carry tool calls keeps the switch pending until the
+		// next request is prepared (beginMainLLMAfterPreparation): those calls
+		// were emitted against the running model's tool surface and stay
+		// validated against it for their whole execution.
+		a.applyPendingModelPoolSwitchesAtRequestBoundary()
 		a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn, "no_valid_calls")
 		switch {
 		case payload.StopReason == "tool_calls":
