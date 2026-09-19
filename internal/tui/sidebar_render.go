@@ -314,14 +314,19 @@ func (s *Sidebar) isFocused(agentID string) bool {
 }
 
 // statusIndicator returns the Unicode status character for an agent.
+//
+// The reachable inputs are the sub-agent states, the "done"/"error" names
+// AgentStatusEvent carries for them, and the job lifecycle names the jobs
+// overlay passes in (activeJobs leaves only running and the stopping remap
+// retrying).
 func statusIndicator(status string, focused bool) string {
 	if focused {
 		return "●"
 	}
 	switch status {
-	case "streaming", "executing", "running":
+	case "running":
 		return "○"
-	case "connecting", "waiting_headers", "waiting_token", "retrying", "retrying_key", "cooling":
+	case "retrying":
 		return "↺"
 	case "waiting_main", "waiting_descendant":
 		return "?"

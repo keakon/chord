@@ -405,7 +405,7 @@ func TestSidebarOrdersAndIndentsTaskTree(t *testing.T) {
 	sidebar.Update([]agent.SubAgentInfo{
 		{InstanceID: "agent-grandchild", TaskID: "task-grandchild", OwnerTaskID: "task-child", TaskDesc: "grandchild", State: "running"},
 		{InstanceID: "agent-z", TaskID: "task-z", TaskDesc: "independent", State: "running"},
-		{InstanceID: "agent-child", TaskID: "task-child", OwnerAgentID: "agent-root", OwnerTaskID: "task-root", TaskDesc: "child", State: "executing"},
+		{InstanceID: "agent-child", TaskID: "task-child", OwnerAgentID: "agent-root", OwnerTaskID: "task-root", TaskDesc: "child", State: "running"},
 		{InstanceID: "agent-root", TaskID: "task-root", TaskDesc: "root", State: "running"},
 	}, "main", "builder")
 
@@ -516,5 +516,33 @@ func TestStatusIndicatorCoversEveryProducibleStatus(t *testing.T) {
 	}
 	if got := statusIndicator(string(agent.SubAgentStateRunning), true); got != "●" {
 		t.Errorf("focused statusIndicator = %q, want the focused marker", got)
+	}
+}
+
+func TestSidebarStatusPriorityOrdersEveryProducibleStatus(t *testing.T) {
+	// Listed from most to least active. A failed worker must sink with the
+	// other terminal states instead of floating above running workers.
+	ascending := []string{
+		string(agent.SubAgentStateRunning),
+		string(agent.SubAgentStateWaitingMain),
+		string(agent.SubAgentStateWaitingDescendant),
+		string(agent.SubAgentStateIdle),
+		string(agent.SubAgentStateCompleted),
+		subAgentStatusDone,
+		string(agent.SubAgentStateCancelled),
+		subAgentStatusError,
+		string(agent.SubAgentStateFailed),
+	}
+	for i := 1; i < len(ascending); i++ {
+		prev, cur := sidebarStatusPriority(ascending[i-1]), sidebarStatusPriority(ascending[i])
+		if cur < prev {
+			t.Errorf("sidebarStatusPriority(%q) = %d must not sort above %q = %d", ascending[i], cur, ascending[i-1], prev)
+		}
+	}
+	if got, want := sidebarStatusPriority(string(agent.SubAgentStateFailed)), sidebarStatusPriority(subAgentStatusError); got != want {
+		t.Errorf("failed priority = %d, want the same rank as error (%d)", got, want)
+	}
+	if got, want := sidebarStatusPriority("unrecognized"), sidebarStatusPriority(string(agent.SubAgentStateFailed)); got <= want {
+		t.Errorf("unrecognized priority = %d, want it below every known status (%d)", got, want)
 	}
 }
