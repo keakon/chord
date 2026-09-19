@@ -91,6 +91,26 @@ func (a *MainAgent) updateSessionSummary(mut func(*SessionSummary)) {
 	a.stateMu.Unlock()
 }
 
+// seedSessionSummaryFirstUser records the session's first user-authored prompt
+// on the in-memory summary. A later message must not fill OriginalFirstUserMessage:
+// after compaction that field is empty precisely when nothing observed the
+// pre-compaction head, and a mid-session prompt written there is sticky.
+func (a *MainAgent) seedSessionSummaryFirstUser(preview string, isCompactionSummary bool) {
+	if strings.TrimSpace(preview) == "" {
+		return
+	}
+	a.updateSessionSummary(func(summary *SessionSummary) {
+		if summary == nil || summary.FirstUserMessage != "" {
+			return
+		}
+		summary.FirstUserMessage = preview
+		summary.FirstUserMessageIsCompactionSummary = isCompactionSummary
+		if summary.OriginalFirstUserMessage == "" && !isCompactionSummary {
+			summary.OriginalFirstUserMessage = preview
+		}
+	})
+}
+
 func (a *MainAgent) refreshSessionSummary() {
 	a.setSessionSummary(buildSessionSummaryForDir(a.sessionDir, a.sessionLock != nil))
 }

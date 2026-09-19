@@ -1401,6 +1401,17 @@ func TestHandleForkSessionCommandTailEditLeavesUnknownOriginalEmpty(t *testing.T
 	if summary.FirstUserMessage != midSession {
 		t.Fatalf("usage summary preview = %q, want %q", summary.FirstUserMessage, midSession)
 	}
+
+	// Submitting the edited tail is a later prompt, not a newly observed head.
+	// The in-memory summary is what the next tail-edit hint and the terminal
+	// title read; filling original here would freeze this prompt permanently.
+	a.recordCommittedUserMessage(message.Message{Role: "user", Content: "corrected tail"})
+	if got := a.GetSessionSummary(); got == nil || got.OriginalFirstUserMessage != "" {
+		t.Fatalf("in-memory original after later prompt = %+v, want empty", got)
+	}
+	if got := a.usageLedger.OriginalFirstUserMessage(); got != "" {
+		t.Fatalf("ledger original after later prompt = %q, want empty", got)
+	}
 }
 
 // The tail edit removes messages, so everything derived from them has to be

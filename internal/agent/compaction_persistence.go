@@ -433,10 +433,22 @@ func (a *MainAgent) pruneCompactionIndexAllocators(keepDir string) {
 //  2. the newest checkpoint's own "Original request:" anchor (see below)
 //  3. ledger's already-set OriginalFirstUserMessage
 //  4. usage-summary.json's OriginalFirstUserMessage
-//  5. read pre-rewrite main.jsonl directly (skips IsCompactionSummary)
-//  6. scan in-memory ctxMgr snapshot (skip IsCompactionSummary)
+//  5. read pre-rewrite main.jsonl directly (skips IsCompactionSummary; skipped
+//     entirely when a checkpoint precedes the first real prompt)
+//  6. scan in-memory ctxMgr snapshot (skip IsCompactionSummary; same condition
+//     as 5)
 //  7. usage-summary.json's FirstUserMessage as a last resort for older sessions
-//     whose summary predates OriginalFirstUserMessage persistence
+//     whose summary predates OriginalFirstUserMessage persistence, provided that
+//     preview is not itself a checkpoint
+//
+// Every candidate names the original request only because something observed
+// the pre-compaction head. The two transcript scans (5, 6) are the exception:
+// they look for the first user-authored message, which on a compacted history
+// is a mid-session prompt. They therefore only answer when no checkpoint
+// precedes that message — a checkpoint that lost its anchors (older data, or a
+// compaction whose original request was already unknown) would otherwise hand a
+// mid-session prompt to the anchor block, where every later checkpoint copies it
+// forward verbatim.
 //
 // Returns "" if no candidate is found; the caller may then fall back further.
 func (a *MainAgent) captureOriginalFirstUserHint() string {
@@ -472,7 +484,10 @@ func (a *MainAgent) captureOriginalFirstUserHint() string {
 	if anchors := latestCompactionAnchors(snapshot); strings.TrimSpace(anchors.OriginalRequest) != "" {
 		return strings.TrimSpace(anchors.OriginalRequest)
 	}
-	var usageSummaryFirstUser string
+	var (
+		usageSummaryFirstUser                    string
+		usageSummaryFirstUserIsCompactionSummary bool
+	)
 	if a.usageLedger != nil {
 		if v := strings.TrimSpace(a.usageLedger.OriginalFirstUserMessage()); v != "" {
 			return v
@@ -482,26 +497,49 @@ func (a *MainAgent) captureOriginalFirstUserHint() string {
 				return v
 			}
 			usageSummaryFirstUser = strings.TrimSpace(usageSummary.FirstUserMessage)
+			usageSummaryFirstUserIsCompactionSummary = usageSummary.FirstUserMessageIsCompactionSummary
 		}
 	}
-	mainPath := filepath.Join(a.sessionDir, identity.MainSessionLogFilename)
-	if info, err := os.Stat(mainPath); err == nil && info.Size() > 0 {
-		if first, err := recovery.FirstUserMessageFromFile(mainPath); err == nil {
-			if v := strings.TrimSpace(first); v != "" {
-				return v
+	if !headIsCompactionCheckpoint(snapshot) {
+		mainPath := filepath.Join(a.sessionDir, identity.MainSessionLogFilename)
+		if info, err := os.Stat(mainPath); err == nil && info.Size() > 0 {
+			if first, err := recovery.FirstUserMessageFromFile(mainPath); err == nil {
+				if v := strings.TrimSpace(first); v != "" {
+					return v
+				}
+			}
+		}
+		for _, msg := range snapshot {
+			if !message.IsUserAuthored(msg) {
+				continue
+			}
+			candidate := strings.TrimSpace(message.UserPromptPlainText(msg))
+			if candidate != "" {
+				return candidate
 			}
 		}
 	}
-	for _, msg := range snapshot {
-		if !message.IsUserAuthored(msg) {
-			continue
-		}
-		candidate := strings.TrimSpace(message.UserPromptPlainText(msg))
-		if candidate != "" {
-			return candidate
-		}
+	if usageSummaryFirstUserIsCompactionSummary {
+		return ""
 	}
 	return usageSummaryFirstUser
+}
+
+// headIsCompactionCheckpoint reports whether a compaction checkpoint precedes
+// the first user-authored message in the history — that is, whether that
+// message is a mid-session prompt instead of the session's original request.
+// Synthetic user-role messages of other kinds (mailbox, loop notice, background
+// result) do not count: the first real prompt after them is still the original.
+func headIsCompactionCheckpoint(messages []message.Message) bool {
+	for _, msg := range messages {
+		if msg.Role == message.RoleUser && msg.IsCompactionSummary {
+			return true
+		}
+		if message.IsUserAuthored(msg) {
+			return false
+		}
+	}
+	return false
 }
 
 func (a *MainAgent) rewriteSessionAfterCompaction(index int, messages []message.Message, originalFirstUserHint string) (string, error) {

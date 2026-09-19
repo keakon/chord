@@ -1704,12 +1704,16 @@ func (a *MainAgent) FillSessionSummaryDetails(list []SessionSummary) []SessionSu
 			}
 		}
 		if out[i].FirstUserMessage == "" {
+			// Only the preview is filled in from the transcript. It must not
+			// stand in for the original request: on a compacted history the
+			// scan skips the checkpoint and names the first prompt *after* it,
+			// and an original request is sticky — session lists prefer it and
+			// every later checkpoint copies it forward as its "Original
+			// request:" anchor. Leaving it empty is what lets the agent layer
+			// recover the real one from the checkpoint's anchors.
 			mainPath := filepath.Join(sessionPath, identity.MainSessionLogFilename)
 			if firstUser, err := recovery.FirstUserMessageFromFile(mainPath); err == nil {
 				out[i].FirstUserMessage = firstUser
-				if out[i].OriginalFirstUserMessage == "" {
-					out[i].OriginalFirstUserMessage = firstUser
-				}
 			}
 		}
 	}

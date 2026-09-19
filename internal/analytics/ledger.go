@@ -65,26 +65,36 @@ type UsageAggregate struct {
 
 // SessionUsageSummary is the materialized session-level view of usage.jsonl.
 type SessionUsageSummary struct {
-	SessionID                           string                                `json:"session_id"`
-	ProjectID                           string                                `json:"project_id,omitempty"`
-	ProjectPath                         string                                `json:"project_path,omitempty"`
-	CreatedAt                           time.Time                             `json:"created_at"`
-	LastUpdatedAt                       time.Time                             `json:"last_updated_at"`
-	LastEventID                         string                                `json:"last_event_id,omitempty"`
-	EventCount                          int64                                 `json:"event_count,omitempty"`
-	Timezone                            string                                `json:"timezone,omitempty"`
-	FirstUserMessage                    string                                `json:"first_user_message,omitempty"`
-	FirstUserMessageIsCompactionSummary bool                                  `json:"first_user_message_is_compaction_summary,omitempty"`
-	OriginalFirstUserMessage            string                                `json:"original_first_user_message,omitempty"`
-	Status                              string                                `json:"status,omitempty"`
-	UsageTotal                          UsageAggregate                        `json:"usage_total"`
-	ByProvider                          map[string]*UsageAggregate            `json:"by_provider,omitempty"`
-	ByModelRef                          map[string]*UsageAggregate            `json:"by_model_ref,omitempty"`
-	ByAgent                             map[string]*UsageAggregate            `json:"by_agent,omitempty"`
-	ByPurpose                           map[string]*UsageAggregate            `json:"by_purpose,omitempty"`
-	ByDate                              map[string]*UsageAggregate            `json:"by_date,omitempty"`
-	ByDateModelRef                      map[string]map[string]*UsageAggregate `json:"by_date_model_ref,omitempty"`
-	ByDateAgent                         map[string]map[string]*UsageAggregate `json:"by_date_agent,omitempty"`
+	SessionID     string    `json:"session_id"`
+	ProjectID     string    `json:"project_id,omitempty"`
+	ProjectPath   string    `json:"project_path,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+	LastUpdatedAt time.Time `json:"last_updated_at"`
+	LastEventID   string    `json:"last_event_id,omitempty"`
+	EventCount    int64     `json:"event_count,omitempty"`
+	Timezone      string    `json:"timezone,omitempty"`
+	// FirstUserMessage previews the head of the current transcript. It is
+	// synthetic — flagged by FirstUserMessageIsCompactionSummary — when it was
+	// not typed by the user: after a compaction it is the checkpoint itself,
+	// and when a rebuild or an adopt had to derive it from the transcript it
+	// names the first prompt *after* that checkpoint, i.e. a mid-session one.
+	// A synthetic preview is still shown to identify the session, but nothing
+	// may treat it as a record of the user's first request.
+	FirstUserMessage                    string `json:"first_user_message,omitempty"`
+	FirstUserMessageIsCompactionSummary bool   `json:"first_user_message_is_compaction_summary,omitempty"`
+	// OriginalFirstUserMessage is the user's first request, preserved across
+	// compaction. It is only ever filled from a source that observed the
+	// pre-compaction head, never re-derived from a replaced transcript.
+	OriginalFirstUserMessage string                                `json:"original_first_user_message,omitempty"`
+	Status                   string                                `json:"status,omitempty"`
+	UsageTotal               UsageAggregate                        `json:"usage_total"`
+	ByProvider               map[string]*UsageAggregate            `json:"by_provider,omitempty"`
+	ByModelRef               map[string]*UsageAggregate            `json:"by_model_ref,omitempty"`
+	ByAgent                  map[string]*UsageAggregate            `json:"by_agent,omitempty"`
+	ByPurpose                map[string]*UsageAggregate            `json:"by_purpose,omitempty"`
+	ByDate                   map[string]*UsageAggregate            `json:"by_date,omitempty"`
+	ByDateModelRef           map[string]map[string]*UsageAggregate `json:"by_date_model_ref,omitempty"`
+	ByDateAgent              map[string]map[string]*UsageAggregate `json:"by_date_agent,omitempty"`
 }
 
 // SessionUsageSummaryFileName is the cached per-session usage rollup written
@@ -94,10 +104,15 @@ const SessionUsageSummaryFileName = "usage-summary.json"
 
 // UsageLedger manages append-only usage.jsonl and usage-summary.json.
 type UsageLedger struct {
-	mu                       sync.RWMutex
-	sessionDir               string
-	projectPath              string
-	projectID                string
+	mu          sync.RWMutex
+	sessionDir  string
+	projectPath string
+	projectID   string
+	// firstUserMessage mirrors a recorded, non-synthetic preview only. A
+	// checkpoint text must never land here: firstUserMessageLocked reports a
+	// mirrored preview without the synthetic flag, so a summary rebuild reading
+	// it there would record the checkpoint text as a user prompt. See
+	// rewriteFirstUserMessage.
 	firstUserMessage         string
 	originalFirstUserMessage string // never overwritten after initial set
 	eventSeq                 uint64
@@ -169,6 +184,15 @@ func (l *UsageLedger) SetFirstUserMessage(content string) error {
 	}
 	if summary != nil && summary.FirstUserMessage != "" {
 		if summary.OriginalFirstUserMessage == "" && !summary.FirstUserMessageIsCompactionSummary {
+			// A preview recorded after a compaction checkpoint is a mid-session
+			// prompt even when the synthetic flag was lost. Promoting it would
+			// freeze that prompt as the original request. Persist the flag so
+			// later calls do not rescan the transcript.
+			if _, headIsCompactionSummary := l.scanFirstUserMessageLocked(); headIsCompactionSummary {
+				summary.FirstUserMessageIsCompactionSummary = true
+				l.firstUserMessage = ""
+				return l.writeSummaryLocked(summary)
+			}
 			summary.OriginalFirstUserMessage = summary.FirstUserMessage
 			l.originalFirstUserMessage = summary.OriginalFirstUserMessage
 			return l.writeSummaryLocked(summary)
@@ -204,12 +228,15 @@ func (l *UsageLedger) RewriteFirstUserMessage(content string) error {
 }
 
 // RewriteFirstUserMessageWithOriginalForCompaction behaves like
-// RewriteFirstUserMessage but marks the rewritten first-user preview as a
-// synthetic compaction summary and allows the caller to seed
-// OriginalFirstUserMessage when neither the ledger nor the on-disk summary has
-// it set yet. This is used by the compaction rewrite path where the original
-// first user message must be captured before main.jsonl is replaced with the
-// compaction summary; otherwise the fallback would read the summary itself.
+// RewriteFirstUserMessage but marks the rewritten first-user preview synthetic
+// and lets the caller seed OriginalFirstUserMessage when neither the ledger nor
+// the on-disk summary has it set yet. Both callers rewrite a transcript whose
+// head sits behind a compaction checkpoint: the compaction rewrite captures the
+// original first user message before main.jsonl is replaced with the summary,
+// and an in-place tail edit on a compacted prefix cannot witness it either. A
+// synthetic preview names a mid-session prompt, so no later call may promote it
+// to the original; otherwise the transcript fallback would read the checkpoint
+// — or the prompt after it — as that original.
 func (l *UsageLedger) RewriteFirstUserMessageWithOriginalForCompaction(content, originalHint string) error {
 	return l.rewriteFirstUserMessage(content, originalHint, true)
 }
@@ -266,14 +293,33 @@ func (l *UsageLedger) rewriteFirstUserMessage(content, originalHint string, firs
 	// the head check is what keeps this branch honest: the cached mirror is not
 	// a substitute, since it can itself hold the checkpoint text the compaction
 	// rewrite recorded as the preview.
+	headIsCompactionSummary := firstUserIsCompactionSummary
 	if l.originalFirstUserMessage == "" && !firstUserIsCompactionSummary {
-		if scanned, headIsCompactionSummary := l.scanFirstUserMessageLocked(); !headIsCompactionSummary {
+		scanned, scannedPastCheckpoint := l.scanFirstUserMessageLocked()
+		if scannedPastCheckpoint {
+			headIsCompactionSummary = true
+		} else {
 			l.originalFirstUserMessage = scanned
 		}
 	}
-	l.firstUserMessage = preview
+	// A rewritten preview that is not itself the original request must not
+	// later be promoted by SetFirstUserMessage / adoptSummaryLocked. After an
+	// in-place tail edit on a compacted prefix the preview is a real
+	// mid-session prompt, but nothing observed the pre-compaction head, so
+	// Original stays empty. Marking that preview synthetic is what keeps
+	// those later writers honest. When the original is already known the
+	// preview can stay a plain prompt.
+	previewIsSynthetic := firstUserIsCompactionSummary || (l.originalFirstUserMessage == "" && headIsCompactionSummary)
+	if previewIsSynthetic {
+		// A synthetic preview must not enter the mirror: firstUserMessageLocked
+		// reports a mirrored preview without the synthetic flag, and a rebuild
+		// that reads it there would record it as a user prompt.
+		l.firstUserMessage = ""
+	} else {
+		l.firstUserMessage = preview
+	}
 	summary.FirstUserMessage = preview
-	summary.FirstUserMessageIsCompactionSummary = firstUserIsCompactionSummary
+	summary.FirstUserMessageIsCompactionSummary = previewIsSynthetic
 	if summary.OriginalFirstUserMessage == "" {
 		summary.OriginalFirstUserMessage = l.originalFirstUserMessage
 	}
@@ -675,8 +721,14 @@ func (l *UsageLedger) carryFirstUserMetadataLocked(summary, previous *SessionUsa
 	}
 	if summary.FirstUserMessage == "" {
 		// The in-memory mirror first, then the transcript scan it falls back
-		// to. This is the only place a scanned preview may enter a summary.
-		summary.FirstUserMessage = l.firstUserMessageLocked()
+		// to. This is the only place a scanned preview may enter a summary, and
+		// a scan that ran past a compaction checkpoint marks what it found
+		// synthetic: that preview names a mid-session prompt, so nothing may
+		// mistake it for a recorded one.
+		if preview, headIsCompactionSummary := l.firstUserMessageLocked(); preview != "" {
+			summary.FirstUserMessage = preview
+			summary.FirstUserMessageIsCompactionSummary = headIsCompactionSummary
+		}
 	}
 	if summary.OriginalFirstUserMessage == "" {
 		summary.OriginalFirstUserMessage = l.originalFirstUserMessage
@@ -710,7 +762,14 @@ func (l *UsageLedger) adoptSummaryLocked(summary *SessionUsageSummary) {
 	// anchor — so a mid-session prompt must never enter it.
 	cachedFirstUser := strings.TrimSpace(summary.FirstUserMessage)
 	if summary.FirstUserMessage == "" {
-		summary.FirstUserMessage = l.firstUserMessageLocked()
+		// A preview read from behind a checkpoint is marked synthetic for the
+		// same reason it may not seed the original request below: it names a
+		// mid-session prompt, not a recorded preview. See
+		// carryFirstUserMetadataLocked.
+		if preview, headIsCompactionSummary := l.firstUserMessageLocked(); preview != "" {
+			summary.FirstUserMessage = preview
+			summary.FirstUserMessageIsCompactionSummary = headIsCompactionSummary
+		}
 	}
 	if summary.FirstUserMessage != "" {
 		if summary.FirstUserMessageIsCompactionSummary {
@@ -1053,15 +1112,22 @@ func usageFirstUserPreview(content string) string {
 	return content
 }
 
-func (l *UsageLedger) firstUserMessageLocked() string {
+// firstUserMessageLocked returns the first user message preview together with
+// whether the transcript scan had to read past a compaction checkpoint to find
+// it. A synthetic head means the preview names a mid-session prompt: usable as a
+// display preview, never as a stand-in for the original request. Only a preview
+// that is not synthetic enters the mirror; a mirrored preview is therefore
+// always a recorded one, and the flag it returns for it is false. Callers must
+// hold l.mu.
+func (l *UsageLedger) firstUserMessageLocked() (string, bool) {
 	if l.firstUserMessage != "" {
-		return l.firstUserMessage
+		return l.firstUserMessage, false
 	}
-	preview, _ := l.scanFirstUserMessageLocked()
-	if preview != "" {
+	preview, headIsCompactionSummary := l.scanFirstUserMessageLocked()
+	if preview != "" && !headIsCompactionSummary {
 		l.firstUserMessage = preview
 	}
-	return preview
+	return preview, headIsCompactionSummary
 }
 
 // scanFirstUserMessageLocked reads main.jsonl and returns the preview of its

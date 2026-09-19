@@ -206,18 +206,7 @@ func (a *MainAgent) finishPlanExecution(turnCtx context.Context, turnID uint64, 
 		if err := a.usageLedger.SetFirstUserMessage(firstUserMessage); err != nil {
 			log.Warnf("failed to update usage summary first user message error=%v", err)
 		}
-		a.updateSessionSummary(func(summary *SessionSummary) {
-			if summary == nil {
-				return
-			}
-			if summary.FirstUserMessage == "" {
-				summary.FirstUserMessage = firstUserMessage
-				summary.FirstUserMessageIsCompactionSummary = false
-			}
-			if summary.OriginalFirstUserMessage == "" {
-				summary.OriginalFirstUserMessage = firstUserMessage
-			}
-		})
+		a.seedSessionSummaryFirstUser(firstUserMessage, false)
 	}
 
 	a.beginMainLLMAfterPreparation(turnCtx, turnID, "")

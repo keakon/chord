@@ -1066,6 +1066,83 @@ func TestListSessions_AndSessionInfoForDir(t *testing.T) {
 	}
 }
 
+// writeSessionMainLog writes a session's main.jsonl from the given messages,
+// creating the session directory.
+func writeSessionMainLog(t *testing.T, sessionDir string, messages []message.Message) {
+	t.Helper()
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%s): %v", sessionDir, err)
+	}
+	var payload []byte
+	for _, msg := range messages {
+		encoded, err := json.Marshal(msg)
+		if err != nil {
+			t.Fatalf("marshal message: %v", err)
+		}
+		payload = append(payload, encoded...)
+		payload = append(payload, '\n')
+	}
+	if err := os.WriteFile(filepath.Join(sessionDir, identity.MainSessionLogFilename), payload, 0o644); err != nil {
+		t.Fatalf("WriteFile(main.jsonl): %v", err)
+	}
+}
+
+// compactedSessionMessages is the transcript shape a scan for the first
+// user-authored message cannot read the original request out of: a checkpoint
+// ahead of a mid-session prompt.
+func compactedSessionMessages() []message.Message {
+	return []message.Message{
+		{Role: message.RoleUser, Content: "[Context Summary]\n## Goal\n- carry on", IsCompactionSummary: true},
+		{Role: message.RoleAssistant, Content: "ack"},
+		{Role: message.RoleUser, Content: "mid-session prompt"},
+	}
+}
+
+// A preview read from the transcript may not stand in for the original request:
+// on a compacted history the scan skips the checkpoint and names the first
+// prompt *after* it. The preview is still reported — a session list needs a
+// label — but the original stays empty so the agent layer can recover the real
+// one from the checkpoint's anchors instead of inheriting a mid-session prompt.
+func TestSessionInfoForDirKeepsScannedPreviewOutOfOriginal(t *testing.T) {
+	sessionDir := filepath.Join(t.TempDir(), "compacted-legacy")
+	writeSessionMainLog(t, sessionDir, compactedSessionMessages())
+
+	info := SessionInfoForDir(sessionDir)
+	if info == nil {
+		t.Fatal("SessionInfoForDir(compacted) = nil")
+	}
+	if info.FirstUserMessage != "mid-session prompt" {
+		t.Fatalf("FirstUserMessage = %q, want the scanned preview", info.FirstUserMessage)
+	}
+	if info.OriginalFirstUserMessage != "" {
+		t.Fatalf("OriginalFirstUserMessage = %q, want empty: a scanned preview is not the original request", info.OriginalFirstUserMessage)
+	}
+}
+
+// A preview the summary recorded may stand in for the original request: it was
+// captured while the transcript head was still observable, which is what makes
+// the promotion safe. Without this the fix above would be indistinguishable from
+// dropping the promotion altogether.
+func TestSessionInfoForDirPromotesRecordedPreviewToOriginal(t *testing.T) {
+	sessionDir := filepath.Join(t.TempDir(), "compacted-legacy")
+	writeSessionMainLog(t, sessionDir, compactedSessionMessages())
+	summary := fmt.Sprintf(`{"session_id":%q,"first_user_message":"the recorded first request","status":"active"}`+"\n", filepath.Base(sessionDir))
+	if err := os.WriteFile(filepath.Join(sessionDir, analytics.SessionUsageSummaryFileName), []byte(summary), 0o600); err != nil {
+		t.Fatalf("WriteFile(usage-summary.json): %v", err)
+	}
+
+	info := SessionInfoForDir(sessionDir)
+	if info == nil {
+		t.Fatal("SessionInfoForDir(compacted) = nil")
+	}
+	if info.FirstUserMessage != "the recorded first request" {
+		t.Fatalf("FirstUserMessage = %q, want the recorded preview", info.FirstUserMessage)
+	}
+	if info.OriginalFirstUserMessage != "the recorded first request" {
+		t.Fatalf("OriginalFirstUserMessage = %q, want the recorded preview", info.OriginalFirstUserMessage)
+	}
+}
+
 func TestLoadMessagesCountCacheOnlyProvidesCapacityHint(t *testing.T) {
 	rm, dir := newTestManager(t)
 	defer rm.Close()

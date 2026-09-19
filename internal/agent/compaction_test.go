@@ -6259,8 +6259,9 @@ func TestCaptureOriginalFirstUserHintPrefersCheckpointAnchorOverCachedPreview(t 
 	}
 	// The polluted cache a pre-fix summary rebuild leaves behind: the original
 	// preview was re-derived from the transcript and named a mid-session prompt.
-	if err := a.usageLedger.SetFirstUserMessage("mid-session prompt"); err != nil {
-		t.Fatalf("SetFirstUserMessage: %v", err)
+	// Record it the way that rebuild did — as both the preview and the original.
+	if err := a.usageLedger.RewriteFirstUserMessageWithOriginalForCompaction("mid-session prompt", "mid-session prompt"); err != nil {
+		t.Fatalf("RewriteFirstUserMessageWithOriginalForCompaction: %v", err)
 	}
 	if got := a.usageLedger.OriginalFirstUserMessage(); got != "mid-session prompt" {
 		t.Fatalf("precondition: ledger original = %q, want the mid-session prompt", got)
@@ -6268,6 +6269,68 @@ func TestCaptureOriginalFirstUserHintPrefersCheckpointAnchorOverCachedPreview(t 
 
 	if got := a.captureOriginalFirstUserHint(); got != "REAL original request" {
 		t.Fatalf("captureOriginalFirstUserHint() = %q, want the checkpoint anchor", got)
+	}
+}
+
+// A checkpoint that lost its anchors block leaves no record of the original
+// request anywhere, and the transcript behind it cannot supply one: its first
+// user-authored message is a mid-session prompt. Returning that would freeze it
+// into the next checkpoint's "Original request:" anchor, which every later
+// checkpoint then copies forward verbatim — so no answer is better than a guess.
+func TestCaptureOriginalFirstUserHintIgnoresTranscriptBehindCheckpoint(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+
+	compacted := []message.Message{
+		{Role: "user", Content: "[Context Summary]\n## Goal\n- carry on", IsCompactionSummary: true},
+		{Role: "assistant", Content: "ack"},
+		{Role: "user", Content: "mid-session prompt"},
+	}
+	a.ctxMgr.RestoreMessages(compacted)
+	if err := a.recoveryManager().RewriteLog("main", compacted); err != nil {
+		t.Fatalf("RewriteLog(compacted): %v", err)
+	}
+	if got := a.usageLedger.OriginalFirstUserMessage(); got != "" {
+		t.Fatalf("precondition: ledger original = %q, want empty", got)
+	}
+
+	if got := a.captureOriginalFirstUserHint(); got != "" {
+		t.Fatalf("captureOriginalFirstUserHint() = %q, want empty: the transcript behind a checkpoint holds no original request", got)
+	}
+}
+
+// A summary written before OriginalFirstUserMessage existed is still a record:
+// its preview was captured while the head was observable, so it stays the last
+// resort for a history that has since been compacted with a checkpoint that
+// carries no anchors. Only a preview the ledger derived by scanning is refused,
+// and a rebuild never promotes a preview to the original on its own.
+func TestCaptureOriginalFirstUserHintKeepsRecordedPreviewWhenCheckpointLostAnchors(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+
+	compacted := []message.Message{
+		{Role: "user", Content: "[Context Summary]\n## Goal\n- carry on", IsCompactionSummary: true},
+		{Role: "assistant", Content: "ack"},
+		{Role: "user", Content: "mid-session prompt"},
+	}
+	a.ctxMgr.RestoreMessages(compacted)
+	if err := a.recoveryManager().RewriteLog("main", compacted); err != nil {
+		t.Fatalf("RewriteLog(compacted): %v", err)
+	}
+	// The pre-OFUM summary shape, seeded stale so the next open rebuilds it: a
+	// rebuild carries the preview over but never promotes it to the original.
+	sessionID := filepath.Base(a.sessionDir)
+	summary := fmt.Sprintf(`{"session_id":%q,"last_event_id":"stale-event","first_user_message":"the recorded first request","status":"active"}`+"\n", sessionID)
+	if err := os.WriteFile(filepath.Join(a.sessionDir, "usage-summary.json"), []byte(summary), 0o600); err != nil {
+		t.Fatalf("WriteFile(usage-summary.json): %v", err)
+	}
+	event := fmt.Sprintf(`{"event_id":"event-1","session_id":%q,"agent_id":"main","purpose":"chat","running_model_ref":"provider-a/model-1"}`+"\n", sessionID)
+	if err := os.WriteFile(filepath.Join(a.sessionDir, "usage.jsonl"), []byte(event), 0o600); err != nil {
+		t.Fatalf("WriteFile(usage.jsonl): %v", err)
+	}
+
+	if got := a.captureOriginalFirstUserHint(); got != "the recorded first request" {
+		t.Fatalf("captureOriginalFirstUserHint() = %q, want the recorded preview", got)
 	}
 }
 
@@ -6374,6 +6437,53 @@ func TestRewriteSessionAfterCompactionNeverAdoptsTailPromptAsOriginal(t *testing
 	}
 	if !summary.FirstUserMessageIsCompactionSummary {
 		t.Fatalf("FirstUserMessageIsCompactionSummary = false, want true (FirstUserMessage = %q)", summary.FirstUserMessage)
+	}
+}
+
+// After a compaction that could not name the original request, a later user
+// prompt still must not fill it. The ledger already refuses that promotion;
+// the in-memory summary is what tail-edit hints and the terminal title read.
+func TestRecordCommittedUserMessageDoesNotFillUnknownOriginal(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+
+	compacted := []message.Message{
+		{Role: "user", Content: "[Context Summary]\n## Goal\n- earlier round", IsCompactionSummary: true},
+		{Role: "assistant", Content: "ack"},
+		{Role: "user", Content: "mid-session prompt"},
+	}
+	a.ctxMgr.RestoreMessages(compacted)
+	if err := a.recoveryManager().RewriteLog("main", compacted); err != nil {
+		t.Fatalf("RewriteLog(compacted): %v", err)
+	}
+	nextCheckpoint := message.Message{
+		Role:                "user",
+		Content:             "[Context Summary]\n## Goal\n- second round",
+		IsCompactionSummary: true,
+	}
+	applied := []message.Message{
+		nextCheckpoint,
+		{Role: "assistant", Content: "ack"},
+		{Role: "user", Content: "mid-session prompt"},
+	}
+	if _, err := a.rewriteSessionAfterCompaction(1, applied, ""); err != nil {
+		t.Fatalf("rewriteSessionAfterCompaction: %v", err)
+	}
+
+	a.recordCommittedUserMessage(message.Message{Role: "user", Content: "later prompt"})
+
+	got := a.GetSessionSummary()
+	if got == nil {
+		t.Fatal("GetSessionSummary() = nil")
+	}
+	if got.OriginalFirstUserMessage != "" {
+		t.Fatalf("in-memory original = %q, want empty: a later prompt is not the original request", got.OriginalFirstUserMessage)
+	}
+	if got := a.usageLedger.OriginalFirstUserMessage(); got != "" {
+		t.Fatalf("ledger original = %q, want empty", got)
+	}
+	if got := a.captureOriginalFirstUserHint(); got != "" {
+		t.Fatalf("captureOriginalFirstUserHint() = %q, want empty", got)
 	}
 }
 

@@ -404,15 +404,16 @@ func (m *Model) sessionSelectMaxVisible() int {
 	return maxVisible
 }
 
+// sessionSummaryPreview renders the label a session is listed under. A recorded
+// original request outranks the current preview, because the preview names
+// whatever heads the transcript now — after a compaction that is the checkpoint,
+// and after an in-place tail edit it may name a prompt the session no longer
+// contains. A synthetic preview is still returned when nothing else exists: a
+// checkpoint text at least identifies the session, whereas an empty label would
+// read as "(no first message)".
 func sessionSummaryPreview(summary agent.SessionSummary) string {
 	if summary.Title != "" {
 		return summary.Title
-	}
-	if summary.OriginalFirstUserMessage != "" {
-		return summary.OriginalFirstUserMessage
-	}
-	if summary.FirstUserMessage != "" && !summary.FirstUserMessageIsCompactionSummary {
-		return summary.FirstUserMessage
 	}
 	if summary.OriginalFirstUserMessage != "" {
 		return summary.OriginalFirstUserMessage

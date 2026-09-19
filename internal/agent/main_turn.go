@@ -214,21 +214,11 @@ func (a *MainAgent) recordCommittedUserMessage(userMsg message.Message) {
 	a.trackObservedFileParts(userMsg.Parts)
 	a.recordEvidenceFromMessage(userMsg)
 	if a.usageLedger != nil {
-		if err := a.usageLedger.SetFirstUserMessage(message.UserPromptPlainText(userMsg)); err != nil {
+		preview := message.UserPromptPlainText(userMsg)
+		if err := a.usageLedger.SetFirstUserMessage(preview); err != nil {
 			log.Warnf("failed to update usage summary first user message error=%v", err)
 		}
-		a.updateSessionSummary(func(summary *SessionSummary) {
-			if summary == nil {
-				return
-			}
-			if summary.FirstUserMessage == "" {
-				summary.FirstUserMessage = message.UserPromptPlainText(userMsg)
-				summary.FirstUserMessageIsCompactionSummary = userMsg.IsCompactionSummary
-			}
-			if summary.OriginalFirstUserMessage == "" && !userMsg.IsCompactionSummary {
-				summary.OriginalFirstUserMessage = message.UserPromptPlainText(userMsg)
-			}
-		})
+		a.seedSessionSummaryFirstUser(preview, userMsg.IsCompactionSummary)
 	}
 	if a.recoveryManager() != nil {
 		a.persistAsync(identity.MainAgentID, userMsg)

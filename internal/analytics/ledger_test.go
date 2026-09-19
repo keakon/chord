@@ -664,8 +664,59 @@ func TestRebuildSummaryLockedDoesNotPromoteScannedPreviewToOriginal(t *testing.T
 	if rebuilt.FirstUserMessage != "mid-session prompt" {
 		t.Fatalf("FirstUserMessage = %q, want the transcript-scan fallback", rebuilt.FirstUserMessage)
 	}
+	// It is flagged synthetic so every promotion path — here, in the recovery
+	// package, and in the agent's detail pass — can tell it apart from a preview
+	// the summary recorded.
+	if !rebuilt.FirstUserMessageIsCompactionSummary {
+		t.Fatal("FirstUserMessageIsCompactionSummary = false, want true: the preview was read from behind a checkpoint")
+	}
 	if rebuilt.OriginalFirstUserMessage != "" {
 		t.Fatalf("OriginalFirstUserMessage = %q, want empty: a scanned preview is not the original request", rebuilt.OriginalFirstUserMessage)
+	}
+}
+
+// A compaction rewrite records the checkpoint text as the preview and keeps it
+// out of the cached mirror, which holds recorded, non-synthetic previews only.
+// If the summary file is lost and the cached summary is dropped — the state a
+// failed summary write leaves behind — the rebuild must not re-record that
+// checkpoint text as a user prompt and let the next adoption promote it to the
+// original request.
+func TestRebuildSummaryLockedKeepsCheckpointPreviewSyntheticAfterSummaryLoss(t *testing.T) {
+	dir := t.TempDir()
+	writeCompactedMainLog(t, dir)
+	ledger := NewUsageLedger(dir, "/tmp/project")
+	if err := ledger.RewriteFirstUserMessageWithOriginalForCompaction("[Context Summary]\n## Goal\n- carry on", ""); err != nil {
+		t.Fatalf("RewriteFirstUserMessageWithOriginalForCompaction: %v", err)
+	}
+	if err := os.Remove(filepath.Join(dir, SessionUsageSummaryFileName)); err != nil {
+		t.Fatalf("Remove(usage-summary.json): %v", err)
+	}
+	ledger.mu.Lock()
+	ledger.summaryLoaded = false
+	ledger.summary = nil
+	ledger.mu.Unlock()
+	if err := ledger.AppendEvent(UsageEvent{Purpose: "chat", RunningModelRef: "provider-a/model-1"}); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+
+	rebuilt, err := ledger.Summary()
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	if !rebuilt.FirstUserMessageIsCompactionSummary {
+		t.Fatalf("FirstUserMessageIsCompactionSummary = false, want true: preview = %q", rebuilt.FirstUserMessage)
+	}
+	if rebuilt.OriginalFirstUserMessage != "" {
+		t.Fatalf("OriginalFirstUserMessage = %q, want empty: a checkpoint preview is not the original request", rebuilt.OriginalFirstUserMessage)
+	}
+	// A later ledger — the session list, or the next process — must not promote
+	// the preview either.
+	fresh := NewUsageLedger(dir, "/tmp/project")
+	if _, err := fresh.Summary(); err != nil {
+		t.Fatalf("fresh Summary: %v", err)
+	}
+	if got := fresh.OriginalFirstUserMessage(); got != "" {
+		t.Fatalf("OriginalFirstUserMessage = %q, want empty: the preview was not recorded as a user prompt", got)
 	}
 }
 
@@ -696,9 +747,14 @@ func TestFirstUserMessageLockedSkipsCompactionSummary(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	ledger := NewUsageLedger(dir, "/tmp/project")
-	got := ledger.firstUserMessageLocked()
+	got, headIsCompactionSummary := ledger.firstUserMessageLocked()
 	if got != "real second user message" {
 		t.Fatalf("firstUserMessageLocked = %q, want %q", got, "real second user message")
+	}
+	// The preview is reported as synthetic so callers that must not treat it as
+	// the session's original request can tell it apart from a recorded one.
+	if !headIsCompactionSummary {
+		t.Fatal("headIsCompactionSummary = false, want true for a checkpoint-led transcript")
 	}
 }
 
@@ -723,8 +779,12 @@ func TestFirstUserMessageLockedSkipsSyntheticUserMessages(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	ledger := NewUsageLedger(dir, "/tmp/project")
-	if got := ledger.firstUserMessageLocked(); got != "real user message" {
+	got, headIsCompactionSummary := ledger.firstUserMessageLocked()
+	if got != "real user message" {
 		t.Fatalf("firstUserMessageLocked = %q, want real user message", got)
+	}
+	if headIsCompactionSummary {
+		t.Fatal("headIsCompactionSummary = true, want false without a checkpoint")
 	}
 }
 
@@ -751,6 +811,20 @@ func TestRewriteFirstUserMessageDoesNotScanPastCheckpointForOriginal(t *testing.
 	}
 	if summary.OriginalFirstUserMessage != "" {
 		t.Fatalf("OriginalFirstUserMessage = %q, want empty: a post-checkpoint prompt is not the original request", summary.OriginalFirstUserMessage)
+	}
+	if !summary.FirstUserMessageIsCompactionSummary {
+		t.Fatal("FirstUserMessageIsCompactionSummary = false, want true: the preview is not a recorded original")
+	}
+
+	if err := ledger.SetFirstUserMessage("later prompt"); err != nil {
+		t.Fatalf("SetFirstUserMessage: %v", err)
+	}
+	after, err := ledger.Summary()
+	if err != nil {
+		t.Fatalf("Summary after later prompt: %v", err)
+	}
+	if after.OriginalFirstUserMessage != "" {
+		t.Fatalf("OriginalFirstUserMessage after later prompt = %q, want empty", after.OriginalFirstUserMessage)
 	}
 }
 

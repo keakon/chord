@@ -476,7 +476,11 @@ func (a *MainAgent) editTailUserMessageInPlace(prefix []message.Message, forkMsg
 	if a.usageLedger != nil {
 		var err error
 		switch {
-		case firstUserIsCompactionSummary:
+		case firstUserIsCompactionSummary || headIsCompactionSummary:
+			// A compacted prefix cannot witness the original request, even when
+			// the preview is a real mid-session prompt rather than the
+			// checkpoint card itself. ForCompaction records that so later
+			// SetFirstUserMessage cannot promote the preview.
 			err = a.usageLedger.RewriteFirstUserMessageWithOriginalForCompaction(firstUser, originalHint)
 		case originalHint != "":
 			err = a.usageLedger.RewriteFirstUserMessageWithOriginal(firstUser, originalHint)
@@ -492,7 +496,7 @@ func (a *MainAgent) editTailUserMessageInPlace(prefix []message.Message, forkMsg
 			return
 		}
 		summary.FirstUserMessage = strings.TrimSpace(firstUser)
-		summary.FirstUserMessageIsCompactionSummary = firstUserIsCompactionSummary
+		summary.FirstUserMessageIsCompactionSummary = firstUserIsCompactionSummary || headIsCompactionSummary
 		if strings.TrimSpace(firstUser) == "" {
 			summary.OriginalFirstUserMessage = ""
 			return

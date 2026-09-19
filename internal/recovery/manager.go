@@ -845,6 +845,12 @@ func SessionInfoForDir(sessionPath string) *SessionInfo {
 	lastModTime := info.ModTime()
 	firstUser, _ := firstUserMessageFromFile(mainPath)
 	firstUserIsCompactionSummary := false
+	// Only a preview the summary actually recorded may seed the original
+	// request. One read from the transcript must not: on a compacted history the
+	// scan skips the checkpoint and names the first prompt *after* it, and an
+	// original request is sticky — session lists prefer it and every later
+	// checkpoint copies it forward as its "Original request:" anchor.
+	firstUserIsRecorded := false
 	originalFirstUser := ""
 	if summary, err := analytics.LoadSessionUsageSummary(sessionPath); err == nil && summary != nil {
 		if !summary.LastUpdatedAt.IsZero() && summary.LastUpdatedAt.After(lastModTime) {
@@ -853,12 +859,13 @@ func SessionInfoForDir(sessionPath string) *SessionInfo {
 		if summary.FirstUserMessage != "" {
 			firstUser = summary.FirstUserMessage
 			firstUserIsCompactionSummary = summary.FirstUserMessageIsCompactionSummary
+			firstUserIsRecorded = true
 		}
 		if summary.OriginalFirstUserMessage != "" {
 			originalFirstUser = summary.OriginalFirstUserMessage
 		}
 	}
-	if originalFirstUser == "" && !firstUserIsCompactionSummary {
+	if originalFirstUser == "" && firstUserIsRecorded && !firstUserIsCompactionSummary {
 		originalFirstUser = firstUser
 	}
 	locked, err := sessionDirLockedByLiveOwner(sessionPath)
