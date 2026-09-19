@@ -489,3 +489,32 @@ func TestSidebarOrdersRunningAgentBeforeCompleted(t *testing.T) {
 		t.Fatalf("running agent must sort before waiting/completed; order=%#v", order)
 	}
 }
+
+func TestStatusIndicatorCoversEveryProducibleStatus(t *testing.T) {
+	// Statuses reaching the sidebar are the sub-agent states plus the
+	// "done"/"error" names AgentStatusEvent carries for them; the jobs overlay
+	// adds only running, with stopping remapped to "retrying".
+	cases := []struct {
+		status string
+		want   string
+	}{
+		{string(agent.SubAgentStateRunning), "○"},
+		{"retrying", "↺"},
+		{string(agent.SubAgentStateWaitingMain), "?"},
+		{string(agent.SubAgentStateWaitingDescendant), "?"},
+		{subAgentStatusDone, "✓"},
+		{string(agent.SubAgentStateCompleted), "✓"},
+		{string(agent.SubAgentStateCancelled), "⊘"},
+		{subAgentStatusError, "✗"},
+		{string(agent.SubAgentStateFailed), "✗"},
+		{string(agent.SubAgentStateIdle), "…"},
+	}
+	for _, tc := range cases {
+		if got := statusIndicator(tc.status, false); got != tc.want {
+			t.Errorf("statusIndicator(%q) = %q, want %q", tc.status, got, tc.want)
+		}
+	}
+	if got := statusIndicator(string(agent.SubAgentStateRunning), true); got != "●" {
+		t.Errorf("focused statusIndicator = %q, want the focused marker", got)
+	}
+}

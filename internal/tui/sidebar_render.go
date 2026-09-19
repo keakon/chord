@@ -329,7 +329,7 @@ func statusIndicator(status string, focused bool) string {
 		return "✓"
 	case "cancelled":
 		return "⊘"
-	case "error":
+	case "error", "failed":
 		return "✗"
 	case "idle":
 		return "…"
