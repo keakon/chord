@@ -419,6 +419,7 @@ providers:
         requires_tool_result_name: true
         requires_assistant_after_tool_result: true
         mcp_system_tools_message: true
+        native_thinking: gemini-3
       usage:
         input_includes_cache_read: false
         input_includes_cache_write: false
@@ -479,6 +480,9 @@ providers:
 	}
 	if cc.MCPSystemToolsMessage == nil || !*cc.MCPSystemToolsMessage {
 		t.Fatalf("mcp_system_tools_message = %#v, want true", cc.MCPSystemToolsMessage)
+	}
+	if cc.NativeThinking != "gemini-3" {
+		t.Fatalf("native_thinking = %q, want gemini-3", cc.NativeThinking)
 	}
 	model := prov.Models["gpt-5.5"]
 	if model.Compat == nil || model.Compat.Responses == nil || model.Compat.Responses.MCPAdditionalTools == nil || *model.Compat.Responses.MCPAdditionalTools {

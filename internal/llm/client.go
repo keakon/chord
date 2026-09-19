@@ -1561,7 +1561,7 @@ func (p *ProviderConfig) NativeFamily(modelID string) string {
 
 func nativeFamilyForDialect(dialect nativeThinkingDialect) string {
 	switch dialect {
-	case nativeThinkingGemini:
+	case nativeThinkingGemini, nativeThinkingGemini3:
 		return modelcompat.NativeFamilyGemini
 	case nativeThinkingAnthropic:
 		return modelcompat.NativeFamilyAnthropic

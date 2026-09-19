@@ -125,25 +125,23 @@ func TestEnsureChatGeminiActiveLoopSignatures(t *testing.T) {
 // The gate cannot rely on the model name alone: an aliased Gemini 3 is only
 // identified by an explicitly pinned gemini dialect.
 func TestChatGeminiRequiresSignaturePlaceholder(t *testing.T) {
-	unset := &config.ChatCompletionsCompatConfig{}
-	pinnedGemini := &config.ChatCompletionsCompatConfig{NativeThinking: "gemini"}
 	cases := []struct {
 		name    string
 		model   string
-		compat  *config.ChatCompletionsCompatConfig
 		dialect nativeThinkingDialect
 		want    bool
 	}{
-		{name: "gemini 3 by name", model: "gemini-3-pro", compat: unset, dialect: nativeThinkingGemini, want: true},
-		{name: "gemini 2 keeps no placeholder", model: "gemini-2.5-pro", compat: unset, dialect: nativeThinkingGemini},
-		{name: "aliased gemini 3 with a pinned dialect", model: "deployment-a", compat: pinnedGemini, dialect: nativeThinkingGemini, want: true},
-		{name: "alias without a pin stays unnamed", model: "deployment-a", compat: unset, dialect: nativeThinkingGemini},
-		{name: "non-gemini dialect", model: "deployment-a", compat: pinnedGemini, dialect: nativeThinkingAnthropic},
+		{name: "gemini 3 by name", model: "gemini-3-pro", dialect: nativeThinkingGemini, want: true},
+		{name: "gemini 2 keeps no placeholder", model: "gemini-2.5-pro", dialect: nativeThinkingGemini},
+		{name: "family pin does not imply gemini 3", model: "deployment-a", dialect: nativeThinkingGemini},
+		{name: "aliased gemini 3 with a versioned dialect", model: "deployment-a", dialect: nativeThinkingGemini3, want: true},
+		{name: "alias without a version stays unnamed", model: "deployment-a", dialect: nativeThinkingGemini},
+		{name: "non-gemini dialect", model: "deployment-a", dialect: nativeThinkingAnthropic},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := chatGeminiRequiresSignaturePlaceholder(tc.model, tc.compat, tc.dialect); got != tc.want {
-				t.Fatalf("chatGeminiRequiresSignaturePlaceholder(%q, %+v, %q) = %v, want %v", tc.model, tc.compat, tc.dialect, got, tc.want)
+			if got := chatGeminiRequiresSignaturePlaceholder(tc.model, tc.dialect); got != tc.want {
+				t.Fatalf("chatGeminiRequiresSignaturePlaceholder(%q, %q) = %v, want %v", tc.model, tc.dialect, got, tc.want)
 			}
 		})
 	}

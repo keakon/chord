@@ -20,6 +20,7 @@ func TestNormalizeNativeThinking(t *testing.T) {
 		{selector: "gemini", want: NativeThinkingGemini},
 		{selector: "google", want: NativeThinkingGemini},
 		{selector: "vertex", want: NativeThinkingGemini},
+		{selector: "gemini-3", want: NativeThinkingGemini3},
 		{selector: "Claude", want: NativeThinkingAnthropic},
 		{selector: "anthropic", want: NativeThinkingAnthropic},
 		{selector: "thinking", want: NativeThinkingObject},
@@ -52,7 +53,7 @@ func TestValidateProviderNativeThinkingAcceptsKnownSelectors(t *testing.T) {
 		Models: map[string]ModelConfig{
 			"model-1": {Compat: &ModelCompatConfig{ChatCompletions: &ChatCompletionsCompatConfig{NativeThinking: "gemini"}}},
 			"model-2": {Compat: &ModelCompatConfig{ChatCompletions: &ChatCompletionsCompatConfig{NativeThinking: "kimi"}}},
-			"model-3": {},
+			"model-3": {Compat: &ModelCompatConfig{ChatCompletions: &ChatCompletionsCompatConfig{NativeThinking: "gemini-3"}}},
 		},
 	}
 	if err := ValidateProviderNativeThinking("sample", cfg); err != nil {

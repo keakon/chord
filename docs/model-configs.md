@@ -750,9 +750,11 @@ model_pools:
   them needs `compat.chat_completions.native_thinking: off`, set on the model or
   on the provider.
 - A model name that hides the upstream (a gateway alias, a private deployment)
-  names the shape directly: `native_thinking: gemini`, `anthropic`, `thinking`,
-  or `qwen`. Family names such as `claude`, `deepseek`, `glm`, `kimi`, and
-  `doubao` select the same shapes.
+  names the shape directly: `native_thinking: gemini`, `gemini-3`, `anthropic`,
+  `thinking`, or `qwen`. Use `gemini` when only the Gemini family is known;
+  use `gemini-3` when the alias is known to target Gemini 3 and missing
+  thought-signature repair is required. Family names such as `claude`,
+  `deepseek`, `glm`, `kimi`, and `doubao` select the same shapes.
 - Kimi K3 rejects the K2.x `thinking` parameter, so do not give it a model-level
   thinking block; K2.x models use the block as described above.
 - `reasoning.effort` still goes out as the portable `reasoning_effort` field.
@@ -784,7 +786,8 @@ their readable text still goes out as portable thinking where the target accepts
 it.
 
 For a Chat Completions model alias, set `native_thinking` to `anthropic` or
-`gemini` to identify its backend. Chord records that family with the response,
+`gemini` to identify its backend; use `gemini-3` when the alias is known to be
+Gemini 3 and needs signature repair. Chord records that family with the response,
 so saved sessions retain the replay identity even when the model name does not
 identify it. Family checks apply before converting between wire formats. A
 Gemini signature carried in a Messages thinking block is sent on the first
@@ -798,9 +801,8 @@ Missing or rejected state is repaired instead of sent as a guaranteed failure:
   a gateway that dropped it), Chord sends the documented placeholder
   `skip_thought_signature_validator`, which the backend accepts in place of a
   real signature. The repair needs to know the endpoint is Gemini 3: for a
-  gateway alias that hides the upstream name, pin `native_thinking: gemini`. An
-  explicit pin identifies the alias by itself, so the model name does not have
-  to reveal the upstream model.
+  gateway alias that hides the upstream name, pin `native_thinking: gemini-3`.
+  A family-only `gemini` pin does not assume a model version.
 - A Claude-backed endpoint whose current turn no longer has replayable
   `thinking_blocks` is called without the `thinking` controls, matching the
   history the request carries; asking for reasoning the replayed history cannot

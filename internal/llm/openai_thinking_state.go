@@ -3,7 +3,6 @@ package llm
 import (
 	"strings"
 
-	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -139,14 +138,13 @@ func applyChatGeminiThoughtSignature(msg *openAIMessage, signature string) bool 
 // chatGeminiRequiresSignaturePlaceholder reports whether this Chat Completions
 // request has to fill missing active-loop signatures. The endpoint must read
 // the Gemini native thinking fields (the resolved dialect), and the upstream
-// must be a Gemini 3 either by name or through an explicitly pinned dialect —
-// an alias only reveals itself through the pin, so the name check cannot be the
-// only gate.
-func chatGeminiRequiresSignaturePlaceholder(model string, compat *config.ChatCompletionsCompatConfig, dialect nativeThinkingDialect) bool {
-	if dialect != nativeThinkingGemini {
+// must be a Gemini 3 either by name or through the explicit gemini-3 selector.
+// A family-only gemini pin is not enough.
+func chatGeminiRequiresSignaturePlaceholder(model string, dialect nativeThinkingDialect) bool {
+	if dialect != nativeThinkingGemini && dialect != nativeThinkingGemini3 {
 		return false
 	}
-	return isGemini3Model(model) || pinnedNativeThinkingDialect(compat)
+	return dialect == nativeThinkingGemini3 || isGemini3Model(model)
 }
 
 // ensureChatGeminiActiveLoopSignatures mirrors

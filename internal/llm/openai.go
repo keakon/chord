@@ -379,7 +379,7 @@ func (o *OpenAIProvider) CompleteStream(
 		if wireFamily == modelcompat.WireFamilyOpenAIChat && continuityMode == modelcompat.ReasoningContinuityOpenAIVisible {
 			fillCurrentTurnEmptyReasoning(apiMessages)
 		}
-		if chatGeminiRequiresSignaturePlaceholder(model, chatCompat, dialect) {
+		if chatGeminiRequiresSignaturePlaceholder(model, dialect) {
 			// Gemini 3 rejects function-call history whose thought signature is
 			// missing; a step without one (never captured, or stripped by the
 			// replay ladder) gets the documented placeholder instead of a
@@ -823,7 +823,7 @@ func convertMessagesToOpenAIWithOptions(systemPrompt, targetWireFamily, continui
 			// the carrier only shapes what survived. Gemini rides on the first
 			// function call of the step, Claude on the message.
 			switch opts.chatNativeThinking {
-			case nativeThinkingGemini:
+			case nativeThinkingGemini, nativeThinkingGemini3:
 				applyChatGeminiThoughtSignature(&omi, modelcompat.ToolCallsThoughtSignature(msg.ToolCalls))
 			case nativeThinkingAnthropic:
 				omi.ThinkingBlocks = carrierBlocksFromThinkingBlocks(msg.ThinkingBlocks)

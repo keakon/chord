@@ -18,6 +18,9 @@ const (
 	NativeThinkingOff = "off"
 	// NativeThinkingGemini emits extra_body.google.thinking_config.
 	NativeThinkingGemini = "gemini"
+	// NativeThinkingGemini3 emits the Gemini request shape and identifies a
+	// pinned Gemini 3 target for signature replay repair.
+	NativeThinkingGemini3 = "gemini-3"
 	// NativeThinkingAnthropic emits the Messages thinking:{type,budget_tokens}
 	// object.
 	NativeThinkingAnthropic = "anthropic"
@@ -40,6 +43,7 @@ var nativeThinkingShapes = map[string]string{
 	"gemini":     NativeThinkingGemini,
 	"google":     NativeThinkingGemini,
 	"vertex":     NativeThinkingGemini,
+	"gemini-3":   NativeThinkingGemini3,
 	"anthropic":  NativeThinkingAnthropic,
 	"claude":     NativeThinkingAnthropic,
 	"thinking":   NativeThinkingObject,

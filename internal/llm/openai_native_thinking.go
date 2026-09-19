@@ -26,6 +26,9 @@ const (
 	// extra_body.google.thinking_config, the shape Google's compatibility
 	// endpoint and gateways copying it read.
 	nativeThinkingGemini nativeThinkingDialect = config.NativeThinkingGemini
+	// nativeThinkingGemini3 emits the same request shape and identifies a
+	// pinned Gemini 3 target for signature replay repair.
+	nativeThinkingGemini3 nativeThinkingDialect = config.NativeThinkingGemini3
 	// nativeThinkingAnthropic emits the Anthropic thinking object that
 	// gateways translating the call into a Messages request read.
 	nativeThinkingAnthropic nativeThinkingDialect = config.NativeThinkingAnthropic
@@ -110,7 +113,7 @@ func nativeThinkingConfigured(tuning RequestTuning) bool {
 // wire.
 func applyNativeThinking(req *openAIRequest, dialect nativeThinkingDialect, tuning RequestTuning) {
 	switch dialect {
-	case nativeThinkingGemini:
+	case nativeThinkingGemini, nativeThinkingGemini3:
 		req.ExtraBody = geminiThinkingExtraBody(tuning.Gemini)
 	case nativeThinkingAnthropic:
 		req.Thinking = anthropicChatThinking(tuning.Anthropic)

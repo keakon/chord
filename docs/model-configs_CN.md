@@ -717,8 +717,10 @@ model_pools:
   生效，也能直接连模型的原生端点。
 - 端点拒绝未知请求体字段、既不忽略也不转换时，用
   `compat.chat_completions.native_thinking: off`（模型级或 provider 级）关掉。
-- 模型名看不出上游（网关别名、私有部署）时直接指定形状：`gemini`、`anthropic`、
-  `thinking`、`qwen`；`claude`、`deepseek`、`glm`、`kimi`、`doubao` 等家族名等价。
+- 模型名看不出上游（网关别名、私有部署）时直接指定形状：`gemini`、`gemini-3`、
+  `anthropic`、`thinking`、`qwen`。只知道是 Gemini 家族时用 `gemini`；已确认别名
+  指向 Gemini 3、需要缺失签名修复时用 `gemini-3`。`claude`、`deepseek`、`glm`、
+  `kimi`、`doubao` 等家族名仍可使用。
 - Kimi K3 不接受 K2.x 的 `thinking` 参数，所以不要给它配模型级 thinking 块；K2.x
   模型按上面的说明使用该块。
 - `reasoning.effort` 仍按可移植的 `reasoning_effort` 字段发送。网关自己映射 effort
@@ -743,7 +745,8 @@ model_pools:
 可读的思考文本仍会按目标接受的形式作为普通 thinking 发出。
 
 Chat Completions 模型使用别名时，用 `native_thinking: anthropic` 或 `gemini`
-明确后端家族。Chord 会把家族信息随响应保存，恢复会话后也不必靠别名猜测来源。
+明确后端家族；已确认是 Gemini 3 且需要签名修复时用 `gemini-3`。Chord 会把家族
+信息随响应保存，恢复会话后也不必靠别名猜测来源。
 只有家族匹配，才会转换回放载体：例如 Messages 思考块中的 Gemini 签名，切到
 Chat Completions 后会放在第一条工具调用上。Gemini 工具续轮即使没有可见思考文本，
 也会保留配置的思考控制参数。
@@ -753,8 +756,8 @@ Chat Completions 后会放在第一条工具调用上。Gemini 工具续轮即�
 - Gemini 3 不接受缺 thought signature 的 function call 步骤。最后一条用户消息之后
   的 assistant 步骤签名已丢时（换了模型、网关把它丢了），Chord 会补上官方文档给出的
   占位值 `skip_thought_signature_validator`，后端接受它代替真实签名。这个修复需要知道
-  端点确实是 Gemini 3：网关别名把上游名字藏了的话，显式 pin `native_thinking: gemini`
-  即可。显式 pin 本身就是别名的身份信号，模型名不必泄露上游模型。
+  端点确实是 Gemini 3：网关别名把上游名字藏了的话，显式 pin
+  `native_thinking: gemini-3` 即可。只声明家族的 `gemini` 不会默认推断模型版本。
 - Claude 线路当前回合已经没有可回放的 `thinking_blocks` 时，该请求不会再带 `thinking`
   控制字段：发出的历史里没有对应的思考块，声明了思考反而会被拒。
 - 后端确实拒绝某个签名时，仍会按回放兼容等级逐级降级：Chord 剥掉 blob 重试，而不是

@@ -780,7 +780,8 @@ type ChatCompletionsCompatConfig struct {
 	// into the model's native API. Empty (default) infers the shape from the
 	// model name; "off" disables the conversion for endpoints that reject the
 	// field instead of translating it. Accepted shapes are "gemini"
-	// (extra_body.google.thinking_config), "anthropic"
+	// (extra_body.google.thinking_config), "gemini-3"
+	// (the same shape plus Gemini 3 signature replay), "anthropic"
 	// (thinking:{type,budget_tokens}), "thinking" (the native thinking:{type}
 	// object used by DeepSeek, GLM, Kimi K2.x, and Doubao), and "qwen"
 	// (enable_thinking). Family aliases (claude, deepseek, glm, kimi, ...) name

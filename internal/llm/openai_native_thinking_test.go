@@ -38,6 +38,7 @@ func TestResolveNativeThinkingDialect(t *testing.T) {
 		{name: "unknown model stays off", modelID: "my-gateway-model", want: nativeThinkingOff},
 		{name: "selector off for a gemini model", modelID: "gemini-3.8-flash", selector: "off", want: nativeThinkingOff},
 		{name: "selector forces a dialect for an alias", modelID: "my-gateway-model", selector: "gemini", want: nativeThinkingGemini},
+		{name: "selector pins gemini 3 for an alias", modelID: "my-gateway-model", selector: "gemini-3", want: nativeThinkingGemini3},
 		{name: "selector accepts a family name", modelID: "my-gateway-model", selector: "kimi", want: nativeThinkingObject},
 		{name: "selector accepts auto", modelID: "deepseek-v4.1-flash", selector: "auto", want: nativeThinkingObject},
 		{name: "selector wins over inference", modelID: "gemini-3.8-flash", selector: "qwen", want: nativeThinkingQwen},
@@ -133,6 +134,12 @@ func TestApplyNativeThinkingShapes(t *testing.T) {
 		{
 			name:    "gemini emits the google block",
 			dialect: nativeThinkingGemini,
+			tuning:  RequestTuning{Gemini: GeminiTuning{ThinkingLevel: "high"}},
+			want:    openAIRequest{ExtraBody: extraBodyWith(openAIGoogleThinkingConfig{ThinkingLevel: "high", IncludeThoughts: new(true)})},
+		},
+		{
+			name:    "gemini 3 emits the google block",
+			dialect: nativeThinkingGemini3,
 			tuning:  RequestTuning{Gemini: GeminiTuning{ThinkingLevel: "high"}},
 			want:    openAIRequest{ExtraBody: extraBodyWith(openAIGoogleThinkingConfig{ThinkingLevel: "high", IncludeThoughts: new(true)})},
 		},
