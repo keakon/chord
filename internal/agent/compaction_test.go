@@ -6324,6 +6324,59 @@ func TestRewriteSessionAfterCompactionPreservesOriginalFirstUserMessage(t *testi
 	}
 }
 
+// A compaction apply must never adopt a tail prompt as the session's original
+// request. The hint the caller captured before the rewrite is the only source
+// that can still name it: once the session has been compacted the pre-rename
+// transcript starts with a checkpoint, and the messages being written start
+// with this compaction's own checkpoint, so a "first user-authored message"
+// scan on either one names the first prompt *after* the checkpoint. An
+// original request is sticky, so such a value would outlive every later
+// compaction.
+func TestRewriteSessionAfterCompactionNeverAdoptsTailPromptAsOriginal(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+
+	// The live transcript was already compacted, and nothing carries the
+	// session's original request: no ledger preview, no checkpoint anchors.
+	compacted := []message.Message{
+		{Role: "user", Content: "[Context Summary]\n## Goal\n- earlier round", IsCompactionSummary: true},
+		{Role: "assistant", Content: "ack"},
+		{Role: "user", Content: "mid-session prompt"},
+	}
+	a.ctxMgr.RestoreMessages(compacted)
+	if err := a.recoveryManager().RewriteLog("main", compacted); err != nil {
+		t.Fatalf("RewriteLog(compacted): %v", err)
+	}
+
+	// A second compaction applies over it with an empty hint, mirroring the
+	// draft shape the apply path builds: this compaction's checkpoint first,
+	// the preserved tail after it.
+	nextCheckpoint := message.Message{
+		Role:                "user",
+		Content:             "[Context Summary]\n## Goal\n- second round",
+		IsCompactionSummary: true,
+	}
+	applied := []message.Message{
+		nextCheckpoint,
+		{Role: "assistant", Content: "ack"},
+		{Role: "user", Content: "mid-session prompt"},
+	}
+	if _, err := a.rewriteSessionAfterCompaction(1, applied, ""); err != nil {
+		t.Fatalf("rewriteSessionAfterCompaction: %v", err)
+	}
+
+	summary, err := a.usageLedger.Summary()
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	if summary.OriginalFirstUserMessage != "" {
+		t.Fatalf("OriginalFirstUserMessage = %q, want empty: a tail prompt is not the original request", summary.OriginalFirstUserMessage)
+	}
+	if !summary.FirstUserMessageIsCompactionSummary {
+		t.Fatalf("FirstUserMessageIsCompactionSummary = false, want true (FirstUserMessage = %q)", summary.FirstUserMessage)
+	}
+}
+
 func TestApplyAnthropicCacheHintsCountsMetaPrefixAndDurableTail(t *testing.T) {
 	newAnthropicAgent := func(t *testing.T) (*MainAgent, *recordingLoopTuningProvider) {
 		t.Helper()

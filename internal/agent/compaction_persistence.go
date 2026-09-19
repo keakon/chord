@@ -517,44 +517,24 @@ func (a *MainAgent) rewriteSessionAfterCompaction(index int, messages []message.
 		hadMain = true
 	}
 
-	// Use the hint captured before main.jsonl was rewritten (see
-	// applyCompactionDraftAsync). If the hint is empty for whatever reason,
-	// retry from the ledger / pre-rewrite file as a defence in depth — but
-	// note that we are inside ReplacePrefixAtomic's callback (write-locked
-	// against ctxmgr), so we MUST NOT call ctxMgr.Snapshot() here.
+	// The hint was captured by the caller from the pre-rewrite state (see
+	// applyCompactionDraftAsync) and is the only source here that can still
+	// name the original request. Do not re-derive it: the two sources a retry
+	// could add are both unsafe at this point —
+	//   - the pre-rename main.jsonl starts with a checkpoint once the session
+	//     has been compacted, so recovery.FirstUserMessageFromFile skips it and
+	//     returns the first prompt *after* it;
+	//   - messages[0] is always this compaction's own checkpoint, so scanning
+	//     the messages being written can only ever reach a tail prompt.
+	// Either would freeze a mid-session prompt as the session's original
+	// request, which session lists prefer and every later checkpoint copies
+	// forward as its "Original request:" anchor. The ledger retries the
+	// previous code had here are no better: they read state
+	// captureOriginalFirstUserHint already consulted, so they can only
+	// reproduce its answer. We are also inside ReplacePrefixAtomic's callback
+	// (write-locked against ctxmgr), so ctxMgr.Snapshot() must not be called
+	// here either.
 	originalFirstUser := strings.TrimSpace(originalFirstUserHint)
-	if originalFirstUser == "" && a.usageLedger != nil {
-		if v := strings.TrimSpace(a.usageLedger.OriginalFirstUserMessage()); v != "" {
-			originalFirstUser = v
-		} else if usageSummary, err := a.usageLedger.Summary(); err == nil && usageSummary != nil {
-			if v := strings.TrimSpace(usageSummary.OriginalFirstUserMessage); v != "" {
-				originalFirstUser = v
-			}
-		}
-	}
-	if originalFirstUser == "" && hadMain {
-		if first, err := recovery.FirstUserMessageFromFile(mainPath); err == nil {
-			originalFirstUser = strings.TrimSpace(first)
-		}
-	}
-	if originalFirstUser == "" {
-		for _, msg := range messages {
-			if !message.IsUserAuthored(msg) {
-				continue
-			}
-			if v := strings.TrimSpace(message.UserPromptPlainText(msg)); v != "" {
-				originalFirstUser = v
-				break
-			}
-		}
-	}
-	if originalFirstUser == "" && a.usageLedger != nil {
-		if usageSummary, err := a.usageLedger.Summary(); err == nil && usageSummary != nil {
-			if v := strings.TrimSpace(usageSummary.FirstUserMessage); v != "" {
-				originalFirstUser = v
-			}
-		}
-	}
 
 	// The rewrite replaces the manager within the same session, so sub-agents
 	// and tool goroutines must follow it: they resolve the manager per write
@@ -589,8 +569,7 @@ func (a *MainAgent) rewriteSessionAfterCompaction(index int, messages []message.
 		// Deliberately the raw user role, not IsUserAuthored: this records the
 		// head of the *rewritten* history, which after a compaction is the
 		// summary card — the ledger marks that separately with
-		// FirstUserMessageIsCompactionSummary. The originalFirstUser scan above
-		// is the one that must skip synthetic messages.
+		// FirstUserMessageIsCompactionSummary.
 		for _, msg := range messages {
 			if msg.Role == message.RoleUser {
 				firstUser = message.UserPromptPlainText(msg)

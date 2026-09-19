@@ -247,7 +247,13 @@ func (l *UsageLedger) rewriteFirstUserMessage(content, originalHint string, firs
 	if l.originalFirstUserMessage == "" && originalPreview != "" {
 		l.originalFirstUserMessage = originalPreview
 	}
-	if l.originalFirstUserMessage == "" {
+	// Only a non-compaction rewrite may fall back to the transcript. The
+	// compaction rewrite runs *after* main.jsonl has been replaced by the
+	// checkpoint, so a scan for the first user-authored message names the first
+	// prompt after it. Adopting that would be permanent: session lists prefer
+	// the original over the current preview, and every later checkpoint copies
+	// it forward as its "Original request:" anchor.
+	if l.originalFirstUserMessage == "" && !firstUserIsCompactionSummary {
 		l.originalFirstUserMessage = l.firstUserMessageLocked()
 	}
 	l.firstUserMessage = preview
@@ -679,6 +685,15 @@ func (l *UsageLedger) adoptSummaryLocked(summary *SessionUsageSummary) {
 	if summary == nil {
 		return
 	}
+	// cachedFirstUser is the preview the summary actually recorded, before the
+	// transcript fallback below. Only a recorded preview may seed the original
+	// request: a preview derived by scanning the transcript is not safe for
+	// that, because the transcript may already have been replaced by a
+	// compaction checkpoint, in which case the scan names the first prompt
+	// *after* it. An original request is sticky — session lists prefer it and
+	// every later checkpoint copies it forward as its "Original request:"
+	// anchor — so a mid-session prompt must never enter it.
+	cachedFirstUser := strings.TrimSpace(summary.FirstUserMessage)
 	if summary.FirstUserMessage == "" {
 		summary.FirstUserMessage = l.firstUserMessageLocked()
 	}
@@ -691,8 +706,8 @@ func (l *UsageLedger) adoptSummaryLocked(summary *SessionUsageSummary) {
 	}
 	if summary.OriginalFirstUserMessage != "" {
 		l.originalFirstUserMessage = summary.OriginalFirstUserMessage
-	} else if l.originalFirstUserMessage == "" && summary.FirstUserMessage != "" && !summary.FirstUserMessageIsCompactionSummary {
-		l.originalFirstUserMessage = summary.FirstUserMessage
+	} else if l.originalFirstUserMessage == "" && cachedFirstUser != "" && !summary.FirstUserMessageIsCompactionSummary {
+		l.originalFirstUserMessage = cachedFirstUser
 	}
 	if summary.SessionID == "" {
 		summary.SessionID = filepath.Base(l.sessionDir)
