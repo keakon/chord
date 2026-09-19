@@ -50,7 +50,7 @@ func buildSubAgentStructuredCheckpoint(s *SubAgent, messages []message.Message, 
 	b.WriteString("- Completed actions: ")
 	b.WriteString(subAgentCheckpointActions(messages, toolMeta))
 	b.WriteByte('\n')
-	b.WriteString("- Skills loaded earlier: ")
+	b.WriteString(subAgentCheckpointSkillsPrefix)
 	b.WriteString(subAgentCheckpointSkills(s, messages))
 	b.WriteByte('\n')
 	b.WriteString("- Known failures: ")
