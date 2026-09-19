@@ -265,6 +265,13 @@ func TestInfoPanelStoppingJobDropsStopAffordance(t *testing.T) {
 	if !strings.Contains(plain, statusIndicator("retrying", false)) {
 		t.Fatalf("stopping job should use the retrying-family dot: %q", plain)
 	}
+	hit, ok := jobHitBox(m, "job-1")
+	if !ok {
+		t.Fatal("a stopping job should still be listed")
+	}
+	if hit.stopZoneEndX > hit.stopZoneStartX {
+		t.Fatalf("a stopping job row must not carry a stop zone: %+v", hit)
+	}
 }
 
 func TestInfoPanelCollapsedJobsShowsHeaderOnly(t *testing.T) {
@@ -393,22 +400,20 @@ func TestStopJobConfirmEnterDoesNotConfirm(t *testing.T) {
 func TestStopJobConfirmYStopsJob(t *testing.T) {
 	m := newJobsTestModel(t, 120, 40)
 	id := startTestJob(t, "sleep 60", "stop with y")
-	refreshJobs(m)
 	m.openStopJobConfirm(id)
 
 	m.handleStopJobConfirmKey(tea.KeyPressMsg(tea.Key{Text: "y", Code: 'y'}))
 	if m.mode == ModeStopJobConfirm {
 		t.Fatal("y must close the stop confirmation")
 	}
-	waitForJobStatus(t, id, "stopping")
-	refreshJobs(m)
-	_ = m.renderInfoPanel(32, 60)
-	hit, ok := jobHitBox(m, id)
-	if !ok {
-		t.Fatal("a stopping job should still be listed")
-	}
-	if hit.stopZoneEndX > hit.stopZoneStartX {
-		t.Fatalf("a stopping job row must not carry a stop zone: %+v", hit)
+	// The stop is recorded synchronously, and the process may reach its
+	// terminal state at any moment, so only assert that the job is no longer
+	// running. The transient stopping row is covered deterministically by
+	// TestInfoPanelStoppingJobDropsStopAffordance.
+	for _, state := range tools.SnapshotJobs() {
+		if state.ID == id && state.Status == jobStatusRunning {
+			t.Fatalf("y must stop the job, status = %q", state.Status)
+		}
 	}
 }
 
