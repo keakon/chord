@@ -459,7 +459,7 @@ func (m *Model) statusBarFingerprint(now time.Time) string {
 	snap := inputs.Snapshot
 	statusActivity := inputs.StatusActivity
 	usage := snap.tokenUsage
-	fmt.Fprintf(&b, "%d|%d|%d|%d|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%d|%d|%t|%t|%t|%s|%s|%s|%s|%s|%t|%t|%d|%d|%d|%d|%f|%d|%d|%f|%f|%t|%d|%d|%d|%d|%t",
+	fmt.Fprintf(&b, "%d|%d|%d|%d|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%d|%d|%t|%t|%t|%t|%t|%s|%s|%s|%s|%s|%t|%t|%d|%d|%d|%d|%f|%d|%d|%f|%f|%t|%d|%d|%d|%d|%t",
 		inputs.Width,
 		inputs.Height,
 		m.mode,
@@ -480,6 +480,8 @@ func (m *Model) statusBarFingerprint(now time.Time) string {
 		inputs.InfoPanelVisible,
 		inputs.YoloEnabled,
 		inputs.PersistenceDegraded,
+		inputs.MemoryEnabled,
+		inputs.MemoryDegraded,
 		inputs.SessionSwitchKind,
 		inputs.SessionSwitchID,
 		inputs.WorkingDirDisplay,

@@ -34,3 +34,38 @@ func TestMemoryDegradedNilReceiver(t *testing.T) {
 		t.Fatal("nil receiver reported degraded memory")
 	}
 }
+
+// A permanent failure (or its recovery) flips the health flag and announces it,
+// so a running TUI repaints instead of keeping the pill it happened to render.
+func TestNoteMemoryOutcomeEmitsHealthFlip(t *testing.T) {
+	a := &MainAgent{outputCh: make(chan AgentEvent, 1)}
+
+	a.noteMemoryOutcome(memory.ErrManagedMarkers)
+	select {
+	case evt := <-a.outputCh:
+		health, ok := evt.(MemoryHealthEvent)
+		if !ok || !health.Degraded {
+			t.Fatalf("event = %#v, want a degraded MemoryHealthEvent", evt)
+		}
+	default:
+		t.Fatal("a permanent failure did not announce the health change")
+	}
+
+	a.noteMemoryOutcome(memory.ErrManagedMarkers)
+	select {
+	case evt := <-a.outputCh:
+		t.Fatalf("an unchanged degraded state re-announced health: %#v", evt)
+	default:
+	}
+
+	a.noteMemoryOutcome(nil)
+	select {
+	case evt := <-a.outputCh:
+		health, ok := evt.(MemoryHealthEvent)
+		if !ok || health.Degraded {
+			t.Fatalf("event = %#v, want a healthy MemoryHealthEvent", evt)
+		}
+	default:
+		t.Fatal("recovery did not announce the health change")
+	}
+}

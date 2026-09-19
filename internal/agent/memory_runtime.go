@@ -56,10 +56,12 @@ type memoryJob struct {
 }
 
 // memoryInflight tracks one in-flight extraction so a new foreground turn can
-// cancel it (foreground preemption).
+// cancel it (foreground preemption). The job is retained so a panic that
+// aborts the drain can requeue exactly the work that was interrupted.
 type memoryInflight struct {
 	sessionDir string
 	cancel     context.CancelFunc
+	job        memoryJob
 }
 
 // initMemory wires the memory manager, resolves the effective auto-extraction
@@ -128,14 +130,21 @@ func (a *MainAgent) MemoryDegraded() bool {
 
 // noteMemoryOutcome tracks background commit health: a permanent failure marks
 // memory degraded (injection has stopped until external intervention), and any
-// later success clears the mark.
+// later success clears the mark. Only a real flip is announced, so a live TUI
+// repaints the MEMORY pill without a redundant event on every commit.
 func (a *MainAgent) noteMemoryOutcome(err error) {
+	var degraded bool
 	switch {
 	case err == nil:
-		a.memoryDegraded.Store(false)
 	case memoryPermanentFailure(err):
-		a.memoryDegraded.Store(true)
+		degraded = true
+	default:
+		return
 	}
+	if a.memoryDegraded.Swap(degraded) == degraded {
+		return
+	}
+	a.emitToTUI(MemoryHealthEvent{Degraded: degraded})
 }
 
 // refreshMemoryReminderBlock reloads the bounded MEMORY.md summary into the
@@ -282,23 +291,48 @@ func (a *MainAgent) memoryWorkerLoop() {
 }
 
 // drainMemoryQueueSafely runs one drain pass under its own recover so a panic
-// in a single extraction cannot stop the worker permanently. The inflight guard
-// is released for the next wake; the job that panicked was already popped, so
-// its fingerprint stays uncovered and a later backfill or explicit request
-// retries it.
+// in a single extraction cannot stop the worker permanently. The interrupted
+// job is requeued with a backoff (see recoverMemoryDrainPanic) so the same
+// work is retried without a hot loop.
 func (a *MainAgent) drainMemoryQueueSafely() {
-	defer func() {
-		if r := recover(); r != nil {
-			log.Errorf("memory worker panic error=%v stack=%v", r, string(debug.Stack()))
-			a.memoryMu.Lock()
-			if a.memoryInflight != nil {
-				a.memoryInflight.cancel()
-				a.memoryInflight = nil
-			}
-			a.memoryMu.Unlock()
-		}
-	}()
+	defer a.recoverMemoryDrainPanic()
 	a.drainMemoryQueue()
+}
+
+// recoverMemoryDrainPanic turns a panic inside one drain pass into a bounded
+// retry. A panic aborts the pass before it can clear memoryInflight, so the
+// interrupted job is still recorded there: release it, charge one attempt, and
+// put it back at the head of the queue with a backoff, scheduling a wake for
+// when the backoff expires. Once the attempt cap is reached the job is dropped
+// and logged so a deterministic panic cannot hot-loop on model tokens.
+func (a *MainAgent) recoverMemoryDrainPanic() {
+	r := recover()
+	if r == nil {
+		return
+	}
+	log.Errorf("memory worker panic error=%v stack=%v", r, string(debug.Stack()))
+	a.memoryMu.Lock()
+	inflight := a.memoryInflight
+	a.memoryInflight = nil
+	a.memoryMu.Unlock()
+	if inflight == nil {
+		return
+	}
+	if inflight.cancel != nil {
+		inflight.cancel()
+	}
+	job := inflight.job
+	job.attempts++
+	if job.attempts > memoryMaxExtractionAttempts {
+		log.Warnf("memory: dropping job after repeated panics session=%v attempts=%d", memoryJobSessionID(job), job.attempts)
+		return
+	}
+	delay := memoryRetryBackoff(job.attempts)
+	job.retryAt = time.Now().Add(delay)
+	a.memoryMu.Lock()
+	a.memoryPending = append([]memoryJob{job}, a.memoryPending...)
+	a.memoryMu.Unlock()
+	time.AfterFunc(delay, a.signalMemoryWake)
 }
 
 // memoryWakeIdle pokes the worker when the foreground becomes idle, so jobs
@@ -338,7 +372,7 @@ func (a *MainAgent) drainMemoryQueue() {
 
 		ctx, cancel := context.WithCancel(a.parentCtx)
 		a.memoryMu.Lock()
-		a.memoryInflight = &memoryInflight{sessionDir: job.sessionDir, cancel: cancel}
+		a.memoryInflight = &memoryInflight{sessionDir: job.sessionDir, cancel: cancel, job: job}
 		a.memoryMu.Unlock()
 		var err error
 		if job.review {

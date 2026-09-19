@@ -629,6 +629,16 @@ type PersistenceHealthEvent struct {
 
 func (PersistenceHealthEvent) agentEvent() {}
 
+// MemoryHealthEvent reports a change of background memory health. Degraded=true
+// means a permanent memory commit failure stopped injection until external
+// intervention; the TUI repaints the MEMORY pill so a long-lived session does
+// not keep showing the health state it happened to render first.
+type MemoryHealthEvent struct {
+	Degraded bool
+}
+
+func (MemoryHealthEvent) agentEvent() {}
+
 // CompactionStatusEvent drives the TUI background compaction slot precisely.
 // Status is one of the CompactionStatus* constants below.
 // Progress events carry response bytes and stream event counts accumulated

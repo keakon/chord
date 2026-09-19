@@ -275,6 +275,11 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 	case agent.PersistenceHealthEvent:
 		m.persistenceDegraded = evt.Degraded
 		return true, effects
+	case agent.MemoryHealthEvent:
+		// The pill is rendered from the live agent state, so only the draw
+		// caches must be dropped for the next frame to pick the new health up.
+		m.invalidateDrawCaches()
+		return true, effects
 	case agent.ToastEvent:
 		effects.addFollowup(m.enqueueToastWithCategory(evt.Message, evt.Level, evt.Category))
 		if m.shouldPriorityFlushToast(evt.Level) {
