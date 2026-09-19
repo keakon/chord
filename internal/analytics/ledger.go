@@ -197,6 +197,8 @@ func (l *UsageLedger) SetFirstUserMessage(content string) error {
 
 // RewriteFirstUserMessage replaces the cached first-user preview and updates
 // usage-summary.json so session lists stay in sync after session rewrites.
+// Passing empty content means the rewritten transcript has no user-authored
+// prompt left; both the preview and the preserved original are then cleared.
 func (l *UsageLedger) RewriteFirstUserMessage(content string) error {
 	return l.rewriteFirstUserMessage(content, "", false)
 }
@@ -222,6 +224,22 @@ func (l *UsageLedger) rewriteFirstUserMessage(content, originalHint string, firs
 	summary, err := l.ensureSummaryLocked()
 	if err != nil {
 		return err
+	}
+	// An empty preview means the rewritten transcript holds no user-authored
+	// prompt anymore: the in-place tail edit (ee chord) dropped the session's
+	// only user message, so nothing is left to describe. The preserved
+	// OriginalFirstUserMessage names exactly that removed message, so it has to
+	// be dropped with it — session lists prefer the original over the current
+	// preview, and keeping it would advertise a prompt the transcript no longer
+	// contains. The next submitted prompt seeds both previews again via
+	// SetFirstUserMessage.
+	if preview == "" && !firstUserIsCompactionSummary {
+		l.firstUserMessage = ""
+		l.originalFirstUserMessage = ""
+		summary.FirstUserMessage = ""
+		summary.FirstUserMessageIsCompactionSummary = false
+		summary.OriginalFirstUserMessage = ""
+		return l.writeSummaryLocked(summary)
 	}
 	if l.originalFirstUserMessage == "" && summary != nil {
 		l.originalFirstUserMessage = summary.OriginalFirstUserMessage

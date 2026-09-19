@@ -1244,6 +1244,131 @@ func TestHandleForkSessionCommandTailEditDoesNotDrainSubAgentInbox(t *testing.T)
 	}
 }
 
+// Editing the tail user message in place can drop the session's only user
+// prompt (the ee chord right after the first request). The cached usage summary
+// must not keep that removed prompt as the preserved original: session lists
+// prefer the original over the current preview, so the resume picker would keep
+// showing the pre-edit question after the corrected one is submitted.
+func TestHandleForkSessionCommandTailEditDropsRemovedFirstUserPreview(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.markAgentsMDReady()
+	a.MarkSkillsReady()
+	a.markMCPReady()
+
+	msgs := []message.Message{{Role: "user", Content: "question one"}}
+	a.ctxMgr.RestoreMessages(msgs)
+	if err := a.recoveryManager().RewriteLog("main", msgs); err != nil {
+		t.Fatalf("RewriteLog(main): %v", err)
+	}
+	if err := a.usageLedger.SetFirstUserMessage("question one"); err != nil {
+		t.Fatalf("SetFirstUserMessage: %v", err)
+	}
+	a.refreshSessionSummary()
+
+	a.handleForkSessionCommand(0)
+
+	summary, err := a.usageLedger.Summary()
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	if summary.FirstUserMessage != "" || summary.OriginalFirstUserMessage != "" {
+		t.Fatalf("usage summary kept the removed prompt: first=%q original=%q", summary.FirstUserMessage, summary.OriginalFirstUserMessage)
+	}
+
+	a.recordCommittedUserMessage(message.Message{Role: "user", Content: "question two"})
+	a.flushPersist()
+
+	// Read the session back through the same path the resume picker uses.
+	list, err := recovery.ListSessions(filepath.Dir(a.SessionDir()), "")
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("len(ListSessions) = %d, want 1", len(list))
+	}
+	if list[0].FirstUserMessage != "question two" {
+		t.Fatalf("FirstUserMessage = %q, want question two", list[0].FirstUserMessage)
+	}
+	if list[0].OriginalFirstUserMessage != "question two" {
+		t.Fatalf("OriginalFirstUserMessage = %q, want question two", list[0].OriginalFirstUserMessage)
+	}
+}
+
+// The tail edit removes messages, so everything derived from them has to be
+// rebuilt: a deleted later user message must leave no trace in the inputs the
+// compaction summary is built from (transcript, evidence pack, anchors), while
+// the surviving constraint stays.
+func TestHandleForkSessionCommandTailEditKeepsDeletedMessageOutOfSummaryInputs(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.markAgentsMDReady()
+	a.MarkSkillsReady()
+	a.markMCPReady()
+
+	const (
+		deletedTail = "DELETED tail prompt"
+		constraint  = "DO NOT TOUCH the public API"
+	)
+	msgs := []message.Message{
+		{Role: "user", Content: "FIRST prompt"},
+		{Role: "assistant", Content: "a1"},
+		{Role: "user", Content: constraint},
+		{Role: "assistant", Content: "a2"},
+		{Role: "user", Content: deletedTail},
+	}
+	a.ctxMgr.RestoreMessages(msgs)
+	for _, msg := range msgs {
+		a.recordEvidenceFromMessage(msg)
+	}
+	if err := a.recoveryManager().RewriteLog("main", msgs); err != nil {
+		t.Fatalf("RewriteLog(main): %v", err)
+	}
+	if err := a.usageLedger.SetFirstUserMessage("FIRST prompt"); err != nil {
+		t.Fatalf("SetFirstUserMessage: %v", err)
+	}
+	a.refreshSessionSummary()
+
+	a.handleForkSessionCommand(4)
+	a.recordCommittedUserMessage(message.Message{Role: "user", Content: "CORRECTED tail prompt"})
+
+	snapshot := a.ctxMgr.Snapshot()
+	var transcript []string
+	for _, msg := range snapshot {
+		transcript = append(transcript, msg.Content)
+	}
+	if strings.Contains(strings.Join(transcript, "\n"), deletedTail) {
+		t.Fatalf("transcript still carries the deleted message: %+v", transcript)
+	}
+
+	evidenceText := make([]string, 0, len(a.evidence.snapshot()))
+	for _, item := range a.evidence.snapshot() {
+		evidenceText = append(evidenceText, item.Excerpt, item.WhyNeeded)
+	}
+	joinedEvidence := strings.Join(evidenceText, "\n")
+	if strings.Contains(joinedEvidence, deletedTail) {
+		t.Fatalf("evidence pack still carries the deleted message: %s", joinedEvidence)
+	}
+	if !strings.Contains(joinedEvidence, constraint) {
+		t.Fatalf("evidence pack dropped the surviving constraint: %s", joinedEvidence)
+	}
+
+	anchors := buildCompactionAnchors(
+		latestCompactionAnchors(snapshot),
+		a.captureOriginalFirstUserHint(),
+		a.evidenceItemsForCompaction(a.ctxMgr.GetMaxTokens()),
+	)
+	if anchors.OriginalRequest != "FIRST prompt" {
+		t.Fatalf("anchors.OriginalRequest = %q, want the session's first prompt", anchors.OriginalRequest)
+	}
+	if strings.Contains(strings.Join(anchors.Constraints, "\n"), deletedTail) {
+		t.Fatalf("anchors carry the deleted message: %+v", anchors.Constraints)
+	}
+	if !slices.Contains(anchors.Constraints, constraint) {
+		t.Fatalf("anchors dropped the surviving constraint: %+v", anchors.Constraints)
+	}
+}
+
 func TestHandleRenameCommandPreservesMetadataAndUpdatesSessionSummary(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	originalID := filepath.Base(a.SessionDir())

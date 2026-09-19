@@ -412,6 +412,50 @@ func TestRewriteFirstUserMessagePreservesOriginalFirstUserMessage(t *testing.T) 
 	}
 }
 
+// An in-place tail edit can drop the session's only user prompt. The preserved
+// original names that removed message, so it must be dropped with it; session
+// lists prefer the original over the current preview, and a stale original
+// would keep advertising a prompt the transcript no longer contains.
+func TestRewriteFirstUserMessageEmptyContentClearsPreservedOriginal(t *testing.T) {
+	dir := t.TempDir()
+	ledger := NewUsageLedger(dir, "/tmp/project")
+	if err := ledger.SetFirstUserMessage("removed first request"); err != nil {
+		t.Fatalf("SetFirstUserMessage: %v", err)
+	}
+	if err := ledger.RewriteFirstUserMessage(""); err != nil {
+		t.Fatalf("RewriteFirstUserMessage(empty): %v", err)
+	}
+
+	summary, err := ledger.Summary()
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	if summary.FirstUserMessage != "" {
+		t.Fatalf("FirstUserMessage = %q, want empty", summary.FirstUserMessage)
+	}
+	if summary.OriginalFirstUserMessage != "" {
+		t.Fatalf("OriginalFirstUserMessage = %q, want empty", summary.OriginalFirstUserMessage)
+	}
+	if got := ledger.OriginalFirstUserMessage(); got != "" {
+		t.Fatalf("OriginalFirstUserMessage() = %q, want empty", got)
+	}
+
+	// The next submitted prompt seeds both previews again.
+	if err := ledger.SetFirstUserMessage("corrected request"); err != nil {
+		t.Fatalf("SetFirstUserMessage(corrected): %v", err)
+	}
+	summary, err = ledger.Summary()
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	if summary.FirstUserMessage != "corrected request" {
+		t.Fatalf("FirstUserMessage = %q, want corrected request", summary.FirstUserMessage)
+	}
+	if summary.OriginalFirstUserMessage != "corrected request" {
+		t.Fatalf("OriginalFirstUserMessage = %q, want corrected request", summary.OriginalFirstUserMessage)
+	}
+}
+
 func TestSetFirstUserMessageAdoptsExistingSummary(t *testing.T) {
 	dir := t.TempDir()
 	seed := &SessionUsageSummary{

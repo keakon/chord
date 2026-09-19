@@ -6135,6 +6135,69 @@ func TestCaptureOriginalFirstUserHintPrefersRecoverableMessageOverPollutedSummar
 	}
 }
 
+// A transcript head that is a real user prompt outranks a cached preview that
+// names a prompt the user replaced. The ee tail edit on the session's first
+// message rewrites the head in place; trusting the cache would write the
+// deleted prompt into the checkpoint's "Original request:" anchor.
+func TestCaptureOriginalFirstUserHintPrefersTranscriptHeadOverStalePreview(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+
+	deleted := []message.Message{{Role: "user", Content: "DELETED prompt"}}
+	a.ctxMgr.RestoreMessages(deleted)
+	if err := a.recoveryManager().RewriteLog("main", deleted); err != nil {
+		t.Fatalf("RewriteLog(deleted): %v", err)
+	}
+	if err := a.usageLedger.SetFirstUserMessage("DELETED prompt"); err != nil {
+		t.Fatalf("SetFirstUserMessage: %v", err)
+	}
+	if got := a.usageLedger.OriginalFirstUserMessage(); got != "DELETED prompt" {
+		t.Fatalf("precondition: ledger OriginalFirstUserMessage = %q, want the deleted prompt", got)
+	}
+
+	// The tail edit rewrites the transcript to the corrected prompt.
+	corrected := []message.Message{{Role: "user", Content: "CORRECTED prompt"}}
+	a.ctxMgr.RestoreMessages(corrected)
+	if err := a.recoveryManager().RewriteLog("main", corrected); err != nil {
+		t.Fatalf("RewriteLog(corrected): %v", err)
+	}
+
+	if got := a.captureOriginalFirstUserHint(); got != "CORRECTED prompt" {
+		t.Fatalf("captureOriginalFirstUserHint() = %q, want the corrected prompt", got)
+	}
+}
+
+// Once the history starts with a checkpoint the head carries no user prompt, so
+// the cached original is the only survivor and must still win — re-deriving it
+// from the transcript would name a mid-session prompt instead.
+func TestCaptureOriginalFirstUserHintKeepsCachedValueAfterCompaction(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+
+	original := []message.Message{{Role: "user", Content: "ORIGINAL request"}}
+	a.ctxMgr.RestoreMessages(original)
+	if err := a.recoveryManager().RewriteLog("main", original); err != nil {
+		t.Fatalf("RewriteLog(original): %v", err)
+	}
+	if err := a.usageLedger.SetFirstUserMessage("ORIGINAL request"); err != nil {
+		t.Fatalf("SetFirstUserMessage: %v", err)
+	}
+
+	compacted := []message.Message{
+		{Role: "user", Content: "[Context Summary]\n## Goal\n- carry on", IsCompactionSummary: true},
+		{Role: "assistant", Content: "ack"},
+		{Role: "user", Content: "mid-session prompt"},
+	}
+	a.ctxMgr.RestoreMessages(compacted)
+	if err := a.recoveryManager().RewriteLog("main", compacted); err != nil {
+		t.Fatalf("RewriteLog(compacted): %v", err)
+	}
+
+	if got := a.captureOriginalFirstUserHint(); got != "ORIGINAL request" {
+		t.Fatalf("captureOriginalFirstUserHint() = %q, want the cached original request", got)
+	}
+}
+
 func TestRewriteSessionAfterCompactionPreservesOriginalFirstUserMessage(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)

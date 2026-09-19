@@ -428,17 +428,40 @@ func (a *MainAgent) pruneCompactionIndexAllocators(keepDir string) {
 // is RLock-only.
 //
 // Order of preference:
-//  1. ledger's already-set OriginalFirstUserMessage (cheapest, authoritative)
-//  2. usage-summary.json's OriginalFirstUserMessage
-//  3. read pre-rewrite main.jsonl directly (skips IsCompactionSummary)
-//  4. scan in-memory ctxMgr snapshot (skip IsCompactionSummary)
-//  5. usage-summary.json's FirstUserMessage as a last resort for older sessions
+//  1. a real user-authored transcript head (see below — the transcript wins
+//     whenever it still carries one)
+//  2. ledger's already-set OriginalFirstUserMessage
+//  3. usage-summary.json's OriginalFirstUserMessage
+//  4. read pre-rewrite main.jsonl directly (skips IsCompactionSummary)
+//  5. scan in-memory ctxMgr snapshot (skip IsCompactionSummary)
+//  6. usage-summary.json's FirstUserMessage as a last resort for older sessions
 //     whose summary predates OriginalFirstUserMessage persistence
 //
 // Returns "" if no candidate is found; the caller may then fall back further.
 func (a *MainAgent) captureOriginalFirstUserHint() string {
 	if a == nil {
 		return ""
+	}
+	// A transcript head that is a real user prompt is authoritative: a history
+	// that still starts with one has never been compacted, so that message *is*
+	// the original request. A cached preview can disagree with it only when the
+	// prompt it names was removed from the transcript — the ee tail edit
+	// rewrites the head in place and leaves the cached copy behind. Trusting the
+	// cache there writes the deleted prompt into the checkpoint's
+	// "Original request:" anchor, which every later compaction then copies
+	// forward verbatim.
+	//
+	// Only the head is consulted, never "the first user message anywhere":
+	// FirstUserMessageFromFile and the snapshot scan below both skip a leading
+	// checkpoint, so on a compacted history they name a mid-session prompt. Once
+	// the history starts with a checkpoint the head carries no user prompt and
+	// the cached value is the only survivor, so the chain below decides.
+	if a.ctxMgr != nil {
+		if snapshot := a.ctxMgr.Snapshot(); len(snapshot) > 0 && message.IsUserAuthored(snapshot[0]) {
+			if v := strings.TrimSpace(message.UserPromptPlainText(snapshot[0])); v != "" {
+				return v
+			}
+		}
 	}
 	var usageSummaryFirstUser string
 	if a.usageLedger != nil {
