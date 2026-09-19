@@ -752,9 +752,9 @@ Chat Completions 后会放在第一条工具调用上。Gemini 工具续轮即�
 
 - Gemini 3 不接受缺 thought signature 的 function call 步骤。最后一条用户消息之后
   的 assistant 步骤签名已丢时（换了模型、网关把它丢了），Chord 会补上官方文档给出的
-  占位值 `skip_thought_signature_validator`，后端接受它代替真实签名。这个修复要求模型
-  名里能看出 Gemini 3：网关别名把名字藏了的话，要同时设置 `native_thinking: gemini`，
-  并让模型名保留 `gemini-3`。
+  占位值 `skip_thought_signature_validator`，后端接受它代替真实签名。这个修复需要知道
+  端点确实是 Gemini 3：网关别名把上游名字藏了的话，显式 pin `native_thinking: gemini`
+  即可。显式 pin 本身就是别名的身份信号，模型名不必泄露上游模型。
 - Claude 线路当前回合已经没有可回放的 `thinking_blocks` 时，该请求不会再带 `thinking`
   控制字段：发出的历史里没有对应的思考块，声明了思考反而会被拒。
 - 后端确实拒绝某个签名时，仍会按回放兼容等级逐级降级：Chord 剥掉 blob 重试，而不是

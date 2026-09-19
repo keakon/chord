@@ -797,9 +797,10 @@ Missing or rejected state is repaired instead of sent as a guaranteed failure:
   assistant step after the last user message lost its signature (a model switch,
   a gateway that dropped it), Chord sends the documented placeholder
   `skip_thought_signature_validator`, which the backend accepts in place of a
-  real signature. The repair needs a name that identifies a Gemini 3 model: a
-  gateway alias that hides it takes `native_thinking: gemini` plus a model name
-  that still contains `gemini-3`.
+  real signature. The repair needs to know the endpoint is Gemini 3: for a
+  gateway alias that hides the upstream name, pin `native_thinking: gemini`. An
+  explicit pin identifies the alias by itself, so the model name does not have
+  to reveal the upstream model.
 - A Claude-backed endpoint whose current turn no longer has replayable
   `thinking_blocks` is called without the `thinking` controls, matching the
   history the request carries; asking for reasoning the replayed history cannot
