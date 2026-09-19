@@ -301,7 +301,19 @@ func (v CompactContextValidator) ParseCompactContextArgs(raw json.RawMessage) (C
 		for _, c := range costs {
 			shorten = append(shorten, c.name)
 		}
-		return CompactContextArgs{}, fmt.Errorf("continuation state exceeds the token budget (estimated_cost=%d, budget=%d)%s; shorten %s and retry", cost, limit, largest, strings.Join(shorten, "/"))
+		// Two compliant ways out of the overflow are named: shortening the
+		// inline text, and externalizing the detail to a workspace file the
+		// checkpoint references. Without the second option the only route the
+		// model can see is a shorter retry, which silently drops the facts the
+		// checkpoint existed to preserve.
+		//
+		// The second route is stated in the order it has to be walked, because
+		// state_files references existing files and this call cannot create
+		// one: a model told only "list it in state_files" would retry with a
+		// path that does not exist yet. Naming the order also keeps this text
+		// consistent with the description's ban on inventing files just to
+		// fill the field.
+		return CompactContextArgs{}, fmt.Errorf("continuation state exceeds the token budget (estimated_cost=%d, budget=%d)%s; shorten %s and retry, or externalize the detail instead of deleting it: write it to a file inside the workspace you would keep anyway, then retry with that path in state_files (the file must exist before the checkpoint is submitted)", cost, limit, largest, strings.Join(shorten, "/"))
 	}
 	return args, nil
 }
@@ -533,7 +545,7 @@ func (t CompactContextTool) Description() string {
 		"Do not call it when the task is complete and only the final response remains. If work requires user input or confirmation, use the normal question or waiting mechanism. A terminal TODO state alone is not a reason to checkpoint.\n" +
 		"Call it alone (no sibling tool calls in the same response), at a safe stop after the current atomic operation has ended. Unfinished background work may continue; do not describe it as completed.\n" +
 		"When context is comfortable, checkpoint only if expected savings justify the reset and recovery cost. Under context pressure, stop optional exploration, preserve the minimum recovery state, and request a provisional checkpoint even if the stage remains active or candidate.\n" +
-		"Capture every fact needed to resume in structured arguments or state_files; do not repeat full file contents in both. Refresh files you rely on before referencing them. Leave state_files empty when the structured arguments fully carry the recovery state, and do not create or modify files solely to request a checkpoint. Record unfinished updates as open_issues, not saved state.\n" +
+		"Capture every fact needed to resume in structured arguments or state_files; do not repeat full file contents in both. Refresh files you rely on before referencing them. Leave state_files empty when the structured arguments fully carry the recovery state, and never create a file merely to fill the field: externalize a fact only when it genuinely has to survive the reset, and write that file before submitting the checkpoint, because state_files references existing files and this call cannot create them. Record unfinished updates as open_issues, not saved state.\n" +
 		"Use planned_state_files only for future paths; they do not externalize state. File paths and evidence requirements are defined by the corresponding parameter descriptions.\n" +
 		"Only active_objective and next_step are required. Report new progress and changed decisions; bounded prior completed work, decisions and open issues carry forward automatically. Use retired_items to remove resolved or superseded entries by their exact checkpoint text. Omission alone never deletes an entry. Evidence and stage metadata are optional; do not invent evidence IDs.\n" +
 		todoSync +

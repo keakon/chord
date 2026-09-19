@@ -1819,7 +1819,16 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 	// near-matches because they may intentionally describe a different state.
 	decisions := renderModelStateList(removeCheckpointItems(req.Args.Decisions, req.Args.Completed), "(none reported by the model)")
 	openIssues := renderModelStateList(removeCheckpointItems(req.Args.OpenIssues, req.Args.Completed), "(none reported by the model)")
-	stateFiles := renderStateFilesSection(req.Args.StateFiles)
+	// The Externalized State footer describes the archive the continuation
+	// actually receives, which is the archival-filtered pack
+	// (newModelDrivenCheckpointBuilder filters the same way), not the raw
+	// evidence the barrier snapshot held: an invalidated item the pack dropped
+	// must not inflate the count of IDs that remain reachable, nor count as a
+	// reference resolved. markTypedClaimsInvalidated and the constraints
+	// section above read the raw set on purpose — they need to know which
+	// claims and corrections were touched, including the invalidated ones.
+	archivedEvidence := filterCompactionEvidenceForArchival(bundle.evidenceItems)
+	stateFiles := renderStateFilesSection(req.Args.StateFiles, archivedEvidence, req.Args.EvidenceRefs)
 	plannedStateFiles := renderPlannedStateFilesSection(req.Args.PlannedStateFiles)
 	evidenceRefs := renderEvidenceRefsSection(req.Args.EvidenceRefs)
 	claims := renderCheckpointClaims(req)
@@ -2141,16 +2150,39 @@ func stripLeadingHeadingMarkers(line string) string {
 // session already read or wrote, and only while the read permission rule still
 // allows it (see compactionContinuationFiles). Anything else — including a
 // missing file — surfaces when the model reads it with the read tool.
-func renderStateFilesSection(paths []string) string {
+func renderStateFilesSection(paths []string, archivedEvidence []evidenceItem, evidenceRefs []string) string {
 	if len(paths) == 0 {
 		// An empty list is legitimate (pure analysis, final delivery, a role
 		// without write tools), so it is never a rejection. The continuation
 		// still gets an actionable line: the checkpoint sections and the
 		// archived history are the whole recovery state, and the next
 		// checkpoint is where a notes/plan file gets registered.
-		return "- (none reported by the model)\n" +
-			"- Model-declared references only; existence is not verified.\n" +
-			"- No durable state file was registered: the continuation must recover from the sections above and the archived history. If this workstream has (or should have) a notes or plan file, write it and register it at the next checkpoint so the continuation can re-read it instead of re-deriving it."
+		//
+		// The archived-evidence counts are stated as facts rather than left as
+		// a generic reminder, because this message repeats on every later
+		// request: the counts tell the continuation whether the record it
+		// needs is still reachable by ID from the archive it received (or from
+		// a later checkpoint's carry), and the ID route is what the evidence
+		// pack's rows and the /restore recovery path both expect.
+		cited := evidenceItemsByID(archivedEvidence)
+		referenced := 0
+		for _, ref := range evidenceRefs {
+			if _, ok := cited[strings.TrimSpace(ref)]; ok {
+				referenced++
+			}
+		}
+		prefix := "- (none reported by the model)\n" +
+			"- Model-declared references only; existence is not verified.\n"
+		if len(archivedEvidence) == 0 {
+			// With nothing archived there is no ID to cite, so offering the ID
+			// route would ask for an action the continuation cannot take. The
+			// only step left is registering a durable file at the next
+			// checkpoint.
+			return prefix +
+				"- No durable state file was registered and no archived evidence exists to cite: register a notes or plan file at the next checkpoint so re-derivable work stops depending on the archive."
+		}
+		return prefix +
+			fmt.Sprintf("- No durable state file was registered: %d archived evidence item(s) exist, and this state references %d of them. Cite an archived ID to make its detail survive later checkpoints, and register a notes or plan file at the next checkpoint so re-derivable work stops depending on the archive.", len(archivedEvidence), referenced)
 	}
 	var sb strings.Builder
 	sb.WriteString("- Model-declared references only; existence is not verified. Use the read tool to load any path before relying on it:\n")

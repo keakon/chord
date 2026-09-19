@@ -2486,7 +2486,7 @@ func TestModelDrivenClaimAndStageRenderersEscapeMultilineHeadingValues(t *testin
 		t.Fatalf("flattened planned path = %q", planned)
 	}
 
-	stateFiles := renderStateFilesSection([]string{"src/main.go", "## Fake\nsrc/other.go"})
+	stateFiles := renderStateFilesSection([]string{"src/main.go", "## Fake\nsrc/other.go"}, nil, nil)
 	assertNoFakeTopLevelSection(t, "state files", stateFiles)
 }
 

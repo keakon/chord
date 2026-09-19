@@ -554,13 +554,16 @@ func TestCompactContextDescriptionKeepsRejectionGuidanceGeneric(t *testing.T) {
 // An empty state_files list stays valid (pure analysis, final delivery, or a
 // role without write tools), so the contract must state when it is the right
 // answer instead of leaving the model to infer it from a rejection it cannot
-// afford on the checkpoint's critical path.
+// afford on the checkpoint's critical path. The ban on inventing files is
+// scoped to filling the field: the externalization route the budget rejection
+// recommends has to stay reachable, or the two texts contradict each other.
 func TestCompactContextStatesWhenStateFilesMayBeEmpty(t *testing.T) {
 	tool := NewCompactContextTool(testCompactValidator())
 	description := tool.Description()
 	for _, want := range []string{
 		"Leave state_files empty when the structured arguments fully carry the recovery state",
-		"do not create or modify files solely to request a checkpoint",
+		"never create a file merely to fill the field",
+		"write that file before submitting the checkpoint",
 	} {
 		if !strings.Contains(description, want) {
 			t.Fatalf("description must mention %q, got:\n%s", want, description)
@@ -683,6 +686,44 @@ func TestCompactContextTokenBudgetShortenListIncludesStageMetadata(t *testing.T)
 		if !strings.Contains(msg, want) {
 			t.Fatalf("error = %q, want substring %q", msg, want)
 		}
+	}
+}
+
+// A budget rejection must name the externalization route alongside the
+// shortening one. Without it the only compliant action visible to the model is
+// a shorter retry, which drops the facts the checkpoint existed to preserve.
+//
+// The rejection and the description must also agree on that route: state_files
+// references existing files and the checkpoint call cannot create one, so the
+// rejection names the write-first order, and the description's ban on
+// inventing files is scoped to filling the field rather than forbidding the
+// file the rejection asks for.
+func TestCompactContextTokenBudgetRejectionNamesStateFilesRoute(t *testing.T) {
+	v := CompactContextValidator{ContinuationStateMaxTokens: 60}
+	longObjective := strings.Repeat("o", 300) // ~100 estimated tokens with the bytes/3 estimator
+	raw := `{
+		"active_objective": "` + longObjective + `",
+		"next_step": "b"
+	}`
+	_, err := v.ParseCompactContextArgs(json.RawMessage(raw))
+	if err == nil {
+		t.Fatal("expected token budget rejection")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"token budget",
+		"shorten",
+		"state_files",
+		"write it to a file inside the workspace",
+		"the file must exist before the checkpoint is submitted",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error = %q, want substring %q", msg, want)
+		}
+	}
+	description := NewCompactContextTool(CompactContextValidator{ContinuationStateMaxTokens: 2048}).Description()
+	if strings.Contains(description, "do not create or modify files solely to request a checkpoint") {
+		t.Fatalf("the description must not ban the externalization the rejection recommends:\n%s", description)
 	}
 }
 
