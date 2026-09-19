@@ -119,6 +119,11 @@ func (p *ProviderConfig) applyAuthStateLockedWithOptions(state config.AuthStateF
 		}
 		ks.OAuthInfo.StateUpdatedAt = record.UpdatedAt
 		ks.OAuthInfo.LastWarmupAt = record.LastWarmupAt
+		// A declared status can only invalidate: OAuthStatusNormal is the empty
+		// string, so this branch never runs for a healthy credential and never
+		// clears Invalid. Only applying a full OAuth setup clears it, in
+		// SetOAuthRefresher. Dropping the guard would read a record without a
+		// status as healthy and revive a key that must stay out of the pool.
 		if record.Status != "" {
 			ks.Invalid = !record.Status.IsValid()
 			ks.OAuthInfo.Status = record.Status
