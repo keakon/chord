@@ -6168,8 +6168,11 @@ func TestCaptureOriginalFirstUserHintPrefersTranscriptHeadOverStalePreview(t *te
 }
 
 // Once the history starts with a checkpoint the head carries no user prompt, so
-// the cached original is the only survivor and must still win — re-deriving it
-// from the transcript would name a mid-session prompt instead.
+// re-deriving the original from the transcript would name a mid-session prompt
+// instead. This fixture's checkpoint predates the anchors block, so the cached
+// original is the only survivor and must win; a checkpoint that does carry
+// anchors outranks the cache — see
+// TestCaptureOriginalFirstUserHintFallsBackToCheckpointAnchor.
 func TestCaptureOriginalFirstUserHintKeepsCachedValueAfterCompaction(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
@@ -6195,6 +6198,76 @@ func TestCaptureOriginalFirstUserHintKeepsCachedValueAfterCompaction(t *testing.
 
 	if got := a.captureOriginalFirstUserHint(); got != "ORIGINAL request" {
 		t.Fatalf("captureOriginalFirstUserHint() = %q, want the cached original request", got)
+	}
+}
+
+// checkpointWithAnchor builds the checkpoint message a compaction writes for
+// the given original request: the verbatim anchors block plus a summary body.
+func checkpointWithAnchor(originalRequest string) message.Message {
+	summary := withCompactionAnchors(
+		"[Context Summary]\n## Goal\n- carry on",
+		compactionAnchors{OriginalRequest: originalRequest},
+	)
+	return message.Message{Role: "user", Content: summary, IsCompactionSummary: true}
+}
+
+// A compacted history starts with a checkpoint, so neither transcript scan can
+// name the original request any more: FirstUserMessageFromFile and the snapshot
+// scan both skip the checkpoint and return the first prompt *after* it. The
+// checkpoint's own anchors block is the durable record — written once, while
+// the real head was still observable, and copied forward verbatim ever after —
+// so it has to be consulted before those two steps are reached.
+func TestCaptureOriginalFirstUserHintFallsBackToCheckpointAnchor(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+
+	compacted := []message.Message{
+		checkpointWithAnchor("REAL original request"),
+		{Role: "assistant", Content: "ack"},
+		{Role: "user", Content: "mid-session prompt"},
+	}
+	a.ctxMgr.RestoreMessages(compacted)
+	if err := a.recoveryManager().RewriteLog("main", compacted); err != nil {
+		t.Fatalf("RewriteLog(compacted): %v", err)
+	}
+	if got := a.usageLedger.OriginalFirstUserMessage(); got != "" {
+		t.Fatalf("precondition: ledger original = %q, want empty", got)
+	}
+
+	if got := a.captureOriginalFirstUserHint(); got != "REAL original request" {
+		t.Fatalf("captureOriginalFirstUserHint() = %q, want the checkpoint anchor", got)
+	}
+}
+
+// The checkpoint anchor outranks the cached preview. A summary rebuild can lose
+// the cached original (older versions did), and adopting a rebuilt preview can
+// even overwrite it with a mid-session prompt, while the anchor is the verbatim
+// copy the first compaction made — so the anchor is what keeps the checkpoint's
+// "Original request:" correct when the two disagree.
+func TestCaptureOriginalFirstUserHintPrefersCheckpointAnchorOverCachedPreview(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+
+	compacted := []message.Message{
+		checkpointWithAnchor("REAL original request"),
+		{Role: "assistant", Content: "ack"},
+		{Role: "user", Content: "mid-session prompt"},
+	}
+	a.ctxMgr.RestoreMessages(compacted)
+	if err := a.recoveryManager().RewriteLog("main", compacted); err != nil {
+		t.Fatalf("RewriteLog(compacted): %v", err)
+	}
+	// The polluted cache a pre-fix summary rebuild leaves behind: the original
+	// preview was re-derived from the transcript and named a mid-session prompt.
+	if err := a.usageLedger.SetFirstUserMessage("mid-session prompt"); err != nil {
+		t.Fatalf("SetFirstUserMessage: %v", err)
+	}
+	if got := a.usageLedger.OriginalFirstUserMessage(); got != "mid-session prompt" {
+		t.Fatalf("precondition: ledger original = %q, want the mid-session prompt", got)
+	}
+
+	if got := a.captureOriginalFirstUserHint(); got != "REAL original request" {
+		t.Fatalf("captureOriginalFirstUserHint() = %q, want the checkpoint anchor", got)
 	}
 }
 

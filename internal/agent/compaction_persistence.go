@@ -430,17 +430,22 @@ func (a *MainAgent) pruneCompactionIndexAllocators(keepDir string) {
 // Order of preference:
 //  1. a real user-authored transcript head (see below — the transcript wins
 //     whenever it still carries one)
-//  2. ledger's already-set OriginalFirstUserMessage
-//  3. usage-summary.json's OriginalFirstUserMessage
-//  4. read pre-rewrite main.jsonl directly (skips IsCompactionSummary)
-//  5. scan in-memory ctxMgr snapshot (skip IsCompactionSummary)
-//  6. usage-summary.json's FirstUserMessage as a last resort for older sessions
+//  2. the newest checkpoint's own "Original request:" anchor (see below)
+//  3. ledger's already-set OriginalFirstUserMessage
+//  4. usage-summary.json's OriginalFirstUserMessage
+//  5. read pre-rewrite main.jsonl directly (skips IsCompactionSummary)
+//  6. scan in-memory ctxMgr snapshot (skip IsCompactionSummary)
+//  7. usage-summary.json's FirstUserMessage as a last resort for older sessions
 //     whose summary predates OriginalFirstUserMessage persistence
 //
 // Returns "" if no candidate is found; the caller may then fall back further.
 func (a *MainAgent) captureOriginalFirstUserHint() string {
 	if a == nil {
 		return ""
+	}
+	var snapshot []message.Message
+	if a.ctxMgr != nil {
+		snapshot = a.ctxMgr.Snapshot()
 	}
 	// A transcript head that is a real user prompt is authoritative: a history
 	// that still starts with one has never been compacted, so that message *is*
@@ -450,18 +455,22 @@ func (a *MainAgent) captureOriginalFirstUserHint() string {
 	// cache there writes the deleted prompt into the checkpoint's
 	// "Original request:" anchor, which every later compaction then copies
 	// forward verbatim.
-	//
-	// Only the head is consulted, never "the first user message anywhere":
-	// FirstUserMessageFromFile and the snapshot scan below both skip a leading
-	// checkpoint, so on a compacted history they name a mid-session prompt. Once
-	// the history starts with a checkpoint the head carries no user prompt and
-	// the cached value is the only survivor, so the chain below decides.
-	if a.ctxMgr != nil {
-		if snapshot := a.ctxMgr.Snapshot(); len(snapshot) > 0 && message.IsUserAuthored(snapshot[0]) {
-			if v := strings.TrimSpace(message.UserPromptPlainText(snapshot[0])); v != "" {
-				return v
-			}
+	if len(snapshot) > 0 && message.IsUserAuthored(snapshot[0]) {
+		if v := strings.TrimSpace(message.UserPromptPlainText(snapshot[0])); v != "" {
+			return v
 		}
+	}
+	// Past that head the history starts with a checkpoint, and the checkpoint's
+	// own anchors block is then the only candidate that still names the
+	// original request: FirstUserMessageFromFile and the snapshot scan below
+	// both skip a leading checkpoint, so on a compacted history they return the
+	// first prompt *after* it. The anchor has no such weakness — it is written
+	// once by the first compaction, while the real head was still observable,
+	// and every later compaction copies it forward verbatim — so it outranks
+	// the cached previews, which live outside the transcript and can be lost or
+	// overwritten by a summary rebuild.
+	if anchors := latestCompactionAnchors(snapshot); strings.TrimSpace(anchors.OriginalRequest) != "" {
+		return strings.TrimSpace(anchors.OriginalRequest)
 	}
 	var usageSummaryFirstUser string
 	if a.usageLedger != nil {
@@ -483,7 +492,7 @@ func (a *MainAgent) captureOriginalFirstUserHint() string {
 			}
 		}
 	}
-	for _, msg := range a.ctxMgr.Snapshot() {
+	for _, msg := range snapshot {
 		if !message.IsUserAuthored(msg) {
 			continue
 		}

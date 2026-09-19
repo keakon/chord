@@ -562,6 +562,113 @@ func TestRewriteFirstUserMessageWithOriginalForCompactionSeedsHintWhenNothingKno
 	}
 }
 
+// writeCompactedMainLog writes a main.jsonl whose head is a compaction
+// checkpoint followed by a mid-session prompt — the transcript shape a scan for
+// the first user-authored message cannot read the original request out of.
+func writeCompactedMainLog(t *testing.T, dir string) {
+	t.Helper()
+	messages := []message.Message{
+		{Role: message.RoleUser, Content: "[Context Summary]\n## Goal\n- carry on", IsCompactionSummary: true},
+		{Role: message.RoleAssistant, Content: "ack"},
+		{Role: message.RoleUser, Content: "mid-session prompt"},
+	}
+	var payload []byte
+	for _, msg := range messages {
+		encoded, err := json.Marshal(msg)
+		if err != nil {
+			t.Fatalf("marshal message: %v", err)
+		}
+		payload = append(payload, encoded...)
+		payload = append(payload, '\n')
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.jsonl"), payload, 0o644); err != nil {
+		t.Fatalf("WriteFile(main.jsonl): %v", err)
+	}
+}
+
+// writeStaleSummaryAndEvent seeds a cached summary and one ledger event that
+// lands after it, which is what makes the next open rebuild the summary.
+func writeStaleSummaryAndEvent(t *testing.T, dir string, seed SessionUsageSummary) {
+	t.Helper()
+	seedBytes, err := json.Marshal(seed)
+	if err != nil {
+		t.Fatalf("Marshal(seed): %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "usage-summary.json"), seedBytes, 0o600); err != nil {
+		t.Fatalf("WriteFile(usage-summary.json): %v", err)
+	}
+	event := `{"event_id":"event-1","session_id":"session-1","agent_id":"main","purpose":"chat","running_model_ref":"provider-a/model-1"}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "usage.jsonl"), []byte(event), 0o600); err != nil {
+		t.Fatalf("WriteFile(usage.jsonl): %v", err)
+	}
+}
+
+// A rebuild replays usage.jsonl, which records token/cost aggregates only — it
+// carries no first-user metadata. That metadata must therefore be carried over
+// from the summary being replaced; re-deriving it from the transcript instead
+// loses the original request as soon as the session has been compacted, because
+// the transcript then starts with a checkpoint and a scan for the first
+// user-authored message names a mid-session prompt.
+func TestRebuildSummaryLockedCarriesFirstUserMetadataOver(t *testing.T) {
+	dir := t.TempDir()
+	writeCompactedMainLog(t, dir)
+	writeStaleSummaryAndEvent(t, dir, SessionUsageSummary{
+		SessionID:                           filepath.Base(dir),
+		LastEventID:                         "stale-event",
+		FirstUserMessage:                    "the checkpoint preview",
+		FirstUserMessageIsCompactionSummary: true,
+		OriginalFirstUserMessage:            "original first request",
+		Status:                              "active",
+	})
+
+	rebuilt, err := LoadSessionUsageSummary(dir)
+	if err != nil {
+		t.Fatalf("LoadSessionUsageSummary: %v", err)
+	}
+	if rebuilt.EventCount != 1 {
+		t.Fatalf("EventCount = %d, want 1: the summary must have been rebuilt", rebuilt.EventCount)
+	}
+	if rebuilt.OriginalFirstUserMessage != "original first request" {
+		t.Fatalf("OriginalFirstUserMessage = %q, want the carried original request", rebuilt.OriginalFirstUserMessage)
+	}
+	if !rebuilt.FirstUserMessageIsCompactionSummary {
+		t.Fatal("FirstUserMessageIsCompactionSummary = false, want the carried true")
+	}
+	if rebuilt.FirstUserMessage != "the checkpoint preview" {
+		t.Fatalf("FirstUserMessage = %q, want the carried checkpoint preview", rebuilt.FirstUserMessage)
+	}
+}
+
+// When nothing carries the first-user metadata — no summary at all, or one that
+// predates the field — the transcript scan is the only source left for the
+// preview. Its result must not be promoted to the original request: on a
+// compacted history it names a mid-session prompt, and an original request is
+// sticky, because session lists prefer it and every later checkpoint copies it
+// forward as its "Original request:" anchor.
+func TestRebuildSummaryLockedDoesNotPromoteScannedPreviewToOriginal(t *testing.T) {
+	dir := t.TempDir()
+	writeCompactedMainLog(t, dir)
+	event := `{"event_id":"event-1","session_id":"session-1","agent_id":"main","purpose":"chat","running_model_ref":"provider-a/model-1"}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "usage.jsonl"), []byte(event), 0o600); err != nil {
+		t.Fatalf("WriteFile(usage.jsonl): %v", err)
+	}
+
+	rebuilt, err := LoadSessionUsageSummary(dir)
+	if err != nil {
+		t.Fatalf("LoadSessionUsageSummary: %v", err)
+	}
+	// The preview still falls back to the scan — session lists need something —
+	// but the original request stays empty so the agent layer can recover the
+	// real one from the checkpoint's anchors instead of inheriting a
+	// mid-session prompt forever.
+	if rebuilt.FirstUserMessage != "mid-session prompt" {
+		t.Fatalf("FirstUserMessage = %q, want the transcript-scan fallback", rebuilt.FirstUserMessage)
+	}
+	if rebuilt.OriginalFirstUserMessage != "" {
+		t.Fatalf("OriginalFirstUserMessage = %q, want empty: a scanned preview is not the original request", rebuilt.OriginalFirstUserMessage)
+	}
+}
+
 func TestFirstUserMessageLockedSkipsCompactionSummary(t *testing.T) {
 	dir := t.TempDir()
 	mainPath := filepath.Join(dir, "main.jsonl")

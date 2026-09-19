@@ -465,7 +465,7 @@ func (l *UsageLedger) AppendEvent(event UsageEvent) error {
 	if summaryErr != nil {
 		l.summaryLoaded = false
 		l.summary = nil
-		rebuilt, err := l.rebuildSummaryLocked()
+		rebuilt, err := l.rebuildSummaryLocked(summary)
 		if err != nil {
 			return fmt.Errorf("rebuild usage summary: %w", err)
 		}
@@ -590,7 +590,7 @@ func (l *UsageLedger) ensureSummaryLocked() (*SessionUsageSummary, error) {
 		l.adoptSummaryLocked(summary)
 		return l.summary, nil
 	default:
-		rebuilt, err := l.rebuildSummaryLocked()
+		rebuilt, err := l.rebuildSummaryLocked(summary)
 		if err != nil {
 			return nil, err
 		}
@@ -600,7 +600,15 @@ func (l *UsageLedger) ensureSummaryLocked() (*SessionUsageSummary, error) {
 	}
 }
 
-func (l *UsageLedger) rebuildSummaryLocked() (*SessionUsageSummary, error) {
+// rebuildSummaryLocked recomputes the summary by replaying usage.jsonl. The
+// ledger records token/cost aggregates only — no first-user metadata — so that
+// metadata is carried over from the state this rebuild replaces instead of
+// being re-derived; see carryFirstUserMetadataLocked for why re-deriving it
+// from the transcript is not an option.
+//
+// previous is the summary the rebuild replaces (the one ensureSummaryLocked
+// read, or nil when there was none).
+func (l *UsageLedger) rebuildSummaryLocked(previous *SessionUsageSummary) (*SessionUsageSummary, error) {
 	summary := l.newEmptySummaryLocked()
 	err := scanUsageEvents(l.usagePath(), func(evt UsageEvent) {
 		applyUsageEvent(summary, evt)
@@ -608,13 +616,63 @@ func (l *UsageLedger) rebuildSummaryLocked() (*SessionUsageSummary, error) {
 	if err != nil {
 		return nil, err
 	}
-	if summary.FirstUserMessage == "" {
-		summary.FirstUserMessage = l.firstUserMessageLocked()
+	if previous == nil {
+		// ensureSummaryLocked can fail before it hands the summary it read
+		// over; the file is still the last durable record of the metadata, so
+		// read it here rather than silently dropping what only a transcript
+		// scan could stand in for.
+		if cached, readErr := readUsageSummaryFile(l.summaryPath()); readErr == nil {
+			previous = cached
+		}
 	}
+	l.carryFirstUserMetadataLocked(summary, previous)
 	if err := l.writeSummaryLocked(summary); err != nil {
 		return nil, err
 	}
 	return summary, nil
+}
+
+// carryFirstUserMetadataLocked fills a rebuilt summary's first-user metadata
+// from whatever already knows it: the summary being replaced, then the
+// in-memory mirrors, and only as a last resort a scan of main.jsonl. Callers
+// must not reorder those — the scan is the weakest source, not the strongest.
+//
+// The scan must never feed OriginalFirstUserMessage. Once a session has been
+// compacted its transcript starts with a checkpoint, so a scan for the first
+// user-authored message names the first prompt *after* it; promoting that to
+// the original request would be permanent, because session lists prefer the
+// original over the current preview and every later checkpoint copies it
+// forward as its "Original request:" anchor.
+func (l *UsageLedger) carryFirstUserMetadataLocked(summary, previous *SessionUsageSummary) {
+	if summary == nil {
+		return
+	}
+	if previous != nil {
+		summary.FirstUserMessage = strings.TrimSpace(previous.FirstUserMessage)
+		summary.FirstUserMessageIsCompactionSummary = previous.FirstUserMessageIsCompactionSummary
+		summary.OriginalFirstUserMessage = strings.TrimSpace(previous.OriginalFirstUserMessage)
+	}
+	if summary.FirstUserMessage == "" {
+		// The in-memory mirror first, then the transcript scan it falls back
+		// to. This is the only place a scanned preview may enter a summary.
+		summary.FirstUserMessage = l.firstUserMessageLocked()
+	}
+	if summary.OriginalFirstUserMessage == "" {
+		summary.OriginalFirstUserMessage = l.originalFirstUserMessage
+	}
+	// Mirror the result onto the in-memory fields exactly as adoptSummaryLocked
+	// does, so a later SetFirstUserMessage sees the same state it would have
+	// seen had the summary been adopted instead of rebuilt.
+	if summary.FirstUserMessage != "" {
+		if summary.FirstUserMessageIsCompactionSummary {
+			l.firstUserMessage = ""
+		} else {
+			l.firstUserMessage = summary.FirstUserMessage
+		}
+	}
+	if summary.OriginalFirstUserMessage != "" {
+		l.originalFirstUserMessage = summary.OriginalFirstUserMessage
+	}
 }
 
 func (l *UsageLedger) adoptSummaryLocked(summary *SessionUsageSummary) {
@@ -673,21 +731,24 @@ func (l *UsageLedger) adoptSummaryLocked(summary *SessionUsageSummary) {
 	l.summaryLoaded = true
 }
 
+// newEmptySummaryLocked returns a summary with the aggregate maps initialized
+// and no first-user metadata: rebuildSummaryLocked is its only caller, and that
+// metadata is carried over separately by carryFirstUserMetadataLocked instead
+// of being re-derived here.
 func (l *UsageLedger) newEmptySummaryLocked() *SessionUsageSummary {
 	return &SessionUsageSummary{
-		SessionID:        filepath.Base(l.sessionDir),
-		ProjectID:        l.projectID,
-		ProjectPath:      l.projectPath,
-		Timezone:         time.Local.String(),
-		FirstUserMessage: l.firstUserMessageLocked(),
-		Status:           "active",
-		ByProvider:       make(map[string]*UsageAggregate),
-		ByModelRef:       make(map[string]*UsageAggregate),
-		ByAgent:          make(map[string]*UsageAggregate),
-		ByPurpose:        make(map[string]*UsageAggregate),
-		ByDate:           make(map[string]*UsageAggregate),
-		ByDateModelRef:   make(map[string]map[string]*UsageAggregate),
-		ByDateAgent:      make(map[string]map[string]*UsageAggregate),
+		SessionID:      filepath.Base(l.sessionDir),
+		ProjectID:      l.projectID,
+		ProjectPath:    l.projectPath,
+		Timezone:       time.Local.String(),
+		Status:         "active",
+		ByProvider:     make(map[string]*UsageAggregate),
+		ByModelRef:     make(map[string]*UsageAggregate),
+		ByAgent:        make(map[string]*UsageAggregate),
+		ByPurpose:      make(map[string]*UsageAggregate),
+		ByDate:         make(map[string]*UsageAggregate),
+		ByDateModelRef: make(map[string]map[string]*UsageAggregate),
+		ByDateAgent:    make(map[string]map[string]*UsageAggregate),
 	}
 }
 
