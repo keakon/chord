@@ -3,6 +3,7 @@ package agent
 import (
 	"fmt"
 	"maps"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -115,6 +116,44 @@ func (a *MainAgent) resolveCheckpointFilePath(path string) string {
 	return filepath.Join(a.projectRoot, filepath.FromSlash(path))
 }
 
+// resolveCheckpointFileReadPath maps a checkpoint path to the location the
+// confined read opens, or "" when it must not be loaded. The returned path is
+// the symlink-resolved location relative to the resolved project root: os.Root
+// refuses to follow a symlink whose target is absolute even when the target
+// stays inside the root, so the lexical spelling cannot be used for the read.
+// A target outside the resolved root is rejected here; os.Root stays the
+// boundary against a symlink swapped in after this check.
+func (a *MainAgent) resolveCheckpointFileReadPath(path string) string {
+	if path == "" || filepath.IsAbs(path) || a.projectRoot == "" {
+		return ""
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(a.projectRoot)
+	if err != nil {
+		return ""
+	}
+	resolvedPath, err := filepath.EvalSymlinks(filepath.Join(a.projectRoot, filepath.FromSlash(path)))
+	if err != nil {
+		return ""
+	}
+	rel, err := filepath.Rel(resolvedRoot, resolvedPath)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return ""
+	}
+	return filepath.ToSlash(rel)
+}
+
+func (a *MainAgent) readCheckpointFile(path string) ([]byte, error) {
+	if a == nil || a.projectRoot == "" {
+		return nil, os.ErrInvalid
+	}
+	root, err := os.OpenRoot(a.projectRoot)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	return root.ReadFile(filepath.FromSlash(path))
+}
+
 // compactionContinuationFiles is the ordered, de-duplicated file set a
 // continuation re-loads after a checkpoint: the state_files the checkpoint
 // registered, then the summary's key files that were not already declared.
@@ -136,7 +175,7 @@ func (a *MainAgent) compactionContinuationFiles(signature string) []string {
 			return
 		}
 		seen[rel] = true
-		if !a.stateFileInjectableForRead(a.resolveCheckpointFilePath(rel)) {
+		if !a.stateFileInjectableForRead(a.resolveCheckpointFilePath(rel)) || a.resolveCheckpointFileReadPath(rel) == "" {
 			return
 		}
 		files = append(files, rel)
@@ -202,9 +241,10 @@ func (a *MainAgent) injectCompactionFileContext(messages []message.Message) ([]m
 		return messages, -1
 	}
 
-	result := filectx.BuildFilePartsWithOptions(keyFiles, a.resolveCheckpointFilePath, filectx.BuildFilePartsOptions{
+	result := filectx.BuildFilePartsWithOptions(keyFiles, a.resolveCheckpointFileReadPath, filectx.BuildFilePartsOptions{
 		MaxFileBytes:  maxFileBytes,
 		MaxTotalBytes: maxTotalBytes,
+		ReadFile:      a.readCheckpointFile,
 	})
 	if len(result.Parts) == 0 {
 		return messages, -1

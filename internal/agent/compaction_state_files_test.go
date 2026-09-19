@@ -102,6 +102,85 @@ func TestExtractCompactionStateFilesScopesChordRoots(t *testing.T) {
 	}
 }
 
+func TestExtractCompactionStateFilesRejectsExternalSymlink(t *testing.T) {
+	projectRoot := t.TempDir()
+	external := filepath.Join(t.TempDir(), "outside.md")
+	if err := os.WriteFile(external, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(projectRoot, "state.md")
+	if err := os.Symlink(external, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if got := extractCompactionStateFiles("## Externalized State\n- state.md\n", projectRoot); len(got) != 0 {
+		t.Fatalf("external symlink was accepted: %v", got)
+	}
+}
+
+// A symlink that stays inside the project must still load. The confined read
+// opens the resolved location because os.Root refuses to follow a symlink whose
+// target is absolute, even when that target points back into the root.
+func TestCompactionContinuationFilesLoadsInRootAbsoluteSymlink(t *testing.T) {
+	projectRoot := t.TempDir()
+	real := filepath.Join(projectRoot, "real.md")
+	if err := os.WriteFile(real, []byte("state body\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(real, filepath.Join(projectRoot, "state.md")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	a := newTestMainAgent(t, projectRoot)
+	a.ruleset = permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionAllow}}
+	summary := "## Externalized State\n- state.md\n"
+
+	out, insertedAt := a.injectCompactionFileContext([]message.Message{
+		{Role: "user", IsCompactionSummary: true, Content: summary},
+	})
+	if insertedAt != 1 || len(out) != 2 {
+		t.Fatalf("an in-root symlink must still load, insertedAt=%d len=%d", insertedAt, len(out))
+	}
+	carried := false
+	for _, part := range out[1].Parts[1:] {
+		carried = carried || strings.Contains(part.Text, "state body")
+	}
+	if !carried {
+		t.Fatalf("resolved file body missing from overlay: %+v", out[1].Parts)
+	}
+}
+
+// The confined read must refuse a symlink that leaves the root even when the
+// path was accepted while it was still a regular file: the request-time load
+// re-resolves it, and os.Root rejects the swap.
+func TestCheckpointReadConfinementRejectsSwappedSymlink(t *testing.T) {
+	projectRoot := t.TempDir()
+	target := filepath.Join(projectRoot, "state.md")
+	if err := os.WriteFile(target, []byte("inside"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := extractCompactionStateFiles("## Externalized State\n- state.md\n", projectRoot); !slices.Equal(got, []string{"state.md"}) {
+		t.Fatalf("regular file must pass extraction, got %v", got)
+	}
+	a := newTestMainAgent(t, projectRoot)
+
+	outside := filepath.Join(t.TempDir(), "outside.md")
+	if err := os.WriteFile(outside, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(target); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, target); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	if got := a.resolveCheckpointFileReadPath("state.md"); got != "" {
+		t.Fatalf("resolveCheckpointFileReadPath accepted an out-of-root symlink: %q", got)
+	}
+	if _, err := a.readCheckpointFile("state.md"); err == nil {
+		t.Fatal("readCheckpointFile followed a symlink out of the project root")
+	}
+}
+
 // Re-loading a model-declared state file must never widen what the model could
 // already reach: the read permission rule has to resolve to allow. An ask rule
 // in particular must not be silently auto-approved by the overlay. The file

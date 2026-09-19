@@ -156,7 +156,7 @@ skip 是正常的策略结果：立即用相同请求重试会被短暂冷却，
 
 `evidence_refs` 可引用 checkpoint evidence pack 中已知的稳定证据 ID，Chord 会在 barrier 前校验 ID。`claim_kinds` 将每条 claim 标记为 observed、derived、assumed 或 proposed。claim 键是自然语言断言，通常是对 `completed`/`decisions` 中某条结论的浓缩重述：允许改写，从不要求逐字一致，完全独立的 claim 也允许。合并上一 checkpoint 的 claim 时以键为单位：只有新提交沿用同一键重述，旧 claim 才会被覆盖；换个键改写，旧 claim 原样保留，与新 claim 并存。`observed` 必须有 `claim_evidence`；Chord 自动将其中的 ID 汇总到 `evidence_refs`，不必重复填写。证据仍必须真实可解析、包含分类且未失效；引用只证明来源，不代表模型结论已经得到验证。`state_files` 只是当前外部状态的路径引用；`planned_state_files` 用于尚未写入、仅供后续动作参考的路径。
 
-两者在构建 checkpoint 时都不会被 Chord 读取或校验存在性（因此该工具无法绕过 Read 权限，也不可能被当成存在性探针使用），只在 reset 后按当前 read 权限规则决定是否自动载入。条目通常写成相对项目根的路径（如 `docs/usage.md`）；绝对路径以及 `~`、`./`、`../` 开头的写法，只要词法解析后落在项目根内也一样接受，并在构建 checkpoint 前统一归一成相对项目根的路径。每个条目始终是模型声明的引用：过期或不存在的路径只在真正读取时才会暴露（read 工具会报告文件缺失），而不是靠 checkpoint 时刻的静默探测。checkpoint 的 `Current User Request` 永远来自你的真实消息，不会采用模型参数。工具 success 只表示请求被接受；之后出现的 model-driven `[Context Summary]` checkpoint 才表示 reset 已应用。请求被跳过或失败时会继续使用旧上下文，usage-driven 自动压缩兜底保持生效。
+两者在构建 checkpoint 时都不会被 Chord 读取或校验存在性（因此该工具无法绕过 Read 权限，也不可能被当成存在性探针使用），只在 reset 后按当前 read 权限规则决定是否自动载入。实际载入前会再次按解析后的项目根校验路径；指向项目外的符号链接会被拒绝。条目通常写成相对项目根的路径（如 `docs/usage.md`）；绝对路径以及 `~`、`./`、`../` 开头的写法，只要词法解析后落在项目根内也一样接受，并在构建 checkpoint 前统一归一成相对项目根的路径。每个条目始终是模型声明的引用：过期或不存在的路径只在真正读取时才会暴露（read 工具会报告文件缺失），而不是靠 checkpoint 时刻的静默探测。checkpoint 的 `Current User Request` 永远来自你的真实消息，不会采用模型参数。工具 success 只表示请求被接受；之后出现的 model-driven `[Context Summary]` checkpoint 才表示 reset 已应用。请求被跳过或失败时会继续使用旧上下文，usage-driven 自动压缩兜底保持生效。
 
 #### 可观测性
 

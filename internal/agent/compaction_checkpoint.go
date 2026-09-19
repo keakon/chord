@@ -529,6 +529,18 @@ func normalizeCheckpointPath(path, projectRoot string, allowNotesRoots bool) str
 	if err != nil || info.IsDir() {
 		return ""
 	}
+	resolvedRoot, err := filepath.EvalSymlinks(projectRoot)
+	if err != nil {
+		return ""
+	}
+	resolvedPath, err := filepath.EvalSymlinks(filepath.Join(projectRoot, candidate))
+	if err != nil {
+		return ""
+	}
+	inside, err := filepath.Rel(resolvedRoot, resolvedPath)
+	if err != nil || inside == ".." || strings.HasPrefix(inside, ".."+string(filepath.Separator)) {
+		return ""
+	}
 	return rel
 }
 

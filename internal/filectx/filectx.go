@@ -15,6 +15,9 @@ type BuildFilePartsOptions struct {
 	MaxFileBytes int
 	// MaxTotalBytes limits the total bytes kept across all loaded files. Zero means unlimited.
 	MaxTotalBytes int
+	// ReadFile optionally supplies the file contents. When nil, paths are read
+	// with os.ReadFile after resolvePath.
+	ReadFile func(string) ([]byte, error)
 }
 
 type LineRange struct {
@@ -126,7 +129,11 @@ func BuildFileRefPartsWithOptions(refs []FileRef, resolvePath func(string) strin
 		if resolved == "" {
 			continue
 		}
-		data, err := os.ReadFile(resolved)
+		readFile := opts.ReadFile
+		if readFile == nil {
+			readFile = os.ReadFile
+		}
+		data, err := readFile(resolved)
 		if err != nil {
 			continue
 		}
