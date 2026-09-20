@@ -1,25 +1,36 @@
-# Chord
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./assets/logo/chord-wordmark-dark.svg">
+    <img src="./assets/logo/chord-wordmark-light.svg" alt="Chord" width="360">
+  </picture>
+</p>
 
-[![CI](https://github.com/keakon/chord/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/keakon/chord/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/keakon/chord?display_name=release)](https://github.com/keakon/chord/releases) [![Go Version](https://img.shields.io/github/go-mod/go-version/keakon/chord)](./go.mod) [![License](https://img.shields.io/github/license/keakon/chord)](./LICENSE)
-
-📖 **Docs site:** <https://keakon.github.io/chord/>
-
-🌐 [中文介绍](./README_CN.md)
-
-**A faster, cheaper, lighter terminal coding agent.** Built for long sessions: it keeps context clean, trims and compacts what the model sees, and switches models automatically when one is unavailable.
+<p align="center"><strong>A faster, cheaper, lighter terminal coding agent.</strong></p>
 
 <p align="center">
-  <img src="./docs/assets/screenshot.png" alt="Chord terminal UI screenshot" width="900">
+  <a href="https://keakon.github.io/chord/">Docs site</a> ·
+  <a href="./README_CN.md">中文 README</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/keakon/chord/actions/workflows/ci.yml"><img src="https://github.com/keakon/chord/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <a href="https://github.com/keakon/chord/releases"><img src="https://img.shields.io/github/v/release/keakon/chord?display_name=release" alt="Release"></a>
+  <a href="./go.mod"><img src="https://img.shields.io/github/go-mod/go-version/keakon/chord" alt="Go Version"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/github/license/keakon/chord" alt="License"></a>
+</p>
+
+<p align="center">
+  <img src="./docs/assets/screenshot.png" alt="Chord terminal UI: tool calls, patches, and diagnostics on the left; model, usage, todos, and changed files on the right" width="900">
 </p>
 
 ## Feature highlights
 
-- [Automatic model fallback](./docs/configuration.md#model-pools-selecting-providermodel): a failing key or model does not stop the session; the next model in the pool takes over.
-- [Request trimming plus compaction](./docs/context-management.md): long sessions stay inside the context window and spend fewer tokens per turn.
-- [Streaming tool early execution](./docs/performance.md#streaming-tool-early-execution): safe tools start before the model finishes its response, so turns come back sooner.
-- [Small memory footprint](./docs/performance.md#app-memory): 30MB with an empty session and 39MB after 200 messages in the measured scenario.
-- [Import Claude Code, Codex, and OpenCode sessions](./docs/usage.md#importing-external-sessions): keep your history when you switch.
-- [Vim-style keyboard controls](./docs/keybindings.md): stay in the terminal flow without reaching for the mouse.
+- [Automatic model fallback](./docs/configuration.md#model-pools-selecting-providermodel)
+- [Request trimming plus compaction](./docs/context-management.md)
+- [Streaming tool early execution](./docs/performance.md#streaming-tool-early-execution)
+- [Small memory footprint](./docs/performance.md#app-memory)
+- [Import Claude Code, Codex, and OpenCode sessions](./docs/usage.md#importing-external-sessions)
+- [Vim-style keyboard controls](./docs/keybindings.md)
 
 ## Three-step setup
 
@@ -72,14 +83,39 @@ For manual provider/model setup and the `limit` fields, see [Quickstart](./docs/
 - [Usage](./docs/usage.md): everyday controls, session recovery, and long tasks
 - [Choosing models](./docs/model-choice.md) · [Model configuration recipes](./docs/model-configs.md) · [Configuration examples](./docs/examples/index.md): pick a channel, then connect it
 - [Permissions & Safety](./docs/permissions-and-safety.md): choose which actions need approval
+- [Long tasks](./docs/usage.md#loop-continuous-execution-mode): keep implementation, checks, and fixes moving
+- [Customization](./docs/customization.md): configure roles, skills, code diagnostics, and external tools
 - [Headless](./docs/headless.md): control Chord from another interface with `chord headless`
 - [Troubleshooting](./docs/troubleshooting.md) · [Full documentation index](./docs/index.md)
 
 ## Measured results
 
-On a [DeepSWE v1.1 task](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration) that adds streaming JSON iteration to `httpx`, Chord v0.8.1 finished in 6m37s, using 54.5K input tokens, 2.96M cache-read tokens, and 58.6K output tokens, at an estimated $0.052. Among six agent harnesses run on the same task with deepseek-v4.1-flash, Chord finished first and cost the least: 33% faster and 34% cheaper than the next-best run. Memory stays small too: 30MB with an empty session and 39MB after 200 messages.
+Six agent harnesses ran the same [DeepSWE v1.1 task](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration): adding streaming JSON iteration to `httpx`. All six runs used deepseek-v4.1-flash. Chord 0.8.1 finished first and cheapest: 6m37s and $0.052, using 54.5K input tokens, 2.96M cache-read tokens, and 58.6K output tokens. The next-best run took 1.49× as long and cost 1.51× as much.
 
-These measurements come from one task and one memory scenario; your numbers will differ. Full tables (including app memory) and methodology: [Performance](./docs/performance.md).
+### Real-world coding task
+
+| Harness | Time | Cost |
+|---------|------|------|
+| Chord 0.8.1 | **6m37s** | **$0.052** |
+| deepseek-harness 0.1.5-rc.1 | 9m50s (1.49×) | $0.079 (1.51×) |
+| pi 0.85.1 | 10m22s (1.57×) | $0.086 (1.65×) |
+| codex 0.154.0 | 17m01s (2.57×) | $0.139 (2.67×) |
+| mini-swe-agent 2.4.6 | 18m29s (2.79×) | $0.125 (2.40×) |
+| claude code 2.1.272 | 22m25s (3.39×) | $0.166 (3.17×) |
+
+Multipliers are relative to Chord.
+
+### App memory
+
+Measured on macOS 15.3.2 (arm64).
+
+| Harness | Empty session | 200 messages | Growth |
+|---------|---------------|--------------|--------|
+| Chord 0.8.1 | 30MB | **39MB** | **+9MB** |
+| codex 0.154.0 | **27MB** | 47MB | +20MB |
+| claude code 2.1.273 | 143MB | 216MB | +73MB |
+
+One measured task and one memory scenario; your numbers will differ. Full tables, methodology, and implementation notes: [Performance](./docs/performance.md#measured-results).
 
 ## Project links
 

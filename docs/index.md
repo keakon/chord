@@ -1,6 +1,6 @@
 # Chord Docs
 
-**A faster, cheaper, lighter terminal coding agent.** Chord keeps long sessions responsive: automatic fallback when a key or model fails, request trimming plus compaction to control cost, and a small memory footprint.
+**A faster, cheaper, lighter terminal coding agent.**
 
 New to Chord? Start with the [Quickstart](./quickstart.md), pick a channel in [Choosing models](./model-choice.md) if you have not already, copy a provider from [Model configuration recipes](./model-configs.md), then set approval rules in [Permissions & Safety](./permissions-and-safety.md). Already using it? Find the relevant guide below.
 

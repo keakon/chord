@@ -1,6 +1,6 @@
 # Chord 文档
 
-**更快、更省、更轻的终端 Coding Agent。** Chord 为长会话设计：key 或模型失败时自动切换，用请求级剪裁加压缩控制成本，内存占用保持低位。
+**更快、更省、更轻的终端 Coding Agent。**
 
 第一次使用时，建议按这个顺序走：先看[快速开始](./quickstart_CN.md)跑通第一个任务，还没选定渠道时先看[按工作选模型](./model-choice_CN.md)，再从[模型配置速查](./model-configs_CN.md)复制服务商配置，最后在[权限与安全](./permissions-and-safety_CN.md)定好审批规则；已经在用时，按下面的目标找答案。
 
