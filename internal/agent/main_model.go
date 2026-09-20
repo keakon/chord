@@ -163,6 +163,124 @@ func (a *MainAgent) RunningModelRef() string {
 	return a.runningModelRef
 }
 
+// applyRunningModelRef makes ref the sidebar's single effective running model for
+// the MainAgent: the identity, the matching context budgets, and the
+// RunningModelChanged event are applied for the same ref, so the displayed model
+// name can never settle on another model's window and limits. Budgets are set
+// before the identity write (the same order swapLLMClientWithRef uses: llmMu is
+// never held across ctxMgr), so concurrent readers may observe a transient
+// window; the identity itself is always the last write for its own ref.
+// It is applied when a switch is confirmed (the target emitted its first
+// visible token, key_confirmed, or the request succeeded), when a request ends
+// without a confirmed switch (the realign back to the cursor head), and at a
+// fallback downshift boundary: the compaction line must already track the
+// narrower window the request is admitted against, so the boundary commits
+// before the fallback confirms and an unconfirmed round returns to the cursor
+// head through this same entry.
+// contextLimit/inputLimit may be 0 to resolve them from the snapshot client for
+// ref.
+func (a *MainAgent) applyRunningModelRef(llmClient *llm.Client, ref string, contextLimit, inputLimit int) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return
+	}
+	if a.ctxMgr != nil {
+		if llmClient != nil {
+			if contextLimit <= 0 {
+				contextLimit = llmClient.ContextLimitForModelRef(ref)
+			}
+			if inputLimit <= 0 {
+				inputLimit = llmClient.InputLimitForModelRef(ref)
+			}
+		}
+		if contextLimit > 0 {
+			a.ctxMgr.SetTokenBudgets(contextLimit, inputLimit, a.effectiveCompactionReservedInput())
+		}
+	}
+	a.llmMu.Lock()
+	prev := a.runningModelRef
+	a.runningModelRef = ref
+	provRef := a.providerModelRef
+	a.llmMu.Unlock()
+	if ref == prev {
+		return
+	}
+	a.emitToTUI(RunningModelChangedEvent{
+		AgentID:          identity.MainAgentID,
+		ProviderModelRef: provRef,
+		RunningModelRef:  ref,
+	})
+}
+
+// applyRunningModelRefIfCurrent applies ref only while llmClient is still the
+// installed client. A concurrent model switch installs a new client and moves
+// the running ref with it; identity applications from a superseded request's
+// captured client — its key_confirmed, its successful response, or its
+// failed-round realign — must not overwrite that identity. A nil capture
+// carries no client identity: nothing can prove it superseded, so it applies
+// unconditionally through applyRunningModelRef. The currency check and the
+// identity write share one critical section so a concurrent switch installing
+// a new client cannot slip between them; limits are resolved from the captured
+// client beforehand (the pointer is stable, and a superseded capture is
+// discarded by the check). Budgets follow the existing swap ordering (identity
+// under llmMu, budgets on ctxMgr afterwards), so readers may observe a
+// transient window — the same trade-off swapLLMClientWithRef makes to avoid
+// holding llmMu across ctxMgr.
+func (a *MainAgent) applyRunningModelRefIfCurrent(llmClient *llm.Client, ref string, contextLimit, inputLimit int) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return
+	}
+	if llmClient != nil {
+		if contextLimit <= 0 {
+			contextLimit = llmClient.ContextLimitForModelRef(ref)
+		}
+		if inputLimit <= 0 {
+			inputLimit = llmClient.InputLimitForModelRef(ref)
+		}
+		a.llmMu.Lock()
+		if a.llmClient != llmClient {
+			a.llmMu.Unlock()
+			return
+		}
+		prev := a.runningModelRef
+		a.runningModelRef = ref
+		provRef := a.providerModelRef
+		a.llmMu.Unlock()
+		if a.ctxMgr != nil && contextLimit > 0 {
+			a.ctxMgr.SetTokenBudgets(contextLimit, inputLimit, a.effectiveCompactionReservedInput())
+		}
+		if ref == prev {
+			return
+		}
+		a.emitToTUI(RunningModelChangedEvent{
+			AgentID:          identity.MainAgentID,
+			ProviderModelRef: provRef,
+			RunningModelRef:  ref,
+		})
+		return
+	}
+	a.applyRunningModelRef(nil, ref, contextLimit, inputLimit)
+}
+
+// syncRunningModelRefToCursorHead realigns the sidebar with the sticky model
+// cursor after a request ended without a confirmed switch. The cursor head is the
+// model the next request will start from, so keeping a failed attempt's target
+// would show that model's name with the cursor model's keys, window, and limits.
+// The cursor is read from the captured client before locking; if a concurrent
+// switch supersedes it, the currency check under the same lock discards the
+// stale read instead of overwriting the new identity.
+func (a *MainAgent) syncRunningModelRefToCursorHead(llmClient *llm.Client) {
+	if llmClient == nil {
+		return
+	}
+	ref := strings.TrimSpace(llmClient.NextRequestModelRef())
+	if ref == "" {
+		return
+	}
+	a.applyRunningModelRefIfCurrent(llmClient, ref, 0, 0)
+}
+
 // FocusedModelState returns an atomic-by-target model view for the TUI. Values
 // for parked SubAgents come from durable state and current agent configuration;
 // callers do not need separate live/parked fallbacks.

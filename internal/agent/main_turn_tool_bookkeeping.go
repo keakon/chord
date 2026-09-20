@@ -440,6 +440,34 @@ func (t *Turn) appendPartialText(s string) {
 	t.partialText.WriteString(s)
 }
 
+// noteProducingModelRef records the model that confirmed visible output for the
+// current streaming round. It is deliberately separate from the sidebar
+// identity: an interrupted partial reply must stay attributed to the model that
+// actually wrote it, even after the sidebar realigns to the sticky cursor.
+func (t *Turn) noteProducingModelRef(ref string) {
+	if t == nil {
+		return
+	}
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return
+	}
+	t.partialTextMu.Lock()
+	defer t.partialTextMu.Unlock()
+	t.partialProducingRef = ref
+}
+
+// producingModelRef returns the confirmed producer of the accumulated partial
+// text, or "" when no attempt has emitted visible output yet.
+func (t *Turn) producingModelRef() string {
+	if t == nil {
+		return ""
+	}
+	t.partialTextMu.Lock()
+	defer t.partialTextMu.Unlock()
+	return strings.TrimSpace(t.partialProducingRef)
+}
+
 // peekPartialText returns the accumulated partial assistant text without
 // clearing it. Callers use it to decide how to recover from a failed request
 // before the recovery path drains the same text.
@@ -453,6 +481,7 @@ func (t *Turn) peekPartialText() string {
 }
 
 // drainPartialText returns and clears the accumulated partial assistant text.
+// The confirmed producer is dropped with it: the text it described is gone.
 func (t *Turn) drainPartialText() string {
 	if t == nil {
 		return ""
@@ -461,6 +490,7 @@ func (t *Turn) drainPartialText() string {
 	defer t.partialTextMu.Unlock()
 	s := t.partialText.String()
 	t.partialText.Reset()
+	t.partialProducingRef = ""
 	return s
 }
 

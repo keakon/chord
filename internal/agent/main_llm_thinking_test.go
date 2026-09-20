@@ -66,22 +66,42 @@ func TestCallLLMPromotesStreamingActivityOnToolUseStartWithoutStatusDelta(t *tes
 	}
 }
 
-func TestMainLLMStatusModelRefUpdatesRunningModelBeforeVisibleOutput(t *testing.T) {
+func TestMainLLMRunningModelMovesOnlyAfterVisibleOutput(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.SetProviderModelRef("sample/gpt-5.5@xhigh")
 
 	state := &mainLLMStreamState{}
 	reducer := a.newMainLLMStreamReducer(nil, "sample/gpt-5.5@xhigh", "sample/gpt-5.5@xhigh", nil, false, state, 0)
+	// A retry status carrying the target ref only announces the attempt: the
+	// sidebar must stay on the model that is still confirmed until the target
+	// emits visible output.
 	reducer.Handle(message.StreamDelta{
 		Type: "status",
 		Status: &message.StatusDelta{
-			Type:     "waiting_headers",
+			Type:     "retrying",
+			ModelRef: "codex/gpt-5.5@xhigh",
+		},
+	})
+
+	if got := a.RunningModelRef(); got != "sample/gpt-5.5@xhigh" {
+		t.Fatalf("RunningModelRef before visible output = %q, want the confirmed sample/gpt-5.5@xhigh", got)
+	}
+	for _, evt := range drainAgentEvents(a.Events()) {
+		if changed, ok := evt.(RunningModelChangedEvent); ok {
+			t.Fatalf("unexpected RunningModelChangedEvent before visible output: %+v", changed)
+		}
+	}
+
+	// The first visible token on the target confirms the switch.
+	reducer.Handle(message.StreamDelta{
+		Type: "key_confirmed",
+		Status: &message.StatusDelta{
 			ModelRef: "codex/gpt-5.5@xhigh",
 		},
 	})
 
 	if got := a.RunningModelRef(); got != "codex/gpt-5.5@xhigh" {
-		t.Fatalf("RunningModelRef = %q, want codex/gpt-5.5@xhigh", got)
+		t.Fatalf("RunningModelRef after key_confirmed = %q, want codex/gpt-5.5@xhigh", got)
 	}
 	events := drainAgentEvents(a.Events())
 	var saw bool
@@ -96,7 +116,7 @@ func TestMainLLMStatusModelRefUpdatesRunningModelBeforeVisibleOutput(t *testing.
 		}
 	}
 	if !saw {
-		t.Fatalf("missing RunningModelChangedEvent for codex retry; events=%#v", events)
+		t.Fatalf("missing RunningModelChangedEvent for confirmed codex switch; events=%#v", events)
 	}
 }
 

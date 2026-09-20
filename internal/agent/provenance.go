@@ -9,6 +9,9 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
+// provenanceSourceID identifies Chord-produced messages in stored provenance.
+const provenanceSourceID = "chord"
+
 func mainAssistantProvenance(a *MainAgent) *message.MessageProvenance {
 	if a == nil {
 		return nil
@@ -27,7 +30,57 @@ func mainAssistantProvenance(a *MainAgent) *message.MessageProvenance {
 	if selectedRef == "" {
 		selectedRef = strings.TrimSpace(client.PrimaryModelRef())
 	}
-	return provenanceFromClient("chord", client, selectedRef, runningRef)
+	return provenanceFromClient(provenanceSourceID, client, selectedRef, runningRef)
+}
+
+// mainAssistantProvenanceForRunningRef builds provenance for a message produced
+// by runningRef, which may differ from the sidebar's current identity after a
+// request realigned it to the sticky cursor.
+func mainAssistantProvenanceForRunningRef(a *MainAgent, runningRef string) *message.MessageProvenance {
+	if a == nil {
+		return nil
+	}
+	runningRef = strings.TrimSpace(runningRef)
+	if runningRef == "" {
+		return mainAssistantProvenance(a)
+	}
+	a.llmMu.RLock()
+	client := a.llmClient
+	selectedRef := strings.TrimSpace(a.providerModelRef)
+	a.llmMu.RUnlock()
+	return provenanceForRunningRef(client, selectedRef, runningRef)
+}
+
+// subAssistantProvenanceForRunningRef is the SubAgent form: an interrupted
+// partial reply keeps the worker model that actually wrote it.
+func subAssistantProvenanceForRunningRef(s *SubAgent, runningRef string) *message.MessageProvenance {
+	if s == nil {
+		return nil
+	}
+	runningRef = strings.TrimSpace(runningRef)
+	if runningRef == "" {
+		return subAssistantProvenance(s)
+	}
+	client, _ := s.llmSnapshot()
+	selectedRef := ""
+	if client != nil {
+		selectedRef = strings.TrimSpace(client.PrimaryModelRef())
+	}
+	return provenanceForRunningRef(client, selectedRef, runningRef)
+}
+
+// provenanceForRunningRef resolves the wire and native families for a message
+// produced by runningRef. An empty selectedRef falls back to the client's
+// primary ref, mirroring provenanceFromModelRefs.
+func provenanceForRunningRef(client *llm.Client, selectedRef, runningRef string) *message.MessageProvenance {
+	runningRef = strings.TrimSpace(runningRef)
+	if client == nil {
+		return provenanceFromModelRefs(provenanceSourceID, selectedRef, runningRef)
+	}
+	if strings.TrimSpace(selectedRef) == "" {
+		selectedRef = strings.TrimSpace(client.PrimaryModelRef())
+	}
+	return provenanceFromClient(provenanceSourceID, client, selectedRef, runningRef)
 }
 
 func subAssistantProvenance(s *SubAgent) *message.MessageProvenance {
@@ -43,7 +96,7 @@ func subAssistantProvenance(s *SubAgent) *message.MessageProvenance {
 	if runningRef == "" {
 		runningRef = selectedRef
 	}
-	return provenanceFromClient("chord", client, selectedRef, runningRef)
+	return provenanceFromClient(provenanceSourceID, client, selectedRef, runningRef)
 }
 
 // toolProvenanceFromContext is the Snapshot-free form of

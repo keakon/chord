@@ -53,6 +53,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Switching models while a request is still running now takes effect only when the next request starts: the running model and its tools stay in place while the response's tool calls execute, so a call such as `apply_patch` still runs instead of being rejected as unsupported by the newly selected model.
 - Editing away a session's first user message no longer leaves the session list advertising the removed prompt: the preview and the recorded original request are cleared together with it.
 - A mid-session prompt can no longer become a compacted session's original request: session lists and previews keep showing the prompt the session started with, and later compactions keep carrying that same prompt forward.
+- The sidebar no longer mixes two models' data. A fallback attempt is not a switch: the model name changes only once that model actually emits output, so a fallback that is still waiting for its first token keeps the previous model's name, key list, rate-limit snapshot, and context window together. Aborting at that point leaves the sidebar on the model the next request will start from instead of pairing the fallback's name with the previously selected model's keys and window.
 
 ## 0.8.1 - 2026-09-16
 

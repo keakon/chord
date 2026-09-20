@@ -61,7 +61,7 @@ func TestCurrentRateLimitSnapshotPrefersPolledSnapshotAfterInlineClear(t *testin
 		t.Fatalf("CurrentRateLimitSnapshot() = %#v, want inline %#v", got, inline)
 	}
 	prov.ClearInlineDisplayRateLimitSnapshot()
-	a.clearCurrentRateLimitSnapshot()
+	a.clearCurrentRateLimitSnapshot("")
 	if got := a.CurrentRateLimitSnapshot(); got != polled {
 		t.Fatalf("after clear CurrentRateLimitSnapshot() = %#v, want polled %#v", got, polled)
 	}

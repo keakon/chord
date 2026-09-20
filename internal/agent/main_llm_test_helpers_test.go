@@ -69,7 +69,13 @@ func (p *blockingStreamProvider) CompleteStream(
 	}
 	if next.holdAfterStreams && p.streamedCh != nil {
 		close(p.streamedCh)
-		<-p.releaseCh
+		select {
+		case <-p.releaseCh:
+		case <-ctx.Done():
+			// A held attempt must not outlive its request: the real transport
+			// also returns as soon as the caller's context is cancelled.
+			return nil, ctx.Err()
+		}
 	}
 	if next.err != nil {
 		return nil, next.err

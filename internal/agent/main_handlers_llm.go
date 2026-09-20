@@ -936,6 +936,10 @@ func (a *MainAgent) savePartialAssistantMsgForTurn(turn *Turn) bool {
 	if turn == nil {
 		return false
 	}
+	// The sidebar identity realigns to the sticky cursor when a request ends, so
+	// it cannot name the producer of a partial reply; the turn's confirmed
+	// producer can, and it must be read before draining drops it.
+	producingRef := turn.producingModelRef()
 	text := turn.drainPartialText()
 	reasoning := turn.drainPartialResponsesOutput()
 	if strings.TrimSpace(text) == "" {
@@ -946,7 +950,7 @@ func (a *MainAgent) savePartialAssistantMsgForTurn(turn *Turn) bool {
 		Content:         text,
 		StopReason:      "interrupted",
 		ResponsesOutput: interruptedAssistantResponsesOutput(reasoning, text),
-		Provenance:      mainAssistantProvenance(a),
+		Provenance:      mainAssistantProvenanceForRunningRef(a, producingRef),
 	}
 	a.ctxMgr.Append(msg)
 	if a.recoveryManager() != nil {

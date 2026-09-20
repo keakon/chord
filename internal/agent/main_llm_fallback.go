@@ -93,14 +93,8 @@ func (a *MainAgent) deferFallbackModelDownshift(payload *llmFallbackBoundaryPayl
 		return nil
 	}
 
-	a.llmMu.Lock()
-	a.runningModelRef = payload.fallbackModelRef
-	a.llmMu.Unlock()
-	a.ctxMgr.SetTokenBudgets(
-		payload.fallbackContextLimit,
-		payload.fallbackInputLimit,
-		a.effectiveCompactionReservedInput(),
-	)
+	client, _ := a.mainLLMAndRef()
+	a.applyRunningModelRef(client, payload.fallbackModelRef, payload.fallbackContextLimit, payload.fallbackInputLimit)
 	a.applyModelCompactionConfig()
 	// Crossing must be evaluated without modelDownshiftCrossing's "not already
 	// running" gate: when a compaction is already in flight (e.g. the

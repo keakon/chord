@@ -59,6 +59,13 @@ type Turn struct {
 	// callback runs on a separate goroutine from the event loop.
 	partialTextMu sync.Mutex
 	partialText   strings.Builder
+	// partialProducingRef records the provider/model ref confirmed to have
+	// produced visible output for the current streaming round (key_confirmed).
+	// It follows partialText's lifecycle and is deliberately independent of the
+	// sidebar identity, which realigns to the sticky cursor when a request ends
+	// without a confirmed switch: an interrupted partial reply keeps the model
+	// that actually wrote it.
+	partialProducingRef string
 	// partialResponsesOutput accumulates finalized reasoning items streamed
 	// during the current LLM round so they can be saved with the partial
 	// assistant message if the stream is interrupted before

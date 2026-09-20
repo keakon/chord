@@ -28,6 +28,10 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	s.markActivity()
 	s.llmSilenceRecoveries = 0
 
+	// The request that produced this result has ended. Realign the displayed
+	// worker identity with the sticky cursor before any recovery restart: an
+	// attempt that never emitted visible output must not keep defining it.
+	s.syncRunningModelRefToCursorHead()
 	if result.err != nil {
 		if s.recoverFromContextLength(result.err) {
 			return
@@ -556,6 +560,10 @@ func (s *SubAgent) preserveInterruptedPartial() {
 	if s == nil || s.turn == nil {
 		return
 	}
+	// The sidebar identity realigns to the sticky cursor when a request ends, so
+	// it cannot name the producer of a partial reply; the turn's confirmed
+	// producer can, and it must be read before draining drops it.
+	producingRef := s.turn.producingModelRef()
 	partial := strings.TrimSpace(s.turn.drainPartialText())
 	reasoning := s.turn.drainPartialResponsesOutput()
 	if partial == "" {
@@ -566,7 +574,7 @@ func (s *SubAgent) preserveInterruptedPartial() {
 		Content:         partial,
 		StopReason:      "interrupted",
 		ResponsesOutput: interruptedAssistantResponsesOutput(reasoning, partial),
-		Provenance:      subAssistantProvenance(s),
+		Provenance:      subAssistantProvenanceForRunningRef(s, producingRef),
 	}
 	s.ctxMgr.Append(msg)
 	s.persistMessageAsync(msg, "interrupted assistant message", nil)

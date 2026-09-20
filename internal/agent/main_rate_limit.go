@@ -108,18 +108,36 @@ func (a *MainAgent) providerUsesCodexRateLimit(providerName string) bool {
 	return strings.EqualFold(strings.TrimSpace(prov.Preset), config.ProviderPresetCodex)
 }
 
-func (a *MainAgent) clearInlineRateLimitSnapshotForCurrentMainClient() {
+// clearInlineRateLimitSnapshotForCurrentMainClient drops the inline rate-limit
+// snapshot of the provider that rotated its key. ref is the attempt target the
+// rotation came from; an empty or unresolvable ref falls back to the client's
+// primary provider, the only provider an unattributed rotation can come from.
+func (a *MainAgent) clearInlineRateLimitSnapshotForCurrentMainClient(ref string) {
 	client, _ := a.mainLLMAndRef()
 	if client == nil {
 		return
 	}
-	if prov := client.ProviderConfig(); prov != nil {
+	prov := client.ProviderForModelRef(ref)
+	if prov == nil {
+		prov = client.ProviderConfig()
+	}
+	if prov != nil {
 		prov.ClearInlineDisplayRateLimitSnapshot()
 	}
 }
 
-func (a *MainAgent) clearCurrentRateLimitSnapshot() {
-	providerName := a.currentRateLimitProviderName()
+// clearCurrentRateLimitSnapshot drops the cached/key-polled rate-limit snapshot
+// of the provider that rotated its key. ref is the attempt target the rotation
+// came from, so a rotation inside an unconfirmed fallback clears that
+// provider's snapshot instead of the sidebar model's.
+func (a *MainAgent) clearCurrentRateLimitSnapshot(ref string) {
+	providerName := ""
+	if ref = strings.TrimSpace(ref); strings.Contains(ref, "/") {
+		providerName = providerNameFromModelRef(ref)
+	}
+	if providerName == "" {
+		providerName = a.currentRateLimitProviderName()
+	}
 	if providerName == "" || !a.providerUsesCodexRateLimit(providerName) {
 		return
 	}

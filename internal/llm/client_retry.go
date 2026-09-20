@@ -743,7 +743,10 @@ func (c *Client) completeStreamTarget(
 		}
 		if keySwitched {
 			if cb != nil {
-				cb(message.StreamDelta{Type: message.StreamDeltaKeySwitched})
+				// Carry the attempt target: the rotation invalidates that
+				// provider's key-scoped snapshots, not the provider the sidebar
+				// still shows while this attempt has not produced output yet.
+				cb(message.StreamDelta{Type: message.StreamDeltaKeySwitched, ModelRef: t.displayRef()})
 			}
 			t.provider.WakeCodexRateLimitPolling()
 		}

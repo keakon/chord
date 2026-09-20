@@ -1050,7 +1050,11 @@ func (s *SubAgent) newSubLLMStreamReducer(turn *Turn, promoteStreamingActivity f
 		state = &subLLMStreamState{}
 	}
 	streamReducer := &llmStreamReducer{}
-	updateRunningModelRef := func(status *message.StatusDelta) {
+	// An attempt is not a switch: the worker's displayed identity moves only once
+	// the target emits visible output (key_confirmed) or the request succeeds, and
+	// syncRunningModelRefToCursorHead realigns it when the request ends without a
+	// confirmed switch.
+	noteConfirmedRunningModelRef := func(status *message.StatusDelta) {
 		if status == nil {
 			return
 		}
@@ -1062,6 +1066,7 @@ func (s *SubAgent) newSubLLMStreamReducer(turn *Turn, promoteStreamingActivity f
 		if client == nil {
 			return
 		}
+		turn.noteProducingModelRef(runningRef)
 		prev := strings.TrimSpace(client.RunningModelRef())
 		client.NoteRunningModelRef(runningRef)
 		if runningRef == prev {
@@ -1130,8 +1135,7 @@ func (s *SubAgent) newSubLLMStreamReducer(turn *Turn, promoteStreamingActivity f
 			s.parent.emitToTUI(RequestProgressEvent{AgentID: s.instanceID, Bytes: state.requestProgressBytes, Events: state.requestProgressEvents})
 		}
 	}
-	streamReducer.beforeStatus = updateRunningModelRef
-	streamReducer.onKeyConfirmed = updateRunningModelRef
+	streamReducer.onKeyConfirmed = noteConfirmedRunningModelRef
 	streamReducer.onRetryError = func(err error, provider, model, maskedKey, accountID, email string) {
 		s.parent.emitToTUI(ErrorEvent{
 			Err:       err,
@@ -1148,6 +1152,33 @@ func (s *SubAgent) newSubLLMStreamReducer(turn *Turn, promoteStreamingActivity f
 		log.Warnf("SubAgent LLM stream error delta text=%v agent=%v", text, s.instanceID)
 	}
 	return streamReducer
+}
+
+// syncRunningModelRefToCursorHead realigns the SubAgent's displayed identity with
+// the sticky model cursor after a request ends without a confirmed switch: the
+// cursor head is the model the next request will start from, so keeping a failed
+// attempt's target would show that model's name with the cursor model's keys and
+// window. Unlike the MainAgent form it takes no captured client: it snapshots the
+// installed client at call time, so a concurrent switch's cursor is read from the
+// new client and a superseded client cannot overwrite the switched identity.
+func (s *SubAgent) syncRunningModelRefToCursorHead() {
+	if s == nil {
+		return
+	}
+	client, _ := s.llmSnapshot()
+	if client == nil {
+		return
+	}
+	ref := strings.TrimSpace(client.NextRequestModelRef())
+	if ref == "" {
+		return
+	}
+	prev := strings.TrimSpace(client.RunningModelRef())
+	client.NoteRunningModelRef(ref)
+	if ref == prev {
+		return
+	}
+	s.parent.emitToTUI(RunningModelChangedEvent{AgentID: s.instanceID, ProviderModelRef: client.PrimaryModelRef(), RunningModelRef: ref})
 }
 
 // ---------------------------------------------------------------------------

@@ -443,6 +443,10 @@ type StreamDelta struct {
 	// effective model that produced the first visible token for the current
 	// streaming attempt (used for confirming fallback/key-switch UI toasts).
 	//
+	// key_switched may carry ModelRef to identify the attempt target whose key
+	// rotated, so provider-scoped snapshots are invalidated for that provider
+	// instead of whichever model the sidebar currently shows.
+	//
 	// reasoning_item carries a finalized reasoning output item (with its
 	// encrypted_content) so an interrupted turn can persist the reasoning
 	// alongside its partial message and replay it as the message's required
@@ -454,6 +458,7 @@ type StreamDelta struct {
 	RateLimit     *ratelimit.KeyRateLimitSnapshot // for Type="rate_limits"
 	Rollback      *RollbackDelta                  // for Type="rollback"
 	ReasoningItem *ResponsesOutputItem            // for Type="reasoning_item"
+	ModelRef      string                          // for Type="key_switched": the attempt target whose key rotated (provider/model[@variant])
 	AccountID     string                          // for Type="key_deactivated"/"key_invalidated"/"key_expired"/"retry_error": the OAuth account ID
 	Email         string                          // for Type="key_deactivated"/"key_invalidated"/"key_expired"/"retry_error": the OAuth account email, if available
 	Err           error                           // for Type="retry_error": the error from a failed retry attempt

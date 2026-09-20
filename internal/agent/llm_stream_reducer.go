@@ -233,7 +233,7 @@ type llmStreamReducer struct {
 	onProgress       func(*message.StreamProgressDelta)
 	beforeStatus     func(*message.StatusDelta)
 	onRateLimits     func(message.StreamDelta)
-	onKeySwitched    func()
+	onKeySwitched    func(ref string)
 	onKeyDeactivated func(email, accountID string)
 	onKeyInvalidated func(email, accountID string)
 	onKeyExpired     func(email, accountID string)
@@ -283,7 +283,7 @@ func (r *llmStreamReducer) Handle(delta message.StreamDelta) {
 		}
 	case message.StreamDeltaKeySwitched:
 		if r.onKeySwitched != nil {
-			r.onKeySwitched()
+			r.onKeySwitched(delta.ModelRef)
 		}
 	case message.StreamDeltaKeyDeactivated:
 		if r.onKeyDeactivated != nil {

@@ -350,25 +350,6 @@ func (a *MainAgent) newMainLLMStreamReducer(llmClient *llm.Client, selectedRef, 
 		a.emitActivity("main", ActivityStreaming, "")
 	}
 
-	updateRunningModelRef := func(confirmedRef string) {
-		confirmedRef = strings.TrimSpace(confirmedRef)
-		if confirmedRef == "" {
-			return
-		}
-		a.llmMu.Lock()
-		prev := a.runningModelRef
-		a.runningModelRef = confirmedRef
-		provRef := a.providerModelRef
-		a.llmMu.Unlock()
-		if confirmedRef != prev {
-			a.emitToTUI(RunningModelChangedEvent{
-				AgentID:          identity.MainAgentID,
-				ProviderModelRef: provRef,
-				RunningModelRef:  confirmedRef,
-			})
-		}
-	}
-
 	emitConfirmedSwitchToast := func(confirmedRef string) {
 		confirmedRef = strings.TrimSpace(confirmedRef)
 		// A fallback attempt announces its target and reason when the retry loop
@@ -450,42 +431,38 @@ func (a *MainAgent) newMainLLMStreamReducer(llmClient *llm.Client, selectedRef, 
 		}
 	}
 	streamReducer.beforeStatus = func(status *message.StatusDelta) {
-		// Any status carrying ModelRef means the retry loop is actively attempting
-		// that target. Reflect it immediately so sidebar errors/toasts and MODEL
-		// stay aligned even before the target emits visible output.
-		if status.ModelRef != "" {
-			if llmClient != nil {
-				if lim := llmClient.ContextLimitForModelRef(status.ModelRef); lim > 0 {
-					a.ctxMgr.SetTokenBudgets(lim, llmClient.InputLimitForModelRef(status.ModelRef), a.effectiveCompactionReservedInput())
-				}
-			}
-			updateRunningModelRef(status.ModelRef)
-			// Only treat as fallback if the model name differs from selected.
-			// Same model name with different provider is effectively a key switch.
-			if status.Type == message.StatusDeltaRetrying && modelNameFromRef(status.ModelRef) != modelNameFromRef(selectedRef) {
-				// Announce the attempt as soon as the retry loop leaves the
-				// selected model: key_confirmed only arrives after the fallback
-				// target emits its first visible token, which can be tens of
-				// seconds later, and the user needs the reason while waiting.
-				if status.ModelRef != state.announcedFallbackRef {
-					state.announcedFallbackRef = status.ModelRef
-					a.emitToTUI(ToastEvent{
-						Message:  fallbackAttemptToastMessage(status.Reason, status.ModelRef),
-						Level:    "warn",
-						Category: toastCategoryFallback,
-					})
-				}
-			}
+		// A ModelRef on a status means the retry loop is attempting that target,
+		// but an attempt is not a switch: the sidebar keeps the previous identity
+		// until the target emits visible output (key_confirmed) or the request
+		// succeeds. Only the attempt notice is emitted here, because key_confirmed
+		// arrives tens of seconds later on a slow fallback and the user needs the
+		// reason while waiting.
+		if status.ModelRef == "" || status.Type != message.StatusDeltaRetrying {
+			return
 		}
+		// Only treat as fallback if the model name differs from selected.
+		// Same model name with different provider is effectively a key switch.
+		if modelNameFromRef(status.ModelRef) == modelNameFromRef(selectedRef) {
+			return
+		}
+		if status.ModelRef == state.announcedFallbackRef {
+			return
+		}
+		state.announcedFallbackRef = status.ModelRef
+		a.emitToTUI(ToastEvent{
+			Message:  fallbackAttemptToastMessage(status.Reason, status.ModelRef),
+			Level:    "warn",
+			Category: toastCategoryFallback,
+		})
 	}
 	streamReducer.onRateLimits = func(delta message.StreamDelta) {
 		if delta.RateLimit != nil {
 			a.updateRateLimitSnapshot(delta.RateLimit)
 		}
 	}
-	streamReducer.onKeySwitched = func() {
-		a.clearInlineRateLimitSnapshotForCurrentMainClient()
-		a.clearCurrentRateLimitSnapshot()
+	streamReducer.onKeySwitched = func(ref string) {
+		a.clearInlineRateLimitSnapshotForCurrentMainClient(ref)
+		a.clearCurrentRateLimitSnapshot(ref)
 		a.noteContextSurfaceIdentityChanged()
 		state.pendingKeySwitch = true
 		a.emitToTUI(KeyPoolChangedEvent{})
@@ -509,8 +486,13 @@ func (a *MainAgent) newMainLLMStreamReducer(llmClient *llm.Client, selectedRef, 
 		if status != nil {
 			confirmedRef = status.ModelRef
 		}
-		// Ensure the sidebar reflects the model that actually produced the first visible token.
-		updateRunningModelRef(confirmedRef)
+		// The confirmed ref is also the producer to credit if this round is
+		// interrupted before it completes: the sidebar may realign to the sticky
+		// cursor, but the partial reply came from this model.
+		turn.noteProducingModelRef(confirmedRef)
+		// Ensure the sidebar reflects the model that actually produced the first
+		// visible token, together with that model's context budgets.
+		a.applyRunningModelRefIfCurrent(llmClient, confirmedRef, 0, 0)
 		// Confirmed toasts must be keyed off the model that actually emitted output.
 		emitConfirmedSwitchToast(confirmedRef)
 	}
@@ -761,6 +743,23 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Me
 	streamReducer.Finish()
 	a.emitToTUI(RequestProgressEvent{AgentID: identity.MainAgentID, Bytes: streamState.requestProgressBytes, Events: streamState.requestProgressEvents, Done: true})
 	if err != nil {
+		// The next request starts from the sticky cursor head, so a request that
+		// ends without a confirmed switch must return the sidebar to it: leaving
+		// a failed attempt's target in place would show one model's name with
+		// another model's keys, window, and limits. A suspension that resumes this
+		// same turn keeps its target — the fallback downshift commits it at the
+		// boundary, and the oversize path re-applies budgets for the continuation.
+		// Both gate flags are read once: the classification here and the oversize
+		// branch below must not disagree when a compaction starts or finishes
+		// between the two reads.
+		compactionRunning := a.IsCompactionRunning()
+		autoCompactEnabled := a.ctxMgr.IsAutoCompactEnabled()
+		oversize := llm.IsAllAttemptedCandidatesContextLengthExceeded(err)
+		resumesPendingCompaction := isFallbackModelDownshiftCompactionPending(err) ||
+			(oversize && (compactionRunning || autoCompactEnabled))
+		if !resumesPendingCompaction {
+			a.syncRunningModelRefToCursorHead(llmClient)
+		}
 		// Skip fallback exhausted toast for context cancellation (user CancelCurrentTurn).
 		// All cancel-path errors use %w wrapping around ctx.Err(), so errors.Is
 		// reliably detects user-initiated cancellation regardless of retry state.
@@ -770,8 +769,8 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Me
 		callStatus := llmClient.LastCallStatus()
 		// If the context is oversized, suspend behind an in-flight compaction or
 		// proactively start oversize-driven compaction when auto compact is enabled.
-		if llm.IsAllAttemptedCandidatesContextLengthExceeded(err) {
-			if a.IsCompactionRunning() {
+		if oversize {
+			if compactionRunning {
 				log.Infof("LLM context length exceeded while compaction running; suspending LLM call error=%v", err)
 				return nil, &contextLengthExceededPendingCompactionError{
 					inner:            err,
@@ -779,7 +778,7 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Me
 					runningModelRef:  callStatus.RunningModelRef,
 				}
 			}
-			if a.ctxMgr.IsAutoCompactEnabled() {
+			if autoCompactEnabled {
 				log.Infof("LLM context length exceeded; requesting oversize-driven compaction on the event loop error=%v", err)
 				return nil, &contextLengthExceededPendingCompactionError{
 					inner:            err,
@@ -811,28 +810,13 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Me
 	if callStatus.RunningModelRef == "" {
 		callStatus.RunningModelRef = selectedRef
 	}
-	if callStatus.RunningContextLimit <= 0 {
-		callStatus.RunningContextLimit = llmClient.ContextLimitForModelRef(callStatus.RunningModelRef)
-	}
-	if callStatus.RunningInputLimit <= 0 {
-		callStatus.RunningInputLimit = llmClient.InputLimitForModelRef(callStatus.RunningModelRef)
-	}
-	if callStatus.RunningContextLimit > 0 {
-		a.ctxMgr.SetTokenBudgets(callStatus.RunningContextLimit, callStatus.RunningInputLimit, a.effectiveCompactionReservedInput())
-	}
 	a.llmMu.Lock()
 	a.previousLLMModelRef = prevRunningRef
-	a.runningModelRef = callStatus.RunningModelRef
 	a.llmMu.Unlock()
+	// The response proves the switch: apply the identity with the limits the
+	// client recorded for that same target.
+	a.applyRunningModelRefIfCurrent(llmClient, callStatus.RunningModelRef, callStatus.RunningContextLimit, callStatus.RunningInputLimit)
 	a.recordLLMModelRun(callStatus.RunningModelRef)
-
-	if callStatus.RunningModelRef != prevRunningRef {
-		a.emitToTUI(RunningModelChangedEvent{
-			AgentID:          identity.MainAgentID,
-			ProviderModelRef: selectedRef,
-			RunningModelRef:  callStatus.RunningModelRef,
-		})
-	}
 
 	if callStatus.FallbackTriggered && callStatus.RunningModelRef != "" &&
 		callStatus.RunningModelRef != selectedRef && callStatus.RunningModelRef != prevRunningRef {
