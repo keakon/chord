@@ -44,6 +44,7 @@ func TestIsApplyPatchModel(t *testing.T) {
 		{"gpt-6", true},
 		{"gpt-6.1", true},
 		{"gpt-6-mini", true},
+		{"gpt-6-astra", true},
 		{"gpt-7", true},
 		{"gpt-50", true},
 		{"gpt-5x", false},

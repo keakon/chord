@@ -112,9 +112,9 @@ func shouldEmitFreeformApplyPatch(provider *ProviderConfig, modelID string) bool
 // IsApplyPatchModel reports whether the model defaults to the complete
 // apply_patch tool-surface semantics (apply_patch instead of edit, with
 // write/delete hidden). Every gpt major family from gpt-5 onward — bare
-// gpt-5, gpt-5-mini, gpt-5-codex, every dotted gpt-5.x name, and future
-// families such as gpt-6 — carries the patch training signal: apply_patch is
-// the first-party Codex editing tool and stays in OpenAI training data across
+// gpt-5, gpt-5-mini, gpt-5-codex, every dotted gpt-5.x name, and later
+// families such as gpt-6-astra — carries the patch training signal: apply_patch
+// is the first-party Codex editing tool and stays in OpenAI training data across
 // generations, mirroring the Codex model catalog whose gpt-5 entries all mark
 // apply_patch_tool_type: freeform. codex-auto-review is the explicit review
 // alias. Other *-codex names (daybreak-codex, foo-codex-bar, ...) are not gpt-5

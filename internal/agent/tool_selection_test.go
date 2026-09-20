@@ -44,6 +44,7 @@ func TestFilterEditToolsByModel_GPTModels(t *testing.T) {
 		{"gpt-5-codex", true, false},
 		{"gpt-6", true, false},
 		{"gpt-6.1", true, false},
+		{"gpt-6-astra", true, false},
 		{"gpt-50", true, false},
 		{"gpt-5x", false, true},
 
