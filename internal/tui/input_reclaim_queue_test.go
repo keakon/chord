@@ -688,6 +688,161 @@ func TestPendingDraftConsumedEventAppendsTranscriptWhenActuallyConsumed(t *testi
 	}
 }
 
+func TestPendingDraftConsumedEventAdoptsCardMaterializedByCompactionRebuild(t *testing.T) {
+	backend := &sessionControlAgent{}
+	m := NewModelWithSize(backend, 80, 24)
+	queuedAt := time.Now()
+	m.queuedDrafts = []queuedDraft{{ID: "draft-7", Content: "queued during compaction", Mirrored: true, QueuedAt: queuedAt, LoopAnchor: true}}
+	m.queueSyncEnabled = true
+
+	// A compaction rewrite restores the transcript while the queued draft is
+	// still in flight: the rebuilt transcript already materializes the durable
+	// user message before its consumption event arrives.
+	backend.messages = []message.Message{
+		{Role: "assistant", Content: "prior reply"},
+		{Role: "user", Content: "queued during compaction"},
+	}
+	m.preserveComposerStateOnNextRebuild = true
+	m.Update(sessionRestoredRebuildMsg{reason: "session_restored"})
+
+	var rebuilt *Block
+	for _, block := range m.viewport.visibleBlocks() {
+		if block.Type == BlockUser {
+			rebuilt = block
+		}
+	}
+	if rebuilt == nil {
+		t.Fatal("rebuild did not materialize the durable user card")
+	}
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.PendingDraftConsumedEvent{
+		DraftID: "draft-7",
+		Parts:   []message.ContentPart{{Type: "text", Text: "queued during compaction"}},
+	}})
+
+	var users []*Block
+	for _, block := range m.viewport.visibleBlocks() {
+		if block.Type == BlockUser {
+			users = append(users, block)
+		}
+	}
+	if len(users) != 1 {
+		t.Fatalf("user blocks = %+v, want the rebuilt card adopted instead of duplicated", users)
+	}
+	if users[0] != rebuilt {
+		t.Fatalf("adopted card = %#v, want the rebuilt card", users[0])
+	}
+	if got := users[0].MsgIndex; got != 1 {
+		t.Fatalf("MsgIndex = %d, want durable index 1", got)
+	}
+	if got := len(m.queuedDrafts); got != 0 {
+		t.Fatalf("len(queuedDrafts) = %d, want 0", got)
+	}
+	if m.inflightDraft == nil || m.inflightDraft.ID != "draft-7" {
+		t.Fatalf("inflightDraft = %+v, want consumed draft draft-7", m.inflightDraft)
+	}
+	if !users[0].LoopAnchor {
+		t.Fatal("adopted card lost the live-only loop marker carried by the draft")
+	}
+	if !users[0].StartedAt.Equal(queuedAt) {
+		t.Fatalf("StartedAt = %v, want the queued draft time %v", users[0].StartedAt, queuedAt)
+	}
+}
+
+func TestPendingDraftConsumedEventAdoptsRebuiltCardWhenOnlyWhitespaceDiffers(t *testing.T) {
+	// The composer stores the raw display text in the draft, so a queued
+	// submission can carry surrounding whitespace that the durable message's
+	// normalized plain text does not. The durable index lookup must still match,
+	// or the rebuilt card gets duplicated.
+	backend := &sessionControlAgent{}
+	m := NewModelWithSize(backend, 80, 24)
+	m.queuedDrafts = []queuedDraft{{ID: "draft-9", Content: "queued during compaction ", Mirrored: true, QueuedAt: time.Now()}}
+	m.queueSyncEnabled = true
+	backend.messages = []message.Message{
+		{Role: "assistant", Content: "prior reply"},
+		{Role: "user", Content: "queued during compaction "},
+	}
+	m.preserveComposerStateOnNextRebuild = true
+	m.Update(sessionRestoredRebuildMsg{reason: "session_restored"})
+
+	var rebuilt *Block
+	for _, block := range m.viewport.visibleBlocks() {
+		if block.Type == BlockUser {
+			rebuilt = block
+		}
+	}
+	if rebuilt == nil {
+		t.Fatal("rebuild did not materialize the durable user card")
+	}
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.PendingDraftConsumedEvent{
+		DraftID: "draft-9",
+		Parts:   []message.ContentPart{{Type: "text", Text: "queued during compaction "}},
+	}})
+
+	var users []*Block
+	for _, block := range m.viewport.visibleBlocks() {
+		if block.Type == BlockUser {
+			users = append(users, block)
+		}
+	}
+	if len(users) != 1 || users[0] != rebuilt {
+		t.Fatalf("user blocks = %+v, want the rebuilt card adopted when only whitespace differs", users)
+	}
+}
+
+func TestPendingDraftConsumedEventBeforeRebuildKeepsSingleUserCard(t *testing.T) {
+	backend := &sessionControlAgent{}
+	m := NewModelWithSize(backend, 80, 24)
+	m.queuedDrafts = []queuedDraft{{ID: "draft-3", Content: "queued during compaction", Mirrored: true, QueuedAt: time.Now()}}
+	m.queueSyncEnabled = true
+	backend.messages = []message.Message{{Role: "user", Content: "queued during compaction"}}
+
+	// No rebuilt card exists yet, so the consumption event appends the live
+	// card. The later rebuild replaces the transcript from ctxMgr and must
+	// still leave a single card.
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.PendingDraftConsumedEvent{
+		DraftID: "draft-3",
+		Parts:   []message.ContentPart{{Type: "text", Text: "queued during compaction"}},
+	}})
+
+	m.preserveComposerStateOnNextRebuild = true
+	m.Update(sessionRestoredRebuildMsg{reason: "session_restored"})
+
+	if blocks := m.viewport.visibleBlocks(); len(blocks) != 1 || blocks[0].Type != BlockUser {
+		t.Fatalf("blocks = %+v, want single user card after rebuild", blocks)
+	}
+}
+
+func TestPendingDraftConsumedEventKeepsDistinctIdenticalUserCards(t *testing.T) {
+	backend := &sessionControlAgent{}
+	m := NewModelWithSize(backend, 80, 24)
+	backend.messages = []message.Message{
+		{Role: "user", Content: "same prompt"},
+		{Role: "user", Content: "same prompt"},
+	}
+	m.preserveComposerStateOnNextRebuild = true
+	m.Update(sessionRestoredRebuildMsg{reason: "session_restored"})
+
+	if blocks := m.viewport.visibleBlocks(); len(blocks) != 2 {
+		t.Fatalf("blocks after rebuild = %+v, want two durable user cards", blocks)
+	}
+
+	m.queuedDrafts = []queuedDraft{{ID: "draft-2", Content: "same prompt", Mirrored: true, QueuedAt: time.Now()}}
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.PendingDraftConsumedEvent{
+		DraftID: "draft-2",
+		Parts:   []message.ContentPart{{Type: "text", Text: "same prompt"}},
+	}})
+
+	blocks := m.viewport.visibleBlocks()
+	if len(blocks) != 2 {
+		t.Fatalf("blocks = %+v, want two cards: identical text at distinct durable indices must stay distinct", blocks)
+	}
+	if blocks[0].MsgIndex != 0 || blocks[1].MsgIndex != 1 {
+		t.Fatalf("MsgIndex = %d,%d, want 0,1", blocks[0].MsgIndex, blocks[1].MsgIndex)
+	}
+}
+
 func TestEditQueuedDraftRemovesPendingDraftAndLoadsComposer(t *testing.T) {
 	backend := &sessionControlAgent{}
 	m := NewModel(backend)
@@ -698,7 +853,6 @@ func TestEditQueuedDraftRemovesPendingDraftAndLoadsComposer(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("editQueuedDraftAt() = nil, want focus command")
 	}
-
 	if got := len(m.queuedDrafts); got != 0 {
 		t.Fatalf("len(queuedDrafts) = %d, want 0", got)
 	}

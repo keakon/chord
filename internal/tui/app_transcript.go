@@ -60,6 +60,15 @@ func (m *Model) syncVisibleMainUserBlockMsgIndexes() {
 	}
 }
 
+// userPromptMatchesContent reports whether a durable user message carries the
+// same user-visible text as content, ignoring surrounding whitespace. The
+// composer keeps the raw display text in the draft — trailing spaces and
+// pasted newlines included — while UserPromptPlainText normalizes the durable
+// message, so every draft-to-durable comparison must normalize both sides.
+func userPromptMatchesContent(msg message.Message, content string) bool {
+	return strings.TrimSpace(message.UserPromptPlainText(msg)) == strings.TrimSpace(content)
+}
+
 func mainUserBlockMsgIndexMatches(block *Block, msgs []message.Message) bool {
 	if block == nil || block.Type != BlockUser || block.IsUserLocalShell() {
 		return false
@@ -71,7 +80,31 @@ func mainUserBlockMsgIndexMatches(block *Block, msgs []message.Message) bool {
 	if !message.IsUserAuthored(msg) {
 		return false
 	}
-	return strings.TrimSpace(message.UserPromptPlainText(msg)) == strings.TrimSpace(block.Content)
+	return userPromptMatchesContent(msg, block.Content)
+}
+
+// mainUserBlockForMsgIndex returns the main-agent USER card already
+// materialized for msgs[msgIndex], or nil when the viewport holds none. A
+// transcript rebuild can draw a durable user message before the live
+// draft-consumption event for the same submission arrives — a compaction
+// rewrite restores the transcript while the queued draft is still in flight —
+// so the event adopts this card instead of appending a duplicate.
+func (m *Model) mainUserBlockForMsgIndex(msgs []message.Message, msgIndex int) *Block {
+	if m == nil || m.viewport == nil || msgIndex < 0 {
+		return nil
+	}
+	for _, block := range m.viewport.blocks {
+		if block == nil || block.MsgIndex != msgIndex {
+			continue
+		}
+		if block.AgentID != "" && block.AgentID != "main" {
+			continue
+		}
+		if mainUserBlockMsgIndexMatches(block, msgs) {
+			return block
+		}
+	}
+	return nil
 }
 
 func findMatchingMainUserMsgIndex(msgs []message.Message, block *Block, used map[int]struct{}) (int, bool) {
@@ -90,7 +123,7 @@ func findMatchingMainUserMsgIndex(msgs []message.Message, block *Block, used map
 		if !message.IsUserAuthored(msg) {
 			continue
 		}
-		if strings.TrimSpace(message.UserPromptPlainText(msg)) != target {
+		if !userPromptMatchesContent(msg, target) {
 			continue
 		}
 		return i, true

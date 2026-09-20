@@ -72,30 +72,45 @@ func (m *Model) handleTurnAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		} else {
 			m.finalizeAgentStreamForIdleEvent(evt.AgentID)
 		}
-		imageCount := 0
 		content := userBlockTextFromParts(draft.contentParts(), draft.Content)
-		_, imageCount = queuedDraftTextAndImageCount(draft)
-		fileRefs := draft.FileRefs
-		if fileRefs == nil {
-			fileRefs = fileRefsFromParts(evt.Parts)
-		}
 		msgIndex := -1
+		var msgs []message.Message
 		if (evt.AgentID == "" || evt.AgentID == "main") && m.agent != nil {
-			msgs := m.agent.GetMessages()
+			msgs = m.agent.GetMessages()
 			for i, msg := range slices.Backward(msgs) {
 
 				if !message.IsUserAuthored(msg) {
 					continue
 				}
-				if message.UserPromptPlainText(msg) == content {
+				if userPromptMatchesContent(msg, content) {
 					msgIndex = i
 					break
 				}
 			}
 		}
-		block := &Block{ID: m.nextBlockID, Type: BlockUser, Content: content, AgentID: evt.AgentID, LoopAnchor: draft.LoopAnchor, ImageCount: imageCount, ImageParts: imagePartsFromContentParts(draft.contentParts()), PDFNames: pdfNamesFromContentParts(draft.contentParts()), FileRefs: fileRefs, MsgIndex: msgIndex, StartedAt: draft.QueuedAt}
-		m.nextBlockID++
-		m.appendViewportBlock(block)
+		// A compaction rewrite can rebuild the transcript from ctxMgr — and so
+		// draw this durable message — before the queued draft's consumption
+		// event arrives. The card then already exists, so adopt it by its
+		// durable message index instead of appending a second card for the same
+		// message.
+		block := m.mainUserBlockForMsgIndex(msgs, msgIndex)
+		if block == nil {
+			_, imageCount := queuedDraftTextAndImageCount(draft)
+			fileRefs := draft.FileRefs
+			if fileRefs == nil {
+				fileRefs = fileRefsFromParts(evt.Parts)
+			}
+			block = &Block{ID: m.nextBlockID, Type: BlockUser, Content: content, AgentID: evt.AgentID, LoopAnchor: draft.LoopAnchor, ImageCount: imageCount, ImageParts: imagePartsFromContentParts(draft.contentParts()), PDFNames: pdfNamesFromContentParts(draft.contentParts()), FileRefs: fileRefs, MsgIndex: msgIndex, StartedAt: draft.QueuedAt}
+			m.nextBlockID++
+			m.appendViewportBlock(block)
+		} else {
+			// The rebuilt card carries the durable content; only the live-only
+			// loop marker and queue timestamp have no durable counterpart.
+			block.LoopAnchor = block.LoopAnchor || draft.LoopAnchor
+			if block.StartedAt.IsZero() {
+				block.StartedAt = draft.QueuedAt
+			}
+		}
 		m.markBlockSettled(block)
 		d := draft
 		if strings.TrimSpace(d.AgentID) == "" {

@@ -2104,11 +2104,16 @@ func TestPendingDraftConsumedEventSkipsSyntheticUserMessages(t *testing.T) {
 	if len(blocks) == 0 {
 		t.Fatal("expected visible blocks after PendingDraftConsumedEvent")
 	}
-	last := blocks[len(blocks)-1]
-	if last.Type != BlockUser || last.Content != "queued" {
-		t.Fatalf("last block = %#v, want consumed user block 'queued'", last)
+	var users []*Block
+	for _, block := range blocks {
+		if block.Type == BlockUser {
+			users = append(users, block)
+		}
 	}
-	if got := last.MsgIndex; got != 0 {
+	if len(users) != 1 {
+		t.Fatalf("user blocks = %d, want 1: the rebuilt card is adopted, not duplicated", len(users))
+	}
+	if got := users[0].MsgIndex; got != 0 {
 		t.Fatalf("MsgIndex = %d, want 0 for the user-authored message", got)
 	}
 }
