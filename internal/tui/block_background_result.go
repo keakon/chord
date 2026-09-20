@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mattn/go-runewidth"
+
 	"github.com/keakon/chord/internal/tools"
 	"github.com/keakon/chord/internal/tui/markdownutil"
 )
@@ -24,7 +26,6 @@ type parsedBackgroundResult struct {
 	residual    []string
 	output      []string
 	elapsed     string
-	quiet       string
 	duration    string
 }
 
@@ -72,9 +73,6 @@ func formatSingleBackgroundResult(raw, id, status, command, description string) 
 	glyph, statusLine := backgroundResultStatusLine(status)
 	if elapsed != "" {
 		statusLine += " · " + elapsedGlyph + " " + elapsed
-	}
-	if parsed.quiet != "" {
-		statusLine += " · quiet " + parsed.quiet
 	}
 	id = strings.TrimSpace(id)
 	description = strings.TrimSpace(description)
@@ -184,8 +182,12 @@ func parseBackgroundResult(raw string) parsedBackgroundResult {
 			parsed.elapsed = value
 			continue
 		}
-		if value, ok := cutBackgroundResultField(trimmed, "Quiet:"); ok {
-			parsed.quiet = value
+		// Quiet is parsed and dropped, not rendered. It measures how long a
+		// *running* job has been silent; this card only reports terminal
+		// states, where it is ~0 whenever the job printed to the end and
+		// says nothing the ✓/✗ glyph does not already say. job_list and the
+		// JOBS overlay keep showing it for jobs that are still running.
+		if _, ok := cutBackgroundResultField(trimmed, "Quiet:"); ok {
 			continue
 		}
 		if strings.EqualFold(trimmed, "Relevant output:") {
@@ -331,12 +333,15 @@ func (b *Block) isBackgroundResultCard() bool {
 func (b *Block) renderBackgroundResult(width int) []string {
 	metrics := newToolCardMetrics(width)
 	body := make([]string, 0, 8)
-	// A folded JOB RESULT card keeps each job's headline and its status line —
-	// the one-line state summary a collapsed tool card also shows — and drops
-	// the residual lines and relevant-output block that made the card tall.
+	// A JOB RESULT card drives every job from its headline: the glyph names the
+	// outcome, the row carries the measured duration the way a tool card header
+	// does, and only status text the glyph cannot spell out gets a row of its
+	// own. Folded, the residual lines and the relevant-output block stay hidden.
 	collapsed := b.Collapsed
 	expectStatus := false
 	skippingOutput := false
+	headlineIdx := -1
+	headlineTailIdx := -1
 	contentLines := strings.Split(strings.TrimSpace(sanitizeDisplayText(b.Content)), "\n")
 	for i := range len(contentLines) {
 		line := contentLines[i]
@@ -352,7 +357,26 @@ func (b *Block) renderBackgroundResult(width int) []string {
 			if len(body) > 0 && body[len(body)-1] != "" {
 				body = append(body, "")
 			}
-			wrapped := wrapText(trimmed, metrics.contentWidth)
+			headlineIdx = len(body)
+			// The status summary follows the headline, so its measured part is
+			// known before the headline is laid out. Every headline line spends
+			// backgroundResultHeadlineIndent columns before its text, and the
+			// tail is appended within the same content width, so the wrap has to
+			// leave both back. Folded, the row truncates around the tail;
+			// expanded, the headline re-wraps so the tail lands at the end of
+			// the last line instead of cutting text out of it.
+			wrapWidth := metrics.contentWidth
+			if elapsed := backgroundResultElapsedAfter(contentLines, i); elapsed != "" {
+				room := backgroundResultElapsedSuffixWidth(elapsed) + backgroundResultHeadlineIndent
+				if collapsed {
+					if budget := max(wrapWidth-room, 10); runewidth.StringWidth(trimmed) > budget {
+						trimmed = runewidth.Truncate(trimmed, budget, "…")
+					}
+				} else if lines := wrapText(trimmed, wrapWidth); runewidth.StringWidth(lines[len(lines)-1])+room > wrapWidth {
+					wrapWidth = max(wrapWidth-room, 10)
+				}
+			}
+			wrapped := wrapText(trimmed, wrapWidth)
 			for i, part := range wrapped {
 				prefix := "    "
 				if i == 0 {
@@ -361,6 +385,7 @@ func (b *Block) renderBackgroundResult(width int) []string {
 				}
 				body = append(body, prefix+part)
 			}
+			headlineTailIdx = len(body) - 1
 			expectStatus = true
 			continue
 		}
@@ -403,13 +428,30 @@ func (b *Block) renderBackgroundResult(width int) []string {
 			}
 			break
 		}
-		if collapsed && expectStatus {
-			if trimmed = foldedBackgroundResultStatusLine(trimmed); trimmed == "" {
-				expectStatus = false
+		if expectStatus {
+			// This summary row contributes two things and nothing else: the
+			// duration rides the headline (a tool card keeps its elapsed on
+			// the header whether the card is folded or open, so the time does
+			// not move when the fold changes), and whatever status text the
+			// ✓/✗ glyph cannot spell out keeps a row. A successful job's
+			// summary duplicates the glyph, so once the duration is lifted the
+			// row is empty and the card reads as headline plus output.
+			expectStatus = false
+			elapsed, detail := splitBackgroundResultStatusTail(backgroundResultStatusDetail(trimmed))
+			if elapsed != "" {
+				targetIdx := headlineIdx
+				if !collapsed {
+					targetIdx = headlineTailIdx
+				}
+				if targetIdx >= 0 {
+					body[targetIdx] = appendToolElapsedSuffix(body[targetIdx], elapsed, metrics.cardWidth-4)
+				}
+			}
+			if detail == "" {
 				continue
 			}
-		}
-		if collapsed && !expectStatus {
+			trimmed = detail
+		} else if collapsed {
 			continue
 		}
 		expectStatus = false
@@ -428,12 +470,13 @@ func (b *Block) renderBackgroundResult(width int) []string {
 	return renderPrewrappedToolCard(metrics.blockStyle, metrics.cardWidth, toolCardTitle(backgroundResultCardTitle, b.displayLabelID()), body, metrics.toolCardBg, railANSISeq("tool", b.Focused))
 }
 
-// foldedBackgroundResultStatusLine returns the status line a folded JOB RESULT
-// card shows for one job. A successful job's summary is already in the ✓
-// headline, so it is dropped; a duration it carried stays, and failure,
-// cancellation, or unknown statuses read as-is because the glyph alone does not
-// name them.
-func foldedBackgroundResultStatusLine(line string) string {
+// backgroundResultStatusDetail returns the status text a JOB RESULT card owes
+// one job. A successful job's summary already sits in the ✓ headline, so it is
+// dropped in either fold state — repeating it below the glyph says nothing the
+// card did not already say. A duration it carried rides the headline instead,
+// and failure, cancellation, or unknown statuses read as-is because the glyph
+// alone does not name them.
+func backgroundResultStatusDetail(line string) string {
 	trimmed := strings.TrimSpace(line)
 	if trimmed == backgroundResultSuccessStatus {
 		return ""
@@ -442,6 +485,56 @@ func foldedBackgroundResultStatusLine(line string) string {
 		return rest
 	}
 	return line
+}
+
+// splitBackgroundResultStatusTail splits a status line into the duration it
+// carries and the status text left once that duration is lifted away. The
+// formatter joins the parts with " · ", so each segment is classified on its
+// own and whatever survives is rejoined with the same separator. The quiet
+// segment no longer exists on this card: it belongs to the surfaces that watch
+// a running job, so a card that never carried it has nothing to strip.
+func splitBackgroundResultStatusTail(line string) (elapsed, detail string) {
+	var kept []string
+	for segment := range strings.SplitSeq(line, " · ") {
+		trimmed := strings.TrimSpace(segment)
+		if trimmed == "" {
+			continue
+		}
+		if value, ok := strings.CutPrefix(trimmed, elapsedGlyph+" "); ok {
+			elapsed = strings.TrimSpace(value)
+			continue
+		}
+		kept = append(kept, trimmed)
+	}
+	return elapsed, strings.Join(kept, " · ")
+}
+
+// backgroundResultElapsedAfter returns the duration a card lifts from the
+// status line that follows the headline at index i, or "" when no status line
+// follows it. Only the one summary line the formatter writes directly under a
+// headline qualifies: any other neighbour (another headline, the relevant-output
+// section) leaves the wrap budget untouched.
+func backgroundResultElapsedAfter(lines []string, headline int) string {
+	for i := headline + 1; i < len(lines); i++ {
+		trimmed := strings.TrimSpace(lines[i])
+		if trimmed == "" {
+			continue
+		}
+		if isBackgroundResultHeadline(trimmed) {
+			return ""
+		}
+		elapsed, _ := splitBackgroundResultStatusTail(backgroundResultStatusDetail(trimmed))
+		return elapsed
+	}
+	return ""
+}
+
+// backgroundResultElapsedSuffixWidth is the room the elapsed tail of a
+// headline needs. It measures the same text the renderer appends, so the wrap
+// reserves it instead of restating the format here and drifting from it, or
+// discovering the overflow after the headline is already wrapped.
+func backgroundResultElapsedSuffixWidth(elapsed string) int {
+	return runewidth.StringWidth(toolElapsedSuffixText(elapsed))
 }
 
 func backgroundResultHasCodeFence(content string) bool {
@@ -454,6 +547,14 @@ func backgroundResultHasCodeFence(content string) bool {
 	return false
 }
 
+// backgroundResultHeadlineIndent is the width every headline line spends before
+// its text: a two-space indent plus the two-cell disclosure marker on the first
+// line, or a four-space indent on continuation lines. The tail is appended to a
+// line that already carries it, so a wrap budget or a reservation that forgets
+// the indent loses exactly that much text to the truncation.
+const backgroundResultHeadlineIndent = 4
+
+// isBackgroundResultHeadline reports whether a line is a ✓/✗/• headline.
 func isBackgroundResultHeadline(line string) bool {
 	return strings.HasPrefix(line, "✓") || strings.HasPrefix(line, "✗") || strings.HasPrefix(line, "•")
 }

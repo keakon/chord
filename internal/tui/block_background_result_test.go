@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mattn/go-runewidth"
+
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -20,9 +22,6 @@ func TestParseBackgroundResultKeepsElapsedAndQuietOutOfResidual(t *testing.T) {
 	if parsed.elapsed != "1m35s" {
 		t.Fatalf("parsed.elapsed = %q, want 1m35s", parsed.elapsed)
 	}
-	if parsed.quiet != "5s" {
-		t.Fatalf("parsed.quiet = %q, want 5s", parsed.quiet)
-	}
 	if len(parsed.residual) != 0 {
 		t.Fatalf("timing fields leaked into residual: %v", parsed.residual)
 	}
@@ -31,8 +30,27 @@ func TestParseBackgroundResultKeepsElapsedAndQuietOutOfResidual(t *testing.T) {
 	if !strings.Contains(formatted, elapsedGlyph+" 1m35s") {
 		t.Fatalf("formatted card dropped the elapsed field:\n%s", formatted)
 	}
-	if !strings.Contains(formatted, "quiet 5s") {
-		t.Fatalf("formatted card dropped the quiet field:\n%s", formatted)
+	// Quiet measures how long a *running* job has been silent; a finished card
+	// gets nothing from it, so the parser consumes the line and the renderer
+	// never sees it.
+	if strings.Contains(formatted, "quiet") {
+		t.Fatalf("formatted card kept the quiet field:\n%s", formatted)
+	}
+}
+
+// A folded headline reserves room for the elapsed tail before it is laid out,
+// so what it reserves has to be the width of the very string the renderer
+// appends. Both come from one spelling of that tail; this pins the pair so a
+// change to the format cannot leave the reservation measuring something else.
+func TestBackgroundResultElapsedSuffixWidthMatchesTheAppendedSuffix(t *testing.T) {
+	const elapsed = "17s"
+	want := " · " + elapsedGlyph + " " + elapsed
+	rendered := stripANSI(appendToolElapsedSuffix("✓ ▸ job-1", elapsed, 80))
+	if !strings.HasSuffix(rendered, want) {
+		t.Fatalf("appended suffix = %q, want it to end with %q", rendered, want)
+	}
+	if got := backgroundResultElapsedSuffixWidth(elapsed); got != runewidth.StringWidth(want) {
+		t.Fatalf("reserved width = %d, want %d (the width of the tail the renderer appends)", got, runewidth.StringWidth(want))
 	}
 }
 

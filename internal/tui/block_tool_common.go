@@ -660,10 +660,19 @@ func appendToolHeaderSuffix(headerLine, suffix string, maxWidth int) string {
 	return truncateToolHeaderForSuffix(headerLine, suffix, maxWidth, headerBudget)
 }
 
+// toolElapsedSuffixText is the tail a header carries for a measured duration:
+// the separator, the glyph, and the duration itself. It is the one spelling of
+// that tail so a surface that must reserve room for it before the header is
+// laid out measures the same string the header will carry, instead of
+// restating the format and drifting away from it unnoticed.
+func toolElapsedSuffixText(elapsed string) string {
+	return " · " + elapsedGlyph + " " + elapsed
+}
+
 // appendToolElapsedSuffix appends " · ⏱ <elapsed>" to a header line, truncating
 // the header with "…" when needed so the elapsed stays visible within maxWidth.
 func appendToolElapsedSuffix(headerLine, elapsed string, maxWidth int) string {
-	return appendToolHeaderSuffix(headerLine, DimStyle.Render(" · "+elapsedGlyph+" "+elapsed), maxWidth)
+	return appendToolHeaderSuffix(headerLine, DimStyle.Render(toolElapsedSuffixText(elapsed)), maxWidth)
 }
 
 // truncateToolHeaderForSuffix shrinks a styled tool header line until

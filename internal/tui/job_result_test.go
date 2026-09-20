@@ -330,6 +330,174 @@ func TestBackgroundResultAppendedEventUsesMessageIDWhenHeadlineCarriesNoJobID(t 
 	}
 }
 
+// foldedBackgroundResultRows strips the card frame off a render and returns the
+// rows its body occupies: one entry per visible row, without the rail column or
+// the trailing padding the card wrapper adds.
+func foldedBackgroundResultRows(t *testing.T, block *Block, width int) []string {
+	t.Helper()
+	rendered := stripANSI(strings.Join(block.Render(width, ""), "\n"))
+	var rows []string
+	for line := range strings.SplitSeq(rendered, "\n") {
+		row := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "│"))
+		if row == "" || strings.HasPrefix(row, "JOB RESULT") {
+			continue
+		}
+		rows = append(rows, row)
+	}
+	if len(rows) == 0 {
+		t.Fatalf("card rendered no body rows:\n%s", rendered)
+	}
+	return rows
+}
+
+// A folded JOB RESULT card reads like a folded tool card: one headline row with
+// the measured duration trailing it, nothing else. The successful summary the ✓
+// already states is gone, and so is the quiet duration, which says something
+// only while a job is still running.
+func TestBackgroundResultFoldedCarriesElapsedOnTheHeadlineAlone(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 30)
+	raw := "[Background job job-40 finished]\n\nStatus: completed (exit code 0)\nElapsed: 17s\nQuiet: 0s\nPurpose: Run gateway tests, race, quality checks\n\nRelevant output:\ncoverage check passed: total 75.9%"
+
+	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("", "mb-fold-elapsed", raw)})
+	block, ok := m.viewport.FindStatusBlockByBackgroundObject("mb-fold-elapsed")
+	if !ok {
+		t.Fatal("expected background result block")
+	}
+	if !block.Collapsed {
+		t.Fatal("background result card must start collapsed")
+	}
+	rows := foldedBackgroundResultRows(t, block, 90)
+	if len(rows) != 1 {
+		t.Fatalf("folded rows = %d (%v), want the headline alone", len(rows), rows)
+	}
+	if !strings.Contains(rows[0], "✓ ▸ job-40 · Run gateway tests, race, quality checks") {
+		t.Fatalf("folded headline = %q, want the job id and purpose", rows[0])
+	}
+	if !strings.HasSuffix(rows[0], elapsedGlyph+" 17s") {
+		t.Fatalf("folded headline = %q, want the duration trailing it", rows[0])
+	}
+	rendered := strings.Join(rows, "\n")
+	if strings.Contains(rendered, "quiet") {
+		t.Fatalf("folded card kept the quiet duration:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "coverage check passed") || strings.Contains(rendered, "Relevant output:") {
+		t.Fatalf("folded card leaked its output body:\n%s", rendered)
+	}
+}
+
+// Opening the card must not move the measurement: a tool card keeps its elapsed
+// on the header whether the card is folded or open, and the row that used to
+// carry it only restated what the ✓ glyph already said.
+func TestBackgroundResultExpandedKeepsElapsedOnTheHeadline(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 30)
+	raw := "[Background job job-45 finished]\n\nStatus: completed (exit code 0)\nElapsed: 42s\nQuiet: 0s\nPurpose: Run the migration\n\nRelevant output:\napplied 3 migrations"
+
+	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("", "mb-open-elapsed", raw)})
+	block, ok := m.viewport.FindStatusBlockByBackgroundObject("mb-open-elapsed")
+	if !ok {
+		t.Fatal("expected background result block")
+	}
+	headlineOf := func(rows []string, label string) string {
+		for _, row := range rows {
+			if strings.Contains(row, "job-45") {
+				return row
+			}
+		}
+		t.Fatalf("%s card has no job-45 headline: %v", label, rows)
+		return ""
+	}
+	folded := foldedBackgroundResultRows(t, block, 90)
+	if headline := headlineOf(folded, "folded"); !strings.HasSuffix(headline, elapsedGlyph+" 42s") {
+		t.Fatalf("folded headline = %q, want the duration trailing it", headline)
+	}
+
+	if !block.ToggleAtWidth(90) || block.Collapsed {
+		t.Fatal("toggling must expand the card")
+	}
+	rows := foldedBackgroundResultRows(t, block, 90)
+	headline := headlineOf(rows, "expanded")
+	if !strings.HasSuffix(headline, elapsedGlyph+" 42s") {
+		t.Fatalf("expanded headline = %q, want the duration to stay on the headline", headline)
+	}
+	rendered := strings.Join(rows, "\n")
+	if strings.Contains(rendered, "Completed successfully") {
+		t.Fatalf("expanded card repeats the success summary:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "applied 3 migrations") {
+		t.Fatalf("expanded card lost its output body:\n%s", rendered)
+	}
+}
+
+// An expanded headline keeps every word when the elapsed tail is appended: the
+// wrap holds room for the tail, so it is not cut out of the last line to make
+// the tail fit. At width 50 the natural wrap would fill the last line and lose
+// the words before the tail.
+func TestBackgroundResultExpandedHeadlineKeepsTextBesideTheElapsedTail(t *testing.T) {
+	const purpose = "run the full gateway test suite with the race detector and every quality gate enabledxxxxxxxxx"
+	block := &Block{Type: BlockStatus, StatusTitle: backgroundResultCardTitle,
+		Content: "✓ job-43 · " + purpose + "\nCompleted successfully · " + elapsedGlyph + " 17s"}
+
+	rows := foldedBackgroundResultRows(t, block, 50)
+	joined := strings.Join(rows, " ")
+	if strings.Contains(joined, "…") {
+		t.Fatalf("expanded headline truncated text to fit the elapsed tail:\n%s", strings.Join(rows, "\n"))
+	}
+	if !strings.Contains(joined, purpose) {
+		t.Fatalf("expanded headline dropped text beside the elapsed tail:\n%s", strings.Join(rows, "\n"))
+	}
+	if last := rows[len(rows)-1]; !strings.HasSuffix(last, elapsedGlyph+" 17s") {
+		t.Fatalf("expanded headline lost the elapsed tail: %q", last)
+	}
+}
+
+// A failed job keeps a second row — the failure detail the glyph does not name —
+// but its duration still rides the headline, so every card measures its time in
+// the same column.
+func TestBackgroundResultFoldedFailureKeepsErrorRowAndMovesElapsed(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 30)
+	raw := "[Background job job-42 finished]\n\nStatus: failed (exit code 7)\nElapsed: 12s\nQuiet: 9s\nPurpose: failing job\n\nRelevant output:\nboom"
+
+	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("", "mb-fold-failed", raw)})
+	block, ok := m.viewport.FindStatusBlockByBackgroundObject("mb-fold-failed")
+	if !ok {
+		t.Fatal("expected background result block")
+	}
+	rows := foldedBackgroundResultRows(t, block, 90)
+	if len(rows) != 2 {
+		t.Fatalf("folded rows = %d (%v), want the headline and its failure detail", len(rows), rows)
+	}
+	if !strings.Contains(rows[0], "✗ ▸ job-42 · failing job") || !strings.HasSuffix(rows[0], elapsedGlyph+" 12s") {
+		t.Fatalf("folded failure headline = %q, want the job summary with its duration", rows[0])
+	}
+	if rows[1] != "↳ Error: exit code 7" {
+		t.Fatalf("folded failure row = %q, want the failure detail alone", rows[1])
+	}
+}
+
+// The headline yields width to the duration instead of pushing it off the card:
+// the row truncates with "…" and the measurement stays readable, which is how a
+// narrow tool card header behaves.
+func TestBackgroundResultFoldedHeadlineYieldsWidthToTheElapsedTail(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 30)
+	raw := "[Background job job-43 finished]\n\nStatus: completed (exit code 0)\nElapsed: 17s\nQuiet: 0s\nPurpose: Run the full gateway test suite with the race detector and every quality gate enabled\n\nRelevant output:\nok"
+
+	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("", "mb-fold-narrow", raw)})
+	block, ok := m.viewport.FindStatusBlockByBackgroundObject("mb-fold-narrow")
+	if !ok {
+		t.Fatal("expected background result block")
+	}
+	rows := foldedBackgroundResultRows(t, block, 50)
+	if len(rows) != 1 {
+		t.Fatalf("narrow folded rows = %d (%v), want the headline kept on one row", len(rows), rows)
+	}
+	if !strings.Contains(rows[0], "…") {
+		t.Fatalf("narrow headline = %q, want truncation around the duration", rows[0])
+	}
+	if !strings.HasSuffix(rows[0], elapsedGlyph+" 17s") {
+		t.Fatalf("narrow headline = %q, want the duration to survive truncation", rows[0])
+	}
+}
+
 func TestBackgroundResultCardParsesPurposeAndCommand(t *testing.T) {
 	m := NewModelWithSize(nil, 120, 30)
 	raw := "[Background job job-9 finished]\n\nKind: bash\nStatus: completed\n" +
@@ -383,10 +551,15 @@ func TestBackgroundResultCardFoldsOutputAndExpandsOnToggle(t *testing.T) {
 		t.Fatal("toggling must expand the card")
 	}
 	expanded := stripANSI(strings.Join(block.Render(110, ""), "\n"))
-	for _, want := range []string{"✓ ▾ job-fold · Run folded tests", "Completed successfully", "Relevant output:", "line one", "line two"} {
+	for _, want := range []string{"✓ ▾ job-fold · Run folded tests", "Relevant output:", "line one", "line two"} {
 		if !strings.Contains(expanded, want) {
 			t.Fatalf("expanded card missing %q:\n%s", want, expanded)
 		}
+	}
+	// The success summary duplicates the ✓ headline, so opening the card must
+	// not bring it back.
+	if strings.Contains(expanded, "Completed successfully") {
+		t.Fatalf("expanded card repeats the success summary its ✓ glyph already shows:\n%s", expanded)
 	}
 }
 
