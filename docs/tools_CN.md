@@ -21,11 +21,11 @@
 | `read` | 读取本地文件进上下文，支持 1-based 的 `offset` / `limit` 行分页。 |
 | `write` | 创建文件，或有意整体替换一个文件。 |
 | `edit` | 在现有文件中替换精确文本。 |
-| `apply_patch` | 应用 Codex 风格补丁信封（`*** Begin Patch`）：新增、更新、删除或移动文件。独立文件组可能部分成功；重试前先检查已应用的修改。 |
+| `apply_patch` | 应用 Codex 风格补丁（`*** Begin Patch`）：新增、更新、删除或移动文件。独立文件组可能部分成功；重试前先检查已应用的修改。 |
 | `delete` | 删除整个文件。 |
 | `view_image` | 加载本地 PNG/JPEG 进上下文；仅在生效模型池的第一个模型支持图片输入时可用。本地路径权限处理与 `read` 相同。 |
 
-模型每次只会看到 `edit` / `apply_patch` 中的一个（按模型家族选择）；补丁原生模型的文件创建/删除也经由 `apply_patch` 信封而非 `write`/`delete`。详见[编辑工具](./edit-tools_CN.md)。
+模型每次只会看到 `edit` / `apply_patch` 中的一个（按模型家族选择）；补丁原生模型的文件创建/删除也经由 `apply_patch` 而非 `write`/`delete`。详见[编辑工具](./edit-tools_CN.md)。
 
 ## 搜索与导航
 

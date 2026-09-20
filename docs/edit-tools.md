@@ -22,12 +22,12 @@ Chord provides two complementary tools for editing files, optimized for differen
 
 ## Tool Selection
 
-Chord **automatically selects** the appropriate tool based on the active model:
+Chord automatically selects the appropriate tool based on the active model:
 
-- **gpt-5 and later gpt major families (gpt-5, gpt-5-mini, gpt-5-nano, gpt-5-codex, any `gpt-5.*` name, and future majors like gpt-6) and `codex-auto-review`** → `apply_patch` (Codex envelope)
+- **gpt-5 and later gpt major families (gpt-5, gpt-5-mini, gpt-5-nano, gpt-5-codex, any `gpt-5.*` name, and later majors like gpt-6-astra) and `codex-auto-review`** → `apply_patch` (Codex envelope)
 - **All other models** (gpt-3.5, gpt-4/4o, gpt-oss-*, o-series, Claude, Qwen, GLM, DeepSeek, Gemini, …) → `edit` (old_string/new_string)
 
-The gpt-4/4o, gpt-3.5, and o-series families are **not** patch-native: the `apply_patch` tool did not exist when they were trained (it was introduced with GPT-5 in August 2025), and measured results are negative or untrained. Every gpt family from gpt-5 onward defaults to the patch tool surface, matching the Codex model catalog; this includes future majors (gpt-6, ...) since `apply_patch` is first-party Codex training data that stays in OpenAI training across generations. If a future family ever drops the patch signal, `compat.apply_patch.enabled: false` opts it out.
+The gpt-4/4o, gpt-3.5, and o-series families are **not** patch native: the `apply_patch` tool did not exist when they were trained (it was introduced with GPT-5 in August 2025), and measured results are negative or untrained. Every gpt family from gpt-5 onward defaults to the patch tool surface, matching the Codex model catalog; this includes later majors such as gpt-6-astra, since `apply_patch` is first-party Codex training data that stays in OpenAI training across generations. A model that does not carry the patch signal can be opted out with `compat.apply_patch.enabled: false`.
 
 When a patch-native model keeps `apply_patch`, Chord also hides `write` and `delete`: the envelope subsumes them (`*** Add File:` creates, `*** Delete File:` removes), matching the native Codex CLI surface those models are trained on. Fallback pairings keep `write`/`delete`: a non-patch-native model that only got `apply_patch` because `edit` is disabled still sees them, and a patch-native model downgraded to `edit` needs `write` to create files at all.
 
@@ -65,8 +65,6 @@ providers:
 - `freeform: true` forces the custom tool shape; `freeform: false` forces the JSON function shape.
 
 If a gateway lowers a custom tool into `{"input": "..."}` instead of `{"patch": "..."}`, Chord reports an actionable error pointing at `compat.apply_patch.freeform: false`; set it and the request will be sent as a function tool.
-
----
 
 ## apply_patch Tool (Codex envelope)
 
@@ -147,7 +145,7 @@ A failed file drags its whole group: if an earlier operation on the same file ma
 
 A move binds both its source and destination into the same dependency boundary. If the move fails, later operations touching either path are also rejected and included in the unapplied operations. The same rule applies when a source group fails after an earlier move appeared to succeed: operations that depended on the moved destination are rolled back with it. This keeps the failure complete instead of reporting a dependent destination edit as committed after its prerequisite was discarded, so a rebuilt operation does not miss this dependency chain.
 
-Failure display: when the patch fails without an applied diff, the tool card keeps the requested-patch preview and labels it separately from the error; it switches to the final diff once execution completes successfully.
+When the patch fails without an applied diff, the tool card keeps the requested-patch preview and labels it separately from the error; it switches to the final diff once execution completes successfully.
 
 ### Error Messages
 
@@ -156,8 +154,6 @@ Failure display: when the patch fails without an applied diff, the tool card kee
 - **"apply_patch contains overlapping operations"**: Two operations in one envelope touch paths where one contains the other (for example `dir` and `dir/file`), or resolve to the same file through different names; merge them into one operation. Repeated `*** Update File:` sections for the exact same path are allowed and apply in order.
 - **"changed after planning"**: The file was modified between validation and commit; nothing was written; retry against the current content.
 - **"apply_patch partially applied: N changes committed, M file groups not applied: ..."**: One or more independent changes committed while other operation groups were omitted (the singular form uses "change" / "file group"). The changes under "Applied patch" are already on disk; do not redo them, and the failure does not echo the submitted patch back. "Not applied" lists each omitted operation group's path and cause; resolve each cause, rebuild those operations from current file contents, and submit only those.
-
----
 
 ## Edit (Replace) Tool
 
@@ -248,8 +244,6 @@ The result text reports when the tolerance was used; the tool description delibe
 
 A combining mark with no visible base (at the start of a line or preceded only by whitespace) is folded out during this normalization: it is a tokenizer artifact that never exists in real file content at that position, but does leak into copied text when a tokenizer splits a heading like `### [U+0304].2.1`. A mark over any visible base (letter, digit, symbol, or punctuation) is kept untouched, so legitimate diacritics (Arabic, Devanagari, Vietnamese, including stacked sequences) and marks on digits or symbols (math overlines) are never folded away.
 
----
-
 ## Recommended Workflow
 
 Neither edit tool requires a prior `read`: both tools read current on-disk content at execution time. For reliable edits, still follow these recommendations:
@@ -257,8 +251,6 @@ Neither edit tool requires a prior `read`: both tools read current on-disk conte
 1. **Inspect the target area first** when you have not already verified the exact text, path, or hunk anchor. `read`, `grep`, or `lsp` are good ways to do that.
 2. **Use the smallest unique block** (2-4 lines). Large context blocks are more likely to become stale.
 3. **Re-read after failures**. If a hunk or string match fails, the file may have changed; read it again before retrying.
-
----
 
 ## Task-Specific Guidance
 
@@ -279,8 +271,6 @@ Both tools work well. Choose based on model training:
 - Creating, deleting, or moving files → `apply_patch` does this natively (`*** Add File:` / `*** Delete File:` / `*** Move to:`); models on `edit` use **Write** and **Delete**
 - Batch text replacements across many files → Use **Shell** with `sd` or `sed`
 - Symbol renames across files → Use **LSP**
-
----
 
 ## Permissions
 
@@ -323,8 +313,6 @@ permission:
 - `*: deny, apply_patch: allow` → both tools allowed (apply_patch rule is inherited by edit)
 - `*: allow, apply_patch: deny` → both tools denied (edit inherits the apply_patch deny)
 
----
-
 ## Technical Notes
 
 ### Why Two Tools?
@@ -347,15 +335,13 @@ It preserves punctuation from the current file in unchanged parts of replacement
 A: Yes. Set `compat.apply_patch.enabled: true` for patches or `false` for replacements. Usually, leave the automatic selection in place.
 
 **Q: What if my model isn't recognized?**
-A: By default, unrecognized models use the `edit` (replace) tool. gpt-5-and-later family names (gpt-5, gpt-5-mini, gpt-5-nano, gpt-5-codex, any `gpt-5.*` name, future majors like gpt-6) and `codex-auto-review` use `apply_patch`; you can override any model via `compat.apply_patch.enabled`.
+A: By default, unrecognized models use the `edit` (replace) tool. gpt-5-and-later family names (gpt-5, gpt-5-mini, gpt-5-nano, gpt-5-codex, any `gpt-5.*` name, later majors like gpt-6-astra) and `codex-auto-review` use `apply_patch`; you can override any model via `compat.apply_patch.enabled`.
 
 **Q: Do both tools support the same file types?**
 A: Yes. Both work with any text file (detected encoding: UTF-8, UTF-16, GB18030, etc.). Binary files are rejected.
 
 **Q: Can I use both tools in the same conversation?**
 A: Only one tool is visible at a time, based on the active model. You won't see both simultaneously.
-
----
 
 ## See Also
 

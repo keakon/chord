@@ -340,7 +340,7 @@ github.com/keakon/chord/internal/tui.renderMarkdownContent
 - 重新 `read` 目标文件，并基于最新内容重建 patch；
 - 从最新 `read` 输出中重新复制目标块，并确认 context/removal 行缩进与当前文件一致；如果 hunk 来自旧的带编号输出，先移除复制进来的行号前缀；
 - 同样的代码块在文件中重复出现时，在 `@@` hunk 中加入附近未变化的行、使用 `@@ header` 锚点，或用 `*** End of File` 钉住文件末尾的修改，让目标位置无歧义；
-- 把过大的 patch 拆成更小的信封或更小的 hunk；
+- 把过大的 patch 拆成更小的补丁或更小的 hunk；
 - 不要通过 `shell` 执行外部 `apply_patch`；请使用 Chord 原生 `apply_patch` 工具，这样权限、stale tracking、diff、LSP 和回滚才会保持接入。
 
 ## 性能问题
