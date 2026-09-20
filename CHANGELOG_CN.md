@@ -20,7 +20,7 @@
 - 新增 `compat.forced_tool_choice.auto_only` 选项：只支持 `tool_choice: "auto"` 的后端，遇到 `required`、`none` 或指名工具都会拒掉，打开它就把所有非 `auto` 的选择降级为后端默认。provider 层设置、按模型覆盖；显式写 `auto` 的请求照常发送。
 - headless 里携带状态的 envelope（事件循环推送、命令路径上的 `role_change` / `handoff_cancelled` 公告、以及 `status_response`）现在带单调递增的 `seq`，集成方可以丢掉被更新推送超车的 `status_response` 旧快照。首次推送前的快照也带非零版本号，每个进程单独计数。任何改了缓存状态的突变都会递增 `seq`，即使网关没订阅对应的推送、或者这次突变根本没有推送，因此之后的 `status_response` 不会被突变前拷的旧快照超车。带状态的推送也按 `seq` 顺序到达线缆（分配与入队共用一个有序区段，事件循环与命令路径都如此），因此只应用较新版本的集成方不会再丢掉一次不会被重发的旧公告；`role_change` 这样丢过一次就不会补发。
 - provider 新增 `stream_total_timeout`（秒）按墙钟给单条流设上限，从响应体开始读取时计时，也包括 Codex Responses WebSocket 读等待。`0` / 省略保持现在的行为，即不设上限——持续产出数据的流只是慢、并非故障，仍只由 `stream_idle_timeout` 约束——所以需要显式配置才生效。它用于覆盖 idle 超时兜不住的那种形态：每次到达都足以重置 idle 计时器、但永不结束的滴流式响应。超时后读取以超时错误结束，与别的流超时一样走正常的 key/model 重试路径。
-- 后台任务在 TUI 里有了实时的观察面。只要有 job 在 running 或 stopping，右侧信息面板就多出一个 `JOBS` 区，每个 job 一行（状态点、标签、耗时，以及行尾可点击的停止入口），子 agent 拉起的 job 也列在里面；终端窄到放不下面板时，状态栏改用可点击的 `1 job` / `2 agents · 1 job` pill，点开是同一份列表的浮层。pill 和行尾 `x` 都只认鼠标，所以 `ctrl+j` 可以在 Normal 模式下不用鼠标打开同一份列表：`j` / `k` 移动选中行，`Enter` 打开该行的确认框。确认框列出 job id、标签、命令、owner、状态、耗时、最后输出时间与最近输出，只有按 `y` 才真的停。这样停掉的 job 会通知它的 owner 是你停的，而不是当成普通失败，也不会再多弹一条 toast。只有后台 job 在跑时，终端标题的 spinner 照样转。
+- 后台任务在 TUI 里有了实时的观察面。只要有 job 在 running 或 stopping，右侧信息面板就多出一个 `JOBS` 区，每个 job 一行（标签、耗时，以及行尾可点击的停止入口），子 agent 拉起的 job 也列在里面；终端窄到放不下面板时，状态栏改用可点击的 `1 job` / `2 agents · 1 job` pill，点开是同一份列表的浮层。pill 和行尾 `x` 都只认鼠标，所以 `ctrl+j` 可以在 Normal 模式下不用鼠标打开同一份列表：`j` / `k` 移动选中行，`Enter` 打开该行的确认框。确认框列出 job id、标签、命令、owner、状态、耗时、最后输出时间与最近输出，只有按 `y` 才真的停。这样停掉的 job 会通知它的 owner 是你停的，而不是当成普通失败，也不会再多弹一条 toast。只有后台 job 在跑时，终端标题的 spinner 照样转。
 
 ### 改进
 

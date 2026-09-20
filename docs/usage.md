@@ -104,7 +104,7 @@ Some work outlives the turn that started it: long shell commands, including the 
 
 ### JOBS block
 
-Whenever at least one job is running or stopping, the info panel gains a `JOBS` block. Each job takes one line, indented two columns, with a status dot, a label (the job description, or the command when there is no description), the elapsed time, and a trailing `x`. Jobs started by SubAgents are listed right alongside your own.
+Whenever at least one job is running or stopping, the info panel gains a `JOBS` block. Each job takes one line, indented two columns, with a label (the job description, or the command when there is no description), the elapsed time, and a trailing `x`. Jobs started by SubAgents are listed right alongside your own.
 
 With nothing running or stopping, the block is omitted entirely.
 

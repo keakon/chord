@@ -492,14 +492,12 @@ func TestSidebarOrdersRunningAgentBeforeCompleted(t *testing.T) {
 
 func TestStatusIndicatorCoversEveryProducibleStatus(t *testing.T) {
 	// Statuses reaching the sidebar are the sub-agent states plus the
-	// "done"/"error" names AgentStatusEvent carries for them; the jobs overlay
-	// adds only running, with stopping remapped to "retrying".
+	// "done"/"error" names AgentStatusEvent carries for them.
 	cases := []struct {
 		status string
 		want   string
 	}{
 		{string(agent.SubAgentStateRunning), "○"},
-		{"retrying", "↺"},
 		{string(agent.SubAgentStateWaitingMain), "?"},
 		{string(agent.SubAgentStateWaitingDescendant), "?"},
 		{subAgentStatusDone, "✓"},

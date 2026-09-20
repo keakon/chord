@@ -156,7 +156,6 @@ func countedNoun(count int, noun string) string {
 // with, so the info panel and the jobs overlay share one row renderer without
 // either leaking its surface colors into the other.
 type jobRowStyles struct {
-	dotStyle     lipgloss.Style
 	labelStyle   lipgloss.Style
 	elapsedStyle lipgloss.Style
 	stopStyle    lipgloss.Style
@@ -165,7 +164,6 @@ type jobRowStyles struct {
 
 func infoPanelJobRowStyles() jobRowStyles {
 	return jobRowStyles{
-		dotStyle:     InfoPanelDim.Foreground(lipgloss.Color(currentTheme.InfoPanelPendingFg)),
 		labelStyle:   InfoPanelValue,
 		elapsedStyle: InfoPanelDim,
 		stopStyle:    InfoPanelDim,
@@ -177,7 +175,6 @@ func dialogJobRowStyles() jobRowStyles {
 	base := lipgloss.NewStyle().Background(lipgloss.Color(currentTheme.DialogBg))
 	dim := base.Foreground(lipgloss.Color(currentTheme.DimFg))
 	return jobRowStyles{
-		dotStyle:     base.Foreground(lipgloss.Color(currentTheme.InfoPanelPendingFg)),
 		labelStyle:   base.Foreground(lipgloss.Color(currentTheme.HeaderFg)).Bold(true),
 		elapsedStyle: dim,
 		stopStyle:    dim,
@@ -194,7 +191,6 @@ func selectedJobRowStyles() jobRowStyles {
 		Background(lipgloss.Color(currentTheme.SelectedBg)).
 		Foreground(lipgloss.Color(currentTheme.SelectedFg))
 	return jobRowStyles{
-		dotStyle:     base,
 		labelStyle:   base.Bold(true),
 		elapsedStyle: base,
 		stopStyle:    base,
@@ -212,22 +208,14 @@ type jobRowLayout struct {
 	stopZoneEnd   int
 }
 
-// renderJobRow renders "<status dot> <label> <quiet> <elapsed> x" when
-// includeQuiet is true, otherwise retaining the compact panel form. The label
-// is truncated last: visible timing fields and the stop affordance stay
-// available however long the label is.
+// renderJobRow renders "<label> [<quiet> ]<elapsed>[ x]", with the quiet field
+// only when includeQuiet is true. The label is truncated last: visible timing
+// fields and the stop affordance stay available however long the label is.
 func renderJobRow(contentWidth int, job tools.JobState, now time.Time, styles jobRowStyles, includeQuiet bool) jobRowLayout {
 	if contentWidth <= 0 {
 		return jobRowLayout{}
 	}
 	stoppable := job.Status == jobStatusRunning
-	indicatorStatus := job.Status
-	if job.Status == jobStatusStopping {
-		// statusIndicator names the retrying family, not the job lifecycle state.
-		indicatorStatus = "retrying"
-	}
-	dot := statusIndicator(indicatorStatus, false)
-	dotWidth := ansi.StringWidth(dot)
 	stopGlyphWidth := ansi.StringWidth(jobStopGlyph)
 	stopWidth := 0
 	row := jobRowLayout{stoppable: stoppable}
@@ -236,16 +224,15 @@ func renderJobRow(contentWidth int, job tools.JobState, now time.Time, styles jo
 		row.stopZoneStart = max(contentWidth-jobStopZoneCells, 0)
 		row.stopZoneEnd = contentWidth
 	}
-	baseWidth := dotWidth + 2 + stopWidth
+	// No status column: every running row would repeat the same circle, and the
+	// only other state the panel lists (stopping) shows itself by the missing
+	// stop affordance, so the columns go to the label instead.
+	baseWidth := 1 + stopWidth
 	if contentWidth < baseWidth {
 		if stoppable {
-			prefix := ""
-			if contentWidth >= dotWidth+stopGlyphWidth {
-				prefix = styles.dotStyle.Render(dot)
-			}
-			row.text = prefix + styles.gapStyle.Render(strings.Repeat(" ", contentWidth-ansi.StringWidth(prefix)-stopGlyphWidth)) + styles.stopStyle.Render(jobStopGlyph)
+			row.text = styles.gapStyle.Render(strings.Repeat(" ", max(contentWidth-stopGlyphWidth, 0))) + styles.stopStyle.Render(jobStopGlyph)
 		} else {
-			row.text = styles.dotStyle.Render(dot) + styles.gapStyle.Render(strings.Repeat(" ", max(contentWidth-dotWidth, 0)))
+			row.text = styles.gapStyle.Render(strings.Repeat(" ", contentWidth))
 		}
 		return row
 	}
@@ -294,8 +281,6 @@ func renderJobRow(contentWidth int, job tools.JobState, now time.Time, styles jo
 	labelPad := max(availLabel-ansi.StringWidth(label), 0)
 
 	var b strings.Builder
-	b.WriteString(styles.dotStyle.Render(dot))
-	b.WriteString(styles.gapStyle.Render(" "))
 	b.WriteString(styles.labelStyle.Render(label))
 	if labelPad > 0 {
 		b.WriteString(styles.gapStyle.Render(strings.Repeat(" ", labelPad)))

@@ -127,11 +127,14 @@ func TestInfoPanelJobsShowsRunningJob(t *testing.T) {
 	if !strings.HasPrefix(plain, "  ") {
 		t.Fatalf("job row must be indented by 2 columns, got %q", plain)
 	}
-	if !strings.Contains(plain, statusIndicator("running", false)) {
-		t.Fatalf("job row missing the running status dot: %q", plain)
+	if strings.Contains(plain, statusIndicator("running", false)) {
+		t.Fatalf("a running job row must not repeat the status dot: %q", plain)
 	}
-	if !strings.Contains(plain, "Run") || !strings.Contains(plain, "...") {
-		t.Fatalf("job row should contain the truncated label, got %q", plain)
+	if trimmed := strings.TrimLeft(plain, " "); !strings.HasPrefix(trimmed, "Run") {
+		t.Fatalf("job label should start at the row indent, got %q", plain)
+	}
+	if !strings.Contains(plain, "Run the nightly build") {
+		t.Fatalf("job row should fit the whole label now that no status dot precedes it, got %q", plain)
 	}
 	if !strings.Contains(plain, "0s") {
 		t.Fatalf("job row missing the elapsed column, got %q", plain)
@@ -262,8 +265,8 @@ func TestInfoPanelStoppingJobDropsStopAffordance(t *testing.T) {
 	if strings.HasSuffix(plain, jobStopGlyph) {
 		t.Fatalf("a stopping job must not offer the stop affordance: %q", plain)
 	}
-	if !strings.Contains(plain, statusIndicator("retrying", false)) {
-		t.Fatalf("stopping job should use the retrying-family dot: %q", plain)
+	if trimmed := strings.TrimLeft(plain, " "); !strings.HasPrefix(trimmed, "winding down") {
+		t.Fatalf("stopping job row should start with its label and no status marker: %q", plain)
 	}
 	hit, ok := jobHitBox(m, "job-1")
 	if !ok {
@@ -746,15 +749,21 @@ func TestJobsOverlayPicksUpNewJobs(t *testing.T) {
 // overlayContentRows counts the job rows between the overlay's title block and
 // its hint line.
 func overlayContentRows(dialog string) int {
-	lines := strings.Split(stripANSI(dialog), "\n")
 	rows := 0
-	for _, line := range lines {
-		text := strings.TrimSpace(strings.Trim(strings.TrimSpace(line), "│"))
-		if strings.HasPrefix(text, statusIndicator("running", false)) {
+	for line := range strings.SplitSeq(stripANSI(dialog), "\n") {
+		if isOverlayJobRow(line) {
 			rows++
 		}
 	}
 	return rows
+}
+
+// isOverlayJobRow reports whether a stripped dialog line is a job row. The rows
+// the overlay tests build are running jobs, and a running row no longer carries
+// a status dot, so the trailing stop glyph is what identifies one.
+func isOverlayJobRow(line string) bool {
+	text := strings.TrimSpace(strings.Trim(strings.TrimSpace(line), "│"))
+	return strings.HasSuffix(text, jobStopGlyph)
 }
 
 // jobOverlayRowLines returns the raw (still ANSI-styled) job rows of the jobs
@@ -762,7 +771,7 @@ func overlayContentRows(dialog string) int {
 func jobOverlayRowLines(dialog string) []string {
 	var rows []string
 	for line := range strings.SplitSeq(dialog, "\n") {
-		if strings.Contains(stripANSI(line), statusIndicator("running", false)) {
+		if isOverlayJobRow(stripANSI(line)) {
 			rows = append(rows, line)
 		}
 	}
