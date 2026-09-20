@@ -28,8 +28,9 @@ const (
 	// the stop affordance out of its hit zone.
 	jobElapsedColumnWidth = len("1h02m03s")
 	// jobQuietColumnWidth caps the compact quiet-duration field so a long
-	// silent job cannot push the stop affordance out of its hit zone.
-	jobQuietColumnWidth = len("no output 1h02m03s")
+	// silent job cannot push the stop affordance out of its hit zone: the
+	// widest prefix JobQuietLabel can carry plus the elapsed clamp.
+	jobQuietColumnWidth = tools.JobQuietLabelPrefixWidth + jobElapsedColumnWidth
 	// jobStopZoneCells is the clickable width at a row's right end that opens
 	// the stop confirmation for a running job.
 	jobStopZoneCells = 4
@@ -263,7 +264,7 @@ func renderJobRow(contentWidth int, job tools.JobState, now time.Time, styles jo
 	quiet := ""
 	quietWidth := 0
 	if includeQuiet {
-		quiet = jobQuietLabel(job, now)
+		quiet = tools.JobQuietLabel(job, now)
 		if len(quiet) > jobQuietColumnWidth {
 			quiet = truncateOneLine(quiet, jobQuietColumnWidth)
 		}
@@ -314,12 +315,4 @@ func renderJobRow(contentWidth int, job tools.JobState, now time.Time, styles jo
 	}
 	row.text = b.String()
 	return row
-}
-
-func jobQuietLabel(job tools.JobState, now time.Time) string {
-	prefix := "quiet "
-	if !job.HasOutput() {
-		prefix = "no output "
-	}
-	return prefix + tools.FormatElapsed(job.QuietDuration(now))
 }

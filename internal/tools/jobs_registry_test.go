@@ -162,11 +162,14 @@ func TestCompletionMessageCarriesElapsedAndQuietDurations(t *testing.T) {
 			t.Fatalf("timed completion message missing %q:\n%s", want, msg)
 		}
 	}
-	if strings.Contains(msg, "(no output yet)") {
+	if strings.Contains(msg, "no output") {
 		t.Fatalf("a job with output must not claim it had none:\n%s", msg)
 	}
 }
 
+// A job that never printed anything was not "quiet" after output, so the
+// labeled field says which it is instead of leaving the number to imply it —
+// and it uses the same words job_list uses for the same fact.
 func TestCompletionMessageReportsNoOutputYetWithoutClaimingStuck(t *testing.T) {
 	started := time.Unix(1_700_000_000, 0)
 	j := &job{
@@ -178,7 +181,7 @@ func TestCompletionMessageReportsNoOutputYetWithoutClaimingStuck(t *testing.T) {
 		status:     jobStatusCompleted,
 	}
 	msg := j.completionMessage(jobStatusCompleted, "completed (exit code 0)")
-	for _, want := range []string{"Elapsed: 2m00s", "Quiet: 2m00s (no output yet)"} {
+	for _, want := range []string{"Elapsed: 2m00s", "Quiet: no output 2m00s"} {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("silent completion message missing %q:\n%s", want, msg)
 		}
@@ -220,6 +223,41 @@ func TestJobStateQuietDurationUsesFinishedAtAndStartFallback(t *testing.T) {
 	}
 }
 
+// The renderings of one measurement must stay siblings: a labeled field, the
+// compact row label, and a sentence all quote the same words, so no surface can
+// drift into its own spelling of "this job has not printed yet".
+func TestJobQuietWordingComesFromOneSource(t *testing.T) {
+	started := time.Unix(1_700_000_000, 0)
+	quiet := JobState{Status: string(jobStatusRunning), StartedAt: started, LastOutputAt: started.Add(30 * time.Second)}
+	silent := JobState{Status: string(jobStatusRunning), StartedAt: started}
+	now := started.Add(90 * time.Second)
+
+	if got := jobQuietFieldValue(quiet, now); got != "1m00s" {
+		t.Fatalf("quiet field value = %q, want the bare duration", got)
+	}
+	if got := JobQuietLabel(quiet, now); got != "quiet 1m00s" {
+		t.Fatalf("quiet label = %q, want the measurement named for a one-line row", got)
+	}
+	if got := jobQuietPhrase(quiet, now); got != "quiet 1m00s" {
+		t.Fatalf("quiet phrase = %q, want the measurement named in prose", got)
+	}
+	if got := jobQuietFieldValue(silent, now); got != "no output 1m30s" {
+		t.Fatalf("silent field value = %q, want the no-output marker", got)
+	}
+	if got := JobQuietLabel(silent, now); got != "no output 1m30s" {
+		t.Fatalf("silent label = %q, want the same words as the labeled field", got)
+	}
+	if got := jobQuietPhrase(silent, now); got != "no output 1m30s" {
+		t.Fatalf("silent phrase = %q, want the same words as the labeled field", got)
+	}
+	// Past the observation threshold the prose adds what the number cannot say;
+	// only a running job reaches it, so a terminal field never carries it.
+	phrase := jobQuietPhrase(silent, started.Add(quietWarnAfter))
+	if !strings.HasSuffix(phrase, "no output "+FormatElapsed(quietWarnAfter)+"; the runner may still be working") {
+		t.Fatalf("quiet phrase at the warn threshold = %q, want the observation appended", phrase)
+	}
+}
+
 func TestJobListShowsQuietDurationNextToElapsed(t *testing.T) {
 	resetJobRegistryOnlyForTest(t)
 	t.Cleanup(func() { StopAllJobsForShutdown() })
@@ -244,7 +282,7 @@ func TestJobListShowsQuietDurationNextToElapsed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("JobListTool.Execute: %v", err)
 	}
-	for _, want := range []string{"job-quiet", "running", "no output for 12m", "the runner may still be working", "npm run watch"} {
+	for _, want := range []string{"job-quiet", "running", "no output 12m00s", "the runner may still be working", "npm run watch"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("job_list missing %q:\n%s", want, out)
 		}
@@ -267,7 +305,7 @@ func TestJobOutputWaitExitTimesOutWithNoticeWhileJobKeepsRunning(t *testing.T) {
 		"[status: running]",
 		"[notice] wait: exit timed out after",
 		"still running",
-		"no output for",
+		"no output 0s",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("wait:exit timeout result missing %q:\n%s", want, out)

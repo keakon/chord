@@ -201,7 +201,7 @@ func jobWaitNotice(j *job, outcome jobWaitOutcome, waited time.Duration) string 
 		return ""
 	}
 	state := j.state()
-	quiet := jobQuietSummary(state, time.Now())
+	quiet := jobQuietPhrase(state, time.Now())
 	if outcome == jobWaitCancelled {
 		return fmt.Sprintf("[notice] wait: exit was cancelled by the caller after %s; job %s is still running; %s. %s", formatWaitDuration(waited), j.ID, quiet, jobOutputWaitGuidance)
 	}
@@ -216,20 +216,6 @@ func formatWaitDuration(d time.Duration) string {
 		return d.Round(time.Millisecond).String()
 	}
 	return FormatElapsed(d)
-}
-
-func jobQuietSummary(state JobState, now time.Time) string {
-	quiet := FormatElapsed(state.QuietDuration(now))
-	if !state.HasOutput() {
-		if state.QuietWarning(now) {
-			return fmt.Sprintf("no output for %s; the runner may still be working", quiet)
-		}
-		return "no output for " + quiet
-	}
-	if state.QuietWarning(now) {
-		return fmt.Sprintf("quiet for %s; the runner may still be working", quiet)
-	}
-	return "quiet for " + quiet
 }
 
 // jobOutputPollWarnStreak is how many consecutive non-blocking reads with no
@@ -325,7 +311,7 @@ func (JobListTool) Execute(ctx context.Context, _ json.RawMessage) (string, erro
 		if label == "" {
 			label = state.Command
 		}
-		quiet := jobQuietSummary(state, now)
+		quiet := jobQuietPhrase(state, now)
 		fmt.Fprintf(&sb, "%s  %s  %s  %s  %s", state.ID, state.Status, FormatElapsed(elapsed), quiet, label)
 		log.Debugf("job listed id=%v status=%v elapsed=%v quiet=%v has_deadline=%v", state.ID, state.Status, FormatElapsed(elapsed), quiet, state.MaxRuntimeSec > 0)
 	}

@@ -55,7 +55,7 @@ func TestBackgroundResultElapsedSuffixWidthMatchesTheAppendedSuffix(t *testing.T
 }
 
 func TestJobOutputSummaryLineIgnoresWaitOutcomeNotice(t *testing.T) {
-	result := "[notice] wait: exit timed out after 30s; job job-1 is still running; no output for 30s. End the turn and await the completion notification instead of polling.\n[status: running]"
+	result := "[notice] wait: exit timed out after 30s; job job-1 is still running; no output 30s. End the turn and await the completion notification instead of polling.\n[status: running]"
 	if got := jobOutputSummaryLine(result); got != "no new output" {
 		t.Fatalf("jobOutputSummaryLine = %q, want the timeout notice to stay meta output", got)
 	}

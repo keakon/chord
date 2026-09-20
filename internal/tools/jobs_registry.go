@@ -571,13 +571,9 @@ func (j *job) completionMessage(status jobStatus, statusText string) string {
 	state := j.stateLocked()
 	j.mu.Unlock()
 	elapsed := state.Elapsed(state.FinishedAt)
-	quiet := state.QuietDuration(state.FinishedAt)
-	quietSuffix := ""
-	if !state.HasOutput() {
-		quietSuffix = " (no output yet)"
-	}
-	log.Debugf("job finished id=%v status=%v elapsed=%v quiet=%v has_output=%v", j.ID, status, FormatElapsed(elapsed), FormatElapsed(quiet), state.HasOutput())
-	msg := fmt.Sprintf("[Background job %s finished]\n\nStatus: %s\nElapsed: %s\nQuiet: %s%s", j.ID, statusText, FormatElapsed(elapsed), FormatElapsed(quiet), quietSuffix)
+	quiet := jobQuietFieldValue(state, state.FinishedAt)
+	log.Debugf("job finished id=%v status=%v elapsed=%v quiet=%v has_output=%v", j.ID, status, FormatElapsed(elapsed), FormatElapsed(state.QuietDuration(state.FinishedAt)), state.HasOutput())
+	msg := fmt.Sprintf("[Background job %s finished]\n\nStatus: %s\nElapsed: %s\nQuiet: %s", j.ID, statusText, FormatElapsed(elapsed), quiet)
 	if purpose := strings.TrimSpace(j.Description); purpose != "" {
 		msg += "\nPurpose: " + purpose
 	}
@@ -935,6 +931,50 @@ func (s JobState) QuietWarning(now time.Time) bool {
 // worth calling out in observation surfaces. It does not create a notification
 // or change the job lifecycle.
 const quietWarnAfter = 5 * time.Minute
+
+// jobQuietFieldValue renders the value of the model-facing quiet field, the
+// way a labeled line reads it: "Quiet: 5s". The metric's name already sits in
+// the label, so repeating it in the value would be noise — only the case that
+// the number alone cannot carry gets words.
+func jobQuietFieldValue(state JobState, now time.Time) string {
+	if !state.HasOutput() {
+		return "no output " + FormatElapsed(state.QuietDuration(now))
+	}
+	return FormatElapsed(state.QuietDuration(now))
+}
+
+// JobQuietLabel renders how long a job has been silent as the compact label a
+// one-line surface shows: "quiet 5s", or "no output 5s" before the job has
+// printed anything. A job that has not printed yet was never quiet after
+// output, so the two cases read differently rather than one implying the other.
+//
+// jobQuietPhrase builds the sentence form on top of it, so both spell the same
+// measurement instead of one surface drifting away from the other.
+func JobQuietLabel(state JobState, now time.Time) string {
+	if state.HasOutput() {
+		return "quiet " + jobQuietFieldValue(state, now)
+	}
+	return jobQuietFieldValue(state, now)
+}
+
+// JobQuietLabelPrefixWidth is the widest prefix JobQuietLabel can put before the
+// duration. A one-line surface clamps the rendered label to this width plus its
+// own elapsed clamp, so the wording and the column it renders into cannot drift
+// apart silently.
+const JobQuietLabelPrefixWidth = len("no output ")
+
+// jobQuietPhrase renders JobQuietLabel as wording a sentence can quote: the
+// completion message's siblings aside, job_list and a wait notice both
+// describe this one measurement. Past quietWarnAfter the phrase carries the
+// observation that the runner may still be working — a long silence is
+// evidence, not proof it hung, and only a running job can reach it.
+func jobQuietPhrase(state JobState, now time.Time) string {
+	phrase := JobQuietLabel(state, now)
+	if state.QuietWarning(now) {
+		phrase += "; the runner may still be working"
+	}
+	return phrase
+}
 
 func (r *JobRegistry) snapshotStates() []JobState {
 	r.mu.RLock()
