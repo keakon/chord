@@ -23,6 +23,8 @@ type parsedBackgroundResult struct {
 	status      string
 	residual    []string
 	output      []string
+	elapsed     string
+	quiet       string
 	duration    string
 }
 
@@ -62,11 +64,17 @@ func formatSingleBackgroundResult(raw, id, status, command, description string) 
 	if strings.TrimSpace(description) == "" {
 		description = command
 	}
-	duration := parsed.duration
+	elapsed := parsed.elapsed
+	if elapsed == "" {
+		elapsed = parsed.duration
+	}
 
 	glyph, statusLine := backgroundResultStatusLine(status)
-	if duration != "" {
-		statusLine += " · " + elapsedGlyph + " " + duration
+	if elapsed != "" {
+		statusLine += " · " + elapsedGlyph + " " + elapsed
+	}
+	if parsed.quiet != "" {
+		statusLine += " · quiet " + parsed.quiet
 	}
 	id = strings.TrimSpace(id)
 	description = strings.TrimSpace(description)
@@ -170,6 +178,14 @@ func parseBackgroundResult(raw string) parsedBackgroundResult {
 		}
 		if value, ok := cutBackgroundResultField(trimmed, "Status:"); ok {
 			parsed.status = value
+			continue
+		}
+		if value, ok := cutBackgroundResultField(trimmed, "Elapsed:"); ok {
+			parsed.elapsed = value
+			continue
+		}
+		if value, ok := cutBackgroundResultField(trimmed, "Quiet:"); ok {
+			parsed.quiet = value
 			continue
 		}
 		if strings.EqualFold(trimmed, "Relevant output:") {

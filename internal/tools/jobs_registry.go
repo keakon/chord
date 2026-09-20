@@ -506,6 +506,18 @@ func (j *job) statusText() string {
 func (j *job) state() JobState {
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	return j.stateLocked()
+}
+
+// stateLocked snapshots the job while j.mu is held. completionMessage builds
+// on it instead of hand-rolling its own JobState so new fields cannot drift.
+func (j *job) stateLocked() JobState {
+	lastOutputAt := time.Time{}
+	if j.output != nil {
+		// Keep the lock order consistent with displayPeek and the incremental
+		// reader: job state first, then the output buffer.
+		lastOutputAt = j.output.lastOutputTime()
+	}
 	return JobState{
 		ID:            j.ID,
 		AgentID:       j.AgentID,
@@ -515,6 +527,7 @@ func (j *job) state() JobState {
 		MaxRuntimeSec: j.MaxRuntimeSec,
 		Status:        string(j.status),
 		FinishedAt:    j.finishedAt,
+		LastOutputAt:  lastOutputAt,
 	}
 }
 
@@ -554,7 +567,17 @@ func (j *job) completionMessage(status jobStatus, statusText string) string {
 	if j == nil {
 		return ""
 	}
-	msg := fmt.Sprintf("[Background job %s finished]\n\nStatus: %s", j.ID, statusText)
+	j.mu.Lock()
+	state := j.stateLocked()
+	j.mu.Unlock()
+	elapsed := state.Elapsed(state.FinishedAt)
+	quiet := state.QuietDuration(state.FinishedAt)
+	quietSuffix := ""
+	if !state.HasOutput() {
+		quietSuffix = " (no output yet)"
+	}
+	log.Debugf("job finished id=%v status=%v elapsed=%v quiet=%v has_output=%v", j.ID, status, FormatElapsed(elapsed), FormatElapsed(quiet), state.HasOutput())
+	msg := fmt.Sprintf("[Background job %s finished]\n\nStatus: %s\nElapsed: %s\nQuiet: %s%s", j.ID, statusText, FormatElapsed(elapsed), FormatElapsed(quiet), quietSuffix)
 	if purpose := strings.TrimSpace(j.Description); purpose != "" {
 		msg += "\nPurpose: " + purpose
 	}
@@ -864,7 +887,54 @@ type JobState struct {
 	MaxRuntimeSec int
 	Status        string
 	FinishedAt    time.Time
+	LastOutputAt  time.Time
 }
+
+// Elapsed returns the job's terminal duration, or its live duration when it is
+// still running. StartedAt is the baseline in both cases.
+func (s JobState) Elapsed(now time.Time) time.Duration {
+	if s.StartedAt.IsZero() {
+		return 0
+	}
+	end := s.FinishedAt
+	if end.IsZero() {
+		end = now
+	}
+	return max(end.Sub(s.StartedAt), 0)
+}
+
+// QuietDuration returns how long the job has gone without output at now. A
+// job that has not produced output yet measures from its start, so callers can
+// show a useful quiet duration without inventing a last-output timestamp.
+func (s JobState) QuietDuration(now time.Time) time.Duration {
+	since := s.LastOutputAt
+	if since.IsZero() {
+		since = s.StartedAt
+	}
+	if since.IsZero() {
+		return 0
+	}
+	end := s.FinishedAt
+	if end.IsZero() {
+		end = now
+	}
+	return max(end.Sub(since), 0)
+}
+
+// HasOutput reports whether the job has produced any output.
+func (s JobState) HasOutput() bool { return !s.LastOutputAt.IsZero() }
+
+// QuietWarning reports whether the running job has crossed the fixed
+// observation threshold. It is intentionally a display/observation signal,
+// not a claim that the runner is stuck.
+func (s JobState) QuietWarning(now time.Time) bool {
+	return s.Status == string(jobStatusRunning) && s.QuietDuration(now) >= quietWarnAfter
+}
+
+// quietWarnAfter is the duration after which a running job's quiet period is
+// worth calling out in observation surfaces. It does not create a notification
+// or change the job lifecycle.
+const quietWarnAfter = 5 * time.Minute
 
 func (r *JobRegistry) snapshotStates() []JobState {
 	r.mu.RLock()

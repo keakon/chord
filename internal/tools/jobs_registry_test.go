@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -131,6 +132,196 @@ func TestCompletionMessageOmitsFollowUpForSuccessfulJob(t *testing.T) {
 	// job_output only invites a redundant read.
 	if strings.Contains(msg, "job_output(") {
 		t.Fatalf("successful completion must not ask for another read:\n%s", msg)
+	}
+}
+
+func TestCompletionMessageCarriesElapsedAndQuietDurations(t *testing.T) {
+	started := time.Unix(1_700_000_000, 0)
+	j := &job{
+		ID:          "job-timed",
+		Command:     "make build",
+		Description: "build it",
+		StartedAt:   started,
+		output:      newTailWriter(maxOutputBytes),
+		finishedAt:  started.Add(95 * time.Second),
+		status:      jobStatusCompleted,
+	}
+	if _, err := j.output.Write([]byte("ok\n")); err != nil {
+		t.Fatalf("write output: %v", err)
+	}
+	j.output.lastOutputAt = started.Add(90 * time.Second)
+
+	msg := j.completionMessage(jobStatusCompleted, "completed (exit code 0)")
+	for _, want := range []string{
+		"Status: completed (exit code 0)",
+		"Elapsed: 1m35s",
+		"Quiet: 5s",
+		"Purpose: build it",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("timed completion message missing %q:\n%s", want, msg)
+		}
+	}
+	if strings.Contains(msg, "(no output yet)") {
+		t.Fatalf("a job with output must not claim it had none:\n%s", msg)
+	}
+}
+
+func TestCompletionMessageReportsNoOutputYetWithoutClaimingStuck(t *testing.T) {
+	started := time.Unix(1_700_000_000, 0)
+	j := &job{
+		ID:         "job-silent",
+		Command:    "make build",
+		StartedAt:  started,
+		output:     newTailWriter(maxOutputBytes),
+		finishedAt: started.Add(2 * time.Minute),
+		status:     jobStatusCompleted,
+	}
+	msg := j.completionMessage(jobStatusCompleted, "completed (exit code 0)")
+	for _, want := range []string{"Elapsed: 2m00s", "Quiet: 2m00s (no output yet)"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("silent completion message missing %q:\n%s", want, msg)
+		}
+	}
+	if strings.Contains(msg, "stuck") || strings.Contains(msg, "dead") {
+		t.Fatalf("a completion message must not diagnose the runner:\n%s", msg)
+	}
+}
+
+func TestJobStateQuietDurationUsesFinishedAtAndStartFallback(t *testing.T) {
+	started := time.Unix(1_700_000_000, 0)
+	finished := started.Add(4 * time.Minute)
+
+	withOutput := JobState{
+		Status:       string(jobStatusCompleted),
+		StartedAt:    started,
+		FinishedAt:   finished,
+		LastOutputAt: started.Add(3 * time.Minute),
+	}
+	if got := withOutput.QuietDuration(finished.Add(time.Hour)); got != time.Minute {
+		t.Fatalf("terminal quiet duration = %v, want it frozen at FinishedAt", got)
+	}
+	if !withOutput.HasOutput() {
+		t.Fatal("a job with LastOutputAt must report output")
+	}
+
+	silent := JobState{Status: string(jobStatusRunning), StartedAt: started}
+	if got := silent.QuietDuration(started.Add(90 * time.Second)); got != 90*time.Second {
+		t.Fatalf("silent running quiet duration = %v, want the start-to-now span", got)
+	}
+	if silent.HasOutput() {
+		t.Fatal("a job with no LastOutputAt must report no output")
+	}
+	if !silent.QuietWarning(started.Add(quietWarnAfter)) {
+		t.Fatal("a running job at the warn threshold must report a quiet warning")
+	}
+	if (JobState{Status: string(jobStatusCompleted), StartedAt: started, FinishedAt: finished}).QuietWarning(finished) {
+		t.Fatal("a terminal job must never raise a live quiet warning")
+	}
+}
+
+func TestJobListShowsQuietDurationNextToElapsed(t *testing.T) {
+	resetJobRegistryOnlyForTest(t)
+	t.Cleanup(func() { StopAllJobsForShutdown() })
+
+	started := time.Now().Add(-12 * time.Minute)
+	j := &job{
+		ID:          "job-quiet",
+		AgentID:     jobTestOwner,
+		Description: "npm run watch",
+		Command:     "npm run watch",
+		StartedAt:   started,
+		output:      newTailWriter(maxOutputBytes),
+		status:      jobStatusRunning,
+		cancelCh:    make(chan string, 1),
+		done:        make(chan struct{}),
+	}
+	globalJobRegistry.mu.Lock()
+	globalJobRegistry.jobs[j.ID] = j
+	globalJobRegistry.mu.Unlock()
+
+	out, err := (JobListTool{}).Execute(jobTestCtx(), nil)
+	if err != nil {
+		t.Fatalf("JobListTool.Execute: %v", err)
+	}
+	for _, want := range []string{"job-quiet", "running", "no output for 12m", "the runner may still be working", "npm run watch"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("job_list missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestJobOutputWaitExitTimesOutWithNoticeWhileJobKeepsRunning(t *testing.T) {
+	resetJobRegistryOnlyForTest(t)
+	t.Cleanup(func() { StopAllJobsForShutdown() })
+	restoreWait := jobOutputWaitMs
+	t.Cleanup(func() { jobOutputWaitMs = restoreWait })
+	jobOutputWaitMs = 60
+
+	id, err := ExecuteJobForTest(jobTestCtx(), "sleep 5", "timed out wait", nil)
+	if err != nil {
+		t.Fatalf("ExecuteJobForTest: %v", err)
+	}
+	out := runJobOutput(t, map[string]any{"job_id": id, "wait": "exit"})
+	for _, want := range []string{
+		"[status: running]",
+		"[notice] wait: exit timed out after",
+		"still running",
+		"no output for",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("wait:exit timeout result missing %q:\n%s", want, out)
+		}
+	}
+	// New fact lines must stay `[notice] `-prefixed meta lines; otherwise the
+	// folded-card summary would count them as fresh output.
+	for line := range strings.SplitSeq(strings.TrimRight(out, "\n"), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "[status: ") || strings.HasPrefix(trimmed, "[notice] ") {
+			continue
+		}
+		t.Fatalf("wait:exit result carried a non-meta line %q:\n%s", trimmed, out)
+	}
+}
+
+func TestJobOutputWaitExitContextCancellationIsNotReportedAsTimeout(t *testing.T) {
+	resetJobRegistryOnlyForTest(t)
+	t.Cleanup(func() { StopAllJobsForShutdown() })
+	restoreWait := jobOutputWaitMs
+	t.Cleanup(func() { jobOutputWaitMs = restoreWait })
+	jobOutputWaitMs = 10_000
+
+	id, err := ExecuteJobForTest(jobTestCtx(), "sleep 5", "cancelled wait", nil)
+	if err != nil {
+		t.Fatalf("ExecuteJobForTest: %v", err)
+	}
+	ctx, cancel := context.WithCancel(jobTestCtx())
+	type result struct {
+		out string
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		out, err := (JobOutputTool{}).Execute(ctx, mustMarshal(t, map[string]any{"job_id": id, "wait": "exit"}))
+		done <- result{out: out, err: err}
+	}()
+	// Let the call reach its blocked wait before cancelling it; the tool itself
+	// only attempts the wait while the job is still running.
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+	got := <-done
+	if got.err != nil {
+		t.Fatalf("JobOutputTool.Execute with a cancelled wait: %v", got.err)
+	}
+	out := got.out
+	if !strings.Contains(out, "was cancelled by the caller") {
+		t.Fatalf("cancelled wait result missing the cancellation fact:\n%s", out)
+	}
+	if strings.Contains(out, "timed out") {
+		t.Fatalf("cancellation must not be reported as a wait timeout:\n%s", out)
+	}
+	if !strings.Contains(out, "[status: running]") {
+		t.Fatalf("cancelled wait must still report the running job:\n%s", out)
 	}
 }
 

@@ -211,7 +211,7 @@ func (m *Model) renderJobsOverlayDialog() string {
 		if start+i == m.jobsOverlay.cursor {
 			rowStyles = selectedStyles
 		}
-		contentLines = append(contentLines, renderJobRow(innerWidth, job, now, rowStyles).text)
+		contentLines = append(contentLines, renderJobRow(innerWidth, job, now, rowStyles, true).text)
 	}
 	content := strings.Join(contentLines, "\n")
 	scroll := ""

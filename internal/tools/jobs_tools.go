@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/keakon/golog/log"
 )
 
 // JobOutputWaitMs bounds how long one job_output call may block the turn. The
@@ -43,7 +45,7 @@ func (JobOutputTool) ConcurrencySafeReadOnly(json.RawMessage) bool { return true
 func (JobOutputTool) Description() string {
 	return "Read output from a background job started by shell (including a command that exceeded the foreground budget).\n" +
 		"Returns the output produced since the previous read (or since the job started), then a final `[status: ...]` line.\n" +
-		fmt.Sprintf("`wait` selects whether the call blocks: `none` (default) returns whatever is available now, `output` waits until the job writes more output, and `exit` waits until it reaches a terminal state. Every wait is capped at %ds by the runtime; a wait that expires is not an error — the job keeps running, the reply still carries whatever output was produced, and the status line reads `[status: running]`.\n", jobOutputWaitSeconds()) +
+		fmt.Sprintf("`wait` selects whether the call blocks: `none` (default) returns whatever is available now, `output` waits until the job writes more output, and `exit` waits until it reaches a terminal state. Every wait is capped at %ds by the runtime; an `exit` wait that expires or is cancelled reports that fact in a `[notice]` while the job keeps running and the status line remains `[status: running]`.\n", jobOutputWaitSeconds()) +
 		"Use `wait: none` only for a needed snapshot, not to poll.\n" +
 		jobOutputWaitGuidance + "\n" +
 		"Repeated non-blocking reads that find no new output are flagged as polling and then rejected."
@@ -98,16 +100,19 @@ func (JobOutputTool) Execute(ctx context.Context, raw json.RawMessage) (string, 
 	// and the incremental read consumes what it returns.
 	reader := strings.TrimSpace(AgentIDFromContext(ctx))
 	blocked := false
+	waitOutcome := jobWaitNotStarted
+	waitStartedAt := time.Time{}
 	if wait == jobWaitExit {
 		if !j.isFinished() {
 			blocked = true
-			waitForJob(ctx, j, false, nil)
+			waitStartedAt = time.Now()
+			waitOutcome = waitForJob(ctx, j)
 		}
 	} else if wait == jobWaitOutput && !j.isFinished() {
 		signal, unread := j.outputWaitState(reader)
 		if !unread {
 			blocked = true
-			waitForJob(ctx, j, true, signal)
+			waitForOutput(ctx, j, signal)
 		}
 	}
 	chunk, dropped := j.readIncremental(reader)
@@ -138,37 +143,93 @@ func (JobOutputTool) Execute(ctx context.Context, raw json.RawMessage) (string, 
 		// receives — leaving it waiting on a job it was promised a wake for.
 		globalJobRegistry.claimReported(j.ID)
 	}
-	note := ""
+	note := jobWaitNotice(j, waitOutcome, time.Since(waitStartedAt))
 	if streak >= jobOutputPollWarnStreak {
 		note = jobOutputPollNotice(streak)
 	}
 	return renderJobOutput(j, chunk, dropped, note), nil
 }
 
-// waitForJob blocks until the job finishes, the requested event arrives, the
-// runtime wait budget expires, or the caller cancels. untilOutput additionally
-// wakes on the output generation captured with the unread predicate; the exit
-// wait ignores output so it cannot return early with a job that is still
-// running.
-func waitForJob(ctx context.Context, j *job, untilOutput bool, signal <-chan struct{}) {
+type jobWaitOutcome uint8
+
+const (
+	jobWaitNotStarted jobWaitOutcome = iota
+	jobWaitFinished
+	jobWaitTimeout
+	jobWaitCancelled
+)
+
+// waitForJob blocks until the job finishes, the runtime wait budget expires,
+// or the caller cancels. The return value lets job_output distinguish a
+// bounded wait from a caller cancellation without guessing from elapsed time.
+func waitForJob(ctx context.Context, j *job) jobWaitOutcome {
 	timer := time.NewTimer(time.Duration(jobOutputWaitMs) * time.Millisecond)
 	defer timer.Stop()
-	if untilOutput {
-		select {
-		case <-j.done:
-		case <-signal:
-		case <-timer.C:
-		case <-ctx.Done():
-			// Cancellation must still report what the job produced.
-		}
-		return
-	}
 	select {
 	case <-j.done:
+		return jobWaitFinished
+	case <-timer.C:
+		if j.isFinished() {
+			return jobWaitFinished
+		}
+		return jobWaitTimeout
+	case <-ctx.Done():
+		if j.isFinished() {
+			return jobWaitFinished
+		}
+		// Cancellation must still report what the job produced.
+		return jobWaitCancelled
+	}
+}
+
+// waitForOutput retains the existing output-wake semantics. A write is not a
+// terminal result, so it deliberately does not produce an exit wait outcome.
+func waitForOutput(ctx context.Context, j *job, signal <-chan struct{}) {
+	timer := time.NewTimer(time.Duration(jobOutputWaitMs) * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-j.done:
+	case <-signal:
 	case <-timer.C:
 	case <-ctx.Done():
 		// Cancellation must still report what the job produced.
 	}
+}
+
+func jobWaitNotice(j *job, outcome jobWaitOutcome, waited time.Duration) string {
+	if j == nil || (outcome != jobWaitTimeout && outcome != jobWaitCancelled) || j.isFinished() {
+		return ""
+	}
+	state := j.state()
+	quiet := jobQuietSummary(state, time.Now())
+	if outcome == jobWaitCancelled {
+		return fmt.Sprintf("[notice] wait: exit was cancelled by the caller after %s; job %s is still running; %s. %s", formatWaitDuration(waited), j.ID, quiet, jobOutputWaitGuidance)
+	}
+	return fmt.Sprintf("[notice] wait: exit timed out after %s; job %s is still running; %s. %s", formatWaitDuration(waited), j.ID, quiet, jobOutputWaitGuidance)
+}
+
+func formatWaitDuration(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	if d < time.Second {
+		return d.Round(time.Millisecond).String()
+	}
+	return FormatElapsed(d)
+}
+
+func jobQuietSummary(state JobState, now time.Time) string {
+	quiet := FormatElapsed(state.QuietDuration(now))
+	if !state.HasOutput() {
+		if state.QuietWarning(now) {
+			return fmt.Sprintf("no output for %s; the runner may still be working", quiet)
+		}
+		return "no output for " + quiet
+	}
+	if state.QuietWarning(now) {
+		return fmt.Sprintf("quiet for %s; the runner may still be working", quiet)
+	}
+	return "quiet for " + quiet
 }
 
 // jobOutputPollWarnStreak is how many consecutive non-blocking reads with no
@@ -231,7 +292,7 @@ func (JobListTool) IsReadOnly() bool { return true }
 func (JobListTool) ConcurrencySafeReadOnly(json.RawMessage) bool { return true }
 
 func (JobListTool) Description() string {
-	return "List the background jobs you can read or stop (id, status, elapsed, label), including jobs started by the main agent and by your direct owner. Use it to see what is still running before deciding to wait, to do other work, or to end your turn."
+	return "List the background jobs you can read or stop (id, status, elapsed, quiet duration, label), including jobs started by the main agent and by your direct owner. Use it to see what is still running before deciding to wait, to do other work, or to end your turn."
 }
 
 func (JobListTool) Parameters() map[string]any {
@@ -259,15 +320,14 @@ func (JobListTool) Execute(ctx context.Context, _ json.RawMessage) (string, erro
 			sb.WriteString("\n")
 		}
 		shown++
-		elapsed := state.FinishedAt.Sub(state.StartedAt)
-		if state.FinishedAt.IsZero() {
-			elapsed = now.Sub(state.StartedAt)
-		}
+		elapsed := state.Elapsed(now)
 		label := state.Description
 		if label == "" {
 			label = state.Command
 		}
-		fmt.Fprintf(&sb, "%s  %s  %s  %s", state.ID, state.Status, FormatElapsed(elapsed), label)
+		quiet := jobQuietSummary(state, now)
+		fmt.Fprintf(&sb, "%s  %s  %s  %s  %s", state.ID, state.Status, FormatElapsed(elapsed), quiet, label)
+		log.Debugf("job listed id=%v status=%v elapsed=%v quiet=%v has_deadline=%v", state.ID, state.Status, FormatElapsed(elapsed), quiet, state.MaxRuntimeSec > 0)
 	}
 	if shown == 0 {
 		return "no background jobs", nil

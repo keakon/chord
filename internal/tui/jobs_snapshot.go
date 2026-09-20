@@ -27,6 +27,9 @@ const (
 	// pathological value ("1000h02m03s" and beyond) is clamped so it cannot push
 	// the stop affordance out of its hit zone.
 	jobElapsedColumnWidth = len("1h02m03s")
+	// jobQuietColumnWidth caps the compact quiet-duration field so a long
+	// silent job cannot push the stop affordance out of its hit zone.
+	jobQuietColumnWidth = len("no output 1h02m03s")
 	// jobStopZoneCells is the clickable width at a row's right end that opens
 	// the stop confirmation for a running job.
 	jobStopZoneCells = 4
@@ -208,10 +211,11 @@ type jobRowLayout struct {
 	stopZoneEnd   int
 }
 
-// renderJobRow renders "<status dot> <label> <elapsed> x". The label is
-// truncated last: the elapsed field and the stop affordance are reserved first,
-// so they stay visible however long the label is.
-func renderJobRow(contentWidth int, job tools.JobState, now time.Time, styles jobRowStyles) jobRowLayout {
+// renderJobRow renders "<status dot> <label> <quiet> <elapsed> x" when
+// includeQuiet is true, otherwise retaining the compact panel form. The label
+// is truncated last: visible timing fields and the stop affordance stay
+// available however long the label is.
+func renderJobRow(contentWidth int, job tools.JobState, now time.Time, styles jobRowStyles, includeQuiet bool) jobRowLayout {
 	if contentWidth <= 0 {
 		return jobRowLayout{}
 	}
@@ -222,14 +226,53 @@ func renderJobRow(contentWidth int, job tools.JobState, now time.Time, styles jo
 		indicatorStatus = "retrying"
 	}
 	dot := statusIndicator(indicatorStatus, false)
-	elapsed := tools.FormatElapsed(now.Sub(job.StartedAt))
-	// FormatElapsed has no upper bound ("1000h02m03s" and beyond), so clamp the
-	// value: an unbounded one would widen the row and push the stop affordance
-	// out of its hit zone.
-	if ansi.StringWidth(elapsed) > jobElapsedColumnWidth {
+	dotWidth := ansi.StringWidth(dot)
+	stopGlyphWidth := ansi.StringWidth(jobStopGlyph)
+	stopWidth := 0
+	row := jobRowLayout{stoppable: stoppable}
+	if stoppable {
+		stopWidth = 2 + stopGlyphWidth
+		row.stopZoneStart = max(contentWidth-jobStopZoneCells, 0)
+		row.stopZoneEnd = contentWidth
+	}
+	baseWidth := dotWidth + 2 + stopWidth
+	if contentWidth < baseWidth {
+		if stoppable {
+			prefix := ""
+			if contentWidth >= dotWidth+stopGlyphWidth {
+				prefix = styles.dotStyle.Render(dot)
+			}
+			row.text = prefix + styles.gapStyle.Render(strings.Repeat(" ", contentWidth-ansi.StringWidth(prefix)-stopGlyphWidth)) + styles.stopStyle.Render(jobStopGlyph)
+		} else {
+			row.text = styles.dotStyle.Render(dot) + styles.gapStyle.Render(strings.Repeat(" ", max(contentWidth-dotWidth, 0)))
+		}
+		return row
+	}
+	elapsed := tools.FormatElapsed(job.Elapsed(now))
+	// FormatElapsed is ASCII-only, so len() is its display width: an unbounded
+	// value would widen the row and push the stop affordance out of its hit zone.
+	if len(elapsed) > jobElapsedColumnWidth {
 		elapsed = truncateOneLine(elapsed, jobElapsedColumnWidth)
 	}
-	elapsedWidth := ansi.StringWidth(elapsed)
+	if available := contentWidth - baseWidth; available == 0 {
+		elapsed = ""
+	} else if len(elapsed) > available {
+		elapsed = truncateOneLine(elapsed, available)
+	}
+	elapsedWidth := len(elapsed)
+	quiet := ""
+	quietWidth := 0
+	if includeQuiet {
+		quiet = jobQuietLabel(job, now)
+		if len(quiet) > jobQuietColumnWidth {
+			quiet = truncateOneLine(quiet, jobQuietColumnWidth)
+		}
+		quietWidth = len(quiet)
+		if baseWidth+elapsedWidth+quietWidth+1 >= contentWidth {
+			quiet = ""
+			quietWidth = 0
+		}
+	}
 
 	label := job.Description
 	if strings.TrimSpace(label) == "" {
@@ -237,9 +280,9 @@ func renderJobRow(contentWidth int, job tools.JobState, now time.Time, styles jo
 	}
 	label = sanitizeToolDisplayText(label)
 
-	reserved := ansi.StringWidth(dot) + 1 + 1 + elapsedWidth
-	if stoppable {
-		reserved += 1 + ansi.StringWidth(jobStopGlyph) + 1
+	reserved := baseWidth + elapsedWidth
+	if quietWidth > 0 {
+		reserved += quietWidth + 1
 	}
 	availLabel := max(contentWidth-reserved, 0)
 	if availLabel > 0 {
@@ -257,17 +300,26 @@ func renderJobRow(contentWidth int, job tools.JobState, now time.Time, styles jo
 		b.WriteString(styles.gapStyle.Render(strings.Repeat(" ", labelPad)))
 	}
 	b.WriteString(styles.gapStyle.Render(" "))
+	if quiet != "" {
+		b.WriteString(styles.elapsedStyle.Render(quiet))
+		b.WriteString(styles.gapStyle.Render(" "))
+	}
 	b.WriteString(styles.elapsedStyle.Render(elapsed))
-	row := jobRowLayout{stoppable: stoppable}
 	if stoppable {
 		// The trailing gap keeps the glyph off the row's last column, the same
 		// spare cell CHANGED FILES leaves after its stats.
 		b.WriteString(styles.gapStyle.Render(" "))
 		b.WriteString(styles.stopStyle.Render(jobStopGlyph))
 		b.WriteString(styles.gapStyle.Render(" "))
-		row.stopZoneStart = max(contentWidth-jobStopZoneCells, 0)
-		row.stopZoneEnd = contentWidth
 	}
 	row.text = b.String()
 	return row
+}
+
+func jobQuietLabel(job tools.JobState, now time.Time) string {
+	prefix := "quiet "
+	if !job.HasOutput() {
+		prefix = "no output "
+	}
+	return prefix + tools.FormatElapsed(job.QuietDuration(now))
 }

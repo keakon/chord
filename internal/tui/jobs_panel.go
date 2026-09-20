@@ -37,7 +37,7 @@ func (m *Model) buildInfoPanelJobsBlock(lineW int) (string, []jobRowHitBox) {
 	hits := make([]jobRowHitBox, 0, len(jobs))
 	for _, job := range jobs {
 		lineIndex := len(lines)
-		row := renderJobRow(contentWidth, job, now, styles)
+		row := renderJobRow(contentWidth, job, now, styles, false)
 		lines = append(lines, renderInfoPanelCollapsibleContentLine(lineW, row.text))
 		hit := jobRowHitBox{jobID: job.ID, startLine: lineIndex, endLine: lineIndex + 1}
 		if row.stoppable {

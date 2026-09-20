@@ -45,7 +45,7 @@ When the queried position is not on an identifier — a line number that lands o
 | --- | --- |
 | `shell` | Run commands; long commands can continue as background jobs. See below. |
 | `job_output` | Read new job output, or wait briefly for output or completion. |
-| `job_list` | List the background jobs you can read or stop (id, status, elapsed, label), including jobs started by the main agent and by your direct owner. |
+| `job_list` | List the background jobs you can read or stop (id, status, elapsed, quiet duration, label), including jobs started by the main agent and by your direct owner. |
 | `job_kill` | Stop a background job by `job_id`, with an optional `reason`. |
 
 ### Command execution and timeouts
@@ -60,7 +60,7 @@ Long commands do not have to block the turn. A command that outlives its foregro
 
 ### Reading background output
 
-Read a background job's output since the previous read, then its `[status: ...]` line. `wait` selects whether the call blocks: `none` (default) returns what is available now, `output` waits for the next output, and `exit` waits for the job to finish, each capped at 30s by the runtime. A wait that expires is not an error: the job keeps running and the reply reports it as running. Repeated non-blocking reads that find no new output are reported as polling and then rejected, so keep reading only while there is a reason to. Terminal escape sequences are stripped from what the model sees.
+Read a background job's output since the previous read, then its `[status: ...]` line. `wait` selects whether the call blocks: `none` (default) returns what is available now, `output` waits for the next output, and `exit` waits for the job to finish, each capped at 30s by the runtime. A wait that expires is not an error: the job keeps running and the reply reports it as running, plus a `[notice]` line that says whether the `exit` wait timed out or was cancelled and how long the job has been quiet. Repeated non-blocking reads that find no new output are reported as polling and then rejected, so keep reading only while there is a reason to. Terminal escape sequences are stripped from what the model sees.
 
 ## Web
 
