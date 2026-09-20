@@ -486,7 +486,7 @@ type compactionBackgroundStatus struct {
 	Events     int64     // Optional dedicated compaction-progress events
 	Terminal   string    // Status: "" / "succeeded" / "failed" / "skipped" / "cancelled"
 	TerminalAt time.Time // When status terminal was set (1-2s flush window)
-	Trigger    string    // Compaction trigger kind (manual | usage_driven | ... | model_driven | model_downshift)
+	Trigger    string    // Compaction trigger kind (manual | usage_driven | ... | model_driven)
 	Reason     string    // Optional terminal reason (e.g. low-gain skip cause)
 	PlanID     string    // Plan id of the compaction this slot shows; "" when idle/terminal
 }

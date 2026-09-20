@@ -57,19 +57,12 @@ type compactionTrigger string
 // against it instead of duplicating the literal.
 const CompactionTriggerModelDriven = "model_driven"
 
-// CompactionTriggerModelDownshift is the exported trigger label carried by
-// CompactionStatusEvent.Trigger when a compaction was started because the
-// running model moved to a smaller window whose line the current context
-// already crosses.
-const CompactionTriggerModelDownshift = "model_downshift"
-
 const (
 	compactionTriggerManual         compactionTrigger = "manual"
 	compactionTriggerUsageDriven    compactionTrigger = "usage_driven"
 	compactionTriggerLengthRecovery compactionTrigger = "length_recovery"
 	compactionTriggerOversize       compactionTrigger = "oversize_driven"
 	compactionTriggerModelDriven    compactionTrigger = compactionTrigger(CompactionTriggerModelDriven)
-	compactionTriggerModelDownshift compactionTrigger = compactionTrigger(CompactionTriggerModelDownshift)
 )
 
 func (t compactionTrigger) needed() bool {

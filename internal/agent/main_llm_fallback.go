@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -31,38 +30,6 @@ func fallbackAttemptToastMessage(reason, modelRef string) string {
 	}
 }
 
-type fallbackModelDownshiftCompactionPendingError struct {
-	planID           uint64
-	selectedModelRef string
-	runningModelRef  string
-}
-
-func (e *fallbackModelDownshiftCompactionPendingError) Error() string {
-	if e == nil {
-		return "fallback model downshift compaction pending"
-	}
-	return fmt.Sprintf("fallback model downshift compaction pending: model=%s plan_id=%d", e.runningModelRef, e.planID)
-}
-
-func isFallbackModelDownshiftCompactionPending(err error) bool {
-	_, ok := errors.AsType[*fallbackModelDownshiftCompactionPendingError](err)
-	return ok
-}
-
-type fallbackDownshiftBypassContextKey struct{}
-
-func withFallbackDownshiftCompactionBypass(ctx context.Context) context.Context {
-	return context.WithValue(ctx, fallbackDownshiftBypassContextKey{}, true)
-}
-
-func fallbackDownshiftCompactionBypass(ctx context.Context) bool {
-	if ctx == nil {
-		return false
-	}
-	enabled, _ := ctx.Value(fallbackDownshiftBypassContextKey{}).(bool)
-	return enabled
-}
-
 func fallbackModelDisplayRef(fallback llm.FallbackModel) string {
 	ref := ""
 	if fallback.ProviderConfig != nil {
@@ -79,10 +46,19 @@ func fallbackModelDisplayRef(fallback llm.FallbackModel) string {
 	return ref
 }
 
-func (a *MainAgent) deferFallbackModelDownshift(payload *llmFallbackBoundaryPayload) error {
+// applyFallbackModelDownshift commits a fallback that re-evaluates the request
+// against a smaller window than the one it was admitted on. The commit moves
+// the sidebar identity, the budgets the compaction line is evaluated against,
+// and the RunningModelChanged event together, or the displayed model keeps the
+// previous window until some later request happens to move it. When the new
+// line is already crossed, applyModelCompactionConfig arms the usage-driven
+// request so the next pre-request gate starts a durable compaction in parallel
+// with the round and injects the pressure warning; the fallback request itself
+// is never held back, and only a hard context-length rejection suspends a round.
+func (a *MainAgent) applyFallbackModelDownshift(payload *llmFallbackBoundaryPayload) {
 	if a == nil || payload == nil || a.ctxMgr == nil ||
 		payload.fallbackModelRef == "" || payload.fallbackContextLimit <= 0 {
-		return nil
+		return
 	}
 	// The auto-compaction line tracks the effective input budget, so a
 	// downshift must be detected against both windows: a fallback whose input
@@ -90,56 +66,41 @@ func (a *MainAgent) deferFallbackModelDownshift(payload *llmFallbackBoundaryPayl
 	// re-evaluates the same context against a lower line and can cross it.
 	if !fallbackNarrowsRequestBudget(payload.fallbackContextLimit, payload.fallbackInputLimit,
 		a.ctxMgr.GetMaxTokens(), a.ctxMgr.GetInputBudget()) {
-		return nil
+		// A non-narrowing fallback commits nothing: the request was admitted
+		// against the current budgets, and the sidebar keeps the last confirmed
+		// identity until the fallback emits its first token or the round
+		// realigns at cursor head. The compaction state the narrowing branch
+		// moves (threshold, armed request) is re-evaluated against the
+		// realigned model at the next pre-request gate or the idle compaction
+		// check, where an armed request the wider window no longer justifies is
+		// cleared instead of force-compacting it.
+		return
 	}
 
 	client, _ := a.mainLLMAndRef()
 	a.applyRunningModelRef(client, payload.fallbackModelRef, payload.fallbackContextLimit, payload.fallbackInputLimit)
 	a.applyModelCompactionConfig()
-	// Crossing must be evaluated without modelDownshiftCrossing's "not already
-	// running" gate: when a compaction is already in flight (e.g. the
-	// usage-driven compaction this round started in parallel at the gate), the
-	// else branch below still has to fold this round onto it and return the
-	// pending error — returning nil here would let the smaller-window fallback
-	// request go out over the line.
-	if !a.modelDownshiftLineCrossed() {
-		return nil
-	}
-	if !a.IsCompactionRunning() {
-		a.startDownshiftCompactionWithContinuation(a.ctxMgr.Snapshot(), payload.turnID, "")
-	}
-	// When a compaction is already running the round is folded onto it rather
-	// than starting a second worker. That fold is armed by
-	// handleCompactionDownshiftSuspend, which the pending error below routes
-	// to: arming it here as well would make the continuation plan have two
-	// sources that must be kept in step, and only the handler also hands off
-	// the activity slot and applies a draft already parked at the barrier.
-	return &fallbackModelDownshiftCompactionPendingError{
-		planID:           a.compactionState.planID,
-		selectedModelRef: a.ProviderModelRef(),
-		runningModelRef:  payload.fallbackModelRef,
-	}
 }
 
 type llmFallbackBoundaryPayload struct {
-	turnID                  uint64
-	messages                []message.Message
-	tailOverlayCount        int
-	primaryContextLimit     int
-	primaryInputLimit       int
-	primaryModelRef         string
-	fallbackModelRef        string
-	fallbackContextLimit    int
-	fallbackInputLimit      int
-	fallbackDownshiftBypass bool
-	reply                   chan llmFallbackBoundaryResult
+	turnID               uint64
+	messages             []message.Message
+	tailOverlayCount     int
+	primaryContextLimit  int
+	primaryInputLimit    int
+	primaryModelRef      string
+	fallbackModelRef     string
+	fallbackContextLimit int
+	fallbackInputLimit   int
+	reply                chan llmFallbackBoundaryResult
 }
 
 type llmFallbackBoundaryResult struct {
 	messages []message.Message
 	// rebuild asks the requesting goroutine to re-run request preparation on
 	// the returned messages. The decision needs event-loop state (the pending
-	// user queue and the downshifted budgets); the work it implies does not.
+	// user queue and the fallback's narrower budgets); the work it implies does
+	// not.
 	rebuild bool
 	err     error
 }
@@ -148,7 +109,7 @@ type llmFallbackBoundaryResult struct {
 // before a fallback provider request. The event loop owns pendingUserMessages,
 // so it must decide which queued inputs have arrived and append them to both
 // the durable context and the fallback request snapshot.
-func (a *MainAgent) updateMainLLMRequestBeforeFallback(ctx context.Context, turnID uint64, messages []message.Message, tailOverlayCount int, fallback llm.FallbackModel, bypass bool) ([]message.Message, error) {
+func (a *MainAgent) updateMainLLMRequestBeforeFallback(ctx context.Context, turnID uint64, messages []message.Message, tailOverlayCount int, fallback llm.FallbackModel) ([]message.Message, error) {
 	if a == nil {
 		return messages, nil
 	}
@@ -159,17 +120,16 @@ func (a *MainAgent) updateMainLLMRequestBeforeFallback(ctx context.Context, turn
 	}
 
 	payload := &llmFallbackBoundaryPayload{
-		turnID:                  turnID,
-		messages:                messages,
-		tailOverlayCount:        tailOverlayCount,
-		primaryContextLimit:     a.ctxMgr.GetMaxTokens(),
-		primaryInputLimit:       a.ctxMgr.GetInputBudget(),
-		primaryModelRef:         a.ProviderModelRef(),
-		fallbackModelRef:        fallbackModelDisplayRef(fallback),
-		fallbackContextLimit:    fallback.ContextLimit,
-		fallbackInputLimit:      fallback.InputLimit,
-		fallbackDownshiftBypass: bypass,
-		reply:                   make(chan llmFallbackBoundaryResult, 1),
+		turnID:               turnID,
+		messages:             messages,
+		tailOverlayCount:     tailOverlayCount,
+		primaryContextLimit:  a.ctxMgr.GetMaxTokens(),
+		primaryInputLimit:    a.ctxMgr.GetInputBudget(),
+		primaryModelRef:      a.ProviderModelRef(),
+		fallbackModelRef:     fallbackModelDisplayRef(fallback),
+		fallbackContextLimit: fallback.ContextLimit,
+		fallbackInputLimit:   fallback.InputLimit,
+		reply:                make(chan llmFallbackBoundaryResult, 1),
 	}
 	a.sendEvent(Event{
 		Type:    EventLLMFallbackBoundary,
@@ -214,12 +174,7 @@ func (a *MainAgent) handleLLMFallbackBoundary(evt Event) {
 	}
 	messages := a.consumePendingUserMessagesForRequest(payload.messages, payload.tailOverlayCount)
 	messages = a.injectPendingMailboxMessagesForRequest(messages, payload.tailOverlayCount)
-	if !payload.fallbackDownshiftBypass {
-		if err := a.deferFallbackModelDownshift(payload); err != nil {
-			payload.reply <- llmFallbackBoundaryResult{err: err}
-			return
-		}
-	}
+	a.applyFallbackModelDownshift(payload)
 	// A prepared surface is only reusable when the fallback admits the request
 	// against the same effective budget; a narrower target window can require
 	// additional reduction even though the primary request already passed. The

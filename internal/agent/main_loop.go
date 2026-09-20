@@ -200,8 +200,6 @@ func (a *MainAgent) dispatch(evt Event) {
 		a.handleCompactionCancel()
 	case EventCompactionOversizeSuspend:
 		a.handleCompactionOversizeSuspend(evt)
-	case EventCompactionDownshiftSuspend:
-		a.handleCompactionDownshiftSuspend(evt)
 	default:
 		log.Warnf("unknown event type in agent dispatch type=%v seq=%v", evt.Type, evt.Seq)
 	}

@@ -269,7 +269,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 | `info`               | 运行时信息消息                               | `agent_id`、`message` |
 | `toast`              | TUI 中的瞬时通知；headless 可以忽略          | `agent_id`、`message`、`level`（`info` / `warn` / `error`） |
 | `todos`              | 替换当前 todo 列表                           | `todos[]`，元素结构为 `{id, content, status, active_form}`；启用 `todo_write` 时，多个独立且正在处理的工作流可以同时为 `in_progress`，但必须使用唯一的 `active_form`。 |
-| `compaction_status`  | 压缩生命周期事件：`started` 与终态（`succeeded`、`skipped`、`failed`、`cancelled`） | `status`、`trigger`（`manual`、`usage_driven`、`length_recovery`、`oversize_driven`、`model_driven`、`model_downshift`）、`reason`、`plan_id`（有界压缩计划标识，用于把终态与产生它的具体计划关联）。进度类遥测不转发。 |
+| `compaction_status`  | 压缩生命周期事件：`started` 与终态（`succeeded`、`skipped`、`failed`、`cancelled`） | `status`、`trigger`（`manual`、`usage_driven`、`length_recovery`、`oversize_driven`、`model_driven`）、`reason`、`plan_id`（有界压缩计划标识，用于把终态与产生它的具体计划关联）。进度类遥测不转发。 |
 | `session_switched`   | 当前会话换了，但进程没重启（执行 handoff plan、`/resume <id>`、`/new`） | `session_id`（换完之后的新会话） |
 | `background_result`  | 后台任务结束后的持久结果；JOB RESULT 卡片唯一的推送通道——它通常在回合 `idle` 之后才落盘，后面不会再有 `assistant_message` 总结它 | `session_id`（Chord 发出该事件时活动会话）、`target_agent_id`、`message_index`、`content` |
 | `context_notice`     | 持久的上下文压力提醒，headless 没有别的通道能收到它 | `session_id`（Chord 发出该事件时活动会话）、`level`、`message`、`message_index` |

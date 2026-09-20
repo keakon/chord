@@ -235,13 +235,13 @@ func TestMainLLMFailedModelPoolKeepsSidebarOnCursorHead(t *testing.T) {
 	}
 }
 
-// TestMainLLMFallbackDownshiftSuspensionKeepsCommittedFallbackRef covers the
-// suspension exception: when a narrower fallback is deferred behind
-// model-downshift compaction, the committed identity and window must survive the
-// unwind. The compaction line is evaluated against that fallback's budget, so
-// realigning the sidebar to the sticky cursor here would show one model's name
-// with another model's window and undo the protective narrowing.
-func TestMainLLMFallbackDownshiftSuspensionKeepsCommittedFallbackRef(t *testing.T) {
+// TestMainLLMFallbackDownshiftKeepsCommittedFallbackRef covers the fallback
+// identity contract: a fallback that narrows the request budget commits its
+// reference and budgets at the boundary before the request runs on it, and once
+// that request succeeds the sidebar must keep reporting the fallback. The
+// compaction line is evaluated against that window, so realigning the sidebar to
+// the sticky cursor would show one model's name with another model's window.
+func TestMainLLMFallbackDownshiftKeepsCommittedFallbackRef(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Threshold: 0.8}}}
 	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(128000, 100000, 0, 0.8)
@@ -263,7 +263,7 @@ func TestMainLLMFallbackDownshiftSuspensionKeepsCommittedFallbackRef(t *testing.
 		err: &llm.APIError{StatusCode: 500, Message: "first fallback unavailable"},
 	}}}
 	secondImpl := &blockingStreamProvider{calls: []scriptedStreamCall{{
-		resp: &message.Response{Content: "unused", StopReason: "stop"},
+		resp: &message.Response{Content: "fallback reply", StopReason: "stop"},
 	}}}
 	client := llm.NewClient(newSidebarTestProviderConfig("primary-prov", "primary-model", 128000, 100000), primaryImpl, "primary-model", 4096, "sys")
 	client.SetFallbackModels([]llm.FallbackModel{
@@ -297,7 +297,7 @@ func TestMainLLMFallbackDownshiftSuspensionKeepsCommittedFallbackRef(t *testing.
 	var boundaryRefs []string
 	var runErr error
 	deadline := time.After(5 * time.Second)
-suspensionLoop:
+fallbackLoop:
 	for {
 		select {
 		case evt := <-a.eventCh:
@@ -309,27 +309,30 @@ suspensionLoop:
 			a.dispatch(evt)
 		case err := <-done:
 			runErr = err
-			break suspensionLoop
+			break fallbackLoop
 		case <-deadline:
-			t.Fatal("timed out waiting for the downshift-suspended request")
+			t.Fatal("timed out waiting for the fallback downshift request")
 		}
 	}
 
 	if want := []string{"first-prov/first-model", "second-prov/second-model"}; !slices.Equal(boundaryRefs, want) {
 		t.Fatalf("fallback boundaries = %q, want %q", boundaryRefs, want)
 	}
-	if !isFallbackModelDownshiftCompactionPending(runErr) {
-		t.Fatalf("callLLM err = %v, want pending model-downshift compaction", runErr)
+	if runErr != nil {
+		t.Fatalf("callLLM err = %v, want the round to complete on the narrower fallback", runErr)
 	}
 
-	if got := client.NextRequestModelRef(); got != "first-prov/first-model" {
-		t.Fatalf("cursor head = %q, want first-prov/first-model", got)
+	// A successful fallback pins the sticky cursor to the model that served the
+	// round, so the next request starts from it instead of retrying the dead
+	// primary; the sidebar identity must agree with that pinned cursor.
+	if got := client.NextRequestModelRef(); got != "second-prov/second-model" {
+		t.Fatalf("cursor head = %q, want the fallback that served the round", got)
 	}
 	if got := a.RunningModelRef(); got != "second-prov/second-model" {
-		t.Fatalf("RunningModelRef after downshift suspension = %q, want the committed second-prov/second-model", got)
+		t.Fatalf("RunningModelRef after the fallback round = %q, want the committed second-prov/second-model", got)
 	}
 	if got := a.ctxMgr.GetMaxTokens(); got != 64000 {
-		t.Fatalf("context window after downshift suspension = %d, want the committed fallback window 64000", got)
+		t.Fatalf("context window after the fallback round = %d, want the committed fallback window 64000", got)
 	}
 }
 
@@ -471,52 +474,93 @@ func TestKeySwitchedDeltaClearsRotatingProviderSnapshots(t *testing.T) {
 	}
 }
 
-// TestMainTurnCancelledReleasesCommittedDownshiftRef pins the suspended-cancel
-// contract: a model downshift commits the fallback identity and its narrower
-// budgets before any output confirms them, and once the user aborts the round
-// that was going to confirm them, both must return to the cursor the next
-// request starts from.
-func TestMainTurnCancelledReleasesCommittedDownshiftRef(t *testing.T) {
+// TestMainTurnCancelledReleasesCommittedFallbackRef pins the cancel contract for
+// a round that was running on a narrower fallback: the boundary commits that
+// identity and its budgets, and when the user aborts the round before it
+// confirms them, both must return to the cursor the next request starts from.
+func TestMainTurnCancelledReleasesCommittedFallbackRef(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Threshold: 0.8}}}
 	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(128000, 100000, 0, 0.8)
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "continue the task"})
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 90000})
+	a.newTurn()
+	turn := a.turn
+	a.started.Store(true)
 
-	client := llm.NewClient(newSidebarTestProviderConfig("primary-prov", "primary-model", 128000, 100000), stubProvider{}, "primary-model", 4096, "sys")
+	primaryImpl := &blockingStreamProvider{calls: []scriptedStreamCall{{
+		err: &llm.APIError{StatusCode: 500, Message: "primary unavailable"},
+	}}}
+	fallbackImpl := &blockingStreamProvider{
+		streamedCh: make(chan struct{}),
+		releaseCh:  make(chan struct{}),
+		calls: []scriptedStreamCall{{
+			streams:          []message.StreamDelta{{Type: message.StreamDeltaText, Text: "partial reply"}},
+			holdAfterStreams: true,
+		}},
+	}
+	client := llm.NewClient(newSidebarTestProviderConfig("primary-prov", "primary-model", 128000, 100000), primaryImpl, "primary-model", 4096, "sys")
 	client.SetFallbackModels([]llm.FallbackModel{{
 		ProviderConfig: newSidebarTestProviderConfig("second-prov", "second-model", 64000, 64000),
-		ProviderImpl:   stubProvider{},
+		ProviderImpl:   fallbackImpl,
 		ModelID:        "second-model",
 		MaxTokens:      4096,
 		ContextLimit:   64000,
 		InputLimit:     64000,
 	}})
 	a.swapLLMClientWithRef(client, "primary-model", 128000, "primary-prov/primary-model")
-	a.newTurn()
-	turn := a.turn
 
-	// The fallback boundary committed the downshift and left the round suspended
-	// behind the compaction that was going to make room for it.
-	a.applyRunningModelRef(client, "second-prov/second-model", 64000, 64000)
-	a.compactionState.downshiftSuspended = true
-	if got := a.RunningModelRef(); got != "second-prov/second-model" {
-		t.Fatalf("RunningModelRef during the suspension = %q, want the committed second-prov/second-model", got)
+	done := make(chan error, 1)
+	go func() {
+		_, err := a.callLLMForRequest(turn.Ctx, a.ctxMgr.Snapshot(), 0)
+		done <- err
+	}()
+
+	// Act as the event loop: the narrowed fallback pauses at the boundary, which
+	// commits its identity and budgets before the request is dispatched.
+	deadline := time.After(5 * time.Second)
+	for committed := false; !committed; {
+		select {
+		case evt := <-a.eventCh:
+			payload, ok := evt.Payload.(*llmFallbackBoundaryPayload)
+			if !ok || payload == nil {
+				a.dispatch(evt)
+				continue
+			}
+			a.handleLLMFallbackBoundary(Event{Type: EventLLMFallbackBoundary, TurnID: turn.ID, Payload: payload})
+			committed = true
+		case <-deadline:
+			t.Fatal("timed out waiting for the fallback boundary")
+		}
 	}
-	drainAgentEvents(a.Events())
 
-	a.CancelCurrentTurn()
-	a.handleTurnCancelled(Event{
-		Type:    EventTurnCancelled,
-		TurnID:  turn.ID,
-		Payload: &TurnCancelledPayload{TurnID: turn.ID},
-	})
+	select {
+	case <-fallbackImpl.streamedCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the narrower fallback attempt to dispatch")
+	}
+	if got := a.RunningModelRef(); got != "second-prov/second-model" {
+		t.Fatalf("RunningModelRef on the committed fallback = %q, want the committed second-prov/second-model", got)
+	}
+	if got := a.ctxMgr.GetMaxTokens(); got != 64000 {
+		t.Fatalf("context window on the committed fallback = %d, want 64000", got)
+	}
+
+	turn.Cancel()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "cancel") {
+			t.Fatalf("callLLM err = %v, want a cancellation error", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the cancelled request to unwind")
+	}
 
 	if got, want := a.RunningModelRef(), client.NextRequestModelRef(); got != want {
-		t.Fatalf("RunningModelRef after aborting the suspension = %q, want the cursor head %q", got, want)
+		t.Fatalf("RunningModelRef after aborting the round = %q, want the cursor head %q", got, want)
 	}
 	if got := a.ctxMgr.GetMaxTokens(); got != 128000 {
-		t.Fatalf("context window after aborting the suspension = %d, want the cursor model's 128000", got)
+		t.Fatalf("context window after aborting the round = %d, want the cursor model's 128000", got)
 	}
 	sawReturn := false
 	for _, evt := range drainAgentEvents(a.Events()) {
@@ -525,7 +569,7 @@ func TestMainTurnCancelledReleasesCommittedDownshiftRef(t *testing.T) {
 		}
 	}
 	if !sawReturn {
-		t.Fatal("missing RunningModelChangedEvent when the aborted suspension released the committed fallback")
+		t.Fatal("missing RunningModelChangedEvent when the aborted round released the committed fallback")
 	}
 }
 

@@ -902,12 +902,16 @@ func TestCallLLMFailedFallbackPersistsLastRunningModel(t *testing.T) {
 
 // TestFallbackBoundaryDefersReductionToTheCaller pins where the rebuild runs.
 // handleLLMFallbackBoundary is an event-loop handler: it owns the pending user
-// queue and the downshifted budgets, so the decision has to be taken there, but
-// re-running request preparation there stalls the whole UI event loop for the
-// length of a full reduction pass over the session. The handler reports the
-// decision and the requesting goroutine does the work.
+// queue and the fallback's narrower budgets, so the decision has to be taken
+// there, but re-running request preparation there stalls the whole UI event loop
+// for the length of a full reduction pass over the session. The handler reports
+// the decision and the requesting goroutine does the work.
 func TestFallbackBoundaryDefersReductionToTheCaller(t *testing.T) {
-	a := &MainAgent{parentCtx: context.Background()}
+	// The handler commits the fallback identity for a narrower window, which
+	// emits a reliable RunningModelChanged event; the buffer stands in for the
+	// TUI sink this minimal harness never starts, so the emit does not wait for
+	// a consumer that will never exist.
+	a := &MainAgent{parentCtx: context.Background(), outputCh: make(chan AgentEvent, 8)}
 	a.ctxMgr = ctxmgr.NewManager(128000, 4096)
 	a.newTurn()
 	toolOutput := strings.Repeat("processed record without a recognizable shape\n", 400)
@@ -921,16 +925,15 @@ func TestFallbackBoundaryDefersReductionToTheCaller(t *testing.T) {
 		{Role: message.RoleUser, Content: "u4"},
 	}
 	payload := &llmFallbackBoundaryPayload{
-		turnID:                  a.turn.ID,
-		messages:                messages,
-		primaryContextLimit:     128000,
-		primaryInputLimit:       96000,
-		primaryModelRef:         "provider/model-1",
-		fallbackModelRef:        "provider/model-2",
-		fallbackContextLimit:    64000,
-		fallbackInputLimit:      48000,
-		fallbackDownshiftBypass: true,
-		reply:                   make(chan llmFallbackBoundaryResult, 1),
+		turnID:               a.turn.ID,
+		messages:             messages,
+		primaryContextLimit:  128000,
+		primaryInputLimit:    96000,
+		primaryModelRef:      "provider/model-1",
+		fallbackModelRef:     "provider/model-2",
+		fallbackContextLimit: 64000,
+		fallbackInputLimit:   48000,
+		reply:                make(chan llmFallbackBoundaryResult, 1),
 	}
 	a.handleLLMFallbackBoundary(Event{Type: EventLLMFallbackBoundary, TurnID: payload.turnID, Payload: payload})
 
@@ -992,7 +995,7 @@ func TestFallbackRequiresFreshAdmission(t *testing.T) {
 		{
 			// An unset fallback input limit means the whole window feeds the
 			// prompt; it must be normalized rather than read as "no limit
-			// information", which is how the downshift check reads it.
+			// information", which is how the narrowing check reads it.
 			name: "unset fallback input limit narrower than the primary input budget",
 			got: llmFallbackBoundaryPayload{
 				primaryContextLimit:  128000,

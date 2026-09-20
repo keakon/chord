@@ -333,6 +333,65 @@ func TestApplyModelCompactionConfigModelChangeClearsStaleArmedRequest(t *testing
 	}
 }
 
+func TestIdleAutoCompactionReevaluatesStaleArmAgainstRealignedModel(t *testing.T) {
+	// A non-narrowing fallback boundary commits nothing, so when its round ends
+	// the armed request and the threshold can still describe the small-window
+	// model the identity has realigned away from. maybeRunAutoCompaction must
+	// re-apply the per-model config before deciding, or the idle path
+	// force-compacts the wider window under the previous model's line.
+	a := modelCompTestAgent(
+		config.CompactionConfig{Threshold: 0.3},
+		map[string]*config.ModelCompactionConfig{"openai/gpt-5.6-sol": {Threshold: new(0.7)}},
+		"openai/gpt-5.6-luna",
+	)
+	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(1000000, 1000000, 0, 0.3)
+	a.appliedCompactionModelRef = "openai/gpt-5.6-luna"
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 500000}) // 0.5 of budget
+	if !a.ctxMgr.AutoCompactDecision().ShouldCompact {
+		t.Fatal("precondition: usage 0.5 must cross luna's 0.3 line")
+	}
+	// The round's own success path armed the request against luna's line.
+	a.armUsageDrivenAutoCompactRequest()
+
+	// The wider model took over the round and its first token realigned the
+	// identity; the boundary committed nothing because it did not narrow.
+	a.runningModelRef = "openai/gpt-5.6-sol"
+
+	a.maybeRunAutoCompaction()
+	if a.autoCompactRequested.Load() {
+		t.Fatal("stale armed request must not survive the idle re-evaluation")
+	}
+	if got := a.ctxMgr.Threshold(); got != 0.7 {
+		t.Fatalf("applied threshold = %v, want the realigned model's 0.7", got)
+	}
+}
+
+func TestApplyModelCompactionConfigModelChangeArmsCrossedUsage(t *testing.T) {
+	// A switch onto a model whose stricter threshold the current context already
+	// crosses arms the usage-driven request, so the next pre-request gate starts
+	// the compaction in parallel with the round instead of deferring that round
+	// behind the compaction.
+	perModel := 0.3
+	a := modelCompTestAgent(
+		config.CompactionConfig{Threshold: 0.65},
+		map[string]*config.ModelCompactionConfig{"openai/gpt-5.6-luna": {Threshold: &perModel}},
+		"openai/gpt-5.6-luna",
+	)
+	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(1000000, 1000000, 0, 0.65)
+	a.appliedCompactionModelRef = "openai/gpt-5.6-sol"
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 500000}) // 0.5 of budget
+	if a.autoCompactRequested.Load() {
+		t.Fatal("precondition: nothing arms the request before the switch")
+	}
+	a.applyModelCompactionConfig()
+	if !a.autoCompactRequested.Load() {
+		t.Fatal("a switch onto a crossed line must arm the usage-driven compaction")
+	}
+	if got := a.ctxMgr.Threshold(); got != 0.3 {
+		t.Fatalf("applied threshold = %v, want 0.3", got)
+	}
+}
+
 func TestApplyModelCompactionConfigSameModelKeepsArmedRequest(t *testing.T) {
 	// No model change: the armed request is never re-evaluated or cleared.
 	a := modelCompTestAgent(config.CompactionConfig{Threshold: 0.65}, nil, "p/m")

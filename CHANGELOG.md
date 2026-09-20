@@ -7,6 +7,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 ### Breaking Changes
 
 - Agent definitions no longer read `capabilities`, `preferred_tasks`, `write_mode`, or `delegation_policy`. Those keys were never enforced: they only appeared as labels on Delegate's agent-type list. Put routing intent in `description`. Whether a role may write files is still decided by `permission`, and Delegate still marks each choice with `empty_scope=allowed` or `non_empty_scope=required`. Leftover keys in existing agent files are ignored.
+- Headless `compaction_status` events no longer carry the `model_downshift` trigger: compactions started by a move to a smaller window are reported as `usage_driven`. Filters matching on the old trigger value should match `usage_driven` instead.
 
 ### Features
 
@@ -54,6 +55,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Editing away a session's first user message no longer leaves the session list advertising the removed prompt: the preview and the recorded original request are cleared together with it.
 - A mid-session prompt can no longer become a compacted session's original request: session lists and previews keep showing the prompt the session started with, and later compactions keep carrying that same prompt forward.
 - The sidebar no longer mixes two models' data. A fallback attempt is not a switch: the model name changes only once that model actually emits output, so a fallback that is still waiting for its first token keeps the previous model's name, key list, rate-limit snapshot, and context window together. Aborting at that point leaves the sidebar on the model the next request will start from instead of pairing the fallback's name with the previously selected model's keys and window.
+- Switching to a model with a smaller context window (or falling back to one) no longer holds the current request until context compaction finishes. Chord arms the automatic compaction and the next pre-request gate starts it in parallel with its own request, so the turn keeps running on the new model and only a rejection for context length suspends it behind a compaction; that gate's request carries the same context-pressure notice and compaction warning as any other threshold crossing. Previously the request was deferred until the compaction applied, which kept the turn idle for the whole compaction and dropped it if you interrupted the wait.
 
 ## 0.8.1 - 2026-09-16
 

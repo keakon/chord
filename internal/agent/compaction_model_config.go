@@ -110,13 +110,16 @@ func (a *MainAgent) effectiveReminderPctForModelRef(modelRef string, threshold f
 // pending model-pool switches are applied; a model change changes the reminder
 // claim's model identity, which resets the reminder-class overlay claims for
 // the new window (full reminder text becomes available again; the warning claim
-// resets with the request generation). It returns whether the running
-// model changed since the last application — the caller (the pre-request gate
-// or the idle switch path) uses that to start the model-downshift compaction
-// when the new line is crossed.
-func (a *MainAgent) applyModelCompactionConfig() bool {
+// resets with the request generation). A model change also re-evaluates the
+// usage-driven request against the new line: a switch to a model whose
+// threshold the current context already crosses arms the request, so the next
+// pre-request gate starts a durable compaction in parallel with the round,
+// while an armed request that the new line no longer justifies is cleared. The
+// round itself is never deferred behind that compaction: only a hard
+// context-length rejection suspends a round.
+func (a *MainAgent) applyModelCompactionConfig() {
 	if a == nil || a.ctxMgr == nil {
-		return false
+		return
 	}
 	modelRef := a.runningModelRef
 	if modelRef == "" {
@@ -153,16 +156,19 @@ func (a *MainAgent) applyModelCompactionConfig() bool {
 			a.armContextNoticeCleanup()
 		}
 	}
-	// A usage-driven request armed under the previous model's threshold may
-	// not be justified by the new model's line (for example a fallback from a
-	// small-window model with a low threshold to a large-window one with a
-	// high threshold). Re-evaluate the armed request against the freshly
-	// applied threshold: if the post-response usage no longer crosses it,
-	// clear the stale request so the new window is not force-compacted by an
-	// old crossing. A request that still crosses the new threshold stays
-	// armed.
-	if modelChanged && a.autoCompactRequested.Load() && !a.ctxMgr.AutoCompactDecision().ShouldCompact {
-		a.clearUsageDrivenAutoCompactRequest()
+	// Re-evaluate the armed request against the freshly applied threshold. A
+	// switch onto a smaller window (or onto a model with a stricter threshold)
+	// leaves the request armed when the current context already crosses the new
+	// line, so the gate below starts the compaction; an armed request the new
+	// line no longer justifies is cleared instead (for example a fallback from
+	// a small-window model with a low threshold to a large-window one with a
+	// high threshold), so the new window is not force-compacted by an old
+	// crossing.
+	if modelChanged {
+		if a.ctxMgr.AutoCompactDecision().ShouldCompact {
+			a.armUsageDrivenAutoCompactRequest()
+		} else if a.autoCompactRequested.Load() {
+			a.clearUsageDrivenAutoCompactRequest()
+		}
 	}
-	return modelChanged
 }

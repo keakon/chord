@@ -155,13 +155,12 @@ The request-side reminder and warning overlays only fire while model-driven comp
 The one-shot externalization warning is shown on the request that actually starts the compaction, which under the grace period is not the first request after the crossing.
 
 Switching models applies the new model's per-model thresholds and starts a
-fresh reminder window. When the switch lands on a model with a smaller context
-window while the current context already crosses its line, Chord compacts
-ahead of the move: from idle the automatic compaction starts right away, and
-with a turn active the next main-model request is deferred until the
-compaction applies, so a request never runs over the new model's threshold
-right after the switch. A one-line status notice reports the downshift
-compaction once it applies.
+fresh reminder window. When the current context already crosses the new
+model's line, Chord arms the automatic compaction and the next pre-request
+gate starts it in parallel with the request it prepares — the same grace
+period and pressure notices as any other crossing. Nothing is held back:
+requests go out, and only a provider rejection for length forces a compaction
+ahead of the retry.
 
 ### Model-driven context checkpoint (experimental)
 

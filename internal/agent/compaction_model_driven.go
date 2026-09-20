@@ -1149,8 +1149,7 @@ func (a *MainAgent) startModelDrivenCompactionAsync(bundle modelDrivenBarrierSna
 	// "executing N tools" (mainSlotForeground held) and nobody else releases
 	// it. Hand the slot to compaction — a plain emitCompactionSlotActivity
 	// would be swallowed by the foreground guard and the status bar would show
-	// the stale executing state for the whole worker run (same fix as the
-	// model-downshift deferral path).
+	// the stale executing state for the whole worker run.
 	a.handoffMainActivityToCompaction()
 	a.emitToTUI(CompactionStatusEvent{Status: CompactionStatusStarted, Trigger: string(compactionTriggerModelDriven), PlanID: strconv.FormatUint(planID, 10)})
 	a.compactionWg.Add(1)

@@ -1534,17 +1534,6 @@ func (a *MainAgent) handleTurnCancelled(evt Event) {
 
 	a.mainLLMRequestInFlight.Store(false)
 	a.savePartialAssistantMsg()
-	// A model-downshift suspension commits the fallback identity before any
-	// output confirms it. This cancellation drops the round that was going to
-	// confirm it, so the identity and its narrower budgets must return to the
-	// cursor the next request starts from. A suspension that is not being
-	// cancelled keeps its committed target: the compaction line is evaluated
-	// against that target's window.
-	if a.compactionState.downshiftSuspended {
-		if client, _ := a.mainLLMAndRef(); client != nil {
-			a.syncRunningModelRefToCursorHead(client)
-		}
-	}
 	if payload.KeepPendingUserMessagesQueued {
 		a.suspendPendingUserDrain()
 	}

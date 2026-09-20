@@ -162,6 +162,14 @@ func (a *MainAgent) maybeRunAutoCompaction() {
 	if !a.autoCompactRequested.Load() {
 		return
 	}
+	// The arm can predate the model the sidebar has since realigned to: a
+	// non-narrowing fallback boundary commits nothing, and the gate-side
+	// re-evaluation only runs when a request is prepared — a round can end
+	// without any further request. Re-apply the per-model compaction config so
+	// the decision below reads the current model's line; an armed request that
+	// line no longer justifies is cleared instead of force-compacting the
+	// wider window.
+	a.applyModelCompactionConfig()
 	decision := a.ctxMgr.AutoCompactDecision()
 	if !decision.ShouldCompact {
 		log.Infof("automatic context compaction request cleared before idle compaction last_input_tokens=%v threshold_tokens=%v input_budget=%v reserved_input=%v usable_input_budget=%v threshold=%v", decision.LastInputTokens, decision.ThresholdTokens, decision.InputBudget, decision.ReservedInput, decision.UsableInputBudget, decision.Threshold)
@@ -734,7 +742,6 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	}
 	a.emitToTUI(ToastEvent{Message: info, Level: "info"})
 	a.emitToTUI(a.compactionStatusEvent(CompactionStatusSucceeded, ""))
-	a.emitModelDownshiftAppliedNotice()
 	a.emitToTUI(SessionRestoredEvent{PreserveRequestActivity: true, PreserveComposerState: true})
 
 	tokensAfterApply := estimateMessagesTokens(a.ctxMgr, compactedMessages)

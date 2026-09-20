@@ -712,7 +712,7 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Me
 	}
 	requestOptions := llm.CompleteStreamOptions{
 		BeforeFallback: func(fallbackCtx context.Context, requestMessages []message.Message, fallback llm.FallbackModel) ([]message.Message, error) {
-			updatedMessages, err := a.updateMainLLMRequestBeforeFallback(fallbackCtx, turnID, requestMessages, tailOverlayCount, fallback, fallbackDownshiftCompactionBypass(fallbackCtx))
+			updatedMessages, err := a.updateMainLLMRequestBeforeFallback(fallbackCtx, turnID, requestMessages, tailOverlayCount, fallback)
 			if err == nil && updatedMessages != nil {
 				messages = updatedMessages
 			}
@@ -746,17 +746,16 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Me
 		// The next request starts from the sticky cursor head, so a request that
 		// ends without a confirmed switch must return the sidebar to it: leaving
 		// a failed attempt's target in place would show one model's name with
-		// another model's keys, window, and limits. A suspension that resumes this
-		// same turn keeps its target — the fallback downshift commits it at the
-		// boundary, and the oversize path re-applies budgets for the continuation.
+		// another model's keys, window, and limits. An oversize suspension that
+		// resumes this same turn keeps its target: the continuation re-applies
+		// the committed budgets for the retry.
 		// Both gate flags are read once: the classification here and the oversize
 		// branch below must not disagree when a compaction starts or finishes
 		// between the two reads.
 		compactionRunning := a.IsCompactionRunning()
 		autoCompactEnabled := a.ctxMgr.IsAutoCompactEnabled()
 		oversize := llm.IsAllAttemptedCandidatesContextLengthExceeded(err)
-		resumesPendingCompaction := isFallbackModelDownshiftCompactionPending(err) ||
-			(oversize && (compactionRunning || autoCompactEnabled))
+		resumesPendingCompaction := oversize && (compactionRunning || autoCompactEnabled)
 		if !resumesPendingCompaction {
 			a.syncRunningModelRefToCursorHead(llmClient)
 		}

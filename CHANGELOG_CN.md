@@ -7,6 +7,7 @@
 ### 不兼容变更
 
 - Agent 定义不再读取 `capabilities`、`preferred_tasks`、`write_mode`、`delegation_policy`。这些键从未被强制执行，只是 Delegate 选人列表上的标签。选人意图写进 `description`。角色能不能写文件仍由 `permission` 决定，Delegate 仍会在每个可选项上标 `empty_scope=allowed` 或 `non_empty_scope=required`。现有 agent 文件里残留的这些键会被忽略。
+- headless 的 `compaction_status` 事件不再携带 `model_downshift` 触发类型：切换到更小窗口引发的压缩现在以 `usage_driven` 上报，按旧值过滤的集成方请改匹配 `usage_driven`。
 
 ### 新功能
 
@@ -54,6 +55,7 @@
 - 删掉会话的第一条用户消息后，会话列表不再显示已经被删掉的那条 prompt：预览与记录的原始 prompt 会一并清除。
 - 中途的 prompt 不会再变成压缩会话的原始 prompt：会话列表与预览继续显示会话开始时的那条 prompt，之后的压缩也一直沿用它。
 - 侧边栏不再把两个模型的信息混在一起。fallback 只是开始尝试、还没产出可见输出时不算切换：模型名要等该模型真正输出后才更新，因此还在等首个 token 的 fallback 仍配着上一个模型的名称、密钥列表、限流快照与上下文窗口。此时按 `Esc` 中断，侧边栏会显示下一个请求实际会用的模型，不再把 fallback 的名字配上原模型的密钥与窗口。
+- 切换到窗口更小的模型（或回退到这类模型）时，不再先等上下文压缩完成再发请求：Chord 会把自动压缩置为待启动，由下一次过 gate 的请求与它并行执行，这一轮在新模型上照常继续；只有 provider 因上下文长度拒绝时，才会把它挂到压缩之后重试。该请求会带上与其他越线场景一致的上下文压力提示与压缩告警。此前这一轮会被压到压缩应用之后，整段压缩期间 turn 都停在原地，等待中被打断还会连同压缩一起丢掉。
 
 ## 0.8.1 - 2026-09-16
 
