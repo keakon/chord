@@ -6,7 +6,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -16,9 +18,7 @@ import (
 
 func TestConfigureCommandProcessGroupUsesNewSession(t *testing.T) {
 	cmd := exec.Command("sh", "-c", "exit 0")
-	if _, err := configureCommandProcessGroup(cmd); err != nil {
-		t.Fatalf("configureCommandProcessGroup: %v", err)
-	}
+	configureCommandProcessGroup(cmd)
 	if cmd.SysProcAttr == nil || !cmd.SysProcAttr.Setsid {
 		t.Fatalf("SysProcAttr = %#v, want Setsid=true", cmd.SysProcAttr)
 	}
@@ -29,7 +29,7 @@ func TestConfigureCommandProcessGroupUsesNewSession(t *testing.T) {
 
 func TestConfiguredCommandTTYAccessFailsFastWithoutControllingTTY(t *testing.T) {
 	cmd := exec.Command("sh", "-c", "cat </dev/tty")
-	_, _ = configureCommandProcessGroup(cmd)
+	configureCommandProcessGroup(cmd)
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
@@ -105,6 +105,120 @@ func TestBashTimeoutForceKillsProcessGroupThatIgnoresSIGTERM(t *testing.T) {
 	}
 	t.Fatalf("child pid %d still appears to be running after forced termination", pid)
 }
+func TestProcessGroupAliveFollowsTheRealGroup(t *testing.T) {
+	cmd := exec.Command("sh", "-c", "sleep 30")
+	configureCommandProcessGroup(cmd)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start command: %v", err)
+	}
+	pgid := cmd.Process.Pid
+	t.Cleanup(func() {
+		_ = syscall.Kill(-pgid, syscall.SIGKILL)
+		_, _ = cmd.Process.Wait()
+	})
+
+	if alive, known := processGroupAlive(pgid); !alive || !known {
+		t.Fatalf("processGroupAlive(running) = (%v, %v), want (true, true)", alive, known)
+	}
+
+	if err := syscall.Kill(-pgid, syscall.SIGKILL); err != nil {
+		t.Fatalf("kill process group: %v", err)
+	}
+	_, _ = cmd.Process.Wait()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		alive, known := processGroupAlive(pgid)
+		if !alive && known {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("processGroupAlive(reaped) = (%v, %v), want a definitively empty group", alive, known)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// A non-positive id names no group, so the probe answers rather than
+	// falling through to a signal against the caller's own group.
+	if alive, known := processGroupAlive(0); alive || !known {
+		t.Fatalf("processGroupAlive(0) = (%v, %v), want (false, true)", alive, known)
+	}
+}
+
+func TestParseProcessGroupMembersFiltersLeaderAndForeignGroups(t *testing.T) {
+	output := strings.Join([]string{
+		" 100  100",
+		" 101  100",
+		" 102  100",
+		" 103  200",
+		"not a row",
+		" 104  x",
+		"",
+	}, "\n")
+	got := parseProcessGroupMembers(output, 100)
+	if len(got) != 2 || got[0] != 101 || got[1] != 102 {
+		t.Fatalf("parseProcessGroupMembers = %v, want [101 102] (leader and foreign groups excluded)", got)
+	}
+	if members := parseProcessGroupMembers(output, 0); members != nil {
+		t.Fatalf("parseProcessGroupMembers(pgid=0) = %v, want nil", members)
+	}
+}
+
+// Attribution needs a recorded member that is still in the group. Liveness
+// alone proves nothing: a process can leave the group on purpose (setsid,
+// setpgid) and stay alive, and a recorded pid can be recycled by another
+// process, so a stop must re-read the group's members before it trusts a
+// witness.
+func TestGroupAttributionNeedsARecordedMemberStillInTheGroup(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "descendant.pid")
+	cmd := exec.Command("sh", "-c", "sleep 30 & echo $! > "+strconv.Quote(pidFile)+"; exit 0")
+	configureCommandProcessGroup(cmd)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start command: %v", err)
+	}
+	pgid := cmd.Process.Pid
+	descendantPID := readJobPidFile(t, pidFile)
+	t.Cleanup(func() {
+		_ = syscall.Kill(-pgid, syscall.SIGKILL)
+		_, _ = cmd.Process.Wait()
+	})
+	waitCh := waitForCommand(cmd)
+	if !waitForCommandExit(waitCh, 5*time.Second) {
+		t.Fatal("the direct command did not exit")
+	}
+
+	if groupAttributionLost(pgid, false, []int{os.Getpid()}) {
+		t.Fatal("a still-running leader owns its group by definition")
+	}
+	if groupAttributionLost(pgid, true, nil) {
+		t.Fatal("an empty witness is not proof that the group number was recycled")
+	}
+	if groupAttributionLost(pgid, true, []int{descendantPID}) {
+		t.Fatal("a recorded member still in the group keeps the group attributed to this job")
+	}
+	if !groupAttributionLost(pgid, true, []int{os.Getpid()}) {
+		t.Fatal("a live pid outside the group must not attribute the group to this job")
+	}
+	if !groupAttributionLost(pgid, true, []int{reapedProcessID(t)}) {
+		t.Fatal("a witness that is entirely gone must stop attributing the group")
+	}
+}
+
+// reapedProcessID returns the pid of a process that has already been waited
+// for, so probes against it observe a process the kernel no longer has.
+func reapedProcessID(t *testing.T) int {
+	t.Helper()
+	cmd := exec.Command("sh", "-c", "exit 0")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start command: %v", err)
+	}
+	pid := cmd.Process.Pid
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("wait command: %v", err)
+	}
+	return pid
+}
+
 func TestBashTimeoutTerminatesBackgroundChild(t *testing.T) {
 	pidFile := t.TempDir() + "/sleep.pid"
 	out, err := ShellTool{}.Execute(context.Background(), mustMarshal(t, map[string]any{

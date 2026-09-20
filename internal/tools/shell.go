@@ -560,11 +560,21 @@ func (t ShellTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 	if yieldBudget > 0 {
 		timer := time.NewTimer(yieldBudget)
 		defer timer.Stop()
+		// The group boundary is sampled with the select so a command that exits
+		// while descendants keep its process group alive promotes the job
+		// instead of blocking the turn until they exit on their own.
+		groupPending := job.groupPendingSignal()
 		select {
 		case <-job.done:
 			return t.foregroundResult(job, started)
 		case <-ctx.Done():
 			return t.cancelOrForegroundResult(job, started)
+		case <-groupPending:
+			if !job.detach() {
+				<-job.done
+				return t.foregroundResult(job, started)
+			}
+			return backgroundJobHandle(job, groupPendingReason), nil
 		case <-timer.C:
 			if !job.detach() {
 				<-job.done
@@ -573,11 +583,22 @@ func (t ShellTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 			return backgroundJobHandle(job, fmt.Sprintf("exceeded the %ds foreground budget", int(yieldBudget/time.Second))), nil
 		}
 	}
+	// Promotion does not depend on the yield budget: an explicit yield_time_ms: 0
+	// (or a command that cannot be promoted) must still not block the turn on
+	// descendants the command left behind, so the same group boundary promotes
+	// the job here too.
+	groupPending := job.groupPendingSignal()
 	select {
 	case <-job.done:
 		return t.foregroundResult(job, started)
 	case <-ctx.Done():
 		return t.cancelOrForegroundResult(job, started)
+	case <-groupPending:
+		if !job.detach() {
+			<-job.done
+			return t.foregroundResult(job, started)
+		}
+		return backgroundJobHandle(job, groupPendingReason), nil
 	}
 }
 
@@ -624,8 +645,13 @@ func (t ShellTool) cancelledResult(j *job) (string, error) {
 	return output, fmt.Errorf("command cancelled after output:\n%s", truncateForError(output, 500))
 }
 
+// groupPendingReason explains a promotion that happened because the command
+// itself exited while descendants in its process group kept running.
+const groupPendingReason = "the command exited but its process group is still running"
+
 // backgroundJobHandle is the model-facing text returned when a command is still
-// running after the foreground budget. It names the job, tells the model not to
+// running — either past the foreground budget or after its own exit left
+// descendants in its process group. It names the job, tells the model not to
 // wait or poll, and warns that the job now runs concurrently.
 func backgroundJobHandle(j *job, reason string) string {
 	var sb strings.Builder

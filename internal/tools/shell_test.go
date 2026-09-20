@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -797,7 +796,7 @@ func TestCancelOrForegroundResultKeepsNaturalExitWhenKillRacesExit(t *testing.T)
 	}
 }
 
-func TestTerminateJobProcessGroupUsesPublishedNaturalExit(t *testing.T) {
+func TestStopJobUsesPublishedNaturalExit(t *testing.T) {
 	cmd := exec.Command("sh", "-c", "exit 7")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start command: %v", err)
@@ -805,12 +804,12 @@ func TestTerminateJobProcessGroupUsesPublishedNaturalExit(t *testing.T) {
 	waitCh := waitForCommand(cmd)
 	<-waitCh.done
 
-	err, natural := terminateJobProcessGroup(cmd, "cancelled", waitCh)
-	if !natural {
-		t.Fatalf("natural = false, want the published exit result to win")
+	j := &job{ID: "job-1", cmd: cmd, groupPending: make(chan struct{})}
+	status, _, err := (&JobRegistry{}).stopJob(j, waitCh, "cancelled", false)
+	if status != jobStatusFailed {
+		t.Fatalf("status = %q, want %q", status, jobStatusFailed)
 	}
-	exitErr, ok := errors.AsType[*exec.ExitError](err)
-	if !ok || exitErr.ExitCode() != 7 {
+	if err == nil || !strings.Contains(err.Error(), "exit code 7") {
 		t.Fatalf("err = %v, want exit code 7", err)
 	}
 }

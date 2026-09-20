@@ -65,6 +65,10 @@ func latestPriorCheckpointStrippedBody(messages []message.Message) string {
 		body := stripCompactionAnchorsBlock(raw)
 		body = stripCheckpointSkillsSection(body)
 		body = stripPriorCheckpointCarrySection(body)
+		// The job snapshot is runtime-owned and re-ensured for the new capture
+		// instant: carrying the previous block forward would leave two blocks
+		// (or one stale one) claiming to be the live job list.
+		body = stripActiveBackgroundJobSnapshotBlock(body)
 		// The strip above can remove the only typed block of a usage-driven
 		// checkpoint, whose machine state lives inside the carried appendix it
 		// replaced. The typed state is machine-carryable and must keep

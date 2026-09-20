@@ -415,6 +415,17 @@ What to check:
 4. If this happens frequently, use `/compact` to manually compact immediately, or lower `threshold`.
 5. With `log_level: debug`, search the logs for `oversize` to confirm whether oversize recovery (compact then retry) was triggered. If automatic compaction is disabled, Chord stops and reports that all attempted candidate models exceeded the current context instead of retrying indefinitely.
 
+## A background job's process is still running but `job_list` does not show it
+
+**Symptom**: `ps` shows a process started by a job command, but `job_list` reports no active jobs.
+
+What to check:
+
+1. The job may have finished. `job_list` lists only running and stopping jobs by default; pass `include_finished: true` to see retained finished ones, or read the job's completion card.
+2. The process may have left the job's process group. A job owns the process group its command starts, so a child that stays in that group keeps the job active; a process that calls `setsid` or `setpgid` (a daemonizing tool, or a wrapper that detaches) is outside the job and no longer subject to its deadline, `job_kill`, or session cleanup. Stop it directly.
+3. Plain `command &` and `nohup command &` stay in the group, so they do not escape on their own; only an explicit detach from the process group does. Chord does not scan the process tree for escaped processes.
+4. The job may have stopped without being able to signal the group. Once its command has exited, Chord signals the group only while a member it recorded at that moment is still in that group; a member that left the group on purpose no longer counts. A stop without that evidence is reported as an unconfirmed teardown and the processes it left behind keep running. Look for `no member witness` or `no recorded member is still in the group` in the log, and stop those processes directly.
+
 ## When to check logs
 
 Check logs first when you encounter:

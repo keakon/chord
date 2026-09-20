@@ -428,6 +428,114 @@ func TestJobListShowsExactlyAccessibleJobs(t *testing.T) {
 	}
 }
 
+func TestJobListHidesFinishedJobsUnlessRequested(t *testing.T) {
+	resetJobRegistryOnlyForTest(t)
+	t.Cleanup(func() { StopAllJobsForShutdown() })
+
+	// The no-jobs sentinel is what the TUI summary line counts on.
+	out, err := (JobListTool{}).Execute(jobTestCtx(), nil)
+	if err != nil {
+		t.Fatalf("JobListTool.Execute: %v", err)
+	}
+	if out != "no background jobs" {
+		t.Fatalf("job_list = %q, want the no-jobs sentinel", out)
+	}
+
+	id, err := ExecuteJobForTest(jobTestCtx(), "printf done", "finished job", nil)
+	if err != nil {
+		t.Fatalf("ExecuteJobForTest: %v", err)
+	}
+	if out := runJobOutput(t, map[string]any{"job_id": id, "wait": "exit"}); !strings.Contains(out, "completed") {
+		t.Fatalf("wait:exit = %q, want the job to have finished", out)
+	}
+
+	out, err = (JobListTool{}).Execute(jobTestCtx(), nil)
+	if err != nil {
+		t.Fatalf("JobListTool.Execute: %v", err)
+	}
+	if strings.Contains(out, id) {
+		t.Fatalf("default job_list = %q, want the terminal job hidden", out)
+	}
+	for _, want := range []string{"no active background jobs", "recently finished hidden", "include_finished"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("default job_list = %q, want %q", out, want)
+		}
+	}
+
+	out, err = (JobListTool{}).Execute(jobTestCtx(), mustMarshal(t, map[string]any{"include_finished": true}))
+	if err != nil {
+		t.Fatalf("JobListTool.Execute(include_finished): %v", err)
+	}
+	for _, want := range []string{id, "completed", "finished job"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("include_finished job_list = %q, want %q", out, want)
+		}
+	}
+}
+
+func TestJobListShowsRemainingDeadlineOnlyForActiveJobsWithOne(t *testing.T) {
+	resetJobRegistryOnlyForTest(t)
+	t.Cleanup(func() { StopAllJobsForShutdown() })
+
+	bounded, err := ExecuteJobForTest(jobTestCtx(), "sleep 30", "bounded job", new(600))
+	if err != nil {
+		t.Fatalf("ExecuteJobForTest(bounded): %v", err)
+	}
+	unbounded, err := ExecuteJobForTest(jobTestCtx(), "sleep 30", "unbounded job", nil)
+	if err != nil {
+		t.Fatalf("ExecuteJobForTest(unbounded): %v", err)
+	}
+
+	out, err := (JobListTool{}).Execute(jobTestCtx(), nil)
+	if err != nil {
+		t.Fatalf("JobListTool.Execute: %v", err)
+	}
+	boundedRow := jobListRow(t, out, bounded)
+	if !strings.Contains(boundedRow, "deadline: ") || !strings.Contains(boundedRow, " left") {
+		t.Fatalf("bounded row = %q, want the remaining deadline", boundedRow)
+	}
+	if row := jobListRow(t, out, unbounded); strings.Contains(row, "deadline") {
+		t.Fatalf("unbounded row = %q, want no deadline fact", row)
+	}
+}
+
+func TestJobDeadlineFactAndActiveWindow(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+
+	live := JobState{Status: string(jobStatusRunning), StartedAt: now.Add(-time.Minute), MaxRuntimeSec: 300}
+	if got := jobDeadlineFact(live, now); got != "deadline: 4m00s left" {
+		t.Fatalf("jobDeadlineFact(live) = %q, want the remaining window", got)
+	}
+	overdue := JobState{Status: string(jobStatusStopping), StartedAt: now.Add(-10 * time.Minute), MaxRuntimeSec: 300}
+	if got := jobDeadlineFact(overdue, now); got != "deadline: overdue" {
+		t.Fatalf("jobDeadlineFact(overdue) = %q, want the overdue marker", got)
+	}
+	if got := jobDeadlineFact(JobState{Status: string(jobStatusRunning), StartedAt: now}, now); got != "" {
+		t.Fatalf("jobDeadlineFact(no deadline) = %q, want no fact", got)
+	}
+	if deadline := live.DeadlineAt(); !deadline.Equal(now.Add(4 * time.Minute)) {
+		t.Fatalf("DeadlineAt = %v, want the start plus the runtime cap", deadline)
+	}
+	if !live.Active() || !overdue.Active() {
+		t.Fatal("a running or stopping job must count as active")
+	}
+	if (JobState{Status: string(jobStatusCompleted)}).Active() {
+		t.Fatal("a terminal job must not count as active")
+	}
+}
+
+// jobListRow returns the single line listing id.
+func jobListRow(t *testing.T, out, id string) string {
+	t.Helper()
+	for line := range strings.SplitSeq(out, "\n") {
+		if strings.HasPrefix(line, id+" ") {
+			return line
+		}
+	}
+	t.Fatalf("job_list = %q, want a row for %s", out, id)
+	return ""
+}
+
 func TestDetachedJobNotifiesAfterOwnerContextCancellation(t *testing.T) {
 	resetJobRegistryOnlyForTest(t)
 	t.Cleanup(func() { StopAllJobsForShutdown() })

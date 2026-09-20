@@ -34,7 +34,7 @@ func runLocalShellCapture(ctx context.Context, workDir, command string, waitDela
 	// draining pipes after the shell exited (or after the deadline killed it):
 	// a descendant that holds stdout open forever must not wedge the caller.
 	// This is the same teardown discipline the job registry applies.
-	_, _ = configureCommandProcessGroup(cmd)
+	configureCommandProcessGroup(cmd)
 	cmd.WaitDelay = waitDelay
 	// CommandContext's default cancel kills only the direct child; with the
 	// command in its own process group, terminate the group instead.

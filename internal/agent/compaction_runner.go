@@ -236,7 +236,7 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 
 	todos := a.GetTodos()
 	subAgents := a.taskInfosForCompaction()
-	backgroundObjects := jobStatesForSnapshot()
+	backgroundObjects, jobSnapshotAt := jobStatesForSnapshotWithTime()
 	headSnapshot := snapshot[:headSplit]
 
 	evidenceItems, _ = applyCompactionProfile(a.ctxMgr, profile, headSnapshot, a.ctxMgr.GetMaxTokens(), evidenceItems)
@@ -305,10 +305,10 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 		input, inputErr := a.buildCompactionInputWithOptions(head, a.ctxMgr.GetMaxTokens(), evidenceItems, recentTail, sessionAnchors)
 		if inputErr == nil {
 			input.EvidenceItems = evidenceItems
-			summaryText = buildStructuredFallbackSummary(pathutil.AbbreviateHome(absHistoryPath), input, summarizeErr, keyFiles, todos, subAgents, backgroundObjects)
+			summaryText = buildStructuredFallbackSummary(pathutil.AbbreviateHome(absHistoryPath), input, summarizeErr, keyFiles, todos, subAgents)
 		} else {
 			summaryMode = message.CompactionSummaryModeTruncateOnly
-			summaryText = buildTruncateOnlySummary(pathutil.AbbreviateHome(absHistoryPath), summarizeErr, keyFiles, todos, subAgents, backgroundObjects)
+			summaryText = buildTruncateOnlySummary(pathutil.AbbreviateHome(absHistoryPath), summarizeErr, keyFiles, todos, subAgents)
 		}
 	} else {
 		modelRef = usedModel
@@ -322,6 +322,12 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 	// model's section in place; it is idempotent for the fallback paths, which
 	// already render the authoritative section themselves.
 	summaryText = ensureCompactionSubAgentSnapshot(summaryText, subAgents)
+	// Live background jobs are the third runtime-owned snapshot: the model was
+	// shown the objects but cannot know their live state, and after the reset
+	// the job handles are gone from the transcript. Rendering from the frozen
+	// capture also keeps the snapshot_at label and the deadline remaining
+	// consistent with the moment the states were read.
+	summaryText = ensureActiveBackgroundJobSnapshot(summaryText, backgroundObjects, jobSnapshotAt)
 
 	if ctx.Err() != nil {
 		return nil, ctx.Err()

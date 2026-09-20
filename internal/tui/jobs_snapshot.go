@@ -14,7 +14,10 @@ import (
 )
 
 // Background job lifecycle names as tools.SnapshotJobs reports them. Only these
-// two mean the job is still running; completed/killed/failed are terminal.
+// two mean the job is still live; the snapshot's activity filter asks tools
+// (tools.JobState.Active) instead of re-deriving that from these names, which
+// stay for the TUI's own rendering checks: whether a row still carries the stop
+// affordance, and whether a stop dialog may target the job.
 const (
 	jobStatusRunning  = "running"
 	jobStatusStopping = "stopping"
@@ -69,8 +72,7 @@ func (m *Model) refreshJobSnapshotIfStale() {
 	m.jobsSnapshot = tools.SnapshotJobs()
 	m.activeJobsSnapshot = m.activeJobsSnapshot[:0]
 	for _, state := range m.jobsSnapshot {
-		switch state.Status {
-		case jobStatusRunning, jobStatusStopping:
+		if state.Active() {
 			m.activeJobsSnapshot = append(m.activeJobsSnapshot, state)
 		}
 	}

@@ -1869,7 +1869,7 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 		{"## Todo State", formatTodosAsRelevanceBullets(bundle.todos, anchor)},
 		{"## SubAgent State", formatSubAgentsAsBullets(bundle.subAgents)},
 	}
-	summary := renderFallbackSummarySections(sections, bundle.backgroundObjects)
+	summary := renderFallbackSummarySections(sections)
 	// The model-driven checkpoint has no model classification to fill the
 	// relevance skeleton above, so the runtime-owned snapshot carries the
 	// complete todo state — the same guarantee the summarization runner
@@ -1883,6 +1883,15 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 	// no longer see — and unable to tell that it should re-load it.
 	skillNames, skillsOmitted := collectCheckpointSkillNames(headSnapshot)
 	summary = ensureCheckpointSkillsSection(summary, skillNames, skillsOmitted)
+	// Live jobs are the third runtime-owned snapshot: the model submission
+	// cannot know them, and after the reset their handles are gone from the
+	// transcript, so the checkpoint must carry what is still running. The
+	// capture instant is taken once here; preflight and render both read this
+	// same rendered body, so the two never disagree about the snapshot_at
+	// label. The staleness fingerprint covers backgroundObjects, so a job that
+	// changed between the barrier capture and the apply rejects the draft
+	// instead of shipping a snapshot that was already wrong when it landed.
+	summary = ensureActiveBackgroundJobSnapshot(summary, bundle.backgroundObjects, time.Now())
 	// The previous checkpoint's machine-carryable state was merged into the
 	// typed state block above; its natural-language body is deliberately NOT
 	// carried forward. The model re-states its current objective on every

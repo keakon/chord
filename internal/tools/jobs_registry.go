@@ -87,6 +87,25 @@ type job struct {
 	output    *tailWriter
 	done      chan struct{}
 
+	// outputPipeRead is the job's own read end of the command's combined
+	// stdout/stderr. The job, not cmd.Wait, owns the copy out of it (see
+	// collectOutput), so a descendant that outlives the direct command keeps
+	// feeding the job instead of having its output cut off.
+	outputPipeRead  *os.File
+	outputPipeWrite *os.File
+
+	// groupPending is closed once the direct command has been reaped while its
+	// process group still holds descendants. It is the boundary a foreground
+	// caller promotes on rather than blocking the turn until they exit.
+	groupPending       chan struct{}
+	groupPendingClosed bool
+	// groupWitness is the best-effort set of descendant pids recorded when the
+	// direct command exited. Only the stop path reads it, and only to decide
+	// whether the group may be signalled: a recorded pid counts while it is still
+	// in the group, and the job's liveness comes from the group itself (see
+	// awaitGroupDrain). Guarded by mu.
+	groupWitness []int
+
 	mu         sync.Mutex
 	status     jobStatus
 	detail     string
@@ -168,9 +187,29 @@ func (r *JobRegistry) maybePruneJobLogs(dir string) {
 }
 
 // commandWaitDelay bounds how long cmd.Wait keeps draining a command's I/O
-// after the command's own process has exited (see cmd.WaitDelay in start and
-// RunLocalShellCapture).
+// after the command's own process has exited (see cmd.WaitDelay in
+// RunLocalShellCapture). Jobs do not use it: the job registry owns the command's
+// output pipe itself (see collectOutput).
 const commandWaitDelay = 3 * time.Second
+
+// jobGroupPollInterval is how often a drain wait re-probes the process group. It
+// is a var so tests can shorten the cadence instead of sleeping out the
+// production value.
+var jobGroupPollInterval = time.Second
+
+// jobOutputDrainGrace bounds how long a job waits for its output copy to finish
+// before releasing the pipe. An ordinary job sees its EOF as soon as the last
+// writer exits; only a process that escaped the job's process group can still
+// hold it. It is a var so tests can shrink the backstop.
+var jobOutputDrainGrace = time.Second
+
+// jobGroupMembers lists the members of a process group other than its leader.
+// It backs both the drain's one-off witness sample and the stop path's
+// attribution check, which re-reads the members to prove that a recorded pid
+// still belongs to the group. It is a var so a test can model a process table
+// that cannot be read, which no stub ps on PATH could reproduce for a group
+// that is really still alive.
+var jobGroupMembers = processGroupMembers
 
 func (r *JobRegistry) start(ctx context.Context, req jobStartRequest) (*job, error) {
 	// The sweep does directory I/O outside r.mu so it cannot block concurrent
@@ -213,31 +252,26 @@ func (r *JobRegistry) start(ctx context.Context, req jobStartRequest) (*job, err
 		jobSessionDir = filepath.Dir(req.LogDir)
 	}
 	j := &job{
-		ID:          id,
-		AgentID:     AgentIDFromContext(ctx),
-		SessionDir:  jobSessionDir,
-		eventSender: EventSenderFromContext(ctx),
-		Command:     req.Command,
-		Description: req.Description,
-		LogFile:     logPath,
-		StartedAt:   time.Now(),
-		status:      jobStatusRunning,
-		detached:    req.Detached,
-		cancelCh:    make(chan string, 1),
-		done:        make(chan struct{}),
-		logWriter:   logWriter,
+		ID:           id,
+		AgentID:      AgentIDFromContext(ctx),
+		SessionDir:   jobSessionDir,
+		eventSender:  EventSenderFromContext(ctx),
+		Command:      req.Command,
+		Description:  req.Description,
+		LogFile:      logPath,
+		StartedAt:    time.Now(),
+		status:       jobStatusRunning,
+		detached:     req.Detached,
+		cancelCh:     make(chan string, 1),
+		done:         make(chan struct{}),
+		groupPending: make(chan struct{}),
+		logWriter:    logWriter,
 	}
 	j.MaxRuntimeSec = req.TimeoutSec
 	st := shell.ParseShellType(req.ShellType)
 	binary, args := shell.GetShellCommand(st, req.Command)
 	cmd := exec.Command(binary, args...)
-	_, _ = configureCommandProcessGroup(cmd)
-	// A job's own process exiting does not guarantee its pipes close: a
-	// daemonized descendant that outlives the process group can hold stdout or
-	// stderr open forever, and cmd.Wait would block on their EOF past every
-	// grace period. WaitDelay bounds that wait to an already-terminal process;
-	// run maps the abandoned-I/O error back to the recorded exit status.
-	cmd.WaitDelay = commandWaitDelay
+	configureCommandProcessGroup(cmd)
 	if req.Workdir != "" {
 		cmd.Dir = req.Workdir
 	}
@@ -246,13 +280,23 @@ func (r *JobRegistry) start(ctx context.Context, req jobStartRequest) (*job, err
 	cmd.Env = appendNonInteractiveEnv(nil)
 	outputBuf := newTailWriter(maxOutputBytes)
 	j.output = outputBuf
-	if logWriter != nil {
-		cmd.Stdout = io.MultiWriter(logWriter, outputBuf)
-		cmd.Stderr = io.MultiWriter(logWriter, outputBuf)
-	} else {
-		cmd.Stdout = outputBuf
-		cmd.Stderr = outputBuf
+	// The job owns the command's combined output pipe instead of handing the
+	// writers to cmd.Wait: a descendant that outlives the direct command keeps
+	// feeding the job's window and diagnostic log, where cmd.WaitDelay would
+	// have cut the copy off three seconds after the direct process exited.
+	pipeRead, pipeWrite, pipeErr := os.Pipe()
+	if pipeErr != nil {
+		r.mu.Unlock()
+		if logWriter != nil {
+			_ = logWriter.Close()
+			_ = os.Remove(logPath)
+		}
+		return nil, fmt.Errorf("creating command output pipe: %w", pipeErr)
 	}
+	j.outputPipeRead = pipeRead
+	j.outputPipeWrite = pipeWrite
+	cmd.Stdout = pipeWrite
+	cmd.Stderr = pipeWrite
 	j.cmd = cmd
 	r.jobs[id] = j
 	r.mu.Unlock()
@@ -264,75 +308,441 @@ func (r *JobRegistry) start(ctx context.Context, req jobStartRequest) (*job, err
 
 func (r *JobRegistry) run(j *job) {
 	cmd := j.cmd
+	read := j.outputPipeRead
 	if err := cmd.Start(); err != nil {
+		j.closeOutputPipes()
 		r.finish(j, jobStatusFailed, "failed to start", fmt.Errorf("starting command: %w", err))
 		return
 	}
+	// Only the command and its descendants may hold the write end now: keeping
+	// our own copy open would hide the EOF that ends the output copy.
+	_ = j.outputPipeWrite.Close()
+	j.outputPipeWrite = nil
+
+	collectorDone := make(chan struct{})
+	go func() {
+		defer close(collectorDone)
+		j.collectOutput(read)
+	}()
 
 	waitCh := waitForCommand(cmd)
-	var (
-		status jobStatus
-		detail string
-		err    error
-	)
-	handleExit := func(rawErr error) {
-		// WaitDelay expiry means the process exited successfully but descendants
-		// kept the pipes open: the recorded exit status is authoritative, and
-		// the abandoned I/O only fed the in-memory window and the diagnostic
-		// log, both expendable. Report success instead of the I/O cutoff. A
-		// non-zero exit surfaces as *exec.ExitError and never carries
-		// ErrWaitDelay, so the exit status needs no reconstruction here.
-		if errors.Is(rawErr, exec.ErrWaitDelay) {
-			rawErr = nil
-		}
-		if rawErr == nil {
-			status, detail, err = jobStatusCompleted, "exit code 0", nil
-			return
-		}
-		status = jobStatusFailed
-		detail = shortExitDetail(rawErr)
-		err = j.formatRuntimeError(rawErr)
+	var deadline <-chan time.Time
+	var timer *time.Timer
+	if j.MaxRuntimeSec > 0 {
+		timer = time.NewTimer(time.Duration(j.MaxRuntimeSec) * time.Second)
+		deadline = timer.C
 	}
-
-	if j.MaxRuntimeSec <= 0 {
-		select {
-		case reason := <-j.cancelCh:
-			if rawErr, natural := terminateJobProcessGroup(cmd, reason, waitCh); natural {
-				handleExit(rawErr)
-			} else {
-				status, detail, err = jobStatusKilled, reason, rawErr
-			}
-		case <-waitCh.done:
-			rawErr, _ := waitCh.result()
-			handleExit(rawErr)
-		}
-	} else {
-		timer := time.NewTimer(time.Duration(j.MaxRuntimeSec) * time.Second)
-		defer timer.Stop()
-		select {
-		case reason := <-j.cancelCh:
-			if rawErr, natural := terminateJobProcessGroup(cmd, reason, waitCh); natural {
-				handleExit(rawErr)
-			} else {
-				status, detail, err = jobStatusKilled, reason, rawErr
-			}
-		case <-waitCh.done:
-			rawErr, _ := waitCh.result()
-			handleExit(rawErr)
-		case <-timer.C:
-			reason := fmt.Sprintf("timed out after %ds", j.MaxRuntimeSec)
-			if rawErr, natural := terminateJobProcessGroup(cmd, reason, waitCh); natural {
-				handleExit(rawErr)
-			} else {
-				status, detail, err = jobStatusKilled, reason, rawErr
-				// A timeout otherwise invites an unchanged, equally slow
-				// re-run: the model cannot see the deadline it hit, so
-				// steer the next step.
-				err = fmt.Errorf("%w\n%s", err, shellTimeoutGuidance)
-			}
+	status, detail, err := r.awaitJob(j, waitCh, deadline)
+	if timer != nil {
+		timer.Stop()
+	}
+	// Give the copy its EOF first; closing the read end is only the backstop for
+	// a writer that escaped the job's process group.
+	stopOutputCollector(read, collectorDone)
+	if status == jobStatusFailed {
+		// The model-facing failure text is composed from the retained window:
+		// the non-interactive diagnostics, the build-failure guidance and the
+		// "Relevant output" snippet all read it. It is composed again here,
+		// after the copy drained, because the composition at the exit signal
+		// can read a window the reaped process has already filled without the
+		// copy having caught up with it.
+		if rawErr, finished := waitCh.result(); finished && rawErr != nil {
+			err = j.formatRuntimeError(rawErr)
 		}
 	}
 	r.finish(j, status, detail, err)
+}
+
+// awaitJob drives the job's two-phase lifecycle. Phase one ends when the direct
+// command is reaped; phase two ends when its process group is drained. A cancel
+// or the deadline may arrive in either phase and tears the whole group down
+// through one shared stop protocol.
+func (r *JobRegistry) awaitJob(j *job, waitCh *commandWait, deadline <-chan time.Time) (jobStatus, string, error) {
+	select {
+	case reason := <-j.cancelCh:
+		return r.stopJob(j, waitCh, reason, false)
+	case <-deadline:
+		return r.stopJob(j, waitCh, jobTimeoutReason(j), true)
+	case <-waitCh.done:
+	}
+	exitErr, _ := waitCh.result()
+	if !tracksProcessGroups {
+		return exitOutcome(j, exitErr, false)
+	}
+	pgid := j.commandProcessGroupID()
+	if alive, _ := processGroupAlive(pgid); !alive {
+		return exitOutcome(j, exitErr, false)
+	}
+	// The direct command is gone but descendants that inherited its process
+	// group are not: they keep this job running and keep it killable. Publishing
+	// this boundary is what lets a foreground caller promote the job instead of
+	// blocking the turn until they exit on their own.
+	j.publishGroupPending()
+	return r.awaitGroupDrain(j, waitCh, deadline, exitErr, pgid)
+}
+
+// awaitGroupDrain waits for the process group of an already-reaped command to
+// empty out. The group's membership is the job's liveness signal: every member
+// inherited the group from the command, so the job stays active while the group
+// answers at all. The member listing taken here is the witness a later stop
+// checks before signalling, not liveness evidence — a descendant forked after
+// this sample is not in it.
+func (r *JobRegistry) awaitGroupDrain(j *job, waitCh *commandWait, deadline <-chan time.Time, exitErr error, pgid int) (jobStatus, string, error) {
+	if members := jobGroupMembers(pgid); len(members) > 0 {
+		j.setGroupWitness(members)
+	} else {
+		log.Warnf("job %s process group pgid=%d has no member witness; a stop will not signal it", j.ID, pgid)
+	}
+	ticker := time.NewTicker(jobGroupPollInterval)
+	defer ticker.Stop()
+	probeReported := false
+	for {
+		alive, known := processGroupAlive(pgid)
+		if !alive {
+			return exitOutcome(j, exitErr, true)
+		}
+		if !known && !probeReported {
+			probeReported = true
+			log.Warnf("job %s process group probe inconclusive pgid=%d; treating the group as still running", j.ID, pgid)
+		}
+		select {
+		case reason := <-j.cancelCh:
+			return r.stopJob(j, waitCh, reason, false)
+		case <-deadline:
+			return r.stopJob(j, waitCh, jobTimeoutReason(j), true)
+		case <-ticker.C:
+		}
+	}
+}
+
+// stopJob terminates the job's process group after a cancel or the deadline and
+// renders the terminal state. A stop that was not needed — the command finished
+// on its own before the request landed — keeps the command's real exit status
+// instead of overwriting it with a kill that lost the race.
+func (r *JobRegistry) stopJob(j *job, waitCh *commandWait, reason string, timeout bool) (jobStatus, string, error) {
+	// When the command had already exited, its own exit status is a fact the
+	// terminal state has to carry: the stop then targeted only the descendants it
+	// left behind, and the notice must not read as if the command itself was
+	// killed. When the stop killed the command itself, that status is not a
+	// user-facing fact and no note is added.
+	stop := stopJobProcessGroup(j, waitCh)
+	if stop.outcome == jobGroupStopUnneeded {
+		exitErr, _ := waitCh.result()
+		return exitOutcome(j, exitErr, false)
+	}
+	notes := make([]string, 0, 2)
+	if stop.leaderReapedBefore {
+		exitErr, _ := waitCh.result()
+		notes = append(notes, "the command had already exited with "+exitDetailText(exitErr))
+	}
+	if stop.outcome == jobGroupStopUnconfirmed {
+		notes = append(notes, stopUnconfirmedNote(tracksProcessGroups))
+	}
+	detail := strings.Join(append([]string{reason}, notes...), "; ")
+	err := fmt.Errorf("command %s", detail)
+	if timeout && !stop.leaderReapedBefore {
+		// A timeout otherwise invites an unchanged, equally slow re-run: the
+		// model cannot see the deadline it hit, so steer the next step. The
+		// guidance does not fit a stop that only had to clean up descendants.
+		err = fmt.Errorf("%w\n%s", err, shellTimeoutGuidance)
+	}
+	return jobStatusKilled, detail, err
+}
+
+// jobGroupStop is how one process-group teardown ended.
+type jobGroupStop struct {
+	outcome jobGroupStopOutcome
+	// leaderReapedBefore marks a stop that arrived after the direct command had
+	// already been reaped, so it only had descendants to stop.
+	leaderReapedBefore bool
+}
+
+type jobGroupStopOutcome uint8
+
+const (
+	// jobGroupStopUnneeded: the group was already gone when the stop was
+	// considered, so the command's own result stands.
+	jobGroupStopUnneeded jobGroupStopOutcome = iota
+	// jobGroupStopDrained: a signal was sent and the group was confirmed empty.
+	jobGroupStopDrained
+	// jobGroupStopUnconfirmed: the group still answered at the end of the grace
+	// budget, could not be attributed to this job at all, or the platform has no
+	// process groups to confirm. Callers must disclose that instead of reporting
+	// a clean stop.
+	jobGroupStopUnconfirmed
+)
+
+// stopUnconfirmedNote renders an unconfirmed stop in the terms of the platform
+// that produced it: where process groups are tracked, the group itself could
+// not be confirmed exited; where they are not, only the direct process could be
+// stopped and the descendants it left behind cannot be observed at all.
+func stopUnconfirmedNote(tracksGroups bool) string {
+	if tracksGroups {
+		return "the process group could not be confirmed exited"
+	}
+	return "this platform does not track process groups, so the command's descendants could not be stopped"
+}
+
+// stopJobProcessGroup sends SIGTERM to the job's process group, escalates to
+// SIGKILL after killGracePeriod and waits for both the direct command and the
+// group to settle. The group's own state decides when that wait is over: a
+// reaped direct command says nothing about the descendants it left behind, and
+// an ignored SIGTERM has to escalate.
+func stopJobProcessGroup(j *job, waitCh *commandWait) jobGroupStop {
+	leaderReaped := waitCh.isDone()
+	if !tracksProcessGroups {
+		// Without a process-group primitive only the direct process can be
+		// signalled, and the command's descendants are not tracked at all: their
+		// fate is unobservable, so a stop that had to kill the direct process
+		// reports unconfirmed instead of claiming a clean teardown.
+		if leaderReaped {
+			return jobGroupStop{outcome: jobGroupStopUnneeded, leaderReapedBefore: true}
+		}
+		_ = forceTerminateCommandProcessGroup(j.cmd)
+		if !waitForCommandExit(waitCh, killGracePeriod) {
+			log.Warnf("job %s direct process did not exit within %s of the stop; its descendants are untracked on this platform", j.ID, killGracePeriod)
+		}
+		return jobGroupStop{outcome: jobGroupStopUnconfirmed}
+	}
+
+	pgid := j.commandProcessGroupID()
+	members := stopWitness(j, leaderReaped)
+	stop := jobGroupStop{leaderReapedBefore: leaderReaped}
+	if alive, _ := processGroupAlive(pgid); !alive {
+		stop.outcome = jobGroupStopUnneeded
+		return stop
+	}
+	if leaderReaped && len(members) == 0 {
+		// No witness was ever recorded for this group (the member scan came
+		// back empty), so a live group number cannot be attributed to this job:
+		// it may have been recycled into an unrelated group, and signalling it
+		// would hit a stranger. Report the stop as unconfirmed instead.
+		log.Warnf("job %s not signalling process group pgid=%d: no descendant witness was recorded", j.ID, pgid)
+		stop.outcome = jobGroupStopUnconfirmed
+		return stop
+	}
+	if groupAttributionLost(pgid, leaderReaped, members) {
+		// No recorded member is still in this group, so the live group number
+		// may have been recycled into an unrelated one: a signal there would hit
+		// a stranger.
+		log.Warnf("job %s not signalling process group pgid=%d: no recorded member is still in the group", j.ID, pgid)
+		stop.outcome = jobGroupStopUnconfirmed
+		return stop
+	}
+	if err := terminateCommandProcessGroup(j.cmd); err != nil && processGroupAlreadyGone(err) {
+		// The group vanished between the probe and the signal.
+		stop.outcome = jobGroupStopDrained
+		return stop
+	}
+	if waitForGroupSettle(waitCh, pgid, killGracePeriod) {
+		stop.outcome = jobGroupStopDrained
+		return stop
+	}
+	if groupAttributionLost(pgid, leaderReaped, members) {
+		log.Warnf("job %s not escalating to SIGKILL for pgid=%d: no recorded member is still in the group", j.ID, pgid)
+		stop.outcome = jobGroupStopUnconfirmed
+		return stop
+	}
+	_ = forceTerminateCommandProcessGroup(j.cmd)
+	if waitForGroupSettle(waitCh, pgid, killGracePeriod) {
+		stop.outcome = jobGroupStopDrained
+		return stop
+	}
+	stop.outcome = jobGroupStopUnconfirmed
+	return stop
+}
+
+// stopWitness returns the descendant witness a stop checks against. It is only
+// meaningful once the direct command has been reaped; while the command still
+// runs the group is by definition this job's, so no witness is used and the
+// signals are sent unconditionally. Only the witness recorded while the group
+// was still known to be this job's counts: sampling the process table at stop
+// time would take whatever now answers to a recycled group number as this job's
+// identity, and signal a stranger's group.
+func stopWitness(j *job, leaderReaped bool) []int {
+	if !leaderReaped {
+		return nil
+	}
+	return j.recordedWitness()
+}
+
+// waitForGroupSettle waits up to budget for the process group to empty after a
+// signal and reports whether it drained. The direct command must be reaped as
+// well: a command that left its group (setsid) would otherwise be reported
+// stopped while it still runs.
+func waitForGroupSettle(waitCh *commandWait, pgid int, budget time.Duration) bool {
+	deadline := time.Now().Add(budget)
+	for {
+		if alive, _ := processGroupAlive(pgid); !alive {
+			return waitForCommandExit(waitCh, time.Until(deadline))
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return false
+		}
+		time.Sleep(min(jobGroupPollInterval, remaining))
+	}
+}
+
+// waitForCommandExit waits up to budget for the direct command to be reaped.
+func waitForCommandExit(waitCh *commandWait, budget time.Duration) bool {
+	if waitCh.isDone() {
+		return true
+	}
+	timer := time.NewTimer(budget)
+	defer timer.Stop()
+	select {
+	case <-waitCh.done:
+		return true
+	case <-timer.C:
+		return false
+	}
+}
+
+// groupAttributionLost reports whether the live group pgid can no longer be
+// attributed to this job. It is only answerable once the direct command has been
+// reaped: while the command still runs the group is by definition this job's.
+// An empty witness is not proof either — it means the member list could not be
+// collected — so the caller keeps the conservative reading.
+//
+// A recorded member ties the group to this job only while it is still in that
+// group: a process that leaves on purpose (setsid, setpgid) is outside the job
+// again, and its pid staying alive says nothing about who owns the group number
+// now. The member list is therefore re-read here instead of trusting liveness.
+// Once no recorded member is still in the group, the group may have been
+// recycled, or it may hold a descendant that was forked after the witness was
+// recorded, and nothing available here tells the two apart. The answer is
+// therefore used to withhold signals, never to end the job: the job stays active
+// while the group answers at all (see awaitGroupDrain), and a stop with no
+// attributable member reports itself unconfirmed instead of signalling a group
+// number that may have been recycled.
+func groupAttributionLost(pgid int, leaderReaped bool, members []int) bool {
+	if !leaderReaped || len(members) == 0 {
+		return false
+	}
+	current := jobGroupMembers(pgid)
+	for _, pid := range members {
+		if slices.Contains(current, pid) {
+			return false
+		}
+	}
+	return true
+}
+
+// exitOutcome renders the terminal state of a job whose own command decided the
+// result. groupDrained marks that descendants outlived the command, so the
+// status says the group drained instead of implying anything about how those
+// descendants exited.
+func exitOutcome(j *job, rawErr error, groupDrained bool) (jobStatus, string, error) {
+	if rawErr == nil {
+		return jobStatusCompleted, exitDetailLine("exit code 0", groupDrained), nil
+	}
+	return jobStatusFailed, exitDetailLine(shortExitDetail(rawErr), groupDrained), j.formatRuntimeError(rawErr)
+}
+
+func exitDetailLine(detail string, groupDrained bool) string {
+	if groupDrained {
+		return detail + "; the process group drained"
+	}
+	return detail
+}
+
+func exitDetailText(err error) string {
+	if err == nil {
+		return "exit code 0"
+	}
+	return shortExitDetail(err)
+}
+
+func jobTimeoutReason(j *job) string {
+	return fmt.Sprintf("timed out after %ds", j.MaxRuntimeSec)
+}
+
+// commandProcessGroupID returns the process group the command runs in. The
+// command leads its own session (Setsid), so the group id is its pid.
+func (j *job) commandProcessGroupID() int {
+	if j.cmd == nil || j.cmd.Process == nil {
+		return 0
+	}
+	return j.cmd.Process.Pid
+}
+
+// publishGroupPending closes the phase boundary exactly once, when the direct
+// command has been reaped while its process group still holds descendants.
+func (j *job) publishGroupPending() {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.groupPendingClosed {
+		return
+	}
+	j.groupPendingClosed = true
+	close(j.groupPending)
+}
+
+// groupPendingSignal returns the boundary channel a foreground caller waits on
+// to promote the job. It is never nil: a boundary already published shows up as
+// an already-closed channel.
+func (j *job) groupPendingSignal() <-chan struct{} {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.groupPending
+}
+
+func (j *job) setGroupWitness(members []int) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.groupWitness = members
+}
+
+func (j *job) recordedWitness() []int {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.groupWitness
+}
+
+// collectOutput copies the command's combined stdout/stderr into the job's
+// retained window and diagnostic log until every writer closes the pipe. run
+// owns this goroutine rather than cmd.Wait, so descendants that outlive the
+// command keep feeding the job.
+func (j *job) collectOutput(read *os.File) {
+	defer read.Close()
+	writers := make([]io.Writer, 0, 2)
+	if j.logWriter != nil {
+		writers = append(writers, j.logWriter)
+	}
+	writers = append(writers, j.output)
+	_, _ = io.Copy(io.MultiWriter(writers...), read)
+}
+
+// stopOutputCollector waits for the output copy to finish on its own EOF, then
+// releases the read end so a writer that escaped the job's process group
+// (setsid) cannot wedge the job on a pipe it still holds.
+func stopOutputCollector(read *os.File, done <-chan struct{}) {
+	select {
+	case <-done:
+		return
+	case <-time.After(jobOutputDrainGrace):
+	}
+	_ = read.Close()
+	select {
+	case <-done:
+	case <-time.After(jobOutputDrainGrace):
+		log.Warnf("job output collector did not stop after its pipe was closed")
+	}
+}
+
+// closeOutputPipes releases the job's pipe ends. Only the failed-start path
+// needs it: once the command runs, run hands the read end to the collector and
+// closes the parent's write end.
+func (j *job) closeOutputPipes() {
+	if j.outputPipeRead != nil {
+		_ = j.outputPipeRead.Close()
+		j.outputPipeRead = nil
+	}
+	if j.outputPipeWrite != nil {
+		_ = j.outputPipeWrite.Close()
+		j.outputPipeWrite = nil
+	}
 }
 
 // finish records the terminal state, wakes any waiter, and delivers the
@@ -487,7 +897,11 @@ func (j *job) statusText() string {
 	defer j.mu.Unlock()
 	switch j.status {
 	case jobStatusCompleted:
-		return "completed (exit code 0)"
+		// The detail is the exit fact plus whether descendants were still
+		// draining when the command itself exited: "exit code 0" alone is the
+		// ordinary case, and the drained marker is the one fact the model cannot
+		// infer from the code.
+		return "completed (" + j.detail + ")"
 	case jobStatusFailed:
 		if j.detail != "" {
 			return "failed (" + j.detail + ")"
@@ -699,6 +1113,10 @@ func shortExitDetail(err error) string {
 	return err.Error()
 }
 
+// commandWait publishes the direct command's exit. Because the job owns the
+// command's output pipe, cmd.Wait returns as soon as the process is reaped:
+// finished and done mean "the command itself exited" — never "its output ended"
+// and never "its process group drained".
 type commandWait struct {
 	mu       sync.Mutex
 	done     chan struct{}
@@ -723,6 +1141,13 @@ func (w *commandWait) result() (error, bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.err, w.finished
+}
+
+// isDone reports whether the direct command has been reaped.
+func (w *commandWait) isDone() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.finished
 }
 
 // cancelAll signals every id in one pass, then waits for them under a single
@@ -884,6 +1309,27 @@ type JobState struct {
 	Status        string
 	FinishedAt    time.Time
 	LastOutputAt  time.Time
+}
+
+// Active reports whether the job is still running or being stopped, i.e. part
+// of the live view job_list shows by default.
+func (s JobState) Active() bool {
+	switch jobStatus(s.Status) {
+	case jobStatusRunning, jobStatusStopping:
+		return true
+	default:
+		return false
+	}
+}
+
+// DeadlineAt returns the wall-clock deadline of a job that carries one, or the
+// zero time when it has none. It says nothing about whether the job already
+// finished; callers that only care about live jobs check Active first.
+func (s JobState) DeadlineAt() time.Time {
+	if s.MaxRuntimeSec <= 0 || s.StartedAt.IsZero() {
+		return time.Time{}
+	}
+	return s.StartedAt.Add(time.Duration(s.MaxRuntimeSec) * time.Second)
 }
 
 // Elapsed returns the job's terminal duration, or its live duration when it is
@@ -1119,50 +1565,6 @@ func (r *JobRegistry) evictFinishedLocked() {
 			r.noteClaimedLocked(c.j.ID)
 		}
 		delete(r.jobs, c.j.ID)
-	}
-}
-
-func terminateJobProcessGroup(cmd *exec.Cmd, reason string, waitCh *commandWait) (error, bool) {
-	if cmd == nil || cmd.Process == nil {
-		return fmt.Errorf("command %s", reason), false
-	}
-	// Hold the same lock the wait goroutine publishes under, so the "already
-	// finished" test and the stop signal cannot interleave with publication.
-	waitCh.mu.Lock()
-	if waitCh.finished {
-		err := waitCh.err
-		waitCh.mu.Unlock()
-		return err, true
-	}
-	signalErr := terminateCommandProcessGroup(cmd)
-	waitCh.mu.Unlock()
-	if processGroupAlreadyGone(signalErr) {
-		// The group no longer existed when the stop arrived: the command exited
-		// on its own, so its result wins even though the wait goroutine had not
-		// published it yet.
-		<-waitCh.done
-		err, _ := waitCh.result()
-		return err, true
-	}
-	select {
-	case <-waitCh.done:
-		err, _ := waitCh.result()
-		if err != nil {
-			return fmt.Errorf("command %s: %w", reason, err), false
-		}
-		return fmt.Errorf("command %s", reason), false
-	case <-time.After(killGracePeriod):
-		_ = forceTerminateCommandProcessGroup(cmd)
-		select {
-		case <-waitCh.done:
-			err, _ := waitCh.result()
-			if err != nil {
-				return fmt.Errorf("command %s: %w", reason, err), false
-			}
-			return fmt.Errorf("command %s", reason), false
-		case <-time.After(killGracePeriod):
-			return fmt.Errorf("command %s", reason), false
-		}
 	}
 }
 

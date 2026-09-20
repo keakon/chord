@@ -3433,7 +3433,6 @@ func TestBuildStructuredFallbackSummaryIncludesSections(t *testing.T) {
 		nil,
 		nil,
 		nil,
-		nil,
 	)
 	for _, heading := range compactionRequiredHeadings {
 		if !strings.Contains(summary, heading) {
@@ -3450,7 +3449,6 @@ func TestBuildStructuredFallbackSummaryUsesGoalAnchorWhenRecentTailMissing(t *te
 		"history-1.md",
 		&compactionInput{RecentTailAnchor: "- (none)", GoalAnchor: "- 分析当前压缩逻辑是否正确"},
 		fmt.Errorf("provider returned invalid summary"),
-		nil,
 		nil,
 		nil,
 		nil,
@@ -3479,7 +3477,6 @@ func TestBuildStructuredFallbackSummaryWithoutAnchorDoesNotInventActiveWork(t *t
 			{ID: "1", Status: "completed", Content: "ship completed docs update"},
 			{ID: "2", Status: "in_progress", Content: "debug older implementation issue"},
 		},
-		nil,
 		nil,
 	)
 	for _, forbidden := range []string{
@@ -4766,7 +4763,6 @@ func TestBuildTruncateOnlySummaryIncludesFilesAndEvidenceSection(t *testing.T) {
 		[]string{"internal/agent/compaction.go"},
 		nil,
 		nil,
-		nil,
 	)
 	for _, heading := range compactionRequiredHeadings {
 		if !strings.Contains(summary, heading) {
@@ -4804,7 +4800,6 @@ func TestExtractCompactionKeyFilesFromTruncateOnlySummary(t *testing.T) {
 		"history-1.md",
 		fmt.Errorf("utility model unavailable"),
 		[]string{"internal/agent/compaction.go"},
-		nil,
 		nil,
 		nil,
 	)
@@ -5962,7 +5957,6 @@ func TestStructuredFallbackSummaryDemotesTodosWhenDoneRejectionChangesTarget(t *
 		fmt.Errorf("summary quality fallback"),
 		nil,
 		[]tools.TodoItem{{ID: "old", Content: "update docs and commit the change", Status: "in_progress"}},
-		nil,
 		nil,
 	)
 	for _, want := range []string{

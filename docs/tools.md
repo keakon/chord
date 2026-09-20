@@ -45,7 +45,7 @@ When the queried position is not on an identifier — a line number that lands o
 | --- | --- |
 | `shell` | Run commands; long commands can continue as background jobs. See below. |
 | `job_output` | Read new job output, or wait briefly for output or completion. |
-| `job_list` | List the background jobs you can read or stop (id, status, elapsed, quiet duration, label), including jobs started by the main agent and by your direct owner. |
+| `job_list` | List the background jobs you can read or stop (id, status, elapsed, quiet duration, label), including jobs started by the main agent and by your direct owner. Only active jobs are listed unless `include_finished: true` is passed. |
 | `job_kill` | Stop a background job by `job_id`, with an optional `reason`. |
 
 ### Command execution and timeouts
@@ -56,7 +56,11 @@ A foreground command that cannot be promoted (one made only of deliberate waits 
 
 Long commands do not have to block the turn. A command that outlives its foreground budget keeps running as a background job, the tool card names its job id, and the agent is notified when the job finishes, so it can do independent work or end the turn and be woken by the completion instead of waiting.
 
+A job owns the whole process group its command starts, not only the direct child. A command that exits while children it started keep running stays active until they exit, and those children stay under the job's `timeout_ms` deadline, `job_kill`, and session cleanup, so `nohup … &` no longer escapes by outliving the wrapper that started it. A process that leaves the group on purpose (`setsid`, `setpgid`) is outside the job again — Chord does not scan the process tree for it. A stop signals the group only while a member it recorded when the command exited is still in that group; when that cannot be proven, `job_kill` reports the teardown as unconfirmed instead of signalling a group number that may have been recycled. Waiting needs no such proof: a job stays active while the group answers at all, so a descendant that inherits the group keeps the job alive even when Chord cannot list its pid. On platforms without process groups (Windows), a job still ends with its direct process: `job_kill`, the job's deadline, and session cleanup can only stop that process, and the result reports the teardown as unconfirmed because the descendants it may leave behind cannot be observed.
+
 `job_output` reads incremental output and only reports what is new, and a bounded wait that expires leaves the job alive. Consecutive job-completion wakes with no user input in between are bounded; after that, further completions wait for your next message. A background job also ends with the session (switching sessions or exiting the client stops it), so day-scale work belongs in an external runner such as tmux, systemd, or CI.
+
+`job_list` shows the jobs that are running or stopping, with the label, elapsed time, quiet duration, and how much of the deadline is left; pass `include_finished: true` to also see retained finished ones.
 
 ### Reading background output
 

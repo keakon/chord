@@ -763,9 +763,9 @@ type fallbackSummarySection struct {
 }
 
 // renderFallbackSummarySections renders heading + body pairs separated by blank
-// lines, then appends a preserved background-objects footer when present. Used
-// by both the structured-fallback and truncate-only summary builders.
-func renderFallbackSummarySections(sections []fallbackSummarySection, backgroundObjects []recovery.BackgroundObjectState) string {
+// lines. Used by both the structured-fallback and truncate-only summary
+// builders, and by the model-driven checkpoint renderer.
+func renderFallbackSummarySections(sections []fallbackSummarySection) string {
 	var sb strings.Builder
 	rendered := 0
 	for _, sec := range sections {
@@ -779,11 +779,6 @@ func renderFallbackSummarySections(sections []fallbackSummarySection, background
 		sb.WriteString("\n")
 		sb.WriteString(strings.TrimSpace(sec.body))
 		rendered++
-	}
-	if len(backgroundObjects) > 0 {
-		sb.WriteString("\n\n<!-- Background objects preserved:\n")
-		sb.WriteString(formatBackgroundObjectsForPrompt(backgroundObjects))
-		sb.WriteString("\n-->")
 	}
 	return strings.TrimSpace(sb.String())
 }
@@ -801,7 +796,7 @@ func isEmptyOptionalSummarySection(section fallbackSummarySection) bool {
 	return body == "" || body == "- (none reported by the model)" || body == "- No stage metadata reported by the model."
 }
 
-func buildStructuredFallbackSummary(historyPath string, input *compactionInput, summarizeErr error, keyFiles []string, todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState) string {
+func buildStructuredFallbackSummary(historyPath string, input *compactionInput, summarizeErr error, keyFiles []string, todos []tools.TodoItem, subAgents []SubAgentInfo) string {
 	anchor := fallbackContinuationAnchorForInput(input)
 	return renderFallbackSummarySections([]fallbackSummarySection{
 		{"## Current User Request", fallbackCurrentUserRequestSection(input)},
@@ -815,7 +810,7 @@ func buildStructuredFallbackSummary(historyPath string, input *compactionInput, 
 		{"## SubAgent State", formatSubAgentsAsBullets(subAgents)},
 		{"## Open Problems", fallbackOpenProblemsSection(input, summarizeErr)},
 		{"## Next Step", fallbackNextStepSection(input)},
-	}, backgroundObjects)
+	})
 }
 
 func fallbackCurrentUserRequestSection(input *compactionInput) string {
@@ -1483,7 +1478,7 @@ func blankToDefault(value, fallback string) string {
 	return value
 }
 
-func buildTruncateOnlySummary(historyPath string, summarizeErr error, keyFiles []string, todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState) string {
+func buildTruncateOnlySummary(historyPath string, summarizeErr error, keyFiles []string, todos []tools.TodoItem, subAgents []SubAgentInfo) string {
 	return renderFallbackSummarySections([]fallbackSummarySection{
 		{"## Current User Request", "- Latest request was not relevance-filtered because model summarization was unavailable; read the preserved recent context and archived history before acting."},
 		{"## Active Objective", "- Continue from the latest preserved user request; do not assume older todos remain active without checking relevance."},
@@ -1496,5 +1491,5 @@ func buildTruncateOnlySummary(historyPath string, summarizeErr error, keyFiles [
 		{"## SubAgent State", formatSubAgentsAsBullets(subAgents)},
 		{"## Open Problems", fallbackOpenProblemsSection(nil, summarizeErr)},
 		{"## Next Step", "- Continue from the latest preserved user request, archived history, and listed key files."},
-	}, backgroundObjects)
+	})
 }

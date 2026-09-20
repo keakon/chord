@@ -651,6 +651,15 @@ func nextHistoryIndexMinusOne(sessionDir string) int {
 	return next - 1
 }
 
+// jobStatesForSnapshotWithTime pairs the live job states with the instant they
+// were captured. A durable checkpoint renders its job block from frozen states,
+// so the pair is captured once: the label then matches the elapsed and
+// deadline numbers derived from it instead of drifting behind a later read.
+func jobStatesForSnapshotWithTime() ([]recovery.BackgroundObjectState, time.Time) {
+	now := time.Now()
+	return jobStatesForSnapshot(), now
+}
+
 func jobStatesForSnapshot() []recovery.BackgroundObjectState {
 	jobs := tools.SnapshotJobs()
 	if len(jobs) == 0 {

@@ -278,28 +278,48 @@ func (JobListTool) IsReadOnly() bool { return true }
 func (JobListTool) ConcurrencySafeReadOnly(json.RawMessage) bool { return true }
 
 func (JobListTool) Description() string {
-	return "List the background jobs you can read or stop (id, status, elapsed, quiet duration, label), including jobs started by the main agent and by your direct owner. Use it to see what is still running before deciding to wait, to do other work, or to end your turn."
+	return "List the background jobs you can read or stop (id, status, elapsed, quiet duration, label), including jobs started by the main agent and by your direct owner. Use it to see what is still running before deciding to wait, to do other work, or to end your turn. Only active jobs are listed by default; set include_finished:true to also list the retained terminal ones. A job row with a deadline shows how much of it is left."
+}
+
+type jobListArgs struct {
+	IncludeFinished bool `json:"include_finished,omitempty"`
 }
 
 func (JobListTool) Parameters() map[string]any {
 	return map[string]any{
-		"type":                 "object",
-		"properties":           map[string]any{},
+		"type": "object",
+		"properties": map[string]any{
+			"include_finished": map[string]any{
+				"type":        "boolean",
+				"description": "Set true to also list terminal jobs that are still retained. The default view lists only jobs that are running or stopping, which is what a long session accumulates: retained finished jobs are capped but never useful for deciding what to wait on.",
+			},
+		},
 		"additionalProperties": false,
 	}
 }
 
-func (JobListTool) Execute(ctx context.Context, _ json.RawMessage) (string, error) {
+func (JobListTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
+	var a jobListArgs
+	if len(raw) > 0 {
+		if err := json.Unmarshal(unwrapToolArgs(raw), &a); err != nil {
+			return "", fmt.Errorf("invalid arguments: %w", err)
+		}
+	}
 	states := SnapshotJobs()
 	now := time.Now()
 	var sb strings.Builder
 	shown := 0
+	hiddenFinished := 0
 	for _, state := range states {
 		// The list must show exactly the jobs the caller may act on: it filters
 		// by the same predicate job_output and job_kill enforce per id, so the
 		// model never sees a job it cannot read and never misses one it can. An
 		// unowned job or a caller with no agent id is denied rather than shown.
 		if !jobOwnerAccessibleFrom(ctx, state.AgentID) {
+			continue
+		}
+		if !state.Active() && !a.IncludeFinished {
+			hiddenFinished++
 			continue
 		}
 		if shown > 0 {
@@ -313,12 +333,36 @@ func (JobListTool) Execute(ctx context.Context, _ json.RawMessage) (string, erro
 		}
 		quiet := jobQuietPhrase(state, now)
 		fmt.Fprintf(&sb, "%s  %s  %s  %s  %s", state.ID, state.Status, FormatElapsed(elapsed), quiet, label)
+		if state.Active() {
+			if fact := jobDeadlineFact(state, now); fact != "" {
+				sb.WriteString("  ")
+				sb.WriteString(fact)
+			}
+		}
 		log.Debugf("job listed id=%v status=%v elapsed=%v quiet=%v has_deadline=%v", state.ID, state.Status, FormatElapsed(elapsed), quiet, state.MaxRuntimeSec > 0)
 	}
 	if shown == 0 {
+		if hiddenFinished > 0 {
+			return fmt.Sprintf("no active background jobs (%d recently finished hidden; pass include_finished:true to list them)", hiddenFinished), nil
+		}
 		return "no background jobs", nil
 	}
 	return sb.String(), nil
+}
+
+// jobDeadlineFact renders how much of a job's deadline is left, so a job about
+// to be killed by its own deadline cannot be mistaken for one that just started.
+// overdue means the deadline already passed and the job is still being torn
+// down.
+func jobDeadlineFact(state JobState, now time.Time) string {
+	deadline := state.DeadlineAt()
+	if deadline.IsZero() {
+		return ""
+	}
+	if remaining := deadline.Sub(now); remaining > 0 {
+		return "deadline: " + FormatElapsed(remaining) + " left"
+	}
+	return "deadline: overdue"
 }
 
 // JobKillTool stops a background job started by shell.

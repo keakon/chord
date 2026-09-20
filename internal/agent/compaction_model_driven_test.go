@@ -2494,7 +2494,7 @@ func TestRenderFallbackSummarySectionsDropsEmptyCheckpointStage(t *testing.T) {
 	rendered := renderFallbackSummarySections([]fallbackSummarySection{
 		{"## Current User Request", "- keep going"},
 		{"## Checkpoint Stage", renderModelDrivenStageSection("", "", "")},
-	}, nil)
+	})
 	if strings.Contains(rendered, "## Checkpoint Stage") {
 		t.Fatalf("empty stage section must be omitted, got:\n%s", rendered)
 	}
@@ -2505,7 +2505,7 @@ func TestRenderFallbackSummarySectionsDropsEmptyCheckpointStage(t *testing.T) {
 	kept := renderFallbackSummarySections([]fallbackSummarySection{
 		{"## Current User Request", "- keep going"},
 		{"## Checkpoint Stage", renderModelDrivenStageSection("stage-1", "completed", "committed")},
-	}, nil)
+	})
 	if !strings.Contains(kept, "## Checkpoint Stage") || !strings.Contains(kept, "Stage ID: stage-1") {
 		t.Fatalf("reported stage metadata must be kept, got:\n%s", kept)
 	}

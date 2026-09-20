@@ -8,14 +8,13 @@ import (
 	"os/exec"
 )
 
-type windowsProcessGroupHandle struct{}
+// tracksProcessGroups is false on Windows: there is no process-group primitive,
+// so a job's completion is the direct process exiting, exactly as before.
+const tracksProcessGroups = false
 
-func (windowsProcessGroupHandle) Close() error { return nil }
-
-func configureCommandProcessGroupImpl(cmd *exec.Cmd) (processGroupHandle, error) {
+func configureCommandProcessGroupImpl(cmd *exec.Cmd) {
 	// Windows does not support Unix process groups; keep default process attributes.
 	_ = cmd
-	return windowsProcessGroupHandle{}, nil
 }
 
 func terminateCommandProcessGroupImpl(cmd *exec.Cmd) error {
@@ -39,4 +38,18 @@ func forceTerminateCommandProcessGroupImpl(cmd *exec.Cmd) error {
 // stop signal arrived.
 func processGroupAlreadyGone(err error) bool {
 	return errors.Is(err, os.ErrProcessDone)
+}
+
+// processGroupAliveImpl cannot answer on Windows: there is no group to probe, so
+// the result is an unknown-yes and callers fall back to the direct process.
+func processGroupAliveImpl(pgid int) (bool, bool) {
+	_ = pgid
+	return true, false
+}
+
+// processGroupMembersImpl has no Windows equivalent: there is no group whose
+// members could be witnessed.
+func processGroupMembersImpl(pgid int) []int {
+	_ = pgid
+	return nil
 }

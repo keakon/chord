@@ -527,6 +527,23 @@ func TestHasUnreadOutputIsPerReader(t *testing.T) {
 	}
 }
 
+// A stop that could not be confirmed has to say why in the terms of the
+// platform that produced it: telling a caller where process groups are not
+// tracked that the group failed to exit would describe a wait that could never
+// happen there.
+func TestStopUnconfirmedNoteNamesThePlatformLimitation(t *testing.T) {
+	if note := stopUnconfirmedNote(true); !strings.Contains(note, "process group") {
+		t.Fatalf("group-platform note = %q, want the process group named as the unconfirmed part", note)
+	}
+	note := stopUnconfirmedNote(false)
+	if !strings.Contains(note, "platform") || !strings.Contains(note, "descendants") {
+		t.Fatalf("platform-without-groups note = %q, want the platform limitation and the descendants it left unstopped", note)
+	}
+	if strings.Contains(note, "process group could not be confirmed exited") {
+		t.Fatalf("platform-without-groups note = %q, must not claim a group wait failed", note)
+	}
+}
+
 // Every reader waiting on the same output generation must wake from one write.
 // The channel is closed, rather than receiving one shared token, so a main
 // agent and its owner cannot leave one another parked until the wait timeout.
