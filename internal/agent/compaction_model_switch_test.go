@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/keakon/chord/internal/config"
@@ -112,4 +113,56 @@ func TestReminderDoesNotStageOverPendingHigherPressureNotice(t *testing.T) {
 			t.Fatal("the warning must survive the reminder queue")
 		}
 	})
+}
+
+// TestModelSwitchAttachesSinglePressureNoticeToRequest is the end-to-end guard
+// for the reported bug: a model switch that crosses the new window's threshold
+// in the same cycle used to queue both the sticky reminder and the
+// higher-pressure notice, so the model received two prompts describing the same
+// pressure. The gate now queues only the notice that matches the trigger, and
+// this asserts the request the provider actually receives carries exactly one.
+func TestModelSwitchAttachesSinglePressureNoticeToRequest(t *testing.T) {
+	a := newReadyTestMainAgent(t)
+	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Threshold: 0.8}}}
+	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(100000, 100000, 0, 0.8)
+	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "continue the task"})
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 90000}) // 0.9: above both the reminder line and the threshold
+	// The running model just changed: the applied threshold still belongs to the
+	// previous model, so this gate re-derives it and reads the crossing.
+	a.appliedCompactionModelRef = "provider/previous-model"
+	enableTestCompactContext(a)
+	provider := &blockingStreamProvider{calls: []scriptedStreamCall{{
+		resp: &message.Response{Content: "still running", StopReason: "stop"},
+	}}}
+	providerCfg := llm.NewProviderConfig("provider", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"current-model": {Limit: config.ModelLimit{Context: 100000, Input: 100000, Output: 4096}},
+		},
+	}, []string{"test-key"})
+	a.llmClient = llm.NewClient(providerCfg, provider, "current-model", 4096, "sys")
+	a.newTurn()
+	a.started.Store(true)
+	t.Cleanup(func() {
+		if a.IsCompactionRunning() {
+			a.handleCompactionCancel()
+		}
+		a.compactionWg.Wait()
+	})
+
+	a.beginMainLLMAfterPreparation(a.turn.Ctx, a.turn.ID, "")
+
+	waitForBlockingStreamProviderCalls(t, provider, 1)
+	requests, _ := provider.snapshot()
+	notices := 0
+	for _, msg := range requests[0] {
+		// The reminder and the countdown share the checkpoint-pressure action
+		// text; the externalization warning has its own wording.
+		if strings.Contains(msg.Content, contextCheckpointPressureAction) || strings.Contains(msg.Content, compactionWarningText) {
+			notices++
+		}
+	}
+	if notices != 1 {
+		t.Fatalf("the dispatched request carried %d context-pressure notices, want exactly one", notices)
+	}
 }

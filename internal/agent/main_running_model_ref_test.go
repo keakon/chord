@@ -573,6 +573,66 @@ func TestMainTurnCancelledReleasesCommittedFallbackRef(t *testing.T) {
 	}
 }
 
+// TestMainTurnCancelledReleasesOversizeSuspendedFallbackRef pins the cancel
+// contract for a round held behind a pending compaction: the oversize
+// suspension legitimately keeps the narrowed fallback's identity and budgets
+// because the continuation is admitted against that same window, but cancelling
+// the turn ends the round for good, so the sidebar must drop the suspended
+// target and return to the cursor the next request starts from.
+func TestMainTurnCancelledReleasesOversizeSuspendedFallbackRef(t *testing.T) {
+	a := newReadyTestMainAgent(t)
+	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Threshold: 0.8}}}
+	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(128000, 100000, 0, 0.8)
+	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "continue the task"})
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 90000})
+	a.newTurn()
+	turn := a.turn
+	a.started.Store(true)
+
+	client := llm.NewClient(newSidebarTestProviderConfig("primary-prov", "primary-model", 128000, 100000), &blockingStreamProvider{}, "primary-model", 4096, "sys")
+	client.SetFallbackModels([]llm.FallbackModel{{
+		ProviderConfig: newSidebarTestProviderConfig("second-prov", "second-model", 64000, 64000),
+		ProviderImpl:   &blockingStreamProvider{},
+		ModelID:        "second-model",
+		MaxTokens:      4096,
+		ContextLimit:   64000,
+		InputLimit:     64000,
+	}})
+	a.swapLLMClientWithRef(client, "primary-model", 128000, "primary-prov/primary-model")
+
+	// The oversize suspension commits the narrower fallback at the boundary and
+	// then holds the round behind the running compaction. callLLMForRequest keeps
+	// that committed target because the continuation is admitted against the same
+	// budgets, so this is the state the cancel path must clean up.
+	a.applyRunningModelRefIfCurrent(client, "second-prov/second-model", 64000, 64000)
+	a.compactionState.oversizeSuspended = true
+	if got := a.RunningModelRef(); got != "second-prov/second-model" {
+		t.Fatalf("precondition: RunningModelRef = %q, want the suspended fallback", got)
+	}
+	if got := a.ctxMgr.GetMaxTokens(); got != 64000 {
+		t.Fatalf("precondition: context window = %d, want the suspended fallback's 64000", got)
+	}
+
+	if !a.CancelCurrentTurn() {
+		t.Fatal("CancelCurrentTurn() = false, want true")
+	}
+	a.handleTurnCancelled(Event{
+		Type:    EventTurnCancelled,
+		TurnID:  turn.ID,
+		Payload: &TurnCancelledPayload{TurnID: turn.ID},
+	})
+
+	if got, want := a.RunningModelRef(), client.NextRequestModelRef(); got != want {
+		t.Fatalf("RunningModelRef after cancelling the oversize suspension = %q, want the cursor head %q", got, want)
+	}
+	if got := client.NextRequestModelRef(); got != "primary-prov/primary-model" {
+		t.Fatalf("cursor head after cancellation = %q, want primary-prov/primary-model", got)
+	}
+	if got := a.ctxMgr.GetMaxTokens(); got != 128000 {
+		t.Fatalf("context window after cancelling the oversize suspension = %d, want the cursor model's 128000", got)
+	}
+}
+
 // TestSubAgentRunningModelRefFollowsConfirmedSwitchOnly pins the worker's
 // identity rule: an attempt target announced before any visible output must not
 // move the displayed model, the first visible output confirms it, and the end of

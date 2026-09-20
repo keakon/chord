@@ -271,12 +271,15 @@ type MainAgent struct {
 	// (TUI, shutdown) read it via CancelCurrentTurn() / Shutdown().
 	turnMu sync.Mutex
 
-	// llmMu protects llmClient, modelName, providerModelRef, running-model
-	// continuity, and model-run cache-warmth state for
-	// cross-goroutine access. The TUI goroutine reads ModelName() and
-	// ProviderModelRef() from View(), while SwapLLMClient / SwitchModel
-	// write these fields. callLLM snapshots under RLock at the start
-	// to ensure consistent model name for hooks and usage tracking.
+	// llmMu protects llmClient, modelName, providerModelRef,
+	// appliedCompactionModelRef, running-model continuity, and model-run
+	// cache-warmth state for cross-goroutine access. The TUI goroutine reads
+	// ModelName() and ProviderModelRef() from View(), while SwapLLMClient /
+	// SwitchModel write these fields. callLLM snapshots under RLock at the start
+	// to ensure consistent model name for hooks and usage tracking. Model writers
+	// serialize identity, budgets, and event delivery with modelUpdateMu; readers
+	// only take llmMu, which is released before any blocking output delivery.
+	modelUpdateMu        sync.Mutex
 	llmMu                sync.RWMutex
 	installedSysPrompt   string
 	systemPromptOverride string
@@ -1533,6 +1536,18 @@ func (a *MainAgent) handleTurnCancelled(evt Event) {
 	}
 
 	a.mainLLMRequestInFlight.Store(false)
+	// Cancelling the turn ends it: nothing resumes behind the pending
+	// compaction, so a round suspended oversize on a narrower fallback must
+	// release that committed identity and its budgets back to the cursor the
+	// next request starts from. callLLMForRequest deliberately keeps the
+	// committed target while the suspension can resume, so this is the only
+	// cancel path that has to realign it; every other cancel already returns
+	// through that request-side realign.
+	if a.compactionState.oversizeSuspended {
+		if client, _ := a.mainLLMAndRef(); client != nil {
+			a.syncRunningModelRefToCursorHead(client)
+		}
+	}
 	a.savePartialAssistantMsg()
 	if payload.KeepPendingUserMessagesQueued {
 		a.suspendPendingUserDrain()

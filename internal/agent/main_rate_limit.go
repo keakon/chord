@@ -39,13 +39,20 @@ func (a *MainAgent) currentRateLimitProviderName() string {
 // ignoring any TUI-focused SubAgent.
 func (a *MainAgent) mainLLMAndRef() (client *llm.Client, ref string) {
 	a.llmMu.RLock()
-	client = a.llmClient
-	ref = strings.TrimSpace(a.runningModelRef)
+	defer a.llmMu.RUnlock()
+	return a.llmClient, a.mainModelRefLocked()
+}
+
+// mainModelRefLocked resolves the effective MainAgent model ref: the running ref
+// when a fallback or switch has set one, else the selected ref. The caller must
+// hold llmMu so the resolved ref is read, compared, and stored against refs from
+// the same snapshot.
+func (a *MainAgent) mainModelRefLocked() string {
+	ref := strings.TrimSpace(a.runningModelRef)
 	if ref == "" {
 		ref = strings.TrimSpace(a.providerModelRef)
 	}
-	a.llmMu.RUnlock()
-	return client, ref
+	return ref
 }
 
 // tuiFocusedLLMAndRef returns the LLM client and provider/model ref for the
@@ -129,7 +136,12 @@ func (a *MainAgent) clearInlineRateLimitSnapshotForCurrentMainClient(ref string)
 // clearCurrentRateLimitSnapshot drops the cached/key-polled rate-limit snapshot
 // of the provider that rotated its key. ref is the attempt target the rotation
 // came from, so a rotation inside an unconfirmed fallback clears that
-// provider's snapshot instead of the sidebar model's.
+// provider's snapshot instead of the sidebar model's. It resolves the provider
+// name from the ref's provider segment because the cached map is keyed by that
+// name — unlike clearInlineRateLimitSnapshotForCurrentMainClient, which resolves
+// the same ref to a *llm.ProviderConfig to clear the client-side inline
+// snapshot. Both target the same rotating attempt; only the object they clear
+// differs.
 func (a *MainAgent) clearCurrentRateLimitSnapshot(ref string) {
 	providerName := ""
 	if ref = strings.TrimSpace(ref); strings.Contains(ref, "/") {

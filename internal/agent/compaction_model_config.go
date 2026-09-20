@@ -121,23 +121,24 @@ func (a *MainAgent) applyModelCompactionConfig() {
 	if a == nil || a.ctxMgr == nil {
 		return
 	}
-	modelRef := a.runningModelRef
-	if modelRef == "" {
-		modelRef = a.providerModelRef
-	}
+	// The event loop owns the threshold, grace, and notice updates, including
+	// fallback boundaries. Serialize this application with request callbacks
+	// that can change the running model and its budgets while the loop runs.
+	a.modelUpdateMu.Lock()
+	defer a.modelUpdateMu.Unlock()
+	a.llmMu.Lock()
+	modelRef := a.mainModelRefLocked()
 	previousModelRef := a.appliedCompactionModelRef
-	modelChanged := false
-	if modelRef != a.appliedCompactionModelRef {
-		// A real model change (not the first application after construction,
-		// where appliedCompactionModelRef is still the zero value) marks the
-		// switch so the armed usage-driven request is re-evaluated below.
-		if a.appliedCompactionModelRef != "" {
-			modelChanged = true
-			// The new model re-evaluates usage against its own threshold,
-			// so the previous window's grace state does not carry over.
-			a.clearCompactionGrace()
-		}
-		a.appliedCompactionModelRef = modelRef
+	// A real model change (not the first application after construction, where
+	// appliedCompactionModelRef is still the zero value) marks the switch so the
+	// armed usage-driven request is re-evaluated below.
+	modelChanged := previousModelRef != "" && previousModelRef != modelRef
+	a.appliedCompactionModelRef = modelRef
+	a.llmMu.Unlock()
+	if modelChanged {
+		// The new model re-evaluates usage against its own threshold, so the
+		// previous window's grace state does not carry over.
+		a.clearCompactionGrace()
 	}
 	previousThreshold := a.ctxMgr.Threshold()
 	newThreshold := a.effectiveCompactionThreshold(modelRef)

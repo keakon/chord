@@ -747,8 +747,10 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Me
 		// ends without a confirmed switch must return the sidebar to it: leaving
 		// a failed attempt's target in place would show one model's name with
 		// another model's keys, window, and limits. An oversize suspension that
-		// resumes this same turn keeps its target: the continuation re-applies
-		// the committed budgets for the retry.
+		// resumes this same turn keeps its target: the continuation is admitted
+		// against those same committed budgets, so widening the sidebar to the
+		// cursor head's window here would stop the compaction line from tracking
+		// the window the resumed request is admitted against.
 		// Both gate flags are read once: the classification here and the oversize
 		// branch below must not disagree when a compaction starts or finishes
 		// between the two reads.

@@ -163,69 +163,11 @@ func (a *MainAgent) RunningModelRef() string {
 	return a.runningModelRef
 }
 
-// applyRunningModelRef makes ref the sidebar's single effective running model for
-// the MainAgent: the identity, the matching context budgets, and the
-// RunningModelChanged event are applied for the same ref, so the displayed model
-// name can never settle on another model's window and limits. Budgets are set
-// before the identity write (the same order swapLLMClientWithRef uses: llmMu is
-// never held across ctxMgr), so concurrent readers may observe a transient
-// window; the identity itself is always the last write for its own ref.
-// It is applied when a switch is confirmed (the target emitted its first
-// visible token, key_confirmed, or the request succeeded), when a request ends
-// without a confirmed switch (the realign back to the cursor head), and at a
-// fallback downshift boundary: the compaction line must already track the
-// narrower window the request is admitted against, so the boundary commits
-// before the fallback confirms and an unconfirmed round returns to the cursor
-// head through this same entry.
-// contextLimit/inputLimit may be 0 to resolve them from the snapshot client for
-// ref.
-func (a *MainAgent) applyRunningModelRef(llmClient *llm.Client, ref string, contextLimit, inputLimit int) {
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
-		return
-	}
-	if a.ctxMgr != nil {
-		if llmClient != nil {
-			if contextLimit <= 0 {
-				contextLimit = llmClient.ContextLimitForModelRef(ref)
-			}
-			if inputLimit <= 0 {
-				inputLimit = llmClient.InputLimitForModelRef(ref)
-			}
-		}
-		if contextLimit > 0 {
-			a.ctxMgr.SetTokenBudgets(contextLimit, inputLimit, a.effectiveCompactionReservedInput())
-		}
-	}
-	a.llmMu.Lock()
-	prev := a.runningModelRef
-	a.runningModelRef = ref
-	provRef := a.providerModelRef
-	a.llmMu.Unlock()
-	if ref == prev {
-		return
-	}
-	a.emitToTUI(RunningModelChangedEvent{
-		AgentID:          identity.MainAgentID,
-		ProviderModelRef: provRef,
-		RunningModelRef:  ref,
-	})
-}
-
-// applyRunningModelRefIfCurrent applies ref only while llmClient is still the
-// installed client. A concurrent model switch installs a new client and moves
-// the running ref with it; identity applications from a superseded request's
-// captured client — its key_confirmed, its successful response, or its
-// failed-round realign — must not overwrite that identity. A nil capture
-// carries no client identity: nothing can prove it superseded, so it applies
-// unconditionally through applyRunningModelRef. The currency check and the
-// identity write share one critical section so a concurrent switch installing
-// a new client cannot slip between them; limits are resolved from the captured
-// client beforehand (the pointer is stable, and a superseded capture is
-// discarded by the check). Budgets follow the existing swap ordering (identity
-// under llmMu, budgets on ctxMgr afterwards), so readers may observe a
-// transient window — the same trade-off swapLLMClientWithRef makes to avoid
-// holding llmMu across ctxMgr.
+// applyRunningModelRefIfCurrent applies a captured client's model identity and
+// budgets only while that client is still installed. A nil capture applies
+// unconditionally. modelUpdateMu serializes the state change and its event with
+// other request callbacks and model installations; llmMu protects readers but
+// is released before sending the event so output backpressure cannot block them.
 func (a *MainAgent) applyRunningModelRefIfCurrent(llmClient *llm.Client, ref string, contextLimit, inputLimit int) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
@@ -238,29 +180,29 @@ func (a *MainAgent) applyRunningModelRefIfCurrent(llmClient *llm.Client, ref str
 		if inputLimit <= 0 {
 			inputLimit = llmClient.InputLimitForModelRef(ref)
 		}
-		a.llmMu.Lock()
-		if a.llmClient != llmClient {
-			a.llmMu.Unlock()
-			return
-		}
-		prev := a.runningModelRef
-		a.runningModelRef = ref
-		provRef := a.providerModelRef
+	}
+	a.modelUpdateMu.Lock()
+	defer a.modelUpdateMu.Unlock()
+	a.llmMu.Lock()
+	if llmClient != nil && a.llmClient != llmClient {
 		a.llmMu.Unlock()
-		if a.ctxMgr != nil && contextLimit > 0 {
-			a.ctxMgr.SetTokenBudgets(contextLimit, inputLimit, a.effectiveCompactionReservedInput())
-		}
-		if ref == prev {
-			return
-		}
-		a.emitToTUI(RunningModelChangedEvent{
-			AgentID:          identity.MainAgentID,
-			ProviderModelRef: provRef,
-			RunningModelRef:  ref,
-		})
 		return
 	}
-	a.applyRunningModelRef(nil, ref, contextLimit, inputLimit)
+	if a.ctxMgr != nil && contextLimit > 0 {
+		a.ctxMgr.SetTokenBudgets(contextLimit, inputLimit, a.effectiveCompactionReservedInput())
+	}
+	prev := a.runningModelRef
+	a.runningModelRef = ref
+	provRef := a.providerModelRef
+	a.llmMu.Unlock()
+	if ref == prev {
+		return
+	}
+	a.emitToTUI(RunningModelChangedEvent{
+		AgentID:          identity.MainAgentID,
+		ProviderModelRef: provRef,
+		RunningModelRef:  ref,
+	})
 }
 
 // syncRunningModelRefToCursorHead realigns the sidebar with the sticky model
@@ -403,6 +345,8 @@ func (a *MainAgent) RunningVariant() string {
 // The ref is usually "provider/model" and may optionally include an inline
 // @variant suffix. Called from startup/model-switch wiring after construction.
 func (a *MainAgent) SetProviderModelRef(ref string) {
+	a.modelUpdateMu.Lock()
+	defer a.modelUpdateMu.Unlock()
 	a.llmMu.Lock()
 	defer a.llmMu.Unlock()
 	a.providerModelRef = ref
@@ -445,6 +389,12 @@ func (a *MainAgent) SwapLLMClient(newClient *llm.Client, modelName string, conte
 // swapLLMClientWithRef is the internal implementation of SwapLLMClient that
 // also atomically updates providerModelRef when non-empty.
 func (a *MainAgent) swapLLMClientWithRef(newClient *llm.Client, modelName string, contextLimit int, providerModelRef string) {
+	a.modelUpdateMu.Lock()
+	defer a.modelUpdateMu.Unlock()
+	a.swapLLMClientWithRefLocked(newClient, modelName, contextLimit, providerModelRef)
+}
+
+func (a *MainAgent) swapLLMClientWithRefLocked(newClient *llm.Client, modelName string, contextLimit int, providerModelRef string) {
 	a.llmMu.Lock()
 	oldClient := a.llmClient
 	oldRunningRef := a.runningModelRef
@@ -458,6 +408,11 @@ func (a *MainAgent) swapLLMClientWithRef(newClient *llm.Client, modelName string
 	}
 	newRunningRef := a.runningModelRef
 	a.installedSysPrompt = ""
+	if newClient != nil {
+		a.ctxMgr.SetTokenBudgets(contextLimit, newClient.InputLimitForModelRef(providerModelRef), a.effectiveCompactionReservedInput())
+	} else {
+		a.ctxMgr.SetMaxTokens(contextLimit)
+	}
 	a.llmMu.Unlock()
 	if oldClient != nil && oldClient != newClient {
 		oldClient.Close()
@@ -472,11 +427,6 @@ func (a *MainAgent) swapLLMClientWithRef(newClient *llm.Client, modelName string
 		a.markRuntimeSurfaceDirty()
 	}
 	a.noteContextSurfaceIdentityChanged()
-	if newClient != nil {
-		a.ctxMgr.SetTokenBudgets(contextLimit, newClient.InputLimitForModelRef(providerModelRef), a.effectiveCompactionReservedInput())
-	} else {
-		a.ctxMgr.SetMaxTokens(contextLimit)
-	}
 
 	// Wire the polled-rate-limit callback so that background /wham/usage poll
 	// results push a RateLimitUpdatedEvent to the TUI immediately, instead of
@@ -603,10 +553,12 @@ func (a *MainAgent) installPreparedMainModel(prepared *preparedMainModel) {
 	if prepared == nil || prepared.client == nil {
 		return
 	}
+	a.modelUpdateMu.Lock()
+	defer a.modelUpdateMu.Unlock()
 	if sid := strings.TrimSpace(filepath.Base(a.sessionDir)); sid != "" && sid != "." {
 		prepared.client.SetSessionID(sid)
 	}
-	a.swapLLMClientWithRef(prepared.client, prepared.modelName, prepared.contextLimit, prepared.selectedRef)
+	a.swapLLMClientWithRefLocked(prepared.client, prepared.modelName, prepared.contextLimit, prepared.selectedRef)
 	a.mainModelPolicyDirty.Store(false)
 	if a.modelPoolPolicy != nil {
 		cfg := a.currentActiveConfig()

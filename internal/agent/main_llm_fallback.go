@@ -78,7 +78,7 @@ func (a *MainAgent) applyFallbackModelDownshift(payload *llmFallbackBoundaryPayl
 	}
 
 	client, _ := a.mainLLMAndRef()
-	a.applyRunningModelRef(client, payload.fallbackModelRef, payload.fallbackContextLimit, payload.fallbackInputLimit)
+	a.applyRunningModelRefIfCurrent(client, payload.fallbackModelRef, payload.fallbackContextLimit, payload.fallbackInputLimit)
 	a.applyModelCompactionConfig()
 }
 
