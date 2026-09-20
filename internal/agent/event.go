@@ -993,10 +993,13 @@ type QuestionRequestEvent struct {
 	Question      string
 	Options       []string
 	OptionDetails []string
-	DefaultAnswer string
 	Multiple      bool
 	RequestID     string
-	Timeout       time.Duration
+	// Deadline is the absolute time after which the request is closed as
+	// no_response. The zero value means wait indefinitely. Clients show a
+	// countdown from it but never close the dialog on their own; a matching
+	// QuestionResolvedEvent is the only signal that the request ended.
+	Deadline time.Time
 	// AgentID is the instance id of the agent whose question tool call
 	// triggered the request, normalized so "main" identifies the main agent.
 	// The TUI switches focus to this agent so the user sees the context the
@@ -1005,6 +1008,25 @@ type QuestionRequestEvent struct {
 }
 
 func (QuestionRequestEvent) agentEvent() {}
+
+// QuestionResolvedEvent reports that a published question request reached a
+// terminal state, so clients can drop the matching pending dialog. It carries
+// no answer: the tool result is the only place a model-visible outcome lives.
+type QuestionResolvedEvent struct {
+	RequestID string
+	// Reason is answered, declined, no_response, superseded, cancelled, or
+	// error.
+	Reason string
+}
+
+func (QuestionResolvedEvent) agentEvent() {}
+
+// Question close reasons that are not model-visible question outcomes. They
+// mean the request was closed by the system rather than answered or timed out.
+const (
+	QuestionResolvedReasonCancelled = "cancelled"
+	QuestionResolvedReasonError     = "error"
+)
 
 // ---------------------------------------------------------------------------
 // Granular activity tracking

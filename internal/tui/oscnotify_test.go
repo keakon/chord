@@ -26,28 +26,30 @@ func (loopBusyAgentStub) QueuePendingUserDraft(string, []message.ContentPart) bo
 func (loopBusyAgentStub) UpdatePendingUserDraft(string, []message.ContentPart) bool { return false }
 func (loopBusyAgentStub) RemovePendingUserDraft(string) bool                        { return false }
 func (loopBusyAgentStub) ResolveConfirm(string, string, string, string, string)     {}
-func (loopBusyAgentStub) ResolveQuestion([]string, bool, string)                    {}
-func (loopBusyAgentStub) ResolveHandoff(string, string, string, string)             {}
-func (loopBusyAgentStub) ProviderModelRef() string                                  { return "" }
-func (loopBusyAgentStub) RunningModelRef() string                                   { return "" }
-func (loopBusyAgentStub) RunningVariant() string                                    { return "" }
-func (loopBusyAgentStub) CurrentPoolName() string                                   { return "" }
-func (loopBusyAgentStub) PoolNames() []string                                       { return nil }
-func (loopBusyAgentStub) MainModelPoolName() string                                 { return "" }
-func (loopBusyAgentStub) MainModelPoolNames() []string                              { return nil }
-func (loopBusyAgentStub) AgentOverridePoolName(string) (string, bool)               { return "", false }
-func (loopBusyAgentStub) SetCurrentModelPool(string) error                          { return nil }
-func (loopBusyAgentStub) SetAgentModelPool(string, string) error                    { return nil }
-func (loopBusyAgentStub) GetSubAgents() []agent.SubAgentInfo                        { return nil }
-func (loopBusyAgentStub) GetMessages() []message.Message                            { return nil }
-func (loopBusyAgentStub) SwitchFocus(string)                                        {}
-func (loopBusyAgentStub) FocusedAgentID() string                                    { return "" }
-func (loopBusyAgentStub) FocusedAgentName() string                                  { return "" }
-func (loopBusyAgentStub) StartupResumeStatus() (bool, string)                       { return false, "" }
-func (loopBusyAgentStub) ContinueFromContext()                                      {}
-func (loopBusyAgentStub) RemoveLastMessage()                                        {}
-func (loopBusyAgentStub) GetTokenUsage() message.TokenUsage                         { return message.TokenUsage{} }
-func (loopBusyAgentStub) GetUsageStats() analytics.SessionStats                     { return analytics.SessionStats{} }
+func (loopBusyAgentStub) ResolveQuestion([]string, string, string) (string, bool) {
+	return "", true
+}
+func (loopBusyAgentStub) ResolveHandoff(string, string, string, string) {}
+func (loopBusyAgentStub) ProviderModelRef() string                      { return "" }
+func (loopBusyAgentStub) RunningModelRef() string                       { return "" }
+func (loopBusyAgentStub) RunningVariant() string                        { return "" }
+func (loopBusyAgentStub) CurrentPoolName() string                       { return "" }
+func (loopBusyAgentStub) PoolNames() []string                           { return nil }
+func (loopBusyAgentStub) MainModelPoolName() string                     { return "" }
+func (loopBusyAgentStub) MainModelPoolNames() []string                  { return nil }
+func (loopBusyAgentStub) AgentOverridePoolName(string) (string, bool)   { return "", false }
+func (loopBusyAgentStub) SetCurrentModelPool(string) error              { return nil }
+func (loopBusyAgentStub) SetAgentModelPool(string, string) error        { return nil }
+func (loopBusyAgentStub) GetSubAgents() []agent.SubAgentInfo            { return nil }
+func (loopBusyAgentStub) GetMessages() []message.Message                { return nil }
+func (loopBusyAgentStub) SwitchFocus(string)                            {}
+func (loopBusyAgentStub) FocusedAgentID() string                        { return "" }
+func (loopBusyAgentStub) FocusedAgentName() string                      { return "" }
+func (loopBusyAgentStub) StartupResumeStatus() (bool, string)           { return false, "" }
+func (loopBusyAgentStub) ContinueFromContext()                          {}
+func (loopBusyAgentStub) RemoveLastMessage()                            {}
+func (loopBusyAgentStub) GetTokenUsage() message.TokenUsage             { return message.TokenUsage{} }
+func (loopBusyAgentStub) GetUsageStats() analytics.SessionStats         { return analytics.SessionStats{} }
 func (loopBusyAgentStub) GetSidebarUsageStats() analytics.SessionStats {
 	return analytics.SessionStats{}
 }

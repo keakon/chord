@@ -71,7 +71,7 @@ func TestCreateRuntimeWiresConfirmAndQuestionTools(t *testing.T) {
 		questionDone <- err
 	}()
 	questionReq := waitForQuestionRequestEvent(t, ac.MainAgent.Events())
-	ac.MainAgent.ResolveQuestion([]string{"yes"}, false, questionReq.RequestID)
+	_, _ = ac.MainAgent.ResolveQuestion([]string{"yes"}, tools.QuestionOutcomeAnswered, questionReq.RequestID)
 	if err := <-questionDone; err != nil {
 		t.Fatalf("Question tool via runtime wiring: %v", err)
 	}
@@ -319,7 +319,7 @@ func TestCreateRuntimeQuestionToolRoundTripReturnsAnswers(t *testing.T) {
 		questionDone <- out
 	}()
 	questionReq := waitForQuestionRequestEvent(t, ac.MainAgent.Events())
-	ac.MainAgent.ResolveQuestion([]string{"yes"}, false, questionReq.RequestID)
+	_, _ = ac.MainAgent.ResolveQuestion([]string{"yes"}, tools.QuestionOutcomeAnswered, questionReq.RequestID)
 	out := <-questionDone
 	var answers []tools.QuestionAnswer
 	if err := json.Unmarshal([]byte(out), &answers); err != nil {

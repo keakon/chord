@@ -277,7 +277,7 @@ func TestWalltimeQuestionAnswerClassifiesAsUserWaitOnly(t *testing.T) {
 	}
 	time.Sleep(30 * time.Millisecond)
 	waitBefore := a.walltime.statsForAgent(identity.MainAgentID).UserWait
-	a.ResolveQuestion([]string{"a"}, false, requestID)
+	_, _ = a.ResolveQuestion([]string{"a"}, tools.QuestionOutcomeAnswered, requestID)
 	<-execDone
 
 	if execErr != nil {

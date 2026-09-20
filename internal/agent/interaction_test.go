@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/permission"
+	"github.com/keakon/chord/internal/tools"
 )
 
 // testWalltimeTarget builds a walltime target pinned to a throwaway recorder,
@@ -68,7 +69,9 @@ func TestResolveConfirmWithRuleIntentPassesIntent(t *testing.T) {
 func TestInteractionBrokerResolveUnknownIsNoop(t *testing.T) {
 	b := newInteractionBroker(nil)
 	b.resolveConfirm("missing", ConfirmResponse{Approved: true})
-	b.resolveQuestion("missing", QuestionResponse{})
+	if _, _, ok := b.terminateQuestion("missing", tools.QuestionOutcomeDeclined, nil); ok {
+		t.Fatal("terminating an unknown question must be a no-op")
+	}
 }
 
 // TestInteractionBrokerAwaitConfirmResolves verifies the register→await→resolve
@@ -170,13 +173,10 @@ func TestInteractionBrokerConcurrentConfirmAndQuestionFlows(t *testing.T) {
 		go func(n int) {
 			defer wg.Done()
 			req := fmt.Sprintf("q-%d", n)
-			ch := b.registerQuestion(req, testWalltimeTarget("worker-question"))
-			defer b.unregisterQuestion(req)
-			b.resolveQuestion(req, QuestionResponse{Answers: []string{"yes"}})
-			select {
-			case <-ch:
-			case <-time.After(time.Second):
-				t.Error("question wait not resolved")
+			entry := b.registerQuestion(req, time.Time{}, testWalltimeTarget("worker-question"))
+			b.terminateQuestion(req, tools.QuestionOutcomeAnswered, []string{"yes"})
+			if _, _, err := b.awaitQuestion(context.Background(), entry, req); err != nil {
+				t.Errorf("question wait not resolved: %v", err)
 			}
 		}(i)
 	}
@@ -187,4 +187,103 @@ func TestInteractionBrokerConcurrentConfirmAndQuestionFlows(t *testing.T) {
 	if settled["main-confirm"] == 0 || settled["worker-question"] == 0 {
 		t.Fatalf("settled durations = %v, want both flows to have settled their waits", settled)
 	}
+}
+
+// TestInteractionBrokerQuestionFirstResolverWins pins the atomic terminal
+// decision: a timeout after an accepted answer must not overwrite it, and a
+// duplicate resolve is rejected.
+func TestInteractionBrokerQuestionFirstResolverWins(t *testing.T) {
+	b := newInteractionBroker(nil)
+	entry := b.registerQuestion("req-1", time.Time{}, testWalltimeTarget("main"))
+
+	if reason, _, ok := b.terminateQuestion("req-1", tools.QuestionOutcomeAnswered, []string{"yes"}); !ok || reason != tools.QuestionOutcomeAnswered {
+		t.Fatalf("first resolve = %q ok=%v, want answered", reason, ok)
+	}
+	if _, _, ok := b.terminateQuestion("req-1", tools.QuestionOutcomeNoResponse, nil); ok {
+		t.Fatal("timeout must not overwrite an accepted answer")
+	}
+	<-entry.done
+	if entry.reason != tools.QuestionOutcomeAnswered {
+		t.Fatalf("terminal reason = %q, want answered", entry.reason)
+	}
+}
+
+// TestInteractionBrokerQuestionLateAnswerDowngrades verifies a client response
+// that lands at or after the deadline settles as no_response, whether it
+// carried a selection or a refusal, rather than being accepted just because
+// the timer has not run yet.
+func TestInteractionBrokerQuestionLateAnswerDowngrades(t *testing.T) {
+	for _, outcome := range []string{tools.QuestionOutcomeAnswered, tools.QuestionOutcomeDeclined} {
+		t.Run(outcome, func(t *testing.T) {
+			b := newInteractionBroker(nil)
+			entry := b.registerQuestion("req-1", time.Now().Add(-time.Millisecond), testWalltimeTarget("main"))
+
+			reason, answers, ok := b.terminateQuestion("req-1", outcome, []string{"yes"})
+			if !ok || reason != tools.QuestionOutcomeNoResponse || len(answers) != 0 {
+				t.Fatalf("late response = (%q, %v, %v), want no_response with no answers", reason, answers, ok)
+			}
+			<-entry.done
+		})
+	}
+}
+
+// TestInteractionBrokerQuestionAbortSettlesOnce verifies a send failure that
+// aborts an unpublished request settles the wait exactly once and leaves no
+// pending state behind.
+func TestInteractionBrokerQuestionAbortSettlesOnce(t *testing.T) {
+	b := newInteractionBroker(nil)
+	var settled int
+	b.setSettledHook(func(*walltimeTarget, time.Duration) { settled++ })
+
+	b.registerQuestion("req-1", time.Time{}, testWalltimeTarget("main"))
+	b.abortQuestion("req-1")
+	b.abortQuestion("req-1")
+	if settled != 1 {
+		t.Fatalf("settled = %d, want 1", settled)
+	}
+	if b.hasPendingUserInteraction() {
+		t.Fatal("aborted request must not remain pending")
+	}
+}
+
+// TestInteractionBrokerClearPendingClosesQuestions verifies a session switch
+// settles in-flight questions as cancelled so their waiters wake with a
+// definite reason instead of hanging.
+func TestInteractionBrokerClearPendingClosesQuestions(t *testing.T) {
+	b := newInteractionBroker(nil)
+	entry := b.registerQuestion("req-1", time.Time{}, testWalltimeTarget("main"))
+
+	b.clearPending()
+
+	select {
+	case <-entry.done:
+	default:
+		t.Fatal("clearPending must close the pending question")
+	}
+	if entry.reason != QuestionResolvedReasonCancelled {
+		t.Fatalf("reason = %q, want cancelled", entry.reason)
+	}
+}
+
+// TestInteractionBrokerQuestionAdmissionCancels verifies batch admission can be
+// abandoned while another batch holds the slot, without leaking the slot.
+func TestInteractionBrokerQuestionAdmissionCancels(t *testing.T) {
+	b := newInteractionBroker(nil)
+	release, err := b.acquireQuestionFlow(context.Background())
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := b.acquireQuestionFlow(ctx); err == nil {
+		t.Fatal("a cancelled waiter must not take the slot")
+	}
+
+	release()
+	release2, err := b.acquireQuestionFlow(context.Background())
+	if err != nil {
+		t.Fatalf("reacquire after release: %v", err)
+	}
+	release2()
 }

@@ -477,6 +477,47 @@ func TestGenericToolCardUsesTheSharedShape(t *testing.T) {
 	}
 }
 
+// TestQuestionCardNamesNonAnsweredOutcomes covers the outcomes that leave no
+// trace in the option list: without the explicit line a declined, timed-out,
+// or superseded question would look the same as an unanswered one, and a
+// question that was never asked after an earlier refusal would look unanswered
+// too.
+func TestQuestionCardNamesNonAnsweredOutcomes(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	newBlock := func(payload string) *Block {
+		args := `{"questions":[{"header":"Target branch","question":"Which branch?","options":[{"label":"main"},{"label":"develop"}]},{"header":"Extra","question":"Anything else?"}]}`
+		return &Block{
+			ID:            1,
+			Type:          BlockToolCall,
+			ToolName:      tools.NameQuestion,
+			Content:       args,
+			RawArgs:       args,
+			ResultDone:    true,
+			ResultPayload: payload,
+			ResultContent: payload,
+		}
+	}
+
+	plain := stripANSI(strings.Join(newBlock(`[{"header":"Target branch","selected":[],"outcome":"declined"},{"header":"Extra","selected":[],"outcome":"not_asked"}]`).Render(96, ""), "\n"))
+	for _, want := range []string{"Outcome: declined", "Outcome: not_asked"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("expected %q in the question card, got:\n%s", want, plain)
+		}
+	}
+
+	expired := stripANSI(strings.Join(newBlock(`[{"header":"Target branch","selected":[],"outcome":"no_response"},{"header":"Extra","selected":[],"outcome":"superseded"}]`).Render(96, ""), "\n"))
+	for _, want := range []string{"Outcome: no_response", "Outcome: superseded"} {
+		if !strings.Contains(expired, want) {
+			t.Fatalf("expected %q in the question card, got:\n%s", want, expired)
+		}
+	}
+
+	answered := stripANSI(strings.Join(newBlock(`[{"header":"Target branch","selected":["main"],"outcome":"answered"},{"header":"Extra","selected":["Ship it"],"outcome":"answered"}]`).Render(96, ""), "\n"))
+	if strings.Contains(answered, "Outcome:") {
+		t.Fatalf("an answered question already shows its selection and needs no outcome line, got:\n%s", answered)
+	}
+}
+
 // TestQuestionCardCarriesItsSectionsUnderABareHeader pins the question card on
 // the shared shape: the header is the bare tool name because every question is
 // rendered in full below it, each question block opens with a "↳ Header:"

@@ -67,7 +67,7 @@ Response:
 {"type": "subscribe_response", "payload": {"events": ["activity", "assistant_message", "idle", "done_completion"]}}
 ```
 
-Available event types: `activity`, `assistant_message`, `idle`, `confirm_request`, `question_request`, `notification`, `handoff_request`, `handoff_cancelled`, `role_change`, `error`, `agent_started`, `agent_notify`, `agent_done`, `info`, `toast`, `done_completion`, `local_shell_result`, `assistant_rollback`, `todos`, `compaction_status`, `session_switched`, `background_result`, `context_notice`.
+Available event types: `activity`, `assistant_message`, `idle`, `confirm_request`, `question_request`, `question_resolved`, `notification`, `handoff_request`, `handoff_cancelled`, `role_change`, `error`, `agent_started`, `agent_notify`, `agent_done`, `info`, `toast`, `done_completion`, `local_shell_result`, `assistant_rollback`, `todos`, `compaction_status`, `session_switched`, `background_result`, `context_notice`.
 
 ### `status`
 
@@ -109,7 +109,7 @@ Send a user message to the agent. Slash commands work the same as in the TUI; ba
 {"type": "send", "content": "Please summarize the project structure."}
 ```
 
-If a `confirm_request`, `question_request`, or `handoff_request` is pending and the user sends a regular message (not via `confirm`, `question`, or `handoff` below), Chord auto-dismisses the pending interaction so the new message is consumed. A pending `confirm_request` is auto-denied with an empty reason and a pending `question_request` is auto-cancelled; neither emits a dedicated cancelled event, so follow the next `status_response` (`pending_confirm` / `pending_question` cleared) to stop waiting. The dismissed interaction stops appearing as pending in the next `status_response`. When the dismissed interaction is a `handoff_request`, Chord also pushes a `handoff_cancelled` event to subscribed clients, just like the runtime-initiated cancellation in the [`handoff`](#handoff) section.
+If a `confirm_request`, `question_request`, or `handoff_request` is pending and the user sends a regular message (not via `confirm`, `question`, or `handoff` below), Chord auto-dismisses the pending interaction so the new message is consumed. A pending `confirm_request` is auto-denied with an empty reason and emits no dedicated event; follow the next `status_response` (`pending_confirm` cleared) to stop waiting. A pending `question_request` is closed as `superseded`, and Chord pushes a `question_resolved` event with `reason: "superseded"` to subscribed clients. When the dismissed interaction is a `handoff_request`, Chord also pushes a `handoff_cancelled` event to subscribed clients, just like the runtime-initiated cancellation in the [`handoff`](#handoff) section. The dismissed interaction stops appearing as pending in the next `status_response`.
 
 ### `models`
 
@@ -191,10 +191,10 @@ Resolve a pending `confirm_request`. Use the `request_id` from the request.
 Answer a pending `question_request`.
 
 ```json
-{"type": "question", "request_id": "r-…", "answers": ["yes"], "cancelled": false}
+{"type": "question", "request_id": "r-…", "answers": ["yes"], "reason": "answered"}
 ```
 
-For multi-select questions, pass multiple strings in `answers`. Pass `"cancelled": true` to dismiss the question without answering.
+For multi-select questions, pass multiple strings in `answers`. `reason` must be `answered` (submit the selection) or `declined` (dismiss without answering); any other value is rejected with an `error`. Clients cannot submit `no_response`, `superseded`, `cancelled`, or `error` — those describe how Chord closed the request, and are reported through `question_resolved`. The response is accepted only if the request is still open and before its `deadline`; a rejected or late answer returns an `error` and never clears a different pending question.
 
 ### `handoff`
 
@@ -256,7 +256,8 @@ You receive these on stdout. The list below covers what is emitted by default pl
 | `idle`                  | The main agent and all SubAgents are globally quiescent and ready for input                         | `last_outcome` (`completed` / `cancelled` / `error`), `suppress_user_notification` (`true` unless the agent ran since the previous idle event) |
 | `done_completion`      | Done tool completed with a final report. Emitted only while a loop is running, since that is the only time `done` is mounted; the `mode` field is currently always `normal` | `call_id`, `report`, `reason`, `status`, `agent_id`, `mode`                                                  |
 | `confirm_request`       | A tool needs explicit confirmation                                                                | `request_id`, `agent_id`, `tool_name`, `args_json`, `needs_approval`, `already_allowed`, `needs_approval_rules`, `already_allowed_rules`, `timeout_ms` |
-| `question_request`      | The model asked the user a question                                                               | `request_id`, `agent_id`, `tool_name`, `question`, `options`, `option_details`, `default_answer`, `multiple`, `timeout_ms` |
+| `question_request`      | The model asked the user a question                                                               | `request_id`, `agent_id`, `tool_name`, `header`, `question`, `options`, `option_details`, `multiple`, `deadline` (absolute RFC 3339 close time; omitted when no `question_timeout` is set) |
+| `question_resolved`     | A published question closed, whether by an answer or by Chord (deadline, supersede, cancel, execution error) | `request_id`, `reason` (`answered`, `declined`, `no_response`, `superseded`, `cancelled`, `error`) |
 | `notification`          | A user-facing reminder for an explicit wait that is not a modal request                       | `reason`, `message` |
 | `handoff_request`       | A planner saved a handoff plan and needs the client to approve or reject execution                 | `request_id`, `plan_path`, `plan_text`, `plan_error`, `agents[]` with `{name, default, model_pools, current_model_pool}`; `agents` is empty when no eligible target exists |
 | `handoff_cancelled`     | A pending handoff was discarded before the client decided — a newer turn, a session switch, or an auto-dismissing `send` superseded it | `request_id`, `reason` (`superseded`)                                                                        |

@@ -196,7 +196,7 @@ func TestQuestionRequestStartsBlinkingBackgroundRequestTitle(t *testing.T) {
 	m.displayState = stateBackground
 	m.terminalTitleBase = "Question pending"
 
-	cmd := m.handleQuestionRequest(questionRequestMsg{request: QuestionRequest{Questions: []tools.QuestionItem{{Header: "Name", Question: "Who?"}}}})
+	cmd := m.handleQuestionRequest(questionDialog{request: QuestionRequest{Questions: []tools.QuestionItem{{Header: "Name", Question: "Who?"}}}})
 	if cmd == nil {
 		t.Fatal("question request should schedule follow-up work")
 	}

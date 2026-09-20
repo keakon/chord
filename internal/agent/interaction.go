@@ -2,9 +2,12 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/identity"
@@ -108,9 +111,17 @@ func (a *MainAgent) awaitConfirm(ctx context.Context, toolName, argsJSON string,
 
 // AskQuestions emits question request events one at a time, waits for each
 // answer, and returns the collected responses in tool-compatible form.
+//
+// Every published request is closed exactly once: a normal decline, timeout,
+// or supersede fills the rest of the batch with not_asked and returns success,
+// while a system cancellation or shutdown returns an error rather than a
+// fabricated batch.
 func (a *MainAgent) AskQuestions(ctx context.Context, questions []tools.QuestionItem, timeout time.Duration) ([]tools.QuestionAnswer, error) {
-	a.interaction.beginQuestionFlow()
-	defer a.interaction.endQuestionFlow()
+	release, err := a.interaction.acquireQuestionFlow(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 
 	a.toolWg.Add(1)
 	defer a.toolWg.Done()
@@ -119,20 +130,30 @@ func (a *MainAgent) AskQuestions(ctx context.Context, questions []tools.Question
 	ownerID := a.agentIDForInteraction(ctx)
 	agentName := a.agentNameForInteraction(ownerID)
 	turnID := a.turnIDForInteraction(ctx)
-	for _, q := range questions {
+	for i, q := range questions {
+		// A cancellation observed while waiting for the batch slot or for a
+		// previous answer must not register another request.
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		select {
+		case <-a.stoppingCh:
+			return nil, ErrAgentShutdown
+		default:
+		}
+
 		requestID := makeRequestID()
-		ch := a.interaction.registerQuestion(requestID, a.walltime.captureAt(ownerID, agentName, turnID))
+		var deadline time.Time
+		if timeout > 0 {
+			deadline = time.Now().Add(timeout)
+		}
+		entry := a.interaction.registerQuestion(requestID, deadline, a.walltime.captureAt(ownerID, agentName, turnID))
 
 		options := make([]string, len(q.Options))
 		optionDetails := make([]string, len(q.Options))
-		for i, opt := range q.Options {
-			options[i] = opt.Label
-			optionDetails[i] = opt.Description
-		}
-
-		defaultAnswer := ""
-		if len(options) > 0 {
-			defaultAnswer = options[0]
+		for j, opt := range q.Options {
+			options[j] = opt.Label
+			optionDetails[j] = opt.Description
 		}
 
 		a.fireHookBackground(ctx, hook.OnWaitQuestion, turnID, map[string]any{
@@ -140,41 +161,90 @@ func (a *MainAgent) AskQuestions(ctx context.Context, questions []tools.Question
 			"header":             q.Header,
 			"question":           q.Question,
 			"options":            append([]string(nil), options...),
-			"default_answer":     defaultAnswer,
 			"multiple":           q.Multiple,
 			"timeout_ms":         timeout.Milliseconds(),
 		})
 
-		if err := a.emitInteractiveToTUI(ctx, QuestionRequestEvent{
+		// The send shares the request deadline: a request that cannot reach the
+		// output channel in time fails as a send timeout and never publishes.
+		sendCtx := ctx
+		var cancelSend context.CancelFunc
+		if !deadline.IsZero() {
+			sendCtx, cancelSend = context.WithDeadline(ctx, deadline)
+		}
+		sendErr := a.emitInteractiveToTUI(sendCtx, QuestionRequestEvent{
 			ToolName:      tools.NameQuestion,
 			Header:        q.Header,
 			Question:      q.Question,
 			Options:       options,
 			OptionDetails: optionDetails,
-			DefaultAnswer: defaultAnswer,
 			Multiple:      q.Multiple,
 			RequestID:     requestID,
-			Timeout:       timeout,
+			Deadline:      deadline,
 			AgentID:       ownerID,
-		}); err != nil {
-			a.interaction.unregisterQuestion(requestID)
-			return nil, err
+		})
+		if cancelSend != nil {
+			cancelSend()
+		}
+		if sendErr != nil {
+			a.interaction.abortQuestion(requestID)
+			if timeout > 0 && errors.Is(sendErr, context.DeadlineExceeded) && ctx.Err() == nil {
+				return nil, fmt.Errorf("question request send timed out after %s", timeout)
+			}
+			return nil, sendErr
 		}
 		a.emitToTUI(NotificationEvent{Reason: NotificationReasonUserInputRequired, Message: "Chord: Question requires your input"})
-		resp, err := a.interaction.awaitQuestion(ctx, ch, timeout)
-		a.interaction.unregisterQuestion(requestID)
-		if err != nil {
-			return nil, err
-		}
-		if resp.Cancelled {
-			return nil, fmt.Errorf("question cancelled by user")
-		}
 
+		reason, respAnswers, waitErr := a.interaction.awaitQuestion(ctx, entry, requestID)
+		// Close the client-side request before moving on: the resolved event
+		// must follow the request and precede the next question. It uses the
+		// agent context rather than the answer-wait context so an expired
+		// answer wait does not suppress it.
+		a.emitQuestionResolved(requestID, reason)
+		if waitErr != nil {
+			return nil, waitErr
+		}
+		if reason != tools.QuestionOutcomeAnswered {
+			answers = append(answers, tools.QuestionAnswer{
+				Header:   q.Header,
+				Selected: []string{},
+				Outcome:  reason,
+			})
+			for _, rest := range questions[i+1:] {
+				answers = append(answers, tools.QuestionAnswer{
+					Header:   rest.Header,
+					Selected: []string{},
+					Outcome:  tools.QuestionOutcomeNotAsked,
+				})
+			}
+			return answers, nil
+		}
+		// ResolveQuestion accepts an answered response only with a non-empty
+		// selection, so respAnswers is never empty here; the copy keeps the
+		// batch from aliasing whatever the broker stored.
 		answers = append(answers, tools.QuestionAnswer{
 			Header:   q.Header,
-			Selected: append([]string(nil), resp.Answers...),
+			Selected: append([]string{}, respAnswers...),
+			Outcome:  tools.QuestionOutcomeAnswered,
 		})
 	}
 
 	return answers, nil
+}
+
+// emitQuestionResolved publishes a QuestionResolvedEvent for a request whose
+// terminal state was already decided. Failure to enqueue is not surfaced: the
+// terminal state is authoritative in core, and a client that never sees the
+// event still clears its pending dialog when the connection closes.
+func (a *MainAgent) emitQuestionResolved(requestID, reason string) {
+	if requestID == "" || reason == "" {
+		return
+	}
+	ctx := a.parentCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := a.emitInteractiveToTUI(ctx, QuestionResolvedEvent{RequestID: requestID, Reason: reason}); err != nil {
+		log.Debugf("question resolved event not delivered request_id=%v reason=%v error=%v", requestID, reason, err)
+	}
 }

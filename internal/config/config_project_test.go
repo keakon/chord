@@ -232,6 +232,7 @@ context:
 skills:
   paths: [/global-skill]
 confirm_timeout: 45
+question_timeout: 45
 desktop_notification: false
 desktop_notification_foreground: true
 prevent_sleep: false
@@ -284,6 +285,7 @@ context:
 skills:
   paths: [/project-skill]
 confirm_timeout: 0
+question_timeout: 0
 thinking_translation:
   target_language: zh-Hans
   model_pool: fast
@@ -326,6 +328,9 @@ keymap:
 	}
 	if mergedCfg.ConfirmTimeout != 0 {
 		t.Fatalf("merged confirm_timeout = %d, want 0", mergedCfg.ConfirmTimeout)
+	}
+	if mergedCfg.QuestionTimeout != 0 {
+		t.Fatalf("merged question_timeout = %d, want 0", mergedCfg.QuestionTimeout)
 	}
 	if mergedCfg.ThinkingTranslation.TargetLanguage != "zh-Hans" {
 		t.Fatalf("merged thinking_translation.target_language = %q, want zh-Hans", mergedCfg.ThinkingTranslation.TargetLanguage)

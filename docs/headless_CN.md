@@ -67,7 +67,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 {"type": "subscribe_response", "payload": {"events": ["activity", "assistant_message", "idle", "done_completion"]}}
 ```
 
-可订阅事件类型：`activity`、`assistant_message`、`idle`、`confirm_request`、`question_request`、`notification`、`handoff_request`、`handoff_cancelled`、`role_change`、`error`、`agent_started`、`agent_notify`、`agent_done`、`info`、`toast`、`done_completion`、`local_shell_result`、`assistant_rollback`、`todos`、`compaction_status`、`session_switched`、`background_result`、`context_notice`。
+可订阅事件类型：`activity`、`assistant_message`、`idle`、`confirm_request`、`question_request`、`question_resolved`、`notification`、`handoff_request`、`handoff_cancelled`、`role_change`、`error`、`agent_started`、`agent_notify`、`agent_done`、`info`、`toast`、`done_completion`、`local_shell_result`、`assistant_rollback`、`todos`、`compaction_status`、`session_switched`、`background_result`、`context_notice`。
 
 ### `status`
 
@@ -109,7 +109,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 {"type": "send", "content": "请总结一下项目结构。"}
 ```
 
-如果当前有待处理的 `confirm_request`、`question_request` 或 `handoff_request`，而用户发送了普通消息（不是下面的 `confirm`、`question` 或 `handoff`），Chord 会先自动关闭该待处理交互，再消费这条新消息。待决的 `confirm_request` 会按空理由自动拒绝，待决的 `question_request` 会自动取消；这两类关闭没有专门的取消事件，看下一次 `status_response` 里 `pending_confirm` / `pending_question` 已清空就知道不用再等。被关闭的交互不会在下一次 `status_response` 中继续显示为待决；如果被关闭的是 `handoff_request`，Chord 还会向订阅了 `handoff_cancelled` 的客户端推送该事件，和 [`handoff`](#handoff) 一节里 runtime 主动取消的路径一致。
+如果当前有待处理的 `confirm_request`、`question_request` 或 `handoff_request`，而用户发送了普通消息（不是下面的 `confirm`、`question` 或 `handoff`），Chord 会先自动关闭该待处理交互，再消费这条新消息。待决的 `confirm_request` 按空理由自动拒绝，且没有专门的关闭事件，看下一次 `status_response` 里 `pending_confirm` 已清空就知道不用再等。待决的 `question_request` 会以 `superseded` 关闭，Chord 向订阅了 `question_resolved` 的客户端推送 `reason: "superseded"` 的事件。如果被关闭的是 `handoff_request`，Chord 还会推送 `handoff_cancelled` 事件，和 [`handoff`](#handoff) 一节里 runtime 主动取消的路径一致。被关闭的交互不会在下一次 `status_response` 中继续显示为待决。
 
 ### `models`
 
@@ -191,10 +191,10 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 回答一个待决的 `question_request`。
 
 ```json
-{"type": "question", "request_id": "r-…", "answers": ["yes"], "cancelled": false}
+{"type": "question", "request_id": "r-…", "answers": ["yes"], "reason": "answered"}
 ```
 
-多选题时可在 `answers` 里传多个字符串。若只想关闭问题而不作答，传 `"cancelled": true`。
+多选题时可在 `answers` 里传多个字符串。`reason` 只能是 `answered`（提交选择）或 `declined`（关闭但不作答），传其他值会返回 `error`。客户端不能提交 `no_response`、`superseded`、`cancelled`、`error`——这些描述的是 Chord 如何关闭请求，通过 `question_resolved` 告知客户端。只有请求仍然打开且未过 `deadline` 时答案才会被接受；答案被拒绝或迟到会返回 `error`，也不会误清另一个待决问题。
 
 ### `handoff`
 
@@ -256,7 +256,8 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 | `idle`               | 主 agent 与所有 SubAgent 均已全局静默，可再次接收输入 | `last_outcome`（`completed` / `cancelled` / `error`）、`suppress_user_notification`（除非 agent 在上一次 idle 事件后运行过，否则为 `true`） |
 | `done_completion`   | Done 工具完成并给出最终报告。只在 loop 运行期间产生——`done` 仅在此时挂载；`mode` 字段目前恒为 `normal` | `call_id`、`report`、`reason`、`status`、`agent_id`、`mode` |
 | `confirm_request`    | 某个工具需要显式确认                         | `request_id`、`agent_id`、`tool_name`、`args_json`、`needs_approval`、`already_allowed`、`needs_approval_rules`、`already_allowed_rules`、`timeout_ms` |
-| `question_request`   | 模型向用户提问                               | `request_id`、`agent_id`、`tool_name`、`question`、`options`、`option_details`、`default_answer`、`multiple`、`timeout_ms` |
+| `question_request`   | 模型向用户提问                               | `request_id`、`agent_id`、`tool_name`、`header`、`question`、`options`、`option_details`、`multiple`、`deadline`（绝对的 RFC 3339 关闭时间；未配置 `question_timeout` 时省略） |
+| `question_resolved`  | 已发布的问题关闭，可能是用户作答，也可能是 Chord 关闭（到期、被替代、取消、执行出错） | `request_id`、`reason`（`answered`、`declined`、`no_response`、`superseded`、`cancelled`、`error`） |
 | `notification`       | agent 需要用户注意，但等待点不是标准 modal 请求 | `reason`、`message` |
 | `handoff_request`    | planner 已保存 handoff plan，需要 client 批准或拒绝执行 | `request_id`、`plan_path`、`plan_text`、`plan_error`、`agents[]`，元素包含 `{name, default, model_pools, current_model_pool}`；没有合法目标时 `agents` 为空列表 |
 | `handoff_cancelled`  | 待决 handoff 在 client 决策前被丢弃——更新的回合、会话切换或 `send` 自动关闭接管了它 | `request_id`、`reason`（`superseded`） |

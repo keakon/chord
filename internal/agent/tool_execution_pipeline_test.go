@@ -876,7 +876,7 @@ func TestToolExecutionPipelineAuditsSchemaFailureArguments(t *testing.T) {
 func TestToolExecutionKeepsStructuredPayloadFreeOfNotes(t *testing.T) {
 	registry := tools.NewRegistry()
 	registry.Register(tools.NewQuestionTool(func(_ context.Context, _ []tools.QuestionItem) ([]tools.QuestionAnswer, error) {
-		return []tools.QuestionAnswer{{Header: "mode", Selected: []string{"fast"}}}, nil
+		return []tools.QuestionAnswer{{Header: "mode", Selected: []string{"fast"}, Outcome: tools.QuestionOutcomeAnswered}}, nil
 	}))
 	pipeline := toolExecutionPipeline{registry: registry}
 	execResult, err := pipeline.execute(context.Background(), message.ToolCall{
@@ -887,7 +887,7 @@ func TestToolExecutionKeepsStructuredPayloadFreeOfNotes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute returned error: %v", err)
 	}
-	if execResult.Payload != `[{"header":"mode","selected":["fast"]}]` {
+	if execResult.Payload != `[{"header":"mode","selected":["fast"],"outcome":"answered"}]` {
 		t.Fatalf("payload = %q, want the clean answers JSON", execResult.Payload)
 	}
 	if len(execResult.Notes) == 0 || !strings.Contains(execResult.Notes[0], "ignored earlier duplicate parameter value(s)") {

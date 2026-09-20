@@ -95,6 +95,28 @@ func TestCollectConfigFileIssuesAllowsReminderAtOrAboveThreshold(t *testing.T) {
 	}
 }
 
+func TestCollectConfigFileIssuesReportsNegativeQuestionTimeout(t *testing.T) {
+	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "question_timeout: -5\n")
+	issues, err := CollectConfigFileIssues(path, true)
+	if err != nil {
+		t.Fatalf("CollectConfigFileIssues: %v", err)
+	}
+	if joined := strings.Join(issues, "\n"); !strings.Contains(joined, "question_timeout") {
+		t.Fatalf("issues = %q, want one mentioning question_timeout", joined)
+	}
+}
+
+func TestLoadConfigFromPathResetsNegativeQuestionTimeout(t *testing.T) {
+	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "question_timeout: -5\n")
+	cfg, err := LoadConfigFromPath(path)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath: %v", err)
+	}
+	if cfg.QuestionTimeout != 0 {
+		t.Fatalf("question_timeout = %d, want 0 after rejecting the negative value", cfg.QuestionTimeout)
+	}
+}
+
 func TestCollectConfigFileIssuesReportsDeadReminderOnDisabledCompaction(t *testing.T) {
 	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "context:\n  compaction:\n    threshold: 0\n    reminder: 0.7\n")
 	issues, err := CollectConfigFileIssues(path, true)

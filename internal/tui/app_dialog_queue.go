@@ -13,7 +13,7 @@ import (
 // asking agent's view — in arrival order once the current dialog closes.
 type pendingDialog struct {
 	confirm   *confirmRequestMsg
-	question  *questionRequestMsg
+	question  *questionDialog
 	handoff   *handoffSelectRequestMsg
 	arrivedAt time.Time
 }
@@ -43,10 +43,11 @@ func (d pendingDialog) timeout() time.Duration {
 	switch {
 	case d.confirm != nil:
 		return d.confirm.request.Timeout
-	case d.question != nil:
-		return d.question.request.Timeout
 	}
-	// Handoff prompts have no timeout: the agent waits until the user decides.
+	// A Question never expires locally: its deadline is absolute and the
+	// broker closes it with a QuestionResolvedEvent that removes the queued
+	// entry. Handoff prompts have no timeout either; the agent waits until the
+	// user decides.
 	return 0
 }
 
@@ -58,7 +59,7 @@ func (m *Model) presentPendingDialog(d pendingDialog, prevMode Mode) tea.Cmd {
 	case d.confirm != nil:
 		return m.presentConfirmRequest(*d.confirm, prevMode, d.arrivedAt)
 	case d.question != nil:
-		return m.presentQuestionRequest(*d.question, prevMode, d.arrivedAt)
+		return m.presentQuestionRequest(*d.question, prevMode)
 	case d.handoff != nil:
 		return m.openHandoffSelect(d.handoff.planPath, d.handoff.requestID, d.handoff.agentID, prevMode)
 	}

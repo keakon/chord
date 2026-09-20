@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/keakon/golog/log"
+
+	"github.com/keakon/chord/internal/tools"
 )
 
 // interactionBroker owns the requestID→response-channel plumbing for the
@@ -39,13 +41,16 @@ type interactionBroker struct {
 	// same map.
 	confirmTargets map[string]*walltimeTarget
 
-	questionFlowMu sync.Mutex
-	questionMapMu  sync.Mutex
-	questionCh     map[string]chan QuestionResponse
-	questionStart  map[string]time.Time
-	// questionTargets is the question-flow counterpart of confirmTargets,
-	// guarded by questionMapMu only.
-	questionTargets map[string]*walltimeTarget
+	// questionAdmit is a one-slot semaphore serializing whole question batches.
+	// Acquiring means receiving from it; releasing means sending it back.
+	// Unlike a plain Mutex this is cancellable, so a waiter can abandon the
+	// queue when its context is cancelled or shutdown begins.
+	questionAdmit chan struct{}
+	questionMapMu sync.Mutex
+	// questionPending holds the in-flight question requests. Each entry carries
+	// its own terminal state so the winning resolver is decided atomically by
+	// terminateQuestion instead of by a select branch.
+	questionPending map[string]*questionEntry
 
 	// handoffMapMu guards the handoff wait bookkeeping. Unlike confirm/question
 	// there is no waiting goroutine: the handoff tool call completes before the
@@ -63,17 +68,18 @@ type interactionBroker struct {
 }
 
 func newInteractionBroker(stoppingCh <-chan struct{}) *interactionBroker {
-	return &interactionBroker{
+	b := &interactionBroker{
 		stoppingCh:      stoppingCh,
 		confirmCh:       make(map[string]chan ConfirmResponse),
 		confirmStart:    make(map[string]time.Time),
 		confirmTargets:  make(map[string]*walltimeTarget),
-		questionCh:      make(map[string]chan QuestionResponse),
-		questionStart:   make(map[string]time.Time),
-		questionTargets: make(map[string]*walltimeTarget),
+		questionAdmit:   make(chan struct{}, 1),
+		questionPending: make(map[string]*questionEntry),
 		handoffStart:    make(map[string]time.Time),
 		handoffTargets:  make(map[string]*walltimeTarget),
 	}
+	b.questionAdmit <- struct{}{}
+	return b
 }
 
 // setSettledHook installs the per-wait settlement callback (walltime recorder).
@@ -216,88 +222,181 @@ func (b *interactionBroker) resolveConfirm(requestID string, resp ConfirmRespons
 // Question flow
 // ---------------------------------------------------------------------------
 
-// beginQuestionFlow serializes question flows; the caller must pair it with
-// endQuestionFlow (typically via defer).
-func (b *interactionBroker) beginQuestionFlow() { b.questionFlowMu.Lock() }
-func (b *interactionBroker) endQuestionFlow()   { b.questionFlowMu.Unlock() }
-
-func (b *interactionBroker) registerQuestion(requestID string, target *walltimeTarget) chan QuestionResponse {
-	ch := make(chan QuestionResponse, 1)
-	now := time.Now()
-	b.questionMapMu.Lock()
-	b.questionCh[requestID] = ch
-	b.questionStart[requestID] = now
-	b.questionTargets[requestID] = target
-	b.questionMapMu.Unlock()
-	return ch
+// questionEntry is the broker-side state of one in-flight question request.
+// reason and answers are written once under questionMapMu before done closes;
+// a waiter reads them only after done closes, which orders the writes.
+type questionEntry struct {
+	done     chan struct{}
+	deadline time.Time
+	reason   string
+	answers  []string
+	target   *walltimeTarget
+	start    time.Time
 }
 
-func (b *interactionBroker) unregisterQuestion(requestID string) {
-	b.questionMapMu.Lock()
-	start, ok := b.questionStart[requestID]
-	delete(b.questionCh, requestID)
-	delete(b.questionStart, requestID)
-	target := b.questionTargets[requestID]
-	delete(b.questionTargets, requestID)
-	b.questionMapMu.Unlock()
-	if ok {
-		b.settleWait(target, start)
-	}
-}
-
-// awaitQuestion blocks until a response arrives on ch, the timeout fires
-// (timeout <= 0 means wait indefinitely), ctx is cancelled, or shutdown
-// begins. Unlike confirm, a timeout is an error rather than an auto-answer.
-func (b *interactionBroker) awaitQuestion(ctx context.Context, ch <-chan QuestionResponse, timeout time.Duration) (QuestionResponse, error) {
-	if timeout <= 0 {
-		select {
-		case resp := <-ch:
-			return resp, nil
-		case <-ctx.Done():
-			return QuestionResponse{}, ctx.Err()
-		case <-b.stoppingCh:
-			return QuestionResponse{}, ErrAgentShutdown
-		}
-	}
-
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-
+// acquireQuestionFlow takes the one-slot question batch lock. Unlike the
+// confirm flow lock it is cancellable: a waiter can give up when ctx is
+// cancelled or shutdown begins instead of blocking behind a question batch that
+// may wait forever. The returned release must be called exactly once.
+func (b *interactionBroker) acquireQuestionFlow(ctx context.Context) (func(), error) {
 	select {
-	case resp := <-ch:
-		return resp, nil
-	case <-timer.C:
-		return QuestionResponse{}, fmt.Errorf("question timed out after %s", timeout)
+	case <-b.questionAdmit:
 	case <-ctx.Done():
-		return QuestionResponse{}, ctx.Err()
+		return nil, ctx.Err()
 	case <-b.stoppingCh:
-		return QuestionResponse{}, ErrAgentShutdown
+		return nil, ErrAgentShutdown
 	}
-}
-
-func (b *interactionBroker) resolveQuestion(requestID string, resp QuestionResponse) {
-	b.questionMapMu.Lock()
-	ch, ok := b.questionCh[requestID]
-	b.questionMapMu.Unlock()
-	if !ok {
-		return
+	// A cancellation can be ready in the same select tick as the slot, so
+	// re-check before the caller registers a request that is already dead.
+	if err := ctx.Err(); err != nil {
+		b.releaseQuestionFlow()
+		return nil, err
 	}
 	select {
-	case ch <- resp:
+	case <-b.stoppingCh:
+		b.releaseQuestionFlow()
+		return nil, ErrAgentShutdown
 	default:
 	}
+	return b.releaseQuestionFlow, nil
+}
+
+func (b *interactionBroker) releaseQuestionFlow() {
+	b.questionAdmit <- struct{}{}
+}
+
+// registerQuestion creates the pending state for one question. deadline is the
+// absolute time the request must resolve by, or the zero value to wait
+// indefinitely. It is fixed at registration so it covers the request send and
+// any client queueing, not just the answer wait.
+func (b *interactionBroker) registerQuestion(requestID string, deadline time.Time, target *walltimeTarget) *questionEntry {
+	entry := &questionEntry{
+		done:     make(chan struct{}),
+		deadline: deadline,
+		target:   target,
+		start:    time.Now(),
+	}
+	b.questionMapMu.Lock()
+	b.questionPending[requestID] = entry
+	b.questionMapMu.Unlock()
+	return entry
+}
+
+// abortQuestion drops a request whose send failed before the client ever saw
+// it, settling its wait once. No awaitQuestion waiter exists on this path, so
+// settling here is what keeps the wait from leaking; every other close leaves
+// settlement to that waiter. No terminal state or resolved event is produced
+// because no request reached the client.
+func (b *interactionBroker) abortQuestion(requestID string) {
+	b.questionMapMu.Lock()
+	entry, ok := b.questionPending[requestID]
+	if ok {
+		delete(b.questionPending, requestID)
+	}
+	b.questionMapMu.Unlock()
+	if ok {
+		b.settleWait(entry.target, entry.start)
+	}
+}
+
+// terminateQuestion atomically decides the terminal state for requestID. The
+// first caller wins; later callers are no-ops. A client response that lands at
+// or after the deadline never decides the outcome, whether it carried a
+// selection or a refusal: it is closed as no_response instead, so a late
+// response cannot beat the deadline just because the timer has not fired yet.
+// It returns the winning reason, answers, and whether this call decided the
+// state.
+//
+// The terminal state is written before done is closed; a waiter that observes
+// the closed channel reads those fields without the lock. Settlement stays with
+// that waiter (see awaitQuestion), so a resolver on the TUI or headless command
+// path never waits on the usage ledger.
+func (b *interactionBroker) terminateQuestion(requestID, reason string, answers []string) (string, []string, bool) {
+	b.questionMapMu.Lock()
+	entry, ok := b.questionPending[requestID]
+	if !ok {
+		b.questionMapMu.Unlock()
+		return "", nil, false
+	}
+	switch reason {
+	case tools.QuestionOutcomeAnswered, tools.QuestionOutcomeDeclined:
+		if !entry.deadline.IsZero() && !time.Now().Before(entry.deadline) {
+			reason = tools.QuestionOutcomeNoResponse
+			answers = nil
+		}
+	}
+	entry.reason = reason
+	entry.answers = answers
+	delete(b.questionPending, requestID)
+	close(entry.done)
+	b.questionMapMu.Unlock()
+	return reason, answers, true
+}
+
+// awaitQuestion waits for the request's terminal state and settles the wait
+// once it ends. The deadline timer and the ctx/shutdown paths only decide that
+// state atomically; the reason and answers are always read back from the entry,
+// so a resolving client and the timer can never both decide the result. A
+// system-close reason is returned with a matching error so callers never
+// mistake it for a normal answer.
+func (b *interactionBroker) awaitQuestion(ctx context.Context, entry *questionEntry, requestID string) (string, []string, error) {
+	// Settlement can block on the usage ledger's persistence pump, so it runs
+	// here on the waiting tool goroutine rather than on whichever TUI or
+	// headless command path decided the state.
+	defer b.settleWait(entry.target, entry.start)
+
+	var timerC <-chan time.Time
+	if !entry.deadline.IsZero() {
+		timer := time.NewTimer(time.Until(entry.deadline))
+		defer timer.Stop()
+		timerC = timer.C
+	}
+	select {
+	case <-entry.done:
+		return entry.reason, entry.answers, questionCloseError(entry.reason, nil)
+	case <-timerC:
+		b.terminateQuestion(requestID, tools.QuestionOutcomeNoResponse, nil)
+		return entry.reason, entry.answers, questionCloseError(entry.reason, nil)
+	case <-ctx.Done():
+		b.terminateQuestion(requestID, QuestionResolvedReasonCancelled, nil)
+		return entry.reason, entry.answers, questionCloseError(entry.reason, ctx.Err())
+	case <-b.stoppingCh:
+		b.terminateQuestion(requestID, QuestionResolvedReasonError, nil)
+		return entry.reason, entry.answers, questionCloseError(entry.reason, ErrAgentShutdown)
+	}
+}
+
+// questionCloseError maps a terminal reason to the error the question flow
+// reports. The four normal outcomes return nil; a system close returns the
+// cause when there is one, or a synthetic error when the wait was settled by
+// clearPending during a session switch or shutdown.
+func questionCloseError(reason string, cause error) error {
+	switch reason {
+	case tools.QuestionOutcomeAnswered, tools.QuestionOutcomeDeclined,
+		tools.QuestionOutcomeNoResponse, tools.QuestionOutcomeSuperseded:
+		return nil
+	}
+	if cause != nil {
+		return cause
+	}
+	if reason == QuestionResolvedReasonCancelled {
+		return fmt.Errorf("question cancelled")
+	}
+	return fmt.Errorf("question flow closed: %w", ErrAgentShutdown)
 }
 
 // ---------------------------------------------------------------------------
 // Shared
 // ---------------------------------------------------------------------------
 
-// clearPending removes all in-flight confirm/question/handoff request mappings. It does
-// not close the per-request channels; waiters exit via ctx cancellation or
-// stoppingCh during shutdown. Open waits are settled (counted as user wait)
-// before the mappings are dropped so a shutdown/session-switch never leaks an
-// open segment. Settlement appends to the usage ledger, which can block on the
-// persistence pump or write to disk, so it runs after the map locks are
+// clearPending removes all in-flight confirm/question/handoff request mappings.
+// It does not close the per-request channels; waiters exit via ctx cancellation
+// or stoppingCh during shutdown. The confirm and handoff waits are settled
+// (counted as user wait) before the mappings are dropped so a shutdown or
+// session switch never leaks an open segment; a question wait is settled by its
+// own waiter, which clearPending wakes with a closed entry rather than counting
+// the segment here. Settlement appends to the usage ledger, which can block on
+// the persistence pump or write to disk, so it runs after the map locks are
 // released: resolveConfirm and registerConfirm contend for the same locks.
 func (b *interactionBroker) clearPending() {
 	type pendingWait struct {
@@ -316,12 +415,16 @@ func (b *interactionBroker) clearPending() {
 	b.confirmMapMu.Unlock()
 
 	b.questionMapMu.Lock()
-	for requestID, start := range b.questionStart {
-		pending = append(pending, pendingWait{target: b.questionTargets[requestID], start: start})
+	for requestID, entry := range b.questionPending {
+		// Wake the waiter with a definite reason so it can emit the matching
+		// resolved event, rather than depending on a select branch that might
+		// not observe the dropped map. Settling the wait is that waiter's job,
+		// so the segment is not counted twice.
+		entry.reason = QuestionResolvedReasonCancelled
+		entry.answers = nil
+		delete(b.questionPending, requestID)
+		close(entry.done)
 	}
-	clear(b.questionCh)
-	clear(b.questionStart)
-	clear(b.questionTargets)
 	b.questionMapMu.Unlock()
 
 	b.handoffMapMu.Lock()
@@ -353,7 +456,7 @@ func (b *interactionBroker) hasPendingUserInteraction() bool {
 		return true
 	}
 	b.questionMapMu.Lock()
-	pending = len(b.questionStart) > 0
+	pending = len(b.questionPending) > 0
 	b.questionMapMu.Unlock()
 	if pending {
 		return true

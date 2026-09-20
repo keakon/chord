@@ -292,6 +292,13 @@ func (b *Block) renderQuestionCall(width int, spinnerFrame string) []string {
 		case len(q.Options) > 0 && !hasStructuredAnswers:
 			result = append(result, DimStyle.Render("    Custom: Enabled"))
 		}
+		if hasAnswer {
+			// A non-answered question checks no option, so without this line a
+			// declined or expired question looks identical to an unanswered one.
+			if label := questionOutcomeDisplay(answer.Outcome); label != "" {
+				result = append(result, DimStyle.Render("    Outcome: "+label))
+			}
+		}
 	}
 
 	switch {
@@ -334,6 +341,19 @@ func questionAnswerForRender(answers []tools.QuestionAnswer, index int, header s
 		}
 	}
 	return tools.QuestionAnswer{}, false
+}
+
+// questionOutcomeDisplay names a non-answered question outcome for the card.
+// It returns "" for answered (the checked option already shows it) and for
+// answers recorded before outcomes existed, so such transcripts keep rendering
+// the selection unchanged.
+func questionOutcomeDisplay(outcome string) string {
+	switch outcome {
+	case "", tools.QuestionOutcomeAnswered:
+		return ""
+	default:
+		return outcome
+	}
 }
 
 func splitQuestionSelections(question tools.QuestionItem, answer tools.QuestionAnswer) (map[string]struct{}, []string) {

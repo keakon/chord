@@ -82,36 +82,39 @@ func (m *Model) handleConfirmTimeoutTick() tea.Cmd {
 	return nil
 }
 
-func (m *Model) handleQuestionRequest(msg questionRequestMsg) tea.Cmd {
+func (m *Model) handleQuestionRequest(dlg questionDialog) tea.Cmd {
 	if m.dialogActive() {
-		m.pendingDialogs = append(m.pendingDialogs, pendingDialog{question: &msg, arrivedAt: time.Now()})
+		m.pendingDialogs = append(m.pendingDialogs, pendingDialog{question: &dlg, arrivedAt: time.Now()})
 		return nil
 	}
-	return m.presentQuestionRequest(msg, m.mode, time.Now())
+	return m.presentQuestionRequest(dlg, m.mode)
 }
 
 // presentQuestionRequest installs a Question dialog as the active modal.
-// prevMode and arrivedAt handling match presentConfirmRequest.
-func (m *Model) presentQuestionRequest(msg questionRequestMsg, prevMode Mode, arrivedAt time.Time) tea.Cmd {
+// prevMode is restored once the dialog closes; it is passed in rather than read
+// from m.mode so a queued dialog restores the mode that was active before the
+// queue started, matching presentConfirmRequest. The countdown anchors to the
+// request's own absolute deadline rather than to the moment the dialog reached
+// the screen, so time spent queued behind another modal never extends it.
+func (m *Model) presentQuestionRequest(dlg questionDialog, prevMode Mode) tea.Cmd {
 	m.exitRenderFreeze()
-	m.focusAgentForRequest(msg.request.AgentID)
+	m.focusAgentForRequest(dlg.request.AgentID)
 	ei := newQuestionTextarea(m.width)
 	m.question = questionState{
-		request:    &msg.request,
-		requestID:  msg.requestID,
-		responseCh: msg.request.ResponseCh,
-		selected:   make(map[int]bool),
-		prevMode:   prevMode,
-		input:      ei,
+		request:   &dlg.request,
+		requestID: dlg.requestID,
+		selected:  make(map[int]bool),
+		prevMode:  prevMode,
+		input:     ei,
 	}
 	m.terminalTitleRequestSeen = m.displayState == stateForeground
 	var timeoutCmd tea.Cmd
-	if msg.request.Timeout > 0 {
-		m.question.deadline = arrivedAt.Add(msg.request.Timeout)
+	if !dlg.request.Deadline.IsZero() {
+		m.question.deadline = dlg.request.Deadline
 		timeoutCmd = questionTimeoutTick()
 	}
 	var focusCmd tea.Cmd
-	if len(msg.request.Questions) > 0 && len(msg.request.Questions[0].Options) == 0 {
+	if len(dlg.request.Questions) > 0 && len(dlg.request.Questions[0].Options) == 0 {
 		focusCmd = m.question.input.Focus()
 	}
 	cmd := m.switchModeWithIME(ModeQuestion)
@@ -125,10 +128,46 @@ func (m *Model) presentQuestionRequest(msg questionRequestMsg, prevMode Mode, ar
 func (m *Model) handleQuestionTimeoutTick() tea.Cmd {
 	if m.mode == ModeQuestion && !m.question.deadline.IsZero() {
 		if time.Now().After(m.question.deadline) {
-			return m.cancelQuestion()
+			// The broker owns termination: it closes the request as
+			// no_response and pushes the resolved event that dismisses this
+			// dialog. The TUI only stops its countdown here.
+			m.recalcViewportSize()
+			return nil
 		}
 		m.recalcViewportSize()
 		return questionTimeoutTick()
+	}
+	return nil
+}
+
+// handleQuestionResolved drops the active or queued question dialog matching
+// the closed request. Duplicate, unknown, and stale-session IDs have no effect,
+// and a request ID identifies exactly one dialog so a late close never touches
+// a newer question.
+func (m *Model) handleQuestionResolved(requestID string) tea.Cmd {
+	if requestID == "" {
+		return nil
+	}
+	if m.question.request != nil && m.question.requestID == requestID {
+		prevMode := m.question.prevMode
+		m.question = questionState{}
+		m.terminalTitleRequestSeen = false
+		m.recalcViewportSize()
+		titleCmd := m.syncTerminalTitleState()
+		cmds := []tea.Cmd{titleCmd}
+		if m.displayState == stateBackground {
+			cmds = append(cmds, m.updateBackgroundIdleSweepState())
+		}
+		return m.finishDialog(prevMode, cmds...)
+	}
+	// The request may still be queued behind another dialog.
+	for i := range m.pendingDialogs {
+		q := m.pendingDialogs[i].question
+		if q == nil || q.requestID != requestID {
+			continue
+		}
+		m.pendingDialogs = append(m.pendingDialogs[:i], m.pendingDialogs[i+1:]...)
+		break
 	}
 	return nil
 }

@@ -55,14 +55,15 @@ func createRuntime(ac *AppContext) (*Runtime, error) {
 	ac.MainAgent.SetBusyPreparationHook(resourceCtrl.EnsureReady)
 
 	confirmTimeout := time.Duration(ac.Cfg.ConfirmTimeout) * time.Second
-	wireMainAgentRuntime(ac.Ctx, ac.MainAgent, ac.Registry, confirmTimeout, ac.Cfg.Context.Compaction.ModelDriven)
+	questionTimeout := time.Duration(ac.Cfg.QuestionTimeout) * time.Second
+	wireMainAgentRuntime(ac.Ctx, ac.MainAgent, ac.Registry, confirmTimeout, questionTimeout, ac.Cfg.Context.Compaction.ModelDriven)
 	startRuntimeMCP(ac)
 	startRuntimeWarmups(ac)
 
 	return &Runtime{Agent: ac.MainAgent, powerMgr: powerMgr}, nil
 }
 
-func wireMainAgentRuntime(ctx context.Context, mainAgent *agent.MainAgent, reg *tools.Registry, confirmTimeout time.Duration, modelDrivenCompaction bool) {
+func wireMainAgentRuntime(ctx context.Context, mainAgent *agent.MainAgent, reg *tools.Registry, confirmTimeout, questionTimeout time.Duration, modelDrivenCompaction bool) {
 	mainAgent.SetConfirmFunc(func(ctx context.Context, toolName, args string, needsApproval, alreadyAllowed, needsApprovalRules, alreadyAllowedRules []string) (agent.ConfirmResponse, error) {
 		resp, err := mainAgent.AwaitConfirmWithRuleContext(ctx, toolName, args, confirmTimeout, needsApproval, alreadyAllowed, needsApprovalRules, alreadyAllowedRules)
 		if err != nil {
@@ -72,7 +73,7 @@ func wireMainAgentRuntime(ctx context.Context, mainAgent *agent.MainAgent, reg *
 	})
 
 	reg.Register(tools.NewQuestionTool(func(ctx context.Context, questions []tools.QuestionItem) ([]tools.QuestionAnswer, error) {
-		return mainAgent.AskQuestions(ctx, questions, confirmTimeout)
+		return mainAgent.AskQuestions(ctx, questions, questionTimeout)
 	}))
 	reg.Register(tools.NewDoneTool())
 	// Record the capability on the agent exactly when the tool registration

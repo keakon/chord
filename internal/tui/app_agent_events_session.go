@@ -103,7 +103,13 @@ func (m *Model) handleSessionAgentEvent(event agent.AgentEvent) (bool, agentEven
 		effects.addFollowup(func() tea.Msg { return confirmRequestMsg{request: req} })
 		return true, effects
 	case agent.QuestionRequestEvent:
-		effects.addFollowup(injectQuestionRequestFromEvent(evt))
+		// Install the dialog inline: a batch of tea.Cmds runs concurrently, so
+		// routing the request through a follow-up message could land it after
+		// its own close and leave a dialog on screen that nothing will dismiss.
+		effects.addFollowup(m.handleQuestionRequest(questionDialogFromEvent(evt)))
+		return true, effects
+	case agent.QuestionResolvedEvent:
+		effects.addFollowup(m.handleQuestionResolved(evt.RequestID))
 		return true, effects
 	default:
 		return false, effects

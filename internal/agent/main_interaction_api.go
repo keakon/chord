@@ -34,12 +34,6 @@ type ConfirmRuleIntent struct {
 	Scope    int // 0=session, 1=project, 2=userGlobal (matches permission.RuleScope)
 }
 
-// QuestionResponse carries the user's response to a QuestionRequestEvent.
-type QuestionResponse struct {
-	Answers   []string
-	Cancelled bool
-}
-
 // ConfirmFunc is the callback the agent invokes when a tool call requires user
 // confirmation (permission action "ask"). The TUI (or test harness) supplies
 // the implementation.
@@ -82,8 +76,41 @@ func (a *MainAgent) ResolveConfirmWithRuleIntent(action, finalArgsJSON, editSumm
 // ResolveQuestion sends the user's question response back to the waiting
 // QuestionFunc goroutine via the broker's requestID→channel map. The resolve
 // path acquires only the map lock (never a flow lock) to avoid deadlock.
-func (a *MainAgent) ResolveQuestion(answers []string, cancelled bool, requestID string) {
-	a.interaction.resolveQuestion(requestID, QuestionResponse{Answers: answers, Cancelled: cancelled})
+//
+// reason must be tools.QuestionOutcomeAnswered or
+// tools.QuestionOutcomeDeclined; an answered response must carry at least one
+// answer, and a declined one must carry none. It returns the request's terminal
+// reason plus whether the broker accepted this response as that state. A
+// duplicate or unknown request returns ("", false). A response that arrived at
+// or after the deadline is closed as no_response and returns
+// (tools.QuestionOutcomeNoResponse, true): the deadline decided the outcome, so
+// the caller can say which one it was instead of a generic refusal.
+func (a *MainAgent) ResolveQuestion(answers []string, reason string, requestID string) (string, bool) {
+	switch reason {
+	case tools.QuestionOutcomeAnswered:
+		if len(answers) == 0 {
+			return "", false
+		}
+	case tools.QuestionOutcomeDeclined:
+		if len(answers) != 0 {
+			return "", false
+		}
+	default:
+		return "", false
+	}
+	got, _, ok := a.interaction.terminateQuestion(requestID, reason, append([]string{}, answers...))
+	if !ok {
+		return "", false
+	}
+	return got, true
+}
+
+// SupersedeQuestion closes the pending question registered under requestID
+// because a newer user message was accepted. It reports whether the request was
+// still pending.
+func (a *MainAgent) SupersedeQuestion(requestID string) bool {
+	_, _, ok := a.interaction.terminateQuestion(requestID, tools.QuestionOutcomeSuperseded, nil)
+	return ok
 }
 
 // ClearPendingInteractions removes requestID mappings for any in-flight

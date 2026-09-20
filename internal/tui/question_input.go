@@ -1,11 +1,11 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 
 	tea "github.com/keakon/bubbletea/v2"
 
+	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -105,9 +105,9 @@ func (m *Model) handleQuestionOptionKey(msg tea.KeyMsg, q tools.QuestionItem) te
 		m.recalcViewportSize()
 		return textareaBlinkCmd()
 
-	// Cancel
+	// Decline
 	case msg.Key().Code == tea.KeyEscape:
-		return m.cancelQuestion()
+		return m.declineQuestion()
 	}
 
 	return nil
@@ -137,8 +137,8 @@ func (m *Model) handleQuestionTextKey(msg tea.KeyMsg, q tools.QuestionItem) tea.
 			m.recalcViewportSize()
 			return nil
 		}
-		// No options → Esc cancels
-		return m.cancelQuestion()
+		// No options → Esc declines
+		return m.declineQuestion()
 
 	case msg.Key().Code == tea.KeyTab:
 		if len(q.Options) > 0 {
@@ -203,14 +203,13 @@ func (m *Model) advanceQuestion(answer tools.QuestionAnswer) tea.Cmd {
 	}
 
 	// All questions answered — send results back.
-	return m.resolveQuestion(QuestionResult{Answers: m.question.answers})
+	return m.resolveQuestion(m.question.answers, false)
 }
 
-// cancelQuestion dismisses the dialog and returns empty answers.
-func (m *Model) cancelQuestion() tea.Cmd {
-	return m.resolveQuestion(QuestionResult{
-		Err: fmt.Errorf("user cancelled"),
-	})
+// declineQuestion dismisses the dialog with an explicit declined outcome, so
+// the model can tell a refusal apart from an unanswered timeout.
+func (m *Model) declineQuestion() tea.Cmd {
+	return m.resolveQuestion(nil, true)
 }
 
 // flattenQuestionAnswers converts TUI question answers to the []string form
@@ -223,24 +222,28 @@ func flattenQuestionAnswers(answers []tools.QuestionAnswer) []string {
 	return out
 }
 
-// resolveQuestion sends the result back via the request-scoped response channel
-// or agent.ResolveQuestion for request-ID based interactions, clears state,
-// restores the previous mode, and re-subscribes to the question channel.
-func (m *Model) resolveQuestion(result QuestionResult) tea.Cmd {
+// resolveQuestion submits the dialog's result to the agent, clears the dialog,
+// restores the previous mode, and presents the next queued dialog. declined
+// marks an explicit refusal (Esc) rather than a submitted answer. The broker
+// decides the terminal state, so a response can lose to the deadline or to a
+// newer message; whatever reason won is surfaced as a toast instead of being
+// silently dropped.
+func (m *Model) resolveQuestion(answers []tools.QuestionAnswer, declined bool) tea.Cmd {
 	if m.question.request == nil {
 		return nil
 	}
 
-	if m.question.requestID != "" {
-		// Request-ID path: resolve through the agent API.
-		answers := flattenQuestionAnswers(result.Answers)
-		m.agent.ResolveQuestion(answers, result.Err != nil, m.question.requestID)
-	} else if m.question.responseCh != nil {
-		// In-process local mode: send to the request-scoped response channel.
-		select {
-		case m.question.responseCh <- result:
-		default:
-		}
+	reason := tools.QuestionOutcomeAnswered
+	submitted := flattenQuestionAnswers(answers)
+	if declined {
+		reason = tools.QuestionOutcomeDeclined
+		submitted = nil
+	}
+
+	terminal, accepted := m.agent.ResolveQuestion(submitted, reason, m.question.requestID)
+	var refusalCmd tea.Cmd
+	if !accepted || terminal != reason {
+		refusalCmd = m.enqueueToast(questionTerminalToast(terminal), "warn")
 	}
 
 	prevMode := m.question.prevMode
@@ -249,9 +252,11 @@ func (m *Model) resolveQuestion(result QuestionResult) tea.Cmd {
 	m.recalcViewportSize()
 	titleCmd := m.syncTerminalTitleState()
 
-	// Re-subscribe to the question channel, then either present the next queued
-	// dialog or restore the pre-dialog mode.
-	cmds := []tea.Cmd{waitForQuestionRequest(m.questionCh), titleCmd}
+	// Present the next queued dialog or restore the pre-dialog mode.
+	cmds := []tea.Cmd{titleCmd}
+	if refusalCmd != nil {
+		cmds = append(cmds, refusalCmd)
+	}
 	if m.displayState == stateBackground {
 		cmds = append(cmds, m.updateBackgroundIdleSweepState())
 	}
@@ -260,4 +265,23 @@ func (m *Model) resolveQuestion(result QuestionResult) tea.Cmd {
 
 func textareaBlinkCmd() tea.Cmd {
 	return tea.Cmd(nil)
+}
+
+// questionTerminalToast explains a response that did not become the question's
+// outcome. A response loses either its request (already closed, unknown) or its
+// race with the deadline or a newer message; naming the winning reason tells
+// the user what actually happened after the dialog is gone.
+func questionTerminalToast(terminal string) string {
+	switch terminal {
+	case tools.QuestionOutcomeNoResponse:
+		return "Question expired before the response arrived; it closed with no answer"
+	case tools.QuestionOutcomeSuperseded:
+		return "Question was superseded by a newer message"
+	case agent.QuestionResolvedReasonCancelled:
+		return "Question was cancelled"
+	case agent.QuestionResolvedReasonError:
+		return "Question was closed because the agent shut down"
+	default:
+		return "Question response not accepted: the question already closed"
+	}
 }

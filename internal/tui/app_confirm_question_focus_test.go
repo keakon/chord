@@ -101,7 +101,7 @@ func TestConfirmRequestFromMainSwitchesToMainView(t *testing.T) {
 
 func TestQuestionRequestSwitchesFocusToAskingSubAgent(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
-	m.handleQuestionRequest(questionRequestMsg{
+	m.handleQuestionRequest(questionDialog{
 		requestID: "q-1",
 		request: QuestionRequest{
 			Questions: []tools.QuestionItem{{Header: "pick", Question: "which one?", Options: []tools.QuestionOption{{Label: "one"}, {Label: "two"}}}},
@@ -126,7 +126,7 @@ func TestQueuedHandoffWithoutTargetsIsSkipped(t *testing.T) {
 		requestID: "h-1",
 		agentID:   identity.MainAgentID,
 	})
-	m.handleQuestionRequest(questionRequestMsg{request: QuestionRequest{
+	m.handleQuestionRequest(questionDialog{request: QuestionRequest{
 		Questions: []tools.QuestionItem{{Header: "pick", Question: "which?"}},
 	}})
 	if len(m.pendingDialogs) != 2 {
@@ -166,23 +166,28 @@ func TestConfirmAndQuestionEventsCarryAgentIDToRequest(t *testing.T) {
 		t.Fatalf("ConfirmRequest.AgentID = %q, want %q", confirm.AgentID, "agent-1")
 	}
 
-	cmd = m.handleAgentEvent(agentEventMsg{event: agent.QuestionRequestEvent{
+	// In the real loop the confirm follow-up reaches Update before the next
+	// event is handled, so the confirm owns the screen when the question
+	// arrives. The question dialog is installed inline rather than through a
+	// follow-up, so it queues behind that confirm.
+	m.Update(confirmRequestMsg{request: *confirm})
+	if !m.dialogActive() {
+		t.Fatal("setup: the confirm should own the screen")
+	}
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.QuestionRequestEvent{
 		RequestID: "req-question",
 		Question:  "continue?",
 		AgentID:   "agent-1",
 	}})
-	var question *QuestionRequest
-	for _, msg := range collectFollowupMsgs(cmd) {
-		if qr, ok := msg.(questionRequestMsg); ok {
-			question = &qr.request
-		}
+	if len(m.pendingDialogs) != 1 || m.pendingDialogs[0].question == nil {
+		t.Fatalf("pendingDialogs = %+v, want the question queued behind the confirm", m.pendingDialogs)
 	}
-	if question == nil {
-		t.Fatal("question event should produce a questionRequestMsg followup")
+	if got := m.pendingDialogs[0].question.request.AgentID; got != "agent-1" {
+		t.Fatalf("QuestionRequest.AgentID = %q, want %q", got, "agent-1")
 	}
-	if question.AgentID != "agent-1" {
-		t.Fatalf("QuestionRequest.AgentID = %q, want %q", question.AgentID, "agent-1")
-	}
+	// Drop the queued question the way a resolved event would, so the handoff
+	// below is presented rather than queued behind it.
+	m.handleQuestionResolved("req-question")
 
 	cmd = m.handleAgentEvent(agentEventMsg{event: agent.HandoffEvent{
 		PlanPath:  "docs/plans/example.md",
@@ -264,7 +269,7 @@ func TestDialogRequestsQueueAndPresentInArrivalOrder(t *testing.T) {
 	}
 
 	// A second request must wait instead of replacing the visible dialog.
-	m.handleQuestionRequest(questionRequestMsg{
+	m.handleQuestionRequest(questionDialog{
 		requestID: "req-question",
 		request: QuestionRequest{
 			Questions: []tools.QuestionItem{{Header: "pick", Question: "which?", Options: []tools.QuestionOption{{Label: "one"}}}},
@@ -327,18 +332,12 @@ func TestQueuedDialogRestoresBaseModeAfterLastDialog(t *testing.T) {
 	}
 }
 
-func TestExpiredQueuedDialogIsDropped(t *testing.T) {
+func TestExpiredQueuedConfirmIsDropped(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
 	m.mode = ModeNormal
 
-	m.handleConfirmRequest(confirmRequestMsg{request: ConfirmRequest{ToolName: tools.NameEdit}})
-	m.handleQuestionRequest(questionRequestMsg{
-		request: QuestionRequest{
-			Questions: []tools.QuestionItem{{Header: "pick", Question: "which?"}},
-			Timeout:   time.Second,
-			AgentID:   "agent-2",
-		},
-	})
+	m.handleConfirmRequest(confirmRequestMsg{request: ConfirmRequest{ToolName: tools.NameShell}})
+	m.handleConfirmRequest(confirmRequestMsg{request: ConfirmRequest{ToolName: tools.NameEdit, Timeout: time.Second}})
 	m.pendingDialogs[0].arrivedAt = time.Now().Add(-2 * time.Second)
 
 	_ = m.resolveConfirm(ConfirmResult{Action: ConfirmAllow})
@@ -384,64 +383,55 @@ func countToastTickMsgs(msgs []tea.Msg) int {
 	return count
 }
 
-func TestQueuedDialogDeadlineAnchorsToArrival(t *testing.T) {
+func TestQueuedQuestionUsesAbsoluteDeadline(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
 	m.mode = ModeNormal
 
 	m.handleConfirmRequest(confirmRequestMsg{request: ConfirmRequest{ToolName: tools.NameEdit}})
-	arrivedAt := time.Now().Add(-2 * time.Second)
-	m.handleQuestionRequest(questionRequestMsg{
+	deadline := time.Now().Add(5 * time.Second)
+	m.handleQuestionRequest(questionDialog{
 		request: QuestionRequest{
 			Questions: []tools.QuestionItem{{Header: "pick", Question: "which?"}},
-			Timeout:   5 * time.Second,
+			Deadline:  deadline,
 			AgentID:   "agent-2",
 		},
 	})
-	m.pendingDialogs[0].arrivedAt = arrivedAt
+	m.pendingDialogs[0].arrivedAt = time.Now().Add(-2 * time.Second)
 
 	_ = m.resolveConfirm(ConfirmResult{Action: ConfirmAllow})
 
 	if m.question.request == nil {
-		t.Fatal("a queued dialog whose own timeout has not elapsed must still be presented")
+		t.Fatal("a queued question must still be presented")
 	}
-	want := arrivedAt.Add(5 * time.Second)
-	if !m.question.deadline.Equal(want) {
-		t.Fatalf("deadline = %v, want %v (anchored to arrival + timeout, not reset to now + timeout)", m.question.deadline, want)
-	}
-	if now := time.Now(); !m.question.deadline.Before(now.Add(5 * time.Second)) {
-		t.Fatalf("deadline = %v must leave less than a full timeout from now (%v)", m.question.deadline, now)
+	if !m.question.deadline.Equal(deadline) {
+		t.Fatalf("deadline = %v, want %v (the request's absolute deadline, not arrival + timeout)", m.question.deadline, deadline)
 	}
 }
 
-func TestQueuedDialogAnsweredAfterOwnTimeoutIsNotPresented(t *testing.T) {
+func TestQueuedQuestionWithElapsedDeadlineStillPresented(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
 	m.mode = ModeNormal
 
 	m.handleConfirmRequest(confirmRequestMsg{request: ConfirmRequest{ToolName: tools.NameEdit}})
-	m.handleQuestionRequest(questionRequestMsg{
+	deadline := time.Now().Add(-time.Second)
+	m.handleQuestionRequest(questionDialog{
 		request: QuestionRequest{
 			Questions: []tools.QuestionItem{{Header: "pick", Question: "which?"}},
-			Timeout:   2 * time.Second,
+			Deadline:  deadline,
 			AgentID:   "agent-2",
 		},
 	})
-	// Answer the open confirm only after the queued question's own
-	// arrivedAt+timeout window has already closed.
-	m.pendingDialogs[0].arrivedAt = time.Now().Add(-3 * time.Second)
 
 	_ = m.resolveConfirm(ConfirmResult{Action: ConfirmAllow})
 
-	if m.dialogActive() {
-		t.Fatal("a queued dialog whose own timeout already elapsed must not be shown")
+	// The TUI never drops a question on its own: only the core resolved event
+	// dismisses it, so an elapsed deadline still shows the dialog (with a
+	// zeroed countdown) until that event arrives.
+	if m.question.request == nil {
+		t.Fatal("an elapsed deadline must not drop the queued question locally")
 	}
-	if m.question.request != nil {
-		t.Fatal("the expired queued question must not be answerable")
-	}
-	if m.mode != ModeNormal {
-		t.Fatalf("mode = %v, want the base mode restored", m.mode)
-	}
-	if len(m.pendingDialogs) != 0 {
-		t.Fatalf("pendingDialogs = %d, want 0", len(m.pendingDialogs))
+	if !m.question.deadline.Equal(deadline) {
+		t.Fatalf("deadline = %v, want %v", m.question.deadline, deadline)
 	}
 }
 
@@ -450,7 +440,7 @@ func TestSessionSwitchStartedClearsActiveAndQueuedDialogs(t *testing.T) {
 	m.mode = ModeNormal
 
 	m.handleConfirmRequest(confirmRequestMsg{request: ConfirmRequest{ToolName: tools.NameEdit}})
-	m.handleQuestionRequest(questionRequestMsg{request: QuestionRequest{
+	m.handleQuestionRequest(questionDialog{request: QuestionRequest{
 		Questions: []tools.QuestionItem{{Header: "pick", Question: "which?"}},
 		AgentID:   "agent-2",
 	}})
@@ -534,5 +524,99 @@ func TestFinishDialogKeepsSkippedHandoffToastCommand(t *testing.T) {
 	}
 	if got := countToastTickMsgs(flattenCmdMsgs(cmd)); got != 1 {
 		t.Fatalf("toast tick commands = %d, want finishDialog to keep the skipped handoff's toast tick", got)
+	}
+}
+
+func TestQuestionResolvedEventClosesMatchingActiveQuestion(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.mode = ModeNormal
+
+	m.handleQuestionRequest(questionDialog{
+		requestID: "q-active",
+		request: QuestionRequest{
+			Questions: []tools.QuestionItem{{Header: "pick", Question: "which?"}},
+			AgentID:   "agent-1",
+		},
+	})
+	if m.question.request == nil || m.question.requestID != "q-active" {
+		t.Fatalf("setup: question = %+v, want q-active active", m.question)
+	}
+
+	// A resolved event for another request must leave the dialog alone.
+	m.handleAgentEvent(agentEventMsg{event: agent.QuestionResolvedEvent{
+		RequestID: "q-other",
+		Reason:    tools.QuestionOutcomeSuperseded,
+	}})
+	if m.question.request == nil {
+		t.Fatal("a resolved event for another request must not close the active dialog")
+	}
+
+	// The matching event closes the active dialog and restores the base mode.
+	m.handleAgentEvent(agentEventMsg{event: agent.QuestionResolvedEvent{
+		RequestID: "q-active",
+		Reason:    tools.QuestionOutcomeNoResponse,
+	}})
+	if m.question.request != nil || m.dialogActive() {
+		t.Fatal("the matching resolved event must close the active question")
+	}
+	if m.mode != ModeNormal {
+		t.Fatalf("mode = %v, want the pre-dialog mode", m.mode)
+	}
+}
+
+func TestQuestionResolvedEventDropsMatchingQueuedQuestion(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.mode = ModeNormal
+
+	m.handleConfirmRequest(confirmRequestMsg{request: ConfirmRequest{ToolName: tools.NameEdit}})
+	m.handleQuestionRequest(questionDialog{
+		requestID: "q-queued",
+		request:   QuestionRequest{Questions: []tools.QuestionItem{{Header: "pick", Question: "which?"}}},
+	})
+	if len(m.pendingDialogs) != 1 || m.pendingDialogs[0].question == nil {
+		t.Fatalf("setup: pendingDialogs = %+v, want one queued question", m.pendingDialogs)
+	}
+
+	// A mismatched or empty request ID must not touch the queue.
+	m.handleQuestionResolved("q-other")
+	m.handleQuestionResolved("")
+	if len(m.pendingDialogs) != 1 {
+		t.Fatalf("pendingDialogs = %d, want the unmatched queued question kept", len(m.pendingDialogs))
+	}
+
+	m.handleQuestionResolved("q-queued")
+	if len(m.pendingDialogs) != 0 {
+		t.Fatalf("pendingDialogs = %d, want the matching queued question dropped", len(m.pendingDialogs))
+	}
+
+	// Draining the confirm must not present the dropped question.
+	_ = m.resolveConfirm(ConfirmResult{Action: ConfirmAllow})
+	if m.dialogActive() {
+		t.Fatal("a dropped queued question must not be presented when the queue drains")
+	}
+	if m.mode != ModeNormal {
+		t.Fatalf("mode = %v, want ModeNormal", m.mode)
+	}
+}
+
+func TestQuestionRequestResolvedInSameEventBatchLeavesNoDialog(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.mode = ModeNormal
+
+	// The request installs its dialog synchronously, so a resolved event later
+	// in the same batch always finds the dialog it must close.
+	updated, _ := m.Update(agentEventBatchMsg{
+		{event: agent.QuestionRequestEvent{RequestID: "q-batch", Question: "which?", AgentID: "agent-1"}},
+		{event: agent.QuestionResolvedEvent{RequestID: "q-batch", Reason: tools.QuestionOutcomeNoResponse}},
+	})
+	model, ok := updated.(*Model)
+	if !ok {
+		t.Fatalf("Update returned %T, want *Model", updated)
+	}
+	if model.question.request != nil || model.dialogActive() {
+		t.Fatal("a question resolved within its own event batch must not leave a dialog on screen")
+	}
+	if model.mode != ModeNormal {
+		t.Fatalf("mode = %v, want the pre-dialog mode", model.mode)
 	}
 }

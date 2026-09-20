@@ -256,19 +256,17 @@ func TestResolveConfirmRestoresInsertModeWithIMERestore(t *testing.T) {
 }
 
 func TestResolveQuestionRestoresInsertModeWithIMERestore(t *testing.T) {
-	m := NewModel(nil)
+	m := NewModel(loopBusyAgentStub{})
 	m.mode = ModeQuestion
 	m.question = questionState{
-		request:  &QuestionRequest{Questions: []tools.QuestionItem{{Header: "name", Question: "who?"}}},
-		prevMode: ModeInsert,
+		request:   &QuestionRequest{Questions: []tools.QuestionItem{{Header: "name", Question: "who?"}}},
+		requestID: "req-ime",
+		prevMode:  ModeInsert,
 	}
 	m.ime.beforeNormal = "zh-orig"
 	preventIMEApplyInTests(&m)
 
-	cmd := m.resolveQuestion(QuestionResult{Err: errors.New("cancelled")})
-	if cmd == nil {
-		t.Fatal("resolveQuestion() returned nil cmd")
-	}
+	_ = m.resolveQuestion(nil, true)
 	if m.mode != ModeInsert {
 		t.Fatalf("mode = %v, want ModeInsert", m.mode)
 	}
@@ -566,21 +564,17 @@ func TestConfirmRequestMsgSwitchesIMEWhenEnteringConfirm(t *testing.T) {
 	}
 }
 
-func TestQuestionRequestMsgSwitchesIMEWhenEnteringQuestion(t *testing.T) {
+func TestQuestionRequestSwitchesIMEWhenEnteringQuestion(t *testing.T) {
 	m := NewModel(nil)
 	m.mode = ModeInsert
 	m.ime.switchTarget = "com.apple.keylayout.ABC"
 
-	updated, cmd := m.Update(questionRequestMsg{request: QuestionRequest{Questions: []tools.QuestionItem{{Header: "name", Question: "who?", Options: []tools.QuestionOption{{Label: "alice"}}}}}})
-	model, ok := updated.(*Model)
-	if !ok {
-		t.Fatalf("Update returned %T, want *Model", updated)
-	}
-	if model.mode != ModeQuestion {
-		t.Fatalf("mode = %v, want ModeQuestion", model.mode)
+	cmd := m.handleQuestionRequest(questionDialog{request: QuestionRequest{Questions: []tools.QuestionItem{{Header: "name", Question: "who?", Options: []tools.QuestionOption{{Label: "alice"}}}}}})
+	if m.mode != ModeQuestion {
+		t.Fatalf("mode = %v, want ModeQuestion", m.mode)
 	}
 	if cmd == nil {
-		t.Fatal("questionRequestMsg should trigger IME query command when entering Question from Insert")
+		t.Fatal("a question request should trigger the IME query command when entering Question from Insert")
 	}
 }
 

@@ -66,8 +66,11 @@ type PromptResolver interface {
 	// confirm flow.
 	ResolveConfirm(action, finalArgsJSON, editSummary, denyReason, requestID string)
 	// ResolveQuestion sends the user's question response back to the pending
-	// question flow.
-	ResolveQuestion(answers []string, cancelled bool, requestID string)
+	// question flow. reason is answered or declined. It returns the request's
+	// terminal reason and whether the broker accepted the response as that
+	// state: a response that lost to the deadline comes back as no_response,
+	// and a duplicate or unknown request as ("", false).
+	ResolveQuestion(answers []string, reason string, requestID string) (string, bool)
 }
 
 // HandoffResolver delivers the user's plan-execution decision back to the

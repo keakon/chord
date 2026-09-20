@@ -96,7 +96,7 @@ func newBlockingRuntime(t *testing.T) (*Runtime, *agent.MainAgent, chan struct{}
 
 	acCtx, cancel := context.WithCancel(context.Background())
 	rt := &Runtime{Agent: mainAgent}
-	wireMainAgentRuntime(acCtx, mainAgent, tools.NewRegistry(), 0, false)
+	wireMainAgentRuntime(acCtx, mainAgent, tools.NewRegistry(), 0, 0, false)
 
 	cleanup := func() {
 		cancel()

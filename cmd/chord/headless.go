@@ -62,16 +62,15 @@ type headlessConfirmPayload struct {
 }
 
 type headlessQuestionPayload struct {
-	ToolName      string   `json:"tool_name"`
-	Header        string   `json:"header,omitempty"`
-	Question      string   `json:"question"`
-	Options       []string `json:"options"`
-	OptionDetails []string `json:"option_details,omitempty"`
-	DefaultAnswer string   `json:"default_answer"`
-	Multiple      bool     `json:"multiple,omitempty"`
-	RequestID     string   `json:"request_id,omitempty"`
-	TimeoutMS     int64    `json:"timeout_ms,omitempty"`
-	AgentID       string   `json:"agent_id,omitempty"`
+	ToolName      string     `json:"tool_name"`
+	Header        string     `json:"header,omitempty"`
+	Question      string     `json:"question"`
+	Options       []string   `json:"options"`
+	OptionDetails []string   `json:"option_details,omitempty"`
+	Multiple      bool       `json:"multiple,omitempty"`
+	RequestID     string     `json:"request_id,omitempty"`
+	Deadline      *time.Time `json:"deadline,omitempty"`
+	AgentID       string     `json:"agent_id,omitempty"`
 }
 
 // headlessHandoffCancelledReasonSuperseded is the reason carried by a
@@ -260,7 +259,7 @@ type headlessCommand struct {
 	RulePattern   string   `json:"rule_pattern,omitempty"`
 	RuleScope     string   `json:"rule_scope,omitempty"` // session | project | user_global
 	Answers       []string `json:"answers,omitempty"`
-	Cancelled     bool     `json:"cancelled,omitempty"`
+	Reason        string   `json:"reason,omitempty"` // for question: answered | declined
 	Events        []string `json:"events,omitempty"` // for subscribe command
 }
 
@@ -271,6 +270,7 @@ var headlessEventTypes = map[string]bool{
 	"idle":               true,
 	"confirm_request":    true,
 	"question_request":   true,
+	"question_resolved":  true,
 	"role_change":        true,
 	"notification":       true,
 	"handoff_request":    true,
@@ -525,19 +525,43 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 		}
 	case agent.QuestionRequestEvent:
 		touch()
-		state.pendingQuestion = &headlessQuestionPayload{ToolName: e.ToolName, Header: e.Header, Question: e.Question, Options: e.Options, OptionDetails: e.OptionDetails, DefaultAnswer: e.DefaultAnswer, Multiple: e.Multiple, RequestID: e.RequestID, TimeoutMS: e.Timeout.Milliseconds(), AgentID: e.AgentID}
+		var deadline *time.Time
+		if !e.Deadline.IsZero() {
+			d := e.Deadline
+			deadline = &d
+		}
+		state.pendingQuestion = &headlessQuestionPayload{ToolName: e.ToolName, Header: e.Header, Question: e.Question, Options: e.Options, OptionDetails: e.OptionDetails, Multiple: e.Multiple, RequestID: e.RequestID, Deadline: deadline, AgentID: e.AgentID}
 		if state.isSubscribed("question_request") {
-			out = append(out, &headlessEnvelope{Type: "question_request", Payload: map[string]any{
+			payload := map[string]any{
 				"tool_name":      e.ToolName,
 				"header":         e.Header,
 				"question":       e.Question,
 				"options":        e.Options,
 				"option_details": e.OptionDetails,
-				"default_answer": e.DefaultAnswer,
 				"multiple":       e.Multiple,
 				"request_id":     e.RequestID,
-				"timeout_ms":     e.Timeout.Milliseconds(),
 				"agent_id":       e.AgentID,
+			}
+			// A question with no configured timeout has no close time. Omitting
+			// the key keeps the wire shape the docs promise; writing a nil
+			// pointer would encode as "deadline": null.
+			if deadline != nil {
+				payload["deadline"] = deadline
+			}
+			out = append(out, &headlessEnvelope{Type: "question_request", Payload: payload})
+		}
+	case agent.QuestionResolvedEvent:
+		// The core close event is the authoritative pending source: clear the
+		// cached request only when it matches, so a stale close never removes a
+		// newer question.
+		if state.pendingQuestion != nil && state.pendingQuestion.RequestID == e.RequestID {
+			touch()
+			state.pendingQuestion = nil
+		}
+		if state.isSubscribed("question_resolved") {
+			out = append(out, &headlessEnvelope{Type: "question_resolved", Payload: map[string]string{
+				"request_id": e.RequestID,
+				"reason":     e.Reason,
 			}})
 		}
 	case agent.HandoffEvent:
@@ -1087,7 +1111,10 @@ type headlessBackend interface {
 	SendUserMessage(content string)
 	CancelCurrentTurn() bool
 	ResolveConfirm(action, finalArgsJSON, editSummary, denyReason, requestID string)
-	ResolveQuestion(answers []string, cancelled bool, requestID string)
+	ResolveQuestion(answers []string, reason string, requestID string) (string, bool)
+	// SupersedeQuestion closes a still-pending question because a newer user
+	// message was accepted. It returns whether the request was still pending.
+	SupersedeQuestion(requestID string) bool
 }
 
 type headlessHandoffBackend interface {
@@ -1436,17 +1463,6 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 			}
 			state.mu.Unlock()
 		}
-		if pendingQuestion != nil {
-			log.Infof("headless: auto-cancelling pending question for new user message request_id=%v tool_name=%v", pendingQuestion.RequestID, pendingQuestion.ToolName)
-			backend.ResolveQuestion(nil, true, pendingQuestion.RequestID)
-			state.mu.Lock()
-			if state.pendingQuestion != nil && state.pendingQuestion.RequestID == pendingQuestion.RequestID {
-				state.pendingQuestion = nil
-				state.updatedAt = time.Now()
-				state.stampHeadlessSeq(true)
-			}
-			state.mu.Unlock()
-		}
 		if pendingHandoff != nil {
 			log.Infof("headless: auto-cancelling pending handoff for new user message request_id=%v plan_path=%v", pendingHandoff.RequestID, pendingHandoff.PlanPath)
 			if hb, ok := backend.(headlessHandoffBackend); ok {
@@ -1482,6 +1498,18 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 					out.emit(cancelled)
 				}
 			})
+		}
+		if pendingQuestion != nil {
+			// Accept the new message first, then wake the blocked Question as
+			// superseded. SendUserMessage returns only once the message is
+			// queued, so the resumed tool cannot reorder a model request ahead
+			// of it. The pending cache is cleared by the core resolved event,
+			// never locally. A handoff pending at the same time was cancelled
+			// above, so neither interaction is left showing as pending.
+			log.Infof("headless: superseding pending question for new user message request_id=%v tool_name=%v", pendingQuestion.RequestID, pendingQuestion.ToolName)
+			backend.SendUserMessage(content)
+			backend.SupersedeQuestion(pendingQuestion.RequestID)
+			return
 		}
 		backend.SendUserMessage(content)
 
@@ -1583,14 +1611,29 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 		state.mu.Unlock()
 
 	case "question":
-		backend.ResolveQuestion(cmd.Answers, cmd.Cancelled, cmd.RequestID)
-		state.mu.Lock()
-		if state.pendingQuestion != nil && state.pendingQuestion.RequestID == cmd.RequestID {
-			state.pendingQuestion = nil
-			state.updatedAt = time.Now()
-			state.stampHeadlessSeq(true)
+		reason := strings.TrimSpace(cmd.Reason)
+		if reason != tools.QuestionOutcomeAnswered && reason != tools.QuestionOutcomeDeclined {
+			out.emit(headlessEnvelope{Type: "error", Payload: map[string]string{
+				"message": "question reason must be answered or declined",
+			}})
+			return
 		}
-		state.mu.Unlock()
+		// The core resolved event is the authoritative pending source, so the
+		// cache is not cleared here: a rejected or late answer must not drop a
+		// different pending question.
+		terminal, accepted := backend.ResolveQuestion(cmd.Answers, reason, cmd.RequestID)
+		if !accepted || terminal != reason {
+			// The broker settles the terminal state under its lock, so a late
+			// answer loses to the deadline instead of deciding the outcome.
+			message := "question response was not accepted"
+			if terminal != "" {
+				message += ": the question closed as " + terminal
+			}
+			out.emit(headlessEnvelope{Type: "error", Payload: map[string]string{
+				"message": message,
+			}})
+			return
+		}
 
 	case "cancel":
 		backend.CancelCurrentTurn()

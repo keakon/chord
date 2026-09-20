@@ -377,9 +377,10 @@ func (m *Model) scheduleKeyPoolTick() tea.Cmd {
 	})
 }
 
-// injectQuestionRequestFromEvent builds a questionRequestMsg from a remote
-// QuestionRequestEvent so the TUI shows the question dialog (remote/connect mode).
-func injectQuestionRequestFromEvent(evt agent.QuestionRequestEvent) tea.Cmd {
+// questionDialogFromEvent builds the dialog a QuestionRequestEvent asks for. The
+// event carries one question: the agent publishes a batch as one request per
+// question, each with its own request id.
+func questionDialogFromEvent(evt agent.QuestionRequestEvent) questionDialog {
 	opts := make([]tools.QuestionOption, len(evt.Options))
 	for i, s := range evt.Options {
 		opt := tools.QuestionOption{Label: s}
@@ -388,17 +389,17 @@ func injectQuestionRequestFromEvent(evt agent.QuestionRequestEvent) tea.Cmd {
 		}
 		opts[i] = opt
 	}
-	req := QuestionRequest{
-		Questions: []tools.QuestionItem{{
-			Header:   evt.Header,
-			Question: evt.Question,
-			Options:  opts,
-			Multiple: evt.Multiple,
-		}},
-		Timeout: evt.Timeout,
-		AgentID: evt.AgentID,
-	}
-	return func() tea.Msg {
-		return questionRequestMsg{request: req, requestID: evt.RequestID}
+	return questionDialog{
+		request: QuestionRequest{
+			Questions: []tools.QuestionItem{{
+				Header:   evt.Header,
+				Question: evt.Question,
+				Options:  opts,
+				Multiple: evt.Multiple,
+			}},
+			Deadline: evt.Deadline,
+			AgentID:  evt.AgentID,
+		},
+		requestID: evt.RequestID,
 	}
 }

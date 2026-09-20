@@ -9,6 +9,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
 )
 
 // sessionDirBackend wraps mockBackend with a configurable session directory so
@@ -502,9 +503,10 @@ func TestHeadlessCommandPathAutoDenyConfirmSeqOrdersSnapshot(t *testing.T) {
 	}
 }
 
-// Auto-cancelling a pending question on send is the same class of silent
-// command-path mutation as auto-denying a confirm: bump seq without a push.
-func TestHeadlessCommandPathAutoCancelQuestionSeqOrdersSnapshot(t *testing.T) {
+// A send that supersedes a pending question leaves the cache to the core
+// resolved event; that event must bump seq so a status snapshot copied while
+// the request was pending cannot restore it.
+func TestHeadlessQuestionResolvedSeqOrdersSnapshot(t *testing.T) {
 	backend := &mockBackend{}
 	state := &headlessState{
 		pendingQuestion: &headlessQuestionPayload{RequestID: "question-1", Question: "which file?"},
@@ -516,11 +518,16 @@ func TestHeadlessCommandPathAutoCancelQuestionSeqOrdersSnapshot(t *testing.T) {
 	if stale == nil {
 		t.Fatal("status_response not emitted")
 	}
+	if payload := headlessPayloadMap(t, stale.Payload); payload["pending_question"] == nil {
+		t.Fatal("stale status should still report the pending question")
+	}
 
 	handleHeadlessCommand(headlessCommand{Type: "send", Content: "never mind"}, backend, state, to.writer())
-	if len(backend.questionCalls) != 1 || !backend.questionCalls[0].cancelled {
-		t.Fatalf("auto-cancel question calls = %#v, want one cancelled", backend.questionCalls)
+	if len(backend.supersededQuestions) != 1 || backend.supersededQuestions[0] != "question-1" {
+		t.Fatalf("superseded questions = %#v, want [question-1]", backend.supersededQuestions)
 	}
+
+	filterHeadlessEvent(agent.QuestionResolvedEvent{RequestID: "question-1", Reason: tools.QuestionOutcomeSuperseded}, state)
 
 	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
 	fresh := findHeadlessEnvelopeValue(to.drain(), "status_response")

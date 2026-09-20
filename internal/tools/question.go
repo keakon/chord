@@ -24,10 +24,22 @@ type QuestionOption struct {
 	Description string `json:"description"`
 }
 
+// Question outcomes. Answered means the user submitted a valid answer;
+// the remaining values are terminal states where no answer was given, and a
+// missing answer never constitutes authorization.
+const (
+	QuestionOutcomeAnswered   = "answered"
+	QuestionOutcomeDeclined   = "declined"
+	QuestionOutcomeNoResponse = "no_response"
+	QuestionOutcomeSuperseded = "superseded"
+	QuestionOutcomeNotAsked   = "not_asked"
+)
+
 // QuestionAnswer holds the user's response to one question.
 type QuestionAnswer struct {
 	Header   string   `json:"header"`
-	Selected []string `json:"selected"` // selected labels or free-text entries
+	Selected []string `json:"selected"` // selected labels or free-text entries; empty for non-answered outcomes
+	Outcome  string   `json:"outcome"`  // one of the QuestionOutcome* values
 }
 
 // ---------------------------------------------------------------------------
@@ -64,7 +76,10 @@ func (QuestionTool) Description() string {
 		"Use this when you need user input for decisions. " +
 		"Each question can have predefined options (single or multi-select). " +
 		"Users can always type a free-text answer even when options are available. " +
-		"If no options are provided, the question is free-text only."
+		"If no options are provided, the question is free-text only. " +
+		"Each answer reports an outcome: answered, declined, no_response, superseded, or not_asked. " +
+		"Only answered carries a selection; declined, no_response, and superseded mean no answer was given, " +
+		"which is not consent or authorization."
 }
 
 func (QuestionTool) Parameters() map[string]any {

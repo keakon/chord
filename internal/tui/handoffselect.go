@@ -61,9 +61,9 @@ func (s handoffSelectState) active() bool {
 }
 
 // handoffSelectRequestMsg carries a Handoff plan decision prompt to the TUI's
-// message loop. It is delivered as a follow-up like confirmRequestMsg and
-// questionRequestMsg, so a batch of agent events presents dialogs in arrival
-// order instead of racing them past each other.
+// message loop. It is delivered as a follow-up like confirmRequestMsg, so a
+// batch of agent events presents dialogs in arrival order instead of racing
+// them past each other.
 type handoffSelectRequestMsg struct {
 	planPath  string
 	requestID string

@@ -116,14 +116,15 @@ func (t *testOut) drain() []headlessEnvelope {
 // ---------------------------------------------------------------------------
 
 type mockBackend struct {
-	mu            sync.Mutex
-	sentMessages  []string
-	confirmCalls  []confirmCall
-	questionCalls []questionCall
-	cancelCalls   int
-	executeCalls  []executePlanCall
-	continueCalls int
-	handoffCalls  []handoffCall
+	mu                  sync.Mutex
+	sentMessages        []string
+	confirmCalls        []confirmCall
+	questionCalls       []questionCall
+	supersededQuestions []string
+	cancelCalls         int
+	executeCalls        []executePlanCall
+	continueCalls       int
+	handoffCalls        []handoffCall
 
 	handoffOptions    []agent.HandoffAgentOption
 	handoffOptionsSet bool
@@ -132,6 +133,21 @@ type mockBackend struct {
 	currentRole     string
 	switchRoleErr   error
 	switchRoleCalls []string
+
+	// resolveQuestionFail, when true, makes ResolveQuestion report a broker
+	// rejection so tests can exercise the not-accepted path. The default
+	// accepts, matching a live broker with the request still pending.
+	resolveQuestionFail bool
+
+	// resolveQuestionTerminal, when set, is the terminal reason ResolveQuestion
+	// reports for an accepted response: a response that lands at or after the
+	// deadline is settled by the deadline, not by the answer.
+	resolveQuestionTerminal string
+
+	// callOrder records mutating backend calls in the order they happened, so
+	// tests can assert sequencing (e.g. accept a new user message before
+	// waking a blocked Question as superseded).
+	callOrder []string
 }
 
 type executePlanCall struct {
@@ -157,13 +173,14 @@ type confirmCall struct {
 
 type questionCall struct {
 	answers   []string
-	cancelled bool
+	reason    string
 	requestID string
 }
 
 func (m *mockBackend) SendUserMessage(content string) {
 	m.mu.Lock()
 	m.sentMessages = append(m.sentMessages, content)
+	m.callOrder = append(m.callOrder, "send:"+content)
 	m.mu.Unlock()
 }
 
@@ -204,10 +221,25 @@ func (m *mockBackend) ResolveConfirmWithRuleIntent(action, finalArgsJSON, editSu
 	m.mu.Unlock()
 }
 
-func (m *mockBackend) ResolveQuestion(answers []string, cancelled bool, requestID string) {
+func (m *mockBackend) ResolveQuestion(answers []string, reason string, requestID string) (string, bool) {
 	m.mu.Lock()
-	m.questionCalls = append(m.questionCalls, questionCall{answers, cancelled, requestID})
+	defer m.mu.Unlock()
+	m.questionCalls = append(m.questionCalls, questionCall{answers: answers, reason: reason, requestID: requestID})
+	if m.resolveQuestionFail {
+		return "", false
+	}
+	if m.resolveQuestionTerminal != "" {
+		return m.resolveQuestionTerminal, true
+	}
+	return reason, true
+}
+
+func (m *mockBackend) SupersedeQuestion(requestID string) bool {
+	m.mu.Lock()
+	m.supersededQuestions = append(m.supersededQuestions, requestID)
+	m.callOrder = append(m.callOrder, "supersede:"+requestID)
 	m.mu.Unlock()
+	return true
 }
 
 func (m *mockBackend) ModelsStatusText() string { return "Model pool: thinking\n" }
@@ -632,7 +664,7 @@ func TestHeadlessConfirmRejectsInvalidRuleScope(t *testing.T) {
 	}
 }
 
-func TestHeadlessPendingQuestionClearedAfterQuestion(t *testing.T) {
+func TestHeadlessQuestionCommandDefersPendingToResolvedEvent(t *testing.T) {
 	state := &headlessState{
 		pendingQuestion: &headlessQuestionPayload{
 			ToolName:  "Question",
@@ -645,14 +677,133 @@ func TestHeadlessPendingQuestionClearedAfterQuestion(t *testing.T) {
 	cmd := headlessCommand{
 		Type:      "question",
 		Answers:   []string{"yes"},
+		Reason:    tools.QuestionOutcomeAnswered,
 		RequestID: "req-2",
 	}
 	handleHeadlessCommand(cmd, backend, state, to.writer())
 
+	backend.mu.Lock()
+	calls := backend.questionCalls
+	backend.mu.Unlock()
+	if len(calls) != 1 || calls[0].reason != tools.QuestionOutcomeAnswered || calls[0].requestID != "req-2" {
+		t.Fatalf("question calls = %#v, want one answered for req-2", calls)
+	}
+
+	// The command must not clear the cache itself: the core resolved event is
+	// the authoritative source.
+	state.mu.Lock()
+	pending := state.pendingQuestion
+	state.mu.Unlock()
+	if pending == nil {
+		t.Fatal("pendingQuestion must stay set until the resolved event arrives")
+	}
+
+	// A matching resolved event clears it.
+	filterHeadlessEvent(agent.QuestionResolvedEvent{RequestID: "req-2", Reason: tools.QuestionOutcomeAnswered}, state)
+	state.mu.Lock()
+	pending = state.pendingQuestion
+	state.mu.Unlock()
+	if pending != nil {
+		t.Fatalf("pendingQuestion = %#v, want nil after the matching resolved event", pending)
+	}
+}
+
+func TestHeadlessQuestionCommandRejectsInvalidReason(t *testing.T) {
+	state := &headlessState{
+		pendingQuestion: &headlessQuestionPayload{ToolName: "Question", RequestID: "req-2"},
+	}
+	to := newTestOut()
+	backend := &mockBackend{}
+
+	handleHeadlessCommand(headlessCommand{
+		Type:      "question",
+		Answers:   []string{"yes"},
+		Reason:    tools.QuestionOutcomeNoResponse,
+		RequestID: "req-2",
+	}, backend, state, to.writer())
+
+	backend.mu.Lock()
+	calls := backend.questionCalls
+	backend.mu.Unlock()
+	if len(calls) != 0 {
+		t.Fatalf("question calls = %#v, want none for an invalid reason", calls)
+	}
+	if env := findHeadlessEnvelopeValue(to.drain(), "error"); env == nil {
+		t.Fatal("expected an error envelope for an invalid reason")
+	}
+}
+
+func TestHeadlessQuestionCommandSurfacesBrokerRejection(t *testing.T) {
+	state := &headlessState{
+		pendingQuestion: &headlessQuestionPayload{ToolName: "Question", RequestID: "req-2"},
+	}
+	to := newTestOut()
+	backend := &mockBackend{resolveQuestionFail: true}
+
+	handleHeadlessCommand(headlessCommand{
+		Type:      "question",
+		Answers:   []string{"yes"},
+		Reason:    tools.QuestionOutcomeAnswered,
+		RequestID: "req-2",
+	}, backend, state, to.writer())
+
+	if env := findHeadlessEnvelopeValue(to.drain(), "error"); env == nil {
+		t.Fatal("expected an error envelope when the broker rejects the answer")
+	}
+	// A rejected answer must not clear the pending cache: the broker kept the
+	// request (or another one is pending), and only its resolved event may.
+	state.mu.Lock()
+	pending := state.pendingQuestion
+	state.mu.Unlock()
+	if pending == nil || pending.RequestID != "req-2" {
+		t.Fatalf("pendingQuestion = %#v, want req-2 preserved after rejection", pending)
+	}
+}
+
+func TestHeadlessQuestionCommandReportsLostRaceWithDeadline(t *testing.T) {
+	state := &headlessState{
+		pendingQuestion: &headlessQuestionPayload{ToolName: "Question", RequestID: "req-3"},
+	}
+	to := newTestOut()
+	backend := &mockBackend{resolveQuestionTerminal: tools.QuestionOutcomeNoResponse}
+
+	handleHeadlessCommand(headlessCommand{
+		Type:      "question",
+		Answers:   []string{"yes"},
+		Reason:    tools.QuestionOutcomeAnswered,
+		RequestID: "req-3",
+	}, backend, state, to.writer())
+
+	env := findHeadlessEnvelopeValue(to.drain(), "error")
+	if env == nil {
+		t.Fatal("expected an error envelope when the deadline decided the outcome")
+	}
+	payload, ok := env.Payload.(map[string]any)
+	if !ok {
+		t.Fatalf("error payload = %T, want map[string]any", env.Payload)
+	}
+	if message, _ := payload["message"].(string); !strings.Contains(message, tools.QuestionOutcomeNoResponse) {
+		t.Fatalf("error message = %q, want the winning terminal reason", message)
+	}
+	// The answer did not decide the state, so the pending cache stays until the
+	// question's own resolved event arrives.
+	state.mu.Lock()
+	pending := state.pendingQuestion
+	state.mu.Unlock()
+	if pending == nil || pending.RequestID != "req-3" {
+		t.Fatalf("pendingQuestion = %#v, want req-3 preserved", pending)
+	}
+}
+
+func TestHeadlessQuestionResolvedMismatchKeepsPending(t *testing.T) {
+	state := &headlessState{
+		pendingQuestion: &headlessQuestionPayload{ToolName: "Question", RequestID: "req-new"},
+	}
+	filterHeadlessEvent(agent.QuestionResolvedEvent{RequestID: "req-old", Reason: tools.QuestionOutcomeNoResponse}, state)
 	state.mu.Lock()
 	defer state.mu.Unlock()
-	if state.pendingQuestion != nil {
-		t.Errorf("pendingQuestion should be nil after question command, got %+v", state.pendingQuestion)
+	if state.pendingQuestion == nil || state.pendingQuestion.RequestID != "req-new" {
+		t.Fatalf("pendingQuestion = %#v, want req-new preserved", state.pendingQuestion)
 	}
 }
 
@@ -691,7 +842,7 @@ func TestHeadlessAutoDenyConfirmOnUserMessage(t *testing.T) {
 	}
 }
 
-func TestHeadlessAutoCancelQuestionOnUserMessage(t *testing.T) {
+func TestHeadlessSupersedeQuestionOnUserMessage(t *testing.T) {
 	state := &headlessState{
 		pendingQuestion: &headlessQuestionPayload{
 			ToolName:  "Question",
@@ -707,22 +858,95 @@ func TestHeadlessAutoCancelQuestionOnUserMessage(t *testing.T) {
 	}
 	handleHeadlessCommand(cmd, backend, state, to.writer())
 
+	// The pending cache is cleared by the core resolved event, not locally, so
+	// it is still set until that event arrives.
 	state.mu.Lock()
 	pq := state.pendingQuestion
 	state.mu.Unlock()
-	if pq != nil {
-		t.Errorf("pendingQuestion should be nil after send command auto-cancelled it, got %+v", pq)
+	if pq == nil {
+		t.Error("pendingQuestion should stay set until the resolved event clears it")
 	}
 
 	backend.mu.Lock()
 	calls := backend.questionCalls
+	superseded := backend.supersededQuestions
 	msgs := backend.sentMessages
 	backend.mu.Unlock()
-	if len(calls) != 1 || !calls[0].cancelled || calls[0].requestID != "req-2" {
-		t.Errorf("question calls = %v, want [cancelled req-2]", calls)
+	if len(calls) != 0 {
+		t.Errorf("question resolve calls = %v, want none (supersede is used instead)", calls)
+	}
+	if len(superseded) != 1 || superseded[0] != "req-2" {
+		t.Errorf("superseded questions = %v, want [req-2]", superseded)
 	}
 	if len(msgs) != 1 || msgs[0] != "skip the question" {
 		t.Errorf("sent messages = %v, want [skip the question]", msgs)
+	}
+	// The new message must be accepted before the blocked Question is woken:
+	// otherwise the resumed tool could queue a model request ahead of it.
+	order := append([]string(nil), backend.callOrder...)
+	if len(order) != 2 || order[0] != "send:skip the question" || order[1] != "supersede:req-2" {
+		t.Errorf("backend call order = %v, want [send:skip the question supersede:req-2]", order)
+	}
+}
+
+// A question and a handoff can be pending at the same time: the question is
+// waiting for input while the agent offers a plan. A regular message must clear
+// both, or the discarded handoff stays visible to the client forever.
+func TestHeadlessSendClearsPendingQuestionAndHandoff(t *testing.T) {
+	state := &headlessState{
+		pendingQuestion: &headlessQuestionPayload{
+			ToolName:  "Question",
+			RequestID: "req-2",
+		},
+		pendingHandoff: &headlessHandoffPayload{
+			RequestID: "handoff-1",
+			PlanPath:  "/tmp/plan.md",
+		},
+	}
+	to := newTestOut()
+	backend := &mockBackend{}
+
+	cmd := headlessCommand{
+		Type:    "send",
+		Content: "move on",
+	}
+	handleHeadlessCommand(cmd, backend, state, to.writer())
+
+	// The pending cache is cleared by the core resolved event, not locally, so
+	// the question stays set until that event arrives; the handoff cache is
+	// cleared by the auto-cancel above.
+	state.mu.Lock()
+	pq := state.pendingQuestion
+	ph := state.pendingHandoff
+	state.mu.Unlock()
+	if pq == nil {
+		t.Error("pendingQuestion should stay set until the resolved event clears it")
+	}
+	if ph != nil {
+		t.Errorf("pendingHandoff = %+v, want it cleared by the send", ph)
+	}
+
+	backend.mu.Lock()
+	handoffCalls := append([]handoffCall(nil), backend.handoffCalls...)
+	superseded := append([]string(nil), backend.supersededQuestions...)
+	msgs := append([]string(nil), backend.sentMessages...)
+	order := append([]string(nil), backend.callOrder...)
+	backend.mu.Unlock()
+	if len(handoffCalls) != 1 || handoffCalls[0].action != "cancel" || handoffCalls[0].requestID != "handoff-1" {
+		t.Errorf("handoff calls = %v, want [cancel handoff-1]", handoffCalls)
+	}
+	if len(superseded) != 1 || superseded[0] != "req-2" {
+		t.Errorf("superseded questions = %v, want [req-2]", superseded)
+	}
+	if len(msgs) != 1 || msgs[0] != "move on" {
+		t.Errorf("sent messages = %v, want [move on]", msgs)
+	}
+	// callOrder tracks the send/supersede pair; the handoff cancel is recorded
+	// separately above. The message must be accepted before the blocked
+	// Question is woken, or the resumed tool could queue a model request ahead
+	// of the new message.
+	if len(order) != 2 || order[0] != "send:move on" || order[1] != "supersede:req-2" {
+		t.Errorf("backend call order = %v, want [send:move on supersede:req-2]", order)
 	}
 }
 
@@ -887,7 +1111,7 @@ func TestHeadlessExplicitHandoffCancelDoesNotEmitCancelled(t *testing.T) {
 	}
 }
 
-func TestHeadlessAutoDenyBothConfirmAndQuestionOnUserMessage(t *testing.T) {
+func TestHeadlessAutoDenyConfirmAndSupersedeQuestionOnUserMessage(t *testing.T) {
 	state := &headlessState{
 		pendingConfirm: &headlessConfirmPayload{
 			ToolName:  "Delete",
@@ -914,20 +1138,24 @@ func TestHeadlessAutoDenyBothConfirmAndQuestionOnUserMessage(t *testing.T) {
 	if pc != nil {
 		t.Errorf("pendingConfirm should be nil, got %+v", pc)
 	}
-	if pq != nil {
-		t.Errorf("pendingQuestion should be nil, got %+v", pq)
+	if pq == nil {
+		t.Error("pendingQuestion should stay set until the resolved event clears it")
 	}
 
 	backend.mu.Lock()
 	cc := backend.confirmCalls
 	qc := backend.questionCalls
+	superseded := backend.supersededQuestions
 	msgs := backend.sentMessages
 	backend.mu.Unlock()
 	if len(cc) != 1 || cc[0].action != "deny" {
 		t.Errorf("confirm calls = %v, want [deny]", cc)
 	}
-	if len(qc) != 1 || !qc[0].cancelled {
-		t.Errorf("question calls = %v, want [cancelled]", qc)
+	if len(qc) != 0 {
+		t.Errorf("question resolve calls = %v, want none", qc)
+	}
+	if len(superseded) != 1 || superseded[0] != "req-2" {
+		t.Errorf("superseded questions = %v, want [req-2]", superseded)
 	}
 	if len(msgs) != 1 || msgs[0] != "new message" {
 		t.Errorf("sent messages = %v, want [new message]", msgs)
@@ -1495,7 +1723,10 @@ type headlessSendOnlyBackend struct{}
 func (headlessSendOnlyBackend) SendUserMessage(content string)                        {}
 func (headlessSendOnlyBackend) CancelCurrentTurn() bool                               { return false }
 func (headlessSendOnlyBackend) ResolveConfirm(string, string, string, string, string) {}
-func (headlessSendOnlyBackend) ResolveQuestion([]string, bool, string)                {}
+func (headlessSendOnlyBackend) ResolveQuestion([]string, string, string) (string, bool) {
+	return "", true
+}
+func (headlessSendOnlyBackend) SupersedeQuestion(string) bool { return false }
 
 func TestHeadlessRoleCommandRejectedByNonRoleBackend(t *testing.T) {
 	state := &headlessState{}
@@ -2233,16 +2464,16 @@ func stringSliceFromAny(t *testing.T, v any) []string {
 func TestHeadlessQuestionRequestEventPayload(t *testing.T) {
 	state := &headlessState{}
 
+	deadline := time.Now().Add(60 * time.Second).UTC().Truncate(time.Second)
 	ev := agent.QuestionRequestEvent{
 		ToolName:      "Question",
 		Header:        "Task sub-1",
 		Question:      "Continue?",
 		Options:       []string{"yes", "no"},
 		OptionDetails: []string{"Yes, proceed", "No, stop"},
-		DefaultAnswer: "yes",
 		Multiple:      false,
 		RequestID:     "req-2",
-		Timeout:       60 * time.Second,
+		Deadline:      deadline,
 		AgentID:       "worker-1",
 	}
 
@@ -2275,8 +2506,11 @@ func TestHeadlessQuestionRequestEventPayload(t *testing.T) {
 	if payload["question"] != "Continue?" {
 		t.Errorf("question = %v, want Continue?", payload["question"])
 	}
-	if payload["timeout_ms"] != float64(60000) {
-		t.Errorf("timeout_ms = %v, want 60000", payload["timeout_ms"])
+	if _, ok := payload["default_answer"]; ok {
+		t.Errorf("default_answer must not be present, got %v", payload["default_answer"])
+	}
+	if payload["deadline"] != deadline.Format(time.RFC3339) {
+		t.Errorf("deadline = %v, want %v", payload["deadline"], deadline.Format(time.RFC3339))
 	}
 	if payload["agent_id"] != "worker-1" {
 		t.Errorf("agent_id = %v, want worker-1", payload["agent_id"])
@@ -2294,6 +2528,48 @@ func TestHeadlessQuestionRequestEventPayload(t *testing.T) {
 	}
 	if pq.AgentID != "worker-1" {
 		t.Errorf("pendingQuestion.AgentID = %q, want worker-1", pq.AgentID)
+	}
+}
+
+// A question without question_timeout has no close time, so the event must not
+// carry the key at all: a nil *time.Time in the payload map would encode as
+// "deadline": null, which reads as a close time that exists.
+func TestHeadlessQuestionRequestOmitsDeadlineWithoutTimeout(t *testing.T) {
+	state := &headlessState{}
+
+	envs := filterHeadlessEvent(agent.QuestionRequestEvent{
+		ToolName:  "Question",
+		Header:    "Task sub-1",
+		Question:  "Continue?",
+		RequestID: "req-1",
+	}, state)
+
+	env := findHeadlessEnvelope(envs, "question_request")
+	if env == nil {
+		t.Fatalf("question_request envelope missing from %#v", envs)
+	}
+
+	data, err := json.Marshal(env.Payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if strings.Contains(string(data), "\"deadline\"") {
+		t.Errorf("payload carries a deadline key without a configured timeout: %s", data)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if value, ok := payload["deadline"]; ok {
+		t.Errorf("deadline = %v, want the key to be absent", value)
+	}
+
+	state.mu.Lock()
+	pq := state.pendingQuestion
+	state.mu.Unlock()
+	if pq == nil || pq.Deadline != nil {
+		t.Fatalf("pendingQuestion = %#v, want no deadline", pq)
 	}
 }
 

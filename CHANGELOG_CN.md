@@ -8,8 +8,12 @@
 
 - Agent 定义不再读取 `capabilities`、`preferred_tasks`、`write_mode`、`delegation_policy`。这些键从未被强制执行，只是 Delegate 选人列表上的标签。选人意图写进 `description`。角色能不能写文件仍由 `permission` 决定，Delegate 仍会在每个可选项上标 `empty_scope=allowed` 或 `non_empty_scope=required`。现有 agent 文件里残留的这些键会被忽略。
 - headless 的 `compaction_status` 事件不再携带 `model_downshift` 触发类型：切换到更小窗口引发的压缩现在以 `usage_driven` 上报，按旧值过滤的集成方请改匹配 `usage_driven`。
+- headless 的提问协议换了形状。`question_request` 不再带 `default_answer` 和 `timeout_ms`，改为带 `deadline`——Chord 关闭该问题的绝对 RFC 3339 时刻（未设置 `question_timeout` 时省略）。Chord 也不再拿第一个选项当兜底默认答案。`question` 命令用 `reason`（`answered` 或 `declined`）取代 `cancelled`，问题关闭改由新增的 `question_resolved` 事件通知，不再靠之后的快照推断。
 
 ### 新功能
+
+- 新增 `question_timeout`（秒，默认 `0`）单独控制 Question 工具等多久，不再跟 `confirm_timeout` 共用；`0` 表示无限等。这段倒计时覆盖整段等待，包括请求排在别的对话框后面的时间，且绝不会采用答案：到期后问题按 `no_response` 关闭。
+- headless 客户端可以订阅 `question_resolved` 推送。每个已发布的问题只会关闭一次，`reason` 为 `answered`、`declined`、`no_response`、`superseded`、`cancelled` 或 `error`，集成方据此清掉待决问题，也能区分超时、被替代和用户选择。
 
 - 文档新增[按工作选模型](./docs/model-choice_CN.md)：先看你已经在付的能不能进 Chord，再按预算和角色分模型。配方页和示例页仍填当前旗舰，方便把字段写全。
 - headless 控制面新增三个可订阅推送：`session_switched` 在进程不重启、直接换会话时（执行 handoff plan、`/resume <id>`、`/new`）广播新的 `session_id`，`status_response.session_id` 也改成跟当前实际会话，不再停在启动快照上；`background_result` 推送后台任务结束后的持久结果（`session_id`、`target_agent_id`、`message_index`、`content`），回合 `idle` 之后才落盘的 JOB RESULT 输出只走这个通道；`context_notice` 转发持久的上下文压力提醒（`session_id`、`level`、`message`、`message_index`），这类提醒在 headless 没有别的通道。
@@ -20,6 +24,7 @@
 
 ### 改进
 
+- `question` 工具结果和对应的卡片现在会给出每道题的结果——`answered`、`declined`、`no_response`、`superseded` 或 `not_asked`——不再只列选中的答案。这样能分清「没人回答」和「用户明确拒绝」，也能看到一批题里前面没答上之后哪些根本没问。
 - 后台任务结果现在会带上耗时和安静时长；`job_output(wait: exit)` 也会明确说明这次有上限的等待是超时还是被取消，而任务仍在运行。`job_list` 和 TUI 的 JOBS 浮层显示同一份安静时长，任务暂时没有输出时不用靠轮询猜状态。
 - 所有 API key 进入冷却时，状态栏改为倒计时剩余等待时间（`↺ 33s left`），不再显示已经等了多久，方便一眼看出下次重试何时开始。倒计时指向「真正能发出请求」的时刻，而不是下一次内部检查；像 provider 配额重置这样的长等待会按小时显示（`↺ 2h15m left`）。终端较窄时先省略 `left`（`↺ 33s`），而不是直接截断。
 - 只配了一个模型时，等待 key 冷却会一直等到它真正恢复，不再每分钟重启一轮：等待在最早的 key 可用时刻结束。较长的窗口（已确认的配额重置时刻，由 Provider 自己决定，`retry_after_max_s` 并不限制它，该设置只限制 `Retry-After` 提示）一次等完，key 可用后立即发出重试。这段等待期间不会重新探测模型池，因此等待中途新增的凭据要等这次等待结束才会被用上。配了 fallback 模型时仍然至少每分钟重新检查一次模型池——兄弟模型、新加的凭据或刷新后的限流快照都可能让请求更早发出。正在等这类冷却的 worker 也不会再被当成卡住的 agent 上报给它的 owner。
@@ -27,6 +32,9 @@
 
 ### 修复
 
+- 超过截止时间才到达的答案不再被接受：问题按 `no_response` 关闭，迟到的提交返回错误，不会再让一个已经过期的对话框报告 Chord 并未承认的成功。
+- 问题对话框倒计时归零时不再自行决定去留，只等 Chord 通知请求已关闭才消失。排在别的对话框后面、其实已经过期的问题会被丢弃而不是再次弹出，某道题的 `Esc` 或提交也不会误关另一道题。
+- headless 下在问题待决时发送新消息，现在会确定地以 `superseded` 关闭该问题：消息先被接纳，随后问题才发出 `question_resolved`（`superseded`）事件，恢复执行的工具无法把你的消息插到一条模型请求之后。
 - headless 模式在关闭 stdout 前会排空已发布的事件：客户端关闭 stdin 后，停机期间产生的事件仍会送达，不再丢失会话尾部事件。
 - 上下文 checkpoint 重新载入文件时不再跟随指向项目根之外的符号链接：解析到项目外的引用会被跳过，不会把项目外文件注入上下文。
 - 对话框浮层不再出现行背景错位：删除会话的 Cancel 操作、规则新增表单里的输入与 Scope/Action 行、handoff 拒绝理由的输入，以及选择类对话框里的多段行，都会留在对话框底色上，不再退回终端默认背景。

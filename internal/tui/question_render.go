@@ -145,7 +145,7 @@ func (m *Model) renderQuestionDialog() string {
 		remaining := max(time.Until(m.question.deadline), 0)
 		secs := int(remaining.Seconds()) + 1
 		lines = append(lines, QuestionTimeoutStyle.Render(
-			fmt.Sprintf("⏱ Auto-cancel in %ds", secs),
+			fmt.Sprintf("⏱ Closes in %ds", secs),
 		))
 	}
 
@@ -187,7 +187,7 @@ func renderCurrentQuestionOptionDescription(description, numKey string, innerWid
 
 func questionHint(q tools.QuestionItem, customMode bool) string {
 	if len(q.Options) == 0 {
-		return "[Enter] Submit  [Shift+Enter/Ctrl+J] New line  [Esc] Cancel"
+		return "[Enter] Submit  [Shift+Enter/Ctrl+J] New line  [Esc] Decline"
 	}
 	if customMode {
 		return "[Enter] Submit  [Shift+Enter/Ctrl+J] New line  [Tab/Esc] Back to options"

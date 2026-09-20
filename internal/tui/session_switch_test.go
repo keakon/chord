@@ -4416,7 +4416,8 @@ func (s *sessionControlAgent) RemovePendingUserDraft(draftID string) bool {
 }
 func (s *sessionControlAgent) ResolveConfirm(action, finalArgsJSON, editSummary, denyReason, requestID string) {
 }
-func (s *sessionControlAgent) ResolveQuestion(answers []string, cancelled bool, requestID string) {
+func (s *sessionControlAgent) ResolveQuestion(answers []string, reason string, requestID string) (string, bool) {
+	return reason, true
 }
 func (s *sessionControlAgent) ProviderModelRef() string {
 	if s.providerModelRefByFocus != nil {

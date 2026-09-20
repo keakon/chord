@@ -256,9 +256,8 @@ type Model struct {
 	confirmResultCh chan ConfirmResult
 	confirm         confirmState
 
-	// Question dialog channels and state
-	questionCh chan QuestionRequest
-	question   questionState
+	// Question dialog state
+	question questionState
 
 	// pendingDialogs holds model-initiated dialogs (permission confirm, Done
 	// approval, question) that arrived while another dialog was on screen. The
@@ -545,7 +544,6 @@ func NewModelWithSize(a agent.AgentForTUI, width, height int) Model {
 		ime:             imeState{mu: &sync.Mutex{}},
 		confirmCh:       make(chan ConfirmRequest, 1),
 		confirmResultCh: make(chan ConfirmResult, 1),
-		questionCh:      make(chan QuestionRequest, 1),
 		sidebar:         NewSidebar(theme),
 
 		// composerRuntimeState
@@ -705,7 +703,6 @@ func (m *Model) Init() tea.Cmd {
 		cmds = append(cmds, cmd)
 	}
 	cmds = append(cmds, waitForConfirmRequest(m.confirmCh))
-	cmds = append(cmds, waitForQuestionRequest(m.questionCh))
 	if cmd := m.startSplashReveal(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
@@ -1137,10 +1134,6 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 
 	case confirmTimeoutTickMsg:
 		return m, m.handleConfirmTimeoutTick()
-
-	// -- question request from Question tool ----------------------------
-	case questionRequestMsg:
-		return m, m.handleQuestionRequest(msg)
 
 	case handoffSelectRequestMsg:
 		return m, m.handleHandoffSelectRequest(msg)

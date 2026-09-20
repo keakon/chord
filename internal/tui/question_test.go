@@ -1,27 +1,53 @@
 package tui
 
 import (
-	"context"
-	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/tools"
 )
 
+// questionResolverAgent records what a question dialog submits and reports the
+// terminal reason the broker settled on, standing in for the real agent in
+// tests.
+type questionResolverAgent struct {
+	loopBusyAgentStub
+	accepted bool
+	// terminal overrides the reason reported back for an accepted response: a
+	// response that loses its race with the deadline comes back as no_response.
+	terminal string
+	calls    []questionResolveCall
+}
+
+type questionResolveCall struct {
+	answers   []string
+	reason    string
+	requestID string
+}
+
+func (a *questionResolverAgent) ResolveQuestion(answers []string, reason, requestID string) (string, bool) {
+	a.calls = append(a.calls, questionResolveCall{answers: answers, reason: reason, requestID: requestID})
+	if !a.accepted {
+		return "", false
+	}
+	if a.terminal != "" {
+		return a.terminal, true
+	}
+	return reason, true
+}
+
 func TestQuestionTextOnlySupportsMultilineSubmit(t *testing.T) {
-	m := NewModel(nil)
+	backend := &questionResolverAgent{accepted: true}
+	m := NewModel(backend)
 	m.width = 80
 	m.mode = ModeQuestion
 	m.question = questionState{
-		request: &QuestionRequest{Questions: []tools.QuestionItem{{Header: "log", Question: "paste log"}}},
-		input:   newQuestionTextarea(m.width),
+		request:   &QuestionRequest{Questions: []tools.QuestionItem{{Header: "log", Question: "paste log"}}},
+		requestID: "req-log",
+		input:     newQuestionTextarea(m.width),
 	}
-	respCh := make(chan QuestionResult, 1)
-	m.question.responseCh = respCh
 	m.question.input.Focus()
 
 	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Text: "a", Code: 'a'}), m.question.request.Questions[0])
@@ -29,55 +55,44 @@ func TestQuestionTextOnlySupportsMultilineSubmit(t *testing.T) {
 	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Text: "b", Code: 'b'}), m.question.request.Questions[0])
 	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), m.question.request.Questions[0])
 
-	select {
-	case result := <-respCh:
-		if result.Err != nil {
-			t.Fatalf("question result err = %v, want nil", result.Err)
-		}
-		if got := len(result.Answers); got != 1 {
-			t.Fatalf("answer count = %d, want 1", got)
-		}
-		if got := len(result.Answers[0].Selected); got != 1 {
-			t.Fatalf("selected count = %d, want 1", got)
-		}
-		if got := result.Answers[0].Selected[0]; got != "a\nb" {
-			t.Fatalf("submitted text = %q, want %q", got, "a\nb")
-		}
-	default:
-		t.Fatal("expected question result after submit")
+	if len(backend.calls) != 1 {
+		t.Fatalf("resolve calls = %d, want 1", len(backend.calls))
+	}
+	call := backend.calls[0]
+	if call.requestID != "req-log" || call.reason != tools.QuestionOutcomeAnswered {
+		t.Fatalf("resolve call = %+v, want answered for req-log", call)
+	}
+	if len(call.answers) != 1 || call.answers[0] != "a\nb" {
+		t.Fatalf("submitted answers = %#v, want [\"a\\nb\"]", call.answers)
 	}
 }
 
 func TestQuestionSubmitPreservesLeadingWhitespace(t *testing.T) {
-	m := NewModel(nil)
+	backend := &questionResolverAgent{accepted: true}
+	m := NewModel(backend)
 	m.width = 80
 	m.mode = ModeQuestion
 	m.question = questionState{
-		request: &QuestionRequest{Questions: []tools.QuestionItem{{Header: "log", Question: "paste log"}}},
-		input:   newQuestionTextarea(m.width),
+		request:   &QuestionRequest{Questions: []tools.QuestionItem{{Header: "log", Question: "paste log"}}},
+		requestID: "req-log",
+		input:     newQuestionTextarea(m.width),
 	}
-	respCh := make(chan QuestionResult, 1)
-	m.question.responseCh = respCh
 	m.question.input.Focus()
 	m.question.input.SetValue("  foo\n bar")
 
 	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), m.question.request.Questions[0])
 
-	select {
-	case result := <-respCh:
-		if result.Err != nil {
-			t.Fatalf("question result err = %v, want nil", result.Err)
-		}
-		if got := result.Answers[0].Selected[0]; got != "  foo\n bar" {
-			t.Fatalf("submitted text = %q, want %q", got, "  foo\n bar")
-		}
-	default:
-		t.Fatal("expected question result after submit")
+	if len(backend.calls) != 1 || len(backend.calls[0].answers) != 1 {
+		t.Fatalf("resolve calls = %+v, want one answer", backend.calls)
+	}
+	if got := backend.calls[0].answers[0]; got != "  foo\n bar" {
+		t.Fatalf("submitted text = %q, want %q", got, "  foo\n bar")
 	}
 }
 
 func TestQuestionCustomSupportsCtrlJNewline(t *testing.T) {
-	m := NewModel(nil)
+	backend := &questionResolverAgent{accepted: true}
+	m := NewModel(backend)
 	m.width = 80
 	m.mode = ModeQuestion
 	m.question = questionState{
@@ -86,11 +101,10 @@ func TestQuestionCustomSupportsCtrlJNewline(t *testing.T) {
 			Question: "paste output",
 			Options:  []tools.QuestionOption{{Label: "skip"}},
 		}}},
-		custom: true,
-		input:  newQuestionTextarea(m.width),
+		requestID: "req-top",
+		custom:    true,
+		input:     newQuestionTextarea(m.width),
 	}
-	respCh := make(chan QuestionResult, 1)
-	m.question.responseCh = respCh
 	m.question.input.Focus()
 
 	q := m.question.request.Questions[0]
@@ -99,19 +113,66 @@ func TestQuestionCustomSupportsCtrlJNewline(t *testing.T) {
 	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Text: "y", Code: 'y'}), q)
 	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), q)
 
-	select {
-	case result := <-respCh:
-		if result.Err != nil {
-			t.Fatalf("question result err = %v, want nil", result.Err)
-		}
-		if got := len(result.Answers); got != 1 {
-			t.Fatalf("answer count = %d, want 1", got)
-		}
-		if got := result.Answers[0].Selected[0]; got != "x\ny" {
-			t.Fatalf("submitted text = %q, want %q", got, "x\ny")
-		}
-	default:
-		t.Fatal("expected question result after submit")
+	if len(backend.calls) != 1 || len(backend.calls[0].answers) != 1 {
+		t.Fatalf("resolve calls = %+v, want one answer", backend.calls)
+	}
+	if got := backend.calls[0].answers[0]; got != "x\ny" {
+		t.Fatalf("submitted text = %q, want %q", got, "x\ny")
+	}
+}
+
+// TestQuestionSubmitSurfacesRefusedResponse pins that a response the broker no
+// longer accepts (the question already closed) is reported instead of looking
+// like an accepted answer.
+func TestQuestionSubmitSurfacesRefusedResponse(t *testing.T) {
+	backend := &questionResolverAgent{accepted: false}
+	m := NewModel(backend)
+	m.width = 80
+	m.mode = ModeQuestion
+	m.question = questionState{
+		request:   &QuestionRequest{Questions: []tools.QuestionItem{{Header: "target", Question: "which?"}}},
+		requestID: "req-late",
+		input:     newQuestionTextarea(m.width),
+	}
+	m.question.input.Focus()
+	m.question.input.SetValue("late")
+
+	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), m.question.request.Questions[0])
+
+	if len(backend.calls) != 1 {
+		t.Fatalf("resolve calls = %d, want 1", len(backend.calls))
+	}
+	if m.question.request != nil {
+		t.Fatal("the dialog must close even when the response was refused")
+	}
+	if m.activeToast == nil {
+		t.Fatal("a refused response must surface a toast")
+	}
+	if m.activeToast.Level != "warn" || !strings.Contains(m.activeToast.Message, "not accepted") {
+		t.Fatalf("activeToast = %+v, want a warn toast about the refused response", m.activeToast)
+	}
+}
+
+func TestQuestionSubmitReportsTheWinningTerminalReason(t *testing.T) {
+	backend := &questionResolverAgent{accepted: true, terminal: tools.QuestionOutcomeNoResponse}
+	m := NewModel(backend)
+	m.width = 80
+	m.mode = ModeQuestion
+	m.question = questionState{
+		request:   &QuestionRequest{Questions: []tools.QuestionItem{{Header: "target", Question: "which?"}}},
+		requestID: "req-expired",
+		input:     newQuestionTextarea(m.width),
+	}
+	m.question.input.Focus()
+	m.question.input.SetValue("late")
+
+	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), m.question.request.Questions[0])
+
+	if m.activeToast == nil {
+		t.Fatal("a response that lost its race with the deadline must surface a toast")
+	}
+	if m.activeToast.Level != "warn" || !strings.Contains(m.activeToast.Message, "expired") {
+		t.Fatalf("activeToast = %+v, want a warn toast naming the expired question", m.activeToast)
 	}
 }
 
@@ -210,15 +271,11 @@ func TestQuestionTextareaShrinksToContentHeight(t *testing.T) {
 func TestQuestionRequestTextOnlyReturnsFocusCmd(t *testing.T) {
 	m := NewModel(nil)
 
-	updated, cmd := m.Update(questionRequestMsg{request: QuestionRequest{Questions: []tools.QuestionItem{{Header: "log", Question: "paste log"}}}})
+	cmd := m.handleQuestionRequest(questionDialog{request: QuestionRequest{Questions: []tools.QuestionItem{{Header: "log", Question: "paste log"}}}})
 	if cmd == nil {
-		t.Fatal("questionRequestMsg for text-only question should return focus cmd")
+		t.Fatal("a text-only question request should return a focus cmd")
 	}
-	model, ok := updated.(*Model)
-	if !ok {
-		t.Fatalf("Update returned %T, want *Model", updated)
-	}
-	if !model.question.input.Focused() {
+	if !m.question.input.Focused() {
 		t.Fatal("text-only question input should be focused")
 	}
 }
@@ -241,76 +298,6 @@ func TestQuestionAdvanceToTextOnlyReturnsFocusCmd(t *testing.T) {
 	if !m.question.input.Focused() {
 		t.Fatal("next text-only question input should be focused")
 	}
-}
-
-func TestMakeQuestionFuncUsesRequestScopedResponseChannel(t *testing.T) {
-	reqCh := make(chan QuestionRequest, 2)
-	qf := MakeQuestionFunc(reqCh, 200*time.Millisecond)
-
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		first := <-reqCh
-		if first.ResponseCh == nil {
-			panic("first.ResponseCh is nil")
-		}
-		first.ResponseCh <- QuestionResult{Answers: []tools.QuestionAnswer{{Header: "first", Selected: []string{"first"}}}}
-		second := <-reqCh
-		if second.ResponseCh == nil {
-			panic("second.ResponseCh is nil")
-		}
-		second.ResponseCh <- QuestionResult{Answers: []tools.QuestionAnswer{{Header: "second", Selected: []string{"second"}}}}
-	}()
-
-	answers, err := qf(context.Background(), []tools.QuestionItem{{Header: "h1", Question: "q1"}})
-	if err != nil {
-		t.Fatalf("first question err = %v", err)
-	}
-	if got := answers[0].Selected[0]; got != "first" {
-		t.Fatalf("first question got %q, want first", got)
-	}
-
-	answers, err = qf(context.Background(), []tools.QuestionItem{{Header: "h2", Question: "q2"}})
-	if err != nil {
-		t.Fatalf("second question err = %v", err)
-	}
-	if got := answers[0].Selected[0]; got != "second" {
-		t.Fatalf("second question got %q, want second", got)
-	}
-
-	<-done
-}
-
-func TestMakeQuestionFuncTimeoutDoesNotBlockNextQuestion(t *testing.T) {
-	reqCh := make(chan QuestionRequest, 2)
-	firstQ := MakeQuestionFunc(reqCh, 20*time.Millisecond)
-	secondQ := MakeQuestionFunc(reqCh, 200*time.Millisecond)
-
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		first := <-reqCh
-		time.Sleep(50 * time.Millisecond)
-		select {
-		case first.ResponseCh <- QuestionResult{Answers: []tools.QuestionAnswer{{Header: "first", Selected: []string{"late-first"}}}}:
-		default:
-		}
-		second := <-reqCh
-		second.ResponseCh <- QuestionResult{Answers: []tools.QuestionAnswer{{Header: "second", Selected: []string{"second"}}}}
-	}()
-
-	if _, err := firstQ(context.Background(), []tools.QuestionItem{{Header: "h1", Question: "q1"}}); err == nil {
-		t.Fatal("first question should time out")
-	}
-
-	answers, err := secondQ(context.Background(), []tools.QuestionItem{{Header: "h2", Question: "q2"}})
-	if err != nil {
-		t.Fatalf("second question err = %v", err)
-	}
-	if got := answers[0].Selected[0]; got != "second" {
-		t.Fatalf("second question got %q, want second", got)
-	}
-	<-done
 }
 
 func TestQuestionTextInputSupportsUpDownNavigation(t *testing.T) {
@@ -343,20 +330,18 @@ func TestQuestionTextInputSupportsUpDownNavigation(t *testing.T) {
 }
 
 func TestResolveQuestionRestoresInsertModeWithTextareaState(t *testing.T) {
-	m := NewModel(nil)
+	m := NewModel(loopBusyAgentStub{})
 	m.mode = ModeQuestion
 	m.question = questionState{
-		request:  &QuestionRequest{Questions: []tools.QuestionItem{{Header: "name", Question: "who?"}}},
-		prevMode: ModeInsert,
-		input:    newQuestionTextarea(80),
+		request:   &QuestionRequest{Questions: []tools.QuestionItem{{Header: "name", Question: "who?"}}},
+		requestID: "req-ime",
+		prevMode:  ModeInsert,
+		input:     newQuestionTextarea(80),
 	}
 	m.ime.beforeNormal = "zh-orig"
 	preventIMEApplyInTests(&m)
 
-	cmd := m.resolveQuestion(QuestionResult{Err: errors.New("cancelled")})
-	if cmd == nil {
-		t.Fatal("resolveQuestion() returned nil cmd")
-	}
+	_ = m.resolveQuestion(nil, true)
 	if m.mode != ModeInsert {
 		t.Fatalf("mode = %v, want ModeInsert", m.mode)
 	}
