@@ -202,17 +202,61 @@ func TestLspToolExecuteRejectsStaleSourceCoordinatesBeforeServerLookup(t *testin
 }
 
 func TestFormatLSPQueryErrorAddsIdentifierRecoveryGuidance(t *testing.T) {
-	err := formatLSPQueryError("references", "internal/demo.go", 86, 31, fmt.Errorf("no identifier found"))
+	lines := []string{
+		"type jobRowLayout struct {",
+		"\ttext string",
+		"}",
+		"",
+		"// renderJobRow renders \"<status dot> <label> <elapsed> x\" when",
+		"// includeQuiet is true.",
+		"// available however long the label is.",
+		"func renderJobRow(contentWidth int, job tools.JobState, now time.Time) jobRowLayout {",
+	}
+	err := formatLSPQueryError("references", "internal/demo.go", 7, 6, lines, fmt.Errorf("no identifier found"))
 	got := err.Error()
 	for _, want := range []string{
-		"references at internal/demo.go:86:31",
+		"references at internal/demo.go:7:6",
 		"no identifier found",
 		"reread the current source line",
 		"inside the target identifier",
+		`> 7| "// available however long the label is."`,
+		`  6| "// includeQuiet is true."`,
+		`  8| "func renderJobRow(contentWidth int, job tools.JobState, now time.Time) jobRowLayout {"`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("formatLSPQueryError() = %q, missing %q", got, want)
 		}
+	}
+}
+
+func TestFormatLSPQueryErrorWithoutSourceLinesKeepsGuidance(t *testing.T) {
+	// The file read can fail before the query (deleted file, permissions), and
+	// then there is no line text to bind the position to.
+	err := formatLSPQueryError("references", "internal/demo.go", 7, 6, nil, fmt.Errorf("no identifier found"))
+	got := err.Error()
+	if !strings.Contains(got, "inside the target identifier") {
+		t.Fatalf("formatLSPQueryError() = %q, missing recovery guidance", got)
+	}
+	if strings.Contains(got, "| ") {
+		t.Fatalf("formatLSPQueryError() = %q, must not render a source window without lines", got)
+	}
+	// Other server failures keep the one-line form.
+	other := formatLSPQueryError("references", "internal/demo.go", 7, 6, nil, fmt.Errorf("server busy")).Error()
+	if strings.Contains(other, "\n") {
+		t.Fatalf("formatLSPQueryError() = %q, want a single line for non-identifier failures", other)
+	}
+}
+
+func TestLspSourceContextWindowClipsAtFileEdges(t *testing.T) {
+	lines := []string{"package demo", "", "func run() {}"}
+	if got := lspSourceContextWindow(lines, 1); got != `> 1| "package demo"`+"\n"+`  2| ""` {
+		t.Fatalf("lspSourceContextWindow(first line) = %q", got)
+	}
+	if got := lspSourceContextWindow(lines, 3); got != `  2| ""`+"\n"+`> 3| "func run() {}"` {
+		t.Fatalf("lspSourceContextWindow(last line) = %q", got)
+	}
+	if got := lspSourceContextWindow(lines, 4); got != "" {
+		t.Fatalf("lspSourceContextWindow(out of range) = %q, want empty", got)
 	}
 }
 

@@ -37,6 +37,8 @@ Only one of `edit` / `apply_patch` is exposed to the model at a time, chosen by 
 
 In the TUI, an `lsp` card shows the operation and query position in its header (for example, `find references internal/agent/main.go:54:17`), the location count once the query completes, and every returned `path:line:character` location in the expandable details.
 
+When the queried position is not on an identifier — a line number that lands on the comment above a declaration, for example — the failure includes the requested line and its neighbors with line numbers, so the position that was actually queried is visible without another read.
+
 ## Execution
 
 | Tool | What it does |

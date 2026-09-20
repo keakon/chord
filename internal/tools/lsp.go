@@ -220,7 +220,7 @@ func (t LspTool) Execute(ctx context.Context, raw json.RawMessage) (string, erro
 	case "definition":
 		locs, err := client.GoToDefinition(ctx, absPath, line, char)
 		if err != nil {
-			return "", formatLSPQueryError("definition", a.Path, a.Line, a.Character, err)
+			return "", formatLSPQueryError("definition", a.Path, a.Line, a.Character, sourceLinesByPath[absPath], err)
 		}
 		if len(locs) == 0 {
 			return "No definition found.", nil
@@ -229,7 +229,7 @@ func (t LspTool) Execute(ctx context.Context, raw json.RawMessage) (string, erro
 	case "references":
 		locs, err := client.FindReferences(ctx, absPath, line, char, includeDecl)
 		if err != nil {
-			return "", formatLSPQueryError("references", a.Path, a.Line, a.Character, err)
+			return "", formatLSPQueryError("references", a.Path, a.Line, a.Character, sourceLinesByPath[absPath], err)
 		}
 		if len(locs) == 0 {
 			return "No references found.", nil
@@ -238,7 +238,7 @@ func (t LspTool) Execute(ctx context.Context, raw json.RawMessage) (string, erro
 	case "implementation":
 		locs, err := client.FindImplementations(ctx, absPath, line, char)
 		if err != nil {
-			return "", formatLSPQueryError("implementation", a.Path, a.Line, a.Character, err)
+			return "", formatLSPQueryError("implementation", a.Path, a.Line, a.Character, sourceLinesByPath[absPath], err)
 		}
 		if len(locs) == 0 {
 			return "No implementations found.", nil
@@ -279,12 +279,38 @@ func validateLSPSourcePosition(lines []string, line, character int) error {
 	return nil
 }
 
-func formatLSPQueryError(operation, path string, line, character int, err error) error {
+// lspSourceContextWindow renders the requested line with its immediate
+// neighbors. A position that is in range yet not on an identifier is usually an
+// off-by-one line that landed on the comment above a declaration, and read
+// output carries no line-number gutter, so the diagnostic itself has to bind
+// the line number to the text the model actually hit.
+func lspSourceContextWindow(lines []string, line int) string {
+	if line < 1 || line > len(lines) {
+		return ""
+	}
+	start := max(line-1, 1)
+	end := min(line+1, len(lines))
+	window := make([]string, 0, end-start+1)
+	for n := start; n <= end; n++ {
+		marker := "  "
+		if n == line {
+			marker = "> "
+		}
+		window = append(window, fmt.Sprintf("%s%d| %s", marker, n, truncateToolLine(lines[n-1])))
+	}
+	return strings.Join(window, "\n")
+}
+
+func formatLSPQueryError(operation, path string, line, character int, sourceLines []string, err error) error {
 	if err == nil {
 		return nil
 	}
 	if strings.Contains(strings.ToLower(err.Error()), "no identifier found") {
-		return fmt.Errorf("%s at %s:%d:%d: %w; reread the current source line and retry with character inside the target identifier", operation, path, line, character, err)
+		suffix := "; reread the current source line and retry with character inside the target identifier"
+		if window := lspSourceContextWindow(sourceLines, line); window != "" {
+			suffix += "\n" + window
+		}
+		return fmt.Errorf("%s at %s:%d:%d: %w%s", operation, path, line, character, err, suffix)
 	}
 	return fmt.Errorf("%s at %s:%d:%d: %w", operation, path, line, character, err)
 }
