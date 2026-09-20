@@ -167,5 +167,5 @@ func (a *MainAgent) recordCompactionGraceEvent(stage string, batch uint64) {
 // model, budget) key but only records first/repeat delivery stages for telemetry.
 func (a *MainAgent) queueCompactionImminentNotice(remaining int) {
 	a.syncOverlayWindowClaim(&a.overlayClaims.imminent, a.currentOverlayWindowKey())
-	a.pendingCompactionImminent = compactionImminentText(remaining)
+	a.stageContextNotice(contextNoticeImminent, compactionImminentText(remaining))
 }

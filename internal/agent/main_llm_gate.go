@@ -461,14 +461,6 @@ func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID
 	// trigger below, which starts that compaction in parallel with this round
 	// and injects the pressure warning; the round itself is never deferred.
 	a.applyModelCompactionConfig()
-	// Queue the context-pressure reminder (sticky: re-queued on every request
-	// above the reminder line until the model calls compact_context or the
-	// window resets) before the compaction gate decision: the gate may start a
-	// parallel usage-driven compaction, and the reminder's usage baseline is
-	// the post-response AutoCompactDecision — not the prepared surface being
-	// assembled for this request. The usage-driven externalization warning is
-	// queued further below, only once the gate actually starts the compaction.
-	a.queueContextPressureReminderForNextRequest()
 	a.noteModelDrivenDenyDiagnosticOnce()
 	// Continuation barrier: apply any ready compaction draft first. When the
 	// apply path resumes a saved continuation (handled=true), it owns control
@@ -490,7 +482,17 @@ func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID
 
 	snapshot := a.ctxMgr.Snapshot()
 	trigger := a.compactionTriggerForMainLLM()
+	// The context-pressure reminder is sticky (re-queued on every request above
+	// the reminder line until the model calls compact_context or the window
+	// resets), with the post-response AutoCompactDecision as its usage baseline
+	// rather than the prepared surface being assembled for this request. It is
+	// the lowest-pressure notice: when this gate already crossed the threshold,
+	// the request carries the higher-pressure notice instead — the grace
+	// countdown while the start is deferred, or the externalization warning on
+	// the request that starts the compaction — so queuing the reminder here
+	// would stack two pressure notices on one request.
 	if !trigger.needed() {
+		a.queueContextPressureReminderForNextRequest()
 		a.applyMainLLMRequestTuningOverride(llm.RequestTuning{})
 		a.spawnMainLLMResponseGoroutine(turnCtx, turnID, snapshot, agentErrSourceID)
 		return
@@ -517,6 +519,12 @@ func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID
 	// state changes, but the armed request it refers to is exactly the one
 	// this gate is about to start.
 	a.queueCompactionWarning()
+	// The warning is claimed once per armed generation, so a later request
+	// behind the same generation — the compaction already running in parallel
+	// — carries no higher-pressure notice. The reminder is the sticky floor
+	// for every request above the reminder line, and the queue drops it
+	// whenever a higher-pressure notice is already staged for this request.
+	a.queueContextPressureReminderForNextRequest()
 
 	// Threshold crossed: start background compaction WITHOUT blocking the LLM
 	// call.  The compaction runs asynchronously with a lightweight idle

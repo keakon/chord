@@ -243,6 +243,63 @@ type contextNotice struct {
 	text  string
 }
 
+// contextNoticeRank orders the three pressure notices by severity: the sticky
+// reminder, the grace-period countdown, and the externalization warning that
+// rides on the request starting the compaction. They describe the same fact at
+// increasing pressure, so a request must never carry two of them.
+func contextNoticeRank(level string) int {
+	switch level {
+	case contextNoticePressure:
+		return 0
+	case contextNoticeImminent:
+		return 1
+	case contextNoticeWarning:
+		return 2
+	}
+	return -1
+}
+
+// stageContextNotice stages the highest-pressure notice for the request being
+// assembled and drops any lower-pressure notice still pending. The pending
+// fields survive an aborted request, so variant orderings (a reminder queued
+// on an earlier request whose dispatch never confirmed, a model switch that
+// arms the compaction in the same cycle) could otherwise attach two notices
+// that say the same thing at different pressure. A newly staged notice never
+// downgrades a higher-pressure one already pending: it is dropped instead.
+func (a *MainAgent) stageContextNotice(level, text string) {
+	if a == nil || strings.TrimSpace(text) == "" {
+		return
+	}
+	rank := contextNoticeRank(level)
+	if rank < 0 {
+		return
+	}
+	current := -1
+	if a.pendingContextPressureReminder != "" {
+		current = contextNoticeRank(contextNoticePressure)
+	}
+	if a.pendingCompactionImminent != "" && contextNoticeRank(contextNoticeImminent) > current {
+		current = contextNoticeRank(contextNoticeImminent)
+	}
+	if a.pendingCompactionWarning != "" && contextNoticeRank(contextNoticeWarning) > current {
+		current = contextNoticeRank(contextNoticeWarning)
+	}
+	if rank < current {
+		return
+	}
+	a.pendingContextPressureReminder = ""
+	a.pendingCompactionImminent = ""
+	a.pendingCompactionWarning = ""
+	switch level {
+	case contextNoticePressure:
+		a.pendingContextPressureReminder = text
+	case contextNoticeImminent:
+		a.pendingCompactionImminent = text
+	case contextNoticeWarning:
+		a.pendingCompactionWarning = text
+	}
+}
+
 // stashContextNotice stages the text of a context overlay that was just
 // attached to the request being assembled (buildTurnOverlayMessages).
 func (a *MainAgent) stashContextNotice(level, text string) {
@@ -521,6 +578,15 @@ func (a *MainAgent) queueContextPressureReminderForNextRequest() {
 
 func (a *MainAgent) queueContextPressureReminder(decision ctxmgr.AutoCompactDecision) {
 	a.pendingContextPressureReminder = ""
+	// A higher-pressure notice is already staged for the request being
+	// assembled — the grace countdown on a threshold deferral, or the
+	// externalization warning on the request that starts the compaction. The
+	// reminder is the lowest of the three and adds nothing they do not say, so
+	// it must not stack on top of one of them (a dispatch that never confirmed
+	// can leave the higher notice pending into the next request).
+	if a.pendingCompactionImminent != "" || a.pendingCompactionWarning != "" {
+		return
+	}
 	threshold := decision.Threshold
 	usable := decision.UsableInputBudget
 	// threshold<=0 means auto-compact is off: no reminder, even when
@@ -606,7 +672,7 @@ func (a *MainAgent) queueContextPressureReminder(decision ctxmgr.AutoCompactDeci
 	if claim.delivered {
 		text = contextPressureReminderShortText
 	}
-	a.pendingContextPressureReminder = text
+	a.stageContextNotice(contextNoticePressure, text)
 }
 
 // contextPressureBelowReminderLine reports whether the decision's effective
@@ -752,7 +818,7 @@ func (a *MainAgent) queueCompactionWarning() {
 	if !a.tryClaimCompactionWarning(requestID, batch) {
 		return
 	}
-	a.pendingCompactionWarning = compactionWarningText
+	a.stageContextNotice(contextNoticeWarning, compactionWarningText)
 }
 
 // contextPressureReminderShortText is the short re-attachment used on requests

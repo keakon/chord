@@ -420,6 +420,72 @@ func TestQueueCompactionWarningLifecycle(t *testing.T) {
 	}
 }
 
+// TestPressureNoticeStagingKeepsHighestSeverityOnly pins the single-notice
+// contract: the reminder, the grace countdown, and the externalization warning
+// report the same pressure fact at increasing severity, so staging any one of
+// them drops whatever lower-severity notice is still pending — regardless of
+// the order the callers queue them. Without it a model switch that both
+// re-attaches the reminder and arms the compaction in the same cycle injects
+// two notices into one request.
+func TestPressureNoticeStagingKeepsHighestSeverityOnly(t *testing.T) {
+	// Reminder first (queued on the request that observes the switch), then the
+	// warning for the compaction the same cycle starts.
+	a := newTestMainAgent(t, t.TempDir())
+	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000}) // above the reminder line (0.54), below the threshold
+	enableTestCompactContext(a)
+	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
+	if a.pendingContextPressureReminder == "" {
+		t.Fatal("above-line usage must stage the reminder")
+	}
+	a.requestBatches.reserve(a.sessionEpoch, 0)
+	a.armUsageDrivenAutoCompactRequest()
+	a.queueCompactionWarning()
+	if a.pendingContextPressureReminder != "" {
+		t.Fatalf("the externalization warning must supersede the reminder, got reminder %q", a.pendingContextPressureReminder)
+	}
+	if a.pendingCompactionWarning == "" {
+		t.Fatal("armed auto-compact request with a visible tool must stage the warning")
+	}
+
+	// Warning first, then the reminder on the next request: the reminder must
+	// not stage on top of it.
+	b := newTestMainAgent(t, t.TempDir())
+	b.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
+	b.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000})
+	enableTestCompactContext(b)
+	b.requestBatches.reserve(b.sessionEpoch, 0)
+	b.armUsageDrivenAutoCompactRequest()
+	b.queueCompactionWarning()
+	b.queueContextPressureReminder(b.ctxMgr.AutoCompactDecision())
+	if b.pendingContextPressureReminder != "" {
+		t.Fatalf("a request that already carries the warning must not also carry the reminder, got %q", b.pendingContextPressureReminder)
+	}
+	if b.pendingCompactionWarning == "" {
+		t.Fatal("the warning must survive the lower-severity reminder staging")
+	}
+
+	// The warning also supersedes a countdown left armed by a request whose
+	// dispatch never confirmed.
+	c := newTestMainAgent(t, t.TempDir())
+	c.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
+	c.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000})
+	enableTestCompactContext(c)
+	c.queueCompactionImminentNotice(minCompactionGracePeriodBatches)
+	if c.pendingCompactionImminent == "" {
+		t.Fatal("grace must stage the countdown")
+	}
+	c.requestBatches.reserve(c.sessionEpoch, 0)
+	c.armUsageDrivenAutoCompactRequest()
+	c.queueCompactionWarning()
+	if c.pendingCompactionImminent != "" {
+		t.Fatalf("the warning must supersede a stale countdown, got %q", c.pendingCompactionImminent)
+	}
+	if c.pendingCompactionWarning == "" {
+		t.Fatal("the warning must be staged")
+	}
+}
+
 func TestBuildTurnOverlayMessagesAttachesPressureOverlays(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
@@ -1059,5 +1125,24 @@ func TestMaybeClearStaleContextNoticesResetsImminentDeliveryForRecross(t *testin
 	a.overlayClaims.mu.Unlock()
 	if delivered {
 		t.Fatal("idle cleanup must reset imminent delivery so a later re-cross can persist a new card")
+	}
+}
+
+// TestStageContextNoticeNeverDowngrades pins the staging rank: a lower-pressure
+// notice staged after a higher-pressure one is dropped, so an aborted request's
+// residual warning cannot be replaced by a stale countdown or reminder.
+func TestStageContextNoticeNeverDowngrades(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.stageContextNotice(contextNoticeWarning, "warning text")
+	a.stageContextNotice(contextNoticeImminent, "imminent text")
+	if a.pendingCompactionWarning != "warning text" {
+		t.Fatalf("staging imminent must not clear the pending warning, got warning %q imminent %q", a.pendingCompactionWarning, a.pendingCompactionImminent)
+	}
+	if a.pendingCompactionImminent != "" {
+		t.Fatalf("a lower-pressure imminent must be dropped while warning is pending, got %q", a.pendingCompactionImminent)
+	}
+	a.stageContextNotice(contextNoticePressure, "reminder text")
+	if a.pendingCompactionWarning != "warning text" || a.pendingContextPressureReminder != "" {
+		t.Fatalf("staging pressure must not downgrade the pending warning, got warning %q reminder %q", a.pendingCompactionWarning, a.pendingContextPressureReminder)
 	}
 }

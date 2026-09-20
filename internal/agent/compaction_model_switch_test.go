@@ -64,3 +64,52 @@ func TestModelSwitchOntoCrossedLineRunsRequestInParallelWithCompaction(t *testin
 		t.Fatalf("compaction trigger = %q, want %q", got, compactionTriggerUsageDriven)
 	}
 }
+
+// TestReminderDoesNotStageOverPendingHigherPressureNotice pins the guard that
+// keeps the reminder from stacking on a higher-pressure notice left pending by
+// a dispatch that never confirmed (a model switch that both re-attaches the
+// reminder and arms the compaction in the same cycle). The guard lives in the
+// reminder queue because it is the lowest-severity notice and cannot tell from
+// its own inputs whether the gate is about to attach the countdown or the
+// warning for this same request.
+func TestReminderDoesNotStageOverPendingHigherPressureNotice(t *testing.T) {
+	newAgent := func(t *testing.T) *MainAgent {
+		a := newTestMainAgent(t, t.TempDir())
+		a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
+		a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000}) // above the reminder line (0.54)
+		enableTestCompactContext(a)
+		return a
+	}
+
+	t.Run("grace countdown", func(t *testing.T) {
+		a := newAgent(t)
+		a.queueCompactionImminentNotice(minCompactionGracePeriodBatches)
+		if a.pendingCompactionImminent == "" {
+			t.Fatal("grace must stage the countdown")
+		}
+		a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
+		if a.pendingContextPressureReminder != "" {
+			t.Fatalf("a pending countdown must keep the lower-pressure reminder from staging, got %q", a.pendingContextPressureReminder)
+		}
+		if a.pendingCompactionImminent == "" {
+			t.Fatal("the countdown must survive the reminder queue")
+		}
+	})
+
+	t.Run("externalization warning", func(t *testing.T) {
+		a := newAgent(t)
+		a.requestBatches.reserve(a.sessionEpoch, 0)
+		a.armUsageDrivenAutoCompactRequest()
+		a.queueCompactionWarning()
+		if a.pendingCompactionWarning == "" {
+			t.Fatal("the armed request must stage the warning")
+		}
+		a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
+		if a.pendingContextPressureReminder != "" {
+			t.Fatalf("a pending warning must keep the lower-pressure reminder from staging, got %q", a.pendingContextPressureReminder)
+		}
+		if a.pendingCompactionWarning == "" {
+			t.Fatal("the warning must survive the reminder queue")
+		}
+	})
+}
