@@ -883,7 +883,10 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 			// can be focused / copied individually.
 			for blockIndex, tb := range assistantThinkingBlocksForTranscript(msg) {
 				thinking := strings.TrimSpace(tb.Thinking)
-				if thinking != "" {
+				// A part that is only a generated section heading carries no
+				// reasoning to show, so skip it instead of materializing an empty
+				// THINKING card.
+				if thinking != "" && !thinkingContentIsPlaceholder(tb.Thinking) {
 					block := &Block{
 						ID:                 *nextID,
 						Type:               BlockThinking,

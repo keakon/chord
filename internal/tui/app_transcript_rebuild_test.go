@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/keakon/chord/internal/agent"
@@ -363,5 +364,39 @@ func TestCompactionRebuildDoesNotAdoptStreamingFromLiveCard(t *testing.T) {
 	}
 	if blocks[0].Streaming {
 		t.Fatal("a card rebuilt from a committed message must not stay Streaming")
+	}
+}
+
+// GPT reasoning summaries intermittently produce body-less parts that are only a
+// generated "**Heading**". A transcript rebuild must not materialize them as
+// empty THINKING cards, while keeping parts that do carry prose.
+func TestTranscriptRebuildSkipsHeadingOnlyThinkingParts(t *testing.T) {
+	backend := &sessionControlAgent{}
+	m := NewModelWithSize(backend, 120, 24)
+	backend.messages = []message.Message{
+		{Role: "user", Content: "keep going"},
+		{Role: "assistant", ThinkingBlocks: []message.ThinkingBlock{
+			{Thinking: "**Planning the next step**"},
+			{Thinking: "**Checking the caller**\n\nI need to verify the return value."},
+			{Thinking: "**Planning configuration reading**\n\n<!-- -->"},
+			{Thinking: "**Checking the result**\n<!-- -->\nI need to verify the output.\n<!-- -->"},
+		}},
+	}
+	m.rebuildViewportFromMessagesWithReason("session_restored")
+
+	var thinking []*Block
+	for _, b := range m.viewport.visibleBlocks() {
+		if b != nil && b.Type == BlockThinking {
+			thinking = append(thinking, b)
+		}
+	}
+	if len(thinking) != 2 {
+		t.Fatalf("rebuilt %d thinking cards, want 2 (heading-only parts skipped)", len(thinking))
+	}
+	if !strings.Contains(thinking[0].Content, "I need to verify the return value.") {
+		t.Fatalf("rebuilt thinking card lost its prose body: %q", thinking[0].Content)
+	}
+	if !strings.Contains(thinking[1].Content, "I need to verify the output.") {
+		t.Fatalf("rebuilt thinking card lost its prose between comments: %q", thinking[1].Content)
 	}
 }

@@ -79,11 +79,111 @@ func TestPreprocessThinkingMarkdown_CJKHeaderStart(t *testing.T) {
 	}
 }
 
+func TestPreprocessThinkingMarkdown_CJKGluedHeader(t *testing.T) {
+	in := "测试**规划任务**"
+	got := preprocessThinkingMarkdown(in)
+	if !strings.Contains(got, "\n\n**规划") {
+		t.Fatalf("expected break before CJK-glued bold heading, got %q", got)
+	}
+}
+
+func TestPreprocessThinkingMarkdown_NoBoldFastPath(t *testing.T) {
+	in := "plain thinking without any emphasis"
+	if got := preprocessThinkingMarkdown(in); got != in {
+		t.Fatalf("text without ** must be returned unchanged, got %q", got)
+	}
+}
+
 func TestPreprocessThinkingMarkdown_AlreadySeparated(t *testing.T) {
 	in := "**Planning**\n\nBody text."
 	got := preprocessThinkingMarkdown(in)
 	if got != in {
 		t.Fatalf("well-formed markdown should be unchanged, got %q", got)
+	}
+}
+
+func TestPreprocessThinkingMarkdown_SingleNewlineBeforeBoldSection(t *testing.T) {
+	// GPT reasoning summaries often separate a section title from the previous
+	// paragraph with a lone newline, which is only a soft break in CommonMark.
+	in := "without over-complicating the caller's job.\n**Clarifying job completion handling**\n\nBody."
+	got := preprocessThinkingMarkdown(in)
+	if !strings.Contains(got, "job.\n\n**Clarifying") {
+		t.Fatalf("expected lone newline promoted to a paragraph break, got %q", got)
+	}
+	if strings.Contains(got, "job.\n**Clarifying") {
+		t.Fatalf("soft break should be replaced, got %q", got)
+	}
+}
+
+func TestPreprocessThinkingMarkdown_DoesNotTouchBlankLineSeparated(t *testing.T) {
+	in := "job.\n\n**Clarifying**\n\nBody."
+	got := preprocessThinkingMarkdown(in)
+	if got != in {
+		t.Fatalf("already blank-line separated section should be unchanged, got %q", got)
+	}
+}
+
+func TestThinkingContentIsPlaceholder(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{name: "bare heading", content: "**Planning job quiet duration display**", want: true},
+		{name: "heading with trailing newlines", content: "**Planning**\n\n", want: true},
+		{name: "heading with empty html comment", content: "**Planning configuration reading**\n\n<!-- -->", want: true},
+		{name: "heading with multiple empty comments", content: "**Planning**\n<!-- -->\n<!--\n\t -->", want: true},
+		{name: "body between comments", content: "**Planning**\n<!-- -->\nI need to check the caller.\n<!-- -->", want: false},
+		{name: "nonempty comment", content: "**Planning**\n<!-- additional context -->", want: false},
+		{name: "CJK heading at rune limit", content: "**" + strings.Repeat("文", thinkingPlaceholderMaxLen-4) + "**", want: true},
+		{name: "CJK heading over rune limit", content: "**" + strings.Repeat("文", thinkingPlaceholderMaxLen-3) + "**", want: false},
+		{name: "heading with prose body", content: "**Planning**\n\nI need to check the caller.", want: false},
+		{name: "plain prose", content: "I need to check the caller.", want: false},
+		{name: "empty", content: "", want: false},
+		{name: "bold sentence", content: "**I should check the tests first.**", want: false},
+		{name: "note label", content: "**Note:**", want: false},
+		{name: "two bold spans", content: "**Planning** **Scope**", want: false},
+		{name: "over-long bold line", content: "**" + strings.Repeat("Very Long Section Heading ", 12) + "**", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := thinkingContentIsPlaceholder(tt.content); got != tt.want {
+				t.Fatalf("thinkingContentIsPlaceholder(%q) = %v, want %v", tt.content, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRenderThinkingMarkdown_SectionTitlesOwnParagraph(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	// The first title is glued to the preceding sentence, the second rides a lone
+	// newline; both must end up on their own line instead of merging into the
+	// paragraph before them.
+	in := "First paragraph.**Planning job wait outcomes**\n\nBody one.\n**Clarifying job completion handling**\n\nBody two."
+	lines := renderMarkdownContent(preprocessThinkingMarkdown(in), 200)
+	for _, title := range []string{"Planning job wait outcomes", "Clarifying job completion handling"} {
+		found := false
+		for _, line := range lines {
+			plain := strings.TrimSpace(stripANSI(line))
+			if plain == title {
+				found = true
+				break
+			}
+			if strings.Contains(plain, title) {
+				t.Fatalf("title %q merged into %q", title, plain)
+			}
+		}
+		if !found {
+			t.Fatalf("title %q not rendered on its own line:\n%s", title, strings.Join(lines, "\n"))
+		}
+	}
+}
+
+func TestRenderThinkingHeadingOnlyRendersNothing(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{Type: BlockThinking, Content: "**Planning job quiet duration display**"}
+	if lines := block.Render(80, ""); len(lines) != 0 {
+		t.Fatalf("heading-only thinking should render nothing, got %q", lines)
 	}
 }
 

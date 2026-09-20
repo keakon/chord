@@ -131,6 +131,9 @@ func startupDeferredMetaSearchVisible(meta startupDeferredBlockMeta, searchable 
 		return false
 	}
 	if meta.Type == BlockThinking {
+		if thinkingContentIsPlaceholder(searchable) {
+			return false
+		}
 		return strings.TrimSpace(preprocessThinkingMarkdown(searchable)) != ""
 	}
 	return true

@@ -294,8 +294,9 @@ func blockVisibleForSearch(block *Block, width int) bool {
 		if inspect == nil {
 			return false
 		}
+		placeholder := thinkingContentIsPlaceholder(inspect.Content)
 		content := strings.TrimSpace(preprocessThinkingMarkdown(inspect.Content))
-		visible := content != ""
+		visible := !placeholder && content != ""
 		if temporary {
 			inspect.InvalidateCache()
 		}

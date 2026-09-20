@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -12,22 +13,65 @@ import (
 	"github.com/keakon/chord/internal/tui/markdownutil"
 )
 
-// thinkingGluedBoldBreakRE matches a sentence or word glued directly to a new
-// markdown bold section (e.g. "too.**Planning**") so we can insert a paragraph
-// break before "**". The rune after "**" must look like a section header start
-// (uppercase, digit, or CJK) to avoid splitting inline bold like "word**bold**".
-var thinkingGluedBoldBreakRE = regexp.MustCompile(
-	`([a-zA-Z0-9.!?)}\]'"。．！？）』」])(\*\*)(\p{Lu}|[0-9]|[\x{4e00}-\x{9fff}])`,
+// thinkingBoldSectionBreakRE normalizes the break in front of a bold section
+// header ("**Title**") so glamour renders it as its own paragraph. GPT
+// reasoning summaries are inconsistent: the header is glued to the previous
+// token ("too.**Planning**"), behind a single newline that CommonMark treats as
+// an inline soft break ("job.\n**Clarifying**"), or already correct behind a
+// blank line. Only the first two forms match; the rune after "**" must look
+// like a header start (uppercase, digit, or CJK) so inline bold such as
+// "word**bold**" is not split. Both forms are handled in one scan because this
+// runs on every streaming flush.
+var thinkingBoldSectionBreakRE = regexp.MustCompile(
+	`(?:([a-zA-Z0-9.!?)}\]'"。．！？）』」\x{4e00}-\x{9fff}])(\*\*)|([^\n])\n(\*\*))(\p{Lu}|[0-9]|[\x{4e00}-\x{9fff}])`,
 )
 
-// preprocessThinkingMarkdown inserts blank lines before "**" headers that were
-// concatenated to the previous token without whitespace. Glamour then renders
-// them as separate blocks instead of one inline-wrapped paragraph.
+// thinkingHeadingOnlyRE matches a thinking part whose entire content is a
+// generated bold section heading, optionally followed by empty HTML comment
+// placeholders. GPT reasoning summaries intermittently emit such body-less
+// parts, which carry no reasoning to display.
+var thinkingHeadingOnlyRE = regexp.MustCompile(`^\s*\*\*([^*\n]+)\*\*\s*(?:<!--\s*-->\s*)*$`)
+
+// thinkingPlaceholderMaxLen bounds a body-less part in runes: it is one generated
+// heading plus an optional empty comment, never a long passage. The bound lets
+// thinkingContentIsPlaceholder reject ordinary thinking text without scanning
+// it, which keeps the streaming render path free of an extra O(content) pass.
+const thinkingPlaceholderMaxLen = 200
+
+// thinkingContentIsPlaceholder reports whether a thinking part has no
+// displayable body: it is only a bold section heading, optionally followed by
+// empty HTML comment placeholders. A heading that ends in sentence punctuation
+// reads as a bold sentence rather than a section title, so it is kept.
+func thinkingContentIsPlaceholder(content string) bool {
+	trimmed := strings.TrimSpace(removeTrailingCursorGlyph(content))
+	if !strings.HasPrefix(trimmed, "**") {
+		return false
+	}
+	if len(trimmed) > thinkingPlaceholderMaxLen*utf8.UTFMax || utf8.RuneCountInString(trimmed) > thinkingPlaceholderMaxLen {
+		return false
+	}
+	match := thinkingHeadingOnlyRE.FindStringSubmatch(trimmed)
+	if match == nil {
+		return false
+	}
+	switch heading := strings.TrimSpace(match[1]); {
+	case heading == "":
+		return false
+	case strings.HasSuffix(heading, "."), strings.HasSuffix(heading, "!"), strings.HasSuffix(heading, "?"),
+		strings.HasSuffix(heading, ":"), strings.HasSuffix(heading, "。"), strings.HasSuffix(heading, "！"),
+		strings.HasSuffix(heading, "？"), strings.HasSuffix(heading, "："):
+		return false
+	}
+	return true
+}
+
+// preprocessThinkingMarkdown makes each "**" section header a standalone
+// paragraph by collapsing whatever separator precedes it into a blank line.
 func preprocessThinkingMarkdown(s string) string {
-	if s == "" {
+	if s == "" || !strings.Contains(s, "**") {
 		return s
 	}
-	return thinkingGluedBoldBreakRE.ReplaceAllString(s, "$1\n\n$2$3")
+	return thinkingBoldSectionBreakRE.ReplaceAllString(s, "${1}${3}\n\n${2}${4}${5}")
 }
 
 // styleRenderedThinkingLines applies title styling to the first line of each
@@ -1349,6 +1393,11 @@ func (b *Block) renderThinking(width int) []string {
 	innerWidth := max(boxWidth-style.GetHorizontalPadding()-style.GetHorizontalBorderSize(), 10)
 	contentWidth := thinkingMarkdownContentWidth(innerWidth)
 	content := removeTrailingCursorGlyph(b.Content)
+	// A part that is only a generated section heading has no reasoning to show;
+	// render nothing rather than a heading-only card.
+	if thinkingContentIsPlaceholder(content) {
+		return nil
+	}
 	// preprocessThinkingMarkdown runs inside renderThinkingMarkdownPart; do not
 	// also run it here — the regex scan is O(content) and this renders on every
 	// streaming flush.
