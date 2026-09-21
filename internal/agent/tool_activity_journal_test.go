@@ -27,3 +27,23 @@ func TestToolActivityJournalRequiredCoversConsumingJobRead(t *testing.T) {
 		t.Fatal("job_kill mutates job state and must be journaled")
 	}
 }
+
+func TestToolActivityJournalRequiredCoversShellReadOnly(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.Register(tools.NewShellTool("bash"))
+	journaled := func(args string) bool {
+		return toolActivityJournalRequired(registry, message.ToolCall{Name: tools.NameShell, Args: json.RawMessage(args)})
+	}
+
+	// Even a provably read-only shell is journaled: a misclassified write
+	// must restore as outcome_unknown, never as not_started ("safe to retry").
+	if !journaled(`{"command":"git log --oneline -20"}`) {
+		t.Fatal("read-only shell must be journaled")
+	}
+	if !journaled(`{"command":"rg --no-config -n pat --glob '*.go'"}`) {
+		t.Fatal("read-only rg shell must be journaled")
+	}
+	if !journaled(`{"command":"go test ./..."}`) {
+		t.Fatal("mutating shell must be journaled")
+	}
+}

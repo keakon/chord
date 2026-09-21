@@ -187,3 +187,31 @@ func TestBuildToolExecutionBatchesKeepsMutatingShellAsBoundary(t *testing.T) {
 		t.Fatalf("len(batches) = %d, want 2: a mutating shell may touch any path and stays a boundary", len(batches))
 	}
 }
+
+func TestBuildToolExecutionBatchesMergesRgWithReadsWithoutSiblingAbort(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.Register(tools.NewShellTool("bash"))
+	registry.Register(tools.ReadTool{})
+	registry.Register(tools.GrepTool{})
+	calls := []message.ToolCall{
+		{ID: "1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"rg --no-config -n pat --glob '*.go'"}`)},
+		{ID: "2", Name: tools.NameRead, Args: json.RawMessage(`{"path":"README.md"}`)},
+		{ID: "3", Name: tools.NameGrep, Args: json.RawMessage(`{"pattern":"TODO","paths":["."]}`)},
+	}
+
+	batches := buildToolExecutionBatches(registry, calls)
+	if len(batches) != 1 || len(batches[0].Calls) != 3 {
+		t.Fatalf("batches = %#v, want one batch of rg + read + grep", batches)
+	}
+	if batches[0].AbortSiblingsOnError {
+		t.Fatal("read-only batch must not abort siblings: rg exit 1 (no match) is still a read")
+	}
+	// No member may arm cancellation on its own either: the executor only
+	// cancels siblings when the batch flag is set, and the flag is the OR of
+	// these per-call policies.
+	for _, call := range calls {
+		if policy := tools.PolicyForTool(registry, call.Name, call.Args); policy.AbortSiblingsOnError {
+			t.Fatalf("policy for %s = %#v, want no sibling abort so a failing read cannot cancel the batch", call.Name, policy)
+		}
+	}
+}

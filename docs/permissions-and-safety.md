@@ -138,6 +138,12 @@ A command-specific `allow` does, however, cover the full capability of that comm
 
 Grant a command-level `allow` only to commands whose worst case (arbitrary file writes via redirection) you accept; otherwise keep them at `ask`.
 
+### Read-only shell commands (batching only)
+
+Chord recognizes some shell commands as provably read-only so they can run in parallel with other reads instead of serializing the turn. The judgment is conservative: any uncertainty means "not read-only". Pipes and `&&` / `||` / `;` chains count as read-only only when every side is read-only, `command` / `nice` unwrap one level, and redirections other than `<`, `<<<`, or `2>&1`-style fd duplication veto. Unknown flags veto, so a new write option in a future tool version fails closed. `rg` is read-only only with `--no-config`: without it, `RIPGREP_CONFIG_PATH` can add `--pre` and run an external command. Words the shell would rewrite veto as well: pathname expansion (`*`, `?`, `[`), backslash quote removal, brace expansion (`{...}`), and `$'...'` ANSI-C escapes are all resolved before the command sees its argv and could turn an innocent-looking operand into a flag (a file named `-o` makes `sort *` run as `sort -o ...`). The same characters inside quotes are literal payload and stay allowed.
+
+This classification never changes permissions: an `ask` / `deny` rule still wins, and a read-only command still asks when your rules say so. If a read-only command still runs serially, that is the classifier staying conservative, not a bug. If you ever see a write batched alongside other tools, report it as a bug with the exact command string.
+
 ## Shell / shell risk
 
 `shell` can execute system commands and should be treated carefully. `shell` is intentionally non-interactive whether the command runs in the foreground or as a background job: Chord does not wire model-controlled stdin into child processes, Unix child processes run without a controlling TTY, and high-confidence interactive commands are rejected before execution.

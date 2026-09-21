@@ -45,6 +45,8 @@ func TestSpeculativeExecutionPolicyBashReadOnlySubset(t *testing.T) {
 		`{"command":"git show HEAD"}`,
 		`{"command":"git branch --show-current"}`,
 		`{"command":"git rev-parse HEAD"}`,
+		`{"command":"pwd && ls"}`,
+		`{"command":"git log | head -20"}`,
 	}
 	for _, args := range allowed {
 		decision := evaluateSpeculativeExecutionPolicyWithPrefix(registry, nil, tools.NameShell, json.RawMessage(args), nil, "")
@@ -56,7 +58,7 @@ func TestSpeculativeExecutionPolicyBashReadOnlySubset(t *testing.T) {
 	rejected := []string{
 		`{"command":"go test ./..."}`,
 		`{"command":"git checkout main"}`,
-		`{"command":"pwd && ls"}`,
+		`{"command":"pwd && rm -rf x"}`,
 		`{"command":"cat README.md > /tmp/out"}`,
 		`{"command":"echo $(pwd)"}`,
 		`{"command":"rm README.md"}`,

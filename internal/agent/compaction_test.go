@@ -777,6 +777,43 @@ func TestPrepareMessagesForLLM_ShellInvalidationVerdictMemoizedPerShell(t *testi
 	}
 }
 
+func TestMutatingShellInvalidationSkipsReadOnlyShells(t *testing.T) {
+	// Only a shell the classifier rejects may trigger the
+	// re-verify earlier reads against disk. An expanded-table query (rg)
+	// must not, even when the earlier read is stale on disk.
+	projectRoot := t.TempDir()
+	path := filepath.Join(projectRoot, "a.go")
+	if err := os.WriteFile(path, []byte("package main\n\nconst value = 1\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile initial: %v", err)
+	}
+	readState := buildReadFileState(path)
+	if err := os.WriteFile(path, []byte("package main\n\nconst value = 2\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile changed: %v", err)
+	}
+	registry := tools.NewRegistry()
+	registry.Register(tools.NewShellTool("bash"))
+	a := &MainAgent{tools: registry, projectRoot: projectRoot}
+	messagesFor := func(callID, shellCommand string) []message.Message {
+		return []message.Message{
+			{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "read", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
+			{Role: message.RoleTool, ToolCallID: "read", ToolStatus: message.ToolStatusSuccess, FileState: readState},
+			{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: callID, Name: tools.NameShell, Args: json.RawMessage(`{"command":` + strconv.Quote(shellCommand) + `}`)}}},
+			{Role: message.RoleTool, ToolCallID: callID, ToolStatus: message.ToolStatusSuccess},
+		}
+	}
+	// NOTE: each case needs its own shell ToolCallID: the verdict memo keys
+	// on call ID (production IDs are unique per call), so reusing one would
+	// return the first case's verdict for the second.
+	msgs := messagesFor("shell-rg", "rg --no-config -n value a.go")
+	if got := a.externallyInvalidatedReadsAfterMutatingShell(msgs, newReductionHistoryScan(msgs)); len(got) != 0 {
+		t.Fatalf("read-only rg shell invalidated reads %v, want none", got)
+	}
+	msgs = messagesFor("shell-touch", "touch other")
+	if got := a.externallyInvalidatedReadsAfterMutatingShell(msgs, newReductionHistoryScan(msgs)); !got[1] {
+		t.Fatalf("mutating shell invalidated reads %v, want index 1", got)
+	}
+}
+
 func TestPrepareMessagesForLLM_RestoredReadBecomesStaleAfterMutatingShell(t *testing.T) {
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "a.go")

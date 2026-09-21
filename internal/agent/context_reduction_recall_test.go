@@ -455,3 +455,37 @@ func TestShellCommandReadOnlyMemoizesVerdictPerToolCallID(t *testing.T) {
 		t.Fatalf("empty ToolCallID must not be memoized: %v", a.shellReadOnlyClass.verdicts)
 	}
 }
+
+func TestShellCommandReadOnlyMapsExpandedQueryCommands(t *testing.T) {
+	// The recall-protection and content-fetch mapping: these expanded-table
+	// commands must enjoy read-like treatment, while writes must not. The
+	// boolean-to-protection mechanism itself is covered by fixture tests;
+	// this pins the command-to-boolean mapping it consumes.
+	registry := tools.NewRegistry()
+	registry.Register(tools.NewShellTool("bash"))
+	a := &MainAgent{tools: registry}
+	readonly := []string{
+		`{"command":"rg --no-config -n pat --glob '*.go'"}`,
+		`{"command":"find . -name '*.go'"}`,
+		`{"command":"git blame f"}`,
+		`{"command":"sed -n '1,20p' f"}`,
+		`{"command":"git log | head -20"}`,
+	}
+	for i, args := range readonly {
+		// Unique ToolCallIDs: the memo keys on call ID, so reusing one
+		// would return the first verdict for every later command.
+		if got := a.shellCommandReadOnly(fmt.Sprintf("ro-%d", i), args); !got {
+			t.Fatalf("shellCommandReadOnly(%s) = false, want true", args)
+		}
+	}
+	mutating := []string{
+		`{"command":"rm -rf ./tmp"}`,
+		`{"command":"touch other"}`,
+		`{"command":"sort {-o,out} in"}`,
+	}
+	for i, args := range mutating {
+		if a.shellCommandReadOnly(fmt.Sprintf("rw-%d", i), args) {
+			t.Fatalf("shellCommandReadOnly(%s) = true, want false", args)
+		}
+	}
+}

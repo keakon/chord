@@ -250,8 +250,8 @@ func TestShellReadOnlyAllowlistCoversNewCommands(t *testing.T) {
 		"head -n 5 file", "tail -n 5 file", "wc -l file", "stat file", "file x", "file -b x", "file --mime-type x", "du -sh .", "df -h",
 	}
 	for _, command := range allowed {
-		if !shellReadOnlyCommandAllowed(mustMarshal(t, map[string]any{"command": command})) {
-			t.Errorf("shellReadOnlyCommandAllowed(%q) = false, want true", command)
+		if v := ClassifyShellReadOnly(command, "bash", false); !v.ReadOnly {
+			t.Errorf("ClassifyShellReadOnly(%q) = false (%s), want true", command, v.Reason)
 		}
 	}
 	denied := []string{
@@ -260,12 +260,12 @@ func TestShellReadOnlyAllowlistCoversNewCommands(t *testing.T) {
 		"file -C", "file --compile", "file -Cm custom.magic", "file --compile --magic custom.magic",
 	}
 	for _, command := range denied {
-		if shellReadOnlyCommandAllowed(mustMarshal(t, map[string]any{"command": command})) {
-			t.Errorf("shellReadOnlyCommandAllowed(%q) = true, want false", command)
+		if v := ClassifyShellReadOnly(command, "bash", false); v.ReadOnly {
+			t.Errorf("ClassifyShellReadOnly(%q) = true, want false", command)
 		}
 	}
-	if shellReadOnlyCommandAllowed(mustMarshal(t, map[string]any{"command": "git status --short", "run_in_background": true})) {
-		t.Error("shellReadOnlyCommandAllowed(background git status) = true, want false")
+	if v := ClassifyShellReadOnly("git status --short", "bash", true); v.ReadOnly {
+		t.Error("ClassifyShellReadOnly(background git status) = true, want false")
 	}
 }
 

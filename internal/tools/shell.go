@@ -256,13 +256,13 @@ func longRunningGitSubcommand(args []string) bool {
 func (ShellTool) Name() string { return NameShell }
 
 // ConcurrencyPolicy keeps every invocation on the one process resource —
-// shells share cwd, environment, and process state — while letting only an
-// allowlisted side-effect-free command be scheduled as a read. A mutating
+// shells share cwd, environment, and process state — while letting only a
+// provably read-only command be scheduled as a read. A mutating
 // command stays exclusive and aborts its batch siblings on error; a read-only
 // command batches with other reads instead of acting as a serialization
 // boundary.
-func (ShellTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
-	if shellReadOnlyCommandAllowed(args) {
+func (t ShellTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
+	if shellReadOnlyArgsVerdict(args, t.shellType).ReadOnly {
 		return ConcurrencyPolicy{Resource: "process:shell", Mode: ConcurrencyModeRead}
 	}
 	return ConcurrencyPolicy{
@@ -272,95 +272,12 @@ func (ShellTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
 	}
 }
 
-// ConcurrencySafeReadOnly admits a narrow allowlist of side-effect-free shell
-// commands (no metacharacters) so they can batch alongside other read-only
+// ConcurrencySafeReadOnly admits provably read-only shell
+// commands so they can batch alongside other read-only
 // tools. Detached calls are excluded: starting a job is a process side effect,
 // not a read. Everything else falls back to the exclusive ConcurrencyPolicy.
-func (ShellTool) ConcurrencySafeReadOnly(args json.RawMessage) bool {
-	return shellReadOnlyCommandAllowed(args)
-}
-
-func shellReadOnlyCommandAllowed(args json.RawMessage) bool {
-	var parsed struct {
-		Command         string `json:"command"`
-		RunInBackground bool   `json:"run_in_background"`
-	}
-	if err := json.Unmarshal(unwrapToolArgs(args), &parsed); err != nil {
-		return false
-	}
-	if parsed.RunInBackground {
-		return false
-	}
-	command := strings.TrimSpace(parsed.Command)
-	if command == "" || containsShellConstruct(command) {
-		return false
-	}
-	fields := strings.Fields(command)
-	if len(fields) == 0 {
-		return false
-	}
-	switch fields[0] {
-	case "pwd", "ls", "cat", "which", "head", "tail", "wc", "stat", "file", "du", "df":
-		if fields[0] == "tail" {
-			for _, f := range fields[1:] {
-				// A follow-mode tail never returns; cover --follow[=mode] and
-				// short-option clusters such as -fn, not only the bare forms.
-				if strings.HasPrefix(f, "--follow") {
-					return false
-				}
-				if strings.HasPrefix(f, "-") && !strings.HasPrefix(f, "--") && strings.ContainsAny(f, "fF") {
-					return false
-				}
-			}
-		}
-		if fields[0] == "file" {
-			for _, f := range fields[1:] {
-				// `file -C/--compile` writes magic.mgc (in the current
-				// directory, or next to the -m path), so it is not a read.
-				if f == "--compile" || strings.HasPrefix(f, "--compile=") {
-					return false
-				}
-				if strings.HasPrefix(f, "-") && !strings.HasPrefix(f, "--") && strings.Contains(f[1:], "C") {
-					return false
-				}
-			}
-		}
-		return true
-	case "git":
-		if len(fields) < 2 {
-			return false
-		}
-		switch fields[1] {
-		case "status", "log", "diff", "show", "branch", "rev-parse":
-			return true
-		default:
-			return false
-		}
-	default:
-		return false
-	}
-}
-
-// shellCommandChainingCharacters are the constructs that turn one command into
-// a different or additional one: chaining, command substitution, redirection,
-// and the newlines that start a fresh command. Any string containing one of
-// them cannot be reasoned about as "this single command".
-const shellCommandChainingCharacters = ";|&`$><\n\r"
-
-// shellArgumentExpansionCharacters are the constructs the shell expands within
-// a single command's own arguments: escapes, grouping, globs, and brace
-// expansion. shellReadOnlyCommandAllowed refuses them even though they cannot
-// introduce a second command by themselves, because for `ls`, `cat` and
-// friends the expanded argument list is what decides which files the command
-// actually touches: the allowlist must not depend on an expansion it does not
-// perform.
-const shellArgumentExpansionCharacters = `\()*?[]{}`
-
-// containsShellConstruct reports whether a command carries any shell syntax
-// beyond a plain word list, so it cannot be classified from its first words
-// alone.
-func containsShellConstruct(command string) bool {
-	return strings.ContainsAny(command, shellCommandChainingCharacters+shellArgumentExpansionCharacters)
+func (t ShellTool) ConcurrencySafeReadOnly(args json.RawMessage) bool {
+	return shellReadOnlyArgsVerdict(args, t.shellType).ReadOnly
 }
 
 func (t ShellTool) Description() string {
