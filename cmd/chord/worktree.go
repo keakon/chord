@@ -156,8 +156,7 @@ type worktreeListRow struct {
 // probing become "?" instead of failing the listing.
 func buildWorktreeListRows(ctx context.Context, infos []worktree.Info, idx *worktree.RepoIndex) []worktreeListRow {
 	rows := make([]worktreeListRow, 0, len(infos))
-	for i := range infos {
-		info := infos[i]
+	for _, info := range infos {
 		row := worktreeListRow{Info: info, Status: "?"}
 		if dirty, ok := worktree.IsDirty(ctx, info.Path); ok {
 			if dirty {

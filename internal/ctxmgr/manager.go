@@ -240,8 +240,8 @@ func (m *Manager) trackToolCallIDsLocked(msg message.Message) {
 // wholesale message-list rewrite. Callers hold m.mu.
 func (m *Manager) rebuildToolCallIDIndexLocked() {
 	m.declaredToolCallIDs = nil
-	for i := range m.messages {
-		m.trackToolCallIDsLocked(m.messages[i])
+	for _, msg := range m.messages {
+		m.trackToolCallIDsLocked(msg)
 	}
 }
 
