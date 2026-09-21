@@ -10,7 +10,6 @@ import (
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/skill"
-	"github.com/keakon/chord/internal/tools"
 )
 
 func (a *MainAgent) SetSkills(skills []*skill.Meta) {
@@ -80,16 +79,7 @@ func (a *MainAgent) parkedTaskVisibleSkills(task *DurableTaskRecord) []*skill.Me
 }
 
 func visibleSkillsForRuleset(loaded []*skill.Meta, ruleset permission.Ruleset) []*skill.Meta {
-	out := make([]*skill.Meta, 0, len(loaded))
-	for _, meta := range loaded {
-		if meta == nil || (len(ruleset) > 0 && ruleset.Evaluate(tools.NameSkill, meta.Name) == permission.ActionDeny) {
-			continue
-		}
-		copyMeta := *meta
-		copyMeta.Discovered = true
-		out = append(out, &copyMeta)
-	}
-	return out
+	return skill.VisibleForRuleset(loaded, ruleset)
 }
 
 func (a *MainAgent) MarkSkillInvoked(meta *skill.Meta) {

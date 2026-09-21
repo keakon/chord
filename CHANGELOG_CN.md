@@ -25,6 +25,7 @@
 - 后台任务在 TUI 里有了实时的观察面。只要有 job 在 running 或 stopping，右侧信息面板就多出一个 `JOBS` 区，每个 job 一行（标签、耗时，以及行尾可点击的停止入口），子 agent 拉起的 job 也列在里面；终端窄到放不下面板时，状态栏改用可点击的 `1 job` / `2 agents · 1 job` pill，点开是同一份列表的浮层。pill 和行尾 `x` 都只认鼠标，所以 `ctrl+j` 可以在 Normal 模式下不用鼠标打开同一份列表：`j` / `k` 移动选中行，`Enter` 打开该行的确认框。确认框列出 job id、标签、命令、owner、状态、耗时、最后输出时间与最近输出，只有按 `y` 才真的停。这样停掉的 job 会通知它的 owner 是你停的，而不是当成普通失败，也不会再多弹一条 toast。只有后台 job 在跑时，终端标题的 spinner 照样转。
 - `delegate` 新增可选的 `result_schema`：一个 JSON Schema 子集（`type`、`required`、`properties`、`items`、`enum`、`description`），声明 worker 交付的结果必须满足什么，`type` 只能取 `object`、`array`、`string`、`integer`、`number`、`boolean`，顶层必须是 `object`。超出子集的 schema 在委派时就被拒绝，而不是被静默忽略；未声明的字段一律放行。worker 调用 `complete` 时，Chord 会校验实际交付的载荷——内联的 `result` 或 `result_ref` 指向的 artifact；不符合的会退回一次让它改正，再次不符合则任务以失败收口，违规诊断写进任务结算，并把这次失败以 `contract` 上报给 owner 与 `on_agent_error` hook。`result_ref` 的内容读不回来时立即失败，因为重试修不好存储侧的问题。不带 schema 的委派行为不变。
 - `escalate` 现在必须带 `kind`。`needs_repair` 向 owner 求助并让任务继续运行；`blocked` 则以 worker 给出的原因把任务按失败收口（owner 视图的 **AGENT BLOCKED** 卡片、`risk_alert` mailbox、`on_agent_error` hook 的 `error_kind: blocked`），不再把 worker 泊住等待。同一个任务最多留下两次未获答复的 `needs_repair` 升级，第三次会被拒绝并退回给 worker，同时提示它自己推进或用 `complete` 收口——这才是反复升级同一个阻塞点时真正的收敛手段。owner 答复了那次升级后计数清零，其他投递不清零。
+- 新增 `chord doctor skills` 命令：解释配好的 skill 为什么到不了模型——逐个给出完整性、加载、`builder` ruleset 可见性、已声明资源健康度，支持 `--json` 和 `--strict`。skill 可在可选的 frontmatter 字段 `resources` 里声明它依赖的文件（相对 skill 根目录的路径）；缺资源不会隐藏 skill，而是以告警块出现在 `skill` 工具输出里，TUI 卡片上也有标记。
 
 ### 改进
 

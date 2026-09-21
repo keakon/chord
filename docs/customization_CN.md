@@ -62,10 +62,56 @@ TUI 侧边栏的 **SKILLS** 区块只显示当前已发现的 skills。`skill` �
 ---
 name: go-expert
 description: Go language development expert
+resources:
+  - references/style.md
 ---
 
 遵循 Effective Go 和 Go Code Review Comments。
 ```
+
+### 声明式资源
+
+skill 正文依赖同目录下的文件时，在 frontmatter 的可选字段 `resources`
+里按相对 skill 根目录的路径列出来。只校验已声明的条目，正文里顺带提到
+的其他路径会被忽略。
+
+- 条目必须留在 skill 根目录内，且最终是普通文件。缺失、逃出根目录（`..`、
+  绝对路径、指向根外的 symlink）、目录和设备文件都会判失败。
+- 空文件只告警：读出来等于没读，但很容易被忽略。
+- 资源问题不会隐藏 skill。缺资源的 skill 照常加载、照常可见；`skill` 工具
+  会在正文前加一段告警块，TUI 卡片上也有标记。
+- doctor 的结论是检查那一刻的快照，不是担保。运行期每次加载都会重新 stat，
+  检查完再删掉的文件，运行时照样告警。
+
+正文里 `${CHORD_SKILL_DIR}/<path>` 这种字面量会按同一规则顺带检查一遍，
+最多记告警。正文散文里的裸相对路径不扫描。
+
+frontmatter 的 `paths` 字段目前只解析、不生效：skill 的可见性只按权限
+过滤，不按文件模式匹配。
+
+## 诊断 skills
+
+`chord doctor skills` 负责回答“配了却没生效”的 skill 卡在哪里。它复用运行
+时的发现顺序和解析器，只是把无效文件和被遮蔽的同名文件也各留一行，而不
+是静默跳过。加 `--json` 可输出机器可读报告。
+
+每行有四个独立维度：
+
+- `integrity`：`passed` 表示运行时会保留该文件；`failed` 表示会被跳过
+ （YAML 写坏了、缺 `name`/`description`、文件读不出）。
+- `load`：正文能不能读出来（`passed`/`failed`/`not_run`）。
+- `visibility`：`builder` ruleset 下是否可见
+ （`visible`/`denied`/`not_checked`）。
+- `resources`：已声明资源的健康状况
+  （`passed`/`failed`/`warning`/`none`）。
+- `shadowed`：是否有更高优先目录的同名 skill 占位。
+
+退出码沿用 `doctor` 家族：有 skill 的 integrity 或 load 失败时返回 `1`，
+检查本身跑不起来时返回 `2`。配置读不出，或扫描出问题（目录不可读、悬空
+符号链接、扫描路径不是目录）都属于这一类：这些问题会列在报告里（`--json`
+下是 `scan_issues`），报告照常输出。被拒绝、被遮蔽、资源问题、一共没配
+skill 都不影响退出码。`--strict` 会在 ruleset 不可用或某项检查没跑成时
+也返回 `1`。能加载、能读出，不代表模型会选用它。
 
 ## Hooks
 

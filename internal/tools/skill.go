@@ -153,6 +153,129 @@ func substituteSkillPlaceholders(content, rootDir, args string) string {
 	return content
 }
 
+// SkillResourceWarningOpen and SkillResourceWarningClose delimit the
+// machine-readable resource warning block prepended to a skill body when
+// declared resources are missing or empty. The block sits before the body so
+// tests can assert the body itself is untouched, and the TUI parses the same
+// block for its card marker instead of re-statting files.
+const (
+	SkillResourceWarningOpen  = "<skill_resource_warnings>"
+	SkillResourceWarningClose = "</skill_resource_warnings>"
+)
+
+// SkillResourceWarningBlock formats failed and warning resource entries as a
+// standalone block. It returns "" when every entry passes, so callers can
+// keep the skill output byte-identical to the body in the healthy case.
+func SkillResourceWarningBlock(entries []skill.ResourceEntry) string {
+	var lines []string
+	for _, entry := range entries {
+		if entry.Status != skill.ResourceStatusFailed && entry.Status != skill.ResourceStatusWarning {
+			continue
+		}
+		reason := entry.Reason
+		if reason == "" {
+			reason = entry.Status
+		}
+		line := "- " + entry.Declared + ": " + reason
+		if detail := strings.TrimSpace(entry.Detail); detail != "" {
+			line += ": " + detail
+		}
+		lines = append(lines, line)
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return SkillResourceWarningOpen + "\n" + strings.Join(lines, "\n") + "\n" + SkillResourceWarningClose
+}
+
+// SkillDeclaredResourceWarningBlock checks declared resources under rootDir
+// and formats any problems. It performs read-only stats only.
+func SkillDeclaredResourceWarningBlock(rootDir string, resources []string) string {
+	if len(resources) == 0 {
+		return ""
+	}
+	return SkillResourceWarningBlock(skill.CheckDeclaredResources(rootDir, resources))
+}
+
+// ExtractSkillResourceWarningLines returns the inner lines of the warning
+// block embedded in a skill result or body, or nil when absent.
+func ExtractSkillResourceWarningLines(s string) []string {
+	_, rest, ok := strings.Cut(s, SkillResourceWarningOpen)
+	if !ok {
+		return nil
+	}
+	inner, _, ok := strings.Cut(rest, SkillResourceWarningClose)
+	if !ok {
+		return nil
+	}
+	inner = strings.TrimSpace(inner)
+	if inner == "" {
+		return nil
+	}
+	lines := strings.Split(inner, "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
+// HasSkillResourceWarning reports whether a skill result carries a warning block.
+func HasSkillResourceWarning(s string) bool {
+	return len(ExtractSkillResourceWarningLines(s)) > 0
+}
+
+// StripSkillResourceWarningBlock removes the warning block from a skill body,
+// leaving the original content intact for display and assertions.
+func StripSkillResourceWarningBlock(s string) string {
+	before, rest, ok := strings.Cut(s, SkillResourceWarningOpen)
+	if !ok {
+		return s
+	}
+	_, after, ok := strings.Cut(rest, SkillResourceWarningClose)
+	if !ok {
+		return s
+	}
+	cleaned := before + after
+	return strings.Trim(cleaned, "\n")
+}
+
+// SkillResourceWarningSummary condenses a skill result warning into one line
+// for collapsed cards, or "" when there is no warning.
+func SkillResourceWarningSummary(s string) string {
+	lines := ExtractSkillResourceWarningLines(s)
+	if len(lines) == 0 {
+		return ""
+	}
+	if len(lines) == 1 {
+		return "resources: 1 issue: " + strings.TrimPrefix(lines[0], "- ")
+	}
+	return fmt.Sprintf("resources: %d issues (see expanded)", len(lines))
+}
+
+// FormatSkillBodyForDisplay replaces the raw warning block with a readable
+// section above the clean body. Bodies without warnings pass through.
+func FormatSkillBodyForDisplay(body string) string {
+	lines := ExtractSkillResourceWarningLines(body)
+	if len(lines) == 0 {
+		return body
+	}
+	clean := strings.TrimSpace(StripSkillResourceWarningBlock(body))
+	var sb strings.Builder
+	sb.WriteString("Skill resources:\n")
+	for _, line := range lines {
+		sb.WriteString(line)
+		sb.WriteString("\n")
+	}
+	if clean != "" {
+		sb.WriteString("\n")
+		sb.WriteString(clean)
+	}
+	return sb.String()
+}
+
 func (t SkillTool) IsAvailable() bool {
 	if t.provider == nil {
 		return false
@@ -190,6 +313,10 @@ func (t SkillTool) Execute(_ context.Context, raw json.RawMessage) (string, erro
 	}
 	fmt.Fprintf(&sb, "<notes>%s</notes>\n", "Relative paths from the skill content resolve against <root>. Read referenced files only when needed; do not guess other entry points if the skill already provides one.")
 	sb.WriteString("\n")
+	if warning := SkillDeclaredResourceWarningBlock(sk.RootDir, sk.Meta.Resources); warning != "" {
+		sb.WriteString(warning)
+		sb.WriteString("\n")
+	}
 	expandedContent := substituteSkillPlaceholders(sk.Content, sk.RootDir, a.Args)
 	sb.WriteString(expandedContent)
 	if !strings.HasSuffix(expandedContent, "\n") {

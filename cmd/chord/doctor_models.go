@@ -142,6 +142,7 @@ func newDoctorCmd() *cobra.Command {
 	}
 	cmd.AddCommand(newDoctorModelsCmd())
 	cmd.AddCommand(newDoctorConfigCmd())
+	cmd.AddCommand(newDoctorSkillsCmd())
 	return cmd
 }
 

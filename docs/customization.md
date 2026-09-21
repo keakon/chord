@@ -67,10 +67,65 @@ Minimal structure example:
 ---
 name: go-expert
 description: Go language development expert
+resources:
+  - references/style.md
 ---
 
 Follow Effective Go and Go Code Review Comments.
 ```
+
+### Declared resources
+
+When a skill body depends on files inside its own directory, list them in the
+optional `resources` frontmatter field as paths relative to the skill root.
+Only listed entries are checked; prose mentions of other paths are ignored.
+
+- Entries must stay inside the skill root and resolve to regular files.
+  Missing entries, escapes (`..`, absolute paths, symlinks pointing outside
+  the root), directories, and special files fail the check.
+- Empty files warn instead of failing: they read as nothing but are easy to
+  miss.
+- Resource problems never hide a skill. A skill with missing resources still
+  loads and stays visible; the `skill` tool output carries a warning block
+  before the body, and the TUI card marks it.
+- A doctor report is a point-in-time check, not a guarantee. Runtime warnings
+  are re-stat'ed on every load, so a file deleted after the check still warns
+  when the skill runs.
+
+Literal `${CHORD_SKILL_DIR}/<path>` references in the body get the same
+check as an auxiliary hint and warn at most. Bare relative paths in prose
+are not scanned.
+
+The `paths` frontmatter field is parsed but currently has no effect: skills
+are filtered by permissions only, not by file patterns.
+
+## Diagnose skills
+
+`chord doctor skills` reports why a configured skill never reaches the model.
+It reuses the runtime discovery order and parser, but keeps invalid and
+shadowed files as their own rows instead of skipping them silently. Add
+`--json` for a machine-readable report.
+
+Each row carries four independent dimensions:
+
+- `integrity`: `passed` means the runtime keeps the file; `failed` means it
+  is skipped (bad YAML, missing `name`/`description`, unreadable file).
+- `load`: whether the body reads back (`passed`/`failed`/`not_run`).
+- `visibility`: whether the `builder` ruleset hides the skill
+  (`visible`/`denied`/`not_checked`).
+- `resources`: health of declared resources
+  (`passed`/`failed`/`warning`/`none`).
+- `shadowed`: a same-name skill from a higher-priority directory wins.
+
+Exit codes follow the `doctor` family: `1` when any skill fails integrity or
+load, `2` when the check itself cannot run. That covers unreadable config and
+scan problems: an unreadable directory, a broken symlink, or a scan path that
+is not a directory. Scan problems are listed in the report (`scan_issues` in
+`--json`) and the report is still printed. Denied skills, shadowed duplicates,
+resource problems, and an empty skill set do not change the exit code. Pass
+`--strict` to also fail when the ruleset is unavailable or a check did not
+run. Loading and reading a skill says nothing about whether the model will
+pick it.
 
 ## Hooks
 

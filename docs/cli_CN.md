@@ -21,6 +21,7 @@ chord [全局 flag] [命令] [命令 flag] [参数]
 | `chord headless`                  | 无 TUI 启动，stdio JSON 控制面                                    |
 | `chord doctor config`             | 校验全局 / 项目配置文件                                            |
 | `chord doctor models`             | 诊断已配置的 provider/model 调用链                                |
+| `chord doctor skills`             | 诊断 skill 的发现、加载与可见性                                    |
 | `chord cleanup status`            | 查看路径定位器管理的 state/cache/logs 体积                        |
 | `chord cleanup <kind>`            | 清理 `sessions` / `cache` / `logs` / `project`（默认 dry-run）    |
 | `chord worktree list`             | 列出当前仓库下 chord 管理的 worktree                              |
@@ -245,6 +246,30 @@ chord doctor models --all-pools --json
 
 # 测试某 provider 下配置的全部模型
 chord doctor models --provider openai --all-models --fail-fast
+```
+
+## `chord doctor skills`
+
+解释配好的 skill 为什么到不了模型。它复用运行时的发现顺序和解析器，只是把无效文件和被遮蔽的同名文件也各留一行，而不是静默跳过。它还会按运行时 glob 的真实遍历面审计目录：目录不可读或符号链接悬空时，会作为扫描问题（`scan_issues`）列出，而不是让它们看起来像空目录。每行有四个独立维度：`integrity`（运行时会不会保留该文件）、`load`（正文能不能读出来）、`visibility`（`builder` ruleset 是否隐藏它）、`resources`（已声明 `resources` 条目的健康状况），同名被更高优先目录占位时另有 `shadowed` 标记。能加载、能读出，不代表模型会选用它。
+
+退出码沿用 `doctor` 家族：有 skill 的 integrity 或 load 失败时返回 `1`，检查本身跑不起来时返回 `2`。扫描出问题（目录不可读、悬空符号链接、扫描路径不是目录）同样返回 `2`，并作为 `scan_issues` 列在报告里，而不是中断报告。被拒绝、被遮蔽、资源问题、一共没配 skill 都不影响退出码。
+
+### Flag
+
+| 参数         | 说明                                               |
+| ------------ | -------------------------------------------------- |
+| `--json`   | 输出机器可读的 JSON 报告                           |
+| `--strict` | ruleset 不可用或某项检查没跑成时也返回 `1`         |
+
+### 示例
+
+```bash
+# 诊断 skill 的发现、加载与可见性
+chord doctor skills
+
+# 机器可读报告，或对未检查到的行也判失败
+chord doctor skills --json
+chord doctor skills --strict
 ```
 
 ## `chord cleanup`

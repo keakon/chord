@@ -21,6 +21,7 @@ Without a command, `chord` runs the local TUI in the current directory.
 | `chord headless`                 | Run without TUI; stdio JSON control plane                        |
 | `chord doctor config`            | Validate global/project config files                            |
 | `chord doctor models`            | Diagnose configured provider/model calls                         |
+| `chord doctor skills`            | Diagnose skill discovery, loading, and visibility                |
 | `chord cleanup status`           | Inspect state/cache/log sizes managed by the path locator        |
 | `chord cleanup <kind>`           | Clean `sessions` / `cache` / `logs` / `project` (dry-run by default) |
 | `chord worktree list`            | List chord-managed worktrees of the current repository           |
@@ -245,6 +246,30 @@ chord doctor models --all-pools --json
 
 # Test every configured model for one provider
 chord doctor models --provider openai --all-models --fail-fast
+```
+
+## `chord doctor skills`
+
+Explain why a configured skill never reaches the model. It reuses the runtime discovery order and parser, but keeps invalid and shadowed files as their own rows instead of skipping them silently. It also audits the directories the runtime glob traverses, so an unreadable directory or a broken symlink shows up as a scan issue instead of looking empty. Each row reports four independent dimensions: `integrity` (whether the runtime keeps the file), `load` (whether the body reads back), `visibility` (whether the `builder` ruleset hides the skill), and `resources` (health of declared `resources` frontmatter entries), plus a `shadowed` flag when a higher-priority directory owns the name. Loading and reading a skill says nothing about whether the model will pick it.
+
+Exit codes follow the `doctor` family: `1` when any skill fails integrity or load, `2` when the check itself cannot run. Scan problems — an unreadable directory, a broken symlink, a scan path that is not a directory — exit `2` and are listed in the report (`scan_issues`) instead of aborting it. Denied skills, shadowed duplicates, resource problems, and an empty skill set do not change the exit code.
+
+### Flags
+
+| Flag       | Description                                                              |
+| ---------- | ------------------------------------------------------------------------ |
+| `--json`   | Emit a machine-readable JSON report                                      |
+| `--strict` | Also fail when the ruleset is unavailable or a check did not run         |
+
+### Examples
+
+```bash
+# Diagnose skill discovery, loading, and visibility
+chord doctor skills
+
+# Machine-readable report, or fail on unchecked rows
+chord doctor skills --json
+chord doctor skills --strict
 ```
 
 ## `chord cleanup`

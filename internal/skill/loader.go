@@ -37,6 +37,7 @@ type Meta struct {
 	Effort       string   // optional: effort level for fork context
 	AllowedTools []string // optional: tool allowlist for fork context
 	Paths        []string // optional: conditional activation glob patterns
+	Resources    []string // optional: files relative to the skill root the body depends on
 }
 
 // Skill represents a fully loaded skill definition.
@@ -56,6 +57,7 @@ type frontmatter struct {
 	Effort       string   `yaml:"effort"`
 	AllowedTools []string `yaml:"allowed_tools"`
 	Paths        []string `yaml:"paths"`
+	Resources    []string `yaml:"resources"`
 }
 
 // Loader scans directories for SKILL.md files and loads them.
@@ -168,6 +170,7 @@ func LoadMeta(path string) (*Meta, error) {
 		Effort:       fm.Effort,
 		AllowedTools: fm.AllowedTools,
 		Paths:        fm.Paths,
+		Resources:    NormalizeResourceList(fm.Resources),
 	}
 
 	// Apply sidecar metadata if present (overrides frontmatter).
@@ -253,6 +256,9 @@ func loadSidecarMeta(rootDir string, meta *Meta) {
 		if len(sidecar.Paths) > 0 {
 			meta.Paths = sidecar.Paths
 		}
+		if len(sidecar.Resources) > 0 {
+			meta.Resources = NormalizeResourceList(sidecar.Resources)
+		}
 		break // first sidecar wins
 	}
 }
@@ -336,7 +342,8 @@ func digestSkillMetas(metas []*Meta) string {
 		}
 		allowed := strings.Join(meta.AllowedTools, ",")
 		paths := strings.Join(meta.Paths, ",")
-		lines = append(lines, fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s",
+		resources := strings.Join(NormalizeResourceList(meta.Resources), ",")
+		lines = append(lines, fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s",
 			meta.Name,
 			meta.Description,
 			meta.Location,
@@ -348,6 +355,7 @@ func digestSkillMetas(metas []*Meta) string {
 			meta.Effort,
 			allowed,
 			paths,
+			resources,
 		))
 	}
 	sort.Strings(lines)

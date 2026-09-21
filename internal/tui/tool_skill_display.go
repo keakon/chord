@@ -134,10 +134,18 @@ func skillSourcePrefixDisplay(path string) string {
 func toolCollapsedResultContent(toolName, result string) string {
 	switch toolName {
 	case tools.NameSkill:
-		if path := skillToolPathFromResult(result); path != "" {
-			return shortenSkillDisplayPath(path)
+		path := skillToolDisplayPath(result)
+		warning := tools.SkillResourceWarningSummary(result)
+		switch {
+		case path != "" && warning != "":
+			return path + "\n" + warning
+		case path != "":
+			return path
+		case warning != "":
+			return warning
+		default:
+			return result
 		}
-		return result
 	case tools.NameDelegate:
 		if summary := taskToolCollapsedHandleSummary(result); summary != "" {
 			return summary
@@ -152,7 +160,7 @@ func toolExpandedResultContent(toolName, result string) string {
 	switch toolName {
 	case tools.NameSkill:
 		if body := skillToolBodyFromResult(result); body != "" {
-			return body
+			return tools.FormatSkillBodyForDisplay(body)
 		}
 		if path := skillToolPathFromResult(result); path != "" {
 			return path
@@ -335,7 +343,7 @@ func skillToolBodyFromResult(result string) string {
 func skillToolCopyContent(displayArgs, result string) string {
 	name := skillToolNameFromArgs(displayArgs)
 	path := skillToolPathFromResult(result)
-	body := skillToolBodyFromResult(result)
+	body := tools.FormatSkillBodyForDisplay(skillToolBodyFromResult(result))
 
 	var parts []string
 	if name != "" {
