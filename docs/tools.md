@@ -92,10 +92,10 @@ These tools control agent workflows rather than local side effects, so YOLO does
 | --- | --- |
 | `done` | Request loop exit with a final Markdown report. Mounted only while a loop is running, so ordinary sessions never see it. See [Usage: continuous execution mode](./usage.md#loop-continuous-execution-mode). |
 | `handoff` | Transfer a plan/work to another role for execution. |
-| `delegate` | Start a sub-task and return its handle immediately. Role permissions determine capabilities; declared scope coordinates work. |
+| `delegate` | Start a sub-task and return its handle immediately. Role permissions determine capabilities; declared scope coordinates work; an optional `result_schema` declares what the delivered result must contain. |
 | `cancel` | Cancel a delegated worker; requires `delegate` to be enabled. |
 | `complete` | SubAgent-side: mark the current delegated task as complete with a summary. |
-| `escalate` | SubAgent-side: request parent-agent intervention without ending the task. |
+| `escalate` | SubAgent-side: ask the owner for help (`kind: needs_repair`) without ending the task, or report a dead end (`kind: blocked`), which fails it. |
 | `notify` | Send a non-blocking update to the owner or a specific delegated worker. A targeted message resumes a worker that already finished or failed, with its own transcript; a cancelled task is not resumable. See the message forms below. |
 
 ### Delegation and work scope
@@ -107,6 +107,21 @@ The declaration is coordination metadata, not an enforced boundary: whether the 
 Declaring an honest narrow scope keeps sibling-overlap hints meaningful: when the declared scope overlaps another still-active task's, the delegation still starts and the handle carries `scope_conflict: true` with `suggested_task_id` and `suggested_action: serialize_or_worktree`, which tells you to run the two tasks serially, coordinate the shared edits through `notify`, or give the new worker its own git worktree.
 
 A read-only task should pick an agent whose role registers no file-modifying tools and pass an empty scope, which is accepted only for such roles; a role that can write files must declare a non-empty scope or the delegation is rejected. Command tools such as `shell` are never scope-restricted and stay governed by the role's permission rules. Denying `delegate` also disables `cancel` and nested delegation for that role.
+
+### Delegated result contracts
+
+`delegate` accepts an optional `result_schema` that declares what the worker's delivered result must contain. The accepted vocabulary is `type`, `required`, `properties`, `items`, `enum`, and `description`, with `type` limited to `object`, `array`, `string`, `integer`, `number`, and `boolean`; the top level must be `type: "object"`. A schema outside that subset is rejected at delegation time instead of being silently ignored, and undeclared fields always pass — a contract states that what you asked for is present and correct rather than enumerating everything the worker may return.
+
+`complete` delivers the result inline (`result`) or as an artifact reference (`result_ref`, typically the ResultRef from `save_artifact`). Chord validates the delivered payload against the contract before accepting the completion: a violation is handed back to the worker with the offending paths and one corrected attempt. If the next delivery still violates the contract, the task fails, the rejection text names up to 20 violations, and the task settlement keeps the machine-readable diagnostics. A `result_ref` whose content cannot be read back fails immediately, since a retry cannot repair the store. Without `result_schema`, delegation behaves as before.
+
+### Escalation
+
+`escalate` is the SubAgent-side way to ask its owner for help, and a required `kind` says which of two things it means:
+
+- `needs_repair` — the task is stuck on something only the owner can decide or provide. The request is delivered as a mailbox message and the worker parks in `WaitingMain` until you answer; the task keeps running.
+- `blocked` — the worker judged the attempt a dead end. The task closes as failed with the stated reason (owner card **AGENT BLOCKED**, `risk_alert` mailbox, `on_agent_error` hook with `error_kind: blocked`) instead of parking.
+
+A task may leave two `needs_repair` escalations unanswered; a third is refused back to the worker (the escalate card reports an error) with a notice to make progress independently or close out with `complete`. That limit is the only convergence for a worker stuck re-escalating the same blocker: every escalation re-enters `WaitingMain` and resets the lifecycle timers, so the stall timeout never catches the loop. Answering that escalation clears the budget; other deliveries to the worker do not.
 
 ### Notifications and replies
 

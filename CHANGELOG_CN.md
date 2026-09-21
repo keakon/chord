@@ -23,6 +23,8 @@
 - headless 里携带状态的 envelope（事件循环推送、命令路径上的 `role_change` / `handoff_cancelled` 公告、以及 `status_response`）现在带单调递增的 `seq`，集成方可以丢掉被更新推送超车的 `status_response` 旧快照。首次推送前的快照也带非零版本号，每个进程单独计数。任何改了缓存状态的突变都会递增 `seq`，即使网关没订阅对应的推送、或者这次突变根本没有推送，因此之后的 `status_response` 不会被突变前拷的旧快照超车。带状态的推送也按 `seq` 顺序到达线缆（分配与入队共用一个有序区段，事件循环与命令路径都如此），因此只应用较新版本的集成方不会再丢掉一次不会被重发的旧公告；`role_change` 这样丢过一次就不会补发。
 - provider 新增 `stream_total_timeout`（秒）按墙钟给单条流设上限，从响应体开始读取时计时，也包括 Codex Responses WebSocket 读等待。`0` / 省略保持现在的行为，即不设上限——持续产出数据的流只是慢、并非故障，仍只由 `stream_idle_timeout` 约束——所以需要显式配置才生效。它用于覆盖 idle 超时兜不住的那种形态：每次到达都足以重置 idle 计时器、但永不结束的滴流式响应。超时后读取以超时错误结束，与别的流超时一样走正常的 key/model 重试路径。
 - 后台任务在 TUI 里有了实时的观察面。只要有 job 在 running 或 stopping，右侧信息面板就多出一个 `JOBS` 区，每个 job 一行（标签、耗时，以及行尾可点击的停止入口），子 agent 拉起的 job 也列在里面；终端窄到放不下面板时，状态栏改用可点击的 `1 job` / `2 agents · 1 job` pill，点开是同一份列表的浮层。pill 和行尾 `x` 都只认鼠标，所以 `ctrl+j` 可以在 Normal 模式下不用鼠标打开同一份列表：`j` / `k` 移动选中行，`Enter` 打开该行的确认框。确认框列出 job id、标签、命令、owner、状态、耗时、最后输出时间与最近输出，只有按 `y` 才真的停。这样停掉的 job 会通知它的 owner 是你停的，而不是当成普通失败，也不会再多弹一条 toast。只有后台 job 在跑时，终端标题的 spinner 照样转。
+- `delegate` 新增可选的 `result_schema`：一个 JSON Schema 子集（`type`、`required`、`properties`、`items`、`enum`、`description`），声明 worker 交付的结果必须满足什么，`type` 只能取 `object`、`array`、`string`、`integer`、`number`、`boolean`，顶层必须是 `object`。超出子集的 schema 在委派时就被拒绝，而不是被静默忽略；未声明的字段一律放行。worker 调用 `complete` 时，Chord 会校验实际交付的载荷——内联的 `result` 或 `result_ref` 指向的 artifact；不符合的会退回一次让它改正，再次不符合则任务以失败收口，违规诊断写进任务结算，并把这次失败以 `contract` 上报给 owner 与 `on_agent_error` hook。`result_ref` 的内容读不回来时立即失败，因为重试修不好存储侧的问题。不带 schema 的委派行为不变。
+- `escalate` 现在必须带 `kind`。`needs_repair` 向 owner 求助并让任务继续运行；`blocked` 则以 worker 给出的原因把任务按失败收口（owner 视图的 **AGENT BLOCKED** 卡片、`risk_alert` mailbox、`on_agent_error` hook 的 `error_kind: blocked`），不再把 worker 泊住等待。同一个任务最多留下两次未获答复的 `needs_repair` 升级，第三次会被拒绝并退回给 worker，同时提示它自己推进或用 `complete` 收口——这才是反复升级同一个阻塞点时真正的收敛手段。owner 答复了那次升级后计数清零，其他投递不清零。
 
 ### 改进
 
@@ -77,6 +79,8 @@
 - 上下文压力提示不再在同一个请求里叠加两条：切换到新窗口的 reminder 线与阈值都已被当前上下文越过的模型时，只带上最高档的那一条——grace 倒计时，或启动压缩的那次请求上的上下文外置警告——而不是 sticky reminder 与切换触发的告警同时出现。
 - 压缩进行中发送的消息不再在会话正文里出现两次：压缩重写先重绘正文时，这条消息会复用已经画出的卡片，不会再追加第二张。
 - 后台任务读取（`job_output`）现在会在执行前记入 started 日志，会话中断后恢复时这次读取会被报成「结果未知」，不再当成从未执行过而重放。这里重放会误导：读取已经消费掉 job 的新输出、也认领了它的完成通知，重试只会返回一个空窗口，看起来像一次成功的全新读取，而崩溃时已经取到的输出已经没了。
+
+- 被 Chord 拒绝的完成不再显示成功卡片。`complete` 参数校验失败，或任务已经用完修复机会后才到达的完成，以前会渲染成一张绿色的成功卡，而这次调用在会话正文里写的是完成被拒绝；现在卡片报 error 状态，与正文和 owner 通知里的失败结果一致。
 
 ## 0.8.1 - 2026-09-16
 

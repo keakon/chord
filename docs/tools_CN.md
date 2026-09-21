@@ -90,10 +90,10 @@
 | --- | --- |
 | `done` | 携带最终 Markdown 报告申请 loop 退出。仅在 loop 运行期间挂载，普通会话看不到它。见[使用指南：持续执行模式](./usage_CN.md#loop持续执行模式)。 |
 | `handoff` | 把计划/工作移交给另一个角色执行。 |
-| `delegate` | 启动子任务并立即返回句柄；角色权限决定其能力，声明的工作范围用于协调。 |
+| `delegate` | 启动子任务并立即返回句柄；角色权限决定其能力，声明的工作范围用于协调，可选的 `result_schema` 声明交付结果必须包含什么。 |
 | `cancel` | 取消一个被委派的 worker；前提是 `delegate` 已启用。 |
 | `complete` | SubAgent 侧：携带摘要把当前委派任务标记为完成。 |
-| `escalate` | SubAgent 侧：请求父 agent 介入，但不结束自己的任务。 |
+| `escalate` | SubAgent 侧：用 `kind: needs_repair` 向 owner 求助但不结束任务；用 `kind: blocked` 报告走不通，任务以失败收口。 |
 | `notify` | 向上级代理或指定子代理发送非阻塞通知。定向消息可唤醒已完成或已失败的子代理，并保留它自己的会话历史；已取消的任务不可恢复。具体参数见下方。 |
 
 ### 委派任务与工作范围
@@ -105,6 +105,21 @@
 诚实声明最窄范围，兄弟任务的叠加提示才有意义：新任务的声明范围与另一个仍活跃的任务重叠时，委派照常启动，句柄会带 `scope_conflict: true`、`suggested_task_id` 和 `suggested_action: serialize_or_worktree`，提示你把两个任务串行执行、用 `notify` 协调共享文件的编辑，或让新 worker 在独立的 git worktree 里工作。
 
 只读任务应选择注册不到文件修改工具的角色并传空 scope：空 scope 只对这种角色放行，能写文件的角色必须声明非空范围，否则委派被拒绝。`shell` 这类命令工具不受 scope 约束，可用性由角色的权限规则决定。拒绝 `delegate` 会同时禁用该角色的 `cancel` 与嵌套委派。
+
+### 交付结果契约
+
+`delegate` 可以带一个可选的 `result_schema`，声明 worker 交付的结果必须包含什么。可用的关键字只有 `type`、`required`、`properties`、`items`、`enum` 和 `description`，`type` 只能取 `object`、`array`、`string`、`integer`、`number`、`boolean`，顶层必须是 `type: "object"`。超出这个子集的 schema 会在委派时被拒绝，不会被静默忽略；未声明的字段一律放行，所以契约校验的是「你要的东西在不在、对不对」，而不是枚举 worker 能返回的全部内容。
+
+`complete` 用 `result` 内联交付结果，或用 `result_ref` 引用 artifact（通常是 `save_artifact` 返回的 ResultRef）。Chord 在接受完成前会拿实际载荷校验契约：不符合的结果退回给 worker，指出违规路径，并留给它一次改正机会；再次交付仍不符合时任务以失败收口，拒绝文案最多列出 20 条违规，机读诊断写进任务结算。`result_ref` 的内容读不回来时立即失败，因为重试也修不好存储侧的问题。不带 `result_schema` 时，委派行为与以前一致。
+
+### 升级
+
+`escalate` 是 SubAgent 向 owner 求助的方式，必须用 `kind` 声明是哪一种：
+
+- `needs_repair`：任务卡在只有 owner 才能决定或提供的事情上。请求作为 mailbox 消息投递，worker 停在 `WaitingMain` 等你答复，任务继续存活。
+- `blocked`：worker 判断这次尝试走不通。任务以失败收口并带上它给出的原因（owner 视图的 **AGENT BLOCKED** 卡片、`risk_alert` mailbox、`on_agent_error` hook 的 `error_kind: blocked`），而不是继续等待。
+
+同一个任务最多留下两次未获答复的 `needs_repair` 升级；第三次会被拒绝并退回给 worker（escalate 卡片显示 error），同时提示它自己推进能做的部分，或用 `complete` 收口。这条上限是唯一的收敛手段：每次升级都会重新进入 `WaitingMain` 并重置生命周期计时器，卡死超时永远抓不到这个循环。owner 答复了那次升级后额度清零，其他投递不清零。
 
 ### 通知与请求回复
 
