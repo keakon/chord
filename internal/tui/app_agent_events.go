@@ -27,10 +27,15 @@ func agentEventMayChangeKeyPool(msg agentEventMsg) bool {
 	}
 }
 
-const (
-	agentEventBatchMax          = 32
-	agentEventStreamBatchWindow = 16 * time.Millisecond
-)
+// agentEventBatchMax caps how many events one Cmd may deliver at once.
+const agentEventBatchMax = 32
+
+// agentEventStreamBatchWindow is how long a stream-text delta waits for its
+// siblings before the batch is delivered. It is a variable, not a constant, so
+// a test can widen it instead of racing it: the guarantee under test is that
+// paced deltas merge, and no assertion should depend on them landing inside
+// 16ms on a loaded machine.
+var agentEventStreamBatchWindow = 16 * time.Millisecond
 
 func isStreamTextDeltaEvent(evt agent.AgentEvent) bool {
 	switch evt.(type) {

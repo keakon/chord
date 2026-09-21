@@ -28,6 +28,16 @@ func TestWaitForAgentEventMicroBatchesStreamText(t *testing.T) {
 }
 
 func TestWaitForAgentEventReducesPacedStreamTextWakeups(t *testing.T) {
+	// Widen the window instead of racing it. The original pacing sent the
+	// deltas across most of a 16ms window, so scheduling jitter on a loaded
+	// machine pushed the tail past the deadline and failed the test for a
+	// timing reason rather than a real one. The guarantee is that paced
+	// deltas merge into one wakeup, so give the pacing room and assert it
+	// exactly.
+	restore := agentEventStreamBatchWindow
+	agentEventStreamBatchWindow = 500 * time.Millisecond
+	t.Cleanup(func() { agentEventStreamBatchWindow = restore })
+
 	const events = 5
 	ch := make(chan agent.AgentEvent, events)
 	ch <- agent.StreamTextEvent{Text: "0"}
@@ -35,7 +45,7 @@ func TestWaitForAgentEventReducesPacedStreamTextWakeups(t *testing.T) {
 
 	go func() {
 		for i := 1; i < events; i++ {
-			time.Sleep(agentEventStreamBatchWindow / events)
+			time.Sleep(2 * time.Millisecond)
 			ch <- agent.StreamTextEvent{Text: "x"}
 		}
 	}()
@@ -45,16 +55,8 @@ func TestWaitForAgentEventReducesPacedStreamTextWakeups(t *testing.T) {
 	if !ok {
 		t.Fatalf("waitForAgentEvent() = %T, want agentEventBatchMsg", msg)
 	}
-	if len(batch) <= 1 {
-		t.Fatalf("batch length = %d, want more than 1 paced stream event", len(batch))
-	}
-	if len(batch) >= events {
-		return
-	}
-	// Scheduling jitter can leave the final event just outside the micro-batch
-	// window, but the batch must still reduce wakeups for paced stream output.
-	if len(batch) < events-1 {
-		t.Fatalf("batch length = %d, want at least %d", len(batch), events-1)
+	if len(batch) != events {
+		t.Fatalf("batch length = %d, want all %d paced stream events merged into one wakeup", len(batch), events)
 	}
 }
 
