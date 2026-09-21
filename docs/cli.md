@@ -19,6 +19,7 @@ Without a command, `chord` runs the local TUI in the current directory.
 | `chord`                          | Run the local TUI                                                |
 | `chord auth [provider]`          | Sign in with a `preset: codex` OAuth provider                    |
 | `chord headless`                 | Run without TUI; stdio JSON control plane                        |
+| `chord acp`                      | Serve the Agent Client Protocol over stdio for ACP clients       |
 | `chord doctor config`            | Validate global/project config files                            |
 | `chord doctor models`            | Diagnose configured provider/model calls                         |
 | `chord doctor skills`            | Diagnose skill discovery, loading, and visibility                |
@@ -179,6 +180,21 @@ chord headless
 chord headless -d /path/to/repo --continue
 chord headless -d /path/to/repo --worktree feat-auth
 ```
+
+## `chord acp`
+
+Serve the Agent Client Protocol over stdio, so an ACP client such as Zed can drive Chord as its agent. stdout carries JSON-RPC only; Chord's logs and any stray stdio output go to `chord.log`.
+
+There are no flags: the client sends the working directory with `session/new`, and model, permissions, MCP servers, and session storage all come from Chord's own configuration. One process serves one session.
+
+### Examples
+
+```bash
+# Launched by the ACP client; running it by hand expects JSON-RPC on stdin
+chord acp
+```
+
+See [ACP Agent Mode](./acp.md) for client setup, what the client sees, and current limits.
 
 ## `chord doctor config`
 
@@ -518,3 +534,4 @@ go run ./cmd/chord/ --worktree feat-auth
 - [Paths](./paths.md)
 - [Environment variables](./environment.md)
 - [Headless](./headless.md)
+- [ACP Agent Mode](./acp.md)

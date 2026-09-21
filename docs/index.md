@@ -34,6 +34,7 @@ In one DeepSWE v1.1 task Chord finished first and cheapest (6m37s, $0.052); see 
 - [Hooks](./hooks.md): Automate notifications, checks, and tool-result processing
 - [Project Memory](./project-memory.md): Store durable, reviewable cross-session project memory
 - [Headless](./headless.md): Control Chord from scripts or another interface
+- [ACP Agent Mode](./acp.md): Serve the Agent Client Protocol so ACP clients can drive Chord
 
 ## Configuration examples
 

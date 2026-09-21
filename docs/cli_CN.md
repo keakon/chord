@@ -19,6 +19,7 @@ chord [全局 flag] [命令] [命令 flag] [参数]
 | `chord`                           | 启动本地 TUI                                                      |
 | `chord auth [provider]`           | 用 `preset: codex` provider 登录 OAuth                            |
 | `chord headless`                  | 无 TUI 启动，stdio JSON 控制面                                    |
+| `chord acp`                       | 为 ACP 客户端提供 stdio 版 Agent Client Protocol 服务             |
 | `chord doctor config`             | 校验全局 / 项目配置文件                                            |
 | `chord doctor models`             | 诊断已配置的 provider/model 调用链                                |
 | `chord doctor skills`             | 诊断 skill 的发现、加载与可见性                                    |
@@ -179,6 +180,21 @@ chord headless
 chord headless -d /path/to/repo --continue
 chord headless -d /path/to/repo --worktree feat-auth
 ```
+
+## `chord acp`
+
+通过 stdio 提供 Agent Client Protocol，让 Zed 这类 ACP 客户端把 Chord 当成自己的 agent 调用。stdout 只跑 JSON-RPC，Chord 的日志和误写到 stdio 的内容都进 `chord.log`。
+
+没有命令行参数：工作目录由客户端在 `session/new` 里给出，模型、权限、MCP server 与会话存储都来自 Chord 自己的配置。一个进程只服务一个会话。
+
+### 示例
+
+```bash
+# 由 ACP 客户端拉起；手工运行需要自己在 stdin 上发 JSON-RPC
+chord acp
+```
+
+客户端配置、客户端能看到什么、以及当前限制见 [ACP Agent 模式](./acp_CN.md)。
 
 ## `chord doctor config`
 
@@ -518,3 +534,4 @@ go run ./cmd/chord/ --worktree feat-auth
 - [目录与路径](./paths_CN.md)
 - [环境变量](./environment_CN.md)
 - [Headless](./headless_CN.md)
+- [ACP Agent 模式](./acp_CN.md)

@@ -43,34 +43,37 @@ const (
 // caller must call Close() to release resources (log file, MCP connections,
 // agent).
 type AppContext struct {
-	Ctx               context.Context
-	Cancel            context.CancelFunc
-	ProjectRoot       string
-	ChordDir          string
-	ConfigHome        string
-	PathLocator       *config.PathLocator
-	ProjectLocator    *config.ProjectLocator
-	SessionDir        string
-	Cfg               *config.Config
-	GlobalCfg         *config.Config
-	ProjectCfg        *config.Config
-	Auth              config.AuthConfig
-	LLMClient         *llm.Client
-	ProviderName      string
-	ModelID           string
-	ProviderCfg       *llm.ProviderConfig // shared, safe for per-session reuse
-	LLMProvider       llm.Provider        // shared HTTP transport
-	ModelCfg          config.ModelConfig  // resolved model limits
-	ProviderCache     *providerCache      // per-provider config cache (key cooldown shared across sessions)
-	CtxMgr            *ctxmgr.Manager
-	Registry          *tools.Registry
-	HookEngine        hook.Manager
-	LSPManager        *lsp.Manager
-	MCPMgr            *mcp.Manager
-	MCPCatalog        *mcp.Catalog
-	MCPConfigs        []mcp.ServerConfig
-	RuntimeResources  *runtimeResourceController
-	MainAgent         *agent.MainAgent
+	Ctx              context.Context
+	Cancel           context.CancelFunc
+	ProjectRoot      string
+	ChordDir         string
+	ConfigHome       string
+	PathLocator      *config.PathLocator
+	ProjectLocator   *config.ProjectLocator
+	SessionDir       string
+	Cfg              *config.Config
+	GlobalCfg        *config.Config
+	ProjectCfg       *config.Config
+	Auth             config.AuthConfig
+	LLMClient        *llm.Client
+	ProviderName     string
+	ModelID          string
+	ProviderCfg      *llm.ProviderConfig // shared, safe for per-session reuse
+	LLMProvider      llm.Provider        // shared HTTP transport
+	ModelCfg         config.ModelConfig  // resolved model limits
+	ProviderCache    *providerCache      // per-provider config cache (key cooldown shared across sessions)
+	CtxMgr           *ctxmgr.Manager
+	Registry         *tools.Registry
+	HookEngine       hook.Manager
+	LSPManager       *lsp.Manager
+	MCPMgr           *mcp.Manager
+	MCPCatalog       *mcp.Catalog
+	MCPConfigs       []mcp.ServerConfig
+	RuntimeResources *runtimeResourceController
+	MainAgent        *agent.MainAgent
+	// ACPMode is set when this process serves the Agent Client Protocol.
+	// Question has no client bridge there, so the tool fails instead of waiting.
+	ACPMode           bool
 	LoadedSkills      []*skill.Meta
 	LoadedCommands    []*command.Definition
 	LogWriter         *rotatingLogFile
@@ -361,6 +364,10 @@ func setupInitialLLMClient(
 	}, nil
 }
 
+// chordLogFileName is the file inside the log directory that every entrypoint
+// writes to; the ACP stdout guard redirects fd 1 into the same file.
+const chordLogFileName = "chord.log"
+
 // initApp performs the shared initialization sequence used by local TUI and
 // headless control-plane entrypoints. It sets up: signal context, project root, logging, config,
 // auth, LLM client, session directory, context manager, tool registry, MCP,
@@ -370,7 +377,7 @@ func setupInitialLLMClient(
 //
 // The caller must call ac.Close() when done (typically via defer).
 func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*AppContext, error) {
-	ac := &AppContext{}
+	ac := &AppContext{ACPMode: mode == "acp"}
 
 	// Signal handling and process identity.
 	ac.Ctx, ac.Cancel = signal.NotifyContext(
@@ -418,7 +425,7 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	logCtx := logContext{PWD: projectRoot, PID: os.Getpid()}
 	ac.logCtx = logCtx
 
-	logPath := filepath.Join(pathLocator.LogsDir, "chord.log")
+	logPath := filepath.Join(pathLocator.LogsDir, chordLogFileName)
 	logWriter, logErr := newRotatingLogFile(logPath)
 	if logErr == nil {
 		ac.LogWriter = logWriter

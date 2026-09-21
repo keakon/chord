@@ -34,10 +34,13 @@ type rotatingLogFile struct {
 	file            *os.File
 	bytesSinceCheck int64
 	stderrRedirect  *stderrRedirect
-	closed          bool
-	stopOnce        sync.Once
-	stopCh          chan struct{}
-	doneCh          chan struct{}
+	// stdoutRedirect keeps the ACP stdout guard pointed at the live log: it
+	// moves fd 1 the same way stderr is moved, and it is nil outside ACP mode.
+	stdoutRedirect *stdoutRedirect
+	closed         bool
+	stopOnce       sync.Once
+	stopCh         chan struct{}
+	doneCh         chan struct{}
 }
 
 func defaultRotatingLogOptions() rotatingLogOptions {
@@ -102,6 +105,12 @@ func (w *rotatingLogFile) SetStderrRedirect(r *stderrRedirect) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.stderrRedirect = r
+}
+
+func (w *rotatingLogFile) SetStdoutRedirect(r *stdoutRedirect) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.stdoutRedirect = r
 }
 
 func (w *rotatingLogFile) Write(p []byte) (int, error) {
@@ -260,13 +269,23 @@ func (w *rotatingLogFile) reopenLocked() error {
 	oldFile := w.file
 	w.file = newFile
 	w.bytesSinceCheck = 0
-	if w.stderrRedirect != nil {
-		_ = w.stderrRedirect.Rebind(newFile)
-	}
+	w.rebindRedirectsLocked(newFile)
 	if oldFile != nil {
 		_ = oldFile.Close()
 	}
 	return nil
+}
+
+// rebindRedirectsLocked points every installed redirect at the file the writer
+// uses from now on, so fd 1 and fd 2 follow rotation instead of staying on a
+// file the writer has already closed.
+func (w *rotatingLogFile) rebindRedirectsLocked(newFile *os.File) {
+	if w.stderrRedirect != nil {
+		_ = w.stderrRedirect.Rebind(newFile)
+	}
+	if w.stdoutRedirect != nil {
+		_ = w.stdoutRedirect.Rebind(newFile)
+	}
 }
 
 func (w *rotatingLogFile) rotateLocked() error {
@@ -299,9 +318,7 @@ func (w *rotatingLogFile) rotateLocked() error {
 	}
 	w.file = newFile
 	w.bytesSinceCheck = 0
-	if w.stderrRedirect != nil {
-		_ = w.stderrRedirect.Rebind(newFile)
-	}
+	w.rebindRedirectsLocked(newFile)
 	if oldFile != nil {
 		_ = oldFile.Close()
 	}

@@ -56,14 +56,14 @@ func createRuntime(ac *AppContext) (*Runtime, error) {
 
 	confirmTimeout := time.Duration(ac.Cfg.ConfirmTimeout) * time.Second
 	questionTimeout := time.Duration(ac.Cfg.QuestionTimeout) * time.Second
-	wireMainAgentRuntime(ac.Ctx, ac.MainAgent, ac.Registry, confirmTimeout, questionTimeout, ac.Cfg.Context.Compaction.ModelDriven)
+	wireMainAgentRuntime(ac.Ctx, ac.MainAgent, ac.Registry, confirmTimeout, questionTimeout, ac.Cfg.Context.Compaction.ModelDriven, ac.ACPMode)
 	startRuntimeMCP(ac)
 	startRuntimeWarmups(ac)
 
 	return &Runtime{Agent: ac.MainAgent, powerMgr: powerMgr}, nil
 }
 
-func wireMainAgentRuntime(ctx context.Context, mainAgent *agent.MainAgent, reg *tools.Registry, confirmTimeout, questionTimeout time.Duration, modelDrivenCompaction bool) {
+func wireMainAgentRuntime(ctx context.Context, mainAgent *agent.MainAgent, reg *tools.Registry, confirmTimeout, questionTimeout time.Duration, modelDrivenCompaction, acpMode bool) {
 	mainAgent.SetConfirmFunc(func(ctx context.Context, toolName, args string, needsApproval, alreadyAllowed, needsApprovalRules, alreadyAllowedRules []string) (agent.ConfirmResponse, error) {
 		resp, err := mainAgent.AwaitConfirmWithRuleContext(ctx, toolName, args, confirmTimeout, needsApproval, alreadyAllowed, needsApprovalRules, alreadyAllowedRules)
 		if err != nil {
@@ -72,9 +72,18 @@ func wireMainAgentRuntime(ctx context.Context, mainAgent *agent.MainAgent, reg *
 		return resp, nil
 	})
 
-	reg.Register(tools.NewQuestionTool(func(ctx context.Context, questions []tools.QuestionItem) ([]tools.QuestionAnswer, error) {
-		return mainAgent.AskQuestions(ctx, questions, questionTimeout)
-	}))
+	if acpMode {
+		// ACP does not bridge QuestionRequestEvent, and question_timeout 0
+		// waits forever. Failing the tool keeps session/prompt from hanging
+		// on a question the client cannot see or answer.
+		reg.Register(tools.NewQuestionTool(func(context.Context, []tools.QuestionItem) ([]tools.QuestionAnswer, error) {
+			return nil, errors.New("question is not available over ACP")
+		}))
+	} else {
+		reg.Register(tools.NewQuestionTool(func(ctx context.Context, questions []tools.QuestionItem) ([]tools.QuestionAnswer, error) {
+			return mainAgent.AskQuestions(ctx, questions, questionTimeout)
+		}))
+	}
 	reg.Register(tools.NewDoneTool())
 	// Record the capability on the agent exactly when the tool registration
 	// decision is made: modelDrivenCompactionEnabled gates the Long-session
