@@ -41,6 +41,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- Slash-command completion now runs the highlighted command after the list shrinks. Typing more of the prefix used to leave the selection index on the longer list, so the dropdown highlighted the last remaining row while `Enter` ran the first match — typically `/resume` instead of the custom command you had moved to.
 - A question answer that arrives after the question's deadline is no longer accepted: the question closes as `no_response` and the late submission is rejected with an error, instead of letting a stale dialog report a success Chord never honored.
 - A question dialog no longer decides its own fate when the countdown hits zero. It closes only when Chord reports the request resolved, so a question that already expired while queued behind another dialog is dropped instead of being shown again, and `Esc` or a submission from one question can no longer resolve a different one.
 - Sending a new message while a question is pending in headless now supersedes that question deterministically: the message is accepted first, then the question closes with a `question_resolved` (`superseded`) event, so a resumed tool cannot slip a model request ahead of your message.

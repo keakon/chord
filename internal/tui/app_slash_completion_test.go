@@ -49,6 +49,49 @@ func TestSlashCompletionEnterCompletesSelectedCommandAndSubmitsIt(t *testing.T) 
 	}
 }
 
+func TestSlashCompletionEnterSubmitsHighlightedCommandAfterFilter(t *testing.T) {
+	backend := &sessionControlAgent{}
+	m := NewModel(backend)
+	m.mode = ModeInsert
+	m.SetCustomCommands([]CustomCommand{{Cmd: "/review", Desc: "review changes"}})
+	m.input.SetValue("/")
+
+	matches := m.getSlashCompletions("/")
+	if len(matches) < 2 || matches[len(matches)-1].Cmd != "/review" {
+		t.Fatalf("full matches = %#v, want custom /review last", matches)
+	}
+
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyUp}))
+	if m.slashCompleteSelected != len(matches)-1 {
+		t.Fatalf("selected after Up = %d, want %d", m.slashCompleteSelected, len(matches)-1)
+	}
+
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'r', Text: "r"}))
+	if got := m.input.Value(); got != "/r" {
+		t.Fatalf("input after r = %q, want /r", got)
+	}
+	filtered := m.getSlashCompletions("/r")
+	highlighted := filtered[clampSlashCompleteSelected(m.slashCompleteSelected, len(filtered))]
+	if highlighted.Cmd != "/review" {
+		t.Fatalf("highlighted = %q, want /review (matches %#v, selected %d)", highlighted.Cmd, filtered, m.slashCompleteSelected)
+	}
+
+	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+
+	if backend.resumeCalls != 0 {
+		t.Fatalf("ResumeSession() calls = %d, want 0", backend.resumeCalls)
+	}
+	if len(backend.sentMessages) != 0 {
+		t.Fatalf("sentMessages = %#v, want none", backend.sentMessages)
+	}
+	if len(backend.sentMultipart) != 1 || len(backend.sentMultipart[0]) != 1 || backend.sentMultipart[0][0].Text != "/review" {
+		t.Fatalf("sent parts = %#v, want [/review]", backend.sentMultipart)
+	}
+	if got := m.input.Value(); got != "" {
+		t.Fatalf("input value after Enter = %q, want empty", got)
+	}
+}
+
 func TestSlashCompletionEnterSubmitsExactCommand(t *testing.T) {
 	backend := &sessionControlAgent{}
 	m := NewModel(backend)

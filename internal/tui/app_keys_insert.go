@@ -23,16 +23,28 @@ func localShellCommandFromParts(display string, parts []message.ContentPart) str
 	return userBlockTextFromParts(parts, display)
 }
 
+// clampSlashCompleteSelected maps a stale completion index onto the current
+// match list. Filtering the prefix does not reset the index, so an index left
+// over from a longer list lands on the last row — the row the dropdown
+// highlights — rather than falling back to the first match.
+func clampSlashCompleteSelected(selected, n int) int {
+	if n <= 0 {
+		return 0
+	}
+	if selected >= n {
+		return n - 1
+	}
+	if selected < 0 {
+		return 0
+	}
+	return selected
+}
+
 func (m *Model) applySelectedSlashCompletion(matches []slashCommand) bool {
 	if len(matches) == 0 {
 		return false
 	}
-	if m.slashCompleteSelected >= len(matches) {
-		m.slashCompleteSelected = len(matches) - 1
-	}
-	if m.slashCompleteSelected < 0 {
-		m.slashCompleteSelected = 0
-	}
+	m.slashCompleteSelected = clampSlashCompleteSelected(m.slashCompleteSelected, len(matches))
 	sel := matches[m.slashCompleteSelected]
 	m.input.SetDisplayValueAndPastes(sel.Cmd+" ", nil, 0)
 	m.input.CursorEnd()
@@ -223,10 +235,11 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 		matches := m.getSlashCompletions(currentValue)
 		if len(matches) > 0 {
 			trimmedInput := strings.TrimSpace(currentValue)
-			selected := matches[0]
-			if m.slashCompleteSelected >= 0 && m.slashCompleteSelected < len(matches) {
-				selected = matches[m.slashCompleteSelected]
-			}
+			// Clamp the same way the dropdown does. Typing narrows the list
+			// without resetting the index, and an out-of-range index is the
+			// last highlighted row, not "no selection" (which would submit
+			// matches[0] instead of the highlighted command).
+			selected := matches[clampSlashCompleteSelected(m.slashCompleteSelected, len(matches))]
 			if !strings.EqualFold(trimmedInput, strings.TrimSpace(selected.Cmd)) {
 				m.input.SetDisplayValueAndPastes(selected.Cmd, nil, 0)
 				currentValue = m.input.Value()

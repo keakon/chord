@@ -277,13 +277,7 @@ func (m *Model) renderSlashCompletionDropdown(value string) string {
 	}
 	maxVisible := min(8, len(matches))
 
-	sel := m.slashCompleteSelected
-	if sel >= len(matches) {
-		sel = len(matches) - 1
-	}
-	if sel < 0 {
-		sel = 0
-	}
+	sel := clampSlashCompleteSelected(m.slashCompleteSelected, len(matches))
 	start := 0
 	if maxVisible > 0 && sel >= maxVisible {
 		start = sel - maxVisible + 1
