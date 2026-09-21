@@ -107,8 +107,17 @@ func (p toolExecutionPipeline) effectiveToolBaseDir() string {
 // started journal record before execution. It skips calls in the read-only
 // concurrency class; TodoWrite is journaled on the normal path, while its
 // side-effect-free speculative preview is journaled only when promoted.
+//
+// A read-only tool that consumes state (see tools.IsConsumingRead) still needs a
+// record: re-running it after a crash would report success while returning
+// nothing, so the journal keeps that retry classified outcome_unknown instead of
+// "never started, safe to retry".
 func toolActivityJournalRequired(registry *tools.Registry, tc message.ToolCall) bool {
-	return tools.ConcurrencyClassForTool(registry, tc.Name, llm.UnwrapToolArgs(tc.Args)) != tools.ToolConcurrencyClassReadOnly
+	name := tools.NormalizeName(tc.Name)
+	if tools.IsConsumingRead(name) {
+		return true
+	}
+	return tools.ConcurrencyClassForTool(registry, name, llm.UnwrapToolArgs(tc.Args)) != tools.ToolConcurrencyClassReadOnly
 }
 
 // recordToolActivityStarted appends a started journal record for non-read-only

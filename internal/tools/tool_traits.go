@@ -47,6 +47,16 @@ func IsReadLike(name string) bool {
 	}
 }
 
+// IsConsumingRead reports whether a read-only tool consumes state as it runs, so
+// a crash between its execution and its persisted result cannot be treated as
+// "never started, safe to retry". job_output is the only such read today: it
+// advances the calling agent's output cursor and can claim the job's completion
+// notification, so a replay returns an empty window instead of the output the
+// interrupted call had already taken.
+func IsConsumingRead(name string) bool {
+	return NormalizeName(name) == NameJobOutput
+}
+
 // IsFileMutation reports whether the tool mutates files in the workspace.
 func IsFileMutation(name string) bool {
 	switch NormalizeName(name) {

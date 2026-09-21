@@ -109,9 +109,10 @@ type ConcurrencyAwareTool interface {
 //
 // Declaring this interface is not enough to merge calls: the batch builder also
 // consults ConcurrencyAwareTool, so an implementor that leaves the policy at the
-// exclusive default is still a serialization boundary while being skipped by the
-// started journal. Implement both, with the policy scoped to what the
-// invocation touches.
+// exclusive default is still a serialization boundary. The started-journal skip
+// is not automatic either: a read that consumes state (IsConsumingRead) is
+// journaled so a crash cannot replay what it already took. Implement both, with
+// the policy scoped to what the invocation touches.
 type ConcurrencySafeReadOnlyTool interface {
 	Tool
 	ConcurrencySafeReadOnly(args json.RawMessage) bool

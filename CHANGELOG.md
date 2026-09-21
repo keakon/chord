@@ -72,6 +72,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - GPT reasoning summaries now show each generated section heading (`**Heading**`) on its own line instead of gluing it to the end of the previous paragraph, and a summary part that carries only such a heading — sometimes followed by an empty HTML comment — no longer shows up as an empty `Thinking` card.
 - Context-pressure notices no longer stack two prompts on one request: switching to a model whose reminder line and threshold the current context already crosses attaches only the highest-pressure notice — the grace countdown, or the externalization warning on the request that starts the compaction — instead of the sticky reminder plus the switch-triggered warning.
 - A message sent while context compaction was running no longer appears twice in the transcript: when the compaction rewrite redraws the transcript first, that message reuses the card it already drew instead of getting a second one.
+- A background job read (`job_output`) is now recorded as started before it runs, so an interrupted session reports that read as an unknown outcome instead of assuming it never happened and replaying it. A replay misleads here: the read consumes the job's new output and claims its completion notice, so the retry returns an empty window that looks like a successful fresh read while the output the interrupted call had already taken is gone.
 
 ## 0.8.1 - 2026-09-16
 
