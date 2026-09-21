@@ -878,7 +878,10 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 			state.cb(message.StreamDelta{Type: message.StreamDeltaThinkingEnd})
 		}
 		if done.Text != "" {
-			state.resp.ThinkingBlocks = append(state.resp.ThinkingBlocks, message.ThinkingBlock{Thinking: done.Text})
+			// A backend may flatten the whole summary into this one part and glue
+			// the section headings together; restore a paragraph break per heading
+			// before the text becomes a thinking block.
+			state.resp.ThinkingBlocks = append(state.resp.ThinkingBlocks, message.ThinkingBlock{Thinking: normalizeReasoningSummaryHeadings(done.Text)})
 		}
 		return nil, nil, false, nil
 
