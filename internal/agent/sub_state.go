@@ -149,7 +149,11 @@ func (s *SubAgent) enterWaitingDescendant(reason string) {
 	s.parent.parkSubAgent(s.instanceID)
 }
 
-func (s *SubAgent) appendCompleteToolResult(callID, resultContent string) {
+// appendCompleteToolResult records the engine's answer to a Complete call.
+// The status is explicit per call site: a deferred delivery was accepted, a
+// rejected one was not, and the card (live and after restore) must agree with
+// the transcript instead of claiming success for both.
+func (s *SubAgent) appendCompleteToolResult(callID, resultContent string, status ToolResultStatus) {
 	if strings.TrimSpace(callID) == "" {
 		return
 	}
@@ -157,6 +161,7 @@ func (s *SubAgent) appendCompleteToolResult(callID, resultContent string) {
 		Role:       "tool",
 		ToolCallID: callID,
 		Content:    resultContent,
+		ToolStatus: string(status),
 	}
 	s.ctxMgr.Append(toolMsg)
 	s.persistMessageAsync(toolMsg, "Complete tool result", nil)
@@ -165,7 +170,7 @@ func (s *SubAgent) appendCompleteToolResult(callID, resultContent string) {
 		CallID:  callID,
 		Name:    tools.NameComplete,
 		Result:  resultContent,
-		Status:  ToolResultStatusSuccess,
+		Status:  status,
 		AgentID: s.instanceID,
 	}
 	s.parent.emitToTUI(event)

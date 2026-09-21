@@ -542,7 +542,7 @@ func (s *SubAgent) handleToolResult(result *toolResult) { // Turn isolation: dis
 		s.pendingComplete = nil
 		s.pendingCompleteCallID = ""
 		if err := s.finishCompletion(callID, complete); err != nil {
-			s.appendCompleteToolResult(callID, "Completion rejected: "+err.Error())
+			s.appendCompleteToolResult(callID, "Completion rejected: "+err.Error(), ToolResultStatusError)
 		}
 		return
 	}

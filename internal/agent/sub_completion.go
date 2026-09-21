@@ -7,7 +7,7 @@ import "fmt"
 // joins; dropping optional metadata must not bypass it.
 func (s *SubAgent) finishCompletion(callID string, result *AgentResult) error {
 	if pending := s.takePendingUserMessagesForContinuation(); len(pending) > 0 {
-		s.appendCompleteToolResult(callID, "Completion deferred: received new user input before completion.")
+		s.appendCompleteToolResult(callID, "Completion deferred: received new user input before completion.", ToolResultStatusSuccess)
 		s.clearPendingCompleteIntent()
 		s.drainContextAppendsBeforeTurn()
 		s.appendPendingUserMessages(pending)
@@ -15,14 +15,14 @@ func (s *SubAgent) finishCompletion(callID string, result *AgentResult) error {
 		return nil
 	}
 	if outstanding := s.parent.outstandingJoinChildTaskIDs(s.taskID); len(outstanding) > 0 {
-		s.appendCompleteToolResult(callID, deferredCompleteResult(len(outstanding)))
+		s.appendCompleteToolResult(callID, deferredCompleteResult(len(outstanding)), ToolResultStatusSuccess)
 		s.setPendingCompleteIntent(result)
 		s.enterWaitingDescendant(deferredCompleteResult(len(outstanding)))
 		return nil
 	}
 	s.clearPendingCompleteIntent()
 	result = s.enrichCompletionResult(result)
-	s.appendCompleteToolResult(callID, result.Summary)
+	s.appendCompleteToolResult(callID, result.Summary, ToolResultStatusSuccess)
 	s.sendEvent(Event{Type: EventAgentDone, Payload: result})
 	return nil
 }
@@ -63,7 +63,7 @@ func (s *SubAgent) rejectInvalidCompleteArguments(callID string, cause error, de
 		return
 	}
 	if s.completionRecoveryBudgetAvailable() {
-		s.appendCompleteToolResult(callID, "Completion rejected: "+cause.Error())
+		s.appendCompleteToolResult(callID, "Completion rejected: "+cause.Error(), ToolResultStatusError)
 		s.appendPendingUserMessage(pendingUserMessage{Content: fmt.Sprintf("Completion was rejected: %v. Call Complete again with corrected, valid arguments.", cause)})
 		s.asyncCallLLMWithFlightMarked(s.turn, s.ctxMgr.Snapshot())
 		return
@@ -78,6 +78,6 @@ func (s *SubAgent) rejectInvalidCompleteArguments(callID string, cause error, de
 			cause = err
 		}
 	}
-	s.appendCompleteToolResult(callID, "Completion rejected: "+cause.Error())
+	s.appendCompleteToolResult(callID, "Completion rejected: "+cause.Error(), ToolResultStatusError)
 	s.sendEvent(Event{Type: EventAgentError, Payload: fmt.Errorf("completion was rejected after retry: %w", cause)})
 }

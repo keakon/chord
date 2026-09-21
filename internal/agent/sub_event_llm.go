@@ -431,7 +431,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 			return
 		}
 		if err := s.finishCompletion(taskCompleteCallID, taskComplete); err != nil {
-			s.appendCompleteToolResult(taskCompleteCallID, "Completion rejected: "+err.Error())
+			s.appendCompleteToolResult(taskCompleteCallID, "Completion rejected: "+err.Error(), ToolResultStatusError)
 		}
 		return
 	}

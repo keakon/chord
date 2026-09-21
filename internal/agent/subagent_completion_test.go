@@ -951,6 +951,45 @@ func TestMainMailboxAndSnapshotDoNotDoubleBillSameCompletion(t *testing.T) {
 	}
 }
 
+// assertCompleteCardStatus pins both surfaces of a Complete card to the same
+// terminal status: the live ToolResultEvent the TUI renders, and the persisted
+// ToolStatus a restored session rebuilds the card from. A rejected Complete
+// that still reports success is the regression this guards.
+func assertCompleteCardStatus(t *testing.T, parent *MainAgent, sub *SubAgent, callID string, want ToolResultStatus) {
+	t.Helper()
+	persisted, found := "", false
+	for _, msg := range sub.ctxMgr.Snapshot() {
+		if msg.Role == "tool" && msg.ToolCallID == callID {
+			persisted, found = msg.ToolStatus, true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("no persisted tool result for Complete call %q", callID)
+	}
+	if got := ToolResultStatus(persisted); got != want {
+		t.Fatalf("persisted Complete status = %q, want %q", got, want)
+	}
+	for {
+		select {
+		case evt := <-parent.outputCh:
+			tre, ok := evt.(ToolResultEvent)
+			if !ok || tre.CallID != callID {
+				continue
+			}
+			if tre.Name != tools.NameComplete {
+				t.Fatalf("Complete tool result event name = %q, want %q", tre.Name, tools.NameComplete)
+			}
+			if tre.Status != want {
+				t.Fatalf("ToolResultEvent.Status = %q, want %q", tre.Status, want)
+			}
+			return
+		default:
+			t.Fatalf("no ToolResultEvent for Complete call %q reached the TUI output channel", callID)
+		}
+	}
+}
+
 // The following completion-rejection tests cover rejectInvalidCompleteArguments
 // and the degraded typed-result delivery, which remain live code.
 
@@ -1014,6 +1053,7 @@ func TestSubAgentInvalidCompleteGetsRejectedToolResultAndBoundedFollowUp(t *test
 			if !foundRejected {
 				t.Fatalf("missing rejected tool result containing %q in %#v", tc.wantReason, msgs)
 			}
+			assertCompleteCardStatus(t, parent, sub, "call-1", ToolResultStatusError)
 
 			// The follow-up request carried the fix-it nudge for the model.
 			seen, _ := provider.snapshot()
@@ -1072,6 +1112,10 @@ func TestSubAgentInvalidCompleteRetryHasOwnBudgetAfterPureTextRecovery(t *testin
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for corrected Complete")
 	}
+	// The rejected attempt is an error card; the corrected delivery it earned
+	// is a success card.
+	assertCompleteCardStatus(t, parent, sub, "call-1", ToolResultStatusError)
+	assertCompleteCardStatus(t, parent, sub, "call-2", ToolResultStatusSuccess)
 }
 
 func TestSubAgentCoReturnedInvalidCompleteRejectedAfterSiblingsSettle(t *testing.T) {
@@ -1123,6 +1167,7 @@ func TestSubAgentCoReturnedInvalidCompleteRejectedAfterSiblingsSettle(t *testing
 	if !foundRejected {
 		t.Fatalf("missing rejected tool result in %#v", msgs)
 	}
+	assertCompleteCardStatus(t, parent, sub, "call-1", ToolResultStatusError)
 }
 
 func TestSubAgentRepeatedInvalidCompleteFailsAfterRecoveryBudgetSpent(t *testing.T) {
@@ -1143,6 +1188,7 @@ func TestSubAgentRepeatedInvalidCompleteFailsAfterRecoveryBudgetSpent(t *testing
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for bounded recovery failure")
 	}
+	assertCompleteCardStatus(t, parent, sub, "call-1", ToolResultStatusError)
 }
 
 // TestSubAgentDeferredCompletionRetainsStructuredEnvelope pins that a
@@ -1183,6 +1229,8 @@ func TestSubAgentDeferredCompletionRetainsStructuredEnvelope(t *testing.T) {
 	if !slices.Contains(pending.Envelope.KnownRisks, "manual QA") || !slices.Contains(pending.Envelope.FollowUpRecommended, "review") {
 		t.Fatalf("pending envelope = %#v, want the declared risks and follow-ups preserved", pending.Envelope)
 	}
+	// Delivery was accepted and only deferred, so the card stays a success.
+	assertCompleteCardStatus(t, parent, sub, "call-1", ToolResultStatusSuccess)
 }
 
 func TestCoordinationSnapshotDoesNotDeadlockOnWaitingDescendant(t *testing.T) {
@@ -1260,4 +1308,7 @@ func TestUnpairedTypedResultSettlesDegradedAfterRecoveryBudgetSpent(t *testing.T
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for the degraded completion")
 	}
+	// Degraded delivery is still an accepted completion, so its card is a
+	// success: only a rejected Complete is an error.
+	assertCompleteCardStatus(t, parent, sub, "call-1", ToolResultStatusSuccess)
 }
