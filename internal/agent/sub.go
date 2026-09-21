@@ -1493,13 +1493,7 @@ func (e *subAgentEventSender) SendAgentEvent(eventType, sourceID string, payload
 	if s == nil {
 		return
 	}
-	switch eventType {
-	case EventEscalate:
-		reason, _ := payload.(string)
-		if !s.setState(SubAgentStateWaitingMain, reason) {
-			log.Warnf("sub-agent escalation state transition rejected agent=%v", s.instanceID)
-		}
-	case EventAgentNotify:
+	if eventType == EventAgentNotify {
 		msg, _ := payload.(string)
 		if strings.TrimSpace(msg) != "" {
 			if !s.updateProgress(msg) {
