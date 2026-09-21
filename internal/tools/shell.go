@@ -255,7 +255,16 @@ func longRunningGitSubcommand(args []string) bool {
 
 func (ShellTool) Name() string { return NameShell }
 
-func (ShellTool) ConcurrencyPolicy(_ json.RawMessage) ConcurrencyPolicy {
+// ConcurrencyPolicy keeps every invocation on the one process resource —
+// shells share cwd, environment, and process state — while letting only an
+// allowlisted side-effect-free command be scheduled as a read. A mutating
+// command stays exclusive and aborts its batch siblings on error; a read-only
+// command batches with other reads instead of acting as a serialization
+// boundary.
+func (ShellTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
+	if shellReadOnlyCommandAllowed(args) {
+		return ConcurrencyPolicy{Resource: "process:shell", Mode: ConcurrencyModeRead}
+	}
 	return ConcurrencyPolicy{
 		Resource:             "process:shell",
 		Mode:                 ConcurrencyModeExclusive,

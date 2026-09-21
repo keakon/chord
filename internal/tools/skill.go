@@ -141,6 +141,12 @@ func (SkillTool) IsReadOnly() bool { return true }
 
 func (SkillTool) ConcurrencySafeReadOnly(json.RawMessage) bool { return true }
 
+// ConcurrencyPolicy keeps a skill load in the read-only class: it reads skill
+// files and mutates nothing, so it must not serialize a turn.
+func (SkillTool) ConcurrencyPolicy(json.RawMessage) ConcurrencyPolicy {
+	return ConcurrencyPolicy{Resource: "tool:skill", Mode: ConcurrencyModeRead}
+}
+
 func substituteSkillPlaceholders(content, rootDir, args string) string {
 	content = strings.ReplaceAll(content, "${CHORD_SKILL_DIR}", rootDir)
 	content = strings.ReplaceAll(content, "${CHORD_SKILL_ARGS}", args)

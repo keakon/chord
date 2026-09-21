@@ -120,3 +120,70 @@ func TestFinalizeStreamingToolCardsSkipsValidCallsAndDiscardsDeferredInvalid(t *
 		t.Fatalf("discard event = %#v", ev)
 	}
 }
+
+func TestBuildToolExecutionBatchesMergesJobReadsWithReadOnlySiblings(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.Register(tools.JobOutputTool{})
+	registry.Register(tools.JobListTool{})
+	registry.Register(tools.ReadTool{})
+	calls := []message.ToolCall{
+		{ID: "1", Name: tools.NameJobOutput, Args: json.RawMessage(`{"job_id":"job-1"}`)},
+		{ID: "2", Name: tools.NameRead, Args: json.RawMessage(`{"path":"README.md"}`)},
+		{ID: "3", Name: tools.NameJobList, Args: json.RawMessage(`{}`)},
+		{ID: "4", Name: tools.NameJobOutput, Args: json.RawMessage(`{"job_id":"job-2"}`)},
+	}
+
+	batches := buildToolExecutionBatches(registry, calls)
+	if len(batches) != 1 {
+		t.Fatalf("len(batches) = %d, want 1: a waiting job read must not hold back read-only siblings", len(batches))
+	}
+	if got := len(batches[0].Calls); got != len(calls) {
+		t.Fatalf("batch calls = %d, want %d", got, len(calls))
+	}
+}
+
+func TestBuildToolExecutionBatchesMergesSameJobReads(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.Register(tools.JobOutputTool{})
+	calls := []message.ToolCall{
+		{ID: "1", Name: tools.NameJobOutput, Args: json.RawMessage(`{"job_id":"job-1"}`)},
+		{ID: "2", Name: tools.NameJobOutput, Args: json.RawMessage(`{"job_id":"job-1","wait":"exit"}`)},
+	}
+
+	// Each call claims its own window from the job's shared cursor, so two reads
+	// of one job stay independent instead of serializing the turn.
+	batches := buildToolExecutionBatches(registry, calls)
+	if len(batches) != 1 || len(batches[0].Calls) != 2 {
+		t.Fatalf("batches = %#v, want one batch of two same-job reads", batches)
+	}
+}
+
+func TestBuildToolExecutionBatchesMergesReadOnlyShellCommand(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.Register(tools.NewShellTool("bash"))
+	registry.Register(tools.ReadTool{})
+	calls := []message.ToolCall{
+		{ID: "1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"README.md"}`)},
+		{ID: "2", Name: tools.NameShell, Args: json.RawMessage(`{"command":"git status"}`)},
+	}
+
+	batches := buildToolExecutionBatches(registry, calls)
+	if len(batches) != 1 || len(batches[0].Calls) != 2 {
+		t.Fatalf("batches = %#v, want one batch for an allowlisted read-only command", batches)
+	}
+}
+
+func TestBuildToolExecutionBatchesKeepsMutatingShellAsBoundary(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.Register(tools.NewShellTool("bash"))
+	registry.Register(tools.ReadTool{})
+	calls := []message.ToolCall{
+		{ID: "1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"go test ./..."}`)},
+		{ID: "2", Name: tools.NameRead, Args: json.RawMessage(`{"path":"README.md"}`)},
+	}
+
+	batches := buildToolExecutionBatches(registry, calls)
+	if len(batches) != 2 {
+		t.Fatalf("len(batches) = %d, want 2: a mutating shell may touch any path and stays a boundary", len(batches))
+	}
+}

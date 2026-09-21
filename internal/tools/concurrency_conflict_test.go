@@ -70,16 +70,20 @@ func (fakeReadOnlyTool) Execute(context.Context, json.RawMessage) (string, error
 }
 func (fakeReadOnlyTool) IsReadOnly() bool { return true }
 
-// fakeBatchSafeTool opts into read-only batching via the interface alone.
+// fakeBatchSafeTool declares the read-only batching class through the interface
+// alone, which is exactly what TestConcurrencyClassFollowsToolInterface pins. It
+// is not batchable by itself: a real tool must also declare a non-exclusive
+// ConcurrencyPolicy (see TestReadOnlyBatchableToolsDeclareConcurrencyPolicy).
 type fakeBatchSafeTool struct{ fakeReadOnlyTool }
 
 func (fakeBatchSafeTool) Name() string                                 { return "FakeBatchSafe" }
 func (fakeBatchSafeTool) ConcurrencySafeReadOnly(json.RawMessage) bool { return true }
 
-// TestConcurrencyClassFollowsToolInterface verifies that read-only batching is
-// decided by the tool implementing ConcurrencySafeReadOnlyTool, not by a
-// central name allowlist: a read-only tool that does not implement it is
-// Exclusive, while implementing it (and nothing else) yields ReadOnly.
+// TestConcurrencyClassFollowsToolInterface verifies that the read-only batching
+// class is decided by the tool implementing ConcurrencySafeReadOnlyTool, not by
+// a central name allowlist: a read-only tool that does not implement it is
+// Exclusive, while implementing it (and nothing else) yields ReadOnly. Merging
+// into a batch additionally requires a non-exclusive ConcurrencyPolicy.
 func TestConcurrencyClassFollowsToolInterface(t *testing.T) {
 	reg := NewRegistry()
 	reg.Register(fakeReadOnlyTool{})

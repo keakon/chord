@@ -65,6 +65,13 @@ func (*ViewImageTool) IsReadOnly() bool { return true }
 
 func (*ViewImageTool) ConcurrencySafeReadOnly(json.RawMessage) bool { return true }
 
+// ConcurrencyPolicy treats the image as the file it is: two views of unrelated
+// paths batch together, and an unresolvable path falls back to the exclusive
+// default through normalizeConcurrencyPolicy.
+func (t *ViewImageTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
+	return normalizeConcurrencyPolicy(NameViewImage, fileToolConcurrencyPolicyInDir(args, true, t.BaseDir))
+}
+
 func (*ViewImageTool) CanRenderBeforeToolUseEnd(json.RawMessage) bool { return true }
 
 // IsAvailable hides ViewImage unless the owning agent can safely expose it.

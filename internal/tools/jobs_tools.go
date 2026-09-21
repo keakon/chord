@@ -42,6 +42,23 @@ func (JobOutputTool) IsReadOnly() bool { return true }
 
 func (JobOutputTool) ConcurrencySafeReadOnly(json.RawMessage) bool { return true }
 
+// ConcurrencyPolicy scopes a read to its job id instead of the tool name, so
+// reading one job never serializes against reading another job or any other
+// read-only call. Two reads of the same job may share a batch: the registry
+// advances a reader's cursor and returns its window under one lock, so the
+// calls claim disjoint windows instead of replaying or dropping output.
+func (JobOutputTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
+	var parsed jobOutputArgs
+	if err := json.Unmarshal(unwrapToolArgs(args), &parsed); err != nil {
+		return ConcurrencyPolicy{}
+	}
+	id := strings.TrimSpace(parsed.JobID)
+	if id == "" {
+		return ConcurrencyPolicy{}
+	}
+	return ConcurrencyPolicy{Resource: "job:" + id, Mode: ConcurrencyModeRead}
+}
+
 func (JobOutputTool) Description() string {
 	return "Read output from a background job started by shell (including a command that exceeded the foreground budget).\n" +
 		"Returns the output produced since the previous read (or since the job started), then a final `[status: ...]` line.\n" +
@@ -276,6 +293,12 @@ func (JobListTool) Name() string { return NameJobList }
 func (JobListTool) IsReadOnly() bool { return true }
 
 func (JobListTool) ConcurrencySafeReadOnly(json.RawMessage) bool { return true }
+
+// ConcurrencyPolicy declares the listing as the read it is: it inspects the
+// registry, touches no job's read cursor, and must not serialize a turn.
+func (JobListTool) ConcurrencyPolicy(json.RawMessage) ConcurrencyPolicy {
+	return ConcurrencyPolicy{Resource: "tool:job_list", Mode: ConcurrencyModeRead}
+}
 
 func (JobListTool) Description() string {
 	return "List the background jobs you can read or stop (id, status, elapsed, quiet duration, label), including jobs started by the main agent and by your direct owner. Use it to see what is still running before deciding to wait, to do other work, or to end your turn. Only active jobs are listed by default; set include_finished:true to also list the retained terminal ones. A job row with a deadline shows how much of it is left."

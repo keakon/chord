@@ -534,6 +534,24 @@ func (ReadArtifactTool) IsReadOnly() bool { return true }
 
 func (ReadArtifactTool) ConcurrencySafeReadOnly(json.RawMessage) bool { return true }
 
+// ConcurrencyPolicy names the artifact as the resource so a read never
+// serializes against unrelated reads; an unusable path falls back to the
+// exclusive default.
+func (ReadArtifactTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
+	var parsed readArtifactArgs
+	if err := json.Unmarshal(unwrapToolArgs(args), &parsed); err != nil {
+		return ConcurrencyPolicy{}
+	}
+	path := strings.TrimSpace(parsed.Path)
+	if path == "" {
+		path = strings.TrimSpace(parsed.RelPath)
+	}
+	if path == "" {
+		return ConcurrencyPolicy{}
+	}
+	return ConcurrencyPolicy{Resource: "artifact:" + path, Mode: ConcurrencyModeRead}
+}
+
 func (ReadArtifactTool) CanRenderBeforeToolUseEnd(json.RawMessage) bool { return true }
 
 func (ReadArtifactTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {

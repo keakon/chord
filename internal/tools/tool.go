@@ -106,6 +106,12 @@ type ConcurrencyAwareTool interface {
 // scheduling) and lets each tool own this decision instead of a central
 // allowlist. The arg-aware signature lets tools like Shell admit only specific
 // read-only commands.
+//
+// Declaring this interface is not enough to merge calls: the batch builder also
+// consults ConcurrencyAwareTool, so an implementor that leaves the policy at the
+// exclusive default is still a serialization boundary while being skipped by the
+// started journal. Implement both, with the policy scoped to what the
+// invocation touches.
 type ConcurrencySafeReadOnlyTool interface {
 	Tool
 	ConcurrencySafeReadOnly(args json.RawMessage) bool
