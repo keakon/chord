@@ -28,6 +28,7 @@ chord [全局 flag] [命令] [命令 flag] [参数]
 | `chord worktree finish <name>`    | 先将目标分支合入真实 worktree，再把结果 squash 回去并删除 worktree |
 | `chord resume <session-id>`       | 按 session id 恢复，自动定位到对应的 worktree                     |
 | `chord import <source> [file]`    | 把外部 agent 会话导入 Chord；可识别工具会在参数能标准化时转换为结构化 Chord 工具卡 |
+| `chord sessions project <id>`     | 把已落盘会话投影成每 turn 一行的 JSONL 事实（只读）               |
 | `chord completion <shell>`        | 为 `bash`、`fish`、`powershell` 或 `zsh` 生成 shell completion 脚本 |
 | `chord help [command]`            | 显示命令帮助                                                      |
 
@@ -427,6 +428,29 @@ chord import claude --id <session-id>
 ```
 
 完整的工具/推理策略、转换告警、provider 安全 wire view 见 [使用指南：导入外部会话](./usage_CN.md#导入外部会话)。
+
+## `chord sessions project <session-id>`
+
+把已落盘会话投影成每 turn 一行的 JSONL 事实：turn 边界、工具结果（含 digest）、工具归因的文件变更、压缩边界。只读：不写会话目录，源会话正被别的进程占用也能跑。复盘会话、给完成报告取证、或把结构化事实喂给其他工具时用它，不用再裸 grep 原始 transcript。
+
+turn 成因只给降级结论：你的消息开的 turn 报 `user_message`，其余报 `inferred`（压缩 checkpoint、后台结果这类合成开头）或 `unknown`（开头根本没有 user 消息）。用户 continue 和后台唤醒在落盘历史里长得一样，投影不会硬猜区分。
+
+每行带 `turn_index`、`trigger`、限长的 `user_text` / `assistant_final_text`（超长截断并标 `truncated: true`，同时给指回源消息的 `ref`）、`tool_calls`（名称、终态、恢复状态、耗时、限长 args、结果 digest，以及 `session_id + message_index + tool_call_id` 形式的 `ref`）、`file_changes`（路径、操作、增删行数、`exact | partial | unknown` 归因），以及 `compaction_boundary` 与消息下标区间。压缩摘要是边界标记、不是事实：它打开的 turn 没有 user 正文。恢复时被打断的工具结果保留落盘终态，但会标 `result_unknown`——先看这个标记再谈成功失败。会话删除或压缩轮换后 ref 可能失效，digest 可以用来发现这种过期。`file_changes` 为空只表示「没有记录」，不等于「没有变化」：没有文件元数据的 shell 副作用归因不出来。
+
+### Flag
+
+| Flag                   | 说明                                              |
+| ---------------------- | ------------------------------------------------- |
+| `--out <path>`         | 投影写进这个文件，而不是 stdout。写进会话目录内、或硬链接到会话目录内文件的路径会被拒绝，投影不可能覆盖它正在读取的会话 |
+| `--session-dir <path>` | 直接投影这个会话目录，不解析 `<session-id>`       |
+| `--max-bytes <n>`      | 调高或调低 JSONL 大小上限（字节）。超过上限直接报错，不会悄悄截断。`0` 保持默认（256 KiB） |
+
+### 示例
+
+```bash
+chord sessions project 20260428064910975 > projection.jsonl
+chord sessions project 20260428064910975 --out projection.jsonl
+```
 
 ## `chord completion <shell>`
 

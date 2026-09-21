@@ -166,7 +166,7 @@ func newRootCmd() *cobra.Command {
 		"Create or enter a chord-managed git worktree by name (auto-named when empty); session/cache live under the worktree's project key")
 	rootCmd.Flags().Lookup("worktree").NoOptDefVal = ""
 
-	rootCmd.AddCommand(newAuthCmd(), newHeadlessCmd(), newDoctorCmd(), newCleanupCmd(), newWorktreeCmd(), newResumeCmd(), newImportCmd())
+	rootCmd.AddCommand(newAuthCmd(), newHeadlessCmd(), newDoctorCmd(), newCleanupCmd(), newWorktreeCmd(), newResumeCmd(), newImportCmd(), newSessionsCmd())
 	return rootCmd
 }
 

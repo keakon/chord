@@ -33,26 +33,36 @@ type ExportedSession struct {
 //
 // Note: multi-part user attachments (e.g. image ContentParts) are intentionally
 // not embedded in export files; only the plain message Content is exported.
+//
+// The kind/file_state/file_attribution_incomplete/tool_changed_paths fields
+// were added after v1 without bumping CurrentVersion: they are all omitempty,
+// so files written by the new exporter still validate as v1 and old readers
+// ignore the unknown fields. See projection.go for why analysis needs them
+// (turn-trigger downgrade needs kind; file attribution needs FileState).
 type ExportedMessage struct {
-	Role                    message.Role                  `json:"role"`
-	Content                 string                        `json:"content"`
-	ToolCallID              string                        `json:"tool_call_id,omitempty"`
-	ToolStatus              string                        `json:"tool_status,omitempty"`       // success / error / cancelled outcome of a tool result
-	ToolDiff                string                        `json:"tool_diff,omitempty"`         // unified diff for Write/Edit results
-	ToolDiffAdded           int                           `json:"tool_diff_added,omitempty"`   // full added-line count before diff truncation
-	ToolDiffRemoved         int                           `json:"tool_diff_removed,omitempty"` // full removed-line count before diff truncation
-	ToolDurationMs          int64                         `json:"tool_duration_ms,omitempty"`
-	LSPReviews              []message.LSPReview           `json:"lsp_reviews,omitempty"`
-	Audit                   *message.ToolArgsAudit        `json:"audit,omitempty"`
-	ToolCalls               []ExportedToolCall            `json:"tool_calls,omitempty"`
-	ThinkingBlocks          []message.ThinkingBlock       `json:"thinking_blocks,omitempty"`
-	ResponsesOutput         []message.ResponsesOutputItem `json:"responses_output,omitempty"`
-	GeminiParts             []message.GeminiReplayPart    `json:"gemini_parts,omitempty"`
-	ReasoningContent        string                        `json:"reasoning_content,omitempty"`
-	IsCompactionSummary     bool                          `json:"is_compaction_summary,omitempty"`
-	CompactionFileRevisions map[string]string             `json:"compaction_file_revisions,omitempty"`
-	Provenance              *message.MessageProvenance    `json:"provenance,omitempty"`
-	Timestamp               time.Time                     `json:"timestamp"`
+	Role                      message.Role                  `json:"role"`
+	Content                   string                        `json:"content"`
+	Kind                      string                        `json:"kind,omitempty"`
+	ToolCallID                string                        `json:"tool_call_id,omitempty"`
+	ToolStatus                string                        `json:"tool_status,omitempty"`       // success / error / cancelled outcome of a tool result
+	ToolDiff                  string                        `json:"tool_diff,omitempty"`         // unified diff for Write/Edit results
+	ToolDiffAdded             int                           `json:"tool_diff_added,omitempty"`   // full added-line count before diff truncation
+	ToolDiffRemoved           int                           `json:"tool_diff_removed,omitempty"` // full removed-line count before diff truncation
+	ToolDurationMs            int64                         `json:"tool_duration_ms,omitempty"`
+	LSPReviews                []message.LSPReview           `json:"lsp_reviews,omitempty"`
+	Audit                     *message.ToolArgsAudit        `json:"audit,omitempty"`
+	FileState                 *message.ToolFileState        `json:"file_state,omitempty"`
+	FileAttributionIncomplete bool                          `json:"file_attribution_incomplete,omitempty"`
+	ToolChangedPaths          []string                      `json:"tool_changed_paths,omitempty"`
+	ToolCalls                 []ExportedToolCall            `json:"tool_calls,omitempty"`
+	ThinkingBlocks            []message.ThinkingBlock       `json:"thinking_blocks,omitempty"`
+	ResponsesOutput           []message.ResponsesOutputItem `json:"responses_output,omitempty"`
+	GeminiParts               []message.GeminiReplayPart    `json:"gemini_parts,omitempty"`
+	ReasoningContent          string                        `json:"reasoning_content,omitempty"`
+	IsCompactionSummary       bool                          `json:"is_compaction_summary,omitempty"`
+	CompactionFileRevisions   map[string]string             `json:"compaction_file_revisions,omitempty"`
+	Provenance                *message.MessageProvenance    `json:"provenance,omitempty"`
+	Timestamp                 time.Time                     `json:"timestamp"`
 	// ToolRecoveryState classifies synthetic restore / barrier-failure results
 	// (not_started / outcome_unknown). Ordinary results leave it empty.
 	ToolRecoveryState string `json:"tool_recovery_state,omitempty"`
@@ -121,24 +131,28 @@ func Export(
 			provenance = &copy
 		}
 		em := ExportedMessage{
-			Role:                    msg.Role,
-			Content:                 msg.Content,
-			ToolCallID:              msg.ToolCallID,
-			ToolStatus:              msg.ToolStatus,
-			ToolDiff:                msg.ToolDiff,
-			ToolDiffAdded:           msg.ToolDiffAdded,
-			ToolDiffRemoved:         msg.ToolDiffRemoved,
-			ToolDurationMs:          msg.ToolDurationMs,
-			LSPReviews:              append([]message.LSPReview(nil), msg.LSPReviews...),
-			Audit:                   msg.Audit.Clone(),
-			ThinkingBlocks:          append([]message.ThinkingBlock(nil), msg.ThinkingBlocks...),
-			ResponsesOutput:         cloneResponsesOutput(msg.ResponsesOutput),
-			GeminiParts:             append([]message.GeminiReplayPart(nil), msg.GeminiParts...),
-			ReasoningContent:        msg.ReasoningContent,
-			IsCompactionSummary:     msg.IsCompactionSummary,
-			CompactionFileRevisions: cloneStringMap(msg.CompactionFileRevisions),
-			Provenance:              provenance,
-			ToolRecoveryState:       msg.ToolRecoveryState,
+			Role:                      msg.Role,
+			Content:                   msg.Content,
+			Kind:                      msg.Kind,
+			ToolCallID:                msg.ToolCallID,
+			ToolStatus:                msg.ToolStatus,
+			ToolDiff:                  msg.ToolDiff,
+			ToolDiffAdded:             msg.ToolDiffAdded,
+			ToolDiffRemoved:           msg.ToolDiffRemoved,
+			ToolDurationMs:            msg.ToolDurationMs,
+			LSPReviews:                append([]message.LSPReview(nil), msg.LSPReviews...),
+			Audit:                     msg.Audit.Clone(),
+			FileState:                 msg.FileState.Clone(),
+			FileAttributionIncomplete: msg.FileAttributionIncomplete,
+			ToolChangedPaths:          append([]string(nil), msg.ToolChangedPaths...),
+			ThinkingBlocks:            append([]message.ThinkingBlock(nil), msg.ThinkingBlocks...),
+			ResponsesOutput:           cloneResponsesOutput(msg.ResponsesOutput),
+			GeminiParts:               append([]message.GeminiReplayPart(nil), msg.GeminiParts...),
+			ReasoningContent:          msg.ReasoningContent,
+			IsCompactionSummary:       msg.IsCompactionSummary,
+			CompactionFileRevisions:   cloneStringMap(msg.CompactionFileRevisions),
+			Provenance:                provenance,
+			ToolRecoveryState:         msg.ToolRecoveryState,
 			// Use incremental timestamps (1µs apart) to preserve ordering
 			// since source messages don't carry original timestamps.
 			Timestamp: now.Add(time.Duration(i) * time.Microsecond),
@@ -356,24 +370,28 @@ func (es *ExportedSession) ToMessages() []message.Message {
 			provenance = &copy
 		}
 		msg := message.Message{
-			Role:                    em.Role,
-			Content:                 em.Content,
-			ToolCallID:              em.ToolCallID,
-			ToolStatus:              em.ToolStatus,
-			ToolDiff:                em.ToolDiff,
-			ToolDiffAdded:           em.ToolDiffAdded,
-			ToolDiffRemoved:         em.ToolDiffRemoved,
-			ToolDurationMs:          em.ToolDurationMs,
-			LSPReviews:              append([]message.LSPReview(nil), em.LSPReviews...),
-			Audit:                   em.Audit.Clone(),
-			ThinkingBlocks:          append([]message.ThinkingBlock(nil), em.ThinkingBlocks...),
-			ResponsesOutput:         cloneResponsesOutput(em.ResponsesOutput),
-			GeminiParts:             append([]message.GeminiReplayPart(nil), em.GeminiParts...),
-			ReasoningContent:        em.ReasoningContent,
-			IsCompactionSummary:     em.IsCompactionSummary,
-			CompactionFileRevisions: cloneStringMap(em.CompactionFileRevisions),
-			Provenance:              provenance,
-			ToolRecoveryState:       em.ToolRecoveryState,
+			Role:                      em.Role,
+			Content:                   em.Content,
+			Kind:                      em.Kind,
+			ToolCallID:                em.ToolCallID,
+			ToolStatus:                em.ToolStatus,
+			ToolDiff:                  em.ToolDiff,
+			ToolDiffAdded:             em.ToolDiffAdded,
+			ToolDiffRemoved:           em.ToolDiffRemoved,
+			ToolDurationMs:            em.ToolDurationMs,
+			LSPReviews:                append([]message.LSPReview(nil), em.LSPReviews...),
+			Audit:                     em.Audit.Clone(),
+			FileState:                 em.FileState.Clone(),
+			FileAttributionIncomplete: em.FileAttributionIncomplete,
+			ToolChangedPaths:          append([]string(nil), em.ToolChangedPaths...),
+			ThinkingBlocks:            append([]message.ThinkingBlock(nil), em.ThinkingBlocks...),
+			ResponsesOutput:           cloneResponsesOutput(em.ResponsesOutput),
+			GeminiParts:               append([]message.GeminiReplayPart(nil), em.GeminiParts...),
+			ReasoningContent:          em.ReasoningContent,
+			IsCompactionSummary:       em.IsCompactionSummary,
+			CompactionFileRevisions:   cloneStringMap(em.CompactionFileRevisions),
+			Provenance:                provenance,
+			ToolRecoveryState:         em.ToolRecoveryState,
 		}
 
 		// Restore tool calls.

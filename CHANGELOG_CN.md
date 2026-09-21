@@ -12,6 +12,8 @@
 
 ### 新功能
 
+- 新增 `chord acp`：通过 stdio 提供 Agent Client Protocol，让 Zed 这类 ACP 客户端把 Chord 当作自己的 agent。工作目录由客户端在 `session/new` 里给出；回答、思考块和工具调用（分类、标题、目标文件、原始参数、输出与文件 diff）以 `session/update` 流式回传；取消本轮返回 `cancelled`；`file://` 资源链接会变成与 TUI 一致的 `<file path="...">` 上下文块。stdout 只跑 JSON-RPC，Chord 日志写入 `chord.log`。一个进程只服务一个会话；确认弹窗尚未接通，在此之前需要授权的工具会等 Chord 自己的确认超时。详见 [ACP Agent 模式](./docs/acp_CN.md)。
+- 新增 `chord sessions project <session-id>` 命令：把已落盘会话投影成每 turn 一行的 JSONL 事实（turn 边界、带 digest 的工具结果、工具归因的文件变更、压缩边界），用于复盘与完成报告取证。只读，源会话被别的进程占用时也能跑；turn 成因只报 `user_message` / `inferred` / `unknown`，不硬猜用户 continue 还是后台唤醒。`--out` 会拒绝写进会话目录内（或硬链接到其中文件）的路径，投影不可能覆盖源会话；`--max-bytes` 可调高 256 KiB 的 JSONL 上限，长会话不再受限。
 - 新增 `question_timeout`（秒，默认 `0`）单独控制 Question 工具等多久，不再跟 `confirm_timeout` 共用；`0` 表示无限等。这段倒计时覆盖整段等待，包括请求排在别的对话框后面的时间，且绝不会采用答案：到期后问题按 `no_response` 关闭。
 - headless 客户端可以订阅 `question_resolved` 推送。每个已发布的问题只会关闭一次，`reason` 为 `answered`、`declined`、`no_response`、`superseded`、`cancelled` 或 `error`，集成方据此清掉待决问题，也能区分超时、被替代和用户选择。
 

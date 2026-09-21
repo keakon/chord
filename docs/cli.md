@@ -28,6 +28,7 @@ Without a command, `chord` runs the local TUI in the current directory.
 | `chord worktree finish <name>`   | Merge the target branch into the real worktree, squash the result back as one commit, then remove the worktree |
 | `chord resume <session-id>`      | Resume a session by ID, auto-locating its worktree               |
 | `chord import <source> [file]`   | Import an external session into Chord's session store and convert recognizable external tools to current Chord tool cards |
+| `chord sessions project <id>`    | Project a persisted session into per-turn JSONL facts (read-only) |
 | `chord completion <shell>`       | Generate shell completion scripts for `bash`, `fish`, `powershell`, or `zsh` |
 | `chord help [command]`           | Show command help                                                |
 
@@ -427,6 +428,29 @@ chord import claude --id <session-id>
 ```
 
 See the [Importing external sessions](./usage.md#importing-external-sessions) section for the full notes on tool/reasoning policy, conversion warnings, and provider-safe wire normalization.
+
+## `chord sessions project <session-id>`
+
+Project a persisted session into per-turn facts as JSONL, one line per turn: turn boundaries, tool outcomes with result digests, tool-attributed file changes, and compaction boundaries. It is read-only: the session directory is never written, so it works while the session is open in another process. Use it when reviewing a session, preparing evidence for a completion report, or feeding structured facts to another tool instead of grepping the raw transcript.
+
+Turn causes are downgraded on purpose: a turn started by your message reports `user_message`; anything else reports `inferred` (a synthetic starter such as a compaction checkpoint or a background result) or `unknown` (no leading user message at all). The projection never guesses between a user continue and a background wake: they are observationally identical in the persisted history.
+
+Each turn carries `turn_index`, `trigger`, bounded `user_text` / `assistant_final_text` (over-long text is cut with `truncated: true` and a `ref` back to the source message), `tool_calls` (name, status, recovery state, duration, bounded args, result digest, and a `ref` shaped as `session_id + message_index + tool_call_id`), `file_changes` (path, op, added/removed lines, `exact | partial | unknown` attribution), plus `compaction_boundary` and the message index range it came from. Compaction summaries are boundary markers, not facts: the turn they open carries no user text. A tool result interrupted by a restore keeps its persisted status but is flagged `result_unknown` — check that flag before reading it as success or failure. Refs may expire after the session is deleted or compacted; digests let you detect that. An empty `file_changes` list means "no recorded change", never "no change": shell effects without file metadata stay unattributed.
+
+### Flags
+
+| Flag                  | Description                                                        |
+| --------------------- | ------------------------------------------------------------------ |
+| `--out <path>`        | Write the JSONL projection to this file instead of stdout. A path inside the session directory — or a hard link to a file in it — is rejected, so a projection can never overwrite the session it reads |
+| `--session-dir <path>`| Project this session directory directly instead of resolving `<session-id>` |
+| `--max-bytes <n>`     | Raise or lower the JSONL size cap (bytes). A projection above the cap fails instead of being silently cut. `0` keeps the default (256 KiB) |
+
+### Examples
+
+```bash
+chord sessions project 20260428064910975 > projection.jsonl
+chord sessions project 20260428064910975 --out projection.jsonl
+```
 
 ## `chord completion <shell>`
 
