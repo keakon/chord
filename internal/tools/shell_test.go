@@ -352,7 +352,7 @@ func TestBashDescriptionIncludesToolSpecificHintsOnlyWhenVisible(t *testing.T) {
 		"For explicit file deletions, prefer `delete`; use shell removal only when shell semantics are actually required, such as directory trees or batch cleanup.",
 		"Do not use shell redirection, heredocs, inline scripts, or `rm` as the default way to edit, write, or delete files when dedicated file tools are unavailable.",
 		"This tool also runs background jobs. Set run_in_background:true for services or work you do not need to wait for",
-		"Long one-shot commands (builds, test suites) are promoted to a background job after the yield budget (default 90s)",
+		"Long one-shot commands (builds, test suites) are promoted to a background job after the yield budget (default 90s), or when the command exits while its process group still runs",
 		"Dependent commands must run in order",
 		"Only set timeout_ms when you need a hard deadline other than the foreground default of 600000ms",
 		"a job started with run_in_background:true has none until you set one, and accepts up to 21600000 for hour-scale work",
@@ -410,6 +410,7 @@ func TestShellParametersExposeYieldAndBackgroundControls(t *testing.T) {
 	for _, want := range []string{
 		"use it when this turn needs the result and the command fits the foreground deadline",
 		"cancelling the turn kills the command",
+		"a command that exits while its process group still runs returns a job handle",
 	} {
 		if !strings.Contains(yieldDesc, want) {
 			t.Fatalf("yield_time_ms description missing %q in %q", want, yieldDesc)
@@ -476,9 +477,15 @@ func TestStopAllJobsForShutdownStopsAll(t *testing.T) {
 	if _, err := globalJobRegistry.start(context.Background(), jobStartRequest{Command: "sh -c 'sleep 5'", Description: "service one"}); err != nil {
 		t.Fatalf("start background 2: %v", err)
 	}
+	start := time.Now()
 	stopped := StopAllJobsForShutdown()
 	if stopped != 2 {
 		t.Fatalf("stopped = %d, want 2", stopped)
+	}
+	// Both jobs die from the same SIGTERM pass: a per-job teardown would pay
+	// the grace period once per job instead of sharing one budget.
+	if elapsed := time.Since(start); elapsed >= 2*time.Second {
+		t.Fatalf("StopAllJobsForShutdown took %v for two jobs, want the shared budget to keep it bounded", elapsed)
 	}
 	for _, state := range SnapshotJobs() {
 		if state.Status == string(jobStatusRunning) || state.Status == string(jobStatusStopping) {

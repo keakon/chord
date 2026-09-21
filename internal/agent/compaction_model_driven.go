@@ -1886,11 +1886,13 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 	// Live jobs are the third runtime-owned snapshot: the model submission
 	// cannot know them, and after the reset their handles are gone from the
 	// transcript, so the checkpoint must carry what is still running. The
-	// capture instant is taken once here; preflight and render both read this
-	// same rendered body, so the two never disagree about the snapshot_at
-	// label. The staleness fingerprint covers backgroundObjects, so a job that
-	// changed between the barrier capture and the apply rejects the draft
-	// instead of shipping a snapshot that was already wrong when it landed.
+	// states were frozen at the barrier capture; the label instant and the
+	// elapsed / deadline numbers are taken once here, and preflight and render
+	// both read this same rendered body, so the two never disagree about the
+	// snapshot_at label. The staleness fingerprint covers backgroundObjects, so
+	// a job that changed between the barrier capture and the apply rejects the
+	// draft instead of shipping a snapshot that was already wrong when it
+	// landed.
 	summary = ensureActiveBackgroundJobSnapshot(summary, bundle.backgroundObjects, time.Now())
 	// The previous checkpoint's machine-carryable state was merged into the
 	// typed state block above; its natural-language body is deliberately NOT

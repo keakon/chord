@@ -415,7 +415,7 @@ func shellToolDescription(visible map[string]struct{}, shellType string) string 
 	parts = append(parts,
 		"Do not use shell redirection, heredocs, inline scripts, or `rm` as the default way to edit, write, or delete files when dedicated file tools are unavailable.",
 		"This tool also runs background jobs. Set run_in_background:true for services or work you do not need to wait for; the call returns a job id immediately and job_output/job_list/job_kill manage it.",
-		fmt.Sprintf("Long one-shot commands (builds, test suites) are promoted to a background job after the yield budget (default %s) and keep running; you will be notified when they finish. Do not sleep-wait or busy-poll — do independent work, or end your turn and wait for the notification.", durationLabel(ShellDefaultYieldMs)),
+		fmt.Sprintf("Long one-shot commands (builds, test suites) are promoted to a background job after the yield budget (default %s), or when the command exits while its process group still runs, and keep running; you will be notified when they finish. Do not sleep-wait or busy-poll — do independent work, or end your turn and wait for the notification.", durationLabel(ShellDefaultYieldMs)),
 		"Dependent commands must run in order: chain them in one call with `&&` or `;`, or wait for the previous result. A background job runs concurrently with other tool calls, so never start a command that depends on a job's output before that job finishes.",
 		fmt.Sprintf("Only set timeout_ms when you need a hard deadline other than the foreground default of %dms — a job started with run_in_background:true has none until you set one, and accepts up to %d for hour-scale work; only set yield_time_ms when you need a foreground budget other than the default %dms.", ShellDefaultTimeoutMs, ShellMaxBackgroundTimeoutMs, ShellDefaultYieldMs),
 	)
@@ -478,7 +478,7 @@ func (ShellTool) Parameters() map[string]any {
 			},
 			"yield_time_ms": map[string]any{
 				"type":        "integer",
-				"description": fmt.Sprintf("Optional foreground budget in milliseconds before the command continues as a background job (max %d, default %d). 0 keeps the command in the foreground until it finishes or hits timeout_ms — use it when this turn needs the result and the command fits the foreground deadline; cancelling the turn kills the command.", shellMaxYieldMs, ShellDefaultYieldMs),
+				"description": fmt.Sprintf("Optional foreground budget in milliseconds before the command continues as a background job (max %d, default %d). 0 keeps the command in the foreground until it finishes or hits timeout_ms — use it when this turn needs the result and the command fits the foreground deadline; cancelling the turn kills the command. One case still promotes the call: a command that exits while its process group still runs returns a job handle instead of blocking the turn on those descendants.", shellMaxYieldMs, ShellDefaultYieldMs),
 			},
 			"run_in_background": map[string]any{
 				"type":        "boolean",

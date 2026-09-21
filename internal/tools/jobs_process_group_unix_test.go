@@ -115,6 +115,44 @@ func TestStopEscalatesToSIGKILLWhileTheDirectCommandStillWaits(t *testing.T) {
 	waitForPidToDisappear(t, descendantPID, 5*time.Second)
 }
 
+// A deadline that lands during the group drain still kills the descendants, and
+// the notice keeps the command's own exit fact: the command had already exited
+// on its own, so the kill only had the group it left behind to stop.
+func TestDeadlineDuringGroupDrainKeepsTheCommandExitFact(t *testing.T) {
+	resetJobRegistryOnlyForTest(t)
+	t.Cleanup(func() { StopAllJobsForShutdown() })
+	shortenJobGroupTimings(t)
+
+	sender := &recordingEventSender{ch: make(chan any, 2)}
+	ctx := WithEventSender(jobTestCtx(), sender)
+	pidFile := filepath.Join(t.TempDir(), "descendant.pid")
+	// exec keeps the ignored disposition across the image change, so only the
+	// SIGKILL half of the stop protocol can end this descendant.
+	command := "(trap '' TERM; exec sleep 60) & echo $! > " + strconv.Quote(pidFile) + "; exit 0"
+	id, err := ExecuteJobForTest(ctx, command, "deadline during drain", new(1))
+	if err != nil {
+		t.Fatalf("ExecuteJobForTest: %v", err)
+	}
+	descendantPID := readJobPidFile(t, pidFile)
+	waitForJobGroupPending(t, id)
+
+	payload := waitForJobFinishedPayload(t, sender)
+	if !strings.HasPrefix(payload.Status, "killed (timed out after 1s") {
+		t.Fatalf("status = %q, want the deadline kill", payload.Status)
+	}
+	if !strings.Contains(payload.Message, "the command had already exited with exit code 0") {
+		t.Fatalf("message = %q, want the command's own exit fact kept", payload.Message)
+	}
+	waitForPidToDisappear(t, descendantPID, 5*time.Second)
+
+	// The terminal state and its notification are delivered exactly once.
+	select {
+	case extra := <-sender.ch:
+		t.Fatalf("extra completion event %+v, want exactly one", extra)
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
 // A foreground command that exits while its process group still holds
 // descendants is promoted instead of blocking the turn until they exit.
 func TestForegroundCommandIsPromotedWhenItsGroupOutlivesIt(t *testing.T) {
