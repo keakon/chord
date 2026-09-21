@@ -848,6 +848,11 @@ providers:
   Invalid modes, negative values, and values above the cap are configuration
   errors.
 
+A retry round that pauses before its next attempt shows that wait in the status
+bar as a countdown to the attempt (`↺ round 12 · retry in 45s`). A round with no
+delay re-probes immediately and keeps showing how long the retry has been
+running, since it has no wait to count down.
+
 For an ordinary 429, the key cooldown follows a single priority order: a confirmed quota reset window wins, then a valid `Retry-After` (bounded by `retry_after_max_s`) applies verbatim, and only a hint-less 429 falls to the retry pacing above: the configured `exponential`/`fixed`/`none` mode, or the one-second exponential default when neither field is set. Invalid or deactivated credentials, and cooldowns already established by other hard states, are never shortened or cleared.
 
 This 429 pacing applies before and after visible streaming output alike: a 429 that interrupts a visible stream cools the key down and rotates to the next one.

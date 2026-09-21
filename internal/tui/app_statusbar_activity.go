@@ -35,10 +35,11 @@ func formatStatusBarStartedAt(t time.Time) string {
 	return statusBarStartedLabel() + t.Format("15:04")
 }
 
-// statusBarCoolingRemaining reports how long a cooling wait still has to run.
-// The runtime attaches the wait deadline to the cooling activity; without one
-// the lane falls back to the elapsed phase time.
-func statusBarCoolingRemaining(a agent.AgentActivityEvent, now time.Time) (time.Duration, bool) {
+// statusBarWaitRemaining reports how much of a wait with a known deadline is
+// left. The runtime attaches a deadline to a cooling wait (the key recovery
+// instant) and to a retry round that pauses before its next attempt; without
+// one the lane falls back to the elapsed phase time.
+func statusBarWaitRemaining(a agent.AgentActivityEvent, now time.Time) (time.Duration, bool) {
 	if a.Deadline.IsZero() {
 		return 0, false
 	}
@@ -239,8 +240,13 @@ type statusBarActivityDisplay struct {
 	Icon string
 	Text string
 	// CompactText is a narrower variant of Text for tight status bar widths
-	// (for example "33s" for "33s left"); it is preferred over truncation.
+	// (for example "33s left" for "keys cooling · 33s left"); it is preferred
+	// over truncation.
 	CompactText string
+	// NarrowText is the last variant tried before truncation (for example "33s"),
+	// for lanes whose compact form still carries a label that the narrowest
+	// widths cannot afford.
+	NarrowText string
 }
 
 func (m Model) statusBarElapsedText(agentID string) string {
@@ -313,19 +319,33 @@ func (m Model) buildStatusBarActivityDisplayAt(a agent.AgentActivityEvent, now t
 		// The detail explains why the request is waiting (fallback: <model>
 		// (<reason>), same key, round N) and outlives the toast that announced the
 		// transition, which matters when the wait lasts tens of seconds.
-		if detail := strings.TrimSpace(a.Detail); detail != "" {
+		detail := strings.TrimSpace(a.Detail)
+		if remaining, ok := statusBarWaitRemaining(a, now); ok {
+			// A round with a scheduled pause knows when its next attempt goes
+			// out; that is what the user is waiting for, while the elapsed phase
+			// time only says how long the retry streak has run.
+			countdown := "retry in " + formatStatusBarCountdown(remaining)
+			display.Text = countdown
+			if detail != "" {
+				display.Text = detail + " · " + countdown
+			}
+			display.CompactText = countdown
+			display.NarrowText = formatStatusBarCountdown(remaining)
+		} else if detail != "" {
 			display.Text = detail + " · " + elapsedText
 		} else {
 			display.Text = elapsedText
 		}
 	case agent.ActivityCooling:
 		// A cooling wait has a known end, so its primary time semantics is the
-		// remaining time rather than the elapsed phase time.
+		// remaining time rather than the elapsed phase time. The lane names the
+		// cause as well: "33s left" alone does not say what is waiting.
 		display.Icon = "↺"
-		if remaining, ok := statusBarCoolingRemaining(a, now); ok {
+		if remaining, ok := statusBarWaitRemaining(a, now); ok {
 			countdown := formatStatusBarCountdown(remaining)
-			display.Text = countdown + " left"
-			display.CompactText = countdown
+			display.Text = "cooling down · " + countdown + " left"
+			display.CompactText = countdown + " left"
+			display.NarrowText = countdown
 		} else {
 			display.Text = elapsedText
 		}
@@ -367,6 +387,11 @@ func (m Model) renderActivityAt(a agent.AgentActivityEvent, maxWidth int, now ti
 		if display.CompactText != "" {
 			if compact := iconStyle.Render(icon) + " " + textStyle.Render(display.CompactText); lipgloss.Width(compact) <= maxWidth {
 				return compact
+			}
+		}
+		if display.NarrowText != "" {
+			if narrow := iconStyle.Render(icon) + " " + textStyle.Render(display.NarrowText); lipgloss.Width(narrow) <= maxWidth {
+				return narrow
 			}
 		}
 		iconW := lipgloss.Width(iconStyle.Render(icon))

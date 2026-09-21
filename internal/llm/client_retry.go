@@ -1421,12 +1421,21 @@ func (c *Client) completeStreamWithRetry(
 					if err := abortIfCancelled(); err != nil {
 						return nil, err
 					}
-					detail := fmt.Sprintf("round %d", round+1)
-					emitStreamStatusDelta(cb, message.StatusDelta{
+					status := message.StatusDelta{
 						Type:     message.StatusDeltaRetrying,
-						Detail:   detail,
+						Detail:   fmt.Sprintf("round %d", round+1),
 						ModelRef: startDisplayRef,
-					})
+					}
+					// The round sleeps a known delay before the next attempt goes
+					// out (provider backoff, or the cooling window a target that
+					// did not end the round reported). Attach it so the status bar
+					// counts down to that attempt instead of showing only how long
+					// the retry streak has run. A zero-delay round re-probes
+					// immediately and has no deadline to promise.
+					if delay > 0 {
+						status.Deadline = time.Now().Add(delay)
+					}
+					emitStreamStatusDelta(cb, status)
 				}
 			}
 			if delay > 0 {

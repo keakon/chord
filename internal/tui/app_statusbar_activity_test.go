@@ -296,6 +296,35 @@ func TestRenderActivityRetryingShowsDetailAndElapsed(t *testing.T) {
 	}
 }
 
+func TestRenderActivityRetryingCountsDownToNextAttempt(t *testing.T) {
+	m := NewModelWithSize(nil, 200, 24)
+	now := time.Unix(1_000_000, 0)
+	m.activityStartTime["main"] = now.Add(-40 * time.Second)
+	a := agent.AgentActivityEvent{Type: agent.ActivityRetrying, AgentID: "main", Detail: "round 12", Deadline: now.Add(45 * time.Second)}
+
+	out := stripANSI(m.renderActivityAt(a, 200, now))
+	if !strings.Contains(out, "round 12") || !strings.Contains(out, "retry in 45s") {
+		t.Fatalf("retrying render with a deadline should count down to the next attempt, got %q", out)
+	}
+	if strings.Contains(out, "40s") {
+		t.Fatalf("retrying countdown should replace the elapsed phase time, got %q", out)
+	}
+
+	later := stripANSI(m.renderActivityAt(a, 200, now.Add(30*time.Second)))
+	if !strings.Contains(later, "retry in 15s") {
+		t.Fatalf("retrying countdown should shrink as time passes, got %q", later)
+	}
+
+	compact := stripANSI(m.renderActivityAt(a, 16, now))
+	if !strings.Contains(compact, "retry in 45s") {
+		t.Fatalf("narrow retrying render should keep the countdown instead of truncating, got %q", compact)
+	}
+	narrow := stripANSI(m.renderActivityAt(a, 12, now))
+	if !strings.Contains(narrow, "45s") || strings.Contains(narrow, "round") {
+		t.Fatalf("12-column retrying render should keep the countdown and drop the round, got %q", narrow)
+	}
+}
+
 func TestRenderActivityCoolingShowsRemainingCountdown(t *testing.T) {
 	m := NewModelWithSize(nil, 200, 24)
 	now := time.Unix(1_000_000, 0)
@@ -303,8 +332,8 @@ func TestRenderActivityCoolingShowsRemainingCountdown(t *testing.T) {
 	a := agent.AgentActivityEvent{Type: agent.ActivityCooling, AgentID: "main", Detail: "45s", Deadline: now.Add(33 * time.Second)}
 
 	out := stripANSI(m.renderActivityAt(a, 200, now))
-	if !strings.Contains(out, "33s left") {
-		t.Fatalf("cooling render should show the remaining wait, got %q", out)
+	if !strings.Contains(out, "cooling down") || !strings.Contains(out, "33s left") {
+		t.Fatalf("cooling render should name the cause and show the remaining wait, got %q", out)
 	}
 
 	later := stripANSI(m.renderActivityAt(a, 200, now.Add(20*time.Second)))
@@ -313,17 +342,25 @@ func TestRenderActivityCoolingShowsRemainingCountdown(t *testing.T) {
 	}
 }
 
-func TestRenderActivityCoolingDegradesToCompactCountdown(t *testing.T) {
+func TestRenderActivityCoolingDegradesBeforeTruncating(t *testing.T) {
 	m := NewModelWithSize(nil, 200, 24)
 	now := time.Unix(1_000_000, 0)
 	a := agent.AgentActivityEvent{Type: agent.ActivityCooling, AgentID: "main", Deadline: now.Add(33 * time.Second)}
 
-	out := stripANSI(m.renderActivityAt(a, 8, now))
-	if strings.Contains(out, "left") {
-		t.Fatalf("narrow cooling render should drop the label before truncating, got %q", out)
+	compact := stripANSI(m.renderActivityAt(a, 20, now))
+	if strings.Contains(compact, "cooling down") {
+		t.Fatalf("tight cooling render should drop the cause to keep the wait, got %q", compact)
 	}
-	if !strings.Contains(out, "33s") {
-		t.Fatalf("narrow cooling render should keep the remaining time, got %q", out)
+	if !strings.Contains(compact, "33s left") {
+		t.Fatalf("tight cooling render should keep the remaining wait, got %q", compact)
+	}
+
+	narrow := stripANSI(m.renderActivityAt(a, 8, now))
+	if strings.Contains(narrow, "left") || strings.Contains(narrow, "…") {
+		t.Fatalf("narrow cooling render should drop the label instead of truncating, got %q", narrow)
+	}
+	if !strings.Contains(narrow, "33s") {
+		t.Fatalf("narrow cooling render should keep the remaining time, got %q", narrow)
 	}
 }
 

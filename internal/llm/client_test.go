@@ -4193,6 +4193,75 @@ func TestCompleteStreamSingleTargetCoolingWaitsForRealRecovery(t *testing.T) {
 	}
 }
 
+func TestCompleteStreamRetryRoundEmitsDeadlineForScheduledWait(t *testing.T) {
+	cfg := testProviderConfig("provider", "model-1")
+	impl := &constantErrProvider{err: &APIError{StatusCode: 503, Message: "no available accounts"}}
+	c := NewClient(cfg, impl, "model-1", 4096, "sys")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	start := time.Now()
+	var details []string
+	var deadlines []time.Time
+	// The retrying status is emitted before the round sleeps, so cancelling
+	// from the callback observes the deadline without waiting it out.
+	_, err := c.CompleteStream(ctx, []message.Message{{Role: "user", Content: "hi"}}, nil, func(delta message.StreamDelta) {
+		if delta.Type != message.StreamDeltaStatus || delta.Status == nil || delta.Status.Type != message.StatusDeltaRetrying {
+			return
+		}
+		details = append(details, delta.Status.Detail)
+		deadlines = append(deadlines, delta.Status.Deadline)
+		cancel()
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("CompleteStream err = %v, want context.Canceled after observing the retry round", err)
+	}
+	if got := impl.calls; got != 1 {
+		t.Fatalf("provider calls = %d, want 1 before the round backed off", got)
+	}
+	if len(deadlines) != 1 {
+		t.Fatalf("retrying statuses = %d, want 1", len(deadlines))
+	}
+	if got := details[0]; got != "round 2" {
+		t.Fatalf("retrying detail = %q, want round 2", got)
+	}
+	// The default provider backoff is 1s with exponential growth, so the
+	// deadline is a real instant one second out, not a far-future placeholder.
+	if d := deadlines[0].Sub(start); d < 500*time.Millisecond || d > 2*time.Second {
+		t.Fatalf("retrying deadline = %v after start, want the 1s round delay", d)
+	}
+}
+
+func TestCompleteStreamImmediateRetryRoundCarriesNoDeadline(t *testing.T) {
+	cfg := testProviderConfig("provider", "model-1")
+	cfg.retryDelayBase = -1 // test hook: a round with no backoff re-probes immediately
+	impl := &constantErrProvider{err: &APIError{StatusCode: 503, Message: "no available accounts"}}
+	c := NewClient(cfg, impl, "model-1", 4096, "sys")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var statuses []message.StatusDelta
+	_, err := c.CompleteStream(ctx, []message.Message{{Role: "user", Content: "hi"}}, nil, func(delta message.StreamDelta) {
+		if delta.Type != message.StreamDeltaStatus || delta.Status == nil || delta.Status.Type != message.StatusDeltaRetrying {
+			return
+		}
+		statuses = append(statuses, *delta.Status)
+		cancel()
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("CompleteStream err = %v, want context.Canceled", err)
+	}
+	if len(statuses) != 1 {
+		t.Fatalf("retrying statuses = %d, want 1", len(statuses))
+	}
+	if got := statuses[0].Detail; got != "round 2" {
+		t.Fatalf("retrying detail = %q, want round 2", got)
+	}
+	if !statuses[0].Deadline.IsZero() {
+		t.Fatalf("immediate retry round deadline = %v, want zero: it re-probes with nothing to count down", statuses[0].Deadline)
+	}
+}
+
 func TestClientCompleteStream401OAuthRefreshRotatesToNextKey(t *testing.T) {
 	oldAccess := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1","chatgpt_user_id":"user-1"}`)
 	newAccess := testProviderOAuthJWT(`{"chatgpt_account_id":"acc-1","exp":4102444800}`)
