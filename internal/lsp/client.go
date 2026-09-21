@@ -35,7 +35,7 @@ type lspProcessClient interface {
 	NotifyDidChangeWatchedFiles(ctx context.Context, changes []protocol.FileEvent) error
 	NotifyWorkspaceDidChangeConfiguration(ctx context.Context, settings any) error
 	RequestHover(ctx context.Context, uri string, position protocol.Position) (*protocol.Hover, error)
-	RequestDefinition(ctx context.Context, uri string, position protocol.Position) (*protocol.Or_Result_textDocument_definition, error)
+	RequestDefinitionRaw(ctx context.Context, uri string, position protocol.Position) (*protocol.Or_Result_textDocument_definition, error)
 	RequestImplementation(ctx context.Context, uri string, position protocol.Position) (*protocol.Or_Result_textDocument_implementation, error)
 	FindReferences(ctx context.Context, filepath string, line, character int, includeDeclaration bool) ([]protocol.Location, error)
 }
@@ -690,7 +690,7 @@ func (c *Client) Hover(ctx context.Context, path string, line, character int) (*
 func (c *Client) GoToDefinition(ctx context.Context, path string, line, character int) ([]RefLocation, error) {
 	uri := c.pathToURI(path)
 	pos := protocol.Position{Line: uint32(line), Character: uint32(character)}
-	res, err := c.client.RequestDefinition(ctx, uri, pos)
+	res, err := c.client.RequestDefinitionRaw(ctx, uri, pos)
 	if err != nil {
 		return nil, err
 	}

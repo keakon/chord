@@ -89,7 +89,7 @@ func (f *fakePowernapClient) NotifyWorkspaceDidChangeConfiguration(_ context.Con
 func (f *fakePowernapClient) RequestHover(context.Context, string, protocol.Position) (*protocol.Hover, error) {
 	return nil, nil
 }
-func (f *fakePowernapClient) RequestDefinition(context.Context, string, protocol.Position) (*protocol.Or_Result_textDocument_definition, error) {
+func (f *fakePowernapClient) RequestDefinitionRaw(context.Context, string, protocol.Position) (*protocol.Or_Result_textDocument_definition, error) {
 	return f.definitionResult, f.definitionErr
 }
 func (f *fakePowernapClient) RequestImplementation(context.Context, string, protocol.Position) (*protocol.Or_Result_textDocument_implementation, error) {
