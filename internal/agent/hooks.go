@@ -350,35 +350,59 @@ func hookToastLevel(result hook.AutomationResult) string {
 	}
 }
 
+// Agent error categories reported through classifyAgentError. They extend the
+// original agent/llm/tool taxonomy so a caller can act on the category instead
+// of parsing the message text. Contract covers both a repairable result-contract
+// violation and an unreadable result store: the error types differ (so the
+// engine can tell them apart), but both mean the delivered result did not
+// satisfy the task's declared contract. Blocked is the escalate kind of the same
+// name — the worker declared the dead end itself.
+const (
+	agentErrorKindAgent    = "agent"
+	agentErrorKindLLM      = "llm"
+	agentErrorKindTool     = "tool"
+	agentErrorKindContract = "contract"
+	agentErrorKindBlocked  = tools.EscalateKindBlocked
+)
+
 func classifyAgentError(err error) string {
 	if err == nil {
-		return "agent"
+		return agentErrorKindAgent
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return "agent"
+		return agentErrorKindAgent
 	}
 	if _, ok := errors.AsType[*llm.APIError](err); ok {
-		return "llm"
+		return agentErrorKindLLM
 	}
 	if _, ok := errors.AsType[*llm.AllKeysCoolingError](err); ok {
-		return "llm"
+		return agentErrorKindLLM
 	}
 	if _, ok := errors.AsType[*llm.NoUsableKeysError](err); ok {
-		return "llm"
+		return agentErrorKindLLM
 	}
 	if llm.IsContextLengthExceeded(err) {
-		return "llm"
+		return agentErrorKindLLM
+	}
+	if _, ok := errors.AsType[*ResultContractViolationError](err); ok {
+		return agentErrorKindContract
+	}
+	if _, ok := errors.AsType[*ResultContractIntegrityError](err); ok {
+		return agentErrorKindContract
+	}
+	if _, ok := errors.AsType[*blockedEscalationError](err); ok {
+		return agentErrorKindBlocked
 	}
 	msg := strings.ToLower(err.Error())
 	switch {
 	case classifyToolError(err) != "unknown", strings.Contains(msg, "tool execution failed"):
-		return "tool"
+		return agentErrorKindTool
 	case strings.Contains(msg, "llm"):
-		return "llm"
+		return agentErrorKindLLM
 	case strings.Contains(msg, "tool"):
-		return "tool"
+		return agentErrorKindTool
 	default:
-		return "agent"
+		return agentErrorKindAgent
 	}
 }
 

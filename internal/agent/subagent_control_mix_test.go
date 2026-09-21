@@ -94,15 +94,15 @@ func TestSubAgentRejectsCompleteAndEscalateInSameBatch(t *testing.T) {
 		resp: &message.Response{
 			ToolCalls: convertCalls([]messageToolCall{
 				mustJSONToolCall(t, "call-1", "complete", map[string]any{"summary": "done"}),
-				mustJSONToolCall(t, "call-2", "escalate", map[string]any{"reason": "need help"}),
+				mustJSONToolCall(t, "call-2", "escalate", map[string]any{"kind": "needs_repair", "reason": "need help"}),
 			}),
 		},
 	})
 	if sub.pendingComplete != nil {
 		t.Fatal("pendingComplete should remain nil for invalid control mix")
 	}
-	if sub.pendingEscalate != "" {
-		t.Fatal("pendingEscalate should remain empty for invalid control mix")
+	if sub.pendingEscalateRequest != nil {
+		t.Fatal("pendingEscalateRequest should remain nil for invalid control mix")
 	}
 }
 
@@ -140,13 +140,13 @@ func TestSubAgentDefersEscalateUntilRegularToolsComplete(t *testing.T) {
 		turnID: 1,
 		resp: &message.Response{
 			ToolCalls: convertCalls([]messageToolCall{
-				mustJSONToolCall(t, "call-1", "escalate", map[string]any{"reason": "need help"}),
+				mustJSONToolCall(t, "call-1", "escalate", map[string]any{"kind": "needs_repair", "reason": "need help"}),
 				mustJSONToolCall(t, "call-2", "Dummy", map[string]any{"value": "x"}),
 			}),
 		},
 	})
-	if sub.pendingEscalate != "need help" {
-		t.Fatalf("pendingEscalate = %q, want %q", sub.pendingEscalate, "need help")
+	if sub.pendingEscalateRequest == nil || sub.pendingEscalateRequest.Reason != "need help" {
+		t.Fatalf("pendingEscalateRequest = %#v, want reason %q", sub.pendingEscalateRequest, "need help")
 	}
 	if sub.State() == SubAgentStateWaitingMain {
 		t.Fatal("worker entered waiting_main before regular tool batch completed")

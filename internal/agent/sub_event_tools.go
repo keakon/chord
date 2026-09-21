@@ -547,20 +547,20 @@ func (s *SubAgent) handleToolResult(result *toolResult) { // Turn isolation: dis
 		return
 	}
 
+	if refusal := s.takePendingEscalateRefusal(); refusal != nil {
+		s.refuseOverBudgetEscalation(refusal)
+		s.drainContextAppendsBeforeTurn()
+		s.continueLLMWithPendingUserMessages()
+		return
+	}
+
 	outstandingJoinChildren := s.parent.outstandingJoinChildTaskIDs(s.taskID)
 	if len(outstandingJoinChildren) > 0 {
-		if s.pendingEscalate != "" {
-			reason := s.pendingEscalate
-			s.pendingEscalate = ""
-			payload := tools.AgentRequestPayload{Reason: reason}
-			if s.pendingEscalateRequest != nil {
-				payload = *s.pendingEscalateRequest
-				s.pendingEscalateRequest = nil
-			}
+		if payload := s.takePendingEscalate(); payload != nil {
 			s.sendEvent(Event{
 				Type:     EventEscalate,
 				SourceID: s.instanceID,
-				Payload:  payload,
+				Payload:  *payload,
 			})
 			return
 		}
@@ -569,18 +569,11 @@ func (s *SubAgent) handleToolResult(result *toolResult) { // Turn isolation: dis
 	}
 	s.clearPendingCompleteIntent()
 
-	if s.pendingEscalate != "" {
-		reason := s.pendingEscalate
-		s.pendingEscalate = ""
-		payload := tools.AgentRequestPayload{Reason: reason}
-		if s.pendingEscalateRequest != nil {
-			payload = *s.pendingEscalateRequest
-			s.pendingEscalateRequest = nil
-		}
+	if payload := s.takePendingEscalate(); payload != nil {
 		s.sendEvent(Event{
 			Type:     EventEscalate,
 			SourceID: s.instanceID,
-			Payload:  payload,
+			Payload:  *payload,
 		})
 		return
 	}

@@ -2254,15 +2254,15 @@ type taskCreatorStub struct {
 	agents []tools.AgentInfo
 }
 
-func (s taskCreatorStub) CreateSubAgent(ctx context.Context, description, agentType string, planTaskRef, semanticTaskKey string, expectedWriteScope tools.WriteScope) (tools.TaskHandle, error) {
+func (s taskCreatorStub) CreateSubAgent(_ context.Context, req tools.SubAgentRequest) (tools.TaskHandle, error) {
 	return tools.TaskHandle{
 		Status:             "started",
 		TaskID:             "adhoc-1",
 		AgentID:            "stub-subagent",
 		Message:            "running in background",
-		PlanTaskRef:        planTaskRef,
-		SemanticTaskKey:    semanticTaskKey,
-		ExpectedWriteScope: expectedWriteScope,
+		PlanTaskRef:        req.PlanTaskRef,
+		SemanticTaskKey:    req.SemanticTaskKey,
+		ExpectedWriteScope: req.ExpectedWriteScope,
 	}, nil
 }
 

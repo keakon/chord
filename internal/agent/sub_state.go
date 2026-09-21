@@ -154,6 +154,13 @@ func (s *SubAgent) enterWaitingDescendant(reason string) {
 // rejected one was not, and the card (live and after restore) must agree with
 // the transcript instead of claiming success for both.
 func (s *SubAgent) appendCompleteToolResult(callID, resultContent string, status ToolResultStatus) {
+	s.appendControlToolResult(callID, tools.NameComplete, "", resultContent, status)
+}
+
+// appendControlToolResult records the engine's answer to a control tool call
+// (complete, escalate): the tool result message, its persisted record, and the
+// card all carry the same explicit status.
+func (s *SubAgent) appendControlToolResult(callID, name, argsJSON, resultContent string, status ToolResultStatus) {
 	if strings.TrimSpace(callID) == "" {
 		return
 	}
@@ -164,14 +171,15 @@ func (s *SubAgent) appendCompleteToolResult(callID, resultContent string, status
 		ToolStatus: string(status),
 	}
 	s.ctxMgr.Append(toolMsg)
-	s.persistMessageAsync(toolMsg, "Complete tool result", nil)
+	s.persistMessageAsync(toolMsg, name+" tool result", nil)
 	s.turn.removeStreamingToolCall(callID)
 	event := ToolResultEvent{
-		CallID:  callID,
-		Name:    tools.NameComplete,
-		Result:  resultContent,
-		Status:  status,
-		AgentID: s.instanceID,
+		CallID:   callID,
+		Name:     name,
+		ArgsJSON: argsJSON,
+		Result:   resultContent,
+		Status:   status,
+		AgentID:  s.instanceID,
 	}
 	s.parent.emitToTUI(event)
 }

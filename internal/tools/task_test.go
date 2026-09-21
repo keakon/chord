@@ -12,11 +12,13 @@ import (
 type taskTestCreator struct{}
 
 type countingTaskCreator struct {
-	calls int
+	calls       int
+	lastRequest SubAgentRequest
 }
 
-func (c *countingTaskCreator) CreateSubAgent(context.Context, string, string, string, string, WriteScope) (TaskHandle, error) {
+func (c *countingTaskCreator) CreateSubAgent(_ context.Context, req SubAgentRequest) (TaskHandle, error) {
 	c.calls++
+	c.lastRequest = req
 	return TaskHandle{Status: "started", TaskID: "adhoc-7", AgentID: "agent-7", Message: "running in background"}, nil
 }
 
@@ -24,8 +26,8 @@ func (*countingTaskCreator) AvailableSubAgents() []AgentInfo {
 	return []AgentInfo{{Name: "builder"}}
 }
 
-func (taskTestCreator) CreateSubAgent(ctx context.Context, description, agentType string, planTaskRef, semanticTaskKey string, expectedWriteScope WriteScope) (TaskHandle, error) {
-	return TaskHandle{Status: "started", TaskID: "adhoc-1", AgentID: "agent-1", Message: description + ":" + agentType, PlanTaskRef: planTaskRef, SemanticTaskKey: semanticTaskKey, ExpectedWriteScope: expectedWriteScope}, nil
+func (taskTestCreator) CreateSubAgent(_ context.Context, req SubAgentRequest) (TaskHandle, error) {
+	return TaskHandle{Status: "started", TaskID: "adhoc-1", AgentID: "agent-1", Message: req.Description + ":" + req.AgentType, PlanTaskRef: req.PlanTaskRef, SemanticTaskKey: req.SemanticTaskKey, ExpectedWriteScope: req.ExpectedWriteScope}, nil
 }
 
 func (taskTestCreator) AvailableSubAgents() []AgentInfo {

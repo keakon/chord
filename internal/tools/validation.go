@@ -138,22 +138,6 @@ func appendIgnoredToolArg(ignored *[]message.IgnoredToolArg, path string, value 
 	return nil
 }
 
-func appendInvalidToolArg(invalid *[]message.InvalidToolArg, path string, value any) error {
-	if invalid == nil {
-		return nil
-	}
-	encoded, err := encodeSanitizedArgs(value)
-	if err != nil {
-		return err
-	}
-	*invalid = append(*invalid, message.InvalidToolArg{
-		Path:      path,
-		ValueJSON: string(encoded),
-		Reason:    message.InvalidToolArgReasonInvalid,
-	})
-	return nil
-}
-
 // dropIgnoredArgsUnder removes shadowed/ignored records nested under parent
 // (directly or through arrays). Once an unrecognized field is dropped whole,
 // its children never execute, so earlier duplicate occurrences inside it are
@@ -321,23 +305,118 @@ func applyArgumentAliases(value any, aliases map[string]string) any {
 	return obj
 }
 
+// resultSchemaPath prefixes every result-contract violation path, matching the
+// path format the tool-argument validator uses (args.files[0].path).
+const resultSchemaPath = "result"
+
+// ResultSchemaViolation is one read-only violation of a delivered result: the
+// structured record (path, offending value, reason) plus the readable
+// explanation carried into the rejection message and terminal diagnostics.
+type ResultSchemaViolation struct {
+	Invalid message.InvalidToolArg
+	Message string
+}
+
+// ValidateResultAgainstSchema checks a delegated result against its result
+// contract without touching the delivered value. It differs from the
+// tool-argument path in both directions that matter here: it keeps the value
+// intact (see schemaCheck.readOnly) and it collects every violation so one
+// rejection can report them all.
+func ValidateResultAgainstSchema(result json.RawMessage, schema map[string]any) ([]ResultSchemaViolation, error) {
+	if len(schema) == 0 {
+		return nil, nil
+	}
+	dec := json.NewDecoder(bytes.NewReader(result))
+	dec.UseNumber()
+	value, err := decodeSchemaJSONValue(dec, resultSchemaPath, nil, 0)
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil, fmt.Errorf("result must be valid JSON")
+		}
+		return nil, fmt.Errorf("decode result: %w", err)
+	}
+	// The token stream accepts a prefix; reject trailing garbage so a document
+	// like `{"a":1} extra` is invalid instead of silently dropping the tail.
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("result must be valid JSON")
+	}
+	check := &schemaCheck{readOnly: true, collectAll: true}
+	validateSchemaValue(value, schema, resultSchemaPath, check)
+	return check.violations, nil
+}
+
+// schemaCheck carries the mode and diagnostics of one schema validation pass.
+// The tool-argument path rewrites the value it validates (dropping undeclared
+// fields and optional explicit nulls) and unwinds at the first violation; the
+// delivered-result path must never rewrite what the worker delivered and
+// collects every violation instead of only the first.
+type schemaCheck struct {
+	ignored    *[]message.IgnoredToolArg
+	invalid    *[]message.InvalidToolArg
+	violations []ResultSchemaViolation
+	readOnly   bool
+	collectAll bool
+	err        error
+}
+
+// report records one violation. The first violation also becomes the error the
+// tool-argument path returns; collectAll additionally keeps every violation,
+// with its readable message, for the delivered-result path.
+func (c *schemaCheck) report(invalid message.InvalidToolArg, msg string) {
+	if c.err == nil {
+		c.err = errors.New(msg)
+	}
+	if c.invalid != nil {
+		*c.invalid = append(*c.invalid, invalid)
+	}
+	if c.collectAll {
+		c.violations = append(c.violations, ResultSchemaViolation{Invalid: invalid, Message: msg})
+	}
+}
+
+func (c *schemaCheck) reportValue(path string, value any, format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	invalid := message.InvalidToolArg{Path: path, Reason: message.InvalidToolArgReasonInvalid}
+	if encoded, err := encodeSanitizedArgs(value); err == nil {
+		invalid.ValueJSON = string(encoded)
+	}
+	c.report(invalid, msg)
+}
+
+func (c *schemaCheck) reportMissing(path string, format string, args ...any) {
+	c.report(message.InvalidToolArg{Path: path, Reason: message.InvalidToolArgReasonMissing}, fmt.Sprintf(format, args...))
+}
+
+// stop unwinds the traversal as soon as a violation is known, unless the caller
+// asked for the complete list.
+func (c *schemaCheck) stop() bool { return c.err != nil && !c.collectAll }
+
 // validateValueAgainstSchema enforces required fields, types, enums and array
-// coercion against a JSON-schema-like description. Fields the schema does not
-// declare under "additionalProperties": false are removed from value rather
-// than rejected, and recorded in ignored. An explicit null for an optional
-// declared field is removed the same way: it decodes exactly like an omitted
-// field, so it is tolerated as an omission instead of failing the call.
-// Validation failures are recorded in invalid when a diagnostic sink is
-// provided; nil sinks skip that metadata.
+// coercion against a JSON-schema-like description and returns the first
+// violation. Fields the schema does not declare under
+// "additionalProperties": false are removed from value rather than rejected,
+// and recorded in ignored. An explicit null for an optional declared field is
+// removed the same way: it decodes exactly like an omitted field, so it is
+// tolerated as an omission instead of failing the call. Validation failures are
+// recorded in invalid when a diagnostic sink is provided; nil sinks skip that
+// metadata.
 func validateValueAgainstSchema(value any, schema map[string]any, path string, ignored *[]message.IgnoredToolArg, invalid *[]message.InvalidToolArg) error {
+	check := &schemaCheck{ignored: ignored, invalid: invalid}
+	validateSchemaValue(value, schema, path, check)
+	return check.err
+}
+
+// validateSchemaValue is the recursive core shared by the tool-argument and
+// delivered-result paths.
+func validateSchemaValue(value any, schema map[string]any, path string, check *schemaCheck) error {
 	if len(schema) == 0 {
 		return nil
 	}
 	if enum, ok := schema["enum"]; ok {
 		values := schemaToSlice(enum)
 		if len(values) > 0 && !valueInEnum(value, values) {
-			_ = appendInvalidToolArg(invalid, path, value)
-			return fmt.Errorf("%s must be one of %s, got %s", path, formatEnum(values), describeJSONValue(value))
+			check.reportValue(path, value, "%s must be one of %s, got %s", path, formatEnum(values), describeJSONValue(value))
+			return check.err
 		}
 	}
 
@@ -354,21 +433,23 @@ func validateValueAgainstSchema(value any, schema map[string]any, path string, i
 	case "object":
 		obj, ok := value.(map[string]any)
 		if !ok {
-			_ = appendInvalidToolArg(invalid, path, value)
-			return fmt.Errorf("%s must be an object, got %s", path, describeJSONValue(value))
+			check.reportValue(path, value, "%s must be an object, got %s", path, describeJSONValue(value))
+			return check.err
 		}
 		props, _ := schema["properties"].(map[string]any)
-		for key, raw := range obj {
-			if _, ok := props[key]; ok || !disallowAdditionalProperties(schema) {
-				continue
+		if !check.readOnly {
+			for key, raw := range obj {
+				if _, ok := props[key]; ok || !disallowAdditionalProperties(schema) {
+					continue
+				}
+				// Record unknown fields before checking required fields so an invalid
+				// spelling can be shown alongside the missing canonical field.
+				dropIgnoredArgsUnder(check.ignored, path+"."+key)
+				if err := appendIgnoredToolArg(check.ignored, path+"."+key, raw, message.IgnoredToolArgReasonUnrecognized); err != nil {
+					return err
+				}
+				delete(obj, key)
 			}
-			// Record unknown fields before checking required fields so an invalid
-			// spelling can be shown alongside the missing canonical field.
-			dropIgnoredArgsUnder(ignored, path+"."+key)
-			if err := appendIgnoredToolArg(ignored, path+"."+key, raw, message.IgnoredToolArgReasonUnrecognized); err != nil {
-				return err
-			}
-			delete(obj, key)
 		}
 		required := requiredFields(schema["required"])
 		mandatory := mandatoryFields(schema)
@@ -378,25 +459,28 @@ func validateValueAgainstSchema(value any, schema map[string]any, path string, i
 		// The dropped value is recorded as ignored so the model still learns
 		// the parameter took no effect. Fields any required group names stay
 		// strict: null there fails the type check below with the same message
-		// as any wrong type.
-		for key, raw := range obj {
-			if raw != nil || mandatory[key] {
-				continue
+		// as any wrong type. The read-only path cannot drop the value, so it
+		// skips the same fields during traversal instead.
+		if !check.readOnly {
+			for key, raw := range obj {
+				if raw != nil || mandatory[key] {
+					continue
+				}
+				if _, declared := props[key].(map[string]any); !declared {
+					continue
+				}
+				if err := appendIgnoredToolArg(check.ignored, path+"."+key, raw, message.IgnoredToolArgReasonNull); err != nil {
+					return err
+				}
+				delete(obj, key)
 			}
-			if _, declared := props[key].(map[string]any); !declared {
-				continue
-			}
-			if err := appendIgnoredToolArg(ignored, path+"."+key, raw, message.IgnoredToolArgReasonNull); err != nil {
-				return err
-			}
-			delete(obj, key)
 		}
 		for _, key := range required {
 			if _, ok := obj[key]; !ok {
-				if invalid != nil {
-					*invalid = append(*invalid, message.InvalidToolArg{Path: path + "." + key, Reason: message.InvalidToolArgReasonMissing})
+				check.reportMissing(path+"."+key, "%s.%s is required", path, key)
+				if check.stop() {
+					return check.err
 				}
-				return fmt.Errorf("%s.%s is required", path, key)
 			}
 		}
 		for key, raw := range obj {
@@ -404,11 +488,14 @@ func validateValueAgainstSchema(value any, schema map[string]any, path string, i
 			if !ok {
 				continue
 			}
-			if err := validateValueAgainstSchema(raw, childSchema, path+"."+key, ignored, invalid); err != nil {
+			if check.readOnly && raw == nil && !mandatory[key] {
+				continue
+			}
+			if err := validateSchemaValue(raw, childSchema, path+"."+key, check); err != nil && !check.collectAll {
 				return err
 			}
 		}
-		return nil
+		return check.err
 	case "array":
 		items, ok := value.([]any)
 		if !ok {
@@ -418,44 +505,46 @@ func validateValueAgainstSchema(value any, schema map[string]any, path string, i
 			// hard failures when models supply a bare string by habit.
 			// "coerceFromObject": true does the same for a single object item.
 			if !schemaCoercesFromScalar(schema, value) && !schemaCoercesFromObject(schema, value) {
-				_ = appendInvalidToolArg(invalid, path, value)
-				return fmt.Errorf("%s must be an array, got %s", path, describeJSONValue(value))
+				check.reportValue(path, value, "%s must be an array, got %s", path, describeJSONValue(value))
+				return check.err
 			}
 			items = []any{value}
 		}
 		if minItems, ok := asInt(schema["minItems"]); ok && len(items) < minItems {
-			_ = appendInvalidToolArg(invalid, path, value)
-			return fmt.Errorf("%s must contain at least %d item(s)", path, minItems)
+			check.reportValue(path, value, "%s must contain at least %d item(s)", path, minItems)
+			if check.stop() {
+				return check.err
+			}
 		}
 		itemSchema, _ := schema["items"].(map[string]any)
 		for i, item := range items {
-			if err := validateValueAgainstSchema(item, itemSchema, fmt.Sprintf("%s[%d]", path, i), ignored, invalid); err != nil {
+			if err := validateSchemaValue(item, itemSchema, fmt.Sprintf("%s[%d]", path, i), check); err != nil && !check.collectAll {
 				return err
 			}
 		}
-		return nil
+		return check.err
 	case "string":
 		if _, ok := value.(string); !ok {
-			_ = appendInvalidToolArg(invalid, path, value)
-			return fmt.Errorf("%s must be a string, got %s", path, describeJSONValue(value))
+			check.reportValue(path, value, "%s must be a string, got %s", path, describeJSONValue(value))
+			return check.err
 		}
 		return nil
 	case "boolean":
 		if _, ok := value.(bool); !ok {
-			_ = appendInvalidToolArg(invalid, path, value)
-			return fmt.Errorf("%s must be a boolean, got %s", path, describeJSONValue(value))
+			check.reportValue(path, value, "%s must be a boolean, got %s", path, describeJSONValue(value))
+			return check.err
 		}
 		return nil
 	case "integer":
 		if !isIntegerJSONValue(value) {
-			_ = appendInvalidToolArg(invalid, path, value)
-			return fmt.Errorf("%s must be an integer, got %s", path, describeJSONValue(value))
+			check.reportValue(path, value, "%s must be an integer, got %s", path, describeJSONValue(value))
+			return check.err
 		}
 		return nil
 	case "number":
 		if !isNumberJSONValue(value) {
-			_ = appendInvalidToolArg(invalid, path, value)
-			return fmt.Errorf("%s must be a number, got %s", path, describeJSONValue(value))
+			check.reportValue(path, value, "%s must be a number, got %s", path, describeJSONValue(value))
+			return check.err
 		}
 		return nil
 	default:

@@ -714,6 +714,20 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 	subCfg.PlanTaskRef = record.PlanTaskRef
 	subCfg.SemanticKey = record.SemanticTaskKey
 	subCfg.WriteScope = writeScope
+	if len(record.ResultSchema) > 0 {
+		// The contract is recompiled from its canonical bytes so a restored
+		// worker validates exactly what it was admitted with. Uncompilable
+		// bytes mean the record was damaged outside the tool chain; dropping
+		// the contract is honest (nothing can enforce it) but must be loud,
+		// because the task then keeps running without its declared contract.
+		schema, canonical, err := tools.CompileResultSchema(record.ResultSchema)
+		if err != nil {
+			log.Warnf("dropping unreadable result contract task_id=%v error=%v", record.TaskID, err)
+		} else {
+			subCfg.ResultSchema = schema
+			subCfg.ResultSchemaJSON = canonical
+		}
+	}
 	subCfg.OwnerAgentID = record.OwnerAgentID
 	subCfg.OwnerTaskID = record.OwnerTaskID
 	subCfg.Depth = record.Depth

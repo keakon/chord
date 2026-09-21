@@ -60,31 +60,59 @@ func NewEscalateTool(sender EventSender) *EscalateTool {
 	return &EscalateTool{sender: sender}
 }
 
+// Escalation kinds. kind is required and carries no default: the two states have
+// different consequences (one parks the task for a reply, the other ends the
+// attempt), so a missing kind silently meaning needs_repair would be exactly the
+// kind of compatibility branch this project does not carry before 1.0.
+const (
+	// EscalateKindNeedsRepair parks the worker until its direct owner replies.
+	EscalateKindNeedsRepair = "needs_repair"
+	// EscalateKindBlocked ends the attempt: the worker has hit a dead end that
+	// even its owner's reply cannot resolve.
+	EscalateKindBlocked = "blocked"
+)
+
 type AgentRequestPayload struct {
+	Kind   string `json:"kind"`
 	Reason string `json:"reason"`
+}
+
+// Validate reports whether the engine can route this escalation.
+func (p AgentRequestPayload) Validate() error {
+	switch strings.TrimSpace(p.Kind) {
+	case EscalateKindNeedsRepair, EscalateKindBlocked:
+	default:
+		return fmt.Errorf("kind must be %q or %q", EscalateKindNeedsRepair, EscalateKindBlocked)
+	}
+	if strings.TrimSpace(p.Reason) == "" {
+		return fmt.Errorf("reason is required")
+	}
+	return nil
 }
 
 func (EscalateTool) Name() string { return NameEscalate }
 
 func (EscalateTool) Description() string {
-	return "Request parent-agent intervention or escalation through the coordination chain. Use when: " +
-		"(1) you encounter a file conflict that needs coordination, " +
-		"(2) you need information from another task's output, " +
-		"(3) you are blocked and need the task to be reassigned or split, " +
-		"(4) you need a decision that is beyond your scope. " +
-		"Unlike complete, this does not end the task; the worker parks until its direct owner replies."
+	return "Request parent-agent intervention or escalation through the coordination chain. Use kind=needs_repair for a file conflict that needs coordination, " +
+		"information from another task's output, a decision beyond your scope, or a task that should be reassigned or split; unlike complete, it does not end the task — " +
+		"the worker parks until its direct owner replies. Use kind=blocked only for a dead end that even the owner's reply cannot resolve, which ends this attempt as failed."
 }
 
 func (EscalateTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
+			"kind": map[string]any{
+				"type":        "string",
+				"enum":        []string{EscalateKindNeedsRepair, EscalateKindBlocked},
+				"description": "needs_repair waits for the owner's reply; blocked ends the attempt because no reply can resolve it. Required; there is no default.",
+			},
 			"reason": map[string]any{
 				"type":        "string",
 				"description": "Why parent-agent intervention or escalation is needed. Be specific about what you need.",
 			},
 		},
-		"required":             []string{"reason"},
+		"required":             []string{"kind", "reason"},
 		"additionalProperties": false,
 	}
 }
@@ -96,8 +124,8 @@ func (t *EscalateTool) Execute(ctx context.Context, raw json.RawMessage) (string
 	if err := json.Unmarshal(raw, &a); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
-	if a.Reason == "" {
-		return "", fmt.Errorf("reason is required")
+	if err := a.Validate(); err != nil {
+		return "", err
 	}
 	if t.sender == nil {
 		return "", fmt.Errorf("event sender not available (no EventSender configured)")
@@ -106,5 +134,8 @@ func (t *EscalateTool) Execute(ctx context.Context, raw json.RawMessage) (string
 	agentID := AgentIDFromContext(ctx)
 	t.sender.SendAgentEvent(EventEscalate, agentID, a)
 
+	if strings.TrimSpace(a.Kind) == EscalateKindBlocked {
+		return "The parent-agent coordination chain has been notified that this task is blocked.", nil
+	}
 	return "The parent-agent coordination chain has been notified. This task will wait for its direct owner's reply.", nil
 }

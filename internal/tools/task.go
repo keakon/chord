@@ -105,6 +105,22 @@ type TaskHandle struct {
 	DuplicateDetected  bool       `json:"duplicate_detected,omitempty"`
 }
 
+// SubAgentRequest is one delegation request. It is a struct rather than a
+// positional parameter list because the delegation surface keeps growing (the
+// result contract is one such field), and every added parameter would otherwise
+// rewrite the argument order at each call site.
+type SubAgentRequest struct {
+	Description        string
+	AgentType          string
+	PlanTaskRef        string
+	SemanticTaskKey    string
+	ExpectedWriteScope WriteScope
+	// ResultSchema is the canonical encoding of the delegated result contract
+	// as validated by CompileResultSchema, or empty for a task with no
+	// contract.
+	ResultSchema json.RawMessage
+}
+
 // SubAgentCreator is the interface used by TaskTool to create SubAgents.
 // Defined here (in the tools package) to avoid circular imports — the agent
 // package imports tools, so tools cannot import agent. MainAgent implements
@@ -112,7 +128,7 @@ type TaskHandle struct {
 type SubAgentCreator interface {
 	// CreateSubAgent creates a new SubAgent for the given task.
 	// Returns a structured handle for the created worker, or an error.
-	CreateSubAgent(ctx context.Context, description, agentType string, planTaskRef, semanticTaskKey string, expectedWriteScope WriteScope) (TaskHandle, error)
+	CreateSubAgent(ctx context.Context, req SubAgentRequest) (TaskHandle, error)
 	// AvailableSubAgents returns the list of subagent-mode agents that can be
 	// used with the Delegate tool. Used to populate the agent_type description.
 	AvailableSubAgents() []AgentInfo
@@ -139,6 +155,10 @@ type delegateArgs struct {
 	// while an empty object is valid only for roles whose surface registers no
 	// file-modifying tools.
 	ExpectedWriteScope *WriteScope `json:"expected_write_scope"`
+	// Optional result contract the worker's reported result must satisfy. The
+	// declared schema is only an object at the tool surface; the accepted
+	// subset is compiled and checked here before a worker is started.
+	ResultSchema json.RawMessage `json:"result_schema,omitempty"`
 }
 
 func (DelegateTool) Name() string { return NameDelegate }
@@ -206,6 +226,10 @@ func (t *DelegateTool) Parameters() map[string]any {
 			"semantic_task_key": map[string]any{
 				"type":        "string",
 				"description": "Optional semantic key for duplicate detection. Use a concise stable identifier for the same deliverable, not for unrelated new work.",
+			},
+			"result_schema": map[string]any{
+				"type":        "object",
+				"description": "Optional result contract the worker's reported result must satisfy. Declare it as a JSON-schema-like object using only type, required, properties, items, enum, and description; the top-level type must be object. A supported schema within the size limits is enforced on both the inline result and a result stored by save_artifact and passed as result_ref. Unsupported keywords, an unsupported type name, or a schema nested too deeply are rejected here before the worker starts. Omit it for a task with no required result shape.",
 			},
 			"expected_write_scope": map[string]any{
 				"type":                 "object",
@@ -291,7 +315,22 @@ func (t *DelegateTool) Execute(ctx context.Context, raw json.RawMessage) (string
 		return "", fmt.Errorf("task creation not available (no SubAgentCreator configured)")
 	}
 
-	handle, err := t.creator.CreateSubAgent(ctx, a.Description, a.AgentType, a.PlanTaskRef, a.SemanticTaskKey, expectedWriteScope)
+	// Reject an unusable contract here, before any worker is admitted: a bad
+	// schema must not cost a whole worker round to discover. Compilation also
+	// canonicalizes what is handed to the creator and persisted with the task.
+	_, resultSchema, err := CompileResultSchema(a.ResultSchema)
+	if err != nil {
+		return "", err
+	}
+
+	handle, err := t.creator.CreateSubAgent(ctx, SubAgentRequest{
+		Description:        a.Description,
+		AgentType:          a.AgentType,
+		PlanTaskRef:        a.PlanTaskRef,
+		SemanticTaskKey:    a.SemanticTaskKey,
+		ExpectedWriteScope: expectedWriteScope,
+		ResultSchema:       resultSchema,
+	})
 	if err != nil {
 		return "", err
 	}

@@ -110,8 +110,8 @@ type subAgentDelegateCreator struct {
 	ruleset func() permission.Ruleset
 }
 
-func (c subAgentDelegateCreator) CreateSubAgent(ctx context.Context, description, agentType string, planTaskRef, semanticTaskKey string, expectedWriteScope tools.WriteScope) (tools.TaskHandle, error) {
-	return c.parent.CreateSubAgent(ctx, description, agentType, planTaskRef, semanticTaskKey, expectedWriteScope)
+func (c subAgentDelegateCreator) CreateSubAgent(ctx context.Context, req tools.SubAgentRequest) (tools.TaskHandle, error) {
+	return c.parent.CreateSubAgent(ctx, req)
 }
 
 // AgentRoleRegistersNoFileWriteTools implements tools.AgentFileWriteSurface for
@@ -744,6 +744,10 @@ func (a *MainAgent) handleEscalate(evt Event) {
 		a.queueLoopEvent(Event{Type: EventAgentError, SourceID: evt.SourceID, Payload: fmt.Errorf("persist agent request: %w", err)})
 		return
 	}
+	// Count the escalation against the durable task before the worker parks: the
+	// budget that refuses a repeated unanswered escalation is read from this
+	// record by the worker itself.
+	a.recordSubAgentEscalation(sub, request.RequestMessageID)
 	a.handleSubAgentStateChangedEvent(Event{
 		Type:     EventSubAgentStateChanged,
 		SourceID: evt.SourceID,
@@ -916,7 +920,12 @@ func (a *MainAgent) getOrCreateAgentMCP(agentName string, mcpCfg config.MCPConfi
 	return extra, nil
 }
 
-func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType string, planTaskRef, semanticTaskKey string, expectedWriteScope tools.WriteScope) (result tools.TaskHandle, resultErr error) {
+func (a *MainAgent) CreateSubAgent(ctx context.Context, req tools.SubAgentRequest) (result tools.TaskHandle, resultErr error) {
+	description := req.Description
+	agentType := req.AgentType
+	planTaskRef := req.PlanTaskRef
+	semanticTaskKey := req.SemanticTaskKey
+	expectedWriteScope := req.ExpectedWriteScope
 	requestCtx := ctx
 	caller, err := a.canCallerDelegate(ctx)
 	if err != nil {
@@ -943,6 +952,13 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 	agentDef, err := a.resolveAgentDef(agentType)
 	if err != nil {
 		return tools.TaskHandle{}, err
+	}
+	// Delegate already refused an unusable contract, but CreateSubAgent is the
+	// admission point for every caller and recompiles from the canonical bytes
+	// it was handed, so an invalid contract never reaches a worker.
+	resultSchema, resultSchemaJSON, err := tools.CompileResultSchema(req.ResultSchema)
+	if err != nil {
+		return tools.TaskHandle{}, fmt.Errorf("invalid result_schema: %w", err)
 	}
 	admission := &subAgentAdmission{
 		taskID:             taskID,
@@ -1089,6 +1105,8 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, description, agentType s
 	subCfg.OwnerTaskID = caller.TaskID
 	subCfg.Depth = caller.Depth + 1
 	subCfg.JoinToOwner = !caller.IsMain && caller.Delegation.ChildJoinEnabled()
+	subCfg.ResultSchema = resultSchema
+	subCfg.ResultSchemaJSON = resultSchemaJSON
 	sub := NewSubAgent(subCfg)
 	admissionStartedAt = time.Now()
 	a.admissionMu.Lock()

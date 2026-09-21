@@ -109,6 +109,11 @@ func (a *MainAgent) commitTerminalTaskFrom(sub *SubAgent, from, state SubAgentSt
 			settlement.ResultRef = &ref
 		}
 	}
+	// A terminal result-contract failure carries its machine-readable diagnosis
+	// into the settlement, the durable surface resume and headless read.
+	if failure := sub.resultContractFailure(); failure != nil {
+		settlement.Contract = failure
+	}
 
 	durable := false
 	var persistErr error

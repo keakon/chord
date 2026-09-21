@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -92,12 +93,20 @@ const inputChanCap = 64
 // external user input is enqueued via InjectUserMessage / InjectUserMessageWithParts.
 // Cross-goroutine lifecycle flags use atomics.
 type SubAgent struct {
-	instanceID         string // immutable, from NextInstanceID()
-	taskID             string // plan task ID or "adhoc-N"
-	agentDefName       string // agent definition name (e.g. "backend-coder")
-	taskDesc           string // task description (from Plan or ad-hoc)
-	planTaskRef        string
-	semanticTaskKey    string
+	instanceID      string // immutable, from NextInstanceID()
+	taskID          string // plan task ID or "adhoc-N"
+	agentDefName    string // agent definition name (e.g. "backend-coder")
+	taskDesc        string // task description (from Plan or ad-hoc)
+	planTaskRef     string
+	semanticTaskKey string
+	// resultSchema is the delegated result contract (runtime map + canonical
+	// bytes). Both are immutable after construction; resultContractMu guards
+	// only the terminal failure diagnostics, which the run loop writes and the
+	// main event loop reads when the task settles.
+	resultSchema       map[string]any
+	resultSchemaJSON   json.RawMessage
+	resultContractMu   sync.Mutex
+	resultContract     *TaskContractDiagnostics
 	writeScopeMu       sync.RWMutex
 	writeScope         tools.WriteScope
 	ownerMu            sync.RWMutex
@@ -220,9 +229,16 @@ type SubAgent struct {
 	pendingRejectedCompleteCallID   string
 	pendingRejectedCompleteErr      error
 	pendingRejectedCompleteDegraded *AgentResult
-	pendingEscalate                 string
-	pendingEscalateRequest          *tools.AgentRequestPayload
-	acceptedMailboxIDs              map[string]struct{} // guarded by inputQueueMu; de-duplicates durable deliveries
+	// pendingEscalateRequest is the accepted needs_repair escalation co-returned
+	// with regular tools; it is routed once those tools settle. Escalate's payload
+	// is the whole routing decision, so the pointer (not a bare reason string) is
+	// the single source of truth here.
+	pendingEscalateRequest *tools.AgentRequestPayload
+	// pendingEscalateRefusal is a needs_repair escalation refused for exhausting
+	// the unanswered-escalation budget while co-returned with regular tools; it is
+	// reported after their results close the batch.
+	pendingEscalateRefusal *escalationRefusal
+	acceptedMailboxIDs     map[string]struct{} // guarded by inputQueueMu; de-duplicates durable deliveries
 
 	// Permission: merged ruleset (global + project + agent-level).
 	//
@@ -493,37 +509,43 @@ const maxSubAgentLLMSilentRecoveries = 1
 
 // SubAgentConfig holds the parameters for creating a new SubAgent.
 type SubAgentConfig struct {
-	InstanceID     string
-	TaskID         string
-	AgentDefName   string
-	TaskDesc       string
-	PlanTaskRef    string
-	SemanticKey    string
-	WriteScope     tools.WriteScope
-	OwnerAgentID   string
-	OwnerTaskID    string
-	Depth          int
-	JoinToOwner    bool
-	Delegation     config.DelegationConfig
-	Color          string
-	SystemPrompt   string // custom role instructions from agent YAML body; empty = use built-in
-	LLMClient      *llm.Client
-	Recovery       *recovery.RecoveryManager
-	SessionEpoch   uint64 // parent session epoch this agent's writes belong to
-	Parent         *MainAgent
-	ParentCtx      context.Context
-	Cancel         context.CancelFunc
-	BaseTools      *tools.Registry // shared base tool registry (Read, Write, Edit, Shell, Grep, Glob, etc.)
-	ExtraMCPTools  []tools.Tool    // agent-specific MCP tools
-	Ruleset        permission.Ruleset
-	WorkDir        string
-	VenvPath       string // absolute path to detected Python virtual environment, or ""
-	SessionDir     string
-	AgentsMD       string
-	Skills         []*skill.Meta
-	ModelName      string
-	StartupTimeout time.Duration // 0 → DefaultSubAgentStartupTimeout
-	Orchestration  config.OrchestrationConfig
+	InstanceID   string
+	TaskID       string
+	AgentDefName string
+	TaskDesc     string
+	PlanTaskRef  string
+	SemanticKey  string
+	// ResultSchema is the delegated result contract as a runtime schema map and
+	// ResultSchemaJSON its canonical bytes. Both come from
+	// tools.CompileResultSchema, so the map and the persisted encoding cannot
+	// drift; empty means the task has no contract.
+	ResultSchema     map[string]any
+	ResultSchemaJSON json.RawMessage
+	WriteScope       tools.WriteScope
+	OwnerAgentID     string
+	OwnerTaskID      string
+	Depth            int
+	JoinToOwner      bool
+	Delegation       config.DelegationConfig
+	Color            string
+	SystemPrompt     string // custom role instructions from agent YAML body; empty = use built-in
+	LLMClient        *llm.Client
+	Recovery         *recovery.RecoveryManager
+	SessionEpoch     uint64 // parent session epoch this agent's writes belong to
+	Parent           *MainAgent
+	ParentCtx        context.Context
+	Cancel           context.CancelFunc
+	BaseTools        *tools.Registry // shared base tool registry (Read, Write, Edit, Shell, Grep, Glob, etc.)
+	ExtraMCPTools    []tools.Tool    // agent-specific MCP tools
+	Ruleset          permission.Ruleset
+	WorkDir          string
+	VenvPath         string // absolute path to detected Python virtual environment, or ""
+	SessionDir       string
+	AgentsMD         string
+	Skills           []*skill.Meta
+	ModelName        string
+	StartupTimeout   time.Duration // 0 → DefaultSubAgentStartupTimeout
+	Orchestration    config.OrchestrationConfig
 }
 
 // NewSubAgent creates a fully-initialised SubAgent. The caller must invoke
@@ -630,6 +652,8 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 		taskDesc:          cfg.TaskDesc,
 		planTaskRef:       strings.TrimSpace(cfg.PlanTaskRef),
 		semanticTaskKey:   strings.TrimSpace(cfg.SemanticKey),
+		resultSchema:      cfg.ResultSchema,
+		resultSchemaJSON:  cloneRawJSON(cfg.ResultSchemaJSON),
 		writeScope:        cfg.WriteScope.Normalized(),
 		ownerAgentID:      strings.TrimSpace(cfg.OwnerAgentID),
 		ownerTaskID:       strings.TrimSpace(cfg.OwnerTaskID),
@@ -1391,7 +1415,11 @@ func (s *SubAgent) buildSystemPrompt() string {
 	// prefix-cacheable.
 
 	// Task description (core difference from MainAgent).
-	parts = append(parts, fmt.Sprintf("## Your Task\n\n%s\n\n%s", s.taskDesc, taskCompletionInstruction(visible)))
+	taskSection := fmt.Sprintf("## Your Task\n\n%s\n\n%s", s.taskDesc, taskCompletionInstruction(visible))
+	if block := s.resultContractPromptBlock(); block != "" {
+		taskSection += "\n\n" + block
+	}
+	parts = append(parts, taskSection)
 
 	if block := agentsMDReminderFramingPromptBlock(s.agentsMD); block != "" {
 		parts = append(parts, block)

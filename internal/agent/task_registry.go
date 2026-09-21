@@ -43,6 +43,7 @@ type DurableTaskRecord struct {
 	TaskDesc             string              `json:"task_desc,omitempty"`
 	PlanTaskRef          string              `json:"plan_task_ref,omitempty"`
 	SemanticTaskKey      string              `json:"semantic_task_key,omitempty"`
+	ResultSchema         json.RawMessage     `json:"result_schema,omitempty"`
 	ExpectedWriteScope   tools.WriteScope    `json:"expected_write_scope"`
 	OwnerAgentID         string              `json:"owner_agent_id,omitempty"`
 	OwnerTaskID          string              `json:"owner_task_id,omitempty"`
@@ -62,6 +63,13 @@ type DurableTaskRecord struct {
 	LastReplyKind        string              `json:"last_reply_kind,omitempty"`
 	LastReplySummary     string              `json:"last_reply_summary,omitempty"`
 	LastArtifactRefs     []tools.ArtifactRef `json:"last_artifact_refs,omitempty"`
+	// EscalationCount and EscalationMailboxID track needs_repair escalations the
+	// owner has not answered. They live on the durable task rather than a turn so
+	// the budget spans attempts: the loop they converge is exactly the one that
+	// crosses attempts. EscalationMailboxID names the mailbox whose answer zeroes
+	// the count (see buildTaskRecordFromSub).
+	EscalationCount      int                 `json:"escalation_count,omitempty"`
+	EscalationMailboxID  string              `json:"escalation_mailbox_id,omitempty"`
 	LastCompletion       *CompletionEnvelope `json:"last_completion,omitempty"`
 	PendingCompletion    *CompletionEnvelope `json:"pending_completion,omitempty"`
 	SuspectedStallReason string              `json:"suspected_stall_reason,omitempty"`
@@ -104,6 +112,7 @@ func cloneDurableTaskRecord(in *DurableTaskRecord) *DurableTaskRecord {
 	out.TaskDesc = strings.TrimSpace(out.TaskDesc)
 	out.PlanTaskRef = strings.TrimSpace(out.PlanTaskRef)
 	out.SemanticTaskKey = strings.TrimSpace(out.SemanticTaskKey)
+	out.ResultSchema = cloneRawJSON(out.ResultSchema)
 	out.ExpectedWriteScope = out.ExpectedWriteScope.Normalized()
 	out.OwnerAgentID = strings.TrimSpace(out.OwnerAgentID)
 	out.OwnerTaskID = strings.TrimSpace(out.OwnerTaskID)
@@ -119,6 +128,7 @@ func cloneDurableTaskRecord(in *DurableTaskRecord) *DurableTaskRecord {
 	out.LastReplyToMailboxID = strings.TrimSpace(out.LastReplyToMailboxID)
 	out.LastReplyKind = strings.TrimSpace(out.LastReplyKind)
 	out.LastReplySummary = strings.TrimSpace(out.LastReplySummary)
+	out.EscalationMailboxID = strings.TrimSpace(out.EscalationMailboxID)
 	out.LastArtifactRefs = tools.NormalizeArtifactRefs(out.LastArtifactRefs)
 	out.LastCompletion = normalizeCompletionEnvelope(out.LastCompletion)
 	out.PendingCompletion = normalizeCompletionEnvelope(out.PendingCompletion)
@@ -715,6 +725,11 @@ func buildTaskRecordFromSub(sub *SubAgent, previous *DurableTaskRecord, closedRe
 	if semanticTaskKey := strings.TrimSpace(sub.semanticTaskKey); semanticTaskKey != "" || rec.SemanticTaskKey == "" {
 		rec.SemanticTaskKey = semanticTaskKey
 	}
+	// The live runtime is the truth for this attempt's contract: a re-delegation
+	// without a contract must not inherit the previous attempt's, and a contract
+	// dropped at rehydration because its bytes were unreadable must not be
+	// reintroduced here.
+	rec.ResultSchema = cloneRawJSON(sub.resultSchemaJSON)
 	if writeScope := sub.currentWriteScope(); !writeScope.Empty() || rec.ExpectedWriteScope.Empty() {
 		rec.ExpectedWriteScope = writeScope
 	}
@@ -746,6 +761,14 @@ func buildTaskRecordFromSub(sub *SubAgent, previous *DurableTaskRecord, closedRe
 	rec.LastReplyToMailboxID = strings.TrimSpace(lastReplyToMailboxID)
 	rec.LastReplyKind = strings.TrimSpace(lastReplyKind)
 	rec.LastReplySummary = strings.TrimSpace(lastReplySummary)
+	// The owner answered the escalation this record is counting, so the budget
+	// starts over. Only a reply to that exact mailbox clears it: owner-initiated
+	// deliveries leave LastReplyToMailboxID empty, and a wake-up from a descendant
+	// mailbox does not touch the reply thread at all, so neither can reset a spin.
+	if rec.EscalationMailboxID != "" && rec.LastReplyToMailboxID == rec.EscalationMailboxID {
+		rec.EscalationCount = 0
+		rec.EscalationMailboxID = ""
+	}
 	if strings.TrimSpace(lastArtifact.ID) != "" || strings.TrimSpace(lastArtifact.RelPath) != "" {
 		rec.LastArtifactRefs = tools.NormalizeArtifactRefs(append(rec.LastArtifactRefs, lastArtifact))
 	}
@@ -825,6 +848,9 @@ func mergeDurableTaskRecords(base map[string]*DurableTaskRecord, extra ...map[st
 				}
 				if next.SemanticTaskKey == "" {
 					next.SemanticTaskKey = prev.SemanticTaskKey
+				}
+				if len(next.ResultSchema) == 0 {
+					next.ResultSchema = cloneRawJSON(prev.ResultSchema)
 				}
 				if next.ExpectedWriteScope.Empty() {
 					next.ExpectedWriteScope = prev.ExpectedWriteScope

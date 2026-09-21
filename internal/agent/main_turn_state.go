@@ -87,6 +87,14 @@ type Turn struct {
 	// chance to repair a malformed Complete, and a rejected Complete does not
 	// eat the wrap-up nudge either.
 	SubAgentCompletionRecoveryCount int
+	// SubAgentResultContractRecoveryCount bounds the follow-up for a completion
+	// rejected by the task's declared result contract to one request. It is
+	// separate from the invalid-arguments budget so a JSON-level mistake cannot
+	// eat the model's one chance to correct the delivered shape, and a shape
+	// mistake cannot eat the chance to correct the arguments: the two failure
+	// classes are independent, and a shared budget would strand whichever came
+	// second without a repair.
+	SubAgentResultContractRecoveryCount int
 	// Resuming a preserved stream interruption has its own budget: it is a
 	// transport failure, not a model that refuses to finish, and the client
 	// already paces each restart behind a credential cooldown. Sharing the

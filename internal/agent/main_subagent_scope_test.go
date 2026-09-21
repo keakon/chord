@@ -35,7 +35,7 @@ func TestNestedCreateSubAgentDeclaredScopeIsAdvisory(t *testing.T) {
 		parent.writeScope = tools.WriteScope{PathPrefix: []string{"src"}}
 		a.syncTaskRecordFromSub(parent, "")
 		ctx := tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID)
-		handle, err := a.CreateSubAgent(ctx, "Fix lib", "worker", "", "", tools.WriteScope{Files: []string{"lib/sample.go"}})
+		handle, err := a.CreateSubAgent(ctx, tools.SubAgentRequest{Description: "Fix lib", AgentType: "worker", ExpectedWriteScope: tools.WriteScope{Files: []string{"lib/sample.go"}}})
 		if err != nil || handle.Status != "started" {
 			t.Fatalf("CreateSubAgent = (%#v, %v), want the broader child declared scope accepted", handle, err)
 		}
@@ -48,7 +48,7 @@ func TestNestedCreateSubAgentDeclaredScopeIsAdvisory(t *testing.T) {
 		parent.writeScope = tools.WriteScope{PathPrefix: []string{"internal"}}
 		a.syncTaskRecordFromSub(parent, "")
 		ctx := tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID)
-		handle, err := a.CreateSubAgent(ctx, "Check sample package", "worker", "", "", tools.WriteScope{Files: []string{"internal/agent/main.go"}})
+		handle, err := a.CreateSubAgent(ctx, tools.SubAgentRequest{Description: "Check sample package", AgentType: "worker", ExpectedWriteScope: tools.WriteScope{Files: []string{"internal/agent/main.go"}}})
 		if err != nil || handle.Status != "started" {
 			t.Fatalf("child = %#v, %v", handle, err)
 		}
@@ -61,7 +61,7 @@ func TestNestedCreateSubAgentDeclaredScopeIsAdvisory(t *testing.T) {
 		parent.writeScope = tools.WriteScope{PathPrefix: []string{"src"}}
 		a.syncTaskRecordFromSub(parent, "")
 		ctx := tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID)
-		handle, err := a.CreateSubAgent(ctx, "Unscoped work", "worker", "", "", tools.WriteScope{})
+		handle, err := a.CreateSubAgent(ctx, tools.SubAgentRequest{Description: "Unscoped work", AgentType: "worker"})
 		if err != nil || handle.Status != "started" {
 			t.Fatalf("CreateSubAgent = (%#v, %v), want empty write-capable child accepted", handle, err)
 		}
@@ -74,7 +74,7 @@ func TestNestedCreateSubAgentDeclaredScopeIsAdvisory(t *testing.T) {
 		parent.writeScope = tools.WriteScope{PathPrefix: []string{"src"}}
 		a.syncTaskRecordFromSub(parent, "")
 		ctx := tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID)
-		handle, err := a.CreateSubAgent(ctx, "Survey parser", "worker", "", "", tools.WriteScope{})
+		handle, err := a.CreateSubAgent(ctx, tools.SubAgentRequest{Description: "Survey parser", AgentType: "worker"})
 		if err != nil || handle.Status != "started" {
 			t.Fatalf("child = %#v, %v; want empty scope accepted for a role without file tools", handle, err)
 		}
@@ -95,11 +95,11 @@ func TestCreateSubAgentOverlappingSiblingScopeStartsWithConflictHint(t *testing.
 	a.syncTaskRecordFromSub(parent, "")
 	ctx := tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID)
 
-	first, err := a.CreateSubAgent(ctx, "Fix agent wiring", "worker", "", "", tools.WriteScope{PathPrefix: []string{"internal/agent"}})
+	first, err := a.CreateSubAgent(ctx, tools.SubAgentRequest{Description: "Fix agent wiring", AgentType: "worker", ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{"internal/agent"}}})
 	if err != nil || first.Status != "started" {
 		t.Fatalf("first child = (%#v, %v), want started", first, err)
 	}
-	second, err := a.CreateSubAgent(ctx, "Extract agent sub helpers", "worker", "", "", tools.WriteScope{Files: []string{"internal/agent/main.go"}})
+	second, err := a.CreateSubAgent(ctx, tools.SubAgentRequest{Description: "Extract agent sub helpers", AgentType: "worker", ExpectedWriteScope: tools.WriteScope{Files: []string{"internal/agent/main.go"}}})
 	if err != nil {
 		t.Fatalf("overlapping second child rejected: %v", err)
 	}

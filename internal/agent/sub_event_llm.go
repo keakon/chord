@@ -271,6 +271,14 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	var wakeMainReason string
 	var wakeMainRequest *tools.AgentRequestPayload
 	var wakeMainArgsJSON string
+	// escalateFailure and escalateBlockedReason are the two terminal escalate
+	// shapes; escalateRefusal is the repairable one (budget exhausted). All three
+	// are resolved below, after the Complete/Escalate mix check.
+	var escalateCallID string
+	var escalateArgsJSON string
+	var escalateFailure error
+	var escalateBlockedReason string
+	var escalateRefusal *escalationRefusal
 	for _, tc := range validCalls {
 		if tools.NormalizeName(tc.Name) == tools.NameComplete {
 			var args struct {
@@ -307,8 +315,15 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 				// An incomplete typed-result group is the one rejection that
 				// leaves a usable delivery behind: everything except the group
 				// validated. Keep that delivery as the fallback the rejection
-				// path settles once the correction budget is spent.
+				// path settles once the correction budget is spent. A declared
+				// result contract makes the group itself the deliverable, so the
+				// same shape is a contract violation with no fallback: the
+				// missing group is the missing result, not optional metadata.
 				if _, ok := errors.AsType[typedResultPairingError](err); ok {
+					if contractErr := s.missingResultContractError(); contractErr != nil {
+						completeRejection = contractErr
+						break
+					}
 					completeDegraded = &AgentResult{
 						Summary: strings.TrimSpace(args.Summary),
 						Envelope: normalizeCompletionEnvelope(&CompletionEnvelope{
@@ -324,6 +339,10 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 				break
 			}
 			taskCompleteCallID = tc.ID
+			if contractErr := s.validateDeliveredResultAgainstContract(result, resultRef); contractErr != nil {
+				completeRejection = contractErr
+				break
+			}
 			taskComplete = &AgentResult{
 				Summary: strings.TrimSpace(args.Summary),
 				Envelope: normalizeCompletionEnvelope(&CompletionEnvelope{
@@ -342,48 +361,56 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 		}
 	}
 	for _, tc := range validCalls {
-		if tools.NormalizeName(tc.Name) == tools.NameEscalate {
-			var args tools.AgentRequestPayload
-			if err := json.Unmarshal(tc.Args, &args); err != nil {
-				s.sendEvent(Event{
-					Type:    EventAgentError,
-					Payload: fmt.Errorf("invalid Escalate args: %w", err),
-				})
-				return
-			}
-			wakeMainCallID = tc.ID
-			wakeMainReason = args.Reason
-			wakeMainRequest = &args
-			wakeMainArgsJSON = string(tc.Args)
+		if tools.NormalizeName(tc.Name) != tools.NameEscalate {
+			continue
+		}
+		escalateCallID = tc.ID
+		escalateArgsJSON = string(tc.Args)
+		var args tools.AgentRequestPayload
+		if err := json.Unmarshal(tc.Args, &args); err != nil {
+			escalateFailure = fmt.Errorf("invalid Escalate args: %w", err)
 			break
 		}
+		if err := args.Validate(); err != nil {
+			escalateFailure = fmt.Errorf("invalid Escalate args: %w", err)
+			break
+		}
+		if strings.TrimSpace(args.Kind) == tools.EscalateKindBlocked {
+			escalateBlockedReason = args.Reason
+			break
+		}
+		// A needs_repair escalation parks the worker until its owner answers, so a
+		// worker looping on the same unanswered blocker re-enters waiting_main and
+		// resets the very timers that would expire it. The durable budget is the
+		// only thing that stops the spin.
+		if !s.parent.subAgentEscalationAllowed(s.taskID) {
+			escalateRefusal = newEscalationRefusal(tc.ID, escalateArgsJSON)
+			break
+		}
+		wakeMainCallID = tc.ID
+		wakeMainReason = args.Reason
+		wakeMainRequest = &args
+		wakeMainArgsJSON = escalateArgsJSON
+		break
 	}
-	if taskCompleteCallID != "" && wakeMainCallID != "" {
+	if taskCompleteCallID != "" && escalateCallID != "" {
 		s.sendEvent(Event{
 			Type:    EventAgentError,
 			Payload: fmt.Errorf("invalid control mix: Complete and Escalate cannot appear in the same response"),
 		})
 		return
 	}
+	if escalateFailure != nil {
+		s.rejectInvalidEscalateArguments(escalateCallID, escalateArgsJSON, escalateFailure)
+		return
+	}
+	if escalateBlockedReason != "" {
+		s.closeAsBlocked(escalateCallID, escalateArgsJSON, escalateBlockedReason)
+		return
+	}
 
 	if wakeMainCallID != "" {
-		resultContent := "Escalation sent: " + wakeMainReason
-		toolMsg := message.Message{
-			Role:       "tool",
-			ToolCallID: wakeMainCallID,
-			Content:    resultContent,
-		}
-		s.ctxMgr.Append(toolMsg)
-		s.persistMessageAsync(toolMsg, "Escalate tool result", nil)
-		s.turn.removeStreamingToolCall(wakeMainCallID)
-		s.parent.emitToTUI(ToolResultEvent{
-			CallID:   wakeMainCallID,
-			Name:     tools.NameEscalate,
-			ArgsJSON: wakeMainArgsJSON,
-			Result:   resultContent,
-			Status:   ToolResultStatusSuccess,
-			AgentID:  s.instanceID,
-		})
+		s.appendControlToolResult(wakeMainCallID, tools.NameEscalate, wakeMainArgsJSON, "Escalation sent: "+wakeMainReason, ToolResultStatusSuccess)
 	}
 
 	// Collect non-Complete valid tool calls for finalize-time batching.
@@ -415,11 +442,19 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 		}
 	}
 
-	// Complete only, no other tools → trigger done immediately.
+	// Complete only, no other tools → trigger done immediately. The discard
+	// covers every path below: none of them leaves a speculative tool behind,
+	// so a refusal must not discard a second time.
 	if len(regularToolCalls) == 0 {
 		s.parent.discardSpeculativeStreamToolsAndClearToolTrace(s.turn, "complete_only")
 		if completeRejection != nil {
 			s.rejectInvalidCompleteArguments(taskCompleteCallID, completeRejection, completeDegraded)
+			return
+		}
+		if escalateRefusal != nil {
+			s.refuseOverBudgetEscalation(escalateRefusal)
+			s.drainContextAppendsBeforeTurn()
+			s.continueLLMWithPendingUserMessages()
 			return
 		}
 		if wakeMainCallID != "" {
@@ -451,11 +486,11 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	}
 	if wakeMainCallID != "" {
 		log.Infof("Escalate co-returned with other tools; executing others first agent=%v other_tools=%v", s.instanceID, len(regularToolCalls))
-		s.pendingEscalate = wakeMainReason
-		if wakeMainRequest != nil {
-			request := *wakeMainRequest
-			s.pendingEscalateRequest = &request
-		}
+		request := *wakeMainRequest
+		s.pendingEscalateRequest = &request
+	}
+	if escalateRefusal != nil {
+		s.pendingEscalateRefusal = escalateRefusal
 	}
 
 	// Dispatching tools for parallel execution is real activity too: a long

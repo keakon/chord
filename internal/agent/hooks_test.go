@@ -21,6 +21,7 @@ func TestClassifyAgentError(t *testing.T) {
 		{name: "tool confirmation failed", err: wrapToolConfirmationFailed("Write", errors.New("backend closed")), want: "tool"},
 		{name: "tool rejected", err: wrapToolRejectedByUser("Write", "policy"), want: "tool"},
 		{name: "tool cancelled", err: context.Canceled, want: "agent"},
+		{name: "blocked escalation", err: newBlockedEscalationError("dead end"), want: "blocked"},
 		{name: "generic", err: errors.New("unknown failure"), want: "agent"},
 	} {
 		if got := classifyAgentError(tc.err); got != tc.want {

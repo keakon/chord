@@ -329,7 +329,7 @@ func TestCreateSubAgentInheritsServiceTier(t *testing.T) {
 	}
 	client.SetServiceTier(config.ServiceTierSlow)
 
-	handle, err := a.CreateSubAgent(context.Background(), "child work", "worker", "", "", tools.WriteScope{})
+	handle, err := a.CreateSubAgent(context.Background(), tools.SubAgentRequest{Description: "child work", AgentType: "worker"})
 	if err != nil {
 		t.Fatalf("CreateSubAgent: %v", err)
 	}
@@ -984,7 +984,7 @@ func TestCreateSubAgentFromSubAgentContextSetsOwnerAndDepth(t *testing.T) {
 	parent.depth = 1
 	parent.delegation = config.DelegationConfig{MaxChildren: 2, MaxDepth: 2}
 
-	handle, err := a.CreateSubAgent(tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID), "child work", "worker", "", "", tools.WriteScope{})
+	handle, err := a.CreateSubAgent(tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID), tools.SubAgentRequest{Description: "child work", AgentType: "worker"})
 	if err != nil {
 		t.Fatalf("CreateSubAgent: %v", err)
 	}
@@ -1027,7 +1027,7 @@ delegate:
 `)
 	a.rebuildRuleset()
 
-	_, err := a.CreateSubAgent(context.Background(), "child work", "worker", "", "", tools.WriteScope{})
+	_, err := a.CreateSubAgent(context.Background(), tools.SubAgentRequest{Description: "child work", AgentType: "worker"})
 	if err == nil || !strings.Contains(err.Error(), "denied by Delegate permission policy") {
 		t.Fatalf("CreateSubAgent() err = %v, want Delegate target denial", err)
 	}
@@ -1043,14 +1043,14 @@ func TestCreateSubAgentReturnsChildLimitReachedForDirectOwner(t *testing.T) {
 	parent.depth = 1
 	parent.delegation = config.DelegationConfig{MaxChildren: 1, MaxDepth: 2}
 
-	first, err := a.CreateSubAgent(tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID), "child one", "worker", "", "", tools.WriteScope{})
+	first, err := a.CreateSubAgent(tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID), tools.SubAgentRequest{Description: "child one", AgentType: "worker"})
 	if err != nil {
 		t.Fatalf("CreateSubAgent(first): %v", err)
 	}
 	if first.Status != "started" {
 		t.Fatalf("first.Status = %q, want started", first.Status)
 	}
-	second, err := a.CreateSubAgent(tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID), "child two", "worker", "", "", tools.WriteScope{})
+	second, err := a.CreateSubAgent(tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID), tools.SubAgentRequest{Description: "child two", AgentType: "worker"})
 	if err != nil {
 		t.Fatalf("CreateSubAgent(second): %v", err)
 	}
@@ -1066,7 +1066,7 @@ func TestCreateSubAgentCountsNonTerminalDirectChildrenForLimit(t *testing.T) {
 	parent.depth = 1
 	parent.delegation = config.DelegationConfig{MaxChildren: 1, MaxDepth: 2}
 
-	first, err := a.CreateSubAgent(tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID), "child one", "worker", "", "", tools.WriteScope{})
+	first, err := a.CreateSubAgent(tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID), tools.SubAgentRequest{Description: "child one", AgentType: "worker"})
 	if err != nil {
 		t.Fatalf("CreateSubAgent(first): %v", err)
 	}
@@ -1078,7 +1078,7 @@ func TestCreateSubAgentCountsNonTerminalDirectChildrenForLimit(t *testing.T) {
 	a.noteSubAgentStateTransition(child, SubAgentStateWaitingMain)
 	a.syncTaskRecordFromSub(child, "")
 
-	second, err := a.CreateSubAgent(tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID), "child two", "worker", "", "", tools.WriteScope{})
+	second, err := a.CreateSubAgent(tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID), tools.SubAgentRequest{Description: "child two", AgentType: "worker"})
 	if err != nil {
 		t.Fatalf("CreateSubAgent(second): %v", err)
 	}
@@ -1101,7 +1101,7 @@ func TestConcurrentCreateSubAgentRespectsDirectChildLimit(t *testing.T) {
 	for i := range 2 {
 		go func() {
 			<-start
-			handle, err := a.CreateSubAgent(ctx, fmt.Sprintf("child %d", i), "worker", "", "", tools.WriteScope{})
+			handle, err := a.CreateSubAgent(ctx, tools.SubAgentRequest{Description: fmt.Sprintf("child %d", i), AgentType: "worker"})
 			results <- handle
 			errs <- err
 		}()
@@ -1128,7 +1128,7 @@ func TestCreateSubAgentRejectsBeforeLLMFactoryWhenChildLimitReached(t *testing.T
 	parent.delegation = config.DelegationConfig{MaxChildren: 1, MaxDepth: 2}
 	ctx := tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID)
 
-	first, err := a.CreateSubAgent(ctx, "child one", "worker", "", "", tools.WriteScope{})
+	first, err := a.CreateSubAgent(ctx, tools.SubAgentRequest{Description: "child one", AgentType: "worker"})
 	if err != nil || first.Status != "started" {
 		t.Fatalf("CreateSubAgent(first) = (%#v, %v), want started", first, err)
 	}
@@ -1138,7 +1138,7 @@ func TestCreateSubAgentRejectsBeforeLLMFactoryWhenChildLimitReached(t *testing.T
 		return newTestLLMClient()
 	}
 
-	second, err := a.CreateSubAgent(ctx, "child two", "worker", "", "", tools.WriteScope{})
+	second, err := a.CreateSubAgent(ctx, tools.SubAgentRequest{Description: "child two", AgentType: "worker"})
 	if err != nil {
 		t.Fatalf("CreateSubAgent(second): %v", err)
 	}
@@ -1166,7 +1166,7 @@ func TestConcurrentDuplicateCreateSharesAdmissionResult(t *testing.T) {
 	results := make(chan tools.TaskHandle, 2)
 	errs := make(chan error, 2)
 	create := func() {
-		handle, err := a.CreateSubAgent(context.Background(), "same task", "worker", "plan-1", "semantic-1", tools.WriteScope{})
+		handle, err := a.CreateSubAgent(context.Background(), tools.SubAgentRequest{Description: "same task", AgentType: "worker", PlanTaskRef: "plan-1", SemanticTaskKey: "semantic-1"})
 		results <- handle
 		errs <- err
 	}
@@ -1224,7 +1224,7 @@ func TestCreateSubAgentPersistenceFailureDoesNotStartRuntime(t *testing.T) {
 	}
 	a.sessionDir = blockedRoot
 
-	handle, err := a.CreateSubAgent(context.Background(), "must persist", "worker", "plan-persist", "semantic-persist", tools.WriteScope{})
+	handle, err := a.CreateSubAgent(context.Background(), tools.SubAgentRequest{Description: "must persist", AgentType: "worker", PlanTaskRef: "plan-persist", SemanticTaskKey: "semantic-persist"})
 	if err == nil || !strings.Contains(err.Error(), "persist initial durable task registration") {
 		t.Fatalf("CreateSubAgent() = (%#v, %v), want persistence failure", handle, err)
 	}
@@ -1258,7 +1258,7 @@ func TestCreateSubAgentCancellationDuringPersistenceDoesNotStartRuntime(t *testi
 	}
 	result := make(chan outcome, 1)
 	go func() {
-		handle, err := a.CreateSubAgent(ctx, "cancel during persistence", "worker", "plan-cancel", "semantic-cancel", tools.WriteScope{})
+		handle, err := a.CreateSubAgent(ctx, tools.SubAgentRequest{Description: "cancel during persistence", AgentType: "worker", PlanTaskRef: "plan-cancel", SemanticTaskKey: "semantic-cancel"})
 		result <- outcome{handle: handle, err: err}
 	}()
 	select {
@@ -1359,7 +1359,7 @@ func TestCreateSubAgentInitializesConcurrentlyBeforeAdmission(t *testing.T) {
 	errs := make(chan error, 2)
 	for i := range 2 {
 		go func() {
-			handle, err := a.CreateSubAgent(context.Background(), fmt.Sprintf("child %d", i), "worker", "", "", tools.WriteScope{PathPrefix: []string{fmt.Sprintf("module-%d", i)}})
+			handle, err := a.CreateSubAgent(context.Background(), tools.SubAgentRequest{Description: fmt.Sprintf("child %d", i), AgentType: "worker", ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{fmt.Sprintf("module-%d", i)}}})
 			results <- handle
 			errs <- err
 		}()
@@ -1392,7 +1392,7 @@ func TestCreateSubAgentDoesNotHoldAdmissionLockDuringReliableOutput(t *testing.T
 
 	createDone := make(chan error, 1)
 	go func() {
-		_, err := a.CreateSubAgent(context.Background(), "work", "worker", "", "", tools.WriteScope{})
+		_, err := a.CreateSubAgent(context.Background(), tools.SubAgentRequest{Description: "work", AgentType: "worker"})
 		createDone <- err
 	}()
 	deadline := time.Now().Add(time.Second)
@@ -1444,7 +1444,7 @@ func TestCreateSubAgentRejectsRegistrationAfterSessionSwitch(t *testing.T) {
 
 	result := make(chan error, 1)
 	go func() {
-		_, err := a.CreateSubAgent(context.Background(), "work", "worker", "", "", tools.WriteScope{})
+		_, err := a.CreateSubAgent(context.Background(), tools.SubAgentRequest{Description: "work", AgentType: "worker"})
 		result <- err
 	}()
 	<-entered
@@ -1464,11 +1464,11 @@ func TestCreateSubAgentRejectsWhileSessionTransitionIsPaused(t *testing.T) {
 	configureNestedDelegationTestRuntime(a, 2)
 	a.prepareSessionSwitch()
 
-	if _, err := a.CreateSubAgent(context.Background(), "work", "worker", "", "", tools.WriteScope{}); err == nil || !strings.Contains(err.Error(), "session transition") {
+	if _, err := a.CreateSubAgent(context.Background(), tools.SubAgentRequest{Description: "work", AgentType: "worker"}); err == nil || !strings.Contains(err.Error(), "session transition") {
 		t.Fatalf("CreateSubAgent error = %v, want transition rejection", err)
 	}
 	a.finishSessionSwitch()
-	handle, err := a.CreateSubAgent(context.Background(), "work", "worker", "", "", tools.WriteScope{})
+	handle, err := a.CreateSubAgent(context.Background(), tools.SubAgentRequest{Description: "work", AgentType: "worker"})
 	if err != nil {
 		t.Fatalf("CreateSubAgent after transition: %v", err)
 	}
@@ -1518,7 +1518,7 @@ func TestCreateSubAgentRejectsRegistrationAfterOwnerCompletes(t *testing.T) {
 	ctx := tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID)
 	result := make(chan error, 1)
 	go func() {
-		_, err := a.CreateSubAgent(ctx, "child work", "worker", "", "", tools.WriteScope{})
+		_, err := a.CreateSubAgent(ctx, tools.SubAgentRequest{Description: "child work", AgentType: "worker"})
 		result <- err
 	}()
 	<-entered
@@ -1552,7 +1552,7 @@ func TestCreateSubAgentCapsActiveChildrenAtTen(t *testing.T) {
 
 	ctx := tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID)
 	for i := range 10 {
-		handle, err := a.CreateSubAgent(ctx, fmt.Sprintf("child work %d", i), "worker", "", "", tools.WriteScope{PathPrefix: []string{fmt.Sprintf("module-%d", i)}})
+		handle, err := a.CreateSubAgent(ctx, tools.SubAgentRequest{Description: fmt.Sprintf("child work %d", i), AgentType: "worker", ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{fmt.Sprintf("module-%d", i)}}})
 		if err != nil {
 			t.Fatalf("CreateSubAgent(%d): %v", i, err)
 		}
@@ -1561,7 +1561,7 @@ func TestCreateSubAgentCapsActiveChildrenAtTen(t *testing.T) {
 		}
 	}
 
-	overflow, err := a.CreateSubAgent(ctx, "child overflow", "worker", "", "", tools.WriteScope{PathPrefix: []string{"overflow"}})
+	overflow, err := a.CreateSubAgent(ctx, tools.SubAgentRequest{Description: "child overflow", AgentType: "worker", ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{"overflow"}}})
 	if err != nil {
 		t.Fatalf("CreateSubAgent(overflow): %v", err)
 	}
@@ -1577,7 +1577,7 @@ func TestDirectOwnerOnlyControlAppliesToLiveChildAndCompletedRehydrate(t *testin
 	parent.depth = 1
 	parent.delegation = config.DelegationConfig{MaxChildren: 2, MaxDepth: 2}
 
-	handle, err := a.CreateSubAgent(tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID), "child work", "worker", "", "", tools.WriteScope{PathPrefix: []string{"internal/agent/main.go"}})
+	handle, err := a.CreateSubAgent(tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID), tools.SubAgentRequest{Description: "child work", AgentType: "worker", ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{"internal/agent/main.go"}}})
 	if err != nil {
 		t.Fatalf("CreateSubAgent: %v", err)
 	}
@@ -1622,7 +1622,7 @@ func TestDirectOwnerOnlyStopRejectsAncestorCaller(t *testing.T) {
 	parent.depth = 1
 	parent.delegation = config.DelegationConfig{MaxChildren: 2, MaxDepth: 2}
 
-	handle, err := a.CreateSubAgent(tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID), "child work", "worker", "", "", tools.WriteScope{})
+	handle, err := a.CreateSubAgent(tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID), tools.SubAgentRequest{Description: "child work", AgentType: "worker"})
 	if err != nil {
 		t.Fatalf("CreateSubAgent: %v", err)
 	}
@@ -2585,7 +2585,7 @@ func TestCreateSubAgentUsesCachedWorkDir(t *testing.T) {
 	wantWorkDir := filepath.Join(a.projectRoot, "workspace")
 	a.cachedWorkDir = wantWorkDir
 
-	handle, err := a.CreateSubAgent(context.Background(), "use stable workspace", "worker", "", "", tools.WriteScope{})
+	handle, err := a.CreateSubAgent(context.Background(), tools.SubAgentRequest{Description: "use stable workspace", AgentType: "worker"})
 	if err != nil {
 		t.Fatalf("CreateSubAgent: %v", err)
 	}
@@ -3574,7 +3574,7 @@ func TestCreateSubAgentSnapshotPersistFailureDoesNotLeakSlot(t *testing.T) {
 	// (task registry + instance meta) is already durable and the next
 	// saveRecoverySnapshot rewrites the snapshot from live state. Failing the
 	// creation here was the historical path that leaked the runtime slot.
-	handle, err := a.CreateSubAgent(context.Background(), "snapshot write fails", "worker", "", "", tools.WriteScope{})
+	handle, err := a.CreateSubAgent(context.Background(), tools.SubAgentRequest{Description: "snapshot write fails", AgentType: "worker"})
 	if err != nil {
 		t.Fatalf("CreateSubAgent: %v", err)
 	}
@@ -3654,7 +3654,7 @@ func TestCreateSubAgentMCPServerFailureReleasesAdmissionSlot(t *testing.T) {
 	// makes getOrCreateAgentMCP fail after the admission already holds a slot.
 	a.agentConfigs["worker"].MCP = config.MCPConfig{"runtime-only": {Manual: true}}
 
-	_, err := a.CreateSubAgent(context.Background(), "mcp must fail", "worker", "", "", tools.WriteScope{})
+	_, err := a.CreateSubAgent(context.Background(), tools.SubAgentRequest{Description: "mcp must fail", AgentType: "worker"})
 	if err == nil || !strings.Contains(err.Error(), "manual") {
 		t.Fatalf("CreateSubAgent() err = %v, want agent-scoped MCP manual rejection", err)
 	}
@@ -3684,7 +3684,7 @@ func TestCancelSubAgentAdmissionsDuringCreateReleasesSlotOnce(t *testing.T) {
 	}
 	result := make(chan outcome, 1)
 	go func() {
-		handle, err := a.CreateSubAgent(context.Background(), "cancel vs create", "worker", "plan-race", "semantic-race", tools.WriteScope{})
+		handle, err := a.CreateSubAgent(context.Background(), tools.SubAgentRequest{Description: "cancel vs create", AgentType: "worker", PlanTaskRef: "plan-race", SemanticTaskKey: "semantic-race"})
 		result <- outcome{handle: handle, err: err}
 	}()
 	select {

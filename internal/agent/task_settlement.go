@@ -33,15 +33,16 @@ func isTaskSettlementJournalCorruption(err error) bool {
 }
 
 type TaskSettlement struct {
-	TaskID           string              `json:"task_id"`
-	Attempt          uint64              `json:"attempt"`
-	TerminalRevision uint64              `json:"terminal_revision"`
-	Outcome          string              `json:"outcome"`
-	Summary          string              `json:"summary,omitempty"`
-	Completion       *CompletionEnvelope `json:"completion,omitempty"`
-	ArtifactRefs     []tools.ArtifactRef `json:"artifact_refs,omitempty"`
-	ResultRef        *tools.ResultRef    `json:"result_ref,omitempty"`
-	SettledAt        time.Time           `json:"settled_at"`
+	TaskID           string                   `json:"task_id"`
+	Attempt          uint64                   `json:"attempt"`
+	TerminalRevision uint64                   `json:"terminal_revision"`
+	Outcome          string                   `json:"outcome"`
+	Summary          string                   `json:"summary,omitempty"`
+	Completion       *CompletionEnvelope      `json:"completion,omitempty"`
+	ArtifactRefs     []tools.ArtifactRef      `json:"artifact_refs,omitempty"`
+	ResultRef        *tools.ResultRef         `json:"result_ref,omitempty"`
+	Contract         *TaskContractDiagnostics `json:"contract,omitempty"`
+	SettledAt        time.Time                `json:"settled_at"`
 }
 
 func cloneTaskSettlement(in *TaskSettlement) *TaskSettlement {
@@ -58,6 +59,7 @@ func cloneTaskSettlement(in *TaskSettlement) *TaskSettlement {
 		ref := *out.ResultRef
 		out.ResultRef = &ref
 	}
+	out.Contract = cloneTaskContractDiagnostics(out.Contract)
 	return &out
 }
 

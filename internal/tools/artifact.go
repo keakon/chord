@@ -239,6 +239,22 @@ func ValidateResultRef(sessionDir string, ref ResultRef, expectedType string) (R
 	return ref, nil
 }
 
+// LoadResultContent reads back the immutable result a validated ref points at.
+// Callers must have validated the ref with ValidateResultRef first: the digest
+// is what binds the ref to its content, and this helper only maps that
+// validated path back to bytes.
+func LoadResultContent(sessionDir string, ref ResultRef) (json.RawMessage, error) {
+	abs, err := ResolveSessionArtifactPath(sessionDir, ref.RelPath)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(abs)
+	if err != nil {
+		return nil, fmt.Errorf("read result %s: %w", ref.ID, err)
+	}
+	return data, nil
+}
+
 // SaveArtifactTool writes a runtime artifact under the active session artifacts dir.
 type SaveArtifactTool struct{}
 
