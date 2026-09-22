@@ -9,6 +9,8 @@
 - Agent 定义不再读取 `capabilities`、`preferred_tasks`、`write_mode`、`delegation_policy`。这些键从未被强制执行，只是 Delegate 选人列表上的标签。选人意图写进 `description`。角色能不能写文件仍由 `permission` 决定，Delegate 仍会在每个可选项上标 `empty_scope=allowed` 或 `non_empty_scope=required`。现有 agent 文件里残留的这些键会被忽略。
 - headless 的 `compaction_status` 事件不再携带 `model_downshift` 触发类型：切换到更小窗口引发的压缩现在以 `usage_driven` 上报，按旧值过滤的集成方请改匹配 `usage_driven`。
 - headless 的提问协议换了形状。`question_request` 不再带 `default_answer` 和 `timeout_ms`，改为带 `deadline`——Chord 关闭该问题的绝对 RFC 3339 时刻（未设置 `question_timeout` 时省略）。Chord 也不再拿第一个选项当兜底默认答案。`question` 命令用 `reason`（`answered` 或 `declined`）取代 `cancelled`，问题关闭改由新增的 `question_resolved` 事件通知，不再靠之后的快照推断。
+- worktree 会话现在按仓库共享：同一仓库的所有 checkout 共用一个 store，在 worktree 里开的会话能在主工作区列出、继续，反过来也一样。旧版本按 checkout 分片写入的会话不会迁移，也不再出现在列表里；继续这类会话失败时，错误信息会给出旧 store 的路径，便于把会话目录拷过去。
+- 点名仓库内路径的权限规则现在对同一仓库的每个 checkout 生效。主工作区里写的 `write src/**: allow`，在 `<worktree>/src/` 下同样允许；也没法写出「只允许某一个 checkout」的规则——Chord 按仓库相对拼写匹配仓库内的路径，绝对路径规则永远匹配不到它们。
 
 ### 新功能
 
@@ -26,6 +28,10 @@
 - `delegate` 新增可选的 `result_schema`：一个 JSON Schema 子集（`type`、`required`、`properties`、`items`、`enum`、`description`），声明 worker 交付的结果必须满足什么，`type` 只能取 `object`、`array`、`string`、`integer`、`number`、`boolean`，顶层必须是 `object`。超出子集的 schema 在委派时就被拒绝，而不是被静默忽略；未声明的字段一律放行。worker 调用 `complete` 时，Chord 会校验实际交付的载荷——内联的 `result` 或 `result_ref` 指向的 artifact；不符合的会退回一次让它改正，再次不符合则任务以失败收口，违规诊断写进任务结算，并把这次失败以 `contract` 上报给 owner 与 `on_agent_error` hook。`result_ref` 的内容读不回来时立即失败，因为重试修不好存储侧的问题。不带 schema 的委派行为不变。
 - `escalate` 现在必须带 `kind`。`needs_repair` 向 owner 求助并让任务继续运行；`blocked` 则以 worker 给出的原因把任务按失败收口（owner 视图的 **AGENT BLOCKED** 卡片、`risk_alert` mailbox、`on_agent_error` hook 的 `error_kind: blocked`），不再把 worker 泊住等待。同一个任务最多留下两次未获答复的 `needs_repair` 升级，第三次会被拒绝并退回给 worker，同时提示它自己推进或用 `complete` 收口——这才是反复升级同一个阻塞点时真正的收敛手段。owner 答复了那次升级后计数清零，其他投递不清零。
 - 新增 `chord doctor skills` 命令：解释配好的 skill 为什么到不了模型——逐个给出完整性、加载、`builder` ruleset 可见性、已声明资源健康度，支持 `--json` 和 `--strict`。skill 可在可选的 frontmatter 字段 `resources` 里声明它依赖的文件（相对 skill 根目录的路径）；缺资源不会隐藏 skill，而是以告警块出现在 `skill` 工具输出里，TUI 卡片上也有标记。
+- 会话里也能让 agent 管理 worktree。`WorktreeEnter` 创建或重新打开 worktree（`name`、`path`、`base`、`branch`、`reset_branch`）并把 agent 的工作目录切进去，shell、文件工具、grep/glob 与 LSP 随之跟着走；`WorktreeExit` 退出并可按需删除该 checkout；`WorktreeList` 列出仓库的 worktree 及其归属与 dirty 状态。每个 SubAgent 各有自己的工作目录，因此一个 worktree 在被改的同时，另一个可以被审查；被放进 worktree 的 worker 会保留这个 checkout 身份，完成回报里会写明它实际工作的 worktree、分支与基线。
+- 新增 `worktree.root` 选项，可把 worktree 建到仓库内（`root: .chord/worktrees`），不再只能放在 state 目录下、仓库之外。root 落在仓库内时，Chord 会保留一个自忽略的 `.gitignore`，这些 checkout 不会出现在 `git status` 里，chord 自己的 grep/glob 也会跳过该 root。
+- 新增 `.worktreeinclude` 文件（gitignore 语法，默认 `.env*`），用来列出要复制进每个新 worktree 的被忽略文件——本地 env、机器相关配置等。已被跟踪的文件绝不覆盖。
+- 新增两个 flag：`--reset-branch` 允许复用没有任何 worktree 检出的遗留 worktree 分支，不再直接失败；`chord worktree remove --purge-sessions` 删除只有旧版按 checkout 分片存会话时才会写入的 sessions/exports store。
 
 ### 改进
 
@@ -38,6 +44,8 @@
 - `lsp` 查询失败时会附上查询行与相邻行的原文和行号，位置没落在标识符上（比如行号差一行、点到声明上方的注释里）一眼就能看出来，不用重读文件。
 - 同一条消息里的只读工具调用现在合进同一个并行批次，不再把消息切成两段：`job_output`、`job_list`、`skill`、`view_image`、`read_artifact` 会与 `read`、`grep`、`glob`、`lsp` 一起执行，Chord 已经识别为只读的 `shell` 命令（比如 `git status`）也跟它们同批，不再充当批次边界。还在等待的 `job_output(wait: exit)` 不再压住同一批里的读文件和检索；读不同的 job 互不等待，读同一个 job 的两次调用同样相互独立，各自取走属于自己的那段新输出。
 - 能并行的只读 shell 命令变多了：`grep`、`find`、`sort`、`jq`、`diff`、`sed -n '1,20p'` 这类检索查看命令，以及 `rg --no-config`（`rg` 只有带 `--no-config` 才并入，因为 `RIPGREP_CONFIG_PATH` 可以注入 `--pre` 去跑外部命令），还有 `git` / `gh` 的查询形态（`git blame`、`git stash list`、`gh pr view` 等）都会跟读文件同批，不再一个个串行。两边都只读的管道和 `&&` / `||`（比如 `git log | head -20`）合进同一批，`command` / `nice` 只剥一层。判定依然偏保守，不会动权限：不认识的 flag 照样串行。
+- 在 worktree 里运行的会话同样带上项目上下文：指令（`AGENTS.md`）与项目技能以会话所在的 checkout 为准——分支可以自带一份——checkout 里没有的 gitignore 副本再回落到主工作区。子代理定义与记忆从主工作区读取，因此 worktree 会话的配置与主工作区一致。Chord 自己的状态——记忆、计划、笔记与 worktree 记录——也写在那里，所以从 worktree 会话写出的计划不会随它所在的 checkout 一起消失。`chord --worktree <name> --continue` 以该 worktree 为工作目录继续仓库里最近的会话。
+- 继续会话时会切回它当时所在的 checkout：`chord resume <id>` 与 `chord --resume <id>` 都会进入会话记录的 worktree；该 worktree 已不存在时先给出提示，再回退到主工作区继续。runtime cache 仍按 checkout 分开。
 
 ### 修复
 
@@ -86,6 +94,7 @@
 - 被 Chord 拒绝的完成不再显示成功卡片。`complete` 参数校验失败，或任务已经用完修复机会后才到达的完成，以前会渲染成一张绿色的成功卡，而这次调用在会话正文里写的是完成被拒绝；现在卡片报 error 状态，与正文和 owner 通知里的失败结果一致。
 - `command` 本身就是服务器进程的 stdio MCP（例如 `python3 /path/to/server.py`）不再在初始化刚完成时被杀掉。之前 Chord 把这个进程绑在「连接尝试」上，握手一成功就取消该 context，服务器连上后还没来得及 `tools/list` 就消失，它的工具永远不出现。现在它会一直连着，直到所属会话释放它、或你把它禁用；`npx`、`uvx` 这类把真正的服务器留在子进程里的启动器不受影响。
 - 落在「消息已被接受、回合尚未开始」这段间隙里的取消现在会被执行，不再被丢弃：消息继续留在会话正文里，它的回合立即以 `cancelled` 收口，不会为此发出模型请求。此前这种取消会被忽略，headless 客户端发完 prompt 立刻取消时，仍会收到完整回复，而 `idle.last_outcome` 已经报成 `cancelled`。
+- `chord worktree remove` 与 `chord worktree finish` 不再删除被移除 worktree 的 sessions 与 exports，清理 checkout 不会再把历史一起丢掉。分支默认仍然保留。
 
 ## 0.8.1 - 2026-09-16
 

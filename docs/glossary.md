@@ -44,7 +44,7 @@ A single user-to-agent interaction round: you send a message → Chord processes
 
 ## Session
 
-A persistent conversation record stored under `<state-dir>/sessions/<project-key>/`. Each session contains the full message history, turn metadata, and compaction archives. Sessions are project-scoped and survive restarts.
+A persistent conversation record stored under `<state-dir>/sessions/<project-key>/`. Each session contains the full message history, turn metadata, and compaction archives. Sessions are scoped to the project — for a git repository, that means every checkout of it — and survive restarts.
 
 ## OAuth
 
@@ -84,7 +84,7 @@ The retry path Chord uses after a provider rejects a request as too large. Chord
 
 ## Worktree
 
-A chord-managed git worktree (under `<state-dir>/worktrees/<repo-id>/<slug>`) with its own project key, sessions, cache, and exports. Create or enter one via `chord --worktree <name>` or `chord worktree <name>`; manage existing ones via `chord worktree list / remove / finish`. Useful for running multiple parallel chord tasks on the same repo without crosstalk. See [Paths: Worktrees](./paths.md#worktrees).
+A chord-managed git worktree (by default under `<state-dir>/worktrees/<repo-id>/<slug>`, or wherever `worktree.root` points) that shares its repository's sessions, permissions, and project content. Create or enter one via `chord --worktree <name>` or `chord worktree <name>`; manage existing ones via `chord worktree list / remove / finish`. Useful for running multiple parallel chord tasks on the same repo without crosstalk. See [Paths: Worktrees](./paths.md#worktrees).
 
 ## Skill
 
@@ -108,7 +108,7 @@ Chord may run a small set of safe, read-only tool calls while the model response
 
 ## Project key
 
-A stable, sanitized identifier Chord computes from a project's canonical filesystem root (e.g. `HOME-projects-chord` for `~/projects/chord`). Used as the namespace for sessions, runtime cache, exports, and worktree identity. If two distinct paths sanitize to the same key, Chord appends an 8-character fingerprint. See [Paths: `<project-key>`](./paths.md#project-key-what-is-it).
+A stable, sanitized identifier Chord computes from a project's canonical filesystem root (e.g. `HOME-projects-chord` for `~/projects/chord`). Used as the namespace for sessions, runtime cache, and exports; every checkout of a git repository resolves to the same key. If two distinct paths sanitize to the same key, Chord appends an 8-character fingerprint. See [Paths: `<project-key>`](./paths.md#project-key-what-is-it).
 
 ## Permission action
 

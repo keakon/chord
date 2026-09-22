@@ -13,7 +13,7 @@ Hooks 让你在 Chord 生命周期的明确节点运行外部命令：工具即�
 1. **启动配置好的命令**（`shell` 行 或 `argv` 列表二选一）。
 2. **从 stdin 发送 JSON envelope**（见 [Envelope](#envelope)）。
 3. **设置一组 `CHORD_HOOK_*` 环境变量**（见 [环境变量](#环境变量)）。
-4. **把工作目录设为项目根**。
+4. **把工作目录设为会话的工作目录**——即会话当前所在的 checkout；会话在 worktree 中时就是该 worktree。
 5. **读 hook 的 stdout**，按触发点的类别解析为 sync result、automation result 或纯文本（见下文）。
 6. **施加超时**（默认 30 秒，可按 hook 配置）。
 
@@ -49,6 +49,8 @@ stdout 不是合法 JSON 时记录为解析失败；非零退出码记录为执�
 | `on_agent_error`                  | observer    | Agent 报错（LLM 错、工具失败等）                                                      | `error`、`error_kind`                                       |
 
 `data` 内部具体字段会随版本演进。为了保证平稳集成：没用到的字段当作不透明对待，只依赖你真正需要的 key。
+
+`project_root` 是**会话的工作目录**——即会话当前所在的 checkout；会话在 worktree 中时就是该 worktree，不一定是仓库的主工作区。需要 checkout 根时，在 hook 里跑 `git rev-parse --show-toplevel`。
 
 ## Envelope
 

@@ -56,7 +56,7 @@ Chord 写在这里。删了就丢历史。
 │       └── memory.lock                 # 跨进程提交锁
 ├── worktrees/
 │   └── <repo-id>/
-│       └── <slug>/                     # chord 管理的 git worktree（位于仓库之外）
+│       └── <slug>/                     # chord 管理的 git worktree（默认位置，`worktree.root` 可改）
 └── logs/
     ├── chord.log                       # 当前日志
     ├── chord.log.1                     # 轮转
@@ -72,13 +72,15 @@ Chord 写在这里。删了就丢历史。
 
 Chord 用项目的规范文件系统根路径（解析符号链接、规范化大小写）作为身份，再据此推导一个稳定、清洗后的 key，例如 `~/projects/chord` 的 key 为 `HOME-projects-chord`。两个项目清洗后冲突时，Chord 追加 8 字符指纹消歧。完整的规范根路径也会写入 `project.json`，所以即使路径相似，注册表也不会混淆。
 
-Sessions、运行时缓存、exports 都以这个 key 为索引：在 `~/projects/chord` 重新跑 `chord` 能找到上次的会话。
+Sessions、运行时缓存、exports 都以这个 key 为索引：在 `~/projects/chord` 重新跑 `chord` 能找到上次的会话。git 仓库的每个 checkout 都会解析到主工作区的 key，所以 chord 管理的 worktree 与所属仓库共用 sessions，而不是各自一份。
 
 ### Worktree
 
-`chord --worktree <name>` 会在 `worktrees/<repo-id>/<slug>` 下创建 chord 管理的 git worktree，**位于原仓库之外**，拥有自己的 project key。每个 chord 管理的 worktree 的 sessions、cache、exports 因此天然隔离。
+`chord --worktree <name>` 会在 `worktrees/<repo-id>/<slug>` 下创建 chord 管理的 git worktree，默认**位于原仓库之外**；`worktree.root` 可以改位置，目标目录在仓库内时 Chord 会放一个 `.gitignore` 进去，让这些 checkout 不出现在 `git status` 里。同一仓库的每个 checkout 都解析到该仓库的 project key，因此 sessions 与 exports 由它们共用，只有运行时缓存仍按 checkout 分开。
 
-移除 worktree，用 `chord worktree remove <name>`。它会删除工作目录及对应的会话、缓存和导出数据，默认保留分支；`--force` 还会强制删除分支，见 [CLI：chord worktree](./cli_CN.md#chord-worktree)。**不要**手动删 worktree 目录，那会留下注册表中的孤儿条目（之后会被 `chord cleanup project` 标记）。
+这个目录只用来放 chord 自己的 worktree。它在仓库内时，那份自忽略 `.gitignore` 会把你放在里面的其它东西一并从 git 里隐藏；路径判定也会把它的每个直接子目录当成 checkout 根，于是仓库相对拼写的权限规则会按那个子目录、而不是仓库根去解析。
+
+移除 worktree，用 `chord worktree remove <name>`。它会删除工作目录、运行时缓存与归属元数据；默认保留分支与仓库的会话历史。`--delete-branch` 一并删分支（已合并才删，除非同时给 `--force`），`--force` 还会强制删除脏 worktree，`--purge-sessions` 删除只有旧版按 checkout 分片存会话时才会写入的 sessions/exports store；见 [CLI：chord worktree](./cli_CN.md#chord-worktree)。**不要**手动删 worktree 目录，那会留下注册表中的孤儿条目（之后会被 `chord cleanup project` 标记）。
 
 ## cache 目录：`~/.cache/chord/`
 

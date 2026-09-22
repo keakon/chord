@@ -56,7 +56,7 @@ Chord writes here. Lose it and you lose history.
 │       └── memory.lock                 # cross-process commit lock
 ├── worktrees/
 │   └── <repo-id>/
-│       └── <slug>/                     # chord-managed git worktree (outside the repo)
+│       └── <slug>/                     # chord-managed git worktree (default location; `worktree.root` can move it)
 └── logs/
     ├── chord.log                       # current log
     ├── chord.log.1                     # rotated
@@ -79,13 +79,15 @@ affect the order.
 
 Chord identifies a project by its canonical filesystem root, then derives a stable, sanitized key, for example `HOME-projects-chord` for `~/projects/chord`. If two projects collide on the sanitized key, Chord appends an 8-character fingerprint to disambiguate. The full canonical root is stored alongside the key in `project.json`, so the registry stays unambiguous even when paths look similar.
 
-Sessions, runtime cache, and exports are all keyed on this: that is how a fresh `chord` started in `~/projects/chord` finds the previous session for the same project.
+Sessions, runtime cache, and exports are all keyed on this: that is how a fresh `chord` started in `~/projects/chord` finds the previous session for the same project. Every checkout of a git repository resolves to the repository's main-checkout key, so a chord-managed worktree shares its repository's sessions instead of getting its own.
 
 ### Worktrees
 
-`chord --worktree <name>` creates a chord-managed git worktree under `worktrees/<repo-id>/<slug>` **outside the original repository**, with its own project key. Each chord-managed worktree therefore has isolated sessions, cache, and exports.
+`chord --worktree <name>` creates a chord-managed git worktree under `worktrees/<repo-id>/<slug>`, **outside the original repository** by default; `worktree.root` can move it, and when the target directory is inside the repository Chord keeps a `.gitignore` in it so the checkouts stay out of `git status`. Every checkout of a repository resolves to the repository's project key, so sessions and exports are shared by all of them while the runtime cache stays per checkout.
 
-Use `chord worktree remove <name>` to remove the working directory and its sessions, caches, and exports. The branch is kept by default; `--force` also force-deletes the branch; see [CLI: chord worktree](./cli.md#chord-worktree). Manually deleting the worktree directory is not recommended; you would leave orphan registry entries that `chord cleanup project` would later flag.
+Keep the worktree root for chord's own worktrees. When it lives inside the repository, that self-ignoring `.gitignore` hides whatever else you put there from git, and path evaluation treats every immediate child as a checkout root — so a repository-relative permission rule would resolve paths under a stray directory against that directory instead of the repository root.
+
+Use `chord worktree remove <name>` to remove the working directory, its runtime cache, and its ownership metadata. The branch and the repository's session history are kept by default; `--delete-branch` also deletes the branch (only if merged, unless `--force` is given), `--force` also force-deletes a dirty worktree, and `--purge-sessions` deletes the session/export store that only older per-checkout versions wrote; see [CLI: chord worktree](./cli.md#chord-worktree). Manually deleting the worktree directory is not recommended; you would leave orphan registry entries that `chord cleanup project` would later flag.
 
 ## Cache dir: `~/.cache/chord/`
 

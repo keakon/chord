@@ -44,7 +44,7 @@ Chord 自主连续执行任务的模式。loop 模式下 agent 会持续处理�
 
 ## Session
 
-持久化会话记录，默认保存在 `<state-dir>/sessions/<project-key>/` 下。它包含消息历史、turn 元数据和上下文压缩归档，并会跨重启保留。
+持久化会话记录，默认保存在 `<state-dir>/sessions/<project-key>/` 下。它包含消息历史、turn 元数据和上下文压缩归档，并会跨重启保留。会话按项目归属——对 git 仓库来说，就是该仓库的所有 checkout 共用。
 
 ## OAuth
 
@@ -84,7 +84,7 @@ provider 因请求过大而拒绝后，Chord 采用的恢复重试流程。Chord
 
 ## Worktree
 
-Chord 管理的 git worktree（位于 `<state-dir>/worktrees/<repo-id>/<slug>`），拥有独立的 project key、sessions、cache、exports。可通过 `chord --worktree <name>` 或 `chord worktree <name>` 创建或进入；已有 worktree 通过 `chord worktree list / remove / finish` 管理。适合在同一仓库上并行跑多个 Chord 任务而不互相干扰。详见 [目录与路径：Worktree](./paths_CN.md#worktree)。
+Chord 管理的 git worktree（默认位于 `<state-dir>/worktrees/<repo-id>/<slug>`，也可以由 `worktree.root` 指定别处），与所属仓库共用 sessions、权限与项目内容。可通过 `chord --worktree <name>` 或 `chord worktree <name>` 创建或进入；已有 worktree 通过 `chord worktree list / remove / finish` 管理。适合在同一仓库上并行跑多个 Chord 任务而不互相干扰。详见 [目录与路径：Worktree](./paths_CN.md#worktree)。
 
 ## Skill
 
@@ -108,7 +108,7 @@ Chord 可能在模型响应仍在流式传输时提前运行少量安全的只�
 
 ## Project key
 
-Chord 从项目根路径计算出的稳定、清洗后标识（如 `~/projects/chord` 的 key 为 `HOME-projects-chord`），用作 sessions、运行时缓存、exports、worktree 身份的命名空间。两个不同路径清洗后冲突时，Chord 追加 8 字符指纹消歧。详见 [目录与路径：`<project-key>`](./paths_CN.md#project-key-是什么)。
+Chord 从项目根路径计算出的稳定、清洗后标识（如 `~/projects/chord` 的 key 为 `HOME-projects-chord`），用作 sessions、运行时缓存与 exports 的命名空间；git 仓库的每个 checkout 都解析到同一个 key。两个不同路径清洗后冲突时，Chord 追加 8 字符指纹消歧。详见 [目录与路径：`<project-key>`](./paths_CN.md#project-key-是什么)。
 
 ## Permission action（权限决策）
 

@@ -1375,7 +1375,7 @@ The full top-level keys of `config.yaml` (both global `~/.config/chord/config.ya
 | `stream_retry_rounds`   | int                   | `0` (retry until success/cancel) | global / project         | Hard cap on public LLM full-round retries. `0` keeps retrying until success, cancellation, or terminal failure. |
 | `proxy`                 | string                | empty (use env / direct)         | global / project         | Global proxy URL. Per-tool override via `web_fetch.proxy`.                                                              |
 | `web_fetch`             | object                | empty                            | global / project         | `user_agent`, `proxy` (inherits global if nil; empty string = direct). See [WebFetch](#webfetch).                       |
-| `worktree`              | object                | empty                            | global / project         | Defaults for `chord --worktree` and `chord worktree …` subcommands.                                                     |
+| `worktree`              | object                | empty                            | global / project         | `branch_prefix` names worktree branches; `root` sets where checkouts are created (a relative value resolves against the repository root; the default stays outside it under the state dir). See [Worktrees](./usage.md#worktrees). |
 
 ### Provider field reference
 

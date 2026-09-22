@@ -1219,7 +1219,7 @@ chord doctor models --pool thinking
 | `stream_retry_rounds`   | int                   | `0`（重试直到成功/取消）       | global / project         | 公开 LLM 流式请求的整轮重试硬上限。`0` 表示一直重试，直到成功、取消或终态失败。                                       |
 | `proxy`                 | string                | 空（用环境变量或直连）          | global / project         | 全局代理 URL。可通过 `web_fetch.proxy` 单独覆盖。                                                                    |
 | `web_fetch`             | object                | 空                              | global / project         | `user_agent`、`proxy`（nil 继承全局；空字符串 = 显式直连）。见 [WebFetch](#webfetch)。                                |
-| `worktree`              | object                | 空                              | global / project         | `chord --worktree` 与 `chord worktree …` 子命令的默认值。                                                            |
+| `worktree`              | object                | 空                              | global / project         | `branch_prefix` 决定 worktree 分支名前缀，`root` 决定 checkout 建在哪里（相对路径以仓库根为基准；默认仍在仓库之外的 state 目录下）。见 [Worktree 用法](./usage_CN.md#worktree)。 |
 
 ### Provider 字段参考
 

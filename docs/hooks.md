@@ -13,7 +13,7 @@ When a registered point fires, Chord:
 1. **Spawns the configured command** (either a `shell` line or an `argv` list).
 2. **Sends a JSON envelope on stdin** (see [Envelope](#envelope)).
 3. **Sets a small set of `CHORD_HOOK_*` environment variables** (see [Env vars](#environment-variables)).
-4. **Sets the working directory to the project root**.
+4. **Sets the working directory to the session's working directory** — the checkout the session is running in, which is the worktree when the session is working in one.
 5. **Reads the hook's stdout** as either a sync result, an automation result, or ignored output (depending on the point's category).
 6. **Enforces a timeout** (default 30 seconds; configurable per hook).
 
@@ -49,6 +49,8 @@ Chord groups the 14 trigger points into three categories that decide what the ho
 | `on_agent_error`                 | observer    | An agent reports an error (LLM error, tool failure, etc.)                                           | `error`, `error_kind`                                               |
 
 The exact `data` fields can evolve. To stay future-proof, treat unknown fields as opaque and rely on the keys you actually need.
+
+`project_root` is the session's working directory — the checkout the session runs in, which is the worktree when the session is working in one. It is not necessarily the repository's main checkout; use `git rev-parse --show-toplevel` inside the hook if you need the checkout root.
 
 ## Envelope
 

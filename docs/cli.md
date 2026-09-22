@@ -64,10 +64,11 @@ On the first run, if global `config.yaml` is missing and Chord can get a control
 | Flag                        | Description                                                                                                                                                                                  |
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `-c`, `--continue`          | Resume the most recent non-empty session for this project that is not already open elsewhere                                                                                                 |
-| `-r`, `--resume <id>`       | Resume a specific session ID of the current project (for a session in another chord-managed worktree, use `chord resume <id>`)                                                              |
-| `--fork-history[=N]`        | Fork the session named by `--resume` at a compaction boundary and resume the fork instead: omit N for the latest applied boundary or pass a `history-N` number (e.g. `=2`). Only valid with `--resume`, and the session must belong to the current project — use `chord resume <id> --fork-history` to fork a session in another worktree. Forking works while the source session is open elsewhere (see [Resuming sessions](#resuming-sessions)). |
+| `-r`, `--resume <id>`       | Resume a specific session ID of the repository the current directory belongs to. A session that recorded a chord-managed worktree reopens in that worktree.                                                                |
+| `--fork-history[=N]`        | Fork the session named by `--resume` at a compaction boundary and resume the fork instead: omit N for the latest applied boundary or pass a `history-N` number (e.g. `=2`). Only valid with `--resume`, and the session must belong to the current repository. Forking works while the source session is open elsewhere (see [Resuming sessions](#resuming-sessions)). |
 | `--yolo`                    | Start with YOLO mode enabled: ordinary tools skip their permission checks and confirmations; handoff, delegate, cancel, done, and compact_context keep following their configured rules                                                                                 |
-| `-w`, `--worktree [name]`   | Create or enter a chord-managed git worktree by name (auto-named when no name is given). Combine with `--continue` / `--resume` to act on the worktree's own session history.                |
+| `-w`, `--worktree [name]`   | Create or enter a chord-managed git worktree by name (auto-named when no name is given); sessions are shared by every checkout of the repository. Combine with `--continue` / `--resume` to continue the repository's latest session with the worktree as the working directory. |
+| `--reset-branch`            | Only with `--worktree`: reset a leftover branch that no worktree has checked out to the current HEAD instead of refusing to reuse the name.                                                  |
 
 `--continue` and `--resume` are mutually exclusive; `--fork-history` applies only with `--resume` and cannot be combined with `--continue` or `--worktree`.
 
@@ -79,10 +80,12 @@ A session that another running Chord process already owns is skipped, and the ne
 
 Both entry points run the same resume pipeline; they differ only in how the session is located:
 
-- `chord --resume <id>` (alias `-r`) resumes a session **of the current project**: the session must live in the project the current directory belongs to, and Chord does not switch directories. It composes with `--continue` / `--worktree` and is the form scripts and headless use. If the session belongs to another chord-managed worktree, the resume fails with a not-found error.
-- `chord resume <id>` resumes a session **by ID from anywhere**: it reads the repository index, finds which chord-managed worktree (or the main repository) the session belongs to, switches into it, and resumes there.
+- `chord --resume <id>` (alias `-r`) resumes a session of the repository the current directory belongs to. It composes with `--continue` / `--worktree` and is the form scripts and headless use.
+- `chord resume <id>` resolves the same sessions as an explicit command: it prints the checkout it switched to and then starts the TUI there.
 
-Rule of thumb: when you are already inside the session's project use `chord --resume`; when you are anywhere else, or do not know which worktree the session lives in, use `chord resume <id>`.
+Both switch into the chord-managed worktree the session recorded, so a worktree session resumes from the main checkout, or from any other checkout of the same repository. When that worktree no longer exists, Chord reports it, records the fallback in the session, and resumes in the repository's main checkout instead.
+
+Rule of thumb: both entry points find the same sessions, so pick by invocation style — a flag on the default command, or the `chord resume <id>` command.
 
 ### Examples
 
@@ -364,7 +367,15 @@ removed 1 sessions, total 263.5 MB
 
 Manage chord-owned git worktrees. Use `chord worktree <name>` (or `chord --worktree <name>`) to create or enter a worktree and start a session there; use this command's subcommands for management operations such as `list`, `remove`, and `finish`.
 
-Worktrees live under `<state-dir>/worktrees/<repo-id>/<slug>` (outside the repository) and each gets its own project key, so sessions and caches are isolated automatically.
+Worktrees live under `<state-dir>/worktrees/<repo-id>/<slug>`, outside the repository, unless `worktree.root` says otherwise: a relative value resolves against the main repository root, so `root: .chord/worktrees` places checkouts at `<repo>/.chord/worktrees/<slug>`. When that directory lies inside the repository, Chord keeps a `.gitignore` containing `*` in it so the checkouts never show up as untracked files in the main checkout. That file only keeps `git status` clean; deleting it does not weaken any protection. Other tools are not aware of that skip: an in-repo checkout is a second copy of the tree, so index- or scan-based tools may pick it up too (see [Worktrees](./usage.md#worktrees)).
+
+Sessions are shared by every checkout of a repository. The history lives in the repository's own store, so a session started in a worktree is listed and resumed from the main checkout and vice versa; the runtime cache stays per checkout, and exports follow their sessions. A session records the checkout it was working in, and resuming it switches back there (see [Resuming sessions](#resuming-sessions)). Removing a worktree keeps that history: only `--purge-sessions` deletes the worktree's own store, which Chord no longer writes.
+
+A worktree contains tracked files only. Gitignored content — a local `AGENTS.md`, `.chord/config.yaml`, agents, skills, plans — is not copied; a session running in a worktree reads it from the main checkout, so project instructions, skills, sub-agents, and memory behave as they do in the main checkout. List the gitignored files a fresh worktree should receive in a repository-root `.worktreeinclude` file (gitignore syntax; `.env*` when the file is missing or lists no pattern). Those files are copied on creation, and a tracked file is never overwritten.
+
+Permission rules, hooks, agent configuration, and worktree creation settings are resolved from the main checkout when a session starts and do not change as it enters or leaves a worktree; see [Worktrees](./usage.md#worktrees) for what that means for rules that target one checkout.
+
+Inside a session the agent manages worktrees itself: `WorktreeEnter` creates or reopens one and switches the agent's working directory into it (parameters mirror the CLI: `name`, `path`, `base`, `branch`, `reset_branch`), `WorktreeExit` leaves it and can remove the checkout, and `WorktreeList` lists the repository's worktrees with their owner and dirty state. Ask the agent to work in a worktree instead of leaving the TUI. If a session crashes while creating a worktree, the creation is reported as outcome unknown on resume; check `chord worktree list` for a leftover checkout.
 
 ### `chord worktree list`
 
@@ -372,12 +383,13 @@ List chord-managed worktrees of the current repository.
 
 ### `chord worktree remove <name>`
 
-Delete the worktree directory and its sessions, cache, and exports. The branch is preserved by default.
+Delete the worktree directory, its runtime cache, and its ownership metadata. The branch and the repository's session history are preserved by default.
 
 | Flag                | Description                                                                                                       |
 | ------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `--force`           | Remove even when the worktree has uncommitted changes; force-delete the branch                                    |
 | `--delete-branch`   | Also delete the worktree's branch. Without `--force`, the branch is only deleted if it has been merged.           |
+| `--purge-sessions`  | Also delete the worktree's own session/export store. Only Chord versions that stored sessions per checkout wrote it; sessions created now live in the repository's shared store and are unaffected. |
 
 ### `chord worktree finish <name>`
 
@@ -394,6 +406,8 @@ If merging the target branch into the worktree would hit conflicts, `finish` exi
 If a rebase or merge is already in progress in the worktree, `finish` exits early instead of starting another merge on top of it.
 
 Use `--check` when you want a conflict preflight without mutating the real worktree, branch, or target branch. A real `finish` is intentionally not side-effect free: if the merge from the target branch conflicts, Chord keeps the real worktree in that merge state so you can resolve it and rerun `finish`.
+
+A real `finish` also moves the target branch: it fast-forwards that branch inside the main checkout, so when the main checkout has it checked out, its working tree is updated, and when the main checkout is on another branch, `finish` switches to the target branch and back. Do not run another session or tool in the main checkout while `finish` runs.
 
 Pass `-m/--message` when you want to override the generated squash message with a final commit message you wrote yourself.
 

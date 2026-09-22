@@ -64,10 +64,11 @@ chord [全局 flag] [命令] [命令 flag] [参数]
 | Flag                         | 说明                                                                                                                                                        |
 | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `-c`, `--continue`           | 恢复本项目最近一个非空、且未被其它进程占用的会话                                                                                                            |
-| `-r`, `--resume <id>`        | 恢复当前项目内指定 session id 的会话（要恢复其它 chord 管理 worktree 里的会话，用 `chord resume <id>`）                                                     |
-| `--fork-history[=N]`         | 先把 `--resume` 指定的会话在某次压缩边界上 fork 出来，再恢复这个 fork：省略 N 表示最近一次已应用边界，或传 `history-N` 序号（如 `=2`）。只能与 `--resume` 一起用，且该会话必须属于当前项目——fork 其它 worktree 里的会话用 `chord resume <id> --fork-history`。源会话即使正被其它进程打开也可以 fork（见下文[恢复会话](#恢复会话)） |
+| `-r`, `--resume <id>`        | 恢复当前目录所属仓库里指定 session id 的会话。会话记录过 chord 管理 worktree 时，会先切回该 worktree                                                     |
+| `--fork-history[=N]`         | 先把 `--resume` 指定的会话在某次压缩边界上 fork 出来，再恢复这个 fork：省略 N 表示最近一次已应用边界，或传 `history-N` 序号（如 `=2`）。只能与 `--resume` 一起用，且该会话必须属于当前仓库。源会话即使正被其它进程打开也可以 fork（见下文[恢复会话](#恢复会话)） |
 | `--yolo`                     | 启动时启用 YOLO 模式：普通工具跳过权限检查、不再弹确认；handoff、delegate、cancel、done 和 compact_context 仍按各自配置的规则执行                                                       |
-| `-w`, `--worktree [name]`    | 创建或进入 chord 管理的 git worktree（不传名字时自动命名）；与 `--continue` / `--resume` 配合可作用于该 worktree 自己的会话历史                              |
+| `-w`, `--worktree [name]`    | 创建或进入 chord 管理的 git worktree（不传名字时自动命名）；同一仓库的所有 checkout 共享会话。与 `--continue` / `--resume` 配合时，以该 worktree 为工作目录继续仓库里最近的会话 |
+| `--reset-branch`             | 仅与 `--worktree` 搭配：把没有任何 worktree 检出的遗留分支重置到当前 HEAD，而不是拒绝复用该名字                                                              |
 
 `--continue` 与 `--resume` 互斥；`--fork-history` 只能与 `--resume` 搭配，不能与 `--continue` 或 `--worktree` 组合。
 
@@ -79,10 +80,12 @@ chord [全局 flag] [命令] [命令 flag] [参数]
 
 两条入口走的是同一条恢复管线，区别只在如何定位会话：
 
-- `chord --resume <id>`（别名 `-r`）恢复**当前项目内**的会话：该会话必须属于当前目录所在项目，Chord 不会切换目录。它可以与 `--continue` / `--worktree` 组合，也是脚本与 headless 使用的形态。如果会话属于其它 chord 管理 worktree，会以「找不到会话」报错。
-- `chord resume <id>` 从**任意目录**按 session id 恢复：它读取仓库索引，找到该会话属于哪个 chord 管理 worktree（或主仓库），切换过去再恢复。
+- `chord --resume <id>`（别名 `-r`）恢复当前目录所属仓库里的会话。它可以与 `--continue` / `--worktree` 组合，也是脚本与 headless 使用的形态。
+- `chord resume <id>` 用显式命令做同一套定位：先打印切到了哪个 checkout，再在该目录启动 TUI。
 
-一句话选择：人已经在会话所在项目里 → 用 `chord --resume`；人在别处、或不确定会话在哪个 worktree → 用 `chord resume <id>`。
+两者都会切回会话记录的 chord 管理 worktree，因此在主工作区也能继续 worktree 里的会话，换到同一仓库的其它 checkout 也一样。如果那个 worktree 已经不在了，Chord 会给出提示、在会话里记录这次回退，改在仓库的主工作区继续。
+
+一句话选择：两者能定位的会话相同，按调用习惯挑即可——默认命令上的 flag，或独立的 `chord resume <id>` 命令。
 
 ### 示例
 
@@ -364,7 +367,15 @@ removed 1 sessions, total 263.5 MB
 
 管理 chord 管理的 git worktree。可使用 `chord worktree <name>`（或 `chord --worktree <name>`）创建或进入一个 worktree 并在其中启动会话；本命令的子命令用于 `list`、`remove`、`finish` 等管理操作。
 
-Worktree 落地在 `<state-dir>/worktrees/<repo-id>/<slug>`（仓库之外），每个 worktree 拥有独立 project key，sessions 与 cache 自动隔离。
+Worktree 默认落地在 `<state-dir>/worktrees/<repo-id>/<slug>`（仓库之外）；也可以用 `worktree.root` 改位置，相对路径以主仓库根为基准，例如 `root: .chord/worktrees` 会落在 `<repo>/.chord/worktrees/<slug>`。这个目录在仓库内时，Chord 会在其中保存一个内容为 `*` 的 `.gitignore`，让这些 checkout 不出现在主工作区的未跟踪文件里。该文件只负责 `git status` 整洁，删掉它不会削弱任何保护。其他工具不知道这层跳过：仓库内的 checkout 是磁盘上的第二份树，索引或扫描类工具也可能扫到它（见 [Worktree 用法](./usage_CN.md#worktree)）。
+
+同一仓库的所有 checkout 共享会话：历史存在仓库自己的 store 里，因此 worktree 里开的会话在主工作区能看到、能继续，反之亦然；runtime cache 仍按 checkout 分开，exports 跟着会话走。会话会记录自己当时所在的 checkout，继续该会话时会先切回去（见下文[恢复会话](#恢复会话)）。删除 worktree 默认保留这份历史：只有 `--purge-sessions` 才删该 worktree 自己的 store，而当前版本已不再往里写会话。
+
+worktree 只包含被 git 追踪的文件。被 gitignore 的内容——本地 `AGENTS.md`、`.chord/config.yaml`、agents、skills、plans——不会复制过去；在 worktree 里运行的会话会从主工作区读取它们，所以项目指令、技能、子代理与记忆的表现和主工作区一致。想让新 worktree 拿到哪些被忽略的文件，就在仓库根放一个 `.worktreeinclude`（gitignore 语法；文件不存在或没有任何 pattern 时默认 `.env*`）。这些文件在创建时复制过去，已被跟踪的文件绝不会被覆盖。
+
+权限规则、hook、agent 配置与 worktree 创建配置在会话启动时从主工作区解析，会话进出 worktree 不会改变它们；分支里改的这些配置只在该 checkout 新开的会话里生效。规则对每个 checkout 的效力见 [Worktree 用法](./usage_CN.md#worktree)。
+
+会话内也可以让 agent 自己管理 worktree：`WorktreeEnter` 创建或重新打开一个 worktree 并把 agent 的工作目录切进去（参数与 CLI 对应：`name`、`path`、`base`、`branch`、`reset_branch`），`WorktreeExit` 退出并可按需删除 checkout，`WorktreeList` 列出仓库的 worktree 及其归属与 dirty 状态。不必离开 TUI，直接让 agent 去某个 worktree 工作即可。会话在创建 worktree 过程中崩溃时，恢复后会按结果未知呈现，用 `chord worktree list` 查看是否有残留的 checkout。
 
 ### `chord worktree list`
 
@@ -372,12 +383,13 @@ Worktree 落地在 `<state-dir>/worktrees/<repo-id>/<slug>`（仓库之外），
 
 ### `chord worktree remove <name>`
 
-删除 worktree 目录及其 sessions、cache、exports。**默认保留分支**。
+删除 worktree 目录、它的 runtime cache 与归属元数据。**默认保留分支与仓库的会话历史**。
 
 | Flag                | 说明                                                                                            |
 | ------------------- | ----------------------------------------------------------------------------------------------- |
 | `--force`           | worktree 有未提交修改也强删；强删分支                                                           |
 | `--delete-branch`   | 同时删除 worktree 分支。不加 `--force` 时仅在分支已合并的前提下删除                       |
+| `--purge-sessions`  | 一并删除该 worktree 自己的 sessions/exports store。只有按 checkout 分片存会话的旧版本会写入它；当前版本的新会话存在仓库共享 store 里，不受影响 |
 
 ### `chord worktree finish <name>`
 
@@ -394,6 +406,8 @@ Worktree 落地在 `<state-dir>/worktrees/<repo-id>/<slug>`（仓库之外），
 如果 worktree 内已经有进行中的 rebase 或 merge，`finish` 会直接退出，避免叠加新的合并流程。
 
 只想提前判断会不会冲突、又不想改动真实 worktree / 分支 / 目标分支时，用 `--check`。真正执行 `finish` 则不是无副作用操作：如果目标分支合入 worktree 时发生冲突，Chord 会把真实 worktree 保留在该 merge 状态，等你解决后再重跑 `finish`。
+
+真跑 `finish` 还会移动目标分支：它会在主 checkout 里把目标分支快进到 squash 结果。主 checkout 正检出该分支时，它的工作树会被更新；主 checkout 在别的分支上时，`finish` 会临时切到目标分支、快进后再切回来。`finish` 执行期间不要在主 checkout 里跑会话或工具。
 
 想手动控制最终 squash commit 的说明时，用 `-m/--message` 覆盖自动生成的 message。
 
