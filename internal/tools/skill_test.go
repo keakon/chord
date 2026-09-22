@@ -116,31 +116,35 @@ func TestSkillToolExecuteSubstitutesSkillPlaceholders(t *testing.T) {
 }
 
 func TestBuildSkillListingTruncatesLongDescription(t *testing.T) {
-	longDesc := strings.Repeat("A", 300)
+	longDesc := strings.Repeat("A", SkillListingMaxDescCharsPerEntry*2)
 	listing := BuildSkillListing([]SkillListingEntry{{Name: "long-skill", Desc: longDesc}}, "## Available Skills\n")
 	if !strings.Contains(listing, "long-skill") {
 		t.Fatal("skill name should be present")
 	}
-	if strings.Contains(listing, strings.Repeat("A", 200)) {
+	if strings.Contains(listing, strings.Repeat("A", SkillListingMaxDescCharsPerEntry)) {
 		t.Fatal("description should be truncated")
 	}
-	if !strings.Contains(listing, strings.Repeat("A", 157)+"...") {
+	if !strings.Contains(listing, strings.Repeat("A", SkillListingMaxDescCharsPerEntry-3)+"...") {
 		t.Fatalf("expected truncated description ending with ..., got:\n%s", listing)
 	}
 }
 
-func TestTruncateSkillDescPreservesUTF8AtByteBoundary(t *testing.T) {
-	// Place a 3-byte rune ("厂" = e5 8e 82) straddling the 157-byte back-off
-	// point so a naive byte slice would emit a half-encoded rune.
-	for _, pad := range []int{155, 156, 157, 158} {
-		desc := strings.Repeat("A", pad) + "厂" + strings.Repeat("B", 50)
-		got := TruncateSkillDesc(desc)
-		if !utf8.ValidString(got) {
-			t.Fatalf("pad=%d: TruncateSkillDesc returned invalid UTF-8: %q", pad, got)
-		}
-		if !strings.HasSuffix(got, "...") {
-			t.Fatalf("pad=%d: expected truncated suffix, got %q", pad, got)
-		}
+func TestTruncateSkillDescCountsCharacters(t *testing.T) {
+	// The per-entry budget counts characters, so a CJK description at the cap
+	// passes through untouched even though its UTF-8 encoding is three times
+	// larger, and truncation must not split a multi-byte character.
+	atCap := strings.Repeat("厂", SkillListingMaxDescCharsPerEntry)
+	if got := TruncateSkillDesc(atCap); got != atCap {
+		t.Fatalf("description at the character cap should pass through, got %d characters", utf8.RuneCountInString(got))
+	}
+
+	got := TruncateSkillDesc(strings.Repeat("厂", SkillListingMaxDescCharsPerEntry+1))
+	if !utf8.ValidString(got) {
+		t.Fatalf("TruncateSkillDesc returned invalid UTF-8: %q", got)
+	}
+	want := strings.Repeat("厂", SkillListingMaxDescCharsPerEntry-3) + "..."
+	if got != want {
+		t.Fatalf("truncated description has %d characters, want a %d-character prefix plus \"...\"", utf8.RuneCountInString(got), SkillListingMaxDescCharsPerEntry-3)
 	}
 }
 
@@ -170,12 +174,13 @@ func TestBuildSkillListingCapsAt32Entries(t *testing.T) {
 }
 
 func TestBuildSkillListingRespectsTotalBudget(t *testing.T) {
-	// Create skills with very long descriptions so total exceeds 4000 chars.
+	// Descriptions at the per-entry cap make the section budget bind well
+	// before the entry cap does.
 	entries := make([]SkillListingEntry, 100)
 	for i := range entries {
 		entries[i] = SkillListingEntry{
 			Name: fmt.Sprintf("skill-%03d", i),
-			Desc: strings.Repeat("X", 200), // each truncated to 160 chars
+			Desc: strings.Repeat("X", SkillListingMaxDescCharsPerEntry),
 		}
 	}
 
@@ -183,8 +188,14 @@ func TestBuildSkillListingRespectsTotalBudget(t *testing.T) {
 	if listing == "" {
 		t.Fatal("missing Available Skills listing")
 	}
-	if len(listing) > SkillListingMaxTotal+100 { // small tolerance for header text
-		t.Fatalf("listing section too large: %d chars", len(listing))
+	if len(listing) > SkillListingMaxTotalBytes+100 { // small tolerance for the overflow summary
+		t.Fatalf("listing section too large: %d bytes", len(listing))
+	}
+	if shown := strings.Count(listing, "- **"); shown >= SkillListingMaxEntries {
+		t.Fatalf("section budget should cut entries below the %d-entry cap, got %d entries", SkillListingMaxEntries, shown)
+	}
+	if !strings.Contains(listing, "more skills available") {
+		t.Fatal("expected overflow summary in listing")
 	}
 }
 

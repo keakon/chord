@@ -69,6 +69,8 @@ resources:
 遵循 Effective Go 和 Go Code Review Comments。
 ```
 
+`description` 是模型在 `Available Skills` 列表里判断技能是否匹配时看到的文本，触发条件写在这里；超过 1024 字符，Chord 会截断并补 `...`。
+
 ### 声明式资源
 
 skill 正文依赖同目录下的文件时，在 frontmatter 的可选字段 `resources`

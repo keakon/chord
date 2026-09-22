@@ -39,29 +39,29 @@ func (SkillTool) Description() string {
 	return "Load a skill's full instructions on demand when a task matches an available skill."
 }
 
-// Listing budget constants for the Available Skills section.
+// Listing budget constants for the Available Skills section.  The section
+// budget counts bytes because it bounds prompt-prefix cost; the per-entry
+// description budget counts characters so multi-byte text is not penalized.
 const (
-	// SkillListingMaxTotal is the character budget for the Available Skills
+	// SkillListingMaxTotalBytes is the byte budget for the Available Skills
 	// section (not counting the preamble text shared by all tools).
-	SkillListingMaxTotal = 4000
-	// SkillListingMaxDescPerEntry is the per-skill description character budget.
-	SkillListingMaxDescPerEntry = 160
+	SkillListingMaxTotalBytes = 8192
+	// SkillListingMaxDescCharsPerEntry is the per-skill description budget in
+	// characters, including the "..." appended on truncation.
+	SkillListingMaxDescCharsPerEntry = 1024
 	// SkillListingMaxEntries is the default max skills shown; overflow shows "+N more".
 	SkillListingMaxEntries = 32
 )
 
 // TruncateSkillDesc truncates a skill description to fit the per-entry budget.
-// The budget is expressed in bytes, so back off to a UTF-8 rune boundary to
-// avoid emitting a half-encoded multi-byte character.
+// The budget counts characters and includes the ellipsis, so an overlong
+// description keeps SkillListingMaxDescCharsPerEntry-3 characters.
 func TruncateSkillDesc(desc string) string {
-	if len(desc) <= SkillListingMaxDescPerEntry {
+	if utf8.RuneCountInString(desc) <= SkillListingMaxDescCharsPerEntry {
 		return desc
 	}
-	end := SkillListingMaxDescPerEntry - 3
-	for end > 0 && !utf8.RuneStart(desc[end]) {
-		end--
-	}
-	return desc[:end] + "..."
+	runes := []rune(desc)
+	return string(runes[:SkillListingMaxDescCharsPerEntry-3]) + "..."
 }
 
 // SkillListingEntry is a lightweight name+description pair used by the shared
@@ -72,12 +72,13 @@ type SkillListingEntry struct {
 
 // BuildSkillListing builds the Available Skills listing section with
 // truncation budgets.  The header (e.g. "\n\n## Available Skills\n") is
-// included in the total budget.  Returns empty string when no entries remain.
+// included in the total budget, which is measured in bytes.  Returns empty
+// string when no entries remain.
 func BuildSkillListing(entries []SkillListingEntry, header string) string {
 	if len(entries) == 0 {
 		return ""
 	}
-	budget := max(SkillListingMaxTotal-len(header), 0)
+	budget := max(SkillListingMaxTotalBytes-len(header), 0)
 
 	shown := 0
 	var sb strings.Builder

@@ -74,6 +74,8 @@ resources:
 Follow Effective Go and Go Code Review Comments.
 ```
 
+The `description` is what the model sees in the `Available Skills` list when deciding whether a skill matches, so put the trigger conditions there; Chord truncates a description longer than 1024 characters with a trailing `...`.
+
 ### Declared resources
 
 When a skill body depends on files inside its own directory, list them in the
