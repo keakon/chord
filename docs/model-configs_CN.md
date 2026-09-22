@@ -21,7 +21,7 @@
 
 ## OpenAI GPT（Responses 兼容接口）
 
-GPT-5.4 / GPT-5.5 / GPT-5.6 / GPT-6 Astra 片段使用 OpenAI 模型页公布的
+GPT-5.4 / GPT-5.5 / GPT-5.6 / GPT-6 Sol / GPT-6 Luna / GPT-6 Astra 片段使用 OpenAI 模型页公布的
 档位：GPT-5.4 / 5.6 / 6 为 `1050000 / 922000 / 128000`（1.05M 总窗口；
 922K 输入预算由 `context` 减 `output` 推导，这些模型不公布独立输入上
 限），API 与当前 Codex 目录一致；GPT-5.5 保持 `400000 / 272000 / 128000`。
@@ -453,6 +453,176 @@ model_templates:
 provider 上（其窗口由服务端控制、Astra 尚未实测），把 `compaction` 写到
 那个 provider 的模型条目上，阈值按实测窗口调，而不是按 API 全窗口。
 
+### GPT-6 Sol
+
+GPT-6 Sol（`gpt-6-sol`，2026 年 9 月发布）是 GPT-6 一代里 GPT-6 Astra 之下的
+主力（和上一代的 `gpt-5.6-sol` 是两个不同模型），模型页把它定位在复杂编程和
+agentic 工作流上。窗口与最大输出和 Astra 相同（1,050,000 / 128,000），价格是
+$2 / $10（每百万 token），只有 Astra 的五分之一。它和新的便宜档 GPT-6 Luna
+同批发布，Luna 的配方见下一节。
+
+```yaml
+model_templates:
+  gpt-6-sol-base: &gpt-6-sol-base
+    limit:
+      context: 1050000
+      output: 128000        # API 完整窗口：不写 `input`，可用输入按 922K 推导
+    cost:
+      input: 2
+      output: 10
+      cache_read: 0.2
+      cache_write: 2.5
+      input_tiers:
+        - above_input_tokens: 272000
+          input: 4
+          output: 15
+          cache_read: 0.4
+          cache_write: 5
+    reasoning:
+      effort: medium
+      summary: auto
+    variants:
+      low:
+        reasoning:
+          effort: low
+      medium:
+        reasoning:
+          effort: medium
+      high:
+        reasoning:
+          effort: high
+      xhigh:
+        reasoning:
+          effort: xhigh
+      max:
+        reasoning:
+          effort: max
+    modalities:
+      input: [text, image, pdf]
+    compaction:
+      threshold: 0.25       # 约 231K 触发，压在 272K 计价断崖之下
+      reminder: 0.2
+
+providers:
+  openai:
+    type: responses
+    api_url: https://api.openai.com/v1/responses
+    models:
+      gpt-6-sol: *gpt-6-sol-base
+
+model_pools:
+  default:
+    - openai/gpt-6-sol@medium
+```
+
+验证：
+
+```bash
+chord doctor models --model openai/gpt-6-sol@medium
+```
+
+要点：
+
+- `reasoning.effort` 支持 `none`、`low`、`medium`（默认）、`high`、`xhigh`、
+  `max`。模型要调工具时保留 Responses provider：走 Chat Completions 时，
+  GPT-6 Sol 只有把 `reasoning_effort` 设为 `none` 才支持 function calling。
+- 缓存写入按输入价的 1.25x 计（$2.50）；Batch 和 Flex 半价，fast mode 双倍，
+  以模型页为准。
+- 和 Astra 一样不要加 `input: 272000`：272K 是计价门槛而不是输入上限，超过后
+  整个请求按 2x 输入 / 缓存、1.5x 输出重新计价。
+
+#### GPT-6 Sol 的压缩调优
+
+OpenAI 还没像 GPT-5.6 和 GPT-6 Astra 那样公布 GPT-6 Sol 的分段长上下文结
+果，所以这份配方先按成本优先：`threshold` 0.25 约 231K 触发，压在 272K 整单
+重新计价的断崖之下，`reminder` 用派生值。只有用自己的材料量过 Sol 的长上下
+文质量、并接受 2x 费率之后，再把阈值抬过断崖；不要照搬 Astra 的 0.6–0.7。
+
+### GPT-6 Luna
+
+GPT-6 Luna（`gpt-6-luna`，2026 年 9 月发布）是 GPT-6 一代的便宜档，接替上一
+代的 `gpt-5.6-luna`；模型页把它定位在高频、聚焦的小任务上。窗口和最大输出与
+Sol 相同（1,050,000 / 128,000），价格 $0.10 / $0.50（每百万 token），缓存读
+$0.01。
+
+```yaml
+model_templates:
+  gpt-6-luna-base: &gpt-6-luna-base
+    limit:
+      context: 1050000
+      output: 128000        # API 完整窗口：不写 `input`，可用输入按 922K 推导
+    cost:
+      input: 0.1
+      output: 0.5
+      cache_read: 0.01
+      cache_write: 0.125
+      input_tiers:
+        - above_input_tokens: 272000
+          input: 0.2
+          output: 0.75
+          cache_read: 0.02
+          cache_write: 0.25
+    reasoning:
+      effort: medium
+      summary: auto
+    variants:
+      low:
+        reasoning:
+          effort: low
+      medium:
+        reasoning:
+          effort: medium
+      high:
+        reasoning:
+          effort: high
+      xhigh:
+        reasoning:
+          effort: xhigh
+      max:
+        reasoning:
+          effort: max
+    modalities:
+      input: [text, image]
+    compaction:
+      threshold: 0.25       # 约 231K 触发，压在 272K 计价断崖之下
+      reminder: 0.2
+
+providers:
+  openai:
+    type: responses
+    api_url: https://api.openai.com/v1/responses
+    models:
+      gpt-6-luna: *gpt-6-luna-base
+
+model_pools:
+  default:
+    - openai/gpt-6-luna@medium
+```
+
+验证：
+
+```bash
+chord doctor models --model openai/gpt-6-luna@medium
+```
+
+要点：
+
+- `reasoning.effort` 支持 `none`、`low`、`medium`（默认）、`high`、`xhigh`、
+  `max`。输入支持文本和图片，输出只有文本。
+- 缓存写入按输入价的 1.25x 计（$0.125）；Batch 和 Flex 半价，fast mode 双倍，
+  以模型页为准。
+- 和 Sol 一样不要加 `input: 272000`：272K 是计价门槛而不是输入上限，超过后
+  整个请求按 2x 输入 / 缓存、1.5x 输出重新计价。
+- 走 Chat Completions 时，Luna 只有把 `reasoning_effort` 设为 `none` 才支持
+  function calling；要调工具就保留 Responses provider。
+
+#### GPT-6 Luna 的压缩调优
+
+OpenAI 还没公布 GPT-6 Luna 的分段长上下文结果，所以这份配方先按成本优先：
+`threshold` 0.25 约 231K 触发，压在 272K 整单重新计价的断崖之下，`reminder`
+用派生值。只有用自己的材料量过 Luna 的长上下文质量、并接受 2x 费率之后，再
+把阈值抬过断崖；不要照搬 Astra 的 0.6–0.7。
+
 ## Codex OAuth preset
 
 当你要使用 ChatGPT/Codex OAuth，而不是 API key 时，用这个配置。Codex OAuth
@@ -463,7 +633,7 @@ provider 上（其窗口由服务端控制、Astra 尚未实测），把 `compac
 
 | 模型 | `limit.context` | `limit.input` | `limit.output` |
 | --- | ---: | ---: | ---: |
-| GPT-6 Astra | 1,050,000 | 922,000 | 128,000 |
+| GPT-6 Sol / Luna / Astra | 1,050,000 | 922,000 | 128,000 |
 | GPT-5.4 | 1,050,000 | 922,000 | 128,000 |
 | GPT-5.5 | 400,000 | 272,000 | 128,000 |
 | GPT-5.6 Sol / Terra / Luna | 1,050,000 | 922,000 | 128,000 |
@@ -473,34 +643,53 @@ provider 上（其窗口由服务端控制、Astra 尚未实测），把 `compac
 `context`；输入接近上限时，留给输出的空间自然会变少。
 
 ```yaml
+model_templates:
+  # 1.05M 窗口的条目共用限额、reasoning、variants 和 modalities；
+  # GPT-6 Luna 只支持图像，不支持 PDF。
+  codex-gpt6-base: &codex-gpt6-base
+    limit:
+      context: 1050000
+      input: 922000
+      output: 128000
+    reasoning:
+      effort: medium
+      summary: auto
+    variants:
+      low:
+        reasoning:
+          effort: low
+      medium:
+        reasoning:
+          effort: medium
+      high:
+        reasoning:
+          effort: high
+      xhigh:
+        reasoning:
+          effort: xhigh
+      max:
+        reasoning:
+          effort: max
+    modalities:
+      input: [text, image, pdf]
+  codex-gpt6-luna: &codex-gpt6-luna
+    <<: *codex-gpt6-base
+    modalities:
+      input: [text, image]
+
 providers:
   codex:
     preset: codex
     type: responses
     models:
-      gpt-6-astra:
-        limit:
-          context: 1050000
-          input: 922000
-          output: 128000
-        variants:
-          medium:
-            reasoning:
-              effort: medium
-          high:
-            reasoning:
-              effort: high
-          xhigh:
-            reasoning:
-              effort: xhigh
-          max:
-            reasoning:
-              effort: max
+      gpt-6-astra: *codex-gpt6-base
       gpt-5.5:
         limit:
           context: 400000
           input: 272000
           output: 128000
+        reasoning:
+          summary: auto
         variants:
           high:
             reasoning:
@@ -508,19 +697,27 @@ providers:
           xhigh:
             reasoning:
               effort: xhigh
-          max:
-            reasoning:
-              effort: max
+        modalities:
+          input: [text, image, pdf]
       gpt-5.4:
         limit:
           context: 1050000
           input: 922000
           output: 128000
-      gpt-5.6-sol:
-        limit:
-          context: 1050000
-          input: 922000
-          output: 128000
+        reasoning:
+          summary: auto
+        variants:
+          high:
+            reasoning:
+              effort: high
+          xhigh:
+            reasoning:
+              effort: xhigh
+        modalities:
+          input: [text, image, pdf]
+      gpt-5.6-sol: *codex-gpt6-base
+      gpt-6-sol: *codex-gpt6-base
+      gpt-6-luna: *codex-gpt6-luna
 
 model_pools:
   default:
@@ -537,15 +734,25 @@ chord auth codex
 要点：
 
 - 同时使用 API key 和 Codex OAuth 时，因为凭据和模型配额不同，应保留两个 provider，并分别配置模型限制。
+- 每个条目都带上了与上文配方相同的 `reasoning` 和 `modalities`。没写
+  `modalities` 的模型只接受文本，它的图像/PDF 附件会被 Chord 丢掉；没有
+  `reasoning` 块时请求里完全不发 reasoning 参数，effort 交给后端默认值，
+  也不会请求摘要。
+- 初始安装向导按同样的档位写完整 Codex 目录（另外还有 `gpt-5.2`、
+  `gpt-5.3-codex`、`gpt-5.6-terra`、`gpt-5.6-luna`），但只写 `limit`、
+  模型池也不带后缀；想让这些模型也有思考摘要和附件输入，按上面的方式补
+  `reasoning` 与 `modalities`。
 - GPT-6 Astra 正在上线后头几周内向 Codex 推出（需要 Codex CLI 0.153.0
   或更新版本），Codex 订阅窗口官方尚未公布。配方沿用 GPT-5.6 Sol 的
   `1050000 / 922000 / 128000` 作为保守起点；上线后请按账号的服务端目录
   核对，并把三个字段都调成实测窗口再用于长会话。
-- GPT-5.4、GPT-5.6 Sol / Terra / Luna 与 GPT-6 Astra 使用模型页档位
+- GPT-5.4、GPT-5.6 Sol / Terra / Luna 与 GPT-6 Sol / Luna / Astra 使用模型页档位
   `1050000 / 922000 / 128000`（922K 输入预算由 `context` 减 `output` 推导，
   这些模型不公布独立输入上限）。API 的 >272K 整单 2× 计价悬崖若适用于
   你的路由仍照常生效。账号/中转的服务端目录仍是旧档位时，回落
   `400000 / 272000 / 128000`。
+- 这份 preset 不含 `cost`（订阅不按 token 计费），也不含 `compaction`：
+  按上文该模型的压缩调优一节挑一个阈值，写在模板或模型条目上。
 - 这些数值跟随当前 Codex 模型目录，未来 Codex 版本可能调整。后端配额变化时，要同时更新三个字段。
 
 ## Anthropic Claude
@@ -629,9 +836,63 @@ model_pools:
     - anthropic/claude-fable-5-1@high
 ```
 
+### Claude Opus 5.5
+
+`claude-opus-5-5`（2026 年 9 月发布）在多数工作上达到 Fable 5.1 的水平，价格
+是 $4 / $20（每百万 token），低于 Opus 5 的 $5 / $25，不到 Fable 5.1 的
+$10 / $50 一半，缓存读取 $0.20；1M 上下文、128K 最大输出、adaptive thinking
+和 PDF 支持都沿用同一套。只有 cost 块和 variants 不同：它的默认 effort 是
+`medium`，比 Opus 5 的 `high` 低一档。
+
+```yaml
+# 需要同一文件上方的 `&claude-opus` 模板。
+model_templates:
+  claude-opus-5.5: &claude-opus-5-5
+    <<: *claude-opus
+    cost:
+      input: 4
+      output: 20
+      cache_read: 0.2
+      cache_write: 5
+      cache_write_1h: 8
+    variants:
+      medium:
+        thinking:
+          effort: medium
+      high:
+        thinking:
+          effort: high
+      xhigh:
+        thinking:
+          effort: xhigh
+
+providers:
+  anthropic:
+    type: messages
+    api_url: https://api.anthropic.com/v1/messages
+    models:
+      claude-opus-5-5: *claude-opus-5-5
+
+model_pools:
+  default:
+    - anthropic/claude-opus-5-5@medium
+```
+
+要点：
+
+- thinking 始终开启：请求里关掉 thinking、或使用强制工具调用，都会报错。
+  `thinking.type` 保持 `adaptive`。
+- 工具调用之间的文本现在从 `thinking` 块返回，默认 `display` 下是空的；模板里的
+  `display: summarized` 让这段进度在 Chord 里照常显示，不会在两个工具之间突然
+  安静。
+- thinking 块绑定产生它的模型和对话前缀。本地改写历史（自动压缩、请求级剪裁）
+  之后，API 会把重放的块判为 `bound to a different conversation` 而拒绝；Chord
+  会识别这类错误、丢掉 thinking 块后重试，会话照常继续，只是压缩前的推理原文
+  没了。
+
 ### Claude 5 的压缩调优
 
-Claude 5 全系（Fable 5.1、Opus 5、Sonnet 5）都是 1M 上下文、128K 最大输出、全窗口统一按 token 计费。MRCR v2 8-needle 显示 Opus 级模型即使到 1M 仍能保持 ~76%（当前所有模型族里最平坦的曲线），可靠窗口确实很大。Opus 4.7 时代的模型为换取「拒绝而非编造」牺牲了检索准确率；Opus 5 和 Fable 5.1 恢复了强长上下文检索。日常用直接不写 `compaction` 块，跟全局默认走
+Claude 5 全系（Fable 5.1、Opus 5.5、Opus 5、Sonnet 5）都是 1M 上下文、128K 最大输出、全窗口统一按 token 计费。MRCR v2 8-needle 显示 Opus 级模型即使到 1M 仍能保持 ~76%（当前所有模型族里最平坦的曲线），可靠窗口确实很大。Opus 4.7 时代的模型为换取「拒绝而非编造」牺牲了检索准确率；Opus 5、Opus 5.5 和 Fable 5.1 恢复了强长上下文检索；Opus 5.5 的缓存读取（每百万 token $0.20）低于 Opus 5 和 Fable 5.1，压缩后重读文件的成本更低。日常用直接不写 `compaction` 块，跟全局默认走
 （`threshold` 0.8，可用预算约 872K 里约 698K 触发）；跑数小时的 agentic 长会话
 再设 `threshold: 0.7`（约 610K），少在 512K 以上的轻度退化带深处待。
 
@@ -1823,7 +2084,7 @@ model_templates:
 providers:
   openai:
     models:
-      gpt-5.6-luna: *luna-full-window
+      gpt-6-luna: *luna-full-window
 ```
 
 没有 `compaction` 块的模型继承全局 `context.compaction.threshold`；

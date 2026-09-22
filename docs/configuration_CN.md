@@ -212,7 +212,7 @@ providers:
           output: 128000
 ```
 
-GPT-5.4 / GPT-5.6 Sol / Terra / Luna / GPT-6 Astra 使用 `1050000 / 922000 / 128000`
+GPT-5.4 / GPT-5.6 Sol / Terra / Luna / GPT-6 Sol / Luna / Astra 使用 `1050000 / 922000 / 128000`
 （1.05M 总窗口；922K 输入预算由 `context` − `output` 推导，这些模型不公布
 独立输入上限）；GPT-5.5 与 GPT-5.2 使用 `400000 / 272000 / 128000`。
 完整示例见 [模型配置速查](./model-configs_CN.md#codex-oauth-preset)。

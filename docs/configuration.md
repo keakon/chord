@@ -219,7 +219,7 @@ providers:
           output: 128000
 ```
 
-GPT-5.4 / 5.6 Sol / Terra / Luna / GPT-6 Astra use `1050000 / 922000 / 128000`
+GPT-5.4 / 5.6 Sol / Terra / Luna / GPT-6 Sol / Luna / Astra use `1050000 / 922000 / 128000`
 (1.05M total window; the 922K input budget derives as `context` − `output`,
 since these models publish no separate input cap); GPT-5.5 and
 GPT-5.2 use `400000 / 272000 / 128000`. See [Model configuration recipes](./model-configs.md#codex-oauth-preset)
