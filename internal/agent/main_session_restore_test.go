@@ -53,6 +53,41 @@ func TestFillSessionSummaryDetailsKeepsScannedPreviewOutOfOriginal(t *testing.T)
 	}
 }
 
+// TestFillSessionSummaryDetailsLoadsWorktreeName pins the picker's worktree
+// column to its data source. Sessions are shared by every checkout of one
+// repository, so without this the picker cannot tell a session created in a
+// worktree from one in the main checkout.
+func TestFillSessionSummaryDetailsLoadsWorktreeName(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	sessionsDir, err := a.projectSessionsDir()
+	if err != nil {
+		t.Fatalf("projectSessionsDir: %v", err)
+	}
+
+	const sessionID = "worktree-legacy"
+	sessionPath := filepath.Join(sessionsDir, sessionID)
+	rm := recovery.NewRecoveryManager(sessionPath)
+	if err := rm.PersistMessage("main", message.Message{Role: message.RoleUser, Content: "hello"}); err != nil {
+		t.Fatalf("PersistMessage: %v", err)
+	}
+	rm.Close()
+	if err := recovery.SaveSessionMeta(sessionPath, recovery.SessionMeta{WorktreeName: "feat-picker"}); err != nil {
+		t.Fatalf("SaveSessionMeta: %v", err)
+	}
+
+	list := a.FillSessionSummaryDetails([]SessionSummary{{
+		ID:           sessionID,
+		MessageCount: UnknownSessionMessageCount,
+	}})
+	if len(list) != 1 {
+		t.Fatalf("len(list) = %d, want 1", len(list))
+	}
+	if list[0].WorktreeName != "feat-picker" {
+		t.Fatalf("WorktreeName = %q, want the recorded worktree", list[0].WorktreeName)
+	}
+}
+
 func TestRestoredSubAgentBuilderTaskDescPrefersUserAuthoredMessage(t *testing.T) {
 	b := newRestoredSubAgentBuilder("sub-1")
 	b.attachTranscript([]message.Message{

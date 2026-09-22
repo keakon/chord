@@ -78,6 +78,16 @@ func (a *MainAgent) executeToolCallSpeculative(ctx context.Context, tc message.T
 	return a.toolExecutionPipeline().executeSpeculative(ctx, tc)
 }
 
+// bindSpeculativeEntry captures the request binding for one speculative call
+// when the call is created, so a queued entry starts in the checkout its
+// arguments were written for.
+func (a *MainAgent) bindSpeculativeEntry() streamingToolRunFunc {
+	pipeline := a.toolExecutionPipeline()
+	return func(ctx context.Context, tc message.ToolCall) (ToolExecutionResult, error) {
+		return pipeline.executeSpeculative(ctx, tc)
+	}
+}
+
 func (a *MainAgent) captureMainWalltimeTarget() *walltimeTarget {
 	if a == nil || a.walltime == nil {
 		return nil
@@ -109,7 +119,7 @@ func (a *MainAgent) toolExecutionPipeline() toolExecutionPipeline {
 		toolBaseDir:           a.effectiveToolBaseDir(),
 		machineStateRoot:      a.ContentRoot(),
 		toolBaseDirGeneration: a.workDirState.load().Generation,
-		pathScope:             a.effectivePathScope,
+		pathScope:             a.effectivePathScope(),
 		refreshRulesetAfterRuleIntent: func(toolName string, intent *ConfirmRuleIntent) permission.Ruleset {
 			a.processRuleIntent(toolName, intent, a.currentAgentName())
 			return a.effectiveRuleset()
@@ -118,7 +128,7 @@ func (a *MainAgent) toolExecutionPipeline() toolExecutionPipeline {
 		confirm:               a.confirmFn,
 		currentTurnID:         a.currentTurnID,
 		captureWalltimeTarget: a.captureMainWalltimeTarget,
-		fireHook:              a.fireHook,
+		fireHook:              a.fireHookInDir,
 		updatePending: func(call PendingToolCall) {
 			if turn := a.currentTurn(); turn != nil {
 				turn.updatePendingToolCall(call)

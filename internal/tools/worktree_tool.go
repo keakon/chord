@@ -175,7 +175,7 @@ func (WorktreeExitTool) Description() string {
 	return "Leaves the active worktree and returns this agent to the checkout the session started in, or removes a worktree checkout.\n" +
 		"`action: \"keep\"` (default) only unbinds the working directory and always keeps the branch and its commits. " +
 		"`action: \"remove\"` deletes the checkout after the work is done; the branch is always kept. " +
-		"Removal is refused when this session does not own the worktree, when the worktree is the currently active working directory (leave first), or when it has uncommitted changes or commits that exist only on its branch. " +
+		"Removal is refused when this session does not own the worktree, when the worktree is the currently active working directory (leave first), when it has uncommitted changes or commits that exist only on its branch, or when another agent of this session or a running background command is still working in it. " +
 		"Pass `discard_changes: true` only when the user explicitly accepts losing those changes."
 }
 

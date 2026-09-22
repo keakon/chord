@@ -1646,6 +1646,11 @@ type SessionSummary struct {
 	OriginalFirstUserMessage            string // preserved across compaction
 	ForkedFrom                          string
 	Locked                              bool
+	// WorktreeName is the chord-managed worktree the session last worked in,
+	// or empty when it ran in the main checkout. Every checkout of a repository
+	// shares one session history, so the picker needs this to tell a session
+	// created in a worktree from one in the main checkout.
+	WorktreeName string
 }
 
 // UnknownSessionMessageCount marks SessionSummary.MessageCount as not yet computed.
@@ -1714,6 +1719,13 @@ func (a *MainAgent) FillSessionSummaryDetails(list []SessionSummary) []SessionSu
 			mainPath := filepath.Join(sessionPath, identity.MainSessionLogFilename)
 			if firstUser, err := recovery.FirstUserMessageFromFile(mainPath); err == nil {
 				out[i].FirstUserMessage = firstUser
+			}
+		}
+		if strings.TrimSpace(out[i].WorktreeName) == "" {
+			// Detail-load only: the worktree the session last worked in lives
+			// in session-meta.json, and list scans stay cheap by not reading it.
+			if meta, metaErr := recovery.LoadSessionMeta(sessionPath); metaErr == nil && meta != nil {
+				out[i].WorktreeName = meta.WorktreeName
 			}
 		}
 	}

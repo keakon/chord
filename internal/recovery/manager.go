@@ -55,10 +55,9 @@ type ToolActivityRecord struct {
 	Tool    string `json:"tool"`
 	State   string `json:"state"`
 	// WorkDir is the agent's active checkout when the call started, and
-	// WorkDirGeneration is the binding generation that produced it. A crash
-	// replay must resolve the call's relative paths against the same
-	// directory, so the journal carries them instead of assuming the
-	// session's startup directory.
+	// WorkDirGeneration is the binding generation that produced it. They keep
+	// the started fact attributable to the checkout it ran in; the resume path
+	// resolves a restored agent's binding from SubAgentMeta, not from here.
 	WorkDir           string `json:"workdir,omitempty"`
 	WorkDirGeneration uint64 `json:"workdir_generation,omitempty"`
 	TS                int64  `json:"ts"` // unix nanoseconds
@@ -174,9 +173,9 @@ type AgentSnapshot struct {
 	State              string           `json:"state,omitempty"`
 	LastSummary        string           `json:"last_summary,omitempty"`
 	// WorkDir is the agent's active checkout at snapshot time and
-	// WorkDirGeneration is its binding generation. A restored agent must
-	// resume in this directory; without it, replay resolves the restored
-	// transcript's relative paths against a different checkout.
+	// WorkDirGeneration is its binding generation. They record the checkout for
+	// post-crash attribution; the resume path resolves a restored agent's
+	// binding from SubAgentMeta, not from these fields.
 	WorkDir                 string          `json:"work_dir,omitempty"`
 	WorkDirGeneration       uint64          `json:"work_dir_generation,omitempty"`
 	PendingCompleteIntent   bool            `json:"pending_complete_intent,omitempty"`

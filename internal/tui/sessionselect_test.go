@@ -219,9 +219,37 @@ func TestHandleSessionSummaryDetailsLoadedUpdatesCurrentPicker(t *testing.T) {
 	}
 }
 
+func TestSessionSelectRendersWorktreeColumn(t *testing.T) {
+	item := sessionSelectItemFor(agent.SessionSummary{
+		ID:                       "sess-worktree",
+		MessageCount:             5,
+		WorktreeName:             "feat-parser",
+		OriginalFirstUserMessage: "Refactor the parser",
+		LastModTime:              time.Date(2026, 4, 25, 12, 0, 0, 0, time.Local),
+	})
+	if !strings.Contains(item.Label, "feat-parser") {
+		t.Fatalf("session row label should include the worktree name, got %q", item.Label)
+	}
+	if got := sessionSelectItemFor(agent.SessionSummary{ID: "sess-main", MessageCount: 1}).Label; !strings.Contains(got, "  -") {
+		t.Fatalf("session row without a worktree should render a placeholder, got %q", got)
+	}
+}
+
+func TestSessionSelectSearchMatchesWorktreeName(t *testing.T) {
+	m := newSessionSelectTestModel([]agent.SessionSummary{
+		{ID: "sess-a", MessageCount: 1, WorktreeName: "feat-parser", OriginalFirstUserMessage: "first"},
+		{ID: "sess-b", MessageCount: 1, WorktreeName: "docs-pass", OriginalFirstUserMessage: "second"},
+	})
+	m.sessionSelect.filter = "feat-parser"
+	m.rebuildSessionSelectFilteredView(true)
+	if got := len(m.sessionSelect.filteredIdx); got != 1 {
+		t.Fatalf("filtered sessions matching the worktree name = %d, want 1", got)
+	}
+}
+
 func TestSessionSelectColumnHeader(t *testing.T) {
 	header := sessionSelectColumnHeader()
-	for _, want := range []string{"Modified", "Msgs", "Preview"} {
+	for _, want := range []string{"Modified", "Msgs", "Worktree", "Preview"} {
 		if !strings.Contains(header, want) {
 			t.Fatalf("column header should include %q, got %q", want, header)
 		}

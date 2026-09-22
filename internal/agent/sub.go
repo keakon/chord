@@ -256,12 +256,19 @@ type SubAgent struct {
 	workDir       string
 	venvPath      string // absolute path to detected Python virtual environment, or ""
 	sessionDir    string
-	agentsMD      string
 	loadedSkills  []*skill.Meta
 	skillsMu      sync.RWMutex
 	invokedSkills map[string]*skill.Meta
 	modelName     string
 	customPrompt  string // from agent YAML body; replaces built-in role instructions if non-empty
+
+	// agentsMD is the AGENTS.md the worker follows: captured at spawn from the
+	// parent, then reloaded when a worktree switch moves the worker into a
+	// checkout carrying its own instructions. The mutex keeps that reload (a
+	// tool goroutine) from racing the model-switch path, which rebuilds the
+	// system prompt from it.
+	agentsMDMu sync.RWMutex
+	agentsMD   string
 	// workDirState is this SubAgent's active checkout; a worktree switch
 	// publishes a new generation here and never touches the parent's binding.
 	workDirState workDirBinding
@@ -799,19 +806,36 @@ func (s *SubAgent) switchModel(client *llm.Client, modelName string, contextLimi
 	s.frozenToolDefs = append([]message.ToolDefinition(nil), toolDefs...)
 	s.llmMu.Unlock()
 	prompt := s.buildSystemPrompt()
-	client.SetSystemPrompt(prompt)
 	s.setSessionID(client)
 	if oldClient != nil && oldClient != client {
 		oldClient.Close()
 	}
 	providerRef := client.PrimaryModelRef()
 	s.ctxMgr.SetTokenBudgets(contextLimit, client.InputLimitForModelRef(providerRef), 0)
-	s.ctxMgr.SetSystemPrompt(message.Message{Role: "system", Content: prompt})
+	s.installSystemPrompt(prompt)
 	runningRef := client.RunningModelRef()
 	if runningRef == "" {
 		runningRef = providerRef
 	}
 	s.parent.emitToTUI(RunningModelChangedEvent{AgentID: s.instanceID, ProviderModelRef: providerRef, RunningModelRef: runningRef})
+}
+
+// installSystemPrompt publishes a new system prompt to the LLM client and the
+// context manager together. Both feed the request prefix, so installing one
+// without the other would leave the model's standing instructions disagreeing
+// with the persisted system message. Model switches and checkout switches both
+// replace the prompt.
+func (s *SubAgent) installSystemPrompt(prompt string) {
+	if s == nil {
+		return
+	}
+	s.llmMu.RLock()
+	client := s.llmClient
+	s.llmMu.RUnlock()
+	if client != nil {
+		client.SetSystemPrompt(prompt)
+	}
+	s.ctxMgr.SetSystemPrompt(message.Message{Role: message.RoleSystem, Content: prompt})
 }
 
 func (s *SubAgent) closeLLMClient() {
@@ -1311,6 +1335,7 @@ func (s *SubAgent) newTurn() *Turn {
 		activeToolBatchCancel: nil,
 	}
 	s.turn.streamingToolExec = NewStreamingToolExecutor(s.turn.ID, ctx, s.parent.emitToTUI, s.executeToolCallSpeculative)
+	s.turn.streamingToolExec.SetEntryBinder(s.bindSpeculativeEntry)
 	s.turn.streamingToolExec.SetWorkDir(s.effectiveToolBaseDir())
 	s.turn.streamingToolExec.SetTraceCallbacks(s.parent.recordToolTraceSpeculativeStart, s.parent.recordToolTraceFirstVisibleResult, s.parent.recordToolTraceSpeculativeDiscard)
 	log.Debugf("SubAgent: new turn created agent=%v turn_id=%v", s.instanceID, s.turn.ID)
@@ -1442,7 +1467,7 @@ func (s *SubAgent) buildSystemPrompt() string {
 	}
 	parts = append(parts, taskSection)
 
-	if block := agentsMDReminderFramingPromptBlock(s.agentsMD); block != "" {
+	if block := agentsMDReminderFramingPromptBlock(s.agentsMDSnapshot()); block != "" {
 		parts = append(parts, block)
 	}
 	// AGENTS.md is delivered as a meta user message under a

@@ -32,3 +32,12 @@ func (s *SubAgent) executeToolCallWithHook(ctx context.Context, tc message.ToolC
 func (s *SubAgent) executeToolCallSpeculative(ctx context.Context, tc message.ToolCall) (ToolExecutionResult, error) {
 	return s.toolExecutionPipeline().executeSpeculative(ctx, tc)
 }
+
+// bindSpeculativeEntry captures the worker's request binding for one
+// speculative call at creation time; see StreamingToolExecutor.SetEntryBinder.
+func (s *SubAgent) bindSpeculativeEntry() streamingToolRunFunc {
+	pipeline := s.toolExecutionPipeline()
+	return func(ctx context.Context, tc message.ToolCall) (ToolExecutionResult, error) {
+		return pipeline.executeSpeculative(ctx, tc)
+	}
+}

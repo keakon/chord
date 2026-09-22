@@ -40,7 +40,14 @@ type streamingToolEntry struct {
 	done         chan struct{}
 	discarded    bool
 	discardWhy   string
+	// run captures the request binding at entry creation (see
+	// SetEntryBinder). nil means the executor's shared run function.
+	run streamingToolRunFunc
 }
+
+// streamingToolRunFunc runs one tool call against the binding its entry was
+// created with.
+type streamingToolRunFunc func(context.Context, message.ToolCall) (ToolExecutionResult, error)
 
 type StreamingToolDiscardInfo struct {
 	CallID      string
@@ -56,9 +63,12 @@ type StreamingToolDiscardInfo struct {
 type StreamingToolExecutor struct {
 	turnID  uint64
 	ctx     context.Context
-	execute func(context.Context, message.ToolCall) (ToolExecutionResult, error)
+	execute streamingToolRunFunc
 	emit    func(AgentEvent)
 	workDir string
+	// bindEntry captures a per-entry request binding when a speculative call is
+	// created; see SetEntryBinder. nil shares execute across entries.
+	bindEntry func() streamingToolRunFunc
 
 	onSpeculativeStart     func(callID, toolName string, at time.Time)
 	onFirstVisibleResult   func(callID, toolName string, at time.Time)
@@ -72,10 +82,22 @@ type StreamingToolExecutor struct {
 	locks    map[string]string
 }
 
-func NewStreamingToolExecutor(turnID uint64, ctx context.Context, emit func(AgentEvent), execute func(context.Context, message.ToolCall) (ToolExecutionResult, error)) *StreamingToolExecutor {
+func NewStreamingToolExecutor(turnID uint64, ctx context.Context, emit func(AgentEvent), execute streamingToolRunFunc) *StreamingToolExecutor {
 	limit := streamingToolSpeculativeLimit
 	sem := make(chan struct{}, limit)
 	return &StreamingToolExecutor{turnID: turnID, ctx: ctx, emit: emit, execute: execute, limit: limit, sem: sem, entries: make(map[string]*streamingToolEntry), locks: make(map[string]string)}
+}
+
+// SetEntryBinder installs a factory that captures the request binding for one
+// speculative call at the moment the call is created. A call that waits behind
+// the concurrency limit and only starts after a checkout switch therefore still
+// runs against the checkout it was created for, instead of resolving its
+// relative paths against the checkout the agent moved to.
+func (e *StreamingToolExecutor) SetEntryBinder(bind func() streamingToolRunFunc) {
+	if e == nil {
+		return
+	}
+	e.bindEntry = bind
 }
 
 func (e *StreamingToolExecutor) SetTraceCallbacks(onStart func(callID, toolName string, at time.Time), onFirstVisible func(callID, toolName string, at time.Time), onDiscard func(info StreamingToolDiscardInfo)) {
@@ -99,6 +121,9 @@ func (e *StreamingToolExecutor) Start(call message.ToolCall) bool {
 	}
 	call.Name = tools.NormalizeName(call.Name)
 	entry := &streamingToolEntry{call: call, argsHash: canonicalArgsHash(call.Args), conflictKeys: speculativeConflictKeys(call, e.workDir), state: streamingToolQueued, done: make(chan struct{})}
+	if e.bindEntry != nil {
+		entry.run = e.bindEntry()
+	}
 	e.mu.Lock()
 	if _, exists := e.entries[call.ID]; exists {
 		e.mu.Unlock()
@@ -222,7 +247,11 @@ func (e *StreamingToolExecutor) runEntry(entry *streamingToolEntry) {
 	if e.emit != nil {
 		e.emit(ToolCallExecutionEvent{ID: call.ID, Name: call.Name, ArgsJSON: string(call.Args), State: ToolCallExecutionStateRunning})
 	}
-	result, err := e.execute(e.ctx, call)
+	execute := e.execute
+	if entry.run != nil {
+		execute = entry.run
+	}
+	result, err := execute(e.ctx, call)
 	completedAt := time.Now()
 
 	e.mu.Lock()

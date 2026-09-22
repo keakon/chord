@@ -8,10 +8,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
@@ -271,6 +273,16 @@ func TestWorktreeEnterSwitchesBaseDirAndKeepsInFlightSnapshot(t *testing.T) {
 	assertFileContent(t, filepath.Join(res.Path, "after.txt"), "after.txt")
 	assertNoFile(t, filepath.Join(repo, "after.txt"))
 
+	// The permission scope and the hook working directory a call was dispatched
+	// with keep the checkout they bound, too: only the request binding moves
+	// forward, the in-flight request does not.
+	if got := before.effectivePathScope().Cwd; got != repo {
+		t.Errorf("in-flight path scope cwd after switch = %q, want %q", got, repo)
+	}
+	if got := after.effectivePathScope().Cwd; got != res.Path {
+		t.Errorf("post-switch path scope cwd = %q, want %q", got, res.Path)
+	}
+
 	// Entering the active worktree again is a no-op: it must not bump the
 	// generation or re-run the post-switch refresh.
 	again, err := a.WorktreeEnter(ctx, tools.WorktreeEnterRequest{Name: "feat-one"})
@@ -282,6 +294,85 @@ func TestWorktreeEnterSwitchesBaseDirAndKeepsInFlightSnapshot(t *testing.T) {
 	}
 	if got := a.workDirState.load().Generation; got != 1 {
 		t.Errorf("generation after re-enter = %d, want 1", got)
+	}
+}
+
+// recordingSyncHookEngine records the envelopes of synchronous hooks so a test
+// can assert the working directory a tool call's hook ran in.
+type recordingSyncHookEngine struct {
+	mu        sync.Mutex
+	envelopes []hook.Envelope
+}
+
+func (e *recordingSyncHookEngine) Fire(_ context.Context, env hook.Envelope) (*hook.Result, error) {
+	e.mu.Lock()
+	e.envelopes = append(e.envelopes, env)
+	e.mu.Unlock()
+	return &hook.Result{Action: hook.ActionContinue}, nil
+}
+
+func (*recordingSyncHookEngine) FireBackground(context.Context, hook.Envelope) {}
+
+func (*recordingSyncHookEngine) RunAutomation(context.Context, hook.Envelope) ([]hook.AutomationJobResult, error) {
+	return nil, nil
+}
+
+func (*recordingSyncHookEngine) HasSyncHooks(string) bool { return false }
+
+func (e *recordingSyncHookEngine) projectRoots(point string) []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	var roots []string
+	for _, env := range e.envelopes {
+		if env.Point == point {
+			roots = append(roots, env.ProjectRoot)
+		}
+	}
+	return roots
+}
+
+// TestWorktreeSwitchKeepsInFlightRequestBinding drives a tool call through the
+// pipeline and checks the hook envelope's working directory: the pipeline built
+// before the switch keeps firing in the checkout it bound, while a call
+// dispatched after the switch runs in the worktree.
+func TestWorktreeSwitchKeepsInFlightRequestBinding(t *testing.T) {
+	ctx := context.Background()
+	a, repo := newWorktreeTestAgent(t, "session-owner")
+	a.tools.Register(tools.ReadTool{BaseDir: repo})
+	hooks := &recordingSyncHookEngine{}
+	a.hookEngine = hooks
+
+	const rel = "binding.txt"
+	if err := os.WriteFile(filepath.Join(repo, rel), []byte("main checkout"), 0o644); err != nil {
+		t.Fatalf("write %s: %v", rel, err)
+	}
+	args, err := json.Marshal(map[string]string{"path": rel})
+	if err != nil {
+		t.Fatalf("marshal args: %v", err)
+	}
+
+	before := a.toolExecutionPipeline()
+	res, err := a.WorktreeEnter(ctx, tools.WorktreeEnterRequest{Name: "feat-binding"})
+	if err != nil {
+		t.Fatalf("WorktreeEnter: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(res.Path, rel), []byte("worktree checkout"), 0o644); err != nil {
+		t.Fatalf("write worktree %s: %v", rel, err)
+	}
+
+	if _, err := before.execute(ctx, message.ToolCall{ID: "call-inflight", Name: tools.NameRead, Args: args}, true); err != nil {
+		t.Fatalf("in-flight read: %v", err)
+	}
+	if got := hooks.projectRoots(hook.OnToolCall); len(got) != 1 || got[0] != repo {
+		t.Fatalf("in-flight hook dirs = %v, want [%s]", got, repo)
+	}
+
+	if _, err := a.executeToolCall(ctx, message.ToolCall{ID: "call-current", Name: tools.NameRead, Args: args}); err != nil {
+		t.Fatalf("current read: %v", err)
+	}
+	got := hooks.projectRoots(hook.OnToolCall)
+	if len(got) != 2 || got[1] != res.Path {
+		t.Fatalf("hook dirs = %v, want [%s %s]", got, repo, res.Path)
 	}
 }
 
@@ -430,6 +521,72 @@ func TestWorktreeExitNeedsDiscardForDirtyCheckout(t *testing.T) {
 	}
 }
 
+// TestWorktreeRemovalWaitsForRunningWork pins the runtime half of the removal
+// guard: a checkout another agent is bound to, or one a background command is
+// still running in, cannot be deleted — not even with discard_changes, which
+// consents to losing the tree's contents rather than to pulling the directory
+// out from under a live process.
+func TestWorktreeRemovalWaitsForRunningWork(t *testing.T) {
+	ctx := context.Background()
+	a, _ := newWorktreeTestAgent(t, "session-owner")
+	a.tools.Register(tools.NewShellTool(""))
+	defer tools.StopAllJobsForSessionSwitch()
+
+	agentTree, err := a.WorktreeEnter(ctx, tools.WorktreeEnterRequest{Name: "feat-agent-holder"})
+	if err != nil {
+		t.Fatalf("WorktreeEnter: %v", err)
+	}
+	if _, err := a.WorktreeExit(ctx, tools.WorktreeExitRequest{Name: "feat-agent-holder"}); err != nil {
+		t.Fatalf("WorktreeExit keep: %v", err)
+	}
+	worker := newControllableTestSubAgent(t, a, "task-holder")
+	worker.setState(SubAgentStateRunning, "working")
+	worker.workDirState.store(WorkDirState{Path: agentTree.Path, WorktreeID: agentTree.Name, Branch: agentTree.Branch})
+
+	_, err = a.WorktreeExit(ctx, tools.WorktreeExitRequest{Name: "feat-agent-holder", Remove: true, DiscardChanges: true})
+	if err == nil || !strings.Contains(err.Error(), "still in use") || !strings.Contains(err.Error(), worker.instanceID) {
+		t.Fatalf("err = %v, want a live-holder refusal naming %s", err, worker.instanceID)
+	}
+	if _, err := os.Stat(agentTree.Path); err != nil {
+		t.Fatalf("worktree should survive a refused removal: %v", err)
+	}
+
+	// A worker that has not reached a terminal state still resumes in that
+	// checkout, so it keeps holding it until it does.
+	worker.setState(SubAgentStateCompleted, "done")
+	if _, err := a.WorktreeExit(ctx, tools.WorktreeExitRequest{Name: "feat-agent-holder", Remove: true}); err != nil {
+		t.Fatalf("WorktreeExit after the worker finished: %v", err)
+	}
+	assertNoFile(t, agentTree.Path)
+
+	// A background command keeps holding its checkout after the agent leaves it.
+	jobTree, err := a.WorktreeEnter(ctx, tools.WorktreeEnterRequest{Name: "feat-job-holder"})
+	if err != nil {
+		t.Fatalf("WorktreeEnter: %v", err)
+	}
+	out, err := a.executeToolCall(ctx, message.ToolCall{
+		ID:   "call-background",
+		Name: tools.NameShell,
+		Args: json.RawMessage(`{"command":"sleep 30","description":"hold the checkout","run_in_background":true}`),
+	})
+	if err != nil {
+		t.Fatalf("background shell: %v", err)
+	}
+	if !strings.Contains(out.Result, "job-") {
+		t.Fatalf("background shell output = %q, want a job handle", out.Result)
+	}
+	if _, err := a.WorktreeExit(ctx, tools.WorktreeExitRequest{Name: "feat-job-holder"}); err != nil {
+		t.Fatalf("WorktreeExit keep: %v", err)
+	}
+	_, err = a.WorktreeExit(ctx, tools.WorktreeExitRequest{Name: "feat-job-holder", Remove: true, DiscardChanges: true})
+	if err == nil || !strings.Contains(err.Error(), "background job") {
+		t.Fatalf("err = %v, want a refusal naming the running background job", err)
+	}
+	if _, err := os.Stat(jobTree.Path); err != nil {
+		t.Fatalf("worktree should survive a refused removal: %v", err)
+	}
+}
+
 func TestWorktreeListMarksActiveCheckout(t *testing.T) {
 	ctx := context.Background()
 	a, _ := newWorktreeTestAgent(t, "session-list")
@@ -498,6 +655,58 @@ func TestSubAgentWorktreeBindingIsIndependent(t *testing.T) {
 	}
 	if got := sub.effectiveToolBaseDir(); got != repo {
 		t.Errorf("sub base dir after exit = %q, want %q", got, repo)
+	}
+}
+
+// TestSubAgentWorktreeSwitchReloadsAgentsMD pins the worker's AGENTS.md to the
+// checkout it works in. A gitignored AGENTS.md that exists only in the main
+// checkout must still reach a worker inside a worktree, while a checkout that
+// carries its own file must override it. Keeping the spawn-time snapshot would
+// leave the worker following the instructions of the checkout it left.
+func TestSubAgentWorktreeSwitchReloadsAgentsMD(t *testing.T) {
+	ctx := context.Background()
+	a, repo := newWorktreeTestAgent(t, "session-owner")
+	if err := os.WriteFile(filepath.Join(repo, "AGENTS.md"), []byte("root instructions\n"), 0o644); err != nil {
+		t.Fatalf("write main checkout AGENTS.md: %v", err)
+	}
+	sub := newControllableTestSubAgent(t, a, "task-1")
+
+	entered, err := sub.WorktreeEnter(ctx, tools.WorktreeEnterRequest{Name: "feat-agents"})
+	if err != nil {
+		t.Fatalf("sub WorktreeEnter: %v", err)
+	}
+	// The checkout has no AGENTS.md of its own, so the switch must fall back to
+	// the main checkout's copy (where gitignored local instructions live).
+	if got := sub.agentsMDSnapshot(); !strings.Contains(got, "root instructions") {
+		t.Fatalf("AGENTS.md in checkout = %q, want the main checkout's instructions", got)
+	}
+	if prompt := sub.buildSystemPrompt(); !strings.Contains(prompt, "## Workspace Instructions") {
+		t.Fatalf("system prompt did not pick up the reloaded AGENTS.md, got:\n%s", prompt)
+	}
+
+	if err := os.WriteFile(filepath.Join(entered.Path, "AGENTS.md"), []byte("checkout instructions\n"), 0o644); err != nil {
+		t.Fatalf("write checkout AGENTS.md: %v", err)
+	}
+	// Leaving re-reads the main checkout's copy: the worktree's own file stays
+	// behind with the checkout.
+	if _, err := sub.WorktreeExit(ctx, tools.WorktreeExitRequest{Name: "feat-agents"}); err != nil {
+		t.Fatalf("sub WorktreeExit: %v", err)
+	}
+	if got := sub.agentsMDSnapshot(); !strings.Contains(got, "root instructions") || strings.Contains(got, "checkout instructions") {
+		t.Fatalf("AGENTS.md after exit = %q, want the main checkout's instructions", got)
+	}
+
+	// Re-entering must pick up the file the checkout now carries, and the
+	// reminder must follow: it is what the model actually reads.
+	if _, err := sub.WorktreeEnter(ctx, tools.WorktreeEnterRequest{Name: "feat-agents"}); err != nil {
+		t.Fatalf("sub WorktreeEnter again: %v", err)
+	}
+	if got := sub.agentsMDSnapshot(); !strings.Contains(got, "checkout instructions") || strings.Contains(got, "root instructions") {
+		t.Fatalf("AGENTS.md in checkout = %q, want the checkout's own instructions", got)
+	}
+	reminder := sub.cachedSessionReminderContent.Load()
+	if reminder == nil || !strings.Contains(*reminder, "checkout instructions") {
+		t.Fatalf("session reminder = %v, want it to carry the checkout's AGENTS.md", reminder)
 	}
 }
 

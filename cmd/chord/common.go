@@ -94,7 +94,11 @@ type AppContext struct {
 	mcpRestoreCancel  context.CancelFunc
 	mcpRestoreGen     atomic.Uint64
 	skillsLoadOnce    sync.Once
-	SessionLock       *recovery.SessionLock
+	// skillsRefreshGen orders asynchronous project-skill scans. A worktree
+	// switch starts a scan that must not overwrite the catalog a later switch
+	// already installed; see refreshSkillsFromDirs.
+	skillsRefreshGen atomic.Uint64
+	SessionLock      *recovery.SessionLock
 	// StartupSkippedLockedSessions names the sessions --continue passed over
 	// at startup because another live process owned them. Headless surfaces
 	// them in the ready envelope; the TUI gets the same notice as a toast from

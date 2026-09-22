@@ -233,18 +233,33 @@ func (s *SubAgent) sessionEnvSnapshot() SessionEnvSnapshot {
 }
 
 // refreshSessionContextReminder rebuilds the SubAgent's cached reminder from
-// the live environment and the construction-frozen AGENTS.md. Construction is
-// the SubAgent's only session head, but a worktree switch moves the working
-// directory, so the reminder is rebuilt on that switch too: without it every
-// later request would keep stating the checkout the worker left. Only the
-// reminder is rebuilt — the system prompt stays frozen, cache-stable framing.
+// the live environment and the current AGENTS.md. Construction is the
+// SubAgent's only session head, but a worktree switch moves the working
+// directory and may swap in the checkout's own AGENTS.md, so the reminder is
+// rebuilt on that switch too: without it every later request would keep
+// stating the checkout the worker left.
 func (s *SubAgent) refreshSessionContextReminder() {
-	content := buildSessionContextReminder(s.sessionEnvSnapshot(), s.agentsMD)
+	content := buildSessionContextReminder(s.sessionEnvSnapshot(), s.agentsMDSnapshot())
 	if content == "" {
 		s.cachedSessionReminderContent.Store(nil)
 		return
 	}
 	s.cachedSessionReminderContent.Store(&content)
+}
+
+// agentsMDSnapshot returns the AGENTS.md content currently in force. The
+// switch path reloads it from the checkout the worker entered, so readers must
+// not touch the field directly.
+func (s *SubAgent) agentsMDSnapshot() string {
+	s.agentsMDMu.RLock()
+	defer s.agentsMDMu.RUnlock()
+	return s.agentsMD
+}
+
+func (s *SubAgent) setAgentsMD(content string) {
+	s.agentsMDMu.Lock()
+	s.agentsMD = content
+	s.agentsMDMu.Unlock()
 }
 
 // injectSessionContextReminder is the SubAgent counterpart: same every-request

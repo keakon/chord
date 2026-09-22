@@ -62,7 +62,7 @@ type toolExecutionPipeline struct {
 	isInternalTool                func(string) bool
 	confirm                       ConfirmFunc
 	currentTurnID                 func() uint64
-	fireHook                      func(context.Context, string, uint64, map[string]any) (*hook.Result, error)
+	fireHook                      func(context.Context, string, uint64, string, map[string]any) (*hook.Result, error)
 	updatePending                 func(PendingToolCall)
 	reservedToolError             func(string) error
 	bypassPermission              func(string) bool
@@ -81,10 +81,11 @@ type toolExecutionPipeline struct {
 	// evaluation input (args, ruleset identity, cwd, pctx) before reusing the
 	// recorded allow; true skips the re-evaluation in applyPermission.
 	preapprovedPermission func(callID, name string, args json.RawMessage, cwd string, pctx toolPermissionContext) bool
-	// pathScope returns the policy-root scope for path-taking tools: the tool
-	// base dir plus the repository's checkout roots. nil falls back to the
-	// base dir alone, which keeps cwd-only path rules.
-	pathScope             func() permission.PathScope
+	// pathScope is the policy-root half of the path scope, captured when the
+	// pipeline was built. effectivePathScope fills in the base dir from this
+	// pipeline's own binding, so the permission rules a call is evaluated
+	// against never mix the checkout it was dispatched in with a later switch.
+	pathScope             permission.PathScope
 	visibleToolNames      func() map[string]struct{}
 	appendToolActivity    func(recovery.ToolActivityRecord) error
 	captureWalltimeTarget func() *walltimeTarget
@@ -161,13 +162,14 @@ func (p toolExecutionPipeline) executeToolForCall(ctx context.Context, tc messag
 	return tool.Execute(ctx, args)
 }
 
-// effectivePathScope resolves the policy-root scope for path-taking tools,
-// falling back to the base dir alone when no resolver was injected.
+// effectivePathScope resolves the policy-root scope for a path-taking tool.
+// The roots are the snapshot captured when this pipeline was built; the Cwd is
+// this pipeline's base dir, so a call keeps the checkout it was dispatched in
+// even when the agent switches while the call is still in flight.
 func (p toolExecutionPipeline) effectivePathScope() permission.PathScope {
-	if p.pathScope != nil {
-		return p.pathScope()
-	}
-	return permission.PathScope{Cwd: p.effectiveToolBaseDir()}
+	scope := p.pathScope
+	scope.Cwd = p.effectiveToolBaseDir()
+	return scope
 }
 
 // toolActivityJournalRequired reports whether a finalized tool call needs a
@@ -1063,7 +1065,7 @@ func (p toolExecutionPipeline) applyToolHook(ctx context.Context, tc *message.To
 	if p.currentTurnID != nil {
 		turnID = p.currentTurnID()
 	}
-	hookResult, hookErr := p.fireHook(ctx, hook.OnToolCall, turnID, buildToolHookData(*tc, p.effectiveToolBaseDir()))
+	hookResult, hookErr := p.fireHook(ctx, hook.OnToolCall, turnID, p.effectiveToolBaseDir(), buildToolHookData(*tc, p.effectiveToolBaseDir()))
 	if hookErr != nil || hookResult == nil {
 		return false, nil
 	}

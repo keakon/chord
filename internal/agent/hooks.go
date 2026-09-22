@@ -407,13 +407,21 @@ func classifyAgentError(err error) string {
 }
 
 func (a *MainAgent) fireHook(ctx context.Context, point string, turnID uint64, data map[string]any) (*hook.Result, error) {
+	return a.fireHookInDir(ctx, point, turnID, a.effectiveToolBaseDir(), data)
+}
+
+// fireHookInDir fires a hook with an explicit working directory. Tool hooks
+// pass the directory bound to the tool call's pipeline instead of the agent's
+// current one, so a hook that runs after a checkout switch still runs where the
+// call was dispatched.
+func (a *MainAgent) fireHookInDir(ctx context.Context, point string, turnID uint64, workDir string, data map[string]any) (*hook.Result, error) {
 	return a.hookEngine.Fire(ctx, newHookEnvelope(
 		point,
 		a.sessionDir,
 		turnID,
 		a.instanceID,
 		"main",
-		a.effectiveToolBaseDir(),
+		workDir,
 		a.ProviderModelRef(),
 		a.RunningModelRef(),
 		data,
@@ -540,6 +548,13 @@ func (s *SubAgent) permissionApprovalMatches(turn *Turn, callID, name, args, cwd
 }
 
 func (s *SubAgent) fireHook(ctx context.Context, point string, turnID uint64, data map[string]any) (*hook.Result, error) {
+	return s.fireHookInDir(ctx, point, turnID, s.effectiveToolBaseDir(), data)
+}
+
+// fireHookInDir is fireHook with an explicit working directory: tool hooks use
+// the directory bound to the call's pipeline, so a hook fired for an in-flight
+// call does not adopt a checkout the worker switched into meanwhile.
+func (s *SubAgent) fireHookInDir(ctx context.Context, point string, turnID uint64, workDir string, data map[string]any) (*hook.Result, error) {
 	_, modelName := s.llmSnapshot()
 	return s.parent.hookEngine.Fire(ctx, newHookEnvelope(
 		point,
@@ -547,7 +562,7 @@ func (s *SubAgent) fireHook(ctx context.Context, point string, turnID uint64, da
 		turnID,
 		s.instanceID,
 		"sub",
-		s.effectiveToolBaseDir(),
+		workDir,
 		modelName,
 		modelName,
 		data,

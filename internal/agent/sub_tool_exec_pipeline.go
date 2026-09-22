@@ -54,7 +54,7 @@ func (s *SubAgent) toolExecutionPipeline() toolExecutionPipeline {
 		toolBaseDir:           s.effectiveToolBaseDir(),
 		machineStateRoot:      contentRoot,
 		toolBaseDirGeneration: s.workDirState.load().Generation,
-		pathScope:             s.effectivePathScope,
+		pathScope:             s.effectivePathScope(),
 		preapprovedPermission: func(callID, name string, args json.RawMessage, cwd string, pctx toolPermissionContext) bool {
 			return s.permissionApprovalMatches(s.currentTurn(), callID, name, string(args), cwd, pctx)
 		},
@@ -79,7 +79,7 @@ func (s *SubAgent) toolExecutionPipeline() toolExecutionPipeline {
 		},
 		currentTurnID:         s.currentTurnID,
 		captureWalltimeTarget: s.captureWalltimeTarget,
-		fireHook:              s.fireHook,
+		fireHook:              s.fireHookInDir,
 		updatePending: func(call PendingToolCall) {
 			if turn := s.currentTurn(); turn != nil {
 				turn.updatePendingToolCall(call)

@@ -150,18 +150,29 @@ func refreshSkillsForWorkDir(ac *AppContext, workDir string) {
 }
 
 func refreshSkillsFromDirs(ac *AppContext, skillDirs []string) {
+	gen := ac.skillsRefreshGen.Add(1)
 	go func() {
-		skillLoader := skill.NewLoader(skillDirs)
-		loadedSkills, skillErr := skillLoader.ScanMeta()
-		if skillErr != nil {
-			log.Warnf("skill loading failed error=%v", skillErr)
-			ac.MainAgent.MarkSkillsReady()
-			return
-		}
-		ac.LoadedSkills = loadedSkills
-		ac.MainAgent.SetSkills(loadedSkills)
-		if len(loadedSkills) > 0 {
-			log.Debugf("skills discovered count=%v", len(loadedSkills))
-		}
+		loadedSkills, skillErr := skill.NewLoader(skillDirs).ScanMeta()
+		ac.installScannedSkills(gen, loadedSkills, skillErr)
 	}()
+}
+
+// installScannedSkills publishes one project-skill scan unless a newer scan has
+// started meanwhile. A worktree switch starts a scan that runs off the main
+// path; without the generation check a slow scan of the checkout the session
+// has already left would overwrite the catalog the later switch installed.
+func (ac *AppContext) installScannedSkills(gen uint64, loadedSkills []*skill.Meta, skillErr error) {
+	if ac == nil || ac.skillsRefreshGen.Load() != gen {
+		return
+	}
+	if skillErr != nil {
+		log.Warnf("skill loading failed error=%v", skillErr)
+		ac.MainAgent.MarkSkillsReady()
+		return
+	}
+	ac.LoadedSkills = loadedSkills
+	ac.MainAgent.SetSkills(loadedSkills)
+	if len(loadedSkills) > 0 {
+		log.Debugf("skills discovered count=%v", len(loadedSkills))
+	}
 }

@@ -371,11 +371,11 @@ Worktrees live under `<state-dir>/worktrees/<repo-id>/<slug>`, outside the repos
 
 Sessions are shared by every checkout of a repository. The history lives in the repository's own store, so a session started in a worktree is listed and resumed from the main checkout and vice versa; the runtime cache stays per checkout, and exports follow their sessions. A session records the checkout it was working in, and resuming it switches back there (see [Resuming sessions](#resuming-sessions)). Removing a worktree keeps that history: only `--purge-sessions` deletes the worktree's own store, which Chord no longer writes.
 
-A worktree contains tracked files only. Gitignored content — a local `AGENTS.md`, `.chord/config.yaml`, agents, skills, plans — is not copied; a session running in a worktree reads it from the main checkout, so project instructions, skills, sub-agents, and memory behave as they do in the main checkout. List the gitignored files a fresh worktree should receive in a repository-root `.worktreeinclude` file (gitignore syntax; `.env*` when the file is missing or lists no pattern). Those files are copied on creation, and a tracked file is never overwritten.
+A worktree contains tracked files only. Gitignored content — a local `AGENTS.md`, `.chord/config.yaml`, agents, skills, plans — is not copied; a session running in a worktree reads it from the main checkout, so project instructions, skills, sub-agents, and memory behave as they do in the main checkout. When the checkout carries its own `AGENTS.md` or project skills, those copies take precedence. List the gitignored files a fresh worktree should receive in a repository-root `.worktreeinclude` file (gitignore syntax; `.env*` when the file is missing or lists no pattern). Those files are copied on creation, and a tracked file is never overwritten.
 
 Permission rules, hooks, agent configuration, and worktree creation settings are resolved from the main checkout when a session starts and do not change as it enters or leaves a worktree; see [Worktrees](./usage.md#worktrees) for what that means for rules that target one checkout.
 
-Inside a session the agent manages worktrees itself: `WorktreeEnter` creates or reopens one and switches the agent's working directory into it (parameters mirror the CLI: `name`, `path`, `base`, `branch`, `reset_branch`), `WorktreeExit` leaves it and can remove the checkout, and `WorktreeList` lists the repository's worktrees with their owner and dirty state. Ask the agent to work in a worktree instead of leaving the TUI. If a session crashes while creating a worktree, the creation is reported as outcome unknown on resume; check `chord worktree list` for a leftover checkout.
+Inside a session the agent manages worktrees itself: `WorktreeEnter` creates or reopens one and switches the agent's working directory into it (`name`, `path`, `base`, `branch`, `reset_branch`; the CLI counterpart `--worktree` / `chord worktree <name>` only sets the name and `--reset-branch`), `WorktreeExit` leaves it and can remove the checkout, and `WorktreeList` lists the repository's worktrees with their owner and dirty state. Ask the agent to work in a worktree instead of leaving the TUI. If a session crashes while creating a worktree, the creation is reported as outcome unknown on resume; check `chord worktree list` for a leftover checkout.
 
 ### `chord worktree list`
 
@@ -383,7 +383,7 @@ List chord-managed worktrees of the current repository.
 
 ### `chord worktree remove <name>`
 
-Delete the worktree directory, its runtime cache, and its ownership metadata. The branch and the repository's session history are preserved by default.
+Delete the worktree directory, its runtime cache, and its ownership metadata. The branch and the repository's session history are preserved by default. Removal does not detect other sessions or tools still working in the checkout, so don't remove one that is in use.
 
 | Flag                | Description                                                                                                       |
 | ------------------- | ----------------------------------------------------------------------------------------------------------------- |

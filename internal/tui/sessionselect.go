@@ -429,11 +429,20 @@ func sessionSelectPreviewText(s agent.SessionSummary) string {
 	return strings.ReplaceAll(strings.ReplaceAll(preview, "\r\n", " "), "\n", " ")
 }
 
+// sessionSelectWorktreeColWidth is the display width of the worktree column.
+// Worktree slugs are capped at 80 characters, so a long name is truncated here
+// instead of pushing the preview out of the row.
+const sessionSelectWorktreeColWidth = 16
+
 func sessionSelectItemFor(s agent.SessionSummary) OverlayListItem {
 	modStr := s.LastModTime.Format("2006-01-02 15:04")
 	countStr := "-"
 	if s.MessageCount >= 0 {
 		countStr = fmt.Sprintf("%d", s.MessageCount)
+	}
+	worktreeStr := "-"
+	if name := strings.TrimSpace(s.WorktreeName); name != "" {
+		worktreeStr = runewidth.Truncate(name, sessionSelectWorktreeColWidth, "…")
 	}
 	preview := sessionSelectPreviewText(s)
 	if s.ForkedFrom != "" {
@@ -441,7 +450,7 @@ func sessionSelectItemFor(s agent.SessionSummary) OverlayListItem {
 	}
 	return OverlayListItem{
 		ID:    s.ID,
-		Label: fmt.Sprintf("%s  %5s  %s", modStr, countStr, preview),
+		Label: fmt.Sprintf("%s  %5s  %-*s  %s", modStr, countStr, sessionSelectWorktreeColWidth, worktreeStr, preview),
 	}
 }
 
@@ -449,7 +458,7 @@ func sessionSelectItemFor(s agent.SessionSummary) OverlayListItem {
 // picker. The 3-space lead matches OverlayList's cursor gutter and the field
 // widths mirror sessionSelectItemFor so the header aligns with the rows.
 func sessionSelectColumnHeader() string {
-	return DimStyle.Render(fmt.Sprintf("   %-16s  %5s  %s", "Modified", "Msgs", "Preview"))
+	return DimStyle.Render(fmt.Sprintf("   %-16s  %5s  %-*s  %s", "Modified", "Msgs", sessionSelectWorktreeColWidth, "Worktree", "Preview"))
 }
 
 func buildSessionSearchCorpus(options []agent.SessionSummary) []string {
@@ -458,6 +467,9 @@ func buildSessionSearchCorpus(options []agent.SessionSummary) []string {
 		parts := []string{strings.ToLower(s.ID), strings.ToLower(sessionSelectPreviewText(s))}
 		if s.ForkedFrom != "" {
 			parts = append(parts, strings.ToLower(s.ForkedFrom))
+		}
+		if name := strings.TrimSpace(s.WorktreeName); name != "" {
+			parts = append(parts, strings.ToLower(name))
 		}
 		corpus = append(corpus, strings.Join(parts, " "))
 	}

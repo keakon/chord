@@ -1312,7 +1312,7 @@ func TestToolExecutionPipelineRechecksDelegatePermissionAfterHookModification(t 
 	pipeline := toolExecutionPipeline{
 		registry:       registry,
 		currentRuleset: func() permission.Ruleset { return ruleset },
-		fireHook: func(context.Context, string, uint64, map[string]any) (*hook.Result, error) {
+		fireHook: func(context.Context, string, uint64, string, map[string]any) (*hook.Result, error) {
 			return &hook.Result{Action: hook.ActionModify, Data: map[string]any{
 				"args": map[string]any{"description": "inspect", "agent_type": "tester"},
 			}}, nil
@@ -1338,7 +1338,7 @@ func TestToolExecutionPipelineRechecksPermissionAfterHookModification(t *testing
 	pipeline := toolExecutionPipeline{
 		registry:       registry,
 		currentRuleset: func() permission.Ruleset { return ruleset },
-		fireHook: func(context.Context, string, uint64, map[string]any) (*hook.Result, error) {
+		fireHook: func(context.Context, string, uint64, string, map[string]any) (*hook.Result, error) {
 			return &hook.Result{Action: hook.ActionModify, Data: map[string]any{
 				"args": map[string]any{"value": "denied"},
 			}}, nil

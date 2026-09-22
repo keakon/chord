@@ -17,6 +17,12 @@ func (a *MainAgent) SetSkills(skills []*skill.Meta) {
 	a.loadedSkills = append([]*skill.Meta(nil), skills...)
 	a.skillsMu.Unlock()
 	a.MarkSkillsReady()
+	// The catalog is part of the LLM surface: the Available Skills block lives
+	// in the system prompt, and the skill tool lists the same entries. Marking
+	// the surface dirty lets the next request compare and rebuild it, so a
+	// refreshed catalog (a worktree switch, a session switch) is visible
+	// instead of waiting for the next session-head reset.
+	a.markRuntimeSurfaceDirty()
 
 	if len(skills) > 0 {
 		names := make([]string, len(skills))

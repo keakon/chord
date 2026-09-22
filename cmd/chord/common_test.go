@@ -19,6 +19,7 @@ import (
 	"github.com/keakon/chord/internal/mcp"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/recovery"
+	"github.com/keakon/chord/internal/skill"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -747,5 +748,26 @@ func newTestAppContext(t *testing.T) *AppContext {
 		SessionDir:  sessionDir,
 		CtxMgr:      ctxMgr,
 		MainAgent:   mainAgent,
+	}
+}
+
+// A worktree switch reloads project skills in the background. When a second
+// switch starts a newer scan before the first finishes, the older result must
+// not republish the catalog of the checkout the session already left.
+func TestSupersededSkillScanDoesNotRepublish(t *testing.T) {
+	ac := newTestAppContext(t)
+
+	stale := ac.skillsRefreshGen.Add(1)
+	current := ac.skillsRefreshGen.Add(1)
+
+	ac.installScannedSkills(current, []*skill.Meta{{Name: "current-skill"}}, nil)
+	ac.installScannedSkills(stale, []*skill.Meta{{Name: "stale-skill"}}, nil)
+
+	ids := make([]string, 0, 1)
+	for _, meta := range ac.MainAgent.ListSkills() {
+		ids = append(ids, meta.Name)
+	}
+	if len(ids) != 1 || ids[0] != "current-skill" {
+		t.Fatalf("skills after a superseded scan = %v, want [current-skill]", ids)
 	}
 }

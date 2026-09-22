@@ -610,8 +610,9 @@ func Remove(ctx context.Context, repoRoot, name string, opts RemoveOptions, path
 	if opts.Force {
 		// `branch -D` succeeds even when unmerged; matches Force semantics.
 		if _, berr := runGit(ctx, info.RepoRoot, "branch", "-D", info.Branch); berr != nil {
-			// Non-fatal: worktree itself is already gone.
-			fmt.Fprintf(os.Stderr, "warning: %v\n", berr)
+			// Non-fatal: the worktree itself is already gone, so this is a
+			// diagnostic rather than a failure of the removal.
+			log.Warnf("remove worktree branch failed worktree=%v branch=%v error=%v", name, info.Branch, berr)
 		}
 	} else if opts.DeleteBranch {
 		if _, berr := runGit(ctx, info.RepoRoot, "branch", "-d", info.Branch); berr != nil {
@@ -619,7 +620,7 @@ func Remove(ctx context.Context, repoRoot, name string, opts RemoveOptions, path
 		}
 	}
 	if err := cleanupWorktreeProjectState(info.Path, pathLocator, opts.PurgeSessions); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: cleanup project state: %v\n", err)
+		log.Warnf("cleanup worktree project state failed worktree=%v error=%v", name, err)
 	}
 	if err := WithRepoIndexLock(pathLocator.StateDir, info.RepoID, func(idx *RepoIndex) error {
 		idx.RemoveWorktree(name)

@@ -10,7 +10,7 @@
 
 - **第一个任务：**先看 [TUI 基本交互](#tui-基本交互)了解发送、工具卡和确认；第一次改文件前，先在[权限与安全](./permissions-and-safety_CN.md)定好规则。
 - **长任务：**用 [`/loop`](#loop持续执行模式)让实现、测试和修复连续推进，不用反复催促。
-- **并行工作：**用 [Worktree](#worktree)按任务隔离会话；恢复、分叉与导入见[会话](#会话)。
+- **并行工作：**用 [Worktree](#worktree)让每个任务在自己的 checkout 里干活，会话仍按仓库共享；恢复、分叉与导入见[会话](#会话)。
 
 ## 运行模式
 
@@ -228,9 +228,9 @@ chord import claude --id <session-id> [--root ~/.claude/projects]
 
 **落在哪里。** 默认在 `<state-dir>/worktrees/<repo-id>/<slug>`，也就是仓库之外。想换位置就设 `worktree.root`：相对路径以主仓库根为基准，`root: .chord/worktrees` 会落在 `<repo>/.chord/worktrees/<slug>`。这个目录在仓库内时，Chord 会在其中放一个内容为 `*` 的 `.gitignore`，这些 checkout 就不会出现在未跟踪文件里；该文件只负责 `git status` 整洁，而 chord 自己的 `grep` / `glob` 会跳过这个根目录。但别的工具并不知道它：仓库内的 checkout 就是磁盘上的第二份代码树，凡是依赖索引或全仓扫描的工具（LSP 建索引、`docker` build context、会遍历整个仓库的测试运行器）都可能把它一并算进去。留在默认位置就不会有这个问题。
 
-**里面有什么。** 只有被 git 追踪的文件。主工作区未提交的改动不会带过去，被 gitignore 的内容也不会：本地 `AGENTS.md`、`.chord/config.yaml`、agents、skills、plans、memory 都留在主工作区，worktree 里的会话从主工作区读取它们。这也是 worktree 会话表现和主工作区一致的原因——同一套指令、技能、子代理与记忆。想让某些被忽略的文件跟过去（本地 env、机器相关配置等），就把它们的 pattern 写进仓库根的 `.worktreeinclude`（gitignore 语法）：Chord 在创建时把匹配且被忽略的文件复制过去，已被跟踪的文件绝不覆盖。没有这个文件时，复制 `.env*`。
+**里面有什么。** 只有被 git 追踪的文件。主工作区未提交的改动不会带过去，被 gitignore 的内容也不会：本地 `AGENTS.md`、`.chord/config.yaml`、agents、skills、plans、memory 都留在主工作区，worktree 里的会话从主工作区读取它们。例外是 `AGENTS.md` 与项目技能：checkout 里自带副本时就用它，所以分支可以带上自己的指令与技能。其余内容的表现和主工作区一致——同一套子代理与记忆。想让某些被忽略的文件跟过去（本地 env、机器相关配置等），就把它们的 pattern 写进仓库根的 `.worktreeinclude`（gitignore 语法）：Chord 在创建时把匹配且被忽略的文件复制过去，已被跟踪的文件绝不覆盖。没有这个文件时，复制 `.env*`。
 
-**会话按仓库共享。** 同一仓库的所有 checkout 共用一个 session store，所以在 worktree 里开的会话，在主工作区能看到、也能继续，反过来也一样。runtime cache 仍按 checkout 分开，exports 跟着会话走。会话会记录自己当时所在的 checkout：`chord resume <id>` 和 `chord --resume <id>` 会切回去；那个 worktree 已经不在了就先提示、再回主工作区继续。`chord worktree remove` 和 `chord worktree finish` 都不会删除仓库的会话历史。
+**会话按仓库共享。** 同一仓库的所有 checkout 共用一个 session store，所以在 worktree 里开的会话，在主工作区能看到、也能继续，反过来也一样。runtime cache 仍按 checkout 分开，exports 跟着会话走。会话会记录自己当时所在的 checkout，`/resume` 的 `Worktree` 列会显示它：`chord resume <id>` 和 `chord --resume <id>` 会切回去；那个 worktree 已经不在了就先提示、再回主工作区继续。`chord worktree remove` 和 `chord worktree finish` 都不会删除仓库的会话历史。
 
 **权限跟着会话，不跟着 checkout。** 权限规则对同一仓库的每个 checkout 都生效：主工作区里写 `write src/**: allow`，在 `<worktree>/src/` 里同样允许写；也没法写出「只允许某一个 checkout」的规则。Chord 把仓库内的路径按仓库相对拼写去匹配，所以绝对路径规则永远匹配不到它们。worktree 是用来并行干活的，不是用来收窄权限的。hook、agent 配置、权限规则和 worktree 创建配置都在会话启动时从主工作区读取，会话中途进出 worktree 不会改变它们——想用分支上改过的配置，就在该 checkout 新开一个会话。
 

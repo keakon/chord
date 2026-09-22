@@ -126,6 +126,20 @@ type workDirActor struct {
 	agentID     string
 	kind        worktree.OwnerKind
 	afterSwitch func(prev, next WorkDirState) []string
+	// removalHolders reports live work still anchored to a worktree (another
+	// agent bound to it, a background command running there). nil means "no way
+	// to tell"; guardRemoval treats an unknown answer conservatively by
+	// refusing the removal.
+	removalHolders func(info *worktree.Info) []string
+}
+
+// removalHoldersFor returns the live holders of info, or an unknown-state
+// report when this actor has no holder resolver at all.
+func (act workDirActor) removalHoldersFor(info *worktree.Info) []string {
+	if act.removalHolders == nil {
+		return []string{"this session cannot verify whether the checkout is still in use"}
+	}
+	return act.removalHolders(info)
 }
 
 func (act workDirActor) currentDir() string {
@@ -141,12 +155,13 @@ func (act workDirActor) available() bool {
 
 func (a *MainAgent) worktreeActor() workDirActor {
 	return workDirActor{
-		binding:     &a.workDirState,
-		startupDir:  a.cachedWorkDir,
-		deps:        a.worktreeRT,
-		agentID:     a.instanceID,
-		kind:        worktree.OwnerKindMain,
-		afterSwitch: a.afterWorkDirSwitch,
+		binding:        &a.workDirState,
+		startupDir:     a.cachedWorkDir,
+		deps:           a.worktreeRT,
+		agentID:        a.instanceID,
+		kind:           worktree.OwnerKindMain,
+		afterSwitch:    a.afterWorkDirSwitch,
+		removalHolders: a.worktreeRemovalHolders,
 	}
 }
 
@@ -159,13 +174,23 @@ func (s *SubAgent) worktreeActor() workDirActor {
 	}
 	if s.parent != nil {
 		act.deps = s.parent.worktreeRT
+		act.removalHolders = s.parent.worktreeRemovalHolders
 		act.afterSwitch = func(WorkDirState, WorkDirState) []string {
 			s.parent.refreshPathRoots()
+			// AGENTS.md is project behavior tied to the checkout, so the
+			// worker reloads it from the checkout just entered (content root
+			// falls back for gitignored instructions). Pinned control plane --
+			// ruleset, hooks, agent config -- is deliberately left alone.
+			if content := loadAgentsMDWithWorkDir(s.parent.ContentRoot(), s.effectiveToolBaseDir()); content != s.agentsMDSnapshot() {
+				s.setAgentsMD(content)
+				// The workspace-instruction framing is part of the system
+				// prompt, so it follows the reload. The reminder rebuilt below
+				// carries the instructions themselves.
+				s.installSystemPrompt(s.buildSystemPrompt())
+			}
 			// The worker's own reminder states the working directory, so it
 			// must be rebuilt on the switch: otherwise every later request
-			// keeps describing the checkout the worker left. The system prompt
-			// (and the AGENTS.md captured with it) stays frozen for the life
-			// of the task.
+			// keeps describing the checkout the worker left.
 			s.refreshSessionContextReminder()
 			// The per-instance metadata is the authoritative source a
 			// rehydrated worker resumes from, so a switch must not leave it
@@ -301,7 +326,11 @@ func (act workDirActor) enter(ctx context.Context, req tools.WorktreeEnterReques
 		return res, fmt.Errorf("this agent has no working directory to base a worktree on")
 	}
 	name := strings.TrimSpace(req.Name)
-	if name == "" && strings.TrimSpace(req.Path) == "" {
+	// A name is optional unless the branch already carries one: Create derives
+	// the name from the branch, so only the "neither given" case needs a
+	// generated slug. Keying this off path as well left a path-only call with
+	// an empty name, which Create rejects.
+	if name == "" && strings.TrimSpace(req.Branch) == "" {
 		name = worktree.GenerateAutoSlug(time.Now())
 	}
 	base := strings.TrimSpace(req.Base)
@@ -413,6 +442,42 @@ func (act workDirActor) exit(ctx context.Context, req tools.WorktreeExitRequest)
 	return res, nil
 }
 
+// worktreeRemovalHolders reports the live work still anchored to one worktree:
+// another agent bound to it, or a background command still running there. A
+// removed checkout takes their working directory with it, so removal waits for
+// them; the answer is never silently empty because something looked
+// unverifiable.
+func (a *MainAgent) worktreeRemovalHolders(info *worktree.Info) []string {
+	if a == nil || info == nil || strings.TrimSpace(info.Path) == "" {
+		return []string{"the worktree path is unknown"}
+	}
+	var holders []string
+	// The caller's own binding is checked before this (active / currentDir),
+	// but a worker reclaiming its own checkout would otherwise delete the
+	// directory the session's main agent is working in.
+	if a.workDirState.load().WorktreeID == info.Name {
+		holders = append(holders, "the session's main agent is still working there")
+	}
+	a.subs.mu.RLock()
+	for _, sub := range a.subs.subAgents {
+		if sub == nil {
+			continue
+		}
+		if !isNonTerminalTaskState(string(sub.State())) {
+			continue
+		}
+		if sub.workDirState.load().WorktreeID != info.Name {
+			continue
+		}
+		holders = append(holders, fmt.Sprintf("agent %s is still bound to it (%s)", sub.instanceID, sub.State()))
+	}
+	a.subs.mu.RUnlock()
+	for _, job := range tools.RunningJobsInDir(info.Path) {
+		holders = append(holders, fmt.Sprintf("background job %s is still running there", job.ID))
+	}
+	return holders
+}
+
 // guardRemoval enforces the ownership and dirty-state rules that stand between
 // an agent and deleting someone else's work.
 func (act workDirActor) guardRemoval(ctx context.Context, info *worktree.Info, active, discardChanges bool) error {
@@ -436,6 +501,13 @@ func (act workDirActor) guardRemoval(ctx context.Context, info *worktree.Info, a
 			return fmt.Errorf("worktree %q was created by the chord command line; only `chord worktree remove %s` can delete it", info.Name, info.Name)
 		}
 		return fmt.Errorf("worktree %q was created by session %s (%s), and this %s agent does not own it; only its owning agent or `chord worktree remove %s` can delete it", info.Name, owner.SessionID, owner.Kind, act.kind, info.Name)
+	}
+	// Ownership answers who may delete; this answers whether anything is still
+	// using the directory. It is deliberately checked before discard_changes,
+	// which consents to losing the tree's contents, not to pulling the
+	// directory out from under a running agent or command.
+	if holders := act.removalHoldersFor(info); len(holders) > 0 {
+		return fmt.Errorf("worktree %q is still in use: %s; finish or stop that work before removing the checkout", info.Name, strings.Join(holders, "; "))
 	}
 	if discardChanges {
 		return nil

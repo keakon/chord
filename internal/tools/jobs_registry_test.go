@@ -12,6 +12,41 @@ import (
 	"time"
 )
 
+// TestRunningJobsInDirMatchesLiveJobsInTheCheckout pins the worktree removal
+// guard's view of live work: a checkout and its descendants count, a live job
+// elsewhere or a finished one does not.
+func TestRunningJobsInDirMatchesLiveJobsInTheCheckout(t *testing.T) {
+	restore := ResetJobRegistryForTest()
+	defer restore()
+
+	checkout := t.TempDir()
+	sub := filepath.Join(checkout, "pkg")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", sub, err)
+	}
+	elsewhere := t.TempDir()
+	globalJobRegistry.mu.Lock()
+	globalJobRegistry.jobs["job-root"] = &job{ID: "job-root", workDir: checkout, status: jobStatusRunning}
+	globalJobRegistry.jobs["job-sub"] = &job{ID: "job-sub", workDir: sub, status: jobStatusStopping}
+	globalJobRegistry.jobs["job-elsewhere"] = &job{ID: "job-elsewhere", workDir: elsewhere, status: jobStatusRunning}
+	globalJobRegistry.jobs["job-finished"] = &job{ID: "job-finished", workDir: checkout, status: jobStatusCompleted, finished: true}
+	globalJobRegistry.mu.Unlock()
+
+	got := make(map[string]bool)
+	for _, state := range RunningJobsInDir(checkout) {
+		got[state.ID] = true
+	}
+	if !got["job-root"] || !got["job-sub"] {
+		t.Errorf("live jobs in the checkout = %v, want job-root and job-sub", got)
+	}
+	if got["job-elsewhere"] || got["job-finished"] {
+		t.Errorf("live jobs in the checkout = %v, want only live jobs inside it", got)
+	}
+	if states := RunningJobsInDir(""); len(states) != 0 {
+		t.Errorf("jobs for an empty directory = %v, want none", states)
+	}
+}
+
 func TestMaybePruneJobLogsRateLimitsSweep(t *testing.T) {
 	r := &JobRegistry{jobs: make(map[string]*job)}
 	seedStale := func(dir, name string) string {
