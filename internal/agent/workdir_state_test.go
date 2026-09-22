@@ -1155,6 +1155,12 @@ func TestRehydrateTaskRestoresRecordedWorktree(t *testing.T) {
 		RuntimeParked:      true,
 		ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{"internal/agent"}},
 	}
+	if err := os.WriteFile(filepath.Join(repo, "AGENTS.md"), []byte("root instructions\n"), 0o644); err != nil {
+		t.Fatalf("write main checkout AGENTS.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(res.Path, "AGENTS.md"), []byte("checkout instructions\n"), 0o644); err != nil {
+		t.Fatalf("write checkout AGENTS.md: %v", err)
+	}
 
 	// A fresh agent on the same repository and session directory replays the
 	// task the way a resumed process does.
@@ -1164,6 +1170,7 @@ func TestRehydrateTaskRestoresRecordedWorktree(t *testing.T) {
 	}
 	configureNestedDelegationTestRuntime(restoredAgent, 1)
 	restoredAgent.setTaskRecords(map[string]*DurableTaskRecord{record.TaskID: record})
+	restoredAgent.ReloadAgentsMD()
 
 	restored, _, err := restoredAgent.rehydrateTask(record)
 	if err != nil {
@@ -1179,7 +1186,13 @@ func TestRehydrateTaskRestoresRecordedWorktree(t *testing.T) {
 	if strings.TrimSpace(state.BaseSHA) == "" {
 		t.Fatalf("restored binding has no base commit: %#v", state)
 	}
-	assertEnvBlockStatesWorktree(t, subAgentReminderContent(t, restored), res.Path, "feat-restore", res.Branch)
+	// The worker resumes in the recorded checkout, so it must read the
+	// instructions of that checkout rather than the parent's snapshot.
+	reminder := subAgentReminderContent(t, restored)
+	assertEnvBlockStatesWorktree(t, reminder, res.Path, "feat-restore", res.Branch)
+	if !strings.Contains(reminder, "checkout instructions") || strings.Contains(reminder, "root instructions") {
+		t.Fatalf("restored reminder = %q, want the checkout's instructions", reminder)
+	}
 }
 
 // A recorded checkout that is no longer a worktree of this repository must not

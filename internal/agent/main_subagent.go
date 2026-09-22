@@ -16,6 +16,7 @@ import (
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/mcp"
+	"github.com/keakon/chord/internal/pathutil"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 	"github.com/keakon/chord/internal/worktree"
@@ -76,6 +77,25 @@ func (a *MainAgent) subAgentWorkDir() string {
 // and are never enforced at tool execution time.
 func (a *MainAgent) writeScopeBaseDir() string {
 	return a.subAgentWorkDir()
+}
+
+// subAgentAgentsMD returns the AGENTS.md a worker starting in workDir follows.
+// A worker that starts in a different checkout than the one its parent works in
+// reads that checkout's instructions: the parent's frozen snapshot describes
+// another tree, so reusing it would leave the worker following the conventions
+// of a branch it is not on. Starting in the parent's own checkout keeps the
+// snapshot, so mid-session edits stay invisible exactly as they do for the
+// parent.
+func (a *MainAgent) subAgentAgentsMD(workDir string) string {
+	contentRoot := a.ContentRoot()
+	workDir = strings.TrimSpace(workDir)
+	if workDir == "" || contentRoot == "" {
+		return a.cachedAgentsMDSnapshot()
+	}
+	if pathutil.CheckoutRoot(workDir, contentRoot) == pathutil.CheckoutRoot(a.subAgentWorkDir(), contentRoot) {
+		return a.cachedAgentsMDSnapshot()
+	}
+	return loadAgentsMDWithWorkDir(contentRoot, workDir)
 }
 
 // resolveDelegateWorkDir maps the Delegate "workdir" argument onto an existing
@@ -1180,6 +1200,9 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, req tools.SubAgentReques
 		inherited.Generation = 0
 		subCfg.WorkDirState = inherited
 	}
+	// The instructions follow the checkout the worker starts in, not the
+	// snapshot its parent froze.
+	subCfg.AgentsMD = a.subAgentAgentsMD(subCfg.WorkDir)
 	subCfg.TaskID = taskID
 	subCfg.TaskDesc = description
 	subCfg.PlanTaskRef = planTaskRef

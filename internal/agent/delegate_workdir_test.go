@@ -420,3 +420,62 @@ func TestMailboxInjectionTextRendersWorktree(t *testing.T) {
 		t.Fatalf("failed diff not surfaced:\n%s", failed)
 	}
 }
+
+// TestCreateSubAgentReadsAgentsMDOfItsStartingCheckout pins the instructions a
+// spawned worker follows to the checkout it starts in. A worker sent into a
+// worktree inherits the parent's frozen snapshot otherwise, so it keeps
+// following the conventions of the checkout it left until its first switch.
+func TestCreateSubAgentReadsAgentsMDOfItsStartingCheckout(t *testing.T) {
+	ctx := context.Background()
+	a, repo := newWorktreeTestAgent(t, "session-agents")
+	configureNestedDelegationTestRuntime(a, 1)
+	if err := os.WriteFile(filepath.Join(repo, "AGENTS.md"), []byte("root instructions\n"), 0o644); err != nil {
+		t.Fatalf("write main checkout AGENTS.md: %v", err)
+	}
+	a.ReloadAgentsMD()
+
+	// A worker that starts in the parent's own checkout keeps the session
+	// snapshot instead of re-reading the file.
+	inherited, err := a.CreateSubAgent(ctx, tools.SubAgentRequest{Description: "inherited work", AgentType: "worker"})
+	if err != nil {
+		t.Fatalf("CreateSubAgent (inherited): %v", err)
+	}
+	if got := a.subAgentByTaskID(inherited.TaskID).agentsMDSnapshot(); !strings.Contains(got, "root instructions") {
+		t.Fatalf("inherited worker AGENTS.md = %q, want the session snapshot", got)
+	}
+
+	res, err := a.WorktreeEnter(ctx, tools.WorktreeEnterRequest{Name: "feat-agents"})
+	if err != nil {
+		t.Fatalf("WorktreeEnter: %v", err)
+	}
+	if _, err := a.WorktreeExit(ctx, tools.WorktreeExitRequest{Name: "feat-agents"}); err != nil {
+		t.Fatalf("WorktreeExit: %v", err)
+	}
+
+	// The checkout carries no AGENTS.md of its own, so the worker falls back to
+	// the main checkout's copy (where gitignored local instructions live).
+	fallback, err := a.CreateSubAgent(ctx, tools.SubAgentRequest{Description: "checkout fallback", AgentType: "worker", WorkDir: "feat-agents"})
+	if err != nil {
+		t.Fatalf("CreateSubAgent (fallback): %v", err)
+	}
+	if got := a.subAgentByTaskID(fallback.TaskID).agentsMDSnapshot(); !strings.Contains(got, "root instructions") {
+		t.Fatalf("worker in a checkout without AGENTS.md = %q, want the main checkout's instructions", got)
+	}
+
+	if err := os.WriteFile(filepath.Join(res.Path, "AGENTS.md"), []byte("checkout instructions\n"), 0o644); err != nil {
+		t.Fatalf("write checkout AGENTS.md: %v", err)
+	}
+	own, err := a.CreateSubAgent(ctx, tools.SubAgentRequest{Description: "checkout own", AgentType: "worker", WorkDir: "feat-agents"})
+	if err != nil {
+		t.Fatalf("CreateSubAgent (own file): %v", err)
+	}
+	child := a.subAgentByTaskID(own.TaskID)
+	if got := child.agentsMDSnapshot(); !strings.Contains(got, "checkout instructions") || strings.Contains(got, "root instructions") {
+		t.Fatalf("worker in a checkout with its own AGENTS.md = %q, want the checkout's instructions", got)
+	}
+	// The reminder is what the model actually reads on every request, so the
+	// checkout's instructions must reach it without a switch.
+	if reminder := subAgentReminderContent(t, child); !strings.Contains(reminder, "checkout instructions") {
+		t.Fatalf("child reminder did not carry the checkout's AGENTS.md, got:\n%s", reminder)
+	}
+}
