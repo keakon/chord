@@ -968,8 +968,8 @@ func (a *MainAgent) externallyInvalidatedReadsAfterMutatingShell(messages []mess
 			if path == "" || expected == "" || !read.Exists {
 				continue
 			}
-			if !filepath.IsAbs(path) && a.projectRoot != "" {
-				path = filepath.Join(a.projectRoot, path)
+			if !filepath.IsAbs(path) && a.effectiveToolBaseDir() != "" {
+				path = filepath.Join(a.effectiveToolBaseDir(), path)
 			}
 			key := path + "\x00" + expected
 			verdict, cached := verdicts[key]

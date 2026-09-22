@@ -115,6 +115,10 @@ type SubAgentRequest struct {
 	PlanTaskRef        string
 	SemanticTaskKey    string
 	ExpectedWriteScope WriteScope
+	// WorkDir is an existing chord-managed worktree (name or path) the worker
+	// starts in. Empty means the worker inherits the delegating agent's
+	// working directory.
+	WorkDir string
 	// ResultSchema is the canonical encoding of the delegated result contract
 	// as validated by CompileResultSchema, or empty for a task with no
 	// contract.
@@ -155,6 +159,10 @@ type delegateArgs struct {
 	// while an empty object is valid only for roles whose surface registers no
 	// file-modifying tools.
 	ExpectedWriteScope *WriteScope `json:"expected_write_scope"`
+	// Workdir is an existing chord-managed worktree (name or path) the worker
+	// starts in. Omitted means the worker inherits the delegating agent's
+	// working directory.
+	Workdir string `json:"workdir,omitempty"`
 	// Optional result contract the worker's reported result must satisfy. The
 	// declared schema is only an object at the tool surface; the accepted
 	// subset is compiled and checked here before a worker is started.
@@ -236,6 +244,10 @@ func (t *DelegateTool) Parameters() map[string]any {
 				"description":          "Required declaration of the paths this task expects to modify. It is a coordination declaration, not an enforced boundary: the runtime does not block the worker's file tools outside it, and which tools the worker may actually use is decided by the role's permission rules. The declaration feeds sibling-overlap hints (a started handle may carry scope_conflict with suggested_task_id) and your own planning, so declare the narrowest files/path_prefix/modules that honestly cover the work. A task that will not modify files should pick an agent_type whose role registers no file-writing tools (its permission rules deny write, edit, delete, and apply_patch) and pass an empty object {}: the empty scope is accepted only for such roles, because a role that can write files must still declare what it plans to touch.",
 				"properties":           scopeProperties,
 				"additionalProperties": false,
+			},
+			"workdir": map[string]any{
+				"type":        "string",
+				"description": "Optional existing chord worktree (its name or path) to start this worker in. The worktree must already exist: this tool never creates one, so create it first (WorktreeEnter) or point at one you already have. Omit it and the worker inherits your working directory. Sharing a worktree is supported on purpose: delegating several workers into the same worktree is how you get a review of what another worker just wrote, and concurrent writes to the same file in the same worktree are still caught by the shared path tracker. The worker's own permission rules decide what it may do there, not this parameter.",
 			},
 			"agent_type": map[string]any{
 				"type":        "string",
@@ -329,6 +341,7 @@ func (t *DelegateTool) Execute(ctx context.Context, raw json.RawMessage) (string
 		PlanTaskRef:        a.PlanTaskRef,
 		SemanticTaskKey:    a.SemanticTaskKey,
 		ExpectedWriteScope: expectedWriteScope,
+		WorkDir:            strings.TrimSpace(a.Workdir),
 		ResultSchema:       resultSchema,
 	})
 	if err != nil {

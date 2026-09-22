@@ -11,7 +11,7 @@ import (
 // from persisted tool history. FileState is authoritative for committed
 // per-file changes even when a multi-file tool ended with an error; otherwise
 // successful Write/Edit add files and successful Delete removes files.
-func RebuildTouchedPathsFromMessages(msgs []message.Message, projectRoot string) []string {
+func RebuildTouchedPathsFromMessages(msgs []message.Message, workDir string) []string {
 	type callInfo struct {
 		name  string
 		paths []string
@@ -26,7 +26,7 @@ func RebuildTouchedPathsFromMessages(msgs []message.Message, projectRoot string)
 			if name != tools.NameWrite && name != tools.NameEdit && name != tools.NameApplyPatch && name != tools.NameDelete {
 				continue
 			}
-			paths := extractHookToolFilePaths(name, tc.Args, projectRoot)
+			paths := extractHookToolFilePaths(name, tc.Args, workDir)
 			calls[tc.ID] = callInfo{name: name, paths: paths}
 		}
 	}

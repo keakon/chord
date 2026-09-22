@@ -29,7 +29,7 @@ import (
 type compactionArchiveMeta struct {
 	sessionDir          string
 	modelName           string
-	projectRoot         string
+	contentRoot         string
 	persistentSessionID string
 	instanceID          string
 }
@@ -40,7 +40,7 @@ func (a *MainAgent) captureCompactionArchiveMeta() compactionArchiveMeta {
 	return compactionArchiveMeta{
 		sessionDir:          a.SessionDir(),
 		modelName:           a.ModelName(),
-		projectRoot:         a.projectRoot,
+		contentRoot:         a.contentRoot,
 		persistentSessionID: a.exportPersistentSessionID(),
 		instanceID:          a.instanceID,
 	}
@@ -54,7 +54,7 @@ func (a *MainAgent) exportCompactionHistory(messages []message.Message, index in
 	absPath = filepath.Join(sessionDir, fmt.Sprintf("history-%d.md", index))
 	metadata := map[string]string{
 		session.MetadataKeyModel:       meta.modelName,
-		session.MetadataKeyProjectPath: meta.projectRoot,
+		session.MetadataKeyProjectPath: meta.contentRoot,
 		session.MetadataKeySessionID:   meta.persistentSessionID,
 		session.MetadataKeyInstanceID:  meta.instanceID,
 	}

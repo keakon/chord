@@ -178,7 +178,7 @@ func Merge(sources ...[]*Definition) ([]*Definition, []string) {
 
 // LoadOptions holds the paths needed to load commands from all four layers.
 type LoadOptions struct {
-	ProjectRoot    string            // project working directory
+	ContentRoot    string            // project content root (the main worktree)
 	ConfigHome     string            // user-level config directory
 	ProjectCfg     map[string]string // project config.yaml commands
 	ProjectCfgPath string            // absolute path to project config.yaml
@@ -191,7 +191,7 @@ type LoadOptions struct {
 func Load(opts LoadOptions) ([]*Definition, []string) {
 	var allWarnings []string
 
-	projectMDDir := filepath.Join(opts.ProjectRoot, ".chord", "commands")
+	projectMDDir := filepath.Join(opts.ContentRoot, ".chord", "commands")
 	globalMDDir := filepath.Join(opts.ConfigHome, "commands")
 
 	projectMD, w := scanMDDir(projectMDDir, "project-md")

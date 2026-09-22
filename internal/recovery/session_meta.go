@@ -25,13 +25,22 @@ type SessionMeta struct {
 	Title      string `json:"title,omitempty"`
 	// Worktree provenance: identifies the chord-managed git worktree the
 	// session ran in. Empty for sessions in a non-worktree (main) project.
-	// All fields populated together by the worktree startup path.
+	// All fields populated together by the worktree startup path. A switch
+	// inside the session updates them, so they always describe the checkout
+	// currently active (the one resume restores), not only the one the session
+	// was created in.
 	RepoID         string `json:"repo_id,omitempty"`
 	RepoRoot       string `json:"repo_root,omitempty"`
 	WorktreeName   string `json:"worktree_name,omitempty"`
 	WorktreeBranch string `json:"worktree_branch,omitempty"`
 	WorktreePath   string `json:"worktree_path,omitempty"`
 	IsMainWorktree bool   `json:"is_main_worktree,omitempty"`
+
+	// WorktreeTimeline is the durable boundary record of checkout switches
+	// (see WorktreeTimelineEntry). It keeps the newest
+	// maxWorktreeTimelineEntries records so a long session cannot grow the
+	// metadata file without bound.
+	WorktreeTimeline []WorktreeTimelineEntry `json:"worktree_timeline,omitempty"`
 
 	// ImportedFrom captures external import provenance (chord import).
 	ImportedFrom *ImportMeta `json:"imported_from,omitempty"`
@@ -41,6 +50,82 @@ type SessionMeta struct {
 	// a server listed here may still be disconnected (pending/retrying). Only
 	// manual servers are persisted; automatic servers stay config-driven.
 	MCPEnabledServers []string `json:"mcp_enabled_servers,omitempty"`
+}
+
+// Reasons a session's active checkout changed. They are persisted verbatim in
+// the timeline, so a resumed or replayed session can tell a user-requested
+// switch from a restore that fell back.
+const (
+	WorktreeSwitchCreate         = "create"
+	WorktreeSwitchResume         = "resume"
+	WorktreeSwitchEnter          = "enter"
+	WorktreeSwitchExit           = "exit"
+	WorktreeSwitchResumeFallback = "resume_fallback"
+)
+
+// WorktreeTimelineEntry is one boundary record of a session's active-checkout
+// history. It exists so history around the switch is not re-interpreted as
+// having happened in the current checkout: the record fixes the checkout, its
+// HEAD, the binding generation and the reason at that point in the session.
+type WorktreeTimelineEntry struct {
+	Reason     string    `json:"reason"`
+	Name       string    `json:"name,omitempty"`
+	Branch     string    `json:"branch,omitempty"`
+	Path       string    `json:"path,omitempty"`
+	Head       string    `json:"head,omitempty"`
+	Generation uint64    `json:"generation,omitempty"`
+	Fallback   bool      `json:"fallback,omitempty"`
+	Detail     string    `json:"detail,omitempty"`
+	At         time.Time `json:"at"`
+}
+
+// WorktreeBinding is the active checkout a session is bound to. An empty Path
+// means the session is not in a worktree, so the recorded worktree fields are
+// cleared.
+type WorktreeBinding struct {
+	RepoID   string
+	RepoRoot string
+	Name     string
+	Branch   string
+	Path     string
+}
+
+// maxWorktreeTimelineEntries bounds the persisted switch history. Older
+// boundaries stop being actionable long before then, and the timeline must not
+// grow the metadata file for the life of a long session.
+const maxWorktreeTimelineEntries = 20
+
+// RecordWorktreeBoundary updates the session's active checkout and appends the
+// boundary record that produced it, in one atomic write. Callers pass an empty
+// binding path to clear the active checkout on exit.
+func RecordWorktreeBoundary(sessionDir string, binding WorktreeBinding, entry WorktreeTimelineEntry) error {
+	if strings.TrimSpace(sessionDir) == "" {
+		return nil
+	}
+	return UpdateSessionMeta(sessionDir, func(meta *SessionMeta) {
+		if strings.TrimSpace(binding.Path) == "" {
+			meta.WorktreeName = ""
+			meta.WorktreeBranch = ""
+			meta.WorktreePath = ""
+		} else {
+			if binding.RepoID != "" {
+				meta.RepoID = binding.RepoID
+			}
+			if binding.RepoRoot != "" {
+				meta.RepoRoot = binding.RepoRoot
+			}
+			meta.WorktreeName = binding.Name
+			meta.WorktreeBranch = binding.Branch
+			meta.WorktreePath = binding.Path
+		}
+		if strings.TrimSpace(entry.Reason) == "" {
+			return
+		}
+		meta.WorktreeTimeline = append(meta.WorktreeTimeline, entry)
+		if len(meta.WorktreeTimeline) > maxWorktreeTimelineEntries {
+			meta.WorktreeTimeline = meta.WorktreeTimeline[len(meta.WorktreeTimeline)-maxWorktreeTimelineEntries:]
+		}
+	})
 }
 
 type ImportMeta struct {
@@ -62,6 +147,7 @@ func (m SessionMeta) IsZero() bool {
 		m.WorktreeName == "" &&
 		m.WorktreeBranch == "" &&
 		m.WorktreePath == "" &&
+		len(m.WorktreeTimeline) == 0 &&
 		m.ImportedFrom == nil &&
 		len(m.MCPEnabledServers) == 0 &&
 		!m.IsMainWorktree

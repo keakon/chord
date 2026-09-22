@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -70,6 +69,10 @@ type MainAgent struct {
 	// once as a toast when the event loop starts so silently dropped values
 	// stay visible, pointing at `chord doctor config` for the full report.
 	startupConfigIssues []string
+	// startupWorkDirNotice names a resume problem the session could not fix
+	// before the event loop started (the recorded worktree was gone). It is
+	// reported once as a toast, like the config issues above.
+	startupWorkDirNotice string
 
 	// Permission system: ruleset from active agent config with overlay support.
 	globalConfig  *config.Config
@@ -344,10 +347,18 @@ type MainAgent struct {
 	interaction *interactionBroker
 
 	// Plan execution workflow state.
-	projectRoot    string
-	pathLocator    *config.PathLocator // resolved startup paths; nil falls back to DefaultPathLocator
-	lastPlanPath   string
-	pendingHandoff *HandoffResult // deferred Handoff action; processed after all sibling tools finish
+	contentRoot string
+	pathLocator *config.PathLocator // resolved startup paths; nil falls back to DefaultPathLocator
+	// pathRootsResolver re-lists the repository's checkouts for policy-root
+	// path evaluation. It is injected by cmd/chord (the only layer that
+	// resolves git worktrees) and consulted at each turn start; pathRoots
+	// caches the last immutable snapshot so tool goroutines read it without
+	// blocking. A nil resolver or empty roots degrade path rules to the
+	// cwd-only behavior.
+	pathRootsResolver PathRootsResolver
+	pathRoots         atomic.Pointer[pathRootsSnapshot]
+	lastPlanPath      string
+	pendingHandoff    *HandoffResult // deferred Handoff action; processed after all sibling tools finish
 	// handoffWaitActive mirrors "pendingHandoff != nil" for mailbox delivery
 	// paths that also run off the event loop (manual delivery, restore). While a
 	// handoff user wait is open, automatic mailbox delivery is held instead of
@@ -754,7 +765,14 @@ type MainAgent struct {
 	cachedVenvPath  string // absolute path to detected Python virtual environment, or ""
 	cachedAgentsMD  string
 	gitStatusReady  chan struct{} // closed when cachedGitStatus is set
-	cachedSubMu     sync.RWMutex
+	// workDirState is the active checkout of this agent. A worktree switch
+	// publishes a whole new state here; cachedWorkDir stays the immutable
+	// directory the session started in.
+	workDirState workDirBinding
+	// worktreeRT carries cmd-injected worktree services (storage locator,
+	// repository root, LSP rebind). Written before the agent runs turns.
+	worktreeRT  WorktreeRuntime
+	cachedSubMu sync.RWMutex
 	// cachedSubAgents is the sorted list of subagent-mode agents available for
 	// the Delegate tool, excluding the currently active role. Rebuilt when role filters change.
 	cachedSubAgents []*config.AgentConfig
@@ -830,8 +848,13 @@ type MainAgent struct {
 // NewMainAgent creates a fully-initialised MainAgent. The caller must invoke
 // Run in a separate goroutine to start the event loop.
 //
-// projectRoot is the root directory of the project (typically cwd) and is used
-// to load AGENTS.md and determine git repository status for the system prompt.
+// contentRoot is the root the project's content and machine state are anchored
+// to: configuration, agent definitions, skills, memory, AGENTS.md, and the
+// session project key. In a linked worktree it is the main worktree root, so
+// every checkout of one repository shares them.
+//
+// The runtime working directory (the checkout tools and shell commands run in)
+// comes from the process working directory at construction time.
 //
 // globalCfg is the user-level config (~/.config/chord/config.yaml). projectCfg is the
 // project-level config (.chord/config.yaml); either may be nil.
@@ -848,7 +871,8 @@ func NewMainAgent(
 	hookEngine hook.Manager,
 	sessionDir string,
 	modelName string,
-	projectRoot string,
+	contentRoot string,
+	workDir string,
 	globalCfg *config.Config,
 	projectCfg *config.Config,
 	mcpClientInfo mcp.ClientInfo,
@@ -860,9 +884,8 @@ func NewMainAgent(
 	}
 	parentCtx, cancel := context.WithCancel(ctx)
 
-	workDir, _ := os.Getwd()
-	if workDir == "" {
-		workDir = projectRoot
+	if strings.TrimSpace(workDir) == "" {
+		workDir = contentRoot
 	}
 	gitStatusReady := make(chan struct{})
 	orchestrationCfg := effectiveOrchestrationConfig(globalCfg, projectCfg)
@@ -876,7 +899,7 @@ func NewMainAgent(
 		tools:                   toolRegistry,
 		hookEngine:              hookEngine,
 		usageTracker:            analytics.NewUsageTracker(),
-		usageLedger:             analytics.NewUsageLedger(sessionDir, projectRoot),
+		usageLedger:             analytics.NewUsageLedger(sessionDir, contentRoot),
 		invokedSkills:           make(map[string]*skill.Meta),
 		globalConfig:            globalCfg,
 		projectConfig:           projectCfg,
@@ -895,7 +918,7 @@ func NewMainAgent(
 		stoppingCh:              make(chan struct{}),
 		evidence:                evidenceCandidateTracker{seen: make(map[string]int)},
 		cacheHitTracker:         newCacheHitTracker(),
-		projectRoot:             projectRoot,
+		contentRoot:             contentRoot,
 		pathLocator:             pathLocator,
 		subs:                    newSubAgentRegistry(),
 		governor:                governor,
@@ -939,20 +962,23 @@ func NewMainAgent(
 
 	// Fetch git status asynchronously; callLLM waits for it before the first
 	// LLM request of this process so every injected prefix carries the real
-	// value from the start.
+	// value from the start. It reads the live binding rather than the startup
+	// directory: a session restored into a worktree installs that binding
+	// while this goroutine may still be running, and both orders must end on
+	// the restored checkout's branch.
 	go func() {
-		a.setCachedGitStatus(getGitStatus(workDir))
+		a.setCachedGitStatus(getGitStatus(a.workDir()))
 		close(gitStatusReady)
 	}()
 
 	// Detect Python virtual environment synchronously (just os.Stat, cheap).
-	a.cachedVenvPath = detectVenvPath(workDir, projectRoot)
+	a.setCachedVenvPath(detectVenvPath(workDir, contentRoot))
 
 	// Wire Memory before building the system prompt so the stable prompt can
 	// include the fixed Memory discipline when a MEMORY.md is present. The
 	// background extraction worker starts here (project/process lifetime).
 	if a.memoryMgr == nil {
-		a.initMemory(projectRoot)
+		a.initMemory(contentRoot)
 	}
 
 	// Build and install the system prompt (git status is injected into the
@@ -1846,7 +1872,7 @@ func (a *MainAgent) handleAgentError(evt Event) {
 		evt.TurnID,
 		evt.SourceID,
 		"sub",
-		a.projectRoot,
+		a.effectiveToolBaseDir(),
 		"",
 		"",
 		map[string]any{

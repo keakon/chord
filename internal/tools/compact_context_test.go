@@ -148,14 +148,14 @@ func TestCompactContextStateFilesDedupedAndNormalized(t *testing.T) {
 	}
 }
 
-// rootedCompactValidator returns a validator whose ProjectRoot provider serves
+// rootedCompactValidator returns a validator whose WorkDir provider serves
 // root, with HOME pinned to its parent so "~" spellings expand deterministically.
 func rootedCompactValidator(t *testing.T, root string) CompactContextValidator {
 	t.Helper()
 	t.Setenv("HOME", filepath.Dir(root))
 	return CompactContextValidator{
 		ContinuationStateMaxTokens: 2048,
-		ProjectRoot:                func() string { return root },
+		WorkDir:                    func() string { return root },
 	}
 }
 

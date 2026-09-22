@@ -15,7 +15,7 @@ type streamToolDeltaReducer struct {
 	turn                         *Turn
 	registry                     *tools.Registry
 	ruleset                      func() permission.Ruleset
-	toolBaseDir                  string
+	pathScope                    permission.PathScope
 	visibleToolNames             func() map[string]struct{}
 	emit                         func(AgentEvent)
 	flushBeforeTool              func()
@@ -201,7 +201,7 @@ func (r streamToolDeltaReducer) maybeStartEarlySpeculativeToolCall(callID string
 	}
 	decision := rejectSpeculativeExecution("sync_hooks_configured")
 	if r.syncHookGate == nil || !r.syncHookGate() {
-		decision = evaluateSpeculativeExecutionPolicyWithPrefix(r.registry, ruleset, callName, json.RawMessage(call.ArgsJSON), r.turn.streamingToolCallsBefore(callID), r.toolBaseDir)
+		decision = evaluateSpeculativeExecutionPolicyWithPrefix(r.registry, ruleset, callName, json.RawMessage(call.ArgsJSON), r.turn.streamingToolCallsBefore(callID), r.pathScope)
 	}
 	if decision.Allowed {
 		decision = r.checkVisibleSpeculativeTool(callName)
@@ -232,7 +232,7 @@ func (r streamToolDeltaReducer) handleToolUseEnd(delta message.StreamDelta) {
 	}
 	decision := rejectSpeculativeExecution("sync_hooks_configured")
 	if r.syncHookGate == nil || !r.syncHookGate() {
-		decision = evaluateSpeculativeExecutionPolicyWithPrefix(r.registry, ruleset, callName, json.RawMessage(argsJSON), r.turn.streamingToolCallsBefore(callID), r.toolBaseDir)
+		decision = evaluateSpeculativeExecutionPolicyWithPrefix(r.registry, ruleset, callName, json.RawMessage(argsJSON), r.turn.streamingToolCallsBefore(callID), r.pathScope)
 	}
 	if decision.Allowed && r.registry != nil {
 		if tool, ok := r.registry.Get(callName); ok {

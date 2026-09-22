@@ -157,7 +157,7 @@ func TestSubAgentWriteScopeDoesNotGateFileToolExecution(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			parent, sub := newMixedBatchTestSubAgent(t)
 			root := t.TempDir()
-			parent.projectRoot = root
+			parent.contentRoot = root
 			sub.workDir = root
 			sub.writeScope = tc.scope
 			sub.tools.Register(tools.WriteTool{BaseDir: root})

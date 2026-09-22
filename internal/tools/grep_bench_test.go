@@ -29,7 +29,7 @@ func BenchmarkGrepWalkRootParallel(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for b.Loop() {
-				if _, _, _, _, err := grepWalkRoot(context.Background(), dir, re, []string{"**/*.go"}, dir, maxGrepMatches, maxGrepOutputBytes); err != nil {
+				if _, _, _, _, err := grepWalkRoot(context.Background(), dir, re, []string{"**/*.go"}, dir, maxGrepMatches, maxGrepOutputBytes, ""); err != nil {
 					b.Fatal(err)
 				}
 			}

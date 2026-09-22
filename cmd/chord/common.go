@@ -31,6 +31,7 @@ import (
 	"github.com/keakon/chord/internal/shell"
 	"github.com/keakon/chord/internal/skill"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/worktree"
 )
 
 const (
@@ -43,10 +44,16 @@ const (
 // caller must call Close() to release resources (log file, MCP connections,
 // agent).
 type AppContext struct {
-	Ctx              context.Context
-	Cancel           context.CancelFunc
-	ProjectRoot      string
-	ChordDir         string
+	Ctx    context.Context
+	Cancel context.CancelFunc
+	// ContentRoot is where project content and machine state are anchored:
+	// project config, agent definitions, skills, memory, AGENTS.md, and the
+	// session project key. It is the main worktree root when chord runs inside
+	// a linked worktree, and the startup directory otherwise.
+	ContentRoot string
+	// WorkDir is the checkout this session works in. Tool base directories,
+	// shell cwd, and the LSP root resolve against it.
+	WorkDir          string
 	ConfigHome       string
 	PathLocator      *config.PathLocator
 	ProjectLocator   *config.ProjectLocator
@@ -132,8 +139,8 @@ func (ac *AppContext) GetOrCreateProviderImpl(provName string, cfg config.Provid
 }
 
 type initAppStartupPlan struct {
-	ProjectRoot       string
-	ChordDir          string
+	ContentRoot       string
+	WorkDir           string
 	PathLocator       *config.PathLocator
 	ProjectLocator    *config.ProjectLocator
 	ConfigHome        string
@@ -143,19 +150,25 @@ type initAppStartupPlan struct {
 	ProjectConfigPath string
 }
 
-func planInitAppStartup(projectRoot string) (*initAppStartupPlan, error) {
-	if strings.TrimSpace(projectRoot) == "" {
-		return nil, fmt.Errorf("project root is empty")
+// planInitAppStartup resolves everything startup needs before initApp wires the
+// runtime. contentRoot anchors project content, control-plane configuration, and
+// machine state; workDir is the checkout this session works in. Both must be
+// canonical absolute paths.
+func planInitAppStartup(contentRoot, workDir string) (*initAppStartupPlan, error) {
+	if strings.TrimSpace(contentRoot) == "" {
+		return nil, fmt.Errorf("content root is empty")
 	}
-	chordDir := filepath.Join(projectRoot, ".chord")
-	if err := os.MkdirAll(chordDir, 0o700); err != nil {
+	if strings.TrimSpace(workDir) == "" {
+		return nil, fmt.Errorf("work dir is empty")
+	}
+	if err := os.MkdirAll(filepath.Join(contentRoot, ".chord"), 0o700); err != nil {
 		return nil, fmt.Errorf("create .chord directory: %w", err)
 	}
 	globalCfg, err := config.LoadConfig()
 	if err != nil {
 		return nil, wrapConfigLoadError("load config", err)
 	}
-	projectConfigPath := config.ProjectConfigPath(projectRoot)
+	projectConfigPath := config.ProjectConfigPath(contentRoot)
 	projectCfg, cfg, err := config.MergeProjectConfig(globalCfg, projectConfigPath)
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
@@ -164,13 +177,13 @@ func planInitAppStartup(projectRoot string) (*initAppStartupPlan, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve storage paths: %w", err)
 	}
-	projectLocator, err := pathLocator.EnsureProject(projectRoot)
+	projectLocator, err := pathLocator.EnsureProject(contentRoot)
 	if err != nil {
 		return nil, fmt.Errorf("resolve project storage paths: %w", err)
 	}
 	return &initAppStartupPlan{
-		ProjectRoot:       projectRoot,
-		ChordDir:          chordDir,
+		ContentRoot:       contentRoot,
+		WorkDir:           workDir,
 		PathLocator:       pathLocator,
 		ProjectLocator:    projectLocator,
 		ConfigHome:        pathLocator.ConfigHome,
@@ -185,8 +198,8 @@ func applyInitAppStartupPlan(ac *AppContext, plan *initAppStartupPlan) {
 	if ac == nil || plan == nil {
 		return
 	}
-	ac.ProjectRoot = plan.ProjectRoot
-	ac.ChordDir = plan.ChordDir
+	ac.ContentRoot = plan.ContentRoot
+	ac.WorkDir = plan.WorkDir
 	ac.PathLocator = plan.PathLocator
 	ac.ProjectLocator = plan.ProjectLocator
 	ac.ConfigHome = plan.ConfigHome
@@ -392,13 +405,17 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	)
 	ac.InstanceID = fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UnixNano())
 
-	// Project root.
-	projectRoot, err := os.Getwd()
+	// Content root and working directory. The content root anchors project
+	// content, control-plane configuration, and machine state; it is the main
+	// worktree root when chord runs inside a linked worktree. The working
+	// directory is the checkout this session works in.
+	workDir, err := os.Getwd()
 	if err != nil {
 		ac.Cancel()
 		return nil, fmt.Errorf("get working directory: %w", err)
 	}
-	startupPlan, err := planInitAppStartup(projectRoot)
+	contentRoot := resolveContentRoot(ac.Ctx, workDir)
+	startupPlan, err := planInitAppStartup(contentRoot, workDir)
 	if err != nil {
 		ac.Cancel()
 		return nil, err
@@ -429,7 +446,7 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 
 	logLevel := resolveLogLevel(globalCfg, projectCfg)
 	ac.logLevel = logLevel
-	logCtx := logContext{PWD: projectRoot, PID: os.Getpid()}
+	logCtx := logContext{PWD: workDir, PID: os.Getpid()}
 	ac.logCtx = logCtx
 
 	logPath := filepath.Join(pathLocator.LogsDir, runtimeLogFileName)
@@ -457,9 +474,10 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	}
 
 	// Resolve agent configs once and reuse the result for both default-model
-	// selection and MainAgent setup.
+	// selection and MainAgent setup. Agent definitions are control-plane
+	// configuration, so they come from the content root only.
 	agentConfigs, agentConfigsErr := config.ResolveAgentConfigs(
-		filepath.Join(projectRoot, ".chord", "agents"),
+		filepath.Join(contentRoot, ".chord", "agents"),
 		filepath.Join(pathLocator.ConfigHome, "agents"),
 	)
 
@@ -550,6 +568,18 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		log.Infof("session %s is open in another Chord process; continuing with %s instead", skipped, ac.logCtx.SID)
 	}
 
+	// Sessions of worktrees created by older chord versions live under that
+	// worktree's own project key and are no longer listed. Surface them when
+	// the user asks to continue a session, so a vanished session is explained
+	// instead of silently missing.
+	if sessionOpts.ContinueLatest || strings.TrimSpace(sessionOpts.ResumeID) != "" {
+		hintCtx := ac.Ctx
+		if hintCtx == nil {
+			hintCtx = context.Background()
+		}
+		printAbandonedWorktreeSessionsHint(os.Stderr, findAbandonedWorktreeSessions(hintCtx, ac.ContentRoot), projectLocator.ProjectSessionsDir)
+	}
+
 	tracePath := filepath.Join(ac.SessionDir, "traces", llm.LLMTraceFileName())
 	var traceWriter *llm.TraceWriter
 	if ac.ProviderCache.traceWriter != nil {
@@ -582,13 +612,22 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		cfg.Context.Compaction.Threshold,
 	)
 
+	// The worktree container is resolved once at startup and then pinned: it is
+	// what Grep/Glob prune so a search never reports another checkout's copies,
+	// and what the policy-root container rule derives fresh checkouts from.
+	worktreeRoot, err := worktree.WorktreeRoot(ac.PathLocator, contentRoot, cfg.Worktree.Root)
+	if err != nil {
+		ac.cleanup()
+		return nil, err
+	}
+
 	// Tool registry.
 	ac.Registry = tools.NewRegistry()
-	ac.Registry.Register(tools.ReadTool{BaseDir: ac.ProjectRoot})
-	ac.Registry.Register(tools.WriteTool{BaseDir: ac.ProjectRoot})
-	ac.Registry.Register(tools.ApplyPatchTool{BaseDir: ac.ProjectRoot})
-	ac.Registry.Register(tools.EditTool{BaseDir: ac.ProjectRoot})
-	ac.Registry.Register(tools.DeleteTool{BaseDir: ac.ProjectRoot})
+	ac.Registry.Register(tools.ReadTool{BaseDir: ac.WorkDir})
+	ac.Registry.Register(tools.WriteTool{BaseDir: ac.WorkDir})
+	ac.Registry.Register(tools.ApplyPatchTool{BaseDir: ac.WorkDir})
+	ac.Registry.Register(tools.EditTool{BaseDir: ac.WorkDir})
+	ac.Registry.Register(tools.DeleteTool{BaseDir: ac.WorkDir})
 
 	// Detect shell type and create appropriate ShellTool
 	detectedShell, err := shell.DetectShell()
@@ -598,15 +637,15 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	}
 	log.Debugf("detected shell for command execution shell=%v", detectedShell.String())
 	shellTool := tools.NewShellTool(detectedShell.String())
-	shellTool.BaseDir = ac.ProjectRoot
+	shellTool.BaseDir = ac.WorkDir
 	ac.Registry.Register(shellTool)
 
 	ac.Registry.Register(tools.JobOutputTool{})
 	ac.Registry.Register(tools.JobListTool{})
 	ac.Registry.Register(tools.JobKillTool{})
-	ac.Registry.Register(tools.GrepTool{BaseDir: ac.ProjectRoot})
-	ac.Registry.Register(tools.GlobTool{BaseDir: ac.ProjectRoot})
-	ac.Registry.Register(tools.HandoffTool{BaseDir: ac.ProjectRoot})
+	ac.Registry.Register(tools.GrepTool{BaseDir: ac.WorkDir, WorktreeRoot: worktreeRoot})
+	ac.Registry.Register(tools.GlobTool{BaseDir: ac.WorkDir, WorktreeRoot: worktreeRoot})
+	ac.Registry.Register(tools.HandoffTool{BaseDir: ac.WorkDir})
 	ac.Registry.Register(tools.NewWebFetchTool(cfg.WebFetch, cfg.Proxy))
 
 	// MCP servers.
@@ -641,13 +680,49 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	// Main agent.
 	ac.MainAgent = agent.NewMainAgent(
 		ac.Ctx, llmClient, ac.CtxMgr, ac.Registry, ac.HookEngine,
-		ac.SessionDir, modelID, projectRoot,
+		ac.SessionDir, modelID, contentRoot, workDir,
 		cfg, ac.ProjectCfg,
 		mcp.ClientInfo{Name: "chord", Version: Version},
 		ac.PathLocator,
 	)
 	llmClient.SetSessionID(filepath.Base(ac.SessionDir))
 	ac.MainAgent.SetInitialYoloMode(flagYolo)
+	worktreeBranchPrefix := resolveWorktreeBranchPrefix(cfg)
+	ac.MainAgent.SetPathRootsResolver(newPathRootsResolver(ac.Ctx, contentRoot, ac.PathLocator, cfg.Worktree.Root))
+	ac.MainAgent.SetWorktreeRuntime(agent.WorktreeRuntime{
+		PathLocator:  ac.PathLocator,
+		RepoRoot:     contentRoot,
+		BranchPrefix: worktreeBranchPrefix,
+		Root:         cfg.Worktree.Root,
+		SessionID:    filepath.Base(ac.SessionDir),
+		RebindLSP:    ac.rebindLSPForWorkDir,
+		RefreshSkills: func(workDir string) {
+			refreshSkillsForWorkDir(ac, workDir)
+		},
+	})
+	// A session remembers the checkout it works in. Stamp the agent's binding
+	// so WorktreeList, Exit and the completion reports agree with the directory
+	// the session was started (or resumed) in; when the recorded checkout is
+	// gone the agent falls back and the notice is shown once as a toast.
+	if flagWorktreeResumeNotice != "" {
+		ac.MainAgent.SetStartupWorkDirNotice(flagWorktreeResumeNotice)
+	}
+	if info := flagWorktreeStartupInfo; info != nil {
+		reason := flagWorktreeStartupReason
+		if reason == "" {
+			reason = recovery.WorktreeSwitchResume
+		}
+		notice := ac.MainAgent.RestoreWorkDirBinding(ac.Ctx, agent.WorkDirState{
+			Path:       info.Path,
+			WorktreeID: info.Name,
+			Branch:     info.Branch,
+			BaseSHA:    info.BaseSHA,
+		}, reason)
+		if notice != "" {
+			fmt.Fprintln(os.Stderr, "warning: "+notice)
+			ac.MainAgent.SetStartupWorkDirNotice(notice)
+		}
+	}
 	ac.MainAgent.SetSessionLock(ac.SessionLock)
 	ac.MainAgent.SetStartupSkippedLockedSessions(ac.StartupSkippedLockedSessions)
 	ac.MainAgent.SetStartupConfigIssues(collectStartupConfigIssues(startupPlan))
@@ -705,8 +780,13 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	ac.Registry.Register(tools.NewTodoWriteTool(ac.MainAgent))
 	ac.Registry.Register(tools.NewSkillTool(ac.MainAgent))
 	viewImageTool := tools.NewViewImageTool(ac.MainAgent)
-	viewImageTool.BaseDir = ac.ProjectRoot
+	viewImageTool.BaseDir = ac.WorkDir
 	ac.Registry.Register(viewImageTool)
+	// Worktree tools are rebound per agent: a SubAgent gets its own instances
+	// so entering a worktree switches only that sub-agent's working directory.
+	ac.Registry.Register(tools.NewWorktreeEnterTool(ac.MainAgent))
+	ac.Registry.Register(tools.NewWorktreeExitTool(ac.MainAgent))
+	ac.Registry.Register(tools.NewWorktreeListTool(ac.MainAgent))
 
 	// LLM factory for SubAgents.
 	ac.MainAgent.SetLLMFactory(buildSubAgentLLMFactory(ac, providerCfg, llmProvider, modelID, modelCfg, cfg, auth))

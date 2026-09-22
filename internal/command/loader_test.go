@@ -210,7 +210,7 @@ func TestLoad_integration(t *testing.T) {
 		"Daily standup.")
 
 	defs, warns := Load(LoadOptions{
-		ProjectRoot:    projectRoot,
+		ContentRoot:    projectRoot,
 		ConfigHome:     chordHome,
 		ProjectCfg:     map[string]string{"standup": "standup via yaml"},
 		ProjectCfgPath: filepath.Join(projectRoot, ".chord", "config.yaml"),

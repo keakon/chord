@@ -24,7 +24,7 @@ func rejectSpeculativeExecution(reason string) speculativeExecutionDecision {
 	return speculativeExecutionDecision{Allowed: false, Reason: reason}
 }
 
-func evaluateSpeculativeExecutionPolicyWithPrefix(registry *tools.Registry, ruleset permission.Ruleset, toolName string, args json.RawMessage, priorCalls []PendingToolCall, cwd string) speculativeExecutionDecision {
+func evaluateSpeculativeExecutionPolicyWithPrefix(registry *tools.Registry, ruleset permission.Ruleset, toolName string, args json.RawMessage, priorCalls []PendingToolCall, scope permission.PathScope) speculativeExecutionDecision {
 	toolName = tools.NormalizeName(toolName)
 	toolName = strings.TrimSpace(toolName)
 	if toolName == "" {
@@ -39,7 +39,7 @@ func evaluateSpeculativeExecutionPolicyWithPrefix(registry *tools.Registry, rule
 		}
 	}
 	if len(ruleset) > 0 && !isInternalControlTool(toolName) {
-		decision := evaluateToolPermissionInDir(ruleset, toolName, args, cwd)
+		decision := evaluateToolPermissionInDir(ruleset, toolName, args, scope)
 		if decision.Action != permission.ActionAllow {
 			return rejectSpeculativeExecution("permission_" + string(decision.Action))
 		}
@@ -59,7 +59,7 @@ func evaluateSpeculativeExecutionPolicyWithPrefix(registry *tools.Registry, rule
 			if registry == nil {
 				return rejectSpeculativeExecution("unknown_tool")
 			}
-			if blocking, ok := firstBlockingPriorSpeculativeCall(registry, ruleset, priorCalls, cwd); ok {
+			if blocking, ok := firstBlockingPriorSpeculativeCall(registry, ruleset, priorCalls, scope); ok {
 				return rejectSpeculativeExecution("prior_pending_non_read_only:" + blocking)
 			}
 			return speculativeExecutionDecision{Allowed: true, Reason: "commit_on_promote_internal_state"}
@@ -79,13 +79,13 @@ func evaluateSpeculativeExecutionPolicyWithPrefix(registry *tools.Registry, rule
 			return rejectSpeculativeExecution("not_in_speculative_allowlist")
 		}
 	}
-	if blocking, ok := firstBlockingPriorSpeculativeCall(registry, ruleset, priorCalls, cwd); ok {
+	if blocking, ok := firstBlockingPriorSpeculativeCall(registry, ruleset, priorCalls, scope); ok {
 		return rejectSpeculativeExecution("prior_pending_non_read_only:" + blocking)
 	}
 	return allowSpeculativeExecution()
 }
 
-func firstBlockingPriorSpeculativeCall(registry *tools.Registry, ruleset permission.Ruleset, priorCalls []PendingToolCall, cwd string) (string, bool) {
+func firstBlockingPriorSpeculativeCall(registry *tools.Registry, ruleset permission.Ruleset, priorCalls []PendingToolCall, scope permission.PathScope) (string, bool) {
 	for _, call := range priorCalls {
 		name := tools.NormalizeName(call.Name)
 		if name == "" {
@@ -93,7 +93,7 @@ func firstBlockingPriorSpeculativeCall(registry *tools.Registry, ruleset permiss
 		}
 		args := json.RawMessage(call.ArgsJSON)
 		if len(ruleset) > 0 && !isInternalControlTool(name) {
-			decision := evaluateToolPermissionInDir(ruleset, name, args, cwd)
+			decision := evaluateToolPermissionInDir(ruleset, name, args, scope)
 			if decision.Action != permission.ActionAllow {
 				return name, true
 			}

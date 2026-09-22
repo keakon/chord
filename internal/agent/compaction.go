@@ -1216,8 +1216,8 @@ func (a *MainAgent) refreshEvidenceValidity() {
 		}
 		for path, expected := range item.Revisions {
 			resolved := path
-			if !filepath.IsAbs(resolved) && a.projectRoot != "" {
-				resolved = filepath.Join(a.projectRoot, resolved)
+			if !filepath.IsAbs(resolved) && a.effectiveToolBaseDir() != "" {
+				resolved = filepath.Join(a.effectiveToolBaseDir(), resolved)
 			}
 			current, exists, err := evidenceFileRevisionMemoGlobal.verifiedHash(resolved)
 			if err != nil || !exists || current != expected {

@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/keakon/golog/log"
@@ -96,7 +97,10 @@ type startEntry struct {
 
 // Manager manages multiple LSP clients and aggregates diagnostics.
 type Manager struct {
-	projectRoot string
+	// projectRoot is the checkout every client is rooted in. It is stored
+	// behind an atomic pointer because a worktree switch rebinds it while
+	// tool goroutines keep reading it.
+	projectRoot atomic.Pointer[string]
 	cfg         *config.Config
 	broadcast   BroadcastFunc
 	clients     map[clientKey]*Client
@@ -173,8 +177,7 @@ func NewManager(cfg *config.Config, projectRoot string, broadcast BroadcastFunc)
 	if broadcast == nil {
 		broadcast = func(string, any) {}
 	}
-	return &Manager{
-		projectRoot:           projectRoot,
+	m := &Manager{
 		cfg:                   cfg,
 		broadcast:             broadcast,
 		clients:               make(map[clientKey]*Client),
@@ -189,6 +192,46 @@ func NewManager(cfg *config.Config, projectRoot string, broadcast BroadcastFunc)
 		reportedByPath:        make(map[string]map[diagnosticIdentity]struct{}),
 		touchedPaths:          make(map[string]struct{}),
 	}
+	m.projectRoot.Store(&projectRoot)
+	return m
+}
+
+// projectRootPath returns the checkout the manager currently binds clients to.
+func (m *Manager) projectRootPath() string {
+	if m == nil {
+		return ""
+	}
+	if p := m.projectRoot.Load(); p != nil {
+		return *p
+	}
+	return ""
+}
+
+// RebindToProjectRoot points the manager at another checkout. Open clients are
+// closed first: their workspace roots and file URIs belong to the previous
+// checkout, so their diagnostics must not be attributed to the new one, and the
+// diagnostic state recorded for the previous checkout is dropped along with
+// them. Later requests start fresh clients under root.
+func (m *Manager) RebindToProjectRoot(ctx context.Context, root string) error {
+	if m == nil {
+		return nil
+	}
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return fmt.Errorf("lsp: empty project root")
+	}
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return fmt.Errorf("lsp: resolve project root %s: %w", root, err)
+	}
+	if m.projectRootPath() == abs {
+		return nil
+	}
+	m.Stop(ctx)
+	m.forgetCheckoutDiagnostics()
+	m.projectRoot.Store(&abs)
+	m.notifySidebarChanged()
+	return nil
 }
 
 func (m *Manager) onDiagnostics(key clientKey) func(uri string, _ string, diags []pnprotocol.Diagnostic, version int32) {
@@ -310,7 +353,7 @@ func (m *Manager) Start(ctx context.Context, path string) {
 	if m.cfg == nil || len(m.cfg.LSP) == 0 {
 		return
 	}
-	if !pathUnderDir(path, m.projectRoot) {
+	if !pathUnderDir(path, m.projectRootPath()) {
 		return
 	}
 	m.clientsMu.Lock()
@@ -389,7 +432,7 @@ func (m *Manager) startServer(ctx context.Context, key clientKey, srvCfg config.
 	delete(m.startFail, key)
 	m.startFailMu.Unlock()
 
-	client, err := newClient(ctx, key.name, srvCfg, key.root, m.projectRoot, false)
+	client, err := newClient(ctx, key.name, srvCfg, key.root, m.projectRootPath(), false)
 	if err != nil {
 		log.Errorf("lsp: create client name=%v root=%v error=%v", key.name, key.root, err)
 		// A Stop that cancelled this launch's start era is the cause, not the
@@ -482,7 +525,7 @@ func (m *Manager) discoverWorkspaceRoot(name string, srvCfg config.LSPServerConf
 	if err != nil {
 		return "", false, false
 	}
-	projectRoot, err := filepath.Abs(m.projectRoot)
+	projectRoot, err := filepath.Abs(m.projectRootPath())
 	if err != nil {
 		return "", false, false
 	}
@@ -704,6 +747,27 @@ func (m *Manager) evictExcessClientsLocked() (closeMe []*Client, survivors map[s
 		}
 	}
 	return closeMe, survivors
+}
+
+// forgetCheckoutDiagnostics drops every diagnostic the manager recorded for the
+// checkout it just left. Its clients are already closed, so no publish can ever
+// clear these entries: left in place they keep the previous checkout's files in
+// the sidebar aggregate (keyed by server name and filtered by the session's
+// touched files) and in the review snapshots the model reads.
+//
+// Caller must hold neither clientsMu nor diagMu.
+func (m *Manager) forgetCheckoutDiagnostics() {
+	m.diagMu.Lock()
+	clear(m.diagByServer)
+	clear(m.publishedDiagByServer)
+	clear(m.reviewByServer)
+	clear(m.diagState)
+	clear(m.reportedByPath)
+	m.diagMu.Unlock()
+
+	m.touchedMu.Lock()
+	clear(m.touchedPaths)
+	m.touchedMu.Unlock()
 }
 
 // dropOrphanedDiagnostics removes every diagnostic recorded under a server name
@@ -1220,6 +1284,13 @@ func normalizeWaiterPath(p string) string {
 // launch goroutine predating the stop survives it. The manager stays usable:
 // a later Start creates a fresh era and registers normally, which is what
 // reloads language servers after an idle unload.
+//
+// Clients are detached from the map under clientsMu and closed without it. A
+// graceful server shutdown waits for the reply, and reading that reply runs the
+// connection's notification handlers, which take diagMu and then clientsMu
+// (see reviewCountsForPathLocked). Holding clientsMu across the close therefore
+// deadlocks the close against those handlers until the caller's context
+// expires — a checkout switch would pay its whole rebind budget for it.
 func (m *Manager) Stop(ctx context.Context) {
 	m.clientsMu.Lock()
 	if m.cancelStartEra != nil {
@@ -1231,13 +1302,22 @@ func (m *Manager) Stop(ctx context.Context) {
 	for _, entry := range m.launches {
 		inflight = append(inflight, entry)
 	}
+	type closingClient struct {
+		key    clientKey
+		client *Client
+	}
+	closing := make([]closingClient, 0, len(m.clients))
 	for key, c := range m.clients {
-		if err := c.Close(ctx); err != nil {
-			log.Warnf("lsp: stop client name=%v root=%v error=%v", key.name, key.root, err)
-		}
+		closing = append(closing, closingClient{key: key, client: c})
 		delete(m.clients, key)
 	}
 	m.clientsMu.Unlock()
+
+	for _, c := range closing {
+		if err := c.client.Close(ctx); err != nil {
+			log.Warnf("lsp: stop client name=%v root=%v error=%v", c.key.name, c.key.root, err)
+		}
+	}
 
 	// Wait for the in-flight launches to exit (their contexts are cancelled,
 	// so they settle promptly). The caller's context still bounds the wait in

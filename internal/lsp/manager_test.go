@@ -15,13 +15,21 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
+// newTestManagerWithRoot builds a Manager bound to root without starting any
+// language server, so path-resolution tests can inspect its binding.
+func newTestManagerWithRoot(root string) *Manager {
+	m := &Manager{}
+	m.projectRoot.Store(&root)
+	return m
+}
+
 // testKey builds a clientKey for a test manager, using the manager's project
 // root as the workspace root so it matches clients that use the same root.
 func testKey(m *Manager, name string) clientKey {
 	if m == nil {
 		return clientKey{name: name}
 	}
-	return clientKey{name: name, root: m.projectRoot}
+	return clientKey{name: name, root: m.projectRootPath()}
 }
 
 func TestRelPathEscapesDir(t *testing.T) {
@@ -108,7 +116,7 @@ func TestNotifyWatchedFileChangedSendsDeletedEvent(t *testing.T) {
 
 func TestAwaitFreshWaiterIgnoresStaleVersionAndSettlesOnFresh(t *testing.T) {
 	mgr := NewManager(&config.Config{}, t.TempDir(), nil)
-	path := filepath.Join(mgr.projectRoot, "main.go")
+	path := filepath.Join(mgr.projectRootPath(), "main.go")
 	ch := mgr.PrepareWaiter(path)
 
 	go func() {
@@ -141,7 +149,7 @@ func TestAwaitFreshWaiterIgnoresStaleVersionAndSettlesOnFresh(t *testing.T) {
 
 func TestAwaitFreshWaiterUsesLatestEventDuringSettleWindow(t *testing.T) {
 	mgr := NewManager(&config.Config{}, t.TempDir(), nil)
-	path := filepath.Join(mgr.projectRoot, "main.go")
+	path := filepath.Join(mgr.projectRootPath(), "main.go")
 	ch := mgr.PrepareWaiter(path)
 
 	go func() {
@@ -379,7 +387,7 @@ func TestRecordReviewSnapshotClearsStaleDiagnosticsForCleanTouchedFile(t *testin
 			},
 		},
 	}, t.TempDir(), nil)
-	path := normalizeWaiterPath(filepath.Join(mgr.projectRoot, "a.go"))
+	path := normalizeWaiterPath(filepath.Join(mgr.projectRootPath(), "a.go"))
 	mgr.clients[testKey(mgr, "gopls")] = &Client{}
 	mgr.reviewByServer = map[string]map[string]reviewCounts{
 		"gopls": {
@@ -478,8 +486,8 @@ func TestCurrentReviewSnapshotsIncludesCleanConnectedServer(t *testing.T) {
 			},
 		},
 	}, t.TempDir(), nil)
-	path := filepath.Join(mgr.projectRoot, "a.go")
-	mgr.clients[testKey(mgr, "gopls")] = &Client{cwd: mgr.projectRoot, cfg: config.LSPServerConfig{FileTypes: []string{".go"}}}
+	path := filepath.Join(mgr.projectRootPath(), "a.go")
+	mgr.clients[testKey(mgr, "gopls")] = &Client{cwd: mgr.projectRootPath(), cfg: config.LSPServerConfig{FileTypes: []string{".go"}}}
 
 	got := mgr.CurrentReviewSnapshots(path)
 	want := []message.LSPReview{{Path: path, ServerID: "gopls", Errors: 0, Warnings: 0}}
@@ -494,12 +502,12 @@ func TestRecordReviewSnapshotIgnoresDiagnosticsFromNonOwnerRoot(t *testing.T) {
 			"gopls": {Command: "gopls", FileTypes: []string{".go"}},
 		},
 	}, t.TempDir(), nil)
-	path := normalizeWaiterPath(filepath.Join(mgr.projectRoot, "nested", "a.go"))
-	mgr.clients[clientKey{name: "gopls", root: mgr.projectRoot}] = &Client{cwd: mgr.projectRoot, cfg: config.LSPServerConfig{FileTypes: []string{".go"}}}
-	mgr.clients[clientKey{name: "gopls", root: filepath.Join(mgr.projectRoot, "nested")}] = &Client{cwd: filepath.Join(mgr.projectRoot, "nested"), cfg: config.LSPServerConfig{FileTypes: []string{".go"}}}
+	path := normalizeWaiterPath(filepath.Join(mgr.projectRootPath(), "nested", "a.go"))
+	mgr.clients[clientKey{name: "gopls", root: mgr.projectRootPath()}] = &Client{cwd: mgr.projectRootPath(), cfg: config.LSPServerConfig{FileTypes: []string{".go"}}}
+	mgr.clients[clientKey{name: "gopls", root: filepath.Join(mgr.projectRootPath(), "nested")}] = &Client{cwd: filepath.Join(mgr.projectRootPath(), "nested"), cfg: config.LSPServerConfig{FileTypes: []string{".go"}}}
 	mgr.diagByServer = map[clientKey]map[string]diagCounts{
-		{name: "gopls", root: mgr.projectRoot}:                          {string(protocol.URIFromPath(path)): {errors: 2}},
-		{name: "gopls", root: filepath.Join(mgr.projectRoot, "nested")}: {string(protocol.URIFromPath(path)): {warnings: 1}},
+		{name: "gopls", root: mgr.projectRootPath()}:                          {string(protocol.URIFromPath(path)): {errors: 2}},
+		{name: "gopls", root: filepath.Join(mgr.projectRootPath(), "nested")}: {string(protocol.URIFromPath(path)): {warnings: 1}},
 	}
 
 	mgr.recordReviewSnapshot(path)
@@ -515,14 +523,14 @@ func TestAllDiagnosticsByAbsPathIgnoresDiagnosticsFromNonOwnerRoot(t *testing.T)
 			"gopls": {Command: "gopls", FileTypes: []string{".go"}},
 		},
 	}, t.TempDir(), nil)
-	path := normalizeWaiterPath(filepath.Join(mgr.projectRoot, "nested", "a.go"))
-	outer := &Client{cwd: mgr.projectRoot, cfg: config.LSPServerConfig{FileTypes: []string{".go"}}, diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{}}
-	inner := &Client{cwd: filepath.Join(mgr.projectRoot, "nested"), cfg: config.LSPServerConfig{FileTypes: []string{".go"}}, diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{}}
+	path := normalizeWaiterPath(filepath.Join(mgr.projectRootPath(), "nested", "a.go"))
+	outer := &Client{cwd: mgr.projectRootPath(), cfg: config.LSPServerConfig{FileTypes: []string{".go"}}, diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{}}
+	inner := &Client{cwd: filepath.Join(mgr.projectRootPath(), "nested"), cfg: config.LSPServerConfig{FileTypes: []string{".go"}}, diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{}}
 	uri := protocol.DocumentURI(protocol.URIFromPath(path))
 	outer.diagnostics[uri] = []protocol.Diagnostic{{Severity: protocol.SeverityError, Message: "stale outer"}}
 	inner.diagnostics[uri] = []protocol.Diagnostic{{Severity: protocol.SeverityWarning, Message: "fresh inner"}}
-	mgr.clients[clientKey{name: "gopls", root: mgr.projectRoot}] = outer
-	mgr.clients[clientKey{name: "gopls", root: filepath.Join(mgr.projectRoot, "nested")}] = inner
+	mgr.clients[clientKey{name: "gopls", root: mgr.projectRootPath()}] = outer
+	mgr.clients[clientKey{name: "gopls", root: filepath.Join(mgr.projectRootPath(), "nested")}] = inner
 
 	got := mgr.allDiagnosticsByAbsPath()[path]
 	if len(got) != 1 || got[0].Severity != int(protocol.SeverityWarning) || got[0].Message != "fresh inner" {
@@ -532,14 +540,14 @@ func TestAllDiagnosticsByAbsPathIgnoresDiagnosticsFromNonOwnerRoot(t *testing.T)
 
 func TestAllDiagnosticsByAbsPathKeepsDistinctServerDiagnosticsPerPath(t *testing.T) {
 	mgr := NewManager(&config.Config{}, t.TempDir(), nil)
-	path := normalizeWaiterPath(filepath.Join(mgr.projectRoot, "pkg", "a.py"))
-	outer := &Client{cwd: mgr.projectRoot, cfg: config.LSPServerConfig{FileTypes: []string{".py"}}, diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{}}
-	inner := &Client{cwd: filepath.Join(mgr.projectRoot, "pkg"), cfg: config.LSPServerConfig{FileTypes: []string{".py"}}, diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{}}
+	path := normalizeWaiterPath(filepath.Join(mgr.projectRootPath(), "pkg", "a.py"))
+	outer := &Client{cwd: mgr.projectRootPath(), cfg: config.LSPServerConfig{FileTypes: []string{".py"}}, diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{}}
+	inner := &Client{cwd: filepath.Join(mgr.projectRootPath(), "pkg"), cfg: config.LSPServerConfig{FileTypes: []string{".py"}}, diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{}}
 	uri := protocol.DocumentURI(protocol.URIFromPath(path))
 	outer.diagnostics[uri] = []protocol.Diagnostic{{Severity: protocol.SeverityWarning, Message: "outer server warning"}}
 	inner.diagnostics[uri] = []protocol.Diagnostic{{Severity: protocol.SeverityError, Message: "inner server error"}}
-	mgr.clients[clientKey{name: "pyright", root: mgr.projectRoot}] = outer
-	mgr.clients[clientKey{name: "basedpyright", root: filepath.Join(mgr.projectRoot, "pkg")}] = inner
+	mgr.clients[clientKey{name: "pyright", root: mgr.projectRootPath()}] = outer
+	mgr.clients[clientKey{name: "basedpyright", root: filepath.Join(mgr.projectRootPath(), "pkg")}] = inner
 
 	// Two servers both own the same file, each from its own root. The owner
 	// cache must distinguish them; keying it by path alone reused the first

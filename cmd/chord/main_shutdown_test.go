@@ -258,7 +258,7 @@ func TestWorktreeResumeCommand_ReservedNameFallsBackToFlagForm(t *testing.T) {
 	}
 }
 
-func TestResumeHintCommand_DetectsWorktreeFromProjectRoot(t *testing.T) {
+func TestResumeHintCommand_DetectsWorktreeFromWorkDir(t *testing.T) {
 	repo := setupStartupRepo(t)
 	withTestStateDir(t)
 	chdirForTest(t, repo)
@@ -266,7 +266,7 @@ func TestResumeHintCommand_DetectsWorktreeFromProjectRoot(t *testing.T) {
 	var info *worktree.Info
 	worktreeOutput, err := captureStderr(t, func() error {
 		var createErr error
-		info, createErr = prepareStartupWorktree(context.Background(), "feat-auth")
+		info, createErr = prepareStartupWorktree(context.Background(), "feat-auth", false)
 		return createErr
 	})
 	if err != nil {
@@ -283,13 +283,15 @@ func TestResumeHintCommand_DetectsWorktreeFromProjectRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("startupPathLocator: %v", err)
 	}
-	proj, err := pl.LocateProject(info.Path)
+	contentRoot := resolveContentRoot(context.Background(), info.Path)
+	proj, err := pl.LocateProject(contentRoot)
 	if err != nil {
 		t.Fatalf("LocateProject: %v", err)
 	}
 	ac := &AppContext{
 		Ctx:            context.Background(),
-		ProjectRoot:    info.Path,
+		ContentRoot:    contentRoot,
+		WorkDir:        info.Path,
 		PathLocator:    pl,
 		ProjectLocator: proj,
 	}

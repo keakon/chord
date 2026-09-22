@@ -123,8 +123,8 @@ func (a *MainAgent) trackObservedFileParts(parts []message.ContentPart) {
 			continue
 		}
 		path := ref.Path
-		if !filepath.IsAbs(path) && a.projectRoot != "" {
-			path = filepath.Join(a.projectRoot, path)
+		if !filepath.IsAbs(path) && a.effectiveToolBaseDir() != "" {
+			path = filepath.Join(a.effectiveToolBaseDir(), path)
 		}
 		data, err := os.ReadFile(path)
 		if err != nil || !bytes.Equal(data, []byte(body)) {
@@ -173,8 +173,8 @@ func (a *MainAgent) externalReadsInvalidatedLazy(messages []message.Message, sca
 			if path == "" || expected == "" || !read.Exists {
 				continue
 			}
-			if !filepath.IsAbs(path) && a.projectRoot != "" {
-				path = filepath.Join(a.projectRoot, path)
+			if !filepath.IsAbs(path) && a.effectiveToolBaseDir() != "" {
+				path = filepath.Join(a.effectiveToolBaseDir(), path)
 			}
 			stale := a.lazyReadStatCheck(path, expected)
 			if stale {

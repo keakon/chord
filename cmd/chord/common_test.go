@@ -476,7 +476,7 @@ func TestInitAppFailsOnMalformedProjectConfig(t *testing.T) {
 	}
 	chdirForTest(t, projectRoot)
 
-	if _, err := planInitAppStartup(projectRoot); err == nil {
+	if _, err := planInitAppStartup(projectRoot, projectRoot); err == nil {
 		t.Fatal("planInitAppStartup should fail for malformed project config")
 	} else if !strings.Contains(err.Error(), "parse config") {
 		t.Fatalf("err = %v, want a config parse error", err)
@@ -494,7 +494,7 @@ func TestCollectStartupConfigIssuesReportsIgnoredProblems(t *testing.T) {
 	projectRoot := t.TempDir()
 	chdirForTest(t, projectRoot)
 
-	plan, err := planInitAppStartup(projectRoot)
+	plan, err := planInitAppStartup(projectRoot, projectRoot)
 	if err != nil {
 		t.Fatalf("planInitAppStartup: %v", err)
 	}
@@ -513,7 +513,7 @@ func TestCollectStartupConfigIssuesSkipsMissingProjectFile(t *testing.T) {
 	projectRoot := t.TempDir()
 	chdirForTest(t, projectRoot)
 
-	plan, err := planInitAppStartup(projectRoot)
+	plan, err := planInitAppStartup(projectRoot, projectRoot)
 	if err != nil {
 		t.Fatalf("planInitAppStartup: %v", err)
 	}
@@ -526,7 +526,8 @@ func TestSkillLoadDirsIncludesAgentsSkillsByDefault(t *testing.T) {
 	projectRoot := t.TempDir()
 	chordHome := t.TempDir()
 	ac := &AppContext{
-		ProjectRoot: projectRoot,
+		ContentRoot: projectRoot,
+		WorkDir:     projectRoot,
 		ConfigHome:  chordHome,
 		Cfg:         &config.Config{},
 	}
@@ -553,7 +554,8 @@ func TestSkillLoadDirsAppendsConfiguredPathsAfterDefaults(t *testing.T) {
 	globalExtra := filepath.Join(t.TempDir(), "global-extra")
 	projectExtra := filepath.Join(t.TempDir(), "project-extra")
 	ac := &AppContext{
-		ProjectRoot: projectRoot,
+		ContentRoot: projectRoot,
+		WorkDir:     projectRoot,
 		ConfigHome:  chordHome,
 		Cfg: &config.Config{Skills: config.SkillsConfig{
 			Paths: []string{globalExtra, projectExtra},
@@ -602,7 +604,8 @@ func TestSkillLoadDirsForWorkDirInsertsChainBeforeHome(t *testing.T) {
 	chordHome := t.TempDir()
 	workDir := filepath.Join(projectRoot, "pkg", "service")
 	ac := &AppContext{
-		ProjectRoot: projectRoot,
+		ContentRoot: projectRoot,
+		WorkDir:     projectRoot,
 		ConfigHome:  chordHome,
 		Cfg:         &config.Config{},
 	}
@@ -620,6 +623,46 @@ func TestSkillLoadDirsForWorkDirInsertsChainBeforeHome(t *testing.T) {
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("skillLoadDirsForWorkDir()[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestSkillLoadDirsPrefersCheckoutOverContentRoot(t *testing.T) {
+	contentRoot := t.TempDir()
+	checkout := t.TempDir()
+	// A linked worktree root carries a .git file rather than a directory.
+	if err := os.WriteFile(filepath.Join(checkout, ".git"), []byte("gitdir: /elsewhere\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	workDir := filepath.Join(checkout, "pkg")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ac := &AppContext{
+		ContentRoot: contentRoot,
+		WorkDir:     workDir,
+		ConfigHome:  t.TempDir(),
+		Cfg:         &config.Config{},
+	}
+
+	// The checkout's own skill dirs come first, then its .agents/skills chain
+	// down to workDir, then the content root as the fallback for gitignored
+	// project skills the checkout does not contain.
+	got := skillLoadDirs(ac)
+	want := []string{
+		filepath.Join(checkout, ".chord", "skills"),
+		filepath.Join(checkout, ".agents", "skills"),
+		filepath.Join(checkout, "pkg", ".agents", "skills"),
+		filepath.Join(contentRoot, ".chord", "skills"),
+		filepath.Join(contentRoot, ".agents", "skills"),
+		filepath.Join(ac.ConfigHome, "skills"),
+	}
+	if len(got) != len(want) {
+		t.Fatalf("len(skillLoadDirs) = %d, want %d (%v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("skillLoadDirs()[%d] = %q, want %q", i, got[i], want[i])
 		}
 	}
 }
@@ -682,6 +725,7 @@ func newTestAppContext(t *testing.T) *AppContext {
 		sessionDir,
 		"test-model",
 		projectRoot,
+		projectRoot,
 		&config.Config{},
 		nil,
 		mcp.ClientInfo{Name: "chord-test", Version: "test"},
@@ -698,7 +742,8 @@ func newTestAppContext(t *testing.T) *AppContext {
 
 	return &AppContext{
 		Ctx:         context.Background(),
-		ProjectRoot: projectRoot,
+		ContentRoot: projectRoot,
+		WorkDir:     projectRoot,
 		SessionDir:  sessionDir,
 		CtxMgr:      ctxMgr,
 		MainAgent:   mainAgent,

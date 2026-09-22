@@ -236,7 +236,7 @@ func (a *MainAgent) sessionArtifactsDir() string {
 	if strings.TrimSpace(a.sessionDir) == "" {
 		locator, err := config.DefaultPathLocator()
 		if err == nil {
-			if pl, err := locator.LocateProject(a.projectRoot); err == nil {
+			if pl, err := locator.LocateProject(a.contentRoot); err == nil {
 				return pl.ProjectExportsDir
 			}
 		}

@@ -183,23 +183,23 @@ type toolPermissionContext struct {
 }
 
 func evaluateToolPermission(ruleset permission.Ruleset, toolName string, args json.RawMessage) toolPermissionDecision {
-	return evaluateToolPermissionInDir(ruleset, toolName, args, "")
+	return evaluateToolPermissionInDir(ruleset, toolName, args, permission.PathScope{})
 }
 
-// evaluateToolPermissionInDir is the cwd-aware entry point. cwd is the
-// session working directory the tool would execute in (its base dir); when it
-// is non-empty, path-taking tools are matched with EvaluatePath so relative
-// and absolute spellings of the same file converge on one rule. An empty cwd
-// degrades to the plain lexical matching of evaluateToolPermission.
+// evaluateToolPermissionInDir is the scope-aware entry point. scope carries the
+// tool base dir plus the repository's checkout roots, so relative and absolute
+// spellings of one repository file converge on one rule regardless of which
+// checkout the agent stands in. A zero scope degrades to the plain lexical
+// matching of evaluateToolPermission.
 //
 // It evaluates with a zero toolPermissionContext, so the loop-gated done
 // exemption is off. Callers that own the loop state must use
 // evaluateToolPermissionInDirWithContext instead.
-func evaluateToolPermissionInDir(ruleset permission.Ruleset, toolName string, args json.RawMessage, cwd string) toolPermissionDecision {
-	return evaluateToolPermissionInDirWithContext(ruleset, toolName, args, cwd, toolPermissionContext{})
+func evaluateToolPermissionInDir(ruleset permission.Ruleset, toolName string, args json.RawMessage, scope permission.PathScope) toolPermissionDecision {
+	return evaluateToolPermissionInDirWithContext(ruleset, toolName, args, scope, toolPermissionContext{})
 }
 
-func evaluateToolPermissionInDirWithContext(ruleset permission.Ruleset, toolName string, args json.RawMessage, cwd string, pctx toolPermissionContext) toolPermissionDecision {
+func evaluateToolPermissionInDirWithContext(ruleset permission.Ruleset, toolName string, args json.RawMessage, scope permission.PathScope, pctx toolPermissionContext) toolPermissionDecision {
 	toolName = tools.NormalizeName(toolName)
 	decision := toolPermissionDecision{Action: permission.ActionDeny, MatchArgument: "*"}
 	if strings.TrimSpace(toolName) == "" {
@@ -218,9 +218,9 @@ func evaluateToolPermissionInDirWithContext(ruleset permission.Ruleset, toolName
 	unwrapped := llm.UnwrapToolArgs(args)
 	switch toolName {
 	case tools.NameApplyPatch:
-		return evaluateApplyPatchPermissionInDir(ruleset, unwrapped, cwd)
+		return evaluateApplyPatchPermissionInDir(ruleset, unwrapped, scope)
 	case tools.NameDelete:
-		return evaluateDeleteToolPermissionInDir(ruleset, unwrapped, cwd)
+		return evaluateDeleteToolPermissionInDir(ruleset, unwrapped, scope)
 	case tools.NameGlob:
 		return evaluateGlobToolPermission(ruleset, unwrapped)
 	case tools.NameShell:
@@ -237,8 +237,10 @@ func evaluateToolPermissionInDirWithContext(ruleset permission.Ruleset, toolName
 		return toolPermissionDecision{Action: compactContextPermissionAction(ruleset), MatchArgument: "*"}
 	default:
 		arg := extractToolArgument(toolName, unwrapped)
-		if isPathToolPermission(toolName) && strings.TrimSpace(cwd) != "" {
-			decision.Action = normalizeToolPermissionAction(toolName, ruleset.EvaluatePath(toolName, arg, cwd))
+		// EvaluatePath degrades to the plain lexical Evaluate for an empty
+		// scope; non-path tools keep matching their argument lexically.
+		if isPathToolPermission(toolName) {
+			decision.Action = normalizeToolPermissionAction(toolName, ruleset.EvaluatePath(toolName, arg, scope))
 		} else {
 			decision.Action = normalizeToolPermissionAction(toolName, ruleset.Evaluate(toolName, arg))
 		}
@@ -248,7 +250,7 @@ func evaluateToolPermissionInDirWithContext(ruleset permission.Ruleset, toolName
 }
 
 // isPathToolPermission reports whether a tool takes a filesystem path as its
-// matching argument, so its rules participate in cwd-relative matching.
+// matching argument, so its rules participate in path-scope matching.
 func isPathToolPermission(toolName string) bool {
 	switch tools.NormalizeName(toolName) {
 	case tools.NameRead, tools.NameWrite, tools.NameEdit, tools.NameViewImage:
@@ -258,14 +260,11 @@ func isPathToolPermission(toolName string) bool {
 	}
 }
 
-func evaluateApplyPatchPermissionInDir(ruleset permission.Ruleset, args json.RawMessage, cwd string) toolPermissionDecision {
+func evaluateApplyPatchPermissionInDir(ruleset permission.Ruleset, args json.RawMessage, scope permission.PathScope) toolPermissionDecision {
 	targets, err := tools.ApplyPatchDisplayTargets(args)
 	if err != nil {
 		arg := extractToolArgument(tools.NameApplyPatch, args)
-		if strings.TrimSpace(cwd) != "" {
-			return toolPermissionDecision{Action: ruleset.EvaluatePath(tools.NameApplyPatch, arg, cwd), MatchArgument: arg}
-		}
-		return toolPermissionDecision{Action: ruleset.Evaluate(tools.NameApplyPatch, arg), MatchArgument: arg}
+		return toolPermissionDecision{Action: ruleset.EvaluatePath(tools.NameApplyPatch, arg, scope), MatchArgument: arg}
 	}
 	paths := make([]string, 0, len(targets)*2)
 	deletePaths := make(map[string]bool)
@@ -297,25 +296,14 @@ func evaluateApplyPatchPermissionInDir(ruleset permission.Ruleset, args json.Raw
 	}
 	items := make([]permissionAggregateItem, 0, len(paths))
 	for _, path := range dedupeStrings(paths) {
-		var action permission.Action
-		if strings.TrimSpace(cwd) != "" {
-			action = ruleset.EvaluatePath(tools.NameApplyPatch, path, cwd)
-		} else {
-			action = ruleset.Evaluate(tools.NameApplyPatch, path)
-		}
+		action := ruleset.EvaluatePath(tools.NameApplyPatch, path, scope)
 		// apply_patch subsumes write/delete for patch-native models. Preserve any
 		// explicit operation-specific threshold when those standalone tools are
 		// hidden; wildcard defaults remain represented by the patch evaluation.
 		for _, toolName := range []string{tools.NameWrite, tools.NameDelete} {
 			applies := toolName == tools.NameWrite && writePaths[path] || toolName == tools.NameDelete && deletePaths[path]
 			if applies {
-				var match permission.MatchResult
-				if strings.TrimSpace(cwd) != "" {
-					match = ruleset.LastSpecificToolMatchPath(toolName, path, cwd)
-				} else {
-					match = ruleset.LastSpecificToolMatch(toolName, path)
-				}
-				if match.Found {
+				if match := ruleset.LastSpecificToolMatchPath(toolName, path, scope); match.Found {
 					action = permission.StricterAction(action, match.Rule.Action)
 				}
 			}
@@ -332,28 +320,19 @@ func evaluateApplyPatchPermissionInDir(ruleset permission.Ruleset, args json.Raw
 	return aggregatePermissionItems(items, permission.ActionAllow, "*")
 }
 
-func evaluateDeleteToolPermissionInDir(ruleset permission.Ruleset, args json.RawMessage, cwd string) toolPermissionDecision {
+func evaluateDeleteToolPermissionInDir(ruleset permission.Ruleset, args json.RawMessage, scope permission.PathScope) toolPermissionDecision {
 	decision := toolPermissionDecision{Action: permission.ActionDeny, MatchArgument: "*"}
 	req, err := tools.DecodeDeleteRequest(args)
 	if err != nil {
 		arg := extractToolArgument(tools.NameDelete, args)
-		if strings.TrimSpace(cwd) != "" {
-			decision.Action = ruleset.EvaluatePath(tools.NameDelete, arg, cwd)
-		} else {
-			decision.Action = ruleset.Evaluate(tools.NameDelete, arg)
-		}
+		decision.Action = ruleset.EvaluatePath(tools.NameDelete, arg, scope)
 		decision.MatchArgument = arg
 		return decision
 	}
 
 	items := make([]permissionAggregateItem, 0, len(req.Paths))
 	for _, path := range req.Paths {
-		var action permission.Action
-		if strings.TrimSpace(cwd) != "" {
-			action = ruleset.EvaluatePath(tools.NameDelete, path, cwd)
-		} else {
-			action = ruleset.Evaluate(tools.NameDelete, path)
-		}
+		action := ruleset.EvaluatePath(tools.NameDelete, path, scope)
 		item := permissionAggregateItem{
 			Argument: path,
 			Action:   action,

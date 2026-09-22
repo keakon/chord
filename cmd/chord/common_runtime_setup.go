@@ -97,11 +97,11 @@ func wireMainAgentRuntime(ctx context.Context, mainAgent *agent.MainAgent, reg *
 			// event-loop validation applies (agent.CompactContinuationStateMaxTokens);
 			// estimation is inherited from the agent's calibrated estimator at
 			// validation time and falls back to the conservative bytes/3
-			// default here. ProjectRoot anchors state_files spellings the same
+			// default here. WorkDir anchors state_files spellings the same
 			// way the file tools' BaseDir does, so the model-facing display
 			// paths and the accepted entries agree.
 			ContinuationStateMaxTokens: agent.CompactContinuationStateMaxTokens,
-			ProjectRoot:                mainAgent.ProjectRoot,
+			WorkDir:                    mainAgent.WorkDir,
 			// Baked at registration so the description (hashed into the
 			// frozen tool surface) stays stable within the session; the
 			// todo-sync guidance only names todo_write when the model can
@@ -159,13 +159,41 @@ func ensureRuntimeLSP(ac *AppContext) {
 		return
 	}
 
-	ac.LSPManager = lsp.NewManager(ac.Cfg, ac.ProjectRoot, nil)
-	ac.Registry.Register(tools.ReadTool{LSP: ac.LSPManager, BaseDir: ac.ProjectRoot})
-	ac.Registry.Register(tools.WriteTool{LSP: ac.LSPManager, BaseDir: ac.ProjectRoot})
-	ac.Registry.Register(tools.ApplyPatchTool{LSP: ac.LSPManager, BaseDir: ac.ProjectRoot})
-	ac.Registry.Register(tools.EditTool{LSP: ac.LSPManager, BaseDir: ac.ProjectRoot})
-	ac.Registry.Register(tools.DeleteTool{LSP: ac.LSPManager, BaseDir: ac.ProjectRoot})
-	ac.Registry.Register(tools.LspTool{LSP: ac.LSPManager, BaseDir: ac.ProjectRoot})
+	ac.LSPManager = lsp.NewManager(ac.Cfg, ac.WorkDir, nil)
+	ac.Registry.Register(tools.ReadTool{LSP: ac.LSPManager, BaseDir: ac.WorkDir})
+	ac.Registry.Register(tools.WriteTool{LSP: ac.LSPManager, BaseDir: ac.WorkDir})
+	ac.Registry.Register(tools.ApplyPatchTool{LSP: ac.LSPManager, BaseDir: ac.WorkDir})
+	ac.Registry.Register(tools.EditTool{LSP: ac.LSPManager, BaseDir: ac.WorkDir})
+	ac.Registry.Register(tools.DeleteTool{LSP: ac.LSPManager, BaseDir: ac.WorkDir})
+	ac.Registry.Register(tools.LspTool{LSP: ac.LSPManager, BaseDir: ac.WorkDir})
+}
+
+// rebindLSPForWorkDir re-roots the session's language servers after a worktree
+// switch. Open clients are closed so diagnostics from the previous checkout are
+// not attributed to the new one, and later requests start servers rooted in
+// workDir. The error is returned to the caller, which surfaces it as a warning
+// without rolling the working directory back.
+func (ac *AppContext) rebindLSPForWorkDir(workDir string) error {
+	if ac == nil || ac.LSPManager == nil {
+		return nil
+	}
+	workDir = strings.TrimSpace(workDir)
+	if workDir == "" {
+		return nil
+	}
+	ctx := ac.Ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	stopCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := ac.LSPManager.RebindToProjectRoot(stopCtx, workDir); err != nil {
+		return err
+	}
+	if ac.MainAgent != nil {
+		ac.MainAgent.NotifyEnvStatusUpdated()
+	}
+	return nil
 }
 
 func configureRuntimeStateProviders(ac *AppContext) {
@@ -190,8 +218,8 @@ func configureRuntimeStateProviders(ac *AppContext) {
 			if ac.LSPManager == nil {
 				return
 			}
-			ac.LSPManager.RestoreReportedDiagnostics(lsp.RebuildReportedDiagnosticsFromMessages(msgs, ac.ProjectRoot))
-			ac.LSPManager.RebuildTouchedPaths(agent.RebuildTouchedPathsFromMessages(msgs, ac.ProjectRoot))
+			ac.LSPManager.RestoreReportedDiagnostics(lsp.RebuildReportedDiagnosticsFromMessages(msgs, ac.WorkDir))
+			ac.LSPManager.RebuildTouchedPaths(agent.RebuildTouchedPathsFromMessages(msgs, ac.WorkDir))
 			ac.LSPManager.RebuildReviewSnapshots(lsp.RebuildReviewSnapshotsFromMessages(msgs))
 			ac.MainAgent.NotifyEnvStatusUpdated()
 		},

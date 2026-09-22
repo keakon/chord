@@ -398,7 +398,7 @@ func (a *MainAgent) newMainLLMStreamReducer(llmClient *llm.Client, selectedRef, 
 		registry:         a.tools,
 		ruleset:          a.effectiveRuleset,
 		syncHookGate:     a.syncToolHooksConfigured,
-		toolBaseDir:      a.projectRoot,
+		pathScope:        a.effectivePathScope(),
 		visibleToolNames: a.mainVisibleLLMToolNames,
 		emit:             a.emitToTUI,
 		flushBeforeTool: func() {

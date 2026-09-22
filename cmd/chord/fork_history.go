@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -608,7 +609,7 @@ func forkResumeSessionByCurrentProject(sid string, target int) (newSID string, c
 	if err != nil {
 		return "", 0, 0, fmt.Errorf("resolve path locator: %w", err)
 	}
-	loc, err := resolveSessionInCurrentProject(pl, cwd, sid)
+	loc, err := resolveSessionInProject(context.Background(), pl, resolveContentRoot(context.Background(), cwd), sid)
 	if err != nil {
 		return "", 0, 0, err
 	}

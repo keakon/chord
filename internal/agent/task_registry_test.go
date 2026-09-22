@@ -787,7 +787,7 @@ func TestFindDuplicateOrConflictingTaskAllowsNoFileWriteToolRoleAlongsideUnspeci
 func TestFindDuplicateOrConflictingTaskCanonicalizesScopeAliases(t *testing.T) {
 	root := t.TempDir()
 	a := newTestMainAgent(t, root)
-	a.projectRoot = root
+	a.contentRoot = root
 	// Scope comparisons resolve relative declarations against the agent's
 	// working directory (writeScopeBaseDir), so the fixture must make the
 	// cached workdir the same root the absolute path below names.

@@ -34,7 +34,7 @@ func newControllableTestSubAgent(t *testing.T, parent *MainAgent, taskID string)
 		ParentCtx:    ctx,
 		Cancel:       cancel,
 		BaseTools:    parent.tools,
-		WorkDir:      parent.projectRoot,
+		WorkDir:      parent.contentRoot,
 		SessionDir:   parent.sessionDir,
 		ModelName:    "test-model",
 	})
@@ -2492,7 +2492,7 @@ func TestRehydratePreservesConfiguredOrchestrationAndWorkDir(t *testing.T) {
 		SubAgentQueueBytes:    12345,
 		SubAgentCompactUsage:  0.65,
 	}}
-	wantWorkDir := filepath.Join(a.projectRoot, "workspace")
+	wantWorkDir := filepath.Join(a.contentRoot, "workspace")
 	a.cachedWorkDir = wantWorkDir
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
 		"restorer": {
@@ -2535,7 +2535,7 @@ func TestRehydratePreservesConfiguredOrchestrationAndWorkDir(t *testing.T) {
 // because the role's tool surface is the boundary, not a declared path list.
 func TestRehydrateAcceptsEmptyScopeForNoFileWriteToolRole(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.cachedWorkDir = a.projectRoot
+	a.cachedWorkDir = a.contentRoot
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
 		"reviewer": {
 			Name:   "reviewer",
@@ -2582,7 +2582,7 @@ func TestRehydrateAcceptsEmptyScopeForNoFileWriteToolRole(t *testing.T) {
 func TestCreateSubAgentUsesCachedWorkDir(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 1)
-	wantWorkDir := filepath.Join(a.projectRoot, "workspace")
+	wantWorkDir := filepath.Join(a.contentRoot, "workspace")
 	a.cachedWorkDir = wantWorkDir
 
 	handle, err := a.CreateSubAgent(context.Background(), tools.SubAgentRequest{Description: "use stable workspace", AgentType: "worker"})

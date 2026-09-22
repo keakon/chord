@@ -792,7 +792,7 @@ func TestMutatingShellInvalidationSkipsReadOnlyShells(t *testing.T) {
 	}
 	registry := tools.NewRegistry()
 	registry.Register(tools.NewShellTool("bash"))
-	a := &MainAgent{tools: registry, projectRoot: projectRoot}
+	a := &MainAgent{tools: registry, contentRoot: projectRoot}
 	messagesFor := func(callID, shellCommand string) []message.Message {
 		return []message.Message{
 			{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "read", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
@@ -7455,7 +7455,7 @@ func TestRefreshEvidenceValidityInvalidatesChangedToolFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte("before\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	a := &MainAgent{projectRoot: projectRoot, tools: tools.NewRegistry(), ctxMgr: ctxmgr.NewManager(10000, 1000)}
+	a := &MainAgent{contentRoot: projectRoot, tools: tools.NewRegistry(), ctxMgr: ctxmgr.NewManager(10000, 1000)}
 	a.evidence.add(evidenceItem{Kind: evidenceToolDiff, SourceID: "call-1", Excerpt: "diff", Revisions: map[string]string{path: "bad-revision"}, Validity: evidenceValidityValid})
 	a.refreshEvidenceValidity()
 	if got := a.evidence.snapshot()[0].Validity; got != evidenceValidityInvalidated {
@@ -7480,7 +7480,7 @@ func TestRefreshEvidenceValidityRehashesOnlyWhenFileChanges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("hash %s: %v", path, err)
 	}
-	a := &MainAgent{projectRoot: projectRoot, tools: tools.NewRegistry(), ctxMgr: ctxmgr.NewManager(10000, 1000)}
+	a := &MainAgent{contentRoot: projectRoot, tools: tools.NewRegistry(), ctxMgr: ctxmgr.NewManager(10000, 1000)}
 	a.evidence.add(evidenceItem{Kind: evidenceToolDiff, SourceID: "call-1", Excerpt: "diff", Revisions: map[string]string{path: hash}, Validity: evidenceValidityValid})
 
 	a.refreshEvidenceValidity()
@@ -7607,7 +7607,7 @@ func TestRefreshEvidenceValidityInvalidatesReplacedSymlinkTarget(t *testing.T) {
 	if err := os.WriteFile(tracked, []byte("v1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	a := &MainAgent{projectRoot: projectRoot, tools: tools.NewRegistry(), ctxMgr: ctxmgr.NewManager(10000, 1000)}
+	a := &MainAgent{contentRoot: projectRoot, tools: tools.NewRegistry(), ctxMgr: ctxmgr.NewManager(10000, 1000)}
 	hash, _, _, err := verifiedCurrentFileHash(tracked)
 	if err != nil {
 		t.Fatalf("hash %s: %v", tracked, err)

@@ -23,7 +23,7 @@ func TestRestoreTrackedFileStateDurableReadAllowsEdit(t *testing.T) {
 
 	a := newRestoreEditTestAgent(t, projectRoot)
 	msgs := restoreReadMessages(t, "read-1", path, computeFileHash(path), nil)
-	result := restoreTrackedFileStateFromMessages(a.fileTrack, a.instanceID, a.projectRoot, msgs)
+	result := restoreTrackedFileStateFromMessages(a.fileTrack, a.instanceID, a.contentRoot, msgs)
 	if result.RestoredUsable != 1 || result.RestoredStale != 0 {
 		t.Fatalf("restore result = %+v, want one durable usable restore", result)
 	}
@@ -61,7 +61,7 @@ func TestRestoreTrackedFileStateDurableHashMismatchRestoresStaleSentinel(t *test
 
 	a := newRestoreEditTestAgent(t, projectRoot)
 	msgs := restoreReadMessages(t, "read-1", path, historicalHash, nil)
-	result := restoreTrackedFileStateFromMessages(a.fileTrack, a.instanceID, a.projectRoot, msgs)
+	result := restoreTrackedFileStateFromMessages(a.fileTrack, a.instanceID, a.contentRoot, msgs)
 	if result.RestoredStale != 1 || result.RestoredUsable != 0 {
 		t.Fatalf("restore result = %+v, want one stale durable restore", result)
 	}
@@ -79,7 +79,7 @@ func TestRestoreTrackedFileStateFailedReadDoesNotRestoreUsableRead(t *testing.T)
 		restoreAssistantCall(t, "read-1", tools.NameRead, map[string]any{"path": path}, nil),
 		{Role: "tool", ToolCallID: "read-1", ToolStatus: string(ToolResultStatusError), Content: "Error: failed"},
 	}
-	result := restoreTrackedFileStateFromMessages(a.fileTrack, a.instanceID, a.projectRoot, msgs)
+	result := restoreTrackedFileStateFromMessages(a.fileTrack, a.instanceID, a.contentRoot, msgs)
 	if result.RestoredUsable != 0 {
 		t.Fatalf("restore result = %+v, want no usable restore", result)
 	}
@@ -106,7 +106,7 @@ func TestRestoreTrackedFileStatePartialReadWriteBacksUpAndContinues(t *testing.T
 			FileState:  &message.ToolFileState{Reads: []message.TrackedFileState{{Path: path, SHA256: computeFileHash(path), Exists: true}}},
 		},
 	}
-	result := restoreTrackedFileStateFromMessages(a.fileTrack, a.instanceID, a.projectRoot, msgs)
+	result := restoreTrackedFileStateFromMessages(a.fileTrack, a.instanceID, a.contentRoot, msgs)
 	if result.RestoredUsable != 1 || result.RestoredStale != 0 {
 		t.Fatalf("restore result = %+v, want committed snapshot restored", result)
 	}
@@ -148,7 +148,7 @@ func TestRestoreTrackedFileStatePartialReadPreservesEarlierWholeObservation(t *t
 			FileState:  &message.ToolFileState{Reads: []message.TrackedFileState{{Path: path, SHA256: hash, Exists: true}}},
 		},
 	)
-	restoreTrackedFileStateFromMessages(a.fileTrack, a.instanceID, a.projectRoot, msgs)
+	restoreTrackedFileStateFromMessages(a.fileTrack, a.instanceID, a.contentRoot, msgs)
 	observation := a.fileTrack.Observation(path, a.instanceID, hash)
 	if !observation.Observed || !observation.Current {
 		t.Fatalf("observation = %+v, want current whole-file observation preserved", observation)
@@ -180,7 +180,7 @@ func TestRestoreTrackedFileStateEffectiveArgsWinOverOriginalArgs(t *testing.T) {
 			FileState: &message.ToolFileState{Reads: []message.TrackedFileState{{Path: realPath, SHA256: computeFileHash(realPath), Exists: true}}},
 		},
 	}
-	result := restoreTrackedFileStateFromMessages(a.fileTrack, a.instanceID, a.projectRoot, msgs)
+	result := restoreTrackedFileStateFromMessages(a.fileTrack, a.instanceID, a.contentRoot, msgs)
 	if result.RestoredUsable != 1 {
 		t.Fatalf("restore result = %+v, want real path restored", result)
 	}
@@ -199,7 +199,7 @@ func TestRestoreTrackedFileStateImportedProvenanceDoesNotRestoreUsableRead(t *te
 	a := newRestoreEditTestAgent(t, projectRoot)
 	imported := &message.MessageProvenance{Source: "import:claude", Imported: true}
 	msgs := restoreReadMessages(t, "read-1", path, computeFileHash(path), imported)
-	result := restoreTrackedFileStateFromMessages(a.fileTrack, a.instanceID, a.projectRoot, msgs)
+	result := restoreTrackedFileStateFromMessages(a.fileTrack, a.instanceID, a.contentRoot, msgs)
 	if result.RestoredUsable != 0 {
 		t.Fatalf("restore result = %+v, want no imported restore", result)
 	}
@@ -226,7 +226,7 @@ func TestRestoreTrackedFileStateReadThenDeleteDoesNotAuthorizeRecreatedPath(t *t
 			FileState:  &message.ToolFileState{Deletes: []message.TrackedFileState{{Path: path, Exists: false}}},
 		},
 	)
-	result := restoreTrackedFileStateFromMessages(a.fileTrack, a.instanceID, a.projectRoot, msgs)
+	result := restoreTrackedFileStateFromMessages(a.fileTrack, a.instanceID, a.contentRoot, msgs)
 	if result.RestoredUsable != 0 || result.RestoredStale != 0 {
 		t.Fatalf("restore result = %+v, want delete to remove candidate", result)
 	}
@@ -255,7 +255,7 @@ func TestRestoreTrackedFileStateReadThenEditUsesPostWriteHash(t *testing.T) {
 			FileState:  &message.ToolFileState{Writes: []message.TrackedFileState{{Path: path, SHA256: postHash, Exists: true}}},
 		},
 	)
-	result := restoreTrackedFileStateFromMessages(a.fileTrack, a.instanceID, a.projectRoot, msgs)
+	result := restoreTrackedFileStateFromMessages(a.fileTrack, a.instanceID, a.contentRoot, msgs)
 	if result.RestoredUsable != 1 || result.RestoredStale != 0 {
 		t.Fatalf("restore result = %+v, want post-write hash usable", result)
 	}
@@ -292,7 +292,7 @@ func TestRestoreTrackedFileStateReadThenPatchUsesPostWriteHash(t *testing.T) {
 			FileState:  &message.ToolFileState{Writes: []message.TrackedFileState{{Path: path, SHA256: postHash, Exists: true}}},
 		},
 	)
-	result := restoreTrackedFileStateFromMessages(a.fileTrack, a.instanceID, a.projectRoot, msgs)
+	result := restoreTrackedFileStateFromMessages(a.fileTrack, a.instanceID, a.contentRoot, msgs)
 	if result.RestoredUsable != 1 || result.RestoredStale != 0 {
 		t.Fatalf("restore result = %+v, want post-write hash usable", result)
 	}
@@ -318,7 +318,7 @@ func TestRestoreTrackedFileStatePartialPatchErrorUsesCommittedFileState(t *testi
 			FileState:  &message.ToolFileState{Writes: []message.TrackedFileState{{Path: path, SHA256: postHash, Exists: true}}},
 		},
 	)
-	result := restoreTrackedFileStateFromMessages(a.fileTrack, a.instanceID, a.projectRoot, msgs)
+	result := restoreTrackedFileStateFromMessages(a.fileTrack, a.instanceID, a.contentRoot, msgs)
 	if result.RestoredUsable != 1 || result.RestoredStale != 0 {
 		t.Fatalf("restore result = %+v, want committed partial write restored", result)
 	}
@@ -423,7 +423,7 @@ func TestRestoreTrackedFileStateUsesPersistedHookOnlyEffectiveArgs(t *testing.T)
 	}
 
 	b := newRestoreEditTestAgent(t, projectRoot)
-	result := restoreTrackedFileStateFromMessages(b.fileTrack, b.instanceID, b.projectRoot, restored)
+	result := restoreTrackedFileStateFromMessages(b.fileTrack, b.instanceID, b.contentRoot, restored)
 	if result.RestoredUsable != 1 {
 		t.Fatalf("restore result = %+v, want one usable restore from persisted effective args", result)
 	}
@@ -490,7 +490,7 @@ func TestRestoreTrackedFileStateSkipReasonCounters(t *testing.T) {
 		{Role: "tool", ToolCallID: "good-read", ToolStatus: string(ToolResultStatusSuccess), Content: "ok", FileState: &message.ToolFileState{Reads: []message.TrackedFileState{{Path: goodPath, SHA256: goodHash, Exists: true}}}},
 	}
 
-	result := restoreTrackedFileStateFromMessages(a.fileTrack, a.instanceID, a.projectRoot, msgs)
+	result := restoreTrackedFileStateFromMessages(a.fileTrack, a.instanceID, a.contentRoot, msgs)
 	if result.RestoredUsable != 1 {
 		t.Fatalf("restore result = %+v, want one usable restore", result)
 	}

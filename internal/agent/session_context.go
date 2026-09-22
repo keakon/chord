@@ -16,15 +16,21 @@ import (
 // The system prompt itself is cache-stable framing: it still varies with
 // Memory load and tool visibility, not with environment or time.
 type SessionEnvSnapshot struct {
-	WorkDir  string
-	Platform string
-	VenvRel  string
-	Date     string
+	WorkDir string
+	// WorktreeName and WorktreeBranch identify the chord-managed worktree the
+	// agent is currently working in, empty in a main checkout. They are part
+	// of the environment block so the model can tell which checkout its
+	// relative paths belong to.
+	WorktreeName   string
+	WorktreeBranch string
+	Platform       string
+	VenvRel        string
+	Date           string
 }
 
 // hasEnv reports whether the snapshot carries any environment field.
 func (e SessionEnvSnapshot) hasEnv() bool {
-	return e.WorkDir != "" || e.Platform != "" || e.VenvRel != "" || e.Date != ""
+	return e.WorkDir != "" || e.Platform != "" || e.VenvRel != "" || e.Date != "" || e.WorktreeName != ""
 }
 
 // renderEnvBlock renders the <env> block using the same format the system
@@ -38,15 +44,23 @@ func (e SessionEnvSnapshot) renderEnvBlock() string {
 	if workDir == "" {
 		workDir = "unknown"
 	}
+	worktreeLine := ""
+	if e.WorktreeName != "" {
+		worktreeLine = fmt.Sprintf("\n  Worktree: %s", e.WorktreeName)
+		if e.WorktreeBranch != "" {
+			worktreeLine += fmt.Sprintf(" (branch %s)", e.WorktreeBranch)
+		}
+		worktreeLine += "\n  This is a separate checkout: relative paths resolve inside it, and the main checkout is a different directory."
+	}
 	venvLine := ""
 	if e.VenvRel != "" {
 		venvLine = fmt.Sprintf("\n  Python virtual environment: %s\n  When running Python commands, prefer the interpreter from this virtual environment.", e.VenvRel)
 	}
 	return fmt.Sprintf(`<env>
-  Working directory: %s
+  Working directory: %s%s
   Platform: %s
   Today's date: %s%s
-</env>`, workDir, e.Platform, e.Date, venvLine)
+</env>`, workDir, worktreeLine, e.Platform, e.Date, venvLine)
 }
 
 // buildSessionContextReminder constructs a meta user message that carries
@@ -96,11 +110,14 @@ func (a *MainAgent) sessionEnvSnapshot() SessionEnvSnapshot {
 	if venvPath != "" && workDir != "" {
 		venvRel = displayPathFromWorkDir(workDir, venvPath)
 	}
+	state := a.workDirState.load()
 	return SessionEnvSnapshot{
-		WorkDir:  workDir,
-		Platform: runtime.GOOS + "/" + runtime.GOARCH,
-		VenvRel:  venvRel,
-		Date:     time.Now().Format("Mon Jan 2 2006"),
+		WorkDir:        workDir,
+		WorktreeName:   state.WorktreeID,
+		WorktreeBranch: state.Branch,
+		Platform:       runtime.GOOS + "/" + runtime.GOARCH,
+		VenvRel:        venvRel,
+		Date:           time.Now().Format("Mon Jan 2 2006"),
 	}
 }
 
@@ -195,9 +212,48 @@ func (a *MainAgent) injectSessionContextReminder(messages []message.Message) []m
 	return injectMetaUserReminder(messages, *ptr)
 }
 
+// sessionEnvSnapshot is the SubAgent counterpart of MainAgent.sessionEnvSnapshot.
+// The working directory and worktree identity come from the live binding, so a
+// worktree switch is reflected without rebuilding the agent.
+func (s *SubAgent) sessionEnvSnapshot() SessionEnvSnapshot {
+	workDir := s.effectiveToolBaseDir()
+	venvRel := ""
+	if s.venvPath != "" && workDir != "" {
+		venvRel = displayPathFromWorkDir(workDir, s.venvPath)
+	}
+	state := s.workDirState.load()
+	return SessionEnvSnapshot{
+		WorkDir:        workDir,
+		WorktreeName:   state.WorktreeID,
+		WorktreeBranch: state.Branch,
+		Platform:       runtime.GOOS + "/" + runtime.GOARCH,
+		VenvRel:        venvRel,
+		Date:           time.Now().Format("Mon Jan 2 2006"),
+	}
+}
+
+// refreshSessionContextReminder rebuilds the SubAgent's cached reminder from
+// the live environment and the construction-frozen AGENTS.md. Construction is
+// the SubAgent's only session head, but a worktree switch moves the working
+// directory, so the reminder is rebuilt on that switch too: without it every
+// later request would keep stating the checkout the worker left. Only the
+// reminder is rebuilt — the system prompt stays frozen, cache-stable framing.
+func (s *SubAgent) refreshSessionContextReminder() {
+	content := buildSessionContextReminder(s.sessionEnvSnapshot(), s.agentsMD)
+	if content == "" {
+		s.cachedSessionReminderContent.Store(nil)
+		return
+	}
+	s.cachedSessionReminderContent.Store(&content)
+}
+
 // injectSessionContextReminder is the SubAgent counterpart: same every-request
-// contract as MainAgent, with content built once at construction (the
-// SubAgent's only session-head) instead of refreshed on session-head resets.
+// contract as MainAgent, with content rebuilt from the live environment at
+// construction and on every worktree switch instead of on session-head resets.
 func (s *SubAgent) injectSessionContextReminder(messages []message.Message) []message.Message {
-	return injectMetaUserReminder(messages, s.cachedSessionReminderContent)
+	ptr := s.cachedSessionReminderContent.Load()
+	if ptr == nil {
+		return messages
+	}
+	return injectMetaUserReminder(messages, *ptr)
 }

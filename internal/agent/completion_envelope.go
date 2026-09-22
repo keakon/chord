@@ -53,13 +53,27 @@ func normalizeCompletionEnvelope(env *CompletionEnvelope) *CompletionEnvelope {
 	out.KnownRisks = normalizeStringList(out.KnownRisks)
 	out.FollowUpRecommended = normalizeStringList(out.FollowUpRecommended)
 	out.Artifacts = tools.NormalizeArtifactRefs(out.Artifacts)
+	if out.Worktree != nil {
+		wt := *out.Worktree
+		wt.Name = strings.TrimSpace(wt.Name)
+		wt.Branch = strings.TrimSpace(wt.Branch)
+		wt.Path = strings.TrimSpace(wt.Path)
+		wt.Base = strings.TrimSpace(wt.Base)
+		wt.DiffStat = strings.TrimSpace(wt.DiffStat)
+		wt.DiffError = strings.TrimSpace(wt.DiffError)
+		if wt.Name == "" && wt.Path == "" && wt.Branch == "" {
+			out.Worktree = nil
+		} else {
+			out.Worktree = &wt
+		}
+	}
 	out.ResultType = strings.TrimSpace(out.ResultType)
 	out.Result = append(json.RawMessage(nil), bytes.TrimSpace(out.Result)...)
 	if out.ResultRef != nil {
 		ref := *out.ResultRef
 		out.ResultRef = &ref
 	}
-	if out.Summary == "" && len(out.FilesChanged) == 0 && len(out.ReportedFilesChanged) == 0 && len(out.ActualFilesChanged) == 0 && !out.FileAttributionIncomplete && len(out.RemainingLimitations) == 0 && len(out.KnownRisks) == 0 && len(out.FollowUpRecommended) == 0 && len(out.Artifacts) == 0 && out.ResultType == "" && len(out.Result) == 0 && out.ResultRef == nil {
+	if out.Summary == "" && len(out.FilesChanged) == 0 && len(out.ReportedFilesChanged) == 0 && len(out.ActualFilesChanged) == 0 && !out.FileAttributionIncomplete && len(out.RemainingLimitations) == 0 && len(out.KnownRisks) == 0 && len(out.FollowUpRecommended) == 0 && len(out.Artifacts) == 0 && out.Worktree == nil && out.ResultType == "" && len(out.Result) == 0 && out.ResultRef == nil {
 		return nil
 	}
 	return &out

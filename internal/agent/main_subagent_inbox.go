@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -2010,6 +2011,39 @@ func formatSubAgentMailboxInjectionText(msg *SubAgentMailboxMessage) string {
 			if len(refs) > 0 {
 				b.WriteString("\n- artifact_refs: ")
 				b.WriteString(strings.Join(refs, ", "))
+			}
+		}
+		if wt := msg.Completion.Worktree; wt != nil {
+			// The owner must be able to act on the result: say which checkout
+			// holds it, what it branched from, and how much changed.
+			if label := strings.TrimSpace(wt.Name); label != "" {
+				b.WriteString("\n- worktree: ")
+				b.WriteString(label)
+				if branch := strings.TrimSpace(wt.Branch); branch != "" {
+					b.WriteString(" (branch ")
+					b.WriteString(branch)
+					b.WriteString(")")
+				}
+			}
+			if path := strings.TrimSpace(wt.Path); path != "" {
+				b.WriteString("\n- worktree_path: ")
+				b.WriteString(path)
+			}
+			if base := strings.TrimSpace(wt.Base); base != "" {
+				b.WriteString("\n- worktree_base: ")
+				b.WriteString(base)
+			}
+			if wt.Generation > 0 {
+				b.WriteString("\n- worktree_generation: ")
+				b.WriteString(strconv.FormatUint(wt.Generation, 10))
+			}
+			if stat := strings.TrimSpace(wt.DiffStat); stat != "" {
+				b.WriteString("\n- worktree_diff_stat:\n  ")
+				b.WriteString(strings.ReplaceAll(stat, "\n", "\n  "))
+			} else if derr := strings.TrimSpace(wt.DiffError); derr != "" {
+				b.WriteString("\n- worktree_diff_stat: unknown (")
+				b.WriteString(derr)
+				b.WriteString(")")
 			}
 		}
 	}

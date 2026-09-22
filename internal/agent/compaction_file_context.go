@@ -110,10 +110,10 @@ func (a *MainAgent) resolveCheckpointFilePath(path string) string {
 	if filepath.IsAbs(path) {
 		return path
 	}
-	if a.projectRoot == "" {
+	if a.effectiveToolBaseDir() == "" {
 		return path
 	}
-	return filepath.Join(a.projectRoot, filepath.FromSlash(path))
+	return filepath.Join(a.effectiveToolBaseDir(), filepath.FromSlash(path))
 }
 
 // resolveCheckpointFileReadPath maps a checkpoint path to the location the
@@ -124,14 +124,14 @@ func (a *MainAgent) resolveCheckpointFilePath(path string) string {
 // A target outside the resolved root is rejected here; os.Root stays the
 // boundary against a symlink swapped in after this check.
 func (a *MainAgent) resolveCheckpointFileReadPath(path string) string {
-	if path == "" || filepath.IsAbs(path) || a.projectRoot == "" {
+	if path == "" || filepath.IsAbs(path) || a.effectiveToolBaseDir() == "" {
 		return ""
 	}
-	resolvedRoot, err := filepath.EvalSymlinks(a.projectRoot)
+	resolvedRoot, err := filepath.EvalSymlinks(a.effectiveToolBaseDir())
 	if err != nil {
 		return ""
 	}
-	resolvedPath, err := filepath.EvalSymlinks(filepath.Join(a.projectRoot, filepath.FromSlash(path)))
+	resolvedPath, err := filepath.EvalSymlinks(filepath.Join(a.effectiveToolBaseDir(), filepath.FromSlash(path)))
 	if err != nil {
 		return ""
 	}
@@ -143,10 +143,10 @@ func (a *MainAgent) resolveCheckpointFileReadPath(path string) string {
 }
 
 func (a *MainAgent) readCheckpointFile(path string) ([]byte, error) {
-	if a == nil || a.projectRoot == "" {
+	if a == nil || a.effectiveToolBaseDir() == "" {
 		return nil, os.ErrInvalid
 	}
-	root, err := os.OpenRoot(a.projectRoot)
+	root, err := os.OpenRoot(a.effectiveToolBaseDir())
 	if err != nil {
 		return nil, err
 	}
@@ -163,8 +163,8 @@ func (a *MainAgent) compactionContinuationFiles(signature string) []string {
 	if a == nil {
 		return nil
 	}
-	declared := extractCompactionStateFiles(signature, a.projectRoot)
-	keyFiles := extractCompactionKeyFiles(signature, a.projectRoot)
+	declared := extractCompactionStateFiles(signature, a.effectiveToolBaseDir())
+	keyFiles := extractCompactionKeyFiles(signature, a.effectiveToolBaseDir())
 	if len(declared) == 0 && len(keyFiles) == 0 {
 		return nil
 	}
@@ -208,7 +208,7 @@ func (a *MainAgent) stateFileInjectableForRead(absPath string) bool {
 	if a.YoloEnabled() {
 		return true
 	}
-	action := a.effectiveRuleset().EvaluatePath(tools.NameRead, absPath, a.projectRoot)
+	action := a.effectiveRuleset().EvaluatePath(tools.NameRead, absPath, a.effectivePathScope())
 	return normalizeToolPermissionAction(tools.NameRead, action) == permission.ActionAllow
 }
 
@@ -220,7 +220,7 @@ func (a *MainAgent) stateFileInjectableForRead(absPath string) bool {
 // it in the stable-prefix shapes would break prefix compatibility on the next
 // request and disable incremental reduction reuse after the first compaction.
 func (a *MainAgent) injectCompactionFileContext(messages []message.Message) ([]message.Message, int) {
-	if len(messages) == 0 || a.projectRoot == "" {
+	if len(messages) == 0 || a.effectiveToolBaseDir() == "" {
 		return messages, -1
 	}
 	checkpointIdx, signature, revisions := a.latestCompactionSummarySignature(messages)

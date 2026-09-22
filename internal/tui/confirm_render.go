@@ -237,7 +237,7 @@ func (m *Model) renderRulePicker(maxWidth int) string {
 			marker = "(●)"
 		}
 		scopeLabel := scopeLabel(scope)
-		scopePath := resolveRuleScopePath(scope, m.usageStatsProjectRoot(), roleName)
+		scopePath := resolveRuleScopePath(scope, m.usageStatsContentRoot(), roleName)
 		scopePathSuffix := ""
 		if scopePath != "" {
 			scopePathSuffix = " (" + scopePath + ")"

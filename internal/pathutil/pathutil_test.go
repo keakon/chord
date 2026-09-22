@@ -1,6 +1,7 @@
 package pathutil
 
 import (
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -224,6 +225,65 @@ func TestNormalizeWithinBase(t *testing.T) {
 			}
 			if got != tt.want {
 				t.Fatalf("NormalizeWithinBase(%q, %q) = %q, want %q", tt.path, tt.baseDir, got, tt.want)
+			}
+		})
+	}
+}
+
+func mustMkdirAll(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// gitMarker simulates the .git entry of a checkout: a directory for a main
+// worktree, a file for a linked worktree.
+func gitMarker(t *testing.T, dir string, linked bool) {
+	t.Helper()
+	mustMkdirAll(t, dir)
+	if linked {
+		if err := os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: /elsewhere\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	mustMkdirAll(t, filepath.Join(dir, ".git"))
+}
+
+func TestCheckoutRoot(t *testing.T) {
+	repo := t.TempDir()
+	gitMarker(t, repo, false)
+	descendant := filepath.Join(repo, "pkg", "a")
+	mustMkdirAll(t, descendant)
+
+	linked := filepath.Join(repo, "wt")
+	gitMarker(t, linked, true)
+	linkedDescendant := filepath.Join(linked, "pkg")
+	mustMkdirAll(t, linkedDescendant)
+
+	noRepo := t.TempDir()
+	limit := filepath.Join(t.TempDir(), "content")
+	limitDescendant := filepath.Join(limit, "pkg")
+	mustMkdirAll(t, limitDescendant)
+
+	tests := []struct {
+		name  string
+		dir   string
+		limit string
+		want  string
+	}{
+		{name: "empty", dir: "", limit: "", want: ""},
+		{name: "checkout root itself", dir: repo, limit: repo, want: repo},
+		{name: "descendant resolves root", dir: descendant, limit: repo, want: repo},
+		{name: "linked worktree wins over outer repo", dir: linkedDescendant, limit: repo, want: linked},
+		{name: "dir outside limit is its own fallback", dir: noRepo, limit: repo, want: noRepo},
+		{name: "bounded fallback to limit", dir: limitDescendant, limit: limit, want: limit},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := CheckoutRoot(tt.dir, tt.limit); got != tt.want {
+				t.Fatalf("CheckoutRoot(%q, %q) = %q, want %q", tt.dir, tt.limit, got, tt.want)
 			}
 		})
 	}

@@ -238,7 +238,8 @@ func TestInjectSessionContextReminderIsStableAcrossRequests(t *testing.T) {
 // first and flipped the prefix shape between request one and two.
 func TestSubAgentInjectSessionContextReminderIsStableAcrossRequests(t *testing.T) {
 	content := "# AGENTS.md instructions\n<INSTRUCTIONS>\nuse tabs\n</INSTRUCTIONS>"
-	s := &SubAgent{cachedSessionReminderContent: content}
+	s := &SubAgent{}
+	s.cachedSessionReminderContent.Store(&content)
 
 	base := []message.Message{
 		{Role: "user", Content: "task"},
@@ -254,7 +255,7 @@ func TestSubAgentInjectSessionContextReminderIsStableAcrossRequests(t *testing.T
 	}
 
 	// Empty content (no AGENTS.md/env for this SubAgent) stays a no-op.
-	s.cachedSessionReminderContent = ""
+	s.cachedSessionReminderContent.Store(nil)
 	if got := s.injectSessionContextReminder(append([]message.Message(nil), base...)); len(got) != len(base) {
 		t.Fatalf("empty reminder content must not inject, got %d messages", len(got))
 	}

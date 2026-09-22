@@ -30,6 +30,7 @@ import (
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/ratelimit"
+	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/worktree"
 )
 
@@ -163,8 +164,10 @@ func newRootCmd() *cobra.Command {
 	rootCmd.Flags().BoolVar(&flagYolo, "yolo", false,
 		"Temporarily bypass main-agent tool permissions except Handoff, Delegate, Cancel, and Done")
 	rootCmd.Flags().StringVarP(&flagWorktree, "worktree", "w", "",
-		"Create or enter a chord-managed git worktree by name (auto-named when empty); session/cache live under the worktree's project key")
+		"Create or enter a chord-managed git worktree by name (auto-named when empty); sessions are shared by every checkout of the repository")
 	rootCmd.Flags().Lookup("worktree").NoOptDefVal = ""
+	rootCmd.Flags().BoolVar(&flagWorktreeResetBranch, "reset-branch", false,
+		"Reset an existing branch that no worktree has checked out to HEAD instead of refusing to recreate it (only with --worktree)")
 
 	rootCmd.AddCommand(newAuthCmd(), newHeadlessCmd(), newACPCmd(), newDoctorCmd(), newCleanupCmd(), newWorktreeCmd(), newResumeCmd(), newImportCmd(), newSessionsCmd())
 	return rootCmd
@@ -238,22 +241,37 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	// --worktree: create/enter the worktree before initApp so the rest of
-	// the startup sees it as the project root. flagWorktreeStartupInfo is
-	// nil when entered via the worktree resume subcommand or another path
-	// that has already prepared the worktree.
+	// Content root and working directory.
 	if plan.PrepareWorktree {
 		wtCtx := cmd.Context()
 		if wtCtx == nil {
 			wtCtx = context.Background()
 		}
-		info, err := prepareStartupWorktree(wtCtx, plan.WorktreeName)
+		info, err := prepareStartupWorktree(wtCtx, plan.WorktreeName, flagWorktreeResetBranch)
 		if err != nil {
 			return err
 		}
 		flagWorktreeStartupInfo = info
 		flagWorktreeStartupMeta = worktreeMetaForInfo(info)
+		flagWorktreeStartupReason = recovery.WorktreeSwitchCreate
 		plan.SessionOptions.NewSessionMeta = flagWorktreeStartupMeta
+	} else if id := strings.TrimSpace(plan.SessionOptions.ResumeID); id != "" {
+		// A session remembers the checkout it was working in. Enter that
+		// worktree before initApp so tools, the LSP root, and git status are
+		// anchored there; an explicit --worktree stays authoritative.
+		wtCtx := cmd.Context()
+		if wtCtx == nil {
+			wtCtx = context.Background()
+		}
+		if info := resumeSessionWorktree(wtCtx, id); info != nil {
+			fmt.Fprintf(os.Stderr, "Resuming session %s in worktree %s (%s)\n", id, info.Name, info.Branch)
+			if err := os.Chdir(info.Path); err != nil {
+				return fmt.Errorf("chdir to worktree %q: %w", info.Name, err)
+			}
+			flagWorktreeStartupInfo = info
+			flagWorktreeStartupMeta = worktreeMetaForInfo(info)
+			flagWorktreeStartupReason = recovery.WorktreeSwitchResume
+		}
 	}
 
 	// pprof: enabled only when CHORD_PPROF_PORT is set (e.g. "6060").
@@ -414,28 +432,28 @@ func activeWorktreeInfo(ac *AppContext) *worktree.Info {
 	if flagWorktreeStartupInfo != nil {
 		return flagWorktreeStartupInfo
 	}
-	if ac == nil || ac.PathLocator == nil || ac.ProjectLocator == nil || strings.TrimSpace(ac.ProjectRoot) == "" {
+	if ac == nil || ac.PathLocator == nil || ac.ProjectLocator == nil || strings.TrimSpace(ac.WorkDir) == "" {
 		return nil
 	}
 	ctx := ac.Ctx
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	mainRoot, err := worktree.GitMainRoot(ctx, ac.ProjectRoot)
+	mainRoot, err := worktree.GitMainRoot(ctx, ac.WorkDir)
 	if err != nil {
 		return nil
 	}
-	if samePath(mainRoot, ac.ProjectRoot) {
+	if samePath(mainRoot, ac.WorkDir) {
 		return nil
 	}
-	repoID := worktree.RepoIDFor(mainRoot)
+	repoID := worktree.ResolveRepoID(ctx, ac.WorkDir, mainRoot)
 	idx, err := worktree.LoadRepoIndex(ac.PathLocator.StateDir, repoID)
 	if err != nil || idx == nil {
 		return nil
 	}
 	for i := range idx.Worktrees {
 		entry := &idx.Worktrees[i]
-		if samePath(entry.Path, ac.ProjectRoot) {
+		if samePath(entry.Path, ac.WorkDir) {
 			return &worktree.Info{
 				Name:     entry.Name,
 				Slug:     entry.Slug,

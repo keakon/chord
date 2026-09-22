@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"os/exec"
@@ -46,6 +47,15 @@ func mustRunStartupGit(t *testing.T, dir string, args ...string) []byte {
 	return out
 }
 
+// writeStartupTestConfig writes a global config.yaml into the test config
+// home so planInitAppStartup can resolve providers and storage paths.
+func writeStartupTestConfig(t *testing.T, body string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(os.Getenv("CHORD_CONFIG_HOME"), "config.yaml"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write global config: %v", err)
+	}
+}
+
 func setupStartupRepo(t *testing.T) string {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
@@ -63,6 +73,132 @@ func setupStartupRepo(t *testing.T) string {
 		t.Fatalf("canonical: %v", err)
 	}
 	return canonical
+}
+
+// TestAbandonedWorktreeSessionsAreReported covers the session stores left
+// behind by chord versions that keyed sessions per checkout: they must be
+// reported (with the sid reachable) instead of the sessions just vanishing.
+func TestAbandonedWorktreeSessionsAreReported(t *testing.T) {
+	repo := setupStartupRepo(t)
+	withTestStateDir(t)
+	chdirForTest(t, repo)
+
+	info := prepareStartupWorktreeForTest(t, context.Background(), "feat-old")
+	pl, err := startupPathLocator()
+	if err != nil {
+		t.Fatalf("startupPathLocator: %v", err)
+	}
+	oldPL, err := pl.LocateProject(info.Path)
+	if err != nil {
+		t.Fatalf("LocateProject(worktree): %v", err)
+	}
+	repoPL, err := pl.LocateProject(repo)
+	if err != nil {
+		t.Fatalf("LocateProject(repo): %v", err)
+	}
+	const sid = "20260101000000000"
+	// One session in the worktree's own store, one in the repository store:
+	// only the former is abandoned.
+	for _, dir := range []string{filepath.Join(oldPL.ProjectSessionsDir, sid), filepath.Join(repoPL.ProjectSessionsDir, "20260101000000001")} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir session dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "main.jsonl"), []byte("{}\n"), 0o600); err != nil {
+			t.Fatalf("write main.jsonl: %v", err)
+		}
+	}
+
+	stores := findAbandonedWorktreeSessions(context.Background(), repo)
+	if len(stores) != 1 {
+		t.Fatalf("findAbandonedWorktreeSessions = %+v, want exactly the worktree store", stores)
+	}
+	store := stores[0]
+	if store.Name != "feat-old" || store.Path != info.Path || store.Count != 1 || store.SessionsDir != oldPL.ProjectSessionsDir {
+		t.Errorf("abandoned store = %+v, want name=feat-old path=%s count=1 dir=%s", store, info.Path, oldPL.ProjectSessionsDir)
+	}
+
+	var buf bytes.Buffer
+	printAbandonedWorktreeSessionsHint(&buf, stores, repoPL.ProjectSessionsDir)
+	hint := buf.String()
+	if !strings.Contains(hint, "feat-old") || !strings.Contains(hint, oldPL.ProjectSessionsDir) || !strings.Contains(hint, repoPL.ProjectSessionsDir) {
+		t.Errorf("hint does not point at the store and the shared store:\n%s", hint)
+	}
+
+	if found, ok := findAbandonedSessionStore(context.Background(), repo, sid); !ok || found != oldPL.ProjectSessionsDir {
+		t.Errorf("findAbandonedSessionStore(%s) = %q, %v; want %q, true", sid, found, ok, oldPL.ProjectSessionsDir)
+	}
+	if _, ok := findAbandonedSessionStore(context.Background(), repo, "20260101999999999"); ok {
+		t.Errorf("findAbandonedSessionStore reported an unknown session")
+	}
+
+	_, err = resolveSessionInProject(context.Background(), pl, repo, sid)
+	if err == nil || !strings.Contains(err.Error(), oldPL.ProjectSessionsDir) {
+		t.Errorf("resolveSessionInProject error = %v, want it to name the abandoned store", err)
+	}
+	if _, err := resolveSessionInProject(context.Background(), pl, repo, "20260101999999999"); err == nil || strings.Contains(err.Error(), oldPL.ProjectSessionsDir) {
+		t.Errorf("resolveSessionInProject error = %v, want a plain not-found error", err)
+	}
+}
+
+// TestWorktreeSessionsShareRepositoryKey verifies the storage half of repo-scoped
+// sessions: planning a session from inside a worktree resolves the repository
+// content root's project key, so --continue there finds the sessions created in
+// the main checkout.
+func TestWorktreeSessionsShareRepositoryKey(t *testing.T) {
+	repo := setupStartupRepo(t)
+	withTestStateDir(t)
+	chdirForTest(t, repo)
+	// planInitAppStartup requires a readable global config.
+	writeStartupTestConfig(t, "paths:\n  state_dir: "+flagStateDir+"\n  cache_dir: "+flagCacheDir+"\n  logs_dir: "+flagLogsDir+"\n  sessions_dir: "+flagSessionsDir+"\n")
+	prepareStartupWorktreeForTest(t, context.Background(), "feat-shared")
+
+	pl, err := startupPathLocator()
+	if err != nil {
+		t.Fatalf("startupPathLocator: %v", err)
+	}
+	repoPL, err := pl.LocateProject(repo)
+	if err != nil {
+		t.Fatalf("LocateProject(repo): %v", err)
+	}
+	const sid = "01HXSHARED000000000001"
+	sessionDir := filepath.Join(repoPL.ProjectSessionsDir, sid)
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sessionDir, "main.jsonl"), []byte(`{"role":"user","content":"hi"}`+"\n"), 0o600); err != nil {
+		t.Fatalf("write main.jsonl: %v", err)
+	}
+
+	// Cwd is the worktree after prepareStartupWorktree.
+	workDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	contentRoot := resolveContentRoot(context.Background(), workDir)
+	if contentRoot != repo {
+		t.Fatalf("resolveContentRoot from worktree = %s, want %s", contentRoot, repo)
+	}
+
+	plan, err := planInitAppStartup(contentRoot, workDir)
+	if err != nil {
+		t.Fatalf("planInitAppStartup: %v", err)
+	}
+	if plan.ProjectLocator.ProjectKey != repoPL.ProjectKey {
+		t.Fatalf("worktree session key = %q, want the repository key %q", plan.ProjectLocator.ProjectKey, repoPL.ProjectKey)
+	}
+
+	sp, err := planSessionStartup(plan.ProjectLocator.ProjectSessionsDir, sessionStartupOptions{ContinueLatest: true})
+	if err != nil {
+		t.Fatalf("planSessionStartup: %v", err)
+	}
+	defer func() {
+		if err := sp.SessionLock.Release(); err != nil {
+			t.Errorf("release session lock: %v", err)
+		}
+	}()
+	if sp.SessionDir != sessionDir {
+		t.Errorf("--continue picked %s, want the repository session %s", sp.SessionDir, sessionDir)
+	}
 }
 
 func TestStartupBranchPrefixUsesProjectOverride(t *testing.T) {
@@ -95,7 +231,7 @@ func prepareStartupWorktreeForTest(t *testing.T, ctx context.Context, name strin
 	var info *worktree.Info
 	output, err := captureStderr(t, func() error {
 		var createErr error
-		info, createErr = prepareStartupWorktree(ctx, name)
+		info, createErr = prepareStartupWorktree(ctx, name, false)
 		return createErr
 	})
 	if err != nil {
@@ -131,12 +267,39 @@ func TestPrepareStartupWorktree_AutoSlug(t *testing.T) {
 	}
 }
 
+// TestPrepareStartupWorktree_RecordsCLIOwner pins the creator identity of a
+// worktree made by the command line. Without the record the worktree is
+// anonymous: `chord worktree list` cannot name its creator after the repo index
+// is dropped, and the plan's `kind ∈ {main, sub, cli}` has no producer for cli.
+func TestPrepareStartupWorktree_RecordsCLIOwner(t *testing.T) {
+	repo := setupStartupRepo(t)
+	withTestStateDir(t)
+	chdirForTest(t, repo)
+
+	info := prepareStartupWorktreeForTest(t, context.Background(), "feat-cli")
+	owner, err := worktree.ReadOwner(context.Background(), info.Path)
+	if err != nil {
+		t.Fatalf("ReadOwner: %v", err)
+	}
+	if owner.Kind != worktree.OwnerKindCLI || owner.SessionID != "" {
+		t.Fatalf("owner = %+v, want a sessionless cli record", owner)
+	}
+	if owner.CreatedAt.IsZero() {
+		t.Error("owner record should carry a creation time")
+	}
+	// The OWNER column reads the worktree's own git metadata, so it still names
+	// the creator when the index is gone (entry == nil) or was rebuilt.
+	if label := worktreeOwnerLabel(context.Background(), info.Path, nil); label != "cli" {
+		t.Errorf("owner label = %q, want cli", label)
+	}
+}
+
 func TestPrepareStartupWorktree_InvalidSlug(t *testing.T) {
 	repo := setupStartupRepo(t)
 	withTestStateDir(t)
 	chdirForTest(t, repo)
 
-	_, err := prepareStartupWorktree(context.Background(), "bad/name")
+	_, err := prepareStartupWorktree(context.Background(), "bad/name", false)
 	if err == nil || !strings.Contains(err.Error(), "forbidden") {
 		t.Errorf("expected slug validation error, got %v", err)
 	}
@@ -153,7 +316,7 @@ func TestPrepareStartupWorktree_FailsOnBadGlobalConfig(t *testing.T) {
 		t.Fatalf("write malformed config: %v", err)
 	}
 
-	_, err := prepareStartupWorktree(context.Background(), "feat-bad-config")
+	_, err := prepareStartupWorktree(context.Background(), "feat-bad-config", false)
 	if err == nil {
 		t.Fatal("prepareStartupWorktree should fail for malformed global config")
 	}
@@ -179,12 +342,14 @@ func TestResolveSessionWorktree_FindsInWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("startupPathLocator: %v", err)
 	}
-	wtPL, err := pl.LocateProject(info.Path)
+	// Sessions live under the repository content root key even when they ran
+	// in a worktree; the worktree itself is recorded in the session metadata.
+	mainPL, err := pl.LocateProject(info.RepoRoot)
 	if err != nil {
 		t.Fatalf("LocateProject: %v", err)
 	}
 	sid := "01HXXTESTSESSION0001"
-	sessionDir := filepath.Join(pl.SessionsRoot, wtPL.ProjectKey, sid)
+	sessionDir := filepath.Join(pl.SessionsRoot, mainPL.ProjectKey, sid)
 	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
 		t.Fatalf("mkdir session dir: %v", err)
 	}
@@ -214,6 +379,9 @@ func TestResolveSessionWorktree_FindsInWorktree(t *testing.T) {
 	if got.Worktree.Name != info.Name || got.Worktree.Path != info.Path {
 		t.Errorf("resolved wrong worktree: got %+v, want name=%s path=%s", got.Worktree, info.Name, info.Path)
 	}
+	if got.ContentRoot != "" {
+		t.Errorf("worktree session should not also carry a content root, got %q", got.ContentRoot)
+	}
 }
 
 func TestResolveSessionWorktree_MainRepo(t *testing.T) {
@@ -238,17 +406,8 @@ func TestResolveSessionWorktree_MainRepo(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	// Manually register repo index with main project so resolveSessionWorktree can find it.
-	repoID := worktree.RepoIDFor(repo)
-	if err := worktree.WithRepoIndexLock(pl.StateDir, repoID, func(idx *worktree.RepoIndex) error {
-		idx.RepoID = repoID
-		idx.MainRepoRoot = repo
-		idx.MainProject = worktree.RepoIndexProject{ProjectKey: mainPL.ProjectKey, ProjectRoot: repo}
-		return nil
-	}); err != nil {
-		t.Fatalf("update repo index: %v", err)
-	}
-
+	// A session stored under the content root key needs no worktree metadata:
+	// resolution hands back the repository root itself.
 	loc, err := resolveSessionWorktree(context.Background(), sid)
 	if err != nil {
 		t.Fatalf("resolveSessionWorktree: %v", err)
@@ -256,8 +415,8 @@ func TestResolveSessionWorktree_MainRepo(t *testing.T) {
 	if loc == nil || loc.Worktree != nil {
 		t.Errorf("main repo session resolved as worktree: %+v", loc)
 	}
-	if loc != nil && loc.MainRepoRoot != repo {
-		t.Errorf("main_root mismatch: got %s, want %s", loc.MainRepoRoot, repo)
+	if loc != nil && loc.ContentRoot != repo {
+		t.Errorf("content root mismatch: got %s, want %s", loc.ContentRoot, repo)
 	}
 }
 
@@ -292,15 +451,15 @@ func TestResolveSessionWorktree_NonGitProject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveSessionWorktree: %v", err)
 	}
-	if loc == nil || loc.ProjectRoot == "" || loc.Worktree != nil || loc.MainRepoRoot != "" {
-		t.Fatalf("expected non-git ProjectRoot resolution, got %+v", loc)
+	if loc == nil || loc.ContentRoot == "" || loc.Worktree != nil {
+		t.Fatalf("expected non-git content root resolution, got %+v", loc)
 	}
 	canonicalProject, err := config.CanonicalProjectRoot(project)
 	if err != nil {
 		t.Fatalf("canonical project: %v", err)
 	}
-	if loc.ProjectRoot != canonicalProject {
-		t.Errorf("ProjectRoot mismatch: got %s, want %s", loc.ProjectRoot, canonicalProject)
+	if loc.ContentRoot != canonicalProject {
+		t.Errorf("content root mismatch: got %s, want %s", loc.ContentRoot, canonicalProject)
 	}
 }
 
@@ -316,24 +475,26 @@ func TestResolveSessionWorktree_NonGitProjectNotFound(t *testing.T) {
 	if strings.Contains(err.Error(), "resolve git main root") || strings.Contains(err.Error(), "not a git repository") {
 		t.Fatalf("non-git project should fall back to current project lookup, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "not found in current project") {
-		t.Fatalf("expected current-project not-found error, got %v", err)
+	if !strings.Contains(err.Error(), "not found in project") {
+		t.Fatalf("expected project not-found error, got %v", err)
 	}
 }
 
 // TestResolveSessionWorktree_FromInsideWorktree verifies that running
-// `chord resume <main-sid>` from inside a worktree directory still
-// reports MainRepoRoot so the resume command can chdir back to the main
-// repo before initApp computes the wrong ProjectKey.
+// `chord resume <main-sid>` from inside a worktree directory still reports
+// the repository content root, so the resume command can chdir back to it
+// instead of computing a worktree-local project key.
 func TestResolveSessionWorktree_FromInsideWorktree(t *testing.T) {
 	repo := setupStartupRepo(t)
 	withTestStateDir(t)
 	chdirForTest(t, repo)
 
-	// Create the worktree first so the repo index has both main + wt.
-	wtInfo := prepareStartupWorktreeForTest(t, context.Background(), "feat-x")
+	// prepareStartupWorktreeForTest chdirs into the new worktree, so the rest
+	// of the test runs from inside it.
+	prepareStartupWorktreeForTest(t, context.Background(), "feat-x")
 
-	// Seed a main-repo session and register the main project in the index.
+	// Seed a session under the content root key, as a main-checkout session
+	// would be stored.
 	pl, err := startupPathLocator()
 	if err != nil {
 		t.Fatalf("startupPathLocator: %v", err)
@@ -350,13 +511,6 @@ func TestResolveSessionWorktree_FromInsideWorktree(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(sessionDir, "main.jsonl"), []byte(`{"role":"user","content":"hi"}`+"\n"), 0o600); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if err := worktree.WithRepoIndexLock(pl.StateDir, wtInfo.RepoID, func(idx *worktree.RepoIndex) error {
-		idx.MainRepoRoot = repo
-		idx.MainProject = worktree.RepoIndexProject{ProjectKey: mainPL.ProjectKey, ProjectRoot: repo}
-		return nil
-	}); err != nil {
-		t.Fatalf("update repo index: %v", err)
-	}
 
 	// Cwd is currently the worktree (prepareStartupWorktree chdir'd).
 	loc, err := resolveSessionWorktree(context.Background(), sid)
@@ -364,9 +518,9 @@ func TestResolveSessionWorktree_FromInsideWorktree(t *testing.T) {
 		t.Fatalf("resolveSessionWorktree from inside worktree: %v", err)
 	}
 	if loc == nil || loc.Worktree != nil {
-		t.Fatalf("expected MainRepoRoot resolution, got %+v", loc)
+		t.Fatalf("expected content root resolution, got %+v", loc)
 	}
-	if loc.MainRepoRoot != repo {
-		t.Errorf("MainRepoRoot mismatch: got %s, want %s", loc.MainRepoRoot, repo)
+	if loc.ContentRoot != repo {
+		t.Errorf("content root mismatch: got %s, want %s", loc.ContentRoot, repo)
 	}
 }

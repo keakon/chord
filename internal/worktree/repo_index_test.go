@@ -40,14 +40,12 @@ func TestSaveLoadRepoIndex_RoundTrip(t *testing.T) {
 	idx := &RepoIndex{
 		RepoID:       repoID,
 		MainRepoRoot: "/repo/main",
-		MainProject:  RepoIndexProject{ProjectKey: "k", ProjectRoot: "/repo/main"},
 	}
 	idx.UpsertWorktree(RepoIndexWorktree{
-		Name:       "feat-a",
-		Slug:       "feat-a",
-		Branch:     "chord/feat-a",
-		Path:       filepath.Join(dir, "wt", "feat-a"),
-		ProjectKey: "wt-key",
+		Name:   "feat-a",
+		Slug:   "feat-a",
+		Branch: "chord/feat-a",
+		Path:   filepath.Join(dir, "wt", "feat-a"),
 	})
 	if err := SaveRepoIndex(dir, idx); err != nil {
 		t.Fatalf("SaveRepoIndex: %v", err)

@@ -69,13 +69,13 @@ type memoryInflight struct {
 // starts the background worker. Called from NewMainAgent before the final
 // refreshSystemPrompt so the stable prompt can include the fixed Memory
 // discipline when a MEMORY.md exists.
-func (a *MainAgent) initMemory(projectRoot string) {
+func (a *MainAgent) initMemory(contentRoot string) {
 	a.memoryMu.Lock()
 	defer a.memoryMu.Unlock()
 	if a.memoryMgr != nil {
 		return
 	}
-	m, err := memory.NewManager(projectRoot, a.pathLocator)
+	m, err := memory.NewManager(contentRoot, a.pathLocator)
 	if err != nil {
 		a.memoryErr = err
 		a.memoryDegraded.Store(true)

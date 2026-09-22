@@ -21,6 +21,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/permission"
+	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -781,12 +782,13 @@ Main role control commands:
 				if wtCtx == nil {
 					wtCtx = context.Background()
 				}
-				info, err := prepareStartupWorktree(wtCtx, flagHeadlessWorktree)
+				info, err := prepareStartupWorktree(wtCtx, flagHeadlessWorktree, flagHeadlessResetBranch)
 				if err != nil {
 					return err
 				}
 				flagWorktreeStartupInfo = info
 				flagWorktreeStartupMeta = worktreeMetaForInfo(info)
+				flagWorktreeStartupReason = recovery.WorktreeSwitchCreate
 			}
 			if flagHeadlessContinue {
 				flagContinueSession = true
@@ -797,6 +799,23 @@ Main role control commands:
 			if flagContinueSession && flagResumeSession != "" {
 				return fmt.Errorf("--continue and --resume are mutually exclusive")
 			}
+			// A resumed session remembers the checkout it was working in.
+			// Enter it before initApp so tools, the LSP root and git status
+			// are anchored there; an explicit --worktree stays authoritative.
+			if flagWorktreeStartupInfo == nil && flagResumeSession != "" {
+				wtCtx := cmd.Context()
+				if wtCtx == nil {
+					wtCtx = context.Background()
+				}
+				if info := resumeSessionWorktree(wtCtx, flagResumeSession); info != nil {
+					if err := os.Chdir(info.Path); err != nil {
+						return fmt.Errorf("chdir to worktree %q: %w", info.Name, err)
+					}
+					flagWorktreeStartupInfo = info
+					flagWorktreeStartupMeta = worktreeMetaForInfo(info)
+					flagWorktreeStartupReason = recovery.WorktreeSwitchResume
+				}
+			}
 			return runHeadless(cmd, nil)
 		},
 	}
@@ -804,8 +823,9 @@ Main role control commands:
 	cmd.Flags().StringVarP(&flagHeadlessDir, "session-dir", "d", "", "Project directory (session directory)")
 	cmd.Flags().BoolVarP(&flagHeadlessContinue, "continue", "c", false, "Continue the latest session")
 	cmd.Flags().StringVarP(&flagHeadlessResume, "resume", "r", "", "Resume a specific session ID")
-	cmd.Flags().StringVarP(&flagHeadlessWorktree, "worktree", "w", "", "Create or enter a chord-managed git worktree by name (auto-named when empty)")
+	cmd.Flags().StringVarP(&flagHeadlessWorktree, "worktree", "w", "", "Create or enter a chord-managed git worktree by name (auto-named when empty); sessions are shared by every checkout of the repository")
 	cmd.Flags().Lookup("worktree").NoOptDefVal = ""
+	cmd.Flags().BoolVar(&flagHeadlessResetBranch, "reset-branch", false, "Reset an existing branch that no worktree has checked out to HEAD instead of refusing to recreate it (only with --worktree)")
 
 	return cmd
 }

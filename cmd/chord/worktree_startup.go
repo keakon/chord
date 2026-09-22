@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/identity"
@@ -42,29 +45,48 @@ func startupPathLocator() (*config.PathLocator, error) {
 	return config.ResolvePathLocator(cfg, startupPathOptions())
 }
 
-// startupBranchPrefix returns the normalized worktree branch prefix from
-// config.yaml (`worktree.branch_prefix`), falling back to the default
-// "chord/" when unset. Invalid config values are logged by the loader and
-// treated as unset.
-func startupBranchPrefix() (string, error) {
+// startupWorktreeConfig returns the merged worktree configuration, applying
+// the same project-config merge as initApp so startup and runtime agree on
+// both the branch prefix and the worktree location. The merge is anchored at
+// the content root: inside a linked worktree the branch's own
+// .chord/config.yaml must not change the prefix or root out from under the
+// CLI management commands.
+func startupWorktreeConfig() (config.WorktreeConfig, error) {
+	var wc config.WorktreeConfig
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return worktree.DefaultBranchPrefix, nil
+			return wc, nil
 		}
-		return "", err
+		return wc, err
 	}
 	if cfg == nil {
-		return worktree.DefaultBranchPrefix, nil
+		return wc, nil
 	}
 	if cwd, cwdErr := os.Getwd(); cwdErr == nil {
-		_, mergedCfg, mergeErr := config.MergeProjectConfig(cfg, config.ProjectConfigPath(cwd))
+		contentRoot := resolveContentRoot(context.Background(), cwd)
+		if strings.TrimSpace(contentRoot) == "" {
+			contentRoot = cwd
+		}
+		_, mergedCfg, mergeErr := config.MergeProjectConfig(cfg, config.ProjectConfigPath(contentRoot))
 		if mergeErr != nil {
-			return "", mergeErr
+			return wc, mergeErr
 		}
 		cfg = mergedCfg
 	}
-	return worktree.NormalizeBranchPrefix(cfg.Worktree.BranchPrefix)
+	return cfg.Worktree, nil
+}
+
+// startupBranchPrefix returns the normalized worktree branch prefix from
+// config.yaml (`worktree.branch_prefix`), falling back to the default "chord/"
+// when unset. Invalid config values are logged by the loader and treated as
+// unset.
+func startupBranchPrefix() (string, error) {
+	wc, err := startupWorktreeConfig()
+	if err != nil {
+		return "", err
+	}
+	return worktree.NormalizeBranchPrefix(wc.BranchPrefix)
 }
 
 // prepareStartupWorktree creates or reuses a chord-managed worktree for
@@ -72,8 +94,9 @@ func startupBranchPrefix() (string, error) {
 // into the worktree, and returns Info describing it. Callers should
 // build a recovery.SessionMeta from the returned Info and pass it via
 // sessionStartupOptions.NewSessionMeta so new sessions remember their
-// worktree provenance.
-func prepareStartupWorktree(ctx context.Context, name string) (*worktree.Info, error) {
+// worktree provenance. resetBranch allows resetting a leftover branch of a
+// removed worktree; without it such a branch is refused.
+func prepareStartupWorktree(ctx context.Context, name string, resetBranch bool) (*worktree.Info, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		name = worktree.GenerateAutoSlug(time.Now())
@@ -85,7 +108,11 @@ func prepareStartupWorktree(ctx context.Context, name string) (*worktree.Info, e
 	if err != nil {
 		return nil, fmt.Errorf("resolve storage paths: %w", err)
 	}
-	branchPrefix, err := startupBranchPrefix()
+	wc, err := startupWorktreeConfig()
+	if err != nil {
+		return nil, fmt.Errorf("resolve worktree config: %w", err)
+	}
+	branchPrefix, err := worktree.NormalizeBranchPrefix(wc.BranchPrefix)
 	if err != nil {
 		return nil, fmt.Errorf("resolve worktree branch_prefix: %w", err)
 	}
@@ -98,12 +125,19 @@ func prepareStartupWorktree(ctx context.Context, name string) (*worktree.Info, e
 		RepoRoot:     cwd,
 		PathLocator:  pl,
 		BranchPrefix: branchPrefix,
+		Root:         wc.Root,
+		ResetBranch:  resetBranch,
+		// The command line has no session to name, but recording the creator
+		// keeps the worktree identifiable in `chord worktree list` and keeps it
+		// unremovable through the agent tools (the same fail-closed outcome as
+		// having no record at all).
+		Owner: &worktree.Owner{Kind: worktree.OwnerKindCLI, CreatedAt: time.Now().UTC()},
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	if err := registerWorktreeInIndex(pl, info); err != nil {
+	if err := worktree.RegisterInIndex(pl, info); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
 	}
 	printWorktreeStartupSummary(info)
@@ -111,38 +145,6 @@ func prepareStartupWorktree(ctx context.Context, name string) (*worktree.Info, e
 		return info, fmt.Errorf("chdir to worktree: %w", err)
 	}
 	return info, nil
-}
-
-// registerWorktreeInIndex inserts/updates the repo index entry for info
-// and stamps last-used. Wrapped in a cross-process lock.
-func registerWorktreeInIndex(pl *config.PathLocator, info *worktree.Info) error {
-	mainPL, mainErr := pl.LocateProject(info.RepoRoot)
-	wtPL, wtErr := pl.LocateProject(info.Path)
-	return worktree.WithRepoIndexLock(pl.StateDir, info.RepoID, func(idx *worktree.RepoIndex) error {
-		idx.RepoID = info.RepoID
-		idx.MainRepoRoot = info.RepoRoot
-		if idx.DisplayName == "" {
-			idx.DisplayName = filepath.Base(info.RepoRoot)
-		}
-		if mainErr == nil && mainPL != nil {
-			idx.MainProject = worktree.RepoIndexProject{
-				ProjectKey:  mainPL.ProjectKey,
-				ProjectRoot: info.RepoRoot,
-			}
-		}
-		entry := worktree.RepoIndexWorktree{
-			Name:   info.Name,
-			Slug:   info.Slug,
-			Branch: info.Branch,
-			Path:   info.Path,
-		}
-		if wtErr == nil && wtPL != nil {
-			entry.ProjectKey = wtPL.ProjectKey
-		}
-		idx.UpsertWorktree(entry)
-		idx.TouchLastUsed(info.Name)
-		return nil
-	})
 }
 
 // printWorktreeStartupSummary emits a short stderr block on first
@@ -187,28 +189,27 @@ func worktreeMetaForInfo(info *worktree.Info) *recovery.SessionMeta {
 	}
 }
 
-// SessionLocation describes where a session id was resolved to. Exactly
-// one of Worktree / MainRepoRoot / ProjectRoot is non-empty. ProjectKey is
-// the session storage project key (<state>/sessions/<projectKey>/<sid>);
-// it is always populated. Callers should chdir to the resolved path before
-// resuming so initApp's ProjectKey computation matches the session's
-// storage location.
+// SessionLocation describes where a session id was resolved to. Worktree is
+// set when the session was working in a chord-managed worktree, otherwise
+// ContentRoot is the repository root the session should run in. ProjectKey is
+// the session storage project key (<state>/sessions/<projectKey>/<sid>) and is
+// always populated. Callers should chdir to the resolved path before resuming
+// so initApp computes the same project key.
 type SessionLocation struct {
-	Worktree     *worktree.Info
-	MainRepoRoot string
-	ProjectRoot  string
-	ProjectKey   string
+	Worktree    *worktree.Info
+	ContentRoot string
+	ProjectKey  string
 }
 
 // resolveSessionWorktree returns the location of the session with the
-// given id within the current repo's chord-managed projects. It walks
-// the repo index — main project + each registered worktree — and probes
-// each project's sessions directory for <sid>/main.jsonl.
+// given id inside the current repository. Sessions are stored under the
+// repository's content root project key, shared by every checkout; the
+// checkout the session was working in is recorded in its SessionMeta, so a
+// session created in a worktree resolves back to that worktree.
 //
 // Returns:
-//   - (loc, nil) where loc.Worktree != nil    → session belongs to a chord-managed worktree
-//   - (loc, nil) where loc.MainRepoRoot != "" → session belongs to the main repo
-//   - (loc, nil) where loc.ProjectRoot != ""  → session belongs to the current non-git project
+//   - (loc, nil) where loc.Worktree != nil    → session was working in a chord-managed worktree
+//   - (loc, nil) where loc.ContentRoot != ""  → session belongs to the repository content root
 //   - (nil, err)                              → not found or error to abort startup
 func resolveSessionWorktree(ctx context.Context, sid string) (*SessionLocation, error) {
 	sid = strings.TrimSpace(sid)
@@ -223,59 +224,124 @@ func resolveSessionWorktree(ctx context.Context, sid string) (*SessionLocation, 
 	if err != nil {
 		return nil, fmt.Errorf("cwd: %w", err)
 	}
-	mainRoot, err := worktree.GitMainRoot(ctx, cwd)
+	contentRoot := resolveContentRoot(ctx, cwd)
+	loc, err := resolveSessionInProject(ctx, pl, contentRoot, sid)
 	if err != nil {
-		if errors.Is(err, worktree.ErrNotGitRepository) {
-			return resolveSessionInCurrentProject(pl, cwd, sid)
-		}
-		return nil, fmt.Errorf("resolve git main root: %w", err)
+		return nil, err
 	}
-	repoID := worktree.RepoIDFor(mainRoot)
-	idx, err := worktree.LoadRepoIndex(pl.StateDir, repoID)
-	if err != nil {
-		return nil, fmt.Errorf("load repo index: %w", err)
+	if info := worktreeLocationForSession(ctx, pl, loc.ProjectKey, sid, contentRoot); info != nil {
+		loc.Worktree = info
+		loc.ContentRoot = ""
 	}
-	if idx != nil {
-		// Probe the registered worktrees first so the worktree case is
-		// reported even when the main repo also has a stale entry.
-		for i := range idx.Worktrees {
-			w := &idx.Worktrees[i]
-			if w.ProjectKey == "" {
-				continue
-			}
-			if sessionExistsInProject(pl, w.ProjectKey, sid) {
-				return &SessionLocation{Worktree: &worktree.Info{
-					Slug:     w.Slug,
-					Name:     w.Name,
-					Branch:   w.Branch,
-					Path:     w.Path,
-					RepoRoot: mainRoot,
-					RepoID:   repoID,
-				}, ProjectKey: w.ProjectKey}, nil
-			}
-		}
-		if idx.MainProject.ProjectKey != "" && sessionExistsInProject(pl, idx.MainProject.ProjectKey, sid) {
-			return &SessionLocation{MainRepoRoot: mainRoot, ProjectKey: idx.MainProject.ProjectKey}, nil
-		}
-	}
-	// Fall back: maybe the main project hasn't been registered yet but
-	// the session lives there.
-	mainPL, perr := pl.LocateProject(mainRoot)
-	if perr == nil && sessionExistsInProject(pl, mainPL.ProjectKey, sid) {
-		return &SessionLocation{MainRepoRoot: mainRoot, ProjectKey: mainPL.ProjectKey}, nil
-	}
-	return nil, fmt.Errorf("session %q not found in this repo's chord-managed worktrees", sid)
+	return loc, nil
 }
 
-func resolveSessionInCurrentProject(pl *config.PathLocator, projectRoot, sid string) (*SessionLocation, error) {
-	projectPL, err := pl.LocateProject(projectRoot)
+// resolveSessionInProject locates sid inside the project anchored at
+// contentRoot, ignoring worktree provenance.
+func resolveSessionInProject(ctx context.Context, pl *config.PathLocator, contentRoot, sid string) (*SessionLocation, error) {
+	projectPL, err := pl.LocateProject(contentRoot)
 	if err != nil {
-		return nil, fmt.Errorf("locate current project: %w", err)
+		return nil, fmt.Errorf("locate project: %w", err)
 	}
-	if sessionExistsInProject(pl, projectPL.ProjectKey, sid) {
-		return &SessionLocation{ProjectRoot: projectPL.ProjectRoot, ProjectKey: projectPL.ProjectKey}, nil
+	if !sessionExistsInProject(pl, projectPL.ProjectKey, sid) {
+		if store, ok := findAbandonedSessionStore(ctx, contentRoot, sid); ok {
+			return nil, fmt.Errorf("session %q belongs to the session store of an older chord version (%s), which this version no longer lists because sessions are shared per repository; copy the session directory into %s to continue it", sid, store, projectPL.ProjectSessionsDir)
+		}
+		return nil, fmt.Errorf("session %q not found in project %s", sid, projectPL.ProjectKey)
 	}
-	return nil, fmt.Errorf("session %q not found in current project; if it belongs to another chord-managed worktree, run `chord resume %s` to locate and resume it", sid, sid)
+	return &SessionLocation{ContentRoot: contentRoot, ProjectKey: projectPL.ProjectKey}, nil
+}
+
+// resumeSessionWorktree returns the chord-managed worktree the session was
+// working in, when it belongs to the repository containing the current
+// directory and that worktree still exists. Returns nil for main-checkout
+// sessions, unknown sessions, and sessions of another repository, so the
+// caller keeps its current directory and lets the normal startup report the
+// mismatch.
+func resumeSessionWorktree(ctx context.Context, sid string) *worktree.Info {
+	sid = strings.TrimSpace(sid)
+	if sid == "" {
+		return nil
+	}
+	pl, err := startupPathLocator()
+	if err != nil {
+		return nil
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil
+	}
+	contentRoot := resolveContentRoot(ctx, cwd)
+	projectPL, err := pl.LocateProject(contentRoot)
+	if err != nil || !sessionExistsInProject(pl, projectPL.ProjectKey, sid) {
+		return nil
+	}
+	return worktreeLocationForSession(ctx, pl, projectPL.ProjectKey, sid, contentRoot)
+}
+
+// worktreeLocationForSession returns the chord-managed worktree recorded in
+// the session's metadata, or nil when the session belongs to the main
+// checkout or the recorded worktree is no longer a worktree of this
+// repository. A dropped checkout is recorded as a fallback boundary and
+// reported to the user (stderr here, toast once the agent starts).
+func worktreeLocationForSession(ctx context.Context, pl *config.PathLocator, projectKey, sid, contentRoot string) *worktree.Info {
+	sessionDir := filepath.Join(pl.SessionsRoot, projectKey, sid)
+	meta, err := recovery.LoadSessionMeta(sessionDir)
+	if err != nil || meta == nil {
+		return nil
+	}
+	path := strings.TrimSpace(meta.WorktreePath)
+	if path == "" || samePath(path, contentRoot) {
+		return nil
+	}
+	repoRoot := strings.TrimSpace(meta.RepoRoot)
+	if repoRoot == "" {
+		repoRoot = contentRoot
+	}
+	if !worktree.IsWorktreeOf(ctx, path, repoRoot) {
+		fmt.Fprintf(os.Stderr, "warning: session %s was working in worktree %s, which is no longer a worktree of this repository; resuming in %s\n", sid, path, contentRoot)
+		recordWorktreeResumeFallback(sessionDir, meta, path)
+		return nil
+	}
+	repoID := strings.TrimSpace(meta.RepoID)
+	if repoID == "" {
+		repoID = worktree.ResolveRepoID(ctx, repoRoot, repoRoot)
+	}
+	name := strings.TrimSpace(meta.WorktreeName)
+	if name == "" {
+		name = filepath.Base(path)
+	}
+	return &worktree.Info{
+		Slug:     name,
+		Name:     name,
+		Branch:   meta.WorktreeBranch,
+		Path:     path,
+		RepoRoot: repoRoot,
+		RepoID:   repoID,
+	}
+}
+
+// recordWorktreeResumeFallback clears the session's active checkout and appends
+// the boundary record that explains why resume landed somewhere else.
+func recordWorktreeResumeFallback(sessionDir string, meta *recovery.SessionMeta, path string) {
+	name, branch := "", ""
+	if meta != nil {
+		name = strings.TrimSpace(meta.WorktreeName)
+		branch = strings.TrimSpace(meta.WorktreeBranch)
+	}
+	entry := recovery.WorktreeTimelineEntry{
+		Reason:   recovery.WorktreeSwitchResumeFallback,
+		Name:     name,
+		Branch:   branch,
+		Path:     path,
+		Fallback: true,
+		Detail:   "recorded worktree is no longer a worktree of this repository",
+		At:       time.Now().UTC(),
+	}
+	if err := recovery.RecordWorktreeBoundary(sessionDir, recovery.WorktreeBinding{}, entry); err != nil {
+		log.Warnf("record worktree resume fallback failed session_dir=%v error=%v", sessionDir, err)
+	}
+	flagWorktreeResumeNotice = fmt.Sprintf("Session was working in worktree %s, which no longer exists; continuing in the repository checkout.", filepath.Base(path))
 }
 
 // sessionExistsInProject reports whether <stateDir>/sessions/<key>/<sid>/main.jsonl
@@ -287,4 +353,114 @@ func sessionExistsInProject(pl *config.PathLocator, projectKey, sid string) bool
 	main := filepath.Join(pl.SessionsRoot, projectKey, sid, identity.MainSessionLogFilename)
 	st, err := os.Stat(main)
 	return err == nil && st.Size() > 0
+}
+
+// abandonedWorktreeSessions describes a per-worktree session store left behind
+// by chord versions that keyed sessions by the worktree's own checkout.
+type abandonedWorktreeSessions struct {
+	Name        string
+	Path        string
+	SessionsDir string
+	Count       int
+}
+
+// findAbandonedWorktreeSessions returns the per-worktree session stores of the
+// current repository that still hold sessions. Sessions are keyed by the
+// repository content root now, so those stores are no longer listed anywhere;
+// callers surface them instead of letting the sessions vanish without a trace.
+// History is intentionally not migrated.
+//
+// Best-effort: worktrees are listed through git with the configured branch
+// prefix, so stores of already-removed worktrees, or of worktrees created with
+// a different prefix, are not reported.
+func findAbandonedWorktreeSessions(ctx context.Context, contentRoot string) []abandonedWorktreeSessions {
+	contentRoot = strings.TrimSpace(contentRoot)
+	if contentRoot == "" {
+		return nil
+	}
+	pl, err := startupPathLocator()
+	if err != nil {
+		return nil
+	}
+	mainPL, err := pl.LocateProject(contentRoot)
+	if err != nil {
+		return nil
+	}
+	branchPrefix, err := startupBranchPrefix()
+	if err != nil {
+		branchPrefix = ""
+	}
+	infos, err := worktree.List(ctx, contentRoot, branchPrefix)
+	if err != nil {
+		return nil
+	}
+	var stores []abandonedWorktreeSessions
+	for _, info := range infos {
+		pj, err := pl.LocateProject(info.Path)
+		if err != nil || pj.ProjectKey == mainPL.ProjectKey {
+			continue
+		}
+		if count := countSessionDirs(pj.ProjectSessionsDir); count > 0 {
+			stores = append(stores, abandonedWorktreeSessions{
+				Name:        info.Name,
+				Path:        info.Path,
+				SessionsDir: pj.ProjectSessionsDir,
+				Count:       count,
+			})
+		}
+	}
+	return stores
+}
+
+// findAbandonedSessionStore returns the abandoned store that holds sid, so a
+// resume failure can point at the session instead of reporting a bare miss.
+func findAbandonedSessionStore(ctx context.Context, contentRoot, sid string) (string, bool) {
+	sid = strings.TrimSpace(sid)
+	if sid == "" {
+		return "", false
+	}
+	for _, store := range findAbandonedWorktreeSessions(ctx, contentRoot) {
+		main := filepath.Join(store.SessionsDir, sid, identity.MainSessionLogFilename)
+		if st, err := os.Stat(main); err == nil && st.Size() > 0 {
+			return store.SessionsDir, true
+		}
+	}
+	return "", false
+}
+
+// printAbandonedWorktreeSessionsHint reports the abandoned stores and where
+// their sessions go. repo SessionsDir is where the shared store lives, so the
+// user can recover a session by copying its directory there.
+func printAbandonedWorktreeSessionsHint(w io.Writer, stores []abandonedWorktreeSessions, repoSessionsDir string) {
+	if w == nil || len(stores) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "Note: sessions created by an older chord version inside a worktree are no longer listed; sessions are shared per repository now.")
+	const maxShown = 5
+	for i, store := range stores {
+		if i == maxShown {
+			fmt.Fprintf(w, "  ... and %d more worktree session store(s)\n", len(stores)-maxShown)
+			break
+		}
+		fmt.Fprintf(w, "  %s: %d session(s) in %s\n", store.Name, store.Count, store.SessionsDir)
+	}
+	if strings.TrimSpace(repoSessionsDir) != "" {
+		fmt.Fprintf(w, "To continue one of them, copy its session directory into %s.\n", repoSessionsDir)
+	}
+}
+
+// countSessionDirs counts the session directories in a session store; files
+// such as the project metadata marker are ignored.
+func countSessionDirs(dir string) int {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	count := 0
+	for _, entry := range entries {
+		if entry.IsDir() {
+			count++
+		}
+	}
+	return count
 }

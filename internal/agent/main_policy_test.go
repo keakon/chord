@@ -598,6 +598,7 @@ func newTestMainAgent(t *testing.T, projectRoot string) *MainAgent {
 		sessionDir,
 		"test-model",
 		projectRoot,
+		projectRoot,
 		&config.Config{},
 		nil,
 		mcp.ClientInfo{Name: "chord-test", Version: "test"},

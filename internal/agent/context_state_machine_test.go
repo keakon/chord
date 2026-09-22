@@ -139,7 +139,7 @@ func TestStateMachineReadExternalMutationArchivesPriorContent(t *testing.T) {
 
 	reg := tools.NewRegistry()
 	reg.Register(tools.ShellTool{})
-	a := &MainAgent{parentCtx: context.Background(), sessionDir: sessionDir, projectRoot: projectRoot, tools: reg}
+	a := &MainAgent{parentCtx: context.Background(), sessionDir: sessionDir, contentRoot: projectRoot, tools: reg}
 	a.newTurn()
 	original := stateMachineReadBody(1, 400, 400, "alpha")
 

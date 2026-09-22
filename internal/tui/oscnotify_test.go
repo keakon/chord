@@ -68,7 +68,8 @@ func (loopBusyAgentStub) GetContextReductionStats() agent.ContextReductionStats 
 func (loopBusyAgentStub) KeyStats() (int, int)                                      { return 0, 0 }
 func (loopBusyAgentStub) CurrentRateLimitSnapshot() *ratelimit.KeyRateLimitSnapshot { return nil }
 func (loopBusyAgentStub) ProxyInUseForRef(string) bool                              { return false }
-func (loopBusyAgentStub) ProjectRoot() string                                       { return "" }
+func (loopBusyAgentStub) ContentRoot() string                                       { return "" }
+func (loopBusyAgentStub) WorkDir() string                                           { return "" }
 func (loopBusyAgentStub) CurrentRole() string                                       { return "builder" }
 func (loopBusyAgentStub) LoopKeepsMainBusy() bool                                   { return true }
 func (loopBusyAgentStub) CurrentLoopState() agent.LoopState                         { return agent.LoopStateExecuting }

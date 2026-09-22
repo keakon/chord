@@ -23,41 +23,40 @@ const (
 	pathRuleAny
 )
 
-// EvaluatePath resolves the action for a path-taking tool call. When cwd is
-// non-empty it is the session working directory the tool would execute in
-// (tool base dir), and the input path is normalized the same way the tool
-// resolves it: paths inside cwd collapse to cwd-relative form, paths outside
-// stay absolute. Rules are classified the same way, so a relative rule can
-// never match an outside-cwd path and an absolute rule never matches an
-// inside-cwd path; only the literal "*" rule matches both spellings. With an
-// empty cwd it degrades to the plain lexical Evaluate.
-func (rs Ruleset) EvaluatePath(permission, pattern, cwd string) Action {
-	if strings.TrimSpace(cwd) == "" {
+// EvaluatePath resolves the action for a path-taking tool call. The input path
+// is normalized against scope the same way the tool resolves it: paths inside
+// a scope root collapse to root-relative form, paths outside every root stay
+// absolute. Rules are classified the same way, so a relative rule can never
+// match an outside-root path and an absolute rule never matches an
+// inside-root path; only the literal "*" rule matches both spellings. With an
+// empty scope it degrades to the plain lexical Evaluate.
+func (rs Ruleset) EvaluatePath(permission, pattern string, scope PathScope) Action {
+	if scope.degenerate() {
 		return rs.Evaluate(permission, pattern)
 	}
 	normPerm := toolname.Normalize(permission)
 	counterpart := getEditPatchCounterpart(normPerm)
 	if counterpart != "" {
-		if match, ok := rs.lastSpecificEditApplyPatchToolMatchPath(normPerm, counterpart, pattern, cwd); ok {
+		if match, ok := rs.lastSpecificEditApplyPatchToolMatchPath(normPerm, counterpart, pattern, scope); ok {
 			return match.Action
 		}
 	}
-	if match := rs.lastMatchPath(permission, pattern, cwd); match.Found {
+	if match := rs.lastMatchPath(permission, pattern, scope); match.Found {
 		return match.Rule.Action
 	}
 	return ActionDeny
 }
 
-// LastSpecificToolMatchPath is the cwd-aware counterpart of
+// LastSpecificToolMatchPath is the scope-aware counterpart of
 // LastSpecificToolMatch: rule patterns are classified and matched against the
-// normalized path instead of the raw string. With an empty cwd it degrades to
-// LastSpecificToolMatch.
-func (rs Ruleset) LastSpecificToolMatchPath(permission, pattern, cwd string) MatchResult {
-	if strings.TrimSpace(cwd) == "" {
+// normalized path instead of the raw string. With an empty scope it degrades
+// to LastSpecificToolMatch.
+func (rs Ruleset) LastSpecificToolMatchPath(permission, pattern string, scope PathScope) MatchResult {
+	if scope.degenerate() {
 		return rs.LastSpecificToolMatch(permission, pattern)
 	}
 	permission = toolname.Normalize(permission)
-	normalized := normalizePathInput(pattern, cwd)
+	normalized := normalizePathInput(pattern, scope)
 	for _, r := range slices.Backward(rs) {
 		normRulePerm := toolname.Normalize(r.Permission)
 		if normRulePerm == "*" {
@@ -70,9 +69,9 @@ func (rs Ruleset) LastSpecificToolMatchPath(permission, pattern, cwd string) Mat
 	return MatchResult{}
 }
 
-func (rs Ruleset) lastMatchPath(permission, pattern, cwd string) MatchResult {
+func (rs Ruleset) lastMatchPath(permission, pattern string, scope PathScope) MatchResult {
 	permission = toolname.Normalize(permission)
-	normalized := normalizePathInput(pattern, cwd)
+	normalized := normalizePathInput(pattern, scope)
 	for _, r := range slices.Backward(rs) {
 		if globMatch(permission, toolname.Normalize(r.Permission)) && pathRuleMatches(r.Pattern, normalized) {
 			return MatchResult{Rule: r, Found: true}
@@ -81,8 +80,8 @@ func (rs Ruleset) lastMatchPath(permission, pattern, cwd string) MatchResult {
 	return MatchResult{}
 }
 
-func (rs Ruleset) lastSpecificEditApplyPatchToolMatchPath(toolName, counterpart, pattern, cwd string) (Rule, bool) {
-	normalized := normalizePathInput(pattern, cwd)
+func (rs Ruleset) lastSpecificEditApplyPatchToolMatchPath(toolName, counterpart, pattern string, scope PathScope) (Rule, bool) {
+	normalized := normalizePathInput(pattern, scope)
 	var counterpartMatch Rule
 	counterpartFound := false
 	for _, r := range slices.Backward(rs) {
@@ -99,22 +98,6 @@ func (rs Ruleset) lastSpecificEditApplyPatchToolMatchPath(toolName, counterpart,
 		}
 	}
 	return counterpartMatch, counterpartFound
-}
-
-// normalizePathInput converts a tool-supplied path into the spelling rules are
-// matched against. Inside cwd it becomes cwd-relative; outside it stays
-// absolute. The result uses "/" separators so rules are portable across
-// platforms.
-func normalizePathInput(input, cwd string) string {
-	p := strings.TrimSpace(input)
-	if p == "" {
-		return p
-	}
-	normalized, err := pathutil.NormalizeWithinBase(p, cwd)
-	if err != nil {
-		return filepath.ToSlash(filepath.Clean(p))
-	}
-	return normalized
 }
 
 // pathRuleMatches reports whether a rule pattern matches a normalized input

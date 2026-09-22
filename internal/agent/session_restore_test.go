@@ -1592,6 +1592,7 @@ func newTestMainAgentForRestore(t *testing.T, projectRoot, sessionDir string) *M
 		sessionDir,
 		"test-model",
 		projectRoot,
+		projectRoot,
 		&config.Config{},
 		nil,
 		mcp.ClientInfo{Name: "chord-test", Version: "test"},

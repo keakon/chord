@@ -15,22 +15,23 @@ func TestPlanInitAppStartupResolvesStorageAndProjectPaths(t *testing.T) {
 	stateDir := filepath.Join(t.TempDir(), "state")
 	cacheDir := filepath.Join(t.TempDir(), "cache")
 	logsDir := filepath.Join(t.TempDir(), "logs")
-	projectRoot := t.TempDir()
+	contentRoot := t.TempDir()
+	workDir := t.TempDir()
 
 	t.Setenv("CHORD_CONFIG_HOME", configHome)
 	if err := os.WriteFile(filepath.Join(configHome, "config.yaml"), []byte("paths:\n  state_dir: "+stateDir+"\n  cache_dir: "+cacheDir+"\n  logs_dir: "+logsDir+"\n"), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
-	plan, err := planInitAppStartup(projectRoot)
+	plan, err := planInitAppStartup(contentRoot, workDir)
 	if err != nil {
 		t.Fatalf("planInitAppStartup: %v", err)
 	}
-	if plan.ProjectRoot != projectRoot {
-		t.Fatalf("ProjectRoot = %q, want %q", plan.ProjectRoot, projectRoot)
+	if plan.ContentRoot != contentRoot || plan.WorkDir != workDir {
+		t.Fatalf("ContentRoot/WorkDir = %q/%q, want %q/%q", plan.ContentRoot, plan.WorkDir, contentRoot, workDir)
 	}
-	if plan.ChordDir != filepath.Join(projectRoot, ".chord") {
-		t.Fatalf("ChordDir = %q", plan.ChordDir)
+	if _, err := os.Stat(filepath.Join(contentRoot, ".chord")); err != nil {
+		t.Fatalf(".chord directory not created under content root: %v", err)
 	}
 	if plan.PathLocator == nil || plan.PathLocator.StateDir != stateDir || plan.PathLocator.CacheDir != cacheDir || plan.PathLocator.LogsDir != logsDir {
 		t.Fatalf("PathLocator = %+v, want configured dirs", plan.PathLocator)
@@ -58,7 +59,7 @@ func TestPlanInitAppStartupReturnsSessionPathError(t *testing.T) {
 		t.Fatalf("write sessions-file: %v", err)
 	}
 
-	plan, err := planInitAppStartup(projectRoot)
+	plan, err := planInitAppStartup(projectRoot, projectRoot)
 	if plan != nil {
 		t.Fatalf("plan = %+v, want nil", plan)
 	}
@@ -73,9 +74,11 @@ func TestApplyInitAppStartupPlanCopiesResolvedState(t *testing.T) {
 	mergedCfg := &config.Config{Proxy: "https://merged.example"}
 	pathLocator := &config.PathLocator{ConfigHome: t.TempDir(), StateDir: t.TempDir(), CacheDir: t.TempDir(), LogsDir: t.TempDir()}
 	projectLocator := &config.ProjectLocator{ProjectRoot: t.TempDir(), ProjectSessionsDir: t.TempDir()}
+	contentRoot := t.TempDir()
+	workDir := t.TempDir()
 	plan := &initAppStartupPlan{
-		ProjectRoot:    projectLocator.ProjectRoot,
-		ChordDir:       filepath.Join(projectLocator.ProjectRoot, ".chord"),
+		ContentRoot:    contentRoot,
+		WorkDir:        workDir,
 		PathLocator:    pathLocator,
 		ProjectLocator: projectLocator,
 		ConfigHome:     pathLocator.ConfigHome,
@@ -87,7 +90,7 @@ func TestApplyInitAppStartupPlanCopiesResolvedState(t *testing.T) {
 	ac := &AppContext{}
 	applyInitAppStartupPlan(ac, plan)
 
-	if ac.ProjectRoot != plan.ProjectRoot || ac.ChordDir != plan.ChordDir || ac.ConfigHome != plan.ConfigHome {
+	if ac.ContentRoot != plan.ContentRoot || ac.WorkDir != plan.WorkDir || ac.ConfigHome != plan.ConfigHome {
 		t.Fatalf("basic paths not copied: ac=%+v plan=%+v", ac, plan)
 	}
 	if ac.PathLocator != pathLocator || ac.ProjectLocator != projectLocator || ac.GlobalCfg != globalCfg || ac.ProjectCfg != projectCfg || ac.Cfg != mergedCfg {

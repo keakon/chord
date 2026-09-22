@@ -24,6 +24,23 @@ import (
 var (
 	flagWorktreeStartupInfo *worktree.Info
 	flagWorktreeStartupMeta *recovery.SessionMeta
+
+	// flagWorktreeResetBranch lets --worktree reset a leftover branch that no
+	// worktree has checked out. Without it Create refuses to recreate the
+	// branch of a removed worktree, because that branch may hold the only
+	// copy of its commits.
+	flagWorktreeResetBranch bool
+	// flagHeadlessResetBranch is the headless counterpart of
+	// flagWorktreeResetBranch.
+	flagHeadlessResetBranch bool
+	// flagWorktreeResumeNotice carries a resume problem detected before the
+	// agent exists (the recorded worktree is gone) so initApp can surface it
+	// as a startup toast once the TUI is attached.
+	flagWorktreeResumeNotice string
+	// flagWorktreeStartupReason records how the startup checkout was chosen
+	// (created or resumed). It is written to the session's worktree timeline
+	// so a resumed session can tell the two apart.
+	flagWorktreeStartupReason string
 )
 
 // newWorktreeCmd builds the `chord worktree …` parent command and its
@@ -34,6 +51,7 @@ var (
 func newWorktreeCmd() *cobra.Command {
 	var continueLatest bool
 	var resumeID string
+	var resetBranch bool
 
 	cmd := &cobra.Command{
 		Use:           "worktree [name]",
@@ -49,21 +67,22 @@ func newWorktreeCmd() *cobra.Command {
 			if continueLatest && resumeID != "" {
 				return fmt.Errorf("--continue and --resume are mutually exclusive")
 			}
-			return runWorktreeSessionEntry(cmd, args[0], continueLatest, resumeID, runRoot)
+			return runWorktreeSessionEntry(cmd, args[0], continueLatest, resumeID, resetBranch, runRoot)
 		},
 	}
 	cmd.Flags().BoolVarP(&continueLatest, "continue", "c", false, "Continue the latest non-empty session in this worktree")
 	cmd.Flags().StringVarP(&resumeID, "resume", "r", "", "Resume a specific session ID in this worktree")
+	cmd.Flags().BoolVar(&resetBranch, "reset-branch", false, "Reset an existing branch that no worktree has checked out to HEAD instead of refusing to recreate it")
 	cmd.AddCommand(newWorktreeListCmd(), newWorktreeRemoveCmd(), newWorktreeFinishCmd())
 	return cmd
 }
 
-func runWorktreeSessionEntry(cmd *cobra.Command, name string, continueLatest bool, resumeID string, runner func(*cobra.Command, []string) error) error {
+func runWorktreeSessionEntry(cmd *cobra.Command, name string, continueLatest bool, resumeID string, resetBranch bool, runner func(*cobra.Command, []string) error) error {
 	ctx := context.Background()
 	if cmd != nil && cmd.Context() != nil {
 		ctx = cmd.Context()
 	}
-	info, err := prepareStartupWorktree(ctx, name)
+	info, err := prepareStartupWorktree(ctx, name, resetBranch)
 	if err != nil {
 		return err
 	}
@@ -123,7 +142,7 @@ func newWorktreeListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			repoID := worktree.RepoIDFor(mainRoot)
+			repoID := worktree.ResolveRepoID(ctx, cwd, mainRoot)
 			idx, _ := worktree.LoadRepoIndex(pl.StateDir, repoID)
 			rows := buildWorktreeListRows(ctx, infos, idx)
 			sort.SliceStable(rows, func(i, j int) bool {
@@ -134,9 +153,9 @@ func newWorktreeListCmd() *cobra.Command {
 				return nil
 			}
 			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-			fmt.Fprintln(tw, "NAME\tBRANCH\tPATH\tSTATUS\tLAST_USED")
+			fmt.Fprintln(tw, "NAME\tBRANCH\tPATH\tSTATUS\tOWNER\tLAST_USED")
 			for _, r := range rows {
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", r.Name, r.Branch, r.Path, r.Status, worktree.FormatRelativeTime(r.LastUsedAt))
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", r.Name, r.Branch, r.Path, r.Status, r.Owner, worktree.FormatRelativeTime(r.LastUsedAt))
 			}
 			return tw.Flush()
 		},
@@ -147,6 +166,7 @@ func newWorktreeListCmd() *cobra.Command {
 // merging porcelain Info with index LastUsedAt and a clean/dirty probe.
 type worktreeListRow struct {
 	worktree.Info
+	Owner      string
 	Status     string
 	LastUsedAt time.Time
 }
@@ -165,14 +185,52 @@ func buildWorktreeListRows(ctx context.Context, infos []worktree.Info, idx *work
 				row.Status = "clean"
 			}
 		}
+		var entry *worktree.RepoIndexWorktree
 		if idx != nil {
-			if entry := idx.FindWorktree(info.Name); entry != nil {
-				row.LastUsedAt = entry.LastUsedAt
+			if e := idx.FindWorktree(info.Name); e != nil {
+				row.LastUsedAt = e.LastUsedAt
+				entry = e
 			}
 		}
+		row.Owner = worktreeOwnerLabel(ctx, info.Path, entry)
 		rows = append(rows, row)
 	}
 	return rows
+}
+
+// worktreeOwnerLabel renders the OWNER column. The worktree's own git
+// directory is authoritative; the index only caches the creator for display,
+// so a missing or rebuilt index still reports who made the worktree.
+func worktreeOwnerLabel(ctx context.Context, path string, entry *worktree.RepoIndexWorktree) string {
+	if entry != nil && (entry.OwnerSessionID != "" || entry.OwnerKind != "") {
+		return formatOwnerLabel(entry.OwnerKind, entry.OwnerSessionID, entry.OwnerAgentID)
+	}
+	owner, err := worktree.ReadOwner(ctx, path)
+	if err != nil {
+		return "?"
+	}
+	return formatOwnerLabel(string(owner.Kind), owner.SessionID, owner.AgentID)
+}
+
+func formatOwnerLabel(kind, sessionID, agentID string) string {
+	if strings.TrimSpace(kind) == "" && strings.TrimSpace(sessionID) == "" {
+		return "?"
+	}
+	label := strings.TrimSpace(kind)
+	if sessionID != "" {
+		label += ":" + shortOwnerID(sessionID)
+	}
+	if agentID != "" {
+		label += "/" + shortOwnerID(agentID)
+	}
+	return label
+}
+
+func shortOwnerID(id string) string {
+	if len(id) <= 8 {
+		return id
+	}
+	return id[:8]
 }
 
 // newWorktreeRemoveCmd removes a chord-managed worktree, preserving its
@@ -180,9 +238,10 @@ func buildWorktreeListRows(ctx context.Context, infos []worktree.Info, idx *work
 func newWorktreeRemoveCmd() *cobra.Command {
 	var force bool
 	var deleteBranch bool
+	var purgeSessions bool
 	cmd := &cobra.Command{
 		Use:           "remove <name>",
-		Short:         "Remove a chord-managed worktree (branch is preserved by default)",
+		Short:         "Remove a chord-managed worktree (branch and sessions are preserved by default)",
 		Args:          cobra.ExactArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -204,10 +263,16 @@ func newWorktreeRemoveCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("resolve worktree branch_prefix: %w", err)
 			}
-			if err := worktree.Remove(ctx, cwd, name, worktree.RemoveOptions{Force: force, DeleteBranch: deleteBranch, BranchPrefix: branchPrefix}, pl); err != nil {
+			opts := worktree.RemoveOptions{Force: force, DeleteBranch: deleteBranch, BranchPrefix: branchPrefix, PurgeSessions: purgeSessions}
+			if err := worktree.Remove(ctx, cwd, name, opts, pl); err != nil {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Removed worktree %s\n", name)
+			if purgeSessions {
+				fmt.Fprintln(cmd.OutOrStdout(), "Also purged this worktree's own session/export store.")
+			} else {
+				fmt.Fprintln(cmd.OutOrStdout(), "Note: the worktree's session/export store was kept; pass --purge-sessions to delete it. Sessions created by this version are shared per repository and are never removed with a worktree.")
+			}
 			if !force && !deleteBranch {
 				fmt.Fprintln(cmd.OutOrStdout(), "Note: branch was kept. Pass --delete-branch (only if merged) or --force (always) to remove the branch.")
 			}
@@ -216,6 +281,7 @@ func newWorktreeRemoveCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "remove even when the worktree is dirty; force-delete the branch")
 	cmd.Flags().BoolVar(&deleteBranch, "delete-branch", false, "delete the worktree's branch (only if merged; pass --force to override)")
+	cmd.Flags().BoolVar(&purgeSessions, "purge-sessions", false, "also delete the worktree's own session/export store (older per-checkout session history)")
 	return cmd
 }
 
@@ -261,6 +327,17 @@ func newWorktreeFinishCmd() *cobra.Command {
 						ontoUsed = br
 					}
 				}
+			}
+			if !check {
+				// A real finish fast-forwards the target branch in the
+				// repository's main checkout, updating its working tree (and
+				// switching its branch back afterwards when it is on another
+				// branch), so that checkout must not be in use meanwhile.
+				target := ontoUsed
+				if target == "" {
+					target = "the target branch"
+				}
+				fmt.Fprintf(cmd.ErrOrStderr(), "Note: a real finish fast-forwards %s in the repository's main checkout, updating its working tree (and switching its branch back when it is on another branch); don't run another session or tool there while finish runs.\n", target)
 			}
 			if err := worktree.Finish(ctx, cwd, name, worktree.FinishOptions{Onto: onto, Check: check, Message: message, BranchPrefix: branchPrefix}, pl); err != nil {
 				return err

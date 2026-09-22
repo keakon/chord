@@ -41,7 +41,7 @@ func TestSpeculativeExecutionJournalsStartedBeforeMutation(t *testing.T) {
 	var recs []recovery.ToolActivityRecord
 	pipeline := toolExecutionPipeline{
 		registry:    registry,
-		projectRoot: projectRoot,
+		toolBaseDir: projectRoot,
 		appendToolActivity: func(rec recovery.ToolActivityRecord) error {
 			recs = append(recs, rec)
 			return nil
@@ -68,7 +68,7 @@ func TestSpeculativeExecutionAbortsMutationWhenJournalAppendFails(t *testing.T) 
 	registry.Register(tools.WriteTool{BaseDir: projectRoot})
 	pipeline := toolExecutionPipeline{
 		registry:    registry,
-		projectRoot: projectRoot,
+		toolBaseDir: projectRoot,
 		appendToolActivity: func(recovery.ToolActivityRecord) error {
 			return errors.New("journal closed")
 		},
@@ -95,7 +95,7 @@ func TestSpeculativeExecutionRejectsInvisibleEditFamilyToolBeforeFileMutation(t 
 	registry.Register(tools.EditTool{BaseDir: projectRoot})
 	pipeline := toolExecutionPipeline{
 		registry:    registry,
-		projectRoot: projectRoot,
+		toolBaseDir: projectRoot,
 		visibleToolNames: func() map[string]struct{} {
 			return map[string]struct{}{tools.NameEdit: {}}
 		},

@@ -23,6 +23,11 @@ import (
 // GrepTool searches file contents using a regex pattern.
 type GrepTool struct {
 	BaseDir string // session working directory for relative paths; empty keeps process cwd behavior
+	// WorktreeRoot, when set, is the absolute directory that holds
+	// chord-managed worktrees. A walk rooted above it prunes it so a search
+	// never reports another checkout's copies; searching inside it explicitly
+	// still works.
+	WorktreeRoot string
 }
 
 type grepArgs struct {
@@ -298,7 +303,11 @@ func (t GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 			continue
 		}
 		searched = append(searched, resolvedSearchPath)
-		rootMatches, rootBytes, rootScanned, rootTruncated, err := grepSearchRoot(ctx, searchPath, resolvedSearchPath, info, re, includes, t.BaseDir, maxGrepMatches-len(matches), maxGrepOutputBytes-outputBytes)
+		skipDir := ""
+		if rel, ok := worktreeSkipRel(resolvedSearchPath, t.WorktreeRoot); ok {
+			skipDir = filepath.Join(resolvedSearchPath, rel)
+		}
+		rootMatches, rootBytes, rootScanned, rootTruncated, err := grepSearchRoot(ctx, searchPath, resolvedSearchPath, info, re, includes, t.BaseDir, maxGrepMatches-len(matches), maxGrepOutputBytes-outputBytes, skipDir)
 		if err != nil {
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				return "", ctxErr
@@ -433,7 +442,7 @@ func DecodeStringOrList(raw json.RawMessage) ([]string, bool, error) {
 	return []string{single}, true, nil
 }
 
-func grepSearchRoot(ctx context.Context, searchPath, resolvedSearchPath string, info os.FileInfo, re *regexp.Regexp, includes []string, baseDir string, maxMatches, maxBytes int) ([]string, int, int64, bool, error) {
+func grepSearchRoot(ctx context.Context, searchPath, resolvedSearchPath string, info os.FileInfo, re *regexp.Regexp, includes []string, baseDir string, maxMatches, maxBytes int, skipDir string) ([]string, int, int64, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, 0, 0, false, err
 	}
@@ -507,7 +516,7 @@ func grepSearchRoot(ctx context.Context, searchPath, resolvedSearchPath string, 
 		return matches, outputBytes, scannedFiles, truncated, nil
 	}
 
-	return grepWalkRoot(ctx, resolvedSearchPath, re, includes, baseDir, maxMatches, maxBytes)
+	return grepWalkRoot(ctx, resolvedSearchPath, re, includes, baseDir, maxMatches, maxBytes, skipDir)
 }
 
 // errGrepWalkCanceled stops the walker when the merger has already filled its
@@ -545,11 +554,11 @@ func grepScanWindow(workerCount int) int {
 // are identical to a sequential scan; workers only ever over-scan files whose
 // results end up discarded after the budget fills, and cancellation stops the
 // walk promptly.
-func grepWalkRoot(ctx context.Context, resolvedSearchPath string, re *regexp.Regexp, includes []string, baseDir string, maxMatches, maxBytes int) ([]string, int, int64, bool, error) {
-	return grepWalkRootWithScanner(ctx, resolvedSearchPath, re, includes, baseDir, maxMatches, maxBytes, scanGrepFile)
+func grepWalkRoot(ctx context.Context, resolvedSearchPath string, re *regexp.Regexp, includes []string, baseDir string, maxMatches, maxBytes int, skipDir string) ([]string, int, int64, bool, error) {
+	return grepWalkRootWithScanner(ctx, resolvedSearchPath, re, includes, baseDir, maxMatches, maxBytes, skipDir, scanGrepFile)
 }
 
-func grepWalkRootWithScanner(ctx context.Context, resolvedSearchPath string, re *regexp.Regexp, includes []string, baseDir string, maxMatches, maxBytes int, scanFile grepFileScanner) ([]string, int, int64, bool, error) {
+func grepWalkRootWithScanner(ctx context.Context, resolvedSearchPath string, re *regexp.Regexp, includes []string, baseDir string, maxMatches, maxBytes int, skipDir string, scanFile grepFileScanner) ([]string, int, int64, bool, error) {
 	parentCtx := ctx
 	ctx, cancel := context.WithCancel(parentCtx)
 	defer cancel()
@@ -575,6 +584,9 @@ func grepWalkRootWithScanner(ctx context.Context, resolvedSearchPath string, re 
 				return errGuardAbort
 			}
 			if d.IsDir() && skipDirNames[d.Name()] {
+				return filepath.SkipDir
+			}
+			if skipDir != "" && d.IsDir() && path == skipDir {
 				return filepath.SkipDir
 			}
 			if d.IsDir() {

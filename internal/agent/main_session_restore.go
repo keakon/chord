@@ -301,7 +301,7 @@ func (a *MainAgent) projectSessionsDir() (string, error) {
 			return "", err
 		}
 	}
-	pl, err := locator.EnsureProject(a.projectRoot)
+	pl, err := locator.EnsureProject(a.contentRoot)
 	if err != nil {
 		return "", err
 	}
@@ -372,7 +372,7 @@ func (a *MainAgent) restoreSessionEvidence(loaded *loadedSessionState, sessionPa
 	if loaded == nil {
 		return 0, 0
 	}
-	if ledger := analytics.NewUsageLedger(sessionPath, a.projectRoot); ledger != nil {
+	if ledger := analytics.NewUsageLedger(sessionPath, a.contentRoot); ledger != nil {
 		usageStarted := time.Now()
 		stats, eventCount, modelRefs, walltime, ledgerErr := ledger.BuildSessionEvidence()
 		if ledgerErr != nil {
@@ -824,7 +824,7 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	if a.usageLedger != nil {
 		a.usageLedger.Close()
 	}
-	a.usageLedger = analytics.NewUsageLedger(loaded.SessionPath, a.projectRoot)
+	a.usageLedger = analytics.NewUsageLedger(loaded.SessionPath, a.contentRoot)
 	if a.fileBackups != nil {
 		// activateLoadedSession bypasses installSessionTarget (which switches
 		// the backup directory for /new and fork); without this the resumed

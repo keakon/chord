@@ -57,7 +57,7 @@ func validateEditedToolArgs(registry *tools.Registry, toolName string, args json
 	return tools.ValidateToolArgs(tool, llm.UnwrapToolArgs(args))
 }
 
-func applyConfirmedArgsEdits(registry *tools.Registry, ruleset permission.Ruleset, toolName string, original json.RawMessage, modifiedArgs string, cwd string) (json.RawMessage, error) {
+func applyConfirmedArgsEdits(registry *tools.Registry, ruleset permission.Ruleset, toolName string, original json.RawMessage, modifiedArgs string, scope permission.PathScope) (json.RawMessage, error) {
 	if strings.TrimSpace(modifiedArgs) == "" {
 		return original, nil
 	}
@@ -67,7 +67,7 @@ func applyConfirmedArgsEdits(registry *tools.Registry, ruleset permission.Rulese
 		return nil, fmt.Errorf("edited arguments for tool %q are invalid: %w", toolName, err)
 	}
 
-	decision := evaluateToolPermissionInDir(ruleset, toolName, edited, cwd)
+	decision := evaluateToolPermissionInDir(ruleset, toolName, edited, scope)
 	if decision.Action == permission.ActionDeny {
 		return nil, wrapEditedArgsPermissionDenied(toolName)
 	}

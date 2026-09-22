@@ -1,11 +1,12 @@
 // Package worktree manages chord-owned git worktrees: creation, removal,
-// listing, and cross-worktree session discovery.
+// listing, and ownership.
 //
-// Worktrees are created at <stateDir>/worktrees/<repoID>/<slug> with branches
-// named chord/<slug>. Each worktree gets its own ProjectKey via the existing
-// PathLocator, so sessions/cache/exports are physically isolated. A repo
-// index at <stateDir>/repos/<repoID>.json provides logical aggregation
-// across the main repo and all of its worktrees.
+// Worktrees are created under the configured worktree root — the state dir's
+// worktrees/<repoID>/<slug> by default, or worktree.root when set — with
+// branches named chord/<slug>. Sessions are keyed by the repository content
+// root, so every checkout of a repo shares one session history; a repo index
+// at <stateDir>/repos/<repoID>.json lists the repo and its worktrees for
+// `worktree list` and carries no session-storage keys.
 package worktree
 
 import (

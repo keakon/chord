@@ -202,7 +202,7 @@ func (m *Model) reloadProjectUsageReport() tea.Cmd {
 	m.usageStats.projectLoadErr = ""
 	m.usageStats.projectLoading = true
 	m.invalidateUsageStatsCache()
-	return loadProjectUsageReportCmd(m.usageStatsProjectRoot(), m.usageStats.rangeFilter)
+	return loadProjectUsageReportCmd(m.usageStatsContentRoot(), m.usageStats.rangeFilter)
 }
 
 func (m *Model) ensureProjectUsageReport() tea.Cmd {
@@ -258,13 +258,14 @@ func (m *Model) currentUsageStatsScopeSupports(view statsView) bool {
 	return slices.Contains(m.currentUsageStatsViews(), view)
 }
 
-func (m *Model) usageStatsProjectRoot() string {
+// usageStatsContentRoot returns the project key source for usage attribution:
+// the content root, so usage of every checkout in a repository is attributed to
+// the same project. Falls back to the displayed working directory.
+func (m *Model) usageStatsContentRoot() string {
 	root := strings.TrimSpace(m.workingDir)
 	if m.agent != nil {
-		if p, ok := m.agent.(interface{ ProjectRoot() string }); ok {
-			if v := strings.TrimSpace(p.ProjectRoot()); v != "" {
-				root = v
-			}
+		if v := strings.TrimSpace(m.agent.ContentRoot()); v != "" {
+			root = v
 		}
 	}
 	return root

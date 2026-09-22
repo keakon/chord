@@ -76,9 +76,27 @@ type CompletionEnvelope struct {
 	KnownRisks                []string            `json:"known_risks,omitempty"`
 	FollowUpRecommended       []string            `json:"follow_up_recommended,omitempty"`
 	Artifacts                 []tools.ArtifactRef `json:"artifacts,omitempty"`
-	ResultType                string              `json:"result_type,omitempty"`
-	Result                    json.RawMessage     `json:"result,omitempty"`
-	ResultRef                 *tools.ResultRef    `json:"result_ref,omitempty"`
+	// Worktree describes the checkout the worker produced its result in. The
+	// owner needs the branch and base commit to pick up the right copy of the
+	// work, so a completion that only says "done" is not actionable.
+	Worktree   *CompletionWorktree `json:"worktree,omitempty"`
+	ResultType string              `json:"result_type,omitempty"`
+	Result     json.RawMessage     `json:"result,omitempty"`
+	ResultRef  *tools.ResultRef    `json:"result_ref,omitempty"`
+}
+
+// CompletionWorktree reports where a worker's changes live.
+type CompletionWorktree struct {
+	Name       string `json:"name,omitempty"`
+	Branch     string `json:"branch,omitempty"`
+	Path       string `json:"path,omitempty"`
+	Base       string `json:"base,omitempty"`
+	Generation uint64 `json:"generation,omitempty"`
+	// DiffStat is `git diff --stat` against Base, covering committed and
+	// uncommitted changes. DiffError is set instead when it could not be
+	// computed, so the owner sees "unknown" rather than an empty diff.
+	DiffStat  string `json:"diff_stat,omitempty"`
+	DiffError string `json:"diff_error,omitempty"`
 }
 
 type SubAgentMailboxMessage struct {
@@ -249,6 +267,9 @@ func mailboxMessageBytes(msg SubAgentMailboxMessage) int {
 		total += len(msg.Completion.Summary) + len(msg.Completion.Result)
 		for _, f := range msg.Completion.FilesChanged {
 			total += len(f)
+		}
+		if wt := msg.Completion.Worktree; wt != nil {
+			total += len(wt.Name) + len(wt.Branch) + len(wt.Path) + len(wt.Base) + len(wt.DiffStat) + len(wt.DiffError)
 		}
 	}
 	for _, ref := range msg.ArtifactRefs {

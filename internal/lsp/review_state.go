@@ -109,8 +109,8 @@ func (m *Manager) normalizeReviewPath(path string) string {
 	if path == "" {
 		return ""
 	}
-	if !filepath.IsAbs(path) && m != nil && m.projectRoot != "" {
-		path = filepath.Join(m.projectRoot, path)
+	if !filepath.IsAbs(path) && m != nil && m.projectRootPath() != "" {
+		path = filepath.Join(m.projectRootPath(), path)
 	}
 	return normalizeWaiterPath(path)
 }

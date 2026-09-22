@@ -65,7 +65,7 @@ func (a *MainAgent) addPermissionRule(rule permission.Rule, scope permission.Rul
 	if ownerRole == "" {
 		ownerRole = "builder"
 	}
-	projectPath, userGlobalPath := agentPermissionRulePaths(a.projectRoot, ownerRole)
+	projectPath, userGlobalPath := agentPermissionRulePaths(a.contentRoot, ownerRole)
 
 	var err error
 	scopePath := ""

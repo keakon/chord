@@ -626,8 +626,8 @@ func (m *Model) syncWorkingDirFromAgent() {
 	}
 	wd := strings.TrimSpace(m.workingDir)
 	if m.agent != nil {
-		if projectRoot := strings.TrimSpace(m.agent.ProjectRoot()); projectRoot != "" {
-			wd = projectRoot
+		if workDir := strings.TrimSpace(m.agent.WorkDir()); workDir != "" {
+			wd = workDir
 		}
 	}
 	// The working dir is pushed to both views on every sync, not only when it

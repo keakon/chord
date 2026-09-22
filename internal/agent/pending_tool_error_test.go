@@ -119,6 +119,7 @@ func TestHandleAgentErrorFailsPendingToolCalls(t *testing.T) {
 		sessionDir,
 		"test-model",
 		projectRoot,
+		projectRoot,
 		&config.Config{},
 		nil,
 		mcp.ClientInfo{Name: "chord-test", Version: "test"},

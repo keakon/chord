@@ -151,7 +151,7 @@ func TestToolExecutionPipelineWritesStartedJournalBeforeExecute(t *testing.T) {
 		agentID:     "agent-1",
 		registry:    registry,
 		fileTrack:   filelock.NewFileTracker(),
-		projectRoot: projectRoot,
+		toolBaseDir: projectRoot,
 		appendToolActivity: func(rec recovery.ToolActivityRecord) error {
 			appended = append(appended, rec)
 			started.Store(true)
@@ -186,7 +186,7 @@ func TestToolExecutionPipelineSkipsStartedJournalForReadOnly(t *testing.T) {
 		agentID:     "agent-1",
 		registry:    registry,
 		fileTrack:   filelock.NewFileTracker(),
-		projectRoot: projectRoot,
+		toolBaseDir: projectRoot,
 		appendToolActivity: func(recovery.ToolActivityRecord) error {
 			appended++
 			return nil
@@ -213,7 +213,7 @@ func TestToolExecutionPipelineJournalFailureBlocksExecute(t *testing.T) {
 		agentID:     "agent-1",
 		registry:    registry,
 		fileTrack:   filelock.NewFileTracker(),
-		projectRoot: projectRoot,
+		toolBaseDir: projectRoot,
 		appendToolActivity: func(recovery.ToolActivityRecord) error {
 			return journalErr
 		},

@@ -54,7 +54,14 @@ type ToolActivityRecord struct {
 	TurnID  uint64 `json:"turn_id"`
 	Tool    string `json:"tool"`
 	State   string `json:"state"`
-	TS      int64  `json:"ts"` // unix nanoseconds
+	// WorkDir is the agent's active checkout when the call started, and
+	// WorkDirGeneration is the binding generation that produced it. A crash
+	// replay must resolve the call's relative paths against the same
+	// directory, so the journal carries them instead of assuming the
+	// session's startup directory.
+	WorkDir           string `json:"workdir,omitempty"`
+	WorkDirGeneration uint64 `json:"workdir_generation,omitempty"`
+	TS                int64  `json:"ts"` // unix nanoseconds
 }
 
 // SessionSnapshot captures the recoverable state of a session at a point in
@@ -151,24 +158,30 @@ func RestoreTodoItems(states []TodoState) []tools.TodoItem {
 
 // AgentSnapshot captures the recoverable state of a running SubAgent.
 type AgentSnapshot struct {
-	InstanceID              string           `json:"instance_id"`    // e.g. "agent-1"
-	TaskID                  string           `json:"task_id"`        // plan task ID or "adhoc-N"
-	AgentDefName            string           `json:"agent_def_name"` // agent definition name (e.g. "backend-coder")
-	TaskDesc                string           `json:"task_desc"`      // task description
-	PlanTaskRef             string           `json:"plan_task_ref,omitempty"`
-	SemanticTaskKey         string           `json:"semantic_task_key,omitempty"`
-	ExpectedWriteScope      tools.WriteScope `json:"expected_write_scope"`
-	SelectedModelRef        string           `json:"selected_model_ref,omitempty"`
-	RunningModelRef         string           `json:"running_model_ref,omitempty"`
-	OwnerAgentID            string           `json:"owner_agent_id,omitempty"`
-	OwnerTaskID             string           `json:"owner_task_id,omitempty"`
-	Depth                   int              `json:"depth,omitempty"`
-	JoinToOwner             bool             `json:"join_to_owner,omitempty"`
-	State                   string           `json:"state,omitempty"`
-	LastSummary             string           `json:"last_summary,omitempty"`
-	PendingCompleteIntent   bool             `json:"pending_complete_intent,omitempty"`
-	PendingCompleteSummary  string           `json:"pending_complete_summary,omitempty"`
-	PendingCompleteEnvelope json.RawMessage  `json:"pending_complete_envelope,omitempty"`
+	InstanceID         string           `json:"instance_id"`    // e.g. "agent-1"
+	TaskID             string           `json:"task_id"`        // plan task ID or "adhoc-N"
+	AgentDefName       string           `json:"agent_def_name"` // agent definition name (e.g. "backend-coder")
+	TaskDesc           string           `json:"task_desc"`      // task description
+	PlanTaskRef        string           `json:"plan_task_ref,omitempty"`
+	SemanticTaskKey    string           `json:"semantic_task_key,omitempty"`
+	ExpectedWriteScope tools.WriteScope `json:"expected_write_scope"`
+	SelectedModelRef   string           `json:"selected_model_ref,omitempty"`
+	RunningModelRef    string           `json:"running_model_ref,omitempty"`
+	OwnerAgentID       string           `json:"owner_agent_id,omitempty"`
+	OwnerTaskID        string           `json:"owner_task_id,omitempty"`
+	Depth              int              `json:"depth,omitempty"`
+	JoinToOwner        bool             `json:"join_to_owner,omitempty"`
+	State              string           `json:"state,omitempty"`
+	LastSummary        string           `json:"last_summary,omitempty"`
+	// WorkDir is the agent's active checkout at snapshot time and
+	// WorkDirGeneration is its binding generation. A restored agent must
+	// resume in this directory; without it, replay resolves the restored
+	// transcript's relative paths against a different checkout.
+	WorkDir                 string          `json:"work_dir,omitempty"`
+	WorkDirGeneration       uint64          `json:"work_dir_generation,omitempty"`
+	PendingCompleteIntent   bool            `json:"pending_complete_intent,omitempty"`
+	PendingCompleteSummary  string          `json:"pending_complete_summary,omitempty"`
+	PendingCompleteEnvelope json.RawMessage `json:"pending_complete_envelope,omitempty"`
 	Persistence             struct {
 		State       string    `json:"state"`
 		LastError   string    `json:"last_error,omitempty"`

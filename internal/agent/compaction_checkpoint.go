@@ -450,8 +450,8 @@ func compactionHeadingSection(summaryContent, heading string) string {
 	return strings.TrimSpace(body[searchStart : searchStart+relEnd])
 }
 
-func extractCompactionKeyFiles(summaryContent, projectRoot string) []string {
-	return extractCompactionPathBullets(compactionFilesAndEvidenceSection(summaryContent), projectRoot, false)
+func extractCompactionKeyFiles(summaryContent, workDir string) []string {
+	return extractCompactionPathBullets(compactionFilesAndEvidenceSection(summaryContent), workDir, false)
 }
 
 // extractCompactionStateFiles reads the state_files a checkpoint registered
@@ -459,8 +459,8 @@ func extractCompactionKeyFiles(summaryContent, projectRoot string) []string {
 // (CompactContextArgs.StateFiles), so unlike the key-file list a continuation
 // may re-load them after the reset — including the .chord/notes and
 // .chord/plans documents the key-file list filters out as harness-internal.
-func extractCompactionStateFiles(summaryContent, projectRoot string) []string {
-	return extractCompactionPathBullets(compactionHeadingSection(summaryContent, "## Externalized State"), projectRoot, true)
+func extractCompactionStateFiles(summaryContent, workDir string) []string {
+	return extractCompactionPathBullets(compactionHeadingSection(summaryContent, "## Externalized State"), workDir, true)
 }
 
 // extractCompactionPathBullets parses one path per "- " bullet, dropping the
@@ -468,7 +468,7 @@ func extractCompactionStateFiles(summaryContent, projectRoot string) []string {
 // normalization. With allowNotesRoots set, agent-owned .chord/notes and
 // .chord/plans documents are accepted; the rest of the .chord/ tree stays
 // filtered as harness-internal.
-func extractCompactionPathBullets(section, projectRoot string, allowNotesRoots bool) []string {
+func extractCompactionPathBullets(section, workDir string, allowNotesRoots bool) []string {
 	if strings.TrimSpace(section) == "" {
 		return nil
 	}
@@ -483,7 +483,7 @@ func extractCompactionPathBullets(section, projectRoot string, allowNotesRoots b
 		line = strings.Trim(line, "`")
 		line = strings.TrimRight(line, ".,;:!?)]}>\"'，。；：！？）】》」』’”")
 		line = strings.TrimPrefix(line, "@")
-		path := normalizeCheckpointPath(line, projectRoot, allowNotesRoots)
+		path := normalizeCheckpointPath(line, workDir, allowNotesRoots)
 		if path == "" || seen[path] {
 			continue
 		}
@@ -493,13 +493,13 @@ func extractCompactionPathBullets(section, projectRoot string, allowNotesRoots b
 	return out
 }
 
-func normalizeCheckpointFilePath(path, projectRoot string) string {
-	return normalizeCheckpointPath(path, projectRoot, false)
+func normalizeCheckpointFilePath(path, workDir string) string {
+	return normalizeCheckpointPath(path, workDir, false)
 }
 
-func normalizeCheckpointPath(path, projectRoot string, allowNotesRoots bool) string {
+func normalizeCheckpointPath(path, workDir string, allowNotesRoots bool) string {
 	path = strings.TrimSpace(path)
-	if path == "" || projectRoot == "" {
+	if path == "" || workDir == "" {
 		return ""
 	}
 	if strings.Contains(path, ": ") || strings.HasPrefix(strings.ToLower(path), "archived history") {
@@ -507,7 +507,7 @@ func normalizeCheckpointPath(path, projectRoot string, allowNotesRoots bool) str
 	}
 	candidate := filepath.FromSlash(path)
 	if filepath.IsAbs(candidate) {
-		rel, err := filepath.Rel(projectRoot, candidate)
+		rel, err := filepath.Rel(workDir, candidate)
 		if err != nil {
 			return ""
 		}
@@ -525,15 +525,15 @@ func normalizeCheckpointPath(path, projectRoot string, allowNotesRoots bool) str
 	if strings.HasPrefix(relFold, ".chord/") && !(allowNotesRoots && isCompactionNotesPath(relFold)) {
 		return ""
 	}
-	info, err := os.Stat(filepath.Join(projectRoot, candidate))
+	info, err := os.Stat(filepath.Join(workDir, candidate))
 	if err != nil || info.IsDir() {
 		return ""
 	}
-	resolvedRoot, err := filepath.EvalSymlinks(projectRoot)
+	resolvedRoot, err := filepath.EvalSymlinks(workDir)
 	if err != nil {
 		return ""
 	}
-	resolvedPath, err := filepath.EvalSymlinks(filepath.Join(projectRoot, candidate))
+	resolvedPath, err := filepath.EvalSymlinks(filepath.Join(workDir, candidate))
 	if err != nil {
 		return ""
 	}
@@ -551,8 +551,8 @@ func isCompactionNotesPath(rel string) bool {
 	return strings.HasPrefix(rel, ".chord/notes/") || strings.HasPrefix(rel, ".chord/plans/")
 }
 
-func extractCompactionKeyFileCandidates(messages []message.Message, projectRoot string, limit int) []string {
-	if limit <= 0 || projectRoot == "" {
+func extractCompactionKeyFileCandidates(messages []message.Message, workDir string, limit int) []string {
+	if limit <= 0 || workDir == "" {
 		return nil
 	}
 	seen := make(map[string]bool, limit)
@@ -561,7 +561,7 @@ func extractCompactionKeyFileCandidates(messages []message.Message, projectRoot 
 		if len(out) >= limit {
 			return
 		}
-		normalized := normalizeCheckpointFilePath(candidate, projectRoot)
+		normalized := normalizeCheckpointFilePath(candidate, workDir)
 		if normalized == "" || seen[normalized] {
 			return
 		}

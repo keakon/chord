@@ -86,6 +86,7 @@ func newBlockingRuntime(t *testing.T) (*Runtime, *agent.MainAgent, chan struct{}
 		sessionDir,
 		"test-model",
 		projectRoot,
+		projectRoot,
 		&config.Config{},
 		nil,
 		mcp.ClientInfo{Name: "chord-test", Version: "test"},

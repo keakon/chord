@@ -101,13 +101,15 @@ func (a *MainAgent) toolExecutionPipeline() toolExecutionPipeline {
 		// MainAgent owns every job; its own instance id both stamps its jobs and
 		// lets it reach jobs started by any SubAgent.
 		jobAccess:       tools.JobAccess{MainAgentID: a.instanceID},
-		projectRoot:     a.projectRoot,
 		guidance:        mainToolOutputGuidance,
 		applyPatchRetry: &a.applyPatchRetry,
 		currentRuleset: func() permission.Ruleset {
 			return a.effectiveRuleset()
 		},
-		toolBaseDir: a.projectRoot,
+		toolBaseDir:           a.effectiveToolBaseDir(),
+		machineStateRoot:      a.ContentRoot(),
+		toolBaseDirGeneration: a.workDirState.load().Generation,
+		pathScope:             a.effectivePathScope,
 		refreshRulesetAfterRuleIntent: func(toolName string, intent *ConfirmRuleIntent) permission.Ruleset {
 			a.processRuleIntent(toolName, intent, a.currentAgentName())
 			return a.effectiveRuleset()
@@ -163,9 +165,26 @@ func normalizeDenyReason(reason string) string {
 	return reason
 }
 
+// workDir returns the checkout the agent's tools and shell commands run in.
+// It is the single runtime source for tool path resolution: worktree switches
+// publish the active checkout into workDirState, and cachedWorkDir only holds
+// the directory the session started in.
+func (a *MainAgent) workDir() string {
+	if a == nil {
+		return ""
+	}
+	if dir := strings.TrimSpace(a.workDirState.load().Path); dir != "" {
+		return dir
+	}
+	if dir := strings.TrimSpace(a.cachedWorkDir); dir != "" {
+		return dir
+	}
+	return a.contentRoot
+}
+
 // effectiveToolBaseDir resolves the base directory tools execute against,
 // matching toolExecutionPipeline.effectiveToolBaseDir without constructing the
 // pipeline (some per-result paths only need the directory).
 func (a *MainAgent) effectiveToolBaseDir() string {
-	return a.projectRoot
+	return a.workDir()
 }

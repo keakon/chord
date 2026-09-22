@@ -39,7 +39,7 @@ func planSessionStartup(sessionsDir string, opts sessionStartupOptions) (session
 		mainPath := filepath.Join(sessionDir, identity.MainSessionLogFilename)
 		info, err := os.Stat(mainPath)
 		if err != nil || info.Size() == 0 {
-			return sessionStartupPlan{}, fmt.Errorf("session %s not found or has no messages in the current project; if it belongs to another chord-managed worktree, run `chord resume %s` to locate and resume it", opts.ResumeID, opts.ResumeID)
+			return sessionStartupPlan{}, fmt.Errorf("session %s not found or has no messages in the current project", opts.ResumeID)
 		}
 		// --resume names one specific session: silently substituting another
 		// would not be honoring the request, so a busy session is an error.

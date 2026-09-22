@@ -535,7 +535,7 @@ func TestGrepParallelScanBoundsOutOfOrderResults(t *testing.T) {
 	}
 	done := make(chan result, 1)
 	go func() {
-		_, _, _, _, err := grepWalkRootWithScanner(context.Background(), dir, regexp.MustCompile("missing"), nil, dir, maxGrepMatches, maxGrepOutputBytes, scanFile)
+		_, _, _, _, err := grepWalkRootWithScanner(context.Background(), dir, regexp.MustCompile("missing"), nil, dir, maxGrepMatches, maxGrepOutputBytes, "", scanFile)
 		done <- result{err: err}
 	}()
 
@@ -604,7 +604,7 @@ func TestGrepWalkRootReturnsCancellationDuringScan(t *testing.T) {
 		cancel()
 		return scanGrepFile(ctx, path, baseDir, re, capMatches, capBytes)
 	}
-	_, _, _, _, err := grepWalkRootWithScanner(ctx, dir, regexp.MustCompile("needle"), nil, dir, maxGrepMatches, maxGrepOutputBytes, scanFile)
+	_, _, _, _, err := grepWalkRootWithScanner(ctx, dir, regexp.MustCompile("needle"), nil, dir, maxGrepMatches, maxGrepOutputBytes, "", scanFile)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)
 	}

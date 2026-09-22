@@ -32,6 +32,9 @@ const (
 	NameReadArtifact   = toolname.ReadArtifact
 	NameViewImage      = toolname.ViewImage
 	NameCompactContext = toolname.CompactContext
+	NameWorktreeEnter  = toolname.WorktreeEnter
+	NameWorktreeExit   = toolname.WorktreeExit
+	NameWorktreeList   = toolname.WorktreeList
 )
 
 var NormalizeName = toolname.Normalize

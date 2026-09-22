@@ -52,7 +52,7 @@ func (m *Manager) AfterFileWriteToolResult(ctx context.Context, absPath, content
 		return base
 	}
 	absPath = normalizeWaiterPath(absPath)
-	if !pathUnderDir(absPath, m.projectRoot) {
+	if !pathUnderDir(absPath, m.projectRootPath()) {
 		m.logLSPServiceNote(absPath, "File is outside project root; language servers were not notified.")
 		return base
 	}

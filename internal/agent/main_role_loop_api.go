@@ -204,8 +204,15 @@ func (a *MainAgent) switchRoleByName(name string) {
 	a.emitToTUI(ToastEvent{Message: fmt.Sprintf("role: %s → %s", from, name), Level: "info"})
 }
 
-func (a *MainAgent) ProjectRoot() string {
-	return strings.TrimSpace(a.projectRoot)
+// ContentRoot returns the root the project content and machine state are
+// anchored to (the main worktree root for a linked worktree).
+func (a *MainAgent) ContentRoot() string {
+	return strings.TrimSpace(a.contentRoot)
+}
+
+// WorkDir returns the checkout the agent's tools and shell commands run in.
+func (a *MainAgent) WorkDir() string {
+	return a.effectiveToolBaseDir()
 }
 
 func (a *MainAgent) LoopKeepsMainBusy() bool {

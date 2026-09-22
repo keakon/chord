@@ -109,13 +109,13 @@ type CompactContextValidator struct {
 	// EstimateTokens converts text to an estimated token count; nil falls
 	// back to len(text)/3.
 	EstimateTokens TokenEstimator
-	// ProjectRoot returns the absolute project root that state_files
-	// spellings resolve against. nil or an empty result keeps the strict
-	// subset: only plain workspace-relative entries are accepted. With a
-	// root, absolute and "~"/"./"/"../"-prefixed spellings are accepted when
-	// they lexically resolve inside it and are normalized to
-	// workspace-relative form before storage.
-	ProjectRoot func() string
+	// WorkDir returns the absolute working directory that state_files
+	// spellings resolve against — the same base the file tools use. nil or an
+	// empty result keeps the strict subset: only plain workspace-relative
+	// entries are accepted. With a root, absolute and "~"/"./"/"../"-prefixed
+	// spellings are accepted when they lexically resolve inside it and are
+	// normalized to workspace-relative form before storage.
+	WorkDir func() string
 	// TodoWriteVisible reports whether todo_write is part of the same
 	// live, model-appropriate tool surface the MainAgent builds for prompts
 	// (registered and not denied). When true, Description() adds guidance to
@@ -178,12 +178,12 @@ func (v CompactContextValidator) ParseCompactContextArgs(raw json.RawMessage) (C
 	if args.RetiredItems, err = validateCompactContextList(args.RetiredItems, 40, "retired_items"); err != nil {
 		return CompactContextArgs{}, err
 	}
-	stateFiles, err := validateStateFiles(args.StateFiles, 16, v.currentProjectRoot())
+	stateFiles, err := validateStateFiles(args.StateFiles, 16, v.currentWorkDir())
 	if err != nil {
 		return CompactContextArgs{}, err
 	}
 	args.StateFiles = stateFiles
-	plannedStateFiles, err := validateStateFiles(args.PlannedStateFiles, 16, v.currentProjectRoot())
+	plannedStateFiles, err := validateStateFiles(args.PlannedStateFiles, 16, v.currentWorkDir())
 	if err != nil {
 		return CompactContextArgs{}, fmt.Errorf("validate planned_state_files: %w", err)
 	}
@@ -418,13 +418,13 @@ func validateCompactContextList(items []string, maxItems int, name string) ([]st
 	return out, nil
 }
 
-// currentProjectRoot returns the project root spellings resolve against, or
-// "" when no provider is wired (strict plain-relative mode).
-func (v CompactContextValidator) currentProjectRoot() string {
-	if v.ProjectRoot == nil {
+// currentWorkDir returns the working directory state_files spellings resolve
+// against, or "" when no provider is wired (strict plain-relative mode).
+func (v CompactContextValidator) currentWorkDir() string {
+	if v.WorkDir == nil {
 		return ""
 	}
-	return v.ProjectRoot()
+	return v.WorkDir()
 }
 
 // validateStateFiles applies the lexical project-root path contract to

@@ -77,7 +77,7 @@ func TestEvaluateToolPermissionDoneRequiresLoopAuthorization(t *testing.T) {
 "*": deny
 read: allow
 `)
-	inLoop := evaluateToolPermissionInDirWithContext(rs, tools.NameDone, json.RawMessage(`{}`), "", toolPermissionContext{LoopExitAuthorized: true})
+	inLoop := evaluateToolPermissionInDirWithContext(rs, tools.NameDone, json.RawMessage(`{}`), permission.PathScope{}, toolPermissionContext{LoopExitAuthorized: true})
 	if inLoop.Action != permission.ActionAllow {
 		t.Fatalf("done inside a loop under a wildcard-only deny = %q, want allow", inLoop.Action)
 	}
@@ -101,7 +101,7 @@ func TestEvaluateToolPermissionDoneExplicitRulesWin(t *testing.T) {
 		rs := permissionRuleset(t, `
 "*": deny
 done: `+tc.rule)
-		got := evaluateToolPermissionInDirWithContext(rs, tools.NameDone, json.RawMessage(`{}`), "", toolPermissionContext{LoopExitAuthorized: true})
+		got := evaluateToolPermissionInDirWithContext(rs, tools.NameDone, json.RawMessage(`{}`), permission.PathScope{}, toolPermissionContext{LoopExitAuthorized: true})
 		if got.Action != tc.want {
 			t.Fatalf("explicit done %s = %q, want %q", tc.rule, got.Action, tc.want)
 		}

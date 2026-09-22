@@ -72,7 +72,7 @@ func extractToolArgument(toolName string, args []byte) string {
 	return extractToolArgumentInDir(toolName, args, "")
 }
 
-func extractToolArgumentInDir(toolName string, args []byte, projectRoot string) string {
+func extractToolArgumentInDir(toolName string, args []byte, workDir string) string {
 	toolName = tools.NormalizeName(toolName)
 	switch toolName {
 	case tools.NameDelegate:
@@ -88,7 +88,7 @@ func extractToolArgumentInDir(toolName string, args []byte, projectRoot string) 
 		}
 	case tools.NameEdit, tools.NameApplyPatch:
 		// Both edit and patch tools use path extraction
-		if path := trackedEditPathFromArgs(args, projectRoot); path != "" {
+		if path := trackedEditPathFromArgs(args, workDir); path != "" {
 			return path
 		}
 	case tools.NameRead, tools.NameWrite, tools.NameViewImage:

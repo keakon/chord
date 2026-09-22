@@ -436,7 +436,7 @@ func TestApplyPatchRetryAllowsChangedPatchWithoutRead(t *testing.T) {
 // absolute path all increment the same counter.
 func TestEditRetryAdviceUnifiesPathSpellings(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	root := a.projectRoot
+	root := a.contentRoot
 	rel := editRetryPayload(tools.NameEdit, `{"path":"demo.md"}`, editMatchFailureError())
 	dotRel := editRetryPayload(tools.NameEdit, `{"path":"./demo.md"}`, editMatchFailureError())
 	abs := editRetryPayload(tools.NameEdit, fmt.Sprintf(`{"path":%q}`, filepath.Join(root, "demo.md")), editMatchFailureError())

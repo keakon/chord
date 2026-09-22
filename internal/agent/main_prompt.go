@@ -11,6 +11,7 @@ import (
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/mcp"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/pathutil"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -31,7 +32,7 @@ import (
 // picked up until the next /new, /resume, or equivalent reset; AGENTS.md is
 // treated as a session-scope snapshot.
 func (a *MainAgent) ReloadAgentsMD() bool {
-	content := loadAgentsMDWithWorkDir(a.projectRoot, a.cachedWorkDir)
+	content := loadAgentsMDWithWorkDir(a.contentRoot, a.workDir())
 
 	a.promptMetaMu.Lock()
 	if content == a.cachedAgentsMD {
@@ -537,7 +538,7 @@ func (a *MainAgent) shouldUsePlannerPrompt(activeCfg *config.AgentConfig) bool {
 func (a *MainAgent) promptMetaSnapshot() (workDir, gitStatus, agentsMD, venvPath string) {
 	a.promptMetaMu.RLock()
 	defer a.promptMetaMu.RUnlock()
-	return a.cachedWorkDir, a.cachedGitStatus, a.cachedAgentsMD, a.cachedVenvPath
+	return a.workDir(), a.cachedGitStatus, a.cachedAgentsMD, a.cachedVenvPath
 }
 
 func (a *MainAgent) cachedAgentsMDSnapshot() string {
@@ -552,55 +553,117 @@ func (a *MainAgent) setCachedGitStatus(status string) {
 	a.promptMetaMu.Unlock()
 }
 
-func loadAgentsMDWithWorkDir(projectRoot, workDir string) string {
-	if projectRoot == "" {
+func (a *MainAgent) setCachedVenvPath(path string) {
+	a.promptMetaMu.Lock()
+	a.cachedVenvPath = path
+	a.promptMetaMu.Unlock()
+}
+
+// refreshWorkDirDerivedMeta recomputes the per-checkout facts that every
+// request injects: the git status (which names the branch) and the Python
+// virtualenv path. Both are derived from the working directory, so every
+// publication of a new workDir binding must call this — a switch that leaves
+// them at the startup value keeps telling the model it is on the branch of the
+// checkout it left, and a session that starts bound to a worktree never gets
+// them right at all.
+func (a *MainAgent) refreshWorkDirDerivedMeta() {
+	if a == nil {
+		return
+	}
+	workDir := a.workDir()
+	a.setCachedGitStatus(getGitStatus(workDir))
+	// A worktree checkout normally carries no virtualenv and the project's
+	// lives in the main worktree, so prefer the active checkout's own
+	// environment and fall back to the content root's instead of dropping the
+	// hint the moment the agent switches.
+	venv := detectVenvPath(workDir, a.contentRoot)
+	if venv == "" && strings.TrimSpace(a.contentRoot) != "" && workDir != a.contentRoot {
+		venv = detectVenvPath(a.contentRoot, a.contentRoot)
+	}
+	a.setCachedVenvPath(venv)
+}
+
+// loadAgentsMDWithWorkDir loads the AGENTS.md instructions that apply to the
+// agent's current checkout, from the checkout root down to workDir.
+//
+// Every level resolves to exactly one file: the checkout's own copy when it
+// exists (a branch may carry its own tracked instructions), otherwise the
+// content root's copy (where gitignored local instructions live, and which the
+// worktree checkout does not contain). Levels are never loaded from both
+// checkouts, so the same instructions are not repeated.
+func loadAgentsMDWithWorkDir(contentRoot, workDir string) string {
+	if contentRoot == "" {
 		return ""
 	}
 
-	absRoot, err := filepath.Abs(projectRoot)
+	absRoot, err := filepath.Abs(contentRoot)
 	if err != nil {
 		return ""
 	}
 	displayBase := absRoot
+	checkoutRoot := absRoot
+	// Level "" is the checkout root; deeper levels follow when workDir sits
+	// below it.
+	levels := []string{""}
 
-	// Collect candidate directories: projectRoot plus all subdirs on the path
-	// to workDir (if workDir is under projectRoot).
-	dirs := []string{absRoot}
 	if workDir != "" {
-		absWork, werr := filepath.Abs(workDir)
-		if werr == nil {
-			rel, ok := relativePathWithin(absRoot, absWork)
-			if ok && rel != "." {
-				displayBase = absWork
-				// Walk from absRoot down to absWork, collecting intermediate dirs.
+		if absWork, werr := filepath.Abs(workDir); werr == nil {
+			// Titles stay relative to the checkout the agent works in, even when
+			// that checkout sits outside the content root (a chord-managed
+			// worktree under the state directory).
+			displayBase = absWork
+			// The walk is relative to the checkout workDir sits in: a linked
+			// worktree or submodule nested inside the repository has its own
+			// root, not the content root's.
+			checkoutRoot = pathutil.CheckoutRoot(absWork, absRoot)
+			rel, ok := relativePathWithin(checkoutRoot, absWork)
+			if !ok {
+				rel = "."
+			}
+			if rel != "." {
 				parts := strings.Split(rel, string(filepath.Separator))
 				for i := 1; i <= len(parts); i++ {
-					dirs = append(dirs, filepath.Join(absRoot, filepath.Join(parts[:i]...)))
+					levels = append(levels, filepath.Join(parts[:i]...))
 				}
 			}
 		}
 	}
 
 	var sections []string
-	for _, dir := range dirs {
-		path := filepath.Join(dir, "AGENTS.md")
-		data, rerr := os.ReadFile(path)
-		if rerr != nil {
-			if !os.IsNotExist(rerr) {
-				log.Warnf("failed to read AGENTS.md path=%v error=%v", path, rerr)
+	for _, rel := range levels {
+		checkoutPath := filepath.Join(checkoutRoot, rel, "AGENTS.md")
+		contentPath := filepath.Join(absRoot, rel, "AGENTS.md")
+		path, data, ok := readAgentsMDLevel(checkoutPath, contentPath)
+		if !ok {
+			continue
+		}
+		log.Debugf("loaded AGENTS.md path=%v size=%v", path, len(data))
+		display := displayPathFromWorkDir(displayBase, path)
+		if display == "" {
+			display = "AGENTS.md"
+		}
+		sections = append(sections, fmt.Sprintf("## %s\n\n%s", display, data))
+	}
+	return strings.Join(sections, "\n\n")
+}
+
+// readAgentsMDLevel reads one AGENTS.md level, preferring the checkout's own
+// copy and falling back to the content root's copy. It returns the file that
+// was read and its trimmed non-empty content.
+func readAgentsMDLevel(checkoutPath, contentPath string) (string, string, bool) {
+	for _, path := range []string{checkoutPath, contentPath} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				log.Warnf("failed to read AGENTS.md path=%v error=%v", path, err)
 			}
 			continue
 		}
-		if c := strings.TrimSpace(string(data)); c != "" {
-			log.Debugf("loaded AGENTS.md path=%v size=%v", path, len(c))
-			rel := displayPathFromWorkDir(displayBase, path)
-			if rel == "" {
-				rel = "AGENTS.md"
-			}
-			sections = append(sections, fmt.Sprintf("## %s\n\n%s", rel, c))
+		if trimmed := strings.TrimSpace(string(data)); trimmed != "" {
+			return path, trimmed, true
 		}
 	}
-	return strings.Join(sections, "\n\n")
+	return "", "", false
 }
 
 func displayPathFromWorkDir(workDir, path string) string {
@@ -742,7 +805,7 @@ func findGitHead(workDir string) (gitRoot, headPath string) {
 // given working directory upward. At each level it checks for .venv, venv, and
 // env directories (in that order) and returns the absolute path of the first one
 // that exists and contains a pyvenv.cfg file. Returns "" if none is found.
-func detectVenvPath(workDir, projectRoot string) string {
+func detectVenvPath(workDir, contentRoot string) string {
 	if workDir == "" {
 		return ""
 	}
@@ -751,8 +814,8 @@ func detectVenvPath(workDir, projectRoot string) string {
 		return ""
 	}
 	absRoot := ""
-	if projectRoot != "" {
-		if root, rerr := filepath.Abs(projectRoot); rerr == nil {
+	if contentRoot != "" {
+		if root, rerr := filepath.Abs(contentRoot); rerr == nil {
 			absRoot = root
 		}
 	}

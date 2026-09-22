@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -160,6 +161,47 @@ func TestWorktreeFinishCmd_MessageFlagCreatesCustomSquashCommit(t *testing.T) {
 	}
 }
 
+func TestWorktreeFinishCmd_NotesMainCheckoutUpdateForRealRuns(t *testing.T) {
+	repo := setupStartupRepo(t)
+	withTestStateDir(t)
+	chdirForTest(t, repo)
+
+	info := prepareStartupWorktreeForTest(t, context.Background(), "alpha")
+	if err := os.WriteFile(filepath.Join(info.Path, "extra.txt"), []byte("hi\n"), 0o644); err != nil {
+		t.Fatalf("write extra: %v", err)
+	}
+	runStartupGit(t, info.Path, "add", "extra.txt")
+	runStartupGit(t, info.Path, "commit", "-q", "-m", "worktree commit")
+
+	chdirForTest(t, repo)
+	checkCmd := newWorktreeFinishCmd()
+	checkCmd.SetOut(io.Discard)
+	checkStderr, err := captureStderr(t, func() error {
+		checkCmd.SetArgs([]string{"alpha", "--check", "--onto", "main"})
+		return checkCmd.Execute()
+	})
+	if err != nil {
+		t.Fatalf("finish --check: %v", err)
+	}
+	if strings.Contains(checkStderr, "main checkout") {
+		t.Fatalf("finish --check stderr = %q, want no main-checkout note", checkStderr)
+	}
+
+	chdirForTest(t, repo)
+	finishCmd := newWorktreeFinishCmd()
+	finishCmd.SetOut(io.Discard)
+	finishStderr, err := captureStderr(t, func() error {
+		finishCmd.SetArgs([]string{"alpha", "--onto", "main"})
+		return finishCmd.Execute()
+	})
+	if err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	if !strings.Contains(finishStderr, "main checkout") || !strings.Contains(finishStderr, "fast-forwards main") {
+		t.Fatalf("finish stderr = %q, want the main-checkout note naming the target branch", finishStderr)
+	}
+}
+
 func TestRunWorktreeSessionEntry_SetsWorktreeAndResumeFlags(t *testing.T) {
 	repo := setupStartupRepo(t)
 	withTestStateDir(t)
@@ -181,7 +223,7 @@ func TestRunWorktreeSessionEntry_SetsWorktreeAndResumeFlags(t *testing.T) {
 	var gotInfo *worktree.Info
 	var gotMetaName string
 	var gotCwd string
-	err := runWorktreeSessionEntry(&cobra.Command{}, "alpha", false, "sid-123", func(*cobra.Command, []string) error {
+	err := runWorktreeSessionEntry(&cobra.Command{}, "alpha", false, "sid-123", false, func(*cobra.Command, []string) error {
 		gotContinue = flagContinueSession
 		gotResume = flagResumeSession
 		gotInfo = flagWorktreeStartupInfo

@@ -971,6 +971,7 @@ func newTestAppContextWithBuilder(
 		sessionDir,
 		"model-alpha",
 		projectRoot,
+		projectRoot,
 		cfg,
 		nil,
 		mcp.ClientInfo{Name: "chord-test", Version: "test"},
@@ -984,7 +985,8 @@ func newTestAppContextWithBuilder(
 
 	ac := &AppContext{
 		Ctx:         context.Background(),
-		ProjectRoot: projectRoot,
+		ContentRoot: projectRoot,
+		WorkDir:     projectRoot,
 		SessionDir:  sessionDir,
 		CtxMgr:      ctxMgr,
 		MainAgent:   mainAgent,

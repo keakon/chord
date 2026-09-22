@@ -269,8 +269,11 @@ type AgentForTUI interface {
 	Events() <-chan AgentEvent
 	GetMessages() []message.Message
 	StartupResumeStatus() (pending bool, sessionID string)
-	// ProjectRoot returns the runtime project root directory.
-	ProjectRoot() string
+	// ContentRoot returns the root the project's content and machine state are
+	// anchored to (the main worktree root inside a linked worktree).
+	ContentRoot() string
+	// WorkDir returns the checkout the agent's tools and shell commands run in.
+	WorkDir() string
 	// InvokedSkills returns skills explicitly loaded via the Skill tool in the current session.
 	InvokedSkills() []*skill.Meta
 	// GetTodos returns the current todo list for sidebar display.

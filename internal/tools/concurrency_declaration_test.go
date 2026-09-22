@@ -96,6 +96,7 @@ func TestReadOnlyBatchableToolPoliciesStayNonExclusive(t *testing.T) {
 		{NameGlob, GlobTool{BaseDir: "/tmp"}, `{"path":"."}`},
 		{NameWebFetch, WebFetchTool{}, `{"url":"https://example.invalid/page"}`},
 		{NameLsp, LspTool{BaseDir: "/tmp"}, `{"path":"main.go"}`},
+		{NameWorktreeList, WorktreeListTool{}, `{}`},
 	}
 	declared, _ := scanReadOnlyClassDeclarations(t)
 	covered := make(map[string]string, len(cases)) // receiver type -> case name

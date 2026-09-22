@@ -16,6 +16,11 @@ import (
 // GlobTool finds files matching a glob pattern with support for ** recursive matching.
 type GlobTool struct {
 	BaseDir string // session working directory for relative paths; empty keeps process cwd behavior
+	// WorktreeRoot, when set, is the absolute directory that holds
+	// chord-managed worktrees. A walk rooted above it prunes it so a search
+	// never reports another checkout's copies; searching inside it explicitly
+	// still works.
+	WorktreeRoot string
 }
 
 type globArgs struct {
@@ -151,16 +156,24 @@ func (t GlobTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		return formatGlobResult(ctx, a, resolvedBaseDir, patterns, acc.result(), startedAt)
 	}
 
-	result, err := globWalkMatches(resolvedBaseDir, patterns, captureFullOutput)
+	skipDir := ""
+	if rel, ok := worktreeSkipRel(resolvedBaseDir, t.WorktreeRoot); ok {
+		skipDir = filepath.Join(resolvedBaseDir, rel)
+	}
+	result, err := globWalkMatches(resolvedBaseDir, patterns, captureFullOutput, skipDir)
 	if err != nil {
 		return "", err
 	}
 	return formatGlobResult(ctx, a, resolvedBaseDir, patterns, result, startedAt)
 }
 
-func globWalkMatches(resolvedBaseDir string, patterns []string, captureFullOutput bool) (globResult, error) {
+func globWalkMatches(resolvedBaseDir string, patterns []string, captureFullOutput bool, skipDir string) (globResult, error) {
 	if err := validateGlobPatterns(patterns); err != nil {
 		return globResult{}, err
+	}
+	skipRel := ""
+	if rel, ok := worktreeSkipRel(resolvedBaseDir, skipDir); ok {
+		skipRel = filepath.ToSlash(rel)
 	}
 	seenMatches := make(map[string]struct{})
 	acc := newGlobMatchAccumulator(resolvedBaseDir, 0, captureFullOutput)
@@ -174,6 +187,9 @@ func globWalkMatches(resolvedBaseDir string, patterns []string, captureFullOutpu
 			return errGuardAbort
 		}
 		if d.IsDir() && path != "." && skipDirNames[d.Name()] {
+			return fs.SkipDir
+		}
+		if skipRel != "" && d.IsDir() && path == skipRel {
 			return fs.SkipDir
 		}
 		if d.IsDir() {

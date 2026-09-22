@@ -48,6 +48,12 @@ func mustRunGit(t *testing.T, dir string, args ...string) []byte {
 	return out
 }
 
+// gitRevParse returns the trimmed output of `git rev-parse <rev>`.
+func gitRevParse(t *testing.T, dir, rev string) string {
+	t.Helper()
+	return strings.TrimSpace(string(mustRunGit(t, dir, "rev-parse", rev)))
+}
+
 // setupTestRepo creates an empty git repo under t.TempDir() with a
 // single commit on its default branch, returns the canonical repo path.
 func setupTestRepo(t *testing.T) string {
@@ -90,6 +96,40 @@ func setupTestLocator(t *testing.T) *config.PathLocator {
 		SessionsRoot: sessionsDir,
 		LogsDir:      logsDir,
 		ExportsDir:   filepath.Join(stateDir, "exports"),
+	}
+}
+
+// seedProjectState creates the per-project state chord generates for a
+// worktree path (sessions, exports, runtime cache, registry metadata) and
+// returns its locator.
+func seedProjectState(t *testing.T, pl *config.PathLocator, worktreePath string) *config.ProjectLocator {
+	t.Helper()
+	pj, err := pl.LocateProject(worktreePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{pj.ProjectSessionsDir, pj.ProjectExportsDir, pj.RuntimeCacheDir, filepath.Dir(pj.RegistryMetaPath)} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(pj.ProjectSessionsDir, "marker"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pj.RegistryMetaPath, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return pj
+}
+
+func assertPathExists(t *testing.T, path string, want bool) {
+	t.Helper()
+	_, err := os.Stat(path)
+	if want && err != nil {
+		t.Errorf("%s missing, want it kept: %v", path, err)
+	}
+	if !want && err == nil {
+		t.Errorf("%s still exists, want it removed", path)
 	}
 }
 
@@ -155,6 +195,46 @@ func TestCreate_FastResume(t *testing.T) {
 	}
 	if first.Path != second.Path {
 		t.Errorf("path drift: %q vs %q", first.Path, second.Path)
+	}
+}
+
+func TestCreate_RefusesLeftoverBranchWithoutReset(t *testing.T) {
+	repo := setupTestRepo(t)
+	pl := setupTestLocator(t)
+	ctx := context.Background()
+	info, err := Create(ctx, CreateOptions{Name: "feat", RepoRoot: repo, PathLocator: pl})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Put a commit only on the worktree branch, then remove the worktree while
+	// keeping the branch: recreating the name must not reset it silently.
+	if err := os.WriteFile(filepath.Join(info.Path, "extra.txt"), []byte("keep me\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, info.Path, "add", "extra.txt")
+	runTestGit(t, info.Path, "commit", "-q", "-m", "extra")
+	branchTip := gitRevParse(t, repo, "chord/feat")
+	if err := Remove(ctx, repo, "feat", RemoveOptions{}, pl); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = Create(ctx, CreateOptions{Name: "feat", RepoRoot: repo, PathLocator: pl})
+	if err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("recreate over leftover branch: err=%v, want refusal mentioning the existing branch", err)
+	}
+	if got := gitRevParse(t, repo, "chord/feat"); got != branchTip {
+		t.Fatalf("branch moved even though Create was refused: %s -> %s", branchTip, got)
+	}
+
+	recreated, err := Create(ctx, CreateOptions{Name: "feat", RepoRoot: repo, PathLocator: pl, ResetBranch: true})
+	if err != nil {
+		t.Fatalf("Create with ResetBranch: %v", err)
+	}
+	if recreated.Path != info.Path {
+		t.Errorf("reset-recreate path drift: %q vs %q", recreated.Path, info.Path)
+	}
+	if got, want := gitRevParse(t, repo, "chord/feat"), gitRevParse(t, repo, "HEAD"); got != want {
+		t.Errorf("ResetBranch left the branch at %s, want the main HEAD %s", got, want)
 	}
 }
 
@@ -230,7 +310,7 @@ func TestList_FiltersByBranchPrefix(t *testing.T) {
 	}
 }
 
-func TestRemove_DefaultPreservesBranch(t *testing.T) {
+func TestRemove_DefaultPreservesBranchAndSessions(t *testing.T) {
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
@@ -238,17 +318,7 @@ func TestRemove_DefaultPreservesBranch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Seed sessions/cache so we can assert cleanup happened.
-	pj, err := pl.LocateProject(info.Path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(pj.ProjectSessionsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(pj.ProjectSessionsDir, "marker"), []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	pj := seedProjectState(t, pl, info.Path)
 
 	if err := Remove(ctx, repo, "feat", RemoveOptions{}, pl); err != nil {
 		t.Fatalf("Remove: %v", err)
@@ -256,9 +326,13 @@ func TestRemove_DefaultPreservesBranch(t *testing.T) {
 	if _, err := os.Stat(info.Path); err == nil {
 		t.Errorf("worktree dir still exists after Remove")
 	}
-	if _, err := os.Stat(pj.ProjectSessionsDir); err == nil {
-		t.Errorf("sessions dir still exists after Remove (cascade cleanup failed)")
-	}
+	// Sessions and exports belong to the repository, not to the checkout, so
+	// removing a worktree must leave them alone.
+	assertPathExists(t, pj.ProjectSessionsDir, true)
+	assertPathExists(t, pj.ProjectExportsDir, true)
+	// Runtime cache and registry metadata are derived from the checkout.
+	assertPathExists(t, pj.RuntimeCacheDir, false)
+	assertPathExists(t, pj.RegistryMetaPath, false)
 	// Branch must remain — Remove default keeps it.
 	branches, err := exec.Command("git", "-C", repo, "branch", "--list", "chord/feat").CombinedOutput()
 	if err != nil {
@@ -267,6 +341,25 @@ func TestRemove_DefaultPreservesBranch(t *testing.T) {
 	if !strings.Contains(string(branches), "chord/feat") {
 		t.Errorf("branch chord/feat removed by default; should require --delete-branch / --force")
 	}
+}
+
+func TestRemove_PurgeSessions(t *testing.T) {
+	repo := setupTestRepo(t)
+	pl := setupTestLocator(t)
+	ctx := context.Background()
+	info, err := Create(ctx, CreateOptions{Name: "feat", RepoRoot: repo, PathLocator: pl})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pj := seedProjectState(t, pl, info.Path)
+
+	if err := Remove(ctx, repo, "feat", RemoveOptions{PurgeSessions: true}, pl); err != nil {
+		t.Fatalf("Remove with purge: %v", err)
+	}
+	assertPathExists(t, pj.ProjectSessionsDir, false)
+	assertPathExists(t, pj.ProjectExportsDir, false)
+	assertPathExists(t, pj.RuntimeCacheDir, false)
+	assertPathExists(t, pj.RegistryMetaPath, false)
 }
 
 func TestRemove_DeleteBranch_OnUnmergedRefuses(t *testing.T) {

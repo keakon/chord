@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/keakon/chord/internal/identity"
+	"github.com/keakon/chord/internal/recovery"
 )
 
 // newResumeCmd resolves a session id back to the worktree (or main repo)
@@ -46,13 +47,10 @@ func newResumeCmd() *cobra.Command {
 				}
 				flagWorktreeStartupInfo = loc.Worktree
 				flagWorktreeStartupMeta = worktreeMetaForInfo(loc.Worktree)
-			case loc.MainRepoRoot != "":
-				if err := os.Chdir(loc.MainRepoRoot); err != nil {
-					return fmt.Errorf("chdir to main repo %q: %w", loc.MainRepoRoot, err)
-				}
-			case loc.ProjectRoot != "":
-				if err := os.Chdir(loc.ProjectRoot); err != nil {
-					return fmt.Errorf("chdir to project %q: %w", loc.ProjectRoot, err)
+				flagWorktreeStartupReason = recovery.WorktreeSwitchResume
+			case loc.ContentRoot != "":
+				if err := os.Chdir(loc.ContentRoot); err != nil {
+					return fmt.Errorf("chdir to project root %q: %w", loc.ContentRoot, err)
 				}
 			default:
 				return fmt.Errorf("session %q location could not be determined", sid)
@@ -79,10 +77,8 @@ func newResumeCmd() *cobra.Command {
 			switch {
 			case loc.Worktree != nil:
 				fmt.Fprintf(os.Stderr, "Resuming session %s in worktree %s (%s)\n", sid, loc.Worktree.Name, loc.Worktree.Branch)
-			case loc.MainRepoRoot != "":
-				fmt.Fprintf(os.Stderr, "Resuming session %s in main repository (%s)\n", sid, loc.MainRepoRoot)
-			case loc.ProjectRoot != "":
-				fmt.Fprintf(os.Stderr, "Resuming session %s in project (%s)\n", sid, loc.ProjectRoot)
+			case loc.ContentRoot != "":
+				fmt.Fprintf(os.Stderr, "Resuming session %s in %s\n", sid, loc.ContentRoot)
 			}
 			flagResumeSession = sid
 			flagContinueSession = false

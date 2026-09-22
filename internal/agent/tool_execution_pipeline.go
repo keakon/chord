@@ -44,9 +44,18 @@ type toolExecutionPipeline struct {
 	jobAccess        tools.JobAccess
 	guidance         string
 	logPrefix        string
-	projectRoot      string
 	toolBaseDir      string
-	applyPatchRetry  *applyPatchRetryGuard
+	// machineStateRoot is the repository content root (the main worktree).
+	// Empty leaves every call on toolBaseDir.
+	machineStateRoot string
+	// callBaseDir overrides toolBaseDir for one call that targets only chord
+	// machine state; see withMachineStateBaseDir.
+	callBaseDir string
+	// toolBaseDirGeneration is the binding generation toolBaseDir was captured
+	// from. The started journal records it with the directory so a crash replay
+	// can tell which checkout a call's relative paths belong to.
+	toolBaseDirGeneration uint64
+	applyPatchRetry       *applyPatchRetryGuard
 
 	currentRuleset                func() permission.Ruleset
 	refreshRulesetAfterRuleIntent func(toolName string, intent *ConfirmRuleIntent) permission.Ruleset
@@ -72,6 +81,10 @@ type toolExecutionPipeline struct {
 	// evaluation input (args, ruleset identity, cwd, pctx) before reusing the
 	// recorded allow; true skips the re-evaluation in applyPermission.
 	preapprovedPermission func(callID, name string, args json.RawMessage, cwd string, pctx toolPermissionContext) bool
+	// pathScope returns the policy-root scope for path-taking tools: the tool
+	// base dir plus the repository's checkout roots. nil falls back to the
+	// base dir alone, which keeps cwd-only path rules.
+	pathScope             func() permission.PathScope
 	visibleToolNames      func() map[string]struct{}
 	appendToolActivity    func(recovery.ToolActivityRecord) error
 	captureWalltimeTarget func() *walltimeTarget
@@ -97,10 +110,64 @@ func decodeShellCallArguments(args json.RawMessage) (shellCallArguments, error) 
 }
 
 func (p toolExecutionPipeline) effectiveToolBaseDir() string {
-	if strings.TrimSpace(p.toolBaseDir) != "" {
-		return p.toolBaseDir
+	if dir := strings.TrimSpace(p.callBaseDir); dir != "" {
+		return dir
 	}
-	return p.projectRoot
+	return strings.TrimSpace(p.toolBaseDir)
+}
+
+// withMachineStateBaseDir rebinds one call to the content root when it targets
+// only chord machine state (plans, notes, memory, docs, worktrees, MEMORY.md).
+// Those directories are machine state, not checkout content: a worktree
+// checkout never contains them, so resolving them against the session working
+// directory writes a plan into a checkout that `worktree remove` deletes.
+//
+// Rebinding the whole call — rather than each path inside the tools — keeps the
+// permission scope, the tracked file lock, the pre-write capture and the tool
+// itself on one path. It is idempotent (always recomputed from toolBaseDir) and
+// a no-op for calls that mix machine state with checkout content, which keeps
+// unclassifiable calls on the ordinary base directory.
+func (p toolExecutionPipeline) withMachineStateBaseDir(tc message.ToolCall) toolExecutionPipeline {
+	bindingDir := strings.TrimSpace(p.toolBaseDir)
+	root := strings.TrimSpace(p.machineStateRoot)
+	p.callBaseDir = ""
+	if root == "" || root == bindingDir {
+		return p
+	}
+	if tools.MachineStateTargetsInDir(tc.Name, tc.Args, bindingDir) {
+		p.callBaseDir = root
+	}
+	return p
+}
+
+// executeToolForCall runs one tool call anchored to the pipeline's snapshot of
+// the working directory. The registry holds one shared instance per session,
+// registered with the directory the session started in, so the base dir is
+// applied per request instead of by mutating that shared instance: a worktree
+// switch takes effect for the calls that bind the new snapshot and never
+// half-updates a call already in flight.
+func (p toolExecutionPipeline) executeToolForCall(ctx context.Context, tc message.ToolCall) (string, error) {
+	tool, ok := p.registry.Get(tc.Name)
+	if !ok {
+		return "", fmt.Errorf("tool not found: %s", tc.Name)
+	}
+	args := llm.UnwrapToolArgs(tc.Args)
+	baseDir := p.effectiveToolBaseDir()
+	if baseDir != "" {
+		if anchored, ok := tool.(tools.BaseDirTool); ok {
+			tool = anchored.WithBaseDir(baseDir)
+		}
+	}
+	return tool.Execute(ctx, args)
+}
+
+// effectivePathScope resolves the policy-root scope for path-taking tools,
+// falling back to the base dir alone when no resolver was injected.
+func (p toolExecutionPipeline) effectivePathScope() permission.PathScope {
+	if p.pathScope != nil {
+		return p.pathScope()
+	}
+	return permission.PathScope{Cwd: p.effectiveToolBaseDir()}
 }
 
 // toolActivityJournalRequired reports whether a finalized tool call needs a
@@ -141,12 +208,14 @@ func (p toolExecutionPipeline) recordToolActivityStarted(tc message.ToolCall) er
 		turnID = p.currentTurnID()
 	}
 	rec := recovery.ToolActivityRecord{
-		CallID:  tc.ID,
-		AgentID: p.toolActivityAgentID(),
-		TurnID:  turnID,
-		Tool:    tc.Name,
-		State:   recovery.ToolActivityStateStarted,
-		TS:      time.Now().UnixNano(),
+		CallID:            tc.ID,
+		AgentID:           p.toolActivityAgentID(),
+		TurnID:            turnID,
+		Tool:              tc.Name,
+		State:             recovery.ToolActivityStateStarted,
+		WorkDir:           p.effectiveToolBaseDir(),
+		WorkDirGeneration: p.toolBaseDirGeneration,
+		TS:                time.Now().UnixNano(),
 	}
 	if err := p.appendToolActivity(rec); err != nil {
 		log.Warnf("tool-activity journal append failed agent=%v call_id=%v error=%v", p.toolActivityAgentID(), tc.ID, err)
@@ -358,6 +427,7 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 	if err := normalizeCompatibleToolCallArgs(&tc, &execResult); err != nil {
 		return execResult, err
 	}
+	p = p.withMachineStateBaseDir(tc)
 	if p.reservedToolError != nil {
 		if err := p.reservedToolError(tc.Name); err != nil {
 			return execResult, err
@@ -385,6 +455,8 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 			if err := normalizeCompatibleToolCallArgs(&tc, &execResult); err != nil {
 				return execResult, err
 			}
+			// A hook may rewrite the target, so re-anchor from the binding dir.
+			p = p.withMachineStateBaseDir(tc)
 			if err := p.applyPermission(ctx, &tc, &execResult); err != nil {
 				return execResult, err
 			}
@@ -488,7 +560,7 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 		return execResult, err
 	}
 
-	result, err := p.registry.Execute(agentCtx, tc.Name, llm.UnwrapToolArgs(tc.Args))
+	result, err := p.executeToolForCall(agentCtx, tc)
 	execResult.Images = imageSink.Drain()
 	deleteAudit, hasDeleteAudit := deleteAuditSink.Audit()
 	if deleteLocks != nil && hasDeleteAudit {
@@ -586,6 +658,7 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 	if err := normalizeCompatibleToolCallArgs(&tc, &execResult); err != nil {
 		return execResult, err
 	}
+	p = p.withMachineStateBaseDir(tc)
 	if p.visibleToolNames != nil {
 		if err := p.checkVisible(tc.Name); err != nil {
 			return execResult, err
@@ -668,7 +741,7 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 			return execResult, err
 		}
 	}
-	result, err := p.registry.Execute(agentCtx, tc.Name, llm.UnwrapToolArgs(tc.Args))
+	result, err := p.executeToolForCall(agentCtx, tc)
 	execResult.Images = imageSink.Drain()
 	if err != nil && staleWrite && (tc.Name == tools.NameEdit || tc.Name == tools.NameApplyPatch) {
 		err = wrapStaleEditError(err)
@@ -927,7 +1000,7 @@ func (p toolExecutionPipeline) applyPermission(ctx context.Context, tc *message.
 	if p.preapprovedPermission != nil && p.preapprovedPermission(tc.ID, tc.Name, tc.Args, p.effectiveToolBaseDir(), pctx) {
 		return nil
 	}
-	decision := evaluateToolPermissionInDirWithContext(ruleset, tc.Name, tc.Args, p.effectiveToolBaseDir(), pctx)
+	decision := evaluateToolPermissionInDirWithContext(ruleset, tc.Name, tc.Args, p.effectivePathScope(), pctx)
 	switch decision.Action {
 	case permission.ActionDeny:
 		logToolPermissionDenied(p.logPrefix, p.agentID, tc.Name, decision.MatchArgument)
@@ -968,7 +1041,7 @@ func (p toolExecutionPipeline) applyPermission(ctx context.Context, tc *message.
 			ruleset = p.refreshRulesetAfterRuleIntent(tc.Name, resp.RuleIntent)
 		}
 		originalArgs := append(json.RawMessage(nil), tc.Args...)
-		editedArgs, err := applyConfirmedArgsEdits(p.registry, ruleset, tc.Name, tc.Args, resp.FinalArgsJSON, p.effectiveToolBaseDir())
+		editedArgs, err := applyConfirmedArgsEdits(p.registry, ruleset, tc.Name, tc.Args, resp.FinalArgsJSON, p.effectivePathScope())
 		if err != nil {
 			return err
 		}

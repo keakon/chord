@@ -1,13 +1,13 @@
 package main
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/command"
+	"github.com/keakon/chord/internal/pathutil"
 	"github.com/keakon/chord/internal/skill"
 )
 
@@ -23,10 +23,10 @@ func loadCustomCommands(ac *AppContext) {
 	if ac.GlobalCfg != nil {
 		globalCfgCommands = ac.GlobalCfg.Commands
 	}
-	projectCfgPath := filepath.Join(ac.ProjectRoot, ".chord", "config.yaml")
+	projectCfgPath := filepath.Join(ac.ContentRoot, ".chord", "config.yaml")
 	globalCfgPath := filepath.Join(ac.ConfigHome, "config.yaml")
 	defs, warnings := command.Load(command.LoadOptions{
-		ProjectRoot:    ac.ProjectRoot,
+		ContentRoot:    ac.ContentRoot,
 		ConfigHome:     ac.ConfigHome,
 		ProjectCfg:     projectCfgCommands,
 		ProjectCfgPath: projectCfgPath,
@@ -44,34 +44,55 @@ func loadCustomCommands(ac *AppContext) {
 }
 
 func skillLoadDirs(ac *AppContext) []string {
-	cwd, _ := os.Getwd()
-	return skillLoadDirsForWorkDir(ac, cwd)
-}
-
-func skillLoadDirsForWorkDir(ac *AppContext, cwd string) []string {
 	if ac == nil {
 		return nil
 	}
-	skillDirs := []string{
-		filepath.Join(ac.ProjectRoot, ".chord", "skills"),
-		filepath.Join(ac.ProjectRoot, ".agents", "skills"),
-		filepath.Join(ac.ConfigHome, "skills"),
+	return skillLoadDirsForWorkDir(ac, ac.WorkDir)
+}
+
+func skillLoadDirsForWorkDir(ac *AppContext, workDir string) []string {
+	if ac == nil {
+		return nil
 	}
-	// Walk from projectRoot to cwd,
-	// collecting .agents/skills at each level. Deeper dirs come first
-	// (higher priority in first-wins deduplication).
-	if chain := WorkDirSkillChain(ac.ProjectRoot, cwd); len(chain) > 0 {
-		// Insert after project-local directories but before global/home skills.
-		merged := make([]string, 0, len(skillDirs)+len(chain))
-		merged = append(merged, skillDirs[:2]...)
-		merged = append(merged, chain...)
-		merged = append(merged, skillDirs[2:]...)
-		skillDirs = merged
+	roots := ac.projectSkillRoots(workDir)
+	skillDirs := make([]string, 0, 2*len(roots)+4)
+	if len(roots) > 0 {
+		checkout := roots[0]
+		skillDirs = append(skillDirs,
+			filepath.Join(checkout, ".chord", "skills"),
+			filepath.Join(checkout, ".agents", "skills"))
+		// Walk from the checkout root down to workDir, collecting
+		// .agents/skills at each level. Deeper dirs come first (higher priority
+		// in first-wins deduplication), and the checkout's own chain outranks
+		// the content-root fallback below.
+		skillDirs = append(skillDirs, WorkDirSkillChain(checkout, workDir)...)
+		for _, fallback := range roots[1:] {
+			skillDirs = append(skillDirs,
+				filepath.Join(fallback, ".chord", "skills"),
+				filepath.Join(fallback, ".agents", "skills"))
+		}
 	}
+	skillDirs = append(skillDirs, filepath.Join(ac.ConfigHome, "skills"))
 	if ac.Cfg != nil && len(ac.Cfg.Skills.Paths) > 0 {
 		skillDirs = append(skillDirs, ac.Cfg.Skills.Paths...)
 	}
 	return skillDirs
+}
+
+// projectSkillRoots returns the roots project skills are read from, in priority
+// order: the checkout workDir sits in first (a branch may add or override
+// skills), then the content root as the fallback for gitignored project skills
+// the checkout does not contain. The skill loader de-duplicates by skill name,
+// so listing both implements "checkout wins, otherwise content root".
+func (ac *AppContext) projectSkillRoots(workDir string) []string {
+	if ac == nil || strings.TrimSpace(ac.ContentRoot) == "" {
+		return nil
+	}
+	checkoutRoot := pathutil.CheckoutRoot(workDir, ac.ContentRoot)
+	if checkoutRoot == "" || checkoutRoot == ac.ContentRoot {
+		return []string{ac.ContentRoot}
+	}
+	return []string{checkoutRoot, ac.ContentRoot}
 }
 
 // WorkDirSkillChain walks from projectRoot to cwd, collecting
@@ -113,6 +134,22 @@ func refreshSkills(ac *AppContext) {
 		return
 	}
 	skillDirs := skillLoadDirs(ac)
+	refreshSkillsFromDirs(ac, skillDirs)
+}
+
+// refreshSkillsForWorkDir reloads project skills for an explicit working
+// directory after a worktree switch. It mirrors refreshSkills but anchors the
+// checkout-first lookup at workDir instead of the startup ac.WorkDir, so a
+// branch that adds .chord/skills becomes visible without restarting.
+func refreshSkillsForWorkDir(ac *AppContext, workDir string) {
+	if ac == nil || ac.MainAgent == nil || ac.Cfg == nil {
+		return
+	}
+	skillDirs := skillLoadDirsForWorkDir(ac, workDir)
+	refreshSkillsFromDirs(ac, skillDirs)
+}
+
+func refreshSkillsFromDirs(ac *AppContext, skillDirs []string) {
 	go func() {
 		skillLoader := skill.NewLoader(skillDirs)
 		loadedSkills, skillErr := skillLoader.ScanMeta()

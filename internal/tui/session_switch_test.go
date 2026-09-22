@@ -365,7 +365,7 @@ func TestDeferredWindowSwitchRestartsPreheatForNewHalo(t *testing.T) {
 	}
 }
 
-func TestStartupRestoredDeferredTranscriptUsesUpdatedProjectRootForRelativeToolPath(t *testing.T) {
+func TestStartupRestoredDeferredTranscriptUsesUpdatedWorkDirForRelativeToolPath(t *testing.T) {
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+110+2)
 	for i := range startupTranscriptWindowMinBlocks + 110 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("filler-%03d", i)})
@@ -378,7 +378,7 @@ func TestStartupRestoredDeferredTranscriptUsesUpdatedProjectRootForRelativeToolP
 		}}},
 		message.Message{Role: "tool", ToolCallID: "call-read-root-1", Content: "1\tneedle line\n2\tomega line"},
 	)
-	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages, projectRoot: "/repo-b"}
+	backend := &sessionControlAgent{resumePending: true, startupResumeID: "123", messages: messages, contentRoot: "/repo-b", workDir: "/repo-b"}
 	m := NewModelWithSize(backend, 120, 24)
 	m.workingDir = "/repo-a"
 	m.viewport.SetWorkingDir(m.workingDir)
@@ -414,9 +414,9 @@ func TestStartupRestoredDeferredTranscriptUsesUpdatedProjectRootForRelativeToolP
 	}
 }
 
-func TestStartupRestoreRenormalizesSidebarFilesForUpdatedProjectRoot(t *testing.T) {
-	projectRoot := t.TempDir()
-	editedPath := filepath.Join(projectRoot, "internal", "tui", "app.go")
+func TestStartupRestoreRenormalizesSidebarFilesForUpdatedWorkDir(t *testing.T) {
+	contentRoot := t.TempDir()
+	editedPath := filepath.Join(contentRoot, "internal", "tui", "app.go")
 	args, err := json.Marshal(map[string]string{
 		"path":       editedPath,
 		"old_string": "old",
@@ -428,7 +428,8 @@ func TestStartupRestoreRenormalizesSidebarFilesForUpdatedProjectRoot(t *testing.
 	backend := &sessionControlAgent{
 		resumePending:   true,
 		startupResumeID: "123",
-		projectRoot:     projectRoot,
+		contentRoot:     contentRoot,
+		workDir:         contentRoot,
 		messages: []message.Message{
 			{Role: "assistant", ToolCalls: []message.ToolCall{{
 				ID:   "call-edit-root-1",
@@ -1698,8 +1699,8 @@ func TestStartupRestoreResetsTargetRuntimeCacheBeforeOpen(t *testing.T) {
 		t.Fatalf("NewManager(): %v", err)
 	}
 
-	projectRoot := t.TempDir()
-	handle, err := mgr.OpenSession(projectRoot, "restored-session")
+	contentRoot := t.TempDir()
+	handle, err := mgr.OpenSession(contentRoot, "restored-session")
 	if err != nil {
 		t.Fatalf("OpenSession(): %v", err)
 	}
@@ -1716,8 +1717,8 @@ func TestStartupRestoreResetsTargetRuntimeCacheBeforeOpen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Getwd(): %v", err)
 	}
-	if err := os.Chdir(projectRoot); err != nil {
-		t.Fatalf("Chdir(projectRoot): %v", err)
+	if err := os.Chdir(contentRoot); err != nil {
+		t.Fatalf("Chdir(contentRoot): %v", err)
 	}
 	defer func() { _ = os.Chdir(prevWD) }()
 
@@ -1727,7 +1728,7 @@ func TestStartupRestoreResetsTargetRuntimeCacheBeforeOpen(t *testing.T) {
 		sessionSummary:  &agent.SessionSummary{ID: "restored-session"},
 	}
 	m := NewModelWithSize(backend, 80, 24)
-	m.workingDir = projectRoot
+	m.workingDir = contentRoot
 	if m.runtimeCacheHandle != nil {
 		t.Fatal("startup restore should defer runtime cache open until SessionRestoredEvent")
 	}
@@ -4009,7 +4010,8 @@ func TestSessionRestoredEventUpdatesWorkingDirAndShowsRelativeToolPath(t *testin
 				Args: []byte(`{"path":"/repo-b/internal/tui/input.go","limit":1,"offset":358}`),
 			}},
 		}, {Role: "tool", ToolCallID: "tool-read", Content: "   359\t\n"}},
-		projectRoot: "/repo-b",
+		contentRoot: "/repo-b",
+		workDir:     "/repo-b",
 	}
 	m := NewModelWithSize(backend, 100, 30)
 	m.workingDir = "/repo-a"
@@ -4328,7 +4330,8 @@ type sessionControlAgent struct {
 	availableRoles          []string
 	currentRole             string
 	switchRoleErr           error
-	projectRoot             string
+	contentRoot             string
+	workDir                 string
 	focused                 string
 	providerModelRef        string
 	providerModelRefByFocus map[string]string
@@ -4570,13 +4573,19 @@ func (s *sessionControlAgent) GetContextReductionStats() agent.ContextReductionS
 func (s *sessionControlAgent) KeyStats() (available, total int)                          { return 0, 0 }
 func (s *sessionControlAgent) CurrentRateLimitSnapshot() *ratelimit.KeyRateLimitSnapshot { return nil }
 func (s *sessionControlAgent) ProxyInUseForRef(ref string) bool                          { return false }
-func (s *sessionControlAgent) ProjectRoot() string                                       { return s.projectRoot }
-func (s *sessionControlAgent) CurrentRole() string                                       { return s.currentRole }
-func (s *sessionControlAgent) LoopKeepsMainBusy() bool                                   { return false }
-func (s *sessionControlAgent) CurrentLoopState() agent.LoopState                         { return s.loopState }
-func (s *sessionControlAgent) MemoryEnabled() bool                                       { return s.memoryEnabled }
-func (s *sessionControlAgent) MemoryDegraded() bool                                      { return s.memoryDegraded }
-func (s *sessionControlAgent) CurrentLoopTarget() string                                 { return s.loopTarget }
+func (s *sessionControlAgent) ContentRoot() string                                       { return s.contentRoot }
+func (s *sessionControlAgent) WorkDir() string {
+	if s.workDir != "" {
+		return s.workDir
+	}
+	return s.contentRoot
+}
+func (s *sessionControlAgent) CurrentRole() string               { return s.currentRole }
+func (s *sessionControlAgent) LoopKeepsMainBusy() bool           { return false }
+func (s *sessionControlAgent) CurrentLoopState() agent.LoopState { return s.loopState }
+func (s *sessionControlAgent) MemoryEnabled() bool               { return s.memoryEnabled }
+func (s *sessionControlAgent) MemoryDegraded() bool              { return s.memoryDegraded }
+func (s *sessionControlAgent) CurrentLoopTarget() string         { return s.loopTarget }
 func (s *sessionControlAgent) CurrentLoopIteration() int {
 	if s.loopIteration == 0 {
 		return 1

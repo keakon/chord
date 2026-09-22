@@ -528,6 +528,9 @@ func (a *MainAgent) interruptCurrentTurnForReplacement() {
 
 // newTurn cancels any in-flight work and creates a fresh Turn.
 func (a *MainAgent) newTurn() {
+	// Policy roots are re-listed once per turn so a checkout created since the
+	// previous turn (by the user or a worktree tool) is in scope for this turn.
+	a.refreshPathRoots()
 	// A replay prefix belongs only to the recovery request of the turn that
 	// produced it. Clear it before replacing an idle or interrupted turn so a
 	// later user message cannot inherit stale model reasoning.
@@ -565,7 +568,7 @@ func (a *MainAgent) newTurn() {
 	}
 	a.newTurnOversizeRecoveryCount = 0
 	a.turn.streamingToolExec = NewStreamingToolExecutor(a.turn.ID, ctx, a.emitToTUI, a.executeToolCallSpeculative)
-	a.turn.streamingToolExec.SetProjectRoot(a.effectiveToolBaseDir())
+	a.turn.streamingToolExec.SetWorkDir(a.effectiveToolBaseDir())
 	a.turn.streamingToolExec.SetTraceCallbacks(a.recordToolTraceSpeculativeStart, a.recordToolTraceFirstVisibleResult, a.recordToolTraceSpeculativeDiscard)
 	a.emitToTUI(RequestCycleStartedEvent{AgentID: identity.MainAgentID, TurnID: a.turn.ID})
 	a.turnMu.Unlock()

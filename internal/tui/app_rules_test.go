@@ -126,7 +126,7 @@ func TestAddSessionRuleBuildsPersistentPaths(t *testing.T) {
 	ag := &sessionControlAgent{
 		events:      make(chan agent.AgentEvent),
 		currentRole: "builder",
-		projectRoot: "/home/user/project-root",
+		contentRoot: "/home/user/project-root",
 	}
 	m := NewModel(ag)
 
@@ -150,11 +150,11 @@ func TestAddSessionRuleBuildsPersistentPaths(t *testing.T) {
 	}
 }
 
-func TestResolveRuleScopePathUsesProjectRootInsteadOfWorkingDir(t *testing.T) {
+func TestResolveRuleScopePathUsesContentRootInsteadOfWorkDir(t *testing.T) {
 	ag := &sessionControlAgent{
 		events:      make(chan agent.AgentEvent),
 		currentRole: "builder",
-		projectRoot: "/repo/root",
+		contentRoot: "/repo/root",
 	}
 	m := NewModelWithSize(ag, 120, 30)
 	m.mode = ModeConfirm

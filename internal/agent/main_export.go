@@ -70,7 +70,7 @@ func (a *MainAgent) handleExportCommand(content string, busy bool) {
 
 	metadata := map[string]string{
 		session.MetadataKeyModel:       a.ModelName(),
-		session.MetadataKeyProjectPath: a.projectRoot,
+		session.MetadataKeyProjectPath: a.contentRoot,
 		session.MetadataKeySessionID:   persistID,
 		session.MetadataKeyInstanceID:  a.instanceID,
 	}

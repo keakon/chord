@@ -60,7 +60,7 @@ func newSilentSubAgent(t *testing.T, parent *MainAgent, taskID string) *SubAgent
 		ParentCtx:    ctx,
 		Cancel:       cancel,
 		BaseTools:    parent.tools,
-		WorkDir:      parent.projectRoot,
+		WorkDir:      parent.contentRoot,
 		SessionDir:   parent.sessionDir,
 		ModelName:    "test-model",
 	})

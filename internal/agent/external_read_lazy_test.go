@@ -38,7 +38,7 @@ func readMessageForLazyCheck(t *testing.T, path string) (message.Message, *reduc
 }
 
 func lazyAgentForTest() *MainAgent {
-	return &MainAgent{projectRoot: "", tools: &tools.Registry{}}
+	return &MainAgent{contentRoot: "", tools: &tools.Registry{}}
 }
 
 func TestLazyExternalReadInvalidationDetectsExternalEdit(t *testing.T) {
@@ -49,7 +49,7 @@ func TestLazyExternalReadInvalidationDetectsExternalEdit(t *testing.T) {
 	}
 	msg, scan := readMessageForLazyCheck(t, path)
 	a := lazyAgentForTest()
-	a.projectRoot = dir
+	a.contentRoot = dir
 
 	// Unchanged file: not stale.
 	invalidated := a.externalReadsInvalidatedLazy([]message.Message{msg}, scan)
@@ -74,7 +74,7 @@ func TestLazyExternalReadInvalidationMemoSkipsUnchangedStat(t *testing.T) {
 	}
 	msg, scan := readMessageForLazyCheck(t, path)
 	a := lazyAgentForTest()
-	a.projectRoot = dir
+	a.contentRoot = dir
 	if got := a.externalReadsInvalidatedLazy([]message.Message{msg}, scan); len(got) != 0 {
 		t.Fatalf("first pass stale: %v", got)
 	}
@@ -142,7 +142,7 @@ func TestLazyExternalReadInvalidationDeletedFileIsStale(t *testing.T) {
 	}
 	msg, scan := readMessageForLazyCheck(t, path)
 	a := lazyAgentForTest()
-	a.projectRoot = dir
+	a.contentRoot = dir
 	if got := a.externalReadsInvalidatedLazy([]message.Message{msg}, scan); len(got) != 0 {
 		t.Fatalf("unchanged file stale: %v", got)
 	}
@@ -179,7 +179,7 @@ func TestLazyExternalReadInvalidationRelativePathResolvesProjectRoot(t *testing.
 	}
 	scan := newReductionHistoryScan(msgs)
 	a := lazyAgentForTest()
-	a.projectRoot = dir
+	a.contentRoot = dir
 	if got := a.externalReadsInvalidatedLazy(msgs, scan); len(got) != 0 {
 		t.Fatalf("relative path resolved incorrectly: %v", got)
 	}
@@ -202,7 +202,7 @@ func TestLazyReadMemoResetWhenOverflow(t *testing.T) {
 	}
 	msg, scan := readMessageForLazyCheck(t, path)
 	a := lazyAgentForTest()
-	a.projectRoot = dir
+	a.contentRoot = dir
 	a.lazyReadMemo.mu.Lock()
 	a.lazyReadMemo.verdicts = make(map[string]externalReadLazyVerdict, lazyReadMemoMaxEntries)
 	for i := range lazyReadMemoMaxEntries {

@@ -95,7 +95,7 @@ func TestToolExecutionPipelineWriteUpdatesFileStateAndTracker(t *testing.T) {
 		registry:    registry,
 		fileTrack:   tracker,
 		fileBackups: newFileBackupManager(filepath.Join(projectRoot, ".chord", "sessions", "test")),
-		projectRoot: projectRoot,
+		toolBaseDir: projectRoot,
 	}
 	call := message.ToolCall{
 		ID:   "write-1",
@@ -153,7 +153,6 @@ func TestToolExecutionPipelineApplyPatchPartialFailureRecordsCommittedFiles(t *t
 		registry:    registry,
 		fileTrack:   tracker,
 		fileBackups: newFileBackupManager(filepath.Join(projectRoot, ".chord", "sessions", "test")),
-		projectRoot: projectRoot,
 		toolBaseDir: projectRoot,
 	}
 	patch := "*** Begin Patch\n" +
@@ -221,7 +220,6 @@ func TestToolExecutionPipelineZeroCommitStaleApplyPatchSurfacesWarning(t *testin
 		registry:    registry,
 		fileTrack:   tracker,
 		fileBackups: newFileBackupManager(filepath.Join(projectRoot, ".chord", "sessions", "test")),
-		projectRoot: projectRoot,
 		toolBaseDir: projectRoot,
 	}
 	patch := "*** Begin Patch\n" +
@@ -261,7 +259,6 @@ func TestToolExecutionPipelineRelativeDeleteReleasesTrackedLease(t *testing.T) {
 		registry:    registry,
 		fileTrack:   tracker,
 		fileBackups: newFileBackupManager(filepath.Join(projectRoot, ".chord", "sessions", "test")),
-		projectRoot: projectRoot,
 		toolBaseDir: projectRoot,
 	}
 	call := message.ToolCall{
@@ -314,7 +311,6 @@ func TestToolExecutionPipelineStaleDeleteNamesChangeAge(t *testing.T) {
 		registry:         registry,
 		fileTrack:        tracker,
 		fileBackups:      newFileBackupManager(filepath.Join(projectRoot, ".chord", "sessions", "test")),
-		projectRoot:      projectRoot,
 		toolBaseDir:      projectRoot,
 		runtimeStartedAt: time.Now().Add(-time.Hour),
 	}
@@ -351,7 +347,6 @@ func TestToolExecutionPipelineUnobservedDeleteBacksUpRegularFile(t *testing.T) {
 		registry:    registry,
 		fileTrack:   tracker,
 		fileBackups: newFileBackupManager(sessionDir),
-		projectRoot: projectRoot,
 		toolBaseDir: projectRoot,
 	}
 
@@ -390,7 +385,6 @@ func TestToolExecutionPipelineUnobservedDeleteBacksUpEmptyFile(t *testing.T) {
 		registry:    registry,
 		fileTrack:   tracker,
 		fileBackups: newFileBackupManager(sessionDir),
-		projectRoot: projectRoot,
 		toolBaseDir: projectRoot,
 	}
 
@@ -434,7 +428,6 @@ func TestToolExecutionPipelineUnobservedDeleteDoesNotFollowSymlink(t *testing.T)
 		registry:    registry,
 		fileTrack:   tracker,
 		fileBackups: newFileBackupManager(sessionDir),
-		projectRoot: projectRoot,
 		toolBaseDir: projectRoot,
 	}
 
@@ -476,7 +469,6 @@ func TestToolExecutionPipelineDeleteContinuesWhenBackupFails(t *testing.T) {
 		registry:    registry,
 		fileTrack:   tracker,
 		fileBackups: newFileBackupManager(sessionFile),
-		projectRoot: projectRoot,
 		toolBaseDir: projectRoot,
 	}
 
@@ -512,7 +504,6 @@ func TestToolExecutionPipelineDeletePartialFailureRecordsCommittedFiles(t *testi
 	pipeline := toolExecutionPipeline{
 		agentID:     "agent-1",
 		registry:    registry,
-		projectRoot: projectRoot,
 		toolBaseDir: projectRoot,
 		emit: func(event AgentEvent) {
 			if progress, ok := event.(ToolProgressEvent); ok && progress.Progress.Label == "paths" && progress.Progress.Current == 1 {
@@ -561,7 +552,7 @@ func TestToolExecutionPipelineStaleWriteBacksUpAndContinues(t *testing.T) {
 		registry:    registry,
 		fileTrack:   tracker,
 		fileBackups: newFileBackupManager(sessionDir),
-		projectRoot: projectRoot,
+		toolBaseDir: projectRoot,
 	}
 	call := message.ToolCall{
 		ID:   "write-1",
@@ -614,7 +605,7 @@ func TestToolExecutionPipelineUnreadableFileWriteProceedsWithoutBackup(t *testin
 		registry:    registry,
 		fileTrack:   tracker,
 		fileBackups: newFileBackupManager(sessionDir),
-		projectRoot: projectRoot,
+		toolBaseDir: projectRoot,
 	}
 	call := message.ToolCall{
 		ID:   "write-1",
@@ -656,7 +647,7 @@ func TestToolExecutionPipelineUnobservedWriteBacksUpAndContinues(t *testing.T) {
 		registry:    registry,
 		fileTrack:   tracker,
 		fileBackups: newFileBackupManager(sessionDir),
-		projectRoot: projectRoot,
+		toolBaseDir: projectRoot,
 	}
 	call := message.ToolCall{
 		ID:   "write-1",
@@ -701,7 +692,7 @@ func TestToolExecutionPipelineWriteConflictIsWrappedAndDoesNotExecute(t *testing
 	defer tracker.AbortWrite(path, "other-agent")
 	registry := tools.NewRegistry()
 	registry.Register(tools.WriteTool{})
-	pipeline := toolExecutionPipeline{agentID: "agent-1", registry: registry, fileTrack: tracker, projectRoot: projectRoot}
+	pipeline := toolExecutionPipeline{agentID: "agent-1", registry: registry, fileTrack: tracker, toolBaseDir: projectRoot}
 	call := message.ToolCall{
 		ID:   "write-1",
 		Name: tools.NameWrite,

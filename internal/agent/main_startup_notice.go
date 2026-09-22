@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"strings"
 )
 
 // SetStartupConfigIssues records the config-file problems the tolerant loader
@@ -33,4 +34,24 @@ func startupConfigIssuesNotice(count int) string {
 		return `config.yaml had 1 problem that was ignored at startup; run "chord doctor config" for details.`
 	}
 	return fmt.Sprintf(`config.yaml had %d problems that were ignored at startup; run "chord doctor config" for details.`, count)
+}
+
+// SetStartupWorkDirNotice records a resume problem the session could not fix
+// before the event loop started, so it can be surfaced once as a toast once the
+// TUI is attached. Mirrors SetStartupConfigIssues.
+func (a *MainAgent) SetStartupWorkDirNotice(notice string) {
+	if a == nil {
+		return
+	}
+	a.stateMu.Lock()
+	a.startupWorkDirNotice = strings.TrimSpace(notice)
+	a.stateMu.Unlock()
+}
+
+func (a *MainAgent) consumeStartupWorkDirNotice() string {
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	notice := a.startupWorkDirNotice
+	a.startupWorkDirNotice = ""
+	return notice
 }

@@ -161,7 +161,10 @@ func (a *MainAgent) compactionReductionScratch() *MainAgent {
 		// is safe; it powers the read-only shell classification (and the
 		// disk-backed read invalidation scan) during compaction-input building.
 		tools:       a.tools,
-		projectRoot: a.projectRoot,
+		contentRoot: a.contentRoot,
+		// The reduction pass resolves the same relative file paths the main
+		// request does, so the scratch must carry the same working directory.
+		cachedWorkDir: a.workDir(),
 		// The session dir is the reduction archive root. Without it, a
 		// non-rebuildable output (job_output / delegate / notify / question) that the
 		// main request archives in full would silently degrade to a lossy

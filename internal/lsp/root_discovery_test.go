@@ -30,7 +30,7 @@ func TestDiscoverWorkspaceRootNestedPackage(t *testing.T) {
 	}
 	target := filepath.Join(src, "apiBase.ts")
 
-	m := &Manager{projectRoot: root}
+	m := newTestManagerWithRoot(root)
 	cfg := config.LSPServerConfig{
 		RootMarkers: []string{"tsconfig.json", "jsconfig.json", "package.json", ".git"},
 	}
@@ -53,7 +53,7 @@ func TestDiscoverWorkspaceRootRootedProject(t *testing.T) {
 	}
 	target := filepath.Join(root, "src", "app.ts")
 
-	m := &Manager{projectRoot: root}
+	m := newTestManagerWithRoot(root)
 	cfg := config.LSPServerConfig{RootMarkers: []string{"tsconfig.json"}}
 	got, markerMatched, ok := m.discoverWorkspaceRoot("sample", cfg, target)
 	if !ok {
@@ -75,7 +75,7 @@ func TestDiscoverWorkspaceRootNoMarkerFallsBackToProjectRoot(t *testing.T) {
 	}
 	target := filepath.Join(src, "app.go")
 
-	m := &Manager{projectRoot: root}
+	m := newTestManagerWithRoot(root)
 	cfg := config.LSPServerConfig{RootMarkers: []string{"tsconfig.json", ".git"}}
 	got, markerMatched, ok := m.discoverWorkspaceRoot("sample", cfg, target)
 	if !ok {
@@ -102,7 +102,7 @@ func TestDiscoverWorkspaceRootStopsAtProjectRoot(t *testing.T) {
 	}
 	target := filepath.Join(root, "file.ts")
 
-	m := &Manager{projectRoot: root}
+	m := newTestManagerWithRoot(root)
 	cfg := config.LSPServerConfig{RootMarkers: []string{".git"}}
 	got, markerMatched, ok := m.discoverWorkspaceRoot("sample", cfg, target)
 	if !ok {
@@ -132,7 +132,7 @@ func TestDiscoverWorkspaceRootStopsAtProjectRootForPathItself(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := &Manager{projectRoot: root}
+	m := newTestManagerWithRoot(root)
 	cfg := config.LSPServerConfig{RootMarkers: []string{".git"}}
 	got, markerMatched, ok := m.discoverWorkspaceRoot("sample", cfg, root)
 	if !ok {
@@ -505,7 +505,7 @@ func TestFailMessageChoosesLexicographicallyFirstRootEvenWithEmptyRoot(t *testin
 // gate in serverRootForPath (the only place that could drop it) observable.
 func TestServerRootForPathFallsBackWhenMarkerAbsent(t *testing.T) {
 	root := t.TempDir()
-	m := &Manager{projectRoot: root}
+	m := newTestManagerWithRoot(root)
 	cfg := config.LSPServerConfig{FileTypes: []string{".ts"}, RootMarkers: []string{"tsconfig.json"}}
 	gotRoot, ok := m.serverRootForPath("sample", cfg, filepath.Join(root, "src", "app.ts"))
 	if !ok {
@@ -607,7 +607,7 @@ func TestDiscoverWorkspaceRootIgnoresOtherLanguageMarkers(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			manager := &Manager{projectRoot: root}
+			manager := newTestManagerWithRoot(root)
 			cfg := config.LSPServerConfig{Command: test.command}
 			rootForFile, matched, ok := manager.discoverWorkspaceRoot(test.server, cfg, filepath.Join(nested, test.filename))
 			if !ok || !matched || rootForFile != project {

@@ -12,9 +12,10 @@ import (
 	"time"
 )
 
-// CurrentRepoIndexSchema is the schema version for RepoIndex on disk;
-// bump and migrate when the structure changes incompatibly.
-const CurrentRepoIndexSchema = 1
+// CurrentRepoIndexSchema is the schema version for RepoIndex on disk.
+// A file written by a different schema is treated as a cache miss and
+// rebuilt from git; the index is never a cross-version contract.
+const CurrentRepoIndexSchema = 2
 
 // RepoIndex aggregates the main repo plus all chord-managed worktrees of
 // a single git repository. Path is <stateDir>/repos/<repoID>.json.
@@ -25,28 +26,24 @@ type RepoIndex struct {
 	DisplayName   string              `json:"display_name,omitempty"`
 	CreatedAt     time.Time           `json:"created_at"`
 	UpdatedAt     time.Time           `json:"updated_at"`
-	MainProject   RepoIndexProject    `json:"main_project,omitzero"`
 	Worktrees     []RepoIndexWorktree `json:"worktrees,omitempty"`
 }
 
-// RepoIndexProject pairs a project root with the chord ProjectKey that
-// scopes its sessions/cache/exports under the global state directory.
-type RepoIndexProject struct {
-	ProjectKey  string `json:"project_key,omitempty"`
-	ProjectRoot string `json:"project_root,omitempty"`
-}
-
 // RepoIndexWorktree records one chord-managed worktree under this repo.
-// Path is the canonical worktree root; ProjectKey is used to locate and
-// purge per-project state on remove.
+// Path is the canonical worktree root. The Owner fields are a display cache
+// of the authoritative chord-owner.json that lives in the worktree's own git
+// administration directory; they may be missing or stale after the index is
+// rebuilt, so removal decisions must re-read the file.
 type RepoIndexWorktree struct {
-	Name       string    `json:"name"`
-	Slug       string    `json:"slug"`
-	Branch     string    `json:"branch"`
-	Path       string    `json:"path"`
-	ProjectKey string    `json:"project_key,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
-	LastUsedAt time.Time `json:"last_used_at"`
+	Name           string    `json:"name"`
+	Slug           string    `json:"slug"`
+	Branch         string    `json:"branch"`
+	Path           string    `json:"path"`
+	OwnerSessionID string    `json:"owner_session_id,omitempty"`
+	OwnerAgentID   string    `json:"owner_agent_id,omitempty"`
+	OwnerKind      string    `json:"owner_kind,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	LastUsedAt     time.Time `json:"last_used_at"`
 }
 
 // RepoIDFor returns a short stable identifier for a canonical main repo
@@ -81,6 +78,9 @@ func LoadRepoIndex(stateDir, repoID string) (*RepoIndex, error) {
 		return nil, nil
 	}
 	if idx.RepoID == "" {
+		return nil, nil
+	}
+	if idx.SchemaVersion != CurrentRepoIndexSchema {
 		return nil, nil
 	}
 	return &idx, nil

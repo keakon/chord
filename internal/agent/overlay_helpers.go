@@ -18,7 +18,7 @@ func (a *MainAgent) initOverlay() {
 
 	a.stateMu.RLock()
 	cfg := a.activeConfig
-	projectRoot := a.projectRoot
+	contentRoot := a.contentRoot
 	a.stateMu.RUnlock()
 
 	var base permission.Ruleset
@@ -30,7 +30,7 @@ func (a *MainAgent) initOverlay() {
 		}
 	}
 
-	projectPath, userGlobalPath := agentPermissionRulePaths(projectRoot, roleName)
+	projectPath, userGlobalPath := agentPermissionRulePaths(contentRoot, roleName)
 	a.overlay.SetActiveRole(roleName)
 	a.overlay.SetBase(base)
 	a.overlay.SetProjectPath(projectPath)
@@ -90,13 +90,13 @@ func (a *MainAgent) RemoveOverlayAddedRule(index int) error {
 	return nil
 }
 
-func agentPermissionRulePaths(projectRoot, roleName string) (projectPath, userGlobalPath string) {
+func agentPermissionRulePaths(contentRoot, roleName string) (projectPath, userGlobalPath string) {
 	roleName = strings.TrimSpace(roleName)
 	if roleName == "" {
 		return "", ""
 	}
-	if projectRoot = strings.TrimSpace(projectRoot); projectRoot != "" {
-		projectPath = filepath.Join(projectRoot, ".chord", "agents", roleName+".yaml")
+	if contentRoot = strings.TrimSpace(contentRoot); contentRoot != "" {
+		projectPath = filepath.Join(contentRoot, ".chord", "agents", roleName+".yaml")
 	}
 	if configHome, err := config.ConfigHomeDir(); err == nil && strings.TrimSpace(configHome) != "" {
 		userGlobalPath = filepath.Join(configHome, "agents", roleName+".yaml")

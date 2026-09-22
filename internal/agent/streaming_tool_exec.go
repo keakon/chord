@@ -54,11 +54,11 @@ type StreamingToolDiscardInfo struct {
 }
 
 type StreamingToolExecutor struct {
-	turnID      uint64
-	ctx         context.Context
-	execute     func(context.Context, message.ToolCall) (ToolExecutionResult, error)
-	emit        func(AgentEvent)
-	projectRoot string
+	turnID  uint64
+	ctx     context.Context
+	execute func(context.Context, message.ToolCall) (ToolExecutionResult, error)
+	emit    func(AgentEvent)
+	workDir string
 
 	onSpeculativeStart     func(callID, toolName string, at time.Time)
 	onFirstVisibleResult   func(callID, toolName string, at time.Time)
@@ -87,9 +87,9 @@ func (e *StreamingToolExecutor) SetTraceCallbacks(onStart func(callID, toolName 
 	e.onSpeculativeDiscarded = onDiscard
 }
 
-func (e *StreamingToolExecutor) SetProjectRoot(projectRoot string) {
+func (e *StreamingToolExecutor) SetWorkDir(workDir string) {
 	if e != nil {
-		e.projectRoot = strings.TrimSpace(projectRoot)
+		e.workDir = strings.TrimSpace(workDir)
 	}
 }
 
@@ -98,7 +98,7 @@ func (e *StreamingToolExecutor) Start(call message.ToolCall) bool {
 		return false
 	}
 	call.Name = tools.NormalizeName(call.Name)
-	entry := &streamingToolEntry{call: call, argsHash: canonicalArgsHash(call.Args), conflictKeys: speculativeConflictKeys(call, e.projectRoot), state: streamingToolQueued, done: make(chan struct{})}
+	entry := &streamingToolEntry{call: call, argsHash: canonicalArgsHash(call.Args), conflictKeys: speculativeConflictKeys(call, e.workDir), state: streamingToolQueued, done: make(chan struct{})}
 	e.mu.Lock()
 	if _, exists := e.entries[call.ID]; exists {
 		e.mu.Unlock()
@@ -116,7 +116,7 @@ func (e *StreamingToolExecutor) Start(call message.ToolCall) bool {
 		log.Debugf("speculative execution skipped call_id=%s tool=%s reason=speculative_mutation_barrier owner=%s", call.ID, call.Name, blocks)
 		return false
 	}
-	if call.Name == tools.NameWrite && speculativeWritePrestateUnreadable(call.Args, e.projectRoot) {
+	if call.Name == tools.NameWrite && speculativeWritePrestateUnreadable(call.Args, e.workDir) {
 		e.mu.Unlock()
 		// Discarding a speculation over an unreadable pre-state could neither
 		// restore nor back up the replaced contents, so the file would keep
@@ -508,18 +508,18 @@ func (e *StreamingToolExecutor) speculativeMutationBarrierLocked(call message.To
 	return ""
 }
 
-func speculativeConflictKeys(call message.ToolCall, projectRoot string) []string {
+func speculativeConflictKeys(call message.ToolCall, workDir string) []string {
 	switch tools.NormalizeName(call.Name) {
 	case tools.NameWrite:
-		if path, ok := singlePathToolPath(call.Args, projectRoot); ok {
+		if path, ok := singlePathToolPath(call.Args, workDir); ok {
 			return []string{"file:" + path}
 		}
 	case tools.NameEdit:
-		if path := trackedEditPathFromArgs(call.Args, projectRoot); path != "" {
+		if path := trackedEditPathFromArgs(call.Args, workDir); path != "" {
 			return []string{"file:" + path}
 		}
 	case tools.NameApplyPatch:
-		paths, err := applyPatchToolPaths(call.Args, projectRoot)
+		paths, err := applyPatchToolPaths(call.Args, workDir)
 		if err == nil && len(paths) > 0 {
 			keys := make([]string, 0, len(paths))
 			for _, path := range paths {
@@ -528,7 +528,7 @@ func speculativeConflictKeys(call message.ToolCall, projectRoot string) []string
 			return keys
 		}
 	case tools.NameDelete:
-		paths, err := deleteToolPaths(call.Args, projectRoot)
+		paths, err := deleteToolPaths(call.Args, workDir)
 		if err == nil && len(paths) > 0 {
 			normalized := normalizeSpeculativeMutationPaths(paths)
 			keys := make([]string, 0, len(normalized))

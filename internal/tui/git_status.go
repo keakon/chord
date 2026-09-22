@@ -69,7 +69,7 @@ func (m *Model) requestGitStatusRefresh() tea.Cmd {
 	}
 	workDir := strings.TrimSpace(m.workingDir)
 	if m.agent != nil {
-		if root := strings.TrimSpace(m.agent.ProjectRoot()); root != "" {
+		if root := strings.TrimSpace(m.agent.WorkDir()); root != "" {
 			workDir = root
 		}
 	}

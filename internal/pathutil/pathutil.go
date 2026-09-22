@@ -166,3 +166,48 @@ func RelToBase(path, baseDir string) (rel string, ok bool) {
 	}
 	return rel, true
 }
+
+// CheckoutRoot returns the root directory of the git checkout dir belongs to:
+// the nearest directory at or above dir that carries a .git entry. A linked
+// worktree or submodule nested inside a repository is its own checkout, so its
+// root wins over the outer repository.
+//
+// When dir lies inside limit the walk never goes above limit and limit is
+// returned as a fallback root when no .git entry is found; this keeps callers
+// anchored to a repository boundary they already resolved. When dir lies
+// outside limit the walk is unbounded, and dir itself is the fallback.
+func CheckoutRoot(dir, limit string) string {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return ""
+	}
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return dir
+	}
+	absDir = filepath.Clean(absDir)
+
+	bounded := false
+	absLimit := ""
+	if l := strings.TrimSpace(limit); l != "" {
+		if absL, lerr := filepath.Abs(l); lerr == nil {
+			absLimit = filepath.Clean(absL)
+			_, bounded = RelToBase(absDir, absLimit)
+		}
+	}
+
+	for cur := absDir; ; {
+		if _, serr := os.Lstat(filepath.Join(cur, ".git")); serr == nil {
+			return cur
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur || (bounded && cur == absLimit) {
+			break
+		}
+		cur = parent
+	}
+	if bounded {
+		return absLimit
+	}
+	return absDir
+}

@@ -277,7 +277,7 @@ func TestPermissionApprovalCacheSkipsRedundantFinalizeEvaluation(t *testing.T) {
 	args := json.RawMessage(`{"value":"old"}`)
 	tc := message.ToolCall{ID: "call-approval-1", Name: "RequiredValue", Args: args}
 
-	a.recordPermissionApproval(turn, tc.ID, tc.Name, string(tc.Args), a.projectRoot)
+	a.recordPermissionApproval(turn, tc.ID, tc.Name, string(tc.Args), a.contentRoot)
 	a.turnMu.Lock()
 	a.turn = turn
 	a.turnMu.Unlock()

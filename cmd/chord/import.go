@@ -46,6 +46,10 @@ func newImportCmd() *cobra.Command {
 				return fmt.Errorf("file is required unless --id is provided")
 			}
 
+			// Imported sessions belong to the repository like any other
+			// session, so a worktree path resolves to its main worktree.
+			projectRoot = resolveContentRoot(ctx, projectRoot)
+
 			res, err := sessionimport.Import(
 				ctx,
 				sessionimport.ImportOptions{

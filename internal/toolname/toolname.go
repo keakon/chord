@@ -30,6 +30,9 @@ const (
 	ReadArtifact   = "read_artifact"
 	ViewImage      = "view_image"
 	CompactContext = "compact_context"
+	WorktreeEnter  = "worktree_enter"
+	WorktreeExit   = "worktree_exit"
+	WorktreeList   = "worktree_list"
 )
 
 // Normalize trims user-provided tool names and maps legacy aliases.

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/keakon/chord/internal/mcp"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/worktree"
 )
 
 // SubAgentInfo carries read-only information about a running SubAgent for TUI
@@ -49,14 +51,18 @@ type delegationCaller struct {
 	Ruleset    permission.Ruleset
 	WriteScope tools.WriteScope
 	WorkDir    string
-	IsMain     bool
+	// WorkDirState is the caller's active checkout binding. A worker that
+	// inherits the caller's directory (no workdir argument) inherits this
+	// identity too, so its environment block names the worktree it is in.
+	WorkDirState WorkDirState
+	IsMain       bool
 }
 
 func (a *MainAgent) subAgentWorkDir() string {
 	if a == nil {
 		return ""
 	}
-	workDir := strings.TrimSpace(a.cachedWorkDir)
+	workDir := strings.TrimSpace(a.workDir())
 	if workDir != "" {
 		return workDir
 	}
@@ -70,6 +76,47 @@ func (a *MainAgent) subAgentWorkDir() string {
 // and are never enforced at tool execution time.
 func (a *MainAgent) writeScopeBaseDir() string {
 	return a.subAgentWorkDir()
+}
+
+// resolveDelegateWorkDir maps the Delegate "workdir" argument onto an existing
+// chord-managed worktree of this repository. An empty argument means "inherit
+// the delegating agent's directory" and resolves to nil.
+func (a *MainAgent) resolveDelegateWorkDir(ctx context.Context, spec string) (*worktree.Info, error) {
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return nil, nil
+	}
+	rt := a.worktreeRT
+	if strings.TrimSpace(rt.RepoRoot) == "" {
+		return nil, fmt.Errorf("workdir %q: worktree support is unavailable in this session", spec)
+	}
+	var (
+		info *worktree.Info
+		err  error
+	)
+	if looksLikeWorktreePath(spec) {
+		info, err = worktree.ResolveByPath(ctx, rt.RepoRoot, spec, rt.BranchPrefix)
+	} else {
+		info, err = worktree.ResolveByName(ctx, rt.RepoRoot, spec, rt.BranchPrefix)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("workdir %q is not an existing worktree of this repository: %w", spec, err)
+	}
+	return info, nil
+}
+
+// looksLikeWorktreePath reports whether a workdir argument is a filesystem
+// path rather than a worktree name. Worktree names are bare slugs, so only a
+// path can carry a separator, be absolute, or be a self/relative reference.
+func looksLikeWorktreePath(spec string) bool {
+	switch spec {
+	case ".", "..":
+		return true
+	}
+	if filepath.IsAbs(spec) {
+		return true
+	}
+	return strings.ContainsAny(spec, `/\`)
 }
 
 func (a *MainAgent) baseSubAgentConfig(agentDef *config.AgentConfig, instanceID string, client *llm.Client, parentCtx context.Context, cancel context.CancelFunc, extraMCPTools []tools.Tool) SubAgentConfig {
@@ -143,14 +190,15 @@ func (a *MainAgent) delegationCallerFromContext(ctx context.Context) (delegation
 			cfg = config.DefaultBuilderAgent()
 		}
 		return delegationCaller{
-			AgentID:    "",
-			TaskID:     "",
-			Depth:      0,
-			Delegation: cfg.Delegation,
-			Ruleset:    a.effectiveRuleset(),
-			WriteScope: tools.WriteScope{},
-			WorkDir:    a.writeScopeBaseDir(),
-			IsMain:     true,
+			AgentID:      "",
+			TaskID:       "",
+			Depth:        0,
+			Delegation:   cfg.Delegation,
+			Ruleset:      a.effectiveRuleset(),
+			WriteScope:   tools.WriteScope{},
+			WorkDir:      a.writeScopeBaseDir(),
+			WorkDirState: a.workDirState.load(),
+			IsMain:       true,
 		}, nil
 	}
 	sub := a.subAgentByID(callerAgentID)
@@ -165,8 +213,12 @@ func (a *MainAgent) delegationCallerFromContext(ctx context.Context) (delegation
 		Delegation: sub.delegation,
 		Ruleset:    sub.currentRuleset(),
 		WriteScope: sub.currentWriteScope(),
-		WorkDir:    sub.workDir,
-		IsMain:     false,
+		// The caller's *current* checkout, not the directory it was created
+		// in: a worker that entered a worktree must delegate into the
+		// checkout it is actually working in.
+		WorkDir:      sub.effectiveToolBaseDir(),
+		WorkDirState: sub.workDirState.load(),
+		IsMain:       false,
 	}, nil
 }
 
@@ -960,6 +1012,17 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, req tools.SubAgentReques
 	if err != nil {
 		return tools.TaskHandle{}, fmt.Errorf("invalid result_schema: %w", err)
 	}
+	// Resolve the requested workdir before any admission work so an unknown
+	// worktree fails fast, and so the resolved directory drives both the
+	// worker's tools and its initial binding.
+	requestedWorktree, err := a.resolveDelegateWorkDir(ctx, req.WorkDir)
+	if err != nil {
+		return tools.TaskHandle{}, err
+	}
+	requestedWorkDir := caller.WorkDir
+	if requestedWorktree != nil {
+		requestedWorkDir = requestedWorktree.Path
+	}
 	admission := &subAgentAdmission{
 		taskID:             taskID,
 		ownerAgentID:       caller.AgentID,
@@ -1096,6 +1159,27 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, req tools.SubAgentReques
 	instanceID := NextInstanceID(agentDef.Name)
 	subCtx, cancel := context.WithCancel(a.parentCtx)
 	subCfg := a.baseSubAgentConfig(agentDef, instanceID, subLLMClient, subCtx, cancel, extraMCPTools)
+	if strings.TrimSpace(requestedWorkDir) != "" {
+		subCfg.WorkDir = requestedWorkDir
+	}
+	// The worker starts inside a worktree whenever Delegate named one, or
+	// whenever it inherits a caller that is itself working in one. Its binding
+	// must say so: the environment block and completion report name the
+	// checkout its relative paths belong to, and WorktreeList uses the binding
+	// to mark it current.
+	switch {
+	case requestedWorktree != nil:
+		subCfg.WorkDirState = WorkDirState{
+			Path:       requestedWorktree.Path,
+			WorktreeID: requestedWorktree.Name,
+			Branch:     requestedWorktree.Branch,
+			BaseSHA:    requestedWorktree.BaseSHA,
+		}
+	case caller.WorkDirState.WorktreeID != "":
+		inherited := caller.WorkDirState
+		inherited.Generation = 0
+		subCfg.WorkDirState = inherited
+	}
 	subCfg.TaskID = taskID
 	subCfg.TaskDesc = description
 	subCfg.PlanTaskRef = planTaskRef

@@ -358,7 +358,7 @@ func (a *MainAgent) installSessionTarget(sessionDir string) {
 	if a.usageLedger != nil {
 		a.usageLedger.Close()
 	}
-	a.usageLedger = analytics.NewUsageLedger(sessionDir, a.projectRoot)
+	a.usageLedger = analytics.NewUsageLedger(sessionDir, a.contentRoot)
 	if a.walltime != nil {
 		a.walltime.repointLedger(a.usageLedger)
 		a.walltime.restoreStats(nil)

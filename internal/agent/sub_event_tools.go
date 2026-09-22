@@ -49,12 +49,12 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 
 		// Only attempt to reuse speculative results when permission is non-interactive.
 		if ruleset := s.currentRuleset(); len(ruleset) > 0 && !isSubAgentInternalTool(tc.Name) {
-			decision := evaluateToolPermissionInDir(ruleset, tc.Name, tc.Args, s.workDir)
+			decision := evaluateToolPermissionInDir(ruleset, tc.Name, tc.Args, s.effectivePathScope())
 			if decision.Action != permission.ActionAllow {
 				pendingCalls = append(pendingCalls, tc)
 				continue
 			}
-			s.recordPermissionApproval(turn, tc.ID, tc.Name, string(tc.Args), s.workDir)
+			s.recordPermissionApproval(turn, tc.ID, tc.Name, string(tc.Args), s.effectiveToolBaseDir())
 		}
 
 		effective := tc
@@ -62,7 +62,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 
 		// Finalize hook: on_tool_call (must not fire speculatively).
 		hookModified := false
-		if hookResult, hookErr := s.fireHook(batchCtx, hook.OnToolCall, turn.ID, buildToolHookData(effective, s.parent.projectRoot)); hookErr == nil && hookResult != nil {
+		if hookResult, hookErr := s.fireHook(batchCtx, hook.OnToolCall, turn.ID, buildToolHookData(effective, s.effectiveToolBaseDir())); hookErr == nil && hookResult != nil {
 			switch hookResult.Action {
 			case hook.ActionBlock:
 				msg := "blocked by hook"

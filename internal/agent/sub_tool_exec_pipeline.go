@@ -21,6 +21,7 @@ func (s *SubAgent) toolExecutionPipeline() toolExecutionPipeline {
 	)
 	runtimeStartedAt := time.Time{}
 	mainAgentID := ""
+	contentRoot := ""
 	if s.parent != nil {
 		fileTrack = s.parent.fileTrack
 		fileBackups = s.parent.fileBackups
@@ -29,6 +30,7 @@ func (s *SubAgent) toolExecutionPipeline() toolExecutionPipeline {
 		confirm = s.parent.confirmFn
 		runtimeStartedAt = s.parent.runtimeStartedAt
 		mainAgentID = s.parent.instanceID
+		contentRoot = s.parent.ContentRoot()
 	}
 	return toolExecutionPipeline{
 		agentID:          s.instanceID,
@@ -45,12 +47,14 @@ func (s *SubAgent) toolExecutionPipeline() toolExecutionPipeline {
 		emit:             emit,
 		// A SubAgent may reach its own jobs, the main agent's jobs, and jobs
 		// started by its direct owner (the worker-reads-owner's-job case).
-		jobAccess:       tools.JobAccess{OwnerAgentID: s.OwnerAgentID(), MainAgentID: mainAgentID},
-		guidance:        subToolOutputGuidance,
-		logPrefix:       "SubAgent:",
-		applyPatchRetry: &s.applyPatchRetry,
-		projectRoot:     s.parent.projectRoot,
-		toolBaseDir:     s.workDir,
+		jobAccess:             tools.JobAccess{OwnerAgentID: s.OwnerAgentID(), MainAgentID: mainAgentID},
+		guidance:              subToolOutputGuidance,
+		logPrefix:             "SubAgent:",
+		applyPatchRetry:       &s.applyPatchRetry,
+		toolBaseDir:           s.effectiveToolBaseDir(),
+		machineStateRoot:      contentRoot,
+		toolBaseDirGeneration: s.workDirState.load().Generation,
+		pathScope:             s.effectivePathScope,
 		preapprovedPermission: func(callID, name string, args json.RawMessage, cwd string, pctx toolPermissionContext) bool {
 			return s.permissionApprovalMatches(s.currentTurn(), callID, name, string(args), cwd, pctx)
 		},
@@ -103,10 +107,16 @@ func (s *SubAgent) captureWalltimeTarget() *walltimeTarget {
 
 // effectiveToolBaseDir resolves the base directory tools execute against,
 // matching toolExecutionPipeline.effectiveToolBaseDir (the sub pipeline pins
-// toolBaseDir to s.workDir) without constructing the pipeline.
+// toolBaseDir to the sub's active checkout) without constructing the pipeline.
 func (s *SubAgent) effectiveToolBaseDir() string {
+	if dir := strings.TrimSpace(s.workDirState.load().Path); dir != "" {
+		return dir
+	}
 	if strings.TrimSpace(s.workDir) != "" {
 		return s.workDir
 	}
-	return s.parent.projectRoot
+	if s.parent != nil {
+		return s.parent.effectiveToolBaseDir()
+	}
+	return ""
 }

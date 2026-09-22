@@ -1,12 +1,15 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/worktree"
 )
 
 func (s *SubAgent) recordTaskToolChanges(result *toolResult, isError bool) (files []string, incomplete bool) {
@@ -48,7 +51,7 @@ func (s *SubAgent) recordTaskToolChanges(result *toolResult, isError bool) (file
 			s.actualChangedFiles = make(map[string]struct{})
 		}
 		for _, path := range exactPaths {
-			path = displayPathFromWorkDir(s.workDir, path)
+			path = displayPathFromWorkDir(s.effectiveToolBaseDir(), path)
 			if path = strings.TrimSpace(path); path != "" {
 				s.actualChangedFiles[path] = struct{}{}
 				files = append(files, path)
@@ -58,7 +61,7 @@ func (s *SubAgent) recordTaskToolChanges(result *toolResult, isError bool) (file
 	}
 
 	name := tools.NormalizeName(result.Name)
-	if isFileAttributionNeutralTool(name) ||
+	if isFileAttributionNeutralTool(name, json.RawMessage(result.ArgsJSON)) ||
 		tools.ConcurrencyClassForTool(s.tools, name, json.RawMessage(result.ArgsJSON)) == tools.ToolConcurrencyClassReadOnly {
 		return nil, false
 	}
@@ -94,7 +97,7 @@ func (s *SubAgent) restoreTaskToolChanges(msgs []message.Message) {
 		}
 		for _, path := range paths {
 			if len(msg.ToolChangedPaths) == 0 {
-				path = displayPathFromWorkDir(s.workDir, path)
+				path = displayPathFromWorkDir(s.effectiveToolBaseDir(), path)
 			}
 			if path = strings.TrimSpace(path); path != "" {
 				if s.actualChangedFiles == nil {
@@ -109,8 +112,18 @@ func (s *SubAgent) restoreTaskToolChanges(msgs []message.Message) {
 	}
 }
 
-func isFileAttributionNeutralTool(name string) bool {
+// isFileAttributionNeutralTool reports whether a tool cannot change the files
+// its owner tracks, so its call must not put the completion's file list under
+// suspicion. WorktreeEnter and WorktreeExit{keep} only move the agent between
+// checkouts; WorktreeExit{remove} deletes a checkout — including the
+// gitignored files copied into it — without recording any path, so it stays
+// flagged.
+func isFileAttributionNeutralTool(name string, args json.RawMessage) bool {
 	switch tools.NormalizeName(name) {
+	case tools.NameWorktreeEnter:
+		return true
+	case tools.NameWorktreeExit:
+		return !worktreeExitRemovesCheckout(args)
 	case tools.NameComplete,
 		tools.NameDelegate,
 		tools.NameNotify,
@@ -131,6 +144,19 @@ func isFileAttributionNeutralTool(name string) bool {
 	default:
 		return false
 	}
+}
+
+// worktreeExitRemovesCheckout mirrors the WorktreeExit action switch: only an
+// explicit "remove" deletes the checkout, and unparseable args are treated as
+// a removal so the conservative flag survives.
+func worktreeExitRemovesCheckout(args json.RawMessage) bool {
+	var req struct {
+		Action string `json:"action"`
+	}
+	if err := json.Unmarshal(args, &req); err != nil {
+		return true
+	}
+	return strings.ToLower(strings.TrimSpace(req.Action)) == "remove"
 }
 
 func (s *SubAgent) taskChangeSnapshot() (files []string, incomplete bool) {
@@ -165,8 +191,47 @@ func (s *SubAgent) enrichCompletionResult(result *AgentResult) *AgentResult {
 	out.Envelope.ActualFilesChanged = actual
 	out.Envelope.FilesChanged = mergeStringLists(reported, actual)
 	out.Envelope.FileAttributionIncomplete = out.Envelope.FileAttributionIncomplete || incomplete
+	if wt := s.completionWorktreeSnapshot(); wt != nil {
+		out.Envelope.Worktree = wt
+	}
 	out.Envelope = normalizeCompletionEnvelope(out.Envelope)
 	return out
+}
+
+// completionWorktreeSnapshot describes the worktree the worker is reporting
+// from, including the base commit and a diff stat, so the owner can tell which
+// copy of the work to pick up. It returns nil when the worker is not in a
+// worktree.
+func (s *SubAgent) completionWorktreeSnapshot() *CompletionWorktree {
+	if s == nil {
+		return nil
+	}
+	state := s.workDirState.load()
+	if strings.TrimSpace(state.WorktreeID) == "" || strings.TrimSpace(state.Path) == "" {
+		return nil
+	}
+	wt := &CompletionWorktree{
+		Name:       state.WorktreeID,
+		Branch:     state.Branch,
+		Path:       state.Path,
+		Base:       state.BaseSHA,
+		Generation: state.Generation,
+	}
+	ctx := context.Background()
+	if s.turn != nil && s.turn.Ctx != nil {
+		ctx = s.turn.Ctx
+	} else if s.parentCtx != nil {
+		ctx = s.parentCtx
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	stat, err := worktree.DiffStat(ctx, state.Path, state.BaseSHA)
+	if err != nil {
+		wt.DiffError = err.Error()
+		return wt
+	}
+	wt.DiffStat = stat
+	return wt
 }
 
 func mergeStringLists(groups ...[]string) []string {

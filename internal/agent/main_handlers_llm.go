@@ -729,7 +729,7 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 		if turn.streamingToolExec != nil && !a.syncToolHooksConfigured() {
 			// Only attempt to reuse speculative results when permission is non-interactive.
 			if len(a.ruleset) > 0 && !isInternalControlTool(tc.Name) {
-				decision := evaluateToolPermissionInDir(a.effectiveRuleset(), tc.Name, tc.Args, a.projectRoot)
+				decision := evaluateToolPermissionInDir(a.effectiveRuleset(), tc.Name, tc.Args, a.effectivePathScope())
 				if decision.Action != permission.ActionAllow {
 					pendingCalls = append(pendingCalls, tc)
 					continue
@@ -737,7 +737,7 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 				// The finalize path re-evaluates permission with the same
 				// inputs; record the allow so it can skip the second
 				// evaluation (see applyPermission's preapproval consult).
-				a.recordPermissionApproval(turn, tc.ID, tc.Name, string(tc.Args), a.projectRoot)
+				a.recordPermissionApproval(turn, tc.ID, tc.Name, string(tc.Args), a.effectiveToolBaseDir())
 			}
 
 			effective := tc
@@ -746,7 +746,7 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 			// Finalize hook: on_tool_call. This must not be fired speculatively, but must
 			// be applied before deciding whether speculative args drifted.
 			hookModified := false
-			if hookResult, hookErr := a.fireHook(turn.Ctx, hook.OnToolCall, turnID, buildToolHookData(effective, a.projectRoot)); hookErr == nil && hookResult != nil {
+			if hookResult, hookErr := a.fireHook(turn.Ctx, hook.OnToolCall, turnID, buildToolHookData(effective, a.effectiveToolBaseDir())); hookErr == nil && hookResult != nil {
 				switch hookResult.Action {
 				case hook.ActionBlock:
 					msg := "blocked by hook"

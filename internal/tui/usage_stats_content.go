@@ -202,7 +202,7 @@ func (m *Model) projectUsageStatsLines(width int) []string {
 			fmt.Sprintf("Reasoning: %s    Cost: %s", formatUsageTokens(report.UsageTotal.ReasoningTokens), formatCost(report.UsageTotal.TotalCost)),
 			fmt.Sprintf("First active: %s", formatUsageTime(report.FirstEventAt)),
 			fmt.Sprintf("Last active: %s", formatUsageTime(report.LastEventAt)),
-			DimStyle.Render(fmt.Sprintf("Source: %s", usageStatsProjectSourceHint(m.usageStatsProjectRoot()))),
+			DimStyle.Render(fmt.Sprintf("Source: %s", usageStatsProjectSourceHint(m.usageStatsContentRoot()))),
 		}
 	}
 }

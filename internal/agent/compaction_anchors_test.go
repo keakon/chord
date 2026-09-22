@@ -195,12 +195,12 @@ func TestCompactionPromptCarriesSessionAnchors(t *testing.T) {
 func TestCompactionReductionScratchCarriesReductionSemantics(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	projectRoot := t.TempDir()
-	a.projectRoot = projectRoot
+	a.contentRoot = projectRoot
 	a.recalledReductionInputs = map[string]struct{}{"read|/work/a.go": {}}
 	a.lastPreparedLLMDiscardedInputs = map[string]string{"shell|go test": "summarized"}
 	scratch := a.compactionReductionScratch()
-	if scratch.projectRoot != projectRoot {
-		t.Fatalf("scratch projectRoot = %q, want %q", scratch.projectRoot, projectRoot)
+	if scratch.contentRoot != projectRoot {
+		t.Fatalf("scratch projectRoot = %q, want %q", scratch.contentRoot, projectRoot)
 	}
 	if scratch.tools != a.tools {
 		t.Fatal("scratch must carry the tool registry for read-only shell classification")

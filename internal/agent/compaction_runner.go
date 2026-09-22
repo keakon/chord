@@ -245,7 +245,7 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 	// constraint one summary at a time.
 	sessionAnchors := buildCompactionAnchors(latestCompactionAnchors(snapshot), originalRequest, evidenceItems)
 	recentTail := append([]message.Message(nil), snapshot[headSplit:]...)
-	keyFiles := extractCompactionKeyFileCandidates(snapshot, a.projectRoot, 8)
+	keyFiles := extractCompactionKeyFileCandidates(snapshot, a.effectiveToolBaseDir(), 8)
 	head, evidenceMsgs := splitMessagesForCompactionWithSelections(headSnapshot, nil, evidenceItems)
 	if len(head) == 0 {
 		return &compactionDraft{
@@ -374,7 +374,7 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 		return estimateMessageTokens(a.ctxMgr, message.Message{Role: message.RoleUser, Content: text})
 	})
 	checkpointContent := buildCompactionCheckpointMessage(withCompactionAnchors(summaryText, sessionAnchors), historyRefs, summaryMode, evidenceItems, retainedRecent)
-	checkpointKeyFiles := extractCompactionKeyFiles(checkpointContent, a.projectRoot)
+	checkpointKeyFiles := extractCompactionKeyFiles(checkpointContent, a.effectiveToolBaseDir())
 	keyFileRevisions := captureCompactionFileRevisions(checkpointKeyFiles, a.resolveCheckpointFilePath)
 	contextSummaryMsg := message.Message{
 		Role:                    "user",
@@ -777,7 +777,7 @@ func (a *MainAgent) summarizeCompactionHead(ctx context.Context, head []message.
 		return "", "", "", err
 	}
 	client.SetOutputTokenMax(compactReservedOutput)
-	keyFiles := extractCompactionKeyFileCandidates(head, a.projectRoot, 8)
+	keyFiles := extractCompactionKeyFileCandidates(head, a.effectiveToolBaseDir(), 8)
 
 	input, err := a.buildCompactionInputWithOptions(head, utilityContextLimit, evidenceItems, recentTail, sessionAnchors)
 	if err != nil {

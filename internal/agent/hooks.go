@@ -29,7 +29,7 @@ func newHookEnvelope(
 	turnID uint64,
 	agentID string,
 	agentKind string,
-	projectRoot string,
+	workDir string,
 	selectedModel string,
 	runningModel string,
 	data map[string]any,
@@ -41,7 +41,7 @@ func newHookEnvelope(
 		TurnID:        turnID,
 		AgentID:       agentID,
 		AgentKind:     agentKind,
-		ProjectRoot:   projectRoot,
+		ProjectRoot:   workDir,
 		SelectedModel: selectedModel,
 		RunningModel:  runningModel,
 		Data:          data,
@@ -56,17 +56,17 @@ func extractHookFilePath(args json.RawMessage) string {
 	return paths[0]
 }
 
-func extractHookToolFilePaths(toolName string, args json.RawMessage, projectRoot string) []string {
+func extractHookToolFilePaths(toolName string, args json.RawMessage, workDir string) []string {
 	if tools.NormalizeName(toolName) == tools.NameApplyPatch {
-		targets, err := tools.ApplyPatchTargets(args, projectRoot)
+		targets, err := tools.ApplyPatchTargets(args, workDir)
 		if err == nil {
 			return tools.MutationTargetPaths(targets)
 		}
 	}
-	return extractHookFilePaths(args, projectRoot)
+	return extractHookFilePaths(args, workDir)
 }
 
-func extractHookFilePaths(args json.RawMessage, projectRoot string) []string {
+func extractHookFilePaths(args json.RawMessage, workDir string) []string {
 	var parsed struct {
 		Path  string   `json:"path"`
 		Paths []string `json:"paths"`
@@ -77,18 +77,18 @@ func extractHookFilePaths(args json.RawMessage, projectRoot string) []string {
 	if parsed.Path != "" {
 		return []string{parsed.Path}
 	}
-	if path := trackedEditPathFromArgs(args, projectRoot); path != "" {
+	if path := trackedEditPathFromArgs(args, workDir); path != "" {
 		return []string{path}
 	}
 	return tools.NormalizeDeletePaths(parsed.Paths)
 }
 
-func buildToolHookData(tc message.ToolCall, projectRoot string) map[string]any {
+func buildToolHookData(tc message.ToolCall, workDir string) map[string]any {
 	data := map[string]any{
 		hook.DataKeyToolName: tc.Name,
 		"args":               json.RawMessage(tc.Args),
 	}
-	if filePaths := extractHookToolFilePaths(tc.Name, tc.Args, projectRoot); len(filePaths) > 0 {
+	if filePaths := extractHookToolFilePaths(tc.Name, tc.Args, workDir); len(filePaths) > 0 {
 		data["paths"] = append([]string(nil), filePaths...)
 		data["path"] = filePaths[0]
 	}
@@ -413,7 +413,7 @@ func (a *MainAgent) fireHook(ctx context.Context, point string, turnID uint64, d
 		turnID,
 		a.instanceID,
 		"main",
-		a.projectRoot,
+		a.effectiveToolBaseDir(),
 		a.ProviderModelRef(),
 		a.RunningModelRef(),
 		data,
@@ -461,7 +461,7 @@ func (a *MainAgent) fireHookBackground(ctx context.Context, point string, turnID
 		turnID,
 		a.instanceID,
 		"main",
-		a.projectRoot,
+		a.effectiveToolBaseDir(),
 		a.ProviderModelRef(),
 		a.RunningModelRef(),
 		data,
@@ -482,7 +482,7 @@ func (a *MainAgent) runToolBatchHooks(ctx context.Context, turn *Turn) ([]hook.A
 		turn.ID,
 		a.instanceID,
 		"main",
-		a.projectRoot,
+		a.effectiveToolBaseDir(),
 		a.ProviderModelRef(),
 		a.RunningModelRef(),
 		data,
@@ -547,7 +547,7 @@ func (s *SubAgent) fireHook(ctx context.Context, point string, turnID uint64, da
 		turnID,
 		s.instanceID,
 		"sub",
-		s.parent.projectRoot,
+		s.effectiveToolBaseDir(),
 		modelName,
 		modelName,
 		data,
@@ -562,7 +562,7 @@ func (s *SubAgent) fireHookBackground(ctx context.Context, point string, turnID 
 		turnID,
 		s.instanceID,
 		"sub",
-		s.parent.projectRoot,
+		s.effectiveToolBaseDir(),
 		modelName,
 		modelName,
 		data,
@@ -584,7 +584,7 @@ func (s *SubAgent) runToolBatchHooks(ctx context.Context, turn *Turn) ([]hook.Au
 		turn.ID,
 		s.instanceID,
 		"sub",
-		s.parent.projectRoot,
+		s.effectiveToolBaseDir(),
 		modelName,
 		modelName,
 		data,

@@ -70,16 +70,42 @@ func TestLoadAgentsMDWithWorkDir_Hierarchical(t *testing.T) {
 	}
 }
 
-func TestLoadAgentsMDWithWorkDir_WorkDirNotUnderRoot(t *testing.T) {
-	root := t.TempDir()
+func TestLoadAgentsMDWithWorkDir_WorkDirOutsideRootUsesItsOwnCopy(t *testing.T) {
+	contentRoot := t.TempDir()
 	other := t.TempDir()
-	writeFile(t, filepath.Join(root, "AGENTS.md"), "root")
+	writeFile(t, filepath.Join(contentRoot, "AGENTS.md"), "root")
 	writeFile(t, filepath.Join(other, "AGENTS.md"), "other")
 
-	// workDir not under projectRoot — should only read root
-	got := loadAgentsMDWithWorkDir(root, other)
-	if got != "## AGENTS.md\n\nroot" {
-		t.Fatalf("expected only root, got %q", got)
+	// workDir outside the content root is its own checkout root (a
+	// chord-managed worktree lives under the state directory), so the walk is
+	// anchored there instead of at the content root, and its own copy wins.
+	got := loadAgentsMDWithWorkDir(contentRoot, other)
+	if got != "## AGENTS.md\n\nother" {
+		t.Fatalf("expected only the workDir checkout copy, got %q", got)
+	}
+}
+
+func TestLoadAgentsMDWithWorkDir_WorkDirOutsideRootFallsBackToContentRootLevels(t *testing.T) {
+	contentRoot := t.TempDir()
+	other := t.TempDir()
+	checkoutWithGitMarker(t, other)
+	workDir := filepath.Join(other, "pkg")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(contentRoot, "pkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A fresh checkout holds no AGENTS.md: the files are local and gitignored
+	// in this project, so the content root's copy applies at each level.
+	writeFile(t, filepath.Join(contentRoot, "AGENTS.md"), "root instructions")
+	writeFile(t, filepath.Join(contentRoot, "pkg", "AGENTS.md"), "pkg instructions")
+
+	got := loadAgentsMDWithWorkDir(contentRoot, workDir)
+	for _, want := range []string{"root instructions", "pkg instructions"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected content-root fallback %q in %q", want, got)
+		}
 	}
 }
 
@@ -95,6 +121,93 @@ func TestLoadAgentsMDWithWorkDir_MissingFiles(t *testing.T) {
 	got := loadAgentsMDWithWorkDir(root, sub)
 	if got != "## ../../AGENTS.md\n\nroot" {
 		t.Fatalf("expected only root, got %q", got)
+	}
+}
+
+// checkoutWithGitMarker creates a directory that pathutil.CheckoutRoot treats
+// as a checkout root, i.e. one carrying a .git entry (a file, as linked
+// worktrees have).
+func checkoutWithGitMarker(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(dir, ".git"), "gitdir: /elsewhere\n")
+}
+
+func TestLoadAgentsMDWithWorkDir_PrefersCheckoutCopyOverContentRoot(t *testing.T) {
+	contentRoot := t.TempDir()
+	checkout := t.TempDir()
+	checkoutWithGitMarker(t, checkout)
+	workDir := filepath.Join(checkout, "pkg")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(contentRoot, "pkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(contentRoot, "AGENTS.md"), "content root instructions")
+	writeFile(t, filepath.Join(checkout, "AGENTS.md"), "checkout root instructions")
+	writeFile(t, filepath.Join(contentRoot, "pkg", "AGENTS.md"), "content pkg instructions")
+	writeFile(t, filepath.Join(checkout, "pkg", "AGENTS.md"), "checkout pkg instructions")
+
+	got := loadAgentsMDWithWorkDir(contentRoot, workDir)
+	for _, want := range []string{"checkout root instructions", "checkout pkg instructions"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected checkout copy %q in %q", want, got)
+		}
+	}
+	for _, unwanted := range []string{"content root instructions", "content pkg instructions"} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("content-root copy %q must not be loaded alongside the checkout copy: %q", unwanted, got)
+		}
+	}
+}
+
+func TestLoadAgentsMDWithWorkDir_FallsBackToContentRootCopies(t *testing.T) {
+	contentRoot := t.TempDir()
+	checkout := t.TempDir()
+	checkoutWithGitMarker(t, checkout)
+	workDir := filepath.Join(checkout, "pkg")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(contentRoot, "pkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A fresh worktree carries only tracked files, so gitignored local
+	// AGENTS.md files exist in the content root alone.
+	writeFile(t, filepath.Join(contentRoot, "AGENTS.md"), "content root instructions")
+	writeFile(t, filepath.Join(contentRoot, "pkg", "AGENTS.md"), "content pkg instructions")
+
+	got := loadAgentsMDWithWorkDir(contentRoot, workDir)
+	for _, want := range []string{"content root instructions", "content pkg instructions"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected content-root fallback %q in %q", want, got)
+		}
+	}
+}
+
+func TestLoadAgentsMDWithWorkDir_AnchorsWalkAtCheckoutRoot(t *testing.T) {
+	contentRoot := t.TempDir()
+	checkoutWithGitMarker(t, contentRoot)
+	checkout := filepath.Join(contentRoot, ".chord", "worktrees", "runtime")
+	checkoutWithGitMarker(t, checkout)
+	workDir := filepath.Join(checkout, "pkg")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(contentRoot, "AGENTS.md"), "content root instructions")
+	writeFile(t, filepath.Join(contentRoot, ".chord", "AGENTS.md"), "content chord instructions")
+
+	got := loadAgentsMDWithWorkDir(contentRoot, workDir)
+	if !strings.Contains(got, "content root instructions") {
+		t.Fatalf("expected the content-root fallback for the checkout root level, got %q", got)
+	}
+	// Levels are relative to the checkout root, so content-root-only levels
+	// between the content root and the checkout (here .chord/) are not walked.
+	if strings.Contains(got, "content chord instructions") {
+		t.Fatalf("walk must not descend content-root-only levels, got %q", got)
 	}
 }
 

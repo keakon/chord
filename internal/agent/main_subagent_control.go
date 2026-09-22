@@ -732,6 +732,26 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 	subCfg.OwnerTaskID = record.OwnerTaskID
 	subCfg.Depth = record.Depth
 	subCfg.JoinToOwner = record.JoinToOwner
+	// A resumed task continues in the checkout its last instance was working
+	// in, when that checkout is still a chord-managed worktree of this
+	// repository. Otherwise the new instance keeps the inherited directory
+	// rather than resolving the restored transcript against a stale path.
+	if meta, metaErr := loadSubAgentMeta(a.sessionDir, record.LatestInstanceID); metaErr != nil {
+		log.Warnf("load subagent meta for workdir failed instance=%v error=%v", record.LatestInstanceID, metaErr)
+	} else if meta != nil {
+		if info := a.resolveRestoredWorktree(ctx, meta.WorkDir); info != nil {
+			subCfg.WorkDir = info.Path
+			// Resume in the recorded checkout with its identity intact: the
+			// worker's environment block, completion report, and worktree
+			// current-marking all read this binding.
+			subCfg.WorkDirState = WorkDirState{
+				Path:       info.Path,
+				WorktreeID: info.Name,
+				Branch:     info.Branch,
+				BaseSHA:    info.BaseSHA,
+			}
+		}
+	}
 	sub = NewSubAgent(subCfg)
 	sub.RestoreMessages(msgs)
 	state := SubAgentState(strings.TrimSpace(record.State))

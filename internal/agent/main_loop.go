@@ -45,6 +45,9 @@ func (a *MainAgent) Run(ctx context.Context) error {
 	if issues := a.consumeStartupConfigIssues(); len(issues) > 0 {
 		a.emitToTUI(ToastEvent{Message: startupConfigIssuesNotice(len(issues)), Level: "warn"})
 	}
+	if notice := a.consumeStartupWorkDirNotice(); notice != "" {
+		a.emitToTUI(ToastEvent{Message: notice, Level: "warn"})
+	}
 
 	// Start the async persistence loop.
 	a.startPersistLoop()

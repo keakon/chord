@@ -54,6 +54,8 @@ func (a *MainAgent) buildRecoverySnapshot() *recovery.SessionSnapshot {
 			JoinToOwner:           sub.JoinToOwner(),
 			State:                 string(state),
 			LastSummary:           summary,
+			WorkDir:               sub.effectiveToolBaseDir(),
+			WorkDirGeneration:     sub.workDirState.load().Generation,
 			PendingCompleteIntent: pendingComplete != nil,
 		}
 		if pendingComplete != nil {

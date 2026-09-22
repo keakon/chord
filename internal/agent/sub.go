@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -263,13 +262,18 @@ type SubAgent struct {
 	invokedSkills map[string]*skill.Meta
 	modelName     string
 	customPrompt  string // from agent YAML body; replaces built-in role instructions if non-empty
+	// workDirState is this SubAgent's active checkout; a worktree switch
+	// publishes a new generation here and never touches the parent's binding.
+	workDirState workDirBinding
 
 	// cachedSessionReminderContent is the meta user message content carrying
 	// environment + AGENTS.md (under "# AGENTS.md instructions" /
-	// <INSTRUCTIONS>). Built once at construction (session-head for SubAgent ==
-	// construction), injected into every request so the prompt prefix keeps one
-	// stable shape. Not persisted. Mirrors MainAgent.
-	cachedSessionReminderContent string
+	// <INSTRUCTIONS>). Built at construction and rebuilt on a worktree switch,
+	// so the environment block always names the active checkout; injected into
+	// every request so the prompt prefix keeps one stable shape. Not persisted.
+	// The pointer is atomic because a worktree switch runs in a tool goroutine
+	// while the request path reads it. Mirrors MainAgent.
+	cachedSessionReminderContent atomic.Pointer[string]
 
 	// frozenToolDefs is the SubAgent's tool surface snapshot, computed once at
 	// construction. Kept stable so the provider request prefix does not drift.
@@ -539,13 +543,19 @@ type SubAgentConfig struct {
 	ExtraMCPTools    []tools.Tool    // agent-specific MCP tools
 	Ruleset          permission.Ruleset
 	WorkDir          string
-	VenvPath         string // absolute path to detected Python virtual environment, or ""
-	SessionDir       string
-	AgentsMD         string
-	Skills           []*skill.Meta
-	ModelName        string
-	StartupTimeout   time.Duration // 0 → DefaultSubAgentStartupTimeout
-	Orchestration    config.OrchestrationConfig
+	// WorkDirState is the checkout the worker starts in: the worktree a
+	// Delegate named, the caller's worktree when the worker inherits its
+	// directory, or the checkout a rehydrated worker is resumed into. It is
+	// installed before the environment reminder is built so that reminder
+	// names the worktree the worker's relative paths belong to.
+	WorkDirState   WorkDirState
+	VenvPath       string // absolute path to detected Python virtual environment, or ""
+	SessionDir     string
+	AgentsMD       string
+	Skills         []*skill.Meta
+	ModelName      string
+	StartupTimeout time.Duration // 0 → DefaultSubAgentStartupTimeout
+	Orchestration  config.OrchestrationConfig
 }
 
 // NewSubAgent creates a fully-initialised SubAgent. The caller must invoke
@@ -581,6 +591,9 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 		switch t.Name() {
 		case tools.NameTodoWrite, tools.NameHandoff, tools.NameReadArtifact, tools.NameSaveArtifact, tools.NameCompactContext:
 			// Skip MainAgent-only tools.
+		case tools.NameWorktreeEnter, tools.NameWorktreeExit, tools.NameWorktreeList:
+			// Rebound per SubAgent below: each agent owns its own active
+			// working directory, so a switch must not move the parent.
 		case tools.NameNotify:
 			// SubAgents get a dedicated Notify tool so owner-notify and
 			// targeted-notify availability can diverge by permission group.
@@ -701,6 +714,22 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 		tool.BaseDir = cfg.WorkDir
 		s.tools.Register(tool)
 	}
+	if !cfg.Ruleset.IsDisabled(tools.NameWorktreeEnter) {
+		s.tools.Register(tools.NewWorktreeEnterTool(s))
+	}
+	if !cfg.Ruleset.IsDisabled(tools.NameWorktreeExit) {
+		s.tools.Register(tools.NewWorktreeExitTool(s))
+	}
+	if !cfg.Ruleset.IsDisabled(tools.NameWorktreeList) {
+		s.tools.Register(tools.NewWorktreeListTool(s))
+	}
+
+	// Install the initial binding before anything derives a path from it: the
+	// environment reminder must name the worktree the worker is placed in, and
+	// the completion report reads the same binding.
+	if cfg.WorkDirState.Path != "" || cfg.WorkDirState.WorktreeID != "" {
+		s.workDirState.store(cfg.WorkDirState)
+	}
 
 	// Build and install the system prompt.
 	prompt := s.buildSystemPrompt()
@@ -712,18 +741,10 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 	})
 
 	// Capture session-level context (environment + AGENTS.md) as
-	// a meta user message and freeze the tool surface. Mirrors MainAgent.
-	venvRel := ""
-	if s.venvPath != "" && s.workDir != "" {
-		venvRel = displayPathFromWorkDir(s.workDir, s.venvPath)
-	}
-	env := SessionEnvSnapshot{
-		WorkDir:  s.workDir,
-		Platform: runtime.GOOS + "/" + runtime.GOARCH,
-		VenvRel:  venvRel,
-		Date:     time.Now().Format("Mon Jan 2 2006"),
-	}
-	s.cachedSessionReminderContent = buildSessionContextReminder(env, s.agentsMD)
+	// a meta user message and freeze the tool surface. Mirrors MainAgent; the
+	// environment block is rebuilt on a worktree switch (see SubAgent
+	// refreshSessionContextReminder).
+	s.refreshSessionContextReminder()
 	s.frozenToolDefs = append(
 		[]message.ToolDefinition(nil),
 		llmToolDefinitionsFromVisibleTools(s.filteredVisibleToolsForModel(s.modelName, s.llmClient))...,
@@ -1117,7 +1138,7 @@ func (s *SubAgent) newSubLLMStreamReducer(turn *Turn, promoteStreamingActivity f
 		turn:             turn,
 		registry:         s.tools,
 		ruleset:          func() permission.Ruleset { return s.currentRuleset() },
-		toolBaseDir:      s.workDir,
+		pathScope:        s.effectivePathScope(),
 		visibleToolNames: s.visibleToolNames,
 		emit:             s.parent.emitToTUI,
 		flushBeforeTool: func() {
@@ -1290,7 +1311,7 @@ func (s *SubAgent) newTurn() *Turn {
 		activeToolBatchCancel: nil,
 	}
 	s.turn.streamingToolExec = NewStreamingToolExecutor(s.turn.ID, ctx, s.parent.emitToTUI, s.executeToolCallSpeculative)
-	s.turn.streamingToolExec.SetProjectRoot(s.effectiveToolBaseDir())
+	s.turn.streamingToolExec.SetWorkDir(s.effectiveToolBaseDir())
 	s.turn.streamingToolExec.SetTraceCallbacks(s.parent.recordToolTraceSpeculativeStart, s.parent.recordToolTraceFirstVisibleResult, s.parent.recordToolTraceSpeculativeDiscard)
 	log.Debugf("SubAgent: new turn created agent=%v turn_id=%v", s.instanceID, s.turn.ID)
 	return s.turn

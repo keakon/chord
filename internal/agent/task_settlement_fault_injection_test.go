@@ -63,7 +63,7 @@ func (m *settlementFaultModel) freshSub() {
 		ParentCtx:    ctx,
 		Cancel:       cancel,
 		BaseTools:    m.agent.tools,
-		WorkDir:      m.agent.projectRoot,
+		WorkDir:      m.agent.contentRoot,
 		SessionDir:   m.agent.sessionDir,
 		ModelName:    "test-model",
 	})
