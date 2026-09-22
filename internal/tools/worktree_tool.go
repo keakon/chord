@@ -92,6 +92,7 @@ func (WorktreeEnterTool) Description() string {
 		"Use it only when the user explicitly asks to work in a separate worktree, branch checkout, or isolated copy; do not enter one on your own initiative. " +
 		"After a successful switch the shell, file tools, grep/glob and LSP all operate inside the worktree until `" + NameWorktreeExit + "`.\n" +
 		"Worktrees share the repository's session history and permissions: entering one does not change permission rules, hooks or agent configuration, and it never modifies the main checkout. " +
+		"Entering a worktree that already exists reuses that checkout, so another session or sub-agent can be working in the same directory: uncommitted changes and files are shared, and concurrent writers can overwrite each other. Open a separate worktree for each task that proceeds in parallel.\n" +
 		"Tracked files come from the branch; ignore-rule content (local config, AGENTS.md, .chord) is provided by the main checkout rather than copied.\n" +
 		"Parameters: `name` (optional; a name is generated when omitted and when `branch` is omitted), `path` (optional; defaults to the configured worktree root), " +
 		"`base` (optional commit to branch from; defaults to the current working directory's HEAD), `branch` (optional existing chord-managed branch to check out instead of creating one). " +

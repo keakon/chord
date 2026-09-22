@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -244,9 +243,6 @@ func resolveSessionInProject(ctx context.Context, pl *config.PathLocator, conten
 		return nil, fmt.Errorf("locate project: %w", err)
 	}
 	if !sessionExistsInProject(pl, projectPL.ProjectKey, sid) {
-		if store, ok := findAbandonedSessionStore(ctx, contentRoot, sid); ok {
-			return nil, fmt.Errorf("session %q belongs to the session store of an older chord version (%s), which this version no longer lists because sessions are shared per repository; copy the session directory into %s to continue it", sid, store, projectPL.ProjectSessionsDir)
-		}
 		return nil, fmt.Errorf("session %q not found in project %s", sid, projectPL.ProjectKey)
 	}
 	return &SessionLocation{ContentRoot: contentRoot, ProjectKey: projectPL.ProjectKey}, nil
@@ -353,114 +349,4 @@ func sessionExistsInProject(pl *config.PathLocator, projectKey, sid string) bool
 	main := filepath.Join(pl.SessionsRoot, projectKey, sid, identity.MainSessionLogFilename)
 	st, err := os.Stat(main)
 	return err == nil && st.Size() > 0
-}
-
-// abandonedWorktreeSessions describes a per-worktree session store left behind
-// by chord versions that keyed sessions by the worktree's own checkout.
-type abandonedWorktreeSessions struct {
-	Name        string
-	Path        string
-	SessionsDir string
-	Count       int
-}
-
-// findAbandonedWorktreeSessions returns the per-worktree session stores of the
-// current repository that still hold sessions. Sessions are keyed by the
-// repository content root now, so those stores are no longer listed anywhere;
-// callers surface them instead of letting the sessions vanish without a trace.
-// History is intentionally not migrated.
-//
-// Best-effort: worktrees are listed through git with the configured branch
-// prefix, so stores of already-removed worktrees, or of worktrees created with
-// a different prefix, are not reported.
-func findAbandonedWorktreeSessions(ctx context.Context, contentRoot string) []abandonedWorktreeSessions {
-	contentRoot = strings.TrimSpace(contentRoot)
-	if contentRoot == "" {
-		return nil
-	}
-	pl, err := startupPathLocator()
-	if err != nil {
-		return nil
-	}
-	mainPL, err := pl.LocateProject(contentRoot)
-	if err != nil {
-		return nil
-	}
-	branchPrefix, err := startupBranchPrefix()
-	if err != nil {
-		branchPrefix = ""
-	}
-	infos, err := worktree.List(ctx, contentRoot, branchPrefix)
-	if err != nil {
-		return nil
-	}
-	var stores []abandonedWorktreeSessions
-	for _, info := range infos {
-		pj, err := pl.LocateProject(info.Path)
-		if err != nil || pj.ProjectKey == mainPL.ProjectKey {
-			continue
-		}
-		if count := countSessionDirs(pj.ProjectSessionsDir); count > 0 {
-			stores = append(stores, abandonedWorktreeSessions{
-				Name:        info.Name,
-				Path:        info.Path,
-				SessionsDir: pj.ProjectSessionsDir,
-				Count:       count,
-			})
-		}
-	}
-	return stores
-}
-
-// findAbandonedSessionStore returns the abandoned store that holds sid, so a
-// resume failure can point at the session instead of reporting a bare miss.
-func findAbandonedSessionStore(ctx context.Context, contentRoot, sid string) (string, bool) {
-	sid = strings.TrimSpace(sid)
-	if sid == "" {
-		return "", false
-	}
-	for _, store := range findAbandonedWorktreeSessions(ctx, contentRoot) {
-		main := filepath.Join(store.SessionsDir, sid, identity.MainSessionLogFilename)
-		if st, err := os.Stat(main); err == nil && st.Size() > 0 {
-			return store.SessionsDir, true
-		}
-	}
-	return "", false
-}
-
-// printAbandonedWorktreeSessionsHint reports the abandoned stores and where
-// their sessions go. repo SessionsDir is where the shared store lives, so the
-// user can recover a session by copying its directory there.
-func printAbandonedWorktreeSessionsHint(w io.Writer, stores []abandonedWorktreeSessions, repoSessionsDir string) {
-	if w == nil || len(stores) == 0 {
-		return
-	}
-	fmt.Fprintln(w, "Note: sessions created by an older chord version inside a worktree are no longer listed; sessions are shared per repository now.")
-	const maxShown = 5
-	for i, store := range stores {
-		if i == maxShown {
-			fmt.Fprintf(w, "  ... and %d more worktree session store(s)\n", len(stores)-maxShown)
-			break
-		}
-		fmt.Fprintf(w, "  %s: %d session(s) in %s\n", store.Name, store.Count, store.SessionsDir)
-	}
-	if strings.TrimSpace(repoSessionsDir) != "" {
-		fmt.Fprintf(w, "To continue one of them, copy its session directory into %s.\n", repoSessionsDir)
-	}
-}
-
-// countSessionDirs counts the session directories in a session store; files
-// such as the project metadata marker are ignored.
-func countSessionDirs(dir string) int {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return 0
-	}
-	count := 0
-	for _, entry := range entries {
-		if entry.IsDir() {
-			count++
-		}
-	}
-	return count
 }

@@ -369,13 +369,13 @@ removed 1 sessions, total 263.5 MB
 
 Worktree 默认落地在 `<state-dir>/worktrees/<repo-id>/<slug>`（仓库之外）；也可以用 `worktree.root` 改位置，相对路径以主仓库根为基准，例如 `root: .chord/worktrees` 会落在 `<repo>/.chord/worktrees/<slug>`。这个目录在仓库内时，Chord 会在其中保存一个内容为 `*` 的 `.gitignore`，让这些 checkout 不出现在主工作区的未跟踪文件里。该文件只负责 `git status` 整洁，删掉它不会削弱任何保护。其他工具不知道这层跳过：仓库内的 checkout 是磁盘上的第二份树，索引或扫描类工具也可能扫到它（见 [Worktree 用法](./usage_CN.md#worktree)）。
 
-同一仓库的所有 checkout 共享会话：历史存在仓库自己的 store 里，因此 worktree 里开的会话在主工作区能看到、能继续，反之亦然；runtime cache 仍按 checkout 分开，exports 跟着会话走。会话会记录自己当时所在的 checkout，继续该会话时会先切回去（见下文[恢复会话](#恢复会话)）。删除 worktree 默认保留这份历史：只有 `--purge-sessions` 才删该 worktree 自己的 store，而当前版本已不再往里写会话。
+同一仓库的所有 checkout 共享会话：历史存在仓库自己的 store 里，因此 worktree 里开的会话在主工作区能看到、能继续，反之亦然；runtime cache 仍按 checkout 分开，exports 跟着会话走。会话会记录自己当时所在的 checkout，继续该会话时会先切回去（见下文[恢复会话](#恢复会话)）。删除 worktree 不会删这份历史。
 
-worktree 只包含被 git 追踪的文件。被 gitignore 的内容——本地 `AGENTS.md`、`.chord/config.yaml`、agents、skills、plans——不会复制过去；在 worktree 里运行的会话会从主工作区读取它们，所以项目指令、技能、子代理与记忆的表现和主工作区一致。checkout 自带 `AGENTS.md` 或项目技能时以它为准。想让新 worktree 拿到哪些被忽略的文件，就在仓库根放一个 `.worktreeinclude`（gitignore 语法；文件不存在或没有任何 pattern 时默认 `.env*`）。这些文件在创建时复制过去，已被跟踪的文件绝不会被覆盖。
+worktree 只包含被 git 追踪的文件。被 gitignore 的内容——本地 `AGENTS.md`、`.chord/config.yaml`、agents、skills、plans——不会复制过去；在 worktree 里运行的会话会从主工作区读取它们，所以项目指令、技能、子代理与记忆的表现和主工作区一致。checkout 自带 `AGENTS.md` 或项目技能时以它为准。想让新 worktree 拿到哪些被忽略的文件，就在仓库根放一个 `.worktreeinclude`（gitignore 语法；文件不存在或没有任何 pattern 时默认 `.env*`）。这些文件在创建时复制过去，已被跟踪的文件绝不会被覆盖。复制只在创建那一刻发生，之后主工作区再改也不会同步；而默认复制 `.env*` 意味着本地凭据可能落进每个 checkout。
 
 权限规则、hook、agent 配置与 worktree 创建配置在会话启动时从主工作区解析，会话进出 worktree 不会改变它们；分支里改的这些配置只在该 checkout 新开的会话里生效。规则对每个 checkout 的效力见 [Worktree 用法](./usage_CN.md#worktree)。
 
-会话内也可以让 agent 自己管理 worktree：`WorktreeEnter` 创建或重新打开一个 worktree 并把 agent 的工作目录切进去（参数：`name`、`path`、`base`、`branch`、`reset_branch`；对应的 CLI `--worktree` / `chord worktree <name>` 只能给名字和 `--reset-branch`），`WorktreeExit` 退出并可按需删除 checkout，`WorktreeList` 列出仓库的 worktree 及其归属与 dirty 状态。不必离开 TUI，直接让 agent 去某个 worktree 工作即可。会话在创建 worktree 过程中崩溃时，恢复后会按结果未知呈现，用 `chord worktree list` 查看是否有残留的 checkout。
+会话内也可以让 agent 自己管理 worktree：`WorktreeEnter` 创建或重新打开一个 worktree 并把 agent 的工作目录切进去（参数：`name`、`path`、`base`、`branch`、`reset_branch`；对应的 CLI `--worktree` / `chord worktree <name>` 只能给名字和 `--reset-branch`），`WorktreeExit` 退出并可按需删除 checkout，`WorktreeList` 列出仓库的 worktree 及其归属与 dirty 状态。进入已存在的 worktree 是复用同一个 checkout，agent 会和当时可能的其他使用者共享这个目录及其未提交改动；要并行推进就各自开 worktree。不必离开 TUI，直接让 agent 去某个 worktree 工作即可。会话在创建 worktree 过程中崩溃时，恢复后会按结果未知呈现，用 `chord worktree list` 查看是否有残留的 checkout。
 
 ### `chord worktree list`
 
@@ -383,13 +383,12 @@ worktree 只包含被 git 追踪的文件。被 gitignore 的内容——本地 
 
 ### `chord worktree remove <name>`
 
-删除 worktree 目录、它的 runtime cache 与归属元数据。**默认保留分支与仓库的会话历史**。删除前不会检测其他会话或工具是否仍在用这个 checkout，请勿删除正在使用中的 worktree。
+删除 worktree 目录、它的 runtime cache 与归属元数据。**保留分支与仓库的会话历史**。删除前会检查是否还有 Chord 会话、子代理或后台 job 占着这个 checkout；Chord 看不到其他工具，所以不要删除正在使用中的 worktree。
 
 | Flag                | 说明                                                                                            |
 | ------------------- | ----------------------------------------------------------------------------------------------- |
 | `--force`           | worktree 有未提交修改也强删；强删分支                                                           |
 | `--delete-branch`   | 同时删除 worktree 分支。不加 `--force` 时仅在分支已合并的前提下删除                       |
-| `--purge-sessions`  | 一并删除该 worktree 自己的 sessions/exports store。只有按 checkout 分片存会话的旧版本会写入它；当前版本的新会话存在仓库共享 store 里，不受影响 |
 
 ### `chord worktree finish <name>`
 

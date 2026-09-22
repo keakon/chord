@@ -80,7 +80,7 @@ Sessions、运行时缓存、exports 都以这个 key 为索引：在 `~/project
 
 这个目录只用来放 chord 自己的 worktree。它在仓库内时，那份自忽略 `.gitignore` 会把你放在里面的其它东西一并从 git 里隐藏；路径判定也会把它的每个直接子目录当成 checkout 根，于是仓库相对拼写的权限规则会按那个子目录、而不是仓库根去解析。
 
-移除 worktree，用 `chord worktree remove <name>`。它会删除工作目录、运行时缓存与归属元数据；默认保留分支与仓库的会话历史。`--delete-branch` 一并删分支（已合并才删，除非同时给 `--force`），`--force` 还会强制删除脏 worktree，`--purge-sessions` 删除只有旧版按 checkout 分片存会话时才会写入的 sessions/exports store；见 [CLI：chord worktree](./cli_CN.md#chord-worktree)。**不要**手动删 worktree 目录，那会留下注册表中的孤儿条目（之后会被 `chord cleanup project` 标记）。
+移除 worktree，用 `chord worktree remove <name>`。它会删除工作目录、运行时缓存与归属元数据，保留分支与仓库的会话历史。`--delete-branch` 一并删分支（已合并才删，除非同时给 `--force`），`--force` 还会强制删除脏 worktree；见 [CLI：chord worktree](./cli_CN.md#chord-worktree)。**不要**手动删 worktree 目录，那会留下注册表中的孤儿条目（之后会被 `chord cleanup project` 标记）。
 
 ## cache 目录：`~/.cache/chord/`
 

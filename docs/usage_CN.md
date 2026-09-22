@@ -221,16 +221,18 @@ chord import claude --id <session-id> [--root ~/.claude/projects]
 - `chord --worktree feat-auth` / `chord worktree feat-auth`：创建或进入名为 `feat-auth` 的 worktree（分支 `chord/feat-auth`）；与 `--continue` / `--resume` 搭配时，以该 worktree 为工作目录继续仓库里最近的会话
 - `chord headless -d <repo> --worktree feat-auth`：headless 同款行为；`ready` 事件 payload 包含 worktree 的 `name`、`branch`、`path`、`repo_root`
 - `chord worktree list`：列出当前仓库的 chord 管理 worktree
-- `chord worktree remove <name>`：删除 worktree 及其 runtime cache；**默认保留分支与仓库的会话历史**。`--delete-branch` 仅在已合并时删分支，`--force` 强制删除脏 worktree 和分支，`--purge-sessions` 额外删除只有旧版按 checkout 分片存会话时才会写入的 store。
+- `chord worktree remove <name>`：删除 worktree 及其 runtime cache，**保留分支与仓库的会话历史**。`--delete-branch` 仅在已合并时删分支，`--force` 强制删除脏 worktree 和分支。
 - `chord worktree finish <name>`：先用目标分支更新工作树，再把结果压缩成一个提交合回目标分支，最后删除工作树和分支。可用 `--onto <branch>` 指定目标分支，或用 `--check` 在不改动现有工作树的情况下预检冲突。发生冲突时，目标分支保持不变；解决工作树中的合并冲突后重新运行 `finish` 即可。
 
 创建或进入 worktree 会改变 Chord 运行所在的目录。你可以用 `chord --worktree <name>`，也可以用 `chord worktree <name>`；`worktree` 子命令同时承担 `list`、`remove`、`finish` 等管理操作。会话进行中也可以直接让 agent 切换 worktree。
 
 **落在哪里。** 默认在 `<state-dir>/worktrees/<repo-id>/<slug>`，也就是仓库之外。想换位置就设 `worktree.root`：相对路径以主仓库根为基准，`root: .chord/worktrees` 会落在 `<repo>/.chord/worktrees/<slug>`。这个目录在仓库内时，Chord 会在其中放一个内容为 `*` 的 `.gitignore`，这些 checkout 就不会出现在未跟踪文件里；该文件只负责 `git status` 整洁，而 chord 自己的 `grep` / `glob` 会跳过这个根目录。但别的工具并不知道它：仓库内的 checkout 就是磁盘上的第二份代码树，凡是依赖索引或全仓扫描的工具（LSP 建索引、`docker` build context、会遍历整个仓库的测试运行器）都可能把它一并算进去。留在默认位置就不会有这个问题。
 
-**里面有什么。** 只有被 git 追踪的文件。主工作区未提交的改动不会带过去，被 gitignore 的内容也不会：本地 `AGENTS.md`、`.chord/config.yaml`、agents、skills、plans、memory 都留在主工作区，worktree 里的会话从主工作区读取它们。例外是 `AGENTS.md` 与项目技能：checkout 里自带副本时就用它，所以分支可以带上自己的指令与技能。其余内容的表现和主工作区一致——同一套子代理与记忆。想让某些被忽略的文件跟过去（本地 env、机器相关配置等），就把它们的 pattern 写进仓库根的 `.worktreeinclude`（gitignore 语法）：Chord 在创建时把匹配且被忽略的文件复制过去，已被跟踪的文件绝不覆盖。没有这个文件时，复制 `.env*`。
+**里面有什么。** 只有被 git 追踪的文件。主工作区未提交的改动不会带过去，被 gitignore 的内容也不会：本地 `AGENTS.md`、`.chord/config.yaml`、agents、skills、plans、memory 都留在主工作区，worktree 里的会话从主工作区读取它们。例外是 `AGENTS.md` 与项目技能：checkout 里自带副本时就用它，所以分支可以带上自己的指令与技能。其余内容的表现和主工作区一致——同一套子代理与记忆。想让某些被忽略的文件跟过去（本地 env、机器相关配置等），就把它们的 pattern 写进仓库根的 `.worktreeinclude`（gitignore 语法）：Chord 在创建时把匹配且被忽略的文件复制过去，已被跟踪的文件绝不覆盖。没有这个文件时，复制 `.env*`。复制只在创建那一刻发生，之后主工作区再改也不会同步过去或同步回来；而默认复制 `.env*` 意味着本地凭据可能落进每个 checkout，所以 pattern 只写 worktree 真正需要的那几个。
 
 **会话按仓库共享。** 同一仓库的所有 checkout 共用一个 session store，所以在 worktree 里开的会话，在主工作区能看到、也能继续，反过来也一样。runtime cache 仍按 checkout 分开，exports 跟着会话走。会话会记录自己当时所在的 checkout，`/resume` 的 `Worktree` 列会显示它：`chord resume <id>` 和 `chord --resume <id>` 会切回去；那个 worktree 已经不在了就先提示、再回主工作区继续。`chord worktree remove` 和 `chord worktree finish` 都不会删除仓库的会话历史。
+
+**checkout 不是独占的。** 创建或进入 worktree 时，只要目录已存在就复用同一个，也不会阻止两个会话在同一个 checkout 里干活：它们看到的是同一份未提交改动，也可能互相覆盖文件。要并行推进的任务就各给一个 worktree；已经攒了未提交改动的 checkout，就当成只能有一个写者。
 
 **权限跟着会话，不跟着 checkout。** 权限规则对同一仓库的每个 checkout 都生效：主工作区里写 `write src/**: allow`，在 `<worktree>/src/` 里同样允许写；也没法写出「只允许某一个 checkout」的规则。Chord 把仓库内的路径按仓库相对拼写去匹配，所以绝对路径规则永远匹配不到它们。worktree 是用来并行干活的，不是用来收窄权限的。hook、agent 配置、权限规则和 worktree 创建配置都在会话启动时从主工作区读取，会话中途进出 worktree 不会改变它们——想用分支上改过的配置，就在该 checkout 新开一个会话。
 

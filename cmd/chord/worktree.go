@@ -311,10 +311,9 @@ func newWorktreeSessionHolders(pl *config.PathLocator, contentRoot string) workt
 func newWorktreeRemoveCmd() *cobra.Command {
 	var force bool
 	var deleteBranch bool
-	var purgeSessions bool
 	cmd := &cobra.Command{
 		Use:           "remove <name>",
-		Short:         "Remove a chord-managed worktree (branch and sessions are preserved by default)",
+		Short:         "Remove a chord-managed worktree (branch and sessions are preserved)",
 		Args:          cobra.ExactArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -337,7 +336,7 @@ func newWorktreeRemoveCmd() *cobra.Command {
 				return fmt.Errorf("resolve worktree branch_prefix: %w", err)
 			}
 			opts := worktree.RemoveOptions{
-				Force: force, DeleteBranch: deleteBranch, BranchPrefix: branchPrefix, PurgeSessions: purgeSessions,
+				Force: force, DeleteBranch: deleteBranch, BranchPrefix: branchPrefix,
 				// Sessions live under the content root's project key, shared by
 				// every checkout, so that is where the sessions using this
 				// checkout are recorded.
@@ -347,11 +346,7 @@ func newWorktreeRemoveCmd() *cobra.Command {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Removed worktree %s\n", name)
-			if purgeSessions {
-				fmt.Fprintln(cmd.OutOrStdout(), "Also purged this worktree's own session/export store.")
-			} else {
-				fmt.Fprintln(cmd.OutOrStdout(), "Note: the worktree's session/export store was kept; pass --purge-sessions to delete it. Sessions created by this version are shared per repository and are never removed with a worktree.")
-			}
+			fmt.Fprintln(cmd.OutOrStdout(), "Note: sessions and exports live under the repository's content root, shared by every checkout, so removing a worktree does not delete them.")
 			if !force && !deleteBranch {
 				fmt.Fprintln(cmd.OutOrStdout(), "Note: branch was kept. Pass --delete-branch (only if merged) or --force (always) to remove the branch.")
 			}
@@ -360,7 +355,6 @@ func newWorktreeRemoveCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "remove even when the worktree is dirty; force-delete the branch")
 	cmd.Flags().BoolVar(&deleteBranch, "delete-branch", false, "delete the worktree's branch (only if merged; pass --force to override)")
-	cmd.Flags().BoolVar(&purgeSessions, "purge-sessions", false, "also delete the worktree's own session/export store (older per-checkout session history)")
 	return cmd
 }
 

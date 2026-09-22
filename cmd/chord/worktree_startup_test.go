@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"os"
 	"os/exec"
@@ -73,71 +72,6 @@ func setupStartupRepo(t *testing.T) string {
 		t.Fatalf("canonical: %v", err)
 	}
 	return canonical
-}
-
-// TestAbandonedWorktreeSessionsAreReported covers the session stores left
-// behind by chord versions that keyed sessions per checkout: they must be
-// reported (with the sid reachable) instead of the sessions just vanishing.
-func TestAbandonedWorktreeSessionsAreReported(t *testing.T) {
-	repo := setupStartupRepo(t)
-	withTestStateDir(t)
-	chdirForTest(t, repo)
-
-	info := prepareStartupWorktreeForTest(t, context.Background(), "feat-old")
-	pl, err := startupPathLocator()
-	if err != nil {
-		t.Fatalf("startupPathLocator: %v", err)
-	}
-	oldPL, err := pl.LocateProject(info.Path)
-	if err != nil {
-		t.Fatalf("LocateProject(worktree): %v", err)
-	}
-	repoPL, err := pl.LocateProject(repo)
-	if err != nil {
-		t.Fatalf("LocateProject(repo): %v", err)
-	}
-	const sid = "20260101000000000"
-	// One session in the worktree's own store, one in the repository store:
-	// only the former is abandoned.
-	for _, dir := range []string{filepath.Join(oldPL.ProjectSessionsDir, sid), filepath.Join(repoPL.ProjectSessionsDir, "20260101000000001")} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatalf("mkdir session dir: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, "main.jsonl"), []byte("{}\n"), 0o600); err != nil {
-			t.Fatalf("write main.jsonl: %v", err)
-		}
-	}
-
-	stores := findAbandonedWorktreeSessions(context.Background(), repo)
-	if len(stores) != 1 {
-		t.Fatalf("findAbandonedWorktreeSessions = %+v, want exactly the worktree store", stores)
-	}
-	store := stores[0]
-	if store.Name != "feat-old" || store.Path != info.Path || store.Count != 1 || store.SessionsDir != oldPL.ProjectSessionsDir {
-		t.Errorf("abandoned store = %+v, want name=feat-old path=%s count=1 dir=%s", store, info.Path, oldPL.ProjectSessionsDir)
-	}
-
-	var buf bytes.Buffer
-	printAbandonedWorktreeSessionsHint(&buf, stores, repoPL.ProjectSessionsDir)
-	hint := buf.String()
-	if !strings.Contains(hint, "feat-old") || !strings.Contains(hint, oldPL.ProjectSessionsDir) || !strings.Contains(hint, repoPL.ProjectSessionsDir) {
-		t.Errorf("hint does not point at the store and the shared store:\n%s", hint)
-	}
-
-	if found, ok := findAbandonedSessionStore(context.Background(), repo, sid); !ok || found != oldPL.ProjectSessionsDir {
-		t.Errorf("findAbandonedSessionStore(%s) = %q, %v; want %q, true", sid, found, ok, oldPL.ProjectSessionsDir)
-	}
-	if _, ok := findAbandonedSessionStore(context.Background(), repo, "20260101999999999"); ok {
-		t.Errorf("findAbandonedSessionStore reported an unknown session")
-	}
-
-	_, err = resolveSessionInProject(context.Background(), pl, repo, sid)
-	if err == nil || !strings.Contains(err.Error(), oldPL.ProjectSessionsDir) {
-		t.Errorf("resolveSessionInProject error = %v, want it to name the abandoned store", err)
-	}
-	if _, err := resolveSessionInProject(context.Background(), pl, repo, "20260101999999999"); err == nil || strings.Contains(err.Error(), oldPL.ProjectSessionsDir) {
-		t.Errorf("resolveSessionInProject error = %v, want a plain not-found error", err)
-	}
 }
 
 // TestWorktreeSessionsShareRepositoryKey verifies the storage half of repo-scoped

@@ -347,6 +347,13 @@ func (act workDirActor) enter(ctx context.Context, req tools.WorktreeEnterReques
 		Kind:      act.kind,
 		CreatedAt: time.Now().UTC(),
 	}
+	// Create() reuses an existing checkout and reports it through Existed, so
+	// entering a worktree another session (or sub-agent) already works in is
+	// allowed on purpose: refusing would break resuming a session whose checkout
+	// still exists, and the owner metadata records who created a worktree, not
+	// who is alive in it. The cost is that both share one working tree and its
+	// uncommitted changes, which the Enter tool description and the public usage
+	// docs state; there is no runtime occupancy gate.
 	info, err := worktree.Create(ctx, worktree.CreateOptions{
 		Name:         name,
 		RepoRoot:     act.deps.RepoRoot,
@@ -538,6 +545,12 @@ func (act workDirActor) list(ctx context.Context) ([]tools.WorktreeListEntry, er
 		return nil, err
 	}
 	active := act.binding.load().WorktreeID
+	// Dirty state and owner are probed one worktree at a time: this list backs a
+	// user-triggered diagnostic, the worktree count of one repository is small,
+	// and a failed probe degrades to "unknown" instead of failing the list.
+	// Batching (`git worktree list --porcelain` for topology, then dirty state in
+	// one call or in the background) would change what the caller sees and is
+	// only worth it if repositories with many worktrees show up.
 	entries := make([]tools.WorktreeListEntry, 0, len(infos))
 	for i := range infos {
 		info := infos[i]

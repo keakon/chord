@@ -9,7 +9,7 @@
 - Agent 定义不再读取 `capabilities`、`preferred_tasks`、`write_mode`、`delegation_policy`。这些键从未被强制执行，只是 Delegate 选人列表上的标签。选人意图写进 `description`。角色能不能写文件仍由 `permission` 决定，Delegate 仍会在每个可选项上标 `empty_scope=allowed` 或 `non_empty_scope=required`。现有 agent 文件里残留的这些键会被忽略。
 - headless 的 `compaction_status` 事件不再携带 `model_downshift` 触发类型：切换到更小窗口引发的压缩现在以 `usage_driven` 上报，按旧值过滤的集成方请改匹配 `usage_driven`。
 - headless 的提问协议换了形状。`question_request` 不再带 `default_answer` 和 `timeout_ms`，改为带 `deadline`——Chord 关闭该问题的绝对 RFC 3339 时刻（未设置 `question_timeout` 时省略）。Chord 也不再拿第一个选项当兜底默认答案。`question` 命令用 `reason`（`answered` 或 `declined`）取代 `cancelled`，问题关闭改由新增的 `question_resolved` 事件通知，不再靠之后的快照推断。
-- worktree 会话现在按仓库共享：同一仓库的所有 checkout 共用一个 store，在 worktree 里开的会话能在主工作区列出、继续，反过来也一样。旧版本按 checkout 分片写入的会话不会迁移，也不再出现在列表里；继续这类会话失败时，错误信息会给出旧 store 的路径，便于把会话目录拷过去。
+- worktree 会话现在按仓库共享：同一仓库的所有 checkout 共用一个 store，在 worktree 里开的会话能在主工作区列出、继续，反过来也一样。旧版本按 checkout 分片写入的会话不会迁移：它们仍留在自己那个 key 下，但 Chord 不再列出、不再恢复，也不会随 worktree 一起清理。
 - 点名仓库内路径的权限规则现在对同一仓库的每个 checkout 生效。主工作区里写的 `write src/**: allow`，在 `<worktree>/src/` 下同样允许；也没法写出「只允许某一个 checkout」的规则——Chord 按仓库相对拼写匹配仓库内的路径，绝对路径规则永远匹配不到它们。
 
 ### 新功能
@@ -31,8 +31,8 @@
 - 会话里也能让 agent 管理 worktree。`WorktreeEnter` 创建或重新打开 worktree（`name`、`path`、`base`、`branch`、`reset_branch`）并把 agent 的工作目录切进去，shell、文件工具、grep/glob 与 LSP 随之跟着走；`WorktreeExit` 退出并可按需删除该 checkout；`WorktreeList` 列出仓库的 worktree 及其归属与 dirty 状态。每个 SubAgent 各有自己的工作目录，因此一个 worktree 在被改的同时，另一个可以被审查；被放进 worktree 的 worker 会保留这个 checkout 身份，完成回报里会写明它实际工作的 worktree、分支与基线。
 - 新增 `worktree.root` 选项，可把 worktree 建到仓库内（`root: .chord/worktrees`），不再只能放在 state 目录下、仓库之外。root 落在仓库内时，Chord 会保留一个自忽略的 `.gitignore`，这些 checkout 不会出现在 `git status` 里，chord 自己的 grep/glob 也会跳过该 root。
 - 新增 `.worktreeinclude` 文件（gitignore 语法，默认 `.env*`），用来列出要复制进每个新 worktree 的被忽略文件——本地 env、机器相关配置等。已被跟踪的文件绝不覆盖。
-- 新增两个 flag：`--reset-branch` 允许复用没有任何 worktree 检出的遗留 worktree 分支，不再直接失败；`chord worktree remove --purge-sessions` 删除只有旧版按 checkout 分片存会话时才会写入的 sessions/exports store。
-- 删除 checkout 现在会在还有人正在用它时拒绝。`chord worktree remove` 与 `chord worktree finish` 删除前会检查是否有另一个 Chord 会话仍在该 checkout 里开着，`WorktreeExit` 也改成在真正删除前再查一次，而不是只信更早那次检查的结果。崩溃退出的会话不会挡住删除：会话记录会活得比进程久，因此只有进程仍持有锁的会话才算占用者。占用情况无法确定时按「占用」处理，拒绝删除。
+- 新增 flag `--reset-branch`：复用没有任何 worktree 检出的遗留 worktree 分支，不再直接失败。
+- 删除 checkout 现在会在仍有 Chord 会话正在用它时拒绝。`chord worktree remove` 与 `chord worktree finish` 删除前会检查是否有另一个 Chord 会话仍在该 checkout 里开着，`WorktreeExit` 也改成在真正删除前再查一次，而不是只信更早那次检查的结果。崩溃退出的会话不会挡住删除：会话记录会活得比进程久，因此只有进程仍持有锁的会话才算占用者。占用情况无法确定时按「占用」处理，拒绝删除。
 
 ### 改进
 

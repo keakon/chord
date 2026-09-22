@@ -87,7 +87,7 @@ Sessions, runtime cache, and exports are all keyed on this: that is how a fresh 
 
 Keep the worktree root for chord's own worktrees. When it lives inside the repository, that self-ignoring `.gitignore` hides whatever else you put there from git, and path evaluation treats every immediate child as a checkout root — so a repository-relative permission rule would resolve paths under a stray directory against that directory instead of the repository root.
 
-Use `chord worktree remove <name>` to remove the working directory, its runtime cache, and its ownership metadata. The branch and the repository's session history are kept by default; `--delete-branch` also deletes the branch (only if merged, unless `--force` is given), `--force` also force-deletes a dirty worktree, and `--purge-sessions` deletes the session/export store that only older per-checkout versions wrote; see [CLI: chord worktree](./cli.md#chord-worktree). Manually deleting the worktree directory is not recommended; you would leave orphan registry entries that `chord cleanup project` would later flag.
+Use `chord worktree remove <name>` to remove the working directory, its runtime cache, and its ownership metadata. The branch and the repository's session history are kept: `--delete-branch` also deletes the branch (only if merged, unless `--force` is given), and `--force` also force-deletes a dirty worktree; see [CLI: chord worktree](./cli.md#chord-worktree). Manually deleting the worktree directory is not recommended; you would leave orphan registry entries that `chord cleanup project` would later flag.
 
 ## Cache dir: `~/.cache/chord/`
 

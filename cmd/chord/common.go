@@ -572,18 +572,6 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		log.Infof("session %s is open in another Chord process; continuing with %s instead", skipped, ac.logCtx.SID)
 	}
 
-	// Sessions of worktrees created by older chord versions live under that
-	// worktree's own project key and are no longer listed. Surface them when
-	// the user asks to continue a session, so a vanished session is explained
-	// instead of silently missing.
-	if sessionOpts.ContinueLatest || strings.TrimSpace(sessionOpts.ResumeID) != "" {
-		hintCtx := ac.Ctx
-		if hintCtx == nil {
-			hintCtx = context.Background()
-		}
-		printAbandonedWorktreeSessionsHint(os.Stderr, findAbandonedWorktreeSessions(hintCtx, ac.ContentRoot), projectLocator.ProjectSessionsDir)
-	}
-
 	tracePath := filepath.Join(ac.SessionDir, "traces", llm.LLMTraceFileName())
 	var traceWriter *llm.TraceWriter
 	if ac.ProviderCache.traceWriter != nil {

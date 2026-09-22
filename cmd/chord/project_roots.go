@@ -49,6 +49,12 @@ func newPathRootsResolver(ctx context.Context, contentRoot string, pl *config.Pa
 // to one set of relative roots, and scoping the set by chord's own branch prefix
 // would make a repository-relative rule match in some checkouts and silently not
 // match in others.
+//
+// It resolves the main worktree root and lists the repository's checkouts on
+// every refresh, and is deliberately not cached: another process can create or
+// remove a worktree between turns, and a stale root set would point policy
+// evaluation at a checkout that no longer exists (or miss a new one until
+// restart).
 func resolvePathRoots(ctx context.Context, contentRoot string, pl *config.PathLocator, configuredRoot string) (roots, containers []string) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -68,7 +74,7 @@ func resolvePathRoots(ctx context.Context, contentRoot string, pl *config.PathLo
 	// The main checkout is seeded explicitly so a failed listing still leaves
 	// the repository itself covered.
 	roots = append(roots, mainRoot)
-	if paths, perr := worktree.CheckoutPaths(ctx, mainRoot); perr == nil {
+	if paths, perr := worktree.CheckoutPathsInMain(ctx, mainRoot); perr == nil {
 		roots = append(roots, paths...)
 	} else {
 		log.Warnf("failed to list repository checkouts; policy roots keep the main checkout only main_root=%v error=%v", mainRoot, perr)

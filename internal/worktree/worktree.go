@@ -174,12 +174,6 @@ type RemoveOptions struct {
 	// prefix. Empty falls back to DefaultBranchPrefix. Must match the
 	// prefix Create used, otherwise the worktree won't be found.
 	BranchPrefix string
-	// PurgeSessions also deletes the worktree's own session/export store,
-	// which only holds sessions created by chord versions that keyed
-	// sessions per checkout. Sessions created today live under the
-	// repository content root's project key, shared with every checkout, so
-	// they are never deleted by removing a worktree.
-	PurgeSessions bool
 	// Holders reports live work anchored to the worktree. It is consulted
 	// last, immediately before the checkout is deleted, so every removal
 	// path -- the agent tools and the command line alike -- refuses to pull
@@ -465,9 +459,11 @@ func List(ctx context.Context, repoRoot, branchPrefix string) ([]Info, error) {
 	return infos, nil
 }
 
-// CheckoutPaths returns the canonical path of every worktree of the repository,
-// including checkouts chord did not create (a branch without the chord prefix,
-// or one added by hand with `git worktree add`).
+// CheckoutPathsInMain returns the canonical path of every worktree of the
+// repository whose main worktree is mainRoot, including checkouts chord did not
+// create (a branch without the chord prefix, or one added by hand with `git
+// worktree add`). Callers resolve mainRoot first, so this avoids the extra
+// `git rev-parse` a repo-root parameter would need.
 //
 // This is the policy-root view, not the management view: every checkout of one
 // repository contributes to a single set of relative roots, so the set must not
@@ -476,11 +472,7 @@ func List(ctx context.Context, repoRoot, branchPrefix string) ([]Info, error) {
 // in the main checkout — the cwd-dependent drift the merged-roots design exists
 // to remove. Use List when the caller needs chord's own worktrees with their
 // slug, branch, and repo metadata.
-func CheckoutPaths(ctx context.Context, repoRoot string) ([]string, error) {
-	mainRoot, err := GitMainRoot(ctx, repoRoot)
-	if err != nil {
-		return nil, err
-	}
+func CheckoutPathsInMain(ctx context.Context, mainRoot string) ([]string, error) {
 	out, err := runGit(ctx, mainRoot, "worktree", "list", "--porcelain")
 	if err != nil {
 		return nil, err
@@ -591,9 +583,7 @@ func ResolveByPath(ctx context.Context, repoRoot, dir, branchPrefix string) (*In
 //
 // Sessions and exports are shared by every checkout of the repository — they
 // live under the content root's project key — so removing a worktree never
-// deletes them. PurgeSessions additionally deletes the worktree's own
-// session/export store, which only holds sessions from versions that keyed
-// sessions per checkout.
+// deletes them.
 //
 // pathLocator is required to compute and clean the worktree's
 // ProjectKey-scoped state. Passing nil is an error.
@@ -626,6 +616,14 @@ func Remove(ctx context.Context, repoRoot, name string, opts RemoveOptions, path
 	// it runs as close to the deletion as possible. The dirty and cwd checks
 	// above are cheap fail-fasts; a holder that appeared while they ran must
 	// still be seen here.
+	//
+	// The check and the `git worktree remove` below are still not atomic across
+	// processes: another Chord process can start and bind this checkout in the
+	// window between them. The window is milliseconds, but closing it needs a
+	// mutation lock shared by "bind a session to this checkout" and "remove the
+	// checkout" — either a flock a binding holds while it records the checkout,
+	// or git's own `worktree lock` plus stale-lock handling. Neither is
+	// implemented, so treat this as best-effort, not as a guarantee.
 	if opts.Holders != nil {
 		if holders := opts.Holders(info); len(holders) > 0 {
 			return fmt.Errorf("worktree %q is still in use: %s; finish or stop that work before removing the checkout", info.Name, strings.Join(holders, "; "))
@@ -651,7 +649,7 @@ func Remove(ctx context.Context, repoRoot, name string, opts RemoveOptions, path
 			return fmt.Errorf("delete branch %s (use --force to override): %w", info.Branch, berr)
 		}
 	}
-	if err := cleanupWorktreeProjectState(info.Path, pathLocator, opts.PurgeSessions); err != nil {
+	if err := cleanupWorktreeProjectState(info.Path, pathLocator); err != nil {
 		log.Warnf("cleanup worktree project state failed worktree=%v error=%v", name, err)
 	}
 	if err := WithRepoIndexLock(pathLocator.StateDir, info.RepoID, func(idx *RepoIndex) error {
@@ -664,27 +662,17 @@ func Remove(ctx context.Context, repoRoot, name string, opts RemoveOptions, path
 }
 
 // cleanupWorktreeProjectState deletes the per-project state chord generated for
-// the worktree. Runtime cache and the registry metadata always go; the
-// worktree's own sessions and exports store is deleted only when
-// purgeSessions is set, because it is the only remaining copy of sessions
-// created before sessions became repository-scoped.
-func cleanupWorktreeProjectState(worktreePath string, pl *config.PathLocator, purgeSessions bool) error {
+// the worktree: the runtime cache derived from that checkout and its registry
+// metadata. The repository's sessions and exports are shared, so they are never
+// touched.
+func cleanupWorktreeProjectState(worktreePath string, pl *config.PathLocator) error {
 	pj, err := pl.LocateProject(worktreePath)
 	if err != nil {
 		return err
 	}
-	dirs := []string{pj.RuntimeCacheDir}
-	if purgeSessions {
-		dirs = append(dirs, pj.ProjectSessionsDir, pj.ProjectExportsDir)
-	}
 	var firstErr error
-	for _, p := range dirs {
-		if p == "" {
-			continue
-		}
-		if err := os.RemoveAll(p); err != nil && firstErr == nil {
-			firstErr = err
-		}
+	if pj.RuntimeCacheDir != "" {
+		firstErr = os.RemoveAll(pj.RuntimeCacheDir)
 	}
 	if pj.RegistryMetaPath != "" {
 		if err := os.Remove(pj.RegistryMetaPath); err != nil && !errors.Is(err, os.ErrNotExist) && firstErr == nil {

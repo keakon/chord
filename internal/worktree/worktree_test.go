@@ -336,7 +336,7 @@ func TestList_FiltersByBranchPrefix(t *testing.T) {
 	}
 }
 
-func TestRemove_DefaultPreservesBranchAndSessions(t *testing.T) {
+func TestRemove_PreservesBranchAndSessions(t *testing.T) {
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
@@ -367,25 +367,6 @@ func TestRemove_DefaultPreservesBranchAndSessions(t *testing.T) {
 	if !strings.Contains(string(branches), "chord/feat") {
 		t.Errorf("branch chord/feat removed by default; should require --delete-branch / --force")
 	}
-}
-
-func TestRemove_PurgeSessions(t *testing.T) {
-	repo := setupTestRepo(t)
-	pl := setupTestLocator(t)
-	ctx := context.Background()
-	info, err := Create(ctx, CreateOptions{Name: "feat", RepoRoot: repo, PathLocator: pl})
-	if err != nil {
-		t.Fatal(err)
-	}
-	pj := seedProjectState(t, pl, info.Path)
-
-	if err := Remove(ctx, repo, "feat", RemoveOptions{PurgeSessions: true}, pl); err != nil {
-		t.Fatalf("Remove with purge: %v", err)
-	}
-	assertPathExists(t, pj.ProjectSessionsDir, false)
-	assertPathExists(t, pj.ProjectExportsDir, false)
-	assertPathExists(t, pj.RuntimeCacheDir, false)
-	assertPathExists(t, pj.RegistryMetaPath, false)
 }
 
 func TestRemove_DeleteBranch_OnUnmergedRefuses(t *testing.T) {
