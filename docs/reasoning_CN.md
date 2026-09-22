@@ -80,6 +80,7 @@ Gemini 用 `extra_body.google.thinking_config`，Claude 用
 - [Kimi](./model-configs_CN.md#kimi)
 - [Grok](./model-configs_CN.md#grokxai)
 - [MiniMax](./model-configs_CN.md#minimaxopenai-兼容接口)
+- [小米 MiMo](./model-configs_CN.md#小米-mimoopenai-兼容接口)
 - [Meta Muse Spark](./model-configs_CN.md#meta-muse-spark)
 
 请求报 thinking 模式错误时，从

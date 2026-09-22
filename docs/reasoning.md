@@ -89,6 +89,7 @@ structured, and that is the part which must survive a provider switch. See
 - [Kimi](./model-configs.md#kimi)
 - [Grok](./model-configs.md#grok-xai)
 - [MiniMax](./model-configs.md#minimax-openai-compatible)
+- [Xiaomi MiMo](./model-configs.md#xiaomi-mimo-openai-compatible)
 - [Meta Muse Spark](./model-configs.md#meta-muse-spark)
 
 When a request fails with a thinking-mode error, start from

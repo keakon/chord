@@ -14,7 +14,7 @@
 | Codex OAuth | [Codex 登录配置](#codex-oauth-preset) |
 | Anthropic API | [Claude](#anthropic-claude) |
 | Google API | [Gemini](#google-gemini) |
-| 其他模型 | [GLM](#glm--bigmodel-coding-plan) · [DeepSeek](#deepseek) · [Qwen](#qwen-保留历史思考) · [Kimi](#kimi) · [Grok](#grokxai) · [MiniMax](#minimaxopenai-兼容接口) · [Muse Spark](#meta-muse-spark) |
+| 其他模型 | [GLM](#glm--bigmodel-coding-plan) · [DeepSeek](#deepseek) · [Qwen](#qwen-保留历史思考) · [Kimi](#kimi) · [Grok](#grokxai) · [MiniMax](#minimaxopenai-兼容接口) · [MiMo](#小米-mimoopenai-兼容接口) · [Muse Spark](#meta-muse-spark) |
 | Chat Completions 网关的思考设置 | [网关配置](#走-chat-completions-网关的-thinking) |
 
 复制后按[验证步骤](#如何验证任意一份配置)检查配置和连接。需要长期运行或控制上下文成本时，再看文末的[按模型调压缩](#按模型调压缩)。
@@ -1362,67 +1362,97 @@ Chord 会保留已完成工具轮次中可迁移的部分：
 
 ## Grok（xAI）
 
-xAI 推荐通过 Responses API 使用 Grok。Grok 4.6 支持文本和图片输入、
-function calling、structured output、reasoning，并提供 500K 上下文。xAI
+xAI 推荐通过 Responses API 使用 Grok。Grok 4.7 支持文本和图片输入、
+function calling、structured output、reasoning，上下文 500K。xAI
 也接受 PDF 附件，以 `input_file` 提供公开 `file_url` 或已上传的 `file_id`
 即可，服务端会自动启用 `attachment_search` 工具；但 Chord 发送 PDF 用的是
 inline base64 `file_data`，xAI 的 Responses API 不接受非图片的 inline 字节，
-所以这里的 `modalities.input` 不声明 `pdf`。Grok 4.6 通过
-`response.reasoning_text.*` 流事件返回 reasoning text；Chord 会把这些事件
-映射到统一 thinking stream，同时保存有序 Responses output item 以延续工具
-调用状态。
+所以这里的 `modalities.input` 不声明 `pdf`。Grok 4.7 的 reasoning text 走
+`response.reasoning_text.*` 流事件，摘要走 `response.reasoning_summary_text.*`；
+Chord 两类都映射到统一 thinking stream，同时保存有序 Responses output item
+以延续工具调用状态。Responses API 对 Grok 4.7 总是返回
+`reasoning.encrypted_content`，Chord 原样回放这些 reasoning item，模型跨轮
+保持思考。
 
 ```yaml
 model_templates:
-  grok-4.6: &grok-4-6
+  grok-4.7: &grok-4-7
     limit:
       context: 500000
     reasoning:
       effort: high
+    variants:
+      low:
+        reasoning:
+          effort: low
+      medium:
+        reasoning:
+          effort: medium
+      high:
+        reasoning:
+          effort: high
+      xhigh:
+        reasoning:
+          effort: xhigh
     modalities:
       input: [text, image]
+    cost:
+      input: 2
+      output: 6
+      cache_read: 0.5
+      input_tiers:
+        - above_input_tokens: 200000
+          input: 4
+          output: 12
+          cache_read: 1
 
 providers:
   xai:
     type: responses
     api_url: https://api.x.ai/v1/responses
     models:
-      grok-4.6: *grok-4-6
+      grok-4.7: *grok-4-7
 
 model_pools:
   default:
-    - xai/grok-4.6
+    - xai/grok-4.7
 ```
 
-xAI 只公布了 Grok 4.6 的 500K 总上下文窗口，没有再给出更低的独立模型输出
+xAI 只公布了 Grok 4.7 的 500K 总上下文窗口，没有再给出更低的独立模型输出
 上限，因此这里省略 `limit.output`。Chord 不会向 xAI 发送
 `max_output_tokens`，由 API 在剩余上下文内安排输出；本地从 `limit.context`
 推导输入预算时，仍会预留默认的 `64000` 输出预算。只有明确需要发送固定上限时，
 才配置 `limit.output`、提高 Chord 的 `max_output_tokens`，并设置
 `compat.responses.send_max_output_tokens: true`。
 
-可使用 `grok-4.6` 作为模型 ID。不要配置
+`cost` 块描述 xAI 的整单分档：prompt 一到 200K token，整单所有 token 都按
+高档计费，`input_tiers` 把这个规则带进 Chord 的费用统计。
+
+模型 ID 用 `grok-4.7`；想在池引用里固定档位就用 `@low` / `@xhigh`。
+Grok 4.6 仍在服务且价格相同，同一份模板只换模型 ID。不要配置
 `openai_visible`：xAI Responses 使用原生有序 output / reasoning 状态，而非
 Chat Completions 的 `reasoning_content`。`reasoning.effort` 支持 `low`、
-`medium`、`high`、`xhigh`（仅 Grok 4.6 可用，不支持该档位的模型会按 `high`
-处理）；`high` 是默认值，且 reasoning 不可关闭。
+`medium`、`high`、`xhigh`（Grok 4.6 及以后；更早的模型把 `xhigh` 当
+`high`）；`high` 是默认值，且 reasoning 不可关闭。
 
 ### Chat Completions
 
-Grok 4.6 也能走 OpenAI 兼容的 `/v1/chat/completions`，官方仍在维护这条线路，
-只是建议新集成改用 Responses。它同样接受 `reasoning_effort`（`low`、`medium`、
-`high` 默认、`xhigh`）；reasoning 模型不接受 `stop`、`presence_penalty`、
+Grok 4.7 也能走 OpenAI 兼容的 `/v1/chat/completions`，但官方已经把它标成
+Responses 的上一代接口，新集成引导去 Responses；这条线路仍保留文档，网关和
+既有集成还能用。它同样接受 `reasoning_effort`（`low`、`medium`、`high`
+默认、`xhigh`）；reasoning 模型不接受 `stop`、`presence_penalty`、
 `frequency_penalty`，`max_tokens` 已弃用，应改用 `max_completion_tokens`。
 
-网关是否回传 `reasoning_content` 各不相同。网关一直不回传时，Chord 回放
-assistant tool call 没有 reasoning content 可用，会按「该后端无法回放
-reasoning」处理，从出现工具调用的下一次请求起剥离 `reasoning_effort`，按请求
-设置的 effort 就只对每个回合的首个请求生效。想让 effort 和 reasoning 请求覆盖项
-在整个回合都保持生效，就用 `compat.chat_completions.keep_reasoning_effort: true`：
+xAI 自己的 Chat Completions 对 reasoning 模型不回传 reasoning content，
+第三方网关也各不相同。一直没有回传时，Chord 回放 assistant tool call 没有
+reasoning content 可用，会按「该后端无法回放 reasoning」处理，从出现工具调用
+的下一次请求起剥离 `reasoning_effort`，按请求设置的 effort 就只对每个回合的
+首个请求生效。想让 effort 和 reasoning 请求覆盖项在整个回合都保持生效，就用
+`compat.chat_completions.keep_reasoning_effort: true`：
 
 ```yaml
 model_templates:
-  grok-4.6: &grok-4-6
+  grok-4.7: &grok-4-7
     limit:
       context: 500000
       output: 64000
@@ -1452,20 +1482,21 @@ providers:
     type: chat-completions
     api_url: https://example.com/v1/chat/completions
     models:
-      grok-4.6: *grok-4-6
+      grok-4.7: *grok-4-7
 
 model_pools:
   default:
-    - grok-gateway/grok-4.6@xhigh
+    - grok-gateway/grok-4.7@xhigh
 ```
 
 `openai_visible` 依然不用配：Grok 不要求回放 `reasoning_content`。缓存命中
-取决于粘性路由：xAI 在 Chat Completions 上接受 `prompt_cache_key` 并映射为
-`x-grok-conv-id`；网关两者都不透传时，每个请求都会以缓存未命中重发。
+取决于粘性路由：xAI 在 `/v1/responses` 和 Chat Completions 上都接受
+`prompt_cache_key`，并映射为 `x-grok-conv-id`；网关两者都不透传时，每个请求
+都会以缓存未命中重发。
 
-### Grok 4.6 的压缩调优
+### Grok 4.7 的压缩调优
 
-Grok 4.6 在 200K prompt token 处有一道整单计费线：200K 以下
+Grok 4.7 在 200K prompt token 处有一道整单计费线：200K 以下
 按 $2 输入 / $0.5 缓存 / $6 输出（每 1M）计费，prompt 达到 200K 则整单按
 $4 / $1 / $12 计收。
 
@@ -1477,7 +1508,7 @@ $4 / $1 / $12 计收。
 
 ```yaml
 model_templates:
-  grok-4.6: &grok-4-6
+  grok-4.7: &grok-4-7
     limit: {context: 500000}
     compaction: {threshold: 0.4, reminder: 0.35}
 ```
@@ -1574,6 +1605,106 @@ model_templates:
 该阈值下的派生值是 0.45，显式写出来只是把默认值摆明。
 M2.x 系列（204800 窗口）没有长度加价的说法，沿用全局默认。M3 会话不长的话，
 `compaction` 块也可以直接省略。
+
+## 小米 MiMo（OpenAI 兼容接口）
+
+`~/.config/chord/auth.yaml` 里配好 key：
+
+```yaml
+mimo:
+  - "$MIMO_API_KEY"
+```
+
+MiMo-V2.6-Pro 和 MiMo-V2.6-Flash 是小米在 MiMo 开放平台上的全模态模型：
+上下文 1,048,576 token，输出上限 131,072（也是 `max_completion_tokens` 的
+默认值和上限），支持图片输入、function calling、structured output，思考默认
+开启。平台同时提供 OpenAI 与 Anthropic 兼容接口，这里走
+`https://api.xiaomimimo.com/v1/chat/completions`：只有 chat 线路文档化了
+Chord 需要的 `reasoning_content` 回放契约。
+
+思考模式有一条硬性回放契约：多轮工具调用时，接口要求把之前所有
+`reasoning_content` 传回去，缺了会报 `400 - Invalid Format`，所以模板开了
+`openai_visible` 加 `preserve_history: true`。思考开关是
+`thinking: {type: ...}` 对象，只有模型显式钉住 chat 方言
+（`native_thinking: thinking`）时 Chord 才会发这个字段——`mimo-*` 不在 Chord
+按模型名推断的名单里。
+
+```yaml
+model_templates:
+  mimo-v2.6-base: &mimo-v2-6-base
+    limit:
+      context: 1048576
+      output: 131072
+    modalities:
+      input: [text, image]
+    thinking:
+      type: enabled
+    variants:
+      off:
+        thinking:
+          type: disabled
+    compat:
+      chat_completions:
+        native_thinking: thinking
+      reasoning_continuity:
+        mode: openai_visible
+        preserve_history: true
+
+providers:
+  mimo:
+    type: chat-completions
+    api_url: https://api.xiaomimimo.com/v1/chat/completions
+    models:
+      mimo-v2.6-pro:
+        <<: *mimo-v2-6-base
+        cost:
+          input: 0.435
+          output: 0.87
+          cache_read: 0.0036
+      mimo-v2.6-flash:
+        <<: *mimo-v2-6-base
+        cost:
+          input: 0.14
+          output: 0.28
+          cache_read: 0.0028
+
+model_pools:
+  default:
+    - mimo/mimo-v2.6-pro
+```
+
+- `mimo-v2.6-pro` 适合复杂、长程的活；`mimo-v2.6-flash` 更便宜，窗口、模态和
+  长度限制相同。`mimo-v2.6-pro-ultraspeed` 是同一模型的加速服务档，平台按
+  定制服务售卖。
+- 思考默认开启；不需要思考的回合用 `mimo/mimo-v2.6-pro@off`，它会发
+  `thinking: {type: disabled}`。平台在思考模式下会把 `temperature` 固定为
+  1.0、`top_p` 固定为 0.95，Chord 本来也不发这两个参数。
+- `preserve_history: true` 会把已完成回合的思考留在对话里，因为接口要求如此；
+  这部分历史每次请求都按输入 token 计费，MiMo 的提示缓存按缓存读价
+  （Pro 每 1M $0.0036）吸收。
+- 缓存写入目前免费，而 `cache_write` 没法表达“免费”：不写就按输入价估算写入
+  部分，缓存多的会话成本估算会略高。
+- 价格：Pro 每 1M $0.435 输入 / $0.87 输出 / $0.0036 缓存命中，Flash
+  $0.14 / $0.28 / $0.0028，没有长上下文加价。
+- 后端会静默丢弃 `auto` 以外的 `tool_choice`；想让 Chord 不再发送强制选择，
+  加 `compat.forced_tool_choice: {auto_only: true}`。
+- `max_completion_tokens` 同时覆盖可见输出和思考 token，长时间思考会吃掉
+  Chord 默认的 64000 输出预算。思考重的活被截断时，提高全局
+  `max_output_tokens` 或模型的 `limit.output`（上限 131072）。
+- 平台同时支持 `api-key` 头和 bearer 认证；Chord 默认用 bearer，端点或 key
+  类型不接受时改 `auth_scheme: api-key`。
+- 平台文档没列 `stream_options`。流式请求被拒时，可设
+  `compat.chat_completions.send_stream_options: false`；MiMo 的流式 chunk
+  自带 usage，用量驱动的自动压缩不受影响。
+- 不配 `compaction` 块：MiMo 没有公布长上下文计费档，也没有公布长上下文
+  质量区间，跟全局默认走。推导出的输入预算是
+  `1048576 − 131072 = 917504`。
+
+验证：
+
+```bash
+chord doctor models --model mimo/mimo-v2.6-pro
+```
 
 ## Meta Muse Spark
 

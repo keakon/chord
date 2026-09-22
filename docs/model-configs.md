@@ -14,7 +14,7 @@ Choose a connection type, then copy its recipe. Keep the default context setting
 | Codex OAuth | [Codex sign-in](#codex-oauth-preset) |
 | Anthropic API | [Claude](#anthropic-claude) |
 | Google API | [Gemini](#google-gemini) |
-| Other models | [GLM](#glm--bigmodel-coding-plan) · [DeepSeek](#deepseek) · [Qwen](#qwen-preserved-thinking) · [Kimi](#kimi) · [Grok](#grok-xai) · [MiniMax](#minimax-openai-compatible) · [Muse Spark](#meta-muse-spark) |
+| Other models | [GLM](#glm--bigmodel-coding-plan) · [DeepSeek](#deepseek) · [Qwen](#qwen-preserved-thinking) · [Kimi](#kimi) · [Grok](#grok-xai) · [MiniMax](#minimax-openai-compatible) · [MiMo](#xiaomi-mimo-openai-compatible) · [Muse Spark](#meta-muse-spark) |
 | Thinking through a Chat Completions gateway | [Gateway settings](#thinking-behind-a-chat-completions-gateway) |
 
 After copying a recipe, [verify the configuration and connection](#verify-any-recipe). For long sessions or context-cost tuning, see [Per-model compaction tuning](#per-model-compaction-tuning) at the end of this page.
@@ -1425,33 +1425,55 @@ chain-of-thought that is not tied to a tool round.
 
 ## Grok (xAI)
 
-xAI recommends the Responses API for Grok. Grok 4.6 supports text and image input, function calling, structured output, reasoning, and a 500K context window. xAI also accepts PDF attachments as `input_file` with a public `file_url` or an uploaded `file_id`, which activates the server-side `attachment_search` tool; Chord sends PDF attachments as inline base64 `file_data`, which the xAI Responses API does not accept for non-image documents, so `modalities.input` stays `[text, image]`.
+xAI recommends the Responses API for Grok. Grok 4.7 supports text and image input, function calling, structured output, reasoning, and a 500K context window. xAI also accepts PDF attachments as `input_file` with a public `file_url` or an uploaded `file_id`, which activates the server-side `attachment_search` tool; Chord sends PDF attachments as inline base64 `file_data`, which the xAI Responses API does not accept for non-image documents, so `modalities.input` stays `[text, image]`.
 
-Grok 4.6 emits reasoning text through `response.reasoning_text.*` stream events; Chord maps those events to the normal thinking stream while preserving the ordered Responses output items for tool-loop continuity.
+Grok 4.7 emits reasoning text through `response.reasoning_text.*` stream events and summarized reasoning through `response.reasoning_summary_text.*`; Chord maps both to the normal thinking stream while preserving the ordered Responses output items for tool-loop continuity. The Responses API always returns `reasoning.encrypted_content` for Grok 4.7, so the reasoning items Chord replays unchanged keep the model's reasoning across turns.
 
 ```yaml
 model_templates:
-  grok-4.6: &grok-4-6
+  grok-4.7: &grok-4-7
     limit:
       context: 500000
     reasoning:
       effort: high
+    variants:
+      low:
+        reasoning:
+          effort: low
+      medium:
+        reasoning:
+          effort: medium
+      high:
+        reasoning:
+          effort: high
+      xhigh:
+        reasoning:
+          effort: xhigh
     modalities:
       input: [text, image]
+    cost:
+      input: 2
+      output: 6
+      cache_read: 0.5
+      input_tiers:
+        - above_input_tokens: 200000
+          input: 4
+          output: 12
+          cache_read: 1
 
 providers:
   xai:
     type: responses
     api_url: https://api.x.ai/v1/responses
     models:
-      grok-4.6: *grok-4-6
+      grok-4.7: *grok-4-7
 
 model_pools:
   default:
-    - xai/grok-4.6
+    - xai/grok-4.7
 ```
 
-xAI publishes a 500K total context window for Grok 4.6, but not a lower,
+xAI publishes a 500K total context window for Grok 4.7, but not a lower,
 separate model output cap, so `limit.output` is unset. Chord therefore
 does not send `max_output_tokens` to xAI and lets the API fit output within the
 remaining context. Locally, Chord still reserves its default `64000` output
@@ -1460,31 +1482,39 @@ raise Chord's `max_output_tokens`, and enable
 `compat.responses.send_max_output_tokens: true` only when you intentionally
 want to enforce and send an explicit cap.
 
-Use `grok-4.6` as the model ID. Do not configure
+The `cost` block models xAI's whole-request tier: a prompt that reaches 200K
+tokens bills every token in the request at the higher rate, which
+`input_tiers` reproduces in Chord's cost accounting.
+
+Use `grok-4.7` as the model ID, or switch the pool ref to `@low` / `@xhigh`
+for a fixed effort. Grok 4.6 is still served at the same price and uses the
+same template with only the model ID swapped. Do not configure
 `openai_visible`: xAI Responses uses native ordered output/reasoning state, not
 Chat Completions `reasoning_content`. `reasoning.effort` accepts `low`,
-`medium`, `high`, and `xhigh` (Grok 4.6 only; models that do not support it
-treat it as `high`). High is the default and reasoning cannot be disabled.
+`medium`, `high`, and `xhigh` (Grok 4.6 and later; older models treat `xhigh`
+as `high`). High is the default and reasoning cannot be disabled.
 
 ### Chat Completions
 
-xAI also serves Grok 4.6 on the OpenAI-compatible `/v1/chat/completions`
-endpoint and keeps documenting it; only new integrations are steered to
-Responses. The wire accepts `reasoning_effort` (`low`, `medium`, `high`
-default, `xhigh`), rejects `stop`, `presence_penalty`, and `frequency_penalty`
-on reasoning models, and deprecates `max_tokens` in favor of
-`max_completion_tokens`.
+xAI still serves Grok 4.7 on the OpenAI-compatible `/v1/chat/completions`
+endpoint, but now describes that API as the legacy predecessor of Responses
+and steers new integrations to Responses; it stays documented for gateways
+and existing integrations. The wire accepts `reasoning_effort` (`low`,
+`medium`, `high` default, `xhigh`), rejects `stop`, `presence_penalty`, and
+`frequency_penalty` on reasoning models, and deprecates `max_tokens` in favor
+of `max_completion_tokens`.
 
-Gateways differ in whether they return `reasoning_content`. When the gateway
-never returns it, Chord has nothing to replay on assistant tool calls, reads
-the backend as replay-incompatible, and strips `reasoning_effort` for the rest
-of the turn, so per-request effort tuning then only affects the first request.
+xAI's own Chat Completions API returns no reasoning content for reasoning
+models, and third-party gateways differ in the same way. When nothing comes
+back, Chord has nothing to replay on assistant tool calls, reads the backend
+as replay-incompatible, and strips `reasoning_effort` for the rest of the
+turn, so per-request effort tuning then only affects the first request.
 Set `compat.chat_completions.keep_reasoning_effort: true` to keep the effort
 and reasoning request overrides active for the whole turn:
 
 ```yaml
 model_templates:
-  grok-4.6: &grok-4-6
+  grok-4.7: &grok-4-7
     limit:
       context: 500000
       output: 64000
@@ -1514,22 +1544,22 @@ providers:
     type: chat-completions
     api_url: https://example.com/v1/chat/completions
     models:
-      grok-4.6: *grok-4-6
+      grok-4.7: *grok-4-7
 
 model_pools:
   default:
-    - grok-gateway/grok-4.6@xhigh
+    - grok-gateway/grok-4.7@xhigh
 ```
 
 `openai_visible` is still unnecessary: Grok does not require a replayed
 `reasoning_content` contract. Cache hits depend on sticky routing: xAI accepts
-a `prompt_cache_key` on Chat Completions and routes it through
-`x-grok-conv-id`, so a gateway that forwards neither re-sends every request as
-a cache miss.
+a `prompt_cache_key` on both `/v1/responses` and Chat Completions and routes it
+through `x-grok-conv-id`, so a gateway that forwards neither re-sends every
+request as a cache miss.
 
-### Compaction tuning for Grok 4.6
+### Compaction tuning for Grok 4.7
 
-Grok 4.6 has a whole-request pricing tier at 200K prompt tokens: below 200K
+Grok 4.7 has a whole-request pricing tier at 200K prompt tokens: below 200K
 the rates are $2 input / $0.50 cached input / $6 output per 1M, while a prompt
 that reaches 200K bills the whole request at $4 / $1 / $12.
 
@@ -1544,7 +1574,7 @@ every provider referencing the template inherits it:
 
 ```yaml
 model_templates:
-  grok-4.6: &grok-4-6
+  grok-4.7: &grok-4-7
     limit: {context: 500000}
     compaction: {threshold: 0.4, reminder: 0.35}
 ```
@@ -1651,6 +1681,82 @@ The derived value for this threshold is 0.45; the explicit
 value only states the default. The M2.x line (204800 window) has no documented
 length surcharge, so leave it on the global default. If your M3 sessions stay
 short, omit the `compaction` block entirely.
+
+## Xiaomi MiMo (OpenAI-compatible)
+
+Pair with `~/.config/chord/auth.yaml`:
+
+```yaml
+mimo:
+  - "$MIMO_API_KEY"
+```
+
+MiMo-V2.6-Pro and MiMo-V2.6-Flash are Xiaomi's fully multimodal agentic models on the MiMo Open Platform: a 1,048,576-token context window, a 131,072-token maximum output (the endpoint's default and cap for `max_completion_tokens`), image input, function calling, structured output, and deep thinking that is on by default. The platform is OpenAI- and Anthropic-compatible; this recipe uses `https://api.xiaomimimo.com/v1/chat/completions` because that is where MiMo documents the `reasoning_content` replay contract Chord needs for tool loops.
+
+Thinking mode carries a hard replay contract: in multi-turn tool calls the API expects every earlier `reasoning_content` back and reports `400 - Invalid Format` when it is missing, so the template enables `openai_visible` with `preserve_history: true`. The thinking switch is a `thinking: {type: ...}` object, which Chord only emits when the model pins the Chat Completions dialect (`native_thinking: thinking`); `mimo-*` is not one of the model names Chord infers a dialect from.
+
+```yaml
+model_templates:
+  mimo-v2.6-base: &mimo-v2-6-base
+    limit:
+      context: 1048576
+      output: 131072
+    modalities:
+      input: [text, image]
+    thinking:
+      type: enabled
+    variants:
+      off:
+        thinking:
+          type: disabled
+    compat:
+      chat_completions:
+        native_thinking: thinking
+      reasoning_continuity:
+        mode: openai_visible
+        preserve_history: true
+
+providers:
+  mimo:
+    type: chat-completions
+    api_url: https://api.xiaomimimo.com/v1/chat/completions
+    models:
+      mimo-v2.6-pro:
+        <<: *mimo-v2-6-base
+        cost:
+          input: 0.435
+          output: 0.87
+          cache_read: 0.0036
+      mimo-v2.6-flash:
+        <<: *mimo-v2-6-base
+        cost:
+          input: 0.14
+          output: 0.28
+          cache_read: 0.0028
+
+model_pools:
+  default:
+    - mimo/mimo-v2.6-pro
+```
+
+Notes:
+
+- `mimo-v2.6-pro` takes complex, long-horizon work; `mimo-v2.6-flash` is the cheaper everyday option with the same window, modalities, and limits. `mimo-v2.6-pro-ultraspeed` is the same model on a faster serving tier, sold as a customized service.
+- Thinking is on by default. `mimo/mimo-v2.6-pro@off` sends `thinking: {type: disabled}` for turns that do not need it. The platform also forces `temperature` to 1.0 and `top_p` to 0.95 in thinking mode, which Chord does not send anyway.
+- `preserve_history: true` keeps completed-turn reasoning in the replayed conversation because the API requires it; that history is billed as input tokens on every request, which MiMo's prompt cache absorbs at the cache-read rate ($0.0036 per 1M on Pro).
+- Cache writes are currently free, and `cache_write` has no way to express that: leaving it unset bills estimated writes at the input rate, so cost estimates for cache-heavy sessions run slightly high.
+- Prices are $0.435 input / $0.87 output / $0.0036 cached input per 1M on Pro and $0.14 / $0.28 / $0.0028 on Flash, with no long-context surcharge.
+- The backend silently drops any `tool_choice` other than `auto`; add `compat.forced_tool_choice: {auto_only: true}` if you want Chord to stop sending a forced choice to this provider.
+- `max_completion_tokens` covers visible output and reasoning tokens together, so a long thinking run counts against Chord's `64000` default output budget. Raise the global `max_output_tokens` or the model's `limit.output` (up to 131072) when thinking-heavy work gets truncated.
+- The platform accepts both an `api-key` header and bearer auth; Chord defaults to bearer, and `auth_scheme: api-key` switches to the header when an endpoint or key type rejects it.
+- The platform does not document `stream_options`. If a streaming request is rejected, set `compat.chat_completions.send_stream_options: false`; MiMo's stream chunks carry usage, so the usage-driven compaction trigger keeps working.
+- No `compaction` block: MiMo publishes no long-context pricing tier and no long-context quality band, so the model uses the global default. The derived input budget is `1048576 − 131072 = 917504`.
+
+Verify:
+
+```bash
+chord doctor models --model mimo/mimo-v2.6-pro
+```
 
 ## Meta Muse Spark
 
