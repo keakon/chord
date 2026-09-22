@@ -33,6 +33,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - New `.worktreeinclude` file (gitignore syntax, default `.env*`) lists the gitignored files — local env files, machine-specific config — that Chord copies into every new worktree. Tracked files are never overwritten.
 - New flag `--reset-branch` reuses a leftover worktree branch that no worktree has checked out instead of failing.
 - Removing a checkout now refuses while a Chord session still works in it. `chord worktree remove` and `chord worktree finish` check whether another Chord session is still open in that checkout before deleting it, and `WorktreeExit` re-checks immediately before the deletion instead of relying on an earlier answer. A session that crashed does not block removal: the recorded checkout outlives the process, so a session only counts as a holder while its process still holds its lock. When the holders cannot be determined the removal is refused rather than allowed.
+- The first-run setup wizard now writes GPT-6 Sol (`gpt-6-sol`) and GPT-6 Luna (`gpt-6-luna`) into a fresh Codex OAuth setup with the same `1050000 / 922000 / 128000` allocation as GPT-6 Astra, landing in `providers.models` and the default model pool; the [Codex OAuth recipe](./docs/model-configs.md#codex-oauth-preset) documents both. Existing `config.yaml` files keep whatever they configured.
 
 ### Improvements
 

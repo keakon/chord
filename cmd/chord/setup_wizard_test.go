@@ -424,7 +424,7 @@ func TestRunInitialSetupWizardCodexSkeletonSupportsAuthCommand(t *testing.T) {
 	if !strings.EqualFold(strings.TrimSpace(providerCfg.Preset), config.ProviderPresetCodex) {
 		t.Fatalf("provider preset = %q, want %q", providerCfg.Preset, config.ProviderPresetCodex)
 	}
-	wantModels := []string{"gpt-5.2", "gpt-5.3-codex", "gpt-5.4", "gpt-5.5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-astra"}
+	wantModels := []string{"gpt-5.2", "gpt-5.3-codex", "gpt-5.4", "gpt-5.5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"}
 	for _, model := range wantModels {
 		if _, ok := providerCfg.Models[model]; !ok {
 			t.Fatalf("missing configured codex model %q", model)

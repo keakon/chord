@@ -33,6 +33,7 @@
 - 新增 `.worktreeinclude` 文件（gitignore 语法，默认 `.env*`），用来列出要复制进每个新 worktree 的被忽略文件——本地 env、机器相关配置等。已被跟踪的文件绝不覆盖。
 - 新增 flag `--reset-branch`：复用没有任何 worktree 检出的遗留 worktree 分支，不再直接失败。
 - 删除 checkout 现在会在仍有 Chord 会话正在用它时拒绝。`chord worktree remove` 与 `chord worktree finish` 删除前会检查是否有另一个 Chord 会话仍在该 checkout 里开着，`WorktreeExit` 也改成在真正删除前再查一次，而不是只信更早那次检查的结果。崩溃退出的会话不会挡住删除：会话记录会活得比进程久，因此只有进程仍持有锁的会话才算占用者。占用情况无法确定时按「占用」处理，拒绝删除。
+- 初始安装向导现在会为新装的 Codex OAuth 写入 GPT-6 Sol（`gpt-6-sol`）和 GPT-6 Luna（`gpt-6-luna`），分配与 GPT-6 Astra 相同（`1050000 / 922000 / 128000`），落进 `providers.models` 和默认模型池；[模型配置速查](./docs/model-configs_CN.md#codex-oauth-preset) 里同样列出了这两个模型。已有的 `config.yaml` 不受影响，保持你原本的配置。
 
 ### 改进
 
