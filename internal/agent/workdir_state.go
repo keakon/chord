@@ -156,7 +156,7 @@ func (act workDirActor) available() bool {
 func (a *MainAgent) worktreeActor() workDirActor {
 	return workDirActor{
 		binding:        &a.workDirState,
-		startupDir:     a.cachedWorkDir,
+		startupDir:     a.cachedWorkDirSnapshot(),
 		deps:           a.worktreeRT,
 		agentID:        a.instanceID,
 		kind:           worktree.OwnerKindMain,

@@ -159,6 +159,20 @@ func newReadyTestMainAgent(t *testing.T) *MainAgent {
 	return a
 }
 
+// setCachedWorkDirForTest pins the startup directory through promptMetaMu: the
+// async git status fetch reads it from a background goroutine.
+func setCachedWorkDirForTest(a *MainAgent, dir string) {
+	a.promptMetaMu.Lock()
+	a.cachedWorkDir = dir
+	a.promptMetaMu.Unlock()
+}
+
+func setCachedAgentsMDForTest(a *MainAgent, content string) {
+	a.promptMetaMu.Lock()
+	a.cachedAgentsMD = content
+	a.promptMetaMu.Unlock()
+}
+
 func TestAutoContinuePromptIsInjectedAsOneShotOverlay(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.pendingAutoContinuePrompt = autoContinuePrompt()

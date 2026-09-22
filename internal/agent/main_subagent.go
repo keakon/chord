@@ -156,7 +156,7 @@ func (a *MainAgent) baseSubAgentConfig(agentDef *config.AgentConfig, instanceID 
 		ExtraMCPTools: extraMCPTools,
 		Ruleset:       a.buildSubAgentRuleset(agentDef),
 		WorkDir:       a.subAgentWorkDir(),
-		VenvPath:      a.cachedVenvPath,
+		VenvPath:      a.cachedVenvPathSnapshot(),
 		SessionDir:    a.sessionDir,
 		AgentsMD:      a.cachedAgentsMDSnapshot(),
 		Skills:        a.loadedSkillsSnapshot(),

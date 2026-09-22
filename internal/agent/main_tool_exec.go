@@ -178,11 +178,21 @@ func normalizeDenyReason(reason string) string {
 // workDir returns the checkout the agent's tools and shell commands run in.
 // It is the single runtime source for tool path resolution: worktree switches
 // publish the active checkout into workDirState, and cachedWorkDir only holds
-// the directory the session started in.
+// the directory the session started in. Production only writes cachedWorkDir
+// in the constructor, but the async git status fetch reads it while tests pin
+// it, so the read goes through promptMetaMu like every other prompt-meta field.
 func (a *MainAgent) workDir() string {
 	if a == nil {
 		return ""
 	}
+	a.promptMetaMu.RLock()
+	defer a.promptMetaMu.RUnlock()
+	return a.workDirLocked()
+}
+
+// workDirLocked is workDir for callers that already hold promptMetaMu. It must
+// not take the lock again: a nested RLock deadlocks once a writer queues.
+func (a *MainAgent) workDirLocked() string {
 	if dir := strings.TrimSpace(a.workDirState.load().Path); dir != "" {
 		return dir
 	}

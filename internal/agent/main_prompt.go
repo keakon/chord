@@ -538,13 +538,28 @@ func (a *MainAgent) shouldUsePlannerPrompt(activeCfg *config.AgentConfig) bool {
 func (a *MainAgent) promptMetaSnapshot() (workDir, gitStatus, agentsMD, venvPath string) {
 	a.promptMetaMu.RLock()
 	defer a.promptMetaMu.RUnlock()
-	return a.workDir(), a.cachedGitStatus, a.cachedAgentsMD, a.cachedVenvPath
+	return a.workDirLocked(), a.cachedGitStatus, a.cachedAgentsMD, a.cachedVenvPath
 }
 
 func (a *MainAgent) cachedAgentsMDSnapshot() string {
 	a.promptMetaMu.RLock()
 	defer a.promptMetaMu.RUnlock()
 	return a.cachedAgentsMD
+}
+
+// cachedWorkDirSnapshot returns the directory the session started in. Readers
+// outside the constructor take the lock like every other prompt-meta reader:
+// the async git status fetch and tests pin the field at different times.
+func (a *MainAgent) cachedWorkDirSnapshot() string {
+	a.promptMetaMu.RLock()
+	defer a.promptMetaMu.RUnlock()
+	return a.cachedWorkDir
+}
+
+func (a *MainAgent) cachedVenvPathSnapshot() string {
+	a.promptMetaMu.RLock()
+	defer a.promptMetaMu.RUnlock()
+	return a.cachedVenvPath
 }
 
 func (a *MainAgent) setCachedGitStatus(status string) {

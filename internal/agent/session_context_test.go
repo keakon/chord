@@ -56,8 +56,8 @@ func TestBuildSessionContextReminder_IncludesSessionWorkingDirectory(t *testing.
 
 func TestCallLLMInjectsWorkingDirectoryReminderIntoFirstProviderRequest(t *testing.T) {
 	a := newReadyTestMainAgent(t)
-	a.cachedWorkDir = "/repo/session"
-	a.cachedAgentsMD = ""
+	setCachedWorkDirForTest(a, "/repo/session")
+	setCachedAgentsMDForTest(a, "")
 	a.refreshSystemPrompt()
 	a.refreshSessionContextReminder()
 
@@ -131,7 +131,7 @@ func TestBuildSessionContextReminder_WithAgentsMD(t *testing.T) {
 
 func TestCallLLMInjectsAgentsMDReminderIntoFirstProviderRequest(t *testing.T) {
 	a := newReadyTestMainAgent(t)
-	a.cachedAgentsMD = "# Repo Rules\n- Follow repository rules before scanning."
+	setCachedAgentsMDForTest(a, "# Repo Rules\n- Follow repository rules before scanning.")
 	a.refreshSystemPrompt()
 	a.refreshSessionContextReminder()
 

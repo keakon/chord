@@ -1984,7 +1984,7 @@ question: allow
 
 func TestInjectGitStatusIntoFirstUserMessage_TextMessage(t *testing.T) {
 	a := &MainAgent{}
-	a.cachedGitStatus = "Git branch: main"
+	a.setCachedGitStatus("Git branch: main")
 
 	msgs := []message.Message{{Role: "user", Content: "hello"}}
 	if injected := a.injectGitStatusIntoFirstUserMessage(msgs); !injected {
@@ -1997,7 +1997,7 @@ func TestInjectGitStatusIntoFirstUserMessage_TextMessage(t *testing.T) {
 
 func TestInjectGitStatusIntoFirstUserMessage_MultipartMessage(t *testing.T) {
 	a := &MainAgent{}
-	a.cachedGitStatus = "Git branch: main"
+	a.setCachedGitStatus("Git branch: main")
 
 	msgs := []message.Message{{
 		Role: "user",
@@ -2025,7 +2025,7 @@ func TestInjectGitStatusIntoFirstUserMessage_MultipartMessage(t *testing.T) {
 
 func TestInjectGitStatusIntoFirstUserMessage_EveryRequest(t *testing.T) {
 	a := &MainAgent{}
-	a.cachedGitStatus = "Git branch: main"
+	a.setCachedGitStatus("Git branch: main")
 
 	msg1 := []message.Message{{Role: "user", Content: "hello"}}
 	msg2 := []message.Message{{Role: "user", Content: "world"}}
@@ -2209,7 +2209,7 @@ func TestDetectVenvPath_FindsVenvNotEnv(t *testing.T) {
 
 func TestBuildSystemPrompt_IncludesAgentsMDReminderFramingWhenAgentsMDPresent(t *testing.T) {
 	a := &MainAgent{tools: tools.NewRegistry()}
-	a.cachedAgentsMD = "repo rules"
+	setCachedAgentsMDForTest(a, "repo rules")
 
 	got := a.buildSystemPrompt()
 	if !strings.Contains(got, "## Workspace Instructions") {
@@ -2284,7 +2284,7 @@ func TestSessionEnvSnapshot_RendersVenvRelativeToWorkDir(t *testing.T) {
 	workDir := filepath.Join(root, "internal", "agent")
 	venvPath := filepath.Join(root, ".venv")
 	a := &MainAgent{tools: tools.NewRegistry(), cachedWorkDir: workDir}
-	a.cachedVenvPath = venvPath
+	a.setCachedVenvPath(venvPath)
 
 	env := a.sessionEnvSnapshot()
 	block := env.renderEnvBlock()

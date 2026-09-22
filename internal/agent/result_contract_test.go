@@ -523,7 +523,7 @@ func TestMergeDurableTaskRecordsKeepsResultSchema(t *testing.T) {
 
 func TestResultContractRehydratesAndRendersPrompt(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.cachedWorkDir = a.contentRoot
+	setCachedWorkDirForTest(a, a.contentRoot)
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
 		"worker": {Name: "worker", Mode: config.AgentModeSubAgent, Models: map[string][]string{"default": {"sample/test-model"}}},
 	})
@@ -570,7 +570,7 @@ func TestResultContractRehydratesAndRendersPrompt(t *testing.T) {
 
 func TestRehydrateDropsUnreadableResultContract(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.cachedWorkDir = a.contentRoot
+	setCachedWorkDirForTest(a, a.contentRoot)
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
 		"worker": {Name: "worker", Mode: config.AgentModeSubAgent, Models: map[string][]string{"default": {"sample/test-model"}}},
 	})

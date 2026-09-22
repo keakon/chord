@@ -90,7 +90,7 @@ func TestPathScopeAllowsAnotherCheckoutWhenRulesAllow(t *testing.T) {
 		return []string{mainCheckout, wtCheckout}, nil
 	})
 	a.refreshPathRoots()
-	a.cachedWorkDir = wtCheckout
+	setCachedWorkDirForTest(a, wtCheckout)
 	a.ruleset = permission.Ruleset{
 		{Permission: "*", Pattern: "*", Action: permission.ActionDeny},
 		{Permission: "write", Pattern: "src/**", Action: permission.ActionAllow},
