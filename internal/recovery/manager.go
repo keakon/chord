@@ -641,6 +641,7 @@ type SessionInfo struct {
 	OriginalFirstUserMessage            string    // original first user message, preserved across compaction
 	ForkedFrom                          string    // parent session ID when this session was created via fork
 	Locked                              bool      // true when another live Chord process currently holds session.lock
+	WorktreeName                        string    // chord-managed checkout the session last worked in; empty for the main checkout
 }
 
 // maxFirstUserMessagePreview is the max rune count for FirstUserMessage in SessionInfo.
@@ -698,11 +699,13 @@ func ListSessions(sessionsDir string, excludeDir string) ([]SessionInfo, error) 
 		}
 		forkedFrom := ""
 		title := ""
+		worktreeName := ""
 		if meta, err := LoadSessionMeta(sessionPath); err != nil {
 			return nil, fmt.Errorf("load session meta for %s: %w", entry.Name(), err)
 		} else if meta != nil {
 			forkedFrom = meta.ForkedFrom
 			title = meta.Title
+			worktreeName = meta.WorktreeName
 		}
 		list = append(list, SessionInfo{
 			ID:                                  entry.Name(),
@@ -715,6 +718,7 @@ func ListSessions(sessionsDir string, excludeDir string) ([]SessionInfo, error) 
 			OriginalFirstUserMessage:            originalFirstUser,
 			ForkedFrom:                          forkedFrom,
 			Locked:                              locked,
+			WorktreeName:                        worktreeName,
 		})
 	}
 	sort.SliceStable(list, func(i, j int) bool {
@@ -885,8 +889,10 @@ func SessionInfoForDir(sessionPath string) *SessionInfo {
 		return nil
 	}
 	forkedFrom := ""
+	worktreeName := ""
 	if meta, err := LoadSessionMeta(sessionPath); err == nil && meta != nil {
 		forkedFrom = meta.ForkedFrom
+		worktreeName = meta.WorktreeName
 	}
 	return &SessionInfo{
 		ID:                                  filepath.Base(sessionPath),
@@ -897,6 +903,7 @@ func SessionInfoForDir(sessionPath string) *SessionInfo {
 		OriginalFirstUserMessage:            originalFirstUser,
 		ForkedFrom:                          forkedFrom,
 		Locked:                              locked,
+		WorktreeName:                        worktreeName,
 	}
 }
 

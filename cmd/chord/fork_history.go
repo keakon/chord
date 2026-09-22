@@ -235,7 +235,7 @@ func copyForkArchives(srcDir, newDir string, boundary int) error {
 // session listings ignore instead of a partial session. It returns the new
 // session directory, the boundary actually used, and the number of seeded
 // records.
-func forkSessionAtHistory(srcDir, projectSessionsDir string, boundaryIndex int) (newDir string, chosen int, seeded int, err error) {
+func forkSessionAtHistory(srcDir, projectSessionsDir, stateDir string, boundaryIndex int) (newDir string, chosen int, seeded int, err error) {
 	boundaries, err := scanForkHistoryBoundaries(srcDir)
 	if err != nil {
 		return "", 0, 0, fmt.Errorf("scan compaction history of session %s: %w", filepath.Base(srcDir), err)
@@ -292,7 +292,7 @@ func forkSessionAtHistory(srcDir, projectSessionsDir string, boundaryIndex int) 
 	if err != nil {
 		return fail(err)
 	}
-	if err := recovery.SaveSessionMeta(newDir, meta); err != nil {
+	if err := saveSessionMetaClaimingCheckout(newDir, meta, stateDir); err != nil {
 		return fail(fmt.Errorf("save fork session meta: %w", err))
 	}
 	if err := copyForkArchives(srcDir, newDir, chosen); err != nil {
@@ -617,7 +617,7 @@ func forkResumeSessionByCurrentProject(sid string, target int) (newSID string, c
 	if err != nil {
 		return "", 0, 0, err
 	}
-	newDir, chosen, seeded, err := forkSessionAtHistory(srcDir, filepath.Dir(srcDir), target)
+	newDir, chosen, seeded, err := forkSessionAtHistory(srcDir, filepath.Dir(srcDir), pl.StateDir, target)
 	if err != nil {
 		return "", 0, 0, err
 	}

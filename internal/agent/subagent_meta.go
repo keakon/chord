@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/privatefs"
+	"github.com/keakon/chord/internal/worktree"
 
 	"github.com/keakon/chord/internal/tools"
 )
@@ -109,12 +111,34 @@ func (a *MainAgent) persistSubAgentMetaToSession(sub *SubAgent, sessionDir strin
 		meta.PendingCompleteSummary = pendingComplete.Summary
 		meta.PendingCompleteEnvelope = normalizeCompletionEnvelope(pendingComplete.Envelope)
 	}
-	data, err := json.MarshalIndent(meta, "", "  ")
-	if err != nil {
+	write := func() error {
+		data, err := json.MarshalIndent(meta, "", "  ")
+		if err != nil {
+			return err
+		}
+		data = append(data, '\n')
+		return privatefs.WriteFile(sessionDir, path, data)
+	}
+	dir := strings.TrimSpace(meta.WorkDir)
+	stateDir := a.checkoutMutationStateDir()
+	if dir == "" || stateDir == "" {
+		return write()
+	}
+	// The recorded working directory is the claim a removal scans for live
+	// holders, so it is written under the same mutation lock removal takes. A
+	// checkout that is already gone is not republished: the claim is dropped
+	// and the rest of the record still lands, because failing here would also
+	// discard the worker's state.
+	err := worktree.ClaimCheckout(stateDir, dir, write)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, worktree.ErrCheckoutGone) {
 		return err
 	}
-	data = append(data, '\n')
-	return privatefs.WriteFile(sessionDir, path, data)
+	meta.WorkDir = ""
+	meta.WorkDirGeneration = 0
+	return write()
 }
 
 func loadSubAgentMeta(sessionDir, instanceID string) (*subAgentMeta, error) {

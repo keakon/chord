@@ -46,6 +46,11 @@ var (
 	// (created or resumed). It is written to the session's worktree timeline
 	// so a resumed session can tell the two apart.
 	flagWorktreeStartupReason string
+	// flagStartupPlan is the session startup plan resolved before initApp ran
+	// (--continue resolves its session early so it can enter the checkout that
+	// session recorded). initApp uses it instead of planning a second time, so
+	// the session it opens is the one whose checkout is already active.
+	flagStartupPlan *sessionStartupPlan
 )
 
 // newWorktreeCmd builds the `chord worktree …` parent command and its

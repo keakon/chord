@@ -281,8 +281,11 @@ func resolveSessionInProject(ctx context.Context, pl *config.PathLocator, conten
 
 // resumeSessionWorktree returns the chord-managed worktree the session was
 // working in, when it belongs to the repository containing the current
-// directory and that worktree still exists. Returns nil for main-checkout
-// sessions, unknown sessions, and sessions of another repository, so the
+// directory and that worktree still exists. A session that recorded no
+// checkout (or lost the one it recorded) falls back to the checkout the
+// process was launched inside, because that is where the session will work
+// from here on and it has to record it. Returns nil for main-checkout
+// launches, unknown sessions, and sessions of another repository, so the
 // caller keeps its current directory and lets the normal startup report the
 // mismatch.
 func resumeSessionWorktree(ctx context.Context, sid string) *worktree.Info {
@@ -303,7 +306,10 @@ func resumeSessionWorktree(ctx context.Context, sid string) *worktree.Info {
 	if err != nil || !sessionExistsInProject(pl, projectPL.ProjectKey, sid) {
 		return nil
 	}
-	return worktreeLocationForSession(ctx, pl, projectPL.ProjectKey, sid, contentRoot)
+	if info := worktreeLocationForSession(ctx, pl, projectPL.ProjectKey, sid, contentRoot); info != nil {
+		return info
+	}
+	return startupWorktreeFromCwd(ctx)
 }
 
 // worktreeLocationForSession returns the chord-managed worktree recorded in
@@ -368,6 +374,46 @@ func recordWorktreeResumeFallback(sessionDir string, meta *recovery.SessionMeta,
 		log.Warnf("record worktree resume fallback failed session_dir=%v error=%v", sessionDir, err)
 	}
 	flagWorktreeResumeNotice = fmt.Sprintf("Session was working in worktree %s, which no longer exists; continuing in the repository checkout.", filepath.Base(path))
+}
+
+// resolveContinueStartup plans the session --continue opens before initApp
+// runs, and resolves the chord-managed checkout that session was working in.
+// --continue must enter that checkout before initApp anchors the tool, git and
+// LSP roots at the launch directory, and it cannot be planned later: the
+// session is only known once a candidate is locked, and that lock has to
+// survive into the plan initApp consumes.
+//
+// The checkout returned is the one the session recorded. A session that
+// recorded none (or whose record is gone) falls back to the checkout the
+// process was launched inside: that is the directory the continuation works
+// in, and without recording it another process could not see this session as
+// a holder of that checkout. Only a main-checkout launch binds nothing, which
+// matches --resume; the caller then keeps its launch directory.
+func resolveContinueStartup(ctx context.Context) (sessionStartupPlan, *worktree.Info, error) {
+	pl, err := startupPathLocator()
+	if err != nil {
+		return sessionStartupPlan{}, nil, fmt.Errorf("resolve storage paths: %w", err)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return sessionStartupPlan{}, nil, fmt.Errorf("cwd: %w", err)
+	}
+	contentRoot := resolveContentRoot(ctx, cwd)
+	projectPL, err := pl.LocateProject(contentRoot)
+	if err != nil {
+		return sessionStartupPlan{}, nil, fmt.Errorf("locate project: %w", err)
+	}
+	plan, taken, err := planContinueSessionStartup(projectPL.ProjectSessionsDir)
+	if err != nil {
+		return sessionStartupPlan{}, nil, err
+	}
+	if !taken {
+		return plan, nil, nil
+	}
+	if info := worktreeLocationForSession(ctx, pl, projectPL.ProjectKey, filepath.Base(plan.SessionDir), contentRoot); info != nil {
+		return plan, info, nil
+	}
+	return plan, startupWorktreeFromCwd(ctx), nil
 }
 
 // sessionExistsInProject reports whether <stateDir>/sessions/<key>/<sid>/main.jsonl

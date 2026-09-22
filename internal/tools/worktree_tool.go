@@ -28,7 +28,6 @@ type WorktreeEnterResult struct {
 	BaseSHA      string
 	Existed      bool
 	MainDirty    bool
-	Generation   uint64
 	PreviousPath string
 	Warnings     []string
 }

@@ -83,9 +83,9 @@ chord [全局 flag] [命令] [命令 flag] [参数]
 - `chord --resume <id>`（别名 `-r`）恢复当前目录所属仓库里的会话。它可以与 `--continue` / `--worktree` 组合，也是脚本与 headless 使用的形态。
 - `chord resume <id>` 用显式命令做同一套定位：先打印切到了哪个 checkout，再在该目录启动 TUI。
 
-两者都会切回会话记录的 chord 管理 worktree，因此在主工作区也能继续 worktree 里的会话，换到同一仓库的其它 checkout 也一样。如果那个 worktree 已经不在了，Chord 会给出提示、在会话里记录这次回退，改在仓库的主工作区继续。
+这几条入口都会切回会话记录的 chord 管理 worktree，`--continue` 也一样：它先挑出会话，再进入那个会话记录的 checkout。因此在主工作区也能继续 worktree 里的会话，换到同一仓库的其它 checkout 也一样。如果那个 worktree 已经不在了，Chord 会给出提示、在会话里记录这次回退：`chord resume <id>` 改在仓库的主工作区继续，`--resume` 与 `--continue` 则在启动 chord 的 checkout 里继续，落在 worktree 里就把它记下来。
 
-一句话选择：两者能定位的会话相同，按调用习惯挑即可——默认命令上的 flag，或独立的 `chord resume <id>` 命令。
+一句话选择：这几条入口能定位的会话相同，按调用习惯挑即可——默认命令上的 flag，或独立的 `chord resume <id>` 命令。
 
 ### 示例
 

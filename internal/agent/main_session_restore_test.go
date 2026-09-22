@@ -53,11 +53,13 @@ func TestFillSessionSummaryDetailsKeepsScannedPreviewOutOfOriginal(t *testing.T)
 	}
 }
 
-// TestFillSessionSummaryDetailsLoadsWorktreeName pins the picker's worktree
-// column to its data source. Sessions are shared by every checkout of one
-// repository, so without this the picker cannot tell a session created in a
-// worktree from one in the main checkout.
-func TestFillSessionSummaryDetailsLoadsWorktreeName(t *testing.T) {
+// TestListSessionSummariesCarriesWorktreeName pins the picker's worktree column
+// to its data source. The session scan already reads session-meta.json for the
+// title and fork provenance, so it carries the recorded checkout along instead
+// of making the detail loader open the same file again. Sessions are shared by
+// every checkout of one repository, so without this the picker cannot tell a
+// session created in a worktree from one in the main checkout.
+func TestListSessionSummariesCarriesWorktreeName(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	sessionsDir, err := a.projectSessionsDir()
@@ -65,7 +67,7 @@ func TestFillSessionSummaryDetailsLoadsWorktreeName(t *testing.T) {
 		t.Fatalf("projectSessionsDir: %v", err)
 	}
 
-	const sessionID = "worktree-legacy"
+	const sessionID = "worktree-picker"
 	sessionPath := filepath.Join(sessionsDir, sessionID)
 	rm := recovery.NewRecoveryManager(sessionPath)
 	if err := rm.PersistMessage("main", message.Message{Role: message.RoleUser, Content: "hello"}); err != nil {
@@ -76,15 +78,18 @@ func TestFillSessionSummaryDetailsLoadsWorktreeName(t *testing.T) {
 		t.Fatalf("SaveSessionMeta: %v", err)
 	}
 
-	list := a.FillSessionSummaryDetails([]SessionSummary{{
-		ID:           sessionID,
-		MessageCount: UnknownSessionMessageCount,
-	}})
+	list, err := a.ListSessionSummaries()
+	if err != nil {
+		t.Fatalf("ListSessionSummaries: %v", err)
+	}
 	if len(list) != 1 {
 		t.Fatalf("len(list) = %d, want 1", len(list))
 	}
 	if list[0].WorktreeName != "feat-picker" {
 		t.Fatalf("WorktreeName = %q, want the recorded worktree", list[0].WorktreeName)
+	}
+	if filled := a.FillSessionSummaryDetails(list); filled[0].WorktreeName != "feat-picker" {
+		t.Fatalf("WorktreeName after detail fill = %q, want the scanned value", filled[0].WorktreeName)
 	}
 }
 

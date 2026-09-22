@@ -65,8 +65,12 @@ func newResumeCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
+				pl, err := startupPathLocator()
+				if err != nil {
+					return err
+				}
 				projectSessionsDir := filepath.Dir(srcDir)
-				newDir, chosen, seeded, err := forkSessionAtHistory(srcDir, projectSessionsDir, target)
+				newDir, chosen, seeded, err := forkSessionAtHistory(srcDir, projectSessionsDir, pl.StateDir, target)
 				if err != nil {
 					return err
 				}

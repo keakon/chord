@@ -816,6 +816,38 @@ Main role control commands:
 					flagWorktreeStartupReason = recovery.WorktreeSwitchResume
 				}
 			}
+			if flagWorktreeStartupInfo == nil && flagContinueSession && flagResumeSession == "" {
+				// --continue opens an existing session, so the checkout to work
+				// in is the one that session recorded. Resolve the plan (and the
+				// session lock with it) before initApp anchors tools and the LSP
+				// root at the launch directory.
+				wtCtx := cmd.Context()
+				if wtCtx == nil {
+					wtCtx = context.Background()
+				}
+				startup, info, err := resolveContinueStartup(wtCtx)
+				if err != nil {
+					return err
+				}
+				flagStartupPlan = &startup
+				switch {
+				case startup.SessionDir == "":
+					// No session could be claimed, so a fresh one is created: bind
+					// it to the launch checkout like a plain startup does.
+					if cwdInfo := startupWorktreeFromCwd(wtCtx); cwdInfo != nil {
+						flagWorktreeStartupInfo = cwdInfo
+						flagWorktreeStartupMeta = worktreeMetaForInfo(cwdInfo)
+						flagWorktreeStartupReason = recovery.WorktreeSwitchStartup
+					}
+				case info != nil:
+					if err := os.Chdir(info.Path); err != nil {
+						return fmt.Errorf("chdir to worktree %q: %w", info.Name, err)
+					}
+					flagWorktreeStartupInfo = info
+					flagWorktreeStartupMeta = worktreeMetaForInfo(info)
+					flagWorktreeStartupReason = recovery.WorktreeSwitchResume
+				}
+			}
 			if flagWorktreeStartupInfo == nil && flagResumeSession == "" && !flagContinueSession {
 				// Started inside a checkout: see startupWorktreeFromCwd. The
 				// session's meta is stamped from flagWorktreeStartupMeta below.
@@ -933,6 +965,7 @@ func runHeadlessWithDeps(deps headlessRunDeps) error {
 		ContinueLatest: flagContinueSession,
 		ResumeID:       flagResumeSession,
 		NewSessionMeta: flagWorktreeStartupMeta,
+		Plan:           flagStartupPlan,
 	})
 	if err != nil {
 		return err

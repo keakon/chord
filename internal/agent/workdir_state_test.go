@@ -244,10 +244,10 @@ func TestWorktreeEnterSwitchesBaseDirAndKeepsInFlightSnapshot(t *testing.T) {
 	if res.PreviousPath != repo {
 		t.Errorf("PreviousPath = %q, want %q", res.PreviousPath, repo)
 	}
-	if res.Generation != 1 {
-		t.Errorf("generation = %d, want 1", res.Generation)
-	}
 	state := a.workDirState.load()
+	if state.Generation != 1 {
+		t.Errorf("binding generation = %d, want 1", state.Generation)
+	}
 	if state.Path != res.Path || state.WorktreeID != "feat-one" || state.Branch != worktree.DefaultBranchPrefix+"feat-one" {
 		t.Errorf("published state = %#v, want path/branch of feat-one", state)
 	}
@@ -289,8 +289,8 @@ func TestWorktreeEnterSwitchesBaseDirAndKeepsInFlightSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WorktreeEnter (again): %v", err)
 	}
-	if again.Path != res.Path || again.Generation != 1 {
-		t.Errorf("re-enter result = %#v, want the same path and generation 1", again)
+	if again.Path != res.Path {
+		t.Errorf("re-enter result = %#v, want the same path", again)
 	}
 	if got := a.workDirState.load().Generation; got != 1 {
 		t.Errorf("generation after re-enter = %d, want 1", got)
@@ -989,14 +989,12 @@ func TestToolActivityJournalCarriesTheActiveCheckout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WorktreeEnter: %v", err)
 	}
-	if res.Generation == 0 {
-		t.Fatalf("switch result = %#v, want a non-zero binding generation", res)
+	bindingGeneration := a.workDirState.load().Generation
+	if bindingGeneration == 0 {
+		t.Fatalf("switch published binding = %#v, want a non-zero generation", a.workDirState.load())
 	}
-	if got := a.workDirState.load().Generation; got != res.Generation {
-		t.Fatalf("live binding generation = %d, want the switch's %d", got, res.Generation)
-	}
-	if got := a.toolExecutionPipeline().toolBaseDirGeneration; got != res.Generation {
-		t.Fatalf("pipeline generation = %d, want the live binding's %d", got, res.Generation)
+	if got := a.toolExecutionPipeline().toolBaseDirGeneration; got != bindingGeneration {
+		t.Fatalf("pipeline generation = %d, want the live binding's %d", got, bindingGeneration)
 	}
 
 	write := func(t *testing.T, callID, name string) {
@@ -1017,8 +1015,8 @@ func TestToolActivityJournalCarriesTheActiveCheckout(t *testing.T) {
 	if checkout.WorkDir != res.Path {
 		t.Errorf("checkout call workdir = %q, want the session's checkout %q", checkout.WorkDir, res.Path)
 	}
-	if checkout.WorkDirGeneration != res.Generation {
-		t.Errorf("checkout call generation = %d, want %d", checkout.WorkDirGeneration, res.Generation)
+	if checkout.WorkDirGeneration != bindingGeneration {
+		t.Errorf("checkout call generation = %d, want %d", checkout.WorkDirGeneration, bindingGeneration)
 	}
 	// Machine state is rebound to the content root, and the journal has to
 	// record the directory the call really used, not the session's checkout.
@@ -1049,8 +1047,8 @@ func TestToolActivityJournalCarriesTheActiveCheckout(t *testing.T) {
 	if snapshot.WorkDir != subRes.Path {
 		t.Errorf("snapshot workdir = %q, want the worker's checkout %q", snapshot.WorkDir, subRes.Path)
 	}
-	if snapshot.WorkDirGeneration != subRes.Generation {
-		t.Errorf("snapshot generation = %d, want %d", snapshot.WorkDirGeneration, subRes.Generation)
+	if snapshot.WorkDirGeneration != sub.workDirState.load().Generation {
+		t.Errorf("snapshot generation = %d, want the live worker binding's %d", snapshot.WorkDirGeneration, sub.workDirState.load().Generation)
 	}
 
 	// Leaving the checkout moves the recorded directory back with it, so a
@@ -1386,5 +1384,69 @@ func TestRehydrateTaskKeepsRecordedMainCheckoutAfterParentSwitches(t *testing.T)
 	}
 	if state := restored.workDirState.load(); state.WorktreeID != "" || state.Path != "" {
 		t.Fatalf("restored binding = %#v, want the plain main checkout without worktree identity", state)
+	}
+}
+
+// A /new session that cannot record the checkout it continues in must not
+// leave a claim on a path a removal already deleted: the claim is refused with
+// the removal's error and surfaced as a warning, and the fresh session record
+// keeps no binding rather than a dead one.
+func TestNewSessionDoesNotClaimACheckoutRemovedUnderIt(t *testing.T) {
+	ctx := context.Background()
+	a, _ := newWorktreeTestAgent(t, "session-new-gone-checkout")
+	a.markAgentsMDReady()
+	a.MarkSkillsReady()
+	a.markMCPReady()
+	oldSessionDir := a.sessionDir
+
+	res, err := a.WorktreeEnter(ctx, tools.WorktreeEnterRequest{Name: "feat-new-gone"})
+	if err != nil {
+		t.Fatalf("WorktreeEnter: %v", err)
+	}
+	if err := os.RemoveAll(res.Path); err != nil {
+		t.Fatalf("remove checkout: %v", err)
+	}
+
+	a.handleNewSessionCommand()
+	if a.sessionDir == oldSessionDir {
+		t.Fatal("sessionDir was not switched")
+	}
+	meta, err := recovery.LoadSessionMeta(a.sessionDir)
+	if err != nil {
+		t.Fatalf("LoadSessionMeta: %v", err)
+	}
+	if meta != nil && meta.WorktreePath != "" {
+		t.Fatalf("new session claimed the removed checkout %q", meta.WorktreePath)
+	}
+}
+
+// A worker whose checkout was removed while its record is written must not
+// republish the claim either — a removal scans this field for live holders —
+// but the rest of its record still has to land, or the worker loses its state.
+func TestSubAgentMetaDropsAClaimOnARemovedCheckout(t *testing.T) {
+	ctx := context.Background()
+	a, _ := newWorktreeTestAgent(t, "session-sub-gone-checkout")
+	sub := newControllableTestSubAgent(t, a, "adhoc-gone-checkout")
+
+	res, err := sub.WorktreeEnter(ctx, tools.WorktreeEnterRequest{Name: "feat-sub-gone"})
+	if err != nil {
+		t.Fatalf("sub WorktreeEnter: %v", err)
+	}
+	if err := os.RemoveAll(res.Path); err != nil {
+		t.Fatalf("remove checkout: %v", err)
+	}
+
+	if err := a.persistSubAgentMeta(sub); err != nil {
+		t.Fatalf("persistSubAgentMeta: %v", err)
+	}
+	meta, err := loadSubAgentMeta(a.sessionDir, sub.instanceID)
+	if err != nil || meta == nil {
+		t.Fatalf("loadSubAgentMeta = %+v, %v", meta, err)
+	}
+	if meta.WorkDir != "" || meta.WorkDirGeneration != 0 {
+		t.Fatalf("worker claim = %q generation %d, want it dropped for the removed checkout", meta.WorkDir, meta.WorkDirGeneration)
+	}
+	if meta.InstanceID != sub.instanceID || meta.TaskID != sub.taskID {
+		t.Fatalf("record = %+v, want the worker's own state preserved", meta)
 	}
 }

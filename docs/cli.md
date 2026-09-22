@@ -78,14 +78,14 @@ A session that another running Chord process already owns is skipped, and the ne
 
 ### Resuming sessions
 
-Both entry points run the same resume pipeline; they differ only in how the session is located:
+Two entry points run the same resume pipeline; they differ only in how the session is located:
 
 - `chord --resume <id>` (alias `-r`) resumes a session of the repository the current directory belongs to. It composes with `--continue` / `--worktree` and is the form scripts and headless use.
 - `chord resume <id>` resolves the same sessions as an explicit command: it prints the checkout it switched to and then starts the TUI there.
 
-Both switch into the chord-managed worktree the session recorded, so a worktree session resumes from the main checkout, or from any other checkout of the same repository. When that worktree no longer exists, Chord reports it, records the fallback in the session, and resumes in the repository's main checkout instead.
+Each of them switches into the chord-managed worktree the session recorded, and so does `--continue`: it picks a session first and enters the checkout that session recorded. A worktree session therefore resumes from the main checkout, or from any other checkout of the same repository. When that worktree no longer exists, Chord reports it and records the fallback: `chord resume <id>` resumes in the repository's main checkout, while `--resume` and `--continue` continue in the checkout Chord was started from, recording it when it is a worktree.
 
-Rule of thumb: both entry points find the same sessions, so pick by invocation style — a flag on the default command, or the `chord resume <id>` command.
+Rule of thumb: the entry points find the same sessions, so pick by invocation style — a flag on the default command, or the `chord resume <id>` command.
 
 ### Examples
 

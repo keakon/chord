@@ -637,6 +637,11 @@ func dirContains(root, dir string) bool {
 // live under the content root's project key — so removing a worktree never
 // deletes them.
 //
+// The holder scan and the destructive steps run under the checkout mutation
+// lock that every writer of a session's checkout takes (see WithCheckoutLock),
+// so a process cannot bind this checkout in the window between the scan and its
+// removal.
+//
 // pathLocator is required to compute and clean the worktree's
 // ProjectKey-scoped state. Passing nil is an error.
 func Remove(ctx context.Context, repoRoot, name string, opts RemoveOptions, pathLocator *config.PathLocator) error {
@@ -677,70 +682,65 @@ func Remove(ctx context.Context, repoRoot, name string, opts RemoveOptions, path
 			return fmt.Errorf("delete branch %s (use --force to override): the branch is not fully merged into %s; the worktree was left untouched", info.Branch, target)
 		}
 	}
-	// Consulted last on purpose: this is the only check that stands between an
-	// in-flight removal and a checkout that something is still working in, so
-	// it runs as close to the deletion as possible. The dirty and cwd checks
-	// above are cheap fail-fasts; a holder that appeared while they ran must
-	// still be seen here.
+	// From here on the checkout is the thing being destroyed, so everything
+	// runs under the checkout mutation lock: the holder scan below is the only
+	// check between an in-flight removal and a checkout something is working
+	// in, and a writer that records "this session works in that checkout" takes
+	// the same lock. Without it the scan and the deletion are not atomic across
+	// processes: another Chord process can bind this checkout in the window
+	// between them and then work in a directory that is being deleted.
 	//
-	// The check and the `git worktree remove` below are still not atomic across
-	// processes: another Chord process can start and bind this checkout in the
-	// window between them. The window is milliseconds, but closing it needs a
-	// mutation lock shared by "bind a session to this checkout" and "remove the
-	// checkout" — either a flock a binding holds while it records the checkout,
-	// or git's own `worktree lock` plus stale-lock handling. Neither is
-	// implemented, so treat this as best-effort, not as a guarantee. A binder
-	// must also hold its own session lock before it records the checkout and
-	// re-check that the path still exists after taking the mutation lock,
-	// otherwise the removal scan reads a just-written binding as an abandoned
-	// one.
-	if opts.Holders != nil {
-		if holders := opts.Holders(info); len(holders) > 0 {
-			return fmt.Errorf("worktree %q is still in use: %s; finish or stop that work before removing the checkout", info.Name, strings.Join(holders, "; "))
+	// The dirty and cwd checks above stay outside: they are cheap fail-fasts,
+	// and a holder that appeared while they ran is still seen inside the lock.
+	return WithCheckoutLock(pathLocator.StateDir, info.Path, func() error {
+		if opts.Holders != nil {
+			if holders := opts.Holders(info); len(holders) > 0 {
+				return fmt.Errorf("worktree %q is still in use: %s; finish or stop that work before removing the checkout", info.Name, strings.Join(holders, "; "))
+			}
 		}
-	}
-	gitArgs := []string{"worktree", "remove"}
-	if opts.Force || opts.DiscardChanges {
-		gitArgs = append(gitArgs, "--force")
-	}
-	gitArgs = append(gitArgs, info.Path)
-	if _, err := runGit(ctx, info.RepoRoot, gitArgs...); err != nil {
-		return err
-	}
-	var branchErr error
-	if opts.Force {
-		// `branch -D` succeeds even when unmerged; matches Force semantics.
-		if _, berr := runGit(ctx, info.RepoRoot, "branch", "-D", info.Branch); berr != nil {
-			// Non-fatal: the worktree itself is already gone, so this is a
-			// diagnostic rather than a failure of the removal.
-			log.Warnf("remove worktree branch failed worktree=%v branch=%v error=%v", name, info.Branch, berr)
+		gitArgs := []string{"worktree", "remove"}
+		if opts.Force || opts.DiscardChanges {
+			gitArgs = append(gitArgs, "--force")
 		}
-	} else if opts.DeleteBranch {
-		if _, berr := runGit(ctx, info.RepoRoot, "branch", "-d", info.Branch); berr != nil {
-			// The pre-check above normally answers this question, so reaching
-			// here means the branch changed while the checkout was removed.
-			// Keep the error for the end: the checkout is already gone, and
-			// returning now would skip the derived-state cleanup below for a
-			// removal that did happen.
-			branchErr = berr
+		gitArgs = append(gitArgs, info.Path)
+		if _, err := runGit(ctx, info.RepoRoot, gitArgs...); err != nil {
+			return err
 		}
-	}
-	if err := cleanupWorktreeProjectState(info.Path, pathLocator); err != nil {
-		log.Warnf("cleanup worktree project state failed worktree=%v error=%v", name, err)
-	}
-	if err := WithRepoIndexLock(pathLocator.StateDir, info.RepoID, func(idx *RepoIndex) error {
-		idx.RemoveWorktree(name)
+		var branchErr error
+		if opts.Force {
+			// `branch -D` succeeds even when unmerged; matches Force semantics.
+			if _, berr := runGit(ctx, info.RepoRoot, "branch", "-D", info.Branch); berr != nil {
+				// Non-fatal: the worktree itself is already gone, so this is a
+				// diagnostic rather than a failure of the removal.
+				log.Warnf("remove worktree branch failed worktree=%v branch=%v error=%v", name, info.Branch, berr)
+			}
+		} else if opts.DeleteBranch {
+			if _, berr := runGit(ctx, info.RepoRoot, "branch", "-d", info.Branch); berr != nil {
+				// The pre-check above normally answers this question, so reaching
+				// here means the branch changed while the checkout was removed.
+				// Keep the error for the end: the checkout is already gone, and
+				// returning now would skip the derived-state cleanup below for a
+				// removal that did happen.
+				branchErr = berr
+			}
+		}
+		if err := cleanupWorktreeProjectState(info.Path, pathLocator); err != nil {
+			log.Warnf("cleanup worktree project state failed worktree=%v error=%v", name, err)
+		}
+		if err := WithRepoIndexLock(pathLocator.StateDir, info.RepoID, func(idx *RepoIndex) error {
+			idx.RemoveWorktree(name)
+			return nil
+		}); err != nil {
+			// The index is a display cache, and the checkout and its branch are
+			// already gone by now: a failed index update must not be reported as a
+			// failed removal, which would invite a retry of a destructive step.
+			log.Warnf("update repo index after worktree removal failed worktree=%v error=%v", name, err)
+		}
+		if branchErr != nil {
+			return fmt.Errorf("worktree %q was removed, but branch %s could not be deleted (use --force to delete it): %w", name, info.Branch, branchErr)
+		}
 		return nil
-	}); err != nil {
-		// The index is a display cache, and the checkout and its branch are
-		// already gone by now: a failed index update must not be reported as a
-		// failed removal, which would invite a retry of a destructive step.
-		log.Warnf("update repo index after worktree removal failed worktree=%v error=%v", name, err)
-	}
-	if branchErr != nil {
-		return fmt.Errorf("worktree %q was removed, but branch %s could not be deleted (use --force to delete it): %w", name, info.Branch, branchErr)
-	}
-	return nil
+	})
 }
 
 // cleanupWorktreeProjectState deletes the per-project state chord generated for

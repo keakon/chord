@@ -550,7 +550,7 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 
 	log.Infof("configuration loaded model=%v max_output_tokens=%v context_window=%v", initialLLM.ModelID, initialLLM.ModelCfg.Limit.Output, initialLLM.ModelCfg.Limit.Context)
 	// Session directory.
-	sessionPlan, err := planSessionStartup(projectLocator.ProjectSessionsDir, sessionOpts)
+	sessionPlan, err := planSessionStartup(projectLocator.ProjectSessionsDir, pathLocator.StateDir, sessionOpts)
 	if err != nil {
 		ac.cleanup()
 		return nil, err

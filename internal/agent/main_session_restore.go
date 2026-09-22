@@ -1706,6 +1706,7 @@ func (a *MainAgent) ListSessionSummaries() ([]SessionSummary, error) {
 			OriginalFirstUserMessage:            s.OriginalFirstUserMessage,
 			ForkedFrom:                          s.ForkedFrom,
 			Locked:                              s.Locked,
+			WorktreeName:                        s.WorktreeName,
 		})
 	}
 	return out, nil
@@ -1739,13 +1740,6 @@ func (a *MainAgent) FillSessionSummaryDetails(list []SessionSummary) []SessionSu
 			mainPath := filepath.Join(sessionPath, identity.MainSessionLogFilename)
 			if firstUser, err := recovery.FirstUserMessageFromFile(mainPath); err == nil {
 				out[i].FirstUserMessage = firstUser
-			}
-		}
-		if strings.TrimSpace(out[i].WorktreeName) == "" {
-			// Detail-load only: the worktree the session last worked in lives
-			// in session-meta.json, and list scans stay cheap by not reading it.
-			if meta, metaErr := recovery.LoadSessionMeta(sessionPath); metaErr == nil && meta != nil {
-				out[i].WorktreeName = meta.WorktreeName
 			}
 		}
 	}

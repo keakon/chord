@@ -298,10 +298,27 @@ func (a *MainAgent) afterWorkDirSwitchWithReason(prev, next WorkDirState, reason
 	return warnings
 }
 
+// checkoutMutationStateDir resolves the state directory holding the
+// cross-process checkout mutation locks. It comes from the locator the
+// worktree tools use, so a writer and the removal it races derive the same
+// lock; empty means this agent has no worktree runtime and no claim to protect.
+func (a *MainAgent) checkoutMutationStateDir() string {
+	if a == nil || a.worktreeRT.PathLocator == nil {
+		return ""
+	}
+	return strings.TrimSpace(a.worktreeRT.PathLocator.StateDir)
+}
+
 // recordWorkDirBoundary persists the active checkout together with the
 // boundary record of the switch that produced it. The switch is already
 // published, so a write failure is reported as a warning by the caller and
 // never rolls the checkout back.
+//
+// Recording a checkout takes the mutation lock removal takes, and only while
+// the directory is still there. A checkout that a removal already deleted is
+// not re-recorded as a claim — the write fails with the removal's error and the
+// session keeps the binding it had, so no resume replays a transcript against a
+// path nothing is in.
 func (a *MainAgent) recordWorkDirBoundary(next WorkDirState, reason string) error {
 	if a == nil || strings.TrimSpace(a.sessionDir) == "" {
 		return nil
@@ -328,6 +345,11 @@ func (a *MainAgent) recordWorkDirBoundary(next WorkDirState, reason string) erro
 			entry.Head = head
 		}
 		cancel()
+		if stateDir := a.checkoutMutationStateDir(); stateDir != "" {
+			return worktree.ClaimCheckout(stateDir, path, func() error {
+				return recovery.RecordWorktreeBoundary(a.sessionDir, binding, entry)
+			})
+		}
 	}
 	return recovery.RecordWorktreeBoundary(a.sessionDir, binding, entry)
 }
@@ -515,7 +537,6 @@ func (act workDirActor) enter(ctx context.Context, req tools.WorktreeEnterReques
 		BaseSHA:      info.BaseSHA,
 		Existed:      info.Existed,
 		MainDirty:    info.MainDirty,
-		Generation:   prev.Generation,
 		PreviousPath: currentDir,
 	}
 	if info.Path == currentDir {
@@ -535,7 +556,6 @@ func (act workDirActor) enter(ctx context.Context, req tools.WorktreeEnterReques
 		Generation: prev.Generation + 1,
 	}
 	act.binding.store(next)
-	res.Generation = next.Generation
 	if act.afterSwitch != nil {
 		res.Warnings = append(res.Warnings, act.afterSwitch(prev, next)...)
 	}

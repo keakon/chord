@@ -227,7 +227,7 @@ func TestForkSessionAtHistoryDefaultLatest(t *testing.T) {
 	}
 	writeForkSourceFixture(t, src)
 
-	newDir, chosen, seeded, err := forkSessionAtHistory(src, filepath.Dir(src), 0)
+	newDir, chosen, seeded, err := forkSessionAtHistory(src, filepath.Dir(src), t.TempDir(), 0)
 	if err != nil {
 		t.Fatalf("fork: %v", err)
 	}
@@ -304,7 +304,7 @@ func TestForkSessionAtHistoryExplicitBoundary(t *testing.T) {
 	}
 	writeForkSourceFixture(t, src)
 
-	newDir, chosen, seeded, err := forkSessionAtHistory(src, filepath.Dir(src), 1)
+	newDir, chosen, seeded, err := forkSessionAtHistory(src, filepath.Dir(src), t.TempDir(), 1)
 	if err != nil {
 		t.Fatalf("fork: %v", err)
 	}
@@ -345,7 +345,7 @@ func TestForkSessionAtHistoryErrors(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(noHist, "main.jsonl"), []byte("{}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := forkSessionAtHistory(noHist, base, 0); err == nil || !strings.Contains(err.Error(), "no applied compaction history") {
+	if _, _, _, err := forkSessionAtHistory(noHist, base, t.TempDir(), 0); err == nil || !strings.Contains(err.Error(), "no applied compaction history") {
 		t.Fatalf("no-history error = %v, want 'no applied compaction history'", err)
 	}
 
@@ -359,7 +359,7 @@ func TestForkSessionAtHistoryErrors(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(src, "main.jsonl"), []byte("{}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, _, _, err := forkSessionAtHistory(src, base, 3)
+	_, _, _, err := forkSessionAtHistory(src, base, t.TempDir(), 3)
 	if err == nil || !strings.Contains(err.Error(), "applied boundary history-3 does not exist") || !strings.Contains(err.Error(), "history-1") {
 		t.Fatalf("out-of-range error = %v, want range listing", err)
 	}
@@ -478,7 +478,7 @@ func TestForkSessionRelocatesImageAttachment(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	newDir, _, _, err := forkSessionAtHistory(src, filepath.Dir(src), 0)
+	newDir, _, _, err := forkSessionAtHistory(src, filepath.Dir(src), t.TempDir(), 0)
 	if err != nil {
 		t.Fatalf("fork: %v", err)
 	}
@@ -526,7 +526,7 @@ func TestForkSessionLatestSkipsPendingBoundary(t *testing.T) {
 
 	// Latest *applied* wins: the newer snapshot whose apply never completed is
 	// not offered for forking.
-	newDir, chosen, _, err := forkSessionAtHistory(src, filepath.Dir(src), 0)
+	newDir, chosen, _, err := forkSessionAtHistory(src, filepath.Dir(src), t.TempDir(), 0)
 	if err != nil {
 		t.Fatalf("fork: %v", err)
 	}
@@ -539,7 +539,7 @@ func TestForkSessionLatestSkipsPendingBoundary(t *testing.T) {
 
 	// Explicitly asking for the not-yet-applied boundary fails instead of
 	// forking a snapshot whose apply never completed.
-	if _, _, _, err := forkSessionAtHistory(src, filepath.Dir(src), 2); err == nil || !strings.Contains(err.Error(), "applied boundary history-2 does not exist") {
+	if _, _, _, err := forkSessionAtHistory(src, filepath.Dir(src), t.TempDir(), 2); err == nil || !strings.Contains(err.Error(), "applied boundary history-2 does not exist") {
 		t.Fatalf("pending boundary error = %v, want an applied-boundary range error", err)
 	}
 }
@@ -566,7 +566,7 @@ func TestForkSessionMissingAttachmentFails(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, _, err := forkSessionAtHistory(src, filepath.Dir(src), 0)
+	_, _, _, err := forkSessionAtHistory(src, filepath.Dir(src), t.TempDir(), 0)
 	if err == nil || !strings.Contains(err.Error(), missingPath) || !strings.Contains(err.Error(), "no longer readable") {
 		t.Fatalf("missing-attachment error = %v, want a readable error naming %s", err, missingPath)
 	}
@@ -635,7 +635,7 @@ func TestForkSessionRewritesCheckpointHistoryMap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	newDir, chosen, _, err := forkSessionAtHistory(src, filepath.Dir(src), 2)
+	newDir, chosen, _, err := forkSessionAtHistory(src, filepath.Dir(src), t.TempDir(), 2)
 	if err != nil {
 		t.Fatalf("fork: %v", err)
 	}

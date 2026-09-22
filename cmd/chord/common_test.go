@@ -180,7 +180,7 @@ func TestPlanSessionStartupResumeRequiresExistingMessages(t *testing.T) {
 		t.Fatalf("mkdir session: %v", err)
 	}
 
-	_, err := planSessionStartup(sessionsDir, sessionStartupOptions{ResumeID: "123"})
+	_, err := planSessionStartup(sessionsDir, t.TempDir(), sessionStartupOptions{ResumeID: "123"})
 	if err == nil {
 		t.Fatal("expected error for empty resume session")
 	}
@@ -197,7 +197,7 @@ func TestPlanSessionStartupResumeFailsWhenSessionOwnedByAnotherProcess(t *testin
 	}
 	defer lock.Release()
 
-	_, err = planSessionStartup(sessionsDir, sessionStartupOptions{ResumeID: "100"})
+	_, err = planSessionStartup(sessionsDir, t.TempDir(), sessionStartupOptions{ResumeID: "100"})
 	if err == nil {
 		t.Fatal("expected an error for a session open in another process")
 	}
@@ -213,7 +213,7 @@ func TestPlanSessionStartupResumeFailsWhenSessionOwnedByAnotherProcess(t *testin
 // acquired, so the temp sessions directory can be cleaned up.
 func planStartupForTest(t *testing.T, sessionsDir string, opts sessionStartupOptions) sessionStartupPlan {
 	t.Helper()
-	plan, err := planSessionStartup(sessionsDir, opts)
+	plan, err := planSessionStartup(sessionsDir, t.TempDir(), opts)
 	if err != nil {
 		t.Fatalf("planSessionStartup: %v", err)
 	}

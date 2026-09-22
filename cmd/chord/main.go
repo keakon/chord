@@ -272,12 +272,44 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 			flagWorktreeStartupMeta = worktreeMetaForInfo(info)
 			flagWorktreeStartupReason = recovery.WorktreeSwitchResume
 		}
-	} else if !plan.SessionOptions.ContinueLatest {
+	} else if plan.SessionOptions.ContinueLatest {
+		// --continue opens an existing session, so the checkout to work in is
+		// the one that session recorded, not the launch directory. Resolve the
+		// plan (and the session lock with it) here, then enter that checkout
+		// before initApp anchors tools, git status and the LSP root at the
+		// launch directory.
+		wtCtx := cmd.Context()
+		if wtCtx == nil {
+			wtCtx = context.Background()
+		}
+		startup, info, err := resolveContinueStartup(wtCtx)
+		if err != nil {
+			return err
+		}
+		plan.SessionOptions.Plan = &startup
+		switch {
+		case startup.SessionDir == "":
+			// No session could be claimed, so a fresh one is created: bind it to
+			// the launch checkout exactly like a plain startup does.
+			if cwdInfo := startupWorktreeFromCwd(wtCtx); cwdInfo != nil {
+				plan.SessionOptions.NewSessionMeta = worktreeMetaForInfo(cwdInfo)
+				flagWorktreeStartupInfo = cwdInfo
+				flagWorktreeStartupMeta = plan.SessionOptions.NewSessionMeta
+				flagWorktreeStartupReason = recovery.WorktreeSwitchStartup
+			}
+		case info != nil:
+			fmt.Fprintf(os.Stderr, "Continuing session %s in worktree %s (%s)\n", filepath.Base(startup.SessionDir), info.Name, info.Branch)
+			if err := os.Chdir(info.Path); err != nil {
+				return fmt.Errorf("chdir to worktree %q: %w", info.Name, err)
+			}
+			flagWorktreeStartupInfo = info
+			flagWorktreeStartupMeta = worktreeMetaForInfo(info)
+			flagWorktreeStartupReason = recovery.WorktreeSwitchResume
+		}
+	} else {
 		// Started inside a checkout: bind to it the same way --worktree and
 		// --resume do, so the session records the checkout it works in and
-		// another process can see it as a holder. --continue is excluded: it
-		// opens an existing session, whose own recorded checkout stays
-		// authoritative (and must not be overwritten by the launch directory).
+		// another process can see it as a holder.
 		wtCtx := cmd.Context()
 		if wtCtx == nil {
 			wtCtx = context.Background()

@@ -121,7 +121,7 @@ func TestWorktreeSessionsShareRepositoryKey(t *testing.T) {
 		t.Fatalf("worktree session key = %q, want the repository key %q", plan.ProjectLocator.ProjectKey, repoPL.ProjectKey)
 	}
 
-	sp, err := planSessionStartup(plan.ProjectLocator.ProjectSessionsDir, sessionStartupOptions{ContinueLatest: true})
+	sp, err := planSessionStartup(plan.ProjectLocator.ProjectSessionsDir, pl.StateDir, sessionStartupOptions{ContinueLatest: true})
 	if err != nil {
 		t.Fatalf("planSessionStartup: %v", err)
 	}
@@ -494,5 +494,226 @@ func TestStartupWorktreeFromCwdBindsCheckout(t *testing.T) {
 	chdirForTest(t, repo)
 	if got := startupWorktreeFromCwd(context.Background()); got != nil {
 		t.Fatalf("startupWorktreeFromCwd in the main checkout = %+v, want nil", got)
+	}
+}
+
+// newContinueStartupSession sets up a repository with one chord-managed
+// worktree and one session under the repository key, then leaves cwd at the
+// repository root: the position `chord --continue` starts from, just as if the
+// user had left the checkout before reopening the session.
+func newContinueStartupSession(t *testing.T, name, sid string) (sessionDir string, info *worktree.Info) {
+	t.Helper()
+	repo := setupStartupRepo(t)
+	withTestStateDir(t)
+	chdirForTest(t, repo)
+	info = prepareStartupWorktreeForTest(t, context.Background(), name)
+
+	pl, err := startupPathLocator()
+	if err != nil {
+		t.Fatalf("startupPathLocator: %v", err)
+	}
+	repoPL, err := pl.LocateProject(repo)
+	if err != nil {
+		t.Fatalf("LocateProject: %v", err)
+	}
+	sessionDir = filepath.Join(repoPL.ProjectSessionsDir, sid)
+	writeTestSessionMain(t, repoPL.ProjectSessionsDir, sid, `{"role":"user","content":"hi"}`+"\n")
+	chdirForTest(t, repo)
+	return sessionDir, info
+}
+
+func releaseContinueStartupPlan(t *testing.T, plan sessionStartupPlan) {
+	t.Helper()
+	if plan.SessionLock == nil {
+		t.Fatal("--continue plan did not acquire a session lock")
+	}
+	t.Cleanup(func() {
+		if err := plan.SessionLock.Release(); err != nil {
+			t.Errorf("release session lock: %v", err)
+		}
+	})
+}
+
+// TestResolveContinueStartupEntersRecordedWorktree pins the binding half of
+// --continue: the session it claims recorded the checkout it was working in,
+// and planning --continue from the repository root resolves that checkout
+// before the agent anchors its tool, git and LSP roots at the launch
+// directory.
+func TestResolveContinueStartupEntersRecordedWorktree(t *testing.T) {
+	const sid = "01HXXCONTINUE0000001"
+	sessionDir, info := newContinueStartupSession(t, "feat-continue", sid)
+	if err := recovery.SaveSessionMeta(sessionDir, recovery.SessionMeta{
+		WorktreeName:   info.Name,
+		WorktreeBranch: info.Branch,
+		WorktreePath:   info.Path,
+		RepoID:         info.RepoID,
+		RepoRoot:       info.RepoRoot,
+	}); err != nil {
+		t.Fatalf("save session meta: %v", err)
+	}
+
+	plan, wt, err := resolveContinueStartup(context.Background())
+	if err != nil {
+		t.Fatalf("resolveContinueStartup: %v", err)
+	}
+	releaseContinueStartupPlan(t, plan)
+	if plan.SessionDir != sessionDir {
+		t.Fatalf("--continue chose %s, want %s", plan.SessionDir, sessionDir)
+	}
+	if wt == nil {
+		t.Fatal("--continue did not resolve the checkout the session recorded")
+	}
+	if wt.Name != info.Name || wt.Path != info.Path {
+		t.Errorf("resolved checkout = %+v, want name=%s path=%s", wt, info.Name, info.Path)
+	}
+}
+
+// TestResolveContinueStartupKeepsLaunchDirWithoutCheckout is the main-checkout
+// case: a session that recorded no checkout keeps --continue in the launch
+// directory instead of inventing one.
+func TestResolveContinueStartupKeepsLaunchDirWithoutCheckout(t *testing.T) {
+	const sid = "01HXXCONTINUE0000002"
+	sessionDir, _ := newContinueStartupSession(t, "feat-continue-plain", sid)
+
+	plan, wt, err := resolveContinueStartup(context.Background())
+	if err != nil {
+		t.Fatalf("resolveContinueStartup: %v", err)
+	}
+	releaseContinueStartupPlan(t, plan)
+	if plan.SessionDir != sessionDir {
+		t.Fatalf("--continue chose %s, want %s", plan.SessionDir, sessionDir)
+	}
+	if wt != nil {
+		t.Fatalf("--continue resolved checkout %+v for a session that recorded none", wt)
+	}
+}
+
+// TestResolveContinueStartupDropsGoneCheckout pins the other fallback: a
+// recorded checkout that is no longer there is not entered, and the session
+// record is cleared with a fallback boundary instead of keeping a claim on a
+// path nothing is in.
+func TestResolveContinueStartupDropsGoneCheckout(t *testing.T) {
+	const sid = "01HXXCONTINUE0000003"
+	sessionDir, info := newContinueStartupSession(t, "feat-continue-gone", sid)
+	if err := recovery.SaveSessionMeta(sessionDir, recovery.SessionMeta{
+		WorktreeName:   info.Name,
+		WorktreeBranch: info.Branch,
+		WorktreePath:   info.Path,
+		RepoID:         info.RepoID,
+		RepoRoot:       info.RepoRoot,
+	}); err != nil {
+		t.Fatalf("save session meta: %v", err)
+	}
+	if err := os.RemoveAll(info.Path); err != nil {
+		t.Fatalf("remove checkout: %v", err)
+	}
+
+	var plan sessionStartupPlan
+	var wt *worktree.Info
+	var resolveErr error
+	warning, err := captureStderr(t, func() error {
+		plan, wt, resolveErr = resolveContinueStartup(context.Background())
+		return resolveErr
+	})
+	if err != nil {
+		t.Fatalf("resolveContinueStartup: %v", err)
+	}
+	releaseContinueStartupPlan(t, plan)
+	if plan.SessionDir != sessionDir {
+		t.Fatalf("--continue chose %s, want %s", plan.SessionDir, sessionDir)
+	}
+	if wt != nil {
+		t.Fatalf("--continue entered the gone checkout %+v", wt)
+	}
+	if !strings.Contains(warning, "no longer") {
+		t.Errorf("gone checkout warning = %q, want it to say the checkout is gone", warning)
+	}
+	meta, err := recovery.LoadSessionMeta(sessionDir)
+	if err != nil || meta == nil {
+		t.Fatalf("load session meta: meta=%v err=%v", meta, err)
+	}
+	if meta.WorktreePath != "" || meta.WorktreeName != "" || meta.WorktreeBranch != "" {
+		t.Errorf("session still records the gone checkout: %+v", meta)
+	}
+	if len(meta.WorktreeTimeline) == 0 {
+		t.Fatal("gone checkout left no fallback boundary in the session record")
+	}
+	last := meta.WorktreeTimeline[len(meta.WorktreeTimeline)-1]
+	if !last.Fallback || last.Reason != recovery.WorktreeSwitchResumeFallback || last.Path != info.Path {
+		t.Errorf("fallback boundary = %+v, want a %s entry for %s", last, recovery.WorktreeSwitchResumeFallback, info.Path)
+	}
+}
+
+// TestResolveContinueStartupAdoptsLaunchCheckoutWithoutARecord pins the other
+// half of --continue: the claimed session recorded no checkout, but chord was
+// launched from inside a checkout, so the continuation works there and has to
+// record it. Without the binding another process cannot see this session as a
+// holder of the checkout and could remove the directory it is working in.
+func TestResolveContinueStartupAdoptsLaunchCheckoutWithoutARecord(t *testing.T) {
+	const sid = "01HXXCONTINUE0000004"
+	sessionDir, info := newContinueStartupSession(t, "feat-continue-launch", sid)
+	chdirForTest(t, info.Path)
+
+	plan, wt, err := resolveContinueStartup(context.Background())
+	if err != nil {
+		t.Fatalf("resolveContinueStartup: %v", err)
+	}
+	releaseContinueStartupPlan(t, plan)
+	if plan.SessionDir != sessionDir {
+		t.Fatalf("--continue chose %s, want %s", plan.SessionDir, sessionDir)
+	}
+	if wt == nil {
+		t.Fatal("--continue did not adopt the checkout it was launched inside")
+	}
+	if wt.Name != info.Name || wt.Path != info.Path {
+		t.Errorf("adopted checkout = %+v, want name=%s path=%s", wt, info.Name, info.Path)
+	}
+}
+
+// TestResumeSessionWorktreeAdoptsLaunchCheckoutWithoutARecord pins --resume's
+// half of the same rule, plus the main-checkout launch that must keep binding
+// nothing: there is no checkout to adopt, so the session stays in the launch
+// directory exactly as before.
+func TestResumeSessionWorktreeAdoptsLaunchCheckoutWithoutARecord(t *testing.T) {
+	const sid = "01HXXRESUME00000001"
+	_, info := newContinueStartupSession(t, "feat-resume-launch", sid)
+	chdirForTest(t, info.Path)
+
+	got := resumeSessionWorktree(context.Background(), sid)
+	if got == nil || got.Name != info.Name || got.Path != info.Path {
+		t.Fatalf("--resume = %+v, want the checkout chord was launched inside name=%s path=%s", got, info.Name, info.Path)
+	}
+
+	chdirForTest(t, info.RepoRoot)
+	if got := resumeSessionWorktree(context.Background(), sid); got != nil {
+		t.Fatalf("--resume bound checkout %+v for a main-checkout launch", got)
+	}
+}
+
+// TestResumeSessionWorktreePrefersRecordedCheckout pins that the launch
+// checkout only fills a gap: a session that recorded a different checkout is
+// resumed there, not in the checkout chord happened to start from.
+func TestResumeSessionWorktreePrefersRecordedCheckout(t *testing.T) {
+	const sid = "01HXXRESUME00000002"
+	sessionDir, recorded := newContinueStartupSession(t, "feat-resume-recorded", sid)
+	chdirForTest(t, recorded.RepoRoot)
+	launched := prepareStartupWorktreeForTest(t, context.Background(), "feat-resume-other")
+	if launched.Path == recorded.Path {
+		t.Fatalf("test setup reused one checkout for both worktrees: %s", launched.Path)
+	}
+	if err := recovery.SaveSessionMeta(sessionDir, recovery.SessionMeta{
+		WorktreeName:   recorded.Name,
+		WorktreeBranch: recorded.Branch,
+		WorktreePath:   recorded.Path,
+		RepoID:         recorded.RepoID,
+		RepoRoot:       recorded.RepoRoot,
+	}); err != nil {
+		t.Fatalf("save session meta: %v", err)
+	}
+	chdirForTest(t, launched.Path)
+
+	got := resumeSessionWorktree(context.Background(), sid)
+	if got == nil || got.Path != recorded.Path {
+		t.Fatalf("--resume = %+v, want the recorded checkout %s", got, recorded.Path)
 	}
 }
