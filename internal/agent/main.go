@@ -1524,6 +1524,10 @@ func (a *MainAgent) handlePendingDraftUpsert(evt Event) {
 	a.newTurn()
 	turnID := a.turn.ID
 	turnCtx := a.turn.Ctx
+	// Committing this draft here makes any queue entry carrying the same DraftID
+	// stale: it was mirrored there while the agent was busy (or during an MCP
+	// transition), and a later drain would inject the same draft a second time.
+	a.pendingUserMessages, _ = removePendingDraft(a.pendingUserMessages, pending.DraftID)
 	a.recordCommittedUserMessage(userMsg)
 	a.emitPendingDraftConsumed(pending.DraftID, userMsg)
 	a.beginMainLLMAfterPreparation(turnCtx, turnID, "")

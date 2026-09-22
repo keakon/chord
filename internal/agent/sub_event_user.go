@@ -52,6 +52,10 @@ func (s *SubAgent) appendPendingUserMessage(input pendingUserMessage) {
 			s.parent.emitToTUI(MailboxTranscriptAppendedEvent{Message: msg, TargetAgentID: s.instanceID, MessageIndex: messageIndex})
 		}
 	})
+
+	// An explicit `/skill <name> [args]` load commits the pair right after the
+	// worker's user message, so its next request carries the skill instructions.
+	s.appendUserSkillInvocation(msg)
 }
 
 func (s *SubAgent) takePendingUserMessagesLocked() []pendingUserMessage {

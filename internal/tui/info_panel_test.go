@@ -16,6 +16,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/analytics"
+	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/ratelimit"
 	"github.com/keakon/chord/internal/skill"
 	"github.com/keakon/chord/internal/tools"
@@ -44,6 +45,7 @@ type infoPanelAgent struct {
 	availableSkills     []*skill.Meta
 	skillsByFocus       map[string][]*skill.Meta
 	invokedSkills       []*skill.Meta
+	skillRuleset        permission.Ruleset
 	keysConfirmed       int
 	keysTotal           int
 	wakeRateLimitCalls  int
@@ -120,6 +122,16 @@ func (a *infoPanelAgent) FocusedSkills() []*skill.Meta {
 		return append([]*skill.Meta(nil), skills...)
 	}
 	return a.ListSkills()
+}
+
+func (a *infoPanelAgent) FocusedSkillInvocationStates() []skill.InvocationState {
+	loaded := make(map[string]struct{}, len(a.invokedSkills))
+	for _, meta := range a.invokedSkills {
+		if meta != nil && strings.TrimSpace(meta.Name) != "" {
+			loaded[meta.Name] = struct{}{}
+		}
+	}
+	return skill.InvocationStates(a.FocusedSkills(), a.skillRuleset, loaded)
 }
 
 func (a *infoPanelAgent) CurrentRateLimitSnapshot() *ratelimit.KeyRateLimitSnapshot {
@@ -324,29 +336,45 @@ func TestRenderInfoPanelShowsInvokedSkills(t *testing.T) {
 	backend.availableSkills = []*skill.Meta{
 		{Name: "go-expert", Description: "Go language development expert", Discovered: true},
 		{Name: "py-expert", Description: "Python development expert", Discovered: true},
+		{Name: "manual-live", Description: "Manual workflow", Discovered: true, DisableModelInvocation: true},
+		{Name: "manual-idle", Description: "Manual helper", Discovered: true, DisableModelInvocation: true},
 	}
-	backend.invokedSkills = []*skill.Meta{{Name: "go-expert", Description: "Go language development expert", Discovered: true, Invoked: true}}
+	backend.invokedSkills = []*skill.Meta{
+		{Name: "go-expert", Description: "Go language development expert", Discovered: true, Invoked: true},
+		{Name: "manual-live", Description: "Manual workflow", Discovered: true, DisableModelInvocation: true, Invoked: true},
+	}
 	m := NewModel(backend)
 
-	rendered := m.renderInfoPanel(40, 24)
+	rendered := m.renderInfoPanel(40, 40)
 	plain := stripANSI(rendered)
 	section := infoPanelSectionLines(infoPanelPlainLines(plain), "▼ SKILLS")
 	joined := strings.Join(section, "\n")
 	if !strings.Contains(plain, "▼ SKILLS") {
 		t.Fatalf("skills header missing in %q", plain)
 	}
-	for _, want := range []string{"go-expert", "py-expert"} {
+	for _, want := range []string{"go-expert", "py-expert", "manual-live", "manual-idle"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("skills section missing %q in %q", want, joined)
 		}
 	}
-	wantInvoked := InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelSuccessFg)).Render("go-expert")
-	if !strings.Contains(rendered, wantInvoked) {
-		t.Fatalf("invoked skill should use success color; want %q in %q", wantInvoked, rendered)
+	// Shape encodes model visibility and color encodes load state, so the four
+	// combinations must stay distinguishable.
+	invokedStyle := InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelSuccessFg))
+	cases := []struct {
+		name  string
+		style lipgloss.Style
+		label string
+	}{
+		{name: "model-visible loaded", style: invokedStyle, label: "● go-expert"},
+		{name: "model-visible idle", style: InfoPanelDim, label: "○ py-expert"},
+		{name: "manual loaded", style: invokedStyle, label: "◌ manual-live"},
+		{name: "manual idle", style: InfoPanelDim, label: "◌ manual-idle"},
 	}
-	wantAvailable := InfoPanelDim.Render("py-expert")
-	if !strings.Contains(rendered, wantAvailable) {
-		t.Fatalf("available skill should use dim color; want %q in %q", wantAvailable, rendered)
+	for _, tc := range cases {
+		want := tc.style.Render(tc.label)
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("%s skill row should render %q; want %q in %q", tc.name, tc.label, want, rendered)
+		}
 	}
 }
 
@@ -382,7 +410,7 @@ func TestRenderInfoPanelSkipsInvokedSkillMissingFromAvailableList(t *testing.T) 
 	if strings.Contains(section, "missing-skill") {
 		t.Fatalf("skills section should omit invoked skills missing from available list, got %q", section)
 	}
-	wantInvoked := InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelSuccessFg)).Render("go-expert")
+	wantInvoked := InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelSuccessFg)).Render("● go-expert")
 	if !strings.Contains(rendered, wantInvoked) {
 		t.Fatalf("visible invoked skill should remain success-colored; want %q in %q", wantInvoked, rendered)
 	}
@@ -2393,7 +2421,7 @@ func TestRenderInfoPanelCollapsibleSectionsIndentContentNotHeaders(t *testing.T)
 		{title: "▼ LSP", want: "   ● gopls"},
 		{title: "▼ MCP", want: "   ● exa"},
 		{title: "▼ TODOS", want: "   ▶ Investigate spacing"},
-		{title: "▼ SKILLS", want: "   go-expert"},
+		{title: "▼ SKILLS", want: "   ○ go-expert"},
 		{title: "▼ CHANGED FILES", want: "   foo.go +2 -1"},
 		{title: "▼ AGENTS", want: "   ● builder"},
 	}

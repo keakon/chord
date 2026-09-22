@@ -856,6 +856,14 @@ type MCPSelectEvent struct{}
 
 func (MCPSelectEvent) agentEvent() {}
 
+// SkillSelectEvent signals the TUI to open the skill selector overlay. It is
+// emitted for a bare `/skill`; the TUI reads the focused agent's per-skill
+// visibility and load state from its state provider so the dialog renders the
+// same authorization the loader applies.
+type SkillSelectEvent struct{}
+
+func (SkillSelectEvent) agentEvent() {}
+
 // RunningModelChangedEvent signals that the active running model has changed.
 // Emitted after a manual model switch or fallback switch so the TUI can
 // update the sidebar without waiting for the next idle snapshot.

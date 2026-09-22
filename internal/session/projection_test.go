@@ -635,3 +635,50 @@ func TestLegacyReaderIgnoresNewExportFields(t *testing.T) {
 		t.Fatalf("legacy = %#v", legacy)
 	}
 }
+
+// TestProjectToolCallOriginDistinguishesUserSkillLoad pins the provenance
+// marker to the projection: a synthesized /skill load carries OriginUser on
+// its declaration, a model-issued call of the identical shape stays empty,
+// and the empty case is omitted from the JSONL so existing projections do not
+// change.
+func TestProjectToolCallOriginDistinguishesUserSkillLoad(t *testing.T) {
+	msgs := []message.Message{
+		{Role: message.RoleUser, Content: "/skill go-expert"},
+		{
+			Role:       message.RoleAssistant,
+			ToolCalls:  []message.ToolCall{{ID: "user-skill-1", Name: "skill", Args: json.RawMessage(`{"name":"go-expert"}`)}},
+			Provenance: &message.MessageProvenance{Origin: message.OriginUser},
+		},
+		{Role: message.RoleTool, ToolCallID: "user-skill-1", Content: "<skill/>", ToolStatus: message.ToolStatusSuccess, Provenance: &message.MessageProvenance{Origin: message.OriginUser}},
+		{Role: message.RoleUser, Content: "continue"},
+		{
+			Role:      message.RoleAssistant,
+			ToolCalls: []message.ToolCall{{ID: "model-skill-1", Name: "skill", Args: json.RawMessage(`{"name":"go-expert"}`)}},
+		},
+		{Role: message.RoleTool, ToolCallID: "model-skill-1", Content: "<skill/>", ToolStatus: message.ToolStatusSuccess},
+	}
+	turns, err := Project(mustExportForProjection(t, msgs))
+	if err != nil {
+		t.Fatalf("Project: %v", err)
+	}
+	if len(turns) != 2 {
+		t.Fatalf("len(turns) = %d, want 2", len(turns))
+	}
+	if len(turns[0].ToolCalls) != 1 || turns[0].ToolCalls[0].Origin != message.OriginUser {
+		t.Fatalf("user-triggered call = %#v, want origin %q", turns[0].ToolCalls, message.OriginUser)
+	}
+	if len(turns[1].ToolCalls) != 1 || turns[1].ToolCalls[0].Origin != "" {
+		t.Fatalf("model call = %#v, want empty origin", turns[1].ToolCalls)
+	}
+
+	data, err := MarshalProjectedTurnsJSONL(turns)
+	if err != nil {
+		t.Fatalf("MarshalProjectedTurnsJSONL: %v", err)
+	}
+	if !strings.Contains(string(data), `"origin":"user"`) {
+		t.Fatalf("projection JSONL should carry the user origin:\n%s", data)
+	}
+	if got := strings.Count(string(data), `"origin"`); got != 1 {
+		t.Fatalf("origin should appear once (model call omitted), got %d:\n%s", got, data)
+	}
+}

@@ -51,8 +51,32 @@ func (a *MainAgent) SetSkills(skills []*skill.Meta) {
 	a.skillsMu.Unlock()
 }
 
+// visibleSkillsSnapshot returns the model-facing catalog: the discovered skills
+// the role's ruleset allows and whose frontmatter keeps them model-invocable.
+// It is the source for the Available Skills prompt block and the skill tool
+// listing, so a manual-only skill cannot reach the model through either.
 func (a *MainAgent) visibleSkillsSnapshot() []*skill.Meta {
-	return visibleSkillsForRuleset(a.loadedSkillsSnapshot(), a.effectiveRuleset())
+	return modelVisibleSkillsForRuleset(a.loadedSkillsSnapshot(), a.effectiveRuleset())
+}
+
+// userSkillsSnapshot returns what the user-facing surfaces may show: every
+// discovered skill the role's ruleset allows, including manual-only skills the
+// model never sees.
+func (a *MainAgent) userSkillsSnapshot() []*skill.Meta {
+	return userVisibleSkillsForRuleset(a.loadedSkillsSnapshot(), a.effectiveRuleset())
+}
+
+// skillInvocationStates returns per-skill visibility and load state for this
+// agent. The catalog is the complete discovered set so the TUI selector can
+// explain a skill the role's ruleset denies instead of silently omitting it.
+func (a *MainAgent) skillInvocationStates() []skill.InvocationState {
+	return skill.InvocationStates(a.loadedSkillsSnapshot(), a.effectiveRuleset(), a.invokedSkillNameSet())
+}
+
+func (a *MainAgent) invokedSkillNameSet() map[string]struct{} {
+	a.skillsMu.RLock()
+	defer a.skillsMu.RUnlock()
+	return invokedSkillNameSetFromMap(a.invokedSkills)
 }
 
 func (a *MainAgent) ListSkills() []*skill.Meta { return a.visibleSkillsSnapshot() }
@@ -63,28 +87,93 @@ func (a *MainAgent) ListSkills() []*skill.Meta { return a.visibleSkillsSnapshot(
 func (a *MainAgent) FocusedSkills() []*skill.Meta {
 	target := a.focusedAgentSnapshot()
 	if target.sub != nil {
-		return target.sub.ListSkills()
+		return target.sub.userSkillsSnapshot()
 	}
 	if (target.parked || target.settled) && target.task != nil {
-		return a.parkedTaskVisibleSkills(target.task)
+		return a.parkedTaskUserSkills(target.task)
 	}
-	return a.ListSkills()
+	return a.userSkillsSnapshot()
 }
 
-func (a *MainAgent) parkedTaskVisibleSkills(task *DurableTaskRecord) []*skill.Meta {
-	if task == nil {
+// FocusedSkillInvocationStates is the TUI's per-skill view of the focused
+// agent: the sidebar reads visibility and load state from it, and the /skill
+// selector lists the same entries.
+func (a *MainAgent) FocusedSkillInvocationStates() []skill.InvocationState {
+	target := a.focusedAgentSnapshot()
+	if target.sub != nil {
+		return target.sub.skillInvocationStates()
+	}
+	if (target.parked || target.settled) && target.task != nil {
+		return a.parkedTaskSkillInvocationStates(target.task)
+	}
+	return a.skillInvocationStates()
+}
+
+func (a *MainAgent) parkedTaskUserSkills(task *DurableTaskRecord) []*skill.Meta {
+	catalog, ruleset := a.parkedTaskCatalogAndRuleset(task)
+	if catalog == nil {
 		return nil
+	}
+	return userVisibleSkillsForRuleset(catalog, ruleset)
+}
+
+func (a *MainAgent) parkedTaskSkillInvocationStates(task *DurableTaskRecord) []skill.InvocationState {
+	catalog, ruleset := a.parkedTaskCatalogAndRuleset(task)
+	if catalog == nil {
+		return nil
+	}
+	return skill.InvocationStates(catalog, ruleset, skillNameSet(task.InvokedSkillNames))
+}
+
+func (a *MainAgent) parkedTaskCatalogAndRuleset(task *DurableTaskRecord) ([]*skill.Meta, permission.Ruleset) {
+	if task == nil {
+		return nil, nil
 	}
 	a.stateMu.RLock()
 	cfg := a.agentConfigs[task.AgentDefName]
 	a.stateMu.RUnlock()
 	if cfg == nil {
-		return nil
+		return nil, nil
 	}
-	return visibleSkillsForRuleset(a.loadedSkillsSnapshot(), a.buildSubAgentRuleset(cfg))
+	return a.loadedSkillsSnapshot(), a.buildSubAgentRuleset(cfg)
 }
 
-func visibleSkillsForRuleset(loaded []*skill.Meta, ruleset permission.Ruleset) []*skill.Meta {
+// skillNameSet turns a name list into the set InvocationStates consumes.
+func skillNameSet(names []string) map[string]struct{} {
+	if len(names) == 0 {
+		return nil
+	}
+	out := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		if name = strings.TrimSpace(name); name != "" {
+			out[name] = struct{}{}
+		}
+	}
+	return out
+}
+
+// invokedSkillNameSetFromMap turns the invoked-skills map into the set
+// InvocationStates consumes, skipping nil entries. Callers hold their own
+// skillsMu while reading the map.
+func invokedSkillNameSetFromMap(invoked map[string]*skill.Meta) map[string]struct{} {
+	if len(invoked) == 0 {
+		return nil
+	}
+	out := make(map[string]struct{}, len(invoked))
+	for name, meta := range invoked {
+		if meta == nil {
+			continue
+		}
+		out[name] = struct{}{}
+	}
+	return out
+}
+
+func modelVisibleSkillsForRuleset(loaded []*skill.Meta, ruleset permission.Ruleset) []*skill.Meta {
+	return skill.ModelVisibleForRuleset(loaded, ruleset)
+}
+
+func userVisibleSkillsForRuleset(loaded []*skill.Meta, ruleset permission.Ruleset) []*skill.Meta {
 	return skill.VisibleForRuleset(loaded, ruleset)
 }
 
@@ -112,7 +201,7 @@ func (a *MainAgent) MarkSkillInvoked(meta *skill.Meta) {
 // asserting the model is following a workflow it can no longer see, and the
 // same session reports different skills before and after a reload.
 func (a *MainAgent) resetInvokedSkillsFromMessages(msgs []message.Message) {
-	invoked := rebuildInvokedSkillsFromMessages(msgs, a.visibleSkillsSnapshot())
+	invoked := rebuildInvokedSkillsFromMessages(msgs, a.userSkillsSnapshot())
 	a.skillsMu.Lock()
 	a.invokedSkills = make(map[string]*skill.Meta, len(invoked))
 	for _, meta := range invoked {
@@ -131,7 +220,7 @@ func (a *MainAgent) InvokedSkills() []*skill.Meta {
 	}
 	if (target.parked || target.settled) && target.task != nil {
 		visible := make(map[string]*skill.Meta)
-		for _, meta := range a.parkedTaskVisibleSkills(target.task) {
+		for _, meta := range a.parkedTaskUserSkills(target.task) {
 			if meta != nil {
 				visible[meta.Name] = meta
 			}
@@ -169,6 +258,10 @@ func (a *MainAgent) invokedSkillsSnapshot() []*skill.Meta {
 	return out
 }
 
+// LoadSkill loads a skill for the model. It resolves against the model-facing
+// catalog only, so a manual-only skill, a skill the ruleset denies, and an
+// unknown name all fail with the same not-found error: the model learns
+// nothing about skills it is not allowed to load.
 func (a *MainAgent) LoadSkill(name string) (*skill.Skill, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -188,7 +281,7 @@ func (a *MainAgent) MarkSkillInvokedByName(name string) {
 	if name == "" {
 		return
 	}
-	for _, meta := range a.visibleSkillsSnapshot() {
+	for _, meta := range a.userSkillsSnapshot() {
 		if meta.Name == name {
 			a.MarkSkillInvoked(meta)
 			return

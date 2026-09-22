@@ -368,6 +368,10 @@ func (m *Model) drawOverlayLayers(scr uv.Screen, area image.Rectangle, layout tu
 		dialog := m.renderMCPSelectDialog()
 		dialogRect := centeredRect(area, dialog)
 		m.renderOverlayCached(scr, dialogRect, &m.cachedDirRender, dialog)
+	case ModeSkillSelect:
+		dialog := m.renderSkillSelectDialog()
+		dialogRect := centeredRect(area, dialog)
+		m.renderOverlayCached(scr, dialogRect, &m.cachedDirRender, dialog)
 	case ModeSessionSelect:
 		dialog := m.renderSessionSelectDialog()
 		dialogRect := centeredRect(area, dialog)

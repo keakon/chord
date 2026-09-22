@@ -49,7 +49,7 @@ Chord discovers Skills from these directories by default:
 
 At runtime, Chord does not preload every skill body into the system prompt. The model calls the `skill` tool to load matching skill content on demand.
 
-In the TUI, the **SKILLS** panel lists discovered skills. A skill turns green only after the `skill` tool successfully loads it during the session. Failed skill loads do not mark the skill as invoked, and unknown (not-discovered) skills are not shown until they are discovered.
+In the TUI, the **SKILLS** panel lists discovered skills. The glyph shape separates model visibility: `○` and `●` are model-invocable, `◌` marks a skill kept for explicit loads. The color is load state, so a skill turns green once its body is live in this agent's context, whether the `skill` tool loaded it or you loaded it with `/skill`. Failed skill loads do not mark the skill as invoked, and unknown (not-discovered) skills are not shown until they are discovered.
 
 Each agent can see and load only the skills its permissions allow. Loading state is separate: a skill loaded by the main agent is not automatically marked as loaded by a sub-agent. Restoring a sub-task recovers its loading history and applies current permissions.
 
@@ -75,6 +75,41 @@ Follow Effective Go and Go Code Review Comments.
 ```
 
 The `description` is what the model sees in the `Available Skills` list when deciding whether a skill matches, so put the trigger conditions there; Chord truncates a description longer than 1024 characters with a trailing `...`.
+
+### Explicit loads
+
+`/skill <name> [args]` loads a skill on the spot. Chord commits the line as an
+ordinary user message and appends the skill body as a `skill` tool result in
+the same turn, so the model gets the instructions without deciding to call the
+tool itself. Everything after the name is passed through as the skill's
+arguments, replacing `${CHORD_SKILL_ARGS}` in the body:
+
+```text
+/skill go-expert review the parser package
+```
+
+The line follows the focused agent, so a SubAgent can be given a skill the same
+way. Bare `/skill` opens the selector instead: it lists every skill the current
+agent may load, manual-only ones first, and backfills `/skill <name>` with a
+trailing space so you can type arguments. A ruleset-denied skill is shown
+disabled with the reason, and an unknown name is refused with a toast.
+
+A synthesized load counts exactly like a model load. It is recorded in the
+session, the skill shows as loaded, and resuming the session recovers that
+state; durable compaction that archives the tool pair clears it, the same as a
+restart.
+
+### Keep a skill out of the model's catalog
+
+`disable-model-invocation: true` in frontmatter keeps a skill out of the
+model's catalog: it is missing from the `Available Skills` list and the `skill`
+tool listing, and the model cannot load it even when it names it. A role whose
+skills are all manual-only does not register the `skill` tool at all. You can
+still load such a skill with `/skill <name>`, and the panel marks it with `◌`.
+The skill directory's `chord.yaml` sidecar can override the flag in either
+direction. Rulesets still apply, so a skill they deny is refused for both sides, and
+`chord doctor skills` reports ruleset visibility rather than this flag: a
+manual-only skill still shows `visible` there while never reaching the model.
 
 ### Declared resources
 
@@ -114,7 +149,9 @@ Each row carries four independent dimensions:
   is skipped (bad YAML, missing `name`/`description`, unreadable file).
 - `load`: whether the body reads back (`passed`/`failed`/`not_run`).
 - `visibility`: whether the `builder` ruleset hides the skill
-  (`visible`/`denied`/`not_checked`).
+  (`visible`/`denied`/`not_checked`). This dimension covers the ruleset only:
+  `disable-model-invocation` is not part of it, so a manual-only skill still
+  reports `visible`.
 - `resources`: health of declared resources
   (`passed`/`failed`/`warning`/`none`).
 - `shadowed`: a same-name skill from a higher-priority directory wins.

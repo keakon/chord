@@ -44,7 +44,7 @@ Chord 默认从以下目录发现 Skills：
 
 运行时不会把所有 skill 正文预先注入 system prompt；任务明显匹配时，模型才会调用 `skill` 工具按需加载。
 
-TUI 侧边栏的 **SKILLS** 区块只显示当前已发现的 skills。`skill` 工具成功加载某个 skill 后，该 skill 以绿色显示为已调用；加载失败不会标记，未发现/不存在的 skill 也不显示（直至被发现）。
+TUI 侧边栏的 **SKILLS** 区块只显示当前已发现的 skills。字形表示模型可见性：`○` / `●` 是模型可加载的，`◌` 表示只留给显式加载。颜色表示加载状态，skill 正文真正进入本 Agent 的上下文后才变绿，`skill` 工具加载和自己用 `/skill` 加载都算。加载失败不会标记，未发现/不存在的 skill 也不显示（直至被发现）。
 
 每个 Agent 只能看到和加载自己权限允许的技能。加载状态分别记录：主 Agent 加载过某个技能，不代表子 Agent 也已加载。恢复子任务时，Chord 会恢复其加载记录，并按当前权限显示。
 
@@ -70,6 +70,22 @@ resources:
 ```
 
 `description` 是模型在 `Available Skills` 列表里判断技能是否匹配时看到的文本，触发条件写在这里；超过 1024 字符，Chord 会截断并补 `...`。
+
+### 自己加载 skill
+
+`/skill <name> [args]` 可以就地加载一个 skill。Chord 把这行当普通用户消息提交，紧接着把 skill 正文作为 `skill` 工具结果追加进同一回合，模型不用自己决定调用工具就能拿到正文。名字之后的内容原样作为该 skill 的参数，替换正文里的 `${CHORD_SKILL_ARGS}`：
+
+```text
+/skill go-expert 审一下 parser 包
+```
+
+这行跟着当前聚焦的 Agent，子 Agent 也可以用同样的方式载入技能。只敲 `/skill` 则打开选择器，列出当前 Agent 可加载的全部技能（只留给显式加载的排在前面），选中后回填带尾随空格的 `/skill <name>`，参数接着输入即可。被 ruleset 拒绝的技能显示为 Disabled 并给出原因，名字不存在则弹 toast 拒绝。
+
+这样合成的加载与模型自己加载等价：记进会话，技能显示为已加载，继续会话时恢复该状态；持久压缩把这对消息归档后同样会清掉，与重启一致。
+
+### 让技能不进模型目录
+
+frontmatter 里写 `disable-model-invocation: true` 会让技能不进模型目录：`Available Skills` 列表和 `skill` 工具列表里都没有它，模型即使点名也加载不了；某个角色配的技能全是这种时，它连 `skill` 工具都不会注册。你仍可以用 `/skill <name>` 自己加载，面板里标 `◌`。skill 目录下的 `chord.yaml` sidecar 可以双向覆盖这个字段。ruleset 依旧生效，被它拒绝的技能双方都用不了；`chord doctor skills` 的可见性只看 ruleset，不看这个字段，所以这类技能在那里照样报 `visible`，尽管它从不到达模型。
 
 ### 声明式资源
 
@@ -103,7 +119,9 @@ frontmatter 的 `paths` 字段目前只解析、不生效：skill 的可见性�
  （YAML 写坏了、缺 `name`/`description`、文件读不出）。
 - `load`：正文能不能读出来（`passed`/`failed`/`not_run`）。
 - `visibility`：`builder` ruleset 下是否可见
- （`visible`/`denied`/`not_checked`）。
+ （`visible`/`denied`/`not_checked`）。这一维只看 ruleset：
+ `disable-model-invocation` 不属于它，因此只留给显式加载的技能照样报
+ `visible`。
 - `resources`：已声明资源的健康状况
   （`passed`/`failed`/`warning`/`none`）。
 - `shadowed`：是否有更高优先目录的同名 skill 占位。

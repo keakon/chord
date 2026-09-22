@@ -94,6 +94,10 @@ func (a *MainAgent) consumePendingUserMessagesForRequest(messages []message.Mess
 			a.persistAsync(identity.MainAgentID, item.msg)
 		}
 		a.emitPendingDraftConsumed(item.draftID, item.msg)
+		// The pair must ride this request too: the slice was built before the
+		// consume loop, so appending only to ctxMgr would leave the model
+		// without the skill instructions until the next request.
+		requestMessages = append(requestMessages, a.appendUserSkillInvocation(item.msg)...)
 	}
 	requestMessages = append(requestMessages, messages[insertionAt:]...)
 	a.syncBugTriagePromptFromSnapshot()
@@ -283,6 +287,9 @@ func (a *MainAgent) recordCommittedUserMessage(userMsg message.Message) {
 	if a.recoveryManager() != nil {
 		a.persistAsync(identity.MainAgentID, userMsg)
 	}
+	// An explicit `/skill <name> [args]` load commits the user's line and then
+	// the skill pair, so the model sees the skill instructions in the same turn.
+	a.appendUserSkillInvocation(userMsg)
 }
 
 func (a *MainAgent) pendingUserMessageToConversationMessage(p pendingUserMessage) (message.Message, bool) {

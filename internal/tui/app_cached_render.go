@@ -108,7 +108,7 @@ func (m *Model) shouldDeferStreamRender() bool {
 	if m.activeToast != nil || m.dialogActive() {
 		return false
 	}
-	if m.search.State.Active || m.mode == ModeSearch || m.mode == ModeDirectory || m.mode == ModeHelp || m.mode == ModeContentViewer || m.mode == ModeModelSelect || m.mode == ModeRoleSelect || m.mode == ModeMCPSelect || m.mode == ModeSessionSelect || m.mode == ModeSessionDeleteConfirm || m.mode == ModeHandoffSelect || m.mode == ModeUsageStats || m.mode == ModeErrorPanel || m.mode == ModeImageViewer {
+	if m.search.State.Active || m.mode == ModeSearch || m.mode == ModeDirectory || m.mode == ModeHelp || m.mode == ModeContentViewer || m.mode == ModeModelSelect || m.mode == ModeRoleSelect || m.mode == ModeMCPSelect || m.mode == ModeSkillSelect || m.mode == ModeSessionSelect || m.mode == ModeSessionDeleteConfirm || m.mode == ModeHandoffSelect || m.mode == ModeUsageStats || m.mode == ModeErrorPanel || m.mode == ModeImageViewer {
 		return false
 	}
 	if !m.cachedFullViewValid {

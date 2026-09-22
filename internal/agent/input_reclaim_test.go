@@ -82,6 +82,40 @@ func TestHandlePendingDraftUpsertWhenIdleEmitsConsumedEvent(t *testing.T) {
 	}
 }
 
+func TestHandlePendingDraftUpsertWhenIdleDropsStaleQueuedCopy(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+
+	// Busy: the draft is mirrored into the queue instead of being committed.
+	a.handleUserMessage(Event{Payload: "first"})
+	a.handlePendingDraftUpsert(Event{
+		Payload: pendingUserMessageFromDraft("draft-1", []message.ContentPart{{Type: "text", Text: "retried"}}),
+	})
+	if len(a.pendingUserMessages) != 1 {
+		t.Fatalf("len(pendingUserMessages) = %d, want 1 mirrored draft", len(a.pendingUserMessages))
+	}
+
+	// The client retries the same draft once the agent is idle. The mirror left
+	// behind by the earlier submission must not survive to be injected again.
+	a.turn = nil
+	a.handlePendingDraftUpsert(Event{
+		Payload: pendingUserMessageFromDraft("draft-1", []message.ContentPart{{Type: "text", Text: "retried"}}),
+	})
+
+	if len(a.pendingUserMessages) != 0 {
+		t.Fatalf("len(pendingUserMessages) = %d, want 0 after idle commit", len(a.pendingUserMessages))
+	}
+	msgs := a.ctxMgr.Snapshot()
+	if len(msgs) != 2 || msgs[1].Role != "user" || msgs[1].Content != "retried" {
+		t.Fatalf("messages after idle commit = %+v, want exactly one retried draft", msgs)
+	}
+
+	a.processPendingUserMessagesBeforeLLMInTurn()
+	if got := len(a.ctxMgr.Snapshot()); got != 2 {
+		t.Fatalf("messages after drain = %d, want 2", got)
+	}
+}
+
 func TestHandleUserMessageWhenBusyDoesNotDropQueuedUserInput(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)

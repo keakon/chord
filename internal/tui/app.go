@@ -45,6 +45,7 @@ const (
 	ModeRules                            // /rules overlay
 	ModeStopJobConfirm                   // stop-background-job confirmation overlay
 	ModeJobsOverlay                      // background jobs overlay (status-bar pill)
+	ModeSkillSelect                      // skill selector overlay (/skill)
 )
 
 // ---------------------------------------------------------------------------
@@ -277,6 +278,9 @@ type Model struct {
 
 	// MCP server selector state (/mcp)
 	mcpSelect mcpSelectState
+
+	// Skill selector state (/skill)
+	skillSelect skillSelectState
 
 	// Session picker state (/resume)
 	sessionSelect sessionSelectState

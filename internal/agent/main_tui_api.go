@@ -46,6 +46,10 @@ func IsTUILocalOnlySlashCommand(content string) bool {
 	case c == "/mcp" || strings.HasPrefix(c, "/mcp "):
 		// MCP control affects the tool surface and must always be routed to the main agent.
 		return true
+	case c == "/skill":
+		// Bare /skill opens the selector; `/skill <name> [args]` is a normal
+		// user message and must follow the focused agent instead.
+		return true
 	default:
 		return false
 	}
@@ -91,6 +95,12 @@ func (a *MainAgent) executeLocalOnlySlashCommand(content string, _ []message.Con
 		return true
 	case c == "/mcp" || strings.HasPrefix(c, "/mcp "):
 		a.handleMCPCommand(c, busy)
+		return true
+	case c == "/skill":
+		a.emitToTUI(SkillSelectEvent{})
+		if !busy {
+			a.setIdleAndDrainPending()
+		}
 		return true
 	default:
 		return false

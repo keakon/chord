@@ -34,6 +34,8 @@
 - 新增 flag `--reset-branch`：复用没有任何 worktree 检出的遗留 worktree 分支，不再直接失败。
 - 删除 checkout 现在会在仍有 Chord 会话正在用它时拒绝。`chord worktree remove` 与 `chord worktree finish` 删除前会检查是否有另一个 Chord 会话仍在该 checkout 里开着，`WorktreeExit` 也改成在真正删除前再查一次，而不是只信更早那次检查的结果。崩溃退出的会话不会挡住删除：会话记录会活得比进程久，因此只有进程仍持有锁的会话才算占用者。占用情况无法确定时按「占用」处理，拒绝删除。
 - 初始安装向导现在会为新装的 Codex OAuth 写入 GPT-6 Sol（`gpt-6-sol`）和 GPT-6 Luna（`gpt-6-luna`），分配与 GPT-6 Astra 相同（`1050000 / 922000 / 128000`），落进 `providers.models` 和默认模型池；[模型配置速查](./docs/model-configs_CN.md#codex-oauth-preset) 里同样列出了这两个模型。已有的 `config.yaml` 不受影响，保持你原本的配置。
+- 新增 skill frontmatter 字段 `disable-model-invocation: true`：声明后该 skill 不进模型目录，`Available Skills` 列表和 `skill` 工具列表里都没有它，模型即使点名也加载不了；你仍可以用 `/skill <name>` 自己加载。某个角色配的技能全是这种时，它连 `skill` 工具都不会注册。TUI 的 SKILLS 面板改为用字形表示模型可见性（`○`/`●` 是模型可加载，`◌` 是只留给显式加载），颜色仍表示加载状态；`chord doctor skills` 的可见性依旧只看 ruleset，因此这类 skill 在那里照样报 `visible`，尽管它从不到达模型。
+- 新增 `/skill <name> [args]` 显式加载：Chord 把这行当普通用户消息提交，并在同一回合里把 skill 正文作为 `skill` 工具结果追加进去，模型不用自己决定调用工具就能拿到正文；名字之后的内容替换正文里的 `${CHORD_SKILL_ARGS}`。这行跟着当前聚焦的 Agent，所以子 Agent 也能用同样方式载入技能。TUI 里只敲 `/skill` 则打开选择器，列出当前 Agent 可加载的全部技能（只留给显式加载的排在前面），选中后回填 `/skill <name> ` 供你接着输参数；被 ruleset 拒绝的技能显示为不可用并给出原因，名字不存在则弹 toast 拒绝。这样合成的加载在各处都算一次真实加载：继续会话时恢复，持久压缩把这对消息归档后与重启一样清掉。
 
 ### 改进
 

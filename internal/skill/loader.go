@@ -38,6 +38,10 @@ type Meta struct {
 	AllowedTools []string // optional: tool allowlist for fork context
 	Paths        []string // optional: conditional activation glob patterns
 	Resources    []string // optional: files relative to the skill root the body depends on
+	// DisableModelInvocation keeps the skill out of the model-facing catalog:
+	// it never enters the Available Skills block or the skill tool listing, and
+	// only the user's explicit /skill request can load it.
+	DisableModelInvocation bool
 }
 
 // Skill represents a fully loaded skill definition.
@@ -58,6 +62,10 @@ type frontmatter struct {
 	AllowedTools []string `yaml:"allowed_tools"`
 	Paths        []string `yaml:"paths"`
 	Resources    []string `yaml:"resources"`
+	// DisableModelInvocation is the ecosystem-compatible
+	// `disable-model-invocation` key. It is a pointer so a sidecar can override
+	// the frontmatter in both directions; nil means the key was not declared.
+	DisableModelInvocation *bool `yaml:"disable-model-invocation"`
 }
 
 // Loader scans directories for SKILL.md files and loads them.
@@ -159,18 +167,19 @@ func LoadMeta(path string) (*Meta, error) {
 	rootDir := filepath.Dir(absPath)
 
 	meta := &Meta{
-		Name:         fm.Name,
-		Description:  fm.Description,
-		Location:     absPath,
-		RootDir:      rootDir,
-		WhenToUse:    fm.WhenToUse,
-		ArgsHint:     fm.ArgsHint,
-		Context:      normalizeContext(fm.Context),
-		Model:        fm.Model,
-		Effort:       fm.Effort,
-		AllowedTools: fm.AllowedTools,
-		Paths:        fm.Paths,
-		Resources:    NormalizeResourceList(fm.Resources),
+		Name:                   fm.Name,
+		Description:            fm.Description,
+		Location:               absPath,
+		RootDir:                rootDir,
+		WhenToUse:              fm.WhenToUse,
+		ArgsHint:               fm.ArgsHint,
+		Context:                normalizeContext(fm.Context),
+		Model:                  fm.Model,
+		Effort:                 fm.Effort,
+		AllowedTools:           fm.AllowedTools,
+		Paths:                  fm.Paths,
+		Resources:              NormalizeResourceList(fm.Resources),
+		DisableModelInvocation: fm.DisableModelInvocation != nil && *fm.DisableModelInvocation,
 	}
 
 	// Apply sidecar metadata if present (overrides frontmatter).
@@ -259,6 +268,9 @@ func loadSidecarMeta(rootDir string, meta *Meta) {
 		if len(sidecar.Resources) > 0 {
 			meta.Resources = NormalizeResourceList(sidecar.Resources)
 		}
+		if sidecar.DisableModelInvocation != nil {
+			meta.DisableModelInvocation = *sidecar.DisableModelInvocation
+		}
 		break // first sidecar wins
 	}
 }
@@ -343,7 +355,7 @@ func digestSkillMetas(metas []*Meta) string {
 		allowed := strings.Join(meta.AllowedTools, ",")
 		paths := strings.Join(meta.Paths, ",")
 		resources := strings.Join(NormalizeResourceList(meta.Resources), ",")
-		lines = append(lines, fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s",
+		lines = append(lines, fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%t",
 			meta.Name,
 			meta.Description,
 			meta.Location,
@@ -356,6 +368,7 @@ func digestSkillMetas(metas []*Meta) string {
 			allowed,
 			paths,
 			resources,
+			meta.DisableModelInvocation,
 		))
 	}
 	sort.Strings(lines)

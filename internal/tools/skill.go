@@ -154,6 +154,48 @@ func substituteSkillPlaceholders(content, rootDir, args string) string {
 	return content
 }
 
+// SkillCallArguments marshals the arguments of a skill tool call. A
+// user-triggered load records its call through this helper so the persisted
+// pair stays byte-shaped like a model-produced one.
+func SkillCallArguments(name, args string) (json.RawMessage, error) {
+	return json.Marshal(skillArgs{Name: name, Args: args})
+}
+
+// FormatSkillInvocationResult renders the tool result of a skill load: the
+// envelope the model reads, including the declared-resource warning block. The
+// model path and the user's explicit load both go through it, so both origins
+// produce one identical result shape — that equivalence is what lets restore,
+// compaction and the TUI treat a user-triggered load exactly like a model call.
+func FormatSkillInvocationResult(sk *skill.Skill, args string) string {
+	if sk == nil {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("<skill>\n")
+	fmt.Fprintf(&sb, "<name>%s</name>\n", sk.Name)
+	fmt.Fprintf(&sb, "<path>%s</path>\n", sk.Location)
+	fmt.Fprintf(&sb, "<root>%s</root>\n", sk.RootDir)
+	fmt.Fprintf(&sb, "<relative_paths_base>%s</relative_paths_base>\n", sk.RootDir)
+	if strings.TrimSpace(args) != "" {
+		fmt.Fprintf(&sb, "<args>%s</args>\n", args)
+	}
+	fmt.Fprintf(&sb, "<notes>%s</notes>\n", skillInvocationNotes)
+	sb.WriteString("\n")
+	if warning := SkillDeclaredResourceWarningBlock(sk.RootDir, sk.Meta.Resources); warning != "" {
+		sb.WriteString(warning)
+		sb.WriteString("\n")
+	}
+	expandedContent := substituteSkillPlaceholders(sk.Content, sk.RootDir, args)
+	sb.WriteString(expandedContent)
+	if !strings.HasSuffix(expandedContent, "\n") {
+		sb.WriteString("\n")
+	}
+	sb.WriteString("</skill>")
+	return sb.String()
+}
+
+const skillInvocationNotes = "Relative paths from the skill content resolve against <root>. Read referenced files only when needed; do not guess other entry points if the skill already provides one."
+
 // SkillResourceWarningOpen and SkillResourceWarningClose delimit the
 // machine-readable resource warning block prepended to a skill body when
 // declared resources are missing or empty. The block sits before the body so
@@ -302,27 +344,5 @@ func (t SkillTool) Execute(_ context.Context, raw json.RawMessage) (string, erro
 	if t.provider != nil {
 		t.provider.MarkSkillInvoked(&sk.Meta)
 	}
-
-	var sb strings.Builder
-	sb.WriteString("<skill>\n")
-	fmt.Fprintf(&sb, "<name>%s</name>\n", sk.Name)
-	fmt.Fprintf(&sb, "<path>%s</path>\n", sk.Location)
-	fmt.Fprintf(&sb, "<root>%s</root>\n", sk.RootDir)
-	fmt.Fprintf(&sb, "<relative_paths_base>%s</relative_paths_base>\n", sk.RootDir)
-	if strings.TrimSpace(a.Args) != "" {
-		fmt.Fprintf(&sb, "<args>%s</args>\n", a.Args)
-	}
-	fmt.Fprintf(&sb, "<notes>%s</notes>\n", "Relative paths from the skill content resolve against <root>. Read referenced files only when needed; do not guess other entry points if the skill already provides one.")
-	sb.WriteString("\n")
-	if warning := SkillDeclaredResourceWarningBlock(sk.RootDir, sk.Meta.Resources); warning != "" {
-		sb.WriteString(warning)
-		sb.WriteString("\n")
-	}
-	expandedContent := substituteSkillPlaceholders(sk.Content, sk.RootDir, a.Args)
-	sb.WriteString(expandedContent)
-	if !strings.HasSuffix(expandedContent, "\n") {
-		sb.WriteString("\n")
-	}
-	sb.WriteString("</skill>")
-	return sb.String(), nil
+	return FormatSkillInvocationResult(sk, a.Args), nil
 }

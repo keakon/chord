@@ -307,6 +307,13 @@ type FocusedSkillsStateProvider interface {
 	FocusedSkills() []*skill.Meta
 }
 
+// FocusedSkillInvocationStateProvider is implemented by TUI backends that can
+// expose per-skill visibility and load state for the currently focused agent,
+// including manual-only skills the model never sees.
+type FocusedSkillInvocationStateProvider interface {
+	FocusedSkillInvocationStates() []skill.InvocationState
+}
+
 // LSPServerDisplay is one row in the ENVIRONMENT / LSP sidebar block.
 type LSPServerDisplay struct {
 	Name     string

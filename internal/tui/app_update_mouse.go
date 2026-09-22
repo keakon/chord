@@ -154,6 +154,31 @@ func (m *Model) handleModalMouseMsg(msg tea.MouseMsg) (tea.Cmd, bool) {
 		return nil, true
 	}
 
+	if m.mode == ModeSkillSelect {
+		m.clearChordState()
+		switch mouse.Button {
+		case tea.MouseWheelUp:
+			if m.skillSelect.selector.list != nil {
+				m.skillSelect.selector.list.HandleWheel(-mouseWheelScrollStep)
+			}
+			return nil, true
+		case tea.MouseWheelDown:
+			if m.skillSelect.selector.list != nil {
+				m.skillSelect.selector.list.HandleWheel(mouseWheelScrollStep)
+			}
+			return nil, true
+		}
+		if _, isClick := msg.(tea.MouseClickMsg); isClick && mouse.Button == tea.MouseLeft {
+			if idx, ok := m.skillSelectOptionIndexAt(mouse.X, mouse.Y); ok {
+				if m.skillSelect.selector.list != nil {
+					m.skillSelect.selector.list.SetCursor(idx)
+				}
+				return m.skillSelectApplyAtCursor(), true
+			}
+		}
+		return nil, true
+	}
+
 	if m.mode == ModeHandoffSelect {
 		m.clearChordState()
 		switch mouse.Button {

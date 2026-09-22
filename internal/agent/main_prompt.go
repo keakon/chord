@@ -738,14 +738,12 @@ func (a *MainAgent) availableSkillsPromptBlock() string {
 	if len(loadedSkills) == 0 {
 		return ""
 	}
-	ruleset := a.effectiveRuleset()
+	// visibleSkillsSnapshot already filters through ModelVisibleForRuleset,
+	// so no second ruleset check here: SubAgent.availableSkillsPromptBlock
+	// uses the same snapshot directly.
 	entries := make([]tools.SkillListingEntry, 0, len(loadedSkills))
 	for _, s := range loadedSkills {
 		if s == nil {
-			continue
-		}
-		if len(ruleset) > 0 && ruleset.Evaluate(tools.NameSkill, s.Name) == permission.ActionDeny {
-			log.Debugf("skill denied by permission, skipping from visible list skill=%v", s.Name)
 			continue
 		}
 		entries = append(entries, tools.SkillListingEntry{Name: s.Name, Desc: s.Description})

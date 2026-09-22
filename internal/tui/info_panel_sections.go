@@ -604,6 +604,7 @@ func (m *Model) buildInfoPanelSkillsBlock(lineW int) string {
 		name        string
 		description string
 		invoked     bool
+		manual      bool
 	}
 
 	entries := make([]infoPanelSkillEntry, 0)
@@ -617,6 +618,7 @@ func (m *Model) buildInfoPanelSkillsBlock(lineW int) string {
 		entries = append(entries, infoPanelSkillEntry{
 			name:        name,
 			description: strings.TrimSpace(sk.Description),
+			manual:      sk.DisableModelInvocation,
 		})
 	}
 	for _, sk := range m.agent.InvokedSkills() {
@@ -646,7 +648,11 @@ func (m *Model) buildInfoPanelSkillsBlock(lineW int) string {
 		if entry.invoked {
 			lineStyle = invokedStyle
 		}
-		label := entry.name
+		// Shape encodes model visibility, color encodes load state: a dashed
+		// glyph marks a manual-only skill the model never sees, and a solid
+		// one a model-visible skill. The name always follows the glyph so a
+		// row never reads as the tool card's "receiving" progress.
+		label := skillVisibilityGlyph(entry.manual, entry.invoked) + " " + entry.name
 		labelWidth := max(lineW-infoPanelCollapsibleContentInset, 1)
 		skillLines = append(skillLines, renderInfoPanelCollapsibleContentLine(lineW, lineStyle.Render(truncateOneLine(label, labelWidth))))
 	}

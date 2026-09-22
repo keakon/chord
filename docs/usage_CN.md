@@ -249,6 +249,7 @@ worktree 工具和命令都要求 `PATH` 里有 `git`。找不到 git 时，agen
 - `/models --agent <name> <pool>`：直接设置指定 agent 的模型池
 - `/role`：弹出角色对话框并切换当前主角色（builder、planner 与自定义主模式角色），即 `Shift+Tab` 的对话框形式；`/role <name>` 直接切换不弹对话框；`/role status` 打印当前角色与可选角色列表
 - `/mcp`：打开 MCP server 选择器；`/mcp status` 输出状态；`/mcp enable|disable <server>` 可切换手动 server。运行时切换会在下一次 LLM 请求生效，不影响当前正在进行的请求。
+- `/skill <name> [args]`：显式加载技能，包括被 `disable-model-invocation` 挡在模型目录外的技能；只敲 `/skill` 打开技能选择器。详见 [Skills：自己加载 skill](./customization_CN.md#自己加载-skill)。
 - `/compact`：手动触发上下文压缩，将当前对话摘要为结构化归档，详见 [上下文管理：上下文压缩](./context-management_CN.md#上下文压缩compaction)
 - `/tier standard|fast|slow`：设置后续模型请求的 service tier（包括尚未开始的后续 retry round）。空的 `/tier` 不是状态查询命令；当前有效 tier 请看侧边栏/状态显示。如果手动输入当前 provider/model 不支持的 tier，Chord 会保持当前 tier 不变并显示错误提示。
 - `/yolo on|off`：临时放开主 agent 对普通工具的权限检查。开启期间，文件编辑、shell 命令这类调用直接放行：`ask` 不弹确认框，`deny` 规则也不拦截。放开是单向的，只放宽不收紧：关闭 YOLO 时能用的工具，开启期间不会变得不可用；关掉 YOLO 即恢复原权限。`handoff`、`delegate`、`cancel` 仍按配置的规则判定：`allow` 照常放行，`deny` 照常拒绝，`ask` 不再弹确认框、直接放行，通配默认与关闭时行为一致。`done` 和 `compact_context` 维持各自的专门语义。Agent 运行中也可以切换 YOLO：执行期的变化会立刻影响后续工具调用，LLM 可见的工具描述和权限提示则在下一次请求刷新。开启期间 SubAgent 也会继承该模式：需要 `ask` 的调用（普通工具和机制工具都一样）不再弹确认框，但 `deny` 规则依然拒绝。切换 YOLO 会立即影响 SubAgent 的后续调用。

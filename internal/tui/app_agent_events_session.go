@@ -38,6 +38,10 @@ func (m *Model) handleSessionAgentEvent(event agent.AgentEvent) (bool, agentEven
 		m.inflightDraft = nil
 		m.openMCPSelect()
 		return true, effects
+	case agent.SkillSelectEvent:
+		m.inflightDraft = nil
+		m.openSkillSelect()
+		return true, effects
 	case agent.SessionSelectEvent:
 		effects.addFollowup(m.openSessionSelect(evt.Sessions, evt.Prefetched))
 		return true, effects

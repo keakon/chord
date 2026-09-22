@@ -415,6 +415,8 @@ func (m *Model) statusBarModeText() string {
 		return "ROLE"
 	case ModeMCPSelect:
 		return "MCP"
+	case ModeSkillSelect:
+		return "SKILLS"
 	case ModeSessionSelect:
 		return "SESSION"
 	case ModeSessionDeleteConfirm:

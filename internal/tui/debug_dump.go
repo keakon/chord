@@ -552,6 +552,8 @@ func debugModeString(mode Mode) string {
 		return "model-select"
 	case ModeRoleSelect:
 		return "role-select"
+	case ModeSkillSelect:
+		return "skill-select"
 	case ModeSessionSelect:
 		return "session-select"
 	case ModeSessionDeleteConfirm:

@@ -11,9 +11,12 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-func (s *SubAgent) visibleSkillsSnapshot() []*skill.Meta {
+// skillCatalogAndRuleset resolves the discovered skill catalog and the role
+// ruleset this worker filters through. A worker whose parent config is gone
+// reports an empty set rather than treating the whole catalog as visible.
+func (s *SubAgent) skillCatalogAndRuleset() ([]*skill.Meta, permission.Ruleset) {
 	if s == nil {
-		return nil
+		return nil, nil
 	}
 	catalog := s.loadedSkills
 	var ruleset permission.Ruleset
@@ -23,30 +26,46 @@ func (s *SubAgent) visibleSkillsSnapshot() []*skill.Meta {
 		cfg := s.parent.agentConfigs[s.agentDefName]
 		s.parent.stateMu.RUnlock()
 		if cfg == nil {
-			return nil
+			return nil, nil
 		}
 		ruleset = s.parent.buildSubAgentRuleset(cfg)
 	} else {
 		ruleset = s.currentRuleset()
 	}
 	if len(catalog) == 0 {
+		return nil, nil
+	}
+	return catalog, ruleset
+}
+
+// visibleSkillsSnapshot returns the model-facing catalog for this worker: the
+// ruleset-allowed skills whose frontmatter keeps them model-invocable.
+func (s *SubAgent) visibleSkillsSnapshot() []*skill.Meta {
+	catalog, ruleset := s.skillCatalogAndRuleset()
+	return skill.ModelVisibleForRuleset(catalog, ruleset)
+}
+
+// userSkillsSnapshot returns what the user-facing surfaces may show for this
+// worker, including manual-only skills the model never sees.
+func (s *SubAgent) userSkillsSnapshot() []*skill.Meta {
+	catalog, ruleset := s.skillCatalogAndRuleset()
+	return skill.VisibleForRuleset(catalog, ruleset)
+}
+
+// skillInvocationStates returns per-skill visibility and load state for the
+// TUI's focused view of this worker.
+func (s *SubAgent) skillInvocationStates() []skill.InvocationState {
+	catalog, ruleset := s.skillCatalogAndRuleset()
+	return skill.InvocationStates(catalog, ruleset, s.invokedSkillNameSet())
+}
+
+func (s *SubAgent) invokedSkillNameSet() map[string]struct{} {
+	if s == nil {
 		return nil
 	}
-	out := make([]*skill.Meta, 0, len(catalog))
-	for _, meta := range catalog {
-		if meta == nil || strings.TrimSpace(meta.Name) == "" {
-			continue
-		}
-		copyMeta := *meta
-		copyMeta.Discovered = true
-		if len(ruleset) > 0 && ruleset.Evaluate(tools.NameSkill, copyMeta.Name) == permission.ActionDeny {
-			copyMeta.Discovered = false
-		}
-		if copyMeta.Discovered {
-			out = append(out, &copyMeta)
-		}
-	}
-	return out
+	s.skillsMu.RLock()
+	defer s.skillsMu.RUnlock()
+	return invokedSkillNameSetFromMap(s.invokedSkills)
 }
 
 func (s *SubAgent) availableSkillsPromptBlock() string {
@@ -77,7 +96,7 @@ func (s *SubAgent) InvokedSkills() []*skill.Meta {
 		return nil
 	}
 	visible := make(map[string]*skill.Meta)
-	for _, meta := range s.visibleSkillsSnapshot() {
+	for _, meta := range s.userSkillsSnapshot() {
 		if meta != nil {
 			visible[meta.Name] = meta
 		}
@@ -125,7 +144,7 @@ func (s *SubAgent) invokedSkillNamesSnapshot() []string {
 }
 
 func (s *SubAgent) restoreInvokedSkills(msgs []message.Message) {
-	invoked := rebuildInvokedSkillsFromMessages(msgs, s.visibleSkillsSnapshot())
+	invoked := rebuildInvokedSkillsFromMessages(msgs, s.userSkillsSnapshot())
 	s.skillsMu.Lock()
 	s.invokedSkills = make(map[string]*skill.Meta, len(invoked))
 	for _, meta := range invoked {

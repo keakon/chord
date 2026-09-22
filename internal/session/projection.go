@@ -130,6 +130,11 @@ type ProjectedToolCall struct {
 	Rejected        bool        `json:"rejected"`
 	RejectionSource string      `json:"rejection_source"`
 	ResultUnknown   bool        `json:"result_unknown,omitempty"`
+	// Origin names who triggered the call when that is observable and not the
+	// model itself. A user-triggered /skill load persists a synthesized call
+	// carrying OriginUser, so consumers can tell it apart from a model call
+	// that produced the identical shape; model calls leave it empty.
+	Origin string `json:"origin,omitempty"`
 }
 
 // ProjectedFileChange is one tool-attributed file mutation.
@@ -254,6 +259,7 @@ type toolDeclRef struct {
 	callID string
 	name   string
 	args   string
+	origin string
 }
 
 func buildProjectedTurns(exported *ExportedSession, limits ProjectionLimits) []ProjectedTurn {
@@ -315,7 +321,7 @@ func buildProjectedTurns(exported *ExportedSession, limits ProjectionLimits) []P
 				current.assistant = append(current.assistant, i)
 			}
 			for _, tc := range em.ToolCalls {
-				current.toolDecls = append(current.toolDecls, toolDeclRef{msgIdx: i, callID: tc.ID, name: tc.Name, args: tc.Args})
+				current.toolDecls = append(current.toolDecls, toolDeclRef{msgIdx: i, callID: tc.ID, name: tc.Name, args: tc.Args, origin: exportedOrigin(em)})
 			}
 			if em.IsCompactionSummary {
 				current.boundary = true
@@ -407,6 +413,16 @@ func isInferredStarterWithContent(em ExportedMessage) bool {
 	}
 }
 
+// exportedOrigin reads the producer origin a message carries, empty when the
+// message has no provenance. It is what marks a synthesized user-triggered
+// skill call apart from a model call of the identical shape.
+func exportedOrigin(em ExportedMessage) string {
+	if em.Provenance == nil {
+		return ""
+	}
+	return em.Provenance.Origin
+}
+
 func renderProjectedTurn(exported *ExportedSession, b *projectedTurnBuilder, sessionID, instanceID string, limits ProjectionLimits) ProjectedTurn {
 	turn := ProjectedTurn{
 		TurnIndex:          b.turnIndex,
@@ -452,7 +468,7 @@ func renderProjectedTurn(exported *ExportedSession, b *projectedTurnBuilder, ses
 		if seen[callID] {
 			continue
 		}
-		orphans = append(orphans, toolDeclRef{msgIdx: msgIdx, callID: callID, name: "unknown"})
+		orphans = append(orphans, toolDeclRef{msgIdx: msgIdx, callID: callID, name: "unknown", origin: exportedOrigin(exported.Messages[msgIdx])})
 	}
 	sort.Slice(orphans, func(i, j int) bool { return orphans[i].msgIdx < orphans[j].msgIdx })
 	for _, orphan := range orphans {
@@ -483,6 +499,7 @@ func renderProjectedToolCall(exported *ExportedSession, decl toolDeclRef, result
 		Args:            boundText(decl.args, limits.MaxArgsRunes, textRef(sessionID, decl.msgIdx, decl.callID+":args")),
 		Ref:             textRef(sessionID, decl.msgIdx, decl.callID),
 		RejectionSource: RejectionSourceNone,
+		Origin:          decl.origin,
 	}
 	if resultIdx >= 0 && resultIdx < len(exported.Messages) {
 		if rm := exported.Messages[resultIdx]; rm.Role == message.RoleTool && (rm.ToolCallID == decl.callID || decl.callID == "") {

@@ -655,15 +655,16 @@ func TestLoadMeta_ExtendedFrontmatter(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "SKILL.md")
 	writeSkillMDWithFM(t, path, map[string]any{
-		"name":          "test-skill",
-		"description":   "Test",
-		"when_to_use":   "For testing",
-		"argument_hint": "--test",
-		"context":       "fork",
-		"model":         "sonnet",
-		"effort":        "medium",
-		"allowed_tools": []string{"Shell"},
-		"paths":         []string{"**/*.go"},
+		"name":                     "test-skill",
+		"description":              "Test",
+		"when_to_use":              "For testing",
+		"argument_hint":            "--test",
+		"context":                  "fork",
+		"model":                    "sonnet",
+		"effort":                   "medium",
+		"allowed_tools":            []string{"Shell"},
+		"paths":                    []string{"**/*.go"},
+		"disable-model-invocation": true,
 	}, "Body\n")
 
 	meta, err := LoadMeta(path)
@@ -690,6 +691,9 @@ func TestLoadMeta_ExtendedFrontmatter(t *testing.T) {
 	}
 	if len(meta.Paths) != 1 || meta.Paths[0] != "**/*.go" {
 		t.Errorf("paths: got %v", meta.Paths)
+	}
+	if !meta.DisableModelInvocation {
+		t.Error("disable-model-invocation: got false, want true")
 	}
 }
 
@@ -780,6 +784,7 @@ func TestSidecarOverridesFrontmatter(t *testing.T) {
 	}, "Body\n")
 	sidecar := `when_to_use: "Sidecar when"
 context: "fork"
+disable-model-invocation: true
 `
 	if err := os.WriteFile(filepath.Join(dir, "chord.yaml"), []byte(sidecar), 0644); err != nil {
 		t.Fatalf("write sidecar: %v", err)
@@ -794,6 +799,9 @@ context: "fork"
 	}
 	if meta.Context != "fork" {
 		t.Errorf("sidecar should override frontmatter; got context=%q", meta.Context)
+	}
+	if !meta.DisableModelInvocation {
+		t.Error("sidecar should be able to set disable-model-invocation")
 	}
 }
 

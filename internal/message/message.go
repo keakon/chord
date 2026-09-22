@@ -638,7 +638,19 @@ type MessageProvenance struct {
 	WireFamily   string `json:"wire_family,omitempty"` // anthropic|openai-chat|openai-responses|gemini|unknown
 	NativeFamily string `json:"native_family,omitempty"`
 	Imported     bool   `json:"imported,omitempty"`
+	// Origin names who triggered a synthesized message when that is not the
+	// model. It stays empty for ordinary messages; a skill pair injected by the
+	// user's explicit /skill request carries OriginUser, so exports and
+	// session-analysis projections can tell a user-triggered load from a model
+	// tool call that produced the same message shape.
+	Origin string `json:"origin,omitempty"`
 }
+
+// Origin values carried by MessageProvenance.Origin.
+const (
+	// OriginUser marks a message the user triggered directly.
+	OriginUser = "user"
+)
 
 // Response represents a complete LLM response.
 type Response struct {
