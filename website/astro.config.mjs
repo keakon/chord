@@ -86,6 +86,7 @@ export default defineConfig({
             { slug: 'customization', translations: { 'zh-CN': '扩展与定制' } },
             { slug: 'hooks', translations: { 'zh-CN': 'Hooks' } },
             { slug: 'headless', translations: { 'zh-CN': 'Headless 集成' } },
+            { slug: 'acp', translations: { 'zh-CN': 'ACP Agent 模式' } },
             { slug: 'project-memory', translations: { 'zh-CN': '项目记忆' } },
           ],
         },

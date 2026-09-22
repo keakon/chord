@@ -86,7 +86,7 @@ chord
 - [长任务](./docs/usage_CN.md#loop持续执行模式)：让实现、检查和修复连续推进
 - [扩展与定制](./docs/customization_CN.md)：配置角色、技能、代码诊断和外部工具
 - [Headless 集成](./docs/headless_CN.md)：通过 `chord headless` 从其他入口操控
-- [ACP Agent 模式](./docs/acp_CN.md)：通过 `chord acp` 让 Zed 等 ACP 客户端直接调用 Chord
+- [ACP Agent 模式](./docs/acp_CN.md)：通过 `chord acp` 让 ACP 客户端（如 Zed）直接调用 Chord
 - [排障](./docs/troubleshooting_CN.md) · [完整文档目录](./docs/index_CN.md)
 
 ## 实测数据

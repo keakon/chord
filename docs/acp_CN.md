@@ -1,6 +1,6 @@
 # ACP Agent 模式
 
-`chord acp` 通过 stdio 提供 [Agent Client Protocol](https://agentclientprotocol.com/)（ACP），让 ACP 客户端把 Chord 当成自己的 agent 使用 —— 在 Zed 里把 Chord 配成自定义 agent server 就是这种用法。客户端发 `initialize`、`session/new`、`session/prompt`、`session/cancel`，Chord 把回答、思考块和每个工具调用作为 `session/update` 通知流式回传。
+`chord acp` 通过 stdio 提供 [Agent Client Protocol](https://agentclientprotocol.com/)（ACP），任何 ACP 客户端都能把 Chord 当成自己的 agent 使用：编辑器如 Zed、JetBrains IDE、Neovim，以及 `acpx` 这类命令行客户端。客户端发 `initialize`、`session/new`、`session/prompt`、`session/cancel`，Chord 把回答、思考块和每个工具调用作为 `session/update` 通知流式回传。
 
 stdout 只跑 JSON-RPC。Chord 自己的日志写进[日志目录](./paths_CN.md)下的 `chord.log`，第三方库误写到 stdout 的内容也会被重定向过去，协议流不会被污染。
 
@@ -16,14 +16,17 @@ chord acp
 
 一个进程只服务一个会话。每次 `chord acp` 都在客户端指定的工作目录里新建会话；这个模式没有 `--continue` / `--resume`。`session/new` 的响应里带 `_meta.chord.sessionId`，也就是为它新建的 Chord 会话目录名 —— 要 `chord resume` 或写 bug 报告时用的就是这个 id。
 
-## 配置 Zed
+## 配置客户端
 
-在 Zed 设置（`dev: open settings`）里把 Chord 加为自定义 agent server：
+进程由客户端拉起，所以配置永远是两个值：二进制的路径，加上 `acp` 参数；放在哪里由客户端决定。
+
+下面用 Zed 举例。打开 External Agents 页面（`agent: open settings`），选 `Add Agent` → `Add Custom Agent`，或者自己往设置文件里加：
 
 ```json
 {
   "agent_servers": {
     "Chord": {
+      "type": "custom",
       "command": "/绝对路径/chord",
       "args": ["acp"]
     }
@@ -31,7 +34,9 @@ chord acp
 }
 ```
 
-`command` 必须写绝对路径，Zed 不会继承你 shell 的 `PATH`。配好后在 agent 面板里选中 Chord；起不来的话用 `dev: open acp logs` 看 ACP 日志。
+`command` 必须写绝对路径：Zed 不一定会继承你 shell 的 `PATH`。配好后在 agent 面板里选中 Chord；起不来的话用 `dev: open acp logs` 看 ACP 日志。
+
+JetBrains IDE 从 `~/.jetbrains/acp.json` 读同一个 `agent_servers` 条目。其余客户端见 [ACP client list](https://agentclientprotocol.com/get-started/clients)。
 
 ## 客户端能看到什么
 

@@ -1,6 +1,6 @@
 # ACP Agent Mode
 
-`chord acp` serves the [Agent Client Protocol](https://agentclientprotocol.com/) (ACP) over stdio, so an ACP client can drive Chord as its agent — Zed does this when you add Chord as a custom agent server. The client sends `initialize`, `session/new`, `session/prompt`, and `session/cancel`; Chord streams the answer, its thinking blocks, and every tool call back as `session/update` notifications.
+`chord acp` serves the [Agent Client Protocol](https://agentclientprotocol.com/) (ACP) over stdio, so any ACP client can drive Chord as its agent — editors like Zed, JetBrains IDEs, and Neovim, or the `acpx` CLI. The client sends `initialize`, `session/new`, `session/prompt`, and `session/cancel`; Chord streams the answer, its thinking blocks, and every tool call back as `session/update` notifications.
 
 stdout carries JSON-RPC only. Chord writes its own logs to `chord.log` in the [logs directory](./paths.md), and a stray print from any library is redirected there too, so the protocol stream stays clean.
 
@@ -16,14 +16,17 @@ The client starts the process, so it works wherever the client can run the binar
 
 One process serves one session. Every `chord acp` start begins a fresh session in the working directory the client asks for; there is no `--continue` or `--resume` in this mode. The `session/new` response carries `_meta.chord.sessionId`, the name of the Chord session directory created for it — that is the id `chord resume` takes and the one to quote in a bug report.
 
-## Configuring Zed
+## Configuring a client
 
-Add Chord as a custom agent server in Zed's settings (`dev: open settings`):
+The client launches `chord acp`, so setup is always the same two values: the path to the binary and the `acp` argument. Where they go depends on the client.
+
+Zed is the worked example. Open the External Agents page (`agent: open settings`) and pick `Add Agent` → `Add Custom Agent`, or add the entry to the settings file yourself:
 
 ```json
 {
   "agent_servers": {
     "Chord": {
+      "type": "custom",
       "command": "/absolute/path/to/chord",
       "args": ["acp"]
     }
@@ -31,7 +34,9 @@ Add Chord as a custom agent server in Zed's settings (`dev: open settings`):
 }
 ```
 
-`command` must be an absolute path, since Zed does not inherit your shell `PATH`. Afterwards pick Chord in the agent panel, and use `dev: open acp logs` if a session does not come up.
+`command` must be an absolute path: Zed does not always inherit your shell `PATH`. Afterwards pick Chord in the agent panel, and use `dev: open acp logs` if a session does not come up.
+
+JetBrains IDEs read the same `agent_servers` entry from `~/.jetbrains/acp.json`. The [ACP client list](https://agentclientprotocol.com/get-started/clients) covers the rest.
 
 ## What the client sees
 

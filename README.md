@@ -86,7 +86,7 @@ For manual provider/model setup and the `limit` fields, see [Quickstart](./docs/
 - [Long tasks](./docs/usage.md#loop-continuous-execution-mode): keep implementation, checks, and fixes moving
 - [Customization](./docs/customization.md): configure roles, skills, code diagnostics, and external tools
 - [Headless](./docs/headless.md): control Chord from another interface with `chord headless`
-- [ACP agent mode](./docs/acp.md): drive Chord from Zed and other ACP clients with `chord acp`
+- [ACP agent mode](./docs/acp.md): drive Chord from ACP clients such as Zed with `chord acp`
 - [Troubleshooting](./docs/troubleshooting.md) · [Full documentation index](./docs/index.md)
 
 ## Measured results
