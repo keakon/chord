@@ -172,8 +172,20 @@ func (a *MainAgent) SendUserMessageToTarget(conversation ConversationTarget, con
 	}
 	a.sendEvent(Event{
 		Type:    EventUserMessage,
-		Payload: content,
+		Payload: a.acceptRawUserMessage(content, nil),
 	})
+}
+
+// acceptRawUserMessage stamps a main-agent user message with its arrival order.
+// The stamp is taken before the message enters the event queues, so a cancel
+// request that samples the counter can tell whether this message was already
+// accepted, and the loop can tell whether a later message outranks it.
+func (a *MainAgent) acceptRawUserMessage(content string, parts []message.ContentPart) acceptedUserMessage {
+	return acceptedUserMessage{
+		Content:       content,
+		Parts:         parts,
+		AcceptedOrder: a.acceptedRawMessages.Add(1),
+	}
 }
 
 // SendUserMessageWithParts enqueues a multi-part user message (text + images).
@@ -223,7 +235,7 @@ func (a *MainAgent) SendUserMessageWithParts(parts []message.ContentPart) {
 	}
 	a.sendEvent(Event{
 		Type:    EventUserMessage,
-		Payload: parts,
+		Payload: a.acceptRawUserMessage(content.String(), parts),
 	})
 }
 

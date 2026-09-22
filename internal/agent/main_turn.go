@@ -105,6 +105,12 @@ func (a *MainAgent) consumePendingUserMessagesForRequest(messages []message.Mess
 // (typically the TUI's Ctrl+C handler). Returns true if a turn was active and
 // cancelled, false if the agent was already idle.
 //
+// A message that is accepted but whose turn does not exist yet is cancelled too:
+// the message keeps its place in the transcript (the usual shape of a cancelled
+// turn) but no model request runs for it. Without that, a cancel landing between
+// acceptance and turn creation would be dropped and the turn would run as if the
+// user never asked to stop.
+//
 // If the turn had pending tool calls, synthetic terminal tool-result messages
 // are appended when the cancellation event is handled so the conversation and
 // persisted session keep a matching output for each tool call.
@@ -115,40 +121,94 @@ func (a *MainAgent) CancelCurrentTurn() bool {
 
 	cancelled := false
 	if t != nil {
-		pending := t.PendingToolCalls.Load()
-		// Cancel the whole turn before cancelling any narrower tool-batch
-		// context. Tool goroutines use turn.Ctx.Err() to distinguish a user
-		// turn cancellation from an ordinary batch cancellation; doing this in
-		// the opposite order can let a racing goroutine emit EventToolResult
-		// before EventTurnCancelled.
-		t.Cancel()
-		if t.activeToolBatchCancel != nil {
-			t.activeToolBatchCancel()
-			t.activeToolBatchCancel = nil
-		}
-		cancelledExec := t.cancelPendingToolCalls()
-		cancelledStream := t.drainStreamingToolCalls()
-		merged := mergePendingToolCalls(cancelledExec, cancelledStream)
-		merged = t.filterCompletedToolCalls(merged)
-		a.clearToolTraceForCalls(merged)
-		a.sendEvent(Event{
-			Type:   EventTurnCancelled,
-			TurnID: t.ID,
-			Payload: &TurnCancelledPayload{
-				TurnID:                               t.ID,
-				Calls:                                merged,
-				MarkToolCallsFailed:                  true,
-				KeepPendingUserMessagesQueued:        true,
-				CommitPendingUserMessagesWithoutTurn: true,
-			},
-		})
-		log.Infof("current turn interrupted by user turn_id=%v instance=%v pending_tools=%v failed_tools=%v", t.ID, a.instanceID, pending, len(merged))
+		a.sendEvent(a.abortTurn(t))
 		cancelled = true
+	} else {
+		// No turn yet, but messages may already be accepted and waiting in the
+		// event queues. Record the watermark they are compared against and let
+		// the loop apply it, so the turn a covered message starts closes as
+		// cancelled instead of running. A request that finds nothing accepted is
+		// still queued (harmless: any later message outranks the watermark) but
+		// reports false, so callers keep seeing an idle agent.
+		watermark := a.acceptedRawMessages.Load()
+		a.raiseCancelUpTo(watermark)
+		a.sendEvent(Event{Type: EventTurnCancelRequested, Payload: &turnCancelRequestPayload{AcceptedUpTo: watermark}})
+		cancelled = watermark > a.dispatchedRawMessages.Load()
 	}
 	if a.interruptSubAgentTurnsForUserCancel() {
 		cancelled = true
 	}
 	return cancelled
+}
+
+// abortTurn stops the given turn and returns the event that closes it out on the
+// event loop: it cancels the turn context and any in-flight tool batch, collects
+// the tool calls that were cancelled with it, and reports them for synthetic
+// terminal results. Off-loop callers must send the event; the loop may hand it
+// to handleTurnCancelled directly.
+func (a *MainAgent) abortTurn(t *Turn) Event {
+	pending := t.PendingToolCalls.Load()
+	// Cancel the whole turn before cancelling any narrower tool-batch context.
+	// Tool goroutines use turn.Ctx.Err() to distinguish a user turn cancellation
+	// from an ordinary batch cancellation; doing this in the opposite order can
+	// let a racing goroutine emit EventToolResult before EventTurnCancelled.
+	t.Cancel()
+	if t.activeToolBatchCancel != nil {
+		t.activeToolBatchCancel()
+		t.activeToolBatchCancel = nil
+	}
+	cancelledExec := t.cancelPendingToolCalls()
+	cancelledStream := t.drainStreamingToolCalls()
+	merged := mergePendingToolCalls(cancelledExec, cancelledStream)
+	merged = t.filterCompletedToolCalls(merged)
+	a.clearToolTraceForCalls(merged)
+	log.Infof("current turn interrupted by user turn_id=%v instance=%v pending_tools=%v failed_tools=%v", t.ID, a.instanceID, pending, len(merged))
+	return Event{
+		Type:   EventTurnCancelled,
+		TurnID: t.ID,
+		Payload: &TurnCancelledPayload{
+			TurnID:                               t.ID,
+			Calls:                                merged,
+			MarkToolCallsFailed:                  true,
+			KeepPendingUserMessagesQueued:        true,
+			CommitPendingUserMessagesWithoutTurn: true,
+		},
+	}
+}
+
+// cancelCoversAcceptedOrder reports whether a cancel request covers the message
+// accepted at this order: arrival orders only grow, and the watermark only
+// rises, so a covered message never starts work.
+func (a *MainAgent) cancelCoversAcceptedOrder(order int64) bool {
+	return order > 0 && order <= a.cancelUpTo.Load()
+}
+
+// raiseCancelUpTo records a cancel watermark, keeping the highest one seen: a
+// request only ever covers more, never less. Cancel requests arrive from any
+// goroutine, so the update is a CAS loop rather than a plain store.
+func (a *MainAgent) raiseCancelUpTo(order int64) {
+	for {
+		current := a.cancelUpTo.Load()
+		if order <= current || a.cancelUpTo.CompareAndSwap(current, order) {
+			return
+		}
+	}
+}
+
+// markRawUserMessageDispatched moves the loop's high-water mark past a message
+// it has consumed, whether or not a turn was started for it. CancelCurrentTurn
+// compares the two marks to tell an already-idle agent from one holding a
+// message that has no turn yet.
+func (a *MainAgent) markRawUserMessageDispatched(order int64) {
+	if order <= 0 {
+		return
+	}
+	for {
+		current := a.dispatchedRawMessages.Load()
+		if order <= current || a.dispatchedRawMessages.CompareAndSwap(current, order) {
+			return
+		}
+	}
 }
 
 func cloneContentParts(parts []message.ContentPart) []message.ContentPart {
@@ -758,6 +818,7 @@ func (a *MainAgent) drainPendingUserMessages() {
 	}
 	var batch []message.Message
 	var consumed []consumedPendingDraft
+	var covered []pendingUserMessage
 	manualInputConsumed := false
 	for _, p := range pending {
 		content := pendingUserMessageText(p)
@@ -767,6 +828,13 @@ func (a *MainAgent) drainPendingUserMessages() {
 		if a.tryHandleSlashCommand(content) {
 			continue
 		}
+		if a.cancelCoversAcceptedOrder(p.AcceptedOrder) {
+			// A cancel request issued after this message was accepted covers it:
+			// the message waits here because no turn could take it yet, so this
+			// is the point where the covered work is dropped.
+			covered = append(covered, p)
+			continue
+		}
 		m, ok := a.pendingUserMessageToConversationMessage(p)
 		if !ok {
 			continue
@@ -774,6 +842,9 @@ func (a *MainAgent) drainPendingUserMessages() {
 		batch = append(batch, m)
 		consumed = append(consumed, consumedPendingDraft{draftID: p.DraftID, msg: m})
 		manualInputConsumed = manualInputConsumed || p.FromUser
+	}
+	if len(covered) > 0 {
+		a.closeCoveredPendingUserMessagesAsCancelled(covered)
 	}
 	if len(batch) == 0 {
 		return
@@ -792,4 +863,28 @@ func (a *MainAgent) drainPendingUserMessages() {
 	}
 	a.syncBugTriagePromptFromSnapshot()
 	a.beginMainLLMAfterPreparation(turnCtx, turnID, "")
+}
+
+// closeCoveredPendingUserMessagesAsCancelled records queued user messages that a
+// cancel request already covers and closes their turn as cancelled, so a message
+// the user cancelled never reaches the model. The transcript keeps the usual
+// shape of a cancelled turn — the busy marker and the global idle an ACP prompt
+// waits on, then the message in history — for messages that could not start a
+// turn when they arrived.
+func (a *MainAgent) closeCoveredPendingUserMessagesAsCancelled(pending []pendingUserMessage) {
+	a.tryRecoverPersistenceBeforeTurn()
+	a.stageNextSubAgentMailboxBatch()
+	a.newTurn()
+	turnID := a.turn.ID
+	for _, p := range pending {
+		userMsg, ok := a.pendingUserMessageToConversationMessage(p)
+		if !ok {
+			continue
+		}
+		a.recordCommittedUserMessage(userMsg)
+		a.emitPendingDraftConsumed(p.DraftID, userMsg)
+	}
+	a.syncBugTriagePromptFromSnapshot()
+	log.Infof("queued user messages cancelled before their turn count=%v turn_id=%v", len(pending), turnID)
+	a.handleTurnCancelled(a.abortTurn(a.turn))
 }

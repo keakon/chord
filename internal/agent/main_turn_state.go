@@ -24,6 +24,12 @@ type Turn struct {
 	LLMResponsesState *llm.ResponsesTurnState
 	Ctx               context.Context
 	Cancel            context.CancelFunc
+	// originAcceptedOrder is the arrival order of the raw main-agent user
+	// message that started this turn, or 0 when something else started it
+	// (slash commands, queued mailbox deliveries, restores). The event-loop
+	// goroutine alone reads and writes it, so a cancel request queued while no
+	// turn existed can tell whether it covers the turn in front of it.
+	originAcceptedOrder int64
 	// PendingToolCalls and TotalToolCalls are accessed from both the event-loop
 	// goroutine (writes) and external goroutines like CancelCurrentTurn (reads),
 	// so they must be accessed atomically.
@@ -186,6 +192,11 @@ type PendingToolCall struct {
 // pendingUserMessage holds a single queued user message when the agent is busy.
 // When Parts is non-nil it is a multi-part message (e.g. text + images); otherwise Content is used.
 type pendingUserMessage struct {
+	// AcceptedOrder is the arrival order of the raw main-agent user message this
+	// entry queued, or 0 for entries that are not raw user messages. A drain
+	// matches it against the cancel watermark so a cancel also covers a message
+	// that was queued before its turn could start.
+	AcceptedOrder       int64
 	DraftID             string
 	Content             string
 	Parts               []message.ContentPart

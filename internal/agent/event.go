@@ -13,19 +13,20 @@ import (
 
 // Internal event types used by the MainAgent event loop.
 const (
-	EventUserMessage        = "user_message"
-	EventAppendContext      = "append_context" // append user message to ctx without calling LLM (e.g. !shell output)
-	EventLLMResponse        = "llm_response"
-	EventToolResult         = "tool_result"
-	EventTurnCancelled      = "turn_cancelled"
-	EventAgentError         = "agent_error"
-	EventExecutePlan        = "execute_plan" // Internal: execute a plan file after user selects target agent (payload: *executePlanPayload)
-	EventSessionControl     = "session_control"
-	EventModelPoolSwitch    = "model_pool_switch"
-	EventMCPControl         = "mcp_control"
-	EventMCPControlDone     = "mcp_control_done"
-	EventPendingDraftUpsert = "pending_draft_upsert"
-	EventPendingDraftRemove = "pending_draft_remove"
+	EventUserMessage         = "user_message"
+	EventAppendContext       = "append_context" // append user message to ctx without calling LLM (e.g. !shell output)
+	EventLLMResponse         = "llm_response"
+	EventToolResult          = "tool_result"
+	EventTurnCancelled       = "turn_cancelled"
+	EventTurnCancelRequested = "turn_cancel_requested" // cancel accepted while no turn existed yet (payload: *turnCancelRequestPayload)
+	EventAgentError          = "agent_error"
+	EventExecutePlan         = "execute_plan" // Internal: execute a plan file after user selects target agent (payload: *executePlanPayload)
+	EventSessionControl      = "session_control"
+	EventModelPoolSwitch     = "model_pool_switch"
+	EventMCPControl          = "mcp_control"
+	EventMCPControlDone      = "mcp_control_done"
+	EventPendingDraftUpsert  = "pending_draft_upsert"
+	EventPendingDraftRemove  = "pending_draft_remove"
 
 	// Multi-agent orchestration event types.
 	EventAgentDone               = "agent_done" // SubAgent completed its task
@@ -133,6 +134,24 @@ type TurnCancelledPayload struct {
 	// CommitPendingUserMessagesWithoutTurn appends queued user messages to the
 	// durable context/transcript but does not start a follow-up LLM turn.
 	CommitPendingUserMessagesWithoutTurn bool
+}
+
+// acceptedUserMessage is a raw main-agent user message on its way to the event
+// loop. AcceptedOrder is the arrival order the sender assigned it, which is what
+// an earlier cancel request is compared against: a message accepted at or below
+// the cancel's watermark keeps its place in the transcript but not the work.
+type acceptedUserMessage struct {
+	Content       string
+	Parts         []message.ContentPart
+	AcceptedOrder int64
+}
+
+// turnCancelRequestPayload carries the accepted-message watermark a cancel
+// request observed while no turn was active. The event loop applies it to the
+// turns started by messages accepted up to there, so a cancel that arrives
+// between acceptance and turn creation still lands.
+type turnCancelRequestPayload struct {
+	AcceptedUpTo int64
 }
 
 // HandoffResult wraps the data from a Handoff tool invocation.

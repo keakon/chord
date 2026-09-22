@@ -125,6 +125,19 @@ type MainAgent struct {
 	outputDropLogSuppressedByType map[string]int
 	stoppingOnce                  sync.Once
 
+	// acceptedRawMessages counts raw main-agent user messages handed to the
+	// event queues by SendUserMessageToTarget / SendUserMessageWithParts;
+	// dispatchedRawMessages is the high-water mark the loop already consumed.
+	// The gap between them is the window where a message is accepted but its
+	// turn does not exist yet, which is where a cancel request has to be matched
+	// against the message order instead of a turn (see CancelCurrentTurn).
+	acceptedRawMessages   atomic.Int64
+	dispatchedRawMessages atomic.Int64
+	// cancelUpTo is the highest accepted-message order a cancel request that
+	// arrived while no turn was active applies to. Only the event loop consumes
+	// it, when it is about to start a turn for a covered message.
+	cancelUpTo atomic.Int64
+
 	turn           *Turn
 	nextTurnID     uint64
 	turnEpoch      uint64
@@ -1326,7 +1339,13 @@ func (a *MainAgent) GetTokenUsage() message.TokenUsage {
 func (a *MainAgent) handleUserMessage(evt Event) {
 	var content string
 	var parts []message.ContentPart
+	acceptedOrder := int64(0)
 	switch p := evt.Payload.(type) {
+	case acceptedUserMessage:
+		content = p.Content
+		parts = p.Parts
+		acceptedOrder = p.AcceptedOrder
+		a.markRawUserMessageDispatched(acceptedOrder)
 	case string:
 		content = p
 	case []message.ContentPart:
@@ -1371,9 +1390,10 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 			return
 		}
 		a.pendingUserMessages = enqueuePendingUserMessage(a.pendingUserMessages, pendingUserMessage{
-			Content:  content,
-			Parts:    parts,
-			FromUser: true,
+			AcceptedOrder: acceptedOrder,
+			Content:       content,
+			Parts:         parts,
+			FromUser:      true,
 		})
 		return
 	}
@@ -1388,9 +1408,10 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 	// only the new message.
 	if a.pendingUserDrainSuspended {
 		a.pendingUserMessages = enqueuePendingUserMessage(a.pendingUserMessages, pendingUserMessage{
-			Content:  content,
-			Parts:    parts,
-			FromUser: true,
+			AcceptedOrder: acceptedOrder,
+			Content:       content,
+			Parts:         parts,
+			FromUser:      true,
 		})
 		a.resumePendingUserDrain()
 		a.drainPendingUserMessages()
@@ -1401,6 +1422,7 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 	a.tryRecoverPersistenceBeforeTurn()
 	a.stageNextSubAgentMailboxBatch()
 	a.newTurn()
+	a.turn.originAcceptedOrder = acceptedOrder
 	turnID := a.turn.ID
 	turnCtx := a.turn.Ctx
 
@@ -1413,6 +1435,15 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 	}
 	a.recordCommittedUserMessage(userMsg)
 	a.syncBugTriagePromptFromSnapshot()
+
+	// A cancel request accepted before this message was dispatched keeps the
+	// message but not the work: the turn exists, so the transcript and recovery
+	// keep the usual shape of a cancelled turn, and the model is never called.
+	if a.cancelCoversAcceptedOrder(acceptedOrder) {
+		log.Infof("accepted user message cancelled before its first request order=%v turn_id=%v", acceptedOrder, turnID)
+		a.handleTurnCancelled(a.abortTurn(a.turn))
+		return
+	}
 
 	a.beginMainLLMAfterPreparation(turnCtx, turnID, "")
 }
@@ -1598,6 +1629,36 @@ func (a *MainAgent) handleTurnCancelled(evt Event) {
 	a.emitActivity(identity.MainAgentID, ActivityIdle, "")
 	a.markActiveSubAgentMailboxAck(false)
 	a.setIdleAndDrainPending()
+}
+
+// handleTurnCancelRequested applies a cancel request that was accepted while no
+// turn existed. A message accepted at or below the request's watermark closes
+// as cancelled instead of running, whether its event is still queued (the
+// watermark is recorded and applied when the turn starts) or already started a
+// turn (that turn is cancelled here, matched by the order of the message that
+// started it). Messages accepted later outrank the watermark and are untouched.
+func (a *MainAgent) handleTurnCancelRequested(evt Event) {
+	payload, ok := evt.Payload.(*turnCancelRequestPayload)
+	if !ok || payload == nil {
+		log.Errorf("handleTurnCancelRequested: invalid payload type payload_type=%v", fmt.Sprintf("%T", evt.Payload))
+		return
+	}
+	a.raiseCancelUpTo(payload.AcceptedUpTo)
+	if a.turn == nil {
+		log.Debugf("cancel request recorded without an active turn accepted_up_to=%v", payload.AcceptedUpTo)
+		return
+	}
+	// A covered message already reached the loop and started its turn, so this
+	// request cancels the turn in front of it. The turn must prove it is
+	// covered: a cancel request samples the watermark before it is queued, so a
+	// message accepted in between can have started the turn in front of this
+	// event, and a turn no raw main-agent message started is never covered.
+	if !a.cancelCoversAcceptedOrder(a.turn.originAcceptedOrder) {
+		log.Debugf("cancel request outranked by active turn accepted_up_to=%v origin=%v turn_id=%v", payload.AcceptedUpTo, a.turn.originAcceptedOrder, a.turn.ID)
+		return
+	}
+	log.Infof("cancel request applied to active turn accepted_up_to=%v turn_id=%v", payload.AcceptedUpTo, a.turn.ID)
+	a.handleTurnCancelled(a.abortTurn(a.turn))
 }
 
 func (a *MainAgent) resumeTurnAfterRoutingInvalidation(turnID uint64) bool {

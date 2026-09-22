@@ -138,6 +138,8 @@ func (a *MainAgent) dispatch(evt Event) {
 		a.handleToolResult(evt)
 	case EventTurnCancelled:
 		a.handleTurnCancelled(evt)
+	case EventTurnCancelRequested:
+		a.handleTurnCancelRequested(evt)
 	case EventAgentError:
 		a.handleAgentError(evt)
 	case EventExecutePlan:

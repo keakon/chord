@@ -256,6 +256,14 @@ func TestEventMapperMap(t *testing.T) {
 			ev:   agent.SessionSwitchStartedEvent{Kind: "new"},
 			want: eventEffects{busy: true},
 		},
+		{
+			// The window-cancel path creates a turn for the accepted message and
+			// closes it as cancelled; this event is what makes the waiter see
+			// that turn as work, so the global idle that follows can settle it.
+			name: "turn creation marks the turn busy",
+			ev:   agent.RequestCycleStartedEvent{TurnID: 3},
+			want: eventEffects{busy: true},
+		},
 	}
 
 	for _, tt := range tests {

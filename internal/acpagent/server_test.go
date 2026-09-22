@@ -70,8 +70,8 @@ func (f *fakeBackend) Events() <-chan agent.AgentEvent { return f.events }
 
 func (f *fakeBackend) CancelCurrentTurn() bool {
 	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.cancels++
-	f.mu.Unlock()
 	return true
 }
 
@@ -558,6 +558,81 @@ func TestCloseSessionCancelsRunningPrompt(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("Prompt did not answer after the session was closed")
+	}
+}
+
+// A session/cancel that arrives while the prompt is still handing its message
+// to the backend must not be lost: Chord can only cancel a message it has
+// accepted, so the cancel shares the hand-off lock and runs after the message is
+// in. Without that it would find nothing, the turn would run to completion, and
+// the prompt would report cancelled over work that actually finished.
+func TestCancelRacingTheHandoffIsNotLost(t *testing.T) {
+	server, backend := newTestServer(t)
+	session := newTestSession(t, server)
+
+	entered, release := backend.holdNextSend()
+	answered := make(chan acp.PromptResponse, 1)
+	go func() {
+		resp, err := server.Prompt(context.Background(), acp.PromptRequest{
+			SessionId: session,
+			Prompt:    []acp.ContentBlock{acp.TextBlock("hello")},
+		})
+		if err != nil {
+			t.Errorf("Prompt returned error: %v", err)
+		}
+		answered <- resp
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the prompt never reached the hand-off to the backend")
+	}
+
+	// The cancel lands inside the hand-off and must wait for it, so the backend
+	// never runs a CancelCurrentTurn while the message is still in flight.
+	cancelReturned := make(chan error, 1)
+	go func() {
+		cancelReturned <- server.Cancel(context.Background(), acp.CancelNotification{SessionId: session})
+	}()
+	select {
+	case err := <-cancelReturned:
+		t.Fatalf("Cancel returned %v before the hand-off it must wait for finished", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if got := backend.cancelCount(); got != 0 {
+		t.Fatalf("CancelCurrentTurn calls = %d, want the cancel to wait for the hand-off", got)
+	}
+
+	release()
+	select {
+	case <-backend.sent:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the hand-off never recorded the message")
+	}
+	select {
+	case err := <-cancelReturned:
+		if err != nil {
+			t.Fatalf("Cancel returned error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Cancel did not return after the hand-off")
+	}
+	if got := backend.cancelCount(); got != 1 {
+		t.Fatalf("CancelCurrentTurn calls = %d, want exactly the one cancel that covers the accepted message", got)
+	}
+
+	// That cancel lands on the turn the message started, and the waiter settles
+	// through the markers that turn emits.
+	backend.events <- agent.RequestCycleStartedEvent{TurnID: 1}
+	backend.events <- agent.GlobalIdleEvent{}
+	select {
+	case resp := <-answered:
+		if resp.StopReason != acp.StopReasonCancelled {
+			t.Fatalf("StopReason = %q, want %q", resp.StopReason, acp.StopReasonCancelled)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Prompt did not answer after the cancel")
 	}
 }
 

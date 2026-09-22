@@ -85,6 +85,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - A completion Chord rejected no longer shows a success card. `complete` arguments that failed validation, or a completion that arrived after the task had used up its recovery attempts, rendered a green success card while the transcript of the same call said the completion was rejected; the card now reports the error status, matching the failed outcome the transcript and the owner notification carry.
 - A stdio MCP server whose `command` is the server process itself (for example `python3 /path/to/server.py`) is no longer killed the moment it finishes initializing. Chord tied the process to the connect attempt and cancelled that context as soon as the handshake succeeded, so such a server connected, vanished before `tools/list`, and never contributed any tool. It now stays connected until the session that owns it releases it or you disable it. Launchers that keep a child alive (`npx`, `uvx`) were unaffected.
+- A cancel that arrives in the gap between a message being accepted and its turn starting is honored instead of dropped: the message stays in the transcript and its turn closes as `cancelled` right away, without a model request. Previously such a cancel was ignored, so a headless client that cancelled right after sending a prompt could still receive the whole reply while `idle.last_outcome` reported `cancelled`.
 
 ## 0.8.1 - 2026-09-16
 

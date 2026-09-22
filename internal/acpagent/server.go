@@ -356,7 +356,14 @@ func (s *Server) Prompt(ctx context.Context, req acp.PromptRequest) (acp.PromptR
 // Cancel handles session/cancel. The SDK has already cancelled the prompt
 // context of this session, so cancelling the Chord turn here is what unblocks
 // the agent loop; Prompt reports the cancelled stop reason.
+//
+// The cancel shares startMu with the prompt hand-off, so it runs either before
+// the hand-off or after the message is in — never in between. Without that, a
+// cancel could run between the send and the message's acceptance, find nothing
+// to cancel, and leave the turn running to completion.
 func (s *Server) Cancel(_ context.Context, params acp.CancelNotification) error {
+	s.startMu.Lock()
+	defer s.startMu.Unlock()
 	s.mu.Lock()
 	rt := s.rt
 	waiter := s.waiter
@@ -642,17 +649,21 @@ func (w *turnWaiter) waitErr() error {
 	return w.err
 }
 
-// cancel asks Chord to abort the turn exactly once: both Prompt (via the
-// cancelled context) and Cancel (via session/cancel) may observe the same
-// request, and a second CancelCurrentTurn call would double-report cancellation.
+// cancel asks Chord to abort the turn once: both Prompt (via the cancelled
+// context) and Cancel (via session/cancel) may observe the same request, and a
+// second effective call would double-report cancellation. Every caller runs
+// after the prompt hand-off — Cancel and CloseSession share startMu with it,
+// and Prompt's cancelled-context branch is already past it — so the request
+// either covers the accepted message or finds the session genuinely idle.
 func (w *turnWaiter) cancel(rt *Runtime) {
 	w.cancelOnce.Do(func() {
 		w.mu.Lock()
 		w.cancelled = true
 		w.mu.Unlock()
-		if rt != nil && rt.Backend != nil {
-			rt.Backend.CancelCurrentTurn()
+		if rt == nil || rt.Backend == nil {
+			return
 		}
+		rt.Backend.CancelCurrentTurn()
 	})
 }
 
