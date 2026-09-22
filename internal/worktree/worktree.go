@@ -280,7 +280,10 @@ func Create(ctx context.Context, opts CreateOptions) (*Info, error) {
 			path, _ := canonicalDir(e.Path)
 			head, _ := runGitText(ctx, path, "rev-parse", "HEAD")
 			return &Info{
-				Slug:     opts.Name,
+				// name, not opts.Name: when the caller named only a branch,
+				// name was derived from it and opts.Name is still empty, and
+				// the index entry built from this Info would record no slug.
+				Slug:     name,
 				Name:     name,
 				Branch:   branch,
 				Path:     path,
