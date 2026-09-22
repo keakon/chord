@@ -1392,8 +1392,7 @@ that do not accept a `role: system` message containing `tools` without
 K2.7 Code is the 256K coding-specialized, thinking-only option; its thinking
 mode and `keep: all` behavior are fixed, so the template does not send a
 `thinking` object. K2.6 is the 256K general-purpose hybrid option and therefore
-sets both fields explicitly. K2.5 does not support preserved thinking and is
-being retired for new users; prefer K3 for new configurations.
+sets both fields explicitly. K2.5 does not support preserved thinking.
 
 For all `openai_visible` recipes (DeepSeek, GLM, supported Qwen, and Kimi), Chord first replays native reasoning optimistically to any Chat Completions target, so documented in-provider upgrades such as Kimi K2.6/K2.7 to K3 and same-model provider fallback can keep continuity.
 

@@ -1328,8 +1328,8 @@ fallback 池能力不一致时，Chord 会自动采用各模型都能接受的�
 
 K2.7 Code 是 256K 上下文、面向编码的纯思考型号；它的 thinking 和
 `keep: all` 行为固定，因此模板不发送 `thinking` 对象。K2.6 是 256K
-上下文的通用混合思考型号，所以显式设置这两个字段。K2.5 不支持保留
-历史思考，而且已对新用户进入退场阶段；新配置应优先使用 K3。
+上下文的通用混合思考型号，所以显式设置这两个字段。
+K2.5 不支持保留历史思考。
 
 对于所有使用 `openai_visible` 的模板（DeepSeek、GLM、受支持的 Qwen 和
 Kimi），Chord 首次会把原生 reasoning 乐观回放给任何 Chat Completions
