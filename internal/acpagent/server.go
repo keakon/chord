@@ -4,17 +4,15 @@
 // keep their existing event channel and message APIs, and this adapter is just
 // another consumer of that channel (the TUI and `chord headless` are the
 // others). One process serves exactly one ACP session, which mirrors Chord's
-// single-active-session model.
+// single-active-session model; the mux frontend in internal/acpmux serves
+// several clients by running one such process per session.
 package acpagent
 
 import (
 	"context"
-	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
@@ -72,6 +70,16 @@ type Server struct {
 	// this lock before the new turn starts.
 	promptMu sync.Mutex
 
+	// startMu orders the last steps of starting a prompt — the closed check, the
+	// waiter install and the hand-off to the backend — against session/close,
+	// which marks the session terminal and picks up the waiter under this lock
+	// too. Without it a close could land between the check and the install, see
+	// no waiter to cancel, and still let the prompt hand a turn to the backend
+	// after the client was told the session had ended. It cannot be s.mu: the
+	// hand-off may wait on agent event capacity, and the event pump needs s.mu
+	// to apply turn effects.
+	startMu sync.Mutex
+
 	mu      sync.Mutex
 	conn    *acp.AgentSideConnection
 	rt      *Runtime
@@ -80,6 +88,12 @@ type Server struct {
 	waiter  *turnWaiter
 	started bool
 	closed  bool
+
+	// sessionClosed is closed once session/close has been handled and logged.
+	// The entrypoint watches it to tear the runtime down and exit, which is
+	// what frees the session's resources.
+	sessionClosed chan struct{}
+	closeOnce     sync.Once
 }
 
 var _ acp.Agent = (*Server)(nil)
@@ -87,7 +101,14 @@ var _ acp.Agent = (*Server)(nil)
 // New creates a Server. Bind must be called with the connection built from it
 // before any client traffic arrives.
 func New(opts Options) *Server {
-	return &Server{opts: opts}
+	return &Server{opts: opts, sessionClosed: make(chan struct{})}
+}
+
+// SessionClosed reports that the session was closed and this process has
+// nothing left to serve. The entrypoint gives the close response a moment to
+// reach the pipe, then shuts the runtime down and exits.
+func (s *Server) SessionClosed() <-chan struct{} {
+	return s.sessionClosed
 }
 
 // Bind attaches the connection the server sends session updates through.
@@ -157,19 +178,8 @@ func (s *Server) sessionFor(id acp.SessionId) (*Runtime, error) {
 // no session loading and no client-side filesystem or terminal delegation, so
 // only the negotiated protocol version and image prompts are advertised.
 func (s *Server) Initialize(_ context.Context, req acp.InitializeRequest) (acp.InitializeResponse, error) {
-	if req.ProtocolVersion != acp.ProtocolVersionNumber {
-		log.Warnf("acp client protocol version differs client=%v agent=%v", req.ProtocolVersion, acp.ProtocolVersionNumber)
-	}
-	if req.ClientInfo != nil {
-		log.Infof("acp client connected name=%v version=%v", req.ClientInfo.Name, req.ClientInfo.Version)
-	}
-	return acp.InitializeResponse{
-		ProtocolVersion: acp.ProtocolVersionNumber,
-		AgentInfo:       &acp.Implementation{Name: "chord", Version: s.opts.Version},
-		AgentCapabilities: acp.AgentCapabilities{
-			PromptCapabilities: acp.PromptCapabilities{Image: true},
-		},
-	}, nil
+	LogInitialize(req)
+	return InitializeResponse(s.opts.Version), nil
 }
 
 // Authenticate is unreachable while no auth methods are advertised.
@@ -180,17 +190,6 @@ func (s *Server) Authenticate(_ context.Context, _ acp.AuthenticateRequest) (acp
 // Logout is not supported; Chord keeps no ACP-visible credentials.
 func (s *Server) Logout(_ context.Context, _ acp.LogoutRequest) (acp.LogoutResponse, error) {
 	return acp.LogoutResponse{}, acp.NewMethodNotFound(acp.AgentMethodLogout)
-}
-
-// sessionSeq numbers the ACP sessions this process serves; it only keeps the
-// minted ids unique within one process.
-var sessionSeq atomic.Uint64
-
-// newSessionID mints the ACP session id. It stays opaque and process-scoped on
-// purpose: the client only echoes it back, and it must survive in-process
-// session switches that move the Chord session directory under it.
-func newSessionID() acp.SessionId {
-	return acp.SessionId(fmt.Sprintf("chord-%d-%d", os.Getpid(), sessionSeq.Add(1)))
 }
 
 // chordSessionName is the name of the Chord session directory this runtime was
@@ -242,13 +241,9 @@ func (s *Server) NewSession(_ context.Context, req acp.NewSessionRequest) (acp.N
 	if s.opts.Bootstrap == nil {
 		return acp.NewSessionResponse{}, acp.NewInternalError(map[string]any{"error": "acp adapter has no runtime bootstrap"})
 	}
-	cwd := strings.TrimSpace(req.Cwd)
-	if cwd == "" {
-		return acp.NewSessionResponse{}, acp.NewInvalidParams(map[string]any{"error": "cwd is required"})
-	}
-	info, err := os.Stat(cwd)
-	if err != nil || !info.IsDir() {
-		return acp.NewSessionResponse{}, acp.NewInvalidParams(map[string]any{"cwd": cwd, "error": "cwd is not a readable directory"})
+	cwd, cwdErr := SessionCwd(req.Cwd)
+	if cwdErr != nil {
+		return acp.NewSessionResponse{}, cwdErr
 	}
 	if len(req.McpServers) > 0 {
 		log.Warnf("acp session/new asked for mcp servers; chord does not take them from a client yet count=%v names=%v", len(req.McpServers), mcpServerNames(req.McpServers))
@@ -260,7 +255,10 @@ func (s *Server) NewSession(_ context.Context, req acp.NewSessionRequest) (acp.N
 	s.mu.Lock()
 	if s.started {
 		s.mu.Unlock()
-		return acp.NewSessionResponse{}, acp.NewInvalidParams(map[string]any{"error": "chord acp serves one session per process"})
+		// One process serves one session. A second session/new means the client
+		// reached a session child instead of the mux frontend, which mints the
+		// ids and spawns one child per session.
+		return acp.NewSessionResponse{}, acp.NewInvalidParams(map[string]any{"error": "session already created for this process"})
 	}
 	s.started = true
 	s.mu.Unlock()
@@ -279,7 +277,7 @@ func (s *Server) NewSession(_ context.Context, req acp.NewSessionRequest) (acp.N
 		s.mu.Unlock()
 		return acp.NewSessionResponse{}, acp.NewInternalError(map[string]any{"error": "runtime bootstrap returned no backend"})
 	}
-	session := newSessionID()
+	session := NewSessionID()
 
 	s.mu.Lock()
 	s.rt = rt
@@ -306,19 +304,26 @@ func (s *Server) Prompt(ctx context.Context, req acp.PromptRequest) (acp.PromptR
 
 	s.promptMu.Lock()
 	defer s.promptMu.Unlock()
-	// sessionFor ran before this lock. A CloseSession that landed in between
-	// has already marked the session closed, and this prompt must not start a
-	// turn the client was told had ended.
+	// sessionFor ran before this lock, so the session is checked again here.
+	// The check, the waiter install and the send form one hand-off under
+	// startMu: CloseSession takes the same lock to mark the session closed and
+	// pick up the waiter, so a close that lands in between either sees this
+	// waiter and cancels it, or makes this prompt refuse to start a turn the
+	// client was told had ended.
+	s.startMu.Lock()
 	if _, err := s.sessionFor(req.SessionId); err != nil {
+		s.startMu.Unlock()
 		return acp.PromptResponse{}, err
 	}
 	if ctx.Err() != nil {
+		s.startMu.Unlock()
 		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
 	}
 
 	waiter := newTurnWaiter()
 	s.setWaiter(waiter)
 	rt.Backend.SendUserMessageWithParts(parts)
+	s.startMu.Unlock()
 	log.Debugf("acp prompt sent session_id=%v parts=%v", req.SessionId, len(parts))
 
 	select {
@@ -370,20 +375,32 @@ func (s *Server) Cancel(_ context.Context, params acp.CancelNotification) error 
 }
 
 // CloseSession cancels any running turn and marks the session terminal, as the
-// protocol requires before resources are released.
+// protocol requires before resources are released. Signaling SessionClosed
+// hands the teardown to the entrypoint: a child process exits, and the mux
+// frontend reaps it.
 func (s *Server) CloseSession(_ context.Context, req acp.CloseSessionRequest) (acp.CloseSessionResponse, error) {
-	rt, err := s.sessionFor(req.SessionId)
-	if err != nil {
+	if _, err := s.sessionFor(req.SessionId); err != nil {
 		return acp.CloseSessionResponse{}, err
 	}
-	waiter := s.currentWaiter()
-	if waiter != nil {
-		waiter.cancel(rt)
-		s.waitSettled(waiter, settleTimeout)
-	}
+	// Closing shares startMu with the prompt hand-off: by the time this lock is
+	// held, every prompt that got past its own check has already handed its turn
+	// to the backend, so the waiter picked up here belongs to a started turn
+	// this close can cancel; a prompt that comes later sees closed and refuses
+	// to start.
+	s.startMu.Lock()
 	s.mu.Lock()
 	s.closed = true
+	rt := s.rt
+	waiter := s.waiter
 	s.mu.Unlock()
+	if waiter != nil {
+		waiter.cancel(rt)
+	}
+	s.startMu.Unlock()
+	if waiter != nil {
+		s.waitSettled(waiter, settleTimeout)
+	}
+	s.closeOnce.Do(func() { close(s.sessionClosed) })
 	log.Infof("acp session closed session_id=%v", req.SessionId)
 	return acp.CloseSessionResponse{}, nil
 }

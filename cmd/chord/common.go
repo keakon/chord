@@ -368,6 +368,13 @@ func setupInitialLLMClient(
 // writes to; the ACP stdout guard redirects fd 1 into the same file.
 const chordLogFileName = "chord.log"
 
+// runtimeLogFileName is the file inside the log directory this process writes
+// to. Only `chord acp` changes it: the mux frontend and each of its session
+// children write their own file, because several processes that share one log
+// also judge its size and rotate it, and concurrent renames overwrite each
+// other.
+var runtimeLogFileName = chordLogFileName
+
 // initApp performs the shared initialization sequence used by local TUI and
 // headless control-plane entrypoints. It sets up: signal context, project root, logging, config,
 // auth, LLM client, session directory, context manager, tool registry, MCP,
@@ -425,7 +432,7 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	logCtx := logContext{PWD: projectRoot, PID: os.Getpid()}
 	ac.logCtx = logCtx
 
-	logPath := filepath.Join(pathLocator.LogsDir, chordLogFileName)
+	logPath := filepath.Join(pathLocator.LogsDir, runtimeLogFileName)
 	logWriter, logErr := newRotatingLogFile(logPath)
 	if logErr == nil {
 		ac.LogWriter = logWriter

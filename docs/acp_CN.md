@@ -1,8 +1,8 @@
 # ACP Agent 模式
 
-`chord acp` 通过 stdio 提供 [Agent Client Protocol](https://agentclientprotocol.com/)（ACP），任何 ACP 客户端都能把 Chord 当成自己的 agent 使用：编辑器如 Zed、JetBrains IDE、Neovim，以及 `acpx` 这类命令行客户端。客户端发 `initialize`、`session/new`、`session/prompt`、`session/cancel`，Chord 把回答、思考块和每个工具调用作为 `session/update` 通知流式回传。
+`chord acp` 通过 stdio 提供 [Agent Client Protocol](https://agentclientprotocol.com/)（ACP），任何 ACP 客户端都能把 Chord 当成自己的 agent 使用：编辑器如 Zed、JetBrains IDE、Neovim，以及 `acpx` 这类命令行客户端。客户端发 `initialize`、`session/new`、`session/prompt`、`session/cancel`、`session/close`，Chord 把回答、思考块和每个工具调用作为 `session/update` 通知流式回传。
 
-stdout 只跑 JSON-RPC。Chord 自己的日志写进[日志目录](./paths_CN.md)下的 `chord.log`，第三方库误写到 stdout 的内容也会被重定向过去，协议流不会被污染。
+stdout 只跑 JSON-RPC。Chord 自己的日志写进[日志目录](./paths_CN.md)：前端写 `chord-acp-mux-<pid>.log`，每个会话的子进程写 `chord-acp-<会话 id>.log`；第三方库误写到 stdout 的内容也会被重定向过去，协议流不会被污染。
 
 ## 启动
 
@@ -10,11 +10,13 @@ stdout 只跑 JSON-RPC。Chord 自己的日志写进[日志目录](./paths_CN.md
 chord acp
 ```
 
-进程由客户端拉起，客户端能跑这个二进制就行。没有命令行参数：工作目录、模型、权限、MCP server 全都来自 Chord 自己的配置。
+进程由客户端拉起，客户端无需传任何参数：工作目录、模型、权限、MCP server 全都来自 Chord 自己的配置。`chord acp` 只接受一个可选 flag `--max-sessions`（默认 8），见下文。
 
 `session/new` 里带的工作目录就是会话目录，Chord 以它为准，客户端在哪个目录启动进程无关紧要。项目配置、会话文件、工具路径都按这个目录解析，和在那个目录启动 TUI 完全一致。
 
-一个进程只服务一个会话。每次 `chord acp` 都在客户端指定的工作目录里新建会话；这个模式没有 `--continue` / `--resume`。`session/new` 的响应里带 `_meta.chord.sessionId`，也就是为它新建的 Chord 会话目录名 —— 要 `chord resume` 或写 bug 报告时用的就是这个 id。
+一个 `chord acp` 进程服务客户端开出的所有会话。`initialize` 只发一次，之后每个会话各发一次 `session/new`，带上要扎根的工作目录；Chord 为每个会话起一个子进程，工作目录、模型客户端、会话存储和 MCP server 都彼此独立。这个模式没有 `--continue` / `--resume`。`session/new` 的响应里带 `_meta.chord.sessionId`，也就是为它新建的 Chord 会话目录名 —— 要 `chord resume` 或写 bug 报告时用的就是这个 id。
+
+每个开着的会话都是一份完整的 Chord runtime，还带着自己的 MCP server 子进程，所以内存随同时打开的会话数增长。`--max-sessions`（默认 8）限制同时能开几个，超出的 `session/new` 会被拒绝。在客户端关掉一个 thread 就会结束该会话的进程，它占用的名额要到这个进程退出后才释放；断开连接则把全部会话一起结束。
 
 ## 配置客户端
 
@@ -51,7 +53,7 @@ JetBrains IDE 从 `~/.jetbrains/acp.json` 读同一个 `agent_servers` 条目。
 ## 当前限制
 
 - **确认弹窗还没接过来。** 工具需要你授权时，Chord 等的是自己的确认超时，而不是问客户端，超时后该调用以未确认失败。在 ACP 的权限请求接通之前，只用读操作的提示词最稳，或者在 `config.yaml` 里写权限规则，让想放行的工具不再询问。
-- 不提供 ACP 提问、mode 和 session config option；`question` 工具在 ACP 下会直接报错，不会去等一个客户端看不到也无法回答的问题。`session/list`、`session/resume`、`session/load` 都未实现，进程重启后也不会恢复 ACP 会话。
+- 不提供 ACP 提问、mode 和 session config option；`question` 工具在 ACP 下会直接报错，不会去等一个客户端看不到也无法回答的问题。`session/list`、`session/resume`、`session/load` 都未实现，进程重启后也不会恢复 ACP 会话；`session/close` 已实现，但关掉的会话不能再打开。
 - `session/new` 里带的 MCP server 和额外目录会被忽略：Chord 只用自己的配置决定 MCP server 和工作区根目录，客户端发来的内容会记进日志。
 - 不使用客户端的文件与终端方法（`fs/read_text_file`、`fs/write_text_file`、`terminal/*`）：读写文件、跑 `shell`、连 MCP server 都由 Chord 自己做。
 - **委派出去的子代理不会单独流式呈现。** worker 自己的正文与思考块不予转发，客户端看到的是主 agent 的委派工具卡和它带回的结果。

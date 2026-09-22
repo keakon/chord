@@ -23,6 +23,11 @@ type fakeBackend struct {
 	mu       sync.Mutex
 	messages [][]message.ContentPart
 	cancels  int
+	// sendHold pins the next send inside the hand-off to the backend: while it
+	// is set, SendUserMessageWithParts closes sendEntered and then waits for
+	// sendHold to be closed before it records the message.
+	sendHold    chan struct{}
+	sendEntered chan struct{}
 }
 
 func newFakeBackend() *fakeBackend {
@@ -32,7 +37,29 @@ func newFakeBackend() *fakeBackend {
 	}
 }
 
+// holdNextSend makes the next SendUserMessageWithParts stop before it records
+// the message: entered is closed when the hand-off reaches the backend, and
+// release lets it finish.
+func (f *fakeBackend) holdNextSend() (entered <-chan struct{}, release func()) {
+	hold := make(chan struct{})
+	enteredCh := make(chan struct{})
+	f.mu.Lock()
+	f.sendHold = hold
+	f.sendEntered = enteredCh
+	f.mu.Unlock()
+	var once sync.Once
+	return enteredCh, func() { once.Do(func() { close(hold) }) }
+}
+
 func (f *fakeBackend) SendUserMessageWithParts(parts []message.ContentPart) {
+	f.mu.Lock()
+	hold, entered := f.sendHold, f.sendEntered
+	f.sendHold, f.sendEntered = nil, nil
+	f.mu.Unlock()
+	if hold != nil {
+		close(entered)
+		<-hold
+	}
 	f.mu.Lock()
 	f.messages = append(f.messages, parts)
 	f.mu.Unlock()
@@ -97,6 +124,51 @@ func newTestSession(t *testing.T, server *Server) acp.SessionId {
 		t.Fatal("NewSession returned an empty session id")
 	}
 	return resp.SessionId
+}
+
+// TestCloseSessionReportsSessionClosed covers what the entrypoint watches: a
+// live session must not report itself closed, and closing it has to report that
+// exactly once, however many closes race.
+func TestCloseSessionReportsSessionClosed(t *testing.T) {
+	server, _ := newTestServer(t)
+	session := newTestSession(t, server)
+
+	select {
+	case <-server.SessionClosed():
+		t.Fatal("a live session must not report itself closed")
+	default:
+	}
+
+	if _, err := server.CloseSession(context.Background(), acp.CloseSessionRequest{SessionId: session}); err != nil {
+		t.Fatalf("CloseSession: %v", err)
+	}
+	select {
+	case <-server.SessionClosed():
+	case <-time.After(time.Second):
+		t.Fatal("CloseSession did not report the session closed")
+	}
+
+	// The session is terminal: it must not start another turn.
+	if _, err := server.Prompt(context.Background(), acp.PromptRequest{
+		SessionId: session,
+		Prompt:    []acp.ContentBlock{acp.TextBlock("hi")},
+	}); err == nil {
+		t.Error("a closed session must reject prompts")
+	}
+
+	// Concurrent closes must not close the channel twice, which would panic.
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Go(func() {
+			_, _ = server.CloseSession(context.Background(), acp.CloseSessionRequest{SessionId: session})
+		})
+	}
+	wg.Wait()
+	select {
+	case <-server.SessionClosed():
+	default:
+		t.Error("the session stopped reporting itself closed")
+	}
 }
 
 func TestInitializeAdvertisesImagePromptsOnly(t *testing.T) {
@@ -486,6 +558,83 @@ func TestCloseSessionCancelsRunningPrompt(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("Prompt did not answer after the session was closed")
+	}
+}
+
+// A close that lands while a prompt is being handed to Chord must wait for the
+// hand-off: answering first would let the turn start after the session was
+// declared closed, with no waiter left for the close to cancel.
+func TestCloseSessionWaitsForPromptHandoff(t *testing.T) {
+	restore := settleTimeout
+	settleTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { settleTimeout = restore })
+
+	server, backend := newTestServer(t)
+	session := newTestSession(t, server)
+
+	entered, release := backend.holdNextSend()
+	answered := make(chan acp.PromptResponse, 1)
+	go func() {
+		resp, err := server.Prompt(context.Background(), acp.PromptRequest{
+			SessionId: session,
+			Prompt:    []acp.ContentBlock{acp.TextBlock("hello")},
+		})
+		if err != nil {
+			t.Errorf("Prompt returned error: %v", err)
+		}
+		answered <- resp
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the prompt never reached the hand-off to the backend")
+	}
+
+	closed := make(chan error, 1)
+	go func() {
+		_, err := server.CloseSession(context.Background(), acp.CloseSessionRequest{SessionId: session})
+		closed <- err
+	}()
+
+	// The close must not answer while the hand-off is still in flight.
+	select {
+	case err := <-closed:
+		t.Fatalf("CloseSession answered while the prompt was still being handed to the backend (err=%v)", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	// The turn is handed over before the close, so the close cancels it; settle
+	// it the way an in-flight cancelled turn settles.
+	release()
+	go func() {
+		for backend.cancelCount() == 0 {
+			time.Sleep(time.Millisecond)
+		}
+		backend.events <- agent.StreamTextEvent{Text: "working", TurnID: 1, RequestSeq: 1}
+		backend.events <- agent.GlobalIdleEvent{}
+		backend.events <- agent.StreamSegmentEndedEvent{TurnID: 1, RequestSeq: 1}
+	}()
+
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatalf("CloseSession returned error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("CloseSession did not answer after the hand-off finished")
+	}
+
+	select {
+	case resp := <-answered:
+		if resp.StopReason != acp.StopReasonCancelled {
+			t.Fatalf("StopReason = %q, want %q after the session was closed", resp.StopReason, acp.StopReasonCancelled)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Prompt did not answer after the session was closed")
+	}
+	if got := backend.messageCount(); got != 1 {
+		t.Fatalf("messages sent = %d, want 1", got)
 	}
 }
 

@@ -183,9 +183,15 @@ chord headless -d /path/to/repo --worktree feat-auth
 
 ## `chord acp`
 
-Serve the Agent Client Protocol over stdio, so an ACP client such as Zed can drive Chord as its agent. stdout carries JSON-RPC only; Chord's logs and any stray stdio output go to `chord.log`.
+Serve the Agent Client Protocol over stdio, so an ACP client such as Zed can drive Chord as its agent. stdout carries JSON-RPC only; Chord's logs and any stray stdio output go to the [logs directory](./paths.md), one log per process (`chord-acp-mux-<pid>.log` for the frontend, `chord-acp-<session-id>.log` for each session).
 
-There are no flags: the client sends the working directory with `session/new`, and model, permissions, MCP servers, and session storage all come from Chord's own configuration. One process serves one session.
+The client sends the working directory with `session/new`, and model, permissions, MCP servers, and session storage all come from Chord's own configuration. One process serves every session the client opens, one child process per session.
+
+### Flags
+
+| Flag             | Description                                                 |
+| ---------------- | ----------------------------------------------------------- |
+| `--max-sessions` | Maximum number of ACP sessions served at once (default `8`) |
 
 ### Examples
 

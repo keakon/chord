@@ -183,9 +183,15 @@ chord headless -d /path/to/repo --worktree feat-auth
 
 ## `chord acp`
 
-通过 stdio 提供 Agent Client Protocol，让 Zed 这类 ACP 客户端把 Chord 当成自己的 agent 调用。stdout 只跑 JSON-RPC，Chord 的日志和误写到 stdio 的内容都进 `chord.log`。
+通过 stdio 提供 Agent Client Protocol，让 Zed 这类 ACP 客户端把 Chord 当成自己的 agent 调用。stdout 只跑 JSON-RPC，Chord 的日志和误写到 stdio 的内容都进[日志目录](./paths_CN.md)，每个进程一个文件（前端是 `chord-acp-mux-<pid>.log`，每个会话是 `chord-acp-<会话 id>.log`）。
 
-没有命令行参数：工作目录由客户端在 `session/new` 里给出，模型、权限、MCP server 与会话存储都来自 Chord 自己的配置。一个进程只服务一个会话。
+工作目录由客户端在 `session/new` 里给出，模型、权限、MCP server 与会话存储都来自 Chord 自己的配置。一个进程服务客户端开出的所有会话，每个会话一个子进程。
+
+### Flag
+
+| Flag             | 说明                                        |
+| ---------------- | ------------------------------------------- |
+| `--max-sessions` | 同时服务的 ACP 会话数上限（默认 `8`）       |
 
 ### 示例
 

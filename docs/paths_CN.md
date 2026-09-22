@@ -61,6 +61,8 @@ Chord 写在这里。删了就丢历史。
     ├── chord.log                       # 当前日志
     ├── chord.log.1                     # 轮转
     ├── chord.log.2                     # 轮转
+    ├── chord-acp-mux-<pid>.log         # `chord acp` 前端日志
+    ├── chord-acp-<会话 id>.log         # 每个 `chord acp` 会话一个
     └── tui-dumps/                      # `Ctrl+G` 输出
 ```
 
@@ -132,6 +134,8 @@ Sessions、运行时缓存、exports 都以这个 key 为索引：在 `~/project
 | `<state-dir>/logs/chord.log`           | 当前运行日志（golog 纯文本）                                          |
 | `<state-dir>/logs/chord.log.1`         | 上一轮轮转                                                            |
 | `<state-dir>/logs/chord.log.2`         | 更早的轮转                                                            |
+| `<state-dir>/logs/chord-acp-mux-<pid>.log` | `chord acp` 前端日志（同样会轮转）                                  |
+| `<state-dir>/logs/chord-acp-<会话 id>.log` | 每个 `chord acp` 会话进程一个                                     |
 | `<state-dir>/logs/tui-dumps/`          | `Ctrl+G` 生成的诊断快照（用于报 bug）                                 |
 
 可用 `--logs-dir <path>` 或 `CHORD_LOGS_DIR=<path>` 覆盖目录。
