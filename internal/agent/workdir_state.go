@@ -388,10 +388,16 @@ func (a *MainAgent) RestoreWorkDirBinding(ctx context.Context, state WorkDirStat
 	return ""
 }
 
-// recordWorktreeResumeDrop clears the session's active checkout and appends the
-// boundary explaining that the recorded checkout is gone. It returns the
-// user-facing notice; the caller keeps its current directory.
+// recordWorktreeResumeDrop handles a recorded checkout that could not be
+// restored: it clears the session's active checkout and appends the boundary
+// explaining that the recorded checkout is gone, and returns the user-facing
+// notice. When git is not available the checkout could not be checked at all,
+// so the record is kept for a later resume and the notice says so instead of
+// claiming the checkout is gone.
 func (a *MainAgent) recordWorktreeResumeDrop(state WorkDirState) string {
+	if !worktree.GitAvailable() {
+		return fmt.Sprintf("session was working in worktree %s, but git is not available to verify it; continuing in %s", state.Path, a.workDir())
+	}
 	entry := recovery.WorktreeTimelineEntry{
 		Reason:   recovery.WorktreeSwitchResumeFallback,
 		Name:     state.WorktreeID,

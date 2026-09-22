@@ -367,6 +367,8 @@ removed 1 sessions, total 263.5 MB
 
 Manage chord-owned git worktrees. Use `chord worktree <name>` (or `chord --worktree <name>`) to create or enter a worktree and start a session there; use this command's subcommands for management operations such as `list`, `remove`, and `finish`.
 
+These commands need `git` on `PATH`, and so do the agent's worktree tools: without it the tools are hidden from the tool list, and `chord worktree <name>`, `--worktree`, `list`, `remove`, and `finish` refuse with a message naming the missing git binary instead of a repository error.
+
 Worktrees live under `<state-dir>/worktrees/<repo-id>/<slug>`, outside the repository, unless `worktree.root` says otherwise: a relative value resolves against the main repository root, so `root: .chord/worktrees` places checkouts at `<repo>/.chord/worktrees/<slug>`. When that directory lies inside the repository, Chord keeps a `.gitignore` containing `*` in it so the checkouts never show up as untracked files in the main checkout. That file only keeps `git status` clean; deleting it does not weaken any protection. Other tools are not aware of that skip: an in-repo checkout is a second copy of the tree, so index- or scan-based tools may pick it up too (see [Worktrees](./usage.md#worktrees)).
 
 Sessions are shared by every checkout of a repository. The history lives in the repository's own store, so a session started in a worktree is listed and resumed from the main checkout and vice versa; the runtime cache stays per checkout, and exports follow their sessions. A session records the checkout it was working in, and resuming it switches back there (see [Resuming sessions](#resuming-sessions)). Removing a worktree never deletes that history.

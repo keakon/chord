@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"os/exec"
 	"testing"
 
 	"github.com/keakon/chord/internal/permission"
@@ -38,6 +39,40 @@ func TestMainToolVisibleFalseWhenToolDenied(t *testing.T) {
 
 	if a.MainToolVisible(tools.NameTodoWrite) {
 		t.Fatal("a permission-deny ruleset must hide todo_write from the visible surface")
+	}
+}
+
+// TestVisibleLLMToolsHidesWorktreeToolsWithoutGit pins the user-visible
+// outcome: a machine without git never lists the worktree tools, because every
+// one of their operations shells out to git.
+func TestVisibleLLMToolsHidesWorktreeToolsWithoutGit(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	parent := newTestMainAgent(t, t.TempDir())
+	reg := tools.NewRegistry()
+	reg.Register(tools.NewWorktreeEnterTool(parent))
+	reg.Register(tools.NewWorktreeExitTool(parent))
+	reg.Register(tools.NewWorktreeListTool(parent))
+	reg.Register(tools.NewTodoWriteTool(nil))
+
+	worktreeTools := []string{tools.NameWorktreeEnter, tools.NameWorktreeExit, tools.NameWorktreeList}
+	visible := visibleLLMTools(reg, permission.Ruleset{}, func(string) bool { return false }, toolPermissionContext{})
+	for _, name := range worktreeTools {
+		if !containsToolNamed(visible, name) {
+			t.Fatalf("%s must be visible with git on PATH", name)
+		}
+	}
+
+	t.Setenv("PATH", t.TempDir())
+	visible = visibleLLMTools(reg, permission.Ruleset{}, func(string) bool { return false }, toolPermissionContext{})
+	for _, name := range worktreeTools {
+		if containsToolNamed(visible, name) {
+			t.Errorf("%s must be hidden when git is not installed", name)
+		}
+	}
+	if !containsToolNamed(visible, tools.NameTodoWrite) {
+		t.Error("an unrelated tool must not be affected by the git check")
 	}
 }
 

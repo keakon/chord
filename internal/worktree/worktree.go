@@ -777,7 +777,7 @@ func GitMainRoot(ctx context.Context, dir string) (string, error) {
 	}
 	common, err := runGitText(ctx, dir, "rev-parse", "--git-common-dir")
 	if err != nil {
-		return "", fmt.Errorf("%w: %s", ErrNotGitRepository, dir)
+		return "", probeError(dir, err)
 	}
 	commonAbs, err := absClean(common, dir)
 	if err != nil {
@@ -807,6 +807,11 @@ func GitMainRoot(ctx context.Context, dir string) (string, error) {
 // tree: GitMainRoot would otherwise resolve to the container directory of
 // the bare git dir, so callers must fall back to the working directory and
 // must not hash the container directory as the repository identity.
+//
+// A failed probe returns why instead of reporting "not bare" silently:
+// ErrGitUnavailable when the binary cannot be started, ErrNotGitRepository
+// when dir is not in a repository. Callers that only care whether dir is bare
+// keep checking the error.
 func IsBareRepository(ctx context.Context, dir string) (bool, error) {
 	if strings.TrimSpace(dir) == "" {
 		var err error
@@ -817,7 +822,7 @@ func IsBareRepository(ctx context.Context, dir string) (bool, error) {
 	}
 	out, err := runGitText(ctx, dir, "rev-parse", "--is-bare-repository")
 	if err != nil {
-		return false, nil
+		return false, probeError(dir, err)
 	}
 	return strings.TrimSpace(out) == "true", nil
 }
@@ -835,7 +840,7 @@ func GitCommonDir(ctx context.Context, dir string) (string, error) {
 	}
 	common, err := runGitText(ctx, dir, "rev-parse", "--git-common-dir")
 	if err != nil {
-		return "", fmt.Errorf("%w: %s", ErrNotGitRepository, dir)
+		return "", probeError(dir, err)
 	}
 	return absClean(common, dir)
 }
@@ -857,6 +862,10 @@ func ResolveRepoID(ctx context.Context, dir, mainRoot string) string {
 // worktree (i.e. `--git-dir` and `--git-common-dir` resolve to different
 // paths after canonicalization). Avoids the well-known footgun where
 // the two outputs differ in absolute-vs-relative form depending on cwd.
+//
+// A failed probe returns the classification from probeError rather than
+// reporting false: a caller that only cares whether dir is a linked worktree
+// can keep treating any error as "no".
 func IsInsideLinkedWorktree(ctx context.Context, dir string) (bool, error) {
 	if dir == "" {
 		var err error
@@ -867,11 +876,11 @@ func IsInsideLinkedWorktree(ctx context.Context, dir string) (bool, error) {
 	}
 	gitDir, err := runGitText(ctx, dir, "rev-parse", "--git-dir")
 	if err != nil {
-		return false, nil
+		return false, probeError(dir, err)
 	}
 	commonDir, err := runGitText(ctx, dir, "rev-parse", "--git-common-dir")
 	if err != nil {
-		return false, nil
+		return false, probeError(dir, err)
 	}
 	gitDirAbs, err := absClean(gitDir, dir)
 	if err != nil {

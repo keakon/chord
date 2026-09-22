@@ -367,6 +367,8 @@ removed 1 sessions, total 263.5 MB
 
 管理 chord 管理的 git worktree。可使用 `chord worktree <name>`（或 `chord --worktree <name>`）创建或进入一个 worktree 并在其中启动会话；本命令的子命令用于 `list`、`remove`、`finish` 等管理操作。
 
+这组命令要求 `PATH` 里有 `git`，agent 的 worktree 工具也一样：找不到 git 时工具会被隐藏，`chord worktree <name>`、`--worktree` 以及 `list`、`remove`、`finish` 都会拒绝执行，并说明缺的是 git 二进制，而不是报成仓库错误。
+
 Worktree 默认落地在 `<state-dir>/worktrees/<repo-id>/<slug>`（仓库之外）；也可以用 `worktree.root` 改位置，相对路径以主仓库根为基准，例如 `root: .chord/worktrees` 会落在 `<repo>/.chord/worktrees/<slug>`。这个目录在仓库内时，Chord 会在其中保存一个内容为 `*` 的 `.gitignore`，让这些 checkout 不出现在主工作区的未跟踪文件里。该文件只负责 `git status` 整洁，删掉它不会削弱任何保护。其他工具不知道这层跳过：仓库内的 checkout 是磁盘上的第二份树，索引或扫描类工具也可能扫到它（见 [Worktree 用法](./usage_CN.md#worktree)）。
 
 同一仓库的所有 checkout 共享会话：历史存在仓库自己的 store 里，因此 worktree 里开的会话在主工作区能看到、能继续，反之亦然；runtime cache 仍按 checkout 分开，exports 跟着会话走。会话会记录自己当时所在的 checkout，继续该会话时会先切回去（见下文[恢复会话](#恢复会话)）。删除 worktree 不会删这份历史。

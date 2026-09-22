@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -687,6 +688,29 @@ func TestResumeSessionWorktreeAdoptsLaunchCheckoutWithoutARecord(t *testing.T) {
 	chdirForTest(t, info.RepoRoot)
 	if got := resumeSessionWorktree(context.Background(), sid); got != nil {
 		t.Fatalf("--resume bound checkout %+v for a main-checkout launch", got)
+	}
+}
+
+// TestWorktreeCommandsRequireGit pins the CLI counterpart of the hidden
+// worktree tools: every worktree entry point needs git, and refuses with a
+// message naming the missing binary instead of a repository error.
+func TestWorktreeCommandsRequireGit(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	withTestStateDir(t)
+	t.Setenv("PATH", t.TempDir())
+
+	if err := requireWorktreeGit(); !errors.Is(err, worktree.ErrGitUnavailable) {
+		t.Fatalf("requireWorktreeGit error = %v, want ErrGitUnavailable", err)
+	}
+	if _, err := prepareStartupWorktree(context.Background(), "feat-nogit", false); !errors.Is(err, worktree.ErrGitUnavailable) {
+		t.Fatalf("prepareStartupWorktree error = %v, want ErrGitUnavailable", err)
+	}
+	listCmd := newWorktreeCmd()
+	listCmd.SetArgs([]string{"list"})
+	if err := listCmd.Execute(); !errors.Is(err, worktree.ErrGitUnavailable) {
+		t.Fatalf("`chord worktree list` error = %v, want ErrGitUnavailable", err)
 	}
 }
 

@@ -226,6 +226,8 @@ chord import claude --id <session-id> [--root ~/.claude/projects]
 
 创建或进入 worktree 会改变 Chord 运行所在的目录。你可以用 `chord --worktree <name>`，也可以用 `chord worktree <name>`；`worktree` 子命令同时承担 `list`、`remove`、`finish` 等管理操作。会话进行中也可以直接让 agent 切换 worktree。
 
+worktree 工具和命令都要求 `PATH` 里有 `git`。找不到 git 时，agent 的 worktree 工具不会出现在工具列表里，创建或进入 worktree、`list`、`remove`、`finish` 都会拒绝执行，并直接说明缺的是 git 二进制，而不是报成仓库错误。记录过 checkout 的会话照样能恢复：Chord 会说明无法验证该 checkout，在解析出的仓库检出里继续，并保留记录，之后装回 git 再恢复仍会切回那个 checkout。
+
 **落在哪里。** 默认在 `<state-dir>/worktrees/<repo-id>/<slug>`，也就是仓库之外。想换位置就设 `worktree.root`：相对路径以主仓库根为基准，`root: .chord/worktrees` 会落在 `<repo>/.chord/worktrees/<slug>`。这个目录在仓库内时，Chord 会在其中放一个内容为 `*` 的 `.gitignore`，这些 checkout 就不会出现在未跟踪文件里；该文件只负责 `git status` 整洁，而 chord 自己的 `grep` / `glob` 会跳过这个根目录。但别的工具并不知道它：仓库内的 checkout 就是磁盘上的第二份代码树，凡是依赖索引或全仓扫描的工具（LSP 建索引、`docker` build context、会遍历整个仓库的测试运行器）都可能把它一并算进去。留在默认位置就不会有这个问题。
 
 **里面有什么。** 只有被 git 追踪的文件。主工作区未提交的改动不会带过去，被 gitignore 的内容也不会：本地 `AGENTS.md`、`.chord/config.yaml`、agents、skills、plans、memory 都留在主工作区，worktree 里的会话从主工作区读取它们。例外是 `AGENTS.md` 与项目技能：checkout 里自带副本时就用它，所以分支可以带上自己的指令与技能。其余内容的表现和主工作区一致——同一套子代理与记忆。想让某些被忽略的文件跟过去（本地 env、机器相关配置等），就把它们的 pattern 写进仓库根的 `.worktreeinclude`（gitignore 语法）：Chord 在创建时把匹配且被忽略的文件复制过去，已被跟踪的文件绝不覆盖。没有这个文件时，复制 `.env*`。复制只在创建那一刻发生，之后主工作区再改也不会同步过去或同步回来；而默认复制 `.env*` 意味着本地凭据可能落进每个 checkout，所以 pattern 只写 worktree 真正需要的那几个。

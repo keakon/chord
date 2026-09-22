@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -234,6 +235,28 @@ func TestWorktreeToolsUnavailableWithoutHost(t *testing.T) {
 	for _, tool := range []Tool{NewWorktreeEnterTool(nil), NewWorktreeExitTool(nil), NewWorktreeListTool(nil)} {
 		if _, err := tool.Execute(context.Background(), json.RawMessage(`{}`)); err == nil {
 			t.Errorf("%s should fail without a host", tool.Name())
+		}
+	}
+}
+
+func TestWorktreeToolsHiddenWithoutGit(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	host := &stubWorktreeHost{}
+	for _, tool := range []Tool{NewWorktreeEnterTool(host), NewWorktreeExitTool(host), NewWorktreeListTool(host)} {
+		available, ok := tool.(AvailableTool)
+		if !ok {
+			t.Fatalf("%s must implement AvailableTool", tool.Name())
+		}
+		if !available.IsAvailable() {
+			t.Fatalf("%s must be available with git on PATH", tool.Name())
+		}
+	}
+	t.Setenv("PATH", t.TempDir())
+	for _, tool := range []Tool{NewWorktreeEnterTool(host), NewWorktreeExitTool(host), NewWorktreeListTool(host)} {
+		if tool.(AvailableTool).IsAvailable() {
+			t.Errorf("%s must be hidden when git is not installed", tool.Name())
 		}
 	}
 }

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/keakon/chord/internal/worktree"
 )
 
 // WorktreeEnterRequest asks the agent runtime to make a worktree the agent's
@@ -129,7 +131,15 @@ func (WorktreeEnterTool) Parameters() map[string]any {
 
 func (WorktreeEnterTool) IsReadOnly() bool { return false }
 
-func (t WorktreeEnterTool) IsAvailable() bool { return t.Host != nil }
+// worktreeToolsAvailable reports whether the worktree tools can be offered at
+// all: each needs an agent binding to operate on and a git executable, because
+// every operation shells out to git. A machine without git hides all three
+// rather than listing a capability that can only fail.
+func worktreeToolsAvailable(host WorktreeHost) bool {
+	return host != nil && worktree.GitAvailable()
+}
+
+func (t WorktreeEnterTool) IsAvailable() bool { return worktreeToolsAvailable(t.Host) }
 
 func (t WorktreeEnterTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	if t.Host == nil {
@@ -203,7 +213,7 @@ func (WorktreeExitTool) Parameters() map[string]any {
 
 func (WorktreeExitTool) IsReadOnly() bool { return false }
 
-func (t WorktreeExitTool) IsAvailable() bool { return t.Host != nil }
+func (t WorktreeExitTool) IsAvailable() bool { return worktreeToolsAvailable(t.Host) }
 
 func (t WorktreeExitTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	if t.Host == nil {
@@ -273,7 +283,7 @@ func (WorktreeListTool) ConcurrencyPolicy(json.RawMessage) ConcurrencyPolicy {
 // calls; it only inspects repository state.
 func (WorktreeListTool) ConcurrencySafeReadOnly(json.RawMessage) bool { return true }
 
-func (t WorktreeListTool) IsAvailable() bool { return t.Host != nil }
+func (t WorktreeListTool) IsAvailable() bool { return worktreeToolsAvailable(t.Host) }
 
 func (t WorktreeListTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	if t.Host == nil {

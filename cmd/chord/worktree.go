@@ -53,6 +53,17 @@ var (
 	flagStartupPlan *sessionStartupPlan
 )
 
+// requireWorktreeGit refuses worktree work on a machine without git. Every
+// `chord worktree` command, --worktree, and the agent's worktree tools shell
+// out to git; without this check they would fail deep inside a probe with a
+// message about the repository instead of the machine.
+func requireWorktreeGit() error {
+	if worktree.GitAvailable() {
+		return nil
+	}
+	return fmt.Errorf("worktree support requires git: %w", worktree.ErrGitUnavailable)
+}
+
 // newWorktreeCmd builds the `chord worktree …` parent command and its
 // list/remove/finish subcommands. In addition to management subcommands,
 // `chord worktree <name>` creates or enters that chord-managed worktree
@@ -131,6 +142,9 @@ func newWorktreeListCmd() *cobra.Command {
 			ctx := cmd.Context()
 			if ctx == nil {
 				ctx = context.Background()
+			}
+			if err := requireWorktreeGit(); err != nil {
+				return err
 			}
 			cwd, err := os.Getwd()
 			if err != nil {
@@ -359,6 +373,9 @@ func newWorktreeRemoveCmd() *cobra.Command {
 			if ctx == nil {
 				ctx = context.Background()
 			}
+			if err := requireWorktreeGit(); err != nil {
+				return err
+			}
 			name := args[0]
 			cwd, err := os.Getwd()
 			if err != nil {
@@ -425,6 +442,9 @@ func newWorktreeFinishCmd() *cobra.Command {
 			branchPrefix, err := startupBranchPrefix()
 			if err != nil {
 				return fmt.Errorf("resolve worktree branch_prefix: %w", err)
+			}
+			if err := requireWorktreeGit(); err != nil {
+				return err
 			}
 			var ontoUsed string
 			if onto != "" {

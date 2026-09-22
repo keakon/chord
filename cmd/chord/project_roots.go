@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strings"
 
@@ -68,7 +69,16 @@ func resolvePathRoots(ctx context.Context, contentRoot string, pl *config.PathLo
 		return []string{contentRoot}, nil
 	}
 	mainRoot, err := worktree.GitMainRoot(ctx, contentRoot)
-	if err != nil || strings.TrimSpace(mainRoot) == "" {
+	if err != nil {
+		// A directory outside a repository is the normal case; a machine
+		// without git is worth a trace, because relative rules silently stop
+		// matching the repository.
+		if !errors.Is(err, worktree.ErrNotGitRepository) {
+			log.Debugf("repository checkouts are not merged into the policy roots error=%v", err)
+		}
+		return nil, nil
+	}
+	if strings.TrimSpace(mainRoot) == "" {
 		return nil, nil
 	}
 	// The main checkout is seeded explicitly so a failed listing still leaves
@@ -126,7 +136,13 @@ func resolveContentRoot(ctx context.Context, workDir string) string {
 	}
 	inside, err := worktree.IsInsideLinkedWorktree(ctx, workDir)
 	if err != nil {
-		log.Warnf("failed to detect linked worktree workdir=%v error=%v", workDir, err)
+		// Outside a repository — including a machine without git — the working
+		// directory is the content root, and only an unexpected failure is
+		// worth a line. A missing git binary is as normal as being outside a
+		// repository: every content-root resolution would otherwise warn once.
+		if !errors.Is(err, worktree.ErrNotGitRepository) && !errors.Is(err, worktree.ErrGitUnavailable) {
+			log.Warnf("failed to detect linked worktree workdir=%v error=%v", workDir, err)
+		}
 		return workDir
 	}
 	if !inside {

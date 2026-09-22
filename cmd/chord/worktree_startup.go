@@ -127,6 +127,9 @@ func startupWorktreeFromCwd(ctx context.Context) *worktree.Info {
 // worktree provenance. resetBranch allows resetting a leftover branch of a
 // removed worktree; without it such a branch is refused.
 func prepareStartupWorktree(ctx context.Context, name string, resetBranch bool) (*worktree.Info, error) {
+	if err := requireWorktreeGit(); err != nil {
+		return nil, err
+	}
 	name = strings.TrimSpace(name)
 	if name == "" {
 		name = worktree.GenerateAutoSlug(time.Now())
@@ -330,6 +333,13 @@ func worktreeLocationForSession(ctx context.Context, pl *config.PathLocator, pro
 	repoRoot := strings.TrimSpace(meta.RepoRoot)
 	if repoRoot == "" {
 		repoRoot = contentRoot
+	}
+	if !worktree.GitAvailable() {
+		// The recorded checkout cannot be checked without git, so resume in
+		// the content root but keep the record: installing git and resuming
+		// again still restores the checkout.
+		fmt.Fprintf(os.Stderr, "warning: session %s was working in worktree %s, but git is not available to verify it; resuming in %s and keeping the recorded checkout\n", sid, path, contentRoot)
+		return nil
 	}
 	if !worktree.IsWorktreeOf(ctx, path, repoRoot) {
 		fmt.Fprintf(os.Stderr, "warning: session %s was working in worktree %s, which is no longer a worktree of this repository; resuming in %s\n", sid, path, contentRoot)
