@@ -35,6 +35,12 @@ type FinishOptions struct {
 	// prefix. Empty falls back to DefaultBranchPrefix. Must match the prefix
 	// Create used.
 	BranchPrefix string
+	// Holders reports live work anchored to the worktree. Finish reclaims the
+	// checkout at the end, so it needs the same guard a plain removal does:
+	// finishing must not delete a checkout another agent, command, or chord
+	// session is still working in. nil means the caller supplied no resolver;
+	// a caller that cannot answer should pass one that says so.
+	Holders HoldersResolver
 }
 
 // Finish merges the target branch into the real worktree branch, then squashes
@@ -153,7 +159,7 @@ func fastForwardTargetToScratch(ctx context.Context, mainRoot, name, onto, tmpBr
 }
 
 func reclaimFinishedWorktree(ctx context.Context, mainRoot string, info *Info, name string, opts FinishOptions, pathLocator *config.PathLocator) error {
-	removeOpts := RemoveOptions{DeleteBranch: false, BranchPrefix: opts.BranchPrefix}
+	removeOpts := RemoveOptions{DeleteBranch: false, BranchPrefix: opts.BranchPrefix, Holders: opts.Holders}
 	if err := Remove(ctx, mainRoot, name, removeOpts, pathLocator); err != nil {
 		return fmt.Errorf("remove worktree %q after squash finish: %w", name, err)
 	}

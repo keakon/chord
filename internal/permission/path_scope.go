@@ -66,7 +66,7 @@ func normalizePathInput(input string, scope PathScope) string {
 		return rel
 	}
 	if filepath.IsAbs(resolved) {
-		if real, ok := resolveSymlinksBestEffort(resolved); ok {
+		if real, ok := pathutil.ResolveSymlinksBestEffort(resolved); ok {
 			if rel, ok := scope.relativize(real); ok {
 				return rel
 			}
@@ -130,26 +130,4 @@ func containerRoot(container, path string) (string, bool) {
 		return "", false
 	}
 	return filepath.Join(container, seg), true
-}
-
-// resolveSymlinksBestEffort re-spells path through the nearest existing
-// ancestor's EvalSymlinks result, so a path that only differs from a root by a
-// symlinked prefix still matches. Returns false when nothing resolves.
-func resolveSymlinksBestEffort(path string) (string, bool) {
-	cur := filepath.Clean(path)
-	remainder := ""
-	for {
-		if resolved, err := filepath.EvalSymlinks(cur); err == nil {
-			if remainder == "" {
-				return resolved, true
-			}
-			return filepath.Join(resolved, remainder), true
-		}
-		parent := filepath.Dir(cur)
-		if parent == cur {
-			return "", false
-		}
-		remainder = filepath.Join(filepath.Base(cur), remainder)
-		cur = parent
-	}
 }

@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/worktree"
 )
@@ -233,6 +236,76 @@ func shortOwnerID(id string) string {
 	return id[:8]
 }
 
+// newWorktreeSessionHolders returns the resolver the command line uses to find
+// chord sessions still working in a checkout before it deletes one.
+//
+// Session metadata records which checkout a session works in, but it is
+// durable and outlives a crash, so on its own it cannot tell "in use" from
+// "abandoned": every crashed session would block removal forever. It is paired
+// with the session lock, which a live process holds exclusively, so a session
+// counts as a holder only while its process is still running.
+//
+// Anything unverifiable is reported as a holder rather than as "free",
+// matching the agent-side guard: a checkout whose users cannot be determined
+// is not deleted.
+func newWorktreeSessionHolders(pl *config.PathLocator, contentRoot string) worktree.HoldersResolver {
+	sessionsDir := ""
+	unresolved := "the repository's session store could not be resolved"
+	if pl != nil && strings.TrimSpace(contentRoot) != "" {
+		if pj, err := pl.LocateProject(contentRoot); err == nil {
+			sessionsDir = pj.ProjectSessionsDir
+			unresolved = ""
+		} else {
+			unresolved = fmt.Sprintf("the repository's session store could not be resolved (%v)", err)
+		}
+	}
+	return func(info *worktree.Info) []string {
+		if info == nil || strings.TrimSpace(info.Path) == "" {
+			return []string{"the worktree path is unknown"}
+		}
+		if unresolved != "" {
+			return []string{fmt.Sprintf("another chord session may be open in it, and that could not be checked (%s)", unresolved)}
+		}
+		target, err := config.CanonicalProjectRoot(info.Path)
+		if err != nil {
+			target = filepath.Clean(info.Path)
+		}
+		entries, err := os.ReadDir(sessionsDir)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				// No sessions have ever been stored for this repository.
+				return nil
+			}
+			return []string{fmt.Sprintf("another chord session may be open in it, and that could not be checked (%v)", err)}
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			sessionDir := filepath.Join(sessionsDir, entry.Name())
+			meta, err := recovery.LoadSessionMeta(sessionDir)
+			if err != nil || meta == nil || strings.TrimSpace(meta.WorktreePath) == "" {
+				continue
+			}
+			recorded, err := config.CanonicalProjectRoot(meta.WorktreePath)
+			if err != nil {
+				recorded = filepath.Clean(meta.WorktreePath)
+			}
+			if recorded != target {
+				continue
+			}
+			active, err := recovery.SessionLockActive(sessionDir)
+			if err != nil {
+				return []string{fmt.Sprintf("session %s is recorded in this checkout and it could not be verified whether it is still running (%v)", entry.Name(), err)}
+			}
+			if active {
+				return []string{fmt.Sprintf("chord session %s is still open in this checkout", entry.Name())}
+			}
+		}
+		return nil
+	}
+}
+
 // newWorktreeRemoveCmd removes a chord-managed worktree, preserving its
 // branch by default to avoid losing commits that exist only there.
 func newWorktreeRemoveCmd() *cobra.Command {
@@ -263,7 +336,13 @@ func newWorktreeRemoveCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("resolve worktree branch_prefix: %w", err)
 			}
-			opts := worktree.RemoveOptions{Force: force, DeleteBranch: deleteBranch, BranchPrefix: branchPrefix, PurgeSessions: purgeSessions}
+			opts := worktree.RemoveOptions{
+				Force: force, DeleteBranch: deleteBranch, BranchPrefix: branchPrefix, PurgeSessions: purgeSessions,
+				// Sessions live under the content root's project key, shared by
+				// every checkout, so that is where the sessions using this
+				// checkout are recorded.
+				Holders: newWorktreeSessionHolders(pl, resolveContentRoot(ctx, cwd)),
+			}
 			if err := worktree.Remove(ctx, cwd, name, opts, pl); err != nil {
 				return err
 			}
@@ -339,7 +418,13 @@ func newWorktreeFinishCmd() *cobra.Command {
 				}
 				fmt.Fprintf(cmd.ErrOrStderr(), "Note: a real finish fast-forwards %s in the repository's main checkout, updating its working tree (and switching its branch back when it is on another branch); don't run another session or tool there while finish runs.\n", target)
 			}
-			if err := worktree.Finish(ctx, cwd, name, worktree.FinishOptions{Onto: onto, Check: check, Message: message, BranchPrefix: branchPrefix}, pl); err != nil {
+			finishOpts := worktree.FinishOptions{
+				Onto: onto, Check: check, Message: message, BranchPrefix: branchPrefix,
+				// A real finish reclaims the checkout at the end, so it needs
+				// the same in-use guard a plain removal has.
+				Holders: newWorktreeSessionHolders(pl, resolveContentRoot(ctx, cwd)),
+			}
+			if err := worktree.Finish(ctx, cwd, name, finishOpts, pl); err != nil {
 				return err
 			}
 			if check {

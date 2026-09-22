@@ -32,6 +32,7 @@
 - 新增 `worktree.root` 选项，可把 worktree 建到仓库内（`root: .chord/worktrees`），不再只能放在 state 目录下、仓库之外。root 落在仓库内时，Chord 会保留一个自忽略的 `.gitignore`，这些 checkout 不会出现在 `git status` 里，chord 自己的 grep/glob 也会跳过该 root。
 - 新增 `.worktreeinclude` 文件（gitignore 语法，默认 `.env*`），用来列出要复制进每个新 worktree 的被忽略文件——本地 env、机器相关配置等。已被跟踪的文件绝不覆盖。
 - 新增两个 flag：`--reset-branch` 允许复用没有任何 worktree 检出的遗留 worktree 分支，不再直接失败；`chord worktree remove --purge-sessions` 删除只有旧版按 checkout 分片存会话时才会写入的 sessions/exports store。
+- 删除 checkout 现在会在还有人正在用它时拒绝。`chord worktree remove` 与 `chord worktree finish` 删除前会检查是否有另一个 Chord 会话仍在该 checkout 里开着，`WorktreeExit` 也改成在真正删除前再查一次，而不是只信更早那次检查的结果。崩溃退出的会话不会挡住删除：会话记录会活得比进程久，因此只有进程仍持有锁的会话才算占用者。占用情况无法确定时按「占用」处理，拒绝删除。
 
 ### 改进
 

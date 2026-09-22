@@ -426,6 +426,10 @@ func (act workDirActor) exit(ctx context.Context, req tools.WorktreeExitRequest)
 		if err := worktree.Remove(ctx, act.deps.RepoRoot, info.Name, worktree.RemoveOptions{
 			DiscardChanges: true,
 			BranchPrefix:   act.deps.BranchPrefix,
+			// guardRemoval already asked once; Remove asks again as late as it
+			// can, so a holder that bound this checkout between the two checks
+			// is not deleted out from under.
+			Holders: act.removalHoldersFor,
 		}, act.deps.PathLocator); err != nil {
 			return res, err
 		}

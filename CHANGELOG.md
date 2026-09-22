@@ -32,6 +32,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - New `worktree.root` option creates worktrees inside the repository (`root: .chord/worktrees`) instead of the default location outside it under the state dir. Chord keeps a self-ignoring `.gitignore` in an in-repo root so the checkouts stay out of `git status`, and its own grep/glob skip that root.
 - New `.worktreeinclude` file (gitignore syntax, default `.env*`) lists the gitignored files — local env files, machine-specific config — that Chord copies into every new worktree. Tracked files are never overwritten.
 - New flags: `--reset-branch` reuses a leftover worktree branch that no worktree has checked out instead of failing, and `chord worktree remove --purge-sessions` deletes the session/export store that only older per-checkout versions wrote.
+- Removing a checkout now refuses while something still works in it. `chord worktree remove` and `chord worktree finish` check whether another Chord session is still open in that checkout before deleting it, and `WorktreeExit` re-checks immediately before the deletion instead of relying on an earlier answer. A session that crashed does not block removal: the recorded checkout outlives the process, so a session only counts as a holder while its process still holds its lock. When the holders cannot be determined the removal is refused rather than allowed.
 
 ### Improvements
 

@@ -289,6 +289,40 @@ func TestCheckoutRoot(t *testing.T) {
 	}
 }
 
+// TestResolveSymlinksBestEffort pins the behaviour permission matching and
+// tool execution now share: the nearest existing ancestor is what gets
+// resolved, so a path that does not exist yet is still spelled against the
+// real directory it will be created in.
+func TestResolveSymlinksBestEffort(t *testing.T) {
+	existing := filepath.Join(t.TempDir(), "pkg")
+	mustMkdirAll(t, existing)
+	canonical, err := filepath.EvalSymlinks(existing)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q): %v", existing, err)
+	}
+
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{name: "existing directory", path: existing, want: canonical},
+		{name: "file not created yet", path: filepath.Join(existing, "new.go"), want: filepath.Join(canonical, "new.go")},
+		{name: "missing intermediate directories", path: filepath.Join(existing, "a", "b", "c.go"), want: filepath.Join(canonical, "a", "b", "c.go")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := ResolveSymlinksBestEffort(tt.path)
+			if !ok {
+				t.Fatalf("ResolveSymlinksBestEffort(%q) reported failure", tt.path)
+			}
+			if got != tt.want {
+				t.Fatalf("ResolveSymlinksBestEffort(%q) = %q, want %q", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRelToBase(t *testing.T) {
 	tests := []struct {
 		name string

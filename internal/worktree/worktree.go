@@ -144,6 +144,18 @@ type CreateOptions struct {
 	Owner *Owner
 }
 
+// HoldersResolver reports live work still anchored to a worktree: another
+// agent bound to it, a background command running there, or a session in
+// another chord process. It returns human-readable reasons; a non-empty slice
+// refuses the removal.
+//
+// The resolver is called by Remove immediately before the checkout is deleted,
+// not earlier, so the window between "nothing holds it" and "it is deleted"
+// stays as narrow as the caller can make it. A resolver that cannot determine
+// the answer must return a reason rather than an empty slice: an unverifiable
+// checkout is treated as in use.
+type HoldersResolver func(info *Info) []string
+
 // RemoveOptions controls Remove. By default Remove protects the worktree
 // branch (commits may exist only there) and refuses dirty trees.
 type RemoveOptions struct {
@@ -168,6 +180,13 @@ type RemoveOptions struct {
 	// repository content root's project key, shared with every checkout, so
 	// they are never deleted by removing a worktree.
 	PurgeSessions bool
+	// Holders reports live work anchored to the worktree. It is consulted
+	// last, immediately before the checkout is deleted, so every removal
+	// path -- the agent tools and the command line alike -- refuses to pull
+	// the directory out from under running work. nil means "no resolver was
+	// supplied", which is not the same as "nothing holds it": the caller
+	// that cannot answer must pass a resolver that says so.
+	Holders HoldersResolver
 }
 
 // WorktreeRoot resolves the directory under which chord creates worktrees for
@@ -597,6 +616,16 @@ func Remove(ctx context.Context, repoRoot, name string, opts RemoveOptions, path
 		}
 		if len(strings.TrimSpace(string(statusOut))) > 0 {
 			return fmt.Errorf("worktree %q has uncommitted changes; pass --force to remove anyway", name)
+		}
+	}
+	// Consulted last on purpose: this is the only check that stands between an
+	// in-flight removal and a checkout that something is still working in, so
+	// it runs as close to the deletion as possible. The dirty and cwd checks
+	// above are cheap fail-fasts; a holder that appeared while they ran must
+	// still be seen here.
+	if opts.Holders != nil {
+		if holders := opts.Holders(info); len(holders) > 0 {
+			return fmt.Errorf("worktree %q is still in use: %s; finish or stop that work before removing the checkout", info.Name, strings.Join(holders, "; "))
 		}
 	}
 	gitArgs := []string{"worktree", "remove"}

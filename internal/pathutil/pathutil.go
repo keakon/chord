@@ -153,6 +153,36 @@ func NormalizeWithinBase(path, baseDir string) (string, error) {
 	return filepath.ToSlash(resolved), nil
 }
 
+// ResolveSymlinksBestEffort re-spells path through the EvalSymlinks result of
+// its nearest existing ancestor, so a path that differs from a known root only
+// by a symlinked prefix still matches that root. It returns false when no
+// ancestor resolves, leaving the caller to keep its own spelling.
+//
+// Permission matching and tool execution both need this, and they must agree:
+// a path the rule check resolved one way and the tool resolved another is a
+// rule that silently stops applying to the call it was meant to govern.
+//
+// The nearest existing ancestor rather than the full path is deliberate: a
+// path being created does not exist yet, but its parent directory does.
+func ResolveSymlinksBestEffort(path string) (string, bool) {
+	cur := filepath.Clean(path)
+	remainder := ""
+	for {
+		if resolved, err := filepath.EvalSymlinks(cur); err == nil {
+			if remainder == "" {
+				return resolved, true
+			}
+			return filepath.Join(resolved, remainder), true
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return "", false
+		}
+		remainder = filepath.Join(filepath.Base(cur), remainder)
+		cur = parent
+	}
+}
+
 // RelToBase returns path relative to baseDir when path lies inside baseDir
 // (the directory itself or a descendant); ok is false when path escapes
 // baseDir or the two live on different volumes.
