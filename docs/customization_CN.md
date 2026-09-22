@@ -166,6 +166,20 @@ lsp:
 
 `options` 是 Chord 应答服务器 `workspace/configuration` 请求时返回的 workspace settings，键名就是 section 名：gopls 的 `staticcheck`、`analyses` 等设置要放在 `gopls` 键下，Pyright 的设置用 `python`、`python.analysis`。平铺在顶层不会送到服务器——section 找不到对应键时，Chord 返回空对象。`init_options` 只作为 LSP 初始化元数据发送，并不是 gopls settings 的正确位置。可用的 analyzer 名称及其默认值取决于本机安装的 gopls 版本。较新的 gopls 已默认启用大多数 `modernize` analyzer；显式设为 `true` 可以记录并保留项目依赖的检查，设为 `false` 则可关闭单项检查。修改 Go 文件后，Chord 会透传 gopls 的 information 和 hint 诊断，但在默认最多 10 条的输出额度内，error 和 warning 会优先展示。
 
+```yaml
+lsp:
+  gopls:
+    command: gopls
+    file_types: [".go"]
+    options:
+      gopls:
+        staticcheck: true
+        analyses:
+          ST1000: false
+```
+
+只想关掉个别噪音检查，不必放弃整个 staticcheck：保留 `staticcheck: true`，在 `analyses` 里把对应 analyzer 设为 `false` 就行。例如 `ST1000: false` 会去掉 staticcheck 的包注释告警，其它 staticcheck 检查照常运行；`staticcheck: false` 才是关闭整个 staticcheck 集合。gopls v0.23 没有 `checks` 选项（本机支持哪些设置可查 `gopls api-json`），老示例里的 `checks: ["all", "-ST1000"]` 写法不生效，能用的开关只有 `analyses` 里的单项设置。这些设置只在语言服务器启动时读取，改完要重启 Chord。
+
 这种 LSP 反馈是编辑后的增量检查，不能替代 CI 中的全仓门禁。若项目要在 CI 中采用独立的 `modernize` 命令，应先清理并审查现有发现，再固定命令版本，而不是使用 `@latest`；部分建议修复（例如把 `omitempty` 改为 `omitzero`）会有意改变序列化行为，必须人工审查。
 
 需要先在本机安装对应语言服务器才能使用。对于 Pyright，未配置 Python 解释器时，Chord 会从 LSP workspace root 向上寻找最近的有效虚拟环境，不越过项目根；类 Unix 查找 `.venv/bin/python`、`venv/bin/python` 和 `env/bin/python`，Windows 查找对应的 `Scripts\python.exe`。同一 workspace root 的发现结果会随 LSP client 缓存，避免重复探测。
