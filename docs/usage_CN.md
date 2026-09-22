@@ -230,7 +230,7 @@ chord import claude --id <session-id> [--root ~/.claude/projects]
 
 **里面有什么。** 只有被 git 追踪的文件。主工作区未提交的改动不会带过去，被 gitignore 的内容也不会：本地 `AGENTS.md`、`.chord/config.yaml`、agents、skills、plans、memory 都留在主工作区，worktree 里的会话从主工作区读取它们。例外是 `AGENTS.md` 与项目技能：checkout 里自带副本时就用它，所以分支可以带上自己的指令与技能。其余内容的表现和主工作区一致——同一套子代理与记忆。想让某些被忽略的文件跟过去（本地 env、机器相关配置等），就把它们的 pattern 写进仓库根的 `.worktreeinclude`（gitignore 语法）：Chord 在创建时把匹配且被忽略的文件复制过去，已被跟踪的文件绝不覆盖。没有这个文件时，复制 `.env*`。复制只在创建那一刻发生，之后主工作区再改也不会同步过去或同步回来；而默认复制 `.env*` 意味着本地凭据可能落进每个 checkout，所以 pattern 只写 worktree 真正需要的那几个。
 
-**会话按仓库共享。** 同一仓库的所有 checkout 共用一个 session store，所以在 worktree 里开的会话，在主工作区能看到、也能继续，反过来也一样。runtime cache 仍按 checkout 分开，exports 跟着会话走。会话会记录自己当时所在的 checkout，`/resume` 的 `Worktree` 列会显示它：`chord resume <id>`、`chord --resume <id>`、`chord --continue` 都会切回去，继续时落在 worktree 里也会把它记下来；记录的那个 worktree 已不存在时先给出提示：`chord resume` 回主工作区继续，`--resume` 与 `--continue` 则在启动 chord 时所在的 checkout 里继续。`chord worktree remove` 和 `chord worktree finish` 都不会删除仓库的会话历史。
+**会话按仓库共享。** 同一仓库的所有 checkout 共用一个 session store，所以在 worktree 里开的会话，在主工作区能看到、也能继续，反过来也一样。runtime cache 仍按 checkout 分开，exports 跟着会话走。会话会记录自己当时所在的 checkout，`/resume` 会在那一行标出来，按 checkout 名字也能搜到：`chord resume <id>`、`chord --resume <id>`、`chord --continue` 都会切回去，继续时落在 worktree 里也会把它记下来；记录的那个 worktree 已不存在时先给出提示：`chord resume` 回主工作区继续，`--resume` 与 `--continue` 则在启动 chord 时所在的 checkout 里继续。`chord worktree remove` 和 `chord worktree finish` 都不会删除仓库的会话历史。
 
 **checkout 不是独占的。** 创建或进入 worktree 时，只要目录已存在就复用同一个，也不会阻止两个会话在同一个 checkout 里干活：它们看到的是同一份未提交改动，也可能互相覆盖文件。要并行推进的任务就各给一个 worktree；已经攒了未提交改动的 checkout，就当成只能有一个写者。
 

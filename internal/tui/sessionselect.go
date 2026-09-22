@@ -429,10 +429,10 @@ func sessionSelectPreviewText(s agent.SessionSummary) string {
 	return strings.ReplaceAll(strings.ReplaceAll(preview, "\r\n", " "), "\n", " ")
 }
 
-// sessionSelectWorktreeColWidth is the display width of the worktree column.
-// Worktree slugs are capped at 80 characters, so a long name is truncated here
-// instead of pushing the preview out of the row.
-const sessionSelectWorktreeColWidth = 16
+// sessionSelectWorktreeNameMaxWidth caps the worktree name rendered on a row.
+// The name is a slug of its own and the row must keep room for the preview,
+// which is what the session is actually identified by.
+const sessionSelectWorktreeNameMaxWidth = 16
 
 func sessionSelectItemFor(s agent.SessionSummary) OverlayListItem {
 	modStr := s.LastModTime.Format("2006-01-02 15:04")
@@ -440,25 +440,25 @@ func sessionSelectItemFor(s agent.SessionSummary) OverlayListItem {
 	if s.MessageCount >= 0 {
 		countStr = fmt.Sprintf("%d", s.MessageCount)
 	}
-	worktreeStr := "-"
-	if name := strings.TrimSpace(s.WorktreeName); name != "" {
-		worktreeStr = runewidth.Truncate(name, sessionSelectWorktreeColWidth, "…")
-	}
 	preview := sessionSelectPreviewText(s)
 	if s.ForkedFrom != "" {
 		preview = fmt.Sprintf("↳ %s · %s", s.ForkedFrom, preview)
 	}
-	return OverlayListItem{
-		ID:    s.ID,
-		Label: fmt.Sprintf("%s  %5s  %-*s  %s", modStr, countStr, sessionSelectWorktreeColWidth, worktreeStr, preview),
+	// Every checkout of a repository shares one session history, and resuming a
+	// session switches the process (cwd, tools, LSP) into the checkout it was
+	// working in. Only those rows carry the marker: a dedicated column would be
+	// blank for every main-checkout session and take its width from the preview.
+	if name := strings.TrimSpace(s.WorktreeName); name != "" {
+		preview = fmt.Sprintf("⎇ %s · %s", runewidth.Truncate(name, sessionSelectWorktreeNameMaxWidth, "…"), preview)
 	}
+	return OverlayListItem{ID: s.ID, Label: fmt.Sprintf("%s  %5s  %s", modStr, countStr, preview)}
 }
 
 // sessionSelectColumnHeader builds the dim column-header row for the session
 // picker. The 3-space lead matches OverlayList's cursor gutter and the field
 // widths mirror sessionSelectItemFor so the header aligns with the rows.
 func sessionSelectColumnHeader() string {
-	return DimStyle.Render(fmt.Sprintf("   %-16s  %5s  %-*s  %s", "Modified", "Msgs", sessionSelectWorktreeColWidth, "Worktree", "Preview"))
+	return DimStyle.Render(fmt.Sprintf("   %-16s  %5s  %s", "Modified", "Msgs", "Preview"))
 }
 
 func buildSessionSearchCorpus(options []agent.SessionSummary) []string {

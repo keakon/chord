@@ -219,7 +219,7 @@ func TestHandleSessionSummaryDetailsLoadedUpdatesCurrentPicker(t *testing.T) {
 	}
 }
 
-func TestSessionSelectRendersWorktreeColumn(t *testing.T) {
+func TestSessionSelectMarksWorktreeSessionsInline(t *testing.T) {
 	item := sessionSelectItemFor(agent.SessionSummary{
 		ID:                       "sess-worktree",
 		MessageCount:             5,
@@ -227,11 +227,32 @@ func TestSessionSelectRendersWorktreeColumn(t *testing.T) {
 		OriginalFirstUserMessage: "Refactor the parser",
 		LastModTime:              time.Date(2026, 4, 25, 12, 0, 0, 0, time.Local),
 	})
-	if !strings.Contains(item.Label, "feat-parser") {
-		t.Fatalf("session row label should include the worktree name, got %q", item.Label)
+	if !strings.Contains(item.Label, "⎇ feat-parser · Refactor the parser") {
+		t.Fatalf("worktree session should mark its checkout before the preview, got %q", item.Label)
 	}
-	if got := sessionSelectItemFor(agent.SessionSummary{ID: "sess-main", MessageCount: 1}).Label; !strings.Contains(got, "  -") {
-		t.Fatalf("session row without a worktree should render a placeholder, got %q", got)
+	if got := sessionSelectItemFor(agent.SessionSummary{
+		ID:                       "sess-main",
+		MessageCount:             1,
+		OriginalFirstUserMessage: "Plain request",
+	}).Label; strings.Contains(got, "⎇") {
+		t.Fatalf("main-checkout session should carry no worktree marker, got %q", got)
+	}
+}
+
+func TestSessionSelectDialogReservesNoWorktreeColumn(t *testing.T) {
+	options := testSessionSummaries()
+	options[0].WorktreeName = "feat-parser"
+	m := newSessionSelectTestModel(options)
+
+	plain := stripANSI(m.renderSessionSelectDialog())
+	if strings.Contains(plain, "Worktree") {
+		t.Fatalf("session picker should not reserve a worktree column:\n%s", plain)
+	}
+	if !strings.Contains(plain, "⎇ feat-parser") {
+		t.Fatalf("session picker should mark the worktree on its row:\n%s", plain)
+	}
+	if !strings.Contains(plain, "Preview") {
+		t.Fatalf("session picker should keep the preview column:\n%s", plain)
 	}
 }
 
@@ -248,11 +269,14 @@ func TestSessionSelectSearchMatchesWorktreeName(t *testing.T) {
 }
 
 func TestSessionSelectColumnHeader(t *testing.T) {
-	header := sessionSelectColumnHeader()
-	for _, want := range []string{"Modified", "Msgs", "Worktree", "Preview"} {
+	header := stripANSI(sessionSelectColumnHeader())
+	for _, want := range []string{"Modified", "Msgs", "Preview"} {
 		if !strings.Contains(header, want) {
 			t.Fatalf("column header should include %q, got %q", want, header)
 		}
+	}
+	if strings.Contains(header, "Worktree") {
+		t.Fatalf("column header should not reserve a worktree column, got %q", header)
 	}
 }
 

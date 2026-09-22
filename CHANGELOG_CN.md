@@ -47,7 +47,7 @@
 - 同一条消息里的只读工具调用现在合进同一个并行批次，不再把消息切成两段：`job_output`、`job_list`、`skill`、`view_image`、`read_artifact` 会与 `read`、`grep`、`glob`、`lsp` 一起执行，Chord 已经识别为只读的 `shell` 命令（比如 `git status`）也跟它们同批，不再充当批次边界。还在等待的 `job_output(wait: exit)` 不再压住同一批里的读文件和检索；读不同的 job 互不等待，读同一个 job 的两次调用同样相互独立，各自取走属于自己的那段新输出。
 - 能并行的只读 shell 命令变多了：`grep`、`find`、`sort`、`jq`、`diff`、`sed -n '1,20p'` 这类检索查看命令，以及 `rg --no-config`（`rg` 只有带 `--no-config` 才并入，因为 `RIPGREP_CONFIG_PATH` 可以注入 `--pre` 去跑外部命令），还有 `git` / `gh` 的查询形态（`git blame`、`git stash list`、`gh pr view` 等）都会跟读文件同批，不再一个个串行。两边都只读的管道和 `&&` / `||`（比如 `git log | head -20`）合进同一批，`command` / `nice` 只剥一层。判定依然偏保守，不会动权限：不认识的 flag 照样串行。
 - 在 worktree 里运行的会话同样带上项目上下文：指令（`AGENTS.md`）与项目技能以会话所在的 checkout 为准——分支可以自带一份——checkout 里没有的 gitignore 副本再回落到主工作区。子代理定义与记忆从主工作区读取，因此 worktree 会话的配置与主工作区一致。Chord 自己的状态——记忆、计划、笔记与 worktree 记录——也写在那里，所以从 worktree 会话写出的计划不会随它所在的 checkout 一起消失。`chord --worktree <name> --continue` 以该 worktree 为工作目录继续仓库里最近的会话。
-- 继续会话时会切回它当时所在的 checkout：`chord resume <id>`、`chord --resume <id>` 与 `chord --continue` 都会进入会话记录的 worktree，继续时落在 worktree 里也会把它记下来。那个 worktree 已不存在时先给出提示：`chord resume` 回退到主工作区，`--resume` 与 `--continue` 则在启动 chord 时所在的 checkout 里继续。会话选择器用 `Worktree` 列标出它，不同 checkout 的会话一眼可辨。runtime cache 仍按 checkout 分开。
+- 继续会话时会切回它当时所在的 checkout：`chord resume <id>`、`chord --resume <id>` 与 `chord --continue` 都会进入会话记录的 worktree，继续时落在 worktree 里也会把它记下来。那个 worktree 已不存在时先给出提示：`chord resume` 回退到主工作区，`--resume` 与 `--continue` 则在启动 chord 时所在的 checkout 里继续。会话选择器会在该会话那一行标出它，不同 checkout 的会话一眼可辨。runtime cache 仍按 checkout 分开。
 - `Available Skills` 列表对技能描述的展示上限从 157 字节提高到 1024 字符，中文描述尤其明显：写在旧上限之后的触发条件现在能到达模型，不再被静默丢掉。列表的整体预算同步提高到 8192 字节，32 条上限不变。
 
 ### 修复
