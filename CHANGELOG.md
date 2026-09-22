@@ -83,6 +83,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - A background job read (`job_output`) is now recorded as started before it runs, so an interrupted session reports that read as an unknown outcome instead of assuming it never happened and replaying it. A replay misleads here: the read consumes the job's new output and claims its completion notice, so the retry returns an empty window that looks like a successful fresh read while the output the interrupted call had already taken is gone.
 
 - A completion Chord rejected no longer shows a success card. `complete` arguments that failed validation, or a completion that arrived after the task had used up its recovery attempts, rendered a green success card while the transcript of the same call said the completion was rejected; the card now reports the error status, matching the failed outcome the transcript and the owner notification carry.
+- A stdio MCP server whose `command` is the server process itself (for example `python3 /path/to/server.py`) is no longer killed the moment it finishes initializing. Chord tied the process to the connect attempt and cancelled that context as soon as the handshake succeeded, so such a server connected, vanished before `tools/list`, and never contributed any tool. It now stays connected until the session that owns it releases it or you disable it. Launchers that keep a child alive (`npx`, `uvx`) were unaffected.
 
 ## 0.8.1 - 2026-09-16
 

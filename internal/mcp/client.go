@@ -334,12 +334,14 @@ type ServerEndpointStatus struct {
 	Error       string
 }
 
-const (
-	defaultConnectAttempts = 3
-	connectAttemptTimeout  = 20 * time.Second
-)
+const defaultConnectAttempts = 3
 
-var connectRetryBackoff = []time.Duration{500 * time.Millisecond, 1500 * time.Millisecond}
+// connectAttemptTimeout bounds one connect attempt. It is a var so tests can
+// shorten the window instead of waiting it out.
+var (
+	connectAttemptTimeout = 20 * time.Second
+	connectRetryBackoff   = []time.Duration{500 * time.Millisecond, 1500 * time.Millisecond}
+)
 
 // Manager manages connections to multiple MCP servers.
 type Manager struct {
@@ -627,8 +629,7 @@ func (m *Manager) connectServer(ctx context.Context, cfg ServerConfig) (*Client,
 		m.setEndpointStatus(status)
 
 		attemptCtx, cancel := context.WithTimeout(ctx, connectAttemptTimeout)
-
-		client, err := m.newClientFactory(attemptCtx, cfg)
+		client, err := m.newClientBounded(attemptCtx, cfg)
 		if err != nil {
 			cancel()
 			lastErr = err
@@ -729,6 +730,55 @@ func (m *Manager) connectServer(ctx context.Context, cfg ServerConfig) (*Client,
 		MaxAttempts: maxAttempts,
 		Error:       lastErr.Error(),
 	}, lastErr
+}
+
+// clientFactoryResult is one client factory call's outcome.
+type clientFactoryResult struct {
+	client *Client
+	err    error
+}
+
+// newClientBounded runs the client factory within the connect attempt and
+// returns what it built.
+//
+// The factory is not handed the attempt context: the process it starts has to
+// outlive the attempt, because the stdio transport spawns it with
+// exec.CommandContext and cancelling the attempt after a successful handshake
+// would kill a server whose command is the server itself (a launcher that keeps
+// its real child alive only loses the launcher). The manager owns that process
+// and terminates it in Client.Close. The attempt therefore bounds the *wait*
+// here: a factory that does not return in time fails the attempt like any other
+// connect error, and a client that shows up after the attempt gave up is closed
+// so that no server process is left behind. A factory that never returns leaves
+// two goroutines parked — the call itself and the drain waiting for whatever it
+// builds — which is the price of an attempt that always returns.
+func (m *Manager) newClientBounded(attemptCtx context.Context, cfg ServerConfig) (*Client, error) {
+	results := make(chan clientFactoryResult, 1)
+	go func() {
+		client, err := m.newClientFactory(context.WithoutCancel(attemptCtx), cfg)
+		results <- clientFactoryResult{client: client, err: err}
+	}()
+
+	select {
+	case res := <-results:
+		return res.client, res.err
+	case <-attemptCtx.Done():
+		// The factory is still running. Drain it in the background: whatever it
+		// returns belongs to no attempt any more.
+		go func() {
+			res := <-results
+			if res.client != nil {
+				_ = res.client.Close()
+			}
+		}()
+		if ctxErr := attemptCtx.Err(); errors.Is(ctxErr, context.Canceled) {
+			// The caller cancelled the whole connect (shutdown); the caller's
+			// classification turns this into the same pending status the
+			// handshake path reports.
+			return nil, fmt.Errorf("mcp server %q: connect aborted: %w", serverConfigName(cfg), ctxErr)
+		}
+		return nil, fmt.Errorf("mcp server %q: starting the server did not finish within %s: %w", serverConfigName(cfg), connectAttemptTimeout, attemptCtx.Err())
+	}
 }
 
 func shouldRetryConnectError(err error, cfg ServerConfig) bool {
