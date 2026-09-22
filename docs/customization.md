@@ -155,11 +155,12 @@ lsp:
     file_types: [".go"]
     root_markers: ["go.work", "go.mod", ".git"]
     options:
-      staticcheck: true
-      analyses:
-        minmax: true
-        rangeint: true
-        slicescontains: true
+      gopls:
+        staticcheck: true
+        analyses:
+          minmax: true
+          rangeint: true
+          slicescontains: true
   pyright:
     command: pyright-langserver
     args: ["--stdio"]
@@ -175,7 +176,7 @@ lsp:
     root_markers: ["Cargo.toml", "rust-project.json"]
 ```
 
-`options` contains language-server workspace settings. For gopls, put settings such as `staticcheck` and the `analyses` map there; `init_options` is sent only as LSP initialization metadata and is not the correct location for gopls settings. Analyzer names and defaults depend on the installed gopls version. Recent gopls releases already enable most `modernize` analyzers by default, while explicit `true` entries document and preserve the checks you rely on and `false` disables an individual analyzer. Chord forwards information and hint diagnostics from gopls after a Go file is changed, but errors and warnings take priority within the default 10-diagnostic output limit.
+`options` holds the workspace settings Chord returns for the server's `workspace/configuration` requests. Keys are section names, so gopls settings such as `staticcheck` and the `analyses` map belong under a `gopls` key, while Pyright settings use `python` / `python.analysis`. A flat top-level map is not delivered: when a section has no matching key, Chord answers with an empty object. `init_options` is sent only as LSP initialization metadata and is not the correct location for gopls settings. Analyzer names and defaults depend on the installed gopls version. Recent gopls releases already enable most `modernize` analyzers by default, while explicit `true` entries document and preserve the checks you rely on and `false` disables an individual analyzer. Chord forwards information and hint diagnostics from gopls after a Go file is changed, but errors and warnings take priority within the default 10-diagnostic output limit.
 
 This edit-time LSP feedback is incremental and does not replace a whole-repository CI gate. If a project adopts the standalone `modernize` command for CI, first clear and review the existing findings, then pin the command version instead of using `@latest`; some suggested fixes, such as changing `omitempty` to `omitzero`, intentionally change serialization behavior and require review.
 
