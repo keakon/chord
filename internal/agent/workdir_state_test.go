@@ -1236,3 +1236,155 @@ func TestRehydrateTaskIgnoresStaleRecordedWorktree(t *testing.T) {
 		t.Fatalf("reminder should not claim a removed worktree:\n%s", content)
 	}
 }
+
+// /new continues in the checkout the session was working in, so the new
+// session's metadata must record it: without that a later resume of the new
+// session lands in the main checkout and replays the transcript's relative
+// paths against a different tree.
+func TestNewSessionRecordsActiveWorktreeCheckout(t *testing.T) {
+	ctx := context.Background()
+	a, _ := newWorktreeTestAgent(t, "session-new-checkout")
+	a.markAgentsMDReady()
+	a.MarkSkillsReady()
+	a.markMCPReady()
+	oldSessionDir := a.sessionDir
+
+	res, err := a.WorktreeEnter(ctx, tools.WorktreeEnterRequest{Name: "feat-new"})
+	if err != nil {
+		t.Fatalf("WorktreeEnter: %v", err)
+	}
+
+	a.handleNewSessionCommand()
+
+	if a.sessionDir == oldSessionDir {
+		t.Fatal("sessionDir was not switched")
+	}
+	meta, err := recovery.LoadSessionMeta(a.sessionDir)
+	if err != nil {
+		t.Fatalf("LoadSessionMeta: %v", err)
+	}
+	if meta == nil {
+		t.Fatal("new session recorded no metadata")
+	}
+	if meta.WorktreePath != res.Path || meta.WorktreeName != res.Name || meta.WorktreeBranch != res.Branch {
+		t.Fatalf("new session meta = %+v, want the active checkout %s", meta, res.Path)
+	}
+	last := meta.WorktreeTimeline[len(meta.WorktreeTimeline)-1]
+	if last.Reason != recovery.WorktreeSwitchStartup || last.Path != res.Path {
+		t.Fatalf("startup boundary = %+v, want reason=%s path=%s", last, recovery.WorktreeSwitchStartup, res.Path)
+	}
+}
+
+// An in-process /resume replaces the session without touching the working
+// directory; the resumed transcript must be interpreted against the checkout
+// the session recorded, not the one the previous session left.
+func TestResumeAdoptsRecordedWorktreeCheckout(t *testing.T) {
+	ctx := context.Background()
+	a, repo := newWorktreeTestAgent(t, "session-resume-adopt")
+
+	res, err := a.WorktreeEnter(ctx, tools.WorktreeEnterRequest{Name: "feat-resume"})
+	if err != nil {
+		t.Fatalf("WorktreeEnter: %v", err)
+	}
+	sessionsDir, err := a.projectSessionsDir()
+	if err != nil {
+		t.Fatalf("projectSessionsDir: %v", err)
+	}
+	targetDir := filepath.Join(sessionsDir, "target-session")
+	persistRestorableSession(t, targetDir)
+	if err := recovery.SaveSessionMeta(targetDir, recovery.SessionMeta{
+		RepoRoot:       repo,
+		WorktreeName:   res.Name,
+		WorktreeBranch: res.Branch,
+		WorktreePath:   res.Path,
+	}); err != nil {
+		t.Fatalf("SaveSessionMeta(target): %v", err)
+	}
+	// Leave the checkout without removing it: the process falls back to its
+	// startup directory, which is what the current session records.
+	if _, err := a.WorktreeExit(ctx, tools.WorktreeExitRequest{Name: res.Name}); err != nil {
+		t.Fatalf("WorktreeExit: %v", err)
+	}
+	if got := a.workDirState.load().Path; got != "" {
+		t.Fatalf("binding after exit = %q, want cleared", got)
+	}
+
+	a.handleResumeCommand("target-session")
+
+	if a.sessionDir != targetDir {
+		t.Fatalf("sessionDir = %q, want %q", a.sessionDir, targetDir)
+	}
+	state := a.workDirState.load()
+	if state.Path != res.Path || state.WorktreeID != res.Name || state.Branch != res.Branch {
+		t.Fatalf("resumed binding = %#v, want the recorded checkout %s", state, res.Path)
+	}
+	meta, err := recovery.LoadSessionMeta(targetDir)
+	if err != nil {
+		t.Fatalf("LoadSessionMeta(target): %v", err)
+	}
+	if meta == nil || meta.WorktreePath != res.Path {
+		t.Fatalf("resumed session meta = %+v, want the adopted checkout", meta)
+	}
+}
+
+// A worker delegated in the main checkout must come back to it even after the
+// parent moved into a worktree. The recorded directory is not a chord-managed
+// worktree, but it still belongs to this repository, so falling back to the
+// parent's current checkout would reinterpret the worker's transcript against
+// a different tree.
+func TestRehydrateTaskKeepsRecordedMainCheckoutAfterParentSwitches(t *testing.T) {
+	ctx := context.Background()
+	a, repo := newWorktreeTestAgent(t, "session-restore-maindir")
+	configureNestedDelegationTestRuntime(a, 1)
+
+	sub := newControllableTestSubAgent(t, a, "adhoc-restore-maindir")
+	if err := a.persistSubAgentMeta(sub); err != nil {
+		t.Fatalf("persistSubAgentMeta: %v", err)
+	}
+	meta, err := loadSubAgentMeta(a.sessionDir, sub.instanceID)
+	if err != nil || meta == nil {
+		t.Fatalf("loadSubAgentMeta before switch = %+v, %v", meta, err)
+	}
+	if meta.WorkDir != repo {
+		t.Fatalf("recorded workdir = %q, want the main checkout %q", meta.WorkDir, repo)
+	}
+
+	if _, err := a.WorktreeEnter(ctx, tools.WorktreeEnterRequest{Name: "feat-parent"}); err != nil {
+		t.Fatalf("WorktreeEnter: %v", err)
+	}
+	if a.effectiveToolBaseDir() == repo {
+		t.Fatal("parent should be working in the worktree")
+	}
+
+	record := &DurableTaskRecord{
+		TaskID:             "adhoc-restore-maindir",
+		AgentDefName:       "worker",
+		TaskDesc:           "resume in the recorded main checkout",
+		State:              string(SubAgentStateCompleted),
+		ResumePolicy:       taskResumePolicyNotify,
+		LatestInstanceID:   sub.instanceID,
+		InstanceHistory:    []string{sub.instanceID},
+		RuntimeParked:      true,
+		ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{"internal/agent"}},
+	}
+	restoredAgent := newWorktreeTestAgentOn(t, repo, "session-restore-maindir-2")
+	if restoredAgent.sessionDir != a.sessionDir {
+		t.Fatalf("restored agent session dir = %q, want %q", restoredAgent.sessionDir, a.sessionDir)
+	}
+	configureNestedDelegationTestRuntime(restoredAgent, 1)
+	restoredAgent.setTaskRecords(map[string]*DurableTaskRecord{record.TaskID: record})
+	// Model the resumed process: the main agent is working in the worktree the
+	// parent entered, so the worker's record is the only source of its tree.
+	restoredAgent.workDirState.store(WorkDirState{Path: a.effectiveToolBaseDir(), WorktreeID: "feat-parent"})
+
+	restored, _, err := restoredAgent.rehydrateTask(record)
+	if err != nil {
+		t.Fatalf("rehydrateTask: %v", err)
+	}
+	if got := restored.effectiveToolBaseDir(); got != repo {
+		t.Fatalf("restored worker dir = %q, want the recorded main checkout %q", got, repo)
+	}
+	if state := restored.workDirState.load(); state.WorktreeID != "" || state.Path != "" {
+		t.Fatalf("restored binding = %#v, want the plain main checkout without worktree identity", state)
+	}
+}

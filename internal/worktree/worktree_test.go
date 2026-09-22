@@ -144,7 +144,7 @@ func TestCreate_Basic(t *testing.T) {
 	if info.Existed {
 		t.Errorf("Existed=true on first create")
 	}
-	if info.Slug != "feat-a" || info.Branch != "chord/feat-a" {
+	if info.Name != "feat-a" || info.Branch != "chord/feat-a" {
 		t.Errorf("name fields wrong: %+v", info)
 	}
 	if !strings.Contains(info.Path, "worktrees") || !strings.Contains(info.Path, info.RepoID) {
@@ -196,16 +196,16 @@ func TestCreate_FastResume(t *testing.T) {
 	if first.Path != second.Path {
 		t.Errorf("path drift: %q vs %q", first.Path, second.Path)
 	}
-	if second.Slug != "feat-a" || second.Name != "feat-a" {
-		t.Errorf("resumed Info = %+v, want Slug and Name both feat-a", second)
+	if second.Name != "feat-a" {
+		t.Errorf("resumed Info = %+v, want Name feat-a", second)
 	}
 }
 
-// TestCreate_FastResumeDerivesSlugFromBranch pins the case the Slug field used
-// to get wrong: the caller names only a branch, so the name is derived from it
-// and opts.Name is still empty. The resumed Info must still carry the derived
-// slug, or the index entry built from it records no slug at all.
-func TestCreate_FastResumeDerivesSlugFromBranch(t *testing.T) {
+// TestCreate_FastResumeDerivesNameFromBranch pins the branch-only resume: the
+// caller names only a branch, so the name is derived from it and opts.Name is
+// still empty. The resumed Info must still carry the derived name, or the index
+// entry built from it records no worktree name.
+func TestCreate_FastResumeDerivesNameFromBranch(t *testing.T) {
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
@@ -219,8 +219,8 @@ func TestCreate_FastResumeDerivesSlugFromBranch(t *testing.T) {
 	if !resumed.Existed {
 		t.Errorf("Existed=false on resume")
 	}
-	if resumed.Slug != "feat-b" || resumed.Name != "feat-b" {
-		t.Errorf("resumed Info = %+v, want Slug and Name both feat-b", resumed)
+	if resumed.Name != "feat-b" {
+		t.Errorf("resumed Info = %+v, want Name feat-b", resumed)
 	}
 }
 
@@ -261,6 +261,43 @@ func TestCreate_RefusesLeftoverBranchWithoutReset(t *testing.T) {
 	}
 	if got, want := gitRevParse(t, repo, "chord/feat"), gitRevParse(t, repo, "HEAD"); got != want {
 		t.Errorf("ResetBranch left the branch at %s, want the main HEAD %s", got, want)
+	}
+}
+
+// TestCreate_PrunesStaleRegistrationInsteadOfResumingIt pins what happens when
+// a worktree directory disappears but its git registration survives (a manual
+// rm -rf, an interrupted create): the fast-resume path must not hand back a
+// binding to a directory that is not there, and the stale registration must be
+// dropped so the branch guard owns what happens next.
+func TestCreate_PrunesStaleRegistrationInsteadOfResumingIt(t *testing.T) {
+	repo := setupTestRepo(t)
+	pl := setupTestLocator(t)
+	ctx := context.Background()
+	info, err := Create(ctx, CreateOptions{Name: "feat-stale", RepoRoot: repo, PathLocator: pl})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(info.Path); err != nil {
+		t.Fatalf("remove checkout directory: %v", err)
+	}
+
+	_, err = Create(ctx, CreateOptions{Name: "feat-stale", RepoRoot: repo, PathLocator: pl})
+	if err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("recreate over a stale registration: err=%v, want the branch refusal", err)
+	}
+	if _, err := ResolveByName(ctx, repo, "feat-stale", DefaultBranchPrefix); err == nil {
+		t.Fatal("stale worktree registration survived, want it pruned")
+	}
+
+	recreated, err := Create(ctx, CreateOptions{Name: "feat-stale", RepoRoot: repo, PathLocator: pl, ResetBranch: true})
+	if err != nil {
+		t.Fatalf("Create with ResetBranch after prune: %v", err)
+	}
+	if recreated.Existed {
+		t.Error("recreated Info.Existed = true, want a fresh create")
+	}
+	if _, err := os.Stat(recreated.Path); err != nil {
+		t.Fatalf("recreated checkout missing: %v", err)
 	}
 }
 
@@ -336,6 +373,32 @@ func TestList_FiltersByBranchPrefix(t *testing.T) {
 	}
 }
 
+func TestGitMainRootResolvesBareRepositoryToItself(t *testing.T) {
+	ctx := context.Background()
+	seed := setupTestRepo(t)
+	bare := filepath.Join(t.TempDir(), "repo.git")
+	runTestGit(t, seed, "clone", "-q", "--bare", seed, bare)
+	canonicalBare, err := config.CanonicalProjectRoot(bare)
+	if err != nil {
+		t.Fatalf("canonical bare: %v", err)
+	}
+
+	// A bare repository has no working tree; its container directory is not a
+	// repository, so the bare dir itself is the main root.
+	if got, err := GitMainRoot(ctx, bare); err != nil || got != canonicalBare {
+		t.Fatalf("GitMainRoot(%q) = %q, %v; want %q", bare, got, err, canonicalBare)
+	}
+
+	// A linked worktree of a bare repository shares that bare dir as its
+	// common dir: resolving its parent would anchor the project to the
+	// container directory.
+	linked := filepath.Join(t.TempDir(), "linked")
+	runTestGit(t, bare, "worktree", "add", "-q", "-b", "feat", linked)
+	if got, err := GitMainRoot(ctx, linked); err != nil || got != canonicalBare {
+		t.Fatalf("GitMainRoot(%q) = %q, %v; want %q", linked, got, err, canonicalBare)
+	}
+}
+
 func TestRemove_PreservesBranchAndSessions(t *testing.T) {
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
@@ -384,6 +447,23 @@ func TestRemove_DeleteBranch_OnUnmergedRefuses(t *testing.T) {
 	runTestGit(t, info.Path, "add", "extra.txt")
 	runTestGit(t, info.Path, "commit", "-q", "-m", "extra")
 
+	pj, err := pl.LocateProject(info.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(pj.RuntimeCacheDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(pj.RegistryMetaPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pj.RegistryMetaPath, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := RegisterInIndex(pl, info); err != nil {
+		t.Fatal(err)
+	}
+
 	err = Remove(ctx, repo, "feat", RemoveOptions{DeleteBranch: true}, pl)
 	if err == nil || !strings.Contains(err.Error(), "delete branch") {
 		t.Errorf("expected delete-branch refusal on unmerged branch, got %v", err)
@@ -391,6 +471,79 @@ func TestRemove_DeleteBranch_OnUnmergedRefuses(t *testing.T) {
 	branches, _ := exec.Command("git", "-C", repo, "branch", "--list", "chord/feat").CombinedOutput()
 	if !strings.Contains(string(branches), "chord/feat") {
 		t.Errorf("branch was removed despite refusal: %s", branches)
+	}
+	// The refusal must come before the checkout is touched: an unmerged branch
+	// can only be reported by `git branch -d` after `git worktree remove`, and
+	// running it there would leave the removal half-executed.
+	if _, err := os.Stat(info.Path); err != nil {
+		t.Errorf("checkout dir gone after a refused delete-branch removal: %v", err)
+	}
+	if _, err := ResolveByName(ctx, repo, "feat", DefaultBranchPrefix); err != nil {
+		t.Errorf("worktree no longer resolves after a refused removal: %v", err)
+	}
+	if _, err := os.Stat(pj.RuntimeCacheDir); err != nil {
+		t.Errorf("runtime cache removed by a refused removal: %v", err)
+	}
+	if _, err := os.Stat(pj.RegistryMetaPath); err != nil {
+		t.Errorf("registry metadata removed by a refused removal: %v", err)
+	}
+	idx, err := LoadRepoIndex(pl.StateDir, info.RepoID)
+	if err != nil {
+		t.Fatalf("LoadRepoIndex: %v", err)
+	}
+	if idx == nil || idx.FindWorktree("feat") == nil {
+		t.Errorf("repo index entry dropped by a refused removal: %+v", idx)
+	}
+}
+
+func TestRemove_DeleteBranch_OnMergedDeletesBranch(t *testing.T) {
+	repo := setupTestRepo(t)
+	pl := setupTestLocator(t)
+	ctx := context.Background()
+	info, err := Create(ctx, CreateOptions{Name: "feat", RepoRoot: repo, PathLocator: pl})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A fresh worktree branch starts at the main checkout's HEAD, so this is
+	// the branch `git branch -d` accepts: the pre-check must not refuse it.
+	if err := Remove(ctx, repo, "feat", RemoveOptions{DeleteBranch: true}, pl); err != nil {
+		t.Fatalf("Remove --delete-branch on a merged branch: %v", err)
+	}
+	if _, err := os.Stat(info.Path); err == nil {
+		t.Errorf("worktree dir still exists after Remove")
+	}
+	branches, _ := exec.Command("git", "-C", repo, "branch", "--list", "chord/feat").CombinedOutput()
+	if strings.Contains(string(branches), "chord/feat") {
+		t.Errorf("merged branch survived --delete-branch: %s", branches)
+	}
+}
+
+func TestBranchFullyMergedTracksHead(t *testing.T) {
+	repo := setupTestRepo(t)
+	pl := setupTestLocator(t)
+	ctx := context.Background()
+	info, err := Create(ctx, CreateOptions{Name: "feat", RepoRoot: repo, PathLocator: pl})
+	if err != nil {
+		t.Fatal(err)
+	}
+	merged, target, err := BranchFullyMerged(ctx, repo, info.Branch)
+	if err != nil {
+		t.Fatalf("BranchFullyMerged: %v", err)
+	}
+	if !merged || target != "HEAD" {
+		t.Errorf("fresh branch = (%v, %q), want (true, HEAD)", merged, target)
+	}
+	if err := os.WriteFile(filepath.Join(info.Path, "extra.txt"), []byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, info.Path, "add", "extra.txt")
+	runTestGit(t, info.Path, "commit", "-q", "-m", "extra")
+	merged, target, err = BranchFullyMerged(ctx, repo, info.Branch)
+	if err != nil {
+		t.Fatalf("BranchFullyMerged after commit: %v", err)
+	}
+	if merged || target != "HEAD" {
+		t.Errorf("diverged branch = (%v, %q), want (false, HEAD)", merged, target)
 	}
 }
 
@@ -453,6 +606,51 @@ func TestRemove_RefusesCwdSelf(t *testing.T) {
 	err = Remove(ctx, repo, "feat", RemoveOptions{Force: true}, pl)
 	if err == nil || !strings.Contains(err.Error(), "current working directory") {
 		t.Errorf("cwd-self removal allowed: err=%v", err)
+	}
+}
+
+// TestFinish_RefusesBeforeTouchingTheMainLineWhenHeld pins the ordering of the
+// holder check: merging, squashing and fast-forwarding the target branch cannot
+// be taken back, so a refusal that only arrived at the deletion step would leave
+// the main line already advanced while the checkout survives.
+func TestFinish_RefusesBeforeTouchingTheMainLineWhenHeld(t *testing.T) {
+	repo := setupTestRepo(t)
+	pl := setupTestLocator(t)
+	ctx := context.Background()
+	info, err := Create(ctx, CreateOptions{Name: "feat-held", RepoRoot: repo, PathLocator: pl})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(info.Path, "extra.txt"), []byte("work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, info.Path, "add", "extra.txt")
+	runTestGit(t, info.Path, "commit", "-q", "-m", "worktree commit")
+
+	beforeMain := strings.TrimSpace(string(mustRunGit(t, repo, "rev-parse", "main")))
+	if branchHead := strings.TrimSpace(string(mustRunGit(t, info.Path, "rev-parse", "HEAD"))); branchHead == beforeMain {
+		t.Fatal("test setup: the worktree branch must be ahead of main")
+	}
+
+	err = Finish(ctx, repo, "feat-held", FinishOptions{
+		Holders: func(*Info) []string {
+			return []string{"chord session 20260101000000000 is still open in this checkout"}
+		},
+	}, pl)
+	if err == nil || !strings.Contains(err.Error(), "still in use") {
+		t.Fatalf("Finish error = %v, want an in-use refusal", err)
+	}
+	if after := strings.TrimSpace(string(mustRunGit(t, repo, "rev-parse", "main"))); after != beforeMain {
+		t.Errorf("main moved to %s despite the refusal (was %s)", after, beforeMain)
+	}
+	if _, err := os.Stat(info.Path); err != nil {
+		t.Errorf("checkout should survive a refused finish: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "extra.txt")); err == nil {
+		t.Error("worktree content landed in the main checkout despite the refusal")
+	}
+	if _, err := ResolveByName(ctx, repo, "feat-held", DefaultBranchPrefix); err != nil {
+		t.Errorf("branch should survive a refused finish: %v", err)
 	}
 }
 

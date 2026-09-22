@@ -80,8 +80,7 @@ func effectiveBranchPrefix(s string) string {
 // index. The same struct is returned by Create, List, and ResolveByName
 // so callers can route a single value through any of those entry points.
 type Info struct {
-	Slug       string // bare slug (no branch-prefix)
-	Name       string // user-facing name; equal to Slug for v1
+	Name       string // bare worktree name, without the branch prefix
 	Branch     string // full branch including branch-prefix (e.g. "chord/<slug>")
 	Path       string // canonical worktree root
 	RepoRoot   string // canonical main repo root
@@ -270,23 +269,34 @@ func Create(ctx context.Context, opts CreateOptions) (*Info, error) {
 		return nil, err
 	}
 	for _, e := range parseWorktreeListPorcelain(listOut) {
-		if shortBranch(e.Branch) == branch {
-			path, _ := canonicalDir(e.Path)
-			head, _ := runGitText(ctx, path, "rev-parse", "HEAD")
-			return &Info{
-				// name, not opts.Name: when the caller named only a branch,
-				// name was derived from it and opts.Name is still empty, and
-				// the index entry built from this Info would record no slug.
-				Slug:     name,
-				Name:     name,
-				Branch:   branch,
-				Path:     path,
-				RepoRoot: mainRoot,
-				RepoID:   repoID,
-				BaseSHA:  head,
-				Existed:  true,
-			}, nil
+		if shortBranch(e.Branch) != branch {
+			continue
 		}
+		// A registration can outlive its directory (a manual rm -rf, an
+		// interrupted create). Resuming it would hand back a binding to a path
+		// that does not exist, so drop the stale registration and fall through
+		// to the normal create path, which owns the decision about the
+		// surviving branch.
+		if st, statErr := os.Stat(strings.TrimSpace(e.Path)); statErr != nil || !st.IsDir() {
+			if _, pruneErr := runGit(ctx, mainRoot, "worktree", "prune"); pruneErr != nil {
+				log.Warnf("prune stale worktree registration failed branch=%v path=%v error=%v", branch, e.Path, pruneErr)
+			}
+			continue
+		}
+		path, _ := canonicalDir(e.Path)
+		head, _ := runGitText(ctx, path, "rev-parse", "HEAD")
+		return &Info{
+			// name, not opts.Name: when the caller named only a branch,
+			// name was derived from it and opts.Name is still empty, so
+			// reading opts.Name here would lose the derived name.
+			Name:     name,
+			Branch:   branch,
+			Path:     path,
+			RepoRoot: mainRoot,
+			RepoID:   repoID,
+			BaseSHA:  head,
+			Existed:  true,
+		}, nil
 	}
 
 	if err := guardWorktreePath(wantPath); err != nil {
@@ -353,7 +363,6 @@ func Create(ctx context.Context, opts CreateOptions) (*Info, error) {
 	headSHA, _ := runGitText(ctx, canonical, "rev-parse", "HEAD")
 	headBranch, _ := runGitText(ctx, mainRoot, "rev-parse", "--abbrev-ref", "HEAD")
 	return &Info{
-		Slug:       name,
 		Name:       name,
 		Branch:     branch,
 		Path:       canonical,
@@ -401,7 +410,6 @@ func RegisterInIndex(pl *config.PathLocator, info *Info) error {
 	}
 	entry := RepoIndexWorktree{
 		Name:   info.Name,
-		Slug:   info.Slug,
 		Branch: info.Branch,
 		Path:   info.Path,
 	}
@@ -444,11 +452,10 @@ func List(ctx context.Context, repoRoot, branchPrefix string) ([]Info, error) {
 		if !strings.HasPrefix(br, prefix) {
 			continue
 		}
-		slug := strings.TrimPrefix(br, prefix)
+		name := strings.TrimPrefix(br, prefix)
 		path, _ := canonicalDir(e.Path)
 		infos = append(infos, Info{
-			Slug:     slug,
-			Name:     slug,
+			Name:     name,
 			Branch:   br,
 			Path:     path,
 			RepoRoot: mainRoot,
@@ -493,10 +500,10 @@ func CheckoutPathsInMain(ctx context.Context, mainRoot string) ([]string, error)
 	return paths, nil
 }
 
-// ResolveByName returns the worktree with the given name (= slug in v1),
-// or an error when not found. branchPrefix scopes the search; empty
-// falls back to DefaultBranchPrefix and must match the prefix Create
-// used.
+// ResolveByName returns the worktree with the given name, which is the
+// branch's bare slug, or an error when not found. branchPrefix scopes the
+// search; empty falls back to DefaultBranchPrefix and must match the prefix
+// Create used.
 func ResolveByName(ctx context.Context, repoRoot, name, branchPrefix string) (*Info, error) {
 	if err := ValidateSlug(name); err != nil {
 		return nil, err
@@ -576,10 +583,55 @@ func ResolveByPath(ctx context.Context, repoRoot, dir, branchPrefix string) (*In
 	return nil, fmt.Errorf("path %s is not a chord-managed worktree of this repository", target)
 }
 
+// ResolveContaining returns the chord-managed worktree whose root is dir or
+// contains dir. It is the ancestor-aware counterpart of ResolveByPath, for
+// callers that hold any directory inside a checkout (a working directory or a
+// process cwd) rather than the checkout root itself. The deepest match wins, so
+// a checkout nested in another one resolves to the one the path is really in.
+func ResolveContaining(ctx context.Context, repoRoot, dir, branchPrefix string) (*Info, error) {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return nil, fmt.Errorf("empty worktree path")
+	}
+	target, err := canonicalDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve worktree path %s: %w", dir, err)
+	}
+	infos, err := List(ctx, repoRoot, branchPrefix)
+	if err != nil {
+		return nil, err
+	}
+	var best *Info
+	for i := range infos {
+		if !dirContains(infos[i].Path, target) {
+			continue
+		}
+		if best == nil || len(infos[i].Path) > len(best.Path) {
+			best = &infos[i]
+		}
+	}
+	if best == nil {
+		return nil, fmt.Errorf("path %s is not inside a chord-managed worktree of this repository", target)
+	}
+	return best, nil
+}
+
+// dirContains reports whether root is dir itself or an ancestor of it. Both
+// paths are expected to be canonical.
+func dirContains(root, dir string) bool {
+	root = filepath.Clean(root)
+	if dir == root {
+		return true
+	}
+	return strings.HasPrefix(dir, root+string(filepath.Separator))
+}
+
 // Remove deletes a chord-managed worktree and its index entry, and clears the
 // per-checkout runtime state chord derived from it (runtime cache and the
 // project registry metadata). Branch is preserved unless DeleteBranch or Force
-// is set.
+// is set. With DeleteBranch the branch is only deleted when `git branch -d`
+// would accept it, and that test runs before the checkout is touched, so a
+// refusal leaves the worktree in place.
 //
 // Sessions and exports are shared by every checkout of the repository — they
 // live under the content root's project key — so removing a worktree never
@@ -611,6 +663,20 @@ func Remove(ctx context.Context, repoRoot, name string, opts RemoveOptions, path
 			return fmt.Errorf("worktree %q has uncommitted changes; pass --force to remove anyway", name)
 		}
 	}
+	// `git branch -d` refuses a branch that is not fully merged into its
+	// upstream, or into HEAD when it has none. Run that same test before the
+	// checkout is touched: running it only after `git worktree remove` turns a
+	// refusal into a half-executed removal — the working directory is gone, the
+	// branch is kept, and the error describes a state the user did not ask for.
+	if opts.DeleteBranch && !opts.Force {
+		merged, target, err := BranchFullyMerged(ctx, info.RepoRoot, info.Branch)
+		if err != nil {
+			return fmt.Errorf("cannot tell whether branch %s is fully merged into %s (pass --force to delete it anyway): %w", info.Branch, target, err)
+		}
+		if !merged {
+			return fmt.Errorf("delete branch %s (use --force to override): the branch is not fully merged into %s; the worktree was left untouched", info.Branch, target)
+		}
+	}
 	// Consulted last on purpose: this is the only check that stands between an
 	// in-flight removal and a checkout that something is still working in, so
 	// it runs as close to the deletion as possible. The dirty and cwd checks
@@ -623,7 +689,11 @@ func Remove(ctx context.Context, repoRoot, name string, opts RemoveOptions, path
 	// mutation lock shared by "bind a session to this checkout" and "remove the
 	// checkout" — either a flock a binding holds while it records the checkout,
 	// or git's own `worktree lock` plus stale-lock handling. Neither is
-	// implemented, so treat this as best-effort, not as a guarantee.
+	// implemented, so treat this as best-effort, not as a guarantee. A binder
+	// must also hold its own session lock before it records the checkout and
+	// re-check that the path still exists after taking the mutation lock,
+	// otherwise the removal scan reads a just-written binding as an abandoned
+	// one.
 	if opts.Holders != nil {
 		if holders := opts.Holders(info); len(holders) > 0 {
 			return fmt.Errorf("worktree %q is still in use: %s; finish or stop that work before removing the checkout", info.Name, strings.Join(holders, "; "))
@@ -637,6 +707,7 @@ func Remove(ctx context.Context, repoRoot, name string, opts RemoveOptions, path
 	if _, err := runGit(ctx, info.RepoRoot, gitArgs...); err != nil {
 		return err
 	}
+	var branchErr error
 	if opts.Force {
 		// `branch -D` succeeds even when unmerged; matches Force semantics.
 		if _, berr := runGit(ctx, info.RepoRoot, "branch", "-D", info.Branch); berr != nil {
@@ -646,7 +717,12 @@ func Remove(ctx context.Context, repoRoot, name string, opts RemoveOptions, path
 		}
 	} else if opts.DeleteBranch {
 		if _, berr := runGit(ctx, info.RepoRoot, "branch", "-d", info.Branch); berr != nil {
-			return fmt.Errorf("delete branch %s (use --force to override): %w", info.Branch, berr)
+			// The pre-check above normally answers this question, so reaching
+			// here means the branch changed while the checkout was removed.
+			// Keep the error for the end: the checkout is already gone, and
+			// returning now would skip the derived-state cleanup below for a
+			// removal that did happen.
+			branchErr = berr
 		}
 	}
 	if err := cleanupWorktreeProjectState(info.Path, pathLocator); err != nil {
@@ -656,7 +732,13 @@ func Remove(ctx context.Context, repoRoot, name string, opts RemoveOptions, path
 		idx.RemoveWorktree(name)
 		return nil
 	}); err != nil {
-		return fmt.Errorf("update repo index: %w", err)
+		// The index is a display cache, and the checkout and its branch are
+		// already gone by now: a failed index update must not be reported as a
+		// failed removal, which would invite a retry of a destructive step.
+		log.Warnf("update repo index after worktree removal failed worktree=%v error=%v", name, err)
+	}
+	if branchErr != nil {
+		return fmt.Errorf("worktree %q was removed, but branch %s could not be deleted (use --force to delete it): %w", name, info.Branch, branchErr)
 	}
 	return nil
 }
@@ -702,6 +784,17 @@ func GitMainRoot(ctx context.Context, dir string) (string, error) {
 		return "", err
 	}
 	mainRoot := filepath.Dir(commonAbs)
+	// The common dir is normally <main-checkout>/.git, so the main root is its
+	// parent. It is not a ".git" directory when the repository itself is the
+	// git dir — a bare repository, or a linked worktree of one — and walking
+	// up would anchor the project to the container directory instead of the
+	// repository. The base-name check keeps this off the common path, where it
+	// would cost an extra git call on every resolution.
+	if filepath.Base(commonAbs) != ".git" {
+		if bare, berr := IsBareRepository(ctx, commonAbs); berr == nil && bare {
+			mainRoot = commonAbs
+		}
+	}
 	canonical, err := canonicalDir(mainRoot)
 	if err != nil {
 		return mainRoot, nil

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -158,4 +159,32 @@ func listSubAgentMetaIDs(sessionDir string) []string {
 	}
 	sort.Strings(ids)
 	return ids
+}
+
+// NonTerminalSubAgentWorkDirs returns the working directories recorded for a
+// session's workers that have not reached a terminal state. The per-instance
+// metadata is the only place a worker's checkout is recorded: a worker can
+// enter a checkout the session's own metadata never names, so a caller
+// deciding whether a checkout is still in use must read here as well.
+//
+// A record that cannot be read is an error rather than an empty answer: the
+// caller is guarding a destructive action and must be able to fail closed. An
+// empty or unknown state counts as non-terminal, because a worker that never
+// reported a terminal state may still be running.
+func NonTerminalSubAgentWorkDirs(sessionDir string) ([]string, error) {
+	ids := listSubAgentMetaIDs(sessionDir)
+	var dirs []string
+	for _, id := range ids {
+		meta, err := loadSubAgentMeta(sessionDir, id)
+		if err != nil {
+			return nil, fmt.Errorf("read worker metadata %s: %w", id, err)
+		}
+		if meta == nil || isTerminalSubAgentState(SubAgentState(strings.TrimSpace(meta.State))) {
+			continue
+		}
+		if dir := strings.TrimSpace(meta.WorkDir); dir != "" {
+			dirs = append(dirs, dir)
+		}
+	}
+	return dirs, nil
 }

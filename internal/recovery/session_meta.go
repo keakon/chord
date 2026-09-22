@@ -61,6 +61,11 @@ const (
 	WorktreeSwitchEnter          = "enter"
 	WorktreeSwitchExit           = "exit"
 	WorktreeSwitchResumeFallback = "resume_fallback"
+	// WorktreeSwitchStartup records a session that began in a checkout because
+	// chord was launched from inside it, without --worktree or --resume naming
+	// the checkout. The switch is still a boundary: the history after it runs in
+	// that checkout whether or not the user asked for it explicitly.
+	WorktreeSwitchStartup = "startup"
 )
 
 // WorktreeTimelineEntry is one boundary record of a session's active-checkout

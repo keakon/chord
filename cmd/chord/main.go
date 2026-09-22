@@ -272,6 +272,22 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 			flagWorktreeStartupMeta = worktreeMetaForInfo(info)
 			flagWorktreeStartupReason = recovery.WorktreeSwitchResume
 		}
+	} else if !plan.SessionOptions.ContinueLatest {
+		// Started inside a checkout: bind to it the same way --worktree and
+		// --resume do, so the session records the checkout it works in and
+		// another process can see it as a holder. --continue is excluded: it
+		// opens an existing session, whose own recorded checkout stays
+		// authoritative (and must not be overwritten by the launch directory).
+		wtCtx := cmd.Context()
+		if wtCtx == nil {
+			wtCtx = context.Background()
+		}
+		if info := startupWorktreeFromCwd(wtCtx); info != nil {
+			flagWorktreeStartupInfo = info
+			flagWorktreeStartupMeta = worktreeMetaForInfo(info)
+			flagWorktreeStartupReason = recovery.WorktreeSwitchStartup
+			plan.SessionOptions.NewSessionMeta = flagWorktreeStartupMeta
+		}
 	}
 
 	// pprof: enabled only when CHORD_PPROF_PORT is set (e.g. "6060").
@@ -456,7 +472,6 @@ func activeWorktreeInfo(ac *AppContext) *worktree.Info {
 		if samePath(entry.Path, ac.WorkDir) {
 			return &worktree.Info{
 				Name:     entry.Name,
-				Slug:     entry.Slug,
 				Branch:   entry.Branch,
 				Path:     entry.Path,
 				RepoRoot: mainRoot,

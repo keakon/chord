@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -137,5 +138,65 @@ func TestWorktreeSessionHoldersFailsClosedWhenUnverifiable(t *testing.T) {
 	}
 	if !strings.Contains(holders[0], "could not be checked") {
 		t.Fatalf("holder = %q, want it to say the check could not be made", holders[0])
+	}
+}
+
+// seedWorkerInCheckout writes a worker metadata record as the agent persists
+// it, so the command-line guard reads the same shape the runtime writes.
+func seedWorkerInCheckout(t *testing.T, sessionDir, instanceID, workDir, state string) {
+	t.Helper()
+	dir := filepath.Join(sessionDir, "subagents")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir subagents: %v", err)
+	}
+	body := fmt.Sprintf(`{"instance_id":%q,"work_dir":%q,"state":%q}`, instanceID, workDir, state)
+	if err := os.WriteFile(filepath.Join(dir, instanceID+".meta.json"), []byte(body), 0o600); err != nil {
+		t.Fatalf("write worker meta: %v", err)
+	}
+}
+
+// TestWorktreeSessionHoldersDetectsWorkerCheckout pins the worker half of the
+// cross-process scan: a worker can enter a checkout the session's own metadata
+// never names, so the session's binding alone cannot see it, and a live worker
+// left out of the scan would have its directory deleted underneath it.
+func TestWorktreeSessionHoldersDetectsWorkerCheckout(t *testing.T) {
+	pl := newHoldersTestLocator(t)
+	contentRoot := t.TempDir()
+	sessionCheckout := filepath.Join(t.TempDir(), "wt-main")
+	workerCheckout := filepath.Join(t.TempDir(), "wt-worker")
+	for _, p := range []string{sessionCheckout, workerCheckout} {
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", p, err)
+		}
+	}
+	sessionDir := seedSessionInCheckout(t, pl, contentRoot, "20260104000000000", sessionCheckout)
+	lock, err := recovery.AcquireSessionLock(sessionDir)
+	if err != nil {
+		t.Fatalf("AcquireSessionLock: %v", err)
+	}
+	defer func() { _ = lock.Release() }()
+	seedWorkerInCheckout(t, sessionDir, "worker-1", workerCheckout, "running")
+
+	holders := newWorktreeSessionHolders(pl, contentRoot)(&worktree.Info{Name: "worker", Path: workerCheckout})
+	if len(holders) != 1 || !strings.Contains(holders[0], "20260104000000000") {
+		t.Fatalf("holders = %v, want the session named as the holder", holders)
+	}
+
+	// A worker whose directory is a subdirectory of the checkout still holds
+	// it: removing the checkout takes that directory with it.
+	nested := filepath.Join(workerCheckout, "nested")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatalf("mkdir nested: %v", err)
+	}
+	seedWorkerInCheckout(t, sessionDir, "worker-2", nested, "waiting_main")
+	if holders := newWorktreeSessionHolders(pl, contentRoot)(&worktree.Info{Name: "worker", Path: workerCheckout}); len(holders) != 1 {
+		t.Fatalf("holders = %v, want the nested worker to hold the checkout", holders)
+	}
+
+	// Terminal workers no longer hold the checkout.
+	seedWorkerInCheckout(t, sessionDir, "worker-1", workerCheckout, "completed")
+	seedWorkerInCheckout(t, sessionDir, "worker-2", nested, "cancelled")
+	if holders := newWorktreeSessionHolders(pl, contentRoot)(&worktree.Info{Name: "worker", Path: workerCheckout}); len(holders) != 0 {
+		t.Fatalf("holders = %v, want none after the workers finished", holders)
 	}
 }

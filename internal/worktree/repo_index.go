@@ -36,7 +36,6 @@ type RepoIndex struct {
 // rebuilt, so removal decisions must re-read the file.
 type RepoIndexWorktree struct {
 	Name           string    `json:"name"`
-	Slug           string    `json:"slug"`
 	Branch         string    `json:"branch"`
 	Path           string    `json:"path"`
 	OwnerSessionID string    `json:"owner_session_id,omitempty"`

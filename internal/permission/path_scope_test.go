@@ -78,6 +78,46 @@ func TestEvaluatePathScopeContainerRule(t *testing.T) {
 	}
 }
 
+// TestNormalizePathInputPrefersCheckoutRootOverCwdSubdir pins the spelling rule
+// for a session running from a subdirectory of its checkout: paths must be
+// spelled relative to the checkout root, or <checkout>/sub/foo and
+// <checkout>/foo both become "foo" and a rule written for one directory applies
+// to the other. With no root at all the cwd fallback keeps the old behavior.
+func TestNormalizePathInputPrefersCheckoutRootOverCwdSubdir(t *testing.T) {
+	scope := PathScope{Cwd: "/repo/sub", Roots: []string{"/repo"}}
+	if got := normalizePathInput("/repo/sub/foo.txt", scope); got != "sub/foo.txt" {
+		t.Errorf("normalizePathInput = %q, want %q", got, "sub/foo.txt")
+	}
+	bare := PathScope{Cwd: "/repo/sub"}
+	if got := normalizePathInput("/repo/sub/foo.txt", bare); got != "foo.txt" {
+		t.Errorf("cwd-only normalizePathInput = %q, want %q", got, "foo.txt")
+	}
+}
+
+// TestNormalizePathInputContainerDirectChildMustBeADirectory pins the container
+// rule's direct-child case: <container>/<name> is a checkout root only when it
+// is a directory. A file of that name would otherwise relativize to "." and be
+// matched by rules written for the checkout root.
+func TestNormalizePathInputContainerDirectChildMustBeADirectory(t *testing.T) {
+	container := t.TempDir()
+	file := filepath.Join(container, "stray.yaml")
+	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
+		t.Fatalf("write stray file: %v", err)
+	}
+	scope := PathScope{Containers: []string{container}}
+	if got := normalizePathInput(file, scope); got != filepath.ToSlash(file) {
+		t.Errorf("normalizePathInput(%q) = %q, want the absolute spelling kept", file, got)
+	}
+
+	checkout := filepath.Join(container, "brand-new")
+	if err := os.MkdirAll(checkout, 0o755); err != nil {
+		t.Fatalf("mkdir checkout: %v", err)
+	}
+	if got := normalizePathInput(checkout, scope); got != "." {
+		t.Errorf("normalizePathInput(%q) = %q, want %q (a checkout root)", checkout, got, ".")
+	}
+}
+
 // TestEvaluatePathScopeOutsideRepositoryKeepsAbsoluteSpelling pins the
 // boundary: a path outside every root only absolute rules and "*" can match,
 // so a relative deny never leaks out of the repository.

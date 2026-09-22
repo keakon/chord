@@ -32,7 +32,12 @@ type sessionRestoreResult struct {
 }
 
 type loadedSessionState struct {
-	SessionPath                          string
+	SessionPath string
+	// RecordedWorkDir is the checkout the session was working in when it
+	// stopped, read from its metadata. The zero value means the main checkout.
+	// An in-process /resume adopts it so the transcript keeps meaning the same
+	// tree.
+	RecordedWorkDir                      WorkDirState
 	Messages                             []message.Message
 	TodoItems                            []tools.TodoItem
 	TaskRecords                          map[string]*DurableTaskRecord
@@ -473,6 +478,15 @@ func (a *MainAgent) loadSessionState(sessionPath string) (*loadedSessionState, e
 		SessionPath: sessionPath,
 		Messages:    append([]message.Message(nil), msgs...),
 		Summary:     summary,
+	}
+	if meta, metaErr := recovery.LoadSessionMeta(sessionPath); metaErr != nil {
+		log.Warnf("failed to load session metadata session=%v error=%v", sessionPath, metaErr)
+	} else if meta != nil {
+		loaded.RecordedWorkDir = WorkDirState{
+			Path:       meta.WorktreePath,
+			WorktreeID: meta.WorktreeName,
+			Branch:     meta.WorktreeBranch,
+		}
 	}
 	if err := reconcileCompactionTransactions(sessionPath, loaded.Messages); err != nil {
 		log.Warnf("failed to reconcile compaction transactions session=%v error=%v", sessionPath, err)
@@ -1622,6 +1636,12 @@ func (a *MainAgent) handleResumeCommand(sessionID string) {
 	}
 	a.sessionLock = newLock
 	result := a.activateLoadedSession(loaded)
+	// Adopt the checkout the resumed session was working in before the next
+	// request is built; otherwise the resumed transcript's relative paths would
+	// be interpreted against the checkout the previous session left.
+	if notice := a.adoptResumedSessionCheckout(a.parentCtx, loaded.RecordedWorkDir); notice != "" {
+		a.emitToTUI(ToastEvent{Message: notice, Level: "warning"})
+	}
 	// Freeze is complete: queue extraction for the frozen (replaced) session.
 	a.scheduleMemoryExtraction(oldSessionDir)
 

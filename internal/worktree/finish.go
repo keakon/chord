@@ -72,6 +72,14 @@ func Finish(ctx context.Context, repoRoot, name string, opts FinishOptions, path
 	if opts.Check {
 		return checkFinish(ctx, mainRoot, info, name, onto)
 	}
+	// Ask before anything irreversible happens. Merging, squashing and
+	// fast-forwarding the target branch cannot be undone by the holder check
+	// that runs at the end, and refusing then would leave the main line moved
+	// while the checkout survives. Remove re-checks immediately before deleting
+	// it, so work that appears after this point is still seen.
+	if err := guardFinishHolders(name, info, opts.Holders); err != nil {
+		return err
+	}
 
 	if err := ensureFinishCommitIdentity(ctx, mainRoot, onto, info.Branch); err != nil {
 		return err
@@ -225,6 +233,21 @@ func prepareFinish(ctx context.Context, repoRoot, name string, opts FinishOption
 		return "", nil, "", fmt.Errorf("worktree %q already has a merge in progress (%s); resolve it (git status; then git commit or git merge --abort) before finishing", name, file)
 	}
 	return mainRoot, info, onto, nil
+}
+
+// guardFinishHolders refuses to start the irreversible part of Finish while
+// something is still working in the checkout. Finish ends by deleting it, and
+// the merge/squash/fast-forward before that cannot be taken back, so the
+// refusal has to come before them: the check at deletion time only reports what
+// appeared in the meantime.
+func guardFinishHolders(name string, info *Info, holders HoldersResolver) error {
+	if holders == nil {
+		return nil
+	}
+	if live := holders(info); len(live) > 0 {
+		return fmt.Errorf("worktree %q is still in use: %s; finish would delete the checkout, so stop that work first", name, strings.Join(live, "; "))
+	}
+	return nil
 }
 
 func checkFinish(ctx context.Context, mainRoot string, info *Info, name, onto string) error {

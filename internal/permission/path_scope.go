@@ -1,6 +1,7 @@
 package permission
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -28,7 +29,9 @@ type PathScope struct {
 	// (the configured worktree root). A path under <container>/<slug>/ is
 	// treated as relative to that checkout even when the slug is missing from
 	// Roots, which closes the window between a checkout being created and the
-	// next roots refresh. The rule is purely lexical and does no IO.
+	// next roots refresh. The rule is lexical; the only IO is a single stat
+	// when the path is a container's immediate child, to tell a checkout
+	// directory from a file that merely shares its name.
 	Containers []string
 }
 
@@ -78,6 +81,13 @@ func normalizePathInput(input string, scope PathScope) string {
 // relativize maps an absolute path onto the longest matching scope root and
 // returns it in "/"-separated relative form. The bool is false when no root
 // contains the path.
+//
+// The checkout roots win over Cwd. Cwd is the tool base dir, and a session can
+// run from a subdirectory of its checkout; relativizing against Cwd would spell
+// <checkout>/sub/foo and <checkout>/foo the same way ("foo"), so a rule written
+// for one of them would apply to both. Cwd is therefore only the fallback when
+// no root or container matches, which keeps cwd-only behavior for a session
+// whose repository root is unknown.
 func (s PathScope) relativize(path string) (string, bool) {
 	best := ""
 	bestRel := ""
@@ -95,7 +105,6 @@ func (s PathScope) relativize(path string) (string, bool) {
 			best, bestRel = root, rel
 		}
 	}
-	consider(s.Cwd)
 	for _, root := range s.Roots {
 		consider(root)
 	}
@@ -103,6 +112,9 @@ func (s PathScope) relativize(path string) (string, bool) {
 		if root, ok := containerRoot(container, path); ok {
 			consider(root)
 		}
+	}
+	if best == "" {
+		consider(s.Cwd)
 	}
 	if best == "" {
 		return "", false
@@ -123,11 +135,23 @@ func containerRoot(container, path string) (string, bool) {
 		return "", false
 	}
 	seg := rel
-	if i := strings.IndexByte(rel, filepath.Separator); i >= 0 {
-		seg = rel[:i]
+	directChild := true
+	if head, _, found := strings.Cut(rel, string(filepath.Separator)); found {
+		seg = head
+		directChild = false
 	}
 	if seg == "" || seg == "." || seg == ".." {
 		return "", false
 	}
-	return filepath.Join(container, seg), true
+	root := filepath.Join(container, seg)
+	if directChild {
+		// The path is the container's immediate child. Only a directory can be
+		// a checkout root: a file of that name would otherwise relativize to
+		// "." and be matched by every rule written for the checkout root.
+		info, err := os.Stat(root)
+		if err != nil || !info.IsDir() {
+			return "", false
+		}
+	}
+	return root, true
 }

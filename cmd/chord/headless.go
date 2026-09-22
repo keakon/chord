@@ -816,6 +816,19 @@ Main role control commands:
 					flagWorktreeStartupReason = recovery.WorktreeSwitchResume
 				}
 			}
+			if flagWorktreeStartupInfo == nil && flagResumeSession == "" && !flagContinueSession {
+				// Started inside a checkout: see startupWorktreeFromCwd. The
+				// session's meta is stamped from flagWorktreeStartupMeta below.
+				wtCtx := cmd.Context()
+				if wtCtx == nil {
+					wtCtx = context.Background()
+				}
+				if info := startupWorktreeFromCwd(wtCtx); info != nil {
+					flagWorktreeStartupInfo = info
+					flagWorktreeStartupMeta = worktreeMetaForInfo(info)
+					flagWorktreeStartupReason = recovery.WorktreeSwitchStartup
+				}
+			}
 			return runHeadless(cmd, nil)
 		},
 	}

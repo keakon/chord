@@ -732,10 +732,13 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 	subCfg.OwnerTaskID = record.OwnerTaskID
 	subCfg.Depth = record.Depth
 	subCfg.JoinToOwner = record.JoinToOwner
-	// A resumed task continues in the checkout its last instance was working
-	// in, when that checkout is still a chord-managed worktree of this
-	// repository. Otherwise the new instance keeps the inherited directory
-	// rather than resolving the restored transcript against a stale path.
+	// A resumed task continues in the directory its last instance was working
+	// in. A chord-managed worktree comes back with its identity so the worker's
+	// environment block and completion report still name it; a plain directory
+	// inside this repository (the main checkout, or a subdirectory of it) comes
+	// back as a directory. Anything else — a removed checkout or a path outside
+	// the repository — falls back to the inherited directory rather than
+	// resolving the restored transcript against a stale or foreign path.
 	if meta, metaErr := loadSubAgentMeta(a.sessionDir, record.LatestInstanceID); metaErr != nil {
 		log.Warnf("load subagent meta for workdir failed instance=%v error=%v", record.LatestInstanceID, metaErr)
 	} else if meta != nil {
@@ -750,6 +753,8 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 				Branch:     info.Branch,
 				BaseSHA:    info.BaseSHA,
 			}
+		} else if dir, ok := a.restoredPlainWorkDir(meta.WorkDir); ok {
+			subCfg.WorkDir = dir
 		}
 	}
 	// A resumed worker reads its checkout's instructions for the same reason a

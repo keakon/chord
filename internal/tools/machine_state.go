@@ -10,12 +10,13 @@ import (
 )
 
 // machineStateDirs are the repository-root directories that hold chord's own
-// machine state rather than checkout content. They are never tracked (the
-// repository ignores `.*`, so a worktree checkout does not contain them), they
-// describe this machine rather than the branch, and every read path already
-// falls back to the content root for them. A relative write that resolved
-// against a worktree checkout would therefore land in a directory that
-// `worktree remove` deletes together with the checkout.
+// machine state rather than checkout content. They live under `.chord/`, which
+// the repository ignores wholesale (`.`-prefixed paths), so a worktree
+// checkout does not contain them; they describe this machine rather than the
+// branch, and every read path already falls back to the content root for them.
+// A relative write that resolved against a worktree checkout would therefore
+// land in a directory that `worktree remove` deletes together with the
+// checkout.
 //
 // Branch-content subdirectories are deliberately absent: `.chord/config.yaml`,
 // `.chord/agents/**` and `.chord/skills/**` follow the checkout (a branch may
@@ -32,7 +33,10 @@ var machineStateDirs = []string{
 }
 
 // machineStateFiles are machine-state files that live at the repository root
-// instead of under `.chord/`.
+// instead of under `.chord/`. The ignore rule above does not cover them: a
+// project may track MEMORY.md, but it is still this machine's memory rather
+// than branch content, so reads already fall back to the content root's copy
+// and a write inside a worktree must belong to the same file.
 var machineStateFiles = []string{"MEMORY.md"}
 
 // MachineStateTargetsInDir reports whether every path argument of a tool call
@@ -119,6 +123,19 @@ func machineStateCallPaths(toolName string, raw json.RawMessage, baseDir string)
 			return nil, false
 		}
 		return paths, true
+	case NameGrep:
+		paths := stringOrListArg(raw, "paths")
+		if len(paths) == 0 {
+			// "path" is the tolerated singular spelling of "paths".
+			paths = stringOrListArg(raw, "path")
+		}
+		return resolveMachineStatePathList(paths, baseDir)
+	case NameGlob:
+		path := stringArg(raw, "path")
+		if path == "" {
+			return nil, false
+		}
+		return []string{resolveForMachineStateCheck(path, baseDir)}, true
 	case NameHandoff:
 		path := stringArg(raw, "plan_path")
 		if path == "" {
@@ -139,6 +156,44 @@ func resolveForMachineStateCheck(path, baseDir string) string {
 		return ""
 	}
 	return resolved
+}
+
+// resolveMachineStatePathList resolves every search root of a read-only search
+// call against baseDir. An empty list (the tool then searches the session
+// working directory, which is checkout content) or one unresolvable path is not
+// classifiable, so the call keeps its ordinary base directory.
+func resolveMachineStatePathList(paths []string, baseDir string) ([]string, bool) {
+	if len(paths) == 0 {
+		return nil, false
+	}
+	resolved := make([]string, 0, len(paths))
+	for _, path := range paths {
+		r := resolveForMachineStateCheck(path, baseDir)
+		if r == "" {
+			return nil, false
+		}
+		resolved = append(resolved, r)
+	}
+	return resolved, true
+}
+
+// stringOrListArg returns the strings under field, accepting both the
+// documented array form and the tolerated single-string form. A missing or
+// malformed field yields nil.
+func stringOrListArg(raw json.RawMessage, field string) []string {
+	var parsed map[string]json.RawMessage
+	if json.Unmarshal(unwrapToolArgs(raw), &parsed) != nil {
+		return nil
+	}
+	value, ok := parsed[field]
+	if !ok {
+		return nil
+	}
+	list, _, err := DecodeStringOrList(value)
+	if err != nil {
+		return nil
+	}
+	return normalizeStringList(list)
 }
 
 func stringArg(raw json.RawMessage, field string) string {

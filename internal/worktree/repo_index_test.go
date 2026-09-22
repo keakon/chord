@@ -43,7 +43,6 @@ func TestSaveLoadRepoIndex_RoundTrip(t *testing.T) {
 	}
 	idx.UpsertWorktree(RepoIndexWorktree{
 		Name:   "feat-a",
-		Slug:   "feat-a",
 		Branch: "chord/feat-a",
 		Path:   filepath.Join(dir, "wt", "feat-a"),
 	})
@@ -135,7 +134,6 @@ func TestWithRepoIndexLock_Serial(t *testing.T) {
 				}
 				idx.UpsertWorktree(RepoIndexWorktree{
 					Name:   "w",
-					Slug:   "w",
 					Branch: "chord/w",
 				})
 				_ = i

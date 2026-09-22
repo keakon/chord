@@ -67,6 +67,16 @@ func TestMachineStateTargetsInDir(t *testing.T) {
 		{"delete mixed", NameDelete, `{"paths":[".chord/plans/x.md","src/main.go"],"reason":"cleanup"}`, false},
 		{"patch plan", NameApplyPatch, `{"patch":"*** Begin Patch\n*** Add File: .chord/plans/x.md\n+hi\n*** End Patch"}`, true},
 		{"patch source", NameApplyPatch, `{"patch":"*** Begin Patch\n*** Update File: src/main.go\n@@\n-a\n+b\n*** End Patch"}`, false},
+		// Searches join the same rule as reads and writes: a search root that
+		// names machine state is anchored to the content root, while an omitted
+		// root (the session working directory) and a mixed call are not.
+		{"grep plan dir", NameGrep, `{"pattern":"foo","paths":[".chord/plans"]}`, true},
+		{"grep singular path alias", NameGrep, `{"pattern":"foo","path":".chord/notes"}`, true},
+		{"grep source dir", NameGrep, `{"pattern":"foo","paths":["src"]}`, false},
+		{"grep default root", NameGrep, `{"pattern":"foo"}`, false},
+		{"grep mixed roots", NameGrep, `{"pattern":"foo","paths":[".chord/plans","src"]}`, false},
+		{"glob plan dir", NameGlob, `{"patterns":["**/*.md"],"path":".chord/plans"}`, true},
+		{"glob default root", NameGlob, `{"patterns":["**/*.md"]}`, false},
 		// The rule reads the resolved path, so the same logical machine-state
 		// location is redirected however it is spelled; a path outside the
 		// base dir is left to the ordinary base dir.

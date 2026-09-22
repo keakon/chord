@@ -72,7 +72,7 @@ Chord 写在这里。删了就丢历史。
 
 Chord 用项目的规范文件系统根路径（解析符号链接、规范化大小写）作为身份，再据此推导一个稳定、清洗后的 key，例如 `~/projects/chord` 的 key 为 `HOME-projects-chord`。两个项目清洗后冲突时，Chord 追加 8 字符指纹消歧。完整的规范根路径也会写入 `project.json`，所以即使路径相似，注册表也不会混淆。
 
-Sessions、运行时缓存、exports 都以这个 key 为索引：在 `~/projects/chord` 重新跑 `chord` 能找到上次的会话。git 仓库的每个 checkout 都会解析到主工作区的 key，所以 chord 管理的 worktree 与所属仓库共用 sessions，而不是各自一份。
+Sessions 与 exports 都以这个 key 为索引：在 `~/projects/chord` 重新跑 `chord` 能找到上次的会话。git 仓库的每个 checkout 都会解析到主工作区的 key，所以 chord 管理的 worktree 与所属仓库共用 sessions，而不是各自一份。运行时缓存是例外：它按会话实际所在的 checkout 分开，因此 `chord worktree remove` 能只清掉一个 checkout 的缓存而不动其它 checkout。
 
 ### Worktree
 

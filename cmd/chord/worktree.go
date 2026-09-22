@@ -13,7 +13,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/pathutil"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/worktree"
 )
@@ -239,11 +241,12 @@ func shortOwnerID(id string) string {
 // newWorktreeSessionHolders returns the resolver the command line uses to find
 // chord sessions still working in a checkout before it deletes one.
 //
-// Session metadata records which checkout a session works in, but it is
-// durable and outlives a crash, so on its own it cannot tell "in use" from
-// "abandoned": every crashed session would block removal forever. It is paired
-// with the session lock, which a live process holds exclusively, so a session
-// counts as a holder only while its process is still running.
+// A live session is recognized by its process lock, which is exclusive and
+// released on exit: session metadata alone is durable and would let a crashed
+// session block removal forever. For every live session two records are read,
+// because either can point at the checkout: the session's own active checkout,
+// and the checkouts its workers hold (a worker can enter a checkout the session
+// itself never named).
 //
 // Anything unverifiable is reported as a holder rather than as "free",
 // matching the agent-side guard: a checkout whose users cannot be determined
@@ -283,27 +286,56 @@ func newWorktreeSessionHolders(pl *config.PathLocator, contentRoot string) workt
 				continue
 			}
 			sessionDir := filepath.Join(sessionsDir, entry.Name())
-			meta, err := recovery.LoadSessionMeta(sessionDir)
-			if err != nil || meta == nil || strings.TrimSpace(meta.WorktreePath) == "" {
-				continue
-			}
-			recorded, err := config.CanonicalProjectRoot(meta.WorktreePath)
-			if err != nil {
-				recorded = filepath.Clean(meta.WorktreePath)
-			}
-			if recorded != target {
-				continue
-			}
 			active, err := recovery.SessionLockActive(sessionDir)
 			if err != nil {
-				return []string{fmt.Sprintf("session %s is recorded in this checkout and it could not be verified whether it is still running (%v)", entry.Name(), err)}
+				return []string{fmt.Sprintf("session %s is recorded in this repository and it could not be verified whether it is still running (%v)", entry.Name(), err)}
 			}
-			if active {
-				return []string{fmt.Sprintf("chord session %s is still open in this checkout", entry.Name())}
+			if !active {
+				continue
+			}
+			if holder := liveSessionHolders(sessionDir, entry.Name(), target); holder != "" {
+				return []string{holder}
 			}
 		}
 		return nil
 	}
+}
+
+// liveSessionHolders reports why a live session holds the checkout rooted at
+// target, or "" when it does not.
+func liveSessionHolders(sessionDir, sessionID, target string) string {
+	meta, err := recovery.LoadSessionMeta(sessionDir)
+	if err != nil {
+		return fmt.Sprintf("chord session %s is running and its checkout could not be read (%v)", sessionID, err)
+	}
+	if meta != nil && strings.TrimSpace(meta.WorktreePath) != "" {
+		if checkoutInDir(meta.WorktreePath, target) {
+			return fmt.Sprintf("chord session %s is still open in this checkout", sessionID)
+		}
+	}
+	workerDirs, err := agent.NonTerminalSubAgentWorkDirs(sessionDir)
+	if err != nil {
+		return fmt.Sprintf("chord session %s is running and its workers' checkouts could not be read (%v)", sessionID, err)
+	}
+	for _, dir := range workerDirs {
+		if checkoutInDir(dir, target) {
+			return fmt.Sprintf("chord session %s has a worker still working in this checkout", sessionID)
+		}
+	}
+	return ""
+}
+
+// checkoutInDir reports whether dir is the checkout root or lies below it.
+// dir is canonicalized first so a recorded path and the target compare as the
+// same directory when they differ only through symlinks; target is expected to
+// be canonical already.
+func checkoutInDir(dir, target string) bool {
+	canonical, err := config.CanonicalProjectRoot(dir)
+	if err != nil {
+		canonical = filepath.Clean(dir)
+	}
+	_, ok := pathutil.RelToBase(canonical, target)
+	return ok
 }
 
 // newWorktreeRemoveCmd removes a chord-managed worktree, preserving its

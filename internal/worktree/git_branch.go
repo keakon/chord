@@ -73,6 +73,33 @@ func DiffStat(ctx context.Context, dir, base string) (string, error) {
 	return out, nil
 }
 
+// BranchFullyMerged reports whether `git branch -d` would delete branch, and
+// names the ref it would test: the branch's upstream when one is configured,
+// HEAD otherwise — the same criterion git itself applies. Callers use it to
+// refuse a branch deletion before taking a checkout apart, so a refusal leaves
+// the worktree untouched instead of half-removed.
+func BranchFullyMerged(ctx context.Context, dir, branch string) (bool, string, error) {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return false, "", fmt.Errorf("check branch merged: empty branch")
+	}
+	target := "HEAD"
+	if upstream, err := runGitText(ctx, dir, "rev-parse", "--abbrev-ref", "--symbolic-full-name", branch+"@{upstream}"); err == nil {
+		if upstream = strings.TrimSpace(upstream); upstream != "" {
+			target = upstream
+		}
+	}
+	out, err := runGitText(ctx, dir, "rev-list", "--count", branch, "--not", target)
+	if err != nil {
+		return false, target, err
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil {
+		return false, target, fmt.Errorf("parse rev-list count %q: %w", out, err)
+	}
+	return n == 0, target, nil
+}
+
 // UnmergedCommits reports how many commits reachable from branch are not
 // reachable from any other ref: commits that would only exist on that branch.
 // The branch under test is excluded from the comparison, so a branch whose tip

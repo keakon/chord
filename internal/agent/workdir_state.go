@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -11,6 +12,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/pathutil"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
 	"github.com/keakon/chord/internal/worktree"
@@ -59,6 +61,23 @@ func cleanWorkdirPath(p string) string {
 	return p
 }
 
+// dirInWorktree reports whether dir is the worktree root or lies below it.
+// It answers "would removing this checkout take dir with it", so the
+// comparison is lexical on purpose: holders are matched on the directory an
+// agent actually works in, and that directory may be a subdirectory of the
+// checkout.
+func dirInWorktree(dir, root string) bool {
+	dir = cleanWorkdirPath(dir)
+	root = cleanWorkdirPath(root)
+	if dir == "" || root == "" {
+		return false
+	}
+	if dir == root {
+		return true
+	}
+	return strings.HasPrefix(dir, root+string(filepath.Separator))
+}
+
 // WorktreeRuntime carries the cmd-layer services the worktree tools need.
 // internal/agent never resolves storage or git topology on its own; cmd/chord
 // injects this bundle before the agent starts running turns.
@@ -92,6 +111,43 @@ func (a *MainAgent) SetWorktreeRuntime(rt WorktreeRuntime) {
 		return
 	}
 	a.worktreeRT = rt
+}
+
+// restoredPlainWorkDir returns the canonical recorded directory when it is an
+// existing directory inside this repository's main checkout. A worker's
+// recorded directory is usually its active checkout; a plain directory (the
+// main checkout or a subdirectory of it) has no worktree identity but still
+// belongs to this repository, so a rehydrated worker must keep it instead of
+// inheriting the parent's current checkout — which could be a different tree.
+// A removed directory, a nested checkout of its own, or a path outside the
+// repository is rejected so replay never resolves against a stale or foreign
+// path.
+func (a *MainAgent) restoredPlainWorkDir(dir string) (string, bool) {
+	dir = strings.TrimSpace(dir)
+	contentRoot := strings.TrimSpace(a.ContentRoot())
+	if dir == "" || contentRoot == "" {
+		return "", false
+	}
+	canonDir, err := config.CanonicalProjectRoot(dir)
+	if err != nil {
+		return "", false
+	}
+	canonRoot, err := config.CanonicalProjectRoot(contentRoot)
+	if err != nil {
+		return "", false
+	}
+	if !dirInWorktree(canonDir, canonRoot) {
+		return "", false
+	}
+	if st, err := os.Stat(canonDir); err != nil || !st.IsDir() {
+		return "", false
+	}
+	// A linked worktree nested inside the main root is its own checkout:
+	// adopting its directories as plain paths would splice two trees together.
+	if canonDir != canonRoot && pathutil.CheckoutRoot(canonDir, canonRoot) != canonRoot {
+		return "", false
+	}
+	return canonDir, true
 }
 
 // resolveRestoredWorktree validates a checkout recorded for a rehydrated agent.
@@ -209,6 +265,18 @@ func (s *SubAgent) worktreeActor() workDirActor {
 // but could not rebind LSP is still better off than one stuck in the previous
 // checkout.
 func (a *MainAgent) afterWorkDirSwitch(prev, next WorkDirState) []string {
+	reason := recovery.WorktreeSwitchEnter
+	if strings.TrimSpace(next.Path) == "" {
+		reason = recovery.WorktreeSwitchExit
+	}
+	return a.afterWorkDirSwitchWithReason(prev, next, reason)
+}
+
+// afterWorkDirSwitchWithReason is afterWorkDirSwitch for callers that know why
+// the checkout changed (a worktree tool, a restore): the reason is persisted
+// verbatim in the session timeline, so an automatic adoption must not reuse a
+// reason that names a user-requested switch.
+func (a *MainAgent) afterWorkDirSwitchWithReason(prev, next WorkDirState, reason string) []string {
 	a.refreshPathRoots()
 	a.ReloadAgentsMD()
 	// The injected git status and virtualenv path describe the working
@@ -218,10 +286,6 @@ func (a *MainAgent) afterWorkDirSwitch(prev, next WorkDirState) []string {
 		a.worktreeRT.RefreshSkills(a.workDir())
 	}
 	a.refreshSessionContextReminder()
-	reason := recovery.WorktreeSwitchEnter
-	if strings.TrimSpace(next.Path) == "" {
-		reason = recovery.WorktreeSwitchExit
-	}
 	var warnings []string
 	if err := a.recordWorkDirBoundary(next, reason); err != nil {
 		warnings = append(warnings, fmt.Sprintf("working directory is now %s but the session metadata could not be updated (%v); resume may restore the previous checkout", a.workDir(), err))
@@ -283,20 +347,7 @@ func (a *MainAgent) RestoreWorkDirBinding(ctx context.Context, state WorkDirStat
 	}
 	info := a.resolveRestoredWorktree(ctx, state.Path)
 	if info == nil {
-		detail := fmt.Sprintf("recorded worktree %s is no longer a worktree of this repository", state.Path)
-		entry := recovery.WorktreeTimelineEntry{
-			Reason:   recovery.WorktreeSwitchResumeFallback,
-			Name:     state.WorktreeID,
-			Branch:   state.Branch,
-			Path:     state.Path,
-			Fallback: true,
-			Detail:   detail,
-			At:       time.Now().UTC(),
-		}
-		if err := recovery.RecordWorktreeBoundary(a.sessionDir, recovery.WorktreeBinding{}, entry); err != nil {
-			log.Warnf("record worktree resume fallback failed session_dir=%v error=%v", a.sessionDir, err)
-		}
-		return fmt.Sprintf("session was working in worktree %s, which no longer exists; continuing in %s", state.Path, a.workDir())
+		return a.recordWorktreeResumeDrop(state)
 	}
 	state.Path = info.Path
 	if strings.TrimSpace(state.BaseSHA) == "" {
@@ -311,6 +362,92 @@ func (a *MainAgent) RestoreWorkDirBinding(ctx context.Context, state WorkDirStat
 	a.refreshWorkDirDerivedMeta()
 	if err := a.recordWorkDirBoundary(state, reason); err != nil {
 		log.Warnf("record restored worktree binding failed session_dir=%v error=%v", a.sessionDir, err)
+	}
+	return ""
+}
+
+// recordWorktreeResumeDrop clears the session's active checkout and appends the
+// boundary explaining that the recorded checkout is gone. It returns the
+// user-facing notice; the caller keeps its current directory.
+func (a *MainAgent) recordWorktreeResumeDrop(state WorkDirState) string {
+	entry := recovery.WorktreeTimelineEntry{
+		Reason:   recovery.WorktreeSwitchResumeFallback,
+		Name:     state.WorktreeID,
+		Branch:   state.Branch,
+		Path:     state.Path,
+		Fallback: true,
+		Detail:   fmt.Sprintf("recorded worktree %s is no longer a worktree of this repository", state.Path),
+		At:       time.Now().UTC(),
+	}
+	if err := recovery.RecordWorktreeBoundary(a.sessionDir, recovery.WorktreeBinding{}, entry); err != nil {
+		log.Warnf("record worktree resume fallback failed session_dir=%v error=%v", a.sessionDir, err)
+	}
+	return fmt.Sprintf("session was working in worktree %s, which no longer exists; continuing in %s", state.Path, a.workDir())
+}
+
+// recordSessionCheckout writes the checkout the process is working in into the
+// session directory that just became current. /new and fork continue in the
+// same checkout as the session they replace, but their metadata starts empty:
+// without this the switch is recorded nowhere, and a later resume of the new
+// session lands in the main checkout and replays the transcript's relative
+// paths against a different tree.
+func (a *MainAgent) recordSessionCheckout() error {
+	if a == nil {
+		return nil
+	}
+	state := a.workDirState.load()
+	if strings.TrimSpace(state.Path) == "" {
+		// The session runs in the main checkout, which needs no provenance:
+		// resume already defaults there.
+		return nil
+	}
+	return a.recordWorkDirBoundary(state, recovery.WorktreeSwitchStartup)
+}
+
+// recordSessionCheckoutOrWarn is recordSessionCheckout plus a user-visible
+// warning: a failed write is not fatal, but without it a later resume of the
+// new session lands in a different checkout than the work it continues.
+func (a *MainAgent) recordSessionCheckoutOrWarn() {
+	if err := a.recordSessionCheckout(); err != nil {
+		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("working directory is %s but the new session could not record it (%v); resuming that session may land in a different checkout", a.workDir(), err), Level: "warning"})
+	}
+}
+
+// adoptResumedSessionCheckout switches the process to the checkout a resumed
+// session was working in. An in-process /resume replaces the session without
+// touching the working directory, so without this the resumed transcript's
+// relative paths would be interpreted against the checkout the previous session
+// left. The recorded checkout must still be a chord-managed worktree of this
+// repository; when it is gone the drop is recorded as a fallback boundary and
+// the returned notice explains it. A session that ran in the main checkout has
+// no recorded checkout and keeps the current one, matching startup resume.
+func (a *MainAgent) adoptResumedSessionCheckout(ctx context.Context, state WorkDirState) string {
+	if a == nil || strings.TrimSpace(state.Path) == "" {
+		return ""
+	}
+	info := a.resolveRestoredWorktree(ctx, state.Path)
+	if info == nil {
+		return a.recordWorktreeResumeDrop(state)
+	}
+	prev := a.workDirState.load()
+	if cleanWorkdirPath(prev.Path) == info.Path {
+		return ""
+	}
+	next := WorkDirState{
+		Path:       info.Path,
+		WorktreeID: info.Name,
+		Branch:     info.Branch,
+		BaseSHA:    info.BaseSHA,
+		Generation: prev.Generation + 1,
+	}
+	if strings.TrimSpace(next.BaseSHA) == "" {
+		if head, err := worktree.HeadCommit(ctx, info.Path); err == nil {
+			next.BaseSHA = head
+		}
+	}
+	a.workDirState.store(next)
+	if warnings := a.afterWorkDirSwitchWithReason(prev, next, recovery.WorktreeSwitchResume); len(warnings) > 0 {
+		log.Warnf("resume worktree switch warnings session=%v warnings=%v", filepath.Base(a.sessionDir), warnings)
 	}
 	return ""
 }
@@ -454,10 +591,18 @@ func (act workDirActor) exit(ctx context.Context, req tools.WorktreeExitRequest)
 }
 
 // worktreeRemovalHolders reports the live work still anchored to one worktree:
-// another agent bound to it, or a background command still running there. A
-// removed checkout takes their working directory with it, so removal waits for
-// them; the answer is never silently empty because something looked
+// another agent working inside it, or a background command still running
+// there. A removed checkout takes their working directory with it, so removal
+// waits for them; the answer is never silently empty because something looked
 // unverifiable.
+//
+// Holders are matched on the directory an agent actually works in, not only on
+// the binding it recorded. A binding is not the whole story: leaving a worktree
+// with action "keep" clears it while the process keeps running in that
+// directory, and a session started from inside a checkout never had one. The
+// binding name is kept as an additional signal so a checkout recorded under a
+// differently spelled path (for example through a symlink) is still refused
+// rather than deleted under a live agent.
 func (a *MainAgent) worktreeRemovalHolders(info *worktree.Info) []string {
 	if a == nil || info == nil || strings.TrimSpace(info.Path) == "" {
 		return []string{"the worktree path is unknown"}
@@ -466,7 +611,7 @@ func (a *MainAgent) worktreeRemovalHolders(info *worktree.Info) []string {
 	// The caller's own binding is checked before this (active / currentDir),
 	// but a worker reclaiming its own checkout would otherwise delete the
 	// directory the session's main agent is working in.
-	if a.workDirState.load().WorktreeID == info.Name {
+	if a.workDirState.load().WorktreeID == info.Name || dirInWorktree(a.workDir(), info.Path) {
 		holders = append(holders, "the session's main agent is still working there")
 	}
 	a.subs.mu.RLock()
@@ -477,10 +622,10 @@ func (a *MainAgent) worktreeRemovalHolders(info *worktree.Info) []string {
 		if !isNonTerminalTaskState(string(sub.State())) {
 			continue
 		}
-		if sub.workDirState.load().WorktreeID != info.Name {
+		if sub.workDirState.load().WorktreeID != info.Name && !dirInWorktree(sub.effectiveToolBaseDir(), info.Path) {
 			continue
 		}
-		holders = append(holders, fmt.Sprintf("agent %s is still bound to it (%s)", sub.instanceID, sub.State()))
+		holders = append(holders, fmt.Sprintf("agent %s is still working there (%s)", sub.instanceID, sub.State()))
 	}
 	a.subs.mu.RUnlock()
 	for _, job := range tools.RunningJobsInDir(info.Path) {

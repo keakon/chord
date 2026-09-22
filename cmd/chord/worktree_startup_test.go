@@ -458,3 +458,41 @@ func TestResolveSessionWorktree_FromInsideWorktree(t *testing.T) {
 		t.Errorf("content root mismatch: got %s, want %s", loc.ContentRoot, repo)
 	}
 }
+
+// TestStartupWorktreeFromCwdBindsCheckout pins the plain `cd <checkout> &&
+// chord` case: the checkout is detected as the session's binding without a flag
+// naming it, so the session records where it works and another process can see
+// it as a holder. The main checkout is not a worktree, so a plain start there
+// binds nothing.
+func TestStartupWorktreeFromCwdBindsCheckout(t *testing.T) {
+	repo := setupStartupRepo(t)
+	withTestStateDir(t)
+	chdirForTest(t, repo)
+
+	// prepareStartupWorktree leaves the process inside the new checkout, which
+	// is exactly the manual `cd <checkout>` case.
+	info := prepareStartupWorktreeForTest(t, context.Background(), "feat-startup")
+
+	got := startupWorktreeFromCwd(context.Background())
+	if got == nil || got.Name != info.Name || got.Path != info.Path {
+		t.Fatalf("startupWorktreeFromCwd = %+v, want the checkout just entered %+v", got, info)
+	}
+
+	// A subdirectory of the checkout still resolves to the checkout root: the
+	// binding is the checkout, not the directory chord happened to be started
+	// from.
+	nested := filepath.Join(info.Path, "nested")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatalf("mkdir nested: %v", err)
+	}
+	chdirForTest(t, nested)
+	got = startupWorktreeFromCwd(context.Background())
+	if got == nil || got.Path != info.Path {
+		t.Fatalf("startupWorktreeFromCwd from a subdirectory = %+v, want %s", got, info.Path)
+	}
+
+	chdirForTest(t, repo)
+	if got := startupWorktreeFromCwd(context.Background()); got != nil {
+		t.Fatalf("startupWorktreeFromCwd in the main checkout = %+v, want nil", got)
+	}
+}

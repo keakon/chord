@@ -130,6 +130,7 @@ func (a *MainAgent) handleNewSessionCommand() {
 	a.sessionLock = newLock
 	a.resetSessionRuntimeState()
 	a.installSessionTarget(newSessionDir)
+	a.recordSessionCheckoutOrWarn()
 	a.llmClient.SetSessionID(filepath.Base(newSessionDir))
 	// Freeze is complete (persist flushed, recovery closed): queue extraction
 	// for the frozen session against its captured directory.
@@ -619,6 +620,7 @@ func (a *MainAgent) handleForkSessionCommand(msgIndex int) {
 	a.sessionLock = newLock
 	a.resetSessionRuntimeState()
 	a.installSessionTarget(newSessionDir)
+	a.recordSessionCheckoutOrWarn()
 	a.llmClient.SetSessionID(filepath.Base(newSessionDir))
 	a.scheduleMemoryExtraction(oldSessionDir)
 

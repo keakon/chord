@@ -88,6 +88,37 @@ func startupBranchPrefix() (string, error) {
 	return worktree.NormalizeBranchPrefix(wc.BranchPrefix)
 }
 
+// startupWorktreeFromCwd returns the chord-managed worktree the process was
+// launched inside, or nil when the current directory is not part of one. It
+// gives a plain `cd <checkout> && chord` the same binding --worktree and
+// --resume install: without it the session works in the checkout with no
+// recorded binding, so resume would drop it back to the main checkout and
+// another process could not see it as a holder of the directory.
+//
+// The worktree root is the binding even when chord was launched from a
+// subdirectory: the active checkout is the checkout, and that is what a resumed
+// session and the removal guard need. The process keeps its own directory.
+func startupWorktreeFromCwd(ctx context.Context) *worktree.Info {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil
+	}
+	contentRoot := resolveContentRoot(ctx, cwd)
+	if strings.TrimSpace(contentRoot) == "" {
+		contentRoot = cwd
+	}
+	branchPrefix, err := startupBranchPrefix()
+	if err != nil {
+		log.Warnf("resolve worktree branch_prefix for startup detection failed error=%v", err)
+		return nil
+	}
+	info, err := worktree.ResolveContaining(ctx, contentRoot, cwd, branchPrefix)
+	if err != nil {
+		return nil
+	}
+	return info
+}
+
 // prepareStartupWorktree creates or reuses a chord-managed worktree for
 // the requested name, updates the repo index, switches the process cwd
 // into the worktree, and returns Info describing it. Callers should
@@ -308,7 +339,6 @@ func worktreeLocationForSession(ctx context.Context, pl *config.PathLocator, pro
 		name = filepath.Base(path)
 	}
 	return &worktree.Info{
-		Slug:     name,
 		Name:     name,
 		Branch:   meta.WorktreeBranch,
 		Path:     path,

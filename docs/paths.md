@@ -79,7 +79,7 @@ affect the order.
 
 Chord identifies a project by its canonical filesystem root, then derives a stable, sanitized key, for example `HOME-projects-chord` for `~/projects/chord`. If two projects collide on the sanitized key, Chord appends an 8-character fingerprint to disambiguate. The full canonical root is stored alongside the key in `project.json`, so the registry stays unambiguous even when paths look similar.
 
-Sessions, runtime cache, and exports are all keyed on this: that is how a fresh `chord` started in `~/projects/chord` finds the previous session for the same project. Every checkout of a git repository resolves to the repository's main-checkout key, so a chord-managed worktree shares its repository's sessions instead of getting its own.
+Sessions and exports are keyed on this: that is how a fresh `chord` started in `~/projects/chord` finds the previous session for the same project. Every checkout of a git repository resolves to the repository's main-checkout key, so a chord-managed worktree shares its repository's sessions instead of getting its own. The runtime cache is the exception: it is keyed on the checkout a session works in, so `chord worktree remove` can drop one checkout's cache without touching another's.
 
 ### Worktrees
 
