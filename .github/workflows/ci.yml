@@ -234,3 +234,28 @@ jobs:
             echo "Run: goimports -w -local github.com/keakon/chord ."
             exit 1
           fi
+
+  deadcode:
+    name: Deadcode gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # One host analyzes every baseline: the analyzer is built for the host and
+      # GOOS/GOARCH select the platform under analysis, so a single runner can
+      # gate all three checked-in baselines.
+      - name: Deadcode gate (linux/amd64)
+        run: GOOS=linux GOARCH=amd64 scripts/check_deadcode.sh
+
+      - name: Deadcode gate (windows/amd64)
+        run: GOOS=windows GOARCH=amd64 scripts/check_deadcode.sh
+
+      - name: Deadcode gate (darwin/arm64)
+        run: GOOS=darwin GOARCH=arm64 scripts/check_deadcode.sh

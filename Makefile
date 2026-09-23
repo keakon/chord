@@ -15,9 +15,9 @@ GOPLS ?= gopls
 MODERNIZE_VERSION ?= v0.23.0
 MODERNIZE ?= $(GO) run golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@$(MODERNIZE_VERSION)
 
-.PHONY: ci fmt fmt-check deps-check test test-cover race vet staticcheck gopls-check modernize-check docs-check docs-examples-check bench-tui clean
+.PHONY: ci fmt fmt-check deps-check test test-cover race vet staticcheck gopls-check modernize-check deadcode-check docs-check docs-examples-check bench-tui clean
 
-ci: fmt-check deps-check test-cover race vet staticcheck gopls-check modernize-check docs-check docs-examples-check
+ci: fmt-check deps-check test-cover race vet staticcheck gopls-check modernize-check deadcode-check docs-check docs-examples-check
 
 fmt:
 	$(GOIMPORTS) -w -local $(LOCAL) .
@@ -55,6 +55,9 @@ gopls-check:
 
 modernize-check:
 	$(MODERNIZE) -test $(PKGS)
+
+deadcode-check:
+	./scripts/check_deadcode.sh
 
 docs-check:
 	./scripts/check_docs_consistency.sh
