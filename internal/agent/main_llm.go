@@ -18,6 +18,7 @@ import (
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/toolname"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -189,7 +190,7 @@ func (a *MainAgent) ensureSessionBuiltWithoutPreparation(ctx context.Context) er
 	a.mcpServersPromptMu.Unlock()
 
 	if pendingMCPReplace && a.tools != nil {
-		_ = a.tools.UnregisterPrefix("mcp_")
+		_ = a.tools.UnregisterPrefix(toolname.MCPToolPrefix)
 	}
 	for _, t := range pendingMCPTools {
 		a.tools.Register(t)

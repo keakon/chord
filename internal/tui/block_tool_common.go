@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 
+	"github.com/keakon/chord/internal/toolname"
 	"github.com/keakon/chord/internal/tools"
 	"github.com/keakon/chord/internal/tui/markdownutil"
 )
@@ -160,6 +161,14 @@ func toolCardAlwaysExpanded(toolName string) bool {
 		return true
 	}
 	return false
+}
+
+// isMCPToolName reports whether a tool name belongs to a dynamically
+// registered MCP tool. Their output is external program output the reader
+// consults on demand, so they fold like any other generic call and must never
+// be pinned expanded.
+func isMCPToolName(toolName string) bool {
+	return strings.HasPrefix(toolNameKey(toolName), toolname.MCPToolPrefix)
 }
 
 // initToolCardFoldState applies the shared initial fold state to a tool call

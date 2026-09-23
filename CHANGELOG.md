@@ -57,6 +57,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- MCP tool cards no longer start expanded. A collapsed `mcp_*` card still rendered its arguments and result on first paint, and Space could not fold it back; MCP calls now follow the same folded default as the other tool cards.
 - The files re-loaded after a context reset or a compaction are now bounded by the model's context window. On a window of 8192 tokens or less the reload takes at most a quarter of the window and is skipped when that leaves less than the smallest useful fragment; it used to receive the fixed 48 KiB default, which could push the next request past the window and fail it. The checkpoint still lists the file references, so the model can read them with its own tools.
 - LSP `options` in the customization docs now nest gopls settings under a `gopls` key. Those keys are `workspace/configuration` section names, and the flat top-level form documented before was never delivered to gopls, so `staticcheck` and `analyses` configured that way had no effect; move them under `gopls`.
 - Slash-command completion now runs the highlighted command after the list shrinks. Typing more of the prefix used to leave the selection index on the longer list, so the dropdown highlighted the last remaining row while `Enter` ran the first match — typically `/resume` instead of the custom command you had moved to.

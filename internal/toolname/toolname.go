@@ -35,6 +35,11 @@ const (
 	WorktreeList   = "worktree_list"
 )
 
+// MCPToolPrefix marks the ids of dynamically registered MCP tools, whose shape
+// is mcp_<server>_<tool>. Producer and matchers share it so a naming change
+// cannot leave one side recognizing names the other no longer produces.
+const MCPToolPrefix = "mcp_"
+
 // Normalize trims user-provided tool names and maps legacy aliases.
 func Normalize(name string) string {
 	name = strings.TrimSpace(name)

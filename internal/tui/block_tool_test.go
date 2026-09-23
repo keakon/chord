@@ -3591,6 +3591,49 @@ func TestCollapsedMCPToolUsesHeaderDisclosureMarker(t *testing.T) {
 	}
 }
 
+func TestCollapsedMCPToolWithSingleHiddenLineStaysCollapsed(t *testing.T) {
+	// A multiline function arg first plus a scalar second yields exactly one
+	// hidden param line, and a short result yields zero hidden result lines.
+	// The generic "only one hidden line" heuristic must not pin such an MCP
+	// card expanded: external program output stays folded by default and Space
+	// must keep working in both directions.
+	block := &Block{
+		ID:                     1,
+		Type:                   BlockToolCall,
+		ToolName:               "mcp_chrome_devtools_evaluate_script",
+		Content:                `{"function":"() => {\n  const hits = [];\n  return hits;\n}","pageId":2}`,
+		ResultContent:          "Script ran on page and returned:\n```json\n[]\n```",
+		ResultDone:             true,
+		ToolCallDetailExpanded: false,
+	}
+
+	collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(collapsed, "✓ ▸ mcp_chrome_devtools_evaluate_script") {
+		t.Fatalf("expected collapsed MCP card to show the collapsed disclosure glyph; got:\n%s", collapsed)
+	}
+	if strings.Contains(collapsed, "const hits") {
+		t.Fatalf("expected collapsed MCP card to hide the function body; got:\n%s", collapsed)
+	}
+	if strings.Contains(collapsed, "Script ran on page") {
+		t.Fatalf("expected collapsed MCP card to hide the result body; got:\n%s", collapsed)
+	}
+
+	block.ToggleAtWidth(120)
+	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(expanded, "✓ ▾ mcp_chrome_devtools_evaluate_script") {
+		t.Fatalf("expected expanded MCP card to show the expanded disclosure glyph; got:\n%s", expanded)
+	}
+	if !strings.Contains(expanded, "const hits") {
+		t.Fatalf("expected expanded MCP card to reveal the function body; got:\n%s", expanded)
+	}
+
+	block.ToggleAtWidth(120)
+	recollapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(recollapsed, "✓ ▸ mcp_chrome_devtools_evaluate_script") {
+		t.Fatalf("expected second toggle to restore the collapsed glyph; got:\n%s", recollapsed)
+	}
+}
+
 func TestExpandedTaskShowsDescriptionAndWorkerWithTaskID(t *testing.T) {
 	block := &Block{
 		ID:                     1,

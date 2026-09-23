@@ -3,6 +3,8 @@ package mcp
 import (
 	"strings"
 	"unicode"
+
+	"github.com/keakon/chord/internal/toolname"
 )
 
 // RegisteredMCPToolName is the tool id exposed to the LLM and TUI, distinct
@@ -16,7 +18,7 @@ func RegisteredMCPToolName(serverKey, remoteToolName string) string {
 	if rt == "" {
 		rt = "tool"
 	}
-	return "mcp_" + sk + "_" + rt
+	return toolname.MCPToolPrefix + sk + "_" + rt
 }
 
 func sanitizeMCPToken(s string) string {

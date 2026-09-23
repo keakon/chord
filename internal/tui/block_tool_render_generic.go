@@ -870,6 +870,13 @@ func (b *Block) compactToolResultForceExpanded(contentWidth int) bool {
 		// Space could never collapse them again (the toggle guard below).
 		return false
 	}
+	if isMCPToolName(b.ToolName) {
+		// MCP cards collapse to a header-only row with no result preview, so
+		// the single-hidden-line count is always a miscount against a hidden
+		// full dump. External program output stays folded; Space owns the
+		// expansion.
+		return false
+	}
 	keys, vals := b.toolArgsParsed()
 	_, mainPart, _, _, _, _, _ := b.toolHeaderMeta()
 	hidden := compactToolHiddenDetailLines(b, keys, vals, mainPart, contentWidth, false)
