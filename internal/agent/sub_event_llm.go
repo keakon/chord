@@ -243,8 +243,11 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	persistBarrier, persistPending := s.persistMessageBarrier(persistMsg, "assistant message")
 
 	// Update token usage (does not auto-compact, but tracks stats).
+	// Missing usage freezes one estimate when samples exist, else unknown.
 	if resp.Usage != nil {
 		s.ctxMgr.UpdateFromUsage(*resp.Usage)
+	} else {
+		s.ctxMgr.NoteMissingUsage()
 	}
 
 	// ---------------------------------------------------------------

@@ -275,12 +275,18 @@ type MainAgent struct {
 	providerModelRef    string // "provider/model" for unique identification
 	runningModelRef     string // actual model used in latest LLM call
 	previousLLMModelRef string
-	instanceID          string
-	mcpClientInfo       mcp.ClientInfo
-	globalIdle          atomic.Bool
-	realWorkEpoch       atomic.Uint64
-	lastIdleWorkEpoch   uint64
-	lastIdleTurnID      atomic.Uint64
+	// usageObservationModelRef records which model's window produced the current
+	// ctxmgr size observation; empty means no observation, or one restored
+	// without a model identity. A model change only invalidates an observation
+	// measured against another window, so a fallback response's own usage
+	// survives the next config application and can arm against its line.
+	usageObservationModelRef string
+	instanceID               string
+	mcpClientInfo            mcp.ClientInfo
+	globalIdle               atomic.Bool
+	realWorkEpoch            atomic.Uint64
+	lastIdleWorkEpoch        uint64
+	lastIdleTurnID           atomic.Uint64
 
 	// turnMu protects the turn pointer for cross-goroutine access.
 	// The event-loop goroutine writes turn in newTurn(); external goroutines
@@ -288,11 +294,12 @@ type MainAgent struct {
 	turnMu sync.Mutex
 
 	// llmMu protects llmClient, modelName, providerModelRef,
-	// appliedCompactionModelRef, running-model continuity, and model-run
-	// cache-warmth state for cross-goroutine access. The TUI goroutine reads
-	// ModelName() and ProviderModelRef() from View(), while SwapLLMClient /
-	// SwitchModel write these fields. callLLM snapshots under RLock at the start
-	// to ensure consistent model name for hooks and usage tracking. Model writers
+	// appliedCompactionModelRef, usageObservationModelRef, running-model
+	// continuity, and model-run cache-warmth state for cross-goroutine access.
+	// The TUI goroutine reads ModelName() and ProviderModelRef() from View(),
+	// while SwapLLMClient / SwitchModel write these fields. callLLM snapshots
+	// under RLock at the start to ensure consistent model name for hooks and
+	// usage tracking. Model writers
 	// serialize identity, budgets, and event delivery with modelUpdateMu; readers
 	// only take llmMu, which is released before any blocking output delivery.
 	modelUpdateMu        sync.Mutex

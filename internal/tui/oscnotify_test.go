@@ -9,6 +9,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/analytics"
+	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/ratelimit"
 	"github.com/keakon/chord/internal/skill"
@@ -57,6 +58,9 @@ func (loopBusyAgentStub) GetSidebarWalltimeStats() analytics.WalltimeStats {
 	return analytics.WalltimeStats{}
 }
 func (loopBusyAgentStub) GetContextStats() (int, int) { return 0, 0 }
+func (loopBusyAgentStub) GetContextUsageState() ctxmgr.ContextUsageState {
+	return ctxmgr.ContextUsageUnknown
+}
 func (loopBusyAgentStub) ContextPressureLinesForModelRef(string) (float64, float64) {
 	return 0, 0
 }

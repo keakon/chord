@@ -49,7 +49,7 @@ reduction settings: a session that raised its retention thresholds also gets a
 durable summary built from the larger retained input. The `history-N.md` archive
 is unaffected and always holds the full, untrimmed original.
 
-Automatic compaction primarily uses input usage reported by the provider, with an estimate based on recent trusted usage when reporting is unavailable. After the threshold is reached, it normally starts before the next model request, not merely because a response ended. Compaction already in progress can finish and apply its result safely. A request paused for exceeding the context limit resumes after compaction.
+Automatic compaction primarily uses input usage reported by the provider, and falls back to one estimate frozen from recent trusted usage when a response omits it. After the threshold is reached, it normally starts before the next model request, not merely because a response ended. Compaction already in progress can finish and apply its result safely. A request paused for exceeding the context limit resumes after compaction.
 
 ## Context compaction
 
@@ -290,7 +290,7 @@ Provider usage is the authority for this automatic trigger. Chord does not use l
 
 There is one fallback for missing usage: after Chord receives a trusted non-zero `input_tokens` sample, it records the context-contributing message byte size for that sample, including content plus replayed tool-call arguments, thinking blocks, and reasoning text.
 
-If later responses omit usage or report zero while those bytes have grown, Chord estimates `input_tokens` by scaling that sample by the byte ratio and can trigger automatic compaction when the estimate reaches `threshold`. This byte-calibrated estimate is only an early compaction signal; it is not used for billing or as an exact context-window measurement.
+If a later response omits usage or reports zero, Chord scales that sample by the byte ratio, freezes the result as that request's estimate, and can trigger automatic compaction when it reaches `threshold`. The frozen value does not grow with messages appended afterwards: only the next response, a model switch, or an applied compaction changes it. The sidebar shows it as `≈` to mark it as an estimate, while a session with no trusted sample yet stays at `0` and never triggers from it. This byte-calibrated estimate is only an early compaction signal; it is not used for billing or as an exact context-window measurement.
 
 **Additional fixed headroom example (only when needed)**:
 

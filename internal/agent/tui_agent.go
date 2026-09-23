@@ -6,6 +6,7 @@ package agent
 import (
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/ratelimit"
 	"github.com/keakon/chord/internal/skill"
@@ -213,8 +214,14 @@ type UsageReporter interface {
 	// info panel section. All buckets are zero when nothing has been recorded.
 	GetSidebarWalltimeStats() analytics.WalltimeStats
 	// GetContextStats returns current input-context usage and usable input budget for the focused agent.
-	// current is the last input token count; limit is the usable input budget (0 if unknown).
+	// current is the usage-only reading (observed baseline, frozen estimate, or 0
+	// when unknown); limit is the usable input budget (0 if unknown).
 	GetContextStats() (current, limit int)
+	// GetContextUsageState reports the observation state behind GetContextStats:
+	// observed, estimated (frozen), or unknown. Unknown renders as 0 and never
+	// triggers compaction; the frozen estimate must be marked as approximate,
+	// because it is computed instead of provider-observed.
+	GetContextUsageState() ctxmgr.ContextUsageState
 	// ContextPressureLinesForModelRef returns the context-pressure reminder and
 	// auto-compaction lines that a model at modelRef would manage its context
 	// with, as usage ratios in the same frame as GetContextStats (current /

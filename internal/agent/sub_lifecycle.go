@@ -9,6 +9,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -546,11 +547,16 @@ func (s *SubAgent) drainQueuedContextAppendsForContinue() {
 }
 
 // GetContextStats returns the context-usage level shown for this SubAgent and
-// its usable input budget, mirroring the main agent's frame: the post-response
-// context baseline (full prompt plus generated output) or the calibrated
-// estimate once the context has grown past it since the last provider sample.
+// its usable input budget, mirroring the main agent's usage-only frame: the
+// observed post-response baseline, the frozen estimate when the latest response
+// missed usage, or 0 when unknown.
 func (s *SubAgent) GetContextStats() (current, limit int) {
 	return s.ctxMgr.EffectiveContextTokens(), s.ctxMgr.GetUsableInputBudget()
+}
+
+// GetContextUsageState reports the observation state behind GetContextStats.
+func (s *SubAgent) GetContextUsageState() ctxmgr.ContextUsageState {
+	return s.ctxMgr.ContextUsageState()
 }
 
 // GetContextMessageCount returns the number of messages in this agent's context (for sidebar).

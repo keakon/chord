@@ -107,15 +107,15 @@ func (a *MainAgent) usageStatsForTask(rec *DurableTaskRecord, liveInstanceID str
 }
 
 // GetContextStats returns the context-usage level shown for the focused agent
-// and its usable input budget. current is the same effective reading the
+// and its usable input budget. current is the usage-only reading the
 // automatic-compaction decision compares against its threshold: the last
-// post-response context baseline (full prompt including cache tokens plus
-// generated output) or the calibrated estimate once the context has grown past
-// it since that provider sample — so the sidebar Context value/gauge and the
-// auto-compaction trigger always observe one value. limit is the usable input
-// budget (the input limit minus reserved headroom). Focused SubAgents report
-// the same frame from their own context manager; parked and settled targets
-// have no live context manager and report zero.
+// observed post-response baseline (full prompt including cache tokens plus
+// generated output), or the single frozen estimate when the latest response
+// missed usage, or 0 when unknown (no usable sample: a session that has not
+// called the model yet shows a plain 0 and never triggers). Post-response
+// growth never moves it.
+// Focused SubAgents report the same frame from their own context manager;
+// parked and settled targets have no live context manager and report zero.
 func (a *MainAgent) GetContextStats() (current, limit int) {
 	target := a.focusedAgentSnapshot()
 	if target.sub != nil {
@@ -125,6 +125,20 @@ func (a *MainAgent) GetContextStats() (current, limit int) {
 		return 0, 0
 	}
 	return a.ctxMgr.EffectiveContextTokens(), a.ctxMgr.GetUsableInputBudget()
+}
+
+// GetContextUsageState reports the observation state behind GetContextStats for
+// the focused agent: observed, estimated (frozen), or unknown. The TUI marks
+// the frozen estimate as approximate; unknown renders as a plain zero.
+func (a *MainAgent) GetContextUsageState() ctxmgr.ContextUsageState {
+	target := a.focusedAgentSnapshot()
+	if target.sub != nil {
+		return target.sub.GetContextUsageState()
+	}
+	if target.parked || target.settled {
+		return ctxmgr.ContextUsageUnknown
+	}
+	return a.ctxMgr.ContextUsageState()
 }
 
 // ContextPressureLinesForModelRef returns the reminder and auto-compaction

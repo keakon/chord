@@ -47,12 +47,11 @@ func askFallbackBoundary(a *MainAgent, payload *llmFallbackBoundaryPayload) llmF
 }
 
 // TestFallbackBoundaryCommitsSmallerWindowAndArmsCompaction covers the fallback
-// downshift contract: a fallback that re-evaluates the request against a
-// smaller window commits its identity and budgets and arms the usage-driven
-// compaction when the new line is already crossed, but the round itself goes
-// out. The compaction starts at the next pre-request gate in parallel with that
-// round, so the boundary must neither claim the compaction slot nor hold the
-// reply.
+// downshift contract under usage-only triggering: a fallback that narrows the
+// window commits its identity and budgets and the round goes out, but the stale
+// size observation is invalidated so nothing arms until fresh usage on the new
+// window crosses its own line. The compaction starts at a later pre-request gate,
+// so the boundary must neither claim the compaction slot nor hold the reply.
 func TestFallbackBoundaryCommitsSmallerWindowAndArmsCompaction(t *testing.T) {
 	a := newFallbackDownshiftTestAgent(t)
 
@@ -70,8 +69,8 @@ func TestFallbackBoundaryCommitsSmallerWindowAndArmsCompaction(t *testing.T) {
 	if a.IsCompactionRunning() {
 		t.Fatal("the boundary must not start a compaction ahead of the round")
 	}
-	if !a.autoCompactRequested.Load() {
-		t.Fatal("a fallback whose line is already crossed must arm the usage-driven compaction")
+	if a.autoCompactRequested.Load() {
+		t.Fatal("a fallback switch must not arm from stale observation: size is invalidated, fresh usage required")
 	}
 	if got := a.RunningModelRef(); got != "provider/smaller-model" {
 		t.Fatalf("RunningModelRef = %q, want the committed fallback identity", got)
@@ -83,9 +82,8 @@ func TestFallbackBoundaryCommitsSmallerWindowAndArmsCompaction(t *testing.T) {
 
 // TestFallbackBoundaryCommitsSmallerInputBudgetOnly verifies that a fallback
 // whose total context window matches the current model but whose effective
-// input budget is smaller is still treated as a downshift: the auto-compaction
-// line tracks the input budget, so the same context crosses the new line even
-// when the overall window is unchanged.
+// input budget is smaller still commits the new budgets, but under usage-only
+// triggering it must not arm from the stale observation.
 func TestFallbackBoundaryCommitsSmallerInputBudgetOnly(t *testing.T) {
 	a := newFallbackDownshiftTestAgent(t)
 
@@ -100,8 +98,8 @@ func TestFallbackBoundaryCommitsSmallerInputBudgetOnly(t *testing.T) {
 	if result.err != nil {
 		t.Fatalf("fallback boundary error = %v, want the round to proceed on the fallback", result.err)
 	}
-	if !a.autoCompactRequested.Load() {
-		t.Fatal("an input-budget-only downshift must arm the usage-driven compaction")
+	if a.autoCompactRequested.Load() {
+		t.Fatal("an input-budget-only downshift must not arm from stale observation after invalidation")
 	}
 	if got := a.RunningModelRef(); got != "provider/smaller-input-model" {
 		t.Fatalf("RunningModelRef = %q, want the committed fallback identity", got)

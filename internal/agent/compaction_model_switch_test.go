@@ -11,19 +11,20 @@ import (
 )
 
 // TestModelSwitchOntoCrossedLineRunsRequestInParallelWithCompaction pins the
-// switch contract: a running-model change onto a window whose line the current
-// context already crosses must not hold the round back. The pre-request gate
-// starts the usage-driven compaction and spawns the request in parallel with
-// it, so the round reaches the provider instead of waiting for the draft; only
-// a hard context-length rejection suspends a round.
+// usage-only switch contract: a running-model change invalidates the size
+// observation (window and tokenization may differ), keeping only the calibration
+// ratio. The round must still go out immediately — a switch never holds the
+// round back — but nothing arms or starts a compaction until fresh usage on the
+// new window crosses its own line; only a hard context-length rejection
+// suspends a round.
 func TestModelSwitchOntoCrossedLineRunsRequestInParallelWithCompaction(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Threshold: 0.8}}}
 	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(100000, 100000, 0, 0.8)
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "continue the task"})
-	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 90000}) // 0.9: over the line the switch lands on
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 90000}) // 0.9: over the old line, invalidated by the switch
 	// The running model just changed: the applied threshold still belongs to the
-	// previous model, so this gate re-derives it and reads the crossing.
+	// previous model, so this gate re-derives it and invalidates the stale size.
 	a.appliedCompactionModelRef = "provider/previous-model"
 	provider := &blockingStreamProvider{calls: []scriptedStreamCall{{
 		resp: &message.Response{Content: "still running", StopReason: "stop"},
@@ -50,26 +51,20 @@ func TestModelSwitchOntoCrossedLineRunsRequestInParallelWithCompaction(t *testin
 	// actual dispatch rather than the in-flight flag alone.
 	waitForBlockingStreamProviderCalls(t, provider, 1)
 	if !a.mainLLMRequestInFlight.Load() {
-		t.Fatal("the round must be in flight in parallel with the compaction")
+		t.Fatal("the round must be in flight after the switch")
 	}
-	if !a.autoCompactRequested.Load() {
-		t.Fatal("the switch onto a crossed line must arm the usage-driven compaction")
+	if a.autoCompactRequested.Load() {
+		t.Fatal("the switch must not arm from stale observation: size is invalidated, fresh usage required")
 	}
-	// compact_context is not visible in this test, so the gate starts the
-	// compaction immediately instead of deferring its start across the grace
-	// window (the request goes out either way).
-	if !a.IsCompactionRunning() {
-		t.Fatal("the gate must start the usage-driven compaction for the switched model")
-	}
-	if got := a.compactionState.trigger; got != compactionTriggerUsageDriven {
-		t.Fatalf("compaction trigger = %q, want %q", got, compactionTriggerUsageDriven)
+	if a.IsCompactionRunning() {
+		t.Fatal("the gate must not start a compaction from stale observation after a model switch")
 	}
 }
 
 // TestReminderDoesNotStageOverPendingHigherPressureNotice pins the guard that
 // keeps the reminder from stacking on a higher-pressure notice left pending by
-// a dispatch that never confirmed (a model switch that both re-attaches the
-// reminder and arms the compaction in the same cycle). The guard lives in the
+// a dispatch that never confirmed (a threshold crossing that both re-attaches
+// the reminder and arms the compaction in the same cycle). The guard lives in the
 // reminder queue because it is the lowest-severity notice and cannot tell from
 // its own inputs whether the gate is about to attach the countdown or the
 // warning for this same request.
@@ -115,13 +110,15 @@ func TestReminderDoesNotStageOverPendingHigherPressureNotice(t *testing.T) {
 	})
 }
 
-// TestModelSwitchAttachesSinglePressureNoticeToRequest is the end-to-end guard
-// for the reported bug: a model switch that crosses the new window's threshold
-// in the same cycle used to queue both the sticky reminder and the
-// higher-pressure notice, so the model received two prompts describing the same
-// pressure. The gate now queues only the notice that matches the trigger, and
-// this asserts the request the provider actually receives carries exactly one.
-func TestModelSwitchAttachesSinglePressureNoticeToRequest(t *testing.T) {
+// TestModelSwitchDoesNotAttachStalePressureNoticeToRequest is the end-to-end
+// guard for the reported bug: a model switch that crossed the new window's
+// threshold in the same cycle used to queue the sticky reminder together with a
+// higher-pressure notice, so the model received two prompts describing one
+// pressure. Under usage-only triggering the switch invalidates the previous
+// window's size observation, so the request that goes out carries no pressure
+// prompt at all: the crossing is judged again from fresh usage against the new
+// window's own line.
+func TestModelSwitchDoesNotAttachStalePressureNoticeToRequest(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Threshold: 0.8}}}
 	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(100000, 100000, 0, 0.8)
@@ -154,15 +151,11 @@ func TestModelSwitchAttachesSinglePressureNoticeToRequest(t *testing.T) {
 
 	waitForBlockingStreamProviderCalls(t, provider, 1)
 	requests, _ := provider.snapshot()
-	notices := 0
 	for _, msg := range requests[0] {
 		// The reminder and the countdown share the checkpoint-pressure action
 		// text; the externalization warning has its own wording.
 		if strings.Contains(msg.Content, contextCheckpointPressureAction) || strings.Contains(msg.Content, compactionWarningText) {
-			notices++
+			t.Fatalf("a model switch must not warn from the previous window's observation, got %q", msg.Content)
 		}
-	}
-	if notices != 1 {
-		t.Fatalf("the dispatched request carried %d context-pressure notices, want exactly one", notices)
 	}
 }

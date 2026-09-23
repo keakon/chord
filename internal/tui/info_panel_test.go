@@ -16,6 +16,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/analytics"
+	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/ratelimit"
 	"github.com/keakon/chord/internal/skill"
@@ -30,8 +31,11 @@ type infoPanelAgent struct {
 	contextCurrent      int
 	contextBytes        int
 	contextLimit        int
-	contextReminder     float64
-	contextThreshold    float64
+	// contextUsageState overrides the state derived from contextCurrent, so a
+	// test can render the frozen-estimate variant without an observation.
+	contextUsageState ctxmgr.ContextUsageState
+	contextReminder   float64
+	contextThreshold  float64
 	// contextLinesForRef optionally overrides ContextPressureLinesForModelRef
 	// per queried ref so tests can distinguish which model the display
 	// resolved (nil falls back to contextReminder/contextThreshold for any ref).
@@ -84,6 +88,16 @@ func (a *infoPanelAgent) GetSidebarWalltimeStats() analytics.WalltimeStats {
 
 func (a *infoPanelAgent) GetContextStats() (current, limit int) {
 	return a.contextCurrent, a.contextLimit
+}
+
+func (a *infoPanelAgent) GetContextUsageState() ctxmgr.ContextUsageState {
+	if a.contextUsageState != "" {
+		return a.contextUsageState
+	}
+	if a.contextCurrent > 0 {
+		return ctxmgr.ContextUsageObserved
+	}
+	return ctxmgr.ContextUsageUnknown
 }
 
 func (a *infoPanelAgent) ContextPressureLinesForModelRef(modelRef string) (reminder, threshold float64) {
@@ -684,6 +698,46 @@ func TestRenderInfoPanelShowsUsageUsesInputBudgetRatherThanTotalContextWindow(t 
 	plain := stripANSI(m.renderInfoPanel(40, 24))
 	if !strings.Contains(plain, "Context: 50.0k (50%)") {
 		t.Fatalf("rendered info panel should show input-budget percentage; got %q", plain)
+	}
+}
+
+func TestRenderInfoPanelUnknownUsageShowsPlainZero(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.contextLimit = 100_000
+	m := NewModel(backend)
+
+	lines := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(40, 24)), "USAGE")
+	if len(lines) == 0 || lines[0] != "Context: 0 (0%)" {
+		t.Fatalf("a session without usage should render a plain zero context line, got %#v", lines)
+	}
+}
+
+func TestRenderInfoPanelFrozenEstimateIsMarkedApproximate(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.contextCurrent = 12_300
+	backend.contextUsageState = ctxmgr.ContextUsageEstimated
+	m := NewModel(backend)
+
+	lines := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(40, 24)), "USAGE")
+	if len(lines) == 0 || lines[0] != "Context: ≈12.3k (6%)" {
+		t.Fatalf("a frozen estimate should be marked approximate, got %#v", lines)
+	}
+}
+
+func TestInfoPanelCacheIncludesUsageState(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.contextCurrent = 12_300
+	backend.contextUsageState = ctxmgr.ContextUsageEstimated
+	m := NewModel(backend)
+
+	first := stripANSI(m.renderInfoPanel(40, 24))
+	if !strings.Contains(first, "Context: ≈12.3k") {
+		t.Fatalf("frozen estimate should render the approximate marker, got %q", first)
+	}
+	backend.contextUsageState = ctxmgr.ContextUsageObserved
+	second := stripANSI(m.renderInfoPanel(40, 24))
+	if strings.Contains(second, "≈") {
+		t.Fatalf("info panel reused the approximate marker after the usage state changed, got %q", second)
 	}
 }
 

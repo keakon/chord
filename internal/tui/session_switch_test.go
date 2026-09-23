@@ -18,6 +18,7 @@ import (
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/ratelimit"
 	"github.com/keakon/chord/internal/runtimecache"
@@ -4563,6 +4564,12 @@ func (s *sessionControlAgent) GetSidebarWalltimeStats() analytics.WalltimeStats 
 }
 func (s *sessionControlAgent) GetContextStats() (current, limit int) {
 	return s.contextCurrent, s.contextLimit
+}
+func (s *sessionControlAgent) GetContextUsageState() ctxmgr.ContextUsageState {
+	if s.contextCurrent > 0 {
+		return ctxmgr.ContextUsageObserved
+	}
+	return ctxmgr.ContextUsageUnknown
 }
 func (s *sessionControlAgent) ContextPressureLinesForModelRef(string) (float64, float64) {
 	return 0, 0

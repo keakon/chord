@@ -34,7 +34,7 @@ Chord 提供两层互补的上下文管理机制：**上下文压缩（Compactio
 
 Compaction 在把历史交给摘要模型之前，会先对其应用一次 Reduction 规则以节省摘要调用的开销，并且遵循你配置的 Reduction 参数：调高了保留阈值的会话，其持久摘要也会基于保留更多的输入生成。归档到 `history-N.md` 的原文不受此影响，始终是完整无损的。
 
-自动压缩主要依据服务商返回的输入用量。缺少用量数据时，Chord 会根据最近的可信用量估算。达到阈值后，通常在下一次模型请求前启动；不会仅因回答结束就另开一轮压缩。已经运行的压缩会继续完成，并在安全时机应用结果。请求因上下文超限暂停时，会等待压缩后再恢复。
+自动压缩主要依据服务商返回的输入用量。某次响应没有带回用量时，Chord 会用最近的可信用量冻结出一个估算值代替。达到阈值后，通常在下一次模型请求前启动；不会仅因回答结束就另开一轮压缩。已经运行的压缩会继续完成，并在安全时机应用结果。请求因上下文超限暂停时，会等待压缩后再恢复。
 
 ## 上下文压缩（Compaction）
 
@@ -166,7 +166,7 @@ TUI 状态栏会把模型请求的 checkpoint 与 usage-driven 压缩区分开�
 
 以**可用输入预算**为基准。若模型配置了 `limit.input`，以此为准；否则按 `limit.context` 减去模型声明的 `limit.output` 推导（模型声明了自己的输出上限时，例如 Codex 400K 窗口配 128K 输出推出 272K 输入预算）；只有未声明 `limit.output` 的模型才回退到预留有效默认输出上限（`max_output_tokens`，默认 `64000`）。若设置了 `reserved`，再从预算中扣除。因此实际触发点为 `(输入预算 - reserved) × threshold`；`reserved` 会和 `threshold` 未使用的比例余量叠加，而不是替代它。TUI 信息面板和底部栏的 `Context` 百分比使用扣除 `reserved` 后的同一输入预算基准，与自动压缩阈值保持对齐。对于会单独报告 prompt cache 写入的 provider，Chord 会把当前 prompt 侧用量按 `input_tokens + cache_write_tokens` 计算，因此新写入缓存的 prompt 片段也会计入显示的上下文负担。
 
-provider usage 是自动触发的权威依据。Chord 不会用请求级剪裁后的本地 token 估算去清除已经触发的自动压缩请求，因为多模态输入、工具 schema、provider/proxy framing 等都可能让本地估算与 provider 统计不一致。唯一的兜底是 usage 缺失场景：Chord 收到可信的非零 `input_tokens` 后，会记录当时会进入上下文的消息 bytes，包括正文、需要回放的 tool-call 参数、thinking blocks 和 reasoning text；如果后续响应缺少 usage 或返回 0，且这些 bytes 已增长，就按比例估算 `input_tokens`，估算值达到 `threshold` 时也会触发自动压缩。这个 byte-calibrated estimate 只用于提前压缩，不用于计费，也不表示精确的上下文窗口用量。
+provider usage 是自动触发的权威依据。Chord 不会用请求级剪裁后的本地 token 估算去清除已经触发的自动压缩请求，因为多模态输入、工具 schema、provider/proxy framing 等都可能让本地估算与 provider 统计不一致。唯一的兜底是 usage 缺失场景：Chord 收到可信的非零 `input_tokens` 后，会记录当时会进入上下文的消息 bytes，包括正文、需要回放的 tool-call 参数、thinking blocks 和 reasoning text；之后某次响应缺少 usage 或返回 0 时，就按 bytes 比例缩放这个样本，把结果冻结成该次请求的估算值，估算值达到 `threshold` 时也会触发自动压缩。冻结后的估算值不会随后续追加的消息继续增长，只有下一次响应回报 usage、模型切换或压缩应用才会改变它。表盘上这个值标为 `≈`，与真实观测区分开；还没有任何可信样本的会话显示 `0`，也不会据此触发压缩。这个 byte-calibrated estimate 只用于提前压缩，不用于计费，也不表示精确的上下文窗口用量。
 
 **额外固定 headroom 示例（仅在需要时）**：
 

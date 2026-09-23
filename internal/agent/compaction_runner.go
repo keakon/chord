@@ -437,7 +437,7 @@ func (a *MainAgent) fireBeforeCompressHook(snapshot []message.Message, manual bo
 // using ReplacePrefixAtomic to preserve tail messages added during compaction.
 func (a *MainAgent) applyCompactionDraft(d *compactionDraft) error {
 	if d == nil || d.Skip {
-		a.ctxMgr.ClearLastTokenUsage()
+		a.clearUsageObservation()
 		a.clearUsageDrivenAutoCompactRequest()
 		a.resetAutoCompactionFailureState()
 		if d != nil && d.InfoMessage != "" && d.Manual {
@@ -681,6 +681,8 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 		a.llmClient.InvalidateRouting("context_compacted")
 	}
 	a.ctxMgr.ClearLastTokenUsage()
+	// The next sample belongs to whichever model answers next.
+	a.setUsageObservationModelRef("")
 	// A model-driven apply's manifest removal is gated on durable evidence
 	// that the applied proposal state and the new interval anchor were
 	// actually persisted: the recovery snapshot carries both, and once it is

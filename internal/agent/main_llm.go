@@ -14,6 +14,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/llm"
@@ -832,12 +833,35 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Me
 		log.Infof("switched back to selected model model=%v", selectedRef)
 	}
 
-	// Record token usage for context compression decisions.
+	// Record token usage for context compression decisions: usage-only trigger.
+	// Observed responses refresh the baseline; missing usage freezes one estimate
+	// when samples exist, else records unknown (display 0, never trigger).
 	if resp.Usage != nil {
 		a.ctxMgr.UpdateFromUsage(*resp.Usage)
+	} else {
+		a.ctxMgr.NoteMissingUsage()
 	}
+	// The sample belongs to the model that answered this request. The next
+	// config application may still be carrying the previous model's threshold,
+	// and this ownership is what keeps it from discarding a sample the new
+	// window produced (see applyModelCompactionConfig).
+	a.setUsageObservationModelRef(callStatus.RunningModelRef)
 	decision := a.ctxMgr.AutoCompactDecision()
-	decisionFields := fmt.Sprintf("last_input_tokens=%v estimated_input_tokens=%v effective_input_tokens=%v threshold_tokens=%v input_budget=%v reserved_input=%v usable_input_budget=%v threshold=%v selected_model=%v running_model=%v turn_id=%v", decision.LastInputTokens, decision.EstimatedInputTokens, decision.EffectiveInputTokens, decision.ThresholdTokens, decision.InputBudget, decision.ReservedInput, decision.UsableInputBudget, decision.Threshold, selectedRef, callStatus.RunningModelRef, turnID)
+	decisionFields := fmt.Sprintf("last_input_tokens=%v estimated_input_tokens=%v effective_input_tokens=%v usage_state=%v threshold_tokens=%v input_budget=%v reserved_input=%v usable_input_budget=%v threshold=%v selected_model=%v running_model=%v turn_id=%v", decision.LastInputTokens, decision.EstimatedInputTokens, decision.EffectiveInputTokens, decision.UsageState, decision.ThresholdTokens, decision.InputBudget, decision.ReservedInput, decision.UsableInputBudget, decision.Threshold, selectedRef, callStatus.RunningModelRef, turnID)
+	// Suspicious-but-successful response: normalized input exceeds the local
+	// budget yet the provider succeeded. Keep the successful result and leave
+	// this as a diagnostic: never replay or discard the answer, and never arm
+	// from here. Arming stays with the threshold crossing below — with a
+	// positive threshold an over-budget prompt already reads as ShouldCompact
+	// there, while threshold <= 0 means the user disabled automatic compaction
+	// and this observation must not override it. Normalization must use
+	// fullPromptTokens (cache reads are already inside input on most wires;
+	// adding them again double-counts).
+	if resp.Usage != nil && decision.UsableInputBudget > 0 {
+		if fullPrompt := ctxmgr.FullPromptTokens(*resp.Usage); fullPrompt > decision.UsableInputBudget {
+			log.Debugf("successful response exceeded local input budget full_prompt_tokens=%v usable_input_budget=%v %v", fullPrompt, decision.UsableInputBudget, decisionFields)
+		}
+	}
 	// The requested line marks a new request instance: arming only transitions
 	// once per threshold crossing, so a response that still reads as crossing
 	// while the same request is armed — a compaction run in flight, or a draft

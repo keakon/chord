@@ -16,11 +16,13 @@ const (
 	// model-driven checkpoint (the high-quality path) or externalize state
 	// before the summary-based compaction takes over.
 	minCompactionGracePeriodBatches = 2
-	// compactionGraceHardCeilingRatio is the abnormal-growth bypass: once the
-	// post-response usage reaches this fraction of the usable input budget
-	// the grace is skipped (or cut short) and compaction starts immediately,
-	// so a single batch that pulled in large tool output cannot ride the
-	// grace into a provider oversize rejection.
+	// compactionGraceHardCeilingRatio is the observed-urgency bypass: once the
+	// latest observation (or the single frozen estimate when usage missed)
+	// reaches this fraction of the usable input budget the grace is skipped (or
+	// cut short) and compaction starts immediately. It no longer guards against
+	// a pre-request size collision; it only measures how urgent the last
+	// observation already is. Unknown (no observation, no frozen estimate) never
+	// reaches it and simply consumes its batches like any other deferred request.
 	compactionGraceHardCeilingRatio = 0.95
 )
 

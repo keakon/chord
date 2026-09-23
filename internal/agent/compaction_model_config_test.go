@@ -281,9 +281,10 @@ func TestApplyModelCompactionConfigSameModelKeepsNoticesFresh(t *testing.T) {
 }
 
 func TestApplyModelCompactionConfigModelChangeKeepsArmedWhenStillOverNewThreshold(t *testing.T) {
-	// An armed usage-driven request that still crosses the new model's lower
-	// threshold survives the switch: it opens a fresh grace period through the
-	// regular gate instead of being force-compacted immediately.
+	// Usage-only trigger: a model switch invalidates the size observation (window
+	// and tokenization may differ), keeping only the calibration ratio. The armed
+	// request from the previous window is therefore cleared even when the old
+	// usage would have crossed the new threshold; fresh usage must re-trigger.
 	perModel := 0.3
 	a := modelCompTestAgent(
 		config.CompactionConfig{Threshold: 0.65},
@@ -295,14 +296,70 @@ func TestApplyModelCompactionConfigModelChangeKeepsArmedWhenStillOverNewThreshol
 	a.armUsageDrivenAutoCompactRequest()
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 500000}) // 0.5 of budget
 	a.applyModelCompactionConfig()
-	if !a.autoCompactRequested.Load() {
-		t.Fatal("armed request must survive the switch when usage still crosses the new threshold")
+	if a.autoCompactRequested.Load() {
+		t.Fatal("model switch must clear the armed request: old observation is invalidated, not re-evaluated")
 	}
 	if got := a.ctxMgr.Threshold(); got != 0.3 {
 		t.Fatalf("applied threshold = %v, want 0.3", got)
 	}
-	if !a.ctxMgr.AutoCompactDecision().ShouldCompact {
-		t.Fatal("usage 0.5 must still cross the new 0.3 threshold")
+	if a.ctxMgr.AutoCompactDecision().ShouldCompact {
+		t.Fatal("after invalidation the decision must be unknown (no trigger) until fresh usage arrives")
+	}
+}
+
+// A sample the new model itself produced — a non-narrowing fallback reports
+// usage for the model that answered — survives the config application that
+// adopts that model: the new window evaluates it against its own line instead
+// of discarding it and deferring the trigger by another round.
+func TestApplyModelCompactionConfigKeepsNewModelOwnedObservation(t *testing.T) {
+	perModel := 0.8
+	a := modelCompTestAgent(
+		config.CompactionConfig{Threshold: 0.65},
+		map[string]*config.ModelCompactionConfig{"openai/gpt-5.6-luna": {Threshold: &perModel}},
+		"openai/gpt-5.6-luna",
+	)
+	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(1000, 1000, 0, 0.65)
+	a.appliedCompactionModelRef = "openai/gpt-5.6-sol"
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 900})
+	a.setUsageObservationModelRef("openai/gpt-5.6-luna")
+	a.applyModelCompactionConfig()
+	if got := a.ctxMgr.ContextUsageState(); got != ctxmgr.ContextUsageObserved {
+		t.Fatalf("usage state = %v, want observed: the sample belongs to the new model", got)
+	}
+	if got := a.ctxMgr.EffectiveContextTokens(); got != 900 {
+		t.Fatalf("effective tokens = %d, want the new model's own sample 900", got)
+	}
+	if got := a.ctxMgr.Threshold(); got != 0.8 {
+		t.Fatalf("applied threshold = %v, want 0.8", got)
+	}
+	if !a.autoCompactRequested.Load() {
+		t.Fatal("900 tokens over the new model's 800-token line must arm at the config application")
+	}
+}
+
+// The counterpart: an observation the previous model produced is stale for the
+// new window, so the switch must invalidate it instead of judging it against
+// the new line.
+func TestApplyModelCompactionConfigInvalidatesOtherModelObservation(t *testing.T) {
+	perModel := 0.8
+	a := modelCompTestAgent(
+		config.CompactionConfig{Threshold: 0.65},
+		map[string]*config.ModelCompactionConfig{"openai/gpt-5.6-luna": {Threshold: &perModel}},
+		"openai/gpt-5.6-luna",
+	)
+	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(1000, 1000, 0, 0.65)
+	a.appliedCompactionModelRef = "openai/gpt-5.6-sol"
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 900})
+	a.setUsageObservationModelRef("openai/gpt-5.6-sol")
+	a.applyModelCompactionConfig()
+	if got := a.ctxMgr.ContextUsageState(); got != ctxmgr.ContextUsageUnknown {
+		t.Fatalf("usage state = %v, want unknown after invalidating another model's sample", got)
+	}
+	if got := a.ctxMgr.EffectiveContextTokens(); got != 0 {
+		t.Fatalf("effective tokens = %d, want 0 after invalidation", got)
+	}
+	if a.autoCompactRequested.Load() {
+		t.Fatal("the previous model's crossing must not arm the new window")
 	}
 }
 
@@ -367,10 +424,9 @@ func TestIdleAutoCompactionReevaluatesStaleArmAgainstRealignedModel(t *testing.T
 }
 
 func TestApplyModelCompactionConfigModelChangeArmsCrossedUsage(t *testing.T) {
-	// A switch onto a model whose stricter threshold the current context already
-	// crosses arms the usage-driven request, so the next pre-request gate starts
-	// the compaction in parallel with the round instead of deferring that round
-	// behind the compaction.
+	// Usage-only trigger: a switch onto a model whose stricter threshold the old
+	// context would have crossed must NOT arm. The size observation is
+	// invalidated on switch; only fresh usage on the new window may trigger.
 	perModel := 0.3
 	a := modelCompTestAgent(
 		config.CompactionConfig{Threshold: 0.65},
@@ -384,8 +440,8 @@ func TestApplyModelCompactionConfigModelChangeArmsCrossedUsage(t *testing.T) {
 		t.Fatal("precondition: nothing arms the request before the switch")
 	}
 	a.applyModelCompactionConfig()
-	if !a.autoCompactRequested.Load() {
-		t.Fatal("a switch onto a crossed line must arm the usage-driven compaction")
+	if a.autoCompactRequested.Load() {
+		t.Fatal("a switch must not arm from stale observation: size is invalidated, fresh usage required")
 	}
 	if got := a.ctxMgr.Threshold(); got != 0.3 {
 		t.Fatalf("applied threshold = %v, want 0.3", got)

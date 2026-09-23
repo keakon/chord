@@ -110,13 +110,14 @@ func (a *MainAgent) effectiveReminderPctForModelRef(modelRef string, threshold f
 // pending model-pool switches are applied; a model change changes the reminder
 // claim's model identity, which resets the reminder-class overlay claims for
 // the new window (full reminder text becomes available again; the warning claim
-// resets with the request generation). A model change also re-evaluates the
-// usage-driven request against the new line: a switch to a model whose
-// threshold the current context already crosses arms the request, so the next
-// pre-request gate starts a durable compaction in parallel with the round,
-// while an armed request that the new line no longer justifies is cleared. The
-// round itself is never deferred behind that compaction: only a hard
-// context-length rejection suspends a round.
+// resets with the request generation). A model change also drops the size
+// observation when it was measured against the previous window, so that window
+// starts from unknown: any request armed before the switch is cleared, and
+// nothing arms until a response reports usage against the new window's own
+// line. An observation the new model itself produced (a fallback response
+// reporting usage for the model that answered) is kept and judged against the
+// new line instead. The round itself is never deferred behind a compaction:
+// only a hard context-length rejection suspends a round.
 func (a *MainAgent) applyModelCompactionConfig() {
 	if a == nil || a.ctxMgr == nil {
 		return
@@ -133,12 +134,24 @@ func (a *MainAgent) applyModelCompactionConfig() {
 	// appliedCompactionModelRef is still the zero value) marks the switch so the
 	// armed usage-driven request is re-evaluated below.
 	modelChanged := previousModelRef != "" && previousModelRef != modelRef
+	// Only an observation owned by another window is stale. The ownership is
+	// cleared together with the observation it describes, in the same critical
+	// section that decides it, so a concurrent sample cannot be misattributed.
+	observationMatchesNewModel := modelRef != "" && a.usageObservationModelRef == modelRef
+	if modelChanged && !observationMatchesNewModel {
+		a.usageObservationModelRef = ""
+	}
 	a.appliedCompactionModelRef = modelRef
 	a.llmMu.Unlock()
 	if modelChanged {
 		// The new model re-evaluates usage against its own threshold, so the
-		// previous window's grace state does not carry over.
+		// previous window's grace state does not carry over. Only the
+		// cross-model calibration ratio survives the invalidation for the
+		// frozen estimate.
 		a.clearCompactionGrace()
+		if !observationMatchesNewModel {
+			a.ctxMgr.InvalidateSizeObservation()
+		}
 	}
 	previousThreshold := a.ctxMgr.Threshold()
 	newThreshold := a.effectiveCompactionThreshold(modelRef)
@@ -157,14 +170,11 @@ func (a *MainAgent) applyModelCompactionConfig() {
 			a.armContextNoticeCleanup()
 		}
 	}
-	// Re-evaluate the armed request against the freshly applied threshold. A
-	// switch onto a smaller window (or onto a model with a stricter threshold)
-	// leaves the request armed when the current context already crosses the new
-	// line, so the gate below starts the compaction; an armed request the new
-	// line no longer justifies is cleared instead (for example a fallback from
-	// a small-window model with a low threshold to a large-window one with a
-	// high threshold), so the new window is not force-compacted by an old
-	// crossing.
+	// Re-evaluate the armed request against the freshly applied threshold. The
+	// invalidation above leaves the decision unknown, so a request armed under
+	// the previous window is cleared here: the new window must not be
+	// force-compacted by an old crossing, and it arms again only once a
+	// response reports usage against its own line.
 	if modelChanged {
 		if a.ctxMgr.AutoCompactDecision().ShouldCompact {
 			a.armUsageDrivenAutoCompactRequest()

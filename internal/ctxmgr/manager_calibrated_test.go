@@ -146,17 +146,13 @@ func TestEstimateMessagesTokensCalibratedClampsOutliers(t *testing.T) {
 	}
 }
 
-// TestEstimateMessagesTokensCalibratedExcludesImageShare verifies the
-// calibration window measures the text share: the provider sample's image
-// tokens leave the numerator and the image payload leaves the denominator, so
-// an image-heavy window cannot bias the tokens-per-byte ratio.
+// Mixed samples cannot identify the provider's text-only token charge.
 func TestEstimateMessagesTokensCalibratedExcludesImageShare(t *testing.T) {
 	m := NewManager(8192, 0)
 	m.Append(message.Message{Content: strings.Repeat("x", 3000)})
 	m.Append(message.Message{Parts: []message.ContentPart{{Type: message.ContentPartImage, Data: make([]byte, 5000)}}})
 	m.UpdateFromUsage(message.TokenUsage{InputTokens: 2000})
-	// Text share 2000 - 1600 over 3000 text bytes.
-	if got, want := m.CalibratedRatio(), 400.0/3000.0; got != want {
+	if got, want := m.CalibratedRatio(), 0.0; got != want {
 		t.Fatalf("CalibratedRatio() = %v, want %v", got, want)
 	}
 }
@@ -203,10 +199,7 @@ func TestEstimateMessagesTokensCalibratedMixedWindowClamps(t *testing.T) {
 	}
 }
 
-// A part restored from the session file carries no inline Data, so the
-// calibration window must subtract its recorded size (DataBytes) from the
-// denominator exactly like an in-memory part: the ratio only measures text
-// bytes, whether or not the blob has been resolved.
+// Lazy image restoration must also exclude mixed samples from text calibration.
 func TestEstimateMessagesTokensCalibratedExcludesLazilyRestoredImageShare(t *testing.T) {
 	m := NewManager(8192, 0)
 	m.RestoreMessages([]message.Message{{Role: message.RoleUser, Parts: []message.ContentPart{
@@ -214,8 +207,7 @@ func TestEstimateMessagesTokensCalibratedExcludesLazilyRestoredImageShare(t *tes
 		{Type: message.ContentPartImage, ImagePath: "shot.png", DataBytes: 5000},
 	}}})
 	m.UpdateFromUsage(message.TokenUsage{InputTokens: 2000})
-	// Text share 2000 - 1600 over 3000 text bytes.
-	if got, want := m.CalibratedRatio(), 400.0/3000.0; got != want {
+	if got, want := m.CalibratedRatio(), 0.0; got != want {
 		t.Fatalf("CalibratedRatio() = %v, want %v", got, want)
 	}
 }

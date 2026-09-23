@@ -205,6 +205,28 @@ func (a *MainAgent) applyRunningModelRefIfCurrent(llmClient *llm.Client, ref str
 	})
 }
 
+// setUsageObservationModelRef records the model whose window produced the
+// current ctxmgr size observation ("" when no observation is recorded).
+func (a *MainAgent) setUsageObservationModelRef(modelRef string) {
+	if a == nil {
+		return
+	}
+	a.llmMu.Lock()
+	a.usageObservationModelRef = strings.TrimSpace(modelRef)
+	a.llmMu.Unlock()
+}
+
+// clearUsageObservation drops the size observation together with its model
+// ownership, so the next decision starts from unknown and no stale owner can
+// keep a later invalidation from running.
+func (a *MainAgent) clearUsageObservation() {
+	if a == nil || a.ctxMgr == nil {
+		return
+	}
+	a.ctxMgr.ClearLastTokenUsage()
+	a.setUsageObservationModelRef("")
+}
+
 // syncRunningModelRefToCursorHead realigns the sidebar with the sticky model
 // cursor after a request ended without a confirmed switch. The cursor head is the
 // model the next request will start from, so keeping a failed attempt's target

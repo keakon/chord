@@ -302,6 +302,8 @@ func (a *MainAgent) resetSessionRuntimeState() {
 	a.ctxMgr.RestoreStats(message.TokenUsage{})
 	a.ctxMgr.SetLastInputTokens(0)
 	a.ctxMgr.SetLastTotalContextTokens(0)
+	// The cleared observation described the previous session's model/context.
+	a.setUsageObservationModelRef("")
 	a.resetContextReductionStats()
 	a.resetSessionRetentionSignals()
 	if a.usageTracker != nil {

@@ -15,6 +15,7 @@ import (
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/bytefmt"
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/skill"
 	"github.com/keakon/chord/internal/tools"
 	"github.com/keakon/chord/internal/tui/markdownutil"
@@ -151,16 +152,21 @@ func keyPoolHealthSeverity(healthy, total int) keyPoolSeverity {
 }
 
 func (m *Model) buildInfoPanelUsageBlock(width, lineW int) string {
-	// current is the agent's effective context usage — the same reading the
-	// auto-compaction decision compares against its threshold (the last
-	// post-response baseline, or the calibrated estimate once the context has
-	// grown past it) — so the gauge shows exactly the pressure that triggers
-	// compaction. percent = current / usable input budget.
+	// current is the usage-only reading the auto-compaction decision compares
+	// against its threshold: the last observed post-response baseline, the
+	// single frozen estimate when the latest response missed usage, or 0 when
+	// unknown. Unknown is what a session that has not called the model yet
+	// looks like, so it renders as a plain 0 with no extra mark and never
+	// triggers; the frozen estimate is computed rather than observed and is
+	// marked with ≈. Post-response growth never moves the value, so the gauge
+	// shows exactly the pressure that triggers compaction. percent = current /
+	// usable input budget.
 	// Color the Context value and its gauge from the focused agent's pressure
 	// lines: orange once usage reaches the reminder line, red once it reaches
 	// the auto-compaction threshold. Agents without usage-driven lines (focused
 	// SubAgent, parked target) fall back to the fixed 50/80% lines.
 	current, limit := m.agent.GetContextStats()
+	usageState := m.agent.GetContextUsageState()
 	percent := 0.0
 	if limit > 0 {
 		percent = float64(current) / float64(limit)
@@ -181,6 +187,9 @@ func (m *Model) buildInfoPanelUsageBlock(width, lineW int) string {
 	if current > 0 || limit > 0 {
 		gauge := m.renderContextGauge(width-6, percent, reminder, threshold)
 		contextValueStr := fmt.Sprintf("%s (%s)", formatTokens(current), formatPercent(percent))
+		if usageState == ctxmgr.ContextUsageEstimated {
+			contextValueStr = "≈" + contextValueStr
+		}
 		usageLines = append(usageLines,
 			renderInfoPanelKVLine(lineW, "Context", contextValueStyle(percent, reminder, threshold).Render(contextValueStr)),
 			InfoPanelLineBg.Width(lineW).Render(gauge),

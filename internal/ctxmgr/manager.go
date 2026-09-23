@@ -33,16 +33,24 @@ type Manager struct {
 	// denominator and charges the per-image allowance instead. payloadBytes and
 	// contextBytes keep counting image bytes: they measure the request surface
 	// for display and byte budgets, not token cost.
-	imagePayloadBytes       int
-	imageEstimateTokens     int
-	lastInputTokens         int // full prompt size for compaction thresholds and input-budget displays
-	lastTotalContextTokens  int // post-response context baseline (full prompt + output)
+	imagePayloadBytes      int
+	imageEstimateTokens    int
+	lastInputTokens        int // full prompt size for compaction thresholds and input-budget displays (observed only)
+	lastTotalContextTokens int // post-response context baseline (full prompt + output, observed only)
+	// observedValid marks that the latest main response carried provider usage.
+	// frozenEstimateTokens/frozenValid carry the single frozen estimate allowed
+	// when the latest response missed usage but calibration samples exist. The
+	// frozen value is computed once at that response's end and never grows with
+	// later appends. When neither holds the state is unknown: 0, which is also
+	// what a session that has not called the model yet shows, and no
+	// usage-driven trigger.
+	frozenEstimateTokens    int
+	observedValid           bool
+	frozenValid             bool
 	calibrationInputTokens  int
 	calibrationContextBytes int
-	// calibrationImageTokens is the image allowance inside the calibration
-	// sample. The sample's byte denominator excludes image payloads, so its
-	// image share is removed before scaling and the current allowance is added
-	// afterwards, keeping image cost out of the text growth factor.
+	// calibrationImageTokens tracks image allowance at the observed baseline,
+	// not the provider's actual image charge.
 	calibrationImageTokens int
 	// usageCalibration keeps a bounded window of (text-share prompt tokens,
 	// estimator prompt bytes) samples from completed LLM calls; the median
@@ -317,9 +325,10 @@ func (m *Manager) Snapshot() []message.Message {
 
 // RestoreMessages replaces the entire message history with msgs.
 // When msgs is nil or empty (e.g. plan execution or role switch with clear history),
-// or orphan-tool repair removes every message, lastInputTokens and
-// lastTotalContextTokens are reset to 0 so context indicators stay empty until
-// the next LLM call refreshes the tracked usage.
+// or orphan-tool repair removes every message, the size observation (observed
+// and frozen) is reset to unknown so context indicators stay empty until the
+// next LLM call refreshes the tracked usage. The calibration ratio window
+// survives: only the single-sample size fields are cleared.
 //
 // Orphan tool results (tool_call_id not declared by any preceding assistant message)
 // are dropped so resumed sessions and compaction commits stay valid for strict APIs.
@@ -343,6 +352,9 @@ func (m *Manager) RestoreMessages(msgs []message.Message) {
 	if len(repaired) == 0 {
 		m.lastInputTokens = 0
 		m.lastTotalContextTokens = 0
+		m.observedValid = false
+		m.frozenEstimateTokens = 0
+		m.frozenValid = false
 	}
 }
 
@@ -371,6 +383,9 @@ func (m *Manager) RepairOrphanToolMessagesInPlace() int {
 	if len(repaired) == 0 {
 		m.lastInputTokens = 0
 		m.lastTotalContextTokens = 0
+		m.observedValid = false
+		m.frozenEstimateTokens = 0
+		m.frozenValid = false
 	}
 	return n
 }
@@ -479,10 +494,76 @@ func fullPromptTokens(usage message.TokenUsage) int {
 	return full
 }
 
+// FullPromptTokens normalizes a usage report to the full prompt size across
+// wire accounting conventions (see fullPromptTokens). Providers must be compared
+// through this normalization: cache reads are already inside input on most
+// wires, so adding them again double-counts.
+func FullPromptTokens(usage message.TokenUsage) int {
+	return fullPromptTokens(usage)
+}
+
+// ContextUsageState is the observation state behind the context gauge and the
+// auto-compaction trigger. observed = latest main response carried usage;
+// estimated = latest missed usage but a frozen calibration estimate exists;
+// unknown = no usable sample: 0, never triggers on usage.
+type ContextUsageState string
+
+const (
+	ContextUsageObserved  ContextUsageState = "observed"
+	ContextUsageEstimated ContextUsageState = "estimated"
+	ContextUsageUnknown   ContextUsageState = "unknown"
+)
+
+// hasUsageReport reports whether a TokenUsage carries any provider observation.
+// An all-zero report is treated as missing usage, never as a real zero-size
+// observation: no provider bills a real request at zero input and zero output.
+func hasUsageReport(usage message.TokenUsage) bool {
+	if fullPromptTokens(usage) > 0 {
+		return true
+	}
+	return usage.OutputTokens > 0 || usage.CacheReadTokens > 0 || usage.CacheWriteTokens > 0 || usage.ReasoningTokens > 0
+}
+
+// computeFrozenEstimateLocked computes the single frozen estimate allowed when a
+// response misses usage: one absolute size for the just-finished request, using
+// the request-equivalent byte snapshot at this moment and historical samples.
+// It never grows with later appends; callers store the result once. Must hold
+// the write lock. Returns 0 when no applicable sample exists (unknown).
+//
+// The byte denominator is the full durable context, the same accounting the
+// calibrated ratio and the planning estimators use — deliberately not the
+// request-level reduced surface the samples were reported against (see
+// EstimateMessagesTokensCalibrated). The two conventions differ by tool
+// definitions, overlays, and request reduction; scaling a sample by a surface
+// it never measured would make the frozen reading and the planning estimates
+// disagree about the same context.
+func (m *Manager) computeFrozenEstimateLocked() int {
+	contextBytes := m.estimatorContextBytesLocked()
+	if m.calibrationInputTokens > 0 && m.calibrationImageTokens > 0 {
+		return m.estimateMixedSampleGrowthLocked(contextBytes)
+	}
+	if m.calibrationInputTokens > 0 && m.calibrationContextBytes > 0 {
+		sampleTokens := m.calibrationInputTokens
+		if contextBytes <= 0 {
+			return m.calibrationInputTokens
+		}
+		if contextBytes <= m.calibrationContextBytes {
+			return sampleTokens + m.imageEstimateTokens
+		}
+		return int((int64(sampleTokens)*int64(contextBytes))/int64(m.calibrationContextBytes)) + m.imageEstimateTokens
+	}
+	if m.calibratedRatioCache > 0 && contextBytes > 0 {
+		return max(int(float64(contextBytes)*m.calibratedRatioCache), 1) + m.imageEstimateTokens
+	}
+	return 0
+}
+
 // UpdateFromUsage accumulates token usage statistics from an API response.
-// lastInputTokens = full normalized prompt size (for compaction thresholds and
-// input-budget displays). lastTotalContextTokens is the post-response context
-// baseline: full prompt plus generated output.
+// With provider usage it records the observed baseline (full normalized prompt
+// plus generated output) and refreshes calibration; without usage it freezes a
+// single estimate for the just-finished request when samples exist, otherwise
+// it records unknown. The frozen value never grows with later appends: only the
+// next response or an explicit invalidation changes it.
 func (m *Manager) UpdateFromUsage(usage message.TokenUsage) {
 	m.mu.Lock()
 	m.stats.InputTokens += usage.InputTokens
@@ -490,21 +571,35 @@ func (m *Manager) UpdateFromUsage(usage message.TokenUsage) {
 	m.stats.CacheReadTokens += usage.CacheReadTokens
 	m.stats.CacheWriteTokens += usage.CacheWriteTokens
 	m.stats.ReasoningTokens += usage.ReasoningTokens
+	if !hasUsageReport(usage) {
+		frozen := m.computeFrozenEstimateLocked()
+		m.lastInputTokens = 0
+		m.lastTotalContextTokens = 0
+		m.observedValid = false
+		if frozen > 0 {
+			m.frozenEstimateTokens = frozen
+			m.frozenValid = true
+		} else {
+			m.frozenEstimateTokens = 0
+			m.frozenValid = false
+		}
+		m.mu.Unlock()
+		return
+	}
 	fullPrompt := fullPromptTokens(usage)
 	m.lastInputTokens = fullPrompt
 	m.lastTotalContextTokens = fullPrompt + usage.OutputTokens
+	m.observedValid = true
+	m.frozenEstimateTokens = 0
+	m.frozenValid = false
 	if fullPrompt > 0 {
 		contextBytes := m.estimatorContextBytesLocked()
-		if contextBytes > 0 {
+		if contextBytes > 0 || m.imageEstimateTokens > 0 {
 			m.calibrationInputTokens = fullPrompt
 			m.calibrationContextBytes = contextBytes
 			m.calibrationImageTokens = m.imageEstimateTokens
-			// The ratio window models the text/tool/thinking share of the
-			// prompt: the provider charged this request's images at its own
-			// per-image rate, and keeping that share in the tokens-per-byte
-			// median would bias every image-heavy window.
-			if textTokens := fullPrompt - m.imageEstimateTokens; textTokens > 0 {
-				m.usageCalibration = append(m.usageCalibration, calibrationSample{tokens: textTokens, bytes: contextBytes})
+			if m.imageEstimateTokens == 0 && contextBytes > 0 {
+				m.usageCalibration = append(m.usageCalibration, calibrationSample{tokens: fullPrompt, bytes: contextBytes})
 				if len(m.usageCalibration) > calibrationWindowSize {
 					m.usageCalibration = m.usageCalibration[len(m.usageCalibration)-calibrationWindowSize:]
 				}
@@ -515,6 +610,13 @@ func (m *Manager) UpdateFromUsage(usage message.TokenUsage) {
 	m.mu.Unlock()
 }
 
+// NoteMissingUsage records that the latest main response carried no provider
+// usage. It freezes one estimate when calibration samples exist, otherwise it
+// records unknown (display 0, never trigger).
+func (m *Manager) NoteMissingUsage() {
+	m.UpdateFromUsage(message.TokenUsage{})
+}
+
 // GetStats returns the cumulative token usage.
 func (m *Manager) GetStats() message.TokenUsage {
 	m.mu.RLock()
@@ -522,23 +624,57 @@ func (m *Manager) GetStats() message.TokenUsage {
 	return m.stats
 }
 
-// LastInputTokens returns the input token count from the most recent API call.
+// LastInputTokens returns the observed input token count from the most recent
+// API call (0 when the latest response missed usage or no observation exists).
 func (m *Manager) LastInputTokens() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	if !m.observedValid {
+		return 0
+	}
 	return m.lastInputTokens
 }
 
-// LastTotalContextTokens returns the post-response context baseline from the
-// most recent API call: the full normalized prompt plus generated output.
+// LastTotalContextTokens returns the observed post-response context baseline
+// from the most recent API call: the full normalized prompt plus generated
+// output (0 when the latest response missed usage or no observation exists).
 // Persistence, recovery, and diagnostics read this raw baseline; sidebar and
 // trigger consumers that must stay aligned with auto-compaction should read
-// EffectiveContextTokens instead, which extends it with post-response growth
-// estimates.
+// EffectiveContextTokens instead, which falls back to the frozen estimate when
+// the latest response missed usage.
 func (m *Manager) LastTotalContextTokens() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	if !m.observedValid {
+		return 0
+	}
 	return m.lastTotalContextTokens
+}
+
+// ContextUsageState reports the observation state behind the gauge and trigger:
+// observed, estimated (frozen), or unknown.
+func (m *Manager) ContextUsageState() ContextUsageState {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.observedValid {
+		return ContextUsageObserved
+	}
+	if m.frozenValid {
+		return ContextUsageEstimated
+	}
+	return ContextUsageUnknown
+}
+
+// FrozenEstimateTokens returns the frozen estimate for the just-finished
+// request when the latest response missed usage but samples exist (0 otherwise).
+// The value is fixed at freeze time and never grows with later appends.
+func (m *Manager) FrozenEstimateTokens() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if !m.frozenValid {
+		return 0
+	}
+	return m.frozenEstimateTokens
 }
 
 // MessageCount returns the number of messages currently in the context (for sidebar display).
@@ -553,6 +689,15 @@ func (m *Manager) SetLastTotalContextTokens(n int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.lastTotalContextTokens = n
+	if n > 0 {
+		m.observedValid = true
+		m.frozenEstimateTokens = 0
+		m.frozenValid = false
+	} else if m.lastInputTokens <= 0 {
+		m.observedValid = false
+		m.frozenEstimateTokens = 0
+		m.frozenValid = false
+	}
 }
 
 // SetLastInputTokens sets the last input token count (e.g. when restoring a
@@ -561,20 +706,40 @@ func (m *Manager) SetLastInputTokens(n int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.lastInputTokens = n
+	if n > 0 {
+		m.observedValid = true
+		m.frozenEstimateTokens = 0
+		m.frozenValid = false
+	} else if m.lastTotalContextTokens <= 0 {
+		m.observedValid = false
+		m.frozenEstimateTokens = 0
+		m.frozenValid = false
+	}
 }
 
 // ClearLastTokenUsage clears the latest request-size usage sample without
 // changing cumulative token stats. Call this after durable context rewrites so
 // stale pre-rewrite usage cannot drive another automatic compaction before the
-// next LLM call reports fresh usage.
+// next LLM call reports fresh usage. The calibration ratio window survives;
+// only the single-sample size fields and the observed/frozen state are cleared.
 func (m *Manager) ClearLastTokenUsage() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.lastInputTokens = 0
 	m.lastTotalContextTokens = 0
+	m.observedValid = false
+	m.frozenEstimateTokens = 0
+	m.frozenValid = false
 	m.calibrationInputTokens = 0
 	m.calibrationContextBytes = 0
 	m.calibrationImageTokens = 0
+}
+
+// InvalidateSizeObservation drops the size observation for a model/window change
+// (window and tokenization may differ) while keeping the cross-model calibration
+// ratio window. The next trigger decision stays unknown until fresh usage arrives.
+func (m *Manager) InvalidateSizeObservation() {
+	m.ClearLastTokenUsage()
 }
 
 // EstimateTotalTokens returns a rough token count for the current message list.
@@ -744,8 +909,9 @@ func EstimateMessageTokens(msg message.Message) int {
 
 type AutoCompactDecision struct {
 	LastInputTokens      int
-	EstimatedInputTokens int
-	EffectiveInputTokens int
+	EstimatedInputTokens int // planning-only live growth estimate, never a trigger input
+	EffectiveInputTokens int // observed baseline or frozen estimate: the only trigger/display input
+	UsageState           ContextUsageState
 	InputBudget          int
 	ReservedInput        int
 	UsableInputBudget    int
@@ -754,31 +920,47 @@ type AutoCompactDecision struct {
 	ShouldCompact        bool
 }
 
-// effectiveContextTokensLocked returns the context-usage level usage decisions
-// compare against the threshold: the largest of the last post-response
-// baseline (full prompt plus generated output), the last prompt alone, and the
-// calibrated estimate for context growth after that provider sample. The next
-// request replays the last full prompt plus the generated output, so the
-// post-response baseline — not the last prompt alone — is what the threshold
-// must catch; comparing the prompt alone would start compaction one request
-// later, past the configured margin. Must hold at least an RLock.
-func (m *Manager) effectiveContextTokensLocked(estimatedInputTokens int) int {
-	return max(m.lastTotalContextTokens, m.lastInputTokens, estimatedInputTokens)
+// observedEffectiveLocked returns the usage-only reading: the observed baseline
+// when the latest response carried usage, else the frozen estimate, else 0
+// (unknown). It never includes the live growth estimate: post-response appends
+// must not move the gauge or the trigger until fresh provider usage arrives.
+// Must hold at least an RLock.
+func (m *Manager) observedEffectiveLocked() int {
+	if m.observedValid {
+		return max(m.lastTotalContextTokens, m.lastInputTokens)
+	}
+	if m.frozenValid {
+		return m.frozenEstimateTokens
+	}
+	return 0
+}
+
+func (m *Manager) usageStateLocked() ContextUsageState {
+	if m.observedValid {
+		return ContextUsageObserved
+	}
+	if m.frozenValid {
+		return ContextUsageEstimated
+	}
+	return ContextUsageUnknown
 }
 
 // EffectiveContextTokens returns the context-usage level in the same frame as
-// AutoCompactDecision: the value the auto-compaction trigger and the reminder
-// lines derived from it compare against the threshold. Sidebar context gauges
-// read this getter so the displayed usage and the trigger decision observe one
-// value, including the calibrated estimate once the context has grown past the
-// last provider-reported sample.
+// AutoCompactDecision: the observed post-response baseline, or the single frozen
+// estimate when the latest response missed usage, or 0 when unknown. Sidebar
+// gauges and the auto-compaction trigger observe one value. Post-response
+// growth never moves it; planning budgets use the calibrated estimators instead.
 func (m *Manager) EffectiveContextTokens() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.effectiveContextTokensLocked(m.estimatedInputTokensFromPayloadBytesLocked())
+	return m.observedEffectiveLocked()
 }
 
 // AutoCompactDecision returns the current automatic compaction threshold inputs.
+// The trigger and the gauge use only provider observations (or the single frozen
+// estimate when the latest response missed usage). EstimatedInputTokens stays as
+// the live planning estimate for capacity consumers, but ShouldCompact never
+// reads it: unknown (0) never compacts.
 func (m *Manager) AutoCompactDecision() AutoCompactDecision {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -792,12 +974,14 @@ func (m *Manager) AutoCompactDecision() AutoCompactDecision {
 		thresholdTokens = int(m.threshold * float64(usable))
 	}
 	estimatedInputTokens := m.estimatedInputTokensFromPayloadBytesLocked()
-	effectiveInputTokens := m.effectiveContextTokensLocked(estimatedInputTokens)
-	shouldCompact := m.threshold > 0 && usable > 0 && float64(effectiveInputTokens) >= m.threshold*float64(usable)
+	effectiveInputTokens := m.observedEffectiveLocked()
+	state := m.usageStateLocked()
+	shouldCompact := m.threshold > 0 && usable > 0 && effectiveInputTokens > 0 && float64(effectiveInputTokens) >= m.threshold*float64(usable)
 	return AutoCompactDecision{
 		LastInputTokens:      m.lastInputTokens,
 		EstimatedInputTokens: estimatedInputTokens,
 		EffectiveInputTokens: effectiveInputTokens,
+		UsageState:           state,
 		InputBudget:          budget,
 		ReservedInput:        m.inputBudgetReserved,
 		UsableInputBudget:    usable,
@@ -815,6 +999,9 @@ func (m *Manager) estimatorContextBytesLocked() int {
 }
 
 func (m *Manager) estimatedInputTokensFromPayloadBytesLocked() int {
+	if m.calibrationInputTokens > 0 && m.calibrationImageTokens > 0 {
+		return m.estimateMixedSampleGrowthLocked(m.estimatorContextBytesLocked())
+	}
 	if m.calibrationInputTokens <= 0 || m.calibrationContextBytes <= 0 {
 		return 0
 	}
@@ -822,12 +1009,17 @@ func (m *Manager) estimatedInputTokensFromPayloadBytesLocked() int {
 	if contextBytes <= m.calibrationContextBytes {
 		return 0
 	}
-	// The sample's image share is provider-priced, not byte-proportional, so it
-	// is removed before scaling the byte-based share and the current images are
-	// charged the local allowance afterwards: image cost enters the estimate
-	// once instead of growing with the text.
-	sampleTokens := max(m.calibrationInputTokens-m.calibrationImageTokens, 0)
+	sampleTokens := m.calibrationInputTokens
 	return int((int64(sampleTokens)*int64(contextBytes))/int64(m.calibrationContextBytes)) + m.imageEstimateTokens
+}
+
+func (m *Manager) estimateMixedSampleGrowthLocked(contextBytes int) int {
+	growthBytes := max(contextBytes-m.calibrationContextBytes, 0)
+	growthTokens := growthBytes / 3
+	if m.calibratedRatioCache > 0 {
+		growthTokens = int(float64(growthBytes) * m.calibratedRatioCache)
+	}
+	return m.calibrationInputTokens + growthTokens + max(m.imageEstimateTokens-m.calibrationImageTokens, 0)
 }
 
 // computeCalibratedRatioLocked recomputes the median clamped tokens-per-byte

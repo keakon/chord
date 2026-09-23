@@ -50,11 +50,11 @@ func fallbackModelDisplayRef(fallback llm.FallbackModel) string {
 // against a smaller window than the one it was admitted on. The commit moves
 // the sidebar identity, the budgets the compaction line is evaluated against,
 // and the RunningModelChanged event together, or the displayed model keeps the
-// previous window until some later request happens to move it. When the new
-// line is already crossed, applyModelCompactionConfig arms the usage-driven
-// request so the next pre-request gate starts a durable compaction in parallel
-// with the round and injects the pressure warning; the fallback request itself
-// is never held back, and only a hard context-length rejection suspends a round.
+// previous window until some later request happens to move it. Under usage-only
+// triggering the stale size observation is invalidated (only the calibration
+// ratio survives), so nothing arms until fresh usage on the new window crosses
+// its own line; the fallback request itself is never held back, and only a hard
+// context-length rejection suspends a round.
 func (a *MainAgent) applyFallbackModelDownshift(payload *llmFallbackBoundaryPayload) {
 	if a == nil || payload == nil || a.ctxMgr == nil ||
 		payload.fallbackModelRef == "" || payload.fallbackContextLimit <= 0 {

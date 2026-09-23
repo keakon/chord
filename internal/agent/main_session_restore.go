@@ -754,6 +754,9 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	if len(restoredMessages) > 0 {
 		a.ctxMgr.SetLastInputTokens(loaded.LastInputTokens)
 		a.ctxMgr.SetLastTotalContextTokens(loaded.LastTotalContextTokens)
+		// A restored baseline carries no model identity: the first model change
+		// after the restore must invalidate it rather than trust the ownership.
+		a.setUsageObservationModelRef("")
 	}
 	a.setPendingCompactionResume(loaded.PendingCompactionResume)
 	a.lastModelDrivenApplyBatch = loaded.LastModelDrivenApplyBatch

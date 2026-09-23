@@ -106,6 +106,7 @@ func (m *Model) infoPanelFingerprint(width, height int) string {
 
 	// Context / token / cost
 	cur, limit := m.agent.GetContextStats()
+	usageState := m.agent.GetContextUsageState()
 	reminder, threshold := m.contextPressureLinesForFocusedModel()
 	contextBytes := m.agent.GetContextBytes()
 	msgCount := m.agent.GetContextMessageCount()
@@ -114,6 +115,8 @@ func (m *Model) infoPanelFingerprint(width, height int) string {
 	appendInt(cur)
 	appendSep()
 	appendInt(limit)
+	appendSep()
+	b.WriteString(string(usageState))
 	appendSep()
 	appendFloat6(reminder)
 	appendSep()

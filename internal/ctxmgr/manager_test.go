@@ -380,9 +380,9 @@ func TestShouldAutoCompactIncludesGeneratedOutput(t *testing.T) {
 	}
 }
 
-// A lower local byte-calibrated estimate must never cancel a compaction the
-// provider-reported usage already triggered: provider usage stays authoritative
-// and the estimate can only raise the effective input, never lower it.
+// The payload-byte estimate is planning-only: provider-reported usage decides
+// the trigger, so a lower local estimate must never cancel a compaction that
+// usage already triggered.
 func TestShouldAutoCompactUsageAuthorityNotCanceledByLowerEstimate(t *testing.T) {
 	m := NewManagerWithInputBudget(1000, 1000, 0, 0.8)
 	m.RestoreMessages([]message.Message{{Role: "user", Content: strings.Repeat("a", 300)}})
@@ -434,9 +434,9 @@ func TestEffectiveContextTokensMatchesAutoCompactDecision(t *testing.T) {
 	if got, want := m.EffectiveContextTokens(), m.AutoCompactDecision().EffectiveInputTokens; got != want {
 		t.Fatalf("EffectiveContextTokens() = %d, want decision EffectiveInputTokens %d", got, want)
 	}
-	// Growth past the last provider sample raises the shared reading through
-	// the calibrated estimate, so a context gauge fed by this getter cannot
-	// lag the auto-compaction trigger.
+	// A response that misses usage freezes one estimate for the request that
+	// just finished; the gauge reads the same frozen value as the trigger, and
+	// later appends move neither.
 	m.Append(message.Message{Role: "tool", Content: strings.Repeat("b", 150)})
 	m.UpdateFromUsage(message.TokenUsage{})
 
@@ -513,10 +513,7 @@ func TestPayloadByteCalibrationAddsPerImageAllowance(t *testing.T) {
 	}
 }
 
-// A sample taken while images were in context carries their provider-priced
-// share; it is removed before scaling so the text growth factor is not inflated
-// by image tokens.
-func TestPayloadByteCalibrationDiscountsSampleImageShare(t *testing.T) {
+func TestPayloadByteCalibrationPreservesMixedSampleBaseline(t *testing.T) {
 	m := NewManagerWithInputBudget(1000, 1000, 0, 0.8)
 	m.RestoreMessages([]message.Message{{Role: message.RoleUser, Content: strings.Repeat("a", 300)}})
 	m.Append(message.Message{Role: message.RoleUser, Parts: []message.ContentPart{{
@@ -528,10 +525,8 @@ func TestPayloadByteCalibrationDiscountsSampleImageShare(t *testing.T) {
 	m.Append(message.Message{Role: message.RoleUser, Content: strings.Repeat("b", 100)})
 	m.UpdateFromUsage(message.TokenUsage{})
 
-	// Text bytes 300 -> 400 scale the sample's text share (2000 - 1600) to 533;
-	// the image adds its allowance back.
-	if got := m.AutoCompactDecision().EstimatedInputTokens; got != 533+imagePartEstimateTokens {
-		t.Fatalf("EstimatedInputTokens = %d, want %d (sample image share discounted, current allowance added)", got, 533+imagePartEstimateTokens)
+	if got := m.AutoCompactDecision().EstimatedInputTokens; got != 2033 {
+		t.Fatalf("EstimatedInputTokens = %d, want 2033", got)
 	}
 }
 
@@ -1037,20 +1032,82 @@ func TestManagerImageAccountingTracksRestoreAndRepair(t *testing.T) {
 	}
 }
 
-// The byte calibration discounts the image allowance of the current context
-// from the provider sample, assuming the request surface carried those images.
-// A target that rejects image input reports a prompt without them, so the
-// discount still applies and the ratio under-scales as text grows. This test
-// pins that known approximation.
-func TestPayloadByteCalibrationUsesContextImageAllowance(t *testing.T) {
+func TestPayloadByteCalibrationSkipsMixedSamples(t *testing.T) {
 	m := NewManagerWithInputBudget(100000, 100000, 0, 0.8)
 	m.RestoreMessages([]message.Message{{Role: message.RoleUser, Parts: []message.ContentPart{
 		{Type: message.ContentPartText, Text: strings.Repeat("a", 30000)},
 		{Type: message.ContentPartImage, Data: make([]byte, 4000)},
 	}}})
 	m.UpdateFromUsage(message.TokenUsage{InputTokens: 10000})
-	// (10000 - 1600) text tokens over 30000 text bytes.
-	if got, want := m.CalibratedRatio(), 8400.0/30000.0; got != want {
+	if got, want := m.CalibratedRatio(), 0.0; got != want {
 		t.Fatalf("CalibratedRatio() = %v, want %v", got, want)
+	}
+}
+
+// A response that misses usage freezes the size of the request that just
+// finished: the frozen value preserves the provider baseline and must
+// not grow when more content is appended before the next response reports
+// usage, or the gauge would drift away from what the provider actually saw.
+func TestFrozenEstimateChargesImagesAndDoesNotGrow(t *testing.T) {
+	m := NewManager(100000, 0.8)
+	m.Append(message.Message{Role: message.RoleUser, Content: strings.Repeat("x", 300)})
+	m.Append(message.Message{Role: message.RoleUser, Parts: []message.ContentPart{{
+		Type: message.ContentPartImage,
+		Data: make([]byte, 100),
+	}}})
+	m.UpdateFromUsage(message.TokenUsage{InputTokens: 2000})
+
+	m.NoteMissingUsage()
+	if got := m.FrozenEstimateTokens(); got != 2000 {
+		t.Fatalf("FrozenEstimateTokens() = %d, want 2000 (text share scaled to the sample plus the image allowance)", got)
+	}
+	if got := m.ContextUsageState(); got != ContextUsageEstimated {
+		t.Fatalf("ContextUsageState() = %v, want estimated", got)
+	}
+	if got := m.EffectiveContextTokens(); got != 2000 {
+		t.Fatalf("EffectiveContextTokens() = %d, want the frozen estimate", got)
+	}
+
+	m.Append(message.Message{Role: message.RoleUser, Content: strings.Repeat("x", 3000)})
+	m.Append(message.Message{Role: message.RoleUser, Parts: []message.ContentPart{{
+		Type: message.ContentPartImage,
+		Data: make([]byte, 300_000),
+	}}})
+	if got := m.FrozenEstimateTokens(); got != 2000 {
+		t.Fatalf("FrozenEstimateTokens() after appends = %d, want the frozen value unchanged", got)
+	}
+	if got := m.EffectiveContextTokens(); got != 2000 {
+		t.Fatalf("EffectiveContextTokens() after appends = %d, want the frozen value unchanged", got)
+	}
+}
+
+func TestMixedUsageKeepsTextCalibrationAndEstimatesOnlyGrowth(t *testing.T) {
+	m := NewManager(100000, 0.8)
+	m.Append(message.Message{Role: message.RoleUser, Content: strings.Repeat("x", 300)})
+	m.UpdateFromUsage(message.TokenUsage{InputTokens: 60})
+	m.Append(message.Message{Role: message.RoleUser, Parts: []message.ContentPart{{Type: message.ContentPartImage}}})
+	m.UpdateFromUsage(message.TokenUsage{InputTokens: 2000})
+	if got := m.CalibratedRatio(); got != 0.2 {
+		t.Fatalf("text ratio = %v, want 0.2", got)
+	}
+	m.Append(message.Message{Role: message.RoleUser, Content: strings.Repeat("x", 100)})
+	m.Append(message.Message{Role: message.RoleUser, Parts: []message.ContentPart{{Type: message.ContentPartImage}}})
+	m.NoteMissingUsage()
+	if got, want := m.FrozenEstimateTokens(), 2020+imagePartEstimateTokens; got != want {
+		t.Fatalf("frozen estimate = %d, want %d", got, want)
+	}
+}
+
+func TestImageOnlyUsagePreservesObservedBaseline(t *testing.T) {
+	m := NewManager(100000, 0.8)
+	m.Append(message.Message{Role: message.RoleUser, Parts: []message.ContentPart{{Type: message.ContentPartImage}}})
+	m.NoteMissingUsage()
+	if got := m.FrozenEstimateTokens(); got != 0 {
+		t.Fatalf("estimate without usage = %d, want unknown", got)
+	}
+	m.UpdateFromUsage(message.TokenUsage{InputTokens: 200})
+	m.NoteMissingUsage()
+	if got := m.FrozenEstimateTokens(); got != 200 {
+		t.Fatalf("image-only estimate = %d, want 200", got)
 	}
 }
