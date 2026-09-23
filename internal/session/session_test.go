@@ -180,7 +180,7 @@ func TestExportPreservesCompactionFileRevisions(t *testing.T) {
 // File I/O tests (round-trip)
 // ---------------------------------------------------------------------------
 
-func TestRoundTripFileExportImport(t *testing.T) {
+func TestExportFileRoundTrip(t *testing.T) {
 	msgs := sampleMessages()
 	stats := sampleStats()
 	meta := sampleMetadata()
@@ -211,10 +211,10 @@ func TestRoundTripFileExportImport(t *testing.T) {
 		t.Fatal("exported file is not valid JSON")
 	}
 
-	// Import.
-	imported, err := ImportFromFile(path)
-	if err != nil {
-		t.Fatalf("ImportFromFile() error: %v", err)
+	// Read it back the way an export consumer would.
+	var imported ExportedSession
+	if err := json.Unmarshal(data, &imported); err != nil {
+		t.Fatalf("unmarshal exported session: %v", err)
 	}
 
 	// Verify round-trip fidelity.
@@ -411,132 +411,6 @@ func TestExportImagePartsNotIncludedInExportedMessages(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Import / validation tests
-// ---------------------------------------------------------------------------
-
-func TestImportFromBytesValid(t *testing.T) {
-	raw := `{
-		"version": "1",
-		"created_at": "2025-06-15T10:30:00Z",
-		"messages": [
-			{"role": "user", "content": "hello"}
-		]
-	}`
-	session, err := ImportFromBytes([]byte(raw))
-	if err != nil {
-		t.Fatalf("ImportFromBytes() error: %v", err)
-	}
-	if session.Version != "1" {
-		t.Errorf("Version = %q, want %q", session.Version, "1")
-	}
-	if len(session.Messages) != 1 {
-		t.Errorf("len(Messages) = %d, want 1", len(session.Messages))
-	}
-}
-
-func TestImportFromBytesInvalidJSON(t *testing.T) {
-	_, err := ImportFromBytes([]byte(`{invalid json`))
-	if err == nil {
-		t.Error("expected error for invalid JSON")
-	}
-}
-
-func TestValidateSessionMissingVersion(t *testing.T) {
-	session := &ExportedSession{
-		CreatedAt: time.Now(),
-		Messages:  []ExportedMessage{},
-	}
-	err := ValidateSession(session)
-	if err == nil {
-		t.Error("expected error for missing version")
-	}
-}
-
-func TestValidateSessionUnsupportedVersion(t *testing.T) {
-	session := &ExportedSession{
-		Version:   "99",
-		CreatedAt: time.Now(),
-		Messages:  []ExportedMessage{},
-	}
-	err := ValidateSession(session)
-	if err == nil {
-		t.Error("expected error for unsupported version")
-	}
-}
-
-func TestValidateSessionMissingCreatedAt(t *testing.T) {
-	session := &ExportedSession{
-		Version:  "1",
-		Messages: []ExportedMessage{},
-	}
-	err := ValidateSession(session)
-	if err == nil {
-		t.Error("expected error for missing created_at")
-	}
-}
-
-func TestValidateSessionNilMessages(t *testing.T) {
-	session := &ExportedSession{
-		Version:   "1",
-		CreatedAt: time.Now(),
-		Messages:  nil,
-	}
-	err := ValidateSession(session)
-	if err == nil {
-		t.Error("expected error for nil messages")
-	}
-}
-
-func TestValidateSessionEmptyRole(t *testing.T) {
-	session := &ExportedSession{
-		Version:   "1",
-		CreatedAt: time.Now(),
-		Messages: []ExportedMessage{
-			{Role: "", Content: "test"},
-		},
-	}
-	err := ValidateSession(session)
-	if err == nil {
-		t.Error("expected error for empty role")
-	}
-}
-
-func TestValidateSessionUnknownRole(t *testing.T) {
-	session := &ExportedSession{
-		Version:   "1",
-		CreatedAt: time.Now(),
-		Messages: []ExportedMessage{
-			{Role: "alien", Content: "test"},
-		},
-	}
-	err := ValidateSession(session)
-	if err == nil {
-		t.Error("expected error for unknown role")
-	}
-}
-
-func TestValidateSessionValid(t *testing.T) {
-	session := &ExportedSession{
-		Version:   "1",
-		CreatedAt: time.Now(),
-		Messages: []ExportedMessage{
-			{Role: "user", Content: "hello"},
-			{Role: "assistant", Content: "hi"},
-		},
-	}
-	if err := ValidateSession(session); err != nil {
-		t.Errorf("ValidateSession() unexpected error: %v", err)
-	}
-}
-
-func TestValidateSessionNil(t *testing.T) {
-	err := ValidateSession(nil)
-	if err == nil {
-		t.Error("expected error for nil session")
-	}
-}
-
-// ---------------------------------------------------------------------------
 // Edge case tests
 // ---------------------------------------------------------------------------
 
@@ -558,13 +432,6 @@ func TestExportToFileBadPath(t *testing.T) {
 	err := ExportToFile(session, "/nonexistent/directory/deep/session.json")
 	if err == nil {
 		t.Error("expected error for bad path")
-	}
-}
-
-func TestImportFromFileNonexistent(t *testing.T) {
-	_, err := ImportFromFile("/nonexistent/file.json")
-	if err == nil {
-		t.Error("expected error for nonexistent file")
 	}
 }
 
@@ -599,9 +466,13 @@ func TestRoundTripEmptySession(t *testing.T) {
 		t.Fatalf("ExportToFile() error: %v", err)
 	}
 
-	imported, err := ImportFromFile(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("ImportFromFile() error: %v", err)
+		t.Fatalf("ReadFile() error: %v", err)
+	}
+	var imported ExportedSession
+	if err := json.Unmarshal(data, &imported); err != nil {
+		t.Fatalf("unmarshal exported session: %v", err)
 	}
 
 	if len(imported.Messages) != 0 {
@@ -779,7 +650,7 @@ func TestExportToMarkdownToolRecoveryState(t *testing.T) {
 	}
 }
 
-func TestExportImportRoundTripPreservesToolRecoveryState(t *testing.T) {
+func TestExportFileRoundTripPreservesToolRecoveryState(t *testing.T) {
 	msgs := []message.Message{
 		{Role: "user", Content: "run it"},
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "call-1", Name: "Shell"}}},
@@ -802,9 +673,13 @@ func TestExportImportRoundTripPreservesToolRecoveryState(t *testing.T) {
 	if err := ExportToFile(session, path); err != nil {
 		t.Fatalf("ExportToFile: %v", err)
 	}
-	imported, err := ImportFromFile(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("ImportFromFile: %v", err)
+		t.Fatalf("ReadFile: %v", err)
+	}
+	var imported ExportedSession
+	if err := json.Unmarshal(data, &imported); err != nil {
+		t.Fatalf("unmarshal exported session: %v", err)
 	}
 	if imported.Messages[2].ToolRecoveryState != message.ToolRecoveryStateOutcomeUnknown {
 		t.Fatalf("imported recovery state = %q, want outcome_unknown", imported.Messages[2].ToolRecoveryState)

@@ -579,25 +579,25 @@ func TestExportNewFieldsRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	imported, err := ImportFromBytes(data)
-	if err != nil {
-		t.Fatalf("ImportFromBytes: %v", err)
+	var imported ExportedSession
+	if err := json.Unmarshal(data, &imported); err != nil {
+		t.Fatalf("unmarshal exported session: %v", err)
 	}
 	if imported.Version != CurrentVersion || imported.Messages[0].Kind != "custom-kind" {
 		t.Fatalf("imported = %#v", imported.Messages[0])
 	}
 }
 
-func TestImportReadsV1FixtureWithoutNewFields(t *testing.T) {
+func TestProjectReadsV1FixtureWithoutNewFields(t *testing.T) {
 	raw := `{"version":"1","created_at":"2026-09-21T00:00:00Z","messages":[{"role":"user","content":"hello","timestamp":"2026-09-21T00:00:00Z"}]}`
-	imported, err := ImportFromBytes([]byte(raw))
-	if err != nil {
-		t.Fatalf("ImportFromBytes: %v", err)
+	var imported ExportedSession
+	if err := json.Unmarshal([]byte(raw), &imported); err != nil {
+		t.Fatalf("unmarshal v1 fixture: %v", err)
 	}
 	if len(imported.Messages) != 1 || imported.Messages[0].Kind != "" || imported.Messages[0].FileState != nil {
 		t.Fatalf("v1 message = %#v", imported.Messages[0])
 	}
-	turns, err := Project(imported)
+	turns, err := Project(&imported)
 	if err != nil {
 		t.Fatalf("Project: %v", err)
 	}

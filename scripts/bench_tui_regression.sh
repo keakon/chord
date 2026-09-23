@@ -27,7 +27,7 @@ PACED_BENCH_PATTERN='^(BenchmarkStreamTextDeltaBurstDeferredView|BenchmarkStream
 FRONTIER_BENCH_PATTERN='^(BenchmarkFindStreamingSettledFrontierAppendSnapshots|BenchmarkStreamingFrontierScannerAppendSnapshots)$'
 SSE_BENCH_PATTERN='^(BenchmarkSSEParseWithCallbackCumulative|BenchmarkSSEParseWithCallbackIncremental|BenchmarkSSEParseWithCollector)$'
 TRUNCATE_BENCH_PATTERN='^BenchmarkTruncateStringHeadTail$'
-SESSION_BENCH_PATTERN='^(BenchmarkImportFromBytesLargeSession|BenchmarkExportedSessionToMessagesLargeSession)$'
+SESSION_BENCH_PATTERN='^BenchmarkExportedSessionToMessagesLargeSession$'
 RECOVERY_BENCH_PATTERN='^(BenchmarkLoadMessagesLargeSession.*|BenchmarkLoadMessagesBySize)$'
 TOOLS_BENCH_PATTERN='^BenchmarkBuildApplyPatchPlan(LargeFile|MultiFile)$'
 

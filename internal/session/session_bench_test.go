@@ -1,7 +1,6 @@
 package session
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -37,25 +36,6 @@ func benchmarkExportedSession(messageCount int) *ExportedSession {
 		s.Messages = append(s.Messages, msg)
 	}
 	return s
-}
-
-func BenchmarkImportFromBytesLargeSession(b *testing.B) {
-	fixture, err := json.Marshal(benchmarkExportedSession(5000))
-	if err != nil {
-		b.Fatal(err)
-	}
-	b.SetBytes(int64(len(fixture)))
-	b.ReportAllocs()
-	b.ResetTimer()
-	for b.Loop() {
-		s, err := ImportFromBytes(fixture)
-		if err != nil {
-			b.Fatal(err)
-		}
-		if len(s.Messages) != 5000 {
-			b.Fatalf("messages = %d, want 5000", len(s.Messages))
-		}
-	}
 }
 
 func BenchmarkExportedSessionToMessagesLargeSession(b *testing.B) {
