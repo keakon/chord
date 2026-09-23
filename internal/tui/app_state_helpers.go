@@ -202,6 +202,7 @@ type viewCacheState struct {
 	cachedStatusBarRightSide           string
 	cachedStatusBarRightWidth          int
 	cachedStatusBarRightStart          int
+	cachedStatusBarRightOffsets        statusBarRightOffsets
 	cachedStatusBarPathValue           string
 	cachedStatusBarPathShown           string
 	cachedStatusBarActivityKey         string

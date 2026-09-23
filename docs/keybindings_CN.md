@@ -107,6 +107,10 @@ TUI 有两种模式：
 
 对话卡片、composer 输入框以及 Done/Handoff Markdown viewer 使用一致的鼠标选择手势：拖拽选择范围，双击选中当前词，三击选中当前可见行。
 
+### 状态栏
+
+双击状态栏里的工作目录段或会话 ID 复制对应的值；段被截断显示时复制到的仍是完整值。可点的范围就是这一行实际画出来的列，被终端宽度或活动车道挤掉的段不在其中。点击 job 计数 pill 会打开 JOBS 列表浮层。
+
 ### Content viewer：Done report 与 Handoff plan
 
 Done 确认弹窗和 Handoff plan 选择器中可按 `V` 打开只读 Markdown viewer。Viewer 会保留右侧侧边栏，支持鼠标滚轮滚动，并在状态栏显示 `esc ⇢ close view`。

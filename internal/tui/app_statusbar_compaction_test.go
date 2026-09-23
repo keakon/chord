@@ -276,7 +276,7 @@ func TestCompactionPillSurvivesBusyActivityLane(t *testing.T) {
 	if rightStart < centerEnd {
 		t.Fatalf("compaction pill collides with the busy activity lane: rightStart=%d centerEnd=%d", rightStart, centerEnd)
 	}
-	line := renderStatusBarPlacedLine("", 0, rightStart, rightSide, "", activityWidth, effectiveWidth)
+	line, _ := renderStatusBarPlacedLine("", 0, rightStart, rightSide, "", activityWidth, effectiveWidth)
 	if plain := stripANSI(line); !strings.Contains(plain, "▪") && !strings.Contains(plain, "■") {
 		t.Fatalf("status bar lost the compaction indicator beside a busy activity lane: %q", plain)
 	}

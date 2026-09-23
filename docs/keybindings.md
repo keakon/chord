@@ -113,6 +113,10 @@ Search also covers older regions of lazily loaded large sessions. Chord loads a 
 
 Transcript cards, the composer input, and Done/Handoff Markdown viewers share the same mouse selection gestures: drag to select a range, double-click to select the current word, and triple-click to select the current visible line.
 
+### Status bar
+
+Double-click the working-directory segment or the session id in the status bar to copy it; a segment shown truncated still copies its full value. The clickable columns are the ones the row actually draws, so a segment cut away by the terminal width or the activity lane is not a copy target. Clicking the jobs pill opens the JOBS list overlay.
+
 ### Content viewer: Done reports and Handoff plans
 
 Done confirmation dialogs and Handoff plan selectors can open a read-only Markdown viewer with `V`. The viewer keeps the right sidebar visible, supports mouse-wheel scrolling, and shows `esc ⇢ close view` in the status bar.

@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
 	tea "github.com/keakon/bubbletea/v2"
@@ -91,6 +92,84 @@ func TestStatusPathDoubleClickSelectsWholePath(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("double click should trigger path copy")
 	}
+}
+
+// The compaction pill is prepended to the status bar's right-side group, so its
+// width must not shift the clickable regions of the members after it: with the
+// pill active, a double click on the visible session id used to hit nothing
+// while a double click on the visible working directory copied the session id.
+func TestStatusDoubleClickCopiesVisibleTargetBesideCompactionPill(t *testing.T) {
+	newModel := func() *Model {
+		backend := &sessionControlAgent{sessionSummary: &agent.SessionSummary{ID: "1775115074902"}}
+		m := NewModelWithSize(backend, 160, 40)
+		m.workingDir = "/home/user/projects/myapp"
+		m.compactionBgStatus = compactionBackgroundStatus{
+			Active:    true,
+			StartedAt: time.Now().Add(-5 * time.Second),
+			Bytes:     1024,
+			Events:    7,
+		}
+		m.layout = m.generateLayout(m.width, m.height)
+		return &m
+	}
+
+	m := newModel()
+	plain := stripANSI(m.renderStatusBar())
+	if !strings.Contains(plain, "SID 1775115074902") || m.statusPath.display == "" || !strings.Contains(plain, m.statusPath.display) {
+		t.Fatalf("compaction pill should leave both copy targets visible, got %q", plain)
+	}
+	progress := formatStatusBarTransportProgress(1024, 7)
+	if _, handled := m.handleStatusCopyClick(statusColumnOf(t, plain, progress), m.layout.status.Min.Y); handled {
+		t.Fatalf("the compaction progress pill is an indicator, not a copy target: %q", plain)
+	}
+
+	sessionModel := newModel()
+	sessionPlain := stripANSI(sessionModel.renderStatusBar())
+	if got := doubleClickStatusColumn(t, sessionModel, statusColumnOf(t, sessionPlain, "SID ")+2); got != "Session ID copied to clipboard" {
+		t.Fatalf("double click on the visible session id copied %q", got)
+	}
+
+	pathModel := newModel()
+	pathPlain := stripANSI(pathModel.renderStatusBar())
+	if got := doubleClickStatusColumn(t, pathModel, statusColumnOf(t, pathPlain, pathModel.statusPath.display)+2); got != "Path copied to clipboard" {
+		t.Fatalf("double click on the visible working directory copied %q", got)
+	}
+}
+
+// statusColumnOf returns the screen column where target starts in a plain
+// (ANSI-stripped) status row. Glyphs such as "◉" and "↓" make the byte index
+// useless as a column, so the prefix's display width is measured instead.
+func statusColumnOf(t *testing.T, plain, target string) int {
+	t.Helper()
+	if target == "" {
+		t.Fatal("statusColumnOf needs a non-empty target")
+	}
+	idx := strings.Index(plain, target)
+	if idx < 0 {
+		t.Fatalf("status row %q does not contain %q", plain, target)
+	}
+	return ansi.StringWidth(plain[:idx])
+}
+
+// doubleClickStatusColumn performs a two-click gesture at x and returns the
+// clipboard action label the second click produced.
+func doubleClickStatusColumn(t *testing.T, m *Model, x int) string {
+	t.Helper()
+	y := m.layout.status.Min.Y
+	updated, cmd := m.Update(tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
+	if cmd != nil {
+		t.Fatalf("first click at x=%d should not copy anything", x)
+	}
+	_, cmd = updated.(*Model).Update(tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
+	if cmd == nil {
+		t.Fatalf("double click at x=%d copied nothing", x)
+	}
+	msg := cmd()
+	v := reflect.ValueOf(msg)
+	if v.Kind() != reflect.Slice || v.Len() != 2 {
+		t.Fatalf("copy command msg = %T, want 2-command sequence", msg)
+	}
+	return v.Index(1).Call(nil)[0].Interface().(clipboardWriteResultMsg).success
 }
 
 func TestNormalYStartsChordWithoutCopyingStatusPath(t *testing.T) {

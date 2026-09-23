@@ -21,6 +21,9 @@ type statusBarPlacedSegment struct {
 	start int
 	end   int
 	text  string
+	// group marks the right-aligned group, whose written columns are recorded in
+	// the status row's copy placement.
+	group bool
 }
 
 func writeStatusBarSpaces(b *strings.Builder, count int) {
@@ -632,9 +635,12 @@ func (m *Model) renderStatusBar() string {
 		activityText, activityWidth = m.renderStatusBarActivityLane(inputs, effectiveWidth, leftWidth)
 		rightSide, rightStart, rightWidth = m.renderStatusBarRightSide(inputs.Now, effectiveWidth, leftWidth, activityWidth, path, sessionValue, inputs.RunningJobs, inputs.FallbackAgents)
 	}
-	separatorWidth := lipgloss.Width(DimStyle.Render(statusBarActivityPathGap))
 	if activityWidth == 0 && leftWidth <= rightStart {
-		m.placeStatusBarRightRegions(rightStart, rightWidth, separatorWidth)
+		// No lane to cut into: the group is drawn whole at rightStart, so only
+		// the row's right edge can clip it.
+		visible := min(rightWidth, max(effectiveWidth-rightStart, 0))
+		placement := statusBarRightPlacement{rowStart: rightStart, groupEnd: visible, drawn: visible > 0}
+		m.placeStatusBarRightRegions(placement, m.cachedStatusBarRightOffsets)
 		statusLine := leftSide + strings.Repeat(" ", max(rightStart-leftWidth, 0)) + rightSide
 		if rightWidth == 0 && leftWidth < effectiveWidth {
 			statusLine += strings.Repeat(" ", effectiveWidth-leftWidth)
@@ -643,36 +649,35 @@ func (m *Model) renderStatusBar() string {
 		return m.renderStatusBarLine(padded)
 	}
 
-	m.placeStatusBarRightRegions(rightStart, rightWidth, separatorWidth)
-
-	statusLine := renderStatusBarPlacedLine(leftSide, leftWidth, rightStart, rightSide, activityText, activityWidth, effectiveWidth)
+	statusLine, placement := renderStatusBarPlacedLine(leftSide, leftWidth, rightStart, rightSide, activityText, activityWidth, effectiveWidth)
+	m.placeStatusBarRightRegions(placement, m.cachedStatusBarRightOffsets)
 	padded := strings.Repeat(" ", statusBarLeftMargin) + statusLine + strings.Repeat(" ", statusBarRightMargin)
 	return m.renderStatusBarLine(padded)
 }
 
-// placeStatusBarRightRegions records the absolute clickable columns of the
-// right-side regions for the row whose right-aligned group starts at rightStart.
-// The jobs pill is the group's last member, so its columns are measured from the
-// group's right edge; path and session keep their existing left-to-right offsets.
-func (m *Model) placeStatusBarRightRegions(rightStart, rightWidth, separatorWidth int) {
-	offset := 0
-	if m.statusPath.display != "" {
-		pathWidth := ansi.StringWidth(m.statusPath.display)
-		m.statusPath.startX = statusBarLeftMargin + rightStart + offset
-		m.statusPath.endX = m.statusPath.startX + pathWidth
-		offset += pathWidth + separatorWidth
+// statusBarRightOffsets records where each right-side member starts inside the
+// assembled group, counted in display columns from the group's left edge. The
+// compaction pill is prepended ahead of path/session, so every member after it
+// is offset by the running total rather than by the group start alone. A
+// negative offset marks a member that was not composed in this pass.
+type statusBarRightOffsets struct {
+	path    int
+	session int
+	jobs    int
+}
+
+// placeStatusBarRightRegions converts the group-relative member offsets into the
+// absolute clickable columns of the status row, which is padded by
+// statusBarLeftMargin before the group's left edge. Members the row did not draw
+// get an empty region, so a click can never land on a copy target the line does
+// not show.
+func (m *Model) placeStatusBarRightRegions(placement statusBarRightPlacement, offsets statusBarRightOffsets) {
+	if !placement.drawn {
+		return
 	}
-	if m.statusSession.display != "" {
-		sessionWidth := ansi.StringWidth(m.statusSession.display)
-		m.statusSession.startX = statusBarLeftMargin + rightStart + offset
-		m.statusSession.endX = m.statusSession.startX + sessionWidth
-		offset += sessionWidth + separatorWidth
-	}
-	if m.statusJobs.display != "" {
-		jobsWidth := ansi.StringWidth(m.statusJobs.display)
-		m.statusJobs.endX = statusBarLeftMargin + rightStart + rightWidth
-		m.statusJobs.startX = m.statusJobs.endX - jobsWidth
-	}
+	m.statusPath.startX, m.statusPath.endX = placement.region(offsets.path, m.statusPath.display)
+	m.statusSession.startX, m.statusSession.endX = placement.region(offsets.session, m.statusSession.display)
+	m.statusJobs.startX, m.statusJobs.endX = placement.region(offsets.jobs, m.statusJobs.display)
 }
 
 // renderStatusBarLine renders the assembled status row within drawableLineWidth,
@@ -888,27 +893,36 @@ func (m *Model) renderStatusBarRightSide(now time.Time, effectiveWidth, leftWidt
 		}
 	}
 
+	// Member offsets are captured while composing the group, because the
+	// clickable regions must follow the rendered order. Deriving them after the
+	// fact from the group's left edge missed any leading member: with the
+	// compaction pill present, path and session were recorded one pill width too
+	// far left, so a double click on the visible session ID hit nothing (or its
+	// left neighbour).
 	rightParts := make([]string, 0, 6)
+	offset := 0
+	appendPart := func(text string) int {
+		if len(rightParts) > 0 {
+			rightParts = append(rightParts, DimStyle.Render(statusBarActivityPathGap))
+			offset += separatorWidth
+		}
+		start := offset
+		rightParts = append(rightParts, text)
+		offset += lipgloss.Width(text)
+		return start
+	}
+	offsets := statusBarRightOffsets{path: -1, session: -1, jobs: -1}
 	if compactionPill != "" {
-		rightParts = append(rightParts, compactionPill)
+		appendPart(compactionPill)
 	}
 	if pathText != "" {
-		if len(rightParts) > 0 {
-			rightParts = append(rightParts, DimStyle.Render(statusBarActivityPathGap))
-		}
-		rightParts = append(rightParts, pathText)
+		offsets.path = appendPart(pathText)
 	}
 	if sessionText != "" {
-		if len(rightParts) > 0 {
-			rightParts = append(rightParts, DimStyle.Render(statusBarActivityPathGap))
-		}
-		rightParts = append(rightParts, sessionText)
+		offsets.session = appendPart(sessionText)
 	}
 	if jobsPillText != "" {
-		if len(rightParts) > 0 {
-			rightParts = append(rightParts, DimStyle.Render(statusBarActivityPathGap))
-		}
-		rightParts = append(rightParts, StatusHintStyle.Render(jobsPillText))
+		offsets.jobs = appendPart(StatusHintStyle.Render(jobsPillText))
 		m.statusJobs.display = jobsPillText
 		m.statusJobs.runningJobs = runningJobs
 		m.statusJobs.fallbackAgents = fallbackAgents
@@ -920,6 +934,7 @@ func (m *Model) renderStatusBarRightSide(now time.Time, effectiveWidth, leftWidt
 	m.cachedStatusBarRightSide = rightSide
 	m.cachedStatusBarRightWidth = rightWidth
 	m.cachedStatusBarRightStart = rightStart
+	m.cachedStatusBarRightOffsets = offsets
 	m.cachedStatusBarPathValue = m.statusPath.value
 	m.cachedStatusBarPathShown = m.statusPath.display
 	m.cachedStatusBarSessionValue = m.statusSession.value
@@ -930,9 +945,37 @@ func (m *Model) renderStatusBarRightSide(now time.Time, effectiveWidth, leftWidt
 	return rightSide, rightStart, rightWidth
 }
 
-func renderStatusBarPlacedLine(leftSide string, leftWidth, rightStart int, rightSide string, activityText string, activityWidth, effectiveWidth int) string {
+// statusBarRightPlacement reports the geometry the placed status row gave the
+// right-aligned group: the group columns that reached the row are
+// [groupStart, groupEnd), and they were written starting at row column rowStart.
+// The activity lane replaces the group's leading columns in place and the row's
+// right edge can clip its tail, so both ends of the group can be missing from
+// the row. drawn tells whether any of the group was drawn at all.
+type statusBarRightPlacement struct {
+	rowStart   int
+	groupStart int
+	groupEnd   int
+	drawn      bool
+}
+
+// region returns the row columns a member occupies, given its offset inside the
+// group and its display text. The member keeps the intersection of its own
+// columns with the group columns the row actually shows.
+func (p statusBarRightPlacement) region(offset int, display string) (int, int) {
+	if offset < 0 || display == "" {
+		return 0, 0
+	}
+	lo := max(offset, p.groupStart)
+	hi := min(offset+ansi.StringWidth(display), p.groupEnd)
+	if hi <= lo {
+		return 0, 0
+	}
+	return statusBarLeftMargin + p.rowStart + lo - p.groupStart, statusBarLeftMargin + p.rowStart + hi - p.groupStart
+}
+
+func renderStatusBarPlacedLine(leftSide string, leftWidth, rightStart int, rightSide string, activityText string, activityWidth, effectiveWidth int) (string, statusBarRightPlacement) {
 	if effectiveWidth <= 0 {
-		return ""
+		return "", statusBarRightPlacement{}
 	}
 	activityStart := 0
 	activityEnd := 0
@@ -948,6 +991,11 @@ func renderStatusBarPlacedLine(leftSide string, leftWidth, rightStart int, right
 	rightSeg := ansi.Cut(rightSide, 0, rightFullWidth)
 	rightWidth := min(lipgloss.Width(rightSide), rightFullWidth)
 	rightEnd := min(rightStart+rightWidth, effectiveWidth)
+	// groupStart is the group column the placed group begins at: the activity
+	// lane replaces the group's leading columns in place, so the columns it ate
+	// stay skipped instead of shifting the members behind them.
+	groupStart := 0
+	placement := statusBarRightPlacement{}
 
 	if activityText != "" {
 		if leftEnd > activityStart {
@@ -955,10 +1003,10 @@ func renderStatusBarPlacedLine(leftSide string, leftWidth, rightStart int, right
 			leftSeg = ansi.Cut(leftSide, 0, leftEnd)
 		}
 		if rightStart < activityEnd {
-			offset := activityEnd - rightStart
-			rightSeg = ansi.Cut(rightSeg, offset, rightWidth-offset)
+			groupStart = activityEnd - rightStart
+			rightSeg = ansi.Cut(rightSeg, groupStart, rightWidth)
 			rightStart = activityEnd
-			rightWidth = max(0, rightWidth-offset)
+			rightWidth = max(0, rightWidth-groupStart)
 			rightEnd = min(rightStart+rightWidth, effectiveWidth)
 		}
 	}
@@ -970,11 +1018,14 @@ func renderStatusBarPlacedLine(leftSide string, leftWidth, rightStart int, right
 	if activityText != "" && activityEnd > activityStart {
 		segments = append(segments, statusBarPlacedSegment{start: activityStart, end: activityEnd, text: activityText})
 	}
-	if rightEnd > rightStart && rightSeg != "" {
-		segments = append(segments, statusBarPlacedSegment{start: rightStart, end: rightEnd, text: rightSeg})
+	// The group is drawn by the same writer that lays out everything before it:
+	// it starts at the cursor those segments left behind and the row's right edge
+	// clips its tail.
+	if rightSeg != "" && rightEnd > rightStart {
+		segments = append(segments, statusBarPlacedSegment{start: rightStart, end: rightEnd, text: rightSeg, group: true})
 	}
 	if len(segments) == 0 {
-		return strings.Repeat(" ", effectiveWidth)
+		return strings.Repeat(" ", effectiveWidth), placement
 	}
 
 	var b strings.Builder
@@ -992,13 +1043,24 @@ func renderStatusBarPlacedLine(leftSide string, leftWidth, rightStart int, right
 		if seg.end-cursor < ansi.StringWidth(text) {
 			text = ansi.Cut(text, 0, seg.end-cursor)
 		}
+		if seg.group {
+			// What the writer wrote is the placement: the group columns it shows
+			// are [groupStart, groupStart+width) and they landed at the cursor the
+			// segments before it left behind.
+			placement = statusBarRightPlacement{
+				rowStart:   cursor,
+				groupStart: groupStart,
+				groupEnd:   groupStart + ansi.StringWidth(text),
+				drawn:      true,
+			}
+		}
 		b.WriteString(text)
 		cursor = seg.end
 	}
 	if cursor < effectiveWidth {
 		writeStatusBarSpaces(&b, effectiveWidth-cursor)
 	}
-	return b.String()
+	return b.String(), placement
 }
 
 func statusBarLeftPillsKey(modeText, viewingLabel, viewingColor string, extraPills []string) string {

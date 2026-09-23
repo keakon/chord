@@ -634,12 +634,18 @@ func TestJobsOverlayOpensFromStatusPill(t *testing.T) {
 	m := newJobsTestModel(t, 100, 40)
 	startTestJob(t, "sleep 60", "pill click")
 	refreshJobs(m)
-	m.renderStatusBar()
+	plain := stripANSI(m.renderStatusBar())
 	if m.statusJobs.display == "" {
 		t.Fatal("narrow layout should render the background-activity pill")
 	}
 	if !strings.Contains(m.statusJobs.display, "job") {
 		t.Fatalf("pill = %q, want a job count", m.statusJobs.display)
+	}
+	// The clickable region must cover exactly the columns the pill is drawn in;
+	// the pill is the group's last member, so a stale width would make the click
+	// open nothing or hit the neighbouring copy target.
+	if got := ansi.Cut(plain, m.statusJobs.startX, m.statusJobs.endX); got != m.statusJobs.display {
+		t.Fatalf("jobs region [%d,%d) drew %q, want %q (row %q)", m.statusJobs.startX, m.statusJobs.endX, got, m.statusJobs.display, plain)
 	}
 	cmd, handled := m.handleStatusCopyClick(m.statusJobs.startX+1, m.layout.status.Min.Y)
 	if !handled {
