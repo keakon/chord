@@ -11,7 +11,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode/utf8"
 
 	"github.com/keakon/golog/log"
 
@@ -226,13 +225,7 @@ func (c *Client) logServerNotice(kind string, severity int, message string) {
 	if message == "" {
 		return
 	}
-	if len(message) > noticeLogMaxChars {
-		cut := noticeLogMaxChars
-		for cut > 0 && !utf8.RuneStart(message[cut]) {
-			cut--
-		}
-		message = message[:cut] + "..."
-	}
+	message = truncateBytesAtRune(message, noticeLogMaxChars, "...")
 
 	c.noticeMu.Lock()
 	if c.noticesSeen == nil {

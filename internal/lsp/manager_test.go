@@ -5,9 +5,11 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/keakon/x/powernap/pkg/lsp/protocol"
 
@@ -450,6 +452,35 @@ func TestPublishedDiagnosticsRefreshExistingReviewedSnapshot(t *testing.T) {
 	rows := mgr.SidebarEntries()
 	if len(rows) != 1 || rows[0].Errors != 0 || rows[0].Warnings != 0 {
 		t.Fatalf("SidebarEntries() = %+v, want clean gopls row", rows)
+	}
+}
+
+// TestSidebarEntriesTruncateLongErrorOnRuneBoundary guards that a start-failure
+// reason over the row budget is cut on a UTF-8 rune boundary. The row reaches
+// the LSP status payload, and the old byte slice through a multi-byte character
+// left invalid UTF-8 in it.
+func TestSidebarEntriesTruncateLongErrorOnRuneBoundary(t *testing.T) {
+	mgr := NewManager(&config.Config{
+		LSP: config.LSPConfig{
+			"gopls": {Command: "gopls", FileTypes: []string{".go"}},
+		},
+	}, t.TempDir(), nil)
+
+	// 116 ASCII bytes put the 117-byte budget one byte into "界" (3 bytes).
+	head := strings.Repeat("x", 116)
+	mgr.startFailMu.Lock()
+	mgr.startFail[testKey(mgr, "gopls")] = head + "界" + strings.Repeat("y", 40)
+	mgr.startFailMu.Unlock()
+
+	rows := mgr.SidebarEntries()
+	if len(rows) != 1 {
+		t.Fatalf("SidebarEntries() len = %d, want 1", len(rows))
+	}
+	if !utf8.ValidString(rows[0].Error) {
+		t.Fatalf("start-failure row is not valid UTF-8: %q", rows[0].Error)
+	}
+	if want := head + "..."; rows[0].Error != want {
+		t.Fatalf("start-failure row = %q, want %q", rows[0].Error, want)
 	}
 }
 

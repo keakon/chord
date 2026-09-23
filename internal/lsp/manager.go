@@ -625,8 +625,11 @@ func (m *Manager) SidebarEntries() []SidebarServerEntry {
 			}
 			m.diagMu.RUnlock()
 		} else if msg := failMessage(failMap, name); msg != "" {
+			// Keep the row short: it is one line of a sidebar, and the full
+			// cause is already in the log. Cut on a rune boundary so a
+			// non-ASCII cause does not leave invalid UTF-8 in the row.
 			if len(msg) > 120 {
-				msg = msg[:117] + "..."
+				msg = truncateBytesAtRune(msg, 117, "...")
 			}
 			entry.Error = msg
 		} else {
