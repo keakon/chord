@@ -205,7 +205,7 @@ func TestLoadMCPStateNilManager(t *testing.T) {
 }
 
 func TestRestoreRuntimeMCPRequiresCompleteRuntime(t *testing.T) {
-	mgr, err := mcp.NewManager(context.Background(), nil)
+	mgr, err := mcp.NewManagerWithClientInfo(context.Background(), nil, mcp.ClientInfo{Name: "chord-test", Version: "test"})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}

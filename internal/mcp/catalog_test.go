@@ -78,11 +78,11 @@ func TestCatalogExecutionBoundary(t *testing.T) {
 
 // TestCatalogEnabledServerNames tracks only explicitly enabled manual servers.
 func TestCatalogEnabledServerNames(t *testing.T) {
-	mgr := NewPendingManager([]ServerConfig{
+	mgr := NewPendingManagerWithClientInfo([]ServerConfig{
 		{Name: "auto", URL: "https://mcp.test/mcp"},
 		{Name: "manual-a", URL: "https://mcp.test/mcp", Manual: true},
 		{Name: "manual-b", URL: "https://mcp.test/mcp", Manual: true},
-	})
+	}, testClientInfo)
 	cat := NewCatalog(mgr)
 	if got := cat.EnabledServerNames(); len(got) != 0 {
 		t.Fatalf("EnabledServerNames = %v, want empty", got)

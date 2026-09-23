@@ -80,19 +80,6 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (string, er
 	return result, nil
 }
 
-// DiscoverTools queries the MCP client for available tools and wraps each one
-// as an MCPTool bound directly to that client. It is used by direct-client
-// callers; manager-driven callers use DiscoverAllTools.
-func DiscoverTools(ctx context.Context, client *Client) ([]tools.Tool, error) {
-	defs, err := client.ListTools(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return wrapToolDefs(client.name, defs, func(_, remoteName string) *ExecutionHandle {
-		return &ExecutionHandle{client: client, serverName: client.name, remoteName: remoteName}
-	}), nil
-}
-
 // wrapToolDefs converts discovered defs for serverName into tools bound to
 // handles produced by handleFor.
 func wrapToolDefs(serverName string, defs []MCPToolDef, handleFor func(serverName, remoteName string) *ExecutionHandle) []tools.Tool {

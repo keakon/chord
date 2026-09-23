@@ -140,7 +140,7 @@ func TestShutdownUsesSharedBudgetAcrossStages(t *testing.T) {
 	a.done = make(chan struct{})
 	a.mcpServerCache = map[string]*mcpServerEntry{
 		agentMCPServerCacheKey("worker", "search"): {
-			Mgr: mcp.NewPendingManager([]mcp.ServerConfig{{Name: "search", URL: "https://worker.example/mcp"}}),
+			Mgr: mcp.NewPendingManagerWithClientInfo([]mcp.ServerConfig{{Name: "search", URL: "https://worker.example/mcp"}}, mcp.ClientInfo{Name: "chord-test", Version: "test"}),
 		},
 	}
 
@@ -187,7 +187,7 @@ func TestShutdownClosesSubAgentMCPServersWhenCompactionDrainTimesOut(t *testing.
 	a := newTestMainAgent(t, t.TempDir())
 	a.mcpServerCache = map[string]*mcpServerEntry{
 		agentMCPServerCacheKey("worker", "search"): {
-			Mgr: mcp.NewPendingManager([]mcp.ServerConfig{{Name: "search", URL: "https://worker.example/mcp"}}),
+			Mgr: mcp.NewPendingManagerWithClientInfo([]mcp.ServerConfig{{Name: "search", URL: "https://worker.example/mcp"}}, mcp.ClientInfo{Name: "chord-test", Version: "test"}),
 		},
 	}
 

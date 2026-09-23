@@ -104,11 +104,6 @@ type Client struct {
 	nextID     atomic.Int64
 }
 
-// NewClient creates a new MCP client for the named server using the given transport.
-func NewClient(name string, transport Transport) *Client {
-	return NewClientWithInfo(name, transport, defaultClientInfo)
-}
-
 // NewClientWithInfo creates a new MCP client with explicit application metadata
 // for the initialize handshake.
 func NewClientWithInfo(name string, transport Transport, info ClientInfo) *Client {
@@ -354,13 +349,6 @@ type Manager struct {
 	clientInfo       clientInfo
 }
 
-// NewPendingManager creates a manager that exposes configured endpoints as
-// pending before any connection attempt starts. Invalid configs are marked as
-// immediate failures.
-func NewPendingManager(configs []ServerConfig) *Manager {
-	return NewPendingManagerWithClientInfo(configs, defaultClientInfo)
-}
-
 // NewPendingManagerWithClientInfo creates a pending manager with explicit
 // application metadata for MCP initialize handshakes.
 func NewPendingManagerWithClientInfo(configs []ServerConfig, info ClientInfo) *Manager {
@@ -425,15 +413,10 @@ func NewPendingManagerWithClientInfo(configs []ServerConfig, info ClientInfo) *M
 	return m
 }
 
-// NewManager creates MCP clients from config and initializes them.
-// Failed servers are recorded in [Manager.ServerEndpoints]; the manager is still
-// returned so the UI can show red status for misconfigured or unreachable MCPs.
-func NewManager(ctx context.Context, configs []ServerConfig) (*Manager, error) {
-	return NewManagerWithClientInfo(ctx, configs, defaultClientInfo)
-}
-
 // NewManagerWithClientInfo creates MCP clients with explicit application
-// metadata for initialize handshakes.
+// metadata for initialize handshakes. Failed servers are recorded in
+// [Manager.ServerEndpoints]; the manager is still returned so the UI can show
+// red status for misconfigured or unreachable MCPs.
 func NewManagerWithClientInfo(ctx context.Context, configs []ServerConfig, info ClientInfo) (*Manager, error) {
 	m := NewPendingManagerWithClientInfo(configs, info)
 	if len(configs) == 0 {

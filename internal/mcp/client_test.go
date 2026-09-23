@@ -322,16 +322,20 @@ func TestMCPTool_Interface(t *testing.T) {
 		},
 	})
 
-	client := NewClientWithInfo("test-server", ft, testClientInfo)
 	ctx := context.Background()
-	_ = client.Initialize(ctx)
+	cfgs := []ServerConfig{{Name: "test-server", URL: "https://mcp.test/mcp"}}
+	mgr := NewPendingManagerWithClientInfo(cfgs, testClientInfo)
+	mgr.newClientFactory = func(context.Context, ServerConfig) (*Client, error) {
+		return NewClientWithInfo("test-server", ft, testClientInfo), nil
+	}
+	mgr.ConnectAll(ctx, cfgs)
 
-	discovered, err := DiscoverTools(ctx, client)
+	discovered, err := DiscoverAllTools(ctx, mgr)
 	if err != nil {
-		t.Fatalf("DiscoverTools failed: %v", err)
+		t.Fatalf("DiscoverAllTools failed: %v", err)
 	}
 	if len(discovered) != 1 {
-		t.Fatalf("DiscoverTools returned %d tools, want 1", len(discovered))
+		t.Fatalf("DiscoverAllTools returned %d tools, want 1", len(discovered))
 	}
 
 	tool := discovered[0]
@@ -365,11 +369,15 @@ func TestMCPTool_Execute(t *testing.T) {
 		},
 	})
 
-	client := NewClientWithInfo("test", ft, testClientInfo)
 	ctx := context.Background()
-	_ = client.Initialize(ctx)
+	cfgs := []ServerConfig{{Name: "test", URL: "https://mcp.test/mcp"}}
+	mgr := NewPendingManagerWithClientInfo(cfgs, testClientInfo)
+	mgr.newClientFactory = func(context.Context, ServerConfig) (*Client, error) {
+		return NewClientWithInfo("test", ft, testClientInfo), nil
+	}
+	mgr.ConnectAll(ctx, cfgs)
 
-	discovered, _ := DiscoverTools(ctx, client)
+	discovered, _ := DiscoverAllTools(ctx, mgr)
 	tool := discovered[0]
 
 	result, err := tool.Execute(ctx, json.RawMessage(`{"msg":"test"}`))
@@ -381,7 +389,7 @@ func TestMCPTool_Execute(t *testing.T) {
 	}
 }
 
-func TestDiscoverTools_SkipsEmptyName(t *testing.T) {
+func TestDiscoverAllToolsSkipsEmptyName(t *testing.T) {
 	ft := newFakeTransport()
 	ft.onMethod("initialize", initializeResult{})
 	ft.onMethod("tools/list", toolsListResult{
@@ -391,13 +399,17 @@ func TestDiscoverTools_SkipsEmptyName(t *testing.T) {
 		},
 	})
 
-	client := NewClientWithInfo("test", ft, testClientInfo)
 	ctx := context.Background()
-	_ = client.Initialize(ctx)
+	cfgs := []ServerConfig{{Name: "test", URL: "https://mcp.test/mcp"}}
+	mgr := NewPendingManagerWithClientInfo(cfgs, testClientInfo)
+	mgr.newClientFactory = func(context.Context, ServerConfig) (*Client, error) {
+		return NewClientWithInfo("test", ft, testClientInfo), nil
+	}
+	mgr.ConnectAll(ctx, cfgs)
 
-	tools, err := DiscoverTools(ctx, client)
+	tools, err := DiscoverAllTools(ctx, mgr)
 	if err != nil {
-		t.Fatalf("DiscoverTools failed: %v", err)
+		t.Fatalf("DiscoverAllTools failed: %v", err)
 	}
 	if len(tools) != 1 {
 		t.Fatalf("expected 1 tool (skipped empty name), got %d", len(tools))
@@ -453,7 +465,7 @@ func TestDiscoverAllToolsFiltersAllowedTools(t *testing.T) {
 }
 
 func TestKnownRegisteredToolNamesUsesAllowedToolsBeforeDiscovery(t *testing.T) {
-	mgr := NewPendingManager([]ServerConfig{{Name: "search_api", Manual: true, AllowedTools: []string{"beta", "alpha"}}})
+	mgr := NewPendingManagerWithClientInfo([]ServerConfig{{Name: "search_api", Manual: true, AllowedTools: []string{"beta", "alpha"}}}, testClientInfo)
 	got := mgr.KnownRegisteredToolNames("search_api")
 	want := []string{"mcp_search_api_alpha", "mcp_search_api_beta"}
 	if !reflect.DeepEqual(got, want) {
@@ -1003,16 +1015,18 @@ func TestFullWorkflow_FakeTransport(t *testing.T) {
 
 	ctx := context.Background()
 	client := NewClientWithInfo("test-server", ft, testClientInfo)
-
-	// Step 1: Initialize
-	if err := client.Initialize(ctx); err != nil {
-		t.Fatalf("Initialize: %v", err)
+	cfgs := []ServerConfig{{Name: "test-server", URL: "https://mcp.test/mcp"}}
+	mgr := NewPendingManagerWithClientInfo(cfgs, testClientInfo)
+	mgr.newClientFactory = func(context.Context, ServerConfig) (*Client, error) {
+		return client, nil
 	}
+	// Step 1: ConnectAll performs the initialize handshake.
+	mgr.ConnectAll(ctx, cfgs)
 
-	// Step 2: Discover tools
-	discovered, err := DiscoverTools(ctx, client)
+	// Step 2: Discover tools through the manager, as production does.
+	discovered, err := DiscoverAllTools(ctx, mgr)
 	if err != nil {
-		t.Fatalf("DiscoverTools: %v", err)
+		t.Fatalf("DiscoverAllTools: %v", err)
 	}
 	if len(discovered) != 1 {
 		t.Fatalf("expected 1 tool, got %d", len(discovered))

@@ -36,8 +36,8 @@ func TestGetOrCreateAgentMCPRejectsManualServer(t *testing.T) {
 
 func TestGetOrCreateAgentMCPIsolatesSameNameAcrossAgents(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	explorer := &mcpServerEntry{Mgr: mcp.NewPendingManager([]mcp.ServerConfig{{Name: "search", URL: "https://explorer.example/mcp"}})}
-	browser := &mcpServerEntry{Mgr: mcp.NewPendingManager([]mcp.ServerConfig{{Name: "search", URL: "https://browser.example/mcp"}})}
+	explorer := &mcpServerEntry{Mgr: mcp.NewPendingManagerWithClientInfo([]mcp.ServerConfig{{Name: "search", URL: "https://explorer.example/mcp"}}, mcp.ClientInfo{Name: "chord-test", Version: "test"})}
+	browser := &mcpServerEntry{Mgr: mcp.NewPendingManagerWithClientInfo([]mcp.ServerConfig{{Name: "search", URL: "https://browser.example/mcp"}}, mcp.ClientInfo{Name: "chord-test", Version: "test"})}
 	a.mcpServerCache = map[string]*mcpServerEntry{
 		agentMCPServerCacheKey("explorer", "search"): explorer,
 		agentMCPServerCacheKey("browser", "search"):  browser,
@@ -59,7 +59,7 @@ func TestGetOrCreateAgentMCPIsolatesSameNameAcrossAgents(t *testing.T) {
 
 func TestGetOrCreateAgentMCPReusesManagerWithinAgentDefinition(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	entry := &mcpServerEntry{Mgr: mcp.NewPendingManager([]mcp.ServerConfig{{Name: "search", URL: "https://exa.example/mcp"}})}
+	entry := &mcpServerEntry{Mgr: mcp.NewPendingManagerWithClientInfo([]mcp.ServerConfig{{Name: "search", URL: "https://exa.example/mcp"}}, mcp.ClientInfo{Name: "chord-test", Version: "test"})}
 	key := agentMCPServerCacheKey("explorer", "search")
 	a.mcpServerCache = map[string]*mcpServerEntry{key: entry}
 	cfg := config.MCPConfig{"search": {URL: "https://exa.example/mcp"}}

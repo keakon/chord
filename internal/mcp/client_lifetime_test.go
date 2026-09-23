@@ -157,7 +157,7 @@ func TestConnectOneBoundsHangingClientFactory(t *testing.T) {
 // next request (tools/list) failed with a broken pipe.
 func TestConnectOneKeepsStdioServerAlive(t *testing.T) {
 	script := writeMiniMCPServer(t)
-	m := NewPendingManager(nil)
+	m := NewPendingManagerWithClientInfo(nil, testClientInfo)
 	t.Cleanup(m.Close)
 
 	// The factory is where the connect attempt context reaches the transport,
